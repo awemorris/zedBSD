@@ -13,10 +13,8 @@
 #include "drivers/platform/pc98/graphics/pc98.h"
 #include "drivers/platform/pc98/graphics/display-auto.h"
 #include "drivers/platform/pc98/graphics/display.h"
-#include "hal/i386/bsp-pc98/display.h"
+#include <kern/device-io.h>
 #include <kern/kcrt.h>
-
-#include <hal/hal.h>
 
 #include "kern/klog.h"
 #include "kern/text-display.h"
@@ -31,6 +29,22 @@
 
 /* How many ranges the end may leave mapped: the four planes and the Cirrus aperture. */
 #define PC98_LEFT_MAX 8U
+
+/*
+ * The graphics display controller's status and command ports, the status's
+ * FIFO-full bit, its START and STOP commands, and how many times a command
+ * waits for room in the FIFO.
+ *
+ * Values referenced: NEC uPD7220 GDC data sheet (the status register's
+ * FIFO-full bit and the START and STOP command codes); the PC-9801's
+ * graphics GDC at ports 0xa0 and 0xa2.
+ */
+#define GDC_STATUS_PORT 0x00a0U
+#define GDC_COMMAND_PORT 0x00a2U
+#define GDC_FIFO_FULL 0x02U
+#define GDC_START 0x0dU
+#define GDC_STOP 0x0cU
+#define GDC_TIMEOUT 1000000U
 
 /*
  * One range of display memory the end left mapped, with the error of its
@@ -71,6 +85,7 @@ static uint8_t port_in8(void *context, uint16_t port);
 static void port_out8(void *context, uint16_t port, uint8_t value);
 static int display_reset(void *context);
 static int display_stop(void *context);
+static int gdc_command(uint8_t value);
 static void left_add(uint64_t physical, uint64_t bytes, int error);
 static void mapping_remove(void *mapped, uint64_t physical, size_t bytes);
 
@@ -546,8 +561,8 @@ display_reset(
 
 	(void)context;
 
-	/* Obtains the pc98 display graphics start result. */
-	error = pc98_display_graphics_start();
+	/* Starts the graphics display controller. */
+	error = gdc_command(GDC_START);
 
 	/* Returns the computed result. */
 	return error;
@@ -562,8 +577,8 @@ display_stop(
 
 	(void)context;
 
-	/* Obtains the pc98 display graphics stop result. */
-	error = pc98_display_graphics_stop();
+	/* Stops the graphics display controller. */
+	error = gdc_command(GDC_STOP);
 
 	/* Returns the computed result. */
 	return error;
@@ -618,4 +633,28 @@ mapping_remove(
 	} else if (error != 0) {
 		left_add(physical, bytes, error);
 	}
+}
+
+/*
+ * Sends one command to the graphics display controller once its FIFO has
+ * room.  Returns 1 when it was sent, 0 when the FIFO stayed full.
+ */
+static int
+gdc_command(
+	uint8_t value)
+{
+	unsigned timeout;
+	uint8_t status;
+
+	/* Waits a bounded time for room in the FIFO, then sends the command. */
+	for (timeout = GDC_TIMEOUT; timeout != 0; timeout--) {
+		status = kern_io_in8(GDC_STATUS_PORT);
+		if ((status & GDC_FIFO_FULL) == 0) {
+			kern_io_out8(GDC_COMMAND_PORT, value);
+			return 1;
+		}
+	}
+
+	/* The FIFO never had room. */
+	return 0;
 }

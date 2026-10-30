@@ -16,10 +16,9 @@
 #include <kern/kcrt.h>
 
 #include <uapi/errno.h>
-#include <hal/hal.h>
 
-#include "hal/i386/i386.h"
 #include "kern/irq.h"
+#include <kern/device-io.h>
 
 #define LGY_IO_BASE 0x00d0U
 #define LGY_DATA_PORT 0x02d0U
@@ -77,7 +76,7 @@ drv_pc98_lgy98_init(
 	/*
 	 * An unused C-bus port reads as 0xff.  Avoid modifying unrelated ports.
 	 */
-	if (asm_inb(LGY_IO_BASE) == 0xffU)
+	if (kern_io_in8(LGY_IO_BASE) == 0xffU)
 		return ENODEV;
 	kern_memset(&lgy_dp, 0, sizeof(lgy_dp));
 	lgy_dp.bus = &lgy_bus_ops;
@@ -114,7 +113,7 @@ drv_pc98_lgy98_init(
 	if (error == 0) {
 		kern_irq_mask(LGY_IRQ);
 
-		/* Checks the hal irq set handler result. */
+		/* Registers the board's interrupt handler. */
 		if (kern_irq_register(LGY_IRQ, lgy_irq_handler, &lgy_dp) ==
 		    0)
 			irq_registered = 1;
@@ -164,7 +163,7 @@ lgy_read_reg(
 	(void)cookie;
 
 	/* Obtains the asm inb result. */
-	function_result = asm_inb((uint16_t)(LGY_IO_BASE + reg));
+	function_result = kern_io_in8((uint16_t)(LGY_IO_BASE + reg));
 
 	/* Returns the computed result. */
 	return function_result;
@@ -178,7 +177,7 @@ lgy_write_reg(
 	uint8_t value)
 {
 	(void)cookie;
-	asm_outb((uint16_t)(LGY_IO_BASE + reg), value);
+	kern_io_out8((uint16_t)(LGY_IO_BASE + reg), value);
 }
 
 /* Supports the lgy read data8 operation. */
@@ -191,7 +190,7 @@ lgy_read_data8(
 	(void)cookie;
 
 	/* Obtains the asm inb result. */
-	function_result = asm_inb(LGY_DATA_PORT);
+	function_result = kern_io_in8(LGY_DATA_PORT);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -207,7 +206,7 @@ lgy_read_data16(
 	(void)cookie;
 
 	/* Obtains the asm inw result. */
-	function_result = asm_inw(LGY_DATA_PORT);
+	function_result = kern_io_in16(LGY_DATA_PORT);
 
 	/* Returns the computed result. */
 	return function_result;
@@ -220,7 +219,7 @@ lgy_write_data16(
 	uint16_t value)
 {
 	(void)cookie;
-	asm_outw(LGY_DATA_PORT, value);
+	kern_io_out16(LGY_DATA_PORT, value);
 }
 
 /* Supports the lgy reset operation. */
@@ -232,13 +231,13 @@ lgy_reset(
 	uint8_t value;
 
 	(void)cookie;
-	value = asm_inb(LGY_RESET_PORT);
-	asm_outb(LGY_RESET_PORT, value);
+	value = kern_io_in8(LGY_RESET_PORT);
+	kern_io_out8(LGY_RESET_PORT, value);
 	/* Process each element required by the operation. */
 	for (spin = 0; spin < 100000U; spin++) {
 		/* Checks the asm inb result. */
-		if ((asm_inb(LGY_IO_BASE + 7U) & 0x80U) != 0) {
-			asm_outb(LGY_IO_BASE + 7U, 0x80U);
+		if ((kern_io_in8(LGY_IO_BASE + 7U) & 0x80U) != 0) {
+			kern_io_out8(LGY_IO_BASE + 7U, 0x80U);
 
 			/* Succeeded. */
 			return 0;

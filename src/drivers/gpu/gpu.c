@@ -31,6 +31,7 @@
 #include <kern/poll.h>
 #include <kern/uaccess.h>
 #include <kern/page.h>
+#include <kern/platform.h>
 #include <kern/pmem.h>
 #include <kern/vm-device.h>
 #include <kern/clock.h>
@@ -48,6 +49,9 @@
 
 /* The longest one GPU_DISPLAY_REFRESH call waits (the caller asks again for longer). */
 #define GPU_DISPLAY_REFRESH_TIMEOUT_NS	1000000000ULL
+
+/* How many names a platform may hand its boot framebuffer over under. */
+#define GPU_BOOT_FRAMEBUFFER_NAMES	6U
 
 #ifndef CONFIG_GPU_JOB_RESERVATION_MS
 #define CONFIG_GPU_JOB_RESERVATION_MS 10000U
@@ -369,6 +373,20 @@ static struct spinlock gpu_timing_lock = {
 static int gpu_console_ended;
 
 /*
+ * The name prefixes under which the platforms hand the screen the firmware
+ * or the boot loader left on over to the kernel; a platform hands at most
+ * one of them over.
+ */
+static const char *const gpu_boot_framebuffer_names[GPU_BOOT_FRAMEBUFFER_NAMES] = {
+	"pcat.framebuffer",
+	"rpi4.framebuffer",
+	"rpi5.framebuffer",
+	"odroidc5.framebuffer",
+	"riscv64.framebuffer",
+	"sun4u.framebuffer"
+};
+
+/*
  * Forward declaration.
  */
 static int gpu_ops_validate(const struct drv_gpu_ops *ops);
@@ -378,6 +396,7 @@ static int gpu_open(struct file *file);
 static int gpu_close(struct file *file);
 static int gpu_ioctl(struct file *file, unsigned long command, uintptr_t argument);
 static void gpu_console_end(unsigned long command);
+static unsigned gpu_boot_framebuffer_range(struct kern_text_range *range);
 static int gpu_poll(struct file *file, short events, short *revents);
 static void gpu_session_drop(struct gpu_session *session);
 static int gpu_session_enter(struct gpu_session *session);
@@ -1870,6 +1889,8 @@ static void
 gpu_console_end(
 	unsigned long command)
 {
+	struct kern_text_range range;
+	unsigned count;
 	int expected;
 	int swapped;
 	int error;
@@ -1891,15 +1912,52 @@ gpu_console_end(
 	if (!swapped)
 		return;
 
-	/* The console stops drawing on the display; this caller gives no memory back. */
-	error = kern_text_end(NULL, 0U);
+	/*
+	 * The console stops drawing on the display and gives up its mappings of
+	 * the boot framebuffer, whose range it judges what it left against.
+	 */
+	count = gpu_boot_framebuffer_range(&range);
+	if (count != 0U) {
+		error = kern_text_end(&range, count);
+	} else {
+		error = kern_text_end(NULL, 0U);
+	}
 
-	/* A board with no display console (ENOTSUP) has nothing to stop. */
+	/* A board with no display console (ENOTSUP) has nothing to stop; anything else left is told and the flip goes on. */
 	if (error != 0 && error != ENOTSUP)
-		kern_logf("gpu: the text console could not leave the display (%d)\n", error);
+		kern_logf("gpu: the text console could not leave the boot framebuffer (%d)\n", error);
 
 	/* Succeeded: the console no longer draws on the display. */
 	return;
+}
+
+/*
+ * Reads the physical range of the boot framebuffer the platform handed
+ * over, under whichever of its names it used.  Returns 1 with the range
+ * filled, or 0 when the platform handed none over.
+ */
+static unsigned
+gpu_boot_framebuffer_range(
+	struct kern_text_range *range)
+{
+	struct kern_boot_framebuffer screen;
+	unsigned index;
+	int error;
+
+	/* Tries each platform's name; the first one handed over is the screen. */
+	for (index = 0; index < GPU_BOOT_FRAMEBUFFER_NAMES; index++) {
+		error = kern_boot_framebuffer(gpu_boot_framebuffer_names[index], &screen);
+		if (error != 0 || screen.size == 0U)
+			continue;
+
+		/* Succeeded: the screen's bytes. */
+		range->physical = screen.physical_base;
+		range->bytes = screen.size;
+		return 1U;
+	}
+
+	/* No screen was handed over. */
+	return 0U;
 }
 
 /*

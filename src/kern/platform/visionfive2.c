@@ -64,7 +64,8 @@
 #include <drivers/disklabel/disklabel.h>
 #include <drivers/generic/fdt.h>
 #include <drivers/generic/ramdisk.h>
-#include <drivers/generic/serial-console.h>
+#include <drivers/generic/boot-fb.h>
+#include <drivers/generic/fb-text.h>
 #include <drivers/platform/visionfive2/vf2-crg.h>
 #include <drivers/platform/visionfive2/vf2-ethernet.h>
 #if CONFIG_DRIVER_POWERVR
@@ -269,11 +270,12 @@ static void (*vf2_fatal_display)(void);
 #endif
 
 /*
- * The console's text operations: the serial teletype's, with the fatal
- * reveal added.  Filled once by kern_platform_init() before it publishes
- * the table and not changed afterwards.
+ * What the board gives the console: the UART when it was found, and the
+ * fatal stop's return of the display to the loader's screen.  Filled once
+ * by start_console() before the console starts and not changed
+ * afterwards.
  */
-static struct kern_text_ops vf2_text_ops;
+static struct drv_fb_text_board vf2_console_board;
 
 /*
  * The ramdisk's disk, published by kern_platform_init() and kept for the
@@ -295,19 +297,9 @@ static int soc_ready;
  * The UART the firmware's console uses (/chosen/stdout-path), mapped by
  * probe_soc() on the boot CPU and kept for the life of the system;
  * console_uart_present says it was found, and neither changes afterwards.
- * Bytes reach it only once the console has left the screen.
  */
 static struct drv_ns16550 console_uart;
 static int console_uart_present;
-
-/*
- * Whether the console has left the screen for good: the kernel's
- * character path is the UART's, a fatal stop takes no display back, and
- * the debug port no longer repeats the log's records.  Set once by
- * vf2_text_end() with a release, after it published the character path;
- * read with an acquire.
- */
-static int console_ended;
 
 /*
  * The SD card's disk, published by kern_platform_init() and kept for the
@@ -332,7 +324,7 @@ static void attach_ethernet(void);
 static void describe_sd_partitions(void);
 static void reveal_fatal(void);
 static void probe_console_uart(const struct drv_fdt *fdt);
-static int vf2_text_end(const struct kern_text_range *ranges, unsigned count);
+static void start_console(void);
 static void console_uart_putc(int character);
 #if CONFIG_DRIVER_POWERVR
 static void probe_display_controller(const struct drv_fdt *fdt);
@@ -370,20 +362,14 @@ kern_platform_init(
 	if (handoff->size < sizeof(*handoff))
 		return 0;
 
-	/*
-	 * Publishes the teletype as /dev/console's output, with the fatal
-	 * reveal that takes the display back and the end that leaves it.
-	 */
-	vf2_text_ops = *drv_serial_console_ops();
-	vf2_text_ops.reveal_fatal = reveal_fatal;
-	vf2_text_ops.end = vf2_text_end;
-	kern_text_register(&vf2_text_ops);
-
 	/* Reads and checks the screen the firmware left on, for the boot log. */
 	describe_framebuffer();
 
 	/* Brings up the SoC's clocks, resets and pins for the devices. */
 	probe_soc();
+
+	/* Publishes the console over the loader's screen and the UART probe_soc() found. */
+	start_console();
 
 	/*
 	 * Selects the partition scheme that tells GPT from MBR: the ramdisk's
@@ -493,22 +479,18 @@ void
 kern_platform_debug_write(
 	const char *text)
 {
-	int ended;
-	int quiet;
+	void (*console)(int character);
 
 	/* Ignores a missing string. */
 	if (text == NULL)
 		return;
 
 	/*
-	 * Once the console has left the screen the log's record has already
-	 * reached the UART through the kernel's character path, unless the
-	 * log is quiet and kept it off that path; then it goes there once
-	 * from here.
+	 * Writes nothing once the kernel's console is published: the log
+	 * already wrote the record there, UART included.
 	 */
-	ended = __atomic_load_n(&console_ended, __ATOMIC_ACQUIRE);
-	quiet = kern_log_quiet();
-	if (ended && !quiet)
+	console = __atomic_load_n(&kernel_putc, __ATOMIC_ACQUIRE);
+	if (console != NULL)
 		return;
 
 	/* Emits every byte through the hardware layer. */
@@ -1409,23 +1391,15 @@ check_display_clocks(
 #endif
 
 /*
- * Shows the console for a fatal stop: puts the display controller's plane
- * back on the loader's screen, where the hardware layer draws the text.
- *
- * The serial teletype itself has nothing to reveal.  Runs with interrupts
+ * Puts the display controller's plane back on the loader's screen for a
+ * fatal stop, before the console draws its text there.  The console calls
+ * it only while it has not left the screen.  Runs with interrupts
  * disabled.
  */
 static void
 reveal_fatal(
 	void)
 {
-	int ended;
-
-	/* A console that left the screen shows nothing there; the stop goes to the UART and the log. */
-	ended = __atomic_load_n(&console_ended, __ATOMIC_ACQUIRE);
-	if (ended)
-		return;
-
 #if CONFIG_DRIVER_POWERVR
 	/* Takes the screen back when the display driver read the controller. */
 	if (vf2_fatal_display != NULL)
@@ -1456,63 +1430,8 @@ probe_console_uart(
 }
 
 /*
- * Ends the console's use of the screen for good: the UART's character path
- * is published as the kernel's, so the hardware layer hands it every
- * character and neither draws on the screen nor calls the firmware again.
- * The hardware layer's mapping of the screen stays (the kernel has no way
- * to remove it), so the screen counts as left: EBUSY when it lies in the
- * ranges, 0 otherwise.  ENOTSUP, changing nothing, without the UART, since
- * the serial line would be lost.
- */
-static int
-vf2_text_end(
-	const struct kern_text_range *ranges,
-	unsigned count)
-{
-	struct kern_boot_framebuffer screen;
-	void (*published)(int);
-	int overlaps;
-	int foreign;
-	int error;
-
-	/* Without the console's UART the kernel would lose the serial line: nothing changes. */
-	if (!console_uart_present)
-		return ENOTSUP;
-
-	/* The hardware layer hands every later character to the UART. */
-	foreign = 0;
-	published = __atomic_load_n(&kernel_putc, __ATOMIC_ACQUIRE);
-	if (published == NULL) {
-		__atomic_store_n(&kernel_putc, console_uart_putc, __ATOMIC_RELEASE);
-	} else if (published != console_uart_putc) {
-		foreign = 1;
-	}
-
-	/* A fatal stop takes no display back, and the debug port stops repeating the log. */
-	__atomic_store_n(&console_ended, 1, __ATOMIC_RELEASE);
-
-	/* Another character path may still draw anywhere the caller gives. */
-	if (foreign && count != 0U)
-		return EBUSY;
-
-	/* A boot without the loader's screen leaves nothing behind. */
-	error = kern_boot_framebuffer("riscv64.framebuffer", &screen);
-	if (error != 0 || screen.size == 0U)
-		return 0;
-
-	/* The screen stays mapped by the hardware layer. */
-	overlaps = kern_text_range_overlaps(ranges, count, screen.physical_base, screen.size);
-	if (overlaps)
-		return EBUSY;
-
-	/* Succeeded: nothing the console leaves behind lies in the ranges. */
-	return 0;
-}
-
-/*
- * Writes one character of the kernel's own path to the console's UART,
- * ending each line with a carriage return as the firmware's console did.
- * Never sleeps.
+ * Writes one character of the console to its UART, ending each line with
+ * a carriage return as the firmware's console did.  Never sleeps.
  */
 static void
 console_uart_putc(
@@ -1524,4 +1443,37 @@ console_uart_putc(
 
 	/* The character itself. */
 	drv_ns16550_putc_polled(&console_uart, (uint8_t)character);
+}
+
+/*
+ * Publishes the console: the loader's screen, the UART, the text console
+ * over both, and the screen's /dev/graphics backend.
+ */
+static void
+start_console(
+	void)
+{
+	struct kern_boot_framebuffer screen;
+	int error;
+
+	/* Gives the console the UART, when the tree named one. */
+	if (console_uart_present)
+		vf2_console_board.serial_write = console_uart_putc;
+	vf2_console_board.reveal_fatal = reveal_fatal;
+
+	/* Maps the loader's screen; without one the console is the UART alone. */
+	error = kern_boot_framebuffer("riscv64.framebuffer", &screen);
+	if (error == 0 && screen.size != 0U) {
+		error = drv_boot_fb_init(&screen, 0U);
+		if (error != 0)
+			kern_logf("visionfive2: framebuffer not mapped (%d)\n", error);
+	}
+
+	/* Starts the text console over the screen and the UART. */
+	drv_fb_text_init(&vf2_console_board);
+
+	/* Offers the screen to /dev/graphics; without one there is no device. */
+	error = drv_boot_fb_register_backend();
+	if (error != 0 && error != ENODEV)
+		kern_logf("graphics: loader framebuffer not offered (%d)\n", error);
 }
