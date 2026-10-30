@@ -1,13 +1,13 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 18:15（Q1）
+最終更新: 2026-10-30 18:25（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 起動（q1716）。bootloader を Hardkernel の公式の image（20260610）の物に替え、Amlogic の license と一緒に zedBSD-firmware へ。試験の image を作り直す | Q1 が zedBSD-firmware を push → 実機の結果で各 Phase を直す |
+| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。試験の image を公式の bootloader で作り直した（text: p1-ws313/build/odroid-c5/hdd-image.img sha256 0f8f56a1…、Keiland: p1-ws313/build/odroid-c5-keiland/hdd-image.img sha256 2cf1f64d…） | zedBSD-firmware の push（ユーザー）→ Q1 が agent/p1-ws313 を merge → 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
 | P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（phase-runner-high、q1717）。p002 kernel に表 B を足す | p003 表 A の置き換え → p004 i915 → p005（rpi4 は未決）→ p006 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 再起動（q1715-i02）。ユーザーが VF2 の HDMI を接続。板を入れ直して framebuffer を確かめ、計測へ | 40 fps 前後の scene を決め 50 fps 以上へ |
 | P4 | — | — | — | — |
