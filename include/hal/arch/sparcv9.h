@@ -64,21 +64,6 @@ struct hal_task_signal_frame_head {
  */
 #define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_NATIVE
 
-#if !defined(__ASSEMBLER__) && !defined(_ASM_SRC_)
-static inline bool
-hal_atomic_uint_try_acquire(
-	volatile unsigned *value)
-{
-	return __atomic_exchange_n(value, 1U, __ATOMIC_ACQUIRE) == 0U;
-}
-
-static inline void
-hal_atomic_relax(void)
-{
-	__asm__ volatile("nop" ::: "memory");
-}
-#endif
-
 /*
  * Checks
  */

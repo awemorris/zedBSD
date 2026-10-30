@@ -24,6 +24,23 @@
  * read it alone.  Such a user undefines the macros together with the
  * include guard HAL_HAL_ATOMIC_H, so that a later <hal/hal.h> in the same
  * translation unit reads the header again.
+ *
+ * Besides the operations below, which follow the style, every port gives
+ * two macros of its own processor, from <hal/arch/atomic/<arch>.h> chosen
+ * by the build's HAL_ARCH_* definition:
+ *
+ *   hal_atomic_uint_try_acquire(value)
+ *	Stores one into the unsigned lock word at value where it held zero,
+ *	with acquire ordering, and is nonzero when it did.  The port's own
+ *	instruction sequence, usable as the guard of an ENTER port's
+ *	serialization region.
+ *
+ *   hal_atomic_relax()
+ *	Lets the processor rest for one step of a spin, with a compiler
+ *	barrier.
+ *
+ * A port whose sequence is a function declares it inside the macro's
+ * block, as the ENTER macros below declare their region.
  */
 #if !defined(HAL_ATOMIC_STYLE) || !defined(HAL_ATOMIC_STYLE_ENTER) || \
     !defined(HAL_ATOMIC_STYLE_NATIVE)
@@ -181,6 +198,49 @@
 
 #define hal_atomic_fence_acquire()					\
 	__atomic_thread_fence(__ATOMIC_ACQUIRE)
+
+#endif
+
+/*
+ * The port's lock word and spin hint.
+ */
+#if defined(HAL_ARCH_I386)
+# include <hal/arch/atomic/i386.h>
+#elif defined(HAL_ARCH_AMD64)
+# include <hal/arch/atomic/amd64.h>
+#elif defined(HAL_ARCH_ARM64)
+# include <hal/arch/atomic/aarch64.h>
+#elif defined(HAL_ARCH_RISCV64)
+# include <hal/arch/atomic/riscv64.h>
+#elif defined(HAL_ARCH_RISCV32)
+# include <hal/arch/atomic/riscv32.h>
+#elif defined(HAL_ARCH_ARMV7)
+# include <hal/arch/atomic/armv7.h>
+#elif defined(HAL_ARCH_PPC64)
+# include <hal/arch/atomic/ppc64.h>
+#elif defined(HAL_ARCH_PPC32)
+# include <hal/arch/atomic/ppc32.h>
+#elif defined(HAL_ARCH_MIPS64)
+# include <hal/arch/atomic/mips64.h>
+#elif defined(HAL_ARCH_MIPS32)
+# include <hal/arch/atomic/mips32.h>
+#elif defined(HAL_ARCH_M68K) && defined(HAL_ARCH_M68040)
+# include <hal/arch/atomic/m68040.h>
+#elif defined(HAL_ARCH_M68K)
+# include <hal/arch/atomic/m68030.h>
+#elif defined(HAL_ARCH_SPARCV9)
+# include <hal/arch/atomic/sparcv9.h>
+#else
+
+/*
+ * Architecture-neutral host tests take the lock word with the compiler's
+ * exchange and spin with a compiler barrier only.
+ */
+#define hal_atomic_uint_try_acquire(value)				\
+	(__atomic_exchange_n((value), 1U, __ATOMIC_ACQUIRE) == 0U)
+
+#define hal_atomic_relax()						\
+	__asm__ volatile("" ::: "memory")
 
 #endif
 

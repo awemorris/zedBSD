@@ -356,21 +356,3 @@ test_copy(void)
 	packet_buf_free(source);
 	check(packet_buf_in_use() == 0U, "every packet is back after the copies");
 }
-
-/*
- * The kernel's lock-word claim and spin hint, which the kernel core defines
- * with the HAL.  The host's exchange stands in for the port's sequence.
- */
-int
-atomic_raw_try_acquire_zero(
-	volatile unsigned *value)
-{
-	return __atomic_exchange_n(value, 1U, __ATOMIC_ACQUIRE) == 0U;
-}
-
-/* The host has no spin instruction to give. */
-void
-atomic_spin_hint(
-	void)
-{
-}

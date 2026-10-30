@@ -55,39 +55,6 @@ struct hal_task_signal_frame_head {
  */
 #define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_ENTER
 
-#if !defined(__ASSEMBLER__) && !defined(_ASM_SRC_)
-
-/*
- * Takes a lock word: swaps in one with acquire ordering and reports
- * whether the word was zero.
- */
-static inline bool
-hal_atomic_uint_try_acquire(
-	volatile unsigned *value)
-{
-	unsigned previous;
-
-	__asm__ volatile("amoswap.w.aq %0, %2, (%1)"
-			 : "=&r"(previous)
-			 : "r"(value), "r"(1U)
-			 : "memory");
-	return previous == 0U;
-}
-
-/*
- * Lets the hart rest in a spin.  The pause hint is encoded as a fence
- * whose predecessor set is writes only and whose successor set is empty,
- * so a hart without the hint extension executes it as that ordinary
- * fence.
- */
-static inline void
-hal_atomic_relax(void)
-{
-	__asm__ volatile("pause" ::: "memory");
-}
-
-#endif
-
 /*
  * Debugging
  */

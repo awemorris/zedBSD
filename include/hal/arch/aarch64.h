@@ -59,36 +59,6 @@ struct hal_task_signal_frame_head {
  */
 #define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_NATIVE
 
-#if !defined(__ASSEMBLER__) && !defined(_ASM_SRC_)
-
-static inline bool
-hal_atomic_uint_try_acquire(
-	volatile unsigned *value)
-{
-	unsigned previous;
-	unsigned status;
-
-	__asm__ volatile("1: ldaxr %w0, [%2]\n"
-			 "   cbnz %w0, 2f\n"
-			 "   stxr %w1, %w3, [%2]\n"
-			 "   cbnz %w1, 1b\n"
-			 "   b 3f\n"
-			 "2: clrex\n"
-			 "3:\n"
-			 : "=&r"(previous), "=&r"(status)
-			 : "r"(value), "r"(1U)
-			 : "memory");
-	return previous == 0U;
-}
-
-static inline void
-hal_atomic_relax(void)
-{
-	__asm__ volatile("yield" ::: "memory");
-}
-
-#endif
-
 /*
  * Debugging
  */

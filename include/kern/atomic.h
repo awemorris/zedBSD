@@ -62,28 +62,6 @@ typedef struct {
 } refcount_t;
 
 /*
- * Claim a plain counter which is zero when free.
- *
- * The claim is the port's own lock-word instruction sequence, which the
- * kernel core reaches through the HAL.  It is out of line so that this
- * header names nothing of the HAL; a port whose kernel is linked with
- * link-time optimization gets the call inlined again.
- */
-int
-atomic_raw_try_acquire_zero(
-	volatile unsigned *value);
-
-/*
- * Hint that this processor is spinning.
- *
- * The hint is the port's spin instruction, out of line for the same reason
- * as the claim above.
- */
-void
-atomic_spin_hint(
-	void);
-
-/*
  * The kernel must not acquire an implicit libatomic dependency.  In
  * particular, some ports need a HAL-provided serialization region for
  * operations which are not natively lock-free.  Compiler and architecture
@@ -94,7 +72,17 @@ static inline int
 atomic_try_acquire_zero(
 	atomic_uint_t *value)
 {
-	return atomic_raw_try_acquire_zero(&value->value);
+	return hal_atomic_uint_try_acquire(&value->value);
+}
+
+/*
+ * Claim a plain counter which is zero when free.
+ */
+static inline int
+atomic_raw_try_acquire_zero(
+	volatile unsigned *value)
+{
+	return hal_atomic_uint_try_acquire(value);
 }
 
 static inline unsigned
@@ -346,6 +334,16 @@ refcount_put_not_last(
 }
 
 /*
+ * Hint that this processor is spinning.
+ */
+static inline void
+atomic_spin_hint(
+	void)
+{
+	hal_atomic_relax();
+}
+
+/*
  * Order earlier loads against everything that follows.
  */
 static inline void
@@ -372,7 +370,10 @@ atomic_acquire_fence(
 # undef hal_atomic_compare_exchange_acquire
 # undef hal_atomic_compare_exchange_release
 # undef hal_atomic_fence_acquire
+# undef hal_atomic_uint_try_acquire
+# undef hal_atomic_relax
 # undef HAL_ATOMIC_ENTER_DECLARE
+# undef HAL_ATOMIC_TRY_ACQUIRE_DECLARE
 # undef HAL_HAL_ATOMIC_H
 #endif
 #if defined(KERN_ATOMIC_STYLE_TEMPORARY)

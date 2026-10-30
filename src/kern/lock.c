@@ -45,33 +45,6 @@ static void mutex_sleep_give_up(struct mutex *mutex);
 static void mutex_check_owner(struct mutex *mutex, struct thread *thread);
 
 /*
- * Claims a lock word which is zero when free, with acquire ordering.
- */
-int
-atomic_raw_try_acquire_zero(
-	volatile unsigned *value)
-{
-	bool acquired;
-
-	/* Runs the port's lock-word sequence. */
-	acquired = hal_atomic_uint_try_acquire(value);
-
-	/* Reports whether this caller now holds the word. */
-	return acquired ? 1 : 0;
-}
-
-/*
- * Lets this processor rest for one step of a spin.
- */
-void
-atomic_spin_hint(
-	void)
-{
-	/* Runs the port's spin instruction. */
-	hal_atomic_relax();
-}
-
-/*
  * Initializes an unlocked spinlock.
  */
 void

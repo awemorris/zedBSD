@@ -53,39 +53,6 @@ struct hal_task_signal_frame_head {
  */
 #define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_ENTER
 
-#if !defined(__ASSEMBLER__) && !defined(_ASM_SRC_)
-
-/*
- * Takes a lock word: stores one with a reservation and reports whether
- * the word was zero.
- */
-static inline bool
-hal_atomic_uint_try_acquire(
-	volatile unsigned *value)
-{
-	unsigned previous;
-
-	__asm__ volatile("1:\tlwarx %0,0,%1\n"
-			 "\tstwcx. %2,0,%1\n"
-			 "\tbne- 1b\n"
-			 "\tisync"
-			 : "=&r"(previous)
-			 : "r"(value), "r"(1U)
-			 : "cr0", "memory");
-	return previous == 0U;
-}
-
-/*
- * Lets the processor rest in a spin.
- */
-static inline void
-hal_atomic_relax(void)
-{
-	__asm__ volatile("" ::: "memory");
-}
-
-#endif
-
 /*
  * Debugging
  */
