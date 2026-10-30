@@ -27,3 +27,9 @@
 1. `make -j32 ZEDBSD_CONFIG=plan/ws307/tests/config-amd64-p004.mk BUILD=build/ws307-p004 ZEDBSD_INSTALLER_TEST_FILES="<python3 plan/tools/guest/guest.py extra-files の値>" installer-image`（1 本だけ、並行の make を走らせない。gtk4 などは BUILD に依らず `build/packages/` で再開する）。warning 0（zedBSD の code）。
 2. host: `PKG_CONFIG_LIBDIR=build/ws307-p004/installer/full/usr/lib/pkgconfig:…/usr/share/pkgconfig PKG_CONFIG_SYSROOT_DIR=build/ws307-p004/installer/full pkgconf --cflags --libs gtk4` で .pc の閉包が足りるか。
 3. `sh plan/ws307/tests/p004-gtk.sh build/ws307-p004/installer-image.img`（host の load が高いと guest の起動が遅れる。他の build と重ねない）。
+
+## q1711-i01（2026-10-30、P6、worktree p6-ws307、branch agent/p6-ws307、基点 main 5aca73738）
+
+- build（Q1 の許可、2026-10-30「p004 の build を許可します」: 出力は自分の worktree の build/packages と BUILD=build/ws307-p004、共有の build/llvm* は読むだけ）: `flock /tmp/zedbsd-image-build.lock make -j32 ZEDBSD_CONFIG=plan/ws307/tests/config-amd64-p004.mk BUILD=build/ws307-p004 ZEDBSD_INSTALLER_TEST_FILES="<guest.py extra-files>" installer-image` rc 0、`check-amd64-native-image: OK`。clang・libcxx・pkgconf・gtk4 と依存は自分の `build/packages/` で stage（clang は target の LLVM を `build/packages/clang/build` で build、共有の `build/llvm-build` は変化無し）。warning は外部の source（fribidi・pixman など）だけ、zedBSD の code は 0。
+- host の .pc の閉包: `PKG_CONFIG_LIBDIR=build/ws307-p004/installer/full/usr/lib/pkgconfig:…/usr/share/pkgconfig PKG_CONFIG_SYSROOT_DIR=build/ws307-p004/installer/full pkg-config --cflags --libs gtk4` rc 0（gtk-4.0・pango・glib・harfbuzz・cairo・graphene などの include と -lgtk-4 … -lglib-2.0）。
+- QEMU run1（`sh plan/ws307/tests/p004-gtk.sh build/ws307-p004/installer-image.img`）: **FAIL**（`build/ws307-test/p004.9Et1i3`）。live の system が 900 秒 SSH に応えず。同じ構成で起こし直して gdbstub で見た: 全 CPU が sched_idle、`klog_buffer` で stick の flush の xHCI の時間切れ → root が read-only → `/sbin/init` が EIO。[BUG-359](../../bugs/BUG-359.md) に当たった（Q1 の判断、ticket に観測を追記）。試験の stick を `-set drive.boot.cache=unsafe` に（installer_walk.py と同じ回避）。

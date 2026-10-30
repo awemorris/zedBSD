@@ -23,7 +23,10 @@ status=0
 
 # The install, in the live system.
 export GUEST_RUNTIME="$(pwd)/$out/guest-live"
-extra="-drive file=$out/nvme.img,if=none,id=p4n,format=raw,cache=unsafe -device nvme,serial=p004n,drive=p4n"
+# The stick's flushes are dropped on the host (cache=unsafe), as installer_walk.py does: a host fsync of the stick's
+# copy blocks QEMU's USB long enough for the guest's xHCI commands to time out (the root then mounts read-only and
+# init cannot be read).
+extra="-set drive.boot.cache=unsafe -drive file=$out/nvme.img,if=none,id=p4n,format=raw,cache=unsafe -device nvme,serial=p004n,drive=p4n"
 g start "$out/boot.img" --disk usb --qemu-extra "$extra" > "$out/live-start.txt" 2>&1 || true
 if g wait --timeout 900 > "$out/live-wait.txt" 2>&1; then
 	g put plan/ws307/tests/p004-guest-install.sh /tmp/p004-install.sh > /dev/null 2>&1 || true
