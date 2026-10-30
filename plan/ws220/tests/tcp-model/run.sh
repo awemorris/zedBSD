@@ -102,13 +102,13 @@ scenario nodelay-1024 4 --bytes 16777216 --delay-us 5000 --nodelay --expect-segm
 # ws221-p008: SO_SNDBUF bounds the payload A's ring holds (16 KB: no more is queued, and the window it keeps busy).
 scenario send-buffer-16k 20 --bytes 16777216 --send-buffer 16384
 # 10 ms of round trip: the rate was the window over the round trip (64 KB: 6.4 MB/s; 128 KB: 12.1 MB/s); since ws315-p006
-# B's buffer grows (32 MB/s with A's ring of 256, 67 MB/s with 768).
+# B's buffer grows (32 MB/s with A's ring of 256; 60 MB/s with 768).
 scenario rtt-10ms 4 --bytes 16777216 --delay-us 5000
 # ws315-p006: B's receive buffer grows by itself (dynamic right-sizing) while its window is what holds the transfer
 # back: over 10 ms of round trip the 128 KB window gave 12.1 MB/s, the buffer grows to the megabyte a connection may take
-# and A's ring limits instead (32 MB/s with 256 segments; 67 MB/s with 768).  On the clean LAN, where the link limits,
-# it grows no more than about twice what a window's time brings (285 KB; the measured round trip is a window's time,
-# 1.2 ms, not the link's 0.2 ms).  With SO_RCVBUF it stays where it was put: 128 KB keeps the rate at the window over the round trip, and 1 MB,
+# and A's ring limits instead (32 MB/s with 256 segments; 60 MB/s with 768).  On the clean LAN, where the link limits,
+# it grows no more than a quarter more than a window's time brings (174 KB; the measured round trip is a window's time,
+# 1.2 ms, not the link's 0.2 ms; twice it gave 285 KB).  With SO_RCVBUF it stays where it was put: 128 KB keeps the rate at the window over the round trip, and 1 MB,
 # larger than the default, is a 1 MB window too (before, the queue's 128 packets kept the window at 128 KB).
 scenario receive-auto-10ms 20 --bytes 16777216 --delay-us 5000 --expect-receive-limit 524288:1048576
 scenario receive-auto-lan 30 --bytes 67108864 --expect-receive-limit 131072:524288
