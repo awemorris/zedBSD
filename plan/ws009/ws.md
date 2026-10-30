@@ -45,7 +45,7 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p018`](phase018/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-display-control.md: power・refresh・cursor・commit・overlay。依存: なし |
 | [`ws009-p019`](phase019/phase.md) | cleared（2026-10-30 Q1、main 59ccf6412。照合 --final PASS、link PASS） | gpu-drivers.md: node の種類の表。依存: なし |
 | [`ws009-p020`](phase020/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-command-stream.md・gpu-sysctl.md。依存: なし |
-| [`ws009-p021`](phase021/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-examples.md: compile できる例。依存: なし |
+| [`ws009-p021`](phase021/phase.md) | 書いた・照合 PASS（2026-10-30 Sonnet 5.5、cleared は Q1 が決める） | gpu-examples.md: compile できる例。依存: なし |
 | [`ws009-p022`](phase022/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-requests.md: 索引の 2 列と共通の errno の表。依存: p010〜p021 |
 | [`ws009-p023`](phase023/phase.md) | planned（2026-10-30 P1 の設計、q1701） | 統合: 全 file の --final・二重の主張の照合・既存の文書の直し。依存: p022 |
 | [`ws009-p024`](phase024/phase.md) | planned（2026-10-30 P1 の設計、q1701） | 正確さの敵対的レビュー（Opus を推す）。依存: p023 |

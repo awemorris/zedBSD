@@ -59,4 +59,51 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu-exa
 
 ## 結果
 
-（未実施）
+2026-10-30 Sonnet 5.5 high が書いた。docs/reference/gpu-examples.md を 884 行にした（4 つの例と Where the tests are）。見出し（H1〜H4）は骨格 4dfcce008 のまま。cleared は Q1 が決める。
+
+実行した command と最後の行（worktree の root）:
+
+- `git log --oneline 4dfcce008..HEAD -- include/uapi/gpu*.h include/uapi/sysctl.h include/uapi/errno.h src/drivers/gpu/gpu.c src/drivers/gpu/gpu-fence.c userland/desktop/libvulkan/context.c`: 出力なし（基点の後の変化なし）。
+- `python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --base 4dfcce008 --examples --final docs/reference/gpu-examples.md`: `check-gpu-uapi-doc: PASS (14 files, 46 index rows, 46 request sections, 98 constant rows, 47 structures, 20 capset rows, 705 placeholders, final 1 files, 4 example compiles)`
+- 同じ command を `GPU_DOC_BUILD=/home/awe/zedBSD-claude1/build` 付きで: `... final 1 files, 12 example compiles)` PASS。
+- `python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --base 4dfcce008`: `check-gpu-uapi-doc: PASS (... 705 placeholders, final 0 files)`
+- `timeout 120 .../noct plan/ws009/tests/check-relative-links.noct docs/reference docs/architecture`: `Markdown relative-link check: PASS (505 links)`
+- `git diff --check`: 出力なし（終了 0）。
+
+どの target で compile したか: worktree の `build/` には amd64 の sysroot（`build/amd64/sysroot`、clang は `build/llvm/bin/clang`）だけがあるため、既定の実行は x86_64-unknown-zedbsd の 1 target × 4 例 = 4 compile。arm64 と riscv64 の sysroot は main の checkout の `/home/awe/zedBSD-claude1/build/{arm64,riscv64}/sysroot` にあり（読むだけ、build していない）、`GPU_DOC_BUILD` でそこを指して x86_64・aarch64・riscv64 の 3 target × 4 例 = 12 compile が PASS。どちらも C11、`-Wall -Wextra -Werror -fsyntax-only`。動かす試験はしていない（compile だけ）。
+
+自分で決めた点:
+
+- info: capability の表は gpu.h・gpu-allocation.h・gpu-fence.h・gpu-display.h・gpu-job.h の全 bit（17 個）。`GPU_CAP_DISPLAY` の bit を見てから `GPU_DISPLAY_QUERY`（`GPU_DISPLAY_COUNT_ONLY`）を呼ぶ形で「bit を見てから要求」を示した。
+- storage: 蓄積の領域は 4096 bytes。blob の部分は `GPU_BLOB_MAPPABLE` の blob だけを map する（storage の map は driver 次第と gpu-memory.md が書くため）。
+- submit-wait: stream は gpu-op.h の命令だけで作る 68 bytes（`GPU_OP_SET_REPLY_STREAM`・`GPU_OP_SEEK_REPLY_STREAM`・`GPU_OP_ENUMERATE_INSTANCE_VERSION`+`GPU_OP_FLAG_REPLY`）で、libvulkan の枠組みと venus-frame の client.c の呼び方に合わせた。reply は読まない（本文に書いた）。ETIMEDOUT は最大 5 回（5 秒）待ち直す、EINTR は待ち直す、EIO・ENODEV と非 0 の status（その後 `GPU_GET_INFO` が失敗した時）は close して開き直し 1 度だけやり直す。
+- display: 出力は最初の connected・FIFO・非 LIMITED・BGRA・現在の mode の frame が `max_frame_bytes` に入る物。frame は storage に `GPU_COPY_MAX` ずつ書く。ESTALE は query からやり直して 3 回まで、EBUSY は報告して終わり、wait の ETIMEDOUT・EINTR は 3 回まで。
+- 独自の名前に `GPU_`・`gpu_` を付けていない（`request`、`release`、`wire_u32`、`show_frame` など）。
+- Where the tests: 直に要求を使う 12 個（gpu-admission・gpu-recovery・gpu-i915・venus-frame・amdrdnactl の gpu-check.c・display-inventory・display-scanout・display-control・gpu-bars・ghci-display・hvs-load・acquire-fence）。骨格の spec に無い gpu-bars・hvs-load・amdrdnactl・acquire-fence は grep で要求名を確かめて足した。gpu-share は WSI の helper を通すので載せなかった。Vulkan 経由は gpu-selftest・gpu-fence。display-events も Vulkan 経由だが骨格の指定に無いので載せなかった。
+
+節ごとの主張の表（文書には置かない）:
+
+| 主張（節と要約） | 根拠（file と関数） | 試験 |
+| --- | --- | --- |
+| info: `GPU_GET_INFO` は version・size を入力に取り、`GPU_DEVICE_QUERY` は bit を要らない | gpu-capabilities.md、gpu.c `gpu_info_ioctl`、`gpu_device_query_ioctl` | gpu-admission/main.c、display-scanout/main.c |
+| info: `GPU_DISPLAY_QUERY` の `GPU_DISPLAY_COUNT_ONLY` は count だけを返す。bit が無ければ `EOPNOTSUPP` | gpu-display.h の comment、gpu.c `gpu_display_ioctl` | display-inventory/main.c |
+| storage: 1 回の転送は `GPU_COPY_MAX` まで、address は 64 bit の user pointer | gpu.c `gpu_transfer_ioctl` | gpu-admission/main.c |
+| storage: map は token を返し、mmap は `MAP_SHARED`、mmap の間は destroy が `EBUSY` | gpu.c `gpu_map_ioctl`、`gpu_mmap`、`gpu_destroy_ioctl` | amdrdnactl/gpu-check.c |
+| storage: `GPU_RESOURCE_MAP` は読みの open を要る | gpu.c `gpu_map_ioctl` | amdrdnactl/gpu-check.c |
+| submit-wait: 成功は受理であって完了ではない。`GPU_WAIT_CONSUME` が record を退役させる | gpu.c `gpu_wait_ioctl`、`gpu_completion_observer_leave` | gpu-recovery/main.c、gpu-i915/main.c |
+| submit-wait: 有限の timeout の満了は `ETIMEDOUT`、record は不変、`EINTR` は再開しない | gpu.c `gpu_completion_observe`、src/kern/waitq.c `waitq_sleep` | gpu-recovery/main.c（status 側） |
+| submit-wait: 失敗した open は `GPU_GET_INFO` も失敗し、close して開き直す | gpu-submission.md の Session failure and recovery、gpu.c `gpu_session_enter` | gpu-recovery/main.c |
+| submit-wait: 68 bytes の stream の並びと reply の書き場所 | gpu-op.h の `GPU_OP_SET_REPLY_STREAM`・`GPU_OP_SEEK_REPLY_STREAM`・`GPU_OP_ENUMERATE_INSTANCE_VERSION` の comment | venus-frame/client.c |
+| display: claim の `ESTALE`・`EBUSY`・`ENOSPC`・`ENXIO` は driver の答え | gpu-display.md、gpu.c `gpu_display_ioctl` | display-scanout/main.c |
+| display: 通常の storage は present が返った後は借りられていない | gpu-display.h の comment、gpu-display.md | display-control/main.c、gpu-bars/main.c |
+| display: wait は 1 回で最大 1 秒、timeout は `ETIMEDOUT` | gpu-display.h `struct gpu_display_wait` の comment | hvs-load/main.c |
+
+表の根拠のうち code を直に読み直したのは次の 3 つ。他の行の根拠は gpu-*.md と header の comment による（code は未読）。読み直した 3 つは文書の主張に合った:
+
+1. `gpu_wait_ioctl`・`gpu_completion_observe`: timeout 0 は `EAGAIN`、有限の期限の満了は `waitq_sleep` の `ETIMEDOUT`（src/kern/waitq.c の 221 行の `return ETIMEDOUT;`）、signal は `EINTR` で record に触らず、`GPU_WAIT_CONSUME` は copyout が成功した時だけ退役。例の待ち直しの形と合う。
+2. `gpu_destroy_ioctl`: `mapping_count != 0` で `EBUSY`。例が `munmap` の後に destroy する理由と合う。
+3. `gpu_transfer_ioctl`: `bytes == 0 || bytes > GPU_COPY_MAX` は `EINVAL`、offset と範囲の検査、address の検査。例が frame を `GPU_COPY_MAX` ずつ書く理由と合う。
+
+source と header・spec・文書の食い違い: 見つからなかった。header の `struct gpu_display_wait` の comment と gpu-display.md の wait の節は合う。
+
+未確認・未実施: 例を動かす試験（compile だけ）、実機・QEMU での動作、arm64・riscv64 の worktree 内の sysroot（main の checkout の sysroot で compile した）。`GPU_DISPLAY_WAIT` が `ETIMEDOUT` を返す具体的な driver の分岐は読んでいない（header の comment と文書による）。
