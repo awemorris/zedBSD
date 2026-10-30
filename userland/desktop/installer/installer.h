@@ -378,7 +378,11 @@ struct inst_app {
 	uint64_t ended_us;
 	int stop_asked;
 
-	/* S10 and S11: what was written, the failure, the helper's states, the loader's place and the swap. */
+	/*
+	 * S10 and S11: what was written, the failure, the helper's states, the
+	 * loader's place, the firmware's boot entry ("none" when none was made)
+	 * and the swap.
+	 */
 	char writes[INST_WRITES_MAX][INST_MESSAGE_MAX];
 	unsigned write_count;
 	int canceled;
@@ -388,6 +392,7 @@ struct inst_app {
 	char states[INST_STATES_MAX][INST_MESSAGE_MAX];
 	unsigned state_count;
 	char loader_path[INST_PATH_MAX];
+	char boot_entry[8];
 	char swap_kind[16];
 	char installed_user[INST_NAME_MAX];
 	char power_message[INST_MESSAGE_MAX];

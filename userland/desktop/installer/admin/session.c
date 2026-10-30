@@ -27,6 +27,7 @@
 #include "unpack.h"
 
 #include "userland/base/diskpart/table.h"
+#include "include/kern/os-name.h"
 
 #include <uapi/gpt-type.h>
 #include <uapi/mountinfo.h>
@@ -58,6 +59,7 @@
 #define SESSION_MKSWAP		"/sbin/mkswap"
 #define SESSION_SWAPON		"/sbin/swapon"
 #define SESSION_SWAPOFF		"/sbin/swapoff"
+#define SESSION_EFIBOOT		"/sbin/efiboot"
 
 /* Where the new root and the ESP are mounted while they are written. */
 #define SESSION_TARGET		"/run/install-admin/target"
@@ -101,6 +103,9 @@
 
 /* The seconds a trial swapon or swapoff of the new swap file may take. */
 #define SESSION_SWAP_SECONDS	30U
+
+/* The time efiboot may take to write the boot entry; the firmware writes its flash meanwhile. */
+#define SESSION_EFIBOOT_SECONDS	60U
 
 /* The bytes unpacked between two BYTES lines, and the entries between two looks for a cancellation. */
 #define SESSION_REPORT_BYTES	(8ULL * 1024ULL * 1024ULL)
@@ -207,6 +212,7 @@ static int session_install_swapfile(struct session_installation *installation);
 static int session_install_release_root(struct session_installation *installation);
 static int session_install_esp(struct session_installation *installation);
 static int session_install_release_esp(struct session_installation *installation);
+static void session_install_boot_entry(struct session_installation *installation);
 static void session_install_cleanup(struct session_installation *installation);
 
 /*
@@ -387,6 +393,9 @@ session_install(
 		free(installation);
 		return error;
 	}
+
+	/* The firmware's boot entry for the loader; the installation stands without one. */
+	session_install_boot_entry(installation);
 
 	/* The loader's place, for the last page, and the end. */
 	session_say(session, "STATE loader %s\n", installation->loader_place);
@@ -3093,6 +3102,60 @@ session_install_release_esp(
 
 	/* Succeeded: the installation is on the disk. */
 	return 0;
+}
+
+/*
+ * Makes the firmware's boot entry, named after the system, for the loader
+ * on the ESP, at the end of the boot order (efiboot uses an entry with
+ * the same device path again).  Says "STATE boot-entry XXXX" with its
+ * number, or "STATE boot-entry none" when the firmware's variables could
+ * not be written: a BIOS boot, or a firmware that refused.  Then the last
+ * page says to choose the disk in the firmware's boot menu.
+ */
+static void
+session_install_boot_entry(
+	struct session_installation *installation)
+{
+	char *argument[8];
+	char disk[SESSION_PATH_MAX];
+	char slot[16];
+	char loader[SESSION_PATH_MAX + 1U];
+	char output[64];
+	char number[8];
+	int matched;
+	int status;
+	int error;
+
+	/* The command line: efiboot create, the label, the disk, the ESP's slot and the loader's path. */
+	snprintf(disk, sizeof(disk), "/dev/%s", installation->request->disk.name);
+	snprintf(slot, sizeof(slot), "%u", installation->esp_slot);
+	snprintf(loader, sizeof(loader), "/%s", installation->loader_place);
+	argument[0] = SESSION_EFIBOOT;
+	argument[1] = "create";
+	argument[2] = "-l";
+	argument[3] = ZEDBSD_OS_NAME;
+	argument[4] = disk;
+	argument[5] = slot;
+	argument[6] = loader;
+	argument[7] = NULL;
+
+	/* Runs it, keeping the line that names the entry. */
+	number[0] = '\0';
+	error = session_run(argument, NULL, output, sizeof(output), SESSION_EFIBOOT_SECONDS, &status);
+	if (error == 0 && status == 0) {
+		matched = sscanf(output, "Boot%4[0-9A-F]", number);
+		if (matched != 1)
+			number[0] = '\0';
+	}
+
+	/* Tells the installer there is no entry. */
+	if (number[0] == '\0') {
+		session_say(installation->session, "STATE boot-entry none\n");
+		return;
+	}
+
+	/* Succeeded: tells the installer the entry's number. */
+	session_say(installation->session, "STATE boot-entry %s\n", number);
 }
 
 /* Leaves nothing of a failed installation open or mounted. */
