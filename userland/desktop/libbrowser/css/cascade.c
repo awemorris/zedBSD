@@ -1210,6 +1210,7 @@ css_initial_style(
 	style->paint_color = style->color;
 	style->background_color = 0;
 	style->background_image = NULL;
+	style->background_density = 1.0f;
 	style->background_repeat = CSS_REPEAT_BOTH;
 	style->background_attachment = CSS_BACKGROUND_SCROLL;
 	style->transform_translate[0].unit = CSS_UNIT_PX;
@@ -4301,8 +4302,12 @@ cascade_apply(
 	case CSS_PROP_BACKGROUND_IMAGE:
 		style->background_image = NULL;
 		style->background_gradient = NULL;
-		if (value->kind == CSS_VALUE_URL)
+		style->background_density = 1.0f;
+		if (value->kind == CSS_VALUE_URL) {
 			style->background_image = value->url;
+			if (value->number > 0.0f)
+				style->background_density = value->number;
+		}
 		if (value->kind == CSS_VALUE_GRADIENT)
 			style->background_gradient = cascade_gradient(engine, value->gradient, style->font_size);
 		break;
@@ -4915,6 +4920,7 @@ cascade_inherit(
 		break;
 	case CSS_PROP_BACKGROUND_IMAGE:
 		style->background_image = parent->background_image;
+		style->background_density = parent->background_density;
 		style->background_gradient = parent->background_gradient;
 		break;
 	case CSS_PROP_BACKGROUND_REPEAT:

@@ -2712,9 +2712,14 @@ list_background_size(
 	int width_auto;
 	int height_auto;
 
-	/* The image's own size. */
-	natural_width = (float)image->width * LAYOUT_UNIT;
-	natural_height = (float)image->height * LAYOUT_UNIT;
+	/* The image's own size (its resolution and the zoom change what a CSS pixel of it is). */
+	scale = box->style.zoom_eff > 0.0f ? box->style.zoom_eff : 1.0f;
+	if (image != box->background)
+		scale = 1.0f;
+	else if (box->style.background_density > 0.0f)
+		scale /= box->style.background_density;
+	natural_width = (float)image->width * LAYOUT_UNIT * scale;
+	natural_height = (float)image->height * LAYOUT_UNIT * scale;
 
 	/* contain: the largest size that fits; cover: the smallest that covers. */
 	if (box->style.background_size_keyword != CSS_BACKGROUND_SIZE_LENGTHS) {

@@ -880,6 +880,8 @@ struct css_style {
 	 * pixels, a percentage of the padding box or auto).
 	 */
 	struct vm_string *background_image;
+	/* How many image pixels make a CSS pixel of the background image (image-set()'s resolution, 1 otherwise). */
+	float background_density;
 	/* The background image when it is a gradient (in the engine's arena; NULL for none). */
 	const struct css_gradient *background_gradient;
 	int background_repeat;
