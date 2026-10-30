@@ -10,16 +10,20 @@
 # is the UFS root the kernel's autoroot finds.
 #
 # The bootloader (Amlogic's signed stages and Hardkernel's U-Boot) is not
-# built by zedBSD.  With --bootloader-from, the bootloader area of another
+# built by zedBSD.  With --bootloader, a signed bootloader file (the
+# firmware package amlogic-s7d-bootloader's u-boot.bin.signed) is written
+# from sector 1, as Hardkernel's Yocto layer places it, and the MBR's boot
+# code stays zero; the file must end before the boot partition.  With
+# --bootloader-from, instead, the bootloader area of another
 # card image (Hardkernel's own ODROID-C5 image, uncompressed) is copied in:
 # the MBR's boot code and the sectors from 1 up to that image's first
 # partition or 8 MiB, whichever is lower; this image's partition table
 # stays.  A donor with a GPT's protective MBR, or whose area is all zero,
 # is refused.  A card without a bootloader is made only with
 # --no-bootloader, and then needs one written separately.  A card with a
-# copied bootloader carries --notice (the bootloader's terms) on its boot
-# partition as BOOTLOADER.txt, followed by the donor's name and the
-# SHA-256 of the area taken from it.
+# bootloader carries --notice (the bootloader's terms) on its boot
+# partition as BOOTLOADER.txt, followed by the name of the file or donor
+# and the SHA-256 of the MBR's boot code and the area written.
 
 from __future__ import annotations
 
@@ -67,11 +71,12 @@ def donor_area_end(donor: bytes) -> int:
     return end
 
 
-def bootloader_notice(args: argparse.Namespace, code: bytes, area: bytes, end: int) -> Path:
+def bootloader_notice(args: argparse.Namespace, source: str, code: bytes,
+                      area: bytes, end: int) -> Path:
     """Writes the card's copy of the bootloader's notice beside the output."""
     digest = hashlib.sha256(code + area).hexdigest()
     text = args.notice.read_text(encoding="utf-8")
-    text += (f"\nCopied from: {args.bootloader_from.name}\n"
+    text += (f"\n{source}\n"
              f"Area: the MBR's first {MBR_CODE_BYTES} bytes and sectors 1-{end - 1}, "
              f"SHA-256 {digest}\n")
     path = args.output.with_name(args.output.name + ".bootloader.txt")
@@ -86,9 +91,11 @@ def build(args: argparse.Namespace) -> None:
         require_file(path)
     if args.ufs_root.stat().st_size % SECTOR:
         raise SystemExit("make-odroid-c5-hdd-image: the UFS root is not whole sectors")
-    if args.bootloader_from is None and not args.no_bootloader:
-        raise SystemExit("make-odroid-c5-hdd-image: no bootloader: give --bootloader-from "
-                         "(Hardkernel's ODROID-C5 image) or --no-bootloader")
+    chosen = [args.bootloader is not None, args.bootloader_from is not None, args.no_bootloader]
+    if sum(chosen) != 1:
+        raise SystemExit("make-odroid-c5-hdd-image: give one of --bootloader (the signed "
+                         "bootloader file), --bootloader-from (Hardkernel's ODROID-C5 image) "
+                         "or --no-bootloader")
     if args.output.exists() and not args.force:
         raise SystemExit(f"make-odroid-c5-hdd-image: output exists (use --force): {args.output}")
 
@@ -105,7 +112,22 @@ def build(args: argparse.Namespace) -> None:
             ROOT_LBA, root_blocks)
         mbr[510:512] = b"\x55\xaa"
 
-        if args.bootloader_from is not None:
+        if args.bootloader is not None:
+            require_file(args.bootloader)
+            area = args.bootloader.read_bytes()
+            end = 1 + (len(area) + SECTOR - 1) // SECTOR
+            if not any(area):
+                raise SystemExit(f"make-odroid-c5-hdd-image: the bootloader {args.bootloader} is empty")
+            if end > BOOTLOADER_END_LBA:
+                raise SystemExit(f"make-odroid-c5-hdd-image: the bootloader {args.bootloader} "
+                                 f"({len(area)} bytes) does not end before sector {BOOTLOADER_END_LBA}")
+            image.seek(SECTOR)
+            image.write(area)
+            print(f"make-odroid-c5-hdd-image: bootloader: {len(area)} bytes "
+                  f"(sectors 1-{end - 1}) from {args.bootloader}")
+            notice = bootloader_notice(args, f"Written from: {args.bootloader.name}",
+                                       bytes(MBR_CODE_BYTES), area, end)
+        elif args.bootloader_from is not None:
             require_file(args.bootloader_from)
             with args.bootloader_from.open("rb") as donor_file:
                 donor = donor_file.read(BOOTLOADER_END_LBA * SECTOR)
@@ -119,7 +141,8 @@ def build(args: argparse.Namespace) -> None:
             image.write(area)
             print(f"make-odroid-c5-hdd-image: bootloader: {len(area)} bytes "
                   f"(sectors 1-{end - 1}) from {args.bootloader_from}")
-            notice = bootloader_notice(args, donor[0:MBR_CODE_BYTES], area, end)
+            notice = bootloader_notice(args, f"Copied from: {args.bootloader_from.name}",
+                                       donor[0:MBR_CODE_BYTES], area, end)
         else:
             print("make-odroid-c5-hdd-image: bootloader: none (--no-bootloader); "
                   "the card does not boot until one is written")
@@ -152,6 +175,7 @@ def main() -> None:
     parser.add_argument("--data-image", type=Path, required=True)
     parser.add_argument("--swapfile", type=Path, required=True)
     parser.add_argument("--ufs-root", type=Path, required=True)
+    parser.add_argument("--bootloader", type=Path)
     parser.add_argument("--bootloader-from", type=Path)
     parser.add_argument("--no-bootloader", action="store_true")
     parser.add_argument("--notice", type=Path,

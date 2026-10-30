@@ -15,11 +15,12 @@ packaging; selection follows the attached device rather than the CPU. Selecting
 a firmware package installs its data without enabling a hardware driver. The
 other way round, menuconfig selects the firmware a driver needs when the
 driver is turned on, and drops it when no driver that is on needs it any more
-(`config/drivers/firmware.list`); the licenses are still accepted when the
-image is built.
+(`config/drivers/firmware.list`), and the firmware a board needs whatever
+its drivers are when the board is chosen; the licenses are still accepted
+when the image is built.
 
 The entries are `rtl8822b/`, `intelax211/`, `intelbt/`, `i915/`, `brcmbt/`,
-`bcm43455/`, `nvidia-gsp/`, `powervr/`, and `mali-csf/`; future
+`bcm43455/`, `nvidia-gsp/`, `powervr/`, `mali-csf/`, and `amlogic-s7d/`; future
 RTL8822C support owns a separate `rtl8822c/` entry. RTL8822B uses its frozen GitHub
 acquisition mirror. AX211 uses the official `linux-firmware` tag `20260410`
 dereferenced commit and installs the exact `-89.ucode`, PNVM, complete Intel
@@ -108,6 +109,21 @@ row is added (plan/ws269, p004, on by default for the VisionFive 2), its
 Until then the package is chosen in the Firmware menu. The license is accepted
 when the image is built. The kernel reads the file from the root file system, which is built from the
 same tree for every root image.
+`mali-csf/` (package `mali-csf-firmware`) uses the official linux-firmware
+commit above and installs `arm/mali/arch10.8/mali_csffw.bin`, the program of the
+Command Stream Frontend of the ODROID-C5's Mali-G310, under the arch 10.8,
+10.10 and 10.12 names linux-firmware gives the same bytes, with the complete
+`LICENCE.mali_csffw`, WHENCE and the manifest; the mali driver
+(`CONFIG_DRIVER_MALI_GPU`) selects it. `amlogic-s7d/` (package
+`amlogic-s7d-bootloader`) is the ODROID-C5's bootloader: Amlogic's signed boot
+stages and Hardkernel's U-Boot in one file, `u-boot.bin.signed`, from
+Hardkernel's Yocto layer `mdrjr/meta-odroid-aml` commit
+`548e2f037e01c626e3fc964fa298464df148fd51`. Choosing the ODROID-C5 board
+selects it; the image build writes the file from the SD card's sector 1 and
+the root file system gets only the GPL-2 text, the layer's recipe, the notice
+and the manifest. No licence text for Amlogic's stages has been found, so the
+notice says their redistribution terms are unknown and that a card made with
+it is not to be passed on until they are known.
 Every entry is default-off, and ordinary builds perform no firmware fetch.
 
 Every file a package fetches is also kept, byte for byte and with its license

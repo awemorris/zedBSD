@@ -9,3 +9,8 @@ CONFIG_DRIVER_BCM2711_AUDIO|bool|BCM2711 PWM audio: Raspberry Pi 4 headphone jac
 CONFIG_DRIVER_BCM2711_GPU|bool|BCM2711 GPU: HVS display and V3D (experimental)|rpi4|y|
 CONFIG_DRIVER_BCM2711_VCHIQ|bool|BCM2711 VCHIQ: VideoCore firmware services (experimental)|rpi4|y|
 CONFIG_DRIVER_BCM2711_VIDEO|bool|BCM2711 H.264 decode as Vulkan Video (needs VCHIQ and GPU, experimental)|rpi4|y|
+-|fixed|Amlogic debug UART console, GIC, timer and PSCI (S905X5M)|odroid-c5|y|
+-|fixed|Amlogic SD/MMC controller|odroid-c5|y|
+-|fixed|Amlogic USB PHY and CRG xHCI host|odroid-c5|y|
+-|fixed|DesignWare EQoS Ethernet with the RGMII PHY|odroid-c5|y|
+CONFIG_DRIVER_MALI_GPU|bool|Mali-G310 GPU: ODROID-C5 display and Vulkan (experimental)|odroid-c5|y|

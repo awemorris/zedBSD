@@ -56,3 +56,32 @@ WS: [WS313](../ws.md)、設計 [design.md](../design.md) §2・§6・§7
   - 書き込み: `sudo dd if=<image> of=/dev/sdX bs=4M conv=fsync status=progress`。
 - DTS の取得の流し直し（14:17、Q1 の指示で 1 回だけ）: raw.githubusercontent.com がまだ HTTP 429。image と host の試験は複写した cache（SHA-256 で検証）で作った。
 - 実機: 未実施（U-Boot が A でこの image の boot.scr を読むかも未確認）。
+
+## q1714-i01（2026-10-30、P1）: Amlogic の bootloader と Mali の firmware を zedBSD-firmware と menuconfig の Firmware に
+
+- ユーザーの指示（原文、2026-10-30）: 「P1: ODROIDで使うamlogicブートローダとMaliファームウェアは、zedBSD-firmwareリポジトリに追加してください。make menuconfigにファームウェアとして入れてください。当然他のファームウェアと同じでライセンス合意も必要です。ODROID-C5のBSPを選ぶと、Amlogicのこのチップのファームウェアが自動で依存関係で有効になるようにしてください。」
+- zedBSD-firmware（branch agent/p1-c5-firmware、**local の commit 227a76db8e82c91ddd63e4017faa97b7e713b08e、親 fcdfccfa（GitHub の main）、push していない**）:
+  - `mali-csf/`: linux-firmware dc85cced の `mali_csffw.bin`（282624、a27847ea…）・`LICENCE.mali_csffw`（9690、ebedc86d…）・`WHENCE`（425450、c282239a…）の無変更の写しと README.md。
+  - `amlogic-s7d/`: mdrjr/meta-odroid-aml 548e2f037e の `u-boot.bin.signed`（3379200、8c2e6691…）と recipe `u-boot-odroid-c5.bb`（803、93711ea6…）、U-Boot 用の `GPL-2`（linux-firmware dc85cced、18092、8177f975…）、README.md（先頭に「License not confirmed」）。
+  - top の README.md の表と `SHA256SUMS`（`sha256sum -c` OK）。
+- license の調べ（GitHub の `git clone --depth 1` だけ。git.odroid.com・dn.odroid.com は触っていない）:
+  - meta-odroid-aml 548e2f037e: repo に LICENSE なし。recipe は `LICENSE = "GPL-2.0-only"`（U-Boot）だけ。
+  - github.com/hardkernel/u-boot の branch odroidc5-v2023.01（c99f3409d5）: submodule（git.odroid.com）だけで license の file なし。
+  - Amlogic の他の SoC の FIP の blob を配る github.com/LibreELEC/amlogic-boot-fip（b6600f2857fdf81d11f18ea7a2e44aa989e7bcc4）の `LICENSE`（sha256 4255537f71b1cd0d487de0fa2b8eddf1eb96ed96d119507336dde8b3782b86e6）: 「All information contained herein is Amlogic confidential. This software is provided to you pursuant to Software License Agreement (SLA) with Amlogic Inc ("Amlogic"). … Redistribution and use in source and binary forms, with or without modification is strictly prohibited without prior written permission from Amlogic.」
+  - 結論: S7D の blob の再配布を許す本文は見つからない。Amlogic が他の SoC に付ける条件は書面の許可なしの再配布を禁じる。**zedBSD-firmware の `amlogic-s7d/` の公開（push）はユーザーの判断が要る**（Q1 へ報告済み）。
+- zedBSD（commit 9c09f68f4、親 7fe2d6328）:
+  - package `amlogic-s7d-bootloader`（`userland/firmware/amlogic-s7d/`: Makefile・notice・manifest）。zedBSD-firmware の `amlogic-s7d/` を先に、だめなら upstream（mdrjr の raw と kernel.org の GPL-2）から取り、大きさと SHA-256 で検証。license の同意は他の firmware と同じ（notice と GPL-2 の本文）。rootfs には GPL-2・recipe・notice・manifest だけ（bootloader 自体は入れない）。
+  - `config/drivers/firmware.list`: key が platform の名の行 `odroid-c5|amlogic-s7d-bootloader`（board を選ぶと選ばれ、別の board で外れる）。`CONFIG_DRIVER_MALI_GPU|mali-csf-firmware` は前から。
+  - `tools/menuconfig.py`: ODROID-C5 の board（CPU arm64 の 2 つ目の board）。`driver_firmware` が platform の行を読む。
+  - `config/drivers/architecture/arm64.drivers`: odroid-c5 の fixed の 4 行と `CONFIG_DRIVER_MALI_GPU`（既定 y、Pi と同じく board の Platform の driver は既定で有効。今まで catalog に無かった）。
+  - `platform/arm64/tools/make-odroid-c5-hdd-image.py --bootloader FILE`（sector 1 から、MBR の code は 0、BOOTLOADER.txt に notice と「Written from」と区画の SHA-256）。`platform/arm64/odroid-c5.mk` は `ODROID_C5_BOOTLOADER_FROM`（明示の上書きとして残す）＞ package ＞ `ODROID_C5_NO_BOOTLOADER=y` の順。
+  - `config/ci/config-odroid-c5.mk`・`config-odroid-c5-keiland.mk` の `ZEDBSD_USER_PROGRAMS` に `amlogic-s7d-bootloader`。
+  - `tools/release/license-components.json` に `amlogic-s7d-bootloader`（`status: decision`、ユーザーの判断まで release の検査で止まる）。mali-csf の manifest に mirror の行。
+  - `plan/tools/menuconfig-target-host-test.py`: main で既に FAIL だった Drivers の分類（Camera が増えた）を追従し、ODROID-C5 の試験（board を選ぶと bootloader と Mali の firmware、Mali の driver を切ると Mali の firmware だけ外れる、Pi に戻すと両方外れる、2 つの CI の config の読み込み）を足した。
+- 確かめ（host）:
+  - `make menuconfig-host-test`: PASS（firmware licenses PASS、round-trip PASS）。
+  - `make ZEDBSD_CONFIG=config/ci/config-odroid-c5.mk AMLOGIC_S7D_BOOTLOADER_CACHE_ROOT=<worktree>/build/fw-sources/amlogic-s7d firmware-licenses-pending`: `amlogic-s7d-bootloader` の行が出て、GPL-2 は repo（fcdfccfa には無い）の 404 の後に kernel.org から取得・検証。
+  - image の tool の単体（既存の build/odroid-c5 の vmunix・UFS で、`--bootloader <amlogic-s7d/u-boot.bin.signed>`）: MBR の code は 0・署名 55aa、sector 1〜6600 が blob（8c2e6691…）、その後 8 MiB まで 0、**区画（MBR の 440 byte＋sector 1 から）の SHA-256 は e6f020856acff8aedd041058971155e8bdb8bae6e3f8764e9818a20afc7b313d で q1709 の image と同じ**。3 つの bootloader の指定を 2 つ同時に渡すと拒否。
+  - `make -n … BUILD=build/odroid-c5 build/odroid-c5/hdd-image.img`: 命令が `--bootloader <cache>/548e2f…/u-boot.bin.signed --notice userland/firmware/amlogic-s7d/amlogic-s7d-bootloader.notice` になる（rc=0）。
+- **未実施**: package 経由の image の build（text の image）。build の前の license の自動の同意（`yes | make … firmware-licenses`）が権限の判定（ユーザーの代わりの同意）で拒まれ、回避せず止めた（Q1 へ報告）。ユーザーが端末で `firmware-licenses` に答えた後に、`BUILD=build/q1714-odroid-c5` で disk-image を作り、区画の SHA-256 を e6f02085… と照らす。
+- 残り: zedBSD-firmware の push（ユーザーの判断。`amlogic-s7d/` は license 未確認）と、push の後に `userland/firmware/zedbsd-firmware.mk` の `ZEDBSD_FIRMWARE_REPOSITORY_REVISION` を 227a76db8e82c91ddd63e4017faa97b7e713b08e に（それまでは各 package が upstream から取る）、mali-csf と amlogic-s7d の manifest に `mirror-revision`。menuconfig が保存する config は `CONFIG_ODROID_C5_SERIAL_CONSOLE`（catalog に無い）を書かない（Pi の `CONFIG_RPI4_SERIAL_CONSOLE` と同じ。範囲の外）。
