@@ -1316,7 +1316,7 @@ port_change_defer(
 	/* Handles the worker condition. */
 	worker = c->port_worker;
 	if (worker)
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 }
 
 /* Reports the descriptor address an event refers to. */
@@ -3567,7 +3567,7 @@ xhci_worker_stop(
 		return;
 	c->port_worker = NULL;
 	__atomic_store_n(&c->port_stopping, 1U, __ATOMIC_RELEASE);
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 	/* Continue while the operation condition remains true. */
 	while (worker->state != THREAD_ZOMBIE)
 		sched_yield();
@@ -8457,7 +8457,7 @@ xhci_isoch_kick(
 	pending = __atomic_load_n(&c->isoch_pending, __ATOMIC_ACQUIRE);
 	worker = c->isoch_worker;
 	if (pending != 0U && worker != NULL)
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 }
 
 /* Finds the DMA address of a request's bytes from offset, which must lie in one segment; 0 or EINVAL. */
@@ -9078,7 +9078,7 @@ xhci_isoch_worker_stop(
 	/* Told, woken, and waited for. */
 	c->isoch_worker = NULL;
 	__atomic_store_n(&c->isoch_stopping, 1U, __ATOMIC_RELEASE);
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 	while (worker->state != THREAD_ZOMBIE)
 		xhci_sleep_ms(1U);
 	(void)thread_wait(worker, NULL);

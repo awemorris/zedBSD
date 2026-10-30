@@ -51,7 +51,6 @@
 #include "../../workarounds.h"
 
 #include <drivers/generic/dma.h>
-#include <hal/hal.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
 

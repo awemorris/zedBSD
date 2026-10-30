@@ -25,10 +25,10 @@
 #include "../pci.h"
 #include "../trace.h"
 
-#include <hal/hal.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
+#include <kern/pmem.h>
 
 #include <uapi/errno.h>
 #include <stddef.h>
@@ -522,8 +522,8 @@ i915_bios_oprom_get_vbt(
 	/* Enables the ROM decode and maps the ROM. */
 	drv_i915_pci_write32(pci, I915_VBT_PCI_ROM_BASE, base | I915_VBT_ROM_ENABLE);
 	rom = NULL;
-	map_error = hal_space_map_device((hal_physaddr_t)base, rom_size, HAL_SPACE_READ, &rom);
-	if (map_error != HAL_OK) {
+	map_error = kern_device_map(base, rom_size, KERN_DEVICE_UNCACHED | KERN_DEVICE_READONLY, &rom);
+	if (map_error != 0) {
 		drv_i915_pci_write32(pci, I915_VBT_PCI_ROM_BASE, original);
 		return 0;
 	}
@@ -558,7 +558,7 @@ i915_bios_oprom_get_vbt(
 		lifted = i915_bios_oprom_lift(display, bytes, rom_size, (size_t)found, out, out_size);
 
 	/* Unmaps the ROM and leaves its decode as it was found. */
-	(void)hal_space_unmap_device(rom, rom_size);
+	(void)kern_device_unmap(rom, rom_size);
 	drv_i915_pci_write32(pci, I915_VBT_PCI_ROM_BASE, original);
 
 	/* A signature without a VBT that checks behind it is an absence. */

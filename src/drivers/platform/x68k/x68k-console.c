@@ -24,7 +24,6 @@
 
 #include "drivers/platform/x68k/x68k-console.h"
 
-#include <hal/hal.h>
 #include <kern/platform.h>
 #include <kern/text-display.h>
 #include <uapi/errno.h>

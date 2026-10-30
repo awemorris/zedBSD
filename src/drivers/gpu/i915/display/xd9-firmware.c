@@ -21,7 +21,7 @@
 
 #include "../mmio.h"
 
-#include <hal/hal.h>
+#include <kern/pmem.h>
 
 #include <uapi/errno.h>
 #include <stddef.h>
@@ -115,8 +115,8 @@ i915_xd9_firmware_vtd_read(
 
 	/* The unit's register page, for reading. */
 	unit = NULL;
-	error = hal_space_map_device((hal_physaddr_t)base, I915_XD9_FIRMWARE_VTD_WINDOW, HAL_SPACE_READ, &unit);
-	if (error != HAL_OK || unit == NULL)
+	error = kern_device_map(base, I915_XD9_FIRMWARE_VTD_WINDOW, KERN_DEVICE_UNCACHED | KERN_DEVICE_READONLY, &unit);
+	if (error != 0 || unit == NULL)
 		return EIO;
 
 	/* Succeeded: the three words, and the mapping dropped. */
@@ -124,6 +124,6 @@ i915_xd9_firmware_vtd_read(
 	*version = *(const volatile uint32_t *)(page + I915_XD9_FIRMWARE_VTD_VER);
 	*status = *(const volatile uint32_t *)(page + I915_XD9_FIRMWARE_VTD_GSTS);
 	*protect = *(const volatile uint32_t *)(page + I915_XD9_FIRMWARE_VTD_PMEN);
-	(void)hal_space_unmap_device(unit, I915_XD9_FIRMWARE_VTD_WINDOW);
+	(void)kern_device_unmap(unit, I915_XD9_FIRMWARE_VTD_WINDOW);
 	return 0;
 }

@@ -30,7 +30,7 @@
 
 #include "intel/gt-regs.h"
 
-#include <hal/hal.h>
+#include <kern/irq.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
@@ -241,8 +241,8 @@ static void i915_irq_gen8_serve(struct i915_irq_dev *irq, uint32_t master_ctl);
 static uint32_t i915_irq_gen8_bank_value(const struct i915_irq_bank *bank, uint32_t bits);
 static uint32_t i915_irq_gen8_bank_take(struct i915_irq_dev *irq, unsigned bank);
 static void i915_irq_gen8_engine(struct i915_irq_dev *irq, const struct i915_irq_bank_engine *engine, uint32_t iir);
-static void i915_irq_handler_body(int vector, hal_irq_ack_t acknowledge, void *argument);
-static void i915_irq_handler(int vector, hal_irq_ack_t acknowledge, void *argument);
+static void i915_irq_handler_body(int vector, kern_irq_ack_t acknowledge, void *argument);
+static void i915_irq_handler(int vector, kern_irq_ack_t acknowledge, void *argument);
 
 /* The Gen11 layout. */
 static const struct i915_irq_layout i915_irq_gen11_layout = {
@@ -305,15 +305,15 @@ drv_i915_irq_install(
 	/*
 	 * Attaches the handler.  The vector was allocated without a handler,
 	 * and until the attach succeeds an arriving message is masked and
-	 * acknowledged by the HAL.
+	 * acknowledged by the kernel.
 	 */
-	status = hal_irq_attach_msi(irq->msi_irq, i915_irq_handler, irq);
-	if (status != HAL_OK) {
+	status = kern_irq_attach_msi(irq->msi_irq, i915_irq_handler, irq);
+	if (status != 0) {
 		/* Only irq_enabled is cleared; irqs_enabled stays set. */
 		irq->irq_enabled = 0;
 		if (irq->display_ops != NULL)
 			irq->display_ops->set_irqs_enabled(irq->display_context, 0);
-		kern_logf("i915: irq install: hal_irq_attach_msi(irq=%d) failed rc=%d\n",
+		kern_logf("i915: irq install: kern_irq_attach_msi(irq=%d) failed rc=%d\n",
 		    irq->msi_irq,
 		    status);
 
@@ -368,8 +368,8 @@ drv_i915_irq_uninstall(
 		return;
 
 	/* Detaches the handler and waits for any invocation still running. */
-	status = hal_irq_detach_msi_sync(irq->msi_irq, i915_irq_handler, irq);
-	if (status != HAL_OK) {
+	status = kern_irq_detach_msi_sync(irq->msi_irq, i915_irq_handler, irq);
+	if (status != 0) {
 		kern_logf("i915: irq uninstall: detach_msi_sync (irq=%d) rc=%d\n",
 		    irq->msi_irq,
 		    status);
@@ -385,7 +385,7 @@ drv_i915_irq_uninstall(
  * It waits on the handler's own entry and exit counts, which equals "every
  * invocation started before the call has finished" only if invocations of
  * this handler never overlap; nothing in
- * the HAL states that an invocation cannot begin after the EOI while the
+ * the kernel states that an invocation cannot begin after the EOI while the
  * previous one is still returning, so a path that must be exact drains its
  * own in-flight count instead.  Returns 0, ETIMEDOUT after 100 ms, or EIO
  * when the time base fails while waiting.
@@ -1291,7 +1291,7 @@ i915_irq_gen8_engine(
 static void
 i915_irq_handler_body(
 	int vector,
-	hal_irq_ack_t acknowledge,
+	kern_irq_ack_t acknowledge,
 	void *argument)
 {
 	const struct i915_irq_layout *layout;
@@ -1310,7 +1310,7 @@ i915_irq_handler_body(
 	/* Interrupts are not enabled: the message is not ours to serve. */
 	if (irq->irqs_enabled == 0) {
 		irq->irq_none_count++;
-		hal_irq_send_eoi(acknowledge);
+		kern_irq_send_eoi(acknowledge);
 		return;
 	}
 
@@ -1322,7 +1322,7 @@ i915_irq_handler_body(
 	if (master_ctl == 0U) {
 		i915_irq_master_on(irq);
 		irq->irq_none_count++;
-		hal_irq_send_eoi(acknowledge);
+		kern_irq_send_eoi(acknowledge);
 		return;
 	}
 
@@ -1331,14 +1331,14 @@ i915_irq_handler_body(
 
 	/* Finishes the interrupt. */
 	irq->irq_handled_count++;
-	hal_irq_send_eoi(acknowledge);
+	kern_irq_send_eoi(acknowledge);
 }
 
 /* Brackets each handler invocation by the counts drv_i915_synchronize_irq() waits on. */
 static void
 i915_irq_handler(
 	int vector,
-	hal_irq_ack_t acknowledge,
+	kern_irq_ack_t acknowledge,
 	void *argument)
 {
 	struct i915_irq_dev *irq;

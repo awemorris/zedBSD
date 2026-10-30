@@ -63,7 +63,6 @@
 
 #include <drivers/gpu/gpu.h>
 #include <drivers/gpu/gpu-display.h>
-#include <hal/hal.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
@@ -386,8 +385,8 @@ drv_i915_bootfb_fini(
 
 	/* Removes the view this file made (the aperture's belongs to the device). */
 	if (bootfb->fb_view != NULL) {
-		error = hal_space_unmap_device(bootfb->fb_view, bootfb->fb_view_bytes);
-		if (error != HAL_OK)
+		error = kern_device_unmap(bootfb->fb_view, bootfb->fb_view_bytes);
+		if (error != 0)
 			kern_logf("i915: bootfb: XXX the framebuffer's view could not be removed: %d\n", error);
 	}
 
@@ -576,8 +575,8 @@ i915_bootfb_view(
 	page_offset = physical & (uint64_t)(I915_BOOTFB_PAGE_BYTES - 1U);
 	bootfb->fb_view_bytes = (size_t)((page_offset + bytes + I915_BOOTFB_PAGE_BYTES - 1U) & ~(uint64_t)(I915_BOOTFB_PAGE_BYTES - 1U));
 	view = NULL;
-	error = hal_space_map_device((hal_physaddr_t)(physical - page_offset), bootfb->fb_view_bytes, HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_WC, &view);
-	if (error != HAL_OK || view == NULL) {
+	error = kern_device_map(physical - page_offset, bootfb->fb_view_bytes, KERN_DEVICE_WRITECOMBINE, &view);
+	if (error != 0 || view == NULL) {
 		bootfb->fb_view_bytes = 0U;
 		return EIO;
 	}

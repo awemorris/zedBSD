@@ -42,7 +42,6 @@
 #include "drivers/platform/pcat/graphics/backend.h"
 
 #include <drivers/pci/pci.h>
-#include <hal/hal.h>
 #include <kern/backlight.h>
 #include <kern/clock.h>
 #include <kern/device-io.h>
@@ -1733,40 +1732,40 @@ drv_pci_find_device(
 }
 
 /*
- * Stands in for hal_space_map_device(): the device mappings is not modelled on the host.
+ * Stands in for kern_device_map(): the device mappings is not modelled on the host.
  */
 int
-hal_space_map_device(
-	hal_physaddr_t paddr,
+kern_device_map(
+	uint64_t address,
 	size_t size,
-	uint32_t attr,
-	void **vaddr)
+	unsigned attributes,
+	void **mapped)
 {
-	UNUSED_PARAMETER(paddr);
+	UNUSED_PARAMETER(address);
 	UNUSED_PARAMETER(size);
-	UNUSED_PARAMETER(attr);
-	UNUSED_PARAMETER(vaddr);
+	UNUSED_PARAMETER(attributes);
+	UNUSED_PARAMETER(mapped);
 
 	/* Ends the test: the tested path reached a service the host does not have. */
-	i915_host_unreachable("hal_space_map_device");
+	i915_host_unreachable("kern_device_map");
 
 	/* Not reached: i915_host_unreachable() does not return. */
 	return 0;
 }
 
 /*
- * Stands in for hal_space_unmap_device(): the device mappings is not modelled on the host.
+ * Stands in for kern_device_unmap(): the device mappings is not modelled on the host.
  */
 int
-hal_space_unmap_device(
-	void *vaddr,
+kern_device_unmap(
+	void *mapped,
 	size_t size)
 {
-	UNUSED_PARAMETER(vaddr);
+	UNUSED_PARAMETER(mapped);
 	UNUSED_PARAMETER(size);
 
 	/* Ends the test: the tested path reached a service the host does not have. */
-	i915_host_unreachable("hal_space_unmap_device");
+	i915_host_unreachable("kern_device_unmap");
 
 	/* Not reached: i915_host_unreachable() does not return. */
 	return 0;
@@ -1842,7 +1841,7 @@ kern_io_out8(
  */
 void *
 kern_pmem_to_kernel(
-	hal_physaddr_t address)
+	kern_physaddr_t address)
 {
 	UNUSED_PARAMETER(address);
 

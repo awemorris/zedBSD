@@ -357,7 +357,7 @@ uhci_root_worker_arm(
 	controller->root_ready = 1;
 	controller->root_wake_generation++;
 	worker = controller->root_worker;
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
@@ -1632,7 +1632,7 @@ uhci_root_worker_request_stop(
 	/* Handles the worker availability. */
 	worker = controller->root_worker;
 	if (worker != NULL && !controller->root_joining)
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
@@ -1925,7 +1925,7 @@ uhci_retirement_defer(
 	/* Handles the worker availability. */
 	worker = controller->retirement_worker;
 	if (worker != NULL && !controller->retirement_joining)
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
@@ -1968,7 +1968,7 @@ uhci_root_worker_stop(
 	 * reap window.
 	 */
 	thread_ref(worker);
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
@@ -2069,7 +2069,7 @@ uhci_retirement_worker_stop(
 	__atomic_store_n(&controller->retirement_stopping, 1U,
 			 __ATOMIC_RELEASE);
 	controller->retirement_wake_generation++;
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
@@ -3371,7 +3371,7 @@ uhci_retirement_watchdog_arm(
 	/* Handles the worker availability. */
 	worker = controller->retirement_worker;
 	if (worker != NULL && !controller->retirement_joining)
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }

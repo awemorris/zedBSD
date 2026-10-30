@@ -63,7 +63,6 @@
 #include <drivers/gpu/gpu-display.h>
 #include <drivers/gpu/gpu-scanout.h>
 #include <drivers/pci/pci.h>
-#include <hal/hal.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>

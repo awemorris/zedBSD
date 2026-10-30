@@ -41,7 +41,6 @@
 #include <kern/kcrt.h>
 
 #include <kern/clock.h>
-#include <hal/hal.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
@@ -415,7 +414,7 @@ drv_i915_worker_serve(
 		return error;
 	}
 
-	kern_logf("i915: resident: GPU node published; serving (RCS0, one request at a time, woken by the engine interrupt) on cpu %u\n", (unsigned)hal_cpu_current());
+	kern_logf("i915: resident: GPU node published; serving (RCS0, one request at a time, woken by the engine interrupt) on cpu %u\n", kern_cpu_current());
 
 	/* The panel's light as /dev/backlight/backlight0, answered by this loop; the node works without it (a failure is logged). */
 	(void)drv_i915_display_backlight_register(device);

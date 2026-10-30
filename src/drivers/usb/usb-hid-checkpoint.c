@@ -179,7 +179,7 @@ checkpoint_completion(
 
 	/* Handles the worker availability. */
 	if (worker != NULL)
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 }
 
 /* Supports the checkpoint begin submit operation. */
@@ -466,7 +466,7 @@ checkpoint_close_admission(
 
 	/* Handles the worker availability. */
 	if (worker != NULL)
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		irq = spin_lock_irqsave(&checkpoint->lock);
@@ -502,7 +502,7 @@ checkpoint_join_worker(
 	/* Handles the worker condition. */
 	if (worker == curthread)
 		return EBUSY;
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 	/* Continue while the operation condition remains true. */
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
 	       THREAD_ZOMBIE)
