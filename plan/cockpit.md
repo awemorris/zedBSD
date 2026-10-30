@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 03:12（Q1）
+最終更新: 2026-10-31 03:20（Q1）
 
 ## 担当（P1〜P8）
 
@@ -13,7 +13,7 @@
 | P2 | Bug | open の Bug の 3 つ目の束（QEMU と host） | q1757: BUG-360（installer の Backspace）→ BUG-306（Settings の回転）→ BUG-292（frame callback の保留）→ BUG-289（xHCI の suspend）→ BUG-365（GPU の header・comment の食い違い） | 1 つ目の束の 6 件は closed（main f81fef099） |
 | P3 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除く | q1737: p006 規約の全文の見直し（約 230 file、規約の担当 3 つを並べる）→ WS331 の完了 | 返却（WS332 は P6 へ移した） |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
-| P5 | [WS318](ws318/ws.md) | libmedia の作り直し（Vulkan の device の共有・codec の指定・encoder・カメラ・libavcodec の内部の fallback） | q1752: p001 設計（design-reviewer と問いの一覧まで） | WS306 の設計は済み（main 843847185、問い Q306-7・9 は下の 0b）。WS326 の後にすぐ実装に入れるよう先に設計 |
+| P5 | [WS329](ws329/ws.md) | libmedia の H.264 の software の encoder（標準廉価実装手順） | q1758: p001 設計（WS326 の module を入力に共通化、design-reviewer と問いまで） | WS318 の設計は済み（main 85fbeb091、問い Q318-1〜14 は下の 0c） |
 | P6 | [WS332](ws332/ws.md) | tick の周波数を API で扱う | q1738: p003（率を仮定する残りの literal）→ p004 規約 → WS332 の完了 | BUG-370・376 は closed、WS291 p014 で RTX big-1000 85〜91 fps |
 | P7 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1754: p003 kernel の口の header の案と review → p006 cpuperf の枠組み（kernel、host 試験） | p011（x86 の CPU の driver）・p014（5330 の受け入れ）へ。BUG-371・372・373・375 は直して closed |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
@@ -123,6 +123,27 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - Q306-7 boot の行 `amdrdna.vk.ngg` を残すか: **推し (a) 診断用に残す**（既定 0、desktop には入れない、書いた時だけ効く）。(b) 消す。
 - Q306-9 WS291（GPU の速さ）の RDNA の段の完了を待たずに、枠組みの Phase（UAPI・kernel の核・各 driver の名前と版・libvulkan・vulkaninfo・文書）を先に進めるか: **推し (a) 進める**。NGG を option に移す p007 と、その文書の p010 だけ RDNA の完了を待つ。費用は、kernel の GPU の共通の file（gpu.c）を他の WS と同じ時期に変えるので merge の衝突が出うる事（Q1 が merge の順で抑える）。(b) 決定のとおり、全部を RDNA の完了の後に。
 - 止めている物: WS306 の実装（Q306-9 の答えまで始めない。元の決定が「WS291 の後」のため）。
+
+### 0c. WS318（libmedia の作り直し）の設計の問い Q318-1〜14（2026-10-31 新しい）
+
+- 背景: WS318 は、libmedia を Keiland の app の唯一の動画・音声・camera の入り口にする WS。app の Vulkan の device を共有し、codec を問い合わせて選び、encoder と camera を足し、libavcodec は libmedia の中の最後の予備にする。P5 が設計（public の header 2 つの案、Phase p001〜p028）を書き、敵対的レビュー（blocker 3・major 20）を反映した（main 85fbeb091）。HAL は変えない。全文・用語・推しは [ws318/user-questions.md](ws318/user-questions.md)。
+- 用語: Vulkan Video は GPU の動画の decode・encode の標準の口。vkfake は試験用の偽の Vulkan の device。MJPEG は camera がよく出す JPEG の連続の形式。B-frame は前後の frame を参照する frame。
+- 問いの要点（どれも推しが付いている）:
+  - Q318-1 hardware の encode と H.265 の decode は、WS318 では vkfake で確かめ、実機の確かめは GPU ごとの driver の WS（WS319〜）の受け入れにする（推し）。
+  - Q318-2 zedBSD の libavcodec の package は encoder を無効のまま。libavcodec の encode の予備は、encoder 付きの libavcodec の機械でだけ働く（推し）。
+  - **Q318-3 Vulkan の header の更新**: 今は 1.3.269 で、KHR の encode が無い。1.3.274 以降の tag に固定して更新したい。共有の sysroot の作り直し（toolchain の扱い）が要る。
+  - Q318-4 MJPEG の camera は Huffman を CPU、IDCT と色の変換を GPU の描画で（推し）。
+  - Q318-5 AAC-LC の encoder に、短い窓の切り替えと TNS を足す（推し）。
+  - Q318-6 camera の実機の Phase（p027）だけが WS282（UVC）を待つ（推し）。
+  - Q318-7 MP4 の書き出し（録画の file）は範囲の外（推し）。
+  - Q318-8 H.265 は Main profile だけ（推し）。
+  - Q318-9 hardware の encode は IDR と P から、B-frame 無し（推し）。
+  - Q318-10 i915 の driver の小さな変更（decode の出力を sample できる形に）は WS319 で（推し）。
+  - Q318-11 browser の `<video>` は libavcodec を使わない（network から来た信頼できない入力を同じ process で decode するため）（推し）。
+  - **Q318-12** 2026-10-12 の決定（毎 frame の CPU の複写をしない）の例外として、software の decoder の出力を GPU の memory へ、import の無い機械の camera の frame の、2 つの複写を認めるか（推し: 認める）。
+  - Q318-13 player の文言で「libavcodec が無い」を先に出す（推し）。
+  - **Q318-14** WS326 の完了を待たずに、WS326 に触れない Phase（p002・p003a・p003b・p011a・p011b・p016〜p019）を先に始めるか（推し: 始める）。
+- 止めている物: WS318 の実装（設計の受け入れと Q318-14 の答えまで始めない）。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 

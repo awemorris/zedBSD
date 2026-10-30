@@ -411,7 +411,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1752 / q1752-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws318`・branch `agent/p5-ws318`） | [ws318](ws318/ws.md) p001 設計 | plan/ws318/ だけ、design-reviewer と問いの一覧まで | in-progress |
+| q1752 / q1752-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws318`・branch `agent/p5-ws318`） | [ws318](ws318/ws.md) p001 設計 | plan/ws318/ だけ、design-reviewer と問いの一覧まで | uncleared（2026-10-31: 設計 e4ce407a1、merge 85fbeb091。理由: ユーザーの問い Q318-1〜14 の答え待ち） |
 
 ## 2026-10-31: Bug の 2 つ目の束（q1753）
 
@@ -438,4 +438,4 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1757 / q1757-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs3`・branch `agent/p2-bugs3`、QEMU と host、image は /tmp） | [BUG-360](bugs/BUG-360.md)・[BUG-306](bugs/BUG-306.md)・[BUG-292](bugs/BUG-292.md)・[BUG-289](bugs/BUG-289.md)・[BUG-365](bugs/BUG-365.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
-
+| q1758 / q1758-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws329`・branch `agent/p5-ws329`） | [ws329](ws329/ws.md) p001 設計 | plan/ws329/ だけ、design-reviewer と問いの一覧まで。実装は WS326 の完了の後 | in-progress |
