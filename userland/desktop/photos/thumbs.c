@@ -26,7 +26,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <pthread.h>
+#include <keiland/keiland_thread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,9 +52,9 @@ struct worker_job {
  * runs and is to stop; the cache folder (empty for none).
  */
 struct worker {
-	pthread_mutex_t lock;
-	pthread_cond_t wake;
-	pthread_t thread;
+	struct kl_mutex lock;
+	struct kl_cond wake;
+	struct kl_thread *thread;
 	struct worker_job jobs[WORKER_JOBS];
 	size_t job_count;
 	struct worker_job current;
@@ -68,15 +68,37 @@ struct worker {
 
 /* The program's thread. */
 static struct worker worker = {
-	.lock = PTHREAD_MUTEX_INITIALIZER,
-	.wake = PTHREAD_COND_INITIALIZER
+	.lock = KL_MUTEX_INIT
 };
 
-static void *worker_main(void *unused);
+/* Whether the thread's condition was made (0) or why it was not; set once by worker_init. */
+static struct kl_once worker_once = KL_ONCE_INIT;
+static int worker_wake_error;
+
+static void worker_init(void);
+static int worker_ready(void);
+static void worker_main(void *unused);
 static void worker_make(const struct worker_job *job, struct ph_result *result);
 static int worker_same(const struct worker_job *job, size_t photo, int whole, unsigned generation);
 static int worker_cache_read(const char *id, struct kl_image *image);
 static void worker_cache_write(const char *id, const struct kl_image *image);
+
+/* Makes the thread's condition, once for the program. */
+static void
+worker_init(void)
+{
+	/* The condition (a static one cannot be made by its bytes). */
+	worker_wake_error = kl_cond_init(&worker.wake);
+}
+
+/* Makes the thread's condition the first time: 0, or why it cannot be. */
+static int
+worker_ready(void)
+{
+	/* Once for the program; every later call sees the first one's outcome. */
+	kl_once(&worker_once, worker_init);
+	return worker_wake_error;
+}
 
 /*
  * Starts the thread, the thumbnails kept in a cache folder (NULL or empty
@@ -87,11 +109,17 @@ ph_worker_start(
 	const char *cache)
 {
 	char probe[PH_PATH_MAX + 4U];
+	struct kl_thread_options options;
 	int error;
 
 	/* Once. */
 	if (worker.running)
 		return 0;
+
+	/* The condition the thread waits on. */
+	error = worker_ready();
+	if (error != 0)
+		return error;
 
 	/* The cache folder. */
 	worker.cache[0] = '\0';
@@ -105,7 +133,13 @@ ph_worker_start(
 
 	/* The thread. */
 	worker.stop = 0;
-	error = pthread_create(&worker.thread, NULL, worker_main, NULL);
+	/* The thread: its name, what it runs and its priority. */
+	memset(&options, 0, sizeof(options));
+	options.name = "photos-thumbs";
+	options.run = worker_main;
+	options.argument = NULL;
+	options.priority = KL_THREAD_PRIORITY_NORMAL;
+	error = kl_thread_start(&options, &worker.thread);
 	if (error != 0)
 		return error;
 	worker.running = 1;
@@ -123,11 +157,12 @@ ph_worker_stop(void)
 
 	/* Asked to stop, and waited for. */
 	if (worker.running) {
-		(void)pthread_mutex_lock(&worker.lock);
+		kl_mutex_lock(&worker.lock);
 		worker.stop = 1;
-		(void)pthread_cond_signal(&worker.wake);
-		(void)pthread_mutex_unlock(&worker.lock);
-		(void)pthread_join(worker.thread, NULL);
+		kl_cond_signal(&worker.wake);
+		kl_mutex_unlock(&worker.lock);
+		(void)kl_thread_join(worker.thread);
+		worker.thread = NULL;
 		worker.running = 0;
 	}
 
@@ -156,25 +191,29 @@ ph_worker_queue(
 	size_t length;
 	size_t index;
 	int same;
+	int ready;
 
 	/* The path fits. */
 	length = strlen(path);
 	if (length >= PH_PATH_MAX)
 		return ENAMETOOLONG;
 
+	/* The condition may not exist yet: a job can come before the thread starts. */
+	ready = worker_ready();
+
 	/* Already queued or being made. */
-	(void)pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 	same = worker.busy && worker_same(&worker.current, photo, whole, generation);
 	for (index = 0; index < worker.job_count && !same; index++)
 		same = worker_same(&worker.jobs[index], photo, whole, generation);
 	if (same) {
-		(void)pthread_mutex_unlock(&worker.lock);
+		kl_mutex_unlock(&worker.lock);
 		return 0;
 	}
 
 	/* No room. */
 	if (worker.job_count == WORKER_JOBS) {
-		(void)pthread_mutex_unlock(&worker.lock);
+		kl_mutex_unlock(&worker.lock);
 		return EAGAIN;
 	}
 
@@ -194,8 +233,9 @@ ph_worker_queue(
 	memcpy(job->path, path, length + 1U);
 	(void)snprintf(job->id, sizeof(job->id), "%s", id);
 	worker.job_count++;
-	(void)pthread_cond_signal(&worker.wake);
-	(void)pthread_mutex_unlock(&worker.lock);
+	if (ready == 0)
+		kl_cond_signal(&worker.wake);
+	kl_mutex_unlock(&worker.lock);
 	return 0;
 }
 
@@ -209,7 +249,7 @@ ph_worker_drop_thumbs(void)
 	size_t kept;
 
 	/* The whole pictures kept in their order. */
-	(void)pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 	kept = 0;
 	for (index = 0; index < worker.job_count; index++) {
 		if (!worker.jobs[index].whole)
@@ -220,7 +260,7 @@ ph_worker_drop_thumbs(void)
 
 	/* Those kept. */
 	worker.job_count = kept;
-	(void)pthread_mutex_unlock(&worker.lock);
+	kl_mutex_unlock(&worker.lock);
 }
 
 /*
@@ -232,11 +272,15 @@ ph_worker_take(
 	struct ph_result *result)
 {
 	size_t index;
+	int ready;
+
+	/* The condition may not exist yet (no thread to tell). */
+	ready = worker_ready();
 
 	/* None. */
-	(void)pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 	if (worker.result_count == 0U) {
-		(void)pthread_mutex_unlock(&worker.lock);
+		kl_mutex_unlock(&worker.lock);
 		return 0;
 	}
 
@@ -247,8 +291,9 @@ ph_worker_take(
 	worker.result_count--;
 
 	/* The thread may wait for the room. */
-	(void)pthread_cond_signal(&worker.wake);
-	(void)pthread_mutex_unlock(&worker.lock);
+	if (ready == 0)
+		kl_cond_signal(&worker.wake);
+	kl_mutex_unlock(&worker.lock);
 	return 1;
 }
 
@@ -262,14 +307,14 @@ ph_worker_busy(void)
 	int busy;
 
 	/* Under the lock. */
-	(void)pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 	busy = worker.busy || worker.job_count != 0U || worker.result_count != 0U;
-	(void)pthread_mutex_unlock(&worker.lock);
+	kl_mutex_unlock(&worker.lock);
 	return busy;
 }
 
 /* The thread: each job in turn until it is asked to stop. */
-static void *
+static void
 worker_main(
 	void *unused)
 {
@@ -277,11 +322,11 @@ worker_main(
 
 	/* Each job. */
 	(void)unused;
-	(void)pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 	for (;;) {
 		/* Waits for a job, or the stop. */
 		while (!worker.stop && (worker.job_count == 0U || worker.result_count == WORKER_RESULTS))
-			(void)pthread_cond_wait(&worker.wake, &worker.lock);
+			kl_cond_wait(&worker.wake, &worker.lock);
 		if (worker.stop)
 			break;
 
@@ -290,19 +335,18 @@ worker_main(
 		worker.job_count--;
 		memmove(&worker.jobs[0], &worker.jobs[1], worker.job_count * sizeof(worker.jobs[0]));
 		worker.busy = 1;
-		(void)pthread_mutex_unlock(&worker.lock);
+		kl_mutex_unlock(&worker.lock);
 		worker_make(&worker.current, &result);
 
 		/* Its result. */
-		(void)pthread_mutex_lock(&worker.lock);
+		kl_mutex_lock(&worker.lock);
 		worker.busy = 0;
 		worker.results[worker.result_count] = result;
 		worker.result_count++;
 	}
 
 	/* Stopped. */
-	(void)pthread_mutex_unlock(&worker.lock);
-	return NULL;
+	kl_mutex_unlock(&worker.lock);
 }
 
 /* Makes a job's picture into its result. */
