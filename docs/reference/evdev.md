@@ -89,7 +89,7 @@ shared with unrelated producers. The registration and publication contract is
 declared by [`input-device.h`](../../include/kern/input-device.h) and
 implemented by [`input-device.c`](../../src/drivers/generic/input.c). Built-in
 mouse button state is backend-local in the [PC/AT PS/2
-driver](../../src/drivers/platform/pcat/ps2-mouse.c) and [PC-98 bus-mouse
+driver](../../src/drivers/isa/ps2-8042.c) and [PC-98 bus-mouse
 driver](../../src/drivers/platform/pc98/pc98-busmouse.c).
 
 The production [`usb-hid.c`](../../src/drivers/usb/usb-hid.c) matches validated HID
@@ -111,7 +111,7 @@ release, and `SYN_REPORT` in one bounded report, so `EVIOCGKEY` cannot retain a
 fabricated held key. Truthful platform declarations are in the
 [PC/AT](../../src/hal/amd64/bsp-pcat/cons.c),
 [PC-98](../../src/hal/i386/bsp-pc98/cons.c),
-[X68000](../../src/hal/m68k/bsp-x68k/keyboard.c),
+[X68000](../../src/hal/m68k/bsp-x68k),
 [arm64](../../src/hal/arm64/bsp-rpi-common/cons.c), and
 [sparcv9](../../src/hal/sparcv9/bsp-sun4u/console.c) HAL sources. The q044
 runner retains the physical x86/m68k paths and generic momentary behavior;
@@ -184,7 +184,7 @@ incorporated into the zedBSD base system.
 | HID descriptor/report parsing | [`hid-report.c`](../../src/drivers/usb/usb-hid.c) | and |
 | USB HID Report-Protocol producers, hotplug, and generation-safe nodes | [`usb-hid.c`](../../src/drivers/usb/usb-hid.c), [`input-device.c`](../../src/drivers/generic/input.c), [`devfs.c`](../../src/kern/devfs.c) | — |
 | Xzed evdev-only consumer | [Xzed input owner](../../userland/x11/xzed/input-posix.c) | and its |
-| Noct 2.0.1 BeUI evdev consumer | [zedBSD BeUI backend](../../userland/base/noct/noct/src/api/api-beui-zedbsd.c) | — |
+| Noct 2.0.1 BeUI evdev consumer | [zedBSD BeUI backend](../../userland/base/noct/patches/0001-connect-zedbsd-target-adapter.patch) | — |
 
 Registration requires `EV_SYN/SYN_REPORT`; malformed declarations and
 undeclared producer events are rejected, keeping advertised capabilities and

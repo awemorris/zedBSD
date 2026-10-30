@@ -94,7 +94,7 @@ A GPU driver is not part of that pair:
 ## Interfaces and policy
 
 Public C headers live in [include/libc](../../include/libc); zedBSD-specific
-records live in [include/uapi/zedbsd](../../include/uapi/zedbsd). Kernel-private
+records live in [include/uapi](../../include/uapi). Kernel-private
 headers and HAL structures are not application contracts. Build applications
 against the selected target sysroot rather than a host OS's ioctl layouts.
 
