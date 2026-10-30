@@ -33,5 +33,5 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 | [p002](phase002/phase.md) | kernel に表 B を足す（driver は変えない） | in-progress（P2、q1717。実装と全 port の build は済み、判定は Q1） | p001 |
 | [p003](phase003/phase.md) | 表 A の機械的な置き換えと include だけの file（sparcv9 の 2 file は別の commit） | in-progress（P2、q1717。b7e70b3be・fae1fcd11・c956a7615・6f31f7e03、build と QEMU の起動は済み、判定は Q1） | p002 |
 | [p004](phase004/phase.md) | i915 の map（WRITECOMBINE・READONLY）と MSI（B2〜B5）、試験の代役 | in-progress（P2、q1717。157f65d69、build と host 試験は済み、5330 は未実施、判定は Q1） | p002 |
-| [p005](phase005/phase.md) | rpi4 の console の作り直し（kernel_putc を公開）と pc98 の 3 か所 | in-progress（P2、q1719） | p003 |
+| [p005](phase005/phase.md) | rpi4 の console の作り直し（kernel_putc を公開）と pc98 の 3 か所。追加: Pi 5・ODROID-C5・VF2 の /dev/graphics（generic の boot-fb・fb-text）、gpu.c の最初の flip で boot の framebuffer を手放す | in-progress（P2、q1719。84e3e2698・609d97bd5・fde6f9ece・1d950e03c、20 port の build と raspi4b の起動・描き直し・serial は済み、Venus・実機は未実施、pc98 の git mv・rm は OK 待ち） | p003 |
 | p006 | 規約の全文の見直し | 未作成 | p003〜p005 |
