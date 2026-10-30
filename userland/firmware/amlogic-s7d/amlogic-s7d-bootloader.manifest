@@ -6,14 +6,18 @@ package-version=odroidc5-20260610
 consumer=the ODROID-C5 image build (platform/arm64/odroid-c5.mk), which writes the bootloader area from the SD card's sector 1
 installed-file=none (the bootloader is on the SD card's sectors 1 to 6538, not in the root file system)
 installed-license=/usr/share/licenses/amlogic-s7d-bootloader/LICENSE.amlogic
+installed-license=/usr/share/licenses/amlogic-s7d-bootloader/GPL-2 (U-Boot)
 installed-notice=/usr/share/licenses/amlogic-s7d-bootloader/amlogic-s7d-bootloader.notice
 
 acquisition-origin=Hardkernel's official ODROID-C5 image, from Hardkernel's download site (dn.odroid.com); a build cannot fetch it from there
 acquisition-file=ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz size=37760380 sha256=04b9817d4e5e27ac4cc46dc4ad48fbc164e9a6c6f42eb1b0ba8d7a927accc5f2
 acquisition-license=LICENSE.amlogic size=1273 sha256=5e8f7ad650a0af4a14ad5641817323f654d0e1b8dc2019aa6f0944ba9108ff65
+acquisition-gpl-repository=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+acquisition-gpl-revision=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-gpl-path=GPL-2 size=18092 sha256=8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643
 acquisition-area=odroidc5-20260610-bootloader.bin from the uncompressed image's sectors 1 to 6538 (bytes 512 to 3347967) size=3347456 sha256=6c5316ed320c78c9c2a67665cdee1089339be25bee625cf1eaffb0a6277c6562
 acquisition-area-check=the image's sectors 6539 to 16383 are all zero, and its sectors 1 to 16383 have sha256=b6a4b424f0a6dac33be4287d2bad6f2651466d983ca9e4146a29357b8e3c8cba
-acquisition-fallback=none on the network; the two files placed by hand in build/sources/firmware/amlogic-s7d/by-hand/ (the notice)
+acquisition-fallback=none on the network for the image and LICENSE.amlogic; the two files placed by hand in build/sources/firmware/amlogic-s7d/by-hand/ (the notice)
 
 mirror-repository=https://github.com/awemorris/zedBSD-firmware.git
 mirror-revision=43662bd72419deb927af6d533d90fe72aa158c74
@@ -21,7 +25,7 @@ mirror-path=amlogic-s7d/
 
 hardware=Hardkernel ODROID-C5 (Amlogic S905X5M, SoC family S7D; the area's BL30 names itself S7D-s905x5m-26052812)
 placement=from the SD card's sector 1, where Hardkernel's image has it; the MBR's boot code stays zero
-license=LicenseRef-amlogic-boot-stages (LICENSE.amlogic: redistribution and use only with Amlogic's prior written permission, which Hardkernel holds) for BL2 to BL32; GPL-2.0 for U-Boot (source: Hardkernel's, the notice)
+license=LicenseRef-amlogic-boot-stages (LICENSE.amlogic: redistribution and use only with Amlogic's prior written permission, which Hardkernel holds) for BL2 to BL32; GPL-2.0-or-later for U-Boot (the installed GPL-2; source: github.com/hardkernel/u-boot branch odroidc5-v2023.01 commit c99f3409d5cad031b365fd871e543f97af893f88, the notice)
 redistribution=only unmodified and only for use on the Hardkernel ODROID-C5, with LICENSE.amlogic and the notice (the user's decision on Hardkernel's permission from Amlogic)
 use=only on the Hardkernel ODROID-C5
 modification=none; the boot ROM accepts only stages signed for the S905X5M

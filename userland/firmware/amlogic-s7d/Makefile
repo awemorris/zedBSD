@@ -9,8 +9,9 @@
 # zedBSD firmware repository; the fetch checks it, decompresses it, takes its
 # sectors 1 to 6538 and checks those too, and the image build
 # (platform/arm64/odroid-c5.mk) writes them from sector 1, where
-# Hardkernel's image has them.  The root file system gets only the license,
-# the notice and the manifest, not the bootloader itself.
+# Hardkernel's image has them.  The root file system gets only the license
+# texts (Amlogic's and U-Boot's GPL-2), the notice and the manifest, not the
+# bootloader itself.
 #
 # A build cannot fetch Hardkernel's image from Hardkernel, so the firmware
 # repository is the only network source.  Without it the two files are
@@ -22,6 +23,8 @@ include $(if $(ZEDBSD_TOPLEVEL_BUILD),userland/firmware,$(ZEDBSD_REPO_ROOT)/user
 # Each entry is CACHE-NAME|UPSTREAM-URL|SIZE|SHA-256; an UPSTREAM-URL of
 # "by-hand" means the file has no upstream a build can fetch, and the copy
 # placed by hand in $(AMLOGIC_S7D_BOOTLOADER_BY_HAND_DIR) is the fallback.
+# GPL-2 is the license text of the U-Boot in the area; it is not in the
+# firmware repository's directory, so it comes from linux-firmware.
 # The area entry is AREA-NAME|SOURCE-NAME|FIRST-SECTOR|LAST-SECTOR|SIZE|
 # SHA-256: the bootloader the image build writes, cut from the uncompressed
 # SOURCE-NAME.
@@ -36,7 +39,8 @@ endif
 AMLOGIC_S7D_BOOTLOADER_REVISION ?= odroidc5-20260610
 AMLOGIC_S7D_BOOTLOADER_FILES ?= \
 	ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz|by-hand|37760380|04b9817d4e5e27ac4cc46dc4ad48fbc164e9a6c6f42eb1b0ba8d7a927accc5f2 \
-	LICENSE.amlogic|by-hand|1273|5e8f7ad650a0af4a14ad5641817323f654d0e1b8dc2019aa6f0944ba9108ff65
+	LICENSE.amlogic|by-hand|1273|5e8f7ad650a0af4a14ad5641817323f654d0e1b8dc2019aa6f0944ba9108ff65 \
+	GPL-2|https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/GPL-2?id=dc85ccedc9c973682fbcf4d628ca61174bcc3120|18092|8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643
 AMLOGIC_S7D_BOOTLOADER_AREA ?= odroidc5-20260610-bootloader.bin|ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz|1|6538|3347456|6c5316ed320c78c9c2a67665cdee1089339be25bee625cf1eaffb0a6277c6562
 # The package directory of the zedBSD firmware repository; empty leaves
 # only the files placed by hand (userland/firmware/zedbsd-firmware.mk).
@@ -51,7 +55,8 @@ else
 override AMLOGIC_S7D_BOOTLOADER_REVISION := odroidc5-20260610
 override AMLOGIC_S7D_BOOTLOADER_FILES := \
 	ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz|by-hand|37760380|04b9817d4e5e27ac4cc46dc4ad48fbc164e9a6c6f42eb1b0ba8d7a927accc5f2 \
-	LICENSE.amlogic|by-hand|1273|5e8f7ad650a0af4a14ad5641817323f654d0e1b8dc2019aa6f0944ba9108ff65
+	LICENSE.amlogic|by-hand|1273|5e8f7ad650a0af4a14ad5641817323f654d0e1b8dc2019aa6f0944ba9108ff65 \
+	GPL-2|https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/GPL-2?id=dc85ccedc9c973682fbcf4d628ca61174bcc3120|18092|8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643
 override AMLOGIC_S7D_BOOTLOADER_AREA := odroidc5-20260610-bootloader.bin|ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz|1|6538|3347456|6c5316ed320c78c9c2a67665cdee1089339be25bee625cf1eaffb0a6277c6562
 override AMLOGIC_S7D_BOOTLOADER_ZEDBSD_URL := $(if $(ZEDBSD_FIRMWARE_REPOSITORY_URL),$(ZEDBSD_FIRMWARE_REPOSITORY_URL)/amlogic-s7d)
 override AMLOGIC_S7D_BOOTLOADER_LICENSE_PROMPT := y
@@ -60,7 +65,7 @@ endif
 
 override AMLOGIC_S7D_BOOTLOADER_SHA256_COMMAND := sha256sum
 # The fetched files and the area cut from the image.
-override AMLOGIC_S7D_BOOTLOADER_FILE_COUNT := 3
+override AMLOGIC_S7D_BOOTLOADER_FILE_COUNT := 4
 
 AMLOGIC_S7D_BOOTLOADER_CACHE_ROOT ?= $(if $(ZEDBSD_TOPLEVEL_BUILD),build,$(ZEDBSD_REPO_ROOT)/build)/sources/firmware/amlogic-s7d
 # The cache holds the file set of one revision.
@@ -80,6 +85,7 @@ override AMLOGIC_S7D_BOOTLOADER_LICENSE_DIR := /usr/share/licenses/amlogic-s7d-b
 
 override AMLOGIC_S7D_BOOTLOADER_DATA := \
 	$(AMLOGIC_S7D_BOOTLOADER_LICENSE_DIR)/LICENSE.amlogic=$(AMLOGIC_S7D_BOOTLOADER_CACHE_DIR)/LICENSE.amlogic \
+	$(AMLOGIC_S7D_BOOTLOADER_LICENSE_DIR)/GPL-2=$(AMLOGIC_S7D_BOOTLOADER_CACHE_DIR)/GPL-2 \
 	$(AMLOGIC_S7D_BOOTLOADER_LICENSE_DIR)/amlogic-s7d-bootloader.notice=userland/firmware/amlogic-s7d/amlogic-s7d-bootloader.notice \
 	/usr/share/zedbsd/packages/amlogic-s7d-bootloader.manifest=$(AMLOGIC_S7D_BOOTLOADER_MANIFEST)
 

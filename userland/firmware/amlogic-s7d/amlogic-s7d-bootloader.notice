@@ -3,7 +3,8 @@ Firmware: ODROID-C5 bootloader: Amlogic's boot stages (BL2 and the stages it
           and Hardkernel's U-Boot (BL33)
 Hardware: Hardkernel ODROID-C5 (Amlogic S905X5M, SoC family S7D) only
 Files:    the SD card's sectors 1 to 6538, written by the image build; the
-          root file system has only Amlogic's license and this notice below
+          root file system has only Amlogic's license, the GPL-2 text of
+          U-Boot and this notice below
           /usr/share/licenses/amlogic-s7d-bootloader, and the manifest
 Source:   Hardkernel's official ODROID-C5 image
           ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz
@@ -31,7 +32,10 @@ Terms:
   a Hardkernel ODROID-C5, and pass them on (for example in an SD card image
   made with this package) only unmodified, with LICENSE.amlogic and this
   notice, and only for use on the ODROID-C5.
-- U-Boot is under the GNU General Public License version 2 or later.  Its
+- U-Boot is under the GNU General Public License version 2 or later (the
+  text: GPL-2 beside this notice, from linux-firmware commit
+  dc85ccedc9c973682fbcf4d628ca61174bcc3120, 18092 bytes, SHA-256
+  8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643).  Its
   corresponding source is Hardkernel's: the submodule bl33/v2023 of the
   branch odroidc5-v2023.01 of https://github.com/hardkernel/u-boot (commit
   c99f3409d5cad031b365fd871e543f97af893f88), on

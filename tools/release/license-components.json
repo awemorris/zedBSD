@@ -397,10 +397,11 @@
    "version": "odroidc5-20260610",
    "notices": [
     "/usr/share/licenses/amlogic-s7d-bootloader/LICENSE.amlogic",
+    "/usr/share/licenses/amlogic-s7d-bootloader/GPL-2",
     "/usr/share/licenses/amlogic-s7d-bootloader/amlogic-s7d-bootloader.notice"
    ],
    "paths": [],
-   "note": "The image's sectors 1-6538, written to the SD card's sectors 1-6538, not into the root file system. Amlogic's licence forbids redistribution and use without its prior written permission, which Hardkernel holds for its ODROID-C5 images; redistributed unmodified and only for use on the ODROID-C5. U-Boot is GPL-2.0 and its source is Hardkernel's (git.odroid.com, the notice).",
+   "note": "The image's sectors 1-6538, written to the SD card's sectors 1-6538, not into the root file system. Amlogic's licence forbids redistribution and use without its prior written permission, which Hardkernel holds for its ODROID-C5 images; redistributed unmodified and only for use on the ODROID-C5. U-Boot is GPL-2.0 (the GPL-2 text is installed) and its source is Hardkernel's (github.com/hardkernel/u-boot branch odroidc5-v2023.01, commit c99f3409d5, on git.odroid.com; the notice).",
    "status": "decided",
    "decision": "2026-10-30 user (WS313): the bootloader of Hardkernel's ODROID-C5 image may be redistributed for use on this board, in the zedBSD firmware repository with Amlogic's licence; the official image itself is kept there unmodified"
   },

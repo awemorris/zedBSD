@@ -125,7 +125,7 @@ hand, as the notice says). The package checks the image's size and SHA-256,
 decompresses it, cuts the sectors and checks their size and SHA-256 too.
 Choosing the ODROID-C5 board selects it; the image build writes the area from
 the SD card's sector 1 and the root file system gets only `LICENSE.amlogic`,
-the notice and the manifest. Amlogic's license allows redistribution only
+U-Boot's `GPL-2` (from linux-firmware), the notice and the manifest. Amlogic's license allows redistribution only
 with its written permission, which Hardkernel holds; the files are
 redistributed unmodified and only for use on the ODROID-C5.
 Every entry is default-off, and ordinary builds perform no firmware fetch.
