@@ -58,6 +58,8 @@ static int position_walk(struct layout_tree *tree, struct layout_box *box, const
 static int position_place(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
 static int position_place_once(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
 static int position_fits(const struct layout_box *box, const struct position_block *containing);
+static uint32_t position_try_key(const struct css_try_list *list);
+static int position_in_scroller(const struct layout_box *box);
 static void position_padding_box(const struct layout_box *box, struct position_block *block);
 static int position_offset(const struct css_length *length, layout_unit size, layout_unit *value);
 static layout_unit position_frame(const struct layout_box *box);
@@ -598,6 +600,8 @@ position_place(
 	const struct position_block *containing)
 {
 	struct layout_box *saved;
+	struct dom_element *element;
+	uint32_t key;
 	int entry;
 	int error;
 
@@ -611,23 +615,78 @@ position_place(
 		return ENOMEM;
 	*saved = *box;
 	error = position_place_once(tree, box, containing);
-	if (error != 0 || position_fits(box, containing))
+	if (error != 0 || position_fits(box, containing)) {
+		/* The base position fits: nothing is remembered. */
+		if (error == 0 && box->node != NULL && box->node->type == DOM_ELEMENT)
+			((struct dom_element *)box->node)->anchor_last = 0;
 		return error;
+	}
 
 	/* Each fallback, from the box as it was. */
+	element = NULL;
+	if (box->node != NULL && box->node->type == DOM_ELEMENT)
+		element = (struct dom_element *)box->node;
+	key = position_try_key(saved->style.position_try);
 	for (entry = 0; entry < saved->style.position_try->count; entry++) {
 		*box = *saved;
 		if (!layout_anchor_try(tree, box, entry))
 			continue;
 		error = position_place_once(tree, box, containing);
-		if (error != 0 || position_fits(box, containing))
+		if (error != 0 || position_fits(box, containing)) {
+			/* The first that fits is remembered. */
+			if (element != NULL) {
+				element->anchor_last = entry + 1;
+				element->anchor_last_key = key;
+			}
 			return error;
+		}
 	}
 
-	/* None fits: the box as it was. */
+	/* None fits: the last that did when the list is the same, else the box as it was. */
+	*box = *saved;
+	if (element != NULL && element->anchor_last > 0 && element->anchor_last_key == key &&
+	    element->anchor_last <= saved->style.position_try->count && layout_anchor_try(tree, box, element->anchor_last - 1))
+		return position_place_once(tree, box, containing);
 	*box = *saved;
 	box->anchor_flip = 0;
 	return position_place_once(tree, box, containing);
+}
+
+/* Tells whether a scroll container is among a box's ancestors (its containing block then reaches its scrollable overflow). */
+static int
+position_in_scroller(
+	const struct layout_box *box)
+{
+	const struct layout_box *ancestor;
+
+	for (ancestor = box->parent; ancestor != NULL; ancestor = ancestor->parent) {
+		if (ancestor->parent == NULL)
+			break;
+		if (ancestor->style.overflow_x != CSS_OVERFLOW_VISIBLE || ancestor->style.overflow_y != CSS_OVERFLOW_VISIBLE)
+			return 1;
+	}
+	return 0;
+}
+
+/* A number that stays the same while a position-try-fallbacks list does. */
+static uint32_t
+position_try_key(
+	const struct css_try_list *list)
+{
+	uint32_t key;
+	int entry;
+	int tactic;
+
+	/* Each entry's name, tactics and area. */
+	key = 2166136261u ^ (uint32_t)list->count;
+	for (entry = 0; entry < list->count; entry++) {
+		if (list->entries[entry].name != NULL)
+			key = key * 16777619u ^ vm_string_hash(list->entries[entry].name);
+		for (tactic = 0; tactic < list->entries[entry].tactic_count; tactic++)
+			key = key * 16777619u ^ (uint32_t)list->entries[entry].tactics[tactic];
+		key = key * 16777619u ^ (uint32_t)list->entries[entry].area;
+	}
+	return key;
 }
 
 /* Tells whether a placed box's margin box is inside its containing block. */
@@ -640,6 +699,10 @@ position_fits(
 	layout_unit top;
 	layout_unit right;
 	layout_unit bottom;
+
+	/* A box a position-area had to move back inside the block did not fit. */
+	if (box->area_overflow)
+		return 0;
 
 	/* The margin box against the block. */
 	left = box->x - box->margin[CSS_LEFT];
@@ -682,6 +745,12 @@ position_place_once(
 	int has_top;
 	int has_bottom;
 	int error;
+
+	/* The position-area clamp is set again by the area. */
+	box->area_clamp_x = 0;
+	box->area_clamp_y = 0;
+	box->area_overflow = 0;
+	box->area_scrolls = position_in_scroller(box);
 
 	/* Insets and sizes with anchor functions are finished against the containing block. */
 	if (layout_anchor_wanted(box))
@@ -841,6 +910,18 @@ position_place_once(
 	}
 
 placed_x:
+	/* A position-area's normal alignment keeps an overflowing box inside the containing block. */
+	if (box->area_clamp_x && !box->area_scrolls) {
+		if (x + box->width + frame + box->margin[CSS_RIGHT] > box->area_clamp[1]) {
+			box->area_overflow = 1;
+			x = box->area_clamp[1] - box->margin[CSS_RIGHT] - frame - box->width;
+		}
+		if (x - box->margin[CSS_LEFT] < box->area_clamp[0]) {
+			box->area_overflow = 1;
+			x = box->area_clamp[0] + box->margin[CSS_LEFT];
+		}
+	}
+
 	/* anchor-center keeps the box inside its containing block across. */
 	if (box->anchor_clamp_x) {
 		if (x + box->width + frame + box->margin[CSS_RIGHT] > box->anchor_clamp[1])
@@ -872,6 +953,18 @@ placed_x:
 		y = box->static_y + box->margin[CSS_TOP] + free_height / 2;
 	} else {
 		y = box->static_y + box->margin[CSS_TOP];
+	}
+
+	/* The same down. */
+	if (box->area_clamp_y && !box->area_scrolls) {
+		if (y + position_outer_height(box) + box->margin[CSS_BOTTOM] > box->area_clamp[3]) {
+			box->area_overflow = 1;
+			y = box->area_clamp[3] - box->margin[CSS_BOTTOM] - position_outer_height(box);
+		}
+		if (y - box->margin[CSS_TOP] < box->area_clamp[2]) {
+			box->area_overflow = 1;
+			y = box->area_clamp[2] + box->margin[CSS_TOP];
+		}
 	}
 
 	/* anchor-center keeps the box inside its containing block down. */

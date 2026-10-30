@@ -68,7 +68,7 @@ struct paint_glyph {
  */
 struct paint_item {
 	int kind;
-	/* Clockwise sideways glyphs on a physical vertical inline axis. */
+	/* Clockwise sideways glyphs on a physical vertical inline axis (1), or counterclockwise ones running up from y (2). */
 	int vertical;
 	layout_unit x;
 	layout_unit y;

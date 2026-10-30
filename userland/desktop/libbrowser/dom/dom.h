@@ -415,6 +415,9 @@ struct dom_element {
 	double scroll_y;
 	/* Whether a popover is showing (in the top layer). */
 	int popover_open;
+	/* The last position-try fallback that fit (1-based, 0 for the base position) and the list it was found in. */
+	int anchor_last;
+	uint32_t anchor_last_key;
 };
 
 /*

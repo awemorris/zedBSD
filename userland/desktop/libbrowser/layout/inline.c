@@ -1222,6 +1222,19 @@ inline_finish_line(
 		 */
 		if (pieces[index].replaced) {
 			inline_replaced_extent(pieces[index].box, &fragment->ascent, &fragment->descent);
+
+			/*
+			 * In a vertical line of upright-or-mixed text the central baseline is
+			 * the one that aligns: a replaced box is centered on the strut's middle.
+			 */
+			if (box->physical_style != NULL && box->physical_style->writing_mode != CSS_WRITING_HORIZONTAL_TB &&
+			    box->physical_style->writing_sideways == 0 && !pieces[index].box->has_baseline) {
+				layout_unit whole;
+
+				whole = fragment->ascent + fragment->descent;
+				fragment->ascent = whole / 2 + (above - below) / 2;
+				fragment->descent = whole - fragment->ascent;
+			}
 			reach[line.fragment_count - 1U].above = fragment->ascent;
 			reach[line.fragment_count - 1U].below = fragment->descent;
 			x += pieces[index].width;

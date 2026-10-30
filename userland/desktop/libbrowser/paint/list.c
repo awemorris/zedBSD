@@ -1292,7 +1292,12 @@ list_lines(
 			}
 
 			/* Text and replaced boxes. */
-			if (box->vertical_inline) {
+			if (box->vertical_inline == 2) {
+				/* sideways-lr: the glyphs turn counterclockwise and the line runs up from the content box's bottom. */
+				list_fragment(walk, fragment,
+				    left + line->y + line->baseline + fragment->shift,
+				    top + box->height - line->left - fragment->x, 2);
+			} else if (box->vertical_inline) {
 				list_fragment(walk, fragment,
 				    left + line->y + line->height - line->baseline - fragment->shift,
 				    top + line->left + fragment->x, 1);
@@ -1389,6 +1394,11 @@ list_fragment(
 		return;
 
 	/* An inline replaced box's margin box stands on the baseline (in a vertical line, its block-start side to the right). */
+	if (fragment->box->kind == LAYOUT_REPLACED && vertical == 2) {
+		/* Where the line runs up from the bottom, with the ascent to the left of the baseline. */
+		list_replaced(walk, fragment->box, x - fragment->ascent, baseline - fragment->width);
+		return;
+	}
 	if (fragment->box->kind == LAYOUT_REPLACED && vertical) {
 		list_replaced_vertical(walk, fragment, x, baseline);
 		return;

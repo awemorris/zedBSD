@@ -259,6 +259,17 @@ struct layout_box {
 	int anchor_clamp_x;
 	int anchor_clamp_y;
 	layout_unit anchor_clamp[4];
+	/*
+	 * A position-area's normal alignment keeps a box that overflows its area
+	 * inside the containing block (area_clamp_x or _y, the range left, right, top,
+	 * bottom); area_overflow tells that it did overflow, so that a fallback is tried.
+	 */
+	int area_clamp_x;
+	int area_clamp_y;
+	int area_overflow;
+	int area_scrolls;
+	layout_unit area_clamp[4];
+	layout_unit area_bounds[4];
 
 	/* How a position-try fallback turned the box's position-area: 4 over the diagonal (first), then 1 down and 2 across. */
 	int anchor_flip;

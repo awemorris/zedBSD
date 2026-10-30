@@ -68,6 +68,9 @@ struct table_state {
 	int *fixed;
 	float *percent;
 	layout_unit *widths;
+	/* The columns run from the right (direction: rtl), over the width the table's cells span. */
+	int rtl;
+	layout_unit span_width;
 };
 
 /*
@@ -132,6 +135,7 @@ layout_table(
 	memset(&state, 0, sizeof(state));
 	state.across = layout_from_px(box->style.border_spacing[0]);
 	state.down = layout_from_px(box->style.border_spacing[1]);
+	state.rtl = box->style.direction == CSS_DIRECTION_RTL;
 
 	/* The rows and cells (collapsed borders overlap instead of the spacing), and each column's narrowest and widest. */
 	wb_vector_init(&state.rows, sizeof(struct layout_box *));
@@ -792,6 +796,10 @@ table_lay_rows(
 			free(heights);
 			return error;
 		}
+
+		/* A table of direction rtl has its first column at the right. */
+		if (state->rtl)
+			x = used - 2 * state->edge_x - x - width;
 
 		/* Keeps the cell at its horizontal grid position until rows are placed. */
 		cell->box->x = x;

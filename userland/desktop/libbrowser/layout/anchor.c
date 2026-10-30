@@ -485,6 +485,10 @@ layout_anchor_area(
 		bottom = top;
 
 	/* The area is the containing block. */
+	box->area_bounds[0] = across[0];
+	box->area_bounds[1] = across[3];
+	box->area_bounds[2] = down[0];
+	box->area_bounds[3] = down[3];
 	box->cb_set = 1;
 	box->cb_left = left;
 	box->cb_right = right;
@@ -570,6 +574,19 @@ anchor_area_align(
 				half = 0;
 			start = center - half;
 			end = center + half;
+		}
+	}
+
+	/* A box that overflows its area stays inside the containing block (the one the area was cut from). */
+	if (align == CSS_ALIGN_AUTO || align == CSS_ALIGN_NORMAL) {
+		if (across) {
+			box->area_clamp_x = 1;
+			box->area_clamp[0] = box->area_bounds[0];
+			box->area_clamp[1] = box->area_bounds[1];
+		} else {
+			box->area_clamp_y = 1;
+			box->area_clamp[2] = box->area_bounds[2];
+			box->area_clamp[3] = box->area_bounds[3];
 		}
 	}
 
