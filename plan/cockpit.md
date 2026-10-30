@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 04:28（Q1）
+最終更新: 2026-10-31 04:32（Q1）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |
 | P6 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1762: p005 の前半（熱の core: sensor・fan・電力の meter・方針と受け手・3 つの thread、host 試験と QEMU の起動） | UAPI（p004）はユーザーの review の後。WS332 は完了 |
-| P7 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1754: p003 kernel の口の header の案と review → p006 cpuperf の枠組み（kernel、host 試験） | p011（x86 の CPU の driver）・p014（5330 の受け入れ）へ。BUG-371・372・373・375 は直して closed |
+| P7 | — | — | 返却（06:5x）。WS333 p006・p007 cleared | 次の割当を Q1 が決める |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
 実装の担当（WS326）: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）。p015・p017・p019・p021・p023 は cleared。
@@ -39,6 +39,7 @@
 | --- | --- | --- |
 | p001 | 統一の設計（CPU の idle・P-state・P/E core・熱・fan・strategy・非常の停止） | 設計済み（第 2 版、main 9946e22c0）。ユーザーの問い Q333-1〜7 待ち。実装の Phase は p003〜p024（約 70 LW） |
 | p003 | kernel の口の header（cpuperf.h・thermal.h、kern_cpu_count） | cleared（main f197c8a3f、20 port の build warning 0、design-reviewer を反映） |
+| p007 | x86 の CPU の register を読む module の設計（標準廉価実装手順、header 5・46 関数・試験の道具） | cleared。AMD と ACPI の仕様は取れず範囲の外（上の 01）。次は p008〜p010 を Sonnet 3 人で並べて |
 | p006 | cpuperf の枠組み（kernel、CPU の速さの制御の要求・方針の写し・上限・idle の統計） | cleared（main b5c8e8f50、host 試験 196 checks、QEMU の起動 4 つ PASS） |
 | p002 | amd64 の CPU の idle を MWAIT に（5330 の idle 12.99 W 対 Linux 3.2〜3.5 W） | MWAIT C6 を main に merge（f740839e5）。idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps。Linux にはまだ遠い（残りは 1 kHz の tick・P-state・ASPM・PSR の見込み、未調査） |
 

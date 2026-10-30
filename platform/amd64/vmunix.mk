@@ -509,6 +509,16 @@ AMD64_KERNEL_SOURCES := \
 ifeq ($(CONFIG_INPUT_TEST_INJECT),y)
 AMD64_KERNEL_SOURCES += src/drivers/generic/input-inject.c
 endif
+# The x86 processor decoders: pure functions over the CPUID and model-specific register values
+# the processor driver reads.  The CPUID part serves the topology in every kernel; the register
+# parts are built only with the CPU performance driver.
+AMD64_KERNEL_SOURCES += src/drivers/platform/pcat/cpu-x86/cpux86.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-cpuid.c
+ifeq ($(CONFIG_CPU_PERF),y)
+AMD64_KERNEL_SOURCES += src/drivers/platform/pcat/cpu-x86/cpux86-hwp.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-pstate.c \
+	src/drivers/platform/pcat/cpu-x86/cpux86-power.c
+endif
 # /dev/input/bridge (ws143-p005): the Bluetooth daemon's HID devices, on the HID input glue; it refuses a FIDO descriptor
 # with hidraw-describe.c (built with usb-hid, or here without it).
 ifeq ($(CONFIG_INPUT_BRIDGE),y)

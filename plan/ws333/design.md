@@ -2,7 +2,7 @@
 
 # WS333 設計: /dev/thermal で統一する電力・熱の枠組み（CPU の idle・P-state・P/E core、熱・fan・strategy・非常の停止）
 
-- 版: **第 2 版**（2026-10-31 P5、q1734-i01）。第 1 版（500061ba1）に design-reviewer の指摘（[design-review.md](design-review.md)、blocker 0・major 8・minor 24）と、main に merge された p002 の結果（f740839e5）を反映した。行き先は §14。
+- 版: **第 2 版**（2026-10-31 P5、q1734-i01）。§15（x86 の decode の module、p007）は 2026-10-31 P7（q1759-i01）が足した。第 1 版（500061ba1）に design-reviewer の指摘（[design-review.md](design-review.md)、blocker 0・major 8・minor 24）と、main に merge された p002 の結果（f740839e5）を反映した。行き先は §14。
 - 入力: WS301 の design.md 第 3 版の改訂 3（CPU の DVFS と P/E core）と WS303 の design.md 第 5 版（熱と fan）。WS303 第 5 版の review（[../ws303/design-v5-review.md](../ws303/design-v5-review.md)、WS303 では未反映）はこの設計に反映した（§8.3）。
 - 基点: worktree `p5-ws333`（branch `agent/p5-ws333`、main aa112273a）。p002 の実装は main f740839e5 で読んだ。引用の file:行 は基点の物（WS301・WS303 の引用は main 68ee65381 の物で、その後に変わった file は §2 で読み直した）。code は書いていない。
 - 読んだ物: WS301 の ws.md・design.md・user-questions.md・hal-review.md・design-v3-review.md、WS303 の ws.md・design.md・user-questions.md・design-v5-review.md、WS302 の ws.md、WS299 の ws.md の結果（2026-10-28）、WS291 p022 の phase.md、WS332 の ws.md・design.md §5、WS331 の ws.md、p002 の phase.md（main）、`plan/guardrail.md`、`plan/master-design-policy.md`、`docs/agent/spec-module-delegation.md`、`include/hal/hal.h`、source（§2）。
@@ -496,8 +496,8 @@ CPU の省電力を先にする。CPU の道は p003 → p006 → p011 → p014 
 | p007 | x86 の decode の module の設計（標準廉価実装手順の設計の Phase）: 最初に SDM Vol 4 で ADL（family 6 model 0x9A）の 0xCE・RAPL・C-state の滞在・0xE2 の有無と、5330 の 0xE2 の lock の bit（Debian で読みだけ）を確かめ、無い MSR の module は立てない。header（仕様の comment）・.c の骨格・単体試験の道具・骨格の照合・p008〜p010 の phase.md。仕様の PDF の置き場所と SHA-256 を記録 | p001 | 2 | 骨格の build、design-reviewer、phase.md 3 本 | Opus |
 | p008 | module: CPUID の解析（1FH/0BH・04H・1AH の topology、05H の C-state、06H の機能の bit、01H の hypervisor・EIST・TSC-deadline） | p007 | 1 | 単体試験 PASS、わざと壊す確かめ | Sonnet（phase-runner-low） |
 | p009 | module: HWP の CAPABILITIES・REQUEST の field の decode・encode と範囲の検査、HFI の表の形の解析 | p007 | 2 | 同上 | Sonnet |
-| p010 | module: legacy の段の源（ACPI の `_PSS` の package の形、0xCE の比、AMD の HwPstate）と RAPL の単位・energy の一周・C-state の滞在の計数（p007 で Vol 4 にあると確かめた物だけ） | p007 | 2 | 同上 | Sonnet |
-| p011 | x86 の CPU の driver の統合: 関門（hypervisor・CPUID の bit・allow list・既定 n・`cpuperf=off`）、MSR の小さな file、probe、HWP の enable の順と既に 1 の道、Highest の MHz の測り、HFI の page、legacy の道、RAPL の meter・滞在の統計、provider の登録、起動の parameter の key | p006、p008〜p010、p005（RAPL の meter の登録 `kern_thermal_meter_register` の所だけ。p003 の review M8） | 5 | host 試験（模擬の CPUID・MSR）、amd64 の build、QEMU で provider 無し | Opus（phase-runner-high） |
+| p010 | module: legacy の段の源（ACPI の `_PSS` の package の形、0xCE の比、AMD の HwPstate）と RAPL の単位・energy の一周・C-state の滞在の計数（p007 で Vol 4 にあると確かめた物だけ）。p007 の結果: `_PSS`・AMD・PERF_CTL は仕様が取れない／使い道が無く外し、0xCE の decode・allow list・RAPL・滞在・0xE2 にした（§15.3） | p007 | 2 | 同上 | Sonnet |
+| p011 | x86 の CPU の driver の統合: 関門（hypervisor・CPUID の bit・allow list・既定 n・`cpuperf=off`）、MSR の小さな file、probe、HWP の enable の順と既に 1 の道、Highest の MHz の測り、HFI の page、legacy の道（p007 の結果で今は無い、§15.7）、RAPL の meter・滞在の統計、provider の登録、起動の parameter の key | p006、p008〜p010、p005（RAPL の meter の登録 `kern_thermal_meter_register` の所だけ。p003 の review M8） | 5 | host 試験（模擬の CPUID・MSR）、amd64 の build、QEMU で provider 無し | Opus（phase-runner-high） |
 | p012 | tick の位相を揃える（amd64 の HAL の実装、承認不要）: 方式（周期の始めを揃える／TSC-deadline）の選び、今の形に戻す build の macro、5330 の前後の電力と PC の滞在（器具は p002 と同じ診断の patch か、p011 の後なら meter） | p002 | 3 | QEMU の起動、5330 の前後の数（下がらなくても記録して cleared、方式の採否は数で決める） | Opus（phase-runner-high） |
 | p013 | CPU の ioctl・`/sbin/thermal` の CPU と電力の表示・strategy の保存と rc の restore（Q333-1 の推し B） | p004、p005、p006 | 3 | ioctl の host 試験、QEMU | Opus |
 | p014 | 5330 の CPU の受け入れ（§8.4 の 5330 の 1〜4、1 本の script）。§4.3.3 の段 4 の判断の数 | p011、p012、p013（p004 が遅れる時は p005 の注入の口で） | 4 | §8.4 の PASS | Opus＋Q1 の実機の割当 |
@@ -617,3 +617,136 @@ CPU の省電力を先にする。CPU の道は p003 → p006 → p011 → p014 
 | m22 MSR の inline asm と規則 | Q1 に | §4.4・§11.2 |
 | m23 server の config | 反映 | §4.16 |
 | m24 根拠の無い数 | 反映（数を消した） | §4.3.3・user-questions.md |
+
+## 15. x86 の decode の module（p007、標準廉価実装手順の設計の Phase）
+
+2026-10-31 P7（q1759-i01）。[docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md) の §4 に従う。header（仕様の comment）が実装の担当（Sonnet 5.5 high）への仕様で、方針（strategy の写し・governor・どの MSR をいつ読むか）は p011 の driver（Opus）に残す（§9 の review M8）。
+
+### 15.1 仕様の置き場所（git に入れない）
+
+置き場所は P7 の worktree の `build/specs/dl/`（Q1 の指示で `build/sources/specs/` の外）。実装の Phase の worktree からは絶対 path で読む。worktree が片付けられる前に、Q1 が消えない場所（例: main の `build/sources/specs/`）へ写すか決める（§15.8 の Q1-a）。
+
+| 文書 | file（`/home/awe/zedBSD-claude1/build/sources/specs/`） | SHA-256 | 出所 |
+| --- | --- | --- | --- |
+| Intel SDM Vol. 1 rev. 093（253665-093、2026-09） | `253665-093-sdm-vol-1.pdf` | `f6ffc430dfa2dada4f791b1ecb462810e59827befe9a9c23f9160941eea642f9` | Intel の公開の download（cdrdv2 671436） |
+| Intel SDM Vol. 2A〜2D rev. 093（325383-093） | `325383-093-sdm-vol-2abcd.pdf` | `d137a7887787bbb06c1a8b8bafd51958d8d2e16b4dff987a03226c845cca1516` | 同（671110）。rev. 093 は CPUID の leaf の表を Vol. 1 第 21 章に置くので、この版では使わなかった |
+| Intel SDM Vol. 3A〜3D rev. 093（325384-093） | `325384-093-sdm-vol-3abcd.pdf` | `77919be320f35da2782771ef2cb65a868cf68e62c8f8279f2ca61199cb70d1f8` | 同（671447） |
+| Intel SDM Vol. 4 rev. 093（335592-093） | `335592-093-sdm-vol-4.pdf` | `79f54b67b9bb3836856f04e0c45f50406c4d4b932c64800eb788b6b705a83dbd` | 同（671098） |
+| AMD64 APM Vol. 2 rev. 3.45（24593、2026-07） | `24593-r3.45-amd-apm-vol2.pdf` | `2282ca1bcefe79e5f2ecec84e2fab5f3b3637c45167e0cc5b3b58199366c5dc8` | WS301 の調査（2026-10-29）が AMD の公開の site から取った写し（Q1 の session の scratchpad）を写した。amd.com からの再取得は bot の確かめで拒まれ、回避していない |
+
+PDF の頁と印刷の頁: Vol. 4 は第 2 章で PDF の頁 = 印刷の頁 2-N の N + 10（例: Table 2-35 は 2-336 → PDF 346）。Vol. 1・Vol. 3 は章ごとに違うので、phase.md には PDF の頁を直に書く。読み方は `pdftotext -layout -f N -l N`、表は頁の画（Read の tool の `pages`）でも照らす。
+
+取れなかった物（再試行しない。ユーザーか Q1 が手で置くかを決める、§15.8 の Q1-b）:
+- AMD64 APM Vol. 3（24594、CPUID の Fn8000_0007_EDX の HwPstate・CPB の bit の位置、"AuthenticAMD" の vendor の文字列）: amd.com が bot の確かめの page を返し、header を変えた再取得は auto mode の判定で拒まれた。
+- ACPI 6.5 の第 8 章（`_PSS`・`_PSD`・`_PPC` の package の形）: uefi.org が Cloudflare の challenge の page を返した（再試行しない）。
+
+### 15.2 SDM Vol. 4 で確かめた事（ADL、family 6 model 0x9A）
+
+- ADL（06_97H・06_9AH）と RPL（06_BAH・06_B7H・06_BFH）の MSR は、Vol. 4 §2.17 の「These processors support the MSR interfaces listed in Table 2-20, 2-21, 2-25, 2-29, 2-35, and 2-39」（PDF 370）と §2.17.5 の Table 2-44〜2-48（PDF 410〜）。Table 2-30・2-31（4th gen の Haswell の client）は**この組に入らない**。
+- 有る（header に入れた物。表は「後の表が前の表に勝つ」の規則で最後の物）:
+
+| MSR | 名前 | 表（PDF の頁） | 要点 |
+| --- | --- | --- | --- |
+| CEH | MSR_PLATFORM_INFO | Table 2-29（298） | [15:8] 最大の非 turbo の比（TSC の比、×100 MHz）、[47:40] 最大効率の比、[55:48] 最小の動作の比、28・29・32・[34:33] |
+| E2H | MSR_PKG_CST_CONFIG_CONTROL | Table 2-35（346）、lock の意味は Table 2-20（PDF 237） | [3:0] 上限（0 C0/C1 … 8 C10、9〜15 予約）、bit 15 CFG Lock（R/WO、bit 15:0 を次の reset まで固定）、25〜30 の demotion。scope は Core |
+| 606H | MSR_RAPL_POWER_UNIT | Table 2-20（252）→ Vol. 3B §17.10.1 Figure 17-35（PDF 577） | power [3:0]、energy [12:8]、time [19:16] |
+| 611H | MSR_PKG_ENERGY_STATUS | Table 2-20（254）→ §17.10.3 Figure 17-37（PDF 579） | [31:0]、約 60 秒で一周しうる |
+| 639H | MSR_PP0_ENERGY_STATUS | Table 2-39（376） | |
+| 641H | MSR_PP1_ENERGY_STATUS | Table 2-21（259） | client の uncore の 1 device |
+| 64DH | MSR_PLATFORM_ENERGY_COUNTER | Table 2-39（377） | platform が支えなければ 0 を読む |
+| 60DH・3F8H・3F9H・3FAH | PKG C2・C3・C6・C7 の滞在 | Table 2-20（253・248・249） | 64 bit、TSC の周波数で数える |
+| 3FCH・3FDH・3FEH | CORE C3・C6・C7 の滞在 | Table 2-20（249） | 同上 |
+| 664H | MSR_MC6_RESIDENCY_COUNTER | Table 2-46（413） | module の C6、**1 MHz** で数える |
+
+- **無い（Vol. 4 rev. 093 の ADL の組に載らない）**: PC8・PC9・PC10 の滞在（630H・631H・632H、Table 2-31（06_45H）と Table 2-58 だけ）、DRAM の energy（619H は Table 2-29 にあるが Vol. 3B §17.10.2 の client の RAPL の階層に DRAM が無いので allow list から外した）。PC8〜PC10 は 5330 の idle の電力（§3、§8.4 の PC の滞在の率）に効く深い状態なので、読むかは判断が要る（§15.8 の Q1-c）。
+- 5330 の 0xE2 の lock の bit（Debian で読みだけ）: **未実施**（5330 は止まっている、Q1）。p011 の 0xE2 の書きの道は lock を読んで EACCES を返す形にした（§15.3 の power）ので、lock の値に依らず設計は変わらない。
+- IA32_PERF_CTL（199H）: Vol. 4 Table 2-2 と Table 2-20 は [15:0]「Target performance State Value」とだけ書き、Vol. 3B §17.1.1 は「The 16-bit encoding that defines valid operating points is model-specific」。**比（ratio）を [15:8] に置く encoding は SDM に無い**。WS301 §4.9 の源 2（0xCE の比の段を PERF_CTL[15:8] に書く）は SDM に根拠が無い（§15.8 の Q1-d）。module は値（例: `_PSS` の Control）を置くだけで、比から値を作らない。
+
+### 15.3 module の分け方
+
+置き場所は `src/drivers/platform/pcat/cpu-x86/`（§4.4）、関数の接頭辞は `cpux86_`。全部が純粋な関数（CPUID・RDMSR・WRMSR を実行せず、driver が読んだ値を受けて構造体を返す、状態を持たない、整数の演算だけ）。依存は一方向（cpux86 ← cpuid ← hwp・power、cpux86 ← pstate）。build は `platform/amd64/vmunix.mk`: `cpux86.c`・`cpux86-cpuid.c` は全部の amd64 の kernel（§4.4・§4.5: topology と core の種類は `CONFIG_CPU_PERF` に依らず出す。review M1）、`hwp`・`pstate`・`power` は `CONFIG_CPU_PERF=y` の時だけ。`cpux86.c`（bit の補助 4 関数）は p009・p010 を p008 と並べて走らせるため p007 で実装した（review m10、`unit/test-cpux86.c` 4140 check、わざと壊す 5 通りを全部捕えた）。
+
+| header | 中身 | 仕様 | Phase |
+| --- | --- | --- | --- |
+| `cpux86.h`（＋`cpux86.c`） | CPUID の register の構造体、bit の field の補助（`cpux86_field32`・`field64`・`insert64`・`ceil_log2`）、誤りの値・未定義の動作の禁止・C89 の約束 | — | p008 |
+| `cpux86-cpuid.h` | 00H・01H（vendor・DisplayFamily/Model・機能の bit: MONITOR・EIST・x2APIC・TSC-deadline・hypervisor）、leaf の有無、05H（MWAIT の sub-state）、06H（HWP・HFI・Thread Director の bit、APERF/MPERF、HFI の表の頁・行）、07H の HYBRID、1AH（core の種類）、04H（cache の共有と group）、0BH・1FH（topology の ID、知らない domain は下の既知の domain の延長）、80000000H・80000007H（invariant TSC）・80000008H（MAXPHYADDR） | Vol. 1 Table 21-4〜21-16・21-21・21-31・21-32・21-63・21-70・21-71・21-89・21-97・21-98、Vol. 3A §11.9.4 | p008 |
+| `cpux86-hwp.h` | PM_ENABLE、CAPABILITIES、REQUEST の encode（幅と lowest ≤ min ≤ max ≤ highest、desired 0 か lowest〜highest）・decode、activity window の encode・decode、HWP_CTL と REQUEST[42] の表（Table 17-2）、STATUS の decode と RWC0 の ack、HFI の表の layout・timestamp・change の byte・cell、PTR・CONFIG の encode、PACKAGE_THERM_STATUS bit 26 の読みと ack（読んだ値から bit 26 だけ落とす） | Vol. 3B §17.4.2〜17.4.5・§17.6.1〜17.6.7、Vol. 4 Table 2-2 | p009 |
+| `cpux86-pstate.h` | 0xCE の decode（Table 2-29 の layout）、比 → MHz | Vol. 4 Table 2-29 | p010 |
+| `cpux86-power.h` | model の allow list（上の表の MSR の bit、06_97/9A/B7/BA/BFH だけ、他は ENOTSUP）、RAPL の単位・energy の status・32 bit の一周の積み・µJ への変換、滞在の counter の表（MSR・scope・状態の番号・数える rate）・差・ns への変換、0xE2 の decode と上限の encode（lock なら EACCES） | Vol. 4 §2.17・§2.17.5 と上の表、Vol. 3B §17.10.1〜17.10.4 | p010 |
+
+外した物（理由）: ACPI `_PSS`・`_PSD`・`_PPC` の package の解析と AMD の vendor・HwPstate・CPB の CPUID の bit（仕様が取れない、§15.1）、IA32_PERF_CTL・PERF_STATUS の encode と AMD の C001_0061〜0063 の decode（第 1 版の header に有ったが、PERF_CTL の値の源（`_PSS`）も AMD の関門（vendor と HwPstate の bit）も無いので使い道が無い。review M4。Q1-b・Q1-d の答えの後に足す）、IA32_HWP_PECI_REQUEST_INFO（775H、WS301 §4.2 の「今上書き中」の flag。p011 で要ると分かったら足す。今の UAPI の案に欄が無い）、IA32_ENERGY_PERF_BIAS（HWP の EPP が無い CPU の代わり。§4.4 に道が無い）。
+
+### 15.4 header を書く時に決めた事（仕様の読みが二つある所）
+
+1. **Thread Director の表の行の padding**（Vol. 3B Table 17-9）: 表 17-9 は class ごとに padding（class 1 が「CP + R8」から）と書く一方、同じ表の最後の class の行（「(CL-1)*CP」から、padding は「CL*CP」の後に 1 つ）・Table 17-7 の注 1〜3（cell の offset = 8 + (i+1)(CP·CL + R8) + CP·cl + cp）・Table 17-8 は padding を行の終わりに 1 つだけ置く。**注の式を採った**（3 か所が一致し、表 17-9 の中でも末尾の行と合う）。5330（CP 2・CL 4）はどちらでも 8 byte の行で同じ。
+2. **HFI だけを有効にした時の表の形**: Thread Director を enumerate する processor は、bit 1 を立てずに bit 0 だけで有効にしても、表の形（行の幅）は CL 個の class の物と読んだ（§17.6.5「bit 0 だけなら class 0 だけを埋める」、表 17-7 の注 10「HFI は 2 つの能力と 1 つの class と見なせる」）。`cpux86_feedback_layout()` は CPUID の enumerate で class の数を決め、有効にした bit を引数に取らない。5330 はどちらの読みでも同じ。
+3. **IA32_HWP_STATUS の Highest_Change は bit 3**（Figure 17-9）。WS301 §2.2 の表の「bit 4」の類の書きとは別に、header は SDM rev. 093 の bit に従う。
+4. **AMD の P-state の field は 4 bit**（APM Vol. 2 r3.45 Figure 17-1〜17-3: [3:0]・[7:4]）。WS301 の 3 bit の読みとは違う。
+5. 予約の bit: architectural な MSR（PM_ENABLE・CAPABILITIES・REQUEST・STATUS・RAPL の unit と energy・AMD の P-state）は「must be zero」の bit が立てば EINVAL。model-specific な 0xCE・0xE2 は他の model が別の field を置くので予約の bit を検めない。
+6. 滞在の counter が前の読みより小さい（間に reset があった）時は ERANGE（差は分からない）。energy の 32 bit は一周を 1 回だけ補う（2 回以上は見えない、§17.10.3）。
+7. 1FH の検査: sub-leaf 0 は THREAD、1 は CORE（「the logical processor and core domains are always enumerated」）、有効な sub-leaf が 2 つ未満は EINVAL、既知の型は昇順で 1 回ずつ、shift は減らない、x2APIC ID は sub-leaf 間で同じ。知らない型（予約の値、0BH の CORE より上）は「下の既知の domain の延長」（Vol. 3A §11.9.4 の 3b）。呼び手は INVALID の sub-leaf まで読み、それを count に含める。INVALID が無い list は途中で切れた物として EINVAL（package の shift が分からない。review M5）。
+8. **SDM Vol. 4 Table 2-2 と Vol. 3B の食い違い**（review M2）: Vol. 4 Table 2-2 は IA32_HWP_STATUS を「63:3 Reserved」、IA32_HWP_REQUEST を「63:43 Reserved」、IA32_HW_FEEDBACK_CONFIG を「63:1 Reserved」、IA32_PACKAGE_THERM_STATUS の bit 1 を「(R/W)」と書く。Vol. 3B（Figure 17-9 の bit 3〜5、Figure 17-6 の bit 59〜63、§17.6.5 の bit 1、§17.8 Figure 17-33 の bit 1 R/WC0）はそれらを定義する。header は **Vol. 3B の §17.4・§17.6 に従う**（機能の節の方が新しく詳しい。Vol. 4 の表は古い要約が残った物と見る）。
+9. **IA32_PACKAGE_THERM_STATUS の ack**（review M3）: 読んだ値を書き戻さない。bit 26 は 0、R/WC0 の log の bit 3・5・7・9・11 は 1（書いても変わらないので、読みと書きの間に立った log を消さない）、bit 1 は読んだ値のまま（Vol. 4 は R/W、Vol. 3B は R/WC0。読んだ値を書けばどちらでも中立）、他は 0（status は書きを無視、予約は 0 で書く）。
+10. HFI の能力の数は EDX[7:0] の立つ bit の数（Table 17-7 の注 4）。bit 0 と 1 は必須、他の bit は受けて数える（後で能力が増えても HFI を止めない。review m4）。
+11. 誤りの順（review m5）: `cpux86_feedback_layout()` は NULL → ENOTSUP（機能が無い）→ EINVAL、`cpux86_feedback_config_encode()` は EINVAL → ENOTSUP。table の reader は渡された layout を信用せず、offset を溢れの検査つきで計算する（偽の layout で表の外は読まない。review m6）。
+
+### 15.5 試験の道具（設計の担当が作り、実装の担当は変えない）
+
+- `plan/ws333/tests/cpux86/run-unit.sh <name>…|all`: `unit/test-<name>.c` を全 `cpux86*.c` と host の cc で `-std=c89 -Wall -Wextra -Werror -Wpedantic`、ASan・UBSan（`-fno-sanitize-recover=all`）で build し流す。最後の行 `run-unit: PASS`。
+- `plan/ws333/tests/cpux86/check-skeleton.sh`（`BASE=<基点の SHA>`）: 各 header の単独の compile（2 回 include）、全 .c を cc と clang で警告なし、header が BASE から変わっていない事。
+- 補助の header（逆方向の独立の実装、decoder の code を使わない）: `unit/check.h`（判定）、`unit/regbuild.h`（CPUID・MSR の値を仕様の bit の位置から組む: field の配置、Intel の leaf 00H、leaf 01H EAX、topology の sub-leaf）、`unit/feedbackbuild.h`（HFI・Thread Director の表を Table 17-7 の注の式で書く: cell・change の byte・timestamp）。`unit/test-builders.c` が補助の自己検査（21 check、PASS）、`unit/test-cpux86.c` が p007 で実装した `cpux86.c` の試験（4140 check、PASS）。
+- 適合の試験の data（公式の conformance の物）は、この仕様には無い。実機の値（5330 の CPUID・MSR、WS301 §2.3 の Debian の読み）は p011 の host 試験と p014 の実機で使い、module の単体試験の期待の値には使わない（期待の値は仕様の表と手の計算だけ）。
+
+### 15.6 実装の Phase
+
+| Phase | module（作る .c） | 単体試験 | 受け入れ | 依存 |
+| --- | --- | --- | --- | --- |
+| [p008](phase008/phase.md) | `cpux86-cpuid.c` | `unit/test-cpuid.c` | 単体試験 PASS、わざと壊す確かめ、骨格の照合、amd64 の build（既定と `CONFIG_CPU_PERF=y`）warning 0 | p007 |
+| [p009](phase009/phase.md) | `cpux86-hwp.c` | `unit/test-hwp.c` | 同上（`CONFIG_CPU_PERF=y`） | p007 |
+| [p010](phase010/phase.md) | `cpux86-pstate.c`・`cpux86-power.c` | `unit/test-pstate.c`・`unit/test-power.c` | 同上（`CONFIG_CPU_PERF=y`） | p007 |
+
+p008〜p010 は p007 の merge の後に並べて走れる（`cpux86.c` は p007 で実装済み、触る file が重ならない。ws.md の表の行だけが競合しうる）。p009・p010 は `cpux86-cpuid.h` の構造体（`struct cpux86_power`・`struct cpux86_identity`）だけを使い、p008 の実装には依らない（試験は構造体を直に組む）。
+
+### 15.7 p011 への持ち越し（driver の統合）
+
+- allow list（`cpux86_model_registers()`）が名指さない MSR を読まない。hypervisor の bit・`max_basic_leaf`・`cpux86_cpuid_has_leaf()` で leaf を選ぶ。
+- 滞在の rate: TSC の周波数は 0xCE の最大の非 turbo の比 × 100 MHz（Table 2-29「the ratio of the frequency that invariant TSC runs at」）か、測り。MC6 は 1 MHz。
+- energy は 60 秒より短い周期で `cpux86_energy_counter_update()`（§4.6）。
+- 0xE2 は core の scope（Table 2-35）なので書くなら全 core で。lock なら書かない。
+- HFI の表は CPUID が言う頁の数を確保、`cpux86_feedback_pointer_encode()` に MAXPHYADDR（80000008H）を渡す。bit 26 を見て写し、`cpux86_feedback_ack()` の値を書く（写しの前に消さない）。MAXPHYADDR は TME-MK が有効だと減る（Vol. 1 Table 21-98 は IA32_TME_ACTIVATE[35:32]、Vol. 3B §17.6.4 の脚注は [39:36] と書き食い違う）。module は leaf の値をそのまま受ける。driver は表を 4 GiB 未満などの低い番地に置けば避けられる（review m11）。
+- 滞在の rate の TSC は 0xCE の比 × 100 MHz の近似（ADL の TSC は正確にはその値でない、CPUID 15H が正確。15H は decode しない。滞在の率には十分）。
+- REQUEST の package_control と valid の bit は CPUID.06H EAX[11]・[17] が無い CPU では予約の bit（Vol. 4）。driver は 0 で書く（zedBSD は package の制御を使わない、§4.3）。
+- MC6（664H、module の scope）は E-core の module の物と見られる。P-core の上での意味は未確認（推定）。driver は core の種類 20H（Atom）の CPU で読む。
+- **legacy の P-state の道は今は無い**（review M4）: `_PSS` も AMD の関門も無く、0xCE の比の encoding は SDM に無い（§15.2）。p011 は HWP の道だけを作り、HWP の無い CPU は provider の `apply` 無し（describe だけ）にする。Q1-b・Q1-d の答えで legacy の道を足す時は module を 1 Phase で足す。
+
+### 15.8 判断が要る点（Q1。ユーザーに回すかは Q1）
+
+| 問い | 背景 | 推し |
+| --- | --- | --- |
+| Q1-a 仕様の PDF の消えない置き場所 | 今は P7 の worktree の `build/specs/dl/`。実装の Phase の worktree から絶対 path で読む。P7 の worktree が片付けられると実装の担当が止まる | main の `build/sources/specs/` に Q1 が写し、p008〜p010 の phase.md の path を直してから起動する（SHA-256 は §15.1） |
+| Q1-b AMD APM Vol. 3 と ACPI 6.5 を手で置くか | bot の確かめで自動の取得は止めた | 置くなら AMD の HwPstate の bit と `_PSS` の解析を 1 Phase で足す。置かないなら legacy の道は Intel の `_PSS` も AMD も無し（下の Q1-d と合わせて） |
+| Q1-c PC8〜PC10 の滞在の MSR（630H〜632H）を ADL で読むか | SDM Vol. 4 rev. 093 の ADL の組に無い。読めなければ #GP で止まる。5330 の深い package の状態の確かめ（p014）に効く | p014 の前に 5330 の Debian で読みだけ（`/dev/cpu/N/msr`）で有無を確かめ、有れば出典を「Debian の読み（2026-xx-xx）」として allow list に足す Phase を立てる（それまでは読まない） |
+| Q1-d legacy の P-state の 0xCE の比の道 | PERF_CTL の値の encoding は SDM で model-specific。比を [15:8] に置く形は SDM に無い | 外す（`_PSS` が取れれば `_PSS` の Control の値だけを使う）。どうしても要るなら、他の資料の値をデータとして出典つきで使う判断をユーザーに |
+| Q1-e 5330 の 0xE2 の lock の bit | 5330 が止まっていて未読 | 5330 が戻った時に Debian で読みだけ。設計は lock の値に依らない |
+
+### 15.9 design-reviewer の指摘と反映（1 回、2026-10-31、blocker 0・major 5・minor 12）
+
+| 指摘 | 扱い |
+| --- | --- |
+| M1 n の kernel に CPUID の decoder が無い（§4.4・§4.5 と矛盾） | 反映: `cpux86.c`・`cpux86-cpuid.c` は全 amd64 の kernel、他は y だけ。p008 の確かめに既定の build を足した（§15.3） |
+| M2 Vol. 4 Table 2-2 と Vol. 3B の食い違いの扱いが無い | 反映: §15.4 の 8（Vol. 3B が勝つ）、p009 の注意 |
+| M3 PACKAGE_THERM_STATUS の ack が読んだ値を書き戻す（log の取りこぼし、信用できない予約の bit の書き） | 反映: 定数の log の bit ＋ 読んだ bit 1 だけ（§15.4 の 9、header、p009 の試験） |
+| M4 PERF_CTL と AMD の decoder は使い道が無い | 反映: header から外し、p011 は legacy の道無しと §15.7 に（§15.3） |
+| M5 topology の list の終わりの扱いが header に無い | 反映: 有効 2 未満と INVALID 無しは EINVAL、呼び手は terminator を含める（header、§15.4 の 7、p008 の試験） |
+| m1 highest は変わらないの誤り | 反映（header） |
+| m2 valid の bit の効く条件 | 反映（`cpux86_hwp_source()` が PACKAGE の時、EAX[17]） |
+| m3 REQUEST_PKG の 63:42 | 反映: header に「呼び手が package_control・valid を無視」 |
+| m4 EDX[7:2] の予約の bit で EINVAL | 反映: 立つ bit を数える（§15.4 の 10） |
+| m5 誤りの順 | 反映（§15.4 の 11、header） |
+| m6 偽の layout と offset の溢れ | 反映（header の約束、p009 の試験） |
+| m7 定数の block の `Values referenced:` | 反映（cpuid・hwp・pstate・power の各 block） |
+| m8 浮動小数点の禁止 | 反映（cpux86.h の約束） |
+| m9 `ULL` の注意 | 反映（3 つの phase.md） |
+| m10 p009・p010 が p008 の 4 関数だけに依る | 反映: `cpux86.c` を p007 で実装、p008〜p010 は並べて走れる（§15.6） |
+| m11 p011 への注意（MAXPHYADDR と TME、TSC の近似、valid の bit の関門、MC6） | 反映（§15.7） |
+| m12 check-skeleton の clang 無しと `<BASE>`、頁の番号、PDF の置き場所 | 反映: clang 無しと BASE が commit でない時は FAIL、§11.9.4 は PDF 356、Q1-a の推しに「phase.md の path を直してから起動」 |
