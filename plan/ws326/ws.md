@@ -51,7 +51,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p012](phase012/phase.md) | CABAC の syntax element: h264sw-cabac-se（試験 test-cabac_se） | cleared（2026-10-30 Q1、main 00ecfcc80。test-cabac_se 168241 checks、突然変異 15 のうち 14 を検出（残り 1 は等価）） | p008、p011 |
 | [ws326-p013](phase013/phase.md) | 変換と逆量子化: h264sw-transform（試験 test-transform） | cleared（2026-10-30 Q1、main 4c2e27dd5。test-transform 33158 checks） | p003 |
 | [ws326-p014](phase014/phase.md) | intra 予測: h264sw-intra（試験 test-intra） | cleared（2026-10-30 Q1、main dfd380ae5。test-intra 593 checks） | p008 |
-| [ws326-p015](phase015/phase.md) | 補間と重み: h264sw-interp、h264sw-weight（試験 test-interp、test-weight） | planned | p007 |
+| [ws326-p015](phase015/phase.md) | 補間と重み: h264sw-interp、h264sw-weight（試験 test-interp、test-weight） | 実装済み・試験 PASS（2026-10-31 S-p015。test-interp 23460 checks、test-weight 159 checks、突然変異 18 を検出（最初に 1 つ通り、境の試験を足して塞いだ）。cleared は Q1 が決める） | p007 |
 | [ws326-p016](phase016/phase.md) | MV の予測と P_Skip: h264sw-mvpred（試験 test-mvpred） | cleared（2026-10-30 Q1、main 4f596bbc6。test-mvpred 83 checks） | p008 |
 | [ws326-p017](phase017/phase.md) | B の direct: h264sw-direct（試験 test-direct） | planned | p007、p008、p016 |
 | [ws326-p018](phase018/phase.md) | slice data と macroblock の syntax: h264sw-macroblock（試験 test-macroblock） | cleared（2026-10-30 Q1、main 3195bbd68。test-macroblock 1107981 checks、突然変異 29 で残りは同値 1・CABAC の residual は p021・p022 で） | p002、p008、p009、p012 |
