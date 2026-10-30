@@ -133,3 +133,8 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 
 - gpu-op.h の先頭の comment は executor を i915・bcm2711 だけと書き、file の名前も古い（i915 は vk/vk-transport.c など）。video の節も nvrtx・bcm2711 の decode と capset の bit の門を書いていない。sysctl.h の `hw.gpu.start` は bcm2711 の Pi 5 の start を書いていない。
 - （p020 の Bug の候補）`sysctl` の `show_name` が 4 byte の値（`hw.gpu.attaching` など）を初期化しない `uint64_t` に読んでいた件は、Q1 が直した（2026-10-30。返った長さ 1・2・4・8 で読み分け、他は EIO。amd64・arm64 の target clang で -std=c89 -Wall -Wextra -Werror PASS、実行は未確かめ）。文書の「4 byte の buffer で読む」はそのままで良い。
+
+## p022 から（2026-10-30 Q1）
+
+- gpu.md の「a few need both or neither」: both の要求は無い（neither だけ）。直す。
+- gpu.md の「GPU の fence を名指さない descriptor は EBADF か EINVAL」: `gpu_fence_get` は EBADF だけ。EINVAL の出所を確かめ、無ければ直す。
