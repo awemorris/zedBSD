@@ -305,6 +305,7 @@ static const struct values_name values_names[] = {
 	{ "position-visibility", CSS_PROP_POSITION_VISIBILITY },
 	{ "view-transition-name", CSS_PROP_VIEW_TRANSITION_NAME },
 	{ "view-transition-class", CSS_PROP_VIEW_TRANSITION_CLASS },
+	{ "zoom", CSS_PROP_ZOOM },
 	{ "container", SHORT_CONTAINER },
 	{ "border-spacing", SHORT_BORDER_SPACING },
 	{ "margin", SHORT_MARGIN },
@@ -2065,6 +2066,25 @@ values_single(
 		}
 		if (value->ident == NULL)
 			return ENOMEM;
+		return 0;
+	}
+
+	/* zoom: normal, a number or a percentage that is not negative (zero means normal). */
+	if (property == CSS_PROP_ZOOM) {
+		if (count != 1)
+			return EINVAL;
+		value->kind = CSS_VALUE_NUMBER;
+		value->number = 1.0f;
+		if (css_ident_equal(&tokens[0], "normal"))
+			return 0;
+		if (tokens[0].type == CSS_TOKEN_NUMBER && tokens[0].number >= 0)
+			value->number = (float)tokens[0].number;
+		else if (tokens[0].type == CSS_TOKEN_PERCENTAGE && tokens[0].number >= 0)
+			value->number = (float)tokens[0].number / 100.0f;
+		else
+			return EINVAL;
+		if (value->number == 0.0f)
+			value->number = 1.0f;
 		return 0;
 	}
 

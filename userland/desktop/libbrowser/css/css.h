@@ -756,6 +756,8 @@ struct css_style {
 	/* view-transition-name: NULL for none, "match-element", or the custom identifier; view-transition-class: none (NULL) or the identifiers joined by spaces (atoms). */
 	struct vm_string *view_transition_name;
 	struct vm_string *view_transition_class;
+	/* zoom: the factor (1 for normal; not applied to the layout yet). */
+	float zoom;
 	const struct css_anchor_names *anchor_scope;
 	int anchor_scope_all;
 	/* position-area's keywords (css_position_area_parse packs them; -1 for none). */

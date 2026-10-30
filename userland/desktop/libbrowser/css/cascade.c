@@ -1065,6 +1065,7 @@ css_initial_style(
 	style->transform_scale[1] = style->transform_scale[0];
 	style->position_area = -1;
 	style->position_visibility = 2;
+	style->zoom = 1.0f;
 	style->transform_origin[0].unit = CSS_UNIT_PERCENT;
 	style->transform_origin[0].value = 50.0f;
 	style->transform_origin[0].offset = 0;
@@ -3969,6 +3970,9 @@ cascade_apply(
 	case CSS_PROP_VIEW_TRANSITION_CLASS:
 		style->view_transition_class = value->keyword == 2 ? value->ident : NULL;
 		break;
+	case CSS_PROP_ZOOM:
+		style->zoom = value->number;
+		break;
 	case CSS_PROP_DISPLAY:
 		style->display = value->keyword;
 		break;
@@ -4622,6 +4626,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_VIEW_TRANSITION_CLASS:
 		style->view_transition_class = parent->view_transition_class;
+		break;
+	case CSS_PROP_ZOOM:
+		style->zoom = parent->zoom;
 		break;
 	case CSS_PROP_Z_INDEX:
 		style->z_index = parent->z_index;

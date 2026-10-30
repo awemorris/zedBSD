@@ -147,6 +147,7 @@ enum computed_property {
 	COMPUTED_POSITION_VISIBILITY,
 	COMPUTED_VIEW_TRANSITION_NAME,
 	COMPUTED_VIEW_TRANSITION_CLASS,
+	COMPUTED_ZOOM,
 
 	/* The flow-relative properties, six families of four (inline-start, inline-end, block-start, block-end): margin, padding, inset, border width, style and color. */
 	COMPUTED_LOGICAL_FIRST,
@@ -341,6 +342,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "position-visibility", COMPUTED_POSITION_VISIBILITY },
 	{ "view-transition-name", COMPUTED_VIEW_TRANSITION_NAME },
 	{ "view-transition-class", COMPUTED_VIEW_TRANSITION_CLASS },
+	{ "zoom", COMPUTED_ZOOM },
 	{ "text-decoration-line", COMPUTED_TEXT_DECORATION_LINE },
 	{ "text-decoration-style", COMPUTED_TEXT_DECORATION_STYLE },
 	{ "text-decoration-skip-ink", COMPUTED_TEXT_DECORATION_SKIP_INK },
@@ -1324,6 +1326,9 @@ computed_write_keyword(
 		break;
 	case COMPUTED_POSITION_VISIBILITY:
 		error = css_position_visibility_serialize(style->position_visibility, out);
+		break;
+	case COMPUTED_ZOOM:
+		error = computed_number(style->zoom, out);
 		break;
 	case COMPUTED_VIEW_TRANSITION_NAME:
 		if (style->view_transition_name == NULL)
