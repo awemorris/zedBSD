@@ -393,7 +393,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1748 / q1748-i01 | S-p015（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws326-p015`・branch `agent/s-ws326-p015`） | [ws326-p015](ws326/phase015/phase.md) | phase.md のとおり（header を変えない） | in-progress |
+| q1748 / q1748-i01 | S-p015（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws326-p015`・branch `agent/s-ws326-p015`） | [ws326-p015](ws326/phase015/phase.md) | phase.md のとおり（header を変えない） | cleared（34119fa06、test-interp 23460・test-weight 159 checks） |
 | q1749 / q1749-i01 | S-p017（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws326-p017`・branch `agent/s-ws326-p017`） | [ws326-p017](ws326/phase017/phase.md) | phase.md のとおり（header を変えない） | cleared（2134a8efe、test-direct 259 checks） |
 
 ## 2026-10-31: Bug の自動の割り当て（q1750）
