@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 18:45（Q1）
+最終更新: 2026-10-30 19:00（Q1）
 
 ## 担当（P1〜P8）
 
@@ -119,13 +119,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-### 1. WS291（GPU の描画の速さ）p020: VF2 の PowerVR の「model の 50 fps」の基準
-
-- 背景: RDNA と NVIDIA では「Linux で約 50 fps になる重さの 3D の scene」を決め、zedBSD が同じ fps 以上を出す事を目標にした。VF2 の今の SD には PowerVR の GPU の driver を持つ Linux が無く、Linux の基準を立てられない。
-- 今の扱い（Q1 の既定）: zedBSD の今の fps で約 40 fps になる scene を決め、profile を見て 50 fps 以上に上げる。P3 が実施中（copies 1 で 62 fps、10 で 31 fps）。
-- 決めてほしい事: この既定でよいか、別の SD に Linux を入れて Linux の基準を立てるか。
-
-### 2. WS331（driver から HAL への直の依存を除く）の残りの未決 3 点
+### 1. WS331（driver から HAL への直の依存を除く）の残りの未決 3 点
 
 - 背景: 表 A・B は 2026-10-30 に許可された。残りは次の 3 点（詳細は下の「WS331」の節と [phase001](ws331/phase001/phase.md) §4・§6）。
 - (1) Raspberry Pi 4 の console の 2 関数（rpi_cons_suspend_output・resume_output）: HAL の early console（起動の早い段の画面の文字の出力）の中の状態と lock を使うので、driver にも kernel にも移せない。案 (a) 当面の例外として残す（P2 の推し）、(b) 汎用の HAL の口を足す（HAL の API の変更、承認が要る）、(c) driver が画面の文字を自分で描く作りにする。
@@ -136,6 +130,8 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-30 | WS291 GPU の速さ | PowerVR の目標: Linux の RTX 2070 の scene-5000（qs40 × 5000、50 fps）をカタログの FP32 の比（約 392 倍、GPU 594 MHz）で割り、qs40 × 13・1920x1080 で 50 fps 以上 | [ws291/ws.md](ws291/ws.md) |
+| 2026-10-30 | WS331 driver の HAL 依存 | kernel_putc は宣言を kernel の header に。kernel_notify_task は既存の sched_notify_task へ | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS313 ODROID-C5 | zedBSD-firmware に Hardkernel の公式の image（無変更）と Amlogic の license、Mali の firmware を入れて push（ユーザー「WS313のpushはやってください。」、GitHub の main 43662bd） | [ws313/ws.md](ws313/ws.md) |
 | 2026-10-30 | WS307 graphical installer | p007 の G2: amd64 の hal_space_map が HAL_SPACE_SYS（firmware の窓）への実行可の map を受けるのは実装の補完で、HAL の API の変更ではない（ユーザー）。P6 が実装 | [ws307/ws.md](ws307/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | p001 の表 A・表 B を許可 | [ws331/ws.md](ws331/ws.md) |

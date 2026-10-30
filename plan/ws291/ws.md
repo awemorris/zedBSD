@@ -270,3 +270,5 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 - 基準の scene: RTX 2070 の scene-5000（`mview --content=game --present=mailbox --copies=5000`、qs40（37000 三角形）× 5000 = 1 frame 約 1.85 億三角形、1920x1080、vertex shading）で NVK・zedBSD とも約 49〜50 fps。
 - 性能比（Q1 の案、理論の FP32）: RTX 2070 は 2304 core × 1620 MHz × 2 = 約 7.46 TFLOPS。VF2 の IMG BXE-4-32 MC1 は 32 FLOPs/clock × 600 MHz = 19.2 GFLOPS（既定の 400 MHz なら 12.8 GFLOPS）。比は約 389 倍（400 MHz なら約 583 倍）。参考に画素の fill は 64 ROP × 1620 MHz = 103.7 Gpix/s 対 4 pixel/clock × 600 MHz = 2.4 Gpix/s で約 43 倍。三角形の処理の速さの公表値は見つからない。
 - 目標（Q1 の案）: 同じ 1920x1080・qs40 で copies を比で割った scene、600 MHz なら copies 13（5000 ÷ 389、約 48 万三角形）、400 MHz なら copies 9（5000 ÷ 583）で 50 fps 以上。VF2 の GPU の clock は P3 が確かめる。
+
+- 2026-10-30 ユーザー（原文）「PowerVRはLinuxではドライバがぜんぜんダメで、実用水準ではないです。Linuxで、の定義にこだわらなくていいです。指示通り、LinuxでのRTX 2070での50fpsとのきのモデル規模と、RTX 2070とのカタログスペック比で、50fpsになるべきモデル規模を決定してください。」 → 決定（Q1）: 基準は Linux（NVK）の RTX 2070 の scene-5000（qs40 × 5000、1920x1080、50.1 fps）。カタログの FP32 の比（RTX 2070 約 7.46 TFLOPS 対 VF2 の BXE-4-32 MC1 の 594 MHz（P3 が dmesg で確かめた）で 32 × 594 MHz = 19.0 GFLOPS、約 392 倍）で割り、**qs40 × 13（copies 13、1920x1080）で 50 fps 以上**を p020 の受け入れにする。
