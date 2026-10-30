@@ -21,7 +21,8 @@
 **判断が解決した時（2026-10-30 ユーザー「判断事項が解決されたらcockpit.mdをアップデートするようにmaster.mdに記録してください。」）**: ユーザーが答えたら、同じ turn のうちに cockpit.md を直して commit する。その項目を「ユーザーの判断を待つ事」から外し、「決まった事」の節へ一行（日付・WS・決定の要約・記録した ws.md か ticket の link）で移す。決定で変わった担当の予定・WS の進捗の表も同じ時に直す。「決まった事」の節もセッションをまたいで残し、消すのはユーザーの指示か確認の後。
 
 <!-- master:agents:start -->
-**引き継ぎ（2026-10-30 13:2x、Q1）**: 今動いている担当は無い（全員返却・ラップアップ済み、成果は全部 main に merge 済み）。次のセッションの Q1 は [cockpit.md](cockpit.md) と下の表から再開する。
+**動いている担当（2026-10-30 14:05、Q1）**: P1 WS313（q1709、まず ODROID-C5 の試験の image）・P5 WS327（q1710）・P6 WS307（q1711）・P7 WS291（q1712、10.0.10.3）・P8 WS074（q1708）。P5・P6・P7 は WS の完了で返却（ユーザー）。P2・P3・P4 は空き。下の表の「次の 1 手」は各 WS の引き継ぎとして今も有効（P1 の WS009 p028、P2→P5 の WS327、P4→P6 の WS307、P5→P7 の WS291）。
+以前の引き継ぎ（2026-10-30 13:2x、Q1）: 全員返却・ラップアップ済み、成果は全部 main に merge 済み。次のセッションの Q1 は [cockpit.md](cockpit.md) と下の表から再開する。
 再開の手順: (1) `git log -1` と registry の SHA を確かめる。(2) 下の「次のセッションの始めにする事」を順に。(3) 担当は同じ名前・同じ worktree で起動し、表の「次の 1 手」の記録から続けさせる。(4) 10.0.10.3 は `/tmp/zedbsd-rdna.lock` を見る（今は free、Debian、NVMe の kernel は vmunix-va1）。5330 は Debian（NVMe の zedBSD の kernel は WS315 の f1）。
 
 | 担当 | 最後の Queue | WS と次の 1 手（記録の場所） | 実機 |
@@ -118,7 +119,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-370 · q1709 · WS331 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-370 · q1713 · WS331 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

@@ -5,14 +5,11 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner | ws009 (q1705-i01 返却) | `/home/awe/zedBSD-worktrees/p1-ws009r` / `agent/p1-ws009r` | returned（次は phase028 の引き継ぎ） | 36c56acb1（merge 6bfc2c1e3） |
-| P2 | phase-runner | ws327 (q1703-i01 返却) | `/home/awe/zedBSD-worktrees/p2-ws327` / `agent/p2-ws327` | returned（次は phase016 の引き継ぎ） | e9f8da415（merge 52ce25740） |
-| P3 | phase-runner | BUG-369 (q1707-i01 返却、停止) | `/home/awe/zedBSD-worktrees/p3-ws315` / `agent/p3-ws315` | returned（ユーザーの指示で停止） | bd445f5c7（merge e1c714fb5） |
-| P4 | phase-runner | ws307 (q1698-i01 返却) | `/home/awe/zedBSD-worktrees/p4-ws307o` / `agent/p4-ws307o` | returned（次は ws307 の Resume point から） | 520360247（merge fbdd143a8） |
-| P5 | phase-runner | ws291 NVIDIA (q1700-i01 返却) | `/home/awe/zedBSD-worktrees/p5-ws291n` / `agent/p5-ws291n` | returned（次は phase010 の q1700-i01 節から） | c59e5a60e（merge 12a2cc467） |
-| P6 | phase-runner＋Sonnet | ws314 p011・p012 (q1691-i01 cleared) | `/home/awe/zedBSD-worktrees/p6-ws314doc` / `agent/p6-ws314doc` | returned | 64f09ca82（merge d4ba04b96） |
+| P1 | phase-runner-high | ws313 (q1709-i01) | `/home/awe/zedBSD-worktrees/p1-ws313` / `agent/p1-ws313` | in-progress（2026-10-30 起動。WS009 p028 は後で再開） | — |
+| P5 | phase-runner | ws327 (q1710-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p5-ws327` / `agent/p5-ws327` | in-progress（2026-10-30 起動） | — |
+| P6 | phase-runner | ws307 (q1711-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p6-ws307` / `agent/p6-ws307` | in-progress（2026-10-30 起動） | — |
 | P8 | phase-runner-low | ws074 p260 (q1708-i01) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-30 13:50 起動） | — |
-| P7 | phase-runner | ws313 (q1687-i01 返却) | `/home/awe/zedBSD-worktrees/p7-ws313e` / `agent/p7-ws313e` | returned（実機の結果待ち） | b35b6240c（merge b6649f09f） |
+| P7 | phase-runner-high | ws291 (q1712-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p7-ws291` / `agent/p7-ws291` | in-progress（2026-10-30 起動、10.0.10.3） | — |
 
 - 同時に動かす数は 6（2026-10-29 ユーザーの P1〜P6 の指示）。VF2（主）と 5330（従）は P3、10.0.10.3 は空き（2026-10-30 09:13 P5 返却）。
 - P6 の branch（merge しない）: agent/p6-ws296→p6-ws296b（2d17bf9ed から）→p6-ws296c（f31a4954d から）、agent/p6-ws282→p6-ws282b（1190b629c から）→p6-ws282c（c60cdbd44 から）、WS296 は agent/p6-ws296c 1809873bd で全 Phase 実装済み、agent/p6-ws243b（飛ばした記録 b13f3dae7）、agent/p6-ws223（未着手）。

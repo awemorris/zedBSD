@@ -232,3 +232,12 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1708 / q1708-i01 | P8（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/p8-ws074`・branch `agent/p8-ws074`、基点 main 2ba50ae52、host だけ） | [ws074-p260](ws074/phase260/phase.md)（と p261・p262） | local の host で Chromium との比較の環境を作り直し（WPT の固定 commit を自分の build へ、Debian の chromium 153.0.8010.52）、Chromium の基準と dev20 の全件の測定、その後 gap の大きい原因から libbrowser を直す。区切りごとに全件の測定で後退 0 | in-progress |
+
+## 2026-10-30 14:0x: WS313・WS327・WS307・WS291 を P1・P5・P6・P7 で（q1709〜）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1709 / q1709-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws313`・branch `agent/p1-ws313`、基点 main 5aca73738、host・image の build） | [ws313](ws313/ws.md) ODROID-C5 の BSP と Mali | ユーザー「WS313をP1で実行します。ODROIDのテスト用イメージをください。」→ まず実機の試験の image（text の console と Keiland）を作って渡す（bootloader の区画を含む）。その後 ws.md の Resume point から | in-progress |
+| q1710 / q1710-i01 | P5（phase-runner、worktree `/home/awe/zedBSD-worktrees/p5-ws327`・branch `agent/p5-ws327`、基点 main 5aca73738、QEMU） | [ws327](ws327/ws.md) p016 受け入れの残り → p017 → WS の完了 | ユーザー「WS327をP5で実行します。P5はこのWSが終わったら返却してください。」 | in-progress |
+| q1711 / q1711-i01 | P6（phase-runner、worktree `/home/awe/zedBSD-worktrees/p6-ws307`・branch `agent/p6-ws307`、基点 main 5aca73738、QEMU） | [ws307](ws307/ws.md) graphical installer の残り（Resume point から） | ユーザー「WS307をP6で実行します。P6はこのWSが終わったら返却してください。」 | in-progress |
+| q1712 / q1712-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws291`・branch `agent/p7-ws291`、基点 main 5aca73738、実機 10.0.10.3） | [ws291](ws291/ws.md) GPU の描画の速さ（NVIDIA の段、p010 の q1700-i01 節から → p012 以降） | ユーザー「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」 | in-progress |
