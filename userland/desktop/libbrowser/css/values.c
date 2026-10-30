@@ -270,6 +270,12 @@ static const struct values_name values_names[] = {
 	{ "grid-row-end", CSS_PROP_GRID_ROW_END },
 	{ "container-type", CSS_PROP_CONTAINER_TYPE },
 	{ "border-collapse", CSS_PROP_BORDER_COLLAPSE },
+	{ "caption-side", CSS_PROP_CAPTION_SIDE },
+	{ "backdrop-filter", CSS_PROP_BACKDROP_FILTER },
+	{ "will-change", CSS_PROP_WILL_CHANGE },
+	{ "filter", CSS_PROP_FILTER },
+	{ "-webkit-filter", CSS_PROP_FILTER },
+	{ "-webkit-backdrop-filter", CSS_PROP_BACKDROP_FILTER },
 	{ "-webkit-clip-path", CSS_PROP_CLIP_PATH },
 	{ "flex", SHORT_FLEX },
 	{ "-webkit-flex", SHORT_FLEX },
@@ -420,6 +426,13 @@ static const struct values_keyword values_display[] = {
 static const struct values_keyword values_border_collapse[] = {
 	{ "separate", 0 },
 	{ "collapse", 1 },
+	{ NULL, 0 }
+};
+
+/* The keywords of caption-side. */
+static const struct values_keyword values_caption_side[] = {
+	{ "top", 0 },
+	{ "bottom", 1 },
 	{ NULL, 0 }
 };
 
@@ -1009,6 +1022,8 @@ static int values_hsl_function(const struct css_token *tokens, size_t count, uin
 static void values_wide_keyword(int property, const struct css_value *value, struct css_declaration *out, size_t *made);
 static int values_background(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static size_t values_function_length(const struct css_token *tokens, size_t count);
+static int values_filter_argument(const struct css_token *token, int kind, struct css_value *amount);
+static int values_filters(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_url(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_view_transition_class(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_animation_single(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_value *value);
@@ -2272,6 +2287,36 @@ values_single(
 		return 0;
 	}
 
+	/* will-change takes auto or a comma-separated list of property names; only whether one makes a containing block is kept. */
+	if (property == CSS_PROP_WILL_CHANGE) {
+		size_t at;
+
+		value->kind = CSS_VALUE_KEYWORD;
+		value->keyword = 0;
+		for (at = 0; at < count; at++) {
+			if (tokens[at].type == CSS_TOKEN_COMMA)
+				continue;
+			if (tokens[at].type != CSS_TOKEN_IDENT)
+				return EINVAL;
+			if (css_ident_equal(&tokens[at], "transform") || css_ident_equal(&tokens[at], "perspective") ||
+			    css_ident_equal(&tokens[at], "filter") || css_ident_equal(&tokens[at], "backdrop-filter"))
+				value->keyword |= 3;
+			if (css_ident_equal(&tokens[at], "clip-path") || css_ident_equal(&tokens[at], "mask") ||
+			    css_ident_equal(&tokens[at], "mask-image") || css_ident_equal(&tokens[at], "mix-blend-mode") ||
+			    css_ident_equal(&tokens[at], "opacity"))
+				value->keyword |= 2;
+		}
+		return count == 0 ? EINVAL : 0;
+	}
+
+	/* backdrop-filter takes none or a list of filter functions. */
+	if (property == CSS_PROP_BACKDROP_FILTER || property == CSS_PROP_FILTER) {
+		error = values_filters(parse, tokens, count, value);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
 	/* box-shadow takes a list of shadows. */
 	if (property == CSS_PROP_BOX_SHADOW) {
 		/* Parse the selected component with its established native grammar. */
@@ -2576,6 +2621,9 @@ values_single(
 		break;
 	case CSS_PROP_BORDER_COLLAPSE:
 		table = values_border_collapse;
+		break;
+	case CSS_PROP_CAPTION_SIDE:
+		table = values_caption_side;
 		break;
 	case CSS_PROP_CURSOR:
 		table = values_cursor;
@@ -5708,6 +5756,146 @@ values_box_shadow(
 
 	/* Succeeded: the shadows are parsed. */
 	return 0;
+}
+
+/*
+ * Parses backdrop-filter: none, or a list of filter functions (blur() takes a length, hue-rotate() an angle, the others a
+ * number or a percentage; an argument may be left out).
+ */
+static int
+values_filters(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	static const struct {
+		const char *name;
+		int kind;
+	} names[] = {
+		{ "blur", CSS_FILTER_BLUR }, { "brightness", CSS_FILTER_BRIGHTNESS }, { "contrast", CSS_FILTER_CONTRAST },
+		{ "grayscale", CSS_FILTER_GRAYSCALE }, { "hue-rotate", CSS_FILTER_HUE_ROTATE }, { "invert", CSS_FILTER_INVERT },
+		{ "opacity", CSS_FILTER_OPACITY }, { "saturate", CSS_FILTER_SATURATE }, { "sepia", CSS_FILTER_SEPIA }
+	};
+	struct css_filter_list *list;
+	struct css_declared_filter *filter;
+	size_t index;
+	size_t used;
+	size_t name;
+	int found;
+	int error;
+
+	/* The list, kept in the arena. */
+	list = wb_arena_zalloc(parse->arena, sizeof(*list));
+	if (list == NULL)
+		return ENOMEM;
+	value->kind = CSS_VALUE_FILTERS;
+	value->filters = list;
+
+	/* none is the empty list. */
+	if (count == 1 && tokens[0].type == CSS_TOKEN_IDENT) {
+		if (!css_ident_equal(&tokens[0], "none"))
+			return EINVAL;
+		return 0;
+	}
+
+	/* Each function. */
+	index = 0;
+	while (index < count) {
+		/* A reference to an SVG filter has no function here: it filters nothing. */
+		if (tokens[index].type == CSS_TOKEN_URL) {
+			index++;
+			continue;
+		}
+		if (tokens[index].type != CSS_TOKEN_FUNCTION)
+			return EINVAL;
+		used = values_function_length(tokens + index, count - index);
+		if (used < 2U || tokens[index + used - 1U].type != CSS_TOKEN_CLOSE_PAREN || list->count >= CSS_FILTERS)
+			return EINVAL;
+		found = 0;
+		for (name = 0; name < sizeof(names) / sizeof(names[0]); name++) {
+			if (css_ident_equal(&tokens[index], names[name].name)) {
+				found = 1;
+				break;
+			}
+		}
+		if (!found)
+			return EINVAL;
+		filter = &list->filters[list->count];
+		filter->kind = names[name].kind;
+
+		/* No argument is the default (one, or zero for blur and hue-rotate). */
+		memset(&filter->amount, 0, sizeof(filter->amount));
+		filter->amount.kind = CSS_VALUE_LENGTH;
+		filter->amount.unit = CSS_DUNIT_PX;
+		if (filter->kind != CSS_FILTER_BLUR && filter->kind != CSS_FILTER_HUE_ROTATE)
+			filter->amount.number = 1.0f;
+		if (used > 2U) {
+			if (used != 3U)
+				return EINVAL;
+			error = values_filter_argument(&tokens[index + 1U], filter->kind, &filter->amount);
+			if (error != 0)
+				return error;
+		}
+		list->count++;
+		index += used;
+	}
+
+	/* Succeeded: the functions are parsed. */
+	return 0;
+}
+
+/* Parses one filter function's argument: a length for blur, an angle in degrees for hue-rotate, else a non-negative number or percentage. */
+static int
+values_filter_argument(
+	const struct css_token *token,
+	int kind,
+	struct css_value *amount)
+{
+	size_t index;
+	double number;
+	static const struct {
+		const char *name;
+		double scale;
+	} angles[] = { { "deg", 1.0 }, { "grad", 0.9 }, { "rad", 57.29577951308232 }, { "turn", 360.0 } };
+
+	amount->kind = CSS_VALUE_LENGTH;
+	if (kind == CSS_FILTER_BLUR) {
+		/* A non-negative length. */
+		if (values_length(token, 0, amount) != 0 || amount->unit == CSS_DUNIT_PERCENT || amount->number < 0)
+			return EINVAL;
+		return 0;
+	}
+	if (kind == CSS_FILTER_HUE_ROTATE) {
+		/* An angle, or zero. */
+		amount->unit = CSS_DUNIT_PX;
+		if (token->type == CSS_TOKEN_NUMBER && token->number == 0) {
+			amount->number = 0;
+			return 0;
+		}
+		if (token->type != CSS_TOKEN_DIMENSION)
+			return EINVAL;
+		for (index = 0; index < sizeof(angles) / sizeof(angles[0]); index++) {
+			if (css_ident_equal(token, angles[index].name)) {
+				number = token->number * angles[index].scale;
+				amount->number = (float)number;
+				return 0;
+			}
+		}
+		return EINVAL;
+	}
+
+	/* A non-negative number, or a percentage of one. */
+	amount->unit = CSS_DUNIT_PX;
+	if (token->type == CSS_TOKEN_NUMBER && token->number >= 0) {
+		amount->number = (float)token->number;
+		return 0;
+	}
+	if (token->type == CSS_TOKEN_PERCENTAGE && token->number >= 0) {
+		amount->number = (float)(token->number / 100.0);
+		return 0;
+	}
+	return EINVAL;
 }
 
 /* Parses one sharp text shadow, or none; blur and lists remain unsupported. */

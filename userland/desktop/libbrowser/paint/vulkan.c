@@ -1205,6 +1205,10 @@ gpu_stage(
 			continue;
 		}
 
+		/* A backdrop filter works on pixels already drawn; the GPU path draws none of it. */
+		if (item->kind == PAINT_BACKDROP)
+			continue;
+
 		/* A rectangle is one instance. */
 		if (item->kind == PAINT_RECT) {
 			status = gpu_stage_rect(gpu, item, scroll_y, extent, paint_clips_top(&clips));

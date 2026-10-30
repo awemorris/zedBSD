@@ -47,6 +47,7 @@ struct parser_state {
 	struct wb_vector import_media;
 	struct wb_vector font_faces;
 	struct wb_vector try_rules;
+	struct wb_vector keyframes;
 	/* The @scope whose block is being read (NULL outside one). */
 	const struct css_scope *scope;
 };
@@ -115,6 +116,7 @@ static int parser_supports(struct parser_state *state, const struct css_token *t
 static int parser_supports_group(struct parser_state *state, const struct css_token *tokens, size_t count, int *status);
 static int parser_import(struct parser_state *state, const struct css_token *tokens, size_t count);
 static int parser_font_face(struct parser_state *state, const struct css_token *tokens, size_t count);
+static int parser_keyframes(struct parser_state *state, const struct css_token *prelude, size_t prelude_count, const struct css_token *body, size_t body_count);
 static int parser_position_try(struct parser_state *state, const struct css_token *prelude, size_t prelude_count, const struct css_token *body, size_t body_count);
 static int parser_font_descriptor(struct parser_state *state, const struct css_token *name, const struct css_token *tokens, size_t count, struct css_font_face *face);
 static int parser_font_family(struct parser_state *state, const struct css_token *tokens, size_t count, struct vm_string **family);
@@ -178,6 +180,7 @@ css_parse_sheet(
 	wb_vector_init(&state.import_media, sizeof(struct css_media *));
 	wb_vector_init(&state.font_faces, sizeof(struct css_font_face));
 	wb_vector_init(&state.try_rules, sizeof(struct css_try_rule));
+	wb_vector_init(&state.keyframes, sizeof(struct css_keyframes_rule));
 	error = parser_rules(&state, tokens, count, NULL);
 	if (error == 0)
 		error = parser_keep_imports(&state);
@@ -194,6 +197,15 @@ css_parse_sheet(
 	wb_vector_release(&state.imports);
 	wb_vector_release(&state.import_media);
 	wb_vector_release(&state.font_faces);
+	if (error == 0 && state.keyframes.count != 0) {
+		sheet->keyframes = wb_arena_alloc(&sheet->arena, state.keyframes.count * sizeof(struct css_keyframes_rule));
+		if (sheet->keyframes == NULL)
+			error = ENOMEM;
+		else
+			memcpy(sheet->keyframes, state.keyframes.items, state.keyframes.count * sizeof(struct css_keyframes_rule));
+		sheet->keyframe_count = state.keyframes.count;
+	}
+	wb_vector_release(&state.keyframes);
 	wb_vector_release(&state.try_rules);
 	if (error != 0) {
 		wb_vector_release(&state.rules);
@@ -771,6 +783,7 @@ parser_at_rule(
 	int is_font_face;
 	int is_scope;
 	int is_try;
+	int is_keyframes;
 	int holds;
 	int error;
 
@@ -792,7 +805,8 @@ parser_at_rule(
 	is_font_face = css_ident_equal(&tokens[0], "font-face");
 	is_scope = css_ident_equal(&tokens[0], "scope");
 	is_try = css_ident_equal(&tokens[0], "position-try");
-	if (!is_media && !is_supports && !is_layer && !is_font_face && !is_scope && !is_try)
+	is_keyframes = css_ident_equal(&tokens[0], "keyframes") || css_ident_equal(&tokens[0], "-webkit-keyframes");
+	if (!is_media && !is_supports && !is_layer && !is_font_face && !is_scope && !is_try && !is_keyframes)
 		return 0;
 	open = 1;
 	while (open < count && tokens[open].type != CSS_TOKEN_OPEN_CURLY)
@@ -811,6 +825,12 @@ parser_at_rule(
 		if (error == ENOMEM)
 			return error;
 		return 0;
+	}
+
+	/* An @keyframes block's keyframes, kept under its name. */
+	if (is_keyframes) {
+		error = parser_keyframes(state, tokens + 1, open - 1U, tokens + open + 1U, body_count);
+		return error;
 	}
 
 	/* An @position-try block's declarations, kept under its name. */
@@ -853,6 +873,95 @@ parser_at_rule(
 
 	/* Succeeded: the at-rule is read. */
 	return 0;
+}
+
+/*
+ * Reads an @keyframes rule: its name (an identifier or a string) and its keyframes, each a list of offsets (from, to or
+ * a percentage) with the declarations of its block (one keyframe a offset).
+ */
+static int
+parser_keyframes(
+	struct parser_state *state,
+	const struct css_token *prelude,
+	size_t prelude_count,
+	const struct css_token *body,
+	size_t body_count)
+{
+	struct css_keyframes_rule rule;
+	struct css_keyframe frame;
+	struct wb_vector frames;
+	struct token_range block;
+	size_t index;
+	size_t name;
+	size_t open;
+	size_t end;
+	size_t at;
+	int error;
+
+	/* The name, alone. */
+	name = prelude_count;
+	for (index = 0; index < prelude_count; index++) {
+		if (prelude[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (name != prelude_count || (prelude[index].type != CSS_TOKEN_IDENT && prelude[index].type != CSS_TOKEN_STRING))
+			return 0;
+		name = index;
+	}
+	if (name == prelude_count)
+		return 0;
+	memset(&rule, 0, sizeof(rule));
+	rule.name = vm_atom_from_units(state->heap, prelude[name].text, prelude[name].length);
+	if (rule.name == NULL)
+		return ENOMEM;
+
+	/* Each keyframe rule: its offsets, then its block. */
+	wb_vector_init(&frames, sizeof(struct css_keyframe));
+	index = 0;
+	error = 0;
+	while (index < body_count && error == 0) {
+		open = index;
+		while (open < body_count && body[open].type != CSS_TOKEN_OPEN_CURLY)
+			open++;
+		if (open >= body_count)
+			break;
+		end = parser_skip_block(body, body_count, open);
+		block.tokens = body + open + 1U;
+		block.count = end - open - 1U;
+		if (block.count > 0 && block.tokens[block.count - 1U].type == CSS_TOKEN_CLOSE_CURLY)
+			block.count--;
+		memset(&frame, 0, sizeof(frame));
+		error = parser_declarations(state->heap, &state->sheet->arena, block, &frame.declarations, &frame.declaration_count);
+		if (error != 0)
+			break;
+
+		/* One keyframe for each offset of the list. */
+		for (at = index; at < open; at++) {
+			if (body[at].type == CSS_TOKEN_IDENT && css_ident_equal(&body[at], "from"))
+				frame.offset = 0.0f;
+			else if (body[at].type == CSS_TOKEN_IDENT && css_ident_equal(&body[at], "to"))
+				frame.offset = 1.0f;
+			else if (body[at].type == CSS_TOKEN_PERCENTAGE && body[at].number >= 0 && body[at].number <= 100)
+				frame.offset = (float)(body[at].number / 100.0);
+			else
+				continue;
+			error = wb_vector_push(&frames, &frame);
+			if (error != 0)
+				break;
+		}
+		index = end;
+	}
+	if (error == 0 && frames.count != 0) {
+		rule.frames = wb_arena_alloc(&state->sheet->arena, frames.count * sizeof(struct css_keyframe));
+		if (rule.frames == NULL) {
+			error = ENOMEM;
+		} else {
+			memcpy(rule.frames, frames.items, frames.count * sizeof(struct css_keyframe));
+			rule.frame_count = frames.count;
+			error = wb_vector_push(&state->keyframes, &rule);
+		}
+	}
+	wb_vector_release(&frames);
+	return error == ENOMEM ? error : 0;
 }
 
 /*
