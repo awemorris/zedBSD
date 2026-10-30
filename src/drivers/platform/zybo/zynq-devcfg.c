@@ -274,6 +274,8 @@ drv_zynq_devcfg_attach(
 	idcode = slcr_read(SLCR_PSS_IDCODE);
 	if (idcode == 0)
 		fpga.emulated = 1;
+
+	/* Honors the boot parameter that skips the waits, on the emulator only. */
 	command_line = kern_boot_handoff("boot.command-line");
 	asked = kern_boot_parameters_token_present(command_line, NO_PL_WAIT_TOKEN);
 	if (asked && fpga.emulated)

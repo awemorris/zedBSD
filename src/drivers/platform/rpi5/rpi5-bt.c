@@ -1295,6 +1295,7 @@ self_reset(
 	int by_worker)
 {
 	unsigned long enabled;
+	uint64_t now;
 	int decision;
 	int error;
 
@@ -1310,7 +1311,9 @@ self_reset(
 
 	enabled = spin_lock_irqsave(&bt->lock);
 
-	decision = drv_rpi_bt_link_self_reset(&bt->link, observed, now_ms());
+	/* Asks the history of resets whether this one goes ahead, stops the controller for good, or is cancelled. */
+	now = now_ms();
+	decision = drv_rpi_bt_link_self_reset(&bt->link, observed, now);
 	if (decision == DRV_RPI4_BT_SELF_RESET_GO) {
 		bt->self_resets++;
 		begin_transition_locked(bt);

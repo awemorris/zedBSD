@@ -395,6 +395,7 @@ drv_i915_worker_serve(
 	struct i915_device *device)
 {
 	struct i915_worker *worker;
+	unsigned cpu;
 	int outcome;
 	int error;
 
@@ -414,7 +415,9 @@ drv_i915_worker_serve(
 		return error;
 	}
 
-	kern_logf("i915: resident: GPU node published; serving (RCS0, one request at a time, woken by the engine interrupt) on cpu %u\n", kern_cpu_current());
+	/* Records which CPU serves the node. */
+	cpu = kern_cpu_current();
+	kern_logf("i915: resident: GPU node published; serving (RCS0, one request at a time, woken by the engine interrupt) on cpu %u\n", cpu);
 
 	/* The panel's light as /dev/backlight/backlight0, answered by this loop; the node works without it (a failure is logged). */
 	(void)drv_i915_display_backlight_register(device);

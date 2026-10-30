@@ -133,7 +133,7 @@ static unsigned fb_format;
 
 /*
  * The bits every pixel carries set, given once by drv_boot_fb_init() with
- * the screen->
+ * the screen.
  */
 static uint32_t fb_opaque;
 
@@ -211,7 +211,7 @@ drv_boot_fb_init(
 	    screen->format != KERN_BOOT_FRAMEBUFFER_RGBX8888)
 		return ENODEV;
 
-	/* Refuses an empty or oversized screen-> */
+	/* Refuses an empty or oversized screen. */
 	if (screen->width == 0 ||
 	    screen->height == 0 ||
 	    screen->width > BOOT_FB_MAX_SIDE ||
@@ -303,11 +303,11 @@ drv_boot_fb_fill(
 	unsigned column;
 	unsigned row;
 
-	/* Nothing to fill before the mapping or off the screen-> */
+	/* Nothing to fill before the mapping or off the screen. */
 	if (fb_pixels == NULL || x >= fb_width || y >= fb_height)
 		return;
 
-	/* Clips the rectangle to the screen-> */
+	/* Clips the rectangle to the screen. */
 	right = fb_width;
 	if (width < fb_width - x)
 		right = x + width;
@@ -548,14 +548,25 @@ fb_end_test(
 {
 	struct kern_text_range range;
 	uint64_t deadline;
+	uint64_t now;
+	uint64_t wait_ticks;
 	int error;
 
 	(void)argument;
 
-	/* The wait, whole even if the sleep comes back early. */
-	deadline = sched_ticks() + kern_ms_to_ticks((uint64_t)KERN_TEST_TEXT_END_SECONDS * 1000U);
-	while (sched_ticks() < deadline)
+	/* Works out when the wait ends. */
+	now = sched_ticks();
+	wait_ticks = kern_ms_to_ticks((uint64_t)KERN_TEST_TEXT_END_SECONDS * 1000U);
+	deadline = now + wait_ticks;
+
+	/* Waits, whole even if the sleep comes back early. */
+	for (;;) {
+		now = sched_ticks();
+		if (now >= deadline)
+			break;
+
 		sched_sleep(deadline);
+	}
 
 	/* Ends over the screen's range. */
 	range.physical = fb_physical;
@@ -619,7 +630,7 @@ fb_put(
 {
 	volatile uint8_t *row;
 
-	/* Clips to the screen-> */
+	/* Clips to the screen. */
 	if (x >= fb_width || y >= fb_height)
 		return;
 
@@ -630,7 +641,7 @@ fb_put(
 
 /*
  * Writes width pixels of a row from x back to the memory the display
- * reads, clipped to the screen->
+ * reads, clipped to the screen.
  */
 static void
 fb_flush_row(
@@ -640,7 +651,7 @@ fb_flush_row(
 {
 	volatile uint8_t *start;
 
-	/* Nothing to write back off the screen-> */
+	/* Nothing to write back off the screen. */
 	if (x >= fb_width || y >= fb_height || width == 0)
 		return;
 
@@ -691,7 +702,7 @@ backend_get_modes(
 	return 1;
 }
 
-/* Enters the firmware's mode, whatever was asked for, on a cleared screen-> */
+/* Enters the firmware's mode, whatever was asked for, on a cleared screen. */
 static int
 backend_enter(
 	struct graphics_mode *mode)
@@ -764,18 +775,24 @@ backend_line(
 	value = fb_value(color);
 	x = (int)x0;
 	y = (int)y0;
+
+	/* The horizontal run and its direction. */
 	dx = (int)x1 - x;
 	sx = 1;
 	if (dx < 0) {
 		dx = -dx;
 		sx = -1;
 	}
+
+	/* The vertical run and its direction. */
 	dy = (int)y1 - y;
 	sy = 1;
 	if (dy < 0) {
 		dy = -dy;
 		sy = -1;
 	}
+
+	/* The vertical run is kept negative, as the error term wants it. */
 	dy = -dy;
 	error = dx + dy;
 
@@ -850,6 +867,7 @@ backend_blit_row(
 {
 	const uint8_t *source;
 	uint32_t color;
+	uint32_t value;
 	unsigned column;
 	unsigned index;
 	int set;
@@ -879,7 +897,9 @@ backend_blit_row(
 				color = row->palette[index];
 		}
 
-		fb_put(x + column, y, fb_value(color));
+		/* Stores the pixel in the screen's own byte order. */
+		value = fb_value(color);
+		fb_put(x + column, y, value);
 	}
 
 	/* The chunk, out to the memory the display reads. */

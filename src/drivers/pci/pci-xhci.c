@@ -1313,7 +1313,7 @@ port_change_defer(
 		return;
 	__atomic_store_n(&c->port_pending, 1U, __ATOMIC_RELEASE);
 
-	/* Handles the worker condition. */
+	/* Wakes the port worker, when there is one, to look at the port change. */
 	worker = c->port_worker;
 	if (worker)
 		sched_notify_task(worker->task);
@@ -3520,7 +3520,10 @@ xhci_worker_stop(
 		return;
 	c->port_worker = NULL;
 	__atomic_store_n(&c->port_stopping, 1U, __ATOMIC_RELEASE);
+
+	/* Wakes the worker so it sees the stop request. */
 	sched_notify_task(worker->task);
+
 	/* Continue while the operation condition remains true. */
 	while (worker->state != THREAD_ZOMBIE)
 		sched_yield();

@@ -13,7 +13,10 @@
 #include <kern/kcrt.h>
 
 
-/* Share the kernel's JIS X 0208 table instead of carrying a duplicate. */
+/*
+ * The JIS X 0208 to Unicode table (jisx0208.c), indexed in row-major order.
+ * It is constant, so the search for a scalar needs no lock.
+ */
 extern const uint16_t drv_pc98_jisx0208_to_ucs[7896];
 
 static unsigned glyph_width(uint16_t jis);
@@ -50,12 +53,12 @@ drv_pc98_unicode_to_jis(
 
 	/* Process each remaining element. */
 	for (index = 0; index < 7896U; index++) {
-		/* Handles the hal pc98 jisx0208 to ucs condition. */
+		/* Stops at the table entry that holds this scalar. */
 		if (drv_pc98_jisx0208_to_ucs[index] == value) {
 			row = (unsigned)(index / 94U) + 0x21U;
 			cell = (unsigned)(index % 94U) + 0x21U;
 
-			/* Returns the computed result. */
+			/* Reports the JIS code of the entry found. */
 			return (uint16_t)((row << 8) | cell);
 		}
 	}

@@ -1161,6 +1161,8 @@ static int
 commit_held_here(
 	void)
 {
+	unsigned cpu;
+
 	/* A free lock is nobody's. */
 	if (atomic_load_acquire(&dc_commit_lock.held) == 0U)
 		return 0;
@@ -1169,8 +1171,15 @@ commit_held_here(
 	if (atomic_raw_load_acquire(&dc_commit_lock.owner_valid) == 0U)
 		return 0;
 
-	/* The lock is this CPU's when the published owner is this CPU. */
-	return dc_commit_lock.owner_cpu == kern_cpu_current();
+	/* Finds the CPU this runs on. */
+	cpu = kern_cpu_current();
+
+	/* A lock owned by another CPU is not this CPU's. */
+	if (dc_commit_lock.owner_cpu != cpu)
+		return 0;
+
+	/* Succeeded: the published owner is this CPU. */
+	return 1;
 }
 
 /* Writes one of the planes' or panels' registers by its controller offset. */
@@ -1544,20 +1553,28 @@ choose_mode(
 	/* The boot parameters are not parsed yet, so the line is read here. */
 	line = kern_boot_handoff("boot.command-line");
 	error = powervr_dc_mode_from_line(line, &width, &height, &refresh);
-	if (error == ENOENT)
-		return powervr_dc_mode_default();
+	if (error == ENOENT) {
+		/* A line that names no mode takes the default. */
+		mode = powervr_dc_mode_default();
+		return mode;
+	}
+
+	/* A line whose mode cannot be read takes the default, and says so. */
 	if (error != 0) {
 		kern_logf("dc8200: display.mode= unreadable (%d); default mode\n", error);
-		return powervr_dc_mode_default();
+		mode = powervr_dc_mode_default();
+		return mode;
 	}
 
 	/* Takes the named mode when the table has it. */
 	error = powervr_dc_mode_find(width, height, refresh, &mode);
 	if (error != 0) {
 		kern_logf("dc8200: no mode %ux%u@%u; default mode\n", width, height, refresh);
-		return powervr_dc_mode_default();
+		mode = powervr_dc_mode_default();
+		return mode;
 	}
 
+	/* Succeeded: the mode the line named. */
 	return mode;
 }
 

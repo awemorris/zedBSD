@@ -68,7 +68,10 @@
 #define GDC_CSRFORM_BOTTOM	0x7bU
 #define GDC_FIFO_FULL		0x02U
 
-/* The JIS X 0208 table the HAL owns, indexed in row-major order. */
+/*
+ * The JIS X 0208 to Unicode table (jisx0208.c), indexed in row-major order.
+ * It is constant, so the search for a scalar needs no lock.
+ */
 extern const uint16_t drv_pc98_jisx0208_to_ucs[7896];
 
 static uint16_t text_codes[TEXT_CELLS];
@@ -804,7 +807,7 @@ unicode_to_pc98(
 		return (uint16_t)(0xa1U + codepoint - 0xff61U);
 	}
 
-	/* Searches BMP scalars in the HAL-owned JIS X 0208 table. */
+	/* Searches BMP scalars in the JIS X 0208 table. */
 	if (codepoint <= 0xffffU) {
 		/* Visits each retained table entry in row-major order. */
 		for (index = 0; index < 7896U; index++) {

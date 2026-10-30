@@ -1777,7 +1777,7 @@ drv_pci_find_device(
 }
 
 /*
- * Stands in for kern_device_map(): the device mappings is not modelled on the host.
+ * Stands in for kern_device_map(): the device mappings are not modelled on the host.
  */
 int
 kern_device_map(
@@ -1799,7 +1799,7 @@ kern_device_map(
 }
 
 /*
- * Stands in for kern_device_unmap(): the device mappings is not modelled on the host.
+ * Stands in for kern_device_unmap(): the device mappings are not modelled on the host.
  */
 int
 kern_device_unmap(
