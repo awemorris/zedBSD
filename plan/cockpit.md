@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 19:45（Q1）
+最終更新: 2026-10-30 20:10（Q1）
 
 ## 担当（P1〜P8）
 
@@ -12,7 +12,7 @@
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 返却。driver の欠け（instance rate・discard・copy・mip・direct scanout・lock の fatal）を直し、目標の qs40 × 13 は 26.6 fps（目標 50） | 次: 解像度に比例して増える費用と頂点の側の費用の調べ、TA と 3D の時間の分け、punch-through の費用 |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
-| P6 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 起動（q1718）。p007 firmware 変数の driver を改訂 5（G1〜G3）で実装、OVMF で試験 | p014 規約 → WS307 の完了 → 返却 |
+| P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
 | P7 | — | — | 返却（WS291: p010 cleared、p012 uncleared、PowerVR は P3 へ） | — |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 再起動（q1708-i02）。Debian の比較の環境は出来た、Chromium 156 の基準と dev20 の全件の測定の完了待ち | compare → gap の大きい原因から直す |
 
@@ -52,10 +52,10 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | p001・p003・p005・p006・p009〜p011・p013 | 仕様、build、道具、4096 sector、helper、app、通し、文書 | cleared |
 | p002 | OS 名を zedBSD に、release の upload | cleared（push 後の CI は未確かめ） |
 | p004 | package の開発の file、clang・libcxx・GTK4 のセルフビルド | cleared（2026-10-30 QEMU run4 PASS: 導入先で GTK4 の app と C++ を build・実行） |
-| p007 | firmware 変数の kernel の driver（HAL を変えない） | in-progress（設計の下書き） |
+| p007 | firmware 変数の kernel の driver（hal.h は変えない） | in-progress（efiboot の OVMF の試験 PASS。残り: install-admin の導入の QEMU、古い zedBSD の entry の掃除） |
 | p008 | UFS からの起動の確かめ直し | cleared（2026-10-30 512 の j3 の sync 3 回 ok） |
 | p012 | 実機の導入 | canceled |
-| p014 | 規約の見直し | in-progress |
+| p014 | 規約の見直し | cleared（2026-10-30） |
 | p015 | 画面の lock、sleep の既定 Never | cleared（2026-10-30 QEMU の 3 回目 4 項目 PASS） |
 
 ### WS291 GPU の描画の速さ（NVIDIA の段）

@@ -278,7 +278,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1718 / q1718-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws307`・branch `agent/p6-ws307`、main に追従、QEMU（OVMF）） | [ws307-p007](ws307/phase007/phase.md) → p014 → WS307 の完了 | ユーザー「WS307の判断事項は、HAL_SPACE_SYS で 実行可能フラグが使えない実装になっているから、使えるようにしよう、という指摘ですか？もしそうなら、それは実装の問題であって、HALのAPIの変更ではないです。」（改訂 5 の G1〜G3 で実装） | in-progress |
+| q1718 / q1718-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws307`・branch `agent/p6-ws307`、main に追従、QEMU（OVMF）） | [ws307-p007](ws307/phase007/phase.md) → p014 → WS307 の完了 | ユーザー「WS307の判断事項は、HAL_SPACE_SYS で 実行可能フラグが使えない実装になっているから、使えるようにしよう、という指摘ですか？もしそうなら、それは実装の問題であって、HALのAPIの変更ではないです。」（改訂 5 の G1〜G3 で実装） | uncleared（2026-10-30 返却。p007 の efiboot の OVMF の試験 PASS、p014 cleared。残り: install-admin の導入の QEMU、古い entry の掃除。ccd0c8693、merge 061230951） |
 
 ## 2026-10-30 19:4x: WS331 p005 を P2 で（q1719）
 

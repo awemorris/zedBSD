@@ -2,7 +2,7 @@
 
 # WS307 Keiland のアプリとしての zedBSD のグラフィカルなインストーラ
 
-- Status: incomplete（2026-10-30 q1718-i01、P6: 全 Phase の作業が終わり完了の形に書き直した。p007・p014 の cleared は Q1 の判定、その後に completed）
+- Status: incomplete（2026-10-30 Q1 の判定: p014 cleared。p007 は efiboot の QEMU（OVMF）の受け入れが PASS したが、install-admin が導入の時に Boot#### を作る道の QEMU が未実施、spec §5.8 の古い zedBSD の entry の掃除が未実装なので in-progress のまま。この 2 つが済めば completed）
 - 仕様: [spec.md](spec.md)（確定。U1〜U29・J1〜J5、p007 の §5.8 は 2026-10-30 の改訂 5 の形）。
 - Resume point: 2026-10-30 q1718-i01（P6、worktree `/home/awe/zedBSD-worktrees/p6-ws307`、branch `agent/p6-ws307`、基点 main f69189c7e）: p007 の実装と QEMU の試験、p014 の p007 の C の見直し、完了の形への書き直しまで。残りは Q1 の判定、Phase の directory と WS だけの試験の削除（Q1）、試験の plan/tools への移動の判断（Q1）、push の後の CI の 1 回（p002）。
 
