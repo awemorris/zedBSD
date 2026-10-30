@@ -72,6 +72,7 @@
 | 記録 | 場所 |
 | --- | --- |
 | 今の状態・目的・Milestone・未完の WS の一覧 | [plan/master.md](plan/master.md) |
+| ユーザーが監視する状況の一枚（担当・WS の進捗・判断を待つ事、Q1 が保つ） | [plan/cockpit.md](plan/cockpit.md) |
 | 完了・取り下げた WS の一覧 | [plan/workstreams-closed.md](plan/workstreams-closed.md) |
 | Queue（今の物）／ 終わった Queue・Past Log | [plan/queue.md](plan/queue.md) ／ [plan/history/](plan/history/index.md) |
 | 担当の運用・台帳・担当ごとの lane | [protocol](plan/agents/protocol.md)・[registry](plan/agents/registry.md)・`plan/agents/P<n>/queue.md` |
