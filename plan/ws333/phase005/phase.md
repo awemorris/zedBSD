@@ -32,6 +32,7 @@ design.md §9 の p005 の前半（p004 の UAPI に依らない所）: 熱の c
 - 全 port の vmunix.mk に `src/kern/thermal.c`（sysctl.c の隣。p006 の cpuperf.c の行とは別の行）。sparcv9 は別の commit。
 - `src/drivers/acpi/acpi-thermal.c`: 自分の写しと `kern_thermal_register` を外し、`kern_thermal_sensor_register` と 5 秒ごとの push（水準を先に、次に温度）に。file の先頭の開発の管理情報（WS・Phase の番号）を消した。log の行は `acpi: temperature sensor <path> flags 0x.. <n> mC`（valid の欄を外した。照合する道具は無いと grep で確かめた）。
 - `src/drivers/platform/rpi5/rpi5-fan.c`: 写しの entry・lock・`thermal_copy` を外し、登録（ZONE、CPU）と読みごとの push（critical は DT の値）に。fan の登録・受け手・boost は p020。
+- p006 の持ち越し（Q1 の指示で p005 の範囲に）: main（f7a9ae9e7、p006 を含む）を merge し、`src/kern/cpuperf.c` の熱の core の weak の宣言と呼ぶ所の NULL の検査を外した（core は全 port に入る）。受け手の `poll` は poll の thread が毎秒呼ぶ。
 - 試験: `plan/ws333/tests/thermal-host/`（`run.sh <out>`、host の thread で 3 つの thread を動かし、時計は 20 倍速）、`plan/ws333/tests/config-amd64-boot.mk`（起動の確認の小さな image）。
 
 ## 設計からの差（理由）
@@ -50,6 +51,5 @@ design.md §9 の p005 の前半（p004 の UAPI に依らない所）: 熱の c
 
 - QEMU amd64 の起動（boot-test.sh）は下の「QEMU」に。
 - 後半（p004 の後）: `/dev/thermal`（cdev・node・core の ioctl 1〜31・read と poll）、`/dev/thermal-inject` と試験の受け手、`/sbin/thermal` の熱の表示。
-- p006 の `cpuperf.c` の weak（`kern_thermal_receiver_register`・`kern_thermal_event`）は、p005 と p006 が両方 main に入った後に外せる（cpuperf.c は P7 の file なのでここでは触らない）。
 - WMI の attach の試し直し（poll の thread、p017）、passive（p021）、非常（p016）、Pi 5 の fan の登録（p020）。
 - 規約の全文の見直しは p024。

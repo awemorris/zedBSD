@@ -264,17 +264,6 @@ static struct wait_queue cpuperf_governor_queue;
 static struct spinlock cpuperf_governor_lock;
 static struct sched_cpu_time *cpuperf_governor_times;
 
-/*
- * The thermal core's interfaces this file calls.
- *
- * The thermal core is optional at link time: a kernel built without it
- * has no strategy and no passive cooling to deliver, so the framework is
- * then never registered as a receiver and never posts an event.  Every
- * call site tests the symbol first.
- */
-extern int kern_thermal_receiver_register(const char *name, const struct kern_thermal_receiver_ops *ops, void *context) __attribute__((weak));
-extern void kern_thermal_event(uint32_t type, uint32_t index, int64_t value) __attribute__((weak));
-
 static int cpuperf_receiver_apply(void *context, const struct kern_thermal_strategy *strategy, uint32_t *flags);
 static int cpuperf_receiver_limit(void *context, uint32_t domain, uint32_t permille);
 static void cpuperf_receiver_poll(void *context);
@@ -422,11 +411,9 @@ kern_cpuperf_init(void)
 	mutex_unlock(&cpuperf_mutex);
 
 	/* Offers the strategy and the ceiling of the CPUs to the thermal core. */
-	if (kern_thermal_receiver_register != NULL) {
-		error = kern_thermal_receiver_register("cpu", &cpuperf_receiver, NULL);
-		if (error != 0)
-			kern_logf("cpuperf: the thermal core refused the receiver (%d)\n", error);
-	}
+	error = kern_thermal_receiver_register("cpu", &cpuperf_receiver, NULL);
+	if (error != 0)
+		kern_logf("cpuperf: the thermal core refused the receiver (%d)\n", error);
 }
 
 /*
@@ -2910,10 +2897,9 @@ cpuperf_publish_change(void)
 {
 	uint32_t generation;
 
-	/* Posts the event when the thermal core is linked. */
+	/* Posts the event with the generation the readers compare. */
 	generation = atomic_load_acquire(&cpuperf_generation_count);
-	if (kern_thermal_event != NULL)
-		kern_thermal_event(KERN_THERMAL_EVENT_CPU, KERN_CPUPERF_ALL, (int64_t)generation);
+	kern_thermal_event(KERN_THERMAL_EVENT_CPU, KERN_CPUPERF_ALL, (int64_t)generation);
 }
 
 /*
