@@ -246,6 +246,10 @@ ZEDBSD_CLANG_RESOURCE_HEADERS = $(shell test -d '$(ZEDBSD_CLANG_RESOURCE_DIR)' &
 # tool: a compile runs cc hundreds of times in a configure, and a script
 # costs a shell start on every one.
 #
+# clang++.cfg, beside the program, is the configuration file the driver reads
+# when it runs as clang++: the target's driver adds no C++ library, so the
+# file names libc++'s headers and the libraries a C++ link needs.
+#
 # The shared C library is copied rather than linked to.  The copy costs a
 # megabyte and is not a second library -- the loader answers DT_NEEDED by
 # soname, so a program linked against this copy loads the /lib one it was
@@ -282,10 +286,12 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
 	$(foreach object,$(ZEDBSD_CLANG_LINK_OBJECTS),\
 	 --file /usr/lib/$(object)=$(ZEDBSD_EXTERNAL_SYSROOT)/usr/lib/$(object)) \
 	--file /usr/lib/libc.so=$(ZEDBSD_CLANG_RUNTIME_LIBC) \
+	--file /usr/bin/clang++.cfg=$(abspath $(ZEDBSD_CLANG_DIR))/clang++.cfg \
 	--file /usr/share/licenses/clang/LICENSE.TXT=$(ZEDBSD_CLANG_LICENSE) \
 	--mode /usr/bin/clang=0755 \
 	$(foreach tool,$(ZEDBSD_CLANG_TOOLS),--mode /usr/bin/$(tool)=0755) \
 	$(foreach library,$(ZEDBSD_CLANG_LIBS),--mode /usr/lib/$(library)=0755) \
-	--mode /usr/lib/libc.so=0755)
+	--mode /usr/lib/libc.so=0755 \
+	--mode /usr/bin/clang++.cfg=0644)
 ZEDBSD_PACKAGE_LINKS += $(if $(filter clang,$(ZEDBSD_USER_PROGRAMS)),\
 	/usr/bin/clang++=clang /usr/bin/cc=clang /usr/bin/ld=ld.lld)

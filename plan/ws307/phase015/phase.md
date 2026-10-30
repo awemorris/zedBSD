@@ -3,7 +3,7 @@
 # ws307-p015 画面の lock の既定を never にし、never でも lock される不具合を直す
 
 - 親: [WS307](../ws.md)。Queue: q1674 / q1674-i01（担当 P5、2026-10-29、worktree p5-ws307lock、基点 main 55ee43590）。
-- Status: in-progress（lock の分は 2026-10-29 cleared。sleep の既定 Never（211103282）の QEMU は q1711-i01 の 3 回目で PASS（下）。Q1 の判定待ち）
+- Status: cleared（2026-10-30 Q1 の判定。lock の分は 2026-10-29、sleep の既定 Never（211103282）は q1711-i01 の QEMU の 3 回目の 4 項目 PASS（`build/ws307-p015s-run3/summary.txt`、merge febbbabfc））
 - ユーザーの指示（原文、2026-10-29）:「WS307でついでに行ってほしいのですが、デスクトップがロックされるデフォルトの時間の設定を、neverをデフォルトにしてほしいです。また、neverにしても、現在は実際にはロックされてしまうみたいなので、直しておいてほしいです。」
 - 範囲（Q1）: idle の後に画面を lock する時間の既定を never に（Settings の頁、compositor の既定、設定の file の既定。file に値がある利用者はその値を保つ）。never でも lock される原因を探して直す。sleep（suspend）の既定は範囲の外（変えない）。
 
@@ -59,4 +59,4 @@
   - p015.sleep-time pass: power.sleep.ac 2 分で 1 分で画面が消え、Never に戻し Esc で点いた。
   - PNG: `build/ws307-p015s-run3/png/`（8 枚）。判定は session の行と SSH の screenshot（console・serial の log は使っていない）。
 - 前の 2 回の未達は host の load（clang の build と重なり load 約 30）の見込みのまま、原因は確定していない（今回は同じ script・image の形で通った）。
-- 実機: 未実施（範囲の外）。Q1 の cleared の判定待ち。
+- 実機: 未実施（範囲の外）。2026-10-30 Q1 の判定で cleared。

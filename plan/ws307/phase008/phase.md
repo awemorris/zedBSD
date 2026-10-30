@@ -67,3 +67,8 @@
 - 512 の j3 の sync は q1665-i07 の p009 の試験で確かめたが、その後に UFS の遅さの直し（6387b82a0: mkfs の native が tail journal を書かない、batched journal、cache の包み `ufs_buf_*`）が入ったので、今の tree で確かめ直す。
 - 形: p004 の試験 `plan/ws307/tests/p004-gtk.sh` が兼ねる（install-admin で NVMe 512 に導入した root に 2,867,200 byte を書き rename・sync し、mount のまま guest を止め、host の `ufs-cat`（`plan/ws307/tests/host/ufs-cat.c`＋`bootloader/common/ufs-read.c`、512 byte）が同じ cksum で読むか。行 `HOST j3-sync ok|fail`）。script は commit 済み（2aad28963）、**未実行**（image の build の前にラップアップ）。
 - 次の 1 手: p004 の phase.md の「次の 1 手」の 1 と 3（installer-image の build と p004-gtk.sh）。p004 を待たずに確かめるなら、同じ tree で `make … ZEDBSD_CONFIG=plan/ws307/tests/config-amd64-p009.mk … installer-image` の後 `sh plan/ws307/tests/p009-install.sh IMAGE`（SATA の 512 で同じ確かめ）。
+
+## q1711-i01（2026-10-30、P6、worktree p6-ws307）: 512 の j3 の sync の確かめ直し
+
+- p004 の試験が兼ねた（UFS の遅さの直し 6387b82a0 の後の tree、main 5aca73738 から作った `build/ws307-p004/installer-image.img`）。`plan/ws307/tests/p004-gtk.sh` の run2・run3・run4 の 3 回とも `HOST j3-sync ok`: install-admin で NVMe 512 に導入した root（native UFS、j3）に 2,867,200 byte を書き、rename、`sync`、mount のまま guest を止め、host の `ufs-cat`（`plan/ws307/tests/host/ufs-cat.c`＋`bootloader/common/ufs-read.c`、512 byte の block）が同じ cksum で読んだ（run4 は `build/ws307-test/p004.oeVctS`）。
+- これで p008 の残りは無い（`video=640x480` の観察は Q1 の判断のまま）。判定は Q1。
