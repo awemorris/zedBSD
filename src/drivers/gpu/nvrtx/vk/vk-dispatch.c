@@ -26,11 +26,13 @@ static unsigned dispatch_shown;
 static void dispatch_refused(uint32_t opcode, int error);
 
 /*
- * The handlers, each owning a group of opcodes: the instance and device,
- * the objects and the recorded work.  The list is fixed for the node's
- * life.
+ * The handlers, each owning a group of opcodes: the recorded commands
+ * (first: a frame's commands are mostly theirs, and no other handler owns
+ * one), the instance and device, the objects and the queue.  The list is
+ * fixed for the node's life.
  */
 static const nvrtx_vk_route dispatch_routes[] = {
+	nvrtx_vk_record_route,
 	nvrtx_vk_device_route,
 	nvrtx_vk_memory_route,
 	nvrtx_vk_resource_route,
@@ -38,7 +40,6 @@ static const nvrtx_vk_route dispatch_routes[] = {
 	nvrtx_vk_target_route,
 	nvrtx_vk_pipeline_route,
 	nvrtx_vk_command_route,
-	nvrtx_vk_record_route,
 	nvrtx_vk_queue_route,
 	nvrtx_vk_video_route
 };

@@ -284,7 +284,42 @@ nvrtx_vk_blob_read(void *owner, uint8_t *to, const uint8_t *from, size_t length)
 /* The fence of the newest run the fakes ran (each submission runs at once). */
 static uint32_t gpu_fence;
 
-/* Decodes a run's push buffer into the method log: incrementing headers of the 3D subchannel. */
+static uint8_t *gpu_cpu(uint64_t va);
+
+/* The constant buffer the loads go to (the selector's address) and where the next load goes in it. */
+static uint64_t gpu_selected;
+static uint32_t gpu_load_at;
+
+/* Logs one method's word; a load into the selected constant buffer is written to its memory. */
+static void
+gpu_method(uint32_t method, uint32_t value)
+{
+	uint8_t *cpu;
+
+	if (method_count < 65536U) {
+		method_log[method_count][0] = method;
+		method_log[method_count][1] = value;
+		method_count++;
+	}
+	if (method == 0x2384U)
+		gpu_selected = (gpu_selected & 0xffffffffULL) | ((uint64_t)value << 32);
+	else if (method == 0x2388U)
+		gpu_selected = (gpu_selected & ~0xffffffffULL) | value;
+	else if (method == 0x238cU)
+		gpu_load_at = value;
+	else if (method >= 0x2390U && method <= 0x23ccU) {
+		cpu = gpu_cpu(gpu_selected + gpu_load_at);
+		if (cpu != NULL)
+			memcpy(cpu, &value, 4);
+		gpu_load_at += 4U;
+	}
+}
+
+/*
+ * Decodes a run's push buffer into the method log: incrementing,
+ * non-incrementing, one-incrementing and immediate headers of the 3D
+ * subchannel.
+ */
 static int
 gpu_run(uint64_t va, uint32_t bytes)
 {
@@ -292,8 +327,10 @@ gpu_run(uint64_t va, uint32_t bytes)
 	uint32_t header;
 	uint32_t count;
 	uint32_t method;
+	uint32_t operation;
 	uint32_t at;
 	uint32_t word;
+	uint32_t value;
 	unsigned index;
 
 	push = NULL;
@@ -310,14 +347,20 @@ gpu_run(uint64_t va, uint32_t bytes)
 		at += 4;
 		count = (header >> 16) & 0x1fffU;
 		method = (header & 0xfffU) << 2;
-		if ((header >> 29) != 1U || ((header >> 13) & 7U) != 0U)
+		operation = header >> 29;
+		if (((header >> 13) & 7U) != 0U)
+			return EIO;
+		if (operation == 4U) {
+			gpu_method(method, count);
+			continue;
+		}
+		if (operation != 1U && operation != 3U && operation != 5U)
 			return EIO;
 		for (word = 0; word < count; word++) {
-			if (method_count < 65536U) {
-				memcpy(&method_log[method_count][1], push + at, 4);
-				method_log[method_count][0] = method + word * 4U;
-				method_count++;
-			}
+			memcpy(&value, push + at, 4);
+			gpu_method(method, value);
+			if (operation == 1U || (operation == 5U && word == 0U))
+				method += 4U;
 			at += 4;
 		}
 	}
@@ -1978,20 +2021,21 @@ test_submit(const char *directory)
 	check(tic != NULL && word == 0x30004000U, "submit: header 0's address");
 	memcpy(&word, tic + 12, 4);
 	check((word & 0xffffU) == (256U >> 5), "submit: header 0's pitch");
-	constants = gpu_cpu(execute_va + (1024U * 1024U));
+	constants = gpu_cpu(execute_va + (1672U * 1024U));
 	memcpy(&word, constants + 0x400, 4);
 	check(word == 0U, "submit: the draw's handle names header 0 and sampler 0");
 	memcpy(&word, constants + 0, 4);
 	check(word == 0xbf800000U, "submit: the draw's push constants");
 
-	/* The upload off the 256-byte boundary: header 3 from the buffer's 0x40, rows of 64; its quad samples from one pixel in. */
+	/* The upload off the 256-byte boundary: header 3 from the buffer's 0x40, rows of 64; its quad (the third, constants of its own after the run's first 1 MiB) samples from one pixel in. */
+	constants = gpu_cpu(execute_va + (1024U * 1024U));
 	memcpy(&word, tic + 3 * 32 + 4, 4);
 	check(word == 0x30008040U, "submit: the skewed upload's texture starts on the 32-byte boundary before it");
 	memcpy(&word, tic + 3 * 32 + 12, 4);
 	check((word & 0xffffU) == (64U >> 5), "submit: the skewed upload's texture rows of 64 bytes");
-	memcpy(&word, constants + 3 * 0x500 + 0x10, 4);
+	memcpy(&word, constants + 2 * 0x500 + 0x10, 4);
 	check(word == 0x3f800000U, "submit: the skewed upload samples from u 1");
-	memcpy(&word, constants + 3 * 0x500 + 0x18, 4);
+	memcpy(&word, constants + 2 * 0x500 + 0x18, 4);
 	check(word == 0x40a00000U, "submit: the skewed upload samples to u 5");
 	check(methods_with(0x0e04, (10U | (14U << 16)), 0) == 1 && methods_with(0x0e08, (50U | (53U << 16)), 0) == 1,
 	    "submit: the skewed upload's scissor is its region");

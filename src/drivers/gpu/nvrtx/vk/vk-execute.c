@@ -23,10 +23,12 @@
  * run: a copy by the CPU, a shadow given back, the session's close (and,
  * in the node, a memory or a run of the executor's memory given back).
  *
- * A draw writes everything it uses: its constants (the push constants and
- * its texture handles) in a constant buffer of its own, a header and a
- * sampler for each sampled image, the viewport, scissor, blend, vertex
- * input and programs.  A copy, a blit, a copy between a buffer and an
+ * A draw writes what it uses: its constants (the push constants and its
+ * texture handles) in constant buffer 0, a header and a sampler for each
+ * sampled image, the viewport, scissor, blend, vertex input and programs;
+ * right after another draw of the push buffer only what differs from it
+ * (the constants loaded into the same constant buffer 0 by the push
+ * buffer).  A copy, a blit, a copy between a buffer and an
  * image, and a clear are drawn too: a quad of the executor's own programs
  * samples the source (in pixel coordinates) into the destination.  A copy
  * whose buffer is not laid out as a texture or a target can be (its start
@@ -68,6 +70,13 @@
 #define EXECUTE_SAMPLERS_AT		(1600U * 1024U)
 #define EXECUTE_ZERO_AT			(1664U * 1024U)
 #define EXECUTE_CORNERS_AT		(1668U * 1024U)
+
+/*
+ * The application draws' constant buffer 0, in the first slot (which
+ * lives as long as the session): zero when made, then written only by
+ * loads in the push buffers, never by the CPU, as the GPU writes it.
+ */
+#define EXECUTE_ROOT_AT			(1672U * 1024U)
 
 /*
  * The headers and the samplers of one push buffer, each eight words.
@@ -173,6 +182,27 @@ struct execute_kept {
 	int32_t y1;
 };
 
+/*
+ * The pool handles a push buffer's draws keep for their textures: one
+ * place for each view and sampler pair, chosen by their addresses (a pair
+ * whose place another took makes its entries again).
+ */
+#define EXECUTE_TEXTURE_CACHE		32U
+#define EXECUTE_TEXTURE_CACHE_SHIFT	6U
+
+/*
+ * The parts of a pipeline's state a draw writes when they differ from the
+ * last draw's pipeline's.
+ */
+#define EXECUTE_PIPELINE_RASTER		(1U << 0)
+#define EXECUTE_PIPELINE_DEPTH		(1U << 1)
+#define EXECUTE_PIPELINE_BLEND		(1U << 2)
+#define EXECUTE_PIPELINE_VERTEX_PROGRAM	(1U << 3)
+#define EXECUTE_PIPELINE_PIXEL_PROGRAM	(1U << 4)
+#define EXECUTE_PIPELINE_VERTEX_INPUT	(1U << 5)
+#define EXECUTE_PIPELINE_UNIFORMS	(1U << 6)
+#define EXECUTE_PIPELINE_ALL		0x7fU
+
 /* The words nvrtx_exec_viewport() writes. */
 #define EXECUTE_VIEWPORT_BYTES		48U
 
@@ -180,7 +210,8 @@ struct execute_kept {
  * What draws one after another reuse: the viewport's words the last draw's
  * viewport (viewport_in, as recorded) made (valid once viewport_bytes is
  * not 0), and the pool handles of the textures (view and sampler) the
- * fragment program sampled, each made in the push buffer counted by pools
+ * fragment programs sampled, each at its pair's place
+ * (EXECUTE_TEXTURE_CACHE) and made in the push buffer counted by pools
  * (execute_begin() counts each new one; the pools start empty there).
  */
 struct execute_reuse {
@@ -188,10 +219,42 @@ struct execute_reuse {
 	uint8_t viewport[EXECUTE_VIEWPORT_BYTES];
 	size_t viewport_bytes;
 	uint32_t pools;
-	uint32_t texture_pools[NVRTX_VK_TEXTURES_MAX];
-	const void *texture_view[NVRTX_VK_TEXTURES_MAX];
-	const void *texture_sampler[NVRTX_VK_TEXTURES_MAX];
-	uint32_t texture_handle[NVRTX_VK_TEXTURES_MAX];
+	uint32_t texture_pools[EXECUTE_TEXTURE_CACHE];
+	const void *texture_view[EXECUTE_TEXTURE_CACHE];
+	const void *texture_sampler[EXECUTE_TEXTURE_CACHE];
+	uint32_t texture_handle[EXECUTE_TEXTURE_CACHE];
+};
+
+/*
+ * What the GPU holds after the last application draw of a push buffer,
+ * for the next draw to write only what differs.  It holds while nothing
+ * else was written since: the same push buffer (pools) going on where that
+ * draw ended (at).  The pipeline's state (the culling, the depth test, the
+ * blend, the programs), the viewport and the scissor as written, the
+ * vertex streams' buffers and offsets, the index buffer, the sets the
+ * uniform buffers came from, the draw's bases, and constant buffer 0: its
+ * slot (constants_va) holding the push constants push and the texture
+ * handles handles, and whether the selector still names it (selected; a
+ * uniform buffer's binding selects its own buffer).
+ */
+struct execute_held {
+	uint32_t pools;
+	size_t at;
+	const struct nvrtx_vk_pipeline *pipeline;
+	uint32_t viewport[6];
+	int32_t scissor[4];
+	const struct nvrtx_vk_buffer *buffers[NVRTX_VK_VERTEX_BINDINGS_MAX];
+	uint64_t offsets[NVRTX_VK_VERTEX_BINDINGS_MAX];
+	bool index_set;
+	const struct nvrtx_vk_buffer *index_buffer;
+	uint64_t index_offset;
+	uint32_t index_type;
+	const struct nvrtx_vk_descriptor_set *sets[NVRTX_VK_SETS_MAX];
+	struct nvrtx_exec_bases bases;
+	uint64_t constants_va;
+	bool selected;
+	uint32_t push[NVRTX_VK_PUSH_BYTES / 4U];
+	uint32_t handles[NVRTX_VK_TEXTURES_MAX];
 };
 
 /*
@@ -202,7 +265,8 @@ struct execute_reuse {
  * started says a push buffer is begun there and not yet submitted;
  * class_ready that a run on the session's channel set the 3D class's
  * initial state and the channel keeps it; kept is what the shadow holds,
- * reuse what one draw leaves the next.  at is
+ * reuse what one draw leaves the next, held what the GPU holds after
+ * the last application draw.  at is
  * where the push buffer goes on, constants, headers and samplers how much
  * of their parts the push buffer uses, draws and quads how many
  * application draws and own quads it holds (for the node's counts).  The
@@ -234,6 +298,7 @@ struct nvrtx_vk_execute {
 	uint64_t shadow_bytes;
 	struct execute_kept kept;
 	struct execute_reuse reuse;
+	struct execute_held held;
 	/* The owner's generation: the shader model of the programs and the 3D class of the push buffers. */
 	uint32_t shader_model;
 	uint32_t threed_class;
@@ -241,7 +306,8 @@ struct nvrtx_vk_execute {
 
 /*
  * What a command buffer's records have bound so far, and the pass they
- * are in; push_bytes are the command buffer's push constant bytes.  A
+ * are in; push_bytes are the command buffer's push constant bytes, push
+ * the ones bound, none from push_end on (still zero).  A
  * pass drawn in the shadow: backing is its target's memory's (NULL
  * without one), and known says the shadow holds the target's
  * pixels in the region known_x0, known_y0 to known_x1, known_y1 at its start.
@@ -259,7 +325,8 @@ struct execute_state {
 	const struct nvrtx_vk_buffer *index_buffer;
 	uint64_t index_offset;
 	uint32_t index_type;
-	uint8_t push[NVRTX_VK_PUSH_BYTES];
+	uint32_t push[NVRTX_VK_PUSH_BYTES / 4U];
+	uint32_t push_end;
 	bool in_pass;
 	struct nvrtx_exec_target target;
 	bool target_written;
@@ -315,7 +382,11 @@ static int execute_end_pass(struct nvrtx_vk_session *session, struct nvrtx_vk_ex
 static void execute_shadow_copy(const struct nvrtx_exec_target *to, const struct nvrtx_exec_target *from, int32_t x0, int32_t y0,
 				int32_t x1, int32_t y1, struct execute_quad *quad);
 static int execute_draw(struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
-static int execute_textures(struct nvrtx_vk_execute *execute, const struct execute_state *state, uint8_t *constants);
+static uint32_t execute_pipeline_changes(const struct nvrtx_vk_pipeline *held, const struct nvrtx_vk_pipeline *pipeline);
+static bool execute_same_words(const uint32_t *left, const uint32_t *right, size_t count);
+static int execute_draw_constants(struct nvrtx_vk_execute *execute, const struct execute_state *state, const uint32_t *handles, bool known);
+static void execute_draw_load(struct nvrtx_vk_execute *execute, uint32_t offset, const uint32_t *words, uint32_t *held_words, uint32_t count);
+static int execute_textures(struct nvrtx_vk_execute *execute, const struct execute_state *state, uint32_t *handles);
 static int execute_texture(struct nvrtx_vk_execute *execute, const struct nvrtx_vk_view *view, const struct nvrtx_vk_sampler *sampler, uint32_t *handle);
 static int execute_pool_entry(struct nvrtx_vk_execute *execute, const uint32_t *header, const uint32_t *sampler, uint32_t *handle);
 static int execute_constants(struct nvrtx_vk_execute *execute, uint8_t **cpu, uint64_t *va);
@@ -503,8 +574,9 @@ execute_slot_make(
 		return error;
 	}
 
-	/* The zero page, and the corners: (0,0) (1,0) (0,1), (1,0) (1,1) (0,1). */
+	/* The zero page, constant buffer 0, and the corners: (0,0) (1,0) (0,1), (1,0) (1,1) (0,1). */
 	kern_memset(slot->cpu + EXECUTE_ZERO_AT, 0, NVRTX_GSP_PAGE_SIZE);
+	kern_memset(slot->cpu + EXECUTE_ROOT_AT, 0, EXECUTE_CONSTANTS_SIZE);
 	for (index = 0U; index < EXECUTE_CORNERS * 2U; index++)
 		nvrtx_put32(slot->cpu, EXECUTE_CORNERS_AT + index * 4U, corners[index]);
 
@@ -918,7 +990,9 @@ execute_bind(
 		state->index_type = record->values[0];
 		break;
 	case GPU_OP_CMD_PUSH_CONSTANTS:
-		kern_memcpy(state->push + record->first, state->push_bytes + record->push_at, record->count);
+		kern_memcpy((uint8_t *)state->push + record->first, state->push_bytes + record->push_at, record->count);
+		if (record->first + record->count > state->push_end)
+			state->push_end = record->first + record->count;
 		break;
 	default:
 		break;
@@ -1275,11 +1349,19 @@ execute_shadow_copy(
 }
 
 /*
- * Runs a draw (indexed or not) in a pass: its constants (the push
- * constants and the texture handles of the fragment program's samples),
- * the target when not written yet, the viewport and scissor, the culling,
- * the depth test, the blend, the vertex input, the index buffer, the
- * constant buffers, the programs and the draw.
+ * Runs a draw (indexed or not) in a pass: the target when not written
+ * yet, its constants (the push constants and the texture handles of the
+ * fragment program's samples), the viewport and scissor, the culling, the
+ * depth test, the blend, the vertex input, the index buffer, the uniform
+ * buffers, the programs and the draw.  Right after another application
+ * draw of the push buffer (nothing written between), only what differs
+ * from that draw's state is written, as the GPU keeps the rest; the
+ * constants then go into the same constant buffer 0 by loads in the push
+ * buffer, which the draws before do not see.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_cmd_draw.c
+ * (nvk_cmd_flush_gfx_dynamic_state, nvk_cmd_flush_gfx_root_desc: the
+ * state written when dirty, constant buffer 0 loaded in the push buffer).
  */
 static int
 execute_draw(
@@ -1289,21 +1371,26 @@ execute_draw(
 {
 	const struct nvrtx_vk_pipeline *pipeline;
 	struct execute_reuse *reuse;
+	struct execute_held *held;
+	struct nvrtx_exec_draw_args draw;
 	struct nvrtx_exec_vertex vertex;
 	struct nvrtx_exec_blend blend;
 	struct nvrtx_exec_depth depth;
 	const uint32_t *viewport;
 	const VkRect2D *scissor;
+	uint32_t handles[NVRTX_VK_TEXTURES_MAX];
 	uint8_t *push;
-	uint8_t *constants;
-	uint64_t constants_va;
 	int32_t x0;
 	int32_t y0;
 	int32_t x1;
 	int32_t y1;
 	uint64_t index_va;
 	uint8_t *index_cpu;
+	uint32_t index;
+	uint32_t changes;
 	bool indexed;
+	bool known;
+	bool same;
 	int error;
 
 	/* A draw in a pass with a target, with a pipeline; an indexed one with an index buffer. */
@@ -1324,23 +1411,7 @@ execute_draw(
 			return EINVAL;
 	}
 
-	/* The draw's constants: the push constants, then the handles of its textures. */
-	error = execute_constants(execute, &constants, &constants_va);
-	if (error != 0)
-		return error;
-	kern_memcpy(constants, state->push, NVRTX_VK_PUSH_BYTES);
-	error = execute_textures(execute, state, constants);
-	if (error != 0)
-		return error;
-
-	/* The target, once in a push buffer. */
-	push = execute->cpu + EXECUTE_PUSH_AT;
-	if (!state->target_written) {
-		execute->at = nvrtx_exec_target(push, execute->at, &state->target);
-		state->target_written = true;
-	}
-
-	/* The viewport and the scissor: dynamic or the pipeline's, the scissor within the target. */
+	/* The viewport and the scissor: dynamic or the pipeline's, the scissor within the target; nothing to draw outside it. */
 	viewport = pipeline->viewport;
 	if (pipeline->dynamic_viewport != 0U && state->viewport_set)
 		viewport = state->viewport;
@@ -1361,68 +1432,364 @@ execute_draw(
 		y1 = (int32_t)state->target.height;
 	if (x1 <= x0 || y1 <= y0)
 		return 0;
-	reuse = &execute->reuse;
-	if (reuse->viewport_bytes == 0U || kern_memcmp(reuse->viewport_in, viewport, sizeof(reuse->viewport_in)) != 0) {
-		kern_memcpy(reuse->viewport_in, viewport, sizeof(reuse->viewport_in));
-		reuse->viewport_bytes = nvrtx_exec_viewport(reuse->viewport, 0U, viewport);
-	}
-	kern_memcpy(push + execute->at, reuse->viewport, reuse->viewport_bytes);
-	execute->at += reuse->viewport_bytes;
-	execute->at = nvrtx_exec_scissor(push, execute->at, (uint32_t)x0, (uint32_t)y0, (uint32_t)x1, (uint32_t)y1);
 
-	/* The culling, the depth test when the pass has a depth target, and the stencil test when it has a stencil. */
-	execute->at = nvrtx_exec_raster(push, execute->at, pipeline->cull_mode, pipeline->front_face);
-	kern_memset(&depth, 0, sizeof(depth));
-	if (state->target.depth_address != 0U) {
-		depth.test = pipeline->depth_test;
-		depth.write = pipeline->depth_write;
-		depth.compare = pipeline->depth_compare;
-	}
-	if (state->target.depth_stencil != 0U) {
-		depth.stencil = pipeline->stencil_test;
-		depth.front = pipeline->stencil_front;
-		depth.back = pipeline->stencil_back;
-	}
-	execute->at = nvrtx_exec_depth(push, execute->at, &depth);
-
-	/* The blend. */
-	blend.enable = pipeline->blend_enable;
-	blend.colour_op = pipeline->blend_colour_op;
-	blend.colour_source = pipeline->blend_src_colour;
-	blend.colour_destination = pipeline->blend_dst_colour;
-	blend.alpha_op = pipeline->blend_alpha_op;
-	blend.alpha_source = pipeline->blend_src_alpha;
-	blend.alpha_destination = pipeline->blend_dst_alpha;
-	blend.write_mask = pipeline->write_mask;
-	execute->at = nvrtx_exec_blend(push, execute->at, &blend);
-
-	/* The vertex input, the index buffer, the constants, the uniform buffers and the programs. */
-	execute_vertex_input(pipeline, state, &vertex);
-	execute->at = nvrtx_exec_vertex(push, execute->at, &vertex);
-	if (indexed)
-		execute->at = nvrtx_exec_index_buffer(push, execute->at, index_va + state->index_offset,
-						      state->index_buffer->size - state->index_offset, state->index_type);
-	execute->at = nvrtx_push_draw_constants(push, execute->at, constants_va, EXECUTE_CONSTANTS_SIZE);
-	error = execute_uniforms(state, &pipeline->vertex, EXECUTE_GROUP_VERTEX, push, &execute->at);
-	if (error == 0)
-		error = execute_uniforms(state, &pipeline->fragment, EXECUTE_GROUP_FRAGMENT, push, &execute->at);
+	/* The handles of the fragment program's textures. */
+	kern_memset(handles, 0, sizeof(handles));
+	error = execute_textures(execute, state, handles);
 	if (error != 0)
 		return error;
-	execute->at = nvrtx_push_draw_pipeline(push, execute->at, pipeline->vertex.va, pipeline->vertex.gprs,
-					       pipeline->fragment.va, pipeline->fragment.gprs);
+
+	/* What the GPU holds is known right after the push buffer's last application draw. */
+	held = &execute->held;
+	reuse = &execute->reuse;
+	known = false;
+	if (held->pools == reuse->pools && held->at == execute->at)
+		known = true;
+
+	/* The target, once in a push buffer (what the GPU held is then written anew). */
+	push = execute->cpu + EXECUTE_PUSH_AT;
+	if (!state->target_written) {
+		execute->at = nvrtx_exec_target(push, execute->at, &state->target);
+		state->target_written = true;
+		known = false;
+	}
+
+	/* The constants. */
+	error = execute_draw_constants(execute, state, handles, known);
+	if (error != 0)
+		return error;
+
+	/* The viewport, when it changed. */
+	same = known;
+	for (index = 0U; index < 6U && same; index++) {
+		if (held->viewport[index] != viewport[index])
+			same = false;
+	}
+	if (!same) {
+		if (reuse->viewport_bytes == 0U || kern_memcmp(reuse->viewport_in, viewport, sizeof(reuse->viewport_in)) != 0) {
+			kern_memcpy(reuse->viewport_in, viewport, sizeof(reuse->viewport_in));
+			reuse->viewport_bytes = nvrtx_exec_viewport(reuse->viewport, 0U, viewport);
+		}
+		kern_memcpy(push + execute->at, reuse->viewport, reuse->viewport_bytes);
+		execute->at += reuse->viewport_bytes;
+		kern_memcpy(held->viewport, viewport, sizeof(held->viewport));
+	}
+
+	/* The scissor, when it changed. */
+	same = known;
+	if (same && (held->scissor[0] != x0 || held->scissor[1] != y0 || held->scissor[2] != x1 || held->scissor[3] != y1))
+		same = false;
+	if (!same) {
+		execute->at = nvrtx_exec_scissor(push, execute->at, (uint32_t)x0, (uint32_t)y0, (uint32_t)x1, (uint32_t)y1);
+		held->scissor[0] = x0;
+		held->scissor[1] = y0;
+		held->scissor[2] = x1;
+		held->scissor[3] = y1;
+	}
+
+	/*
+	 * The pipeline's state, each part when it differs from the last
+	 * draw's pipeline's: the culling, the depth test when the pass has a
+	 * depth target, the stencil test when it has a stencil, the blend, the
+	 * programs (all of the pipeline's methods when not known).
+	 */
+	changes = EXECUTE_PIPELINE_ALL;
+	if (known && held->pipeline == pipeline)
+		changes = 0U;
+	else if (known)
+		changes = execute_pipeline_changes(held->pipeline, pipeline);
+	if ((changes & EXECUTE_PIPELINE_RASTER) != 0U)
+		execute->at = nvrtx_exec_raster(push, execute->at, pipeline->cull_mode, pipeline->front_face);
+	if ((changes & EXECUTE_PIPELINE_DEPTH) != 0U) {
+		kern_memset(&depth, 0, sizeof(depth));
+		if (state->target.depth_address != 0U) {
+			depth.test = pipeline->depth_test;
+			depth.write = pipeline->depth_write;
+			depth.compare = pipeline->depth_compare;
+		}
+		if (state->target.depth_stencil != 0U) {
+			depth.stencil = pipeline->stencil_test;
+			depth.front = pipeline->stencil_front;
+			depth.back = pipeline->stencil_back;
+		}
+		execute->at = nvrtx_exec_depth(push, execute->at, &depth);
+	}
+	if ((changes & EXECUTE_PIPELINE_BLEND) != 0U) {
+		blend.enable = pipeline->blend_enable;
+		blend.colour_op = pipeline->blend_colour_op;
+		blend.colour_source = pipeline->blend_src_colour;
+		blend.colour_destination = pipeline->blend_dst_colour;
+		blend.alpha_op = pipeline->blend_alpha_op;
+		blend.alpha_source = pipeline->blend_src_alpha;
+		blend.alpha_destination = pipeline->blend_dst_alpha;
+		blend.write_mask = pipeline->write_mask;
+		execute->at = nvrtx_exec_blend(push, execute->at, &blend);
+	}
+	if (changes == EXECUTE_PIPELINE_ALL) {
+		execute->at = nvrtx_push_draw_pipeline(push, execute->at, pipeline->vertex.va, pipeline->vertex.gprs,
+						       pipeline->fragment.va, pipeline->fragment.gprs);
+	} else {
+		if ((changes & EXECUTE_PIPELINE_VERTEX_PROGRAM) != 0U)
+			execute->at = nvrtx_push_draw_program(push, execute->at, false, pipeline->vertex.va, pipeline->vertex.gprs);
+		if ((changes & EXECUTE_PIPELINE_PIXEL_PROGRAM) != 0U)
+			execute->at = nvrtx_push_draw_program(push, execute->at, true, pipeline->fragment.va, pipeline->fragment.gprs);
+	}
+
+	/* The vertex input, when the pipeline's or a bound vertex buffer changed. */
+	same = true;
+	if ((changes & EXECUTE_PIPELINE_VERTEX_INPUT) != 0U)
+		same = false;
+	for (index = 0U; index < NVRTX_VK_VERTEX_BINDINGS_MAX && same; index++) {
+		if (held->buffers[index] != state->buffers[index] || held->offsets[index] != state->offsets[index])
+			same = false;
+	}
+	if (!same) {
+		execute_vertex_input(pipeline, state, &vertex);
+		execute->at = nvrtx_exec_vertex(push, execute->at, &vertex);
+		kern_memcpy(held->buffers, state->buffers, sizeof(held->buffers));
+		kern_memcpy(held->offsets, state->offsets, sizeof(held->offsets));
+	}
+
+	/* The index buffer of an indexed draw, when it changed. */
+	if (!known)
+		held->index_set = false;
+	if (indexed) {
+		same = held->index_set;
+		if (same &&
+		    (held->index_buffer != state->index_buffer ||
+		     held->index_offset != state->index_offset ||
+		     held->index_type != state->index_type))
+			same = false;
+		if (!same) {
+			execute->at = nvrtx_exec_index_buffer(push, execute->at, index_va + state->index_offset,
+							      state->index_buffer->size - state->index_offset, state->index_type);
+			held->index_set = true;
+			held->index_buffer = state->index_buffer;
+			held->index_offset = state->index_offset;
+			held->index_type = state->index_type;
+		}
+	}
+
+	/* The uniform buffers, when the pipeline's or a bound set changed (their binding selects them, not constant buffer 0). */
+	same = true;
+	if ((changes & EXECUTE_PIPELINE_UNIFORMS) != 0U)
+		same = false;
+	for (index = 0U; index < NVRTX_VK_SETS_MAX && same; index++) {
+		if (held->sets[index] != state->sets[index])
+			same = false;
+	}
+	if (!same) {
+		error = execute_uniforms(state, &pipeline->vertex, EXECUTE_GROUP_VERTEX, push, &execute->at);
+		if (error == 0)
+			error = execute_uniforms(state, &pipeline->fragment, EXECUTE_GROUP_FRAGMENT, push, &execute->at);
+		if (error != 0) {
+			held->pools = 0U;
+			return error;
+		}
+		if (pipeline->vertex.uniform_count != 0U || pipeline->fragment.uniform_count != 0U)
+			held->selected = false;
+		kern_memcpy(held->sets, state->sets, sizeof(held->sets));
+	}
 
 	/* The draw, one more in the push buffer. */
+	draw.indexed = indexed;
+	draw.topology = pipeline->topology;
+	draw.first = record->values[2];
+	draw.count = record->values[0];
+	draw.instances = record->values[1];
+	draw.first_instance = record->values[3];
+	draw.vertex_offset = 0;
 	if (indexed) {
-		execute->at = nvrtx_exec_draw_indexed(push, execute->at, pipeline->topology, record->values[2], record->values[0],
-						      record->values[1], record->values[4], (int32_t)record->values[3]);
-	} else {
-		execute->at = nvrtx_exec_draw(push, execute->at, pipeline->topology, record->values[2], record->values[0],
-					      record->values[1], record->values[3]);
+		draw.first_instance = record->values[4];
+		draw.vertex_offset = (int32_t)record->values[3];
 	}
+	execute->at = nvrtx_exec_draw_held(push, execute->at, &held->bases, known, &draw);
 	execute->draws++;
+
+	/* What the GPU holds now, for the next draw. */
+	held->pipeline = pipeline;
+	held->pools = reuse->pools;
+	held->at = execute->at;
 
 	/* Succeeded: the draw is written. */
 	return 0;
+}
+
+/*
+ * Reports the parts of a pipeline's state (EXECUTE_PIPELINE_*) that
+ * differ from the held pipeline's: what the draw writes anew.
+ */
+static uint32_t
+execute_pipeline_changes(
+	const struct nvrtx_vk_pipeline *held,
+	const struct nvrtx_vk_pipeline *pipeline)
+{
+	uint32_t changes;
+	bool same;
+
+	/* The culling and the front face. */
+	changes = 0U;
+	if (held->cull_mode != pipeline->cull_mode || held->front_face != pipeline->front_face)
+		changes |= EXECUTE_PIPELINE_RASTER;
+
+	/* The depth and stencil tests. */
+	same = true;
+	if (held->depth_test != pipeline->depth_test || held->depth_write != pipeline->depth_write)
+		same = false;
+	if (held->depth_compare != pipeline->depth_compare || held->stencil_test != pipeline->stencil_test)
+		same = false;
+	if (same)
+		same = execute_same_words((const uint32_t *)&held->stencil_front, (const uint32_t *)&pipeline->stencil_front,
+					  sizeof(held->stencil_front) / 4U);
+	if (same)
+		same = execute_same_words((const uint32_t *)&held->stencil_back, (const uint32_t *)&pipeline->stencil_back,
+					  sizeof(held->stencil_back) / 4U);
+	if (!same)
+		changes |= EXECUTE_PIPELINE_DEPTH;
+
+	/* The blend: its eight words from blend_enable to write_mask. */
+	same = execute_same_words(&held->blend_enable, &pipeline->blend_enable,
+				  (offsetof(struct nvrtx_vk_pipeline, write_mask) - offsetof(struct nvrtx_vk_pipeline, blend_enable)) / 4U + 1U);
+	if (!same)
+		changes |= EXECUTE_PIPELINE_BLEND;
+
+	/* The programs. */
+	if (held->vertex.va != pipeline->vertex.va || held->vertex.gprs != pipeline->vertex.gprs)
+		changes |= EXECUTE_PIPELINE_VERTEX_PROGRAM;
+	if (held->fragment.va != pipeline->fragment.va || held->fragment.gprs != pipeline->fragment.gprs)
+		changes |= EXECUTE_PIPELINE_PIXEL_PROGRAM;
+
+	/* The vertex input: the bindings and the attributes. */
+	same = true;
+	if (held->binding_count != pipeline->binding_count || held->attribute_count != pipeline->attribute_count)
+		same = false;
+	if (same)
+		same = execute_same_words((const uint32_t *)held->bindings, (const uint32_t *)pipeline->bindings,
+					  held->binding_count * (sizeof(held->bindings[0]) / 4U));
+	if (same)
+		same = execute_same_words((const uint32_t *)held->attributes, (const uint32_t *)pipeline->attributes,
+					  held->attribute_count * (sizeof(held->attributes[0]) / 4U));
+	if (!same)
+		changes |= EXECUTE_PIPELINE_VERTEX_INPUT;
+
+	/* The uniform buffers the programs read. */
+	same = true;
+	if (held->vertex.uniform_count != pipeline->vertex.uniform_count ||
+	    held->fragment.uniform_count != pipeline->fragment.uniform_count)
+		same = false;
+	if (same)
+		same = execute_same_words((const uint32_t *)held->vertex.uniforms, (const uint32_t *)pipeline->vertex.uniforms,
+					  held->vertex.uniform_count * (sizeof(held->vertex.uniforms[0]) / 4U));
+	if (same)
+		same = execute_same_words((const uint32_t *)held->fragment.uniforms, (const uint32_t *)pipeline->fragment.uniforms,
+					  held->fragment.uniform_count * (sizeof(held->fragment.uniforms[0]) / 4U));
+	if (!same)
+		changes |= EXECUTE_PIPELINE_UNIFORMS;
+
+	/* Succeeded: the parts that differ. */
+	return changes;
+}
+
+/* Reports whether two runs of count words are equal. */
+static bool
+execute_same_words(
+	const uint32_t *left,
+	const uint32_t *right,
+	size_t count)
+{
+	size_t index;
+
+	/* Each word in turn. */
+	for (index = 0U; index < count; index++) {
+		if (left[index] != right[index])
+			return false;
+	}
+
+	/* Succeeded: every word is equal. */
+	return true;
+}
+
+/*
+ * Gives the draw's constant buffer 0 its push constants and texture
+ * handles, by loads in the push buffer into the session's one constant
+ * buffer 0 (EXECUTE_ROOT_AT).  Unless the GPU's is known, it is selected,
+ * bound to every program group and loaded whole; else the words that
+ * differ are loaded (selected again when a uniform buffer's binding
+ * selected another).
+ */
+static int
+execute_draw_constants(
+	struct nvrtx_vk_execute *execute,
+	const struct execute_state *state,
+	const uint32_t *handles,
+	bool known)
+{
+	struct execute_held *held;
+	uint8_t *push;
+
+	/*
+	 * Unknown: constant buffer 0 selected and bound to every group, then
+	 * all its push constants and handles loaded (the GPU's loads, which
+	 * the draws before do not see; the CPU never writes it).
+	 */
+	held = &execute->held;
+	push = execute->cpu + EXECUTE_PUSH_AT;
+	if (!known) {
+		held->constants_va = execute->slots[0].va + EXECUTE_ROOT_AT;
+		execute->at = nvrtx_push_draw_constants(push, execute->at, held->constants_va, EXECUTE_CONSTANTS_SIZE);
+		execute->at = nvrtx_exec_constants_load(push, execute->at, NVRTX_SM75_CB_PUSH, state->push, NVRTX_VK_PUSH_BYTES / 4U);
+		execute->at = nvrtx_exec_constants_load(push, execute->at, NVRTX_SM75_CB_TEXTURES, handles, NVRTX_VK_TEXTURES_MAX);
+		held->selected = true;
+		kern_memcpy(held->push, state->push, sizeof(held->push));
+		kern_memcpy(held->handles, handles, sizeof(held->handles));
+		return 0;
+	}
+
+	/* Known: the push constants (none past push_end, zero in both) and the handles that differ, loaded. */
+	execute_draw_load(execute, NVRTX_SM75_CB_PUSH, state->push, held->push, (state->push_end + 3U) / 4U);
+	execute_draw_load(execute, NVRTX_SM75_CB_TEXTURES, handles, held->handles, NVRTX_VK_TEXTURES_MAX);
+
+	/* Succeeded: constant buffer 0 holds the draw's constants. */
+	return 0;
+}
+
+/*
+ * Loads the run of words that differ from what constant buffer 0 holds
+ * (held, count words from the byte offset) into it, and keeps them in
+ * held_words; nothing when none differs.
+ */
+static void
+execute_draw_load(
+	struct nvrtx_vk_execute *execute,
+	uint32_t offset,
+	const uint32_t *words,
+	uint32_t *held_words,
+	uint32_t count)
+{
+	struct execute_held *held;
+	uint8_t *push;
+	uint32_t first;
+	uint32_t last;
+
+	/* The first and the last word that differ. */
+	first = 0U;
+	while (first < count && words[first] == held_words[first])
+		first++;
+	if (first == count)
+		return;
+	last = count - 1U;
+	while (last > first && words[last] == held_words[last])
+		last--;
+
+	/* Constant buffer 0 selected again when another was, then the words from the first to the last. */
+	held = &execute->held;
+	push = execute->cpu + EXECUTE_PUSH_AT;
+	if (!held->selected) {
+		execute->at = nvrtx_exec_constants_select(push, execute->at, held->constants_va, EXECUTE_CONSTANTS_SIZE);
+		held->selected = true;
+	}
+	execute->at = nvrtx_exec_constants_load(push, execute->at, offset + first * 4U, &words[first], last - first + 1U);
+	kern_memcpy(&held_words[first], &words[first], (size_t)(last - first + 1U) * 4U);
 }
 
 /*
@@ -1478,8 +1845,8 @@ execute_uniforms(
 }
 
 /*
- * Writes the handles of the fragment program's sampled images into a
- * draw's constants: each one's header and sampler from the bound set's
+ * Gives the handles of the fragment program's sampled images for a
+ * draw's constants (handles, NVRTX_VK_TEXTURES_MAX): each one's header and sampler from the bound set's
  * binding, put in the pools once a push buffer for a view and a sampler.
  * A binding with nothing bound refuses the draw.
  */
@@ -1487,14 +1854,17 @@ static int
 execute_textures(
 	struct nvrtx_vk_execute *execute,
 	const struct execute_state *state,
-	uint8_t *constants)
+	uint32_t *handles)
 {
 	const struct nvrtx_vk_program *program;
 	const struct nvrtx_vk_descriptor_set *set;
 	const struct nvrtx_vk_descriptor_slot *slot;
+	const struct nvrtx_vk_view *view;
+	const struct nvrtx_vk_sampler *sampler;
 	struct execute_reuse *reuse;
 	uint32_t handle;
 	uint32_t index;
+	uint32_t place;
 	int error;
 
 	/* Each sampled image of the fragment program. */
@@ -1507,23 +1877,25 @@ execute_textures(
 		if (slot->view == NULL || slot->sampler == NULL)
 			return EINVAL;
 
-		/* Its handle at its slot: the one an earlier draw of this push buffer made for the same view and sampler, or a new one. */
+		/* Its handle: the one an earlier draw of this push buffer made for the same view and sampler (at their place), or a new one. */
 		reuse = &execute->reuse;
-		if (index < NVRTX_VK_TEXTURES_MAX && reuse->texture_pools[index] == reuse->pools &&
-		    reuse->texture_view[index] == slot->view->payload && reuse->texture_sampler[index] == slot->sampler->payload) {
-			handle = reuse->texture_handle[index];
+		view = slot->view->payload;
+		sampler = slot->sampler->payload;
+		place = (uint32_t)((((uintptr_t)view ^ ((uintptr_t)sampler >> 3)) >> EXECUTE_TEXTURE_CACHE_SHIFT) % EXECUTE_TEXTURE_CACHE);
+		if (reuse->texture_pools[place] == reuse->pools && reuse->texture_view[place] == view &&
+		    reuse->texture_sampler[place] == sampler) {
+			handle = reuse->texture_handle[place];
 		} else {
-			error = execute_texture(execute, slot->view->payload, slot->sampler->payload, &handle);
+			error = execute_texture(execute, view, sampler, &handle);
 			if (error != 0)
 				return error;
-			if (index < NVRTX_VK_TEXTURES_MAX) {
-				reuse->texture_pools[index] = reuse->pools;
-				reuse->texture_view[index] = slot->view->payload;
-				reuse->texture_sampler[index] = slot->sampler->payload;
-				reuse->texture_handle[index] = handle;
-			}
+			reuse->texture_pools[place] = reuse->pools;
+			reuse->texture_view[place] = view;
+			reuse->texture_sampler[place] = sampler;
+			reuse->texture_handle[place] = handle;
 		}
-		nvrtx_put32(constants, NVRTX_SM75_CB_TEXTURES + index * 4U, handle);
+		if (index < NVRTX_VK_TEXTURES_MAX)
+			handles[index] = handle;
 	}
 
 	/* Succeeded: every handle is in place. */
