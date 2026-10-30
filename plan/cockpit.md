@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 04:00（Q1）
+最終更新: 2026-10-31 04:06（Q1）
 
 ## 担当（P1〜P8）
 
@@ -10,7 +10,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
-| P2 | Bug | 3 つ目の束の続き | BUG-292 の同じ類: terminal・monitor・notes・browser・imageview・videoplayer・libegl の自前の 10 秒の acquire の期限を外す | 3 つ目の束（BUG-360・306・292・289・365）は main a2a9fca00。BUG-289 は closed、360・306・292 は fixed（確かめの残り）、365 は一部 |
+| P2 | Bug | open の Bug の 4 つ目の束（QEMU と host） | q1761: BUG-312（壊れた root の fsck）→ BUG-173（sh の日本語の履歴）→ BUG-238（emacs -nw）→ BUG-199（古い host 試験）→ BUG-281（QEMU の SSH の間欠の停止）→ BUG-308（UFS の journal の窓） | 3 つ目の束は main 612a2ea04。BUG-289・292 closed |
 | P3 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除く | q1737: p006 規約の全文の見直し（約 230 file、規約の担当 3 つを並べる）→ WS331 の完了 | 返却（WS332 は P6 へ移した） |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS329](ws329/ws.md) | libmedia の H.264 の software の encoder（標準廉価実装手順） | q1758: p001 設計（WS326 の module を入力に共通化、design-reviewer と問いまで） | WS318 の設計は済み（main 85fbeb091、問い Q318-1〜14 は下の 0c） |
@@ -101,7 +101,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 ### 00. host の disk の一括の片付け（2026-10-31 02:3x、急ぎ）
 
-- 背景: host の / が満杯になり（938G 中 891G、空き 0）、P1・P4・P8・P3・P6 の build が「No space left on device」で落ちた。担当が頼んだ一時物を Q1 が消して、今の空きは約 13 GB。大きいのは古い担当の worktree（`/home/awe/zedBSD-worktrees/` に約 250 個、合わせて約 559 GB）の `build/`（試験の image・kernel・sysroot の写し）。
+- 背景: host の / が満杯になり（938G 中 891G、空き 0）、P1・P4・P8・P3・P6 の build が「No space left on device」で落ちた。担当が頼んだ一時物を Q1 が消したが、新しい担当の sysroot の写しなどで 05:3x に空きは約 6 GB。大きいのは古い担当の worktree（`/home/awe/zedBSD-worktrees/` に約 250 個、合わせて約 559 GB）の `build/`（試験の image・kernel・sysroot の写し）。
 - Q1 がしようとした事: 今使っていない worktree（返却済み・merge 済みの担当の物）の `build/` の中身を消す（`build/review` の PNG は残す、今動いている担当の worktree と WS313 の ODROID の image は残す、git の中身と branch は消さない）。**権限の判定（取り返せない削除）で止められた**ので、回避せずユーザーに聞く。
 - 決めてほしい事: この片付けをしてよいか。よければ settings に許可を足すか、ユーザーが `! ` で直に走らせる。それまで担当は大きな image を /tmp（tmpfs、空き約 69G）に作る。
 

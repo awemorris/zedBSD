@@ -441,3 +441,12 @@
 | q1758 / q1758-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws329`・branch `agent/p5-ws329`） | [ws329](ws329/ws.md) p001 設計 | plan/ws329/ だけ、design-reviewer と問いの一覧まで。実装は WS326 の完了の後 | in-progress |
 | q1759 / q1759-i01 | P7（phase-runner-high、同じ worktree p7-ws333） | [ws333](ws333/ws.md) p006 の QEMU の起動の回帰 → p007 x86 の decode の module の設計 | boot-test.sh で amd64・armv7-virt・riscv64-virt・raspi4b。p007 は design.md §9 のとおり、5330 の読みは未実施で可 | in-progress |
 | q1760 / q1760-i01 | O-p022（phase-runner-high、Opus、worktree `/home/awe/zedBSD-worktrees/o-ws326-p022`・branch `agent/o-ws326-p022`） | [ws326-p022](ws326/phase022/phase.md) | phase.md のとおり。h264sw-*.c の修正は可、header は不可。check-skeleton の BASE は 8ddb130a9 | in-progress |
+
+## 2026-10-31: Bug の 4 つ目の束（q1761）
+
+上の q1750 と同じユーザーの指示（Bug を自動でスケジュールして直す）。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1761 / q1761-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs4`・branch `agent/p2-bugs4`、QEMU と host、出力は全部 /tmp） | [BUG-312](bugs/BUG-312.md)・[BUG-173](bugs/BUG-173.md)・[BUG-238](bugs/BUG-238.md)・[BUG-199](bugs/BUG-199.md)・[BUG-281](bugs/BUG-281.md)・[BUG-308](bugs/BUG-308.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
+
