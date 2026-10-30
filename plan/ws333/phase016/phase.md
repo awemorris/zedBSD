@@ -2,7 +2,7 @@
 
 # ws333-p016: 見張りと非常の停止
 
-Status: in-progress（host 試験・全 port の build・QEMU の SSDT の注入（電源断と init の記録）PASS。init の ACK の ioctl と注入の口は /dev/thermal の UAPI（p004）の後の p005 後半へ持ち越し。cleared の判定は Q1）
+Status: cleared（2026-10-31 Q1、main a57216e81）
 Parent: [WS333](../ws.md)
 Queue: q1774-i01（P6）
 

@@ -2,7 +2,7 @@
 
 # ws333-p021: passive（見張り → poll の thread → 受け手の limit）
 
-Status: in-progress（受け入れの host 試験（模擬の上限の受け手）PASS。cleared の判定は Q1）
+Status: cleared（2026-10-31 Q1、main a57216e81）
 Parent: [WS333](../ws.md)
 Queue: q1774-i01（P6）
 
