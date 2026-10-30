@@ -10,14 +10,15 @@ Queue: q1731（P1）
 
 2026-10-30 ユーザーから、i915 についても WS291 に Phase を作り、5330 で最適化を行い、P1 を割り当てる、という趣旨の指示を受けた。
 
-## 目標の決め方（PowerVR・Pi 5 と同じ形）
+## 目標の決め方（2026-10-30 改め: 実測の Linux を基準に、RDNA・NVIDIA の p002・p010 と同じ形）
 
-- 基準: Linux（NVK）の RTX 2070 の scene-5000（qs40 × 5000、1920x1080、約 50 fps）、FP32 約 7.46 TFLOPS。
-- 5330 の iGPU（Alder Lake の Xe-LP、EU の数と最大の clock は実機で確かめる）: FP32 = EU 数 × 8 lane × 2（積和）× clock。例: 96 EU・1.25 GHz なら約 1.92 TFLOPS（比 約 3.9 倍 → copies 約 1,290）。実機の EU の数と clock で確定し、ws.md に記録する。
-- 受け入れ: 確定した copies、1920x1080（5330 の内蔵の画面の解像度が違えばその画面で、比で割る）、direct scanout で 50 fps 以上。
+- 2026-10-30 Q1 から、ユーザーが「5330 は Linux も起動できるので、RTX の比ではなく、実測の Linux の性能をゴールにする」という趣旨の指示をした、と伝えられた（原文は Q1 の記録）。
+- 基準: 5330 の Debian（Mesa の Intel の Vulkan の driver、ANV）で同じ mview（qs40、`plan/tools/gpu-perf/linux/build-mview.sh`）を weston の DRM の kiosk の上の fullscreen（plane-only、direct scanout）で測り、copies を変えて約 50 fps になる scene を決める。解像度は 5330 の内蔵の画面（1920x1080）で zedBSD と揃える。
+- 受け入れ: その scene（copies・解像度・present の形を記録）で zedBSD の fps が Linux 以上、direct scanout。
+- 参考（前の決め方、使わない）: RTX 2070 の FP32 との比。5330 の GT は 80 EU（`gt_init_mmio ... total=80`）、RP0 1200 MHz（72 × 16.67）で FP32 約 1.54 TFLOPS、比 約 4.86、copies 約 1030 だった。
 
 ## 範囲
 
 1. 5330 の zedBSD（NVMe）で mview が動くかを確かめ、足りない Vulkan の機能（indexed draw・instance・mip など）があれば i915 の Vulkan の実行器に足す。
-2. EU の数と clock を確かめて目標を確定し、今の fps を測る。
+2. Linux（ANV）で約 50 fps の scene を決め、zedBSD の今の fps を測る。
 3. profile を見て i915 の driver・Vulkan の backend・compiler を直す。HAL は変えない、driver は hal_* を使わない。改善ごとの fps と profile を記録。
