@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 05:02（Q1）
+最終更新: 2026-10-31 05:12（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,7 +9,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
+| P1 | — | — | 返却（05:5x）。WS299 の UFS の書きの直しを main に（QEMU で新しい file 490 → 851 MB/s、上書き 410 → 852） | 5330 の電源の入れ直しの後に実測（script は用意済み） |
 | P2 | Bug | VF2 の実機の Bug の束 | q1772: BUG-338（hart 0）→ 342（PowerVR の static data）→ 340（SD の CRC）→ 343（root が live にならない）→ 339（U-Boot の DTB）を今の main で実機で | 4 つ目の束は closed 5 件 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
 | P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1769: p026 共通部分を codec に依らない名前に（設計を先に、移しは p022 の後） | 午後: Pi 5 の実機 |
@@ -68,7 +68,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 
 ### WS326 libmedia の H.264 の software の decoder
 
-20 Phase cleared。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019・p021（全体の流れ、22 本 408 frame が ffmpeg と一致）・p023（libmedia の backend、実際の stream を h264-software で decode）は cleared → p022 JVT の適合（Opus）→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
+22 Phase cleared（p022 JVT の適合: 範囲の中の 101 本 14,526 frame が全部一致、decoder の直し 0）。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019・p021（全体の流れ、22 本 408 frame が ffmpeg と一致）・p023（libmedia の backend、実際の stream を h264-software で decode）は cleared ・p022 は cleared → p026 共通の名前への移し（P4、in-progress）→ p024 速さ → p025 規約→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
 
 ### 最近完了した WS
 
