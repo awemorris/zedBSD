@@ -195,6 +195,8 @@ kl_address_parse(
 		} else if (errno != 0 || number > UINT32_MAX) {
 			return EINVAL;
 		}
+
+		/* The scope is the interface's index. */
 		address->scope = (uint32_t)number;
 	}
 
@@ -226,6 +228,8 @@ kl_address_format(
 	} else {
 		return EAFNOSUPPORT;
 	}
+
+	/* An address that could not be written has no text. */
 	if (written == NULL)
 		return EAFNOSUPPORT;
 
@@ -237,6 +241,8 @@ kl_address_format(
 	} else {
 		length = snprintf(text, size, "[%s]:%u", numbers, (unsigned)address->port);
 	}
+
+	/* The text must fit in the room given. */
 	if (length < 0 || (size_t)length >= size)
 		return ENOSPC;
 
@@ -330,6 +336,8 @@ kl_socket_resolve(
 		if (error != 0)
 			return error;
 	}
+
+	/* The system's type of the kind asked for. */
 	error = socket_type(kind, &hints.ai_socktype);
 	if (error != 0)
 		return error;
@@ -364,6 +372,8 @@ kl_socket_resolve(
 			(*count)++;
 		}
 	}
+
+	/* The system's list goes. */
 	FreeAddrInfoW(found);
 
 	/* A host with no address of a known family. */
@@ -440,6 +450,8 @@ kl_socket_open(
 			free(made);
 			return error;
 		}
+
+		/* The record keeps the mode, which the system cannot tell. */
 		made->nonblocking = 1;
 	}
 
@@ -738,6 +750,8 @@ kl_socket_accept(
 		error = socket_error(wsa);
 		return error;
 	}
+
+	/* The new socket owns the handle. */
 	made->handle = handle;
 
 	/* Blocking or not as flags says, whatever the listening socket does. */
@@ -750,6 +764,8 @@ kl_socket_accept(
 		free(made);
 		return error;
 	}
+
+	/* The record keeps the mode, which the system cannot tell. */
 	made->nonblocking = nonblocking;
 
 	/* The handle is kept from the programs the application starts. */
@@ -804,6 +820,8 @@ kl_socket_send(
 	} else {
 		chunk = (int)size;
 	}
+
+	/* The send. */
 	written = send(socket->handle, (const char *)bytes, chunk, 0);
 	if (written == SOCKET_ERROR) {
 		wsa = WSAGetLastError();
@@ -850,6 +868,8 @@ kl_socket_receive(
 	} else {
 		chunk = (int)size;
 	}
+
+	/* The receive. */
 	count = recv(socket->handle, (char *)buffer, chunk, 0);
 	if (count == SOCKET_ERROR) {
 		wsa = WSAGetLastError();
@@ -961,6 +981,8 @@ kl_socket_receive_from(
 	} else {
 		chunk = (int)size;
 	}
+
+	/* The room for the sender's address, and the receive. */
 	length = (int)sizeof(system);
 	memset(&system, 0, sizeof(system));
 	count = recvfrom(socket->handle, (char *)buffer, chunk, 0, (struct sockaddr *)&system, &length);
@@ -972,6 +994,8 @@ kl_socket_receive_from(
 			error = socket_error(wsa);
 			return error;
 		}
+
+		/* The buffer's worth came. */
 		count = chunk;
 	}
 
@@ -1253,6 +1277,7 @@ kl_socket_poll(
 	fd_set *readable;
 	fd_set *writable;
 	fd_set *failed;
+	size_t header_bytes;
 	size_t set_bytes;
 	size_t index;
 	unsigned found;
@@ -1282,9 +1307,10 @@ kl_socket_poll(
 	}
 
 	/* Room for the three sets, each of count entries. */
-	if (count > (SIZE_MAX / 3U - offsetof(fd_set, fd_array)) / sizeof(SOCKET))
+	header_bytes = offsetof(fd_set, fd_array);
+	if (count > (SIZE_MAX / 3U - header_bytes) / sizeof(SOCKET))
 		return ENOMEM;
-	set_bytes = offsetof(fd_set, fd_array) + count * sizeof(SOCKET);
+	set_bytes = header_bytes + count * sizeof(SOCKET);
 	room = malloc(set_bytes * 3U);
 	if (room == NULL)
 		return ENOMEM;
@@ -1340,6 +1366,8 @@ kl_socket_poll(
 		if (found != 0U)
 			(*ready)++;
 	}
+
+	/* The sets go. */
 	free(room);
 
 	/* Succeeded: *ready waits are ready (none: the time ran out). */
@@ -1452,6 +1480,8 @@ static void
 socket_start_once(void)
 {
 	WSADATA data;
+	BYTE major;
+	BYTE minor;
 	int status;
 
 	/* WinSock 2.2. */
@@ -1462,11 +1492,15 @@ socket_start_once(void)
 		} else {
 			socket_start_error = EIO;
 		}
+
+		/* The start failed. */
 		return;
 	}
 
 	/* A WinSock older than the one asked for cannot be used. */
-	if (LOBYTE(data.wVersion) != 2 || HIBYTE(data.wVersion) != 2) {
+	major = LOBYTE(data.wVersion);
+	minor = HIBYTE(data.wVersion);
+	if (major != 2 || minor != 2) {
 		(void)WSACleanup();
 		socket_start_error = EIO;
 		return;
@@ -1566,8 +1600,12 @@ socket_to_system(
 		*length = (int)sizeof(*ipv4);
 		return 0;
 	}
+
+	/* Only IPv6 besides. */
 	if (address->family != KL_ADDRESS_IPV6)
 		return EAFNOSUPPORT;
+
+	/* The IPv6 layout. */
 	ipv6 = (struct sockaddr_in6 *)system;
 	ipv6->sin6_family = AF_INET6;
 	ipv6->sin6_port = htons(address->port);
@@ -1604,6 +1642,8 @@ socket_from_system(
 	/* Only IPv6 besides. */
 	if (system->sa_family != AF_INET6 || length < (int)sizeof(*ipv6))
 		return EAFNOSUPPORT;
+
+	/* The IPv6 layout. */
 	ipv6 = (const struct sockaddr_in6 *)(const void *)system;
 	address->family = KL_ADDRESS_IPV6;
 	address->port = ntohs(ipv6->sin6_port);
@@ -1883,14 +1923,20 @@ socket_poll_fill(
 			readable->fd_count++;
 			continue;
 		}
+
+		/* A socket in the sets of what it asks for. */
 		if ((wait->events & KL_SOCKET_READABLE) != 0U) {
 			readable->fd_array[readable->fd_count] = wait->socket->handle;
 			readable->fd_count++;
 		}
+
+		/* And in the set of what it can send. */
 		if ((wait->events & KL_SOCKET_WRITABLE) != 0U) {
 			writable->fd_array[writable->fd_count] = wait->socket->handle;
 			writable->fd_count++;
 		}
+
+		/* Every socket in the set of failures. */
 		failed->fd_array[failed->fd_count] = wait->socket->handle;
 		failed->fd_count++;
 	}
@@ -1933,6 +1979,8 @@ socket_poll_found(
 			socket_waker_drain(wait->waker);
 			found = KL_SOCKET_READABLE;
 		}
+
+		/* The waker's bits. */
 		return found;
 	}
 
@@ -2023,6 +2071,8 @@ socket_waker_pair(
 		error = socket_error(wsa);
 		goto done;
 	}
+
+	/* The listening. */
 	status = listen(listener, SOCKET_WAKER_BACKLOG);
 	if (status != 0) {
 		wsa = WSAGetLastError();
@@ -2049,6 +2099,8 @@ socket_waker_pair(
 		error = socket_error(wsa);
 		goto done;
 	}
+
+	/* The connecting socket's own address, which the accepted peer must match. */
 	length = (int)sizeof(client_address);
 	status = getsockname(client, (struct sockaddr *)&client_address, &length);
 	if (status != 0) {
@@ -2066,6 +2118,8 @@ socket_waker_pair(
 			error = socket_error(wsa);
 			goto done;
 		}
+
+		/* Whether the peer is the connecting socket itself. */
 		matched = 0;
 		if (peer_address.sin_addr.s_addr == client_address.sin_addr.s_addr &&
 		    peer_address.sin_port == client_address.sin_port)
@@ -2108,6 +2162,10 @@ done:
 	if (client != INVALID_SOCKET)
 		(void)closesocket(client);
 
-	/* Why the pair could not be made, or 0. */
-	return error;
+	/* Reports why the pair could not be made. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the pair is made. */
+	return 0;
 }

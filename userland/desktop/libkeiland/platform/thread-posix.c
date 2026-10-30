@@ -108,9 +108,11 @@ kl_thread_start(
 	/* Nothing started yet. */
 	*thread = NULL;
 
-	/* A thread runs something, at a priority the interface knows. */
+	/* A thread runs something. */
 	if (options == NULL || options->run == NULL)
 		return EINVAL;
+
+	/* A thread's priority is one the interface knows. */
 	if (options->priority > KL_THREAD_PRIORITY_HIGH)
 		return EINVAL;
 
@@ -122,22 +124,30 @@ kl_thread_start(
 	/* What the thread runs, its name (cut to what threads keep) and its priority. */
 	record->run = options->run;
 	record->argument = options->argument;
+
+	/* The name is kept only when the program gave one. */
 	if (options->name != NULL)
 		(void)strncpy(record->name, options->name, KL_THREAD_NAME_MAX);
+
+	/* The priority the thread sets for itself as it starts. */
 	record->priority = options->priority;
 
 	/* Held by the program and by the thread until each gives it back. */
 	atomic_init(&record->owners, 2U);
 
-	/* The stack the program asked for (at least the system's least), or the system's. */
+	/* Prepares the thread's attributes. */
 	error = pthread_attr_init(&attributes);
 	if (error != 0) {
 		free(record);
 		return error;
 	}
+
+	/* The stack the program asked for (at least the system's least), or the system's. */
 	stack_size = options->stack_size;
 	if (stack_size != 0U && stack_size < (size_t)PTHREAD_STACK_MIN)
 		stack_size = (size_t)PTHREAD_STACK_MIN;
+
+	/* A stack size is set only when one was asked for. */
 	if (stack_size != 0U) {
 		error = pthread_attr_setstacksize(&attributes, stack_size);
 		if (error != 0) {
@@ -288,11 +298,13 @@ int
 kl_mutex_init(
 	struct kl_mutex *mutex)
 {
+	pthread_mutex_t *system_mutex;
 	int error;
 
 	/* The system's mutex in the room, with its defaults (not recursive). */
 	memset(mutex, 0, sizeof(*mutex));
-	error = pthread_mutex_init(thread_mutex(mutex), NULL);
+	system_mutex = thread_mutex(mutex);
+	error = pthread_mutex_init(system_mutex, NULL);
 	if (error != 0)
 		return error;
 
@@ -307,8 +319,11 @@ void
 kl_mutex_destroy(
 	struct kl_mutex *mutex)
 {
+	pthread_mutex_t *system_mutex;
+
 	/* The system's mutex. */
-	(void)pthread_mutex_destroy(thread_mutex(mutex));
+	system_mutex = thread_mutex(mutex);
+	(void)pthread_mutex_destroy(system_mutex);
 }
 
 /*
@@ -318,8 +333,11 @@ void
 kl_mutex_lock(
 	struct kl_mutex *mutex)
 {
+	pthread_mutex_t *system_mutex;
+
 	/* Held when this returns. */
-	(void)pthread_mutex_lock(thread_mutex(mutex));
+	system_mutex = thread_mutex(mutex);
+	(void)pthread_mutex_lock(system_mutex);
 }
 
 /*
@@ -329,10 +347,12 @@ int
 kl_mutex_try(
 	struct kl_mutex *mutex)
 {
+	pthread_mutex_t *system_mutex;
 	int error;
 
 	/* Held, or another thread holds it. */
-	error = pthread_mutex_trylock(thread_mutex(mutex));
+	system_mutex = thread_mutex(mutex);
+	error = pthread_mutex_trylock(system_mutex);
 	if (error != 0)
 		return EBUSY;
 
@@ -347,8 +367,11 @@ void
 kl_mutex_unlock(
 	struct kl_mutex *mutex)
 {
+	pthread_mutex_t *system_mutex;
+
 	/* Free for another thread. */
-	(void)pthread_mutex_unlock(thread_mutex(mutex));
+	system_mutex = thread_mutex(mutex);
+	(void)pthread_mutex_unlock(system_mutex);
 }
 
 /*
@@ -359,12 +382,15 @@ kl_cond_init(
 	struct kl_cond *cond)
 {
 	pthread_condattr_t attributes;
+	pthread_cond_t *system_cond;
 	int error;
 
-	/* Its waits time on the clock that only goes forward. */
+	/* Prepares the condition's attributes. */
 	error = pthread_condattr_init(&attributes);
 	if (error != 0)
 		return error;
+
+	/* Its waits time on the clock that only goes forward. */
 	error = pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC);
 	if (error != 0) {
 		(void)pthread_condattr_destroy(&attributes);
@@ -373,7 +399,8 @@ kl_cond_init(
 
 	/* The system's condition in the room. */
 	memset(cond, 0, sizeof(*cond));
-	error = pthread_cond_init(thread_cond(cond), &attributes);
+	system_cond = thread_cond(cond);
+	error = pthread_cond_init(system_cond, &attributes);
 	(void)pthread_condattr_destroy(&attributes);
 	if (error != 0)
 		return error;
@@ -389,8 +416,11 @@ void
 kl_cond_destroy(
 	struct kl_cond *cond)
 {
+	pthread_cond_t *system_cond;
+
 	/* The system's condition. */
-	(void)pthread_cond_destroy(thread_cond(cond));
+	system_cond = thread_cond(cond);
+	(void)pthread_cond_destroy(system_cond);
 }
 
 /*
@@ -401,8 +431,13 @@ kl_cond_wait(
 	struct kl_cond *cond,
 	struct kl_mutex *mutex)
 {
+	pthread_cond_t *system_cond;
+	pthread_mutex_t *system_mutex;
+
 	/* Woken, or for nothing, with the mutex held again. */
-	(void)pthread_cond_wait(thread_cond(cond), thread_mutex(mutex));
+	system_cond = thread_cond(cond);
+	system_mutex = thread_mutex(mutex);
+	(void)pthread_cond_wait(system_cond, system_mutex);
 }
 
 /*
@@ -415,6 +450,8 @@ kl_cond_wait_for(
 	uint32_t milliseconds)
 {
 	struct timespec until;
+	pthread_cond_t *system_cond;
+	pthread_mutex_t *system_mutex;
 	int error;
 
 	/* The end of the wait on the monotonic clock. */
@@ -427,7 +464,9 @@ kl_cond_wait_for(
 	}
 
 	/* Woken, or the time is out; the mutex is held again either way. */
-	error = pthread_cond_timedwait(thread_cond(cond), thread_mutex(mutex), &until);
+	system_cond = thread_cond(cond);
+	system_mutex = thread_mutex(mutex);
+	error = pthread_cond_timedwait(system_cond, system_mutex, &until);
 	if (error == ETIMEDOUT)
 		return ETIMEDOUT;
 
@@ -442,8 +481,11 @@ void
 kl_cond_signal(
 	struct kl_cond *cond)
 {
+	pthread_cond_t *system_cond;
+
 	/* One waiter, if any. */
-	(void)pthread_cond_signal(thread_cond(cond));
+	system_cond = thread_cond(cond);
+	(void)pthread_cond_signal(system_cond);
 }
 
 /*
@@ -453,8 +495,11 @@ void
 kl_cond_broadcast(
 	struct kl_cond *cond)
 {
+	pthread_cond_t *system_cond;
+
 	/* All the waiters. */
-	(void)pthread_cond_broadcast(thread_cond(cond));
+	system_cond = thread_cond(cond);
+	(void)pthread_cond_broadcast(system_cond);
 }
 
 /*
@@ -465,8 +510,11 @@ kl_once(
 	struct kl_once *once,
 	void (*run)(void))
 {
+	pthread_once_t *system_once;
+
 	/* run, the first time; the others wait for it to return. */
-	(void)pthread_once((pthread_once_t *)(void *)once->opaque.bytes, run);
+	system_once = (pthread_once_t *)(void *)once->opaque.bytes;
+	(void)pthread_once(system_once, run);
 }
 
 /*
@@ -477,11 +525,13 @@ kl_thread_key_create(
 	struct kl_thread_key *key,
 	void (*destroy)(void *value))
 {
+	pthread_key_t *system_key;
 	int error;
 
 	/* The system's key in the room. */
 	memset(key, 0, sizeof(*key));
-	error = pthread_key_create((pthread_key_t *)(void *)key->opaque.bytes, destroy);
+	system_key = (pthread_key_t *)(void *)key->opaque.bytes;
+	error = pthread_key_create(system_key, destroy);
 	if (error != 0)
 		return error;
 
@@ -548,14 +598,19 @@ thread_main(
 	void *argument)
 {
 	struct kl_thread *thread;
+#if THREAD_NAMES
+	pthread_t self;
+#endif
 
 	/* The thread's own record. */
 	thread = argument;
 
 	/* The name the system shows, where it keeps one. */
 #if THREAD_NAMES
-	if (thread->name[0] != '\0')
-		(void)pthread_setname_np(pthread_self(), thread->name);
+	if (thread->name[0] != '\0') {
+		self = pthread_self();
+		(void)pthread_setname_np(self, thread->name);
+	}
 #endif
 
 	/* The priority asked for, as far as the system gives it. */
@@ -629,8 +684,12 @@ thread_set_priority(
 	} else {
 		nice += THREAD_NICE_HIGH;
 	}
+
+	/* The niceness stays within what the system allows. */
 	if (nice > THREAD_NICE_MAX)
 		nice = THREAD_NICE_MAX;
+
+	/* The calling thread's niceness set. */
 	(void)setpriority(PRIO_PROCESS, (id_t)self, nice);
 #else
 	/* zedBSD and FreeBSD give the threads of a time-shared program no priority of their own. */

@@ -69,7 +69,7 @@ struct kl_thread_options {
  * unknown priority), EAGAIN (the system's threads are used up) or ENOMEM.
  * A name or a priority the system cannot give is left out; the thread
  * still starts.  The thread is given back with kl_thread_join or
- * kl_thread_detach, exactly once.
+ * kl_thread_detach, exactly once.  On failure *thread is NULL.
  */
 int kl_thread_start(const struct kl_thread_options *options, struct kl_thread **thread);
 
