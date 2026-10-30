@@ -3,7 +3,7 @@
 # ws307-p004 package の header・.pc と pkgconf、導入先で GTK4 の app を build する
 
 - 親: [WS307](../ws.md)。仕様: [spec.md](../spec.md) §6.2（U13、T18）。Queue: q1698 / q1698-i01（担当 P4、2026-10-30、worktree `/home/awe/zedBSD-worktrees/p4-ws307o`、branch `agent/p4-ws307o`、基点 main d3abf7c27）。
-- Status: in-progress（実装と試験の script を commit（2aad28963）。build の確かめと QEMU の試験は未実施。2026-10-30 09:13 に Q1 のラップアップの指示で止めた）
+- Status: in-progress（q1711-i01 の QEMU の run4 で PASS（GTK4 と C++ の build と実行、j3-sync）。Q1 の判定待ち）
 - ユーザーの回答（2026-10-30、原文、ws.md）:「clangとlibcxxのビルドは許可しますが、導入先というのはどういう意味なのかわかりません。zedBSDホストでのセルフビルドのことですか？」→ Q1 の解釈: 導入先 = installer で入れた zedBSD（その上の self build）。ユーザーに確認中で、違えば Q1 が知らせる。clang・libcxx の package の build は許可（共有の toolchain の tree は lock のまま、自分の worktree の `build/` で）。
 
 ## 実装（commit 2aad28963）
@@ -38,3 +38,12 @@
   - C++: `clang++ -std=c++17 p004-cxx.cc` が `'iostream' file not found`。libc++ の header は `/usr/include/c++/v1` にあるが、toolchain の ZedBSD の driver（`toolchain/llvm/patches/0001-add-zedbsd-x86-target.patch` の `ToolChains/ZedBSD.cpp`）に C++ の標準の include の道（AddClangCXXStdlibIncludeArgs）が無い。直すのは toolchain の変更（Q1 の許可が要る）。Q1 に案 A（`lang/clang` の package に `/usr/bin/clang++.cfg`）・案 B（LLVM の patch）を送り判断待ち。
   - 写真: 初回の login の Settings の Welcome が全画面で前にあり、hello.png に GTK の窓が写らない。`p004-guest-run.sh` で hello の前に Settings を閉じるよう直した。
   - 観察（範囲の外、未調査）: GTK が `Unrecognized accessibility backend "\`\xe4..."` を出す（script は `GTK_A11Y=none` を渡す）。環境変数の値が壊れて読まれている疑い。Q1 に報告。
+- C++ の直し（Q1 の許可、2026-10-30「C++ は案 A を許可します」: 範囲は `userland/packages/lang/clang` の package が `/usr/bin/clang++.cfg` を入れる変更だけ。LLVM の patch・llvm.mk・共有の build/llvm* は変えない）: `userland/packages/lang/clang/clang++.cfg`（新規。`-isystem /usr/include/c++/v1`・`-lc++`・`-lc++abi`・`-lunwind`）と Makefile の `--file /usr/bin/clang++.cfg=…`（mode 0644）と注記。clang は clang++ として動く時、実行 file と同じ directory の `clang++.cfg` を読む。`-stdlib=libc++` はこの driver では何も足さないので入れていない。host の cross clang に `--config=` で当て、`-c -Werror -Wall -Wextra` で警告無し、link の command に `-lc++ -lc++abi -lunwind` が入ることを確かめた（lld は共有 library の順に依らない）。manifest で `usr/bin/clang++.cfg	lang-clang	clang	f	0644`。
+- 試験の直し: `p004-guest-run.sh` で hello の前に Settings を閉じる（`ps -A -o pid,comm` で選ぶ）。GTK_A11Y の観察の小さな C（getenv と environ を print、判定に使わない）を足した。
+- QEMU run4（image を作り直し、`VENUS_RENDERER=/home/awe/zedBSD-claude1/build/ws035-sq-venus/install sh plan/ws307/tests/p004-gtk.sh build/ws307-p004/installer-image.img`）: **PASS**（`build/ws307-test/p004.oeVctS`、p6-ws307 の worktree）:
+  - 導入（install-admin、NVMe 512 の 24 GiB、base・desktop・firmware・openssh・openssl・lang-clang・devel-pkgconf・desktop-gtk4 と依存）全 STEP ok、`HOST j3-sync ok`。
+  - 導入先だけで起動（Venus）、tester で SSH: `PKGCONF 3.0.10`、`STEP pkg-config-gtk4 ok`、`STEP build ok`（`cc -Wall -Wextra -Werror … $(pkg-config --cflags --libs gtk4)`）、`P004 MAPPED gtk=4.18.6`、`P004 QUIT status=0`、窓の写真 `hello.png`（「p004 hello」の窓に「Built on zedBSD with clang and pkg-config」、目で確かめた。Settings の Welcome は閉じられず後ろに残った（kill が効かなかった、原因は未調査、判定に影響無し））。
+  - `STEP build-cxx ok`（`clang++ -std=c++17 -Wall -Wextra -Werror`）、`CXX P004 CXX libc++ on zedBSD`、`STEP cxx-run ok`。
+  - GTK_A11Y の観察: `getenv GTK_A11Y=none`、environ も渡した値のまま。この回は GTK の「Unrecognized accessibility backend」は 0 回（run3 の 6 回は再現しなかった）。Q1 に報告。
+- Future Work（登録は Q1）: 案 B — toolchain の LLVM の patch（`toolchain/llvm/patches/0001-add-zedbsd-x86-target.patch` の `ToolChains/ZedBSD.cpp`）の driver が libc++ の include（AddClangCXXStdlibIncludeArgs）と C++ の link（AddCXXStdlibLibArgs）を自分で足す本来の形。入れたら `clang++.cfg` を外す。LLVM の作り直しと cache の asset の更新が要る。
+- 受け入れ（spec §6.2: 導入先で GTK4 の小さな app を clang と `pkg-config gtk4` で build して動く）は QEMU で満たした。判定は Q1。実機は未実施。

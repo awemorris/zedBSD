@@ -33,6 +33,35 @@ sed 's/^/HELLO /' hello.out
 step hello-status test $status -eq 0
 step hello-mapped grep -q '^P004 MAPPED gtk=4\.' hello.out
 
+# An observation, not judged: GTK reported GTK_A11Y with a broken value.  A small program run with the same variables
+# prints what getenv() and environ hold, to see whether the C library gives the value as it was passed.
+cat > p004-env.c <<'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+
+extern char **environ;
+
+int main(void)
+{
+	const char *value;
+	char **entry;
+
+	value = getenv("GTK_A11Y");
+	if (value == NULL)
+		value = "(null)";
+	printf("getenv GTK_A11Y=%s\n", value);
+	for (entry = environ; *entry != NULL; entry++)
+		printf("environ %s\n", *entry);
+	return 0;
+}
+EOF
+if cc -o p004-env p004-env.c > env-build.txt 2>&1; then
+	XDG_RUNTIME_DIR=/run/user/$uid WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland GSK_RENDERER=cairo GTK_A11Y=none \
+		./p004-env 2>&1 | sed 's/^/ENVTEST /'
+else
+	sed 's/^/ENVTEST build /' env-build.txt
+fi
+
 cat > p004-cxx.cc <<'EOF'
 #include <iostream>
 #include <string>

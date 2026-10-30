@@ -96,7 +96,7 @@ if [ -n "$up" ]; then
 		n=$((n + 1))
 	done
 	wait $run || true
-	grep -E '^(STEP|PKGCONF|CLANG|CFLAGS|LIBS|HELLO|CXX|P004)' "$out/run.txt" || true
+	grep -E '^(STEP|PKGCONF|CLANG|CFLAGS|LIBS|HELLO|ENVTEST|CXX|P004)' "$out/run.txt" || true
 	grep -q '^P004 RUN DONE' "$out/run.txt" || status=1
 	grep -q '^STEP .* fail' "$out/run.txt" && status=1
 else
