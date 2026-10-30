@@ -1540,6 +1540,8 @@ inet_ioctl_wlan(
 	error = copyin(argument, &request, size);
 	if (error != 0)
 		goto out;
+
+	/* Refuses a request without a usable interface name. */
 	error = inet_ioctl_wlan_validate_name(&request.header);
 	if (error != 0)
 		goto out;

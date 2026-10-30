@@ -34,7 +34,9 @@ enum paint_kind {
 	PAINT_TEXT,
 	PAINT_CLIP,
 	PAINT_UNCLIP,
-	PAINT_IMAGE
+	PAINT_IMAGE,
+	/* The filters of backdrop-filter applied to what is drawn so far inside the rectangle. */
+	PAINT_BACKDROP
 };
 
 /* The deepest nesting of clips the renderers keep (deeper clips are ignored). */
@@ -74,6 +76,9 @@ struct paint_item {
 	const struct paint_glyph *glyphs;
 	size_t glyph_count;
 	const struct img_bitmap *image;
+	/* A backdrop item's filter functions (the box's style, kept by the page). */
+	const struct css_filter *filters;
+	int filter_count;
 };
 
 /*

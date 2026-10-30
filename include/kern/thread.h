@@ -31,6 +31,12 @@ struct ucred;
 /* The arguments of one system call a restart keeps. */
 #define THREAD_SYSCALL_ARGS	6
 
+/*
+ * What a thread saves when it enters one signal handler.
+ *
+ * One level lives in a thread for as long as its handler runs, so a handler
+ * that is interrupted by another signal can be unwound in order.
+ */
 struct thread_signal_level {
 	uint32_t token;
 	sigset_t saved_mask;
@@ -53,6 +59,12 @@ enum thread_state {
 	THREAD_DEAD,
 };
 
+/*
+ * One thread of execution of a process, or of the kernel itself.
+ *
+ * It lives from creation until the last reference is dropped; the scheduler,
+ * the owning process, and any waiter hold references while they use it.
+ */
 struct thread {
 	refcount_t refs;
 	tid_t tid;

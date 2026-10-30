@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 04:14（Q1）
+最終更新: 2026-10-31 04:36（Q1）
 
 ## 担当（P1〜P8）
 
@@ -11,14 +11,14 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
 | P2 | Bug | open の Bug の 4 つ目の束（QEMU と host） | q1761: BUG-312（壊れた root の fsck）→ BUG-173（sh の日本語の履歴）→ BUG-238（emacs -nw）→ BUG-199（古い host 試験）→ BUG-281（QEMU の SSH の間欠の停止）→ BUG-308（UFS の journal の窓） | 3 つ目の束は main 612a2ea04。BUG-289・292 closed |
-| P3 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除く | q1737: p006 規約の全文の見直し（約 230 file、規約の担当 3 つを並べる）→ WS331 の完了 | 返却（WS332 は P6 へ移した） |
+| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
-| P5 | [WS329](ws329/ws.md) | libmedia の H.264 の software の encoder（標準廉価実装手順） | q1758: p001 設計（WS326 の module を入力に共通化、design-reviewer と問いまで） | WS318 の設計は済み（main 85fbeb091、問い Q318-1〜14 は下の 0c） |
-| P6 | — | — | 返却（05:4x）。WS332 を完了 | 次の割当を Q1 が決める |
-| P7 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1754: p003 kernel の口の header の案と review → p006 cpuperf の枠組み（kernel、host 試験） | p011（x86 の CPU の driver）・p014（5330 の受け入れ）へ。BUG-371・372・373・375 は直して closed |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
+| P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |
+| P6 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1762: p005 の前半（熱の core: sensor・fan・電力の meter・方針と受け手・3 つの thread、host 試験と QEMU の起動） | UAPI（p004）はユーザーの review の後。WS332 は完了 |
+| P7 | [WS333](ws333/ws.md)・Bug | 電力・熱の枠組み、noct の依存の Bug | q1768: p012（全 CPU の tick の時刻を揃え、全 core が同時に深く休めるように、amd64 の HAL の実装）→ BUG-377（emacs が libEGL 無しで起動しない、config の依存） | 5330 の電力の計測は電源の入れ直しの後 |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,427（69.90%）。flexbox の auto の最小・表・justify・backdrop-filter・filter・@keyframes を足した |
 
-実装の担当（WS326）: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）。p015・p017・p019・p021・p023 は cleared。
+実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
 
 ## WS ごとの進捗
 
@@ -39,20 +39,13 @@
 | --- | --- | --- |
 | p001 | 統一の設計（CPU の idle・P-state・P/E core・熱・fan・strategy・非常の停止） | 設計済み（第 2 版、main 9946e22c0）。ユーザーの問い Q333-1〜7 待ち。実装の Phase は p003〜p024（約 70 LW） |
 | p003 | kernel の口の header（cpuperf.h・thermal.h、kern_cpu_count） | cleared（main f197c8a3f、20 port の build warning 0、design-reviewer を反映） |
-| p006 | cpuperf の枠組み（kernel） | in-progress（P7） |
+| p007 | x86 の CPU の register を読む module の設計（標準廉価実装手順、header 5・46 関数・試験の道具） | cleared。AMD と ACPI の仕様は取れず範囲の外（上の 01）。次は p008〜p010 を Sonnet 3 人で並べて |
+| p006 | cpuperf の枠組み（kernel、CPU の速さの制御の要求・方針の写し・上限・idle の統計） | cleared（main b5c8e8f50、host 試験 196 checks、QEMU の起動 4 つ PASS） |
 | p002 | amd64 の CPU の idle を MWAIT に（5330 の idle 12.99 W 対 Linux 3.2〜3.5 W） | MWAIT C6 を main に merge（f740839e5）。idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps。Linux にはまだ遠い（残りは 1 kHz の tick・P-state・ASPM・PSR の見込み、未調査） |
 
 ### WS331 driver から HAL への直の依存を除く
 
-規則（2026-10-30 ユーザーの決定）: driver は HAL を知らず、kernel の関数（kern_*）だけを使う。driver の HAL の include と `hal_*` の呼び出しは 0 になった（build の印 `HAL_ARCH_*` も p008 で driver から消した）。
-
-| Phase | 内容 | 状態 |
-| --- | --- | --- |
-| p001〜p004 | 違反の一覧、kernel に足す関数（表 B、許可済み）、表 A の置き換え、i915 | cleared（i915 の ktest-sync の 5330 の実行は未） |
-| p005 | Pi 4・Pi 5・VF2・ODROID-C5 に /dev/graphics と console（PC/AT の形、kernel_putc） | 実装済み。残り: VF2 の画面の目視、amd64 の Venus での flip の確かめ |
-| p007 | HAL の early console の framebuffer の窓を kernel が外せる形に（Pi の EBUSY を解消） | cleared |
-| p008〜p011 | Pi の共通化と ODROID-C5 の分離、kernel の header の _private.h、atomic.h の分離、arch の spinlock の macro | cleared |
-| p006 | 規約の全文の見直し | 未作成（担当なし） |
+completed（2026-10-31、main 1035ec0a0）。driver の HAL の include と `hal_*` の呼び出しは 0。全 20 port の build、QEMU（amd64・raspi4b の login、armv7・riscv64）PASS。残り（VF2 の画面の目視、amd64 の Venus の flip）は拾える試験へ。
 
 ### WS332 tick の周波数を API で扱う
 
@@ -60,7 +53,7 @@ completed（2026-10-31、main 39fc879c5）。KERN_CLOCK_HZ を無くし、tick �
 
 ### WS074 Web ブラウザ（libbrowser）
 
-Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→ 2,215 → 2,386（68.72%、10-31）。後退 0、Acid3 100/100。P8 が 100% まで自走（ユーザーの指示）。
+Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→ 2,386 → 2,427（69.90%、10-31 04:5x、main 9175ad146）。後退は偶然通っていた scripted の 2 件だけ、Acid3 100/100。P8 が 100% まで自走（ユーザーの指示）、3 回目（i03）に入った。
 
 ### WS307 graphical installer
 
@@ -76,7 +69,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 
 ### 最近完了した WS
 
-- WS332 tick の周波数を API で（2026-10-31）、WS307 graphical installer（2026-10-31）、WS009 文書（2026-10-30）、WS327 libkeiland の thread と socket（2026-10-30）、WS315 Realtek USB 2.5G（2026-10-30）。
+- WS331 driver から HAL への直の依存を除く（2026-10-31）、WS332 tick の周波数を API で（2026-10-31）、WS307 graphical installer（2026-10-31）、WS009 文書（2026-10-30）、WS327 libkeiland の thread と socket（2026-10-30）、WS315 Realtek USB 2.5G（2026-10-30）。
 
 ## open の Bug（今日見つかった物）
 
@@ -97,7 +90,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 ### 00. host の disk の一括の片付け（2026-10-31 02:3x、急ぎ）
 
-- 背景: host の / が満杯になり（938G 中 891G、空き 0）、P1・P4・P8・P3・P6 の build が「No space left on device」で落ちた。担当が頼んだ一時物を Q1 が消したが、新しい担当の sysroot の写しなどで 05:3x に空きは約 6 GB。大きいのは古い担当の worktree（`/home/awe/zedBSD-worktrees/` に約 250 個、合わせて約 559 GB）の `build/`（試験の image・kernel・sysroot の写し）。
+- 背景: host の / が満杯になり（938G 中 891G、空き 0）、P1・P4・P8・P3・P6 の build が「No space left on device」で落ちた。担当が頼んだ一時物を Q1 が消したが、新しい担当の sysroot の写し（1 つ約 1.7 GB）などで 04:3x に空きは約 3.8 GB（危ない）。担当には出力を全部 /tmp に置かせ、消せる物を挙げさせている。大きいのは古い担当の worktree（`/home/awe/zedBSD-worktrees/` に約 250 個、合わせて約 559 GB）の `build/`（試験の image・kernel・sysroot の写し）。
 - Q1 がしようとした事: 今使っていない worktree（返却済み・merge 済みの担当の物）の `build/` の中身を消す（`build/review` の PNG は残す、今動いている担当の worktree と WS313 の ODROID の image は残す、git の中身と branch は消さない）。**権限の判定（取り返せない削除）で止められた**ので、回避せずユーザーに聞く。
 - 決めてほしい事: この片付けをしてよいか。よければ settings に許可を足すか、ユーザーが `! ` で直に走らせる。それまで担当は大きな image を /tmp（tmpfs、空き約 69G）に作る。
 
@@ -149,6 +142,17 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
   - Q318-13 player の文言で「libavcodec が無い」を先に出す（推し）。
   - **Q318-14** WS326 の完了を待たずに、WS326 に触れない Phase（p002・p003a・p003b・p011a・p011b・p016〜p019）を先に始めるか（推し: 始める）。
 - 止めている物: WS318 の実装（設計の受け入れと Q318-14 の答えまで始めない）。
+
+### 0d. WS329（libmedia の H.264 の software の encoder）の設計の問い Q329-1〜5（2026-10-31 新しい）
+
+- 背景: WS329 は、libmedia に既存の library を使わない H.264 の encoder を作る WS（標準廉価実装手順）。P5 が設計（header の案 26、Phase p002〜p026）を書き、敵対的レビュー（major 10）を反映した（main 455a7d5b4）。encoder は decoder（WS326）の部品と再構成をそのまま使うので、encoder と decoder の画がずれない。実装は WS326 の完了の後。全文は [ws329/user-questions.md](ws329/user-questions.md)。
+- 用語: BD-rate は同じ画質に要る bit の量の差（+40% は x264 より 4 割多く要る）。preset は速さと画質の釣り合いの段。x264 veryfast は広く使われる速い設定。
+- Q329-1 画質の目標: **推し A** 釣り合いの preset で x264 veryfast に対し BD-rate +40% 以内、速い preset で +80% 以内。
+- Q329-2 速さの目標: **推し A** 5330 で速い preset の 720p30 を実時間に（slice の 2〜4 thread）。1080p30 は目標にしない（SIMD を使わないため）。
+- Q329-3 B-frame: **推し A** 入れる（Main・High、参照にしない B を最大 3 枚、既定は 0）。
+- Q329-4 WS318 と並べて進める: **推し A** WS326 の完了の後に p002〜p023 を WS318 と並べ、p024 は WS318 p012a、p025 は WS318 p008 を待つ。
+- Q329-5 libmedia の encoder の設定に速さの欄を足す: **推し A** WS318 の media_encoder_config に `speed` を 1 つ足す。
+- 止めている物: 無し（実装は WS326 の完了待ち）。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
@@ -204,6 +208,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
+- VF2: 今の main の kernel で HDMI に console の画面が出るか（WS331 p005 の目視の残り、BUG-372 は直った）。
 - installer（BUG-360）: 大きさの欄を全部消して打ち直せるか（QEMU は disk の空きの都合で未実施）。Settings（BUG-306）: 回転を 2 回目に 90° にしても窓が残るか。
 - **5330 の電源の入れ直し（起きたら）**: 2026-10-31 02:2x、P1 が main の kernel で起動した後に応答しない（遠隔の電源が無い）。入れ直すと Debian に戻る。古い userland と新しい kernel の組み合わせで network が上がらないだけの見込み（BUG-373・371）。P1 はそれまで QEMU で WS299 を進める。
 - **Pi 5（2026-10-31 の午後にユーザーが行う予定）**: image は出来ている（P4、main d26c657c7＋Pi 5 の GPU の branch、戻しの kernel 入り）: `/home/awe/zedBSD-worktrees/p4-ws291pi/build/ws291-p021c/rpi5-p021.img`（sha256 dcadd719…）。Q1 が SD に書く（`sudo dd … bs=4M conv=fsync`）か、ユーザーが書く。起動したら Q1 に知らせると担当が SSH で GPU の clock と fps を測る。起動しなければ config.txt の `kernel=vmunix-fallback`。

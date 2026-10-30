@@ -699,8 +699,13 @@ kern_preempt_enable(void)
 unsigned
 kern_cpu_current(void)
 {
-	/* The kernel numbers CPUs as the platform does. */
-	return (unsigned)hal_cpu_current();
+	unsigned cpu;
+
+	/* Asks the HAL, which numbers the CPUs. */
+	cpu = (unsigned)hal_cpu_current();
+
+	/* Reports the CPU the caller runs on. */
+	return cpu;
 }
 
 /*

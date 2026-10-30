@@ -133,8 +133,12 @@ bool
 vm_device_write_combine_supported(
 	void)
 {
-	/* Succeeded: the port's answer, fixed when the kernel is built. */
-	return VM_DEVICE_WC_SUPPORTED != 0;
+	/* A port whose user translations cannot write-combine says no. */
+	if (VM_DEVICE_WC_SUPPORTED == 0)
+		return false;
+
+	/* Succeeded: this port can write-combine device pages. */
+	return true;
 }
 
 /*

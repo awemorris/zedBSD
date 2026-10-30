@@ -1158,6 +1158,8 @@ draw_plane(
 						character = ' ';
 					}
 				}
+
+				/* Picks the glyph's bitmap rows from the font. */
 				glyph = &arm64_font8x16[((unsigned)(unsigned char)character) * ARM64_FONT_HEIGHT];
 				for (bit = 0; bit < 8U; bit++) {
 					screen_x = WATCH_ORIGIN_X + column * 8U + bit;
@@ -1212,6 +1214,8 @@ draw_cells(
 					character = ' ';
 				}
 			}
+
+			/* Draws the character into its cell of the framebuffer. */
 			arm64_framebuffer_cell(row, column, character, WATCH_CELL_ATTRIBUTE);
 		}
 	}

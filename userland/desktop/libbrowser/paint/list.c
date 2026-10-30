@@ -144,6 +144,9 @@ static void list_box_part(struct list_walk *walk, const struct layout_box *box, 
 static void list_box_own(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth, int part);
 static const struct layout_box **list_children_ordered(const struct layout_box *box);
 static const struct layout_box *list_child(const struct layout_box *from, const struct layout_box **ordered, size_t index);
+static void list_backdrop(struct list_walk *walk, const struct layout_box *box);
+static void list_filter(struct list_walk *walk, const struct layout_box *box);
+static void list_filter_items(struct list_walk *walk, const struct layout_box *box, const struct css_filter *filters, int filter_count);
 static void list_fade(struct list_walk *walk, size_t first, float opacity);
 static void list_scale(struct list_walk *walk, size_t first, const struct layout_box *box);
 static int list_border_shape(const struct layout_box *box, struct list_shape *shape);
@@ -474,6 +477,13 @@ paint_dump(
 			continue;
 		}
 
+		/* A backdrop filter: its rectangle and the number of functions. */
+		if (item->kind == PAINT_BACKDROP) {
+			wb_buffer_printf(out, "backdrop %.2f %.2f %.2f %.2f %d\n", (double)layout_to_px(item->x), (double)layout_to_px(item->y),
+			    (double)layout_to_px(item->width), (double)layout_to_px(item->height), item->filter_count);
+			continue;
+		}
+
 		/* An image: its rectangle and its image's size. */
 		if (item->kind == PAINT_IMAGE) {
 			wb_buffer_printf(out, "image %.2f %.2f %.2f %.2f %dx%d\n", (double)layout_to_px(item->x), (double)layout_to_px(item->y),
@@ -714,6 +724,10 @@ list_box_part(
 	/* A translucent box fades what was painted for it. */
 	if (box->style.opacity < 1.0f)
 		list_fade(walk, first, box->style.opacity);
+
+	/* The box's filter works on its border box once it is painted. */
+	if (part != LIST_BOX_DECORATION && box->style.filter_count != 0 && box->parent != NULL)
+		list_filter(walk, box);
 }
 
 /* Starts the clip of a box's clip-path inset(), and reports whether there is one to end. */
@@ -824,6 +838,10 @@ list_box_own(
 	if (part != LIST_BOX_INLINE && visible)
 		list_shadows(walk, box);
 
+	/* The backdrop filter works on what is drawn so far, under the box's own background. */
+	if (part != LIST_BOX_INLINE && visible && box->style.backdrop_filter_count != 0 && box->parent != NULL)
+		list_backdrop(walk, box);
+
 	/* The background fills the border box, rounded as its corners are, unless it went to the canvas. */
 	width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
 	height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
@@ -875,6 +893,17 @@ list_box_own(
 	} else {
 		/* The children in painting order: a flex or grid container's in order-modified document order. */
 		ordered = list_children_ordered(box);
+
+		/* The items of a flex or grid container paint each as a whole, as inline blocks do (no phases across items). */
+		if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+		    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
+			for (index = 0, child = list_child(box, ordered, 0); child != NULL; child = list_child(child, ordered, ++index))
+				list_box(walk, child, layer, depth + 1);
+			free(ordered);
+			if (clips)
+				list_unclip(walk);
+			return;
+		}
 
 		/* Block decorations precede floats; their inline contents follow the floats. */
 		for (index = 0, child = list_child(box, ordered, 0); child != NULL; child = list_child(child, ordered, ++index)) {
@@ -2708,6 +2737,61 @@ list_rect(
 	item.width = width;
 	item.height = height;
 	item.color = color;
+	error = wb_vector_push(&walk->list->items, &item);
+	if (error != 0)
+		walk->error = error;
+}
+
+/* Adds the backdrop filter of a box (or its own filter, after it is painted): its border box, with the filter functions. */
+static void
+list_backdrop(
+	struct list_walk *walk,
+	const struct layout_box *box)
+{
+	const struct layout_box *ancestor;
+
+	/* Inside a backdrop root the backdrop is only what the root painted: none is drawn before this box here. */
+	for (ancestor = box->parent; ancestor != NULL && ancestor->parent != NULL; ancestor = ancestor->parent) {
+		if (ancestor->style.backdrop_filter_count != 0 || ancestor->style.filter_count != 0 ||
+		    ancestor->style.opacity < 1.0f || ancestor->style.mix_blend_mode != 0 ||
+		    ancestor->style.clip_inset != 0 || ancestor->style.clip_rect != 0 ||
+		    ancestor->style.will_change_contains != 0 || ancestor->style.view_transition_name != NULL)
+			return;
+	}
+	list_filter_items(walk, box, box->style.backdrop_filters, box->style.backdrop_filter_count);
+}
+
+/* Adds the filter of a box over its painted border box. */
+static void
+list_filter(
+	struct list_walk *walk,
+	const struct layout_box *box)
+{
+	list_filter_items(walk, box, box->style.filters, box->style.filter_count);
+}
+
+static void
+list_filter_items(
+	struct list_walk *walk,
+	const struct layout_box *box,
+	const struct css_filter *filters,
+	int filter_count)
+{
+	struct paint_item item;
+	int error;
+
+	if (walk->error != 0)
+		return;
+	memset(&item, 0, sizeof(item));
+	item.kind = PAINT_BACKDROP;
+	item.x = box->x;
+	item.y = box->y;
+	item.width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+	item.height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	if (item.width <= 0 || item.height <= 0)
+		return;
+	item.filters = filters;
+	item.filter_count = filter_count;
 	error = wb_vector_push(&walk->list->items, &item);
 	if (error != 0)
 		walk->error = error;

@@ -82,6 +82,8 @@ enum computed_property {
 	COMPUTED_BACKGROUND_IMAGE,
 	COMPUTED_OPACITY,
 	COMPUTED_TEXT_SHADOW,
+	COMPUTED_BACKDROP_FILTER,
+	COMPUTED_FILTER,
 	COMPUTED_Z_INDEX,
 	COMPUTED_FONT_SIZE,
 	COMPUTED_FONT_WEIGHT,
@@ -96,6 +98,7 @@ enum computed_property {
 	COMPUTED_VERTICAL_ALIGN,
 	COMPUTED_LIST_STYLE_TYPE,
 	COMPUTED_BORDER_COLLAPSE,
+	COMPUTED_CAPTION_SIDE,
 	COMPUTED_FLEX_DIRECTION,
 	COMPUTED_FLEX_WRAP,
 	COMPUTED_FLEX_GROW,
@@ -216,6 +219,8 @@ static int computed_ascii(const char *ascii, struct wb_units *out);
 static int computed_decoration_append(struct wb_units *out, const struct wb_units *part);
 static int computed_decoration(const struct css_style *style, struct wb_units *out);
 static int computed_text_shadow(const struct css_style *style, struct wb_units *out);
+static int computed_backdrop_filter(const struct css_style *style, struct wb_units *out);
+static int computed_filter_list(const struct css_filter *filters, int count, struct wb_units *out);
 
 /* The state of a computed declaration, which marks its element's object. */
 static const struct vm_cell_type computed_ref_type = { "computed-style", computed_trace, NULL };
@@ -295,6 +300,8 @@ static const struct computed_entry computed_entries[] = {
 	{ "background-image", COMPUTED_BACKGROUND_IMAGE },
 	{ "opacity", COMPUTED_OPACITY },
 	{ "text-shadow", COMPUTED_TEXT_SHADOW },
+	{ "backdrop-filter", COMPUTED_BACKDROP_FILTER },
+	{ "filter", COMPUTED_FILTER },
 	{ "z-index", COMPUTED_Z_INDEX },
 	{ "font-size", COMPUTED_FONT_SIZE },
 	{ "font-weight", COMPUTED_FONT_WEIGHT },
@@ -312,6 +319,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "vertical-align", COMPUTED_VERTICAL_ALIGN },
 	{ "list-style-type", COMPUTED_LIST_STYLE_TYPE },
 	{ "border-collapse", COMPUTED_BORDER_COLLAPSE },
+	{ "caption-side", COMPUTED_CAPTION_SIDE },
 	{ "flex-direction", COMPUTED_FLEX_DIRECTION },
 	{ "flex-wrap", COMPUTED_FLEX_WRAP },
 	{ "flex-grow", COMPUTED_FLEX_GROW },
@@ -465,6 +473,7 @@ static const char *const computed_list_styles[] = { "disc", "circle", "square", 
 
 /* The names of border-collapse. */
 static const char *const computed_collapses[] = { "separate", "collapse" };
+static const char *const computed_caption_sides[] = { "top", "bottom" };
 
 /* The names of flex-direction, by enum css_flex_direction. */
 static const char *const computed_flex_directions[] = { "row", "row-reverse", "column", "column-reverse" };
@@ -1284,6 +1293,12 @@ computed_write_keyword(
 	case COMPUTED_OPACITY:
 		error = computed_number(style->opacity, out);
 		break;
+	case COMPUTED_BACKDROP_FILTER:
+		error = computed_backdrop_filter(style, out);
+		break;
+	case COMPUTED_FILTER:
+		error = computed_filter_list(style->filters, style->filter_count, out);
+		break;
 	case COMPUTED_TEXT_SHADOW:
 		error = computed_text_shadow(style, out);
 		break;
@@ -1380,6 +1395,9 @@ computed_write_keyword(
 		break;
 	case COMPUTED_BORDER_COLLAPSE:
 		error = computed_name(computed_collapses, 2, style->border_collapse, out);
+		break;
+	case COMPUTED_CAPTION_SIDE:
+		error = computed_name(computed_caption_sides, 2, style->caption_side, out);
 		break;
 	case COMPUTED_FLEX_DIRECTION:
 		error = computed_name(computed_flex_directions, 4, style->flex_direction, out);
@@ -2294,6 +2312,55 @@ computed_decoration_append(struct wb_units *out, const struct wb_units *part)
 			return error;
 	}
 	return wb_units_append(out, part->data, part->length);
+}
+
+/* Serializes backdrop-filter as its functions (blur in px, hue-rotate in deg, the others as numbers), or none. */
+static int
+computed_backdrop_filter(
+	const struct css_style *style,
+	struct wb_units *out)
+{
+	return computed_filter_list(style->backdrop_filters, style->backdrop_filter_count, out);
+}
+
+/* Serializes a filter list. */
+static int
+computed_filter_list(
+	const struct css_filter *filters,
+	int count,
+	struct wb_units *out)
+{
+	static const char *const names[] = {
+		"blur", "brightness", "contrast", "grayscale", "hue-rotate", "invert", "opacity", "saturate", "sepia"
+	};
+	const struct css_filter *filter;
+	int index;
+	int error;
+
+	/* No function. */
+	if (count == 0)
+		return computed_ascii("none", out);
+	error = 0;
+	for (index = 0; index < count && error == 0; index++) {
+		filter = &filters[index];
+		if (index != 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_ascii(names[filter->kind], out);
+		if (error == 0)
+			error = computed_ascii("(", out);
+		if (error == 0 && filter->kind == CSS_FILTER_BLUR)
+			error = computed_pixels(filter->amount, out);
+		else if (error == 0 && filter->kind == CSS_FILTER_HUE_ROTATE) {
+			error = computed_number(filter->amount, out);
+			if (error == 0)
+				error = computed_ascii("deg", out);
+		} else if (error == 0)
+			error = computed_number(filter->amount, out);
+		if (error == 0)
+			error = computed_ascii(")", out);
+	}
+	return error;
 }
 
 /* Serializes the text shadow as its color and its offsets and blur in pixels, or none. */

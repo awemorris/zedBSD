@@ -83,6 +83,8 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev26（7727cb0b0、harness だけ測り直し。static・scripted・crash は dev25 のまま） | 976 | 1,085 | 115 | 39 | 2,215（63.80%） |
   | ours-dev27（ad3b33639、2026-10-31、q1727-i01、4 runner を測り直し） | 986 | 1,107 | 235 | 41 | 2,369（68.23%） |
   | ours-dev28（5b032c17b、harness・scripted・crash を測り直し。static は同じ source の部分測定の再実行 1,111 pass で後退 0、数えは 1,107） | 996 | 1,107 | 242 | 41 | 2,386（68.72%） |
+  | ours-dev30（4078977d5、2026-10-31、q1727-i02、4 runner を測り直し。static は static-subset.py の全件を並列で。後退あり、下の記述） | 998 | 1,137 | 236 | 41 | 2,412（69.47%） |
+  | ours-dev31（a6fad1068、2026-10-31、q1727-i02、4 runner を測り直し。後退は scripted の 2 件だけ） | 998 | 1,146 | 242 | 41 | 2,427（69.90%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -174,6 +176,52 @@ Origin: 2026-10-27 ユーザーの指示。
   - getComputedStyle(el, '::view-transition-*(name)')（bind/computed.c、page_vt_pseudo_style）と animation-* の computed。
   - 未対応（残り）: inline 要素の capture（inline-element-size・new-content-is-inline など約 10）、縦書きの massive element、iframe の transition（約 10）、shadow の ::part（6）、
     Web Animations（getAnimations・set-current-time・web-animations-api 約 8）、dialog・top layer、scrollbar・scroll の rebase、harness の pseudo-elements-valid の URL variant。
+
+### q1727-i02 の途中経過（2026-10-31、P8）
+
+- 確かめ（image・QEMU）: `flock /tmp/zedbsd-image-build.lock sh plan/ws074/tests/build-browser-image.sh build/amd64` が exit 0（libbrowser の warning 無し）。
+  Venus の guest（runtime build/ws074-run）で wayland --glass と `/bin/browser` が起動し、`browser-start.sh` が PASS（start → about → 戻る、zdesktop に ERROR 無し）。
+  browser-start.sh は古かった（既定の頁が google.com に変わった事、待ちが早すぎた事）ので直した（start.html を URL に渡し、wayland の socket と window の map を待つ。7215eef0b）。
+  引数無しの起動は https://www.google.com/ を network から読んで描いた（画面で確認）。
+- 直した物（commit 6aed8bc06、ec73c1d7a、7f65d6e32）:
+  1. flex の自動の最小（min-width: auto）は行が収まる時も、flex-basis より大きい時も効く（収まる時の省略と base での頭打ちを外した）。flex: 0 0 0% の項目が内容の幅になる。
+  2. flex・grid の item は inline-block のように 1 つずつ丸ごと描く（背景を先に全部描いてから文字、をやめた）。隣の item に食い込む文字の重なり順が合う（flexbox_flex-0-* など）。
+  3. table: `caption-side`（top・bottom）、table の height・min-height は行が分け合う（caption を除く）、column の flex で stretch された table は幅を満たす。
+  4. flex の `justify-content: start|end`（flex-start・flex-end でない）は container の writing mode の左・右（column は上・下）で、flex-direction の逆でも変わらない。
+  5. flex-shrink の合計が 1 未満なら、不足の一部（合計倍）だけ縮む（9.7 の規則）。
+  6. 入れ子の column の flex で、auto の高さの container の中の item の % の高さは auto 扱い（`height_indefinite`）。
+  7. 画像の flex item の content-based minimum は、定まった cross size に自然な比を掛けた値。
+  8. `backdrop-filter`（blur・brightness・contrast・grayscale・hue-rotate・invert・opacity・saturate・sepia、url() は読み飛ばし）の parse・cascade・computed、
+     表示 list の PAINT_BACKDROP と software renderer の色行列・Gauss blur（GPU は描かない）。`will-change: transform|perspective|filter|backdrop-filter` と backdrop-filter は fixed・absolute の containing block を作る。
+     filter-effects の static 51 のうち gap だった 20 → 10（残りは border-radius の clip、zoom、opacity と backdrop root、transform、SVG の rect の CSS の幅）。
+- 部分の確認: css-flexbox・css-grid・css-align・css-position・css-writing-modes・css-tables の static（1,413 件の subset）で後退 0、FIXED +16（flexbox 以外の abspos 22 は q1727-i01 の分）。
+
+- 全件の測定（ours-dev30、source 4078977d5、`build/ws074-cmp/ours-dev30`）: 2,412 / 3,472 = 69.47%（dev28 は 2,386）。gap 1,060: harness 479、static 415、scripted 160、crash 6。
+  Acid3 100/100・pixel 差 0（exact match）、Acid2 99.27%（基準と同じ）、host build は `-Wall -Wextra -Werror` で warning 0。
+  **後退あり（dev28 の gap に無く dev30 の gap にある ID）: harness 0、crash 0、static 9、scripted 8**。原因は backdrop-filter の実装で、これまで「test も reference も backdrop-filter を無視して偶然同じ絵」で通っていた物:
+  - static: css-backdrop-filters-animation-{blur,brightness,contrast,grayscale,hue-rotate,invert,saturate,sepia}（8）は reference が backdrop-filter を使い、test が @keyframes の animation（paused、delay -2s）で backdrop-filter を動かす。engine に @keyframes が無いので test に効かない。
+    + css-view-transitions/view-transition-name-is-backdrop-filter-root（1）。
+  - scripted: filter-effects/backdrop-filter-{basic-blur,boundary,edge-clipping-2,edge-mirror,edge-pixels-2}（5）は blur の端（blur は box の外へ滲む、mirror の端）が Chromium と違い maxDifference を超える。
+    css-view-transitions/{backdrop-filter-animated,new-element-on-start,old-content-captures-different-size}（3）は、old-content-captures-different-size は単独で PASS（測定中の負荷による時間切れの疑い）、new-element-on-start は単独でも FAIL（20,000 画素差）、backdrop-filter-animated は @keyframes。
+  次の Attempt は、(1) @keyframes（parser.c の `@position-try` と同じ形で名前付きの rule を sheet に持ち、animation-name から progress を求めて backdrop-filter・filter を補間する）、(2) blur の端（box の外へ滲む filter と mirror の backdrop）で後退を 0 にする。
+  net の増分は +26 だが、後退 17 ID を直すまで dev30 を「後退 0」とは言えない。
+- 追加で直した物（4078977d5）: 入れ子の column の flex で item の主軸の大きさが定まるのは flex-basis が長さの時（basis が auto なら height が長さの時）だけにした（広げすぎて percentage-heights-005〜007・flex-basis-012 が後退したのを直した）。
+  画像の content-based minimum は row だけ（column は比の無い SVG で後退した）。`filter`（同じ関数群、border box に後から適用）と `will-change`（transform・perspective・filter・backdrop-filter は containing block と backdrop root を作る）を足した。
+
+- **最終の測定（ours-dev31、source a6fad1068、`build/ws074-cmp/ours-dev31`）: 2,427 / 3,472 = 69.90%**（dev28 は 2,386、+41）。gap 1,045: harness 479、static 406、scripted 154、crash 6。
+  dev28 の gap に無く dev31 の gap にある ID（後退）は **harness 0・static 0・crash 0・scripted 2**。上の dev30 の後退 17 件のうち 15 件を、blur を描かない（Gauss の blur は box の外へ滲まず端が mirror でないため、無い方が reference に近かった）、
+  `@keyframes`（parser.c の `parser_keyframes`、cascade.c の `cascade_animation`: 名前・delay・duration から時刻 0 の進みを求め、backdrop-filter・filter だけを前後の keyframe の間で補間）、
+  view-transition-name を持つ祖先を backdrop root として直した。残る 2 件（scripted）:
+  `css-view-transitions/new-element-on-start`（view-transition の pseudo-element の `filter: invert(1)` が image-pair の描きに入る。以前は filter を無視した偶然の一致）と
+  `css-view-transitions/backdrop-filter-animated`（pseudo-element の animation で backdrop-filter を動かし `getAnimations()` の currentTime を使う）。次の Attempt で直す。
+  Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）、host build は `-Wall -Wextra -Werror` で warning 0（dev30 の時点。dev31 の source の差は css・paint の追加だけで、build は warning 0）。
+  gap 一覧: `build/tmp/p8/gap31.json`。
+- 調べて直さなかった物（次の候補）:
+  - 直交 flow の flex item（縦書きの item を横の flex に置く）は layout_logical_wanted が flex の item を物理座標のままにするため、base size が inline の max-content になる（flexbox-writing-mode-009〜016、align-self-vert-rtl、align-self-horiz 約 25 件）。
+    正しくは item を論理座標の領域にして block size を base にする。縦の行は折り返さない簡易実装（`vertical_inline`）が前提なので、まず flex の item を領域にする設計が要る。
+  - table の `height` は caption を除く grid box の高さ（caption は外）。flex が与える高さは wrapper 全体（caption を含む）なので両者を区別する印が要る（table-as-item-inflexible-in-row-2、min-height-1）。
+  - backdrop-filter の parse: drop-shadow()・url("...") の保持、canonical な直列化（blur(0px)・hue-rotate(0deg)・100% の上限）。
+  - flexbox の SVG の viewBox と片方の寸法から決まる固有の大きさ、`min-height: min-content`。
 
 再開点（2026-10-31、q1727-i01 の停止）:
 - 最後の全件の測定は ours-dev28（source 5b032c17b、`build/ws074-cmp/ours-dev28` の harness・scripted・crash と、static は `static-subset.py` の全件の再実行）。2,386 / 3,472 = 68.72%、

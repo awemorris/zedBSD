@@ -39,6 +39,11 @@ enum sched_queue_kind {
 	SCHED_QUEUE_WOKEN,
 };
 
+/*
+ * The scheduler's state of one thread.
+ *
+ * It lives inside the thread, so it exists as long as the thread does.
+ */
 struct sched {
 	int priority;
 	uint32_t quantum;

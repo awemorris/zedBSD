@@ -357,6 +357,8 @@ uhci_root_worker_arm(
 	controller->root_ready = 1;
 	controller->root_wake_generation++;
 	worker = controller->root_worker;
+
+	/* Wakes the root worker to scan the ports. */
 	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -1629,7 +1631,7 @@ uhci_root_worker_request_stop(
 	controller->root_stopping = 1;
 	controller->root_wake_generation++;
 
-	/* Handles the worker availability. */
+	/* Wakes the root worker so it sees the stop request, unless a joiner is already reaping it. */
 	worker = controller->root_worker;
 	if (worker != NULL && !controller->root_joining)
 		sched_notify_task(worker->task);
@@ -1922,7 +1924,7 @@ uhci_retirement_defer(
 	__atomic_store_n(&controller->retirement_pending, 1U, __ATOMIC_RELEASE);
 	controller->retirement_wake_generation++;
 
-	/* Handles the worker availability. */
+	/* Wakes the retirement worker for the deferred request, unless a joiner is already reaping it. */
 	worker = controller->retirement_worker;
 	if (worker != NULL && !controller->retirement_joining)
 		sched_notify_task(worker->task);
@@ -1968,6 +1970,8 @@ uhci_root_worker_stop(
 	 * reap window.
 	 */
 	thread_ref(worker);
+
+	/* Wakes the root worker so it sees the stop request. */
 	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -2069,6 +2073,8 @@ uhci_retirement_worker_stop(
 	__atomic_store_n(&controller->retirement_stopping, 1U,
 			 __ATOMIC_RELEASE);
 	controller->retirement_wake_generation++;
+
+	/* Wakes the retirement worker so it sees the stop request. */
 	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -3368,7 +3374,7 @@ uhci_retirement_watchdog_arm(
 
 	controller->retirement_wake_generation++;
 
-	/* Handles the worker availability. */
+	/* Wakes the retirement worker to look at the stalled queue head, unless a joiner is already reaping it. */
 	worker = controller->retirement_worker;
 	if (worker != NULL && !controller->retirement_joining)
 		sched_notify_task(worker->task);

@@ -450,15 +450,19 @@ sleep_reason(
 	unsigned battery;
 	unsigned gpe;
 	unsigned ec_gpe;
+	uint64_t settle_ticks;
 	int status;
 
 	/* A note from a driver's handler, which runs in the ACPI event thread after the SCI. */
 	note = KERN_SLEEP_WAKE_NONE;
+
+	/* Waits for the note in short steps, up to the settle time. */
+	settle_ticks = kern_ms_to_ticks(SLEEP_SETTLE_STEP_MS);
 	for (waited = 0U; waited < SLEEP_SETTLE_MS; waited += SLEEP_SETTLE_STEP_MS) {
 		note = __atomic_load_n(&sleep_note, __ATOMIC_ACQUIRE);
 		if (note != KERN_SLEEP_WAKE_NONE)
 			break;
-		sched_sleep(sched_ticks() + kern_ms_to_ticks(SLEEP_SETTLE_STEP_MS));
+		sched_sleep(sched_ticks() + settle_ticks);
 	}
 
 	/* A note is the reason. */

@@ -540,6 +540,8 @@ drv_rpi_sdio_transfer(
 		command.block_size = block_size;
 		command.block_count = (unsigned)count;
 	}
+
+	/* Puts the block count, or the byte count of a single transfer, into the argument. */
 	argument |= count;
 
 	/* Describes the command and its data. */
@@ -825,6 +827,8 @@ describe_pins(
 			return EINVAL;
 		slot->pins[i] = (unsigned)cell;
 	}
+
+	/* Records how many pins the group has. */
 	slot->pin_count = count;
 
 	/* Reads the one function the group gives every pin. */

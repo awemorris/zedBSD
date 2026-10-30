@@ -94,7 +94,7 @@ static int table_cell_widths(struct layout_tree *tree, struct layout_box *cell, 
 static layout_unit table_wanted(const struct table_state *state, layout_unit spacing, layout_unit sum_most);
 static void table_spread(layout_unit *widths, int first, int span, layout_unit spacing, layout_unit wanted);
 static void table_columns(struct table_state *state, layout_unit room);
-static int table_lay_rows(struct layout_tree *tree, struct table_state *state, layout_unit used, layout_unit *cursor);
+static int table_lay_rows(struct layout_tree *tree, struct table_state *state, layout_unit used, layout_unit *cursor, layout_unit total);
 static void table_place_groups(struct layout_box *box, layout_unit edge, layout_unit used, layout_unit cursor);
 static void table_collapse(struct table_state *state);
 static int table_lay_cell(struct layout_tree *tree, struct layout_box *cell, layout_unit width, layout_unit *wanted);
@@ -122,6 +122,9 @@ layout_table(
 	layout_unit used;
 	layout_unit containing;
 	layout_unit cursor;
+	layout_unit below;
+	layout_unit total;
+	layout_unit sizing;
 	int column;
 	int error;
 
@@ -185,26 +188,51 @@ layout_table(
 	/* The columns' widths in what the spacing leaves. */
 	table_columns(&state, used - spacing);
 
-	/* The captions above the rows. */
+	/* The captions above the rows (those of caption-side: bottom are laid out for their height, and placed below the rows). */
 	cursor = 0;
+	below = 0;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow || child->style.display != CSS_DISPLAY_TABLE_CAPTION)
 			continue;
 		error = layout_block(tree, child, used);
 		if (error != 0)
 			break;
+		if (child->style.caption_side != 0) {
+			below += child->margin[CSS_TOP] + table_frame_down(child) + child->height + child->margin[CSS_BOTTOM];
+			continue;
+		}
 		child->x = child->margin[CSS_LEFT];
 		child->y = cursor + child->margin[CSS_TOP];
 		cursor = child->y + table_frame_down(child) + child->height + child->margin[CSS_BOTTOM];
 	}
 
+	/* A height of the table is the least its rows fill: the rows share what the captions leave. */
+	total = -1;
+	sizing = 0;
+	if (box->style.box_sizing != CSS_BOX_SIZING_BORDER)
+		sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	if (box->style.height.unit == CSS_UNIT_PX)
+		total = layout_from_px(box->style.height.value) - table_frame_down(box) + sizing - below;
+	if (box->style.min_height.unit == CSS_UNIT_PX &&
+	    layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing - below > total)
+		total = layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing - below;
+
 	/* The rows, then the row groups around them. */
 	if (error == 0)
-		error = table_lay_rows(tree, &state, used, &cursor);
+		error = table_lay_rows(tree, &state, used, &cursor, total);
 	table_release(&state);
 	if (error != 0)
 		return error;
 	table_place_groups(box, state.edge_x, used, cursor);
+
+	/* The captions below the rows. */
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->style.display != CSS_DISPLAY_TABLE_CAPTION || child->style.caption_side == 0)
+			continue;
+		child->x = child->margin[CSS_LEFT];
+		child->y = cursor + child->margin[CSS_TOP];
+		cursor = child->y + table_frame_down(child) + child->height + child->margin[CSS_BOTTOM];
+	}
 
 	/* Succeeded: the table is as tall as its captions, rows and spacing. */
 	box->height = cursor;
@@ -717,7 +745,8 @@ table_lay_rows(
 	struct layout_tree *tree,
 	struct table_state *state,
 	layout_unit used,
-	layout_unit *cursor)
+	layout_unit *cursor,
+	layout_unit total)
 {
 	struct table_cell *cell;
 	struct layout_box *row;
@@ -788,6 +817,39 @@ table_lay_rows(
 		if (have < cell->wanted) {
 			missing = cell->wanted - have;
 			heights[last_row - 1U] += missing;
+		}
+	}
+
+	/* A table with a height of its own: the rows grow in proportion to share what its content leaves (the first row's share when none has a height). */
+	if (total >= 0 && state->rows.count != 0) {
+		layout_unit sum;
+		layout_unit extra;
+		layout_unit given;
+
+		sum = *cursor + state->edge_y + state->edge_y + state->down * (layout_unit)(state->rows.count - 1U);
+		for (number = 0; number < state->rows.count; number++)
+			sum += heights[number];
+		extra = total - sum;
+		if (extra > 0) {
+			layout_unit heights_sum;
+
+			heights_sum = 0;
+			for (number = 0; number < state->rows.count; number++)
+				heights_sum += heights[number];
+			given = 0;
+			for (number = 0; number < state->rows.count; number++) {
+				layout_unit share;
+
+				if (number + 1U == state->rows.count) {
+					share = extra - given;
+				} else if (heights_sum > 0) {
+					share = (layout_unit)((float)extra * (float)heights[number] / (float)heights_sum);
+				} else {
+					share = extra / (layout_unit)state->rows.count;
+				}
+				heights[number] += share;
+				given += share;
+			}
 		}
 	}
 

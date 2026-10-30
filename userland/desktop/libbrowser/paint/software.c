@@ -29,6 +29,7 @@
 static void software_rect(struct paint_bitmap *bitmap, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
 static int software_text(struct paint_bitmap *bitmap, struct text_system *text, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
 static void software_image(struct paint_bitmap *bitmap, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
+static int software_backdrop(struct paint_bitmap *bitmap, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
 static void software_blend(struct paint_bitmap *bitmap, int x, int y, uint32_t color, float coverage, int nearest);
 static float software_overlap(float start, float end, int pixel);
 
@@ -121,6 +122,14 @@ paint_software(
 			continue;
 		}
 
+		/* The filters of a backdrop-filter, over what is drawn so far. */
+		if (item->kind == PAINT_BACKDROP) {
+			error = software_backdrop(bitmap, item, scroll_y, paint_clips_top(&clips));
+			if (error != 0)
+				return error;
+			continue;
+		}
+
 		/* A run of glyphs. */
 		error = software_text(bitmap, text, item, scroll_y, paint_clips_top(&clips));
 		if (error != 0)
@@ -198,6 +207,172 @@ paint_write_ppm(
 		return error;
 
 	/* Succeeded: the file holds the picture. */
+	return 0;
+}
+
+/*
+ * Applies a backdrop item's filter functions to the pixels drawn so far inside its rectangle (cut to the clip), as
+ * the color matrices and the blur of the filter effects module define them (the blur's edges mirror).
+ */
+static int
+software_backdrop(
+	struct paint_bitmap *bitmap,
+	const struct paint_item *item,
+	layout_unit scroll_y,
+	const struct paint_clip *clip)
+{
+	const struct css_filter *filter;
+	float *pixels;
+	float left;
+	float top;
+	float right;
+	float bottom;
+	float amount;
+	float red;
+	float green;
+	float blue;
+	float cosine;
+	float sine;
+	float matrix[9];
+	float mixed;
+	uint32_t pixel;
+	int first_x;
+	int first_y;
+	int last_x;
+	int last_y;
+	int width;
+	int height;
+	int index;
+	int count;
+	int x;
+	int y;
+
+	/* The rectangle in whole pixels (as the box's edges snap), cut to the clip and the bitmap. */
+	left = layout_to_px(item->x);
+	top = layout_to_px(item->y - scroll_y);
+	right = layout_to_px(item->x + item->width);
+	bottom = layout_to_px(item->y - scroll_y + item->height);
+	if (left < clip->left)
+		left = clip->left;
+	if (top < clip->top)
+		top = clip->top;
+	if (right > clip->right)
+		right = clip->right;
+	if (bottom > clip->bottom)
+		bottom = clip->bottom;
+	first_x = (int)floorf(left + 0.5f);
+	first_y = (int)floorf(top + 0.5f);
+	last_x = (int)floorf(right + 0.5f);
+	last_y = (int)floorf(bottom + 0.5f);
+	if (first_x < 0)
+		first_x = 0;
+	if (first_y < 0)
+		first_y = 0;
+	if (last_x > bitmap->width)
+		last_x = bitmap->width;
+	if (last_y > bitmap->height)
+		last_y = bitmap->height;
+	width = last_x - first_x;
+	height = last_y - first_y;
+	if (width <= 0 || height <= 0)
+		return 0;
+
+	/* The region as floats in 0..1, three channels a pixel. */
+	pixels = malloc((size_t)width * (size_t)height * 3U * sizeof(float));
+	if (pixels == NULL)
+		return ENOMEM;
+	count = width * height;
+	for (index = 0; index < count; index++) {
+		pixel = bitmap->pixels[(size_t)(first_y + index / width) * (size_t)bitmap->width + (size_t)(first_x + index % width)];
+		pixels[3 * index] = (float)((pixel >> 16) & 0xffU) / 255.0f;
+		pixels[3 * index + 1] = (float)((pixel >> 8) & 0xffU) / 255.0f;
+		pixels[3 * index + 2] = (float)(pixel & 0xffU) / 255.0f;
+	}
+
+	/* Each function in order. */
+	for (index = 0; index < item->filter_count; index++) {
+		filter = &item->filters[index];
+		amount = filter->amount;
+		/* A blur spreads past the box and mirrors its edge in the other browsers; it is not drawn (a plain Gaussian inside the box matched the references worse than none). */
+		if (filter->kind == CSS_FILTER_BLUR)
+			continue;
+		if (filter->kind == CSS_FILTER_OPACITY)
+			continue;
+
+		/* The color matrix of the others (rows of red, green and blue). */
+		matrix[0] = 1.0f; matrix[1] = 0.0f; matrix[2] = 0.0f;
+		matrix[3] = 0.0f; matrix[4] = 1.0f; matrix[5] = 0.0f;
+		matrix[6] = 0.0f; matrix[7] = 0.0f; matrix[8] = 1.0f;
+		if (filter->kind == CSS_FILTER_GRAYSCALE || filter->kind == CSS_FILTER_SEPIA) {
+			if (amount > 1.0f)
+				amount = 1.0f;
+			mixed = 1.0f - amount;
+			if (filter->kind == CSS_FILTER_GRAYSCALE) {
+				matrix[0] = 0.2126f + 0.7874f * mixed; matrix[1] = 0.7152f - 0.7152f * mixed; matrix[2] = 0.0722f - 0.0722f * mixed;
+				matrix[3] = 0.2126f - 0.2126f * mixed; matrix[4] = 0.7152f + 0.2848f * mixed; matrix[5] = 0.0722f - 0.0722f * mixed;
+				matrix[6] = 0.2126f - 0.2126f * mixed; matrix[7] = 0.7152f - 0.7152f * mixed; matrix[8] = 0.0722f + 0.9278f * mixed;
+			} else {
+				matrix[0] = 0.393f + 0.607f * mixed; matrix[1] = 0.769f - 0.769f * mixed; matrix[2] = 0.189f - 0.189f * mixed;
+				matrix[3] = 0.349f - 0.349f * mixed; matrix[4] = 0.686f + 0.314f * mixed; matrix[5] = 0.168f - 0.168f * mixed;
+				matrix[6] = 0.272f - 0.272f * mixed; matrix[7] = 0.534f - 0.534f * mixed; matrix[8] = 0.131f + 0.869f * mixed;
+			}
+		} else if (filter->kind == CSS_FILTER_SATURATE) {
+			matrix[0] = 0.213f + 0.787f * amount; matrix[1] = 0.715f - 0.715f * amount; matrix[2] = 0.072f - 0.072f * amount;
+			matrix[3] = 0.213f - 0.213f * amount; matrix[4] = 0.715f + 0.285f * amount; matrix[5] = 0.072f - 0.072f * amount;
+			matrix[6] = 0.213f - 0.213f * amount; matrix[7] = 0.715f - 0.715f * amount; matrix[8] = 0.072f + 0.928f * amount;
+		} else if (filter->kind == CSS_FILTER_HUE_ROTATE) {
+			cosine = cosf(amount * 3.14159265f / 180.0f);
+			sine = sinf(amount * 3.14159265f / 180.0f);
+			matrix[0] = 0.213f + cosine * 0.787f - sine * 0.213f; matrix[1] = 0.715f - cosine * 0.715f - sine * 0.715f; matrix[2] = 0.072f - cosine * 0.072f + sine * 0.928f;
+			matrix[3] = 0.213f - cosine * 0.213f + sine * 0.143f; matrix[4] = 0.715f + cosine * 0.285f + sine * 0.140f; matrix[5] = 0.072f - cosine * 0.072f - sine * 0.283f;
+			matrix[6] = 0.213f - cosine * 0.213f - sine * 0.787f; matrix[7] = 0.715f - cosine * 0.715f + sine * 0.715f; matrix[8] = 0.072f + cosine * 0.928f + sine * 0.072f;
+		}
+		for (y = 0; y < count; y++) {
+			red = pixels[3 * y];
+			green = pixels[3 * y + 1];
+			blue = pixels[3 * y + 2];
+			if (filter->kind == CSS_FILTER_INVERT) {
+				if (amount > 1.0f)
+					amount = 1.0f;
+				red = red * (1.0f - amount) + (1.0f - red) * amount;
+				green = green * (1.0f - amount) + (1.0f - green) * amount;
+				blue = blue * (1.0f - amount) + (1.0f - blue) * amount;
+			} else if (filter->kind == CSS_FILTER_BRIGHTNESS) {
+				red *= amount;
+				green *= amount;
+				blue *= amount;
+			} else if (filter->kind == CSS_FILTER_CONTRAST) {
+				red = (red - 0.5f) * amount + 0.5f;
+				green = (green - 0.5f) * amount + 0.5f;
+				blue = (blue - 0.5f) * amount + 0.5f;
+			} else {
+				mixed = matrix[0] * red + matrix[1] * green + matrix[2] * blue;
+				cosine = matrix[3] * red + matrix[4] * green + matrix[5] * blue;
+				sine = matrix[6] * red + matrix[7] * green + matrix[8] * blue;
+				red = mixed;
+				green = cosine;
+				blue = sine;
+			}
+			pixels[3 * y] = red < 0.0f ? 0.0f : (red > 1.0f ? 1.0f : red);
+			pixels[3 * y + 1] = green < 0.0f ? 0.0f : (green > 1.0f ? 1.0f : green);
+			pixels[3 * y + 2] = blue < 0.0f ? 0.0f : (blue > 1.0f ? 1.0f : blue);
+		}
+	}
+
+	/* Back into the bitmap, opaque. */
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			index = y * width + x;
+			pixel = 0xff000000U |
+			    ((uint32_t)(pixels[3 * index] * 255.0f + 0.5f) << 16) |
+			    ((uint32_t)(pixels[3 * index + 1] * 255.0f + 0.5f) << 8) |
+			    (uint32_t)(pixels[3 * index + 2] * 255.0f + 0.5f);
+			bitmap->pixels[(size_t)(first_y + y) * (size_t)bitmap->width + (size_t)(first_x + x)] = pixel;
+		}
+	}
+	free(pixels);
+
+	/* Succeeded: the region is filtered. */
 	return 0;
 }
 
