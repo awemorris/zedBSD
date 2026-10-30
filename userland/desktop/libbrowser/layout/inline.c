@@ -92,7 +92,8 @@ static void inline_cut_text(struct inline_cutter *cutter, struct layout_box *box
 static void inline_add_replaced(struct inline_cutter *cutter, struct layout_box *box);
 static void inline_add_atomic(struct inline_cutter *cutter, struct layout_box *box);
 static int inline_first_baseline(const struct layout_box *box, layout_unit *baseline, int depth);
-static int inline_items_baseline(const struct layout_box *box, layout_unit *baseline);
+static int inline_items_baseline(const struct layout_box *box, layout_unit *baseline, int last);
+static int inline_is_legend(const struct layout_box *box, const struct layout_box *child);
 static int inline_last_baseline(const struct layout_box *box, layout_unit *baseline, int depth);
 static void inline_align(struct layout_tree *tree, struct layout_box *box, struct layout_line *line, struct inline_reach *reach, size_t count, layout_unit *above, layout_unit *below);
 static layout_unit inline_shift(struct layout_tree *tree, const struct layout_box *box, const struct css_style *style, const struct inline_reach *reach);
@@ -769,6 +770,27 @@ inline_add_atomic(
 	cutter->previous = 0;
 }
 
+/* Tells whether a child is the legend of a fieldset (its baselines are not the fieldset's), or a caption of a table. */
+static int
+inline_is_legend(
+	const struct layout_box *box,
+	const struct layout_box *child)
+{
+	const struct dom_element *element;
+
+	/* A table's captions are outside its rows: its baselines are its rows'. */
+	if ((box->style.display == CSS_DISPLAY_TABLE || box->style.display == CSS_DISPLAY_INLINE_TABLE) &&
+	    child->style.display == CSS_DISPLAY_TABLE_CAPTION)
+		return 1;
+	if (box->node == NULL || box->node->type != DOM_ELEMENT || child->node == NULL || child->node->type != DOM_ELEMENT)
+		return 0;
+	element = (const struct dom_element *)box->node;
+	if (element->ns != DOM_NS_HTML || element->tag != DOM_TAG_FIELDSET)
+		return 0;
+	element = (const struct dom_element *)child->node;
+	return element->ns == DOM_NS_HTML && element->tag == DOM_TAG_LEGEND;
+}
+
 /*
  * Finds the baseline of a laid out block's last line in the normal flow,
  * searching its last blocks that have one, as a distance below the top of
@@ -790,6 +812,14 @@ inline_last_baseline(
 	if (depth > LAYOUT_DEPTH_MAX)
 		return 0;
 
+	/* A flex or grid container's: its last row's or line's (when its items know where they were put). */
+	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
+		found = inline_items_baseline(box, baseline, 1);
+		if (found >= 0)
+			return found;
+	}
+
 	/* A block of lines: its last line's baseline. */
 	if (box->children_inline) {
 		if (box->line_count == 0)
@@ -805,6 +835,8 @@ inline_last_baseline(
 		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE)
 			continue;
 		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
+			continue;
+		if (inline_is_legend(box, child))
 			continue;
 
 		/* The child's own last baseline, moved into this box's content box. */
@@ -1869,49 +1901,85 @@ inline_decorations(
 }
 
 /*
- * Finds a flex or grid container's first baseline below its content box's
- * top: the baseline its first row's (or line's) baseline-aligned items
- * share (the first row that holds an item), else the first item's of that row (synthesized from its border
+ * Finds a flex or grid container's first (or last) baseline below its content box's
+ * top: the baseline its first (last) row's or line's baseline-aligned items
+ * share, else the one of its startmost (endmost) item of that row, which a flex
+ * container takes as the one at the physical start (a reversed direction or a right to left row
+ * puts the start at the other end) (synthesized from its border
  * box's bottom when it has none).  Reports 1 when found, 0 when the
  * container has no item, and -1 when its items do not know their rows.
  */
 static int
 inline_items_baseline(
 	const struct layout_box *box,
-	layout_unit *baseline)
+	layout_unit *baseline,
+	int last)
 {
 	const struct layout_box *child;
 	const struct layout_box *best;
 	layout_unit inner;
 	int aligned;
 	int best_aligned;
-	int first_row;
+	int wanted_row;
+	int flex;
+	int row;
+	int reversed;
+	int reversed_lines;
+	int last_line;
+	int last_item;
+	int better;
 	int any;
 	int align;
+	int item_last;
 
-	/* The first row that holds an item. */
-	first_row = 0;
+	/*
+	 * Where a flex container's start is: its lines and its items run the other way when its direction (or a right to
+	 * left row, or a wrapped column's lines) is reversed.  The first baseline is the one of the line at the physical
+	 * start and the item at its start; the last baseline the one at the other ends.
+	 */
+	flex = box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX;
+	reversed = 0;
+	reversed_lines = 0;
+	if (flex) {
+		row = box->style.flex_direction == CSS_FLEX_ROW || box->style.flex_direction == CSS_FLEX_ROW_REVERSE;
+		reversed = box->style.flex_direction == CSS_FLEX_ROW_REVERSE || box->style.flex_direction == CSS_FLEX_COLUMN_REVERSE;
+		reversed_lines = box->style.flex_wrap == CSS_FLEX_WRAP_REVERSE;
+		if (row && box->style.direction == CSS_DIRECTION_RTL)
+			reversed = !reversed;
+		if (!row && box->style.direction == CSS_DIRECTION_RTL)
+			reversed_lines = !reversed_lines;
+	}
+	last_line = last != reversed_lines;
+	last_item = last != reversed;
+
+	/* The line that holds an item at that end. */
+	wanted_row = 0;
 	any = 0;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow)
 			continue;
 		any = 1;
-		if (child->item_row > 0 && (first_row == 0 || child->item_row < first_row))
-			first_row = child->item_row;
+		if (child->item_row > 0 && (wanted_row == 0 || (last_line ? child->item_row > wanted_row : child->item_row < wanted_row)))
+			wanted_row = child->item_row;
 	}
 
-	/* Its items, a baseline-aligned one before the others, then the first by column. */
+	/* Its items, a baseline-aligned one before the others, then the one at that end. */
 	best = NULL;
 	best_aligned = 0;
 	for (child = box->first_child; child != NULL; child = child->next) {
-		if (child->out_of_flow || first_row == 0 || child->item_row != first_row)
+		if (child->out_of_flow || wanted_row == 0 || child->item_row != wanted_row)
 			continue;
 		align = child->style.align_self;
-		if (align == CSS_ALIGN_AUTO)
+		item_last = (child->style.last_baselines & 8u) != 0;
+		if (align == CSS_ALIGN_AUTO) {
 			align = box->style.align_items;
-		aligned = align == CSS_ALIGN_BASELINE;
-		if (best == NULL || (aligned && !best_aligned) ||
-		    (aligned == best_aligned && child->item_column < best->item_column)) {
+			item_last = (box->style.last_baselines & 4u) != 0;
+		}
+		aligned = align == CSS_ALIGN_BASELINE && item_last == (last != 0);
+		if (flex && last && item_last && align != CSS_ALIGN_BASELINE)
+			aligned = 1;
+		better = best == NULL || (last_item ? child->item_column > best->item_column : child->item_column < best->item_column);
+		if (best == NULL || (aligned && !best_aligned) || (aligned == best_aligned && better)) {
 			best = child;
 			best_aligned = aligned;
 		}
@@ -1920,7 +1988,8 @@ inline_items_baseline(
 		return any ? -1 : 0;
 
 	/* Its baseline, or its border box's bottom (an orthogonal item's always), below the container's content box's top. */
-	if (best->style.writing_mode != box->style.writing_mode || !layout_first_baseline(best, &inner))
+	if (best->style.writing_mode != box->style.writing_mode ||
+	    !(last ? layout_last_baseline(best, &inner) : layout_first_baseline(best, &inner)))
 		inner = best->border[CSS_TOP] + best->padding[CSS_TOP] + best->height + best->padding[CSS_BOTTOM] +
 		    best->border[CSS_BOTTOM];
 	*baseline = best->y + inner;
@@ -1953,7 +2022,7 @@ inline_first_baseline(
 	/* A flex or grid container's: its first row's or line's (when its items know where they were put). */
 	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
 	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
-		found = inline_items_baseline(box, baseline);
+		found = inline_items_baseline(box, baseline, 0);
 		if (found >= 0)
 			return found;
 	}
@@ -1969,6 +2038,8 @@ inline_first_baseline(
 	/* A block of blocks: the first child in the flow that has one, below where that child's content starts. */
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE || child->replaced)
+			continue;
+		if (inline_is_legend(box, child))
 			continue;
 		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
 			continue;
@@ -2000,8 +2071,17 @@ layout_first_baseline(
 	if (!inline_first_baseline(box, &inner, 0))
 		return 0;
 
-	/* Succeeded: below the border and the padding. */
+	/* Below the border and the padding, and no further than a box that scrolls reaches. */
 	*baseline = box->border[CSS_TOP] + box->padding[CSS_TOP] + inner;
+	if (layout_clips(box)) {
+		layout_unit extent;
+
+		extent = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		if (*baseline < 0)
+			*baseline = 0;
+		if (*baseline > extent)
+			*baseline = extent;
+	}
 	return 1;
 }
 
@@ -2022,7 +2102,16 @@ layout_last_baseline(
 	if (!inline_last_baseline(box, &inner, 0))
 		return 0;
 
-	/* Succeeded: below the border and the padding. */
+	/* Below the border and the padding, and no further than a box that scrolls reaches. */
 	*baseline = box->border[CSS_TOP] + box->padding[CSS_TOP] + inner;
+	if (layout_clips(box)) {
+		layout_unit extent;
+
+		extent = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		if (*baseline < 0)
+			*baseline = 0;
+		if (*baseline > extent)
+			*baseline = extent;
+	}
 	return 1;
 }

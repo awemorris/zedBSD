@@ -17,6 +17,7 @@
 
 static layout_unit block_resolve(const struct css_length *length, layout_unit containing_width);
 static void block_width(struct layout_box *box, layout_unit containing_width);
+static void block_fieldset_legend(struct layout_box *box);
 static int block_children(struct layout_tree *tree, struct layout_box *box);
 static layout_unit block_collapse(layout_unit first, layout_unit second);
 static layout_unit block_outer_height(const struct layout_box *box);
@@ -212,6 +213,9 @@ layout_block(
 	if (error != 0)
 		return error;
 
+	/* A fieldset's first legend sits in its top border: it replaces the border's height instead of adding to the padding box's. */
+	block_fieldset_legend(box);
+
 	/* An explicit height replaces the content's. */
 	content_height = box->height;
 	if (height_definite)
@@ -250,6 +254,72 @@ layout_block(
 
 	/* Succeeded: the box has its size. */
 	return 0;
+}
+
+/*
+ * Puts a fieldset's rendered legend (its first child in the flow, a legend element) on its top border: the box
+ * is centered on the larger of the border's width and its own height, and what follows starts there too, so
+ * the legend takes the place of the border instead of lying under it.
+ */
+static void
+block_fieldset_legend(
+	struct layout_box *box)
+{
+	struct layout_box *legend;
+	struct layout_box *child;
+	const struct dom_element *element;
+	layout_unit height;
+	layout_unit border;
+	layout_unit shift;
+	layout_unit zone;
+	int after;
+
+	if (box->node == NULL || box->node->type != DOM_ELEMENT || box->children_inline)
+		return;
+	element = (const struct dom_element *)box->node;
+	if (element->ns != DOM_NS_HTML || element->tag != DOM_TAG_FIELDSET)
+		return;
+
+	/* The rendered legend: the first legend child, wherever it is among them. */
+	legend = NULL;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE || child->node == NULL || child->node->type != DOM_ELEMENT)
+			continue;
+		element = (const struct dom_element *)child->node;
+		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_LEGEND) {
+			legend = child;
+			break;
+		}
+	}
+	if (legend == NULL)
+		return;
+
+	/* The legend's margin box, against the border above. */
+	height = legend->margin[CSS_TOP] + legend->border[CSS_TOP] + legend->padding[CSS_TOP] + legend->height +
+	    legend->padding[CSS_BOTTOM] + legend->border[CSS_BOTTOM] + legend->margin[CSS_BOTTOM];
+	border = box->border[CSS_TOP];
+	shift = height < border ? height : border;
+	zone = height > border ? height : border;
+	if (zone <= 0)
+		return;
+
+	/* The legend is centered in the zone from the border box's top; the rest starts below the zone, instead of after the border. */
+	after = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child == legend) {
+			after = 1;
+			continue;
+		}
+		if (child->out_of_flow) {
+			child->static_y += zone - border - (after ? height : 0);
+			continue;
+		}
+		child->y += zone - border - (after ? height : 0);
+	}
+	legend->y = (zone - height) / 2 - border - box->padding[CSS_TOP];
+	box->height -= shift;
+	if (box->height < 0)
+		box->height = 0;
 }
 
 /*
