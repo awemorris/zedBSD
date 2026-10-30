@@ -25,9 +25,9 @@
 #include <string.h>
 
 #include "drivers/platform/pc98/graphics/display-auto.h"
-#include "hal/i386/bsp-pc98/display.h"
 #include "kern/cdev.h"
 #include "kern/clock.h"
+#include "kern/dcache.h"
 #include "kern/device-io.h"
 #include "kern/irq.h"
 #include "kern/sched.h"
@@ -92,8 +92,6 @@ unsigned irq_disables;
 unsigned irq_enables;
 
 /* The Raspberry Pi hardware layer's console calls. */
-unsigned rpi_suspends;
-unsigned rpi_resumes;
 
 /* The PC-98 native display's calls, and the device /dev/graphics registered. */
 unsigned pc98_enters;
@@ -105,8 +103,8 @@ const struct cdev_ops *graphics_cdev;
 /* The device tree the hardware layer hands over: its address and size. */
 uint64_t fdt_range[2];
 
-/* The JIS table the PC-98 hardware layer owns. */
-const uint16_t hal_pc98_jisx0208_to_ucs[7896];
+/* The JIS table the PC-98 graphics driver owns. */
+const uint16_t drv_pc98_jisx0208_to_ucs[7896];
 
 static struct stub_mapping *mapping_find(void *pointer);
 static int pc98_enter(void *context, struct pc98_display_info *info);
@@ -126,12 +124,6 @@ vf2_test_set_fatal_display(
 #else
 	(void)display;
 #endif
-}
-
-int
-vf2_test_console_ended(void)
-{
-	return console_ended;
 }
 
 int
@@ -296,6 +288,8 @@ kern_device_unmap(
 		unmapped_size[unmap_count] = size;
 	}
 	unmap_count++;
+	if (mapping->pointer != uart_console_registers && mapping->pointer != uart_other_registers)
+		free(mapping->pointer);
 	mapping->pointer = NULL;
 	return 0;
 }
@@ -560,18 +554,6 @@ drv_pc98_glyph_get_bitmap(
 }
 
 int
-pc98_display_graphics_start(void)
-{
-	return 1;
-}
-
-int
-pc98_display_graphics_stop(void)
-{
-	return 1;
-}
-
-int
 kthread_create(
 	void (*entry)(void *),
 	void *arg,
@@ -618,16 +600,48 @@ tty_console_input_byte(
 	(void)byte;
 }
 
+/* The early console is the hardware layer's character path. */
 void
-rpi_cons_suspend_output(void)
+kern_console_early_putc(
+	int character)
 {
-	rpi_suspends++;
+	hal_putc(character);
+}
+
+/* The kernel's interrupt switch, counted with the hardware layer's. */
+bool
+kern_irq_disable(void)
+{
+	irq_disables++;
+	return true;
 }
 
 void
-rpi_cons_resume_output(void)
+kern_irq_enable(void)
 {
-	rpi_resumes++;
+	irq_enables++;
+}
+
+/* The test runs on one processor. */
+unsigned
+kern_cpu_current(void)
+{
+	return 0U;
+}
+
+/* The test's framebuffer is plain memory: nothing to write back or order. */
+void
+kern_dcache_clean_range(
+	const void *address,
+	size_t size)
+{
+	(void)address;
+	(void)size;
+}
+
+void
+kern_io_barrier(void)
+{
 }
 
 /* The VisionFive 2's other drivers: nothing of the SoC comes up. */

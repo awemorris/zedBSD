@@ -641,10 +641,26 @@ hal_rtc_read_counter(
 	return true;
 }
 
+/* The kernel's name for the same counter. */
+bool
+kern_rtc_read_counter(
+	uint64_t *value,
+	uint64_t *frequency)
+{
+	return hal_rtc_read_counter(value, frequency);
+}
+
 hal_cpu_id_t
 hal_cpu_current(void)
 {
 	return (hal_cpu_id_t)stub_cpu;
+}
+
+/* The kernel's name for the same answer. */
+unsigned
+kern_cpu_current(void)
+{
+	return (unsigned)stub_cpu;
 }
 
 /* The device registry keeps the operations, for the scene to call. */

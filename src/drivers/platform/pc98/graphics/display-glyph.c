@@ -14,7 +14,7 @@
 
 
 /* Share the kernel's JIS X 0208 table instead of carrying a duplicate. */
-extern const uint16_t hal_pc98_jisx0208_to_ucs[7896];
+extern const uint16_t drv_pc98_jisx0208_to_ucs[7896];
 
 static unsigned glyph_width(uint16_t jis);
 static int read_font(struct pc98_glyph *backend, uint16_t jis, uint8_t font[32]);
@@ -51,7 +51,7 @@ drv_pc98_unicode_to_jis(
 	/* Process each remaining element. */
 	for (index = 0; index < 7896U; index++) {
 		/* Handles the hal pc98 jisx0208 to ucs condition. */
-		if (hal_pc98_jisx0208_to_ucs[index] == value) {
+		if (drv_pc98_jisx0208_to_ucs[index] == value) {
 			row = (unsigned)(index / 94U) + 0x21U;
 			cell = (unsigned)(index % 94U) + 0x21U;
 

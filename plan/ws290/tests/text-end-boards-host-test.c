@@ -8,9 +8,9 @@
 /*
  * Host test of the console's leaving of the display on the boards other
  * than the PC/AT: the PC-98 (its text layer, /dev/graphics and backend),
- * the Raspberry Pi 4 and the X68000 consoles, the VisionFive 2's binding
- * with the polled sending of the 16550 UART driver, and the serial-only
- * console, each over the real src/kern/text-display.c and src/kern/klog.c,
+ * the Raspberry Pi 4's console and the VisionFive 2's binding over the
+ * boot framebuffer's text console, the X68000 console, the polled sending
+ * of the 16550 UART driver, and the serial-only console, each over the real src/kern/text-display.c and src/kern/klog.c,
  * with the kernel's services as stubs (text-end-boards-stubs.c).
  *
  * Each scene runs in its own process (the layers keep their state in
@@ -74,8 +74,6 @@ extern uint64_t screen_physical;
 extern uint64_t screen_size;
 extern unsigned irq_disables;
 extern unsigned irq_enables;
-extern unsigned rpi_suspends;
-extern unsigned rpi_resumes;
 extern unsigned pc98_enters;
 extern unsigned pc98_fills;
 extern unsigned pc98_leaves;
@@ -83,7 +81,6 @@ extern const struct cdev_ops *graphics_cdev;
 extern uint64_t fdt_range[2];
 
 void vf2_test_set_fatal_display(void (*display)(void));
-int vf2_test_console_ended(void);
 int vf2_test_uart_present(void);
 uint64_t vf2_test_uart_physical(void);
 
@@ -434,44 +431,46 @@ scene_pc98_kernel_path(void)
 }
 #endif
 
-/* Raspberry Pi 4: the end suspends the hardware layer's framebuffer output for good. */
+/* Raspberry Pi 4: the console draws the firmware's screen itself, and the end gives its mapping back. */
 static void
 scene_rpi4(void)
 {
 	struct kern_text_range range;
+	unsigned mapped;
 	int error;
 
-	/* The console up; before the end a suspend and a resume go through. */
-	drv_rpi4_console_init();
-	kern_text_suspend();
-	kern_text_resume();
-	expect(rpi_suspends == 1U && rpi_resumes == 1U, "rpi4: suspend and resume reach the hardware layer before the end");
-
-	/* The end without ranges. */
-	error = kern_text_end(NULL, 0U);
-	expect(error == 0 && rpi_suspends == 2U, "rpi4: 0, the output suspended");
-
-	/* No resume gives the screen back. */
-	kern_text_resume();
-	kern_text_resume();
-	expect(rpi_resumes == 1U, "rpi4: a resume after the end does not resume the output");
-
-	/* The firmware's screen, which a stop's report may draw on, judged against the ranges. */
+	/* The console up over the firmware's screen: the kernel's path is the console's from the start. */
 	screen_name = "rpi4.framebuffer";
 	screen_physical = 0x3e000000ULL;
-	screen_size = 0x800000ULL;
-	range.physical = 0x3e400000ULL;
+	screen_size = 640U * 480U * 4U;
+	drv_rpi4_console_init();
+	mapped = mapping_count;
+	expect(mapped == 1U && kernel_putc == kern_text_kernel_putc, "rpi4: the screen mapped and the kernel's path published");
+
+	/* Characters, a suspend and a resume never reach the hardware layer. */
+	hal_drawn = 0U;
+	kern_text_putc('A');
+	kern_text_suspend();
+	kern_text_putc('B');
+	kern_text_resume();
+	expect(hal_drawn == 0U, "rpi4: the hardware layer draws nothing");
+
+	/* The end over the screen: the mapping goes, and the screen the hardware layer keeps counts as left. */
+	range.physical = 0x3e040000ULL;
 	range.bytes = 0x1000U;
 	error = kern_text_end(&range, 1U);
-	expect(error == EBUSY, "rpi4: EBUSY for a range over the firmware's screen");
+	expect(error == EBUSY && unmap_count == 1U && unmapped_physical[0] == 0x3e000000ULL, "rpi4: EBUSY over the screen, the mapping given back");
+
+	/* A range away from it: 0, nothing more given back. */
 	range.physical = 0x600000000ULL;
 	error = kern_text_end(&range, 1U);
-	expect(error == 0, "rpi4: 0 for a range away from it");
+	expect(error == 0 && unmap_count == 1U, "rpi4: 0 for a range away from it");
 
-	/* Characters still go to the hardware layer (its serial line). */
-	hal_drawn = 0U;
-	kern_text_putc('Z');
-	expect(hal_drawn == 1U, "rpi4: a character still reaches the hardware layer");
+	/* Characters after the end still go nowhere near the hardware layer, and a resume draws nothing. */
+	kern_text_putc('C');
+	kern_text_resume();
+	kern_text_reveal_fatal();
+	expect(hal_drawn == 0U, "rpi4: after the end the hardware layer still draws nothing");
 }
 
 /* X68000: the end publishes a path that drops every character. */
@@ -594,30 +593,22 @@ scene_ns16550_probe(void)
 	expect(error == ENOENT, "16550 probe: its input cannot start");
 }
 
-/* VisionFive 2: the end publishes the UART's path; the screen and the firmware are left alone from then on. */
+/* VisionFive 2: the console sends to the UART and draws the loader's screen; the end leaves the screen. */
 static void
 scene_vf2(void)
 {
 	char line[] = "vf2 log line\n";
 	int error;
 
-	/* The board up with its console UART; before the end the hardware layer prints and a stop takes the display back. */
+	/* The board up with its console UART and the loader's screen; the kernel's path is the console's. */
+	screen_name = "riscv64.framebuffer";
+	screen_physical = 0xfe000000ULL;
+	screen_size = 640U * 480U * 4U;
 	vf2_start(TREE_ALIAS);
 	expect(vf2_test_uart_present() && vf2_test_uart_physical() == 0x10000000ULL, "vf2: the console UART found by stdout-path");
-	kern_text_putc('A');
-	kern_platform_debug_write("x");
-	expect(hal_drawn == 2U && uart_sent_count == 0U, "vf2: before the end the hardware layer prints");
-	kern_text_reveal_fatal();
-	expect(fatal_displays == 1U, "vf2: before the end a fatal stop takes the display back");
-
-	/* The end. */
-	error = kern_text_end(NULL, 0U);
-	expect(error == 0 && vf2_test_console_ended(), "vf2: end 0");
-	expect(kernel_putc != NULL && kernel_putc != other_putc, "vf2: a path is published");
+	expect(kernel_putc == kern_text_kernel_putc, "vf2: the kernel's path published at the start");
 
 	/* The console's characters reach the UART, a new line with its carriage return; the hardware layer draws nothing. */
-	hal_drawn = 0U;
-	sent_reset();
 	kern_text_putc('B');
 	kern_text_putc('\n');
 	expect(sent_is("B\r\n") && hal_drawn == 0U, "vf2: the console's characters reach the UART only");
@@ -627,20 +618,23 @@ scene_vf2(void)
 	kern_log_write(line, strlen(line));
 	expect(sent_is("vf2 log line\r\n"), "vf2: a log record reaches the UART once");
 
-	/* A quiet log keeps the record off the kernel's path; the debug port sends it once. */
-	kern_log_set_quiet(1);
-	sent_reset();
-	kern_log_write(line, strlen(line));
-	expect(sent_is("vf2 log line\r\n"), "vf2: a quiet log record reaches the UART once");
-	kern_log_set_quiet(0);
-
-	/* A fatal stop takes no display back. */
+	/* Before the end a fatal stop takes the display back. */
 	kern_text_reveal_fatal();
-	expect(fatal_displays == 1U && hal_drawn == 0U, "vf2: after the end a fatal stop takes no display back");
+	expect(fatal_displays == 1U, "vf2: before the end a fatal stop takes the display back");
+
+	/* The end. */
+	error = kern_text_end(NULL, 0U);
+	expect(error == 0 && kernel_putc == kern_text_kernel_putc, "vf2: end 0, the path kept");
+
+	/* After the end the characters still reach the UART, and a fatal stop takes no display back. */
+	sent_reset();
+	kern_text_putc('C');
+	kern_text_reveal_fatal();
+	expect(sent_is("C") && fatal_displays == 1U && hal_drawn == 0U, "vf2: after the end the UART only, no display taken back");
 	expect(uart_other_writes == 0U, "vf2: nothing reached the UART that is not the console");
 }
 
-/* VisionFive 2: the screen the hardware layer keeps mapped, judged against the ranges. */
+/* VisionFive 2: the loader's screen, which the hardware layer keeps mapped, judged against the ranges. */
 static void
 scene_vf2_ranges(void)
 {
@@ -653,11 +647,11 @@ scene_vf2_ranges(void)
 	screen_size = 0x1000000ULL;
 	vf2_start(TREE_ALIAS);
 
-	/* A range over the screen: EBUSY, the console ended all the same. */
+	/* A range over the screen: EBUSY, the console's mapping given back all the same. */
 	range.physical = 0xfe800000ULL;
 	range.bytes = 0x1000U;
 	error = kern_text_end(&range, 1U);
-	expect(error == EBUSY && vf2_test_console_ended() && kernel_putc != NULL, "vf2 ranges: EBUSY over the screen, ended");
+	expect(error == EBUSY && unmap_count == 1U && kernel_putc == kern_text_kernel_putc, "vf2 ranges: EBUSY over the screen, mapping given back");
 
 	/* A range away from it: 0. */
 	range.physical = 0x40000000ULL;
@@ -665,32 +659,25 @@ scene_vf2_ranges(void)
 	error = kern_text_end(&range, 1U);
 	expect(error == 0, "vf2 ranges: 0 for a range away from the screen");
 
-	/* Without the screen's name there is no screen: 0 even over that place. */
-	screen_name = NULL;
-	range.physical = 0xfe800000ULL;
-	range.bytes = 0x1000U;
-	error = kern_text_end(&range, 1U);
-	expect(error == 0, "vf2 ranges: 0 without a screen");
-
 	/* Another path published: EBUSY with ranges. */
 	kernel_putc = other_putc;
 	error = kern_text_end(&range, 1U);
 	expect(error == EBUSY && kernel_putc == other_putc, "vf2 ranges: EBUSY under another path");
 }
 
-/* VisionFive 2: without the console's UART the end changes nothing. */
+/* VisionFive 2: without the console's UART or a screen the end changes nothing. */
 static void
 scene_vf2_no_uart(void)
 {
 	int error;
 
-	/* The board up with a tree that names no console. */
+	/* The board up with a tree that names no console, and no screen. */
 	vf2_start(TREE_NONE);
-	expect(!vf2_test_uart_present(), "vf2 no UART: none found");
+	expect(!vf2_test_uart_present() && kernel_putc == NULL, "vf2 no UART: none found, nothing published");
 
-	/* ENOTSUP, nothing published, the console as before. */
+	/* ENOTSUP, nothing published, the hardware layer prints and a stop takes the display back. */
 	error = kern_text_end(NULL, 0U);
-	expect(error == ENOTSUP && kernel_putc == NULL && !vf2_test_console_ended(), "vf2 no UART: ENOTSUP, nothing changed");
+	expect(error == ENOTSUP && kernel_putc == NULL, "vf2 no UART: ENOTSUP, nothing changed");
 	kern_text_putc('A');
 	kern_platform_debug_write("x");
 	kern_text_reveal_fatal();
