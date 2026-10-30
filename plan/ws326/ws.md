@@ -33,7 +33,7 @@
 ## Phase
 
 設計は [design.md](design.md)（module・決定・所有・試験の道）、各 module の仕様は `userland/desktop/libmedia/h264sw*.h` の comment。p002〜p020 は Sonnet 5.5 high の 1 回の起動で 1 Phase（header 1〜2 個）、依存の Phase の実装が main に入ってから始める。
-p021（最初の全体の試験、module の間の誤りがここで出る）・p022（適合）・p024（速さの設計）は Opus を推す（Q1 の判断）。header の基点は fd1d6f88c（実装の Phase は header を変えない、`BASE=fd1d6f88c sh plan/ws326/tests/check-skeleton.sh`）。
+p021（最初の全体の試験、module の間の誤りがここで出る）・p022（適合）・p024（速さの設計）は Opus を推す（Q1 の判断）。header の基点は fd1d6f88c（実装の Phase は header を変えない、`BASE=fd1d6f88c sh plan/ws326/tests/check-skeleton.sh`）。2026-10-31 p021 で Q1 の許した h264sw-reflist.h の直し（`h264sw_reflist_build` に `poc_type`、8.2.4.2.3）を commit 8ddb130a9 に入れ、以後の BASE は 8ddb130a9（fd1d6f88c との header の差はこの直しだけ）。
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
@@ -57,7 +57,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p018](phase018/phase.md) | slice data と macroblock の syntax: h264sw-macroblock（試験 test-macroblock） | cleared（2026-10-30 Q1、main 3195bbd68。test-macroblock 1107981 checks、突然変異 29 で残りは同値 1・CABAC の residual は p021・p022 で） | p002、p008、p009、p012 |
 | [ws326-p019](phase019/phase.md) | macroblock の再構成: h264sw-recon（試験 test-recon） | cleared（2026-10-31 Q1、053bafc0b。test-recon 33584 checks・全 PASS・check-skeleton PASS を Q1 も実行、突然変異 18 のうち 17 を検出（残り 1 は等価）） | p013〜p018 |
 | [ws326-p020](phase020/phase.md) | deblocking: h264sw-deblock（試験 test-deblock） | cleared（2026-10-30 Q1、main 9fa35fc76。test-deblock 3313 checks、突然変異約 35 で残りは観測できない 1 つ） | p003、p008 |
-| [ws326-p021](phase021/phase.md) | decoder の全体の流れと最初の全体の試験: h264sw-decoder（試験 —） | planned | p002〜p020 |
+| [ws326-p021](phase021/phase.md) | decoder の全体の流れと最初の全体の試験: h264sw-decoder（試験 run-stream.sh） | 実装済み・試験 PASS（2026-10-31 O-p021。22 本 408 frame が ffmpeg と一致、壊した stream 200 通り・開始 63 通り PASS、BASE 8ddb130a9。cleared は Q1 が決める） | p002〜p020 |
 | [ws326-p022](phase022/phase.md) | JVT の適合の試験: —（試験 —） | planned | p021 |
 | [ws326-p023](phase023/phase.md) | libmedia の backend と backend の切り替え: h264sw-backend（試験 —） | planned | p021（p022 を推す） |
 | [ws326-p024](phase024/phase.md) | 速さの設計と最初の最適化: —（試験 —） | planned | p022、p023 |
