@@ -54,7 +54,49 @@
 
 ## 結果
 
-（P2 が書く）
+P2（q1703-i01、worktree p2-ws327、基点 main b901b1968）。日付は host の `date`。
+
+### 1. 境界（2026-10-30 10:15）
+
+- `python3 -I plan/ws327/tests/check-layers.py`（範囲を絞らず）→ `check: T1 0 found`・`check: N1 0 found`・`ws327-check-layers: PASS`。
+- `sh plan/tools/keiland-os-boundary/check.sh` を今の tree（b901b1968）と WS327 の前（e05900bef = 7b1a79c23 の親、`build/tmp/p016-base-src` の
+  scratch の clone）で流し、FAIL の行を比べた（`build/tmp/p016-boundary-base.txt`・`p016-boundary-head.txt`）: 110 → 148 行。
+  増えた 38 行は全て B5（`#include <keiland/keiland_thread.h>`・`keiland_socket.h` の名前を旧い接頭辞 `keiland_` と拾う既存の誤検出。
+  keiland.h・keiland_version.h・platform/・app の include と `plan/ws327/tests/`・`plan/tools/mail/` の試験）。他の check の増減は無い
+  （A1 の libbrowser の行番号の移動 1 件だけ、中身は同じ）。B5 の直しと T1・N1 の check.sh への案は下の「Q1 へ」。
+
+### 2. build（2026-10-30 10:16〜10:20）
+
+- `sh plan/ws327/tests/build-zedbsd.sh p016 <arch> "mailer music videoplayer photos settings keiland-ime terminal"`:
+  `zedbsd amd64 make=0 warnings=0`・`zedbsd arm64 make=0 warnings=0`・`zedbsd riscv64 make=0 warnings=0`（7 program と libkeiland.so が
+  3 arch とも在る）。
+- Linux: `make -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-p016-linux …/lib/libkeiland.so …/bin/settings
+  …/libexec/keiland-ime` → `linux make=0 warnings=0`。
+
+### 3. host（2026-10-30 10:18〜10:22、log `build/ws327-p016-host.log`）
+
+| command | 最後の行 |
+| --- | --- |
+| `host-test.sh build/ws327-p016-linux` | `SUMMARY pass=12 fail=0`（thread 27・socket 53 の各 build） |
+| `host-apps.sh build/ws327-p016-linux ime picker` | `ime: PASS (host-engine: 230 passed, 0 failed)`・`picker: PASS`・`ws327-host-apps: PASS` |
+| `plan/tools/mail/run-host-mail-backend.sh` | `host-mail-sync: PASS`（backend も PASS） |
+| `plan/tools/music/host-music-play.sh` | `host-music-play: PASS` |
+| `plan/tools/media/run-host-codec.sh` | `run-host-codec: PASS` |
+| `plan/ws327/tests/build-win32.sh` | `ws327-win32: PASS`（x86_64・i686 の compile warning 0 と link） |
+| `plan/ws314/tests/doc-examples.sh build/ws327-p016-linux/lib` | `SUMMARY pass=76 fail=0 not-done=0` |
+
+### 4. 閉じた WS の試験（AGENTS.md §9 の基準、2026-10-30 10:22〜10:25）
+
+| 試験 | 生きた参照 | 扱い | 結果 |
+| --- | --- | --- | --- |
+| `plan/ws089/tests/host-build.sh` | `plan/tools/keiland-linux/zedbsd-commands.md`（tools.md に登録）・`plan/tools/keiland/run-host-welcome.sh` | 直した: `platform/thread-posix.c` を `shared-thread-posix.o` として link | `built build/ws089-host/settings-render`（exit 0） |
+| `plan/ws089/tests/host-wallpaper.sh` | 無い（ws100 の閉じた Phase だけ） | 直しは不要: host-build.sh の objects.list の `shared-*.o` を拾うので上の直しで通る。削除の候補から外した | `host-wallpaper: PASS` |
+| `plan/ws095/tests/host-engine.sh` | `userland/desktop/ime/Makefile` の comment | 直した: thread-posix.c を gnu17 で compile して link、`-Iuserland/desktop/include` | `host-engine: 233 passed, 0 failed` |
+| `plan/ws191/tests/host-audio-stream.sh` | `libkeiland-backend-zedbsd/audio-stream-zedbsd.c` の comment（`AUDIO_SOCKET_PATH` の差し替えはこの試験のため） | 直した: client の側に thread-posix.c。2 つ目の部分の `host-audiod.c` は ws209-p002（0349a118c）の `AUDIOD_VERSION` → `AUDIOD_SHM_VERSION` に追従していなかった（WS327 の前から FAIL の原因）: 1 行を直した | `host-audio-stream: PASS`・`host-audiod: PASS`・`host-pump: PASS`（exit 0） |
+
+削除の候補は無い（4 本とも直した）。`plan/ws327/tests/host-apps.sh` の「audio.c に host 試験が無い」の comment を直した。
+
+（以下 5・6 と QEMU・FreeBSD は続き）
 
 ## Q1 から（2026-10-30）: 移行で壊れた閉じた WS の試験
 
