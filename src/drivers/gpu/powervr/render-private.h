@@ -421,6 +421,16 @@ struct powervr_session {
 	uint32_t last_value;
 
 	/*
+	 * Whether a transfer since the session's last other work wrote a
+	 * buffer, and the transfer timeline's value of the newest such one:
+	 * a render's geometry (which reads vertex, index and uniform buffers)
+	 * waits for it, while a transfer that wrote only images holds back
+	 * only the render's 3D.  Changed only by the session's own submissions.
+	 */
+	unsigned transfer_wrote_buffer;
+	uint32_t transfer_buffer_value;
+
+	/*
 	 * The render jobs whose 3D may still run, oldest first, under the
 	 * queue lock; their memory is released once their points are reached.
 	 */
@@ -609,6 +619,9 @@ void powervr_buffer_retain(struct powervr_render *render, struct powervr_buffer 
 
 /* Drops a reference; the last one frees the buffer, or keeps it after a fault. */
 void powervr_buffer_put(struct powervr_render *render, struct powervr_buffer *buffer);
+
+/* Gives back a list of cached buffers the cache was flushed of: into the pool, or freed. */
+void powervr_buffers_release_flushed(struct powervr_render *render, struct powervr_buffer *list);
 
 /* Frees a list of buffers kept for a reset, linked through next. */
 void powervr_buffers_free(struct powervr_buffer *list);
@@ -909,7 +922,7 @@ struct powervr_render_marks {
  * half of a render target, after the syncs it waits for; the core's lock
  * is held.
  */
-int powervr_session_kick_render(struct powervr_render *render, struct powervr_session *session, struct powervr_target *target, unsigned half, const uint8_t *geometry, const uint8_t *partial, const uint8_t *fragment, const struct powervr_sync *waits, unsigned wait_count, struct powervr_render_marks *marks);
+int powervr_session_kick_render(struct powervr_render *render, struct powervr_session *session, struct powervr_target *target, unsigned half, const uint8_t *geometry, const uint8_t *partial, const uint8_t *fragment, const struct powervr_sync *waits, unsigned wait_count, const struct powervr_sync *fragment_waits, unsigned fragment_wait_count, struct powervr_render_marks *marks);
 
 /*
  * Waits, bounded, for a render's fragment to finish and reports its

@@ -656,6 +656,30 @@ powervr_buffer_put(
 }
 
 /*
+ * Gives back a list of cached buffers, linked through next, whose lines
+ * the system level cache wrote back and dropped: into the pool for reuse
+ * (through the cache no longer), or freed.  A write the cache still made
+ * after the flush would land in memory the GPU keeps, not in the
+ * kernel's.
+ */
+void
+powervr_buffers_release_flushed(
+	struct powervr_render *render,
+	struct powervr_buffer *list)
+{
+	struct powervr_buffer *buffer;
+
+	/* Each buffer of the list. */
+	while (list != NULL) {
+		buffer = list;
+		list = buffer->next;
+		buffer->next = NULL;
+		buffer->gpu_cached = 0;
+		pool_put(render, buffer);
+	}
+}
+
+/*
  * Frees a list of buffers kept for a reset, linked through next.
  */
 void
@@ -1185,6 +1209,12 @@ blob_make(
 		if (session->vk == NULL)
 			return EINVAL;
 		error = powervr_vk_memory_buffer(session->vk, request->blob_id, request->bytes, &buffer);
+
+		/* Memory the system level cache holds lines of: no other view of its pages. */
+		if (error == 0 && buffer->gpu_cached) {
+			powervr_buffer_put(render, buffer);
+			return EINVAL;
+		}
 	} else {
 		error = powervr_buffer_create(render, request->bytes, &buffer);
 	}

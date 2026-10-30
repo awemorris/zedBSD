@@ -367,23 +367,26 @@
 #define POWERVR_SLC_FLUSH_INVALIDATE	4U
 
 /*
- * Whether device-local Vulkan memory (only the GPU reaches it) is mapped
- * through the system level cache (1), instead of around it like memory
- * the processor maps; its buffers' cached lines are written back and
- * dropped before their pages are freed.
- */
-/*
  * Whether a cached buffer's pages wait for a flush of the system level
- * cache before they are freed (1).  With 0 they are freed at once, as
- * the mainline driver frees its buffers without flushing the cache; the
- * board rebooted with the flush on (2026-10-21), which this tells apart.
+ * cache before they are given back (1).  With 0 they are given back at
+ * once, as the mainline driver frees its buffers without flushing the
+ * cache.
  */
 #ifndef POWERVR_SLC_FLUSH_ON_FREE
 #define POWERVR_SLC_FLUSH_ON_FREE	1
 #endif
 
+/*
+ * Whether device-local Vulkan memory (only the GPU reaches it) is mapped
+ * through the system level cache (1), instead of around it like memory
+ * the processor maps; with POWERVR_SLC_FLUSH_ON_FREE its buffers' cached
+ * lines are written back and dropped before their pages are given back
+ * (into the pool, or freed).  The vertex data and textures of a draw are
+ * read many times over; around the cache the geometry of a large model
+ * takes about twice as long.
+ */
 #ifndef POWERVR_DEVICE_MEMORY_CACHED
-#define POWERVR_DEVICE_MEMORY_CACHED	0
+#define POWERVR_DEVICE_MEMORY_CACHED	1
 #endif
 
 /*

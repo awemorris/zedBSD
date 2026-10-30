@@ -227,8 +227,9 @@ struct powervr_reset_stage {
 };
 
 /*
- * The most waits a render names: the partial render's fence takes one
- * more, the geometry's own completion.
+ * The most waits a render names, those of its geometry and those of its
+ * 3D alone together: the partial render's fence takes one more, the
+ * geometry's own completion.
  */
 #define POWERVR_RENDER_WAITS_MAX		(POWERVR_CLIENT_FENCES_MAX - 1U)
 
@@ -286,10 +287,11 @@ struct powervr_client_command {
  * What one render asks of its contexts: the geometry and fragment
  * contexts' timeline words and the values the render writes there (the
  * partial render writes one less than the fragment), the render target
- * data set, the syncs the render waits for, the three firmware commands
- * as the caller built them, and the background the fragment takes after
- * a partial render when its command names none (NULL for no such
- * default).
+ * data set, the syncs the whole render waits for (from its geometry on),
+ * the syncs only its 3D (the partial render and the fragment) waits for,
+ * the three firmware commands as the caller built them, and the
+ * background the fragment takes after a partial render when its command
+ * names none (NULL for no such default).
  */
 struct powervr_render_request {
 	uint32_t geometry_timeline;
@@ -299,6 +301,8 @@ struct powervr_render_request {
 	uint32_t target_data;
 	const struct powervr_sync *waits;
 	unsigned wait_count;
+	const struct powervr_sync *fragment_waits;
+	unsigned fragment_wait_count;
 	const uint8_t *geometry;
 	const uint8_t *partial;
 	const uint8_t *fragment;
@@ -316,7 +320,7 @@ struct powervr_render_sequence {
 	uint8_t fragment[POWERVR_FRAGMENT_BYTES];
 	struct powervr_sync geometry_waits[POWERVR_CLIENT_FENCES_MAX];
 	struct powervr_sync partial_waits[POWERVR_CLIENT_FENCES_MAX];
-	struct powervr_sync fragment_wait;
+	struct powervr_sync fragment_waits[POWERVR_CLIENT_FENCES_MAX];
 	struct powervr_sync updates[3];
 	struct powervr_client_command geometry_commands[POWERVR_RENDER_COMMANDS_MAX];
 	struct powervr_client_command partial_commands[POWERVR_RENDER_COMMANDS_MAX];
@@ -378,7 +382,7 @@ void powervr_reset_stage_of(const struct powervr_reset_notice *notice, enum powe
 
 /*
  * Builds the commands of a render's three kicks; EINVAL for more waits
- * than a render names.
+ * (of the geometry and of the 3D alone together) than a render names.
  */
 int powervr_render_sequence_make(const struct powervr_render_request *request, struct powervr_render_sequence *sequence);
 

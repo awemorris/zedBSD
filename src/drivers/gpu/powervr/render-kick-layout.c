@@ -339,10 +339,11 @@ powervr_reset_stage_of(
  *
  * The geometry waits for the render's syncs, runs with its partial
  * render test on the geometry timeline at one less than its own value,
- * and writes its value.  The partial render waits for the same syncs and
- * then the geometry's value, last, runs, and writes one less than the
- * fragment's value.  The fragment waits for the geometry's value, runs,
- * and writes its own.  Every fence is a partial render fence.
+ * and writes its value.  The partial render waits for the same syncs,
+ * the syncs of the 3D alone and then the geometry's value, last, runs,
+ * and writes one less than the fragment's value.  The fragment waits for
+ * the syncs of the 3D alone and the geometry's value, last, runs, and
+ * writes its own.  Every fence is a partial render fence.
  *
  * Procedure referenced:
  * Linux v7.3 drivers/gpu/drm/imagination/pvr_queue.c
@@ -362,9 +363,12 @@ powervr_render_sequence_make(
 {
 	struct powervr_client_command *command;
 	unsigned index;
+	unsigned waits;
 
 	/* Refuses more waits than the partial render's fence holds with the geometry's. */
 	if (request->wait_count > POWERVR_RENDER_WAITS_MAX)
+		return EINVAL;
+	if (request->fragment_wait_count > POWERVR_RENDER_WAITS_MAX - request->wait_count)
 		return EINVAL;
 
 	/* The firmware commands, each with the data set and the geometry with its test. */
@@ -377,14 +381,23 @@ powervr_render_sequence_make(
 	if (request->partial_background != NULL)
 		partial_background(sequence->fragment, request->partial_background);
 
-	/* The syncs: the render's waits for the geometry and the partial render, the geometry's completion last. */
+	/*
+	 * The syncs: the render's waits for the geometry and the partial
+	 * render, the 3D's own for the partial render and the fragment, the
+	 * geometry's completion last.
+	 */
 	for (index = 0; index < request->wait_count; index++) {
 		sequence->geometry_waits[index] = request->waits[index];
 		sequence->partial_waits[index] = request->waits[index];
 	}
-	sequence->partial_waits[request->wait_count].address = request->geometry_timeline;
-	sequence->partial_waits[request->wait_count].value = request->geometry_value;
-	sequence->fragment_wait = sequence->partial_waits[request->wait_count];
+	for (index = 0; index < request->fragment_wait_count; index++) {
+		sequence->partial_waits[request->wait_count + index] = request->fragment_waits[index];
+		sequence->fragment_waits[index] = request->fragment_waits[index];
+	}
+	waits = request->wait_count + request->fragment_wait_count;
+	sequence->partial_waits[waits].address = request->geometry_timeline;
+	sequence->partial_waits[waits].value = request->geometry_value;
+	sequence->fragment_waits[request->fragment_wait_count] = sequence->partial_waits[waits];
 
 	/* The three updates: the geometry's value, one less than the fragment's, the fragment's. */
 	sequence->updates[0].address = request->geometry_timeline;
@@ -415,7 +428,7 @@ powervr_render_sequence_make(
 	sequence->partial_count = 0;
 	command = &sequence->partial_commands[sequence->partial_count++];
 	command->type = POWERVR_CLIENT_FENCE_PARTIAL;
-	command->size = (request->wait_count + 1U) * 8U;
+	command->size = (waits + 1U) * 8U;
 	command->data = (const uint8_t *)sequence->partial_waits;
 	command = &sequence->partial_commands[sequence->partial_count++];
 	command->type = POWERVR_CLIENT_PARTIAL_RENDER;
@@ -426,12 +439,12 @@ powervr_render_sequence_make(
 	command->size = 8U;
 	command->data = (const uint8_t *)&sequence->updates[1];
 
-	/* The fragment's: the geometry's completion, the command, the update. */
+	/* The fragment's: the 3D's own waits and the geometry's completion, the command, the update. */
 	sequence->fragment_count = 0;
 	command = &sequence->fragment_commands[sequence->fragment_count++];
 	command->type = POWERVR_CLIENT_FENCE_PARTIAL;
-	command->size = 8U;
-	command->data = (const uint8_t *)&sequence->fragment_wait;
+	command->size = (request->fragment_wait_count + 1U) * 8U;
+	command->data = (const uint8_t *)sequence->fragment_waits;
 	command = &sequence->fragment_commands[sequence->fragment_count++];
 	command->type = POWERVR_CLIENT_FRAGMENT;
 	command->size = POWERVR_FRAGMENT_BYTES;

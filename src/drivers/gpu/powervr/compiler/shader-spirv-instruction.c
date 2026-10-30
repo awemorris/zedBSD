@@ -426,6 +426,7 @@ reader_store(
 		error = reader_memory_address(reader, target, address);
 		if (error != 0)
 			return error;
+		reader->program->stores = 1;
 		for (index = 0; index < count; index++) {
 			offset = address[2];
 			if (index != 0) {

@@ -162,9 +162,9 @@ int powervr_session_target(struct powervr_render *render, struct powervr_session
 const struct powervr_target_layout *powervr_target_layout_of(const struct powervr_target *target) { (void)target; return &layout_stand_in; }
 
 int
-powervr_session_kick_render(struct powervr_render *render, struct powervr_session *session, struct powervr_target *target, unsigned half, const uint8_t *geometry, const uint8_t *partial, const uint8_t *fragment, const struct powervr_sync *waits, unsigned wait_count, struct powervr_render_marks *marks)
+powervr_session_kick_render(struct powervr_render *render, struct powervr_session *session, struct powervr_target *target, unsigned half, const uint8_t *geometry, const uint8_t *partial, const uint8_t *fragment, const struct powervr_sync *waits, unsigned wait_count, const struct powervr_sync *fragment_waits, unsigned fragment_wait_count, struct powervr_render_marks *marks)
 {
-	(void)render; (void)session; (void)target; (void)half; (void)partial; (void)waits; (void)wait_count;
+	(void)render; (void)session; (void)target; (void)half; (void)partial; (void)waits; (void)wait_count; (void)fragment_waits; (void)fragment_wait_count;
 	memcpy(kicked_geometry, geometry, sizeof(kicked_geometry));
 	memcpy(kicked_fragment, fragment, sizeof(kicked_fragment));
 	marks->geometry_value = 1;

@@ -10,7 +10,8 @@
 # back from it (OUT/board-vmunix), BUILD's kernel
 # put in and the board power-cycled (plan/tools/vf2/run.sh); the programs, the libraries and the qs40 model go to the
 # user's ~/p7 (the board's system files are not changed: they run with LD_LIBRARY_PATH), the compositor is started on
-# its own socket, mview spins in the game mode (mailbox, 4 images) once for each of COPIES, then the compositor is ended,
+# its own socket, mview spins in the game mode (mailbox, 4 images) once for each of COPIES (its whole output in
+# OUT/cN.txt), then the compositor is ended (its whole log in OUT/wayland.log),
 # the board's kernel put back (checked by reading it back) and the board power-cycled again.  The password comes from
 # the environment, never from this file.  OUT/summary.txt holds what is printed.
 # The compositor and mview run as root: the display node opens only for root or its owner.  MVIEW_ARGS are added to
@@ -105,6 +106,8 @@ for copies in ${COPIES:-1 10 50 100 200}; do
 done
 b "grep -E 'KWL (SCANOUT|MODE [a-z]|FAILED|VULKAN_ERROR|DIRECT)' $H/wayland.log | sort | uniq -c | head -12" > "$out/scanout.txt" 2>&1
 sed 's/^/compositor /' "$out/scanout.txt" | tee -a "$summary"
+# The compositor's whole log, its lines in order (the kernel errors and the mode changes around a failure).
+bcp "$VF2_HOST:p7/wayland.log" "$out/wayland.log" > /dev/null 2>&1 || say "FAIL the compositor's log was not read back"
 printf '%s\n' "$VF2_PASSWORD" | b "sudo -S sh -c 'kill \$(cat $H/wayland.pid)'; sleep 1; dmesg | grep -iE 'powervr|fault|lost|hang' | grep -v timing: | tail -8" > "$out/kernel.txt" 2>&1
 grep -v '^\[sudo\]' "$out/kernel.txt" | sed 's/^/kernel /' | tee -a "$summary"
 

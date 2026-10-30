@@ -59,15 +59,6 @@
 #define GENERAL_TERMINATE_PPP		0xb400U
 #define GENERAL_BYTES			0xc000U
 
-/*
- * A test switch (1 as built): 0 lets a render's geometry not wait for a
- * transfer left running, to see on the board what that wait costs.  Not
- * safe: a render may read what the transfer wrote.
- */
-#ifndef RENDER_TRANSFER_WAIT_TRIAL
-#define RENDER_TRANSFER_WAIT_TRIAL	1
-#endif
-
 /* The most pixels of a job the timing counts as small (256 x 256). */
 #define JOB_SMALL_PIXELS		65536U
 
@@ -227,6 +218,7 @@ struct job_memory {
 static int job_check(const struct powervr_render_job *job);
 static void load_draw_free(struct powervr_render_job *work, struct load_draw *load);
 static bool job_skips_empty_tiles(const struct powervr_render_job *job);
+static bool job_geometry_meets_images(const struct powervr_render_job *job);
 static bool job_needs_no_background(const struct powervr_render_job *job, bool load_drawn);
 static uint32_t float_bits(uint32_t value);
 static int load_graphics(struct powervr_render *render, uint32_t vk_format, struct powervr_vk_graphics **result);
@@ -324,7 +316,9 @@ powervr_render_job_run(
 	struct load_draw *load;
 	struct powervr_job_done *done;
 	struct powervr_sync previous[2];
+	struct powervr_sync transfer_wait;
 	unsigned wait_count;
+	unsigned fragment_wait_count;
 	unsigned half;
 	uint32_t half_fragment;
 	unsigned long enabled;
@@ -537,10 +531,27 @@ powervr_render_job_run(
 		wait_count++;
 	}
 
-	/* A render after a transfer left running waits for it too (it may read what the transfer wrote). */
-	if (session->last_kind == POWERVR_POINT_TRANSFER && RENDER_TRANSFER_WAIT_TRIAL)
-		wait_count += powervr_session_point_sync(session, session->last_kind, session->last_value, &previous[wait_count]);
-	error = powervr_session_kick_render(render, session, target, half, memory->geometry, memory->fragment, memory->fragment, previous, wait_count, &memory->marks);
+	/*
+	 * A render after transfers left running: its 3D waits for the last of
+	 * them (it may read what they wrote, or draw over what they read).
+	 * Its geometry waits for the newest that wrote a buffer (the vertex,
+	 * index and uniform buffers are read there), and for the last when a
+	 * vertex shader samples an image or stores; otherwise the geometry
+	 * runs beside the transfers (a frame's geometry beside the copy that
+	 * presents the frame before).
+	 */
+	fragment_wait_count = 0;
+	if (session->last_kind == POWERVR_POINT_TRANSFER) {
+		if (job_geometry_meets_images(job)) {
+			wait_count += powervr_session_point_sync(session, session->last_kind, session->last_value, &previous[wait_count]);
+		} else {
+			if (session->transfer_wrote_buffer)
+				wait_count += powervr_session_point_sync(session, session->last_kind, session->transfer_buffer_value, &previous[wait_count]);
+			fragment_wait_count = powervr_session_point_sync(session, session->last_kind, session->last_value, &transfer_wait);
+		}
+	}
+	error = powervr_session_kick_render(render, session, target, half, memory->geometry, memory->fragment, memory->fragment, previous, wait_count,
+					    &transfer_wait, fragment_wait_count, &memory->marks);
 
 	mutex_unlock(&render->core->lock);
 
@@ -1928,6 +1939,38 @@ put_bytes(
 		buffer->view[offset + index] = bytes[index];
 		index++;
 	}
+}
+
+/*
+ * Whether a job's geometry meets what an image transfer touched: a vertex
+ * shader that samples an image (or names any descriptor other than a
+ * buffer's address) or stores to memory.
+ */
+static bool
+job_geometry_meets_images(
+	const struct powervr_render_job *job)
+{
+	const struct powervr_vk_graphics *graphics;
+	const struct powervr_shader_request *request;
+	uint32_t draw;
+	uint32_t index;
+
+	/* Each draw's vertex program. */
+	for (draw = 0; draw < job->draw_count; draw++) {
+		graphics = job->draws[draw].pipeline;
+		if (graphics == NULL)
+			continue;
+		if (graphics->vertex.stores)
+			return true;
+		for (index = 0; index < graphics->vertex.request_count; index++) {
+			request = &graphics->vertex.requests[index];
+			if (request->kind == POWERVR_SHADER_REQUEST_DESCRIPTOR && request->part != POWERVR_SHADER_PART_BUFFER_ADDRESS)
+				return true;
+		}
+	}
+
+	/* Succeeded: the vertex programs read buffers alone. */
+	return false;
 }
 
 /*

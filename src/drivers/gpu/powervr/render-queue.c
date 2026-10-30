@@ -608,7 +608,9 @@ powervr_session_kick_compute(
  * the cleanup count.  The geometry's timeline takes the next value, the
  * fragment's the one after next (the partial render writes the one
  * between).  A fragment command that names no background after a
- * partial render takes the context's stand-in.
+ * partial render takes the context's stand-in.  The waits hold the whole
+ * render back (from its geometry on); the fragment waits only the 3D
+ * (the partial render and the fragment).
  *
  * Procedure referenced:
  * Linux v7.3 drivers/gpu/drm/imagination/pvr_queue.c (pvr_queue_run_job:
@@ -629,6 +631,8 @@ powervr_session_kick_render(
 	const uint8_t *fragment,
 	const struct powervr_sync *waits,
 	unsigned wait_count,
+	const struct powervr_sync *fragment_waits,
+	unsigned fragment_wait_count,
 	struct powervr_render_marks *marks)
 {
 	struct powervr_render_context *context;
@@ -686,6 +690,8 @@ powervr_session_kick_render(
 	request.target_data = powervr_target_data_address(target, half);
 	request.waits = waits;
 	request.wait_count = wait_count;
+	request.fragment_waits = fragment_waits;
+	request.fragment_wait_count = fragment_wait_count;
 	request.geometry = geometry;
 	request.partial = partial;
 	request.fragment = fragment;
@@ -1473,9 +1479,11 @@ powervr_session_point_set(
 	unsigned kind,
 	uint32_t value)
 {
-	/* The point. */
+	/* The point; work of another kind ends the run of transfers. */
 	session->last_kind = kind;
 	session->last_value = value;
+	if (kind != POWERVR_POINT_TRANSFER)
+		session->transfer_wrote_buffer = 0;
 }
 
 /*
@@ -2726,11 +2734,13 @@ service_pass(
 	unsigned stalled_count;
 	uint64_t progress;
 	struct powervr_buffer *flushed;
+	struct powervr_buffer *last;
 	uint32_t compute_now;
 	uint32_t fragment_now;
 	uint32_t transfer_now;
 	int overdue;
 	int pending;
+	int flush_error;
 	int error;
 
 	/* A lost firmware is not read any more. */
@@ -2801,7 +2811,14 @@ service_pass(
 		spin_unlock_irqrestore(&render->queue_lock, enabled);
 	}
 
-	/* Cached buffers let go: the cache written back and dropped, then they are freed after the lock. */
+	/*
+	 * Cached buffers let go: the cache written back and dropped, then
+	 * they go back after the lock.  After a fault, or when the flush
+	 * failed (a command that timed out may still run later), the cache
+	 * may still write their lines: they are kept for the reset, which
+	 * powers the core down before freeing them, and a failed flush puts
+	 * the device into quarantine.
+	 */
 	enabled = spin_lock_irqsave(&render->queue_lock);
 
 	flushed = render->slc_pending;
@@ -2809,10 +2826,23 @@ service_pass(
 
 	spin_unlock_irqrestore(&render->queue_lock, enabled);
 
+	flush_error = 0;
 	if (flushed != NULL && !render->faulted) {
-		error = powervr_command_slc_flush(render->core);
-		if (error != 0)
-			kern_logf("powervr: cache flush before freeing failed (%d)\n", error);
+		flush_error = powervr_command_slc_flush(render->core);
+		if (flush_error != 0)
+			kern_logf("powervr: cache flush before freeing failed (%d)\n", flush_error);
+	}
+	if (flushed != NULL && (render->faulted || flush_error != 0)) {
+		enabled = spin_lock_irqsave(&render->queue_lock);
+
+		last = flushed;
+		while (last->next != NULL)
+			last = last->next;
+		last->next = render->kept_buffers;
+		render->kept_buffers = flushed;
+		flushed = NULL;
+
+		spin_unlock_irqrestore(&render->queue_lock, enabled);
 	}
 
 	/* A command overdue: asks the firmware whether it is alive. */
@@ -2831,9 +2861,13 @@ service_pass(
 	if (unwoken && delivery.count != 0U)
 		wake_retires_late++;
 
-	/* Delivers what retired, and frees the flushed buffers. */
+	/* Delivers what retired, and gives the flushed buffers back. */
 	deliver(render, &delivery);
-	powervr_buffers_free(flushed);
+	powervr_buffers_release_flushed(render, flushed);
+
+	/* A flush that failed: the cache's state is not known. */
+	if (flush_error != 0 && error == 0)
+		error = flush_error;
 
 	/* Sessions whose work made no progress: the core stops each (it lives while its callbacks are pending). */
 	for (index = 0; index < stalled_count; index++) {
