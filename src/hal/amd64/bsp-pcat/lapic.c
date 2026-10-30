@@ -52,6 +52,7 @@
 #define LAPIC_LVT_WITH_THERMAL 5U
 #define LAPIC_LVT_WITH_CMCI  6U
 #define LAPIC_PERIODIC      0x20000U
+#define LAPIC_TSC_DEADLINE  0x40000U
 #define ICR_PENDING         0x1000U
 #define PIT_POLL_LIMIT      1000000U
 #define PIT_INPUT_HZ        1193182ULL
@@ -61,8 +62,8 @@
  * How many PIT windows calibrate the local APIC timer.  The shortest one is
  * kept: a delay can only lengthen a window as the APIC timer sees it (a
  * virtual CPU descheduled by its host between a gate edge and the sample
- * that brackets it), never shorten it (BUG-094: one window measured 17 times
- * its length, and the tick ran 17 times slow).
+ * that brackets it), never shorten it (one window was once measured at 17
+ * times its length, and the tick ran 17 times slow).
  */
 #define TIMER_CAL_WINDOWS   3U
 
@@ -81,10 +82,39 @@
 #define MSR_IA32_APIC_BASE            0x01bU
 #define MSR_IA32_ARCH_CAPABILITIES    0x10aU
 #define MSR_IA32_XAPIC_DISABLE_STATUS 0x0bdU
+#define MSR_IA32_TSC_DEADLINE         0x6e0U
+
+/* CPUID leaf 1's ECX: the local APIC timer has the TSC-deadline mode. */
+#define CPUID_TSC_DEADLINE            (1U << 24)
+
+/*
+ * Whether the tick is timed by the TSC-deadline mode, with every CPU's
+ * deadlines at the multiples of one tick period on the shared TSC.  Every
+ * CPU then takes its tick at the same moment and sleeps in the same gap,
+ * so the package can stay in a deep state for most of the period; a
+ * periodic timer started on each CPU at its own moment spreads the ticks
+ * over the period instead.  0 keeps the periodic timer on every CPU, as a
+ * build to compare against.
+ */
+#ifndef LAPIC_TICK_TSC_DEADLINE
+#define LAPIC_TICK_TSC_DEADLINE       1
+#endif
 
 static volatile uint32_t *lapic;
 static uint32_t timer_initial;
 static uint32_t lapic_physical_address;
+
+/*
+ * The TSC count of one tick when the TSC-deadline mode may time the tick,
+ * else 0; chosen once on the BSP with the calibration.
+ */
+static uint64_t tick_period_tsc;
+
+/*
+ * Which CPUs' ticks the TSC-deadline mode times now: each such CPU arms its
+ * next deadline at every tick.  Only the CPU itself writes its entry.
+ */
+static bool tick_deadline[AMD64_SMP_MAX_CPUS];
 
 static uint32_t read_reg(unsigned offset);
 static void write_reg(unsigned offset, uint32_t value);
@@ -94,6 +124,9 @@ static int acpi_has_apic_id(const struct amd64_acpi_info *acpi, uint32_t apic_id
 static int wait_icr(void);
 static void init_registers(void);
 static int calibrate_timer(void);
+static void choose_tick_source(void);
+static bool cpu_has_tsc_deadline(void);
+static void arm_next_deadline(void);
 static int tsc_wait_window(uint64_t window_ticks, unsigned *polls, const char **stage, uint32_t *lapic_start, uint32_t *lapic_end);
 static int pit_wait_level(struct amd64_pit_poll *poll, int expected_high, uint8_t *last_port61);
 static int pit_wait_10ms(uint8_t *last_port61, unsigned *polls, const char **stage, int measure_tsc, uint64_t *tsc_start, uint64_t *tsc_end, uint32_t *lapic_start, uint32_t *lapic_end);
@@ -258,22 +291,63 @@ int
 amd64_lapic_timer_start(
 	void)
 {
+	hal_cpu_id_t cpu;
+	bool deadline;
 	int error;
 
-	/* Calibrates the shared timer period once on the BSP. */
+	/* Calibrates the shared timer period once on the BSP and chooses how ticks are timed. */
 	if (timer_initial == 0) {
 		error = calibrate_timer();
 		if (error != HAL_OK)
 			return error;
+		choose_tick_source();
 	}
 
-	/* Programs the calibrated periodic timer on the current CPU. */
-	write_reg(LAPIC_TIMER_DIVIDE, 0x3U);
-	write_reg(LAPIC_LVT_TIMER, LAPIC_PERIODIC | INT_IRQ_BASE);
-	write_reg(LAPIC_TIMER_INITIAL, timer_initial);
+	/* Times this CPU's tick by TSC deadlines when the BSP chose them and this CPU has the mode. */
+	cpu = hal_cpu_current();
+	deadline = false;
+	if (tick_period_tsc != 0U)
+		deadline = cpu_has_tsc_deadline();
+	tick_deadline[cpu] = deadline;
 
-	/* Succeeded: the periodic local timer is running. */
+	/*
+	 * Arms the first deadline at the next multiple of the period.  The
+	 * LVT write is fenced (write_reg) before the deadline MSR write, so
+	 * the deadline is not written while the timer is still in another mode,
+	 * where the write would be ignored.
+	 */
+	if (deadline) {
+		write_reg(LAPIC_LVT_TIMER, LAPIC_TSC_DEADLINE | INT_IRQ_BASE);
+		arm_next_deadline();
+	}
+
+	/* Otherwise programs the calibrated periodic timer on the current CPU. */
+	if (!deadline) {
+		write_reg(LAPIC_TIMER_DIVIDE, 0x3U);
+		write_reg(LAPIC_LVT_TIMER, LAPIC_PERIODIC | INT_IRQ_BASE);
+		write_reg(LAPIC_TIMER_INITIAL, timer_initial);
+	}
+
+	/* Succeeded: the local timer is running. */
 	return HAL_OK;
+}
+
+/*
+ * Arms the current CPU's next tick when the TSC-deadline mode times it.
+ *
+ * Called at every tick of the CPU, before the tick's work.  A periodic timer
+ * rearms itself, and then nothing is done.
+ */
+void
+amd64_lapic_timer_tick(
+	hal_cpu_id_t cpu)
+{
+	/* A periodic tick needs nothing. */
+	if (!tick_deadline[cpu])
+		return;
+
+	/* The next deadline, at the next multiple of the period. */
+	arm_next_deadline();
 }
 
 /*
@@ -283,14 +357,19 @@ void
 amd64_lapic_timer_stop(
 	void)
 {
-	/* Masks the timer vector before clearing its initial count. */
+	/*
+	 * Masks the timer vector before clearing its initial count.  Leaving
+	 * the TSC-deadline mode also disarms a deadline, and a deadline write
+	 * from a tick still pending is ignored outside that mode.
+	 */
+	tick_deadline[hal_cpu_current()] = false;
 	write_reg(LAPIC_LVT_TIMER, LAPIC_MASKED | INT_IRQ_BASE);
 	write_reg(LAPIC_TIMER_INITIAL, 0);
 }
 
 /*
- * Quiets the current CPU's local interrupt sources for a system sleep
- * (ws052-p006): the corrected machine-check, thermal, performance-counter
+ * Quiets the current CPU's local interrupt sources for a system sleep:
+ * the corrected machine-check, thermal, performance-counter
  * and error entries, and the two local lines when they deliver a fixed
  * vector (an NMI or ExtINT line is left alone), each masked with its value
  * kept in saved for amd64_lapic_restore_sources().
@@ -650,8 +729,8 @@ init_registers(
  *
  * The reference that times the 10 ms is the TSC when CPUID has already given
  * its rate, and the PIT otherwise.  The PIT is not used when it is not needed:
- * a Core i5-13400F desktop's PIT output never rose, and the boot stopped
- * (BUG-303).  A PIT window also measures the TSC's rate when CPUID did not.
+ * a Core i5-13400F desktop's PIT output never rose, and the boot stopped.
+ * A PIT window also measures the TSC's rate when CPUID did not.
  */
 static int
 calibrate_timer(
@@ -811,6 +890,94 @@ calibrate_timer(
 
 	/* Succeeded: timer_initial holds the period every CPU programs. */
 	return HAL_OK;
+}
+
+/*
+ * Chooses once, on the BSP after the calibration, whether the TSC-deadline
+ * mode may time the tick: the TSC must run at one rate through every P- and
+ * C-state (invariant), and its rate must be known.  Each CPU still checks
+ * that it has the mode when its timer starts.
+ */
+static void
+choose_tick_source(
+	void)
+{
+	uint64_t frequency;
+	uint64_t period;
+	bool invariant;
+	bool known;
+
+	/* Keeps the periodic timer when the build asks for it. */
+	tick_period_tsc = 0U;
+	if (LAPIC_TICK_TSC_DEADLINE == 0) {
+		hal_puts("A64 TIMER TICK source=periodic\n");
+		return;
+	}
+
+	/* Keeps the periodic timer unless the TSC's rate is fixed and known. */
+	invariant = amd64_timecounter_invariant();
+	known = amd64_timecounter_bsp_candidate_frequency(&frequency);
+	period = 0U;
+	if (invariant && known)
+		period = frequency / HAL_TIMER_FREQUENCY;
+	if (period == 0U || !cpu_has_tsc_deadline()) {
+		hal_puts("A64 TIMER TICK source=periodic\n");
+		return;
+	}
+
+	/* Publishes the period every CPU's deadlines are multiples of. */
+	tick_period_tsc = period;
+	hal_printf(
+		"A64 TIMER TICK source=tsc-deadline period=%llu\n",
+		(unsigned long long)period);
+}
+
+/* Reports whether the current CPU's local APIC timer has the TSC-deadline mode. */
+static bool
+cpu_has_tsc_deadline(
+	void)
+{
+	uint32_t max_leaf;
+	uint32_t eax;
+	uint32_t ebx;
+	uint32_t ecx;
+	uint32_t edx;
+
+	/* A CPU without leaf 1 has no such mode. */
+	cpuid_count(0, 0, &max_leaf, &ebx, &ecx, &edx);
+	if (max_leaf < 1U)
+		return false;
+
+	/* The mode as leaf 1 reports it. */
+	cpuid_count(1, 0, &eax, &ebx, &ecx, &edx);
+	if ((ecx & CPUID_TSC_DEADLINE) == 0U)
+		return false;
+
+	/* Succeeded: the mode is present. */
+	return true;
+}
+
+/*
+ * Writes the current CPU's next deadline: the first multiple of the period
+ * after the TSC now.  The deadlines are multiples of the period on every CPU
+ * rather than the last deadline plus the period, so a tick that was late
+ * does not move the phase, and every CPU keeps the same phase however long
+ * after another it started.  At a tick the TSC has reached the deadline, so
+ * the next multiple is always a later one.
+ */
+static void
+arm_next_deadline(
+	void)
+{
+	uint64_t now;
+	uint64_t next;
+
+	/* The next multiple of the period after now. */
+	now = amd64_timecounter_sample_serialized();
+	next = (now / tick_period_tsc + 1U) * tick_period_tsc;
+
+	/* Arms the local APIC timer at that TSC value. */
+	asm_write_msr(MSR_IA32_TSC_DEADLINE, next);
 }
 
 /* Measures the APIC timer's count over one window timed by the TSC. */

@@ -56,8 +56,11 @@ clock_handler(
 {
 	hal_cpu_id_t cpu;
 
-	/* Limits the one-time diagnostic to the BSP. */
+	/* Arms this CPU's next tick first, when TSC deadlines time it. */
 	cpu = hal_cpu_current();
+	amd64_lapic_timer_tick(cpu);
+
+	/* Limits the one-time diagnostic to the BSP. */
 	if (cpu != 0)
 		return;
 

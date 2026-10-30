@@ -26,3 +26,4 @@
 | [p008](phase008/phase.md) | module: CPUID の解析（cpux86-cpuid.c） | in-progress（q1765、Sonnet） | p007 |
 | [p009](phase009/phase.md) | module: HWP の register と HFI の表（cpux86-hwp.c） | in-progress（q1766、Sonnet） | p007 |
 | [p010](phase010/phase.md) | module: 0xCE と、allow list・RAPL・C-state の滞在・0xE2（cpux86-pstate.c・cpux86-power.c）。`_PSS`・AMD・PERF_CTL は仕様未取得／使い道が無く外した | in-progress（q1767、Sonnet） | p007 |
+| [p012](phase012/phase.md) | tick の位相を揃える（amd64 の HAL の実装）: TSC-deadline の mode で全 CPU の期限を TSC の周期の倍数に、戻す macro `LAPIC_TICK_TSC_DEADLINE=0` | in-progress（P7、q1768-i01。2026-10-31: vmunix warning 0、QEMU+KVM の起動 PASS（periodic と tsc-deadline の両方、SMP 4）、tick 1000 Hz。5330 の前後の電力と PC の滞在は未実施） | p002 |
