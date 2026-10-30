@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 13:00（Q1）
+最終更新: 2026-10-30 13:05（Q1）
 
 ## 担当（P1〜P8）
 
@@ -96,7 +96,7 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | --- | --- | --- |
 | 1 | WS309 Keiland の compositor の thread の整理 | **決定済み（2026-10-30）**: 1 は (a)・切り替えは compositor の都合、2〜4 は推し。次のセッションで p015 の実装へ |
 | 2 | BUG-364 GPU の fence の受け取り | display が、別の GPU が出した「描き終わり」の印を、無条件に受けてよいか |
-| 3 | WS328 libbrowser のベクトル描画と SVG | いつ、誰と調整して始めるか（Codex のセッションの WS074 と file が重なる） |
+| 3 | WS328 libbrowser のベクトル描画と SVG（WS074 も Claude に移った） | WS328 と、Codex から移った WS074（Web ブラウザ）の、どちらをいつ始めるか |
 
 ### 1. WS309: ゲームモードの V2 をどう作るか
 
@@ -156,17 +156,17 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 ### 3. WS328: libbrowser のベクトル描画と SVG をいつ始めるか
 
 **背景**
-- WS074 は zedBSD の Web ブラウザ（libbrowser と Browser の app）を作る WS で、**Claude ではなく、別の Codex のセッション（安い model）が main の checkout で直に作業している**。Q1 はそのセッションに指示を出せず、調整はユーザー経由になる。
+- WS074 は zedBSD の Web ブラウザ（libbrowser と Browser の app）を作る WS。これまで別の Codex のセッションが作っていたが、2026-10-30 にユーザーが Codex を解約し、**WS074 は Claude（Q1）の管理下に移った**。Codex との file の衝突の心配は無くなった。WS074 の Queue は Codex の解約で止まっていて、Q1 が担当を割り当て直す必要がある。
 - WS328 は、2026-10-30 のユーザーの指示で立てた WS: libbrowser の描画（`userland/desktop/libbrowser/paint/`）に、曲線・角丸・gradient・影のベクトル描画を Vulkan で足し、それで CSS の装飾と SVG の画像を描く。Phase は標準廉価実装手順（Opus が設計、Sonnet が実装）の形に書いてある。
-- WS328 が触る file（paint/、CSS の描画、SVG の部分）は、Codex が WS074 で触っている file と重なる。同時に触ると、どちらかの作業が merge で衝突する。
+- WS328 と WS074 は同じ libbrowser を触るので、どちらも Claude の担当が進めるなら、順と file の分担を Q1 が決められる。
 
 **用語**
-- Codex: OpenAI の coding agent。このプロジェクトでは WS074 を担当している別のセッション。
 - 標準廉価実装手順: Opus が module の設計と header・試験の道具を作り、Sonnet 5.5 high が中身を実装する手順（docs/agent/spec-module-delegation.md）。
+- WPT（Web Platform Tests）: Web ブラウザの標準の試験の集まり。WS074 の今の目標は WPT Interop 2025 の全件 PASS。
 
 **選択肢**
-- (A)【推し】設計の p001（Opus）だけ今始める。p001 は plan/ の文書と header の案だけで、Codex の file を触らない。p001 の成果に「WS328 が触る file の一覧」を入れ、それをユーザーが Codex のセッションに伝えて分担を決めてから、実装の Phase を始める。
-- (B) WS074 が一区切りつくまで WS328 を始めない。衝突は無いが、SVG の対応が遅れる。
-- (C) WS328 も Codex のセッションに任せる。file の衝突は起きないが、安い model に Vulkan のベクトル描画の設計まで任せる事になる。
+- (A)【推し】WS328 の設計の p001（Opus）を今始め、WS074 の再開は WS328 の実装の後か、file が重ならない範囲で並べる。理由: SVG と角丸・gradient は WPT の多くの試験の前提なので、先にあると WS074 の WPT の得点も上がる。
+- (B) WS074 を先に Claude の担当で再開し、WS328 はその後。WS074 の WPT の続きが先に進むが、ベクトル描画の無い所の試験は通らないまま。
+- (C) 両方を並べて始め、Q1 が file の分担を決める（担当が 2 人要る）。
 
-**決まらない間**: WS328 は planning のまま動かない。
+**決まらない間**: WS328 は planning のまま、WS074 は止まったまま。

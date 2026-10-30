@@ -56,6 +56,7 @@ main に未 merge の branch は [registry](agents/registry.md) の試験待ち�
 ### 統合の注意
 
 <!-- master:merge:start -->
+- WS074（2026-10-30 ユーザー「Codexは解約しました。WS074はClaudeの管理下に移ります。」）: Codex のセッションは終わった。WS074 は Q1 が管理し、Claude の担当（P1〜P8・B1・Sonnet）に割り当ててよい。main の checkout の WS074 の未 commit の変更は無い（2026-10-30 git status で確かめた）。
 - H.265（2026-10-30 ユーザー「H.265のパテントプールへの支払いは行う方針です。H.265の実装を行っていいです。」）: HEVC の decode・encode を実装してよい（WS236 の「HEVCはライセンスがないのでやらないです」を置き換え）。
 - 5330 への SSH（2026-10-30 ユーザー「5330へのSSHは許可します。」）: 権限の判定に止められた 5330（ssh の別名 solaris10-man、10.0.30.3）への SSH を許可。担当は試験の前に uname で 5330 の Debian か zedBSD かを確かめる。身元の分からない host には login しない。
 - firmware の license（2026-10-30 ユーザー「試験に関しては私はすべてのライセンスに同意しておりますので、自動でいいです」）: 試験の image の build で firmware の license の確認が出たら、担当は `yes | make firmware-licenses`（自分の worktree）で同意して続けてよい。
