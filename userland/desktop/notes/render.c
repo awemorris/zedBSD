@@ -400,9 +400,9 @@ notes_renderer_draw(
 	if (frame->vertex_count != 0U)
 		render_copy(renderer, frame->vertices, page_vertices, frame->vertex_count);
 
-	/* The image to draw into, once the compositor has given one back. */
+	/* The image to draw into, once the compositor has given one back, however long a busy compositor takes (a closed connection ends the wait with an error). */
 	renderer->operation = "vkAcquireNextImageKHR";
-	error = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, RENDER_TIMEOUT, renderer->acquired, VK_NULL_HANDLE, &image);
+	error = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, UINT64_MAX, renderer->acquired, VK_NULL_HANDLE, &image);
 	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
 		return error;
 

@@ -391,11 +391,11 @@ sm_renderer_draw(
 	if (scene->vertex_count != 0U)
 		memcpy(renderer->vertex_map, scene->vertices, scene->vertex_count * SM_VERTEX_FLOATS * sizeof(float));
 
-	/* The image to draw into, once the compositor has given one back. */
+	/* The image to draw into, once the compositor has given one back, however long a busy compositor takes (a closed connection ends the wait with an error). */
 	memset(times, 0, sizeof(*times));
 	before = kl_clock_us();
 	renderer->operation = "vkAcquireNextImageKHR";
-	error = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, RENDER_TIMEOUT, renderer->acquired, VK_NULL_HANDLE, &image);
+	error = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, UINT64_MAX, renderer->acquired, VK_NULL_HANDLE, &image);
 	times->acquire_us = kl_clock_us() - before;
 	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
 		return error;

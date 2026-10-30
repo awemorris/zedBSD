@@ -287,10 +287,10 @@ terminal_renderer_draw(
 	render_upload(renderer, vertex_count);
 	render_perf_add(RENDER_PERF_UPLOAD, mark);
 
-	/* The image to draw into, once the compositor has given one back. */
+	/* The image to draw into, once the compositor has given one back, however long a busy compositor takes (a closed connection ends the wait with an error). */
 	mark = render_now_us();
 	renderer->operation = "vkAcquireNextImageKHR";
-	error = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, RENDER_TIMEOUT, renderer->acquired, VK_NULL_HANDLE, &image);
+	error = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, UINT64_MAX, renderer->acquired, VK_NULL_HANDLE, &image);
 	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
 		return error;
 	render_perf_add(RENDER_PERF_ACQUIRE, mark);
