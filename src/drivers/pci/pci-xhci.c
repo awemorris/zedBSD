@@ -1357,6 +1357,7 @@ command_ex(
 	bool counter_sampled;
 	int command_error;
 	int matches;
+	int expired;
 	unsigned command_owner;
 	unsigned irq_owner;
 	uint32_t controller_fault;
@@ -1440,27 +1441,35 @@ command_ex(
 	/* Publishes the command before polling its completion. */
 	xhci_ring_doorbell(c, 0, 0);
 
-	/* Bounds completion by elapsed time even when the caller cannot enable IRQ. */
+	/*
+	 * Bounds completion by elapsed time even when the caller cannot enable
+	 * IRQ.  Once the time is up the ring is still read until it is empty:
+	 * the doorbell write itself may have taken the whole wait (an emulated
+	 * controller runs the command inside it, and stopping an endpoint
+	 * there waits for the device's outstanding request, such as a slow
+	 * cache flush), and a completion already posted is not a timeout.
+	 */
+	expired = 0;
 	for (n = 0; n < XHCI_TIMEOUT; n++) {
 		/* Chooses an IRQ-independent clock when the HAL supplies one. */
 		if (have_counter) {
-			/* Treats a lost or changed time base as an uncompleted command. */
+			/* Treats a lost or changed time base as an expired wait. */
 			counter_sampled = kern_rtc_read_counter(
 			    &counter_now,
 			    &sample_frequency);
 			if (!counter_sampled ||
-			    sample_frequency != counter_frequency)
-				break;
-
-			/* Limits a missing completion to the same elapsed wait on every CPU. */
-			if ((counter_now - counter_start) / counter_frequency >=
-			    XHCI_COMMAND_WAIT_SECONDS)
-				break;
+			    sample_frequency != counter_frequency) {
+				expired = 1;
+			} else if ((counter_now - counter_start) / counter_frequency >=
+			    XHCI_COMMAND_WAIT_SECONDS) {
+				/* Limits a missing completion to the same elapsed wait on every CPU. */
+				expired = 1;
+			}
 		} else {
 			/* Uses scheduler time where a hardware counter is unavailable. */
 			tick_now = sched_ticks();
 			if (tick_now - tick_start >= tick_limit)
-				break;
+				expired = 1;
 		}
 
 		/* Lets init and networking run between short event-ring critical sections. */
@@ -1506,9 +1515,12 @@ command_ex(
 		if (enabled)
 			kern_irq_enable();
 
-		/* Waits for the next event when the ring is empty. */
-		if (!available)
+		/* Waits for the next event when the ring is empty, unless the time is up. */
+		if (!available) {
+			if (expired != 0)
+				break;
 			continue;
+		}
 
 		/* Defers claimed transfer callbacks until the command gate is open; isochronous ones go now. */
 		if (type == 32U) {
