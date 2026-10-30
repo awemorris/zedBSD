@@ -21,6 +21,7 @@
 #ifndef DRIVERS_GPU_NVRTX_NVRTX_DRAW_H
 #define DRIVERS_GPU_NVRTX_NVRTX_DRAW_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -138,6 +139,7 @@ size_t nvrtx_push_draw_target(uint8_t *push, size_t at, const struct nvrtx_draw_
 
 /* Writes the pipeline: a vertex and a pixel program (each at its header), the other stages off, the shader caches untouched; reports where the push buffer goes on. */
 size_t nvrtx_push_draw_pipeline(uint8_t *push, size_t at, uint64_t vertex, uint32_t vertex_gprs, uint64_t pixel, uint32_t pixel_gprs);
+size_t nvrtx_push_draw_program(uint8_t *push, size_t at, bool pixel, uint64_t address, uint32_t gprs);
 
 /* Writes the invalidation of the shader caches at a push buffer's start, without a wait for idle; reports where the push buffer goes on. */
 size_t nvrtx_push_draw_invalidate(uint8_t *push, size_t at);
