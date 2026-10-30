@@ -2,7 +2,7 @@
 
 # ws332-p003: 率を仮定する残りを時間の単位に
 
-Status: in-progress（2026-10-31 P6）
+Status: cleared（2026-10-31 P6）
 Parent: [WS332](../ws.md)
 Queue: q1738-i01（P6、P3 の列から移した）
 
@@ -53,4 +53,4 @@ clock.c の関数（`kern_ms_to_ticks()`・`kern_us_to_ticks()`）に任せる�
   odroid-c5・visionfive2・riscv64-virt・riscv32-virt・armv7-virt・zybo・m68k-virt・ppc32-mac99・ppc64-pseries・mips32-malta・mips64-malta・sun4u・x68k の 19 が rc=0、warning 0
   （要約 /tmp/p6-ws332/ports/summary.txt）。
 - host 試験: `sh plan/tools/i915-display/run-xd-host-tests.sh /tmp/p6-ws332/i915-xd` → `run-xd-host-tests: all passed`（xd-screen の evade の 2 tick を含む）。
-- QEMU の起動は p004 の後の先端で 1 回（下の p004 の記録）。共有の image の lock が他の担当の build で塞がっていたため、p003 だけの image は作っていない。
+- QEMU の起動は p004 の後の先端（48219a2e9）で 1 回（phase004 の記録）。共有の image の lock が他の担当の build で塞がっていたため、p003 だけの image は作っていない。

@@ -2,7 +2,7 @@
 
 # ws332-p004: 規約の全文の見直し
 
-Status: in-progress（2026-10-31 P6）
+Status: cleared（2026-10-31 P6）
 Parent: [WS332](../ws.md)
 Queue: q1738-i01（P6、p003 の後）
 
@@ -40,3 +40,7 @@ WS332 が書いた・書き換えた文と、その段落・関数の形だけ�
 - 全 port の vmunix 19 個（p003 と同じ command、BUILD=/tmp/p6-ws332/ports2/<port>）: rc=0、warning 0（要約 /tmp/p6-ws332/ports2/summary.txt）。
 - host 試験: `OUT=/tmp/p6-ws332/tcp-model sh plan/ws220/tests/tcp-model/run.sh` → `tcp-model: PASS`、
   `sh plan/tools/i915-display/run-xd-host-tests.sh /tmp/p6-ws332/i915-xd2` → `run-xd-host-tests: all passed`。`git diff --check` は空。
+- QEMU（amd64、48219a2e9 の tree）: `sh plan/ws332/tests/boot.sh /tmp/p6-ws332/boot2 amd64`（config-amd64 の disk-image、boot-test.sh の画面の判定）→ `amd64: boot PASS`・
+  `ws332-boot: PASS`。画面 /tmp/p6-ws332/boot2/amd64/login.png に `login:` と `init: system running`。image の build の log の warning は openssh の package と
+  perl の locale だけで、kernel と userland/base/wifi には無い。
+- 未実施: 100 Hz の port（pcat・m68k）と rpi4 の QEMU の起動（p003 の VM の待ちの変更が効く所。今回は amd64 だけを割り当てられた）、実機。
