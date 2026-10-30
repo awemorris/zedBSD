@@ -6,8 +6,7 @@
  */
 
 /*
- * The amd64 suspend-to-idle (S0ix) of one CPU (ws052-p006, HAL v2 H1v2),
- * and the ordinary idle of hal_cpu_idle() in an MWAIT C-state.
+ * The amd64 suspend-to-idle (S0ix) of one CPU, and the ordinary idle of hal_cpu_idle() in an MWAIT C-state.
  *
  * The state is the one the firmware names for low-power S0 idle: the LPIT's
  * first enabled native C-state with a functional-fixed-hardware trigger,
@@ -29,8 +28,9 @@
  * The ordinary idle waits the same way, with the CPU's tick running: in
  * the deepest C-state up to IDLE_WAIT_DEEPEST_CSTATE that CPUID reports
  * sub-states for, when the CPU has MONITOR/MWAIT with the break on a masked
- * interrupt, its local APIC timer keeps running in every C-state (ARAT) and
- * the TSC is invariant; otherwise it halts (C1) as before.  A C-state
+ * interrupt, its local APIC timer keeps running in every C-state (ARAT),
+ * the TSC is invariant and no hypervisor is underneath (whose MWAIT may not
+ * reach the hardware's C-states); otherwise it halts (C1) as before.  A C-state
  * deeper than C1 lets the core power down, and a package whose cores all do
  * enter its own low-power states.
  */
@@ -42,8 +42,9 @@
 #include "timecounter.h"
 #include "../defs.h"
 
-/* CPUID: leaf 1's MONITOR/MWAIT bit, and leaf 5's extensions and break-on-interrupt bits. */
+/* CPUID: leaf 1's MONITOR/MWAIT and hypervisor bits, and leaf 5's extensions and break-on-interrupt bits. */
 #define CPUID_LEAF_FEATURES		1U
+#define CPUID_FEATURE_HYPERVISOR	(1U << 31)
 #define CPUID_LEAF_MWAIT		5U
 #define CPUID_FEATURE_MONITOR		(1U << 3)
 #define CPUID_MWAIT_EXTENSIONS		(1U << 0)
@@ -65,7 +66,8 @@
  * The deepest C-state the ordinary idle enters, as CPUID leaf 5 counts
  * them (C0 is 0, an MWAIT hint's C-state field plus one).  The tick wakes
  * every CPU each millisecond, so a state whose exit costs a large part of
- * that is not taken.
+ * that is not taken.  1 keeps the ordinary idle halted (HLT), as a build
+ * to compare against.
  */
 #ifndef IDLE_WAIT_DEEPEST_CSTATE
 #define IDLE_WAIT_DEEPEST_CSTATE	3U
@@ -234,7 +236,8 @@ bsp_cpu_idle(
  * Chooses the ordinary idle's MWAIT hint: the deepest C-state up to
  * IDLE_WAIT_DEEPEST_CSTATE with sub-states, its deepest sub-state, when the
  * CPU has MONITOR/MWAIT, breaks out of it on a masked interrupt and keeps
- * its local APIC timer running (ARAT).  Without any, the idle halts.
+ * its local APIC timer running (ARAT), and runs on no hypervisor.  Without
+ * any, the idle halts.
  */
 static void
 idle_wait_init(
@@ -250,6 +253,10 @@ idle_wait_init(
 	/* MONITOR/MWAIT, the MWAIT leaf and the power leaf. */
 	idle_wait_ready = 0U;
 	idle_cpuid(CPUID_LEAF_FEATURES, &eax, &ebx, &ecx, &edx);
+	if ((ecx & CPUID_FEATURE_HYPERVISOR) != 0U) {
+		hal_puts("A64 IDLE WAIT HLT reason=hypervisor\n");
+		return;
+	}
 	if ((ecx & CPUID_FEATURE_MONITOR) == 0U) {
 		hal_puts("A64 IDLE WAIT HLT reason=monitor\n");
 		return;

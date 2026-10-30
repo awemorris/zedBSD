@@ -34,3 +34,4 @@ Queue: q1735（P1）
 - 起動: 5330 で C6・C10 の両方の kernel が起動し、desktop の session・mview が動いた。HAL の起動の行（`A64 IDLE WAIT ...`）は dmesg・`/boot/boot0/log` に出ず、MWAIT の路を通った事は電力の差からの推定（未確認）。
 - 未実施: QEMU（MONITOR の無い CPU で HLT に戻る路）の起動の確かめ、AMD の CPU。
 - **残り**: idle は Linux（3.2〜3.5 W）にまだ遠い（11.6 W）。core の C-state だけでは package が深い状態に入れていない見込み（1 kHz の tick の全 CPU の起床、P-state（HWP 無し）、PCIe の ASPM・display の PSR などの package C-state の妨げ、未調査）。P-state は p001 の設計の後。
+- 追い（2026-10-31、WS333 の設計の review の条件、Q1 経由）: hypervisor の下（CPUID leaf 1 ECX bit 31）は HLT のまま（`reason=hypervisor`）、file の先頭の comment から開発の管理情報を消した、`IDLE_WAIT_DEEPEST_CSTATE` を 1 にすると HLT に戻る事を macro の comment に。build（warning 0）だけ、5330 の再計測はしていない。
