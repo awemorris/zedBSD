@@ -18,10 +18,10 @@
 #include "../intel/display-regs-xd.h"
 #include "../intel/xd-vbt-layout.h"
 
-#include <hal/hal.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/platform.h>
+#include <kern/pmem.h>
 
 #include <uapi/errno.h>
 #include <stddef.h>
@@ -384,10 +384,10 @@ i915_xd_map_device(
 
 	UNUSED_PARAMETER(context);
 
-	/* Asks the HAL for a read-only kernel mapping. */
+	/* Asks the kernel for a read-only mapping. */
 	mapping = NULL;
-	status = hal_space_map_device((hal_physaddr_t)address, size, HAL_SPACE_READ, &mapping);
-	if (status != HAL_OK)
+	status = kern_device_map(address, size, KERN_DEVICE_UNCACHED | KERN_DEVICE_READONLY, &mapping);
+	if (status != 0)
 		return EIO;
 	if (mapping == NULL)
 		return EIO;
@@ -407,7 +407,7 @@ i915_xd_unmap_device(
 	(void)context;
 
 	/* Removes the mapping; nothing is left to do if that fails. */
-	(void)hal_space_unmap_device((void *)(uintptr_t)bytes, size);
+	(void)kern_device_unmap((void *)(uintptr_t)bytes, size);
 }
 
 /* Names a south display kind for the log. */

@@ -11,7 +11,7 @@
  * The enable, decode, capability walk and MSI logic is written once over the
  * operations table.  The real operations at the end of the file are only the
  * boundary to the kernel: they reach the configuration space through
- * drv_pci_device_config_*() and reserve MSI vectors from the HAL.
+ * drv_pci_device_config_*() and reserve MSI vectors from the kernel.
  */
 
 #include "i915.h"
@@ -19,7 +19,7 @@
 #include "trace.h"
 
 #include <drivers/pci/pci.h>
-#include <hal/hal.h>
+#include <kern/irq.h>
 
 #include <uapi/errno.h>
 #include <stddef.h>
@@ -94,7 +94,7 @@ drv_i915_pci_init(
  * Returns the operations that reach a real PCI device.
  *
  * The context those operations receive is a struct i915_pci_context.  The
- * vector allocation reserves a HAL vector with no handler; the handler is
+ * vector allocation reserves a kernel vector with no handler; the handler is
  * attached later, when the interrupt code installs it, and the vector is
  * freed only after the device has stopped sending it.
  */
@@ -112,7 +112,7 @@ drv_i915_pci_device_ops(void)
 		i915_pci_free_msi_vector
 	};
 
-	/* Succeeded: the operations reach the PCI configuration space and the HAL. */
+	/* Succeeded: the operations reach the PCI configuration space and the kernel. */
 	return &ops;
 }
 
@@ -757,7 +757,7 @@ i915_pci_config_write32(
 	(void)drv_pci_device_config_write32(device->pci, offset, value);
 }
 
-/* Reserves a HAL MSI vector with no handler and reports its message data. */
+/* Reserves an MSI vector with no handler and reports its message data. */
 static int
 i915_pci_alloc_msi_vector(
 	void *context,
@@ -765,12 +765,12 @@ i915_pci_alloc_msi_vector(
 {
 	struct i915_pci_context *device;
 	struct drv_pci_address address;
-	paddr_t message_address;
+	uint64_t message_address;
 	uint32_t message_event;
 	int irq;
 	int status;
 
-	/* Names the MSI source by the device's PCI address, as the HAL expects. */
+	/* Names the MSI source by the device's PCI address, as the kernel expects. */
 	device = context;
 	drv_pci_device_address(device->pci, &address);
 	i915_pci_format_msi_source(device->msi_source, &address);
@@ -779,14 +779,14 @@ i915_pci_alloc_msi_vector(
 	 * Reserves the vector, its routing and its message; the handler is
 	 * attached later, when the interrupt code installs it.
 	 *
-	 * XXX: the HAL's reason for a failure is not passed on; the caller
+	 * XXX: the kernel's reason for a failure is not passed on; the caller
 	 * sees EIO.
 	 */
 	irq = -1;
 	message_address = 0;
 	message_event = 0U;
-	status = hal_irq_alloc_msi(device->msi_source, &irq, &message_address, &message_event);
-	if (status != HAL_OK)
+	status = kern_irq_alloc_msi(device->msi_source, &irq, &message_address, &message_event);
+	if (status != 0)
 		return EIO;
 
 	/* Keeps the logical interrupt for the free and the handler attach. */
@@ -799,7 +799,7 @@ i915_pci_alloc_msi_vector(
 	return 0;
 }
 
-/* Frees the HAL MSI vector once the device has stopped sending it. */
+/* Frees the MSI vector once the device has stopped sending it. */
 static void
 i915_pci_free_msi_vector(
 	void *context,
@@ -815,7 +815,7 @@ i915_pci_free_msi_vector(
 	 */
 	device = context;
 	if (device->msi_irq >= 0) {
-		(void)hal_irq_free_msi(device->msi_irq);
+		(void)kern_irq_free_msi(device->msi_irq);
 		device->msi_irq = -1;
 	}
 }

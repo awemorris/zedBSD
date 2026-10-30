@@ -126,7 +126,7 @@ mutex_unlock(
  */
 void *
 kern_pmem_to_kernel(
-	hal_physaddr_t address)
+	kern_physaddr_t address)
 {
 	/* The address as a pointer. */
 	return (void *)(uintptr_t)address;

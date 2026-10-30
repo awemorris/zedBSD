@@ -948,7 +948,7 @@ i915_ppgtt_table(
 
 	/* Entry bits below the page and above the address width are attributes. */
 	physical = entry & I915_PPGTT_ADDRESS_MASK;
-	table = kern_pmem_to_kernel((hal_physaddr_t)physical);
+	table = kern_pmem_to_kernel((kern_physaddr_t)physical);
 
 	/* Succeeded: the child table's CPU view. */
 	return table;

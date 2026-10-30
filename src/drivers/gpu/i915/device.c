@@ -36,11 +36,11 @@
 #include <drivers/generic/dma.h>
 #include <drivers/pci/pci-i915.h>
 #include <drivers/pci/pci.h>
-#include <hal/hal.h>
 #include <kern/boot.h>
 #include <kern/clock.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
+#include <kern/pmem.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 
@@ -1548,9 +1548,9 @@ i915_start_aperture(
 		 */
 		drv_i915_trace_record(&gt->trace, 0U, I915_TRACE_ACQUIRE, "ggtt_aperture_gmadr", gt->gmadr_base, gt->gmadr_size);
 		view = NULL;
-		error = hal_space_map_device((hal_physaddr_t)gt->gmadr_base, (size_t)gt->gmadr_size, HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_WC, &view);
+		error = kern_device_map(gt->gmadr_base, (size_t)gt->gmadr_size, KERN_DEVICE_WRITECOMBINE, &view);
 		device->stage = "ggtt_aperture_wc";
-		if (error != HAL_OK || view == NULL) {
+		if (error != 0 || view == NULL) {
 			kern_logf("i915: ggtt_init_hw: WC aperture map(base=0x%llx size=0x%llx) failed rc=%d\n",
 			    (unsigned long long)gt->gmadr_base,
 			    (unsigned long long)gt->gmadr_size,
@@ -2079,7 +2079,7 @@ i915_stop_hardware(
 
 	/* Unmaps the aperture view. */
 	if (gt->aperture != NULL) {
-		error = hal_space_unmap_device(gt->aperture, (size_t)gt->gmadr_size);
+		error = kern_device_unmap(gt->aperture, (size_t)gt->gmadr_size);
 		kern_logf("i915: stop: WC aperture unmap va=%p size=0x%llx rc=%d\n",
 		    gt->aperture,
 		    (unsigned long long)gt->gmadr_size,

@@ -33,10 +33,10 @@
 #include <drivers/gpu/gpu.h>
 #include <drivers/pci/pci-i915.h>
 #include <drivers/pci/pci.h>
-#include <hal/hal.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
+#include <kern/platform.h>
 #include <kern/waitq.h>
 
 #include <uapi/errno.h>
@@ -511,7 +511,7 @@ i915_gen9_enabled(void)
 	int found;
 
 	/* Without a boot line the default holds. */
-	line = hal_get_arch_handoff("boot.command-line");
+	line = kern_boot_handoff("boot.command-line");
 	if (line == NULL)
 		return I915_GEN9_DEFAULT_ON;
 

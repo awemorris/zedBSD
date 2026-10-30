@@ -22,9 +22,9 @@
 
 #include <drivers/generic/dma.h>
 #include <drivers/pci/pci.h>
-#include <hal/hal.h>
 #include <kern/clock.h>
 #include <kern/device-io.h>
+#include <kern/irq.h>
 #include <kern/kmem.h>
 #include <kern/pmem.h>
 
@@ -255,35 +255,35 @@ drv_pci_device_config_write32(
 }
 
 /*
- * Stands in for the HAL MSI vector allocation.
+ * Stands in for the kernel's MSI vector allocation.
  */
 int
-hal_irq_alloc_msi(
+kern_irq_alloc_msi(
 	const char *source,
 	int *mapped_irq,
-	paddr_t *mapped_addr,
+	uint64_t *mapped_address,
 	uint32_t *mapped_event)
 {
 	UNUSED_PARAMETER(source);
 	UNUSED_PARAMETER(mapped_irq);
-	UNUSED_PARAMETER(mapped_addr);
+	UNUSED_PARAMETER(mapped_address);
 	UNUSED_PARAMETER(mapped_event);
 
 	/* The mock PCI function hands out its own vectors. */
-	host_unreached("hal_irq_alloc_msi");
+	host_unreached("kern_irq_alloc_msi");
 }
 
 /*
- * Stands in for the HAL MSI vector release.
+ * Stands in for the kernel's MSI vector release.
  */
 int
-hal_irq_free_msi(
+kern_irq_free_msi(
 	int mapped_irq)
 {
 	UNUSED_PARAMETER(mapped_irq);
 
 	/* The mock PCI function takes its own vectors back. */
-	host_unreached("hal_irq_free_msi");
+	host_unreached("kern_irq_free_msi");
 }
 
 /*
@@ -353,7 +353,7 @@ kern_pmem_free(
  */
 void *
 kern_pmem_to_kernel(
-	hal_physaddr_t address)
+	kern_physaddr_t address)
 {
 	UNUSED_PARAMETER(address);
 

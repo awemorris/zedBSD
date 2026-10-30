@@ -14,9 +14,9 @@
  * the PCODE mailbox, the DRAM and bandwidth probe and the power-well fuse
  * wait run against a register model in this file and never reach the
  * device's registers.  The interrupt vector and write-combining checks call
- * the real HAL: they allocate and free MSI vectors for a made-up source and
- * map and unmap a small device range, and touch nothing the started device
- * owns.
+ * the real kernel: they allocate and free MSI vectors for a made-up source
+ * and map and unmap a small device range, and touch nothing the started
+ * device owns.
  */
 
 #include "ktest.h"
@@ -31,10 +31,11 @@
 #include "../../trace.h"
 #include "../../workqueue.h"
 
-#include <hal/hal.h>
 #include <kern/clock.h>
+#include <kern/irq.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
+#include <kern/pmem.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
 #include <kern/waitq.h>
@@ -66,6 +67,13 @@
 
 /* The device range the write-combining checks map: the HPET page. */
 #define I915_KTEST_WC_ADDRESS		0xfed00000ULL
+
+/*
+ * A cache-policy value and an attribute bit kern_device_map() does not
+ * define, for the checks that it refuses them.
+ */
+#define I915_KTEST_WC_UNKNOWN_POLICY	3U
+#define I915_KTEST_WC_UNKNOWN_FLAG	0x200U
 
 /*
  * A register model of the reset, PCODE, fuse and power-well registers.
@@ -292,7 +300,7 @@ static void i915_ktest_requeue_fn(void *argument);
 static void i915_ktest_cancel_worker_fn(void *argument);
 static void i915_ktest_canceller_thread(void *argument);
 static void i915_ktest_xcpu_fn(void *argument);
-static void i915_ktest_msi_handler(int irq, hal_irq_ack_t acknowledge, void *argument);
+static void i915_ktest_msi_handler(int irq, kern_irq_ack_t acknowledge, void *argument);
 static void i915_ktest_sleep_corunner(void *argument);
 static int i915_ktest_rpm_resume(void *context);
 static void i915_ktest_rpm_suspend(void *context);
@@ -319,8 +327,8 @@ static const struct i915_rpm_ops i915_ktest_rpm_ops = {
  * Runs the tests of the kernel services the driver waits and queues work on.
  *
  * Covers the completions, the work queue, the MSI vector lifecycle and the
- * write-combining attribute contract of the HAL, the reset and PCODE control
- * flow, the DRAM and bandwidth probe, the runtime-PM contract, the yielding
+ * write-combining attribute contract of the kernel, the reset and PCODE
+ * control flow, the DRAM and bandwidth probe, the runtime-PM contract, the yielding
  * sleep-range, the PCODE preemption-off phase and the late fuse wait.
  */
 void
@@ -330,7 +338,7 @@ drv_i915_ktest_sync(
 	unsigned cpu;
 
 	/* Names the CPU the tests start on. */
-	cpu = (unsigned)hal_cpu_current();
+	cpu = kern_cpu_current();
 	kern_logf("i915: ktest sync begin (cpu=%u, shared backend)\n", cpu);
 
 	/* Samples the time base once while it is fresh. */
@@ -343,7 +351,7 @@ drv_i915_ktest_sync(
 	/* The work queue. */
 	i915_ktest_workqueue(ktest);
 
-	/* The HAL interrupt vector lifecycle and the write-combining contract. */
+	/* The kernel interrupt vector lifecycle and the write-combining contract. */
 	i915_ktest_msi(ktest);
 	i915_ktest_wc_contract(ktest);
 
@@ -554,7 +562,7 @@ i915_ktest_workqueue_xcpu(
 		drv_i915_work_init(&i915_ktest_xcpu_works[generation - 1U], i915_ktest_xcpu_fn, NULL);
 		drv_i915_reinit_completion(&shared->done);
 		shared->payload = generation ^ I915_KTEST_XCPU_MAGIC;
-		shared->queuer_cpu = (unsigned)hal_cpu_current();
+		shared->queuer_cpu = kern_cpu_current();
 		shared->worker_cpu = 0xffffU;
 		shared->seen_payload = 0U;
 
@@ -585,13 +593,13 @@ i915_ktest_workqueue_xcpu(
 	drv_i915_ktest_check(ktest, queue_fail == 0U, "cross-CPU: every queue succeeded");
 }
 
-/* Checks the HAL MSI vector lifecycle on a made-up source. */
+/* Checks the kernel's MSI vector lifecycle on a made-up source. */
 static void
 i915_ktest_msi(
 	struct i915_ktest *ktest)
 {
 	int irq;
-	paddr_t address;
+	uint64_t address;
 	uint32_t event;
 	int result;
 
@@ -599,19 +607,19 @@ i915_ktest_msi(
 	irq = -1;
 	address = 0;
 	event = 0U;
-	result = hal_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq, &address, &event);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M0: alloc_msi reserves a vector");
+	result = kern_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq, &address, &event);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M0: alloc_msi reserves a vector");
 	drv_i915_ktest_check(ktest, address != 0, "MSI M0: alloc_msi returns a message address");
-	result = hal_irq_free_msi(irq);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M0: free_msi releases an unattached vector");
+	result = kern_irq_free_msi(irq);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M0: free_msi releases an unattached vector");
 
 	/* An attach validates its handler. */
-	result = hal_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq, &address, &event);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M1: alloc");
-	result = hal_irq_attach_msi(irq, NULL, NULL);
-	drv_i915_ktest_check(ktest, result == HAL_ERR_INVALID, "MSI M1: attach rejects a NULL handler");
-	result = hal_irq_free_msi(irq);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M1: free after a failed attach");
+	result = kern_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq, &address, &event);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M1: alloc");
+	result = kern_irq_attach_msi(irq, NULL, NULL);
+	drv_i915_ktest_check(ktest, result == EINVAL, "MSI M1: attach rejects a NULL handler");
+	result = kern_irq_free_msi(irq);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M1: free after a failed attach");
 
 	/* The full attach, detach and free lifecycle, and two live vectors. */
 	i915_ktest_msi_attach(ktest);
@@ -624,7 +632,7 @@ i915_ktest_msi_attach(
 	struct i915_ktest *ktest)
 {
 	int irq;
-	paddr_t address;
+	uint64_t address;
 	uint32_t event;
 	int result;
 
@@ -632,22 +640,22 @@ i915_ktest_msi_attach(
 	irq = -1;
 	address = 0;
 	event = 0U;
-	result = hal_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq, &address, &event);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M2: alloc");
-	result = hal_irq_attach_msi(irq, i915_ktest_msi_handler, &i915_ktest_msi_token);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M2: attach a handler");
+	result = kern_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq, &address, &event);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M2: alloc");
+	result = kern_irq_attach_msi(irq, i915_ktest_msi_handler, &i915_ktest_msi_token);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M2: attach a handler");
 
 	/* A free while attached, and a detach of another registration, are refused. */
-	result = hal_irq_free_msi(irq);
-	drv_i915_ktest_check(ktest, result == HAL_ERR_STATE, "MSI M2: free is refused while a handler is attached");
-	result = hal_irq_detach_msi_sync(irq, i915_ktest_msi_handler, &i915_ktest_msi_other_token);
-	drv_i915_ktest_check(ktest, result == HAL_ERR_INVALID, "MSI M2: detach rejects a mismatched registration");
+	result = kern_irq_free_msi(irq);
+	drv_i915_ktest_check(ktest, result == EBUSY, "MSI M2: free is refused while a handler is attached");
+	result = kern_irq_detach_msi_sync(irq, i915_ktest_msi_handler, &i915_ktest_msi_other_token);
+	drv_i915_ktest_check(ktest, result == EINVAL, "MSI M2: detach rejects a mismatched registration");
 
 	/* The exact registration detaches, and then the vector frees. */
-	result = hal_irq_detach_msi_sync(irq, i915_ktest_msi_handler, &i915_ktest_msi_token);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M2: detach_sync drains the exact registration");
-	result = hal_irq_free_msi(irq);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M2: free after detach");
+	result = kern_irq_detach_msi_sync(irq, i915_ktest_msi_handler, &i915_ktest_msi_token);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M2: detach_sync drains the exact registration");
+	result = kern_irq_free_msi(irq);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M2: free after detach");
 }
 
 /* Checks that two live vectors differ and that a released vector is refused. */
@@ -657,8 +665,8 @@ i915_ktest_msi_distinct(
 {
 	int irq_a;
 	int irq_b;
-	paddr_t address_a;
-	paddr_t address_b;
+	uint64_t address_a;
+	uint64_t address_b;
 	uint32_t event_a;
 	uint32_t event_b;
 	int result;
@@ -670,26 +678,26 @@ i915_ktest_msi_distinct(
 	address_b = 0;
 	event_a = 0U;
 	event_b = 0U;
-	result = hal_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq_a, &address_a, &event_a);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M3: alloc A");
-	result = hal_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq_b, &address_b, &event_b);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M3: alloc B");
+	result = kern_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq_a, &address_a, &event_a);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M3: alloc A");
+	result = kern_irq_alloc_msi(I915_KTEST_MSI_SOURCE, &irq_b, &address_b, &event_b);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M3: alloc B");
 	drv_i915_ktest_check(ktest, irq_a != irq_b, "MSI M3: distinct allocations get distinct vectors");
 
 	/* Releases both. */
-	result = hal_irq_free_msi(irq_a);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M3: free A");
-	result = hal_irq_free_msi(irq_b);
-	drv_i915_ktest_check(ktest, result == HAL_OK, "MSI M3: free B");
+	result = kern_irq_free_msi(irq_a);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M3: free A");
+	result = kern_irq_free_msi(irq_b);
+	drv_i915_ktest_check(ktest, result == 0, "MSI M3: free B");
 
 	/* A released vector can be neither freed nor detached again. */
-	result = hal_irq_free_msi(irq_a);
-	drv_i915_ktest_check(ktest, result == HAL_ERR_INVALID, "MSI M4: free of an already-released vector is refused");
-	result = hal_irq_detach_msi_sync(irq_a, i915_ktest_msi_handler, &i915_ktest_msi_token);
-	drv_i915_ktest_check(ktest, result == HAL_ERR_INVALID, "MSI M4: detach of an unallocated vector is refused");
+	result = kern_irq_free_msi(irq_a);
+	drv_i915_ktest_check(ktest, result == EINVAL, "MSI M4: free of an already-released vector is refused");
+	result = kern_irq_detach_msi_sync(irq_a, i915_ktest_msi_handler, &i915_ktest_msi_token);
+	drv_i915_ktest_check(ktest, result == EINVAL, "MSI M4: detach of an unallocated vector is refused");
 }
 
-/* Checks that the HAL rejects a write-combining map combined with another cache policy. */
+/* Checks that the kernel rejects device-map attributes it does not define. */
 static void
 i915_ktest_wc_contract(
 	struct i915_ktest *ktest)
@@ -697,21 +705,21 @@ i915_ktest_wc_contract(
 	void *mapped;
 	int result;
 
-	/* Write combining and uncached together are refused before anything is mapped. */
+	/* A cache policy past write combining is refused before anything is mapped. */
 	mapped = NULL;
-	result = hal_space_map_device(I915_KTEST_WC_ADDRESS,
-				      0x1000U,
-				      HAL_SPACE_READ | HAL_SPACE_WC | HAL_SPACE_NOCACHE,
-				      &mapped);
-	drv_i915_ktest_check(ktest, result == HAL_ERR_INVALID, "WC: a WC request combined with NOCACHE is rejected");
+	result = kern_device_map(I915_KTEST_WC_ADDRESS,
+				 0x1000U,
+				 I915_KTEST_WC_UNKNOWN_POLICY,
+				 &mapped);
+	drv_i915_ktest_check(ktest, result == EINVAL, "WC: an unknown cache policy is rejected");
 	drv_i915_ktest_check(ktest, mapped == NULL, "WC: a rejected request leaves the output pointer untouched");
 
-	/* Write combining and device memory together are refused. */
-	result = hal_space_map_device(I915_KTEST_WC_ADDRESS,
-				      0x1000U,
-				      HAL_SPACE_READ | HAL_SPACE_WC | HAL_SPACE_DEVICE,
-				      &mapped);
-	drv_i915_ktest_check(ktest, result == HAL_ERR_INVALID, "WC: a WC request combined with DEVICE is rejected");
+	/* A write-combining request with an undefined attribute bit is refused. */
+	result = kern_device_map(I915_KTEST_WC_ADDRESS,
+				 0x1000U,
+				 KERN_DEVICE_WRITECOMBINE | I915_KTEST_WC_UNKNOWN_FLAG,
+				 &mapped);
+	drv_i915_ktest_check(ktest, result == EINVAL, "WC: a WC request with an unknown attribute bit is rejected");
 }
 
 /* Checks the reset control flow: acknowledged, never acknowledged, and a retry. */
@@ -788,24 +796,24 @@ i915_ktest_wc_full_range(
 
 	/* A one-gigabyte write-combining map is refused and leaves the output alone. */
 	mapped = (void *)0x1;
-	refused = hal_space_map_device(I915_KTEST_WC_ADDRESS,
-				       0x40000000U,
-				       HAL_SPACE_READ | HAL_SPACE_WC,
-				       &mapped);
-	drv_i915_ktest_check(ktest, refused != HAL_OK, "WC: an oversized aperture map is refused");
+	refused = kern_device_map(I915_KTEST_WC_ADDRESS,
+				  0x40000000U,
+				  KERN_DEVICE_WRITECOMBINE | KERN_DEVICE_READONLY,
+				  &mapped);
+	drv_i915_ktest_check(ktest, refused != 0, "WC: an oversized aperture map is refused");
 	drv_i915_ktest_check(ktest, mapped == (void *)0x1, "WC: a refused map leaves the output untouched");
 
 	/* A one-page write-combining map succeeds afterwards. */
 	recovered = NULL;
-	result = hal_space_map_device(I915_KTEST_WC_ADDRESS,
-				      0x1000U,
-				      HAL_SPACE_READ | HAL_SPACE_WC,
-				      &recovered);
-	drv_i915_ktest_check(ktest, result == HAL_OK && recovered != NULL, "WC: a valid map succeeds after the failed one (recovery)");
+	result = kern_device_map(I915_KTEST_WC_ADDRESS,
+				 0x1000U,
+				 KERN_DEVICE_WRITECOMBINE | KERN_DEVICE_READONLY,
+				 &recovered);
+	drv_i915_ktest_check(ktest, result == 0 && recovered != NULL, "WC: a valid map succeeds after the failed one (recovery)");
 
 	/* Removes the page mapped by the recovery check. */
-	if (result == HAL_OK)
-		(void)hal_space_unmap_device(recovered, 0x1000U);
+	if (result == 0)
+		(void)kern_device_unmap(recovered, 0x1000U);
 }
 
 /* Records the timer-interrupt completion checks as not run: the kernel hook is not built. */
@@ -1312,7 +1320,7 @@ i915_ktest_xcpu_fn(
 	shared = &i915_ktest_xcpu_state;
 	payload = shared->payload;
 	shared->seen_payload = payload;
-	shared->worker_cpu = (unsigned)hal_cpu_current();
+	shared->worker_cpu = kern_cpu_current();
 
 	/* Wakes the test. */
 	drv_i915_complete(&shared->done);
@@ -1322,7 +1330,7 @@ i915_ktest_xcpu_fn(
 static void
 i915_ktest_msi_handler(
 	int irq,
-	hal_irq_ack_t acknowledge,
+	kern_irq_ack_t acknowledge,
 	void *argument)
 {
 	UNUSED_PARAMETER(irq);
