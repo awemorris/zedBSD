@@ -6,9 +6,9 @@
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
 | P1 | phase-runner-high | ws299 (q1744-i01) | `/home/awe/zedBSD-worktrees/p1-ws299e` / `agent/p1-ws299e` | in-progress（2026-10-31 起動、5330 専用） | 6e6c26b8c（merge d26c657c7） |
-| P2 | phase-runner-high | Bug の一括 (q1750-i01: BUG-363・344・366・354・328・352) | `/home/awe/zedBSD-worktrees/p2-bugs` / `agent/p2-bugs` | in-progress（2026-10-31 起動、QEMU） | —（前の agent/p2-ws291v は BUG-375 の後に merge） |
+| P2 | phase-runner-high | Bug の一括 (q1750-i01: BUG-363・344・366・354・328・352) | `/home/awe/zedBSD-worktrees/p2-bugs` / `agent/p2-bugs` | in-progress（2026-10-31 起動、QEMU） | 806ff2ca2（merge 62eeb340e、WS291 p020） |
 | P4 | phase-runner-high | q1742 BUG-374（uncleared、目視待ち）→ Pi 5 p021 の image の build | `/home/awe/zedBSD-worktrees/p4-ws291pi` / `agent/p4-ws291pi` | in-progress | b2e2993de（merge 54a134140。ws291p021 は未 merge） |
-| P5 | kernel-and-driver-designer | ws306 p001 (q1746-i01) | `/home/awe/zedBSD-worktrees/p5-ws306` / `agent/p5-ws306` | in-progress（2026-10-31 起動） | 4b80eb69c（merge 9946e22c0、WS333 p001） |
+| P5 | kernel-and-driver-designer | ws318 p001 (q1752-i01) | `/home/awe/zedBSD-worktrees/p5-ws318` / `agent/p5-ws318` | in-progress（2026-10-31 起動） | 3f1e3c655（merge 843847185、WS306 p001） |
 | P6 | phase-runner-high | q1740 BUG-370 → q1741 WS291 p014 | `/home/awe/zedBSD-worktrees/p6-ws291` / `agent/p6-ws291` | in-progress（2026-10-31 起動） | 93f7ec9d3 |
 | P3 | phase-runner-high | q1736 WS307 → q1737 WS331 p006 → q1738 WS332 → q1739 WS326 | `/home/awe/zedBSD-worktrees/p3-seq` / `agent/p3-seq` | in-progress（2026-10-31 起動） | 823ce7bde（merge ccd7bf2d2） |
 | P8 | phase-runner-low | ws074 p260 自走 (q1727-i02) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-31 起動し直し） | fccca00dc |

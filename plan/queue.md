@@ -384,7 +384,7 @@
 | q1743 / q1743-i01 | P6（同じ worktree p6-ws291、q1740 の後、q1741 の前、QEMU） | [BUG-376](bugs/BUG-376.md) | 2026-10-31 ユーザーから、PS/2 の aux を起票してどこでもいいので割り当てる、という趣旨の指示を受けた | pending |
 | q1744 / q1744-i01 | 5330 が空いた担当（P1 の q1735・q1731 の後） | [ws299](ws299/ws.md) 5330 の NVMe の速さの続き | 2026-10-31 ユーザーから、WS299 は 5330 が空いたらどの担当でもよいのでスケジュールする、という趣旨の指示を受けた | in-progress（P1、worktree p1-ws299e・branch agent/p1-ws299e、2026-10-31 起動） |
 | q1745 / q1745-i01 | P4（Pi 5 の WS291 p021 の後、実機 Pi 5） | [ws304](ws304/ws.md) Pi 5 の外の PCIe の続き（ハードの切り分けを含む） | 2026-10-31 ユーザーから、WS304 は空いている所にスケジュールする、という趣旨の指示を受けた | pending |
-| q1746 / q1746-i01 | P5（WS333 p001 の後） | [ws306](ws306/ws.md) p001 設計 | 2026-10-31 ユーザーから、WS306 は検討済みなので進め、決定事項が不明なら cockpit に書けば答える、という趣旨の指示を受けた | in-progress（P5、kernel-and-driver-designer、worktree p5-ws306・branch agent/p5-ws306、2026-10-31 起動） |
+| q1746 / q1746-i01 | P5（WS333 p001 の後） | [ws306](ws306/ws.md) p001 設計 | 2026-10-31 ユーザーから、WS306 は検討済みなので進め、決定事項が不明なら cockpit に書けば答える、という趣旨の指示を受けた | uncleared（2026-10-31: 設計の第 3 版 3f1e3c655、merge 843847185。理由: ユーザーの問い Q306-7・Q306-9 の答え待ち。実装は Q306-9 の後） |
 | q1747 / q1747-i01 | P4（q1742 BUG-374 の後、実機 10.0.10.3 の ue0、lock で P6 と交代） | [BUG-222](bugs/BUG-222.md) の試験 | 2026-10-31 ユーザーから、BUG-222 は別のチケットで解決済みの見込みなので試験だけ流して完了にする、という趣旨の指示を受けた | cleared（5d51b15b6、merge dd85f56ee。BUG-222 closed） |
 
 ## 2026-10-31: WS326 を昼までに（q1748・q1749）
@@ -404,3 +404,11 @@
 | --- | --- | --- | --- | --- |
 | q1750 / q1750-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs`・branch `agent/p2-bugs`、QEMU と host） | [BUG-363](bugs/BUG-363.md)・[BUG-344](bugs/BUG-344.md)・[BUG-366](bugs/BUG-366.md)・[BUG-354](bugs/BUG-354.md)・[BUG-328](bugs/BUG-328.md)・[BUG-352](bugs/BUG-352.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
 | q1751 / q1751-i01 | S-p019（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws326-p019`・branch `agent/s-ws326-p019`） | [ws326-p019](ws326/phase019/phase.md) | phase.md のとおり（header を変えない） | in-progress |
+
+## 2026-10-31: WS318 の設計（q1752）
+
+2026-10-31 ユーザーから、不在の間は設計だけ進められる WS は設計を進め、libmedia の WS の優先度を上げる、という趣旨の指示を受けた。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1752 / q1752-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws318`・branch `agent/p5-ws318`） | [ws318](ws318/ws.md) p001 設計 | plan/ws318/ だけ、design-reviewer と問いの一覧まで | in-progress |

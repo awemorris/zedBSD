@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 02:27（Q1）
+最終更新: 2026-10-31 02:33（Q1）
 
 ## 担当（P1〜P8）
 
@@ -13,7 +13,7 @@
 | P2 | Bug | open の小さな Bug をまとめて直す（QEMU と host） | q1750: BUG-363（/etc/hosts）→ BUG-344（fscanf）→ BUG-366（MAP_FIXED）→ BUG-354（top の %CPU）→ BUG-328（静的な route・DNS）→ BUG-352（default route 2 つ） | WS291 p020（PowerVR、c13 45.8 fps 対 目標 50）は返却。branch agent/p2-ws291v は BUG-375 の直しの後に main へ |
 | P3 | [WS307](ws307/ws.md)・[WS331](ws331/ws.md)・[WS332](ws332/ws.md)・[WS326](ws326/ws.md) | 残りの仕事を順に | 起動（q1736）。WS307 p007 の残り（installer の導入の QEMU、古い entry の掃除） | WS331 p006 規約 → WS332 p003・p004 → WS326 p015・p017 以降 |
 | P4 | [WS291](ws291/ws.md)・Bug | Pi 5 の GPU と BUG-374 | Pi 5 p021 の image を main＋branch で build（main には入れない） | 午後: ユーザーが Pi 5 を起動 → SSH で clock・fps。BUG-374 はユーザーの目視待ち（uncleared） |
-| P5 | [WS306](ws306/ws.md) | GPU の「ゲーム最適化」の UAPI と driver の識別 | q1746: p001 設計（既存の設計を今の code と照らして直す → design-reviewer → 問いの一覧） | WS333 p001 の設計は済み（main 9946e22c0、問い 7 つは下の「判断を待つ事」） |
+| P5 | [WS318](ws318/ws.md) | libmedia の作り直し（Vulkan の device の共有・codec の指定・encoder・カメラ・libavcodec の内部の fallback） | q1752: p001 設計（design-reviewer と問いの一覧まで） | WS306 の設計は済み（main 843847185、問い Q306-7・9 は下の 0b）。WS326 の後にすぐ実装に入れるよう先に設計 |
 | P6 | Bug・[WS291](ws291/ws.md) | BUG-370（Photos）と RTX の CPU の費用 | 起動（q1740）。BUG-370 の直し（QEMU） | WS291 p014: 命令の記録の段と全画面の copy を減らす（10.0.10.3） |
 | P7 | Bug | network と VF2 と compositor の Bug | BUG-371 の QEMU の確かめ、BUG-375（game mode の後に compositor が落ちる）の解析 | 直し → VF2（P2）と 10.0.10.3（P3）で確かめ |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
@@ -115,6 +115,14 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
   - Q333-6 電力（RAPL、CPU の電力の積算の計数）と CPU の休みの深さの割合を /dev/thermal で読めるようにするか: **推し A**＝入れる（読みだけ）。
   - Q333-7 CPU の速さの制御（`CONFIG_CPU_PERF`、今は既定で無効）の既定をいつ有効にするか: **推し A**＝5330 の受け入れの試験（p014）が通ったら amd64 の既定で有効（server の設定は変えない）。
 - 止めている物: 無し。Q1 は推しで進める（CPU の道 p003→p006→p011→p014 は問いを待たない）。Q333-4 だけは UAPI を実装する Phase の前に答えがほしい。
+
+### 0b. WS306（GPU の「ゲーム最適化」の UAPI と driver の識別）の設計の問い Q306-7・Q306-9（2026-10-31 新しい）
+
+- 背景: WS306 は、ゲームが環境変数（`VULKAN_ZEDBSD_GAME` など）で GPU の driver の最適化の ON/OFF と個別の option を選べるようにし、GPU の名前と driver の版を取れるようにする WS。option の一覧は vulkaninfo（Khronos の標準の道具、移植する）に出す。P5 が設計の第 3 版を書き、敵対的レビュー（major 7）を反映した（main 843847185）。実装は p002〜p011、約 54 LW。全文は [ws306/user-questions.md](ws306/user-questions.md)。
+- 用語: NGG は AMD RDNA の新しい形の頂点の処理の段。culling は見えない三角形を早く捨てる事。boot の行は起動の設定に書く kernel への指定。
+- Q306-7 boot の行 `amdrdna.vk.ngg` を残すか: **推し (a) 診断用に残す**（既定 0、desktop には入れない、書いた時だけ効く）。(b) 消す。
+- Q306-9 WS291（GPU の速さ）の RDNA の段の完了を待たずに、枠組みの Phase（UAPI・kernel の核・各 driver の名前と版・libvulkan・vulkaninfo・文書）を先に進めるか: **推し (a) 進める**。NGG を option に移す p007 と、その文書の p010 だけ RDNA の完了を待つ。費用は、kernel の GPU の共通の file（gpu.c）を他の WS と同じ時期に変えるので merge の衝突が出うる事（Q1 が merge の順で抑える）。(b) 決定のとおり、全部を RDNA の完了の後に。
+- 止めている物: WS306 の実装（Q306-9 の答えまで始めない。元の決定が「WS291 の後」のため）。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
