@@ -34,7 +34,7 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p007`](phase007/phase.md) | Complete (`q150`) | Architecture, compatibility, console/graphics/system and multi-radio WLAN reconciled; 283 product links pass |
 | [`ws009-p008`](phase008/phase.md) | Complete (`q190`) | Current amd64/PC98 installer and native-root workflows, recovery/limits, producer evidence and 293 product links verified |
 | [`ws009-p009`](phase009/phase.md) | canceled（2026-10-30、p010〜p024 に分けて置き換えた） | DOC-54 の第 2 版の設計（p009a・p009b、22 LW）。review の指摘（[design-review.md](phase009/design-review.md)）は p010〜p024 の骨格の spec と phase.md に移した |
-| [`ws009-p010`](phase010/phase.md) | 書いた・照合 PASS（2026-10-30、cleared は Q1 が決める） | gpu.md: node・権限・呼び方・並行と待ち・互換。依存: なし |
+| [`ws009-p010`](phase010/phase.md) | cleared（2026-10-30 Q1、main fa61e266b。照合 --final PASS、link PASS） | gpu.md: node・権限・呼び方・並行と待ち・互換。依存: なし |
 | [`ws009-p011`](phase011/phase.md) | cleared（2026-10-30 Q1、main e75adfd29。照合 --final PASS、link PASS） | gpu-capabilities.md: bit・GET_INFO・GET_CAPSET・capset 4。依存: なし |
 | [`ws009-p012`](phase012/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-memory.md: resource・blob・placed・transfer・map・device。依存: なし |
 | [`ws009-p013`](phase013/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-sharing.md: export・import（resource・allocation・scanout）。依存: なし |

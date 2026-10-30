@@ -94,3 +94,9 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 - `i915/display/present.c` の file の comment（output 1 つ、hot-plug・topology の event 無し）が code（複数の connector、GPU_DISPLAY_LIMITED、display の event）と食い違う。
 - `CONFIG_DRIVER_PCI_AMDRDNA` の既定が config/drivers/pci.drivers は n、Makefile の amd64 は y。
 - nvrtx・i915 は GPU_CAP_DISPLAY_CONTROL を立てるが GPU_DISPLAY_POWER に EOPNOTSUPP。
+
+## p010 から（2026-10-30 Q1、Bug の候補の一覧に入れる）
+
+- sessiond の `seat.c` の `sessiond_seat_restore` の comment は root に返した node を「誰でも開ける」と書くが、`gpu_open` は root と owner だけ（mode 0666 でも EACCES）。
+- `gpu-display.h` の `struct gpu_display_wait` は「signal で EINTR」と書くが、ghci の display の wait と adoption の wait は flags 0 の `waitq_sleep` で signal で終わらない（bcm2711 だけ中断できる）。`GPU_DISPLAY_REFRESH` の 4 driver も signal を見ない。
+- `GPU_DISPLAY_OVERLAY_INFO` は ungated の経路でしか届かない（gpu-display-control.md の p018 に知らせ済みでなければ統合で合わせる）。
