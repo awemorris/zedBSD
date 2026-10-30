@@ -10,7 +10,7 @@
 | P5 | phase-runner | ws327 (q1710-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p5-ws327` / `agent/p5-ws327` | in-progress（2026-10-30 起動） | — |
 | P6 | phase-runner | ws307 (q1711-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p6-ws307` / `agent/p6-ws307` | in-progress（2026-10-30 起動） | — |
 | P8 | phase-runner-low | ws074 p260 (q1708-i02) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（i01 返却の後に再起動） | 94cbacb31（merge fca92282d） |
-| P7 | phase-runner-high | ws291 (q1712-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p7-ws291` / `agent/p7-ws291` | in-progress（2026-10-30 起動、10.0.10.3） | — |
+| P7 | phase-runner-high | ws291 (q1712-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p7-ws291` / `agent/p7-ws291` | in-progress（2026-10-30 起動。10.0.10.3 は 14:45 返却、VF2 を割り当て） | bf76b4bb1 |
 
 - 同時に動かす数は 6（2026-10-29 ユーザーの P1〜P6 の指示）。VF2（主）と 5330（従）は P3、10.0.10.3 は空き（2026-10-30 09:13 P5 返却）。
 - P6 の branch（merge しない）: agent/p6-ws296→p6-ws296b（2d17bf9ed から）→p6-ws296c（f31a4954d から）、agent/p6-ws282→p6-ws282b（1190b629c から）→p6-ws282c（c60cdbd44 から）、WS296 は agent/p6-ws296c 1809873bd で全 Phase 実装済み、agent/p6-ws243b（飛ばした記録 b13f3dae7）、agent/p6-ws223（未着手）。

@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 15:40（Q1）
+最終更新: 2026-10-30 15:50（Q1）
 
 ## 担当（P1〜P8）
 
@@ -13,7 +13,7 @@
 | P4 | — | — | — | — |
 | P5 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | 起動（phase-runner、q1710）。p016 受け入れの残り（QEMU の回帰、Video Player・Photos の FAIL の解析、08-network） | p017 規約 → WS の完了 → 返却 |
 | P6 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 起動（phase-runner、q1711）。ws.md の Resume point から | p015 の QEMU の 3 回目 → p004 GTK4 → p008 → p014 → p007 → WS の完了 → 返却 |
-| P7 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 起動（phase-runner-high、q1712、10.0.10.3） | p010 desktop の測り直し → p012 以降で 3D を 50 fps 超えへ → WS の完了 → 返却 |
+| P7 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX・PowerVR） | p010 cleared、p012 uncleared（hardware の限界）。VF2 を割り当てて p020 PowerVR へ | p020 → WS291 は incomplete のまま返却（RDNA の Phase は実機が戻るまで止め） |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 再起動（q1708-i02）。Debian の比較の環境は出来た、Chromium 156 の基準と dev20 の全件の測定の完了待ち | compare → gap の大きい原因から直す |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。
@@ -76,7 +76,8 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | p001〜p006 | RDNA | cleared |
 | p010 | NVIDIA desktop 60 fps | cleared（2026-10-30 P7、実機で 2 回、60〜68 fps） |
 | p010a・p011 | NVIDIA の executor、scene-5000 | cleared（49.5〜49.7 fps、NVK と同等） |
-| p012〜 | 50 fps を明らかに超える改善 | planned |
+| p012 | 50 fps を明らかに超える改善 | uncleared（2026-10-30 P7: 頂点の側の固定機能の hardware の限界、NVK と同等 49.0 fps、上限 約 51.3。温度の差なし） |
+| p006・p008・p009 | RDNA の残り | 止め（RX 5600 XT が抜かれて実機なし） |
 | p020 | PowerVR | planned |
 
 ### WS326 libmedia の H.264 の software の decoder（標準廉価実装手順）
