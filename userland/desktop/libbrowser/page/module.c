@@ -19,11 +19,15 @@
 struct page_inline_module {
 	char *url;
 	struct wb_units source;
+	/* A root named by the script's src: fetched like any dependency, not held here. */
+	int external;
 };
 
 static int module_resolve(void *context, const char *base, const uint16_t *specifier,
 	size_t length, struct wb_buffer *url);
 static int module_fetch(void *context, const char *url, struct wb_units *source);
+static int module_fetch_json(void *context, const char *url, struct wb_units *source);
+static int module_json_mime(const struct wb_buffer *type);
 static int module_same_origin(const char *owner, const char *candidate);
 static int module_javascript_mime(const struct wb_buffer *type);
 static void module_report(struct page *page, const struct page_inline_module *entry,
@@ -68,17 +72,11 @@ page_module_enqueue(
 	const struct dom_character_data *data;
 	struct dom_node *child;
 	struct wb_buffer url;
+	struct wb_buffer href;
 	const char *base;
 	const char *fragment;
 	size_t index;
 	int status;
-
-	/* External module roots are handled by a later bounded pass. */
-	for (index = 0; index < script->attribute_count; index++) {
-		if (script->attributes[index].ns == DOM_NS_NONE &&
-		    vm_string_equal_ascii(script->attributes[index].name, "src"))
-			return 0;
-	}
 
 	entry = calloc(1, sizeof(*entry));
 	if (entry == NULL)
@@ -86,6 +84,40 @@ page_module_enqueue(
 	wb_units_init(&entry->source);
 	wb_buffer_init(&url);
 	status = 0;
+
+	/* An external root is the resolved src, which the graph fetches when it runs. */
+	for (index = 0; index < script->attribute_count; index++) {
+		if (script->attributes[index].ns == DOM_NS_NONE &&
+		    vm_string_equal_ascii(script->attributes[index].name, "src")) {
+			wb_buffer_init(&href);
+			status = vm_string_to_utf8(script->attributes[index].value, &href);
+			base = page->base;
+			if (base == NULL)
+				base = "about:blank";
+			if (status == 0)
+				status = page_resolve_location(base, wb_buffer_string(&href), &url);
+			wb_buffer_release(&href);
+			if (status == 0) {
+				entry->url = strdup(wb_buffer_string(&url));
+				entry->external = 1;
+				if (entry->url == NULL)
+					status = ENOMEM;
+			}
+			if (status == 0)
+				status = wb_vector_push(&page->module_scripts, &entry);
+			wb_buffer_release(&url);
+			if (status != 0) {
+				wb_units_release(&entry->source);
+				free(entry->url);
+				free(entry);
+			}
+
+			/* A src that does not resolve is no module to run. */
+			if (status == EINVAL || status == ENOENT)
+				return 0;
+			return status;
+		}
+	}
 	for (child = script->node.first_child; child != NULL && status == 0; child = child->next) {
 		if (child->type != DOM_TEXT && child->type != DOM_CDATA_SECTION)
 			continue;
@@ -135,6 +167,9 @@ page_modules_run(
 	if (page->module_graph == NULL) {
 		status = js_module_graph_create(page->realm, module_resolve, module_fetch,
 		    page, &page->module_graph);
+		if (status != 0)
+			return status;
+		status = js_module_graph_set_json_fetch(page->module_graph, module_fetch_json);
 		if (status != 0)
 			return status;
 	}
@@ -194,7 +229,7 @@ module_fetch(
 	page = context;
 	for (index = 0; index < page->module_scripts.count; index++) {
 		entry = *(struct page_inline_module **)wb_vector_at(&page->module_scripts, index);
-		if (strcmp(entry->url, url) == 0)
+		if (!entry->external && strcmp(entry->url, url) == 0)
 			return wb_units_append(source, entry->source.data, entry->source.length);
 	}
 
@@ -219,6 +254,84 @@ module_fetch(
 	status = wb_utf8_to_units(bytes, length, source);
 	net_response_release(&response);
 	return status;
+}
+
+/* Fetches the text of a JSON module: a same-origin response with a JSON type. */
+static int
+module_fetch_json(
+	void *context,
+	const char *url,
+	struct wb_units *source)
+{
+	struct net_response response;
+	struct page *page;
+	const unsigned char *bytes;
+	size_t length;
+	int status;
+
+	/* Within the document's origin. */
+	page = context;
+	status = module_same_origin(page->base, url);
+	if (status != 0)
+		return status;
+
+	/* A successful response of a JSON type. */
+	status = page_fetch_response(url, url, &response);
+	if (status != 0)
+		return status;
+	if (response.status < 200 || response.status > 299 || !module_json_mime(&response.content_type)) {
+		net_response_release(&response);
+		return EINVAL;
+	}
+
+	/* Its text, without a byte order mark. */
+	bytes = response.body.data;
+	length = response.body.length;
+	if (length >= 3 && bytes[0] == 0xefU && bytes[1] == 0xbbU && bytes[2] == 0xbfU) {
+		bytes += 3;
+		length -= 3;
+	}
+	status = wb_utf8_to_units(bytes, length, source);
+	net_response_release(&response);
+	return status;
+}
+
+/* Recognizes a JSON MIME type: application/json, or any type that ends in +json. */
+static int
+module_json_mime(
+	const struct wb_buffer *type)
+{
+	const unsigned char *bytes;
+	size_t start;
+	size_t end;
+	size_t index;
+	unsigned char unit;
+	char lower[64];
+
+	/* The essence, without parameters. */
+	bytes = type->data;
+	start = 0;
+	while (start < type->length && (bytes[start] == ' ' || bytes[start] == '\t'))
+		start++;
+	end = start;
+	while (end < type->length && bytes[end] != ';')
+		end++;
+	while (end > start && (bytes[end - 1] == ' ' || bytes[end - 1] == '\t'))
+		end--;
+	if (end - start >= sizeof(lower))
+		return 0;
+	for (index = 0; index < end - start; index++) {
+		unit = bytes[start + index];
+		if (unit >= 'A' && unit <= 'Z')
+			unit = (unsigned char)(unit + 0x20U);
+		lower[index] = (char)unit;
+	}
+	lower[end - start] = '\0';
+	if (strcmp(lower, "application/json") == 0)
+		return 1;
+	if (end - start > 5U && strcmp(lower + (end - start) - 5U, "+json") == 0)
+		return 1;
+	return 0;
 }
 
 /* Rejects a dependency outside the document's HTTP origin. */
@@ -316,16 +429,19 @@ module_report(
 	int written;
 
 	if (status == VM_THROWN) {
-		bind_report_exception(page->window, page->realm->exception);
+		bind_report_exception_at(page->window, page->realm->exception, 1U, 1U);
 		page->realm->exception = VM_VALUE_UNDEFINED;
 		return;
 	}
 	wb_buffer_init(&message);
-	if (status == EINVAL && syntax->message[0] != '\0')
-		written = wb_buffer_printf(&message, "Uncaught SyntaxError: %s (%s:%u:%u)",
-		    syntax->message, entry->url, (unsigned)syntax->line,
-		    (unsigned)syntax->column);
-	else
+	if (status == EINVAL && syntax->message[0] != '\0') {
+		/* A SyntaxError the window reports, with an error event. */
+		(void)vm_throw_error(page->realm, VM_ERROR_SYNTAX, syntax->message);
+		bind_report_exception_at(page->window, page->realm->exception, (unsigned)syntax->line, (unsigned)syntax->column);
+		page->realm->exception = VM_VALUE_UNDEFINED;
+		wb_buffer_release(&message);
+		return;
+	} else
 		written = wb_buffer_printf(&message, "Failed to load module %s: %s",
 		    entry->url, strerror(status));
 	if (written == 0)

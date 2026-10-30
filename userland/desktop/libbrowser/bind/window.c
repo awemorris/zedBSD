@@ -649,6 +649,51 @@ bind_report_exception(
 	window_report_exception(window, exception, NULL);
 }
 
+/*
+ * Reports an exception the host made (a module that could not be loaded)
+ * as thrown from a place of the document's own: the error event discloses
+ * it as it does the exception of an inline script, with the line and column.
+ */
+void
+bind_report_exception_at(
+	struct bind_window *window,
+	vm_value exception,
+	unsigned line,
+	unsigned column)
+{
+	struct window_script_source *origin;
+	struct vm_realm *realm;
+	struct vm_cell *root;
+	struct wb_buffer filename;
+
+	/* The document's URL names the place. */
+	realm = window->realm;
+	root = NULL;
+	wb_buffer_init(&filename);
+	if (window->detached || vm_heap_add_root(realm->heap, &root) != 0)
+		return;
+	origin = vm_heap_alloc(realm->heap, &window_script_source_type, sizeof(*origin));
+	if (origin == NULL)
+		goto cleanup;
+	root = &origin->cell;
+	if (bind_document_url(window->document, 0, &filename) != 0)
+		goto cleanup;
+	origin->filename = vm_string_from_utf8(realm->heap, wb_buffer_string(&filename), filename.length);
+	if (origin->filename == NULL)
+		goto cleanup;
+
+	/* The recorded throw place is this one. */
+	realm->throw_value = exception;
+	realm->throw_source = vm_value_cell(origin);
+	realm->throw_line = line;
+	realm->throw_column = column;
+	window_report_exception(window, exception, NULL);
+
+cleanup:
+	wb_buffer_release(&filename);
+	vm_heap_remove_root(realm->heap, &root);
+}
+
 /* Retains one managed value without treating immediate values as heap pointers. */
 static struct vm_cell *
 window_exception_cell(

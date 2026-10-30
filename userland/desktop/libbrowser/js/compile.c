@@ -52,6 +52,11 @@ struct js_module_import {
 	size_t imported_length;
 	uint16_t *specifier;
 	size_t specifier_length;
+	/* The import attributes: the type's value when given, and whether a key other than type was. */
+	uint16_t *type;
+	size_t type_length;
+	int has_type;
+	int unknown_key;
 	struct js_binding *binding;
 	uint32_t slot;
 	int linked;
@@ -78,6 +83,7 @@ static int compile_program(struct vm_realm *realm, struct js_program *program, s
 static void compile_module_exports(struct js_compiler *compiler, struct js_function_info *info, struct js_module *module);
 static void compile_module_export_name(struct js_compiler *compiler, struct js_function_info *info, struct js_module *module, struct js_node *name, struct js_node *exported);
 static void compile_module_imports(struct js_compiler *compiler, struct js_function_info *info, struct js_module *module);
+static struct js_module_import *compile_module_import_entry(struct js_compiler *compiler, struct js_module *module, struct js_node *specifier, struct js_node *local, struct js_node *imported, struct js_node *attributes, struct js_binding *binding);
 static void compile_prepare(struct js_function_compiler *fc);
 static void compile_place_binding(struct js_function_compiler *fc, struct js_scope *scope, struct js_binding *binding, uint32_t *env_count);
 static void compile_prologue(struct js_function_compiler *fc, uint32_t env_count);
@@ -183,7 +189,8 @@ compile_program(
 			module->exports[index].binding = NULL;
 		}
 		for (index = 0; index < module->import_count; index++) {
-			module->imports[index].slot = module->imports[index].binding->location;
+			if (module->imports[index].binding != NULL)
+				module->imports[index].slot = module->imports[index].binding->location;
 			module->imports[index].binding = NULL;
 		}
 	}
@@ -353,6 +360,81 @@ compile_module_export_name(
 	info->has_env = 1;
 }
 
+/*
+ * Adds one import entry of a module: where it comes from (the specifier and
+ * its attributes) and, for a binding, the imported and local names.
+ */
+static struct js_module_import *
+compile_module_import_entry(
+	struct js_compiler *compiler,
+	struct js_module *module,
+	struct js_node *specifier,
+	struct js_node *local,
+	struct js_node *imported,
+	struct js_node *attributes,
+	struct js_binding *binding)
+{
+	static const uint16_t type_key[] = { 't', 'y', 'p', 'e' };
+	struct js_module_import *imports;
+	struct js_module_import *entry;
+	struct js_node *attribute;
+	struct js_node *key;
+	struct js_node *value;
+
+	/* The entry. */
+	imports = realloc(module->imports, (module->import_count + 1U) * sizeof(*imports));
+	if (imports == NULL)
+		js_compile_out_of_memory(compiler);
+	module->imports = imports;
+	entry = &imports[module->import_count];
+	memset(entry, 0, sizeof(*entry));
+	module->import_count++;
+
+	/* The names it owns. */
+	entry->specifier = malloc((specifier->text_length + 1U) * sizeof(uint16_t));
+	if (entry->specifier == NULL)
+		js_compile_out_of_memory(compiler);
+	memcpy(entry->specifier, specifier->text, specifier->text_length * sizeof(uint16_t));
+	entry->specifier[specifier->text_length] = 0;
+	entry->specifier_length = specifier->text_length;
+	if (local != NULL) {
+		entry->local = malloc((local->text_length + 1U) * sizeof(uint16_t));
+		entry->imported = malloc((imported->text_length + 1U) * sizeof(uint16_t));
+		if (entry->local == NULL || entry->imported == NULL)
+			js_compile_out_of_memory(compiler);
+		memcpy(entry->local, local->text, local->text_length * sizeof(uint16_t));
+		memcpy(entry->imported, imported->text, imported->text_length * sizeof(uint16_t));
+		entry->local[local->text_length] = 0;
+		entry->imported[imported->text_length] = 0;
+		entry->local_length = local->text_length;
+		entry->imported_length = imported->text_length;
+	} else {
+		/* Nothing to bind: there is nothing for the host to link. */
+		entry->linked = 1;
+	}
+	entry->binding = binding;
+
+	/* The attributes: type is the only key a module knows. */
+	for (attribute = attributes; attribute != NULL; attribute = attribute->next) {
+		key = attribute->first;
+		value = attribute->second;
+		if (key == NULL || value == NULL || key->text == NULL ||
+		    key->text_length != sizeof(type_key) / sizeof(type_key[0]) ||
+		    memcmp(key->text, type_key, sizeof(type_key)) != 0) {
+			entry->unknown_key = 1;
+			continue;
+		}
+		entry->has_type = 1;
+		entry->type = malloc((value->text_length + 1U) * sizeof(uint16_t));
+		if (entry->type == NULL)
+			js_compile_out_of_memory(compiler);
+		memcpy(entry->type, value->text, value->text_length * sizeof(uint16_t));
+		entry->type[value->text_length] = 0;
+		entry->type_length = value->text_length;
+	}
+	return entry;
+}
+
 /* Records static named imports and keeps their local slots after evaluation. */
 static void
 compile_module_imports(
@@ -360,8 +442,6 @@ compile_module_imports(
 	struct js_function_info *info,
 	struct js_module *module)
 {
-	struct js_module_import *imports;
-	struct js_module_import *entry;
 	struct js_binding *binding;
 	struct js_node *item;
 	struct js_node *part;
@@ -377,8 +457,14 @@ compile_module_imports(
 		if (item->kind != JS_NODE_IMPORT)
 			continue;
 		specifier = item->second;
-		if (specifier == NULL || specifier->kind != JS_NODE_STRING || item->first == NULL)
+		if (specifier == NULL || specifier->kind != JS_NODE_STRING)
 			js_compile_unsupported(compiler, item, "this kind of module import");
+
+		/* An import with no bindings only loads the module. */
+		if (item->first == NULL) {
+			compile_module_import_entry(compiler, module, specifier, NULL, NULL, item->third, NULL);
+			continue;
+		}
 		for (part = item->first; part != NULL; part = part->next) {
 			imported = part->first;
 			local = part->second;
@@ -410,28 +496,7 @@ compile_module_imports(
 				js_compile_fail(compiler, local, "Module import has no local binding");
 
 			/* A stable import entry owns its names beyond the parser arena. */
-			imports = realloc(module->imports, (module->import_count + 1U) * sizeof(*imports));
-			if (imports == NULL)
-				js_compile_out_of_memory(compiler);
-			module->imports = imports;
-			entry = &imports[module->import_count];
-			memset(entry, 0, sizeof(*entry));
-			module->import_count++;
-			entry->local = malloc((local->text_length + 1U) * sizeof(uint16_t));
-			entry->imported = malloc((imported->text_length + 1U) * sizeof(uint16_t));
-			entry->specifier = malloc((specifier->text_length + 1U) * sizeof(uint16_t));
-			if (entry->local == NULL || entry->imported == NULL || entry->specifier == NULL)
-				js_compile_out_of_memory(compiler);
-			memcpy(entry->local, local->text, local->text_length * sizeof(uint16_t));
-			memcpy(entry->imported, imported->text, imported->text_length * sizeof(uint16_t));
-			memcpy(entry->specifier, specifier->text, specifier->text_length * sizeof(uint16_t));
-			entry->local[local->text_length] = 0;
-			entry->imported[imported->text_length] = 0;
-			entry->specifier[specifier->text_length] = 0;
-			entry->local_length = local->text_length;
-			entry->imported_length = imported->text_length;
-			entry->specifier_length = specifier->text_length;
-			entry->binding = binding;
+			compile_module_import_entry(compiler, module, specifier, local, imported, item->third, binding);
 			binding->captured = 1;
 			info->has_env = 1;
 		}
@@ -611,6 +676,10 @@ js_module_import_at(
 	info->imported_length = entry->imported_length;
 	info->local = entry->local;
 	info->local_length = entry->local_length;
+	info->type = entry->type;
+	info->type_length = entry->type_length;
+	info->has_type = entry->has_type;
+	info->unknown_key = entry->unknown_key;
 	return 0;
 }
 
@@ -698,6 +767,7 @@ js_module_release(
 		free(module->imports[index].local);
 		free(module->imports[index].imported);
 		free(module->imports[index].specifier);
+		free(module->imports[index].type);
 	}
 	free(module->imports);
 	free(module);

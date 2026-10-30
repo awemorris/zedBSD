@@ -47,7 +47,7 @@ static struct js_node *stmt_import_specifier(struct js_parser *parser, int named
 static struct js_node *stmt_export(struct js_parser *parser);
 static struct js_node *stmt_module_name(struct js_parser *parser);
 static struct js_node *stmt_module_string(struct js_parser *parser);
-static void stmt_import_attributes(struct js_parser *parser);
+static struct js_node *stmt_import_attributes(struct js_parser *parser);
 static int stmt_is_lexical(struct js_parser *parser);
 static int stmt_next_is(struct js_parser *parser, int punctuator);
 static int stmt_is_async_function(struct js_parser *parser);
@@ -1259,7 +1259,7 @@ stmt_import(
 	js_next(parser);
 	if (parser->lexer.token.kind == JS_TOKEN_STRING) {
 		node->second = stmt_module_string(parser);
-		stmt_import_attributes(parser);
+		node->third = stmt_import_attributes(parser);
 		js_semicolon(parser);
 		return node;
 	}
@@ -1311,7 +1311,7 @@ stmt_import(
 		js_fail(parser, "from is expected");
 	js_next(parser);
 	node->second = stmt_module_string(parser);
-	stmt_import_attributes(parser);
+	node->third = stmt_import_attributes(parser);
 	js_semicolon(parser);
 
 	/* Succeeded: the import. */
@@ -1386,7 +1386,7 @@ stmt_export(
 			js_fail(parser, "from is expected");
 		js_next(parser);
 		node->second = stmt_module_string(parser);
-		stmt_import_attributes(parser);
+		(void)stmt_import_attributes(parser);
 		js_semicolon(parser);
 		return node;
 	}
@@ -1463,7 +1463,7 @@ stmt_export(
 		if (parser->lexer.token.keyword == JS_W_FROM) {
 			js_next(parser);
 			node->second = stmt_module_string(parser);
-			stmt_import_attributes(parser);
+			(void)stmt_import_attributes(parser);
 		}
 
 		/* The end of the export. */
@@ -1544,23 +1544,34 @@ stmt_module_string(
 	return node;
 }
 
-/* Skips an import's attributes: with { key: "value", ... }. */
-static void
+/*
+ * Parses an import's attributes: with { key: "value", ... }.  Each one is
+ * an import specifier node with the key in first and the value in second;
+ * they are chained.  NULL when there is no with clause or it is empty.
+ */
+static struct js_node *
 stmt_import_attributes(
 	struct js_parser *parser)
 {
+	struct js_node *first;
+	struct js_node *last;
+	struct js_node *attribute;
 	uint32_t flags;
 
 	/* Only with and a brace (a line break may come before with). */
+	first = NULL;
+	last = NULL;
 	if (parser->lexer.token.keyword != JS_W_WITH)
-		return;
+		return NULL;
 	js_next(parser);
 	js_expect(parser, JS_P_LBRACE);
 	while (parser->lexer.token.punctuator != JS_P_RBRACE) {
 		flags = 0;
-		(void)js_parse_property_name(parser, &flags);
+		attribute = js_node_new(parser, JS_NODE_IMPORT_SPECIFIER);
+		attribute->first = js_parse_property_name(parser, &flags);
 		js_expect(parser, JS_P_COLON);
-		(void)stmt_module_string(parser);
+		attribute->second = stmt_module_string(parser);
+		js_append(&first, &last, attribute);
 		if (parser->lexer.token.punctuator != JS_P_COMMA)
 			break;
 		js_next(parser);
@@ -1568,6 +1579,7 @@ stmt_import_attributes(
 
 	/* The closing brace. */
 	js_expect(parser, JS_P_RBRACE);
+	return first;
 }
 
 /*
