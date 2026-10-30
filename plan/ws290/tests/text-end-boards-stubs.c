@@ -1040,3 +1040,19 @@ uart_write(
 	if (number == 0U && uart_sent_count < sizeof(uart_sent))
 		uart_sent[uart_sent_count++] = (uint8_t)value;
 }
+
+/* A tick of the test's clock is one millisecond. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	return milliseconds;
+}
+
+/* The test's ticks are milliseconds already. */
+uint64_t
+kern_ticks_to_ms(
+	uint64_t ticks)
+{
+	return ticks;
+}
