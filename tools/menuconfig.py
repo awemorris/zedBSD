@@ -400,6 +400,13 @@ def normalize(values: dict[str, object]) -> None:
     available_programs = {row[0] for row in user_program_rows()}
     selected_programs = values.setdefault("ZEDBSD_USER_PROGRAMS", set())
     selected_programs.intersection_update(available_programs)
+    # Noct built with its accelerator (an amd64 option) links libEGL and
+    # libGLESv2, so the image that carries noct carries them too.
+    architecture = platform_record(platform)[1]
+    if (architecture == "amd64" and "noct" in selected_programs and
+            str(values.get("ZEDBSD_NOCT_ACCEL", "n")) == "y"):
+        for library in ("libegl", "libglesv2"):
+            package_select(user_program_rows(), selected_programs, library)
     if "Xzed" in selected_programs:
         values["CONFIG_DRIVER_GRAPHICS"] = "y"
 
