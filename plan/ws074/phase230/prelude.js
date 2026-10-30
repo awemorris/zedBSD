@@ -1769,4 +1769,108 @@
     def(g, 'ViewTransition', ViewTransition);
     def(g, 'ViewTransitionTypeSet', ViewTransitionTypeSet);
   })();
+  // ---- Element.animate (https://drafts.csswg.org/web-animations-1/)
+  // The timeline of an animation: its promises, play state and time, without any effect on the page's style.
+  if (typeof document !== 'undefined' && typeof g.Element === 'function' && !g.Element.prototype.animate) (function () {
+    var ANIM = {};
+    function deferred() {
+      var d = {};
+      d.promise = new Promise(function (resolve, reject) { d.resolve = resolve; d.reject = reject; });
+      return d;
+    }
+    var all = new Set();
+    class Animation extends EventTarget {
+      constructor(key, target, keyframes, options) {
+        if (key !== ANIM) throw new TypeError('Illegal constructor');
+        super();
+        var o = typeof options === 'number' ? { duration: options } : (options || {});
+        hidden(this, '_target', target);
+        hidden(this, '_keyframes', keyframes);
+        hidden(this, '_timing', {
+          delay: +o.delay || 0, endDelay: +o.endDelay || 0, fill: o.fill || 'auto', iterationStart: +o.iterationStart || 0,
+          iterations: o.iterations === undefined ? 1 : +o.iterations, duration: o.duration === undefined ? 'auto' : o.duration,
+          direction: o.direction || 'normal', easing: o.easing || 'linear'
+        });
+        hidden(this, '_state', 'running');
+        hidden(this, '_ready', deferred());
+        hidden(this, '_finished', deferred());
+        hidden(this, '_timer', 0);
+        hidden(this, '_start', performance.now());
+        hidden(this, '_hold', null);
+        this.id = o.id || '';
+        this.onfinish = null;
+        this.oncancel = null;
+        this._ready.resolve(this);
+        this._finished.promise.then(undefined, function () {});
+        all.add(this);
+        this._arm();
+      }
+      _total() {
+        var t = this._timing, d = t.duration === 'auto' ? 0 : +t.duration;
+        return t.delay + d * t.iterations + t.endDelay;
+      }
+      _arm() {
+        var self = this, left;
+        if (this._timer) clearTimeout(this._timer);
+        this._timer = 0;
+        if (this._state !== 'running') return;
+        left = this._total() - this.currentTime;
+        if (!isFinite(left)) return;
+        this._timer = setTimeout(function () { self._finish(); }, Math.max(0, left));
+      }
+      _finish() {
+        if (this._state === 'finished' || this._state === 'idle') return;
+        this._state = 'finished';
+        this._hold = this._total();
+        if (this._timer) clearTimeout(this._timer);
+        this._timer = 0;
+        this._finished.resolve(this);
+        var ev = new Event('finish');
+        if (typeof this.onfinish === 'function') { try { this.onfinish.call(this, ev); } catch (e) { setTimeout(function () { throw e; }, 0); } }
+        this.dispatchEvent(ev);
+      }
+      get effect() { var a = this; return { target: a._target, getTiming: function () { return Object.assign({}, a._timing); }, getComputedTiming: function () { return Object.assign({ endTime: a._total(), activeDuration: a._total() - a._timing.delay - a._timing.endDelay, currentIteration: 0, progress: 0 }, a._timing); }, getKeyframes: function () { return a._keyframes; } }; }
+      get playState() { return this._state; }
+      get pending() { return false; }
+      get replaceState() { return 'active'; }
+      get ready() { return this._ready.promise; }
+      get finished() { return this._finished.promise; }
+      get startTime() { return this._state === 'idle' ? null : this._start; }
+      get currentTime() {
+        if (this._state === 'idle') return null;
+        if (this._hold !== null) return this._hold;
+        return performance.now() - this._start;
+      }
+      set currentTime(v) { this._start = performance.now() - v; if (this._hold !== null) this._hold = v; this._arm(); }
+      get timeline() { return document.timeline || null; }
+      play() { if (this._state === 'finished' || this._state === 'idle') { this._start = performance.now(); this._hold = null; this._finished = deferred(); this._finished.promise.then(undefined, function () {}); } else if (this._hold !== null) { this._start = performance.now() - this._hold; this._hold = null; } this._state = 'running'; this._arm(); }
+      pause() { if (this._state === 'running') { this._hold = this.currentTime; this._state = 'paused'; if (this._timer) clearTimeout(this._timer); this._timer = 0; } }
+      finish() { this._finish(); }
+      cancel() {
+        if (this._state === 'idle') return;
+        this._state = 'idle';
+        if (this._timer) clearTimeout(this._timer);
+        this._timer = 0;
+        this._finished.reject(new DOMException('The animation was aborted', 'AbortError'));
+        this._finished = deferred();
+        this._finished.promise.then(undefined, function () {});
+        all.delete(this);
+        var ev = new Event('cancel');
+        if (typeof this.oncancel === 'function') { try { this.oncancel.call(this, ev); } catch (e) { setTimeout(function () { throw e; }, 0); } }
+        this.dispatchEvent(ev);
+      }
+      reverse() {}
+      updatePlaybackRate() {}
+      persist() {}
+      commitStyles() {}
+    }
+    tag(Animation, 'Animation');
+    def(g.Element.prototype, 'animate', function animate(keyframes, options) { return new Animation(ANIM, this, keyframes, options); });
+    def(g.Element.prototype, 'getAnimations', function getAnimations() {
+      var self = this;
+      return Array.from(all).filter(function (a) { return a._target === self && (a._state === 'running' || a._state === 'paused'); });
+    });
+    def(g.Document.prototype, 'getAnimations', function getAnimations() { return Array.from(all).filter(function (a) { return a._state === 'running' || a._state === 'paused'; }); });
+    def(g, 'Animation', Animation);
+  })();
 })
