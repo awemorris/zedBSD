@@ -242,7 +242,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-372](bugs/BUG-372.md) | VisionFive 2 の今の main の kernel で serial の console が入力を受けない（WS331 p005 の疑い） | open（2026-10-30） |
 | [BUG-373](bugs/BUG-373.md) | 今の main の kernel で networkd の初期の Wi-Fi の正規化が EINVAL、networking が上がらない（Wi-Fi の無い機械でも） | open（2026-10-31、P7） |
 | [BUG-374](bugs/BUG-374.md) | RTX（nvrtx）の mouse の cursor の色が他の GPU と逆（外枠が白・内側が黒） | open（2026-10-31、P3） |
-| [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が lease の解放より先に swapchain を作り EBUSY で終了（VF2） | open（2026-10-31） |
+| [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が lease の解放より先に swapchain を作り EBUSY で終了（VF2） | closed（2026-10-31 Q1 の判定、P7 157a69cc0: kernel の CCB の満杯を待つ。VF2 で 8 回とも落ちず） |
 | [BUG-376](bugs/BUG-376.md) | PS/2 の mouse の port が mouse が無くても node を作り、open のたびに約 80 ms 待って EIO | open（2026-10-31、P6） |
 | [BUG-176](bugs/BUG-176.md) | 起動の直後の約 10 秒「Network service is not …」と出る | reproduced（実機） / resolved（2026-10-08 夜 ユーザー「下記は実装の変更が多かったので、いったんすべてcloseします。」、Q1 の中継）。前: scheduled、低（q726: bar の起動の直後の表示を「Starting the network service...」に、UAT 待ち） | UAT 2026-10-04 | WS131・networkd（[ticket](bugs/BUG-176.md)） |
 | [BUG-159](bugs/BUG-159.md) | バッテリー駆動で描画が 5 fps ほどに落ち、電池切れで警告なく落ちる | reproduced（実機 S1） / tracking | S1（WS133） | WS075（i915）、電源の管理（WS050〜052・WS132）。UAT 2026-10-04: 再現せず（電源の状態は BUG-165 の後） |
