@@ -70,3 +70,15 @@ Queue: q1731（P1）
 
 - 5330 の NVMe の zedBSD（main 48a27d158 の image、kernel は p022 の MAD 入りの build）の desktop の session で、root から `su user -c '... /bin/notes'` で起動: 窓が出た（keiland-shot の PNG、build/p022-meas/shots/notes.png、git の外。「note-20261030-161726.pdf — Notes」の窓、道具の列と白い page）。notes の log: `NOTES START width=1024 height=768`、`NOTES FRAME first draws=52`。
 - 終わり: SIGTERM で終わった（exit=143、signal 15 の既定の終わり方）。dmesg に fault・trap の行は無し。**窓の閉じる button・File の終わり（`NOTES EXIT` の行の出る通常の終わり方）は未実施**（この image に試験の入力の注入 `CONFIG_INPUT_TEST_INJECT` が無い）。
+
+### CPU の idle の MWAIT（WS333 p002、q1735）の後
+
+- WS333 p002（commit e44a18dd7、`hal_cpu_idle` を MWAIT C6 に）を足した kernel（p022 の GPU の変更すべて＋MWAIT、診断なし）: c1 265.6 fps、**c600 32.52・32.64 fps**（direct scanout）。c600 の shot は ANV と 1 pixel 1 階調差。idle の package 13.00 → 11.70 W、c600 の GT 800〜850 → 850〜900 MHz（WS333 p002 の表）。
+
+## 状態と再開点（2026-10-31、P1 の q1731-i01 の終わり）
+
+- 受け入れ（qs40 × 600、1920x1080、direct scanout で Linux の 50.6 fps 以上）: **未達**（32.6 fps）。
+- 主因: package の電力の上限（PL1 13 W）で GT が 850〜900 MHz（Linux 1100〜1200 MHz）。zedBSD の idle が 11.6 W（Linux 3.2〜3.5 W）で枠を食う。同じ周波数に換算した GPU の前段（頂点）の時間は Linux と約 8% の差。
+- 次に効く物（効く順の見込み）: (1) WS333 の package の省電力の続き（P-state・HWP、tick、ASPM・PSR など、idle 11.6 W の内訳の調査）。(2) GPU 側: 非同期の submit（frame あたり GPU の空き約 1 ms）、present の GPU の copy（1.2 ms/frame、真の flip に）、HiZ、texture の tiling、FS の SIMD16、SWSB の依存の解析（全命令 `@1`）。
+- 5330 の後片付け: `5330-mview.sh restore` で NVMe の zedBSD を退避の時の物に戻した（結果は下）。Debian の `~/p1-p022/`（退避 orig 約 6.6 GB、image、linux-mview、src）は残してある（消すのは Q1）。weston・seatd を Debian に入れた（apt）。
+- 戻しの結果（2026-10-31）: p5・p6 は退避の sha256 と一致、p4 の file（vmunix 3510016546・vmunix.old 2965513653・zedbsd.cfg・logo.ppm・元の log）と ESP の `\EFI\zedbsd\BOOTX64.EFI`（1896835601）も退避の cksum と一致。`restore` は FAT への `cp -a` の owner の保存で失敗して途中で止まったので、残り（p4 の写し・umount・loader）は手で同じ事をして照合した（script は `cp --preserve=timestamps` に直した）。**p4 に残った物**（消していない、削除は Q1）: `log/boot-000137.txt`〜`boot-000157.txt`（この作業の起動の log）と `vmunix.prev`。5330 は Debian で起動中、BootNext は無し。
