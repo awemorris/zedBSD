@@ -58,9 +58,15 @@ Queue: q1731（P1）
 | main 48a27d158 | 22.96・23.04 | 約 39.4 ms/frame | draw の全 surface が MOCS 3（L3・LLC uncached） |
 | ＋ MOCS（入力・depth・state は index 2 WB、colour target は 61） | 30.10・30.16 | 約 30.7 ms/frame | 1.31 倍 |
 | ＋ compiler: push 定数・float の即値・頂点の attribute を register に写さず直に読む、always 書く VUE の register を 0 で埋めない（mview の VS 134 → 83 命令） | 31.37・31.62 | 約 29.7 ms/frame | ＋4.5%。shot は ANV と同じ（c1 一致、c600 1 pixel 1 階調）、desktop の keiland-shot も正常。tree の VS 21 本は全て compile でき、全部縮んだ |
+| ＋ compiler: MAD（Gen12 の 3-source の encode、Mesa の brw_asm と bit 一致を host で確かめた。一度だけ読まれる積を和・差と一つの MAD に。mview の VS 83 → 67 命令） | 30.78・30.95 | 約 30.2 ms/frame | 同じ時間帯の MAD 無し（直読みだけ）の kernel は 30.46・30.66・30.74 で、差は電力の上限の揺れの内（熱で前の 31.4〜31.6 から下がった）。shot は ANV と同じ。tree の VS 21 本は compile でき、Mesa の disasm → asm で bit 一致 |
 
 - cull=all（MOCS の後）: 35.3 fps（前段だけで約 26 ms、Linux 約 16 ms）。
 - pipeline statistics（診断の kernel、c600 の 1 frame）: IA 21.2M prims、VS 16.5M（頂点の cache は効いている、unique 15.5M）、CL 21.2M、PS 6.9M。
 - **GT の実の周波数**（診断の kernel、mview の間）: 要求 1200 MHz に対し **実 800 MHz**。GT0_PERF_LIMIT_REASONS = 0x05000C00（PL1 と PL2 の電力の上限）。Linux は同じ負荷で 1200 MHz。CPU の idle が HLT（C1）だけ・HWP 無しの件（master.md の WS299 の続き・WS301）で package の電力が CPU 側に食われている見込み（未確認）。GPU の driver の範囲の外。
 - **package の電力**（診断の kernel が GT の MMIO の MCHBAR の写し 0x14593C・0x145938・0x1459A0 を読む、`telemetry-sum.py`）: zedBSD は mview c600 で 13.0 W、PL1（MMIO）13.0 W に張り付き、GT 800 MHz。**zedBSD の idle（desktop の session、GPU は止まっている）で既に 12.99 W**。Linux（intel-rapl:0）は idle 3.2〜3.5 W（i915・weston の kiosk）、mview c600 で 14.6 W（12 s、1200 MHz）・14.3 W（60 s、42 s 後に 1100 MHz、49.4 fps）。zedBSD は idle の時点で約 10 W を余計に使い、GT の電力の枠を食っている。CPU の idle（HLT だけ）・P-state（HWP 無し）の見込み。Linux の cpuidle を C1E だけにしても Linux は 1200 MHz・50.99 fps（C1E は電圧を下げる、zedBSD の HLT の C1 とは違う）。GPU の driver の範囲の外の依存（Q1 に報告済み）。
 - VS の code: 134 命令（ANV 約 50）。MAD 無し、push の scalar を mov で広げる、VUE の 16 register を 0 で埋める、全命令が SWSB `@1`。
+
+### Notes の起動（2026-10-31 Q1 の依頼、ユーザーの指示「5330 で Notes が起動できるかを確かめておく」の趣旨）
+
+- 5330 の NVMe の zedBSD（main 48a27d158 の image、kernel は p022 の MAD 入りの build）の desktop の session で、root から `su user -c '... /bin/notes'` で起動: 窓が出た（keiland-shot の PNG、build/p022-meas/shots/notes.png、git の外。「note-20261030-161726.pdf — Notes」の窓、道具の列と白い page）。notes の log: `NOTES START width=1024 height=768`、`NOTES FRAME first draws=52`。
+- 終わり: SIGTERM で終わった（exit=143、signal 15 の既定の終わり方）。dmesg に fault・trap の行は無し。**窓の閉じる button・File の終わり（`NOTES EXIT` の行の出る通常の終わり方）は未実施**（この image に試験の入力の注入 `CONFIG_INPUT_TEST_INJECT` が無い）。

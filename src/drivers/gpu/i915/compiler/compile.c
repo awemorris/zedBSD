@@ -174,6 +174,13 @@
 #define COMPILE_FORWARD_IMM	2U
 #define COMPILE_FORWARD_INPUT	3U
 
+/*
+ * A float product read once, by the sum or difference right after it in
+ * the same straight run of code, is made by that instruction as one MAD
+ * (Gen12): the product gets no register; its factors live to the MAD.
+ */
+#define COMPILE_FORWARD_PRODUCT	4U
+
 /* No value: a victim not found, an output component never stored. */
 #define COMPILE_NO_VALUE	0xFFFFFFFFU
 
@@ -596,6 +603,9 @@ static void i915_compile_widen_loops(struct i915_compile_state *state, const str
 static void i915_compile_keep_outputs(struct i915_compile_state *state);
 static uint32_t i915_compile_grf(struct i915_compile_state *state, uint32_t value);
 static void i915_compile_forwarding(struct i915_compile_state *state);
+static void i915_compile_products(struct i915_compile_state *state);
+static int i915_compile_fusable_factor(const struct i915_compile_state *state, uint32_t value);
+static uint32_t i915_compile_product_of(const struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t *other);
 static int i915_compile_forwarded(const struct i915_compile_state *state, uint32_t value);
 static struct i915_eu_reg i915_compile_operand(struct i915_compile_state *state, uint32_t value);
 static uint32_t i915_compile_payload_inputs(const struct i915_compile_state *state);
@@ -827,6 +837,7 @@ drv_i915_shader_compile_gen(
 	/* Decides once which skippable regions are really skipped, and which values are read without a register. */
 	i915_compile_skips(&state);
 	i915_compile_forwarding(&state);
+	i915_compile_products(&state);
 
 	/*
 	 * Lowers the shader until its values fit the registers: a vertex shader
@@ -1323,6 +1334,15 @@ i915_compile_liveness(
 			value = i915_compile_source(inst, source);
 			if (value < ir->value_count)
 				state->last_use[value] = index;
+
+			/* A product made here as a MAD: its factors are read here. */
+			if (value < ir->value_count && state->forward[value] == COMPILE_FORWARD_PRODUCT &&
+			    state->def_index[value] != COMPILE_NO_INDEX) {
+				if (ir->instructions[state->def_index[value]].src[0] < ir->value_count)
+					state->last_use[ir->instructions[state->def_index[value]].src[0]] = index;
+				if (ir->instructions[state->def_index[value]].src[1] < ir->value_count)
+					state->last_use[ir->instructions[state->def_index[value]].src[1]] = index;
+			}
 		}
 
 		/* A MOVE into a value defined before keeps that value alive up to it. */
@@ -1611,6 +1631,158 @@ i915_compile_forwarding(
 			}
 		}
 	}
+}
+
+/*
+ * Marks each float product made as part of a MAD (COMPILE_FORWARD_PRODUCT):
+ * an FMUL on Gen12 whose value one FADD or FSUB alone reads, with nothing
+ * between the two that starts or ends a loop or a skipped region or writes
+ * a factor again (a MOVE), whose factors and addend are no immediates (a
+ * MAD has no 32-bit immediate) and are read whole or as one float, and
+ * whose reader takes no other product.  The sum's rounding is the MAD's
+ * single one, as Vulkan's float operations allow.
+ */
+static void
+i915_compile_products(
+	struct i915_compile_state *state)
+{
+	const struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir_inst *reader;
+	uint32_t *readers;
+	uint32_t *reader_index;
+	uint32_t index;
+	uint32_t between;
+	uint32_t source;
+	uint32_t sources;
+	uint32_t value;
+	uint32_t other;
+	int blocked;
+
+	/* Gen9 and Gen11 encode no MAD here. */
+	ir = state->ir;
+	if (state->graphics_ver < 12U || ir->value_count == 0U)
+		return;
+
+	/* How many times each value is read, and the last instruction that does. */
+	readers = kern_calloc(2U * (size_t)ir->value_count, sizeof(uint32_t));
+	if (readers == NULL)
+		return;
+	reader_index = readers + ir->value_count;
+	for (index = 0U; index < ir->instruction_count; index++) {
+		inst = &ir->instructions[index];
+		sources = i915_compile_sources(inst);
+		for (source = 0U; source < sources; source++) {
+			value = i915_compile_source(inst, source);
+			if (value < ir->value_count) {
+				readers[value]++;
+				reader_index[value] = index;
+			}
+		}
+		if (inst->op == DRV_GPU_IR_MOVE && inst->dst < ir->value_count)
+			readers[inst->dst] += 2U;
+	}
+
+	/* Each product read once by a sum or difference after it. */
+	for (index = 0U; index < ir->instruction_count; index++) {
+		inst = &ir->instructions[index];
+		value = inst->dst;
+		if (inst->op != DRV_GPU_IR_FMUL || inst->guard != 0U || value >= ir->value_count)
+			continue;
+		if (readers[value] != 1U || reader_index[value] <= index)
+			continue;
+		if (state->forward[value] != COMPILE_FORWARD_NONE)
+			continue;
+		reader = &ir->instructions[reader_index[value]];
+		if ((reader->op != DRV_GPU_IR_FADD && reader->op != DRV_GPU_IR_FSUB) || reader->guard != 0U)
+			continue;
+
+		/* The reader's other source: not the product itself, not a product already made there. */
+		other = reader->src[0];
+		if (other == value)
+			other = reader->src[1];
+		if (other == value || other >= ir->value_count)
+			continue;
+		if (state->forward[other] == COMPILE_FORWARD_PRODUCT)
+			continue;
+
+		/* The factors and the addend: registers, push constants or attributes, not immediates. */
+		if (!i915_compile_fusable_factor(state, inst->src[0]) ||
+		    !i915_compile_fusable_factor(state, inst->src[1]) ||
+		    !i915_compile_fusable_factor(state, other))
+			continue;
+
+		/* Nothing between them changes the flow or writes a factor. */
+		blocked = 0;
+		for (between = index + 1U; between < reader_index[value]; between++) {
+			switch (ir->instructions[between].op) {
+			case DRV_GPU_IR_LOOP_BEGIN:
+			case DRV_GPU_IR_LOOP_END:
+			case DRV_GPU_IR_SKIP_BEGIN:
+			case DRV_GPU_IR_SKIP_END:
+			case DRV_GPU_IR_KILL:
+				blocked = 1;
+				break;
+			case DRV_GPU_IR_MOVE:
+				if (ir->instructions[between].dst == inst->src[0] || ir->instructions[between].dst == inst->src[1])
+					blocked = 1;
+				break;
+			default:
+				break;
+			}
+		}
+		if (blocked)
+			continue;
+
+		/* Succeeded: the reader makes the product as a MAD. */
+		state->forward[value] = COMPILE_FORWARD_PRODUCT;
+	}
+	kern_free(readers);
+}
+
+/* Says whether a value may be a MAD's factor or addend: anything but an immediate. */
+static int
+i915_compile_fusable_factor(
+	const struct i915_compile_state *state,
+	uint32_t value)
+{
+	/* A value outside the IR is not. */
+	if (value >= state->ir->value_count)
+		return 0;
+
+	/* Succeeded: MAD takes no 32-bit immediate. */
+	return state->forward[value] != COMPILE_FORWARD_IMM;
+}
+
+/*
+ * Returns the product an FADD or FSUB makes as a MAD (COMPILE_NO_VALUE for
+ * none) and, in `other`, its other source.
+ */
+static uint32_t
+i915_compile_product_of(
+	const struct i915_compile_state *state,
+	const struct drv_gpu_shader_ir_inst *inst,
+	uint32_t *other)
+{
+	uint32_t source;
+	uint32_t value;
+
+	/* Only the sums and differences read a product so. */
+	if (inst->op != DRV_GPU_IR_FADD && inst->op != DRV_GPU_IR_FSUB)
+		return COMPILE_NO_VALUE;
+
+	/* The source that is a product made here. */
+	for (source = 0U; source < 2U; source++) {
+		value = inst->src[source];
+		if (value < state->ir->value_count && state->forward[value] == COMPILE_FORWARD_PRODUCT &&
+		    state->def_index[value] != COMPILE_NO_INDEX) {
+			*other = inst->src[1U - source];
+			return value;
+		}
+	}
+
+	/* Succeeded: none. */
+	return COMPILE_NO_VALUE;
 }
 
 /* Says whether a value is read where it is, without a register of its own. */
@@ -2138,7 +2310,8 @@ i915_compile_instruction(
 	payload_inputs = i915_compile_payload_inputs(state);
 
 	/* A value the arithmetic reads where it is gets no register and no code. */
-	if ((inst->op == DRV_GPU_IR_CONST || inst->op == DRV_GPU_IR_LOAD_PUSH || inst->op == DRV_GPU_IR_LOAD_INPUT) &&
+	if ((inst->op == DRV_GPU_IR_CONST || inst->op == DRV_GPU_IR_LOAD_PUSH || inst->op == DRV_GPU_IR_LOAD_INPUT ||
+	     inst->op == DRV_GPU_IR_FMUL) &&
 	    i915_compile_forwarded(state, inst->dst))
 		return;
 
@@ -2908,11 +3081,37 @@ i915_compile_arithmetic(
 	struct i915_compile_state *state,
 	const struct drv_gpu_shader_ir_inst *inst)
 {
+	const struct drv_gpu_shader_ir_inst *maker;
 	struct i915_eu_reg left;
 	struct i915_eu_reg right;
 	struct i915_eu_reg temporary;
+	struct i915_eu_reg addend;
+	struct i915_eu_reg first;
+	struct i915_eu_reg second;
 	enum i915_eu_alu op;
+	uint32_t product;
+	uint32_t other;
 	uint32_t dst;
+
+	/* A sum or difference with a product made here: one MAD. */
+	product = i915_compile_product_of(state, inst, &other);
+	if (product != COMPILE_NO_VALUE) {
+		maker = &state->ir->instructions[state->def_index[product]];
+		addend = i915_compile_operand(state, other);
+		first = i915_compile_operand(state, maker->src[0]);
+		second = i915_compile_operand(state, maker->src[1]);
+
+		/* x - a*b = x + (-a)*b; a*b - x = a*b + (-x). */
+		if (inst->op == DRV_GPU_IR_FSUB && inst->src[1] == product)
+			first.negate ^= 1U;
+		if (inst->op == DRV_GPU_IR_FSUB && inst->src[0] == product)
+			addend.negate ^= 1U;
+
+		/* Gives the result its register and makes it. */
+		dst = i915_compile_define(state, inst->dst, 1U);
+		drv_i915_eu_mad(&state->code, drv_i915_eu_grf(dst), addend, first, second);
+		return;
+	}
 
 	/* Reads both sources: registers, or a push constant or an immediate where they are. */
 	left = i915_compile_operand(state, inst->src[0]);
