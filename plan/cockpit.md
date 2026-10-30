@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 11:25（Q1）
+最終更新: 2026-10-30 11:40（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS009](ws009/ws.md) → [WS296](ws296/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書）→ src/drivers の comment の管理情報の削除と規約 | DOC-54 は全 Phase cleared。完了の条件の不足を p025〜p028 に立て、p025（Wi-Fi の文書）を実行中 | WS009 completed → WS296 を標準廉価実装手順に組み直す設計 → Sonnet → WS297 |
 | P2 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | p016 の受け入れ: 境界・build・host 試験 PASS、Win32 の揺れの一覧、QEMU の app の回帰へ | QEMU の回帰 → FreeBSD の build → p017 規約の見直し（Sonnet）→ WS の完了 |
-| P3 | — | — | 返却（WS315 completed、main 834d10d88） | 次は WS221（Jumbo frame）・WS299（5330 の NVMe）（ユーザー: WS315 の後） |
+| P3 | [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close が戻らない | QEMU で再現と解析、今日の TCP の変更との関係を確かめて直す | BUG-367 → WS221（Jumbo frame）・WS299（5330 の NVMe） |
 | P4 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 返却（09:13）。次の 1 手は ws.md の Resume point | p015 の QEMU の 3 回目 → p004 clang・libcxx・GTK4 のセルフビルド → p008 → p014 → p007 firmware 変数の driver |
 | P5 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 返却（09:13、計測なし） | p010 desktop の測り直し → p012 以降で 3D を 50 fps 超えへ（デスクトップ機） |
 | P6 | — | — | 返却（WS282・WS284 は main に merge 済み） | 未割当 |
