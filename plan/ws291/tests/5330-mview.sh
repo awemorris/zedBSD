@@ -155,7 +155,7 @@ backup() {
 restore() {
 	to_linux || return 1
 	T=15 deb "test -f $ORIG/sums.txt" || { say "FAIL no backup"; return 1; }
-	T=1800 deb "sudo -n sh -c 'set -e; gzip -dc $ORIG/p5.gz | dd of=$NV_ROOT bs=4M conv=fsync status=none; gzip -dc $ORIG/p6.gz | dd of=$NV_SWAP bs=4M conv=fsync status=none; mount $NV_BOOT /mnt/zb; cp -a $ORIG/p4/. /mnt/zb/; sync; umount /mnt/zb; cp -p $ORIG/BOOTX64.EFI /boot/efi/EFI/zedbsd/BOOTX64.EFI; sync'" ||
+	T=1800 deb "sudo -n sh -c 'set -e; gzip -dc $ORIG/p5.gz | dd of=$NV_ROOT bs=4M conv=fsync status=none; gzip -dc $ORIG/p6.gz | dd of=$NV_SWAP bs=4M conv=fsync status=none; mount $NV_BOOT /mnt/zb; cp -r --preserve=timestamps $ORIG/p4/. /mnt/zb/; sync; umount /mnt/zb; cp --preserve=timestamps $ORIG/BOOTX64.EFI /boot/efi/EFI/zedbsd/BOOTX64.EFI; sync'" ||
 	    { say "FAIL restore"; return 1; }
 	nvme_sums > "$top/build/tmp/p022-sums-now.txt" || return 1
 	T=15 deb "cat $ORIG/sums.txt" > "$top/build/tmp/p022-sums-orig.txt"
