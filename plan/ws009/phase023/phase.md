@@ -79,3 +79,11 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 - PRESENT がいつ返るかを示す output の flag が無い（driver ごとに採用後・表示後・flip の arm 後で違う）。
 - 他の open の lease の WAIT の errno: header は EBUSY、venus は EPERM、i915 は EINVAL。i915 の mode の ENOENT、bcm2711 の plane_index の EBUSY（他は EINVAL）。
 - `timeout_ns` の 1 秒の上限は core に無く bcm2711・ghci だけ、他の driver の wait は timeout を見ない。
+
+## p011 から（2026-10-30 Q1、Bug の候補の一覧に入れる）
+
+- i915 の capset は capset_id・version を見ず、どの id にも同じ payload を返す（他の driver は 4/0 以外を ENOTSUP）。
+- `venus_get_info` が strict の queue が無い時に JOB・JOB_CAPACITY を落としても、`gpu_info_ioctl` が `ops->capabilities` で上書きするので GET_INFO は立てたまま、`GPU_JOB_RESERVE`・`CAPACITY` は ENOTSUP（venus.c の comment と食い違い）。
+- Venus の kernel は host の capset がちょうど 168 byte の時だけ vendor の suffix を読み、libvulkan は 168 と 176 で読む（176 byte の host で strict が食い違う）。
+- gpu-op.h の video の properties の comment は i915 だけと書くが、nvrtx と bcm2711（video 付きの build）も NATIVE_VIDEO_DECODE_H264 を立てる。
+- i915 は契約が未実装（XXX）のまま vendor flags 7 を返す。
