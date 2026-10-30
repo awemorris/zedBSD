@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,6 +46,15 @@
 #define KERNEL_LOG_INTERVAL_SECONDS 2
 
 /*
+ * The most message bytes held for the writer.  The socket's queue is only a
+ * few messages deep, and a sender whose message does not fit waits or loses
+ * it; while the disk is slow (a flush can take seconds) the receiver keeps
+ * taking messages into memory up to this much.  A message past it is
+ * dropped and counted, and the count is written to the log in its place.
+ */
+#define LOG_QUEUE_LIMIT (1024U * 1024U)
+
+/*
  * The part of the kernel log already on disk.
  *
  * The ring drops its oldest bytes when full and counts them, so the bytes it
@@ -56,8 +66,36 @@ struct kernel_log_follow {
 	uint64_t written;
 };
 
+/* One received message waiting to be written, its newline included. */
+struct log_message {
+	struct log_message *next;
+	size_t length;
+	char text[];
+};
+
+/*
+ * The messages the receiver has taken and the writer has not yet written.
+ *
+ * The receiver only appends; the writer takes the whole list at once and
+ * writes it outside the lock, so a slow write or flush never keeps the
+ * receiver from the socket.  Everything here is protected by lock.
+ */
+struct log_queue {
+	pthread_mutex_t lock;
+	pthread_cond_t wake;
+	struct log_message *head;
+	struct log_message *tail;
+	size_t bytes;
+	uint64_t dropped;
+	int reopen;
+	int stop;
+};
+
 static volatile sig_atomic_t stopping;
 static volatile sig_atomic_t reopening;
+
+/* The queue between the receiving main thread and the writer thread. */
+static struct log_queue queue;
 
 static void save_boot_log(void);
 static char *read_kernel_log(size_t *length);
@@ -69,26 +107,32 @@ static void kernel_log_copy(struct kernel_log_follow *follow);
 static int kernel_log_total(uint64_t *total);
 static int kernel_log_dropped(uint64_t *dropped);
 static time_t monotonic_seconds(void);
+static int queue_start(pthread_t *writer, int output);
+static void queue_add(const char *text, size_t length);
+static void queue_signal(int stop, int reopen);
+static void *writer_main(void *argument);
+static void writer_take(time_t deadline, struct log_message **list, uint64_t *dropped, int *reopen, int *stop);
+static int writer_write(int output, struct log_message *list, uint64_t dropped);
 
 /*
  * Runs the syslogd command.
+ *
+ * The main thread receives the messages and hands them to a writer thread,
+ * which writes them, follows the kernel log and flushes both files.
  */
 int
 main(
 	int argc,
 	char **argv)
 {
-	int replacement;
+	pthread_t writer;
 	ssize_t length;
 	struct sockaddr_un address;
-	struct kernel_log_follow follow;
 	struct pollfd waiting;
 	char message[2048];
 	int socket_descriptor, output;
-	int output_dirty;
 	int ready;
-	time_t now;
-	time_t last_flush;
+	int error;
 
 	(void)argv;
 
@@ -103,12 +147,6 @@ main(
 	(void)signal(SIGTERM, handle_signal);
 	(void)signal(SIGINT, handle_signal);
 	save_boot_log();
-
-	/* Starts the on-disk kernel log with everything the ring holds now. */
-	kernel_log_open(&follow);
-	kernel_log_copy(&follow);
-	last_flush = monotonic_seconds();
-	output_dirty = 0;
 
 	output = open_output();
 
@@ -139,32 +177,23 @@ main(
 		/* Reports operation failure. */
 		return 1;
 	}
+
+	/* Starts the writer, which owns the log files from here on. */
+	error = queue_start(&writer, output);
+	if (error != 0) {
+		fprintf(stderr, "syslogd: writer: %s\n", strerror(error));
+		return 1;
+	}
+
+	/* Takes each message off the socket and queues it for the writer. */
 	while (!stopping) {
-		/* Handles the reopening condition. */
+		/* Passes a reopen request (SIGHUP) on to the writer. */
 		if (reopening) {
-			replacement = open_output();
 			reopening = 0;
-
-			/* Handles the replacement condition. */
-			if (replacement >= 0) {
-				close(output);
-				output = replacement;
-			}
+			queue_signal(0, 1);
 		}
 
-		/* Copies new kernel lines and flushes both logs every interval. */
-		now = monotonic_seconds();
-		if (now - last_flush >= KERNEL_LOG_INTERVAL_SECONDS) {
-			kernel_log_copy(&follow);
-
-			/* Puts the messages written since the last flush on the disk. */
-			if (output_dirty)
-				(void)fsync(output);
-			output_dirty = 0;
-			last_flush = now;
-		}
-
-		/* Waits for a message, but not past the next interval. */
+		/* Waits for a message; a signal ends the wait early. */
 		waiting.fd = socket_descriptor;
 		waiting.events = POLLIN;
 		waiting.revents = 0;
@@ -178,39 +207,26 @@ main(
 		if (ready == 0)
 			continue;
 
+		/* Receives one message. */
 		length =
 		    recv(socket_descriptor, message, sizeof(message) - 1, 0);
-
-		/* Handles the reported system error. */
 		if (length < 0 && errno == EINTR)
 			continue;
-
-		/* Checks the current data length. */
 		if (length < 0)
 			break;
 		message[length] = '\0';
 
-		/* Handles a failed memchr operation. */
+		/* Refuses a message with a NUL inside, which no line can hold. */
 		if (memchr(message, '\0', (size_t)length) != NULL)
 			continue;
 
-		/* Handles a failed write all operation. */
-		if (write_all(output, message, (size_t)length) != 0 ||
-		    write_all(output, "\n", 1) != 0) {
-			fprintf(stderr, "syslogd: log write failed: %s\n",
-				strerror(errno));
-		}
-
-		/* The message waits for the next flush. */
-		output_dirty = 1;
+		/* Hands it to the writer. */
+		queue_add(message, (size_t)length);
 	}
 
-	/* Copies the kernel's last lines before stopping. */
-	kernel_log_copy(&follow);
-	if (follow.descriptor >= 0)
-		(void)close(follow.descriptor);
-	(void)fsync(output);
-	close(output);
+	/* Has the writer write what is queued, copy the kernel's last lines and flush. */
+	queue_signal(1, 0);
+	(void)pthread_join(writer, NULL);
 	close(socket_descriptor);
 	unlink(LOG_SOCKET);
 
@@ -532,4 +548,301 @@ monotonic_seconds(
 
 	/* Succeeded: whole seconds are enough for the interval. */
 	return now.tv_sec;
+}
+
+/*
+ * Starts the writer thread over the empty queue.
+ *
+ * The thread is started with the signals blocked, so that they reach the
+ * receiving main thread and end its wait.  Returns 0 or the error number.
+ */
+static int
+queue_start(
+	pthread_t *writer,
+	int output)
+{
+	pthread_condattr_t attributes;
+	sigset_t blocked;
+	sigset_t previous;
+	int error;
+
+	/* Prepares the lock and the wakeup, the latter timed on the monotonic clock. */
+	memset(&queue, 0, sizeof(queue));
+	error = pthread_mutex_init(&queue.lock, NULL);
+	if (error != 0)
+		return error;
+	error = pthread_condattr_init(&attributes);
+	if (error != 0)
+		return error;
+	error = pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC);
+	if (error != 0) {
+		(void)pthread_condattr_destroy(&attributes);
+		return error;
+	}
+	error = pthread_cond_init(&queue.wake, &attributes);
+	(void)pthread_condattr_destroy(&attributes);
+	if (error != 0)
+		return error;
+
+	/* Starts the writer with the signals blocked, then lets this thread take them again. */
+	sigemptyset(&blocked);
+	sigaddset(&blocked, SIGHUP);
+	sigaddset(&blocked, SIGTERM);
+	sigaddset(&blocked, SIGINT);
+	(void)pthread_sigmask(SIG_BLOCK, &blocked, &previous);
+	error = pthread_create(writer, NULL, writer_main, (void *)(intptr_t)output);
+	(void)pthread_sigmask(SIG_SETMASK, &previous, NULL);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the writer waits for messages. */
+	return 0;
+}
+
+/*
+ * Queues one message and its newline for the writer.
+ *
+ * A message that would take the queue past its limit, or that no memory can
+ * hold, is dropped and counted; the writer says how many in the log.
+ */
+static void
+queue_add(
+	const char *text,
+	size_t length)
+{
+	struct log_message *message;
+	size_t size;
+	int full;
+
+	/* Decides under the lock whether the message fits; the count of drops lives there too. */
+	size = length + 1U;
+	pthread_mutex_lock(&queue.lock);
+
+	full = 0;
+	if (queue.bytes + size > LOG_QUEUE_LIMIT)
+		full = 1;
+	if (full)
+		queue.dropped++;
+
+	pthread_mutex_unlock(&queue.lock);
+
+	/* A message past the limit is only counted. */
+	if (full)
+		return;
+
+	/* Copies the message with its newline. */
+	message = malloc(sizeof(*message) + size);
+	if (message == NULL) {
+		pthread_mutex_lock(&queue.lock);
+		queue.dropped++;
+		pthread_mutex_unlock(&queue.lock);
+		return;
+	}
+
+	message->next = NULL;
+	message->length = size;
+	memcpy(message->text, text, length);
+	message->text[length] = '\n';
+
+	/* Appends it and wakes the writer. */
+	pthread_mutex_lock(&queue.lock);
+
+	if (queue.tail != NULL)
+		queue.tail->next = message;
+	else
+		queue.head = message;
+	queue.tail = message;
+	queue.bytes += size;
+	pthread_cond_signal(&queue.wake);
+
+	pthread_mutex_unlock(&queue.lock);
+}
+
+/* Asks the writer to stop after what is queued, or to reopen the log file. */
+static void
+queue_signal(
+	int stop,
+	int reopen)
+{
+	/* Records the request where the writer looks for it and wakes the writer. */
+	pthread_mutex_lock(&queue.lock);
+
+	if (stop)
+		queue.stop = 1;
+	if (reopen)
+		queue.reopen = 1;
+	pthread_cond_signal(&queue.wake);
+
+	pthread_mutex_unlock(&queue.lock);
+}
+
+/*
+ * Writes the queued messages, follows the kernel log and flushes both files.
+ *
+ * Every interval the kernel log's new lines are copied and the files are
+ * flushed; a flush on a slow disk holds only this thread.  On a stop the
+ * remaining messages are written and both files flushed before it returns.
+ */
+static void *
+writer_main(
+	void *argument)
+{
+	struct kernel_log_follow follow;
+	struct log_message *list;
+	uint64_t dropped;
+	time_t next_flush;
+	time_t now;
+	int output;
+	int replacement;
+	int output_dirty;
+	int reopen;
+	int stop;
+	int failed;
+
+	/* Starts the on-disk kernel log with everything the ring holds now. */
+	output = (int)(intptr_t)argument;
+	kernel_log_open(&follow);
+	kernel_log_copy(&follow);
+	next_flush = monotonic_seconds() + KERNEL_LOG_INTERVAL_SECONDS;
+	output_dirty = 0;
+
+	/* Writes each batch of messages until asked to stop. */
+	for (;;) {
+		/* Takes what the receiver queued, waiting until the next flush at most. */
+		writer_take(next_flush, &list, &dropped, &reopen, &stop);
+
+		/* Changes to a new log file on SIGHUP, keeping the old one if none opens. */
+		if (reopen) {
+			replacement = open_output();
+			if (replacement >= 0) {
+				(void)fsync(output);
+				close(output);
+				output = replacement;
+				output_dirty = 0;
+			}
+		}
+
+		/* Writes the batch; it waits for the next flush. */
+		if (list != NULL || dropped != 0) {
+			failed = writer_write(output, list, dropped);
+			if (failed != 0) {
+				fprintf(stderr, "syslogd: log write failed: %s\n",
+					strerror(errno));
+			}
+
+			output_dirty = 1;
+		}
+
+		/* Copies new kernel lines and flushes both logs every interval, and at the stop. */
+		now = monotonic_seconds();
+		if (stop || now >= next_flush) {
+			kernel_log_copy(&follow);
+			if (output_dirty)
+				(void)fsync(output);
+			output_dirty = 0;
+			next_flush = now + KERNEL_LOG_INTERVAL_SECONDS;
+		}
+
+		/* The last batch is written and flushed. */
+		if (stop)
+			break;
+	}
+
+	/* Closes both files. */
+	if (follow.descriptor >= 0)
+		(void)close(follow.descriptor);
+	close(output);
+
+	/* Succeeded: everything received is on the disk. */
+	return NULL;
+}
+
+/*
+ * Takes the queued messages, the count of those dropped and the requests,
+ * waiting for any of them until the deadline (monotonic seconds).
+ */
+static void
+writer_take(
+	time_t deadline,
+	struct log_message **list,
+	uint64_t *dropped,
+	int *reopen,
+	int *stop)
+{
+	struct timespec until;
+	int error;
+
+	/* Waits for work or the next flush, then empties the queue. */
+	until.tv_sec = deadline;
+	until.tv_nsec = 0;
+	pthread_mutex_lock(&queue.lock);
+
+	while (queue.head == NULL &&
+	       queue.dropped == 0 &&
+	       !queue.reopen &&
+	       !queue.stop) {
+		error = pthread_cond_timedwait(&queue.wake, &queue.lock, &until);
+		if (error == ETIMEDOUT)
+			break;
+	}
+
+	*list = queue.head;
+	*dropped = queue.dropped;
+	*reopen = queue.reopen;
+	*stop = queue.stop;
+	queue.head = NULL;
+	queue.tail = NULL;
+	queue.bytes = 0;
+	queue.dropped = 0;
+	queue.reopen = 0;
+
+	pthread_mutex_unlock(&queue.lock);
+}
+
+/*
+ * Writes a count of dropped messages, then the messages, freeing each.
+ *
+ * Returns 0, or -1 when a write failed (the rest are still freed).
+ */
+static int
+writer_write(
+	int output,
+	struct log_message *list,
+	uint64_t dropped)
+{
+	struct log_message *next;
+	char note[96];
+	int failed;
+	int written;
+
+	/* Says how many messages the queue could not hold, where they would have been. */
+	failed = 0;
+	if (dropped != 0) {
+		(void)snprintf(note, sizeof(note),
+			       "syslogd: %llu messages were dropped while the log was behind\n",
+			       (unsigned long long)dropped);
+		written = write_all(output, note, strlen(note));
+		if (written != 0)
+			failed = -1;
+	}
+
+	/* Writes each message in the order received. */
+	while (list != NULL) {
+		next = list->next;
+		if (failed == 0) {
+			written = write_all(output, list->text, list->length);
+			if (written != 0)
+				failed = -1;
+		}
+
+		free(list);
+		list = next;
+	}
+
+	/* Reports a write the file refused. */
+	if (failed != 0)
+		return -1;
+
+	/* Succeeded: the messages are in the file. */
+	return 0;
 }

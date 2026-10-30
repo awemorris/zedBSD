@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -23,6 +24,25 @@ static char identity[64];
 static int options, facility = LOG_USER, mask = LOG_UPTO(LOG_DEBUG),
 		    descriptor = -1;
 static volatile unsigned log_lock;
+
+/*
+ * How long a message waits for room in the log daemon's queue, in ms.
+ *
+ * The daemon drains its socket at once when it is well; a full queue means it
+ * is behind, and a caller such as sshd or su must not be held until it
+ * catches up.  A message that still finds no room is dropped and counted.
+ */
+#define LOG_ROOM_WAIT_MS 100
+
+/*
+ * The messages dropped since one last reached the daemon, protected by
+ * log_lock.  The next message that gets through is followed by a line
+ * with this count, so the loss shows in the log where it happened.
+ */
+static unsigned long dropped_messages;
+
+static int send_message(const char *message, size_t length);
+
 static void
 lock_log(void)
 {
@@ -130,7 +150,7 @@ vsyslog(int priority, const char *format, va_list arguments)
 	if ((size_t)length >= sizeof(message))
 		length = (int)sizeof(message) - 1;
 	if (connect_logger() != 0 ||
-	    send(descriptor, message, (size_t)length, MSG_NOSIGNAL) < 0) {
+	    send_message(message, (size_t)length) != 0) {
 		if (options & LOG_CONS) {
 			console = open("/dev/console", O_WRONLY | O_CLOEXEC);
 			if (console >= 0) {
@@ -155,4 +175,66 @@ syslog(int priority, const char *format, ...)
 	va_start(arguments, format);
 	vsyslog(priority, format, arguments);
 	va_end(arguments);
+}
+
+/*
+ * Sends one message without waiting long for room at the daemon.
+ *
+ * A full queue is waited on for LOG_ROOM_WAIT_MS at most; a message that
+ * still does not fit is dropped and counted.  After a message gets through,
+ * a count of those dropped before it is sent as a line of its own.  Called
+ * with log_lock held and the socket connected.  Returns 0, or -1 with errno
+ * set when the message was not delivered.
+ */
+static int
+send_message(
+	const char *message,
+	size_t length)
+{
+	struct pollfd room;
+	char note[160];
+	ssize_t sent;
+	int written;
+
+	/* Sends the message if the daemon has room for it now. */
+	sent = send(descriptor, message, length, MSG_NOSIGNAL | MSG_DONTWAIT);
+
+	/* Waits a little for room in a full queue, then tries once more. */
+	if (sent < 0 &&
+	    (errno == EAGAIN ||
+	     errno == EWOULDBLOCK ||
+	     errno == ENOBUFS)) {
+		room.fd = descriptor;
+		room.events = POLLOUT;
+		room.revents = 0;
+		(void)poll(&room, 1, LOG_ROOM_WAIT_MS);
+		sent = send(descriptor, message, length, MSG_NOSIGNAL | MSG_DONTWAIT);
+	}
+
+	/* Counts a message the daemon had no room for. */
+	if (sent < 0) {
+		if (errno == EAGAIN ||
+		    errno == EWOULDBLOCK ||
+		    errno == ENOBUFS)
+			dropped_messages++;
+		return -1;
+	}
+
+	/* Reports the earlier losses after a message that got through, keeping the count if this does not. */
+	if (dropped_messages != 0) {
+		written = snprintf(note, sizeof(note),
+				   "<%d>%s[%ld]: syslog: %lu messages were dropped because the log daemon was behind",
+				   LOG_USER | LOG_WARNING,
+				   identity[0] ? identity : "zedbsd",
+				   (long)getpid(),
+				   dropped_messages);
+		if (written > 0 && (size_t)written < sizeof(note)) {
+			sent = send(descriptor, note, (size_t)written, MSG_NOSIGNAL | MSG_DONTWAIT);
+			if (sent >= 0)
+				dropped_messages = 0;
+		}
+	}
+
+	/* Succeeded: the message is in the daemon's queue. */
+	return 0;
 }
