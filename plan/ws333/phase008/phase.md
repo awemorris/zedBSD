@@ -2,7 +2,7 @@
 
 # ws333-p008: module — CPUID の解析（cpux86-cpuid.c）
 
-Status: planned
+Status: cleared（2026-10-31 Q1、fae4a0d41）
 Parent: [WS333](../ws.md)、設計 [design.md](../design.md) §15
 依存: p007（header の確定と `cpux86.c` の実装、基点の SHA `39f4a5597`）
 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順 [docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md) §5）。header は p007 の設計で、変えない。
@@ -66,4 +66,33 @@ Parent: [WS333](../ws.md)、設計 [design.md](../design.md) §15
 
 ## 結果
 
-（実装の担当が書く）
+日付: 2026-10-31（host の `date`）。担当 S-ws333-p008（Sonnet 5.5 high）。状態: 実装済み・試験 PASS（cleared は Q1 の判定の後）。
+
+実行した command と結果（worktree の root で）:
+
+- `timeout 600 sh plan/ws333/tests/cpux86/run-unit.sh cpuid` → `test-cpuid: PASS (3590873 checks)`、最後の行 `run-unit: PASS`。
+- `sh plan/ws333/tests/cpux86/run-unit.sh all` → test-builders PASS (21)・test-cpuid PASS (3590873)・test-cpux86 PASS (4140)、`run-unit: PASS`。`CC=clang` でも `run-unit: PASS`。
+- `BASE=39f4a5597 timeout 300 sh plan/ws333/tests/cpux86/check-skeleton.sh` → `check-skeleton: PASS`。
+- amd64 の kernel の 2 つの build（`ZEDBSD_CONFIG=config/ci/config-amd64.mk`）: 既定（`BUILD=/tmp/s-ws333-p008/b`、host の / の空きが少ないので /tmp）と `CONFIG_CPU_PERF=y`（`BUILD=build/p008y`）。どちらも exit 0、`grep -c 'warning:'` が 0、`amd64 vmunix check: PASS`。
+- `git diff --check` → 出力なし。
+
+試験の中身: identity・range・features・mwait・power（EAX の 32 bit を 1 つずつ、5330 の EDX の行 0〜3）・hybrid・core_kind・cache（手で出した大きさ 49152・18874368・512・2^32・2^33・2^63・0xFFFFFFFF00000000、ERANGE は 2^64）・cache_group・topology（0BH と 1FH、5330 の形、4 段、知らない型の延長、全ての誤り）・extended、固定の種の xorshift32 で 100000 組の乱数（topology は count ちょうどの heap の array で読み過ぎを ASan に見せ、cache と topology の成功の経路に届いた数も検査）。ASan・UBSan 付き。
+
+わざと壊した確かめ（git の外の写し `build/tmp/mut-p008/` に 44 通り: DisplayModel の拡張を family 6・0FH で足さない、DisplayFamily の拡張、vendor の検査、topology の field の上端・下端・幅のずれ、INVALID の terminator の検査・2 段未満の検査、cache の +1（ways・sets・sharing）、ERANGE の検査を外す・緩める、予約の cache type、share_shift の丸め、group の shift の上限、has_leaf の境界、extended の下限、mwait の gating と field、power の予約 bit・pages の +1・row、hybrid の bit、core_kind の ENOTSUP、invariant TSC の bit、知らない型の延長、既知の型の昇順、ECX[7:0]・terminator の ECX・EDX・shift の減少・ENOTSUP の条件、0BH の既知の型、package の shift、features の bit、sub-leaf 0 が THREAD・1 が CORE の検査、最初の INVALID で止める）。最初の実行で生き残ったのは 2 つ: 「sub-leaf 0 が THREAD の検査」（試験を足して検出）と「has_leaf の extended 最大 0 の明示の検査」（同値: 0 のとき `leaf <= 0` は拡張の範囲で常に偽。同値の変異なので試験は足さない）。最終: 44 通り中 43 を検出、1 は同値。変異は写しだけで行い、source は触っていないので元に戻す手順は無い（`git diff` で source の変更は意図した実装だけ）。
+
+header が黙っていて自分で決めた点:
+
+1. leaf 1FH の既知の型は 1〜6（tile=4 と DIEGRP=6 を含む、`CPUX86_DOMAIN_COUNT` が 7 で配列の添字がある）。未知は 7 以上。leaf 0BH の既知の型は THREAD・CORE だけで、3 以上は未知（CORE の field を延ばす）。
+2. ECX[7:0] の検査は INVALID の terminator にも当てる（header の「ECX[7:0] が index でない sub-leaf」を全 sub-leaf と読んだ）。EDX の一致は有効な sub-leaf だけ（header どおり）、terminator の EDX は見ない。
+3. 誤りの順: NULL・leaf・count（EINVAL）→ sub-leaf 0 の INVALID・EBX[15:0]=0（ENOTSUP）→ list の形（EINVAL）。list の形の中の順は結果（EINVAL）に影響しない。
+4. 既知の型の検査は「最初の既知の型より高い物だけ」: sub-leaf 0 が THREAD、1 が CORE、以降の既知の型は直前に置いた既知の型より大きいこと（等しい・小さいは EINVAL）。未知の型は順序の検査なし。shift 等しいは許す（空の field）。
+5. cache の size の ERANGE は「幾何の積（最大 2^32）と sets（最大 2^32）が両方ちょうど 2^32」の時だけ（それ以外は 64 bit に収まる）。64 bit の除算を使わない。
+6. mwait の flags は ECX[0] が 0 でも ECX[1]・[3] を出す（substates だけが 0）。power の `feedback_pages` は EAX[19] に依らず常に EDX[11:8] + 1。
+7. has_leaf は 80000000H 以上を拡張の leaf とみなし、max_basic_leaf が 0xFFFFFFFF でも拡張の leaf は basic にならない。
+8. `cpux86_cpuid_identity` の vendor が Intel でなくても成功（UNKNOWN）で、family・model の decode は同じ規則で行う。
+
+header の不備: 見つけなかった（header は変えていない）。
+
+未実施: QEMU・実機での確認（この Phase の範囲外、driver への組み込みは p011）。5330 の実機の CPUID の値は期待に使っていない（WS301 の Debian の読みから EDX の行を手で組んだ試験の入力だけ）。
+
+commit: Q1 に SHA を返す（`git commit -m WIP`、path は src の cpux86-cpuid.c・plan/ws333/tests/cpux86/unit/test-cpuid.c・plan/ws333/phase008/phase.md・plan/ws333/ws.md）。
