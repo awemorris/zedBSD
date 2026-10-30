@@ -40,3 +40,8 @@
 4. **/dev の口**: `/dev/fwvar`（root だけ、0600）の ioctl: GET・SET・NEXT。名前は GUID の文字列（36 文字）と UTF-8 の名前（kernel が UCS-2 に変える）、値は byte 列と attribute。上限（名前の長さ・値の大きさ）を code の前に決める。
 5. **efiboot**（userland）: `list`（BootOrder と各 Boot####）、`create`（説明「zedBSD」、HD(GPT の partition 番号・署名・開始・大きさ)/File(`\EFI\ZEDBSD\BOOTX64.EFI`)、BootOrder の末尾に足す、U15）、`delete`。installer の S11 から使う所は spec §5.8。
 6. **試験**: QEMU の OVMF（書ける VARS の複写）で zedBSD を起動し、`efiboot create` → `efiboot list` で読み戻し、再起動の後も残ること、OVMF がその entry で起動すること（BootNext か BootOrder）。
+
+### 引き継ぎ（2026-10-30 09:13、q1698-i01 のラップアップ）
+
+- 記録だけ（3c14ef8f4、branch `agent/p4-ws307o`）。code は無い。`proposed/` の 2 file は取り下げ、削除は Q1。
+- 次の 1 手: 設計の下書きの 3 の「map の方式」を詰める（`hal_space_map(HAL_SPACE_SYS, …)` で EXEC の kernel の map が作れるか、SMEP・SMAP の下で 1:1 の map を HAL の実装の中だけで作れるか、SetVirtualAddressMap を HAL の起動の早い段で呼ぶ形か）。既存の口で足りなければ理由を付けて Q1 に返す。決めた後 loader v8 → HAL の名前 → driver → /dev → efiboot → OVMF の試験の順。

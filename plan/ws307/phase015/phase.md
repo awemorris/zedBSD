@@ -3,7 +3,7 @@
 # ws307-p015 画面の lock の既定を never にし、never でも lock される不具合を直す
 
 - 親: [WS307](../ws.md)。Queue: q1674 / q1674-i01（担当 P5、2026-10-29、worktree p5-ws307lock、基点 main 55ee43590）。
-- Status: cleared（2026-10-29 Q1 の判定、QEMU の 3 試験 PASS、実機は未実施。sleep の既定を Never にするかは Q1 がユーザーに確認中で、答えまで変えない）
+- Status: in-progress（2026-10-29 に lock の分は cleared（Q1 の判定）。2026-10-30 ユーザーの「sleep の既定もneverにします。」で q1698-i01 が sleep の既定を Never に変えた（211103282）。QEMU は未達、下の「q1698-i01」）
 - ユーザーの指示（原文、2026-10-29）:「WS307でついでに行ってほしいのですが、デスクトップがロックされるデフォルトの時間の設定を、neverをデフォルトにしてほしいです。また、neverにしても、現在は実際にはロックされてしまうみたいなので、直しておいてほしいです。」
 - 範囲（Q1）: idle の後に画面を lock する時間の既定を never に（Settings の頁、compositor の既定、設定の file の既定。file に値がある利用者はその値を保つ）。never でも lock される原因を探して直す。sleep（suspend）の既定は範囲の外（変えない）。
 
@@ -39,3 +39,12 @@
 - sleep の既定（`power.sleep.ac` 30 分・`power.sleep.battery` 15 分）は変えていない。sleep する機械では sleep の時間で「sleep の前の lock」が起きる（`sleep.c`、設計どおり）。sleep を Never にすれば時間では lock されない。既定を Never にするかは Q1 がユーザーに確認中。
 - 蓋を閉じた時の lock（"lid"）は時間の lock ではなく、開けると password 無しで外れる覆いなので変えていない。
 - 残す試験: `plan/tools/settings/host-store.c` の power.lock の 3 つの check（回帰、Q1 の了承）。`plan/ws307/tests/p015-lock.sh`・`p015-lock.py`・`config-amd64-p015.mk` はこの Phase の物。
+
+## q1698-i01（2026-10-30、P4、worktree p4-ws307o、branch agent/p4-ws307o、基点 d3abf7c27）: sleep の既定を Never に
+
+- ユーザーの回答（2026-10-30、原文、ws.md）:「sleep の既定もneverにします。」
+- 直し（commit 211103282）: `userland/desktop/wayland/sleep-rules.h` の `KWL_SLEEP_AC_MINUTES`・`KWL_SLEEP_BATTERY_MINUTES` を 30・15 → 0（compositor の既定）、`userland/desktop/settings/look.c` の `LOOK_SLEEP_AC`・`LOOK_SLEEP_BATTERY` を 0（Settings の既定）、`userland/desktop/settings-keys/settings-keys.c` の `power.sleep.ac`・`power.sleep.battery` の既定を 0（設定の file の既定、画面の lock の `power.lock` と同じ置き場所）。desktop.conf に値がある利用者はその値のまま。comment の日付の経緯を外した。sleep の時間の半分で画面を消す動き（`sleep.c`）も、時間が 0 の時は起きない（既存の `limit != 0U` の条件）。
+- 試験: `plan/tools/settings/host-store.c` に `test_sleep`（値の無い file で power.sleep.ac・battery は 0 で未選択、file の 30・15 はそのまま）→ `sh plan/tools/settings/host-store.sh build/tmp/p015s-host/host-store` 53 passed 0 failed、`host-settings.sh` 38 passed 0 failed。`p015-lock.py` を 4 項目に（default-never で power.lock・sleep.ac・sleep.battery が 0、16 分（960 秒）の無操作で lock も「KWL SLEEP screen off」も無し、新しい p015.sleep-time: power.sleep.ac 2 で 90 秒の内に「KWL SLEEP screen off via=idle」、0 に戻し Esc で「KWL SLEEP screen on via=input」）、`p015-lock.sh` は 4 項目を期待。
+- image: `AAT_CONFIG=plan/ws307/tests/config-amd64-p015.mk plan/tools/aat/build-image.sh build/ws307-p015s` rc 0、変えた file の warning 0（warning は openssh・openssl・libavcodec の外部の source の既存の物だけ）。
+- QEMU（`VENUS_RENDERER=/home/awe/zedBSD-claude1/build/ws035-sq-venus/install plan/ws307/tests/p015-lock.sh build/ws307-p015s/hdd-image.img OUT`）: **未達**。run1（`build/ws307-p015s-run1`）: SSH は通ったが 180 秒で `KWL READY` を読めず FAIL。run2（`build/ws307-p015s-run2`）: SSH が 240 秒で応えず FAIL、`no-ssh.png` は起動の splash。どちらも同じ時に clang の package の build が走り host の load が約 30 だった。同じ image を手で起動した時（load 約 10）は session が上がり `KWL READY … role=normal` を session.log に読めた（`build/tmp/p015dbg`）。原因は load の見込みだが未確定。
+- 次の 1 手: host の load が低い時（他の build を止めて）に同じ command で run3。3 回目も同じなら gdbstub・QMP で起動の停止を解析する（AGENTS.md §9）。

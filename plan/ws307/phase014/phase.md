@@ -42,3 +42,4 @@
 - 全文（`plan/coding-style.md`）と差分の行を照らした結果: 直したのは `screens.c` の 1 か所（69f43f4c3）: else の本体の段落に comment が無く、`strcmp` の結果の名前 `none_diff` が何を持つかを言わない → `none_differs` に、表の名前の段落と行の段落に comment。動作は同じ（同じ式・同じ文字列）。他は規約どおり（前方宣言 1 行、各段落の comment、分けた呼び出しは 1 引数 1 行の揃え、成功の return が最後で `Succeeded`、条件の中に呼び出し無し）。
 - 確かめ: `make ZEDBSD_CONFIG=plan/ws307/tests/config-amd64-p009.mk ZEDBSD_IMAGE_PROFILE=installer BUILD=build/p014b build/p014b/dynamic/obj/userland/desktop/installer/screens.o` rc 0、warning 0。`plan/tools/style-check.py` は installer の 4 file で 0、ufs.c・ufs-format.c の新しい行の範囲で 0。`git diff --check` clean。QEMU は p004 の image の試験（installer の画面は通らない）の他は未実施。
 - 残り: p007（UEFI の変数の driver・efiboot）の C は入った時に見直す。
+- 引き継ぎ（2026-10-30 09:13）: branch `agent/p4-ws307o`、69f43f4c3（screens.c）・b388f58e0（記録）。この Queue で後から足した C（p004 の試験の `plan/ws307/tests/p004-hello.c`、2aad28963）は段落の comment を付けた。次の 1 手: p007 の C が入った後にその見直し。

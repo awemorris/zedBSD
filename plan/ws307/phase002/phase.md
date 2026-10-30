@@ -103,3 +103,9 @@
 - 受け入れ（spec §13a の H）: 新しい名前の asset が rev-0 にあり、tree の規則が新しい URL から取って pin と一致し、zip が `zedbsd-nightly/` の root で作れる → 満たした（上の確かめ）。
 - A〜G・compositor・docs は q1665-i01・i02・q1671-i01 で commit 済み、`git grep -i kei` の残りは「残す物の一覧」の物だけ（q1671-i01 の数え）。
 - 残る未実施: push の後の CI の 1 回、`plan/tools` の中の kei（371 行、各試験の次の実行の時に直すか消す、Q1 の判断）、試験の道具の古さ 2 つ（keiland-shot と greeter、ws131 の link の一覧、Q1 に送った物）。どれも名前の変更の受け入れの外と見る。
+
+### 引き継ぎ（2026-10-30 09:13、q1698-i01 のラップアップ）
+
+- branch `agent/p4-ws307o`、この Phase の commit: 16e45a703（cherry-pick）、07c144e8e（記録）。未 commit の物は無い。
+- 次の 1 手: Q1 の cleared の判定。push の後に CI の 1 回（`zedbsd-nightly-zip` が新しい URL から取るか）。
+- CI の別件 2 つ（この Phase の変更によらない、直すかは Q1）: (1) `.github/workflows/ci.yml` の「Package zedbsd-qemu.zip」は直前の段が `config.mk` を pc98 にした後に走るので「use an amd64 config」で止まる見込み（continue-on-error）。amd64 の最後の build は server の config。(2) `.github/workflows/release.yml` は `ZEDBSD_NIGHTLY_ALLOW_DRAFT=` で走らせるので draft の base（fork の commit 未確定）を拒む見込み（前の asset でも同じ）。
