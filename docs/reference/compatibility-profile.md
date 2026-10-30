@@ -36,7 +36,9 @@ and `errno`; do not infer success from `_POSIX_VERSION` alone.
 ## ABI boundary
 
 [uapi/types.h](../../include/uapi/types.h) selects `uapi_ptr_t` as
-64 bits for `ZEDBSD_USER_ABI_LP64`, otherwise 32 bits. Structures containing
+64 bits when `KERN_USER_ABI_LP64` is defined, otherwise 32 bits. The build
+defines `KERN_USER_ABI_LP64` for an LP64 target; when it does not say, the
+header defines it from the compiler's `__LP64__`. Structures containing
 that type and ioctl encodings must be compiled for the intended ABI. Do not
 copy host Linux structures, assume all UAPI records have one architecture-neutral
 size, or send a host process's pointer to a guest kernel.
