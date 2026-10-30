@@ -1635,4 +1635,130 @@
       });
     });
   })();
+  // ---- View Transitions (https://drafts.csswg.org/css-view-transitions-1/)
+  // The script side: the states of a transition, its three promises and its types.  What the transition shows
+  // (the captured images and the pseudo-element tree) is the engine's, told through native.viewTransition.
+  if (typeof document !== 'undefined' && typeof g.Document === 'function' && !g.Document.prototype.startViewTransition) (function () {
+    var then = Promise.prototype.then;
+    var VT = {};
+    var current = null;
+    function deferred() {
+      var d = {};
+      d.promise = new Promise(function (resolve, reject) { d.resolve = resolve; d.reject = reject; });
+      return d;
+    }
+    function markHandled(p) { then.call(p, undefined, function () {}); return p; }
+    class ViewTransitionTypeSet extends Set {
+      constructor(key) {
+        if (key !== VT) throw new TypeError('Illegal constructor');
+        super();
+      }
+    }
+    tag(ViewTransitionTypeSet, 'ViewTransitionTypeSet');
+    class ViewTransition {
+      constructor(key) {
+        if (key !== VT) throw new TypeError('Illegal constructor');
+        hidden(this, '_ready', deferred());
+        hidden(this, '_done', deferred());
+        hidden(this, '_finished', deferred());
+        hidden(this, '_phase', 'pending-capture');
+        hidden(this, '_callback', null);
+        hidden(this, '_types', new ViewTransitionTypeSet(VT));
+        markHandled(this._ready.promise);
+        markHandled(this._done.promise);
+        markHandled(this._finished.promise);
+      }
+      get ready() { return this._ready.promise; }
+      get finished() { return this._finished.promise; }
+      get updateCallbackDone() { return this._done.promise; }
+      get types() { return this._types; }
+      skipTransition() { if (this._phase !== 'done') skip(this, new DOMException('Skipped view transition due to skipTransition() call.', 'AbortError')); }
+    }
+    tag(ViewTransition, 'ViewTransition');
+    // Calls the update callback once; its outcome settles updateCallbackDone.
+    function callUpdate(t) {
+      var result, d = t._done;
+      if (t._phase === 'pending-capture') t._phase = 'update-callback-called';
+      if (t._updated) return;
+      t._updated = true;
+      try {
+        result = t._callback ? t._callback.call(undefined) : undefined;
+      } catch (e) {
+        d.reject(e);
+        return;
+      }
+      then.call(Promise.resolve(result), function () { d.resolve(undefined); t._updateDone = 1; }, function (e) { d.reject(e); t._updateDone = 2; });
+    }
+    function skip(t, reason) {
+      var wasPending = t._phase === 'pending-capture';
+      t._phase = 'done';
+      if (current === t) {
+        current = null;
+        native.viewTransition(null);
+      }
+      if (wasPending) setTimeout(function () { callUpdate(t); }, 0);
+      t._ready.reject(reason);
+      then.call(t._done.promise, function () { t._finished.resolve(undefined); }, function (e) { t._finished.reject(e); });
+      if (!wasPending && !t._updated) callUpdate(t);
+    }
+    function finish(t) {
+      if (t._phase === 'done') return;
+      t._phase = 'done';
+      if (current === t) {
+        current = null;
+        native.viewTransition(null);
+      }
+      t._finished.resolve(undefined);
+    }
+    // After the update callback: the new state, the pseudo-element tree and the animations.
+    function activate(t) {
+      if (t._phase === 'done') return;
+      t._phase = 'animating';
+      if (!native.viewTransition(t, 'new')) {
+        skip(t, new DOMException('Skipped view transition due to an invalid state.', 'InvalidStateError'));
+        return;
+      }
+      t._ready.resolve(undefined);
+      requestAnimationFrame(function () { setTimeout(function () { finish(t); }, native.viewTransitionDuration(t)); });
+    }
+    g.Document.prototype.startViewTransition = function startViewTransition(callbackOptions) {
+      var t = new ViewTransition(VT), cb = callbackOptions, i, list;
+      if (typeof cb === 'function') {
+        t._callback = cb;
+      } else if (cb !== undefined && cb !== null) {
+        if (typeof cb !== 'object') throw new TypeError("Failed to execute 'startViewTransition' on 'Document': The provided value is not of type 'StartViewTransitionOptions'.");
+        if (cb.update !== undefined && cb.update !== null) {
+          if (typeof cb.update !== 'function') throw new TypeError("Failed to execute 'startViewTransition' on 'Document': The provided callback is not a function.");
+          t._callback = cb.update;
+        }
+        if (cb.types !== undefined && cb.types !== null) {
+          list = Array.from(cb.types);
+          for (i = 0; i < list.length; i++) t._types.add(String(list[i]));
+        }
+      }
+      if (document.visibilityState === 'hidden') {
+        skip(t, new DOMException('Skipped view transition due to document being hidden.', 'InvalidStateError'));
+        return t;
+      }
+      if (current) skip(current, new DOMException('Old view transition aborted by new view transition.', 'AbortError'));
+      current = t;
+      // The next rendering opportunity: the old state is captured, then the callback runs and the new state is made.
+      requestAnimationFrame(function () {
+        if (t._phase === 'done') return;
+        if (!native.viewTransition(t, 'old')) {
+          skip(t, new DOMException('Skipped view transition due to an invalid state.', 'InvalidStateError'));
+          return;
+        }
+        setTimeout(function () {
+          if (t._phase === 'done') return;
+          callUpdate(t);
+          then.call(t._done.promise, function () { requestAnimationFrame(function () { activate(t); }); }, function (e) { skip(t, e); });
+        }, 0);
+      });
+      return t;
+    };
+    Object.defineProperty(g.Document.prototype, 'activeViewTransition', { get: function () { return current; }, configurable: true, enumerable: true });
+    def(g, 'ViewTransition', ViewTransition);
+    def(g, 'ViewTransitionTypeSet', ViewTransitionTypeSet);
+  })();
 })

@@ -40,6 +40,8 @@ static int prelude_scroll_fragment(struct vm_realm *realm, vm_value this_value, 
 static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_duration(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_utf8_argument(const vm_value *args, unsigned count, unsigned index, struct wb_buffer *out, int *present);
 
 /* parseURL(input, base): the parts of the URL as an array of strings, or null when it does not parse. */
@@ -399,6 +401,40 @@ prelude_set_follower(
 	/* Succeeded: the window keeps it (its trace marks it). */
 	window = bind_window_of(realm);
 	window->follow_hyperlink = vm_value_as_cell(follower);
+	return 0;
+}
+
+/* viewTransition(transition, phase): tells the page a view transition's state; true when it could be made. */
+static int
+prelude_view_transition(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	UNUSED_PARAMETER(realm);
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	*result = VM_VALUE_TRUE;
+	return 0;
+}
+
+/* viewTransitionDuration(transition): the milliseconds until the transition's animations have all ended. */
+static int
+prelude_view_transition_duration(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	UNUSED_PARAMETER(realm);
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	*result = vm_value_number(250.0);
 	return 0;
 }
 
@@ -866,6 +902,14 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "nodeRect", 1, prelude_node_rect, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "nodeRect", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransition", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionDuration", 1, prelude_view_transition_duration, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionDuration", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status != 0)
 		return status;
 	status = prelude_run(window, prelude_source, sizeof(prelude_source) - 1U, vm_value_cell(natives));
