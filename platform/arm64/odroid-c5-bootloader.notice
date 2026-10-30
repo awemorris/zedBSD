@@ -1,6 +1,6 @@
 Firmware: ODROID-C5 bootloader: Amlogic's boot stages (BL2 and the stages it loads,
           BL30, BL31 and BL32, with their signed headers) and Hardkernel's U-Boot (BL33)
-Hardware: Hardkernel ODROID-C5 (Amlogic S905X5M)
+Hardware: Hardkernel ODROID-C5 (Amlogic S905X5M, SoC family S7D)
 Files:    the SD card's bootloader area: the MBR's boot code and the sectors from 1
           up to the first partition (at most 8 MiB); this file on the SD card's boot
           partition as /BOOTLOADER.txt
@@ -14,6 +14,15 @@ Source:   not fetched by zedBSD.  The area is copied, byte for byte, from the ca
           c99f3409d5cad031b365fd871e543f97af893f88, "ODROID-C5: Firmware update
           with Amlogic BSP 202508"); the Amlogic stages and the U-Boot source are
           its submodules on git.odroid.com.
+          A donor known to work with this notice: the signed bootloader of
+          Hardkernel's Yocto layer for the ODROID-C5,
+          https://github.com/mdrjr/meta-odroid-aml at commit
+          548e2f037e01c626e3fc964fa298464df148fd51, file
+          recipes-bsp/u-boot-odroid-c5/files/u-boot.bin.signed (3379200 bytes,
+          SHA-256 8c2e66919a05921d79e130cc00a977a07cf8df6b34153e66c18c3241c0809e3c;
+          its BL30 names the SoC "S7D-s905x5m"), placed from sector 1 as that
+          layer's odroid-c5.wks does (rawcopy, --offset 1S); the donor file is
+          512 zero bytes followed by it, so the MBR's boot code stays zero.
 
 Copyright Amlogic, Inc. (the boot stages BL2 to BL32)
 Copyright the U-Boot authors and Hardkernel Co., Ltd. (U-Boot)
@@ -23,8 +32,9 @@ Terms:
   submodule bl33/v2023 of the branch above (https://git.odroid.com/yocto/uboot,
   branch odroidc5-v2023.01).  zedBSD changes nothing in it.
 - Amlogic's boot stages are binaries Amlogic gives to board makers.  No licence
-  text for them was found in Hardkernel's public tree or image, and no public
-  download of them alone was found.  Their redistribution terms are therefore
+  text for them was found in Hardkernel's public tree or image, nor in the
+  Yocto layer above (its recipe states GPL-2.0-only, for U-Boot only), and no
+  public download of them alone was found.  Their redistribution terms are therefore
   unknown: an SD card image made with ODROID_C5_BOOTLOADER_FROM carries
   Amlogic's binaries as Hardkernel ships them, is for the use of whoever built
   it with their own copy of Hardkernel's image, and is not to be passed on
