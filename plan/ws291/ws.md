@@ -52,6 +52,7 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 | [p010](phase010/phase.md) | NVIDIA（RTX 2070）: nvrtx の起動、desktop の計測と 60 fps、Linux の NVK の基準 | 機械の入れ替え（2026-10-29 ユーザー）、P2 | cleared（2026-10-30 14:10 P7 q1712-i01: WS309 の後の main 5aca73738 で frame-ops 2 回、launch 63・64、type 61・62、output 68・65、drag 61・60、home 63・64、wiseview 65・60 fps、scroll・hover・keys は入力の間隔） |
 | [p010a](phase010a/phase.md) | NVIDIA: nvrtx の executor に mview が要る物（depth・index の draw・instance・mip・uniform buffer・cull） | p010 | cleared（2026-10-29 10:48 q1670-i04: 実機で depth・texture が参照と一致、scene-5000 42.2 fps。残り: instance の rate の実機の個別の確かめ） |
 | [p011](phase011/phase.md) | NVIDIA: Linux（NVK）で約 50 fps の scene（qs40 ×5000）での差の計測と 50 fps（p012〜p019 は改善の予備）。GPU の待ちを lock の外へ出す件（非同期の submit）は 2026-10-29 Q1 の判断でこの p011 で行う（WS250 は担当が無く止まっている。WS250 の design.md の期限の STOP・session ごとの worker と食い違わない形にし、WS250 はその上に作る） | p010a | cleared（2026-10-30 Q1 の判定: NVK と揺れの内で同等、文の「50 fps 以上」は未達（49.5〜49.7 fps）。2026-10-29: scene-5000 は 49.1〜49.5 fps で、同じ機械の NVK の単独の run 49.1・平均 50.1 と揺れの内で並ぶ。残りは GPU 19.5 ms、50 fps を明らかに超えるのは p012 以降の予備（vertex の program の質）。2026-10-30 q1693-i01: compiler の FFMA と operand の直読み（VS 108 → 59 命令）でも GPU の時間は不変、49.50・49.69 fps。固定機能で決まる見込み） |
+| [p012](phase012/phase.md) | NVIDIA: scene-5000 を 50 fps を明らかに超える所へ（p011 の予備） | p011 | uncleared（2026-10-30 14:45 P7 q1712-i01: GPU の 19.4 ms は頂点の側の固定機能の hardware の限界で NVK と同等（続けての 6 回の平均 49.05 対 NVK 49.02）、cull=all・boost・VPC/VTG の method で不変、上限は約 51.3 fps。driver の変更なし） |
 | p020 | PowerVR（VF2）: model の 50 fps（RDNA で確立した手順、P3） | RDNA の手順の確立（p002 と最初の改善） | planned |
 | 最後 | 規約の全文の見直し | 実装の全部 | — |
 
@@ -249,3 +250,11 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 - 再開点（09:13 P5、利用の上限で Q1 がラップアップ）: 実機の計測は未実施。main の kernel の build（build/ws291/vmunix-m0、warning 0）まで。
   次の 1 手と手順は [phase010](phase010/phase.md) の「q1700-i01」節（先に main の Keiland・libvulkan・libc を NVMe の zedBSD に入れてから rtx-desk-profile.sh、
   その後 p012 を立てて `--cull=all`・`--size=` で GPU の内訳を NVK と比べる）。機械は Debian・RTX は vfio-pci、NVMe の kernel は触っていない、lock は返した。
+
+## 2026-10-30 q1712-i01（P7、worktree p7-ws291、NVIDIA の段）
+
+- 承認: ユーザー（2026-10-30 原文）「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」
+- 結果: p010 cleared（WS309 の後の main 5aca73738 で frame-ops 2 回、frame で決まる段は全部 60 fps 以上）。p012 uncleared（頂点の側の固定機能の hardware の限界、
+  NVK と同等。Q1 の判断「(A) の時は、p012 を uncleared … として記録し、ws.md の残りへ進んでください。」）。道具: `plan/ws291/tests/rtx-desk-main.sh`・
+  `rtx-scene-main.sh`・`rtx-thermal.sh`・`rtx-files.sh`（NVMe の kernel を読み戻し、main の desktop の program を入れて測り、終わりに戻して照合）。
+- 再開点（14:45 P7）: NVIDIA の段の残りは無い。ws.md の残りは p008〜p009（RDNA、RX 5600 XT を挿し直すまで実機が無い）、p020（PowerVR、VF2 の割り当てが要る）、最後の規約の見直し。
