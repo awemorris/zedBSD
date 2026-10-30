@@ -1,13 +1,13 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:34（Q1）
+最終更新: 2026-10-31 01:41（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS333](ws333/ws.md)・[WS291](ws291/ws.md) | CPU の idle の省電力と、i915（5330）の描画の速さ | WS333 p002: amd64 の idle を HLT から MWAIT に替え、5330 で idle の電力と GPU の周波数を前後で測る | WS291 p022 に戻って測り直す（今 qs40 × 600 で 31.0 fps、Linux 50.6）。Notes は 5330 で起動を確かめた |
+| P1 | [WS333](ws333/ws.md)・[WS291](ws291/ws.md) | CPU の idle の省電力と、i915（5330）の描画の速さ | WS291 p022 に戻った（WS333 p002 の MWAIT は main に merge 済み） | qs40 × 600 を Linux の 50.6 fps へ（今 32.6 fps）。idle の残り（11.6 W 対 Linux 3.2〜3.5 W）は tick・P-state・ASPM などで、WS333 の設計の後 |
 | P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | p020: GPU の memory を cache（SLC）に通す既定の回帰、表示用の copy を頂点の処理が待たない直し | qs40 × 13 を 42.35 → 50 fps 以上へ。branch は BUG-375 が直るまで main に入れない |
 | P3 | [WS307](ws307/ws.md)・[WS331](ws331/ws.md)・[WS332](ws332/ws.md)・[WS326](ws326/ws.md) | 残りの仕事を順に | 起動（q1736）。WS307 p007 の残り（installer の導入の QEMU、古い entry の掃除） | WS331 p006 規約 → WS332 p003・p004 → WS326 p015・p017 以降 |
 | P4 | Bug・[WS291](ws291/ws.md) | BUG-374（RTX の cursor の色が逆）と Pi 5 の GPU | 起動（q1742）。BUG-374 の原因の特定と直し（10.0.10.3 は P6 と lock で交代） | Pi 5 の起動の後に WS291 p021 |
@@ -29,14 +29,14 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | p013・p014 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
 | p020 | PowerVR（VF2） | qs40 × 13・1920x1080・direct scanout で 50 fps（RTX のカタログの FP32 の比） | 42.35 fps（direct） | in-progress（P2） |
 | p021 | Raspberry Pi 5（V3D 7.1） | スペックの比の copies で 50 fps（clock を実機で確定） | 未計測（mview に要る driver の機能を host で実装済み） | in-progress（P4、実機待ち） |
-| p022 | Intel i915（5330） | 5330 の Linux（ANV）で 50.6 fps の qs40 × 600 で Linux 以上 | 31.0 fps（頂点の shader 134 → 67 命令。GPU が電力の上限で 800 MHz、WS333 p002 で CPU の idle を先に直す） | in-progress（P1） |
+| p022 | Intel i915（5330） | 5330 の Linux（ANV）で 50.6 fps の qs40 × 600 で Linux 以上 | 32.6 fps（頂点の shader 134 → 67 命令。CPU の idle を MWAIT にして GPU が 800 → 850〜900 MHz、まだ電力の上限 13 W に張り付く） | in-progress（P1） |
 
 ### WS333 /dev/thermal で統一する電力・熱の枠組み（2026-10-31 新設、WS301・WS303 を統合）
 
 | Phase | 内容 | 状態 |
 | --- | --- | --- |
 | p001 | 統一の設計（CPU の idle・P-state・P/E core・熱・fan・strategy・非常の停止） | in-progress（P5） |
-| p002 | amd64 の CPU の idle を MWAIT に（5330 の idle 12.99 W 対 Linux 3.2〜3.5 W） | in-progress（P1） |
+| p002 | amd64 の CPU の idle を MWAIT に（5330 の idle 12.99 W 対 Linux 3.2〜3.5 W） | MWAIT C6 を main に merge（f740839e5）。idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps。Linux にはまだ遠い（残りは 1 kHz の tick・P-state・ASPM・PSR の見込み、未調査） |
 
 ### WS331 driver から HAL への直の依存を除く
 

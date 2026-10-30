@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner-high | ws291 p022 (q1731-i01) と ws333 p002 (q1735-i01) | `/home/awe/zedBSD-worktrees/p1-ws291i` / `agent/p1-ws291i` | in-progress（2026-10-31、5330） | c0c7b49c2（merge 98871328b） |
+| P1 | phase-runner-high | ws291 p022 (q1731-i01) と ws333 p002 (q1735-i01) | `/home/awe/zedBSD-worktrees/p1-ws291i` / `agent/p1-ws291i` | in-progress（2026-10-31、5330、p022 に戻った） | 6314c5b94（merge f740839e5） |
 | P2 | phase-runner-high | ws291 p020 (q1733-i01) | `/home/awe/zedBSD-worktrees/p2-ws291v` / `agent/p2-ws291v` | in-progress（2026-10-31 起動し直し、VF2 の SSH・sudo の許可） | dc49bd786 |
 | P4 | phase-runner-high | q1742 BUG-374（Pi 5 の p021 は実機待ち） | `/home/awe/zedBSD-worktrees/p4-bug374` / `agent/p4-bug374` | in-progress（2026-10-31 起動） | e4f77b9e5（ws291p021 は未 merge） |
 | P5 | kernel-and-driver-designer | ws333 p001 (q1734-i01) | `/home/awe/zedBSD-worktrees/p5-ws333` / `agent/p5-ws333` | in-progress（2026-10-31 起動） | — |

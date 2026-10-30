@@ -366,7 +366,7 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1734 / q1734-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws333`・branch `agent/p5-ws333`） | [ws333-p001](ws333/phase001/phase.md) | 2026-10-31 ユーザーから、WS301・WS303 を統合した WS333 で CPU の省電力を先に直す、という趣旨の指示を受けた | in-progress |
-| q1735 / q1735-i01 | P1（phase-runner-high、worktree p1-ws291i、実機 5330） | [ws333-p002](ws333/phase002/phase.md) | 同上（amd64 の idle の MWAIT を先に） | in-progress |
+| q1735 / q1735-i01 | P1（phase-runner-high、worktree p1-ws291i、実機 5330） | [ws333-p002](ws333/phase002/phase.md) | 同上（amd64 の idle の MWAIT を先に） | in-progress（MWAIT C6 を e44a18dd7、main に merge f740839e5。idle 13.00 → 11.70 W） |
 
 ## 2026-10-31: 担当の無い仕事の割り当て（q1736〜q1742）
 
