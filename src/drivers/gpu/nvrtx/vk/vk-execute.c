@@ -96,13 +96,15 @@
 #define EXECUTE_RECORD_ROOM		32768U
 
 /*
- * The application draws after which the first push buffer of a command
- * buffer's run is put on the GPU, so the GPU (idle when a frame is
- * submitted) starts while the CPU writes the rest: a draw is written in a
- * fraction of the time the GPU takes to run it, so the later push buffers
- * keep ahead of the GPU.
+ * The application draws after which a push buffer is put on the GPU: the
+ * first of a command buffer's run after a few, so the GPU (idle when a
+ * frame is submitted) starts while the CPU writes the rest, the others
+ * after more.  A draw is written in about half the time the GPU takes to
+ * run it, so push buffers this short keep the GPU fed (a long one left
+ * it waiting for the CPU to finish it).
  */
 #define EXECUTE_FIRST_DRAWS		256U
+#define EXECUTE_RUN_DRAWS		2048U
 
 /*
  * A texture handle: the header's index, and the sampler's from bit 20.
@@ -286,8 +288,8 @@ struct execute_held {
  * of their parts the push buffer uses, draws and quads how many
  * application draws and own quads it holds (for the node's counts); early
  * says the push buffer is a command buffer's first, put on the GPU after
- * EXECUTE_FIRST_DRAWS draws.  The programs are compiled once, into a run
- * of their own.
+ * EXECUTE_FIRST_DRAWS draws (the others after EXECUTE_RUN_DRAWS).  The
+ * programs are compiled once, into a run of their own.
  */
 struct nvrtx_vk_execute {
 	struct execute_slot slots[EXECUTE_SLOTS];
@@ -874,9 +876,9 @@ execute_drain(
 
 /*
  * Makes room for one record: runs the push buffer when the record could
- * pass its end or the run's other parts are nearly used, or when it is the
- * command buffer's first and holds its first draws.  The target is written
- * again in the next push buffer.
+ * pass its end or the run's other parts are nearly used, or when it holds
+ * its share of draws (fewer for a command buffer's first).  The target is
+ * written again in the next push buffer.
  */
 static int
 execute_room(
@@ -896,8 +898,10 @@ execute_room(
 	if (execute->headers + NVRTX_VK_REGIONS_MAX + NVRTX_VK_TEXTURES_MAX > EXECUTE_POOL_ENTRIES)
 		full = true;
 
-	/* The command buffer's first push buffer goes to the idle GPU after a few draws. */
+	/* The command buffer's first push buffer goes to the idle GPU after a few draws, the others after more. */
 	if (execute->early && execute->draws >= EXECUTE_FIRST_DRAWS)
+		full = true;
+	if (execute->draws >= EXECUTE_RUN_DRAWS)
 		full = true;
 	if (!full)
 		return 0;
