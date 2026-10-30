@@ -236,6 +236,11 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev36（edbd03c1a） | 要素の scroll、anchor の解決、popover | 1,006 | 1,146 | 261 | 41 | 2,454（70.68%） |
   | dev37（1d2ad3ef0） | flex・grid の baseline、fieldset、overflow の clamp | 1,012 | 1,148 | 261 | 41 | 2,462（70.91%） |
 
+  | dev38（813ef1a6a） | CSS logical の CSSOM（shorthand の longhand と computed の直列化、inline-size など）、groove・ridge | 1,021 | 1,149 | 261 | 41 | 2,472（71.20%） |
+  | dev39（zoom まで） | zoom（cascade）、css-viewport/zoom +11 | 1,022 | 1,160 | 263 | 41 | 2,486（71.60%） |
+  | dev40（efd1d8313） | navigation-api の DataCloneError・intercept・detach、Streams・WebAssembly.Memory の stub | 1,039 | 1,160 | 263 | 41 | 2,503（72.09%） |
+  | dev42（cfd40a883） | grid の abspos の descendant、display: contents の blockify、grid-*-gap の computed | 1,041 | 1,160 | 263 | 41 | 2,505（72.15%） |
+
   どの測定も後退 0（dev31 または直前の gap との差で、4 runner とも gap に新しく入った ID は無い）。
 - 直した物:
   1. filter を隔離した group で描く（paint/paint.h の `PAINT_GROUP`・`PAINT_GROUP_END`、paint/software.c の `software_group`: group の items を黒の上と白の上に 2 回描いて各画素の色と coverage を求め、filter の関数を色に掛けて page の上に重ねる）。
@@ -253,6 +258,15 @@ Origin: 2026-10-27 ユーザーの指示。
      last baseline の flex・grid container の対応。overflow が visible でない box の baseline は border box の中に clamp。table の baseline は caption を除く。fieldset の baseline は legend を除く。
      fieldset の legend（最初の legend の子）は上の border の位置に載り、border の高さと legend の高さの大きい方だけが上を占める（layout/block.c `block_fieldset_legend`）。
      flex-align-baseline-001・flex-flex-001・fieldset-001 と grid の同等の物、overflow-001 が PASS。
+  6. CSS logical box properties（bind/style.c `style_box_get`: margin・padding・inset・border-width・style・color と inline・block の shorthand と border の shorthand から longhand を inline style で読む。bind/computed.c `computed_box_shorthand`:
+     shorthand の computed を longhand から作る（4 辺は短い形）、`inline-size`・`block-size` と min・max の computed、`grid-row-gap`・`grid-column-gap`）、sideways-lr の inline-start は下（cascade.c `cascade_margin_property`）、border-style の groove・ridge を区別。
+     css-logical の logical-box-margin・padding・inset・border-width・color・style・shorthands・size が PASS（border-radius は未）。
+  7. zoom（css/cascade.c）: 要素の effective zoom（祖先の積）を `css_style.zoom_eff` に持ち、cascade の長さ（px・pt・in・vw など、calc の px、font-size の em・%・keyword、継承した font-size・line-height・text-indent・border-spacing・text-shadow、rem は root の zoom で割って要素の zoom を掛ける）に掛ける。
+     computed の px の出力は zoom で割る（bind/computed.c `computed_zoom`、`computed_pixels`）。画像の自然な大きさ（layout/replaced.c）も掛ける。css-viewport/zoom の static が 2 → 14。
+  8. navigation-api（plan/ws074/phase230/prelude.js）: structuredClone が EventTarget・Event らしい object を DataCloneError にする（realm をまたいでも）、ReadableStream・WritableStream・TransformStream と WebAssembly.Memory（shared の buffer は clone 不可）の stub、
+     unserializable な state の rejection の順、intercept() が detach 後に InvalidStateError、navigateerror の ErrorEvent の lineno・colno（Error に位置が無いので 1・1）、NavigationHistoryEntry・NavigationDestination の key・id・url・index が detach 後に空・-1。harness +17。
+  9. grid の abspos: grid が containing block の abspos の descendant（親が item の block）も grid-placement の area を containing block にする（layout/grid.c `grid_abspos_deeper`。入れ子の grid・subgrid の下と、名前付きの線は除く）。
+     flex・grid の hit test は item を order の逆（上に描く物から）に探す（layout/hit.c `hit_items`）。computed の blockify は display: contents の親を飛ばす。`::view-transition` の UA の position は absolute。
 - 調べて直さなかった物（次の候補）:
   - 直交 flow の flex item（`/tmp/p8out/flex-ortho-exp1.patch`: `layout_logical_wanted` が flex の item を物理のままにする所を外すと static の css-flexbox で +5/-5。後退は fit-content-item-002〜004（auto の cross を持つ縦書きの item の inline size が viewport になる）・ortho-table-item-001・stretching-orthogonal-flows）。
     必要な事: 縦書きの item の cross 方向の inline size を fit-content にする（logical_fits_content が flex の item を除外している所）、stretch された cross の再 layout。
