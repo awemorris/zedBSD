@@ -8,10 +8,10 @@
 /*
  * The binding of the StarFive VisionFive 2 board.
  *
- * The console is a teletype whose output the hardware layer writes to the
- * firmware's console; the board's UART does not type into it yet.  The
- * UART the firmware's console uses is mapped too, for the end of the
- * console's use of the screen (below).  The board publishes one boot
+ * The console is the text console over the loader's screen and the UART
+ * the firmware's console uses: what it writes goes to both, and what the
+ * UART receives, by its interrupt, is typed into it beside USB keyboards.
+ * The board publishes one boot
  * device: the initial ramdisk the loader read, when there is one, and
  * otherwise the SD card.  The ramdisk holds a disk
  * image laid out like a Raspberry Pi 4's SD card, a FAT boot partition
@@ -66,6 +66,7 @@
 #include <drivers/generic/ramdisk.h>
 #include <drivers/generic/boot-fb.h>
 #include <drivers/generic/fb-text.h>
+#include <drivers/generic/serial-console.h>
 #include <drivers/platform/visionfive2/vf2-crg.h>
 #include <drivers/platform/visionfive2/vf2-ethernet.h>
 #if CONFIG_DRIVER_POWERVR
@@ -439,16 +440,30 @@ kern_platform_refresh_devices(
 }
 
 /*
- * Starts the console's input; the board's UART does not type into it yet.
+ * Starts the console's input: USB keyboards, and what the console's UART
+ * receives.
  */
 int
 kern_platform_input_init(
 	void)
 {
+	int error;
+
 	/* Lets USB keyboards type into the console. */
 	drv_vf2_pcie_input_ready();
 
-	/* Succeeded: the UART does not type yet; USB keyboards do. */
+	/* A tree without the console's UART leaves the keyboards alone. */
+	if (!console_uart_present)
+		return 0;
+
+	/* Has the UART's receive interrupt feed the console. */
+	error = drv_ns16550_start_input(&console_uart, drv_serial_console_receive);
+	if (error != 0) {
+		kern_logf("visionfive2: serial input unavailable (%d)\n", error);
+		return error;
+	}
+
+	/* Succeeded: the serial line and USB keyboards type into the console. */
 	return 0;
 }
 
@@ -1408,8 +1423,9 @@ reveal_fatal(
 }
 
 /*
- * Maps the UART /chosen/stdout-path names, without starting its input.  A
- * tree without one leaves the console unable to leave the screen.
+ * Maps the UART /chosen/stdout-path names; kern_platform_input_init()
+ * starts its input.  A tree without one leaves the console on the screen
+ * alone.
  */
 static void
 probe_console_uart(
@@ -1424,7 +1440,7 @@ probe_console_uart(
 		return;
 	}
 
-	/* Keeps it for the end of the console's use of the screen. */
+	/* Keeps it for the console's output and input. */
 	console_uart_present = 1;
 	kern_logf("visionfive2: console UART at %llx\n", (unsigned long long)console_uart.physical);
 }
