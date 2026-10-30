@@ -124,6 +124,7 @@ Queue: q1696 / q1696-i01（P3）、q1702 / q1702-i01（P3、同時の send の�
 - 測りの全部は上の「結果」の表（q1702-i01）。
 - 機械の状態: 5330 は Debian（10:45 に uname で確かめた）。NVMe の zedBSD の kernel は f1（= ag10、sha256 f561a0d9a6dc9bad、vmunix.old も f1）、userland は p003 の img1、zedbsd.cfg に CFG_ADD の行は無い。
   10.0.10.3 は 10:37 に lock を返した（free、Debian 6.12.111、NVMe の kernel は vmunix-va1 cksum 1463007375 を確かめた）。QEMU は止まっている（最終の tree の qemu-tcp PASS）。
-- 残り: なし（Phase の範囲）。F-WS315-rcvbuf の解決の文案は Q1 に送った。WS315 の受け入れと completed の判定は Q1。
+- 残り: なし（Phase の範囲）。F-WS315-rcvbuf は Q1 が「解決」にした（main 5d03cec11）。Q1 の依頼で WS315 の受け入れを確かめ（満ちている）、完了の形の ws.md の案
+  （/tmp/claude-1000/-home-awe-zedBSD-claude1/32b291a0-a356-4e09-b7a3-5bc58ae68278/scratchpad/ws315-completed.md）、試験の plan/tools/rtl815x/ への git mv の案、tools.md の行、消す物の一覧を Q1 に送った（git mv・削除は Q1 の OK の後）。
 - 消してよい物（Q1 へ）: build/tmp/p006-base、build/p006a-*・build/p006b-*・build/p006c-*（21 config の build）、build/p006-{k1,g10,g12,d1,a1,ag10,amd64,base5330,base8127,f-5330,f-8127}、
   build/p006-model-{a,ag10,f}、build/ws315-p006-{k1,g10,g12,d1,a1,ag10,base}-vmunix（f1 は 5330 の NVMe と同じなので残してもよい）、build/tmp/p006-host-*。
