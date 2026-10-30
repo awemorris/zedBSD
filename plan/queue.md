@@ -477,3 +477,7 @@
 | q1772 / q1772-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-vf2bugs`・branch `agent/p2-vf2bugs`、実機 VF2） | [BUG-338](bugs/BUG-338.md)・[BUG-342](bugs/BUG-342.md)・[BUG-340](bugs/BUG-340.md)・[BUG-343](bugs/BUG-343.md)・[BUG-339](bugs/BUG-339.md) | 今の main の kernel で実機で確かめ、残りは直す。出力は /tmp | cleared（912e43c1f・f12ef81f2、main f52088f45。338・340・342・343 closed、339 は判断待ち） |
 | q1773 / q1773-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws326p024`・branch `agent/p1-ws326p024`） | [ws326-p024](ws326/phase024/phase.md) | 計測・profile・目標・案を先に、h264sw-*.c の変更は p026 の merge の後 | in-progress |
 | q1774 / q1774-i01 | P6（phase-runner-high、worktree p6-ws333） | [ws333](ws333/ws.md) p016 見張りと非常の停止 → p021 passive | `thermal.emergency=off` は作らない（ユーザーに聞くまで保留） | in-progress |
+| q1775 / q1775-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws302`・branch `agent/p5-ws302`） | [ws302](ws302/ws.md) p001 設計 | plan/ws302/ だけ、design-reviewer と問いまで | in-progress |
+| q1776 / q1776-i01 | P7（phase-runner-high、worktree p7-ws333b） | [ws333](ws333/ws.md) p018 Dell の provider | host の harness まで、5330 の実機は電源の入れ直しの後。SMM の失敗の印は値だけを出典つきで（Q1 の判断） | in-progress |
+| q1777 / q1777-i01 | P4（phase-runner、worktree p4-bugs） | [ws333](ws333/ws.md) p019 sessiond の THERMAL の要求 | UAPI（p004）待ちの kernel への呼びは仮の口 | in-progress |
+

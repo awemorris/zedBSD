@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 05:58（Q1）
+最終更新: 2026-10-31 05:59（Q1）
 
 ## 担当（P1〜P8）
 
@@ -12,10 +12,10 @@
 | P1 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1773: p024 速さ（計測・profile・目標・案を先に、最適化は p026 の後） | WS299 は 5330 の実測待ち |
 | P2 | — | — | 返却（06:5x）。VF2: BUG-338・340・342・343 closed（SD の CRC の誤りの根を直し、10 回の起動で root が毎回 live）、339 は判断待ち（0g） | 次の割当を Q1 が決める |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
-| P4 | — | — | 返却（06:2x）。WS326 p026（共通部分を vcodec- の名前に、前後の試験が全部同じ）を main に | 午後: Pi 5 の実機 |
-| P5 | — | — | 返却（06:3x）。WS330 の設計を main に（問い Q330-1〜4 は下の 0f） | 次の割当を Q1 が決める |
+| P4 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1777: p019 sessiond の熱の要求の口（UAPI 待ちの所は仮の口） | 午後: Pi 5 の実機 |
+| P5 | [WS302](ws302/ws.md) | デスクトップのスレッドバランサ（DTB） | q1775: p001 設計（WS333 の CPU の口を使う、design-reviewer と問いまで） | WS330 の設計は済み（問いは 0f） |
 | P6 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1774: p016 危ない温度での非常の停止（init への通知・sync・電源断）→ p021 passive（温度で CPU の上限を下げる） | 非常の停止を止める起動の switch（`thermal.emergency=off`）は作らない（下の 0 の Q1 の判断の項目） |
-| P7 | — | — | 返却（06:2x）。WS333 p011（x86 の CPU の driver、HWP・RAPL・HFI、QEMU では MSR に触らない）を main に | p014 5330 の受入れは電源の入れ直しの後 |
+| P7 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1776: p018 Dell の provider（BIOS の熱の mode・fan・boost、host の harness まで） | 5330 の実機は電源の入れ直しの後 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,472（71.20%）。flex・grid の baseline、fieldset、CSS の論理の box の property を足した、後退 0 |
 
 実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
