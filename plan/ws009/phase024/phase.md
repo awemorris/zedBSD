@@ -2,7 +2,7 @@
 
 # ws009-p024: DOC-54 正確さの敵対的レビュー（Opus を推す）
 
-Status: planned（2026-10-30 P1 の設計、q1701。p009 を節ごとに分けた物）
+Status: in-progress（2026-10-30 P1、q1704-i01。worktree p1-ws009r、起点 d73c023ef）
 Parent: [WS009](../ws.md)
 Approval: 2026-10-27 ユーザーの回答（クリック）「今書く」（DOC-54）。2026-10-30 ユーザー「WS009、WS296・WS297は標準廉価実装手順を適用してphaseを作り替え、今から実行してOKです。ただ、1 WSずつ実施します。」
 実装の担当: Opus（設計の担当の推し。推論が多い）
@@ -56,4 +56,4 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 
 ## 結果
 
-（未実施）
+途中（2026-10-30、P1）。gpu.md・gpu-requests.md の review と直しを commit 0b5cf893f。他の 12 file は file の群ごとに読み取りの review を並べて進行中。最後の照合・link の検査は未実施。
