@@ -105,3 +105,17 @@ Origin: 2026-10-27 ユーザーの指示。
   - 残りの大きな塊: grid の column 軸（justify）の baseline と縦書きの baseline、grid の track sizing の仕様どおりの書き直し、
     subgrid の配置、View Transitions、Navigation API の文書をまたぐ遷移・iframe、grid・grid-template の shorthand の
     longhand からの直列化、Error の生成位置（navigateerror の lineno）。
+
+### q1708-i01 の途中経過（2026-10-30、P8、local の Debian 13 host）
+
+- 比較の環境: `sh plan/ws074/tests/debian-setup.sh`（commit 5e20c8da9）。apt で nodejs・npm・chromium-headless-shell を入れ、
+  playwright-core を `build/ws074-chrome/node` に入れて `playwright` module を headless shell に向け、`build/ws074-chrome/bin/chromium` の wrapper と fonts.conf を作る。
+  使う時は `export NODE_PATH=$PWD/build/ws074-chrome/node/node_modules PATH=$PWD/build/ws074-chrome/bin:$PATH`。
+- Chromium の版: apt の更新で chromium が 153.0.8010.52 から **156.0.8078.73** に上がった（chromium-headless-shell が同じ版を要求したため）。前回の .12 とは版が違う。
+- WPT: `build/ws074-suites/wpt` に全体を取得、commit 2d66b9b7998bb58c336138c178323ddee857b586、licence 確認済み。
+- host build: `CC=clang sh plan/ws074/tests/host-build.sh plain` 成功（wpt-ready-render も build 済み）。
+- 測定（背景で実行中だった。結果は未確認）: `build/ws074-cmp/ours-dev20`（`--kind ours --jobs 8`、source は 2ba50ae52 = 7d096964d を含む）、
+  `build/ws074-cmp/chrome156`（`--kind chrome --jobs 6`、NODE_PATH・PATH は上のとおり）。`runs.json` ができたら完了。
+  次は `python3 plan/ws074/tests/interop2025-chrome-gap.py compare --chrome build/ws074-cmp/chrome156 --ours build/ws074-cmp/ours-dev20`、
+  Chromium PASS の数（前回 3,472）と dev20（dev19 は 2,096）を上の表に足す。
+- 未実施: 上の compare、gap の原因分けと engine の修正、Acid の回帰。
