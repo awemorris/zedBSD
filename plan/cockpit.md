@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 17:30（Q1）
+最終更新: 2026-10-30 17:45（Q1）
 
 ## 担当（P1〜P8）
 
@@ -12,7 +12,7 @@
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 再起動（q1715-i02）。ユーザーが VF2 の HDMI を接続。板を入れ直して framebuffer を確かめ、計測へ | 40 fps 前後の scene を決め 50 fps 以上へ |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
-| P6 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 起動（phase-runner、q1711）。ws.md の Resume point から | p015 の QEMU の 3 回目 → p004 GTK4 → p008 → p014 → p007 → WS の完了 → 返却 |
+| P6 | — | — | 返却（WS307: p015・p004・p008 cleared。p007 はユーザーの判断待ち） | — |
 | P7 | — | — | 返却（WS291: p010 cleared、p012 uncleared、PowerVR は P3 へ） | — |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 再起動（q1708-i02）。Debian の比較の環境は出来た、Chromium 156 の基準と dev20 の全件の測定の完了待ち | compare → gap の大きい原因から直す |
 
@@ -82,7 +82,12 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-今は無し。
+| WS | 何を | 背景と案 |
+| --- | --- | --- |
+| [WS307](ws307/ws.md) graphical installer | p007 の G2: kernel の新しい関数 kern_firmware_map の下で、amd64 の HAL の実装が kernel の側の firmware の窓（64 MiB）への実行可の map を受ける事を「実装の補完」と見てよいか | installer が UEFI の起動の項目（Boot####）を書くため、kernel の driver が firmware の関数（runtime services）を呼ぶ。driver は kern_* だけを使う（ユーザー）。firmware の code を実行するには kernel の側に実行可の map が要り、今の HAL はどの port も kernel の側（HAL_SPACE_SYS）の map を拒む。hal.h は変えない。案は [proposed/uefi-runtime-window.md](ws307/proposed/uefi-runtime-window.md) 改訂 5 |
+| [WS313](ws313/ws.md) ODROID-C5 | zedBSD-firmware の push（commit 43662bd、公式の image と Amlogic の license、Mali の firmware） | push は権限の判定で止まった。ユーザーが `! cd /home/awe/zedBSD-firmware && git push origin q1-c5-firmware:main` を打つか指示 |
+| [WS291](ws291/ws.md) GPU の速さ | PowerVR の 50 fps の基準 | 当面は zedBSD の今の fps で約 40 fps の scene から 50 fps 以上へ |
+| [WS331](ws331/ws.md) driver の HAL 依存 | p001 の表 B（kernel に足す関数）の採否と未決 4 点 | [phase001](ws331/phase001/phase.md) |
 
 ## 決まった事
 
