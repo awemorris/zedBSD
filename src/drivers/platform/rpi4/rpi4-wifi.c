@@ -214,11 +214,15 @@ drv_rpi4_wifi_probe(
 		atomic_raw_store_release(&wifi_probe_state, PROBE_REFUSED);
 		return ENODEV;
 	}
+
+	/* Maps the tree's address. */
 	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (blob == NULL) {
 		atomic_raw_store_release(&wifi_probe_state, PROBE_REFUSED);
 		return ENODEV;
 	}
+
+	/* Opens the tree, checking its header. */
 	error = drv_fdt_open(&wifi->fdt, blob, WIFI_FDT_READ_LIMIT);
 	if (error != 0) {
 		atomic_raw_store_release(&wifi_probe_state, PROBE_REFUSED);
@@ -631,6 +635,8 @@ route_pins(
 		error = drv_rpi_gpio_set_pull(pin, wifi->slot.pulls[i]);
 		if (error != 0)
 			return error;
+
+		/* Hands the pin to the bus controller as its function. */
 		error = drv_rpi_gpio_set_function(pin, wifi->slot.function);
 		if (error != 0)
 			return error;
@@ -717,6 +723,8 @@ prepare_functions(
 		kern_logf("rpi4-wifi: F1 block size not set (%d)\n", error);
 		return error;
 	}
+
+	/* Sets the block size CMD53 uses for the frames. */
 	error = drv_rpi_sdio_set_block_size(&wifi->card, FUNCTION_FRAMES, FUNCTION2_BLOCK_SIZE);
 	if (error != 0) {
 		kern_logf("rpi4-wifi: F2 block size not set (%d)\n", error);
@@ -1110,6 +1118,8 @@ bus_power_up(
 	error = drv_rpi_sdio_host_set_bus_width(&wifi->host, 1);
 	if (error != 0)
 		return error;
+
+	/* Returns the bus to the enumeration clock. */
 	error = drv_rpi_sdio_host_set_clock(&wifi->host, DRV_RPI_SDIO_HOST_IDENTIFY_HZ);
 	if (error != 0)
 		return error;

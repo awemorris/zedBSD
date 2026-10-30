@@ -693,6 +693,8 @@ commit_device(
 	} else if (node->is_gic) {
 		wanted = 1;
 	}
+
+	/* Skips every other node. */
 	if (!wanted)
 		return FDT_OK;
 
@@ -766,7 +768,9 @@ commit_framebuffer(
 		return FDT_OK;
 	if ((node->fb_format & ~FDT_FB_FORMAT_ALPHA) == FDT_FB_FORMAT_NONE)
 		return FDT_OK;
-	if (node->fb_width == 0 || node->fb_height == 0 || node->fb_stride == 0)
+	if (node->fb_width == 0 ||
+	    node->fb_height == 0 ||
+	    node->fb_stride == 0)
 		return FDT_OK;
 
 	/* Requires one whole base and size in reg. */
@@ -1116,6 +1120,8 @@ record_property(
 		node->release_addr = read_be64(value);
 		return;
 	}
+
+	/* The same address in one cell. */
 	if (matches && length == 4) {
 		node->release_addr = read_be32(value);
 		return;
@@ -1171,11 +1177,15 @@ record_property(
 		node->fb_width = read_be32(value);
 		return;
 	}
+
+	/* The framebuffer's height in rows. */
 	matches = string_equal(name, name_length, "height");
 	if (matches && length == 4) {
 		node->fb_height = read_be32(value);
 		return;
 	}
+
+	/* The framebuffer's row length in bytes. */
 	matches = string_equal(name, name_length, "stride");
 	if (matches && length == 4) {
 		node->fb_stride = read_be32(value);

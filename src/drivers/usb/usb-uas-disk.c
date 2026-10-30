@@ -573,6 +573,8 @@ uas_control_stop(struct uas_disk *owner)
 	if (worker == NULL)
 		return 0;
 	atomic_raw_store_release(&owner->control_stopping, 1U);
+
+	/* Wakes the control worker so it sees the stop request. */
 	sched_notify_task(worker->task);
 	deadline = sched_ticks() + kern_ms_to_ticks(UAS_CONTROL_STOP_MS);
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) != THREAD_ZOMBIE) {
@@ -661,8 +663,12 @@ uas_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id)
 	}
 	(void)drv_usb_interface_set_driver_data(interface, owner);
 	atomic_raw_store_release(&owner->control_ready, 1U);
+
+	/* Wakes the control worker, when there is one, now that the driver data is set. */
 	if (owner->control_worker != NULL)
 		sched_notify_task(owner->control_worker->task);
+
+	/* Succeeded: the disk is attached. */
 	return 0;
 
 fail:

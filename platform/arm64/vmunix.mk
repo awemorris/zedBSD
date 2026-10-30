@@ -777,29 +777,34 @@ $(DYNAMIC_DIR)/obj/src/rtld/tlsdesc.o: src/rtld/tlsdesc-arm64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) -c $< -o $@
 $(DYNAMIC_LIBM_OBJS): $(DYNAMIC_FLOAT_DIR)/math/%.o: src/libc/math/%.c \
-	$(ZEDBSD_LIBM_HEADERS)
+	$(ZEDBSD_LIBM_HEADERS) $(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/softfloat.o: src/libc/softfloat.c src/libc/softfloat.h
+$(DYNAMIC_FLOAT_DIR)/softfloat.o: src/libc/softfloat.c src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/compiler-runtime.o: src/libc/compiler-runtime.c src/libc/softfloat.h
+$(DYNAMIC_FLOAT_DIR)/compiler-runtime.o: src/libc/compiler-runtime.c src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/softfloat128.o: src/libc/softfloat128.c \
-	src/libc/softfloat128.h src/libc/softfloat.h
+	src/libc/softfloat128.h src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/compiler-runtime128.o: src/libc/compiler-runtime128.c \
-	src/libc/softfloat128.h src/libc/softfloat.h
+	src/libc/softfloat128.h src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/float-parse.o: src/libc/float-parse.c src/libc/softfloat.h
+$(DYNAMIC_FLOAT_DIR)/float-parse.o: src/libc/float-parse.c src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@

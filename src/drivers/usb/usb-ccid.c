@@ -316,6 +316,8 @@ usb_ccid_detach(
 	if (worker != NULL) {
 		if (worker == curthread)
 			return EBUSY;
+
+		/* Wakes the worker so it sees the stop request. */
 		sched_notify_task(worker->task);
 		for (;;) {
 			state = atomic_raw_load_acquire((volatile unsigned *)&worker->state);

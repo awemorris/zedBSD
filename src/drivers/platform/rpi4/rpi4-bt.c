@@ -431,7 +431,7 @@ drv_rpi4_bt_probe(
 		return ENODEV;
 	}
 
-	/* Records the clocks config.txt affects, whether or not the controller is driven (ws215 design B2). */
+	/* Records the clocks config.txt affects, whether or not the controller is driven. */
 	log_clocks();
 
 	/* The PL011 carries the serial console in this build, so Bluetooth stays off (the user's D1). */
@@ -991,6 +991,8 @@ route_pins(
 		error = drv_rpi_gpio_set_pull(pin, bt->pulls[index]);
 		if (error != 0)
 			return error;
+
+		/* Hands the pin to the PL011 as its alternate function. */
 		error = drv_rpi_gpio_set_function(pin, DRV_RPI_GPIO_FUNCTION_ALT3);
 		if (error != 0)
 			return error;
@@ -1029,6 +1031,8 @@ release_console_pins(void)
 		error = drv_rpi_gpio_get_function(pins[index], &function);
 		if (error != 0)
 			continue;
+
+		/* Only a pin UART0 still drives needs releasing. */
 		if (function != DRV_RPI_GPIO_FUNCTION_ALT0)
 			continue;
 
@@ -1562,6 +1566,7 @@ self_reset(
 	int by_worker)
 {
 	unsigned long enabled;
+	uint64_t now;
 	int decision;
 	int error;
 
@@ -1577,7 +1582,9 @@ self_reset(
 
 	enabled = spin_lock_irqsave(&bt->lock);
 
-	decision = drv_rpi_bt_link_self_reset(&bt->link, observed, now_ms());
+	/* Asks the history of resets whether this one goes ahead, stops the controller for good, or is cancelled. */
+	now = now_ms();
+	decision = drv_rpi_bt_link_self_reset(&bt->link, observed, now);
 	if (decision == DRV_RPI4_BT_SELF_RESET_GO) {
 		bt->self_resets++;
 		begin_transition_locked(bt);

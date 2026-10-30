@@ -14,6 +14,12 @@
 
 #include <stdint.h>
 
+/*
+ * The Unicode scalar of each JIS X 0208 cell, 94 cells to a row.
+ *
+ * It is constant and shared by the text console and the graphics glyph
+ * lookup, which search it for a scalar and take the index as the cell.
+ */
 const uint16_t drv_pc98_jisx0208_to_ucs[7896] = {
 	0x3000, 0x3001, 0x3002, 0xFF0C, 0xFF0E, 0x30FB, 0xFF1A, 0xFF1B, 0xFF1F, 0xFF01, 0x309B, 0x309C,
 	0x00B4, 0xFF40, 0x00A8, 0xFF3E, 0xFFE3, 0xFF3F, 0x30FD, 0x30FE, 0x309D, 0x309E, 0x3003, 0x4EDD,

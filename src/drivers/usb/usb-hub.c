@@ -188,6 +188,8 @@ usb_hub_detach(
 	if (worker != NULL) {
 		if (worker == curthread)
 			return EBUSY;
+
+		/* Wakes the worker so it sees the stop request. */
 		sched_notify_task(worker->task);
 		while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
 		    THREAD_ZOMBIE)

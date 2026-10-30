@@ -557,15 +557,19 @@ static int
 display_reset(
 	void *context)
 {
-	int error;
+	int sent;
 
 	(void)context;
 
 	/* Starts the graphics display controller. */
-	error = gdc_command(GDC_START);
+	sent = gdc_command(GDC_START);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports that the controller never had room for the command. */
+	if (!sent)
+		return 0;
+
+	/* Succeeded: the controller took the command. */
+	return 1;
 }
 
 /* Supports the display stop operation. */
@@ -573,15 +577,19 @@ static int
 display_stop(
 	void *context)
 {
-	int error;
+	int sent;
 
 	(void)context;
 
 	/* Stops the graphics display controller. */
-	error = gdc_command(GDC_STOP);
+	sent = gdc_command(GDC_STOP);
 
-	/* Returns the computed result. */
-	return error;
+	/* Reports that the controller never had room for the command. */
+	if (!sent)
+		return 0;
+
+	/* Succeeded: the controller took the command. */
+	return 1;
 }
 
 /*
@@ -646,15 +654,21 @@ gdc_command(
 	unsigned timeout;
 	uint8_t status;
 
-	/* Waits a bounded time for room in the FIFO, then sends the command. */
+	/* Waits a bounded time for room in the FIFO. */
+	status = GDC_FIFO_FULL;
 	for (timeout = GDC_TIMEOUT; timeout != 0; timeout--) {
 		status = kern_io_in8(GDC_STATUS_PORT);
-		if ((status & GDC_FIFO_FULL) == 0) {
-			kern_io_out8(GDC_COMMAND_PORT, value);
-			return 1;
-		}
+		if ((status & GDC_FIFO_FULL) == 0)
+			break;
 	}
 
 	/* The FIFO never had room. */
-	return 0;
+	if ((status & GDC_FIFO_FULL) != 0)
+		return 0;
+
+	/* Sends the command now that the FIFO has room. */
+	kern_io_out8(GDC_COMMAND_PORT, value);
+
+	/* Succeeded: the command was sent. */
+	return 1;
 }

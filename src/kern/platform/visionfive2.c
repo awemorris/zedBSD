@@ -11,9 +11,8 @@
  * The console is the text console over the loader's screen and the UART
  * the firmware's console uses: what it writes goes to both, and what the
  * UART receives, by its interrupt, is typed into it beside USB keyboards.
- * The board publishes one boot
- * device: the initial ramdisk the loader read, when there is one, and
- * otherwise the SD card.  The ramdisk holds a disk
+ * The board publishes one boot device: the initial ramdisk the loader read,
+ * when there is one, and otherwise the SD card.  The ramdisk holds a disk
  * image laid out like a Raspberry Pi 4's SD card, a FAT boot partition
  * first and the UFS root beside it, so the kernel's root search finds the
  * root as it does there.  An SD card booted without a ramdisk carries its
@@ -1475,6 +1474,8 @@ start_console(
 	/* Gives the console the UART, when the tree named one. */
 	if (console_uart_present)
 		vf2_console_board.serial_write = console_uart_putc;
+
+	/* Lets a fatal stop take the display back to the loader's screen. */
 	vf2_console_board.reveal_fatal = reveal_fatal;
 
 	/* Maps the loader's screen; without one the console is the UART alone. */

@@ -160,6 +160,7 @@ drv_rpi_mmc_irq_add(
 		return EBUSY;
 	}
 
+	/* Records the handler in the free slot. */
 	slots[free_slot].handler = handler;
 	slots[free_slot].argument = argument;
 
@@ -172,6 +173,8 @@ drv_rpi_mmc_irq_add(
 		line_masked = 0;
 		unmask = 1;
 	}
+
+	/* Starts the run of unclaimed interrupts again. */
 	unclaimed_count = 0;
 
 	spin_unlock_irqrestore(&dispatch_lock, enabled);
