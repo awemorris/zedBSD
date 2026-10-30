@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 05:12（Q1）
+最終更新: 2026-10-31 05:13（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,7 +9,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | — | 返却（05:5x）。WS299 の UFS の書きの直しを main に（QEMU で新しい file 490 → 851 MB/s、上書き 410 → 852） | 5330 の電源の入れ直しの後に実測（script は用意済み） |
+| P1 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1773: p024 速さ（計測・profile・目標・案を先に、最適化は p026 の後） | WS299 は 5330 の実測待ち |
 | P2 | Bug | VF2 の実機の Bug の束 | q1772: BUG-338（hart 0）→ 342（PowerVR の static data）→ 340（SD の CRC）→ 343（root が live にならない）→ 339（U-Boot の DTB）を今の main で実機で | 4 つ目の束は closed 5 件 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
 | P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1769: p026 共通部分を codec に依らない名前に（設計を先に、移しは p022 の後） | 午後: Pi 5 の実機 |
