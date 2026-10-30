@@ -734,7 +734,9 @@ vp_toggle(
 
 	/* What it does now. */
 	kl_mutex_lock(&player->media.lock);
+
 	state = player->media.state;
+
 	kl_mutex_unlock(&player->media.lock);
 
 	/* The other. */
@@ -757,7 +759,9 @@ vp_states(
 
 	/* What is open. */
 	kl_mutex_lock(&player->media.lock);
+
 	state = player->media.state;
+
 	kl_mutex_unlock(&player->media.lock);
 
 	/* The playback's actions only with something open. */
@@ -889,9 +893,13 @@ vp_draw(
 
 	/* A decoder failure is a user-visible playback state, rather than an apparent end of the file. */
 	kl_mutex_lock(&player->media.lock);
+
 	failure = player->media.failure;
 	player->media.failure = 0;
+
 	kl_mutex_unlock(&player->media.lock);
+
+	/* A failure is told to the user. */
 	if (failure != 0) {
 		(void)snprintf(player->notice, sizeof(player->notice), "Playback stopped because the media could not be decoded.");
 		player->dirty = 1;
@@ -901,13 +909,13 @@ vp_draw(
 	clock = vp_media_clock(&player->media);
 	played_out = vp_played_out(player, clock, now_us);
 
-	/* The clock's reckoning, once a second while playing (BUG-300). */
+	/* The clock's reckoning, once a second while playing. */
 	vp_log_clock(player, clock, played_out, now_us);
 
 	/*
 	 * The picture whose time has come (the first one at once after an open
 	 * or a seek).  Once the sound has played out, every picture left is due:
-	 * the clock stops short of the end with the position heard (BUG-300).
+	 * the clock stops short of the end with the position heard.
 	 */
 	due = clock;
 	if (played_out)
@@ -937,7 +945,7 @@ vp_draw(
 		played_out &&
 		player->media.state == VP_PLAYING &&
 		player->media.picture_count == 0U) {
-		/* The clock stays at the end (BUG-300), as the slider and the time show it while ended. */
+		/* The clock stays at the end, as the slider and the time show it while ended. */
 		player->media.clock_time = clock;
 		if (player->media.duration > clock)
 			player->media.clock_time = player->media.duration;
@@ -1435,7 +1443,9 @@ vp_bar_visible(
 
 	/* The media's state. */
 	kl_mutex_lock(&player->media.lock);
+
 	state = player->media.state;
+
 	kl_mutex_unlock(&player->media.lock);
 
 	/* Hidden while playing once its time is over. */
@@ -1506,9 +1516,13 @@ vp_draw_bar(
 
 	/* Shown while paused or ended, and for a while after the pointer moved. */
 	kl_mutex_lock(&player->media.lock);
+
 	state = player->media.state;
 	duration = player->media.duration;
+
 	kl_mutex_unlock(&player->media.lock);
+
+	/* Hidden while playing once its time is over. */
 	if (state == VP_PLAYING && now_us > player->bar_until)
 		return;
 
@@ -1599,8 +1613,12 @@ vp_wait(
 
 	/* While playing, the pictures' pace (a frame's time at most). */
 	kl_mutex_lock(&player->media.lock);
+
 	state = player->media.state;
+
 	kl_mutex_unlock(&player->media.lock);
+
+	/* A short wait while pictures are due, a long one otherwise. */
 	wait = VP_IDLE_MS;
 	if (state == VP_PLAYING || player->need_picture)
 		wait = 10;

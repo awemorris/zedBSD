@@ -103,8 +103,10 @@ keiui_picker_init(
 		return error;
 	}
 
-	/* Succeeded: the lock and the condition are made and released by keiui_picker_fini. */
+	/* The lock and the condition are made and released by keiui_picker_fini. */
 	picker->lock_made = 1;
+
+	/* Succeeded: the picker can be started. */
 	return 0;
 }
 
@@ -245,8 +247,10 @@ keiui_picker_start(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: keiui_picker_fini stops and joins it. */
+	/* keiui_picker_fini stops and joins the thread. */
 	picker->thread_made = 1;
+
+	/* Succeeded: the thread runs. */
 	return 0;
 }
 

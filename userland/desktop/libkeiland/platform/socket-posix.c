@@ -146,6 +146,8 @@ kl_address_parse(
 		} else if (errno != 0 || number > UINT32_MAX) {
 			return EINVAL;
 		}
+
+		/* The scope is the interface's index. */
 		address->scope = (uint32_t)number;
 	}
 
@@ -174,6 +176,8 @@ kl_address_format(
 	} else {
 		return EAFNOSUPPORT;
 	}
+
+	/* An address that could not be written has no text. */
 	if (written == NULL)
 		return EAFNOSUPPORT;
 
@@ -185,6 +189,8 @@ kl_address_format(
 	} else {
 		length = snprintf(text, size, "[%s]:%u", numbers, (unsigned)address->port);
 	}
+
+	/* The text must fit in the room given. */
 	if (length < 0 || (size_t)length >= size)
 		return ENOSPC;
 
@@ -262,6 +268,8 @@ kl_socket_resolve(
 		if (error != 0)
 			return error;
 	}
+
+	/* The system's type of the kind asked for. */
 	error = socket_type(kind, &hints.ai_socktype);
 	if (error != 0)
 		return error;
@@ -279,6 +287,8 @@ kl_socket_resolve(
 		if (error == 0)
 			(*count)++;
 	}
+
+	/* The system's list goes. */
 	freeaddrinfo(found);
 
 	/* A host with no address of a known family. */
@@ -380,6 +390,8 @@ kl_socket_set_nonblocking(
 	} else {
 		flags &= ~O_NONBLOCK;
 	}
+
+	/* The new flags set. */
 	status = fcntl(socket->fd, F_SETFL, flags);
 	if (status != 0)
 		return errno;
@@ -412,6 +424,8 @@ kl_socket_connect(
 	status = connect(socket->fd, (const struct sockaddr *)&system, length);
 	if (status == 0)
 		return 0;
+
+	/* A signal cut it short: the end is waited for. */
 	error = errno;
 	if (error == EINTR) {
 		error = socket_wait_connect(socket->fd);
@@ -420,8 +434,12 @@ kl_socket_connect(
 		return 0;
 	}
 
-	/* EINPROGRESS for a socket that does not block, or why it failed. */
-	return error;
+	/* Reports EINPROGRESS for a socket that does not block, or why it failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: connected. */
+	return 0;
 }
 
 /*
@@ -442,8 +460,12 @@ kl_socket_connect_result(
 	if (status != 0)
 		return errno;
 
-	/* The connection's end. */
-	return error;
+	/* Reports why the connection failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the socket connected. */
+	return 0;
 }
 
 /*
@@ -553,6 +575,8 @@ kl_socket_accept(
 			return EAGAIN;
 		return error;
 	}
+
+	/* The new socket owns the descriptor. */
 	made->fd = fd;
 
 	/* Where it came from. */
@@ -886,6 +910,8 @@ kl_socket_native(
 
 /*
  * Closes a socket.
+ *
+ * A NULL socket is ignored.
  */
 void
 kl_socket_close(
@@ -960,6 +986,8 @@ kl_socket_poll(
 			polled[index].events = POLLIN;
 			continue;
 		}
+
+		/* A socket asks for what the wait asks. */
 		polled[index].fd = wait->socket->fd;
 		polled[index].events = 0;
 		if ((wait->events & KL_SOCKET_READABLE) != 0U)
@@ -983,6 +1011,8 @@ kl_socket_poll(
 				free(polled);
 			return error;
 		}
+
+		/* A signal cut the wait short: the rest of the time is left. */
 		if (milliseconds > 0) {
 			left = deadline - socket_now_ms();
 			if (left < 0)
@@ -1011,10 +1041,14 @@ kl_socket_poll(
 			if ((events & (POLLERR | POLLNVAL)) != 0U)
 				found |= KL_SOCKET_FAILED;
 		}
+
+		/* The wait's result, counted when it found anything. */
 		wait->ready = found;
 		if (found != 0U)
 			(*ready)++;
 	}
+
+	/* The list allocated for a long wait goes. */
 	if (polled != stack)
 		free(polled);
 
@@ -1112,8 +1146,12 @@ socket_to_system(
 		*length = sizeof(*ipv4);
 		return 0;
 	}
+
+	/* Only IPv6 besides. */
 	if (address->family != KL_ADDRESS_IPV6)
 		return EAFNOSUPPORT;
+
+	/* The IPv6 layout. */
 	ipv6 = (struct sockaddr_in6 *)system;
 	ipv6->sin6_family = AF_INET6;
 	ipv6->sin6_port = htons(address->port);
@@ -1150,6 +1188,8 @@ socket_from_system(
 	/* Only IPv6 besides. */
 	if (system->sa_family != AF_INET6 || length < (socklen_t)sizeof(*ipv6))
 		return EAFNOSUPPORT;
+
+	/* The IPv6 layout. */
 	ipv6 = (const struct sockaddr_in6 *)(const void *)system;
 	address->family = KL_ADDRESS_IPV6;
 	address->port = ntohs(ipv6->sin6_port);
@@ -1258,8 +1298,12 @@ socket_wait_connect(
 	if (status != 0)
 		return errno;
 
-	/* Connected (0), or why not. */
-	return error;
+	/* Reports why the connection failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: connected. */
+	return 0;
 }
 
 /* Tells whether accept's error is a connection gone before it was taken, to pass over for the next. */

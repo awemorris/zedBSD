@@ -428,10 +428,14 @@ primes_post(
 	/* The count handed back: its thread is ending, so it is joined (if primes_finish has not); the record is the program's again. */
 	if (code == POST_FINISHED) {
 		count = data;
+
+		/* Joins the thread unless primes_finish did. */
 		if (primes->worker != NULL) {
 			(void)kl_thread_join(primes->worker);
 			primes->worker = NULL;
 		}
+
+		/* Takes the result and shows how the count ended. */
 		primes->done = count->done;
 		primes->found = count->primes;
 		how = "Done";
@@ -519,6 +523,8 @@ primes_finish(
 		status = kl_app_dispatch(primes->app, 0);
 		if (status != 0)
 			break;
+
+		/* Acts on every post this dispatch brought, counting them. */
 		found = 0;
 		for (;;) {
 			taken = kl_app_take(primes->app, &event);
@@ -531,6 +537,8 @@ primes_finish(
 				primes_post(primes, event.code, event.data);
 			}
 		}
+
+		/* No post came: none is left. */
 		if (found == 0)
 			break;
 	}

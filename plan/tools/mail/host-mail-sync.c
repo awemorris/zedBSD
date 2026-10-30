@@ -210,7 +210,7 @@ test_wait_for(
 			ml_sync_release(&result);
 		}
 
-		/* The next wake. */
+		/* Waits a little before looking again. */
 		kl_thread_sleep(100U);
 	}
 

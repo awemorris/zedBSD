@@ -6,7 +6,7 @@
  */
 
 /*
- * Mail's backend (WS169 p003, plan/ws169/phase001/phase.md section 2): a
+ * Mail's backend: a
  * connection to a mail server, plain or TLS (the OpenSSL package loaded
  * when first needed), IMAP4rev1 to read the folders, SMTP to send, the
  * reading and the writing of a message (RFC 5322 and MIME), and the

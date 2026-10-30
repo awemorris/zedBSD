@@ -142,9 +142,11 @@ kl_thread_start(
 	/* Nothing started yet. */
 	*thread = NULL;
 
-	/* A thread runs something, at a priority the interface knows. */
+	/* A thread runs something. */
 	if (options == NULL || options->run == NULL)
 		return EINVAL;
+
+	/* A thread's priority is one the interface knows. */
 	if (options->priority > KL_THREAD_PRIORITY_HIGH)
 		return EINVAL;
 
@@ -156,8 +158,12 @@ kl_thread_start(
 	/* What the thread runs, its name (cut to what threads keep) and its priority. */
 	record->run = options->run;
 	record->argument = options->argument;
+
+	/* The name is kept only when the program gave one. */
 	if (options->name != NULL)
 		thread_name_keep(record->name, options->name);
+
+	/* The priority the thread sets for itself as it starts. */
 	record->priority = options->priority;
 
 	/* Held by the program and by the thread until each gives it back. */
@@ -339,6 +345,7 @@ kl_thread_cpu_count(void)
 	DWORD count;
 	DWORD_PTR process_mask;
 	DWORD_PTR system_mask;
+	HANDLE process;
 	BOOL got;
 	unsigned allowed;
 
@@ -351,7 +358,8 @@ kl_thread_cpu_count(void)
 		count = 1UL;
 
 	/* The processors the process may use, when the system tells. */
-	got = GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask);
+	process = GetCurrentProcess();
+	got = GetProcessAffinityMask(process, &process_mask, &system_mask);
 	if (got != FALSE) {
 		/* Counts the processors in the mask. */
 		allowed = 0U;
@@ -380,9 +388,12 @@ int
 kl_mutex_init(
 	struct kl_mutex *mutex)
 {
+	SRWLOCK *lock;
+
 	/* The system's lock in the room, free. */
 	memset(mutex, 0, sizeof(*mutex));
-	InitializeSRWLock(thread_lock(mutex));
+	lock = thread_lock(mutex);
+	InitializeSRWLock(lock);
 
 	/* Succeeded: the mutex is free. */
 	return 0;
@@ -408,8 +419,11 @@ void
 kl_mutex_lock(
 	struct kl_mutex *mutex)
 {
+	SRWLOCK *lock;
+
 	/* Held when this returns. */
-	AcquireSRWLockExclusive(thread_lock(mutex));
+	lock = thread_lock(mutex);
+	AcquireSRWLockExclusive(lock);
 }
 
 /*
@@ -419,10 +433,12 @@ int
 kl_mutex_try(
 	struct kl_mutex *mutex)
 {
+	SRWLOCK *lock;
 	BOOLEAN taken;
 
 	/* Held, or another thread holds it. */
-	taken = TryAcquireSRWLockExclusive(thread_lock(mutex));
+	lock = thread_lock(mutex);
+	taken = TryAcquireSRWLockExclusive(lock);
 	if (taken == FALSE)
 		return EBUSY;
 
@@ -437,8 +453,11 @@ void
 kl_mutex_unlock(
 	struct kl_mutex *mutex)
 {
+	SRWLOCK *lock;
+
 	/* Free for another thread. */
-	ReleaseSRWLockExclusive(thread_lock(mutex));
+	lock = thread_lock(mutex);
+	ReleaseSRWLockExclusive(lock);
 }
 
 /*
@@ -448,9 +467,12 @@ int
 kl_cond_init(
 	struct kl_cond *cond)
 {
+	CONDITION_VARIABLE *condition;
+
 	/* The system's condition in the room, with nobody waiting. */
 	memset(cond, 0, sizeof(*cond));
-	InitializeConditionVariable(thread_condition(cond));
+	condition = thread_condition(cond);
+	InitializeConditionVariable(condition);
 
 	/* Succeeded: nobody waits on it. */
 	return 0;
@@ -475,8 +497,13 @@ kl_cond_wait(
 	struct kl_cond *cond,
 	struct kl_mutex *mutex)
 {
+	CONDITION_VARIABLE *condition;
+	SRWLOCK *lock;
+
 	/* Woken, or for nothing, with the lock held again (taken exclusively: no flags). */
-	(void)SleepConditionVariableSRW(thread_condition(cond), thread_lock(mutex), INFINITE, 0UL);
+	condition = thread_condition(cond);
+	lock = thread_lock(mutex);
+	(void)SleepConditionVariableSRW(condition, lock, INFINITE, 0UL);
 }
 
 /*
@@ -491,6 +518,8 @@ kl_cond_wait_for(
 	struct kl_mutex *mutex,
 	uint32_t milliseconds)
 {
+	CONDITION_VARIABLE *condition;
+	SRWLOCK *lock;
 	DWORD wait;
 	BOOL woken;
 	DWORD error;
@@ -501,7 +530,9 @@ kl_cond_wait_for(
 		wait = INFINITE - 1UL;
 
 	/* Waits with the lock held again afterwards. */
-	woken = SleepConditionVariableSRW(thread_condition(cond), thread_lock(mutex), wait, 0UL);
+	condition = thread_condition(cond);
+	lock = thread_lock(mutex);
+	woken = SleepConditionVariableSRW(condition, lock, wait, 0UL);
 	if (woken != FALSE)
 		return 0;
 
@@ -521,8 +552,11 @@ void
 kl_cond_signal(
 	struct kl_cond *cond)
 {
+	CONDITION_VARIABLE *condition;
+
 	/* One waiting thread runs again. */
-	WakeConditionVariable(thread_condition(cond));
+	condition = thread_condition(cond);
+	WakeConditionVariable(condition);
 }
 
 /*
@@ -532,8 +566,11 @@ void
 kl_cond_broadcast(
 	struct kl_cond *cond)
 {
+	CONDITION_VARIABLE *condition;
+
 	/* Every waiting thread runs again. */
-	WakeAllConditionVariable(thread_condition(cond));
+	condition = thread_condition(cond);
+	WakeAllConditionVariable(condition);
 }
 
 /*
@@ -550,12 +587,14 @@ kl_once(
 	void (*run)(void))
 {
 	struct thread_once_call call;
+	INIT_ONCE *room;
 
 	/* The function the system's callback runs. */
 	call.run = run;
 
 	/* Run by the first caller; the others wait for it to end. */
-	(void)InitOnceExecuteOnce(thread_once_room(once), thread_once_run, &call, NULL);
+	room = thread_once_room(once);
+	(void)InitOnceExecuteOnce(room, thread_once_run, &call, NULL);
 }
 
 /*
@@ -628,6 +667,8 @@ kl_thread_key_set(
 		record = malloc(sizeof(*record));
 		if (record == NULL)
 			return ENOMEM;
+
+		/* The record carries the key's destroy and no value yet. */
 		record->destroy = room->destroy;
 		record->value = NULL;
 
@@ -764,6 +805,7 @@ thread_set_name(
 	thread_describe_function describe;
 	WCHAR wide[THREAD_NAME_WIDE];
 	int count;
+	HANDLE self;
 	HRESULT status;
 
 	/* The system's library that may have the call. */
@@ -783,7 +825,8 @@ thread_set_name(
 		return;
 
 	/* The calling thread's name; a failure leaves it without one. */
-	status = describe(GetCurrentThread(), wide);
+	self = GetCurrentThread();
+	status = describe(self, wide);
 	(void)status;
 }
 
@@ -796,11 +839,14 @@ static void
 thread_set_priority(
 	unsigned priority)
 {
+	HANDLE self;
+
 	/* Normal is what a thread starts with. */
+	self = GetCurrentThread();
 	if (priority == KL_THREAD_PRIORITY_LOW) {
-		(void)SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+		(void)SetThreadPriority(self, THREAD_PRIORITY_BELOW_NORMAL);
 	} else if (priority == KL_THREAD_PRIORITY_HIGH) {
-		(void)SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+		(void)SetThreadPriority(self, THREAD_PRIORITY_ABOVE_NORMAL);
 	}
 }
 
@@ -813,6 +859,7 @@ thread_once_run(
 {
 	struct thread_once_call *call;
 
+	/* The system's own arguments are not needed. */
 	(void)once;
 	(void)context;
 

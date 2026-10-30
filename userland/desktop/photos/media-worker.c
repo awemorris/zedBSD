@@ -93,9 +93,10 @@ ph_media_worker_start(
 	error = media_ready();
 	if (error != 0)
 		return error;
+
+	/* The thread: not stopped, no result held, its name, what it runs and its priority. */
 	worker.stop = 0;
 	worker.result.descriptor = -1;
-	/* The thread: its name, what it runs and its priority. */
 	memset(&options, 0, sizeof(options));
 	options.name = "photos-import";
 	options.run = media_main;
@@ -104,6 +105,8 @@ ph_media_worker_start(
 	error = kl_thread_start(&options, &worker.thread);
 	if (error != 0)
 		return error;
+
+	/* The worker runs. */
 	worker.running = 1;
 
 	/* Succeeded: the UI can enqueue paths without performing any media IO. */
@@ -120,6 +123,8 @@ ph_media_worker_stop(
 	/* Cancellation shuts down only this worker's Wayland connection, never the UI's. */
 	if (!worker.running)
 		return;
+
+	/* The worker is told to stop and woken. */
 	kl_mutex_lock(&worker.lock);
 
 	worker.stop = 1;
@@ -128,6 +133,8 @@ ph_media_worker_stop(
 	kl_cond_signal(&worker.wake);
 
 	kl_mutex_unlock(&worker.lock);
+
+	/* Waits for the worker to end. */
 	(void)kl_thread_join(worker.thread);
 	worker.thread = NULL;
 
@@ -249,9 +256,10 @@ media_queue(
 
 	/* The condition exists once the worker runs; a failure to make it leaves the signal out. */
 	ready = media_ready();
-	kl_mutex_lock(&worker.lock);
 
 	/* A new job cannot overwrite the identity, path or descriptor of the preceding request. */
+	kl_mutex_lock(&worker.lock);
+
 	if (worker.busy || worker.stop) {
 		kl_mutex_unlock(&worker.lock);
 		return EBUSY;
@@ -306,10 +314,13 @@ media_main(
 		worker.queued = 0;
 
 		kl_mutex_unlock(&worker.lock);
+
+		/* Runs the job without the lock. */
 		media_run(path, notice, removing, &result);
-		kl_mutex_lock(&worker.lock);
 
 		/* Publishes a complete descriptor and status as one result. */
+		kl_mutex_lock(&worker.lock);
+
 		worker.result = result;
 		worker.ready = 1;
 

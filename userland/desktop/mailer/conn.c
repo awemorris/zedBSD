@@ -6,13 +6,13 @@
  */
 
 /*
- * Mail's connection to a server (WS169 p003; mail.h): a TCP socket to a
+ * Mail's connection to a server (mail.h): a TCP socket to a
  * host and port, TLS from the start or after STARTTLS (tls.c), and reads
  * of a whole line or of a counted run of bytes through a buffer, each
  * waiting at most the connection's timeout for the server.
  *
- * ws177-p015: a connection that the server does not take within
- * CONN_CONNECT_MS fails with ETIMEDOUT instead of the system's long wait.
+ * A connection that the server does not take within CONN_CONNECT_MS fails
+ * with ETIMEDOUT instead of the system's long wait.
  */
 
 #include "mail.h"
@@ -111,8 +111,14 @@ ml_conn_open(
 	conn->timeout_ms = CONN_TIMEOUT_MS;
 
 	/* The host's addresses for a stream; any failure to find them is a name not found, as the window says. */
-	status = kl_socket_resolve(server->host, (uint16_t)server->port, KL_ADDRESS_ANY, KL_SOCKET_STREAM,
-	    addresses, CONN_ADDRESSES, &count);
+	status = kl_socket_resolve(
+		server->host,
+		(uint16_t)server->port,
+		KL_ADDRESS_ANY,
+		KL_SOCKET_STREAM,
+		addresses,
+		CONN_ADDRESSES,
+		&count);
 	if (status != 0)
 		return ENOENT;
 
@@ -158,6 +164,7 @@ ml_conn_start_tls(
 	struct ml_conn *conn,
 	const struct ml_server *server)
 {
+	intptr_t native;
 	int error;
 
 	/* Bytes the server sent before the handshake would be read as plain text after it. */
@@ -165,7 +172,8 @@ ml_conn_start_tls(
 		return EPROTO;
 
 	/* The handshake. */
-	error = ml_tls_open(kl_socket_native(conn->socket), server->host, server->pin, &conn->tls);
+	native = kl_socket_native(conn->socket);
+	error = ml_tls_open(native, server->host, server->pin, &conn->tls);
 	if (error != 0)
 		return error;
 
@@ -351,6 +359,8 @@ conn_fill(
 	pending = 0;
 	if (conn->tls != NULL)
 		pending = ml_tls_pending(conn->tls);
+
+	/* Waits until the socket can be read, or the timeout passes. */
 	if (!pending) {
 		watched.socket = conn->socket;
 		watched.waker = NULL;
@@ -362,9 +372,11 @@ conn_fill(
 			return ETIMEDOUT;
 	}
 
-	/* Through TLS. */
+	/* The buffer starts empty. */
 	conn->start = 0;
 	conn->end = 0;
+
+	/* Through TLS. */
 	if (conn->tls != NULL) {
 		error = ml_tls_read(conn->tls, conn->buffer, sizeof(conn->buffer), &decrypted);
 		if (error != 0)
@@ -372,6 +384,8 @@ conn_fill(
 		if (decrypted == 0U)
 			return EPIPE;
 		conn->end = decrypted;
+
+		/* Succeeded: the buffer has decrypted bytes. */
 		return 0;
 	}
 
@@ -382,8 +396,10 @@ conn_fill(
 	if (received == 0U)
 		return EPIPE;
 
-	/* Succeeded: the buffer has bytes. */
+	/* The bytes received are what the buffer holds. */
 	conn->end = received;
+
+	/* Succeeded: the buffer has bytes. */
 	return 0;
 }
 
@@ -439,7 +455,9 @@ conn_connect(
 		return error;
 	}
 
-	/* Succeeded: the server took the connection. */
+	/* The connected socket goes to the caller. */
 	*socket = made;
+
+	/* Succeeded: the server took the connection. */
 	return 0;
 }

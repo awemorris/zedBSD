@@ -6,16 +6,16 @@
  */
 
 /*
- * The media thread of the player: mediafile (WS122 p003) reads the file,
- * the decoding add-in (codec.c, p004) decodes its first video track and its
+ * The media thread of the player: mediafile reads the file,
+ * the decoding add-in (codec.c) decodes its first video track and its
  * first audio track it has a decoder for.  The pictures wait in a small
  * ring for the window to take them at their time; the sound is converted
  * to 16-bit stereo at the stream's rate and written into the stream's ring,
  * which paces the reading.  A seek drops what is decoded and queued, and
  * starts the clock again at the time sought.
  *
- * The clock is the sound's, so the sound must never wait for the pictures
- * (BUG-300): while the ring of pictures is full, the reader keeps the
+ * The clock is the sound's, so the sound must never wait for the pictures:
+ * while the ring of pictures is full, the reader keeps the
  * picture that did not fit, keeps reading, decodes and writes the sound, and
  * keeps the video packets in the file's order in a bounded queue, which the
  * video decoder takes as the ring makes room.
@@ -151,7 +151,7 @@ vp_media_open(
 	int64_t length_us;
 	int error;
 
-	/* What was open goes; the sound is opened again when its service went or came (WS191). */
+	/* What was open goes; the sound is opened again when its service went or came. */
 	vp_media_close(media);
 	if (media->audio != NULL)
 		vp_audio_renew(media->audio);
@@ -173,6 +173,7 @@ vp_media_open(
 
 	/* What is known of the file, paused at its start. */
 	kl_mutex_lock(&media->lock);
+
 	(void)snprintf(media->path, sizeof(media->path), "%s", path);
 	media->width = (int)media_file_track(reader->file, reader->video_track)->width;
 	media->height = (int)media_file_track(reader->file, reader->video_track)->height;
@@ -188,6 +189,7 @@ vp_media_open(
 	media->clock_time = 0.0;
 	media->clock_frames = vp_audio_clock_position(media->audio);
 	media->clock_us = media_now_us();
+
 	kl_mutex_unlock(&media->lock);
 
 	/* The thread reads ahead from here: its name, what it runs and its priority. */
@@ -203,8 +205,10 @@ vp_media_open(
 		return error;
 	}
 
-	/* Succeeded: the thread owns the reader. */
+	/* The thread owns the reader. */
 	media->thread_started = 1;
+
+	/* Succeeded: the file is open and paused at its start. */
 	return 0;
 }
 
@@ -218,9 +222,13 @@ vp_media_close(
 	/* The thread is asked to end, and waited for. */
 	if (media->thread_started) {
 		kl_mutex_lock(&media->lock);
+
 		media->quit = 1;
 		kl_cond_broadcast(&media->wake);
+
 		kl_mutex_unlock(&media->lock);
+
+		/* Waits for the thread to end. */
 		(void)kl_thread_join(media->thread);
 		media->thread = NULL;
 		media->thread_started = 0;
@@ -234,10 +242,12 @@ vp_media_close(
 
 	/* The pictures and the state. */
 	kl_mutex_lock(&media->lock);
+
 	media_drop_pictures(media);
 	media->state = VP_EMPTY;
 	media->path[0] = '\0';
 	media->eof = 0;
+
 	kl_mutex_unlock(&media->lock);
 }
 
@@ -252,8 +262,12 @@ vp_media_play(
 
 	/* From the start again after the end. */
 	kl_mutex_lock(&media->lock);
+
 	state = media->state;
+
 	kl_mutex_unlock(&media->lock);
+
+	/* A file that ended is played from its start again. */
 	if (state == VP_ENDED)
 		vp_media_seek(media, 0.0);
 	if (state == VP_EMPTY || state == VP_PLAYING || state == VP_FAILED)
@@ -261,11 +275,13 @@ vp_media_play(
 
 	/* The clock goes on from where it stood. */
 	kl_mutex_lock(&media->lock);
+
 	media->clock_time = vp_media_clock(media);
 	media->clock_frames = vp_audio_clock_position(media->audio);
 	media->clock_us = media_now_us();
 	media->state = VP_PLAYING;
 	kl_cond_broadcast(&media->wake);
+
 	kl_mutex_unlock(&media->lock);
 
 	/* And the sound with it. */
@@ -284,6 +300,7 @@ vp_media_pause(
 
 	/* Only while playing. */
 	kl_mutex_lock(&media->lock);
+
 	if (media->state != VP_PLAYING) {
 		kl_mutex_unlock(&media->lock);
 		return;
@@ -293,6 +310,7 @@ vp_media_pause(
 	now = vp_media_clock(media);
 	media->state = VP_PAUSED;
 	media->clock_time = now;
+
 	kl_mutex_unlock(&media->lock);
 
 	/* And the sound with it. */
@@ -316,6 +334,7 @@ vp_media_seek(
 
 	/* The request; the clock stands at the time sought until the thread starts it again. */
 	kl_mutex_lock(&media->lock);
+
 	media->seek_wanted = 1;
 	media->seek_to = seconds;
 	media->clock_time = seconds;
@@ -324,6 +343,7 @@ vp_media_seek(
 		media->state = VP_PAUSED;
 	media_drop_pictures(media);
 	kl_cond_broadcast(&media->wake);
+
 	kl_mutex_unlock(&media->lock);
 }
 
@@ -375,6 +395,7 @@ vp_media_take(
 	taken = NULL;
 	*next = -1.0;
 	kl_mutex_lock(&media->lock);
+
 	while (media->picture_count > 0U) {
 		/* Not due yet: the next time. */
 		slot = media->picture_first;
@@ -396,7 +417,10 @@ vp_media_take(
 
 	/* Room for the reader. */
 	kl_cond_broadcast(&media->wake);
+
 	kl_mutex_unlock(&media->lock);
+
+	/* Reports the picture taken, or NULL. */
 	return taken;
 }
 
@@ -427,10 +451,14 @@ media_run(
 
 		/* Wait in the failed state while leaving seek and stop requests available. */
 		kl_mutex_lock(&media->lock);
+
 		stop = 0;
 		if (media->state == VP_FAILED)
 			stop = 1;
+
 		kl_mutex_unlock(&media->lock);
+
+		/* Failed: the reader only waits for a seek or the stop. */
 		if (stop) {
 			media_sleep_ms(MEDIA_WAIT_MS * 5);
 			continue;
@@ -458,8 +486,12 @@ media_run(
 		status = media_file_read(reader->file, &packet);
 		if (status == ENODATA) {
 			kl_mutex_lock(&media->lock);
+
 			drained = media->eof;
+
 			kl_mutex_unlock(&media->lock);
+
+			/* The end is drained once. */
 			if (!drained) {
 				/* The end of the video track follows its last packet, and drains its decoder in turn. */
 				if (!reader->video_ended) {
@@ -496,10 +528,14 @@ media_run(
 
 			/* The end is noted once, and the reader waits for a seek or the end of the thread. */
 			kl_mutex_lock(&media->lock);
+
 			if (!media->eof)
 				vp_log("END reached dropped=%llu", (unsigned long long)media_file_dropped(reader->file));
 			media->eof = 1;
+
 			kl_mutex_unlock(&media->lock);
+
+			/* A little wait for a seek or the stop. */
 			media_sleep_ms(MEDIA_WAIT_MS * 5);
 			continue;
 		}
@@ -1005,11 +1041,19 @@ media_sound(
 		stop = media_stopping(media);
 		if (stop)
 			return 1;
+
+		/* A seek asked for meanwhile. */
 		kl_mutex_lock(&media->lock);
+
 		stop = media->seek_wanted;
+
 		kl_mutex_unlock(&media->lock);
+
+		/* A seek asked for ends this write. */
 		if (stop)
 			return 1;
+
+		/* As much as fits. */
 		written = vp_audio_write(media->audio, reader->samples + done * 2U, converted - done);
 		done += written;
 		if (done < converted)
@@ -1037,9 +1081,13 @@ media_seek(
 	/* A seek asked for. */
 	media = reader->media;
 	kl_mutex_lock(&media->lock);
+
 	wanted = media->seek_wanted;
 	seconds = media->seek_to;
+
 	kl_mutex_unlock(&media->lock);
+
+	/* No seek asked for: nothing to carry out. */
 	if (!wanted)
 		return 0;
 
@@ -1047,8 +1095,12 @@ media_seek(
 	error = media_file_seek(reader->file, (int64_t)(seconds * 1000000.0));
 	if (error != 0) {
 		kl_mutex_lock(&media->lock);
+
 		media->seek_wanted = 0;
+
 		kl_mutex_unlock(&media->lock);
+
+		/* The seek failed: the failure is published. */
 		media_fail(reader, error);
 		return 1;
 	}
@@ -1070,6 +1122,7 @@ media_seek(
 
 	/* The clock anchored at the time sought; the pictures dropped again (some may have come meanwhile). */
 	kl_mutex_lock(&media->lock);
+
 	media_drop_pictures(media);
 	media->clock_time = seconds;
 	media->clock_frames = vp_audio_clock_position(media->audio);
@@ -1079,7 +1132,10 @@ media_seek(
 	if (media->state == VP_FAILED)
 		media->state = VP_PAUSED;
 	media->seek_wanted = 0;
+
 	kl_mutex_unlock(&media->lock);
+
+	/* The log line the tests read. */
 	vp_log("SEEK done to_ms=%lld", (long long)(seconds * 1000.0));
 
 	/* Carried out. */
@@ -1097,9 +1153,13 @@ media_fail(
 	/* The window consumes the reason while the reader waits in the failed state. */
 	media = reader->media;
 	kl_mutex_lock(&media->lock);
+
 	media->failure = error;
 	media->state = VP_FAILED;
+
 	kl_mutex_unlock(&media->lock);
+
+	/* The sound stops with the picture. */
 	(void)vp_audio_stop(media->audio);
 	vp_log("PLAYBACK failed error=%d", error);
 }
@@ -1127,8 +1187,12 @@ media_stopping(
 
 	/* Read under the lock. */
 	kl_mutex_lock(&media->lock);
+
 	quit = media->quit;
+
 	kl_mutex_unlock(&media->lock);
+
+	/* Reports whether the thread is to end. */
 	return quit;
 }
 

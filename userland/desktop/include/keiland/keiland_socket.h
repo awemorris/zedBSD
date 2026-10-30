@@ -214,7 +214,7 @@ intptr_t kl_socket_native(const struct kl_socket *socket);
 
 /*
  * Closes a socket.  No other thread may be using it (waiting for it,
- * sending or receiving) meanwhile.
+ * sending or receiving) meanwhile.  A NULL socket does nothing.
  */
 void kl_socket_close(struct kl_socket *socket);
 

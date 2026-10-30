@@ -215,8 +215,11 @@ test_produce(
 	for (value = 1U; value <= TEST_ITEMS; value++) {
 		kl_mutex_lock(&ring->lock);
 
+		/* Waits for room. */
 		while (ring->count == TEST_RING)
 			kl_cond_wait(&ring->room, &ring->lock);
+
+		/* Puts the item at the tail of the ring and wakes a consumer. */
 		ring->values[(ring->head + ring->count) % TEST_RING] = value;
 		ring->count++;
 		ring->made++;
@@ -249,12 +252,17 @@ test_consume(
 	for (;;) {
 		kl_mutex_lock(&ring->lock);
 
+		/* Waits for an item, or for the producer's end. */
 		while (ring->count == 0U && !ring->done)
 			kl_cond_wait(&ring->item, &ring->lock);
+
+		/* The producer is done and nothing is left: this consumer ends. */
 		if (ring->count == 0U) {
 			kl_mutex_unlock(&ring->lock);
 			break;
 		}
+
+		/* Takes the item at the head of the ring and wakes the producer. */
 		value = ring->values[ring->head];
 		ring->head = (ring->head + 1U) % TEST_RING;
 		ring->count--;
@@ -316,6 +324,8 @@ test_key_race(
 		free(value);
 		return;
 	}
+
+	/* The value read back must be the one set. */
 	read = kl_thread_key_get(&test_key);
 	if (read != value || *read != *(unsigned *)argument)
 		*(unsigned *)argument = 0U;
@@ -376,14 +386,20 @@ test_hold(
 	void *argument)
 {
 	atomic_int *holding;
+	int state;
 
 	/* Held, told, and kept until told to let go. */
 	holding = argument;
 	kl_mutex_lock(&test_static_lock);
 
 	atomic_store(holding, 1);
-	while (atomic_load(holding) == 1)
+
+	/* Yields until the starter has tried the mutex and sets the state to 2. */
+	state = atomic_load(holding);
+	while (state == 1) {
 		kl_thread_yield();
+		state = atomic_load(holding);
+	}
 
 	kl_mutex_unlock(&test_static_lock);
 }
@@ -439,6 +455,8 @@ test_mutexes(void)
 			break;
 		started++;
 	}
+
+	/* Every adder started. */
 	test_check(started == TEST_ADDERS, "thread-start");
 
 	/* Each adder's end. */
@@ -471,16 +489,33 @@ test_conditions(void)
 		test_check(0, "cond-init");
 		return;
 	}
+
+	/* The ring's mutex. */
 	error = kl_mutex_init(&ring->lock);
-	if (error == 0)
-		error = kl_cond_init(&ring->room);
-	if (error == 0)
-		error = kl_cond_init(&ring->item);
-	test_check(error == 0, "cond-init");
 	if (error != 0) {
+		test_check(0, "cond-init");
 		free(ring);
 		return;
 	}
+
+	/* The condition for room. */
+	error = kl_cond_init(&ring->room);
+	if (error != 0) {
+		test_check(0, "cond-init");
+		free(ring);
+		return;
+	}
+
+	/* The condition for an item. */
+	error = kl_cond_init(&ring->item);
+	if (error != 0) {
+		test_check(0, "cond-init");
+		free(ring);
+		return;
+	}
+
+	/* All three are made. */
+	test_check(1, "cond-init");
 
 	/* The consumers, then the producer. */
 	memset(&options, 0, sizeof(options));
@@ -494,13 +529,17 @@ test_conditions(void)
 			break;
 		started++;
 	}
+
+	/* The producer. */
 	options.name = "test-producer";
 	options.run = test_produce;
 	error = kl_thread_start(&options, &producer);
 	test_check(error == 0 && started == TEST_CONSUMERS, "cond-start");
-	if (error == 0)
+
+	/* Waits for the producer, or, when it did not start, tells the consumers that nothing comes. */
+	if (error == 0) {
 		(void)kl_thread_join(producer);
-	else {
+	} else {
 		kl_mutex_lock(&ring->lock);
 
 		ring->done = 1;
@@ -534,10 +573,16 @@ test_timed_wait(void)
 
 	/* A condition nobody signals. */
 	error = kl_mutex_init(&lock);
-	if (error == 0)
-		error = kl_cond_init(&cond);
 	if (error != 0) {
 		test_check(0, "wait-for-init");
+		return;
+	}
+
+	/* The condition. */
+	error = kl_cond_init(&cond);
+	if (error != 0) {
+		test_check(0, "wait-for-init");
+		kl_mutex_destroy(&lock);
 		return;
 	}
 
@@ -575,6 +620,9 @@ test_once_and_keys(void)
 	unsigned started;
 	unsigned index;
 	unsigned own;
+	unsigned once_runs;
+	unsigned destroyed;
+	void *unset;
 	int error;
 
 	/* The racers on the once. */
@@ -587,10 +635,15 @@ test_once_and_keys(void)
 			break;
 		started++;
 	}
+
+	/* The racers' ends, then the once once more from this thread. */
 	for (index = 0; index < started; index++)
 		(void)kl_thread_join(threads[index]);
 	kl_once(&test_once, test_once_call);
-	test_check(started == TEST_RACERS && atomic_load(&test_once_runs) == 1U, "once");
+
+	/* The call ran once in all. */
+	once_runs = atomic_load(&test_once_runs);
+	test_check(started == TEST_RACERS && once_runs == 1U, "once");
 
 	/* The key, and the racers that set it. */
 	error = kl_thread_key_create(&test_key, test_key_destroy);
@@ -607,18 +660,24 @@ test_once_and_keys(void)
 			break;
 		started++;
 	}
+
+	/* The racers' ends. */
 	for (index = 0; index < started; index++)
 		(void)kl_thread_join(threads[index]);
 
-	/* Each racer read its own value, the destructor took every one, and this thread has none. */
+	/* Each racer read its own value: it leaves its index unchanged. */
 	own = 1U;
 	for (index = 0; index < started; index++) {
 		if (indexes[index] != index + 1U)
 			own = 0U;
 	}
+
+	/* The destructor took every value, and this thread has none. */
 	test_check(started == TEST_RACERS && own == 1U, "key-own");
-	test_check(atomic_load(&test_key_destroyed) == TEST_RACERS, "key-destroy");
-	test_check(kl_thread_key_get(&test_key) == NULL, "key-unset");
+	destroyed = atomic_load(&test_key_destroyed);
+	test_check(destroyed == TEST_RACERS, "key-destroy");
+	unset = kl_thread_key_get(&test_key);
+	test_check(unset == NULL, "key-unset");
 	kl_thread_key_delete(&test_key);
 }
 
@@ -630,6 +689,9 @@ test_join_and_detach(void)
 	struct kl_thread *thread;
 	struct test_self self;
 	uint64_t start;
+	uint64_t elapsed;
+	int ran;
+	int current;
 	int error;
 
 	/* A detached thread runs on and ends by itself (its record goes then; a leak check sees it). */
@@ -637,22 +699,40 @@ test_join_and_detach(void)
 	options.name = "test-detached";
 	options.run = test_detached;
 	error = kl_thread_start(&options, &thread);
-	if (error == 0)
+	if (error == 0) {
 		error = kl_thread_detach(thread);
+	}
+
+	/* Waits for it to say it ran, for a limited time. */
 	start = test_now_ms();
-	while (atomic_load(&test_detached_ran) == 0 && test_now_ms() - start < TEST_LATE_MS)
+	ran = atomic_load(&test_detached_ran);
+	elapsed = 0;
+	while (ran == 0 && elapsed < TEST_LATE_MS) {
 		kl_thread_sleep(1U);
-	test_check(error == 0 && atomic_load(&test_detached_ran) == 1, "detach");
+		ran = atomic_load(&test_detached_ran);
+		elapsed = test_now_ms() - start;
+	}
+
+	/* It ran. */
+	test_check(error == 0 && ran == 1, "detach");
 
 	/* A thread handed its own record cannot join itself and is current to itself. */
 	memset(&self, 0, sizeof(self));
 	error = kl_mutex_init(&self.lock);
-	if (error == 0)
-		error = kl_cond_init(&self.ready);
 	if (error != 0) {
 		test_check(0, "join-self");
 		return;
 	}
+
+	/* The condition the thread waits on for its record. */
+	error = kl_cond_init(&self.ready);
+	if (error != 0) {
+		test_check(0, "join-self");
+		kl_mutex_destroy(&self.lock);
+		return;
+	}
+
+	/* The thread that tries to join itself. */
 	options.name = "test-self";
 	options.run = test_join_self;
 	options.argument = &self;
@@ -661,13 +741,20 @@ test_join_and_detach(void)
 		test_check(0, "join-self");
 		return;
 	}
-	test_check(kl_thread_is_current(thread) == 0, "current-other");
+
+	/* This thread is not the one it started. */
+	current = kl_thread_is_current(thread);
+	test_check(current == 0, "current-other");
+
+	/* Hands the thread its record. */
 	kl_mutex_lock(&self.lock);
 
 	self.thread = thread;
 	kl_cond_signal(&self.ready);
 
 	kl_mutex_unlock(&self.lock);
+
+	/* Its answer is that it could not join itself. */
 	error = kl_thread_join(thread);
 	test_check(error == 0 && self.answer == EDEADLK, "join-self");
 	kl_cond_destroy(&self.ready);
@@ -685,29 +772,47 @@ test_static_and_limits(void)
 	struct kl_thread_options options;
 	struct kl_thread *thread;
 	atomic_int holding;
+	unsigned cpus;
+	int state;
+	int same;
 	int error;
 
 	/* The system's static initializers are all zero bytes, which KL_MUTEX_INIT and KL_ONCE_INIT give. */
-	test_check(memcmp(&system_mutex, zero_mutex, sizeof(system_mutex)) == 0, "static-mutex-zero");
-	test_check(memcmp(&system_once, zero_once, sizeof(system_once)) == 0, "static-once-zero");
+	same = memcmp(&system_mutex, zero_mutex, sizeof(system_mutex));
+	test_check(same == 0, "static-mutex-zero");
+	same = memcmp(&system_once, zero_once, sizeof(system_once));
+	test_check(same == 0, "static-once-zero");
 
 	/* The static mutex: free, then held by another thread (kl_mutex_try fails), then free again. */
 	error = kl_mutex_try(&test_static_lock);
-	if (error == 0)
+	if (error == 0) {
 		kl_mutex_unlock(&test_static_lock);
+	}
+
+	/* It was free. */
 	test_check(error == 0, "try-free");
+
+	/* Another thread holds it: the try fails. */
 	memset(&options, 0, sizeof(options));
 	options.run = test_hold;
 	options.argument = &holding;
 	atomic_init(&holding, 0);
 	error = kl_thread_start(&options, &thread);
 	if (error == 0) {
-		while (atomic_load(&holding) == 0)
+		/* Waits until the thread holds the mutex. */
+		state = atomic_load(&holding);
+		while (state == 0) {
 			kl_thread_yield();
+			state = atomic_load(&holding);
+		}
+
+		/* Tries the mutex, then lets the thread go. */
 		error = kl_mutex_try(&test_static_lock);
 		atomic_store(&holding, 2);
 		(void)kl_thread_join(thread);
 	}
+
+	/* It was busy. */
 	test_check(error == EBUSY, "try-held");
 
 	/* A long name is cut and kept (Linux reads it back), at a low priority; and one at a high priority starts too. */
@@ -717,19 +822,30 @@ test_static_and_limits(void)
 	options.priority = KL_THREAD_PRIORITY_LOW;
 	options.stack_size = 256U * 1024U;
 	error = kl_thread_start(&options, &thread);
-	if (error == 0)
+	if (error == 0) {
 		error = kl_thread_join(thread);
+	}
+
+	/* The low-priority thread started and ended. */
 	test_check(error == 0, "start-low");
+
+	/* The name as the thread read it back. */
 #if defined(__linux__)
-	test_check(strcmp(test_name_read, "test-a-name-lon") == 0, "name");
+	same = strcmp(test_name_read, "test-a-name-lon");
+	test_check(same == 0, "name");
 #endif
+
+	/* A thread of high priority, with no name and the default stack. */
 	options.name = NULL;
 	options.run = test_nothing;
 	options.priority = KL_THREAD_PRIORITY_HIGH;
 	options.stack_size = 0U;
 	error = kl_thread_start(&options, &thread);
-	if (error == 0)
+	if (error == 0) {
 		error = kl_thread_join(thread);
+	}
+
+	/* The high-priority thread started and ended. */
 	test_check(error == 0, "start-high");
 
 	/* No run, or an unknown priority, is refused. */
@@ -743,5 +859,6 @@ test_static_and_limits(void)
 	test_check(error == EINVAL && thread == NULL, "start-bad-priority");
 
 	/* At least one processor. */
-	test_check(kl_thread_cpu_count() >= 1U, "cpu-count");
+	cpus = kl_thread_cpu_count();
+	test_check(cpus >= 1U, "cpu-count");
 }

@@ -6,7 +6,7 @@
  */
 
 /*
- * Mail's thread that talks to the servers (WS169 p004; sync.h): the
+ * Mail's thread that talks to the servers (sync.h): the
  * window queues jobs (sign in, get mail, send, mark read, move), the
  * thread does them one by one on its own IMAP session for each account
  * and queues the results, and between jobs it waits in IDLE on every
@@ -23,14 +23,14 @@
  * under one lock; a job's and a result's memory goes with it from one
  * thread to the other.
  *
- * ws177-p015: a message of the trash is deleted for good, an account's
+ * A message of the trash is deleted for good, an account's
  * new settings are tried without being taken (the window starts the
  * thread again with them), a server that keeps the sent messages by
  * itself (Gmail) gets no copy appended to Sent, and a failure says in
  * words what failed on which server (and gives an untrusted
  * certificate's fingerprint for the user to trust).
  *
- * ws177-p016: a message larger than ML_FETCH_BYTES is not read from the
+ * A message larger than ML_FETCH_BYTES is not read from the
  * start the fetch gave; after the fetch it is fetched again by its
  * structure (its header and its words alone, ml_imap_fetch_large).
  */
@@ -203,9 +203,11 @@ ml_sync_start(
 		return status;
 	}
 
-	/* Succeeded: the thread runs. */
+	/* Publishes the running thread. */
 	sync->started = 1;
 	*made = sync;
+
+	/* Succeeded: the thread runs. */
 	return 0;
 }
 
@@ -233,7 +235,7 @@ ml_sync_stop(
 
 		kl_mutex_unlock(&sync->lock);
 
-		/* Woken, and waited for. */
+		/* Wakes the thread out of its wait and waits for it to end. */
 		kl_socket_waker_ring(sync->waker);
 		(void)kl_thread_join(sync->thread);
 		sync->thread = NULL;
@@ -293,6 +295,8 @@ ml_sync_queue(
 
 	/* The thread woken (rings merge until its wait finds them). */
 	kl_socket_waker_ring(sync->waker);
+
+	/* Succeeded: the job is queued. */
 	return 0;
 }
 
@@ -315,8 +319,9 @@ ml_sync_take(
 		sync->results = first->next;
 		if (sync->results == NULL)
 			sync->results_last = NULL;
-	} else
+	} else {
 		sync->told = 0;
+	}
 
 	kl_mutex_unlock(&sync->lock);
 
@@ -328,6 +333,8 @@ ml_sync_take(
 	*result = *first;
 	result->next = NULL;
 	free(first);
+
+	/* Succeeded: one result is handed over. */
 	return 1;
 }
 
@@ -463,18 +470,20 @@ sync_wait(
 			continue;
 		}
 
-		/* New mail: IDLE ended and the inbox's new messages got. */
-		if (arrived) {
-			error = ml_imap_idle_stop(&sync->accounts[accounts[index]].imap);
-			sync->accounts[accounts[index]].idling = 0;
-			if (error != 0) {
-				sync_close(sync, accounts[index]);
-				continue;
-			}
-	
+		/* No new mail: the session keeps idling. */
+		if (!arrived)
+			continue;
+
+		/* New mail: the session's IDLE is ended so that the inbox can be read. */
+		error = ml_imap_idle_stop(&sync->accounts[accounts[index]].imap);
+		sync->accounts[accounts[index]].idling = 0;
+		if (error != 0) {
+			sync_close(sync, accounts[index]);
+			continue;
+		}
+
 		/* New mail: the inbox's new messages got. */
 		sync_refresh(sync, accounts[index], ML_INBOX, 1);
-		}
 	}
 
 	/* Succeeded: the wait is over. */

@@ -332,7 +332,6 @@ network_draw(
 	kl_ui_window_text(network->ui, network->window);
 }
 
-
 /*
  * Draws and shows a frame; nonzero when the frame cannot be shown.
  */
@@ -444,12 +443,18 @@ network_post(
 	/* The series handed back: its thread is ending, so it is joined (if network_finish has not), and only then is its waker closed. */
 	if (code == POST_FINISHED) {
 		exchange = data;
+
+		/* Joins the thread unless network_finish did. */
 		if (network->thread != NULL) {
 			(void)kl_thread_join(network->thread);
 			network->thread = NULL;
 		}
+
+		/* Closes the waker: nothing waits on it now. */
 		kl_socket_waker_close(exchange->waker);
 		network->done = exchange->done;
+
+		/* Shows how the series ended: all made, stopped, or failed. */
 		if (exchange->error == 0) {
 			snprintf(network->status, sizeof(network->status), "Done: %u round trips, %lu us each.", exchange->done, (unsigned long)(exchange->total_us / exchange->done));
 		} else if (exchange->error == ECANCELED) {
@@ -457,6 +462,8 @@ network_post(
 		} else {
 			snprintf(network->status, sizeof(network->status), "Failed after %u round trips (%s).", exchange->done, strerror(exchange->error));
 		}
+
+		/* The series is the program's again: frees it. */
 		free(exchange);
 		network->exchange = NULL;
 		network->dirty = 1;
@@ -558,6 +565,8 @@ network_finish(
 		status = kl_app_dispatch(network->app, 0);
 		if (status != 0)
 			break;
+
+		/* Acts on every post this dispatch brought, counting them. */
 		found = 0;
 		for (;;) {
 			taken = kl_app_take(network->app, &event);
@@ -570,6 +579,8 @@ network_finish(
 				network_post(network, event.code, event.data);
 			}
 		}
+
+		/* No post came: none is left. */
 		if (found == 0)
 			break;
 	}
@@ -709,11 +720,15 @@ network_join(
 			waits[count].events = KL_SOCKET_READABLE;
 			count++;
 		}
+
+		/* The connecting socket, until its connect has ended. */
 		if (!connected) {
 			waits[count].socket = client;
 			waits[count].events = KL_SOCKET_WRITABLE;
 			count++;
 		}
+
+		/* The waker, always. */
 		waits[count].waker = exchange->waker;
 		waits[count].events = KL_SOCKET_READABLE;
 		count++;
@@ -939,6 +954,8 @@ network_send_line(
 				return status;
 			continue;
 		}
+
+		/* Refuses to go on when the send failed. */
 		if (status != 0)
 			return status;
 		total += sent;

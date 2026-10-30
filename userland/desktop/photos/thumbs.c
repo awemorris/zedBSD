@@ -131,9 +131,8 @@ ph_worker_start(
 			worker.cache[0] = '\0';
 	}
 
-	/* The thread. */
+	/* The thread: not stopped, its name, what it runs and its priority. */
 	worker.stop = 0;
-	/* The thread: its name, what it runs and its priority. */
 	memset(&options, 0, sizeof(options));
 	options.name = "photos-thumbs";
 	options.run = worker_main;
@@ -142,7 +141,11 @@ ph_worker_start(
 	error = kl_thread_start(&options, &worker.thread);
 	if (error != 0)
 		return error;
+
+	/* The thread runs. */
 	worker.running = 1;
+
+	/* Succeeded: the thread is started. */
 	return 0;
 }
 
@@ -158,9 +161,13 @@ ph_worker_stop(void)
 	/* Asked to stop, and waited for. */
 	if (worker.running) {
 		kl_mutex_lock(&worker.lock);
+
 		worker.stop = 1;
 		kl_cond_signal(&worker.wake);
+
 		kl_mutex_unlock(&worker.lock);
+
+		/* Waits for the thread to end. */
 		(void)kl_thread_join(worker.thread);
 		worker.thread = NULL;
 		worker.running = 0;
@@ -203,6 +210,7 @@ ph_worker_queue(
 
 	/* Already queued or being made. */
 	kl_mutex_lock(&worker.lock);
+
 	same = worker.busy && worker_same(&worker.current, photo, whole, generation);
 	for (index = 0; index < worker.job_count && !same; index++)
 		same = worker_same(&worker.jobs[index], photo, whole, generation);
@@ -235,7 +243,10 @@ ph_worker_queue(
 	worker.job_count++;
 	if (ready == 0)
 		kl_cond_signal(&worker.wake);
+
 	kl_mutex_unlock(&worker.lock);
+
+	/* Succeeded: the job is queued. */
 	return 0;
 }
 
@@ -250,6 +261,7 @@ ph_worker_drop_thumbs(void)
 
 	/* The whole pictures kept in their order. */
 	kl_mutex_lock(&worker.lock);
+
 	kept = 0;
 	for (index = 0; index < worker.job_count; index++) {
 		if (!worker.jobs[index].whole)
@@ -260,6 +272,7 @@ ph_worker_drop_thumbs(void)
 
 	/* Those kept. */
 	worker.job_count = kept;
+
 	kl_mutex_unlock(&worker.lock);
 }
 
@@ -279,6 +292,7 @@ ph_worker_take(
 
 	/* None. */
 	kl_mutex_lock(&worker.lock);
+
 	if (worker.result_count == 0U) {
 		kl_mutex_unlock(&worker.lock);
 		return 0;
@@ -293,7 +307,10 @@ ph_worker_take(
 	/* The thread may wait for the room. */
 	if (ready == 0)
 		kl_cond_signal(&worker.wake);
+
 	kl_mutex_unlock(&worker.lock);
+
+	/* Succeeded: one result is handed over. */
 	return 1;
 }
 
@@ -308,8 +325,12 @@ ph_worker_busy(void)
 
 	/* Under the lock. */
 	kl_mutex_lock(&worker.lock);
+
 	busy = worker.busy || worker.job_count != 0U || worker.result_count != 0U;
+
 	kl_mutex_unlock(&worker.lock);
+
+	/* Reports whether the thread has work. */
 	return busy;
 }
 
@@ -323,6 +344,7 @@ worker_main(
 	/* Each job. */
 	(void)unused;
 	kl_mutex_lock(&worker.lock);
+
 	for (;;) {
 		/* Waits for a job, or the stop. */
 		while (!worker.stop && (worker.job_count == 0U || worker.result_count == WORKER_RESULTS))
@@ -335,17 +357,21 @@ worker_main(
 		worker.job_count--;
 		memmove(&worker.jobs[0], &worker.jobs[1], worker.job_count * sizeof(worker.jobs[0]));
 		worker.busy = 1;
+
 		kl_mutex_unlock(&worker.lock);
+
+		/* Makes the job's picture. */
 		worker_make(&worker.current, &result);
 
 		/* Its result. */
 		kl_mutex_lock(&worker.lock);
+
 		worker.busy = 0;
 		worker.results[worker.result_count] = result;
 		worker.result_count++;
 	}
 
-	/* Stopped. */
+	/* Stopped: the lock is let go as the thread ends. */
 	kl_mutex_unlock(&worker.lock);
 }
 

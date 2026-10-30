@@ -183,6 +183,8 @@ se_scan_finish(
 		(void)kl_thread_join(scan->threads[index]);
 		scan->threads[index] = NULL;
 	}
+
+	/* No worker is left. */
 	scan->thread_count = 0U;
 
 	/* The folders left on the list, and the set of links. */
@@ -336,11 +338,15 @@ scan_folder(
 	if (folder == NULL) {
 		if (descriptor >= 0)
 			(void)close(descriptor);
+
+		/* The folder is counted as unreadable. */
 		kl_mutex_lock(&scan->lock);
 
 		scan->unreadable++;
 
 		kl_mutex_unlock(&scan->lock);
+
+		/* Nothing of it is walked. */
 		return;
 	}
 
@@ -389,6 +395,8 @@ scan_folder(
 		scan_add(scan, job->group, bytes, files);
 		bytes = 0U;
 		files = 0U;
+
+		/* Whether the scan was stopped meanwhile. */
 		kl_mutex_lock(&scan->lock);
 
 		stop = scan->stop;
