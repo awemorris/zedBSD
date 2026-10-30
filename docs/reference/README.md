@@ -1,5 +1,7 @@
 # Reference
 
+Status: current navigation index
+
 Reference documents define the commands, configuration formats, headers,
 structures, constants, errors and permissions that programs and people use
 ([rules](../style.md)).
@@ -27,6 +29,8 @@ structures, constants, errors and permissions that programs and people use
 - [Security keys and smart card readers](security-keys.md): the raw HID nodes
   of FIDO keys and the slots of USB CCID readers, their requests and
   permissions.
+- [Media playback](media-playback.md): the native media library's AAC-LC audio
+  and H.264 video decoding on Vulkan Video, and what a GPU must provide.
 - [Vulkan Video decode](vulkan-video.md): H.264 decode on Intel Gen12's video
   engine through the Vulkan Video extensions, its limits, result status and
   differences from the specification.

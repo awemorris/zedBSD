@@ -1,5 +1,7 @@
 # Static executable TLS (x86, m68k)
 
+Status: reference.
+
 zedBSDの静的amd64/i386実行ファイルはELF `PT_TLS`を使う。
 コンパイラのlocal-exec TLSは、amd64でFS、i386でGSを使うVariant II配置に従う。
 TPの直前に各スレッド専用のTLSデータがあり、TP先頭wordはTP自身である。

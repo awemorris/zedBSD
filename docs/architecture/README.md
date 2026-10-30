@@ -1,5 +1,7 @@
 # Architecture
 
+Status: current navigation index
+
 Architecture documents give the external design of each subsystem: its
 purpose, its parts and their boundaries, and the reasons for them. They state
 the target design; the implementation follows ([rules](../style.md)).

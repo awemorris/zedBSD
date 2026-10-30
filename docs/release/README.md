@@ -16,3 +16,5 @@ The release's own name (the system was called Kei then).
   notes.
 - [Known issues](zedbsd-1.0.0-beta2-known-issues.md): problems you may meet
   and what to do about them.
+- [Release notes](zedbsd-1.0.0-beta2.md): what the release contains, as
+  published with the release on GitHub.
