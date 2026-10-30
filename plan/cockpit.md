@@ -119,8 +119,8 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 
 **決める事と推し**
 
-1. **app 側の形**
-   - (a)【推し】libvulkan の Wayland の WSI が、ゲームモードの間だけ、compositor から借りた画像を swapchain の画像として使う。ゲームの app は今の Vulkan の書き方のまま、変更なし。
+1. **app 側の形** — **決定（2026-10-30 ユーザー）: (a)。全画面と窓の切り替えは compositor の都合で行い、app は気づかない。**
+   - (a)【推し・決定】libvulkan の Wayland の WSI が、ゲームモードの間だけ、compositor から借りた画像を swapchain の画像として使う。ゲームの app は今の Vulkan の書き方のまま、変更なし。
    - (b) 新しい約束事を app が直に使う。mview などの app を書き直す。
    - 推しの理由: Vulkan を OS の正式な口にする決定 8 の趣旨に合い、app を書き直さずに済む。得失: Linux・FreeBSD で動く app（Mesa を使う）は (a) の恩恵を受けず、今の暫定の経路に残る。
 2. **compositor と app の間に、新しい private な Wayland の protocol を作るか**（製品の判断）

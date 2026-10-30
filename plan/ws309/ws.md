@@ -122,3 +122,8 @@
 | [ws309-p018](phase018/phase.md) | 規約の全文の見直し | cleared（31 file の書き方、style-check の WS309 の行 88→9） | 全て |
 | [ws309-p019](phase019/phase.md) | 試験の screen capture の画素の送りを thread へ（keiland-shot の後の SURFACE_LOST、Q1 の依頼） | cleared（RDNA の実機は P2 の q1668） | p002 |
 - 2026-10-30 Q1: p015 の「要る判断」1〜4 は、ユーザー「WS309の判断は、次回セッション開始時に聞いてくれるように記録してください。」により、次のセッションの始めにユーザーに聞く（master の「次のセッションの始めにする事」）。
+
+## p015 の判断 1（2026-10-30 ユーザー、原文）
+
+「WS309の判断ですが、appは意識せずに、コンポジタの都合で、全画面とウィンドウを切り替えられるようにしたいです。そうすると、app側は(a)しかありえないのではないでしょうか。」
+→ 解釈（Q1）: 判断 1 は (a)（libvulkan の Wayland の WSI が、game mode の間だけ compositor から借りた画像を swapchain の画像として使う。app は変更なし）。加えて、全画面と窓の切り替えは compositor が決め、app は気づかない（libvulkan の WSI が窓の経路と借りた画像の経路を内部で切り替える。swapchain の作り直しを app に求めない形を設計の目標にする）。判断 2〜4 は未回答。
