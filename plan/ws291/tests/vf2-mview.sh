@@ -2,7 +2,7 @@
 # ws291-p020: mview's scene on the VisionFive 2's PowerVR with one tree's kernel and programs, run from the top of the
 # tree while the board is assigned:
 #   VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=... VF2_PLUG=14C19FA80F86 [COPIES='1 10 50 100 200'] [SPIN=12]
-#       [MVIEW_ARGS='--shading=pixel'] [TIMING=1] [KEEP=1] sh plan/ws291/tests/vf2-mview.sh OUT BUILD
+#       [MVIEW_ARGS='--shading=pixel'] [TIMING=1] [KEEP=1] [SHOT_BUILD=DIR] sh plan/ws291/tests/vf2-mview.sh OUT BUILD
 # BUILD is the tree's build of plan/ws291/tests/config-vf2.mk (its vmunix, bin/wayland, bin/mview and the dynamic
 # libraries).  The board's kernel is kept on the board as vmunix.p7old (when not kept already: the original) and read
 # back from it (OUT/board-vmunix), BUILD's kernel
@@ -14,6 +14,8 @@
 # The compositor and mview run as root: the display node opens only for root or its owner.  MVIEW_ARGS are added to
 # every mview run; TIMING=1 turns on libvulkan's submission timing for mview and keeps the kernel's timing lines (a
 # kernel built with -DPOWERVR_SUBMIT_TIMING=1) of each run; KEEP=1 leaves BUILD's kernel on the board (no put back).
+# SHOT_BUILD is a build of the same config with ZEDBSD_TEST_SCREEN_CAPTURE=y and keiland-shot: its compositor is run
+# instead, and keiland-shot takes the screen half way through each spin (OUT/shot-cN.png).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 out=${1:?usage: vf2-mview.sh OUT BUILD}
@@ -56,10 +58,13 @@ say "kernel $(cksum < "$build/vmunix" | cut -d' ' -f1) on the board: $(b 'uname 
 
 # The programs, the libraries and the model in the user's ~/p7.
 b 'mkdir -p p7/bin p7/lib p7/qs40/tex p7/run && chmod 700 p7/run'
-bcp "$build/bin/wayland" "$build/bin/mview" "$VF2_HOST:p7/bin/" &&
+compositor=$build/bin/wayland
+[ -n "${SHOT_BUILD:-}" ] && compositor=$SHOT_BUILD/bin/wayland
+bcp "$compositor" "$build/bin/mview" "$VF2_HOST:p7/bin/" &&
     bcp "$build"/dynamic/*.so "$VF2_HOST:p7/lib/" &&
     bcp userland/tests/mview/models/qs40/model.txt "$VF2_HOST:p7/qs40/" &&
     bcp userland/tests/mview/models/qs40/tex/*.pam "$VF2_HOST:p7/qs40/tex/" || say "FAIL the files were not copied"
+[ -n "${SHOT_BUILD:-}" ] && { bcp "$SHOT_BUILD/bin/keiland-shot" "$VF2_HOST:p7/bin/" || say "FAIL keiland-shot was not copied"; }
 say "files $(b 'cd p7 && cksum bin/wayland bin/mview lib/libc.so lib/libvulkan.so' 2>&1 | awk '{print $1, $3}' | tr '\n' ' ')"
 
 # The compositor as root on its own socket (a stale socket of an earlier run removed first), its pid kept.
@@ -72,7 +77,13 @@ timing=
 [ "${TIMING:-0}" = 1 ] && timing='VULKAN_ZEDBSD_SUBMIT_TIMING=1'
 for copies in ${COPIES:-1 10 50 100 200}; do
 	b 'dmesg' > "$out/c$copies.before" 2>&1
-	printf '%s\n' "$VF2_PASSWORD" | BT=$((${SPIN:-12} + 120)) b "sudo -S $ENV $timing $H/bin/mview --display=$H/run/wayland-0 --model=$H/qs40 --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-}" > "$out/c$copies.txt" 2>&1
+	shot=
+	[ -n "${SHOT_BUILD:-}" ] && shot="& sleep $((${SPIN:-12} / 2 + 4)); $H/bin/keiland-shot --socket $H/run/keiland-shot.sock $H/shot-c$copies.png; wait"
+	printf '%s\n' "$VF2_PASSWORD" | BT=$((${SPIN:-12} + 120)) b "sudo -S sh -c '$ENV $timing $H/bin/mview --display=$H/run/wayland-0 --model=$H/qs40 --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-} $shot'" > "$out/c$copies.txt" 2>&1
+	if [ -n "${SHOT_BUILD:-}" ]; then
+		bcp "$VF2_HOST:p7/shot-c$copies.png" "$out/" > /dev/null 2>&1
+		say "c$copies shot $(grep KEILAND-SHOT "$out/c$copies.txt" | tr '\n' ' ')"
+	fi
 	say "c$copies $(grep -E 'MVIEW (SPIN|STAGES|FAILED|HITCHES)' "$out/c$copies.txt" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')"
 	b 'dmesg' > "$out/c$copies.after" 2>&1
 	grep -F -x -v -f "$out/c$copies.before" "$out/c$copies.after" | grep -v 'dw-mmc' > "$out/c$copies.kernel"
