@@ -129,7 +129,7 @@ audiod_answer(int fd, const struct audiod_header *request)
 		(void)ftruncate(memory, AUDIOD_SHM_HEADER + 8192);
 		shm = mmap(NULL, AUDIOD_SHM_HEADER, PROT_READ | PROT_WRITE, MAP_SHARED, memory, 0);
 		shm->magic = AUDIOD_SHM_MAGIC;
-		shm->version = AUDIOD_VERSION;
+		shm->version = AUDIOD_SHM_VERSION;
 		munmap(shm, AUDIOD_SHM_HEADER);
 		memset(&created, 0, sizeof(created));
 		created.header.type = AUDIOD_STREAM_CREATED;

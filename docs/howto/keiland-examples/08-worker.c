@@ -425,11 +425,13 @@ primes_post(
 		return;
 	}
 
-	/* The count handed back: its thread is ending, so it is joined; the record is the program's again. */
+	/* The count handed back: its thread is ending, so it is joined (if primes_finish has not); the record is the program's again. */
 	if (code == POST_FINISHED) {
 		count = data;
-		(void)kl_thread_join(primes->worker);
-		primes->worker = NULL;
+		if (primes->worker != NULL) {
+			(void)kl_thread_join(primes->worker);
+			primes->worker = NULL;
+		}
 		primes->done = count->done;
 		primes->found = count->primes;
 		how = "Done";
@@ -488,8 +490,11 @@ primes_start(
 
 /*
  * Ends a count still running when the program ends: asks the worker to
- * stop, waits for its thread, and takes the posts it left, whose data
- * would be lost with the application otherwise.
+ * stop, waits for its thread, and then takes the posts it left, whose data
+ * would be lost with the application otherwise.  It joins the thread rather
+ * than wait for the count's post, which fails when there is no memory:
+ * once the thread has ended no post is on its way, and a count that did
+ * not come back is freed here.
  */
 static void
 primes_finish(
@@ -498,28 +503,41 @@ primes_finish(
 	struct kl_app_event event;
 	int status;
 	int taken;
+	int found;
 
 	/* Nothing runs. */
 	if (primes->count == NULL)
 		return;
 
-	/* Stops the worker; it posts its count as it ends, and taking that post joins its thread. */
+	/* Stops the worker and waits for its thread: every post it made now waits for a dispatch. */
 	atomic_store(&primes->count->stop, 1);
+	(void)kl_thread_join(primes->worker);
+	primes->worker = NULL;
 
-	/* Takes the posts left, without waiting, until its count came back (the last of them). */
-	while (primes->count != NULL) {
+	/* Takes the posts left, without waiting: a dispatch that brings none means none is left. */
+	for (;;) {
 		status = kl_app_dispatch(primes->app, 0);
 		if (status != 0)
 			break;
-		taken = kl_app_take(primes->app, &event);
-		if (!taken)
-			break;
-		if (event.kind == KL_APP_WINDOW && event.input.kind == KL_WINDOW_POST) {
-			primes_post(primes, event.input.code, event.input.data);
-		} else if (event.kind == KL_APP_POST) {
-			primes_post(primes, event.code, event.data);
+		found = 0;
+		for (;;) {
+			taken = kl_app_take(primes->app, &event);
+			if (!taken)
+				break;
+			found++;
+			if (event.kind == KL_APP_WINDOW && event.input.kind == KL_WINDOW_POST) {
+				primes_post(primes, event.input.code, event.input.data);
+			} else if (event.kind == KL_APP_POST) {
+				primes_post(primes, event.code, event.data);
+			}
 		}
+		if (found == 0)
+			break;
 	}
+
+	/* A count whose post was lost (no memory) is the program's to free. */
+	free(primes->count);
+	primes->count = NULL;
 }
 
 /*

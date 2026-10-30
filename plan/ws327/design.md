@@ -484,6 +484,32 @@ ECONNRESET、`WSAENETDOWN` → ENETDOWN、`WSAEHOSTDOWN` → EHOSTUNREACH（ming
 `WSAEMSGSIZE` は誤りにせず「切った datagram」として buffer の大きさを返す（§4.3）。MSVC・mingw の errno.h では EAGAIN と EWOULDBLOCK が別の値
 （11・140）なので、library は EAGAIN だけを返す（header に「EWOULDBLOCK と比べない」と書く）。
 
+### 5.4 Windows で header の約束が揺れる所（p013・p014 の結果、p016 のまとめ、2026-10-30）
+
+Win32 の層は mingw の compile と link まで（決定 3、走らせていない）。下は「Windows では header の文言のとおりにならない／なるか確かめていない」所。
+**header を変える必要は無い**と判断した: どれも header の「or another errno value」「on some systems」「未規定」の内、または実装の側で
+直せる。既に直した物も記録に残す。
+
+| # | 層 | 所 | Windows での形 | 扱い |
+| --- | --- | --- | --- | --- |
+| W1 | thread | `kl_thread_sleep` の「少なくとも ms」 | `Sleep` は tick で早く返る | 直した（p013、QPC で測り眠り直す） |
+| W2 | thread | `kl_thread_cpu_count` | 全 group の数は多すぎる | 直した（p013、呼び手の group の数を affinity の bit の数で狭める。job object の制限は見ない） |
+| W3 | thread | key の destroy の回数 | FLS の callback は 1 回。destroy の中で同じ key に set した値は漏れうる | header の「again, on some systems」の内。変えない |
+| W4 | thread | `kl_thread_key_delete` | `FlsFree` が他の thread の生きた値にも、呼んだ thread の上で destroy を呼ぶ | header は未規定と書く。変えない |
+| W5 | thread | libkeiland が DLL で、thread の生きている間に unload | FLS の callback が消えた code を指す。`ExitProcess` では他の thread の destroy は呼ばれない（POSIX の exit と同じ） | header は DLL を語らない。Windows の Makefile を作る時に「libkeiland は unload しない」を build の側の約束にする（Future Work の候補） |
+| W6 | thread | 名前 | `SetThreadDescription` は Windows 10 1607 より前に無い。run time に探し、無ければ付けない | header の「付けられない名前は黙って付けない」の内 |
+| W7 | thread | `stack_size` | reserve の大きさ。`UINT_MAX` 近くは `_beginthreadex` が失敗 → EAGAIN | header の EAGAIN の内 |
+| W8 | thread | `kl_cond_wait_for` の時間 | `SleepConditionVariableSRW` は tick で早く ETIMEDOUT を返しうる | header は「at most」なので内。変えない |
+| S1 | socket | peer が閉じた後の send の EPIPE | WinSock は `WSAECONNABORTED`・`WSAECONNRESET`（→ ECONNABORTED・ECONNRESET）。EPIPE は自分の `shutdown(SD_SEND)` の後だけ | Q1 の決定（2026-10-30）: header は変えない。app は EPIPE と ECONNRESET を同じに扱う（Mailer がそう） |
+| S2 | socket | 接続した UDP の ICMP 到達不能 | `SIO_UDP_CONNRESET` を切るので ECONNREFUSED は来ない | header は約束していない |
+| S3 | socket | bind していない socket の `kl_socket_local_address` | `getsockname` は WSAEINVAL | 直した（Q1 の決定、POSIX に合わせ any・port 0） |
+| S4 | socket | bind の乗っ取り | `SO_EXCLUSIVEADDRUSE` を付けないので他の process が `SO_REUSEADDR` で同じ port に bind できる（waker の listen だけは付ける） | listen する server の app が出たら再検討（今の app は client だけ） |
+| S5 | socket | ready の意味 | `POLLHUP` は select に無い。FIN は readable、RST は readable と writable。「閉じた socket の WRITABLE」は未確認 | header の READABLE（終わり）・FAILED は守れる。WRITABLE は実機で確かめる時に |
+| S6 | socket | `select` の socket の数 | `fd_set` を `fd_count` と配列の malloc で作るので `FD_SETSIZE`（64）に縛られない（code で確かめた、走らせていない） | 実装の内 |
+| S7 | socket | `kl_socket_poll` の時間 | `select` の timeval と、waits が 0 の時の `Sleep` は tick で早く返りうる。POSIX の poll は早く返らない | 直した（p016、Q1 の判断 2026-10-30）: QPC で測り、時間の前に何も無く返った select は残りを待ち直す。waits が 0 は `kl_thread_sleep`。header は変えない |
+| S8 | socket | link と版 | `-lws2_32 -liphlpapi`、`inet_pton` は Vista 以降、`WSA_FLAG_NO_HANDLE_INHERIT` は 7 SP1 以降。Windows 10 を前提（`_WIN32_WINNT=0x0A00`） | Windows の Makefile（範囲の外）の約束 |
+| S9 | socket | `kl_socket_close(NULL)` | 両方の層で何もしない（Mailer が頼る） | header の comment に「NULL は何もしない」を足す（p017 へ持ち越し、design-reviewer #9） |
+
 ## 6. app の移行（p008〜p012）
 
 ### 6.1 thread の名前と数（WS309 の方針）

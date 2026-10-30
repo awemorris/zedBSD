@@ -8,9 +8,8 @@
 #     picker  libkeiland's media picker's model (ui/picker-model.c) against the Linux libkeiland (LINUX_BUILD, default
 #             build/ws327-linux: make -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=DIR DIR/lib/libkeiland.so),
 #             plan/ws197/tests/picker-model-host-test.sh
-# libkeiland's sound streams (audio/audio.c) have no working host test: the first part of
-# plan/ws191/tests/host-audio-stream.sh, built the same way, fails with audio.c as it was before it moved (its opens
-# answer EOPNOTSUPP), so audio.c is checked by its build and the guest.
+# libkeiland's sound streams (audio/audio.c) are tested by plan/ws191/tests/host-audio-stream.sh, which links the
+# thread layer itself.
 # Prints one line per test and "ws327-host-apps: PASS" or "FAIL".  Output in build/tmp/ws327-host-apps (a new
 # directory each run).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib

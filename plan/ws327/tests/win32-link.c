@@ -7,8 +7,9 @@
 
 /*
  * The Windows layers' link check (build-win32.sh): a program that calls
- * every function of keiland_thread.h and keiland_socket.h once, so that the
- * link fails when one is not defined.  It is built, never run.
+ * every function of keiland/keiland_thread.h and keiland/keiland_socket.h
+ * once, so that the link fails when one is not defined.  It is built, never
+ * run.
  */
 
 #include <keiland/keiland_socket.h>
