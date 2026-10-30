@@ -34,5 +34,5 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 | [p003](phase003/phase.md) | 表 A の機械的な置き換えと include だけの file（sparcv9 の 2 file は別の commit） | cleared（2026-10-30 Q1） | p002 |
 | [p004](phase004/phase.md) | i915 の map（WRITECOMBINE・READONLY）と MSI（B2〜B5）、試験の代役 | cleared（2026-10-30 Q1） | p002 |
 | [p005](phase005/phase.md) | rpi4 の console の作り直し（kernel_putc を公開）と pc98 の 3 か所。追加: Pi 5・ODROID-C5・VF2 の /dev/graphics（generic の boot-fb・fb-text）、gpu.c の最初の flip で boot の framebuffer を手放す | in-progress（P2、q1719。84e3e2698〜977f43204、20 port の build、raspi4b の起動・描き直し・serial、WS290 の host 試験、VF2 の実機の起動（画面・serial の目視は未確かめ）は済み、Venus は未実施、判定は Q1） | p003 |
-| [p007](phase007/phase.md) | HAL の early console の framebuffer の窓を、kernel が外せる形に（amd64 の fb_window を arm64・riscv64 へ） | in-progress（P2、q1720） | p005 |
+| [p007](phase007/phase.md) | HAL の early console の framebuffer の窓を、kernel が外せる形に（amd64 の fb_window を arm64・riscv64 へ） | in-progress（P2、q1720。6888c59b7、20 port の build、QEMU raspi4b の end（gdbstub・PNG）と VF2 の実機の end（SSH の log）は PASS、Pi 5・ODROID-C5・Pi 4 の実機は未実施、判定は Q1） | p005 |
 | p006 | 規約の全文の見直し | 未作成 | p003〜p005 |
