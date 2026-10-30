@@ -717,6 +717,10 @@ list_box_part(
 	int clipped;
 	int grouped;
 
+	/* A box position-visibility hides paints nothing, nor does what is in it. */
+	if (box->anchor_hidden)
+		return;
+
 	/* Stops at the depth the layout stops at, or after an error. */
 	if (depth > LAYOUT_DEPTH_MAX || walk->error != 0)
 		return;

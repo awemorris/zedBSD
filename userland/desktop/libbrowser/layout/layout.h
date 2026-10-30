@@ -268,6 +268,8 @@ struct layout_box {
 	int area_clamp_y;
 	int area_overflow;
 	int area_scrolls;
+	/* position-visibility hides the box and what is in it (its anchor is clipped or hidden, or it overflows). */
+	int anchor_hidden;
 	/* The inset-modified containing block the last placing used (left, right, top, bottom), which a fallback has to fit in. */
 	layout_unit imcb[4];
 	layout_unit area_clamp[4];
@@ -425,6 +427,7 @@ float layout_transition_progress(const struct css_style *style, float elapsed);
 int layout_transition_group_rect(const struct layout_transition_name *name, const struct css_style *style, float elapsed, struct layout_rect *rect);
 
 /* Anchor positioning (anchor.c). */
+int layout_anchor_hides(const struct layout_tree *tree, const struct layout_box *box);
 int layout_anchor_wanted(const struct layout_box *box);
 int layout_anchor_try(struct layout_tree *tree, struct layout_box *box, int entry);
 void layout_anchor_center(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
