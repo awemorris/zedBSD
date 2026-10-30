@@ -24,7 +24,6 @@
 #define KERN_KERN_SCHED_HINT_H
 
 #include <kern/types.h>
-#include <stdbool.h>
 #include <stdint.h>
 
 struct thread;
@@ -37,10 +36,12 @@ struct thread;
 /*
  * How hard a hint is followed.  PREFER: placement and stealing favour the
  * kind, nothing is moved for it.  PLACE: sched_hint_place() may move the
- * thread, running or not, to a CPU of the kind.
+ * thread, running or not, to an idle CPU of the kind.  PLACE_IDLE: the
+ * same, but only to a CPU whose SMT sibling is idle too.
  */
 #define SCHED_HINT_PREFER		1U
 #define SCHED_HINT_PLACE		2U
+#define SCHED_HINT_PLACE_IDLE		3U
 
 /*
  * A CPU of another kind steals the thread only once it has waited longer
@@ -48,21 +49,38 @@ struct thread;
  */
 #define SCHED_HINT_NO_OVERFLOW		0x1U
 
-/* The longest a thread lowered below the default waits before one quantum at the running level. */
+/*
+ * The longest a user thread waits behind higher levels before it runs one
+ * quantum at the running thread's level, never above the kernel's default.
+ */
 #define SCHED_HINT_STARVE_MS		100U
 
 /*
- * What a balancer asks of one thread.
+ * The level a user thread runs at while hints are in force, below the
+ * kernel's default so that the kernel's workers keep their turn.  A user
+ * thread inside the kernel is never queued lower than this.
+ */
+#define SCHED_HINT_USER_DEFAULT		10
+
+/* How sched_hint_choose() picks: a move, a move to an idle core, or a placement. */
+#define SCHED_HINT_CHOOSE_MOVE		1U
+#define SCHED_HINT_CHOOSE_MOVE_IDLE_CORE	2U
+#define SCHED_HINT_CHOOSE_PLACE		3U
+
+/*
+ * What a balancer asks of one user thread.
  *
- * The priority is the level the thread returns to whenever it is queued;
- * the scheduler may raise it above that for one quantum to keep it from
- * starving.  A hint with strength 0 asks for no kind of core.
+ * The priority is the level the thread returns to whenever it is queued,
+ * SCHED_PRIORITY_DEFAULT or lower; the scheduler may raise it for one
+ * quantum to keep it from starving, and queues a thread inside the kernel
+ * no lower than SCHED_HINT_USER_DEFAULT.  A hint with strength 0 asks for
+ * no kind of core.
  */
 struct sched_hint {
 	uint8_t core;			/* SCHED_HINT_CORE_* */
-	uint8_t strength;		/* 0, SCHED_HINT_PREFER or SCHED_HINT_PLACE */
+	uint8_t strength;		/* 0 or SCHED_HINT_PREFER, _PLACE, _PLACE_IDLE */
 	uint8_t flags;			/* SCHED_HINT_NO_OVERFLOW */
-	uint8_t priority;		/* SCHED_PRIOR_HIGH .. SCHED_PRIOR_LOW */
+	uint8_t priority;		/* SCHED_PRIORITY_DEFAULT .. SCHED_PRIOR_LOW */
 };
 
 /*
@@ -111,15 +129,23 @@ struct sched_hint_counters {
 	uint64_t handoff_retries;
 	uint64_t handoff_failures;	/* handed back to their old CPU */
 	uint64_t starved;		/* threads raised for one quantum */
+	uint64_t kernel_held;		/* user threads queued at the user default while in the kernel */
 };
 
 /*
  * The hint state a thread carries, in its scheduler record.
  *
- * The thread's CPU lock guards the hint, the base level and move_pending.
- * The counters have one writer each (the thread's own CPU at its tick and
- * at its system call entry, the waker under the CPU lock) and are read
- * without a lock.
+ * The thread's CPU lock guards the hint, the base level, move_pending and
+ * raised.  base_priority starts equal to the thread's priority when the
+ * thread is made.  move_pending lives only while the thread runs: queueing
+ * it or switching away without queueing it clears the mark.
+ *
+ * run_ticks and user_streak are written by the tick of the CPU the thread
+ * runs on, user_streak and syscalls by the thread's system call entry with
+ * interrupts masked, wakeups under the lock of whichever CPU holds the
+ * thread when it becomes runnable.  user_streak stops at its maximum
+ * instead of wrapping.  Readers load them without a lock and get a recent
+ * value.
  */
 struct sched_hint_state {
 	struct sched_hint hint;
@@ -146,10 +172,11 @@ sched_cpu_classes_set(
 	unsigned count);
 
 /*
- * Stores a thread's hint and moves it to its new level if it is queued.
+ * Stores a thread's hint and moves it to its new level if it waits on a
+ * run queue.  A sleeping thread keeps its place on the sleep queue.
  *
- * Any thread context; takes the thread's CPU lock.  Returns 0, or EINVAL
- * for an idle, exiting or dead thread or a value out of range.
+ * Thread context; takes the thread's CPU lock.  Returns 0, ESRCH for a
+ * kernel, idle, new or exiting thread, or EINVAL for a value out of range.
  */
 int
 sched_hint_set(
@@ -157,14 +184,17 @@ sched_hint_set(
 	const struct sched_hint *hint);
 
 /*
- * Moves a thread now to a CPU of the kind its hint names.
+ * Moves a thread now to an idle CPU of the kind its hint names.
  *
- * Thread context; may sleep only as sched_set_cpu() does.  A thread that
- * is not running moves before the call returns; a running one is marked
- * and its CPU hands it off at its next notification or tick.  Returns 0,
- * EALREADY when it is on a CPU of that kind, EAGAIN when no CPU of the
- * kind is idle or free of waiting threads, EBUSY when the thread is
- * already moving, or EINVAL for a hint without PLACE.
+ * Thread context; does not sleep (it takes CPU locks and moves a stopped
+ * task).  A thread that is not running moves before the call returns,
+ * after its state is checked again under its CPU's lock; a running one is
+ * marked and its CPU hands it off at its next notification or tick.
+ * Returns 0, EALREADY when it is on a CPU of that kind, EAGAIN when no
+ * CPU of the kind is idle, EBUSY when the thread is already moving or its
+ * CPU's handoff is taken, ESRCH for a thread that cannot move (new,
+ * exiting, being reaped), or EINVAL for a hint without PLACE or
+ * PLACE_IDLE.
  */
 int
 sched_hint_place(
@@ -191,16 +221,18 @@ sched_hint_counters(
 	struct sched_hint_counters *counters);
 
 /*
- * Chooses the CPU a thread of the given kind should move to.
+ * Chooses the CPU a thread of the given kind should go to.
  *
- * A pure function over a snapshot, so that it can be tested alone:
- * idle and backlog hold one bit per CPU (idle: halted with nothing
- * queued; backlog: has threads waiting).  For FAST: a usable FAST CPU
- * whose core is idle, then the idle usable CPUs ranked by rank (EFFICIENT)
- * or sibling_rank (FAST with a busy sibling), then a FAST CPU without a
- * backlog.  For EFFICIENT: an idle usable EFFICIENT CPU, then one without
- * a backlog.  Ties go to the lowest number.  Returns the CPU, or
- * KERN_CPU_MAX when none fits.
+ * A pure function over a snapshot, so that it can be tested alone: idle
+ * and backlog are KERN_CPU_MASK_WORDS words with one bit per CPU (idle:
+ * halted with nothing queued; backlog: has threads waiting).
+ *
+ * MOVE: an idle usable CPU of the kind, by rank; never one of another
+ * kind.  MOVE_IDLE_CORE: the same, with the SMT sibling idle too.
+ * PLACE: for FAST, a usable FAST CPU whose core is idle, then the idle
+ * usable CPUs ranked by rank (EFFICIENT) or sibling_rank (FAST with a busy
+ * sibling); for EFFICIENT, an idle usable EFFICIENT CPU.  Ties go to the
+ * lowest number.  Returns the CPU, or KERN_CPU_MAX when none fits.
  */
 kern_cpu_id_t
 sched_hint_choose(
@@ -208,6 +240,7 @@ sched_hint_choose(
 	unsigned count,
 	const uint64_t *idle,
 	const uint64_t *backlog,
-	unsigned core);
+	unsigned core,
+	unsigned mode);
 
 #endif

@@ -47,15 +47,20 @@ struct dtb_process_activity {
  * What the balancer remembers of one thread between its passes.
  *
  * Only the balancer's thread reads or writes it, so it needs no lock.
+ * run_window holds the ticks the thread ran in each of the last passes,
+ * from which the balancer tells a thread that keeps a CPU busy.
  */
 struct dtb_thread_state {
-	volatile uint64_t gpu_submit_tick;	/* written by the thread through kern_dtb_note_gpu() */
 	uint64_t run_ticks_seen;
 	uint64_t moved_tick;			/* when the balancer last moved it */
 	uint32_t syscalls_seen;
-	uint16_t quiet_passes;			/* passes in a row that looked not busy */
+	uint16_t run_window[10];
+	uint8_t window_next;
+	uint8_t quiet_passes;			/* passes in a row that looked not busy */
+	uint8_t light_passes;			/* passes in a row that looked light */
 	uint8_t marks;				/* DTB_MARK_*, private to dtb.c */
 	uint8_t rule;				/* the rule that chose the current hint */
+	uint8_t reserved;
 };
 
 #if CONFIG_DTB
@@ -69,10 +74,12 @@ void
 kern_dtb_init(void);
 
 /*
- * Notes one input report from any device.
+ * Notes one input report a person made on any device.
  *
- * Any context, interrupts masked or not, under any lock: it only stores
- * the time and counts.
+ * The input core calls it for the events a device emits, not for the
+ * reports it makes up when a device goes or a reader catches up.  Any
+ * context, interrupts masked or not, under any lock: it only stores the
+ * time and counts.
  */
 void
 kern_dtb_note_input(void);

@@ -28,6 +28,8 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 ## 今の事実（2026-10-27 の調べ、根拠は file:行）
 
+（2026-10-31 注: 下の行番号は 2026-10-27 の tree の物。main 3d820d9ca での引き直しは [design.md](design.md) §2・§2.8。）
+
 - sched（`src/kern/sched.c` 2952 行、`include/kern/sched.h`）: CPU ごとの run queue、thread は CPU に固定、移動は `sched_set_cpu()`（:1665-1758）だけで、**走っている thread は移せず（EINVAL）、sched.c の外に呼び手は無い**。
   16 段の priority、全部の thread が既定の priority で作られる。affinity・cpuset は無い。負荷の分散は idle の CPU の盗み（:2528-2599）と、忙しい CPU が idle の CPU を起こす（:1092-1113）だけで、
   core の性能・topology を知らない。hint の口は無い。
@@ -78,27 +80,27 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 
 | Phase | 内容 | 状態 | 依存 | LW |
 | --- | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 検討と設計: 情報 → 性質 → hint の表、規則の強さの順、sched の口、統計の場所と負担、config、試験と受け入れ、design-reviewer、ユーザーの問い | in-progress（設計と review の反映は済み、ユーザーの答え待ち） | — | — |
-| p002 | config（`CONFIG_DTB`・`CONFIG_DTB_TEST`）、`dtb.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・wakeup、process の GPU と表示の時刻、gpu.c・input.c の通知） | planned | p001 | 3 |
-| p003 | sched の口: base の priority と `sched_hint_set`、CPU の種類の表、行き先の選び、置き場所・盗み・tick の助け、`sched_hint_place`、走っている thread の手渡し、飢えの防ぎ、計数 | planned | p002 | 6 |
-| p004 | DTB の本体（dtb.c・dtb-policy.c、分類・履歴・nice の段・HID の状態・周期・予算、`dtb=off`、試験の偽の種類と stress、`kern.dtb`） | planned | p003、Q302-1〜3・5・6 | 6 |
+| [p001](phase001/phase.md) | 検討と設計: 情報 → 性質 → hint の表、規則の強さの順、sched の口、統計の場所と負担、config、試験と受け入れ、design-reviewer、ユーザーの問い | in-progress（第 2 版で review（blocker 2・major 11・minor 13）を反映済み、ユーザーの答え待ち） | — | — |
+| p002 | config（`CONFIG_DTB`）、`dtb.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・RUNNABLE の所、process の GPU と表示の時刻、gpu.c・input.c の通知）、`base_priority` の初め | planned | p001、Q302-5 | 3 |
+| p003 | sched の口: base の priority と `sched_hint_set`、kernel の中の優先、CPU の種類の表、行き先の選び、置き場所・盗み・tick の助け、`sched_hint_place`、`sched_set_cpu` の確かめ直し、走っている thread の手渡し、飢えの防ぎ、計数、`CONFIG_DTB_TEST` の偽の種類と stress（QEMU 30 分） | planned | p002、Q302-2・3 | 7 |
+| p004 | DTB の本体（dtb.c・dtb-policy.c、分類・履歴・nice の段・HID の状態・周期・予算、`dtb=off`、`kern.dtb`） | planned | p003、Q302-1・6 | 6 |
 | p005 | （条件つき）compositor からの前面の app の hint（Q302-4 で作る時か、p006 の数で要る時だけ） | — | p004、UAPI の決定 | 3 |
 | p006 | 5330 の評価（on・off の比べの 1 本の script）と閾値の調整 | planned | p004、WS333 p011・p013（電力の meter と相対の性能）、5330 の割当 | 4 |
 | p007 | 規約の全文の見直しと文書 | planned | p006 | 2 |
 
-合計 約 21 LW（p005 を立てれば 24）。旧い表（約 32 LW、WS301 の Phase に依存）は git の履歴にある。
+合計 約 22 LW（p005 を立てれば 25）。旧い表（約 32 LW、WS301 の Phase に依存）は git の履歴にある。
 
 ## 判断が要る点
 
 - D1: 決定済み（2026-10-27 09:39 ユーザー（クリック）「CONFIG_DTB の既定は off」、上の原文）。
-- D2: → Q302-1（推し: nice → 忙しい計算 → 画面を作る process → GPU の app → terminal）と Q302-2（忙しい計算の空いた P への溢れ）。
-- D3: 決定済み（2026-10-27 09:39 ユーザー（クリック）「nice は core の選択に加えて sched の priority にも効かせる」、上の原文）。今は sched が nice を読まない（survey-source.md §2）ので、飢えを防ぐ対応（段か重みか上限か）は p001 の設計で決める。→ 段と 100 ms の飢えの防ぎ（design.md §4.7）、段の幅と on の時だけにするかは Q302-3。
+- D2: → Q302-1（推し: nice → 忙しい計算 → 画面を作る process → GPU の app → terminal、terminal は兄弟も空いた P がある時だけ）と Q302-2（忙しい計算の空いた P への溢れ）。
+- D3: 決定済み（2026-10-27 09:39 ユーザー（クリック）「nice は core の選択に加えて sched の priority にも効かせる」、上の原文）。今は sched が nice を読まない（survey-source.md §2）ので、飢えを防ぐ対応（段か重みか上限か）は p001 の設計で決める。→ user の thread を kernel の worker（8）より上に置かない段（DTB が on の時の user の既定 10、上げは 8・9）と 100 ms の飢えの防ぎ（design.md §4.7）。段と on の時だけにするかは Q302-3。
 - D4: → Q302-4（推し: v1 では作らず、p006 の数で要れば条件つきの p005）。
 - D5: → Q302-5（推し: `CONFIG_DTB=y` の build の時だけ取る）。
 - 新: Q302-6（観察の読みだけの UAPI `kern.dtb`）、Q302-7（受け入れの数、design.md §6.4）。
 
 ## 再開点（2026-10-31 P5、q1775-i01）
 
-- p001 の設計 [design.md](design.md) 第 1 版（main 3d820d9ca の code で書いた）、header の案 [proposed/include/kern/](proposed/include/kern/)（`sched-hint.h`・`dtb.h`）、問い [user-questions.md](user-questions.md)（Q302-1〜7）、review [design-review.md](design-review.md)。HAL は変えない（design.md §5）。
-- 次: ユーザーの答え。p002・p003 は答えを待たずに始められる（Q1 が Queue を立てる）。p004 は Q302-1〜3・5・6 の答えの後。
+- p001 の設計 [design.md](design.md) 第 2 版（main 3d820d9ca の code で書いた。第 1 版 f2d6ca7b4 に review を反映）、header の案 [proposed/include/kern/](proposed/include/kern/)（`sched-hint.h`・`dtb.h`、UAPI の案 `proposed/include/uapi/dtb-sysctl.h`）、問い [user-questions.md](user-questions.md)（Q302-1〜7）、review [design-review.md](design-review.md)。HAL は変えない（design.md §5）。
+- 次: ユーザーの答え。p002 は Q302-5、p003 は Q302-2・3、p004 は Q302-1・6 の答えの後（推しで先に始めるかは Q1、design.md §10.2 の 5）。
 - 前の再開点（2026-10-29）の source の棚卸し [survey-source.md](survey-source.md) は design.md §2.8 で引き直した。§0 の ws.md の食い違いは既に直っていた。
