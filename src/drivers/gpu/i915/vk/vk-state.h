@@ -209,6 +209,8 @@ int drv_i915_gfx_texel_buffer_format(uint32_t format, uint32_t *surface_format, 
 void drv_i915_gfx_pipeline_kernels(const struct i915_gfx_pipeline *pipeline, struct i915_gfx_kernels *kernels);
 
 uint32_t drv_i915_gfx_mocs_uncached(unsigned graphics_ver);
+uint32_t drv_i915_gfx_mocs_cached(unsigned graphics_ver);
+uint32_t drv_i915_gfx_mocs_display(unsigned graphics_ver);
 int drv_i915_gfx_write_state(uint8_t *page, const struct i915_gfx_draw_state *state, const struct i915_gfx_kernels *kernels, const struct i915_gfx_image *target, uint32_t mocs);
 int drv_i915_gfx_write_state_gen(uint8_t *page, const struct i915_gfx_draw_state *state, const struct i915_gfx_kernels *kernels, const struct i915_gfx_image *target, uint32_t mocs, unsigned graphics_ver);
 int drv_i915_gfx_write_push(uint8_t *data, const struct i915_gfx_draw_state *state, const struct i915_gfx_push_layout *layout);
