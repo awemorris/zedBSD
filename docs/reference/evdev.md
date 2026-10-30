@@ -2,10 +2,9 @@
 
 Status: experimental UAPI. The event core, capability/current-state queries,
 console-keyboard adapter, PC/AT PS/2 mouse, PC-98 bus mouse, and USB HID Report
-Protocol keyboard/mouse/tablet producers are implemented. The q048 automatic
-matrix covers USB HID on xHCI and paired EHCI/UHCI with concurrent USB-root
-storage, and the user confirmed physical USB keyboard/mouse operation on
-2026-09-05.
+Protocol keyboard/mouse/tablet producers are implemented. USB HID is tested
+on xHCI and paired EHCI/UHCI with concurrent USB-root storage, and physical
+USB keyboard and mouse operation has been confirmed.
 
 zedBSD reserves `/dev/input/eventN` for an independently implemented event
 interface whose initial keyboard and pointer subset is source-oriented toward
@@ -89,7 +88,7 @@ shared with unrelated producers. The registration and publication contract is
 declared by [`input-device.h`](../../include/kern/input-device.h) and
 implemented by [`input-device.c`](../../src/drivers/generic/input.c). Built-in
 mouse button state is backend-local in the [PC/AT PS/2
-driver](../../src/drivers/platform/pcat/ps2-mouse.c) and [PC-98 bus-mouse
+driver](../../src/drivers/isa/ps2-8042.c) and [PC-98 bus-mouse
 driver](../../src/drivers/platform/pc98/pc98-busmouse.c).
 
 The production [`usb-hid.c`](../../src/drivers/usb/usb-hid.c) matches validated HID
@@ -103,7 +102,7 @@ remain independent and `EVIOCGRAB` still does not disable console text input.
 
 The HAL advertises whether a console source has physical release/repeat
 information or only characters through `struct hal_cons_input_info` returned
-by [`hal_cons_get_input_info()`](../../include/hal/hal.h). PC/AT, PC-98, and X68000
+by [`hal_cons_get_input_info()`](../../include/hal/hal.h). PC/AT and PC-98
 keyboard adapters preserve physical press, release, and repeat events. A
 character-only arm64 or sparcv9 console is registered as a momentary source:
 each character that maps to a public key code publishes press, synthetic
@@ -111,12 +110,12 @@ release, and `SYN_REPORT` in one bounded report, so `EVIOCGKEY` cannot retain a
 fabricated held key. Truthful platform declarations are in the
 [PC/AT](../../src/hal/amd64/bsp-pcat/cons.c),
 [PC-98](../../src/hal/i386/bsp-pc98/cons.c),
-[X68000](../../src/hal/m68k/bsp-x68k/keyboard.c),
 [arm64](../../src/hal/arm64/bsp-rpi-common/cons.c), and
-[sparcv9](../../src/hal/sparcv9/bsp-sun4u/console.c) HAL sources. The q044
-runner retains the physical x86/m68k paths and generic momentary behavior;
-arm64/sparcv9 declarations are source-audited because their cross compilers
-were unavailable. This reference does not claim fresh hardware or QEMU
+[sparcv9](../../src/hal/sparcv9/bsp-sun4u/console.c) HAL sources. The X68000
+console has no keyboard input yet
+([x68k-console.c](../../src/drivers/platform/x68k/x68k-console.c)), so it
+publishes no key events. The arm64 and sparcv9 declarations are
+source-audited. This reference does not claim fresh hardware or QEMU
 acceptance for every architecture.
 
 The console is a bounded kernel-internal subscriber to the same publication
@@ -126,7 +125,7 @@ source. Subscriber callbacks are required to be bounded and nonblocking, and
 unsubscribe joins already admitted callbacks. A user-space `EVIOCGRAB` affects
 only evdev readers, not this console subscriber.
 
-Stable `jis-*` position symbols let PC-98 and X68000 retain physical identity
+Stable `jis-*` position symbols let PC-98 retain physical identity
 when modifiers change between make, repeat, and break. A console-only symbol
 which has no code in the frozen public subset remains internal to the console
 subscriber and does not fabricate an evdev capability or event.
@@ -184,22 +183,23 @@ incorporated into the zedBSD base system.
 | HID descriptor/report parsing | [`hid-report.c`](../../src/drivers/usb/usb-hid.c) | and |
 | USB HID Report-Protocol producers, hotplug, and generation-safe nodes | [`usb-hid.c`](../../src/drivers/usb/usb-hid.c), [`input-device.c`](../../src/drivers/generic/input.c), [`devfs.c`](../../src/kern/devfs.c) | — |
 | Xzed evdev-only consumer | [Xzed input owner](../../userland/x11/xzed/input-posix.c) | and its |
-| Noct 2.0.1 BeUI evdev consumer | [zedBSD BeUI backend](../../userland/base/noct/noct/src/api/api-beui-zedbsd.c) | — |
+| Noct 2.0.1 BeUI evdev consumer | [zedBSD BeUI backend](../../userland/base/noct/patches/0001-connect-zedbsd-target-adapter.patch) | — |
 
 Registration requires `EV_SYN/SYN_REPORT`; malformed declarations and
 undeclared producer events are rejected, keeping advertised capabilities and
-the delivered public stream consistent. The q044 ownership gates pass, and
-q048 adds Report-Protocol keyboard, relative mouse, and absolute tablet
-production fixtures plus generation-safe cdev/devfs lifecycle checks. Its QEMU
-matrix passes with xHCI and paired EHCI/UHCI, including hotplug, stale-fd
-isolation, event-number reuse, console coexistence, and concurrent USB-root
-I/O. The user's 2026-09-05 physical USB HID confirmation completes IN-T42.
+the delivered public stream consistent. The ownership tests pass, as do the
+Report-Protocol keyboard, relative mouse, and absolute tablet production
+fixtures and the generation-safe cdev/devfs lifecycle checks. The QEMU tests
+pass with xHCI and paired EHCI/UHCI, including hotplug, stale-fd isolation,
+event-number reuse, console coexistence, and concurrent USB-root I/O, and
+physical USB HID operation has been confirmed.
 
 Xzed and the selected Noct 2.0.1 BeUI backend both discover
 `/dev/input/eventN` by capabilities and consume evdev without the console
-event interface. `/dev/mouse` is absent. WS006-p009 removes the legacy
+event interface. `/dev/mouse` is absent. The legacy
 `/dev/console` continuous-event, input-mode, drain-input, and key-state ioctls
-and their private event queue. Their request numbers remain unused; unknown
+and their private event queue have been removed. Their request numbers remain
+unused; unknown
 console requests follow the ordinary TTY unsupported-operation path
 (`EOPNOTSUPP`). Console read/poll still use the normal TTY discipline,
 including termios and character input. Geometry/cursor operations and the
