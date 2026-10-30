@@ -220,6 +220,12 @@ done >> "$work/B5"
 # functions are in app-allow.tsv, each with its decision.  The compositor, libkeiland-backend, the system's services
 # (sessiond, printd), the X server and the graphics and compatibility libraries are not applications.  Comments are
 # left out; a literal is looked at only inside its quotes.
+# They use libkeiland's threads and network, not the system's (T1, N1): no pthread_*, thrd_*, mtx_*, cnd_*, call_once,
+# <pthread.h>, <threads.h> (T1); no socket, connect, bind, listen, accept, getaddrinfo, poll, select, epoll, kqueue,
+# send, recv, setsockopt, shutdown calls, no <sys/socket.h>, <sys/select.h>, <sys/un.h>, <netdb.h>, <poll.h>,
+# <netinet/*>, <arpa/inet.h> (N1).  libbrowser and libmedia (libraries of their own) and libkeiland/platform/ (the
+# layers themselves) are not looked at for T1 and N1.  A call is a name followed by "(" and not preceded by a word
+# character, "." or ">" (a member such as ->select( is not one).
 python3 - plan/tools/keiland-os-boundary/app-allow.tsv "$work" <<'PY'
 import os
 import re
@@ -241,6 +247,18 @@ calls = {
 }
 literal = re.compile(r'^/(dev|proc|sys|run|var|etc)(/|$)|\.sock$|^(netd|audiod|volumed|bluetoothd|sessiond|printd|wpa_supplicant)\b')
 header = re.compile(r'^\s*#\s*include\s*[<"]((uapi|linux|dev)/[^>"]*|sys/sysctl\.h|mntent\.h|userland/base/[^>"]*)[>"]')
+layer_calls = {
+    'T1': re.compile(r'(?<![\w.>])(pthread_\w+|thrd_\w+|mtx_\w+|cnd_\w+|call_once)\s*\('),
+    'N1': re.compile(r'(?<![\w.>])(socket|connect|bind|listen|accept|accept4|getaddrinfo|poll|ppoll|select|pselect|'
+                     r'epoll_\w+|kqueue|kevent|send|recv|sendto|recvfrom|setsockopt|shutdown)\s*\('),
+}
+layer_types = re.compile(r'(?<![\w.>])(pthread_\w+_t|thrd_t|mtx_t|cnd_t|once_flag|PTHREAD_\w+)\b')
+layer_headers = {
+    'T1': re.compile(r'^\s*#\s*include\s*<(pthread\.h|threads\.h)>'),
+    'N1': re.compile(r'^\s*#\s*include\s*<(sys/socket\.h|sys/select\.h|sys/un\.h|netdb\.h|poll\.h|netinet/[^>]*|'
+                     r'arpa/inet\.h)>'),
+}
+layer_excluded = ('userland/desktop/libbrowser/', 'userland/desktop/libmedia/', 'userland/desktop/libkeiland/platform/')
 
 # The allowed operations: (check, source, name); a row without its reason fails A1.
 allowed = []
@@ -309,7 +327,7 @@ for name in sorted(os.listdir('userland/desktop')):
             if file.endswith(('.c', '.h', '.inc')):
                 sources.append(os.path.join(directory, file))
 
-found = {'A1': list(malformed), 'A2': [], 'A3': [], 'A4': [], 'A5': []}
+found = {'A1': list(malformed), 'A2': [], 'A3': [], 'A4': [], 'A5': [], 'T1': [], 'N1': []}
 for path in sorted(sources):
     with open(path, errors='replace') as source:
         text = source.read()
@@ -326,6 +344,22 @@ for path in sorted(sources):
     for number, value in literals:
         if literal.search(value) and not is_allowed('A1', path, value):
             found['A1'].append(f'{path}:{number}: "{value}"')
+    # T1 and N1: not the libraries of their own, nor the layers.
+    if path.startswith(layer_excluded):
+        continue
+    for number, line in enumerate(code.split('\n'), 1):
+        for check, pattern in layer_calls.items():
+            for match in pattern.finditer(line):
+                if not is_allowed(check, path, match.group(1)):
+                    found[check].append(f'{path}:{number}: {match.group(1)}')
+        for match in layer_types.finditer(line):
+            if not is_allowed('T1', path, match.group(1)):
+                found['T1'].append(f'{path}:{number}: {match.group(1)}')
+    for number, line in enumerate(text.split('\n'), 1):
+        for check, pattern in layer_headers.items():
+            match = pattern.match(line)
+            if match and not is_allowed(check, path, match.group(1)):
+                found[check].append(f'{path}:{number}: #include <{match.group(1)}>')
 
 for check, lines in found.items():
     with open(os.path.join(work, check), 'w') as out:
@@ -334,7 +368,7 @@ for check, lines in found.items():
 PY
 
 # Report every violated condition before returning the aggregate outcome.
-for check in C1 C2 C3 C4 C5 L1 L2 L3 L4 L5 L6 L7 M1 X1 B1 B2 B3 B5 S1 A1 A2 A3 A4 A5; do
+for check in C1 C2 C3 C4 C5 L1 L2 L3 L4 L5 L6 L7 M1 X1 B1 B2 B3 B5 S1 A1 A2 A3 A4 A5 T1 N1; do
     if [ -s "$work/$check" ]; then
         while IFS= read -r detail; do
             printf 'check: %s FAIL %s\n' "$check" "$detail"

@@ -73,6 +73,12 @@ P2（q1703-i01、worktree p2-ws327、基点 main b901b1968）。日付は host �
   scratch の clone で確かめた: T1 PASS・N1 PASS・全体 64 行（今と同じ）、突然変異（music/play.c の kl_mutex_lock を pthread_mutex_lock に、
   settings/look.c に `#include <netdb.h>`）で `T1 FAIL …play.c:133: pthread_mutex_lock`・`N1 FAIL …look.c:977: #include <netdb.h>`。
   入れたら `plan/ws327/tests/check-layers.py`・`layers-allow.tsv` は WS の完了で消せる（Q1 へ）。
+- Q1「T1・N1 を check.sh に入れる案は採る」（2026-10-30）: patch を当てた（`check.sh`・`app-allow.tsv`）。今の tree で `check: T1 PASS`・
+  `check: N1 PASS`、FAIL は 64 行のまま。patch の file（`plan/ws327/phase016/check-t1-n1.patch`）は削除の候補（Q1 へ）。
+  plan/tools.md の 121 行（Keiland の OS 境界 checker）の説明の末尾に足す文案:
+  「2026-10-30 WS327 p016: T1・N1（app と libkeiland の platform/ の外が libkeiland の thread・network の層を使う: pthread_*・C11 threads・
+  <pthread.h>（T1）、socket・connect・poll・select・send・recv などと <sys/socket.h>・<poll.h>・<netdb.h> など（N1）。libbrowser・libmedia・
+  libkeiland/platform/ は見ない。許可は同じ app-allow.tsv）。B5 は directory の付いた公開の header の名前 `keiland/keiland_*.h` を許す」
 
 ### 2. build（2026-10-30 10:16〜10:20）
 
