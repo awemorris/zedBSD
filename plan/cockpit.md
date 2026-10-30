@@ -68,7 +68,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 ### WS313 ODROID-C5
 
-試験の image（text と Keiland、公式の bootloader 入り）は出来ている: p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img。zedBSD-firmware は push 済み。実機の結果待ち。
+試験の image（text と Keiland、公式の bootloader 入り）で、2026-10-31 に HDMI に画面が出なかった（ユーザー）。serial で調べるのは VF2 の最適化の後、今日の午後。zedBSD-firmware は push 済み。
 
 ### WS326 libmedia の H.264 の software の decoder
 
@@ -155,7 +155,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
 - **Pi 5（2026-10-31 の午後にユーザーが行う予定）**: その時の main で最新の image を作り直して渡す（P4）。Q1 が声をかける。画面に console の login が出るか、起動の後に P4 が SSH で GPU の clock と fps を測る。
-- ODROID-C5: 試験の image（上の WS313）で起動と画面。
+- **ODROID-C5（2026-10-31 の午後、VF2 の最適化の後）**: 試験の image で HDMI に画面が出なかった（ユーザー）。serial（今は VF2 につないでいる）を C5 につないで、起動のどこで止まるかを見る。Q1 が担当（WS313）を起動して声をかける。
 - VF2: 新しい kernel で画面と serial の login（BUG-372）。
 
 ## 決まった事
