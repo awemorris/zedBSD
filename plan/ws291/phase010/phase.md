@@ -3,7 +3,7 @@
 # ws291-p010 NVIDIA（RTX 2070）: nvrtx の起動・desktop の計測と 60 fps、Linux の NVK の基準
 
 - 親: [WS291](../ws.md)。
-- 状態: in-progress（2026-10-29 06:20 P2、q1670-i01、worktree p2-ws291m、基点 main 42da8d889。12:55 q1670-i06: driver 側の直し（cursor・window_lock）の後、全段 60 fps 以上か入力の間隔で決まる値。受け入れの判定は WS309 の後に測り直して）。
+- 状態: cleared（2026-10-30 14:10 P7、q1712-i01: WS309 の後の main 5aca73738 の kernel と desktop の program で frame-ops 2 回、frame で決まる段は全部 60 fps 以上、scroll・hover・keys は入力の間隔（下の「q1712-i01」節）。前: 2026-10-29 06:20 P2 q1670-i01 着手、12:55 q1670-i06 driver 側の直し）。
 - 承認: ユーザーの回答（クリック、2026-10-29）「WS291 の NVIDIA の段 (推し)」（問い: RX 5600 XT を外している間、P2 は何をするか）。
   機械の変更（原文）「再起動後、RTL8127と、RTX 2070が接続されています。RX 5600 XTはPCIスロットの高さの関係で、RTL8127と排他だからです。」
 - Linux の基準の driver: ユーザーの回答（クリック、2026-10-29、Q1 経由）「NVK（nouveau） (推し)」→ Mesa の NVK、設定の file は変えず、計測の時だけ sysfs で
@@ -235,3 +235,40 @@
   2. `sh plan/ws291/tests/rtx-desk-profile.sh build/ws291/rtx/q1700-desk build/ws291/vmunix-va1 build/ws291/vmunix-m0`（2 回、揺れを見る）。表は上の dp3 と同じ形で記録。
   3. p012（新設、phase.md は未作成）: scene-5000 の GPU 19.5 ms の内訳を mview の `--cull=all`（頂点だけ）と `--size=`（画素の量）で zedBSD と NVK の両方で取り、
      頂点・画素のどちらが NVK より重いかを見てから直す（vertex の program の質・属性の fetch・ZCULL など）。
+
+
+## q1712-i01（2026-10-30 13:54〜14:10 P7、worktree p7-ws291、基点 main 5aca73738）: WS309 の後の測り直し
+
+- 承認: ユーザー（2026-10-30 原文）「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」。
+- 写した物（Q1 の指示「計測の入力の data だけ」）: p5-ws291n から build/ws291/measure/ref/linux-shot-1.png（Linux の参照の画）だけを使う。
+  同時に写した build の成果（linux-mview・vmunix-va1・usb/bin/vkhang）は使わず、Q1 が消した。RESTORE の kernel は機械の NVMe の今の
+  /boot/boot0/vmunix を読み戻して cksum 1463007375（vmunix-va1）を確かめて使う（OUT/nvme-vmunix）。
+- build（この worktree、main 5aca73738）: `make ZEDBSD_CONFIG=plan/ws291/tests/config.mk BUILD=build/ws291/k` で vmunix（cksum 2016763217、
+  3558888 byte）・bin/wayland・files・settings・terminal・keiland-ime・sessiond・mview・dynamic の libc・libkeiland・libvulkan・
+  libwayland-client。自分の code の warning 0（sessiond の依存で build された外部 package の OpenSSL の warning 1 種と perl の locale の行だけ）。
+- NVMe の zedBSD の userland（feb1a5f、10-28 の build）と cksum を比べ、違う物だけを入れた: libc.so・libkeiland.so・sessiond・files・settings・
+  terminal・keiland-ime・wayland（mview・libvulkan・libwayland-client・ld.so・libtruetype・png・jpeg・z・keiland-shot・aat-input は byte 一致）。
+- 道具: `plan/ws291/tests/rtx-desk-main.sh OUT VMUNIX`（新、`FILES='DEST=SRC …'`・`RESTORE_CKSUM`・`RUNS`。NVMe の kernel を読み戻し、
+  file を *.p7old に残して入れ替え（rename）、kernel を入れて frame-ops を RUNS 回、終わりに file と kernel を戻して cksum を照合、Debian へ）。
+  入れ替えの部分は `plan/ws291/tests/rtx-files.sh`（p012 の script と共用）。
+- 新しい compositor が動いた証拠: session.log に `KWL THREADS count=6 names=io-file,io-device,font,blur,present,display`（WS309 の印）。
+
+| 段（実機 RTX 2070、DP、kernel 2016763217） | fps 1 回目・2 回目 | work p50/max | period p50/max | next p50/max |
+| --- | --- | --- | --- | --- |
+| launch | **63・64** | 0/3・0/2 | 17/23・17/20 | 17/21・16/19 |
+| type | **61・62** | 0/1・0/1 | 17/17・16/18 | 17/17・16/17 |
+| keys | 250・250（200 ms 間隔の入力、period 4） | 0/1 | 4/4 | 4/4 |
+| output | **68・65** | 0/1 | 15/17・15/16 | 15/17・15/16 |
+| scroll | 19・19（50 ms 間隔） | 0/1 | 52/53 | 51/53 |
+| hover | 22・22（15 ms 間隔） | 4/10・4/9 | 32/85・34/82 | 28/80・29/78 |
+| drag | **61・60**（182・181 frames） | 1/21・1/19 | 17/27・17/25 | 9/22・8/22 |
+| home | **63・64** | 0/2・0/1 | 17/26・17/21 | 16/25・17/20 |
+| wiseview | **65・60** | 0/14・0/32 | 17/22・17/32 | 16/21・17/26 |
+
+- 判定: frame で決まる段（launch・type・output・drag・home・wiseview）は 2 回とも 60 fps 以上。scroll・hover・keys は p001 と同じく試験の入力の
+  間隔で決まる（work は 0〜4 ms）。→ 受け入れ（frame-ops の各段が 60 fps、入力の間隔の段は p001 の読み方）を満たす。
+- 残りの観察（受け入れの外）: launch の lag max 3034〜3036 ms（terminal の起動の最初の frame までの時間の見込み、未解析）、wiseview の 2 回目の
+  work max 32 ms（7 frame が work>16）。
+- 証拠: worktree p7-ws291 の build/ws291/rtx/q1712-desk（summary.txt、desk1・desk2 の table.txt・frames.txt・session.log・shot.png）。実機の結果だけ、QEMU は無し。
+- 終わり（14:10）: file と kernel を戻して照合（libc 3004291210 … wayland 1664242966、vmunix 1463007375、cfg の nvrtx.vk.perf の行 0）、
+  Debian 6.12.111、RTX の 4 function は vfio-pci。
