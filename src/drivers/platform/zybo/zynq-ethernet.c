@@ -30,7 +30,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <hal/hal.h>
 #include <drivers/ethernet/cadence-gem.h>
 #include <drivers/ethernet/mii-phy.h>
 #include <drivers/ethernet/rtl8211e.h>
@@ -42,6 +41,7 @@
 #include <kern/irq.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
+#include <kern/platform.h>
 #include <kern/pmem.h>
 #include <uapi/errno.h>
 
@@ -464,7 +464,7 @@ mac_from_parameters(
 	int error;
 
 	/* Without a boot line there is no mac0=. */
-	line = hal_get_arch_handoff("boot.command-line");
+	line = kern_boot_handoff("boot.command-line");
 	if (line == NULL)
 		return 0;
 
@@ -512,12 +512,12 @@ mac_from_tree(
 	int error;
 
 	/* Finds the device tree's physical range the hardware layer kept. */
-	fdt_range = hal_get_arch_handoff("armv7.fdt");
+	fdt_range = kern_boot_handoff("armv7.fdt");
 	if (fdt_range == NULL)
 		return 0;
 
 	/* Finds the tree in the direct map. */
-	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_range[0]);
+	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_range[0]);
 	if (blob == NULL)
 		return 0;
 

@@ -8,11 +8,11 @@
 /*
  * A teletype console for a board whose console is a serial line.
  *
- * Each character the console writes goes to hal_putc(), which the hardware
- * layer sends to the firmware's console (the same serial line) and, on a
- * board that has one, to a framebuffer it draws text on.  A positioned
- * write has no teletype meaning and is dropped; the grid only answers the
- * size and cursor queries programs make.
+ * Each character the console writes goes to kern_console_early_putc(),
+ * which the platform sends to the firmware's console (the same serial line)
+ * and, on a board that has one, to a framebuffer it draws text on.  A
+ * positioned write has no teletype meaning and is dropped; the grid only
+ * answers the size and cursor queries programs make.
  *
  * Input arrives from a UART driver, one byte at a time in interrupt
  * context, and is typed into the console's line discipline.
@@ -23,7 +23,7 @@
 
 #include <drivers/generic/serial-console.h>
 
-#include <hal/hal.h>
+#include <kern/platform.h>
 #include <kern/text-display.h>
 #include <kern/tty.h>
 
@@ -133,7 +133,7 @@ console_putc(
 	int character)
 {
 	/* Writes the character through the hardware layer's console. */
-	hal_putc(character);
+	kern_console_early_putc(character);
 }
 
 /* Drops a positioned write, which a teletype cannot place. */

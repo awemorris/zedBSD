@@ -229,7 +229,7 @@ drv_rp1_init(
 	int error;
 
 	/* Opens the device tree through the direct map. */
-	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_phys);
+	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (blob == NULL)
 		return ENODEV;
 	error = drv_fdt_open(&rp1.fdt, blob, RP1_FDT_READ_LIMIT);

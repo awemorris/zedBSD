@@ -34,7 +34,6 @@
 #include <kern/pmem.h>
 #include <kern/vm-device.h>
 #include <kern/clock.h>
-#include <hal/hal.h>
 #include <kern/sched.h>
 #include <kern/waitq.h>
 #include <kern/kcrt.h>
@@ -1833,7 +1832,7 @@ gpu_ioctl(
 	key = 0;
 	if (GPU_IOCTL_TIMING) {
 		key = gpu_timing_key(command, argument);
-		counted = hal_rtc_read_counter(&entered, &rate);
+		counted = kern_rtc_read_counter(&entered, &rate);
 		if (!counted)
 			entered = 0;
 	}
@@ -1843,7 +1842,7 @@ gpu_ioctl(
 
 	/* Its kernel time and the user time before it. */
 	if (GPU_IOCTL_TIMING && entered != 0U) {
-		counted = hal_rtc_read_counter(&returned, &rate);
+		counted = kern_rtc_read_counter(&returned, &rate);
 		if (counted) {
 			gpu_timing_rate = rate;
 			gpu_timing_record(key, entered, returned);

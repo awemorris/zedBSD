@@ -149,7 +149,7 @@ drv_rpi5_pcie_init(
 	register_drivers();
 
 	/* Opens the device tree through the direct map. */
-	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_phys);
+	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (blob == NULL)
 		return ENODEV;
 	error = drv_fdt_open(&rpi5_pcie_fdt, blob, RPI5_PCIE_FDT_READ_LIMIT);

@@ -127,7 +127,7 @@ drv_mali_gpu_attach(
 	board_gpu_attached = 1;
 
 	/* Opens the device tree through the direct map. */
-	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_phys);
+	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (blob == NULL) {
 		kern_logf("mali: no device tree at %llx\n", (unsigned long long)fdt_phys);
 		return -ENODEV;

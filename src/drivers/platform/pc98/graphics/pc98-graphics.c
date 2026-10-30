@@ -20,7 +20,6 @@
 
 #include <uapi/graphics.h>
 #include <uapi/errno.h>
-#include <hal/hal.h>
 
 #define GRAPHICS_CAPABILITIES                                                  \
 	(KERN_GRAPHICS_CAP_FILL | KERN_GRAPHICS_CAP_LINE |                 \

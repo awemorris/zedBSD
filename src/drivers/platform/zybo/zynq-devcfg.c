@@ -49,7 +49,6 @@
 #include <drivers/generic/dma.h>
 #include <drivers/platform/zybo/zynq-devcfg.h>
 #include <drivers/platform/zybo/zynq-slcr.h>
-#include <hal/hal.h>
 #include <kern/boot.h>
 #include <kern/cdev.h>
 #include <kern/clock.h>
@@ -61,6 +60,8 @@
 #include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/lock.h>
+#include <kern/panic.h>
+#include <kern/platform.h>
 #include <kern/pmem.h>
 #include <kern/sched.h>
 #include <kern/uaccess.h>
@@ -273,7 +274,7 @@ drv_zynq_devcfg_attach(
 	idcode = slcr_read(SLCR_PSS_IDCODE);
 	if (idcode == 0)
 		fpga.emulated = 1;
-	command_line = hal_get_arch_handoff("boot.command-line");
+	command_line = kern_boot_handoff("boot.command-line");
 	asked = kern_boot_parameters_token_present(command_line, NO_PL_WAIT_TOKEN);
 	if (asked && fpga.emulated)
 		fpga.skip_waits = 1;
@@ -381,7 +382,7 @@ ctrl_update(
 	/* Refuses to touch any bit but the configuration's. */
 	valid = drv_zynq_devcfg_ctrl_request_valid(set, clear);
 	if (!valid)
-		HAL_FATAL("fpga: CTRL request outside the configuration bits");
+		KERN_FATAL("fpga: CTRL request outside the configuration bits");
 
 	/* Changes the requested bits and keeps the others as they are. */
 	control = devcfg_read(DEVCFG_CTRL);

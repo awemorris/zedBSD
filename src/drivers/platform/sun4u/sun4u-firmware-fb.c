@@ -30,7 +30,6 @@
 #include "drivers/platform/sun4u/sun4u-firmware-fb.h"
 #include "drivers/platform/pcat/graphics/vgafont.h"
 
-#include <hal/hal.h>
 #include <uapi/errno.h>
 #include <uapi/graphics.h>
 
@@ -38,6 +37,7 @@
 #include <kern/graphics-backend.h>
 #include <kern/kcrt.h>
 #include <kern/lock.h>
+#include <kern/platform.h>
 #include <kern/pmem.h>
 #include <kern/text-display.h>
 
@@ -488,10 +488,10 @@ fb_name(
 {
 	const uint64_t *value;
 
-	/* Asks the HAL for the named word. */
-	value = hal_get_arch_handoff(name);
+	/* Asks the platform for the named word. */
+	value = kern_boot_handoff(name);
 
-	/* Reports the word, NULL when the HAL does not name it. */
+	/* Reports the word, NULL when the platform does not name it. */
 	return value;
 }
 

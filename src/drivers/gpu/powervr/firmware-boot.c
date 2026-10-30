@@ -30,6 +30,7 @@
 #include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/kmem.h>
+#include <kern/pmem.h>
 #include <kern/sched.h>
 #include <kern/sysctl.h>
 #include <kern/thread.h>
@@ -1976,7 +1977,7 @@ powervr_firmware_return_probe(
 		  (const void *)firmware->kccb_returns.view);
 
 	/* The first slots through the alias and through the cached view, its lines dropped first. */
-	cached = kern_pmem_to_kernel((hal_physaddr_t)physical);
+	cached = kern_pmem_to_kernel((kern_physaddr_t)physical);
 	if (cached != NULL)
 		kern_dcache_invalidate_range((const void *)cached, POWERVR_MIPS_PAGE_BYTES);
 	for (index = 0; index < 8U; index += 4U) {
@@ -2000,7 +2001,7 @@ powervr_firmware_return_probe(
 		if ((entry & PROBE_ENTRY_VALID) == 0U)
 			continue;
 		entry_physical = ((uint64_t)(entry & PROBE_FRAME_MASK) >> PROBE_FRAME_SHIFT) << PROBE_PAGE_SHIFT;
-		cached = kern_pmem_to_kernel((hal_physaddr_t)entry_physical);
+		cached = kern_pmem_to_kernel((kern_physaddr_t)entry_physical);
 		if (cached == NULL)
 			continue;
 		kern_dcache_invalidate_range((const void *)cached, POWERVR_MIPS_PAGE_BYTES);

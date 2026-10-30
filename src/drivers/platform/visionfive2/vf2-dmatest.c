@@ -206,7 +206,7 @@ run_check(
 	}
 
 	/* The alias needs the run's physical address: the device's must be it. */
-	direct = kern_pmem_to_kernel((hal_physaddr_t)run.device_address);
+	direct = kern_pmem_to_kernel((kern_physaddr_t)run.device_address);
 	if (direct != run.address) {
 		drv_dma_free_coherent(device, &run);
 		drv_dw_axi_dmac_channel_put(memory.channel);

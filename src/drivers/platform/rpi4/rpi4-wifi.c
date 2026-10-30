@@ -214,7 +214,7 @@ drv_rpi4_wifi_probe(
 		atomic_raw_store_release(&wifi_probe_state, PROBE_REFUSED);
 		return ENODEV;
 	}
-	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_phys);
+	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (blob == NULL) {
 		atomic_raw_store_release(&wifi_probe_state, PROBE_REFUSED);
 		return ENODEV;

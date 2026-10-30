@@ -9,10 +9,10 @@
  * Raspberry Pi 4 console: /dev/console over the PL011 serial port.
  *
  * The board has no text display of its own, so the console is a teletype:
- * each character goes to hal_putc(), which writes it to the serial port and
- * to the firmware framebuffer.  A positioned write has no teletype meaning
- * and is dropped; the grid only answers the size and cursor queries that
- * programs make.
+ * each character goes to kern_console_early_putc(), which writes it to the
+ * serial port and to the firmware framebuffer.  A positioned write has no
+ * teletype meaning and is dropped; the grid only answers the size and
+ * cursor queries that programs make.
  *
  * Input is read from the PL011 receive FIFO by a kernel thread that looks
  * at it every few milliseconds, so the console needs no interrupt routing.
@@ -28,8 +28,6 @@
 #include <stdint.h>
 
 #include "drivers/platform/rpi4/rpi4-console.h"
-
-#include <hal/hal.h>
 
 #include "hal/arm64/bsp-rpi-common/cons.h"
 #include <kern/clock.h>
@@ -211,7 +209,7 @@ console_putc(
 	int character)
 {
 	/* Writes the character wherever the hardware layer shows the console. */
-	hal_putc(character);
+	kern_console_early_putc(character);
 }
 
 /* Drops a positioned write, which a teletype cannot place. */

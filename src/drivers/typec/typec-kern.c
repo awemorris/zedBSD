@@ -15,7 +15,6 @@
 #include <stdarg.h>
 #include <stdbool.h>
 
-#include <hal/hal.h>
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
@@ -23,11 +22,13 @@
 
 #include "kern/cdev.h"
 #include "kern/clock.h"
+#include "kern/device-io.h"
 #include "kern/file.h"
 #include "kern/klog.h"
 #include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/page.h"
+#include "kern/pmem.h"
 #include "kern/sched.h"
 #include "kern/thread.h"
 #include "kern/waitq.h"
@@ -185,7 +186,7 @@ drv_typec_os_log(
 }
 
 /*
- * Maps a device's physical range uncached; the HAL refuses a range that
+ * Maps a device's physical range uncached; the kernel refuses a range that
  * holds RAM, so a mailbox firmware left in memory the kernel hands out is
  * never used.  The range need not start on a page.
  */
@@ -207,8 +208,8 @@ drv_typec_os_map(
 	length = (offset + size + KERN_PAGE_SIZE - 1U) & ~(size_t)(KERN_PAGE_SIZE - 1U);
 
 	/* Maps them for reading and writing, uncached as the device wants. */
-	error = hal_space_map_device((hal_physaddr_t)page, length, HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE, &window);
-	if (error != HAL_OK)
+	error = kern_device_map(page, length, KERN_DEVICE_UNCACHED, &window);
+	if (error != 0)
 		return EFAULT;
 
 	/* Succeeded: the range is reached through the window, for as long as the kernel runs. */
@@ -218,7 +219,7 @@ drv_typec_os_map(
 
 /*
  * Removes a mapping drv_typec_os_map() made of a range of the same size:
- * the same pages, given back to the HAL's window.
+ * the same pages, given back to the kernel.
  */
 void
 drv_typec_os_unmap(
@@ -238,8 +239,8 @@ drv_typec_os_unmap(
 	length = (offset + size + KERN_PAGE_SIZE - 1U) & ~(size_t)(KERN_PAGE_SIZE - 1U);
 
 	/* Given back; a refusal is only logged (the window keeps them). */
-	error = hal_space_unmap_device((void *)page, length);
-	if (error != HAL_OK)
+	error = kern_device_unmap((void *)page, length);
+	if (error != 0)
 		kern_logf("typec: the mailbox's mapping was not removed (%d)\n", error);
 }
 
@@ -253,7 +254,7 @@ drv_typec_os_read8(
 	uint8_t value;
 
 	/* One byte access, as firmware's ByteAcc fields make. */
-	value = hal_mmio_read8(address);
+	value = kern_mmio_read8(address);
 
 	/* Succeeded: the byte. */
 	return value;
@@ -268,7 +269,7 @@ drv_typec_os_write8(
 	uint8_t value)
 {
 	/* One byte access, as firmware's ByteAcc fields make. */
-	hal_mmio_write8(address, value);
+	kern_mmio_write8(address, value);
 }
 
 /*

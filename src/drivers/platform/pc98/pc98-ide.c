@@ -21,7 +21,6 @@
 #include "kern/lock.h"
 #include <uapi/errno.h>
 #include <uapi/sysctl.h>
-#include <hal/hal.h>
 #include "kern/klog.h"
 
 /*

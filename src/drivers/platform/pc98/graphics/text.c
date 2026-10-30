@@ -20,7 +20,6 @@
  * the screen and give it back without losing what was on it.
  */
 
-#include <hal/hal.h>
 #include <kern/device-io.h>
 #include <kern/lock.h>
 #include <kern/text-display.h>
