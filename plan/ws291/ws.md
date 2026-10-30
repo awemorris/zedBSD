@@ -242,3 +242,10 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
   perf 無しの A/B: big-1000 23.8 → 52.4 fps、subs-100 67 → 104、subs-1000 6.7 → 10.9、scene 不変。回帰（shot・hang・desktop・subs の still）は phase011。
 - WS309 p015 への候補（2026-10-30 Q1）: (B) WSI の image を block-linear にし scanout も block-linear にすれば、nvrtx の shadow の copy（pass の終わりの 1 回）も無くなる。
   WS291 の範囲の外。WS309 p015（compositor が game mode の image を貸す時の image の形式と tiling の選び方）の候補として残す。
+
+## 2026-10-30 q1700-i01（P5、worktree p5-ws291n、NVIDIA の段）
+
+- 承認: ユーザー（2026-10-30 原文）「WS291はNVIDIAですか？それなら今実行してOKです。」。範囲: p010 の desktop の測り直し（WS309 の後）、p012 以降で scene-5000 を 50 fps を明らかに超える所へ。
+- 再開点（09:13 P5、利用の上限で Q1 がラップアップ）: 実機の計測は未実施。main の kernel の build（build/ws291/vmunix-m0、warning 0）まで。
+  次の 1 手と手順は [phase010](phase010/phase.md) の「q1700-i01」節（先に main の Keiland・libvulkan・libc を NVMe の zedBSD に入れてから rtx-desk-profile.sh、
+  その後 p012 を立てて `--cull=all`・`--size=` で GPU の内訳を NVK と比べる）。機械は Debian・RTX は vfio-pci、NVMe の kernel は触っていない、lock は返した。
