@@ -53,7 +53,7 @@ struct sched {
 	uint64_t queued_tick;
 
 	/*
-	 * The latency diagnostic (kern.perf=1, ws213-p007).  When a wakeup or
+	 * The latency diagnostic (kern.perf=1).  When a wakeup or
 	 * a preemption made the thread runnable, the counter then (zero while
 	 * no wait is being measured), why (SCHED_PERF_*), the CPU it waits on
 	 * and that CPU's switch count then, which together say how long it
@@ -201,6 +201,15 @@ kern_preempt_enable(void);
 unsigned
 kern_cpu_current(void);
 
+/*
+ * Reports how many CPUs the kernel runs on.
+ *
+ * Any context, no lock.  CPUs are numbered 0 .. count - 1, and the count
+ * does not change once the secondary CPUs have joined the scheduler.
+ */
+unsigned
+kern_cpu_count(void);
+
 /* Test-only: current CPU's kern_preempt_disable() nesting depth. */
 unsigned
 sched_test_preempt_count(void);
@@ -258,7 +267,7 @@ sched_ticks(void);
 
 /*
  * One CPU's clock ticks since boot by what it was doing when each came
- * (hw.cputimes, ws134-p005): a user thread in user mode, a thread in the
+ * (hw.cputimes): a user thread in user mode, a thread in the
  * kernel or a kernel thread, its idle thread, or between threads.
  */
 struct sched_cpu_time {
