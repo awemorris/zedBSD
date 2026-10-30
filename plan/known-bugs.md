@@ -231,7 +231,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-361](bugs/BUG-361.md) | NVIDIA RTX 2070（nvrtx）で Notes が起動しない（executor に stencil の format・test が無い） | fixed（2026-10-30 P5 q1692、実機で Notes の pen と文字、agent/p5-ws243 48f21726b、main に未 merge） |
 | [BUG-362](bugs/BUG-362.md) | 共有の shader の frontend が SPIR-V の NoContraction（precise）を拒み、precise を含む shader が compile されない | open |
 | [BUG-363](bugs/BUG-363.md) | zedBSD の image に /etc/hosts が無く、localhost の名前の解決が失敗する | open |
-| [BUG-364](bugs/BUG-364.md) | gpu_fence_get の foreign の fence が device を比べず別の GPU の fence を承認なしに受ける | open |
+| [BUG-364](bugs/BUG-364.md) | gpu_fence_get の foreign の fence が device を比べず別の GPU の fence を承認なしに受ける | closed（2026-10-30、comment の直し） |
 | [BUG-365](bugs/BUG-365.md) | GPU の文書の調べで見つかった header・comment と code の食い違い（一括、22 件＋p024 の 13 件） | open |
 | [BUG-366](bugs/BUG-366.md) | device の mmap で MAP_FIXED が hint として扱われる（POSIX に反する） | open |
 | [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close(2) が戻らない | open |

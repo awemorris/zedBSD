@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 13:05（Q1）
+最終更新: 2026-10-30 13:10（Q1）
 
 ## 担当（P1〜P8）
 
@@ -95,7 +95,7 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | # | WS | 一行の問い |
 | --- | --- | --- |
 | 1 | WS309 Keiland の compositor の thread の整理 | **決定済み（2026-10-30）**: 1 は (a)・切り替えは compositor の都合、2〜4 は推し。次のセッションで p015 の実装へ |
-| 2 | BUG-364 GPU の fence の受け取り | display が、別の GPU が出した「描き終わり」の印を、無条件に受けてよいか |
+| 2 | BUG-364 GPU の fence の受け取り | **決定済み（2026-10-30）**: (A) どの GPU の fence も受ける今の動きを正とし、comment と header を直す |
 | 3 | WS328 libbrowser のベクトル描画と SVG（WS074 も Claude に移った） | WS328 と、Codex から移った WS074（Web ブラウザ）の、どちらをいつ始めるか |
 
 ### 1. WS309: ゲームモードの V2 をどう作るか
@@ -151,7 +151,7 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 - (A)【推し】どの GPU の fence も受ける今の動きを正しい設計とし、comment と header の文を直す。理由: fence は「待つ」だけで、相手の GPU の memory を読み書きしない（悪い fence で出来るのは画面の切り替えを遅らせる事くらいで、それは自分の app の画面だけ）。全部の driver が companion を 0 にしているので、(B) にすると今の Pi・VF2・C5 の画面の出し方が壊れる。ノート PC の Intel と NVIDIA の組のように、組が driver の外で決まる場合も受けられる。
 - (B) companion の組だけを受ける。各 driver に正しい companion_id を入れさせ、組でない GPU の fence は断る。費用: driver ごとの組の調べと実装、試験。得: 誤った組み合わせを早く断れる。
 
-**決まらない間**: 今の動き（どの GPU の fence も受ける）が続く。文書（docs/reference/gpu-fences.md）は今の動きを書いている。
+**決定（2026-10-30 ユーザー）**: (A)。Q1 が `gpu.c` の 2 つの comment を「どの GPU の fence も受ける」に直して BUG-364 を閉じた（876b64d55、code は変えていない）。
 
 ### 3. WS328: libbrowser のベクトル描画と SVG をいつ始めるか
 
