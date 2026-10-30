@@ -266,31 +266,51 @@ kl_thread_is_current(
 }
 
 /*
- * Sleeps for a number of milliseconds.
+ * Sleeps for at least a number of milliseconds.
  *
- * Sleep ends on the system's tick and may return a little early, so the rest
- * is slept again until the tick count reaches the end.
+ * Sleep ends on the system's tick and may return a little early, so the time
+ * is measured with the performance counter (which counts finer than a
+ * millisecond) and the rest slept again until the counter has run the whole
+ * time.
  */
 void
 kl_thread_sleep(
 	uint32_t milliseconds)
 {
-	ULONGLONG end;
-	ULONGLONG now;
+	LARGE_INTEGER frequency;
+	LARGE_INTEGER start;
+	LARGE_INTEGER now;
+	ULONGLONG ticks_per_second;
+	ULONGLONG wanted;
+	ULONGLONG elapsed;
 	ULONGLONG left;
+	ULONGLONG left_milliseconds;
 
-	/* The tick count at which the sleep is over. */
-	end = GetTickCount64() + (ULONGLONG)milliseconds;
+	/* The counter's rate and where it stands; the rate is never 0 on Windows XP and later. */
+	(void)QueryPerformanceFrequency(&frequency);
+	(void)QueryPerformanceCounter(&start);
+	ticks_per_second = (ULONGLONG)frequency.QuadPart;
+	if (ticks_per_second == 0U)
+		ticks_per_second = 1000U;
 
-	/* Slept until the end; a Sleep that returned early leaves the rest to sleep. */
+	/* The counter ticks the wait takes, rounded up (seconds apart from the rest so that the product cannot overflow). */
+	wanted = ((ULONGLONG)milliseconds / 1000U) * ticks_per_second;
+	wanted += (((ULONGLONG)milliseconds % 1000U) * ticks_per_second + 999U) / 1000U;
+
+	/* Slept until the counter has run the whole wait; a Sleep that returned early leaves the rest to sleep. */
 	for (;;) {
-		now = GetTickCount64();
-		if (now >= end)
+		(void)QueryPerformanceCounter(&now);
+		elapsed = (ULONGLONG)(now.QuadPart - start.QuadPart);
+		if (elapsed >= wanted)
 			break;
-		left = end - now;
-		if (left > THREAD_SLEEP_MAX)
-			left = THREAD_SLEEP_MAX;
-		Sleep((DWORD)left);
+
+		/* What is left in whole milliseconds, rounded up so that the last Sleep does not end early. */
+		left = wanted - elapsed;
+		left_milliseconds = (left / ticks_per_second) * 1000U;
+		left_milliseconds += ((left % ticks_per_second) * 1000U + ticks_per_second - 1U) / ticks_per_second;
+		if (left_milliseconds > THREAD_SLEEP_MAX)
+			left_milliseconds = THREAD_SLEEP_MAX;
+		Sleep((DWORD)left_milliseconds);
 	}
 }
 
@@ -305,16 +325,22 @@ kl_thread_yield(void)
 }
 
 /*
- * Counts the processors the program's threads run on.
+ * Counts the processors the program can run on.
  *
  * A thread runs in one processor group, so the count is of the caller's
- * group: that of every group would be too many.
+ * group: that of every group would be too many.  The process's affinity mask
+ * narrows it when the system gives one (it does not when the process has
+ * threads in several groups).
  */
 unsigned
 kl_thread_cpu_count(void)
 {
 	PROCESSOR_NUMBER number;
 	DWORD count;
+	DWORD_PTR process_mask;
+	DWORD_PTR system_mask;
+	BOOL got;
+	unsigned allowed;
 
 	/* The group the caller runs in. */
 	GetCurrentProcessorNumberEx(&number);
@@ -322,7 +348,23 @@ kl_thread_cpu_count(void)
 	/* The processors of that group, or one when the system does not tell. */
 	count = GetActiveProcessorCount(number.Group);
 	if (count == 0UL)
-		return 1U;
+		count = 1UL;
+
+	/* The processors the process may use, when the system tells. */
+	got = GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask);
+	if (got != FALSE) {
+		/* Counts the processors in the mask. */
+		allowed = 0U;
+		while (process_mask != 0U) {
+			if ((process_mask & 1U) != 0U)
+				allowed++;
+			process_mask >>= 1;
+		}
+
+		/* A mask with fewer processors than the group has narrows the count. */
+		if (allowed != 0U && allowed < (unsigned)count)
+			count = (DWORD)allowed;
+	}
 
 	/* Succeeded: so many processors. */
 	return (unsigned)count;

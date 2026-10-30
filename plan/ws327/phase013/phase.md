@@ -88,7 +88,7 @@ plan/ws327/phase013/phase.md`（ws.md は Q1）。動作の確かめはしない
 
 確かめ（`date` 2026-10-30、worktree `s-ws327-p013`）:
 
-- `sh plan/ws327/tests/build-win32.sh` → x86_64・i686 とも thread/socket の compile PASS (warnings 0)・`link win32-link.exe: PASS`、最後に `ws327-win32: PASS`。
+- `sh plan/ws327/tests/build-win32.sh`（sleep・cpu_count の直しの後に再実行）→ x86_64・i686 とも thread/socket の compile PASS (warnings 0)・`link win32-link.exe: PASS`、最後に `ws327-win32: PASS`。
 - `sh plan/ws327/tests/check-base.sh p013` → `ws327-check-base: PASS`。
 - `make -j16 -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-p013-linux build/ws327-p013-linux/lib/libkeiland.so` → libkeiland.so の link まで通った。
 - 突然変異: `kl_cond_broadcast` を `#if 0` で消す → compile は PASS、link が FAIL（x86_64・i686）。局所の未使用変数を足す → compile FAIL。戻して `cmp` 一致。
@@ -105,9 +105,10 @@ plan/ws327/phase013/phase.md`（ws.md は Q1）。動作の確かめはしない
 
 Q1 へ（Win32 で header の約束が揺れる所。header は変えていない）:
 
-1. `kl_thread_sleep`: `GetTickCount64`（粒度 約 15 ms）の期限まで眠り直すが、開始の読みが tick の切り捨てなので「少なくとも ms」を最大 1 tick 満たさない事がある
-   （MS の文書も `Sleep` が早く返りうると書く）。厳密にするには `QueryPerformanceCounter` が要る（骨格は `GetTickCount64`）。
-2. `kl_thread_cpu_count`: 呼び手の processor group の `GetActiveProcessorCount` で、process の affinity・job の制限を見ない。header の「the program can run on」より多く返しうる。
+1. `kl_thread_sleep`（Q1 の指示で直した）: `QueryPerformanceCounter`・`QueryPerformanceFrequency` で測り、経過が ms 以上になるまで残りを（切り上げの ms で）`Sleep` し直す。
+   `GetTickCount64` の粒度で「少なくとも ms」を満たさない問題は無くなった（`Sleep` 自体は早く返りうるが、loop が眠り直す）。
+2. `kl_thread_cpu_count`（Q1 の指示で直した）: 呼び手の group の `GetActiveProcessorCount` を、`GetProcessAffinityMask` の mask の bit の数がそれより少なければその数に狭める。
+   `GetProcessAffinityMask` が失敗する時（process の thread が複数の group にいる時など）は group の数のまま。job object の制限（CPU rate・group をまたぐ affinity）は見ない。
 3. key の destroy: FLS は 1 回だけ。destroy の中で同じ key に `set` した値は（FLS の callback の中の slot の扱いが文書に無く、確かめていない）漏れうる。
    header は「on some systems again」と書くので許される範囲。
 4. `kl_thread_key_delete`: `FlsFree` が他の thread の生きた値にも、その場で（呼んだ thread の上で）destroy を呼ぶ。header は未規定と書く。
