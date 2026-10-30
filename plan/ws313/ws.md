@@ -37,6 +37,7 @@ Resume point: 今夜のユーザーの実機の試験（[tests/README.md](tests/
 
 - 2026-10-29 §8 の判断（ユーザーのクリック、Q1 の中継。前置きで WS・状態・未決・用語を説明した）:
   - bootloader の binary（Amlogic の BL2・BL31 と Hardkernel の U-Boot）: 「取得して image に入れる」→ build で Hardkernel の公開の binary を取得し SHA-256 で検証して image に入れる。再配布の条件（Amlogic の blob の license）を確かめて記録する（notice の file）。
+  - bootloader の出所（2026-10-30 ユーザーのクリック「公式 image を渡す (推し)」、Q1 の中継。前置きで dn.odroid.com が bot の確認で拒んだ事、Hardkernel の GitHub に C5 の prebuilt が無い事、git.odroid.com は clone と U-Boot の build が要る事を説明した）: ユーザーが Hardkernel の公式の ODROID-C5 の image（展開した .img）を host に置き、`ODROID_C5_BOOTLOADER_FROM` で写す。自前の取得・build は今はしない。
   - GPU の CSF の firmware（mali_csffw.bin）: 「取得・検証・同意 (推し)」→ 他の firmware と同じく linux-firmware から取得・SHA-256 で検証・license への同意の形で image に。
   - UART の対話での判定: 「許可する (推し)」→ AGENTS.md §9 の例外を ODROID-C5 の実機に広げる（生きた serial を対話で読む。network と画面が出た後は SSH と画面の PNG）。
   - 起動の道（Hardkernel の U-Boot＋boot.scr＋booti）・DTB の出所（Hardkernel の DTS から build）・範囲（eMMC・OTG・Audio・HDMI の mode の変更は後回し）は Q1 の判断で推しどおり。
