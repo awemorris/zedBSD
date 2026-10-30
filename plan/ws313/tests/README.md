@@ -8,13 +8,13 @@
 - USB-UART の adapter（3.3 V、921600 baud を出せる物。Hardkernel の USB-UART kit、CP2102・FT232 など）を C5 の UART の connector（TX・RX・GND）につなぎ、centris の USB へ。pin の配置は wiki.odroid.com が読めず未確認（基板の silk か Hardkernel の資料で）。
 - 12 V/2 A の電源（5.5/2.1 mm）。SwitchBot の plug を使うなら、その ID。
 - microSD（8 GB 以上）、HDMI の display、USB の keyboard・mouse、LAN の cable（DHCP のある網）。
-- Hardkernel の ODROID-C5 の公式の image（bootloader の区画を写すため。`ODROID_C5_BOOTLOADER_FROM` に展開した `.img` の path を渡す。`.xz` などの圧縮のままでは読めない）。
+- bootloader の donor（下の「媒体」）か Hardkernel の ODROID-C5 の公式の image（bootloader の区画を写すため。`ODROID_C5_BOOTLOADER_FROM` に展開した `.img` の path を渡す。`.xz` などの圧縮のままでは読めない）。
 - eMMC の module は外す（U-Boot は起動した媒体の boot.scr を先に読むが、eMMC から起動すると eMMC の OS が先に起動する）。
 
 ## 媒体
 
 image は main（merge の後）か P7 の worktree で作る。sysroot が無い checkout では先に `make ZEDBSD_CONFIG=config/ci/config-odroid-c5.mk sysroot-arm64`。
-bootloader は、ユーザーの判断（§8「取得して image に入れる」）の公開の取得先がまだ分からないので、今夜は Hardkernel の公式の image から写す（`ODROID_C5_BOOTLOADER_FROM`）。無しでも image はでき（2026-10-29 P7 が確かめた）、その時は bootloader の区画が空で、SD からは起動しない。
+bootloader は、2026-10-30 から Hardkernel の Yocto の layer（github.com/mdrjr/meta-odroid-aml の commit 548e2f037e の `recipes-bsp/u-boot-odroid-c5/files/u-boot.bin.signed`、SHA-256 8c2e66919a05921d79e130cc00a977a07cf8df6b34153e66c18c3241c0809e3c）を、512 byte の 0 の後に付けた donor（sector 1 から置く形、[phase003](../phase003/phase.md) の q1709-i01）にして `ODROID_C5_BOOTLOADER_FROM` に渡す。Hardkernel の公式の image の展開した `.img` も同じ変数で使える。試験だけに使い、image と donor を公開しない（Amlogic の blob の再配布の条件が不明）。無しでも image はでき（2026-10-29 P7 が確かめた）、その時は bootloader の区画が空で、SD からは起動しない。
 desktop の image は Arm の CSF の firmware（`mali-csf-firmware`）を入れる。その license（`LICENCE.mali_csffw`、Arm の EULA）への同意はユーザーが端末で一度だけ答える（`make ZEDBSD_CONFIG=config/ci/config-odroid-c5-keiland.mk firmware-licenses`。担当は代わりに答えない）。
 
 ```sh

@@ -49,3 +49,10 @@ WS: [WS313](../ws.md)、設計 [design.md](../design.md) §2・§6・§7
 - build（2026-10-30、main 5aca73738 ＋ 21297ef31）: `make sysroot-arm64` rc=0、`make … BUILD=build/odroid-c5 world` rc=0、keiland の `world` rc=0（`MALI_CSF_FIRMWARE_CACHE_ROOT` は worktree の build/fw-sources、license は自動で同意: 2026-10-30 ユーザー「試験に関しては私はすべてのライセンスに同意しておりますので、自動でいいです」）。zedBSD の source の warning 0（warning は openssl・openssh・perl だけ）。
 - host の試験: `c5-build-check.sh q1709` の 5 つの vmunix の warning 0、meson-mmc・Mali の 10 の試験 PASS。DTS の取得は raw.githubusercontent.com の HTTP 429 で失敗 → 他の worktree の DTS の cache を複写し（fetcher が manifest の SHA-256 で検証）、`odroid-c5-fdt-host-test` PASS・meson-mmc glue PASS。
   `mali-compiler-host-test` は 2026-10-30 に main に入った `plan/tools/nvrtx/sm75/precise.comp`（NoContraction）を共通の front end が拒否して 34/35 → Mali の feature の bit（`DRV_GPU_SPIRV_FEATURE_NO_CONTRACTION`、Mali の backend は積と和を融合しない）で受けて 35/35 PASS（21297ef31・4d4193dfa）。
+- image（2026-10-30 14:16〜14:17、branch agent/p1-ws313 81118cb62、`flock /tmp/zedbsd-image-build.lock make … ODROID_C5_BOOTLOADER_FROM=<A の donor> disk-image` rc=0）:
+  - text: `/home/awe/zedBSD-worktrees/p1-ws313/build/odroid-c5/hdd-image.img`、461373440 byte、sha256 65f5f69b7086b7aaffc3887ae6c152aa520d673621b9f2a9b3e483718a7cde55
+  - desktop: `/home/awe/zedBSD-worktrees/p1-ws313/build/odroid-c5-keiland/hdd-image.img`、464519168 byte、sha256 fa02863f3a3ce75c8723c80f521786d065b7e1d5f00a7b31b9fff1b4966a45ff（rootfs に `mali_csffw.bin`）
+  - 確かめ（host）: 両方とも sector 1 からの 3379200 byte が A と cmp で一致、MBR の code は 0・署名 55aa、区画の SHA-256 e6f020856acff8aedd041058971155e8bdb8bae6e3f8764e9818a20afc7b313d、FAT に boot.scr・vmunix・odroid-c5.dtb・data.img・swapfile・BOOTLOADER.txt、UFS の root は `canonical zedBSD UFS OK`。
+  - 書き込み: `sudo dd if=<image> of=/dev/sdX bs=4M conv=fsync status=progress`。
+- DTS の取得の流し直し（14:17、Q1 の指示で 1 回だけ）: raw.githubusercontent.com がまだ HTTP 429。image と host の試験は複写した cache（SHA-256 で検証）で作った。
+- 実機: 未実施（U-Boot が A でこの image の boot.scr を読むかも未確認）。
