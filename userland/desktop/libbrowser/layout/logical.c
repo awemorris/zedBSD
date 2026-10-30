@@ -107,8 +107,6 @@ layout_logical_wanted(
 	 */
 	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB && box->parent != NULL && !box->out_of_flow) {
 		display = box->parent->style.display;
-		if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)
-			return 0;
 		if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
 			return 0;
 	}
@@ -218,8 +216,8 @@ layout_logical(
 
 /*
  * Tells whether an orthogonal box's auto inline size fits its content: a
- * float, an inline block, a box out of the flow, or a block-level box of a
- * block container (a flex or grid item is sized by its container).
+ * float, an inline block, a box out of the flow, a flex item, or a block-level box of a
+ * block container or a flex container (a grid item is sized by its container).
  */
 static int
 logical_fits_content(
@@ -239,10 +237,8 @@ logical_fits_content(
 	if (box->floating != CSS_FLOAT_NONE || box->out_of_flow || box->atomic)
 		return 1;
 
-	/* Flex and grid items are sized by their containers. */
+	/* Grid items are sized by their containers (a flex item's inline size is its content's until the line stretches it). */
 	display = box->parent->style.display;
-	if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)
-		return 0;
 	if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
 		return 0;
 

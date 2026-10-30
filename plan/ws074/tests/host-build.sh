@@ -82,7 +82,7 @@ for file in userland/desktop/libmedia/engine.c userland/desktop/libmedia/decoder
     userland/desktop/libmedia/bits.c userland/desktop/libmedia/aac-input.c userland/desktop/libmedia/aac-huffman.c \
     userland/desktop/libmedia/aac-codec.c userland/desktop/libmedia/aac-bands.c userland/desktop/libmedia/aac-frame.c \
     userland/desktop/libmedia/aac-synth.c userland/desktop/libmedia/aac.c userland/desktop/libmedia/sound.c \
-    userland/desktop/libmedia/sbc.c userland/desktop/libmedia/aac-encode.c userland/desktop/libmedia/h264sw-*.c \
+    userland/desktop/libmedia/sbc.c userland/desktop/libmedia/aac-encode.c userland/desktop/libmedia/h264sw-*.c userland/desktop/libmedia/vcodec-*.c \
     userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c \
     userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c; do
 	object=$out/obj/media-$(basename "$(dirname "$file")")-$(basename "$file" .c).o

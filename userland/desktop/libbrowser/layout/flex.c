@@ -1007,6 +1007,12 @@ flex_base_size(
 	if (item->minimum < 0)
 		item->minimum = 0;
 
+	/* A table never gets narrower than its content: an orthogonal one's width is its block size, which its rows give. */
+	if (row && (child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE) &&
+	    child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    item->minimum < item->base)
+		item->minimum = item->base;
+
 	/* The base stays unconstrained; the hypothetical size is limited for line breaking. */
 	item->size = item->base;
 	if (item->maximum >= 0 && item->size > item->maximum)
@@ -1917,6 +1923,24 @@ flex_lay_sized(
 	child->style.margin[CSS_BOTTOM].value = layout_to_px(item->margin_end);
 	child->style.margin[CSS_BOTTOM].offset = 0;
 	align = flex_align_of(box, child);
+
+	/* An orthogonal item's physical width is its block size: a stretch makes it as wide as the container. */
+	if (align == CSS_ALIGN_STRETCH && box->style.flex_wrap == CSS_FLEX_NOWRAP && child->style.width.unit == CSS_UNIT_AUTO &&
+	    !child->replaced && (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) !=
+	    (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) &&
+	    child->style.margin[CSS_LEFT].unit != CSS_UNIT_AUTO && child->style.margin[CSS_RIGHT].unit != CSS_UNIT_AUTO) {
+		layout_unit room;
+
+		room = box->width - flex_length(&child->style.margin[CSS_LEFT], box->width) -
+		    flex_length(&child->style.margin[CSS_RIGHT], box->width);
+		if (child->style.box_sizing != CSS_BOX_SIZING_BORDER)
+			room -= child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
+		if (room < 0)
+			room = 0;
+		child->style.width.unit = CSS_UNIT_PX;
+		child->style.width.value = layout_to_px(room);
+		child->style.width.offset = 0;
+	}
 	if ((align == CSS_ALIGN_STRETCH && box->style.flex_wrap == CSS_FLEX_NOWRAP) ||
 	    child->style.width.unit != CSS_UNIT_AUTO) {
 		/* A table stretched across is as wide as the room (an auto-width table would be as wide as its content). */
@@ -2431,10 +2455,27 @@ flex_align_of(
 	align = item->style.align_self;
 	if (align == CSS_ALIGN_AUTO)
 		align = box->style.align_items;
-	if (align == CSS_ALIGN_SELF_START)
-		align = CSS_ALIGN_START;
-	if (align == CSS_ALIGN_SELF_END)
-		align = CSS_ALIGN_END;
+	if (align == CSS_ALIGN_SELF_START || align == CSS_ALIGN_SELF_END) {
+		int reverse;
+
+		/*
+		 * The item's own start: an orthogonal item of a horizontal row has its
+		 * inline axis across the line (from the bottom in rtl); one of a
+		 * column has its block axis across it (from the right in vertical-rl).
+		 */
+		reverse = 0;
+		if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+		    item->style.writing_mode != CSS_WRITING_HORIZONTAL_TB) {
+			if (box->style.flex_direction == CSS_FLEX_ROW || box->style.flex_direction == CSS_FLEX_ROW_REVERSE)
+				reverse = item->style.direction == CSS_DIRECTION_RTL;
+			else
+				reverse = item->style.writing_mode == CSS_WRITING_VERTICAL_RL;
+		}
+		if ((align == CSS_ALIGN_SELF_START) != (reverse != 0))
+			align = CSS_ALIGN_START;
+		else
+			align = CSS_ALIGN_END;
+	}
 	if (align == CSS_ALIGN_NORMAL)
 		align = CSS_ALIGN_STRETCH;
 
