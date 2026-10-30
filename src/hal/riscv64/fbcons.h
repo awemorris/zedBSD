@@ -45,6 +45,14 @@ riscv64_fbcons_ready(
 	void);
 
 void
+riscv64_fbcons_move(
+	uintptr_t address);
+
+void
+riscv64_fbcons_detach(
+	void);
+
+void
 riscv64_fbcons_cell(
 	unsigned row,
 	unsigned column,

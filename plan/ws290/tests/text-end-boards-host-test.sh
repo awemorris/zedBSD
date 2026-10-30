@@ -16,7 +16,7 @@ repo=$(cd "$(dirname "$0")/../../.." && pwd)
 mkdir -p "$repo/build/tmp"
 out=$(mktemp -d "$repo/build/tmp/text-end-boards-host.XXXXXX")
 status=0
-scenes='1 2 3 4 5 6 7 8 9 10 11 12 13 14'
+scenes='1 2 3 4 5 6 7 8 9 10 11 12 13 14 15'
 for mode in ordinary undefined address; do
 	extra=
 	pc98="$repo/src/drivers/platform/pc98/graphics/text.c $repo/src/drivers/platform/pc98/graphics/pc98-graphics.c $repo/src/drivers/platform/pc98/graphics/backend.c"

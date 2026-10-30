@@ -136,6 +136,7 @@ static void scene_ns16550_probe(void);
 static void scene_vf2(void);
 static void scene_vf2_ranges(void);
 static void scene_vf2_no_uart(void);
+static void scene_vf2_unmap_error(void);
 static void scene_serial_only(void);
 
 int
@@ -203,6 +204,9 @@ main(
 		break;
 	case 13:
 		scene_serial_only();
+		break;
+	case 15:
+		scene_vf2_unmap_error();
 		break;
 	default:
 		return 2;
@@ -455,16 +459,20 @@ scene_rpi4(void)
 	kern_text_resume();
 	expect(hal_drawn == 0U, "rpi4: the hardware layer draws nothing");
 
-	/* The end over the screen: the mapping goes, and the screen the hardware layer keeps counts as left. */
+	/*
+	 * The end over the screen: the console's mapping goes, then the early
+	 * console's, asked for as exactly the screen and removed at once.
+	 */
 	range.physical = 0x3e040000ULL;
 	range.bytes = 0x1000U;
 	error = kern_text_end(&range, 1U);
-	expect(error == EBUSY && unmap_count == 1U && unmapped_physical[0] == 0x3e000000ULL, "rpi4: EBUSY over the screen, the mapping given back");
+	expect(error == 0 && unmap_count == 2U && unmapped_physical[0] == 0x3e000000ULL, "rpi4: 0 over the screen, the console's mapping given back");
+	expect(unmapped_physical[1] == 0x3e000000ULL && unmapped_size[1] == 640U * 480U * 4U, "rpi4: the mapping of exactly the screen removed");
 
 	/* A range away from it: 0, nothing more given back. */
 	range.physical = 0x600000000ULL;
 	error = kern_text_end(&range, 1U);
-	expect(error == 0 && unmap_count == 1U, "rpi4: 0 for a range away from it");
+	expect(error == 0 && unmap_count == 2U, "rpi4: 0 for a range away from it");
 
 	/* Characters after the end still go nowhere near the hardware layer, and a resume draws nothing. */
 	kern_text_putc('C');
@@ -634,24 +642,26 @@ scene_vf2(void)
 	expect(uart_other_writes == 0U, "vf2: nothing reached the UART that is not the console");
 }
 
-/* VisionFive 2: the loader's screen, which the hardware layer keeps mapped, judged against the ranges. */
+/* VisionFive 2: the loader's screen, whose mappings the kernel keeps for good, judged against the ranges. */
 static void
 scene_vf2_ranges(void)
 {
 	struct kern_text_range range;
 	int error;
 
-	/* The board up, with the loader's screen. */
+	/* The board up, with the loader's screen, whose mappings the kernel refuses to remove (its EBUSY). */
 	screen_name = "riscv64.framebuffer";
 	screen_physical = 0xfe000000ULL;
 	screen_size = 0x1000000ULL;
 	vf2_start(TREE_ALIAS);
+	unmap_fail_physical = 0xfe000000ULL;
+	unmap_fail_error = EBUSY;
 
-	/* A range over the screen: EBUSY, the console's mapping given back all the same. */
+	/* A range over the screen: EBUSY, both removals asked for. */
 	range.physical = 0xfe800000ULL;
 	range.bytes = 0x1000U;
 	error = kern_text_end(&range, 1U);
-	expect(error == EBUSY && unmap_count == 1U && kernel_putc == kern_text_kernel_putc, "vf2 ranges: EBUSY over the screen, mapping given back");
+	expect(error == EBUSY && unmap_count == 0U && kernel_putc == kern_text_kernel_putc, "vf2 ranges: EBUSY over a screen kept mapped");
 
 	/* A range away from it: 0. */
 	range.physical = 0x40000000ULL;
@@ -663,6 +673,33 @@ scene_vf2_ranges(void)
 	kernel_putc = other_putc;
 	error = kern_text_end(&range, 1U);
 	expect(error == EBUSY && kernel_putc == other_putc, "vf2 ranges: EBUSY under another path");
+}
+
+/* VisionFive 2: a removal of the screen's mapping that fails reports its error over the screen. */
+static void
+scene_vf2_unmap_error(void)
+{
+	struct kern_text_range range;
+	int error;
+
+	/* The board up, with the loader's screen, whose removal fails. */
+	screen_name = "riscv64.framebuffer";
+	screen_physical = 0xfe000000ULL;
+	screen_size = 0x1000000ULL;
+	vf2_start(TREE_ALIAS);
+	unmap_fail_physical = 0xfe000000ULL;
+	unmap_fail_error = EIO;
+
+	/* A range over the screen: the removal's error. */
+	range.physical = 0xfe000000ULL;
+	range.bytes = 0x10U;
+	error = kern_text_end(&range, 1U);
+	expect(error == EIO, "vf2 unmap error: the removal's error over the screen");
+
+	/* A range away from it: 0. */
+	range.physical = 0x40000000ULL;
+	error = kern_text_end(&range, 1U);
+	expect(error == 0, "vf2 unmap error: 0 for a range away from the screen");
 }
 
 /* VisionFive 2: without the console's UART or a screen the end changes nothing. */

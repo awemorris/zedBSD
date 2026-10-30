@@ -36,7 +36,8 @@
 /*
  * The screen the console draws on.  It and the three variables below are
  * written once by riscv64_fbcons_attach() on the boot hart before any
- * other hart runs and read only afterwards, under the console's lock.
+ * other hart runs and read only afterwards, under the console's lock;
+ * riscv64_fbcons_move() changes the address once, on the boot hart too.
  */
 static struct riscv64_fbcons_screen fbcons_screen;
 
@@ -51,7 +52,9 @@ static uint32_t fbcons_colours[16];
 
 /*
  * Nonzero once a screen was attached; until then nothing is drawn and the
- * console only keeps its text.  Set with fbcons_screen.
+ * console only keeps its text.  Set with fbcons_screen, and cleared for
+ * good under the console's lock once the kernel's console takes the
+ * screen over (riscv64_fbcons_detach()).
  */
 static int fbcons_on;
 
@@ -127,6 +130,35 @@ riscv64_fbcons_ready(
 {
 	/* Succeeded: whether riscv64_fbcons_attach() succeeded. */
 	return fbcons_on;
+}
+
+/*
+ * Draws the attached screen through a new address from now on: the early
+ * console's window of it.  Called on the boot hart, before any other hart
+ * runs, once the kernel's tables hold the window.
+ */
+void
+riscv64_fbcons_move(
+	uintptr_t address)
+{
+	/* Nothing to move without a screen. */
+	if (!fbcons_on)
+		return;
+
+	/* The same pixels at the window's address. */
+	fbcons_screen.address = address;
+}
+
+/*
+ * Forgets the screen for good: nothing is drawn on it again.  The caller
+ * holds the console's lock.
+ */
+void
+riscv64_fbcons_detach(
+	void)
+{
+	/* No drawing reaches the screen from now on. */
+	fbcons_on = 0;
 }
 
 /*

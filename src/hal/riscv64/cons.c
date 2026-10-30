@@ -90,6 +90,27 @@ riscv64_cons_redraw(
 	riscv64_spin_unlock(&cons_lock, enabled);
 }
 
+/*
+ * Gives the screen up to the kernel's console, which took the early
+ * console's window of it over and removes it.  The kernel prints through
+ * its own console by then, so nothing here draws again; the screen goes
+ * under the console's lock all the same, so that a character that began
+ * before the hand-over finishes before the window goes.
+ */
+void
+riscv64_cons_detach_screen(
+	void)
+{
+	bool enabled;
+
+	/* Waits for a character being drawn, then keeps the next ones off the screen. */
+	enabled = riscv64_spin_lock(&cons_lock);
+
+	riscv64_fbcons_detach();
+
+	riscv64_spin_unlock(&cons_lock, enabled);
+}
+
 /* Paints one cell of the grid, a blank for one never written, without writing it through. */
 static void
 paint_cell_locked(

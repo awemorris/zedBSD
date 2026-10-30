@@ -155,6 +155,27 @@ prekern_bsp_cons_irq_init(
 		hal_irq_mask((int)info->uart_irq);
 }
 
+/*
+ * Gives the framebuffer up to the kernel's console, which took the early
+ * console's window of it over and removes it.  The kernel prints through
+ * its own console by then, so nothing here paints again; the view goes
+ * under the output lock all the same, so that a character that began
+ * before the hand-over finishes before the window goes.
+ */
+void
+rpi_cons_framebuffer_release(
+	void)
+{
+	bool interrupts_enabled;
+
+	/* Waits for a character being painted, then keeps the next ones off the framebuffer. */
+	interrupts_enabled = output_enter();
+
+	rpi_framebuffer_forget();
+
+	output_leave(interrupts_enabled);
+}
+
 /* Acquires the output lock with interrupts disabled. */
 static bool
 output_enter(

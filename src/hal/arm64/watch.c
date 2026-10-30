@@ -35,7 +35,10 @@
  * scans out when a display driver owns the screen, and to the firmware's
  * framebuffer through the early console's cell painter otherwise.  A stop
  * that lasts long enough also replaces the display list with one plane,
- * so that a window above the text cannot hide it.
+ * so that a window above the text cannot hide it.  Once the kernel's
+ * console has given the firmware's framebuffer up, the text goes nowhere
+ * near it: a plane on it is passed over and the cell painter paints
+ * nothing.
  */
 
 #include <hal/hal.h>
@@ -1130,6 +1133,7 @@ find_planes(
 	uint32_t extent;
 	unsigned count;
 	unsigned entries;
+	int given_up;
 
 	/* The list the hardware follows starts at the word DISPLIST0 names. */
 	list = (volatile uint32_t *)((volatile uint8_t *)watch_hvs + WATCH_HVS_DLIST);
@@ -1166,11 +1170,17 @@ find_planes(
 			planes[count].x = list[index + 1U] & 0x3fffU;
 			planes[count].y = (list[index + 1U] >> 16) & 0x3fffU;
 
-			/* Keeps a plane big enough to hold text and laid out as its pitch says. */
+			/*
+			 * Keeps a plane big enough to hold text and laid out as its pitch
+			 * says, and not on the firmware's framebuffer once the kernel's
+			 * console gave that up: nothing in the HAL paints there then.
+			 */
+			given_up = rpi_framebuffer_given_up(planes[count].physical, (uint64_t)planes[count].pitch * planes[count].height);
 			if (planes[count].width >= WATCH_PLANE_MIN_SIZE &&
 			    planes[count].height >= WATCH_PLANE_MIN_SIZE &&
 			    planes[count].pitch >= planes[count].width * 4U &&
-			    planes[count].physical != 0)
+			    planes[count].physical != 0 &&
+			    !given_up)
 				count++;
 		}
 

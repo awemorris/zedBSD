@@ -15,6 +15,11 @@
  * the firmware's (lowest) priority, so a later display driver can take
  * the screen over.
  *
+ * The end gives the screen up for good: the driver's own mapping, and the
+ * mapping of exactly the screen the kernel hands over once the console
+ * prints through the kernel (the hardware layer's early console drew
+ * through it), both removed, as the PC/AT graphics backend does.
+ *
  * Every pixel is four bytes, blue or red in the low byte.  The kernel may
  * give the framebuffer's memory back through its cached view, and the
  * display reads memory past the processor's caches, so every drawing ends
@@ -41,6 +46,13 @@
 #include <kern/pmem.h>
 #include <kern/text-display.h>
 
+#ifdef KERN_TEST_TEXT_END_SECONDS
+#include <kern/clock.h>
+#include <kern/klog.h>
+#include <kern/sched.h>
+#include <kern/thread.h>
+#endif
+
 /* The bytes of one pixel. */
 #define BOOT_FB_PIXEL_BYTES	4U
 
@@ -53,6 +65,12 @@
 #define BOOT_FB_MAX_SIDE	16384U
 
 static void fb_end_lock_init_once(void);
+static void fb_end_remove(void *mapping, size_t bytes);
+static void fb_end_leave(int error);
+#ifdef KERN_TEST_TEXT_END_SECONDS
+static void fb_end_test_start(void);
+static void fb_end_test(void *argument);
+#endif
 static uint32_t fb_value(uint32_t color);
 static void fb_put(unsigned x, unsigned y, uint32_t value);
 static void fb_flush_row(unsigned x, unsigned y, unsigned width);
@@ -102,9 +120,10 @@ static uint64_t fb_physical;
 static size_t fb_bytes;
 
 /*
- * The whole screen's memory as the platform handed it over, which the
- * hardware layer keeps its own view of.  Set once by drv_boot_fb_init()
- * once the screen is found drawable, mapped or not; 0 before.
+ * The whole screen's memory as the platform handed it over, which the end
+ * asks the kernel for to remove the early console's view.  Set once by
+ * drv_boot_fb_init() once the screen is found drawable, mapped or not; 0
+ * before.
  */
 static uint64_t fb_screen_bytes;
 static unsigned fb_width;
@@ -131,6 +150,34 @@ static int fb_end_lock_ready;
  * under fb_end_lock (or, with no lock yet, before anything was mapped).
  */
 static int fb_ended;
+
+/*
+ * Whether the end left a mapping of the screen in place, and the error of
+ * the removal that failed (0 for one that cannot be removed, which the
+ * end reports as EBUSY).  Written once by the first end under
+ * fb_end_lock, read by every later one under it.
+ */
+static int fb_left;
+static int fb_left_error;
+
+#ifdef KERN_TEST_TEXT_END_SECONDS
+/*
+ * The console's end as a display driver's first flip asks for it,
+ * KERN_TEST_TEXT_END_SECONDS after the screen is mapped: what
+ * kern_text_end() returned (fb_end_test_result), and 1 once it has
+ * returned (fb_end_test_done), written once by the thread that asks, and
+ * the address of the mapping of exactly the screen the end was handed and
+ * removed (fb_end_test_handed), written once by the end.  Nothing in the
+ * kernel reads them; they are volatile so that the stores and the symbols
+ * stay in the image for a debugger.
+ */
+static volatile int fb_end_test_result;
+static volatile int fb_end_test_done;
+static void *volatile fb_end_test_handed;
+
+/* Whether the thread that ends the console was started; written by the first mapping only. */
+static int fb_end_test_started;
+#endif
 
 /*
  * Maps the screen a board read.
@@ -197,6 +244,11 @@ drv_boot_fb_init(
 	fb_opaque = opaque;
 	fb_mapping = mapped;
 	fb_pixels = mapped;
+
+#ifdef KERN_TEST_TEXT_END_SECONDS
+	/* The test build ends the console over the screen after its wait. */
+	fb_end_test_start();
+#endif
 
 	/* Succeeded: the framebuffer can be drawn. */
 	return 0;
@@ -350,6 +402,7 @@ drv_boot_fb_end(
 	unsigned count)
 {
 	void *mapping;
+	void *handed;
 	int overlaps;
 	int error;
 
@@ -378,31 +431,143 @@ drv_boot_fb_end(
 		fb_pixels = NULL;
 		fb_mapping = NULL;
 
-		/* Gives the mapping back; the kernel may keep its view of memory for other users. */
+		/* Gives the driver's own mapping back. */
 		if (mapping != NULL)
-			(void)kern_device_unmap(mapping, fb_bytes);
+			fb_end_remove(mapping, fb_bytes);
+
+		/*
+		 * The early console's mapping, handed over by a mapping of exactly
+		 * the screen once the console prints through the kernel, and
+		 * removed at once.  Without the hand-over the mapping made is an
+		 * ordinary one, and it goes the same way.
+		 */
+		if (fb_screen_bytes != 0) {
+			error = kern_device_map(fb_physical, (size_t)fb_screen_bytes, KERN_DEVICE_UNCACHED, &handed);
+			if (error == 0) {
+#ifdef KERN_TEST_TEXT_END_SECONDS
+				fb_end_test_handed = handed;
+#endif
+				fb_end_remove(handed, (size_t)fb_screen_bytes);
+			} else {
+				fb_end_leave(error);
+			}
+		}
 	}
 
-	/*
-	 * The hardware layer keeps its own view of the screen for its stall and
-	 * fatal reports, so the screen counts as left.
-	 */
+	/* A screen left mapped counts against the caller's ranges. */
 	error = 0;
-	if (fb_screen_bytes != 0) {
+	if (fb_left) {
 		overlaps = kern_text_range_overlaps(ranges, count, fb_physical, fb_screen_bytes);
-		if (overlaps)
+		if (overlaps) {
 			error = EBUSY;
+			if (fb_left_error != 0)
+				error = fb_left_error;
+		}
 	}
 
 	mutex_unlock(&fb_end_lock);
 
-	/* Reports a screen in the ranges. */
+	/* Reports a screen left mapped in the ranges. */
 	if (error != 0)
 		return error;
 
 	/* Succeeded: nothing of the framebuffer lies in the ranges. */
 	return 0;
 }
+
+/*
+ * Removes one mapping of the screen at the end, recording the screen as
+ * left when the removal fails (EBUSY from the kernel: a mapping kept for
+ * good).
+ */
+static void
+fb_end_remove(
+	void *mapping,
+	size_t bytes)
+{
+	int error;
+
+	/* Asks the kernel to remove it. */
+	error = kern_device_unmap(mapping, bytes);
+
+	/* A mapping kept for good is left without an error; another failure with its own. */
+	if (error == EBUSY) {
+		fb_end_leave(0);
+	} else if (error != 0) {
+		fb_end_leave(error);
+	}
+}
+
+/*
+ * Records the screen as left mapped by the end, keeping the first failed
+ * removal's error (0 for a mapping kept for good).
+ */
+static void
+fb_end_leave(
+	int error)
+{
+	/* The first record keeps its error; a later one adds only an error the first lacked. */
+	if (!fb_left || fb_left_error == 0)
+		fb_left_error = error;
+	fb_left = 1;
+}
+
+#ifdef KERN_TEST_TEXT_END_SECONDS
+/* Starts, once a boot, the thread that ends the console after the configured wait. */
+static void
+fb_end_test_start(
+	void)
+{
+	struct thread *thread;
+	int error;
+
+	/* Only the first mapping starts it. */
+	if (fb_end_test_started)
+		return;
+	fb_end_test_started = 1;
+
+	/* The thread, at the default priority. */
+	error = kthread_create(fb_end_test, NULL, SCHED_PRIORITY_DEFAULT, &thread);
+	if (error != 0) {
+		kern_logf("boot framebuffer: the timed end did not start (%d)\n", error);
+		return;
+	}
+
+	/* Lets it run. */
+	thread_start(thread);
+}
+
+/*
+ * Waits KERN_TEST_TEXT_END_SECONDS, then ends the console's use of the
+ * display once over the screen's range, as a display driver's first flip
+ * does, and keeps the result.
+ */
+static void
+fb_end_test(
+	void *argument)
+{
+	struct kern_text_range range;
+	uint64_t deadline;
+	int error;
+
+	(void)argument;
+
+	/* The wait, whole even if the sleep comes back early. */
+	deadline = sched_ticks() + kern_ms_to_ticks((uint64_t)KERN_TEST_TEXT_END_SECONDS * 1000U);
+	while (sched_ticks() < deadline)
+		sched_sleep(deadline);
+
+	/* Ends over the screen's range. */
+	range.physical = fb_physical;
+	range.bytes = fb_screen_bytes;
+	error = kern_text_end(&range, 1U);
+
+	/* The result, then the mark that it is there. */
+	fb_end_test_result = error;
+	__atomic_store_n(&fb_end_test_done, 1, __ATOMIC_RELEASE);
+	kern_logf("boot framebuffer: the timed end returned %d, the screen's mapping at %p removed\n", error, fb_end_test_handed);
+}
+#endif
 
 /* Initializes the end's lock on the first start. */
 static void
