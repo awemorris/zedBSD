@@ -242,6 +242,8 @@ WS が完了・取り下げになったら、行を master.md からここへ移
 | [WS294](ws294/ws.md) | MG006 | i915 の GuC による submission | canceled（2026-10-27 00:18、GuC は WS295 の xe で） | — |
 | [WS298](ws298/ws.md) | MG003 | Intel VMD の driver（5330 の NVMe を BIOS を変えずに使う） | completed（2026-10-27 08:33） | NVMe から zedBSD が起動 |
 | [WS119](ws119/ws.md) | MG003 | インストーラの作り直し | canceled（2026-10-28 ユーザー、Keiland のアプリの新しいインストーラ WS307 へ） | — |
+| [WS301](ws301/ws.md) | MG004 | CPU の DVFS と P/E core の相対性能の枠組み（UAPI は /dev/thermal、HAL は変えない、HWP の無い CPU も P-state を driver で）（2026-10-27・29 ユーザー） | canceled（2026-10-31、WS333 に統合） | 設計は WS333 の入力 |
+| [WS303](ws303/ws.md) | MG004 | 熱と fan（/dev/thermal・/sbin/thermal、strategy performance・balanced・powersave・manual、fan は上げるだけ、非常の停止）（2026-10-27・29 ユーザー） | canceled（2026-10-31、WS333 に統合） | 設計は WS333 の入力 |
 | [WS308](ws308/ws.md) | MG004 | read/write の syscall の lock の取り合いを無くす（NVMe の command_lock、heap、timecounter、cred の読み）と、見つけた前からの不具合 3 つ（retired_creds、cred の競争、memory 圧迫の ENOMEM）の直し | completed（2026-10-28、5330 の乱読み QD32 が Debian の 99.3%） | p005 は Future Work、fork の飢えは Future Work |
 | [WS312](ws312/ws.md) | MG005 | IPv6 の fragment の受け取りと再組立て（2026-10-29 ユーザー） | completed（2026-10-29） | QEMU で大きい UDP・ping6 の fragment を受け取る |
 | [WS235](ws235/ws.md) | MG006 | Realtek RTL8125 系の共通の Ethernet driver（PCIe の RTL8127 10GbE） | completed（2026-10-29） | 10.0.10.3 の RTL8127 で 10000Mbps・ssh・tcp-perf 両向き、driver は律速でない |

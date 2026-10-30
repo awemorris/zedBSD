@@ -63,6 +63,17 @@
 #define CSS_PSEUDO_ELEMENT_BEFORE 1
 #define CSS_PSEUDO_ELEMENT_AFTER 2
 #define CSS_PSEUDO_ELEMENT_OTHER 3
+/* The view transition tree: ::view-transition and the group, image pair, old and new images of a name. */
+#define CSS_PSEUDO_ELEMENT_VT_ROOT 4
+#define CSS_PSEUDO_ELEMENT_VT_GROUP 5
+#define CSS_PSEUDO_ELEMENT_VT_PAIR 6
+#define CSS_PSEUDO_ELEMENT_VT_OLD 7
+#define CSS_PSEUDO_ELEMENT_VT_NEW 8
+/* The translation a view transition group's style starts with until its rectangle is known (an author's transform replaces it). */
+/* The places a view transition pseudo-element can have among its siblings (for :first-child, :last-child and :only-child). */
+#define CSS_VT_FIRST 1
+#define CSS_VT_LAST 2
+#define CSS_VT_TRANSLATE_PENDING (-12345.5f)
 
 /*
  * The units a length can have after the cascade: pixels, a percentage of
@@ -756,6 +767,15 @@ struct css_style {
 	/* view-transition-name: NULL for none, "match-element", or the custom identifier; view-transition-class: none (NULL) or the identifiers joined by spaces (atoms). */
 	struct vm_string *view_transition_name;
 	struct vm_string *view_transition_class;
+	/* The one animation's name (NULL for none), its duration and delay in seconds, and whether it is paused. */
+	struct vm_string *animation_name;
+	float animation_duration;
+	float animation_delay;
+	int animation_paused;
+	/* The timing function as text: a keyword, "steps N position" or "bezier a b c d" (NULL for ease). */
+	struct vm_string *animation_timing;
+	/* mix-blend-mode: 0 normal, 1 plus-lighter, 2 any other blend. */
+	int mix_blend_mode;
 	/* zoom: the factor (1 for normal; not applied to the layout yet). */
 	float zoom;
 	const struct css_anchor_names *anchor_scope;
@@ -1059,8 +1079,10 @@ int css_engine_container_missed(const struct css_engine *engine);
 size_t css_engine_container_uses(const struct css_engine *engine);
 void css_engine_container_use(const struct css_engine *engine, size_t index, const struct dom_element **container, float *width, float *height);
 void css_engine_forget_styles(struct css_engine *engine);
+void css_engine_set_view_transition(struct css_engine *engine, int active, const struct vm_string *const *types, int count);
 int css_engine_compute(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style);
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);
+int css_engine_compute_vt_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct vm_string *name, const struct vm_string *classes, int siblings, const struct css_style *parent, struct css_style *style);
 void css_initial_style(struct css_style *style);
 void css_engine_query_begin(struct css_engine *engine);
 void css_engine_query_scope(struct css_engine *engine, struct dom_element *element);

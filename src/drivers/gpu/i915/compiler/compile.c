@@ -163,6 +163,24 @@
 /* The def_index entry of a value no instruction defines. */
 #define COMPILE_NO_INDEX	0xFFFFFFFFU
 
+/*
+ * How a value is read when it has no register of its own (the forward map):
+ * a push constant straight from the push data as a scalar region, a float
+ * constant as an immediate, a vertex attribute component from its payload
+ * register.  Only the float arithmetic and minimum and maximum read them so.
+ */
+#define COMPILE_FORWARD_NONE	0U
+#define COMPILE_FORWARD_PUSH	1U
+#define COMPILE_FORWARD_IMM	2U
+#define COMPILE_FORWARD_INPUT	3U
+
+/*
+ * A float product read once, by the sum or difference right after it in
+ * the same straight run of code, is made by that instruction as one MAD
+ * (Gen12): the product gets no register; its factors live to the MAD.
+ */
+#define COMPILE_FORWARD_PRODUCT	4U
+
 /* No value: a victim not found, an output component never stored. */
 #define COMPILE_NO_VALUE	0xFFFFFFFFU
 
@@ -508,6 +526,9 @@ struct i915_compile_state {
 	 * the instruction that defines the value, plus one).
 	 */
 	uint32_t *skip_ok;
+
+	/* Per value: COMPILE_FORWARD_*, how it is read when it has no register of its own. */
+	uint32_t *forward;
 	uint32_t *skip_taint;
 	uint32_t *skip_def;
 
@@ -581,6 +602,13 @@ static int i915_compile_liveness(struct i915_compile_state *state);
 static void i915_compile_widen_loops(struct i915_compile_state *state, const struct i915_compile_loop *loops, uint32_t loop_count);
 static void i915_compile_keep_outputs(struct i915_compile_state *state);
 static uint32_t i915_compile_grf(struct i915_compile_state *state, uint32_t value);
+static void i915_compile_forwarding(struct i915_compile_state *state);
+static void i915_compile_products(struct i915_compile_state *state);
+static int i915_compile_fusable_factor(const struct i915_compile_state *state, uint32_t value);
+static uint32_t i915_compile_product_of(const struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t *other);
+static int i915_compile_forwarded(const struct i915_compile_state *state, uint32_t value);
+static struct i915_eu_reg i915_compile_operand(struct i915_compile_state *state, uint32_t value);
+static uint32_t i915_compile_payload_inputs(const struct i915_compile_state *state);
 static uint32_t i915_compile_define(struct i915_compile_state *state, uint32_t value, uint32_t count);
 static uint32_t i915_compile_temporary(struct i915_compile_state *state);
 static uint32_t i915_compile_temporaries(struct i915_compile_state *state, uint32_t count);
@@ -636,6 +664,7 @@ static void i915_compile_fragment_payload(struct i915_compile_state *state);
 static void i915_compile_frag_coord(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static void i915_compile_blocks(struct i915_compile_state *state);
 static void i915_compile_prologue(struct i915_compile_state *state);
+static void i915_compile_vue_written(const struct i915_compile_state *state, uint8_t written[COMPILE_MAX_GRF + 1U]);
 static void i915_compile_terminate(struct i915_compile_state *state);
 static uint32_t i915_compile_fs_outputs(const struct i915_compile_state *state);
 static void i915_compile_terminate_dual(struct i915_compile_state *state);
@@ -785,7 +814,7 @@ drv_i915_shader_compile_gen(
 	 * The register, last-use and definition maps, the scratch slots and the
 	 * skippable regions' marks and scratch share one allocation.
 	 */
-	map_entries = 6U * (size_t)ir->value_count + (size_t)ir->instruction_count;
+	map_entries = 7U * (size_t)ir->value_count + (size_t)ir->instruction_count;
 	if (map_entries == 0U)
 		map_entries = 4U;
 
@@ -803,9 +832,12 @@ drv_i915_shader_compile_gen(
 	state.skip_taint = state.spill_slot + ir->value_count;
 	state.skip_def = state.skip_taint + ir->value_count;
 	state.skip_ok = state.skip_def + ir->value_count;
+	state.forward = state.skip_ok + ir->instruction_count;
 
-	/* Decides once which skippable regions are really skipped. */
+	/* Decides once which skippable regions are really skipped, and which values are read without a register. */
 	i915_compile_skips(&state);
+	i915_compile_forwarding(&state);
+	i915_compile_products(&state);
 
 	/*
 	 * Lowers the shader until its values fit the registers: a vertex shader
@@ -991,6 +1023,7 @@ i915_compile_reset(
 	uint32_t *value_grf;
 	uint32_t *spill_slot;
 	uint32_t *skip_ok;
+	uint32_t *forward;
 	uint32_t spill_count;
 	uint32_t value;
 	int late_vue;
@@ -1004,6 +1037,7 @@ i915_compile_reset(
 	spill_count = state->spill_count;
 	late_vue = state->late_vue;
 	skip_ok = state->skip_ok;
+	forward = state->forward;
 
 	/* Drops the previous attempt's code and clears everything else. */
 	drv_i915_eu_free(&state->code);
@@ -1021,6 +1055,7 @@ i915_compile_reset(
 	state->spill_count = spill_count;
 	state->late_vue = late_vue;
 	state->skip_ok = skip_ok;
+	state->forward = forward;
 	state->skip_taint = spill_slot + ir->value_count;
 	state->skip_def = state->skip_taint + ir->value_count;
 
@@ -1299,6 +1334,15 @@ i915_compile_liveness(
 			value = i915_compile_source(inst, source);
 			if (value < ir->value_count)
 				state->last_use[value] = index;
+
+			/* A product made here as a MAD: its factors are read here. */
+			if (value < ir->value_count && state->forward[value] == COMPILE_FORWARD_PRODUCT &&
+			    state->def_index[value] != COMPILE_NO_INDEX) {
+				if (ir->instructions[state->def_index[value]].src[0] < ir->value_count)
+					state->last_use[ir->instructions[state->def_index[value]].src[0]] = index;
+				if (ir->instructions[state->def_index[value]].src[1] < ir->value_count)
+					state->last_use[ir->instructions[state->def_index[value]].src[1]] = index;
+			}
 		}
 
 		/* A MOVE into a value defined before keeps that value alive up to it. */
@@ -1351,6 +1395,12 @@ i915_compile_liveness(
 	/* Widens the lives the loops read again on every pass. */
 	i915_compile_widen_loops(state, loops, loop_count);
 	kern_free(loops);
+
+	/* A value read without a register of its own needs none past its definition. */
+	for (value = 0U; value < ir->value_count; value++) {
+		if (state->forward[value] != COMPILE_FORWARD_NONE)
+			state->last_use[value] = state->def_index[value];
+	}
 
 	/* A vertex shader that gathers its VUE at the end keeps what each output component last stored until then. */
 	if (state->late_vue != 0)
@@ -1474,6 +1524,318 @@ i915_compile_grf(
 
 	/* Succeeded: the value lives in this register. */
 	return state->value_grf[value];
+}
+
+/*
+ * Returns the first register of the inputs: after the fixed payload and the
+ * push data.  A compute thread's push data starts at r1, a geometry
+ * thread's after the input vertices' handles, a fragment thread's after its
+ * setup data.
+ */
+static uint32_t
+i915_compile_payload_inputs(
+	const struct i915_compile_state *state)
+{
+	/* By the stage. */
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX)
+		return COMPILE_PAYLOAD_GRF + state->push_regs;
+	if (state->ir->stage == DRV_GPU_STAGE_COMPUTE)
+		return COMPILE_CS_PUSH_GRF + state->push_regs;
+	if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY)
+		return state->gs_push_grf + state->push_regs;
+
+	/* A fragment thread's. */
+	return state->fs_setup_grf + state->push_regs;
+}
+
+/*
+ * Decides, once for the shader, which values the float arithmetic reads
+ * where they are instead of from a register of their own: a push constant
+ * (LOAD_PUSH) as a scalar region of the push data, a float constant (CONST)
+ * as an immediate.  Such a value is made by nothing else (no MOVE writes
+ * it) and every reader is an FADD, FSUB or FMUL; an immediate also needs the
+ * other source of each reader to be no immediate, since only one source may
+ * be one, and to be the second source of a minimum or a maximum.  A vertex
+ * shader's attribute component (LOAD_INPUT) is read from its payload
+ * register.  A value read any other way keeps its register and its MOV.
+ */
+static void
+i915_compile_forwarding(
+	struct i915_compile_state *state)
+{
+	const struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
+	uint32_t index;
+	uint32_t source;
+	uint32_t sources;
+	uint32_t value;
+	uint32_t other;
+	int arithmetic;
+
+	/* The candidates: each value a push load or a float constant makes. */
+	ir = state->ir;
+	for (value = 0U; value < ir->value_count; value++)
+		state->forward[value] = COMPILE_FORWARD_NONE;
+	for (index = 0U; index < ir->instruction_count; index++) {
+		inst = &ir->instructions[index];
+		if (inst->dst >= ir->value_count || inst->guard != 0U)
+			continue;
+		if (inst->op == DRV_GPU_IR_LOAD_PUSH &&
+		    (inst->immediate & 3U) == 0U &&
+		    inst->immediate + 4U <= ir->push_bytes)
+			state->forward[inst->dst] = COMPILE_FORWARD_PUSH;
+		if (inst->op == DRV_GPU_IR_CONST)
+			state->forward[inst->dst] = COMPILE_FORWARD_IMM;
+		if (inst->op == DRV_GPU_IR_LOAD_INPUT && ir->stage == DRV_GPU_STAGE_VERTEX && inst->component <= 3U)
+			state->forward[inst->dst] = COMPILE_FORWARD_INPUT;
+	}
+
+	/* Drops each candidate something else writes or reads otherwise. */
+	for (index = 0U; index < ir->instruction_count; index++) {
+		inst = &ir->instructions[index];
+
+		/* A value written again (a loop variable) keeps its register. */
+		if (inst->op == DRV_GPU_IR_MOVE && inst->dst < ir->value_count)
+			state->forward[inst->dst] = COMPILE_FORWARD_NONE;
+
+		/* Every source of an instruction other than the float arithmetic, minimum and maximum. */
+		arithmetic = 0;
+		if ((inst->op == DRV_GPU_IR_FADD || inst->op == DRV_GPU_IR_FSUB || inst->op == DRV_GPU_IR_FMUL ||
+		     inst->op == DRV_GPU_IR_FMIN || inst->op == DRV_GPU_IR_FMAX) &&
+		    inst->guard == 0U)
+			arithmetic = 1;
+		sources = i915_compile_sources(inst);
+		for (source = 0U; source < sources; source++) {
+			value = i915_compile_source(inst, source);
+			if (value >= ir->value_count)
+				continue;
+			if (!arithmetic || source > 1U) {
+				state->forward[value] = COMPILE_FORWARD_NONE;
+				continue;
+			}
+
+			/* A minimum or a maximum takes an immediate second only (its operands are not swapped). */
+			if (state->forward[value] == COMPILE_FORWARD_IMM && source == 0U &&
+			    (inst->op == DRV_GPU_IR_FMIN || inst->op == DRV_GPU_IR_FMAX)) {
+				state->forward[value] = COMPILE_FORWARD_NONE;
+				continue;
+			}
+
+			/* An immediate whose fellow source is one too: neither is read so. */
+			other = inst->src[1U - source];
+			if (state->forward[value] == COMPILE_FORWARD_IMM &&
+			    other < ir->value_count &&
+			    state->forward[other] == COMPILE_FORWARD_IMM) {
+				state->forward[value] = COMPILE_FORWARD_NONE;
+				state->forward[other] = COMPILE_FORWARD_NONE;
+			}
+		}
+	}
+}
+
+/*
+ * Marks each float product made as part of a MAD (COMPILE_FORWARD_PRODUCT):
+ * an FMUL on Gen12 whose value one FADD or FSUB alone reads, with nothing
+ * between the two that starts or ends a loop or a skipped region or writes
+ * a factor again (a MOVE), whose factors and addend are no immediates (a
+ * MAD has no 32-bit immediate) and are read whole or as one float, and
+ * whose reader takes no other product.  The sum's rounding is the MAD's
+ * single one, as Vulkan's float operations allow.
+ */
+static void
+i915_compile_products(
+	struct i915_compile_state *state)
+{
+	const struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir_inst *reader;
+	uint32_t *readers;
+	uint32_t *reader_index;
+	uint32_t index;
+	uint32_t between;
+	uint32_t source;
+	uint32_t sources;
+	uint32_t value;
+	uint32_t other;
+	int blocked;
+
+	/* Gen9 and Gen11 encode no MAD here. */
+	ir = state->ir;
+	if (state->graphics_ver < 12U || ir->value_count == 0U)
+		return;
+
+	/* How many times each value is read, and the last instruction that does. */
+	readers = kern_calloc(2U * (size_t)ir->value_count, sizeof(uint32_t));
+	if (readers == NULL)
+		return;
+	reader_index = readers + ir->value_count;
+	for (index = 0U; index < ir->instruction_count; index++) {
+		inst = &ir->instructions[index];
+		sources = i915_compile_sources(inst);
+		for (source = 0U; source < sources; source++) {
+			value = i915_compile_source(inst, source);
+			if (value < ir->value_count) {
+				readers[value]++;
+				reader_index[value] = index;
+			}
+		}
+		if (inst->op == DRV_GPU_IR_MOVE && inst->dst < ir->value_count)
+			readers[inst->dst] += 2U;
+	}
+
+	/* Each product read once by a sum or difference after it. */
+	for (index = 0U; index < ir->instruction_count; index++) {
+		inst = &ir->instructions[index];
+		value = inst->dst;
+		if (inst->op != DRV_GPU_IR_FMUL || inst->guard != 0U || value >= ir->value_count)
+			continue;
+		if (readers[value] != 1U || reader_index[value] <= index)
+			continue;
+		if (state->forward[value] != COMPILE_FORWARD_NONE)
+			continue;
+		reader = &ir->instructions[reader_index[value]];
+		if ((reader->op != DRV_GPU_IR_FADD && reader->op != DRV_GPU_IR_FSUB) || reader->guard != 0U)
+			continue;
+
+		/* The reader's other source: not the product itself, not a product already made there. */
+		other = reader->src[0];
+		if (other == value)
+			other = reader->src[1];
+		if (other == value || other >= ir->value_count)
+			continue;
+		if (state->forward[other] == COMPILE_FORWARD_PRODUCT)
+			continue;
+
+		/* The factors and the addend: registers, push constants or attributes, not immediates. */
+		if (!i915_compile_fusable_factor(state, inst->src[0]) ||
+		    !i915_compile_fusable_factor(state, inst->src[1]) ||
+		    !i915_compile_fusable_factor(state, other))
+			continue;
+
+		/* Nothing between them changes the flow or writes a factor. */
+		blocked = 0;
+		for (between = index + 1U; between < reader_index[value]; between++) {
+			switch (ir->instructions[between].op) {
+			case DRV_GPU_IR_LOOP_BEGIN:
+			case DRV_GPU_IR_LOOP_END:
+			case DRV_GPU_IR_SKIP_BEGIN:
+			case DRV_GPU_IR_SKIP_END:
+			case DRV_GPU_IR_KILL:
+				blocked = 1;
+				break;
+			case DRV_GPU_IR_MOVE:
+				if (ir->instructions[between].dst == inst->src[0] || ir->instructions[between].dst == inst->src[1])
+					blocked = 1;
+				break;
+			default:
+				break;
+			}
+		}
+		if (blocked)
+			continue;
+
+		/* Succeeded: the reader makes the product as a MAD. */
+		state->forward[value] = COMPILE_FORWARD_PRODUCT;
+	}
+	kern_free(readers);
+}
+
+/* Says whether a value may be a MAD's factor or addend: anything but an immediate. */
+static int
+i915_compile_fusable_factor(
+	const struct i915_compile_state *state,
+	uint32_t value)
+{
+	/* A value outside the IR is not. */
+	if (value >= state->ir->value_count)
+		return 0;
+
+	/* Succeeded: MAD takes no 32-bit immediate. */
+	return state->forward[value] != COMPILE_FORWARD_IMM;
+}
+
+/*
+ * Returns the product an FADD or FSUB makes as a MAD (COMPILE_NO_VALUE for
+ * none) and, in `other`, its other source.
+ */
+static uint32_t
+i915_compile_product_of(
+	const struct i915_compile_state *state,
+	const struct drv_gpu_shader_ir_inst *inst,
+	uint32_t *other)
+{
+	uint32_t source;
+	uint32_t value;
+
+	/* Only the sums and differences read a product so. */
+	if (inst->op != DRV_GPU_IR_FADD && inst->op != DRV_GPU_IR_FSUB)
+		return COMPILE_NO_VALUE;
+
+	/* The source that is a product made here. */
+	for (source = 0U; source < 2U; source++) {
+		value = inst->src[source];
+		if (value < state->ir->value_count && state->forward[value] == COMPILE_FORWARD_PRODUCT &&
+		    state->def_index[value] != COMPILE_NO_INDEX) {
+			*other = inst->src[1U - source];
+			return value;
+		}
+	}
+
+	/* Succeeded: none. */
+	return COMPILE_NO_VALUE;
+}
+
+/* Says whether a value is read where it is, without a register of its own. */
+static int
+i915_compile_forwarded(
+	const struct i915_compile_state *state,
+	uint32_t value)
+{
+	/* A value outside the IR is not. */
+	if (value >= state->ir->value_count)
+		return 0;
+
+	/* Succeeded: by the map. */
+	return state->forward[value] != COMPILE_FORWARD_NONE;
+}
+
+/*
+ * Returns the operand that reads a value: its register, or, for a value the
+ * float arithmetic reads where it is (i915_compile_forwarding()), its word
+ * of the push data as a scalar region or its bits as a float immediate.
+ */
+static struct i915_eu_reg
+i915_compile_operand(
+	struct i915_compile_state *state,
+	uint32_t value)
+{
+	const struct drv_gpu_shader_ir_inst *maker;
+	uint32_t push_grf;
+	uint32_t rank;
+	int found;
+
+	/* A value with a register of its own. */
+	if (!i915_compile_forwarded(state, value) || state->def_index[value] == COMPILE_NO_INDEX)
+		return drv_i915_eu_grf(i915_compile_grf(state, value));
+
+	/* The instruction that made it says where it is. */
+	maker = &state->ir->instructions[state->def_index[value]];
+	if (state->forward[value] == COMPILE_FORWARD_IMM)
+		return drv_i915_eu_imm_f(maker->immediate);
+
+	/* An attribute component of a vertex is a payload register of its own. */
+	if (state->forward[value] == COMPILE_FORWARD_INPUT) {
+		found = i915_compile_rank(state->inputs, state->input_count, maker->location, &rank);
+		if (found != 0) {
+			state->unsupported = 1;
+			return drv_i915_eu_grf(state->first_value_grf);
+		}
+		return drv_i915_eu_grf(i915_compile_payload_inputs(state) + 4U * rank + maker->component);
+	}
+
+	/* The push constants start the push data, 32 bytes to a register. */
+	push_grf = i915_compile_payload_inputs(state) - state->push_regs + maker->immediate / 32U;
+	return drv_i915_eu_grf_scalar(push_grf, maker->immediate % 32U);
 }
 
 /*
@@ -1944,20 +2306,14 @@ i915_compile_instruction(
 	uint32_t payload_inputs;
 	uint32_t dst;
 
-	/*
-	 * The inputs follow the fixed payload registers and the push data; a
-	 * compute thread's push data starts at r1, a geometry thread's after
-	 * the input vertices' handles.
-	 */
-	if (state->ir->stage == DRV_GPU_STAGE_VERTEX) {
-		payload_inputs = COMPILE_PAYLOAD_GRF + state->push_regs;
-	} else if (state->ir->stage == DRV_GPU_STAGE_COMPUTE) {
-		payload_inputs = COMPILE_CS_PUSH_GRF + state->push_regs;
-	} else if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
-		payload_inputs = state->gs_push_grf + state->push_regs;
-	} else {
-		payload_inputs = state->fs_setup_grf + state->push_regs;
-	}
+	/* Where the inputs start, after the fixed payload and the push data. */
+	payload_inputs = i915_compile_payload_inputs(state);
+
+	/* A value the arithmetic reads where it is gets no register and no code. */
+	if ((inst->op == DRV_GPU_IR_CONST || inst->op == DRV_GPU_IR_LOAD_PUSH || inst->op == DRV_GPU_IR_LOAD_INPUT ||
+	     inst->op == DRV_GPU_IR_FMUL) &&
+	    i915_compile_forwarded(state, inst->dst))
+		return;
 
 	/* Lowers by the operation. */
 	switch (inst->op) {
@@ -2725,22 +3081,57 @@ i915_compile_arithmetic(
 	struct i915_compile_state *state,
 	const struct drv_gpu_shader_ir_inst *inst)
 {
+	const struct drv_gpu_shader_ir_inst *maker;
 	struct i915_eu_reg left;
 	struct i915_eu_reg right;
+	struct i915_eu_reg temporary;
+	struct i915_eu_reg addend;
+	struct i915_eu_reg first;
+	struct i915_eu_reg second;
 	enum i915_eu_alu op;
-	uint32_t left_grf;
-	uint32_t right_grf;
+	uint32_t product;
+	uint32_t other;
 	uint32_t dst;
 
-	/* Reads both sources. */
-	left_grf = i915_compile_grf(state, inst->src[0]);
-	left = drv_i915_eu_grf(left_grf);
-	right_grf = i915_compile_grf(state, inst->src[1]);
-	right = drv_i915_eu_grf(right_grf);
+	/* A sum or difference with a product made here: one MAD. */
+	product = i915_compile_product_of(state, inst, &other);
+	if (product != COMPILE_NO_VALUE) {
+		maker = &state->ir->instructions[state->def_index[product]];
+		addend = i915_compile_operand(state, other);
+		first = i915_compile_operand(state, maker->src[0]);
+		second = i915_compile_operand(state, maker->src[1]);
 
-	/* a - b = a + (-b): ADD with the SECOND source negated (operand order matters). */
-	if (inst->op == DRV_GPU_IR_FSUB)
-		right = drv_i915_eu_negate(right);
+		/* x - a*b = x + (-a)*b; a*b - x = a*b + (-x). */
+		if (inst->op == DRV_GPU_IR_FSUB && inst->src[1] == product)
+			first.negate ^= 1U;
+		if (inst->op == DRV_GPU_IR_FSUB && inst->src[0] == product)
+			addend.negate ^= 1U;
+
+		/* Gives the result its register and makes it. */
+		dst = i915_compile_define(state, inst->dst, 1U);
+		drv_i915_eu_mad(&state->code, drv_i915_eu_grf(dst), addend, first, second);
+		return;
+	}
+
+	/* Reads both sources: registers, or a push constant or an immediate where they are. */
+	left = i915_compile_operand(state, inst->src[0]);
+	right = i915_compile_operand(state, inst->src[1]);
+
+	/* a - b = a + (-b): ADD with the SECOND source negated (operand order matters); an immediate flips its sign bit. */
+	if (inst->op == DRV_GPU_IR_FSUB) {
+		if (right.file == EU_FILE_IMM) {
+			right.immediate ^= 0x80000000U;
+		} else {
+			right = drv_i915_eu_negate(right);
+		}
+	}
+
+	/* Only the second source may be an immediate: the sum and the product do not mind the order. */
+	if (left.file == EU_FILE_IMM) {
+		temporary = left;
+		left = right;
+		right = temporary;
+	}
 
 	/* Gives the result its register. */
 	dst = i915_compile_define(state, inst->dst, 1U);
@@ -2872,15 +3263,11 @@ i915_compile_minmax(
 	struct i915_eu_reg left;
 	struct i915_eu_reg right;
 	enum i915_eu_cond cond;
-	uint32_t left_grf;
-	uint32_t right_grf;
 	uint32_t dst;
 
-	/* Reads both sources. */
-	left_grf = i915_compile_grf(state, inst->src[0]);
-	left = drv_i915_eu_grf(left_grf);
-	right_grf = i915_compile_grf(state, inst->src[1]);
-	right = drv_i915_eu_grf(right_grf);
+	/* Reads both sources: registers, or a push constant, an attribute or (second) an immediate where they are. */
+	left = i915_compile_operand(state, inst->src[0]);
+	right = i915_compile_operand(state, inst->src[1]);
 
 	/* Gives the result its register. */
 	dst = i915_compile_define(state, inst->dst, 1U);
@@ -4877,6 +5264,7 @@ i915_compile_prologue(
 	struct i915_compile_state *state)
 {
 	struct i915_eu_reg header;
+	uint8_t written[COMPILE_MAX_GRF + 1U];
 	uint32_t outputs;
 	uint32_t grf;
 
@@ -4921,9 +5309,62 @@ i915_compile_prologue(
 		drv_i915_eu_mov(&state->code, header, drv_i915_eu_imm_d(0U));
 	}
 
-	/* The position and the varyings start as zeros. */
-	for (grf = state->vue_grf + 4U; grf < COMPILE_MAX_GRF; grf++)
+	/* The position and the varyings start as zeros, but for the registers a store always writes. */
+	i915_compile_vue_written(state, written);
+	for (grf = state->vue_grf + 4U; grf < COMPILE_MAX_GRF; grf++) {
+		if (written[grf] != 0U)
+			continue;
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf(grf), drv_i915_eu_imm_f(0U));
+	}
+}
+
+/*
+ * Marks in `written` (one entry per register) the VUE staging registers of
+ * a vertex shader that a store writes whatever the run: a STORE_OUTPUT of
+ * the position or of a varying outside every loop and skippable region and
+ * without a guard.  Every other register of the staged VUE keeps its zero.
+ */
+static void
+i915_compile_vue_written(
+	const struct i915_compile_state *state,
+	uint8_t written[COMPILE_MAX_GRF + 1U])
+{
+	const struct drv_gpu_shader_ir_inst *inst;
+	uint32_t index;
+	uint32_t depth;
+	uint32_t rank;
+	uint32_t grf;
+
+	/* Nothing is known written to start with; a geometry shader's VUE is written per vertex. */
+	kern_memset(written, 0, COMPILE_MAX_GRF + 1U);
+	if (state->ir->stage != DRV_GPU_STAGE_VERTEX)
+		return;
+
+	/* The stores at the top level, in order. */
+	depth = 0U;
+	for (index = 0U; index < state->ir->instruction_count; index++) {
+		inst = &state->ir->instructions[index];
+		if (inst->op == DRV_GPU_IR_LOOP_BEGIN || inst->op == DRV_GPU_IR_SKIP_BEGIN)
+			depth++;
+		if ((inst->op == DRV_GPU_IR_LOOP_END || inst->op == DRV_GPU_IR_SKIP_END) && depth != 0U)
+			depth--;
+		if (inst->op != DRV_GPU_IR_STORE_OUTPUT || depth != 0U || inst->guard != 0U || inst->component > 3U)
+			continue;
+
+		/* The position follows the header; a varying follows the position, in ascending location order. */
+		if (inst->location == DRV_GPU_IR_LOCATION_POSITION) {
+			grf = state->vue_grf + 4U;
+		} else if (i915_compile_rank(state->varyings, state->varying_count, inst->location, &rank) == 0) {
+			grf = state->vue_grf + 8U + 4U * rank;
+		} else {
+			continue;
+		}
+
+		/* The component's staging register, when it is one. */
+		grf += inst->component;
+		if (grf <= COMPILE_MAX_GRF)
+			written[grf] = 1U;
+	}
 }
 
 /* Emits the shader's terminating output message. */

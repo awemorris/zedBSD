@@ -123,6 +123,16 @@ struct css_engine {
 	struct wb_vector kept_names;
 	int pseudo_wanted;
 	int pseudo_seen;
+	/* The view transition pseudo-element being styled: its name, its classes, and whether selectors' names count. */
+	const struct vm_string *vt_name;
+	const struct vm_string *vt_classes[4];
+	int vt_class_count;
+	int vt_names;
+	int vt_siblings;
+	/* The active view transition: whether there is one, and its types. */
+	int vt_active;
+	const struct vm_string *vt_types[8];
+	int vt_type_count;
 	struct cascade_classes *class_table;
 	size_t class_capacity;
 	size_t class_count;
@@ -275,6 +285,7 @@ static int cascade_anchored(struct dom_element *element, int combinator, struct 
 static int cascade_language(struct dom_element *element, const struct vm_string *range);
 static int cascade_language_matches(const struct vm_string *language, const struct vm_string *range);
 static int cascade_pseudo_class(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple);
+static int cascade_vt_type_matches(const struct css_engine *engine, const struct vm_string *list);
 static int cascade_any_matches(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple);
 static int cascade_has(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple);
 static int cascade_has_below(struct css_engine *engine, struct dom_node *node, const struct css_simple *simple, struct dom_element *anchor, int depth);
@@ -742,6 +753,101 @@ css_engine_compute_pseudo(
 	return 0;
 }
 
+/* Tells whether a space-separated list of types has one the active view transition has. */
+static int
+cascade_vt_type_matches(
+	const struct css_engine *engine,
+	const struct vm_string *list)
+{
+	uint16_t word[64];
+	size_t length;
+	size_t used;
+	size_t index;
+	int at;
+
+	length = list->length;
+	used = 0;
+	for (index = 0; index <= length; index++) {
+		if (index < length && vm_string_at(list, index) != ' ') {
+			if (used < 64U)
+				word[used++] = vm_string_at(list, index);
+			continue;
+		}
+		if (used > 0) {
+			for (at = 0; at < engine->vt_type_count; at++) {
+				if (vm_string_equal_units(engine->vt_types[at], word, used))
+					return 1;
+			}
+		}
+		used = 0;
+	}
+	return 0;
+}
+
+/* Tells the engine whether a view transition is active and the types it has (the ones past eight are dropped). */
+void
+css_engine_set_view_transition(
+	struct css_engine *engine,
+	int active,
+	const struct vm_string *const *types,
+	int count)
+{
+	int index;
+
+	engine->vt_active = active;
+	engine->vt_type_count = 0;
+	for (index = 0; index < count && index < 8; index++)
+		engine->vt_types[engine->vt_type_count++] = types[index];
+}
+
+/*
+ * Computes the style of a view transition pseudo-element of an element (the root): the rules for the pseudo-element
+ * of that name (NULL for ::view-transition) whose classes the group has, and the style it inherits from.
+ */
+int
+css_engine_compute_vt_pseudo(
+	struct css_engine *engine,
+	struct dom_element *element,
+	int pseudo,
+	const struct vm_string *name,
+	const struct vm_string *classes,
+	int siblings,
+	const struct css_style *parent,
+	struct css_style *style)
+{
+	uint16_t word[64];
+	size_t length;
+	size_t used;
+	size_t index;
+	int error;
+
+	/* The classes are the words of a list; the first four count. */
+	engine->vt_name = name;
+	engine->vt_siblings = siblings;
+	engine->vt_class_count = 0;
+	if (classes != NULL) {
+		length = classes->length;
+		used = 0;
+		for (index = 0; index <= length; index++) {
+			if (index < length && vm_string_at(classes, index) != ' ') {
+				if (used < 64U)
+					word[used++] = vm_string_at(classes, index);
+				continue;
+			}
+			if (used > 0 && engine->vt_class_count < 4) {
+				engine->vt_classes[engine->vt_class_count] = vm_atom_from_units(engine->heap, word, used);
+				if (engine->vt_classes[engine->vt_class_count] != NULL)
+					engine->vt_class_count++;
+			}
+			used = 0;
+		}
+	}
+	engine->vt_names = 1;
+	error = css_engine_compute_pseudo(engine, element, pseudo, parent, style);
+	engine->vt_names = 0;
+	return error;
+}
+
 /* Computes only the alternate color and restores all cascade bookkeeping. */
 static int
 cascade_paint_color(
@@ -812,6 +918,13 @@ cascade_compute(
 
 	/* Starts from the initial values, with the inherited ones from the parent. */
 	css_initial_style(style);
+
+	/* A view transition group begins with the UA's transform, which the author's rules may replace. */
+	if (pseudo == CSS_PSEUDO_ELEMENT_VT_GROUP && engine->vt_names) {
+		style->transform_translate[0].value = CSS_VT_TRANSLATE_PENDING;
+		style->transform_translate[1].value = CSS_VT_TRANSLATE_PENDING;
+		style->transform_set = 1;
+	}
 	if (parent != NULL) {
 		style->color = parent->color;
 		style->paint_color = parent->paint_color;
@@ -2763,14 +2876,53 @@ cascade_compound_matches(
 	struct dom_element *element,
 	const struct css_compound *compound)
 {
+	const struct css_simple *simple;
 	size_t index;
 	int matches;
+	int after;
 
 	/* Every simple selector must match. */
+	after = 0;
 	for (index = 0; index < compound->count; index++) {
-		matches = cascade_simple_matches(engine, element, &compound->simples[index]);
+		simple = &compound->simples[index];
+		if (simple->kind == CSS_SIMPLE_PSEUDO_ELEMENT)
+			after = 1;
+
+		/* After a view transition pseudo-element, the structural pseudo-classes are about its place among its siblings. */
+		if (after && engine->vt_names && simple->kind == CSS_SIMPLE_PSEUDO_CLASS &&
+		    (simple->pseudo == CSS_PSEUDO_FIRST_CHILD || simple->pseudo == CSS_PSEUDO_LAST_CHILD || simple->pseudo == CSS_PSEUDO_ONLY_CHILD)) {
+			if (engine->pseudo_wanted == CSS_PSEUDO_ELEMENT_VT_ROOT)
+				return 0;
+			if (simple->pseudo == CSS_PSEUDO_FIRST_CHILD)
+				matches = (engine->vt_siblings & CSS_VT_FIRST) != 0;
+			else if (simple->pseudo == CSS_PSEUDO_LAST_CHILD)
+				matches = (engine->vt_siblings & CSS_VT_LAST) != 0;
+			else
+				matches = engine->vt_siblings == (CSS_VT_FIRST | CSS_VT_LAST);
+			if (!matches)
+				return 0;
+			continue;
+		}
+		matches = cascade_simple_matches(engine, element, simple);
 		if (!matches)
 			return 0;
+	}
+
+	/* A view transition pseudo-element's name and classes, while one is styled. */
+	if (engine->vt_names && compound->pseudo_element >= CSS_PSEUDO_ELEMENT_VT_ROOT) {
+		if (compound->pseudo_name != NULL &&
+		    (engine->vt_name == NULL || !vm_string_equal(compound->pseudo_name, engine->vt_name)))
+			return 0;
+		for (index = 0; index < (size_t)compound->pseudo_class_count; index++) {
+			size_t other;
+
+			for (other = 0; other < (size_t)engine->vt_class_count; other++) {
+				if (vm_string_equal(compound->pseudo_classes[index], engine->vt_classes[other]))
+					break;
+			}
+			if (other == (size_t)engine->vt_class_count)
+				return 0;
+		}
 	}
 
 	/* The compound matches. */
@@ -2967,6 +3119,11 @@ cascade_pseudo_class(
 	switch (simple->pseudo) {
 	case CSS_PSEUDO_ROOT:
 		return element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT;
+	case CSS_PSEUDO_ACTIVE_VT:
+		return engine->vt_active && element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT;
+	case CSS_PSEUDO_ACTIVE_VT_TYPE:
+		return engine->vt_active && element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT &&
+		    cascade_vt_type_matches(engine, simple->value);
 	case CSS_PSEUDO_SCOPE:
 	case CSS_PSEUDO_SCOPE_NEST:
 		/* The scope's root inside @scope, the root element elsewhere. */
@@ -3973,6 +4130,24 @@ cascade_apply(
 	case CSS_PROP_ZOOM:
 		style->zoom = value->number;
 		break;
+	case CSS_PROP_ANIMATION_NAME:
+		style->animation_name = value->keyword == 2 ? value->ident : NULL;
+		break;
+	case CSS_PROP_ANIMATION_DURATION:
+		style->animation_duration = value->number;
+		break;
+	case CSS_PROP_ANIMATION_DELAY:
+		style->animation_delay = value->number;
+		break;
+	case CSS_PROP_ANIMATION_PLAY_STATE:
+		style->animation_paused = value->keyword == 1;
+		break;
+	case CSS_PROP_ANIMATION_TIMING_FUNCTION:
+		style->animation_timing = value->keyword == 2 ? value->ident : NULL;
+		break;
+	case CSS_PROP_MIX_BLEND_MODE:
+		style->mix_blend_mode = value->keyword;
+		break;
 	case CSS_PROP_DISPLAY:
 		style->display = value->keyword;
 		break;
@@ -4629,6 +4804,24 @@ cascade_inherit(
 		break;
 	case CSS_PROP_ZOOM:
 		style->zoom = parent->zoom;
+		break;
+	case CSS_PROP_ANIMATION_NAME:
+		style->animation_name = parent->animation_name;
+		break;
+	case CSS_PROP_ANIMATION_DURATION:
+		style->animation_duration = parent->animation_duration;
+		break;
+	case CSS_PROP_ANIMATION_DELAY:
+		style->animation_delay = parent->animation_delay;
+		break;
+	case CSS_PROP_ANIMATION_PLAY_STATE:
+		style->animation_paused = parent->animation_paused;
+		break;
+	case CSS_PROP_ANIMATION_TIMING_FUNCTION:
+		style->animation_timing = parent->animation_timing;
+		break;
+	case CSS_PROP_MIX_BLEND_MODE:
+		style->mix_blend_mode = parent->mix_blend_mode;
 		break;
 	case CSS_PROP_Z_INDEX:
 		style->z_index = parent->z_index;

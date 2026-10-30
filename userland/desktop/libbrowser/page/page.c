@@ -569,7 +569,7 @@ page_layout(
 	/* Builds and lays out the box tree, the images found by their elements (the ones there are now). */
 	page->laid_out_images = page->images_generation;
 	css_engine_set_container_lookup(page->css, page_container_size, page);
-	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height);
+	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, page->transition_on ? &page->transition : NULL);
 	page->laid_out = 1;
 	if (error != 0)
 		goto cleanup;
@@ -593,7 +593,7 @@ page_layout(
 		page->previous_laid_out = 1;
 		memset(&page->layout, 0, sizeof(page->layout));
 		css_engine_forget_styles(page->css);
-		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height);
+		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, page->transition_on ? &page->transition : NULL);
 		if (error != 0)
 			goto cleanup;
 	}
@@ -613,6 +613,7 @@ page_layout(
 
 	/* Only a complete layout advances observable generation and geometry caches. */
 	page->laid_out_generation = page->document->generation;
+	page->laid_out_transition = page->transition_generation;
 	page->laid_out_visits = page->visits_generation;
 	page->layout_serial++;
 
@@ -1262,6 +1263,7 @@ page_gather_styles(
 		return error;
 	if (page->visited_urls.count != 0)
 		css_engine_set_visited_lookup(page->css, page_link_visited, page);
+	css_engine_set_view_transition(page->css, page->vt_active, page->vt_types, page->vt_type_count);
 
 	/* The document's sheets, parsed once and lent to the engine. */
 	error = page_sheets_add(page);

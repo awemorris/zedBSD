@@ -136,6 +136,7 @@ struct layout_line {
  * is a block among its parent's inline content: the line it is on places
  * it (x and y relative to that block's content box, like a float).
  */
+struct layout_transition_name;
 struct layout_box {
 	int kind;
 	struct dom_node *node;
@@ -274,6 +275,11 @@ struct layout_box {
 	layout_unit max_content;
 	int max_content_known;
 
+	/* A box of the view transition tree (transition.c): in the tree; the old or new image of a name. */
+	int vt_tree;
+	const struct layout_transition_name *vt_old;
+	const struct layout_transition_name *vt_new;
+
 	/* How far a sticky box is moved from where the flow put it (sticky.c). */
 	layout_unit sticky_dx;
 	layout_unit sticky_dy;
@@ -297,6 +303,39 @@ struct layout_rect {
 	layout_unit y;
 	layout_unit width;
 	layout_unit height;
+};
+
+struct paint_snapshot;
+
+/*
+ * One name of a view transition (https://drafts.csswg.org/css-view-transitions-1/): the root or an element, what
+ * was captured of its old state (an image of what was painted and where the border box was) and where its new
+ * state's border box is.  The name is an atom.
+ */
+struct layout_transition_name {
+	struct vm_string *name;
+	struct vm_string *classes;
+	int is_root;
+	int has_old;
+	int has_new;
+	struct layout_rect old_rect;
+	struct layout_rect new_rect;
+	struct paint_snapshot *old_image;
+};
+
+/*
+ * A view transition's state the layout and the painting read: its names in order and whether the pseudo-element
+ * tree is shown (from when the new state is made until the transition ends).
+ */
+struct layout_transition {
+	struct layout_transition_name *names;
+	size_t count;
+	size_t capacity;
+	int show;
+	/* The heap the generated names (match-element's) are atoms of. */
+	struct vm_heap *heap;
+	/* The seconds the animations of the pseudo-elements have run (they start when the tree is shown). */
+	float elapsed;
 };
 
 /*
@@ -336,6 +375,8 @@ struct layout_tree {
 	int position_pass;
 	/* The writing mode whose logical coordinates the boxes are being laid out in (horizontal-tb outside any vertical domain). */
 	int logical_mode;
+	/* The view transition being shown or measured (not owned), and whether this build is the measuring one. */
+	const struct layout_transition *transition;
 };
 
 /*
@@ -349,7 +390,7 @@ struct layout_context {
 };
 
 /* The layout (box.c, block.c, inline.c, float.c, position.c, replaced.c, dump.c, hit.c). */
-int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height);
+int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, const struct layout_transition *transition);
 void layout_box_model(struct layout_box *box, layout_unit containing_width);
 void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
 void layout_replaced_size(struct layout_box *box, layout_unit containing_width, layout_unit containing_height, int height_definite);
@@ -358,6 +399,15 @@ int layout_is_positioned(const struct layout_box *box);
 int layout_is_layered(const struct layout_box *box);
 int layout_contains_absolute(const struct layout_box *box);
 int layout_contains_fixed(const struct layout_box *box);
+
+/* View transitions (transition.c). */
+struct layout_transition_name *layout_transition_find(const struct layout_transition *transition, const struct vm_string *name);
+int layout_transition_measure(const struct layout_tree *tree, struct layout_transition *transition, int old_state);
+const struct layout_box *layout_transition_box(const struct layout_transition *transition, const struct layout_box *box, const struct vm_string *name, int depth);
+struct vm_string *layout_transition_name_of(const struct layout_transition *transition, const struct layout_box *box);
+void layout_transition_release(struct layout_transition *transition);
+float layout_transition_progress(const struct css_style *style, float elapsed);
+int layout_transition_group_rect(const struct layout_transition_name *name, const struct css_style *style, float elapsed, struct layout_rect *rect);
 
 /* Anchor positioning (anchor.c). */
 int layout_anchor_wanted(const struct layout_box *box);

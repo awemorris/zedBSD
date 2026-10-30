@@ -107,3 +107,5 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
      level ごとの tiling）へ変換し、texture の record に level の数と base の level を入れる。sampler の mipmap mode・LOD を texture の record に。
   3. 欠け 5（sample する image を pass ごとに CPU で tile へ写す件）は perf の行の `tex` を実機で見てから。
 - 既知の制限: index の draw は直の fetch でしか動かない（packed の copy は index を CPU で読まないため）。primitive restart は off。
+
+- 2026-10-31 ユーザーから、Pi 5 の試験は今日の午後に行い、その時の main で最新の image を作り直して実施する、Q1 が声をかける、という趣旨の指示を受けた。

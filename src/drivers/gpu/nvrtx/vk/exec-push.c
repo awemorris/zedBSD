@@ -115,6 +115,19 @@
 #define M_SET_Z_COMPRESSION			0x19ccU
 #define M_SET_CONSTANT_BUFFER_SELECTOR_A	0x2380U
 #define M_BIND_GROUP_CONSTANT_BUFFER		0x2410U
+
+/*
+ * The offset of the loads into the selected constant buffer, and the
+ * header whose first word goes to its method and the rest to the one after
+ * it (the loads, each going on four bytes further).
+ *
+ * Values referenced: Mesa 25.0.7
+ * src/nouveau/headers/nvidia/classes/clc597.h
+ * (NVC597_LOAD_CONSTANT_BUFFER_OFFSET, NVC597_LOAD_CONSTANT_BUFFER) and
+ * src/nouveau/headers/nv_push.h (NVC0_FIFO_PKHDR_1I).
+ */
+#define M_LOAD_CONSTANT_BUFFER_OFFSET		0x238cU
+#define EXEC_METHOD_ONE_INCREMENT		(5U << 29)
 #define M_BIND_GROUP_STRIDE			0x20U
 
 /*
@@ -1053,6 +1066,141 @@ nvrtx_exec_uniform(
 	at = exec_set(push, at, M_BIND_GROUP_CONSTANT_BUFFER + group * M_BIND_GROUP_STRIDE, V_GROUP_VALID | (slot << V_GROUP_SLOT_SHIFT));
 
 	/* Succeeded: the group reads the buffer at the slot. */
+	return at;
+}
+
+/*
+ * Writes the selection of a constant buffer for the loads after it (its
+ * size, then its address), binding it to no group.
+ *
+ * Returns where the push buffer goes on.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_cmd_draw.c
+ * (nvk_mme_select_cb0).
+ */
+size_t
+nvrtx_exec_constants_select(
+	uint8_t *push,
+	size_t at,
+	uint64_t address,
+	uint32_t size)
+{
+	/* The size, then the address. */
+	at = exec_method(push, at, M_SET_CONSTANT_BUFFER_SELECTOR_A, 3U);
+	nvrtx_put32(push, at, size);
+	nvrtx_put32(push, at + 4U, (uint32_t)(address >> 32));
+	nvrtx_put32(push, at + 8U, (uint32_t)(address & 0xffffffffU));
+	at += 12U;
+
+	/* Succeeded: the loads after it go to the buffer. */
+	return at;
+}
+
+/*
+ * Writes count words into the selected constant buffer from the byte
+ * offset on.  The loads are in order with the draws: a draw before them
+ * reads the buffer as it was, a draw after them as written.
+ *
+ * Returns where the push buffer goes on.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_cmd_draw.c
+ * (nvk_cmd_flush_gfx_root_desc, nvk_push_draw_state_init).
+ */
+size_t
+nvrtx_exec_constants_load(
+	uint8_t *push,
+	size_t at,
+	uint32_t offset,
+	const uint32_t *words,
+	uint32_t count)
+{
+	uint32_t index;
+
+	/* The offset, then the words, each to the load method. */
+	nvrtx_put32(push, at, EXEC_METHOD_ONE_INCREMENT | ((count + 1U) << 16) | (M_LOAD_CONSTANT_BUFFER_OFFSET >> 2));
+	nvrtx_put32(push, at + 4U, offset);
+	at += 8U;
+	for (index = 0U; index < count; index++)
+		nvrtx_put32(push, at + index * 4U, words[index]);
+	at += count * 4U;
+
+	/* Succeeded: the words are in the buffer for the draws after them. */
+	return at;
+}
+
+/*
+ * Writes a draw (indexed or not) as nvrtx_exec_draw() and
+ * nvrtx_exec_draw_indexed() do, but only the bases and counts that differ
+ * from what held says the GPU has (everything when known is false); held
+ * is then what the GPU has after it.
+ *
+ * Returns where the push buffer goes on.
+ *
+ * Procedure referenced: Mesa 25.0.7 src/nouveau/vulkan/nvk_cmd_draw.c
+ * (nvk_mme_build_set_draw_params, nvk_mme_build_draw).
+ */
+size_t
+nvrtx_exec_draw_held(
+	uint8_t *push,
+	size_t at,
+	struct nvrtx_exec_bases *held,
+	bool known,
+	const struct nvrtx_exec_draw_args *draw)
+{
+	uint32_t vertex;
+	uint32_t begin;
+
+	/* The topology: a list or a strip of triangles. */
+	begin = V_BEGIN_TRIANGLES | V_BEGIN_ITERATE;
+	if (draw->topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
+		begin = V_BEGIN_TRIANGLE_STRIP | V_BEGIN_ITERATE;
+
+	/* The vertex numbers from the vertex offset of an indexed draw, from 0 for another. */
+	vertex = 0U;
+	if (draw->indexed)
+		vertex = (uint32_t)draw->vertex_offset;
+	if (!known || held->vertex != vertex) {
+		at = exec_set(push, at, M_SET_GLOBAL_BASE_VERTEX_INDEX, vertex);
+		at = exec_set(push, at, M_SET_VERTEX_ID_BASE, vertex);
+		held->vertex = vertex;
+	}
+
+	/* The instances from the first instance. */
+	if (!known || held->instance != draw->first_instance) {
+		at = exec_set(push, at, M_SET_GLOBAL_BASE_INSTANCE_INDEX, draw->first_instance);
+		held->instance = draw->first_instance;
+	}
+	if (!known || held->instances != draw->instances) {
+		at = exec_set(push, at, M_SET_INSTANCE_COUNT, draw->instances);
+		held->instances = draw->instances;
+	}
+
+	/* An indexed draw: no restart (written once), the first index, then the count, which draws. */
+	if (!known)
+		held->restart_off = false;
+	if (draw->indexed) {
+		if (!held->restart_off) {
+			at = exec_set(push, at, M_SET_DA_PRIMITIVE_RESTART, V_FALSE);
+			held->restart_off = true;
+		}
+		at = exec_set(push, at, M_BEGIN, begin);
+		at = exec_method(push, at, M_SET_INDEX_BUFFER_F, 2U);
+		nvrtx_put32(push, at, draw->first);
+		nvrtx_put32(push, at + 4U, draw->count);
+		at += 8U;
+		at = exec_set(push, at, M_END, 0U);
+		return at;
+	}
+
+	/* Another draw: the vertex range. */
+	at = exec_set(push, at, M_BEGIN, begin);
+	at = exec_method(push, at, M_SET_VERTEX_ARRAY_START, 2U);
+	nvrtx_put32(push, at, draw->first);
+	nvrtx_put32(push, at + 4U, draw->count);
+	at += 8U;
+	at = exec_set(push, at, M_END, 0U);
+
+	/* Succeeded: the draw is written. */
 	return at;
 }
 

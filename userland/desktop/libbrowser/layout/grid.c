@@ -1712,17 +1712,17 @@ grid_static_vertical_start(
 	}
 }
 
-/* Gives a direct absolute child the origin of its definite grid area. */
+/* Gives one direct absolute child the origin of its definite grid area. */
 static void
-grid_static_position(
+grid_static_child(
 	struct layout_box *box,
+	struct layout_box *child,
 	const struct grid_state *grid,
 	layout_unit column_gap,
 	layout_unit row_gap,
 	layout_unit shift,
 	layout_unit row_shift)
 {
-	struct layout_box *child;
 	layout_unit x;
 	layout_unit y;
 	int column;
@@ -1744,11 +1744,360 @@ grid_static_position(
 	int child_frame;
 	layout_unit available_height;
 
-	/* Other writing directions retain their existing static-position path. */
-	if (box->style.position != CSS_POSITION_RELATIVE)
+	explicit_inset = child->style.offset[CSS_LEFT].unit != CSS_UNIT_AUTO ||
+	    child->style.offset[CSS_RIGHT].unit != CSS_UNIT_AUTO ||
+	    child->style.offset[CSS_TOP].unit != CSS_UNIT_AUTO ||
+	    child->style.offset[CSS_BOTTOM].unit != CSS_UNIT_AUTO;
+	if (explicit_inset &&
+	    (child->style.grid_column.start <= 0 ||
+	    child->style.grid_column.end <= 0 ||
+	    child->style.grid_row.start <= 0 ||
+	    child->style.grid_row.end <= 0))
 		return;
+
+	/* An absolute box never creates a track or enters auto-placement. */
+	grid_resolve(&child->style.grid_column, box->style.column_count,
+	    &column, &column_span);
+	grid_resolve(&child->style.grid_row, box->style.row_count,
+	    &row, &row_span);
+	available_height = 0;
+	if (box->style.align_content == CSS_ALIGN_CENTER &&
+	    box->style.height.unit == CSS_UNIT_PX &&
+	    box->padding[CSS_TOP] == 0 && box->padding[CSS_BOTTOM] == 0 &&
+	    box->border[CSS_TOP] == 0 && box->border[CSS_BOTTOM] == 0)
+		available_height = layout_from_px(box->style.height.value);
+	full_block = available_height > 0 && child->style.grid_row.start == 0 &&
+	    child->style.grid_row.end == 0 &&
+	    child->style.grid_row.start_span == 0 &&
+	    child->style.grid_row.end_span == 0;
+	auto_start_row = available_height > 0 && child->style.grid_row.start == 0 &&
+	    child->style.grid_row.end == 1;
+	auto_end_row = available_height > 0 && child->style.grid_row.start == 2 &&
+	    child->style.grid_row.end == 0;
+	full_inline = child->style.grid_column.start == 0 &&
+	    child->style.grid_column.end == 0 &&
+	    child->style.grid_column.start_span == 0 &&
+	    child->style.grid_column.end_span == 0;
+	if (full_inline && (box->padding[CSS_LEFT] != 0 ||
+	    box->padding[CSS_RIGHT] != 0 || box->border[CSS_LEFT] != 0 ||
+	    box->border[CSS_RIGHT] != 0))
+		return;
+	if (column < 0 && !full_inline)
+		return;
+	if (row < 0 && !full_block)
+		return;
+	if (column_span < 1)
+		return;
+	if (row_span < 1)
+		return;
+	if (!full_inline && column + column_span > box->style.column_count)
+		return;
+	if (!full_block && row + row_span > box->style.row_count)
+		return;
+	justify = child->style.justify_self;
+	if (justify == CSS_ALIGN_AUTO)
+		justify = box->style.justify_items;
+	parent_frame = 0;
+	child_frame = 0;
+	orthogonal_frame_auto = box->style.display == CSS_DISPLAY_INLINE_GRID &&
+	    (box->style.direction == CSS_DIRECTION_LTR ||
+	    box->style.direction == CSS_DIRECTION_RTL) &&
+	    box->style.column_count == 2 && box->style.row_count == 2 &&
+	    box->style.column_gap.value == 0 && box->style.row_gap.value == 0 &&
+	    column_span == 1 && row == 0 && row_span == 1 &&
+	    child->style.grid_column.start == column + 1 &&
+	    child->style.grid_column.end == column + 2 &&
+	    child->style.grid_row.start == 1 && child->style.grid_row.end == 2 &&
+	    ((column == 0 &&
+	    child->style.writing_mode == CSS_WRITING_VERTICAL_LR &&
+	    justify == CSS_ALIGN_RIGHT) ||
+	    (column == 1 &&
+	    child->style.writing_mode == CSS_WRITING_VERTICAL_RL &&
+	    justify == CSS_ALIGN_CENTER)) &&
+	    child->style.direction == box->style.direction &&
+	    (child->style.width.unit == CSS_UNIT_AUTO ||
+	    child->style.width.unit == CSS_UNIT_PX) &&
+	    child->style.height.unit == CSS_UNIT_AUTO &&
+	    !explicit_inset;
+	for (index = 0; orthogonal_frame_auto && index < 2; index++) {
+		if (box->style.columns[index].kind != CSS_TRACK_LENGTH ||
+		    box->style.columns[index].size.unit != CSS_UNIT_PX ||
+		    box->style.rows[index].kind != CSS_TRACK_LENGTH ||
+		    box->style.rows[index].size.unit != CSS_UNIT_PX)
+			orthogonal_frame_auto = 0;
+	}
+	if (orthogonal_frame_auto) {
+		for (index = 0; index < 4; index++) {
+			if (box->border[index] != 0 || box->padding[index] != 0)
+				parent_frame = 1;
+			if ((child->style.border_style[index] != CSS_BORDER_NONE &&
+			    child->style.border_width[index] > 0) ||
+			    (child->style.padding[index].unit == CSS_UNIT_PX &&
+			    child->style.padding[index].value != 0))
+				child_frame = 1;
+		}
+		orthogonal_frame_auto = parent_frame && child_frame;
+	}
+	orthogonal_rtl_inset = box->style.display == CSS_DISPLAY_INLINE_GRID &&
+	    box->style.direction == CSS_DIRECTION_RTL &&
+	    box->style.column_count == 2 && box->style.row_count == 2 &&
+	    box->style.column_gap.value == 0 && box->style.row_gap.value == 0 &&
+	    column_span == 1 && row_span == 1 &&
+	    child->style.direction == CSS_DIRECTION_RTL &&
+	    child->style.width.unit == CSS_UNIT_AUTO &&
+	    child->style.height.unit == CSS_UNIT_AUTO &&
+	    child->style.offset[CSS_BOTTOM].unit == CSS_UNIT_AUTO &&
+	    ((row == 0 && column == 0 &&
+	    child->style.writing_mode == CSS_WRITING_VERTICAL_LR &&
+	    child->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO &&
+	    child->style.offset[CSS_LEFT].unit == CSS_UNIT_PX &&
+	    child->style.offset[CSS_RIGHT].unit == CSS_UNIT_AUTO) ||
+	    (row == 0 && column == 1 &&
+	    child->style.writing_mode == CSS_WRITING_VERTICAL_RL &&
+	    child->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO &&
+	    child->style.offset[CSS_RIGHT].unit == CSS_UNIT_PX &&
+	    child->style.offset[CSS_LEFT].unit == CSS_UNIT_AUTO) ||
+	    (row == 1 && column == 1 &&
+	    child->style.writing_mode == CSS_WRITING_VERTICAL_RL &&
+	    child->style.offset[CSS_LEFT].unit == CSS_UNIT_PX &&
+	    child->style.offset[CSS_TOP].unit == CSS_UNIT_PX &&
+	    child->style.offset[CSS_RIGHT].unit == CSS_UNIT_AUTO));
+	/* Only definite pixel tracks supply this orthogonal area. */
+	for (index = 0; orthogonal_rtl_inset && index < 2; index++) {
+		if (box->style.columns[index].kind != CSS_TRACK_LENGTH ||
+		    box->style.columns[index].size.unit != CSS_UNIT_PX ||
+		    box->style.rows[index].kind != CSS_TRACK_LENGTH ||
+		    box->style.rows[index].size.unit != CSS_UNIT_PX)
+			orthogonal_rtl_inset = 0;
+	}
+	/* A framed area stays on its established RTL path. */
+	for (index = 0; orthogonal_rtl_inset && index < 4; index++) {
+		if (box->border[index] != 0 || box->padding[index] != 0 ||
+		    child->border[index] != 0 || child->padding[index] != 0)
+			orthogonal_rtl_inset = 0;
+	}
+	if (box->style.direction == CSS_DIRECTION_RTL &&
+	    justify != CSS_ALIGN_START && justify != CSS_ALIGN_END &&
+	    justify != CSS_ALIGN_SELF_END && justify != CSS_ALIGN_CENTER &&
+	    justify != CSS_ALIGN_LEFT && justify != CSS_ALIGN_RIGHT &&
+	    justify != CSS_ALIGN_SELF_START &&
+	    !(justify == CSS_ALIGN_NORMAL && orthogonal_rtl_inset))
+		return;
+
+	/* Track offsets include the container's content distribution and gaps. */
+	x = shift;
+	if (full_inline) {
+		x = box->style.direction == CSS_DIRECTION_RTL ? box->width : 0;
+		child->static_x_from_right = box->style.direction == CSS_DIRECTION_RTL;
+	} else if (box->style.direction == CSS_DIRECTION_RTL) {
+		/* The right edge includes the current column and every track after it. */
+		for (index = column; index < grid->column_count; index++) {
+			x += grid->columns[index];
+			if (index + 1 < grid->column_count)
+				x += column_gap;
+		}
+		child->static_x_from_right = 1;
+	} else {
+		for (index = 0; index < column; index++)
+			x += grid->columns[index] + column_gap;
+	}
+	/* An auto start line reaches the padding edge, before content distribution. */
+	if (child->style.grid_column.start == 0 &&
+	    child->style.grid_column.end == 1)
+		x = box->style.direction == CSS_DIRECTION_RTL ? box->width : 0;
+	y = child->style.grid_row.start > 0 ? row_shift : 0;
+	for (index = 0; !full_block && index < row; index++)
+		y += grid->rows[index] + row_gap;
+	child->static_x = x;
+	child->static_y = y;
+	if ((child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB ||
+	    orthogonal_frame_auto) &&
+	    (justify == CSS_ALIGN_END || justify == CSS_ALIGN_SELF_END ||
+	    justify == CSS_ALIGN_CENTER || justify == CSS_ALIGN_LEFT ||
+	    justify == CSS_ALIGN_RIGHT || justify == CSS_ALIGN_SELF_START)) {
+		child->static_x_align = justify;
+		child->static_x_safe = (child->style.justify_self != CSS_ALIGN_AUTO ?
+		    (child->style.flex_keywords & 0x1000u) : (box->style.flex_keywords & 0x2000u)) != 0;
+		if (justify == CSS_ALIGN_SELF_END)
+			child->static_x_align_from_right =
+			    child->style.direction == CSS_DIRECTION_LTR;
+		else if (justify == CSS_ALIGN_SELF_START)
+			child->static_x_align_from_right =
+			    child->style.direction == CSS_DIRECTION_RTL;
+		else
+			child->static_x_align_from_right =
+			    justify == CSS_ALIGN_RIGHT ||
+			    (justify == CSS_ALIGN_END && box->style.direction == CSS_DIRECTION_LTR);
+		if (full_inline) {
+			child->static_x_area_width = box->width;
+		} else {
+			for (index = column; index < column + column_span; index++) {
+				child->static_x_area_width += grid->columns[index];
+				if (index + 1 < column + column_span)
+					child->static_x_area_width += column_gap;
+			}
+		}
+		/* An auto end line reaches the opposite padding edge. */
+		if (child->style.grid_column.start == 2 &&
+		    child->style.grid_column.end == 0)
+			child->static_x_area_width = box->style.direction == CSS_DIRECTION_RTL ?
+			    x : box->width - x;
+		if (child->static_x_area_width < 0)
+			child->static_x_area_width = 0;
+	}
+	align = grid_in_flow_align(child->style.align_self);
+	if (align == CSS_ALIGN_AUTO)
+		align = box->style.align_items;
+	orthogonal_y_align = box->style.display == CSS_DISPLAY_INLINE_GRID &&
+	    (box->style.direction == CSS_DIRECTION_LTR ||
+	    box->style.direction == CSS_DIRECTION_RTL) &&
+	    box->style.column_count == 2 && box->style.row_count == 2 &&
+	    box->style.column_gap.value == 0 && box->style.row_gap.value == 0 &&
+	    box->style.columns[0].kind == CSS_TRACK_LENGTH &&
+	    box->style.columns[1].kind == CSS_TRACK_LENGTH &&
+	    box->style.rows[0].kind == CSS_TRACK_LENGTH &&
+	    box->style.rows[1].kind == CSS_TRACK_LENGTH &&
+	    box->style.columns[0].size.unit == CSS_UNIT_PX &&
+	    box->style.columns[1].size.unit == CSS_UNIT_PX &&
+	    box->style.rows[0].size.unit == CSS_UNIT_PX &&
+	    box->style.rows[1].size.unit == CSS_UNIT_PX &&
+	    column == 1 && column_span == 1 && row == 0 && row_span == 1 &&
+	    child->style.writing_mode == CSS_WRITING_VERTICAL_RL &&
+	    child->style.direction == box->style.direction &&
+	    child->style.width.unit == CSS_UNIT_AUTO &&
+	    child->style.height.unit == CSS_UNIT_AUTO &&
+	    child->style.offset[CSS_RIGHT].unit == CSS_UNIT_PX &&
+	    child->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO &&
+	    child->style.offset[CSS_BOTTOM].unit == CSS_UNIT_AUTO;
+	/* The orthogonal Y alignment applies to this frameless fixed area only. */
+	for (index = 0; orthogonal_y_align && index < 4; index++) {
+		if (box->border[index] != 0 || box->padding[index] != 0 ||
+		    child->border[index] != 0 || child->padding[index] != 0)
+			orthogonal_y_align = 0;
+	}
+	if ((child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB ||
+	    orthogonal_y_align || (orthogonal_frame_auto && column == 1)) &&
+	    (align == CSS_ALIGN_END || align == CSS_ALIGN_SELF_END ||
+	    align == CSS_ALIGN_CENTER)) {
+		child->static_y_align = align;
+		child->static_y_safe = (child->style.align_self != CSS_ALIGN_AUTO ?
+		    (child->style.flex_keywords & 128u) : (box->style.flex_keywords & 64u)) != 0;
+		if (full_block) {
+			child->static_y_area_height = available_height;
+		} else if (auto_start_row) {
+			child->static_y_area_height = row_shift;
+		} else if (auto_end_row) {
+			child->static_y_area_height = available_height - y;
+		} else {
+			for (index = row; index < row + row_span; index++) {
+				child->static_y_area_height += grid->rows[index];
+				if (index + 1 < row + row_span)
+					child->static_y_area_height += row_gap;
+			}
+		}
+		if (child->static_y_area_height < 0)
+			child->static_y_area_height = 0;
+	}
+	/* Explicit insets use this definite Grid area as their containing block. */
+	if (explicit_inset) {
+		child->static_grid_area = 1;
+		child->static_x_area_width = 0;
+		for (index = column; index < column + column_span; index++) {
+			child->static_x_area_width += grid->columns[index];
+			if (index + 1 < column + column_span)
+				child->static_x_area_width += column_gap;
+		}
+		child->static_y_area_height = 0;
+		for (index = row; index < row + row_span; index++) {
+			child->static_y_area_height += grid->rows[index];
+			if (index + 1 < row + row_span)
+				child->static_y_area_height += row_gap;
+		}
+	}
+}
+
+/* Sets how an absolute child is aligned in its static-position rectangle: justify-self across and align-self down. */
+static void
+grid_static_alignment(
+	struct layout_box *box,
+	struct layout_box *child)
+{
+	int justify;
+	int align;
+	int rtl;
+
+	rtl = box->style.direction == CSS_DIRECTION_RTL;
+	justify = child->style.justify_self;
+	if (justify == CSS_ALIGN_AUTO)
+		justify = box->style.justify_items;
+	align = grid_in_flow_align(child->style.align_self);
+	if (align == CSS_ALIGN_AUTO)
+		align = box->style.align_items;
+	align = grid_in_flow_align(align);
+	child->static_x_align = CSS_ALIGN_AUTO;
+	child->static_y_align = CSS_ALIGN_AUTO;
+	if (justify == CSS_ALIGN_END || justify == CSS_ALIGN_SELF_END ||
+	    justify == CSS_ALIGN_CENTER || justify == CSS_ALIGN_LEFT ||
+	    justify == CSS_ALIGN_RIGHT || justify == CSS_ALIGN_SELF_START) {
+		child->static_x_align = justify;
+		child->static_x_safe = (child->style.justify_self != CSS_ALIGN_AUTO ?
+		    (child->style.flex_keywords & 0x1000u) : (box->style.flex_keywords & 0x2000u)) != 0;
+		if (justify == CSS_ALIGN_SELF_END)
+			child->static_x_align_from_right = child->style.direction == CSS_DIRECTION_LTR;
+		else if (justify == CSS_ALIGN_SELF_START)
+			child->static_x_align_from_right = child->style.direction == CSS_DIRECTION_RTL;
+		else
+			child->static_x_align_from_right = justify == CSS_ALIGN_RIGHT ||
+			    (justify == CSS_ALIGN_END && !rtl);
+	}
+	if (align == CSS_ALIGN_END || align == CSS_ALIGN_CENTER) {
+		child->static_y_align = align;
+		child->static_y_safe = (child->style.align_self != CSS_ALIGN_AUTO ?
+		    (child->style.flex_keywords & 128u) : (box->style.flex_keywords & 64u)) != 0;
+	}
+}
+
+/*
+ * The static position of an absolute child of a grid container that is not
+ * its containing block: the content box is the rectangle, and the child's
+ * grid area is not used.
+ */
+static void
+grid_static_content_box(
+	struct layout_box *box,
+	struct layout_box *child,
+	layout_unit content_height)
+{
+	int rtl;
+
+	rtl = box->style.direction == CSS_DIRECTION_RTL;
+	child->static_x = rtl ? box->width : 0;
+	child->static_y = 0;
+	child->static_x_from_right = rtl;
+	child->static_x_area_width = box->width;
+	child->static_y_area_height = content_height;
+	grid_static_alignment(box, child);
+}
+
+/* Gives each direct absolute child the origin of its definite grid area. */
+static void
+grid_static_position(
+	struct layout_box *box,
+	const struct grid_state *grid,
+	layout_unit column_gap,
+	layout_unit row_gap,
+	layout_unit shift,
+	layout_unit row_shift)
+{
+	struct layout_box *child;
+	layout_unit content_height;
+	int own_block;
+	int index;
+
+	/* Other writing directions retain their existing static-position path. */
 	if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB) {
-		grid_static_vertical_start(box);
+		if (box->style.position == CSS_POSITION_RELATIVE)
+			grid_static_vertical_start(box);
 		return;
 	}
 	if (box->style.direction != CSS_DIRECTION_LTR &&
@@ -1756,279 +2105,23 @@ grid_static_position(
 		return;
 
 	/* A direct absolute child can use a definite explicit area without becoming a grid item. */
+	/* A container that is not a containing block does not use the child's grid area. */
+	own_block = box->style.position != CSS_POSITION_STATIC;
+	content_height = box->style.height.unit == CSS_UNIT_PX ?
+	    layout_from_px(box->style.height.value) : 0;
+	if (box->style.height.unit != CSS_UNIT_PX) {
+		for (index = 0; index < grid->row_count; index++)
+			content_height += grid->rows[index];
+		if (grid->row_count > 1)
+			content_height += row_gap * (layout_unit)(grid->row_count - 1);
+	}
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->style.position != CSS_POSITION_ABSOLUTE)
 			continue;
-		explicit_inset = child->style.offset[CSS_LEFT].unit != CSS_UNIT_AUTO ||
-		    child->style.offset[CSS_RIGHT].unit != CSS_UNIT_AUTO ||
-		    child->style.offset[CSS_TOP].unit != CSS_UNIT_AUTO ||
-		    child->style.offset[CSS_BOTTOM].unit != CSS_UNIT_AUTO;
-		if (explicit_inset &&
-		    (child->style.grid_column.start <= 0 ||
-		    child->style.grid_column.end <= 0 ||
-		    child->style.grid_row.start <= 0 ||
-		    child->style.grid_row.end <= 0))
-			continue;
-
-		/* An absolute box never creates a track or enters auto-placement. */
-		grid_resolve(&child->style.grid_column, box->style.column_count,
-		    &column, &column_span);
-		grid_resolve(&child->style.grid_row, box->style.row_count,
-		    &row, &row_span);
-		available_height = 0;
-		if (box->style.align_content == CSS_ALIGN_CENTER &&
-		    box->style.height.unit == CSS_UNIT_PX &&
-		    box->padding[CSS_TOP] == 0 && box->padding[CSS_BOTTOM] == 0 &&
-		    box->border[CSS_TOP] == 0 && box->border[CSS_BOTTOM] == 0)
-			available_height = layout_from_px(box->style.height.value);
-		full_block = available_height > 0 && child->style.grid_row.start == 0 &&
-		    child->style.grid_row.end == 0 &&
-		    child->style.grid_row.start_span == 0 &&
-		    child->style.grid_row.end_span == 0;
-		auto_start_row = available_height > 0 && child->style.grid_row.start == 0 &&
-		    child->style.grid_row.end == 1;
-		auto_end_row = available_height > 0 && child->style.grid_row.start == 2 &&
-		    child->style.grid_row.end == 0;
-		full_inline = child->style.grid_column.start == 0 &&
-		    child->style.grid_column.end == 0 &&
-		    child->style.grid_column.start_span == 0 &&
-		    child->style.grid_column.end_span == 0;
-		if (full_inline && (box->padding[CSS_LEFT] != 0 ||
-		    box->padding[CSS_RIGHT] != 0 || box->border[CSS_LEFT] != 0 ||
-		    box->border[CSS_RIGHT] != 0))
-			continue;
-		if (column < 0 && !full_inline)
-			continue;
-		if (row < 0 && !full_block)
-			continue;
-		if (column_span < 1)
-			continue;
-		if (row_span < 1)
-			continue;
-		if (!full_inline && column + column_span > box->style.column_count)
-			continue;
-		if (!full_block && row + row_span > box->style.row_count)
-			continue;
-		justify = child->style.justify_self;
-		if (justify == CSS_ALIGN_AUTO)
-			justify = box->style.justify_items;
-		parent_frame = 0;
-		child_frame = 0;
-		orthogonal_frame_auto = box->style.display == CSS_DISPLAY_INLINE_GRID &&
-		    (box->style.direction == CSS_DIRECTION_LTR ||
-		    box->style.direction == CSS_DIRECTION_RTL) &&
-		    box->style.column_count == 2 && box->style.row_count == 2 &&
-		    box->style.column_gap.value == 0 && box->style.row_gap.value == 0 &&
-		    column_span == 1 && row == 0 && row_span == 1 &&
-		    child->style.grid_column.start == column + 1 &&
-		    child->style.grid_column.end == column + 2 &&
-		    child->style.grid_row.start == 1 && child->style.grid_row.end == 2 &&
-		    ((column == 0 &&
-		    child->style.writing_mode == CSS_WRITING_VERTICAL_LR &&
-		    justify == CSS_ALIGN_RIGHT) ||
-		    (column == 1 &&
-		    child->style.writing_mode == CSS_WRITING_VERTICAL_RL &&
-		    justify == CSS_ALIGN_CENTER)) &&
-		    child->style.direction == box->style.direction &&
-		    (child->style.width.unit == CSS_UNIT_AUTO ||
-		    child->style.width.unit == CSS_UNIT_PX) &&
-		    child->style.height.unit == CSS_UNIT_AUTO &&
-		    !explicit_inset;
-		for (index = 0; orthogonal_frame_auto && index < 2; index++) {
-			if (box->style.columns[index].kind != CSS_TRACK_LENGTH ||
-			    box->style.columns[index].size.unit != CSS_UNIT_PX ||
-			    box->style.rows[index].kind != CSS_TRACK_LENGTH ||
-			    box->style.rows[index].size.unit != CSS_UNIT_PX)
-				orthogonal_frame_auto = 0;
-		}
-		if (orthogonal_frame_auto) {
-			for (index = 0; index < 4; index++) {
-				if (box->border[index] != 0 || box->padding[index] != 0)
-					parent_frame = 1;
-				if ((child->style.border_style[index] != CSS_BORDER_NONE &&
-				    child->style.border_width[index] > 0) ||
-				    (child->style.padding[index].unit == CSS_UNIT_PX &&
-				    child->style.padding[index].value != 0))
-					child_frame = 1;
-			}
-			orthogonal_frame_auto = parent_frame && child_frame;
-		}
-		orthogonal_rtl_inset = box->style.display == CSS_DISPLAY_INLINE_GRID &&
-		    box->style.direction == CSS_DIRECTION_RTL &&
-		    box->style.column_count == 2 && box->style.row_count == 2 &&
-		    box->style.column_gap.value == 0 && box->style.row_gap.value == 0 &&
-		    column_span == 1 && row_span == 1 &&
-		    child->style.direction == CSS_DIRECTION_RTL &&
-		    child->style.width.unit == CSS_UNIT_AUTO &&
-		    child->style.height.unit == CSS_UNIT_AUTO &&
-		    child->style.offset[CSS_BOTTOM].unit == CSS_UNIT_AUTO &&
-		    ((row == 0 && column == 0 &&
-		    child->style.writing_mode == CSS_WRITING_VERTICAL_LR &&
-		    child->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO &&
-		    child->style.offset[CSS_LEFT].unit == CSS_UNIT_PX &&
-		    child->style.offset[CSS_RIGHT].unit == CSS_UNIT_AUTO) ||
-		    (row == 0 && column == 1 &&
-		    child->style.writing_mode == CSS_WRITING_VERTICAL_RL &&
-		    child->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO &&
-		    child->style.offset[CSS_RIGHT].unit == CSS_UNIT_PX &&
-		    child->style.offset[CSS_LEFT].unit == CSS_UNIT_AUTO) ||
-		    (row == 1 && column == 1 &&
-		    child->style.writing_mode == CSS_WRITING_VERTICAL_RL &&
-		    child->style.offset[CSS_LEFT].unit == CSS_UNIT_PX &&
-		    child->style.offset[CSS_TOP].unit == CSS_UNIT_PX &&
-		    child->style.offset[CSS_RIGHT].unit == CSS_UNIT_AUTO));
-		/* Only definite pixel tracks supply this orthogonal area. */
-		for (index = 0; orthogonal_rtl_inset && index < 2; index++) {
-			if (box->style.columns[index].kind != CSS_TRACK_LENGTH ||
-			    box->style.columns[index].size.unit != CSS_UNIT_PX ||
-			    box->style.rows[index].kind != CSS_TRACK_LENGTH ||
-			    box->style.rows[index].size.unit != CSS_UNIT_PX)
-				orthogonal_rtl_inset = 0;
-		}
-		/* A framed area stays on its established RTL path. */
-		for (index = 0; orthogonal_rtl_inset && index < 4; index++) {
-			if (box->border[index] != 0 || box->padding[index] != 0 ||
-			    child->border[index] != 0 || child->padding[index] != 0)
-				orthogonal_rtl_inset = 0;
-		}
-		if (box->style.direction == CSS_DIRECTION_RTL &&
-		    justify != CSS_ALIGN_START && justify != CSS_ALIGN_END &&
-		    justify != CSS_ALIGN_SELF_END && justify != CSS_ALIGN_CENTER &&
-		    justify != CSS_ALIGN_LEFT && justify != CSS_ALIGN_RIGHT &&
-		    justify != CSS_ALIGN_SELF_START &&
-		    !(justify == CSS_ALIGN_NORMAL && orthogonal_rtl_inset))
-			continue;
-
-		/* Track offsets include the container's content distribution and gaps. */
-		x = shift;
-		if (full_inline) {
-			x = box->style.direction == CSS_DIRECTION_RTL ? box->width : 0;
-			child->static_x_from_right = box->style.direction == CSS_DIRECTION_RTL;
-		} else if (box->style.direction == CSS_DIRECTION_RTL) {
-			/* The right edge includes the current column and every track after it. */
-			for (index = column; index < grid->column_count; index++) {
-				x += grid->columns[index];
-				if (index + 1 < grid->column_count)
-					x += column_gap;
-			}
-			child->static_x_from_right = 1;
-		} else {
-			for (index = 0; index < column; index++)
-				x += grid->columns[index] + column_gap;
-		}
-		/* An auto start line reaches the padding edge, before content distribution. */
-		if (child->style.grid_column.start == 0 &&
-		    child->style.grid_column.end == 1)
-			x = box->style.direction == CSS_DIRECTION_RTL ? box->width : 0;
-		y = child->style.grid_row.start > 0 ? row_shift : 0;
-		for (index = 0; !full_block && index < row; index++)
-			y += grid->rows[index] + row_gap;
-		child->static_x = x;
-		child->static_y = y;
-		if ((child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB ||
-		    orthogonal_frame_auto) &&
-		    (justify == CSS_ALIGN_END || justify == CSS_ALIGN_SELF_END ||
-		    justify == CSS_ALIGN_CENTER || justify == CSS_ALIGN_LEFT ||
-		    justify == CSS_ALIGN_RIGHT || justify == CSS_ALIGN_SELF_START)) {
-			child->static_x_align = justify;
-			child->static_x_safe = (child->style.justify_self != CSS_ALIGN_AUTO ?
-			    (child->style.flex_keywords & 0x1000u) : (box->style.flex_keywords & 0x2000u)) != 0;
-			if (justify == CSS_ALIGN_SELF_END)
-				child->static_x_align_from_right =
-				    child->style.direction == CSS_DIRECTION_LTR;
-			else if (justify == CSS_ALIGN_SELF_START)
-				child->static_x_align_from_right =
-				    child->style.direction == CSS_DIRECTION_RTL;
-			else
-				child->static_x_align_from_right =
-				    justify == CSS_ALIGN_RIGHT ||
-				    (justify == CSS_ALIGN_END && box->style.direction == CSS_DIRECTION_LTR);
-			if (full_inline) {
-				child->static_x_area_width = box->width;
-			} else {
-				for (index = column; index < column + column_span; index++) {
-					child->static_x_area_width += grid->columns[index];
-					if (index + 1 < column + column_span)
-						child->static_x_area_width += column_gap;
-				}
-			}
-			/* An auto end line reaches the opposite padding edge. */
-			if (child->style.grid_column.start == 2 &&
-			    child->style.grid_column.end == 0)
-				child->static_x_area_width = box->style.direction == CSS_DIRECTION_RTL ?
-				    x : box->width - x;
-			if (child->static_x_area_width < 0)
-				child->static_x_area_width = 0;
-		}
-		align = grid_in_flow_align(child->style.align_self);
-		if (align == CSS_ALIGN_AUTO)
-			align = box->style.align_items;
-		orthogonal_y_align = box->style.display == CSS_DISPLAY_INLINE_GRID &&
-		    (box->style.direction == CSS_DIRECTION_LTR ||
-		    box->style.direction == CSS_DIRECTION_RTL) &&
-		    box->style.column_count == 2 && box->style.row_count == 2 &&
-		    box->style.column_gap.value == 0 && box->style.row_gap.value == 0 &&
-		    box->style.columns[0].kind == CSS_TRACK_LENGTH &&
-		    box->style.columns[1].kind == CSS_TRACK_LENGTH &&
-		    box->style.rows[0].kind == CSS_TRACK_LENGTH &&
-		    box->style.rows[1].kind == CSS_TRACK_LENGTH &&
-		    box->style.columns[0].size.unit == CSS_UNIT_PX &&
-		    box->style.columns[1].size.unit == CSS_UNIT_PX &&
-		    box->style.rows[0].size.unit == CSS_UNIT_PX &&
-		    box->style.rows[1].size.unit == CSS_UNIT_PX &&
-		    column == 1 && column_span == 1 && row == 0 && row_span == 1 &&
-		    child->style.writing_mode == CSS_WRITING_VERTICAL_RL &&
-		    child->style.direction == box->style.direction &&
-		    child->style.width.unit == CSS_UNIT_AUTO &&
-		    child->style.height.unit == CSS_UNIT_AUTO &&
-		    child->style.offset[CSS_RIGHT].unit == CSS_UNIT_PX &&
-		    child->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO &&
-		    child->style.offset[CSS_BOTTOM].unit == CSS_UNIT_AUTO;
-		/* The orthogonal Y alignment applies to this frameless fixed area only. */
-		for (index = 0; orthogonal_y_align && index < 4; index++) {
-			if (box->border[index] != 0 || box->padding[index] != 0 ||
-			    child->border[index] != 0 || child->padding[index] != 0)
-				orthogonal_y_align = 0;
-		}
-		if ((child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB ||
-		    orthogonal_y_align || (orthogonal_frame_auto && column == 1)) &&
-		    (align == CSS_ALIGN_END || align == CSS_ALIGN_SELF_END ||
-		    align == CSS_ALIGN_CENTER)) {
-			child->static_y_align = align;
-			child->static_y_safe = (child->style.align_self != CSS_ALIGN_AUTO ?
-			    (child->style.flex_keywords & 128u) : (box->style.flex_keywords & 64u)) != 0;
-			if (full_block) {
-				child->static_y_area_height = available_height;
-			} else if (auto_start_row) {
-				child->static_y_area_height = row_shift;
-			} else if (auto_end_row) {
-				child->static_y_area_height = available_height - y;
-			} else {
-				for (index = row; index < row + row_span; index++) {
-					child->static_y_area_height += grid->rows[index];
-					if (index + 1 < row + row_span)
-						child->static_y_area_height += row_gap;
-				}
-			}
-			if (child->static_y_area_height < 0)
-				child->static_y_area_height = 0;
-		}
-		/* Explicit insets use this definite Grid area as their containing block. */
-		if (explicit_inset) {
-			child->static_grid_area = 1;
-			child->static_x_area_width = 0;
-			for (index = column; index < column + column_span; index++) {
-				child->static_x_area_width += grid->columns[index];
-				if (index + 1 < column + column_span)
-					child->static_x_area_width += column_gap;
-			}
-			child->static_y_area_height = 0;
-			for (index = row; index < row + row_span; index++) {
-				child->static_y_area_height += grid->rows[index];
-				if (index + 1 < row + row_span)
-					child->static_y_area_height += row_gap;
-			}
-		}
+		if (!own_block)
+			grid_static_content_box(box, child, content_height);
+		else
+			grid_static_child(box, child, grid, column_gap, row_gap, shift, row_shift);
 	}
 }
 
@@ -2199,6 +2292,7 @@ grid_abspos_areas(
 			if (child->static_y_area_height < 0)
 				child->static_y_area_height = 0;
 		}
+		grid_static_alignment(box, child);
 	}
 }
 

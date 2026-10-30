@@ -56,6 +56,8 @@
 
 **WS291 の PowerVR の目標（2026-10-30 ユーザーの決定）**: Linux の PowerVR の driver は実用の水準でないので、Linux の基準に拘らない。Linux（NVK）の RTX 2070 で 50 fps だった scene-5000（qs40 × 5000、1920x1080）を、カタログの FP32 の比（約 392 倍、VF2 の GPU は 594 MHz）で割り、qs40 × 13・1920x1080 で 50 fps 以上を p020 の受け入れにする。
 
+**OS の名前（2026-10-31 ユーザーの決定）**: OS 名は zedBSD に決定（仮決めではない）。Keiland・libkeiland の名前は残す。変える時はユーザーが改めて伝える。
+
 ### 統合の注意
 
 <!-- master:merge:start -->
@@ -76,7 +78,8 @@
 <!-- master:focus:start -->
 - 公開は rev.5 まで（実質のベータ2）。次に何をやるかは Q1 とユーザーが整理中。「保留の WS」はその整理の対象。
 - 実装の進め方: 外部の標準仕様に基づく物と、手順に分けられる大きな仕事は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../docs/agent/spec-module-delegation.md)、Opus が設計、Sonnet 5.5 high が実装）。今の対象は WS326・WS327・WS009・WS328、次に WS296・WS297・WS329・WS330。
-- **H.264 の software の decoder**（[WS326](ws326/ws.md)）: 20 Phase cleared、全体の流れと適合の試験へ。共通部分は H.265 でも使える汎用の名前にする（ユーザー）。
+- **H.264 の software の decoder**（[WS326](ws326/ws.md)）: 2026-10-31 ユーザーから、libmedia の実装の WS を昼までに終わるよう優先度を上げてスケジュールする、という趣旨の指示を受けた。Q1 が P3 の列から外して直に回す（p015・p017 → p019 → p021 → p022・p023 → p024・p026 → p025）。共通部分は H.265 でも使える汎用の名前にする（ユーザー）。
+- **ユーザーの不在の間（2026-10-31 未明〜昼）**: 2026-10-31 ユーザーから、設計だけ進められる WS は設計を、実装できる WS は実装だけでも、試験できるなら試験も進める、という趣旨の指示を受けた。
 - **文書**（[WS009](ws009/ws.md)）: /dev/gpu の UAPI の文書（DOC-54）は完成、残りは build・boot の再現だけ。
 - **GPU の描画の速さ**（[WS291](ws291/ws.md)）: RDNA は Linux と同等、NVIDIA は scene-5000 で NVK と同等（49.5〜49.7 fps）、50 fps を明らかに超える改善と desktop の測り直しが残り。
 - **インストーラ**（[WS307](ws307/ws.md)）: app と通しの試験は済み、残りは sleep の QEMU、GTK4 のセルフビルド、firmware 変数の driver、規約。
@@ -96,17 +99,11 @@
 ### ユーザーの未決
 
 <!-- master:open-decisions:start -->
-- WS299 の継続（P1 の report: ws299/ws.md の「結果（2026-10-28 21:50）」）。担当の外で見つけた物の扱い: amd64 の idle（C1 だけ）・HWP・P/E core の置き方（CPU が Debian の 70〜90%）、clock_gettime に vDSO が無く 1 ms 刻み、main から return した時に stdout が flush されない、libc の memcpy の続き（大きな copy・memset・build の flag -fno-builtin -Os）。
-- kernel の PS/2 の aux: mouse が無いのに node を作り、open のたびに 約 80 ms 待って EIO（src/kern/platform/pcat.c の drv_pcat_ps2_8042_init の辺り）。Bug にするか、いつ直すか。
+- WS299 の継続（2026-10-31 ユーザー: 5330 が空いたらどの担当でもよいので割り当てる、q1744）（P1 の report: ws299/ws.md の「結果（2026-10-28 21:50）」）。担当の外で見つけた物の扱い（amd64 の idle・HWP・P/E core は 2026-10-31 に WS333 へ）: clock_gettime に vDSO が無く 1 ms 刻み、main から return した時に stdout が flush されない、libc の memcpy の続き（大きな copy・memset・build の flag -fno-builtin -Os）。
 - P4（q1660）が拾った候補: WS162 を canceled にするか（WS172 に吸収）、WS279 p009（ライセンスと類似性の監査）の担当、P4m の時々の失敗（T1-691）の Bug、nvrtx.disp.own の既定、pci-msi-qemu.c（CONFIG_KERNEL_TEST_CHECKPOINTS の唯一の config が消えた）を残すか、master-design-policy.md へ移す候補 約 25 件（各 WS の ws.md に原文）。retained の 41 WS は source の comment の掃除の Queue の後に片付ける。
-- 名前の変更（2026-10-28 ユーザー「…KeiというOS名を削除して、zedBSDに統一します。インストーラだけでなくすべてに影響します。…」、WS307 の Phase）: Keiland・libkeiland は残す、OS 名は zedBSD に仮決め。
-- 保留の WS の整理（以前のベータ3・4 の中身を含む）。Q1 とユーザー。
-- WS304: Raspberry Pi OS で同じ HAT・FFC・NVMe の link を見るか（ハードの切り分け）。
-- WS306: ゲーム最適化の環境変数の名前と書式、知らない option の扱い（p001 の設計で推しを示す）。
 - WS282〜WS285: 実装を始める時期（ユーザー「設計だけ残してラップアップして、後日実装することにします。」）。再開の時に WS282 の試験の画面を出す PC（D11）と買う webcam（D12）。
-- WS286 の後の物: openXC7 の host への導入。LLVM の cache の asset を GitHub の release に upload してよいか（toolchain の変更の時に確かめる）。
 - BUG-345（Pi 5 の click が画面に出ない窓）: 再発したら再起動の前に Q1 に知らせてもらう。
-- 以前からの物: UEFI の loader の GOP の mode の選び方、BUG-222（ue0 の SCP が約 10 Mbps、tracking）、WS153 U2〜U15（ユーザーが検討中、聞かない）。
+- 以前からの物: UEFI の loader の GOP の mode の選び方、WS153 U2〜U15（説明を cockpit に足した、2026-10-31）。BUG-222 は 2026-10-31 に試験を流して閉じる（q1747）。
 <!-- master:open-decisions:end -->
 
 ### 止まっている物
@@ -122,7 +119,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-371 · q1732 · WS333 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-377 · q1750 · WS334 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -168,9 +165,8 @@ BUG-371 · q1732 · WS333 · KL_VERSION 105。使う前に衝突を確かめる�
 | --- | --- | --- | --- | --- |
 | [WS299](ws299/ws.md) | MG004 | 5330 の NVMe の読み書きを速くする（512 MiB の崖、転送・queue・readahead）（2026-10-27 ユーザー） | incomplete | p001〜p003・p009 cleared（raw の読み 583 MB/s ≒ Debian の 50%）。受け入れは Debian の 95% 以上、HMB はやる（ユーザー）。q1634（P1）で p004 raw の先読み → p005〜p008 2026-10-30 ユーザー「WS299はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の後 |
 | [WS300](ws300/ws.md) | MG003 | NVMe と VMD の低電力（S0 idle の VMD の suspend・NVMe の状態、APST・ASPM・LTR）（2026-10-27 ユーザー） | incomplete（p001 cleared、p002〜p005 実装済み・試験未実施、branch agent/p6-ws300 は 5330 の試験の後に merge） | p006（5330、WS052 p014 と一緒）。Q300-6（_OSC 無しの ASPM）はユーザーの判断待ち |
-| [WS301](ws301/ws.md) | MG004 | CPU の DVFS と P/E core の相対性能の枠組み（UAPI は /dev/thermal、HAL は変えない、HWP の無い CPU も P-state を driver で）（2026-10-27・29 ユーザー） | planning | 設計 第 3 版の改訂 2（P5）、review の minor の反映と再 review、約 25 LW |
+| [WS333](ws333/ws.md) | MG004 | /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）。WS301・WS303 を統合（2026-10-31 ユーザー） | planning | p001 統一の設計（P5）、p002 amd64 の idle の MWAIT（P1） |
 | [WS302](ws302/ws.md) | MG006 | デスクトップスレッドバランサ DTB（CONFIG_DTB、sched への hint）（2026-10-27 ユーザー） | planning | p001 検討（WS301 p001 の後）、約 32 LW |
-| [WS303](ws303/ws.md) | MG004 | 熱と fan（/dev/thermal・/sbin/thermal、strategy performance・balanced・powersave・manual、fan は上げるだけ、非常の停止）（2026-10-27・29 ユーザー） | planning | 設計 第 5 版（P5）、design-reviewer の後に Q303-15〜19、約 35 LW、passive は WS301 に依存 |
 | [WS304](ws304/ws.md) | MG003 | Raspberry Pi 5 の外の PCIe（pcie1、M.2）と NVMe（2026-10-27 ユーザー、実機の試験はまだ） | incomplete | p001・p002 cleared（e616b4128、host 試験・build のみ）、p003 の実機は新しい SwitchBot の後、HAT の型番をユーザーに確認 |
 | [WS305](ws305/ws.md) | MG006 | デスクトップの GPU の passthrough の試験環境（Linux＋VFIO＋QEMU、素の起動と使い分け）（2026-10-27 ユーザー） | incomplete（再開待ち） | P4 はラップアップ（2026-10-27）。script と guest の image は用意済み、host（10.0.10.3）では未着手。再開は ws.md の「状態と再開点」 |
 | [WS306](ws306/ws.md) | MG006 | GPU の driver の枠組みの「ゲーム最適化」の UAPI（ON/OFF と option の文字列、GPU の名前と driver の版の取得）（2026-10-27 ユーザー） | planning | p001 の設計（使用量が戻ってから） |
