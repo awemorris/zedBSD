@@ -352,7 +352,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1732 / q1732-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-bug373`・branch `agent/p7-bug373`、QEMU） | [BUG-373](bugs/BUG-373.md)・[BUG-371](bugs/BUG-371.md)・[BUG-372](bugs/BUG-372.md) | 今日の変更による network の退行（Q1 の判断、AGENTS.md の Bug の扱い） | in-progress |
+| q1732 / q1732-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-bug373`・branch `agent/p7-bug373`、QEMU） | [BUG-373](bugs/BUG-373.md)・[BUG-371](bugs/BUG-371.md)・[BUG-372](bugs/BUG-372.md) | 今日の変更による network の退行（Q1 の判断、AGENTS.md の Bug の扱い） | cleared（30fd47a4f・157a69cc0・c5a5e14b8・cb2f410a4、main 52aa284ba。BUG-371・372・373・375 closed、VF2 の実機で確かめた） |
 
 ## 2026-10-31: WS291 p020 の続き（P2、q1733）
 
@@ -420,4 +420,12 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1753 / q1753-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-bugs`・branch `agent/p4-bugs`、QEMU と host、image は /tmp） | [BUG-351](bugs/BUG-351.md)・[BUG-349](bugs/BUG-349.md)・[BUG-362](bugs/BUG-362.md)・[BUG-368](bugs/BUG-368.md)・[BUG-359](bugs/BUG-359.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
+
+## 2026-10-31: WS333 の実装の始め（q1754）
+
+2026-10-31 ユーザーから、不在の間は実装できる WS は実装だけでも進め、試験できるなら試験もする、という趣旨の指示を受けた。Q333-1〜7 は推しで進める（CPU の道は問いを待たない）。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1754 / q1754-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333`・branch `agent/p7-ws333`、host と build） | [ws333](ws333/ws.md) p003 → p006 | kernel の口の header の案と review、cpuperf の枠組みの kernel の実装と host 試験。UAPI（p004）は作らない | in-progress |
 

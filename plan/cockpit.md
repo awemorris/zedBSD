@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 02:51（Q1）
+最終更新: 2026-10-31 02:55（Q1）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS318](ws318/ws.md) | libmedia の作り直し（Vulkan の device の共有・codec の指定・encoder・カメラ・libavcodec の内部の fallback） | q1752: p001 設計（design-reviewer と問いの一覧まで） | WS306 の設計は済み（main 843847185、問い Q306-7・9 は下の 0b）。WS326 の後にすぐ実装に入れるよう先に設計 |
 | P6 | Bug・[WS291](ws291/ws.md) | BUG-370（Photos）と RTX の CPU の費用 | 起動（q1740）。BUG-370 の直し（QEMU） | WS291 p014: 命令の記録の段と全画面の copy を減らす（10.0.10.3） |
-| P7 | Bug | network と VF2 と compositor の Bug | BUG-371 の QEMU の確かめ、BUG-375（game mode の後に compositor が落ちる）の解析 | 直し → VF2（P2）と 10.0.10.3（P3）で確かめ |
+| P7 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1754: p003 kernel の口の header の案と review → p006 cpuperf の枠組み（kernel、host 試験） | p011（x86 の CPU の driver）・p014（5330 の受け入れ）へ。BUG-371・372・373・375 は直して closed |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
 Sonnet の実装の担当（標準廉価実装手順）: S-p019（[WS326](ws326/ws.md) p019 再構成、02:3x 起動）。p015・p017 は cleared。
@@ -84,9 +84,9 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 
 | Bug | 中身 | 状態 |
 | --- | --- | --- |
-| [BUG-373](bugs/BUG-373.md) | main の kernel の Wi-Fi の ioctl の検査の順の誤りで、古い userland の networkd が EINVAL を受け network が上がらない | 直しを main に merge（QEMU で確かめた）。実機（VF2・10.0.10.3）で確かめてから閉じる |
-| [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking を飛ばす | 直しを main に merge、QEMU で確かめた（Wi-Fi が失敗しても有線が上がる）。実機で確かめてから閉じる |
-| [BUG-372](bugs/BUG-372.md) | VF2 の serial の console が入力を受けない（元から未実装） | 直しを main に merge、VF2 の実機の確かめ待ち |
+| [BUG-373](bugs/BUG-373.md) | main の kernel の Wi-Fi の ioctl の検査の順の誤りで、古い networkd が EINVAL を受け network が上がらない | closed（VF2 の実機で確かめた） |
+| [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking を飛ばす | closed（VF2 の実機で確かめた） |
+| [BUG-372](bugs/BUG-372.md) | VF2 の serial の console が入力を受けない（元から未実装） | closed（VF2 の実機で確かめた） |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が EBUSY で終わる（VF2） | closed（P7: 原因は GPU の kernel の命令の buffer が満杯の時に待たずに失敗する事。待つ形に直し、VF2 で 8 回とも落ちず。main 2c5897f26） |
 | [BUG-374](bugs/BUG-374.md) | RTX の mouse の cursor の色が他の GPU と逆 | 診断の kernel を用意済み（矢印の色で原因が分かれる）。ユーザーの目視待ち（下の「拾える試験」） |
 | [BUG-370](bugs/BUG-370.md) | Photos で保存すると全面表示が閉じる | P6 が直す（q1740） |
@@ -181,7 +181,6 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **5330 の電源の入れ直し（起きたら）**: 2026-10-31 02:2x、P1 が main の kernel で起動した後に応答しない（遠隔の電源が無い）。入れ直すと Debian に戻る。古い userland と新しい kernel の組み合わせで network が上がらないだけの見込み（BUG-373・371）。P1 はそれまで QEMU で WS299 を進める。
 - **Pi 5（2026-10-31 の午後にユーザーが行う予定）**: image は出来ている（P4、main d26c657c7＋Pi 5 の GPU の branch、戻しの kernel 入り）: `/home/awe/zedBSD-worktrees/p4-ws291pi/build/ws291-p021c/rpi5-p021.img`（sha256 dcadd719…）。Q1 が SD に書く（`sudo dd … bs=4M conv=fsync`）か、ユーザーが書く。起動したら Q1 に知らせると担当が SSH で GPU の clock と fps を測る。起動しなければ config.txt の `kernel=vmunix-fallback`。
 - **ODROID-C5（2026-10-31 の午後、VF2 の最適化の後）**: 試験の image で HDMI に画面が出なかった（ユーザー）。serial（今は VF2 につないでいる）を C5 につないで、起動のどこで止まるかを見る。Q1 が担当（WS313）を起動して声をかける。
-- VF2: 新しい kernel で画面と serial の login（BUG-372）。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
 
 ## 決まった事
