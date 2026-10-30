@@ -103,8 +103,12 @@ Queue: q1696 / q1696-i01（P3）
 | p006-a1 | 案 A（4575db11d、kernel の sha256 は d1 と同じ d10d30aeb406c145: 説明だけの差） | 2367.2 | 2372.4 | 1616.1 | 2286.3 | 923648（recv だけ 653312）。この host（相手の perf-peer）が load 19 の間に測った |
 | p006-a2 | 案 A（a1 と同じ kernel） | 2349.9 | 2366.7 | 1538.5 | 2337.2 | 886784。host の load 20〜40（他の担当の build） |
 | Linux p006-lin1 | r8152（`5330-linux-both.sh`、同じ load） | — | — | 2253.7 | 2310.8 | — |
+| p006-b1 | p006 の前（c90327de3 の 3 file、128 KB 固定・ring 256、build/ws315-p006-base-vmunix） | 2371.6 | 2334.7 | 2285.5 | 1546.7 | 131072。load 40 → 14 |
+| p006-ag10 | 案 A ＋ 倍率 1.25 倍（tcp.c の 16U → 10U を一時に、build/ws315-p006-ag10-vmunix） | 測り中 | | | | |
 
 - 同時の送りの接続（net.tcpstats）: d1 retransmit 181・fast 14、a1 917・53、a2 483・57（in flight 約 650 KB、cwnd 約 820 KB、srtt 約 2.1 ms）。案 A では ring でなく損失（CUBIC の cwnd）が律している。損失の場所は未確認（host の ixgbe の ATR の入れ替え、host の load の影響の見込み）。
+  見立て（b1 の後）: 案 A でも受けの窓が 900 KB まで広がると、switch の 5330 向きの queue（窓 − BDP）で送りの往復が 2 ms に延び、損失の後の CUBIC の戻りが遅い。同時の受けは窓 200〜374 KB で足りる（g10 の 2356）。
+  そこで「案 A ＋ 1.25 倍」（ag10）を測る。**未 commit の一時の変更: src/kern/net/tcp.c の TCP_RECEIVE_AUTO_GROWTH_EIGHTHS 16U → 10U**（再開したら `git diff` で確かめ、決めるまで commit しない）。
   host の load を揃えて比べるため、p006 の前の kernel（c90327de3 の 3 file を一時に置いて build、戻した。build/ws315-p006-base-vmunix）を同じ時間帯に測る。
 
 - d1 の他: ping・MTU・down/up 3/3、5330-run PASS、Debian に戻った（uname で確かめた）。pool の使用の最大 1074/4096、alloc の失敗 0。ue0 の TX dropped 550183（g10 は 152516、送りが driver の TX の queue を溢れさせた分、SACK で回復）。証拠 build/ws315-hw/p006-d1/、plan/tools/hw5330/evidence/ws315-p006-d1.md。
