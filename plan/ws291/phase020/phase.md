@@ -3,7 +3,7 @@
 # ws291-p020 PowerVR（VisionFive 2）: model の 50 fps
 
 - 親: [WS291](../ws.md)。
-- 状態: in-progress（2026-10-31 01:1x P2 q1726-i01: direct scanout の c13 42.35 fps（目標 50）。前の「direct」は合成だった。下の「q1726-i01」節と「訂正」節。権限の判定で板の回帰の前に止まった）。前: in-progress（2026-10-30 16:50 P3、q1715-i02: 表示が出て、driver の欠け（instance rate・discard・vkCmdCopyBuffer・mip の transfer・direct scanout の BLOB）を
+- 状態: in-progress（2026-10-31 01:5x P2 q1733-i01: SLC を既定にし（回帰 PASS）、present の copy を geometry が待たない形にして direct scanout の c13 45.8 fps・c1 86.9 fps（目標 50）。下の「q1733-i01」節）。前: in-progress（2026-10-31 01:1x P2 q1726-i01: direct scanout の c13 42.35 fps（目標 50）。前の「direct」は合成だった。下の「q1726-i01」節と「訂正」節。権限の判定で板の回帰の前に止まった）。前: in-progress（2026-10-30 16:50 P3、q1715-i02: 表示が出て、driver の欠け（instance rate・discard・vkCmdCopyBuffer・mip の transfer・direct scanout の BLOB）を
   埋めて mview の qs40 が描けた。目標の copies 13 は 26.6 fps（目標 50）。profile の途中。下の「q1715-i02」節）。
 - 承認: ユーザー（2026-10-30 原文）「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」。VF2 の割り当て: Q1（2026-10-30）「VF2 を P7 に割り当てます。」。
 - 未決（ws.md）: 50 fps の基準（Linux との比較か、絶対値か）。VF2 の Linux の PowerVR の driver は今の板の SD に無い。Q1 がユーザーに (a) Linux の基準を立てる、
@@ -238,3 +238,57 @@ P3 の基点（cb03c9983 ＋ 差分、p15、scratch の tree に同じ直し）�
   4. BUG-375 が直るまで、direct の計測は COPIES を 1 つずつ別の run（compositor を毎回起こし直す）にする。
 - 再開の command: `VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=14C19FA80F86 OLD=p2old TIMING=1 KEEP=1 COPIES=13 sh plan/ws291/tests/vf2-mview.sh OUT build/ws291/m1`
   （build: `make ZEDBSD_CONFIG=plan/ws291/tests/config-vf2.mk BUILD=build/ws291/m1 ZEDBSD_TEST_CPPFLAGS="-DPOWERVR_SUBMIT_TIMING=1 -DPOWERVR_DEVICE_MEMORY_CACHED=1" …/vmunix …/bin/wayland …/bin/mview`）。serial: /dev/serial/by-id/usb-FTDI_TTL232R_FTBTJOV8-if00-port0。
+
+### q1733-i01（2026-10-31 01:1x〜01:5x P2、worktree p2-ws291v、main 095ed8acb を merge した 50487dbe4 の上）
+
+- 承認: 2026-10-30 ユーザーの指示（WS291 の PowerVR の最適化を P2 で）。2026-10-31 ユーザーから、P2 が VF2 で SSH・sudo を使って kernel・userland の入れ替えと計測の program の実行を続けてよい、という趣旨の指示（Q1 経由）。bug-analyzer の subagent の利用の許可（Q1 経由）。
+- 道具（c8f69f7fa）: `plan/ws291/tests/vf2-regress.sh OUT BUILD`（`KERNEL=`・`KEEP=1`・`OLD=p2old`。板の kernel を入れ、~/p7 に置いた tree の program を root で: vkmatrix・`-p 3`・`-r 3`・vkcoherency・vkcompute・desktop（compositor ＋ Files の desktop ＋ Terminal、keiland-shot の PNG）、step ごとの kernel の fault・lost の行、/boot/boot0/log の最新の名で再起動の有無）、`config-vf2-shot.mk`（config-vf2.mk ＋ 画面の capture と keiland-shot）。
+  `vf2-mview.sh` は compositor の log を丸ごと OUT/wayland.log に回収する（BUG-375 の解析のため）。
+
+#### 1. SLC（device-local の Vulkan memory を SLC に通す）を既定に
+
+- 板の回帰（build/ws291/run/r-s0・r-s1・r-s2・r-s3/summary.txt）: SLC なし（s0、kernel 3264574974）・あり（s1、160846527）・下の 2 を足した物（s2、3547555133）・既定 1 と下の直し（s3、83139905）の 4 つとも
+  vkmatrix 109/109、`-p 3` PASS、`-r 3` 327/327、vkcoherency PASS、vkcompute 4096/4096、desktop の compositor の error 0。kernel の fault・lost・reset の行 0、再起動 0。desktop の PNG は 4 つとも同じ cksum（518389155、build/review/ws291/p020-s3-desk.png）。
+- 10-21 の再起動の原因の調べ（bug-analyzer、code を読むだけ）: 平常の道（参照 → unmap → SLC の flush → free）に欠けは無い。欠けは異常系: fault・flush の失敗の時に flush 無しか未完で page を kernel に返す、時間切れの flush の command が後で走る、isolate・abandoned の session の buffer。
+  firmware の command（KCCB 105、data の配置）は Linux v7.3 の pvr_rogue_fwif.h と一致。log 無しの再起動の第一候補は「flush の完了を早く取り違えて解放の後に書き戻しが落ちる」（未確かめ）。原因は確定していない。
+- 直した物（c8f69f7fa、driver の中だけ、HAL は変えない）: fault か flush の失敗の時は flush した buffer を kept に回し reset（core の電源を落とす）の後に解放、flush の失敗は quarantine、flush 済みの buffer は kernel でなく pool に戻す（gpu_cached=0。後の書き戻しが kernel の memory に落ちない）、cached の memory に blob（CPU・display の view）を作らない（EINVAL）。
+  `POWERVR_DEVICE_MEMORY_CACHED` の既定を 1 に（interface.h、source の comment の日付の経緯も外した）。
+- 未実施: isolate・abandoned の session の buffer を kept に回す直し（cached=0 でも同じ既存の道）、flush の後の SLC_STATUS0 の pending の読み（GPU の電源が落ちている時の register の読みを避けて見送った）、解放の多い負荷と page の pattern の照合、vkreset との組み合わせ。
+
+#### 2. present の copy を geometry が待たない
+
+- これまで transfer の後の render は geometry から transfer を待った（次の frame の TA が前の frame の present の copy（約 5 ms）の後に始まった）。
+  直し（c8f69f7fa）: render の 3D（partial render と fragment）は最後の transfer を待ち、geometry は transfer が buffer を書いた時（vkCmdCopyBuffer・copy image to buffer、session に最新の値を覚える）と、job の vertex shader が image・sampler を読むか store する時（compiler の `program.stores` を足した）だけ待つ。
+  render-kick-layout の sequence に 3D だけの waits を足した（partial render の fence に geometry の waits・3D の waits・geometry の完了、fragment の fence に 3D の waits・geometry の完了）。試しの switch RENDER_TRANSFER_WAIT_TRIAL は外した。
+- host 試験: p010 全 PASS（kick-host-test 87、3D の waits の 5 件を足した。selftest-host は 1 回目に host の負荷 45 で時間の判定が外れ、再実行で PASS）、p010-compiler 3062 PASS・group 29 PASS。build（s1・s2・s3・d1）warning 0。
+
+#### 計測（direct scanout、1920x1080、qs40、mailbox 4 枚、TIMING=1、SPIN 12、COPIES は 1 つずつ別の run。build/ws291/run/v-*/summary.txt）
+
+| kernel | c1 fps | c13 fps | c13 frame ms | c13 fence ms | c13 gpu ta ms | c13 gpu 3d ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| s1（SLC の試し、2 なし） | 83.41 | 42.30 | 23.59 | 20.97 | 15.2 | 6.7 |
+| s2（s1 ＋ 2） | 86.92 | 45.85 | 21.77 | 18.99 | 13.2 | 7.0 |
+| s3（SLC 既定 ＋ 直し ＋ 2） | 86.94 | 45.78 | 21.80 | 18.98 | 13.1 | 6.7 |
+| d1（s2 ＋ BUG-375 の診断） | 86.93 | 45.84 | 21.77 | 18.97 | — | — |
+| s3、`--inflight=2`（参考） | — | 43.42 | 22.98（min 10・max 30） | 20.70 | — | — |
+
+- 見た目: s3 の c13 を window（合成）で撮った PNG（build/review/ws291/p020-s3-c13-window.png）で 13 体の並び・cutout の髪・崩れなしを P2 が目視。direct scanout の間は keiland-shot が `ERROR inactive`（game mode では撮れない）。
+- 残りの差（c13 で 21.8 ms → 20 ms に約 1.8 ms）: frame ≒ CPU（acquire 0.15・record 0.34・submit 1.30 ms、この間 GPU は止まる）＋ TA 13.1 ＋ 3D 6.7。TA は copy と重ならない時 約 11 ms（前の p9）で、copy（1080p、約 5 ms、3D の hardware）と重なる帯域の競合で 約 2 ms 延びる。
+  kernel の submit の中は job build 162 µs・map 80・kick 19・mmu flush 2 回で 約 0.35 ms（libvulkan の submit 1.3 ms の残りは wire と ioctl）。copy を無くす zero copy（WS309 p015、範囲の外）で TA の競合 約 2 ms が消える見込み（未確かめ）。`--inflight=2` は速くならず（43.4、frame が 10〜30 ms に揺れる。原因は未調べ）。
+
+#### BUG-375 の資料（P7 へ、Q1 経由）
+
+- 取り直した compositor の log（丸ごと、順のまま）: build/ws291/run/v-s1-c1/wayland.log・v-s1-c13・v-s2run-c1・v-s2run-c13（各 `KWL FAILED site=window_mode` 2 回）。mview の出力は同じ dir の c1.txt・c13.txt。
+  並び（v-s1-c1）: `KWL SCANOUT direct=0 reason=no-window` → `KWL STARTUP step=output-swapchain ms=34` → **compositor の** `VULKAN kernel error errno=17 device lost`（zedBSD の errno 17 は EBUSY）→ `KWL CURSOR_PLANE unavailable step=swapchain result=-4` → `KWL VULKAN_ERROR operation=targets result=-4` → `KWL MODE_ERROR errno=5` → `KWL FAILED site=window_mode`。mview の c1.txt にも同じ errno=17 の行がある。
+- 診断の build（build/ws291/d1、CONFIG_POWERVR_DEBUG=y、display.c の EBUSY の 6 箇所に関数名の行、libvulkan の device lost の行に context.c の行番号。plan/ws291/tests/bug375-diag.patch、tree からは戻した）で c1 → c13 を 1 つの compositor で流したが、この run では再現しなかった（build/ws291/run/d1-c1c13、lease 1〜5 の claim・release の行は c1.kernel・c13.kernel・summary.txt）。s3 の 2 run でも再現なし。再現は s1・s2 の 4 run の全部。
+
+#### 板（01:5x）
+
+- 元に戻して照合: /boot/boot0/vmunix 2825517684（vmunix.p2old も 2825517684）、zedbsd.cfg 632416842、login の行 0。userland は触っていない（program は ~/p7 から LD_LIBRARY_PATH で）。
+- 板に残る物: 区画 3 の p2swap・zedbsd.cfg.p2orig・vmunix.p2old、~/p7（program・library・qs40・regress.sh・r-*.txt・desk.png）。
+
+#### 再開点（2026-10-31 01:5x P2）
+
+- 今: c13 45.8 fps（direct、目標 50）。commit c8f69f7fa（SLC 既定と異常系の直し、transfer の待ちの分け、道具）。
+- 次の手の候補: (1) zero copy（WS309 p015、範囲の外: Q1 の判断）で copy と TA の競合を無くす。(2) submit の CPU（frame あたり GPU が止まる 約 1.8 ms）を縮める: libvulkan の submit 1.3 ms の内訳（wire の encode・ioctl）、kernel の job map 80 µs。(3) `--inflight=2` が遅くなる理由。(4) SLC の残りの直し（isolate・abandoned の buffer、解放の多い負荷での照合）。
+
