@@ -31,7 +31,7 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | p023 | 統合・Bug の候補の一覧 | cleared（BUG-364・BUG-365 を登録） |
 | p024 | 正確さの review（Opus） | cleared（12 file を直した、BUG-366 と BUG-365 の追加） |
 | p025 | managed-wlan.md の書き直し（Opus） | in-progress（P1） |
-| p026 | build の文書・索引・Status 行（Sonnet） | in-progress |
+| p026 | build の文書・索引・Status 行（Sonnet） | cleared |
 | p027 | 文書の検査の script を今の規則に直し plan/tools へ（Sonnet） | planned（p025・p026 の後） |
 | p028 | clean build・QEMU 起動の再現、WS001 との照合（Opus） | planned |
 
