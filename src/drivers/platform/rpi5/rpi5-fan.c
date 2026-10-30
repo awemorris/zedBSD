@@ -13,7 +13,7 @@
  * degree.  The board's four-pin fan connector is driven by channel 3 of
  * RP1's second PWM block on RP1's GPIO 45; its speed is read back from a
  * register of the same block.  This file's thread reads the temperature
- * every polling period, lists it in sysctl hw.thermal, and sets the fan's
+ * every polling period, pushes it to the thermal core, and sets the fan's
  * level from the zone's active trip points and cooling maps, as Linux's
  * pwm-fan driver does with the same tree.  A temperature that cannot be
  * read runs the fan at its highest level.
@@ -27,13 +27,11 @@
 #include <kern/device-io.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
-#include <kern/lock.h>
 #include <kern/pmem.h>
 #include <kern/sched.h>
-#include <kern/sysctl.h>
+#include <kern/thermal.h>
 #include <kern/thread.h>
 #include <uapi/errno.h>
-#include <uapi/sysctl.h>
 
 #include <stdint.h>
 
@@ -166,14 +164,13 @@
 #define RP1_CLK_AUXSRC_XOSC		2U
 #define RP1_PWM_CLOCK_HZ		50000000U
 
-/* A second in nanoseconds, and a millisecond. */
+/* A second in nanoseconds. */
 #define RPI5_NS_PER_SECOND		1000000000U
-#define RPI5_NS_PER_MS			1000000ULL
 
 /* The polls after a level change before the fan's speed is logged. */
 #define RPI5_FAN_SETTLE_POLLS		5U
 
-/* The name of the sensor in hw.thermal. */
+/* The name of the sensor in the thermal core. */
 #define RPI5_FAN_SENSOR_NAME		"bcm2712 cpu-thermal"
 
 /*
@@ -194,9 +191,9 @@ struct rpi5_fan_trip {
  *
  * drv_rpi5_fan_start() fills everything before the thread starts; after
  * that only the thread changes the trips and the fan's level.  sensor is
- * NULL without a readable sensor, pwm NULL without a fan.  lock (with
- * interrupts off) protects entry, which the thread writes and the sysctl
- * copies.
+ * NULL without a readable sensor, pwm NULL without a fan.  core_sensor is
+ * the thermal core's handle the readings are pushed through, NULL when
+ * the core refused the sensor.
  */
 struct rpi5_fan_state {
 	volatile uint8_t *sensor;
@@ -221,8 +218,7 @@ struct rpi5_fan_state {
 	unsigned level;
 	unsigned settle;
 	int sensor_failed;
-	struct spinlock lock;
-	struct thermal_entry entry;
+	struct kern_thermal_sensor *core_sensor;
 };
 
 /*
@@ -268,7 +264,6 @@ static void set_level(unsigned level);
 static uint32_t read_rpm(void);
 static void poll_once(void);
 static void fan_thread(void *argument);
-static int thermal_copy(void *context, struct thermal_entry *entries, unsigned capacity, unsigned *count);
 
 /*
  * Starts the temperature sensor and the fan.
@@ -293,7 +288,6 @@ drv_rpi5_fan_start(
 	}
 
 	/* The Pi 5's own zone and fan until the tree says otherwise. */
-	spin_init(&rpi5_fan.lock, LOCK_RANK_DEVICE, "rpi5 thermal");
 	set_defaults();
 
 	/* Finds the fan, which tells the zone's maps which device is its. */
@@ -314,6 +308,17 @@ drv_rpi5_fan_start(
 	if (rpi5_fan.sensor == NULL && rpi5_fan.pwm == NULL)
 		return ENODEV;
 
+	/* Registers the sensor with the thermal core; each reading carries the critical level. */
+	if (rpi5_fan.sensor != NULL) {
+		error = kern_thermal_sensor_register(
+			RPI5_FAN_SENSOR_NAME,
+			KERN_THERMAL_KIND_ZONE,
+			KERN_THERMAL_SENSOR_CPU,
+			&rpi5_fan.core_sensor);
+		if (error != 0)
+			kern_logf("rpi5-fan: the temperature is not registered (%d)\n", error);
+	}
+
 	/* The first reading, and the fan's level from it (the highest without one). */
 	error = read_temperature(&milli_celsius, &status);
 	record_temperature(error, milli_celsius);
@@ -323,13 +328,6 @@ drv_rpi5_fan_start(
 			rpi5_fan.level = choose_level(milli_celsius);
 		set_level(rpi5_fan.level);
 		rpi5_fan.settle = RPI5_FAN_SETTLE_POLLS;
-	}
-
-	/* Lists the sensor in hw.thermal. */
-	if (rpi5_fan.sensor != NULL) {
-		error = kern_thermal_register(thermal_copy, &rpi5_fan);
-		if (error != 0)
-			kern_logf("rpi5-fan: the temperature is not listed (%d)\n", error);
 	}
 
 	/* Says what was found, in one line. */
@@ -385,12 +383,6 @@ set_defaults(
 	for (index = 0; index < RPI5_FAN_LEVEL_COUNT; index++)
 		rpi5_fan.levels[index] = rpi5_fan_default_levels[index];
 	rpi5_fan.level_count = RPI5_FAN_LEVEL_COUNT;
-
-	/* The sysctl's entry, its values unknown until the first reading. */
-	kern_memset(&rpi5_fan.entry, 0, sizeof(rpi5_fan.entry));
-	kern_strncpy(rpi5_fan.entry.name, RPI5_FAN_SENSOR_NAME, sizeof(rpi5_fan.entry.name) - 1U);
-	rpi5_fan.entry.kind = THERMAL_KIND_ZONE;
-	rpi5_fan.entry.flags = THERMAL_FLAG_CPU;
 }
 
 /* Finds the AVS monitor's temperature sensor and maps the monitor's registers. */
@@ -999,35 +991,29 @@ read_temperature(
 	return 0;
 }
 
-/* Keeps a reading (or its absence) for hw.thermal, with the time it was made. */
+/*
+ * Pushes a reading (or its absence) to the thermal core, with the zone's
+ * critical level (none without one).
+ */
 static void
 record_temperature(
 	int error,
 	int32_t milli_celsius)
 {
-	unsigned long irq;
-	uint64_t time_ns;
-	uint32_t valid;
+	int32_t critical;
+	bool valid;
 
-	/* What the entry has: the temperature when it was read, the critical point. */
-	valid = 0;
-	time_ns = 0;
-	if (error == 0) {
-		valid |= THERMAL_HAVE_TEMPERATURE;
-		time_ns = kern_ticks_to_ms(sched_ticks()) * RPI5_NS_PER_MS;
-	}
+	/* The critical level the zone has, 0 for none. */
+	critical = 0;
 	if (rpi5_fan.has_critical)
-		valid |= THERMAL_HAVE_CRITICAL;
+		critical = rpi5_fan.critical;
+	kern_thermal_sensor_levels(rpi5_fan.core_sensor, 0, critical);
 
-	/* Publishes it to the sysctl. */
-	irq = spin_lock_irqsave(&rpi5_fan.lock);
-
-	rpi5_fan.entry.valid = valid;
-	rpi5_fan.entry.milli_celsius = milli_celsius;
-	rpi5_fan.entry.critical_milli_celsius = rpi5_fan.critical;
-	rpi5_fan.entry.time_ns = time_ns;
-
-	spin_unlock_irqrestore(&rpi5_fan.lock, irq);
+	/* The reading, valid when the sensor answered. */
+	valid = false;
+	if (error == 0)
+		valid = true;
+	kern_thermal_sensor_update(rpi5_fan.core_sensor, milli_celsius, valid);
 }
 
 /*
@@ -1212,34 +1198,4 @@ fan_thread(
 		/* Reads and sets again. */
 		poll_once();
 	}
-}
-
-/* Copies the temperature as it was last read, for hw.thermal (kern_thermal_read_t). */
-static int
-thermal_copy(
-	void *context,
-	struct thermal_entry *entries,
-	unsigned capacity,
-	unsigned *count)
-{
-	unsigned long irq;
-
-	/* The context is the board's one state. */
-	(void)context;
-
-	/* Nothing fits in no room. */
-	*count = 0;
-	if (capacity == 0U)
-		return 0;
-
-	/* The one entry. */
-	irq = spin_lock_irqsave(&rpi5_fan.lock);
-
-	kern_memcpy(&entries[0], &rpi5_fan.entry, sizeof(entries[0]));
-
-	spin_unlock_irqrestore(&rpi5_fan.lock, irq);
-
-	/* Succeeded: one entry. */
-	*count = 1;
-	return 0;
 }
