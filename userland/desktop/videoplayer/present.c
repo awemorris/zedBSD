@@ -284,10 +284,10 @@ vp_present_frame(
 			return error;
 	}
 
-	/* The image to draw into, once the compositor has given one back. */
+	/* The image to draw into, once the compositor has given one back, however long a busy compositor takes (a closed connection ends the wait with an error). */
 	started = present_clock_us();
 	present->operation = "vkAcquireNextImageKHR";
-	error = vkAcquireNextImageKHR(present->device, present->swapchain, PRESENT_TIMEOUT, present->acquired[slot], VK_NULL_HANDLE, &image);
+	error = vkAcquireNextImageKHR(present->device, present->swapchain, UINT64_MAX, present->acquired[slot], VK_NULL_HANDLE, &image);
 	present->acquire_us += present_clock_us() - started;
 	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
 		return error;

@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* How long an acquire may wait for the compositor to give an image back, in nanoseconds. */
+/* How long the last frame's work may take on the GPU, in nanoseconds. */
 #define PRESENT_TIMEOUT		10000000000ULL
 
 /* The most swapchain images the presenter takes. */
@@ -191,9 +191,9 @@ shell_present_frame(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* The image to draw into, once the compositor has given one back. */
+	/* The image to draw into, once the compositor has given one back, however long a busy compositor takes (a closed connection ends the wait with an error). */
 	present->operation = "vkAcquireNextImageKHR";
-	error = vkAcquireNextImageKHR(present->device, present->swapchain, PRESENT_TIMEOUT, present->acquired, VK_NULL_HANDLE, &image);
+	error = vkAcquireNextImageKHR(present->device, present->swapchain, UINT64_MAX, present->acquired, VK_NULL_HANDLE, &image);
 	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
 		return error;
 
