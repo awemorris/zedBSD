@@ -164,7 +164,11 @@ enum computed_property {
 
 	/* The flow-relative sizes: inline-size, block-size, then their minimums and maximums. */
 	COMPUTED_SIZE_FIRST,
-	COMPUTED_SIZE_LAST = COMPUTED_SIZE_FIRST + 5
+	COMPUTED_SIZE_LAST = COMPUTED_SIZE_FIRST + 5,
+
+	/* The corner radii: the four physical corners (as border-radius lists them), then the flow-relative ones (start-start, start-end, end-end, end-start). */
+	COMPUTED_RADIUS_FIRST,
+	COMPUTED_RADIUS_LAST = COMPUTED_RADIUS_FIRST + 7
 };
 
 /*
@@ -202,6 +206,7 @@ static int computed_overflow_axis(int own, int other);
 static float computed_zoom = 1.0f;
 
 static int computed_logical_property(const struct css_style *style, int property);
+static int computed_write_radius(const struct css_style *style, int index, struct wb_units *out);
 static int computed_write_overflow(const struct css_style *style, struct wb_units *out);
 static int computed_write_url(const struct vm_string *url, struct wb_units *out);
 static int computed_needs_quotes(const struct vm_string *family);
@@ -238,6 +243,14 @@ static const struct vm_cell_type computed_ref_type = { "computed-style", compute
  * for the life of the program.
  */
 static const struct computed_entry computed_entries[] = {
+	{ "border-top-left-radius", COMPUTED_RADIUS_FIRST + 0 },
+	{ "border-top-right-radius", COMPUTED_RADIUS_FIRST + 1 },
+	{ "border-bottom-right-radius", COMPUTED_RADIUS_FIRST + 2 },
+	{ "border-bottom-left-radius", COMPUTED_RADIUS_FIRST + 3 },
+	{ "border-start-start-radius", COMPUTED_RADIUS_FIRST + 4 },
+	{ "border-start-end-radius", COMPUTED_RADIUS_FIRST + 5 },
+	{ "border-end-end-radius", COMPUTED_RADIUS_FIRST + 6 },
+	{ "border-end-start-radius", COMPUTED_RADIUS_FIRST + 7 },
 	{ "inline-size", COMPUTED_SIZE_FIRST + 0 },
 	{ "block-size", COMPUTED_SIZE_FIRST + 1 },
 	{ "min-inline-size", COMPUTED_SIZE_FIRST + 2 },
@@ -1091,6 +1104,13 @@ computed_write(
 	/* Lengths are reported unzoomed: the zoom the element's lengths were scaled by is taken off in the numbers written. */
 	computed_zoom = style->zoom_eff > 0.0f ? style->zoom_eff : 1.0f;
 
+	/* A corner radius: its horizontal and vertical radii (one when they are alike). */
+	if (property >= COMPUTED_RADIUS_FIRST && property <= COMPUTED_RADIUS_LAST) {
+		error = computed_write_radius(style, property - COMPUTED_RADIUS_FIRST, out);
+		free(style);
+		return error;
+	}
+
 	/* A flow-relative property is the physical one it maps to here. */
 	if (property >= COMPUTED_LOGICAL_FIRST && property <= COMPUTED_LOGICAL_LAST)
 		property = computed_logical_property(style, property);
@@ -1136,6 +1156,68 @@ computed_write(
 
 	/* Succeeded: the ordinary resolved property value is complete. */
 	return 0;
+}
+
+/*
+ * Writes a corner's computed radius: the first four are the physical corners, the next four the flow-relative
+ * ones (start-start, start-end, end-end, end-start); a vertical writing mode swaps their horizontal and vertical radii.
+ */
+static int
+computed_write_radius(
+	const struct css_style *style,
+	int index,
+	struct wb_units *out)
+{
+	const struct css_length *first;
+	const struct css_length *second;
+	int vertical;
+	int block_side;
+	int inline_side;
+	int row;
+	int column;
+	int corner;
+	int swap;
+	int error;
+
+	/* A flow-relative corner is the physical one the block and inline sides name. */
+	corner = index;
+	swap = 0;
+	if (index >= 4) {
+		vertical = style->writing_mode != CSS_WRITING_HORIZONTAL_TB;
+		block_side = CSS_TOP;
+		if (style->writing_mode == CSS_WRITING_VERTICAL_LR)
+			block_side = CSS_LEFT;
+		if (style->writing_mode == CSS_WRITING_VERTICAL_RL)
+			block_side = CSS_RIGHT;
+		inline_side = vertical ? CSS_TOP : CSS_LEFT;
+		if ((style->direction == CSS_DIRECTION_RTL) != (vertical && style->writing_sideways == 1))
+			inline_side = vertical ? CSS_BOTTOM : CSS_RIGHT;
+		row = (index - 4) >= 2 ? (block_side + 2) % 4 : block_side;
+		column = (index - 4) == 1 || (index - 4) == 2 ? (inline_side + 2) % 4 : inline_side;
+		if (row == CSS_LEFT || row == CSS_RIGHT) {
+			corner = row;
+			row = column;
+			column = corner;
+		}
+		if (row == CSS_TOP)
+			corner = column == CSS_LEFT ? CSS_TOP_LEFT : CSS_TOP_RIGHT;
+		else
+			corner = column == CSS_LEFT ? CSS_BOTTOM_LEFT : CSS_BOTTOM_RIGHT;
+		swap = 0;
+	}
+
+	/* The radii, horizontal then vertical. */
+	first = &style->radius[corner][0];
+	second = &style->radius[corner][1];
+	error = computed_length(first, out);
+	if (error != 0)
+		return error;
+	if (swap || first->unit != second->unit || first->value != second->value || first->offset != second->offset) {
+		error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_length(second, out);
+	}
+	return error;
 }
 
 /* Writes a supported Grid template axis from copied actual layout values. */

@@ -77,6 +77,10 @@ enum values_shorthand {
 	SHORT_RADIUS_TOP_RIGHT,
 	SHORT_RADIUS_BOTTOM_RIGHT,
 	SHORT_RADIUS_BOTTOM_LEFT,
+	SHORT_RADIUS_START_START,
+	SHORT_RADIUS_START_END,
+	SHORT_RADIUS_END_END,
+	SHORT_RADIUS_END_START,
 	SHORT_OUTLINE,
 	SHORT_GRID_COLUMN,
 	SHORT_GRID_ROW,
@@ -293,10 +297,10 @@ static const struct values_name values_names[] = {
 	{ "-webkit-border-top-right-radius", SHORT_RADIUS_TOP_RIGHT },
 	{ "-webkit-border-bottom-right-radius", SHORT_RADIUS_BOTTOM_RIGHT },
 	{ "-webkit-border-bottom-left-radius", SHORT_RADIUS_BOTTOM_LEFT },
-	{ "border-start-start-radius", SHORT_RADIUS_TOP_LEFT },
-	{ "border-start-end-radius", SHORT_RADIUS_TOP_RIGHT },
-	{ "border-end-end-radius", SHORT_RADIUS_BOTTOM_RIGHT },
-	{ "border-end-start-radius", SHORT_RADIUS_BOTTOM_LEFT },
+	{ "border-start-start-radius", SHORT_RADIUS_START_START },
+	{ "border-start-end-radius", SHORT_RADIUS_START_END },
+	{ "border-end-end-radius", SHORT_RADIUS_END_END },
+	{ "border-end-start-radius", SHORT_RADIUS_END_START },
 	{ "outline", SHORT_OUTLINE },
 	{ "grid-column", SHORT_GRID_COLUMN },
 	{ "grid-row", SHORT_GRID_ROW },
@@ -1314,6 +1318,11 @@ css_parse_property(
 		return values_corner_radius(parse, CSS_BOTTOM_RIGHT, tokens, count, out, out_count);
 	case SHORT_RADIUS_BOTTOM_LEFT:
 		return values_corner_radius(parse, CSS_BOTTOM_LEFT, tokens, count, out, out_count);
+	case SHORT_RADIUS_START_START:
+	case SHORT_RADIUS_START_END:
+	case SHORT_RADIUS_END_END:
+	case SHORT_RADIUS_END_START:
+		return values_corner_radius(parse, 4 + (property - SHORT_RADIUS_START_START), tokens, count, out, out_count);
 	case SHORT_OUTLINE:
 		return values_outline(parse, tokens, count, out, out_count);
 	case SHORT_GRID_COLUMN:
@@ -2741,7 +2750,7 @@ values_single(
 
 	/* A corner's radius on one axis: a length or a percentage that is not negative. */
 	if (property >= CSS_PROP_RADIUS_TOP_LEFT_X &&
-	    property <= CSS_PROP_RADIUS_BOTTOM_LEFT_Y) {
+	    property <= CSS_PROP_RADIUS_END_START_Y) {
 		error = values_length(&tokens[0], 0, value);
 		if (error != 0)
 			return error;
@@ -3577,6 +3586,10 @@ values_wide_keyword(
 	case SHORT_RADIUS_TOP_RIGHT:
 	case SHORT_RADIUS_BOTTOM_RIGHT:
 	case SHORT_RADIUS_BOTTOM_LEFT:
+	case SHORT_RADIUS_START_START:
+	case SHORT_RADIUS_START_END:
+	case SHORT_RADIUS_END_END:
+	case SHORT_RADIUS_END_START:
 		/* A corner's two radii. */
 		first = CSS_PROP_RADIUS_TOP_LEFT_X + 2 * (property - SHORT_RADIUS_TOP_LEFT);
 		values_add(out, made, first, value);
