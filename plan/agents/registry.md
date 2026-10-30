@@ -6,7 +6,7 @@
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
 | P1 | phase-runner-high | ws291 p022 (q1731-i01) | `/home/awe/zedBSD-worktrees/p1-ws291i` / `agent/p1-ws291i` | in-progress（2026-10-30 起動、5330） | — |
-| P2 | phase-runner-high | ws291 p020 (q1726-i01 返却) | `/home/awe/zedBSD-worktrees/p2-ws291v` / `agent/p2-ws291v` | returned（権限の判定で停止、ユーザーの判断待ち。branch は BUG-375 まで未 merge） | dc49bd786 |
+| P2 | phase-runner-high | ws291 p020 (q1733-i01) | `/home/awe/zedBSD-worktrees/p2-ws291v` / `agent/p2-ws291v` | in-progress（2026-10-31 起動し直し、VF2 の SSH・sudo の許可） | dc49bd786 |
 | P4 | phase-runner-high | ws291 p021 (q1730-i01 返却) | `/home/awe/zedBSD-worktrees/p4-ws291pi` / `agent/p4-ws291pi` | returned（実機待ち、branch は未 merge） | e4f77b9e5 |
 | P5 | phase-runner | ws327 (q1710-i01 cleared) | `/home/awe/zedBSD-worktrees/p5-ws327` / `agent/p5-ws327` | returned（WS327 完了） | cf2963051（merge a17e9386d） |
 | P6 | phase-runner-high | ws307 (q1718-i01 返却) | `/home/awe/zedBSD-worktrees/p6-ws307` / `agent/p6-ws307` | returned（p007 の残り 2 つ） | ccd0c8693（merge 061230951） |

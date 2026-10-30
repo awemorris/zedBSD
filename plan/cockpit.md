@@ -1,14 +1,14 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:08（Q1）
+最終更新: 2026-10-31 01:16（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS291](ws291/ws.md) | GPU の描画の速さ（Intel i915、5330 の Alder Lake の段） | 起動（q1731）。p022: main の kernel の起動と mview の確かめ、5330 の Linux（ANV）で約 50 fps の scene を決める | 今の fps → 改善（WS313 の ODROID-C5 は実機の結果待ちのまま） |
-| P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 返却。direct で qs40 × 13 が 42.35 fps（目標 50）、× 1 が 83.4 fps。VF2 の SSH・sudo の計測が権限の判定で止まった | ユーザーの判断の後: SLC の既定の回帰、present の copy を geometry が待たない直し。BUG-375 の後に branch を merge |
+| P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 起動し直し（q1733、VF2 の SSH・sudo の許可）。SLC の既定の回帰、present の copy を geometry が待たない直し | qs40 × 13 を 42.35 → 50 fps 以上へ。branch は BUG-375 の後に merge |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 起動（q1728）。p013: big-1000（52 対 NVK 136 fps）・subs-1000（10.9 対 75.4 fps）の CPU の費用 | profile → nvrtx の record・submit の改善 |
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ（Raspberry Pi 5 の V3D 7.1 の段） | 返却。host で driver の欠け（indexed・instance・直の fetch・mip の第 1 段）を実装、build と host 試験 PASS。実機は未、branch は未 merge（Pi 4 の desktop の回帰の確かめ待ち） | Pi 5 の起動の後: image を作り直し、desktop の回帰、clock の確かめ、fps の計測 |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
@@ -123,13 +123,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-### 1. WS291 p020（PowerVR、VF2）: VF2 で SSH と sudo を使った kernel の入れ替えと計測の program の実行を続けてよいか
-
-- 背景: P2 が VF2 で計測している途中、試しの kernel を入れて SSH で sudo して計測の program（vkmatrix）を走らせる command が、auto mode の権限の判定（Interfere With Workloads、動いている処理への干渉）で拒否された。それまで同じ形の操作は何度も通っていた。回避はしていない。板は元の kernel と userland に戻した。
-- 今の数: direct scanout で qs40 × 13 が 42.35 fps（目標 50）、× 1 が 83.4 fps。
-- 許可する場合: AGENTS.md の手順で P2 を許可を添えて起動し直し、cache（SLC）を既定にする前の回帰と、present の copy の待ちを外す直しを続ける。許可しない場合: VF2 の計測を止め、host の側だけにする。
-
-### 2. WS291 p022（i915、5330）: CPU の省電力（idle の C-state・P-state）を先に直すか
+### 1. WS291 p022（i915、5330）: CPU の省電力（idle の C-state・P-state）を先に直すか
 
 - 背景: 5330 の zedBSD は idle で package の電力が 12.99 W（Linux は 3.2〜3.5 W）で、mview の時に電力の上限（PL1 13 W）に張り付いて GPU が 800 MHz（Linux は 1200 MHz）に抑えられている。CPU の idle が HLT（C1）だけで、P-state（CPU の周波数）の制御が無い見込み。GPU が 1200 MHz なら qs40 × 600 は約 45 fps 相当（今 30.1 fps、Linux 50.6 fps）。
 - (a) CPU の idle（MWAIT の C-state）と P-state を先に直す（WS301 を進めるか新しい WS、担当を決める）。(b) 当面は GPU の側の改善だけを続ける（P1 は (b) を続けている）。
@@ -139,6 +133,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-31 | WS291 PowerVR | P2 が VF2 で SSH と sudo を使って kernel の入れ替えと計測の program の実行を続けてよい | [ws291/ws.md](ws291/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | HAL の atomic.h は macro だけの契約（直列化は macro の中の block で宣言して呼ぶ、cookie の型を消す、2 行の include を外す）、kernel の atomic.h は使った後に undef | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | pc98・pcat の legacy の VRAM・VGA の窓: platform driver は straight map の基底 0x80000000 を知っている前提で、基底は driver の中で定義し、HAL の定数は参照しない（handoff・API は足さない） | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS331・WS332 | driver は rpi-common・s905x5m、HAL は bsp-rpi-common・bsp-s905x5m-common・bsp-odroidc5 に分ける。kernel の header は整数の型を kernel で定義し、sched・atomic・thread・vmspace は _private.h に分ける。KERN_CLOCK_HZ は obsolete なので削除し、tick を API で扱い可変にする WS332 を立てる | [ws331/ws.md](ws331/ws.md)・[ws332/ws.md](ws332/ws.md) |
