@@ -20384,8 +20384,12 @@ j3_commit_pending(
  *
  * Metadata is pinned in the cache and logged.  Content goes to the cache
  * as an ordinary delayed write, unless it lands in a block the running
- * transaction freed: then it is pinned until the commit, so that a crash
- * that undoes the free finds the old owner's block untouched.
+ * or the closed transaction freed: then it is pinned until the commit, so
+ * that a crash that undoes the free finds the old owner's block untouched,
+ * and logged like metadata, so that a crash after the commit's seal finds
+ * the new content at home once replay has run, not the old owner's.  Only
+ * content larger than a slot's payload is pinned without a copy in the
+ * slot (held), and the cache writes it home after the seal.
  */
 static int
 j3_write(
@@ -20399,6 +20403,7 @@ j3_write(
 {
 	struct ufs_j3 *j3;
 	uint64_t bytes;
+	int freed;
 	int hold;
 	int room;
 	int pending;
@@ -20409,13 +20414,22 @@ j3_write(
 	bytes = (uint64_t)count * UFS_SECTOR_SIZE;
 	mutex_lock(&j3->lock);
 
-	/* Holds content that lands in a block the running or the closed transaction freed. */
-	hold = 0;
+	/* Finds content that lands in a block the running or the closed transaction freed. */
+	freed = 0;
 	if (content && (j3->freed_count != 0 || j3->closed_freed_count != 0))
-		hold = j3_content_freed(ms, lba, count);
+		freed = j3_content_freed(ms, lba, count);
+
+	/*
+	 * Such content is logged when one slot's payload can carry it; larger
+	 * content is only held, which leaves its home to the cache after the
+	 * seal.
+	 */
+	hold = 0;
+	if (freed && count > j3->payload_max)
+		hold = 1;
 
 	/* Writes other content as an ordinary delayed write, outside the journal. */
-	if (content && !hold) {
+	if (content && !freed) {
 		mutex_unlock(&j3->lock);
 
 		/*
