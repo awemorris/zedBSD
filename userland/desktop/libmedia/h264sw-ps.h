@@ -222,7 +222,7 @@ struct h264sw_pps {
  * sps_generation[id] is incremented each time the SPS of that id is
  * replaced by one with different content, so the decoder can tell, when
  * an IDR picture starts, whether the sequence changed (7.4.1.2.1).
- * Owned by the decoder, embedded in it (about 50 KiB).
+ * Owned by the decoder, embedded in it (about 126 KiB).
  */
 struct h264sw_ps_store {
 	int sps_present[H264SW_SPS_IDS];
