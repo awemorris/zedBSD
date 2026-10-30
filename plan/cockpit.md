@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 04:55（Q1）
+最終更新: 2026-10-31 05:01（Q1）
 
 ## 担当（P1〜P8）
 
@@ -10,7 +10,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
-| P2 | Bug | open の Bug の 4 つ目の束（QEMU と host） | q1761: BUG-312（壊れた root の fsck）→ BUG-173（sh の日本語の履歴）→ BUG-238（emacs -nw）→ BUG-199（古い host 試験）→ BUG-281（QEMU の SSH の間欠の停止）→ BUG-308（UFS の journal の窓） | 3 つ目の束は main 612a2ea04。BUG-289・292 closed |
+| P2 | — | — | 返却（05:4x）。4 つ目の束: BUG-312・173・238・199・281 closed、308（UFS の journal の窓）は直して前後の再現で確かめた | 次の割当を Q1 が決める |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
 | P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1769: p026 共通部分を codec に依らない名前に（設計を先に、移しは p022 の後） | 午後: Pi 5 の実機 |
 | P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |

@@ -448,7 +448,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1761 / q1761-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs4`・branch `agent/p2-bugs4`、QEMU と host、出力は全部 /tmp） | [BUG-312](bugs/BUG-312.md)・[BUG-173](bugs/BUG-173.md)・[BUG-238](bugs/BUG-238.md)・[BUG-199](bugs/BUG-199.md)・[BUG-281](bugs/BUG-281.md)・[BUG-308](bugs/BUG-308.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
+| q1761 / q1761-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs4`・branch `agent/p2-bugs4`、QEMU と host、出力は全部 /tmp） | [BUG-312](bugs/BUG-312.md)・[BUG-173](bugs/BUG-173.md)・[BUG-238](bugs/BUG-238.md)・[BUG-199](bugs/BUG-199.md)・[BUG-281](bugs/BUG-281.md)・[BUG-308](bugs/BUG-308.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | cleared（4f19b40a4〜b35939531、main 9154dc6db。312・173・238・199・281 closed、308 fixed（review と crash 試験の残り）） |
 | q1762 / q1762-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws333`・branch `agent/p6-ws333`、host と QEMU、出力は /tmp） | [ws333](ws333/ws.md) p005 の前半（熱の core） | UAPI（p004）・/dev/thermal・/sbin/thermal は作らない | in-progress・返却（前半の熱の core b122563a8〜259e45cd7、main b7ac4f576。後半は p004 の後） |
 
 ## 2026-10-31: 空いた P3・P5 の割り当て（q1763・q1764）
