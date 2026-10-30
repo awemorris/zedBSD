@@ -56,7 +56,7 @@
   `tests/config-amd64-guest.mk`（未 build）。p006（Win32）は未着手。
 - 2026-10-30 Q1: ユーザーの指示で Phase を標準廉価実装手順の形に組み直した（上の表）。P2 を再起動し p003 の guest の実行と p007 の委譲の設計から。
 - 2026-10-30 P2（q1697-i02）: p003 の guest の実行 PASS（cleared の候補）。p007: p008〜p017 の phase.md、design §13（実装の Phase の共通の約束）、
-  Win32 の骨格、試験の道具（`check-layers.py`・`check-base.sh`＋`frozen.sha256`・`build-win32.sh`・`host-apps.sh`・`doc-lines.py`・
+  Win32 の骨格、試験の道具（`check-layers.py`・`check-base.sh`・`build-win32.sh`・`host-apps.sh`・`doc-lines.py`・
   `guest-layers.sh`）。p015 の依存を p007 に（API は凍結済み）。design-reviewer 21 件を反映（high の 1: Mailer が main で壊れないよう
   P2 が `sync.c` を移した。p008 は確かめと host 試験の直し）。実装の担当は ws.md に触らない（Q1 が merge の時に表を直す）。
 - 2026-10-30 P2（q1703-i01、p016）ラップアップ（Q1 の指示）: 境界（B5 の直し、T1・N1 を check.sh に、WS327 の前と同じ 64 行）・zedBSD 3 arch と

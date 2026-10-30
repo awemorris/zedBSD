@@ -1,14 +1,14 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 12:40（Q1）
+最終更新: 2026-10-30 12:50（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS009](ws009/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書と、完了の条件の不足） | 返却（ラップアップ）。p028 の build・boot の再現の途中（native の image まで出来た、boot の判定は script の誤りで未判定、直した script は未実行） | 次のセッション: p028 の native の boot → hybrid・uefi・bios → WS009 completed → WS296（P6 の実装を元に組み直す）→ WS297 |
-| P2 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | p016 の受け入れ: 境界・build・host 試験 PASS、Win32 の揺れの一覧、QEMU の app の回帰へ | QEMU の回帰 → FreeBSD の build → p017 規約の見直し（Sonnet）→ WS の完了 |
+| P2 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | 返却（ラップアップ）。p016 の受け入れの途中: 境界・build・host 試験・FreeBSD は PASS、QEMU の回帰は Mail・Music・Settings まで | 次のセッション: QEMU の回帰の残り（Video Player の PAUSE・Photos の import の FAIL の解析）、BUG-367 の後に 08-network → p017 → WS の完了 |
 | P3 | [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close が戻らない | QEMU で再現と解析、今日の TCP の変更との関係を確かめて直す | BUG-367 → WS221（Jumbo frame）・WS299（5330 の NVMe） |
 | P4 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 返却（09:13）。次の 1 手は ws.md の Resume point | p015 の QEMU の 3 回目 → p004 clang・libcxx・GTK4 のセルフビルド → p008 → p014 → p007 firmware 変数の driver |
 | P5 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 返却（09:13、計測なし） | p010 desktop の測り直し → p012 以降で 3D を 50 fps 超えへ（デスクトップ機） |
@@ -47,7 +47,7 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | p008〜p012 | app の移行（Mailer・Music/Video・Photos・Settings・IME/picker/audio、Sonnet） | cleared |
 | p013・p014 | thread-win32.c・socket-win32.c（mingw の compile まで） | cleared |
 | p015 | 解説（8 章、08-network.c） | cleared |
-| p016 | 受け入れ（P2） | in-progress |
+| p016 | 受け入れ（P2） | in-progress（QEMU の回帰の途中、Video Player・Photos に未解析の FAIL） |
 | p017 | 規約の見直し | planned |
 
 進捗: 2026-10-30 Sonnet 9 回で実装。閉じた WS の試験 4 本を直した。Win32 の揺れ 17 項目は header を変えず、S7 は実装で直した。F-WS327-win32-build を登録。
