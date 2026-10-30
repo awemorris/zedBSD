@@ -17,6 +17,7 @@
  */
 
 #include "kern/exec.h"
+#include "kern/clock.h"
 #include "kern/cred.h"
 #include "kern/file.h"
 #include "kern/kmem.h"
@@ -63,6 +64,9 @@ typedef uint32_t exec_user_word_t;
 #endif
 
 #define EXEC_AUXV_PAIRS 13U
+
+/* How long exec sleeps between two looks at a sibling thread it asked to retire, in milliseconds. */
+#define EXEC_RETIRE_POLL_MS 1U
 
 struct exec_target {
 	struct file *file;
@@ -1633,7 +1637,7 @@ process_exec_file(
 		if (!retired)
 			sched_interrupt(other);
 		while (!retired) {
-			sched_sleep(sched_ticks() + 1U);
+			sched_sleep(sched_ticks() + kern_ms_to_ticks(EXEC_RETIRE_POLL_MS));
 			retired = exec_thread_retired(other);
 		}
 

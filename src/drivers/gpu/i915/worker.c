@@ -87,10 +87,10 @@
 
 /*
  * The longest sleep between two looks at the context status buffer, in
- * scheduler ticks.  The engine's interrupt normally ends it; the bound only
+ * milliseconds.  The engine's interrupt normally ends it; the bound only
  * keeps a lost interrupt from costing more than this.
  */
-#define I915_WORKER_WAIT_TICKS		1U
+#define I915_WORKER_WAIT_MS		1U
 
 /* The pause between two polls of the context status buffer when no interrupt handler is attached. */
 #define I915_WORKER_POLL_US		50U
@@ -1800,8 +1800,8 @@ i915_worker_emit(
  * Waits until a submitted request has ended, or times out.
  *
  * The context status buffer is processed, and between two looks the worker
- * sleeps until the engine's next interrupt, one tick at most.  Without an
- * interrupt handler it polls every 50 microseconds instead.
+ * sleeps until the engine's next interrupt, a millisecond at most.  Without
+ * an interrupt handler it polls every 50 microseconds instead.
  */
 static int
 i915_worker_wait(
@@ -1818,6 +1818,7 @@ i915_worker_wait(
 	uint64_t observed;
 	uint64_t now;
 	uint32_t timeout_ms;
+	unsigned wait_ticks;
 	int completed;
 	int error;
 
@@ -1830,8 +1831,9 @@ i915_worker_wait(
 	if (gt_index == worker->video_index)
 		timeout_ms = I915_WORKER_VIDEO_TIMEOUT_MS;
 
-	/* Looks at the status buffer until the request ends, for at most the timeout. */
+	/* Looks at the status buffer until the request ends, for at most the timeout, sleeping a millisecond at most between looks. */
 	deadline = sched_ticks() + kern_ms_to_ticks(timeout_ms);
+	wait_ticks = (unsigned)kern_ms_to_ticks(I915_WORKER_WAIT_MS);
 	for (;;) {
 		/* Notes the engine interrupts so far before the look, so one during the look is not missed. */
 		observed = drv_i915_irq_engine_sequence(&device->gt.irq);
@@ -1865,14 +1867,14 @@ i915_worker_wait(
 		if (now >= deadline)
 			break;
 
-		/* Sleeps until the engine's next interrupt, or one tick at most. */
-		error = drv_i915_irq_engine_wait(&device->gt.irq, observed, I915_WORKER_WAIT_TICKS);
+		/* Sleeps until the engine's next interrupt, or a millisecond at most. */
+		error = drv_i915_irq_engine_wait(&device->gt.irq, observed, wait_ticks);
 		if (error == 0) {
 			worker->wait_interrupts++;
 			continue;
 		}
 
-		/* The bound ran out: a lost interrupt costs one tick, not the request. */
+		/* The bound ran out: a lost interrupt costs a millisecond, not the request. */
 		if (error == ETIMEDOUT) {
 			worker->wait_timeouts++;
 			continue;

@@ -169,9 +169,9 @@ kern_clock_idle_suspend_end(void);
 bool kern_rtc_read_counter(uint64_t *counter, uint64_t *frequency_hz);
 
 /*
- * Short high-resolution wait for at least `min_us` microseconds (bounded busy
- * delay off the monotonic counter).  A true yielding hrtimer-backed sleep-range
- * is a pending HAL item; this serves the microsecond-scale waits (usleep_range).
+ * Sleeps for at least `min_us` microseconds off the monotonic counter,
+ * yielding the CPU.  The wake comes at tick granularity, so `max_us` is
+ * advisory and the sleep may last longer.
  */
 void kern_usleep_range(unsigned min_us, unsigned max_us);
 

@@ -47,6 +47,9 @@
 #define ENGINE_WAIT_STEP_US 10U
 #define ENGINE_WAIT_STEPS 10000U
 
+/* The longest sleep for an engine event before the caller looks again, in milliseconds. */
+#define ENGINE_EVENT_WAIT_MS 1U
+
 /* The hub registers this file uses. */
 #define HUB_IDENT0 0x008U
 #define HUB_INT_STS 0x050U
@@ -213,7 +216,7 @@ bcm2711_v3d_hardware_event_sequence(
 }
 
 /*
- * Sleeps until an IRQ comes after the observed sequence, or until the next scheduler tick.
+ * Sleeps until an IRQ comes after the observed sequence, or for a millisecond at most.
  */
 void
 bcm2711_v3d_hardware_event_wait(
@@ -223,8 +226,8 @@ bcm2711_v3d_hardware_event_wait(
 	unsigned long enabled;
 	uint64_t deadline;
 
-	/* At most until the next tick. */
-	deadline = sched_ticks() + 1U;
+	/* At most a millisecond (a tick at least). */
+	deadline = sched_ticks() + kern_ms_to_ticks(ENGINE_EVENT_WAIT_MS);
 
 	/* Sleeps on the queue unless an IRQ came since the observation. */
 	enabled = spin_lock_irqsave(&engine->hardware.guard);

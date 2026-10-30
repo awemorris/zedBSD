@@ -37,6 +37,7 @@ void process_timer_cleanup(struct process *);
 #include "kern/kmem.h"
 #include "kern/cred.h"
 #include "kern/signal.h"
+#include "kern/clock.h"
 #include "kern/sched.h"
 #include "kern/sched_private.h"
 #include "kern/namei.h"
@@ -70,6 +71,9 @@ static struct spinlock process_tree_lock = {
 
 /* The armed real interval timers one tick collects before it walks by PID. */
 #define PROCESS_ITIMER_REAL_BATCH 16U
+
+/* How long _exit sleeps between two looks at the threads it killed, in milliseconds. */
+#define PROCESS_EXIT_POLL_MS 1U
 
 struct process_stop_notification {
 	struct process *process;
@@ -3052,7 +3056,7 @@ process_exit_cleanup(
 			break;
 		(void)signal_send_thread(other, SIGKILL);
 		thread_release(other);
-		sched_sleep(sched_ticks() + 1U);
+		sched_sleep(sched_ticks() + kern_ms_to_ticks(PROCESS_EXIT_POLL_MS));
 	}
 
 	/* Closes the descriptors and the working directory. */

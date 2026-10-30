@@ -240,7 +240,7 @@ vm_reclaim_frame(
 		irq = spin_lock_irqsave(&pageout_lock);
 		sequence = waitq_sequence(&free_waitq);
 		(void)waitq_sleep(&free_waitq, &pageout_lock, sequence,
-		    sched_ticks() + VM_FREE_WAIT_TICKS, 0);
+		    sched_ticks() + kern_ms_to_ticks(VM_FREE_WAIT_MS), 0);
 		spin_unlock_irqrestore(&pageout_lock, irq);
 
 		/* A thread that was killed while waiting stops waiting. */
