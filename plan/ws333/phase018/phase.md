@@ -62,10 +62,6 @@ design.md §9 の p018（WS303 design §4.2・§4.5 と WS333 design §4.7・§4
 
 ## 確かめた事
 
-（下の「確かめた事（実行の記録）」に実行したコマンドと結果を書く。）
-
-## 確かめた事（実行の記録）
-
 - `sh plan/ws333/tests/dell/run.sh`: 30 項目 PASS（`dell: PASS`）。
   - unit: 49 check（strategy の写しと manual の境 33/34・66/67、名前が 15 文字以内、5330 の fan の情報 `{4, 00 39 0f ff}` → 種類 0・3897 rpm、長さ 0・0xFF だけ・2 fan・長さ 5・buffer を越える長さ・0xFF の欠け・5 fan（4 を取り E2BIG）、Cool の SMBIOS の buffer の全 byte、4 mode の input1 の bit、sentinel のまま → ENXIO、status 0・-2・output0 が -1 のまま、短い答え、SMM の get・set の buffer の全 byte、EAX が command のまま・0xFFFF・0x1FFFF・2、短い答え）。
   - 5330 の DSDT・SSDT1〜15 の harness（`--events --ec --reg --init`、EC の fan の数・種類・rpm を `--ec-seq` で Debian の観測の値に）の SMI の数（呼びごと）:
@@ -89,7 +85,11 @@ design.md §9 の p018（WS303 design §4.2・§4.5 と WS333 design §4.7・§4
 
 - わざと壊す確かめ（tree の写しを /tmp で壊して run.sh）: `\ECRD` の検査を外す → ec・ec-smi・ec-no-fan が FAIL、同じ mode を省く検査を外す → strategy-smi が FAIL、sentinel のままを成功と読む → untouched・untouched-smi が FAIL、boost の読み直しを外す → boost-take・boost-take-smi が FAIL。4 つとも検出。
 - `make -C plan/tools/aml-host kernel-check`（kernel の target と flag、`-Werror`）: `src/drivers/acpi/*.c` 全部 warning 0。`acpi-dell.c` を `-DCONFIG_DELL_SMM_BOOST=1` でも同じ flag で compile して warning 0（最大の frame は `dell_apply` 120 B）。
-- `python3 plan/tools/style-check.py`（新しい file・`aml-host.c`・`aml-host-dell.c`）0 件。
+- `python3 plan/tools/style-check.py`（新しい file・`aml-host.c`・`aml-host-dell.c`）0 件。`git diff --check` 0。
+- harness の回帰（`aml-host.c` を変えたため）: `sh plan/ws333/tests/wmi/run.sh` PASS、`make -C plan/tools/aml-host` と `sh plan/tools/aml-host/check-latitude5330.sh` 5 項目 PASS（LTO の stack 7184 B）、`python3 plan/tools/aml-host/run-asl.py` 21 passed、`make -C plan/ws052/tests` と `sh plan/ws052/tests/run-host-sleep.sh` PASS。ws052 の Makefile は変えていない: `aml-host.c` の Dell の呼びを weak にし、Dell を link しない harness では `--dell` が「not linked」と答える。
+- amd64 の vmunix（`sh plan/tools/ports/build-vmunix-all.sh /tmp/p7-ws333/b-amd64 amd64`）rc=0、warning 0、`drv_acpi_dell_attach` が vmunix にある（llvm-nm、boost の関数は既定 n で無い）。
+- 全 20 port の vmunix（`sh plan/tools/ports/build-vmunix-all.sh /tmp/p7-ws333/b-all`、2923e980e と同じ kernel の source）: 20 port 全部 rc=0、warning 0。
+- QEMU amd64（`make ZEDBSD_CONFIG=plan/ws333/tests/config-amd64-boot.mk BUILD=/tmp/p7-ws333/img disk-image` rc=0・warning 0、vmunix に `drv_acpi_dell_attach`。`BOOT_MODE=uefi-usb OUTPUT=/tmp/p7-ws333/boot plan/tools/boot-test.sh /tmp/p7-ws333/img/hdd-image.img`）: PASS、画面の PNG（`/tmp/p7-ws333/boot/login.png`）で login prompt を見た。q35 に PNP0C14 は無いので Dell の WMI が無い道（WMI の attach が ENODEV、Dell の attach が ENODEV で log なし）の回帰。console・serial の log は判定に使っていない。
 
 ## 未実施・残り
 
