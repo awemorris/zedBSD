@@ -15,6 +15,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 /* The font size of the root before any style sets it, in pixels. */
@@ -321,6 +322,7 @@ static struct css_length cascade_length(struct css_engine *engine, const struct 
 static void cascade_shadows(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_filters(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_filter *out, int *count);
 static const char *cascade_subgrid(struct css_engine *engine, const struct css_value *value);
+static const char *cascade_declared(struct css_engine *engine, const struct css_style *style, const struct css_value *value);
 static void cascade_text_shadow(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
@@ -4473,11 +4475,13 @@ cascade_apply(
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
 		style->column_names = cascade_line_names(engine, value);
 		style->column_subgrid = cascade_subgrid(engine, value);
+		style->column_declared = cascade_declared(engine, style, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		cascade_tracks(engine, style, value, style->rows, &style->row_count, &style->row_repeat);
 		style->row_names = cascade_line_names(engine, value);
 		style->row_subgrid = cascade_subgrid(engine, value);
+		style->row_declared = cascade_declared(engine, style, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
 		/* The areas, in the engine's arena. */
@@ -5054,6 +5058,7 @@ cascade_inherit(
 		style->column_repeat = parent->column_repeat;
 		style->column_names = parent->column_names;
 		style->column_subgrid = parent->column_subgrid;
+		style->column_declared = parent->column_declared;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		memcpy(style->rows, parent->rows, sizeof(style->rows));
@@ -5061,6 +5066,7 @@ cascade_inherit(
 		style->row_repeat = parent->row_repeat;
 		style->row_names = parent->row_names;
 		style->row_subgrid = parent->row_subgrid;
+		style->row_declared = parent->row_declared;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
 		style->areas = parent->areas;
@@ -5535,6 +5541,58 @@ cascade_try_rule(
 		}
 	}
 	return found;
+}
+
+/* Keeps the text of a template with a repeat() in the engine's arena, its lengths in ems turned to pixels by the font size (NULL for another template). */
+static const char *
+cascade_declared(
+	struct css_engine *engine,
+	const struct css_style *style,
+	const struct css_value *value)
+{
+	struct wb_buffer text;
+	const char *source;
+	const char *kept;
+	char number[40];
+	size_t index;
+	size_t start;
+	size_t length;
+	int error;
+
+	/* Only a parsed template with a repeat() has one. */
+	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL || value->tracks->declared == NULL)
+		return NULL;
+	source = value->tracks->declared;
+	length = strlen(source);
+
+	/* Each number followed by em becomes pixels. */
+	wb_buffer_init(&text);
+	error = 0;
+	for (index = 0; error == 0 && index < length; ) {
+		start = index;
+		if ((source[index] >= '0' && source[index] <= '9') || (source[index] == '.' && index + 1U < length)) {
+			while (index < length && ((source[index] >= '0' && source[index] <= '9') || source[index] == '.'))
+				index++;
+			if (index + 1U < length && source[index] == 'e' && source[index + 1U] == 'm' &&
+			    (index + 2U >= length || !((source[index + 2U] >= 'a' && source[index + 2U] <= 'z') || source[index + 2U] == '-'))) {
+				snprintf(number, sizeof(number), "%.6gpx", atof(source + start) * (double)style->font_size);
+				error = wb_buffer_append_string(&text, number);
+				index += 2U;
+				continue;
+			}
+			error = wb_buffer_append(&text, source + start, index - start);
+			continue;
+		}
+		error = wb_buffer_append_byte(&text, source[index]);
+		index++;
+	}
+	if (error != 0) {
+		wb_buffer_release(&text);
+		return NULL;
+	}
+	kept = cascade_keep(engine, wb_buffer_string(&text), text.length + 1U);
+	wb_buffer_release(&text);
+	return kept;
 }
 
 /* Keeps a subgrid template's serialization in the engine's arena (NULL for another template). */

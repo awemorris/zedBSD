@@ -987,6 +987,9 @@ struct css_style {
 	/* A subgrid axis's value as it serializes (in the engine's arena), or NULL. */
 	const char *column_subgrid;
 	const char *row_subgrid;
+	/* A template with a repeat() as written, ems in pixels (what an element that is not a grid container reports), or NULL. */
+	const char *column_declared;
+	const char *row_declared;
 	const struct css_grid_areas *areas;
 	struct css_track auto_columns[CSS_TRACKS];
 	int auto_column_count;

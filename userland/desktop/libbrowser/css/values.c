@@ -1034,6 +1034,8 @@ static int values_view_transition_class(struct css_parse *parse, const struct cs
 static int values_animation_single(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_animation(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_repeat_parts(const struct css_token *const *parts, size_t count, struct css_value *value);
+static int values_declared_text(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
+static int values_token_utf8(const struct css_token *token, struct wb_buffer *out);
 static int values_subgrid(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
 static int values_position_parts(const struct css_token *const *parts, size_t count, struct css_value *x, struct css_value *y);
 static int values_position_part(const struct css_token *token, struct css_value *value);
@@ -6356,7 +6358,129 @@ values_tracks(
 	if (list->count == 0)
 		return EINVAL;
 
+	/* A template with a repeat() keeps its text for an element that is not a grid container. */
+	error = values_declared_text(parse, tokens, count, list);
+	if (error != 0)
+		return error;
+
 	/* Succeeded: the template is parsed. */
+	return 0;
+}
+
+/* Writes a number the way a serialization does (an integer without a point, else up to six significant digits). */
+static int
+values_declared_number(
+	double number,
+	struct wb_buffer *out)
+{
+	char text[40];
+
+	if (number == (double)(long)number)
+		snprintf(text, sizeof(text), "%ld", (long)number);
+	else
+		snprintf(text, sizeof(text), "%.6g", number);
+	return wb_buffer_append_string(out, text);
+}
+
+/*
+ * Keeps the text of a track list that has a repeat() (an element that is not a grid container reports its value
+ * as written): the tokens with single spaces, ", " after commas and line names in brackets without inner padding.
+ */
+static int
+values_declared_text(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_track_list *list)
+{
+	struct wb_buffer text;
+	char *kept;
+	size_t index;
+	int repeats;
+	int error;
+	int space;
+
+	/* Only a template with a repeat(). */
+	repeats = 0;
+	for (index = 0; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[index], "repeat"))
+			repeats = 1;
+		if (tokens[index].type == CSS_TOKEN_FUNCTION && !css_ident_equal(&tokens[index], "repeat") &&
+		    !css_ident_equal(&tokens[index], "minmax") && !css_ident_equal(&tokens[index], "fit-content"))
+			return 0;
+	}
+	if (!repeats)
+		return 0;
+
+	/* The tokens. */
+	wb_buffer_init(&text);
+	error = 0;
+	space = 0;
+	for (index = 0; error == 0 && index < count; index++) {
+		switch (tokens[index].type) {
+		case CSS_TOKEN_WHITESPACE:
+			space = 1;
+			continue;
+		case CSS_TOKEN_COMMA:
+			space = 0;
+			error = wb_buffer_append_string(&text, ", ");
+			continue;
+		case CSS_TOKEN_CLOSE_SQUARE:
+		case CSS_TOKEN_CLOSE_PAREN:
+			space = 0;
+			error = wb_buffer_append_byte(&text, tokens[index].type == CSS_TOKEN_CLOSE_SQUARE ? ']' : ')');
+			continue;
+		default:
+			break;
+		}
+		if (space && text.length != 0 && text.data[text.length - 1U] != '[' && text.data[text.length - 1U] != '(' &&
+		    !(text.length >= 2U && text.data[text.length - 1U] == ' ' && text.data[text.length - 2U] == ','))
+			error = wb_buffer_append_byte(&text, ' ');
+		space = 0;
+		if (error != 0)
+			break;
+		switch (tokens[index].type) {
+		case CSS_TOKEN_OPEN_SQUARE:
+			error = wb_buffer_append_byte(&text, '[');
+			break;
+		case CSS_TOKEN_FUNCTION:
+			error = values_token_utf8(&tokens[index], &text);
+			if (error == 0)
+				error = wb_buffer_append_byte(&text, '(');
+			break;
+		case CSS_TOKEN_NUMBER:
+			error = values_declared_number(tokens[index].number, &text);
+			break;
+		case CSS_TOKEN_PERCENTAGE:
+			error = values_declared_number(tokens[index].number, &text);
+			if (error == 0)
+				error = wb_buffer_append_byte(&text, '%');
+			break;
+		case CSS_TOKEN_DIMENSION:
+			error = values_declared_number(tokens[index].number, &text);
+			if (error == 0)
+				error = values_token_utf8(&tokens[index], &text);
+			break;
+		default:
+			error = values_token_utf8(&tokens[index], &text);
+			break;
+		}
+	}
+	if (error != 0) {
+		wb_buffer_release(&text);
+		return error;
+	}
+
+	/* Kept in the parse's arena. */
+	kept = wb_arena_alloc(parse->arena, text.length + 1U);
+	if (kept == NULL) {
+		wb_buffer_release(&text);
+		return ENOMEM;
+	}
+	memcpy(kept, text.data, text.length);
+	kept[text.length] = '\0';
+	list->declared = kept;
+	wb_buffer_release(&text);
 	return 0;
 }
 

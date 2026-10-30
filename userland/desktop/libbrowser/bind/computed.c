@@ -1249,6 +1249,13 @@ computed_write_grid(
 	if (property != COMPUTED_GRID_TEMPLATE_COLUMNS && property != COMPUTED_GRID_TEMPLATE_ROWS)
 		return 0;
 
+	/* An element that is not a grid container reports a template with a repeat() as written. */
+	if (style->display != CSS_DISPLAY_GRID && style->display != CSS_DISPLAY_INLINE_GRID &&
+	    (property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_declared != NULL : style->row_declared != NULL)) {
+		*handled = 1;
+		return computed_ascii(property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_declared : style->row_declared, out);
+	}
+
 	/* A subgrid axis is its line-name lists. */
 	if (property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid != NULL : style->row_subgrid != NULL) {
 		*handled = 1;

@@ -566,6 +566,8 @@ struct css_track_list {
 	int named;
 	/* A subgrid's value as it serializes ("subgrid" and its line-name lists), NUL-terminated in the arena; NULL otherwise. */
 	const char *subgrid;
+	/* A template with a repeat(): its text as written (spaces normalized, lengths in ems unresolved), NUL-terminated in the arena; NULL otherwise. */
+	const char *declared;
 };
 
 /* A declared clip-path: inset(): its four declared lengths, top, right, bottom, left. */
