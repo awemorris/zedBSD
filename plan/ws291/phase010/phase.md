@@ -219,3 +219,19 @@
 - cursor の同じ image の set の 5 ms（上）。terminal の起動の blob の clear 自体（4 MB で約 76 ms、起動する client だけが待つ）。
 - 1 回ずつの計測（dp3 は 1 回）。揺れの確かめは WS309 の後の測り直しで。
 
+
+## q1700-i01（2026-10-30 09:10〜09:13 P5、worktree p5-ws291n、基点 main ef35deaf9。利用の上限で Q1 がラップアップ、計測は未実施）
+
+- 承認: ユーザー（2026-10-30 原文）「WS291はNVIDIAですか？それなら今実行してOKです。」。範囲（Q1）: (1) この p010 の desktop の 60 fps を測り直す
+  （WS309 の後の約束。WS309 は p015 以外 cleared）、(2) p012 以降の予備で scene-5000 を 50 fps を明らかに超えるところへ。
+- 済み: worktree の準備だけ（plan/tmp/guest/id_ed25519 を mode 600、build/ に共有の toolchain への symlink、build/ws291/ に linux-mview・measure/ref・
+  usb/bin/vkhang・vmunix-va1（cksum 1463007375）を p2-ws291l・p5-ws291 から写した）。main の kernel を build: `make ZEDBSD_CONFIG=plan/ws291/tests/config.mk
+  BUILD=build/ws291/k build/ws291/k/vmunix` warning 0、build/ws291/vmunix-m0（cksum 1774294323）。
+- 未実施: 実機の計測は 1 つもしていない（deploy もしていない）。機械は Debian、RTX は vfio-pci（09:13 に確かめた）、NVMe の kernel は触っていない。lock は 09:13 に返した。
+- 次の 1 手（再開の手順）:
+  1. NVMe の zedBSD の userland は WS309 の Keiland より古い見込み（未確かめ）。測り直しの前に main の `/bin/wayland`・`/lib/libkeiland.so`・
+     `/lib/libvulkan.so`（WS309 p014 で wayland は新しい libc の `posix_spawn_file_actions_addclosefrom_np` を要る → libc.so も）を build し、
+     plan/ws309/tests/rtx-bug353.sh と同じ形（元を *.old に残し、終わりに戻す）で入れる。入れる前に zedBSD の今の file の cksum を取って比べる。
+  2. `sh plan/ws291/tests/rtx-desk-profile.sh build/ws291/rtx/q1700-desk build/ws291/vmunix-va1 build/ws291/vmunix-m0`（2 回、揺れを見る）。表は上の dp3 と同じ形で記録。
+  3. p012（新設、phase.md は未作成）: scene-5000 の GPU 19.5 ms の内訳を mview の `--cull=all`（頂点だけ）と `--size=`（画素の量）で zedBSD と NVK の両方で取り、
+     頂点・画素のどちらが NVK より重いかを見てから直す（vertex の program の質・属性の fetch・ZCULL など）。
