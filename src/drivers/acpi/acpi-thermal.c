@@ -249,7 +249,7 @@ thermal_thread(
 	/* For as long as the kernel runs. */
 	for (;;) {
 		/* Sleeps for the period (nothing wakes the queue). */
-		deadline = sched_ticks() + KERN_MS_TO_TICKS(THERMAL_PERIOD_MS);
+		deadline = sched_ticks() + kern_ms_to_ticks(THERMAL_PERIOD_MS);
 		irq = spin_lock_irqsave(&thermal_lock);
 
 		for (;;) {

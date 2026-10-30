@@ -30,8 +30,8 @@
 #include "drivers/gpu/powervr/firmware-file.h"
 
 /* How long the read waits for the root file system (60 s), and each step of the wait (100 ms). */
-#define ROOT_WAIT_TICKS		(60U * KERN_CLOCK_HZ)
-#define ROOT_POLL_TICKS		(KERN_CLOCK_HZ / 10U)
+#define ROOT_WAIT_TICKS		kern_ms_to_ticks(60000U)
+#define ROOT_POLL_TICKS		kern_ms_to_ticks(100U)
 
 /*
  * The file being read.

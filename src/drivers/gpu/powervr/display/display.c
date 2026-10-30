@@ -1130,7 +1130,7 @@ output_wait(
 	}
 
 	request->completed_sequence = display->sequence;
-	request->present_time_ns = display->present_tick * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	request->present_time_ns = kern_ticks_to_ns(display->present_tick);
 	request->generation = POWERVR_DISPLAY_GENERATION;
 
 	mutex_unlock(&display->mutex);
@@ -1911,7 +1911,7 @@ flip_report(
 
 	/* Not yet time, or nothing to say. */
 	now = sched_ticks();
-	if (now - display->report_tick < KERN_MS_TO_TICKS(POWERVR_FLIP_REPORT_MS))
+	if (now - display->report_tick < kern_ms_to_ticks(POWERVR_FLIP_REPORT_MS))
 		return;
 	presents = display->report_presents;
 	display->report_tick = now;

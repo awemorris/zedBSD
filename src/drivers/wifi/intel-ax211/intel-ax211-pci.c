@@ -77,7 +77,7 @@
 #define AX211_DIRECT_EVENT_LIMIT 64U
 #define AX211_DEFERRED_EVENT_LIMIT 16U
 #define AX211_DIRECT_TIMEOUT_US 1000000U
-#define AX211_LIFECYCLE_JOIN_TICKS (5U * KERN_CLOCK_HZ)
+#define AX211_LIFECYCLE_JOIN_TICKS kern_ms_to_ticks(5000U)
 
 /*
  * How many times in a row a recovery may restart the epoch by itself before
@@ -4115,7 +4115,7 @@ ax211_pci_command_timeout(
 			remaining_us = AX211_DIRECT_TIMEOUT_US;
 		} else {
 			remaining_us =
-				remaining_ticks * 1000000U / KERN_CLOCK_HZ;
+				kern_ticks_to_us(remaining_ticks);
 
 			/* Rounds a remainder below 1 us up to 1 us. */
 			if (remaining_us == 0U)
@@ -6677,10 +6677,10 @@ ax211_pci_log_rejection(
 		return 0;
 
 	/* Sets the next deadline one second ahead, saturating the clock. */
-	if (UINT64_MAX - now < KERN_CLOCK_HZ)
+	if (UINT64_MAX - now < kern_ms_to_ticks(1000U))
 		controller->reject_log_deadline = UINT64_MAX;
 	else
-		controller->reject_log_deadline = now + KERN_CLOCK_HZ;
+		controller->reject_log_deadline = now + kern_ms_to_ticks(1000U);
 
 	/* A diagnostic may be logged. */
 	return 1;

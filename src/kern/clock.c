@@ -36,6 +36,13 @@
 static volatile uint64_t kernel_ticks;
 
 /*
+ * The ticks in a second.  It is the rate the HAL runs the periodic timer
+ * at, and only this file reads it: everything else asks the functions
+ * below to convert.  It is at most one tick per nanosecond.
+ */
+static const uint32_t tick_rate = HAL_TIMER_FREQUENCY;
+
+/*
  * The counter's value when CPU 0 last entered suspend-to-idle, and the
  * counts left over from the ticks it brought forward (ws052-p006).  Only
  * CPU 0's idle loop touches them, around hal_cpu_idle_suspend(); begun is
@@ -54,6 +61,8 @@ static atomic_uint_t realtime_writer;
 
 static void realtime_write_begin(void);
 static void realtime_write_end(void);
+static uint64_t scale_floor(uint64_t value, uint64_t multiplier, uint64_t divisor);
+static uint64_t scale_ceil(uint64_t value, uint64_t multiplier, uint64_t divisor);
 
 /*
  * Initializes the tick counter and seeds the realtime offset from the RTC.
@@ -163,7 +172,7 @@ kern_clock_idle_suspend_end(
 		return;
 
 	/* The counts of one tick; a counter slower than the tick cannot measure it. */
-	per_tick = frequency / HAL_TIMER_FREQUENCY;
+	per_tick = frequency / tick_rate;
 	if (per_tick == 0U)
 		return;
 
@@ -271,12 +280,141 @@ clock_milliseconds(
 	/* Scales the tick counter to milliseconds. */
 	ticks = clock_ticks();
 
-	/*
-	 * Reports the elapsed milliseconds.  1000 / KERN_CLOCK_HZ is not used:
-	 * it is zero once the tick is finer than a millisecond, and wrong
-	 * whenever the rate does not divide a thousand.
-	 */
+	/* Reports the elapsed milliseconds. */
 	return kern_ticks_to_ms(ticks);
+}
+
+/*
+ * Converts a time in milliseconds to ticks, rounding up.
+ *
+ * At 100 Hz a 2 ms recovery interval becomes one tick, 10 ms, and never
+ * zero, which would not wait at all.  Zero stays zero.
+ */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	/* Reports the ticks that cover the time. */
+	return scale_ceil(milliseconds, tick_rate, 1000U);
+}
+
+/*
+ * Converts a time in microseconds to ticks, rounding up.
+ */
+uint64_t
+kern_us_to_ticks(
+	uint64_t microseconds)
+{
+	/* Reports the ticks that cover the time. */
+	return scale_ceil(microseconds, tick_rate, 1000000U);
+}
+
+/*
+ * Converts a time in nanoseconds to ticks, rounding up.
+ */
+uint64_t
+kern_ns_to_ticks(
+	uint64_t nanoseconds)
+{
+	/* Reports the ticks that cover the time. */
+	return scale_ceil(nanoseconds, tick_rate, KERN_NSEC_PER_SEC);
+}
+
+/*
+ * Converts a number of ticks to milliseconds, rounding down.
+ */
+uint64_t
+kern_ticks_to_ms(
+	uint64_t ticks)
+{
+	/* Reports no more time than the ticks have counted. */
+	return scale_floor(ticks, 1000U, tick_rate);
+}
+
+/*
+ * Converts a number of ticks to microseconds, rounding down.
+ */
+uint64_t
+kern_ticks_to_us(
+	uint64_t ticks)
+{
+	/* Reports no more time than the ticks have counted. */
+	return scale_floor(ticks, 1000000U, tick_rate);
+}
+
+/*
+ * Converts a number of ticks to nanoseconds, rounding down.
+ */
+uint64_t
+kern_ticks_to_ns(
+	uint64_t ticks)
+{
+	/* Reports no more time than the ticks have counted. */
+	return scale_floor(ticks, KERN_NSEC_PER_SEC, tick_rate);
+}
+
+/*
+ * Converts a number of ticks to a count at another fixed rate, rounding down.
+ *
+ * This is how the kernel hands a CPU time to a user ABI whose unit is fixed
+ * (times(2), the process list), whatever the tick is on this machine.  The
+ * rate is at most one count per nanosecond.
+ */
+uint64_t
+kern_ticks_to_rate(
+	uint64_t ticks,
+	uint64_t rate)
+{
+	/* Reports the whole counts the ticks have reached. */
+	return scale_floor(ticks, rate, tick_rate);
+}
+
+/*
+ * Converts a number of ticks to a timespec, rounding down.
+ */
+void
+kern_ticks_to_timespec(
+	uint64_t ticks,
+	struct timespec *result)
+{
+	uint64_t fraction;
+
+	/* Whole seconds apart from the rest, so the product cannot overflow. */
+	fraction = ticks % tick_rate;
+	result->tv_sec = (time_t)(ticks / tick_rate);
+	result->tv_nsec = (long)(fraction * KERN_NSEC_PER_SEC / tick_rate);
+}
+
+/*
+ * Reports the time between two ticks, in nanoseconds, rounded up.
+ *
+ * It is the finest step clock_ticks() takes, and the longest a deadline
+ * can wait past its time before it is noticed.  Like the rate, it is
+ * asked for each time and never kept as a constant.
+ */
+uint64_t
+kern_clock_resolution_ns(
+	void)
+{
+	/* Reports one tick, rounded up so it is never shorter than it is. */
+	return (KERN_NSEC_PER_SEC + tick_rate - 1U) / tick_rate;
+}
+
+/*
+ * Reports the ticks in a second.
+ *
+ * Only a report whose ABI states its unit as a rate (hw.cputimes), or
+ * arithmetic that must stay in whole ticks, asks for it; a time is
+ * converted with the functions above instead.  The rate is fixed at boot
+ * today, but a caller asks each time it needs it and never keeps it as a
+ * constant.
+ */
+uint32_t
+kern_clock_tick_rate(
+	void)
+{
+	/* Reports the rate the tick counter advances at. */
+	return tick_rate;
 }
 
 /*
@@ -440,18 +578,18 @@ kern_duration_to_ticks_ceil(
 
 	/* Rejects whole seconds that would overflow the tick count. */
 	seconds = (uint64_t)duration->tv_sec;
-	if (seconds > UINT64_MAX / KERN_CLOCK_HZ)
+	if (seconds > UINT64_MAX / tick_rate)
 		return EOVERFLOW;
 
 	/* Rounds the nanosecond fraction up to whole ticks. */
+	fraction = ((uint64_t)duration->tv_nsec * tick_rate +
+	    KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
 
 	/* Rejects a total that would overflow the tick count. */
-	fraction = ((uint64_t)duration->tv_nsec * KERN_CLOCK_HZ +
-	    KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
-	if (seconds * KERN_CLOCK_HZ > UINT64_MAX - fraction)
+	if (seconds * tick_rate > UINT64_MAX - fraction)
 		return EOVERFLOW;
 
-	*ticks = seconds * KERN_CLOCK_HZ + fraction;
+	*ticks = seconds * tick_rate + fraction;
 
 	/* Reports the converted tick count. */
 	return 0;
@@ -507,6 +645,7 @@ kern_clock_gettime(
 	struct kern_timespec monotonic;
 	struct kern_timespec value;
 	struct kern_timespec offset;
+	struct timespec uptime;
 	uint64_t ticks;
 	unsigned before;
 	unsigned after;
@@ -520,9 +659,9 @@ kern_clock_gettime(
 
 	/* Converts the tick counter to monotonic time. */
 	ticks = clock_ticks();
-	monotonic.tv_sec = (int64_t)(ticks / KERN_CLOCK_HZ);
-	monotonic.tv_nsec = (int32_t)((ticks % KERN_CLOCK_HZ) *
-	    (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ));
+	kern_ticks_to_timespec(ticks, &uptime);
+	monotonic.tv_sec = (int64_t)uptime.tv_sec;
+	monotonic.tv_nsec = (int32_t)uptime.tv_nsec;
 	value = monotonic;
 
 	/* Adds the realtime offset read consistently under the sequence lock. */
@@ -565,7 +704,7 @@ kern_clock_getres(
 	/* Reports one tick when a result is wanted. */
 	if (result != NULL) {
 		result->tv_sec = 0;
-		result->tv_nsec = (long)(KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+		result->tv_nsec = (long)kern_clock_resolution_ns();
 	}
 
 	/* Reports a supported clock. */
@@ -703,7 +842,7 @@ kern_usleep_range(unsigned min_us, unsigned max_us)
 	 * its deadline and yield the CPU (waitq_sleep -> sched_sleep_locked), so
 	 * another thread on this CPU runs; on wake we re-read the monotonic counter
 	 * and only return once at least min_us has elapsed.  This is coarse: the
-	 * actual wake is at tick granularity (1/KERN_CLOCK_HZ) and may be LATER than [min,max_us]
+	 * actual wake is at tick granularity (kern_clock_resolution_ns()) and may be LATER than [min,max_us]
 	 * -- callers (PCODE re-request, register slow polls) MUST re-check their
 	 * condition after the sleep, which they do.  waitq_sleep removes the wait
 	 * token on return, so no timer state outlives this frame.
@@ -742,4 +881,59 @@ kern_usleep_range(unsigned min_us, unsigned max_us)
 		spin_unlock_irqrestore(&lk, enabled);
 		/* woken (tick expiry or early): the loop re-checks the SAME earliest. */
 	}
+}
+
+/*
+ * Scales a count by multiplier / divisor, rounding down and saturating.
+ *
+ * Whole divisors are taken apart from the rest so that the product of the
+ * rest cannot overflow; both factors are at most a billion.
+ */
+static uint64_t
+scale_floor(
+	uint64_t value,
+	uint64_t multiplier,
+	uint64_t divisor)
+{
+	uint64_t whole;
+	uint64_t part;
+
+	/* A count of whole divisors too large to scale saturates. */
+	whole = value / divisor;
+	if (multiplier != 0U && whole > UINT64_MAX / multiplier)
+		return UINT64_MAX;
+
+	/* The rest, scaled on its own; the sum saturates as well. */
+	part = value % divisor * multiplier / divisor;
+	if (whole * multiplier > UINT64_MAX - part)
+		return UINT64_MAX;
+
+	/* Succeeded: the scaled count. */
+	return whole * multiplier + part;
+}
+
+/*
+ * Scales a count by multiplier / divisor, rounding up and saturating.
+ */
+static uint64_t
+scale_ceil(
+	uint64_t value,
+	uint64_t multiplier,
+	uint64_t divisor)
+{
+	uint64_t whole;
+	uint64_t part;
+
+	/* A count of whole divisors too large to scale saturates. */
+	whole = value / divisor;
+	if (multiplier != 0U && whole > UINT64_MAX / multiplier)
+		return UINT64_MAX;
+
+	/* The rest, scaled on its own and rounded up; the sum saturates as well. */
+	part = (value % divisor * multiplier + divisor - 1U) / divisor;
+	if (whole * multiplier > UINT64_MAX - part)
+		return UINT64_MAX;
+
+	/* Succeeded: the scaled count. */
+	return whole * multiplier + part;
 }

@@ -245,7 +245,7 @@
  * How long the vertical blanks may stop before a wait for them gives up
  * and the output counts as lost: six frames at 60 Hz.
  */
-#define DC_STALL_TICKS		KERN_MS_TO_TICKS(100U)
+#define DC_STALL_TICKS		kern_ms_to_ticks(100U)
 
 /*
  * How far before the next blank a commit is still taken at that blank, in

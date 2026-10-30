@@ -1,15 +1,15 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 21:55（Q1）
+最終更新: 2026-10-30 23:00（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。zedBSD-firmware を push し branch を merge（b4e549bfc）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
-| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（q1721）。p008: Pi の共通化（rpi-common）と ODROID-C5 の分離（s905x5m、bsp-s905x5m-common・bsp-odroidc5） | p009 kernel の header の _private.h → p006 規約 |
-| P3 | [WS332](ws332/ws.md) | tick の周波数を API で扱い可変にする（KERN_CLOCK_HZ の削除） | 起動（q1722）。p001 設計 | p002 KERN_CLOCK_HZ の削除（175 か所） → 可変の tick |
+| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | p008 済み（merge fcea07e74）。watch.c の HVS を Pi の側へ移す小さな残り → p009 | p009 kernel の header の _private.h → p006 規約 |
+| P3 | — | — | 返却（WS332: p001・p002 cleared、KERN_CLOCK_HZ を削除、wlan の UAPI の期限の不具合を直した） | WS332 p003（率を仮定する残りの literal）・p004 規約は未割当 |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
@@ -81,7 +81,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | p004 | i915 の map（write-combine・読み出しだけ）と MSI、試験の代役 | cleared（2026-10-30、ktest-sync の 5330 は未実施） |
 | p005 | Pi 4・Pi 5・VisionFive 2・ODROID-C5 に /dev/graphics と console を PC/AT の形で（GPU の最初の描画で console が framebuffer から離れる）、pc98 の 3 か所 | 実装済み（Pi 4 の QEMU で login と描き直し、VF2 の実機で起動と /dev/graphics。残り: VF2 の画面の目視、amd64 の Venus、Pi の GPU の最初の flip で framebuffer を手放せない（EBUSY）） |
 | p007 | HAL の early console の framebuffer の窓を kernel が外せる形に（amd64 の fb_window を arm64・riscv64 へ） | cleared（2026-10-30、QEMU Pi 4 と VF2 の実機で窓が外れる事を確かめた） |
-| p008 | Pi の共通化と ODROID-C5 の分離、残りの HAL_ARCH_* | in-progress（P2） |
+| p008 | Pi の共通化と ODROID-C5 の分離、残りの HAL_ARCH_* | 実装済み（20 port の build、QEMU Pi 4、driver の HAL の grep 0）。残り: watch.c の HVS を Pi の側へ |
 | p009 | kernel の header から HAL を分ける（_private.h） | planned（P2） |
 | p006 | 規約の全文の見直し | 未作成 |
 
@@ -124,9 +124,10 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 | Phase | 内容 | 状態 |
 | --- | --- | --- |
-| p001 | 設計（時間の API、可変の tick、HAL の timer） | in-progress（P3） |
-| p002 | KERN_CLOCK_HZ の削除（175 か所） | planned |
-| p003〜 | 可変の tick と mode（ゲーム 1000・通常 100・待機 10 Hz） | 設計の後 |
+| p001 | 設計（時間の API、今の率を取る口） | cleared（2026-10-30） |
+| p002 | KERN_CLOCK_HZ の削除、wlan の UAPI を ns に | cleared（2026-10-30） |
+| p003 | 率を仮定する残り（tick の数の literal、+1） | planned |
+| p004 | 規約の見直し | planned |
 
 ## ユーザーの判断を待つ事
 

@@ -335,7 +335,7 @@ i915_vkc_wait_node(
 		if (device->gpu != NULL && device->vk != NULL)
 			return 0;
 
-		(void)drv_i915_wait_for_completion(&nap, sched_ticks() + KERN_CLOCK_HZ / 20U);
+		(void)drv_i915_wait_for_completion(&nap, sched_ticks() + kern_ms_to_ticks(50U));
 	}
 
 	/* The node never came. */

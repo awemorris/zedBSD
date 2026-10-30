@@ -818,7 +818,7 @@ drv_i915_wait_vblank(
 		frame0 = read_frame(frame_ctx);
 
 	/* Waits in whole ticks, one tick more than the timeout asks for. */
-	deadline = sched_ticks() + ((uint64_t)timeout_ms * KERN_CLOCK_HZ + 999U) / 1000U + 1U;
+	deadline = sched_ticks() + kern_ms_to_ticks(timeout_ms) + 1U;
 	satisfied = 0;
 	for (;;) {
 		/* Enough new vblanks, and the frame counter moved: the wait is over. */

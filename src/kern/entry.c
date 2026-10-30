@@ -378,7 +378,7 @@ kernel_entry(
 		   "[cpu %u, memory %uMB, timer %ums]\n",
 		   hal_cpu_count(),
 		   (unsigned)(hal_pmem_get_total_size() / (1024U * 1024U)),
-		   (unsigned)(1000U / HAL_TIMER_FREQUENCY));
+		   (unsigned)(kern_clock_resolution_ns() / 1000000U));
 	kern_logf("boot: CPUs ready: %u\n", hal_cpu_count());
 	kern_log_boot_step("the HAL and the CPUs are ready");
 

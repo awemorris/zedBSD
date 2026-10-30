@@ -25,13 +25,11 @@ struct spinlock;
 #define SCHED_PRIORITY_DEFAULT	8
 /*
  * The time a thread runs before another of its priority gets a turn.  It
- * is set in milliseconds and counted in ticks of this platform's timer,
- * at least one.
+ * is set in milliseconds and counted in ticks, at least one: the
+ * conversion rounds up.
  */
 #define SCHED_QUANTUM_MS	10U
-#define SCHED_QUANTUM_TICKS						\
-	((uint32_t)(KERN_MS_TO_TICKS(SCHED_QUANTUM_MS) != 0U ?		\
-	    KERN_MS_TO_TICKS(SCHED_QUANTUM_MS) : 1U))
+#define SCHED_QUANTUM_TICKS	((uint32_t)kern_ms_to_ticks(SCHED_QUANTUM_MS))
 
 enum sched_queue_kind {
 	SCHED_QUEUE_NONE = 0,

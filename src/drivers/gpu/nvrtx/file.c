@@ -36,8 +36,8 @@
 #define FILE_PATH_BYTES			160U
 
 /* How long a read waits for the root file system (60 s), and each step of the wait (100 ms). */
-#define FILE_ROOT_WAIT_TICKS		(60U * KERN_CLOCK_HZ)
-#define FILE_ROOT_POLL_TICKS		(KERN_CLOCK_HZ / 10U)
+#define FILE_ROOT_WAIT_TICKS		kern_ms_to_ticks(60000U)
+#define FILE_ROOT_POLL_TICKS		kern_ms_to_ticks(100U)
 
 /* The most bytes of a section table, or of the names section, read into kernel memory. */
 #define FILE_SECTION_TABLE_MAX		0x10000U

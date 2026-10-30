@@ -532,7 +532,7 @@ drv_i915_present_display_wait(
 
 	/* The newest sequence, the tick it completed at, and the generation. */
 	request->completed_sequence = rd->sequence;
-	request->present_time_ns = rd->present_tick * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	request->present_time_ns = kern_ticks_to_ns(rd->present_tick);
 	(void)drv_i915_display_resident_identity(display, &display_id, &generation, &connected);
 	request->generation = generation;
 
@@ -863,7 +863,7 @@ drv_i915_present_hold_start(
 	 */
 	display->window.holding = 1;
 	display->window.hold_since = sched_ticks();
-	display->window.hold_until = display->window.hold_since + KERN_MS_TO_TICKS(I915_PRESENT_HOLD_MS);
+	display->window.hold_until = display->window.hold_since + kern_ms_to_ticks(I915_PRESENT_HOLD_MS);
 	display->window.stale_buffers = 3U;
 
 	/* Succeeded: the output holds the last picture. */
@@ -2008,7 +2008,7 @@ i915_present_head_wait(
 
 	/* The newest sequence, the tick it completed at, and the connector's generation. */
 	request->completed_sequence = head->sequence;
-	request->present_time_ns = head->present_tick * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	request->present_time_ns = kern_ticks_to_ns(head->present_tick);
 	request->generation = head->generation;
 	error = drv_i915_display_output_connector(display, head->connector, &found);
 	if (error == 0)

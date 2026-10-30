@@ -458,7 +458,7 @@ sleep_reason(
 		note = __atomic_load_n(&sleep_note, __ATOMIC_ACQUIRE);
 		if (note != KERN_SLEEP_WAKE_NONE)
 			break;
-		sched_sleep(sched_ticks() + KERN_MS_TO_TICKS(SLEEP_SETTLE_STEP_MS));
+		sched_sleep(sched_ticks() + kern_ms_to_ticks(SLEEP_SETTLE_STEP_MS));
 	}
 
 	/* A note is the reason. */

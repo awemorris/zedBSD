@@ -2351,8 +2351,8 @@ step(
 	uint64_t tick_ns;
 	unsigned direction;
 
-	/* The next tick of the kernel's clock (KERN_CLOCK_HZ a second), and the earliest event before it. */
-	tick_ns = (now_ns / (1000000000ULL / KERN_CLOCK_HZ) + 1U) * (1000000000ULL / KERN_CLOCK_HZ);
+	/* The next tick of the kernel's clock (MODEL_TICK_HZ a second), and the earliest event before it. */
+	tick_ns = (now_ns / (1000000000ULL / MODEL_TICK_HZ) + 1U) * (1000000000ULL / MODEL_TICK_HZ);
 	next_ns = tick_ns;
 	if (held_ack != NULL && held_ack_until_ns > now_ns && held_ack_until_ns < next_ns)
 		next_ns = held_ack_until_ns;

@@ -195,7 +195,7 @@ kern_random_read(
 
 	/* Replaces the key from the pool now and then. */
 	if (random_is_seeded &&
-	    sched_ticks() - random_reseed_tick >= KERN_MS_TO_TICKS(RANDOM_RESEED_MS))
+	    sched_ticks() - random_reseed_tick >= kern_ms_to_ticks(RANDOM_RESEED_MS))
 		reseed_locked();
 
 	/* Makes the output a chunk at a time so other callers can interleave. */

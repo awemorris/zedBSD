@@ -1132,7 +1132,7 @@ i915_bootfb_wait(
 
 	/* The newest sequence, the tick it completed at, and the one generation. */
 	request->completed_sequence = rd->sequence;
-	request->present_time_ns = latched_tick * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	request->present_time_ns = kern_ticks_to_ns(latched_tick);
 	request->generation = I915_BOOTFB_GENERATION;
 
 	mutex_unlock(&rd->mutex);

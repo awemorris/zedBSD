@@ -247,7 +247,7 @@ process_timer_gettime(
 			if (timer->realtime_absolute)
 				units = KERN_NSEC_PER_SEC;
 			else
-				units = KERN_CLOCK_HZ;
+				units = kern_clock_tick_rate();
 			units_to_timespec(remaining, units, &result->it_value);
 			units_to_timespec(timer->interval, units, &result->it_interval);
 		}
@@ -324,11 +324,11 @@ process_timer_settime(
 	 * the locked lookup; only the selected domain's conversion result is
 	 * authoritative.
 	 */
-	tick_error = timespec_to_units(&requested->it_value, KERN_CLOCK_HZ,
+	tick_error = timespec_to_units(&requested->it_value, kern_clock_tick_rate(),
 	    &tick_value);
 	if (tick_error == 0)
 		tick_error = timespec_to_units(&requested->it_interval,
-		    KERN_CLOCK_HZ, &tick_interval);
+		    kern_clock_tick_rate(), &tick_interval);
 	if ((flags & TIMER_ABSTIME) != 0) {
 		realtime_error = timespec_to_units(&requested->it_value,
 		    KERN_NSEC_PER_SEC, &realtime_value);
@@ -395,7 +395,7 @@ process_timer_settime(
 		if (timer->realtime_absolute)
 			units = KERN_NSEC_PER_SEC;
 		else
-			units = KERN_CLOCK_HZ;
+			units = kern_clock_tick_rate();
 		units_to_timespec(remaining, units, &old_snapshot.it_value);
 		units_to_timespec(timer->interval, units, &old_snapshot.it_interval);
 	}

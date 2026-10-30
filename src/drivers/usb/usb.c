@@ -975,7 +975,7 @@ drv_usb_trace_now_ns(
 	/* The counter; a machine without one has only the clock's ticks. */
 	have = kern_rtc_read_counter(&counter, &frequency);
 	if (!have || frequency == 0U)
-		return sched_ticks() * (1000000000ULL / KERN_CLOCK_HZ);
+		return kern_ticks_to_ns(sched_ticks());
 
 	/* Whole seconds, then the rest, so the product does not overflow. */
 	seconds = counter / frequency;

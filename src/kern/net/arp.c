@@ -34,7 +34,7 @@
 #define ARP_OPERATION_REQUEST 1U
 #define ARP_OPERATION_REPLY 2U
 #define ARP_RETRY_COUNT 4U
-#define ARP_RETRY_TICKS (KERN_CLOCK_HZ / 4U)
+#define ARP_RETRY_TICKS kern_ms_to_ticks(250U)
 
 struct arp_entry {
 	struct net_device *device;

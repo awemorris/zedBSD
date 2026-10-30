@@ -354,7 +354,7 @@ ms_deadline(
 	uint64_t ticks;
 
 	/* Rounds up, so a short bound still waits one tick. */
-	ticks = ((uint64_t)milliseconds * KERN_CLOCK_HZ + 999U) / 1000U;
+	ticks = kern_ms_to_ticks(milliseconds);
 	if (ticks == 0U)
 		ticks = 1;
 

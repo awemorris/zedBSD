@@ -822,7 +822,7 @@ ghci_scan_now_ns(void)
 	ticks = clock_ticks();
 
 	/* Succeeded: the time. */
-	return ticks * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	return kern_ticks_to_ns(ticks);
 }
 
 /*

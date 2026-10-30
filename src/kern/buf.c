@@ -80,8 +80,8 @@
  * BUF_GATHER_HOLD at a time under the cache lock, and looks at
  * BUF_WRITEBACK_SCAN lines from the oldest for one to start at.
  */
-#define BUF_FLUSH_INTERVAL	(KERN_CLOCK_HZ)
-#define BUF_FLUSH_AGE		(2U * KERN_CLOCK_HZ)
+#define BUF_FLUSH_INTERVAL	kern_ms_to_ticks(1000U)
+#define BUF_FLUSH_AGE		kern_ms_to_ticks(2000U)
 #define BUF_DIRTY_SHARE		4U
 #define BUF_DIRTY_SMALL		(UINT64_C(32) * 1024U * 1024U)
 #define BUF_WRITEBACK_SCAN	1024U

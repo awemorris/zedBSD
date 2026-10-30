@@ -992,7 +992,7 @@ i915_xd9_flip_latch(
 	uint32_t faults;
 
 	/* Reads the live surface until it is the one asked for, or the time is up. */
-	deadline = sched_ticks() + ((uint64_t)I915_XD9_FLIP_LATCH_MS * KERN_CLOCK_HZ + 999U) / 1000U + 1U;
+	deadline = sched_ticks() + kern_ms_to_ticks(I915_XD9_FLIP_LATCH_MS) + 1U;
 	for (;;) {
 		live = drv_i915_xd9_plane_surf_live(&flip->io, flip->readout.pipe);
 		if (live == surf)

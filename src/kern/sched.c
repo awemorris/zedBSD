@@ -2819,7 +2819,7 @@ perf_report_if_due(
 	/* Waits for the interval to pass since the last report. */
 	now = clock_ticks();
 	last = atomic_u64_load_acquire(&sched_perf_report_tick);
-	interval = KERN_MS_TO_TICKS(SCHED_PERF_REPORT_MS);
+	interval = kern_ms_to_ticks(SCHED_PERF_REPORT_MS);
 	if (now - last < interval)
 		return;
 

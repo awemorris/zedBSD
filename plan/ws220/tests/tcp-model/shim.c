@@ -159,12 +159,74 @@ model_device(
 	return &model_devices[host];
 }
 
-/* The clock, in kernel ticks (KERN_CLOCK_HZ a second). */
+/* The clock, in kernel ticks (MODEL_TICK_HZ a second, the rate of amd64). */
 uint64_t
 sched_ticks(
 	void)
 {
-	return model_tick_base + model_now_us / (1000000U / KERN_CLOCK_HZ);
+	return model_tick_base + model_now_us / (1000000U / MODEL_TICK_HZ);
+}
+
+/* The kernel's conversions at the model's tick: a wait rounds up, a report rounds down. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	return (milliseconds * MODEL_TICK_HZ + 999U) / 1000U;
+}
+
+uint64_t
+kern_us_to_ticks(
+	uint64_t microseconds)
+{
+	return (microseconds * MODEL_TICK_HZ + 999999U) / 1000000U;
+}
+
+uint64_t
+kern_ticks_to_ms(
+	uint64_t ticks)
+{
+	return ticks * 1000U / MODEL_TICK_HZ;
+}
+
+uint64_t
+kern_ticks_to_us(
+	uint64_t ticks)
+{
+	return ticks * (1000000U / MODEL_TICK_HZ);
+}
+
+void
+kern_ticks_to_timespec(
+	uint64_t ticks,
+	struct timespec *result)
+{
+	result->tv_sec = (time_t)(ticks / MODEL_TICK_HZ);
+	result->tv_nsec = (long)(ticks % MODEL_TICK_HZ * (KERN_NSEC_PER_SEC / MODEL_TICK_HZ));
+}
+
+int
+kern_duration_to_ticks_ceil(
+	const struct timespec *duration,
+	uint64_t *ticks)
+{
+	*ticks = (uint64_t)duration->tv_sec * MODEL_TICK_HZ +
+	    ((uint64_t)duration->tv_nsec * MODEL_TICK_HZ + KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
+	return 0;
+}
+
+uint64_t
+kern_clock_resolution_ns(
+	void)
+{
+	return KERN_NSEC_PER_SEC / MODEL_TICK_HZ;
+}
+
+uint32_t
+kern_clock_tick_rate(
+	void)
+{
+	return MODEL_TICK_HZ;
 }
 
 /* The monotonic counter, the virtual clock at a megahertz (the receive buffer's sizing times the round trip with it). */

@@ -701,7 +701,7 @@ present_present(
 		/* The frame counts: its number and the time it was shown. */
 		node->sequence++;
 		node->presents++;
-		node->shown_time_ns = sched_ticks() * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+		node->shown_time_ns = kern_ticks_to_ns(sched_ticks());
 		request->sequence = node->sequence;
 
 		/* The console's surface is off the screen: its text stops drawing there. */
@@ -898,7 +898,7 @@ present_refresh(
 	timeout_ns = request->timeout_ns;
 	if (timeout_ns > PRESENT_REFRESH_MAX_NS)
 		timeout_ns = PRESENT_REFRESH_MAX_NS;
-	deadline = sched_ticks() + (timeout_ns * KERN_CLOCK_HZ + KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
+	deadline = sched_ticks() + kern_ns_to_ticks(timeout_ns);
 
 	/* Whether the lease's holder powered the display off. */
 	mutex_lock(&node->display_lock);

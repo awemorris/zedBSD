@@ -193,11 +193,12 @@ socket_setsockopt_common(
 	socklen_t length)
 {
 	struct timeval timeout;
+	struct timespec duration;
 	uint64_t ticks;
-	uint64_t fraction;
 	unsigned long irq;
 	int enabled;
 	int requested;
+	int error;
 
 	/* Only socket-level options are handled here. */
 	if (socket == NULL || level != SOL_SOCKET)
@@ -264,14 +265,11 @@ socket_setsockopt_common(
 	    timeout.tv_usec < 0 ||
 	    timeout.tv_usec >= 1000000)
 		return EINVAL;
-	if ((uint64_t)timeout.tv_sec > UINT64_MAX / KERN_CLOCK_HZ)
-		return EOVERFLOW;
-	ticks = (uint64_t)timeout.tv_sec * KERN_CLOCK_HZ;
-	fraction = ((uint64_t)timeout.tv_usec *
-	    KERN_CLOCK_HZ + 999999U) / 1000000U;
-	if (ticks > UINT64_MAX - fraction)
-		return EOVERFLOW;
-	ticks += fraction;
+	duration.tv_sec = timeout.tv_sec;
+	duration.tv_nsec = timeout.tv_usec * 1000L;
+	error = kern_duration_to_ticks_ceil(&duration, &ticks);
+	if (error != 0)
+		return error;
 
 	/* Records the timeout. */
 	irq = spin_lock_irqsave(&socket->lock);
@@ -299,6 +297,7 @@ socket_getsockopt_common(
 	socklen_t *length)
 {
 	struct timeval timeout;
+	struct timespec duration;
 	uint64_t ticks;
 	unsigned long irq;
 	int error;
@@ -390,9 +389,9 @@ socket_getsockopt_common(
 
 	spin_unlock_irqrestore(&socket->lock, irq);
 
-	timeout.tv_sec = (time_t)(ticks / KERN_CLOCK_HZ);
-	timeout.tv_usec = (long)((ticks % KERN_CLOCK_HZ) *
-	    (1000000U / KERN_CLOCK_HZ));
+	kern_ticks_to_timespec(ticks, &duration);
+	timeout.tv_sec = duration.tv_sec;
+	timeout.tv_usec = duration.tv_nsec / 1000L;
 	kern_memcpy(value, &timeout, sizeof(timeout));
 	*length = sizeof(timeout);
 

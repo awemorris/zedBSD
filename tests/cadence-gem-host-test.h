@@ -30,11 +30,17 @@
 #include <drivers/ethernet/mii-phy.h>
 #include <drivers/platform/rpi5/rp1-ethernet.h>
 
-/* The scheduler's tick rate the fake clock counts in. */
-#define KERN_CLOCK_HZ			1000U
-
-/* A constant number of milliseconds as scheduler ticks, rounded up. */
-#define KERN_MS_TO_TICKS(milliseconds)	(((uint64_t)(milliseconds) * KERN_CLOCK_HZ + 999U) / 1000U)
+/*
+ * A number of milliseconds as scheduler ticks, rounded up.  The fake clock
+ * counts one tick a millisecond.
+ */
+static inline uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	/* Reports the ticks of the fake clock. */
+	return milliseconds;
+}
 
 /* The lock rank the drivers take their device lock at. */
 enum lock_rank {
@@ -118,6 +124,7 @@ struct net_device_ops {
 	unsigned (*poll_receive)(struct net_device *device, unsigned budget);
 	int (*ioctl)(struct net_device *device, unsigned long request, void *argument);
 	void (*release)(void *driver_data);
+	int (*set_mtu)(struct net_device *device, unsigned mtu);
 };
 
 /* The fields of a network interface that the driver fills in and counts. */

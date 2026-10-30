@@ -38,8 +38,8 @@
 #include "drivers/gpu/amdrdna/amdrdna-regs.h"
 
 /* How long the stage waits for the root file system, and the step of the wait. */
-#define VBIOS_ROOT_WAIT_TICKS		(60U * KERN_CLOCK_HZ)
-#define VBIOS_ROOT_POLL_TICKS		(KERN_CLOCK_HZ / 10U)
+#define VBIOS_ROOT_WAIT_TICKS		kern_ms_to_ticks(60000U)
+#define VBIOS_ROOT_POLL_TICKS		kern_ms_to_ticks(100U)
 
 /*
  * The bytes read from the flash before the image's length is known, and
