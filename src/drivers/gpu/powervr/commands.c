@@ -212,6 +212,16 @@ powervr_command_wait_executed(
 
 /*
  * Sends one command and waits, bounded, for its answer.
+ *
+ * A kernel buffer that is full only means the firmware has not read the
+ * commands before it yet (the kicks of every session share it), so the
+ * send is tried again once a tick within the same bound, as a kick's is,
+ * rather than failing the caller's operation (a resource's creation, a
+ * flush) at once.
+ *
+ * Procedure referenced:
+ * Linux v7.3 drivers/gpu/drm/imagination/pvr_ccb.c
+ * (pvr_kccb_reserve_slot_sync: waits, bounded, for a free slot).
  */
 int
 powervr_command_run(
@@ -220,11 +230,28 @@ powervr_command_run(
 	unsigned milliseconds,
 	uint32_t *answer)
 {
+	uint64_t deadline;
+	uint64_t now;
 	uint32_t slot;
 	int error;
 
-	/* Sends the command. */
-	error = powervr_command_send(core, command, &slot);
+	/* Sends the command, waiting while the kernel's buffer is full. */
+	deadline = ms_deadline(milliseconds);
+	for (;;) {
+		error = powervr_command_send(core, command, &slot);
+		if (error != EBUSY)
+			break;
+
+		/* The bound is spent with the buffer still full. */
+		now = sched_ticks();
+		if (now >= deadline)
+			return ETIMEDOUT;
+
+		/* Sleeps one tick. */
+		sched_sleep(now + 1U);
+	}
+
+	/* The firmware's buffer refused it for another reason. */
 	if (error != 0)
 		return error;
 
