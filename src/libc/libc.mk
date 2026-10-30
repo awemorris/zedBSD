@@ -23,7 +23,7 @@ ZEDBSD_REGEX_SOURCES := src/libc/regex/regcomp.c src/libc/regex/regexec.c \
 ZEDBSD_LIBC_USER_EXTRA_SOURCES := \
 	userland/base/libc/atomic-runtime.c \
 	src/libc/string-extra.c src/libc/fenv.c src/libc/wide-extra.c src/libc/inttypes.c \
-	src/libc/stdlib-extra.c src/libc/sort.c src/libc/time-extra.c src/libc/stdio-extra.c \
+	src/libc/stdlib-extra.c src/libc/sort.c src/libc/time-extra.c src/libc/stdio-extra.c src/libc/scan.c \
 	src/libc/setjmp.c src/libc/err.c src/libc/libgen.c src/libc/search.c src/libc/iconv.c \
 	src/libc/random48.c src/libc/random.c src/libc/xsi-crypto.c \
 	src/libc/ftw.c src/libc/ndbm.c src/libc/realpath.c src/libc/tempnam.c \
@@ -54,6 +54,7 @@ ZEDBSD_LIBC_SOURCES := \
 	src/libc/format.c \
 	src/libc/stdio.c \
 	src/libc/stdio-extra.c \
+	src/libc/scan.c \
 	src/libc/setjmp.c \
 	src/libc/err.c \
 	src/libc/libgen.c \
@@ -92,3 +93,24 @@ libc-opcode-check: libc-objects
 	@echo "zedBSD libc i386 opcode check: PASS"
 
 .PHONY: libc-objects libc-opcode-check
+
+#
+# The host test of the scanf family: scan.c over the host's stdio, its
+# public names renamed so that the host's own scanf stays out of the way.
+# glibc marks the stream nonnull; __nonnull is emptied so that scan.c's
+# check of a missing stream compiles there as it does here.
+#
+
+ZEDBSD_SCANF_HOST_RENAMES := -Dsscanf=zed_sscanf -Dvsscanf=zed_vsscanf \
+	-Dfscanf=zed_fscanf -Dvfscanf=zed_vfscanf -Dscanf=zed_scanf -Dvscanf=zed_vscanf
+
+$(BUILD)/tests/scanf-host-test: tests/scanf-host-test.c src/libc/scan.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=c11 -D_GNU_SOURCE -O2 -fno-builtin -Wall -Wextra -Werror \
+		'-D__nonnull(params)=' $(ZEDBSD_SCANF_HOST_RENAMES) \
+		tests/scanf-host-test.c src/libc/scan.c -lm -o $@
+
+scanf-host-test: $(BUILD)/tests/scanf-host-test
+	$(BUILD)/tests/scanf-host-test
+
+.PHONY: scanf-host-test
