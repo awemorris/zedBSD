@@ -2,7 +2,7 @@
 
 # WS307 インストーラの仕様
 
-- 親: [WS307](ws.md)。作成: [ws307-p001](phase001/phase.md)（P4、2026-10-28）。
+- 親: [WS307](ws.md)。作成: ws307-p001（P4、2026-10-28）。
 - 状態: **確定**（ユーザーの確認事項 U1〜U29・J1〜J5 は回答済み、§15 に原文。J1 は J5 で置き換えた。design-reviewer の 1〜3 回目の指摘は §17 で反映済み、J5 の反映は §17.4。実装の Phase の表は ws.md）。
 - 正はユーザーの原文（[ws.md](ws.md) の「ユーザーの指示と希望の仕様」）。この文書は原文のブラッシュアップで、原文と食い違えば原文が正。
 - 調査の出典は file:行（基点 main 5300ea917。3 回目のレビューの反映は main d483706d4 で確かめた）。
@@ -257,7 +257,7 @@ install-admin（set-user-ID root の helper、1 つの仕事だけ）
 
 ### 5.8 UEFI の boot entry（U5 の回答「Boot####の作成もWSに入れる」）
 
-- 形（2026-10-30 の p007 の改訂 5 で確定。経緯は [proposed/uefi-runtime-window.md](proposed/uefi-runtime-window.md) と [phase007/phase.md](phase007/phase.md)）: firmware の変数は kernel の driver が UEFI の runtime services で読み書きする。driver は HAL を知らず kernel の口（`kern_*`）だけを使う。`include/hal/hal.h` は変えない。
+- 形（2026-10-30 の p007 の改訂 5 で確定。経緯は WS307 の完了の前の `plan/ws307/proposed/uefi-runtime-window.md` と `plan/ws307/phase007/phase.md`、git の履歴にある）: firmware の変数は kernel の driver が UEFI の runtime services で読み書きする。driver は HAL を知らず kernel の口（`kern_*`）だけを使う。`include/hal/hal.h` は変えない。
 - 作る物:
   1. loader → HAL（G1・G3）: UEFI の loader は handoff を v8 にする（`bootloader/include/amd64-handoff.h` の `struct zbl6_handoff_v8_uefi`、v7 の後ろに 32 byte の runtime の部分）。ExitBootServices の直後、firmware の identity の map の上で、`EFI_MEMORY_RUNTIME` の記述子を low block（offset 0xb000、8 KiB まで）に写し、kernel の runtime の窓（`ZBL6_UEFI_RUNTIME_VIRTUAL_BASE` = `0xfffffffe80000000` から 64 MiB、PDPT の slot 506）の中に map の順で詰めた VirtualStart を付けて `SetVirtualAddressMap` を 1 回呼ぶ。成功した時だけ system table の物理 address・記述子の数・大きさ・版を handoff に入れ、flag `ZBL6_HANDOFF_FLAG_UEFI_RUNTIME` を立てる。窓・写しに入らない時と firmware が拒んだ時は渡さず、起動は続ける。
   2. HAL → kernel（G1、HAL の実装の補完）: amd64 の HAL は v8 の runtime の部分を検査して記述子を自分の領域に写し、名前 `uefi.system-table`（system table の物理 address）・`uefi.runtime-map`（記述子の列）・`uefi.runtime-map-count`・`uefi.runtime-map-entry-size`・`uefi.runtime-map-version` で返す（値は 64 bit の word への pointer）。BIOS の起動・v7 以前の loader・検査に通らない時は NULL。

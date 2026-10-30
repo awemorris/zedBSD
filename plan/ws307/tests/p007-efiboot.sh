@@ -11,7 +11,8 @@
 #   4 nouefi  IMAGE with OLD_LOADER (a loader built before the runtime handoff) on its ESP: the kernel boots and
 #             efiboot answers that the variables are not supported
 # With BIOS_IMAGE (an image that also boots from the PC BIOS, ZEDBSD_VARIANT=hybrid), a fifth boot runs nouefi under
-# SeaBIOS.  The summary is the guest's STEP lines and "p007-efiboot: PASS|FAIL OUT".  Output goes to a new
+# SeaBIOS, from an IDE disk of the PC machine (SeaBIOS does not boot the image from NVMe).  The summary is the
+# guest's STEP lines and "p007-efiboot: PASS|FAIL OUT".  Output goes to a new
 # build/ws307-test/p007-efiboot.*.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
@@ -67,12 +68,12 @@ boot "$out/old.img" /usr/share/OVMF/OVMF_VARS_4M.fd "$out/vars-old.fd" nouefi
 if [ -n "$bios_image" ]; then
 	cp --sparse=always "$bios_image" "$out/bios.img"
 	port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-	timeout 900 qemu-system-x86_64 -accel kvm -machine q35 -m 4096 -smp 2 -cpu host \
+	timeout 900 qemu-system-x86_64 -accel kvm -machine pc -m 4096 -smp 2 -cpu host \
 		-device qemu-xhci,id=xhci,p2=8,p3=8 \
-		-drive "if=none,id=boot,file=$out/bios.img,format=raw" -device nvme,serial=zedbsd-boot,drive=boot,bootindex=1 \
+		-drive "if=ide,bus=0,unit=0,file=$out/bios.img,format=raw" \
 		-netdev "user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dhcpstart=10.0.2.15,dns=10.0.2.3,hostfwd=tcp:127.0.0.1:$port-:22" \
 		-device usb-net,bus=xhci.0,port=2,id=ecm,netdev=net0,mac=52:54:00:33:00:01,msos-desc=on \
-		-vga std -display none -no-reboot > "$out/qemu-bios.txt" 2>&1 &
+		-vga std -display none -no-reboot -qmp "unix:$out/qmp-bios.sock,server,nowait" > "$out/qemu-bios.txt" 2>&1 &
 	qemu=$!
 	ssh_guest() {
 		ssh -i plan/tmp/guest/id_ed25519 -p "$port" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -92,7 +93,18 @@ if [ -n "$bios_image" ]; then
 		ssh_guest sh /tmp/p007-steps.sh nouefi | sed 's/^STEP /STEP bios-/; s/^P007 DONE nouefi/P007 DONE bios/' \
 			> "$out/steps-bios.txt" 2>&1 || true
 	else
-		echo "STEP bios-boot fail (no SSH answer)" > "$out/steps-bios.txt"
+		echo "STEP bios-boot fail (no SSH answer, screen in $out/bios-screen.ppm)" > "$out/steps-bios.txt"
+		python3 - "$out/qmp-bios.sock" "$(pwd)/$out/bios-screen.ppm" <<'PY' || true
+import json, socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+s.recv(65536)
+s.send(b'{"execute":"qmp_capabilities"}\n')
+time.sleep(0.5)
+s.recv(65536)
+s.send(json.dumps({"execute": "screendump", "arguments": {"filename": sys.argv[2]}}).encode() + b"\n")
+time.sleep(2)
+PY
 	fi
 	kill "$qemu" 2> /dev/null || true
 	wait "$qemu" 2> /dev/null || true
