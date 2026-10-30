@@ -1,6 +1,6 @@
 #!/bin/sh
 # Host tests of libmedia's software H.264 back end and the decoder layer's switching:
-#   test-backend: h264sw-backend.c against a scripted stand-in for the decoder (every other h264sw-*.c real).
+#   test-backend: h264sw-backend.c against a scripted stand-in for the decoder (every other h264sw-*.c and the vcodec-*.c real).
 #   test-switch:  decoder.c against scripted stand-in back ends (open order, refusal before and after a packet was taken,
 #                 draining, dropping to a key frame, the end before a key frame).
 # ASan and UBSan; the last line is "run-backend: PASS" or "run-backend: FAIL".
@@ -14,7 +14,7 @@ fresh_out "$out"
 
 lib=userland/desktop/libmedia
 modules=""
-for file in $lib/h264sw-*.c; do
+for file in $lib/h264sw-*.c $lib/vcodec-*.c; do
 	case "$file" in
 	*/h264sw-backend.c|*/h264sw-decoder.c) ;;
 	*) modules="$modules $file" ;;

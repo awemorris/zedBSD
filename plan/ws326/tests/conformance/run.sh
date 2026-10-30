@@ -1,6 +1,6 @@
 #!/bin/sh
 # The JVT conformance test of the software H.264 decoder (libmedia's h264sw-*): conform.c is built with every
-# h264sw-*.c except the back end and bits.c, with ASan and UBSan, and run on each stream of
+# h264sw-*.c and vcodec-*.c except the back end, and bits.c, with ASan and UBSan, and run on each stream of
 # plan/ws326/tests/conformance/list.txt (or the <dir>/<name> given) whose zip fetch.sh has unpacked: the bitstream
 # is decoded and each output frame compared with the reference decoder's YUV (size, count, MD5 of each frame).
 #   sh plan/ws326/tests/conformance/run.sh [<dir>/<name>...]
@@ -24,7 +24,7 @@ fresh_out "$out"
 status=0
 
 modules=""
-for file in userland/desktop/libmedia/h264sw-*.c; do
+for file in userland/desktop/libmedia/h264sw-*.c userland/desktop/libmedia/vcodec-*.c; do
 	case "$file" in
 	*/h264sw-backend.c) ;;
 	*) modules="$modules $file" ;;

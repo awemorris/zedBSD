@@ -31,7 +31,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "userland/desktop/libmedia/h264sw-bits.h"
+#include "userland/desktop/libmedia/vcodec-bitreader.h"
 #include "userland/desktop/libmedia/h264sw-context.h"
 #include "userland/desktop/libmedia/h264sw-intra.h"
 #include "userland/desktop/libmedia/h264sw-macroblock.h"
@@ -2347,7 +2347,7 @@ stream_run(
 	/* The trailing bits end the slice data; the reader starts at the first bit. */
 	bitwriter_trailing(&writer);
 	CHECK(writer.overflow == 0);
-	h264sw_bits_init(&ctx.bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&ctx.bits, writer.data, bitwriter_bytes(&writer));
 
 	/* The loop under test, with the real macroblock layer and reconstruction. */
 	status = h264sw_slice_data(&ctx);
@@ -2583,7 +2583,7 @@ check_slice_random(void)
 	total = (unsigned)bitwriter_bytes(&writer);
 	for (length = 0; length <= total; length += 7U) {
 		slice_env(H264SW_SLICE_I);
-		h264sw_bits_init(&ctx.bits, writer.data, length);
+		vcodec_bitreader_init(&ctx.bits, writer.data, length);
 		status = h264sw_slice_data(&ctx);
 		CHECK(status == 0 || status == EINVAL);
 	}
@@ -2602,7 +2602,7 @@ check_slice_random(void)
 			writer.data[index] = (uint8_t)random_next();
 		if (random_next() % 2U == 0U)
 			writer.data[0] = (uint8_t)(0x80U | (random_next() % 128U));
-		h264sw_bits_init(&ctx.bits, writer.data, length);
+		vcodec_bitreader_init(&ctx.bits, writer.data, length);
 		status = h264sw_slice_data(&ctx);
 		CHECK(status == 0 || status == EINVAL || status == ENOTSUP);
 	}

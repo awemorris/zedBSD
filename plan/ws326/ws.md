@@ -22,6 +22,7 @@
 - 決定 3 の解釈: H.265 でも使える部分（例: bit の読み、Exp-Golomb、NAL・RBSP（emulation prevention）、CABAC の算術の engine と状態の遷移の表、frame・plane の確保、DPB・出力の順の共通の部分、試験の道具）は `h264sw` の名前でなく codec に依らない名前の module にする。
   今動いている実装の Phase（header は凍結）を乱さないため、名前の移しは p026（適合の試験 p022 の後、規約の見直し p025 の前）で行い、単体試験と適合の試験が前後で同じであることで確かめる。
   どこまでを共通にするかと名前は p026 の設計（Opus）で決め、[WS329](../ws329/ws.md)（H.264 の encoder）・[WS330](../ws330/ws.md)（H.265 の decoder・encoder）の共通化の設計はその上に足す。
+  p026 の設計（2026-10-31）: bit の読み・NAL（Annex B の分割と emulation prevention）・CABAC の算術の engine と表・共通の約束を `vcodec.h`・`vcodec-bitreader`・`vcodec-nal`・`vcodec-cabac` に移した。frame・plane の確保と DPB・出力の順は、H.265 の相手の設計なしでは推測の API になるので、WS330 の設計へ先送りする（Q1 の技術の判断、2026-10-31）。WS329 の encoder も `h264sw_frame`・`h264sw_dpb` を使うので、WS330 で decoder と encoder の両方を移す。
 
 ## Q1 の判断（2026-10-30、p001 の問い）
 
@@ -33,7 +34,7 @@
 ## Phase
 
 設計は [design.md](design.md)（module・決定・所有・試験の道）、各 module の仕様は `userland/desktop/libmedia/h264sw*.h` の comment。p002〜p020 は Sonnet 5.5 high の 1 回の起動で 1 Phase（header 1〜2 個）、依存の Phase の実装が main に入ってから始める。
-p021（最初の全体の試験、module の間の誤りがここで出る）・p022（適合）・p024（速さの設計）は Opus を推す（Q1 の判断）。header の基点は 8ddb130a9（2026-10-31 p021 で h264sw-reflist.h だけを直した。実装の Phase は header を変えない、`BASE=8ddb130a9 sh plan/ws326/tests/check-skeleton.sh`）。2026-10-31 p021 で Q1 の許した h264sw-reflist.h の直し（`h264sw_reflist_build` に `poc_type`、8.2.4.2.3）を commit 8ddb130a9 に入れ、以後の BASE は 8ddb130a9（fd1d6f88c との header の差はこの直しだけ）。
+p021（最初の全体の試験、module の間の誤りがここで出る）・p022（適合）・p024（速さの設計）は Opus を推す（Q1 の判断）。header の基点は 8ddb130a9（2026-10-31 p021 で h264sw-reflist.h だけを直した。実装の Phase は header を変えない、`BASE=8ddb130a9 sh plan/ws326/tests/check-skeleton.sh`）。2026-10-31 p021 で Q1 の許した h264sw-reflist.h の直し（`h264sw_reflist_build` に `poc_type`、8.2.4.2.3）を commit 8ddb130a9 に入れ、以後の BASE は 8ddb130a9（fd1d6f88c との header の差はこの直しだけ）。2026-10-31 p026 で codec に依らない部分を vcodec*.h へ移し、以後の BASE は 92ca2d0e8（check-skeleton は h264sw*.h と vcodec*.h の両方を照合する。WS329 p002 でもう一度移る）。
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
@@ -60,8 +61,8 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p021](phase021/phase.md) | decoder の全体の流れと最初の全体の試験: h264sw-decoder（試験 run-stream.sh） | cleared（2026-10-31 Q1、86539318e。header の直し 8ddb130a9 が新しい BASE。22 本 408 frame が ffmpeg と一致、壊した stream 200 通り・開始 63 通り PASS、BASE 8ddb130a9。cleared は Q1 が決める） | p002〜p020 |
 | [ws326-p022](phase022/phase.md) | JVT の適合の試験: —（試験 tests/conformance/run.sh） | cleared（2026-10-31 Q1、4568d794b〜c80e33c37。in 101 本 14526 frame が参照と一致、out 103 本は範囲の外、decoder の修正 0。担当の記録: 実装済み・試験 PASS（2026-10-31 O-p022、q1760。204 本を取得し in 101 本が全 frame（14526）参照の YUV と一致、out 103 本（interlace 73・format 25・slice-groups 3・profile-88 2）、slice を逆順にした 6 本も一致、decoder の修正 0。cleared は Q1） | p021 |
 | [ws326-p023](phase023/phase.md) | libmedia の backend と backend の切り替え: h264sw-backend（試験 tests/backend） | 実装済み・host 試験 PASS（実 stream の試験は p021 の取り込み後） | cleared（2026-10-31 Q1、ac1109d25・37789c4d6。host 試験 202＋112 checks、p021 の merge の後に run-host-decode PASS（MP4・TS・複数 slice を h264-software で ffmpeg と一致）。QEMU の Video Player は未実施）
-| [ws326-p024](phase024/phase.md) | 速さの設計と最初の最適化: —（試験 —） | in-progress（q1773、P1。最適化は p026 の後） | p022、p023 |
-| ws326-p026 | H.265 でも使える部分を codec に依らない名前の module へ移す（設計 Opus、移しは Sonnet 可、試験は全単体と適合の前後の一致） | planned | p022 |
+| [ws326-p024](phase024/phase.md) | 速さの設計と最初の最適化: —（試験 —） | in-progress（q1773、P1。最適化は p026 の後） | p022、p023、p026 |
+| [ws326-p026](phase026/phase.md) | H.265 でも使える部分を codec に依らない名前の module へ移す（設計 Opus、移しは Sonnet 可、試験は全単体と適合の前後の一致） | cleared（2026-10-31 Q1、92ca2d0e8（新しい BASE）・ac38fd1d9。前後で run-unit・run-stream・backend・host-decode・適合 212 行・nm -D が同じ。frame・DPB は WS330 へ） | p022 |
 | [ws326-p025](phase025/phase.md) | 規約の全文の見直し: —（試験 —） | planned | p023・p026（と速さの Phase） |
 
 ## Resume point
@@ -73,3 +74,4 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 
 - 2026-10-31 Q1（WS318 の設計からの引き継ぎ）: p024（速さ）は decoder の中に留め、出力の複写の削減は WS318 p006a に任せる。p023 の phase.md の「WS318 p002」は WS318 p004（libavcodec を表の最後に足す）と読む。
 - 2026-10-31 Q1（WS329 の設計からの引き継ぎ）: p026（共通部分の名前の移し）は、WS329 が書き側の module に使う `vcodec-` の名前を候補として受け取る。WS329 p002 が decoder の CAVLC の表・CABAC の context の選び・表 A-1 を共通の header に出すと、check-skeleton の BASE がもう一度移る。
+- 2026-10-31 P4（q1769-i01）: p026 の設計 acb27716b、design-reviewer 13 件を反映、移し 92ca2d0e8（新しい BASE）。p024 は p026 の後（依存に足した）。

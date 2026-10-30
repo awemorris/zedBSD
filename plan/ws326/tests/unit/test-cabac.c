@@ -23,15 +23,10 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "userland/desktop/libmedia/h264sw-bits.h"
+#include "userland/desktop/libmedia/vcodec-bitreader.h"
 #include "userland/desktop/libmedia/h264sw-cabac.h"
 #include "userland/desktop/libmedia/h264sw-cabac-init.h"
 #include "userland/desktop/libmedia/h264sw-slice.h"
-
-/* The tables of the engine, which no header declares. */
-extern const uint8_t h264sw_cabac_range_lps[64][4];
-extern const uint8_t h264sw_cabac_trans_lps[64];
-extern const uint8_t h264sw_cabac_trans_mps[64];
 
 /* The slice types the engine is started with, as the first index of the lists below. */
 #define KIND_I 0U
@@ -338,11 +333,11 @@ engine_start(
 	unsigned idc,
 	int qp)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	int status;
 
 	/* A reader over the buffer at its first bit. */
-	h264sw_bits_init(&bits, data, size);
+	vcodec_bitreader_init(&bits, data, size);
 
 	/* Starts the engine as the slice data begins. */
 	status = h264sw_cabac_start(cabac, &bits, kind_slice_type(kind), idc, qp);
@@ -511,7 +506,7 @@ decode_and_compare(
 	size_t bytes)
 {
 	struct h264sw_cabac cabac;
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	uint8_t samples[PCM_BYTES];
 	unsigned expected;
 	unsigned bin;
@@ -525,8 +520,8 @@ decode_and_compare(
 	int status;
 
 	/* Reads the slice header bits and starts the engine. */
-	h264sw_bits_init(&bits, written.data, bytes);
-	prefix_value = h264sw_bits_u(&bits, prefix_bits);
+	vcodec_bitreader_init(&bits, written.data, bytes);
+	prefix_value = vcodec_bitreader_u(&bits, prefix_bits);
 	CHECK(prefix_value == (0x15U & ((1U << prefix_bits) - 1U)));
 	status = h264sw_cabac_start(&cabac, &bits, kind_slice_type(kind), idc, qp);
 	CHECK(status == 0);
@@ -541,20 +536,20 @@ decode_and_compare(
 		bin = 2U;
 		if (ops[index].type == OP_DECISION) {
 			before = cabac.state[ops[index].ctx];
-			quantized = (cabac.range >> 6) & 3U;
+			quantized = (cabac.engine.range >> 6) & 3U;
 			bin = h264sw_cabac_decision(&cabac, ops[index].ctx);
 			seen_pairs[before & 63U][quantized]++;
 			if (bin != (before >> 6))
 				seen_lps_from[before & 63U]++;
 		} else if (ops[index].type == OP_BYPASS) {
-			bin = h264sw_cabac_bypass(&cabac);
+			bin = vcodec_cabac_bypass(&cabac.engine);
 		} else if (ops[index].type == OP_TERMINATE) {
-			bin = h264sw_cabac_terminate(&cabac);
+			bin = vcodec_cabac_terminate(&cabac.engine);
 		} else {
 			/* An I_PCM macroblock: the terminate bin is 1 and the samples follow. */
 			expected = 1U;
-			bin = h264sw_cabac_terminate(&cabac);
-			status = h264sw_cabac_pcm(&cabac, samples, PCM_BYTES);
+			bin = vcodec_cabac_terminate(&cabac.engine);
+			status = vcodec_cabac_pcm(&cabac.engine, samples, PCM_BYTES);
 			if (status != 0)
 				bin = 2U;
 			for (sample_index = 0U; sample_index < PCM_BYTES; sample_index++) {
@@ -575,9 +570,9 @@ decode_and_compare(
 	CHECK(mismatches == 0U);
 
 	/* The end_of_slice_flag is 1 where it was coded, and no read went past the end. */
-	bin = h264sw_cabac_terminate(&cabac);
+	bin = vcodec_cabac_terminate(&cabac.engine);
 	CHECK(bin == 1U);
-	CHECK(cabac.error == 0);
+	CHECK(cabac.engine.error == 0);
 }
 
 /* Checks the shape of the tables and a few values read from the pages. */
@@ -589,58 +584,58 @@ check_tables(
 	unsigned column;
 
 	/* Table 9-44 entries read from the page: the first row, a middle one, the last rows. */
-	CHECK(h264sw_cabac_range_lps[0][0] == 128U && h264sw_cabac_range_lps[0][3] == 240U);
-	CHECK(h264sw_cabac_range_lps[12][0] == 77U && h264sw_cabac_range_lps[12][3] == 128U);
-	CHECK(h264sw_cabac_range_lps[31][0] == 29U && h264sw_cabac_range_lps[31][3] == 48U);
-	CHECK(h264sw_cabac_range_lps[32][0] == 27U && h264sw_cabac_range_lps[32][3] == 45U);
-	CHECK(h264sw_cabac_range_lps[45][1] == 17U && h264sw_cabac_range_lps[45][2] == 20U);
-	CHECK(h264sw_cabac_range_lps[62][0] == 6U && h264sw_cabac_range_lps[62][3] == 9U);
-	CHECK(h264sw_cabac_range_lps[63][0] == 2U && h264sw_cabac_range_lps[63][3] == 2U);
+	CHECK(vcodec_cabac_range_lps[0][0] == 128U && vcodec_cabac_range_lps[0][3] == 240U);
+	CHECK(vcodec_cabac_range_lps[12][0] == 77U && vcodec_cabac_range_lps[12][3] == 128U);
+	CHECK(vcodec_cabac_range_lps[31][0] == 29U && vcodec_cabac_range_lps[31][3] == 48U);
+	CHECK(vcodec_cabac_range_lps[32][0] == 27U && vcodec_cabac_range_lps[32][3] == 45U);
+	CHECK(vcodec_cabac_range_lps[45][1] == 17U && vcodec_cabac_range_lps[45][2] == 20U);
+	CHECK(vcodec_cabac_range_lps[62][0] == 6U && vcodec_cabac_range_lps[62][3] == 9U);
+	CHECK(vcodec_cabac_range_lps[63][0] == 2U && vcodec_cabac_range_lps[63][3] == 2U);
 
 	/* Table 9-45 entries read from the page. */
-	CHECK(h264sw_cabac_trans_lps[5] == 4U && h264sw_cabac_trans_lps[13] == 11U);
-	CHECK(h264sw_cabac_trans_lps[24] == 19U && h264sw_cabac_trans_lps[31] == 24U);
-	CHECK(h264sw_cabac_trans_lps[47] == 33U && h264sw_cabac_trans_lps[61] == 38U);
-	CHECK(h264sw_cabac_trans_lps[63] == 63U);
-	CHECK(h264sw_cabac_trans_mps[0] == 1U && h264sw_cabac_trans_mps[61] == 62U);
-	CHECK(h264sw_cabac_trans_mps[62] == 62U && h264sw_cabac_trans_mps[63] == 63U);
+	CHECK(vcodec_cabac_trans_lps[5] == 4U && vcodec_cabac_trans_lps[13] == 11U);
+	CHECK(vcodec_cabac_trans_lps[24] == 19U && vcodec_cabac_trans_lps[31] == 24U);
+	CHECK(vcodec_cabac_trans_lps[47] == 33U && vcodec_cabac_trans_lps[61] == 38U);
+	CHECK(vcodec_cabac_trans_lps[63] == 63U);
+	CHECK(vcodec_cabac_trans_mps[0] == 1U && vcodec_cabac_trans_mps[61] == 62U);
+	CHECK(vcodec_cabac_trans_mps[62] == 62U && vcodec_cabac_trans_mps[63] == 63U);
 
 	/* Every row grows with qCodIRangeIdx (the last row is 2, 2, 2, 2), and every column does not grow with pStateIdx. */
 	for (state_idx = 0U; state_idx < 64U; state_idx++) {
 		for (column = 0U; column < 3U; column++) {
 			if (state_idx < 63U) {
-				CHECK(h264sw_cabac_range_lps[state_idx][column] < h264sw_cabac_range_lps[state_idx][column + 1U]);
+				CHECK(vcodec_cabac_range_lps[state_idx][column] < vcodec_cabac_range_lps[state_idx][column + 1U]);
 			} else {
-				CHECK(h264sw_cabac_range_lps[state_idx][column] == h264sw_cabac_range_lps[state_idx][column + 1U]);
+				CHECK(vcodec_cabac_range_lps[state_idx][column] == vcodec_cabac_range_lps[state_idx][column + 1U]);
 			}
 		}
 		for (column = 0U; column < 4U; column++) {
 			if (state_idx > 0U)
-				CHECK(h264sw_cabac_range_lps[state_idx][column] <= h264sw_cabac_range_lps[state_idx - 1U][column]);
+				CHECK(vcodec_cabac_range_lps[state_idx][column] <= vcodec_cabac_range_lps[state_idx - 1U][column]);
 		}
 	}
 	for (column = 0U; column < 4U; column++)
-		CHECK(h264sw_cabac_range_lps[63][column] == 2U);
+		CHECK(vcodec_cabac_range_lps[63][column] == 2U);
 
 	/* transIdxMPS is Min( pStateIdx + 1, 62 ) with 63 staying 63; transIdxLPS never rises, never falls from state to state, and 0 stays 0. */
 	for (state_idx = 0U; state_idx < 64U; state_idx++) {
 		if (state_idx < 63U) {
-			CHECK(h264sw_cabac_trans_mps[state_idx] == (state_idx + 1U < 62U ? state_idx + 1U : 62U));
+			CHECK(vcodec_cabac_trans_mps[state_idx] == (state_idx + 1U < 62U ? state_idx + 1U : 62U));
 		} else {
-			CHECK(h264sw_cabac_trans_mps[state_idx] == 63U);
+			CHECK(vcodec_cabac_trans_mps[state_idx] == 63U);
 		}
-		CHECK(h264sw_cabac_trans_lps[state_idx] <= state_idx);
+		CHECK(vcodec_cabac_trans_lps[state_idx] <= state_idx);
 		if (state_idx > 0U && state_idx < 63U)
-			CHECK(h264sw_cabac_trans_lps[state_idx] >= h264sw_cabac_trans_lps[state_idx - 1U]);
+			CHECK(vcodec_cabac_trans_lps[state_idx] >= vcodec_cabac_trans_lps[state_idx - 1U]);
 	}
-	CHECK(h264sw_cabac_trans_lps[0] == 0U);
+	CHECK(vcodec_cabac_trans_lps[0] == 0U);
 
 	/* The decoder's tables equal the encoder's own copy of the tables, entry by entry. */
 	for (state_idx = 0U; state_idx < 64U; state_idx++) {
 		for (column = 0U; column < 4U; column++)
-			CHECK(h264sw_cabac_range_lps[state_idx][column] == cabacwriter_range_lps[state_idx][column]);
-		CHECK(h264sw_cabac_trans_lps[state_idx] == cabacwriter_trans_lps[state_idx]);
-		CHECK(h264sw_cabac_trans_mps[state_idx] == cabacwriter_trans_mps[state_idx]);
+			CHECK(vcodec_cabac_range_lps[state_idx][column] == cabacwriter_range_lps[state_idx][column]);
+		CHECK(vcodec_cabac_trans_lps[state_idx] == cabacwriter_trans_lps[state_idx]);
+		CHECK(vcodec_cabac_trans_mps[state_idx] == cabacwriter_trans_mps[state_idx]);
 	}
 }
 
@@ -676,8 +671,8 @@ check_init(
 			for (qp = -3; qp <= 54; qp++) {
 				status = engine_start(&cabac, data, sizeof(data), kind, idc, qp);
 				CHECK(status == 0);
-				CHECK(cabac.error == 0);
-				CHECK(cabac.range == 510U);
+				CHECK(cabac.engine.error == 0);
+				CHECK(cabac.engine.range == 510U);
 
 				set = 0U;
 				if (kind != KIND_I)
@@ -827,7 +822,7 @@ check_errors(
 	static const uint8_t pcm_short[4] = { 0x00U, 0x00U, 0x00U, 0x00U };
 	uint8_t samples[PCM_BYTES];
 	struct h264sw_cabac cabac;
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	unsigned index;
 	unsigned bin;
 	int status;
@@ -836,33 +831,33 @@ check_errors(
 	status = engine_start(&cabac, zeros, sizeof(zeros), KIND_I, 0U, 26);
 	CHECK(status == 0);
 	for (index = 0U; index < 7U; index++) {
-		bin = h264sw_cabac_bypass(&cabac);
+		bin = vcodec_cabac_bypass(&cabac.engine);
 		CHECK(bin == 0U);
-		CHECK(cabac.error == 0);
+		CHECK(cabac.engine.error == 0);
 	}
-	bin = h264sw_cabac_bypass(&cabac);
+	bin = vcodec_cabac_bypass(&cabac.engine);
 	CHECK(bin == 0U);
-	CHECK(cabac.error != 0);
+	CHECK(cabac.engine.error != 0);
 
 	/* Going on after the error stays defined. */
 	for (index = 0U; index < 100U; index++) {
 		(void)h264sw_cabac_decision(&cabac, 3U);
-		(void)h264sw_cabac_bypass(&cabac);
-		(void)h264sw_cabac_terminate(&cabac);
+		(void)vcodec_cabac_bypass(&cabac.engine);
+		(void)vcodec_cabac_terminate(&cabac.engine);
 	}
-	CHECK(cabac.error != 0);
+	CHECK(cabac.engine.error != 0);
 
 	/* A decision that renormalizes past the end sets the error too. */
 	status = engine_start(&cabac, zeros, sizeof(zeros), KIND_I, 0U, 26);
 	CHECK(status == 0);
 	for (index = 0U; index < 3000U; index++)
 		(void)h264sw_cabac_decision(&cabac, 3U);
-	CHECK(cabac.error != 0);
+	CHECK(cabac.engine.error != 0);
 
 	/* codIOffset 510 and 511 at the start are refused, 509 is not. */
 	status = engine_start(&cabac, forbidden_510, sizeof(forbidden_510), KIND_I, 0U, 26);
 	CHECK(status == EINVAL);
-	CHECK(cabac.error != 0);
+	CHECK(cabac.engine.error != 0);
 	status = engine_start(&cabac, forbidden_511, sizeof(forbidden_511), KIND_I, 0U, 26);
 	CHECK(status == EINVAL);
 	status = engine_start(&cabac, allowed_509, sizeof(allowed_509), KIND_I, 0U, 26);
@@ -875,36 +870,36 @@ check_errors(
 	CHECK(status == EINVAL);
 
 	/* The alignment bits must be 1: 3 bits are read, then 1 1 1 1 1 is good and 1 1 1 1 0 is not. */
-	h264sw_bits_init(&bits, alignment_good, sizeof(alignment_good));
-	(void)h264sw_bits_u(&bits, 3U);
+	vcodec_bitreader_init(&bits, alignment_good, sizeof(alignment_good));
+	(void)vcodec_bitreader_u(&bits, 3U);
 	status = h264sw_cabac_start(&cabac, &bits, H264SW_SLICE_I, 0U, 26);
 	CHECK(status == 0);
-	h264sw_bits_init(&bits, alignment_bad, sizeof(alignment_bad));
-	(void)h264sw_bits_u(&bits, 3U);
+	vcodec_bitreader_init(&bits, alignment_bad, sizeof(alignment_bad));
+	(void)vcodec_bitreader_u(&bits, 3U);
 	status = h264sw_cabac_start(&cabac, &bits, H264SW_SLICE_I, 0U, 26);
 	CHECK(status == EINVAL);
 
 	/* A reader that already failed is refused. */
-	h264sw_bits_init(&bits, zeros, sizeof(zeros));
-	(void)h264sw_bits_u(&bits, 24U);
+	vcodec_bitreader_init(&bits, zeros, sizeof(zeros));
+	(void)vcodec_bitreader_u(&bits, 24U);
 	CHECK(bits.error != 0);
 	status = h264sw_cabac_start(&cabac, &bits, H264SW_SLICE_I, 0U, 26);
 	CHECK(status == EINVAL);
 
 	/* A slice type or cabac_init_idc outside the ranges. */
-	h264sw_bits_init(&bits, zeros, sizeof(zeros));
+	vcodec_bitreader_init(&bits, zeros, sizeof(zeros));
 	status = h264sw_cabac_start(&cabac, &bits, H264SW_SLICE_SP, 0U, 26);
 	CHECK(status == EINVAL);
-	h264sw_bits_init(&bits, zeros, sizeof(zeros));
+	vcodec_bitreader_init(&bits, zeros, sizeof(zeros));
 	status = h264sw_cabac_start(&cabac, &bits, H264SW_SLICE_SI, 0U, 26);
 	CHECK(status == EINVAL);
-	h264sw_bits_init(&bits, zeros, sizeof(zeros));
+	vcodec_bitreader_init(&bits, zeros, sizeof(zeros));
 	status = h264sw_cabac_start(&cabac, &bits, 9U, 0U, 26);
 	CHECK(status == EINVAL);
-	h264sw_bits_init(&bits, zeros, sizeof(zeros));
+	vcodec_bitreader_init(&bits, zeros, sizeof(zeros));
 	status = h264sw_cabac_start(&cabac, &bits, H264SW_SLICE_P, 3U, 26);
 	CHECK(status == EINVAL);
-	h264sw_bits_init(&bits, zeros, sizeof(zeros));
+	vcodec_bitreader_init(&bits, zeros, sizeof(zeros));
 	status = h264sw_cabac_start(&cabac, &bits, H264SW_SLICE_B, 0xffffffffU, 26);
 	CHECK(status == EINVAL);
 
@@ -913,33 +908,33 @@ check_errors(
 	CHECK(status == 0);
 	bin = h264sw_cabac_decision(&cabac, H264SW_CABAC_CONTEXTS);
 	CHECK(bin == 0U);
-	CHECK(cabac.error != 0);
+	CHECK(cabac.engine.error != 0);
 	status = engine_start(&cabac, zeros, sizeof(zeros), KIND_I, 0U, 26);
 	CHECK(status == 0);
 	bin = h264sw_cabac_decision(&cabac, H264SW_CABAC_TERMINATE);
 	CHECK(bin == 0U);
-	CHECK(cabac.error != 0);
+	CHECK(cabac.engine.error != 0);
 	status = engine_start(&cabac, zeros, sizeof(zeros), KIND_I, 0U, 26);
 	CHECK(status == 0);
 	bin = h264sw_cabac_decision(&cabac, 0xffffffffU);
 	CHECK(bin == 0U);
-	CHECK(cabac.error != 0);
+	CHECK(cabac.engine.error != 0);
 
 	/* I_PCM: samples that do not fit in the data are refused, and so is an engine that has failed. */
 	status = engine_start(&cabac, pcm_short, sizeof(pcm_short), KIND_I, 0U, 26);
 	CHECK(status == 0);
-	status = h264sw_cabac_pcm(&cabac, samples, PCM_BYTES);
+	status = vcodec_cabac_pcm(&cabac.engine, samples, PCM_BYTES);
 	CHECK(status == EINVAL);
-	CHECK(cabac.error != 0);
-	status = h264sw_cabac_pcm(&cabac, samples, 1U);
-	CHECK(status == EINVAL);
-	status = engine_start(&cabac, pcm_short, sizeof(pcm_short), KIND_I, 0U, 26);
-	CHECK(status == 0);
-	status = h264sw_cabac_pcm(&cabac, samples, (size_t)-1);
+	CHECK(cabac.engine.error != 0);
+	status = vcodec_cabac_pcm(&cabac.engine, samples, 1U);
 	CHECK(status == EINVAL);
 	status = engine_start(&cabac, pcm_short, sizeof(pcm_short), KIND_I, 0U, 26);
 	CHECK(status == 0);
-	status = h264sw_cabac_pcm(&cabac, NULL, 1U);
+	status = vcodec_cabac_pcm(&cabac.engine, samples, (size_t)-1);
+	CHECK(status == EINVAL);
+	status = engine_start(&cabac, pcm_short, sizeof(pcm_short), KIND_I, 0U, 26);
+	CHECK(status == 0);
+	status = vcodec_cabac_pcm(&cabac.engine, NULL, 1U);
 	CHECK(status == EINVAL);
 }
 
@@ -976,7 +971,7 @@ check_garbage(
 		status = engine_start(&cabac, data, length, kind, idc, (int)(random_next() % 120U) - 30);
 		CHECK(status == 0 || status == EINVAL);
 		if (status != 0)
-			CHECK(cabac.error != 0);
+			CHECK(cabac.engine.error != 0);
 
 		/* Random calls, including bad context numbers; the engine must stay defined. */
 		for (index = 0U; index < 200U; index++) {
@@ -984,11 +979,11 @@ check_garbage(
 			if (operation < 3U) {
 				(void)h264sw_cabac_decision(&cabac, random_next() % 500U);
 			} else if (operation < 5U) {
-				(void)h264sw_cabac_bypass(&cabac);
+				(void)vcodec_cabac_bypass(&cabac.engine);
 			} else if (operation < 7U) {
-				(void)h264sw_cabac_terminate(&cabac);
+				(void)vcodec_cabac_terminate(&cabac.engine);
 			} else {
-				(void)h264sw_cabac_pcm(&cabac, samples, random_next() % 64U);
+				(void)vcodec_cabac_pcm(&cabac.engine, samples, random_next() % 64U);
 			}
 		}
 	}

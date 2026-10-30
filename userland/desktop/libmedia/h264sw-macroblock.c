@@ -500,7 +500,7 @@ mb_stream_error(
 		return EINVAL;
 
 	/* CABAC keeps it in the arithmetic decoder. */
-	if (ctx->cabac_mode != 0 && ctx->cabac.error != 0)
+	if (ctx->cabac_mode != 0 && ctx->cabac.engine.error != 0)
 		return EINVAL;
 
 	/* Succeeded: no read failed. */
@@ -527,7 +527,7 @@ mb_read_mb_type(
 	}
 
 	/* Reads the CAVLC code number. */
-	code = h264sw_bits_ue(&ctx->bits);
+	code = vcodec_bitreader_ue(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -556,7 +556,7 @@ mb_read_sub_mb_type(
 	}
 
 	/* Reads the CAVLC code number. */
-	code = h264sw_bits_ue(&ctx->bits);
+	code = vcodec_bitreader_ue(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -601,7 +601,7 @@ mb_read_ref_idx(
 	}
 
 	/* Reads the CAVLC te(v) whose largest value is the last index. */
-	code = h264sw_bits_te(&ctx->bits, active - 1U);
+	code = vcodec_bitreader_te(&ctx->bits, active - 1U);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -638,7 +638,7 @@ mb_read_mvd(
 	}
 
 	/* Reads the CAVLC signed Exp-Golomb code. */
-	value = h264sw_bits_se(&ctx->bits);
+	value = vcodec_bitreader_se(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -670,7 +670,7 @@ mb_read_cbp(
 	}
 
 	/* Reads the CAVLC code number. */
-	code = h264sw_bits_ue(&ctx->bits);
+	code = vcodec_bitreader_ue(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -703,7 +703,7 @@ mb_read_qp_delta(
 	}
 
 	/* Reads the CAVLC signed Exp-Golomb code. */
-	value = h264sw_bits_se(&ctx->bits);
+	value = vcodec_bitreader_se(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -732,7 +732,7 @@ mb_read_transform_8x8(
 	}
 
 	/* Reads the CAVLC bit; a failed read gives 0 and sets the sticky error of the reader. */
-	flag = h264sw_bits_u1(&ctx->bits);
+	flag = vcodec_bitreader_u1(&ctx->bits);
 
 	/* Succeeded: the flag. */
 	return flag;
@@ -789,23 +789,23 @@ mb_parse_pcm(
 
 	/* Reads the samples with the CABAC engine, which finds the byte position itself and restarts afterwards. */
 	if (ctx->cabac_mode != 0) {
-		error = h264sw_cabac_pcm(&ctx->cabac, ctx->syntax.pcm, MB_PCM_BYTES);
+		error = vcodec_cabac_pcm(&ctx->cabac.engine, ctx->syntax.pcm, MB_PCM_BYTES);
 		if (error != 0)
 			return error;
 	} else {
 		/* Skips the pcm_alignment_zero_bit bits up to the byte boundary. */
 		skip_bits = (unsigned)(ctx->bits.position % 8U);
 		if (skip_bits != 0U)
-			h264sw_bits_skip(&ctx->bits, 8U - skip_bits);
+			vcodec_bitreader_skip(&ctx->bits, 8U - skip_bits);
 
 		/* Refuses a macroblock whose samples run past the end of the data. */
-		bits_left = h264sw_bits_left(&ctx->bits);
+		bits_left = vcodec_bitreader_left(&ctx->bits);
 		if (bits_left < (size_t)MB_PCM_BYTES * 8U)
 			return EINVAL;
 
 		/* Reads the 256 luma samples and the 2 * 64 chroma samples. */
 		for (index = 0; index < MB_PCM_BYTES; index++)
-			ctx->syntax.pcm[index] = (uint8_t)h264sw_bits_u(&ctx->bits, 8U);
+			ctx->syntax.pcm[index] = (uint8_t)vcodec_bitreader_u(&ctx->bits, 8U);
 	}
 
 	/* An I_PCM macroblock counts as fully coded for the contexts, has QPY 0 for the deblocking filter, and leaves QPY of the slice as it was. */
@@ -855,9 +855,9 @@ mb_pred_intra(
 		if (ctx->cabac_mode != 0) {
 			h264sw_cabac_intra_mode(ctx, &flag, &rem);
 		} else {
-			flag = h264sw_bits_u1(&ctx->bits);
+			flag = vcodec_bitreader_u1(&ctx->bits);
 			if (flag == 0U)
-				rem = h264sw_bits_u(&ctx->bits, 3U);
+				rem = vcodec_bitreader_u(&ctx->bits, 3U);
 		}
 		syntax->prev_intra_flag[index] = (uint8_t)flag;
 		syntax->rem_intra_mode[index] = (uint8_t)rem;
@@ -867,7 +867,7 @@ mb_pred_intra(
 	if (ctx->cabac_mode != 0) {
 		chroma_mode = h264sw_cabac_chroma_mode(ctx);
 	} else {
-		code = h264sw_bits_ue(&ctx->bits);
+		code = vcodec_bitreader_ue(&ctx->bits);
 		if (ctx->bits.error != 0)
 			return EINVAL;
 		if (code > MB_CHROMA_PRED_MAX)
@@ -1316,7 +1316,7 @@ mb_slice_skip(
 	/* CABAC sends one mb_skip_flag per macroblock. */
 	if (ctx->cabac_mode != 0) {
 		flag = h264sw_cabac_mb_skip(ctx);
-		if (ctx->cabac.error != 0)
+		if (ctx->cabac.engine.error != 0)
 			return EINVAL;
 		*skipped = (int)flag;
 
@@ -1326,7 +1326,7 @@ mb_slice_skip(
 
 	/* CAVLC reads mb_skip_run when no run is being counted and no coded macroblock is due; the run may not pass the last macroblock of the picture. */
 	if (ctx->skip_run < 0) {
-		run = h264sw_bits_ue(&ctx->bits);
+		run = vcodec_bitreader_ue(&ctx->bits);
 		if (ctx->bits.error != 0)
 			return EINVAL;
 		if (run > picture->size_mbs - ctx->mb_addr)
@@ -1361,7 +1361,7 @@ mb_slice_end(
 	/* CABAC sends end_of_slice_flag after every macroblock, skipped or not. */
 	if (ctx->cabac_mode != 0) {
 		end = h264sw_cabac_end_of_slice(ctx);
-		if (ctx->cabac.error != 0)
+		if (ctx->cabac.engine.error != 0)
 			return EINVAL;
 		*more_data = 1;
 		if (end != 0U)
@@ -1381,7 +1381,7 @@ mb_slice_end(
 		ctx->skip_run = -1;
 
 	/* Asks whether the RBSP has more data after the last skipped macroblock of a run or after a coded one. */
-	more = h264sw_bits_more_rbsp_data(&ctx->bits);
+	more = vcodec_bitreader_more_rbsp_data(&ctx->bits);
 	if (more == 0)
 		*more_data = 0;
 

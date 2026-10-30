@@ -45,7 +45,7 @@
 
 #include "userland/desktop/libmedia/h264sw-decoder.h"
 #include "userland/desktop/libmedia/h264sw-nal.h"
-#include "userland/desktop/libmedia/h264sw-bits.h"
+#include "userland/desktop/libmedia/vcodec-bitreader.h"
 
 #include <errno.h>
 #include <math.h>
@@ -141,7 +141,7 @@ static void take_output(struct h264sw_decoder *decoder, struct conform_run *run)
 static void give(struct h264sw_decoder *decoder, struct conform_run *run, const uint8_t *data, const uint8_t *nal, size_t size);
 static void give_reversed(struct h264sw_decoder *decoder, struct conform_run *run, const uint8_t *data, const uint8_t **slice, const size_t *slice_size, unsigned count);
 static void add_reason(struct conform_run *run, const char *reason);
-static void skip_scaling_lists(struct h264sw_bits *bits, unsigned count);
+static void skip_scaling_lists(struct vcodec_bitreader *bits, unsigned count);
 static void sps_reason(const struct h264sw_nal *unit, char *reason);
 static void slice_reason(const struct h264sw_nal *unit, char *reason);
 static void refusal_reason(struct conform_run *run, const uint8_t *nal, size_t size);
@@ -222,7 +222,7 @@ main(
 	cursor = 0U;
 	slices = 0U;
 	for (;;) {
-		found = h264sw_nal_find(data, size, &cursor, &nal, &nal_size);
+		found = vcodec_nal_find(data, size, &cursor, &nal, &nal_size);
 		if (!found)
 			break;
 
@@ -823,7 +823,7 @@ add_reason(
  */
 static void
 skip_scaling_lists(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	unsigned count)
 {
 	unsigned list;
@@ -838,7 +838,7 @@ skip_scaling_lists(
 	for (list = 0U;
 	     list < count;
 	     list++) {
-		present = h264sw_bits_u1(bits);
+		present = vcodec_bitreader_u1(bits);
 		if (present == 0U)
 			continue;
 		size = 64U;
@@ -852,7 +852,7 @@ skip_scaling_lists(
 		     index < size;
 		     index++) {
 			if (next != 0) {
-				delta = h264sw_bits_se(bits);
+				delta = vcodec_bitreader_se(bits);
 				if (delta < -128)
 					delta = -128;
 				if (delta > 127)
@@ -873,7 +873,7 @@ sps_reason(
 	const struct h264sw_nal *unit,
 	char *reason)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	uint32_t profile;
 	uint32_t chroma;
 	uint32_t depth_luma;
@@ -888,10 +888,10 @@ sps_reason(
 	unsigned taken;
 
 	/* Reads profile_idc, skips the constraint flags, level_idc and the id. */
-	h264sw_bits_init(&bits, unit->rbsp, unit->rbsp_size);
-	profile = h264sw_bits_u(&bits, 8U);
-	h264sw_bits_skip(&bits, 16U);
-	(void)h264sw_bits_ue(&bits);
+	vcodec_bitreader_init(&bits, unit->rbsp, unit->rbsp_size);
+	profile = vcodec_bitreader_u(&bits, 8U);
+	vcodec_bitreader_skip(&bits, 16U);
+	(void)vcodec_bitreader_ue(&bits);
 
 	/* Finds whether the profile carries the format fields. */
 	format_fields = 0U;
@@ -904,12 +904,12 @@ sps_reason(
 
 	/* The High family carries the format fields; the others imply 4:2:0 with 8 bits. */
 	if (format_fields != 0U) {
-		chroma = h264sw_bits_ue(&bits);
+		chroma = vcodec_bitreader_ue(&bits);
 		if (chroma == 3U)
-			(void)h264sw_bits_u1(&bits);
-		depth_luma = h264sw_bits_ue(&bits);
-		depth_chroma = h264sw_bits_ue(&bits);
-		lossless = h264sw_bits_u1(&bits);
+			(void)vcodec_bitreader_u1(&bits);
+		depth_luma = vcodec_bitreader_ue(&bits);
+		depth_chroma = vcodec_bitreader_ue(&bits);
+		lossless = vcodec_bitreader_u1(&bits);
 		if (chroma != 1U ||
 		    depth_luma != 0U ||
 		    depth_chroma != 0U) {
@@ -920,33 +920,33 @@ sps_reason(
 			strcpy(reason, "lossless");
 			return;
 		}
-		matrix = h264sw_bits_u1(&bits);
+		matrix = vcodec_bitreader_u1(&bits);
 		if (matrix != 0U)
 			skip_scaling_lists(&bits, 8U);
 	}
 
 	/* Skips log2_max_frame_num_minus4 and the order count fields of its type (7.3.2.1.1). */
-	(void)h264sw_bits_ue(&bits);
-	poc_type = h264sw_bits_ue(&bits);
+	(void)vcodec_bitreader_ue(&bits);
+	poc_type = vcodec_bitreader_ue(&bits);
 	if (poc_type == 0U) {
-		(void)h264sw_bits_ue(&bits);
+		(void)vcodec_bitreader_ue(&bits);
 	} else if (poc_type == 1U) {
-		(void)h264sw_bits_u1(&bits);
-		(void)h264sw_bits_se(&bits);
-		(void)h264sw_bits_se(&bits);
-		count = h264sw_bits_ue(&bits);
+		(void)vcodec_bitreader_u1(&bits);
+		(void)vcodec_bitreader_se(&bits);
+		(void)vcodec_bitreader_se(&bits);
+		count = vcodec_bitreader_ue(&bits);
 		for (index = 0U;
 		     index < count && index < 256U;
 		     index++)
-			(void)h264sw_bits_se(&bits);
+			(void)vcodec_bitreader_se(&bits);
 	}
 
 	/* Skips max_num_ref_frames, the gaps flag and the size, then reads frame_mbs_only_flag. */
-	(void)h264sw_bits_ue(&bits);
-	(void)h264sw_bits_u1(&bits);
-	(void)h264sw_bits_ue(&bits);
-	(void)h264sw_bits_ue(&bits);
-	frame_mbs_only = h264sw_bits_u1(&bits);
+	(void)vcodec_bitreader_ue(&bits);
+	(void)vcodec_bitreader_u1(&bits);
+	(void)vcodec_bitreader_ue(&bits);
+	(void)vcodec_bitreader_ue(&bits);
+	frame_mbs_only = vcodec_bitreader_u1(&bits);
 	if (bits.error == 0 && frame_mbs_only == 0U) {
 		strcpy(reason, "interlace");
 		return;
@@ -979,13 +979,13 @@ slice_reason(
 	const struct h264sw_nal *unit,
 	char *reason)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	uint32_t slice_type;
 
 	/* Reads first_mb_in_slice and slice_type; types 3, 4, 8 and 9 are SP and SI (Table 7-6). */
-	h264sw_bits_init(&bits, unit->rbsp, unit->rbsp_size);
-	(void)h264sw_bits_ue(&bits);
-	slice_type = h264sw_bits_ue(&bits) % 5U;
+	vcodec_bitreader_init(&bits, unit->rbsp, unit->rbsp_size);
+	(void)vcodec_bitreader_ue(&bits);
+	slice_type = vcodec_bitreader_ue(&bits) % 5U;
 	if (bits.error == 0 &&
 	    (slice_type == 3U ||
 	     slice_type == 4U)) {

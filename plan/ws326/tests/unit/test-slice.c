@@ -225,7 +225,7 @@ static void
 install(
 	const struct config *c)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	struct bitwriter *w;
 	int error;
 
@@ -239,17 +239,17 @@ install(
 
 	/* Reads the SPS. */
 	write_sps(w, c);
-	h264sw_bits_init(&bits, w->data, bitwriter_bytes(w));
+	vcodec_bitreader_init(&bits, w->data, bitwriter_bytes(w));
 	error = h264sw_ps_read_sps(&store, &bits);
 	CHECK(error == 0);
 
 	/* Reads the PPS under the ids 0 and 1, which are the same set. */
 	write_pps(w, c, 0U);
-	h264sw_bits_init(&bits, w->data, bitwriter_bytes(w));
+	vcodec_bitreader_init(&bits, w->data, bitwriter_bytes(w));
 	error = h264sw_ps_read_pps(&store, &bits);
 	CHECK(error == 0);
 	write_pps(w, c, 1U);
-	h264sw_bits_init(&bits, w->data, bitwriter_bytes(w));
+	vcodec_bitreader_init(&bits, w->data, bitwriter_bytes(w));
 	error = h264sw_ps_read_pps(&store, &bits);
 	CHECK(error == 0);
 	free(w);
@@ -464,14 +464,14 @@ read_rbsp(
 	size_t size,
 	struct h264sw_slice_header *header)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	struct h264sw_nal nal;
 
 	nal.type = type;
 	nal.ref_idc = ref_idc;
 	nal.rbsp = data;
 	nal.rbsp_size = size;
-	h264sw_bits_init(&bits, data, size);
+	vcodec_bitreader_init(&bits, data, size);
 	return h264sw_slice_read(&bits, &nal, &store, header);
 }
 
@@ -517,7 +517,7 @@ test_hand_coded(void)
 {
 	struct config c;
 	struct h264sw_slice_header header;
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	struct h264sw_nal nal;
 	/*
 	 * first_mb_in_slice 0: ue 1; slice_type 7: ue 0001000; pic_parameter_set_id 0: ue 1;
@@ -534,7 +534,7 @@ test_hand_coded(void)
 	nal.ref_idc = 3U;
 	nal.rbsp = rbsp;
 	nal.rbsp_size = sizeof(rbsp);
-	h264sw_bits_init(&bits, rbsp, sizeof(rbsp));
+	vcodec_bitreader_init(&bits, rbsp, sizeof(rbsp));
 	error = h264sw_slice_read(&bits, &nal, &store, &header);
 	CHECK(error == 0);
 	CHECK(header.nal_type == 5U);
@@ -1291,14 +1291,14 @@ test_arguments(void)
 	struct config c;
 	struct params p;
 	struct h264sw_slice_header header;
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	struct h264sw_nal nal;
 
 	config_defaults(&c);
 	install(&c);
 	params_slice(&p, 2U);
 	build(&current_config, &p);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	nal.type = 1U;
 	nal.ref_idc = 1U;
 	nal.rbsp = writer.data;
