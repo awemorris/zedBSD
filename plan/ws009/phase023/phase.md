@@ -72,3 +72,10 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 - `GPU_COMMAND_SUBMIT` は driver を呼ぶ前に `sequence` を写し出すので、driver が断ると何も指さない sequence が残り、その wait は ENOENT。
 - device の失敗の poll は POLLERR だけ、POLLHUP は device が外れた時だけ（skeleton の spec は POLLERR|POLLHUP だった）。UINT64_MAX の wait は device が外れると ENODEV。
 - `GPU_COMMAND` の大きすぎは EINVAL、`GPU_COMMAND_SUBMIT` は E2BIG（header は無言）。`GPU_PRESENT` の不明な handle は ENOENT でなく EINVAL。
+
+## p017 から（2026-10-30 Q1、Bug の候補の一覧に入れる）
+
+- gpu-display.h は lease の release・close で output が console に戻ると書くが、最初の flip で `gpu_console_end` が `kern_text_end` を system で 1 回呼び、戻らない（powervr は「the text console resumes」と log する）。
+- PRESENT がいつ返るかを示す output の flag が無い（driver ごとに採用後・表示後・flip の arm 後で違う）。
+- 他の open の lease の WAIT の errno: header は EBUSY、venus は EPERM、i915 は EINVAL。i915 の mode の ENOENT、bcm2711 の plane_index の EBUSY（他は EINVAL）。
+- `timeout_ns` の 1 秒の上限は core に無く bcm2711・ghci だけ、他の driver の wait は timeout を見ない。
