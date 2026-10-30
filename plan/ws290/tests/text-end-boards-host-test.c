@@ -38,7 +38,7 @@
 #include "drivers/generic/serial-console.h"
 #include "drivers/platform/pc98/graphics/backend.h"
 #include "drivers/platform/pc98/graphics/text.h"
-#include "drivers/platform/rpi4/rpi4-console.h"
+#include "drivers/platform/rpi-common/rpi-console.h"
 #include "drivers/platform/x68k/x68k-console.h"
 #include "drivers/serial/ns16550.h"
 #include "kern/boot.h"
@@ -447,7 +447,7 @@ scene_rpi4(void)
 	screen_name = "rpi4.framebuffer";
 	screen_physical = 0x3e000000ULL;
 	screen_size = 640U * 480U * 4U;
-	drv_rpi4_console_init();
+	drv_rpi_console_init(DRV_RPI_BOARD_PI4);
 	mapped = mapping_count;
 	expect(mapped == 1U && kernel_putc == kern_text_kernel_putc, "rpi4: the screen mapped and the kernel's path published");
 

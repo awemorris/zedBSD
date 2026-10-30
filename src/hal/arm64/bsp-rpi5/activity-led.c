@@ -13,7 +13,7 @@
 #include <hal/hal.h>
 #include "../defs.h"
 #include "board.h"
-#include "../bsp-rpi-common/led.h"
+#include "../led.h"
 
 /*
  * A bank's data register holds the pin levels and its direction register
@@ -34,14 +34,14 @@ static volatile uint8_t *gpio_registers(void);
  * Makes the activity LED's pin an output, and turns the LED off.
  */
 void
-rpi_led_init(
+arm64_led_init(
 	void)
 {
 	volatile uint8_t *base;
 	uint32_t direction;
 
 	/* Dark first, so the pin does not light it when it turns into an output. */
-	rpi_led_set(0);
+	arm64_led_set(0);
 
 	/* Clears the pin's input bit: the block drives it from now on. */
 	base = gpio_registers();
@@ -54,7 +54,7 @@ rpi_led_init(
  * Turns the LED on or off.
  */
 void
-rpi_led_set(
+arm64_led_set(
 	int on)
 {
 	volatile uint8_t *base;

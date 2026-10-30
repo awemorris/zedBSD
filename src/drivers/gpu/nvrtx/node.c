@@ -36,6 +36,7 @@
 #include <kern/pmem.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
+#include <kern/vm-device.h>
 #include <uapi/errno.h>
 #include <uapi/gpu.h>
 #include <uapi/gpu-allocation.h>
@@ -947,6 +948,7 @@ node_resource_map(
 	struct nvrtx_node *node;
 	struct nvrtx_resource *resource;
 	volatile uint8_t *cpu;
+	bool write_combine;
 	int error;
 
 	UNUSED_PARAMETER(session);
@@ -974,15 +976,16 @@ node_resource_map(
 	mapping->attributes = DRV_GPU_MAPPING_DEVICE;
 
 	/*
-	 * The application's writes into the window combine (amd64; another
-	 * port refuses the policy), as the amdrdna driver's do: the
-	 * host-visible memory is written far more than read (a frame's
-	 * instance data), and the submission's locked instructions on the
-	 * writing processor drain its combining buffers before the GPU reads.
+	 * The application's writes into the window combine where the kernel
+	 * takes the policy (amd64; another port refuses it), as the amdrdna
+	 * driver's do: the host-visible memory is written far more than read
+	 * (a frame's instance data), and the submission's locked instructions
+	 * on the writing processor drain its combining buffers before the GPU
+	 * reads.
 	 */
-#if defined(HAL_ARCH_AMD64)
-	mapping->attributes |= DRV_GPU_MAPPING_WRITE_COMBINE;
-#endif
+	write_combine = vm_device_write_combine_supported();
+	if (write_combine)
+		mapping->attributes |= DRV_GPU_MAPPING_WRITE_COMBINE;
 
 	/* Succeeded: the view covers the whole object. */
 	return 0;

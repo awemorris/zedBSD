@@ -48,8 +48,8 @@
 #include "percpu.h"
 #include "space.h"
 #include "watch.h"
-#include "bsp-rpi-common/font.h"
-#include "bsp-rpi-common/framebuffer.h"
+#include "font.h"
+#include "framebuffer.h"
 
 /* How long a CPU may go without its tick before it counts as stopped, in seconds. */
 #define WATCH_STALL_SECONDS 2U
@@ -1175,7 +1175,7 @@ find_planes(
 			 * says, and not on the firmware's framebuffer once the kernel's
 			 * console gave that up: nothing in the HAL paints there then.
 			 */
-			given_up = rpi_framebuffer_given_up(planes[count].physical, (uint64_t)planes[count].pitch * planes[count].height);
+			given_up = arm64_framebuffer_given_up(planes[count].physical, (uint64_t)planes[count].pitch * planes[count].height);
 			if (planes[count].width >= WATCH_PLANE_MIN_SIZE &&
 			    planes[count].height >= WATCH_PLANE_MIN_SIZE &&
 			    planes[count].pitch >= planes[count].width * 4U &&
@@ -1218,9 +1218,9 @@ draw_plane(
 
 	/* Every pixel row of every text line. */
 	for (line = 0; line < WATCH_LINES; line++) {
-		for (glyph_row = 0; glyph_row < RPI_FONT_HEIGHT; glyph_row++) {
+		for (glyph_row = 0; glyph_row < ARM64_FONT_HEIGHT; glyph_row++) {
 			/* The row on the screen, and in the plane when the plane covers it. */
-			screen_y = WATCH_ORIGIN_Y + line * RPI_FONT_HEIGHT + glyph_row;
+			screen_y = WATCH_ORIGIN_Y + line * ARM64_FONT_HEIGHT + glyph_row;
 			if (screen_y < plane->y)
 				continue;
 			local_y = screen_y - plane->y;
@@ -1241,7 +1241,7 @@ draw_plane(
 						character = ' ';
 					}
 				}
-				glyph = &rpi_font8x16[((unsigned)(unsigned char)character) * RPI_FONT_HEIGHT];
+				glyph = &arm64_font8x16[((unsigned)(unsigned char)character) * ARM64_FONT_HEIGHT];
 				for (bit = 0; bit < 8U; bit++) {
 					screen_x = WATCH_ORIGIN_X + column * 8U + bit;
 					if (screen_x < plane->x)
@@ -1295,7 +1295,7 @@ draw_cells(
 					character = ' ';
 				}
 			}
-			rpi_framebuffer_cell(row, column, character, WATCH_CELL_ATTRIBUTE);
+			arm64_framebuffer_cell(row, column, character, WATCH_CELL_ATTRIBUTE);
 		}
 	}
 }

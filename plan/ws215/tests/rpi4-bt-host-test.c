@@ -10,7 +10,7 @@
  * (ws215-p003): the H4 reassembly of bt-hci-proto.c (types mixed, cut
  * anywhere, several in one feed, a refused packet kept, every way a header
  * shows the line out of step, the ACL limit changed, a packet loaded
- * whole), and rpi4-bt-link.c: the hunt for the anchor (a false header's
+ * whole), and rpi-bt-link.c: the hunt for the anchor (a false header's
  * prefix before a real answer, overlapping type bytes, an answer to
  * another command, a candidate cut short and replayed, a receive error),
  * the PL011's divisor, and the line's reset history and generation (the
@@ -19,7 +19,7 @@
  */
 
 #include <drivers/generic/bt-hci.h>
-#include "drivers/platform/rpi4/rpi4-bt-link.h"
+#include "drivers/platform/rpi-common/rpi-bt-link.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -614,62 +614,62 @@ test_history(void)
 static void
 test_link(void)
 {
-	struct drv_rpi4_bt_link link;
+	struct drv_rpi_bt_link link;
 	uint32_t observed;
 	int decision;
 
 	/* Never powered: nothing to reset. */
-	drv_rpi4_bt_link_init(&link);
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 0U);
+	drv_rpi_bt_link_init(&link);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 0U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_CANCEL, "link: an unpowered line is not reset");
 
 	/* The power-up: quiet, then hunting, then in step on the anchor. */
-	drv_rpi4_bt_link_transition_begin(&link);
+	drv_rpi_bt_link_transition_begin(&link);
 	expect(link.mode == DRV_RPI4_BT_MODE_QUIET && link.generation == 1U, "link: a transition is quiet at a new generation");
-	drv_rpi4_bt_link_anchor(&link);
+	drv_rpi_bt_link_anchor(&link);
 	expect(link.mode == DRV_RPI4_BT_MODE_QUIET, "link: a quiet line takes no anchor");
-	drv_rpi4_bt_link_transition_end(&link);
+	drv_rpi_bt_link_transition_end(&link);
 	expect(link.mode == DRV_RPI4_BT_MODE_HUNT, "link: after the quiet time it hunts");
-	drv_rpi4_bt_link_anchor(&link);
+	drv_rpi_bt_link_anchor(&link);
 	expect(link.mode == DRV_RPI4_BT_MODE_SYNC, "link: the anchor puts it in step");
 
 	/* Three resets of its own are made, each a transition. */
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 1000U);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 1000U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_GO, "link: the first own reset");
-	drv_rpi4_bt_link_transition_begin(&link);
-	drv_rpi4_bt_link_transition_end(&link);
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 2000U);
+	drv_rpi_bt_link_transition_begin(&link);
+	drv_rpi_bt_link_transition_end(&link);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 2000U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_GO, "link: the second own reset");
-	drv_rpi4_bt_link_transition_begin(&link);
-	drv_rpi4_bt_link_transition_end(&link);
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 3000U);
+	drv_rpi_bt_link_transition_begin(&link);
+	drv_rpi_bt_link_transition_end(&link);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 3000U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_GO, "link: the third own reset");
-	drv_rpi4_bt_link_transition_begin(&link);
-	drv_rpi4_bt_link_transition_end(&link);
+	drv_rpi_bt_link_transition_begin(&link);
+	drv_rpi_bt_link_transition_end(&link);
 
 	/* The fourth within the minute stops the line. */
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 4000U);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 4000U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_STOP, "link: the fourth own reset stops");
 	observed = link.generation;
-	drv_rpi4_bt_link_stop(&link);
+	drv_rpi_bt_link_stop(&link);
 	expect(link.mode == DRV_RPI4_BT_MODE_STOPPED && link.generation != observed, "link: stopped at a new generation");
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 4100U);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 4100U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_CANCEL, "link: a stopped line is not reset by itself");
-	drv_rpi4_bt_link_transition_end(&link);
+	drv_rpi_bt_link_transition_end(&link);
 	expect(link.mode == DRV_RPI4_BT_MODE_STOPPED, "link: a stop is not undone by the end of a transition");
 
 	/* The program's reset starts the line again, but one more own reset within the window stops it again. */
-	drv_rpi4_bt_link_transition_begin(&link);
-	drv_rpi4_bt_link_transition_end(&link);
+	drv_rpi_bt_link_transition_begin(&link);
+	drv_rpi_bt_link_transition_end(&link);
 	expect(link.mode == DRV_RPI4_BT_MODE_HUNT, "link: the program's reset leaves STOPPED");
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 5000U);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 5000U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_STOP, "link: one own reset in the window after the program's reset stops again");
 
 	/* Out of the window, the count starts again. */
-	drv_rpi4_bt_link_stop(&link);
-	drv_rpi4_bt_link_transition_begin(&link);
-	drv_rpi4_bt_link_transition_end(&link);
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 64000U);
+	drv_rpi_bt_link_stop(&link);
+	drv_rpi_bt_link_transition_begin(&link);
+	drv_rpi_bt_link_transition_end(&link);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 64000U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_GO, "link: a minute after the first resets one is made again");
 
 	/*
@@ -677,17 +677,17 @@ test_link(void)
 	 * reset; the program's reset makes its transition first; the worker's
 	 * then finds another generation and is cancelled, without counting.
 	 */
-	drv_rpi4_bt_link_transition_begin(&link);
-	drv_rpi4_bt_link_transition_end(&link);
+	drv_rpi_bt_link_transition_begin(&link);
+	drv_rpi_bt_link_transition_end(&link);
 	observed = link.generation;
-	drv_rpi4_bt_link_transition_begin(&link);
-	drv_rpi4_bt_link_transition_end(&link);
-	decision = drv_rpi4_bt_link_self_reset(&link, observed, 64100U);
+	drv_rpi_bt_link_transition_begin(&link);
+	drv_rpi_bt_link_transition_end(&link);
+	decision = drv_rpi_bt_link_self_reset(&link, observed, 64100U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_CANCEL, "link: a reset that came first cancels the worker's");
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 64200U);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 64200U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_GO, "link: the cancelled one was not counted (the second of the window)");
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 64300U);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 64300U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_GO, "link: the third of the window");
-	decision = drv_rpi4_bt_link_self_reset(&link, link.generation, 64400U);
+	decision = drv_rpi_bt_link_self_reset(&link, link.generation, 64400U);
 	expect(decision == DRV_RPI4_BT_SELF_RESET_STOP, "link: the fourth of the window stops");
 }

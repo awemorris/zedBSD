@@ -27,8 +27,8 @@
 #include "space.h"
 #include "task.h"
 #include "watch.h"
-#include "bsp-rpi-common/clock.h"
-#include "bsp-rpi-common/gic.h"
+#include "clock.h"
+#include "gic.h"
 
 /* The bytes of a secondary CPU's boot stack, which becomes its initial task's. */
 #define ARM64_SECONDARY_STACK_SIZE 16384U
@@ -81,7 +81,7 @@ static unsigned cpu_count = 1;
  * others' by arm64_smp_configure(); not changed afterwards.
  */
 static uint64_t cpu_core[ARM64_CPU_MAX];
-static struct rpi_fdt_cpu cpu_entry[ARM64_CPU_MAX];
+static struct arm64_fdt_cpu cpu_entry[ARM64_CPU_MAX];
 
 /*
  * The CPUs that are up, one bit per CPU.
@@ -128,8 +128,8 @@ void
 arm64_smp_configure(
 	void)
 {
-	const struct rpi_fdt_info *info;
-	const struct rpi_fdt_cpu *entry;
+	const struct arm64_fdt_info *info;
+	const struct arm64_fdt_cpu *entry;
 	unsigned limit;
 	unsigned index;
 	uint64_t core;
@@ -141,7 +141,7 @@ arm64_smp_configure(
 		limit = ARM64_CPU_MAX;
 
 	/* Takes each other core the board can release. */
-	info = rpi_boot_info();
+	info = arm64_boot_info();
 	for (index = 0; index < info->cpu_count; index++) {
 		entry = &info->cpus[index];
 		core = arm64_bsp_core_of(entry->mpidr);
@@ -295,7 +295,7 @@ arm64_secondary_main(
 		HAL_FATAL("arm64 secondary initial task allocation failed");
 
 	/* Starts the CPU's scheduling tick. */
-	rpi_timer_init();
+	arm64_timer_init();
 
 	/* Publishes the CPU first through its record, then the ready mask. */
 	__atomic_store_n(&record->ready, 1U, __ATOMIC_RELEASE);
@@ -327,7 +327,7 @@ hal_cpu_notify(
 		return HAL_ERR_STATE;
 
 	/* Sends the notification SGI to the CPU's interface. */
-	rpi_gic_send_sgi(RPI_SGI_NOTIFY, cpu_interface_bit(cpu));
+	arm64_gic_send_sgi(ARM64_SGI_NOTIFY, cpu_interface_bit(cpu));
 
 	/* Succeeded: the CPU runs kernel_cpu_notify_handler(). */
 	return HAL_OK;
@@ -373,7 +373,7 @@ hal_cpu_notify_mask(
 		return HAL_ERR_INVALID;
 
 	/* One SGI request reaches every named interface. */
-	rpi_gic_send_sgi(RPI_SGI_NOTIFY, interfaces);
+	arm64_gic_send_sgi(ARM64_SGI_NOTIFY, interfaces);
 
 	/* Succeeded: every named CPU runs kernel_cpu_notify_handler(). */
 	return HAL_OK;
@@ -436,7 +436,7 @@ hal_cpu_panic_all(
 
 	/* Tells them to stop, then stops this one. */
 	if (interfaces != 0)
-		rpi_gic_send_sgi(RPI_SGI_STOP, interfaces);
+		arm64_gic_send_sgi(ARM64_SGI_STOP, interfaces);
 	hal_cpu_park();
 }
 
@@ -448,7 +448,7 @@ boot_parameter_cpus(
 	void)
 {
 	static const char key[] = "cpus=";
-	const struct rpi_fdt_info *info;
+	const struct arm64_fdt_info *info;
 	const char *line;
 	unsigned length;
 	unsigned position;
@@ -457,10 +457,10 @@ boot_parameter_cpus(
 	int at_word;
 
 	/* No command line, no parameter. */
-	info = rpi_boot_info();
+	info = arm64_boot_info();
 	if (info->bootargs_offset == 0 || info->bootargs_length == 0)
 		return 0;
-	line = (const char *)arm64_phys_to_direct(rpi_boot_fdt_phys() + info->bootargs_offset);
+	line = (const char *)arm64_phys_to_direct(arm64_boot_fdt_phys() + info->bootargs_offset);
 	length = info->bootargs_length;
 
 	/* Looks for the key at the start of a word. */

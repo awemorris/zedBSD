@@ -125,6 +125,19 @@ vm_device_create(
 }
 
 /*
+ * Tells whether this port's user translations can write-combine device
+ * pages, so that a driver asks for the policy only where vm_device_create()
+ * takes it.
+ */
+bool
+vm_device_write_combine_supported(
+	void)
+{
+	/* Succeeded: the port's answer, fixed when the kernel is built. */
+	return VM_DEVICE_WC_SUPPORTED != 0;
+}
+
+/*
  * Retains storage for another region or pin without consulting a driver.
  */
 void

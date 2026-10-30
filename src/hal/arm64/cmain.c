@@ -18,12 +18,12 @@
 #include "space.h"
 #include "task.h"
 #include "watch.h"
-#include "bsp-rpi-common/fdt.h"
-#include "bsp-rpi-common/framebuffer.h"
-#include "bsp-rpi-common/led.h"
+#include "fdt.h"
+#include "framebuffer.h"
+#include "led.h"
 
 /* The most bytes of the firmware's device tree the parser may read. */
-#define RPI_FDT_READ_LIMIT (2U * 1024U * 1024U)
+#define ARM64_FDT_READ_LIMIT (2U * 1024U * 1024U)
 
 /* The RAM locore.S maps for the boot: the first gigabyte. */
 #define BOOT_RAM_LIMIT 0x40000000UL
@@ -41,7 +41,7 @@ arm64_cmain(
 	uintptr_t fdt_phys)
 {
 	const void *fdt;
-	struct rpi_fdt_info info;
+	struct arm64_fdt_info info;
 	uint64_t level;
 	int error;
 	int framebuffer;
@@ -51,8 +51,8 @@ arm64_cmain(
 
 	/* Opens the early console and starts counting stages on the LED. */
 	prekern_bsp_cons_init();
-	rpi_led_init();
-	rpi_led_stage(1);
+	arm64_led_init();
+	arm64_led_stage(1);
 	hal_puts(ARM64_BOARD_TAG " ENTRY\n");
 
 	/* The kernel runs at EL1; locore.S has left EL2 if it entered there. */
@@ -66,20 +66,20 @@ arm64_cmain(
 		HAL_FATAL("missing firmware FDT");
 
 	/* The boot tables map only the first gigabyte of RAM, where the tree must lie. */
-	if (fdt_phys >= BOOT_RAM_LIMIT - RPI_FDT_READ_LIMIT)
+	if (fdt_phys >= BOOT_RAM_LIMIT - ARM64_FDT_READ_LIMIT)
 		HAL_FATAL("firmware FDT above the boot map");
 
 	/* Parses the tree through the direct map. */
 	fdt = (const void *)(ARM64_DIRECT_BASE + fdt_phys);
-	error = rpi_fdt_parse(fdt, RPI_FDT_READ_LIMIT, &info);
+	error = arm64_fdt_parse(fdt, ARM64_FDT_READ_LIMIT, &info);
 	if (error != 0) {
-		hal_printf("FDT parse error: %s\n", rpi_fdt_error(error));
+		hal_printf("FDT parse error: %s\n", arm64_fdt_error(error));
 		HAL_FATAL("invalid firmware FDT");
 	}
 
 	/* Reports the tree and the peripherals it names, and counts the stage. */
 	hal_printf(ARM64_BOARD_TAG " FDT PASS phys=%p size=%u\n", (void *)fdt_phys, info.totalsize);
-	rpi_led_stage(2);
+	arm64_led_stage(2);
 	hal_printf(ARM64_BOARD_TAG " MMIO uart=%llx gic=%llx/%llx sd=%llx\n",
 		   info.uart_base,
 		   info.gic_dist_base,
@@ -87,22 +87,22 @@ arm64_cmain(
 		   info.sdhci_base);
 
 	/* Keeps the tree's record for the rest of the HAL and the kernel's handoff. */
-	rpi_boot_set_info(&info, fdt_phys);
+	arm64_boot_set_info(&info, fdt_phys);
 
 	/* Fixes the number of CPUs before the kernel can ask for it. */
 	arm64_smp_configure();
 
 	/* Brings up the framebuffer console, or stays on the UART without one. */
-	framebuffer = rpi_framebuffer_init(info.mailbox_base);
+	framebuffer = arm64_bsp_framebuffer_init();
 	if (framebuffer == 0) {
 		hal_puts(ARM64_BOARD_TAG " FRAMEBUFFER PASS\n");
-		rpi_framebuffer_describe();
-		rpi_led_stage(3);
-		rpi_framebuffer_test_pattern();
-		rpi_framebuffer_describe();
+		arm64_framebuffer_describe();
+		arm64_led_stage(3);
+		arm64_framebuffer_test_pattern();
+		arm64_framebuffer_describe();
 	} else {
 		hal_puts(ARM64_BOARD_TAG " framebuffer unavailable; UART-only console\n");
-		rpi_led_stage(6);
+		arm64_led_stage(6);
 	}
 
 	/* Sets up memory, the tables, the task switch, interrupts and debug. */
@@ -116,9 +116,9 @@ arm64_cmain(
 	hal_irq_enable();
 
 	/* The LED stays lit once the kernel proper starts. */
-	rpi_led_stage(4);
-	rpi_led_set(1);
-	kernel_entry(rpi_kernel_handoff());
+	arm64_led_stage(4);
+	arm64_led_set(1);
+	kernel_entry(arm64_kernel_handoff());
 
 	/* The kernel never returns; a halt keeps the CPU if it does. */
 	for (;;)

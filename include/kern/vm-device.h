@@ -13,6 +13,7 @@
 #define KERN_VM_DEVICE_H
 
 #include <kern/atomic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -46,6 +47,8 @@ struct vm_device_mapping {
  * Success retains file and transfers one eventual release callback to the VM.
  */
 int vm_device_create(struct file *file, uint64_t physical, void *address, size_t bytes, uint32_t attributes, uint32_t max_prot, void (*release)(void *), void *owner, struct vm_device_mapping **result);
+/* Whether this port's user translations can write-combine device pages (VM_DEVICE_WRITE_COMBINE). */
+bool vm_device_write_combine_supported(void);
 void vm_device_ref(struct vm_device_mapping *mapping);
 void vm_device_put(struct vm_device_mapping *mapping);
 uint32_t vm_device_page_attributes(const struct vm_device_mapping *mapping);

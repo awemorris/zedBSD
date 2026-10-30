@@ -37,7 +37,7 @@ for mode in ordinary undefined address; do
 		"$repo/src/kern/text-display.c" "$repo/src/kern/klog.c" \
 		"$repo/src/drivers/generic/fdt.c" "$repo/src/drivers/generic/serial-console.c" \
 		"$repo/src/drivers/serial/ns16550.c" \
-		"$repo/src/drivers/platform/rpi4/rpi4-console.c" "$repo/src/drivers/platform/x68k/x68k-console.c" \
+		"$repo/src/drivers/platform/rpi-common/rpi-console.c" "$repo/src/drivers/platform/x68k/x68k-console.c" \
 		"$repo/src/drivers/generic/boot-fb.c" "$repo/src/drivers/generic/fb-text.c" \
 		"$repo/src/drivers/platform/pcat/graphics/vgafont.c" \
 		$pc98 -o "$out/$mode"

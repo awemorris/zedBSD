@@ -13,7 +13,7 @@
 #include <hal/hal.h>
 #include "../bsp.h"
 #include "../defs.h"
-#include "framebuffer.h"
+#include "../framebuffer.h"
 #include "mailbox.h"
 
 /* The property tags the HAL sends: get the display's size, then set up and allocate. */
@@ -64,16 +64,23 @@ static uint32_t request[40] __attribute__((aligned(16)));
  * The size is the one the firmware set up for the display (config.txt's
  * framebuffer_width and framebuffer_height, or the mode's), so that the
  * framebuffer is scanned out as it is, without scaling; 640x480 when the
- * firmware reports none (QEMU).  Returns 0 when the framebuffer is ready.
+ * firmware reports none (QEMU).  The firmware's mailbox is the one the
+ * device tree names.  Returns 0 when the framebuffer is ready.
  */
 int
-rpi_framebuffer_init(
-	uintptr_t mailbox_phys)
+arm64_bsp_framebuffer_init(
+	void)
 {
+	const struct arm64_fdt_info *info;
+	uintptr_t mailbox_phys;
 	uint32_t want_width;
 	uint32_t want_height;
 	uint64_t phys;
 	int error;
+
+	/* Finds the firmware's mailbox the tree names. */
+	info = arm64_boot_info();
+	mailbox_phys = (uintptr_t)info->mailbox_base;
 
 	/* Asks for the display's size: one tag with room for two words. */
 	request[0] = SIZE_WORDS * 4U;
@@ -159,7 +166,7 @@ rpi_framebuffer_init(
 	phys = (uint64_t)(request[ANSWER_BASE] & 0x3fffffffU);
 
 	/* Takes the allocation for the console, which checks that it is large enough. */
-	error = rpi_framebuffer_adopt(phys,
+	error = arm64_framebuffer_adopt(phys,
 				      request[ANSWER_SIZE],
 				      request[ANSWER_WIDTH],
 				      request[ANSWER_HEIGHT],
