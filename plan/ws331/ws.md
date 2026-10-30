@@ -37,5 +37,5 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 | [p005](phase005/phase.md) | rpi4 の console の作り直し（kernel_putc を公開）と pc98 の 3 か所。追加: Pi 5・ODROID-C5・VF2 の /dev/graphics（generic の boot-fb・fb-text）、gpu.c の最初の flip で boot の framebuffer を手放す | in-progress（P2、q1719。84e3e2698〜977f43204、20 port の build、raspi4b の起動・描き直し・serial、WS290 の host 試験、VF2 の実機の起動（画面・serial の目視は未確かめ）は済み、Venus は未実施、判定は Q1） | p003 |
 | [p007](phase007/phase.md) | HAL の early console の framebuffer の窓を、kernel が外せる形に（amd64 の fb_window を arm64・riscv64 へ） | cleared（2026-10-30 Q1） | p005 |
 | [p008](phase008/phase.md) | Pi の共通化（drivers rpi-common、HAL bsp-rpi-common）、ODROID-C5 の分離（drivers s905x5m、HAL bsp-s905x5m-common と bsp-odroidc5）、残りの HAL_ARCH_* | in-progress（P2、q1721。74d6760d2〜ae0b1b031、20 port の build、driver の HAL_ の grep 0、raspi4b の login・描き直し・end・serial は済み、Pi 5・ODROID-C5 は build だけ、判定は Q1） | p007 |
-| [p009](phase009/phase.md) | kernel の header から HAL を分ける（kernel の整数の型、_private.h） | planned（P2、q1721） | p008 |
+| [p009](phase009/phase.md) | kernel の header から HAL を分ける（kernel の整数の型、_private.h） | in-progress（P2、q1721。22e324fc9・e5e316da5、20 port の build、amd64・rpi4・m68k-virt・riscv64-virt の QEMU、atomic.h は判断待ち、判定は Q1） | p008 |
 | p006 | 規約の全文の見直し | 未作成 | p003〜p005 |
