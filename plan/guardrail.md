@@ -101,6 +101,7 @@ zedBSD の貢献の規則と標準の索引。Queue・backlog・実行許可で�
 | 2026-10-19 | 例外: sun4u の kernel が pcat の `src/drivers/platform/pcat/graphics/vgafont.c`（`drv_pcat_vgafont16`）をそのまま compile する（WS275、design-review-1 の M4。boot-test.py が path で読むので移さない）。generic への移動は F-111 で boot-test.py の追従と一緒に | WS275 |
 | 2026-10-30 | hal.h の RTC の説明の comment に残る KERN_CLOCK_HZ（WS332 で削除）の語を、意味を変えずに今の言葉に直す。宣言・型・約束は変えない（ユーザーの承認） | WS332 p002 |
 | 2026-10-30 | include/hal/atomic.h: 契約を macro だけにする（ENTER の直列化は macro の中の block で enter・leave を宣言して呼ぶ、hal_atomic_cookie_t を消す、arch.h・types.h の include を外し、単体の include を認める comment）。hal.h の宣言は変えない（ユーザーの指示） | WS331 p010 |
+| 2026-10-30 | arch の header の hal_atomic_uint_try_acquire・hal_atomic_relax を include/hal/arch/atomic/<arch>.h の macro に移し、hal/atomic.h が -DHAL_ARCH_* で選んで include する（arch の header から消す）。hal.h の宣言は変えない（ユーザーの指示） | WS331 p011 |
 
 2026-09-25 以降、hal.h を変えない `src/hal/` の実装の変更は承認を要しない（上の規則）。hal.h の変更はこの表の承認が要る。
 

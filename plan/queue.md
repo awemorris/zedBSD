@@ -304,3 +304,9 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1723 / q1723-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p010](ws331/phase010/phase.md) | 2026-10-30 ユーザーから、HAL の atomic.h を macro だけの契約にして kernel の atomic.h で undef する形と、pc98・pcat の legacy の窓の番地を driver の基底で書く形の趣旨の指示を受けた | cleared（2026-10-30 Q1。atomic.h の分離（案 C）、pc98・pcat の窓の番地、20 port の build、QEMU pcat・amd64・rpi4・m68k、host 試験、gpu の build の選択の試験は Q1 が流して PASS。7396b8440、merge 94e9b6e88） |
+
+## 2026-10-30: WS331 p011 を P2 で（q1724）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1724 / q1724-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p011](ws331/phase011/phase.md) | 2026-10-30 ユーザーから、arch の spinlock の取得を include/hal/arch/atomic/<arch>.h に分けて hal/atomic.h の macro の契約に入れる実装の指示を受けた | in-progress |
