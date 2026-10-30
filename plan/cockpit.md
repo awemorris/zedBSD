@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 04:06（Q1）
+最終更新: 2026-10-31 04:14（Q1）
 
 ## 担当（P1〜P8）
 
@@ -14,7 +14,7 @@
 | P3 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除く | q1737: p006 規約の全文の見直し（約 230 file、規約の担当 3 つを並べる）→ WS331 の完了 | 返却（WS332 は P6 へ移した） |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS329](ws329/ws.md) | libmedia の H.264 の software の encoder（標準廉価実装手順） | q1758: p001 設計（WS326 の module を入力に共通化、design-reviewer と問いまで） | WS318 の設計は済み（main 85fbeb091、問い Q318-1〜14 は下の 0c） |
-| P6 | [WS332](ws332/ws.md) | tick の周波数を API で扱う | q1738: p003（率を仮定する残りの literal）→ p004 規約 → WS332 の完了 | BUG-370・376 は closed、WS291 p014 で RTX big-1000 85〜91 fps |
+| P6 | — | — | 返却（05:4x）。WS332 を完了 | 次の割当を Q1 が決める |
 | P7 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1754: p003 kernel の口の header の案と review → p006 cpuperf の枠組み（kernel、host 試験） | p011（x86 の CPU の driver）・p014（5330 の受け入れ）へ。BUG-371・372・373・375 は直して closed |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
@@ -56,11 +56,7 @@
 
 ### WS332 tick の周波数を API で扱う
 
-| Phase | 内容 | 状態 |
-| --- | --- | --- |
-| p001・p002 | 設計、KERN_CLOCK_HZ の削除、Wi-Fi の UAPI を ns に | cleared |
-| p003 | 率を仮定する残り（tick の数の literal、+1） | planned（担当なし） |
-| p004 | 規約の見直し | planned |
+completed（2026-10-31、main 39fc879c5）。KERN_CLOCK_HZ を無くし、tick の数を前提にした残り 32 か所も時間の単位に。全 port の build と amd64 の QEMU の起動 PASS。100 Hz の port の VM の待ちは 100 → 10 ms。周期を実際に変える実装は Future Work。
 
 ### WS074 Web ブラウザ（libbrowser）
 
@@ -80,7 +76,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 
 ### 最近完了した WS
 
-- WS307 graphical installer（2026-10-31）、WS009 文書（2026-10-30）、WS327 libkeiland の thread と socket（2026-10-30）、WS315 Realtek USB 2.5G（2026-10-30）。
+- WS332 tick の周波数を API で（2026-10-31）、WS307 graphical installer（2026-10-31）、WS009 文書（2026-10-30）、WS327 libkeiland の thread と socket（2026-10-30）、WS315 Realtek USB 2.5G（2026-10-30）。
 
 ## open の Bug（今日見つかった物）
 
