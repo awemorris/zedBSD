@@ -1,13 +1,15 @@
 #!/bin/sh
 # ws291-p013: kernels compared on the RTX 2070 in one window, with one tree's programs, run from the top of the tree in the
 # 10.0.10.3 machine's lock:
-#   FILES='DEST=SRC ...' [RESTORE_CKSUM=N] [LIST=plan/ws291/tests/rtx-ab.list] [ROUNDS=2] [SHOT=1]
+#   FILES='DEST=SRC ...' [RESTORE_CKSUM=N] [LIST=plan/ws291/tests/rtx-ab.list] [ROUNDS=2] [SHOT=1] [PROF=1]
 #       sh plan/ws291/tests/rtx-p013.sh OUT NAME=VMUNIX...
 # The NVMe kernel is read back (OUT/nvme-vmunix, checked against RESTORE_CKSUM), FILES put in (rtx-files.sh); then in
 # ROUNDS rounds (the order given, then reversed, and so on) each kernel put in (zedBSD restarted) and the gpu-perf bench
 # LIST run (its table in OUT/NAME-ROUND/bench/table.txt, the fps lines printed as "NAME ROUND LABEL ..."); with SHOT=1
 # also mview's still views of 100 copies (one instanced draw a group, a draw a copy and group, one submission a copy)
-# compared with each other (OUT/NAME-ROUND/{one,each,subs}.png).  Then the files and the NVMe kernel put back, checked
+# compared with each other (OUT/NAME-ROUND/{one,each,subs}.png); with PROF=1 also, in the last round, the driver's counts
+# on (nvrtx.vk.perf=1, zedBSD restarted) for mview big-1000 and subs-100 with libvulkan's submission timing and the
+# driver's perf lines (OUT/NAME-ROUND/prof.txt, printed), the counts off after.  Then the files and the NVMe kernel put back, checked
 # by cksum, and Debian again.  OUT/summary.txt holds what is printed.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -52,6 +54,22 @@ grep -E 'MVIEW (DONE|FAILED)' /tmp/mview-shot.log" 2>&1 | sed "s/^/$2 $view /" |
 	done
 }
 
+# prof DIR LABEL: big-1000 and subs-100 with the counts on.
+prof() {
+	timeout 700 $M timing on > "$1/timing-on.txt" 2>&1 || say "$2 FAIL timing on"
+	ip=$($M zedbsd 2> /dev/null | tail -1)
+	ZT=300 z 'U=$(awk -F: "\$3 == 1000 { print \$1; exit }" /etc/passwd)
+for a in "big-1000|--draws=each --copies=1000" "subs-100|--draws=each --copies=100 --submits=100"; do
+	label=${a%%|*}; opts=${a#*|}
+	n=$(dmesg | wc -l)
+	su $U -c "env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 VULKAN_ZEDBSD_SUBMIT_TIMING=1 timeout 40 /bin/mview --token=p --spin=11 --content=game --present=mailbox --images=4 $opts" 2>&1 |
+	    grep -E "MVIEW (SPIN|STAGES|FAILED)|VULKAN TIMING" | tail -12 | sed "s/^/$label /"
+	dmesg | tail -n +$n | grep -E "perf|executor|lost" | tail -14 | sed "s/^/$label /"
+done' > "$1/prof.txt" 2>&1
+	sed "s/^/$2 prof /" "$1/prof.txt" | tee -a "$summary"
+	timeout 700 $M timing off > "$1/timing-off.txt" 2>&1 || say "$2 FAIL timing off"
+}
+
 say "start $(date +%H:%M)"
 ip=$(timeout 700 $M zedbsd 2> "$out/zedbsd.txt" | tail -1)
 [ -n "$ip" ] || { say "FAIL zedBSD did not come up"; exit 1; }
@@ -74,7 +92,9 @@ while [ $failed = 0 ] && [ $round -lt "${ROUNDS:-2}" ]; do
 		grep -E "^(big|subs|scene)-[0-9]+ " "$dir/bench.txt" | sed "s/^/$name $round /" | tee -a "$summary"
 		ip=$($M zedbsd 2> /dev/null | tail -1)
 		[ "${SHOT:-0}" = 1 ] && [ -n "$ip" ] && shots "$dir" "$name $round"
-		z "dmesg | grep -E 'fault|lost|MMU|executor fail|refused' | tail -4" 2>&1 | sed "s/^/$name $round kernel /" | tee -a "$summary"
+		[ "${PROF:-0}" = 1 ] && [ "$round" = "${ROUNDS:-2}" ] && [ -n "$ip" ] && prof "$dir" "$name $round"
+		ip=$($M zedbsd 2> /dev/null | tail -1)
+		z "dmesg | grep -E 'fault|lost|MMU|executor fail|refused|cursor-diag' | tail -8" 2>&1 | sed "s/^/$name $round kernel /" | tee -a "$summary"
 	done
 	reversed=""
 	for arm in $order; do reversed="$arm $reversed"; done

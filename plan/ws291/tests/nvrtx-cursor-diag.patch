@@ -1,0 +1,36 @@
+diff --git a/src/drivers/gpu/nvrtx/display/cursor.c b/src/drivers/gpu/nvrtx/display/cursor.c
+index fdd7d890a..2c1efc482 100644
+--- a/src/drivers/gpu/nvrtx/display/cursor.c
++++ b/src/drivers/gpu/nvrtx/display/cursor.c
+@@ -28,6 +28,7 @@
+ #include <drivers/gpu/gpu.h>
+ #include <drivers/gpu/gpu-display.h>
+ #include <kern/kcrt.h>
++#include <kern/klog.h>
+ #include <kern/kmem.h>
+ #include <uapi/errno.h>
+ #include <uapi/gpu.h>
+@@ -208,6 +209,23 @@ nvrtx_cursor_set(
+ 		mutex_unlock(&node->lock);
+ 		return error;
+ 	}
++	{
++		static unsigned diag_shown;
++		unsigned diag_white = 0, diag_black = 0, diag_clear = 0, diag_other = 0, diag_i;
++		uint32_t diag_first_other = 0;
++		for (diag_i = 0; diag_i < CURSOR_SLOT_PIXELS; diag_i++) {
++			if (staged[diag_i] == 0xffffffffU) diag_white++;
++			else if (staged[diag_i] == 0xff000000U) diag_black++;
++			else if (staged[diag_i] == 0U) diag_clear++;
++			else { if (diag_other == 0) diag_first_other = staged[diag_i]; diag_other++; }
++		}
++		if (diag_shown < 12U) {
++			diag_shown++;
++			kern_logf("nvrtx: cursor-diag %ux%u format %u kind %u white %u black %u clear %u other %u (first %08x)\n",
++			    (unsigned)request->width, (unsigned)request->height, (unsigned)request->format, (unsigned)resource->kind,
++			    diag_white, diag_black, diag_clear, diag_other, (unsigned)diag_first_other);
++		}
++	}
+ 
+ 	/* The image the cursor's slot already holds needs nothing sent, even while the core's last change is out. */
+ 	compared = kern_memcmp(staged, shown, CURSOR_SLOT_BYTES);

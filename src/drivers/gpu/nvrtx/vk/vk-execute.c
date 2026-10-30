@@ -184,11 +184,17 @@ struct execute_kept {
 
 /*
  * The pool handles a push buffer's draws keep for their textures: one
- * place for each view and sampler pair, chosen by their addresses (a pair
- * whose place another took makes its entries again).
+ * place for each view and sampler pair, chosen by their addresses mixed
+ * (a multiplication by the golden ratio's bits, its top bits taken: the
+ * objects' addresses lie a fixed distance apart, which their low bits
+ * alone do not tell apart); a pair whose place another took makes its
+ * entries again.  Two neighbouring places (place and place ^ 1) make a
+ * set: a pair is looked for in both and a new one takes the set's place
+ * not used in this push buffer yet.
  */
 #define EXECUTE_TEXTURE_CACHE		32U
-#define EXECUTE_TEXTURE_CACHE_SHIFT	6U
+#define EXECUTE_TEXTURE_CACHE_MIX	0x9e3779b97f4a7c15ULL
+#define EXECUTE_TEXTURE_CACHE_SHIFT	58U
 
 /*
  * The parts of a pipeline's state a draw writes when they differ from the
@@ -387,6 +393,7 @@ static bool execute_same_words(const uint32_t *left, const uint32_t *right, size
 static int execute_draw_constants(struct nvrtx_vk_execute *execute, const struct execute_state *state, const uint32_t *handles, bool known);
 static void execute_draw_load(struct nvrtx_vk_execute *execute, uint32_t offset, const uint32_t *words, uint32_t *held_words, uint32_t count);
 static int execute_textures(struct nvrtx_vk_execute *execute, const struct execute_state *state, uint32_t *handles);
+static bool execute_texture_kept(const struct execute_reuse *reuse, uint32_t place, const void *view, const void *sampler);
 static int execute_texture(struct nvrtx_vk_execute *execute, const struct nvrtx_vk_view *view, const struct nvrtx_vk_sampler *sampler, uint32_t *handle);
 static int execute_pool_entry(struct nvrtx_vk_execute *execute, const uint32_t *header, const uint32_t *sampler, uint32_t *handle);
 static int execute_constants(struct nvrtx_vk_execute *execute, uint8_t **cpu, uint64_t *va);
@@ -1862,9 +1869,11 @@ execute_textures(
 	const struct nvrtx_vk_view *view;
 	const struct nvrtx_vk_sampler *sampler;
 	struct execute_reuse *reuse;
+	uint64_t mixed;
 	uint32_t handle;
 	uint32_t index;
 	uint32_t place;
+	bool found;
 	int error;
 
 	/* Each sampled image of the fragment program. */
@@ -1881,11 +1890,20 @@ execute_textures(
 		reuse = &execute->reuse;
 		view = slot->view->payload;
 		sampler = slot->sampler->payload;
-		place = (uint32_t)((((uintptr_t)view ^ ((uintptr_t)sampler >> 3)) >> EXECUTE_TEXTURE_CACHE_SHIFT) % EXECUTE_TEXTURE_CACHE);
-		if (reuse->texture_pools[place] == reuse->pools && reuse->texture_view[place] == view &&
-		    reuse->texture_sampler[place] == sampler) {
+		mixed = ((uint64_t)(uintptr_t)view ^ ((uint64_t)(uintptr_t)sampler >> 3)) * EXECUTE_TEXTURE_CACHE_MIX;
+		place = (uint32_t)(mixed >> EXECUTE_TEXTURE_CACHE_SHIFT) % EXECUTE_TEXTURE_CACHE;
+		found = execute_texture_kept(reuse, place, view, sampler);
+		if (!found) {
+			/* The pair's other place (the two make one set). */
+			place ^= 1U;
+			found = execute_texture_kept(reuse, place, view, sampler);
+		}
+		if (found) {
 			handle = reuse->texture_handle[place];
 		} else {
+			/* A new entry, at the set's place this push buffer does not use yet, else at the first. */
+			if (reuse->texture_pools[place] == reuse->pools)
+				place ^= 1U;
 			error = execute_texture(execute, view, sampler, &handle);
 			if (error != 0)
 				return error;
@@ -1900,6 +1918,24 @@ execute_textures(
 
 	/* Succeeded: every handle is in place. */
 	return 0;
+}
+
+/* Reports whether a place of the push buffer's textures holds the handle of a view and a sampler. */
+static bool
+execute_texture_kept(
+	const struct execute_reuse *reuse,
+	uint32_t place,
+	const void *view,
+	const void *sampler)
+{
+	/* Made in this push buffer, for the same pair. */
+	if (reuse->texture_pools[place] != reuse->pools)
+		return false;
+	if (reuse->texture_view[place] != view || reuse->texture_sampler[place] != sampler)
+		return false;
+
+	/* Succeeded: the place's handle is the pair's. */
+	return true;
 }
 
 /* Writes a view's header and a sampler into the pools and gives their handle. */

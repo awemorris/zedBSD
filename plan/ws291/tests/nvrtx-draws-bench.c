@@ -868,10 +868,10 @@ bench_draws(const char *directory, unsigned copies, unsigned frames, unsigned su
 	write_tail(&client, 0x50c);
 	memset(&size, 0, sizeof(size));
 	size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	size.descriptorCount = 2;
+	size.descriptorCount = 14;
 	memset(&pool, 0, sizeof(pool));
 	pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	pool.maxSets = 2;
+	pool.maxSets = 14;
 	pool.poolSizeCount = 1;
 	pool.pPoolSizes = &size;
 	write_create(&client, GPU_OP_CREATE_DESCRIPTOR_POOL);
@@ -879,6 +879,15 @@ bench_draws(const char *directory, unsigned copies, unsigned frames, unsigned su
 	write_tail(&client, 0x50d);
 	bench_set(&client, handles, 0x50e, 0x507);
 	bench_set(&client, handles, 0x51c, 0x51b);
+
+	/* Twelve more views of the second texture, a set each (mview's groups each sample their own texture). */
+	view.image = (VkImage)(uintptr_t)&handles[3];
+	for (index = 0; index < 12; index++) {
+		write_create(&client, GPU_OP_CREATE_IMAGE_VIEW);
+		vulkan_encode_VkImageViewCreateInfo(&client, &view);
+		write_tail(&client, 0x540 + index);
+		bench_set(&client, handles, 0x560 + index, 0x540 + index);
+	}
 
 	/* Render pass, framebuffer, two pipelines, command pool and buffer, fence. */
 	memset(&attachment, 0, sizeof(attachment));
@@ -1048,7 +1057,7 @@ bench_draws(const char *directory, unsigned copies, unsigned frames, unsigned su
 					vulkan_write_u32(&client, 0);
 					vulkan_write_u32(&client, 1);
 					vulkan_write_u64(&client, 1);
-					vulkan_write_u64(&client, (group % 3 == 0) ? 0x51c : 0x50e);
+					vulkan_write_u64(&client, group < 12 ? 0x560 + group : ((group % 2 == 0) ? 0x51c : 0x50e));
 					vulkan_write_u32(&client, 0);
 					vulkan_write_u64(&client, 0);
 					push[0] = 0xbf800000;
