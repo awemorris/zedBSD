@@ -303,7 +303,7 @@ training_run(
 	/* Records the result. */
 	device->training.result = AMDRDNA_TRAINING_RAN;
 	device->training.reason = AMDRDNA_TRAINING_SKIP_NONE;
-	device->training.milliseconds = (uint32_t)((ended - started) * 1000U / KERN_CLOCK_HZ);
+	device->training.milliseconds = (uint32_t)kern_ticks_to_ms(ended - started);
 
 	/* Succeeded: the training finished and the low VRAM is restored. */
 	return 0;

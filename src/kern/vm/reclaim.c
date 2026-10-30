@@ -250,7 +250,7 @@ vm_reclaim_frame(
 
 		/* Kills the largest process when nothing has been freed for long. */
 		now = sched_ticks();
-		if (now - started < (uint64_t)VM_OOM_WAIT_SECONDS * KERN_CLOCK_HZ)
+		if (now - started < kern_ms_to_ticks((uint64_t)VM_OOM_WAIT_SECONDS * 1000U))
 			continue;
 		killed = vm_oom_kill();
 		if (!killed)

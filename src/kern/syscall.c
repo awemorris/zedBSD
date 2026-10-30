@@ -4648,9 +4648,7 @@ sys_nanosleep_call(
 		/* Reports the remaining time to a caller interrupted by a signal. */
 		left = kern_deadline_remaining(sched_ticks(), deadline);
 		if (args[1] != 0) {
-			remaining.tv_sec = (time_t)(left / KERN_CLOCK_HZ);
-			remaining.tv_nsec = (long)((left % KERN_CLOCK_HZ) *
-			    (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ));
+			kern_ticks_to_timespec(left, &remaining);
 			error = copyout(&remaining, args[1], sizeof(remaining));
 			if (error != 0)
 				return -error;
@@ -8958,9 +8956,12 @@ ticks_to_timeval(
 	uint64_t ticks,
 	struct timeval *value)
 {
-	value->tv_sec = (time_t)(ticks / KERN_CLOCK_HZ);
-	value->tv_usec = (long)((ticks % KERN_CLOCK_HZ) *
-	    (1000000U / KERN_CLOCK_HZ));
+	struct timespec exact;
+
+	/* Rounds down to whole microseconds. */
+	kern_ticks_to_timespec(ticks, &exact);
+	value->tv_sec = exact.tv_sec;
+	value->tv_usec = exact.tv_nsec / 1000L;
 }
 
 /* Handles getrusage(2). */
@@ -9013,23 +9014,21 @@ timeval_ticks(
 	const struct timeval *value,
 	uint64_t *ticks)
 {
-	uint64_t whole;
-	uint64_t fraction;
+	struct timespec duration;
+	int error;
 
 	/* Rejects a time this kernel does not represent. */
 	if (value->tv_sec < 0 || value->tv_usec < 0 || value->tv_usec >= 1000000)
 		return EINVAL;
 
-	/* Refuses a whole-second count the tick counter cannot hold. */
-	if ((uint64_t)value->tv_sec > UINT64_MAX / KERN_CLOCK_HZ)
-		return EOVERFLOW;
+	/* Rounds up to whole ticks; a time the tick counter cannot hold overflows. */
+	duration.tv_sec = value->tv_sec;
+	duration.tv_nsec = value->tv_usec * 1000L;
+	error = kern_duration_to_ticks_ceil(&duration, ticks);
+	if (error != 0)
+		return error;
 
-	/* Rounds the fraction up and adds it to the whole seconds. */
-	whole = (uint64_t)value->tv_sec * KERN_CLOCK_HZ;
-	fraction = ((uint64_t)value->tv_usec * KERN_CLOCK_HZ + 999999U) / 1000000U;
-	if (whole > UINT64_MAX - fraction)
-		return EOVERFLOW;
-	*ticks = whole + fraction;
+	/* Succeeded: the ticks that cover the time. */
 	return 0;
 }
 

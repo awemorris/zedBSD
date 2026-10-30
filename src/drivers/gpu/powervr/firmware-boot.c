@@ -1648,7 +1648,7 @@ ms_deadline(
 	uint64_t ticks;
 
 	/* Rounds up, so a short bound still waits one tick. */
-	ticks = ((uint64_t)milliseconds * KERN_CLOCK_HZ + 999U) / 1000U;
+	ticks = kern_ms_to_ticks(milliseconds);
 	if (ticks == 0U)
 		ticks = 1;
 
@@ -1676,6 +1676,7 @@ measure_core_clock(
 	uint64_t began;
 	uint64_t ended;
 	uint64_t ticks;
+	uint64_t microseconds;
 	uint64_t rate;
 
 	/* The timer and the scheduler's clock, a second apart. */
@@ -1687,12 +1688,13 @@ measure_core_clock(
 
 	/* The core clocks over the time that passed. */
 	ticks = ended - began;
+	microseconds = kern_ticks_to_us(ticks);
 	rate = 0;
-	if (ticks != 0U)
-		rate = (last - first) * CORE_TIMER_CYCLES * KERN_CLOCK_HZ / ticks;
-	kern_logf("powervr: core clock measured %llu Hz (timer %llu over %llu ticks at %llu Hz)\n",
+	if (microseconds != 0U)
+		rate = (last - first) * CORE_TIMER_CYCLES * 1000000U / microseconds;
+	kern_logf("powervr: core clock measured %llu Hz (timer %llu over %llu us)\n",
 		  (unsigned long long)rate, (unsigned long long)(last - first),
-		  (unsigned long long)ticks, (unsigned long long)KERN_CLOCK_HZ);
+		  (unsigned long long)microseconds);
 }
 
 /* Notes that a step of the later stage begins, on one line. */
@@ -1718,7 +1720,7 @@ step_done(
 
 	/* The time the step took. */
 	ticks = sched_ticks() - __atomic_load_n(&step_began, __ATOMIC_ACQUIRE);
-	milliseconds = (unsigned)(ticks * 1000U / KERN_CLOCK_HZ);
+	milliseconds = (unsigned)kern_ticks_to_ms(ticks);
 	__atomic_store_n(&step_name, (const char *)NULL, __ATOMIC_RELEASE);
 
 	/* Done, or failed with its error. */
@@ -1746,11 +1748,11 @@ watch_thread(
 	uint64_t interval;
 
 	(void)argument;
-	interval = ((uint64_t)WATCH_REPORT_MS * KERN_CLOCK_HZ + 999U) / 1000U;
+	interval = kern_ms_to_ticks(WATCH_REPORT_MS);
 	reported = 0;
 	while (!__atomic_load_n(&stage_ended, __ATOMIC_ACQUIRE)) {
 		/* Sleeps a second. */
-		sched_sleep(sched_ticks() + KERN_CLOCK_HZ);
+		sched_sleep(sched_ticks() + kern_ms_to_ticks(1000U));
 
 		/* A step that has run past the next report time is named. */
 		name = __atomic_load_n(&step_name, __ATOMIC_ACQUIRE);
@@ -1763,7 +1765,7 @@ watch_thread(
 		if (reported != 0 && now - reported < interval)
 			continue;
 		reported = now;
-		kern_logf("powervr: firmware: still in %s after %u s\n", name, (unsigned)((now - began) / KERN_CLOCK_HZ));
+		kern_logf("powervr: firmware: still in %s after %u s\n", name, (unsigned)(kern_ticks_to_ms(now - began) / 1000U));
 	}
 }
 

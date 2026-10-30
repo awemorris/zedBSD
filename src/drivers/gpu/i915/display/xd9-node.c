@@ -301,7 +301,7 @@ drv_i915_xd9_node_stop(
 	/* The hotplug work cancelled and waited for, then its queues. */
 	node->stopping = 1;
 	if (node->queues) {
-		deadline = sched_ticks() + (uint64_t)I915_XD9_NODE_STOP_S * KERN_CLOCK_HZ;
+		deadline = sched_ticks() + kern_ms_to_ticks((uint64_t)I915_XD9_NODE_STOP_S * 1000U);
 		(void)drv_i915_delayed_cancel_sync(&node->timers, &node->poll_work, deadline);
 		drv_i915_timer_queue_destroy(&node->timers);
 		drv_i915_workqueue_destroy(&node->workqueue);
@@ -824,7 +824,7 @@ drv_i915_xd9_node_wait(
 	/* A latched flip completes the request at the screen's sequence. */
 	if (error == 0) {
 		request->completed_sequence = screen->sequence;
-		request->present_time_ns = screen->latched_tick * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+		request->present_time_ns = kern_ticks_to_ns(screen->latched_tick);
 		request->generation = screen->generation;
 	}
 
@@ -1398,7 +1398,7 @@ i915_xd9_node_latch(
 	screen = &node->screen[index];
 
 	/* The live surface until it is the armed one, or the time is up. */
-	deadline = sched_ticks() + ((uint64_t)I915_XD9_NODE_LATCH_MS * KERN_CLOCK_HZ + 999U) / 1000U + 1U;
+	deadline = sched_ticks() + kern_ms_to_ticks(I915_XD9_NODE_LATCH_MS) + 1U;
 	for (;;) {
 		live = drv_i915_xd9_outputs_live(&node->outputs, index);
 		if (live == screen->armed)

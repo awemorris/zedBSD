@@ -734,7 +734,7 @@ powervr_session_wait(
 	uint32_t current;
 
 	/* Reads the timeline once a tick until it reaches the value or the bound is spent. */
-	deadline = sched_ticks() + ((uint64_t)milliseconds * KERN_CLOCK_HZ + 999U) / 1000U;
+	deadline = sched_ticks() + kern_ms_to_ticks(milliseconds);
 	for (;;) {
 		current = powervr_session_timeline(session);
 		if ((int32_t)(current - value) >= 0)
@@ -1957,7 +1957,7 @@ register_pause(
 
 	/* Sleeps the pause, rounded up to whole ticks. */
 	(void)context;
-	ticks = ((uint64_t)REGISTER_PAUSE_MS * KERN_CLOCK_HZ + 999U) / 1000U;
+	ticks = kern_ms_to_ticks(REGISTER_PAUSE_MS);
 	sched_sleep(sched_ticks() + ticks);
 }
 

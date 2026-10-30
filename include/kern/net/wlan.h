@@ -13,15 +13,15 @@
 #include <kern/clock.h>
 #include <uapi/wlan.h>
 
-#define WLAN_SCAN_DEADLINE_TICKS KERN_MS_TO_TICKS(15000U)
-#define WLAN_SCAN_TUNE_DEADLINE_TICKS KERN_MS_TO_TICKS(500U)
+#define WLAN_SCAN_DEADLINE_TICKS kern_ms_to_ticks(15000U)
+#define WLAN_SCAN_TUNE_DEADLINE_TICKS kern_ms_to_ticks(500U)
 /* Software scans listen for 100 ms actively, or 200 ms without probes. */
-#define WLAN_SCAN_DWELL_TICKS KERN_MS_TO_TICKS(100U)
-#define WLAN_SCAN_PASSIVE_DWELL_TICKS KERN_MS_TO_TICKS(200U)
+#define WLAN_SCAN_DWELL_TICKS kern_ms_to_ticks(100U)
+#define WLAN_SCAN_PASSIVE_DWELL_TICKS kern_ms_to_ticks(200U)
 /* Firmware completion is required; this is a timeout, never a dwell delay. */
-#define WLAN_SCAN_OFFLOAD_DEADLINE_TICKS KERN_MS_TO_TICKS(1000U)
-#define WLAN_CONNECT_DEADLINE_TICKS KERN_MS_TO_TICKS(30000U)
-#define WLAN_CONNECT_TRANSITION_TICKS KERN_MS_TO_TICKS(1000U)
+#define WLAN_SCAN_OFFLOAD_DEADLINE_TICKS kern_ms_to_ticks(1000U)
+#define WLAN_CONNECT_DEADLINE_TICKS kern_ms_to_ticks(30000U)
+#define WLAN_CONNECT_TRANSITION_TICKS kern_ms_to_ticks(1000U)
 #define WLAN_MANAGEMENT_FRAME_MAX 2304U
 
 #define WLAN_SCAN_CHANNEL_MAX 51U

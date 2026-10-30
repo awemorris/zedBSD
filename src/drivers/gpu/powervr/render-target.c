@@ -1214,7 +1214,7 @@ ms_ticks(
 	unsigned milliseconds)
 {
 	/* Rounds up, so a short span is still a tick. */
-	return ((uint64_t)milliseconds * KERN_CLOCK_HZ + 999U) / 1000U;
+	return kern_ms_to_ticks(milliseconds);
 }
 
 /* Reads the parameter manager's catalogues (VCE 0 to 3, TE 0 to 3, ALIST) from one half of a target's record. */

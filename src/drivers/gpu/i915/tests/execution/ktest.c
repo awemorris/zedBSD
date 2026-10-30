@@ -93,7 +93,7 @@ drv_i915_ktest_deadline_ms(
 	/* Adds the timeout, rounded up to a whole tick, to the current tick. */
 	deadline = 0U;
 	now = sched_ticks();
-	(void)kern_deadline_after(now, (uint64_t)milliseconds * KERN_CLOCK_HZ / 1000U + 1U, &deadline);
+	(void)kern_deadline_after(now, kern_ms_to_ticks(milliseconds) + 1U, &deadline);
 
 	/* Reports the deadline; zero when the addition would overflow. */
 	return deadline;

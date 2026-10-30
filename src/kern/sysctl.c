@@ -936,7 +936,7 @@ sysctl_cputimes(
 	header.struct_size = sizeof(header);
 	header.element_size = sizeof(entry);
 	header.count = count;
-	header.hz = KERN_CLOCK_HZ;
+	header.hz = kern_clock_tick_rate();
 	output = oldp;
 	kern_memcpy(output, &header, sizeof(header));
 

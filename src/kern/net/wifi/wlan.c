@@ -39,8 +39,8 @@
 #define WLAN_LOCAL_ASSOC_CAPABILITY 0x0011U
 #define WLAN_ASSOC_CAPABILITY_SHORT_SLOT_TIME 0x0400U
 #define WLAN_BEACON_MISS_MULTIPLIER 20U
-#define WLAN_BEACON_WATCH_MIN_TICKS (2U * KERN_CLOCK_HZ)
-#define WLAN_BEACON_WATCH_MAX_TICKS (10U * KERN_CLOCK_HZ)
+#define WLAN_BEACON_WATCH_MIN_TICKS kern_ms_to_ticks(2000U)
+#define WLAN_BEACON_WATCH_MAX_TICKS kern_ms_to_ticks(10000U)
 #define WLAN_PROBE_REQUEST_MAX_SIZE (24U + 2U + WLAN_SSID_MAX + 2U + 8U)
 
 extern void net_worker_wakeup(void) __attribute__((weak));
@@ -1650,8 +1650,8 @@ wlan_station_stop_complete(struct wlan_station *station, int error)
 		else {
 			if (station->stop_attempts < 5U)
 				station->stop_attempts++;
-			delay = (uint64_t)KERN_CLOCK_HZ <<
-			    (station->stop_attempts - 1U);
+			delay = kern_ms_to_ticks(1000U <<
+			    (station->stop_attempts - 1U));
 			station->stop_retry_deadline = deadline_after(
 			    station_now_locked(station), delay);
 		}
@@ -2893,10 +2893,7 @@ station_beacon_watch_ticks(
 	 */
 	microseconds = (uint64_t)beacon_interval_tu * 1024U *
 	    WLAN_BEACON_MISS_MULTIPLIER;
-	if (microseconds > (UINT64_MAX - 999999U) / KERN_CLOCK_HZ)
-		ticks = WLAN_BEACON_WATCH_MAX_TICKS;
-	else
-		ticks = (microseconds * KERN_CLOCK_HZ + 999999U) / 1000000U;
+	ticks = kern_us_to_ticks(microseconds);
 	if (ticks < WLAN_BEACON_WATCH_MIN_TICKS)
 		ticks = WLAN_BEACON_WATCH_MIN_TICKS;
 	if (ticks > WLAN_BEACON_WATCH_MAX_TICKS)

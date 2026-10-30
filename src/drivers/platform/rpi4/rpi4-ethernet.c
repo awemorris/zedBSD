@@ -1232,7 +1232,7 @@ update_link(
 	now = clock_ticks();
 	if (device->next_link_check != 0 && now < device->next_link_check)
 		return;
-	device->next_link_check = now + KERN_MS_TO_TICKS(GENET_LINK_MS);
+	device->next_link_check = now + kern_ms_to_ticks(GENET_LINK_MS);
 
 	/* Obtains negotiated carrier through the external PHY driver's MDIO interface. */
 	error = drv_bcm54213pe_read_link(&device->phy, &speed);
@@ -1511,7 +1511,7 @@ poll_worker(
 			net_device_schedule_poll(device->net);
 
 		/* Sleeps on scheduler ticks rather than spinning a dedicated Ethernet thread. */
-		deadline = sched_ticks() + KERN_MS_TO_TICKS(GENET_POLL_MS);
+		deadline = sched_ticks() + kern_ms_to_ticks(GENET_POLL_MS);
 		sched_sleep(deadline);
 	}
 }

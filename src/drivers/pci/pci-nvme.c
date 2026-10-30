@@ -2599,7 +2599,7 @@ nvme_timeout_ticks(
 	unsigned milliseconds)
 {
 	uint64_t ticks =
-		((uint64_t)milliseconds * KERN_CLOCK_HZ + 999U) / 1000U;
+		kern_ms_to_ticks(milliseconds);
 
 	/* Returns the computed result. */
 	return ticks == 0U ? 1U : ticks;

@@ -1503,7 +1503,7 @@ update_link(
 	now = clock_ticks();
 	if (gem->next_link_check != 0 && now < gem->next_link_check)
 		return;
-	gem->next_link_check = now + KERN_MS_TO_TICKS(GEM_LINK_MS);
+	gem->next_link_check = now + kern_ms_to_ticks(GEM_LINK_MS);
 
 	/* Reads the negotiated speed and duplex. */
 	error = read_link(gem, &link);
@@ -1804,7 +1804,7 @@ poll_worker(
 			net_device_schedule_poll(gem->net);
 
 		/* Sleeps on scheduler ticks until the next pass. */
-		deadline = sched_ticks() + KERN_MS_TO_TICKS(GEM_POLL_MS);
+		deadline = sched_ticks() + kern_ms_to_ticks(GEM_POLL_MS);
 		sched_sleep(deadline);
 	}
 }

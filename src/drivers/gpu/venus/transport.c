@@ -1952,7 +1952,7 @@ venus_request_post(
 
 	/* Bounds queue-space admission independently from later device execution. */
 	started = clock_milliseconds(NULL);
-	deadline = sched_ticks() + KERN_CLOCK_HZ * VENUS_WAIT_MILLISECONDS / 1000U;
+	deadline = sched_ticks() + kern_ms_to_ticks(VENUS_WAIT_MILLISECONDS);
 	irq = spin_lock_irqsave(&transport->queue_lock);
 
 	while (1) {
@@ -2104,7 +2104,7 @@ venus_request_wait(
 	int error;
 
 	/* A finite hardware deadline also bounds synchronous context/resource teardown. */
-	deadline = sched_ticks() + KERN_CLOCK_HZ * VENUS_WAIT_MILLISECONDS / 1000U;
+	deadline = sched_ticks() + kern_ms_to_ticks(VENUS_WAIT_MILLISECONDS);
 	last = clock_milliseconds(NULL);
 	stalled = 0U;
 	error = 0;
@@ -2659,13 +2659,13 @@ venus_worker_stop(
 
 	/* The retained thread must exit before mappings and locks can be destroyed or reset. */
 	now = sched_ticks();
-	if (now > UINT64_MAX - KERN_CLOCK_HZ * 15U) {
+	if (now > UINT64_MAX - kern_ms_to_ticks(15000U)) {
 		mutex_unlock(&transport->worker_lock);
 		return EOVERFLOW;
 	}
 
 	/* A successful thread_wait consumes the creator's retained thread reference. */
-	deadline = now + KERN_CLOCK_HZ * 15U;
+	deadline = now + kern_ms_to_ticks(15000U);
 	while (1) {
 		error = thread_wait(worker, NULL);
 		if (error == 0)
@@ -2750,7 +2750,7 @@ venus_worker(
 		/* An empty queue sleeps indefinitely until publication or teardown changes its sequence. */
 		deadline = 0U;
 		if (shortest != UINT64_MAX)
-			deadline = sched_ticks() + (shortest * KERN_CLOCK_HZ + 999U) / 1000U;
+			deadline = sched_ticks() + kern_ms_to_ticks(shortest);
 
 		/* Lost-wakeup-safe waiting sends no recurring hardware or renderer traffic. */
 		observed = waitq_sequence(&transport->queue_waitq);

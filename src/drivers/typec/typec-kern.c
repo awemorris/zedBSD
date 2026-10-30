@@ -319,7 +319,7 @@ drv_typec_os_wait(
 	int error;
 
 	/* Sleeps until the signal or the deadline. */
-	deadline = sched_ticks() + KERN_MS_TO_TICKS(milliseconds);
+	deadline = sched_ticks() + kern_ms_to_ticks(milliseconds);
 	irq = spin_lock_irqsave(&typec_signal_lock);
 
 	for (;;) {

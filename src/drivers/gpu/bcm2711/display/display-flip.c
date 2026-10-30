@@ -77,7 +77,7 @@
 #define FLIP_LINE_BUFFER_PIXELS 2048U
 
 /* How long a recorded state may wait for the hardware to adopt a list showing it. */
-#define FLIP_ADOPTION_TICKS KERN_MS_TO_TICKS(100U)
+#define FLIP_ADOPTION_TICKS kern_ms_to_ticks(100U)
 
 /*
  * The bytes per second the HVS may read for one output's planes: a

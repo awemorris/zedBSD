@@ -45,10 +45,10 @@
 #define I915_FIRMWARE_MAX_BYTES		(1024U * 1024U)
 
 /* How long a request waits for the root file system, in scheduler ticks (30 s). */
-#define I915_FIRMWARE_ROOT_WAIT_TICKS	(30U * KERN_CLOCK_HZ)
+#define I915_FIRMWARE_ROOT_WAIT_TICKS	kern_ms_to_ticks(30000U)
 
 /* How long each sleep of that wait lasts, in scheduler ticks (100 ms). */
-#define I915_FIRMWARE_ROOT_POLL_TICKS	(KERN_CLOCK_HZ / 10U)
+#define I915_FIRMWARE_ROOT_POLL_TICKS	kern_ms_to_ticks(100U)
 
 /*
  * Test checkpoints.

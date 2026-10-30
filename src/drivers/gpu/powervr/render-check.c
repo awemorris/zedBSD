@@ -556,7 +556,7 @@ check_empty(
 
 	/* The core's geometry registers a little after the kick. */
 	if (error == 0 && POWERVR_DIAGNOSTICS && !POWERVR_RENDER_CHECK_FULL_TRACE) {
-		sched_sleep(sched_ticks() + (CHECK_PROBE_MS * KERN_CLOCK_HZ + 999U) / 1000U);
+		sched_sleep(sched_ticks() + kern_ms_to_ticks(CHECK_PROBE_MS));
 		probe_geometry(check->render->core);
 	}
 

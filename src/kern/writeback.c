@@ -39,7 +39,7 @@
 
 #define WB_PAUSED 2U
 
-#define WB_AGE (2U * KERN_CLOCK_HZ)
+#define WB_AGE kern_ms_to_ticks(2000U)
 
 #define WB_MEMORY (WRITEBACK_TICKET_BYTES + KERN_PAGE_SIZE)
 

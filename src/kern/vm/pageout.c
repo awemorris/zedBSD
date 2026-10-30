@@ -320,7 +320,7 @@ pageout_worker(
 		sequence = waitq_sequence(&pageout_waitq);
 		if (!pageout_requested) {
 			(void)waitq_sleep(&pageout_waitq, &pageout_lock, sequence,
-			    sched_ticks() + KERN_CLOCK_HZ / 10U, 0);
+			    sched_ticks() + kern_ms_to_ticks(100U), 0);
 		}
 
 		/* Consumes the request it is about to serve. */

@@ -99,7 +99,7 @@
 #define I915_WORKER_REQUEST_ROOM	512U
 
 /* How long the worker sleeps before it looks again for work it was not woken for (one second). */
-#define I915_WORKER_SLEEP_TICKS		(1U * KERN_CLOCK_HZ)
+#define I915_WORKER_SLEEP_TICKS		kern_ms_to_ticks(1000U)
 
 /* The size of a context's timeline page. */
 #define I915_WORKER_TIMELINE_BYTES	4096U
@@ -1831,7 +1831,7 @@ i915_worker_wait(
 		timeout_ms = I915_WORKER_VIDEO_TIMEOUT_MS;
 
 	/* Looks at the status buffer until the request ends, for at most the timeout. */
-	deadline = sched_ticks() + KERN_MS_TO_TICKS(timeout_ms);
+	deadline = sched_ticks() + kern_ms_to_ticks(timeout_ms);
 	for (;;) {
 		/* Notes the engine interrupts so far before the look, so one during the look is not missed. */
 		observed = drv_i915_irq_engine_sequence(&device->gt.irq);

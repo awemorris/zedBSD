@@ -2128,7 +2128,7 @@ display_sample_locked(
 		advance = amdrdna_frame_advance(display->frame_last, frame);
 		if (advance != 0U) {
 			display->refresh_count += advance;
-			display->refresh_time_ns = sched_ticks() * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+			display->refresh_time_ns = kern_ticks_to_ns(sched_ticks());
 		}
 	}
 

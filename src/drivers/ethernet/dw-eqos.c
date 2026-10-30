@@ -2066,7 +2066,7 @@ service_worker(
 		now = sched_ticks();
 		if (now >= next_link) {
 			check_link(device);
-			next_link = now + KERN_MS_TO_TICKS(EQOS_LINK_MS);
+			next_link = now + kern_ms_to_ticks(EQOS_LINK_MS);
 		}
 
 		/* Samples whether the interface is open. */
@@ -2081,7 +2081,7 @@ service_worker(
 			net_device_schedule_poll(device->net);
 
 		/* Sleeps until the next service. */
-		sched_sleep(sched_ticks() + KERN_MS_TO_TICKS(EQOS_POLL_MS));
+		sched_sleep(sched_ticks() + kern_ms_to_ticks(EQOS_POLL_MS));
 	}
 }
 

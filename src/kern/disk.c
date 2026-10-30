@@ -4598,7 +4598,7 @@ disk_stats_now_ns(
 	/* The counter, when the machine has one. */
 	have = kern_rtc_read_counter(&counter, &frequency);
 	if (!have || frequency == 0U)
-		return sched_ticks() * (1000000000ULL / KERN_CLOCK_HZ);
+		return kern_ticks_to_ns(sched_ticks());
 
 	/* Whole seconds, then the rest, so the product does not overflow. */
 	seconds = counter / frequency;

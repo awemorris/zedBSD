@@ -835,7 +835,7 @@ i915_capture_present(
 	frame.format = request->format;
 	frame.lease = rd->lease;
 	frame.lease_sequence = rd->sequence;
-	frame.present_time_ns = rd->present_tick * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	frame.present_time_ns = kern_ticks_to_ns(rd->present_tick);
 	drv_i915_capture_slot_close(i915_capture_area.cpu, slot, &frame);
 
 	/* Writes both headers back to memory, fenced, for a reader outside the caches' view. */

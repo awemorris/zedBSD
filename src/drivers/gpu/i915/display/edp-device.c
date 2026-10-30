@@ -808,7 +808,7 @@ i915_dp_kernel_sync_deadline(void)
 	/* Ten seconds from the current tick. */
 	deadline = 0;
 	now = sched_ticks();
-	(void)kern_deadline_after(now, 10u * KERN_CLOCK_HZ, &deadline);
+	(void)kern_deadline_after(now, kern_ms_to_ticks(10000U), &deadline);
 
 	/* Succeeded: reports the deadline. */
 	return deadline;
