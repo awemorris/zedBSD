@@ -1,14 +1,14 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 19:20（Q1）
+最終更新: 2026-10-30 19:45（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。zedBSD-firmware を push し branch を merge（b4e549bfc）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
-| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（phase-runner-high、q1717）。p002 kernel に表 B を足す | p003 表 A の置き換え → p004 i915 → p005（rpi4 は未決）→ p006 |
+| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | p002〜p004 済み。p005: Raspberry Pi の console を kernel_putc の形に作り直す（sun4u と同じ形） | p005 → p006 規約の見直し |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 返却。driver の欠け（instance rate・discard・copy・mip・direct scanout・lock の fatal）を直し、目標の qs40 × 13 は 26.6 fps（目標 50） | 次: 解像度に比例して増える費用と頂点の側の費用の調べ、TA と 3D の時間の分け、punch-through の費用 |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
@@ -76,10 +76,10 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | Phase | 内容 | 状態 |
 | --- | --- | --- |
 | p001 | 違反の全数、置き換え先の一覧（表 A）、kernel に足す関数の案（表 B） | cleared（2026-10-30 ユーザーが表 A・B を許可） |
-| p002 | kernel に表 B を足す（driver は変えない） | in-progress（P2） |
-| p003 | 表 A の機械的な置き換え（sparcv9 の 2 file は別の commit） | planned（P2） |
-| p004 | i915 の map（write-combine・読み出しだけ）と MSI、試験の代役 | planned（P2） |
-| p005 | 例外の候補（pc98 の 3 か所、rpi4 の console） | 未作成 |
+| p002 | kernel に表 B を足す（driver は変えない） | 実装・確かめ済み（20 port の build） |
+| p003 | 表 A の機械的な置き換え（sparcv9 の 2 file は別の commit） | 実装・確かめ済み（QEMU の起動 pcat・sun4u・rpi4・amd64 など） |
+| p004 | i915 の map（write-combine・読み出しだけ）と MSI、試験の代役 | 実装・確かめ済み（ktest-sync の 5330 の実機は未実施） |
+| p005 | Raspberry Pi の console を kernel_putc の形に作り直す（ユーザーの決定）、pc98 の 3 か所 | in-progress（P2） |
 | p006 | 規約の全文の見直し | 未作成 |
 
 表 A（kernel に置き換え先が既にある物）:
