@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 03:47（Q1）
+最終更新: 2026-10-31 04:00（Q1）
 
 ## 担当（P1〜P8）
 
@@ -10,7 +10,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
-| P2 | Bug | open の Bug の 3 つ目の束（QEMU と host） | q1757: BUG-360（installer の Backspace）→ BUG-306（Settings の回転）→ BUG-292（frame callback の保留）→ BUG-289（xHCI の suspend）→ BUG-365（GPU の header・comment の食い違い） | 1 つ目の束の 6 件は closed（main f81fef099） |
+| P2 | Bug | 3 つ目の束の続き | BUG-292 の同じ類: terminal・monitor・notes・browser・imageview・videoplayer・libegl の自前の 10 秒の acquire の期限を外す | 3 つ目の束（BUG-360・306・292・289・365）は main a2a9fca00。BUG-289 は closed、360・306・292 は fixed（確かめの残り）、365 は一部 |
 | P3 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除く | q1737: p006 規約の全文の見直し（約 230 file、規約の担当 3 つを並べる）→ WS331 の完了 | 返却（WS332 は P6 へ移した） |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS329](ws329/ws.md) | libmedia の H.264 の software の encoder（標準廉価実装手順） | q1758: p001 設計（WS326 の module を入力に共通化、design-reviewer と問いまで） | WS318 の設計は済み（main 85fbeb091、問い Q318-1〜14 は下の 0c） |
@@ -208,6 +208,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
+- installer（BUG-360）: 大きさの欄を全部消して打ち直せるか（QEMU は disk の空きの都合で未実施）。Settings（BUG-306）: 回転を 2 回目に 90° にしても窓が残るか。
 - **5330 の電源の入れ直し（起きたら）**: 2026-10-31 02:2x、P1 が main の kernel で起動した後に応答しない（遠隔の電源が無い）。入れ直すと Debian に戻る。古い userland と新しい kernel の組み合わせで network が上がらないだけの見込み（BUG-373・371）。P1 はそれまで QEMU で WS299 を進める。
 - **Pi 5（2026-10-31 の午後にユーザーが行う予定）**: image は出来ている（P4、main d26c657c7＋Pi 5 の GPU の branch、戻しの kernel 入り）: `/home/awe/zedBSD-worktrees/p4-ws291pi/build/ws291-p021c/rpi5-p021.img`（sha256 dcadd719…）。Q1 が SD に書く（`sudo dd … bs=4M conv=fsync`）か、ユーザーが書く。起動したら Q1 に知らせると担当が SSH で GPU の clock と fps を測る。起動しなければ config.txt の `kernel=vmunix-fallback`。
 - **ODROID-C5（2026-10-31 の午後、VF2 の最適化の後）**: 試験の image で HDMI に画面が出なかった（ユーザー）。serial（今は VF2 につないでいる）を C5 につないで、起動のどこで止まるかを見る。Q1 が担当（WS313）を起動して声をかける。
