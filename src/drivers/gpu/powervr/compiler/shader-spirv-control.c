@@ -249,10 +249,12 @@ reader_region(
 			 * pco_nir_pvfio.c (lower_isp_fb: a demote stores true to
 			 * the discard).
 			 */
-			if (reader->discard == 0)
+			if (reader->discard == 0 && reader->stage != POWERVR_SHADER_FRAGMENT)
 				return ENOTSUP;
-			condition = shader_spirv_constant_operand(UINT32_MAX);
-			shader_spirv_emit(reader, POWERVR_IR_MOVE, reader->discard, &condition, NULL, NULL, 0, 0);
+			if (reader->discard != 0) {
+				condition = shader_spirv_constant_operand(UINT32_MAX);
+				shader_spirv_emit(reader, POWERVR_IR_MOVE, reader->discard, &condition, NULL, NULL, 0, 0);
+			}
 			if (stop == 0 && reader->loop_count == 0) {
 				reader->returned = 0;
 				*returned = 1;

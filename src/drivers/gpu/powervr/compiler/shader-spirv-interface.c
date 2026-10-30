@@ -42,6 +42,16 @@ static uint32_t color_format_known(uint32_t format);
 static int module_kills(const struct shader_spirv_reader *reader);
 
 /*
+ * A test switch (0 as built): a kill does nothing, so a shader that
+ * discards draws opaque and its draws do not pass punch-through, to
+ * see on the board what the punch-through pass costs.  Wrong images;
+ * for timing only.
+ */
+#ifndef POWERVR_SHADER_IGNORE_KILL_TRIAL
+#define POWERVR_SHADER_IGNORE_KILL_TRIAL	0
+#endif
+
+/*
  * Places the interface variables: each register-class variable gets
  * values for its words, vertex inputs their registers, varyings their
  * output words or coefficient sets.
@@ -357,7 +367,7 @@ shader_spirv_reader_entry_prologue(
 	 * demote, a discard being a demote there (pco_nir.c
 	 * discard_is_demote), read by the one isp_feedback_pco).
 	 */
-	if (reader->stage == POWERVR_SHADER_FRAGMENT && module_kills(reader)) {
+	if (reader->stage == POWERVR_SHADER_FRAGMENT && !POWERVR_SHADER_IGNORE_KILL_TRIAL && module_kills(reader)) {
 		reader->discard = shader_spirv_new_value(reader, 1);
 		word = shader_spirv_constant_operand(0);
 		shader_spirv_emit(reader, POWERVR_IR_MOVE, reader->discard, &word, NULL, NULL, 0, 0);
