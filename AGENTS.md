@@ -124,7 +124,7 @@
 - 書く前に出力で確かめる: merge は `git log -1 --format='%h %p'`、担当の SHA は `git cat-file -t`、件数・試験の PASS は自分で数えて見る。
   確かめていない事は「未確認」と書く。
 - 日付は host の `date`。出来事は今日の日付、予定・期限は未来の日付のまま。
-- **ユーザーの決定**: 発言の原文を記録に載せない（公開の repo に出るため、2026-10-30 ユーザー）。決定の要点を Q1 の言葉で書き、決めた日付と「ユーザーの決定」である事を示す。WS・Phase に効く決定はその ws.md（と phase.md）に。全体に効く決定は、この文書・
+- **ユーザーの決定**: 発言の原文を記録に載せない（公開の repo に出るため、2026-10-30 ユーザー）。「（日付）ユーザーから○○という趣旨の指示を受けた」の形で、要点を自分の言葉で書く。WS・Phase に効く決定はその ws.md（と phase.md）に。全体に効く決定は、この文書・
   [master-design-policy.md](plan/master-design-policy.md)・master.md の「今の状態」に、今も有効な形で書く（日付の log にしない）。
   曖昧な時・既存の事実と食い違う時は記録の前に聞く。
 - 本体と写しを同じ commit で直す: phase.md → ws.md の表・Queue、ws.md → master.md の行、ticket → Bug Board、割当 → queue.md・registry。
