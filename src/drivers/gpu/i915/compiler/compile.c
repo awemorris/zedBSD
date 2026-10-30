@@ -1640,7 +1640,8 @@ i915_compile_forwarding(
  * a factor again (a MOVE), whose factors and addend are no immediates (a
  * MAD has no 32-bit immediate) and are read whole or as one float, and
  * whose reader takes no other product.  The sum's rounding is the MAD's
- * single one, as Vulkan's float operations allow.
+ * single one, as Vulkan's float operations allow unless the product or the
+ * sum is decorated NoContraction (the instruction's no_contraction).
  */
 static void
 i915_compile_products(
@@ -1687,14 +1688,15 @@ i915_compile_products(
 	for (index = 0U; index < ir->instruction_count; index++) {
 		inst = &ir->instructions[index];
 		value = inst->dst;
-		if (inst->op != DRV_GPU_IR_FMUL || inst->guard != 0U || value >= ir->value_count)
+		if (inst->op != DRV_GPU_IR_FMUL || inst->guard != 0U || inst->no_contraction != 0U || value >= ir->value_count)
 			continue;
 		if (readers[value] != 1U || reader_index[value] <= index)
 			continue;
 		if (state->forward[value] != COMPILE_FORWARD_NONE)
 			continue;
 		reader = &ir->instructions[reader_index[value]];
-		if ((reader->op != DRV_GPU_IR_FADD && reader->op != DRV_GPU_IR_FSUB) || reader->guard != 0U)
+		if ((reader->op != DRV_GPU_IR_FADD && reader->op != DRV_GPU_IR_FSUB) || reader->guard != 0U ||
+		    reader->no_contraction != 0U)
 			continue;
 
 		/* The reader's other source: not the product itself, not a product already made there. */

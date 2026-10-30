@@ -32,7 +32,9 @@
  * declaration without a body, and a body of several blocks called from a
  * loop's header or continue target (whose labels the loop's structure
  * names).  Decorations of the dropped functions' ids are not carried to the
- * new ids; none of those this parser interprets is on a function-local id.
+ * new ids, but for NoContraction: the only one this parser interprets on a
+ * function-local id, it is written again for each new id of a decorated
+ * result.
  */
 
 /* The opcodes only the inlining reads. */
@@ -120,6 +122,14 @@ struct drv_gpu_spirv_inliner {
 	uint32_t *stamp;
 	uint32_t generation;
 
+	/*
+	 * Whether an id, of the module or new, is a result decorated
+	 * NoContraction, and the offset just past the module's last
+	 * decoration, where the new ids' decorations go.
+	 */
+	uint8_t *no_contraction;
+	uint32_t annotations_end;
+
 	/* The refused call, for the caller's diagnostic. */
 	struct drv_gpu_compile_diagnostic diag;
 };
@@ -133,6 +143,7 @@ static int drv_gpu_spirv_inline_define(struct drv_gpu_spirv_inliner *inliner, co
 static uint32_t drv_gpu_spirv_inline_id(const struct drv_gpu_spirv_inliner *inliner, uint32_t id);
 static void drv_gpu_spirv_inline_fix_phis(struct drv_gpu_spirv_words *blocks, const struct drv_gpu_spirv_words *fixes);
 static int drv_gpu_spirv_inline_assemble(struct drv_gpu_spirv_inliner *inliner, uint32_t **out, size_t *out_count);
+static int drv_gpu_spirv_inline_decorate(const struct drv_gpu_spirv_inliner *inliner, struct drv_gpu_spirv_words *module);
 static void drv_gpu_spirv_inline_mark_dropped(struct drv_gpu_spirv_inliner *inliner);
 static int drv_gpu_spirv_inline_names_dropped(const struct drv_gpu_spirv_inliner *inliner, const uint32_t *word, uint32_t count);
 static struct drv_gpu_spirv_function *drv_gpu_spirv_inline_find(struct drv_gpu_spirv_inliner *inliner, uint32_t id);
@@ -200,9 +211,11 @@ drv_gpu_spirv_inline(
 	inliner.next_id = words[3];
 	inliner.map = kern_calloc(SPIRV_MAX_BOUND, sizeof(*inliner.map));
 	inliner.stamp = kern_calloc(SPIRV_MAX_BOUND, sizeof(*inliner.stamp));
+	inliner.no_contraction = kern_calloc(SPIRV_MAX_BOUND, sizeof(*inliner.no_contraction));
 	inliner.functions = kern_calloc(INLINE_MAX_FUNCTIONS, sizeof(*inliner.functions));
 	if (inliner.map == NULL ||
 	    inliner.stamp == NULL ||
+	    inliner.no_contraction == NULL ||
 	    inliner.functions == NULL) {
 		drv_gpu_spirv_inline_release(&inliner);
 		return ENOMEM;
@@ -262,6 +275,21 @@ drv_gpu_spirv_inline_scan(
 		/* The first entry point names the function the parse lowers. */
 		if (opcode == OP_ENTRY_POINT && entry_id == 0U && count > 2U)
 			entry_id = word[2];
+
+		/* A result decorated NoContraction keeps it under every new id. */
+		if (opcode == OP_DECORATE &&
+		    count >= 3U &&
+		    word[1] < SPIRV_MAX_BOUND &&
+		    word[2] == DEC_NO_CONTRACTION)
+			inliner->no_contraction[word[1]] = 1U;
+
+		/* The decorations' section ends after the last one (SPIR-V 1.6, 2.4). */
+		if (function == NULL &&
+		    (opcode == OP_DECORATE ||
+		     opcode == OP_MEMBER_DECORATE ||
+		     opcode == OP_DECORATE_ID ||
+		     opcode == OP_DECORATE_STRING))
+			inliner->annotations_end = offset + count;
 
 		/* A function opens a record. */
 		if (opcode == OP_FUNCTION) {
@@ -611,6 +639,7 @@ drv_gpu_spirv_inline_define(
 			}
 			inliner->map[id] = inliner->next_id;
 			inliner->stamp[id] = inliner->generation;
+			inliner->no_contraction[inliner->next_id] = inliner->no_contraction[id];
 			inliner->next_id++;
 		}
 		offset += count;
@@ -744,6 +773,13 @@ drv_gpu_spirv_inline_assemble(
 	while (offset < inliner->words && error == 0) {
 		count = inliner->code[offset] >> 16;
 
+		/* After the last decoration, the NoContraction of each new id of a decorated result. */
+		if (offset == inliner->annotations_end) {
+			error = drv_gpu_spirv_inline_decorate(inliner, &module);
+			if (error != 0)
+				break;
+		}
+
 		/* A function's words are skipped, the entry function's rewritten. */
 		skipped = NULL;
 		for (index = 0U; index < inliner->function_count; index++) {
@@ -756,6 +792,7 @@ drv_gpu_spirv_inline_assemble(
 			offset += count;
 			continue;
 		}
+
 		if (skipped == entry) {
 			/* OpFunction, the first label, the variables, the rest of the blocks, OpFunctionEnd. */
 			first_count = entry->blocks.word[0] >> 16;
@@ -782,6 +819,32 @@ drv_gpu_spirv_inline_assemble(
 	/* Succeeded: the caller owns the rewritten module. */
 	*out = module.word;
 	*out_count = module.count;
+	return 0;
+}
+
+/* Appends an OpDecorate NoContraction for each new id of a decorated result. */
+static int
+drv_gpu_spirv_inline_decorate(
+	const struct drv_gpu_spirv_inliner *inliner,
+	struct drv_gpu_spirv_words *module)
+{
+	uint32_t decoration[3];
+	uint32_t id;
+	int error;
+
+	/* The new ids are those from the module's bound on. */
+	for (id = inliner->bound; id < inliner->next_id; id++) {
+		if (inliner->no_contraction[id] == 0U)
+			continue;
+		decoration[0] = (3U << 16) | OP_DECORATE;
+		decoration[1] = id;
+		decoration[2] = DEC_NO_CONTRACTION;
+		error = drv_gpu_spirv_inline_push(module, decoration, 3U);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: every new decorated result is decorated. */
 	return 0;
 }
 
@@ -1084,6 +1147,8 @@ drv_gpu_spirv_inline_release(
 		kern_free(inliner->map);
 	if (inliner->stamp != NULL)
 		kern_free(inliner->stamp);
+	if (inliner->no_contraction != NULL)
+		kern_free(inliner->no_contraction);
 
 	/* Succeeded: nothing of the inlining is left. */
 	return;

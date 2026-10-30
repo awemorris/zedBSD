@@ -785,6 +785,14 @@ struct drv_gpu_shader_ir_inst {
 	 * (DRV_GPU_IR_IMAGE_*).  Other instructions leave it zero.
 	 */
 	uint32_t image_shape;
+
+	/*
+	 * Nonzero when the instruction was lowered from a result decorated
+	 * NoContraction (GLSL's precise): the code generator keeps it apart
+	 * from the operations it reads and that read it, so no product and
+	 * sum become one fused multiply-add with a different rounding.
+	 */
+	uint32_t no_contraction;
 };
 
 /*
