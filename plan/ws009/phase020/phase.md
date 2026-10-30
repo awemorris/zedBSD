@@ -123,4 +123,3 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu-com
 - 文書だけの変更なので build と QEMU・実機の試験は未実施。telemetry の値・hw.gpu.start の実機の挙動は観測していない。
 - i915 の GPU_COMMAND_SUBMIT で 4 の倍数でない長さを executor が拒否するかは確かめていない（文書は GPU_COMMAND の kernel の検査だけを書いた）。
 - Venus の host の側が未知の command を返す結果は zedBSD の code にないので書いていない。
-
