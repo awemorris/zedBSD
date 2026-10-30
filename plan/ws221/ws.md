@@ -136,3 +136,7 @@ p001 の設計の要点（第 2 版）: QEMU の usb-net（CDC ECM）は descrip
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p011](phase011/phase.md) | IPv6 の TCP の試験と直し（IPv6 の tcp-perf、実機・QEMU、jumbo、PTB の実地） | cleared（2026-10-29 P3 q1664-i05: 0342c9d89 まで。IPv6 の way の保持（送り 613 → 894〜932、受け 821 → 936.3）、PTB の RFC 8201 の確かめ、RST の後の write の errno、lo0 の NODAD。jumbo・PTB の注入・link-local・QEMU inet6 PASS） | p002〜p009 |
+
+## 日程（2026-10-30 ユーザー、原文）
+
+「WS221はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の completed の後

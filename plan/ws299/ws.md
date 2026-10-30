@@ -164,3 +164,7 @@ Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRA
 
 - 残る差の見立て（未確認の物を含む）: (1) CPU の速さ（idle が C1 だけ・HWP なし・hybrid を知らない置き方）で、書き手の CPU が律速の項目（UFS の書き・direct の書きの fill）は 10〜30% 遅くなる。所有の外（HAL の idle・scheduler）。(2) UFS の書きは buffer cache の line ごとの費用。(3) 時計入りの randread は clock_gettime が syscall（vDSO が無く 1 ms 刻み）のため。(4) read mode の最初の約 900 MiB が遅いのは、乱読みが残した 4 KiB の line を追い出す道が遅いためと見ている（cache は乱読みの後に既に満杯、chunk2 から速い。未確認）。(5) memcpy は 1 KiB〜4 KiB（dst を揃えていない、AVX なし）と 32 MiB（non-temporal の store なし）で glibc より遅い。
 - 再開点: ユーザーの継続の判断待ち（2026-10-28 ユーザー「その上で継続判断させてください。」）。証拠は worktree の `build/hw5330/ws299d/`（切り分け）・`build/hw5330/ws299e/`（全体）、git の外。
+
+## 日程（2026-10-30 ユーザー、原文）
+
+「WS299はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の completed の後
