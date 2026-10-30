@@ -60,4 +60,4 @@
   判定は SSH で取った各試験の結果の行（console の log は読まない）。途中の失敗と直し: process-test の terminal の mode の確かめは zedBSD の sh が
   行の編集の間 ECHO・ICANON を切るので、`read` の待ちの間に確かめる形にした（Linux の dash では前の形でも通っていた）。instance-test は
   compositor が client に `XDG_RUNTIME_DIR=/tmp`（他人も書ける）を渡すので ENOTSUP。試験の側で私的な directory を渡した（library の動きは正しい）。
-- 未実施: Installer の probe・session（installer の image、`plan/ws307/tests/p011-install.py`）と Phone の viewer の QEMU の動き。
+- 未実施: Installer の probe・session（installer の image、`plan/tools/installer/p011-install.py`）と Phone の viewer の QEMU の動き。
