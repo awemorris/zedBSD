@@ -342,6 +342,7 @@ transition_ease(
 	float d;
 	int steps;
 	char position[8];
+	char *end;
 	float step;
 
 	if (timing == NULL)
@@ -362,9 +363,21 @@ transition_ease(
 		return 1.0f;
 	if (strcmp(text, "step-end") == 0)
 		return progress >= 1.0f ? 1.0f : 0.0f;
-	if (sscanf(text, "bezier %f %f %f %f", &a, &b, &c, &d) == 4)
+	if (strncmp(text, "bezier ", 7) == 0) {
+		a = strtof(text + 7, &end);
+		b = strtof(end, &end);
+		c = strtof(end, &end);
+		d = strtof(end, &end);
 		return transition_bezier(progress, a, b, c, d);
-	if (sscanf(text, "steps %d %7s", &steps, position) == 2 && steps >= 1) {
+	}
+	if (strncmp(text, "steps ", 6) == 0) {
+		steps = (int)strtol(text + 6, &end, 10);
+		while (*end == ' ')
+			end++;
+		strncpy(position, end, sizeof(position) - 1U);
+		position[sizeof(position) - 1U] = '\0';
+		if (steps < 1)
+			return progress;
 		step = (float)(int)(progress * (float)steps);
 		if (progress >= 1.0f)
 			step = (float)steps;

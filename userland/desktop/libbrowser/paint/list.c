@@ -3540,6 +3540,55 @@ list_vt_remap(
 	}
 }
 
+/*
+ * Finds where a picture of a size goes in a replaced box's content box under object-fit and object-position:
+ * the rectangle it is stretched to, from the content box's top left.
+ */
+static void
+list_vt_fit(
+	const struct layout_box *box,
+	const struct layout_rect *picture,
+	layout_unit *left,
+	layout_unit *top,
+	layout_unit *width,
+	layout_unit *height)
+{
+	const struct css_length *position;
+	float scale;
+	float scale_height;
+	int fit;
+
+	fit = box->style.object_fit;
+	*left = 0;
+	*top = 0;
+	*width = box->width;
+	*height = box->height;
+	if (fit == CSS_OBJECT_FIT_FILL || box->width <= 0 || box->height <= 0 || picture->width <= 0 || picture->height <= 0)
+		return;
+	scale = (float)box->width / (float)picture->width;
+	scale_height = (float)box->height / (float)picture->height;
+	if (fit == CSS_OBJECT_FIT_COVER) {
+		if (scale_height > scale)
+			scale = scale_height;
+	} else if (fit == CSS_OBJECT_FIT_CONTAIN || fit == CSS_OBJECT_FIT_SCALE_DOWN) {
+		if (scale_height < scale)
+			scale = scale_height;
+		if (fit == CSS_OBJECT_FIT_SCALE_DOWN && scale > 1.0f)
+			scale = 1.0f;
+	} else {
+		scale = 1.0f;
+	}
+	*width = (layout_unit)((float)picture->width * scale);
+	*height = (layout_unit)((float)picture->height * scale);
+	position = box->style.object_position;
+	*left = (layout_unit)((float)(box->width - *width) * position[0].value / 100.0f);
+	*top = (layout_unit)((float)(box->height - *height) * position[1].value / 100.0f);
+	if (position[0].unit == CSS_UNIT_PX)
+		*left = layout_from_px(position[0].value);
+	if (position[1].unit == CSS_UNIT_PX)
+		*top = layout_from_px(position[1].value);
+}
+
 /* Paints the old or new image of a name into the box of its pseudo-element. */
 static void
 list_vt_image(
@@ -3554,6 +3603,10 @@ list_vt_image(
 	struct layout_rect from;
 	layout_unit dx;
 	layout_unit dy;
+	layout_unit left;
+	layout_unit top;
+	layout_unit width;
+	layout_unit height;
 	size_t first;
 	size_t index;
 	int error;
@@ -3563,11 +3616,36 @@ list_vt_image(
 	entry = box->vt_old != NULL ? box->vt_old : box->vt_new;
 	dx = box->x + box->border[CSS_LEFT] + box->padding[CSS_LEFT];
 	dy = box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
-	first = walk->list->items.count;
+
+	/* What is painted: the old snapshot, the page's live content, or a live box. */
+	snapshot = NULL;
+	live = NULL;
 	if (box->vt_old != NULL) {
 		snapshot = entry->old_image;
 		if (snapshot == NULL)
 			return;
+		from.x = snapshot->x;
+		from.y = snapshot->y;
+		from.width = snapshot->width;
+		from.height = snapshot->height;
+	} else if (entry->is_root) {
+		from.x = 0;
+		from.y = 0;
+		from.width = walk->tree->viewport_width;
+		from.height = walk->tree->viewport_height;
+	} else {
+		live = layout_transition_box(walk->transition, walk->tree->root, entry->name, 0);
+		if (live == NULL)
+			return;
+		from.x = live->x;
+		from.y = live->y;
+		from.width = live->border[CSS_LEFT] + live->padding[CSS_LEFT] + live->width + live->padding[CSS_RIGHT] + live->border[CSS_RIGHT];
+		from.height = live->border[CSS_TOP] + live->padding[CSS_TOP] + live->height + live->padding[CSS_BOTTOM] + live->border[CSS_BOTTOM];
+	}
+	list_vt_fit(box, &from, &left, &top, &width, &height);
+
+	first = walk->list->items.count;
+	if (snapshot != NULL) {
 		for (index = 0; index < snapshot->count && walk->error == 0; index++) {
 			item = snapshot->items[index];
 			if (item.kind == PAINT_TEXT && item.glyph_count != 0) {
@@ -3583,35 +3661,14 @@ list_vt_image(
 			if (error != 0)
 				walk->error = error;
 		}
-		from.x = snapshot->x;
-		from.y = snapshot->y;
-		from.width = snapshot->width;
-		from.height = snapshot->height;
-	} else if (entry->is_root) {
-		error = list_vt_paint(walk, NULL);
-		if (error != 0) {
-			walk->error = error;
-			return;
-		}
-		from.x = 0;
-		from.y = 0;
-		from.width = walk->tree->viewport_width;
-		from.height = walk->tree->viewport_height;
 	} else {
-		live = layout_transition_box(walk->transition, walk->tree->root, entry->name, 0);
-		if (live == NULL)
-			return;
 		error = list_vt_paint(walk, live);
 		if (error != 0) {
 			walk->error = error;
 			return;
 		}
-		from.x = live->x;
-		from.y = live->y;
-		from.width = live->border[CSS_LEFT] + live->padding[CSS_LEFT] + live->width + live->padding[CSS_RIGHT] + live->border[CSS_RIGHT];
-		from.height = live->border[CSS_TOP] + live->padding[CSS_TOP] + live->height + live->padding[CSS_BOTTOM] + live->border[CSS_BOTTOM];
 	}
-	list_vt_remap(walk->list, first, &from, dx, dy, box->width, box->height);
+	list_vt_remap(walk->list, first, &from, dx + left, dy + top, width, height);
 }
 
 /*
