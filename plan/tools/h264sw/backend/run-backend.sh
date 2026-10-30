@@ -4,12 +4,12 @@
 #   test-switch:  decoder.c against scripted stand-in back ends (open order, refusal before and after a packet was taken,
 #                 draining, dropping to a key frame, the end before a key frame).
 # ASan and UBSan; the last line is "run-backend: PASS" or "run-backend: FAIL".
-#   sh plan/ws326/tests/backend/run-backend.sh
+#   sh plan/tools/h264sw/backend/run-backend.sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../../.."
 . plan/tools/fresh-out.sh
-out=build/tmp/ws326-backend
+out=build/tmp/h264sw-backend
 fresh_out "$out"
 
 lib=userland/desktop/libmedia
@@ -20,10 +20,10 @@ for file in $lib/h264sw-*.c $lib/vcodec-*.c; do
 	*) modules="$modules $file" ;;
 	esac
 done
-flags="-std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. -Iuserland/desktop/libmedia -Iplan/ws326/tests/unit -Iuserland/desktop/include"
+flags="-std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. -Iuserland/desktop/libmedia -Iplan/tools/h264sw/unit -Iuserland/desktop/include"
 
 status=0
-if cc $flags plan/ws326/tests/backend/test-backend.c $lib/h264sw-backend.c $lib/bitstream.c $lib/picture.c $lib/bits.c $modules \
+if cc $flags plan/tools/h264sw/backend/test-backend.c $lib/h264sw-backend.c $lib/bitstream.c $lib/picture.c $lib/bits.c $modules \
     -lm -lpthread -o "$out/test-backend" > "$out/test-backend.build.log" 2>&1; then
 	if ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 timeout 300 "$out/test-backend" > "$out/test-backend.log" 2>&1; then
 		tail -1 "$out/test-backend.log"
@@ -38,7 +38,7 @@ else
 	status=1
 fi
 
-if cc $flags plan/ws326/tests/backend/test-switch.c $lib/decoder.c -lpthread -o "$out/test-switch" > "$out/test-switch.build.log" 2>&1; then
+if cc $flags plan/tools/h264sw/backend/test-switch.c $lib/decoder.c -lpthread -o "$out/test-switch" > "$out/test-switch.build.log" 2>&1; then
 	if ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 timeout 300 "$out/test-switch" > "$out/test-switch.log" 2>&1; then
 		tail -1 "$out/test-switch.log"
 	else

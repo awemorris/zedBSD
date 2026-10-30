@@ -27,6 +27,6 @@
 ## 確かめ
 
 - `timeout 3600 sh plan/ws329/tests/roundtrip.sh basic`
-- `sh plan/ws329/tests/run-unit.sh all`、`sh plan/ws326/tests/run-unit.sh all`
+- `sh plan/ws329/tests/run-unit.sh all`、`sh plan/tools/h264sw/run-unit.sh all`
 - zedBSD amd64: `timeout 1200 make ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-claude1/build/llvm/bin ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-claude1/build/amd64/sysroot -o /home/awe/zedBSD-claude1/build/amd64/sysroot/.zedbsd-sysroot-complete -j8 build/amd64/dynamic/libmedia.so` → exit 0、warning 0
 - `git diff --check`。commit は `git commit -m WIP -- <path>`、push しない。結果の節（host の `date`、command と結果、未実施）を足し、ws.md の行を更新（cleared は Q1）。

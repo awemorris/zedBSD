@@ -20,7 +20,7 @@ design §4・§5.3 の R1〜R5 を行う。decoder の振る舞い（出力の�
 
 ## 受け入れ
 
-- 変える前と後で `sh plan/ws326/tests/run-unit.sh all` の各 test の最後の行（件数を含む）が同じ。WS326 p022 の適合の試験（`in` の全 stream）が前後で同じ結果。
+- 変える前と後で `sh plan/tools/h264sw/run-unit.sh all` の各 test の最後の行（件数を含む）が同じ。WS326 p022 の適合の試験（`in` の全 stream）が前後で同じ結果。
 - 新しい単体試験 `plan/ws329/tests/unit/test-cabac_ctx.c`（各関数を手の例で: 隣の有無・skip・intra・I_PCM・direct・cat ごとの offset）と `test-levels.c`（表 A-1 の全行、1b の見つけ方）。この 2 本は p003 の run-unit.sh で流す（p002 では WS326 の run-unit.sh の形を一時の command で）。
 - WS326 の `check-skeleton.sh`（BASE 無し）PASS、amd64 の libmedia.so の build warning 0。
 - WS326 の header の基点が移ることを結果に書く（Q1 が WS326 の記録に反映）。
@@ -32,7 +32,7 @@ design §4・§5.3 の R1〜R5 を行う。decoder の振る舞い（出力の�
 
 ## 確かめ
 
-- `sh plan/ws326/tests/run-unit.sh all` を変更の前後で流し、出力を比べる。
+- `sh plan/tools/h264sw/run-unit.sh all` を変更の前後で流し、出力を比べる。
 - 適合の試験（WS326 p022 の command）を前後で。
 - zedBSD amd64: `timeout 1200 make ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-claude1/build/llvm/bin ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-claude1/build/amd64/sysroot -o /home/awe/zedBSD-claude1/build/amd64/sysroot/.zedbsd-sysroot-complete -j8 build/amd64/dynamic/libmedia.so` → exit 0、warning 0
 - `git diff --check`。commit は `git commit -m WIP -- <path>`、push しない。結果の節（host の `date`、command と結果、未実施）を足し、ws.md の行を更新（cleared は Q1）。

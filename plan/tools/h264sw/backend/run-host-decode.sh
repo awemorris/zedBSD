@@ -4,17 +4,17 @@
 # pictures with ffmpeg's own decoding: number of pictures, and the MD5 of the whole output, of the first and of the last
 # picture.  ASan and UBSan.  It needs the decoder (h264sw-decoder.c) to be implemented.
 # Last line: run-host-decode: PASS or FAIL.
-#   sh plan/ws326/tests/backend/run-host-decode.sh
+#   sh plan/tools/h264sw/backend/run-host-decode.sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../../.."
 . plan/tools/fresh-out.sh
-out=build/tmp/ws326-host-decode
+out=build/tmp/h264sw-host-decode
 fresh_out "$out"
 
 lib=userland/desktop/libmedia
 if ! cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. \
-    plan/ws326/tests/backend/host-decode.c $lib/decoder.c $lib/bitstream.c $lib/picture.c $lib/bits.c $lib/h264sw-*.c $lib/vcodec-*.c \
+    plan/tools/h264sw/backend/host-decode.c $lib/decoder.c $lib/bitstream.c $lib/picture.c $lib/bits.c $lib/h264sw-*.c $lib/vcodec-*.c \
     userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c \
     userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c \
     -lpthread -lm -o "$out/host-decode" > "$out/build.log" 2>&1; then

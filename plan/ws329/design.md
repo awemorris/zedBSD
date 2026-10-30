@@ -90,7 +90,7 @@ WS326 の各 module（main 85fbeb091 の header を読んだ事実）と、encod
 | h264sw-deblock | picture の deblocking | 無し |
 | h264sw-decoder・h264sw-backend | 全体の試験の oracle（encoder の出力を decode） | 無し |
 | bits.h（`media_bits`、`media_rbsp_unescape`） | 使わない | 無し |
-| 試験の道具（`plan/ws326/tests/unit/check.h`・`bitwriter.h`・`cabacwriter.h`） | `check.h` は WS329 の試験も使う。`bitwriter.h`・`cabacwriter.h` は decoder の試験の独立の逆実装なので、製品の writer にはしない（同じ誤りの共有を避ける） | 無し |
+| 試験の道具（`plan/tools/h264sw/unit/check.h`・`bitwriter.h`・`cabacwriter.h`） | `check.h` は WS329 の試験も使う。`bitwriter.h`・`cabacwriter.h` は decoder の試験の独立の逆実装なので、製品の writer にはしない（同じ誤りの共有を避ける） | 無し |
 
 decoder の module で encoder に要らない物は無い（全部が「使う」か「oracle」）。
 
@@ -280,7 +280,7 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 
 - **読む物（共通）**: AGENTS.md §4・§7・§9・§10、plan/agents/protocol.md、plan/coding-style.md の全文（§14 の checklist）、この文書の §1・§3・§4・§7・§10.1、`h264sw.h`・`h264enc.h`、実装する header と、その header が include する header、仕様の PDF（§1 の path と SHA-256、頁の換算）。
 - **変えてはいけない物**: 全部の `h264sw*.h`・`h264enc*.h`・`vcodec-*.h`、担当の外の `.c`、Makefile、`plan/ws329/tests/run-unit.sh`・`check-skeleton.sh`・`unit/check.h` 以外の試験の道具（自分の test を除く）、HAL・toolchain・共有の build/。header の不備は直さず止めて Q1 へ（どの header のどの関数で何が足りないか）。
-- **確かめの command**: `timeout 900 sh plan/ws329/tests/run-unit.sh <name>` と `all`、`BASE=<p003 の SHA> timeout 300 sh plan/ws329/tests/check-skeleton.sh`、WS326 の `sh plan/ws326/tests/run-unit.sh all`（decoder が変わっていない）、zedBSD amd64 の libmedia.so の build（WS326 design §6 の command）で warning 0、`git diff --check`。
+- **確かめの command**: `timeout 900 sh plan/ws329/tests/run-unit.sh <name>` と `all`、`BASE=<p003 の SHA> timeout 300 sh plan/ws329/tests/check-skeleton.sh`、WS326 の `sh plan/tools/h264sw/run-unit.sh all`（decoder が変わっていない）、zedBSD amd64 の libmedia.so の build（WS326 design §6 の command）で warning 0、`git diff --check`。
 - **終わりの条件**: 上が全部 PASS（出力を自分で読む）、わざと壊す確かめ、規約の checklist、`git add` の後 `git commit -m WIP -- <path>`、phase.md の「結果」（日付は host の `date`、command と件数、自分で決めた点、未実施）、ws.md の行を「実装済み・試験 PASS」（cleared は Q1）。
 
 ## 14. Q1 への注意（ユーザーの判断ではない物）

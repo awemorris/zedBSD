@@ -1,29 +1,29 @@
 #!/bin/sh
 # The host unit tests of the software H.264 decoder (libmedia's h264sw-*): each test
-# plan/ws326/tests/unit/test-<name>.c is built with every h264sw-*.c and vcodec-*.c except the back end (modules
+# plan/tools/h264sw/unit/test-<name>.c is built with every h264sw-*.c and vcodec-*.c except the back end (modules
 # not implemented yet are skeletons that answer ENOSYS) and bits.c, with ASan and UBSan, and run.
 # Each test's last line is "test-<name>: PASS (...)" or "test-<name>: FAIL (...)".
-#   sh plan/ws326/tests/run-unit.sh <name>...     one or more tests
-#   sh plan/ws326/tests/run-unit.sh all           every test present
-# Last line: run-unit: PASS or run-unit: FAIL.  Output under build/tmp/ws326-unit (a fresh run directory).
+#   sh plan/tools/h264sw/run-unit.sh <name>...     one or more tests
+#   sh plan/tools/h264sw/run-unit.sh all           every test present
+# Last line: run-unit: PASS or run-unit: FAIL.  Output under build/tmp/h264sw-unit (a fresh run directory).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh
-out=build/tmp/ws326-unit
+out=build/tmp/h264sw-unit
 fresh_out "$out"
 
 names="$*"
 if [ "$names" = "all" ]; then
 	names=""
-	for file in plan/ws326/tests/unit/test-*.c; do
+	for file in plan/tools/h264sw/unit/test-*.c; do
 		[ -f "$file" ] || continue
 		name=$(basename "$file" .c)
 		names="$names ${name#test-}"
 	done
 fi
 if [ -z "$names" ]; then
-	echo "usage: sh plan/ws326/tests/run-unit.sh <name>... | all"
+	echo "usage: sh plan/tools/h264sw/run-unit.sh <name>... | all"
 	exit 2
 fi
 
@@ -37,14 +37,14 @@ done
 
 status=0
 for name in $names; do
-	source=plan/ws326/tests/unit/test-$name.c
+	source=plan/tools/h264sw/unit/test-$name.c
 	if [ ! -f "$source" ]; then
 		echo "test-$name: FAIL (no $source)"
 		status=1
 		continue
 	fi
 	if ! cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined \
-	    -fno-omit-frame-pointer -I. -Iplan/ws326/tests/unit "$source" $modules userland/desktop/libmedia/bits.c \
+	    -fno-omit-frame-pointer -I. -Iplan/tools/h264sw/unit "$source" $modules userland/desktop/libmedia/bits.c \
 	    -lm -o "$out/test-$name" > "$out/test-$name.build.log" 2>&1; then
 		echo "test-$name: FAIL (build)"
 		head -20 "$out/test-$name.build.log"

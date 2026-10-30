@@ -6,14 +6,14 @@
 #  3. no vcodec file names an h264sw header (the codec-independent part does not depend on a codec);
 #  4. with BASE=<commit>, the headers are unchanged since that commit (an implementation Phase
 #     must not change them; a header fault goes back to Q1).
-#   sh plan/ws326/tests/check-skeleton.sh
-#   BASE=<sha> sh plan/ws326/tests/check-skeleton.sh
+#   sh plan/tools/h264sw/check-skeleton.sh
+#   BASE=<sha> sh plan/tools/h264sw/check-skeleton.sh
 # Last line: check-skeleton: PASS or check-skeleton: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh
-out=build/tmp/ws326-skeleton
+out=build/tmp/h264sw-skeleton
 fresh_out "$out"
 flags="-std=c89 -Wall -Wextra -Werror -Wpedantic -D_DEFAULT_SOURCE -I."
 status=0

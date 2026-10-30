@@ -20,7 +20,7 @@
 
 ## 3. 試験の項目
 
-- 全 initValue（3 × 157）を PDF の pdftotext からの独立の抜き出し（WS326 の `plan/ws326/tests/cabac-init-extract.py` の形で新しく書く）と全値照合。Table 9-4 の initType ごとの ctxIdx の範囲と header の配置が合うこと。
+- 全 initValue（3 × 157）を PDF の pdftotext からの独立の抜き出し（WS326 の `plan/tools/h264sw/cabac-init-extract.py` の形で新しく書く）と全値照合。Table 9-4 の initType ごとの ctxIdx の範囲と header の配置が合うこと。
 - 抜き出しで取れない値（折り返した cell）は頁の画で読み、照合の弱点として結果に記録。
 - initType（9-7）の 6 通り、9-4〜9-6 の手計算（initValue 154・139・63 などを qp 0・26・51 で）。
 - 共通: 誤りの入力・途中で切れた入力・乱数の入力で落ちず（ASan・UBSan 0）決められた誤りを返す。
