@@ -403,7 +403,7 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1750 / q1750-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs`・branch `agent/p2-bugs`、QEMU と host） | [BUG-363](bugs/BUG-363.md)・[BUG-344](bugs/BUG-344.md)・[BUG-366](bugs/BUG-366.md)・[BUG-354](bugs/BUG-354.md)・[BUG-328](bugs/BUG-328.md)・[BUG-352](bugs/BUG-352.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
-| q1751 / q1751-i01 | S-p019（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws326-p019`・branch `agent/s-ws326-p019`） | [ws326-p019](ws326/phase019/phase.md) | phase.md のとおり（header を変えない） | in-progress |
+| q1751 / q1751-i01 | S-p019（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws326-p019`・branch `agent/s-ws326-p019`） | [ws326-p019](ws326/phase019/phase.md) | phase.md のとおり（header を変えない） | cleared（053bafc0b、test-recon 33584 checks） |
 
 ## 2026-10-31: WS318 の設計（q1752）
 

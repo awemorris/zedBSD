@@ -3,7 +3,7 @@
 # ws326-p019 macroblock の再構成
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: cleared（2026-10-31 Q1、053bafc0b。実装と試験 S-p019）。
 - 依存: p013〜p018（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
@@ -52,3 +52,23 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果
+
+- 日付: 2026-10-31（host の `date`）。状態: 実装済み・試験 PASS（cleared は Q1 が受け入れを見て決める）。
+- 作った物: `userland/desktop/libmedia/h264sw-recon.c`（`h264sw_recon_mb`: I_PCM、Intra_4x4・Intra_8x8・Intra_16x16 と chroma、P_Skip、P の 16x16・16x8・8x16・8x8（sub 4 種）、B_Skip・B_Direct_16x16・B_8x8（direct sub を含む）、重み付き予測、4x4・8x8 の residual）、単体試験 `plan/ws326/tests/unit/test-recon.c`。header・他の module・Makefile・試験の道具は変えていない。
+- 実行した command と結果:
+  - `timeout 600 sh plan/ws326/tests/run-unit.sh recon` → `test-recon: PASS (33584 checks)`、`run-unit: PASS`（ASan・UBSan の報告 0）。
+  - `timeout 900 sh plan/ws326/tests/run-unit.sh all` → 全 test PASS（test-macroblock 1107981・test-recon 33584 ほか 24 本）、`run-unit: PASS`。
+  - `BASE=fd1d6f88c sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - zedBSD amd64 の `make ... build/amd64/dynamic/libmedia.so` → exit 0、出力の warning 0（h264sw-recon.o を含めて link）。cc と clang の `-std=c89 -Wall -Wextra -Werror -Wpedantic` で .c を単独 compile して OK。
+  - `git diff --check` → 問題なし。
+- 試験の内容: I_PCM の複写（3 plane、周りの sample が不変、nonzero 0xffff）、Intra_16x16 DC（residual 無しで 128、DC level 1 を QPY 28 で 129・36 で 131、-1 で 127、scan 位置 1 の level で左右の block が 136・120）、AC level、chroma DC の位置（c01・c10 で 148・108）、QP'C（Cb と Cr 別の offset、Table 8-15 の写しで 12 通り、clip 0 と 51）、Intra_4x4 の 16 block の順（block 0 の residual を後の block が端に使い全体 132）、Intra_8x8（130 と 4 bit の nonzero）、使えない mode の概念上の隠蔽（1 macroblock で concealed 1）、scaling list の intra・inter・成分（Intra Cb 16・Cr 32・Inter Cb 32・Cr 16、8x8 の inter）、P_L0_16x16 の整数 MV（右端の clamp 込み）、分数 MV（半 sample の 6 tap と負の MV の floor）、explicit weight、P_Skip（median の vector と、B が無い時の 0）、16x8・8x16 の mvp の連鎖、P_8x8 の 4x4 sub の連鎖（C が未導出で D に替わる）、sub ごとの ref_idx、B の双予測（別 MV）、implicit weight（w0 48・w1 16）、B_L0_L1_16x8、spatial・temporal の direct（mvL0 8・mvL1 -8）、B_8x8（direct・L1・Bi・L0 の sub）、vector の wrap、誤り（context・frame・範囲外の macroblock・範囲外の ref_idx・NULL の frame・大きさの違う frame・co-located 無し・不正な type と sub）、ランダムの syntax 30000 本。slice_data の loop（bitwriter の CAVLC、2x2 macroblock）: I_16x16 DC だけの I slice は全 sample 128、I_PCM の 4 macroblock は送った sample のまま、skip だけの P slice は参照と同じ、P_L0_16x16 の整数 MV (16, 0) は参照を 4 sample（chroma は 2）ずらした物（端は clamp）、B_Skip だけの B slice は参照 2 枚の平均、途中で切れた stream とランダムの stream 3000 本。期待の値は仕様の式と表から手で出した物。
+- 試験の確かめ（一時的な突然変異、git の外）: 18 通りの誤りを入れ、17 通りで test-recon が FAIL（Intra_4x4 の residual 抜け、Cr に Cb の offset、Table 8-15 無し、inter の luma に intra の list、floor 除算が 0 への丸め、ref_id の書き忘れ、decoded_4x4 の更新忘れ、chroma の weight が luma の物、luma DC の転置、chroma DC の index の取り違え、P_Skip の ref_id、8x8 の nonzero が 1 bit、concealed を event ごとに数える、intra4x4_mode の書き忘れ、PCM の Cb と Cr の plane の取り違え、一様性の判定が ref_idx を見ない、8x8 の inter に intra の list）。PASS のまま残ったのは vector の wrap の「下側を戻さない」だけで、int16_t への変換が host の compiler で同じ結果になるため等価（wrap を書く理由は変換が実装定義だから）。
+- header が決めていない点で担当が決めた物（Q1 の確認用）:
+  - concealed は 1 macroblock につき最大 1 だけ足す（使えない mode・missing の参照が複数あっても 1）。
+  - 動きは partition ごとに導出して各 4x4 block に書き、予測は動き（vector と ref_idx）が同じ 16x16・8x8・4x4 の最大の正方形にまとめる。サンプル単位の演算なので partition の形で結果は変わらない。
+  - Intra_16x16 の nonzero は DC level が 1 つでもあれば 16 bit 全部（struct h264sw_mb の規則）、AC は block ごと。
+  - 参照の frame の大きさが現在の frame と違う、plane が NULL、ref_idx が list の外・負、partition が macroblock の外・4 の倍数でない、list を 1 つも使わない partition は EINVAL。
+  - I_NxN のままの kind（parser は解決する）と未知の kind は EINVAL。
+- 未実施: CABAC の slice を recon まで通す試験（p021 の stream の試験と p022 の適合で）、実 stream での比較、QEMU・実機。
