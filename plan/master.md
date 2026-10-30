@@ -27,7 +27,7 @@
 
 | 担当 | 最後の Queue | WS と次の 1 手（記録の場所） | 実機 |
 | --- | --- | --- | --- |
-| P1 | q1705-i01 返却 | [WS009](ws009/ws.md) 文書: p028 の build・boot の再現の途中。次は [phase028](ws009/phase028/phase.md) の引き継ぎ（native の boot だけ → hybrid・uefi・bios → WS009 の完了の形）。その後 [WS296](ws296/ws.md)（P6 の 1809873bd を元に組み直す案は phase028 の末尾）→ [WS297](ws297/ws.md)（ユーザー: 1 WS ずつ） | QEMU |
+| P1 | q1705-i01 返却 | [WS009](ws009/ws.md) は 2026-10-30 P7（q1725）で completed。WS296 の組み直しの調べは [ws296/ws.md](ws296/ws.md) の末尾 | QEMU |
 | P2 | q1703-i01 返却 | [WS327](ws327/ws.md) は 2026-10-30 P5（q1710）で completed | QEMU |
 | P3 | q1707-i01 返却（停止） | BUG-367・BUG-369 を閉じた。次の候補は [WS221](ws221/ws.md) Jumbo frame・[WS299](ws299/ws.md) 5330 の NVMe（ユーザー: WS315 の後） | 5330・10.0.10.3 |
 | P4 | q1698-i01 返却 | [WS307](ws307/ws.md) installer: ws.md の Resume point（p015 の QEMU の 3 回目 → p004 GTK4 の試験 → p008 → p014 → p007 firmware 変数の driver の設計の続き） | QEMU |
@@ -177,7 +177,6 @@ BUG-371 · q1730 · WS333 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS052](ws052/ws.md) | MG003 | 電源管理（S0ix を 5330 で初めて動かす、modern standby、/dev/system） | incomplete | 再開点 p014（WS300 p002 の後）、並べて p015・p016、約 31 LW |
 | [WS332](ws332/ws.md) | MG004 | tick の周波数を API で扱う（KERN_CLOCK_HZ の削除、今の周波数の取得の口。変える実装は将来）（2026-10-30 ユーザー） | incomplete | p001 設計・p002 削除（P3、q1722） |
 | [WS331](ws331/ws.md) | MG001 | driver から HAL への直の依存を除き kernel の口だけに（2026-10-30 ユーザー） | incomplete | p001 cleared（表 A・B の許可）。p002〜p004 を P2（q1717） |
-| [WS009](ws009/ws.md) | MG001 | 文書 | incomplete（DOC-54 を今書く、2026-10-27 ユーザーの回答「今書く」） | DOC-54（/dev/gpu の UAPI の文書） |
 | [WS068](ws068/ws.md) | MG006 | EGL と OpenGL ES（と desktop GL 3.0〜4.6）を Vulkan と display 拡張の上に実装する（Wayland とディスプレイ直接の両方）（2026-09-26・27 ユーザー指示） | incomplete・継続（空き時間だけ。受け入れは Venus のみ、2026-10-29 ユーザー） | 次は p045（sample shading、Venus の試験だけ）→ p047〜p068（GL 4.x を分けた物）→ p007 規約 |
 | [WS074](ws074/ws.md) | MG006 | zedBSD の Web ブラウザ `userland/base/zdesktop-browser`（HTML5 の layout engine → 最適化にこだわらない JavaScript engine の接続 → CSS の準拠と Chrome との比較で目標値を段階的に上げる。JS と Wasm の実行 engine を共通化。画像は libpng-compat・新しい libjpeg-compat、TLS は当面 OpenSSL）（2026-09-27 ユーザー指示） | incomplete・継続（Codex のセッション） | WPT Interop 2025 の 100%（ws074-q20261019-55 active） |
 | [WS217](ws217/ws.md) | MG006 | 画面の回転（Settings の Display、縦長で Notes を使う）（2026-10-13 ユーザーの UAT） | incomplete（2026-10-28 ユーザー「WS217 を開き直す」） | p009-1（Intel の PRM）・p009〜p011（scanout の 180°）・p005（複数 head）・p006（pen・touch と display の結び付け）・p012（game の session）→ p007 確かめ・p008 規約。p002a・p002b・p003・p004 は済み |

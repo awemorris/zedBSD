@@ -38,3 +38,12 @@ src/drivers の gpu/ 以外の C・header の comment（と log の文言）か�
 - 2026-10-29 01:3x ユーザー「P6は設計が決まっているWSについて、テストなしでひたすら実装だけ進めてテスト未完了でincompleteだけど実装はできていてマージされていない状態のWSを増やす。」
 - ユーザー「調査しなくてよい、設計ができているか自明なWSについて、ひたすら書いてください。選択したもののうち、調査が必要なものはスキップします。WSごとにサブのサブエージェントを作ってよいです。」（選択: WS223・WS282〜WS284・WS243・WS296）
 - 解釈（Q1）: 試験をせず実装だけを P6 の branch に積み、main に merge しない。Status は incomplete のまま（試験は未実施）。調べが要ると分かれば P6 は飛ばして Q1 に返す。
+
+## 引き継ぎ: WS296 の調べ（2026-10-30 P1、q1705-i01。WS009 の phase028 から 2026-10-30 Q1 が移した。WS296 の設計の入力）
+
+- P6（q1667）が WS296 の p001〜p005 を全部実装済み: branch の先頭 `1809873bd`（基点 main `61630bb0b`、src/drivers の 104 file・+14,854/−8,032、`plan/ws296/tests/check-mgmt.sh`・`check-mgmt.exclude`・`config-amd64-test-options.mk` を含む）。未試験・未 merge。P6 の記録では検査 0・XXX 0・12 の config の vmunix が warning 0、usb.c・usb-rtl8822bu.c は `-S` の関数ごとの比較をした。
+- 今の main（00396e3da）で P6 の check-mgmt.sh を流すと **413 行**（platform 25・generic 18・usb 12・acpi 12・wifi 8・pci 8・typec 6・i2c 3・fs 3・mmc・isa・gpio 各 1 の file）、XXX の file は 11（31,308 行）。
+- 基点の後に main で変わった P6 の file は 10: fs/fat.c・fs/ufs.c・pci/pci-pcat.c・pci/pci.c・platform/pcat/graphics/splash.c・.h・usb/usb-cdc-ecm.c（main 68 行）・usb/usb-cdc-ncm-net.c（**main 1,105 行**）・usb/usb-cdc-ncm.c（261 行）・usb/usb.c（175 行）。他の 94 file は P6 の版をそのまま持ってこられる。
+- 組み直しの案（標準廉価実装手順の形）: 各 Phase は main から始め、自分の file 群について P6 の版を `git merge-file`（基点 61630bb0b、main、1809873bd）で取り込み、検査と「動作を変えない」の機械の確かめをする。
+  - 道具: P6 の check-mgmt.sh（path を引数で絞れる形に）、XXX の数え、**asm-compare.sh**（基点と変更後の 2 つの tree を同じ config・`ZEDBSD_KERNEL_LTO=none` で vmunix まで build し、対象の .o を llvm-objdump の関数ごとの disassembly と rodata で比べる。差は名前の変わった static 関数・log の文字列・HAL_ASSERT/HAL_FATAL/KERN_FATAL の `__LINE__`（drivers の gpu/ 以外で 18 file・42 か所）だけのはずで、残りを読む）。下書き: `/home/awe/zedBSD-worktrees/p1-ws009r/build/tmp/ws296-draft/asm-compare.sh`（未試験。基点の tree の build/ には llvm・llvm-source・llvm-build・NoctLang・host-noct-state だけを link する案）、file ごとの P6 の差と main の差の数え `files.tsv`（列: path、P6 の変更行、基点から main の変更行）。
+  - Phase の群（Sonnet 5.5 high、各 1 回、file が重ならないので並べられる）: (1) 管理情報だけの約 90 file（platform・acpi・wifi・typec・i2c・gpio・isa・mmc・fs・pci・generic の hid-report 以外・usb の小さな物。main で変わった 6 file は merge-file）、(2) HID: generic/hid-report.c・usb-hid.c・usb-hid-checkpoint.c（約 4,200 行の差）、(3) UAS: usb-uas.c・usb-uas-transport.c・usb-uas-disk.c、(4) usb-cdc-ecm.c・usb-cdc-ncm.c、(5) usb-cdc-ncm-net.c（main の変更が大きいので main から当て直し、P6 は参考）、(6) usb.c、(7) usb-rtl8822bu.c、(8) 最後: 全体の検査 0・XXX 0・P6 の 12 の config の build・規約の全文の見直し（Opus を推す）。旧 p001〜p005 は canceled（P6 の branch に置き換え）。

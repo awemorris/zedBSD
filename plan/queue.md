@@ -315,7 +315,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1725 / q1725-i01 | P7（phase-runner、worktree `/home/awe/zedBSD-worktrees/p7-ws009`・branch `agent/p7-ws009`、QEMU） | [ws009](ws009/ws.md) p028（clean build と QEMU の起動の再現）→ WS の受け入れの確認 → 完了の形 | 2026-10-30 ユーザーから、WS009 を P7 で実行する、という趣旨の指示を受けた | in-progress |
+| q1725 / q1725-i01 | P7（phase-runner、worktree `/home/awe/zedBSD-worktrees/p7-ws009`・branch `agent/p7-ws009`、QEMU） | [ws009](ws009/ws.md) p028（clean build と QEMU の起動の再現）→ WS の受け入れの確認 → 完了の形 | 2026-10-30 ユーザーから、WS009 を P7 で実行する、という趣旨の指示を受けた | cleared（2026-10-30 Q1。p028 cleared、WS009 completed。89e9ecbb1、merge 94f1dec75） |
 
 ## 2026-10-30: WS291 p020 を P2 で（q1726）
 

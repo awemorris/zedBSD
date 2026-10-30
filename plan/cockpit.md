@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 23:11（Q1）
+最終更新: 2026-10-30 23:18（Q1）
 
 ## 担当（P1〜P8）
 
@@ -13,29 +13,16 @@
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ（Raspberry Pi 5 の V3D 7.1 の段） | 起動（q1729）。p021: Pi 5 の試験の image を作る、目標はスペックの比（qs40 × 約 51〜74、clock を実機で確定） | image をユーザーへ → 実機で今の fps → 改善 |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
-| P7 | [WS009](ws009/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書と、完了の条件の不足） | 起動（q1725）。p028 の clean build と QEMU の起動の再現（native → hybrid・uefi・bios） | WS の受け入れの確認 → 完了の形 → 返却 |
+| P7 | — | — | 返却（WS009 completed、2026-10-30） | 次は WS296（WS009 の後の予定） |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 自走（q1727、ユーザーの指示）。今 3,472 のうち 2,215（63.80%） | 100% まで。返却のたびに Q1 が起動し直す |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。
 
 ## WS ごとの進捗
 
-### WS009 文書（DOC-54: /dev/gpu の UAPI の文書）
+### WS009 文書 — completed（2026-10-30）
 
-| Phase | 内容 | 状態 |
-| --- | --- | --- |
-| p001〜p008 | 既存の文書 | cleared |
-| p009 | DOC-54 一括 | canceled（p010〜p024 に分けた） |
-| p010〜p021 | 節ごとの文書 12（Sonnet） | cleared |
-| p022 | 要求の索引 | cleared |
-| p023 | 統合・Bug の候補の一覧 | cleared（BUG-364・BUG-365 を登録） |
-| p024 | 正確さの review（Opus） | cleared（12 file を直した、BUG-366 と BUG-365 の追加） |
-| p025 | managed-wlan.md の書き直し（Opus） | cleared |
-| p026 | build の文書・索引・Status 行（Sonnet） | cleared |
-| p027 | 文書の検査の script を今の規則に直し plan/tools へ（Sonnet） | cleared |
-| p028 | clean build・QEMU 起動の再現、WS001 との照合（Opus） | in-progress（照合は済み。native の image まで、boot は未判定、hybrid・uefi・bios は未） |
-
-進捗: 2026-10-30 骨格と照合の script（P1）→ Sonnet 13 回で全文 → 統合で照合 PASS（14 file、例 12 compile）。sysctl の 4 byte の読みの不具合を Q1 が直した。
+/dev/gpu の UAPI の文書（DOC-54）を書き、clean tree から 4 種の image の build と 5 つの起動を build の文書どおりに再現（P7）。docs の照合の道具は plan/tools/docs-check/。
 
 ### WS327 libkeiland の thread と socket の wrapper — completed（2026-10-30）
 
