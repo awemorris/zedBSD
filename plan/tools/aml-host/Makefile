@@ -14,11 +14,16 @@ SOURCES := $(sort $(wildcard $(REPO)/src/drivers/acpi/aml-*.c)) \
 	$(REPO)/src/drivers/acpi/acpi-ec.c \
 	$(REPO)/src/drivers/acpi/acpi-text.c \
 	$(REPO)/src/drivers/acpi/acpi-resource.c \
+	$(REPO)/src/drivers/acpi/acpi-wmi.c \
+	$(REPO)/src/drivers/acpi/acpi-wmi-table.c \
 	$(REPO)/plan/tools/aml-host/aml-host.c \
-	$(REPO)/plan/tools/aml-host/aml-host-hardware.c
+	$(REPO)/plan/tools/aml-host/aml-host-hardware.c \
+	$(REPO)/plan/tools/aml-host/aml-host-wmi.c
 HEADERS := $(wildcard $(REPO)/src/drivers/acpi/*.h) \
 	$(REPO)/include/drivers/acpi/acpi.h \
-	$(REPO)/plan/tools/aml-host/aml-host-hardware.h
+	$(REPO)/include/drivers/acpi/wmi.h \
+	$(REPO)/plan/tools/aml-host/aml-host-hardware.h \
+	$(REPO)/plan/tools/aml-host/aml-host-wmi.h
 
 WARNINGS := -Wall -Wextra -Werror -Wdeclaration-after-statement \
 	-Wstrict-prototypes -Wmissing-prototypes -Wshadow

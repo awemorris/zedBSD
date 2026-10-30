@@ -19,8 +19,11 @@ SOURCES := $(sort $(wildcard $(REPO)/src/drivers/acpi/aml-*.c)) \
 	$(REPO)/src/drivers/acpi/acpi-text.c \
 	$(REPO)/src/drivers/acpi/acpi-resource.c \
 	$(REPO)/src/drivers/acpi/acpi-sleep.c \
+	$(REPO)/src/drivers/acpi/acpi-wmi.c \
+	$(REPO)/src/drivers/acpi/acpi-wmi-table.c \
 	$(HARNESS)/aml-host.c \
 	$(HARNESS)/aml-host-hardware.c \
+	$(HARNESS)/aml-host-wmi.c \
 	$(REPO)/plan/ws052/tests/host-sleep.c
 HEADERS := $(wildcard $(REPO)/src/drivers/acpi/*.h) \
 	$(REPO)/include/drivers/acpi/acpi.h \

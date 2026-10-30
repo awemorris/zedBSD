@@ -6,11 +6,11 @@
  */
 
 /*
- * The simulated ACPI hardware of the host harness (WS049).
+ * The simulated ACPI hardware of the host harness.
  */
 
-#ifndef WS049_AML_HOST_HARDWARE_H
-#define WS049_AML_HOST_HARDWARE_H
+#ifndef AML_HOST_HARDWARE_H
+#define AML_HOST_HARDWARE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -44,6 +44,19 @@ void
 hardware_ec_ports(
 	uint32_t data,
 	uint32_t command);
+
+int
+hardware_ec_sequence(
+	uint8_t address,
+	const uint8_t *values,
+	unsigned count);
+
+unsigned long
+hardware_smi_writes(void);
+
+void
+hardware_smi_hook(
+	void (*hook)(uint8_t command));
 
 uint8_t
 hardware_ec_ram_read(

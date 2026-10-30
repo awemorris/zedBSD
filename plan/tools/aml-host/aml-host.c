@@ -6,7 +6,7 @@
  */
 
 /*
- * The host test harness of the AML interpreter (WS049).
+ * The host test harness of the AML interpreter.
  *
  * It compiles src/drivers/acpi/aml-*.c with the host compiler, implements
  * aml-os.h over the host C library, and simulates the address spaces the
@@ -60,6 +60,20 @@
  *     --package-arg PATH  after MAIN, evaluate PATH with a package built by
  *                     drv_acpi_object_package_new/set (Integer 0x1234,
  *                     String "zed") as its argument
+ *     --ec-seq A=V,V...  successive EC reads of byte A (hex) take the values
+ *                     (hex) in turn, the last one staying (with --ec)
+ *     --smi-memory A=HEX  at each write of the SMI command port, store the
+ *                     bytes (hex pairs) at system memory address A (hex),
+ *                     as firmware answering in a shared buffer would
+ *     --wmi           attach the WMI mapping devices and list the blocks,
+ *                     with the SMI writes the attach caused
+ *     --wmi-path PATH  attach the WMI mapping device at PATH (repeatable)
+ *     --wmi-query GUID:I  query instance I of the WMI data block GUID
+ *     --wmi-method GUID:I:M:HEX  call WMI method M of instance I
+ *     --eval-args 'PATH ARG...'  evaluate PATH with arguments i:NUMBER,
+ *                     s:TEXT or b:HEX
+ *                     (the WMI and argument calls run in the order given,
+ *                     after --eval, each printing its SMI writes)
  *     --stack         print the deepest stack use of the interpreter
  *     --budget BYTES  the stack budget (default 1 MiB)
  *     --quiet         do not print the interpreter's log
@@ -80,6 +94,7 @@
 #include "drivers/acpi/aml-os.h"
 
 #include "aml-host-hardware.h"
+#include "aml-host-wmi.h"
 
 /*
  * The size of one simulated memory page.
@@ -151,7 +166,14 @@ enum option_kind {
 	OPTION_RUN_LOCKED,
 	OPTION_NOTIFY_ONCE,
 	OPTION_PACKAGE_ARG,
-	OPTION_POWEROFF
+	OPTION_POWEROFF,
+	OPTION_EC_SEQ,
+	OPTION_SMI_MEMORY,
+	OPTION_WMI,
+	OPTION_WMI_PATH,
+	OPTION_WMI_QUERY,
+	OPTION_WMI_METHOD,
+	OPTION_EVAL_ARGS
 };
 
 /*
@@ -199,6 +221,9 @@ struct harness_options {
 	const char *actions[OPTION_LIST_MAX];
 	enum option_kind action_kinds[OPTION_LIST_MAX];
 	unsigned action_count;
+	const char *calls[OPTION_LIST_MAX];
+	enum option_kind call_kinds[OPTION_LIST_MAX];
+	unsigned call_count;
 };
 
 /*
@@ -216,6 +241,15 @@ struct dynamic_table {
 struct memory_piece {
 	uint64_t address;
 	uint8_t *data;
+	size_t length;
+};
+
+/*
+ * Bytes --smi-memory stores at a system memory address at each SMI.
+ */
+struct smi_store {
+	uint64_t address;
+	uint8_t *bytes;
 	size_t length;
 };
 
@@ -283,6 +317,13 @@ static const struct option_name option_names[] = {
 	{ "--notify-once", OPTION_NOTIFY_ONCE, 1 },
 	{ "--package-arg", OPTION_PACKAGE_ARG, 1 },
 	{ "--poweroff", OPTION_POWEROFF, 0 },
+	{ "--ec-seq", OPTION_EC_SEQ, 1 },
+	{ "--smi-memory", OPTION_SMI_MEMORY, 1 },
+	{ "--wmi", OPTION_WMI, 0 },
+	{ "--wmi-path", OPTION_WMI_PATH, 1 },
+	{ "--wmi-query", OPTION_WMI_QUERY, 1 },
+	{ "--wmi-method", OPTION_WMI_METHOD, 1 },
+	{ "--eval-args", OPTION_EVAL_ARGS, 1 },
 };
 
 /*
@@ -350,6 +391,14 @@ static uint64_t slept;
 static unsigned notify_once_calls;
 
 /*
+ * The stores --smi-memory asked for, filled from the command line and run
+ * at every write of the SMI command port; the harness frees their bytes at
+ * exit.
+ */
+static struct smi_store smi_stores[OPTION_LIST_MAX];
+static unsigned smi_store_count;
+
+/*
  * Whether the interpreter lock is held.  The harness has one thread, so
  * the lock only checks that the interpreter takes and lets it go in pairs.
  */
@@ -396,6 +445,10 @@ static int locked_work(void *argument);
 static int install_notify_once(const char *path);
 static void notify_once(struct drv_acpi_node *node, uint32_t value, void *argument);
 static int check_package_arg(const char *path);
+static int parse_ec_sequence(const char *text);
+static int parse_smi_store(const char *text);
+static void smi_answer(uint8_t command);
+static int run_calls(const struct harness_options *options);
 
 /*
  * Runs the harness.
@@ -520,6 +573,11 @@ main(
 		if (error != 0)
 			status = 1;
 	}
+
+	/* Runs the WMI calls and the evaluations with arguments, in order. */
+	error = run_calls(&options);
+	if (error != 0)
+		status = 1;
 
 	/* Evaluates the identification objects of every device; the visitor never stops the walk. */
 	if (options.devices)
@@ -900,6 +958,12 @@ parse_arguments(
 	if (options->notified_count > OPTION_LIST_MAX || options->dynamic_count > OPTION_LIST_MAX)
 		return 1;
 
+	/* Refuses more WMI calls and evaluations with arguments than the harness keeps. */
+	if (options->call_count > OPTION_LIST_MAX) {
+		fprintf(stderr, "more than %u --wmi, --wmi-path, --wmi-query, --wmi-method and --eval-args options\n", OPTION_LIST_MAX);
+		return 1;
+	}
+
 	/* Refuses more hardware actions than the harness keeps. */
 	if (options->action_count > OPTION_LIST_MAX) {
 		fprintf(stderr, "more than %u --ec-ram, --gpe, --power-button and --ec-query options\n", OPTION_LIST_MAX);
@@ -1030,6 +1094,32 @@ record_option(
 		break;
 	case OPTION_PACKAGE_ARG:
 		options->package_arg = value;
+		break;
+	case OPTION_EC_SEQ:
+		/* Refuses a sequence the harness cannot read or keep. */
+		refused = parse_ec_sequence(value);
+		if (refused != 0)
+			fprintf(stderr, "--ec-seq needs ADDRESS=VALUE,VALUE...: %s\n", value);
+		break;
+	case OPTION_SMI_MEMORY:
+		/* Refuses a store the harness cannot read or keep. */
+		refused = parse_smi_store(value);
+		if (refused != 0)
+			fprintf(stderr, "--smi-memory needs ADDRESS=HEX: %s\n", value);
+		break;
+	case OPTION_WMI:
+	case OPTION_WMI_PATH:
+	case OPTION_WMI_QUERY:
+	case OPTION_WMI_METHOD:
+	case OPTION_EVAL_ARGS:
+		/* The calls run in the order given, after the evaluations. */
+		if (options->call_count < OPTION_LIST_MAX) {
+			options->calls[options->call_count] = value;
+			options->call_kinds[options->call_count] = kind;
+		}
+
+		/* Counts it, kept or not, so that too many refuse the command line. */
+		options->call_count++;
 		break;
 	default:
 		/* Keeps a table to load. */
@@ -1432,6 +1522,10 @@ release_all(void)
 	/* Frees the tables LoadTable might have loaded. */
 	for (index = 0; index < dynamic_table_count; index++)
 		free(dynamic_tables[index].data);
+
+	/* Frees the bytes --smi-memory stored at each SMI. */
+	for (index = 0; index < smi_store_count; index++)
+		free(smi_stores[index].bytes);
 }
 
 /* Reads a whole file into memory the caller frees. */
@@ -2179,6 +2273,8 @@ print_resource(
 		       resource->source);
 		return 0;
 	}
+
+	/* A GPIO interrupt connection. */
 	if (resource->kind == DRV_ACPI_RESOURCE_GPIO_INT) {
 		printf("RESOURCE gpio-int pin=0x%llX pins=%llu desc=0x%02X p=%u level=%u low=%u shared=%u wake=%u source=%s\n",
 		       (unsigned long long)resource->base,
@@ -2389,5 +2485,168 @@ check_package_arg(
 	drv_acpi_object_release(result);
 
 	/* Succeeded: the method saw the package. */
+	return 0;
+}
+
+/* Records the values successive EC reads of a byte take: hex ADDRESS=VALUE,VALUE... */
+static int
+parse_ec_sequence(
+	const char *text)
+{
+	uint8_t values[64];
+	unsigned long address;
+	unsigned long value;
+	unsigned count;
+	const char *cursor;
+	char *end;
+	int error;
+
+	/* The address and its equals sign. */
+	address = strtoul(text, &end, 16);
+	if (end == text || *end != '=' || address > 0xffU)
+		return 1;
+
+	/* The values, separated by commas. */
+	count = 0;
+	cursor = end + 1;
+	for (;;) {
+		/* Reads one value. */
+		value = strtoul(cursor, &end, 16);
+		if (end == cursor || value > 0xffU || count >= sizeof(values))
+			return 1;
+		values[count] = (uint8_t)value;
+		count++;
+
+		/* Stops at the end, goes on after a comma. */
+		if (*end == '\0')
+			break;
+		if (*end != ',')
+			return 1;
+		cursor = end + 1;
+	}
+
+	/* Gives the byte its sequence. */
+	error = hardware_ec_sequence((uint8_t)address, values, count);
+	if (error != 0)
+		return 1;
+
+	/* Succeeded: the reads take the values. */
+	return 0;
+}
+
+/* Records bytes to store in system memory at each SMI: hex ADDRESS=HEX. */
+static int
+parse_smi_store(
+	const char *text)
+{
+	struct smi_store *store;
+	unsigned long long address;
+	char pair[3];
+	char *end;
+	size_t digits;
+	size_t index;
+
+	/* Refuses a store past the room. */
+	if (smi_store_count >= OPTION_LIST_MAX)
+		return 1;
+
+	/* The address and its equals sign, then an even number of digits. */
+	address = strtoull(text, &end, 16);
+	if (end == text || *end != '=')
+		return 1;
+	digits = strlen(end + 1);
+	if (digits == 0 || digits % 2U != 0U)
+		return 1;
+
+	/* Allocates the bytes. */
+	store = &smi_stores[smi_store_count];
+	store->bytes = malloc(digits / 2U);
+	if (store->bytes == NULL)
+		return 1;
+
+	/* Reads each pair. */
+	pair[2] = '\0';
+	for (index = 0; index < digits / 2U; index++) {
+		pair[0] = end[1 + index * 2U];
+		pair[1] = end[2 + index * 2U];
+		store->bytes[index] = (uint8_t)strtoul(pair, NULL, 16);
+	}
+
+	/* Keeps the store. */
+	store->address = address;
+	store->length = digits / 2U;
+	smi_store_count++;
+
+	/* The first store installs the hook that runs them. */
+	hardware_smi_hook(smi_answer);
+
+	/* Succeeded: the bytes are stored at each SMI. */
+	return 0;
+}
+
+/* Answers an SMI as firmware would: stores the --smi-memory bytes in system memory. */
+static void
+smi_answer(
+	uint8_t command)
+{
+	struct smi_store *store;
+	uint8_t *byte;
+	unsigned index;
+	size_t offset;
+
+	UNUSED_PARAMETER(command);
+
+	/* Stores every requested run of bytes. */
+	for (index = 0; index < smi_store_count; index++) {
+		store = &smi_stores[index];
+		for (offset = 0; offset < store->length; offset++) {
+			byte = page_byte(DRV_ACPI_SPACE_SYSTEM_MEMORY, store->address + offset);
+			if (byte != NULL)
+				*byte = store->bytes[offset];
+		}
+	}
+}
+
+/* Runs the WMI calls and the evaluations with arguments, in the order given. */
+static int
+run_calls(
+	const struct harness_options *options)
+{
+	unsigned index;
+	int failed;
+	int error;
+
+	/* Runs each call; a failed one makes the outcome a failure and the others still run. */
+	failed = 0;
+	for (index = 0; index < options->call_count; index++) {
+		/* Runs the call by its kind. */
+		switch (options->call_kinds[index]) {
+		case OPTION_WMI:
+			error = host_wmi_attach();
+			break;
+		case OPTION_WMI_PATH:
+			error = host_wmi_attach_path(options->calls[index]);
+			break;
+		case OPTION_WMI_QUERY:
+			error = host_wmi_query(options->calls[index]);
+			break;
+		case OPTION_WMI_METHOD:
+			error = host_wmi_method(options->calls[index]);
+			break;
+		default:
+			error = host_eval_args(options->calls[index]);
+			break;
+		}
+
+		/* Remembers a failure. */
+		if (error != 0)
+			failed = 1;
+	}
+
+	/* Reports a failed call. */
+	if (failed)
+		return 1;
+
+	/* Succeeded: every call ran. */
 	return 0;
 }

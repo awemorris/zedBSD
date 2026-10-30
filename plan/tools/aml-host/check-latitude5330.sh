@@ -90,7 +90,8 @@ if [ -x "$clang" ] && [ -n "$budget" ]; then
 	sources="$sources $repo/src/drivers/acpi/acpi-tables.c $repo/src/drivers/acpi/acpi-event.c"
 	sources="$sources $repo/src/drivers/acpi/acpi-ec.c $repo/src/drivers/acpi/acpi-text.c"
 	sources="$sources $repo/src/drivers/acpi/acpi-resource.c $repo/plan/tools/aml-host/aml-host.c"
-	sources="$sources $repo/plan/tools/aml-host/aml-host-hardware.c"
+	sources="$sources $repo/plan/tools/aml-host/aml-host-hardware.c $repo/plan/tools/aml-host/aml-host-wmi.c"
+	sources="$sources $repo/src/drivers/acpi/acpi-wmi.c $repo/src/drivers/acpi/acpi-wmi-table.c"
 	"$clang" -std=gnu11 -Os -flto -fuse-ld=lld -B"$repo/build/llvm/bin" --target=x86_64-linux-gnu \
 	    -mno-red-zone -fno-stack-protector -fno-asynchronous-unwind-tables \
 	    -I"$repo/include" -I"$repo/src" -o "$out/aml-host-lto" $sources
