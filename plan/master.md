@@ -30,7 +30,7 @@
 予定（ユーザーの決定、各 ws.md）: WS326 の後に WS318（すぐ）と WS329（H.264 encoder）、WS329 の後に WS330（H.265）。WS315 の後に WS221 と WS299。WS328 は WS074 と調整してから p001。
 **次のセッションの始めにする事（2026-10-30 ユーザー）**:
 1. [BUG-363](bugs/BUG-363.md)（image に /etc/hosts が無い）に取り組む（ユーザー「BUG-363は、次回のセッション開始時に取り組むようにスケジュールしておいてください。」）。
-2. P3 を再起動し WS315 p006 の同時の send の退行を解決（ユーザー「再開時に同時sendを解決しましょう。」）。
+2. WS315 p006 の同時の send の退行: P3 を 2026-10-30 に q1702-i01 で再起動済み（強制終了に備え phase006/phase.md の「引き継ぎ」を測りごとに更新）。止まっていれば同じ worktree で再起動。
 3. [WS250](ws250/ws.md) の QEMU の起動の回帰を流して completed に（ユーザー「WS250は流してよいです。」。fault の app・isolate の道は Future Work へ）。
 4. ユーザーに [WS309 p015](ws309/phase015/phase.md) の「要る判断」1〜4 を聞く（ユーザー「WS309の判断は、次回セッション開始時に聞いてくれるように記録してください。」。聞く前に AGENTS.md §3 の前置き: WS の番号と説明・状態・決まっていない事・用語の説明）。
 5. 上の表の担当（P1・P2・P4・P5）と WS326 の Sonnet（p015・p017）を再開。
@@ -114,7 +114,7 @@ main に未 merge の branch は [registry](agents/registry.md) の試験待ち�
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-364 · q1702 · WS331 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-364 · q1703 · WS331 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
