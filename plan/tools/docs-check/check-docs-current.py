@@ -3,7 +3,7 @@
 
 Run with python3 -I from anywhere:
 
-  python3 -I plan/ws009/tests/check-docs-current.py [REPOSITORY_ROOT]
+  python3 -I plan/tools/docs-check/check-docs-current.py [REPOSITORY_ROOT]
 
 REPOSITORY_ROOT defaults to ".".  Every value that a document must agree with
 is read from the source (usage strings, headers, Makefile, version files,
@@ -32,8 +32,8 @@ Checked:
   ZEDBSD_VARIANTS_amd64_pcat in the Makefile has a table row that starts with
   its backquoted name; every amd64 variant label of tools/menuconfig.py is in
   backquotes; the Noct tag, archive size and SHA-256, and the version as
-  v<version>; the LLVM version and cache tag; the sysroot directories and
-  the Target Noct row.
+  v<version>; the LLVM version, cache tag and cache asset name; the sysroot
+  directories and the Target Noct row.
 * Status: every .md under docs/ except docs/agent/ and the release texts
   docs/release/zedbsd-*.md has a line starting "Status: " in its first 12
   lines; none of them contains ".internal/".
@@ -242,7 +242,8 @@ def check_build(root, noct):
                  "Noct release (ZEDBSD_NOCT_VERSION)")
     if llvm_text is not None:
         llvm = make_vars(llvm_text)
-        for key in ("ZEDBSD_LLVM_VERSION", "ZEDBSD_LLVM_CACHE_TAG"):
+        for key in ("ZEDBSD_LLVM_VERSION", "ZEDBSD_LLVM_CACHE_TAG",
+                    "ZEDBSD_LLVM_CACHE_ASSET"):
             if key in llvm:
                 need(rel, doc, llvm[key], key)
             else:

@@ -55,8 +55,11 @@ step() {
 boot_one() {
 	local variant=$1 mode=$2 image=$out/hdd-$variant.img
 	# BOOT_TEST_WORK stays the tool's default (a new directory under TMPDIR):
-	# the QMP socket's path must be shorter than 108 bytes.
-	OUTPUT=$out/boot-$variant-$mode-$stamp BOOT_MODE=$mode BOOT_TIMEOUT=300 \
+	# the QMP socket's path must be shorter than 108 bytes.  KERNEL names the
+	# 64-bit vmunix the image carries: boot-test.sh's bios-ide picks
+	# qemu-system-x86_64 from it, and qemu-system-i386 when no kernel lies
+	# beside the image copy (which then stops at "Booting from Hard Disk...").
+	KERNEL=$src/build/amd64/vmunix OUTPUT=$out/boot-$variant-$mode-$stamp BOOT_MODE=$mode BOOT_TIMEOUT=300 \
 		timeout 600 "$src/plan/tools/boot-test.sh" "$image" \
 		>"$logs/boot-$variant-$mode-$stamp.log" 2>&1
 	say "boot $variant $mode: exit $? (PNG under $out/boot-$variant-$mode-$stamp)"

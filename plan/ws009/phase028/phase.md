@@ -2,7 +2,7 @@
 
 # ws009-p028: clean な tree からの build と amd64 QEMU の boot の再現、互換の主張の照合（案 D）
 
-Status: in-progress（2026-10-30 P1。DOC-T60 済み。build・boot は native の image まで、boot の判定は未、ラップアップで停止）
+Status: in-progress（2026-10-30 P7。終わりの条件を満たした: clean tree の 4 variant の build と 5 つの boot が画面の login: まで、DOC-T60 済み。cleared は Q1 が決める）
 Parent: [WS009](../ws.md)
 Approval: 2026-10-30 ユーザー「WS009、WS296・WS297は標準廉価実装手順を適用してphaseを作り替え、今から実行してOKです。ただ、1 WSずつ実施します。」。2026-10-30 Q1: 案 D は P1 が実行、QEMU は P1 専用の名前・port・directory で流してよい。
 実行の担当: Opus（P1）
@@ -90,16 +90,57 @@ script `plan/ws009/tests/p028-reproduce.sh`（初版 04ff4da4e、boot の直し�
 
 注意（次の担当へ）: menu の既定は `ZEDBSD_GRAPHICAL_LOGIN := y`。boot-test.sh の既定の pattern は text の `login:` なので、画面が greeter なら pattern が合わない可能性がある。その時は PNG（`OUTPUT/login.png`）を Read で見て、文書（build-from-source.md の「The initial success marker … followed by `login:`」）と menu の既定の食い違いとして記録する（graphical の既定で text の `login:` を成功の印と書くのは文書の誤りの候補）。
 
-### 次の 1 手
+### build と boot の再現（2026-10-30 22:47〜23:12 P7、q1725-i01、基点 main 2596260f4）
+
+P1 の image は旧 main（04ff4da4e）の物なので使わず、今の HEAD 2596260f4 で clean tree から全部作り直した。
 
 ```sh
-cd /home/awe/zedBSD-worktrees/p1-ws009r   # main に ff してから
-P028_BOOT_ONLY=/home/awe/zedBSD-worktrees/p1-ws009r/build/tmp/p028-20261030-110805 timeout 900 plan/ws009/tests/p028-reproduce.sh native
-# その後、残りの variant を新しい run で（build から）:
-timeout 36000 plan/ws009/tests/p028-reproduce.sh hybrid uefi bios   # native も要るなら引数なし
+cd /home/awe/zedBSD-worktrees/p7-ws009
+flock -w 3600 /tmp/zedbsd-image-build.lock timeout 14400 plan/ws009/tests/p028-reproduce.sh          # native hybrid uefi bios
+P028_BOOT_ONLY=$PWD/build/tmp/p028-20261030-224755 timeout 1500 plan/ws009/tests/p028-reproduce.sh hybrid bios   # script の直しの後、BIOS の boot だけ
 ```
 
-消す物（Q1 へ、p028 の後）: `/home/awe/zedBSD-worktrees/p1-ws009r/build/tmp/p028-20261030-110805/`（約 4.5 GB、clean tree と image）、`build/tmp/p028-run.out`。
+出力 `/home/awe/zedBSD-worktrees/p7-ws009/build/tmp/p028-20261030-224755/`（`src/` は commit 2596260f4 の git archive。共有の llvm・llvm-source・llvm-build・NoctLang・host-noct-state へ読み取り専用の symlink、`make toolchain-cache`・`make -j16 toolchain` は再現していない（Q1 の判断 (a)）。それ以外の sysroot・firmware・image は tree の中で作った）。
+
+| step | 結果 |
+| --- | --- |
+| `tools/menuconfig.py --output config.mk --defaults` | exit 0（`ZEDBSD_PLATFORM := amd64`、`ZEDBSD_VARIANT := native`、`ZEDBSD_GRAPHICAL_BOOT := y`、`ZEDBSD_GRAPHICAL_LOGIN := y`） |
+| `make help`・`make list-targets` | exit 0。文書の target（disk-image・vmunix・rootfs・world・bootloader・run・download・toolchain-cache・toolchain・menuconfig）は全部 help か list-targets にある |
+| `yes \| make firmware-licenses` | exit 0 |
+| `make -j16 sysroot-amd64` | exit 0（22:49:13） |
+| `make -j16 disk-image` native・hybrid・uefi・bios | 全部 exit 0（22:50:27・22:53:38・23:01:56・23:06:35）。image 2,485,125,120・585,105,408・584,073,728・516,947,968 bytes。native の log の warning は host の perl の locale 258 行と third-party の OpenSSL の 15 件だけ（zedBSD の code の warning 0）。他の 3 つは 0 |
+| boot native（uefi-nvme、OVMF） | PASS、画面に `login:` |
+| boot hybrid（uefi-nvme） | PASS |
+| boot hybrid（bios-ide、SeaBIOS） | 1 回目は「Booting from Hard Disk...」で止まり FAIL。原因は script: image の写しの横に vmunix が無いので boot-test.sh が qemu-system-i386 を選んだ（tool の説明の通り、64 bit の kernel は i386 の QEMU で止まる）。script に `KERNEL=$src/build/amd64/vmunix` を足して 2 回目 PASS |
+| boot uefi（uefi-nvme） | PASS |
+| boot bios（bios-ide） | 1 回目は同じ script の誤りで FAIL、2 回目 PASS |
+
+PNG（Q1 がユーザーに見せる）: `build/review/p028-boot-native-uefi-nvme.png`・`p028-boot-hybrid-uefi-nvme.png`・`p028-boot-hybrid-bios-ide.png`・`p028-boot-uefi-uefi-nvme.png`・`p028-boot-bios-bios-ide.png`（worktree の中、元は出力の `boot-*/login.png`）。
+どの画面も greeter が「there is no greeter or no display」（native）か「greeter ended」で終わり、console の `login:` が出た。
+
+未実施: 否定の側（`uefi` を SeaBIOS で、`bios` を OVMF で起動しないこと、`native` を SeaBIOS で起動しないこと）、`make run` そのもの（boot-test.sh の uefi-nvme・bios-ide は同じ firmware・bus の組で、command line は同じでない）、i386 PC/AT・PC-98（範囲の外、過去の WS010 の証拠のまま）、toolchain の 2 手。
+
+観察（直していない、Q1 へ）: BIOS の 2 つの起動で kernel が「boot: ignored 1 unknown parameter; first=video」と出す（loader の cfg の `video=640x480` を kernel が知らない）。起動には影響が無い。
+
+### 文書の直し（docs/howto/build-from-source.md）
+
+今の main（WS331・WS332・WS313・WS307 の後）と照らした。docs/ の中の source の path（217 個）は全部実在した（外部の URL の 2 つを除く）。KERNEL_CLOCK_HZ・efiboot の古い記述は docs/ に無い。直した所:
+
+| 所 | 前 | 今の source | 直し |
+| --- | --- | --- | --- |
+| Status の行 | 2026-10-09 | — | 2026-10-30 |
+| menu の CPU / Board | x86_64 か arm64（Raspberry Pi 4） | `MENU_CPUS`: x86_64、arm64（RPi 4・ODROID-C5）、i386（PC-9800・PC/AT）、RISC-V 64（virt・VisionFive 2）、RISC-V 32（virt） | 一覧を書いた |
+| main menu の項 | Drivers・Retro が無い | `tui()` の `every_entry` に Drivers・Retro、Desktop は desktop の build される CPU だけ | 2 行足し、Desktop に条件 |
+| menu に無い設定 | 「kernel's options and drivers」「the X11 programs」 | drivers は Drivers の menu、Retro の X11 は menu | 「kernel's options」「X11 programs other than Retro's」 |
+| i386 | 「no longer offered by the menu」 | menu の CPU に i386 | CPU / Board で選ぶ、に |
+| QEMU | 「maintained six-cell runner above」（文書に無い）、amd64 の明示の command が pc・IDE（native の既定と違う） | `platform/amd64/run.mk`: native は q35・OVMF・NVMe | native・uefi の OVMF の command と hybrid・bios の SeaBIOS の command に分けた。Diagnostics の「maintained Variant runner」も OVMF の launch に |
+| 成功の印 | init の後に `login:` | menu の既定は graphical login | greeter が display を見つけないと終わり console の `login:` になる、を足した（画面で確かめた振る舞い） |
+
+照合: `python3 -I plan/tools/docs-check/check-docs-current.py .` PASS（56 items）、link の検査 docs/reference・architecture・howto・release PASS 1051。
+
+### 消す物（Q1 へ）
+
+`/home/awe/zedBSD-worktrees/p7-ws009/build/tmp/p028-20261030-224755/`（clean tree と image 4 つ、約 5.0 GB）、P1 の `/home/awe/zedBSD-worktrees/p1-ws009r/build/tmp/p028-20261030-110805/`・`build/tmp/p028-run.out`。
 
 ## 引き継ぎ: WS296 の調べ（2026-10-30 P1、q1705-i01、commit はしていない。WS009 の completed の後に WS296 の設計として書く）
 
