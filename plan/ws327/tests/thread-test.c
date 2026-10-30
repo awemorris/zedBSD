@@ -680,15 +680,16 @@ test_static_and_limits(void)
 {
 	static const pthread_mutex_t system_mutex = PTHREAD_MUTEX_INITIALIZER;
 	static const pthread_once_t system_once = PTHREAD_ONCE_INIT;
-	static const unsigned char zero[sizeof(pthread_mutex_t)];
+	static const unsigned char zero_mutex[sizeof(pthread_mutex_t)];
+	static const unsigned char zero_once[sizeof(pthread_once_t)];
 	struct kl_thread_options options;
 	struct kl_thread *thread;
 	atomic_int holding;
 	int error;
 
 	/* The system's static initializers are all zero bytes, which KL_MUTEX_INIT and KL_ONCE_INIT give. */
-	test_check(memcmp(&system_mutex, zero, sizeof(system_mutex)) == 0, "static-mutex-zero");
-	test_check(memcmp(&system_once, zero, sizeof(system_once)) == 0, "static-once-zero");
+	test_check(memcmp(&system_mutex, zero_mutex, sizeof(system_mutex)) == 0, "static-mutex-zero");
+	test_check(memcmp(&system_once, zero_once, sizeof(system_once)) == 0, "static-once-zero");
 
 	/* The static mutex: free, then held by another thread (kl_mutex_try fails), then free again. */
 	error = kl_mutex_try(&test_static_lock);

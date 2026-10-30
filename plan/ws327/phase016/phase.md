@@ -144,7 +144,20 @@ Q1 の判断（2026-10-30）: S7 は直す、S9 は p017 で header の comment 
   （`_WIN32_WINNT=0x0A00`、`SetThreadDescription`・`inet_pton`・`WSA_FLAG_NO_HANDLE_INHERIT`）、libkeiland の DLL は thread の生きている間に
   unload しない（FLS の callback が消えた code を指す）。WS327 design §5.4 W5・S8」
 
-（以下 QEMU・FreeBSD は続き）
+### 3b. FreeBSD（2026-10-30 10:45〜10:52、QEMU+KVM、FreeBSD 15.1-RELEASE-p6 amd64）
+
+`GUEST_DIR=<P1 の build/ws309/freebsd/guest>（読み取り専用の base、overlay は自分の build/ws327-freebsd-run）`、`SSH_PORT=2247` で
+`sh plan/ws327/tests/freebsd-layers.sh build/ws327-p016-freebsd2`（新しい script: backend-test.sh で native の build と backend の試験、
+その後 guest の clang で thread-test・socket-test を libkeiland と link した物と、層の source を ASan・UBSan で入れた物）:
+- backend-test: `PASS build`・`PASS build-warnings (0)`・install・audit・host-seat-freebsd・host-session・host-power・sync-rejected・
+  dmabuf-export-rejected 全て PASS（`build/native/lib/libkeiland.so`・`bin/settings`・`libexec/keiland-ime` が build された）。
+- `thread-lib: status=0 pass=27`・`thread-asan: pass=27`・`socket-lib: pass=53`・`socket-asan: pass=53`、fail 0、`ws327-freebsd: PASS`。
+- 1 回目（build/ws327-p016-freebsd）は試験の側の誤りで FAIL: (a) `thread-test.c` の静的な初期値の比べで 0 の配列を
+  `sizeof(pthread_mutex_t)` で作り `pthread_once_t`（FreeBSD では 16 byte、mutex は 8 byte の pointer）と比べて ASan の
+  global-buffer-overflow → 配列を型ごとに分けた（Linux の host-test.sh の thread 6 build も PASS のまま）。(b) libkeiland の link の試験で
+  libtruetype.so が見つからない → build の全ての lib の directory を LD_LIBRARY_PATH に。層の実装の直しは無い。
+
+（以下 QEMU は続き）
 
 ## Q1 から（2026-10-30）: 移行で壊れた閉じた WS の試験
 

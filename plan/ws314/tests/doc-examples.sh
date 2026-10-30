@@ -63,7 +63,8 @@ if [ "${1:-}" = guest ]; then
 	[ $# -gt 0 ] && shift
 	only=" $* "
 	runtime=$PWD/build/p009-run
-	sysroot=$build/sysroot
+	# The sysroot is the worktree's build/amd64/sysroot whatever BUILD is (the Makefile's ZEDBSD_TARGET_SYSROOT).
+	sysroot=build/amd64/sysroot
 	clang=build/llvm/bin/clang
 	export GUEST_RUNTIME="$runtime"
 	guest() { timeout 120 python3 plan/tools/guest/guest.py run "$1" 2>&1 </dev/null; }
@@ -169,6 +170,7 @@ EOF
 	# 08-language leaves the desktop in Japanese, and 07-services-ja is 07-services started after it.
 	mkdir -p build/review "$out/shots"
 	for run in 01-app 02-window 03-titlebar 04-counter 04-counter-parts 05-widgets 06-menu 07-services 08-worker \
+		08-network 08-network-stop:08-network 08-network-close:08-network \
 		09-sort 09-shell 10-instance 08-language 07-services-ja:07-services; do
 		name=${run%%:*}
 		program=${run#*:}
@@ -199,6 +201,21 @@ EOF
 		06-menu) keys '<ctrl-equal>' '<ctrl-equal>'; sleep 2; pointer move 640 400 sleep 300 right-down sleep 80 right-up sleep 1200 ;;
 		07-services) pointer move 670 542 sleep 300 down sleep 80 up sleep 1000 move 476 542 sleep 300 down sleep 80 up sleep 6000 ;;
 		08-worker) pointer move 492 528 sleep 300 down sleep 80 up sleep 2500 ;;
+		# 08-network: Start, and the series to its end; then Start and Stop at once (its window as 08-worker's).
+		08-network) pointer move 492 528 sleep 300 down sleep 80 up sleep 4000 ;;
+		08-network-stop) pointer move 492 528 sleep 300 down sleep 80 up sleep 500 move 600 528 sleep 100 down sleep 80 up sleep 1500 ;;
+		# 08-network-close: Start, then the window's close button while the round trips run (its place from the
+		# compositor's last KWL MAP line, the button 26 from the body's right and 30 above it); the program ends by
+		# itself (network_finish joins the thread), so no process is left when the picture is taken.
+		08-network-close) pointer move 492 528 sleep 300 down sleep 80 up sleep 500
+			map=$(guest "grep 'KWL MAP client=' /tmp/zdesktop.log | tail -n 1")
+			map_x=$(printf '%s\n' "$map" | sed -n 's/.* x=\(-\{0,1\}[0-9]*\) y=.*/\1/p')
+			map_y=$(printf '%s\n' "$map" | sed -n 's/.* y=\(-\{0,1\}[0-9]*\).*/\1/p')
+			printf '%s\n' "$map" > "$out/$name.map.txt"
+			if [ -n "$map_x" ] && [ -n "$map_y" ]; then
+				pointer move $((map_x + 440 - 26)) $((map_y - 30)) sleep 300 down sleep 80 up sleep 2500
+			fi
+			guest "ps -A -o pid,args | grep -c '[/]tmp/08-network'; cat /tmp/$name.out" > "$out/$name.alive.txt" ;;
 		09-sort) pointer move 492 558 sleep 300 down sleep 80 up sleep 2000 ;;
 		# 09-shell: a command, then a password read (zedBSD's sh edits its own prompt without the terminal's echo and
 		# line mode; a read waits with the modes stty set).
