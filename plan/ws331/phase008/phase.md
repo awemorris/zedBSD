@@ -58,6 +58,6 @@ s905x5m の driver に直書きは無かった。`kern_pmem_to_kernel` などの
 
 - Pi 5・ODROID-C5 は build だけ（実機・QEMU なし）。Pi 5 の SD の 200 MHz が handoff 経由で効く事は code の読みだけ。
 - overlayfs の `kern_calloc`（約 3 MiB）が amd64 以外の port の起動で取れる事は raspi4b の起動だけで確かめた（overlay の mount が通ったかは見ていない）。他の port は p009 の QEMU の起動で見る。
-- `src/hal/arm64/watch.c`（もとから arm64 の共通）は HVS（Pi 4 の compositor）の register と display list を直に扱う。board の hook（`arm64_bsp_watch_compositor`）で HVS の有無を受けるが、HVS の形は共通の file にある。今回の移動の対象の外で、残した（Pi の側へ移すなら別に）。
+- `src/hal/arm64/watch.c` の HVS の形は、Q1 の指示で 0e4a71447 で Pi 4 の hook（`bsp-rpi4/watch-hvs.c`）へ移した（記録は [p009](../phase009/phase.md) の「p008 の追加」）。
 - `bsp-s905x5m-common/fdt.c` は board の compatible（"hardkernel,odroid-c5"）を SoC の "amlogic,s7d" と並べて持つ。S7D の tree なら通るので、別の board でもそのまま使える。
 - 判定は Q1。
