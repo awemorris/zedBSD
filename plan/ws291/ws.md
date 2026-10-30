@@ -279,3 +279,4 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 - 2026-10-30 ユーザー（原文）「PowerVRはLinuxではドライバがぜんぜんダメで、実用水準ではないです。Linuxで、の定義にこだわらなくていいです。指示通り、LinuxでのRTX 2070での50fpsとのきのモデル規模と、RTX 2070とのカタログスペック比で、50fpsになるべきモデル規模を決定してください。」 → 決定（Q1）: 基準は Linux（NVK）の RTX 2070 の scene-5000（qs40 × 5000、1920x1080、50.1 fps）。カタログの FP32 の比（RTX 2070 約 7.46 TFLOPS 対 VF2 の BXE-4-32 MC1 の 594 MHz（P3 が dmesg で確かめた）で 32 × 594 MHz = 19.0 GFLOPS、約 392 倍）で割り、**qs40 × 13（copies 13、1920x1080）で 50 fps 以上**を p020 の受け入れにする。
 
 - 2026-10-30 ユーザーから、Pi 5 の V3D の host 試験のために P4 に plan/ws141/temp/ の利用（Mesa の照合用の file を plan/ws141/temp/mesa/ に置き、試験を compile・実行する）を許可する、という趣旨の指示を受けた（q1730 で P4 を起動し直した）。
+- 2026-10-30 ユーザーから、5330 は Linux も起動できるので、p022（i915）は RTX の比ではなく 5330 の Linux（ANV）の実測の性能をゴールにする、という趣旨の指示を受けた。→ RDNA・NVIDIA と同じく、Linux で約 50 fps の qs40 の scene を決め、zedBSD がその scene で Linux 以上。

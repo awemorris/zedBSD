@@ -1,13 +1,13 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 23:35（Q1）
+最終更新: 2026-10-30 23:40（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS291](ws291/ws.md) | GPU の描画の速さ（Intel i915、5330 の Alder Lake の段） | 起動（q1731）。p022: mview が動くかの確かめ、EU と clock を確かめて目標の copies を確定 | 今の fps → 改善（WS313 の ODROID-C5 は実機の結果待ちのまま） |
+| P1 | [WS291](ws291/ws.md) | GPU の描画の速さ（Intel i915、5330 の Alder Lake の段） | 起動（q1731）。p022: main の kernel の起動と mview の確かめ、5330 の Linux（ANV）で約 50 fps の scene を決める | 今の fps → 改善（WS313 の ODROID-C5 は実機の結果待ちのまま） |
 | P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 起動（q1726）。p020: qs40 × 13・1920x1080 を 26.6 fps から 50 fps 以上へ | profile（TA と 3D の分け、解像度に比例する費用、頂点の側）→ 改善 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 起動（q1728）。p013: big-1000（52 対 NVK 136 fps）・subs-1000（10.9 対 75.4 fps）の CPU の費用 | profile → nvrtx の record・submit の改善 |
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ（Raspberry Pi 5 の V3D 7.1 の段） | 起動し直し（q1730、plan/ws141/temp の許可）。driver の欠け（indexed・instance・mip・直の fetch）の実装と host 試験。試験の image は p4-ws291pi/build/ws291-p021/rpi5-p021.img | 実機の起動の後に clock を確かめて目標を確定 → 改善 |
@@ -55,7 +55,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | p013 | draw・submit の多い bench の CPU の費用を NVK 並みに | in-progress（P3） |
 | p012 | 50 fps を明らかに超える改善 | uncleared（2026-10-30 P7: 頂点の側の固定機能の hardware の限界、NVK と同等 49.0 fps、上限 約 51.3。温度の差なし） |
 | p006・p008・p009 | RDNA の残り | 止め（RX 5600 XT が抜かれて実機なし） |
-| p022 | Intel i915（5330）の model 50 fps（qs40 × スペックの比） | in-progress（P1） |
+| p022 | Intel i915（5330）: Linux（ANV）で約 50 fps の scene を zedBSD で Linux 以上に（ユーザーの指示で実測の Linux が基準） | in-progress（P1） |
 | p021 | Raspberry Pi 5 の model 50 fps（qs40 × スペックの比） | in-progress（P4） |
 | p020 | PowerVR の model 50 fps（qs40 × 13） | in-progress（26.6 fps、2026-10-30） |
 
