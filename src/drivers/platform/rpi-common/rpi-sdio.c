@@ -22,7 +22,7 @@
  * cases the slot is refused before any register is touched.
  */
 
-#include "drivers/platform/rpi4/rpi4-sdio.h"
+#include "drivers/platform/rpi-common/rpi-sdio.h"
 #include "drivers/platform/rpi4/rpi4-board.h"
 #include <kern/klog.h>
 #include <uapi/errno.h>
@@ -129,26 +129,26 @@
 #define GPIO_FUNCTION_CODE_MAX		7U
 
 static int node_compatible(const struct drv_fdt *fdt, uint32_t node, const char *name);
-static int describe_interrupt(const struct drv_fdt *fdt, uint32_t node, struct drv_rpi4_sdio_slot *slot);
-static int describe_pins(const struct drv_fdt *fdt, uint32_t node, struct drv_rpi4_sdio_slot *slot);
-static int ask_operating_condition(struct drv_rpi4_sdio_card *card, const struct drv_rpi4_sdio_waiter *waiter);
-static int address_card(struct drv_rpi4_sdio_card *card);
-static int read_common_registers(struct drv_rpi4_sdio_card *card);
-static int widen_bus(struct drv_rpi4_sdio_card *card);
-static void read_cis(struct drv_rpi4_sdio_card *card);
-static int send_command(struct drv_rpi4_sdio_card *card, unsigned index, uint32_t argument, enum drv_rpi4_sdio_response response, uint32_t *reply);
-static int io_direct(struct drv_rpi4_sdio_card *card, int write, unsigned function, uint32_t address, uint8_t in, uint8_t *out);
-static int block_size_address(struct drv_rpi4_sdio_card *card, unsigned function, uint32_t *address);
-static int wait_ms(const struct drv_rpi4_sdio_waiter *waiter, unsigned milliseconds);
+static int describe_interrupt(const struct drv_fdt *fdt, uint32_t node, struct drv_rpi_sdio_slot *slot);
+static int describe_pins(const struct drv_fdt *fdt, uint32_t node, struct drv_rpi_sdio_slot *slot);
+static int ask_operating_condition(struct drv_rpi_sdio_card *card, const struct drv_rpi_sdio_waiter *waiter);
+static int address_card(struct drv_rpi_sdio_card *card);
+static int read_common_registers(struct drv_rpi_sdio_card *card);
+static int widen_bus(struct drv_rpi_sdio_card *card);
+static void read_cis(struct drv_rpi_sdio_card *card);
+static int send_command(struct drv_rpi_sdio_card *card, unsigned index, uint32_t argument, enum drv_rpi_sdio_response response, uint32_t *reply);
+static int io_direct(struct drv_rpi_sdio_card *card, int write, unsigned function, uint32_t address, uint8_t in, uint8_t *out);
+static int block_size_address(struct drv_rpi_sdio_card *card, unsigned function, uint32_t *address);
+static int wait_ms(const struct drv_rpi_sdio_waiter *waiter, unsigned milliseconds);
 
 /*
  * Finds the Wi-Fi chip's SDIO slot in the device tree.
  */
 int
-drv_rpi4_sdio_describe_slot(
+drv_rpi_sdio_describe_slot(
 	const struct drv_fdt *fdt,
 	uintptr_t sd_base,
-	struct drv_rpi4_sdio_slot *slot)
+	struct drv_rpi_sdio_slot *slot)
 {
 	uint64_t size;
 	uint32_t chip;
@@ -198,7 +198,7 @@ drv_rpi4_sdio_describe_slot(
 		return EINVAL;
 
 	/* Refuses a register block smaller than the controller's. */
-	if (size < DRV_RPI4_SDIO_HOST_REGISTER_SPAN)
+	if (size < DRV_RPI_SDIO_HOST_REGISTER_SPAN)
 		return EINVAL;
 
 	/* Leaves the controller to the SD card driver that bound to it. */
@@ -221,9 +221,9 @@ drv_rpi4_sdio_describe_slot(
  * Decodes the answer to CMD5.
  */
 int
-drv_rpi4_sdio_decode_ocr(
+drv_rpi_sdio_decode_ocr(
 	uint32_t reply,
-	struct drv_rpi4_sdio_ocr *ocr)
+	struct drv_rpi_sdio_ocr *ocr)
 {
 	/* Refuses nowhere to put the answer. */
 	if (ocr == NULL)
@@ -253,7 +253,7 @@ drv_rpi4_sdio_decode_ocr(
  * Picks the windows of a card's I/O OCR that the 3.3 V bus offers.
  */
 int
-drv_rpi4_sdio_voltage_window(
+drv_rpi_sdio_voltage_window(
 	uint32_t voltages,
 	uint32_t *window)
 {
@@ -277,7 +277,7 @@ drv_rpi4_sdio_voltage_window(
  * Decodes the answer to CMD52.
  */
 int
-drv_rpi4_sdio_decode_r5(
+drv_rpi_sdio_decode_r5(
 	uint32_t reply,
 	uint8_t *data)
 {
@@ -300,10 +300,10 @@ drv_rpi4_sdio_decode_r5(
  * Walks a card information structure's tuple chain.
  */
 int
-drv_rpi4_sdio_parse_cis(
+drv_rpi_sdio_parse_cis(
 	const uint8_t *bytes,
 	size_t length,
-	struct drv_rpi4_sdio_cis *cis)
+	struct drv_rpi_sdio_cis *cis)
 {
 	size_t offset;
 	unsigned code;
@@ -376,10 +376,10 @@ drv_rpi4_sdio_parse_cis(
  * Brings a freshly powered card to the selected state and reads it.
  */
 int
-drv_rpi4_sdio_enumerate(
-	struct drv_rpi4_sdio_card *card,
-	struct drv_rpi4_sdio_host *host,
-	const struct drv_rpi4_sdio_waiter *waiter)
+drv_rpi_sdio_enumerate(
+	struct drv_rpi_sdio_card *card,
+	struct drv_rpi_sdio_host *host,
+	const struct drv_rpi_sdio_waiter *waiter)
 {
 	unsigned i;
 	int error;
@@ -401,7 +401,7 @@ drv_rpi4_sdio_enumerate(
 	card->cis.has_function0 = 0;
 	card->cis.function0_block_max = 0;
 	card->cis.speed_code = 0;
-	for (i = 0; i <= DRV_RPI4_SDIO_FUNCTION_MAX; i++)
+	for (i = 0; i <= DRV_RPI_SDIO_FUNCTION_MAX; i++)
 		card->block_size[i] = 0;
 
 	/* Agrees on the voltage and waits for the card's power-up. */
@@ -435,8 +435,8 @@ drv_rpi4_sdio_enumerate(
  * Reads one byte with CMD52.
  */
 int
-drv_rpi4_sdio_read_byte(
-	struct drv_rpi4_sdio_card *card,
+drv_rpi_sdio_read_byte(
+	struct drv_rpi_sdio_card *card,
 	unsigned function,
 	uint32_t address,
 	uint8_t *value)
@@ -460,8 +460,8 @@ drv_rpi4_sdio_read_byte(
  * Writes one byte with CMD52.
  */
 int
-drv_rpi4_sdio_write_byte(
-	struct drv_rpi4_sdio_card *card,
+drv_rpi_sdio_write_byte(
+	struct drv_rpi_sdio_card *card,
 	unsigned function,
 	uint32_t address,
 	uint8_t value)
@@ -481,16 +481,16 @@ drv_rpi4_sdio_write_byte(
  * Moves bytes of a function's space with CMD53.
  */
 int
-drv_rpi4_sdio_transfer(
-	struct drv_rpi4_sdio_card *card,
-	enum drv_rpi4_sdio_data direction,
+drv_rpi_sdio_transfer(
+	struct drv_rpi_sdio_card *card,
+	enum drv_rpi_sdio_data direction,
 	unsigned function,
 	uint32_t address,
 	int increment,
 	uint8_t *buffer,
 	size_t length)
 {
-	struct drv_rpi4_sdio_command command;
+	struct drv_rpi_sdio_command command;
 	uint32_t argument;
 	uint32_t count;
 	unsigned block_size;
@@ -500,7 +500,7 @@ drv_rpi4_sdio_transfer(
 	/* Refuses a missing card or buffer, nothing to move, or an unknown direction. */
 	if (card == NULL || buffer == NULL || length == 0)
 		return EINVAL;
-	if (direction != DRV_RPI4_SDIO_DATA_READ && direction != DRV_RPI4_SDIO_DATA_WRITE)
+	if (direction != DRV_RPI_SDIO_DATA_READ && direction != DRV_RPI_SDIO_DATA_WRITE)
 		return EINVAL;
 
 	/* Refuses a function the card does not have or an address beyond 17 bits. */
@@ -514,7 +514,7 @@ drv_rpi4_sdio_transfer(
 	argument |= address << IO_ADDRESS_SHIFT;
 	if (increment)
 		argument |= IO_INCREMENT;
-	if (direction == DRV_RPI4_SDIO_DATA_WRITE)
+	if (direction == DRV_RPI_SDIO_DATA_WRITE)
 		argument |= IO_WRITE;
 
 	/*
@@ -545,18 +545,18 @@ drv_rpi4_sdio_transfer(
 	/* Describes the command and its data. */
 	command.index = SDIO_CMD_IO_RW_EXTENDED;
 	command.argument = argument;
-	command.response = DRV_RPI4_SDIO_RESPONSE_SHORT;
+	command.response = DRV_RPI_SDIO_RESPONSE_SHORT;
 	command.data = direction;
 	command.buffer = buffer;
 	command.reply = 0;
 
 	/* Moves the bytes. */
-	error = drv_rpi4_sdio_host_command(card->host, &command);
+	error = drv_rpi_sdio_host_command(card->host, &command);
 	if (error != 0)
 		return error;
 
 	/* Refuses a transfer the card reports as failed. */
-	error = drv_rpi4_sdio_decode_r5(command.reply, &flags);
+	error = drv_rpi_sdio_decode_r5(command.reply, &flags);
 	if (error != 0)
 		return error;
 
@@ -568,10 +568,10 @@ drv_rpi4_sdio_transfer(
  * Enables a function and waits for it to report ready.
  */
 int
-drv_rpi4_sdio_enable_function(
-	struct drv_rpi4_sdio_card *card,
+drv_rpi_sdio_enable_function(
+	struct drv_rpi_sdio_card *card,
 	unsigned function,
-	const struct drv_rpi4_sdio_waiter *waiter,
+	const struct drv_rpi_sdio_waiter *waiter,
 	unsigned timeout_ms)
 {
 	uint8_t enable;
@@ -588,17 +588,17 @@ drv_rpi4_sdio_enable_function(
 	bit = (uint8_t)(1U << function);
 
 	/* Sets the function's bit in the I/O enable register, keeping the others. */
-	error = drv_rpi4_sdio_read_byte(card, 0, CCCR_IO_ENABLE, &enable);
+	error = drv_rpi_sdio_read_byte(card, 0, CCCR_IO_ENABLE, &enable);
 	if (error != 0)
 		return error;
-	error = drv_rpi4_sdio_write_byte(card, 0, CCCR_IO_ENABLE, (uint8_t)(enable | bit));
+	error = drv_rpi_sdio_write_byte(card, 0, CCCR_IO_ENABLE, (uint8_t)(enable | bit));
 	if (error != 0)
 		return error;
 
 	/* Waits for the function to report itself ready. */
 	for (waited = 0; waited <= timeout_ms; waited += READY_INTERVAL_MS) {
 		/* Finishes once the ready bit is up. */
-		error = drv_rpi4_sdio_read_byte(card, 0, CCCR_IO_READY, &ready);
+		error = drv_rpi_sdio_read_byte(card, 0, CCCR_IO_READY, &ready);
 		if (error != 0)
 			return error;
 		if ((ready & bit) != 0)
@@ -618,8 +618,8 @@ drv_rpi4_sdio_enable_function(
  * Disables a function.
  */
 int
-drv_rpi4_sdio_disable_function(
-	struct drv_rpi4_sdio_card *card,
+drv_rpi_sdio_disable_function(
+	struct drv_rpi_sdio_card *card,
 	unsigned function)
 {
 	uint8_t enable;
@@ -634,10 +634,10 @@ drv_rpi4_sdio_disable_function(
 	bit = (uint8_t)(1U << function);
 
 	/* Clears the function's bit in the I/O enable register, keeping the others. */
-	error = drv_rpi4_sdio_read_byte(card, 0, CCCR_IO_ENABLE, &enable);
+	error = drv_rpi_sdio_read_byte(card, 0, CCCR_IO_ENABLE, &enable);
 	if (error != 0)
 		return error;
-	error = drv_rpi4_sdio_write_byte(card, 0, CCCR_IO_ENABLE, (uint8_t)(enable & ~bit));
+	error = drv_rpi_sdio_write_byte(card, 0, CCCR_IO_ENABLE, (uint8_t)(enable & ~bit));
 	if (error != 0)
 		return error;
 
@@ -649,8 +649,8 @@ drv_rpi4_sdio_disable_function(
  * Sets a function's block size and reads it back.
  */
 int
-drv_rpi4_sdio_set_block_size(
-	struct drv_rpi4_sdio_card *card,
+drv_rpi_sdio_set_block_size(
+	struct drv_rpi_sdio_card *card,
 	unsigned function,
 	unsigned size)
 {
@@ -662,7 +662,7 @@ drv_rpi4_sdio_set_block_size(
 	/* Refuses a size outside 1 to 2048 bytes. */
 	if (card == NULL)
 		return EINVAL;
-	if (size == 0 || size > DRV_RPI4_SDIO_BLOCK_SIZE_MAX)
+	if (size == 0 || size > DRV_RPI_SDIO_BLOCK_SIZE_MAX)
 		return EINVAL;
 
 	/* Finds the function's block size register. */
@@ -671,18 +671,18 @@ drv_rpi4_sdio_set_block_size(
 		return error;
 
 	/* Writes the size, low byte first. */
-	error = drv_rpi4_sdio_write_byte(card, 0, address, (uint8_t)(size & 0xffU));
+	error = drv_rpi_sdio_write_byte(card, 0, address, (uint8_t)(size & 0xffU));
 	if (error != 0)
 		return error;
-	error = drv_rpi4_sdio_write_byte(card, 0, address + 1U, (uint8_t)(size >> 8));
+	error = drv_rpi_sdio_write_byte(card, 0, address + 1U, (uint8_t)(size >> 8));
 	if (error != 0)
 		return error;
 
 	/* Reads the size back. */
-	error = drv_rpi4_sdio_read_byte(card, 0, address, &low);
+	error = drv_rpi_sdio_read_byte(card, 0, address, &low);
 	if (error != 0)
 		return error;
-	error = drv_rpi4_sdio_read_byte(card, 0, address + 1U, &high);
+	error = drv_rpi_sdio_read_byte(card, 0, address + 1U, &high);
 	if (error != 0)
 		return error;
 
@@ -747,7 +747,7 @@ static int
 describe_interrupt(
 	const struct drv_fdt *fdt,
 	uint32_t node,
-	struct drv_rpi4_sdio_slot *slot)
+	struct drv_rpi_sdio_slot *slot)
 {
 	const uint8_t *value;
 	uint32_t length;
@@ -789,7 +789,7 @@ static int
 describe_pins(
 	const struct drv_fdt *fdt,
 	uint32_t node,
-	struct drv_rpi4_sdio_slot *slot)
+	struct drv_rpi_sdio_slot *slot)
 {
 	const uint8_t *value;
 	const uint8_t *pull_value;
@@ -816,12 +816,12 @@ describe_pins(
 	if (error != 0 || length == 0 || length % 4U != 0)
 		return EINVAL;
 	count = length / 4U;
-	if (count > DRV_RPI4_SDIO_SLOT_PIN_MAX)
+	if (count > DRV_RPI_SDIO_SLOT_PIN_MAX)
 		return EINVAL;
 	for (i = 0; i < count; i++) {
 		/* Refuses a pin the GPIO block does not have. */
 		cell = drv_fdt_cells_value(value, i, 1);
-		if (cell >= DRV_RPI4_GPIO_PIN_COUNT)
+		if (cell >= DRV_RPI_GPIO_PIN_COUNT)
 			return EINVAL;
 		slot->pins[i] = (unsigned)cell;
 	}
@@ -834,7 +834,7 @@ describe_pins(
 	cell = drv_fdt_cells_value(value, 0, 1);
 	if (cell > GPIO_FUNCTION_CODE_MAX)
 		return EINVAL;
-	slot->function = (enum drv_rpi4_gpio_function)cell;
+	slot->function = (enum drv_rpi_gpio_function)cell;
 
 	/* Reads the pulls: one for every pin, or one for all. */
 	error = drv_fdt_property(fdt, group, "brcm,pull", &pull_value, &pull_length);
@@ -850,7 +850,7 @@ describe_pins(
 			cell = drv_fdt_cells_value(pull_value, i, 1);
 
 		/* Converts the tree's number, refusing one it does not define. */
-		error = drv_rpi4_gpio_pull_from_dt((uint32_t)cell, &slot->pulls[i]);
+		error = drv_rpi_gpio_pull_from_dt((uint32_t)cell, &slot->pulls[i]);
 		if (error != 0)
 			return EINVAL;
 	}
@@ -865,8 +865,8 @@ describe_pins(
  */
 static int
 ask_operating_condition(
-	struct drv_rpi4_sdio_card *card,
-	const struct drv_rpi4_sdio_waiter *waiter)
+	struct drv_rpi_sdio_card *card,
+	const struct drv_rpi_sdio_waiter *waiter)
 {
 	uint32_t reply;
 	uint32_t window;
@@ -881,7 +881,7 @@ ask_operating_condition(
 	reply = 0;
 	for (waited = 0; waited <= CMD5_TIMEOUT_MS; waited += CMD5_INTERVAL_MS) {
 		/* Stops at an answer or at an error other than silence. */
-		error = send_command(card, SDIO_CMD_IO_SEND_OP_COND, 0, DRV_RPI4_SDIO_RESPONSE_SHORT_UNCHECKED, &reply);
+		error = send_command(card, SDIO_CMD_IO_SEND_OP_COND, 0, DRV_RPI_SDIO_RESPONSE_SHORT_UNCHECKED, &reply);
 		if (error != ETIMEDOUT)
 			break;
 
@@ -899,14 +899,14 @@ ask_operating_condition(
 	}
 
 	/* Refuses a card without I/O functions: it is not an SDIO card. */
-	(void)drv_rpi4_sdio_decode_ocr(reply, &card->ocr);
+	(void)drv_rpi_sdio_decode_ocr(reply, &card->ocr);
 	if (card->ocr.function_count == 0) {
 		kern_logf("rpi4-sdio: card without I/O functions (R4 %08x)\n", reply);
 		return ENODEV;
 	}
 
 	/* Picks the windows around 3.3 V. */
-	error = drv_rpi4_sdio_voltage_window(card->ocr.voltages, &window);
+	error = drv_rpi_sdio_voltage_window(card->ocr.voltages, &window);
 	if (error != 0) {
 		kern_logf("rpi4-sdio: card does not run at 3.3 V (OCR %06x)\n", card->ocr.voltages);
 		return error;
@@ -915,10 +915,10 @@ ask_operating_condition(
 	/* Offers the windows until the card reports its power-up done. */
 	for (waited = 0; waited <= CMD5_TIMEOUT_MS; waited += CMD5_INTERVAL_MS) {
 		/* Finishes once the card is ready. */
-		error = send_command(card, SDIO_CMD_IO_SEND_OP_COND, window, DRV_RPI4_SDIO_RESPONSE_SHORT_UNCHECKED, &reply);
+		error = send_command(card, SDIO_CMD_IO_SEND_OP_COND, window, DRV_RPI_SDIO_RESPONSE_SHORT_UNCHECKED, &reply);
 		if (error != 0)
 			return error;
-		(void)drv_rpi4_sdio_decode_ocr(reply, &card->ocr);
+		(void)drv_rpi_sdio_decode_ocr(reply, &card->ocr);
 		if (card->ocr.ready)
 			return 0;
 
@@ -938,13 +938,13 @@ ask_operating_condition(
  */
 static int
 address_card(
-	struct drv_rpi4_sdio_card *card)
+	struct drv_rpi_sdio_card *card)
 {
 	uint32_t reply;
 	int error;
 
 	/* Asks the card to publish an address. */
-	error = send_command(card, SDIO_CMD_SEND_RELATIVE_ADDR, 0, DRV_RPI4_SDIO_RESPONSE_SHORT, &reply);
+	error = send_command(card, SDIO_CMD_SEND_RELATIVE_ADDR, 0, DRV_RPI_SDIO_RESPONSE_SHORT, &reply);
 	if (error != 0)
 		return error;
 
@@ -956,7 +956,7 @@ address_card(
 		return EIO;
 
 	/* Selects the card, which then answers CMD52 and CMD53. */
-	error = send_command(card, SDIO_CMD_SELECT_CARD, (uint32_t)card->rca << R6_RCA_SHIFT, DRV_RPI4_SDIO_RESPONSE_SHORT_BUSY, &reply);
+	error = send_command(card, SDIO_CMD_SELECT_CARD, (uint32_t)card->rca << R6_RCA_SHIFT, DRV_RPI_SDIO_RESPONSE_SHORT_BUSY, &reply);
 	if (error != 0)
 		return error;
 
@@ -973,7 +973,7 @@ address_card(
  */
 static int
 read_common_registers(
-	struct drv_rpi4_sdio_card *card)
+	struct drv_rpi_sdio_card *card)
 {
 	uint8_t revision;
 	uint8_t pointer;
@@ -981,21 +981,21 @@ read_common_registers(
 	int error;
 
 	/* The CCCR format and SDIO specification revisions. */
-	error = drv_rpi4_sdio_read_byte(card, 0, CCCR_REVISION, &revision);
+	error = drv_rpi_sdio_read_byte(card, 0, CCCR_REVISION, &revision);
 	if (error != 0)
 		return error;
 	card->cccr_revision = revision & CCCR_REVISION_MASK;
 	card->sdio_revision = revision >> CCCR_SDIO_SHIFT;
 
 	/* What the card can do: whether it is a low-speed card, among others. */
-	error = drv_rpi4_sdio_read_byte(card, 0, CCCR_CAPABILITY, &card->capability);
+	error = drv_rpi_sdio_read_byte(card, 0, CCCR_CAPABILITY, &card->capability);
 	if (error != 0)
 		return error;
 
 	/* Assembles the common CIS pointer, three bytes, least significant first. */
 	card->cis_pointer = 0;
 	for (i = 0; i < 3U; i++) {
-		error = drv_rpi4_sdio_read_byte(card, 0, CCCR_CIS_POINTER + i, &pointer);
+		error = drv_rpi_sdio_read_byte(card, 0, CCCR_CIS_POINTER + i, &pointer);
 		if (error != 0)
 			return error;
 		card->cis_pointer |= (uint32_t)pointer << (8U * i);
@@ -1013,7 +1013,7 @@ read_common_registers(
  */
 static int
 widen_bus(
-	struct drv_rpi4_sdio_card *card)
+	struct drv_rpi_sdio_card *card)
 {
 	uint8_t control;
 	int low_speed;
@@ -1030,16 +1030,16 @@ widen_bus(
 
 	/* Tells the card to use four lines, keeping the rest of the bus interface control. */
 	if (four_lines) {
-		error = drv_rpi4_sdio_read_byte(card, 0, CCCR_BUS_INTERFACE, &control);
+		error = drv_rpi_sdio_read_byte(card, 0, CCCR_BUS_INTERFACE, &control);
 		if (error != 0)
 			return error;
 		control = (uint8_t)((control & ~BUS_WIDTH_MASK) | BUS_WIDTH_4BIT);
-		error = drv_rpi4_sdio_write_byte(card, 0, CCCR_BUS_INTERFACE, control);
+		error = drv_rpi_sdio_write_byte(card, 0, CCCR_BUS_INTERFACE, control);
 		if (error != 0)
 			return error;
 
 		/* Follows the card on the host's side. */
-		error = drv_rpi4_sdio_host_set_bus_width(card->host, 4);
+		error = drv_rpi_sdio_host_set_bus_width(card->host, 4);
 		if (error != 0)
 			return error;
 	}
@@ -1049,7 +1049,7 @@ widen_bus(
 		return 0;
 
 	/* Runs a full-speed card at 25 MHz. */
-	error = drv_rpi4_sdio_host_set_clock(card->host, DRV_RPI4_SDIO_HOST_DEFAULT_HZ);
+	error = drv_rpi_sdio_host_set_clock(card->host, DRV_RPI_SDIO_HOST_DEFAULT_HZ);
 	if (error != 0)
 		return error;
 
@@ -1064,7 +1064,7 @@ widen_bus(
  */
 static void
 read_cis(
-	struct drv_rpi4_sdio_card *card)
+	struct drv_rpi_sdio_card *card)
 {
 	uint8_t bytes[CIS_WINDOW];
 	unsigned i;
@@ -1078,7 +1078,7 @@ read_cis(
 
 	/* Reads the window one byte at a time. */
 	for (i = 0; i < CIS_WINDOW; i++) {
-		error = drv_rpi4_sdio_read_byte(card, 0, card->cis_pointer + i, &bytes[i]);
+		error = drv_rpi_sdio_read_byte(card, 0, card->cis_pointer + i, &bytes[i]);
 		if (error != 0) {
 			kern_logf("rpi4-sdio: CIS byte %u not read (%d)\n", i, error);
 			return;
@@ -1086,7 +1086,7 @@ read_cis(
 	}
 
 	/* Walks the tuples for the codes. */
-	error = drv_rpi4_sdio_parse_cis(bytes, sizeof(bytes), &card->cis);
+	error = drv_rpi_sdio_parse_cis(bytes, sizeof(bytes), &card->cis);
 	if (error != 0)
 		kern_logf("rpi4-sdio: CIS at %06x does not parse (%d)\n", card->cis_pointer, error);
 }
@@ -1096,27 +1096,27 @@ read_cis(
  */
 static int
 send_command(
-	struct drv_rpi4_sdio_card *card,
+	struct drv_rpi_sdio_card *card,
 	unsigned index,
 	uint32_t argument,
-	enum drv_rpi4_sdio_response response,
+	enum drv_rpi_sdio_response response,
 	uint32_t *reply)
 {
-	struct drv_rpi4_sdio_command command;
+	struct drv_rpi_sdio_command command;
 	int error;
 
 	/* Describes a command without data. */
 	command.index = index;
 	command.argument = argument;
 	command.response = response;
-	command.data = DRV_RPI4_SDIO_DATA_NONE;
+	command.data = DRV_RPI_SDIO_DATA_NONE;
 	command.buffer = NULL;
 	command.block_size = 0;
 	command.block_count = 0;
 	command.reply = 0;
 
 	/* Sends it. */
-	error = drv_rpi4_sdio_host_command(card->host, &command);
+	error = drv_rpi_sdio_host_command(card->host, &command);
 	if (error != 0)
 		return error;
 
@@ -1130,7 +1130,7 @@ send_command(
  */
 static int
 io_direct(
-	struct drv_rpi4_sdio_card *card,
+	struct drv_rpi_sdio_card *card,
 	int write,
 	unsigned function,
 	uint32_t address,
@@ -1158,12 +1158,12 @@ io_direct(
 	}
 
 	/* Sends CMD52. */
-	error = send_command(card, SDIO_CMD_IO_RW_DIRECT, argument, DRV_RPI4_SDIO_RESPONSE_SHORT, &reply);
+	error = send_command(card, SDIO_CMD_IO_RW_DIRECT, argument, DRV_RPI_SDIO_RESPONSE_SHORT, &reply);
 	if (error != 0)
 		return error;
 
 	/* Refuses an access the card reports as failed, and takes the byte read. */
-	error = drv_rpi4_sdio_decode_r5(reply, out);
+	error = drv_rpi_sdio_decode_r5(reply, out);
 	if (error != 0)
 		return error;
 
@@ -1177,7 +1177,7 @@ io_direct(
  */
 static int
 block_size_address(
-	struct drv_rpi4_sdio_card *card,
+	struct drv_rpi_sdio_card *card,
 	unsigned function,
 	uint32_t *address)
 {
@@ -1201,7 +1201,7 @@ block_size_address(
  */
 static int
 wait_ms(
-	const struct drv_rpi4_sdio_waiter *waiter,
+	const struct drv_rpi_sdio_waiter *waiter,
 	unsigned milliseconds)
 {
 	int error;

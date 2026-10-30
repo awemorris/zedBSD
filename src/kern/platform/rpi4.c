@@ -31,11 +31,11 @@
 #if CONFIG_DRIVER_BCM2711_AUDIO
 #include "drivers/platform/rpi4/rpi4-audio.h"
 #endif
-#include "drivers/platform/rpi4/rpi4-console.h"
+#include "drivers/platform/rpi-common/rpi-console.h"
 #include "drivers/platform/rpi4/rpi4-firmware.h"
-#include "drivers/platform/rpi4/rpi4-gpio.h"
+#include "drivers/platform/rpi-common/rpi-gpio.h"
 #include "drivers/platform/rpi4/rpi4-pcie.h"
-#include "drivers/platform/rpi4/rpi4-sdhci.h"
+#include "drivers/platform/rpi-common/rpi-sdhci.h"
 #if CONFIG_DRIVER_BCM2711_WIFI
 #include "drivers/platform/rpi4/rpi4-wifi.h"
 #endif
@@ -135,7 +135,7 @@ kern_platform_init(
 		fdt_phys = *fdt_object;
 
 	/* Publishes the serial console as /dev/console's output. */
-	drv_rpi4_console_init();
+	drv_rpi_console_init(DRV_RPI_BOARD_PI4);
 
 	/* Selects the MBR partition scheme and starts the SD controller. */
 	partition_set_scheme(&drv_partition_scheme_mbr);
@@ -143,14 +143,14 @@ kern_platform_init(
 #if CONFIG_DRIVER_BCM2711_WIFI
 	rpi4_sd_base = (uintptr_t)sdhci_phys;
 #endif
-	if (drv_rpi4_sdhci_init((uintptr_t)sdhci_phys) != 0) {
+	if (drv_rpi_sdhci_init((uintptr_t)sdhci_phys, 0) != 0) {
 		/*
 		 * QEMU raspi4b currently attaches -drive if=sd to the legacy
 		 * Arasan controller, while real Pi 4 firmware boots from eMMC2.
 		 */
 		if (sdhci_phys != 0xfe340000ULL)
 			return 0;
-		if (drv_rpi4_sdhci_init(0xfe300000ULL) != 0)
+		if (drv_rpi_sdhci_init(0xfe300000ULL, 0) != 0)
 			return 0;
 #if CONFIG_DRIVER_BCM2711_WIFI
 		rpi4_sd_base = (uintptr_t)0xfe300000ULL;
@@ -294,7 +294,7 @@ kern_platform_input_init(
 #endif
 
 	/* Starts the serial reader alongside USB keyboards and mice. */
-	error = drv_rpi4_console_start_input();
+	error = drv_rpi_console_start_input();
 	if (error != 0)
 		return error;
 
@@ -316,7 +316,7 @@ kern_platform_block_device(
 		return NULL;
 
 	/* Resolves the SDHCI disk. */
-	disk = drv_rpi4_sdhci_disk();
+	disk = drv_rpi_sdhci_disk();
 
 	/* Reports the disk. */
 	return disk;
@@ -441,7 +441,7 @@ prepare_shared_blocks(
 		kern_logf("rpi4-firmware: mailbox unavailable (%d)\n", error);
 
 	/* Maps the GPIO block the wireless and Bluetooth drivers set their pins through. */
-	error = drv_rpi4_gpio_init(&fdt);
+	error = drv_rpi_gpio_init(&fdt);
 	if (error != 0)
 		kern_logf("rpi4-gpio: GPIO block unavailable (%d)\n", error);
 }

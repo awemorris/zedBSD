@@ -1,7 +1,7 @@
 #!/bin/sh
 # The host test of the Raspberry Pi 4 onboard Bluetooth's pure parts (ws215-p003): builds the H4 reassembly
 # (src/drivers/generic/bt-hci-proto.c) and the line's hunt, divisor and reset history
-# (src/drivers/platform/rpi4/rpi4-bt-link.c) with the host's compiler under ASan and UBSan and runs them; then checks
+# (src/drivers/platform/rpi-common/rpi-bt-link.c) with the host's compiler under ASan and UBSan and runs them; then checks
 # the config.txt the build writes (platform/arm64/tools/make-rpi4-config.py) for the four combinations of the
 # Bluetooth driver and the serial console.
 # usage: plan/ws215/tests/rpi4-bt-host-test.sh   (from the repository's top; OUT= to choose the build folder)
@@ -11,7 +11,7 @@ OUT=${OUT:-build/ws215-rpi4-bt-host}
 mkdir -p "$OUT"
 cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Iinclude -Isrc -I. \
 	-o "$OUT/rpi4-bt-host-test" plan/ws215/tests/rpi4-bt-host-test.c src/drivers/generic/bt-hci-proto.c \
-	src/drivers/platform/rpi4/rpi4-bt-link.c
+	src/drivers/platform/rpi-common/rpi-bt-link.c
 timeout 60 "$OUT/rpi4-bt-host-test"
 
 # config.txt: byte for byte the source unless the driver is on and the console off; then exactly the three serial

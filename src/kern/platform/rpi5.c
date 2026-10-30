@@ -32,8 +32,8 @@
 #include <kern/platform.h>
 #include <kern/boot.h>
 #include <kern/klog.h>
-#include "drivers/platform/rpi4/rpi4-console.h"
-#include "drivers/platform/rpi4/rpi4-sdhci.h"
+#include "drivers/platform/rpi-common/rpi-console.h"
+#include "drivers/platform/rpi-common/rpi-sdhci.h"
 #include "drivers/platform/rpi5/rp1.h"
 #include "drivers/platform/rpi5/rp1-usb.h"
 #include "drivers/platform/rpi5/rp1-ethernet.h"
@@ -82,9 +82,11 @@ kern_platform_init(
 	size_t capacity)
 {
 	const uint64_t *sdhci_object;
+	const uint64_t *sdhci_clock_object;
 	const uint64_t *fdt_object;
 	struct kern_boot_device *device;
 	uint64_t sdhci_phys;
+	uint64_t sdhci_clock_hz;
 	uint64_t fdt_phys;
 	unsigned index;
 	int error;
@@ -111,6 +113,12 @@ kern_platform_init(
 		return 0;
 	sdhci_phys = *sdhci_object;
 
+	/* Reads the controller's base clock the HAL names; zero takes the controller's own. */
+	sdhci_clock_object = hal_get_arch_handoff("rpi5.sdhci.clock");
+	sdhci_clock_hz = 0;
+	if (sdhci_clock_object != NULL)
+		sdhci_clock_hz = *sdhci_clock_object;
+
 	/* Finds the device tree; zero tells the drivers below that none came. */
 	fdt_object = hal_get_arch_handoff("rpi5.fdt");
 	fdt_phys = 0;
@@ -119,14 +127,14 @@ kern_platform_init(
 	rpi5_fdt_phys = fdt_phys;
 
 	/* Publishes the console as /dev/console's output. */
-	drv_rpi4_console_init();
+	drv_rpi_console_init(DRV_RPI_BOARD_PI5);
 
 	/* Selects the MBR partition scheme the SD card carries. */
 	partition_set_scheme(&drv_partition_scheme_mbr);
 	disk_registry_reset();
 
 	/* Starts the SD controller and the card the firmware booted from. */
-	error = drv_rpi4_sdhci_init((uintptr_t)sdhci_phys);
+	error = drv_rpi_sdhci_init((uintptr_t)sdhci_phys, sdhci_clock_hz);
 	if (error != 0) {
 		kern_logf("rpi5: SD card unavailable (%d)\n", error);
 		return 0;
@@ -235,7 +243,7 @@ kern_platform_input_init(
 #endif
 
 	/* Starts the serial reader, which a build without the serial console leaves off. */
-	error = drv_rpi4_console_start_input();
+	error = drv_rpi_console_start_input();
 	if (error != 0)
 		return error;
 
@@ -259,7 +267,7 @@ kern_platform_block_device(
 		return NULL;
 
 	/* Resolves the SD card's disk. */
-	disk = drv_rpi4_sdhci_disk();
+	disk = drv_rpi_sdhci_disk();
 
 	/* Succeeded: the SD card's disk, or none before it was published. */
 	return disk;

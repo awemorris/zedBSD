@@ -37,9 +37,9 @@
 
 /*
  * Whether the serial line carries the console.  The build defines
- * RPI4_SERIAL_CONSOLE for either board's serial-console option.
+ * ARM64_SERIAL_CONSOLE for either board's serial-console option.
  */
-#ifdef RPI4_SERIAL_CONSOLE
+#ifdef ARM64_SERIAL_CONSOLE
 #define CONS_SERIAL	1
 #else
 #define CONS_SERIAL	0

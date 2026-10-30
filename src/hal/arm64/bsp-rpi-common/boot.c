@@ -57,6 +57,15 @@ static char boot_command_line[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
 static uint64_t handoff_fdt_phys;
 static uint64_t handoff_sdhci_phys;
 
+#ifdef ARM64_BOARD_SDHCI_CLOCK_HZ
+/*
+ * The SD controller's base clock ("<board>.sdhci.clock"), a 64-bit word in
+ * hertz, on a board whose controller runs from a clock its capabilities do
+ * not report (board.h).  Never changed.
+ */
+static const uint64_t handoff_sdhci_clock_hz = ARM64_BOARD_SDHCI_CLOCK_HZ;
+#endif
+
 /*
  * The names under which the kernel reads the boot framebuffer, one per
  * value, in the order of framebuffer_values[].
@@ -213,7 +222,9 @@ rpi_kernel_handoff(
  *
  * "boot.command-line" is the firmware's command line; "<board>.fdt" and
  * "<board>.sdhci" are the physical addresses of the device tree and of the
- * SD controller it names, each a 64-bit word; "<board>.framebuffer.phys",
+ * SD controller it names, each a 64-bit word; "<board>.sdhci.clock" is the
+ * SD controller's base clock in hertz, a 64-bit word, on a board whose
+ * board.h names one; "<board>.framebuffer.phys",
  * ".size", ".width", ".height", ".pitch" and ".format" are the firmware's
  * framebuffer, each a 64-bit word, all present or all absent.  <board> is
  * "rpi4" on a Pi 4 and "rpi5" on a Pi 5.
@@ -245,6 +256,15 @@ hal_get_arch_handoff(
 		if (match)
 			return &handoff_sdhci_phys;
 	}
+
+#ifdef ARM64_BOARD_SDHCI_CLOCK_HZ
+	/* Exposes the SD controller's base clock on a board that names one. */
+	if (handoff_sdhci_phys != 0) {
+		match = handoff_name_is(name, ARM64_BOARD_HANDOFF ".sdhci.clock");
+		if (match)
+			return (void *)&handoff_sdhci_clock_hz;
+	}
+#endif
 
 	/* Exposes the framebuffer's values when the firmware allocated one. */
 	if (framebuffer_values[1] != 0) {

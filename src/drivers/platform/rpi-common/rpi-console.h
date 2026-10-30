@@ -6,17 +6,23 @@
  */
 
 /*
- * The console of the Raspberry Pi 4, the Raspberry Pi 5 and the ODROID-C5:
- * /dev/console over the firmware's screen and the debug UART.
+ * The console of the Raspberry Pi 4 and the Raspberry Pi 5: /dev/console
+ * over the firmware's screen and the debug UART.
  */
 
-#ifndef KERN_DRIVERS_RPI4_CONSOLE_H
-#define KERN_DRIVERS_RPI4_CONSOLE_H
+#ifndef KERN_DRIVERS_RPI_CONSOLE_H
+#define KERN_DRIVERS_RPI_CONSOLE_H
+
+/* The board the console runs on, which names its UART and its screen. */
+enum drv_rpi_board {
+	DRV_RPI_BOARD_PI4,
+	DRV_RPI_BOARD_PI5
+};
 
 /* Publishes the console and the screen's /dev/graphics backend; call once, before /dev/console opens. */
-void drv_rpi4_console_init(void);
+void drv_rpi_console_init(enum drv_rpi_board board);
 
 /* Starts reading the serial port into the console; returns an errno. */
-int drv_rpi4_console_start_input(void);
+int drv_rpi_console_start_input(void);
 
 #endif

@@ -7,7 +7,7 @@
 
 /*
  * The pure part of the Raspberry Pi 4 onboard Bluetooth's UART transport
- * (rpi4-bt-link.h): the PL011's divisor, the hunt for an event
+ * (rpi-bt-link.h): the PL011's divisor, the hunt for an event
  * to fall in step with, the history of the transport's own resets, and the
  * line's mode and generation.
  *
@@ -15,7 +15,7 @@
  * this driver's own choices.
  */
 
-#include "drivers/platform/rpi4/rpi4-bt-link.h"
+#include "drivers/platform/rpi-common/rpi-bt-link.h"
 
 #include <uapi/errno.h>
 
@@ -277,8 +277,8 @@ drv_rpi4_bt_history_admit(
 
 /* Starts a line that was never powered, with an empty history. */
 void
-drv_rpi4_bt_link_init(
-	struct drv_rpi4_bt_link *link)
+drv_rpi_bt_link_init(
+	struct drv_rpi_bt_link *link)
 {
 	/* Off, at the first generation. */
 	link->mode = DRV_RPI4_BT_MODE_OFF;
@@ -292,8 +292,8 @@ drv_rpi4_bt_link_init(
  * A stopped line starts again this way.
  */
 void
-drv_rpi4_bt_link_transition_begin(
-	struct drv_rpi4_bt_link *link)
+drv_rpi_bt_link_transition_begin(
+	struct drv_rpi_bt_link *link)
 {
 	/*
 	 * The new generation tells everyone who saw the old one that the line
@@ -305,8 +305,8 @@ drv_rpi4_bt_link_transition_begin(
 
 /* Ends a reset or a change of speed: the transport hunts for an answer to fall in step with. */
 void
-drv_rpi4_bt_link_transition_end(
-	struct drv_rpi4_bt_link *link)
+drv_rpi_bt_link_transition_end(
+	struct drv_rpi_bt_link *link)
 {
 	/* Only a line in the middle of a change hunts now (a stop meanwhile stays). */
 	if (link->mode == DRV_RPI4_BT_MODE_QUIET)
@@ -315,8 +315,8 @@ drv_rpi4_bt_link_transition_end(
 
 /* Records that an answer was found: the line is in step. */
 void
-drv_rpi4_bt_link_anchor(
-	struct drv_rpi4_bt_link *link)
+drv_rpi_bt_link_anchor(
+	struct drv_rpi_bt_link *link)
 {
 	/* Only a hunting line falls in step. */
 	if (link->mode == DRV_RPI4_BT_MODE_HUNT)
@@ -334,8 +334,8 @@ drv_rpi4_bt_link_anchor(
  * made within the window (the caller then stops the line).
  */
 int
-drv_rpi4_bt_link_self_reset(
-	struct drv_rpi4_bt_link *link,
+drv_rpi_bt_link_self_reset(
+	struct drv_rpi_bt_link *link,
 	uint32_t observed,
 	uint64_t now_ms)
 {
@@ -362,8 +362,8 @@ drv_rpi4_bt_link_self_reset(
 
 /* Stops the line: the controller is powered down until the program resets it. */
 void
-drv_rpi4_bt_link_stop(
-	struct drv_rpi4_bt_link *link)
+drv_rpi_bt_link_stop(
+	struct drv_rpi_bt_link *link)
 {
 	/* A new generation, so a sender or a gatherer of the old line gives up. */
 	link->generation++;

@@ -28,7 +28,7 @@
  * that serves the card, which rearms it afterwards.
  */
 
-#include "drivers/platform/rpi4/rpi4-sdio-host.h"
+#include "drivers/platform/rpi-common/rpi-sdio-host.h"
 #include <kern/clock.h>
 #include <kern/device-io.h>
 #include <kern/klog.h>
@@ -156,26 +156,26 @@
 #define COMMAND_TIMEOUT_US	100000U
 #define DATA_TIMEOUT_US		1000000U
 
-static int reset_lines_locked(struct drv_rpi4_sdio_host *host, uint32_t lines);
-static int restore_locked(struct drv_rpi4_sdio_host *host);
-static int program_clock_locked(struct drv_rpi4_sdio_host *host, uint32_t target_hz);
-static void program_host_control_locked(struct drv_rpi4_sdio_host *host, uint32_t power);
-static int send_locked(struct drv_rpi4_sdio_host *host, struct drv_rpi4_sdio_command *command);
-static int move_block_locked(struct drv_rpi4_sdio_host *host, struct drv_rpi4_sdio_command *command, unsigned block);
-static int fail_command_locked(struct drv_rpi4_sdio_host *host, int error, uint32_t status);
-static int wait_status(struct drv_rpi4_sdio_host *host, uint32_t bits, unsigned timeout_us, uint32_t *status);
-static int wait_present_clear(struct drv_rpi4_sdio_host *host, uint32_t bits, unsigned timeout_us);
-static void write_enables_locked(struct drv_rpi4_sdio_host *host);
-static uint32_t read_register(struct drv_rpi4_sdio_host *host, unsigned offset);
-static void write_register(struct drv_rpi4_sdio_host *host, unsigned offset, uint32_t value);
+static int reset_lines_locked(struct drv_rpi_sdio_host *host, uint32_t lines);
+static int restore_locked(struct drv_rpi_sdio_host *host);
+static int program_clock_locked(struct drv_rpi_sdio_host *host, uint32_t target_hz);
+static void program_host_control_locked(struct drv_rpi_sdio_host *host, uint32_t power);
+static int send_locked(struct drv_rpi_sdio_host *host, struct drv_rpi_sdio_command *command);
+static int move_block_locked(struct drv_rpi_sdio_host *host, struct drv_rpi_sdio_command *command, unsigned block);
+static int fail_command_locked(struct drv_rpi_sdio_host *host, int error, uint32_t status);
+static int wait_status(struct drv_rpi_sdio_host *host, uint32_t bits, unsigned timeout_us, uint32_t *status);
+static int wait_present_clear(struct drv_rpi_sdio_host *host, uint32_t bits, unsigned timeout_us);
+static void write_enables_locked(struct drv_rpi_sdio_host *host);
+static uint32_t read_register(struct drv_rpi_sdio_host *host, unsigned offset);
+static void write_register(struct drv_rpi_sdio_host *host, unsigned offset, uint32_t value);
 static void pause_us(unsigned us);
 
 /*
  * Prepares the controller for an SDIO card.
  */
 int
-drv_rpi4_sdio_host_init(
-	struct drv_rpi4_sdio_host *host,
+drv_rpi_sdio_host_init(
+	struct drv_rpi_sdio_host *host,
 	volatile void *registers,
 	uint32_t base_clock_hz)
 {
@@ -194,7 +194,7 @@ drv_rpi4_sdio_host_init(
 	/* Describes the controller before anything has been programmed. */
 	host->registers = registers;
 	host->base_clock_hz = base_clock_hz;
-	host->clock_target_hz = DRV_RPI4_SDIO_HOST_IDENTIFY_HZ;
+	host->clock_target_hz = DRV_RPI_SDIO_HOST_IDENTIFY_HZ;
 	host->card_clock_hz = 0;
 	host->bus_width = 1;
 
@@ -226,7 +226,7 @@ drv_rpi4_sdio_host_init(
 		base_clock_hz);
 
 	/* Resets the controller and powers the bus at the enumeration clock. */
-	error = drv_rpi4_sdio_host_reset(host);
+	error = drv_rpi_sdio_host_reset(host);
 	if (error != 0)
 		return error;
 
@@ -238,8 +238,8 @@ drv_rpi4_sdio_host_init(
  * Resets the whole controller and restores what the reset clears.
  */
 int
-drv_rpi4_sdio_host_reset(
-	struct drv_rpi4_sdio_host *host)
+drv_rpi_sdio_host_reset(
+	struct drv_rpi_sdio_host *host)
 {
 	int error;
 
@@ -272,8 +272,8 @@ drv_rpi4_sdio_host_reset(
  * Runs the bus at the fastest rate at or below target_hz.
  */
 int
-drv_rpi4_sdio_host_set_clock(
-	struct drv_rpi4_sdio_host *host,
+drv_rpi_sdio_host_set_clock(
+	struct drv_rpi_sdio_host *host,
 	uint32_t target_hz)
 {
 	int error;
@@ -297,8 +297,8 @@ drv_rpi4_sdio_host_set_clock(
  * Moves data on one line or on four.
  */
 int
-drv_rpi4_sdio_host_set_bus_width(
-	struct drv_rpi4_sdio_host *host,
+drv_rpi_sdio_host_set_bus_width(
+	struct drv_rpi_sdio_host *host,
 	unsigned width)
 {
 	/* Refuses a width the controller does not have (eight lines are eMMC only). */
@@ -321,9 +321,9 @@ drv_rpi4_sdio_host_set_bus_width(
  * Sends one command, waits for its response and moves its data.
  */
 int
-drv_rpi4_sdio_host_command(
-	struct drv_rpi4_sdio_host *host,
-	struct drv_rpi4_sdio_command *command)
+drv_rpi_sdio_host_command(
+	struct drv_rpi_sdio_host *host,
+	struct drv_rpi_sdio_command *command)
 {
 	int error;
 
@@ -332,16 +332,16 @@ drv_rpi4_sdio_host_command(
 		return EINVAL;
 	if (command->index > COMMAND_INDEX_MAX)
 		return EINVAL;
-	if (command->response > DRV_RPI4_SDIO_RESPONSE_SHORT_UNCHECKED)
+	if (command->response > DRV_RPI_SDIO_RESPONSE_SHORT_UNCHECKED)
 		return EINVAL;
 
 	/* Refuses data without a buffer or outside the block register's range. */
-	if (command->data != DRV_RPI4_SDIO_DATA_NONE) {
+	if (command->data != DRV_RPI_SDIO_DATA_NONE) {
 		if (command->buffer == NULL)
 			return EINVAL;
-		if (command->block_size == 0 || command->block_size > DRV_RPI4_SDIO_HOST_BLOCK_MAX)
+		if (command->block_size == 0 || command->block_size > DRV_RPI_SDIO_HOST_BLOCK_MAX)
 			return EINVAL;
-		if (command->block_count == 0 || command->block_count > DRV_RPI4_SDIO_HOST_BLOCK_COUNT_MAX)
+		if (command->block_count == 0 || command->block_count > DRV_RPI_SDIO_HOST_BLOCK_COUNT_MAX)
 			return EINVAL;
 	}
 
@@ -364,7 +364,7 @@ drv_rpi4_sdio_host_command(
  * Finds the divider for a bus clock.
  */
 int
-drv_rpi4_sdio_host_clock_divisor(
+drv_rpi_sdio_host_clock_divisor(
 	uint32_t base_hz,
 	uint32_t target_hz,
 	unsigned specification,
@@ -423,10 +423,10 @@ drv_rpi4_sdio_host_clock_divisor(
  * Serves the controller's share of the SD interrupt line.
  */
 bool
-drv_rpi4_sdio_host_interrupt(
+drv_rpi_sdio_host_interrupt(
 	void *argument)
 {
-	struct drv_rpi4_sdio_host *host;
+	struct drv_rpi_sdio_host *host;
 	unsigned long enabled;
 	uint32_t status;
 	bool mine;
@@ -468,8 +468,8 @@ drv_rpi4_sdio_host_interrupt(
  * Lets the card's interrupt reach the CPU or keeps it away.
  */
 void
-drv_rpi4_sdio_host_card_irq_enable(
-	struct drv_rpi4_sdio_host *host,
+drv_rpi_sdio_host_card_irq_enable(
+	struct drv_rpi_sdio_host *host,
 	int enable)
 {
 	unsigned long enabled;
@@ -497,8 +497,8 @@ drv_rpi4_sdio_host_card_irq_enable(
  * Arms the card's interrupt again after the thread has served it.
  */
 void
-drv_rpi4_sdio_host_card_irq_rearm(
-	struct drv_rpi4_sdio_host *host)
+drv_rpi_sdio_host_card_irq_rearm(
+	struct drv_rpi_sdio_host *host)
 {
 	unsigned long enabled;
 
@@ -517,8 +517,8 @@ drv_rpi4_sdio_host_card_irq_rearm(
  * Waits until the card's interrupt fires or the deadline passes.
  */
 int
-drv_rpi4_sdio_host_card_irq_wait(
-	struct drv_rpi4_sdio_host *host,
+drv_rpi_sdio_host_card_irq_wait(
+	struct drv_rpi_sdio_host *host,
 	uint64_t deadline)
 {
 	unsigned long enabled;
@@ -565,8 +565,8 @@ drv_rpi4_sdio_host_card_irq_wait(
  * Wakes the thread waiting for the card's interrupt without one.
  */
 void
-drv_rpi4_sdio_host_card_irq_kick(
-	struct drv_rpi4_sdio_host *host)
+drv_rpi_sdio_host_card_irq_kick(
+	struct drv_rpi_sdio_host *host)
 {
 	unsigned long enabled;
 
@@ -586,13 +586,13 @@ drv_rpi4_sdio_host_card_irq_kick(
  * Stops the controller.
  */
 void
-drv_rpi4_sdio_host_stop(
-	struct drv_rpi4_sdio_host *host)
+drv_rpi_sdio_host_stop(
+	struct drv_rpi_sdio_host *host)
 {
 	uint32_t word;
 
 	/* Keeps the card's interrupt away from the line first. */
-	drv_rpi4_sdio_host_card_irq_enable(host, 0);
+	drv_rpi_sdio_host_card_irq_enable(host, 0);
 
 	/* Stops the bus clock and the internal clock, then the bus power. */
 	mutex_lock(&host->command_lock);
@@ -612,7 +612,7 @@ drv_rpi4_sdio_host_stop(
  */
 static int
 reset_lines_locked(
-	struct drv_rpi4_sdio_host *host,
+	struct drv_rpi_sdio_host *host,
 	uint32_t lines)
 {
 	uint32_t word;
@@ -650,7 +650,7 @@ reset_lines_locked(
  */
 static int
 restore_locked(
-	struct drv_rpi4_sdio_host *host)
+	struct drv_rpi_sdio_host *host)
 {
 	unsigned long enabled;
 	uint32_t word;
@@ -691,7 +691,7 @@ restore_locked(
  */
 static int
 program_clock_locked(
-	struct drv_rpi4_sdio_host *host,
+	struct drv_rpi_sdio_host *host,
 	uint32_t target_hz)
 {
 	uint32_t word;
@@ -704,7 +704,7 @@ program_clock_locked(
 	int error;
 
 	/* Finds the divider before anything is stopped. */
-	error = drv_rpi4_sdio_host_clock_divisor(
+	error = drv_rpi_sdio_host_clock_divisor(
 		host->base_clock_hz,
 		target_hz,
 		host->specification,
@@ -769,7 +769,7 @@ program_clock_locked(
  */
 static void
 program_host_control_locked(
-	struct drv_rpi4_sdio_host *host,
+	struct drv_rpi_sdio_host *host,
 	uint32_t power)
 {
 	uint32_t word;
@@ -789,8 +789,8 @@ program_host_control_locked(
  */
 static int
 send_locked(
-	struct drv_rpi4_sdio_host *host,
-	struct drv_rpi4_sdio_command *command)
+	struct drv_rpi_sdio_host *host,
+	struct drv_rpi_sdio_command *command)
 {
 	uint32_t inhibit;
 	uint32_t mode;
@@ -801,9 +801,9 @@ send_locked(
 
 	/* Names the lines the command needs free: the data lines too for data or a busy signal. */
 	inhibit = PRESENT_COMMAND_INHIBIT;
-	if (command->data != DRV_RPI4_SDIO_DATA_NONE)
+	if (command->data != DRV_RPI_SDIO_DATA_NONE)
 		inhibit |= PRESENT_DATA_INHIBIT;
-	if (command->response == DRV_RPI4_SDIO_RESPONSE_SHORT_BUSY)
+	if (command->response == DRV_RPI_SDIO_RESPONSE_SHORT_BUSY)
 		inhibit |= PRESENT_DATA_INHIBIT;
 
 	/* Waits for the previous command and data to leave the lines. */
@@ -817,7 +817,7 @@ send_locked(
 	write_register(host, REG_INTERRUPT_STATUS, STATUS_CLEARABLE);
 
 	/* Describes the blocks of a data command. */
-	if (command->data != DRV_RPI4_SDIO_DATA_NONE) {
+	if (command->data != DRV_RPI_SDIO_DATA_NONE) {
 		write_register(
 			host,
 			REG_BLOCK,
@@ -829,9 +829,9 @@ send_locked(
 
 	/* Builds the transfer mode: counted blocks, their direction, more than one. */
 	mode = 0;
-	if (command->data != DRV_RPI4_SDIO_DATA_NONE) {
+	if (command->data != DRV_RPI_SDIO_DATA_NONE) {
 		mode |= TRANSFER_BLOCK_COUNT;
-		if (command->data == DRV_RPI4_SDIO_DATA_READ)
+		if (command->data == DRV_RPI_SDIO_DATA_READ)
 			mode |= TRANSFER_READ;
 		if (command->block_count > 1)
 			mode |= TRANSFER_MULTIPLE;
@@ -840,15 +840,15 @@ send_locked(
 	/* Builds the command: its index, the response it expects and the checks. */
 	code = command->index << COMMAND_INDEX_SHIFT;
 	switch (command->response) {
-	case DRV_RPI4_SDIO_RESPONSE_NONE:
+	case DRV_RPI_SDIO_RESPONSE_NONE:
 		break;
-	case DRV_RPI4_SDIO_RESPONSE_SHORT:
+	case DRV_RPI_SDIO_RESPONSE_SHORT:
 		code |= COMMAND_RESPONSE_48 | COMMAND_CHECK_CRC | COMMAND_CHECK_INDEX;
 		break;
-	case DRV_RPI4_SDIO_RESPONSE_SHORT_BUSY:
+	case DRV_RPI_SDIO_RESPONSE_SHORT_BUSY:
 		code |= COMMAND_RESPONSE_48_BUSY | COMMAND_CHECK_CRC | COMMAND_CHECK_INDEX;
 		break;
-	case DRV_RPI4_SDIO_RESPONSE_SHORT_UNCHECKED:
+	case DRV_RPI_SDIO_RESPONSE_SHORT_UNCHECKED:
 		code |= COMMAND_RESPONSE_48;
 		break;
 	default:
@@ -856,7 +856,7 @@ send_locked(
 	}
 
 	/* Tells the controller that data follows the command. */
-	if (command->data != DRV_RPI4_SDIO_DATA_NONE)
+	if (command->data != DRV_RPI_SDIO_DATA_NONE)
 		code |= COMMAND_DATA_PRESENT;
 
 	/* Starts the command: the transfer mode and the command go in one word. */
@@ -874,8 +874,8 @@ send_locked(
 	command->reply = read_register(host, REG_RESPONSE);
 
 	/* Waits out the busy signal of an R1b response. */
-	if (command->response == DRV_RPI4_SDIO_RESPONSE_SHORT_BUSY &&
-	    command->data == DRV_RPI4_SDIO_DATA_NONE) {
+	if (command->response == DRV_RPI_SDIO_RESPONSE_SHORT_BUSY &&
+	    command->data == DRV_RPI_SDIO_DATA_NONE) {
 		error = wait_status(host, STATUS_TRANSFER_COMPLETE, DATA_TIMEOUT_US, &status);
 		if (error != 0) {
 			error = fail_command_locked(host, error, status);
@@ -887,7 +887,7 @@ send_locked(
 	}
 
 	/* Succeeds at once for a command without data. */
-	if (command->data == DRV_RPI4_SDIO_DATA_NONE)
+	if (command->data == DRV_RPI_SDIO_DATA_NONE)
 		return 0;
 
 	/* Moves each block through the data port as the controller has room or data for it. */
@@ -918,8 +918,8 @@ send_locked(
  */
 static int
 move_block_locked(
-	struct drv_rpi4_sdio_host *host,
-	struct drv_rpi4_sdio_command *command,
+	struct drv_rpi_sdio_host *host,
+	struct drv_rpi_sdio_command *command,
 	unsigned block)
 {
 	uint8_t *bytes;
@@ -933,7 +933,7 @@ move_block_locked(
 
 	/* Waits until the buffer holds a block to read, or has room for one to write. */
 	ready = STATUS_WRITE_READY;
-	if (command->data == DRV_RPI4_SDIO_DATA_READ)
+	if (command->data == DRV_RPI_SDIO_DATA_READ)
 		ready = STATUS_READ_READY;
 	error = wait_status(host, ready, DATA_TIMEOUT_US, &status);
 	if (error != 0) {
@@ -953,7 +953,7 @@ move_block_locked(
 			count = 4U;
 
 		/* Reads a word and keeps its bytes in order. */
-		if (command->data == DRV_RPI4_SDIO_DATA_READ) {
+		if (command->data == DRV_RPI_SDIO_DATA_READ) {
 			word = read_register(host, REG_DATA_PORT);
 			for (i = 0; i < count; i++)
 				bytes[offset + i] = (uint8_t)(word >> (8U * i));
@@ -977,7 +977,7 @@ move_block_locked(
  */
 static int
 fail_command_locked(
-	struct drv_rpi4_sdio_host *host,
+	struct drv_rpi_sdio_host *host,
 	int error,
 	uint32_t status)
 {
@@ -1014,7 +1014,7 @@ fail_command_locked(
  */
 static int
 wait_status(
-	struct drv_rpi4_sdio_host *host,
+	struct drv_rpi_sdio_host *host,
 	uint32_t bits,
 	unsigned timeout_us,
 	uint32_t *status)
@@ -1052,7 +1052,7 @@ wait_status(
  */
 static int
 wait_present_clear(
-	struct drv_rpi4_sdio_host *host,
+	struct drv_rpi_sdio_host *host,
 	uint32_t bits,
 	unsigned timeout_us)
 {
@@ -1083,7 +1083,7 @@ wait_present_clear(
  */
 static void
 write_enables_locked(
-	struct drv_rpi4_sdio_host *host)
+	struct drv_rpi_sdio_host *host)
 {
 	uint32_t status_enable;
 	uint32_t signal_enable;
@@ -1104,7 +1104,7 @@ write_enables_locked(
 /* Reads one register word. */
 static uint32_t
 read_register(
-	struct drv_rpi4_sdio_host *host,
+	struct drv_rpi_sdio_host *host,
 	unsigned offset)
 {
 	uint32_t value;
@@ -1123,7 +1123,7 @@ read_register(
  */
 static void
 write_register(
-	struct drv_rpi4_sdio_host *host,
+	struct drv_rpi_sdio_host *host,
 	unsigned offset,
 	uint32_t value)
 {

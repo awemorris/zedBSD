@@ -35,8 +35,8 @@
 #include "drivers/platform/rpi5/rpi5-gio.h"
 #include "drivers/platform/rpi5/rpi5-pinctrl.h"
 #include "drivers/platform/rpi5/rpi5-serror.h"
-#include "drivers/platform/rpi4/rpi4-mmc-irq.h"
-#include "drivers/platform/rpi4/rpi4-sdio.h"
+#include "drivers/platform/rpi-common/rpi-mmc-irq.h"
+#include "drivers/platform/rpi-common/rpi-sdio.h"
 #include "drivers/wifi/bcm43455/bcm43455.h"
 #include <drivers/generic/fdt.h>
 #include <kern/atomic.h>
@@ -162,9 +162,9 @@ struct rpi5_wifi {
 	uint8_t mac[ADDRESS_LENGTH];
 	unsigned has_mac;
 	struct drv_rpi5_gio gio;
-	struct drv_rpi4_sdio_host host;
-	struct drv_rpi4_sdio_card card;
-	struct drv_rpi4_sdio_waiter waiter;
+	struct drv_rpi_sdio_host host;
+	struct drv_rpi_sdio_card card;
+	struct drv_rpi_sdio_waiter waiter;
 	void *registers;
 	void *cfg_registers;
 	struct bcm43455_device *device;
@@ -430,7 +430,7 @@ describe(
 	error = drv_fdt_reg(&wifi->fdt, wifi->controller_node, 0, &wifi->registers_phys, &size);
 	if (error != 0)
 		return error;
-	if (size < DRV_RPI4_SDIO_HOST_REGISTER_SPAN)
+	if (size < DRV_RPI_SDIO_HOST_REGISTER_SPAN)
 		return ERANGE;
 
 	/* Finds the controller's configuration block; without it the card cannot be forced present. */
@@ -890,7 +890,7 @@ bring_up(
 	/* Maps the controller's registers. */
 	error = kern_device_map(
 		wifi->registers_phys,
-		DRV_RPI4_SDIO_HOST_REGISTER_SPAN,
+		DRV_RPI_SDIO_HOST_REGISTER_SPAN,
 		KERN_DEVICE_UNCACHED,
 		&wifi->registers);
 	if (error != 0) {
@@ -905,7 +905,7 @@ bring_up(
 		return error;
 
 	/* Resets the controller and starts the 400 kHz bus. */
-	error = drv_rpi4_sdio_host_init(&wifi->host, wifi->registers, wifi->base_clock_hz);
+	error = drv_rpi_sdio_host_init(&wifi->host, wifi->registers, wifi->base_clock_hz);
 	(void)drv_rpi5_serror_check("rpi5-wifi: starting the host");
 	if (error != 0)
 		return error;
@@ -913,7 +913,7 @@ bring_up(
 	report_host(wifi, "started");
 
 	/* Joins the controller's interrupt line; the card's interrupt stays disarmed until the chip's driver arms it. */
-	error = drv_rpi4_mmc_irq_add(wifi->irq, drv_rpi4_sdio_host_interrupt, &wifi->host);
+	error = drv_rpi_mmc_irq_add(wifi->irq, drv_rpi_sdio_host_interrupt, &wifi->host);
 	if (error != 0) {
 		kern_logf("rpi5-wifi: SD interrupt line %d not joined (%d)\n", wifi->irq, error);
 		return error;
@@ -1019,13 +1019,13 @@ report_pin_selections(
 	pins = kern_mmio_read32(cfg + SDIO_CFG_SD_PIN_SEL) & ~SDIO_CFG_SD_PIN_SEL_MASK;
 	for (selection = 0; selection <= SDIO_CFG_SD_PIN_SEL_MASK; selection++) {
 		kern_mmio_write32(cfg + SDIO_CFG_SD_PIN_SEL, pins | selection);
-		(void)drv_rpi4_sdio_host_set_clock(&wifi->host, DRV_RPI4_SDIO_HOST_IDENTIFY_HZ);
+		(void)drv_rpi_sdio_host_set_clock(&wifi->host, DRV_RPI_SDIO_HOST_IDENTIFY_HZ);
 		present[selection] = kern_mmio_read32(registers + SDHCI_PRESENT_STATE);
 	}
 
 	/* Restores the SD pins. */
 	kern_mmio_write32(cfg + SDIO_CFG_SD_PIN_SEL, pins | SDIO_CFG_SD_PIN_SEL_SD);
-	(void)drv_rpi4_sdio_host_set_clock(&wifi->host, DRV_RPI4_SDIO_HOST_IDENTIFY_HZ);
+	(void)drv_rpi_sdio_host_set_clock(&wifi->host, DRV_RPI_SDIO_HOST_IDENTIFY_HZ);
 
 	/* Records the levels. */
 	kern_logf("rpi5-wifi: command line low; present by pin selection 0-3: %08x %08x %08x %08x\n",
@@ -1195,21 +1195,21 @@ prepare_functions(
 	}
 
 	/* Enables the backplane, through which the chip's memory is reached. */
-	error = drv_rpi4_sdio_enable_function(&wifi->card, FUNCTION_BACKPLANE, &wifi->waiter, FUNCTION1_READY_MS);
+	error = drv_rpi_sdio_enable_function(&wifi->card, FUNCTION_BACKPLANE, &wifi->waiter, FUNCTION1_READY_MS);
 	if (error != 0) {
 		kern_logf("rpi5-wifi: F1 not ready (%d)\n", error);
 		return error;
 	}
 
 	/* Sets the block size CMD53 uses for the backplane. */
-	error = drv_rpi4_sdio_set_block_size(&wifi->card, FUNCTION_BACKPLANE, FUNCTION1_BLOCK_SIZE);
+	error = drv_rpi_sdio_set_block_size(&wifi->card, FUNCTION_BACKPLANE, FUNCTION1_BLOCK_SIZE);
 	if (error != 0) {
 		kern_logf("rpi5-wifi: F1 block size not set (%d)\n", error);
 		return error;
 	}
 
 	/* Sets the block size CMD53 uses for the frames. */
-	error = drv_rpi4_sdio_set_block_size(&wifi->card, FUNCTION_FRAMES, FUNCTION2_BLOCK_SIZE);
+	error = drv_rpi_sdio_set_block_size(&wifi->card, FUNCTION_FRAMES, FUNCTION2_BLOCK_SIZE);
 	if (error != 0) {
 		kern_logf("rpi5-wifi: F2 block size not set (%d)\n", error);
 		return error;
@@ -1230,7 +1230,7 @@ static void
 report_card(
 	struct rpi5_wifi *wifi)
 {
-	struct drv_rpi4_sdio_card *card;
+	struct drv_rpi_sdio_card *card;
 
 	card = &wifi->card;
 
@@ -1275,13 +1275,13 @@ give_back(
 
 	/* Stops the controller, which keeps the card's interrupt off the line. */
 	if (wifi->host_ready != 0) {
-		drv_rpi4_sdio_host_stop(&wifi->host);
+		drv_rpi_sdio_host_stop(&wifi->host);
 		wifi->host_ready = 0;
 	}
 
 	/* Leaves the line once the controller can no longer raise it. */
 	if (wifi->irq_added != 0) {
-		error = drv_rpi4_mmc_irq_remove(wifi->irq, drv_rpi4_sdio_host_interrupt, &wifi->host);
+		error = drv_rpi_mmc_irq_remove(wifi->irq, drv_rpi_sdio_host_interrupt, &wifi->host);
 		if (error != 0)
 			kern_logf("rpi5-wifi: SD interrupt line not left (%d)\n", error);
 		wifi->irq_added = 0;
@@ -1393,7 +1393,7 @@ bus_read_byte(
 	wifi = context;
 
 	/* Reads the byte through the card layer. */
-	error = drv_rpi4_sdio_read_byte(&wifi->card, function, address, value);
+	error = drv_rpi_sdio_read_byte(&wifi->card, function, address, value);
 	if (error != 0)
 		return error;
 
@@ -1415,7 +1415,7 @@ bus_write_byte(
 	wifi = context;
 
 	/* Writes the byte through the card layer. */
-	error = drv_rpi4_sdio_write_byte(&wifi->card, function, address, value);
+	error = drv_rpi_sdio_write_byte(&wifi->card, function, address, value);
 	if (error != 0)
 		return error;
 
@@ -1439,7 +1439,7 @@ bus_read(
 	wifi = context;
 
 	/* Reads the bytes through the card layer. */
-	error = drv_rpi4_sdio_transfer(&wifi->card, DRV_RPI4_SDIO_DATA_READ, function, address, increment, buffer, length);
+	error = drv_rpi_sdio_transfer(&wifi->card, DRV_RPI_SDIO_DATA_READ, function, address, increment, buffer, length);
 	if (error != 0)
 		return error;
 
@@ -1463,7 +1463,7 @@ bus_write(
 	wifi = context;
 
 	/* Writes the bytes through the card layer. */
-	error = drv_rpi4_sdio_transfer(&wifi->card, DRV_RPI4_SDIO_DATA_WRITE, function, address, increment, buffer, length);
+	error = drv_rpi_sdio_transfer(&wifi->card, DRV_RPI_SDIO_DATA_WRITE, function, address, increment, buffer, length);
 	if (error != 0)
 		return error;
 
@@ -1482,7 +1482,7 @@ bus_block_size(
 	wifi = context;
 
 	/* A function past the card's has no block size. */
-	if (function > DRV_RPI4_SDIO_FUNCTION_MAX)
+	if (function > DRV_RPI_SDIO_FUNCTION_MAX)
 		return 0;
 
 	/* Succeeded: the size enumeration and power_up set. */
@@ -1502,7 +1502,7 @@ bus_enable_function(
 	wifi = context;
 
 	/* Enables it through the card layer, which sleeps through the thread's waiter. */
-	error = drv_rpi4_sdio_enable_function(&wifi->card, function, &wifi->waiter, timeout_ms);
+	error = drv_rpi_sdio_enable_function(&wifi->card, function, &wifi->waiter, timeout_ms);
 	if (error != 0)
 		return error;
 
@@ -1522,7 +1522,7 @@ bus_disable_function(
 	wifi = context;
 
 	/* Disables it through the card layer. */
-	error = drv_rpi4_sdio_disable_function(&wifi->card, function);
+	error = drv_rpi_sdio_disable_function(&wifi->card, function);
 	if (error != 0)
 		return error;
 
@@ -1542,7 +1542,7 @@ bus_interrupt_wait(
 	wifi = context;
 
 	/* Waits on the host's card interrupt. */
-	waited = drv_rpi4_sdio_host_card_irq_wait(&wifi->host, deadline);
+	waited = drv_rpi_sdio_host_card_irq_wait(&wifi->host, deadline);
 	if (waited != 0)
 		return waited;
 
@@ -1561,7 +1561,7 @@ bus_interrupt_enable(
 	wifi = context;
 
 	/* Applies it in the host. */
-	drv_rpi4_sdio_host_card_irq_enable(&wifi->host, enable);
+	drv_rpi_sdio_host_card_irq_enable(&wifi->host, enable);
 }
 
 /* Arms the card's interrupt again after it was served. */
@@ -1574,7 +1574,7 @@ bus_interrupt_rearm(
 	wifi = context;
 
 	/* Rearms it in the host. */
-	drv_rpi4_sdio_host_card_irq_rearm(&wifi->host);
+	drv_rpi_sdio_host_card_irq_rearm(&wifi->host);
 }
 
 /* Ends the bus thread's wait without an interrupt. */
@@ -1587,7 +1587,7 @@ bus_interrupt_kick(
 	wifi = context;
 
 	/* Kicks the host's wait. */
-	drv_rpi4_sdio_host_card_irq_kick(&wifi->host);
+	drv_rpi_sdio_host_card_irq_kick(&wifi->host);
 }
 
 /*
@@ -1605,12 +1605,12 @@ bus_power_up(
 	wifi = context;
 
 	/* Returns the bus to one line, which a previous run left wide. */
-	error = drv_rpi4_sdio_host_set_bus_width(&wifi->host, 1);
+	error = drv_rpi_sdio_host_set_bus_width(&wifi->host, 1);
 	if (error != 0)
 		return error;
 
 	/* Returns the bus to the enumeration clock, which a previous run left fast. */
-	error = drv_rpi4_sdio_host_set_clock(&wifi->host, DRV_RPI4_SDIO_HOST_IDENTIFY_HZ);
+	error = drv_rpi_sdio_host_set_clock(&wifi->host, DRV_RPI_SDIO_HOST_IDENTIFY_HZ);
 	if (error != 0)
 		return error;
 
@@ -1620,7 +1620,7 @@ bus_power_up(
 		return error;
 
 	/* Enumerates the SDIO interface up to a selected card on the fast bus. */
-	error = drv_rpi4_sdio_enumerate(&wifi->card, &wifi->host, &wifi->waiter);
+	error = drv_rpi_sdio_enumerate(&wifi->card, &wifi->host, &wifi->waiter);
 	(void)drv_rpi5_serror_check("rpi5-wifi: enumerating the card");
 	if (error != 0)
 		return error;
@@ -1651,7 +1651,7 @@ bus_power_down(
 	wifi = context;
 
 	/* Keeps the card's interrupt off the line. */
-	drv_rpi4_sdio_host_card_irq_enable(&wifi->host, 0);
+	drv_rpi_sdio_host_card_irq_enable(&wifi->host, 0);
 
 	/* Holds the chip in reset. */
 	error = set_power(wifi, 0);

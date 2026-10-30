@@ -9,7 +9,7 @@
  * Host test of the Raspberry Pi 4 GPIO helpers and the firmware's GPIO
  * expander helpers (ws206-p002a).
  *
- * The production rpi4-gpio.c and rpi4-firmware.c are compiled unchanged
+ * The production rpi-gpio.c and rpi4-firmware.c are compiled unchanged
  * against a model of the GPIO block's registers, of the mailbox and of the
  * VideoCore's answers, with the firmware's real device tree.
  *
@@ -23,7 +23,7 @@
  */
 
 #include "drivers/platform/rpi4/rpi4-firmware.h"
-#include "drivers/platform/rpi4/rpi4-gpio.h"
+#include "drivers/platform/rpi-common/rpi-gpio.h"
 #include <kern/clock.h>
 #include <kern/dcache.h>
 #include <kern/device-io.h>
@@ -174,24 +174,24 @@ main(
 static void
 run_unit(void)
 {
-	enum drv_rpi4_gpio_function function;
+	enum drv_rpi_gpio_function function;
 	int error;
 
 	/* The conversion from the tree needs no mapping. */
 	check_conversions();
 
 	/* Every helper that touches registers refuses to before the block is mapped. */
-	error = drv_rpi4_gpio_set_function(34U, DRV_RPI4_GPIO_FUNCTION_ALT3);
+	error = drv_rpi_gpio_set_function(34U, DRV_RPI_GPIO_FUNCTION_ALT3);
 	CHECK(error == ENODEV);
-	error = drv_rpi4_gpio_get_function(34U, &function);
+	error = drv_rpi_gpio_get_function(34U, &function);
 	CHECK(error == ENODEV);
-	error = drv_rpi4_gpio_set_pull(35U, DRV_RPI4_GPIO_PULL_UP);
+	error = drv_rpi_gpio_set_pull(35U, DRV_RPI_GPIO_PULL_UP);
 	CHECK(error == ENODEV);
 
 	/* Maps the block once; a second call does nothing. */
-	error = drv_rpi4_gpio_init(&fdt);
+	error = drv_rpi_gpio_init(&fdt);
 	CHECK(error == 0);
-	error = drv_rpi4_gpio_init(&fdt);
+	error = drv_rpi_gpio_init(&fdt);
 	CHECK(error == 0);
 	CHECK(gpio_mappings == 1U);
 
@@ -207,26 +207,26 @@ run_unit(void)
 static void
 check_conversions(void)
 {
-	enum drv_rpi4_gpio_pull pull;
+	enum drv_rpi_gpio_pull pull;
 	int error;
 
 	/* The tree says 0 for none, 1 for down and 2 for up. */
-	error = drv_rpi4_gpio_pull_from_dt(0U, &pull);
+	error = drv_rpi_gpio_pull_from_dt(0U, &pull);
 	CHECK(error == 0);
-	CHECK(pull == DRV_RPI4_GPIO_PULL_NONE);
-	error = drv_rpi4_gpio_pull_from_dt(1U, &pull);
+	CHECK(pull == DRV_RPI_GPIO_PULL_NONE);
+	error = drv_rpi_gpio_pull_from_dt(1U, &pull);
 	CHECK(error == 0);
-	CHECK(pull == DRV_RPI4_GPIO_PULL_DOWN);
-	error = drv_rpi4_gpio_pull_from_dt(2U, &pull);
+	CHECK(pull == DRV_RPI_GPIO_PULL_DOWN);
+	error = drv_rpi_gpio_pull_from_dt(2U, &pull);
 	CHECK(error == 0);
-	CHECK(pull == DRV_RPI4_GPIO_PULL_UP);
+	CHECK(pull == DRV_RPI_GPIO_PULL_UP);
 
 	/* Any other number, or nowhere to put the answer, is refused. */
-	error = drv_rpi4_gpio_pull_from_dt(3U, &pull);
+	error = drv_rpi_gpio_pull_from_dt(3U, &pull);
 	CHECK(error == EINVAL);
-	error = drv_rpi4_gpio_pull_from_dt(0xffffffffU, &pull);
+	error = drv_rpi_gpio_pull_from_dt(0xffffffffU, &pull);
 	CHECK(error == EINVAL);
-	error = drv_rpi4_gpio_pull_from_dt(0U, NULL);
+	error = drv_rpi_gpio_pull_from_dt(0U, NULL);
 	CHECK(error == EINVAL);
 }
 
@@ -234,7 +234,7 @@ check_conversions(void)
 static void
 check_functions(void)
 {
-	enum drv_rpi4_gpio_function function;
+	enum drv_rpi_gpio_function function;
 	uint32_t before[GPIO_SPAN / 4U];
 	unsigned pin;
 	unsigned code;
@@ -244,7 +244,7 @@ check_functions(void)
 	int error;
 
 	/* Sets every function on every pin over a register file of noise. */
-	for (pin = 0; pin < DRV_RPI4_GPIO_PIN_COUNT; pin++) {
+	for (pin = 0; pin < DRV_RPI_GPIO_PIN_COUNT; pin++) {
 		for (code = 0; code < 8U; code++) {
 			/* Fills the block with a pattern the change must keep. */
 			for (index = 0; index < GPIO_SPAN / 4U; index++)
@@ -252,7 +252,7 @@ check_functions(void)
 			memcpy(before, gpio_block, sizeof(before));
 
 			/* Changes the pin. */
-			error = drv_rpi4_gpio_set_function(pin, (enum drv_rpi4_gpio_function)code);
+			error = drv_rpi_gpio_set_function(pin, (enum drv_rpi_gpio_function)code);
 			CHECK(error == 0);
 
 			/* Only the pin's three bits of its register changed, and they hold the code. */
@@ -267,7 +267,7 @@ check_functions(void)
 			CHECK(((gpio_block[word] >> shift) & 7U) == code);
 
 			/* The read gives the code back. */
-			error = drv_rpi4_gpio_get_function(pin, &function);
+			error = drv_rpi_gpio_get_function(pin, &function);
 			CHECK(error == 0);
 			CHECK((unsigned)function == code);
 		}
@@ -275,15 +275,15 @@ check_functions(void)
 
 	/* Pins and functions the block does not have are refused without a write. */
 	memcpy(before, gpio_block, sizeof(before));
-	error = drv_rpi4_gpio_set_function(DRV_RPI4_GPIO_PIN_COUNT, DRV_RPI4_GPIO_FUNCTION_OUTPUT);
+	error = drv_rpi_gpio_set_function(DRV_RPI_GPIO_PIN_COUNT, DRV_RPI_GPIO_FUNCTION_OUTPUT);
 	CHECK(error == EINVAL);
-	error = drv_rpi4_gpio_set_function(34U, (enum drv_rpi4_gpio_function)8);
+	error = drv_rpi_gpio_set_function(34U, (enum drv_rpi_gpio_function)8);
 	CHECK(error == EINVAL);
-	error = drv_rpi4_gpio_set_function(34U, (enum drv_rpi4_gpio_function)-1);
+	error = drv_rpi_gpio_set_function(34U, (enum drv_rpi_gpio_function)-1);
 	CHECK(error == EINVAL);
-	error = drv_rpi4_gpio_get_function(DRV_RPI4_GPIO_PIN_COUNT, &function);
+	error = drv_rpi_gpio_get_function(DRV_RPI_GPIO_PIN_COUNT, &function);
 	CHECK(error == EINVAL);
-	error = drv_rpi4_gpio_get_function(34U, NULL);
+	error = drv_rpi_gpio_get_function(34U, NULL);
 	CHECK(error == EINVAL);
 	CHECK(memcmp(before, gpio_block, sizeof(before)) == 0);
 }
@@ -292,10 +292,10 @@ check_functions(void)
 static void
 check_pulls(void)
 {
-	static const enum drv_rpi4_gpio_pull pulls[3] = {
-		DRV_RPI4_GPIO_PULL_NONE,
-		DRV_RPI4_GPIO_PULL_UP,
-		DRV_RPI4_GPIO_PULL_DOWN
+	static const enum drv_rpi_gpio_pull pulls[3] = {
+		DRV_RPI_GPIO_PULL_NONE,
+		DRV_RPI_GPIO_PULL_UP,
+		DRV_RPI_GPIO_PULL_DOWN
 	};
 
 	/* BCM2711 GPIO_PUP_PDN_CNTRL: 00 none, 01 up, 10 down. */
@@ -310,7 +310,7 @@ check_pulls(void)
 	int error;
 
 	/* Sets every resistor on every pin over a register file of noise. */
-	for (pin = 0; pin < DRV_RPI4_GPIO_PIN_COUNT; pin++) {
+	for (pin = 0; pin < DRV_RPI_GPIO_PIN_COUNT; pin++) {
 		for (choice = 0; choice < 3U; choice++) {
 			/* Fills the block with a pattern the change must keep. */
 			for (index = 0; index < GPIO_SPAN / 4U; index++)
@@ -318,7 +318,7 @@ check_pulls(void)
 			memcpy(before, gpio_block, sizeof(before));
 
 			/* Changes the pin. */
-			error = drv_rpi4_gpio_set_pull(pin, pulls[choice]);
+			error = drv_rpi_gpio_set_pull(pin, pulls[choice]);
 			CHECK(error == 0);
 
 			/* Only the pin's two bits of its pull register changed, and they hold the code. */
@@ -336,11 +336,11 @@ check_pulls(void)
 
 	/* The raw numbers of the tree (0) and outside the enumeration (4) are refused without a write. */
 	memcpy(before, gpio_block, sizeof(before));
-	error = drv_rpi4_gpio_set_pull(35U, (enum drv_rpi4_gpio_pull)0);
+	error = drv_rpi_gpio_set_pull(35U, (enum drv_rpi_gpio_pull)0);
 	CHECK(error == EINVAL);
-	error = drv_rpi4_gpio_set_pull(35U, (enum drv_rpi4_gpio_pull)4);
+	error = drv_rpi_gpio_set_pull(35U, (enum drv_rpi_gpio_pull)4);
 	CHECK(error == EINVAL);
-	error = drv_rpi4_gpio_set_pull(DRV_RPI4_GPIO_PIN_COUNT, DRV_RPI4_GPIO_PULL_UP);
+	error = drv_rpi_gpio_set_pull(DRV_RPI_GPIO_PIN_COUNT, DRV_RPI_GPIO_PULL_UP);
 	CHECK(error == EINVAL);
 	CHECK(memcmp(before, gpio_block, sizeof(before)) == 0);
 }
@@ -504,7 +504,7 @@ run_smp(void)
 {
 	pthread_t threads[CPU_COUNT];
 	struct cpu_part parts[CPU_COUNT];
-	enum drv_rpi4_gpio_function function;
+	enum drv_rpi_gpio_function function;
 	unsigned i;
 	unsigned word;
 	unsigned shift;
@@ -531,9 +531,9 @@ run_smp(void)
 
 	/* Each CPU's last change of its pins survived the others' changes. */
 	for (i = 0; i < CPU_COUNT; i++) {
-		error = drv_rpi4_gpio_get_function(30U + i, &function);
+		error = drv_rpi_gpio_get_function(30U + i, &function);
 		CHECK(error == 0);
-		CHECK(function == (enum drv_rpi4_gpio_function)((i + 1U) & 7U));
+		CHECK(function == (enum drv_rpi_gpio_function)((i + 1U) & 7U));
 		word = (GPIO_PULL_OFFSET / 4U) + (32U + 2U * i) / 16U;
 		shift = 2U * ((32U + 2U * i) % 16U);
 		pthread_mutex_lock(&fake_lock);
@@ -555,14 +555,14 @@ static void *
 cpu_main(
 	void *argument)
 {
-	static const enum drv_rpi4_gpio_pull pulls[3] = {
-		DRV_RPI4_GPIO_PULL_NONE,
-		DRV_RPI4_GPIO_PULL_UP,
-		DRV_RPI4_GPIO_PULL_DOWN
+	static const enum drv_rpi_gpio_pull pulls[3] = {
+		DRV_RPI_GPIO_PULL_NONE,
+		DRV_RPI_GPIO_PULL_UP,
+		DRV_RPI_GPIO_PULL_DOWN
 	};
 	struct cpu_part *part;
-	enum drv_rpi4_gpio_function function;
-	enum drv_rpi4_gpio_function wanted;
+	enum drv_rpi_gpio_function function;
+	enum drv_rpi_gpio_function wanted;
 	unsigned change;
 	unsigned pin;
 	int error;
@@ -572,30 +572,30 @@ cpu_main(
 	pthread_barrier_wait(&start_line);
 
 	/* Maps the block together with the others. */
-	part->init_error = drv_rpi4_gpio_init(&fdt);
+	part->init_error = drv_rpi_gpio_init(&fdt);
 	if (part->init_error != 0)
 		return NULL;
 
 	/* Changes the pins; a lost update shows as a different read-back. */
 	for (change = 0; change < CHANGES_PER_CPU; change++) {
-		wanted = (enum drv_rpi4_gpio_function)((change + part->index) & 7U);
-		error = drv_rpi4_gpio_set_function(pin, wanted);
+		wanted = (enum drv_rpi_gpio_function)((change + part->index) & 7U);
+		error = drv_rpi_gpio_set_function(pin, wanted);
 		CHECK(error == 0);
-		error = drv_rpi4_gpio_get_function(pin, &function);
+		error = drv_rpi_gpio_get_function(pin, &function);
 		CHECK(error == 0);
 		CHECK(function == wanted);
-		error = drv_rpi4_gpio_set_pull(32U + 2U * part->index, pulls[change % 3U]);
+		error = drv_rpi_gpio_set_pull(32U + 2U * part->index, pulls[change % 3U]);
 		CHECK(error == 0);
-		error = drv_rpi4_gpio_set_pull(33U + 2U * part->index, pulls[(change + 1U) % 3U]);
+		error = drv_rpi_gpio_set_pull(33U + 2U * part->index, pulls[(change + 1U) % 3U]);
 		CHECK(error == 0);
 	}
 
 	/* Leaves a final value the main thread can check. */
-	error = drv_rpi4_gpio_set_function(pin, (enum drv_rpi4_gpio_function)((part->index + 1U) & 7U));
+	error = drv_rpi_gpio_set_function(pin, (enum drv_rpi_gpio_function)((part->index + 1U) & 7U));
 	CHECK(error == 0);
-	error = drv_rpi4_gpio_set_pull(32U + 2U * part->index, DRV_RPI4_GPIO_PULL_UP);
+	error = drv_rpi_gpio_set_pull(32U + 2U * part->index, DRV_RPI_GPIO_PULL_UP);
 	CHECK(error == 0);
-	error = drv_rpi4_gpio_set_pull(33U + 2U * part->index, DRV_RPI4_GPIO_PULL_DOWN);
+	error = drv_rpi_gpio_set_pull(33U + 2U * part->index, DRV_RPI_GPIO_PULL_DOWN);
 	CHECK(error == 0);
 	return NULL;
 }

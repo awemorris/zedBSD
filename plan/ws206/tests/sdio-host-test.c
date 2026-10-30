@@ -10,8 +10,8 @@
  * dispatcher, the SDIO card layer and the onboard Wi-Fi's thread
  * (ws206-p002b).
  *
- * The production rpi4-mmc-irq.c, rpi4-sdio-host.c, rpi4-sdio.c,
- * rpi4-wifi.c, rpi4-gpio.c and rpi4-board.c are compiled unchanged against
+ * The production rpi-mmc-irq.c, rpi-sdio-host.c, rpi-sdio.c,
+ * rpi4-wifi.c, rpi-gpio.c and rpi4-board.c are compiled unchanged against
  * a model of the legacy EMMC controller's registers with an SDIO card
  * behind them, a model of the GPIO block, stand-ins for the firmware's
  * mailbox helpers, and the firmware's real device tree.
@@ -36,10 +36,10 @@
  */
 
 #include "drivers/platform/rpi4/rpi4-firmware.h"
-#include "drivers/platform/rpi4/rpi4-gpio.h"
-#include "drivers/platform/rpi4/rpi4-mmc-irq.h"
-#include "drivers/platform/rpi4/rpi4-sdio-host.h"
-#include "drivers/platform/rpi4/rpi4-sdio.h"
+#include "drivers/platform/rpi-common/rpi-gpio.h"
+#include "drivers/platform/rpi-common/rpi-mmc-irq.h"
+#include "drivers/platform/rpi-common/rpi-sdio-host.h"
+#include "drivers/platform/rpi-common/rpi-sdio.h"
 #include "drivers/platform/rpi4/rpi4-wifi.h"
 #include "drivers/wifi/bcm43455/bcm43455.h"
 #include <kern/clock.h>
@@ -116,7 +116,7 @@
 #define CIS_ADDRESS		0x1000U
 
 /* The largest transfer the model holds. */
-#define TRANSFER_MAX		(DRV_RPI4_SDIO_HOST_BLOCK_MAX * 4U)
+#define TRANSFER_MAX		(DRV_RPI_SDIO_HOST_BLOCK_MAX * 4U)
 
 /*
  * The scheduler's clock and its default priority (kern/sched.h, whose
@@ -374,71 +374,71 @@ check_divisor(void)
 	uint32_t actual;
 
 	/* 25 MHz from the base clocks the firmware may give. */
-	CHECK(drv_rpi4_sdio_host_clock_divisor(250000000U, 25000000U, 2, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(250000000U, 25000000U, 2, &divisor, &actual) == 0);
 	CHECK(divisor == 5U && actual == 25000000U);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(200000000U, 25000000U, 2, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(200000000U, 25000000U, 2, &divisor, &actual) == 0);
 	CHECK(divisor == 4U && actual == 25000000U);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(100000000U, 25000000U, 2, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(100000000U, 25000000U, 2, &divisor, &actual) == 0);
 	CHECK(divisor == 2U && actual == 25000000U);
 
 	/* 400 kHz, never above. */
-	CHECK(drv_rpi4_sdio_host_clock_divisor(250000000U, 400000U, 2, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(250000000U, 400000U, 2, &divisor, &actual) == 0);
 	CHECK(divisor == 313U && actual == 399361U);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(200000000U, 400000U, 2, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(200000000U, 400000U, 2, &divisor, &actual) == 0);
 	CHECK(divisor == 250U && actual == 400000U);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(100000000U, 400000U, 2, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(100000000U, 400000U, 2, &divisor, &actual) == 0);
 	CHECK(divisor == 125U && actual == 400000U);
 
 	/* A version 2.00 host rounds up to a power of two, up to 128. */
-	CHECK(drv_rpi4_sdio_host_clock_divisor(100000000U, 400000U, 1, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(100000000U, 400000U, 1, &divisor, &actual) == 0);
 	CHECK(divisor == 128U && actual == 390625U);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(100000000U, 25000000U, 1, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(100000000U, 25000000U, 1, &divisor, &actual) == 0);
 	CHECK(divisor == 2U && actual == 25000000U);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(250000000U, 25000000U, 1, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(250000000U, 25000000U, 1, &divisor, &actual) == 0);
 	CHECK(divisor == 8U && actual == 15625000U);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(250000000U, 400000U, 1, &divisor, &actual) == ERANGE);
+	CHECK(drv_rpi_sdio_host_clock_divisor(250000000U, 400000U, 1, &divisor, &actual) == ERANGE);
 
 	/* An undivided clock, a rate too slow for 1023, and missing values. */
-	CHECK(drv_rpi4_sdio_host_clock_divisor(25000000U, 25000000U, 2, &divisor, &actual) == 0);
+	CHECK(drv_rpi_sdio_host_clock_divisor(25000000U, 25000000U, 2, &divisor, &actual) == 0);
 	CHECK(divisor == 0 && actual == 25000000U);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(250000000U, 100000U, 2, &divisor, &actual) == ERANGE);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(0, 400000U, 2, &divisor, &actual) == EINVAL);
-	CHECK(drv_rpi4_sdio_host_clock_divisor(250000000U, 0, 2, &divisor, &actual) == EINVAL);
+	CHECK(drv_rpi_sdio_host_clock_divisor(250000000U, 100000U, 2, &divisor, &actual) == ERANGE);
+	CHECK(drv_rpi_sdio_host_clock_divisor(0, 400000U, 2, &divisor, &actual) == EINVAL);
+	CHECK(drv_rpi_sdio_host_clock_divisor(250000000U, 0, 2, &divisor, &actual) == EINVAL);
 }
 
 /* The answers to CMD5 and CMD52, and the voltage window. */
 static void
 check_decoders(void)
 {
-	struct drv_rpi4_sdio_ocr ocr;
+	struct drv_rpi_sdio_ocr ocr;
 	uint32_t window;
 	uint8_t data;
 
 	/* A ready card with two functions and no memory, from 2.8 to 3.6 V. */
-	CHECK(drv_rpi4_sdio_decode_ocr(0xa0ff8000U, &ocr) == 0);
+	CHECK(drv_rpi_sdio_decode_ocr(0xa0ff8000U, &ocr) == 0);
 	CHECK(ocr.ready == 1 && ocr.function_count == 2 && ocr.memory_present == 0);
 	CHECK(ocr.voltages == 0x00ff8000U);
-	CHECK(drv_rpi4_sdio_voltage_window(ocr.voltages, &window) == 0);
+	CHECK(drv_rpi_sdio_voltage_window(ocr.voltages, &window) == 0);
 	CHECK(window == 0x00300000U);
 
 	/* A busy combined card with seven functions. */
-	CHECK(drv_rpi4_sdio_decode_ocr(0x78100000U, &ocr) == 0);
+	CHECK(drv_rpi_sdio_decode_ocr(0x78100000U, &ocr) == 0);
 	CHECK(ocr.ready == 0 && ocr.function_count == 7 && ocr.memory_present == 1);
-	CHECK(drv_rpi4_sdio_voltage_window(ocr.voltages, &window) == 0);
+	CHECK(drv_rpi_sdio_voltage_window(ocr.voltages, &window) == 0);
 	CHECK(window == 0x00100000U);
 
 	/* A card that cannot run at 3.3 V. */
-	CHECK(drv_rpi4_sdio_voltage_window(0x0000ff80U, &window) == ENOTSUP);
+	CHECK(drv_rpi_sdio_voltage_window(0x0000ff80U, &window) == ENOTSUP);
 
 	/* R5: the data byte, and each error flag refused. */
-	CHECK(drv_rpi4_sdio_decode_r5(0x00001055U, &data) == 0 && data == 0x55U);
-	CHECK(drv_rpi4_sdio_decode_r5(0x000020aaU, &data) == 0 && data == 0xaaU);
-	CHECK(drv_rpi4_sdio_decode_r5(0x00008000U, &data) == EIO);
-	CHECK(drv_rpi4_sdio_decode_r5(0x00004000U, &data) == EIO);
-	CHECK(drv_rpi4_sdio_decode_r5(0x00000800U, &data) == EIO);
-	CHECK(drv_rpi4_sdio_decode_r5(0x00000200U, &data) == EIO);
-	CHECK(drv_rpi4_sdio_decode_r5(0x00000100U, &data) == EIO);
-	CHECK(drv_rpi4_sdio_decode_r5(0x00000400U, NULL) == 0);
+	CHECK(drv_rpi_sdio_decode_r5(0x00001055U, &data) == 0 && data == 0x55U);
+	CHECK(drv_rpi_sdio_decode_r5(0x000020aaU, &data) == 0 && data == 0xaaU);
+	CHECK(drv_rpi_sdio_decode_r5(0x00008000U, &data) == EIO);
+	CHECK(drv_rpi_sdio_decode_r5(0x00004000U, &data) == EIO);
+	CHECK(drv_rpi_sdio_decode_r5(0x00000800U, &data) == EIO);
+	CHECK(drv_rpi_sdio_decode_r5(0x00000200U, &data) == EIO);
+	CHECK(drv_rpi_sdio_decode_r5(0x00000100U, &data) == EIO);
+	CHECK(drv_rpi_sdio_decode_r5(0x00000400U, NULL) == 0);
 }
 
 /* The CIS walk: the tuples it reads, padding, the two ends, and truncation. */
@@ -457,50 +457,50 @@ check_cis(void)
 	static const uint8_t short_manfid[] = { 0x20, 0x02, 0xd0, 0x02, 0xff };
 	static const uint8_t truncated[] = { 0x20, 0x04, 0xd0, 0x02 };
 	static const uint8_t no_end[] = { 0x21, 0x02, 0x0c, 0x00 };
-	struct drv_rpi4_sdio_cis cis;
+	struct drv_rpi_sdio_cis cis;
 
 	/* MANFID and function 0's FUNCE are read; function 1's FUNCE is not function 0's. */
-	CHECK(drv_rpi4_sdio_parse_cis(chain, sizeof(chain), &cis) == 0);
+	CHECK(drv_rpi_sdio_parse_cis(chain, sizeof(chain), &cis) == 0);
 	CHECK(cis.has_manufacturer == 1 && cis.manufacturer == 0x02d0U && cis.card == 0x4345U);
 	CHECK(cis.has_function0 == 1 && cis.function0_block_max == 0x0200U && cis.speed_code == 0x32U);
 
 	/* A link of 0xff ends the chain where it stands. */
-	CHECK(drv_rpi4_sdio_parse_cis(link_end, sizeof(link_end), &cis) == 0);
+	CHECK(drv_rpi_sdio_parse_cis(link_end, sizeof(link_end), &cis) == 0);
 	CHECK(cis.has_manufacturer == 1 && cis.has_function0 == 0);
 
 	/* A MANFID too short to hold the codes is passed over. */
-	CHECK(drv_rpi4_sdio_parse_cis(short_manfid, sizeof(short_manfid), &cis) == 0);
+	CHECK(drv_rpi_sdio_parse_cis(short_manfid, sizeof(short_manfid), &cis) == 0);
 	CHECK(cis.has_manufacturer == 0);
 
 	/* A tuple or a chain that runs out of bytes. */
-	CHECK(drv_rpi4_sdio_parse_cis(truncated, sizeof(truncated), &cis) == EINVAL);
-	CHECK(drv_rpi4_sdio_parse_cis(no_end, sizeof(no_end), &cis) == EINVAL);
-	CHECK(drv_rpi4_sdio_parse_cis(NULL, 4, &cis) == EINVAL);
+	CHECK(drv_rpi_sdio_parse_cis(truncated, sizeof(truncated), &cis) == EINVAL);
+	CHECK(drv_rpi_sdio_parse_cis(no_end, sizeof(no_end), &cis) == EINVAL);
+	CHECK(drv_rpi_sdio_parse_cis(NULL, 4, &cis) == EINVAL);
 }
 
 /* The slot in the firmware's tree, and the trees that refuse it. */
 static void
 check_slot(void)
 {
-	struct drv_rpi4_sdio_slot slot;
+	struct drv_rpi_sdio_slot slot;
 	struct drv_fdt changed;
 	unsigned char *copy;
 	unsigned i;
 
 	/* The board's tree with the SD card on eMMC2. */
-	CHECK(drv_rpi4_sdio_describe_slot(&fdt, (uintptr_t)EMMC2_BASE, &slot) == 0);
+	CHECK(drv_rpi_sdio_describe_slot(&fdt, (uintptr_t)EMMC2_BASE, &slot) == 0);
 	CHECK(slot.registers == SDHCI_BASE);
 	CHECK(slot.irq == MMC_IRQ);
 	CHECK(slot.pin_count == 6U);
 	for (i = 0; i < 6U; i++)
 		CHECK(slot.pins[i] == 34U + i);
-	CHECK(slot.function == DRV_RPI4_GPIO_FUNCTION_ALT3);
-	CHECK(slot.pulls[0] == DRV_RPI4_GPIO_PULL_NONE);
+	CHECK(slot.function == DRV_RPI_GPIO_FUNCTION_ALT3);
+	CHECK(slot.pulls[0] == DRV_RPI_GPIO_PULL_NONE);
 	for (i = 1; i < 6U; i++)
-		CHECK(slot.pulls[i] == DRV_RPI4_GPIO_PULL_UP);
+		CHECK(slot.pulls[i] == DRV_RPI_GPIO_PULL_UP);
 
 	/* The SD card on the same controller (QEMU's fallback) keeps it. */
-	CHECK(drv_rpi4_sdio_describe_slot(&fdt, (uintptr_t)SDHCI_BASE, &slot) == EBUSY);
+	CHECK(drv_rpi_sdio_describe_slot(&fdt, (uintptr_t)SDHCI_BASE, &slot) == EBUSY);
 
 	/* A tree without the PCIe controller and GENET is QEMU's. */
 	copy = malloc(tree_size);
@@ -509,19 +509,19 @@ check_slot(void)
 	corrupt(copy, tree_size, "brcm,bcm2711-pcie", 'x');
 	corrupt(copy, tree_size, "brcm,bcm2711-genet-v5", 'x');
 	CHECK(drv_fdt_open(&changed, copy, tree_size) == 0);
-	CHECK(drv_rpi4_sdio_describe_slot(&changed, (uintptr_t)EMMC2_BASE, &slot) == ENODEV);
+	CHECK(drv_rpi_sdio_describe_slot(&changed, (uintptr_t)EMMC2_BASE, &slot) == ENODEV);
 
 	/* A tree without the chip. */
 	memcpy(copy, tree_blob, tree_size);
 	corrupt(copy, tree_size, "brcm,bcm4329-fmac", 'x');
 	CHECK(drv_fdt_open(&changed, copy, tree_size) == 0);
-	CHECK(drv_rpi4_sdio_describe_slot(&changed, (uintptr_t)EMMC2_BASE, &slot) == ENODEV);
+	CHECK(drv_rpi_sdio_describe_slot(&changed, (uintptr_t)EMMC2_BASE, &slot) == ENODEV);
 
 	/* The slot switched off, as the disable-wifi overlay does. */
 	memcpy(copy, tree_blob, tree_size);
 	corrupt(copy, tree_size, "mmcnr@7e300000", 0);
 	CHECK(drv_fdt_open(&changed, copy, tree_size) == 0);
-	CHECK(drv_rpi4_sdio_describe_slot(&changed, (uintptr_t)EMMC2_BASE, &slot) == ENODEV);
+	CHECK(drv_rpi_sdio_describe_slot(&changed, (uintptr_t)EMMC2_BASE, &slot) == ENODEV);
 	free(copy);
 }
 
@@ -533,9 +533,9 @@ check_dispatcher(void)
 
 	/* A failed installation is retried by the next add. */
 	register_fail_next = 1;
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, handler_0, &asked[0]) == EIO);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, handler_0, &asked[0]) == EIO);
 	CHECK(register_calls == 1U && installed_handler == NULL);
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, handler_0, &asked[0]) == 0);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, handler_0, &asked[0]) == 0);
 	CHECK(register_calls == 2U && installed_handler != NULL && installed_irq == MMC_IRQ);
 	CHECK(installed_argument == NULL);
 	CHECK(mode_calls == 2U);
@@ -544,11 +544,11 @@ check_dispatcher(void)
 	CHECK(mask_calls == 2U && unmask_calls == 1U);
 
 	/* The second slot, then the refusals. */
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, handler_1, &asked[1]) == 0);
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, handler_2, &asked[2]) == EBUSY);
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, handler_1, &asked[1]) == EEXIST);
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ + 1, handler_2, &asked[2]) == EINVAL);
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, NULL, NULL) == EINVAL);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, handler_1, &asked[1]) == 0);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, handler_2, &asked[2]) == EBUSY);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, handler_1, &asked[1]) == EEXIST);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ + 1, handler_2, &asked[2]) == EINVAL);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, NULL, NULL) == EINVAL);
 	CHECK(register_calls == 2U);
 
 	/* An interrupt asks both, even when the first claims it, and is ended once. */
@@ -558,11 +558,11 @@ check_dispatcher(void)
 	CHECK(asked[0] == 1U && asked[1] == 1U && eoi_calls == 1U);
 
 	/* A removed handler is not asked again. */
-	CHECK(drv_rpi4_mmc_irq_remove(MMC_IRQ, handler_0, &asked[0]) == 0);
+	CHECK(drv_rpi_mmc_irq_remove(MMC_IRQ, handler_0, &asked[0]) == 0);
 	installed_handler(MMC_IRQ, (kern_irq_ack_t)1, installed_argument);
 	CHECK(asked[0] == 1U && asked[1] == 2U && eoi_calls == 2U);
-	CHECK(drv_rpi4_mmc_irq_remove(MMC_IRQ, handler_0, &asked[0]) == ENOENT);
-	CHECK(drv_rpi4_mmc_irq_remove(MMC_IRQ + 1, handler_1, &asked[1]) == EINVAL);
+	CHECK(drv_rpi_mmc_irq_remove(MMC_IRQ, handler_0, &asked[0]) == ENOENT);
+	CHECK(drv_rpi_mmc_irq_remove(MMC_IRQ + 1, handler_1, &asked[1]) == EINVAL);
 
 	/* A line nobody claims for a long run is masked; the next add unmasks it. */
 	for (i = 0; i < 100000U; i++)
@@ -570,12 +570,12 @@ check_dispatcher(void)
 	CHECK(mask_calls == 3U);
 	installed_handler(MMC_IRQ, (kern_irq_ack_t)1, installed_argument);
 	CHECK(mask_calls == 3U);
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, handler_0, &asked[0]) == 0);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, handler_0, &asked[0]) == 0);
 	CHECK(unmask_calls == 2U);
 
 	/* Leaves the line with both slots empty for the Wi-Fi thread. */
-	CHECK(drv_rpi4_mmc_irq_remove(MMC_IRQ, handler_0, &asked[0]) == 0);
-	CHECK(drv_rpi4_mmc_irq_remove(MMC_IRQ, handler_1, &asked[1]) == 0);
+	CHECK(drv_rpi_mmc_irq_remove(MMC_IRQ, handler_0, &asked[0]) == 0);
+	CHECK(drv_rpi_mmc_irq_remove(MMC_IRQ, handler_1, &asked[1]) == 0);
 	installed_handler(MMC_IRQ, (kern_irq_ack_t)1, installed_argument);
 	CHECK(asked[0] == 1U);
 }
@@ -584,15 +584,15 @@ check_dispatcher(void)
 static void
 check_host(void)
 {
-	struct drv_rpi4_sdio_host host;
-	struct drv_rpi4_sdio_command command;
+	struct drv_rpi_sdio_host host;
+	struct drv_rpi_sdio_command command;
 	uint64_t deadline;
 	unsigned reads_before;
 	bool mine;
 
 	/* Init: a reset, 3.3 V before power, the 400 kHz divider, the enables. */
 	prepare_model();
-	CHECK(drv_rpi4_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
+	CHECK(drv_rpi_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
 	CHECK(resets_all == 1U);
 	CHECK(host.specification == 2U);
 	CHECK(power_write_count >= 2U);
@@ -610,31 +610,31 @@ check_host(void)
 	power_card(0);
 	command.index = 5;
 	command.argument = 0;
-	command.response = DRV_RPI4_SDIO_RESPONSE_SHORT_UNCHECKED;
-	command.data = DRV_RPI4_SDIO_DATA_NONE;
+	command.response = DRV_RPI_SDIO_RESPONSE_SHORT_UNCHECKED;
+	command.data = DRV_RPI_SDIO_DATA_NONE;
 	command.buffer = NULL;
 	command.block_size = 0;
 	command.block_count = 0;
-	CHECK(drv_rpi4_sdio_host_command(&host, &command) == ETIMEDOUT);
+	CHECK(drv_rpi_sdio_host_command(&host, &command) == ETIMEDOUT);
 	CHECK(resets_lines == 1U);
 	CHECK((sdhci_status & 0xffff7fffU) == 0);
 
 	/* A powered card answers CMD5. */
 	power_card(1);
 	card.silent_cmd5 = 0;
-	CHECK(drv_rpi4_sdio_host_command(&host, &command) == 0);
+	CHECK(drv_rpi_sdio_host_command(&host, &command) == 0);
 	CHECK((command.reply & 0x70000000U) == 0x20000000U);
 
 	/* Refusals before the controller is touched. */
 	command.index = 64;
-	CHECK(drv_rpi4_sdio_host_command(&host, &command) == EINVAL);
+	CHECK(drv_rpi_sdio_host_command(&host, &command) == EINVAL);
 	command.index = 53;
-	command.data = DRV_RPI4_SDIO_DATA_READ;
-	CHECK(drv_rpi4_sdio_host_command(&host, &command) == EINVAL);
-	command.data = DRV_RPI4_SDIO_DATA_NONE;
+	command.data = DRV_RPI_SDIO_DATA_READ;
+	CHECK(drv_rpi_sdio_host_command(&host, &command) == EINVAL);
+	command.data = DRV_RPI_SDIO_DATA_NONE;
 
 	/* Moves to 25 MHz: no pause owed from here on. */
-	CHECK(drv_rpi4_sdio_host_set_clock(&host, 25000000U) == 0);
+	CHECK(drv_rpi_sdio_host_set_clock(&host, 25000000U) == 0);
 	CHECK(host.card_clock_hz == 25000000U);
 	CHECK(((sdhci[R_CLOCK / 4U] >> 8) & 0xffU) == 5U);
 	CHECK(model_slow() == 0);
@@ -642,52 +642,52 @@ check_host(void)
 	/* A disarmed controller is not the line's, and its status is not read. */
 	card_irq_line = 1;
 	reads_before = status_reads;
-	mine = drv_rpi4_sdio_host_interrupt(&host);
+	mine = drv_rpi_sdio_host_interrupt(&host);
 	CHECK(!mine && status_reads == reads_before);
 
 	/* Enabled, the card's interrupt is signalled; the handler disarms it and wakes the waiter. */
-	drv_rpi4_sdio_host_card_irq_enable(&host, 1);
+	drv_rpi_sdio_host_card_irq_enable(&host, 1);
 	CHECK((sdhci[R_STATUS_ENABLE / 4U] & S_CARD) != 0);
 	CHECK((sdhci[R_SIGNAL_ENABLE / 4U] & S_CARD) != 0);
-	mine = drv_rpi4_sdio_host_interrupt(&host);
+	mine = drv_rpi_sdio_host_interrupt(&host);
 	CHECK(mine);
 	CHECK((sdhci[R_STATUS_ENABLE / 4U] & S_CARD) == 0);
 	CHECK((sdhci[R_SIGNAL_ENABLE / 4U] & S_CARD) == 0);
 	CHECK(host.card_irq_count == 1U);
-	CHECK(drv_rpi4_sdio_host_card_irq_wait(&host, sched_ticks() + 1000U) == 0);
+	CHECK(drv_rpi_sdio_host_card_irq_wait(&host, sched_ticks() + 1000U) == 0);
 
 	/* Nothing pending: the wait ends at its deadline. */
 	deadline = sched_ticks() + 5U;
-	CHECK(drv_rpi4_sdio_host_card_irq_wait(&host, deadline) == ETIMEDOUT);
+	CHECK(drv_rpi_sdio_host_card_irq_wait(&host, deadline) == ETIMEDOUT);
 	CHECK(sched_ticks() >= deadline);
 
 	/* A kick before the wait ends it at once with EAGAIN, once, and leaves the interrupt disarmed. */
-	drv_rpi4_sdio_host_card_irq_kick(&host);
-	CHECK(drv_rpi4_sdio_host_card_irq_wait(&host, sched_ticks() + 1000U) == EAGAIN);
+	drv_rpi_sdio_host_card_irq_kick(&host);
+	CHECK(drv_rpi_sdio_host_card_irq_wait(&host, sched_ticks() + 1000U) == EAGAIN);
 	CHECK(sched_ticks() < deadline + 500U);
-	CHECK(drv_rpi4_sdio_host_card_irq_wait(&host, sched_ticks() + 5U) == ETIMEDOUT);
+	CHECK(drv_rpi_sdio_host_card_irq_wait(&host, sched_ticks() + 5U) == ETIMEDOUT);
 	CHECK((sdhci[R_SIGNAL_ENABLE / 4U] & S_CARD) == 0);
 
 	/* A disarmed interrupt stays disarmed through a reset; rearming brings it back. */
-	CHECK(drv_rpi4_sdio_host_reset(&host) == 0);
+	CHECK(drv_rpi_sdio_host_reset(&host) == 0);
 	CHECK(resets_all == 2U);
 	CHECK(host.card_clock_hz == 25000000U);
 	CHECK(sdhci[R_STATUS_ENABLE / 4U] == 0x03ff0033U);
 	CHECK(sdhci[R_SIGNAL_ENABLE / 4U] == 0);
-	drv_rpi4_sdio_host_card_irq_rearm(&host);
+	drv_rpi_sdio_host_card_irq_rearm(&host);
 	CHECK(sdhci[R_STATUS_ENABLE / 4U] == (0x03ff0033U | S_CARD));
 	CHECK(sdhci[R_SIGNAL_ENABLE / 4U] == S_CARD);
 
 	/* An armed interrupt is armed again after a reset, which cleared the enables. */
-	CHECK(drv_rpi4_sdio_host_reset(&host) == 0);
+	CHECK(drv_rpi_sdio_host_reset(&host) == 0);
 	CHECK(sdhci[R_STATUS_ENABLE / 4U] == (0x03ff0033U | S_CARD));
 	CHECK(sdhci[R_SIGNAL_ENABLE / 4U] == S_CARD);
 
 	/* Disabling forgets the interrupt; stopping leaves no clock and no power. */
-	drv_rpi4_sdio_host_card_irq_enable(&host, 0);
+	drv_rpi_sdio_host_card_irq_enable(&host, 0);
 	CHECK(sdhci[R_SIGNAL_ENABLE / 4U] == 0);
 	card_irq_line = 0;
-	drv_rpi4_sdio_host_stop(&host);
+	drv_rpi_sdio_host_stop(&host);
 	CHECK((sdhci[R_CLOCK / 4U] & 0xffffU) == 0);
 	CHECK(((sdhci[R_HOST / 4U] >> 8) & 0xffU) == 0);
 	CHECK(host.card_clock_hz == 0);
@@ -697,10 +697,10 @@ check_host(void)
 static void
 check_enumeration(void)
 {
-	struct drv_rpi4_sdio_host host;
-	struct drv_rpi4_sdio_card sdio;
-	struct drv_rpi4_sdio_waiter waiter;
-	struct drv_rpi4_sdio_waiter canceller;
+	struct drv_rpi_sdio_host host;
+	struct drv_rpi_sdio_card sdio;
+	struct drv_rpi_sdio_waiter waiter;
+	struct drv_rpi_sdio_waiter canceller;
 	unsigned sleeps;
 	unsigned budget;
 	uint8_t bytes[256];
@@ -709,12 +709,12 @@ check_enumeration(void)
 
 	/* A card that is silent twice and busy twice after its power-up. */
 	prepare_model();
-	CHECK(drv_rpi4_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
+	CHECK(drv_rpi_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
 	power_card(1);
 	sleeps = 0;
 	waiter.sleep = count_sleep;
 	waiter.context = &sleeps;
-	CHECK(drv_rpi4_sdio_enumerate(&sdio, &host, &waiter) == 0);
+	CHECK(drv_rpi_sdio_enumerate(&sdio, &host, &waiter) == 0);
 	CHECK(sleeps == 4U);
 
 	/* What enumeration learned. */
@@ -733,61 +733,61 @@ check_enumeration(void)
 	CHECK(host.card_clock_hz == 25000000U);
 
 	/* F1 becomes ready; F2 does not without the chip's firmware. */
-	CHECK(drv_rpi4_sdio_enable_function(&sdio, 1, &waiter, 10) == 0);
+	CHECK(drv_rpi_sdio_enable_function(&sdio, 1, &waiter, 10) == 0);
 	CHECK((card.f0[0x02] & 0x02U) != 0);
-	CHECK(drv_rpi4_sdio_enable_function(&sdio, 2, &waiter, 5) == ETIMEDOUT);
-	CHECK(drv_rpi4_sdio_disable_function(&sdio, 2) == 0);
+	CHECK(drv_rpi_sdio_enable_function(&sdio, 2, &waiter, 5) == ETIMEDOUT);
+	CHECK(drv_rpi_sdio_disable_function(&sdio, 2) == 0);
 	CHECK((card.f0[0x02] & 0x04U) == 0 && (card.f0[0x02] & 0x02U) != 0);
-	CHECK(drv_rpi4_sdio_enable_function(&sdio, 3, &waiter, 5) == EINVAL);
-	CHECK(drv_rpi4_sdio_enable_function(&sdio, 0, &waiter, 5) == EINVAL);
+	CHECK(drv_rpi_sdio_enable_function(&sdio, 3, &waiter, 5) == EINVAL);
+	CHECK(drv_rpi_sdio_enable_function(&sdio, 0, &waiter, 5) == EINVAL);
 
 	/* Block sizes, read back from the FBRs. */
-	CHECK(drv_rpi4_sdio_set_block_size(&sdio, 1, 64) == 0);
+	CHECK(drv_rpi_sdio_set_block_size(&sdio, 1, 64) == 0);
 	CHECK(card.f0[0x110] == 64U && card.f0[0x111] == 0);
-	CHECK(drv_rpi4_sdio_set_block_size(&sdio, 2, 512) == 0);
+	CHECK(drv_rpi_sdio_set_block_size(&sdio, 2, 512) == 0);
 	CHECK(card.f0[0x210] == 0 && card.f0[0x211] == 2U);
 	CHECK(sdio.block_size[1] == 64U && sdio.block_size[2] == 512U);
-	CHECK(drv_rpi4_sdio_set_block_size(&sdio, 1, 0) == EINVAL);
-	CHECK(drv_rpi4_sdio_set_block_size(&sdio, 1, 4096) == EINVAL);
+	CHECK(drv_rpi_sdio_set_block_size(&sdio, 1, 0) == EINVAL);
+	CHECK(drv_rpi_sdio_set_block_size(&sdio, 1, 4096) == EINVAL);
 
 	/* CMD53 in byte mode, a length that is not a multiple of four. */
 	for (i = 0; i < sizeof(bytes); i++)
 		bytes[i] = (uint8_t)(i * 7U + 3U);
-	CHECK(drv_rpi4_sdio_transfer(&sdio, DRV_RPI4_SDIO_DATA_WRITE, 1, 0x8000, 1, bytes, 63) == 0);
+	CHECK(drv_rpi_sdio_transfer(&sdio, DRV_RPI_SDIO_DATA_WRITE, 1, 0x8000, 1, bytes, 63) == 0);
 	CHECK(memcmp(card.f1 + 0x8000, bytes, 63) == 0);
 	memset(back, 0, sizeof(back));
-	CHECK(drv_rpi4_sdio_transfer(&sdio, DRV_RPI4_SDIO_DATA_READ, 1, 0x8000, 1, back, 63) == 0);
+	CHECK(drv_rpi_sdio_transfer(&sdio, DRV_RPI_SDIO_DATA_READ, 1, 0x8000, 1, back, 63) == 0);
 	CHECK(memcmp(back, bytes, 63) == 0);
 
 	/* CMD53 in block mode, four blocks of 64. */
-	CHECK(drv_rpi4_sdio_transfer(&sdio, DRV_RPI4_SDIO_DATA_WRITE, 1, 0x9000, 1, bytes, 256) == 0);
+	CHECK(drv_rpi_sdio_transfer(&sdio, DRV_RPI_SDIO_DATA_WRITE, 1, 0x9000, 1, bytes, 256) == 0);
 	CHECK(memcmp(card.f1 + 0x9000, bytes, 256) == 0);
 	memset(back, 0, sizeof(back));
-	CHECK(drv_rpi4_sdio_transfer(&sdio, DRV_RPI4_SDIO_DATA_READ, 1, 0x9000, 1, back, 256) == 0);
+	CHECK(drv_rpi_sdio_transfer(&sdio, DRV_RPI_SDIO_DATA_READ, 1, 0x9000, 1, back, 256) == 0);
 	CHECK(memcmp(back, bytes, 256) == 0);
 
 	/* Runs that are not whole blocks, functions the card lacks, addresses beyond 17 bits. */
-	CHECK(drv_rpi4_sdio_transfer(&sdio, DRV_RPI4_SDIO_DATA_READ, 1, 0x9000, 1, back, 100) == EINVAL);
-	CHECK(drv_rpi4_sdio_transfer(&sdio, DRV_RPI4_SDIO_DATA_READ, 3, 0x9000, 1, back, 4) == EINVAL);
-	CHECK(drv_rpi4_sdio_transfer(&sdio, DRV_RPI4_SDIO_DATA_READ, 1, 0x20000, 1, back, 4) == EINVAL);
+	CHECK(drv_rpi_sdio_transfer(&sdio, DRV_RPI_SDIO_DATA_READ, 1, 0x9000, 1, back, 100) == EINVAL);
+	CHECK(drv_rpi_sdio_transfer(&sdio, DRV_RPI_SDIO_DATA_READ, 3, 0x9000, 1, back, 4) == EINVAL);
+	CHECK(drv_rpi_sdio_transfer(&sdio, DRV_RPI_SDIO_DATA_READ, 1, 0x20000, 1, back, 4) == EINVAL);
 
 	/* A card that never finishes its power-up times out after a second of waits. */
 	prepare_model();
-	CHECK(drv_rpi4_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
+	CHECK(drv_rpi_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
 	card.busy_setting = 1000000;
 	power_card(1);
 	sleeps = 0;
-	CHECK(drv_rpi4_sdio_enumerate(&sdio, &host, &waiter) == ETIMEDOUT);
+	CHECK(drv_rpi_sdio_enumerate(&sdio, &host, &waiter) == ETIMEDOUT);
 	CHECK(sleeps >= 100U);
 
 	/* A stop during the waits ends enumeration with the stop's error. */
 	prepare_model();
-	CHECK(drv_rpi4_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
+	CHECK(drv_rpi_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
 	card.absent = 1;
 	budget = 3;
 	canceller.sleep = cancel_sleep;
 	canceller.context = &budget;
-	CHECK(drv_rpi4_sdio_enumerate(&sdio, &host, &canceller) == ECANCELED);
+	CHECK(drv_rpi_sdio_enumerate(&sdio, &host, &canceller) == ECANCELED);
 }
 
 /*
@@ -798,7 +798,7 @@ check_enumeration(void)
 static void
 check_thread(void)
 {
-	enum drv_rpi4_gpio_function function;
+	enum drv_rpi_gpio_function function;
 	uint32_t pulls;
 	unsigned i;
 
@@ -827,8 +827,8 @@ check_thread(void)
 
 	/* GPIO 34 to 39 carry the controller's function, CLK without pull, the others pulled up. */
 	for (i = 34; i <= 39; i++) {
-		CHECK(drv_rpi4_gpio_get_function(i, &function) == 0);
-		CHECK(function == DRV_RPI4_GPIO_FUNCTION_ALT3);
+		CHECK(drv_rpi_gpio_get_function(i, &function) == 0);
+		CHECK(function == DRV_RPI_GPIO_FUNCTION_ALT3);
 	}
 	pulls = gpio_block[(0xe4U + 8U) / 4U];
 	CHECK(((pulls >> ((34U - 32U) * 2U)) & 0x3U) == 0);
@@ -890,7 +890,7 @@ run_stop(void)
 	CHECK(power.states[0] == 0 && power.states[1] == 1 && power.states[2] == 0 && power.states[3] == 0);
 	CHECK((sdhci[R_CLOCK / 4U] & 0xffffU) == 0);
 	CHECK(sdhci[R_SIGNAL_ENABLE / 4U] == 0);
-	CHECK(drv_rpi4_mmc_irq_remove(MMC_IRQ, drv_rpi4_sdio_host_interrupt, NULL) == ENOENT);
+	CHECK(drv_rpi_mmc_irq_remove(MMC_IRQ, drv_rpi_sdio_host_interrupt, NULL) == ENOENT);
 
 	/* A second stop finds no thread. */
 	drv_rpi4_wifi_stop();
@@ -903,7 +903,7 @@ run_stop(void)
 static void
 run_nopackage(void)
 {
-	enum drv_rpi4_gpio_function function;
+	enum drv_rpi_gpio_function function;
 
 	/* A board without the package. */
 	prepare_model();
@@ -921,8 +921,8 @@ run_nopackage(void)
 	CHECK(firmware_inits == 0U);
 	CHECK(power.count == 0U);
 	CHECK(register_calls == 0U);
-	CHECK(drv_rpi4_gpio_get_function(34, &function) == 0);
-	CHECK(function == DRV_RPI4_GPIO_FUNCTION_INPUT);
+	CHECK(drv_rpi_gpio_get_function(34, &function) == 0);
+	CHECK(function == DRV_RPI_GPIO_FUNCTION_INPUT);
 	CHECK(sdhci[R_CLOCK / 4U] == 0 && resets_all == 0U);
 
 	drv_rpi4_wifi_stop();
@@ -963,35 +963,35 @@ run_refused(void)
 static void
 run_smp(void)
 {
-	struct drv_rpi4_sdio_host host;
+	struct drv_rpi_sdio_host host;
 	pthread_t interrupts;
 	pthread_t waiter;
 	unsigned i;
 
 	/* A permanent handler that claims every interrupt keeps the line unmasked. */
 	answers[0] = true;
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, handler_0, &asked[0]) == 0);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, handler_0, &asked[0]) == 0);
 
 	/* Interrupts arrive on another CPU while this one adds and removes a second handler. */
 	smp_stop = 0;
 	CHECK(pthread_create(&interrupts, NULL, smp_interrupts, NULL) == 0);
 	for (i = 0; i < SMP_CHANGES; i++) {
 		__atomic_store_n(&smp_removed, 0, __ATOMIC_SEQ_CST);
-		CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, smp_handler, NULL) == 0);
+		CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, smp_handler, NULL) == 0);
 		sched_yield();
-		CHECK(drv_rpi4_mmc_irq_remove(MMC_IRQ, smp_handler, NULL) == 0);
+		CHECK(drv_rpi_mmc_irq_remove(MMC_IRQ, smp_handler, NULL) == 0);
 		__atomic_store_n(&smp_removed, 1, __ATOMIC_SEQ_CST);
 	}
 	__atomic_store_n(&smp_stop, 1, __ATOMIC_SEQ_CST);
 	CHECK(pthread_join(interrupts, NULL) == 0);
-	CHECK(drv_rpi4_mmc_irq_remove(MMC_IRQ, handler_0, &asked[0]) == 0);
+	CHECK(drv_rpi_mmc_irq_remove(MMC_IRQ, handler_0, &asked[0]) == 0);
 
 	/* The controller at 25 MHz with its card's interrupt armed on the line. */
 	prepare_model();
-	CHECK(drv_rpi4_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
-	CHECK(drv_rpi4_sdio_host_set_clock(&host, 25000000U) == 0);
-	CHECK(drv_rpi4_mmc_irq_add(MMC_IRQ, drv_rpi4_sdio_host_interrupt, &host) == 0);
-	drv_rpi4_sdio_host_card_irq_enable(&host, 1);
+	CHECK(drv_rpi_sdio_host_init(&host, sdhci, EMMC_CLOCK_HZ) == 0);
+	CHECK(drv_rpi_sdio_host_set_clock(&host, 25000000U) == 0);
+	CHECK(drv_rpi_mmc_irq_add(MMC_IRQ, drv_rpi_sdio_host_interrupt, &host) == 0);
+	drv_rpi_sdio_host_card_irq_enable(&host, 1);
 
 	/* The card interrupts while the serving thread waits, serves and rearms. */
 	smp_stop = 0;
@@ -1002,7 +1002,7 @@ run_smp(void)
 
 	/* Every interrupt was claimed once and served once. */
 	CHECK(host.card_irq_count == SMP_CHANGES);
-	CHECK(drv_rpi4_mmc_irq_remove(MMC_IRQ, drv_rpi4_sdio_host_interrupt, &host) == 0);
+	CHECK(drv_rpi_mmc_irq_remove(MMC_IRQ, drv_rpi_sdio_host_interrupt, &host) == 0);
 	printf("  nested dispatcher-to-controller locks: %u\n", nested_dispatch);
 	CHECK(nested_dispatch > 0);
 }
@@ -1019,7 +1019,7 @@ static void *
 smp_interrupts(
 	void *argument)
 {
-	struct drv_rpi4_sdio_host *host;
+	struct drv_rpi_sdio_host *host;
 	unsigned i;
 
 	host = argument;
@@ -1050,7 +1050,7 @@ static void *
 smp_waiter(
 	void *argument)
 {
-	struct drv_rpi4_sdio_host *host;
+	struct drv_rpi_sdio_host *host;
 	unsigned i;
 	int error;
 
@@ -1058,13 +1058,13 @@ smp_waiter(
 	for (i = 0; i < SMP_CHANGES; i++) {
 		/* Waits for the interrupt; a deadline only means another look. */
 		do {
-			error = drv_rpi4_sdio_host_card_irq_wait(host, sched_ticks() + 1000U);
+			error = drv_rpi_sdio_host_card_irq_wait(host, sched_ticks() + 1000U);
 		} while (error == ETIMEDOUT);
 		CHECK(error == 0);
 
 		/* Serves the card, which drops its line, then rearms. */
 		__atomic_store_n(&card_irq_line, 0, __ATOMIC_SEQ_CST);
-		drv_rpi4_sdio_host_card_irq_rearm(host);
+		drv_rpi_sdio_host_card_irq_rearm(host);
 		__atomic_store_n(&smp_served, i + 1U, __ATOMIC_SEQ_CST);
 	}
 	return NULL;
@@ -1492,7 +1492,7 @@ static void
 prepare_gpio(void)
 {
 	memset(gpio_block, 0, sizeof(gpio_block));
-	CHECK(drv_rpi4_gpio_init(&fdt) == 0);
+	CHECK(drv_rpi_gpio_init(&fdt) == 0);
 }
 
 /*

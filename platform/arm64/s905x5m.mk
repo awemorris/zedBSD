@@ -2,11 +2,13 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 # The SoC's peripheral drivers under src/drivers/platform/s905x5m/ and the
-# shared cores they sit on: the SoC's clocks, resets, pins and device tree;
+# shared cores they sit on: the console on the debug UART and the boot
+# framebuffer; the SoC's clocks, resets, pins and device tree;
 # the SD card on the Amlogic SD/eMMC core; the Ethernet port on the
 # DesignWare EQoS core with its PHY drivers; and the USB host shown to the
 # PCI core, whose xHCI driver comes with the USB sources.
 ARM64_S905X5M_SOURCES := \
+	src/drivers/platform/s905x5m/s905x5m-console.c \
 	src/drivers/platform/s905x5m/s905x5m-soc.c \
 	src/drivers/platform/s905x5m/s905x5m-mmc.c \
 	src/drivers/mmc/meson-mmc.c \

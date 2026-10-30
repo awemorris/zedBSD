@@ -17,8 +17,8 @@
  * builds this file as it is.
  */
 
-#ifndef KERN_DRIVERS_RPI4_BT_LINK_H
-#define KERN_DRIVERS_RPI4_BT_LINK_H
+#ifndef KERN_DRIVERS_RPI_BT_LINK_H
+#define KERN_DRIVERS_RPI_BT_LINK_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -104,7 +104,7 @@ struct drv_rpi4_bt_history {
  * reset meanwhile, and what was gathered or decided before belongs to the
  * old line.  The generation wraps; only equality is ever tested.
  */
-struct drv_rpi4_bt_link {
+struct drv_rpi_bt_link {
 	enum drv_rpi4_bt_mode mode;
 	uint32_t generation;
 	struct drv_rpi4_bt_history history;
@@ -121,11 +121,11 @@ int drv_rpi4_bt_hunt_give_up(struct drv_rpi4_bt_hunt *hunt, size_t *length);
 void drv_rpi4_bt_history_init(struct drv_rpi4_bt_history *history);
 int drv_rpi4_bt_history_admit(struct drv_rpi4_bt_history *history, uint64_t now_ms);
 
-void drv_rpi4_bt_link_init(struct drv_rpi4_bt_link *link);
-void drv_rpi4_bt_link_transition_begin(struct drv_rpi4_bt_link *link);
-void drv_rpi4_bt_link_transition_end(struct drv_rpi4_bt_link *link);
-void drv_rpi4_bt_link_anchor(struct drv_rpi4_bt_link *link);
-int drv_rpi4_bt_link_self_reset(struct drv_rpi4_bt_link *link, uint32_t observed, uint64_t now_ms);
-void drv_rpi4_bt_link_stop(struct drv_rpi4_bt_link *link);
+void drv_rpi_bt_link_init(struct drv_rpi_bt_link *link);
+void drv_rpi_bt_link_transition_begin(struct drv_rpi_bt_link *link);
+void drv_rpi_bt_link_transition_end(struct drv_rpi_bt_link *link);
+void drv_rpi_bt_link_anchor(struct drv_rpi_bt_link *link);
+int drv_rpi_bt_link_self_reset(struct drv_rpi_bt_link *link, uint32_t observed, uint64_t now_ms);
+void drv_rpi_bt_link_stop(struct drv_rpi_bt_link *link);
 
 #endif

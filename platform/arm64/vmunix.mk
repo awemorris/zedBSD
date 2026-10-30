@@ -66,19 +66,19 @@ ARM64_BCM43455_SOURCES := src/drivers/wifi/bcm43455/bcm43455.c \
 # external PCIe port of the M.2 HATs.
 ARM64_BOARD_KERNEL_SOURCES_rpi4 := \
 	src/kern/platform/rpi4.c \
-	src/drivers/platform/rpi4/rpi4-sdhci.c src/drivers/mmc/sdhci.c \
-	src/drivers/platform/rpi4/rpi4-console.c \
+	src/drivers/platform/rpi-common/rpi-sdhci.c src/drivers/mmc/sdhci.c \
+	src/drivers/platform/rpi-common/rpi-console.c \
 	src/drivers/platform/rpi4/rpi4-pcie.c \
 	src/drivers/platform/rpi4/rpi4-board.c \
 	src/drivers/platform/rpi4/rpi4-firmware.c src/kern/dcache.c \
-	src/drivers/platform/rpi4/rpi4-gpio.c \
+	src/drivers/platform/rpi-common/rpi-gpio.c \
 	src/kern/uncached.c \
 	src/drivers/generic/fdt.c src/drivers/generic/dma.c \
 	src/drivers/pci/pci.c src/drivers/pci/pci-brcmstb.c
 ARM64_BOARD_KERNEL_SOURCES_rpi5 := \
 	src/kern/platform/rpi5.c \
-	src/drivers/platform/rpi4/rpi4-sdhci.c src/drivers/mmc/sdhci.c \
-	src/drivers/platform/rpi4/rpi4-console.c \
+	src/drivers/platform/rpi-common/rpi-sdhci.c src/drivers/mmc/sdhci.c \
+	src/drivers/platform/rpi-common/rpi-console.c \
 	src/drivers/platform/rpi5/rp1.c \
 	src/drivers/platform/rpi5/rp1-gpio.c \
 	src/drivers/platform/rpi5/rp1-irq.c \
@@ -93,10 +93,10 @@ ARM64_BOARD_KERNEL_SOURCES_rpi5 := \
 	src/drivers/platform/rpi5/rpi5-serror.c \
 	src/drivers/platform/rpi5/rpi5-pcie.c \
 	src/drivers/platform/rpi5/rpi5-mip.c \
-	src/drivers/platform/rpi4/rpi4-mmc-irq.c \
-	src/drivers/platform/rpi4/rpi4-sdio-host.c \
-	src/drivers/platform/rpi4/rpi4-sdio.c \
-	src/drivers/platform/rpi4/rpi4-gpio.c \
+	src/drivers/platform/rpi-common/rpi-mmc-irq.c \
+	src/drivers/platform/rpi-common/rpi-sdio-host.c \
+	src/drivers/platform/rpi-common/rpi-sdio.c \
+	src/drivers/platform/rpi-common/rpi-gpio.c \
 	$(ARM64_BCM43455_SOURCES) \
 	src/kern/dcache.c \
 	src/kern/uncached.c \
@@ -109,7 +109,6 @@ ARM64_BOARD_KERNEL_SOURCES_rpi5 := \
 include platform/arm64/s905x5m.mk
 ARM64_BOARD_KERNEL_SOURCES_odroid-c5 := \
 	src/kern/platform/odroid-c5.c \
-	src/drivers/platform/rpi4/rpi4-console.c \
 	$(ARM64_S905X5M_SOURCES) \
 	src/kern/dcache.c \
 	src/kern/uncached.c \
@@ -142,7 +141,7 @@ endif
 ifeq ($(CONFIG_DRIVER_RPI5_BT),y)
 ARM64_BOARD_KERNEL_SOURCES_rpi5 += \
 	src/drivers/platform/rpi5/rpi5-bt.c \
-	src/drivers/platform/rpi4/rpi4-bt-link.c
+	src/drivers/platform/rpi-common/rpi-bt-link.c
 endif
 
 # The Pi 5's processor temperature and fan connector, when the build asks
@@ -229,9 +228,9 @@ endif
 # interrupt line's dispatcher and the chip's bring-up (ws206-p002b), and
 # the BCM43455 driver on top of them (ws206-p004).
 ifeq ($(CONFIG_DRIVER_BCM2711_WIFI),y)
-ARM64_KERNEL_SOURCES += src/drivers/platform/rpi4/rpi4-mmc-irq.c \
-	src/drivers/platform/rpi4/rpi4-sdio-host.c \
-	src/drivers/platform/rpi4/rpi4-sdio.c \
+ARM64_KERNEL_SOURCES += src/drivers/platform/rpi-common/rpi-mmc-irq.c \
+	src/drivers/platform/rpi-common/rpi-sdio-host.c \
+	src/drivers/platform/rpi-common/rpi-sdio.c \
 	src/drivers/platform/rpi4/rpi4-wifi.c \
 	$(ARM64_BCM43455_SOURCES)
 endif
@@ -239,7 +238,7 @@ endif
 # The onboard Bluetooth: the PL011 as the controller's HCI transport (ws215-p003).
 ifeq ($(CONFIG_DRIVER_BCM2711_BT),y)
 ARM64_KERNEL_SOURCES += src/drivers/platform/rpi4/rpi4-bt.c \
-	src/drivers/platform/rpi4/rpi4-bt-link.c
+	src/drivers/platform/rpi-common/rpi-bt-link.c
 endif
 
 # The headphone jack: PWM1 and a legacy DMA channel (ws207-p002).

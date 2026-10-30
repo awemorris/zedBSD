@@ -14,13 +14,13 @@
  * and the dispatcher asks each in turn whether the interrupt was its own.
  */
 
-#ifndef KERN_DRIVERS_RPI4_MMC_IRQ_H
-#define KERN_DRIVERS_RPI4_MMC_IRQ_H
+#ifndef KERN_DRIVERS_RPI_MMC_IRQ_H
+#define KERN_DRIVERS_RPI_MMC_IRQ_H
 
 #include <stdbool.h>
 
 /* How many controllers may share the line. */
-#define DRV_RPI4_MMC_IRQ_SLOTS		2U
+#define DRV_RPI_MMC_IRQ_SLOTS		2U
 
 /*
  * One controller's handler.
@@ -30,7 +30,7 @@
  * Returns true when the interrupt was this controller's and the controller
  * has stopped raising it.
  */
-typedef bool (*drv_rpi4_mmc_irq_fn)(void *argument);
+typedef bool (*drv_rpi_mmc_irq_fn)(void *argument);
 
 /*
  * Adds a controller's handler to the shared line.
@@ -41,7 +41,7 @@ typedef bool (*drv_rpi4_mmc_irq_fn)(void *argument);
  * when both slots are taken, or the kernel's error from installing the
  * dispatcher.  Thread context only.
  */
-int drv_rpi4_mmc_irq_add(int irq, drv_rpi4_mmc_irq_fn handler, void *argument);
+int drv_rpi_mmc_irq_add(int irq, drv_rpi_mmc_irq_fn handler, void *argument);
 
 /*
  * Removes a controller's handler from the shared line.
@@ -50,6 +50,6 @@ int drv_rpi4_mmc_irq_add(int irq, drv_rpi4_mmc_irq_fn handler, void *argument);
  * controller from raising the line first.  Returns EINVAL for a line that is
  * not the dispatcher's and ENOENT for a handler that was not added.
  */
-int drv_rpi4_mmc_irq_remove(int irq, drv_rpi4_mmc_irq_fn handler, void *argument);
+int drv_rpi_mmc_irq_remove(int irq, drv_rpi_mmc_irq_fn handler, void *argument);
 
 #endif

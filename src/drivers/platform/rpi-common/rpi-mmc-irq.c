@@ -19,7 +19,7 @@
  * then a controller's own interrupt lock; a controller never takes this one.
  */
 
-#include "drivers/platform/rpi4/rpi4-mmc-irq.h"
+#include "drivers/platform/rpi-common/rpi-mmc-irq.h"
 #include <kern/atomic.h>
 #include <kern/clock.h>
 #include <kern/irq.h>
@@ -53,7 +53,7 @@
  * An empty slot has no handler.
  */
 struct mmc_irq_slot {
-	drv_rpi4_mmc_irq_fn handler;
+	drv_rpi_mmc_irq_fn handler;
 	void *argument;
 };
 
@@ -81,7 +81,7 @@ static int line_irq;
  * Protected by dispatch_lock; zero means no handler.  They live for as long
  * as the kernel runs.
  */
-static struct mmc_irq_slot slots[DRV_RPI4_MMC_IRQ_SLOTS];
+static struct mmc_irq_slot slots[DRV_RPI_MMC_IRQ_SLOTS];
 
 /*
  * How many interrupts in a row no handler has claimed, and whether that
@@ -110,9 +110,9 @@ static void dispatch(int irq, kern_irq_ack_t acknowledge, void *argument);
  * Adds a controller's handler to the shared line.
  */
 int
-drv_rpi4_mmc_irq_add(
+drv_rpi_mmc_irq_add(
 	int irq,
-	drv_rpi4_mmc_irq_fn handler,
+	drv_rpi_mmc_irq_fn handler,
 	void *argument)
 {
 	unsigned long enabled;
@@ -133,14 +133,14 @@ drv_rpi4_mmc_irq_add(
 		return error;
 
 	/* Fills a free slot, refusing a second add of the same handler. */
-	free_slot = DRV_RPI4_MMC_IRQ_SLOTS;
+	free_slot = DRV_RPI_MMC_IRQ_SLOTS;
 	unmask = 0;
 	enabled = spin_lock_irqsave(&dispatch_lock);
 
-	for (i = 0; i < DRV_RPI4_MMC_IRQ_SLOTS; i++) {
+	for (i = 0; i < DRV_RPI_MMC_IRQ_SLOTS; i++) {
 		/* Remembers the first free slot. */
 		if (slots[i].handler == NULL) {
-			if (free_slot == DRV_RPI4_MMC_IRQ_SLOTS)
+			if (free_slot == DRV_RPI_MMC_IRQ_SLOTS)
 				free_slot = i;
 			continue;
 		}
@@ -154,7 +154,7 @@ drv_rpi4_mmc_irq_add(
 	}
 
 	/* Refuses a third controller. */
-	if (free_slot == DRV_RPI4_MMC_IRQ_SLOTS) {
+	if (free_slot == DRV_RPI_MMC_IRQ_SLOTS) {
 		spin_unlock_irqrestore(&dispatch_lock, enabled);
 
 		return EBUSY;
@@ -188,9 +188,9 @@ drv_rpi4_mmc_irq_add(
  * Removes a controller's handler from the shared line.
  */
 int
-drv_rpi4_mmc_irq_remove(
+drv_rpi_mmc_irq_remove(
 	int irq,
-	drv_rpi4_mmc_irq_fn handler,
+	drv_rpi_mmc_irq_fn handler,
 	void *argument)
 {
 	unsigned long enabled;
@@ -207,7 +207,7 @@ drv_rpi4_mmc_irq_remove(
 	/* Empties the handler's slot; the interrupt cannot be inside it meanwhile. */
 	enabled = spin_lock_irqsave(&dispatch_lock);
 
-	for (i = 0; i < DRV_RPI4_MMC_IRQ_SLOTS; i++) {
+	for (i = 0; i < DRV_RPI_MMC_IRQ_SLOTS; i++) {
 		/* Passes over another controller's slot. */
 		if (slots[i].handler != handler)
 			continue;
@@ -323,7 +323,7 @@ dispatch(
 	mask = 0;
 	enabled = spin_lock_irqsave(&dispatch_lock);
 
-	for (i = 0; i < DRV_RPI4_MMC_IRQ_SLOTS; i++) {
+	for (i = 0; i < DRV_RPI_MMC_IRQ_SLOTS; i++) {
 		/* Passes over an empty slot. */
 		if (slots[i].handler == NULL)
 			continue;

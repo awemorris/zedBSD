@@ -25,7 +25,7 @@
 #include <kern/platform.h>
 #include <kern/boot.h>
 #include <kern/klog.h>
-#include "drivers/platform/rpi4/rpi4-console.h"
+#include "drivers/platform/s905x5m/s905x5m-console.h"
 #include "drivers/platform/s905x5m/s905x5m-mmc.h"
 #include "drivers/platform/s905x5m/s905x5m-usb.h"
 #include "drivers/platform/s905x5m/s905x5m-ethernet.h"
@@ -39,6 +39,15 @@
 
 /* The bytes of one sector of the SD card. */
 #define ODROID_C5_SECTOR_BYTES	512U
+
+/*
+ * The board's debug UART, its UART connector: the S905X5M's uart_B.
+ *
+ * Value referenced: Hardkernel Linux odroids7d-6.12.y common_drivers
+ * arch/arm64/boot/dts/amlogic/meson-s7d.dtsi (uart_B under apb4's
+ * ranges).
+ */
+#define ODROID_C5_DEBUG_UART	0xfe07a000ULL
 
 #if CONFIG_DRIVER_MALI_GPU
 /*
@@ -89,7 +98,7 @@ kern_platform_init(
 		return 0;
 
 	/* Publishes the console as /dev/console's output. */
-	drv_rpi4_console_init();
+	drv_s905x5m_console_init(ODROID_C5_DEBUG_UART, "odroidc5.framebuffer");
 
 	/* Finds the device tree, which names every controller; without it nothing boots. */
 	fdt_object = hal_get_arch_handoff("odroidc5.fdt");
@@ -183,7 +192,7 @@ kern_platform_input_init(
 #endif
 
 	/* Starts the serial reader, which a build without the serial console leaves off. */
-	error = drv_rpi4_console_start_input();
+	error = drv_s905x5m_console_start_input();
 	if (error != 0)
 		return error;
 

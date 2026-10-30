@@ -43,4 +43,14 @@
  */
 #define RPI_BOARD_MAILBOX_BUS_ALIAS 0x00000000U
 
+/*
+ * The base clock of the SD card's controller, which the HAL hands the
+ * kernel as "rpi5.sdhci.clock": a fixed 200 MHz, whatever the controller's
+ * capabilities say.
+ *
+ * Value referenced: Raspberry Pi Linux rpi-6.12.y
+ * arch/arm64/boot/dts/broadcom/bcm2712.dtsi (clk_emmc2, sdio1's clock).
+ */
+#define ARM64_BOARD_SDHCI_CLOCK_HZ 200000000ULL
+
 #endif

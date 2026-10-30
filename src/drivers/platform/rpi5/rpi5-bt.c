@@ -21,7 +21,7 @@
  * line's speed is a transition: the bytes that come while it lasts and a
  * short quiet time after it are dropped, and then the worker hunts for a
  * Command Complete or Command Status answering the last command sent
- * (rpi4-bt-link.c).  Only once one is found is the line in step; a header
+ * (rpi-bt-link.c).  Only once one is found is the line in step; a header
  * no controller sends, a receive error or a packet cut short then means the
  * line lost step, and the worker resets the controller by itself (the
  * class's RESET notice tells the daemon).  More than three such resets a
@@ -53,7 +53,7 @@
 #include "drivers/platform/rpi5/rpi5-bt.h"
 #include "drivers/platform/rpi5/rpi5-gio.h"
 #include "drivers/platform/rpi5/rpi5-pinctrl.h"
-#include "drivers/platform/rpi4/rpi4-bt-link.h"
+#include "drivers/platform/rpi-common/rpi-bt-link.h"
 #include <drivers/generic/bt-hci.h>
 #include <drivers/generic/fdt.h>
 #include <kern/atomic.h>
@@ -239,7 +239,7 @@ struct rpi5_bt {
 	struct wait_queue sender_wake;
 	struct wait_queue parked_wake;
 	struct wait_queue pause_wake;
-	struct drv_rpi4_bt_link link;
+	struct drv_rpi_bt_link link;
 	uint32_t interrupt_mask;
 	uint16_t rx_ring[RX_RING_ENTRIES];
 	size_t rx_head;
@@ -419,7 +419,7 @@ drv_rpi5_bt_probe(
 	waitq_init(&bt->sender_wake, "rpi5 bt sender");
 	waitq_init(&bt->parked_wake, "rpi5 bt parked");
 	waitq_init(&bt->pause_wake, "rpi5 bt pause");
-	drv_rpi4_bt_link_init(&bt->link);
+	drv_rpi_bt_link_init(&bt->link);
 
 	/* Creates the thread that does everything that touches the hardware. */
 	error = kthread_create(bt_thread, bt, SCHED_PRIORITY_DEFAULT, &thread);
@@ -972,7 +972,7 @@ begin_transition_locked(
 	struct rpi5_bt *bt)
 {
 	/* The new generation and the quiet line. */
-	drv_rpi4_bt_link_transition_begin(&bt->link);
+	drv_rpi_bt_link_transition_begin(&bt->link);
 
 	/* What was queued for the old line is dropped, and counted as sent so no wait is left for it. */
 	bt->tx_head = 0U;
@@ -997,7 +997,7 @@ stop_line_locked(
 	struct rpi5_bt *bt)
 {
 	/* The stopped line, at a new generation. */
-	drv_rpi4_bt_link_stop(&bt->link);
+	drv_rpi_bt_link_stop(&bt->link);
 
 	/* Nothing is received or sent while it is stopped. */
 	write_mask_locked(bt, 0U);
@@ -1212,7 +1212,7 @@ finish_quiet(
 	}
 
 	/* The quiet line hunts now, and the worker finds it so. */
-	drv_rpi4_bt_link_transition_end(&bt->link);
+	drv_rpi_bt_link_transition_end(&bt->link);
 	waitq_wake_all(&bt->worker_wake);
 
 	spin_unlock_irqrestore(&bt->lock, enabled);
@@ -1310,7 +1310,7 @@ self_reset(
 
 	enabled = spin_lock_irqsave(&bt->lock);
 
-	decision = drv_rpi4_bt_link_self_reset(&bt->link, observed, now_ms());
+	decision = drv_rpi_bt_link_self_reset(&bt->link, observed, now_ms());
 	if (decision == DRV_RPI4_BT_SELF_RESET_GO) {
 		bt->self_resets++;
 		begin_transition_locked(bt);
@@ -1945,7 +1945,7 @@ worker_anchor(
 	/* The line is in step. */
 	enabled = spin_lock_irqsave(&bt->lock);
 
-	drv_rpi4_bt_link_anchor(&bt->link);
+	drv_rpi_bt_link_anchor(&bt->link);
 
 	spin_unlock_irqrestore(&bt->lock, enabled);
 

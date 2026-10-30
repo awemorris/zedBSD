@@ -20,7 +20,7 @@
  * line's speed is a transition: the bytes that come while it lasts and a
  * short quiet time after it are dropped, and then the worker hunts for a
  * Command Complete or Command Status answering the last command sent
- * (rpi4-bt-link.c).  Only once one is found is the line in step; a header
+ * (rpi-bt-link.c).  Only once one is found is the line in step; a header
  * no controller sends, a receive error or a packet cut short then means the
  * line lost step, and the worker resets the controller by itself (the
  * class's RESET notice tells the daemon).  More than three such resets a
@@ -51,9 +51,9 @@
 
 #include "drivers/platform/rpi4/rpi4-bt.h"
 #include "drivers/platform/rpi4/rpi4-board.h"
-#include "drivers/platform/rpi4/rpi4-bt-link.h"
+#include "drivers/platform/rpi-common/rpi-bt-link.h"
 #include "drivers/platform/rpi4/rpi4-firmware.h"
-#include "drivers/platform/rpi4/rpi4-gpio.h"
+#include "drivers/platform/rpi-common/rpi-gpio.h"
 #include <drivers/generic/bt-hci.h>
 #include <drivers/generic/fdt.h>
 #include <kern/atomic.h>
@@ -207,7 +207,7 @@
 #define SEEN_BYTES			24U
 
 /* Whether the PL011 carries the serial console in this build (CONFIG_RPI4_SERIAL_CONSOLE): then Bluetooth is off. */
-#ifdef RPI4_SERIAL_CONSOLE
+#ifdef ARM64_SERIAL_CONSOLE
 #define BT_UART_IS_CONSOLE		1
 #else
 #define BT_UART_IS_CONSOLE		0
@@ -250,7 +250,7 @@ struct rpi4_bt {
 	int irq;
 	uint32_t tree_speed;
 	uint8_t board_address[BT_ADDRESS_SIZE];
-	enum drv_rpi4_gpio_pull pulls[PIN_COUNT];
+	enum drv_rpi_gpio_pull pulls[PIN_COUNT];
 	void *registers;
 	uint32_t clock_hz;
 	uint32_t speed_max;
@@ -261,7 +261,7 @@ struct rpi4_bt {
 	struct wait_queue sender_wake;
 	struct wait_queue parked_wake;
 	struct wait_queue pause_wake;
-	struct drv_rpi4_bt_link link;
+	struct drv_rpi_bt_link link;
 	uint32_t interrupt_mask;
 	uint16_t rx_ring[RX_RING_ENTRIES];
 	size_t rx_head;
@@ -462,7 +462,7 @@ drv_rpi4_bt_probe(
 	waitq_init(&bt->sender_wake, "rpi4 bt sender");
 	waitq_init(&bt->parked_wake, "rpi4 bt parked");
 	waitq_init(&bt->pause_wake, "rpi4 bt pause");
-	drv_rpi4_bt_link_init(&bt->link);
+	drv_rpi_bt_link_init(&bt->link);
 
 	/* Creates the thread that does everything that touches the hardware. */
 	error = kthread_create(bt_thread, bt, SCHED_PRIORITY_DEFAULT, &thread);
@@ -716,10 +716,10 @@ describe_pulls(
 	int error;
 
 	/* The vendor tree's pulls, kept for any pin the board's tree does not describe. */
-	bt->pulls[0] = DRV_RPI4_GPIO_PULL_UP;
-	bt->pulls[1] = DRV_RPI4_GPIO_PULL_NONE;
-	bt->pulls[2] = DRV_RPI4_GPIO_PULL_NONE;
-	bt->pulls[3] = DRV_RPI4_GPIO_PULL_UP;
+	bt->pulls[0] = DRV_RPI_GPIO_PULL_UP;
+	bt->pulls[1] = DRV_RPI_GPIO_PULL_NONE;
+	bt->pulls[2] = DRV_RPI_GPIO_PULL_NONE;
+	bt->pulls[3] = DRV_RPI_GPIO_PULL_UP;
 
 	/* The pin groups the PL011 names. */
 	error = drv_fdt_property(&bt->fdt, node, "pinctrl-0", &value, &length);
@@ -742,7 +742,7 @@ describe_group_pulls(
 	struct rpi4_bt *bt,
 	uint32_t group)
 {
-	enum drv_rpi4_gpio_pull pull;
+	enum drv_rpi_gpio_pull pull;
 	const uint8_t *pins;
 	const uint8_t *pulls;
 	uint32_t pins_length;
@@ -776,7 +776,7 @@ describe_group_pulls(
 		cell = drv_fdt_cells_value(pulls, 0, 1);
 		if (pull_count == count)
 			cell = drv_fdt_cells_value(pulls, index, 1);
-		error = drv_rpi4_gpio_pull_from_dt((uint32_t)cell, &pull);
+		error = drv_rpi_gpio_pull_from_dt((uint32_t)cell, &pull);
 		if (error != 0)
 			continue;
 		bt->pulls[pin - PIN_FIRST] = pull;
@@ -971,7 +971,7 @@ static int
 route_pins(
 	struct rpi4_bt *bt)
 {
-	enum drv_rpi4_gpio_function before;
+	enum drv_rpi_gpio_function before;
 	unsigned index;
 	unsigned pin;
 	int error;
@@ -981,17 +981,17 @@ route_pins(
 		pin = PIN_FIRST + index;
 
 		/* Reads what the firmware left the pin as. */
-		error = drv_rpi4_gpio_get_function(pin, &before);
+		error = drv_rpi_gpio_get_function(pin, &before);
 		if (error != 0) {
 			kern_logf("rpi4-bt: GPIO %u not readable (%d)\n", pin, error);
 			return error;
 		}
 
 		/* Sets the pull before the function, so the line never floats as UART0's. */
-		error = drv_rpi4_gpio_set_pull(pin, bt->pulls[index]);
+		error = drv_rpi_gpio_set_pull(pin, bt->pulls[index]);
 		if (error != 0)
 			return error;
-		error = drv_rpi4_gpio_set_function(pin, DRV_RPI4_GPIO_FUNCTION_ALT3);
+		error = drv_rpi_gpio_set_function(pin, DRV_RPI_GPIO_FUNCTION_ALT3);
 		if (error != 0)
 			return error;
 
@@ -1000,7 +1000,7 @@ route_pins(
 			"rpi4-bt: GPIO %u function %u -> %u, pull %u\n",
 			pin,
 			(unsigned)before,
-			(unsigned)DRV_RPI4_GPIO_FUNCTION_ALT3,
+			(unsigned)DRV_RPI_GPIO_FUNCTION_ALT3,
 			(unsigned)bt->pulls[index]);
 	}
 
@@ -1016,7 +1016,7 @@ route_pins(
 static void
 release_console_pins(void)
 {
-	enum drv_rpi4_gpio_function function;
+	enum drv_rpi_gpio_function function;
 	unsigned pins[2];
 	unsigned index;
 	int error;
@@ -1026,14 +1026,14 @@ release_console_pins(void)
 	pins[1] = CONSOLE_PIN_RX;
 	for (index = 0U; index < 2U; index++) {
 		/* What the pin is now; an unreadable one is left alone. */
-		error = drv_rpi4_gpio_get_function(pins[index], &function);
+		error = drv_rpi_gpio_get_function(pins[index], &function);
 		if (error != 0)
 			continue;
-		if (function != DRV_RPI4_GPIO_FUNCTION_ALT0)
+		if (function != DRV_RPI_GPIO_FUNCTION_ALT0)
 			continue;
 
 		/* UART0 on the console's pin: an input instead. */
-		error = drv_rpi4_gpio_set_function(pins[index], DRV_RPI4_GPIO_FUNCTION_INPUT);
+		error = drv_rpi_gpio_set_function(pins[index], DRV_RPI_GPIO_FUNCTION_INPUT);
 		kern_logf("rpi4-bt: GPIO %u was UART0, now an input (%d)\n", pins[index], error);
 	}
 }
@@ -1250,7 +1250,7 @@ begin_transition_locked(
 	struct rpi4_bt *bt)
 {
 	/* The new generation and the quiet line. */
-	drv_rpi4_bt_link_transition_begin(&bt->link);
+	drv_rpi_bt_link_transition_begin(&bt->link);
 
 	/* What was queued for the old line is dropped, and counted as sent so no wait is left for it. */
 	bt->tx_head = 0U;
@@ -1275,7 +1275,7 @@ stop_line_locked(
 	struct rpi4_bt *bt)
 {
 	/* The stopped line, at a new generation. */
-	drv_rpi4_bt_link_stop(&bt->link);
+	drv_rpi_bt_link_stop(&bt->link);
 
 	/* Nothing is received or sent while it is stopped. */
 	write_mask_locked(bt, 0U);
@@ -1479,7 +1479,7 @@ finish_quiet(
 	}
 
 	/* The quiet line hunts now, and the worker finds it so. */
-	drv_rpi4_bt_link_transition_end(&bt->link);
+	drv_rpi_bt_link_transition_end(&bt->link);
 	waitq_wake_all(&bt->worker_wake);
 
 	spin_unlock_irqrestore(&bt->lock, enabled);
@@ -1577,7 +1577,7 @@ self_reset(
 
 	enabled = spin_lock_irqsave(&bt->lock);
 
-	decision = drv_rpi4_bt_link_self_reset(&bt->link, observed, now_ms());
+	decision = drv_rpi_bt_link_self_reset(&bt->link, observed, now_ms());
 	if (decision == DRV_RPI4_BT_SELF_RESET_GO) {
 		bt->self_resets++;
 		begin_transition_locked(bt);
@@ -2213,7 +2213,7 @@ worker_anchor(
 	/* The line is in step. */
 	enabled = spin_lock_irqsave(&bt->lock);
 
-	drv_rpi4_bt_link_anchor(&bt->link);
+	drv_rpi_bt_link_anchor(&bt->link);
 
 	spin_unlock_irqrestore(&bt->lock, enabled);
 

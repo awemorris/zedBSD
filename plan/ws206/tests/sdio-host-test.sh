@@ -25,11 +25,11 @@ CC=${CC:-cc}
 mkdir -p "$OUT"
 
 SOURCES="$REPO/plan/ws206/tests/sdio-host-test.c
-$REPO/src/drivers/platform/rpi4/rpi4-mmc-irq.c
-$REPO/src/drivers/platform/rpi4/rpi4-sdio-host.c
-$REPO/src/drivers/platform/rpi4/rpi4-sdio.c
+$REPO/src/drivers/platform/rpi-common/rpi-mmc-irq.c
+$REPO/src/drivers/platform/rpi-common/rpi-sdio-host.c
+$REPO/src/drivers/platform/rpi-common/rpi-sdio.c
 $REPO/src/drivers/platform/rpi4/rpi4-wifi.c
-$REPO/src/drivers/platform/rpi4/rpi4-gpio.c
+$REPO/src/drivers/platform/rpi-common/rpi-gpio.c
 $REPO/src/drivers/platform/rpi4/rpi4-board.c
 $REPO/src/drivers/generic/fdt.c"
 

@@ -20,7 +20,7 @@
  * Bluetooth drivers use only these.
  */
 
-#include "drivers/platform/rpi4/rpi4-gpio.h"
+#include "drivers/platform/rpi-common/rpi-gpio.h"
 #include <kern/atomic.h>
 #include <kern/clock.h>
 #include <kern/device-io.h>
@@ -80,7 +80,7 @@
 /*
  * The block's registers.
  *
- * Mapped once by drv_rpi4_gpio_init() and kept for as long as the kernel
+ * Mapped once by drv_rpi_gpio_init() and kept for as long as the kernel
  * runs.  Only read after gpio_state has been seen READY with an acquire
  * load, which orders the read after the store that filled it.
  */
@@ -109,7 +109,7 @@ static struct spinlock gpio_lock = {
 
 static int prepare_registers(const struct drv_fdt *fdt);
 static int registers_ready(void);
-static int pull_code(enum drv_rpi4_gpio_pull pull, uint32_t *code);
+static int pull_code(enum drv_rpi_gpio_pull pull, uint32_t *code);
 static void update_field(unsigned offset, unsigned shift, uint32_t mask, uint32_t value);
 
 /*
@@ -119,7 +119,7 @@ static void update_field(unsigned offset, unsigned shift, uint32_t mask, uint32_
  * one of them maps the block and the others wait until it is ready.
  */
 int
-drv_rpi4_gpio_init(
+drv_rpi_gpio_init(
 	const struct drv_fdt *fdt)
 {
 	unsigned state;
@@ -171,9 +171,9 @@ drv_rpi4_gpio_init(
  * Selects a pin's function.
  */
 int
-drv_rpi4_gpio_set_function(
+drv_rpi_gpio_set_function(
 	unsigned pin,
-	enum drv_rpi4_gpio_function function)
+	enum drv_rpi_gpio_function function)
 {
 	unsigned offset;
 	unsigned shift;
@@ -181,7 +181,7 @@ drv_rpi4_gpio_set_function(
 	int error;
 
 	/* Refuses a pin the block does not have. */
-	if (pin >= DRV_RPI4_GPIO_PIN_COUNT)
+	if (pin >= DRV_RPI_GPIO_PIN_COUNT)
 		return EINVAL;
 
 	/* Refuses a code wider than the three bits of a function. */
@@ -209,9 +209,9 @@ drv_rpi4_gpio_set_function(
  * Reads a pin's current function.
  */
 int
-drv_rpi4_gpio_get_function(
+drv_rpi_gpio_get_function(
 	unsigned pin,
-	enum drv_rpi4_gpio_function *function)
+	enum drv_rpi_gpio_function *function)
 {
 	unsigned long enabled;
 	unsigned offset;
@@ -220,7 +220,7 @@ drv_rpi4_gpio_get_function(
 	int error;
 
 	/* Refuses a pin the block does not have. */
-	if (pin >= DRV_RPI4_GPIO_PIN_COUNT)
+	if (pin >= DRV_RPI_GPIO_PIN_COUNT)
 		return EINVAL;
 
 	/* Refuses nowhere to put the answer. */
@@ -244,7 +244,7 @@ drv_rpi4_gpio_get_function(
 	spin_unlock_irqrestore(&gpio_lock, enabled);
 
 	/* Every 3-bit code names a function, so the answer needs no check. */
-	*function = (enum drv_rpi4_gpio_function)((select >> shift) & GPIO_FUNCTION_MASK);
+	*function = (enum drv_rpi_gpio_function)((select >> shift) & GPIO_FUNCTION_MASK);
 
 	/* Succeeded: function holds the pin's current function. */
 	return 0;
@@ -254,9 +254,9 @@ drv_rpi4_gpio_get_function(
  * Sets a pin's pull resistor.
  */
 int
-drv_rpi4_gpio_set_pull(
+drv_rpi_gpio_set_pull(
 	unsigned pin,
-	enum drv_rpi4_gpio_pull pull)
+	enum drv_rpi_gpio_pull pull)
 {
 	unsigned offset;
 	unsigned shift;
@@ -264,7 +264,7 @@ drv_rpi4_gpio_set_pull(
 	int error;
 
 	/* Refuses a pin the block does not have. */
-	if (pin >= DRV_RPI4_GPIO_PIN_COUNT)
+	if (pin >= DRV_RPI_GPIO_PIN_COUNT)
 		return EINVAL;
 
 	/* Converts the resistor to the register's code, refusing any other number. */
@@ -294,9 +294,9 @@ drv_rpi4_gpio_set_pull(
  * This is the one place that knows the tree's numbers.
  */
 int
-drv_rpi4_gpio_pull_from_dt(
+drv_rpi_gpio_pull_from_dt(
 	uint32_t brcm_pull,
-	enum drv_rpi4_gpio_pull *pull)
+	enum drv_rpi_gpio_pull *pull)
 {
 	/* Refuses nowhere to put the answer. */
 	if (pull == NULL)
@@ -305,13 +305,13 @@ drv_rpi4_gpio_pull_from_dt(
 	/* Names the tree's number; anything else is not a resistor. */
 	switch (brcm_pull) {
 	case GPIO_DT_PULL_NONE:
-		*pull = DRV_RPI4_GPIO_PULL_NONE;
+		*pull = DRV_RPI_GPIO_PULL_NONE;
 		break;
 	case GPIO_DT_PULL_DOWN:
-		*pull = DRV_RPI4_GPIO_PULL_DOWN;
+		*pull = DRV_RPI_GPIO_PULL_DOWN;
 		break;
 	case GPIO_DT_PULL_UP:
-		*pull = DRV_RPI4_GPIO_PULL_UP;
+		*pull = DRV_RPI_GPIO_PULL_UP;
 		break;
 	default:
 		return EINVAL;
@@ -396,18 +396,18 @@ registers_ready(void)
  */
 static int
 pull_code(
-	enum drv_rpi4_gpio_pull pull,
+	enum drv_rpi_gpio_pull pull,
 	uint32_t *code)
 {
 	/* Names the register's code; a raw number from the tree or the register is refused. */
 	switch (pull) {
-	case DRV_RPI4_GPIO_PULL_NONE:
+	case DRV_RPI_GPIO_PULL_NONE:
 		*code = GPIO_PULL_CODE_NONE;
 		break;
-	case DRV_RPI4_GPIO_PULL_UP:
+	case DRV_RPI_GPIO_PULL_UP:
 		*code = GPIO_PULL_CODE_UP;
 		break;
-	case DRV_RPI4_GPIO_PULL_DOWN:
+	case DRV_RPI_GPIO_PULL_DOWN:
 		*code = GPIO_PULL_CODE_DOWN;
 		break;
 	default:

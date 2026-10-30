@@ -25,7 +25,7 @@ CC=${CC:-cc}
 mkdir -p "$OUT"
 
 SOURCES="$REPO/plan/ws206/tests/gpio-host-test.c
-$REPO/src/drivers/platform/rpi4/rpi4-gpio.c
+$REPO/src/drivers/platform/rpi-common/rpi-gpio.c
 $REPO/src/drivers/platform/rpi4/rpi4-firmware.c
 $REPO/src/drivers/generic/fdt.c"
 
