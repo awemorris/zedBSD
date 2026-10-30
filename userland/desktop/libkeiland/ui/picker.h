@@ -21,7 +21,6 @@
 
 #include <keiland/keiland.h>
 
-#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -128,10 +127,10 @@ struct keiui_picker {
 	char cache[KEIUI_PICKER_PATH_MAX];
 	int (*thumbnail)(void *data, const char *path, int side, struct kl_image *image);
 	void *thumbnail_data;
-	pthread_mutex_t lock;
-	pthread_cond_t wake;
+	struct kl_mutex lock;
+	struct kl_cond wake;
 	int lock_made;
-	pthread_t thread;
+	struct kl_thread *thread;
 	int thread_made;
 	int stop;
 	size_t want_first;

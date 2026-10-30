@@ -26,9 +26,10 @@
 #include "audio-protocol.h"
 #include "userland/desktop/libkeiland/audio/kl-audio-protocol.h"
 
+#include <keiland/keiland_thread.h>
+
 #include <errno.h>
 #include <poll.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,7 +68,7 @@ _Static_assert(KL_AUDIO_FORMAT_F32_LE == KL_AUDIO_WIRE_FORMAT_F32_LE, "F32_LE");
  * written are read by any thread with atomic loads.
  */
 struct kl_audio_stream {
-	pthread_mutex_t lock;
+	struct kl_mutex lock;
 	struct wl_display *display;
 	struct wl_registry *registry;
 	struct wl_proxy *audio;
@@ -200,7 +201,7 @@ kl_audio_stream_open(
 		return ENOMEM;
 	stream->ready_fd = -1;
 	stream->next_request = 1U;
-	error = pthread_mutex_init(&stream->lock, NULL);
+	error = kl_mutex_init(&stream->lock);
 	if (error != 0) {
 		free(stream);
 		return error;
@@ -250,7 +251,7 @@ kl_audio_stream_close(
 		(void)munmap(stream->ring, stream->ring_bytes);
 
 	/* The record. */
-	(void)pthread_mutex_destroy(&stream->lock);
+	kl_mutex_destroy(&stream->lock);
 	free(stream);
 }
 
@@ -354,10 +355,10 @@ kl_audio_stream_write(
 	lost = __atomic_load_n(&stream->lost, __ATOMIC_ACQUIRE);
 	consumed = kl_audio_stream_consumed(stream);
 	if (lost && consumed == stream->written) {
-		status = pthread_mutex_trylock(&stream->lock);
+		status = kl_mutex_try(&stream->lock);
 		if (status == 0) {
 			audio_sink_anchor(stream, stream->running);
-			pthread_mutex_unlock(&stream->lock);
+			kl_mutex_unlock(&stream->lock);
 		}
 	}
 
@@ -373,12 +374,12 @@ kl_audio_stream_write(
 	 * lost stream is known; another thread holding the stream does it.
 	 */
 	if (room == 0U) {
-		status = pthread_mutex_trylock(&stream->lock);
+		status = kl_mutex_try(&stream->lock);
 		if (status != 0)
 			return 0U;
 		if (!stream->lost)
 			(void)audio_read(stream, 0);
-		pthread_mutex_unlock(&stream->lock);
+		kl_mutex_unlock(&stream->lock);
 		return 0U;
 	}
 
@@ -506,7 +507,7 @@ kl_audio_stream_dispatch(
 	/* Another thread holds the stream: nothing is taken now. */
 	if (events != NULL)
 		*events = 0U;
-	status = pthread_mutex_trylock(&stream->lock);
+	status = kl_mutex_try(&stream->lock);
 	if (status != 0)
 		return 0;
 
@@ -520,7 +521,7 @@ kl_audio_stream_dispatch(
 	stream->events = 0U;
 	lost = stream->lost;
 
-	pthread_mutex_unlock(&stream->lock);
+	kl_mutex_unlock(&stream->lock);
 
 	/* A lost stream says so. */
 	if (lost)
@@ -670,12 +671,12 @@ audio_control(
 	int error;
 
 	/* One control at a time on the connection. */
-	pthread_mutex_lock(&stream->lock);
+	kl_mutex_lock(&stream->lock);
 
 	/* A lost stream: the sink takes the control. */
 	if (stream->lost) {
 		audio_sink_control(stream, opcode, starts, stops);
-		pthread_mutex_unlock(&stream->lock);
+		kl_mutex_unlock(&stream->lock);
 		return EPIPE;
 	}
 
@@ -730,7 +731,7 @@ audio_control(
 		}
 	}
 
-	pthread_mutex_unlock(&stream->lock);
+	kl_mutex_unlock(&stream->lock);
 
 	/* Refused, or lost. */
 	if (error != 0)

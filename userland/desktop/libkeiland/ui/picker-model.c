@@ -39,7 +39,7 @@
 static int model_add(struct keiui_picker *picker, char **fields);
 static int model_compare(const void *left, const void *right);
 static void model_clear(struct keiui_picker *picker);
-static void *model_thread(void *data);
+static void model_thread(void *data);
 static int model_next(struct keiui_picker *picker, size_t *index);
 static void model_make(struct keiui_picker *picker, size_t index, struct kl_image *image, int *video, int *thumb);
 static int model_kind(const char *path, int *kind);
@@ -94,12 +94,12 @@ keiui_picker_init(
 	picker->scroll_made = 1;
 
 	/* The lock the thread and the view share. */
-	error = pthread_mutex_init(&picker->lock, NULL);
+	error = kl_mutex_init(&picker->lock);
 	if (error != 0)
 		return error;
-	error = pthread_cond_init(&picker->wake, NULL);
+	error = kl_cond_init(&picker->wake);
 	if (error != 0) {
-		(void)pthread_mutex_destroy(&picker->lock);
+		kl_mutex_destroy(&picker->lock);
 		return error;
 	}
 
@@ -228,14 +228,20 @@ int
 keiui_picker_start(
 	struct keiui_picker *picker)
 {
+	struct kl_thread_options options;
 	int error;
 
 	/* Once, after the lock is made. */
 	if (picker->thread_made || !picker->lock_made)
 		return EINVAL;
 
-	/* The thread waits until the view wants items made. */
-	error = pthread_create(&picker->thread, NULL, model_thread, picker);
+	/* The thread waits until the view wants items made: its name, what it runs and its priority. */
+	memset(&options, 0, sizeof(options));
+	options.name = "kl-picker-scan";
+	options.run = model_thread;
+	options.argument = picker;
+	options.priority = KL_THREAD_PRIORITY_NORMAL;
+	error = kl_thread_start(&options, &picker->thread);
 	if (error != 0)
 		return error;
 
@@ -253,15 +259,16 @@ keiui_picker_fini(
 {
 	/* The thread finishes the thumbnail it makes, then ends. */
 	if (picker->thread_made) {
-		pthread_mutex_lock(&picker->lock);
+		kl_mutex_lock(&picker->lock);
 
 		picker->stop = 1;
-		pthread_cond_signal(&picker->wake);
+		kl_cond_signal(&picker->wake);
 
-		pthread_mutex_unlock(&picker->lock);
+		kl_mutex_unlock(&picker->lock);
 
 		/* Waits for it to end. */
-		(void)pthread_join(picker->thread, NULL);
+		(void)kl_thread_join(picker->thread);
+		picker->thread = NULL;
 		picker->thread_made = 0;
 	}
 
@@ -279,8 +286,8 @@ keiui_picker_fini(
 
 	/* The lock, now that no thread uses it. */
 	if (picker->lock_made) {
-		(void)pthread_cond_destroy(&picker->wake);
-		(void)pthread_mutex_destroy(&picker->lock);
+		kl_cond_destroy(&picker->wake);
+		kl_mutex_destroy(&picker->lock);
 		picker->lock_made = 0;
 	}
 }
@@ -306,15 +313,15 @@ keiui_picker_want(
 		return;
 
 	/* The range the thread reads, and a wake when it changed. */
-	pthread_mutex_lock(&picker->lock);
+	kl_mutex_lock(&picker->lock);
 
 	if (first != picker->want_first || last != picker->want_last) {
 		picker->want_first = first;
 		picker->want_last = last;
-		pthread_cond_signal(&picker->wake);
+		kl_cond_signal(&picker->wake);
 	}
 
-	pthread_mutex_unlock(&picker->lock);
+	kl_mutex_unlock(&picker->lock);
 }
 
 /*
@@ -341,7 +348,7 @@ keiui_picker_collect(
 
 	/* Each item in sight: a finished one is the view's from now on, unchanged by the thread. */
 	pending = 0;
-	pthread_mutex_lock(&picker->lock);
+	kl_mutex_lock(&picker->lock);
 
 	for (index = first; index < last; index++) {
 		item = &picker->items[index];
@@ -356,7 +363,7 @@ keiui_picker_collect(
 		pending = 1;
 	}
 
-	pthread_mutex_unlock(&picker->lock);
+	kl_mutex_unlock(&picker->lock);
 
 	/* Reports whether another frame is wanted for thumbnails still to come. */
 	return pending;
@@ -635,7 +642,7 @@ model_clear(
 }
 
 /* The thread: makes the thumbnail of each item in sight that has none, until told to stop. */
-static void *
+static void
 model_thread(
 	void *data)
 {
@@ -650,40 +657,37 @@ model_thread(
 	picker = data;
 	for (;;) {
 		/* Waits for an item in sight without a thumbnail, and claims it. */
-		pthread_mutex_lock(&picker->lock);
+		kl_mutex_lock(&picker->lock);
 
 		found = model_next(picker, &index);
 		while (!found && !picker->stop) {
-			pthread_cond_wait(&picker->wake, &picker->lock);
+			kl_cond_wait(&picker->wake, &picker->lock);
 			found = model_next(picker, &index);
 		}
 
 		/* Told to stop: ends with the lock released. */
 		if (picker->stop) {
-			pthread_mutex_unlock(&picker->lock);
+			kl_mutex_unlock(&picker->lock);
 			break;
 		}
 
 		/* Claimed: the view sees it as being made. */
 		picker->items[index].thumb = KEIUI_PICKER_THUMB_LOADING;
 
-		pthread_mutex_unlock(&picker->lock);
+		kl_mutex_unlock(&picker->lock);
 
 		/* Makes it without the lock: reading and decoding may take long. */
 		model_make(picker, index, &image, &video, &thumb);
 
 		/* Publishes it; the view takes it on its next frame. */
-		pthread_mutex_lock(&picker->lock);
+		kl_mutex_lock(&picker->lock);
 
 		picker->items[index].image = image;
 		picker->items[index].video = video;
 		picker->items[index].thumb = thumb;
 
-		pthread_mutex_unlock(&picker->lock);
+		kl_mutex_unlock(&picker->lock);
 	}
-
-	/* The thread ends. */
-	return NULL;
 }
 
 /* Finds an item in sight not looked at yet, under the lock: 1 with its index, 0 when none. */
