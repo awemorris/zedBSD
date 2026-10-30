@@ -12,15 +12,22 @@
 #include <hal/hal.h>
 
 /*
+ * The serialization region's entry points, declared as the macros of
+ * <hal/atomic.h> declare them, so that a definition which drifts from the
+ * macros does not compile.
+ */
+HAL_ATOMIC_ENTER_DECLARE();
+
+/*
  * Takes the guard of the read-modify-write and 64-bit operations.  The
  * port is uniprocessor, so turning interrupts off excludes every other
  * context.
  */
-hal_atomic_cookie_t
+uintptr_t
 hal_atomic_enter(
 	void)
 {
-	hal_atomic_cookie_t cookie;
+	uintptr_t cookie;
 	bool enabled;
 
 	/* Keeps the caller's interrupt state as the cookie. */
@@ -39,7 +46,7 @@ hal_atomic_enter(
  */
 void
 hal_atomic_leave(
-	hal_atomic_cookie_t cookie)
+	uintptr_t cookie)
 {
 	/* Orders the guarded accesses before interrupts can come in. */
 	__asm__ volatile("" ::: "memory");

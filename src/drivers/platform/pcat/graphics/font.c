@@ -16,8 +16,21 @@
 #include "kern/klog.h"
 #include "kern/platform.h"
 
+/*
+ * Where the i386 kernel's straight map of physical memory starts.
+ *
+ * The VGA window lies in the first megabyte, inside the straight map, so the
+ * i386 kernel reaches it at this base plus its physical address without
+ * mapping it.  The driver keeps its own copy of the base rather than read it
+ * from the hardware layer.  A kernel with another layout gives the window's
+ * address in PCAT_VGA_APERTURE_ADDRESS.
+ */
+#define PCAT_STRAIGHT_MAP_BASE 0x80000000U
+#define PCAT_VGA_APERTURE_PHYSICAL 0x000a0000U
+
 #ifndef PCAT_VGA_APERTURE_ADDRESS
-#define PCAT_VGA_APERTURE_ADDRESS 0x800a0000U
+#define PCAT_VGA_APERTURE_ADDRESS                                              \
+	(PCAT_STRAIGHT_MAP_BASE + PCAT_VGA_APERTURE_PHYSICAL)
 #endif
 #define VGA_FONT_MEMORY                                                        \
 	((volatile uint8_t *)(uintptr_t)PCAT_VGA_APERTURE_ADDRESS)

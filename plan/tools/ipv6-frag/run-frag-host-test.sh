@@ -13,7 +13,7 @@ cc=${CC:-clang}
 sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
 status=0
 for arch in AMD64 I386; do
-	bits=; [ $arch = I386 ] && bits=-m32
+	bits=; [ $arch = I386 ] && bits="-m32 -DKERN_ATOMIC_SERIALIZED"
 	common="-std=c11 -O1 -g -Iinclude -Isrc -I. -DKERN_UAPI_NATIVE -DKERN_KCRT_NATIVE -DHAL_ARCH_$arch -Wall -Wextra -Werror $bits"
 	kernel="$common -nostdlibinc -ffreestanding -fno-builtin"
 	built=y

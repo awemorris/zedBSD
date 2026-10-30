@@ -399,6 +399,24 @@ clock_ticks(void)
 	return stub.ticks;
 }
 
+/* A tick of the fake clock is one millisecond. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	/* The same count in the fake clock's unit. */
+	return milliseconds;
+}
+
+/* A tick of the fake clock is one millisecond. */
+uint64_t
+kern_ticks_to_ns(
+	uint64_t ticks)
+{
+	/* The same time in nanoseconds. */
+	return ticks * 1000000U;
+}
+
 void
 sched_sleep(
 	uint64_t timeout_tick)
@@ -513,7 +531,7 @@ kern_pmem_alloc_limited(
 		return 4;
 
 	/* Succeeded: the run. */
-	run->paddr = (hal_physaddr_t)bus;
+	run->paddr = (kern_physaddr_t)bus;
 	run->size = size;
 	return 0;
 }
@@ -539,7 +557,7 @@ kern_pmem_free(
 
 void *
 kern_pmem_to_kernel(
-	hal_physaddr_t address)
+	kern_physaddr_t address)
 {
 	/* The run's bytes in the model. */
 	return model_dma(address, 1U);

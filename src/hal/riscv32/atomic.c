@@ -12,6 +12,13 @@
 #include <hal/hal.h>
 
 /*
+ * The serialization region's entry points, declared as the macros of
+ * <hal/atomic.h> declare them, so that a definition which drifts from the
+ * macros does not compile.
+ */
+HAL_ATOMIC_ENTER_DECLARE();
+
+/*
  * A 32-bit hart has no 64-bit atomic instruction.  This guard serializes
  * the read-modify-write and 64-bit operations across harts.  Interrupts
  * are disabled before it is taken so that an interrupt cannot wait on the
@@ -22,11 +29,11 @@ static volatile unsigned atomic_guard;
 /*
  * Takes the atomic-operation guard.
  */
-hal_atomic_cookie_t
+uintptr_t
 hal_atomic_enter(
 	void)
 {
-	hal_atomic_cookie_t cookie;
+	uintptr_t cookie;
 	bool enabled;
 	bool acquired;
 
@@ -53,7 +60,7 @@ hal_atomic_enter(
  */
 void
 hal_atomic_leave(
-	hal_atomic_cookie_t cookie)
+	uintptr_t cookie)
 {
 	unsigned previous;
 

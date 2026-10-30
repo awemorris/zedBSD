@@ -86,10 +86,10 @@ drv_pc98_gdc_default(
 	backend->io_context = io_context;
 	backend->port_in8 = port_in8;
 	backend->port_out8 = port_out8;
-	backend->planes[0] = (volatile uint8_t *)0x000a8000U;
-	backend->planes[1] = (volatile uint8_t *)0x000b0000U;
-	backend->planes[2] = (volatile uint8_t *)0x000b8000U;
-	backend->planes[3] = (volatile uint8_t *)0x000e0000U;
+	backend->planes[0] = (volatile uint8_t *)(uintptr_t)(PC98_STRAIGHT_MAP_BASE + 0x000a8000U);
+	backend->planes[1] = (volatile uint8_t *)(uintptr_t)(PC98_STRAIGHT_MAP_BASE + 0x000b0000U);
+	backend->planes[2] = (volatile uint8_t *)(uintptr_t)(PC98_STRAIGHT_MAP_BASE + 0x000b8000U);
+	backend->planes[3] = (volatile uint8_t *)(uintptr_t)(PC98_STRAIGHT_MAP_BASE + 0x000e0000U);
 }
 
 /*

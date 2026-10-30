@@ -114,7 +114,7 @@ drv_pc98_glyph_default(
 	backend->port_in8 = port_in8;
 	backend->port_out8 = port_out8;
 	backend->io_context = io_context;
-	backend->cg_window = (volatile uint8_t *)0x800a4000U;
+	backend->cg_window = (volatile uint8_t *)(uintptr_t)(PC98_STRAIGHT_MAP_BASE + 0x000a4000U);
 	backend->display = display;
 }
 

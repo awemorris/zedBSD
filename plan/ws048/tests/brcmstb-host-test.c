@@ -1170,6 +1170,34 @@ drv_pci_device_config_read8(
 	return error;
 }
 
+int
+drv_pci_device_config_read16(
+	struct drv_pci_device *device,
+	unsigned offset,
+	uint16_t *value)
+{
+	uint32_t read;
+	int error;
+
+	/* The model's configuration space, as the core would read it. */
+	error = published_ops->config_read(published_host, &device->address, offset, 2U, &read);
+	*value = (uint16_t)read;
+	return error;
+}
+
+/* The model's functions list no capability, so messages are never offered. */
+int
+drv_pci_device_find_capability(
+	struct drv_pci_device *device,
+	uint8_t id,
+	unsigned *result)
+{
+	(void)device;
+	(void)id;
+	(void)result;
+	return ENOENT;
+}
+
 struct drv_pci_bus *
 drv_pci_device_bus(
 	const struct drv_pci_device *device)

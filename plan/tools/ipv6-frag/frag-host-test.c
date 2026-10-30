@@ -31,7 +31,7 @@
 #include <string.h>
 #include <uapi/errno.h>
 
-#include "hal/atomic.h"
+#include <stdint.h>
 
 /* The headers a test fragment has before its fragment header. */
 #define TEST_PLAIN		0U	/* the IPv6 header alone */
@@ -155,7 +155,7 @@ kern_calloc(
 }
 
 /* A 32-bit board's atomics enter and leave nothing on the host's one thread. */
-hal_atomic_cookie_t
+uintptr_t
 hal_atomic_enter(void)
 {
 	return 0;
@@ -164,7 +164,7 @@ hal_atomic_enter(void)
 /* Leaves what hal_atomic_enter entered. */
 void
 hal_atomic_leave(
-	hal_atomic_cookie_t cookie)
+	uintptr_t cookie)
 {
 	(void)cookie;
 }
@@ -1310,4 +1310,22 @@ test_quoted_error(void)
 	ipv6_fragment_timer_run(test_now_ms);
 	check(error_count == 0U, "quoted error: no Time Exceeded about an error message");
 	settle("quoted error");
+}
+
+/*
+ * The kernel's lock-word claim and spin hint, which the kernel core defines
+ * with the HAL.  The host's exchange stands in for the port's sequence.
+ */
+int
+atomic_raw_try_acquire_zero(
+	volatile unsigned *value)
+{
+	return __atomic_exchange_n(value, 1U, __ATOMIC_ACQUIRE) == 0U;
+}
+
+/* The host has no spin instruction to give. */
+void
+atomic_spin_hint(
+	void)
+{
 }

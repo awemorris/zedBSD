@@ -15,7 +15,7 @@
 
 #include "kern/test-checkpoint.h"
 
-#include <hal/atomic.h>
+#include <hal/hal.h>
 
 #ifdef KERN_TEST_CHECKPOINTS
 static kern_test_checkpoint_fn checkpoint_handler;

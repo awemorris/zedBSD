@@ -12,7 +12,7 @@ AWK ?= awk
 
 M68KV_CPPFLAGS := -nostdinc -isystem $(shell $(M68KV_CC) -print-file-name=include) \
 	-Iinclude -Isrc -I. -D__ZEDBSD__=1 -D_LIBC_LIMITS_H_ \
-	-DHAL_ARCH_M68K -DHAL_ARCH_M68040 -DHAL_BOARD_VIRT -DKERN_USER_ABI_M68K
+	-DHAL_ARCH_M68K -DKERN_ATOMIC_SERIALIZED -DHAL_ARCH_M68040 -DHAL_BOARD_VIRT -DKERN_USER_ABI_M68K
 M68KV_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 
 # The kernel's C uses no floating point.

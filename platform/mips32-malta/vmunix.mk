@@ -24,7 +24,7 @@ MIPS32_OBJDUMP ?= $(ZEDBSD_TARGET_LLVM_BIN)/llvm-objdump
 # The kernel and the HAL read the compiler's freestanding headers and the
 # tree's include/ and src/, never the C library (as on the other ports).
 MIPS32_CPPFLAGS := -nostdlibinc -Iinclude -Isrc -I. -Isrc/hal/mips \
-	-DHAL_ARCH_MIPS32 $(MIPS32_BOARD_CPPFLAGS) -DKERN_USER_ABI_MIPS32
+	-DHAL_ARCH_MIPS32 -DKERN_ATOMIC_SERIALIZED $(MIPS32_BOARD_CPPFLAGS) -DKERN_USER_ABI_MIPS32
 MIPS32_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 
 # A test build of the HAL takes the paths of a virtually tagged

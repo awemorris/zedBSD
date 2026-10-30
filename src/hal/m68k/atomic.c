@@ -8,13 +8,20 @@
 #include <hal/hal.h>
 
 /*
+ * The serialization region's entry points, declared as the macros of
+ * <hal/atomic.h> declare them, so that a definition which drifts from the
+ * macros does not compile.
+ */
+HAL_ATOMIC_ENTER_DECLARE();
+
+/*
  * The MC68030 HAL is uniprocessor.  Excluding interrupts therefore
  * serializes atomic fallback regions against every execution context.
  */
-hal_atomic_cookie_t
+uintptr_t
 hal_atomic_enter(void)
 {
-	hal_atomic_cookie_t cookie;
+	uintptr_t cookie;
 
 	cookie = hal_irq_disable() ? 1U : 0U;
 	__asm__ volatile("" ::: "memory");
@@ -23,7 +30,7 @@ hal_atomic_enter(void)
 
 void
 hal_atomic_leave(
-	hal_atomic_cookie_t cookie)
+	uintptr_t cookie)
 {
 	__asm__ volatile("" ::: "memory");
 	if (cookie != 0U)
@@ -34,7 +41,7 @@ bool
 hal_atomic_uint_try_acquire(
 	volatile unsigned *value)
 {
-	hal_atomic_cookie_t cookie;
+	uintptr_t cookie;
 	unsigned previous;
 
 	cookie = hal_atomic_enter();

@@ -8,9 +8,50 @@
 #ifndef KERN_KERN_ATOMIC_H
 #define KERN_KERN_ATOMIC_H
 
-#include <hal/hal.h>
 #include <limits.h>
 #include <stdint.h>
+
+/*
+ * The HAL's atomic macros.
+ *
+ * A translation unit of the kernel core that has read <hal/hal.h> already
+ * has them, and keeps them.  Otherwise this header reads <hal/atomic.h>
+ * alone, with the port's atomic style taken from the build configuration
+ * (KERN_ATOMIC_SERIALIZED on a port whose HAL serializes atomic sequences
+ * with hal_atomic_enter() and hal_atomic_leave()), defines the inline
+ * functions below with the macros, and undefines every name the HAL
+ * header gave at the end, so that a driver sees no name of the HAL.
+ */
+#if defined(HAL_HAL_ATOMIC_H)
+# define KERN_ATOMIC_HAL_KEPT
+#else
+# if !defined(HAL_ATOMIC_STYLE)
+#  define KERN_ATOMIC_STYLE_TEMPORARY
+#  define HAL_ATOMIC_STYLE_NATIVE	0
+#  define HAL_ATOMIC_STYLE_ENTER	1
+#  if defined(KERN_ATOMIC_SERIALIZED)
+#   define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_ENTER
+#  else
+#   define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_NATIVE
+#  endif
+# endif
+# include <hal/atomic.h>
+#endif
+
+/*
+ * The build configuration and the HAL must agree on the style; a kernel
+ * core translation unit which has read the HAL checks it.
+ */
+#if !defined(KERN_ATOMIC_STYLE_TEMPORARY)
+# if defined(KERN_ATOMIC_SERIALIZED) && \
+    HAL_ATOMIC_STYLE != HAL_ATOMIC_STYLE_ENTER
+#  error "KERN_ATOMIC_SERIALIZED is set for a HAL with native atomics"
+# endif
+# if !defined(KERN_ATOMIC_SERIALIZED) && \
+    HAL_ATOMIC_STYLE == HAL_ATOMIC_STYLE_ENTER
+#  error "KERN_ATOMIC_SERIALIZED is missing for a HAL with serialized atomics"
+# endif
+#endif
 
 typedef struct {
 	unsigned value;
@@ -20,6 +61,27 @@ typedef struct {
 	unsigned value;
 } refcount_t;
 
+/*
+ * Claim a plain counter which is zero when free.
+ *
+ * The claim is the port's own lock-word instruction sequence, which the
+ * kernel core reaches through the HAL.  It is out of line so that this
+ * header names nothing of the HAL; a port whose kernel is linked with
+ * link-time optimization gets the call inlined again.
+ */
+int
+atomic_raw_try_acquire_zero(
+	volatile unsigned *value);
+
+/*
+ * Hint that this processor is spinning.
+ *
+ * The hint is the port's spin instruction, out of line for the same reason
+ * as the claim above.
+ */
+void
+atomic_spin_hint(
+	void);
 
 /*
  * The kernel must not acquire an implicit libatomic dependency.  In
@@ -32,17 +94,7 @@ static inline int
 atomic_try_acquire_zero(
 	atomic_uint_t *value)
 {
-	return hal_atomic_uint_try_acquire(&value->value);
-}
-
-/*
- * Claim a plain counter which is zero when free.
- */
-static inline int
-atomic_raw_try_acquire_zero(
-	volatile unsigned *value)
-{
-	return hal_atomic_uint_try_acquire(value);
+	return atomic_raw_try_acquire_zero(&value->value);
 }
 
 static inline unsigned
@@ -294,16 +346,6 @@ refcount_put_not_last(
 }
 
 /*
- * Hint that this processor is spinning.
- */
-static inline void
-atomic_spin_hint(
-	void)
-{
-	hal_atomic_relax();
-}
-
-/*
  * Order earlier loads against everything that follows.
  */
 static inline void
@@ -312,5 +354,33 @@ atomic_acquire_fence(
 {
 	hal_atomic_fence_acquire();
 }
+
+/*
+ * Takes back every name <hal/atomic.h> gave, unless the kernel core had
+ * read the HAL before this header.
+ */
+#if !defined(KERN_ATOMIC_HAL_KEPT)
+# undef hal_atomic_load_acquire
+# undef hal_atomic_load_relaxed
+# undef hal_atomic_store_release
+# undef hal_atomic_store_relaxed
+# undef hal_atomic_fetch_add_relaxed
+# undef hal_atomic_fetch_add_release
+# undef hal_atomic_fetch_or_release
+# undef hal_atomic_compare_exchange_serialized
+# undef hal_atomic_compare_exchange_acq_rel
+# undef hal_atomic_compare_exchange_acquire
+# undef hal_atomic_compare_exchange_release
+# undef hal_atomic_fence_acquire
+# undef HAL_ATOMIC_ENTER_DECLARE
+# undef HAL_HAL_ATOMIC_H
+#endif
+#if defined(KERN_ATOMIC_STYLE_TEMPORARY)
+# undef HAL_ATOMIC_STYLE
+# undef HAL_ATOMIC_STYLE_NATIVE
+# undef HAL_ATOMIC_STYLE_ENTER
+# undef KERN_ATOMIC_STYLE_TEMPORARY
+#endif
+#undef KERN_ATOMIC_HAL_KEPT
 
 #endif

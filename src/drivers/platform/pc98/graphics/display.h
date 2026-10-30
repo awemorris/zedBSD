@@ -15,6 +15,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/*
+ * Where the kernel's straight map of physical memory starts.
+ *
+ * The PC-98 legacy windows (text VRAM, the character generator window and
+ * the GDC planes) lie in the first megabyte, inside the straight map, so the
+ * drivers reach a window at physical address p at this base plus p, without
+ * mapping it.  The value is the i386 kernel layout's; the drivers keep their
+ * own copy rather than read it from the hardware layer.
+ */
+#define PC98_STRAIGHT_MAP_BASE	0x80000000U
+
 struct pc98_display_rect {
 	unsigned x, y, width, height;
 };
