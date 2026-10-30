@@ -213,6 +213,11 @@ struct js_module_import_info {
 	size_t imported_length;
 	const uint16_t *local;
 	size_t local_length;
+	/* The import attributes: the value of type when there is one, and whether another key came. */
+	const uint16_t *type;
+	size_t type_length;
+	int has_type;
+	int unknown_key;
 };
 int js_compile(struct vm_realm *realm, struct js_program *program, struct vm_function **function, struct js_syntax_error *error);
 int js_run_script(struct vm_realm *realm, const uint16_t *source, size_t length, unsigned how, vm_value *result, struct js_syntax_error *error);
@@ -229,6 +234,7 @@ struct js_module_graph;
 typedef int (*js_module_resolve)(void *context, const char *base, const uint16_t *specifier,
 	size_t length, struct wb_buffer *url);
 typedef int (*js_module_fetch)(void *context, const char *url, struct wb_units *source);
+int js_module_graph_set_json_fetch(struct js_module_graph *graph, js_module_fetch fetch);
 int js_module_graph_create(struct vm_realm *realm, js_module_resolve resolve,
 	js_module_fetch fetch, void *context, struct js_module_graph **graph);
 int js_module_graph_run(struct js_module_graph *graph, const char *url,

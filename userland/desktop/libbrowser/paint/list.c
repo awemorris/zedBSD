@@ -179,6 +179,7 @@ static void list_image_item(struct list_walk *walk, const struct img_bitmap *ima
 static void list_box_background(struct list_walk *walk, const struct layout_box *box);
 static void list_canvas_background(struct list_walk *walk, const struct layout_tree *tree);
 static void list_background_image(struct list_walk *walk, const struct layout_box *box, const struct list_area *area, const struct list_area *painting);
+static const struct img_bitmap *list_gradient(struct list_walk *walk, const struct css_gradient *gradient, layout_unit width, layout_unit height);
 static void list_background_size(const struct layout_box *box, const struct img_bitmap *image, const struct list_area *area, layout_unit *width, layout_unit *height);
 static layout_unit list_background_length(const struct css_length *length, layout_unit whole);
 static layout_unit list_background_offset(const struct css_length *position, layout_unit room);
@@ -579,7 +580,7 @@ list_canvas(
 		return NULL;
 
 	/* A body without a background leaves the canvas white. */
-	if ((body->style.background_color >> 24) == 0 && body->background == NULL)
+	if ((body->style.background_color >> 24) == 0 && body->background == NULL && body->style.background_gradient == NULL)
 		return NULL;
 
 	/* The body's background is the canvas's. */
@@ -2295,8 +2296,8 @@ list_box_background(
 	struct list_area area;
 	struct list_area painting;
 
-	/* A box without an image paints none. */
-	if (box->background == NULL)
+	/* A box without an image or a gradient paints none. */
+	if (box->background == NULL && box->style.background_gradient == NULL)
 		return;
 
 	/* The border box paints it; the padding box places it. */
@@ -2324,8 +2325,10 @@ list_canvas_background(
 	struct list_area area;
 	struct list_area painting;
 
-	/* A canvas without an image paints none. */
-	if (walk->canvas_box == NULL || walk->canvas_box->background == NULL)
+	/* A canvas without an image or a gradient paints none. */
+	if (walk->canvas_box == NULL)
+		return;
+	if (walk->canvas_box->background == NULL && walk->canvas_box->style.background_gradient == NULL)
 		return;
 
 	/* The whole canvas paints it; the root's padding box places it. */
@@ -2355,6 +2358,7 @@ list_background_image(
 	const struct list_area *painting)
 {
 	const struct img_bitmap *image;
+	struct img_bitmap gradient_size;
 	struct list_area fixed;
 	const struct list_area *positioning;
 	layout_unit tile_width;
@@ -2371,7 +2375,9 @@ list_background_image(
 
 	/* A zero-sized positioning area still places a canvas image. */
 	image = box->background;
-	if (walk->error != 0 || image == NULL)
+	if (walk->error != 0)
+		return;
+	if (image == NULL && box->style.background_gradient == NULL)
 		return;
 	if (painting->width <= 0)
 		return;
@@ -2388,10 +2394,26 @@ list_background_image(
 		positioning = &fixed;
 	}
 
+	/* A gradient has no size of its own: it fills the positioning area, which background-size may change. */
+	if (image == NULL) {
+		gradient_size.width = (int)(layout_to_px(positioning->width) + 0.5f);
+		gradient_size.height = (int)(layout_to_px(positioning->height) + 0.5f);
+		if (gradient_size.width <= 0 || gradient_size.height <= 0)
+			return;
+		image = &gradient_size;
+	}
+
 	/* The size of one tile; an empty one paints nothing. */
 	list_background_size(box, image, positioning, &tile_width, &tile_height);
 	if (tile_width <= 0 || tile_height <= 0)
 		return;
+
+	/* The gradient is drawn at the tile's size. */
+	if (image == &gradient_size) {
+		image = list_gradient(walk, box->style.background_gradient, tile_width, tile_height);
+		if (image == NULL)
+			return;
+	}
 
 	/* The first tile's place, from the position in the room the area leaves. */
 	start_x = positioning->x + list_background_offset(&box->style.background_position[0], positioning->width - tile_width);
@@ -2425,6 +2447,48 @@ list_background_image(
 
 	/* The painting area's clip ends. */
 	list_unclip(walk);
+}
+
+/*
+ * Draws a gradient into a bitmap of the size of its tile (rounded to whole
+ * pixels, at least one), kept with the list; NULL when it cannot be.
+ */
+static const struct img_bitmap *
+list_gradient(
+	struct list_walk *walk,
+	const struct css_gradient *gradient,
+	layout_unit width,
+	layout_unit height)
+{
+	struct img_bitmap *bitmap;
+	int pixel_width;
+	int pixel_height;
+	int error;
+
+	/* The tile's size in pixels. */
+	pixel_width = (int)(layout_to_px(width) + 0.5f);
+	pixel_height = (int)(layout_to_px(height) + 0.5f);
+	if (pixel_width < 1)
+		pixel_width = 1;
+	if (pixel_height < 1)
+		pixel_height = 1;
+
+	/* The bitmap record and its pixels last as long as the list. */
+	bitmap = wb_arena_alloc(&walk->list->arena, sizeof(*bitmap));
+	if (bitmap == NULL) {
+		walk->error = ENOMEM;
+		return NULL;
+	}
+	memset(bitmap, 0, sizeof(*bitmap));
+	error = paint_gradient_render(&walk->list->arena, gradient, pixel_width, pixel_height, bitmap);
+	if (error != 0) {
+		if (error == ENOMEM)
+			walk->error = error;
+		return NULL;
+	}
+
+	/* Succeeded: the gradient's bitmap. */
+	return bitmap;
 }
 
 /*

@@ -93,7 +93,15 @@ enum values_shorthand {
 	SHORT_TRANSFORM,
 	SHORT_TRANSFORM_ORIGIN,
 	SHORT_ASPECT_RATIO,
-	SHORT_OBJECT_POSITION
+	SHORT_OBJECT_POSITION,
+	SHORT_BORDER_INLINE,
+	SHORT_BORDER_BLOCK,
+	SHORT_BORDER_INLINE_WIDTH,
+	SHORT_BORDER_INLINE_STYLE,
+	SHORT_BORDER_INLINE_COLOR,
+	SHORT_BORDER_BLOCK_WIDTH,
+	SHORT_BORDER_BLOCK_STYLE,
+	SHORT_BORDER_BLOCK_COLOR
 };
 
 /*
@@ -295,6 +303,9 @@ static const struct values_name values_names[] = {
 	{ "position-try-fallbacks", CSS_PROP_POSITION_TRY_FALLBACKS },
 	{ "position-try-order", CSS_PROP_POSITION_TRY_ORDER },
 	{ "position-visibility", CSS_PROP_POSITION_VISIBILITY },
+	{ "view-transition-name", CSS_PROP_VIEW_TRANSITION_NAME },
+	{ "view-transition-class", CSS_PROP_VIEW_TRANSITION_CLASS },
+	{ "zoom", CSS_PROP_ZOOM },
 	{ "container", SHORT_CONTAINER },
 	{ "border-spacing", SHORT_BORDER_SPACING },
 	{ "margin", SHORT_MARGIN },
@@ -349,6 +360,14 @@ static const struct values_name values_names[] = {
 	{ "border-inline-end", SHORT_BORDER_INLINE_END },
 	{ "border-block-start", SHORT_BORDER_BLOCK_START },
 	{ "border-block-end", SHORT_BORDER_BLOCK_END },
+	{ "border-inline", SHORT_BORDER_INLINE },
+	{ "border-block", SHORT_BORDER_BLOCK },
+	{ "border-inline-width", SHORT_BORDER_INLINE_WIDTH },
+	{ "border-inline-style", SHORT_BORDER_INLINE_STYLE },
+	{ "border-inline-color", SHORT_BORDER_INLINE_COLOR },
+	{ "border-block-width", SHORT_BORDER_BLOCK_WIDTH },
+	{ "border-block-style", SHORT_BORDER_BLOCK_STYLE },
+	{ "border-block-color", SHORT_BORDER_BLOCK_COLOR },
 	{ "margin-inline", SHORT_MARGIN_INLINE },
 	{ "margin-block", SHORT_MARGIN_BLOCK },
 	{ "padding-inline", SHORT_PADDING_INLINE },
@@ -983,6 +1002,7 @@ static void values_wide_keyword(int property, const struct css_value *value, str
 static int values_background(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static size_t values_function_length(const struct css_token *tokens, size_t count);
 static int values_url(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_view_transition_class(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_repeat_parts(const struct css_token *const *parts, size_t count, struct css_value *value);
 static int values_subgrid(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
 static int values_position_parts(const struct css_token *const *parts, size_t count, struct css_value *x, struct css_value *y);
@@ -1199,6 +1219,22 @@ css_parse_property(
 	case SHORT_BORDER_BLOCK_END:
 		/* A logical side: the cascade finds its physical side. */
 		return values_border(parse, VALUES_LOGICAL_SIDE + property - SHORT_BORDER_INLINE_START, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE:
+	case SHORT_BORDER_BLOCK:
+		/* Both sides of an axis. */
+		return values_border(parse, VALUES_LOGICAL_SIDE + 4 + property - SHORT_BORDER_INLINE, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE_WIDTH:
+		return values_pair(parse, CSS_PROP_BORDER_INLINE_START_WIDTH, CSS_PROP_BORDER_INLINE_END_WIDTH, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE_STYLE:
+		return values_pair(parse, CSS_PROP_BORDER_INLINE_START_STYLE, CSS_PROP_BORDER_INLINE_END_STYLE, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE_COLOR:
+		return values_pair(parse, CSS_PROP_BORDER_INLINE_START_COLOR, CSS_PROP_BORDER_INLINE_END_COLOR, tokens, count, out, out_count);
+	case SHORT_BORDER_BLOCK_WIDTH:
+		return values_pair(parse, CSS_PROP_BORDER_BLOCK_START_WIDTH, CSS_PROP_BORDER_BLOCK_END_WIDTH, tokens, count, out, out_count);
+	case SHORT_BORDER_BLOCK_STYLE:
+		return values_pair(parse, CSS_PROP_BORDER_BLOCK_START_STYLE, CSS_PROP_BORDER_BLOCK_END_STYLE, tokens, count, out, out_count);
+	case SHORT_BORDER_BLOCK_COLOR:
+		return values_pair(parse, CSS_PROP_BORDER_BLOCK_START_COLOR, CSS_PROP_BORDER_BLOCK_END_COLOR, tokens, count, out, out_count);
 	case SHORT_BACKGROUND:
 		return values_background(parse, tokens, count, out, out_count);
 	case SHORT_BACKGROUND_POSITION:
@@ -2011,6 +2047,73 @@ values_single(
 		return 0;
 	}
 
+	/* view-transition-name: none, match-element or a custom identifier. */
+	if (property == CSS_PROP_VIEW_TRANSITION_NAME) {
+		if (count != 1 || tokens[0].type != CSS_TOKEN_IDENT)
+			return EINVAL;
+		value->kind = CSS_VALUE_KEYWORD;
+		if (css_ident_equal(&tokens[0], "none")) {
+			value->keyword = 0;
+			return 0;
+		}
+		if (css_ident_equal(&tokens[0], "auto") || css_ident_equal(&tokens[0], "default"))
+			return EINVAL;
+		value->keyword = 2;
+		if (css_ident_equal(&tokens[0], "match-element")) {
+			value->ident = vm_atom_from_ascii(parse->heap, "match-element");
+		} else {
+			value->ident = vm_atom_from_units(parse->heap, tokens[0].text, tokens[0].length);
+		}
+		if (value->ident == NULL)
+			return ENOMEM;
+		return 0;
+	}
+
+	/* zoom: normal, a number or a percentage that is not negative (zero means normal). */
+	if (property == CSS_PROP_ZOOM) {
+		/* A calculation of numbers, or of percentages. */
+		if (count > 1 && tokens[0].type == CSS_TOKEN_FUNCTION) {
+			error = values_calc(parse, property, tokens, count, value);
+			if (error != 0)
+				return error;
+			if (value->kind != CSS_VALUE_NUMBER) {
+				if (value->kind != CSS_VALUE_LENGTH || value->unit != CSS_DUNIT_CALC || value->calc->count != 1 ||
+				    value->calc->sums[0].px != 0.0f || !value->calc->sums[0].has_percent)
+					return EINVAL;
+				value->number = value->calc->sums[0].percent / 100.0f;
+				value->kind = CSS_VALUE_NUMBER;
+			}
+			if (value->number < 0)
+				return EINVAL;
+			if (value->number == 0.0f)
+				value->number = 1.0f;
+			return 0;
+		}
+		if (count != 1)
+			return EINVAL;
+		value->kind = CSS_VALUE_NUMBER;
+		value->number = 1.0f;
+		if (css_ident_equal(&tokens[0], "normal"))
+			return 0;
+		if (tokens[0].type == CSS_TOKEN_NUMBER && tokens[0].number >= 0)
+			value->number = (float)tokens[0].number;
+		else if (tokens[0].type == CSS_TOKEN_PERCENTAGE && tokens[0].number >= 0)
+			value->number = (float)tokens[0].number / 100.0f;
+		else
+			return EINVAL;
+		if (value->number == 0.0f)
+			value->number = 1.0f;
+		return 0;
+	}
+
+	/* view-transition-class: none, or custom identifiers. */
+	if (property == CSS_PROP_VIEW_TRANSITION_CLASS) {
+		error = values_view_transition_class(parse, tokens, count, value);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
 	/* position-anchor: auto or a name. */
 	if (property == CSS_PROP_POSITION_ANCHOR) {
 		if (count != 1)
@@ -2091,8 +2194,18 @@ values_single(
 		return 0;
 	}
 
-	/* An image: url(...) or none. */
+	/* An image: url(...), a gradient or none. */
 	if (property == CSS_PROP_BACKGROUND_IMAGE) {
+		/* A gradient. */
+		if (count > 0 && tokens[0].type == CSS_TOKEN_FUNCTION && (css_ident_equal(&tokens[0], "linear-gradient") || css_ident_equal(&tokens[0], "repeating-linear-gradient"))) {
+			memset(value, 0, sizeof(*value));
+			error = css_gradient_parse(parse, tokens, count, &value->gradient);
+			if (error != 0)
+				return error;
+			value->kind = CSS_VALUE_GRADIENT;
+			return 0;
+		}
+
 		/* Parse the selected component with its established native grammar. */
 		error = values_url(parse, tokens, count, value);
 		if (error != 0)
@@ -2971,6 +3084,16 @@ values_border(
 	}
 
 	/* A logical side declares its logical longhands. */
+	if (side >= VALUES_LOGICAL_SIDE + 4) {
+		/* Both sides of the axis: the inline ones (2 places on), or the block ones. */
+		first = 2 * (side - VALUES_LOGICAL_SIDE - 4);
+		for (index = 0; index < 2U; index++) {
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + first + (int)index, &width);
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + first + (int)index, &style);
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR + first + (int)index, &color);
+		}
+		return 0;
+	}
 	if (side >= VALUES_LOGICAL_SIDE) {
 		values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + side - VALUES_LOGICAL_SIDE, &width);
 		values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + side - VALUES_LOGICAL_SIDE, &style);
@@ -3259,6 +3382,38 @@ values_wide_keyword(
 		values_add(out, made, CSS_PROP_MARGIN_BLOCK_START, value);
 		values_add(out, made, CSS_PROP_MARGIN_BLOCK_END, value);
 		return;
+	case SHORT_BORDER_INLINE:
+	case SHORT_BORDER_BLOCK:
+		for (first = 0; first < 2; first++) {
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + 2 * (property - SHORT_BORDER_INLINE) + first, value);
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + 2 * (property - SHORT_BORDER_INLINE) + first, value);
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR + 2 * (property - SHORT_BORDER_INLINE) + first, value);
+		}
+		return;
+	case SHORT_BORDER_INLINE_WIDTH:
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_END_WIDTH, value);
+		return;
+	case SHORT_BORDER_INLINE_STYLE:
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_END_STYLE, value);
+		return;
+	case SHORT_BORDER_INLINE_COLOR:
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_END_COLOR, value);
+		return;
+	case SHORT_BORDER_BLOCK_WIDTH:
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_START_WIDTH, value);
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_END_WIDTH, value);
+		return;
+	case SHORT_BORDER_BLOCK_STYLE:
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_START_STYLE, value);
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_END_STYLE, value);
+		return;
+	case SHORT_BORDER_BLOCK_COLOR:
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_START_COLOR, value);
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_END_COLOR, value);
+		return;
 	case SHORT_PADDING_INLINE:
 		values_add(out, made, CSS_PROP_PADDING_INLINE_START, value);
 		values_add(out, made, CSS_PROP_PADDING_INLINE_END, value);
@@ -3480,6 +3635,21 @@ values_background(
 		/* The tokens of the component: one, or a function to its closing parenthesis. */
 		rest = values_function_length(tokens + index, count - index);
 
+		/* A gradient is an image. */
+		if (tokens[index].type == CSS_TOKEN_FUNCTION &&
+		    (css_ident_equal(&tokens[index], "linear-gradient") || css_ident_equal(&tokens[index], "repeating-linear-gradient"))) {
+			if (image_seen)
+				return EINVAL;
+			memset(&image, 0, sizeof(image));
+			error = css_gradient_parse(parse, tokens + index, rest, &image.gradient);
+			if (error != 0)
+				return error;
+			image.kind = CSS_VALUE_GRADIENT;
+			image_seen = 1;
+			index += rest;
+			continue;
+		}
+
 		/* An image: url(...) or none. */
 		is_url = 0;
 		named = css_ident_equal(&tokens[index], "url");
@@ -3610,6 +3780,58 @@ values_function_length(
 
 	/* An unclosed function runs to the end. */
 	return count;
+}
+
+/* Parses view-transition-class: none, or one or more custom identifiers, kept as one atom of them joined by spaces. */
+static int
+values_view_transition_class(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	struct wb_units joined;
+	uint16_t space;
+	size_t index;
+	size_t names;
+	int error;
+
+	/* none alone. */
+	value->kind = CSS_VALUE_KEYWORD;
+	if (count == 1 && css_ident_equal(&tokens[0], "none")) {
+		value->keyword = 0;
+		return 0;
+	}
+
+	/* Identifiers (none is not one), separated by whitespace. */
+	wb_units_init(&joined);
+	space = ' ';
+	names = 0;
+	error = 0;
+	for (index = 0; index < count && error == 0; index++) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (tokens[index].type != CSS_TOKEN_IDENT || css_ident_equal(&tokens[index], "none") ||
+		    css_ident_equal(&tokens[index], "default")) {
+			error = EINVAL;
+			break;
+		}
+		if (names != 0)
+			error = wb_units_append(&joined, &space, 1U);
+		if (error == 0)
+			error = wb_units_append(&joined, tokens[index].text, tokens[index].length);
+		names++;
+	}
+	if (error == 0 && names == 0)
+		error = EINVAL;
+	if (error == 0) {
+		value->keyword = 2;
+		value->ident = vm_atom_from_units(parse->heap, joined.data, joined.length);
+		if (value->ident == NULL)
+			error = ENOMEM;
+	}
+	wb_units_release(&joined);
+	return error;
 }
 
 /*
@@ -4094,7 +4316,7 @@ values_calc(
 
 	/* A calculation of plain numbers is a number: line-height's, or zero for a length. */
 	if (calc.count == 0) {
-		if (property == CSS_PROP_LINE_HEIGHT) {
+		if (property == CSS_PROP_LINE_HEIGHT || property == CSS_PROP_ZOOM) {
 			value->kind = CSS_VALUE_NUMBER;
 			value->number = calc.sums[0].px;
 			return 0;

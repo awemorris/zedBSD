@@ -150,6 +150,41 @@ struct css_anchor_names {
 	struct vm_string *names[CSS_ANCHOR_NAMES];
 };
 
+/* The most color stops of a gradient, and the directions of its "to" keywords (flags). */
+#define CSS_GRADIENT_STOPS	16
+#define CSS_GRADIENT_TOP	1
+#define CSS_GRADIENT_RIGHT	2
+#define CSS_GRADIENT_BOTTOM	4
+#define CSS_GRADIENT_LEFT	8
+
+/* Where a color stop is: not given, in pixels, a percentage of the gradient line, or in ems (until the font size is known). */
+enum css_gradient_unit {
+	CSS_GRADIENT_AT_AUTO,
+	CSS_GRADIENT_AT_PX,
+	CSS_GRADIENT_AT_PERCENT,
+	CSS_GRADIENT_AT_EM
+};
+
+/* One color stop of a gradient. */
+struct css_gradient_stop {
+	uint32_t color;
+	float position;
+	int unit;
+};
+
+/*
+ * A linear gradient: its direction (an angle in degrees, 0 pointing up and
+ * turning clockwise, or the sides of a "to" keyword in corner) and its stops.
+ */
+struct css_gradient {
+	float angle;
+	unsigned corner;
+	/* Whether the stops repeat along the line (repeating-linear-gradient). */
+	unsigned repeating;
+	unsigned count;
+	struct css_gradient_stop stops[CSS_GRADIENT_STOPS];
+};
+
 /* The most entries of position-try-fallbacks, and try-tactics (flip-block, flip-inline, flip-start, flip-x, flip-y) in one. */
 #define CSS_TRY_ENTRIES	8
 #define CSS_TRY_TACTICS	5
@@ -718,6 +753,11 @@ struct css_style {
 	const struct css_anchor_expr *anchor[CSS_ANCHOR_SLOTS];
 	const struct css_anchor_names *anchor_names;
 	struct vm_string *position_anchor;
+	/* view-transition-name: NULL for none, "match-element", or the custom identifier; view-transition-class: none (NULL) or the identifiers joined by spaces (atoms). */
+	struct vm_string *view_transition_name;
+	struct vm_string *view_transition_class;
+	/* zoom: the factor (1 for normal; not applied to the layout yet). */
+	float zoom;
 	const struct css_anchor_names *anchor_scope;
 	int anchor_scope_all;
 	/* position-area's keywords (css_position_area_parse packs them; -1 for none). */
@@ -784,6 +824,8 @@ struct css_style {
 	 * pixels, a percentage of the padding box or auto).
 	 */
 	struct vm_string *background_image;
+	/* The background image when it is a gradient (in the engine's arena; NULL for none). */
+	const struct css_gradient *background_gradient;
 	int background_repeat;
 	int background_attachment;
 	struct css_length background_position[2];

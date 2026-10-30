@@ -250,6 +250,7 @@ bind_window_create(
 	made->realm = realm;
 	made->document = document;
 	made->host = *host;
+	made->frame = host->frame;
 	made->next_timer_id = 1;
 	made->ready_state = "loading";
 	wb_vector_init(&made->timers, sizeof(struct bind_timer));
@@ -346,6 +347,31 @@ bind_window_set_time(
 	/* The time only moves forward. */
 	if (now > window->now)
 		window->now = now;
+}
+
+/*
+ * Records that the window's load event has finished dispatching: a
+ * navigation from then on adds an entry to the history instead of
+ * replacing the current one.
+ */
+void
+bind_window_set_load_ended(
+	struct bind_window *window)
+{
+	/* The flag only goes one way. */
+	window->load_ended = 1;
+}
+
+/*
+ * Records that the window's document is being left for another one in its
+ * frame, whose pagehide event is to be fired.
+ */
+void
+bind_window_set_unloading(
+	struct bind_window *window)
+{
+	/* The flag only goes one way. */
+	window->unloading = 1;
 }
 
 /*
@@ -489,6 +515,36 @@ window_report_stop(
 	wb_buffer_release(&line);
 }
 
+/* The first window of the tree of frames below a window, the window itself included, that has jobs queued (other than skip). */
+static struct bind_window *
+window_find_jobs(
+	struct bind_window *window,
+	const struct bind_window *skip)
+{
+	struct bind_window *child;
+	struct bind_window *found;
+	const struct dom_node *walk;
+
+	/* Its own queue, unless it is draining it already. */
+	if (window != skip && !window->detached && !window->checkpoint_running && window->realm->jobs.count != 0)
+		return window;
+
+	/* The frames' queues. */
+	if (window->context_depth >= 64U)
+		return NULL;
+	walk = window->document->node.first_child;
+	while (walk != NULL) {
+		child = bind_frame_child(walk);
+		if (child != NULL) {
+			found = window_find_jobs(child, skip);
+			if (found != NULL)
+				return found;
+		}
+		walk = bind_following(walk, &window->document->node);
+	}
+	return NULL;
+}
+
 /*
  * Runs a microtask checkpoint: every queued microtask, each exception
  * reported through the Window and its console default.
@@ -498,6 +554,7 @@ bind_checkpoint(
 	struct bind_window *window)
 {
 	struct vm_cell *realm_root;
+	struct bind_window *related;
 	int registered;
 	int queued;
 	int status;
@@ -542,6 +599,21 @@ bind_checkpoint(
 			break;
 	}
 
+	/* The frames of the same page share one agent: a promise of one window settled by another's code queues jobs in its own realm. */
+	while (status == 0) {
+		related = window;
+		while (related->frame != NULL && related->frame->node.document->view != NULL && related->frame->node.document->view != related)
+			related = related->frame->node.document->view;
+		related = window_find_jobs(related, window);
+		if (related == NULL)
+			break;
+		status = bind_checkpoint(related);
+
+		/* What that queued for this window runs before the next look. */
+		if (status == 0 && window->realm->jobs.count != 0)
+			status = vm_run_jobs(window->realm, window_report_job, window);
+	}
+
 	/* Host frame processing follows the completed checkpoint and may legitimately request another one. */
 	window->checkpoint_running = 0;
 	if (status == 0 &&
@@ -575,6 +647,51 @@ bind_report_exception(
 	vm_value exception)
 {
 	window_report_exception(window, exception, NULL);
+}
+
+/*
+ * Reports an exception the host made (a module that could not be loaded)
+ * as thrown from a place of the document's own: the error event discloses
+ * it as it does the exception of an inline script, with the line and column.
+ */
+void
+bind_report_exception_at(
+	struct bind_window *window,
+	vm_value exception,
+	unsigned line,
+	unsigned column)
+{
+	struct window_script_source *origin;
+	struct vm_realm *realm;
+	struct vm_cell *root;
+	struct wb_buffer filename;
+
+	/* The document's URL names the place. */
+	realm = window->realm;
+	root = NULL;
+	wb_buffer_init(&filename);
+	if (window->detached || vm_heap_add_root(realm->heap, &root) != 0)
+		return;
+	origin = vm_heap_alloc(realm->heap, &window_script_source_type, sizeof(*origin));
+	if (origin == NULL)
+		goto cleanup;
+	root = &origin->cell;
+	if (bind_document_url(window->document, 0, &filename) != 0)
+		goto cleanup;
+	origin->filename = vm_string_from_utf8(realm->heap, wb_buffer_string(&filename), filename.length);
+	if (origin->filename == NULL)
+		goto cleanup;
+
+	/* The recorded throw place is this one. */
+	realm->throw_value = exception;
+	realm->throw_source = vm_value_cell(origin);
+	realm->throw_line = line;
+	realm->throw_column = column;
+	window_report_exception(window, exception, NULL);
+
+cleanup:
+	wb_buffer_release(&filename);
+	vm_heap_remove_root(realm->heap, &root);
 }
 
 /* Retains one managed value without treating immediate values as heap pointers. */

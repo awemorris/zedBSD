@@ -246,6 +246,7 @@ int js_word_of(const uint16_t *text, size_t length);
 void js_fail(struct js_parser *parser, const char *message);
 void js_fail_at(struct js_parser *parser, uint32_t line, uint32_t column, const char *message);
 struct js_node *js_node_new(struct js_parser *parser, int kind);
+int js_export_is_declaration(const struct js_node *node);
 void *js_arena_copy(struct js_parser *parser, const void *data, size_t size);
 void js_next(struct js_parser *parser);
 void js_next_regexp(struct js_parser *parser);

@@ -525,6 +525,8 @@ struct vm_realm {
 	unsigned property_depth;
 	void *host;
 	struct wb_vector jobs;
+	/* Where the microtasks of a retired realm are queued instead (a live realm that drains them), or NULL. */
+	struct vm_realm *job_target;
 	struct wb_vector rejections;
 	int reporting_rejection;
 };

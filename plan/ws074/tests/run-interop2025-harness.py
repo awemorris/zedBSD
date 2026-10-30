@@ -420,7 +420,8 @@ def run(args):
     worker = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     worker.start()
     url = "http://127.0.0.1:%d%s" % (server.server_port, args.test_id)
-    command = ([str(args.program), "--run", "--settle-ms=%d" % args.settle_ms] +
+    # --async: a frame's page is fetched in the background, as in the window; the at-once mode never loads a web frame.
+    command = ([str(args.program), "--run", "--async", "--settle-ms=%d" % args.settle_ms] +
                font_arguments(getattr(args, "font_dir", None)) + [url])
     try:
         try:

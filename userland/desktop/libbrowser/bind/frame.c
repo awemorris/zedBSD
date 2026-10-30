@@ -258,6 +258,65 @@ bind_frames_release(
 }
 
 /*
+ * Reports the connected child window of an embedding element (an HTML iframe
+ * or object), or NULL when the node holds none.
+ */
+struct bind_window *
+bind_frame_child(
+	const struct dom_node *node)
+{
+	const struct dom_element *element;
+	const struct vm_realm *realm;
+
+	/* Only an HTML iframe or object holds a frame. */
+	if (node->type != DOM_ELEMENT)
+		return NULL;
+	element = (const struct dom_element *)node;
+	if (element->ns != DOM_NS_HTML)
+		return NULL;
+	if (element->tag != DOM_TAG_IFRAME && element->tag != DOM_TAG_OBJECT)
+		return NULL;
+
+	/* Its published context, if there is one. */
+	realm = (const struct vm_realm *)element->child_context;
+	if (realm == NULL)
+		return NULL;
+	return realm->host;
+}
+
+/*
+ * Points a frame's own document at another location, as the document's script
+ * does when it navigates: the frame element's source attribute stays, and the
+ * page loads the location into the frame at its next checkpoint.  Reports in
+ * *started whether this window is a connected frame's (a top-level window is
+ * navigated by its host).
+ */
+int
+bind_frame_navigate(
+	struct bind_window *window,
+	const char *location,
+	size_t length,
+	int *started)
+{
+	struct vm_string *string;
+
+	/* Only a connected frame can be pointed elsewhere. */
+	*started = 0;
+	if (window->detached || window->frame == NULL)
+		return 0;
+
+	/* The location is a string of the heap, which the element keeps alive. */
+	string = vm_string_from_utf8(window->realm->heap, location, length);
+	if (string == NULL)
+		return ENOMEM;
+	window->frame->child_navigation = string;
+
+	/* Succeeded: the frame's next scan loads the location. */
+	*started = 1;
+	return 0;
+}
+
+/*
  * Reports the receiver Window's parent, or itself for a top-level context.
  */
 int
@@ -729,6 +788,7 @@ frame_remove_subtree(
 	struct dom_element *element;
 	struct vm_realm *realm;
 	struct bind_window *window;
+	struct bind_window *owner;
 
 	/* The root itself may be the iframe whose connection is disappearing. */
 	walk = root;
@@ -741,6 +801,8 @@ frame_remove_subtree(
 			element->child_epoch++;
 			element->child_load_seen = 0;
 			element->child_source = NULL;
+			element->child_attribute = NULL;
+			element->child_navigation = NULL;
 
 			/* Only published child contexts participate in synchronous retirement. */
 			if (element->child_context != NULL) {
@@ -752,6 +814,9 @@ frame_remove_subtree(
 				/* A complete child host loses its connected element before detaching. */
 				if (window != NULL) {
 					window->frame = NULL;
+					owner = element->node.document->view;
+					if (owner != NULL)
+						window->realm->job_target = owner->realm;
 					bind_window_detach(window);
 				}
 			}

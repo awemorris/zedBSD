@@ -52,6 +52,11 @@ struct js_module_import {
 	size_t imported_length;
 	uint16_t *specifier;
 	size_t specifier_length;
+	/* The import attributes: the type's value when given, and whether a key other than type was. */
+	uint16_t *type;
+	size_t type_length;
+	int has_type;
+	int unknown_key;
 	struct js_binding *binding;
 	uint32_t slot;
 	int linked;
@@ -76,8 +81,9 @@ static void compile_trace(struct vm_heap *heap, void *context);
 static void compile_release_all(struct js_compiler *compiler);
 static int compile_program(struct vm_realm *realm, struct js_program *program, struct vm_function **function, struct js_module *module, struct js_syntax_error *error);
 static void compile_module_exports(struct js_compiler *compiler, struct js_function_info *info, struct js_module *module);
-static void compile_module_export_name(struct js_compiler *compiler, struct js_function_info *info, struct js_module *module, struct js_node *name);
+static void compile_module_export_name(struct js_compiler *compiler, struct js_function_info *info, struct js_module *module, struct js_node *name, struct js_node *exported);
 static void compile_module_imports(struct js_compiler *compiler, struct js_function_info *info, struct js_module *module);
+static struct js_module_import *compile_module_import_entry(struct js_compiler *compiler, struct js_module *module, struct js_node *specifier, struct js_node *local, struct js_node *imported, struct js_node *attributes, struct js_binding *binding);
 static void compile_prepare(struct js_function_compiler *fc);
 static void compile_place_binding(struct js_function_compiler *fc, struct js_scope *scope, struct js_binding *binding, uint32_t *env_count);
 static void compile_prologue(struct js_function_compiler *fc, uint32_t env_count);
@@ -183,7 +189,8 @@ compile_program(
 			module->exports[index].binding = NULL;
 		}
 		for (index = 0; index < module->import_count; index++) {
-			module->imports[index].slot = module->imports[index].binding->location;
+			if (module->imports[index].binding != NULL)
+				module->imports[index].slot = module->imports[index].binding->location;
 			module->imports[index].binding = NULL;
 		}
 	}
@@ -234,21 +241,34 @@ compile_module_exports(
 	for (item = info->node->first; item != NULL; item = item->next) {
 		if (item->kind != JS_NODE_EXPORT)
 			continue;
-		if ((item->flags & (JS_FLAG_DEFAULT | JS_FLAG_ALL)) != 0U || item->second != NULL ||
-		    item->first == NULL || item->first->kind == JS_NODE_EXPORT_SPECIFIER)
+
+		/* export { local as exported }: names of bindings declared elsewhere in the module. */
+		if (item->first != NULL && item->first->kind == JS_NODE_EXPORT_SPECIFIER && item->second == NULL &&
+		    (item->flags & (JS_FLAG_DEFAULT | JS_FLAG_ALL)) == 0U) {
+			for (part = item->first; part != NULL; part = part->next)
+				compile_module_export_name(compiler, info, module, part->first, part->second);
+			continue;
+		}
+		if (!js_export_is_declaration(item))
 			js_compile_unsupported(compiler, item, "this kind of module export");
 
-		/* A declaration's name, or each var/let/const declarator's name. */
+		/* A default export of a named function or class is exported as default. */
 		declaration = item->first;
+		if ((item->flags & JS_FLAG_DEFAULT) != 0U) {
+			compile_module_export_name(compiler, info, module, declaration, NULL);
+			continue;
+		}
+
+		/* A declaration's name, or each var/let/const declarator's name. */
 		if (declaration->kind == JS_NODE_VARIABLES) {
 			for (part = declaration->first; part != NULL; part = part->next) {
 				if (part->first == NULL || part->first->kind != JS_NODE_IDENTIFIER)
 					js_compile_unsupported(compiler, part, "exported binding patterns");
-				compile_module_export_name(compiler, info, module, part->first);
+				compile_module_export_name(compiler, info, module, part->first, part->first);
 			}
 		} else if (declaration->kind == JS_NODE_FUNCTION_DECLARATION ||
 		    declaration->kind == JS_NODE_CLASS_DECLARATION) {
-			compile_module_export_name(compiler, info, module, declaration);
+			compile_module_export_name(compiler, info, module, declaration, declaration);
 		} else {
 			js_compile_unsupported(compiler, declaration, "this kind of module export");
 		}
@@ -261,11 +281,16 @@ compile_module_export_name(
 	struct js_compiler *compiler,
 	struct js_function_info *info,
 	struct js_module *module,
-	struct js_node *name)
+	struct js_node *name,
+	struct js_node *exported)
 {
+	static const uint16_t default_local[] = { '*', 'd', 'e', 'f', 'a', 'u', 'l', 't', '*' };
+	static const uint16_t default_name[] = { 'd', 'e', 'f', 'a', 'u', 'l', 't' };
 	struct js_module_export *exports;
 	struct js_module_export *entry;
 	struct js_binding *binding;
+	const uint16_t *exported_text;
+	size_t exported_length;
 	size_t index;
 	int same;
 
@@ -283,12 +308,32 @@ compile_module_export_name(
 	if (binding == NULL)
 		js_compile_fail(compiler, name, "Exported declaration has no local binding");
 
+	/* An imported binding cannot be exported again without an indirect entry. */
+	if (binding->kind == JS_BINDING_IMPORT)
+		js_compile_unsupported(compiler, name, "re-exporting an import");
+
+	/* The exported name: the local one, another one after as, or default (for a default export and the hidden constant). */
+	exported_text = name->text;
+	exported_length = name->text_length;
+	if (exported != NULL) {
+		exported_text = exported->text;
+		exported_length = exported->text_length;
+	} else {
+		exported_text = default_name;
+		exported_length = sizeof(default_name) / sizeof(default_name[0]);
+	}
+	if (name->text_length == sizeof(default_local) / sizeof(default_local[0]) &&
+	    memcmp(name->text, default_local, sizeof(default_local)) == 0) {
+		exported_text = default_name;
+		exported_length = sizeof(default_name) / sizeof(default_name[0]);
+	}
+
 	/* One exported name may not appear twice. */
 	for (index = 0; index < module->export_count; index++) {
 		entry = &module->exports[index];
-		same = entry->length == name->text_length;
+		same = entry->length == exported_length;
 		if (same)
-			same = memcmp(entry->name, name->text, name->text_length * sizeof(uint16_t)) == 0;
+			same = memcmp(entry->name, exported_text, exported_length * sizeof(uint16_t)) == 0;
 		if (same)
 			js_compile_fail(compiler, name, "Duplicate module export");
 	}
@@ -300,12 +345,12 @@ compile_module_export_name(
 	module->exports = exports;
 	entry = &exports[module->export_count];
 	memset(entry, 0, sizeof(*entry));
-	entry->name = malloc((name->text_length + 1U) * sizeof(uint16_t));
+	entry->name = malloc((exported_length + 1U) * sizeof(uint16_t));
 	if (entry->name == NULL)
 		js_compile_out_of_memory(compiler);
-	memcpy(entry->name, name->text, name->text_length * sizeof(uint16_t));
-	entry->name[name->text_length] = 0;
-	entry->length = name->text_length;
+	memcpy(entry->name, exported_text, exported_length * sizeof(uint16_t));
+	entry->name[exported_length] = 0;
+	entry->length = exported_length;
 	entry->binding = binding;
 	entry->lexical = binding->kind == JS_BINDING_LET || binding->kind == JS_BINDING_CONST;
 	module->export_count++;
@@ -315,6 +360,81 @@ compile_module_export_name(
 	info->has_env = 1;
 }
 
+/*
+ * Adds one import entry of a module: where it comes from (the specifier and
+ * its attributes) and, for a binding, the imported and local names.
+ */
+static struct js_module_import *
+compile_module_import_entry(
+	struct js_compiler *compiler,
+	struct js_module *module,
+	struct js_node *specifier,
+	struct js_node *local,
+	struct js_node *imported,
+	struct js_node *attributes,
+	struct js_binding *binding)
+{
+	static const uint16_t type_key[] = { 't', 'y', 'p', 'e' };
+	struct js_module_import *imports;
+	struct js_module_import *entry;
+	struct js_node *attribute;
+	struct js_node *key;
+	struct js_node *value;
+
+	/* The entry. */
+	imports = realloc(module->imports, (module->import_count + 1U) * sizeof(*imports));
+	if (imports == NULL)
+		js_compile_out_of_memory(compiler);
+	module->imports = imports;
+	entry = &imports[module->import_count];
+	memset(entry, 0, sizeof(*entry));
+	module->import_count++;
+
+	/* The names it owns. */
+	entry->specifier = malloc((specifier->text_length + 1U) * sizeof(uint16_t));
+	if (entry->specifier == NULL)
+		js_compile_out_of_memory(compiler);
+	memcpy(entry->specifier, specifier->text, specifier->text_length * sizeof(uint16_t));
+	entry->specifier[specifier->text_length] = 0;
+	entry->specifier_length = specifier->text_length;
+	if (local != NULL) {
+		entry->local = malloc((local->text_length + 1U) * sizeof(uint16_t));
+		entry->imported = malloc((imported->text_length + 1U) * sizeof(uint16_t));
+		if (entry->local == NULL || entry->imported == NULL)
+			js_compile_out_of_memory(compiler);
+		memcpy(entry->local, local->text, local->text_length * sizeof(uint16_t));
+		memcpy(entry->imported, imported->text, imported->text_length * sizeof(uint16_t));
+		entry->local[local->text_length] = 0;
+		entry->imported[imported->text_length] = 0;
+		entry->local_length = local->text_length;
+		entry->imported_length = imported->text_length;
+	} else {
+		/* Nothing to bind: there is nothing for the host to link. */
+		entry->linked = 1;
+	}
+	entry->binding = binding;
+
+	/* The attributes: type is the only key a module knows. */
+	for (attribute = attributes; attribute != NULL; attribute = attribute->next) {
+		key = attribute->first;
+		value = attribute->second;
+		if (key == NULL || value == NULL || key->text == NULL ||
+		    key->text_length != sizeof(type_key) / sizeof(type_key[0]) ||
+		    memcmp(key->text, type_key, sizeof(type_key)) != 0) {
+			entry->unknown_key = 1;
+			continue;
+		}
+		entry->has_type = 1;
+		entry->type = malloc((value->text_length + 1U) * sizeof(uint16_t));
+		if (entry->type == NULL)
+			js_compile_out_of_memory(compiler);
+		memcpy(entry->type, value->text, value->text_length * sizeof(uint16_t));
+		entry->type[value->text_length] = 0;
+		entry->type_length = value->text_length;
+	}
+	return entry;
+}
+
 /* Records static named imports and keeps their local slots after evaluation. */
 static void
 compile_module_imports(
@@ -322,28 +442,44 @@ compile_module_imports(
 	struct js_function_info *info,
 	struct js_module *module)
 {
-	struct js_module_import *imports;
-	struct js_module_import *entry;
 	struct js_binding *binding;
 	struct js_node *item;
 	struct js_node *part;
 	struct js_node *local;
 	struct js_node *imported;
 	struct js_node *specifier;
+	struct js_node default_node;
+	static const uint16_t default_text[] = { 'd', 'e', 'f', 'a', 'u', 'l', 't' };
 	int same;
 
-	/* This finite pass accepts explicit named imports from string specifiers. */
+	/* This finite pass accepts named and default imports from string specifiers. */
 	for (item = info->node->first; item != NULL; item = item->next) {
 		if (item->kind != JS_NODE_IMPORT)
 			continue;
 		specifier = item->second;
-		if (specifier == NULL || specifier->kind != JS_NODE_STRING || item->first == NULL)
+		if (specifier == NULL || specifier->kind != JS_NODE_STRING)
 			js_compile_unsupported(compiler, item, "this kind of module import");
+
+		/* An import with no bindings only loads the module. */
+		if (item->first == NULL) {
+			compile_module_import_entry(compiler, module, specifier, NULL, NULL, item->third, NULL);
+			continue;
+		}
 		for (part = item->first; part != NULL; part = part->next) {
 			imported = part->first;
 			local = part->second;
-			if (imported == NULL || imported->kind != JS_NODE_IDENTIFIER || local == NULL ||
-			    local->kind != JS_NODE_IDENTIFIER)
+			if ((part->flags & JS_FLAG_ALL) != 0U)
+				js_compile_unsupported(compiler, part, "a namespace import");
+
+			/* A default import names the default export. */
+			if (imported == NULL && local != NULL && local->kind == JS_NODE_IDENTIFIER) {
+				imported = &default_node;
+				default_node.kind = JS_NODE_IDENTIFIER;
+				default_node.text = default_text;
+				default_node.text_length = sizeof(default_text) / sizeof(default_text[0]);
+			}
+			if (imported == NULL || (imported->kind != JS_NODE_IDENTIFIER && imported->kind != JS_NODE_STRING) ||
+			    local == NULL || local->kind != JS_NODE_IDENTIFIER)
 				js_compile_unsupported(compiler, part, "this kind of module import");
 
 			/* The scope pass already declared the local name. */
@@ -360,28 +496,7 @@ compile_module_imports(
 				js_compile_fail(compiler, local, "Module import has no local binding");
 
 			/* A stable import entry owns its names beyond the parser arena. */
-			imports = realloc(module->imports, (module->import_count + 1U) * sizeof(*imports));
-			if (imports == NULL)
-				js_compile_out_of_memory(compiler);
-			module->imports = imports;
-			entry = &imports[module->import_count];
-			memset(entry, 0, sizeof(*entry));
-			module->import_count++;
-			entry->local = malloc((local->text_length + 1U) * sizeof(uint16_t));
-			entry->imported = malloc((imported->text_length + 1U) * sizeof(uint16_t));
-			entry->specifier = malloc((specifier->text_length + 1U) * sizeof(uint16_t));
-			if (entry->local == NULL || entry->imported == NULL || entry->specifier == NULL)
-				js_compile_out_of_memory(compiler);
-			memcpy(entry->local, local->text, local->text_length * sizeof(uint16_t));
-			memcpy(entry->imported, imported->text, imported->text_length * sizeof(uint16_t));
-			memcpy(entry->specifier, specifier->text, specifier->text_length * sizeof(uint16_t));
-			entry->local[local->text_length] = 0;
-			entry->imported[imported->text_length] = 0;
-			entry->specifier[specifier->text_length] = 0;
-			entry->local_length = local->text_length;
-			entry->imported_length = imported->text_length;
-			entry->specifier_length = specifier->text_length;
-			entry->binding = binding;
+			compile_module_import_entry(compiler, module, specifier, local, imported, item->third, binding);
 			binding->captured = 1;
 			info->has_env = 1;
 		}
@@ -561,6 +676,10 @@ js_module_import_at(
 	info->imported_length = entry->imported_length;
 	info->local = entry->local;
 	info->local_length = entry->local_length;
+	info->type = entry->type;
+	info->type_length = entry->type_length;
+	info->has_type = entry->has_type;
+	info->unknown_key = entry->unknown_key;
 	return 0;
 }
 
@@ -648,6 +767,7 @@ js_module_release(
 		free(module->imports[index].local);
 		free(module->imports[index].imported);
 		free(module->imports[index].specifier);
+		free(module->imports[index].type);
 	}
 	free(module->imports);
 	free(module);
@@ -1231,8 +1351,10 @@ compile_statement(
 		break;
 	case JS_NODE_EXPORT:
 		/* A named export declaration runs its declaration in this module's scope. */
-		if ((node->flags & (JS_FLAG_DEFAULT | JS_FLAG_ALL)) != 0U || node->second != NULL ||
-		    node->first == NULL || node->first->kind == JS_NODE_EXPORT_SPECIFIER)
+		if (node->first != NULL && node->first->kind == JS_NODE_EXPORT_SPECIFIER && node->second == NULL &&
+		    (node->flags & (JS_FLAG_DEFAULT | JS_FLAG_ALL)) == 0U)
+			break;
+		if (!js_export_is_declaration(node))
 			js_compile_unsupported(fc->compiler, node, "this kind of module export");
 		compile_statement(fc, node->first);
 		break;

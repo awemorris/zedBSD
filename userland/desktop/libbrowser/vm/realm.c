@@ -128,6 +128,10 @@ vm_enqueue_job(
 	struct vm_job job;
 	int error;
 
+	/* A retired realm's microtasks run in the realm that took them over. */
+	while (realm->job_target != NULL)
+		realm = realm->job_target;
+
 	/* The job goes to the end of the queue, which the realm's tracer keeps alive. */
 	job.callback = callback;
 	job.argument = argument;
@@ -465,6 +469,10 @@ realm_trace(
 		vm_heap_mark(heap, &realm->lexicals->cell);
 	vm_heap_mark_value(heap, realm->callee);
 	vm_heap_mark_value(heap, realm->new_target);
+
+	/* The realm that takes the retired realm's microtasks stays alive with it. */
+	if (realm->job_target != NULL && realm->job_target->managed)
+		vm_heap_mark(heap, &realm->job_target->cell);
 
 	/* The microtasks waiting for a checkpoint. */
 	for (index = 0; index < realm->jobs.count; index++) {

@@ -97,6 +97,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/css/grid-text.c \
 	$(LIBBROWSER_DIR)/css/flex-text.c \
 	$(LIBBROWSER_DIR)/css/anchor.c \
+	$(LIBBROWSER_DIR)/css/gradient.c \
 	$(LIBBROWSER_DIR)/css/cascade.c \
 	$(LIBBROWSER_DIR)/css/index.c \
 	$(LIBBROWSER_DIR)/css/media.c \
@@ -194,6 +195,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/layout/hit.c \
 	$(LIBBROWSER_DIR)/layout/bounds.c \
 	$(LIBBROWSER_DIR)/paint/list.c \
+	$(LIBBROWSER_DIR)/paint/gradient.c \
 	$(LIBBROWSER_DIR)/paint/software.c \
 	$(LIBBROWSER_DIR)/paint/vulkan.c
 

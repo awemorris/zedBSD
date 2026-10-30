@@ -135,6 +135,27 @@ js_fail_at(
 }
 
 /*
+ * Tells whether an export node wraps a declaration of this module (a
+ * variable, function or class declaration, or a default export of a named
+ * function or class), not specifiers, a re-export or an anonymous default.
+ */
+int
+js_export_is_declaration(
+	const struct js_node *node)
+{
+	/* A re-export or specifiers are not. */
+	if ((node->flags & JS_FLAG_ALL) != 0U || node->second != NULL)
+		return 0;
+	if (node->first == NULL || node->first->kind == JS_NODE_EXPORT_SPECIFIER)
+		return 0;
+
+	/* A default export of a function or class needs a name. */
+	if ((node->flags & JS_FLAG_DEFAULT) != 0U && node->first->text == NULL)
+		return 0;
+	return 1;
+}
+
+/*
  * Makes a node of a kind at the current token's place.
  */
 struct js_node *

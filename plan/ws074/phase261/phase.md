@@ -51,3 +51,21 @@ location.hash の変更と hashchange もこの model に載せる。
   lineno/colno（script の位置の情報が無い、4）、WritableStream・WebAssembly が無い（2）、CSS の `:target`（1）、読み込み時の autofocus（2）。
   文書をまたぐ navigation（intercept しない別文書への遷移・reload は navigate event だけで読み込まない）と iframe は後続。
   利用者のクリック（GUI）は navigate event を通らない。
+
+2026-10-30（q1708-i02、P8、branch `agent/p8-ws074`）: 文書をまたぐ navigation を iframe で実装した。
+
+- 前提の修正（p260 の runner と engine）: runner が `browser --run` に `--async` を付ける（at-once の読み込みは web の frame を一切読まない）。
+  window の load は frame・画像・style sheet・web font の完了まで保留する（`page_fire_load` の保留と `page_fire_load_resume`）。
+  style sheet は後続の script を止める（`page_wait_sheets`）。別 realm の promise の await が固まる問題（job を関連する window でも drain、
+  除去した frame の job は親の realm へ）、iframe の timer が一度も動いていなかった問題（`bind_run_timers` が子の window も走らせる）を直した。
+- 実装: iframe の中の script が別の文書へ navigate すると（`navigation.navigate`・`location`・リンク・traverse・reload）、frame 要素の
+  `child_navigation` に新しい location を置き、次の scan で frame が読み込まれる（src 属性は変えない）。history の entries は
+  `frameElement.__zedNav` に置いて次の文書の prelude が引き継ぐ（`NavigationHistoryEntry.sameDocument` は文書の id で決める、
+  `navigation.activation`、traverse は文書が違えば cancelable でない）。beforeunload を navigate の中で、pagehide を差し替えの直前に発火し、
+  その間の navigation は InvalidStateError。initial about:blank は navigate event を出さず replace 扱い（`activation` は null、
+  `updateCurrentEntry` は InvalidStateError）。除去した frame の window は InvalidStateError。編集は `plan/ws074/phase230/prelude.js`
+  （`make-prelude.py` で `bind/prelude-source.inc` を作る）と `bind/frame.c`・`bind/prelude.c`・`page/frame-load.c`。
+- 測定（Chromium が通す navigation-api の harness 158 件のうち dev20 で落ちていた物）: 8 → 80 PASS（`plan/ws074/tests/wpt-one.sh` で 1 ID ずつ）。
+- 残り: window.open・popup・form の target・meta refresh（browsing context が無い）、`history.back()` を親から呼ぶ joint session history、
+  sandbox の iframe、beforematch、data:・blob:・srcdoc・javascript: の文書、WritableStream・WebAssembly が無い（unserializable の試験）、
+  navigateerror の lineno/colno、reload の navigation timing。

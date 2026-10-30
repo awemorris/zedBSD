@@ -131,6 +131,7 @@ int paint_build(struct paint_list *list, const struct layout_tree *tree);
 void paint_release(struct paint_list *list);
 int paint_add_ring(struct paint_list *list, layout_unit x, layout_unit y, layout_unit width, layout_unit height, layout_unit thickness, uint32_t color);
 int paint_add_rect(struct paint_list *list, layout_unit x, layout_unit y, layout_unit width, layout_unit height, uint32_t color);
+int paint_gradient_render(struct wb_arena *arena, const struct css_gradient *gradient, int width, int height, struct img_bitmap *bitmap);
 int paint_dump(const struct paint_list *list, struct wb_buffer *out);
 void paint_clips_init(struct paint_clips *clips, int width, int height);
 void paint_clips_push(struct paint_clips *clips, const struct paint_item *item, layout_unit scroll_y);

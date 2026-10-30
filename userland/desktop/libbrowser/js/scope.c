@@ -451,8 +451,7 @@ scope_declarations(
 			break;
 		case JS_NODE_EXPORT:
 			/* A declaration with export still declares its local names. */
-			if ((node->flags & (JS_FLAG_DEFAULT | JS_FLAG_ALL)) == 0U && node->second == NULL &&
-			    node->first != NULL && node->first->kind != JS_NODE_EXPORT_SPECIFIER)
+			if (js_export_is_declaration(node))
 				scope_declarations(compiler, info, node->first);
 			break;
 		case JS_NODE_VARIABLES:
@@ -760,8 +759,7 @@ scope_declare_lexicals(
 	found = 0;
 	for (node = list; node != NULL; node = node->next) {
 		/* A named export declaration makes the same lexical binding as the declaration alone. */
-		if (node->kind == JS_NODE_EXPORT && (node->flags & (JS_FLAG_DEFAULT | JS_FLAG_ALL)) == 0U &&
-		    node->second == NULL && node->first != NULL && node->first->kind != JS_NODE_EXPORT_SPECIFIER) {
+		if (node->kind == JS_NODE_EXPORT && js_export_is_declaration(node)) {
 			if (scope_declare_lexicals(compiler, scope, node->first))
 				found = 1;
 			continue;

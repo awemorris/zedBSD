@@ -1039,6 +1039,10 @@ element_trace(
 	/* Pending source identity is independent of the published child context. */
 	if (element->child_source != NULL)
 		vm_heap_mark(heap, &element->child_source->cell);
+	if (element->child_attribute != NULL)
+		vm_heap_mark(heap, &element->child_attribute->cell);
+	if (element->child_navigation != NULL)
+		vm_heap_mark(heap, &element->child_navigation->cell);
 
 	/* The exact inline source remains live with its Element, independently of the rounded attribute. */
 	if (element->inline_style_source != NULL)

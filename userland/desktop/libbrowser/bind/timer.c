@@ -34,6 +34,7 @@ static int timer_add(struct vm_realm *realm, const vm_value *args, unsigned coun
 static int timer_find_due(const struct bind_window *window, uint64_t limit, size_t *index);
 static int timer_run(struct bind_window *window, const struct bind_timer *timer);
 static int timer_run_due(struct bind_window *window);
+static int timer_run_children(struct bind_window *window);
 
 /*
  * Reports when the next timer is due; zero when there is none.
@@ -44,6 +45,9 @@ bind_next_timer(
 	double *due)
 {
 	const struct bind_timer *timer;
+	const struct dom_node *walk;
+	const struct bind_window *child;
+	double child_due;
 	size_t index;
 	int found;
 
@@ -58,12 +62,96 @@ bind_next_timer(
 		}
 	}
 
+	/* The timers of the frames in the document count too. */
+	if (window->context_depth < 64U) {
+		walk = window->document->node.first_child;
+		while (walk != NULL) {
+			child = bind_frame_child(walk);
+			if (child != NULL && bind_next_timer(child, &child_due)) {
+				if (!found || child_due < *due)
+					*due = child_due;
+				found = 1;
+			}
+			walk = bind_following(walk, &window->document->node);
+		}
+	}
+
 	/* An empty queue supplies no due time to the embedding. */
 	if (!found)
 		return 0;
 
 	/* Succeeded: the embedding receives the earliest queued due time. */
 	return found;
+}
+
+/*
+ * Runs the timers due in the frames of a window's document, each at the
+ * window's time.  The children are listed first and kept alive, since a
+ * callback may remove a frame.
+ */
+static int
+timer_run_children(
+	struct bind_window *window)
+{
+	struct wb_vector children;
+	struct dom_node *walk;
+	struct bind_window *child;
+	struct vm_cell **slot;
+	struct vm_cell *cell;
+	size_t index;
+	size_t rooted;
+	int status;
+
+	/* The frames of the document now. */
+	wb_vector_init(&children, sizeof(struct vm_cell *));
+	status = 0;
+	walk = window->document->node.first_child;
+	while (walk != NULL && status == 0) {
+		child = bind_frame_child(walk);
+		if (child != NULL) {
+			cell = &child->realm->cell;
+			status = wb_vector_push(&children, &cell);
+		}
+		walk = bind_following(walk, &window->document->node);
+	}
+
+	/* Each is rooted where it stays in the list, which no longer grows. */
+	rooted = 0;
+	while (status == 0 && rooted < children.count) {
+		slot = wb_vector_at(&children, rooted);
+		status = vm_heap_add_root(window->realm->heap, slot);
+		if (status == 0)
+			rooted++;
+	}
+
+	/* Each runs what is due at this window's time. */
+	for (index = 0; status == 0 && index < children.count; index++) {
+		slot = wb_vector_at(&children, index);
+		child = ((struct vm_realm *)*slot)->host;
+		if (child == NULL || child->detached)
+			continue;
+		bind_window_set_time(child, window->now);
+		status = bind_run_timers(child);
+
+		/* What the frame's callbacks queued for this window (a removed frame's jobs come here) runs now. */
+		if (status == 0)
+			status = bind_checkpoint(window);
+	}
+
+	/* The roots end in reverse order. */
+	while (rooted != 0) {
+		rooted--;
+		slot = wb_vector_at(&children, rooted);
+		vm_heap_remove_root(window->realm->heap, slot);
+	}
+	wb_vector_release(&children);
+
+	/* Report a failure of the list or of a timer. */
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the frames' timers have run. */
+	return 0;
 }
 
 /*
@@ -84,6 +172,16 @@ bind_run_timers(
 		status = vm_heap_add_root(window->realm->heap, &owner);
 		if (status != 0)
 			return status;
+	}
+
+	/* The frames' timers run first: their documents loaded before this one's load event. */
+	if (window->context_depth < 64U) {
+		status = timer_run_children(window);
+		if (status != 0) {
+			if (owner != NULL)
+				vm_heap_remove_root(window->realm->heap, &owner);
+			return status;
+		}
 	}
 
 	/* Keeps the child host alive across every timer callback and checkpoint. */
