@@ -825,6 +825,7 @@ box_build_transition(
 	float picture_width;
 	float picture_height;
 	float group_width;
+	float group_height;
 	size_t first_group;
 	size_t last_group;
 	int siblings;
@@ -875,6 +876,7 @@ box_build_transition(
 		if (group->style.transform_translate[1].value == CSS_VT_TRANSLATE_PENDING)
 			group->style.transform_translate[1].value = layout_to_px(rect.y);
 		group_width = group->style.width.unit == CSS_UNIT_PX ? group->style.width.value : layout_to_px(rect.width);
+		group_height = group->style.height.unit == CSS_UNIT_PX ? group->style.height.value : layout_to_px(rect.height);
 
 		/* The pair holds the two images. */
 		pair = box_transition_pseudo(tree, css, element, group, &group->style, CSS_PSEUDO_ELEMENT_VT_PAIR, name, CSS_VT_FIRST | CSS_VT_LAST, pair_style, &error);
@@ -907,6 +909,17 @@ box_build_transition(
 				image->style.height.unit = CSS_UNIT_PX;
 				image->style.height.value = width_px * picture_height / picture_width;
 				image->style.height.offset = 0.0f;
+			}
+
+			/* In a vertical writing mode the height is the inline size, given: the picture's shape gives the width from it. */
+			if (image->style.width.unit == CSS_UNIT_AUTO && picture_height > 0.0f) {
+				float height_px;
+
+				height_px = image->style.height.unit == CSS_UNIT_PERCENT ? group_height * image->style.height.value / 100.0f :
+				    image->style.height.unit == CSS_UNIT_PX ? image->style.height.value : picture_height;
+				image->style.width.unit = CSS_UNIT_PX;
+				image->style.width.value = height_px * picture_width / picture_height;
+				image->style.width.offset = 0.0f;
 			}
 
 			/* The UA's animations fade the old image out and the new one in. */
