@@ -262,3 +262,11 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 - p020（2026-10-30 15:05 P3、q1715-i01）: 板の元の kernel（2825517684）でも、板に残る 10-28 19:47 以降の起動の記録 32 個でも全部 `no boot framebuffer (6)` → main の kernel の退行ではなく、U-Boot の GOP が無い（HDMI に画面が無い見込み）。物理の接続を Q1 に報告して止めた。画面なしで測る案（display の node を own mode の画面で attach、driver の側）は Q1 の判断待ち。[phase020](phase020/phase.md)。
 - WS291 は incomplete のまま返却（Q1 の指示「p020 が終わったら（または進めなくなったら）、規約の見直しは RDNA の後に回し、WS291 は incomplete のまま返却してください。」）。
 - 再開点（14:45 P7）: NVIDIA の段の残りは無い。ws.md の残りは p008〜p009（RDNA、RX 5600 XT を挿し直すまで実機が無い）、p020（PowerVR、VF2 の割り当てが要る）、最後の規約の見直し。
+
+## PowerVR（p020）の性能目標（2026-10-30）
+
+ユーザー（原文）「WS291 PowerVRの性能目標は、RTX 2070とIMG B XHE-32-4 MC1の性能比率から立ててください。」
+
+- 基準の scene: RTX 2070 の scene-5000（`mview --content=game --present=mailbox --copies=5000`、qs40（37000 三角形）× 5000 = 1 frame 約 1.85 億三角形、1920x1080、vertex shading）で NVK・zedBSD とも約 49〜50 fps。
+- 性能比（Q1 の案、理論の FP32）: RTX 2070 は 2304 core × 1620 MHz × 2 = 約 7.46 TFLOPS。VF2 の IMG BXE-4-32 MC1 は 32 FLOPs/clock × 600 MHz = 19.2 GFLOPS（既定の 400 MHz なら 12.8 GFLOPS）。比は約 389 倍（400 MHz なら約 583 倍）。参考に画素の fill は 64 ROP × 1620 MHz = 103.7 Gpix/s 対 4 pixel/clock × 600 MHz = 2.4 Gpix/s で約 43 倍。三角形の処理の速さの公表値は見つからない。
+- 目標（Q1 の案）: 同じ 1920x1080・qs40 で copies を比で割った scene、600 MHz なら copies 13（5000 ÷ 389、約 48 万三角形）、400 MHz なら copies 9（5000 ÷ 583）で 50 fps 以上。VF2 の GPU の clock は P3 が確かめる。
