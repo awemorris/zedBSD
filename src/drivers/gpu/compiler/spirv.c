@@ -1946,6 +1946,7 @@ drv_gpu_spirv_declare_decoration(
 		if (word[2] == DEC_NO_CONTRACTION &&
 		    (parser->features & DRV_GPU_SPIRV_FEATURE_NO_CONTRACTION) != 0U)
 			ignored = 1;
+
 		if (ignored == 0) {
 			/*
 			 * Records the unsupported instruction in the caller's
