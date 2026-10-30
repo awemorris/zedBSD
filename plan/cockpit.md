@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 02:45（Q1）
+最終更新: 2026-10-31 02:51（Q1）
 
 ## 担当（P1〜P8）
 
@@ -11,7 +11,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
 | P2 | Bug | open の小さな Bug をまとめて直す（QEMU と host） | q1750: BUG-363（/etc/hosts）→ BUG-344（fscanf）→ BUG-366（MAP_FIXED）→ BUG-354（top の %CPU）→ BUG-328（静的な route・DNS）→ BUG-352（default route 2 つ） | WS291 p020（PowerVR、c13 45.8 fps 対 目標 50）は返却。branch agent/p2-ws291v は BUG-375 の直しの後に main へ |
-| P3 | [WS307](ws307/ws.md)・[WS331](ws331/ws.md)・[WS332](ws332/ws.md)・[WS326](ws326/ws.md) | 残りの仕事を順に | 起動（q1736）。WS307 p007 の残り（installer の導入の QEMU、古い entry の掃除） | WS331 p006 規約 → WS332 p003・p004 → WS326 p015・p017 以降 |
+| P3 | [WS331](ws331/ws.md)・[WS332](ws332/ws.md) | driver から HAL への直の依存を除く・tick の周波数の API | q1737: WS331 p006 規約の全文の見直し → WS331 の完了 | q1738: WS332 p003・p004 → 完了（WS307 は完了、WS326 は Q1 が直に回す） |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS318](ws318/ws.md) | libmedia の作り直し（Vulkan の device の共有・codec の指定・encoder・カメラ・libavcodec の内部の fallback） | q1752: p001 設計（design-reviewer と問いの一覧まで） | WS306 の設計は済み（main 843847185、問い Q306-7・9 は下の 0b）。WS326 の後にすぐ実装に入れるよう先に設計 |
 | P6 | Bug・[WS291](ws291/ws.md) | BUG-370（Photos）と RTX の CPU の費用 | 起動（q1740）。BUG-370 の直し（QEMU） | WS291 p014: 命令の記録の段と全画面の copy を減らす（10.0.10.3） |
@@ -66,7 +66,7 @@ Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→
 
 ### WS307 graphical installer
 
-p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firmware 変数の driver と efiboot）は OVMF の試験 PASS、残り: installer の導入の QEMU、古い zedBSD の entry の掃除。担当なし（P6 は返却）。
+completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の起動の項目を作り、古い zedBSD の項目を消す（QEMU の OVMF で PASS、実機は未実施）。試験は plan/tools/installer/ に。
 
 ### WS313 ODROID-C5
 
@@ -78,7 +78,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 ### 最近完了した WS
 
-- WS009 文書（2026-10-30）、WS327 libkeiland の thread と socket（2026-10-30）、WS315 Realtek USB 2.5G（2026-10-30）。
+- WS307 graphical installer（2026-10-31）、WS009 文書（2026-10-30）、WS327 libkeiland の thread と socket（2026-10-30）、WS315 Realtek USB 2.5G（2026-10-30）。
 
 ## open の Bug（今日見つかった物）
 

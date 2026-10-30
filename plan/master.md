@@ -82,7 +82,6 @@
 - **ユーザーの不在の間（2026-10-31 未明〜昼）**: 2026-10-31 ユーザーから、設計だけ進められる WS は設計を、実装できる WS は実装だけでも、試験できるなら試験も進める、という趣旨の指示を受けた。
 - **文書**（[WS009](ws009/ws.md)）: /dev/gpu の UAPI の文書（DOC-54）は完成、残りは build・boot の再現だけ。
 - **GPU の描画の速さ**（[WS291](ws291/ws.md)）: RDNA は Linux と同等、NVIDIA は scene-5000 で NVK と同等（49.5〜49.7 fps）、50 fps を明らかに超える改善と desktop の測り直しが残り。
-- **インストーラ**（[WS307](ws307/ws.md)）: app と通しの試験は済み、残りは sleep の QEMU、GTK4 のセルフビルド、firmware 変数の driver、規約。
 - 達成: WS315（Realtek USB 2.5G、5330 で Linux 並み）、WS314（libkeiland の fd の除去）、WS243（NVDEC 1080p60）（2026-10-30）。fg021 ZYBO、fg020 VisionFive 2、fg019 ベータ2 など。
 - 実機の使い分け（2026-10-27 ユーザー）: デスクトップ（10.0.10.3）は GPU の driver、Keiland の app は VM で開発して VF2 で速さを詰める、5330 は Intel GPU・電源・Alder Lake と USB の NIC。
 <!-- master:focus:end -->
@@ -203,7 +202,6 @@ BUG-377 · q1754 · WS334 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS292](ws292/ws.md) | MG006 | GHCI の session の保護（PROT）を zedBSD の driver に（WS290 の後） | planning | p001 設計（WS290 と G29 の回答の後） |
 | [WS295](ws295/ws.md) | MG006 | Intel の xe の driver（Meteor Lake 以降の iGPU と discrete の Arc、GuC の submission、i915 の使える所は写して重複） | planning | p001 調査（担当の起動はユーザーの指示の時） |
 | [WS296](ws296/ws.md) | MG001 | src/drivers（gpu/ を除く）の comment から開発の管理情報を消し、XXX の規約の当て直し（usb など 11 file） | planned | 18 LW、担当の起動はユーザーの指示の時 |
-| [WS307](ws307/ws.md) | MG003 | Keiland のアプリとしての zedBSD のグラフィカルなインストーラ（UEFI＋ACPI の PC、ウィザード、disk 全体／partition の選択、base・desktop・firmware・packages の tarball）（2026-10-28 ユーザー） | incomplete（p001 cleared、仕様は spec.md） | 実装 p002〜p014（134 LW、指示の後） |
 
 ### 保留の WS（何をやるかは Q1 とユーザーが整理中）
 
