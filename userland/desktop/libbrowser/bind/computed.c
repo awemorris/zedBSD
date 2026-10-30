@@ -145,6 +145,8 @@ enum computed_property {
 	COMPUTED_POSITION_TRY_ORDER,
 	COMPUTED_POSITION_TRY,
 	COMPUTED_POSITION_VISIBILITY,
+	COMPUTED_VIEW_TRANSITION_NAME,
+	COMPUTED_VIEW_TRANSITION_CLASS,
 
 	/* The flow-relative properties, six families of four (inline-start, inline-end, block-start, block-end): margin, padding, inset, border width, style and color. */
 	COMPUTED_LOGICAL_FIRST,
@@ -337,6 +339,8 @@ static const struct computed_entry computed_entries[] = {
 	{ "position-try-order", COMPUTED_POSITION_TRY_ORDER },
 	{ "position-try", COMPUTED_POSITION_TRY },
 	{ "position-visibility", COMPUTED_POSITION_VISIBILITY },
+	{ "view-transition-name", COMPUTED_VIEW_TRANSITION_NAME },
+	{ "view-transition-class", COMPUTED_VIEW_TRANSITION_CLASS },
 	{ "text-decoration-line", COMPUTED_TEXT_DECORATION_LINE },
 	{ "text-decoration-style", COMPUTED_TEXT_DECORATION_STYLE },
 	{ "text-decoration-skip-ink", COMPUTED_TEXT_DECORATION_SKIP_INK },
@@ -1320,6 +1324,18 @@ computed_write_keyword(
 		break;
 	case COMPUTED_POSITION_VISIBILITY:
 		error = css_position_visibility_serialize(style->position_visibility, out);
+		break;
+	case COMPUTED_VIEW_TRANSITION_NAME:
+		if (style->view_transition_name == NULL)
+			error = computed_ascii("none", out);
+		else
+			error = vm_string_append_units(style->view_transition_name, out);
+		break;
+	case COMPUTED_VIEW_TRANSITION_CLASS:
+		if (style->view_transition_class == NULL)
+			error = computed_ascii("none", out);
+		else
+			error = vm_string_append_units(style->view_transition_class, out);
 		break;
 	case COMPUTED_FLEX_FLOW:
 		error = computed_name(computed_flex_directions, 4, style->flex_direction, out);

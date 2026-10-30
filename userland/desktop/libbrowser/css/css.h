@@ -753,6 +753,9 @@ struct css_style {
 	const struct css_anchor_expr *anchor[CSS_ANCHOR_SLOTS];
 	const struct css_anchor_names *anchor_names;
 	struct vm_string *position_anchor;
+	/* view-transition-name: NULL for none, "match-element", or the custom identifier; view-transition-class: none (NULL) or the identifiers joined by spaces (atoms). */
+	struct vm_string *view_transition_name;
+	struct vm_string *view_transition_class;
 	const struct css_anchor_names *anchor_scope;
 	int anchor_scope_all;
 	/* position-area's keywords (css_position_area_parse packs them; -1 for none). */

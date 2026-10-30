@@ -303,6 +303,8 @@ static const struct values_name values_names[] = {
 	{ "position-try-fallbacks", CSS_PROP_POSITION_TRY_FALLBACKS },
 	{ "position-try-order", CSS_PROP_POSITION_TRY_ORDER },
 	{ "position-visibility", CSS_PROP_POSITION_VISIBILITY },
+	{ "view-transition-name", CSS_PROP_VIEW_TRANSITION_NAME },
+	{ "view-transition-class", CSS_PROP_VIEW_TRANSITION_CLASS },
 	{ "container", SHORT_CONTAINER },
 	{ "border-spacing", SHORT_BORDER_SPACING },
 	{ "margin", SHORT_MARGIN },
@@ -999,6 +1001,7 @@ static void values_wide_keyword(int property, const struct css_value *value, str
 static int values_background(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static size_t values_function_length(const struct css_token *tokens, size_t count);
 static int values_url(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_view_transition_class(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_repeat_parts(const struct css_token *const *parts, size_t count, struct css_value *value);
 static int values_subgrid(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
 static int values_position_parts(const struct css_token *const *parts, size_t count, struct css_value *x, struct css_value *y);
@@ -2040,6 +2043,36 @@ values_single(
 			return error;
 		value->kind = CSS_VALUE_NUMBER;
 		value->number = (float)keyword;
+		return 0;
+	}
+
+	/* view-transition-name: none, match-element or a custom identifier. */
+	if (property == CSS_PROP_VIEW_TRANSITION_NAME) {
+		if (count != 1 || tokens[0].type != CSS_TOKEN_IDENT)
+			return EINVAL;
+		value->kind = CSS_VALUE_KEYWORD;
+		if (css_ident_equal(&tokens[0], "none")) {
+			value->keyword = 0;
+			return 0;
+		}
+		if (css_ident_equal(&tokens[0], "auto"))
+			return EINVAL;
+		value->keyword = 2;
+		if (css_ident_equal(&tokens[0], "match-element")) {
+			value->ident = vm_atom_from_ascii(parse->heap, "match-element");
+		} else {
+			value->ident = vm_atom_from_units(parse->heap, tokens[0].text, tokens[0].length);
+		}
+		if (value->ident == NULL)
+			return ENOMEM;
+		return 0;
+	}
+
+	/* view-transition-class: none, or custom identifiers. */
+	if (property == CSS_PROP_VIEW_TRANSITION_CLASS) {
+		error = values_view_transition_class(parse, tokens, count, value);
+		if (error != 0)
+			return error;
 		return 0;
 	}
 
@@ -3709,6 +3742,57 @@ values_function_length(
 
 	/* An unclosed function runs to the end. */
 	return count;
+}
+
+/* Parses view-transition-class: none, or one or more custom identifiers, kept as one atom of them joined by spaces. */
+static int
+values_view_transition_class(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	struct wb_units joined;
+	uint16_t space;
+	size_t index;
+	size_t names;
+	int error;
+
+	/* none alone. */
+	value->kind = CSS_VALUE_KEYWORD;
+	if (count == 1 && css_ident_equal(&tokens[0], "none")) {
+		value->keyword = 0;
+		return 0;
+	}
+
+	/* Identifiers (none is not one), separated by whitespace. */
+	wb_units_init(&joined);
+	space = ' ';
+	names = 0;
+	error = 0;
+	for (index = 0; index < count && error == 0; index++) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (tokens[index].type != CSS_TOKEN_IDENT || css_ident_equal(&tokens[index], "none")) {
+			error = EINVAL;
+			break;
+		}
+		if (names != 0)
+			error = wb_units_append(&joined, &space, 1U);
+		if (error == 0)
+			error = wb_units_append(&joined, tokens[index].text, tokens[index].length);
+		names++;
+	}
+	if (error == 0 && names == 0)
+		error = EINVAL;
+	if (error == 0) {
+		value->keyword = 2;
+		value->ident = vm_atom_from_units(parse->heap, joined.data, joined.length);
+		if (value->ident == NULL)
+			error = ENOMEM;
+	}
+	wb_units_release(&joined);
+	return error;
 }
 
 /*

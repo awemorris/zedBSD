@@ -3963,6 +3963,12 @@ cascade_apply(
 	case CSS_PROP_POSITION_ANCHOR:
 		style->position_anchor = value->keyword == 1 ? value->ident : NULL;
 		break;
+	case CSS_PROP_VIEW_TRANSITION_NAME:
+		style->view_transition_name = value->keyword == 2 ? value->ident : NULL;
+		break;
+	case CSS_PROP_VIEW_TRANSITION_CLASS:
+		style->view_transition_class = value->keyword == 2 ? value->ident : NULL;
+		break;
 	case CSS_PROP_DISPLAY:
 		style->display = value->keyword;
 		break;
@@ -4610,6 +4616,12 @@ cascade_inherit(
 		break;
 	case CSS_PROP_POSITION_ANCHOR:
 		style->position_anchor = parent->position_anchor;
+		break;
+	case CSS_PROP_VIEW_TRANSITION_NAME:
+		style->view_transition_name = parent->view_transition_name;
+		break;
+	case CSS_PROP_VIEW_TRANSITION_CLASS:
+		style->view_transition_class = parent->view_transition_class;
 		break;
 	case CSS_PROP_Z_INDEX:
 		style->z_index = parent->z_index;
