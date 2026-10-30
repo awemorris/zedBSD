@@ -16,6 +16,7 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 - 解釈（Q1）: (1) 規則を guardrail に書く（済み）。(2) 最初の成果は 2 つの一覧: 違反に使われた `hal_*` の関数ごとに、置き換える kernel の関数（既存の wrapper）の一覧と、kernel に wrapper が無い関数の一覧（kernel に足す関数の案）。ユーザーが見て、kernel に足す関数を決める。(3) driver の書き換えは一覧の後の Phase で（一覧の後に Phase を立てる）。HAL の API は変えない。
 
 - 2026-10-30 ユーザー（原文）「表A,Bを許可します」 → p001 の表 A（置き換え先）と表 B（B1〜B8: kern_device_map の WRITECOMBINE・READONLY、MSI の 4 関数 kern_irq_alloc_msi・attach_msi・detach_msi_sync・free_msi、kern_cpu_current、kern_console_early_putc、kern_physaddr_t）を許可。MSI は表 B の関数を足す形（別の案は採らない、Q1 の解釈）。未決のまま: rpi4 の console の 2 関数、build の macro HAL_ARCH_*、kernel の header が HAL の header を include する件。
+- 2026-10-30 p003 で見つかった表 B の漏れ（kernel_putc・kernel_notify_task、hal.h だけに宣言のある kernel の名前）へのユーザーの回答（原文）「kern_task_notifyはなんか変。sched系の名前にするのがいいのでは？putcはOK。」 → kernel_putc は既存の宣言を include/kern/text-display.h に足す。kernel_notify_task は新しい関数を足さず、既存の sched_notify_task（include/kern/sched.h）に driver の呼び出しを替える（Q1 の解釈）。
 
 ## 調べの起点（2026-10-30 Q1 の grep、main f29e49c3c）
 
