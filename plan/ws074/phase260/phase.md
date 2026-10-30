@@ -81,6 +81,8 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev24（q1708-i02 の途中、gradient・logical・overflow まで） | 964 | 1,085 | 115 | 39 | 2,203（63.45%） |
   | ours-dev25（66e610b8a、module・view-transition の parse・zoom まで） | 973 | 1,085 | 115 | 39 | 2,212（63.71%） |
   | ours-dev26（7727cb0b0、harness だけ測り直し。static・scripted・crash は dev25 のまま） | 976 | 1,085 | 115 | 39 | 2,215（63.80%） |
+  | ours-dev27（ad3b33639、2026-10-31、q1727-i01、4 runner を測り直し） | 986 | 1,107 | 235 | 41 | 2,369（68.23%） |
+  | ours-dev28（5b032c17b、harness・scripted・crash を測り直し。static は同じ source の部分測定の再実行 1,111 pass で後退 0、数えは 1,107） | 996 | 1,107 | 242 | 41 | 2,386（68.72%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -145,6 +147,46 @@ Origin: 2026-10-27 ユーザーの指示。
      （key が type 以外なら SyntaxError、type が json 以外なら TypeError）・JSON module。module の失敗は error event で報告する
      （`bind_report_exception_at`）。html/semantics の import-attributes・json-module のうち 6 件が PASS。
 - 道具: `plan/ws074/tests/wpt-one.sh <ID>...`（1 ID ずつ runner と同じ条件で実行して callback を見る）。
+
+### q1727-i01 の途中経過（2026-10-30〜31、P8）
+
+- 道具（plan/ws074/tests/）: `ref-one.py ID...`（static reftest の test・ref・差の地図を横に並べた PNG、`--chrome` で Chromium も）、
+  `static-subset.py PREFIX...`（manifest の prefix だけの static reftest を並列に流して前回の全件の結果との REGRESSION・FIXED を出す）、
+  `scripted-one.py ID...`（scripted reftest 1 件の test・ref の capture と差、`--chrome` あり）、
+  `scripted-subset.py PREFIX...`（scripted reftest の prefix だけ。runner に `--only` を足した）。いずれも program を複写して流す（流している間に build し直してよい）。
+  build は `CC=clang sh plan/ws074/tests/host-build.sh plain`（増分で約 40 秒）。
+- grid の abspos の静的位置（layout/grid.c）: grid container が containing block でない（position: static）時は grid-area を使わず content box を矩形にして
+  justify-self・align-self で揃える（`grid_static_content_box`）。containing block の時の area への揃えも `grid_abspos_areas` に足した（`grid_static_alignment`）。
+  static の css-grid/abspos 59 → 81（subset）、全 static で 1089 → 1111、後退 0。
+- View Transitions（css-view-transitions、scripted 2 → 120 前後 / 205、後退 0）:
+  - JS（plan/ws074/phase230/prelude.js → `make-prelude.py`）: `document.startViewTransition`（callback・{update, types}）、ViewTransition（ready・finished・updateCallbackDone・skipTransition・types）、
+    `document.activeViewTransition`。native.viewTransition(1|2|0)（old を capture・new を測って木を出す・終わり）と viewTransitionDuration（bind/prelude.c → bind_host.view_transition・view_transition_duration）。
+  - page/transition.c: 状態（page.transition）。old: 今の layout で名前付き box を測り（layout/transition.c の `layout_transition_measure`、名前の重複は失敗、match-element は element から名前を作る）、
+    root（全体、名前付き box を除く）と各 box の painting を snapshot（paint/list.c の `paint_transition_capture`、items の複写）に取る。new: 木なしで測り直して木を出す（`show`）。
+  - layout/box.c `box_build_transition`: root の box の最後の子に `::view-transition` → group → image-pair → old・new の box を作る。group の大きさと位置は old・new の rect を
+    animation の進み（`layout_transition_progress`: delay・duration・play-state・timing function ease/linear/steps/cubic-bezier、fill both、時刻は 0）で補間、
+    transform の平行移動は UA の物（`CSS_VT_TRANSLATE_PENDING`、作者の transform が置き換える）。old・new の opacity は UA の fade の進み。
+    画像の高さは幅と元の縦横比から、object-fit・object-position 対応。group は paint 順（stacking order）に並べる。
+  - css/: `::view-transition`・`-group`・`-image-pair`・`-old`・`-new`（名前・`*`・`.class`）のセレクタ（名前は type、class はまとめて 1 class の詳細度）、
+    `css_engine_compute_vt_pseudo`、UA sheet（css/ua.c）に木の既定、`:root { view-transition-name: root }`、`:first/last/only-child` は兄弟の位置（CSS_VT_FIRST・LAST）。
+    新しい property: animation（shorthand）・animation-name・-duration・-delay・-play-state・-timing-function、mix-blend-mode（plus-lighter だけ区別）。keyframes は未実装（UA の名前だけを解釈）。
+  - paint/list.c: root が名前付きなら木だけを白の上に描く（無ければ普通の painting で名前付き box だけ除く）。old は snapshot、new は live の box を描いて group の box へ移して縮尺を合わせる（text は縮尺しない）。
+  - getComputedStyle(el, '::view-transition-*(name)')（bind/computed.c、page_vt_pseudo_style）と animation-* の computed。
+  - 未対応（残り）: inline 要素の capture（inline-element-size・new-content-is-inline など約 10）、縦書きの massive element、iframe の transition（約 10）、shadow の ::part（6）、
+    Web Animations（getAnimations・set-current-time・web-animations-api 約 8）、dialog・top layer、scrollbar・scroll の rebase、harness の pseudo-elements-valid の URL variant。
+
+再開点（2026-10-31、q1727-i01 の停止）:
+- 最後の全件の測定は ours-dev28（source 5b032c17b、`build/ws074-cmp/ours-dev28` の harness・scripted・crash と、static は `static-subset.py` の全件の再実行）。2,386 / 3,472 = 68.72%、
+  4 runner とも dev25/26 の PASS に対する後退 0。その後に commit は無い（この記録の commit だけ）。Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）。
+  gap 1,086: harness 481、static 445、scripted 154、crash 6。
+- 残りの大きな塊（dev28 の gap）: css-grid（harness 約 160: alignment の baseline 68・animation 12・subgrid、static 約 180: subgrid 44・alignment・abspos の orthogonal）、
+  css-flexbox（harness 約 60: baseline 31、static 約 144）、css-anchor-position（約 160: 要素の scroll 約 36、top layer 6、position-try の細部）、css-view-transitions（scripted 約 75 残り:
+  inline 要素の capture 約 10、iframe 約 10、縦書き、shadow ::part 6、Web Animations 約 8、dialog・top layer、scrollbar、harness の pseudo-elements-valid/invalid の URL variant・
+  querySelector での pseudo-element の SyntaxError・hit-test）、navigation-api（約 80: window.open・popup・joint session history）、css-viewport の zoom（static 21 と harness 3、
+  実効 zoom を cascade の長さに掛ける設計が要る）、css-writing-modes の sideways（static 約 40）、backdrop-filter（約 30）、shape-outside（16）。
+- 要素の scroll（overflow の scrollTop・scrollLeft）が無い（`bind_scroll_top_set` は root だけ）。anchor-scroll・position-visibility など約 36 件に効くが、行の座標が block 相対で paint・hit・geometry に散るため
+  設計が要る（layout_absolute の content 原点を scroll 分ずらす案は、inline の行・fragment が block 相対なので paint・hit・bounds も直す必要がある）。次に取り組む価値が大きい。
+- 道具: 一部の失敗の原因は ref-one.py（static）・scripted-one.py（scripted、`--chrome` で Chromium と見比べ）で PNG を見るのが早い。wpt-one.sh は URL variant の ID を扱えない。
 
 再開点（2026-10-30、q1708-i02 の停止）:
 - 最後の全件の測定は ours-dev25（static・scripted・crash は 66e610b8a、harness は dev26 の 7727cb0b0）。その後に commit は無い。

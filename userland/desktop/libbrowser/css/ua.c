@@ -40,6 +40,7 @@ const char css_user_agent_sheet[] =
 	"tr, td, th { vertical-align: inherit; }\n"
 	"th { text-align: center; }\n"
 	"html { color: black; font-family: serif; font-size: medium; line-height: normal; }\n"
+	":root { view-transition-name: root; }\n"
 	"body { margin: 8px; }\n"
 	"p, blockquote, figure, listing, plaintext, pre, xmp, dl { margin-block-start: 1em; margin-block-end: 1em; }\n"
 	"blockquote, figure { margin-inline-start: 40px; margin-inline-end: 40px; }\n"
@@ -93,4 +94,14 @@ const char css_user_agent_sheet[] =
 	" box-sizing: border-box; }\n"
 	"select { padding: 0 0 0 3px; border: 1px outset #767676; background-color: white; }\n"
 	"textarea { font-family: monospace; padding: 2px; border: 1px solid #767676; background-color: white;"
-	" white-space: pre-wrap; }\n";
+	" white-space: pre-wrap; }\n"
+	":root::view-transition { display: block; position: fixed; top: 0; right: 0; bottom: 0; left: 0; }\n"
+	":root::view-transition-group(*) { display: block; position: absolute; top: 0; left: 0;"
+	" animation-name: -ua-view-transition-group; animation-duration: 0.25s; }\n"
+	":root::view-transition-image-pair(*) { display: block; position: absolute; top: 0; right: 0; bottom: 0; left: 0;"
+	" animation-duration: inherit; animation-delay: inherit; animation-play-state: inherit; animation-timing-function: inherit; }\n"
+	":root::view-transition-old(*), :root::view-transition-new(*) { display: block; position: absolute; top: 0; left: 0;"
+	" width: 100%; height: auto; mix-blend-mode: plus-lighter; animation-duration: inherit; animation-delay: inherit;"
+	" animation-play-state: inherit; animation-timing-function: inherit; }\n"
+	":root::view-transition-old(*) { animation-name: -ua-view-transition-fade-out; }\n"
+	":root::view-transition-new(*) { animation-name: -ua-view-transition-fade-in; }\n";

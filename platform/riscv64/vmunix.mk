@@ -61,13 +61,14 @@ RISCV64_PLATFORM_SOURCES_virt := src/kern/platform/riscv-virt.c \
 	src/drivers/generic/ramdisk.c \
 	src/drivers/disklabel/gpt.c src/drivers/disklabel/pcat.c
 # The VisionFive 2's binding: the console's text over the loader's screen
-# and the UART, the initial ramdisk as the boot device, the SoC's system control
+# and the UART, the UART's input typed into the console (serial-console.c's
+# receiver), the initial ramdisk as the boot device, the SoC's system control
 # blocks, clock and reset generators and pin controllers, and the SD card
 # slot (the DesignWare controller and its JH7110 glue) with the GPT reader
 # its UEFI disk image needs, and the headphone jack (the PWM audio converter
 # fed by the AXI DMA controller).
 RISCV64_PLATFORM_SOURCES_visionfive2 := src/kern/platform/visionfive2.c \
-	src/drivers/serial/ns16550.c \
+	src/drivers/serial/ns16550.c src/drivers/generic/serial-console.c \
 	src/drivers/generic/boot-fb.c src/drivers/generic/fb-text.c \
 	src/drivers/platform/pcat/graphics/vgafont.c \
 	src/drivers/generic/ramdisk.c \

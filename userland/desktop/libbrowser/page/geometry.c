@@ -82,7 +82,8 @@ page_selector_engine(
 		return NULL;
 	}
 
-	/* Succeeded: the engine. */
+	/* Succeeded: the engine, told of the active view transition. */
+	css_engine_set_view_transition(page->query_css, page->vt_active, page->vt_types, page->vt_type_count);
 	return page->query_css;
 }
 
@@ -689,7 +690,7 @@ geometry_child_box(
 	    height >= 0 &&
 	    width <= INT_MAX / LAYOUT_UNIT &&
 	    height <= INT_MAX / LAYOUT_UNIT) {
-		status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height);
+		status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height, NULL);
 		if (status != 0) {
 			layout_release(&tree);
 			goto release_roots;

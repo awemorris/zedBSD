@@ -154,6 +154,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/net/cookie.c \
 	$(LIBBROWSER_DIR)/net/loader.c \
 	$(LIBBROWSER_DIR)/page/page.c \
+	$(LIBBROWSER_DIR)/page/transition.c \
 	$(LIBBROWSER_DIR)/page/link.c \
 	$(LIBBROWSER_DIR)/page/resource.c \
 	$(LIBBROWSER_DIR)/page/frame-load.c \
@@ -178,6 +179,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/text/linebreak.c \
 	$(LIBBROWSER_DIR)/text/woff.c \
 	$(LIBBROWSER_DIR)/layout/box.c \
+	$(LIBBROWSER_DIR)/layout/transition.c \
 	$(LIBBROWSER_DIR)/layout/block.c \
 	$(LIBBROWSER_DIR)/layout/flex.c \
 	$(LIBBROWSER_DIR)/layout/grid.c \

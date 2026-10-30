@@ -129,6 +129,33 @@ struct nvrtx_exec_vertex {
 };
 
 /*
+ * The bases and counts the GPU holds after a draw: the vertex numbers'
+ * base (the base vertex index and the vertex id's), the first instance,
+ * the instances, and whether primitive restart was written off.
+ */
+struct nvrtx_exec_bases {
+	uint32_t vertex;
+	uint32_t instance;
+	uint32_t instances;
+	bool restart_off;
+};
+
+/*
+ * A draw: indexed or not, its topology, its first vertex or index and
+ * count, its instances from the first, and an indexed draw's vertex
+ * offset.
+ */
+struct nvrtx_exec_draw_args {
+	bool indexed;
+	uint32_t topology;
+	uint32_t first;
+	uint32_t count;
+	uint32_t instances;
+	uint32_t first_instance;
+	int32_t vertex_offset;
+};
+
+/*
  * A sampler: the Vulkan filters, the mipmap mode and the levels' range
  * (float bits; both zero for level 0 alone), address modes and whether
  * coordinates are in pixels.
@@ -157,6 +184,9 @@ size_t nvrtx_exec_index_buffer(uint8_t *push, size_t at, uint64_t address, uint6
 size_t nvrtx_exec_raster(uint8_t *push, size_t at, uint32_t cull_mode, uint32_t front_face);
 size_t nvrtx_exec_depth(uint8_t *push, size_t at, const struct nvrtx_exec_depth *depth);
 size_t nvrtx_exec_uniform(uint8_t *push, size_t at, uint32_t group, uint32_t slot, uint64_t address, uint32_t size);
+size_t nvrtx_exec_constants_select(uint8_t *push, size_t at, uint64_t address, uint32_t size);
+size_t nvrtx_exec_constants_load(uint8_t *push, size_t at, uint32_t offset, const uint32_t *words, uint32_t count);
+size_t nvrtx_exec_draw_held(uint8_t *push, size_t at, struct nvrtx_exec_bases *held, bool known, const struct nvrtx_exec_draw_args *draw);
 size_t nvrtx_exec_clear(uint8_t *push, size_t at, const uint32_t *colour, uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1);
 size_t nvrtx_exec_clear_depth(uint8_t *push, size_t at, uint32_t depth, uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1);
 size_t nvrtx_exec_clear_stencil(uint8_t *push, size_t at, uint32_t stencil, uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1);

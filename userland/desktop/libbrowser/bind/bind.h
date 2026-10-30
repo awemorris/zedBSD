@@ -256,6 +256,14 @@ struct bind_host {
 	int (*media)(void *context, struct dom_element *element, int request, double value, struct bind_media *state);
 	/* An <img>'s state (BIND_IMAGE_*); restart loads its source again, a load or error event to follow. */
 	int (*image)(void *context, struct dom_element *element, int restart, struct bind_image *state);
+	/* The style of a view transition pseudo-element of the root (CSS_PSEUDO_ELEMENT_VT_*; name NULL for any) for getComputedStyle; ENOENT for an element that has none. */
+	int (*vt_pseudo_style)(void *context, struct dom_element *element, int pseudo, const struct vm_string *name, struct css_style *style);
+	/* Tells whether a view transition is active (for :active-view-transition) and its types. */
+	void (*view_transition_active)(void *context, int active, struct vm_string **types, size_t count);
+	/* A view transition's step: 1 captures the old state, 2 makes the new one and shows the tree, 0 ends it; returns whether it could be made. */
+	int (*view_transition)(void *context, int step);
+	/* The milliseconds until the shown transition's animations all end (a very large number when one never does). */
+	double (*view_transition_duration)(void *context);
 	/* The frame element of a child window, known from its creation (its scripts may read it at once). */
 	struct dom_element *frame;
 };

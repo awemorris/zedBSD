@@ -126,7 +126,24 @@ struct paint_clips {
 	int ignored;
 };
 
+/*
+ * What was painted of an element (or of the page without its named elements) for a view transition: the items
+ * with their glyphs, where they were and the size of the border box they belong to.
+ */
+struct paint_snapshot {
+	struct paint_item *items;
+	size_t count;
+	struct paint_glyph *glyphs;
+	size_t glyph_count;
+	layout_unit x;
+	layout_unit y;
+	layout_unit width;
+	layout_unit height;
+};
+
 /* The display list (list.c). */
+int paint_transition_capture(const struct layout_tree *tree, const struct layout_transition *transition, const struct layout_box *box, struct paint_snapshot **out);
+void paint_snapshot_release(struct paint_snapshot *snapshot);
 int paint_build(struct paint_list *list, const struct layout_tree *tree);
 void paint_release(struct paint_list *list);
 int paint_add_ring(struct paint_list *list, layout_unit x, layout_unit y, layout_unit width, layout_unit height, layout_unit thickness, uint32_t color);

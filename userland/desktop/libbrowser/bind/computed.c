@@ -147,6 +147,12 @@ enum computed_property {
 	COMPUTED_POSITION_VISIBILITY,
 	COMPUTED_VIEW_TRANSITION_NAME,
 	COMPUTED_VIEW_TRANSITION_CLASS,
+	COMPUTED_ANIMATION_NAME,
+	COMPUTED_ANIMATION_DURATION,
+	COMPUTED_ANIMATION_DELAY,
+	COMPUTED_ANIMATION_PLAY_STATE,
+	COMPUTED_ANIMATION_TIMING_FUNCTION,
+	COMPUTED_MIX_BLEND_MODE,
 	COMPUTED_ZOOM,
 
 	/* The flow-relative properties, six families of four (inline-start, inline-end, block-start, block-end): margin, padding, inset, border width, style and color. */
@@ -168,7 +174,14 @@ struct computed_entry {
 struct computed_ref {
 	struct vm_cell cell;
 	vm_value element;
+	/* A view transition pseudo-element asked for (CSS_PSEUDO_ELEMENT_VT_*; -1 for one that did not parse), and its name. */
+	int pseudo;
+	struct vm_string *pseudo_name;
 };
+
+/* The pseudo-element of the declaration being read (set by bind_computed_element, read by computed_write). */
+static int computed_pseudo;
+static struct vm_string *computed_pseudo_name;
 
 static void computed_trace(struct vm_heap *heap, struct vm_cell *cell);
 static int computed_find(const struct vm_string *name, int *property);
@@ -342,6 +355,12 @@ static const struct computed_entry computed_entries[] = {
 	{ "position-visibility", COMPUTED_POSITION_VISIBILITY },
 	{ "view-transition-name", COMPUTED_VIEW_TRANSITION_NAME },
 	{ "view-transition-class", COMPUTED_VIEW_TRANSITION_CLASS },
+	{ "animation-name", COMPUTED_ANIMATION_NAME },
+	{ "animation-duration", COMPUTED_ANIMATION_DURATION },
+	{ "animation-delay", COMPUTED_ANIMATION_DELAY },
+	{ "animation-play-state", COMPUTED_ANIMATION_PLAY_STATE },
+	{ "animation-timing-function", COMPUTED_ANIMATION_TIMING_FUNCTION },
+	{ "mix-blend-mode", COMPUTED_MIX_BLEND_MODE },
 	{ "zoom", COMPUTED_ZOOM },
 	{ "text-decoration-line", COMPUTED_TEXT_DECORATION_LINE },
 	{ "text-decoration-style", COMPUTED_TEXT_DECORATION_STYLE },
@@ -464,6 +483,94 @@ static const char *const computed_justifies[] = {
 };
 
 /*
+ * Reads getComputedStyle's pseudo-element argument: 0 when it is none or ::before or ::after (they are not told
+ * apart here), a view transition pseudo-element (CSS_PSEUDO_ELEMENT_VT_*) with its name (NULL for *), or -1 when
+ * it does not parse as one.
+ */
+static int
+computed_pseudo_of(
+	struct vm_realm *realm,
+	vm_value argument,
+	struct vm_string **name)
+{
+	struct vm_string *string;
+	uint16_t units[128];
+	char word[64];
+	size_t length;
+	size_t index;
+	size_t start;
+	size_t used;
+	int pseudo;
+	int status;
+
+	*name = NULL;
+	if (argument == VM_VALUE_UNDEFINED || argument == VM_VALUE_NULL)
+		return 0;
+	status = vm_to_string(realm, argument, &string);
+	if (status != 0)
+		return 0;
+	length = string->length;
+	if (length == 0)
+		return 0;
+	if (length > 127U)
+		return -1;
+	for (index = 0; index < length; index++)
+		units[index] = vm_string_at(string, index);
+	index = 0;
+	while (index < length && units[index] == ' ')
+		index++;
+	if (index + 1U >= length || units[index] != ':' || units[index + 1U] != ':')
+		return units[index] == ':' ? 0 : -1;
+	index += 2U;
+	used = 0;
+	while (index < length && units[index] != '(' && units[index] != ' ' && used < sizeof(word) - 1U)
+		word[used++] = (char)units[index++];
+	word[used] = '\0';
+	if (strncmp(word, "view-transition", 15) != 0)
+		return 0;
+	pseudo = 0;
+	if (strcmp(word, "view-transition") == 0)
+		pseudo = CSS_PSEUDO_ELEMENT_VT_ROOT;
+	else if (strcmp(word, "view-transition-group") == 0)
+		pseudo = CSS_PSEUDO_ELEMENT_VT_GROUP;
+	else if (strcmp(word, "view-transition-image-pair") == 0)
+		pseudo = CSS_PSEUDO_ELEMENT_VT_PAIR;
+	else if (strcmp(word, "view-transition-old") == 0)
+		pseudo = CSS_PSEUDO_ELEMENT_VT_OLD;
+	else if (strcmp(word, "view-transition-new") == 0)
+		pseudo = CSS_PSEUDO_ELEMENT_VT_NEW;
+	else
+		return -1;
+	while (index < length && units[index] == ' ')
+		index++;
+	if (pseudo == CSS_PSEUDO_ELEMENT_VT_ROOT)
+		return index == length ? pseudo : -1;
+	if (index >= length || units[index] != '(')
+		return -1;
+	index++;
+	while (index < length && units[index] == ' ')
+		index++;
+	start = index;
+	while (index < length && units[index] != ')' && units[index] != ' ')
+		index++;
+	if (index == start)
+		return -1;
+	if (!(index - start == 1U && units[start] == '*')) {
+		*name = vm_atom_from_units(realm->heap, units + start, index - start);
+		if (*name == NULL)
+			return -1;
+	}
+	while (index < length && units[index] == ' ')
+		index++;
+	if (index >= length || units[index] != ')')
+		return -1;
+	index++;
+	while (index < length && units[index] == ' ')
+		index++;
+	return index == length ? pseudo : -1;
+}
+
+/*
  * Makes the computed declaration of an element's style
  * (window.getComputedStyle); the pseudo-element argument is not read.
  */
@@ -499,6 +606,7 @@ bind_get_computed_style(
 	if (ref == NULL)
 		return ENOMEM;
 	ref->element = given;
+	ref->pseudo = computed_pseudo_of(realm, js_argument(args, count, 1), &ref->pseudo_name);
 	ref_root = &ref->cell;
 	status = vm_heap_add_root(realm->heap, &ref_root);
 	if (status != 0)
@@ -556,6 +664,8 @@ bind_computed_element(
 	/* Succeeded: its element. */
 	ref = (struct computed_ref *)cell;
 	*element = (struct dom_element *)bind_node_of(ref->element);
+	computed_pseudo = ref->pseudo;
+	computed_pseudo_name = ref->pseudo_name;
 	return 1;
 }
 
@@ -746,7 +856,14 @@ computed_write(
 		return ENOMEM;
 
 	/* Primary pages keep their host path; initial children own their cascade. */
-	if (window->host.computed_style != NULL) {
+	if (computed_pseudo < 0) {
+		/* A pseudo-element argument that did not parse has no values. */
+		free(style);
+		return 0;
+	}
+	if (computed_pseudo != 0 && window->host.vt_pseudo_style != NULL) {
+		error = window->host.vt_pseudo_style(window->host.context, element, computed_pseudo, computed_pseudo_name, style);
+	} else if (window->host.computed_style != NULL) {
 		error = window->host.computed_style(window->host.context, element, style);
 	} else {
 		error = bind_style_context_compute(window, element, style);
@@ -1341,6 +1458,30 @@ computed_write_keyword(
 			error = computed_ascii("none", out);
 		else
 			error = vm_string_append_units(style->view_transition_class, out);
+		break;
+	case COMPUTED_ANIMATION_NAME:
+		if (style->animation_name == NULL)
+			error = computed_ascii("none", out);
+		else
+			error = vm_string_append_units(style->animation_name, out);
+		break;
+	case COMPUTED_ANIMATION_DURATION:
+	case COMPUTED_ANIMATION_DELAY:
+		error = computed_number(property == COMPUTED_ANIMATION_DURATION ? style->animation_duration : style->animation_delay, out);
+		if (error == 0)
+			error = computed_ascii("s", out);
+		break;
+	case COMPUTED_ANIMATION_PLAY_STATE:
+		error = computed_ascii(style->animation_paused ? "paused" : "running", out);
+		break;
+	case COMPUTED_ANIMATION_TIMING_FUNCTION:
+		if (style->animation_timing == NULL)
+			error = computed_ascii("ease", out);
+		else
+			error = vm_string_append_units(style->animation_timing, out);
+		break;
+	case COMPUTED_MIX_BLEND_MODE:
+		error = computed_ascii(style->mix_blend_mode == 1 ? "plus-lighter" : "normal", out);
 		break;
 	case COMPUTED_FLEX_FLOW:
 		error = computed_name(computed_flex_directions, 4, style->flex_direction, out);
