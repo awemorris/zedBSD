@@ -1265,7 +1265,9 @@ page_fire_load_resume(
 	if (error != 0)
 		return error;
 
-	/* A resource is still on its way. */
+	/* A listener that ran for those sheets may have fired the load already; or a resource is still on its way. */
+	if (!page->load_pending)
+		return 0;
 	if (page_load_waiting(page))
 		return 0;
 
