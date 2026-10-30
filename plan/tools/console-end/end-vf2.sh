@@ -3,9 +3,9 @@
 # by the kernel's log and the board's state over SSH.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
-#   VF2_HOST=user@host VF2_PASSWORD=... VF2_PLUG=... plan/ws331/tests/end-vf2.sh VMUNIX OUTDIR
+#   VF2_HOST=user@host VF2_PASSWORD=... VF2_PLUG=... plan/tools/console-end/end-vf2.sh VMUNIX OUTDIR
 #
-# VMUNIX is the kernel of plan/ws331/tests/config-visionfive2-end.mk.  One run:
+# VMUNIX is the kernel of plan/tools/console-end/config-visionfive2-end.mk.  One run:
 #   1. keeps the board's kernel as /boot/boot0/vmunix.p2old, unless that is
 #      there already;
 #   2. plan/tools/vf2/run.sh: the kernel put on the board and booted (the

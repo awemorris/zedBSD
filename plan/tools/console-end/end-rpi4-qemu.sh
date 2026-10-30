@@ -3,11 +3,11 @@
 # driver's first flip asks for it, judged by the screen and the debugger.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
-#   plan/ws331/tests/end-rpi4-qemu.sh BUILD_DIR
+#   plan/tools/console-end/end-rpi4-qemu.sh BUILD_DIR
 #
-# BUILD_DIR holds the image of plan/ws331/tests/config-rpi4-end.mk (hdd-image.img,
+# BUILD_DIR holds the image of plan/tools/console-end/config-rpi4-end.mk (hdd-image.img,
 # vmunix and its symbols kernel.elf beside it):
-#   make ZEDBSD_CONFIG=plan/ws331/tests/config-rpi4-end.mk BUILD=BUILD_DIR disk-image
+#   make ZEDBSD_CONFIG=plan/tools/console-end/config-rpi4-end.mk BUILD=BUILD_DIR disk-image
 #
 # One run: the overlay of the image, QEMU raspi4b with its QMP socket and a
 # gdbstub (port GDB_PORT, default 2221), then
