@@ -101,7 +101,8 @@ enum values_shorthand {
 	SHORT_BORDER_INLINE_COLOR,
 	SHORT_BORDER_BLOCK_WIDTH,
 	SHORT_BORDER_BLOCK_STYLE,
-	SHORT_BORDER_BLOCK_COLOR
+	SHORT_BORDER_BLOCK_COLOR,
+	SHORT_ANIMATION
 };
 
 /*
@@ -306,6 +307,13 @@ static const struct values_name values_names[] = {
 	{ "view-transition-name", CSS_PROP_VIEW_TRANSITION_NAME },
 	{ "view-transition-class", CSS_PROP_VIEW_TRANSITION_CLASS },
 	{ "zoom", CSS_PROP_ZOOM },
+	{ "animation-name", CSS_PROP_ANIMATION_NAME },
+	{ "animation-duration", CSS_PROP_ANIMATION_DURATION },
+	{ "animation-delay", CSS_PROP_ANIMATION_DELAY },
+	{ "animation-play-state", CSS_PROP_ANIMATION_PLAY_STATE },
+	{ "animation-timing-function", CSS_PROP_ANIMATION_TIMING_FUNCTION },
+	{ "mix-blend-mode", CSS_PROP_MIX_BLEND_MODE },
+	{ "animation", SHORT_ANIMATION },
 	{ "container", SHORT_CONTAINER },
 	{ "border-spacing", SHORT_BORDER_SPACING },
 	{ "margin", SHORT_MARGIN },
@@ -1003,6 +1011,8 @@ static int values_background(struct css_parse *parse, const struct css_token *to
 static size_t values_function_length(const struct css_token *tokens, size_t count);
 static int values_url(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_view_transition_class(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_animation_single(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_animation(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_repeat_parts(const struct css_token *const *parts, size_t count, struct css_value *value);
 static int values_subgrid(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
 static int values_position_parts(const struct css_token *const *parts, size_t count, struct css_value *x, struct css_value *y);
@@ -1237,6 +1247,8 @@ css_parse_property(
 		return values_pair(parse, CSS_PROP_BORDER_BLOCK_START_COLOR, CSS_PROP_BORDER_BLOCK_END_COLOR, tokens, count, out, out_count);
 	case SHORT_BACKGROUND:
 		return values_background(parse, tokens, count, out, out_count);
+	case SHORT_ANIMATION:
+		return values_animation(parse, tokens, count, out, out_count);
 	case SHORT_BACKGROUND_POSITION:
 		return values_background_position(tokens, count, out, out_count);
 	case SHORT_BACKGROUND_SIZE:
@@ -2105,6 +2117,12 @@ values_single(
 			value->number = 1.0f;
 		return 0;
 	}
+
+	/* animation-name: none or a name (the one animation of the cascade); the times and play state alongside. */
+	if (property == CSS_PROP_ANIMATION_NAME || property == CSS_PROP_ANIMATION_DURATION ||
+	    property == CSS_PROP_ANIMATION_DELAY || property == CSS_PROP_ANIMATION_PLAY_STATE ||
+	    property == CSS_PROP_ANIMATION_TIMING_FUNCTION || property == CSS_PROP_MIX_BLEND_MODE)
+		return values_animation_single(parse, property, tokens, count, value);
 
 	/* view-transition-class: none, or custom identifiers. */
 	if (property == CSS_PROP_VIEW_TRANSITION_CLASS) {
@@ -3510,6 +3528,13 @@ values_wide_keyword(
 		values_add(out, made, first, value);
 		values_add(out, made, first + 1, value);
 		return;
+	case SHORT_ANIMATION:
+		values_add(out, made, CSS_PROP_ANIMATION_NAME, value);
+		values_add(out, made, CSS_PROP_ANIMATION_DURATION, value);
+		values_add(out, made, CSS_PROP_ANIMATION_DELAY, value);
+		values_add(out, made, CSS_PROP_ANIMATION_PLAY_STATE, value);
+		values_add(out, made, CSS_PROP_ANIMATION_TIMING_FUNCTION, value);
+		return;
 	case SHORT_OUTLINE:
 		/* The outline's width, style and color. */
 		values_add(out, made, CSS_PROP_OUTLINE_WIDTH, value);
@@ -3780,6 +3805,271 @@ values_function_length(
 
 	/* An unclosed function runs to the end. */
 	return count;
+}
+
+/*
+ * Reads a timing function (a keyword, steps() or cubic-bezier()) into the text the style keeps: the keyword,
+ * "steps N position" or "bezier a b c d".  Returns the number of tokens it used (0: not one).
+ */
+static size_t
+values_timing(
+	const struct css_token *tokens,
+	size_t count,
+	char *text,
+	size_t size)
+{
+	double number[4];
+	size_t index;
+	size_t found;
+	size_t end;
+	const char *position;
+	static const char *const keywords[] = { "ease", "linear", "ease-in", "ease-out", "ease-in-out", "step-start", "step-end" };
+	size_t word;
+
+	if (count == 0)
+		return 0;
+	if (tokens[0].type == CSS_TOKEN_IDENT) {
+		for (word = 0; word < sizeof(keywords) / sizeof(keywords[0]); word++) {
+			if (css_ident_equal(&tokens[0], keywords[word])) {
+				snprintf(text, size, "%s", keywords[word]);
+				return 1;
+			}
+		}
+		return 0;
+	}
+	if (tokens[0].type != CSS_TOKEN_FUNCTION)
+		return 0;
+	end = 1;
+	while (end < count && tokens[end].type != CSS_TOKEN_CLOSE_PAREN)
+		end++;
+	if (end >= count)
+		return 0;
+	found = 0;
+	position = "end";
+	for (index = 1; index < end; index++) {
+		if (tokens[index].type == CSS_TOKEN_NUMBER && found < 4)
+			number[found++] = tokens[index].number;
+		else if (tokens[index].type == CSS_TOKEN_IDENT) {
+			if (css_ident_equal(&tokens[index], "start") || css_ident_equal(&tokens[index], "jump-start"))
+				position = "start";
+			else if (css_ident_equal(&tokens[index], "jump-none"))
+				position = "none";
+			else if (css_ident_equal(&tokens[index], "jump-both"))
+				position = "both";
+		}
+	}
+	if (css_ident_equal(&tokens[0], "steps") && found == 1 && number[0] >= 1) {
+		snprintf(text, size, "steps %d %s", (int)number[0], position);
+		return end + 1U;
+	}
+	if (css_ident_equal(&tokens[0], "cubic-bezier") && found == 4 && number[0] >= 0 && number[0] <= 1 && number[2] >= 0 && number[2] <= 1) {
+		snprintf(text, size, "bezier %g %g %g %g", number[0], number[1], number[2], number[3]);
+		return end + 1U;
+	}
+	return 0;
+}
+
+/* Reads a time (seconds or milliseconds) into seconds, and tells whether the token is one. */
+static int
+values_time(
+	const struct css_token *token,
+	float *seconds)
+{
+	if (token->type == CSS_TOKEN_DIMENSION && css_units_equal_ascii(token->text, token->length, "s")) {
+		*seconds = (float)token->number;
+		return 1;
+	}
+	if (token->type == CSS_TOKEN_DIMENSION && css_units_equal_ascii(token->text, token->length, "ms")) {
+		*seconds = (float)(token->number / 1000.0);
+		return 1;
+	}
+	if (token->type == CSS_TOKEN_NUMBER && token->number == 0) {
+		*seconds = 0.0f;
+		return 1;
+	}
+	return 0;
+}
+
+/* Reads one value of animation-name, -duration, -delay, -play-state or mix-blend-mode. */
+static int
+values_animation_single(
+	struct css_parse *parse,
+	int property,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	float seconds;
+
+	if (count != 1 && property != CSS_PROP_ANIMATION_TIMING_FUNCTION)
+		return EINVAL;
+	if (property == CSS_PROP_ANIMATION_NAME) {
+		if (tokens[0].type != CSS_TOKEN_IDENT)
+			return EINVAL;
+		value->kind = CSS_VALUE_KEYWORD;
+		value->keyword = 0;
+		if (css_ident_equal(&tokens[0], "none"))
+			return 0;
+		value->keyword = 2;
+		value->ident = vm_atom_from_units(parse->heap, tokens[0].text, tokens[0].length);
+		return value->ident == NULL ? ENOMEM : 0;
+	}
+	if (property == CSS_PROP_ANIMATION_DURATION || property == CSS_PROP_ANIMATION_DELAY) {
+		if (!values_time(&tokens[0], &seconds))
+			return EINVAL;
+		if (property == CSS_PROP_ANIMATION_DURATION && seconds < 0)
+			return EINVAL;
+		value->kind = CSS_VALUE_NUMBER;
+		value->number = seconds;
+		return 0;
+	}
+	if (property == CSS_PROP_ANIMATION_PLAY_STATE) {
+		value->kind = CSS_VALUE_KEYWORD;
+		if (css_ident_equal(&tokens[0], "running"))
+			value->keyword = 0;
+		else if (css_ident_equal(&tokens[0], "paused"))
+			value->keyword = 1;
+		else
+			return EINVAL;
+		return 0;
+	}
+
+	if (property == CSS_PROP_ANIMATION_TIMING_FUNCTION) {
+		char text[64];
+		size_t used;
+
+		used = values_timing(tokens, count, text, sizeof(text));
+		if (used != count)
+			return EINVAL;
+		value->kind = CSS_VALUE_KEYWORD;
+		value->keyword = 2;
+		value->ident = vm_atom_from_ascii(parse->heap, text);
+		return value->ident == NULL ? ENOMEM : 0;
+	}
+
+	/* mix-blend-mode: a blend keyword; only plus-lighter is told from normal. */
+	if (tokens[0].type != CSS_TOKEN_IDENT)
+		return EINVAL;
+	value->kind = CSS_VALUE_KEYWORD;
+	value->keyword = 2;
+	if (css_ident_equal(&tokens[0], "normal"))
+		value->keyword = 0;
+	else if (css_ident_equal(&tokens[0], "plus-lighter"))
+		value->keyword = 1;
+	return 0;
+}
+
+/*
+ * Parses the animation shorthand of one animation: a duration, then a delay, a play state and a name in any order
+ * (the other longhands are not kept).  Every longhand it makes is reset first.
+ */
+static int
+values_animation(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_value value;
+	float seconds;
+	size_t index;
+	int times;
+	int have_name;
+	int have_state;
+	float duration;
+	float delay;
+	int state;
+	int error;
+	char timing[64];
+	size_t used;
+	int have_timing;
+
+	have_timing = 0;
+	times = 0;
+	have_name = 0;
+	have_state = 0;
+	duration = 0.0f;
+	delay = 0.0f;
+	state = 0;
+	memset(&value, 0, sizeof(value));
+	value.kind = CSS_VALUE_KEYWORD;
+	for (index = 0; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (tokens[index].type == CSS_TOKEN_COMMA)
+			return EINVAL;
+		if (values_time(&tokens[index], &seconds)) {
+			if (times == 0)
+				duration = seconds;
+			else if (times == 1)
+				delay = seconds;
+			else
+				return EINVAL;
+			times++;
+			continue;
+		}
+		used = values_timing(tokens + index, count - index, timing, sizeof(timing));
+		if (used != 0) {
+			have_timing = 1;
+			index += used - 1U;
+			continue;
+		}
+		if (tokens[index].type != CSS_TOKEN_IDENT)
+			continue;
+		if (css_ident_equal(&tokens[index], "paused") || css_ident_equal(&tokens[index], "running")) {
+			state = css_ident_equal(&tokens[index], "paused");
+			have_state = 1;
+			continue;
+		}
+		if (css_ident_equal(&tokens[index], "none")) {
+			if (have_name)
+				return EINVAL;
+			have_name = 1;
+			continue;
+		}
+		if (css_ident_equal(&tokens[index], "infinite") || css_ident_equal(&tokens[index], "normal") ||
+		    css_ident_equal(&tokens[index], "reverse") || css_ident_equal(&tokens[index], "alternate") ||
+		    css_ident_equal(&tokens[index], "alternate-reverse") || css_ident_equal(&tokens[index], "forwards") ||
+		    css_ident_equal(&tokens[index], "backwards") || css_ident_equal(&tokens[index], "both") ||
+		    css_ident_equal(&tokens[index], "ease") || css_ident_equal(&tokens[index], "ease-in") ||
+		    css_ident_equal(&tokens[index], "ease-out") || css_ident_equal(&tokens[index], "ease-in-out") ||
+		    css_ident_equal(&tokens[index], "linear") || css_ident_equal(&tokens[index], "step-start") ||
+		    css_ident_equal(&tokens[index], "step-end"))
+			continue;
+		if (have_name)
+			return EINVAL;
+		have_name = 2;
+		error = values_animation_single(parse, CSS_PROP_ANIMATION_NAME, &tokens[index], 1, &value);
+		if (error != 0)
+			return error;
+		values_add(out, made, CSS_PROP_ANIMATION_NAME, &value);
+	}
+	if (have_name != 2) {
+		memset(&value, 0, sizeof(value));
+		value.kind = CSS_VALUE_KEYWORD;
+		values_add(out, made, CSS_PROP_ANIMATION_NAME, &value);
+	}
+	memset(&value, 0, sizeof(value));
+	value.kind = CSS_VALUE_KEYWORD;
+	if (have_timing) {
+		value.keyword = 2;
+		value.ident = vm_atom_from_ascii(parse->heap, timing);
+		if (value.ident == NULL)
+			return ENOMEM;
+	}
+	values_add(out, made, CSS_PROP_ANIMATION_TIMING_FUNCTION, &value);
+	memset(&value, 0, sizeof(value));
+	value.kind = CSS_VALUE_NUMBER;
+	value.number = duration;
+	values_add(out, made, CSS_PROP_ANIMATION_DURATION, &value);
+	value.number = delay;
+	values_add(out, made, CSS_PROP_ANIMATION_DELAY, &value);
+	memset(&value, 0, sizeof(value));
+	value.kind = CSS_VALUE_KEYWORD;
+	value.keyword = have_state ? state : 0;
+	values_add(out, made, CSS_PROP_ANIMATION_PLAY_STATE, &value);
+	return 0;
 }
 
 /* Parses view-transition-class: none, or one or more custom identifiers, kept as one atom of them joined by spaces. */

@@ -481,6 +481,10 @@ def run(args):
     if (len(rows) != 413 or len(static_ids) != 1561 or static_ids & omitted_ids or
             static_ids | omitted_ids != all_ids or len(all_ids) != 1974):
         raise ValueError("fixed scripted/static partition differs")
+    if args.only:
+        # A part of the partition (for a quick look): the checks above ran on the whole selection.
+        wanted = set(args.only.split(","))
+        rows = [row for row in rows if row["id"] in wanted]
     args.out.mkdir(parents=True, exist_ok=True)
     raw = Path(__import__("tempfile").mkdtemp(prefix="retained-", dir=args.out)).resolve()
     (raw / "runner-source.py").write_bytes(runner_source)
@@ -608,6 +612,7 @@ def main():
     parser.add_argument("--deadline-ms", type=int, default=5000)
     parser.add_argument("--process-timeout", type=int, default=20)
     parser.add_argument("--budget-seconds", type=int, default=2400)
+    parser.add_argument("--only", default="", help="comma-separated test IDs to run, a part of the partition")
     args = parser.parse_args()
     return run(args)
 

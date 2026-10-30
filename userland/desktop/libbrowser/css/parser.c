@@ -81,6 +81,7 @@ static const struct parser_pseudo_name parser_pseudo_names[] = {
 	{ "defined", CSS_PSEUDO_ALWAYS },
 	{ "scope", CSS_PSEUDO_SCOPE },
 	{ "target", CSS_PSEUDO_TARGET },
+	{ "active-view-transition", CSS_PSEUDO_ACTIVE_VT },
 	{ NULL, 0 }
 };
 
@@ -97,6 +98,7 @@ static const struct parser_pseudo_name parser_pseudo_functions[] = {
 	{ "where", CSS_PSEUDO_IS },
 	{ "has", CSS_PSEUDO_HAS },
 	{ "lang", CSS_PSEUDO_LANG },
+	{ "active-view-transition-type", CSS_PSEUDO_ACTIVE_VT_TYPE },
 	{ "nth-child", CSS_PSEUDO_NTH_CHILD },
 	{ "nth-last-child", CSS_PSEUDO_NTH_LAST_CHILD },
 	{ "nth-of-type", CSS_PSEUDO_NTH_OF_TYPE },
@@ -134,6 +136,8 @@ static int parser_compound(struct vm_heap *heap, struct wb_arena *arena, const s
 static int parser_attribute(struct vm_heap *heap, const struct css_token *tokens, size_t count, struct css_simple *simple);
 static int parser_pseudo(struct vm_heap *heap, struct wb_arena *arena, const struct css_token *tokens, size_t count, size_t *index, struct css_simple *simple, uint32_t *specificity);
 static void parser_pseudo_element(const struct css_token *token, struct css_simple *simple);
+static int parser_type_list(struct vm_heap *heap, struct token_range arguments, struct css_simple *simple);
+static int parser_view_transition_argument(struct vm_heap *heap, const struct css_token *tokens, size_t count, size_t *index, struct css_compound *compound);
 static int parser_pseudo_arguments(struct vm_heap *heap, struct wb_arena *arena, struct token_range arguments, int relative, struct css_simple *simple, uint32_t *specificity);
 static int parser_nth(struct token_range arguments, int *a, int *b);
 static int parser_declarations(struct vm_heap *heap, struct wb_arena *arena, struct token_range block, struct css_declaration **declarations, size_t *count);
@@ -1776,6 +1780,8 @@ parser_compound(
 	/* Reads simple selectors until whitespace, a combinator or the end. */
 	made = 0;
 	compound->pseudo_element = CSS_PSEUDO_ELEMENT_NONE;
+	compound->pseudo_name = NULL;
+	compound->pseudo_class_count = 0;
 	while (*index < count && made < 32U) {
 		token = &tokens[*index];
 		simple = &simples[made];
@@ -1833,9 +1839,20 @@ parser_compound(
 				compound->pseudo_element = simple->pseudo;
 				*specificity += 1U;
 
-				/* A functional pseudo-element's arguments are skipped. */
-				if (tokens[*index].type == CSS_TOKEN_FUNCTION)
+				/* A view transition one reads its name; a functional pseudo-element's other arguments are skipped. */
+				if (simple->pseudo >= CSS_PSEUDO_ELEMENT_VT_ROOT) {
+					error = parser_view_transition_argument(heap, tokens, count, index, compound);
+					if (error != 0)
+						return error;
+
+					/* A name counts as a type selector, and the classes together as one class selector. */
+					if (compound->pseudo_name != NULL)
+						*specificity += 1U;
+					if (compound->pseudo_class_count != 0)
+						*specificity += 1U << 8;
+				} else if (tokens[*index].type == CSS_TOKEN_FUNCTION) {
 					*index = parser_skip_block(tokens, count, *index) - 1U;
+				}
 			} else {
 				error = parser_pseudo(heap, arena, tokens, count, index, simple, specificity);
 				if (error != 0)
@@ -2095,6 +2112,13 @@ parser_pseudo(
 		/* Language contributes the specificity of a pseudo-class. */
 		*specificity += 1U << 8;
 		return 0;
+	case CSS_PSEUDO_ACTIVE_VT_TYPE:
+		/* Identifiers separated by commas, kept as one space-separated atom. */
+		error = parser_type_list(heap, arguments, simple);
+		if (error != 0)
+			return error;
+		*specificity += 1U << 8;
+		return 0;
 	case CSS_PSEUDO_NTH_CHILD:
 	case CSS_PSEUDO_NTH_LAST_CHILD:
 	case CSS_PSEUDO_NTH_OF_TYPE:
@@ -2110,6 +2134,46 @@ parser_pseudo(
 		*specificity += 1U << 8;
 		return 0;
 	}
+}
+
+/* Reads the identifiers of :active-view-transition-type() into one space-separated atom. */
+static int
+parser_type_list(
+	struct vm_heap *heap,
+	struct token_range arguments,
+	struct css_simple *simple)
+{
+	uint16_t joined[256];
+	size_t used;
+	size_t index;
+	size_t at;
+	int expect_ident;
+
+	used = 0;
+	expect_ident = 1;
+	for (index = 0; index < arguments.count; index++) {
+		if (arguments.tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (expect_ident) {
+			if (arguments.tokens[index].type != CSS_TOKEN_IDENT)
+				return EINVAL;
+			if (used + arguments.tokens[index].length + 1U > 256U)
+				return EINVAL;
+			if (used != 0)
+				joined[used++] = ' ';
+			for (at = 0; at < arguments.tokens[index].length; at++)
+				joined[used++] = arguments.tokens[index].text[at];
+			expect_ident = 0;
+		} else {
+			if (arguments.tokens[index].type != CSS_TOKEN_COMMA)
+				return EINVAL;
+			expect_ident = 1;
+		}
+	}
+	if (used == 0 || expect_ident)
+		return EINVAL;
+	simple->value = vm_atom_from_units(heap, joined, used);
+	return simple->value == NULL ? ENOMEM : 0;
 }
 
 /* Reads a pseudo-element's name: ::before and ::after make boxes, any other never matches. */
@@ -2133,8 +2197,81 @@ parser_pseudo_element(
 	if (same)
 		return;
 
+	/* The view transition tree. */
+	simple->pseudo = CSS_PSEUDO_ELEMENT_VT_ROOT;
+	if (css_ident_equal(token, "view-transition"))
+		return;
+	simple->pseudo = CSS_PSEUDO_ELEMENT_VT_GROUP;
+	if (css_ident_equal(token, "view-transition-group"))
+		return;
+	simple->pseudo = CSS_PSEUDO_ELEMENT_VT_PAIR;
+	if (css_ident_equal(token, "view-transition-image-pair"))
+		return;
+	simple->pseudo = CSS_PSEUDO_ELEMENT_VT_OLD;
+	if (css_ident_equal(token, "view-transition-old"))
+		return;
+	simple->pseudo = CSS_PSEUDO_ELEMENT_VT_NEW;
+	if (css_ident_equal(token, "view-transition-new"))
+		return;
+
 	/* Any other (::placeholder, ::-webkit-scrollbar, ::first-line ...) is not drawn. */
 	simple->pseudo = CSS_PSEUDO_ELEMENT_OTHER;
+}
+
+/*
+ * Reads the argument of a view transition pseudo-element, (name), (*), (name.class) or (.class): the name
+ * (NULL for any) and up to two classes.  The index is the function token and ends on its closing parenthesis.
+ * A malformed argument makes the selector invalid.
+ */
+static int
+parser_view_transition_argument(
+	struct vm_heap *heap,
+	const struct css_token *tokens,
+	size_t count,
+	size_t *index,
+	struct css_compound *compound)
+{
+	size_t end;
+	size_t position;
+
+	compound->pseudo_name = NULL;
+	compound->pseudo_class_count = 0;
+	if (tokens[*index].type != CSS_TOKEN_FUNCTION) {
+		/* ::view-transition takes none, and the others need one. */
+		return compound->pseudo_element == CSS_PSEUDO_ELEMENT_VT_ROOT ? 0 : EINVAL;
+	}
+	if (compound->pseudo_element == CSS_PSEUDO_ELEMENT_VT_ROOT)
+		return EINVAL;
+	end = parser_skip_block(tokens, count, *index);
+	if (end <= *index + 1U || tokens[end - 1U].type != CSS_TOKEN_CLOSE_PAREN)
+		return EINVAL;
+	position = *index + 1U;
+	while (position < end - 1U && tokens[position].type == CSS_TOKEN_WHITESPACE)
+		position++;
+	if (position < end - 1U && tokens[position].type == CSS_TOKEN_IDENT) {
+		compound->pseudo_name = parser_atom(heap, &tokens[position], 0);
+		if (compound->pseudo_name == NULL)
+			return ENOMEM;
+		position++;
+	} else if (position < end - 1U && tokens[position].type == CSS_TOKEN_DELIM && tokens[position].delim == '*') {
+		position++;
+	}
+	while (position + 1U < end - 1U && tokens[position].type == CSS_TOKEN_DELIM && tokens[position].delim == '.' &&
+	    tokens[position + 1U].type == CSS_TOKEN_IDENT) {
+		if (compound->pseudo_class_count >= 2)
+			return EINVAL;
+		compound->pseudo_classes[compound->pseudo_class_count] = parser_atom(heap, &tokens[position + 1U], 0);
+		if (compound->pseudo_classes[compound->pseudo_class_count] == NULL)
+			return ENOMEM;
+		compound->pseudo_class_count++;
+		position += 2U;
+	}
+	while (position < end - 1U && tokens[position].type == CSS_TOKEN_WHITESPACE)
+		position++;
+	if (position != end - 1U)
+		return EINVAL;
+	*index = end - 1U;
+	return 0;
 }
 
 /*
