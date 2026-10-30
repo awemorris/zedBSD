@@ -9,7 +9,7 @@
 # SHUTDOWN event with the reason guest-shutdown (the ACPI S5 write; a reset
 # or a crash gives another reason or none).  The screen is captured every 10
 # seconds as OUT/boot1-NNN.png.  Boot 2 boots the disk boot 1 wrote, without
-# the SSDT, through plan/tools/boot-test.sh, logs in as root on the keyboard
+# the SSDT, through plan/tools/boot-test.sh, logs in as root (password root) on the keyboard
 # and shows /var/log/thermal-emergency, the record init writes when the
 # kernel tells it of the emergency (OUT/boot2/login-after.png).  Nothing
 # reads a console or serial log.
@@ -53,7 +53,7 @@ timeout $((wait_limit + 60)) qemu-system-x86_64 -machine q35 -m 4G -smp 4 "${acc
 	-vga std -display none -no-reboot -no-shutdown \
 	-qmp "unix:$out/qmp1.sock,server,nowait" >"$out/qemu1.out" 2>&1 &
 qemu=$!
-watch=$(python3 -I "$here/qmp-watch.py" "$out/qmp1.sock" "$out" boot1 "$wait_limit" 10)
+watch=$(python3 -I "$here/qmp-watch.py" "$out/qmp1.sock" "$out" boot1 "$wait_limit" 3)
 echo "boot 1: $watch" >>"$summary"
 python3 -I "$root/plan/tools/qmp.py" "$out/qmp1.sock" quit >/dev/null 2>&1
 wait "$qemu" 2>/dev/null
@@ -65,7 +65,7 @@ esac
 # Boot 2 without the SSDT: the record init wrote.
 qemu-img convert -O raw "$out/disk.qcow2" "$out/boot2.img" || fail "convert"
 OUTPUT=$out/boot2 BOOT_MODE=uefi-usb BOOT_TIMEOUT=240 \
-	BOOT_THEN=$'keys:root\nexpect:#\nkeys:cat /var/log/thermal-emergency\nexpect:thermal emergency at [0-9]+, [0-9]+ ms after init started' \
+	BOOT_THEN=$'keys:root\nexpect:Password\nkeys:root\nexpect:root@[^ ]*:~[$#]\nkeys:cat /var/log/thermal-emergency\nexpect:thermal emergency at [0-9]+, [0-9]+ ms after init started' \
 	timeout 400 "$root/plan/tools/boot-test.sh" "$out/boot2.img" >"$out/boot2.out" 2>&1
 status=$?
 echo "boot 2: boot-test status $status, screen $out/boot2/login-after.png" >>"$summary"
