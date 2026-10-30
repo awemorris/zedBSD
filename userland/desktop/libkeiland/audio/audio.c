@@ -379,7 +379,10 @@ kl_audio_stream_write(
 			return 0U;
 		if (!stream->lost)
 			(void)audio_read(stream, 0);
+
 		kl_mutex_unlock(&stream->lock);
+
+		/* Nothing fits while the ring is full. */
 		return 0U;
 	}
 

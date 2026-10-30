@@ -6,7 +6,7 @@
  */
 
 /*
- * Mail's IMAP4rev1 client (WS169 p003, RFC 3501; mail.h): a session on
+ * Mail's IMAP4rev1 client (RFC 3501; mail.h): a session on
  * one connection that logs in (after STARTTLS on a plain port), finds the
  * folders by their special use (RFC 6154) or their usual names, selects
  * one, fetches the latest messages or those after a UID, sets and clears

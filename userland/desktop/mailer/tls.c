@@ -6,7 +6,7 @@
  */
 
 /*
- * Mail's TLS (WS169 p003; mail.h): the OpenSSL package's libssl and
+ * Mail's TLS (mail.h): the OpenSSL package's libssl and
  * libcrypto, loaded with dlopen the first time a server is reached, as
  * the browser does (libbrowser's net/tls.c), so that Mail builds without
  * the package.  Without it every connection fails with EPROTONOSUPPORT.
@@ -17,7 +17,7 @@
  * certificate's name against the server's host.  A failure is EPROTO,
  * its reason kept for ml_tls_error.
  *
- * ws177-p015: the handshake runs to its end whatever the verification
+ * The handshake runs to its end whatever the verification
  * says, and the outcome is decided after it, before a byte is sent: a
  * certificate that does not verify is ML_ERROR_UNTRUSTED, with its
  * SHA-256 fingerprint kept for ml_tls_fingerprint so that the user can be

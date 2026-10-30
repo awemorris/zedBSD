@@ -261,6 +261,7 @@ ja_user_save(
 
 	kl_mutex_unlock(&user_writer_file_lock);
 
+	/* The text is no longer needed. */
 	free(text);
 
 	/* Reports a write that failed. */
@@ -272,8 +273,8 @@ ja_user_save(
 }
 
 /*
- * Writes the user dictionary back to its file by the writer thread
- * (BUG-143): the text is made now, the slow write, sync and rename happen
+ * Writes the user dictionary back to its file by the writer thread:
+ * the text is made now, the slow write, sync and rename happen
  * away from the keys.  A newer save replaces a text that still waits.
  *
  * Returns 0, or ENOMEM or the errno of a thread that could not start; the
@@ -321,6 +322,8 @@ ja_user_save_later(
 				user_writer.started = 1;
 		}
 	}
+
+	/* The thread is told of the text, or the text is not left waiting. */
 	if (error == 0)
 		kl_cond_signal(&user_writer_wake);
 	if (error != 0) {
@@ -338,6 +341,7 @@ ja_user_save_later(
 
 		kl_mutex_unlock(&user_writer_file_lock);
 
+		/* The text is no longer needed. */
 		free(text);
 		if (error != 0)
 			return error;
@@ -509,6 +513,7 @@ user_writer_run(
 	char *text;
 	size_t length;
 
+	/* The thread takes no argument. */
 	(void)argument;
 
 	/* Each text in turn. */
@@ -537,6 +542,7 @@ user_writer_run(
 
 		kl_mutex_unlock(&user_writer_file_lock);
 
+		/* The text is no longer needed. */
 		free(text);
 	}
 }
@@ -567,6 +573,7 @@ user_writer_flush(
 	(void)kl_thread_join(user_writer.thread);
 	user_writer.thread = NULL;
 
+	/* The writer may be started again by a later save. */
 	kl_mutex_lock(&user_writer_lock);
 
 	user_writer.started = 0;

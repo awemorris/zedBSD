@@ -110,8 +110,10 @@ se_trash_empty_start(
 		return error;
 	}
 
-	/* Succeeded: it empties. */
+	/* The thread runs, and must be joined. */
 	trash->started = 1;
+
+	/* Succeeded: it empties. */
 	return 0;
 }
 
