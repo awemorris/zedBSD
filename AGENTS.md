@@ -11,11 +11,11 @@
    担当は、渡された Queue の `phase.md` と親の `ws.md`、[plan/agents/protocol.md](plan/agents/protocol.md) を読む。
 4. 関係のある時だけ読む: [Guardrail](plan/guardrail.md)（範囲・HAL・出典・承認済みの差分）、C を書く前に [coding-style.md](plan/coding-style.md) の該当の規則、
    設計の前に [master-design-policy.md](plan/master-design-policy.md)、道具と実機は [plan/tools.md](plan/tools.md)。
-   外部の標準仕様に基づく物を module に分けて実装の担当（Sonnet 5.5 high）に委ねる時は「標準廉価実装手順」[docs/agent/spec-module-delegation.md](docs/agent/spec-module-delegation.md)（2026-10-30 ユーザー「…我々の標準の方法として、docs/に記録してもらえますか？」）。
+   外部の標準仕様に基づく物を module に分けて実装の担当（Sonnet 5.5 high）に委ねる時は「標準廉価実装手順」[docs/agent/spec-module-delegation.md](docs/agent/spec-module-delegation.md)（ユーザーの決定）。
 5. 作業ツリーの未 commit の変更を確かめ、他人の変更は保つ。関係の無い計画・履歴は読まない。`plan/history/` は履歴であって指示ではない。
 
 **記録が食い違う時**: ユーザーの指示は一貫している。記録同士が食い違えば、それは壊れた記録である（複数のエージェントが書いたため）。
-ユーザーの決定の原文と main の code の実態から正しい形を復元する。記録の多数決や「新しい記録が正」で決めない。分からなければ Q1 に聞く。
+ユーザーの決定と main の code の実態から正しい形を復元する。記録の多数決や「新しい記録が正」で決めない。分からなければ Q1 に聞く。
 
 ## 2. Awesome Plan（計画の枠組み）
 
@@ -43,7 +43,7 @@
 - 人間の判断が要る点・計画に無い依存・未達の受け入れ条件は、その場で Q1（Q1 はユーザー）へ報告する。
   ユーザーが不在の間の自律実行を指示された時は、判断が要る Phase を uncleared にして理由と要る判断を記録し、先へ進む。
 - Q1 はユーザーに日本語で、聞かれた件だけを答える。ユーザーに試験を頼まず、ユーザーが拾える試験の一覧に置く。
-- **ユーザーに選択（クリック）を求める前に**、どの WS か（番号と短い説明）、どんな WS か、今の状態、何が決まっていないかを書き、問いに専門語があれば用語を説明してから問いに入る（2026-10-29 ユーザー「質問のクリックを求めるときには、事前に、どのWSで、どんなWSで、どんなステータスで、何が決まっていなくて、質問に専門用語があるなら説明した上で、質問に入ってください。」）。
+- **ユーザーに選択（クリック）を求める前に**、どの WS か（番号と短い説明）、どんな WS か、今の状態、何が決まっていないかを書き、問いに専門語があれば用語を説明してから問いに入る（ユーザーの決定）。
 
 ## 4. 担当の共通の規則
 
@@ -58,7 +58,7 @@
   Q1 に送り、Q1 が自分の pipeline（`plan/tools/q1-clean.sh` など）で消す。例外: make の規則（Makefile・`*.mk`）が自分の worktree の
   `build/` の自分の出力を消すこと、guest の中の削除、plan/tools.md に登録した guest の道具（`plan/tools/guest/guest.py`、
   `plan/tools/keiland-linux/`・`plan/tools/keiland-freebsd/` の build-guest.sh・guest.py など）が自分の worktree の `build/` の中の自分の一時の file
-  （image の途中の物・overlay・socket・session）を消すこと（2026-10-30 ユーザー「決めの事項は、許可します。」）。script の出力先は `plan/tools/fresh-out.sh` か `build/tmp/` の新しい directory。
+  （image の途中の物・overlay・socket・session）を消すこと（ユーザーの決定）。script の出力先は `plan/tools/fresh-out.sh` か `build/tmp/` の新しい directory。
   `git mv`・`git rm` は、消す file の一覧を先に Q1 に送り OK を得てから。
 - **権限・security の判定で止められたら**、別の経路で同じ結果を作らずに止まって Q1 に返す。Q1 も回避せず、ユーザーに対処を聞く
   （回避はアカウントの停止につながる）。ユーザーが承認したら、Q1 は担当をラップアップし、同じ名前で起動し直して承認の引用とともに再開させる。
@@ -82,7 +82,7 @@
 | 回帰と観察の道具・実機 ／ シナリオ試験（AAT） | [plan/tools.md](plan/tools.md)（道具は `plan/tools/`）／ [plan/tests.md](plan/tests.md)・`tests/scenarios/` |
 | Phase に固有の試験・一時物 | `plan/wsNNN/tests/`・`plan/wsNNN/temp/`（temp は git に入れない） |
 
-- **ws.md の形**: 先頭に `Status:`（状態の語）、目標、Primary の Milestone、ユーザーの決定（原文）、Resume point、Phase の表（ID・目的・状態・依存）。
+- **ws.md の形**: 先頭に `Status:`（状態の語）、目標、Primary の Milestone、ユーザーの決定（要点）、Resume point、Phase の表（ID・目的・状態・依存）。
 - **WS の完了**: ws.md を完了の形（Status: completed、結果、制限・移管、Phase の一覧）に書き直し、Phase の directory とその WS だけの試験を
   消す（Q1 に頼む。git の履歴に残る）。今後も使う試験は `plan/tools/` に移して [plan/tools.md](plan/tools.md) に登録する。
   master.md の行を [workstreams-closed.md](plan/workstreams-closed.md) へ移す。
@@ -103,7 +103,7 @@
 - `.internal/` を読まない。
 - 集約の `make check` を走らせない。
 - **HAL の API**（`include/hal/hal.h` の宣言・契約・HAL の責務）の変更は差分ごとの事前承認が要る。承認前の差分は plan に置くだけ。
-  **HAL を変える必要があると主張する時は、なぜ既存の HAL と driver・kernel の側では足りないのかを必ず説明する**（2026-10-29 ユーザー「HALを変える必要があると主張するときは、どうしてそう思うのかを添えて必ず説明してください。これまで、ほとんどのケースで、HALを変える必要がなく、提案が粗悪なものでした。」）。まず HAL を変えない形（driver・kernel の側、既存の HAL の口）を探し、それで足りない理由を具体的に示した時だけ HAL の差分を案にする。
+  **HAL を変える必要があると主張する時は、なぜ既存の HAL と driver・kernel の側では足りないのかを必ず説明する**（ユーザーの決定）。まず HAL を変えない形（driver・kernel の側、既存の HAL の口）を探し、それで足りない理由を具体的に示した時だけ HAL の差分を案にする。
   `src/hal/` の実装の修正・補完・最適化は承認不要。承認済みの差分は [Guardrail](plan/guardrail.md) の表。
 - **toolchain** は Q1 の許可なしに変更・build・install しない: `toolchain/`（LLVM の patch・`llvm.mk`・`sysroot.mk`）、`userland/base/noct/` の patch と
   build の規則、`userland/packages/lang/clang`・`userland/packages/devel/libcxx`、共有の `build/llvm`・`build/llvm-source`・`build/llvm-build`・
@@ -124,7 +124,7 @@
 - 書く前に出力で確かめる: merge は `git log -1 --format='%h %p'`、担当の SHA は `git cat-file -t`、件数・試験の PASS は自分で数えて見る。
   確かめていない事は「未確認」と書く。
 - 日付は host の `date`。出来事は今日の日付、予定・期限は未来の日付のまま。
-- **ユーザーの決定**: 原文を引用し、解釈と分けて書く。WS・Phase に効く決定はその ws.md（と phase.md）に。全体に効く決定は、この文書・
+- **ユーザーの決定**: 発言の原文を記録に載せない（公開の repo に出るため、2026-10-30 ユーザー）。決定の要点を Q1 の言葉で書き、決めた日付と「ユーザーの決定」である事を示す。WS・Phase に効く決定はその ws.md（と phase.md）に。全体に効く決定は、この文書・
   [master-design-policy.md](plan/master-design-policy.md)・master.md の「今の状態」に、今も有効な形で書く（日付の log にしない）。
   曖昧な時・既存の事実と食い違う時は記録の前に聞く。
 - 本体と写しを同じ commit で直す: phase.md → ws.md の表・Queue、ws.md → master.md の行、ticket → Bug Board、割当 → queue.md・registry。
@@ -150,7 +150,7 @@
   | Linux・FreeBSD の QEMU guest（WS105・WS108・WS109・WS131。Linux の backend は QEMU+KVM） | `127.0.0.1` の転送 port からの SSH の疎通と QMP の `screendump` の PNG |
   | ZYBO の QEMU `xilinx-zynq-a9` と実機（WS286） | 生きた serial を対話で読む（armv7 の QEMU `virt` は boot-test.sh） |
   | ZYBO の LAN（WS289） | `127.0.0.1` の転送 port から guest の SSH |
-  | ODROID-C5 の実機（WS313） | 生きた serial を対話で読む（network と画面が出た後は SSH と画面の PNG）（2026-10-29 ユーザーのクリック「許可する」） |
+  | ODROID-C5 の実機（WS313） | 生きた serial を対話で読む（network と画面が出た後は SSH と画面の PNG）（ユーザーの決定） |
   | RG350 の実機（WS273） | ユーザーが画面・LED を目で見て写真で返した結果 |
 
 - 回帰試験では GPU を使わず framebuffer で login prompt だけを確かめる。GPU の確認は GPU を扱う WS の Phase で。

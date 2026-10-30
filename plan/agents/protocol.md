@@ -29,7 +29,7 @@
 
 - Q1 は worktree を作る: `git worktree add /home/awe/zedBSD-worktrees/<名前> -b agent/<名前> main`。古い worktree・branch を消したり使い回したりしない。
   作った後に `chmod 600 plan/tmp/guest/id_ed25519`（git は mode を追わず 0664 になり、ssh が鍵を拒む。2026-10-29 P2 の measure.sh が「zedBSD did not come up」と誤って出した原因）。
-- 起動の指示に入れる物: 担当名、Queue の ID と attempt、Phase、範囲と承認の原文、worktree と branch、所有の path、前提の成果、試験の方法（QEMU の名前・port、実機の割当）、
+- 起動の指示に入れる物: 担当名、Queue の ID と attempt、Phase、範囲と承認（要点）、worktree と branch、所有の path、前提の成果、試験の方法（QEMU の名前・port、実機の割当）、
   予約の次の Queue、報告の規則（§3）。
 - 1 担当の active Queue は最大 1。予約の次の Queue は、前の Queue の後に同じ担当が続けてよい（その Queue の承認を確かめる）。
   依存する Queue は、前の成果が main に merge され確かめられてから始める。Queue が空なら次の Phase を自分で選ばず Q1 を待つ。
