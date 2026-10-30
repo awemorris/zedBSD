@@ -1,34 +1,51 @@
 Firmware: ODROID-C5 bootloader: Amlogic's boot stages (BL2 and the stages it
           loads, BL30, BL31 and BL32, signed and encrypted for the S905X5M)
-          and Hardkernel's U-Boot (BL33), in one file, u-boot.bin.signed
-Hardware: Hardkernel ODROID-C5 (Amlogic S905X5M, SoC family S7D)
-Files:    the SD card's sectors from 1 (byte 512), written by the image
-          build; the root file system has only the license texts below
-          /usr/share/licenses/amlogic-s7d-bootloader and the manifest
-Source:   Hardkernel's Yocto layer https://github.com/mdrjr/meta-odroid-aml,
-          commit 548e2f037e01c626e3fc964fa298464df148fd51,
-          recipes-bsp/u-boot-odroid-c5/files/u-boot.bin.signed (3379200
-          bytes, SHA-256
-          8c2e66919a05921d79e130cc00a977a07cf8df6b34153e66c18c3241c0809e3c)
+          and Hardkernel's U-Boot (BL33)
+Hardware: Hardkernel ODROID-C5 (Amlogic S905X5M, SoC family S7D) only
+Files:    the SD card's sectors 1 to 6538, written by the image build; the
+          root file system has only Amlogic's license, the GPL-2 text of
+          U-Boot and this notice below
+          /usr/share/licenses/amlogic-s7d-bootloader, and the manifest
+Source:   Hardkernel's official ODROID-C5 image
+          ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz
+          (37760380 bytes, SHA-256
+          04b9817d4e5e27ac4cc46dc4ad48fbc164e9a6c6f42eb1b0ba8d7a927accc5f2),
+          kept unmodified in the zedBSD firmware repository
+          https://github.com/awemorris/zedBSD-firmware (amlogic-s7d/), with
+          LICENSE.amlogic (1273 bytes, SHA-256
+          5e8f7ad650a0af4a14ad5641817323f654d0e1b8dc2019aa6f0944ba9108ff65).
+          The build decompresses the image and takes its sectors 1 to 6538
+          (3347456 bytes, SHA-256
+          6c5316ed320c78c9c2a67665cdee1089339be25bee625cf1eaffb0a6277c6562;
+          the BL30 in it names itself S7D-s905x5m-26052812).
 
-Copyright Amlogic, Inc. (the boot stages BL2 to BL32)
+Copyright (C) 2018 Amlogic, Inc. (the boot stages BL2 to BL32)
 Copyright the U-Boot authors and Hardkernel Co., Ltd. (U-Boot)
 
 Terms:
-- U-Boot is under the GNU General Public License version 2 (the text
-  below); the layer's recipe (u-boot-odroid-c5.bb) states GPL-2.0-only.
-  Its corresponding source is Hardkernel's: the submodule bl33/v2023 of
-  the branch odroidc5-v2023.01 of https://github.com/hardkernel/u-boot
-  (commit c99f3409d5cad031b365fd871e543f97af893f88), on
+- Amlogic's boot stages are under Amlogic's license (LICENSE.amlogic): they
+  are provided under a Software License Agreement with Amlogic, and
+  redistribution and use without Amlogic's prior written permission are
+  prohibited.  Amlogic has given that permission to Hardkernel, which
+  distributes them in its images for the ODROID-C5, and such an image, which
+  can be used only on this board, may be redistributed.  So use them only on
+  a Hardkernel ODROID-C5, and pass them on (for example in an SD card image
+  made with this package) only unmodified, with LICENSE.amlogic and this
+  notice, and only for use on the ODROID-C5.
+- U-Boot is under the GNU General Public License version 2 or later (the
+  text: GPL-2 beside this notice, from linux-firmware commit
+  dc85ccedc9c973682fbcf4d628ca61174bcc3120, 18092 bytes, SHA-256
+  8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643).  Its
+  corresponding source is Hardkernel's: the submodule bl33/v2023 of the
+  branch odroidc5-v2023.01 of https://github.com/hardkernel/u-boot (commit
+  c99f3409d5cad031b365fd871e543f97af893f88), on
   https://git.odroid.com/yocto/uboot.  zedBSD changes nothing in it.
-- Amlogic's boot stages: no licence text for them was found, in the layer,
-  in Hardkernel's U-Boot tree or in the file.  For the boot stages of its
-  other SoCs Amlogic's published terms (for example the LICENSE of
-  https://github.com/LibreELEC/amlogic-boot-fip) say they are provided
-  under a Software License Agreement with Amlogic and that redistribution
-  and use, modified or not, are prohibited without Amlogic's prior written
-  permission.  Whether those terms apply to this file is not known.  Use it
-  only on your own ODROID-C5, and do not pass on an SD card image made with
-  it until the terms are known.
-- The boot ROM accepts only stages signed for the S905X5M, so the file is
+- The boot ROM accepts only stages signed for the S905X5M, so the area is
   written as it is; zedBSD does not modify, re-sign or rebuild it.
+
+Without the firmware repository: a build cannot fetch the image from
+Hardkernel.  Download it from Hardkernel's ODROID-C5 page yourself, and place
+it, under its own name, with LICENSE.amlogic (the text in the firmware
+repository's amlogic-s7d/), in build/sources/firmware/amlogic-s7d/by-hand/
+(or AMLOGIC_S7D_BOOTLOADER_CACHE_ROOT/by-hand/).  The build then asks about
+the license and checks the same sizes and SHA-256 values.

@@ -11,9 +11,10 @@
 #
 # The bootloader (Amlogic's signed stages and Hardkernel's U-Boot) is not
 # built by zedBSD.  With --bootloader, a signed bootloader file (the
-# firmware package amlogic-s7d-bootloader's u-boot.bin.signed) is written
-# from sector 1, as Hardkernel's Yocto layer places it, and the MBR's boot
-# code stays zero; the file must end before the boot partition.  With
+# firmware package amlogic-s7d-bootloader's area, cut from Hardkernel's
+# official image) is written from sector 1, where Hardkernel's image has it,
+# and the MBR's boot code stays zero; the file must end before the boot
+# partition.  With
 # --bootloader-from, instead, the bootloader area of another
 # card image (Hardkernel's own ODROID-C5 image, uncompressed) is copied in:
 # the MBR's boot code and the sectors from 1 up to that image's first

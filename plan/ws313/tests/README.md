@@ -8,14 +8,14 @@
 - USB-UART の adapter（3.3 V、921600 baud を出せる物。Hardkernel の USB-UART kit、CP2102・FT232 など）を C5 の UART の connector（TX・RX・GND）につなぎ、centris の USB へ。pin の配置は wiki.odroid.com が読めず未確認（基板の silk か Hardkernel の資料で）。
 - 12 V/2 A の電源（5.5/2.1 mm）。SwitchBot の plug を使うなら、その ID。
 - microSD（8 GB 以上）、HDMI の display、USB の keyboard・mouse、LAN の cable（DHCP のある網）。
-- bootloader は firmware の package `amlogic-s7d-bootloader` が自動で入れる（下の「媒体」）。Hardkernel の ODROID-C5 の公式の image の区画を代わりに使う時だけ、`ODROID_C5_BOOTLOADER_FROM` に展開した `.img` の path を渡す（`.xz` などの圧縮のままでは読めない）。
+- bootloader は firmware の package `amlogic-s7d-bootloader` が自動で入れる（下の「媒体」）。package を使わずに Hardkernel の ODROID-C5 の公式の image の区画を写す時は、`ODROID_C5_BOOTLOADER_FROM` に展開した `.img` の path を渡す（`.xz` などの圧縮のままでは読めない。先頭 8 MiB だけで足りる: `xz -dc ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz | head -c 8388608 > c5-head.img`）。
 - eMMC の module は外す（U-Boot は起動した媒体の boot.scr を先に読むが、eMMC から起動すると eMMC の OS が先に起動する）。
 
 ## 媒体
 
 image は main（merge の後）か P7 の worktree で作る。sysroot が無い checkout では先に `make ZEDBSD_CONFIG=config/ci/config-odroid-c5.mk sysroot-arm64`。
-bootloader は firmware の package `amlogic-s7d-bootloader`（`userland/firmware/amlogic-s7d/`、2026-10-30 q1714）: Hardkernel の Yocto の layer（github.com/mdrjr/meta-odroid-aml の commit 548e2f037e の `recipes-bsp/u-boot-odroid-c5/files/u-boot.bin.signed`、SHA-256 8c2e66919a05921d79e130cc00a977a07cf8df6b34153e66c18c3241c0809e3c）を取得・検証し、image の sector 1 から書く（MBR の code は 0）。ODROID-C5 の config（`config-odroid-c5*.mk`）と menuconfig で board に ODROID-C5 を選んだ時に選ばれ、license（notice と U-Boot の GPL-2）への同意は他の firmware と同じく build の時。`ODROID_C5_BOOTLOADER_FROM=<展開した .img か donor>` を渡すと、その区画を代わりに写す（明示の上書き）。試験だけに使い、image を公開しない（Amlogic の blob の再配布の条件が不明）。package を外し `ODROID_C5_NO_BOOTLOADER=y` を明示した時だけ bootloader 無しの image ができ、SD からは起動しない。
-desktop の image は Arm の CSF の firmware（`mali-csf-firmware`）も入れる。license（`LICENCE.mali_csffw`、Arm の EULA と、bootloader の notice と GPL-2）への同意はユーザーが端末で一度だけ答える（`make ZEDBSD_CONFIG=config/ci/config-odroid-c5-keiland.mk firmware-licenses`。担当は代わりに答えない）。
+bootloader は firmware の package `amlogic-s7d-bootloader`（`userland/firmware/amlogic-s7d/`、2026-10-30 q1714・q1716）: Hardkernel の ODROID-C5 の公式の image `ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz`（37760380 byte、SHA-256 04b9817d4e5e27ac4cc46dc4ad48fbc164e9a6c6f42eb1b0ba8d7a927accc5f2）を zedBSD-firmware の `amlogic-s7d/` から取得・検証し、展開して sector 1〜6538（3347456 byte、SHA-256 6c5316ed320c78c9c2a67665cdee1089339be25bee625cf1eaffb0a6277c6562、BL30 `S7D-s905x5m-26052812`）を切り出して検証し、image の sector 1 から書く（MBR の code は 0）。上流の取得先は無く、firmware の repo が使えない時は `build/sources/firmware/amlogic-s7d/by-hand/` に公式の `.img.xz` と `LICENSE.amlogic` を手で置く。ODROID-C5 の config（`config-odroid-c5*.mk`）と menuconfig で board に ODROID-C5 を選んだ時に選ばれ、license（notice と `LICENSE.amlogic`）への同意は他の firmware と同じく build の時。rootfs には `LICENSE.amlogic`・U-Boot の `GPL-2`・notice・manifest。ユーザーの判断（2026-10-30）で、ODROID-C5 で使う目的でだけ再配布できる。`ODROID_C5_BOOTLOADER_FROM=<展開した .img>` を渡すと、その区画を代わりに写す（明示の上書き、package の license の質問は無い）。package を外し `ODROID_C5_NO_BOOTLOADER=y` を明示した時だけ bootloader 無しの image ができ、SD からは起動しない。
+desktop の image は Arm の CSF の firmware（`mali-csf-firmware`）も入れる。license（`LICENCE.mali_csffw`、Arm の EULA と、bootloader の notice と `LICENSE.amlogic`）への同意はユーザーが端末で一度だけ答える（`make ZEDBSD_CONFIG=config/ci/config-odroid-c5-keiland.mk firmware-licenses`。担当は代わりに答えない）。
 
 ```sh
 cd /home/awe/zedBSD-claude1
@@ -28,7 +28,7 @@ make ZEDBSD_CONFIG=config/ci/config-odroid-c5-keiland.mk BUILD=build/odroid-c5-k
 sudo dd if=build/odroid-c5/hdd-image.img of=/dev/sdX bs=4M conv=fsync status=progress   # desktop の image は build/odroid-c5-keiland/hdd-image.img
 ```
 
-image の形: MBR、先頭 8 MiB は bootloader（sector 1 から `u-boot.bin.signed`、6600 sector）、part 1 FAT32（8 MiB から、`boot.scr`・`vmunix`・`odroid-c5.dtb`・`data.img`・`swapfile`）、part 2 UFS の root。
+image の形: MBR、先頭 8 MiB は bootloader（sector 1 から公式の image の sector 1〜6538、残りは 0。sector 1〜16383 の SHA-256 は b6a4b424f0a6dac33be4287d2bad6f2651466d983ca9e4146a29357b8e3c8cba で公式の image と同じ）、part 1 FAT32（8 MiB から、`boot.scr`・`vmunix`・`odroid-c5.dtb`・`data.img`・`swapfile`）、part 2 UFS の root。
 
 ## 確かめる順と判定
 
