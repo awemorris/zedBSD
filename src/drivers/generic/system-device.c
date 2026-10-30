@@ -11,10 +11,14 @@
  * The device answers ioctls that describe the boot devices, memory, the
  * process table, and which processes use a file or a mount; it forwards the
  * swap controls to the swap layer, lets init halt or reboot the machine, and
- * lets root give the screen back to the text console (ws239-p001).
+ * lets root give the screen back to the text console.
+ *
+ * During the thermal emergency the machine's power goes off whatever init
+ * asks: a halt or a reboot is taken as a power-off, and a system sleep is
+ * refused.
  *
  * An open that subscribes to classes of the system's events
- * (KERN_SYSTEM_EVENT_SUBSCRIBE, ws132-p002) reads them and polls for them
+ * (KERN_SYSTEM_EVENT_SUBSCRIBE) reads them and polls for them
  * (system-event.c); its subscriber is made at its first subscription, so
  * an open that only asks ioctls costs nothing more.
  */
@@ -57,6 +61,7 @@
 #include <kern/kcrt.h>
 #include <kern/lock.h>
 #include <kern/system-event.h>
+#include <kern/thermal.h>
 #include <uapi/fcntl.h>
 #include <uapi/poll.h>
 
@@ -74,6 +79,7 @@ static int system_get_usb_device(uintptr_t argument);
 static int system_get_vmstat(uintptr_t argument);
 static void system_drop_caches(void);
 static int system_show_console(void);
+static int system_stop(unsigned long request);
 static int system_get_resources(uintptr_t argument);
 static int system_get_process(uintptr_t argument);
 static int system_get_process_arguments(uintptr_t argument);
@@ -115,7 +121,7 @@ extern int drv_usb_system_describe(uint32_t index, struct system_usb_device_info
 extern void drv_acpi_power_get(struct system_power_info *info) __attribute__((weak));
 
 /*
- * The devices' suspend and resume (pci-power.c, ws052-p004).  They are
+ * The devices' suspend and resume (pci-power.c).  They are
  * weak because only the platforms with PCI power management build them;
  * a null test makes KERN_SYSTEM_SLEEP answer EOPNOTSUPP on the others.
  */
@@ -525,7 +531,7 @@ system_get_power(
 	if (drv_acpi_power_get != NULL)
 		drv_acpi_power_get(&info);
 
-	/* Whether the machine can sleep to idle (ws052-p011: KERN_SYSTEM_SLEEP would not refuse S0IDLE). */
+	/* Whether the machine can sleep to idle: KERN_SYSTEM_SLEEP would not refuse S0IDLE. */
 	supported = kern_sleep_supported();
 	if (supported)
 		info.flags |= KERN_SYSTEM_POWER_FLAG_CAN_SLEEP;
@@ -552,6 +558,7 @@ system_sleep(
 	struct kern_sleep_outcome outcome;
 	struct ucred *credential;
 	unsigned busy;
+	bool emergency;
 	int superuser;
 	int empty;
 	int supported;
@@ -586,6 +593,11 @@ system_sleep(
 		supported = kern_sleep_supported();
 	if (!supported)
 		return EOPNOTSUPP;
+
+	/* Refuses a sleep once the thermal emergency began: the power is about to go. */
+	emergency = kern_thermal_emergency_active();
+	if (emergency)
+		return EBUSY;
 
 	/* Refuses a sleep while another is under way. */
 	busy = __atomic_exchange_n(&system_sleeping, 1U, __ATOMIC_ACQ_REL);
@@ -771,45 +783,9 @@ system_ioctl(
 		error = system_firmware_variable(request, argument);
 		break;
 	case KERN_SYSTEM_HALT:
-		/* Only init may halt the machine. */
-		if (curthread->proc->pid != 1)
-			return EPERM;
-		error = system_shutdown_prepare();
-		if (error != 0) {
-			kern_logf("system: the halt was not taken: the shutdown preparation failed (error %d)\n", error);
-			return error;
-		}
-		kern_platform_halt();
-		error = 0;
-		break;
 	case KERN_SYSTEM_POWEROFF:
-		/* Only init may turn the machine off. */
-		if (curthread->proc->pid != 1)
-			return EPERM;
-		error = system_shutdown_prepare();
-		if (error != 0) {
-			kern_logf("system: the power-off was not taken: the shutdown preparation failed (error %d)\n", error);
-			return error;
-		}
-
-		/* A platform that could not cut its power answers EOPNOTSUPP, so that init halts it. */
-		error = kern_platform_poweroff();
-		if (error != 0) {
-			kern_logf("system: the power-off failed (error %d); halting instead\n", error);
-			return EOPNOTSUPP;
-		}
-		break;
 	case KERN_SYSTEM_REBOOT:
-		/* Only init may reboot the machine. */
-		if (curthread->proc->pid != 1)
-			return EPERM;
-		error = system_shutdown_prepare();
-		if (error != 0) {
-			kern_logf("system: the reboot was not taken: the shutdown preparation failed (error %d)\n", error);
-			return error;
-		}
-		kern_platform_reboot();
-		error = 0;
+		error = system_stop(request);
 		break;
 	default:
 		error = EOPNOTSUPP;
@@ -1131,7 +1107,7 @@ system_drop_caches(
 
 /*
  * Gives the screen back to the text console when the graphical login could
- * not start (ws239-p001): kernel messages go to the console again and a
+ * not start: kernel messages go to the console again and a
  * quiet boot's logo goes.  Only root may ask.
  */
 static int
@@ -1257,7 +1233,79 @@ system_get_process(
 }
 
 /*
- * Gives one process's command line (BUG-274): the line exec gave it, or
+ * Halts, turns off or reboots the machine for init, once the shutdown is
+ * prepared.
+ *
+ * Only init may ask.  It first claims the one way of stopping the
+ * machine, which the thermal guard may hold already (EBUSY: the guard is
+ * cutting the power).  During the thermal emergency every request is a
+ * power-off, and one that fails halts the machine here rather than going
+ * back to init.  A preparation that fails is returned, so init tries again.
+ */
+static int
+system_stop(
+	unsigned long request)
+{
+	const char *what;
+	bool emergency;
+	int error;
+
+	/* Only init may stop the machine. */
+	if (curthread->proc->pid != 1)
+		return EPERM;
+
+	/* Takes the one way of stopping the machine, unless the thermal guard has it. */
+	error = kern_thermal_shutdown_claim();
+	if (error != 0)
+		return error;
+
+	/* During the thermal emergency the power goes off whatever init asked. */
+	emergency = kern_thermal_emergency_active();
+	if (emergency && request != KERN_SYSTEM_POWEROFF) {
+		kern_logf("system: thermal emergency: turning the power off instead\n");
+		request = KERN_SYSTEM_POWEROFF;
+	}
+
+	/* Names the request for the log. */
+	what = "halt";
+	if (request == KERN_SYSTEM_POWEROFF)
+		what = "power-off";
+	else if (request == KERN_SYSTEM_REBOOT)
+		what = "reboot";
+
+	/* Writes the volumes out and stops the devices. */
+	error = system_shutdown_prepare();
+	if (error != 0) {
+		kern_logf("system: the %s was not taken: the shutdown preparation failed (error %d)\n", what, error);
+		return error;
+	}
+
+	/* A halt and a reboot do not return. */
+	if (request == KERN_SYSTEM_HALT)
+		kern_platform_halt();
+	if (request == KERN_SYSTEM_REBOOT)
+		kern_platform_reboot();
+
+	/* A power-off returns only when the platform could not cut its power. */
+	error = kern_platform_poweroff();
+	if (error != 0) {
+		/* In the emergency the machine halts at once rather than waiting for init. */
+		if (emergency) {
+			kern_logf("system: the power-off failed (error %d); halting\n", error);
+			kern_platform_halt();
+		}
+
+		/* A platform that could not cut its power answers EOPNOTSUPP, so that init halts it. */
+		kern_logf("system: the power-off failed (error %d); halting instead\n", error);
+		return EOPNOTSUPP;
+	}
+
+	/* Succeeded: the platform reported no error. */
+	return 0;
+}
+
+/*
+ * Gives one process's command line: the line exec gave it, or
  * the title it set instead (setproctitle), empty for a caller of another
  * identity.  ENOENT when no process has the pid.
  */

@@ -18,7 +18,8 @@
  * The core has three threads: the strategy thread, which calls the
  * receivers and may wait on firmware; the poll thread, which reads the
  * fans and the meters and passes the passive ceiling, once a second; and
- * the guard, which watches the sensors and calls no driver.
+ * the guard, which watches the sensors, calls no driver, and stops the
+ * machine when a firmware zone stays at its critical level.
  */
 
 #ifndef KERN_KERN_THERMAL_H
@@ -260,5 +261,28 @@ kern_thermal_event(
 /* Restarts the watch after a system sleep.  Thread context. */
 void
 kern_thermal_resume(void);
+
+/*
+ * Tells whether the thermal emergency began: a firmware zone stayed at its
+ * critical level and the machine is on its way to losing its power.  Once
+ * true it stays true.  Any context; one atomic read.
+ *
+ * While it is true the system device turns a halt or a reboot into a
+ * power-off and refuses a system sleep, and a system sleep that has not
+ * frozen the user processes yet gives up.
+ */
+bool
+kern_thermal_emergency_active(void);
+
+/*
+ * Claims the one way of stopping the machine for init's halt, power-off
+ * or reboot, before the shutdown is prepared.
+ *
+ * Thread context.  Returns 0 when init holds it, also when it already did,
+ * or EBUSY once the thermal guard took it to cut the power itself; init
+ * then has nothing to do but wait.
+ */
+int
+kern_thermal_shutdown_claim(void);
 
 #endif

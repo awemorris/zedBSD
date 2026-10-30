@@ -433,6 +433,10 @@ drv_acpi_sci_interrupt(void);
 int
 drv_acpi_poweroff(void);
 
+/* S5 without _PTS, for the thermal emergency (acpi-event.c). */
+int
+drv_acpi_poweroff_emergency(void);
+
 /* The FADT's reset register (acpi-event.c, BUG-249): 0 once the reset is asked for. */
 int
 drv_acpi_reset_machine(void);

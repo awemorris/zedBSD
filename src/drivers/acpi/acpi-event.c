@@ -291,6 +291,7 @@ static void log_gpe_list(const char *what, bool wake);
 static bool gpe_wanted(unsigned gpe);
 static bool gpe_is_pending(unsigned gpe);
 static void log_event_state(unsigned runtime);
+static int soft_off_enter(bool tell_firmware);
 
 /*
  * Reads the event hardware from the FADT, switches the platform into ACPI
@@ -1010,102 +1011,35 @@ drv_acpi_events_global_release(void)
 int
 drv_acpi_poweroff(void)
 {
-	struct drv_acpi_object *arguments[1];
-	struct drv_acpi_object *state_number;
-	struct drv_acpi_object *result;
-	unsigned long state;
-	uint64_t start;
-	uint64_t now;
-	unsigned poll;
-	unsigned gpe;
-	uint8_t control;
-	bool present;
 	int error;
 
-	/* Refuses a platform whose soft-off state is unknown. */
-	if (!soft_off.known)
-		return ENODEV;
+	/* Tells the firmware with _PTS, then enters S5; only a failure returns. */
+	error = soft_off_enter(true);
+	if (error != 0)
+		return error;
 
-	/* Refuses a platform whose sleep register was not found. */
-	if (soft_off.reduced) {
-		if (soft_off.sleep_control.length == 0)
-			return ENODEV;
-	} else {
-		if (!events.ready || events.pm1a_control.length == 0)
-			return ENODEV;
-	}
+	/* The entry never returns without a reason; the power stayed on all the same. */
+	return ETIMEDOUT;
+}
 
-	/* Allocates the argument of _PTS, the number of the S5 state. */
-	state_number = drv_acpi_object_integer_new(SLEEP_STATE_S5);
-	if (state_number == NULL)
-		return ENOMEM;
+/*
+ * Turns the power off for the thermal emergency: the S5 soft-off state
+ * without _PTS, which may run AML that waits on the embedded controller or
+ * on the hardware that overheats.  The event lock is still taken, so the
+ * SCI's thread does not run during the write.  It reports what
+ * drv_acpi_poweroff() reports.
+ */
+int
+drv_acpi_poweroff_emergency(void)
+{
+	int error;
 
-	/* Tells firmware with _PTS that S5 is coming. */
-	arguments[0] = state_number;
-	result = NULL;
-	error = drv_acpi_evaluate(NULL, "\\_PTS", arguments, 1, &result);
-	drv_acpi_object_release(result);
-	drv_acpi_object_release(state_number);
+	/* Enters S5 without telling the firmware; only a failure returns. */
+	error = soft_off_enter(false);
+	if (error != 0)
+		return error;
 
-	/* A firmware without _PTS needs no notice; a failed _PTS does not stop the power going. */
-	if (error != 0 && error != ENOENT)
-		drv_acpi_os_log("ACPI: _PTS(5) failed (error %d); turning off anyway\n", error);
-
-	/*
-	 * From here no event is taken: the event lock keeps the SCI's thread
-	 * out and interrupts off on this CPU until the power goes.
-	 */
-	state = drv_acpi_os_event_lock();
-
-	/* A hardware-reduced platform sleeps through one byte. */
-	if (soft_off.reduced) {
-		/* Writes the sleep type with SLP_EN in the same byte. */
-		control = (uint8_t)(soft_off.type_a << SLEEP_CONTROL_SLP_TYP_SHIFT);
-		control |= SLEEP_CONTROL_SLP_EN;
-		(void)drv_acpi_os_port_write(soft_off.sleep_control.port, 8, control);
-	} else {
-		/* Masks every fixed event, so that nothing wakes the platform. */
-		pm1_write(events.pm1a_event.length / 2U, 0);
-
-		/* Masks every GPE the blocks have. */
-		for (gpe = 0; gpe < events.gpe_count; gpe++) {
-			/* Skips a number between the two blocks, which no register carries. */
-			present = gpe_present(gpe);
-			if (!present)
-				continue;
-
-			/* Masks the GPE. */
-			gpe_set_enable(gpe, false);
-		}
-
-		/* Clears a stale wake, so that the next wake is seen. */
-		pm1_write(0, PM1_STS_WAK_STS);
-
-		/* Writes the sleep type into both blocks first, then the type with SLP_EN, as ACPICA does. */
-		pm1_control_sleep(&events.pm1a_control, soft_off.type_a, false);
-		if (events.pm1b_control.length != 0)
-			pm1_control_sleep(&events.pm1b_control, soft_off.type_b, false);
-		pm1_control_sleep(&events.pm1a_control, soft_off.type_a, true);
-		if (events.pm1b_control.length != 0)
-			pm1_control_sleep(&events.pm1b_control, soft_off.type_b, true);
-	}
-
-	/* Waits for the power to go: by the timer when it runs, by count otherwise. */
-	start = drv_acpi_os_timer();
-	for (poll = 0; poll < POWEROFF_POLLS; poll++) {
-		/* A platform still running this long after SLP_EN did not turn off. */
-		now = drv_acpi_os_timer();
-		if (now - start >= POWEROFF_WAIT)
-			break;
-	}
-
-	/*
-	 * The function only reaches its end when the platform stayed on: a
-	 * successful soft-off never returns, so this failure is the last
-	 * statement rather than a success return.
-	 */
-	drv_acpi_os_event_unlock(state);
-	drv_acpi_os_log("ACPI: the platform did not turn off\n");
+	/* The entry never returns without a reason; the power stayed on all the same. */
 	return ETIMEDOUT;
 }
 
@@ -1902,4 +1836,115 @@ log_event_state(
 
 	/* Writes the line. */
 	drv_acpi_os_log("ACPI: SCI_EN %u, PM1_EN 0x%x, %u runtime GPEs\n", (unsigned)(control & PM1_CNT_SCI_EN), (unsigned)enable, runtime);
+}
+
+/*
+ * Enters the S5 soft-off state, telling the firmware with _PTS(5) first
+ * when asked to.  Returns only the reason the power stayed on: ENODEV,
+ * ENOMEM or ETIMEDOUT.
+ */
+static int
+soft_off_enter(
+	bool tell_firmware)
+{
+	struct drv_acpi_object *arguments[1];
+	struct drv_acpi_object *state_number;
+	struct drv_acpi_object *result;
+	unsigned long state;
+	uint64_t start;
+	uint64_t now;
+	unsigned poll;
+	unsigned gpe;
+	uint8_t control;
+	bool present;
+	int error;
+
+	/* Refuses a platform whose soft-off state is unknown. */
+	if (!soft_off.known)
+		return ENODEV;
+
+	/* Refuses a platform whose sleep register was not found. */
+	if (soft_off.reduced) {
+		if (soft_off.sleep_control.length == 0)
+			return ENODEV;
+	} else {
+		if (!events.ready || events.pm1a_control.length == 0)
+			return ENODEV;
+	}
+
+	/* Tells firmware with _PTS that S5 is coming, unless the power must go at once. */
+	if (tell_firmware) {
+		/* Allocates the argument of _PTS, the number of the S5 state. */
+		state_number = drv_acpi_object_integer_new(SLEEP_STATE_S5);
+		if (state_number == NULL)
+			return ENOMEM;
+
+		/* Evaluates _PTS(5). */
+		arguments[0] = state_number;
+		result = NULL;
+		error = drv_acpi_evaluate(NULL, "\\_PTS", arguments, 1, &result);
+		drv_acpi_object_release(result);
+		drv_acpi_object_release(state_number);
+
+		/* A firmware without _PTS needs no notice; a failed _PTS does not stop the power going. */
+		if (error != 0 && error != ENOENT)
+			drv_acpi_os_log("ACPI: _PTS(5) failed (error %d); turning off anyway\n", error);
+	}
+
+	/*
+	 * From here no event is taken: the event lock keeps the SCI's thread
+	 * out and interrupts off on this CPU until the power goes.
+	 */
+	state = drv_acpi_os_event_lock();
+
+	/* A hardware-reduced platform sleeps through one byte. */
+	if (soft_off.reduced) {
+		/* Writes the sleep type with SLP_EN in the same byte. */
+		control = (uint8_t)(soft_off.type_a << SLEEP_CONTROL_SLP_TYP_SHIFT);
+		control |= SLEEP_CONTROL_SLP_EN;
+		(void)drv_acpi_os_port_write(soft_off.sleep_control.port, 8, control);
+	} else {
+		/* Masks every fixed event, so that nothing wakes the platform. */
+		pm1_write(events.pm1a_event.length / 2U, 0);
+
+		/* Masks every GPE the blocks have. */
+		for (gpe = 0; gpe < events.gpe_count; gpe++) {
+			/* Skips a number between the two blocks, which no register carries. */
+			present = gpe_present(gpe);
+			if (!present)
+				continue;
+
+			/* Masks the GPE. */
+			gpe_set_enable(gpe, false);
+		}
+
+		/* Clears a stale wake, so that the next wake is seen. */
+		pm1_write(0, PM1_STS_WAK_STS);
+
+		/* Writes the sleep type into both blocks first, then the type with SLP_EN, as ACPICA does. */
+		pm1_control_sleep(&events.pm1a_control, soft_off.type_a, false);
+		if (events.pm1b_control.length != 0)
+			pm1_control_sleep(&events.pm1b_control, soft_off.type_b, false);
+		pm1_control_sleep(&events.pm1a_control, soft_off.type_a, true);
+		if (events.pm1b_control.length != 0)
+			pm1_control_sleep(&events.pm1b_control, soft_off.type_b, true);
+	}
+
+	/* Waits for the power to go: by the timer when it runs, by count otherwise. */
+	start = drv_acpi_os_timer();
+	for (poll = 0; poll < POWEROFF_POLLS; poll++) {
+		/* A platform still running this long after SLP_EN did not turn off. */
+		now = drv_acpi_os_timer();
+		if (now - start >= POWEROFF_WAIT)
+			break;
+	}
+
+	/*
+	 * The function only reaches its end when the platform stayed on: a
+	 * successful soft-off never returns, so this failure is the last
+	 * statement rather than a success return.
+	 */
+	drv_acpi_os_event_unlock(state);
+	drv_acpi_os_log("ACPI: the platform did not turn off\n");
+	return ETIMEDOUT;
 }
