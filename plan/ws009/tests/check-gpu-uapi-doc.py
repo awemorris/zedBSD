@@ -15,8 +15,10 @@ The last line is "check-gpu-uapi-doc: PASS ..." or "check-gpu-uapi-doc: FAIL ...
 What the documents must look like (the rules the checks read):
 
 * Files: docs/reference/gpu.md and every docs/reference/gpu-*.md.
-  Each has a line starting "Status: experimental".
-* ioctl index (gpu.md): a table whose header row begins
+  Line 3 of each is exactly "Status: experimental reference for GPU ABI
+  version 1.".  Lines inside fenced code blocks (```) are never headings,
+  tables or section lines.
+* ioctl index (gpu-requests.md): a table whose header row begins
   | Request | Nr | Direction | Argument | Bytes | Open mode | Capability | Described in |
   One row per request of the headers, each exactly once.  Request, Argument
   in backticks; Direction is `_IOW`, `_IOWR`, `_IOR` or `_IO`; Bytes is
@@ -27,10 +29,11 @@ What the documents must look like (the rules the checks read):
   request over all files.  In final mode its body has a line starting
   "Sources:" with a link into include/uapi/, a link into src/ and either a
   link into userland/tests/ or the words "no source-tree test"; and a line
-  "Errors:" followed by list items "- `EXXX`: ...".  Every section has exactly
+  "Errors:" followed by list items "- `EXXX`: ..." and one item
+  "- Other values: ..." for the errors a driver passes through.  Every section has exactly
   one line "Requires: open mode X; capability Y." (X and Y as in the index;
   PENDING until written); once both are written, the section and the index
-  row must agree.
+  row must agree.  A capability text never mixes "and" with "or".
 * Constant tables: header row begins | Name | Value |.  Name is a
   backticked macro; Value is decimal, 0x hex or UINT32_MAX and must equal the
   header's value.  Every required macro (see REQUIRED_* below) appears in at
@@ -51,14 +54,19 @@ What the documents must look like (the rules the checks read):
   the headers (gpu-op.h enum members included); every backticked errno name
   exists in include/uapi/errno.h.
 * Links: every relative link resolves; none points into plan/.  No
-  development-management references (WS/Phase/Queue/Bug numbers, plan/).
+  development-management references: WS/Queue/Bug numbers (WS009, ws009-p1,
+  q123, BUG-12), "Phase N", ISO dates, the text plan/, .internal/.
 * Placeholders: "<!-- spec:" comments and the word PENDING.  Counted always;
   in final mode they fail the named files (all files when none is named).
 * Skeleton (--base SHA): the headings of levels 1 to 4 of every file are
   those of the file at SHA, in order; a writer adds level-5 headings only.
 * Examples (--examples): every ```c block of gpu-examples.md whose first line
   is "/* example: NAME */" compiles with the target clang, -std=c11 -Wall
-  -Wextra -Werror -fsyntax-only, for each GPU target whose sysroot exists.
+  -Wextra -Werror -fsyntax-only, for each GPU target whose sysroot exists;
+  no compile at all is a FAIL.
+* Options may come in any order; --final takes the file names that follow
+  it up to the next option.  An unknown option is a FAIL.  Any exception
+  while checking is reported as a FAIL, so the last line is always printed.
 """
 
 import os
@@ -281,10 +289,23 @@ def unquote(cell):
 
 
 class Document:
+    """A document; lines holds the text with fenced code blocks blanked, so
+    that a '# ' or '|' line inside a code block is never a heading or a table."""
+
     def __init__(self, root, path):
         self.path = path
         self.text = read(root, path)
-        self.lines = self.text.split("\n")
+        self.raw_lines = self.text.split("\n")
+        self.lines = []
+        fenced = False
+        for line in self.raw_lines:
+            if line.lstrip().startswith("```"):
+                fenced = not fenced
+                self.lines.append("")
+            elif fenced:
+                self.lines.append("")
+            else:
+                self.lines.append(line)
 
 
 def collect_tables(doc):
@@ -385,6 +406,8 @@ def capability_set(text):
     text = text.strip()
     if text in ("none", "PENDING"):
         return (text, ())
+    if " or " in text and " and " in text:
+        fail("capability %r mixes 'and' and 'or'" % text)
     joiner = "or" if " or " in text else "and"
     return (joiner, tuple(sorted(unquote(part) for part in re.split(r"\s+(?:and|or)\s+", text))))
 
@@ -427,6 +450,8 @@ def check_sections(docs, headers, final_paths, index_rows):
                 items = [line for line in body[at + 1:] if line.startswith("- `E")]
                 if not items:
                     fail("%s: %s 'Errors:' has no '- `EXXX`:' items" % (where, name))
+                if not [line for line in body[at + 1:] if line.startswith("- Other values:")]:
+                    fail("%s: %s 'Errors:' has no '- Other values: ...' item (driver pass-through)" % (where, name))
     for name in headers.ioctls:
         if count.get(name, 0) != 1:
             fail("request section '### `%s`' appears %d times" % (name, count.get(name, 0)))
@@ -449,6 +474,9 @@ def check_constants(docs, headers):
                 continue
             for row in body:
                 where = "%s:%d" % (doc.path, number)
+                if len(row) < 3:
+                    fail("%s: constant row has %d cells" % (where, len(row)))
+                    continue
                 name = unquote(row[0])
                 if name not in headers.defines:
                     fail("%s: constant %s is not a value macro of the headers" % (where, name))
@@ -480,10 +508,16 @@ def check_structs(docs, headers, final_paths):
             if name not in headers.structs:
                 fail("%s: struct %s is not in the headers" % (where, name))
                 continue
+            if name not in headers.layout:
+                fail("%s: no layout for struct %s (the layout unit did not compile)" % (where, name))
+                continue
             expect = headers.rendered_members(name)
             if len(body) != len(expect):
                 fail("%s: struct %s has %d rows, header %d members" % (where, name, len(body), len(expect)))
             for row, (offset, size, ctype, field) in zip(body, expect):
+                if len(row) < 6:
+                    fail("%s: struct %s row has %d cells" % (where, name, len(row)))
+                    continue
                 got = (row[0], row[1], unquote(row[2]), unquote(row[3]))
                 want = (str(offset), str(size), ctype, field)
                 if got != want:
@@ -521,9 +555,15 @@ def check_capset(docs, root):
             where = "%s:%d" % (doc.path, number)
             if head[:2] == ["Capset constant", "Value"]:
                 for row in body:
+                    if len(row) < 3:
+                        fail("%s: capset row has %d cells" % (where, len(row)))
+                        continue
                     seen_constants[unquote(row[0])] = (parse_value(unquote(row[1])), where)
             elif head[:3] == ["Offset", "Bytes", "Payload field"]:
                 for row in body:
+                    if len(row) < 4:
+                        fail("%s: payload row has %d cells" % (where, len(row)))
+                        continue
                     seen_words[unquote(row[2])] = (row[0], row[1], where)
     for name, value in constants.items():
         if name not in seen_constants:
@@ -541,20 +581,23 @@ def check_capset(docs, root):
     return len(seen_constants) + len(seen_words)
 
 
-DEV_INFO = re.compile(r"\b(?:WS|ws)\d{3}\b|\bws\d{3}-p\d+|\bBUG-\d+|\bq\d{3,4}\b|\.internal/")
+STATUS_LINE = "Status: experimental reference for GPU ABI version 1."
+
+DEV_INFO = re.compile(r"\b(?:WS|ws)\d{3}\b|\bws\d{3}-p\d+|\bBUG-\d+|\bq\d{3,4}\b|\.internal/|"
+                      r"\b20\d\d-\d\d-\d\d\b|(?<![\w.])plan/|\bPhase \d+")
 
 
 def check_text(docs, headers, root, final_paths):
     placeholders = 0
     for doc in docs:
-        if not re.search(r"^Status: experimental", doc.text, flags=re.M):
-            fail("%s: no 'Status: experimental' line" % doc.path)
-        for number, line in enumerate(doc.lines, 1):
+        if len(doc.raw_lines) < 3 or doc.raw_lines[2] != STATUS_LINE:
+            fail("%s: line 3 is not %r" % (doc.path, STATUS_LINE))
+        for number, line in enumerate(doc.raw_lines, 1):
             where = "%s:%d" % (doc.path, number)
-            for token in re.findall(r"(?<![A-Za-z0-9_])((?:GPU|HW_GPU)[A-Z0-9_]*)", line):
+            for token in re.findall(r"(?<![A-Za-z0-9_])((?:GPU_|HW_GPU)[A-Z0-9_]*)", line):
                 if token.endswith("_"):
                     continue
-                if token not in headers.known and token != "GPU":
+                if token not in headers.known:
                     fail("%s: %s is not a name of the headers" % (where, token))
             for token in re.findall(r"\bstruct\s+(gpu_\w+)", line):
                 if "struct " + token not in headers.known:
@@ -564,7 +607,7 @@ def check_text(docs, headers, root, final_paths):
                     fail("%s: %s is not an errno name" % (where, token))
             if DEV_INFO.search(line):
                 fail("%s: development-management reference: %s" % (where, line.strip()[:120]))
-            for target in re.findall(r"\]\(([^)\s]+)\)", line):
+            for target in re.findall(r"\]\(<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\)", line):
                 if re.match(r"[a-z]+:", target) or target.startswith("#"):
                     continue
                 path = target.split("#")[0]
@@ -581,7 +624,14 @@ def check_text(docs, headers, root, final_paths):
 
 
 def headings(text):
-    return [line for line in text.split("\n") if re.match(r"#{1,6} ", line)]
+    lines = []
+    fenced = False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and re.match(r"#{1,6} ", line):
+            lines.append(line)
+    return lines
 
 
 def check_base(root, docs, base):
@@ -627,13 +677,17 @@ def check_examples(root):
                 fail("example %s (%s): %s" % (name, target, result.stderr.strip()[:2000]))
             else:
                 compiled += 1
+    if compiled == 0:
+        fail("examples: nothing compiled (no GPU target sysroot under %s)" % build)
     return compiled
 
 
 def emit(headers, args):
-    kind = args[0]
+    kind = args[0] if args else ""
     if kind == "struct":
         for name in args[1:]:
+            if name not in headers.layout:
+                sys.exit("unknown structure %s" % name)
             print("#### `struct %s`" % name)
             print()
             print("| Offset | Bytes | Type | Field | Direction | Meaning |")
@@ -645,6 +699,8 @@ def emit(headers, args):
         print("| Name | Value | Meaning |")
         print("| --- | ---: | --- |")
         for name in args[1:]:
+            if name not in headers.defines:
+                sys.exit("unknown constant %s" % name)
             print("| `%s` | %s | PENDING |" % (name, headers.defines[name]))
     elif kind == "ioctls":
         print("| Request | Nr | Direction | Argument | Bytes | Open mode | Capability | Described in |")
@@ -667,26 +723,32 @@ def main(argv):
     examples = False
     emit_args = None
     base = None
+    usage = "usage: check-gpu-uapi-doc.py [--root R] [--base SHA] [--examples] [--final [FILE...]] | --emit KIND ARGS"
     index = 0
     while index < len(argv):
         arg = argv[index]
-        if arg == "--root":
-            root = argv[index + 1]
-            index += 2
-        elif arg == "--final":
-            final = argv[index + 1:]
-            break
-        elif arg == "--base":
-            base = argv[index + 1]
+        if arg in ("--root", "--base") and index + 1 < len(argv):
+            if arg == "--root":
+                root = argv[index + 1]
+            else:
+                base = argv[index + 1]
             index += 2
         elif arg == "--examples":
             examples = True
             index += 1
+        elif arg == "--final":
+            final = []
+            index += 1
+            while index < len(argv) and not argv[index].startswith("--"):
+                final.append(argv[index])
+                index += 1
         elif arg == "--emit":
             emit_args = argv[index + 1:]
             break
         else:
-            sys.exit("usage: check-gpu-uapi-doc.py [--root R] [--base SHA] [--examples] [--final [FILE...]] | --emit KIND ARGS")
+            print(usage)
+            print("check-gpu-uapi-doc: FAIL (unknown argument %s)" % arg)
+            return 2
     headers = Headers(root)
     if emit_args is not None:
         if errors:
@@ -705,16 +767,29 @@ def main(argv):
                 fail("--final %s is not a GPU reference file" % path)
     else:
         final_paths = set(doc.path for doc in docs)
-    index_rows = check_ioctl_index(docs, headers)
+    counts = {}
+
+    def run(key, function, *args):
+        try:
+            counts[key] = function(*args)
+        except Exception as exception:  # a malformed document must still end in FAIL
+            fail("%s: %s: %s" % (function.__name__, type(exception).__name__, exception))
+            counts[key] = 0
+
+    run("index", check_ioctl_index, docs, headers)
+    index_rows = counts["index"] if isinstance(counts["index"], dict) else {}
     ioctls = len(index_rows)
-    sections = check_sections(docs, headers, final_paths, index_rows)
+    run("sections", check_sections, docs, headers, final_paths, index_rows)
     if base:
-        check_base(root, docs, base)
-    constants = check_constants(docs, headers)
-    structs = check_structs(docs, headers, final_paths)
-    capset = check_capset(docs, root)
-    placeholders = check_text(docs, headers, root, final_paths)
-    compiled = check_examples(root) if examples else 0
+        run("base", check_base, root, docs, base)
+    run("constants", check_constants, docs, headers)
+    run("structs", check_structs, docs, headers, final_paths)
+    run("capset", check_capset, docs, root)
+    run("text", check_text, docs, headers, root, final_paths)
+    if examples:
+        run("examples", check_examples, root)
+    sections, constants, structs, capset = counts["sections"], counts["constants"], counts["structs"], counts["capset"]
+    placeholders, compiled = counts["text"], counts.get("examples", 0)
     summary = ("%d files, %d index rows, %d request sections, %d constant rows, %d structures, %d capset rows, "
                "%d placeholders, final %d files%s"
                % (len(docs), ioctls, sections, constants, structs, capset, placeholders, len(final_paths),

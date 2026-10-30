@@ -16,9 +16,11 @@ PENDING
 <!-- spec: From src/drivers/gpu/gpu.c (gpu_job_reserve_ioctl,
 gpu_job_action_ioctl, gpu_job_bind, gpu_job_unbind, gpu_job_admit,
 gpu_job_observe, gpu_monitor_*, gpu_capacity_changed_locked,
-gpu_retirement_changed_locked): (1) A state diagram in words or a table:
-reserved, committed, cancelled, faulted, terminal, consumed; which
-request moves between them; GPU_COMMAND_WAIT observes and consumes the
+gpu_retirement_changed_locked): (1) The life cycle as a table: use the
+states of enum gpu_job_state in gpu.c by their meaning (do not invent
+states the code does not have), and for each request and each kernel
+event (deadline, completion, device loss) the state it moves a job from
+and to; what CANCEL and CANCEL_FAULT leave behind; GPU_COMMAND_WAIT observes and consumes the
 terminal record of a committed job (gpu-submission.md). (2) The optional
 fence (fd and generation, -1 and zero when absent): reserved generations
 have a producer deadline but are not GPU dependencies; what CANCEL and

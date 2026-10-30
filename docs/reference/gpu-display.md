@@ -33,9 +33,10 @@ gpu_close: a lease is an exclusive reservation of one plane of one output
 by one open file description (shared by dup and SCM_RIGHTS, never
 transferred to another open); lease values are nonzero. What another
 open's claim returns while the plane is leased (EBUSY), what release does
-(retires scanout and private buffers first), what close of the last
-reference does, and that ending the lease returns the output to the text
-console (see User-visible side effects). Which requests need the lease
+(retires scanout and private buffers first) and what close of the last
+reference does. What the output shows after the lease ends is decided by
+the driver; do not promise that the text console comes back (see
+User-visible side effects). Which requests need the lease
 and which do not (GPU_DISPLAY_REFRESH needs none). -->
 
 PENDING
@@ -80,10 +81,15 @@ PENDING
 kern_text_end, tty_console_input_hold, tty_console_input_unhold in
 src/drivers/gpu/gpu.c): (1) The first successful flip
 (GPU_PRESENT, GPU_DISPLAY_PRESENT, GPU_DISPLAY_PRESENT_SYNC or
-GPU_DISPLAY_COMMIT) ends the text console's drawing into the framebuffer
-(once per boot? read the code). (2) A display claim holds the console
-keyboard input; release and close give it back. (3) What a program sees
-on the screen when its lease ends. Keep to what the code does now. -->
+GPU_DISPLAY_COMMIT) ends the text console's use of the display; read
+gpu_console_end and kern_text_end (src/kern/text-display.c) to state
+whether this lasts for the rest of the boot. (2) A display claim holds
+the console keyboard input; release and close give it back. (3) What the
+screen shows when a lease ends depends on the driver (some drivers draw
+the console again themselves); say that and point to gpu-drivers.md.
+Where the header comments say the output returns to the console, write
+what the code does and report the difference. Keep to what the code does
+now. -->
 
 PENDING
 

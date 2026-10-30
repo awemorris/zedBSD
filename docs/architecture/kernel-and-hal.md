@@ -1,6 +1,6 @@
 # Kernel, HAL and driver boundaries
 
-Status: current; source inventory reconciled in q150 (2026-09-09)
+Status: current
 
 zedBSD has its own kernel, drivers and user ABI. Familiar Unix names describe
 interfaces, not a claim that a FreeBSD, NetBSD or Linux kernel binary or disk

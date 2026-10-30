@@ -19,10 +19,14 @@ errno the source returns; see gpu_ioctl_body). Then, below the table, the
 rules: (1) The bits GPU_GET_INFO returns are the node's registered
 capabilities (gpu_info_ioctl copies device->ops->capabilities; a value
 the backend writes into the info request is not what the caller gets).
-(2) Whether the bits can change during a node's life: read whether any
-driver adds bits after drv_gpu_register publishes the node (the runtime
-binding in amdrdna and nvrtx; see gpu-drivers.md) and state the result
-exactly; if bits can be added later, say when a program must query again.
+(2) Whether the bits can change during a node's life: read every place a
+driver adds or removes bits (amdrdna/node.c and amdrdna/present.c,
+nvrtx/node.c, powervr/render-runtime.c, bcm2711/render-runtime.c,
+mali/sched.c and mali/render.c, ghci/ghci.c and ghci/vk/vk-node.c; grep
+for further assignments to capabilities) and whether that happens before
+or after drv_gpu_register publishes the node; state the result exactly
+(gpu-drivers.md gives the per-driver detail); if bits can change later,
+say when a program must query again.
 (3) GPU_CAP_HOST_BLOB's rule from its header comment (asking for
 GPU_BLOB_HOST is always safe). (4) A bit that is set does not by itself
 promise that every request it guards succeeds on every node: name any
@@ -75,8 +79,9 @@ Sources: PENDING
 
 <!-- spec: Argument struct gpu_capset (Structures). Read gpu_capset_ioctl and the drivers' get_capset operations (venus.c
 venus_get_capset, amdrdna/runtime.c runtime_capset, nvrtx/runtime.c,
-powervr/render-runtime.c, bcm2711/render-runtime.c, mali, ghci/vk/vk-node.c;
-find them with grep get_capset). Cover: inputs capset_id, capset_version,
+powervr/render-runtime.c, bcm2711/render-runtime.c, i915/command.c
+i915_get_capset, mali, ghci/vk/vk-node.c; find them with grep
+get_capset). Cover: inputs capset_id, capset_version,
 capacity (bounds: GPU_CAPSET_MAX), outputs bytes and data; that every
 current driver answers only capset id 4 version 0 (say what other ids
 return); what happens when capacity is smaller than the capset; unused
@@ -103,9 +108,11 @@ xml_version: the Vulkan registry version encoded with VK_MAKE_VERSION;
 timelines: number of completion timelines; vendor_magic/vendor_flags:
 present when bytes is VENDOR_BYTES or NATIVE_BYTES; native_magic/
 native_flags: present when bytes is NATIVE_BYTES). Add rows for bytes 8 to
-151 as one range row (the Venus renderer's fields: what a virtual
-machine's host fills, what native drivers leave zero; read venus.c and a
-native driver's capset function). All words are little-endian u32.
+151 as one range row: say only that a virtual machine's host fills the
+range with its renderer's data and that native drivers leave it zero
+(read venus.c and a native driver's capset function); do not copy field
+names or a structure from another project. Note that the payload field
+names are the words the Vulkan driver reads, named as it names them. All words are little-endian u32.
 (2) The constants table: fill Meaning (the two payload sizes, the two
 magic values, each flag: OPAQUE, STRICT_QUEUE, QUIESCE, HOST_SCANOUT,
 VIDEO_DECODE_H264, SYNC_COMMAND; read what libvulkan does with each flag

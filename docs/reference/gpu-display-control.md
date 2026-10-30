@@ -37,7 +37,9 @@ as a new image, so the caller does not write it while borrowed.
 GPU_DISPLAY_PRESENT. (8) ENOSPC for bandwidth or overlay limits
 (nothing changed). (9) ETIMEDOUT: the output keeps every borrowed image,
 later commits and presents of the lease fail with EBUSY, and release or
-close returns the output to the console. -->
+close lets the images go; what the output shows afterwards is the
+driver's (gpu-display.md User-visible side effects; do not promise the
+text console). -->
 
 PENDING
 

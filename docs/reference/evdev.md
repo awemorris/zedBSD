@@ -2,10 +2,9 @@
 
 Status: experimental UAPI. The event core, capability/current-state queries,
 console-keyboard adapter, PC/AT PS/2 mouse, PC-98 bus mouse, and USB HID Report
-Protocol keyboard/mouse/tablet producers are implemented. The q048 automatic
-matrix covers USB HID on xHCI and paired EHCI/UHCI with concurrent USB-root
-storage, and the user confirmed physical USB keyboard/mouse operation on
-2026-09-05.
+Protocol keyboard/mouse/tablet producers are implemented. USB HID is tested
+on xHCI and paired EHCI/UHCI with concurrent USB-root storage, and physical
+USB keyboard and mouse operation has been confirmed.
 
 zedBSD reserves `/dev/input/eventN` for an independently implemented event
 interface whose initial keyboard and pointer subset is source-oriented toward
@@ -188,18 +187,19 @@ incorporated into the zedBSD base system.
 
 Registration requires `EV_SYN/SYN_REPORT`; malformed declarations and
 undeclared producer events are rejected, keeping advertised capabilities and
-the delivered public stream consistent. The q044 ownership gates pass, and
-q048 adds Report-Protocol keyboard, relative mouse, and absolute tablet
-production fixtures plus generation-safe cdev/devfs lifecycle checks. Its QEMU
-matrix passes with xHCI and paired EHCI/UHCI, including hotplug, stale-fd
-isolation, event-number reuse, console coexistence, and concurrent USB-root
-I/O. The user's 2026-09-05 physical USB HID confirmation completes IN-T42.
+the delivered public stream consistent. The ownership tests pass, as do the
+Report-Protocol keyboard, relative mouse, and absolute tablet production
+fixtures and the generation-safe cdev/devfs lifecycle checks. The QEMU tests
+pass with xHCI and paired EHCI/UHCI, including hotplug, stale-fd isolation,
+event-number reuse, console coexistence, and concurrent USB-root I/O, and
+physical USB HID operation has been confirmed.
 
 Xzed and the selected Noct 2.0.1 BeUI backend both discover
 `/dev/input/eventN` by capabilities and consume evdev without the console
-event interface. `/dev/mouse` is absent. WS006-p009 removes the legacy
+event interface. `/dev/mouse` is absent. The legacy
 `/dev/console` continuous-event, input-mode, drain-input, and key-state ioctls
-and their private event queue. Their request numbers remain unused; unknown
+and their private event queue have been removed. Their request numbers remain
+unused; unknown
 console requests follow the ordinary TTY unsupported-operation path
 (`EOPNOTSUPP`). Console read/poll still use the normal TTY discipline,
 including termios and character input. Geometry/cursor operations and the

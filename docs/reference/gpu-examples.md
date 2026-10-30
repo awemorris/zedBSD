@@ -4,7 +4,7 @@ Status: experimental reference for GPU ABI version 1.
 
 <!-- spec: One paragraph: complete C programs that use the requests
 directly, as a reference for the calling conventions; real programs use
-Vulkan through libvulkan. Every example is a ```c block whose first line
+Vulkan through libvulkan. Every example is a fenced C block whose first line
 is /* example: NAME */ and compiles as C11 for every GPU target with
 -Wall -Wextra -Werror; each asserts the sizes of the structures it uses
 with _Static_assert. Link back to gpu.md. -->
@@ -53,10 +53,12 @@ PENDING
 
 ## Where the tests are
 
-<!-- spec: Links to the test programs under userland/tests/ that exercise
-these requests (gpu-selftest, gpu-admission, gpu-recovery, gpu-share,
-gpu-fence, acquire-fence, display-control, display-events,
-display-inventory, display-scanout; check each exists) with one line
-each on what it covers. -->
+<!-- spec: Links to the test programs under userland/tests/ that use the
+requests directly (find them with grep for the request names; for
+example gpu-admission, gpu-recovery, gpu-i915, acquire-fence,
+display-control, display-inventory, display-scanout, ghci-display,
+venus-frame), each linked to its source file, with one line on what it
+covers. Programs that reach the GPU only through Vulkan (gpu-selftest,
+gpu-fence) are listed separately as Vulkan-level tests. -->
 
 PENDING
