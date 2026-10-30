@@ -15,6 +15,9 @@ from __future__ import annotations
 import subprocess
 import sys
 
+# The SSH sessions the script opens after the rounds.
+AFTER = int(sys.argv[6]) if len(sys.argv) > 6 else 2
+
 FIELDS = ("frame.time_epoch", "ip.src", "ip.dst", "ipv6.src", "ipv6.dst",
 	  "tcp.stream", "tcp.srcport", "tcp.dstport", "tcp.flags.str", "tcp.len",
 	  "tcp.analysis.retransmission", "tcp.payload", "udp.srcport",
@@ -59,7 +62,7 @@ def state_counts(lines: list[str]) -> str:
 
 
 def main() -> int:
-	pcap, rounds_path, limit, before, after = sys.argv[1:6]
+	pcap, rounds_path, limit, stats_before, stats_after = sys.argv[1:6]
 	limit_seconds = float(limit)
 	frames = read_capture(pcap)
 	streams: dict[str, list[dict]] = {}
@@ -71,8 +74,8 @@ def main() -> int:
 	with open(rounds_path, encoding="utf-8") as handle:
 		rounds = [line.split() for line in handle if line.strip()]
 	# The emulator stamps the capture with its own clock, so the rounds are
-	# matched by their order: the last sessions but one (the reading of
-	# net.tcpstats after them) are the rounds', one each.
+	# matched by their order: the sessions before the last AFTER (the
+	# reading of net.tcpstats and of the log after them) are the rounds'.
 	# Only whole sessions count: something on the host now and then opens
 	# the forwarded port, sends its banner and closes at once.
 	ordered = sorted((stream for stream in streams.values()
@@ -80,7 +83,9 @@ def main() -> int:
 			  sum(int(frame["tcp.len"] or 0) for frame in stream
 			      if frame["tcp.dstport"] == "22") >= 1000),
 			 key=lambda stream: float(stream[0]["frame.time_epoch"]))
-	matched = ordered[-(len(rounds) + 1):-1] if len(ordered) > len(rounds) else []
+	matched = []
+	if len(ordered) >= len(rounds) + AFTER:
+		matched = ordered[len(ordered) - AFTER - len(rounds):len(ordered) - AFTER]
 	offset = None
 	for index, words in enumerate(rounds):
 		number, begin, end, status = words[:4]
@@ -126,7 +131,7 @@ def main() -> int:
 			# its own (where a slow round waits), and the size of what
 			# it was answering.
 			longest = 0.0
-			after = 0
+			answered = 0
 			asked_at = None
 			asked_length = 0
 			for frame in mine:
@@ -139,13 +144,13 @@ def main() -> int:
 						asked_at, asked_length = at, length
 				elif asked_at is not None:
 					if at - asked_at > longest:
-						longest, after = at - asked_at, asked_length
+						longest, answered = at - asked_at, asked_length
 					asked_at = None
 			marks["answer-max"] = longest
 			lead = syn + offset - start
 			detail = (f"syn +{lead:.2f} " +
 				  " ".join(f"{key} {value:.2f}" for key, value in marks.items()) +
-				  f" (after {after} bytes) frames {len(mine)} rexmit {retransmissions}")
+				  f" (after {answered} bytes) frames {len(mine)} rexmit {retransmissions}")
 		detail += disk
 		verdict = "ok" if status == "0" and seconds < limit_seconds else "SLOW"
 		if verdict != "ok":
@@ -169,8 +174,8 @@ def main() -> int:
 		print("other frames during the rounds: " +
 		      (" ".join(f"[{key}]x{value}" for key, value in sorted(others.items())) or "none"))
 
-	print("net.tcpstats before: " + state_counts(stats_lines(before)))
-	print("net.tcpstats after: " + state_counts(stats_lines(after)))
+	print("net.tcpstats before: " + state_counts(stats_lines(stats_before)))
+	print("net.tcpstats after: " + state_counts(stats_lines(stats_after)))
 	print(f"rounds: {len(rounds)}, slow or failed: {failed}")
 	print("qemu-ssh-rtt: " + ("PASS" if failed == 0 and rounds else "FAIL"))
 	return 0 if failed == 0 and rounds else 1
