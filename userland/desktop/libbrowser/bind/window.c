@@ -363,6 +363,18 @@ bind_window_set_load_ended(
 }
 
 /*
+ * Records that the window's document is being left for another one in its
+ * frame, whose pagehide event is to be fired.
+ */
+void
+bind_window_set_unloading(
+	struct bind_window *window)
+{
+	/* The flag only goes one way. */
+	window->unloading = 1;
+}
+
+/*
  * Tells the window the size of the viewport, in CSS pixels
  * (innerWidth and innerHeight).
  */

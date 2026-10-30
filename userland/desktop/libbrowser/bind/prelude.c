@@ -34,6 +34,7 @@ static int prelude_set_url(struct vm_realm *realm, vm_value this_value, const vm
 static int prelude_navigate_frame(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_load_ended(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_fully_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_initial_blank(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_frame_element(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_scroll_fragment(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -232,7 +233,30 @@ prelude_fully_active(
 
 	/* A window that was detached with its removed frame is not. */
 	window = bind_window_of(realm);
-	*result = vm_value_boolean(!window->detached);
+	*result = vm_value_boolean(!window->detached && !window->unloading);
+	return 0;
+}
+
+/* initialBlank(): whether the window is a frame still on its initial about:blank document (no resource was loaded into it). */
+static int
+prelude_initial_blank(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	int blank;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* A top-level window has its page's resource; a frame without a loaded resource is blank. */
+	window = bind_window_of(realm);
+	blank = window->parent_global != NULL && window->document->resource_url == NULL;
+	*result = vm_value_boolean(blank);
 	return 0;
 }
 
@@ -818,6 +842,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "fullyActive", 0, prelude_fully_active, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "fullyActive", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "initialBlank", 0, prelude_initial_blank, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "initialBlank", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "frameElement", 0, prelude_frame_element, NULL, &function);
 	if (status == 0)

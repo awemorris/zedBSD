@@ -303,6 +303,7 @@ void bind_window_set_time(struct bind_window *window, double now);
 void bind_window_set_viewport(struct bind_window *window, int width, int height);
 void bind_window_set_ready_state(struct bind_window *window, const char *state);
 void bind_window_set_load_ended(struct bind_window *window);
+void bind_window_set_unloading(struct bind_window *window);
 void bind_window_set_current_script(struct bind_window *window, struct dom_node *script);
 /* Borrows active child cascade/viewport until its next DOM mutation; caller roots its Document. */
 int bind_window_child_styles(struct bind_window *window, struct css_engine **engine, int *width, int *height);

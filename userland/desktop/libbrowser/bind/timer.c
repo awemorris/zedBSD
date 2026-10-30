@@ -132,6 +132,10 @@ timer_run_children(
 			continue;
 		bind_window_set_time(child, window->now);
 		status = bind_run_timers(child);
+
+		/* What the frame's callbacks queued for this window (a removed frame's jobs come here) runs now. */
+		if (status == 0)
+			status = bind_checkpoint(window);
 	}
 
 	/* The roots end in reverse order. */

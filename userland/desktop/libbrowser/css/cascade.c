@@ -309,6 +309,7 @@ static void cascade_align(struct css_style *style, unsigned bit, int *field, int
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
 static const struct css_line_names *cascade_line_names(struct css_engine *engine, const struct css_value *value);
 static const void *cascade_keep(struct css_engine *engine, const void *data, size_t size);
+static const struct css_gradient *cascade_gradient(struct css_engine *engine, const struct css_gradient *gradient, float font_size);
 static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 static const struct css_try_rule *cascade_try_rule(const struct css_engine *engine, const struct vm_string *name);
 static void cascade_anchor(struct css_engine *engine, struct css_style *style, int property, const struct css_anchor_expr *expr);
@@ -4064,8 +4065,11 @@ cascade_apply(
 		break;
 	case CSS_PROP_BACKGROUND_IMAGE:
 		style->background_image = NULL;
+		style->background_gradient = NULL;
 		if (value->kind == CSS_VALUE_URL)
 			style->background_image = value->url;
+		if (value->kind == CSS_VALUE_GRADIENT)
+			style->background_gradient = cascade_gradient(engine, value->gradient, style->font_size);
 		break;
 	case CSS_PROP_BACKGROUND_REPEAT:
 		style->background_repeat = value->keyword;
@@ -4637,6 +4641,7 @@ cascade_inherit(
 		break;
 	case CSS_PROP_BACKGROUND_IMAGE:
 		style->background_image = parent->background_image;
+		style->background_gradient = parent->background_gradient;
 		break;
 	case CSS_PROP_BACKGROUND_REPEAT:
 		style->background_repeat = parent->background_repeat;
@@ -5062,6 +5067,29 @@ cascade_subgrid(
 	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL || value->tracks->subgrid == NULL)
 		return NULL;
 	return cascade_keep(engine, value->tracks->subgrid, strlen(value->tracks->subgrid) + 1U);
+}
+
+/* Keeps a gradient in the engine's arena, its stops in ems turned to pixels by the font size. */
+static const struct css_gradient *
+cascade_gradient(
+	struct css_engine *engine,
+	const struct css_gradient *gradient,
+	float font_size)
+{
+	struct css_gradient resolved;
+	unsigned index;
+
+	/* A copy, each em position in pixels. */
+	resolved = *gradient;
+	for (index = 0; index < resolved.count; index++) {
+		if (resolved.stops[index].unit == CSS_GRADIENT_AT_EM) {
+			resolved.stops[index].position *= font_size;
+			resolved.stops[index].unit = CSS_GRADIENT_AT_PX;
+		}
+	}
+
+	/* The kept copy. */
+	return cascade_keep(engine, &resolved, sizeof(resolved));
 }
 
 /* Copies a value into the engine's arena, once for each different value. */

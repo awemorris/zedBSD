@@ -779,6 +779,11 @@
           function (r) { if (rejected) return; rejected = true; failure(r); });
       }
     }
+    // A document that is being left (beforeunload fired, then pagehide) refuses further navigations; one that is
+    // still on its initial about:blank has no navigate events, activation or entry state of its own.
+    var unloading = false;
+    function active() { return native.fullyActive() && !unloading; }
+    function initialBlank() { return native.initialBlank(); }
     // A navigation to another document in this frame: the entries as they will be, handed to the document that loads.
     function packEntry(e) {
       return { url: urlOf(e), key: e.key, id: e.id, navState: e.navState, classic: e.classic, scrollMode: e.scrollMode, docId: e.docId };
@@ -791,6 +796,7 @@
       leave(old);
       list = entries.slice();
       index = current;
+      if (initialBlank()) o = { type: 'replace', url: o.url, navState: null };
       if (o.type === 'push') {
         target = makeEntry(o.url, o.navState, null, old);
         target.docId = uuid();
@@ -807,9 +813,14 @@
       } else {
         index = entries.indexOf(o.entry);
       }
-      h = { url: o.url, type: o.type, current: index, from: packEntry(old), entries: list.map(packEntry) };
+      h = { url: o.url, type: o.type, current: index, from: initialBlank() ? null : packEntry(old), entries: list.map(packEntry) };
+      if (!initialBlank()) {
+        unloading = true;
+        fire(g, new Event('beforeunload', { cancelable: true }));
+      }
       Object.defineProperty(frame, '__zedNav', { value: h, writable: true, configurable: true, enumerable: false });
       if (native.navigateFrame(o.url)) return true;
+      unloading = false;
       delete frame.__zedNav;
       return false;
     }
@@ -826,8 +837,8 @@
       entries[current].url = null;
       classicState = entries[current].classic ? deserialize(entries[current].classic) : null;
       for (i = 0; i < entries.length; i++) if (entries[i].key === h.from.key && entries[i].id === h.from.id) fromEntry = entries[i];
-      if (!fromEntry) fromEntry = unpackEntry(h.from);
-      return new NavigationActivation(KEY, nhe(fromEntry), nhe(entries[current]), h.type);
+      if (!fromEntry && h.from) fromEntry = unpackEntry(h.from);
+      return new NavigationActivation(KEY, fromEntry ? nhe(fromEntry) : null, nhe(entries[current]), h.type);
     }
 
     // Fires the navigate event of a navigation; o has the navigation's type, url, destination entry (a traversal),
@@ -835,6 +846,12 @@
     // commit(), which carries out a navigation of this document that no listener intercepted.
     function fireNavigate(o) {
       var t, controller, event, n, dispatched, intercepted, from, promises, i;
+      if (initialBlank() && !o.sameDocument) {
+        // The initial about:blank document is replaced by what it navigates to: no navigate event, and nothing settles.
+        upcomingTracker = null;
+        if (o.type !== 'reload' && o.type !== 'traverse') leaveForDocument(o);
+        return;
+      }
       if (ongoingEvent) abortOngoing();
       if (o.type === 'traverse') {
         t = upcomingTraverse.get(o.entry.key) || null;
@@ -865,7 +882,7 @@
       focusChanged = false;
       suppressScroll = false;
       try { dispatched = fire(navigation, event); } finally { n.dispatching = false; }
-      if (!native.fullyActive()) {
+      if (!active()) {
         if (!controller.signal.aborted) abortOngoing();
         return;
       }
@@ -978,13 +995,14 @@
         if (key !== KEY) throw new TypeError('Illegal constructor');
         super();
       }
-      entries() { return native.fullyActive() ? entries.map(nhe) : []; }
-      get currentEntry() { return native.fullyActive() ? nhe(entries[current]) : null; }
+      entries() { return active() ? entries.map(nhe) : []; }
+      get currentEntry() { return active() ? nhe(entries[current]) : null; }
       updateCurrentEntry(options) {
         var state;
         if (arguments.length < 1) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': 1 argument required.");
         options = dictionary(options, 'NavigationUpdateCurrentEntryOptions');
-        if (!native.fullyActive()) throw domError('InvalidStateError', "Failed to execute 'updateCurrentEntry' on 'Navigation': The document is not fully active.");
+        if (!active()) throw domError('InvalidStateError', "Failed to execute 'updateCurrentEntry' on 'Navigation': The document is not fully active.");
+        if (initialBlank()) throw domError('InvalidStateError', "Failed to execute 'updateCurrentEntry' on 'Navigation': The document is still on the initial about:blank.");
         if (options.state === undefined) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': required member state is undefined.");
         state = serialize(options.state);
         entries[current].navState = state;
@@ -992,8 +1010,8 @@
       }
       get transition() { return transition; }
       get activation() { return activation; }
-      get canGoBack() { return native.fullyActive() && current > 0; }
-      get canGoForward() { return native.fullyActive() && current < entries.length - 1; }
+      get canGoBack() { return active() && current > 0; }
+      get canGoForward() { return active() && current < entries.length - 1; }
       navigate(url, options) {
         var handling, u, state = null, t;
         options = dictionary(options, 'NavigationNavigateOptions');
@@ -1004,7 +1022,7 @@
         if (options.state !== undefined) {
           try { state = serialize(options.state); } catch (e) { return earlyError(e); }
         }
-        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'navigate' on 'Navigation': The document is not fully active."));
+        if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'navigate' on 'Navigation': The document is not fully active."));
         t = makeTracker(options.info, state, null);
         upcomingTracker = t;
         if (handling === 'auto' && !native.loadEnded()) handling = 'replace';
@@ -1019,7 +1037,7 @@
         if (options.state !== undefined) {
           try { state = serialize(options.state); } catch (e) { return earlyError(e); }
         }
-        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'reload' on 'Navigation': The document is not fully active."));
+        if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'reload' on 'Navigation': The document is not fully active."));
         t = makeTracker(options.info, state, null);
         upcomingTracker = t;
         navigateTo(docURL(), { history: 'reload', navState: state });
@@ -1030,19 +1048,19 @@
         if (arguments.length < 1) throw new TypeError("Failed to execute 'traverseTo' on 'Navigation': 1 argument required.");
         key = String(key);
         options = dictionary(options, 'NavigationOptions');
-        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'traverseTo' on 'Navigation': The document is not fully active."));
+        if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'traverseTo' on 'Navigation': The document is not fully active."));
         if (!findEntry(key)) return earlyError(domError('InvalidStateError', "Failed to execute 'traverseTo' on 'Navigation': Invalid key."));
         return traverseToKey(key, options);
       }
       back(options) {
         options = dictionary(options, 'NavigationOptions');
-        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': The document is not fully active."));
+        if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': The document is not fully active."));
         if (current <= 0) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': Cannot go back."));
         return traverseToKey(entries[current - 1].key, options);
       }
       forward(options) {
         options = dictionary(options, 'NavigationOptions');
-        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': The document is not fully active."));
+        if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': The document is not fully active."));
         if (current >= entries.length - 1) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': Cannot go forward."));
         return traverseToKey(entries[current + 1].key, options);
       }
@@ -1215,7 +1233,7 @@
       activation = adoptHandover();
     } else {
       entries.push(makeEntry(null, null, null, null));
-      activation = new NavigationActivation(KEY, null, nhe(entries[0]), 'push');
+      activation = initialBlank() ? null : new NavigationActivation(KEY, null, nhe(entries[0]), 'push');
     }
     def(g, 'navigation', navigation);
     def(g, 'history', new History(KEY));

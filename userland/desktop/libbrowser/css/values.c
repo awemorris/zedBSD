@@ -2091,8 +2091,18 @@ values_single(
 		return 0;
 	}
 
-	/* An image: url(...) or none. */
+	/* An image: url(...), a gradient or none. */
 	if (property == CSS_PROP_BACKGROUND_IMAGE) {
+		/* A gradient. */
+		if (count > 0 && tokens[0].type == CSS_TOKEN_FUNCTION && (css_ident_equal(&tokens[0], "linear-gradient") || css_ident_equal(&tokens[0], "repeating-linear-gradient"))) {
+			memset(value, 0, sizeof(*value));
+			error = css_gradient_parse(parse, tokens, count, &value->gradient);
+			if (error != 0)
+				return error;
+			value->kind = CSS_VALUE_GRADIENT;
+			return 0;
+		}
+
 		/* Parse the selected component with its established native grammar. */
 		error = values_url(parse, tokens, count, value);
 		if (error != 0)
@@ -3479,6 +3489,21 @@ values_background(
 
 		/* The tokens of the component: one, or a function to its closing parenthesis. */
 		rest = values_function_length(tokens + index, count - index);
+
+		/* A gradient is an image. */
+		if (tokens[index].type == CSS_TOKEN_FUNCTION &&
+		    (css_ident_equal(&tokens[index], "linear-gradient") || css_ident_equal(&tokens[index], "repeating-linear-gradient"))) {
+			if (image_seen)
+				return EINVAL;
+			memset(&image, 0, sizeof(image));
+			error = css_gradient_parse(parse, tokens + index, rest, &image.gradient);
+			if (error != 0)
+				return error;
+			image.kind = CSS_VALUE_GRADIENT;
+			image_seen = 1;
+			index += rest;
+			continue;
+		}
 
 		/* An image: url(...) or none. */
 		is_url = 0;

@@ -616,11 +616,13 @@ frame_load_activate(
 {
 	struct dom_document *document;
 	struct bind_window *parent;
+	struct bind_window *leaving;
 	struct bind_window *window;
 	struct vm_realm *realm;
 	struct vm_cell *roots[2];
 	unsigned index;
 	unsigned registered;
+	int canceled;
 	int allowed;
 	int current;
 	int error;
@@ -694,6 +696,21 @@ frame_load_activate(
 		if (!load->blank) {
 			error = frame_load_metadata(load, document);
 			if (error != 0)
+				goto release_roots;
+		}
+
+		/* The document that is left is told its page is hidden, and then it is replaced if the frame is still this attempt's. */
+		realm = (struct vm_realm *)load->element->child_context;
+		leaving = NULL;
+		if (realm != NULL)
+			leaving = realm->host;
+		if (leaving != NULL && leaving->document->resource_url != NULL) {
+			bind_window_set_unloading(leaving);
+			error = bind_fire_event(leaving, NULL, "pagehide", BIND_EVENT_DOCUMENT, &canceled);
+			if (error != 0)
+				goto release_roots;
+			current = frame_load_current(load);
+			if (!current)
 				goto release_roots;
 		}
 

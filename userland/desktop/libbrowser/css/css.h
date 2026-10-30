@@ -150,6 +150,41 @@ struct css_anchor_names {
 	struct vm_string *names[CSS_ANCHOR_NAMES];
 };
 
+/* The most color stops of a gradient, and the directions of its "to" keywords (flags). */
+#define CSS_GRADIENT_STOPS	16
+#define CSS_GRADIENT_TOP	1
+#define CSS_GRADIENT_RIGHT	2
+#define CSS_GRADIENT_BOTTOM	4
+#define CSS_GRADIENT_LEFT	8
+
+/* Where a color stop is: not given, in pixels, a percentage of the gradient line, or in ems (until the font size is known). */
+enum css_gradient_unit {
+	CSS_GRADIENT_AT_AUTO,
+	CSS_GRADIENT_AT_PX,
+	CSS_GRADIENT_AT_PERCENT,
+	CSS_GRADIENT_AT_EM
+};
+
+/* One color stop of a gradient. */
+struct css_gradient_stop {
+	uint32_t color;
+	float position;
+	int unit;
+};
+
+/*
+ * A linear gradient: its direction (an angle in degrees, 0 pointing up and
+ * turning clockwise, or the sides of a "to" keyword in corner) and its stops.
+ */
+struct css_gradient {
+	float angle;
+	unsigned corner;
+	/* Whether the stops repeat along the line (repeating-linear-gradient). */
+	unsigned repeating;
+	unsigned count;
+	struct css_gradient_stop stops[CSS_GRADIENT_STOPS];
+};
+
 /* The most entries of position-try-fallbacks, and try-tactics (flip-block, flip-inline, flip-start, flip-x, flip-y) in one. */
 #define CSS_TRY_ENTRIES	8
 #define CSS_TRY_TACTICS	5
@@ -784,6 +819,8 @@ struct css_style {
 	 * pixels, a percentage of the padding box or auto).
 	 */
 	struct vm_string *background_image;
+	/* The background image when it is a gradient (in the engine's arena; NULL for none). */
+	const struct css_gradient *background_gradient;
 	int background_repeat;
 	int background_attachment;
 	struct css_length background_position[2];

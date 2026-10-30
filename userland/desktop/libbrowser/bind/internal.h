@@ -251,6 +251,8 @@ struct bind_window {
 	const char *ready_state;
 	/* Set once the window's load event has finished dispatching. */
 	int load_ended;
+	/* Set when the window's document is being left for another (its page is hidden): its navigation methods are refused. */
+	int unloading;
 	struct dom_node *current_script;
 	struct vm_object *location;
 	double time_origin;
