@@ -536,7 +536,12 @@ Exactly one `kernel=` directive selects a safe path relative to the selected
 FAT, or on amd64 UEFI a path on the root partition (Section 9.2), and is
 consumed by the loader. Every other nonempty line contributes one
 kernel-parameter token; on amd64 UEFI the boot keys may then drop and append
-tokens of the assembled record (Section 7c). The parser synthesizes `boot0=UUID=XXXX-XXXX` when
+tokens of the assembled record (Section 7c). The `video=WIDTHxHEIGHT` line
+of the amd64 `zedbsd.cfg` files is such a token: the amd64 UEFI loader reads it
+to choose the GOP mode (`bootloader/uefi/video.c`), the BIOS loaders do not
+read it, and it reaches the kernel unchanged on every path. The kernel has no
+`video` parameter, so such a boot also logs
+`boot: ignored 1 unknown parameter; first=video`. The parser synthesizes `boot0=UUID=XXXX-XXXX` when
 `boot0=` is absent and qualifies bare `overlay-root`, `overlay-data`, and
 file-form `swapN` values with `boot0:`. Explicit boot references and raw swap
 selectors beginning with `/dev/`, `UUID=`, `LABEL=`, `PARTUUID=`, or
