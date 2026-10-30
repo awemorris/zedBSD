@@ -103,7 +103,7 @@ remain independent and `EVIOCGRAB` still does not disable console text input.
 
 The HAL advertises whether a console source has physical release/repeat
 information or only characters through `struct hal_cons_input_info` returned
-by [`hal_cons_get_input_info()`](../../include/hal/hal.h). PC/AT, PC-98, and X68000
+by [`hal_cons_get_input_info()`](../../include/hal/hal.h). PC/AT and PC-98
 keyboard adapters preserve physical press, release, and repeat events. A
 character-only arm64 or sparcv9 console is registered as a momentary source:
 each character that maps to a public key code publishes press, synthetic
@@ -111,12 +111,12 @@ release, and `SYN_REPORT` in one bounded report, so `EVIOCGKEY` cannot retain a
 fabricated held key. Truthful platform declarations are in the
 [PC/AT](../../src/hal/amd64/bsp-pcat/cons.c),
 [PC-98](../../src/hal/i386/bsp-pc98/cons.c),
-[X68000](../../src/hal/m68k/bsp-x68k),
 [arm64](../../src/hal/arm64/bsp-rpi-common/cons.c), and
-[sparcv9](../../src/hal/sparcv9/bsp-sun4u/console.c) HAL sources. The q044
-runner retains the physical x86/m68k paths and generic momentary behavior;
-arm64/sparcv9 declarations are source-audited because their cross compilers
-were unavailable. This reference does not claim fresh hardware or QEMU
+[sparcv9](../../src/hal/sparcv9/bsp-sun4u/console.c) HAL sources. The X68000
+console has no keyboard input yet
+([x68k-console.c](../../src/drivers/platform/x68k/x68k-console.c)), so it
+publishes no key events. The arm64 and sparcv9 declarations are
+source-audited. This reference does not claim fresh hardware or QEMU
 acceptance for every architecture.
 
 The console is a bounded kernel-internal subscriber to the same publication
