@@ -182,6 +182,17 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - Q330-4 decoder の部分を早く始めるか: **推し A** 決定どおり WS329 の完了の後（共通化を 1 回で済ませる）。
 - 止めている物: 無し（実装は WS329 の後）。
 
+### 0g. BUG-339（VF2 で U-Boot の control の DTB を渡すと起動が VFS で止まる）の恒久の直し（2026-10-31 新しい）
+
+- 背景: VF2 の U-Boot が持つ DTB（control の DTB）は vendor の書き方（binding）で、zedBSD の VF2 の driver は全部 Linux の mainline の書き方を読む。そのため control の DTB で起動すると SoC の部品が見つからず止まる。今は ESP に置いた mainline の vf2.dtb を渡す道で毎回起動しているので、普段の使い方には影響しない（P2 が実機で確かめ、log に「ESP の dtb を渡す」案内を 1 行足した）。
+- 用語: DTB は機械の部品の一覧を書いた表。U-Boot は VF2 の最初に動く起動の program。HAL の handoff は loader が kernel に渡す情報の約束（変えるには差分ごとのユーザーの承認が要る）。
+- 案（どれも判断が要るので P2 は着手していない）:
+  - (1) loader が ESP の DTB を別の板の表として渡す。HAL の handoff に key を足すので、ユーザーの事前承認が要る。
+  - (2) kernel に mainline の DTB を埋め込む。base system に外部の物を入れない方針に触れる。
+  - (3) loader を差し替える。OpenSBI の reserved-memory と MAC の address を失う危険がある。
+  - (4) 今のまま（ESP の vf2.dtb の道だけを支え、control の DTB は案内の log で止める）。Q1 の推し（他の案の費用と危険に見合う利点が無い）。
+- 決めてほしい事: どの案にするか。
+
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
 - 背景: 2026-10-28 の P1 の報告（[ws299/ws.md](ws299/ws.md) の「結果（2026-10-28 21:50）」）。idle と HWP は WS333 に入れた。WS299 そのものは、5330 が空いたら担当を付ける（2026-10-31 の指示、q1744）。
