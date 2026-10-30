@@ -116,6 +116,11 @@ main(
 	int argc,
 	char **argv)
 {
+	int listing;
+	int creating;
+	int deleting;
+	int ordering;
+	int nexting;
 	int error;
 
 	/* Shows the usage without a command. */
@@ -132,15 +137,20 @@ main(
 	}
 
 	/* Runs the command the first operand names. */
-	if (strcmp(argv[1], "list") == 0 && argc == 2) {
+	listing = strcmp(argv[1], "list");
+	creating = strcmp(argv[1], "create");
+	deleting = strcmp(argv[1], "delete");
+	ordering = strcmp(argv[1], "order");
+	nexting = strcmp(argv[1], "next");
+	if (listing == 0 && argc == 2) {
 		error = command_list();
-	} else if (strcmp(argv[1], "create") == 0) {
+	} else if (creating == 0) {
 		error = command_create(argc - 2, argv + 2);
-	} else if (strcmp(argv[1], "delete") == 0 && argc == 3) {
+	} else if (deleting == 0 && argc == 3) {
 		error = command_delete(argv[2]);
-	} else if (strcmp(argv[1], "order") == 0 && argc == 3) {
+	} else if (ordering == 0 && argc == 3) {
 		error = command_order(argv[2]);
-	} else if (strcmp(argv[1], "next") == 0 && argc == 3) {
+	} else if (nexting == 0 && argc == 3) {
 		error = command_next(argv[2]);
 	} else {
 		usage();
@@ -247,10 +257,14 @@ boot_number(
 	const char *name,
 	unsigned *number)
 {
+	size_t length;
+	int prefix;
 	int error;
 
 	/* Refuses a name that is not Boot followed by four digits. */
-	if (strncmp(name, "Boot", 4) != 0 || strlen(name) != 8U)
+	prefix = strncmp(name, "Boot", 4);
+	length = strlen(name);
+	if (prefix != 0 || length != 8U)
 		return EINVAL;
 
 	/* Reads the four hexadecimal digits. */
@@ -366,6 +380,7 @@ entry_numbers(
 	unsigned number;
 	size_t index;
 	size_t place;
+	int global;
 	int error;
 
 	/* Walks every variable from the first. */
@@ -381,9 +396,12 @@ entry_numbers(
 		if (error != 0)
 			return error;
 
-		/* Skips variables that are not global boot entries. */
-		if (strcmp(space, EFI_GLOBAL_VARIABLE) != 0)
+		/* Skips variables that are not global. */
+		global = strcmp(space, EFI_GLOBAL_VARIABLE);
+		if (global != 0)
 			continue;
+
+		/* Skips global variables that are not boot entries. */
 		error = boot_number(name, &number);
 		if (error != 0)
 			continue;
@@ -615,17 +633,27 @@ partition_find(
 	struct stat status;
 	char path[64];
 	const char *name;
+	const char *slash;
 	unsigned index;
+	size_t length;
 	int descriptor;
+	int prefix;
 	int result;
 	int error;
 
-	/* Opens the disk by its device name, with or without /dev/. */
+	/* Takes the device name, with or without /dev/. */
 	name = disk;
-	if (strncmp(name, "/dev/", 5) == 0)
+	prefix = strncmp(name, "/dev/", 5);
+	if (prefix == 0)
 		name += 5;
-	if (name[0] == '\0' || strlen(name) >= KERN_BLOCK_NAME_MAX || strchr(name, '/') != NULL)
+
+	/* Refuses an empty name, a name too long for a device, or a path. */
+	length = strlen(name);
+	slash = strchr(name, '/');
+	if (length == 0 || length >= KERN_BLOCK_NAME_MAX || slash != NULL)
 		return EINVAL;
+
+	/* Opens the disk. */
 	snprintf(path, sizeof(path), "/dev/%s", name);
 	descriptor = open(path, O_RDONLY);
 	if (descriptor < 0)
@@ -636,7 +664,7 @@ partition_find(
 	result = fstat(descriptor, &status);
 	if (result < 0) {
 		error = errno;
-	} else if (!S_ISBLK(status.st_mode)) {
+	} else if ((status.st_mode & S_IFMT) != S_IFBLK) {
 		error = EINVAL;
 	}
 
@@ -663,6 +691,8 @@ partition_find(
 	io.read = device_read;
 	if (error == 0)
 		error = dp_load(&table, &io);
+
+	/* Closes the disk; the table is in memory. */
 	close(descriptor);
 	if (error != 0)
 		return error;
@@ -683,6 +713,8 @@ partition_find(
 			break;
 		}
 	}
+
+	/* Lets the table go and reports a slot that holds no partition. */
 	dp_free(&table);
 	if (error != 0)
 		return error;
@@ -785,6 +817,8 @@ path_build(
 			path[offset + 4U + index * 2U] = '\\';
 		path[offset + 5U + index * 2U] = 0;
 	}
+
+	/* Steps past the file path node. */
 	offset += file_size;
 
 	/* Writes the end node. */
@@ -855,10 +889,12 @@ command_list(
 	static unsigned numbers[BOOT_ORDER_MAX];
 	uint16_t order[BOOT_ORDER_MAX];
 	struct boot_entry entry;
+	const char *separator;
 	uint8_t number[2];
 	size_t count;
 	size_t size;
 	size_t index;
+	char active;
 	int error;
 
 	/* Shows the entry the firmware started this boot from, when it says. */
@@ -883,9 +919,16 @@ command_list(
 		fprintf(stderr, "efiboot: BootOrder: %s\n", strerror(error));
 		return error;
 	}
+
+	/* Writes the order's numbers, separated by commas. */
 	printf("BootOrder:");
-	for (index = 0; index < count; index++)
-		printf("%s%04X", index == 0 ? " " : ",", order[index]);
+	separator = " ";
+	for (index = 0; index < count; index++) {
+		printf("%s%04X", separator, order[index]);
+		separator = ",";
+	}
+
+	/* Ends the order's line. */
 	printf("\n");
 
 	/* Collects the entries. */
@@ -905,10 +948,13 @@ command_list(
 			continue;
 		}
 
-		/* Writes the entry's line. */
+		/* Writes the entry's line, marking an active entry. */
+		active = ' ';
+		if ((entry.attributes & LOAD_OPTION_ACTIVE) != 0)
+			active = '*';
 		printf("Boot%04X%c %s\t%s\n",
 		       numbers[index],
-		       (entry.attributes & LOAD_OPTION_ACTIVE) != 0 ? '*' : ' ',
+		       active,
 		       entry.label,
 		       entry.path);
 	}
@@ -950,6 +996,8 @@ command_create(
 	size_t order_count;
 	size_t index;
 	int set_next;
+	int labeled;
+	int next_named;
 	int found;
 	int same;
 	int error;
@@ -959,11 +1007,13 @@ command_create(
 	label = DEFAULT_LABEL;
 	set_next = 0;
 	while (argc > 0 && argv[0][0] == '-') {
-		if (strcmp(argv[0], "-l") == 0 && argc > 1) {
+		labeled = strcmp(argv[0], "-l");
+		next_named = strcmp(argv[0], "-n");
+		if (labeled == 0 && argc > 1) {
 			label = argv[1];
 			argc -= 2;
 			argv += 2;
-		} else if (strcmp(argv[0], "-n") == 0) {
+		} else if (next_named == 0) {
 			set_next = 1;
 			argc -= 1;
 			argv += 1;
@@ -978,6 +1028,8 @@ command_create(
 		usage();
 		return EINVAL;
 	}
+
+	/* Reads the partition's number in the GPT, counted from one. */
 	errno = 0;
 	slot = (unsigned)strtoul(argv[1], &end, 10);
 	if (errno != 0 || *end != '\0' || slot == 0) {
@@ -1058,10 +1110,14 @@ command_create(
 		fprintf(stderr, "efiboot: BootOrder: %s\n", strerror(error));
 		return error;
 	}
+
+	/* Looks for the entry in the order. */
 	for (index = 0; index < order_count; index++) {
 		if (order[index] == number)
 			break;
 	}
+
+	/* Appends an entry the order does not hold. */
 	if (index == order_count) {
 		/* Refuses an order that has no room left. */
 		if (order_count == BOOT_ORDER_MAX) {
@@ -1128,11 +1184,15 @@ command_delete(
 		fprintf(stderr, "efiboot: BootOrder: %s\n", strerror(error));
 		return error;
 	}
+
+	/* Keeps every other number of the order. */
 	kept = 0;
 	for (index = 0; index < count; index++) {
 		if (order[index] != number)
 			order[kept++] = order[index];
 	}
+
+	/* Stores the shorter order. */
 	if (kept != count) {
 		error = order_write(order, kept);
 		if (error != 0) {
@@ -1155,6 +1215,7 @@ command_order(
 	const char *cursor;
 	unsigned number;
 	size_t count;
+	size_t length;
 	int error;
 
 	/* Reads each four-digit number before a comma or the end. */
@@ -1162,10 +1223,13 @@ command_order(
 	cursor = operand;
 	for (;;) {
 		/* Refuses a number that is not four digits followed by a comma or the end. */
-		if (strlen(cursor) < 4U || (cursor[4] != ',' && cursor[4] != '\0')) {
+		length = strlen(cursor);
+		if (length < 4U || (cursor[4] != ',' && cursor[4] != '\0')) {
 			fprintf(stderr, "efiboot: %s: not a list of boot entry numbers\n", operand);
 			return EINVAL;
 		}
+
+		/* Reads the four digits; a full order takes no more. */
 		memcpy(digits, cursor, 4U);
 		digits[4] = '\0';
 		error = number_parse(digits, &number);
@@ -1173,6 +1237,8 @@ command_order(
 			fprintf(stderr, "efiboot: %s: not a list of boot entry numbers\n", operand);
 			return EINVAL;
 		}
+
+		/* Adds the number to the order. */
 		order[count++] = (uint16_t)number;
 
 		/* Ends after the last number. */

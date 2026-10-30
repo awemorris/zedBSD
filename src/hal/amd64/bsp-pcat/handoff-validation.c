@@ -229,7 +229,6 @@ zbl6_uefi_runtime_descriptors_valid(
 
 		/* Refuses an unaligned range or one that wraps physical memory. */
 		bytes = pages * ZBL6_PAGE_SIZE;
-
 		if (((physical | virtual_start) & (ZBL6_PAGE_SIZE - 1U)) != 0 ||
 		    physical > UINT64_MAX - bytes)
 			return 0;

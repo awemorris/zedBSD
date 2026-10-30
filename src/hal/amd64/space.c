@@ -3001,6 +3001,7 @@ firmware_window_map(
 		    (physical + offset) | flags;
 	}
 
+	/* Lets other changes of the shared tables in again. */
 	registry_lock_leave(enabled);
 
 	/* Succeeded: the extent is mapped at the address the firmware was given. */
