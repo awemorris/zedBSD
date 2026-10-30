@@ -81,6 +81,8 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev24（q1708-i02 の途中、gradient・logical・overflow まで） | 964 | 1,085 | 115 | 39 | 2,203（63.45%） |
   | ours-dev25（66e610b8a、module・view-transition の parse・zoom まで） | 973 | 1,085 | 115 | 39 | 2,212（63.71%） |
   | ours-dev26（7727cb0b0、harness だけ測り直し。static・scripted・crash は dev25 のまま） | 976 | 1,085 | 115 | 39 | 2,215（63.80%） |
+  | ours-dev27（ad3b33639、2026-10-31、q1727-i01、4 runner を測り直し） | 986 | 1,107 | 235 | 41 | 2,369（68.23%） |
+  | ours-dev28（5b032c17b、harness・scripted・crash を測り直し。static は同じ source の部分測定の再実行 1,111 pass で後退 0、数えは 1,107） | 996 | 1,107 | 242 | 41 | 2,386（68.72%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -172,6 +174,19 @@ Origin: 2026-10-27 ユーザーの指示。
   - getComputedStyle(el, '::view-transition-*(name)')（bind/computed.c、page_vt_pseudo_style）と animation-* の computed。
   - 未対応（残り）: inline 要素の capture（inline-element-size・new-content-is-inline など約 10）、縦書きの massive element、iframe の transition（約 10）、shadow の ::part（6）、
     Web Animations（getAnimations・set-current-time・web-animations-api 約 8）、dialog・top layer、scrollbar・scroll の rebase、harness の pseudo-elements-valid の URL variant。
+
+再開点（2026-10-31、q1727-i01 の停止）:
+- 最後の全件の測定は ours-dev28（source 5b032c17b、`build/ws074-cmp/ours-dev28` の harness・scripted・crash と、static は `static-subset.py` の全件の再実行）。2,386 / 3,472 = 68.72%、
+  4 runner とも dev25/26 の PASS に対する後退 0。その後に commit は無い（この記録の commit だけ）。Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）。
+  gap 1,086: harness 481、static 445、scripted 154、crash 6。
+- 残りの大きな塊（dev28 の gap）: css-grid（harness 約 160: alignment の baseline 68・animation 12・subgrid、static 約 180: subgrid 44・alignment・abspos の orthogonal）、
+  css-flexbox（harness 約 60: baseline 31、static 約 144）、css-anchor-position（約 160: 要素の scroll 約 36、top layer 6、position-try の細部）、css-view-transitions（scripted 約 75 残り:
+  inline 要素の capture 約 10、iframe 約 10、縦書き、shadow ::part 6、Web Animations 約 8、dialog・top layer、scrollbar、harness の pseudo-elements-valid/invalid の URL variant・
+  querySelector での pseudo-element の SyntaxError・hit-test）、navigation-api（約 80: window.open・popup・joint session history）、css-viewport の zoom（static 21 と harness 3、
+  実効 zoom を cascade の長さに掛ける設計が要る）、css-writing-modes の sideways（static 約 40）、backdrop-filter（約 30）、shape-outside（16）。
+- 要素の scroll（overflow の scrollTop・scrollLeft）が無い（`bind_scroll_top_set` は root だけ）。anchor-scroll・position-visibility など約 36 件に効くが、行の座標が block 相対で paint・hit・geometry に散るため
+  設計が要る（layout_absolute の content 原点を scroll 分ずらす案は、inline の行・fragment が block 相対なので paint・hit・bounds も直す必要がある）。次に取り組む価値が大きい。
+- 道具: 一部の失敗の原因は ref-one.py（static）・scripted-one.py（scripted、`--chrome` で Chromium と見比べ）で PNG を見るのが早い。wpt-one.sh は URL variant の ID を扱えない。
 
 再開点（2026-10-30、q1708-i02 の停止）:
 - 最後の全件の測定は ours-dev25（static・scripted・crash は 66e610b8a、harness は dev26 の 7727cb0b0）。その後に commit は無い。
