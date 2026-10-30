@@ -718,7 +718,18 @@ probe_soc(
 
 	/* Maps the system control blocks, which hold the PLL settings. */
 	error = drv_vf2_syscon_init(&fdt);
-	if (error != 0) {
+	if (error == ENODEV) {
+		/*
+		 * A tree without the blocks is not in the binding of Linux's
+		 * mainline device tree, which the board's drivers read: StarFive's
+		 * U-Boot hands over its own tree when bootefi is given
+		 * ${fdtcontroladdr}.  The EFI partition carries the mainline trees.
+		 */
+		kern_logf("visionfive2: system control blocks unavailable (%d)\n", error);
+		kern_logf("visionfive2: the device tree is not Linux's mainline binding; boot with the EFI partition's "
+			  "dtb/jh7110-starfive-visionfive-2-v1.3b.dtb (or -v1.2a.dtb) loaded to ${fdt_addr_r} and passed to bootefi\n");
+		return;
+	} else if (error != 0) {
 		kern_logf("visionfive2: system control blocks unavailable (%d)\n", error);
 		return;
 	}

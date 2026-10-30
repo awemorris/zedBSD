@@ -103,6 +103,12 @@ serial_stop() {
 }
 
 say "start $(date '+%F %H:%M')"
+# A board that does not answer (an earlier run left it stopped) is cycled until SSH answers (up to three times).
+for try in 1 2 3; do
+	b true > /dev/null 2>&1 && break
+	say "start: board down, cycling ($try)"
+	cycle > /dev/null
+done
 say "board $(b 'uname -sm; cksum /boot/boot0/vmunix' 2>&1 | tr '\n' ' ')"
 bsudo "test -f $orig || cp -p /boot/boot0/vmunix $orig; sync"
 bcp "$VF2_HOST:$orig" "$out/board-vmunix" || { say "FAIL the board's kernel was not read back"; exit 1; }
