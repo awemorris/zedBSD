@@ -11,7 +11,7 @@ RISCV32_BSP_DIR_virt := bsp-virt
 # The kernel and the HAL read the compiler's freestanding headers and the
 # tree's include/ and src/, never the C library (as on the other ports).
 RISCV32_CPPFLAGS := -nostdlibinc -Iinclude -Isrc -I. \
-	-Isrc/hal/riscv32 -DHAL_ARCH_RISCV32 $(RISCV32_BOARD_DEFINE_$(ZEDBSD_BOARD)) \
+	-Isrc/hal/riscv32 -DHAL_ARCH_RISCV32 -DKERN_ATOMIC_SERIALIZED $(RISCV32_BOARD_DEFINE_$(ZEDBSD_BOARD)) \
 	-DKERN_USER_ABI_RISCV32
 RISCV32_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 

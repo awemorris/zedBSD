@@ -2,8 +2,9 @@
 set -eu
 
 repository=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-workspace=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-pci-service.XXXXXX")
-trap 'rm -rf "$workspace"' EXIT HUP INT TERM
+# The build folder is kept (the first argument, default build/ws014-pci-service).
+workspace=${1:-"$repository/build/ws014-pci-service"}
+mkdir -p "$workspace"
 compiler=${CC:-cc}
 
 # Links the actual PCI implementation and discards unrelated IRQ entry points.

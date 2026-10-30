@@ -1739,7 +1739,7 @@ kern_device_map(
 /* Finds the device tree. */
 void *
 kern_pmem_to_kernel(
-	hal_physaddr_t address)
+	kern_physaddr_t address)
 {
 	CHECK(address == FDT_PHYSICAL);
 	return tree_blob;

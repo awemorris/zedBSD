@@ -28,18 +28,23 @@
 #include <uapi/errno.h>
 
 #include "backend.h"
+#include "display.h"
 #include "text.h"
 
-/* Characters are 16-bit words; their attributes live in a second plane. */
-#define TEXT_CODE_VRAM		((volatile uint16_t *)0x800a0000)
-#define TEXT_ATTRIBUTE_VRAM	((volatile uint8_t *)0x800a2000)
-
 /*
- * The text memory's physical range under those kernel addresses: both
- * planes, in the hardware layer's map of low memory, which stays mapped.
+ * The text memory's physical range: both planes, in the first megabyte,
+ * which the kernel's straight map keeps mapped.
  */
 #define TEXT_VRAM_PHYSICAL	0x000a0000U
 #define TEXT_VRAM_BYTES		0x00004000U
+
+/* Characters are 16-bit words; their attributes live in a second plane. */
+#define TEXT_CODE_VRAM \
+	((volatile uint16_t *)(uintptr_t)(PC98_STRAIGHT_MAP_BASE + \
+	    TEXT_VRAM_PHYSICAL))
+#define TEXT_ATTRIBUTE_VRAM \
+	((volatile uint8_t *)(uintptr_t)(PC98_STRAIGHT_MAP_BASE + \
+	    TEXT_VRAM_PHYSICAL + 0x00002000U))
 
 #define TEXT_COLUMNS		80U
 #define TEXT_ROWS		25U
@@ -427,7 +432,7 @@ drv_pc98_text_end(
 	if (foreign && count != 0U)
 		return EBUSY;
 
-	/* Text memory lies in the hardware layer's map of low memory, which stays. */
+	/* Text memory lies in the kernel's straight map of low memory, which stays. */
 	overlaps = kern_text_range_overlaps(ranges, count, TEXT_VRAM_PHYSICAL, TEXT_VRAM_BYTES);
 	if (overlaps)
 		return EBUSY;

@@ -10,7 +10,7 @@ mkdir -p "$out"
 cc=${CC:-clang}
 status=0
 for arch in AMD64 I386; do
-	bits=; [ $arch = I386 ] && bits=-m32
+	bits=; [ $arch = I386 ] && bits="-m32 -DKERN_ATOMIC_SERIALIZED"
 	flags="-std=c11 -O1 -g -nostdlibinc -Iinclude -Isrc -I. -DKERN_UAPI_NATIVE -DKERN_KCRT_NATIVE -DHAL_ARCH_$arch
 		-ffreestanding -fno-builtin -Wall -Wextra -Werror $bits"
 	# shellcheck disable=SC2086

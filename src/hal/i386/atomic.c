@@ -12,6 +12,13 @@
 #include <hal/hal.h>
 
 /*
+ * The serialization region's entry points, declared as the macros of
+ * <hal/atomic.h> declare them, so that a definition which drifts from the
+ * macros does not compile.
+ */
+HAL_ATOMIC_ENTER_DECLARE();
+
+/*
  * An i386 has XCHG but no CMPXCHG.  This guard serializes the uncommon
  * read-modify-write and 64-bit operations across CPUs.  IRQs are disabled
  * before acquisition so an interrupt cannot recursively wait on the guard
@@ -22,11 +29,11 @@ static volatile unsigned atomic_guard;
 /*
  * Acquires the i386 atomic-operation guard.
  */
-hal_atomic_cookie_t
+uintptr_t
 hal_atomic_enter(
 	void)
 {
-	hal_atomic_cookie_t cookie;
+	uintptr_t cookie;
 
 	/* Preserves the caller's interrupt state while acquiring the guard. */
 	cookie = hal_irq_disable() ? 1U : 0U;
@@ -44,7 +51,7 @@ hal_atomic_enter(
  */
 void
 hal_atomic_leave(
-	hal_atomic_cookie_t cookie)
+	uintptr_t cookie)
 {
 	unsigned previous;
 

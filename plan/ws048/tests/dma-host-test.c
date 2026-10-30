@@ -25,6 +25,7 @@
 #include <kern/pmem.h>
 #include <uapi/errno.h>
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -357,7 +358,7 @@ kern_pmem_free(
 
 void *
 kern_pmem_to_kernel(
-	hal_physaddr_t address)
+	kern_physaddr_t address)
 {
 	CHECK(address >= PHYSICAL_BASE);
 	CHECK(address < PHYSICAL_BASE + sizeof(ram));

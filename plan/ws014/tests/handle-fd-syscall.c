@@ -198,6 +198,19 @@ record_lock_fcntl(
 }
 
 /*
+ * The calling thread's credential: the superuser's, all zero.  A socketpair
+ * send passes it on without a path to check it against.
+ */
+const struct ucred *
+cred_current(void)
+{
+	static struct ucred root;
+
+	/* The fixture's one credential. */
+	return &root;
+}
+
+/*
  * Rejects named socket resolution because this fixture uses real socketpairs.
  */
 int

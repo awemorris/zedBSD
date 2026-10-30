@@ -7,7 +7,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-isystem $(ZEDBSD_SYSROOT_I386)/usr/include \
 	-Iinclude -Isrc -Isrc/hal/i386 -I. \
-	-DHAL_ARCH_I386 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON
+	-DHAL_ARCH_I386 -DKERN_ATOMIC_SERIALIZED -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON
 HAL_PCAT_SOURCES := src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/x86/rtc.c src/hal/x86/boot-parameters.c src/hal/x86/io.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c src/hal/idle-suspend-unsupported.c \
 	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
 	src/hal/i386/ioapic.c \
@@ -27,7 +27,7 @@ ZEDBSD_KERN_CC += $(ZEDBSD_CONFIG_CPPFLAGS)
 # entry.c is built with this compiler rather than the common rule, and it
 # needs to know the machine as every other kernel object does: the tick rate
 # and the architecture's constants come from <hal/arch/i386.h>.
-ZEDBSD_KERN_CC += -DHAL_ARCH_I386
+ZEDBSD_KERN_CC += -DHAL_ARCH_I386 -DKERN_ATOMIC_SERIALIZED
 PCAT_GRAPHICS_OBJS :=
 ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
 PCAT_GRAPHICS_OBJS := \
@@ -555,7 +555,7 @@ $(foreach command,$(USER_BASIC_COMMANDS),\
 DYNAMIC_DIR := $(BUILD)/dynamic
 DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude \
 	-isystem $(ZEDBSD_SYSROOT_I386)/usr/include \
-	-DHAL_ARCH_I386 -DKERN_DYNAMIC_LIBC
+	-DHAL_ARCH_I386 -DKERN_ATOMIC_SERIALIZED -DKERN_DYNAMIC_LIBC
 DYNAMIC_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fPIC -fno-builtin \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-ftls-model=global-dynamic -Wall -Wextra -Werror -msoft-float \

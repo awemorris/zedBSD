@@ -8,8 +8,29 @@
 #ifndef HAL_HAL_ATOMIC_H
 #define HAL_HAL_ATOMIC_H
 
-#include <hal/arch.h>
-#include <hal/types.h>
+#include <stdint.h>
+
+/*
+ * Atomic operations
+ * -----------------
+ * This header is a contract of macros only: it declares nothing at file
+ * scope, so a translation unit that reads it and then undefines its macros
+ * keeps no name of the HAL.
+ *
+ * It is expected to be read through <hal/hal.h>, after <hal/arch.h> has
+ * given HAL_ATOMIC_STYLE_NATIVE, HAL_ATOMIC_STYLE_ENTER and the port's
+ * HAL_ATOMIC_STYLE.  A user that defines those three itself, as the
+ * kernel's own atomic header does from the build configuration, may also
+ * read it alone.  Such a user undefines the macros together with the
+ * include guard HAL_HAL_ATOMIC_H, so that a later <hal/hal.h> in the same
+ * translation unit reads the header again.
+ */
+#if !defined(HAL_ATOMIC_STYLE) || !defined(HAL_ATOMIC_STYLE_ENTER) || \
+    !defined(HAL_ATOMIC_STYLE_NATIVE)
+# error "HAL_ATOMIC_STYLE must be defined before <hal/atomic.h>"
+#endif
+
+#if HAL_ATOMIC_STYLE == HAL_ATOMIC_STYLE_ENTER
 
 /*
  * Atomic fallback serialization
@@ -19,24 +40,23 @@
  * sleep, and must exclude every CPU.  A local IRQ mask is sufficient only
  * for a HAL which guarantees uniprocessor execution.
  *
- * Both enter and leave are full compiler barriers.  Native ports instead use
- * compiler primitives hidden behind the HAL interface below.
+ * Both enter and leave are full compiler barriers.  hal_atomic_enter()
+ * returns a cookie which the matching hal_atomic_leave() takes back.
+ *
+ * The two functions are declared inside the block of each macro below, not
+ * at file scope.  The port's definitions are preceded by the same
+ * declarations at file scope, from HAL_ATOMIC_ENTER_DECLARE(), so that a
+ * definition which drifts from them does not compile.
  */
-typedef uintptr_t hal_atomic_cookie_t;
-
-#if HAL_ATOMIC_STYLE == HAL_ATOMIC_STYLE_ENTER
-
-hal_atomic_cookie_t
-hal_atomic_enter(void);
-
-void
-hal_atomic_leave(
-	hal_atomic_cookie_t cookie);
+#define HAL_ATOMIC_ENTER_DECLARE()					\
+	uintptr_t hal_atomic_enter(void);				\
+	void hal_atomic_leave(uintptr_t cookie)
 
 #define hal_atomic_load_acquire(pointer)					\
 	({									\
+		HAL_ATOMIC_ENTER_DECLARE();					\
 		__auto_type hal_atomic_pointer_ = (pointer);			\
-		hal_atomic_cookie_t hal_atomic_cookie_ = hal_atomic_enter();	\
+		uintptr_t hal_atomic_cookie_ = hal_atomic_enter();		\
 		__auto_type hal_atomic_result_ = *hal_atomic_pointer_;		\
 		hal_atomic_leave(hal_atomic_cookie_);				\
 		hal_atomic_result_;						\
@@ -47,9 +67,10 @@ hal_atomic_leave(
 
 #define hal_atomic_store_release(pointer, value)				\
 	do {									\
+		HAL_ATOMIC_ENTER_DECLARE();					\
 		__auto_type hal_atomic_pointer_ = (pointer);			\
 		__auto_type hal_atomic_value_ = (value);			\
-		hal_atomic_cookie_t hal_atomic_cookie_ = hal_atomic_enter();	\
+		uintptr_t hal_atomic_cookie_ = hal_atomic_enter();		\
 		*hal_atomic_pointer_ = hal_atomic_value_;			\
 		hal_atomic_leave(hal_atomic_cookie_);				\
 	} while (0)
@@ -59,9 +80,10 @@ hal_atomic_leave(
 
 #define hal_atomic_fetch_add_relaxed(pointer, value)				\
 	({									\
+		HAL_ATOMIC_ENTER_DECLARE();					\
 		__auto_type hal_atomic_pointer_ = (pointer);			\
 		__auto_type hal_atomic_value_ = (value);			\
-		hal_atomic_cookie_t hal_atomic_cookie_ = hal_atomic_enter();	\
+		uintptr_t hal_atomic_cookie_ = hal_atomic_enter();		\
 		__auto_type hal_atomic_previous_ = *hal_atomic_pointer_;	\
 		*hal_atomic_pointer_ = hal_atomic_previous_ +			\
 		    hal_atomic_value_;						\
@@ -74,9 +96,10 @@ hal_atomic_leave(
 
 #define hal_atomic_fetch_or_release(pointer, value)				\
 	({									\
+		HAL_ATOMIC_ENTER_DECLARE();					\
 		__auto_type hal_atomic_pointer_ = (pointer);			\
 		__auto_type hal_atomic_value_ = (value);			\
-		hal_atomic_cookie_t hal_atomic_cookie_ = hal_atomic_enter();	\
+		uintptr_t hal_atomic_cookie_ = hal_atomic_enter();		\
 		__auto_type hal_atomic_previous_ = *hal_atomic_pointer_;	\
 		*hal_atomic_pointer_ = hal_atomic_previous_ |			\
 		    hal_atomic_value_;						\
@@ -86,10 +109,11 @@ hal_atomic_leave(
 
 #define hal_atomic_compare_exchange_serialized(pointer, expected, desired)	\
 	({									\
+		HAL_ATOMIC_ENTER_DECLARE();					\
 		__auto_type hal_atomic_pointer_ = (pointer);			\
 		__auto_type hal_atomic_expected_ = (expected);			\
 		__auto_type hal_atomic_desired_ = (desired);			\
-		hal_atomic_cookie_t hal_atomic_cookie_ = hal_atomic_enter();	\
+		uintptr_t hal_atomic_cookie_ = hal_atomic_enter();		\
 		__auto_type hal_atomic_current_ = *hal_atomic_pointer_;		\
 		int hal_atomic_exchanged_ =					\
 		    hal_atomic_current_ == *hal_atomic_expected_;		\

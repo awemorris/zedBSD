@@ -18,7 +18,7 @@ M68K_LIBGCC := $(shell $(M68K_CC) -m68030 -msoft-float -print-libgcc-file-name)
 M68K_GCC_INCLUDE := $(shell $(M68K_CC) -print-file-name=include 2>/dev/null)
 M68K_CPPFLAGS := -nostdinc -isystem $(M68K_GCC_INCLUDE) -D__ZEDBSD__=1 \
 	-D_LIBC_LIMITS_H_ -Iinclude -Isrc -I. \
-	-Isrc/hal/m68k -DHAL_ARCH_M68K -DHAL_BOARD_X68K \
+	-Isrc/hal/m68k -DHAL_ARCH_M68K -DKERN_ATOMIC_SERIALIZED -DHAL_BOARD_X68K \
 	-DKERN_USER_ABI_M68K -DKERN_PAGE_SIZE=4096 \
 	-DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT \
 	-DKERN_INIT_PATH='"/x68k/bin/sh"'
@@ -34,7 +34,7 @@ M68K_USER_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 # compiler has no zedBSD sysroot, so its freestanding headers and the
 # target's define are given as for the kernel.
 M68K_USER_CPPFLAGS := -nostdinc -isystem $(M68K_GCC_INCLUDE) -D__ZEDBSD__=1 \
-	-Iinclude/libc -Iinclude -Isrc -I. -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K \
+	-Iinclude/libc -Iinclude -Isrc -I. -DHAL_ARCH_M68K -DKERN_ATOMIC_SERIALIZED -DKERN_USER_ABI_M68K \
 	-DKERN_USER_PAGE_SIZE=4096 -DKERN_NO_PRINTF_FLOAT -DZEDBSD_STATIC_TLS
 
 # These overrides make an explicit `libc-objects` request use the m68k kernel
