@@ -2,7 +2,7 @@
 
 # ws333-p005: 熱の core（前半: core・sensor の push・hw.thermal を写しから）
 
-Status: in-progress
+Status: in-progress（前半は済み、後半は p004 の後）
 Parent: [WS333](../ws.md)
 Queue: q1762-i01（P6、前半）
 
@@ -47,9 +47,12 @@ design.md §9 の p005 の前半（p004 の UAPI に依らない所）: 熱の c
 - わざと壊す確かめ（/tmp の写しで 5 つ）: PARTIAL を消す、跳ねの規則を消す、世代の比較を壊す、計数の mask を外す、hysteresis を外す — どれも該当の scenario が FAIL。
 - 全 20 port の vmunix（`plan/ws333/tests/build-vmunix-all.sh /tmp/p6-ws333/all`、各 make 30 分の上限）: 20 port 全部 rc=0、warning 0（amd64・intelmac・pcat・pc98・rpi4・rpi5・odroid-c5・visionfive2・zybo・armv7-virt・riscv64-virt・riscv32-virt・m68k-virt・ppc32-mac99・ppc64-pseries・mips32-malta・mips64-malta・mips32-rg350・sun4u・x68k）。20 port の `thermal.o` が最後の `thermal.c` より新しい事を確かめた。arm64・armv7・i386・riscv64 の sysroot は main の checkout の物を worktree の `build/<arch>/sysroot` に symlink で読むだけ（p003 と同じ）。
 
+- merge の後（main f7a9ae9e7 を merge した d299b5c84 と cpuperf.c の weak 外しの後の tree）: 全 20 port の vmunix をやり直して 20 port 全部 rc=0・warning 0、20 port の `thermal.o`・`cpuperf.o` が最後の source より新しい事、amd64 の vmunix に `kern_thermal_*` の weak・未定義の symbol が無い事（llvm-nm）を確かめた。cpuperf の host 試験（`plan/ws333/tests/cpuperf-host/run.sh`）PASS、熱の host 試験も merge の後に 13 scenario PASS。
+- QEMU amd64（`make ZEDBSD_CONFIG=plan/ws333/tests/config-amd64-boot.mk BUILD=/tmp/p6-ws333/img disk-image`、kernel の warning 0。`BOOT_MODE=uefi-usb plan/tools/boot-test.sh`、BOOT_THEN で root の login と `sysctl hw.thermal`）: PASS。画面の PNG（`/tmp/p6-ws333/boot2/login-after.png`）を見て、login の後に `hw.thermal: sensors=0`（QEMU の q35 は ACPI の thermal zone も _TMP の device も無いので 0。hw.thermal の 2 つの source の header が正しく読めた）を確かめた。console・serial の log は判定に使っていない。
+- 未実施: sensor のある機械（5330 の DPTF の participant、Pi 5）での hw.thermal の値の確かめ（実機の割当が要る）、arm64 の QEMU raspi4b の起動。
+
 ## 未実施・残り
 
-- QEMU amd64 の起動（boot-test.sh）は下の「QEMU」に。
 - 後半（p004 の後）: `/dev/thermal`（cdev・node・core の ioctl 1〜31・read と poll）、`/dev/thermal-inject` と試験の受け手、`/sbin/thermal` の熱の表示。
 - WMI の attach の試し直し（poll の thread、p017）、passive（p021）、非常（p016）、Pi 5 の fan の登録（p020）。
 - 規約の全文の見直しは p024。
