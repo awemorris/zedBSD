@@ -14,7 +14,7 @@ fresh_out "$out"
 
 lib=userland/desktop/libmedia
 if ! cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. \
-    plan/ws326/tests/backend/host-decode.c $lib/decoder.c $lib/bitstream.c $lib/picture.c $lib/bits.c $lib/h264sw-*.c \
+    plan/ws326/tests/backend/host-decode.c $lib/decoder.c $lib/bitstream.c $lib/picture.c $lib/bits.c $lib/h264sw-*.c $lib/vcodec-*.c \
     userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c \
     userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c \
     -lpthread -lm -o "$out/host-decode" > "$out/build.log" 2>&1; then

@@ -37,7 +37,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "userland/desktop/libmedia/h264sw-bits.h"
+#include "userland/desktop/libmedia/vcodec-bitreader.h"
 #include "userland/desktop/libmedia/h264sw-cabac.h"
 #include "userland/desktop/libmedia/h264sw-cabac-se.h"
 #include "userland/desktop/libmedia/h264sw-cavlc.h"
@@ -273,7 +273,7 @@ stream_end(
 	CHECK(writer.overflow == 0);
 
 	/* The slice data starts at the first bit. */
-	h264sw_bits_init(&ctx.bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&ctx.bits, writer.data, bitwriter_bytes(&writer));
 }
 
 /* Checks that a parse read exactly the bits of the stream's content and no more. */
@@ -1631,7 +1631,7 @@ check_truncated(void)
 	/* Parses every prefix; one that ends before the content does is an error. */
 	for (bytes = 0; bytes <= length; bytes++) {
 		env_make(H264SW_SLICE_I, 0, 1, 0, 0, 0, 26, ADDR);
-		h264sw_bits_init(&ctx.bits, writer.data, bytes);
+		vcodec_bitreader_init(&ctx.bits, writer.data, bytes);
 		status = h264sw_macroblock_parse(&ctx, 0);
 		if (bytes * 8U < content_bits)
 			CHECK(status == EINVAL);
@@ -1703,7 +1703,7 @@ check_fuzz_cavlc(void)
 		if (round % 2U == 0U)
 			data[0] = (uint8_t)(0x80U | (random_next() & 0x7fU));
 		env_make(slice_type, 0, 1U + random_next() % 4U, 1U + random_next() % 4U, (int)(random_next() & 1U), (int)(random_next() & 1U), (int)(random_next() % 52U), ADDR);
-		h264sw_bits_init(&ctx.bits, data, length);
+		vcodec_bitreader_init(&ctx.bits, data, length);
 		status = h264sw_macroblock_parse(&ctx, 0);
 		CHECK(status == 0 || status == EINVAL);
 		if (status == 0) {
@@ -1956,7 +1956,7 @@ static int
 cabac_end(
 	unsigned slice_type)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	int status;
 
 	/* The encoder's last bit is the stop bit when the last bin was end_of_slice_flag 1; the rest of the byte is zero. */
@@ -1965,7 +1965,7 @@ cabac_end(
 	CHECK(writer.overflow == 0);
 
 	/* Starts the decoder on the bytes and gives it the encoder's context variables. */
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	status = h264sw_cabac_start(&ctx.cabac, &bits, slice_type, 0U, 26);
 	CHECK(status == 0);
 	memcpy(ctx.cabac.state, initial_state, sizeof(initial_state));
@@ -2022,7 +2022,7 @@ check_cabac_pcm(void)
 
 	/* The two sides ended with the same context variables and no read went past the data. */
 	CHECK(memcmp(ctx.cabac.state, encoder.state, CABACWRITER_CONTEXTS) == 0);
-	CHECK(ctx.cabac.error == 0);
+	CHECK(ctx.cabac.engine.error == 0);
 }
 
 /*
@@ -2069,7 +2069,7 @@ check_cabac_skip(void)
 	for (index = 0; index < PCM_BYTES; index++)
 		CHECK(recon_pcm[2][index] == (uint8_t)(255U - index));
 	CHECK(memcmp(ctx.cabac.state, encoder.state, CABACWRITER_CONTEXTS) == 0);
-	CHECK(ctx.cabac.error == 0);
+	CHECK(ctx.cabac.engine.error == 0);
 }
 
 /*
@@ -2173,7 +2173,7 @@ check_cabac_inter(void)
 		}
 	}
 	CHECK(mbs[3].cbp == 0U);
-	CHECK(ctx.cabac.error == 0);
+	CHECK(ctx.cabac.engine.error == 0);
 
 	/* Parses the second macroblock, whose left neighbour is the first. */
 	mbs[4].slice = 0;
@@ -2189,7 +2189,7 @@ check_cabac_inter(void)
 	CHECK(ctx.syntax.mvd[0][0][0][1] == 0);
 	CHECK(mbs[4].cbp == 0U);
 	CHECK(mbs[4].qp == 26U);
-	CHECK(ctx.cabac.error == 0);
+	CHECK(ctx.cabac.engine.error == 0);
 
 	/* Both sides ended with the same context variables, so every element was read with the context it was written with, and the slice ends where the encoder ended it. */
 	CHECK(memcmp(ctx.cabac.state, encoder.state, CABACWRITER_CONTEXTS) == 0);
@@ -2201,7 +2201,7 @@ static void
 check_fuzz_cabac(void)
 {
 	static uint8_t data[300];
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	unsigned round;
 	unsigned slice_type;
 	unsigned index;
@@ -2225,7 +2225,7 @@ check_fuzz_cabac(void)
 		for (index = 0; index < length; index++)
 			data[index] = (uint8_t)random_next();
 		env_make(slice_type, 1, 1U + random_next() % 4U, 1U + random_next() % 4U, (int)(random_next() & 1U), (int)(random_next() & 1U), (int)(random_next() % 52U), ADDR);
-		h264sw_bits_init(&bits, data, length);
+		vcodec_bitreader_init(&bits, data, length);
 		status = h264sw_cabac_start(&ctx.cabac, &bits, slice_type, random_next() % 3U, ctx.qp);
 		if (status != 0)
 			continue;
@@ -2258,7 +2258,7 @@ check_fuzz_cabac(void)
 		slice_env(slice_type, (int)(round & 1U), random_next() % 9U);
 		header.num_ref_idx_active[0] = 1U + random_next() % 3U;
 		header.num_ref_idx_active[1] = 1U + random_next() % 3U;
-		h264sw_bits_init(&bits, data, length);
+		vcodec_bitreader_init(&bits, data, length);
 		if ((round & 1U) != 0U) {
 			status = h264sw_cabac_start(&ctx.cabac, &bits, slice_type, 0U, 26);
 			if (status != 0)

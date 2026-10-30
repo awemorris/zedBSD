@@ -30,7 +30,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "userland/desktop/libmedia/h264sw-bits.h"
+#include "userland/desktop/libmedia/vcodec-bitreader.h"
 #include "userland/desktop/libmedia/h264sw-cabac.h"
 #include "userland/desktop/libmedia/h264sw-cabac-se.h"
 #include "userland/desktop/libmedia/h264sw-context.h"
@@ -295,7 +295,7 @@ static void
 stream_end(
 	int end_flag)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	int status;
 
 	/* Puts the flag that ends the slice. */
@@ -308,7 +308,7 @@ stream_end(
 	CHECK(written.overflow == 0);
 
 	/* Starts the decoder on the bytes. */
-	h264sw_bits_init(&bits, written.data, bitwriter_bytes(&written));
+	vcodec_bitreader_init(&bits, written.data, bitwriter_bytes(&written));
 	status = h264sw_cabac_start(&ctx.cabac, &bits, stream_slice_type, 0U, 26);
 	CHECK(status == 0);
 
@@ -330,7 +330,7 @@ stream_check(
 	}
 
 	/* No read ran past the data. */
-	CHECK(ctx.cabac.error == 0);
+	CHECK(ctx.cabac.engine.error == 0);
 
 	/* The contexts the decoder used are the contexts the encoder used: their variables ended the same. */
 	CHECK(memcmp(ctx.cabac.state, writer.state, CABACWRITER_CONTEXTS) == 0);
@@ -807,7 +807,7 @@ check_mb_skip(
 	stream_end(1);
 	got = h264sw_cabac_mb_skip(&ctx);
 	CHECK(got == 0U);
-	CHECK(ctx.cabac.error != 0);
+	CHECK(ctx.cabac.engine.error != 0);
 }
 
 /* Checks mb_type of I slices: all 26 values under each neighbour setup. */
@@ -991,7 +991,7 @@ check_mb_type_errors(
 	CHECK(status == EINVAL && got == 0U);
 
 	/* Nothing was read: the first bin is still there. */
-	CHECK(ctx.cabac.error == 0);
+	CHECK(ctx.cabac.engine.error == 0);
 	CHECK(memcmp(ctx.cabac.state, initial_state, sizeof(initial_state)) == 0);
 }
 
@@ -1522,7 +1522,7 @@ check_mvd(
 	got = 12345;
 	status = h264sw_cabac_mvd(&ctx, 0U, 0U, 0U, 0U, &got);
 	CHECK(status == EINVAL);
-	CHECK(ctx.cabac.error == 0);
+	CHECK(ctx.cabac.engine.error == 0);
 	CHECK(h264sw_cabac_end_of_slice(&ctx) == 1U);
 
 	/* Arguments that no partition has: list 2, component 2, a location outside the macroblock. */
@@ -2164,7 +2164,7 @@ check_residual_errors(
 	int32_t untouched[64];
 	int32_t expected[16];
 	int32_t block[64];
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	unsigned coded;
 	unsigned index;
 	unsigned cat;
@@ -2269,12 +2269,12 @@ check_residual_errors(
 	stream_end(1);
 
 	/* Only the first three bytes of what was written are given to the decoder. */
-	h264sw_bits_init(&bits, written.data, 3U);
+	vcodec_bitreader_init(&bits, written.data, 3U);
 	status = h264sw_cabac_start(&ctx.cabac, &bits, H264SW_SLICE_I, 0U, 26);
 	if (status == 0) {
 		memcpy(ctx.cabac.state, initial_state, sizeof(initial_state));
 		status = h264sw_cabac_residual_block(&ctx, 5U, 0U, 0U, 0U, 63U, 64U, block, &coded);
-		CHECK(ctx.cabac.error != 0 || status != 0);
+		CHECK(ctx.cabac.engine.error != 0 || status != 0);
 	}
 }
 
@@ -2284,7 +2284,7 @@ check_fuzz(
 	void)
 {
 	uint8_t data[96];
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	unsigned iteration;
 	unsigned index;
 	unsigned slice_type;
@@ -2336,7 +2336,7 @@ check_fuzz(
 		header.num_ref_idx_active[1] = 1U + next_random() % 32U;
 
 		/* Starts the engine; a start the engine refuses is skipped. */
-		h264sw_bits_init(&bits, data, sizeof(data));
+		vcodec_bitreader_init(&bits, data, sizeof(data));
 		status = h264sw_cabac_start(&ctx.cabac, &bits, slice_type, 0U, (int)(number % 52U));
 		if (status != 0)
 			continue;

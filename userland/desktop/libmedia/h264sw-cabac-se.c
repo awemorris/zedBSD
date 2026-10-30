@@ -161,7 +161,7 @@ h264sw_cabac_mb_skip(
 		offset = SE_OFFSET_SKIP_B;
 	} else {
 		/* Any other slice type has no skipped macroblocks, so the caller made a mistake. */
-		ctx->cabac.error = 1;
+		ctx->cabac.engine.error = 1;
 		return 0;
 	}
 
@@ -598,7 +598,7 @@ h264sw_cabac_mvd(
 	}
 
 	/* Reads the sign, a bypass bin that is 1 for a negative value. */
-	bin = h264sw_cabac_bypass(&ctx->cabac);
+	bin = vcodec_cabac_bypass(&ctx->cabac.engine);
 
 	/* Refuses a value outside the range of 7.4.5.1, which is one larger in magnitude for a negative value. */
 	if (bin == 0U) {
@@ -766,7 +766,7 @@ h264sw_cabac_end_of_slice(
 	unsigned bin;
 
 	/* Decodes the bin with the termination procedure. */
-	bin = h264sw_cabac_terminate(&ctx->cabac);
+	bin = vcodec_cabac_terminate(&ctx->cabac.engine);
 
 	/* Reports the flag. */
 	return bin;
@@ -896,7 +896,7 @@ h264sw_cabac_residual_block(
 		}
 
 		/* Reads the sign, a bypass bin that is 1 for a negative level. */
-		sign = h264sw_cabac_bypass(&ctx->cabac);
+		sign = vcodec_cabac_bypass(&ctx->cabac.engine);
 
 		/* Refuses a level outside -2^15 .. 2^15 - 1, which is one larger in magnitude for a negative level. */
 		if (sign == 0U) {
@@ -1096,7 +1096,7 @@ se_mb_type_intra(
 	}
 
 	/* Bin 1, the terminate bin: 1 is I_PCM. */
-	bin = h264sw_cabac_terminate(&ctx->cabac);
+	bin = vcodec_cabac_terminate(&ctx->cabac.engine);
 	if (bin != 0U) {
 		*value = 25;
 		return 0;
@@ -1296,7 +1296,7 @@ se_exp_golomb_suffix(
 	/* Reads the unary part: each 1 adds 2^k to the value and raises k by one; the first 0 ends it. */
 	suffix = 0;
 	ones = 0;
-	bin = h264sw_cabac_bypass(&ctx->cabac);
+	bin = vcodec_cabac_bypass(&ctx->cabac.engine);
 	while (bin != 0U) {
 		ones++;
 
@@ -1306,13 +1306,13 @@ se_exp_golomb_suffix(
 
 		suffix += (uint32_t)1 << order;
 		order++;
-		bin = h264sw_cabac_bypass(&ctx->cabac);
+		bin = vcodec_cabac_bypass(&ctx->cabac.engine);
 	}
 
 	/* Reads the k bits that follow, most significant first. */
 	while (order > 0U) {
 		order--;
-		bin = h264sw_cabac_bypass(&ctx->cabac);
+		bin = vcodec_cabac_bypass(&ctx->cabac.engine);
 		suffix += (uint32_t)bin << order;
 	}
 

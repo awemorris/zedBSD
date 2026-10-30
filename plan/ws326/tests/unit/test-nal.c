@@ -19,7 +19,7 @@
 
 #include <errno.h>
 
-/* Checks the byte stream cases of h264sw_nal_find. */
+/* Checks the byte stream cases of vcodec_nal_find. */
 static void
 test_find(
 	void)
@@ -46,34 +46,34 @@ test_find(
 
 	/* The first NAL unit follows the four-byte start code; the cursor stops at the next prefix. */
 	cursor = 0U;
-	found = h264sw_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
 	CHECK(found == 1);
 	CHECK(nal == stream + 7);
 	CHECK(nal_size == 3U);
 	CHECK(cursor == 10U);
 
 	/* The second ends before its trailing zero bytes and the zero_byte of the next start code. */
-	found = h264sw_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
 	CHECK(found == 1);
 	CHECK(nal == stream + 13);
 	CHECK(nal_size == 2U);
 	CHECK(cursor == 19U);
 
 	/* The third runs to the end of the data without its trailing zero bytes. */
-	found = h264sw_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
 	CHECK(found == 1);
 	CHECK(nal == stream + 22);
 	CHECK(nal_size == 2U);
 	CHECK(cursor == sizeof(stream));
 
 	/* Nothing is left: 0, and the cursor stays at the end. */
-	found = h264sw_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
 	CHECK(found == 0);
 	CHECK(cursor == sizeof(stream));
 
 	/* Two start codes in a row delimit an empty NAL unit, which is skipped. */
 	cursor = 0U;
-	found = h264sw_nal_find(twice, sizeof(twice), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(twice, sizeof(twice), &cursor, &nal, &nal_size);
 	CHECK(found == 1);
 	CHECK(nal == twice + 6);
 	CHECK(nal_size == 2U);
@@ -81,36 +81,36 @@ test_find(
 
 	/* Bytes 00 00 03 inside a NAL unit are not a start code. */
 	cursor = 0U;
-	found = h264sw_nal_find(inner, sizeof(inner), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(inner, sizeof(inner), &cursor, &nal, &nal_size);
 	CHECK(found == 1);
 	CHECK(nal == inner + 3);
 	CHECK(nal_size == 6U);
 
 	/* No start code: 0, and the cursor goes to the end. */
 	cursor = 0U;
-	found = h264sw_nal_find(none, sizeof(none), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(none, sizeof(none), &cursor, &nal, &nal_size);
 	CHECK(found == 0);
 	CHECK(cursor == sizeof(none));
 
 	/* A start code with nothing after it delimits an empty NAL unit. */
 	cursor = 0U;
-	found = h264sw_nal_find(only_prefix, sizeof(only_prefix), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(only_prefix, sizeof(only_prefix), &cursor, &nal, &nal_size);
 	CHECK(found == 0);
 	CHECK(cursor == sizeof(only_prefix));
 
 	/* A cursor in the middle starts the search there. */
 	cursor = 8U;
-	found = h264sw_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
 	CHECK(found == 1);
 	CHECK(nal == stream + 13);
 
 	/* A cursor beyond the data, and no data at all, find nothing. */
 	cursor = 1000U;
-	found = h264sw_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(stream, sizeof(stream), &cursor, &nal, &nal_size);
 	CHECK(found == 0);
 	CHECK(cursor == sizeof(stream));
 	cursor = 0U;
-	found = h264sw_nal_find(NULL, 0U, &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(NULL, 0U, &cursor, &nal, &nal_size);
 	CHECK(found == 0);
 	CHECK(cursor == 0U);
 }
@@ -300,7 +300,7 @@ test_round_trip(
 
 	/* The NAL unit is found whole: the escaping never makes a start code. */
 	cursor = 0U;
-	found = h264sw_nal_find(stream, used, &cursor, &found_nal, &found_size);
+	found = vcodec_nal_find(stream, used, &cursor, &found_nal, &found_size);
 	CHECK(found == 1);
 	CHECK(found_size == nal_size);
 	CHECK(memcmp(found_nal, nal, nal_size) == 0);
@@ -353,7 +353,7 @@ test_garbage(
 		found = 1;
 		while (found != 0) {
 			previous = cursor;
-			found = h264sw_nal_find(bytes, size, &cursor, &nal, &nal_size);
+			found = vcodec_nal_find(bytes, size, &cursor, &nal, &nal_size);
 			if (found == 0)
 				break;
 			if (cursor <= previous)

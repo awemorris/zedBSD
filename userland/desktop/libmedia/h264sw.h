@@ -6,8 +6,8 @@
  */
 
 /*
- * The limits and conventions shared by every part of libmedia's software
- * H.264 decoder.
+ * The range and the limits of libmedia's software H.264 decoder, shared
+ * by every part of it.
  *
  * The decoder reads progressive frames of 8-bit 4:2:0 streams: the
  * Constrained Baseline, Baseline, Main and High profiles, and streams of
@@ -16,35 +16,9 @@
  * above 8, lossless coding, slice groups, data partitioning and the SP
  * and SI slices are refused.  Redundant pictures are skipped.
  *
- * Every function that reads the bitstream treats it as untrusted: it never
- * reads outside its buffers, never indexes an array with a value it has
- * not checked against the array, and never loops without a bound that the
- * buffer sizes or these limits give.  A failure is returned, never asserted.
- *
- * Arithmetic never relies on undefined or implementation-defined
- * behaviour, whatever the bitstream holds: no signed overflow (products
- * of levels and scales, sums of picture order counts, scaled motion
- * vectors are computed in int64_t where int32_t could overflow); no left
- * shift of a negative value (a formula's "x << n" on a signed x is
- * written as x * (1 << n)); and a value is clamped or wrapped by
- * explicit arithmetic to the range of a narrower type before it is
- * stored in it.
- *
- * The error values, used alike by every part:
- *
- *   0        Succeeded.
- *   EINVAL   The bitstream breaks the syntax or the semantics of the
- *            specification (a value out of its range, a read past the end
- *            of a NAL unit, a reference to an absent parameter set).
- *   ENOTSUP  The bitstream is valid but uses a tool or a format outside
- *            the range above.
- *   ENOMEM   An allocation failed, or a frame pool reached its limit.
- *   ENOBUFS  A buffer or queue the caller sized is too small (a caller's
- *            mistake, or an output queue the caller has not emptied).
- *   EBUSY    The decoder holds output the caller must take first.
- *
- * No part keeps global state: everything lives in the structures a
- * decoder owns, so two decoders run on two threads without locks.
+ * The conventions of every part (untrusted input, arithmetic without
+ * undefined behaviour, the error values, no global state) are those of
+ * vcodec.h.
  */
 
 #ifndef LIBMEDIA_H264SW_H
@@ -52,6 +26,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include "vcodec.h"
 
 /*
  * The clause, table and equation numbers in the comments of these files
@@ -77,14 +53,6 @@
 /* The parameter set id ranges (7.4.2.1.1 seq_parameter_set_id, 7.4.2.2 pic_parameter_set_id). */
 #define H264SW_SPS_IDS 32U
 #define H264SW_PPS_IDS 256U
-
-/*
- * Marks a parameter a function does not use, so the compiler does not
- * warn about it.
- */
-#ifndef UNUSED_PARAMETER
-#define UNUSED_PARAMETER(name) ((void)(name))
-#endif
 
 /* The samples of one macroblock: 16x16 luma and two 8x8 chroma blocks (4:2:0). */
 #define H264SW_MB_LUMA 256U

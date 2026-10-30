@@ -1,6 +1,6 @@
 #!/bin/sh
 # The whole-stream test of the software H.264 decoder (libmedia's h264sw-*): decode-stream.c is built
-# with every h264sw-*.c except the back end and bits.c, with ASan and UBSan, and
+# with every h264sw-*.c and vcodec-*.c except the back end, and bits.c, with ASan and UBSan, and
 #  1. decodes each sample stream and compares the MD5 of every output frame (cropped, I420) with the
 #     frames of the host's ffmpeg (the secondary oracle): the samples of plan/ws083/tests/streams and
 #     plan/ws236/tests, and short 352x288 streams made here with ffmpeg's libx264 (CAVLC Baseline,
@@ -21,7 +21,7 @@ fresh_out "$out"
 status=0
 
 modules=""
-for file in userland/desktop/libmedia/h264sw-*.c; do
+for file in userland/desktop/libmedia/h264sw-*.c userland/desktop/libmedia/vcodec-*.c; do
 	case "$file" in
 	*/h264sw-backend.c) ;;
 	*) modules="$modules $file" ;;

@@ -12,7 +12,7 @@
  * CABAC), and the syntax of one macroblock (macroblock_layer 7.3.5,
  * mb_pred 7.3.5.1, sub_mb_pred 7.3.5.2, residual 7.3.5.3 with
  * residual_luma 7.3.5.3.1) read with CAVLC (h264sw-cavlc.h and the
- * descriptors of h264sw-bits.h) or CABAC (h264sw-cabac-se.h).
+ * descriptors of vcodec-bitreader.h) or CABAC (h264sw-cabac-se.h).
  *
  * The parsing writes the macroblock's syntax into ctx->syntax and the
  * fields of the current struct h264sw_mb entry that the contexts of the
@@ -68,7 +68,7 @@ int h264sw_slice_data(struct h264sw_slice_ctx *ctx);
  * skipped: then only the inferred values are set (type P_Skip or
  * B_Skip, cbp 0, qp_delta 0, the entry's qp the predictor's).
  * Otherwise: mb_type (and for I_PCM the alignment and the samples, via
- * h264sw_cabac_pcm for CABAC or the reader for CAVLC), the
+ * vcodec_cabac_pcm for CABAC or the reader for CAVLC), the
  * transform_size_8x8_flag where 7.3.5 reads it (for I_NxN after mb_type;
  * for the inter kinds after coded_block_pattern when the conditions of
  * 7.3.5 hold, including direct_8x8_inference_flag for B_Direct_16x16 and

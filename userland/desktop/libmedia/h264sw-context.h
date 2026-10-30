@@ -23,7 +23,7 @@
 #define LIBMEDIA_H264SW_CONTEXT_H
 
 #include "h264sw.h"
-#include "h264sw-bits.h"
+#include "vcodec-bitreader.h"
 #include "h264sw-cabac.h"
 #include "h264sw-direct.h"
 #include "h264sw-frame.h"
@@ -179,7 +179,7 @@ struct h264sw_slice_ctx {
 	struct h264sw_weights weights;
 	struct h264sw_direct direct;
 
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	int cabac_mode;
 	struct h264sw_cabac cabac;
 

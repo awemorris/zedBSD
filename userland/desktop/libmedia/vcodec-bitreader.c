@@ -6,10 +6,11 @@
  */
 
 /*
- * The bit reader of the software H.264 decoder (7.2, 9.1).
+ * The bit reader of libmedia's software video codecs (H.264 7.2 and 9.1,
+ * H.265 7.2 and 9.2).
  */
 
-#include "h264sw-bits.h"
+#include "vcodec-bitreader.h"
 
 #include <errno.h>
 #include <stddef.h>
@@ -27,7 +28,7 @@
 #define BITS_FETCH_BYTES 5U
 
 /* Static function declarations. */
-static uint32_t bits_fetch(const struct h264sw_bits *bits, size_t position, unsigned count);
+static uint32_t bits_fetch(const struct vcodec_bitreader *bits, size_t position, unsigned count);
 static size_t bits_stop_find(const uint8_t *data, size_t size);
 
 /*
@@ -38,8 +39,8 @@ static size_t bits_stop_find(const uint8_t *data, size_t size);
  * nonzero byte.
  */
 void
-h264sw_bits_init(
-	struct h264sw_bits *bits,
+vcodec_bitreader_init(
+	struct vcodec_bitreader *bits,
 	const uint8_t *data,
 	size_t size)
 {
@@ -64,8 +65,8 @@ h264sw_bits_init(
  * the reader got.
  */
 uint32_t
-h264sw_bits_u(
-	struct h264sw_bits *bits,
+vcodec_bitreader_u(
+	struct vcodec_bitreader *bits,
 	unsigned count)
 {
 	uint32_t value;
@@ -86,7 +87,7 @@ h264sw_bits_u(
 		return 0U;
 
 	/* Refuses a read that would pass the end of the RBSP. */
-	left = h264sw_bits_left(bits);
+	left = vcodec_bitreader_left(bits);
 	if ((size_t)count > left) {
 		bits->error = EINVAL;
 		return 0U;
@@ -102,13 +103,13 @@ h264sw_bits_u(
 
 /* Reads u(1), the commonest read (flags). */
 uint32_t
-h264sw_bits_u1(
-	struct h264sw_bits *bits)
+vcodec_bitreader_u1(
+	struct vcodec_bitreader *bits)
 {
 	uint32_t value;
 
 	/* Reads one bit through the general read. */
-	value = h264sw_bits_u(bits, 1U);
+	value = vcodec_bitreader_u(bits, 1U);
 
 	/* Reports the bit. */
 	return value;
@@ -120,8 +121,8 @@ h264sw_bits_u1(
  * Bits beyond the end of the RBSP read as 0.
  */
 uint32_t
-h264sw_bits_peek(
-	struct h264sw_bits *bits,
+vcodec_bitreader_peek(
+	struct vcodec_bitreader *bits,
 	unsigned count)
 {
 	uint32_t value;
@@ -141,8 +142,8 @@ h264sw_bits_peek(
 
 /* Moves position by count bits; moving past size * 8 sets error and leaves position at size * 8. */
 void
-h264sw_bits_skip(
-	struct h264sw_bits *bits,
+vcodec_bitreader_skip(
+	struct vcodec_bitreader *bits,
 	size_t count)
 {
 	size_t left;
@@ -152,7 +153,7 @@ h264sw_bits_skip(
 		return;
 
 	/* Moving past the end parks the reader at the end and marks the error. */
-	left = h264sw_bits_left(bits);
+	left = vcodec_bitreader_left(bits);
 	if (count > left) {
 		bits->position = bits->size * 8U;
 		bits->error = EINVAL;
@@ -171,8 +172,8 @@ h264sw_bits_skip(
  * code is at most 63 bits, so the zeros are counted in a 32-bit peek.
  */
 uint32_t
-h264sw_bits_ue(
-	struct h264sw_bits *bits)
+vcodec_bitreader_ue(
+	struct vcodec_bitreader *bits)
 {
 	uint32_t window;
 	uint32_t suffix;
@@ -203,7 +204,7 @@ h264sw_bits_ue(
 	}
 
 	/* Refuses a code whose prefix, stop bit and suffix pass the end of the RBSP. */
-	left = h264sw_bits_left(bits);
+	left = vcodec_bitreader_left(bits);
 	if ((size_t)(2U * zeros + 1U) > left) {
 		bits->error = EINVAL;
 		return 0U;
@@ -213,7 +214,7 @@ h264sw_bits_ue(
 	bits->position += (size_t)(zeros + 1U);
 
 	/* Reads the suffix; a zero-length suffix is 0. */
-	suffix = h264sw_bits_u(bits, zeros);
+	suffix = vcodec_bitreader_u(bits, zeros);
 
 	/* Assembles codeNum = 2^leadingZeroBits - 1 + suffix, at most 2^32 - 2. */
 	code_num = ((uint32_t)1U << zeros) - 1U + suffix;
@@ -229,15 +230,15 @@ h264sw_bits_ue(
  * negative value -(k / 2); both fit in int32_t for codeNum up to 2^32 - 2.
  */
 int32_t
-h264sw_bits_se(
-	struct h264sw_bits *bits)
+vcodec_bitreader_se(
+	struct vcodec_bitreader *bits)
 {
 	uint32_t code_num;
 	uint32_t magnitude;
 	int32_t value;
 
 	/* Reads the codeNum of the signed code. */
-	code_num = h264sw_bits_ue(bits);
+	code_num = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return 0;
 
@@ -263,8 +264,8 @@ h264sw_bits_se(
  * range it is an ue(v).
  */
 uint32_t
-h264sw_bits_te(
-	struct h264sw_bits *bits,
+vcodec_bitreader_te(
+	struct vcodec_bitreader *bits,
 	uint32_t range)
 {
 	uint32_t bit;
@@ -278,12 +279,12 @@ h264sw_bits_te(
 
 	/* A range above 1 is coded like ue(v). */
 	if (range > 1U) {
-		value = h264sw_bits_ue(bits);
+		value = vcodec_bitreader_ue(bits);
 		return value;
 	}
 
 	/* A range of 1 is one bit whose value is the inverse of the bit read. */
-	bit = h264sw_bits_u1(bits);
+	bit = vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return 0U;
 
@@ -296,8 +297,8 @@ h264sw_bits_te(
 
 /* Reports whether position is on a byte boundary (byte_aligned(), 7.2). */
 int
-h264sw_bits_aligned(
-	const struct h264sw_bits *bits)
+vcodec_bitreader_aligned(
+	const struct vcodec_bitreader *bits)
 {
 	/* A position that is not a multiple of 8 is inside a byte. */
 	if ((bits->position & 7U) != 0U)
@@ -309,8 +310,8 @@ h264sw_bits_aligned(
 
 /* Returns the bits left before size * 8. */
 size_t
-h264sw_bits_left(
-	const struct h264sw_bits *bits)
+vcodec_bitreader_left(
+	const struct vcodec_bitreader *bits)
 {
 	size_t total;
 	size_t left;
@@ -330,8 +331,8 @@ h264sw_bits_left(
  * the data and the stop bit itself does not.
  */
 int
-h264sw_bits_more_rbsp_data(
-	const struct h264sw_bits *bits)
+vcodec_bitreader_more_rbsp_data(
+	const struct vcodec_bitreader *bits)
 {
 	/* A broken reader has no more data, so a loop on it ends. */
 	if (bits->error != 0)
@@ -352,8 +353,8 @@ h264sw_bits_more_rbsp_data(
  * already; what is checked is that the reader stands on that bit.
  */
 int
-h264sw_bits_trailing(
-	struct h264sw_bits *bits)
+vcodec_bitreader_trailing(
+	struct vcodec_bitreader *bits)
 {
 	/* A broken reader cannot be at the trailing bits. */
 	if (bits->error != 0)
@@ -383,7 +384,7 @@ h264sw_bits_trailing(
  */
 static uint32_t
 bits_fetch(
-	const struct h264sw_bits *bits,
+	const struct vcodec_bitreader *bits,
 	size_t position,
 	unsigned count)
 {

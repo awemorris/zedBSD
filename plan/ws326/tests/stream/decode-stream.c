@@ -33,7 +33,7 @@
 
 #include "userland/desktop/libmedia/h264sw-decoder.h"
 #include "userland/desktop/libmedia/h264sw-nal.h"
-#include "userland/desktop/libmedia/h264sw-bits.h"
+#include "userland/desktop/libmedia/vcodec-bitreader.h"
 #include "userland/desktop/libmedia/h264sw-slice.h"
 
 #include <errno.h>
@@ -537,7 +537,7 @@ feed(
 	if (from >= 3U)
 		cursor = from - 3U;
 	for (;;) {
-		found = h264sw_nal_find(data, size, &cursor, &nal, &nal_size);
+		found = vcodec_nal_find(data, size, &cursor, &nal, &nal_size);
 		if (!found)
 			break;
 		if ((size_t)(nal - data) >= to)
@@ -580,7 +580,7 @@ feed_parameter_sets(
 	/* Walks the NAL units before the offset and gives only the parameter sets. */
 	cursor = 0U;
 	for (;;) {
-		found = h264sw_nal_find(data, size, &cursor, &nal, &nal_size);
+		found = vcodec_nal_find(data, size, &cursor, &nal, &nal_size);
 		if (!found)
 			break;
 		if ((size_t)(nal - data) >= to)
@@ -658,7 +658,7 @@ first_picture_at(
 	/* Walks the NAL units from the offset. */
 	cursor = from;
 	for (;;) {
-		found = h264sw_nal_find(data, size, &cursor, &nal, &nal_size);
+		found = vcodec_nal_find(data, size, &cursor, &nal, &nal_size);
 		if (!found)
 			return 0;
 		if (nal_size < 2U)
@@ -1025,7 +1025,7 @@ slice_type_at(
 {
 	static uint8_t rbsp[STREAM_MAX_FILE / 16U];
 	struct h264sw_nal unit;
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	const uint8_t *nal;
 	size_t nal_size;
 	size_t cursor;
@@ -1037,7 +1037,7 @@ slice_type_at(
 	cursor = 0U;
 	if (offset >= 3U)
 		cursor = offset - 3U;
-	found = h264sw_nal_find(data, size, &cursor, &nal, &nal_size);
+	found = vcodec_nal_find(data, size, &cursor, &nal, &nal_size);
 	if (!found)
 		return 99U;
 	if (nal_size > sizeof(rbsp))
@@ -1047,9 +1047,9 @@ slice_type_at(
 		return 99U;
 
 	/* Reads first_mb_in_slice, then slice_type (7.3.3). */
-	h264sw_bits_init(&bits, unit.rbsp, unit.rbsp_size);
-	(void)h264sw_bits_ue(&bits);
-	slice_type = h264sw_bits_ue(&bits);
+	vcodec_bitreader_init(&bits, unit.rbsp, unit.rbsp_size);
+	(void)vcodec_bitreader_ue(&bits);
+	slice_type = vcodec_bitreader_ue(&bits);
 	if (bits.error)
 		return 99U;
 

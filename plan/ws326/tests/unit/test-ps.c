@@ -476,9 +476,9 @@ read_sps_bytes(
 	const uint8_t *data,
 	size_t size)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 
-	h264sw_bits_init(&bits, data, size);
+	vcodec_bitreader_init(&bits, data, size);
 	return h264sw_ps_read_sps(&store, &bits);
 }
 
@@ -488,9 +488,9 @@ read_pps_bytes(
 	const uint8_t *data,
 	size_t size)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 
-	h264sw_bits_init(&bits, data, size);
+	vcodec_bitreader_init(&bits, data, size);
 	return h264sw_ps_read_pps(&store, &bits);
 }
 
