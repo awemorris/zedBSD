@@ -79,12 +79,13 @@ page_view_transition(
 		if (error != 0 || page->layout.root == NULL)
 			return 0;
 		page->transition_on = 1;
+		page->transition.heap = page->heap;
 		error = layout_transition_measure(&page->layout, &page->transition, 1);
 		for (index = 0; error == 0 && index < page->transition.count; index++) {
 			entry = &page->transition.names[index];
 			box = NULL;
 			if (!entry->is_root) {
-				box = layout_transition_box(page->layout.root, entry->name, 0);
+				box = layout_transition_box(&page->transition, page->layout.root, entry->name, 0);
 				if (box == NULL)
 					continue;
 			}

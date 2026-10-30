@@ -332,6 +332,8 @@ struct layout_transition {
 	size_t count;
 	size_t capacity;
 	int show;
+	/* The heap the generated names (match-element's) are atoms of. */
+	struct vm_heap *heap;
 	/* The seconds the animations of the pseudo-elements have run (they start when the tree is shown). */
 	float elapsed;
 };
@@ -401,7 +403,8 @@ int layout_contains_fixed(const struct layout_box *box);
 /* View transitions (transition.c). */
 struct layout_transition_name *layout_transition_find(const struct layout_transition *transition, const struct vm_string *name);
 int layout_transition_measure(const struct layout_tree *tree, struct layout_transition *transition, int old_state);
-const struct layout_box *layout_transition_box(const struct layout_box *box, const struct vm_string *name, int depth);
+const struct layout_box *layout_transition_box(const struct layout_transition *transition, const struct layout_box *box, const struct vm_string *name, int depth);
+struct vm_string *layout_transition_name_of(const struct layout_transition *transition, const struct layout_box *box);
 void layout_transition_release(struct layout_transition *transition);
 float layout_transition_progress(const struct css_style *style, float elapsed);
 int layout_transition_group_rect(const struct layout_transition_name *name, const struct css_style *style, float elapsed, struct layout_rect *rect);

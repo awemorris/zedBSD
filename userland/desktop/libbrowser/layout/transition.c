@@ -15,13 +15,40 @@
 #include "paint/paint.h"
 
 #include <errno.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static int transition_collect(const struct layout_box *box, struct layout_transition *transition, int old_state, layout_unit viewport_width, layout_unit viewport_height, int depth);
 static struct layout_transition_name *transition_add(struct layout_transition *transition, struct vm_string *name);
 static void transition_rect(const struct layout_box *box, struct layout_rect *rect);
-static float transition_ease(float progress);
+static float transition_ease(float progress, const struct vm_string *timing);
+static void transition_sort(const struct layout_tree *tree, struct layout_transition *transition);
+
+/*
+ * The name a box has in a transition: its view-transition-name, or for match-element a name made from its
+ * element (the same one in both states), or NULL.
+ */
+struct vm_string *
+layout_transition_name_of(
+	const struct layout_transition *transition,
+	const struct layout_box *box)
+{
+	struct vm_string *name;
+	char text[48];
+	uint16_t units[48];
+	size_t index;
+	int length;
+
+	name = box->style.view_transition_name;
+	if (name == NULL || transition->heap == NULL || !vm_string_equal_ascii(name, "match-element"))
+		return name;
+	length = snprintf(text, sizeof(text), "-ua-match-%llx", (unsigned long long)(uintptr_t)box->node);
+	for (index = 0; index < (size_t)length; index++)
+		units[index] = (uint16_t)text[index];
+	return vm_atom_from_units(transition->heap, units, (size_t)length);
+}
 
 /* Finds the entry of a name (NULL when the transition has none). */
 struct layout_transition_name *
@@ -43,6 +70,7 @@ layout_transition_find(
 /* Finds the box of a name in a laid out tree (NULL: none). */
 const struct layout_box *
 layout_transition_box(
+	const struct layout_transition *transition,
 	const struct layout_box *box,
 	const struct vm_string *name,
 	int depth)
@@ -53,10 +81,10 @@ layout_transition_box(
 	if (depth > LAYOUT_DEPTH_MAX || box->vt_tree)
 		return NULL;
 	if (box->node != NULL && box->parent != NULL && box->style.view_transition_name != NULL &&
-	    (box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED) && vm_string_equal(box->style.view_transition_name, name))
+	    (box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED) && vm_string_equal(layout_transition_name_of(transition, box), name))
 		return box;
 	for (child = box->first_child; child != NULL; child = child->next) {
-		found = layout_transition_box(child, name, depth + 1);
+		found = layout_transition_box(transition, child, name, depth + 1);
 		if (found != NULL)
 			return found;
 	}
@@ -128,6 +156,7 @@ transition_collect(
 	const struct layout_box *child;
 	struct layout_transition_name *entry;
 	struct layout_rect rect;
+	struct vm_string *name;
 	int error;
 
 	if (depth > LAYOUT_DEPTH_MAX)
@@ -136,7 +165,8 @@ transition_collect(
 		return 0;
 	if ((box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED) && box->node != NULL &&
 	    box->style.view_transition_name != NULL && box->style.display != CSS_DISPLAY_NONE) {
-		entry = layout_transition_find(transition, box->style.view_transition_name);
+		name = layout_transition_name_of(transition, box);
+		entry = layout_transition_find(transition, name);
 		transition_rect(box, &rect);
 		if (box->parent == NULL) {
 			/* The root is the whole viewport. */
@@ -148,7 +178,7 @@ transition_collect(
 		if (old_state) {
 			if (entry != NULL && entry->has_old)
 				return EEXIST;
-			entry = transition_add(transition, box->style.view_transition_name);
+			entry = transition_add(transition, name);
 			if (entry == NULL)
 				return ENOMEM;
 			entry->has_old = 1;
@@ -159,7 +189,7 @@ transition_collect(
 			if (entry != NULL && entry->has_new)
 				return EEXIST;
 			if (entry == NULL) {
-				entry = transition_add(transition, box->style.view_transition_name);
+				entry = transition_add(transition, name);
 				if (entry == NULL)
 					return ENOMEM;
 			}
@@ -188,6 +218,7 @@ layout_transition_measure(
 	int old_state)
 {
 	size_t index;
+	int error;
 
 	if (tree->root == NULL)
 		return EINVAL;
@@ -195,13 +226,85 @@ layout_transition_measure(
 		for (index = 0; index < transition->count; index++)
 			transition->names[index].has_new = 0;
 	}
-	return transition_collect(tree->root, transition, old_state, tree->viewport_width, tree->viewport_height, 0);
+	error = transition_collect(tree->root, transition, old_state, tree->viewport_width, tree->viewport_height, 0);
+	if (error != 0)
+		return error;
+	transition_sort(tree, transition);
+	return 0;
 }
 
-/* The ease timing function: cubic-bezier(0.25, 0.1, 0.25, 1). */
+/*
+ * Puts the entries in the order their boxes are painted in (the groups stack that way): the boxes of the normal
+ * flow in tree order, between the positioned boxes below them and above them in their stacking order.  The root
+ * stays first.
+ */
+static void
+transition_sort(
+	const struct layout_tree *tree,
+	struct layout_transition *transition)
+{
+	struct wb_vector order;
+	struct layout_transition_name held;
+	const struct layout_box *box;
+	const struct layout_box *layer;
+	size_t flow_index;
+	size_t first;
+	size_t index;
+	size_t other;
+	size_t slot;
+	double *keys;
+	double key;
+
+	first = transition->count != 0 && transition->names[0].is_root ? 1U : 0U;
+	if (transition->count < first + 2U)
+		return;
+	wb_vector_init(&order, sizeof(const struct layout_box *));
+	if (layout_stacking_order(tree, &order, &flow_index) != 0) {
+		wb_vector_release(&order);
+		return;
+	}
+	keys = calloc(transition->count, sizeof(*keys));
+	if (keys == NULL) {
+		wb_vector_release(&order);
+		return;
+	}
+	for (index = first; index < transition->count; index++) {
+		keys[index] = (double)flow_index - 0.5 + (double)index / 100000.0;
+		box = layout_transition_box(transition, tree->root, transition->names[index].name, 0);
+		if (box == NULL)
+			continue;
+		for (slot = 0; slot < order.count; slot++) {
+			layer = *(const struct layout_box **)wb_vector_at(&order, slot);
+			if (layer == box) {
+				keys[index] = (double)slot;
+				break;
+			}
+		}
+	}
+
+	/* An insertion sort keeps equal keys in the order they came. */
+	for (index = first + 1U; index < transition->count; index++) {
+		held = transition->names[index];
+		key = keys[index];
+		for (other = index; other > first && keys[other - 1] > key; other--) {
+			transition->names[other] = transition->names[other - 1];
+			keys[other] = keys[other - 1];
+		}
+		transition->names[other] = held;
+		keys[other] = key;
+	}
+	free(keys);
+	wb_vector_release(&order);
+}
+
+/* Solves a cubic bezier easing (control points x1 y1 x2 y2) at a progress. */
 static float
-transition_ease(
-	float progress)
+transition_bezier(
+	float progress,
+	float x1,
+	float y1,
+	float x2,
+	float y2)
 {
 	float low;
 	float high;
@@ -215,13 +318,67 @@ transition_ease(
 	mid = progress;
 	for (step = 0; step < 40; step++) {
 		mid = (low + high) / 2.0f;
-		x = 3.0f * (1.0f - mid) * (1.0f - mid) * mid * 0.25f + 3.0f * (1.0f - mid) * mid * mid * 0.25f + mid * mid * mid;
+		x = 3.0f * (1.0f - mid) * (1.0f - mid) * mid * x1 + 3.0f * (1.0f - mid) * mid * mid * x2 + mid * mid * mid;
 		if (x < progress)
 			low = mid;
 		else
 			high = mid;
 	}
-	return 3.0f * (1.0f - mid) * (1.0f - mid) * mid * 0.1f + 3.0f * (1.0f - mid) * mid * mid * 1.0f + mid * mid * mid;
+	return 3.0f * (1.0f - mid) * (1.0f - mid) * mid * y1 + 3.0f * (1.0f - mid) * mid * mid * y2 + mid * mid * mid;
+}
+
+/* Applies a timing function (the style's text; NULL is ease) to a progress from 0 to 1. */
+static float
+transition_ease(
+	float progress,
+	const struct vm_string *timing)
+{
+	char text[64];
+	size_t index;
+	size_t length;
+	float a;
+	float b;
+	float c;
+	float d;
+	int steps;
+	char position[8];
+	float step;
+
+	if (timing == NULL)
+		return transition_bezier(progress, 0.25f, 0.1f, 0.25f, 1.0f);
+	length = timing->length < sizeof(text) - 1U ? timing->length : sizeof(text) - 1U;
+	for (index = 0; index < length; index++)
+		text[index] = (char)vm_string_at(timing, index);
+	text[length] = '\0';
+	if (strcmp(text, "linear") == 0)
+		return progress;
+	if (strcmp(text, "ease-in") == 0)
+		return transition_bezier(progress, 0.42f, 0.0f, 1.0f, 1.0f);
+	if (strcmp(text, "ease-out") == 0)
+		return transition_bezier(progress, 0.0f, 0.0f, 0.58f, 1.0f);
+	if (strcmp(text, "ease-in-out") == 0)
+		return transition_bezier(progress, 0.42f, 0.0f, 0.58f, 1.0f);
+	if (strcmp(text, "step-start") == 0)
+		return 1.0f;
+	if (strcmp(text, "step-end") == 0)
+		return progress >= 1.0f ? 1.0f : 0.0f;
+	if (sscanf(text, "bezier %f %f %f %f", &a, &b, &c, &d) == 4)
+		return transition_bezier(progress, a, b, c, d);
+	if (sscanf(text, "steps %d %7s", &steps, position) == 2 && steps >= 1) {
+		step = (float)(int)(progress * (float)steps);
+		if (progress >= 1.0f)
+			step = (float)steps;
+		if (strcmp(position, "start") == 0) {
+			step = progress >= 1.0f ? (float)steps : step + 1.0f;
+			return step / (float)steps;
+		}
+		if (strcmp(position, "both") == 0)
+			return (step + (progress >= 1.0f ? 0.0f : 1.0f)) / (float)(steps + 1);
+		if (strcmp(position, "none") == 0)
+			return steps > 1 ? step / (float)(steps - 1) : progress;
+		return step / (float)steps;
+	}
+	return progress;
 }
 
 /*
@@ -247,7 +404,7 @@ layout_transition_progress(
 		progress = 0.0f;
 	if (progress > 1.0f)
 		progress = 1.0f;
-	return transition_ease(progress);
+	return transition_ease(progress, style->animation_timing);
 }
 
 /*

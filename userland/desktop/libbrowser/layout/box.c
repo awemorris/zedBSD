@@ -843,10 +843,11 @@ box_build_transition(
 			box_transition_px(&group->style.width, rect.width);
 		if (group->style.height.unit == CSS_UNIT_AUTO)
 			box_transition_px(&group->style.height, rect.height);
-		if (group->style.offset[CSS_LEFT].unit == CSS_UNIT_AUTO && group->style.offset[CSS_RIGHT].unit == CSS_UNIT_AUTO)
-			box_transition_px(&group->style.offset[CSS_LEFT], rect.x);
-		if (group->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO && group->style.offset[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
-			box_transition_px(&group->style.offset[CSS_TOP], rect.y);
+		/* The UA moves the group to its rectangle by a transform, which the author's rules replace. */
+		if (group->style.transform_translate[0].value == CSS_VT_TRANSLATE_PENDING)
+			group->style.transform_translate[0].value = layout_to_px(rect.x);
+		if (group->style.transform_translate[1].value == CSS_VT_TRANSLATE_PENDING)
+			group->style.transform_translate[1].value = layout_to_px(rect.y);
 		group_width = group->style.width.unit == CSS_UNIT_PX ? group->style.width.value : layout_to_px(rect.width);
 
 		/* The pair holds the two images. */

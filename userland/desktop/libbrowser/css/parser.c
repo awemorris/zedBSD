@@ -1841,6 +1841,12 @@ parser_compound(
 					error = parser_view_transition_argument(heap, tokens, count, index, compound);
 					if (error != 0)
 						return error;
+
+					/* A name counts as a type selector, and the classes together as one class selector. */
+					if (compound->pseudo_name != NULL)
+						*specificity += 1U;
+					if (compound->pseudo_class_count != 0)
+						*specificity += 1U << 8;
 				} else if (tokens[*index].type == CSS_TOKEN_FUNCTION) {
 					*index = parser_skip_block(tokens, count, *index) - 1U;
 				}

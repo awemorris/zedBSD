@@ -3400,7 +3400,7 @@ list_vt_named(
 		return 0;
 	if (box->style.view_transition_name == NULL)
 		return 0;
-	return layout_transition_find(walk->transition, box->style.view_transition_name) != NULL;
+	return layout_transition_find(walk->transition, layout_transition_name_of(walk->transition, box)) != NULL;
 }
 
 /* Tells whether a box is not painted into what is captured: the transition's own boxes, or a named box but the one captured. */
@@ -3598,7 +3598,7 @@ list_vt_image(
 		from.width = walk->tree->viewport_width;
 		from.height = walk->tree->viewport_height;
 	} else {
-		live = layout_transition_box(walk->tree->root, entry->name, 0);
+		live = layout_transition_box(walk->transition, walk->tree->root, entry->name, 0);
 		if (live == NULL)
 			return;
 		error = list_vt_paint(walk, live);

@@ -863,6 +863,13 @@ cascade_compute(
 
 	/* Starts from the initial values, with the inherited ones from the parent. */
 	css_initial_style(style);
+
+	/* A view transition group begins with the UA's transform, which the author's rules may replace. */
+	if (pseudo == CSS_PSEUDO_ELEMENT_VT_GROUP && engine->vt_names) {
+		style->transform_translate[0].value = CSS_VT_TRANSLATE_PENDING;
+		style->transform_translate[1].value = CSS_VT_TRANSLATE_PENDING;
+		style->transform_set = 1;
+	}
 	if (parent != NULL) {
 		style->color = parent->color;
 		style->paint_color = parent->paint_color;
@@ -4053,6 +4060,9 @@ cascade_apply(
 	case CSS_PROP_ANIMATION_PLAY_STATE:
 		style->animation_paused = value->keyword == 1;
 		break;
+	case CSS_PROP_ANIMATION_TIMING_FUNCTION:
+		style->animation_timing = value->keyword == 2 ? value->ident : NULL;
+		break;
 	case CSS_PROP_MIX_BLEND_MODE:
 		style->mix_blend_mode = value->keyword;
 		break;
@@ -4724,6 +4734,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_ANIMATION_PLAY_STATE:
 		style->animation_paused = parent->animation_paused;
+		break;
+	case CSS_PROP_ANIMATION_TIMING_FUNCTION:
+		style->animation_timing = parent->animation_timing;
 		break;
 	case CSS_PROP_MIX_BLEND_MODE:
 		style->mix_blend_mode = parent->mix_blend_mode;

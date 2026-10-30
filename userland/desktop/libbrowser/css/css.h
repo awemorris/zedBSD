@@ -69,6 +69,8 @@
 #define CSS_PSEUDO_ELEMENT_VT_PAIR 6
 #define CSS_PSEUDO_ELEMENT_VT_OLD 7
 #define CSS_PSEUDO_ELEMENT_VT_NEW 8
+/* The translation a view transition group's style starts with until its rectangle is known (an author's transform replaces it). */
+#define CSS_VT_TRANSLATE_PENDING (-12345.5f)
 
 /*
  * The units a length can have after the cascade: pixels, a percentage of
@@ -767,6 +769,8 @@ struct css_style {
 	float animation_duration;
 	float animation_delay;
 	int animation_paused;
+	/* The timing function as text: a keyword, "steps N position" or "bezier a b c d" (NULL for ease). */
+	struct vm_string *animation_timing;
 	/* mix-blend-mode: 0 normal, 1 plus-lighter, 2 any other blend. */
 	int mix_blend_mode;
 	/* zoom: the factor (1 for normal; not applied to the layout yet). */
