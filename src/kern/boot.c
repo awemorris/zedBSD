@@ -57,6 +57,8 @@ static const struct parameter_name parameter_names[KERN_BOOT_PARAMETER_COUNT] = 
 	PARAMETER_NAME("i915.gen9"),
 	PARAMETER_NAME("dc8200.zerocopy"),
 	PARAMETER_NAME("mac0"),
+	PARAMETER_NAME("cpuperf"),
+	PARAMETER_NAME("cpuperf.hwp"),
 };
 
 static char firmware_source[KERN_BOOT_SOURCE_SELECTOR_SIZE];
@@ -294,8 +296,8 @@ kern_boot_parameters_parse(
 
 		/*
 		 * kmsg=, login=, display=, i915.start=, i915.debug=,
-		 * i915.gen9= and dc8200.zerocopy= take one of their words
-		 * (ws035-p097, ws075-p012, ws118-p005, ws229-p002, ws277-p003).
+		 * i915.gen9=, dc8200.zerocopy=, cpuperf= and cpuperf.hwp=
+		 * take one of their words.
 		 */
 		if (key == KERN_BOOT_PARAMETER_KMSG ||
 		    key == KERN_BOOT_PARAMETER_LOGIN ||
@@ -303,7 +305,9 @@ kern_boot_parameters_parse(
 		    key == KERN_BOOT_PARAMETER_I915_START ||
 		    key == KERN_BOOT_PARAMETER_I915_DEBUG ||
 		    key == KERN_BOOT_PARAMETER_I915_GEN9 ||
-		    key == KERN_BOOT_PARAMETER_DC8200_ZEROCOPY) {
+		    key == KERN_BOOT_PARAMETER_DC8200_ZEROCOPY ||
+		    key == KERN_BOOT_PARAMETER_CPUPERF ||
+		    key == KERN_BOOT_PARAMETER_CPUPERF_HWP) {
 			error = parameter_word(key, parameters->storage + value_start, value_length);
 			if (error != 0) {
 				error = parse_error(parameters, error);
@@ -311,7 +315,7 @@ kern_boot_parameters_parse(
 			}
 		}
 
-		/* display.mode= is a mode written WxH or WxH@R (ws075-p012). */
+		/* display.mode= is a mode written WxH or WxH@R. */
 		if (key == KERN_BOOT_PARAMETER_DISPLAY_MODE) {
 			error = kern_boot_display_mode_parse(parameters->storage + value_start, value_length, &mode_width, &mode_height, &mode_refresh);
 			if (error != 0) {
@@ -338,8 +342,9 @@ kern_boot_parameters_parse(
 /*
  * Checks the word of kmsg= (quiet or console), login= (graphical or console),
  * display= (auto, hdmi, edp or panel), i915.start= (auto or manual),
- * i915.debug= (off or display), i915.gen9= (on or off) or
- * dc8200.zerocopy= (off or test).
+ * i915.debug= (off or display), i915.gen9= (on or off),
+ * dc8200.zerocopy= (off or test), cpuperf= (on or off) or cpuperf.hwp=
+ * (on or off).
  */
 static int
 parameter_word(
@@ -432,6 +437,24 @@ parameter_word(
 			return EINVAL;
 
 		/* Succeeded: one of dc8200.zerocopy='s words. */
+		return 0;
+	}
+
+	/*
+	 * cpuperf= turns the x86 processor driver off (off) or leaves it on
+	 * (on, the default when absent); cpuperf.hwp= keeps it from turning
+	 * HWP on (off) or lets it (on, the default).  The driver reads them
+	 * from the loader's line when it attaches, before this parse.
+	 */
+	if (key == KERN_BOOT_PARAMETER_CPUPERF ||
+	    key == KERN_BOOT_PARAMETER_CPUPERF_HWP) {
+		other = parameter_text_is(value, length, "on");
+		if (!other)
+			other = parameter_text_is(value, length, "off");
+		if (!other)
+			return EINVAL;
+
+		/* Succeeded: one of cpuperf='s or cpuperf.hwp='s words. */
 		return 0;
 	}
 
