@@ -47,7 +47,7 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p020`](phase020/phase.md) | cleared（2026-10-30 Q1、main fff25f65e。照合 --final PASS（2 file）、link PASS） | gpu-command-stream.md・gpu-sysctl.md。依存: なし |
 | [`ws009-p021`](phase021/phase.md) | cleared（2026-10-30 Q1、main 9e41d8918。照合 --final --examples PASS（x86_64・aarch64・riscv64 × 4 例、compile のみ）、link PASS） | gpu-examples.md: compile できる例。依存: なし |
 | [`ws009-p022`](phase022/phase.md) | cleared（2026-10-30 Q1、main 4374dde38。照合 --final PASS（placeholder 0）、link PASS） | gpu-requests.md: 索引の 2 列と共通の errno の表。依存: p010〜p021 |
-| [`ws009-p023`](phase023/phase.md) | 書いた・照合 PASS（2026-10-30 実装の担当。cleared は Q1 が決める） | 統合: 全 file の --final・二重の主張の照合・既存の文書の直し。依存: p022 |
+| [`ws009-p023`](phase023/phase.md) | cleared（2026-10-30 Q1、main 4a3b4e0e4。全 14 file の照合 --final --examples PASS（12 compile）、link PASS 826。Bug の候補 23 は phase023 の結果） | 統合: 全 file の --final・二重の主張の照合・既存の文書の直し。依存: p022 |
 | [`ws009-p024`](phase024/phase.md) | planned（2026-10-30 P1 の設計、q1701） | 正確さの敵対的レビュー（Opus を推す）。依存: p023 |
 
 Documentation work may be extracted alongside a producer WS when it describes
