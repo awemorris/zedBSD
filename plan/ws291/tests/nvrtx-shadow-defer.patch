@@ -1,0 +1,619 @@
+diff -ru a/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h b/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h
+--- a/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h
++++ b/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h
+@@ -424,7 +424,9 @@
+ int nvrtx_vk_record_route(struct nvrtx_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+ void nvrtx_vk_command_reset(struct nvrtx_vk_command_buffer *command);
+ int nvrtx_vk_queue_route(struct nvrtx_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+-int nvrtx_vk_execute(struct nvrtx_vk_session *session, struct nvrtx_vk_command_buffer *command);
++int nvrtx_vk_execute(struct nvrtx_vk_session *session, struct nvrtx_vk_command_buffer *command, bool settle);
++int nvrtx_vk_execute_settle(struct nvrtx_vk_session *session);
++void nvrtx_vk_execute_forget(struct nvrtx_vk_session *session, void *backing);
+ 
+ int nvrtx_vk_video_route(struct nvrtx_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+ bool nvrtx_vk_video_recorded(uint32_t opcode);
+diff -ru a/src/drivers/gpu/nvrtx/vk/vk-device.c b/src/drivers/gpu/nvrtx/vk/vk-device.c
+--- a/src/drivers/gpu/nvrtx/vk/vk-device.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-device.c
+@@ -948,9 +948,11 @@
+ 	if (reader->error != 0)
+ 		return EINVAL;
+ 
+-	/* Waits for the newest run, and replies whether it did its work. */
++	/* The copy of a shadow not done yet goes first; then waits for the newest run, and replies whether it did its work. */
+ 	result = (uint32_t)VK_SUCCESS;
+-	error = nvrtx_vk_gpu_idle(session->owner);
++	error = nvrtx_vk_execute_settle(session);
++	if (error == 0)
++		error = nvrtx_vk_gpu_idle(session->owner);
+ 	if (error != 0)
+ 		result = (uint32_t)VK_ERROR_DEVICE_LOST;
+ 	drv_i915_wire_reply_u32(reply, result);
+diff -ru a/src/drivers/gpu/nvrtx/vk/vk-execute.c b/src/drivers/gpu/nvrtx/vk/vk-execute.c
+--- a/src/drivers/gpu/nvrtx/vk/vk-execute.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-execute.c
+@@ -35,6 +35,14 @@
+  * or row pitch off their boundaries) is done by the CPU through the BAR1
+  * window.  Between a pass or a transfer and what follows, the GPU waits
+  * for its idle and its texture and constant caches are invalidated.
++ *
++ * A pass drawn in the shadow of a pitch-linear target gives its pixels to
++ * the target later, not at its end: the copy waits while the passes after
++ * it load the same target from the shadow, and is done before anything
++ * else the executor runs, at the end of a submission that signals a fence
++ * or a semaphore (what another user of the image waits for), and before a
++ * wait for the queue or the device to be idle.  Its memory given back
++ * drops it.
+  */
+ 
+ #include <stdbool.h>
+@@ -192,6 +200,25 @@
+ };
+ 
+ /*
++ * A copy of the shadow onto its pitch-linear target not done yet: the
++ * target (to) and the shadow (from) as targets, the region (x0, y0 to x1,
++ * y1, the same in both), and the target's memory's backing.  It is valid
++ * from the end of a pass drawn in the shadow until it is done (or its
++ * memory goes); only passes loading the same target from the shadow run
++ * meanwhile.
++ */
++struct execute_pending {
++	bool valid;
++	struct nvrtx_exec_target to;
++	struct nvrtx_exec_target from;
++	void *backing;
++	int32_t x0;
++	int32_t y0;
++	int32_t x1;
++	int32_t y1;
++};
++
++/*
+  * The pool handles a push buffer's draws keep for their textures: one
+  * place for each view and sampler pair, chosen by their addresses mixed
+  * (a multiplication by the golden ratio's bits, its top bits taken: the
+@@ -280,7 +307,8 @@
+  * started says a push buffer is begun there and not yet submitted;
+  * class_ready that a run on the session's channel set the 3D class's
+  * initial state and the channel keeps it; kept is what the shadow holds,
+- * reuse what one draw leaves the next, held what the GPU holds after
++ * pending the copy of the shadow onto its target not done yet, reuse what
++ * one draw leaves the next, held what the GPU holds after
+  * the last application draw.  at is
+  * where the push buffer goes on, constants, headers and samplers how much
+  * of their parts the push buffer uses, draws and quads how many
+@@ -315,6 +343,7 @@
+ 	uint64_t shadow_va;
+ 	uint64_t shadow_bytes;
+ 	struct execute_kept kept;
++	struct execute_pending pending;
+ 	struct execute_reuse reuse;
+ 	struct execute_held held;
+ 	/* The owner's generation: the shader model of the programs and the 3D class of the push buffers. */
+@@ -397,6 +426,9 @@
+ static int execute_shadow(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state,
+ 			  bool load);
+ static int execute_end_pass(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state);
++static bool execute_pending_goes_on(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state, uint32_t load_op);
++static int execute_pending_copy(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state);
++static bool execute_pending_kept(uint32_t opcode);
+ static void execute_shadow_copy(const struct nvrtx_exec_target *to, const struct nvrtx_exec_target *from, int32_t x0, int32_t y0,
+ 				int32_t x1, int32_t y1, struct execute_quad *quad);
+ static int execute_draw(struct nvrtx_vk_execute *execute, struct execute_state *state, const struct nvrtx_vk_record *record);
+@@ -429,13 +461,16 @@
+ 
+ /*
+  * Puts an executable command buffer's records on the GPU without waiting
+- * for them.  Returns 0, EINVAL for a command buffer that is not
+- * executable, or the error of the submission or the wait that failed.
++ * for them; with settle (the last command buffer of a submission that
++ * signals) the copy of a shadow not done yet goes after them.  Returns 0,
++ * EINVAL for a command buffer that is not executable, or the error of the
++ * submission or the wait that failed.
+  */
+ int
+ nvrtx_vk_execute(
+ 	struct nvrtx_vk_session *session,
+-	struct nvrtx_vk_command_buffer *command)
++	struct nvrtx_vk_command_buffer *command,
++	bool settle)
+ {
+ 	struct nvrtx_vk_execute *execute;
+ 	struct execute_state *state;
+@@ -478,6 +513,10 @@
+ 			break;
+ 	}
+ 
++	/* A submission that signals (its last command buffer) does the copy of the shadow not done yet. */
++	if (error == 0 && settle && execute->pending.valid)
++		error = execute_pending_copy(session, execute, state);
++
+ 	/* The rest of the push buffer. */
+ 	if (error == 0)
+ 		error = execute_submit(session, execute);
+@@ -517,6 +556,77 @@
+ }
+ 
+ /*
++ * Does the copy of a shadow onto its target not done yet, in a push buffer
++ * of its own: for a submission that signals without a command buffer to
++ * carry it, and before a wait for the queue or the device to be idle.
++ * Returns the error of the copy or its submission.
++ */
++int
++nvrtx_vk_execute_settle(
++	struct nvrtx_vk_session *session)
++{
++	struct nvrtx_vk_execute *execute;
++	struct execute_state *state;
++	int error;
++
++	/* Nothing waits to be copied. */
++	execute = session->execute;
++	if (execute == NULL || !execute->pending.valid)
++		return 0;
++
++	/* A state of its own, empty. */
++	state = kern_calloc(1U, sizeof(*state));
++	if (state == NULL)
++		return ENOMEM;
++
++	/* A push buffer begun before and never submitted is begun again; else a slot is taken. */
++	error = 0;
++	if (execute->started) {
++		execute_begin(execute);
++	} else {
++		error = execute_start(session, execute);
++	}
++
++	/* The copy, then the push buffer on the GPU. */
++	if (error == 0)
++		error = execute_pending_copy(session, execute, state);
++	if (error == 0)
++		error = execute_submit(session, execute);
++	kern_free(state);
++
++	/* Reports a copy that did not run. */
++	if (error != 0)
++		return error;
++
++	/* Succeeded: the target has the shadow's pixels once the run ends. */
++	return 0;
++}
++
++/*
++ * Drops the copy of a shadow onto a target not done yet when the target's
++ * memory (its backing) is given back, and what the shadow is known to
++ * hold of it: nothing may write the memory after it goes.
++ */
++void
++nvrtx_vk_execute_forget(
++	struct nvrtx_vk_session *session,
++	void *backing)
++{
++	struct nvrtx_vk_execute *execute;
++
++	/* Nothing of the executor's yet. */
++	execute = session->execute;
++	if (execute == NULL || backing == NULL)
++		return;
++
++	/* The copy onto this memory, and what the shadow held of it. */
++	if (execute->pending.valid && execute->pending.backing == backing)
++		execute->pending.valid = false;
++	if (execute->kept.valid && execute->kept.backing == backing)
++		execute->kept.valid = false;
++}
++
++/*
+  * Gives the session's slots, made at its first submission with the first
+  * slot, and the executor's programs.
+  */
+@@ -921,8 +1031,19 @@
+ 	struct execute_state *state,
+ 	const struct nvrtx_vk_record *record)
+ {
++	bool kept;
+ 	int error;
+ 
++	/* A copy of the shadow not done yet is done before anything but a binding or a pass (which decides itself). */
++	if (execute->pending.valid) {
++		kept = execute_pending_kept(record->opcode);
++		if (!kept) {
++			error = execute_pending_copy(session, execute, state);
++			if (error != 0)
++				return error;
++		}
++	}
++
+ 	/* The record's command. */
+ 	error = 0;
+ 	switch (record->opcode) {
+@@ -1046,6 +1167,7 @@
+ 	bool clear_colour;
+ 	bool clear_depth;
+ 	bool clear_stencil;
++	bool goes_on;
+ 	int32_t x1;
+ 	int32_t y1;
+ 	int error;
+@@ -1063,6 +1185,8 @@
+ 	kern_memset(&state->target, 0, sizeof(state->target));
+ 	if (pass->colour == 0U || pass->colour_attachment >= framebuffer->view_count) {
+ 		execute->kept.valid = false;
++		if (execute->pending.valid)
++			return execute_pending_copy(session, execute, state);
+ 		return 0;
+ 	}
+ 
+@@ -1086,6 +1210,16 @@
+ 			return error;
+ 	}
+ 
++	/* A copy of the shadow not done yet goes on only into a pass loading the same target from the shadow; else it is done first. */
++	if (execute->pending.valid) {
++		goes_on = execute_pending_goes_on(session, execute, state, pass->load_op);
++		if (!goes_on) {
++			error = execute_pending_copy(session, execute, state);
++			if (error != 0)
++				return error;
++		}
++	}
++
+ 	/* A pitch-linear colour target with a depth target is drawn in a block-linear shadow; any pass lets what the shadow held go. */
+ 	if (state->target.depth_address != 0U && state->target.block_linear == 0U) {
+ 		error = execute_shadow(session, execute, state, pass->load_op == VK_ATTACHMENT_LOAD_OP_LOAD);
+@@ -1264,7 +1398,8 @@
+ 
+ /*
+  * Ends a pass: its work is ordered before what follows, and a pass drawn in
+- * a shadow copies its render area from the shadow to the target.
++ * a shadow leaves the copy of its render area from the shadow to the
++ * target to be done later (the copy not done yet).
+  */
+ static int
+ execute_end_pass(
+@@ -1273,12 +1408,11 @@
+ 	struct execute_state *state)
+ {
+ 	struct execute_kept *kept;
+-	struct execute_quad quad;
++	struct execute_pending *pending;
+ 	int32_t x0;
+ 	int32_t y0;
+ 	int32_t x1;
+ 	int32_t y1;
+-	int error;
+ 
+ 	/* The pass's work before what follows. */
+ 	state->in_pass = false;
+@@ -1303,14 +1437,32 @@
+ 	if (x1 <= x0 || y1 <= y0)
+ 		return 0;
+ 
+-	/* The shadow's area onto the target, then ordered before what follows. */
+-	execute_shadow_copy(&state->resolve, &state->target, x0, y0, x1, y1, &quad);
+-	quad.source_tiled = true;
+-	error = execute_quad(session, execute, state, &quad);
+-	if (error != 0)
+-		return error;
++	/*
++	 * The shadow's area goes onto the target later: the copy not done yet
++	 * (widened when it goes on from an earlier pass; the region stays
++	 * inside what the shadow holds as the target's).
++	 */
++	pending = &execute->pending;
++	if (pending->valid) {
++		if (x0 < pending->x0)
++			pending->x0 = x0;
++		if (y0 < pending->y0)
++			pending->y0 = y0;
++		if (x1 > pending->x1)
++			pending->x1 = x1;
++		if (y1 > pending->y1)
++			pending->y1 = y1;
++	} else {
++		pending->valid = true;
++		pending->to = state->resolve;
++		pending->from = state->target;
++		pending->backing = state->backing;
++		pending->x0 = x0;
++		pending->y0 = y0;
++		pending->x1 = x1;
++		pending->y1 = y1;
++	}
+ 	state->target_written = false;
+-	execute->at = nvrtx_exec_barrier(execute->cpu + EXECUTE_PUSH_AT, execute->at);
+ 
+ 	/*
+ 	 * The shadow now holds what the target has in the area, and in what
+@@ -1337,10 +1489,120 @@
+ 		kept->y1 = state->known_y1;
+ 	}
+ 
+-	/* Succeeded: the target has the pass's pixels. */
++	/* Succeeded: the shadow has the pass's pixels, the target gets them by the copy not done yet. */
++	return 0;
++}
++
++/*
++ * Tells whether the copy of the shadow not done yet goes on into a pass
++ * (its target and backing in state, the shadow not put in yet): the pass
++ * loads the same target, draws it in the shadow, and the shadow holds
++ * the target's pixels of its render area (execute_kept_holds()).
++ */
++static bool
++execute_pending_goes_on(
++	struct nvrtx_vk_session *session,
++	struct nvrtx_vk_execute *execute,
++	struct execute_state *state,
++	uint32_t load_op)
++{
++	const struct execute_pending *pending;
++	bool held;
++
++	/* A loading pass drawn in the shadow. */
++	if (load_op != VK_ATTACHMENT_LOAD_OP_LOAD)
++		return false;
++	if (state->target.depth_address == 0U || state->target.block_linear != 0U)
++		return false;
++
++	/* The same target and memory as the copy's. */
++	pending = &execute->pending;
++	if (state->backing == NULL || state->backing != pending->backing)
++		return false;
++	if (state->target.address != pending->to.address || state->target.pitch != pending->to.pitch ||
++	    state->target.width != pending->to.width || state->target.height != pending->to.height ||
++	    state->target.format != pending->to.format)
++		return false;
++
++	/* The shadow holds its area as the target is to have it (the target as the shadow's resolve, as the shadow puts it). */
++	state->resolve = state->target;
++	state->resolve.depth_address = 0U;
++	held = execute_kept_holds(session, execute, state);
++	if (!held)
++		return false;
++
++	/* Succeeded: the pass draws on in the shadow; the copy waits. */
++	return true;
++}
++
++/*
++ * Does the copy of the shadow onto its target not done yet, ordered
++ * before what follows, with room for the record after it.  Returns the
++ * error of the room or the copy.
++ */
++static int
++execute_pending_copy(
++	struct nvrtx_vk_session *session,
++	struct nvrtx_vk_execute *execute,
++	struct execute_state *state)
++{
++	struct execute_pending *pending;
++	struct execute_quad quad;
++	int error;
++
++	/* Room for the copy. */
++	error = execute_room(session, execute, state);
++	if (error != 0)
++		return error;
++
++	/* The shadow's region onto the target, then ordered before what follows; the copy is done. */
++	pending = &execute->pending;
++	execute_shadow_copy(&pending->to, &pending->from, pending->x0, pending->y0, pending->x1, pending->y1, &quad);
++	quad.source_tiled = true;
++	error = execute_quad(session, execute, state, &quad);
++	if (error != 0)
++		return error;
++	execute->at = nvrtx_exec_barrier(execute->cpu + EXECUTE_PUSH_AT, execute->at);
++	pending->valid = false;
++	state->target_written = false;
++
++	/* Room again for the record after it. */
++	error = execute_room(session, execute, state);
++	if (error != 0)
++		return error;
++
++	/* Succeeded: the target has the shadow's pixels once the run gets there. */
+ 	return 0;
+ }
+ 
++/*
++ * Tells whether a record leaves the copy of the shadow not done yet
++ * waiting: a binding (nothing is read or written) or a pass's beginning
++ * (which decides itself).
++ */
++static bool
++execute_pending_kept(
++	uint32_t opcode)
++{
++	/* The bindings and the pass's beginning. */
++	switch (opcode) {
++	case GPU_OP_CMD_BIND_PIPELINE:
++	case GPU_OP_CMD_SET_VIEWPORT:
++	case GPU_OP_CMD_SET_SCISSOR:
++	case GPU_OP_CMD_BIND_DESCRIPTOR_SETS:
++	case GPU_OP_CMD_BIND_VERTEX_BUFFERS:
++	case GPU_OP_CMD_BIND_INDEX_BUFFER:
++	case GPU_OP_CMD_PUSH_CONSTANTS:
++	case GPU_OP_CMD_BEGIN_RENDER_PASS:
++		return true;
++	default:
++		break;
++	}
++
++	/* Anything else may read or write the target: the copy is done first. */
++	return false;
++}
++
+ /* Describes a one-to-one, nearest copy of a region between two colour targets of one size as a quad. */
+ static void
+ execute_shadow_copy(
+diff -ru a/src/drivers/gpu/nvrtx/vk/vk-memory.c b/src/drivers/gpu/nvrtx/vk/vk-memory.c
+--- a/src/drivers/gpu/nvrtx/vk/vk-memory.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-memory.c
+@@ -521,9 +521,11 @@
+ 
+ 	memory = payload;
+ 
+-	/* The node unmaps the run and lets its backing go. */
+-	if (memory->attached)
++	/* No copy of the executor's writes it any more; the node unmaps the run and lets its backing go. */
++	if (memory->attached) {
++		nvrtx_vk_execute_forget(session, memory->backing);
+ 		nvrtx_vk_memory_detach(session->owner, memory->backing, memory->va, memory->bytes);
++	}
+ 
+ 	/* The record. */
+ 	kern_free(memory);
+diff -ru a/src/drivers/gpu/nvrtx/vk/vk-queue.c b/src/drivers/gpu/nvrtx/vk/vk-queue.c
+--- a/src/drivers/gpu/nvrtx/vk/vk-queue.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-queue.c
+@@ -34,8 +34,8 @@
+ #define QUEUE_ITEMS_MAX			32U
+ 
+ static int queue_submit(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+-static int queue_read_submit(struct i915_wire_reader *reader, uint64_t *commands, uint32_t *command_count);
+-static int queue_read_identities(struct i915_wire_reader *reader, bool stages);
++static int queue_read_submit(struct i915_wire_reader *reader, uint64_t *commands, uint32_t *command_count, uint64_t *signals);
++static int queue_read_identities(struct i915_wire_reader *reader, bool stages, uint64_t *count);
+ static uint32_t queue_result(int error);
+ static int queue_create_sync(struct nvrtx_vk_session *session, enum i915_vk_object_kind kind, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+ static int queue_reset_fences(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+@@ -114,7 +114,10 @@
+ 	uint64_t submits;
+ 	uint64_t index;
+ 	uint64_t fence_id;
++	uint64_t signals;
++	uint64_t signaled;
+ 	uint32_t result;
++	bool settle;
+ 	int error;
+ 
+ 	/* The queue and how many submits follow. */
+@@ -124,13 +127,15 @@
+ 	if (reader->error != 0 || submits > QUEUE_SUBMITS_MAX)
+ 		return EINVAL;
+ 
+-	/* Each submit's command buffers, in order. */
++	/* Each submit's command buffers, in order, and how many semaphores they signal. */
+ 	command_count = 0U;
++	signaled = 0U;
+ 	for (index = 0U; index < submits; index++) {
+-		error = queue_read_submit(reader, commands + command_count, &taken);
++		error = queue_read_submit(reader, commands + command_count, &taken, &signals);
+ 		if (error != 0)
+ 			return error;
+ 		command_count += taken;
++		signaled += signals;
+ 	}
+ 
+ 	/* The fence. */
+@@ -138,8 +143,14 @@
+ 	if (reader->error != 0)
+ 		return EINVAL;
+ 
+-	/* Puts each command buffer's runs on the GPU; the first that fails ends the submission. */
++	/*
++	 * Puts each command buffer's runs on the GPU; the first that fails ends
++	 * the submission.  A submission that signals a fence or a semaphore
++	 * (what another user of its images waits for) leaves no copy of a
++	 * shadow undone: its last command buffer does it, else a run of its own.
++	 */
+ 	error = 0;
++	settle = (fence_id != 0U || signaled != 0U);
+ 	for (index = 0U; index < command_count; index++) {
+ 		command = nvrtx_vk_payload(session, I915_VK_OBJ_COMMAND_BUFFER, commands[index]);
+ 		if (command == NULL) {
+@@ -147,12 +158,14 @@
+ 			break;
+ 		}
+ 
+-		error = nvrtx_vk_execute(session, command);
++		error = nvrtx_vk_execute(session, command, settle && index + 1U == command_count);
+ 		if (error != 0) {
+ 			kern_logf("nvrtx: vk: a command buffer did not run (%d)\n", error);
+ 			break;
+ 		}
+ 	}
++	if (error == 0 && settle)
++		error = nvrtx_vk_execute_settle(session);
+ 
+ 	/* The fence is signaled once the newest run now has ended. */
+ 	fence = nvrtx_vk_payload(session, I915_VK_OBJ_FENCE, fence_id);
+@@ -179,7 +192,8 @@
+ queue_read_submit(
+ 	struct i915_wire_reader *reader,
+ 	uint64_t *commands,
+-	uint32_t *command_count)
++	uint32_t *command_count,
++	uint64_t *signals)
+ {
+ 	uint64_t count;
+ 	uint64_t index;
+@@ -187,11 +201,12 @@
+ 
+ 	/* sType and pNext. */
+ 	*command_count = 0U;
++	*signals = 0U;
+ 	(void)drv_i915_wire_read_u32(reader);
+ 	(void)drv_i915_wire_read_u64(reader);
+ 
+ 	/* The waits with their stages. */
+-	error = queue_read_identities(reader, true);
++	error = queue_read_identities(reader, true, &count);
+ 	if (error != 0)
+ 		return error;
+ 
+@@ -204,8 +219,8 @@
+ 		commands[index] = drv_i915_wire_read_u64(reader);
+ 	*command_count = (uint32_t)count;
+ 
+-	/* The signals. */
+-	error = queue_read_identities(reader, false);
++	/* The signals, counted. */
++	error = queue_read_identities(reader, false, signals);
+ 	if (error != 0)
+ 		return error;
+ 
+@@ -213,29 +228,30 @@
+ 	return 0;
+ }
+ 
+-/* Reads a semaphore list [count][count]{identity}, and with stages its [count]{stage}. */
++/* Reads a semaphore list [count][count]{identity}, and with stages its [count]{stage}; *count gets the semaphores'. */
+ static int
+ queue_read_identities(
+ 	struct i915_wire_reader *reader,
+-	bool stages)
++	bool stages,
++	uint64_t *count)
+ {
+-	uint64_t count;
++	uint64_t stage_count;
+ 	uint64_t index;
+ 
+ 	/* The semaphores. */
+ 	(void)drv_i915_wire_read_u32(reader);
+-	count = drv_i915_wire_read_u64(reader);
+-	if (reader->error != 0 || count > QUEUE_ITEMS_MAX)
++	*count = drv_i915_wire_read_u64(reader);
++	if (reader->error != 0 || *count > QUEUE_ITEMS_MAX)
+ 		return EINVAL;
+-	for (index = 0U; index < count; index++)
++	for (index = 0U; index < *count; index++)
+ 		(void)drv_i915_wire_read_u64(reader);
+ 
+ 	/* Their stages. */
+ 	if (stages) {
+-		count = drv_i915_wire_read_u64(reader);
+-		if (reader->error != 0 || count > QUEUE_ITEMS_MAX)
++		stage_count = drv_i915_wire_read_u64(reader);
++		if (reader->error != 0 || stage_count > QUEUE_ITEMS_MAX)
+ 			return EINVAL;
+-		for (index = 0U; index < count; index++)
++		for (index = 0U; index < stage_count; index++)
+ 			(void)drv_i915_wire_read_u32(reader);
+ 	}
+ 	if (reader->error != 0)

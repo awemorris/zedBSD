@@ -1,0 +1,364 @@
+diff --git a/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h b/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h
+index fecf7ce2f..4f7414bc3 100644
+--- a/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h
++++ b/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h
+@@ -314,14 +314,34 @@ struct nvrtx_vk_vertex_attribute {
+ };
+ 
+ /*
+- * A graphics VkPipeline: its two programs in a run of the executor's GPU
+- * memory (code_token names the run to the node), the vertex input, the
+- * topology, the culling, the depth and stencil tests, the blend of the
+- * colour attachment, and the viewport and scissor unless they are dynamic
+- * (floats as their bits).
++ * A compiled program (its header, then its code) in a run of the
++ * executor's GPU memory (token names the run to the node, va is its
++ * address), shared by a session's pipelines with the same program, so a
++ * draw after another one's does not bind it again: the session's list
++ * (next), what it is found by (a copy of its bytes in the kernel's
++ * memory, their length and hash), and how many pipelines hold it.  It
++ * goes when the last one does.
++ */
++struct nvrtx_vk_code {
++	struct nvrtx_vk_code *next;
++	void *token;
++	uint64_t va;
++	uint8_t *image;
++	uint32_t length;
++	uint32_t hash;
++	uint32_t references;
++};
++
++/*
++ * A graphics VkPipeline: its two programs, each a compiled program of the
++ * session's (vertex_code and fragment_code, NULL until made), the vertex
++ * input, the topology, the culling, the depth and stencil tests, the blend
++ * of the colour attachment, and the viewport and scissor unless they are
++ * dynamic (floats as their bits).
+  */
+ struct nvrtx_vk_pipeline {
+-	void *code_token;
++	struct nvrtx_vk_code *vertex_code;
++	struct nvrtx_vk_code *fragment_code;
+ 	struct nvrtx_vk_program vertex;
+ 	struct nvrtx_vk_program fragment;
+ 	uint32_t push_bytes;
+diff --git a/src/drivers/gpu/nvrtx/vk/nvrtx-vk.h b/src/drivers/gpu/nvrtx/vk/nvrtx-vk.h
+index ca744df1f..4dc5b6f67 100644
+--- a/src/drivers/gpu/nvrtx/vk/nvrtx-vk.h
++++ b/src/drivers/gpu/nvrtx/vk/nvrtx-vk.h
+@@ -45,6 +45,7 @@
+ 
+ struct nvrtx_vk_object;
+ struct nvrtx_vk_execute;
++struct nvrtx_vk_code;
+ 
+ /*
+  * One executor session.
+@@ -71,6 +72,8 @@ struct nvrtx_vk_session {
+ 	uint64_t timelines;
+ 	/* The run its submissions are written into and the executor's programs (vk-execute.c), made at the first one. */
+ 	struct nvrtx_vk_execute *execute;
++	/* The pipelines' compiled programs, each once for every pipeline with the same one (vk-pipeline.c). */
++	struct nvrtx_vk_code *codes;
+ };
+ 
+ /*
+diff --git a/src/drivers/gpu/nvrtx/vk/vk-pipeline.c b/src/drivers/gpu/nvrtx/vk/vk-pipeline.c
+index 9184e9542..e3f65b234 100644
+--- a/src/drivers/gpu/nvrtx/vk/vk-pipeline.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-pipeline.c
+@@ -10,11 +10,13 @@
+  *
+  * A pipeline's vertex and fragment modules are compiled for SM75 by the
+  * nvrtx compiler (compiler/sm75/) when the pipeline is created,
+- * and their programs (each its header, then its code) are copied into a
+- * run of the executor's GPU memory the pipeline keeps.  The pipeline also
+- * keeps the state a draw sends: the vertex input, the topology, the
+- * culling, the colour attachment's blend, and the viewport and scissor
+- * when they are not dynamic.
++ * and their programs (each its header, then its code) are copied into
++ * runs of the executor's GPU memory, one for each different program of the
++ * session's pipelines (a pipeline whose program is the same as another's
++ * shares its run, so a draw after the other's does not bind it again).
++ * The pipeline also keeps the state a draw sends: the vertex input, the
++ * topology, the culling, the colour attachment's blend, and the viewport
++ * and scissor when they are not dynamic.
+  *
+  * The programs read push constants from constant buffer 0 at 0 and the
+  * fragment program's texture handles from it at NVRTX_SM75_CB_TEXTURES,
+@@ -51,9 +53,13 @@
+ /* The locations a vertex attribute may have (the generic attributes). */
+ #define PIPELINE_LOCATIONS		16U
+ 
++/* The FNV-1a hash's start and multiplier, for finding a compiled program among the session's. */
++#define PIPELINE_HASH_START		2166136261U
++#define PIPELINE_HASH_PRIME		16777619U
++
+ /*
+  * The two modules of a pipeline being made, and their compiled programs
+- * until they are copied into the pipeline's run.
++ * until they are copied into the session's runs.
+  */
+ struct pipeline_build {
+ 	const struct nvrtx_vk_shader *vertex_module;
+@@ -72,7 +78,11 @@ static void pipeline_decode_dynamic(struct nvrtx_vk_session *session, struct i91
+ static void pipeline_stencil_face(const VkStencilOpState *state, struct nvrtx_exec_stencil_face *face);
+ static int pipeline_compile(struct nvrtx_vk_session *session, struct nvrtx_vk_pipeline *pipeline, struct pipeline_build *build);
+ static int pipeline_compile_stage(const struct nvrtx_vk_shader *module, enum drv_gpu_shader_stage stage, uint32_t shader_model, struct nvrtx_sm75_binary **binary);
+-static int pipeline_program(struct nvrtx_vk_program *program, const struct nvrtx_sm75_binary *binary, uint8_t *cpu, uint64_t va);
++static int pipeline_program(struct nvrtx_vk_program *program, const struct nvrtx_sm75_binary *binary, uint64_t va);
++static int pipeline_code(struct nvrtx_vk_session *session, const struct nvrtx_sm75_binary *binary, struct nvrtx_vk_code **code);
++static bool pipeline_code_same(const struct nvrtx_vk_code *code, const struct nvrtx_sm75_binary *binary, uint32_t length, uint32_t hash);
++static uint32_t pipeline_code_hash(const struct nvrtx_sm75_binary *binary);
++static void pipeline_code_release(struct nvrtx_vk_session *session, struct nvrtx_vk_code *code);
+ static uint32_t pipeline_program_bytes(const struct nvrtx_sm75_binary *binary);
+ static void pipeline_build_free(struct pipeline_build *build);
+ static int pipeline_compute(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+@@ -643,9 +653,8 @@ pipeline_decode_dynamic(
+ }
+ 
+ /*
+- * Compiles a pipeline's two modules and copies the programs into a run of
+- * the executor's GPU memory: the vertex program first, the fragment
+- * program on the next boundary.
++ * Compiles a pipeline's two modules and puts the programs in the
++ * session's compiled programs (a run for each different one).
+  */
+ static int
+ pipeline_compile(
+@@ -653,10 +662,6 @@ pipeline_compile(
+ 	struct nvrtx_vk_pipeline *pipeline,
+ 	struct pipeline_build *build)
+ {
+-	uint8_t *cpu;
+-	uint64_t va;
+-	uint32_t vertex_bytes;
+-	uint32_t fragment_bytes;
+ 	uint32_t shader_model;
+ 	int error;
+ 
+@@ -678,17 +683,18 @@ pipeline_compile(
+ 	if (build->fragment->storage_count != 0U || build->fragment->uniform_count > NVRTX_VK_UNIFORMS_MAX)
+ 		return ENOTSUP;
+ 
+-	/* The run holding both, each on the boundary. */
+-	vertex_bytes = pipeline_program_bytes(build->vertex);
+-	fragment_bytes = pipeline_program_bytes(build->fragment);
+-	error = nvrtx_vk_gpu_alloc(session->owner, (uint64_t)vertex_bytes + fragment_bytes, &pipeline->code_token, &cpu, &va);
++	/* Each program in the session's: the same one another pipeline has, or a new run. */
++	error = pipeline_code(session, build->vertex, &pipeline->vertex_code);
++	if (error != 0)
++		return error;
++	error = pipeline_code(session, build->fragment, &pipeline->fragment_code);
+ 	if (error != 0)
+ 		return error;
+ 
+-	/* Copies the programs and keeps what a draw needs of them. */
+-	error = pipeline_program(&pipeline->vertex, build->vertex, cpu, va);
++	/* Keeps what a draw needs of them. */
++	error = pipeline_program(&pipeline->vertex, build->vertex, pipeline->vertex_code->va);
+ 	if (error == 0)
+-		error = pipeline_program(&pipeline->fragment, build->fragment, cpu + vertex_bytes, va + vertex_bytes);
++		error = pipeline_program(&pipeline->fragment, build->fragment, pipeline->fragment_code->va);
+ 	if (error != 0)
+ 		return error;
+ 
+@@ -729,22 +735,17 @@ pipeline_compile_stage(
+ }
+ 
+ /*
+- * Copies a compiled program to its place (its header, then its code) and
+- * keeps its address, registers, texture sources and uniform buffer sources.
++ * Keeps what a draw needs of a compiled program placed at va: its address,
++ * registers, texture sources and uniform buffer sources.
+  */
+ static int
+ pipeline_program(
+ 	struct nvrtx_vk_program *program,
+ 	const struct nvrtx_sm75_binary *binary,
+-	uint8_t *cpu,
+ 	uint64_t va)
+ {
+ 	uint32_t index;
+ 
+-	/* The header where the address points, the code behind it. */
+-	kern_memcpy(cpu, binary->sph, PIPELINE_HEADER_BYTES);
+-	kern_memcpy(cpu + PIPELINE_HEADER_BYTES, binary->code, (size_t)binary->code_words * 4U);
+-
+ 	/* The address, the registers and where each texture handle comes from. */
+ 	program->va = va;
+ 	program->gprs = binary->gpr_count;
+@@ -769,6 +770,157 @@ pipeline_program(
+ 	return 0;
+ }
+ 
++/*
++ * Gives the session's compiled program that is the same as a binary (its
++ * header and code), held once more, or a new one: a run with the header,
++ * then the code.  Returns the error of the run.
++ */
++static int
++pipeline_code(
++	struct nvrtx_vk_session *session,
++	const struct nvrtx_sm75_binary *binary,
++	struct nvrtx_vk_code **code)
++{
++	struct nvrtx_vk_code *found;
++	struct nvrtx_vk_code *made;
++	uint8_t *cpu;
++	uint32_t length;
++	uint32_t hash;
++	bool same;
++	int error;
++
++	/* The program's length (its header and code) and hash. */
++	length = PIPELINE_HEADER_BYTES + binary->code_words * 4U;
++	hash = pipeline_code_hash(binary);
++
++	/* The same program of another pipeline's is held once more. */
++	for (found = session->codes; found != NULL; found = found->next) {
++		same = pipeline_code_same(found, binary, length, hash);
++		if (!same)
++			continue;
++		if (found->references == 0xffffffffU)
++			break;
++		found->references++;
++		*code = found;
++		return 0;
++	}
++
++	/* A new one: its record, the copy it is found by, and its run. */
++	made = kern_calloc(1U, sizeof(*made));
++	if (made == NULL)
++		return ENOMEM;
++	made->image = kern_malloc(length);
++	if (made->image == NULL) {
++		kern_free(made);
++		return ENOMEM;
++	}
++	error = nvrtx_vk_gpu_alloc(session->owner, pipeline_program_bytes(binary), &made->token, &cpu, &made->va);
++	if (error != 0) {
++		kern_free(made->image);
++		kern_free(made);
++		return error;
++	}
++
++	/* The header where the address points, the code behind it; the same in the copy. */
++	kern_memcpy(made->image, binary->sph, PIPELINE_HEADER_BYTES);
++	kern_memcpy(made->image + PIPELINE_HEADER_BYTES, binary->code, (size_t)binary->code_words * 4U);
++	kern_memcpy(cpu, made->image, length);
++
++	/* Found from now on, held by the pipeline. */
++	made->length = length;
++	made->hash = hash;
++	made->references = 1U;
++	made->next = session->codes;
++	session->codes = made;
++
++	/* Succeeded: the program is in the GPU's memory. */
++	*code = made;
++	return 0;
++}
++
++/* Tells whether a compiled program of the session's is a binary's: the same length, hash, header and code. */
++static bool
++pipeline_code_same(
++	const struct nvrtx_vk_code *code,
++	const struct nvrtx_sm75_binary *binary,
++	uint32_t length,
++	uint32_t hash)
++{
++	int differ;
++
++	/* The length and the hash first. */
++	if (code->length != length || code->hash != hash)
++		return false;
++
++	/* Then the header and the code themselves (the copy in the kernel's memory). */
++	differ = kern_memcmp(code->image, binary->sph, PIPELINE_HEADER_BYTES);
++	if (differ != 0)
++		return false;
++	differ = kern_memcmp(code->image + PIPELINE_HEADER_BYTES, binary->code, (size_t)binary->code_words * 4U);
++	if (differ != 0)
++		return false;
++
++	/* Succeeded: the same program. */
++	return true;
++}
++
++/* Hashes a program's header and code (FNV-1a over their bytes). */
++static uint32_t
++pipeline_code_hash(
++	const struct nvrtx_sm75_binary *binary)
++{
++	const uint8_t *bytes;
++	uint32_t hash;
++	size_t count;
++	size_t index;
++
++	/* The header's bytes. */
++	hash = PIPELINE_HASH_START;
++	bytes = (const uint8_t *)binary->sph;
++	for (index = 0U; index < PIPELINE_HEADER_BYTES; index++) {
++		hash ^= bytes[index];
++		hash *= PIPELINE_HASH_PRIME;
++	}
++
++	/* The code's bytes. */
++	bytes = (const uint8_t *)binary->code;
++	count = (size_t)binary->code_words * 4U;
++	for (index = 0U; index < count; index++) {
++		hash ^= bytes[index];
++		hash *= PIPELINE_HASH_PRIME;
++	}
++
++	/* Succeeded: the hash. */
++	return hash;
++}
++
++/* Lets a pipeline's hold on a compiled program go; the last one frees its run. */
++static void
++pipeline_code_release(
++	struct nvrtx_vk_session *session,
++	struct nvrtx_vk_code *code)
++{
++	struct nvrtx_vk_code **link;
++
++	/* Others still hold it. */
++	code->references--;
++	if (code->references != 0U)
++		return;
++
++	/* Out of the session's list. */
++	for (link = &session->codes; *link != NULL; link = &(*link)->next) {
++		if (*link == code) {
++			*link = code->next;
++			break;
++		}
++	}
++
++	/* Its run, then its copy and record. */
++	nvrtx_vk_gpu_free(session->owner, code->token);
++	kern_free(code->image);
++	kern_free(code);
++}
++
+ /* Reports the bytes a program takes in the run: its header and code, on the boundary. */
+ static uint32_t
+ pipeline_program_bytes(
+@@ -826,9 +978,11 @@ pipeline_destroy(
+ 
+ 	pipeline = payload;
+ 
+-	/* The run, when the programs were copied. */
+-	if (pipeline->code_token != NULL)
+-		nvrtx_vk_gpu_free(session->owner, pipeline->code_token);
++	/* Its holds on the compiled programs, when they were made. */
++	if (pipeline->vertex_code != NULL)
++		pipeline_code_release(session, pipeline->vertex_code);
++	if (pipeline->fragment_code != NULL)
++		pipeline_code_release(session, pipeline->fragment_code);
+ 
+ 	kern_free(pipeline);
+ 
