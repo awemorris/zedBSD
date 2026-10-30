@@ -92,6 +92,11 @@ static int query_valid(const struct system_swap_source_info *query);
 static int map_source_state(uint32_t state, uint32_t *mapped);
 static int control_ioctl(unsigned long request, uintptr_t argument, int superuser);
 static int get_source_ioctl(uintptr_t argument);
+static int system_firmware_variable(unsigned long request, uintptr_t argument);
+static int firmware_variable_read(uintptr_t argument, struct system_firmware_variable *variable);
+static int firmware_variable_walk(uintptr_t argument, struct system_firmware_variable *variable);
+static int firmware_variable_store(const struct system_firmware_variable *variable);
+static int firmware_variable_load(uintptr_t argument, struct system_firmware_variable *variable);
 
 /*
  * The PCI core describes its functions.  A platform without PCI does not
@@ -118,6 +123,15 @@ struct drv_pci_device;
 extern int drv_pci_suspend_all(struct drv_pci_device **failed) __attribute__((weak));
 extern int drv_pci_resume_all(void) __attribute__((weak));
 extern void drv_pci_device_name(struct drv_pci_device *device, char *text, size_t size) __attribute__((weak));
+
+/*
+ * The firmware's variable store (the UEFI driver of the PC platform).  A
+ * platform without one does not link it, and then a null test makes the
+ * firmware variable requests answer EOPNOTSUPP.
+ */
+extern int drv_firmware_variable_get(const char *space, const char *name, uint32_t *attributes, void *value, size_t *size) __attribute__((weak));
+extern int drv_firmware_variable_set(const char *space, const char *name, uint32_t attributes, const void *value, size_t size) __attribute__((weak));
+extern int drv_firmware_variable_next(char *space, size_t space_size, char *name, size_t name_size) __attribute__((weak));
 
 /*
  * Whether a sleep is under way: set by the KERN_SYSTEM_SLEEP that runs and
@@ -164,6 +178,220 @@ drv_system_device_register(
 		return error;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Reads, writes or walks the firmware's variables for root.
+ */
+static int
+system_firmware_variable(
+	unsigned long request,
+	uintptr_t argument)
+{
+	struct system_firmware_variable variable;
+	struct ucred *credential;
+	int superuser;
+	int error;
+
+	/* Refuses a caller that is not root. */
+	credential = cred_current_ref();
+	superuser = cred_is_superuser(credential);
+	cred_release(credential);
+	if (!superuser)
+		return EPERM;
+
+	/* Answers that this platform's firmware has no variables the kernel reaches. */
+	if (drv_firmware_variable_get == NULL ||
+	    drv_firmware_variable_set == NULL ||
+	    drv_firmware_variable_next == NULL)
+		return EOPNOTSUPP;
+
+	/* Reads and checks the request. */
+	error = firmware_variable_read(argument, &variable);
+	if (error != 0)
+		return error;
+
+	/* Carries out the request. */
+	switch (request) {
+	case KERN_SYSTEM_FIRMWARE_VARIABLE_NEXT:
+		error = firmware_variable_walk(argument, &variable);
+		break;
+	case KERN_SYSTEM_FIRMWARE_VARIABLE_SET:
+		error = firmware_variable_store(&variable);
+		break;
+	default:
+		error = firmware_variable_load(argument, &variable);
+		break;
+	}
+
+	/* Reports why the request failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Reads a firmware variable request and checks its version, strings and size. */
+static int
+firmware_variable_read(
+	uintptr_t argument,
+	struct system_firmware_variable *variable)
+{
+	const void *terminator;
+	int error;
+
+	/* Reads the request. */
+	error = copyin(argument, variable, sizeof(*variable));
+	if (error != 0)
+		return error;
+
+	/* Refuses another version, or a reserved field that is not zero. */
+	if (variable->version != KERN_SYSTEM_FIRMWARE_VARIABLE_VERSION ||
+	    variable->reserved != 0)
+		return EINVAL;
+
+	/* Refuses a space that does not end inside its field; a walk may start from an empty one. */
+	terminator = kern_memchr(variable->space, '\0', sizeof(variable->space));
+	if (terminator == NULL)
+		return EINVAL;
+
+	/* Refuses a name that does not end inside its field. */
+	terminator = kern_memchr(variable->name, '\0', sizeof(variable->name));
+	if (terminator == NULL)
+		return EINVAL;
+
+	/* Refuses a value larger than the kernel copies. */
+	if (variable->value_size > KERN_SYSTEM_FIRMWARE_VARIABLE_VALUE_MAX)
+		return E2BIG;
+
+	/* Succeeded: the request can be passed to the firmware. */
+	return 0;
+}
+
+/* Replaces the request's space and name with the next variable's. */
+static int
+firmware_variable_walk(
+	uintptr_t argument,
+	struct system_firmware_variable *variable)
+{
+	int error;
+
+	/* Asks the firmware for the variable after the one named. */
+	error = drv_firmware_variable_next(variable->space,
+					   sizeof(variable->space),
+					   variable->name,
+					   sizeof(variable->name));
+	if (error != 0)
+		return error;
+
+	/* Gives the caller the next space and name. */
+	error = copyout(variable, argument, sizeof(*variable));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller holds the next name. */
+	return 0;
+}
+
+/*
+ * Writes the caller's value, or deletes the variable when the size is zero.
+ *
+ * The value moves through a kernel copy, since the firmware cannot reach
+ * user memory.
+ */
+static int
+firmware_variable_store(
+	const struct system_firmware_variable *variable)
+{
+	void *value;
+	int error;
+
+	/* Deletes the variable; a deletion carries no value. */
+	if (variable->value_size == 0) {
+		error = drv_firmware_variable_set(variable->space, variable->name, variable->attributes, NULL, 0);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the firmware deleted the variable. */
+		return 0;
+	}
+
+	/* Allocates the kernel's copy of the value. */
+	value = kern_malloc(variable->value_size);
+	if (value == NULL)
+		return ENOMEM;
+
+	/* Copies the caller's value. */
+	error = copyin(variable->value, value, variable->value_size);
+	if (error != 0) {
+		kern_free(value);
+		return error;
+	}
+
+	/* Writes the value to the firmware and lets the copy go. */
+	error = drv_firmware_variable_set(variable->space, variable->name, variable->attributes, value, variable->value_size);
+	kern_free(value);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the firmware stored the variable. */
+	return 0;
+}
+
+/*
+ * Reads a variable into the caller's buffer and reports its size and
+ * attributes; a variable larger than the buffer gives ERANGE with the size
+ * it needs.
+ */
+static int
+firmware_variable_load(
+	uintptr_t argument,
+	struct system_firmware_variable *variable)
+{
+	uint32_t attributes;
+	size_t size;
+	void *value;
+	int error;
+
+	/* Allocates the kernel's copy of the value; a size query needs none. */
+	value = NULL;
+	if (variable->value_size != 0) {
+		value = kern_malloc(variable->value_size);
+		if (value == NULL)
+			return ENOMEM;
+	}
+
+	/* Reads the variable from the firmware. */
+	size = variable->value_size;
+	attributes = 0;
+	error = drv_firmware_variable_get(variable->space, variable->name, &attributes, value, &size);
+
+	/* Gives the caller the value it read. */
+	if (error == 0 && size != 0)
+		error = copyout(value, variable->value, size);
+	kern_free(value);
+
+	/* Tells the caller the size a larger variable needs. */
+	if (error == ERANGE) {
+		variable->value_size = (uint32_t)size;
+		(void)copyout(variable, argument, sizeof(*variable));
+		return ERANGE;
+	}
+
+	/* Reports why the variable could not be read. */
+	if (error != 0)
+		return error;
+
+	/* Reports the value's size and attributes. */
+	variable->value_size = (uint32_t)size;
+	variable->attributes = attributes;
+	error = copyout(variable, argument, sizeof(*variable));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller holds the variable. */
 	return 0;
 }
 
@@ -536,6 +764,11 @@ system_ioctl(
 	case KERN_SYSTEM_SWAP_REMOVE:
 	case KERN_SYSTEM_GET_SWAP_SOURCE:
 		error = system_swap_ioctl(request, argument);
+		break;
+	case KERN_SYSTEM_FIRMWARE_VARIABLE_GET:
+	case KERN_SYSTEM_FIRMWARE_VARIABLE_SET:
+	case KERN_SYSTEM_FIRMWARE_VARIABLE_NEXT:
+		error = system_firmware_variable(request, argument);
 		break;
 	case KERN_SYSTEM_HALT:
 		/* Only init may halt the machine. */

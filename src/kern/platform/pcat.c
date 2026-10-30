@@ -189,6 +189,13 @@ static int boot_disk_present(const char *uuid);
 static int disk_holds_boot_fat(struct disk *disk, const char *uuid);
 static int sector_holds_boot_fat(const uint8_t *sector, unsigned signature_offset, const char *uuid);
 
+/*
+ * The UEFI variable store.  Only the amd64 kernel links it (its calls into
+ * the firmware use the x64 convention), so the i386 PC kernel finds it
+ * null and skips it.
+ */
+extern int drv_pcat_uefi_variables_init(void) __attribute__((weak));
+
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 int drv_usb_hid_checkpoint_driver_register(void);
 #endif
@@ -466,6 +473,14 @@ kern_platform_init(
 	}
 #endif
 #endif
+
+	/*
+	 * Reaches the firmware's variables when the loader moved UEFI's runtime
+	 * services into the kernel's window; a BIOS boot has none, and then the
+	 * variable requests answer EOPNOTSUPP.
+	 */
+	if (drv_pcat_uefi_variables_init != NULL)
+		(void)drv_pcat_uefi_variables_init();
 
 	/* Lists every BIOS IDE unit as a boot device. */
 	(void)drv_pcat_ide_init();

@@ -1132,6 +1132,9 @@ flow_install_line(
 	matched = sscanf(line, "STATE loader %255s", app->loader_path);
 	if (matched == 1)
 		return;
+	matched = sscanf(line, "STATE boot-entry %7s", app->boot_entry);
+	if (matched == 1)
+		return;
 	matched = sscanf(line, "STATE swap %15s", app->swap_kind);
 	if (matched == 1)
 		return;
@@ -1467,6 +1470,7 @@ flow_install(
 	app->stop_asked = 0;
 	app->state_count = 0;
 	app->loader_path[0] = '\0';
+	app->boot_entry[0] = '\0';
 	app->swap_kind[0] = '\0';
 	app->started_us = kl_clock_us();
 	if (error == 0) {

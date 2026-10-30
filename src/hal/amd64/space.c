@@ -64,6 +64,24 @@ _Static_assert(AMD64_DEVICE_WINDOW_BASE == 0xffffff8000000000ULL +
     (unsigned long long)AMD64_DEVICE_PDPT_FIRST * 0x40000000ULL,
     "device window base agreement");
 
+/*
+ * The UEFI runtime window: the kernel PDPT slot below the device window,
+ * where the UEFI loader told the firmware its runtime services are.  Only
+ * hal_space_map(HAL_SPACE_SYS, ...) fills it, and only with firmware pages
+ * outside the RAM map; its mappings last for the kernel's life.
+ */
+#define AMD64_FIRMWARE_PDPT_INDEX 506U
+#define AMD64_FIRMWARE_PD_COUNT \
+	(ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE / (512U * PAGE_SIZE))
+
+_Static_assert(ZBL6_UEFI_RUNTIME_VIRTUAL_BASE == 0xffffff8000000000ULL +
+    (unsigned long long)AMD64_FIRMWARE_PDPT_INDEX * 0x40000000ULL,
+    "firmware window base agreement");
+_Static_assert(AMD64_FIRMWARE_PDPT_INDEX < AMD64_DEVICE_PDPT_FIRST,
+    "firmware window lies below the device window");
+_Static_assert(AMD64_FIRMWARE_PD_COUNT <= 512U,
+    "firmware window fits one directory");
+
 #define AMD64_FRAMEBUFFER_PD_FIRST 16U
 #define AMD64_FRAMEBUFFER_PD_COUNT \
 	(AMD64_ECAM_PD_FIRST - AMD64_FRAMEBUFFER_PD_FIRST)
@@ -163,6 +181,16 @@ static uint64_t system_mmio_pd[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t system_device_pd[AMD64_DEVICE_PDPT_COUNT][512]
 	__attribute__((aligned(PAGE_SIZE)));
 /*
+ * The directory of the UEFI runtime window, linked into the shared system
+ * PDPT when the system page table is built so that every address space
+ * sees what is mapped there.  Its leaf tables are allocated when a page of
+ * their span is first mapped and stay attached for the kernel's life; the
+ * address-space registry lock serializes their creation and every entry
+ * written to them.
+ */
+static uint64_t system_firmware_pd[512] __attribute__((aligned(PAGE_SIZE)));
+
+/*
  * Device leaf tables remain attached for the kernel lifetime. Individual views
  * release their PTEs and slots; at most the reserved 2-GiB window needs tables.
  */
@@ -231,6 +259,7 @@ static int fb_window_meets_fixed(hal_physaddr_t physical, size_t size);
 static void service_shootdowns(hal_cpu_id_t cpu);
 static int user_page_allowed(hal_physaddr_t physical, uint32_t attr);
 static int device_fixed_range(hal_physaddr_t physical, size_t size, void **address);
+static int firmware_window_map(uintptr_t address, hal_physaddr_t physical, size_t size, uint32_t attr);
 static int device_window_map(hal_physaddr_t physical, size_t size, uint32_t attr, void **address);
 static int device_window_unmap(void *address, size_t size);
 static int device_window_populate(struct amd64_device_mapping *mapping);
@@ -690,6 +719,9 @@ prekern_amd64_space_init(
 	system_pdpt[AMD64_ACPI_PDPT_INDEX] =
 	    amd64_image_to_phys(system_acpi_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_pdpt[AMD64_FIRMWARE_PDPT_INDEX] =
+	    amd64_image_to_phys(system_firmware_pd) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	system_pdpt[510] = amd64_image_to_phys(system_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	system_pdpt[511] = amd64_image_to_phys(system_mmio_pd) |
@@ -1115,9 +1147,15 @@ hal_space_map(
 	space = handle;
 	address = (uintptr_t)pointer;
 
-	/* Rejects a missing address space. */
-	if (space == NULL)
-		return HAL_ERR_INVALID;
+	/* The system space takes firmware pages in the UEFI runtime window alone. */
+	if (space == HAL_SPACE_SYS) {
+		error = firmware_window_map(address, physical, size, attr);
+		if (error != HAL_OK)
+			return error;
+
+		/* Succeeded: the firmware pages stay mapped for the kernel's life. */
+		return HAL_OK;
+	}
 
 	/* Rejects an invalid user virtual range. */
 	if (!valid_user_range(address, size))
@@ -2848,6 +2886,125 @@ user_page_allowed(
 	}
 
 	/* Succeeded: the requested attributes preserve this page's storage type. */
+	return HAL_OK;
+}
+
+/*
+ * Maps firmware pages into the UEFI runtime window of the system space.
+ *
+ * The pages must lie outside the RAM map, so no cached alias of them exists
+ * elsewhere, and the window pages must be unmapped.  Execution and writes
+ * are given as asked; HAL_SPACE_NOCACHE makes the pages uncached.  The
+ * entries go from not present to present, which no processor caches, so no
+ * TLB shootdown is needed.
+ */
+static int
+firmware_window_map(
+	uintptr_t address,
+	hal_physaddr_t physical,
+	size_t size,
+	uint32_t attr)
+{
+	hal_physaddr_t table_physical;
+	uint64_t ram_entry;
+	uint64_t flags;
+	uint64_t *table;
+	uintptr_t window_offset;
+	size_t offset;
+	unsigned directory;
+	bool enabled;
+	int ram_present;
+	int error;
+
+	/* Refuses attributes other than the access rights and uncached. */
+	if ((attr & (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) == 0 ||
+	    (attr & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC |
+	    HAL_SPACE_NOCACHE)) != 0)
+		return HAL_ERR_INVALID;
+
+	/* Refuses an empty or unaligned extent. */
+	if (size == 0 ||
+	    ((address | physical | size) & (PAGE_SIZE - 1U)) != 0)
+		return HAL_ERR_INVALID;
+
+	/* Refuses an extent outside the window. */
+	if (address < ZBL6_UEFI_RUNTIME_VIRTUAL_BASE ||
+	    address - ZBL6_UEFI_RUNTIME_VIRTUAL_BASE >= ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE ||
+	    size > ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE -
+	    (address - ZBL6_UEFI_RUNTIME_VIRTUAL_BASE))
+		return HAL_ERR_INVALID;
+
+	/* Refuses a physical extent beyond this processor's address width. */
+	if (physical > acpi_physical_max || size - 1U > acpi_physical_max - physical)
+		return HAL_ERR_INVALID;
+
+	/* Refuses RAM, which the direct map already holds with its own attributes. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		ram_present = amd64_ram_lookup(&ram_builder, physical + offset, &ram_entry);
+		if (ram_present)
+			return HAL_ERR_INVALID;
+	}
+
+	/* Builds the supervisor entry bits shared by every page of the extent. */
+	flags = AMD64_PTE_PRESENT | AMD64_PTE_GLOBAL;
+	if ((attr & HAL_SPACE_WRITE) != 0)
+		flags |= AMD64_PTE_WRITE;
+	if ((attr & HAL_SPACE_EXEC) == 0)
+		flags |= AMD64_PTE_NX;
+	if ((attr & HAL_SPACE_NOCACHE) != 0)
+		flags |= AMD64_PTE_NOCACHE;
+
+	/* Fills the window under the registry lock, which owns its tables. */
+	window_offset = address - ZBL6_UEFI_RUNTIME_VIRTUAL_BASE;
+	enabled = registry_lock_enter();
+
+	/* Refuses window pages that are already mapped, before changing any. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		directory = (unsigned)((window_offset + offset) / (512U * PAGE_SIZE));
+		if ((system_firmware_pd[directory] & AMD64_PTE_PRESENT) == 0)
+			continue;
+
+		/* Reads the leaf entry of a page whose table exists. */
+		table = table_at(system_firmware_pd[directory]);
+		if ((table[((window_offset + offset) / PAGE_SIZE) % 512U] & AMD64_PTE_PRESENT) != 0) {
+			registry_lock_leave(enabled);
+			return HAL_ERR_INVALID;
+		}
+	}
+
+	/* Creates the leaf tables the extent needs; they stay for the kernel's life. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		directory = (unsigned)((window_offset + offset) / (512U * PAGE_SIZE));
+		if ((system_firmware_pd[directory] & AMD64_PTE_PRESENT) != 0)
+			continue;
+
+		/* Reserves ordinary RAM for one kernel leaf table. */
+		error = alloc_page(&table_physical);
+		if (error != HAL_OK) {
+			registry_lock_leave(enabled);
+			return error;
+		}
+
+		/* Clears and links the table; the page counter counts it as a table. */
+		table = (uint64_t *)hal_pmem_to_kernel(table_physical);
+		hal_memset(table, 0, PAGE_SIZE);
+		(void)__atomic_fetch_add(&page_table_count, 1U, __ATOMIC_RELAXED);
+		system_firmware_pd[directory] = table_physical |
+		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	}
+
+	/* Publishes every page of the extent. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		directory = (unsigned)((window_offset + offset) / (512U * PAGE_SIZE));
+		table = table_at(system_firmware_pd[directory]);
+		table[((window_offset + offset) / PAGE_SIZE) % 512U] =
+		    (physical + offset) | flags;
+	}
+
+	/* Lets other changes of the shared tables in again. */
+	registry_lock_leave(enabled);
+
+	/* Succeeded: the extent is mapped at the address the firmware was given. */
 	return HAL_OK;
 }
 

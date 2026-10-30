@@ -68,6 +68,9 @@
 
 #define ZBL6_HANDOFF_V7_VERSION			7
 #define ZBL6_HANDOFF_V7_UEFI_SIZE		(ZBL6_HANDOFF_V6_UEFI_SIZE + KERN_BOOT_PROVENANCE_SIZE)
+#define ZBL6_HANDOFF_V8_VERSION			8
+#define ZBL6_UEFI_RUNTIME_HANDOFF_SIZE		32
+#define ZBL6_HANDOFF_V8_UEFI_SIZE		(ZBL6_HANDOFF_V7_UEFI_SIZE + ZBL6_UEFI_RUNTIME_HANDOFF_SIZE)
 #define ZBL6_HANDOFF_V6_VERSION			6
 #define ZBL6_MEMORY_HANDOFF_SIZE		64
 #define ZBL6_HANDOFF_V6_BIOS_MEMORY_OFFSET	ZBL6_HANDOFF_V5_BIOS_SIZE
@@ -121,6 +124,21 @@
 #define ZBL6_HANDOFF_FLAG_BOOT_UUID		(1U << 4)
 #define ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS	(1U << 5)
 #define ZBL6_HANDOFF_FLAG_BOOT_ALLOCATIONS	(1U << 6)
+#define ZBL6_HANDOFF_FLAG_UEFI_RUNTIME		(1U << 7)
+
+/*
+ * The kernel window the UEFI loader gives the firmware's runtime services
+ * with SetVirtualAddressMap, and the HAL maps them in: one kernel PDPT slot
+ * below the device window, of which the first 64 MiB are used.
+ */
+#define ZBL6_UEFI_RUNTIME_VIRTUAL_BASE		0xfffffffe80000000ULL
+#define ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE		0x0000000004000000ULL
+
+/* The most bytes of runtime memory descriptors the version-eight handoff carries. */
+#define ZBL6_UEFI_RUNTIME_MAP_MAX_BYTES		8192U
+
+/* The smallest UEFI memory descriptor: type, pad, physical, virtual, pages and attribute. */
+#define ZBL6_UEFI_MEMORY_DESCRIPTOR_MIN_SIZE	40U
 
 /* The framebuffer pixel layouts, and where the HAL maps the framebuffer. */
 #define ZBL6_FRAMEBUFFER_RGBX8888		1U
@@ -315,7 +333,38 @@ struct zbl6_handoff_v7_uefi {
 	struct kern_boot_provenance provenance;
 } __attribute__((packed));
 
+/*
+ * Where the firmware's runtime services are after the loader gave them
+ * their kernel addresses.
+ *
+ * system_table is the physical address of the UEFI system table, and
+ * descriptors the physical address of a copy of the firmware's memory
+ * descriptors that carry the runtime attribute, each descriptor_size bytes
+ * long, with VirtualStart set inside the runtime window.  Every field is
+ * zero, and the runtime flag clear, when the firmware's runtime services
+ * were not moved into the window.
+ */
+struct zbl6_uefi_runtime_handoff {
+	uint64_t system_table;
+	uint64_t descriptors;
+	uint32_t descriptor_count;
+	uint32_t descriptor_size;
+	uint32_t descriptor_version;
+	uint32_t reserved;
+} __attribute__((packed));
+
+/* V8 retains the V7 layout and appends the firmware's runtime services. */
+struct zbl6_handoff_v8_uefi {
+	struct zbl6_handoff_v5_uefi prefix;
+	struct zbl6_memory_handoff memory;
+	struct kern_boot_provenance provenance;
+	struct zbl6_uefi_runtime_handoff runtime;
+} __attribute__((packed));
+
 _Static_assert(sizeof(struct zbl6_handoff_v7_uefi) == ZBL6_HANDOFF_V7_UEFI_SIZE, "ZBL6 V7 UEFI size");
+_Static_assert(sizeof(struct zbl6_uefi_runtime_handoff) == ZBL6_UEFI_RUNTIME_HANDOFF_SIZE, "ZBL6 UEFI runtime size");
+_Static_assert(sizeof(struct zbl6_handoff_v8_uefi) == ZBL6_HANDOFF_V8_UEFI_SIZE, "ZBL6 V8 UEFI size");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v8_uefi, runtime) == ZBL6_HANDOFF_V7_UEFI_SIZE, "ZBL6 V8 runtime offset");
 _Static_assert(__builtin_offsetof(struct zbl6_handoff_v7_uefi, provenance) == ZBL6_HANDOFF_V6_UEFI_SIZE, "ZBL6 V7 provenance offset");
 _Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, source) == ZBL6_MEMORY_SOURCE_OFFSET, "ZBL6 memory source offset");
 _Static_assert(__builtin_offsetof(struct zbl6_memory_handoff, flags) == ZBL6_MEMORY_FLAGS_OFFSET, "ZBL6 memory flags offset");

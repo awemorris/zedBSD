@@ -2059,17 +2059,26 @@ screen_done(
 	const struct kl_theme *theme;
 	char words[512];
 	int zedbsd;
+	int entry;
 	int same;
 	int y;
 
-	/* How to start it: the loader's place decides the words. */
+	/* How to start it: the firmware's boot entry, or else the loader's place, decides the words. */
 	theme = app->style.theme;
 	zedbsd = strstr(app->loader_path, "ZEDBSD") != NULL;
+	entry = 0;
+	same = strcmp(app->boot_entry, "none");
+	if (app->boot_entry[0] != '\0' && same != 0)
+		entry = 1;
 	screen_mark(app, x, top, 64U);
 	(void)kl_tr_format(words, sizeof(words), kl_tr("{1} is installed."), app->os_name, (const char *)NULL);
 	y = screen_lines(app, x + 84, top + 20, width - 84, words, 20U, 1, theme->text, 1);
 	y = top + 64 + SCREEN_GAP;
-	if (zedbsd) {
+	if (entry) {
+		(void)kl_tr_format(words, sizeof(words),
+				   kl_tr("{1} was added to the firmware's boot menu, at the end of its boot order. Restart; if another system starts first, choose {1} in the firmware's boot menu."),
+				   app->os_name, (const char *)NULL);
+	} else if (zedbsd) {
 		(void)kl_tr_format(words, sizeof(words),
 				   kl_tr("The disk already had a loader, which was kept. Restart and choose {1} in the firmware's boot menu (\\EFI\\ZEDBSD\\BOOTX64.EFI on the disk)."),
 				   app->os_name, (const char *)NULL);

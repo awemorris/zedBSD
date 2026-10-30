@@ -34,8 +34,17 @@ enum zbl6_handoff_form {
 	ZBL6_HANDOFF_FORM_V5_UEFI,
 	ZBL6_HANDOFF_FORM_V6_BIOS,
 	ZBL6_HANDOFF_FORM_V6_UEFI,
-	ZBL6_HANDOFF_FORM_V7_UEFI
+	ZBL6_HANDOFF_FORM_V7_UEFI,
+	ZBL6_HANDOFF_FORM_V8_UEFI
 };
+
+/*
+ * Validates the runtime part of a version-eight handoff: where its copy of
+ * the runtime descriptors lies, before the HAL copies it, and then the
+ * copied descriptors themselves.
+ */
+int zbl6_uefi_runtime_envelope_valid(const struct zbl6_uefi_runtime_handoff *runtime, const struct zbl6_memory_handoff *memory, const struct zbl6_boot_allocation *allocations);
+int zbl6_uefi_runtime_descriptors_valid(const struct zbl6_uefi_runtime_handoff *runtime, const uint8_t *descriptors);
 
 enum zbl6_handoff_form
 zbl6_handoff_classify(

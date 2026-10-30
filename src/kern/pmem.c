@@ -201,6 +201,46 @@ kern_device_unmap(
 }
 
 /*
+ * Maps one firmware range at the kernel address the firmware was told.
+ */
+int
+kern_firmware_map(
+	uint64_t address,
+	void *mapped,
+	size_t size,
+	unsigned protection,
+	unsigned attributes)
+{
+	uint32_t flags;
+	int status;
+
+	/* Translates the access rights the firmware's range needs. */
+	flags = 0;
+	if ((protection & KERN_PROT_READ) != 0)
+		flags |= HAL_SPACE_READ;
+	if ((protection & KERN_PROT_WRITE) != 0)
+		flags |= HAL_SPACE_WRITE;
+	if ((protection & KERN_PROT_EXEC) != 0)
+		flags |= HAL_SPACE_EXEC;
+
+	/* Refuses an unknown cache attribute. */
+	if (attributes != KERN_FIRMWARE_CACHED && attributes != KERN_FIRMWARE_UNCACHED)
+		return EINVAL;
+
+	/* Keeps the firmware's device ranges, such as its flash, out of the caches. */
+	if (attributes == KERN_FIRMWARE_UNCACHED)
+		flags |= HAL_SPACE_NOCACHE;
+
+	/* Maps the range into the system space at the named address. */
+	status = hal_space_map(HAL_SPACE_SYS, mapped, (hal_physaddr_t)address, size, flags);
+	if (status != HAL_OK)
+		return pmem_error(status);
+
+	/* Succeeded: the range stays mapped for the kernel's life. */
+	return 0;
+}
+
+/*
  * Reports the page size of one translation level.
  */
 size_t
