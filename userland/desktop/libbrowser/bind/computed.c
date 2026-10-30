@@ -348,6 +348,8 @@ static const struct computed_entry computed_entries[] = {
 	{ "order", COMPUTED_ORDER },
 	{ "row-gap", COMPUTED_ROW_GAP },
 	{ "column-gap", COMPUTED_COLUMN_GAP },
+	{ "grid-row-gap", COMPUTED_ROW_GAP },
+	{ "grid-column-gap", COMPUTED_COLUMN_GAP },
 	{ "outline-width", COMPUTED_OUTLINE_WIDTH },
 	{ "outline-style", COMPUTED_OUTLINE_STYLE },
 	{ "outline-color", COMPUTED_OUTLINE_COLOR },

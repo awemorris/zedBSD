@@ -97,6 +97,8 @@ static void grid_resolve(const struct css_grid_place *place, int explicit_count,
 static void grid_static_position(struct layout_box *box, const struct grid_state *grid,
     layout_unit column_gap, layout_unit row_gap, layout_unit shift, layout_unit row_shift);
 static void grid_static_vertical_start(struct layout_box *box);
+static void grid_abspos_one(struct layout_box *box, struct layout_box *child, const struct grid_state *grid, layout_unit column_gap, layout_unit row_gap, layout_unit shift, layout_unit row_shift, layout_unit off_x, layout_unit off_y, int direct);
+static void grid_abspos_deeper(struct layout_box *box, struct layout_box *walk, const struct grid_state *grid, layout_unit column_gap, layout_unit row_gap, layout_unit shift, layout_unit row_shift, layout_unit off_x, layout_unit off_y, int depth);
 static void grid_abspos_areas(struct layout_box *box, const struct grid_state *grid,
     layout_unit column_gap, layout_unit row_gap, layout_unit shift, layout_unit row_shift);
 static int grid_place(struct grid_state *grid, int auto_flow);
@@ -2184,6 +2186,77 @@ grid_abspos_areas(
 	layout_unit row_shift)
 {
 	struct layout_box *child;
+
+	/* The grid is the containing block only when positioned; other flows keep their paths. */
+	if (box->style.position == CSS_POSITION_STATIC ||
+	    box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
+	    (box->style.direction != CSS_DIRECTION_LTR && box->style.direction != CSS_DIRECTION_RTL))
+		return;
+	for (child = box->first_child; child != NULL; child = child->next)
+		grid_abspos_one(box, child, grid, column_gap, row_gap, shift, row_shift, 0, 0, 1);
+
+	/* The boxes out of the flow deeper in the grid items that the grid contains are placed in their areas too. */
+	grid_abspos_deeper(box, box, grid, column_gap, row_gap, shift, row_shift, 0, 0, 0);
+}
+
+/*
+ * Finds the boxes out of the flow below the grid's items whose containing block is the grid (the grid-placement
+ * properties name their area), with the offset of their parent's content box from the grid's.
+ */
+static void
+grid_abspos_deeper(
+	struct layout_box *box,
+	struct layout_box *walk,
+	const struct grid_state *grid,
+	layout_unit column_gap,
+	layout_unit row_gap,
+	layout_unit shift,
+	layout_unit row_shift,
+	layout_unit off_x,
+	layout_unit off_y,
+	int depth)
+{
+	struct layout_box *child;
+
+	if (depth > 32)
+		return;
+	for (child = walk->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow) {
+			if (walk != box && child->style.position == CSS_POSITION_ABSOLUTE && layout_containing_box(child) == box)
+				grid_abspos_one(box, child, grid, column_gap, row_gap, shift, row_shift, off_x, off_y, 0);
+			continue;
+		}
+		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
+			continue;
+
+		/* A grid inside lays its own items out; what its lines name (a subgrid's) is not the outer grid's. */
+		if (child->style.display == CSS_DISPLAY_GRID || child->style.display == CSS_DISPLAY_INLINE_GRID ||
+		    child->style.column_subgrid != NULL || child->style.row_subgrid != NULL)
+			continue;
+		grid_abspos_deeper(box, child, grid, column_gap, row_gap, shift, row_shift,
+		    off_x + child->x + child->border[CSS_LEFT] + child->padding[CSS_LEFT] + (walk == box ? 0 : 0),
+		    off_y + child->y + child->border[CSS_TOP] + child->padding[CSS_TOP], depth + 1);
+	}
+}
+
+/*
+ * Gives a box out of the flow the grid area its grid-placement properties name as its containing block (and, for a
+ * child of the grid, the static position at the area's start corner).  off_x and off_y are the offsets of its parent's
+ * content box from the grid's, which the cb of a deeper box is relative to.
+ */
+static void
+grid_abspos_one(
+	struct layout_box *box,
+	struct layout_box *child,
+	const struct grid_state *grid,
+	layout_unit column_gap,
+	layout_unit row_gap,
+	layout_unit shift,
+	layout_unit row_shift,
+	layout_unit off_x,
+	layout_unit off_y,
+	int direct)
+{
 	layout_unit begin;
 	layout_unit left;
 	layout_unit right;
@@ -2197,21 +2270,24 @@ grid_abspos_areas(
 	int index;
 	int rtl;
 
-	/* The grid is the containing block only when positioned; other flows keep their paths. */
-	if (box->style.position == CSS_POSITION_STATIC ||
-	    box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
-	    (box->style.direction != CSS_DIRECTION_LTR && box->style.direction != CSS_DIRECTION_RTL))
-		return;
 	rtl = box->style.direction == CSS_DIRECTION_RTL;
-	for (child = box->first_child; child != NULL; child = child->next) {
+	{
 		if (child->style.position != CSS_POSITION_ABSOLUTE || child->static_grid_area)
-			continue;
+			return;
 		if (child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
-			continue;
+			return;
 		grid_abspos_lines(&child->style.grid_column, box->style.column_count,
 		    grid->column_count, &first_column, &last_column);
 		grid_abspos_lines(&child->style.grid_row, box->style.row_count,
 		    grid->row_count, &first_row, &last_row);
+
+		/* A deeper box that names no line keeps the grid's padding box, and one that names lines by name leaves them to a subgrid. */
+		if (!direct && first_column == 0 && last_column == 0 && first_row == 0 && last_row == 0)
+			return;
+		if (!direct && (child->style.grid_column.start_name != NULL || child->style.grid_column.end_name != NULL ||
+		    child->style.grid_row.start_name != NULL || child->style.grid_row.end_name != NULL))
+			return;
+
 		/* The columns: logical offsets from the start of the track strip. */
 		total = column_gap * (layout_unit)(grid->column_count - 1);
 		for (index = 0; index < grid->column_count; index++)
@@ -2246,13 +2322,13 @@ grid_abspos_areas(
 			physical_right = shift + total - left;
 			child->cb_left_auto = left_auto;
 			child->cb_right_auto = right_auto;
-			child->cb_left = left_auto ? -box->padding[CSS_LEFT] : physical_left;
-			child->cb_right = right_auto ? box->width + box->padding[CSS_RIGHT] : physical_right;
+			child->cb_left = (left_auto ? -box->padding[CSS_LEFT] : physical_left) - off_x;
+			child->cb_right = (right_auto ? box->width + box->padding[CSS_RIGHT] : physical_right) - off_x;
 		} else {
 			child->cb_left_auto = first_column == 0;
 			child->cb_right_auto = last_column == 0;
-			child->cb_left = child->cb_left_auto ? -box->padding[CSS_LEFT] : shift + left;
-			child->cb_right = child->cb_right_auto ? box->width + box->padding[CSS_RIGHT] : shift + right;
+			child->cb_left = (child->cb_left_auto ? -box->padding[CSS_LEFT] : shift + left) - off_x;
+			child->cb_right = (child->cb_right_auto ? box->width + box->padding[CSS_RIGHT] : shift + right) - off_x;
 		}
 
 		/* The rows. */
@@ -2276,9 +2352,12 @@ grid_abspos_areas(
 			bottom = 0;
 		child->cb_top_auto = first_row == 0;
 		child->cb_bottom_auto = last_row == 0;
-		child->cb_top = child->cb_top_auto ? -box->padding[CSS_TOP] : row_shift + top;
-		child->cb_bottom = child->cb_bottom_auto ? 0 : row_shift + bottom;
+		child->cb_top = (child->cb_top_auto ? -box->padding[CSS_TOP] : row_shift + top) - off_y;
+		child->cb_bottom = (child->cb_bottom_auto ? 0 : row_shift + bottom) - off_y;
 		child->cb_set = 1;
+
+		if (!direct)
+			return;
 
 		/* The static position starts at the area's start corner. */
 		child->static_x = rtl ? child->cb_right : child->cb_left;
