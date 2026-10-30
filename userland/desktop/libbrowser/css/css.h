@@ -37,6 +37,28 @@
 /* The most sources an @font-face rule keeps (the ones after are dropped). */
 #define CSS_FONT_SOURCES 4
 
+/* The most filter functions a style keeps (the ones after are dropped). */
+#define CSS_FILTERS 8
+
+/* The kinds of filter function. */
+enum css_filter_kind {
+	CSS_FILTER_BLUR,
+	CSS_FILTER_BRIGHTNESS,
+	CSS_FILTER_CONTRAST,
+	CSS_FILTER_GRAYSCALE,
+	CSS_FILTER_HUE_ROTATE,
+	CSS_FILTER_INVERT,
+	CSS_FILTER_OPACITY,
+	CSS_FILTER_SATURATE,
+	CSS_FILTER_SEPIA
+};
+
+/* One filter function of a style: blur's amount is in pixels, hue-rotate's in degrees, the others' a number (1 is 100%). */
+struct css_filter {
+	int kind;
+	float amount;
+};
+
 /* The most box shadows a style keeps (the ones after are dropped). */
 #define CSS_SHADOWS 4
 
@@ -799,6 +821,11 @@ struct css_style {
 	float opacity;
 	struct css_shadow shadows[CSS_SHADOWS];
 	int shadow_count;
+	/* backdrop-filter: the functions applied to what is painted behind the box. */
+	struct css_filter backdrop_filters[CSS_FILTERS];
+	int backdrop_filter_count;
+	/* will-change names a property that makes the box a containing block of fixed and absolute boxes (transform, filter...). */
+	int will_change_contains;
 	/* One inherited sharp text shadow; blur and lists are added by a later phase. */
 	struct css_shadow text_shadow;
 	int text_shadow_set;

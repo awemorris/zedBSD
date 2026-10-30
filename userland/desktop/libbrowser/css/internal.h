@@ -170,6 +170,7 @@ enum css_value_kind {
 	CSS_VALUE_UNSET,
 	CSS_VALUE_CONTENT,
 	CSS_VALUE_SHADOWS,
+	CSS_VALUE_FILTERS,
 	CSS_VALUE_INSET,
 	CSS_VALUE_TRACKS,
 	CSS_VALUE_GRID_LINE,
@@ -320,6 +321,8 @@ enum css_property {
 	CSS_PROP_BORDER_SPACING_Y,
 	CSS_PROP_BORDER_COLLAPSE,
 	CSS_PROP_CAPTION_SIDE,
+	CSS_PROP_BACKDROP_FILTER,
+	CSS_PROP_WILL_CHANGE,
 	CSS_PROP_TEXT_TRANSFORM,
 	CSS_PROP_MARGIN_INLINE_START,
 	CSS_PROP_MARGIN_INLINE_END,
@@ -510,6 +513,7 @@ struct css_value {
 	const struct css_calc *calc;
 	const struct css_content *content;
 	const struct css_shadow_list *shadows;
+	const struct css_filter_list *filters;
 	const struct css_declared_inset *inset;
 	const struct css_track_list *tracks;
 	/* A grid line's name (an atom; NULL for none), and grid-template-areas' cells (none when NULL). */
@@ -568,6 +572,18 @@ struct css_declared_shadow {
 	struct css_value lengths[4];
 	uint32_t color;
 	int inset;
+};
+
+/* One declared filter function: its kind and its argument (a number, a percentage, a length or an angle in degrees). */
+struct css_declared_filter {
+	int kind;
+	struct css_value amount;
+};
+
+/* A declared filter list, kept in the parse's arena (none is an empty list). */
+struct css_filter_list {
+	struct css_declared_filter filters[CSS_FILTERS];
+	size_t count;
 };
 
 /* A declared box-shadow list, kept in the parse's arena (none is an empty list). */

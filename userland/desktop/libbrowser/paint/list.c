@@ -144,6 +144,7 @@ static void list_box_part(struct list_walk *walk, const struct layout_box *box, 
 static void list_box_own(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth, int part);
 static const struct layout_box **list_children_ordered(const struct layout_box *box);
 static const struct layout_box *list_child(const struct layout_box *from, const struct layout_box **ordered, size_t index);
+static void list_backdrop(struct list_walk *walk, const struct layout_box *box);
 static void list_fade(struct list_walk *walk, size_t first, float opacity);
 static void list_scale(struct list_walk *walk, size_t first, const struct layout_box *box);
 static int list_border_shape(const struct layout_box *box, struct list_shape *shape);
@@ -471,6 +472,13 @@ paint_dump(
 			    (double)layout_to_px(item->width), (double)layout_to_px(item->height));
 			list_color(out, item->color);
 			wb_buffer_append_string(out, "\n");
+			continue;
+		}
+
+		/* A backdrop filter: its rectangle and the number of functions. */
+		if (item->kind == PAINT_BACKDROP) {
+			wb_buffer_printf(out, "backdrop %.2f %.2f %.2f %.2f %d\n", (double)layout_to_px(item->x), (double)layout_to_px(item->y),
+			    (double)layout_to_px(item->width), (double)layout_to_px(item->height), item->filter_count);
 			continue;
 		}
 
@@ -823,6 +831,10 @@ list_box_own(
 	/* The shadows go under the box. */
 	if (part != LIST_BOX_INLINE && visible)
 		list_shadows(walk, box);
+
+	/* The backdrop filter works on what is drawn so far, under the box's own background. */
+	if (part != LIST_BOX_INLINE && visible && box->style.backdrop_filter_count != 0 && box->parent != NULL)
+		list_backdrop(walk, box);
 
 	/* The background fills the border box, rounded as its corners are, unless it went to the canvas. */
 	width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
@@ -2719,6 +2731,32 @@ list_rect(
 	item.width = width;
 	item.height = height;
 	item.color = color;
+	error = wb_vector_push(&walk->list->items, &item);
+	if (error != 0)
+		walk->error = error;
+}
+
+/* Adds the backdrop filter of a box: its border box, with the box's filter functions. */
+static void
+list_backdrop(
+	struct list_walk *walk,
+	const struct layout_box *box)
+{
+	struct paint_item item;
+	int error;
+
+	if (walk->error != 0)
+		return;
+	memset(&item, 0, sizeof(item));
+	item.kind = PAINT_BACKDROP;
+	item.x = box->x;
+	item.y = box->y;
+	item.width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+	item.height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	if (item.width <= 0 || item.height <= 0)
+		return;
+	item.filters = box->style.backdrop_filters;
+	item.filter_count = box->style.backdrop_filter_count;
 	error = wb_vector_push(&walk->list->items, &item);
 	if (error != 0)
 		walk->error = error;

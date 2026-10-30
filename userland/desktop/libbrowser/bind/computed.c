@@ -82,6 +82,7 @@ enum computed_property {
 	COMPUTED_BACKGROUND_IMAGE,
 	COMPUTED_OPACITY,
 	COMPUTED_TEXT_SHADOW,
+	COMPUTED_BACKDROP_FILTER,
 	COMPUTED_Z_INDEX,
 	COMPUTED_FONT_SIZE,
 	COMPUTED_FONT_WEIGHT,
@@ -217,6 +218,7 @@ static int computed_ascii(const char *ascii, struct wb_units *out);
 static int computed_decoration_append(struct wb_units *out, const struct wb_units *part);
 static int computed_decoration(const struct css_style *style, struct wb_units *out);
 static int computed_text_shadow(const struct css_style *style, struct wb_units *out);
+static int computed_backdrop_filter(const struct css_style *style, struct wb_units *out);
 
 /* The state of a computed declaration, which marks its element's object. */
 static const struct vm_cell_type computed_ref_type = { "computed-style", computed_trace, NULL };
@@ -296,6 +298,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "background-image", COMPUTED_BACKGROUND_IMAGE },
 	{ "opacity", COMPUTED_OPACITY },
 	{ "text-shadow", COMPUTED_TEXT_SHADOW },
+	{ "backdrop-filter", COMPUTED_BACKDROP_FILTER },
 	{ "z-index", COMPUTED_Z_INDEX },
 	{ "font-size", COMPUTED_FONT_SIZE },
 	{ "font-weight", COMPUTED_FONT_WEIGHT },
@@ -1286,6 +1289,9 @@ computed_write_keyword(
 		break;
 	case COMPUTED_OPACITY:
 		error = computed_number(style->opacity, out);
+		break;
+	case COMPUTED_BACKDROP_FILTER:
+		error = computed_backdrop_filter(style, out);
 		break;
 	case COMPUTED_TEXT_SHADOW:
 		error = computed_text_shadow(style, out);
@@ -2300,6 +2306,45 @@ computed_decoration_append(struct wb_units *out, const struct wb_units *part)
 			return error;
 	}
 	return wb_units_append(out, part->data, part->length);
+}
+
+/* Serializes backdrop-filter as its functions (blur in px, hue-rotate in deg, the others as numbers), or none. */
+static int
+computed_backdrop_filter(
+	const struct css_style *style,
+	struct wb_units *out)
+{
+	static const char *const names[] = {
+		"blur", "brightness", "contrast", "grayscale", "hue-rotate", "invert", "opacity", "saturate", "sepia"
+	};
+	const struct css_filter *filter;
+	int index;
+	int error;
+
+	/* No function. */
+	if (style->backdrop_filter_count == 0)
+		return computed_ascii("none", out);
+	error = 0;
+	for (index = 0; index < style->backdrop_filter_count && error == 0; index++) {
+		filter = &style->backdrop_filters[index];
+		if (index != 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_ascii(names[filter->kind], out);
+		if (error == 0)
+			error = computed_ascii("(", out);
+		if (error == 0 && filter->kind == CSS_FILTER_BLUR)
+			error = computed_pixels(filter->amount, out);
+		else if (error == 0 && filter->kind == CSS_FILTER_HUE_ROTATE) {
+			error = computed_number(filter->amount, out);
+			if (error == 0)
+				error = computed_ascii("deg", out);
+		} else if (error == 0)
+			error = computed_number(filter->amount, out);
+		if (error == 0)
+			error = computed_ascii(")", out);
+	}
+	return error;
 }
 
 /* Serializes the text shadow as its color and its offsets and blur in pixels, or none. */

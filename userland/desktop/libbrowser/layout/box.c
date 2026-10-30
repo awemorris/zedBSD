@@ -285,8 +285,9 @@ int
 layout_contains_fixed(
 	const struct layout_box *box)
 {
-	/* A transformed block. */
-	return box->kind == LAYOUT_BLOCK && box->style.transform_set;
+	/* A transformed block, or one with a backdrop filter or a will-change that makes one. */
+	return box->kind == LAYOUT_BLOCK &&
+	    (box->style.transform_set || box->style.backdrop_filter_count != 0 || box->style.will_change_contains);
 }
 
 /*
