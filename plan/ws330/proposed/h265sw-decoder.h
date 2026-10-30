@@ -27,12 +27,15 @@
  *  4. A slice segment of a decodable type (h265sw_nal_is_decodable):
  *     h265sw_slice_read_start; the PPS and SPS (absent: EINVAL; refused:
  *     ENOTSUP).  A first segment starts a picture: the SPS is activated
- *     at an IRAP picture (the copy kept in sps with its generation; a
- *     change of size or DPB size makes a new pool, DPB and picture
- *     context after the old DPB was flushed or cleared by
- *     NoOutputOfPriorPicsFlag), and any other picture whose PPS names
- *     another SPS (or generation) is dropped with EINVAL (7.4.3.2.1: the
- *     SPS changes only at an IRAP picture with NoRaslOutputFlag 1);
+ *     only at an IRAP picture with NoRaslOutputFlag 1 (the copy kept in
+ *     sps with its generation; h265sw_ps_sps_supported, ENOTSUP outside
+ *     the range; a change of size or DPB size makes a new pool, DPB and
+ *     picture context after the old DPB was flushed or cleared by
+ *     NoOutputOfPriorPicsFlag), and any other picture (a CRA with
+ *     NoRaslOutputFlag 0 included) whose PPS names another SPS id or
+ *     generation is dropped with EINVAL (7.4.3.2.1: the SPS changes only
+ *     there; an SPS sent again with the same content keeps its
+ *     generation, h265sw-ps.h);
  *     h265sw_ps_check_pair; h265sw_slice_read_rest; NoRaslOutputFlag of an
  *     IRAP picture (IDR, BLA, the first picture, after end of sequence or
  *     a reset: 1; else a CRA 0); RASL pictures associated with an IRAP
@@ -56,8 +59,9 @@
  *     context, then h265sw_slice_data on the RBSP from data_offset.
  *  6. Finishing a picture: CTBs no segment decoded are concealed (their
  *     samples copied from the same place of RefPicList0[ 0 ] of the last
- *     P or B slice when there was one, else from the frame output last,
- *     else grey; their blocks intra with filtering off; counted), the
+ *     P or B slice when there was one, else from the frame output last
+ *     when it has the same size, else grey; their blocks intra with
+ *     filtering off; counted), the
  *     deblocking (h265sw_deblock_picture), SAO (h265sw_sao_picture), the
  *     motion stored in the frame (h265sw_tmvp_store), the decoded picture
  *     hash compared when there was one (stats), h265sw_poc_finish, and
@@ -83,6 +87,8 @@
 #include "h265sw.h"
 #include "h265sw-ctu.h"
 #include "h265sw-dpb.h"
+#include "h265sw-inter.h"
+#include "h265sw-mvctx.h"
 #include "h265sw-pic.h"
 #include "h265sw-poc.h"
 #include "h265sw-ps.h"
@@ -135,7 +141,8 @@ struct h265sw_decoder_stats {
  * its PicOrderCntVal; irap_no_rasl and no_rasl_output (NoRaslOutputFlag
  * of the current IRAP picture and of the IRAP picture the current
  * picture is associated with); pic_output PicOutputFlag; sets the
- * reference picture set; lists the current slice's lists; hash the
+ * reference picture set; lists the current slice's lists, mv and inter
+ * the contexts the inter prediction of the slice reads; hash the
  * decoded picture hash received for it; time_us the time of its first
  * segment's NAL unit; last_ref_frame RefPicList0[ 0 ] of its last P or B
  * slice (the concealment's source).
@@ -180,6 +187,8 @@ struct h265sw_decoder {
 	int pic_output;
 	struct h265sw_ref_sets sets;
 	struct h265sw_reflists lists;
+	struct h265sw_mvctx mv;
+	struct h265sw_inter_ctx inter;
 	struct h265sw_picture_hash hash;
 	int64_t time_us;
 	struct vcodec_frame *last_ref_frame;

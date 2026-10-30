@@ -54,17 +54,20 @@ struct h265sw_cabac_store {
  * contexts.
  *
  * From CtbAddrInTs = CtbAddrRsToTs[ slice_segment_address ]: at the
- * start, the contexts by 9.3.2.1 (initialized by
- * h265sw_cabac_init_contexts with initType and SliceQpY; for a dependent
- * segment synchronized from store->ds, or from store->wpp when the
- * segment starts a wavefront row as 9.3.2.1 orders) and the engine
+ * start, the contexts by 9.3.2.1 in its order of priority: the first CTU
+ * of a tile is initialized (h265sw_cabac_init_contexts with initType and
+ * SliceQpY); else the first CTU of a wavefront row is synchronized from
+ * store->wpp when the CTB above-right (9-3) is available, else
+ * initialized; else a dependent segment is synchronized from store->ds;
+ * else initialized.  Then the engine
  * (vcodec_cabac_start); then for each CTU: the initialization at the
  * first CTU of a tile, the synchronization from store->wpp (when the CTB
  * above-right is available by 6.4.1, else initialization) at the first
  * CTU of a row with entropy_coding_sync_enabled_flag; the QP state reset
  * at the first quantization group of a slice, a tile and a wavefront
- * row; h265sw_ctu_parse; h265sw_recon_ctu; pic->ctb marked decoded and
- * given the segment and SliceAddrRs; the storage to store->wpp after the
+ * row; pic->ctb[ addr ] given SliceAddrRs and the segment before the
+ * parse (the availability of 6.4.1 inside the CTU depends on it);
+ * h265sw_ctu_parse; h265sw_recon_ctu; pic->ctb marked decoded; the storage to store->wpp after the
  * second CTU of a row; end_of_slice_segment_flag; when the next CTU
  * starts a tile or a wavefront row, end_of_subset_one_bit (must be 1)
  * and the engine restarted at the next byte boundary

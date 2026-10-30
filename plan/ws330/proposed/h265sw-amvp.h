@@ -26,8 +26,9 @@
  *
  * The candidates (8.5.3.2.7): A from A0 then A1 (each available by
  * h265sw_pic_pb_available), first one whose list X or list Y reference
- * has the same order count as RefPicListX[ refIdxLX ] (the same picture
- * by order count and no long-term mismatch), else with scaling
+ * is the picture RefPicListX[ refIdxLX ] (equal order counts:
+ * DiffPicOrderCnt 0, 8-171 and 8-172; order counts are unique in a coded
+ * video sequence), else with scaling
  * (h265sw_tmvp_scale) of the first available one whose reference has the
  * same long-term marking; isScaledFlagLX = availableA0 || availableA1;
  * B from B0, B1, B2 likewise without scaling, then, when isScaledFlagLX

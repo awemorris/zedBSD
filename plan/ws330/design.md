@@ -38,8 +38,8 @@
 | D1 | **decoder は Main の tool を全部持つ（tile と WPP を含む）** | Main の適合の decoder は tile・WPP・dependent slice を decode できる必要がある（A.3.2）。x265 は既定で WPP を使い、実際の HEVC の file の多くが WPP か tile を持つ。1 thread で順に読むなら、tile は CTB の走査の順と文脈の初期化、WPP は文脈の保存と同期と substream の切り替えだけで、費用は小さい | tile・WPP を範囲の外にして次の backend へ（実際の stream の多くを libavcodec に回すことになり、WS の目的に反する） |
 | D2 | 範囲は Main（8 bit）。Main 10 は後の WS（Q330-1） | WS318 Q318-8 の推しと同じ（P010 の出力と表示の道が libmedia に無い）。8 bit の型で全 module を書ける。header は BitDepth を定数 `H265SW_BIT_DEPTH` で式に残し、後で 16 bit の sample に広げる時に式を読み直さずに済む形にした | 最初から 16 bit の sample（8 bit の stream で memory の帯域が倍、全 module の試験が倍） |
 | D3 | 名前: H.265 の decoder は `h265sw-`、encoder は `h265enc-`、codec に依らない物は `vcodec-` | WS326 の決定 3（共通部分は汎用の名前）、WS329 の E4（`vcodec-` を書き側に使った）に揃える | 全部 `hevc-`（既存の名前の組と揃わない） |
-| D4 | **H.265 の parameter set・slice header・POC・RPS・DPB の marking の解析は Vulkan の header に依らない構造体で 1 つだけ作り、WS318 の Vulkan Video の H.265 の道もそれを使う**（StdVideoH265 へ写す module だけ WS318 が持つ）（Q330-2） | H.265 の SPS・PPS・slice header・RPS は H.264 よりずっと大きく（st_ref_pic_set の予測、tile、long-term、VUI と HRD）、2 つ書くと誤りも 2 倍。H.264 で分けた理由（既に h264.c があり、Vulkan の道を壊す危険）は H.265 には無い（まだどちらも無い） | WS318 の D19 のまま 2 つの解析（重複。同じ仕様の節を 2 回 Sonnet に実装させ、2 回照合する） |
-| D5 | CTU を先に全部 parse し（`h265sw-ctu`）、次に再構成する（`h265sw-recon`） | H.265 の syntax の解析は画素に依らない（intra の mode の導出は要るが画素は要らない）ので分けても正確。module の境がはっきりし、parse と再構成を別の Phase で試験できる。CTU 1 つの struct は約 30 KB | CU ごとに parse と再構成を交互（module が大きくなり、Sonnet の 1 回に収まらない） |
+| D4 | **H.265 の parameter set・slice header・POC・RPS・DPB の marking の解析は Vulkan の header に依らない構造体で 1 つだけ作り、WS318 の Vulkan Video の H.265 の道もそれを使う**（StdVideoH265 へ写す module だけ WS318 が持つ）（Q330-2）。解析は範囲で拒まない（SPS は 10 bit・4:2:2・4:4:4・range extension の flag も読んで保ち、software の範囲は `h265sw_ps_sps_supported` が別に判定する、review M7）。Vulkan の道が要る生の値（VPS・HRD・st_ref_pic_set の生の syntax・slice header の RPS の生の field）は、A に決まれば WS318 p016 が p003 の前にこの header へ足す | H.265 の SPS・PPS・slice header・RPS は H.264 よりずっと大きく（st_ref_pic_set の予測、tile、long-term、VUI と HRD）、2 つ書くと誤りも 2 倍。H.264 で分けた理由（既に h264.c があり、Vulkan の道を壊す危険）は H.265 には無い（まだどちらも無い） | WS318 の D19 のまま 2 つの解析（重複。同じ仕様の節を 2 回 Sonnet に実装させ、2 回照合する） |
+| D5 | CTU を先に全部 parse し（`h265sw-ctu`）、次に再構成する（`h265sw-recon`、inter の PU は `h265sw-inter`）。再構成は CU ごとにも呼べる（`h265sw_recon_cu`: encoder が CU を決めるたびに再構成する、review M8） | H.265 の syntax の解析は画素に依らない（intra の mode の導出は要るが画素は要らない）ので分けても正確。module の境がはっきりし、parse と再構成を別の Phase で試験できる。CTU 1 つの struct は約 30 KB | CU ごとに parse と再構成を交互（module が大きくなり、Sonnet の 1 回に収まらない） |
 | D6 | picture の状態は 4x4 の block ごとの entry（`struct h265sw_blk`・`struct h265sw_mv_field`）と CTB ごと（slice・tile・SAO）と slice segment ごと（filter の値と参照の id と POC） | 最小の PU（8x4・4x8）と TU（4x4）が 4x4 の格子。deblocking・SAO・AMVP・merge・文脈の選びが同じ表を読む | MinTbAddrZs の表を持つ（8K で 2 M 個の uint32）。z 順の番号は 6-10 の式で計算する（`h265sw_pic_zscan`） |
 | D7 | 参照画の motion は 16x16 ごとに 1 つ（左上の 4x4 の値）を、参照の POC と long-term の印と一緒に frame の side data に持つ | 8.5.3.2.8 が `( ( x >> 4 ) << 4, ( y >> 4 ) << 4 )` しか読まない。参照の POC と印を一緒に持てば、collocated の picture の参照の list を残さずに済む（LongTermRefPic と DiffPicOrderCnt は「その picture を decode した時の」値） | 4x4 の motion を全部残す（16 倍の memory）、参照の list を frame に持つ |
 | D8 | **frame と DPB を H.264 と H.265 で共通にする**（Q1 の依頼、2026-10-31）。frame は共通の `struct vcodec_frame`（plane・参照の数・id・POC・時刻・表示の値、大きさは luma の sample で MB・CTB の単位を持たない）を codec の frame の最初の member に埋め込み、codec の motion は side data（H.264 は MB ごとの `h264sw_motion`、H.265 は 16x16 ごとの `h265sw_col_motion`）。DPB は共通の `struct vcodec_dpb`（buffer・marking・needed for output・POC・generated と codec の field: H.264 の frame_num と LongTermFrameIdx、H.265 の PicLatencyCount）と、共通の操作（空き、除去、bumping、flush、clear、出力待ちの列）を `vcodec-dpb` に、いつ bumping するかと marking（H.264 の sliding window・MMCO・gap・C.4、H.265 の RPS・8.3.3・C.5.2）は codec に残す | H.264 の frame と pool（420 行）と DPB の buffer の扱い・bumping（C.4.5.3 と H.265 C.5.2.4 は同じ手順）は codec に依らない。埋め込みなら H.264 の field を残したまま共通にできる。WS326 p026 が「H.265 の設計と一緒に決める」として先送りした物 | H.265 だけ別の pool と DPB（重複）、DPB の marking まで共通（規則が別で、共通の型が両方の規則の和になる）、汎用の `void *` の field の束（型が弱い） |
@@ -51,7 +51,7 @@
 | D14 | substream（tile・WPP の行）は slice data の中を順に読む。entry_point_offset は読み飛ばす | 1 thread なら次の substream は end_of_subset_one_bit の後の byte 境界から始まる。entry point は emulation prevention を含む NAL の byte 数で、RBSP の位置にすると変換が要る | entry point で位置を決める（変換が要り、並列にしない間は利点が無い） |
 | D15 | 最初は 1 thread。WPP・tile の並列の decode と SIMD は速さの Phase（p031）で | 正しさが先（WS326 と同じ順）。構造（CTU の parse と再構成、文脈の保存）は並列にできる形 | 最初から並列 |
 | D16 | VPS は読まない | base layer の decode は VPS の値を使わない（7.4.3.1） | 全部読む（使わない code と試験） |
-| D17 | SPS の VUI が読めない時、profile が Main・Main 10・Main Still Picture なら VUI だけ捨てて SPS を残し、拡張の flag を 0 とみなす。他の profile では EINVAL | 古い encoder の VUI の誤り（default display window の位置）で再生を止めない。Main の系は拡張の flag が 0 と A.3.2〜A.3.4 が定めるので、捨てても誤った decode にならない | 全部 EINVAL（実際の file が再生できない）、全部許す（RExt の stream を誤って decode する） |
+| D17 | SPS の VUI が読めない時（読めてしまう誤った VUI の後で拡張の flag が 1 になる場合は救えない: 記録、review m14）、profile が Main・Main 10・Main Still Picture なら VUI だけ捨てて SPS を残し、拡張の flag を 0 とみなす。他の profile では EINVAL | 古い encoder の VUI の誤り（default display window の位置）で再生を止めない。Main の系は拡張の flag が 0 と A.3.2〜A.3.4 が定めるので、捨てても誤った decode にならない | 全部 EINVAL（実際の file が再生できない）、全部許す（RExt の stream を誤って decode する） |
 | D18 | 算術の未定義の動作の禁止を `vcodec.h` の補助（asr・shl・clip3）で統一 | H.265 は負の値の shift が多い（MV の scaling、intra の index、filter、文脈の初期化の `( m * qp ) >> 4`）。H.264 の decoder の規則を共通の補助にして両方が使う | module ごとに書く（同じ誤りを何度も） |
 | D19 | **encoder の module の header は decoder の header が実装で確かめられた後（p033、Opus）に書く**。この Phase は encoder の公開の header（`h265enc.h`）・module の地図・決定・Phase の案まで | encoder は decoder の状態と導出をそのまま使う（WS329 E1）。decoder の header は実装の Phase で直ることがある（WS326 p021 で reflist の header を直した）。先に encoder の header を固めると直しが連鎖する | 今 encoder の header も全部書く（decoder の header の直しのたびに encoder の header も直す） |
 | D20 | encoder の並列は WPP（CTU の行）で、slice では分けない | HEVC の並列の道具。slice は header と予測の切れで bit が増える。WPP は約 1〜2% の bit で行を並べられ、decoder も D1 で持つ | slice の並列（WS329 と同じ形だが H.265 では効率が悪い） |
@@ -166,14 +166,15 @@ C1〜C4 は WS326 と WS329 の header を変えるので、両方の `check-ske
 | h265sw-merge | merge の候補と選び（8.5.3.2.2〜8.5.3.2.5） | mvctx |
 | h265sw-amvp | MV の予測（8.5.3.2.6、8.5.3.2.7）・mvd の加算（8-94〜8-97） | mvctx |
 | h265sw-ctu | CTU・SAO・CQT・CU・PU・TT・TU の syntax（7.3.8.2〜7.3.8.14）・intra の mode の導出 | cabac-se、residual、intra、pic、ps、slice |
-| h265sw-recon | QP の予測（8.6.1）・CU の再構成（8.4、8.5、8.6） | ctu、mvctx、merge、amvp、intra、transform、interp、reflist |
+| h265sw-inter | PU の motion（merge・AMVP・8-94〜8-97）と inter 予測（8.5.3.3） | ctu、mvctx、merge、amvp、interp、reflist |
+| h265sw-recon | QP の予測（8.6.1）・CU の再構成（8.4、8.5.4、8.6）、CU ごとと CTU ごと | ctu、inter、intra、transform |
 | h265sw-deblock | deblocking（8.7.2、Table 8-12） | pic、transform（QpC） |
 | h265sw-sao | SAO（8.7.3、Table 8-13） | pic |
 | h265sw-slicedata | slice_segment_data・文脈の保存と同期・substream（7.3.8.1、9.3.1、9.3.2） | ctu、recon、cabac-init |
 | h265sw-decoder | 全体の流れ（8.1.3、C.5.2） | 全部 |
 | h265sw-backend.c | libmedia の decoder の ops（p030、header は無し、WS318 の後） | decoder、共通の backend の核 |
 
-依存の順（実装の Phase の順）: nal・sei → scan・pic → scaling・rps・vui → ps → slice → poc → dpb → reflist；cabac-init → cabac-se → residual；intra・transform・interp（独立）；tmvp → merge・amvp；ctu → recon → slicedata；deblock・sao（scan・pic の後）→ decoder → 適合 → backend → 速さ。
+依存の順（実装の Phase の順）: nal・sei → scan・pic → scaling・rps・vui → ps → slice → poc → dpb → reflist；cabac-init → cabac-se → residual；intra・transform・interp（独立）；tmvp → merge・amvp → inter；ctu → inter → recon → slicedata；deblock（scan・pic・transform の後）・sao（scan・pic の後）→ decoder → 適合 → backend → 速さ。
 
 ### 6.1 1 つの picture の流れ
 
@@ -295,7 +296,7 @@ WS329 §10.2 と同じ形: host の道具が raw の I420 を stdin から読み
 | --- | --- | --- | --- | --- |
 | p001 | 設計（この文書、proposed、問い、review） | O | — | Q1 の受け入れ、Q330 の回答 |
 | p002 | 共通化 C1〜C4（vcodec.h の補助・vcodec-frame・vcodec-dpb・vcodec-output・CABAC の追加）、H.264 の decoder と encoder を移す | O | WS329 completed、WS326 p026 | WS326 の run-unit all・run-stream・backend・適合と WS329 の run-unit・roundtrip の出力が前後で同じ、新しい test-vcodec_*、amd64 build warning 0 |
-| p003 | H.265 の decoder の header（proposed → source、p026・p002 の名前に合わせる）・.c の骨格（ENOSYS）・Makefile・run-unit.sh・check-skeleton.sh・試験の補助（syntax の書き、MD5）・BASE | O | p002 | check-skeleton PASS、amd64 build warning 0、H.264 の試験が変わらず PASS |
+| p003 | H.265 の decoder の header（proposed → source、p026・p002 の名前に合わせる）・.c の骨格（ENOSYS）・Makefile・run-unit.sh・check-skeleton.sh・試験の補助（syntax の書き `h265write.h`: parameter set・slice header・CTU・slice data、review M10）・H.264 の回帰の path の読み替え（review M9）・BASE | O | p002 | check-skeleton PASS、h265write.h の自己試験、amd64 build warning 0、H.264 の試験が変わらず PASS |
 | p004 | h265sw-nal、h265sw-sei | S | p003 | run-unit（nal・sei）、MD5 の RFC 1321 の付録の値、CRC と checksum の手計算 |
 | p005 | h265sw-scan、h265sw-pic | S | p003 | 走査の表を節の loop から導き直して全一致、tile の 6-3〜6-9 の手の例、可用性の境の例 |
 | p006 | h265sw-scaling | S | p005 | Table 7-5・7-6 の照合、予測と DC、7-44〜7-49 の配置 |
@@ -315,12 +316,13 @@ WS329 §10.2 と同じ形: host の道具が raw の I420 を stdin から読み
 | p020 | h265sw-tmvp | S | p005、p002 | 8-205〜8-209 の手計算、候補の位置、LT の不一致、保存 |
 | p021 | h265sw-merge | S | p020 | 空間の候補の各規則、並列の merge level、組み合わせの Table 8-7、0 の候補、8x4 の規則 |
 | p022 | h265sw-amvp | S | p020 | A・B の scaling と isScaled、時間、重複の除去、8-94〜8-97 の折り返し |
-| p023 | h265sw-ctu | S | p009、p010、p015、p016、p017 | CTU を書いて parse し syntax と pic の entry が一致（全 PartMode、PCM、TT の推定の分割、QG） |
-| p024 | h265sw-recon | S | p013、p018、p019、p021、p022、p023 | 性質の試験（intra の平らな画、inter の整数 MV の複写、bypass、PCM）、QP の予測の例、edge と coded |
-| p025 | h265sw-deblock | S | p005 | bS の各規則、Table 8-12、強弱の判定と filter の手計算、境界の除外 |
+| p023 | h265sw-ctu | S | p009、p010、p015、p016、p017 | p003 の h265write.h で CTU を書いて parse し syntax と pic の entry が一致（全 PartMode、PCM、TT の推定の分割、QG） |
+| p024a | h265sw-inter | S | p013、p019、p021、p022、p023 | motion の書き込み、整数 MV の複写、補間と重みの選び、絵の外 |
+| p024b | h265sw-recon | S | p018、p024a | 性質の試験（intra の平らな画、bypass、PCM）、QP の予測の例、edge と coded、recon_cu と recon_ctu の一致 |
+| p025 | h265sw-deblock | S | p005、p018 | bS の各規則、Table 8-12、強弱の判定と filter の手計算、境界の除外 |
 | p026 | h265sw-sao | S | p005 | band と edge の手計算、境界と NOFILTER の除外、写しからの読み |
-| p027 | h265sw-slicedata | S | p023、p024 | WPP の保存と同期・tile の初期化・dependent・end_of_subset の作った stream、QP の reset |
-| p028 | h265sw-decoder の全体、host の道具と run-stream.sh、最初の全体の試験 | O | p004〜p027 | libx265 の組（§10.2）で ffmpeg と全 frame 一致・SEI の hash 一致、壊した stream 200 通り |
+| p027 | h265sw-slicedata | S | p023、p024b | WPP の保存と同期・tile の初期化・dependent・end_of_subset の作った stream、QP の reset |
+| p028 | h265sw-decoder の全体、host の道具と run-stream.sh、最初の全体の試験 | O | p004〜p027（p024a・p024b を含む） | libx265 の組（§10.2）で ffmpeg と全 frame 一致・SEI の hash 一致、壊した stream 200 通り |
 | p029 | 適合の試験（HEVC_v1） | O | p028 | §10.3 の `in` の全部が一致 |
 | p030 | libmedia の backend（共通の backend の核を出す） | O | p029、WS318 completed | WS318 の decoder の層の試験、run-host-decode（HEVC）、amd64 build warning 0、QEMU の Video Player |
 | p031 | decoder の速さ（測り、近道、WPP・tile の thread、実機） | O | p029、p030 | Q330-3 の目標、近道の前後で MD5 が同じ |
@@ -343,7 +345,7 @@ WS329 §10.2 と同じ形: host の道具が raw の I420 を stdin から読み
 | p048 | encoder の速さ（WPP の thread、実機） | O | p046、p047 | Q330-3 の速さ |
 | p049 | 規約の全文の見直し、header の持ち越しの直し | D | p031、p046〜p048 | conformance-reviewer の checklist、全試験 PASS |
 
-- 並べられる組（p003 の後）: {p004}、{p005 → (p006、p020 → (p021、p022)、p025、p026)}、{p007、p008} → p009 → p010 → p011 → p012 → p013、{p014 → p015 → p016}、p017、p018、p019。推しの起動の順: p004・p005・p007・p008・p014 を並べ（最大 5）、次に p006・p017・p018・p019・p020、…。
+- 並べられる組（p003 の後）: {p004}、{p005 → (p006、p020 → (p021、p022)、p026)}、p025（p005・p018 の後）、{p007、p008} → p009 → p010 → p011 → p012 → p013、{p014 → p015 → p016}、p017、p018、p019。推しの起動の順: p004・p005・p007・p008・p014 を並べ（最大 5）、次に p006・p017・p018・p019・p020、…。
 - p004・p007〜p012 は Q330-2 の答えが推しで WS318 p017〜p019 が先に実装した時は「確かめと足りない物だけ」の Phase になる。
 
 ### 13.1 実装の Phase（S）の共通の節
@@ -352,12 +354,12 @@ WS329 §10.2 と同じ形: host の道具が raw の I420 を stdin から読み
 
 - **読む物（共通）**: AGENTS.md §4・§7・§9・§10、plan/agents/protocol.md、plan/coding-style.md の全文、この文書の §1・§2・§3・§7・§8・§10.1、`vcodec.h`・`h265sw.h`、実装する header とそれが include する header、仕様の PDF（§1 の path と SHA-256、頁の換算 +18）。
 - **変えてはいけない物**: 全部の `h265sw*.h`・`vcodec-*.h`・`h264sw*.h`・`h264enc*.h`、担当の外の `.c`、Makefile、`plan/ws330/tests/run-unit.sh`・`check-skeleton.sh`・共通の試験の補助（自分の test を除く）、HAL・toolchain・共有の build/。header の不備は直さず止めて Q1 へ（どの header のどの関数で何が足りないか）。
-- **確かめの command**: `timeout 900 sh plan/ws330/tests/run-unit.sh <name>` と `all`、`BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh`、WS326 の `sh plan/ws326/tests/run-unit.sh all`（H.264 が変わっていない）、zedBSD amd64 の libmedia.so の build（WS326 design §6 の command）で warning 0、`git diff --check`。
+- **確かめの command**: `timeout 900 sh plan/ws330/tests/run-unit.sh <name>` と `all`、`BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh`、H.264 の回帰（WS326・WS329 の完了で plan/tools へ移った単体試験の all、path は p003 が plan/tools.md の登録に合わせて各 phase.md に書く）、zedBSD amd64 の libmedia.so の build（WS326 design §6 の command）で warning 0、`git diff --check`。
 - **終わりの条件**: 上が全部 PASS（出力を自分で読む）、わざと壊す確かめ、規約の checklist、`git add` の後 `git commit -m WIP -- <path>`、phase.md の「結果」（日付は host の `date`、command と件数、自分で決めた点、未実施）、ws.md の行を「実装済み・試験 PASS」（cleared は Q1）。
 
 ## 14. Q1 への注意（ユーザーの判断ではない物）
 
-1. 仕様の PDF を main の `build/sources/specs/itu-t-h265-202601.pdf` へ写してほしい（今は `/home/awe/zedBSD-worktrees/p5-ws330/build/tmp/ws330-spec/itu-t-h265-202601.pdf`、SHA-256 `78b09348…d4d2`）。phase.md はその path を書いた。worktree の `build/tmp/ws330-spec/`（PDF と index の html）と `build/tmp/ws330-conf/`（3 つの zip、約 7 MB）と `build/tmp/ws330-hdr/` は使い捨て（Q1 が消す）。
+1. 仕様の PDF は main の `build/sources/specs/itu-t-h265-202601.pdf` に写してある（design-reviewer が SHA-256 `78b09348…d4d2` の一致を確かめた）。phase.md はその path を書いた。worktree の `build/tmp/ws330-spec/`（PDF と index の html）と `build/tmp/ws330-conf/`（3 つの zip、約 7 MB）と `build/tmp/ws330-hdr/` は使い捨て（Q1 が消す）。
 2. WS326 p026（P4 の設計、acb27716b）の名前に proposed/common を合わせた。旧い `proposed/common/vcodec-bits.h` は Q1 の OK（2026-10-31）で `git rm` した。p026 の §7 の提案（`vcodec_cabac_pcm` を位置と再開に分ける）は WS330 p002 の C4 で行う。WS329 の encoder も `h264sw_frame`・`h264sw_dpb` を使うので、p002 は WS329 の試験の前後一致も確かめる（§5.2）。
 3. WS329 p003 が proposed の header を source に置く時、`vcodec-cabac-enc.h` の表の参照（`h264sw_cabac_range_lps` など）を共通化の後の名前（`vcodec_cabac_range_lps` など）に、comment の「H.265 9.3.4.3」を「H.265 9.3.5」（V11 の encoder の engine の節）にしてほしい。
 4. 適合の cache: zip だけで 129 MB。main の `build/sources/h265-conformance/` に置くのを推す（WS318 §13.3 も同じ場所を予定、共有）。展開しない（`unzip -p`）ので disk はこれだけ。取得は p029 の前に Q1 が `H265SW_CONFORMANCE_DIR=… sh plan/ws330/tests/conformance/fetch.sh` で（パラメータの無い GET 147 回）。
@@ -368,4 +370,4 @@ WS329 §10.2 と同じ形: host の道具が raw の I420 を stdin から読み
 
 ## 15. design-reviewer の結果と反映
 
-（design-reviewer の後に書く。全件は [design-review.md](design-review.md)。）
+2026-10-31 に design-reviewer を 1 回（30 件: blocker 1・major 11・minor 16、HEAD 5072c9469 を読んだ）。全件と反映は [design-review.md](design-review.md)。主な変更: 可用性の判定を「CTB の slice_addr_rs を parse の前に書き、それで比べる」に直した（B1、全 stream が誤る誤り）、係数の走査は log2 0〜3 の全部で 3 種（M1）、同じ中身の SPS の再送で generation を増やさない（M2）、再利用の frame の motion を消す `vcodec_frame_side_reset`（M3）、tile の幅の上限と uint64 の和（M5）、Exp-Golomb の上限を意味の範囲から（M6）、SPS の解析は範囲で拒まず `h265sw_ps_sps_supported` を別に（M7）、`h265sw_recon_cu` と merge の候補の list（M8）、H.264 の回帰の path（M9）、CTU の書きの補助を p003 に・再構成を p024a（inter）と p024b（recon）に分けた（M10）、`h265enc.h` を `h264enc.h` の契約に揃えた（M11）、deblock の依存に p018（M4）。

@@ -143,9 +143,11 @@ unsigned h265sw_se_cbf_chroma(struct h265sw_cabac *cabac, unsigned trafo_depth);
 /*
  * cu_qp_delta_abs and, when it is not 0, cu_qp_delta_sign_flag
  * (9.3.3.10: prefix TR cMax 5 with ctxInc 0 for bin 0 and 1 for bins
- * 1..4, suffix EG0 bypass); returns CuQpDeltaVal (7.4.9.14).  An EG0
- * prefix longer than 31 bins sets the engine's error; the caller checks
- * the range -26..25 (8 bits).
+ * 1..4, suffix EG0 bypass); returns CuQpDeltaVal (7.4.9.14).
+ * |CuQpDeltaVal| is at most 26 for 8 bits, so the suffix value is at most
+ * 21 and its EG0 prefix at most 4 ones: a longer prefix sets the engine's
+ * error and gives 0 (no value beyond int32_t is ever built).  The caller
+ * checks the range -26..25.
  */
 int32_t h265sw_se_cu_qp_delta(struct h265sw_cabac *cabac);
 

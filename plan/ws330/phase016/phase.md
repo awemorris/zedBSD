@@ -23,7 +23,7 @@
 - 試験の中の独立の書き（7.3.8.11 の syntax を書きの向きに、bin を vcodec-cabac-enc で）で、乱数の係数の block（4〜32、luma と chroma、scanIdx 0〜2、transform skip、SDH の有り無し）を書いて読む往復。数千通り。
 - SDH: 隠れた符号の偶奇の両方。Rice の更新（9-24）が 4 で止まる。EGk の suffix の長い値。
 - last の位置の swap（scanIdx 2）、sub-block の推定（inferSbDcSigCoeffFlag）。
-- 範囲外: last が block の外、TransCoeffLevel が int16 の外、prefix が 32 を超える で error と範囲の中。
+- 範囲外: last が block の外、TransCoeffLevel が int16 の外、coeff_abs_level_remaining の prefix が 4 + 16 を超える で error と範囲の中（UBSan）。
 - 共通: 誤りの入力・途中で切れた入力・乱数の入力で落ちず（ASan・UBSan 0）決められた誤りを返す。
 
 ## 4. 注意
@@ -42,7 +42,7 @@
 timeout 900 sh plan/ws330/tests/run-unit.sh h265_residual
 timeout 1800 sh plan/ws330/tests/run-unit.sh all
 BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh
-timeout 1800 sh plan/ws326/tests/run-unit.sh all
+（H.264 の回帰: p003 が plan/tools.md に登録した WS326・WS329 の単体試験の道具の all。WS326・WS329 の完了で plan/ws326・ws329 の tests は plan/tools へ移るので、p003 の結果の節の path を使う）
 （amd64 の libmedia.so の build: plan/ws326/design.md §6 の command、warning 0）
 git diff --check
 ```

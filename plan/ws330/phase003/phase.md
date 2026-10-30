@@ -13,11 +13,12 @@
 
 ## 2. すること
 
-proposed/ の h265sw*.h（と h265enc.h は p033 まで置かない）を `userland/desktop/libmedia/` に置く（p002・p026 の名前に合わせて機械的に置き換え、内容は変えない）。全 .c の骨格（ENOSYS・何もしない）、Makefile（libmedia の source の列に足す。backend の表には登録しない）、`plan/ws330/tests/run-unit.sh`・`check-skeleton.sh`（WS326 の形）、試験の補助（`plan/ws326/tests/unit/check.h` の利用、H.265 の syntax の書きの補助: vcodec-bitwriter と vcodec-cabac-enc の上の小さな関数、ただし 2 値化は各試験で書く方針を補助の comment に）、`test-bitwriter` に当たる補助の自己試験。design-reviewer の指摘で header を直す時はこの Phase で（以後は凍結）。
+proposed/ の h265sw*.h（と h265enc.h は p033 まで置かない）を `userland/desktop/libmedia/` に置く（p002・p026 の名前に合わせて機械的に置き換え、内容は変えない）。全 .c の骨格（ENOSYS・何もしない）、Makefile（libmedia の source の列に足す。backend の表には登録しない）、`plan/ws330/tests/run-unit.sh`・`check-skeleton.sh`（WS326 の形）、試験の補助: `check.h` の利用（WS326・WS329 の完了で plan/tools へ移った path、plan/tools.md の登録を見る）、H.265 の syntax の書き `plan/ws330/tests/unit/h265write.h`（vcodec-bitwriter と vcodec-cabac-enc の上で、parameter set・slice header・CTU（sao・cqt・cu・pu・tt・tu・residual、2 値化と ctxInc は仕様から decoder の code を使わずに書く）・slice data（end_of_slice_segment_flag・end_of_subset_one_bit・WPP と tile の substream）を組む。p023・p027 などの試験が使う）とその自己試験（書いた bin の列を手の例と比べる）。各 phase.md の「H.264 の回帰」の command を plan/tools.md の登録の path に書き直す。design-reviewer の指摘で header を直す時はこの Phase で（以後は凍結）。
 
 ## 3. 受け入れ
 
 - `check-skeleton.sh`: 各 header の単独 compile（cc と clang、c89 pedantic）と全 .c の compile、`BASE=` の照合。
+- h265write.h の自己試験 PASS。
 - amd64 build warning 0、WS326・WS329 の試験が変わらず PASS。
 - BASE の SHA を ws.md と各 phase.md に書く。
 

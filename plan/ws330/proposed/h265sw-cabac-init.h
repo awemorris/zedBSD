@@ -73,6 +73,14 @@
  * rqt_root_cbf, merge_flag, merge_idx, inter_pred_idc, ref_idx, mvp,
  * abs_mvd_greater0/1_flag) holds 154 and is never read.
  *
+ * Placement by Table 9-4, where the ctxIdx of an element are not one run
+ * per initType: cbf_cb and cbf_cr have ctxIdx 0..3 and 12 for initType
+ * 0, 4..7 and 13 for 1, 8..11 and 14 for 2 (ctxInc 4 is the last of each);
+ * abs_mvd_greater0_flag and abs_mvd_greater1_flag share Table 9-23
+ * (greater0 ctxIdx 0 and 2, greater1 1 and 3 for initType 1 and 2);
+ * sig_coeff_flag has ctxIdx 0..41, 42..83, 84..125 and then 126..127,
+ * 128..129, 130..131 for ctxInc 42 and 43.
+ *
  * Values referenced: ITU-T H.265 (01/2026) Tables 9-5 to 9-31, placed by
  * Table 9-4.
  */

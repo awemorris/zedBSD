@@ -20,17 +20,17 @@
 
 ## 3. 試験の項目
 
-- 走査の表: 試験の中で 6.5.3〜6.5.5 の loop を書き直して全大きさ・全 scanIdx の配列を作り、module の表と全一致（独立の導き直し）。各表が 0..n^2-1 の置換であること。
-- tile: uniform と明示の幅、列 1・20、行 1・22、PicWidthInCtbsY 1 と 1056、最後の列が 0 になる明示の幅で EINVAL。6-7〜6-9 を手で追った 3x2 の tile の例（rs_to_ts・ts_to_rs・tile_id の全値）。ts_to_rs と rs_to_ts が互いの逆。
+- 走査の表: 試験の中で 6.5.3〜6.5.5 の loop を書き直して全大きさ（log2 0〜3）・全 scanIdx の配列を作り、module の表と全一致（独立の導き直し）。log2 1 の horizontal（8x8 の TB の sub-block の順）が対角と違うことを必ず含める。各表が 0..n^2-1 の置換であること。
+- tile: uniform と明示の幅、列 1・20、行 1・22、PicWidthInCtbsY 1 と 1056、最後の列が 0 になる明示の幅で EINVAL、和が unsigned で折り返す巨大な幅（各 1055 を超える値は PPS の読みで断るが、この関数も uint64 の和で断ること）。6-7〜6-9 を手で追った 3x2 の tile の例（rs_to_ts・ts_to_rs・tile_id の全値）。ts_to_rs と rs_to_ts が互いの逆。
 - z 順: 6-10 を CTB 16・32・64 と MinTb 4・8・16 で、試験の中で 6-10 の loop から作った値と一致。
-- 可用性 6.4.1: 絵の外、後の z 順、別の slice（slice_addr_rs）、別の tile、decoded でない CTB。6.4.2: sameCb、Nx2N の第 2 の分割の規則、intra の隣。
+- 可用性 6.4.1: 絵の外、後の z 順、別の slice（slice_addr_rs）、別の tile、どの slice も届いていない CTB（UINT32_MAX）。今の CTB の中の隣は slice_addr_rs を書いた後なら使える（parse の途中の CTB の中の左・上の block が available になること）。6.4.2: sameCb、NxN の第 2 の PB から左下（第 3）の PB を見る規則、intra の隣。
 - alloc の大きさの上限（level 6.2）と ENOMEM の後の状態、start の初期化の値（intra_mode 1、ref_idx -1）、fill・mark の範囲（CTB の端）。
 - 共通: 誤りの入力・途中で切れた入力・乱数の入力で落ちず（ASan・UBSan 0）決められた誤りを返す。
 
 ## 4. 注意
 
 - z 順は表を持たず式で計算する（D6）。CTB の外へ出る座標は呼び手の誤り（範囲の検査で 0 を返す）。
-- slice_addr_rs の初期値は「どの slice にも無い」値（UINT32_MAX）にして、decode されていない CTB を別の slice とみなす。
+- slice_addr_rs の初期値は「どの slice にも無い」値（UINT32_MAX）にして、どの slice も届いていない CTB を別の slice とみなす。decoded は concealment の印で、可用性には使わない（header）。
 - 算術は vcodec.h の規則（負の値の shift は vcodec_asr32・vcodec_shl32、積は広い型、狭い型へは clip）。
 
 ## 5. 変えてはいけない物
@@ -44,7 +44,7 @@
 timeout 900 sh plan/ws330/tests/run-unit.sh h265_scan h265_pic
 timeout 1800 sh plan/ws330/tests/run-unit.sh all
 BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh
-timeout 1800 sh plan/ws326/tests/run-unit.sh all
+（H.264 の回帰: p003 が plan/tools.md に登録した WS326・WS329 の単体試験の道具の all。WS326・WS329 の完了で plan/ws326・ws329 の tests は plan/tools へ移るので、p003 の結果の節の path を使う）
 （amd64 の libmedia.so の build: plan/ws326/design.md §6 の command、warning 0）
 git diff --check
 ```

@@ -23,7 +23,7 @@
 - 空間の各候補の可用性と除外（第 2 の分割、並列の merge level、pairwise の比較、B2 の 4 つの規則）を、pic に手で置いた隣の motion で。
 - Log2ParMrgLevel > 2 と nCbS 8 の共有の list。
 - 時間の候補（tmvp の結果を作る col の frame を試験で用意）、組み合わせ（Table 8-7 の順、DiffPicOrderCnt 0 と mv 等しいで除く）、0 の候補（numRefIdx と zeroIdx）。
-- 8x4・4x8 の bi の L1 の除去。全 merge_idx で結果が仕様の手順の手追いと一致。
+- 8x4・4x8 の bi の L1 の除去（h265sw_merge_restrict）。全 merge_idx で h265sw_merge_derive の結果が h265sw_merge_candidates の list の該当と restrict の結果に一致し、仕様の手順の手追いと一致。
 - 共通: 誤りの入力・途中で切れた入力・乱数の入力で落ちず（ASan・UBSan 0）決められた誤りを返す。
 
 ## 4. 注意
@@ -41,7 +41,7 @@
 timeout 900 sh plan/ws330/tests/run-unit.sh h265_merge
 timeout 1800 sh plan/ws330/tests/run-unit.sh all
 BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh
-timeout 1800 sh plan/ws326/tests/run-unit.sh all
+（H.264 の回帰: p003 が plan/tools.md に登録した WS326・WS329 の単体試験の道具の all。WS326・WS329 の完了で plan/ws326・ws329 の tests は plan/tools へ移るので、p003 の結果の節の path を使う）
 （amd64 の libmedia.so の build: plan/ws326/design.md §6 の command、warning 0）
 git diff --check
 ```

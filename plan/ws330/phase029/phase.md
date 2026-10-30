@@ -13,7 +13,7 @@
 
 ## 2. すること
 
-`fetch.sh` で cache を満たし（Q1 が場所を決める）、zip を `unzip -p` で読む道具（decode-h265 に zip の入力か pipe）で全 `in` を流す。decoder 自身の SPS の判定で list.txt の分類を確定し、readme と食い違えば記録。
+`fetch.sh` で cache を満たし（Q1 が場所を決める）、zip を `unzip -p` で読む道具（decode-h265 に zip の入力か pipe）で全 `in` を流す。decoder 自身の SPS の判定で list.txt の分類を確定し、readme と食い違えば記録。fetch.sh の注意: 初めて取る zip は SHA-256 をその時に記録する（初回は照合でなく記録、記録した sha256.txt を commit する）、main の checkout で流すと git の管理下の sha256.txt を書き換える（担当の worktree で流し、結果を commit する）、失敗した `.part` は残る（rm をしない規則。次の取得で上書き、Q1 に path を送る）。
 
 ## 3. 受け入れ
 

@@ -58,7 +58,8 @@ struct h265sw_residual_params {
  * sig_coeff_flag (9.3.4.2.5 with ctxIdxMap of Table 9-50 for 4x4 blocks,
  * sigCtx from the right and lower sub-blocks' flags otherwise, and the
  * chroma offset 27), coeff_abs_level_greater1_flag (9.3.4.2.6, ctxSet
- * and greater1Ctx carried from the previous sub-block of the same block),
+ * and greater1Ctx from the last invocation for a previous sub-block of
+ * the same block, 9.3.4.2.6),
  * coeff_abs_level_greater2_flag (9.3.4.2.7), coeff_sign_flag (bypass,
  * the hidden sign of firstSigScanPos when signHidden), and
  * coeff_abs_level_remaining (9.3.3.11 with persistent rice adaptation
@@ -66,7 +67,10 @@ struct h265sw_residual_params {
  * cRiceParam, prefix TR, suffix EG( cRiceParam + 1 ) bypass).
  *
  * Untrusted input: LastSignificantCoeffX and Y not below 1 << log2_size,
- * an EGk prefix longer than 32 bins, or a TransCoeffLevel outside
+ * a coeff_abs_level_remaining whose prefix has more than 4 + 16 ones
+ * (with cRiceParam at most 4 that already exceeds 2^15 + 3, beyond any
+ * level the constraint allows; the suffix is read with at most 32 bits
+ * at a time and summed in uint32_t), or a TransCoeffLevel outside
  * -32768..32767 (CoeffMinY and CoeffMaxY, 7.4.9.11: the stream breaks the
  * constraint) set the engine's error and end the block (levels then
  * hold what was decoded, all within int16_t).  Every loop is bounded by

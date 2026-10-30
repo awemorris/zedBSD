@@ -30,7 +30,7 @@
 
 | Phase | 目的 | 型 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
-| ws330-p001 | 設計（Opus 5.5）: H.264 との共通部分の洗い出しと共通化の設計、H.265 の decoder の module・header・試験の道・実装の Phase の表、encoder の地図と公開の header | O | in-progress（q1763 P5。設計と review の反映の後、Q1 の受け入れと Q330-1〜4 の回答待ち） | — |
+| ws330-p001 | 設計（Opus 5.5）: H.264 との共通部分の洗い出しと共通化の設計（frame・DPB を含む）、H.265 の decoder の module・header・試験の道・実装の Phase の表、encoder の地図と公開の header | O | in-progress（q1763 P5。設計と review（30 件）の反映は済み、Q1 の受け入れと Q330-1〜4 の回答待ち） | — |
 | [ws330-p002](phase002/phase.md) | 共通化（vcodec.h の補助・frame・DPB・出力・CABAC の追加を H.264 と H.265 で共通に、H.264 の decoder と encoder を移し前後一致で確かめる） | O | planned | WS329 completed、WS326 p026 |
 | [ws330-p003](phase003/phase.md) | decoder の header と骨格を source に、試験の道具、BASE | O | planned | p002 |
 | [ws330-p004](phase004/phase.md) | h265sw-nal、h265sw-sei | S | planned | p003 |
@@ -53,10 +53,11 @@
 | [ws330-p021](phase021/phase.md) | h265sw-merge | S | planned | p020 |
 | [ws330-p022](phase022/phase.md) | h265sw-amvp | S | planned | p020 |
 | [ws330-p023](phase023/phase.md) | h265sw-ctu（CTU の syntax） | S | planned | p009、p010、p015、p016、p017 |
-| [ws330-p024](phase024/phase.md) | h265sw-recon（CU の再構成） | S | planned | p013、p018、p019、p021、p022、p023 |
-| [ws330-p025](phase025/phase.md) | h265sw-deblock | S | planned | p005 |
+| [ws330-p024a](phase024a/phase.md) | h265sw-inter（PU の motion と inter 予測） | S | planned | p013、p019、p021、p022、p023 |
+| [ws330-p024b](phase024b/phase.md) | h265sw-recon（CU の再構成: QP・intra・残差・PCM・bypass） | S | planned | p018、p024a |
+| [ws330-p025](phase025/phase.md) | h265sw-deblock | S | planned | p005、p018 |
 | [ws330-p026](phase026/phase.md) | h265sw-sao | S | planned | p005 |
-| [ws330-p027](phase027/phase.md) | h265sw-slicedata（WPP・tile・dependent） | S | planned | p023、p024 |
+| [ws330-p027](phase027/phase.md) | h265sw-slicedata（WPP・tile・dependent） | S | planned | p023、p024b |
 | [ws330-p028](phase028/phase.md) | h265sw-decoder の全体、host の道具、最初の全体の試験 | O | planned | p004〜p027 |
 | [ws330-p029](phase029/phase.md) | 適合の試験（HEVC_v1） | O | planned | p028 |
 | [ws330-p030](phase030/phase.md) | libmedia の backend（共通の backend の核） | O | planned | p029、WS318 completed |
@@ -83,4 +84,4 @@
 ## Resume point
 
 - 2026-10-30 Q1: 作成。WS329 の completed の後に p001。
-- 2026-10-31 P5（q1763-i01）: p001 の設計を branch agent/p5-ws330 に（design.md・proposed/ の header 37 個（common 7 を含む、cc と clang の c89 pedantic で単独 compile を確かめた）・user-questions.md（Q330-1〜4）・phase002〜033 の phase.md・tests/conformance の list・fetch.sh・sha256・design-review.md）。source は変えていない。次: Q1 が受け入れて merge、Q330-1〜4 の回答、design §14 の Q1 への注意（仕様の PDF の写し、WS326 p026 と WS329 p003 への入力、WS318 の記録）。WS329 completed の後に p002。
+- 2026-10-31 P5（q1763-i01）: p001 の設計を branch agent/p5-ws330 に（design.md・proposed/ の header 38 個（common 7 を含む、cc と clang の c89 pedantic で単独 compile を確かめた）・user-questions.md（Q330-1〜4）・phase002〜033 の phase.md（p024 は p024a・p024b に分けた）・tests/conformance の list・fetch.sh・sha256・design-review.md）。source は変えていない。次: Q1 が受け入れて merge、Q330-1〜4 の回答、design §14 の Q1 への注意（WS329 p003 への入力、WS318 の記録、phase024/phase.md の git rm）。WS329 completed の後に p002。

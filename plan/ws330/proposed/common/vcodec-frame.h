@@ -173,6 +173,14 @@ void vcodec_frame_ref(struct vcodec_frame *frame);
 void vcodec_frame_unref(struct vcodec_frame *frame);
 
 /* Fills a frame's three planes with 128 (a grey picture); the codec data is the caller's to set. */
+
+/*
+ * Clears a frame's codec data and gives it to the pool's side_init, as
+ * for a newly allocated frame: what a reused frame needs before it
+ * stands for a picture that was not decoded (its old motion must not be
+ * read).  Nothing when side_bytes is 0.
+ */
+void vcodec_frame_side_reset(struct vcodec_frame *frame);
 void vcodec_frame_fill_grey(struct vcodec_frame *frame);
 
 /*

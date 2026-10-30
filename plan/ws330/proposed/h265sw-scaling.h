@@ -74,7 +74,7 @@ int h265sw_scaling_read(struct h265sw_scaling_list *list, struct vcodec_bitreade
 /*
  * Derives the quantization matrices of a list (7-44 to 7-49): sizeId 0
  * and 1 place the list along the up-right diagonal scan of a 4x4 and an
- * 8x8 block (6.5.3, h265sw_scan_diagonal); sizeId 2 and 3 repeat each
+ * 8x8 block (6.5.3, h265sw_scan_order with H265SW_SCAN_DIAG); sizeId 2 and 3 repeat each
  * entry of the 8x8 placement over 2x2 and 4x4 samples and put the DC at
  * [0][0].
  */

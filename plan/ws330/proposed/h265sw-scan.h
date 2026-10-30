@@ -66,9 +66,13 @@ void h265sw_scan_ctb_maps(const struct h265sw_tiles *tiles, unsigned width_ctbs,
  * Returns the scan order of a block of 1 << log2_size samples on each
  * side (log2_size 0..3; 0 is the single position): the array of
  * ( 1 << log2_size )^2 positions, each { x, y } (sComp 0 and 1), in scan
- * position order.  scan_idx is H265SW_SCAN_*; the horizontal and vertical
- * scans exist for log2_size 2 and 3 only (and are used for 4x4 and 8x8
- * transform blocks), other sizes give the diagonal scan.
+ * position order.  scan_idx is H265SW_SCAN_*; all three scans exist for
+ * every log2_size 0..3 (7.4.3.2.1 builds them all): residual coding
+ * uses log2_size 2 for the positions inside a 4x4 sub-block and
+ * log2TrafoSize - 2 (0..3) for the order of the sub-blocks, so an 8x8
+ * transform block with scanIdx 1 or 2 orders its four sub-blocks with
+ * the 2x2 horizontal or vertical scan (the 2x2 horizontal differs from
+ * the diagonal).
  *
  * Values referenced: ITU-T H.265 (01/2026) 6.5.3 to 6.5.5 (the arrays
  * the loops of those clauses produce).

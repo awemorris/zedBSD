@@ -22,8 +22,8 @@
 
 - SPS・PPS を vcodec-bitwriter で組んで読む往復（全 flag の分岐、sub-layer の順序の情報の有り無しと値の写し下ろし、PCM、long-term、tile の明示と uniform）。
 - 範囲の境: 大きさ（MinCb の倍数でない、0、16888 と 16896、MaxLumaPs）、CtbLog2 3 と 7（ENOTSUP）、MinTb と MaxTb、深さ、log2_max_poc_lsb 4 と 16 と 17、DPB 16 と 17、id の上限。
-- ENOTSUP の分類: chroma 0・2・3、bit depth 9、range extension の各 flag、SCC・3D の flag、field_seq_flag。sps_refused と pps_refused の印と、正しい set で消えること。失敗した読みで store が前のまま。
-- VUI の誤りの規則（profile 1〜3 で VUI を捨てて残す、他で EINVAL）。
+- ENOTSUP の分類（読みの ENOTSUP）: SCC・3D・multilayer の flag、CtbLog2 の 3 と 7、PPS の range extension の tool。sps_refused と pps_refused の印と、正しい set で消えること。失敗した読みで store が前のまま。
+- VUI の誤りの規則（profile 1〜3 で VUI を捨てて残す、他で EINVAL）。同じ中身の SPS の再送で generation が増えず、違う中身で増える。h265sw_ps_sps_supported の各条件（10 bit・4:2:2・range extension の flag・field_seq）で SPS は store に入り supported だけが ENOTSUP。tile の幅の各値 1056 で EINVAL。
 - h265sw_ps_check_pair の各条件、h265sw_ps_scaling の 3 通り。
 - 途中で切れた入力・乱数（ASan・UBSan）。
 - 共通: 誤りの入力・途中で切れた入力・乱数の入力で落ちず（ASan・UBSan 0）決められた誤りを返す。
@@ -45,7 +45,7 @@
 timeout 900 sh plan/ws330/tests/run-unit.sh h265_ps
 timeout 1800 sh plan/ws330/tests/run-unit.sh all
 BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh
-timeout 1800 sh plan/ws326/tests/run-unit.sh all
+（H.264 の回帰: p003 が plan/tools.md に登録した WS326・WS329 の単体試験の道具の all。WS326・WS329 の完了で plan/ws326・ws329 の tests は plan/tools へ移るので、p003 の結果の節の path を使う）
 （amd64 の libmedia.so の build: plan/ws326/design.md §6 の command、warning 0）
 git diff --check
 ```

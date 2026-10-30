@@ -20,7 +20,7 @@
 
 ## 3. 試験の項目
 
-- 試験の中の CTU の書き（syntax を書きの向きに、bin は vcodec-cabac-enc、要素の 2 値化は試験の側）で CTU を組み、parse の結果（cu・tu・levels・SAO）と pic の entry（flags・depth・intra_mode）が書いた値と一致。組: CTB 16・32・64、絵の端の推定の分割、全 PartMode（AMP を含む）、intra の 2Nx2N と NxN、PCM（大きさの境、bit depth 1〜8）、skip、merge、AMVP、rqt_root_cbf 0、TT の推定の分割（MaxTb を超える、IntraSplit、interSplit）、chroma の 4x4 の blkIdx 3、cu_qp_delta と QG の始まり、transquant bypass、SAO の merge と band と edge。
+- p003 が用意した試験の補助の CTU の書き（plan/ws330/tests/unit/h265write.h、syntax を書きの向きに、bin は vcodec-cabac-enc、2 値化は補助の側で仕様から）で CTU を組み、parse の結果（cu・tu・levels・SAO）と pic の entry（flags・depth・intra_mode）が書いた値と一致。組: CTB 16・32・64、絵の端の推定の分割、全 PartMode（AMP を含む）、intra の 2Nx2N と NxN、PCM（大きさの境、bit depth 1〜8）、skip、merge、AMVP、rqt_root_cbf 0、TT の推定の分割（MaxTb を超える、IntraSplit、interSplit）、chroma の 4x4 の blkIdx 3、cu_qp_delta と QG の始まり、transquant bypass、SAO の merge と band と edge。
 - 誤り: cu_qp_delta の範囲外、配列の上限、engine の error で EINVAL。
 - 共通: 誤りの入力・途中で切れた入力・乱数の入力で落ちず（ASan・UBSan 0）決められた誤りを返す。
 
@@ -41,7 +41,7 @@
 timeout 900 sh plan/ws330/tests/run-unit.sh h265_ctu
 timeout 1800 sh plan/ws330/tests/run-unit.sh all
 BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh
-timeout 1800 sh plan/ws326/tests/run-unit.sh all
+（H.264 の回帰: p003 が plan/tools.md に登録した WS326・WS329 の単体試験の道具の all。WS326・WS329 の完了で plan/ws326・ws329 の tests は plan/tools へ移るので、p003 の結果の節の path を使う）
 （amd64 の libmedia.so の build: plan/ws326/design.md §6 の command、warning 0）
 git diff --check
 ```

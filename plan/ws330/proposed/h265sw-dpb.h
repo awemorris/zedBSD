@@ -14,7 +14,8 @@
  * C.5.2.4).
  *
  * The steps for one picture, in this order: h265sw_dpb_apply_rps (8.3.2),
- * h265sw_dpb_generate (8.3.3, and stand-ins for missing references),
+ * h265sw_dpb_generate (8.3.3, and stand-ins for missing references,
+ * after removing the pictures that are no longer needed),
  * h265sw_dpb_before_picture (C.5.2.2), the decoding, h265sw_dpb_store
  * (C.5.2.3).  Frames output by bumping are appended to a struct
  * vcodec_output_queue in output order.
@@ -97,7 +98,11 @@ void h265sw_dpb_apply_rps(struct h265sw_dpb *dpb, const struct h265sw_rps_pocs *
  * Fills the "no reference picture" entries of sets with generated
  * pictures (8.3.3.2: every sample 1 << ( BitDepth - 1 ), motion all
  * intra, PicOutputFlag 0, PicOrderCntVal from the entry, marked short- or
- * long-term by its set).
+ * long-term by its set).  Each frame taken from the pool, new or reused,
+ * gets vcodec_frame_fill_grey and vcodec_frame_side_reset (the pool's
+ * side_init makes its motion intra), so no old motion is read as
+ * collocated.  vcodec_dpb_remove_unused runs first, so buffers of
+ * pictures neither referenced nor waiting for output are free for them.
  *
  * With foll_only 1 (a BLA picture or a CRA picture with NoRaslOutputFlag
  * 1, 8.3.3.1) only StFoll and LtFoll entries are generated, as the clause

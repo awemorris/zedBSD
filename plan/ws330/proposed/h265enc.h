@@ -33,7 +33,9 @@
  *
  * The module headers of the encoder (h265enc-*) are designed after the
  * decoder's headers are final; this header fixes the interface the
- * libmedia back end sees, which mirrors the H.264 encoder's.
+ * libmedia back end sees, which mirrors the H.264 encoder's (the same
+ * structures, returns and rules, field for field, except the codec's
+ * own: wavefront for slices, no entropy choice).
  *
  * Conventions, as vcodec.h: 0 succeeded; EINVAL a caller's argument out
  * of range (or an internal inconsistency, which is a bug); ENOTSUP a
@@ -124,64 +126,89 @@ struct h265enc_config {
 	unsigned sar_height;
 };
 
+/* The slice types of a packet (H265SW_SLICE_* values, Table 7-7). */
+#define H265ENC_TYPE_B 0U
+#define H265ENC_TYPE_P 1U
+#define H265ENC_TYPE_I 2U
+
 /*
- * One picture given to the encoder: planes in format (I420: Y, Cb, Cr;
- * NV12: Y and the interleaved CbCr in plane[1]), stride bytes per row,
- * of the configured size; time_us; flags (H265ENC_FORCE_KEY).  The
- * encoder copies the samples before h265enc_send returns.
+ * One picture given to the encoder, as struct h264enc_picture: planes in
+ * format (I420: Y, Cb, Cr; NV12: Y and the interleaved CbCr in plane[1],
+ * plane[2] unused), stride bytes per row, of the configured size;
+ * time_us; flags (H265ENC_FORCE_KEY).  The encoder copies the samples
+ * before h265enc_send returns: the caller may reuse them.
  */
 struct h265enc_picture {
-	unsigned format;
 	const uint8_t *plane[3];
 	size_t stride[3];
+	unsigned format;
 	int64_t time_us;
 	unsigned flags;
 };
 
 /*
- * One access unit taken from the encoder: data and size (Annex B, with
- * the VPS, SPS and PPS before each IRAP picture), time_us and dts_us
- * (presentation and decoding times), flags (H265ENC_PACKET_KEY).  The
- * bytes stay the encoder's until the next h265enc_receive or
- * h265enc_destroy.
+ * One packet taken, as struct h264enc_packet: one access unit in decoding
+ * order, Annex B (every NAL unit after 0x00000001; the VPS, SPS and PPS
+ * before each IRAP picture).  data and size stay the encoder's until the
+ * next h265enc_receive or h265enc_destroy.  time_us is the picture's
+ * presentation time, decode_time_us its decoding time by the H.264
+ * encoder's rule (without B-frames the presentation time; with B-frames,
+ * for the first packet its presentation time less one frame duration,
+ * for the n-th packet (n >= 1) the ( n - 1 )-th smallest of the
+ * presentation times given), so decoding times increase and never exceed
+ * presentation times.  flags H265ENC_PACKET_KEY; type the slice type
+ * (H265ENC_TYPE_*) and qp the picture's SliceQpY, for logs and tests.
  */
 struct h265enc_packet {
 	const uint8_t *data;
 	size_t size;
 	int64_t time_us;
-	int64_t dts_us;
+	int64_t decode_time_us;
 	unsigned flags;
+	unsigned type;
+	int qp;
 };
 
 struct h265enc;
 
 /*
- * Makes an encoder.  Checks config against the limits and the profile;
- * chooses the level.  Returns 0 and *encoder; EINVAL for a value out of
- * range; ENOTSUP for a valid configuration outside the encoder's range;
- * ENOMEM.
+ * Makes an encoder.  Checks config (EINVAL for a value out of its range,
+ * ENOTSUP for a combination this encoder does not make or a level_idc
+ * the configuration does not fit), resolves the defaults, chooses the
+ * level, writes the parameter sets.  Returns 0 and *encoder; EINVAL;
+ * ENOTSUP; ENOMEM.
  */
 int h265enc_create(const struct h265enc_config *config, struct h265enc **encoder);
 
 /*
- * Gives one picture, or NULL to drain (the pictures held for B-frames are
- * encoded and every packet becomes available).  Returns 0; EAGAIN when
- * packets must be taken first; EINVAL for a picture of the wrong format
- * or after a drain; the encoder's failure value once it has failed.
+ * Gives the next picture in presentation order, or NULL to drain (every
+ * picture held is encoded; no picture may follow).  Returns 0; EAGAIN
+ * when packets are waiting and the caller must take them first (nothing
+ * was taken); EINVAL for a wrong format, a time not after the last one,
+ * a picture after the drain; ENOMEM; another errno for an internal
+ * failure, after which the encoder is unusable.
  */
 int h265enc_send(struct h265enc *encoder, const struct h265enc_picture *picture);
 
-/* Takes the next packet in decoding order.  Returns 0 and *packet; EAGAIN when none is ready; ENODATA after a drain when all were taken. */
+/*
+ * Takes the next packet.  Returns 1 and *packet, 0 when none is ready
+ * (more pictures are needed, or the drain is complete), or a negative
+ * errno after an internal failure.
+ */
 int h265enc_receive(struct h265enc *encoder, struct h265enc_packet *packet);
 
 /*
- * Gives the parameter sets (the VPS, SPS and PPS NAL units in Annex B)
- * for the container's codec data (hvcC is assembled by libmedia's packet
- * format code).  The bytes stay the encoder's.  Returns 0.
+ * Gives the VPS, SPS and PPS as NAL units in Annex B (each after
+ * 0x00000001), for a container's codec data (hvcC is assembled by
+ * libmedia's packet format code).  The bytes stay the encoder's until
+ * h265enc_destroy.
  */
-int h265enc_parameter_sets(const struct h265enc *encoder, const uint8_t **data, size_t *size);
+void h265enc_parameter_sets(const struct h265enc *encoder, const uint8_t **data, size_t *size);
 
-/* Frees an encoder.  NULL is ignored. */
+/* The general_profile_idc, general_tier_flag and general_level_idc chosen. */
+void h265enc_profile_level(const struct h265enc *encoder, unsigned *profile_idc, unsigned *tier, unsigned *level_idc);
+
+/* Frees an encoder and everything it holds (NULL is ignored). */
 void h265enc_destroy(struct h265enc *encoder);
 
 #endif

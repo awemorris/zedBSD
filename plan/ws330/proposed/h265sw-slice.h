@@ -67,7 +67,9 @@ struct h265sw_weights {
  * num_long_term_pics, at most H265SW_MAX_RPS - NumDeltaPocs) with, for
  * each i, lt_poc_lsb (PocLsbLt), lt_used (UsedByCurrPicLt), lt_msb_present
  * (delta_poc_msb_present_flag) and lt_msb_cycle (DeltaPocMsbCycleLt,
- * 7-52, accumulated); temporal_mvp (slice_temporal_mvp_enabled_flag);
+ * 7-52, accumulated in uint64_t: each delta_poc_msb_cycle_lt is checked
+ * against 0..2^( 32 - log2_max_poc_lsb ) (7.4.7.1) and the sum must stay
+ * within that bound too, else EINVAL); temporal_mvp (slice_temporal_mvp_enabled_flag);
  * sao_luma, sao_chroma; num_ref_idx[2] (num_ref_idx_lX_active_minus1 +
  * 1, 1..15, 0 for lists the slice type does not use); list_mod[X] and
  * list_entry[X][i] (ref_pic_list_modification_flag_lX, list_entry_lX);
@@ -80,7 +82,9 @@ struct h265sw_weights {
  * loop_filter_across_slices (the PPS's when absent).
  *
  * Derived: num_pic_total_curr (NumPicTotalCurr, 7-57: the used entries
- * of st_rps and of the long-term entries; at most 8, A.4.1 e)).
+ * of st_rps and of the long-term entries; A.4.1 e) limits it to 8 below
+ * level 8.5, but the decoder takes up to H265SW_MAX_RPS, which its
+ * arrays hold).
  */
 struct h265sw_slice_header {
 	unsigned nal_type;

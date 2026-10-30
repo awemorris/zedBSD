@@ -52,6 +52,8 @@ extern const uint8_t vcodec_cabac_trans_mps[64];
  * implementation may keep offset scaled with more bits read ahead
  * (bits_left counts them), as long as every decoded bin and every
  * position vcodec_cabac_position reports are those of the 9-bit model.
+ * terminated is 1 after vcodec_cabac_terminate returned 1 and until the
+ * next vcodec_cabac_start (vcodec_cabac_position checks it).
  *
  * When the 9-bit model would read a bit beyond the end of data, zero bits
  * are supplied and error is set (a conforming stream ends before that);
@@ -67,6 +69,7 @@ struct vcodec_cabac {
 	uint32_t offset;
 	int bits_left;
 	int error;
+	int terminated;
 };
 
 /*

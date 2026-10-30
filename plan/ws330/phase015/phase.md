@@ -22,7 +22,7 @@
 
 - 各要素を、試験の中で仕様の表から手で書いた 2 値化で bin の列にし、vcodec-cabac-enc で符号化して decode する往復。全値（part_mode の全列、inter_pred_idc の 12 と非 12、merge_idx の cMax 1〜4、ref_idx の 2〜15、cu_qp_delta の 0〜26 と符号、mvd の 0・1・2・大きい値・2^15）。
 - 文脈の index の確かめ: 各 bin が使う context の byte が Table 9-48 の ctxInc の物であること（試験の側で bin ごとの期待の index を持ち、decode の後の contexts の配列の変わった entry と比べる）。
-- 範囲外: mvd の 2^15 を超える、EG の prefix が長すぎる で engine の error。
+- 範囲外: mvd の 2^15 を超える、cu_qp_delta_abs の EG0 の prefix が 5 以上、で engine の error（int32 を超える値を作らない、UBSan）。
 - 共通: 誤りの入力・途中で切れた入力・乱数の入力で落ちず（ASan・UBSan 0）決められた誤りを返す。
 
 ## 4. 注意
@@ -41,7 +41,7 @@
 timeout 900 sh plan/ws330/tests/run-unit.sh h265_cabac_se
 timeout 1800 sh plan/ws330/tests/run-unit.sh all
 BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh
-timeout 1800 sh plan/ws326/tests/run-unit.sh all
+（H.264 の回帰: p003 が plan/tools.md に登録した WS326・WS329 の単体試験の道具の all。WS326・WS329 の完了で plan/ws326・ws329 の tests は plan/tools へ移るので、p003 の結果の節の path を使う）
 （amd64 の libmedia.so の build: plan/ws326/design.md §6 の command、warning 0）
 git diff --check
 ```

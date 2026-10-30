@@ -9,9 +9,8 @@
  * The reconstruction of one parsed CTU in the software H.265 decoder,
  * coding unit after coding unit in decoding order (8.4, 8.5, 8.6): the
  * quantization parameters (8.6.1), intra prediction transform unit by
- * transform unit (8.4.4.1), the motion of each prediction unit (merge,
- * h265sw-merge.h; or the predictor and the difference, h265sw-amvp.h)
- * and its prediction samples (8.5.3.3), the residuals (h265sw-transform.h)
+ * transform unit (8.4.4.1), the inter prediction of each prediction unit
+ * (h265sw-inter.h), the residuals (h265sw-transform.h)
  * added and clipped (8.6.7, 8-325), PCM samples (8.4.1, 8-12 to 8-14: shifted by
  * BitDepth - PcmBitDepth), and the transquant bypass.
  *
@@ -25,6 +24,7 @@
 
 #include "h265sw.h"
 #include "h265sw-ctu.h"
+#include "h265sw-inter.h"
 #include "h265sw-mvctx.h"
 #include "h265sw-reflist.h"
 #include "h265sw-scaling.h"
@@ -48,10 +48,10 @@ struct h265sw_qp_state {
 /*
  * What the reconstruction of a slice segment's CTUs uses: pic, frame (the
  * current picture's samples), sps, pps, header, segment (index in
- * pic->segments), lists (the slice's reference picture lists), mv (the
- * motion derivations' context for the slice), scaling (the picture's
- * quantization matrices, NULL when scaling_list_enabled_flag is 0), qp
- * (the state above).
+ * pic->segments), inter (the inter prediction's context for the slice:
+ * its frame is the same frame), scaling (the picture's quantization
+ * matrices, NULL when scaling_list_enabled_flag is 0), qp (the state
+ * above).
  */
 struct h265sw_recon_ctx {
 	struct h265sw_pic *pic;
@@ -60,8 +60,7 @@ struct h265sw_recon_ctx {
 	const struct h265sw_pps *pps;
 	const struct h265sw_slice_header *header;
 	unsigned segment;
-	const struct h265sw_reflists *lists;
-	const struct h265sw_mvctx *mv;
+	const struct h265sw_inter_ctx *inter;
 	const struct h265sw_scaling_factors *scaling;
 	struct h265sw_qp_state *qp;
 };
@@ -70,7 +69,19 @@ struct h265sw_recon_ctx {
 void h265sw_recon_qp_reset(struct h265sw_qp_state *state, int slice_qp);
 
 /*
- * Reconstructs every coding unit of a parsed CTU into ctx->frame.
+ * Reconstructs coding unit cu_index (below ctu->num_cu) of a parsed CTU
+ * into ctx->frame, as h265sw_recon_ctu does for each CU.  The coding
+ * units of a CTU must be reconstructed in decoding order, each once
+ * (the QP state and the intra reference samples depend on the CUs
+ * before); a caller may interleave other work between them (the encoder
+ * reconstructs each CU as it decides it).  Same returns as
+ * h265sw_recon_ctu.
+ */
+int h265sw_recon_cu(const struct h265sw_recon_ctx *ctx, const struct h265sw_ctu *ctu, unsigned cu_index);
+
+/*
+ * Reconstructs every coding unit of a parsed CTU into ctx->frame
+ * (h265sw_recon_cu for each in order).
  *
  * Per CU: at a quantization group's first CU, qPY_PRED from qPY_PREV and
  * the left and upper groups inside the same CTB (8.6.1 steps 2 to 4,
@@ -84,13 +95,8 @@ void h265sw_recon_qp_reset(struct h265sw_qp_state *state, int slice_qp);
  * 8.4.4.2.2 substitution), filter and predict (h265sw-intra.h) with the
  * prediction block's mode, then the residual added; the chroma blocks
  * likewise with IntraPredModeC (no filtering).  Inter: for each
- * prediction unit, the motion (merge or AMVP + h265sw_amvp_add; refIdx
- * checked against the list length), written to pic->mv at once (the next
- * prediction unit reads it), then the prediction of luma and chroma for
- * each used list (h265sw_interp_*, the reference frame from ctx->lists)
- * and the weighting (explicit when weighted_pred_flag for P or
- * weighted_bipred_flag for B, else default); then the residual of each
- * transform unit added.  Skip: merge, no residual.  PCM: the samples <<
+ * prediction unit h265sw_inter_predict (motion and samples), then the
+ * residual of each transform unit added.  Skip: merge, no residual.  PCM: the samples <<
  * ( BitDepth - PcmBitDepth ).  Bypass: residual = levels.  Each
  * residual addition clips to 0..255 (8.6.7).
  *

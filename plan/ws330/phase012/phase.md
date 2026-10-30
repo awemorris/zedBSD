@@ -21,7 +21,7 @@
 ## 3. 試験の項目
 
 - marking: LT を先に（msb の有り無しの照合）、ST は short-term の中から、どの組にも無い参照は unused、IRAP の全部 unused。
-- generate: foll だけと全部、空の buffer が無い時、pool の失敗（limit）。灰の値 128 と motion の intra（side_init）。
+- generate: foll だけと全部、空の buffer が無い時（先に remove_unused で空くこと）、pool の失敗（limit）。灰の値 128 と motion の intra: 再利用の frame（前に motion を書いた frame を pool に返してから取る）でも side が intra に戻ること（vcodec_frame_side_reset）。
 - before_picture: IRAP の NoOutputOfPriorPicsFlag 0 と 1、picture 0、通常の除去と bumping の 3 条件（reorder・latency・fullness）を手の表で（各 picture の POC と出力の順）。詰まりの時の Curr でない最小 POC の除去、全部 Curr で EINVAL。出力の queue が満ちた時の ENOBUFS（何も壊さない）。
 - store: latency の加算は出力の順で後の picture だけ（C.5.2.3）、pic_output 0、additional bumping。flush の POC の順。clear。
 - 参照の数: frame の ref と unref が釣り合う（試験の終わりに pool の allocated と free の数）。
@@ -43,7 +43,7 @@
 timeout 900 sh plan/ws330/tests/run-unit.sh h265_dpb
 timeout 1800 sh plan/ws330/tests/run-unit.sh all
 BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh
-timeout 1800 sh plan/ws326/tests/run-unit.sh all
+（H.264 の回帰: p003 が plan/tools.md に登録した WS326・WS329 の単体試験の道具の all。WS326・WS329 の完了で plan/ws326・ws329 の tests は plan/tools へ移るので、p003 の結果の節の path を使う）
 （amd64 の libmedia.so の build: plan/ws326/design.md §6 の command、warning 0）
 git diff --check
 ```

@@ -62,12 +62,12 @@ void h265sw_transform_scale(const int16_t *levels, unsigned log2_size, int qp, c
  * one-dimensional transform of 8.6.4.2 (trType 1: the 4x4 DST of 8-315
  * and 8-316; trType 0: y[ i ] = Sum of transMatrix[ i ][ j * 2^( 5 -
  * Log2( n ) ) ] * x[ j ] (8-317), the 32x32 transMatrix of 8-318 to
- * 8-323 being data of this module), the intermediate clip of 8-314 (( e + 64 )
+ * 8-321 being data of this module), the intermediate clip of 8-314 (( e + 64 )
  * >> 7 to -32768..32767), then the rows.  The output is r before the
  * final bdShift of 8-299, in int32_t, [ y * n + x ].
  *
  * Values referenced: ITU-T H.265 (01/2026) 8.6.4.2, 8-316 and the
- * transMatrix of 8-317 to 8-323.
+ * transMatrix of 8-318 to 8-321.
  */
 void h265sw_transform_inverse(const int32_t *d, unsigned log2_size, unsigned tr_type, int32_t *r);
 

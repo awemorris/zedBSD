@@ -80,9 +80,12 @@ struct h265sw_sao {
 
 /*
  * One CTB of the picture: slice_addr_rs is SliceAddrRs of the slice
- * segment that contains it; segment the index of that slice segment in
- * the picture's segments; tile the TileId of the CTB; decoded 1 once
- * its coding tree unit was decoded; sao[cIdx] its SAO parameters.
+ * segment that contains it, written by the slice data loop before the
+ * CTU is parsed (UINT32_MAX until then: a CTB no slice reached belongs
+ * to no slice); segment the index of that slice segment in the picture's
+ * segments; tile the TileId of the CTB (from h265sw_pic_start); decoded
+ * 1 once its coding tree unit was completely parsed and reconstructed
+ * (the concealment's test); sao[cIdx] its SAO parameters.
  */
 struct h265sw_ctb {
 	uint32_t slice_addr_rs;
@@ -175,7 +178,8 @@ void h265sw_pic_free(struct h265sw_pic *pic);
 /*
  * Starts a picture: sets sps and pps, derives the tiles and the CTB maps
  * (h265sw_scan_tiles, h265sw_scan_ctb_maps; EINVAL when they do not fit
- * the SPS), clears every ctb entry (decoded 0, SAO off), every blk entry
+ * the SPS), clears every ctb entry (slice_addr_rs UINT32_MAX, decoded 0,
+ * SAO off, tile from the maps), every blk entry
  * (flags 0, pred_mode INTRA, intra_mode 1, depth 0, qp_y 0, coded 0) and
  * every mv entry (ref_idx -1), and num_segments.  Returns 0 or EINVAL.
  */
@@ -192,8 +196,12 @@ uint32_t h265sw_pic_zscan(const struct h265sw_pic *pic, unsigned x, unsigned y);
  * Derives availableN of the z-scan order block availability (6.4.1) of
  * the neighbouring location ( x_nb, y_nb ) for the current block at (
  * x_cur, y_cur ): 0 when the neighbour is outside the picture, later in
- * z-scan order (6-1, 6-2), in a CTB not decoded yet, or in another slice
- * (SliceAddrRs) or tile; else 1.  x_nb and y_nb may be negative.
+ * z-scan order (6-1, 6-2), or in a CTB whose slice_addr_rs differs from
+ * that of the current block's CTB (another slice, or a CTB no slice has
+ * reached: its UINT32_MAX never equals a real address) or whose tile
+ * differs; else 1.  The current CTB is "reached" while it is parsed and
+ * reconstructed (its slice_addr_rs is written first), so blocks inside it
+ * see each other.  x_nb and y_nb may be negative.
  */
 int h265sw_pic_available(const struct h265sw_pic *pic, int x_cur, int y_cur, int x_nb, int y_nb);
 
@@ -201,8 +209,10 @@ int h265sw_pic_available(const struct h265sw_pic *pic, int x_cur, int y_cur, int
  * Derives availableN of the prediction block availability (6.4.2): the
  * coding block ( x_cb, y_cb, n_cbs ), the prediction block ( x_pb,
  * y_pb, w, h ) with part_idx, the neighbouring location ( x_nb, y_nb ).
- * sameCb, the second-partition rule of Nx2N-like partitions, and 0 for
- * a neighbour whose CuPredMode is MODE_INTRA.
+ * sameCb (6.4.1 when the neighbour is in another coding block), the
+ * rule of the second prediction block of an NxN partition (nPbW << 1 and
+ * nPbH << 1 equal to nCbS, partIdx 1, the neighbour in the lower-left
+ * one), and 0 for a neighbour whose CuPredMode is MODE_INTRA.
  */
 int h265sw_pic_pb_available(const struct h265sw_pic *pic, int x_cb, int y_cb, unsigned n_cbs, int x_pb, int y_pb, unsigned w, unsigned h, unsigned part_idx, int x_nb, int y_nb);
 

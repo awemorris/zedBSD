@@ -48,7 +48,14 @@ struct h265sw_ptl {
 };
 
 /*
- * One sequence parameter set, with the derived values the decoder uses.
+ * One sequence parameter set as read, with the derived values the
+ * decoder uses.  It keeps every format a valid SPS may name (the parse
+ * does not refuse what the software decoder cannot decode, so a parse
+ * shared with another back end keeps working): chroma_format_idc,
+ * separate_colour_plane, bit_depth_luma and bit_depth_chroma (8..16),
+ * range_extension with the nine flags of 7.3.2.2.2 as bits (bit n is the
+ * n-th flag in syntax order).  h265sw_ps_sps_supported says whether the
+ * software decoder takes it.
  *
  * Signalled (7.3.2.2.1), each checked against 7.4.3.2.1: id
  * (sps_seq_parameter_set_id 0..15), max_sub_layers_minus1 (0..6), ptl,
@@ -88,6 +95,11 @@ struct h265sw_sps {
 	unsigned id;
 	unsigned max_sub_layers_minus1;
 	struct h265sw_ptl ptl;
+	unsigned chroma_format_idc;
+	int separate_colour_plane;
+	unsigned bit_depth_luma;
+	unsigned bit_depth_chroma;
+	unsigned range_extension;
 	unsigned width;
 	unsigned height;
 	unsigned crop_x;
@@ -147,9 +159,12 @@ struct h265sw_sps {
  * weighted_pred, weighted_bipred, transquant_bypass, tiles,
  * entropy_sync (entropy_coding_sync_enabled_flag), with tiles:
  * tile_columns and tile_rows (num_tile_columns_minus1 + 1 ..., at most
- * H265SW_MAX_TILE_COLS and H265SW_MAX_TILE_ROWS, else ENOTSUP),
- * uniform_spacing, column_width[] and row_height[] (column_width_minus1
- * + 1 ..., in CTBs, the last one not signalled), loop_filter_across_tiles
+ * H265SW_MAX_TILE_COLS and H265SW_MAX_TILE_ROWS, else ENOTSUP: only
+ * levels above 6.2 allow more), uniform_spacing, column_width[] and
+ * row_height[] (column_width_minus1 + 1 ..., in CTBs, the last one not
+ * signalled; each value read is checked at once to be at most
+ * H265SW_MAX_SIDE / 16 = 1055, EINVAL otherwise, so no later sum of them
+ * can wrap), loop_filter_across_tiles
  * (inferred 1 without tiles); loop_filter_across_slices,
  * deblocking_override_enabled, deblocking_disabled, beta_offset_div2 and
  * tc_offset_div2 (-6..6, 0 when absent), scaling_list_present with
@@ -209,8 +224,15 @@ struct h265sw_pps {
  * sps_generation[id] counts the SPSs stored under id (a picture compares
  * the generation it started with to notice a replaced SPS).
  * sps_refused[id] and pps_refused[id] are 1 when the last set of that id
- * was refused as ENOTSUP (a slice that names it is then outside the
- * decoder's range rather than broken); a stored set clears it.
+ * was refused as ENOTSUP (a syntax this parse does not read: the screen
+ * content, 3D or multilayer extensions, the PPS range extension tools; a
+ * slice that names it is then outside the decoder's range rather than
+ * broken); a stored set clears it.  sps_generation[id] counts the stored
+ * SPSs of id whose content differed from the one stored before: an SPS
+ * sent again with the same content (7.4.2.4.2 allows it inside a coded
+ * video sequence) keeps the generation.  The comparison is of the parsed
+ * structures, each built in a structure cleared to 0 first, so a byte
+ * comparison is exact.
  */
 struct h265sw_ps_store {
 	int sps_present[H265SW_SPS_IDS];
@@ -238,10 +260,12 @@ void h265sw_ps_init(struct h265sw_ps_store *store);
  * (vcodec_bitreader_trailing; extension data after sps_extension_4bits is
  * skipped up to the trailing bits).
  *
- * The decoder's range: chroma_format_idc 1, bit_depth_luma_minus8 and
- * bit_depth_chroma_minus8 0, ctb_log2 4..6, every range extension flag
- * 0, no multilayer, 3D or screen content extension, and a VUI without
- * field_seq_flag; anything else valid is ENOTSUP (sps_refused set).
+ * Stored whatever its format (chroma_format_idc 0..3, bit depths up to
+ * 16, the range extension flags); the software decoder's range is
+ * h265sw_ps_sps_supported.  ENOTSUP (sps_refused set): the screen
+ * content, 3D and multilayer extensions (whose syntax this parse does not
+ * read), and CtbLog2SizeY outside 4..6 (every profile of Annex A, A.3.2
+ * to A.3.8, limits it so).
  *
  * A VUI that fails to read (E.2.1 streams from some old encoders have
  * misplaced fields) is dropped when ptl.profile_idc is 1, 2 or 3 (Main,
@@ -256,6 +280,15 @@ void h265sw_ps_init(struct h265sw_ps_store *store);
  * Returns 0; EINVAL for a syntax or range error; ENOTSUP as above.
  */
 int h265sw_ps_read_sps(struct h265sw_ps_store *store, struct vcodec_bitreader *bits);
+
+/*
+ * Reports whether the software decoder takes a sequence (h265sw.h):
+ * returns 0 for chroma_format_idc 1, both bit depths 8, range_extension
+ * 0 and no VUI with field_seq_flag; ENOTSUP otherwise.  The decoder calls
+ * it when it activates the SPS (a slice of such a sequence is then
+ * ENOTSUP, and libmedia moves on to the next back end).
+ */
+int h265sw_ps_sps_supported(const struct h265sw_sps *sps);
 
 /*
  * Reads a picture parameter set RBSP and keeps it in store (7.3.2.3).
@@ -276,8 +309,9 @@ int h265sw_ps_read_pps(struct h265sw_ps_store *store, struct vcodec_bitreader *b
  * ctb_log2 - min_cb_log2; log2_parallel_merge_level at most ctb_log2;
  * tile_columns at most pic_width_ctbs and tile_rows at most
  * pic_height_ctbs; for non-uniform spacing, the signalled widths and
- * heights sum to less than pic_width_ctbs and pic_height_ctbs (the last
- * column and row take the rest, at least 1).  Returns 0 or EINVAL.
+ * heights sum (in uint64_t) to less than pic_width_ctbs and
+ * pic_height_ctbs (the last column and row take the rest, at least 1).
+ * Returns 0 or EINVAL.
  */
 int h265sw_ps_check_pair(const struct h265sw_sps *sps, const struct h265sw_pps *pps);
 

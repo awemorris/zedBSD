@@ -49,4 +49,22 @@
  */
 void h265sw_merge_derive(const struct h265sw_mvctx *ctx, const struct h265sw_pu *pu, unsigned merge_idx, struct h265sw_mv_field *out);
 
+/*
+ * Builds the whole merge candidate list of a prediction block, as
+ * h265sw_merge_derive does before it picks one: list[0 ..
+ * MaxNumMergeCand) in mergeCandList order (8-119, then the combined and
+ * zero candidates), without the 8x4 and 4x8 rule (h265sw_merge_derive
+ * applies it to the one it picks; a caller choosing among the list, as
+ * the encoder does, applies it with h265sw_merge_restrict).  Returns
+ * MaxNumMergeCand.
+ */
+unsigned h265sw_merge_candidates(const struct h265sw_mvctx *ctx, const struct h265sw_pu *pu, struct h265sw_mv_field list[5]);
+
+/*
+ * Applies the rule of 8.5.3.2.2 step 10 to a chosen candidate: when it
+ * uses both lists and orig_w + orig_h (the prediction block's own size)
+ * is 12, list 1 is dropped (refIdxL1 -1).
+ */
+void h265sw_merge_restrict(struct h265sw_mv_field *motion, unsigned orig_w, unsigned orig_h);
+
 #endif

@@ -3,13 +3,13 @@
 # ws330-p027 h265sw-slicedata（slice data の loop、WPP・tile・dependent）
 
 - 親: [ws.md](../ws.md)、設計 [design.md](../design.md)。型: S（Sonnet 5.5 high、phase-runner-low、標準廉価実装手順、1 回の起動）。
-- 状態: planned（2026-10-31 p001 が作成）。依存: p023、p024。BASE: p003 の commit（p003 が書く）。
+- 状態: planned（2026-10-31 p001 が作成）。依存: p023、p024b。BASE: p003 の commit（p003 が書く）。
 
 ## 1. 読む物
 
 - 共通: [design.md](../design.md) §13.1 の「読む物（共通）」（AGENTS.md §4・§7・§9・§10、plan/agents/protocol.md、plan/coding-style.md の全文、design.md §1・§2・§3・§7・§8・§10.1、`vcodec.h`・`h265sw.h`）。
 - 仕様: ITU-T H.265 (V11) (01/2026)、`/home/awe/zedBSD-claude1/build/sources/specs/itu-t-h265-202601.pdf`（SHA-256 `78b093480e178a2b99d8cb7499934240f359c50c6d09568f8be651bc1151d4d2`、git の外）。**PDF の頁 = 印刷の頁 + 18**。`pdftotext -layout -f N -l M` で読み、表と式（上付きが崩れる: 2^15 が「215」になる）は Read の tool で PDF の頁の画を見て確かめる。
-- header（仕様の正本）: `userland/desktop/libmedia/h265sw-slicedata.h`、`userland/desktop/libmedia/h265sw-ctu.h`、`userland/desktop/libmedia/h265sw-recon.h`、`userland/desktop/libmedia/h265sw-cabac-init.h`（p003 の前は [proposed/](../proposed/)）。
+- header（仕様の正本）: `userland/desktop/libmedia/h265sw-slicedata.h`、`userland/desktop/libmedia/h265sw-ctu.h`、`userland/desktop/libmedia/h265sw-recon.h`、`userland/desktop/libmedia/h265sw-cabac-init.h`、`userland/desktop/libmedia/h265sw-pic.h`（p003 の前は [proposed/](../proposed/)）。
 - 仕様の節: 7.3.8.1（印刷 51 = PDF 69）、9.3.1・9.3.2.1・9.3.2.4〜9.3.2.6（印刷 203〜218 = PDF 221〜236）、8.6.1 step 1。
 
 ## 2. 作る物
@@ -20,7 +20,7 @@
 
 ## 3. 試験の項目
 
-- 試験の中の slice data の書き（CTU の書きは p023 の試験の補助を共有してよい: 試験の補助は plan/ws330/tests/unit/ の中の新しい file）で、WPP（行の始まりの同期、右上の CTB が無い時の初期化、2 番目の CTU の後の保存）、tile（初期化、end_of_subset_one_bit と byte 境界）、dependent（ds の同期）、複数の slice segment、QP の reset。
+- p003 の試験の補助（h265write.h の slice data の書き）で、WPP（行の始まりの同期、右上の CTB が無い時の初期化、2 番目の CTU の後の保存）、tile（初期化、end_of_subset_one_bit と byte 境界）、dependent（ds の同期）、複数の slice segment、QP の reset。
 - 誤り: end_of_subset_one_bit 0、絵の最後を越える、重なる segment。数えた CTU の数。
 - 共通: 誤りの入力・途中で切れた入力・乱数の入力で落ちず（ASan・UBSan 0）決められた誤りを返す。
 
@@ -40,7 +40,7 @@
 timeout 900 sh plan/ws330/tests/run-unit.sh h265_slicedata
 timeout 1800 sh plan/ws330/tests/run-unit.sh all
 BASE=<p003 の SHA> timeout 300 sh plan/ws330/tests/check-skeleton.sh
-timeout 1800 sh plan/ws326/tests/run-unit.sh all
+（H.264 の回帰: p003 が plan/tools.md に登録した WS326・WS329 の単体試験の道具の all。WS326・WS329 の完了で plan/ws326・ws329 の tests は plan/tools へ移るので、p003 の結果の節の path を使う）
 （amd64 の libmedia.so の build: plan/ws326/design.md §6 の command、warning 0）
 git diff --check
 ```
