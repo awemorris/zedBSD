@@ -580,8 +580,8 @@ static const struct values_keyword values_border_style[] = {
 	{ "dashed", CSS_BORDER_DASHED },
 	{ "dotted", CSS_BORDER_DOTTED },
 	{ "double", CSS_BORDER_DOUBLE },
-	{ "groove", CSS_BORDER_SOLID },
-	{ "ridge", CSS_BORDER_SOLID },
+	{ "groove", CSS_BORDER_GROOVE },
+	{ "ridge", CSS_BORDER_RIDGE },
 	{ "inset", CSS_BORDER_INSET },
 	{ "outset", CSS_BORDER_OUTSET },
 	{ NULL, 0 }

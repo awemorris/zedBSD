@@ -309,7 +309,7 @@ static struct dom_element *cascade_parent_element(struct dom_element *element);
 static struct dom_element *cascade_previous_element(struct dom_element *element);
 static struct dom_element *cascade_next_element(struct dom_element *element);
 static void cascade_apply(struct css_engine *engine, struct css_style *style, const struct css_style *parent, const struct css_declaration *declaration);
-static int cascade_margin_property(int property, int writing_mode, int direction);
+static int cascade_margin_property(int property, int writing_mode, int direction, int sideways);
 static void cascade_inherit(struct css_style *style, const struct css_style *parent, int property);
 static struct css_length cascade_flex_basis(struct css_engine *engine, const struct css_value *value, float font_size);
 static struct css_length cascade_length(struct css_engine *engine, const struct css_value *value, float font_size);
@@ -3958,7 +3958,8 @@ static int
 cascade_margin_property(
 	int property,
 	int writing_mode,
-	int direction)
+	int direction,
+	int sideways)
 {
 	static const int groups[][2] = {
 		{ CSS_PROP_MARGIN_INLINE_START, CSS_PROP_MARGIN_TOP },
@@ -4005,7 +4006,7 @@ cascade_margin_property(
 		/* Inline-start and inline-end. */
 		if (logical == 0 || logical == 1) {
 			side = vertical ? CSS_TOP : CSS_LEFT;
-			if (direction == CSS_DIRECTION_RTL)
+			if ((direction == CSS_DIRECTION_RTL) != (vertical && sideways == 1))
 				side = vertical ? CSS_BOTTOM : CSS_RIGHT;
 			if (logical == 1)
 				side = (side + 2) % 4;
@@ -4049,7 +4050,7 @@ cascade_apply(
 
 	/* The CSS-wide keywords. */
 	value = &declaration->value;
-	property = cascade_margin_property(declaration->property, style->writing_mode, style->direction);
+	property = cascade_margin_property(declaration->property, style->writing_mode, style->direction, style->writing_sideways);
 	if (value->kind == CSS_VALUE_INHERIT || value->kind == CSS_VALUE_UNSET) {
 		/* Unset follows inheritance only for properties whose initial cascade inherits. */
 		inherited = 0;
