@@ -1,13 +1,13 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 11:55（Q1）
+最終更新: 2026-10-30 12:15（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS009](ws009/ws.md) → [WS296](ws296/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書）→ src/drivers の comment の管理情報の削除と規約 | DOC-54 は全 Phase cleared。完了の条件の不足を p025〜p028 に。p025・p026 cleared、p027（Sonnet）・p028（P1）を実行中 | WS009 completed → WS296 を標準廉価実装手順に組み直す設計 → Sonnet → WS297 |
+| P1 | [WS009](ws009/ws.md) → [WS296](ws296/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書）→ src/drivers の comment の管理情報の削除と規約 | DOC-54 は全 Phase cleared。完了の条件の不足を p025〜p028 に。p025〜p027 cleared、p028 の build・boot の再現（4 variant）を実行中 | WS009 completed → WS296 を標準廉価実装手順に組み直す設計 → Sonnet → WS297 |
 | P2 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | p016 の受け入れ: 境界・build・host 試験 PASS、Win32 の揺れの一覧、QEMU の app の回帰へ | QEMU の回帰 → FreeBSD の build → p017 規約の見直し（Sonnet）→ WS の完了 |
 | P3 | [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close が戻らない | QEMU で再現と解析、今日の TCP の変更との関係を確かめて直す | BUG-367 → WS221（Jumbo frame）・WS299（5330 の NVMe） |
 | P4 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 返却（09:13）。次の 1 手は ws.md の Resume point | p015 の QEMU の 3 回目 → p004 clang・libcxx・GTK4 のセルフビルド → p008 → p014 → p007 firmware 変数の driver |
@@ -32,8 +32,8 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | p024 | 正確さの review（Opus） | cleared（12 file を直した、BUG-366 と BUG-365 の追加） |
 | p025 | managed-wlan.md の書き直し（Opus） | cleared |
 | p026 | build の文書・索引・Status 行（Sonnet） | cleared |
-| p027 | 文書の検査の script を今の規則に直し plan/tools へ（Sonnet） | in-progress |
-| p028 | clean build・QEMU 起動の再現、WS001 との照合（Opus） | in-progress（P1） |
+| p027 | 文書の検査の script を今の規則に直し plan/tools へ（Sonnet） | cleared |
+| p028 | clean build・QEMU 起動の再現、WS001 との照合（Opus） | in-progress（P1、照合は済み、4 variant の build と boot を実行中） |
 
 進捗: 2026-10-30 骨格と照合の script（P1）→ Sonnet 13 回で全文 → 統合で照合 PASS（14 file、例 12 compile）。sysctl の 4 byte の読みの不具合を Q1 が直した。
 
