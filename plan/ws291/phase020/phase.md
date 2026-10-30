@@ -155,3 +155,30 @@ mview が qs40 を描くのに driver に欠けていた物（どれも HAL は�
    （c1・c13 の fps と kernel の `gpu ta`・`gpu 3d`・`gpu frame` の行）。TA/3D の重なりと cutout の効果を分けるには、P3 の基点そのまま（P3 の build/ws291/vf2t、計測の stamp は無い）と比べる。
 3. main の kernel（build/ws291/vf2m）の VF2 の起動は、回復の手段（serial）がある時だけ試す（起動しないと板がまた止まる）。
 4. その後の手（phase020 の次の手の 1〜3）: c1 の 1080p の非線形な 3D の費用（texture の mip 0 の読み・cache）、頂点の側（mview.vert 49 group、TA の固定機能・parameter buffer の書き）、cutout の残り（14 group: 比較・select・tstz を 1 つの test に寄せる、feedback を色の後ろへ）。
+
+#### 板が「起動しない」の訂正と回復（2026-10-30 23:41〜10-31 00:4x P2）
+
+- ユーザーが VF2 の serial をつないだ（/dev/ttyUSB0、by-id `usb-FTDI_TTL232R_FTBTJOV8-if00-port0`）。serial を読みながら入れ直すと、main 780e7349b ＋ 1 の kernel は止まっておらず init・`login:` まで出ていた。
+  SSH が来ない原因は network: `networkd: initial Wi-Fi normalization: Invalid argument` → `init: networkd: FAIL 3 wifi-normalize` → `init: skipped networking: required dependency failed`（en0 は link up）。
+  板の userland（10-21 の 5c83c16）のままでも、main の rootfs の networkd（3095223911）に揃えても同じ EINVAL（networkd の retire_managed_policy、VF2 に Wi-Fi は無い）→ main の VF2 では network が上がらない。Q1 が Bug にした: BUG-371（Wi-Fi の正規化の失敗だけで init が有線の en0 を含む networking 全体を飛ばす）、BUG-372（main の VF2 の kernel で serial の入力が効かない。ws331 p005 の疑い）。
+- 計測の差分の kernel の不具合（直した、ef5879abb）: 計測の stamp が、render context を作っている途中の session の timeline を読んで NULL の load（`riscv64 trap scause=d stval=0`、`powervr_render_jobs_stamp`）。走っている job がある session だけを見るようにした。
+- 回復: U-Boot の入力は効く（autoboot の 2 秒に空白を送る）。`fatload mmc 1:3 0x60000000 vmunix.p2old` → `fatwrite mmc 1:3 0x60000000 vmunix ${filesize}` → `boot` で元の kernel に戻せる。
+- **事故（P2 の手順の誤り）**: userland を main に揃える時、file ごとに「mv 元 → 元.p2old、cp 新 → 元」とした。/bin/cp 自身と /lib/ld.so を退けた所で cp（動的）が動かなくなり、/lib/ld.so が無い板になった（exec できず SSH も入れない）。
+  回復: static の helper（build/tmp/p2swap、/bin・/sbin・/lib・/usr の *.p2old を rename で戻し、/lib/ld.so と /sbin/init を stat で確かめてから /sbin/init を exec。pid 1 で走る）を U-Boot の `loady`（host の lrzsz の sb、ymodem、crc32 で照合）で読ませて区画 3 に fatwrite、
+  zedbsd.cfg（元を zedbsd.cfg.p2orig に写した）に `init=/boot/boot0/p2swap` を 1 行足して起動 → `p2swap: 178 done, 0 failed` → init・sshd → SSH。cfg は元に戻して cksum 一致（632416842）。
+- 手順の直し（Q1 の条件）: 入れ替えは、新しい物を同じ directory の `FILE.p2new` に写し（mode と owner は元の物）、static の helper が `link(FILE, FILE.p2old)` と `rename(FILE.p2new, FILE)` を exec を挟まずに行う。ld.so と libc は最後。mv で先に退ける形は使わない。
+  root（UFS 256 MiB）は inode が足りず /usr/include・*.a・pkgconfig・/lib/debug は除いた（256 file）。この形で main の userland に揃えたが上の EINVAL で network が上がらず、同じ init= の手順（`254 done, 0 failed`）で元に戻した。
+- 板の今（00:4x）: kernel は元（/boot/boot0/vmunix 2825517684）、userland は元（入れ替えた 279 file が作業前の cksum と全部一致）、zedbsd.cfg は元（login の行 0）。
+  残る物: 区画 3 の p2swap・zedbsd.cfg.p2orig（P2 の回復の道具）、main の rootfs の新しい file（元に無かった物、空の directory を含む。元の file とは名前が重ならない）。元の 279 file の写しは host の build/ws291/board-orig/orig.tar。
+
+#### 計測 b2（2026-10-30 23:57、P3 の基点 cb03c9983 ＋ e14843450・ef5879abb の差分、kernel 5686341、板の古い userland、direct scanout、TIMING=1）
+
+| scene | fps | frame ms | fence ms | gpu ta ms | gpu 3d ms | gpu frame ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| c1 | 66.48（P3 の前 62.29） | 15.03 | 11.76 | 4.9 | 5.5 | 15.8 |
+| c13 | 27.44（P3 の前 26.57） | 36.33 | 31.28 | 20.7 | 7.8 | 36.1 |
+
+- 分かった事: c13 の GPU は TA（頂点の処理と tiling）が 20.7 ms、3D が 7.8 ms。TA ＋ 3D ＝ 28.5 ms に対し frame は 36 ms。mview は frame ごとに fence を待つ（`vkWaitForFences` を毎 frame、command buffer は 1 組）ので
+  同時に走る frame は 1 つ。GPU は CPU の record・submit・present（約 4.5 ms）の間に止まり、TA と 3D の重なり（2）は効く場面が無い（効果は未確かめ）。
+- TA の費用: c1 4.9 ms、c13 20.7 ms → 1 copy（25861 頂点、37000 三角形）あたり約 1.3 ms ＋ 固定 約 3.6 ms。目標の 20 ms（50 fps）には、mview が 1 frame しか重ねない限り CPU ＋ TA ＋ 3D ≦ 20 ms が要る。
+- cutout の分岐なし（3）は 3D の側。c1 の 3D 5.5 ms（P3 の c1 の fence 13.0 ms の時の分けは無い）。
