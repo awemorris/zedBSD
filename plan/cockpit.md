@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:50（Q1）
+最終更新: 2026-10-31 01:53（Q1）
 
 ## 担当（P1〜P8）
 
@@ -18,7 +18,7 @@
 | P7 | Bug | network と VF2 と compositor の Bug | BUG-371 の QEMU の確かめ、BUG-375（game mode の後に compositor が落ちる）の解析 | 直し → VF2（P2）と 10.0.10.3（P3）で確かめ |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
-Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015・p017。
+Sonnet の実装の担当（標準廉価実装手順）: S-p015・S-p017（[WS326](ws326/ws.md) p015 補間と重み・p017 B の direct、01:5x 起動）。
 
 ## WS ごとの進捗
 
@@ -74,7 +74,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 ### WS326 libmedia の H.264 の software の decoder
 
-20 Phase cleared。p015・p017（補間と重み、B の direct）から Sonnet で。担当なし。
+20 Phase cleared。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017 を Sonnet 2 人で同時に（in-progress）→ p019 再構成（Sonnet）→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
 
 ### 最近完了した WS
 

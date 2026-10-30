@@ -78,7 +78,8 @@
 <!-- master:focus:start -->
 - 公開は rev.5 まで（実質のベータ2）。次に何をやるかは Q1 とユーザーが整理中。「保留の WS」はその整理の対象。
 - 実装の進め方: 外部の標準仕様に基づく物と、手順に分けられる大きな仕事は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../docs/agent/spec-module-delegation.md)、Opus が設計、Sonnet 5.5 high が実装）。今の対象は WS326・WS327・WS009・WS328、次に WS296・WS297・WS329・WS330。
-- **H.264 の software の decoder**（[WS326](ws326/ws.md)）: 20 Phase cleared、全体の流れと適合の試験へ。共通部分は H.265 でも使える汎用の名前にする（ユーザー）。
+- **H.264 の software の decoder**（[WS326](ws326/ws.md)）: 2026-10-31 ユーザーから、libmedia の実装の WS を昼までに終わるよう優先度を上げてスケジュールする、という趣旨の指示を受けた。Q1 が P3 の列から外して直に回す（p015・p017 → p019 → p021 → p022・p023 → p024・p026 → p025）。共通部分は H.265 でも使える汎用の名前にする（ユーザー）。
+- **ユーザーの不在の間（2026-10-31 未明〜昼）**: 2026-10-31 ユーザーから、設計だけ進められる WS は設計を、実装できる WS は実装だけでも、試験できるなら試験も進める、という趣旨の指示を受けた。
 - **文書**（[WS009](ws009/ws.md)）: /dev/gpu の UAPI の文書（DOC-54）は完成、残りは build・boot の再現だけ。
 - **GPU の描画の速さ**（[WS291](ws291/ws.md)）: RDNA は Linux と同等、NVIDIA は scene-5000 で NVK と同等（49.5〜49.7 fps）、50 fps を明らかに超える改善と desktop の測り直しが残り。
 - **インストーラ**（[WS307](ws307/ws.md)）: app と通しの試験は済み、残りは sleep の QEMU、GTK4 のセルフビルド、firmware 変数の driver、規約。
@@ -118,7 +119,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-377 · q1748 · WS334 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-377 · q1750 · WS334 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
