@@ -2,7 +2,7 @@
 
 # ws332-p002: KERN_CLOCK_HZ の削除
 
-Status: in-progress（2026-10-30 P3 q1722: 実装と確かめを終えた。cleared は Q1）
+Status: cleared（2026-10-30 Q1）
 Parent: [WS332](../ws.md)
 Queue: q1722（P3、p001 の後）
 

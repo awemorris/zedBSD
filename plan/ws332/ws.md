@@ -6,7 +6,7 @@ Status: incomplete
 Primary Milestone: MG004
 Parent: [Master](../master.md)
 目標: obsolete の `KERN_CLOCK_HZ`（中身は HAL の `HAL_TIMER_FREQUENCY`）を kernel・driver から無くし、時間は単位（ms・ns）の API で扱う。今の tick の周波数を走っている時に取得する口を用意する（周波数を変える実装は将来）。
-Resume point: p001（設計）と p002（KERN_CLOCK_HZ の削除）を P3（q1722）。
+Resume point: p001・p002 cleared（2026-10-30）。次は p003（率を仮定する残りの literal）と p004 規約。
 
 ## ユーザーの決定（要点）
 
@@ -19,7 +19,7 @@ Resume point: p001（設計）と p002（KERN_CLOCK_HZ の削除）を P3（q172
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計: 時間の API（tick の数でなく ms・ns の期限）、可変の tick（周期を変える口、mode と電源管理 WS052・WS301・WS306 との関係）、各 arch の HAL の timer の実装の補完（hal.h を変えずに済むか） | in-progress（P3、2026-10-30 設計と review 済み、[design.md](design.md)） | — |
-| [p002](phase002/phase.md) | KERN_CLOCK_HZ の削除: 175 か所を時間の単位の API に置き換え、clock.h から HAL_TIMER_FREQUENCY を外す。全 port の build と、主な port の QEMU の起動 | in-progress（P3） | p001 |
+| [p001](phase001/phase.md) | 設計: 時間の API（tick の数でなく ms・ns の期限）、可変の tick（周期を変える口、mode と電源管理 WS052・WS301・WS306 との関係）、各 arch の HAL の timer の実装の補完（hal.h を変えずに済むか） | cleared（2026-10-30 Q1） | — |
+| [p002](phase002/phase.md) | KERN_CLOCK_HZ の削除: 175 か所を時間の単位の API に置き換え、clock.h から HAL_TIMER_FREQUENCY を外す。全 port の build と、主な port の QEMU の起動 | cleared（2026-10-30 Q1） | p001 |
 | p003 | 率を仮定する残り（tick の数の literal: VM_FREE_WAIT_TICKS・rpi4-vchiq・i915 の WAIT・EVADE、「次の tick まで」の +1 の約 8 か所）を時間の単位の API に（design.md §2・§5） | planned | p002 |
 | p004 | 規約の全文の見直し | — | p003 |

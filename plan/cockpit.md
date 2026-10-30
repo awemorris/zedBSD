@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 22:30（Q1）
+最終更新: 2026-10-30 23:00（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。zedBSD-firmware を push し branch を merge（b4e549bfc）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
 | P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | p008 済み（merge fcea07e74）。watch.c の HVS を Pi の側へ移す小さな残り → p009 | p009 kernel の header の _private.h → p006 規約 |
-| P3 | [WS332](ws332/ws.md) | tick の周波数を API で扱う（KERN_CLOCK_HZ の削除、取得の口だけ） | 起動（q1722）。p001 設計 | p002 KERN_CLOCK_HZ の削除（175 か所） → p003 規約 |
+| P3 | — | — | 返却（WS332: p001・p002 cleared、KERN_CLOCK_HZ を削除、wlan の UAPI の期限の不具合を直した） | WS332 p003（率を仮定する残りの literal）・p004 規約は未割当 |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
@@ -124,9 +124,10 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 | Phase | 内容 | 状態 |
 | --- | --- | --- |
-| p001 | 設計（時間の API、可変の tick、HAL の timer） | in-progress（P3） |
-| p002 | KERN_CLOCK_HZ の削除（175 か所） | planned |
-| p003 | 規約の見直し（周波数を変える実装は将来、ユーザーの指示） | planned |
+| p001 | 設計（時間の API、今の率を取る口） | cleared（2026-10-30） |
+| p002 | KERN_CLOCK_HZ の削除、wlan の UAPI を ns に | cleared（2026-10-30） |
+| p003 | 率を仮定する残り（tick の数の literal、+1） | planned |
+| p004 | 規約の見直し | planned |
 
 ## ユーザーの判断を待つ事
 

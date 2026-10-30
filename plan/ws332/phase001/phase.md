@@ -2,7 +2,7 @@
 
 # ws332-p001: 設計（時間の単位の API と tick の率を取る口）
 
-Status: in-progress（2026-10-30 P3 q1722: 設計と design-reviewer を終えた。cleared は Q1）
+Status: cleared（2026-10-30 Q1）
 Parent: [WS332](../ws.md)
 Queue: q1722（P3）
 
