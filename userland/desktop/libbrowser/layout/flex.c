@@ -1130,7 +1130,9 @@ flex_shrink(
 {
 	layout_unit used;
 	layout_unit missing;
+	layout_unit initial;
 	layout_unit share;
+	float factor;
 	float total;
 	float weight;
 	size_t index;
@@ -1138,6 +1140,7 @@ flex_shrink(
 	int violated;
 
 	/* Inflexible items and bases below a minimum keep their hypothetical size. */
+	initial = 0;
 	for (index = 0; index < count; index++) {
 		items[index].frozen = items[index].box->style.flex_shrink <= 0 ||
 		    items[index].base < items[index].size;
@@ -1178,6 +1181,17 @@ flex_shrink(
 			/* The sizes stand. */
 			return;
 		}
+
+		/* Factors that add up to less than one take only that part of the first round's missing space. */
+		if (round == 0)
+			initial = missing;
+		factor = 0;
+		for (index = 0; index < count; index++) {
+			if (!items[index].frozen)
+				factor += items[index].box->style.flex_shrink;
+		}
+		if (factor < 1.0f && (layout_unit)((float)initial * factor) < missing)
+			missing = (layout_unit)((float)initial * factor);
 
 		/* Each other item's part of the missing space; the ones below their minimums are held and frozen. */
 		violated = 0;
@@ -1609,6 +1623,26 @@ flex_auto_minimums(
 			error = flex_content_height(tree, box, child, &least);
 		if (error != 0)
 			return error;
+
+		/* An image's content size suggestion is its natural ratio applied to a definite cross size. */
+		if (child->replaced && child->style.aspect_ratio <= 0.0f &&
+		    child->image != NULL && child->image->width > 0 && child->image->height > 0) {
+			layout_unit cross;
+
+			cross = flex_ratio_cross_size(tree, box, child, row);
+			if (cross >= 0) {
+				if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					cross -= row ?
+					    child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM] :
+					    child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
+				if (cross < 0)
+					cross = 0;
+				if (row)
+					least = (layout_unit)((double)cross * child->image->width / child->image->height);
+				else
+					least = (layout_unit)((double)cross * child->image->height / child->image->width);
+			}
+		}
 
 		/* A size in pixels that is smaller is the minimum instead. */
 		size = row ? &child->style.width : &child->style.height;
