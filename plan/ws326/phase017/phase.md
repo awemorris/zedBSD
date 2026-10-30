@@ -3,7 +3,7 @@
 # ws326-p017 B の direct
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: 実装済み・試験 PASS（2026-10-31 S-p017。cleared は Q1 の受け入れ後）。
 - 依存: p007、p008、p016（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
@@ -50,3 +50,27 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果
+
+- 実装済み・試験 PASS（2026-10-31 S-p017、Sonnet 5.5 high。cleared は Q1 が受け入れを見て決める）。
+- 作った物: `userland/desktop/libmedia/h264sw-direct.c`（header は無変更）、`plan/ws326/tests/unit/test-direct.c`。
+- 実行した command と結果:
+  - `timeout 600 sh plan/ws326/tests/run-unit.sh direct` → `test-direct: PASS (259 checks)`、`run-unit: PASS`（ASan・UBSan 黙る）。
+  - `timeout 900 sh plan/ws326/tests/run-unit.sh all` → 全 21 試験 PASS、最後の行 `run-unit: PASS`。
+  - `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - zedBSD amd64 の `make ... build/amd64/dynamic/libmedia.so` → exit 0、出力の `warning` は 0 件。
+  - `git diff --check` → `check-skeleton: PASS`。
+  - 試験の検出力: 角の block の表（0、5、10、15）と floor の右 shift を一時的に壊すと 7 件が FAIL になることを確かめ、元に戻した（commit していない）。
+- 試験の中身: DistScaleFactor（128、85、-256、512、clip の 1023 と 256、極値の POC、long-term と td 0 の long_term0、list 1 の long-term、list 1 が空）、
+  temporal（4 つの quadrant の mvL0・mvL1・refIdxL0・ref_id、co-located が list 1 だけ、intra の co-located、list 0 に無い frame で refIdxL0 0 と concealed、同じ frame が 2 つの時の最小の index、
+  long-term と td 0 で mvL0 = mvCol、direct_8x8_inference 1 と 0、-1024 の係数と極値の vector の clamp）、
+  spatial（MinPositive、単独一致、list を使わない・intra・利用不可の隣、両 list が -1 での 0・0 と directZero、C の代わりの D、colZeroFlag の各条件、long-term の list1[0]、inference 1 と 0、macroblock の 1 回の導出と spatial_ready の再導出）、
+  direct の bit、誤りの入力（NULL、quadrant 4 以上、context の欠け、co-located frame の欠け・motion の欠け・address が範囲外、空の list、frame の無い entry、list の外の refIdx、巨大な refIdx）。
+- 判断（header が書かない所）:
+  - 床の右 shift は `direct_floor_shift`（負の値の `>>` を使わない）。式 8-198 と 8-199 の `>>` は仕様では算術 shift。
+  - 誤りは書く前に全部検査し、EINVAL の時は ctx->n.current の motion と direct の bit を変えない（spatial の準備の ctx->direct の欄は更新されうる）。
+  - spatial の refIdx が list の count 以上、または entry に frame が無い時は EINVAL（隣は同じ slice の物なので壊れた stream の時だけ）。
+  - temporal の refIdxL0 は quadrant の最初の 4x4 block の co-located で決める（同じ quadrant の block は同じ refIdxCol を持つ）。list 0 に frame が無い時は ctx->concealed を quadrant ごとに 1 増やす（macroblock ごとではない）。
+  - co-located の block が intra でなく両 list とも未使用の時は refIdxCol -1、mvCol 0 とする。
+- 仕様と header の食い違い: 無し。

@@ -53,7 +53,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p014](phase014/phase.md) | intra 予測: h264sw-intra（試験 test-intra） | cleared（2026-10-30 Q1、main dfd380ae5。test-intra 593 checks） | p008 |
 | [ws326-p015](phase015/phase.md) | 補間と重み: h264sw-interp、h264sw-weight（試験 test-interp、test-weight） | in-progress（q1748） | p007 |
 | [ws326-p016](phase016/phase.md) | MV の予測と P_Skip: h264sw-mvpred（試験 test-mvpred） | cleared（2026-10-30 Q1、main 4f596bbc6。test-mvpred 83 checks） | p008 |
-| [ws326-p017](phase017/phase.md) | B の direct: h264sw-direct（試験 test-direct） | in-progress（q1749） | p007、p008、p016 |
+| [ws326-p017](phase017/phase.md) | B の direct: h264sw-direct（試験 test-direct） | cleared（2026-10-31 Q1、2134a8efe。test-direct 259 checks・全 21 本 PASS・check-skeleton PASS を Q1 も実行、突然変異 7 件を検出） | p007、p008、p016 |
 | [ws326-p018](phase018/phase.md) | slice data と macroblock の syntax: h264sw-macroblock（試験 test-macroblock） | cleared（2026-10-30 Q1、main 3195bbd68。test-macroblock 1107981 checks、突然変異 29 で残りは同値 1・CABAC の residual は p021・p022 で） | p002、p008、p009、p012 |
 | [ws326-p019](phase019/phase.md) | macroblock の再構成: h264sw-recon（試験 test-recon） | planned | p013〜p018 |
 | [ws326-p020](phase020/phase.md) | deblocking: h264sw-deblock（試験 test-deblock） | cleared（2026-10-30 Q1、main 9fa35fc76。test-deblock 3313 checks、突然変異約 35 で残りは観測できない 1 つ） | p003、p008 |
