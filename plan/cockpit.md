@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 05:23（Q1）
+最終更新: 2026-10-31 05:26（Q1）
 
 ## 担当（P1〜P8）
 
@@ -16,7 +16,7 @@
 | P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |
 | P6 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1774: p016 危ない温度での非常の停止（init への通知・sync・電源断）→ p021 passive（温度で CPU の上限を下げる） | 非常の停止を止める起動の switch（`thermal.emergency=off`）は作らない（下の 0 の Q1 の判断の項目） |
 | P7 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1770: p011 x86 の CPU の driver の統合（HWP の道、関門、RAPL の meter） | p014 5330 の受け入れ（電源の入れ直しの後） |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,427（69.90%）。flexbox の auto の最小・表・justify・backdrop-filter・filter・@keyframes を足した |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,454（70.68%）。要素の scroll・popover・document.fonts・Range の矩形を足した、後退 0 |
 
 実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
 
@@ -57,7 +57,7 @@ completed（2026-10-31、main 39fc879c5）。KERN_CLOCK_HZ を無くし、tick �
 
 ### WS074 Web ブラウザ（libbrowser）
 
-Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→ 2,386 → 2,427（69.90%、10-31 04:5x、main 9175ad146）。後退は偶然通っていた scripted の 2 件だけ、Acid3 100/100。P8 が 100% まで自走（ユーザーの指示）、3 回目（i03）に入った。
+Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→ 2,386 → 2,427（69.90%）→ 2,454（70.68%、10-31 06:1x、main に merge）。後退は偶然通っていた scripted の 2 件だけ、Acid3 100/100。P8 が 100% まで自走（ユーザーの指示）、3 回目（i03）に入った。
 
 ### WS307 graphical installer
 
