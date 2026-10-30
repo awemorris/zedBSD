@@ -115,6 +115,8 @@ static const char *const *style_shorthand_longhands(const struct vm_string *name
 static int style_flex_part(struct vm_realm *realm, const struct vm_string *shorthand, struct vm_string *value, const char *longhand, struct vm_string **part);
 static int style_canonical_flex(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_wide_keyword(const struct vm_string *value);
+static int style_canonical_overflow(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
+static int style_canonical_comments(struct vm_realm *realm, struct vm_string *value, struct vm_string **out);
 static int style_canonical_anchor(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_grid_get(struct vm_realm *realm, const struct style_list *list, const struct vm_string *name, vm_value *result, int *present);
 static int style_grid_expand(struct vm_realm *realm, struct style_list *list, const struct vm_string *name);
@@ -871,6 +873,14 @@ style_set(
 		goto roots_cleanup;
 	if (!valid)
 		goto roots_cleanup;
+	status = style_canonical_comments(realm, value, &value);
+	if (status != 0)
+		goto roots_cleanup;
+	roots[1] = &value->cell;
+	status = style_canonical_overflow(realm, name, value, &value);
+	if (status != 0)
+		goto roots_cleanup;
+	roots[1] = &value->cell;
 	status = style_canonical_decoration_line(realm, name, value, &value);
 	if (status != 0)
 		goto roots_cleanup;
@@ -1879,6 +1889,126 @@ style_canonical_flex(
 	wb_units_release(&canonical);
 	for (index = 0; index < 3U; index++)
 		wb_units_release(&parts[index]);
+	return status;
+}
+
+/* Puts overflow in its canonical form: one keyword when the two are the same. */
+static int
+style_canonical_overflow(
+	struct vm_realm *realm,
+	const struct vm_string *name,
+	struct vm_string *value,
+	struct vm_string **out)
+{
+	struct wb_units source;
+	size_t split;
+	size_t index;
+	int status;
+
+	/* Only overflow, and not a CSS-wide keyword. */
+	*out = value;
+	if (!vm_string_equal_ascii(name, "overflow") || style_wide_keyword(value))
+		return 0;
+
+	/* The text, trimmed. */
+	wb_units_init(&source);
+	status = vm_string_append_units(value, &source);
+	if (status != 0) {
+		wb_units_release(&source);
+		return status;
+	}
+	while (source.length != 0U && style_is_space(source.data[source.length - 1U]))
+		source.length--;
+
+	/* Two words that are the same make one. */
+	split = 0;
+	for (index = 0; index < source.length; index++) {
+		if (style_is_space(source.data[index])) {
+			split = index;
+			break;
+		}
+	}
+	if (split != 0U) {
+		index = split;
+		while (index < source.length && style_is_space(source.data[index]))
+			index++;
+		if (source.length - index == split && memcmp(source.data, source.data + index, split * sizeof(uint16_t)) == 0) {
+			*out = vm_string_from_units(realm->heap, source.data, split);
+			if (*out == NULL)
+				status = ENOMEM;
+		}
+	}
+	wb_units_release(&source);
+	return status;
+}
+
+/* Takes the comments out of a value (and the space around it), unless it holds a string. */
+static int
+style_canonical_comments(
+	struct vm_realm *realm,
+	struct vm_string *value,
+	struct vm_string **out)
+{
+	struct wb_units source;
+	struct wb_units canonical;
+	size_t index;
+	size_t end;
+	int changed;
+	int status;
+
+	/* A value without a comment is as it is. */
+	*out = value;
+	wb_units_init(&source);
+	status = vm_string_append_units(value, &source);
+	if (status != 0) {
+		wb_units_release(&source);
+		return status;
+	}
+	changed = 0;
+	for (index = 0; index + 1U < source.length; index++) {
+		if (source.data[index] == '/' && source.data[index + 1U] == '*')
+			changed = 1;
+	}
+	for (index = 0; index < source.length; index++) {
+		if (source.data[index] == '"' || source.data[index] == '\'' || source.data[index] == '\\' || source.data[index] == '(')
+			changed = 0;
+	}
+	if (!changed) {
+		wb_units_release(&source);
+		return 0;
+	}
+
+	/* Each comment replaced by nothing. */
+	wb_units_init(&canonical);
+	index = 0;
+	while (index < source.length) {
+		if (index + 1U < source.length && source.data[index] == '/' && source.data[index + 1U] == '*') {
+			end = index + 2U;
+			while (end + 1U < source.length && !(source.data[end] == '*' && source.data[end + 1U] == '/'))
+				end++;
+			index = end + 2U;
+			continue;
+		}
+		if (style_is_space(source.data[index]) && canonical.length != 0U && style_is_space(canonical.data[canonical.length - 1U])) {
+			index++;
+			continue;
+		}
+		status = wb_units_append(&canonical, source.data + index, 1U);
+		if (status != 0)
+			goto cleanup;
+		index++;
+	}
+
+	/* The space the comment left at an end goes. */
+	while (canonical.length != 0U && style_is_space(canonical.data[canonical.length - 1U]))
+		canonical.length--;
+	*out = vm_string_from_units(realm->heap, canonical.data, canonical.length);
+	if (*out == NULL)
+		status = ENOMEM;
+
+cleanup:
+	wb_units_release(&canonical);
+	wb_units_release(&source);
 	return status;
 }
 

@@ -169,6 +169,7 @@ static int computed_write_grid(struct bind_window *window, struct dom_element *e
 static int computed_write(struct bind_window *window, struct dom_element *element, int property, struct wb_units *out);
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
+static int computed_overflow_axis(int own, int other);
 static int computed_write_overflow(const struct css_style *style, struct wb_units *out);
 static int computed_write_url(const struct vm_string *url, struct wb_units *out);
 static int computed_needs_quotes(const struct vm_string *family);
@@ -1034,19 +1035,23 @@ computed_write_keyword(
 		error = computed_write_overflow(style, out);
 		break;
 	case COMPUTED_OVERFLOW_X:
-		error = computed_name(computed_overflows, 5, style->overflow_x, out);
+		error = computed_name(computed_overflows, 5, computed_overflow_axis(style->overflow_x, style->overflow_y), out);
 		break;
 	case COMPUTED_OVERFLOW_Y:
-		error = computed_name(computed_overflows, 5, style->overflow_y, out);
+		error = computed_name(computed_overflows, 5, computed_overflow_axis(style->overflow_y, style->overflow_x), out);
 		break;
 	case COMPUTED_OVERFLOW_INLINE:
 		/* The inline axis is the horizontal one in a horizontal writing mode. */
-		error = computed_name(computed_overflows, 5,
-		    style->writing_mode == CSS_WRITING_HORIZONTAL_TB ? style->overflow_x : style->overflow_y, out);
+		if (style->writing_mode == CSS_WRITING_HORIZONTAL_TB)
+			error = computed_name(computed_overflows, 5, computed_overflow_axis(style->overflow_x, style->overflow_y), out);
+		else
+			error = computed_name(computed_overflows, 5, computed_overflow_axis(style->overflow_y, style->overflow_x), out);
 		break;
 	case COMPUTED_OVERFLOW_BLOCK:
-		error = computed_name(computed_overflows, 5,
-		    style->writing_mode == CSS_WRITING_HORIZONTAL_TB ? style->overflow_y : style->overflow_x, out);
+		if (style->writing_mode == CSS_WRITING_HORIZONTAL_TB)
+			error = computed_name(computed_overflows, 5, computed_overflow_axis(style->overflow_y, style->overflow_x), out);
+		else
+			error = computed_name(computed_overflows, 5, computed_overflow_axis(style->overflow_x, style->overflow_y), out);
 		break;
 	case COMPUTED_BOX_SIZING:
 		error = computed_name(computed_box_sizings, 2, style->box_sizing, out);
@@ -1786,28 +1791,47 @@ computed_track_breadth(
 	return 0;
 }
 
+/* The computed overflow of an axis: visible becomes auto when the other axis scrolls or hides. */
+static int
+computed_overflow_axis(
+	int own,
+	int other)
+{
+	int other_open;
+
+	/* The other axis shows everything (visible or clip). */
+	other_open = other == CSS_OVERFLOW_VISIBLE || other == CSS_OVERFLOW_CLIP;
+	if (own == CSS_OVERFLOW_VISIBLE && !other_open)
+		return CSS_OVERFLOW_AUTO;
+	return own;
+}
+
 /* Writes overflow: one keyword when the two axes agree, otherwise both. */
 static int
 computed_write_overflow(
 	const struct css_style *style,
 	struct wb_units *out)
 {
+	int across;
+	int down;
 	int error;
 
 	/* The horizontal axis's. */
-	error = computed_name(computed_overflows, 5, style->overflow_x, out);
+	across = computed_overflow_axis(style->overflow_x, style->overflow_y);
+	down = computed_overflow_axis(style->overflow_y, style->overflow_x);
+	error = computed_name(computed_overflows, 5, across, out);
 	if (error != 0)
 		return error;
 
 	/* The same on both is one keyword. */
-	if (style->overflow_y == style->overflow_x)
+	if (down == across)
 		return 0;
 
 	/* Succeeded: the vertical axis's after a space. */
 	error = computed_ascii(" ", out);
 	if (error != 0)
 		return error;
-	error = computed_name(computed_overflows, 5, style->overflow_y, out);
+	error = computed_name(computed_overflows, 5, down, out);
 	return error;
 }
 
