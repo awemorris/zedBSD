@@ -1694,7 +1694,7 @@
       t._phase = 'done';
       if (current === t) {
         current = null;
-        native.viewTransition(null);
+        native.viewTransition(0);
       }
       if (wasPending) setTimeout(function () { callUpdate(t); }, 0);
       t._ready.reject(reason);
@@ -1706,7 +1706,7 @@
       t._phase = 'done';
       if (current === t) {
         current = null;
-        native.viewTransition(null);
+        native.viewTransition(0);
       }
       t._finished.resolve(undefined);
     }
@@ -1714,12 +1714,12 @@
     function activate(t) {
       if (t._phase === 'done') return;
       t._phase = 'animating';
-      if (!native.viewTransition(t, 'new')) {
+      if (!native.viewTransition(2)) {
         skip(t, new DOMException('Skipped view transition due to an invalid state.', 'InvalidStateError'));
         return;
       }
       t._ready.resolve(undefined);
-      requestAnimationFrame(function () { setTimeout(function () { finish(t); }, native.viewTransitionDuration(t)); });
+      requestAnimationFrame(function () { setTimeout(function () { finish(t); }, native.viewTransitionDuration()); });
     }
     g.Document.prototype.startViewTransition = function startViewTransition(callbackOptions) {
       var t = new ViewTransition(VT), cb = callbackOptions, i, list;
@@ -1745,7 +1745,7 @@
       // The next rendering opportunity: the old state is captured, then the callback runs and the new state is made.
       requestAnimationFrame(function () {
         if (t._phase === 'done') return;
-        if (!native.viewTransition(t, 'old')) {
+        if (!native.viewTransition(1)) {
           skip(t, new DOMException('Skipped view transition due to an invalid state.', 'InvalidStateError'));
           return;
         }

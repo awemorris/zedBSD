@@ -93,4 +93,14 @@ const char css_user_agent_sheet[] =
 	" box-sizing: border-box; }\n"
 	"select { padding: 0 0 0 3px; border: 1px outset #767676; background-color: white; }\n"
 	"textarea { font-family: monospace; padding: 2px; border: 1px solid #767676; background-color: white;"
-	" white-space: pre-wrap; }\n";
+	" white-space: pre-wrap; }\n"
+	":root::view-transition { display: block; position: fixed; top: 0; right: 0; bottom: 0; left: 0; }\n"
+	":root::view-transition-group(*) { display: block; position: absolute;"
+	" animation-name: -ua-view-transition-group; animation-duration: 0.25s; }\n"
+	":root::view-transition-image-pair(*) { display: block; position: absolute; top: 0; right: 0; bottom: 0; left: 0;"
+	" animation-duration: inherit; animation-delay: inherit; animation-play-state: inherit; }\n"
+	":root::view-transition-old(*), :root::view-transition-new(*) { display: block; position: absolute; top: 0; left: 0;"
+	" width: 100%; height: auto; mix-blend-mode: plus-lighter; animation-duration: inherit; animation-delay: inherit;"
+	" animation-play-state: inherit; }\n"
+	":root::view-transition-old(*) { animation-name: -ua-view-transition-fade-out; }\n"
+	":root::view-transition-new(*) { animation-name: -ua-view-transition-fade-in; }\n";

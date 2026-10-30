@@ -107,6 +107,11 @@ struct list_walk {
 	layout_unit viewport_width;
 	layout_unit viewport_height;
 	int error;
+	/* While a view transition is painted: the tree, its transition, whether the named boxes are left out, and the box captured. */
+	const struct layout_tree *tree;
+	const struct layout_transition *transition;
+	int vt_hide;
+	const struct layout_box *vt_capture;
 };
 
 /*
@@ -178,6 +183,9 @@ static void list_text_run(struct list_walk *walk, const struct text_font *font, 
 static void list_image_item(struct list_walk *walk, const struct img_bitmap *image, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 static void list_box_background(struct list_walk *walk, const struct layout_box *box);
 static void list_canvas_background(struct list_walk *walk, const struct layout_tree *tree);
+static int list_vt_left_out(const struct list_walk *walk, const struct layout_box *box);
+static void list_vt_image(struct list_walk *walk, const struct layout_box *box);
+static int list_vt_paint(struct list_walk *walk, const struct layout_box *capture);
 static void list_background_image(struct list_walk *walk, const struct layout_box *box, const struct list_area *area, const struct list_area *painting);
 static const struct img_bitmap *list_gradient(struct list_walk *walk, const struct css_gradient *gradient, layout_unit width, layout_unit height);
 static void list_background_size(const struct layout_box *box, const struct img_bitmap *image, const struct list_area *area, layout_unit *width, layout_unit *height);
@@ -199,7 +207,11 @@ paint_build(
 {
 	struct list_walk walk;
 	struct wb_vector order;
+	struct wb_vector order_vt;
 	const struct layout_box *layer;
+	const struct layout_box *up;
+	size_t first;
+	float fade;
 	size_t flow_index;
 	size_t index;
 	int clips;
@@ -225,6 +237,48 @@ paint_build(
 	/* An empty document paints only the canvas. */
 	if (tree->root == NULL)
 		return 0;
+	wb_vector_init(&order_vt, sizeof(const struct layout_box *));
+
+	/* While a view transition is shown only its tree is painted (over the white page), the page being in its images. */
+	if (tree->transition != NULL && tree->transition->show) {
+		list->canvas_color = LIST_CANVAS_DEFAULT;
+		walk.canvas_box = NULL;
+		walk.tree = tree;
+		walk.transition = tree->transition;
+		error = layout_stacking_order(tree, &order_vt, &flow_index);
+		if (error != 0) {
+			wb_vector_release(&order_vt);
+			paint_release(list);
+			return error;
+		}
+		for (index = 0; index < order_vt.count; index++) {
+			layer = *(const struct layout_box **)wb_vector_at(&order_vt, index);
+			if (!layer->vt_tree)
+				continue;
+
+			/* The boxes of the tree are layers of their own, so their parents' opacity is applied here. */
+			fade = 1.0f;
+			for (up = layer->parent; up != NULL && up->vt_tree; up = up->parent)
+				fade *= up->style.opacity;
+			if (fade <= LIST_OPACITY_NONE)
+				continue;
+			clips = list_layer_clips(&walk, layer, 1);
+			first = list->items.count;
+			list_box(&walk, layer, layer, 0);
+			if (fade < 1.0f)
+				list_fade(&walk, first, fade);
+			while (clips > 0) {
+				list_unclip(&walk);
+				clips--;
+			}
+		}
+		wb_vector_release(&order_vt);
+		if (walk.error != 0) {
+			paint_release(list);
+			return walk.error;
+		}
+		return 0;
+	}
 
 	/* The canvas's background image, under everything. */
 	list_canvas_background(&walk, tree);
@@ -627,6 +681,10 @@ list_box_part(
 	if (box->kind != LAYOUT_BLOCK && box->kind != LAYOUT_ANONYMOUS_BLOCK)
 		return;
 
+	/* While a view transition is shown the boxes it names are painted by its images only, and its own boxes are not part of the page. */
+	if (walk->vt_hide && list_vt_left_out(walk, box))
+		return;
+
 	/* A positioned box (not the root) is painted in its own turn. */
 	positioned = layout_is_layered(box);
 	if (positioned && box != layer && box->parent != NULL)
@@ -783,6 +841,12 @@ list_box_own(
 		list_round_borders(walk, box, &shape);
 	} else if (part != LIST_BOX_INLINE && visible) {
 		list_borders(walk, box);
+	}
+
+	/* The old or new image of a view transition name. */
+	if (part != LIST_BOX_INLINE && visible && (box->vt_old != NULL || box->vt_new != NULL)) {
+		list_vt_image(walk, box);
+		return;
 	}
 
 	/* A replaced block's image fills its content box. */
@@ -3312,4 +3376,332 @@ list_layer_clips(
 
 	/* Reports how many there are. */
 	return count;
+}
+
+/*
+ * View transitions: a box named by the transition is painted by the images of its name only, and an image is
+ * the items of what was painted of the named box (the old state, kept when it was captured) or of its live
+ * state, moved and scaled from the border box it was painted in to the image's box.
+ */
+
+/* Tells whether a box is a named one of the transition (the root is not: it is the page). */
+static int
+list_vt_named(
+	const struct list_walk *walk,
+	const struct layout_box *box)
+{
+	if (walk->transition == NULL || box->node == NULL || box->parent == NULL)
+		return 0;
+	if (box->kind != LAYOUT_BLOCK && box->kind != LAYOUT_REPLACED)
+		return 0;
+	if (box->style.view_transition_name == NULL)
+		return 0;
+	return layout_transition_find(walk->transition, box->style.view_transition_name) != NULL;
+}
+
+/* Tells whether a box is not painted into what is captured: the transition's own boxes, or a named box but the one captured. */
+static int
+list_vt_left_out(
+	const struct list_walk *walk,
+	const struct layout_box *box)
+{
+	if (box->vt_tree)
+		return 1;
+	if (box == walk->vt_capture)
+		return 0;
+	return list_vt_named(walk, box);
+}
+
+/* Tells whether a box or an ancestor of it up to stop is left out. */
+static int
+list_vt_blocked(
+	const struct list_walk *walk,
+	const struct layout_box *box,
+	const struct layout_box *stop)
+{
+	for (; box != NULL && box != stop; box = box->parent) {
+		if (list_vt_left_out(walk, box))
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * Paints the page's live content (capture NULL: all of it but the named boxes, over its canvas) or one named box
+ * with what is inside it, into the walk's list in the document's coordinates.
+ */
+static int
+list_vt_paint(
+	struct list_walk *walk,
+	const struct layout_box *capture)
+{
+	struct list_walk sub;
+	struct wb_vector order;
+	const struct layout_box *layer;
+	const struct layout_box *up;
+	uint32_t color;
+	size_t flow_index;
+	size_t index;
+	int clips;
+	int error;
+
+	sub = *walk;
+	sub.vt_hide = 1;
+	sub.vt_capture = capture;
+	wb_vector_init(&order, sizeof(const struct layout_box *));
+	error = layout_stacking_order(walk->tree, &order, &flow_index);
+	if (error != 0) {
+		wb_vector_release(&order);
+		return error;
+	}
+	if (capture == NULL) {
+		sub.canvas_box = list_canvas(walk->tree, &color);
+		list_rect(&sub, 0, 0, walk->tree->viewport_width, walk->tree->viewport_height, color);
+		list_canvas_background(&sub, walk->tree);
+		for (index = 0; index < order.count; index++) {
+			if (index == flow_index)
+				list_box(&sub, walk->tree->root, NULL, 0);
+			layer = *(const struct layout_box **)wb_vector_at(&order, index);
+			if (list_vt_blocked(&sub, layer, NULL))
+				continue;
+			clips = list_layer_clips(&sub, layer, 1);
+			list_box(&sub, layer, layer, 0);
+			while (clips > 0) {
+				list_unclip(&sub);
+				clips--;
+			}
+		}
+		if (flow_index == order.count)
+			list_box(&sub, walk->tree->root, NULL, 0);
+	} else {
+		sub.canvas_box = NULL;
+		list_box(&sub, capture, capture, 0);
+		for (index = 0; index < order.count; index++) {
+			layer = *(const struct layout_box **)wb_vector_at(&order, index);
+			if (layer == capture)
+				continue;
+			for (up = layer->parent; up != NULL && up != capture; up = up->parent)
+				;
+			if (up == NULL || list_vt_blocked(&sub, layer, capture))
+				continue;
+			clips = list_layer_clips(&sub, layer, 1);
+			list_box(&sub, layer, layer, 0);
+			while (clips > 0) {
+				list_unclip(&sub);
+				clips--;
+			}
+		}
+	}
+	wb_vector_release(&order);
+	if (sub.error != 0)
+		return sub.error;
+	return 0;
+}
+
+/* Scales a distance from a source size to a destination size. */
+static layout_unit
+list_vt_scale(
+	layout_unit value,
+	layout_unit to,
+	layout_unit from)
+{
+	if (from <= 0 || to == from)
+		return value;
+	return (layout_unit)((int64_t)value * to / from);
+}
+
+/* Moves the items from an index on, painted in a source rectangle, into a destination one. */
+static void
+list_vt_remap(
+	struct paint_list *list,
+	size_t first,
+	const struct layout_rect *from,
+	layout_unit dx,
+	layout_unit dy,
+	layout_unit dw,
+	layout_unit dh)
+{
+	struct paint_item *item;
+	size_t index;
+
+	for (index = first; index < list->items.count; index++) {
+		item = wb_vector_at(&list->items, index);
+		item->x = dx + list_vt_scale(item->x - from->x, dw, from->width);
+		item->y = dy + list_vt_scale(item->y - from->y, dh, from->height);
+		if (item->kind != PAINT_TEXT) {
+			item->width = list_vt_scale(item->width, dw, from->width);
+			item->height = list_vt_scale(item->height, dh, from->height);
+		}
+	}
+}
+
+/* Paints the old or new image of a name into the box of its pseudo-element. */
+static void
+list_vt_image(
+	struct list_walk *walk,
+	const struct layout_box *box)
+{
+	const struct layout_transition_name *entry;
+	const struct layout_box *live;
+	const struct paint_snapshot *snapshot;
+	struct paint_item item;
+	struct paint_glyph *glyphs;
+	struct layout_rect from;
+	layout_unit dx;
+	layout_unit dy;
+	size_t first;
+	size_t index;
+	int error;
+
+	if (walk->error != 0 || walk->tree == NULL)
+		return;
+	entry = box->vt_old != NULL ? box->vt_old : box->vt_new;
+	dx = box->x + box->border[CSS_LEFT] + box->padding[CSS_LEFT];
+	dy = box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
+	first = walk->list->items.count;
+	if (box->vt_old != NULL) {
+		snapshot = entry->old_image;
+		if (snapshot == NULL)
+			return;
+		for (index = 0; index < snapshot->count && walk->error == 0; index++) {
+			item = snapshot->items[index];
+			if (item.kind == PAINT_TEXT && item.glyph_count != 0) {
+				glyphs = wb_arena_alloc(&walk->list->arena, item.glyph_count * sizeof(*glyphs));
+				if (glyphs == NULL) {
+					walk->error = ENOMEM;
+					return;
+				}
+				memcpy(glyphs, item.glyphs, item.glyph_count * sizeof(*glyphs));
+				item.glyphs = glyphs;
+			}
+			error = wb_vector_push(&walk->list->items, &item);
+			if (error != 0)
+				walk->error = error;
+		}
+		from.x = snapshot->x;
+		from.y = snapshot->y;
+		from.width = snapshot->width;
+		from.height = snapshot->height;
+	} else if (entry->is_root) {
+		error = list_vt_paint(walk, NULL);
+		if (error != 0) {
+			walk->error = error;
+			return;
+		}
+		from.x = 0;
+		from.y = 0;
+		from.width = walk->tree->viewport_width;
+		from.height = walk->tree->viewport_height;
+	} else {
+		live = layout_transition_box(walk->tree->root, entry->name, 0);
+		if (live == NULL)
+			return;
+		error = list_vt_paint(walk, live);
+		if (error != 0) {
+			walk->error = error;
+			return;
+		}
+		from.x = live->x;
+		from.y = live->y;
+		from.width = live->border[CSS_LEFT] + live->padding[CSS_LEFT] + live->width + live->padding[CSS_RIGHT] + live->border[CSS_RIGHT];
+		from.height = live->border[CSS_TOP] + live->padding[CSS_TOP] + live->height + live->padding[CSS_BOTTOM] + live->border[CSS_BOTTOM];
+	}
+	list_vt_remap(walk->list, first, &from, dx, dy, box->width, box->height);
+}
+
+/*
+ * Captures what is painted of a box (NULL: the page's live content without its named boxes) as it is laid out
+ * now: a snapshot of its items and the border box they were painted for.
+ */
+int
+paint_transition_capture(
+	const struct layout_tree *tree,
+	const struct layout_transition *transition,
+	const struct layout_box *box,
+	struct paint_snapshot **out)
+{
+	struct paint_list list;
+	struct list_walk walk;
+	struct paint_snapshot *snapshot;
+	struct paint_item *item;
+	size_t glyphs;
+	size_t used;
+	size_t index;
+	int error;
+
+	memset(&list, 0, sizeof(list));
+	wb_arena_init(&list.arena, 0);
+	wb_vector_init(&list.items, sizeof(struct paint_item));
+	memset(&walk, 0, sizeof(walk));
+	walk.list = &list;
+	walk.text = tree->text;
+	walk.viewport_width = tree->viewport_width;
+	walk.viewport_height = tree->viewport_height;
+	walk.tree = tree;
+	walk.transition = transition;
+	error = list_vt_paint(&walk, box);
+	if (error == 0)
+		error = walk.error;
+	if (error != 0) {
+		paint_release(&list);
+		return error;
+	}
+
+	/* The items and their glyphs move into the snapshot, which outlives the list. */
+	glyphs = 0;
+	for (index = 0; index < list.items.count; index++) {
+		item = wb_vector_at(&list.items, index);
+		if (item->kind == PAINT_TEXT)
+			glyphs += item->glyph_count;
+	}
+	snapshot = calloc(1, sizeof(*snapshot));
+	if (snapshot == NULL) {
+		paint_release(&list);
+		return ENOMEM;
+	}
+	snapshot->items = calloc(list.items.count == 0 ? 1 : list.items.count, sizeof(*snapshot->items));
+	snapshot->glyphs = calloc(glyphs == 0 ? 1 : glyphs, sizeof(*snapshot->glyphs));
+	if (snapshot->items == NULL || snapshot->glyphs == NULL) {
+		paint_snapshot_release(snapshot);
+		paint_release(&list);
+		return ENOMEM;
+	}
+	used = 0;
+	for (index = 0; index < list.items.count; index++) {
+		item = wb_vector_at(&list.items, index);
+		snapshot->items[index] = *item;
+		if (item->kind == PAINT_TEXT && item->glyph_count != 0) {
+			memcpy(&snapshot->glyphs[used], item->glyphs, item->glyph_count * sizeof(*item->glyphs));
+			snapshot->items[index].glyphs = &snapshot->glyphs[used];
+			used += item->glyph_count;
+		}
+	}
+	snapshot->count = list.items.count;
+	snapshot->glyph_count = glyphs;
+	if (box == NULL) {
+		snapshot->x = 0;
+		snapshot->y = 0;
+		snapshot->width = tree->viewport_width;
+		snapshot->height = tree->viewport_height;
+	} else {
+		snapshot->x = box->x;
+		snapshot->y = box->y;
+		snapshot->width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+		snapshot->height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	}
+	paint_release(&list);
+	*out = snapshot;
+	return 0;
+}
+
+/* Frees a snapshot (NULL is none). */
+void
+paint_snapshot_release(
+	struct paint_snapshot *snapshot)
+{
+	if (snapshot == NULL)
+		return;
+	free(snapshot->items);
+	free(snapshot->glyphs);
+	free(snapshot);
 }

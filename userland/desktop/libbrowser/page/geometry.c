@@ -689,7 +689,7 @@ geometry_child_box(
 	    height >= 0 &&
 	    width <= INT_MAX / LAYOUT_UNIT &&
 	    height <= INT_MAX / LAYOUT_UNIT) {
-		status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height);
+		status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height, NULL);
 		if (status != 0) {
 			layout_release(&tree);
 			goto release_roots;

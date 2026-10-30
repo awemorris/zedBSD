@@ -256,6 +256,10 @@ struct bind_host {
 	int (*media)(void *context, struct dom_element *element, int request, double value, struct bind_media *state);
 	/* An <img>'s state (BIND_IMAGE_*); restart loads its source again, a load or error event to follow. */
 	int (*image)(void *context, struct dom_element *element, int restart, struct bind_image *state);
+	/* A view transition's step: 1 captures the old state, 2 makes the new one and shows the tree, 0 ends it; returns whether it could be made. */
+	int (*view_transition)(void *context, int step);
+	/* The milliseconds until the shown transition's animations all end (a very large number when one never does). */
+	double (*view_transition_duration)(void *context);
 	/* The frame element of a child window, known from its creation (its scripts may read it at once). */
 	struct dom_element *frame;
 };

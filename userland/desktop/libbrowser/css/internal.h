@@ -380,6 +380,11 @@ enum css_property {
 	CSS_PROP_VIEW_TRANSITION_NAME,
 	CSS_PROP_VIEW_TRANSITION_CLASS,
 	CSS_PROP_ZOOM,
+	CSS_PROP_ANIMATION_NAME,
+	CSS_PROP_ANIMATION_DURATION,
+	CSS_PROP_ANIMATION_DELAY,
+	CSS_PROP_ANIMATION_PLAY_STATE,
+	CSS_PROP_MIX_BLEND_MODE,
 	CSS_PROP_COUNT
 };
 
@@ -433,6 +438,10 @@ struct css_compound {
 	size_t count;
 	int combinator;
 	int pseudo_element;
+	/* A view transition pseudo-element's name (NULL for *) and the classes it asks for. */
+	struct vm_string *pseudo_name;
+	struct vm_string *pseudo_classes[2];
+	int pseudo_class_count;
 };
 
 /*

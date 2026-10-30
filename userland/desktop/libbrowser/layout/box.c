@@ -39,6 +39,7 @@ static int box_wrap_tables(struct layout_tree *tree, struct layout_box *box);
 static int box_is_table_part(const struct layout_box *box);
 static struct layout_box *box_anonymous_of(struct layout_tree *tree, const struct layout_box *parent, int display);
 static int box_flex_items(struct layout_tree *tree, struct layout_box *box);
+static int box_build_transition(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *root);
 static void box_anonymous_style(const struct css_style *parent, struct css_style *style);
 static void box_marker(struct layout_box *box, int ordinal);
 static void box_relative_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
@@ -63,7 +64,8 @@ layout_build(
 	layout_url_lookup url_lookup,
 	void *image_context,
 	int width,
-	int height)
+	int height,
+	const struct layout_transition *transition)
 {
 	struct dom_node *node;
 	struct layout_box *root;
@@ -77,6 +79,7 @@ layout_build(
 	tree->image_lookup = image_lookup;
 	tree->url_lookup = url_lookup;
 	tree->image_context = image_context;
+	tree->transition = transition;
 	tree->viewport_width = (layout_unit)width * LAYOUT_UNIT;
 	tree->viewport_height = (layout_unit)height * LAYOUT_UNIT;
 	tree->containing_height = tree->viewport_height;
@@ -583,6 +586,13 @@ box_build_element(
 	error = box_build_pseudo(tree, css, element, box, CSS_PSEUDO_ELEMENT_AFTER);
 	if (error != 0)
 		return error;
+
+	/* The root element of a page with a view transition on show has the transition's tree. */
+	if (parent == NULL && tree->transition != NULL && tree->transition->show) {
+		error = box_build_transition(tree, css, element, box);
+		if (error != 0)
+			return error;
+	}
 	error = box_fix_children(tree, box);
 	if (error != 0)
 		return error;
@@ -729,6 +739,157 @@ box_build_pseudo(
 
 	/* Succeeded: the pseudo-element's box is built. */
 	return 0;
+}
+
+/* Sets a length to pixels. */
+static void
+box_transition_px(
+	struct css_length *length,
+	layout_unit value)
+{
+	length->unit = CSS_UNIT_PX;
+	length->value = layout_to_px(value);
+	length->offset = 0.0f;
+}
+
+/*
+ * Makes the box of one pseudo-element of the view transition tree below a parent box: its style from the
+ * rules for the pseudo-element of the name, the style it inherits from the parent pseudo-element's, and out of
+ * the flow when it is positioned.  Returns it (NULL: it has none, or memory ran out, told by *error).
+ */
+static struct layout_box *
+box_transition_pseudo(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_element *element,
+	struct layout_box *parent,
+	const struct css_style *parent_style,
+	int pseudo,
+	const struct layout_transition_name *name,
+	struct css_style *style,
+	int *error)
+{
+	struct layout_box *box;
+
+	*error = css_engine_compute_vt_pseudo(css, element, pseudo, name != NULL ? name->name : NULL, NULL, 0, parent_style, style);
+	if (*error != 0)
+		return NULL;
+	if (style->display == CSS_DISPLAY_NONE)
+		return NULL;
+	box = box_new(tree, LAYOUT_BLOCK, NULL, style);
+	if (box == NULL) {
+		*error = ENOMEM;
+		return NULL;
+	}
+	box->vt_tree = 1;
+	if (style->position == CSS_POSITION_ABSOLUTE || style->position == CSS_POSITION_FIXED)
+		box->out_of_flow = 1;
+	box_append(parent, box);
+	return box;
+}
+
+/*
+ * Builds the view transition's pseudo-element tree as the last child of the root's box (box.c's ::after way):
+ * ::view-transition, and for each name its group, image pair and old and new images.  A group is as big as the
+ * border box its animation has reached; an image is the group's width and as high as its picture is.
+ */
+static int
+box_build_transition(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_element *element,
+	struct layout_box *root)
+{
+	const struct layout_transition *transition;
+	const struct layout_transition_name *name;
+	struct css_style *root_style;
+	struct css_style *group_style;
+	struct css_style *pair_style;
+	struct css_style *image_style;
+	struct layout_box *top;
+	struct layout_box *group;
+	struct layout_box *pair;
+	struct layout_box *image;
+	struct layout_rect rect;
+	size_t index;
+	int error;
+	int which;
+	float progress;
+	float picture_width;
+	float picture_height;
+	float group_width;
+
+	transition = tree->transition;
+	root_style = malloc(4U * sizeof(*root_style));
+	if (root_style == NULL)
+		return ENOMEM;
+	group_style = root_style + 1;
+	pair_style = root_style + 2;
+	image_style = root_style + 3;
+	error = 0;
+	top = box_transition_pseudo(tree, css, element, root, &root->style, CSS_PSEUDO_ELEMENT_VT_ROOT, NULL, root_style, &error);
+	for (index = 0; top != NULL && error == 0 && index < transition->count; index++) {
+		name = &transition->names[index];
+		if (!name->has_old && !name->has_new)
+			continue;
+
+		/* The group, at the size and place its animation has reached. */
+		group = box_transition_pseudo(tree, css, element, top, root_style, CSS_PSEUDO_ELEMENT_VT_GROUP, name, group_style, &error);
+		if (group == NULL)
+			continue;
+		memset(&rect, 0, sizeof(rect));
+		layout_transition_group_rect(name, &group->style, transition->elapsed, &rect);
+		if (group->style.width.unit == CSS_UNIT_AUTO)
+			box_transition_px(&group->style.width, rect.width);
+		if (group->style.height.unit == CSS_UNIT_AUTO)
+			box_transition_px(&group->style.height, rect.height);
+		if (group->style.offset[CSS_LEFT].unit == CSS_UNIT_AUTO && group->style.offset[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+			box_transition_px(&group->style.offset[CSS_LEFT], rect.x);
+		if (group->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO && group->style.offset[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
+			box_transition_px(&group->style.offset[CSS_TOP], rect.y);
+		group_width = group->style.width.unit == CSS_UNIT_PX ? group->style.width.value : layout_to_px(rect.width);
+
+		/* The pair holds the two images. */
+		pair = box_transition_pseudo(tree, css, element, group, &group->style, CSS_PSEUDO_ELEMENT_VT_PAIR, name, pair_style, &error);
+		if (pair == NULL)
+			continue;
+		for (which = 0; which < 2 && error == 0; which++) {
+			if (which == 0 && !name->has_old)
+				continue;
+			if (which == 1 && !name->has_new)
+				continue;
+			image = box_transition_pseudo(tree, css, element, pair, &pair->style,
+			    which == 0 ? CSS_PSEUDO_ELEMENT_VT_OLD : CSS_PSEUDO_ELEMENT_VT_NEW, name, image_style, &error);
+			if (image == NULL)
+				continue;
+			if (which == 0)
+				image->vt_old = name;
+			else
+				image->vt_new = name;
+
+			/* The picture's shape gives the height, from the width. */
+			picture_width = layout_to_px(which == 0 ? name->old_rect.width : name->new_rect.width);
+			picture_height = layout_to_px(which == 0 ? name->old_rect.height : name->new_rect.height);
+			if (image->style.height.unit == CSS_UNIT_AUTO && picture_width > 0.0f) {
+				float width_px;
+
+				width_px = image->style.width.unit == CSS_UNIT_PERCENT ? group_width * image->style.width.value / 100.0f :
+				    image->style.width.unit == CSS_UNIT_PX ? image->style.width.value : picture_width;
+				image->style.height.unit = CSS_UNIT_PX;
+				image->style.height.value = width_px * picture_height / picture_width;
+				image->style.height.offset = 0.0f;
+			}
+
+			/* The UA's animations fade the old image out and the new one in. */
+			if (image->style.animation_name != NULL &&
+			    vm_string_equal_ascii(image->style.animation_name, which == 0 ? "-ua-view-transition-fade-out" : "-ua-view-transition-fade-in")) {
+				progress = layout_transition_progress(&image->style, transition->elapsed);
+				image->style.opacity = which == 0 ? 1.0f - progress : progress;
+			}
+		}
+	}
+	free(root_style);
+	return error;
 }
 
 /* Builds the boxes of a node's children into a box. */

@@ -404,7 +404,7 @@ prelude_set_follower(
 	return 0;
 }
 
-/* viewTransition(transition, phase): tells the page a view transition's state; true when it could be made. */
+/* viewTransition(step): 1 captures the old state, 2 makes the new one and shows the tree, 0 ends the transition; true when it could be made. */
 static int
 prelude_view_transition(
 	struct vm_realm *realm,
@@ -413,15 +413,24 @@ prelude_view_transition(
 	unsigned count,
 	vm_value *result)
 {
-	UNUSED_PARAMETER(realm);
+	struct bind_window *window;
+	double step;
+	int status;
+
 	UNUSED_PARAMETER(this_value);
-	UNUSED_PARAMETER(args);
-	UNUSED_PARAMETER(count);
-	*result = VM_VALUE_TRUE;
+	window = bind_window_of(realm);
+	*result = VM_VALUE_FALSE;
+	status = vm_to_number(realm, js_argument(args, count, 0), &step);
+	if (status != 0)
+		return status;
+	if (window->host.view_transition == NULL)
+		return 0;
+	if (window->host.view_transition(window->host.context, (int)step) != 0)
+		*result = VM_VALUE_TRUE;
 	return 0;
 }
 
-/* viewTransitionDuration(transition): the milliseconds until the transition's animations have all ended. */
+/* viewTransitionDuration(): the milliseconds until the shown transition's animations have all ended. */
 static int
 prelude_view_transition_duration(
 	struct vm_realm *realm,
@@ -430,11 +439,15 @@ prelude_view_transition_duration(
 	unsigned count,
 	vm_value *result)
 {
-	UNUSED_PARAMETER(realm);
+	struct bind_window *window;
+
 	UNUSED_PARAMETER(this_value);
 	UNUSED_PARAMETER(args);
 	UNUSED_PARAMETER(count);
-	*result = vm_value_number(250.0);
+	window = bind_window_of(realm);
+	*result = vm_value_number(0.0);
+	if (window->host.view_transition_duration != NULL)
+		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
 	return 0;
 }
 
