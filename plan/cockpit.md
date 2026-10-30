@@ -14,7 +14,7 @@
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
 | P7 | Bug | BUG-373（main の kernel で Wi-Fi の正規化が EINVAL、network が上がらない）・BUG-371・BUG-372 | 起動（q1732）。QEMU で再現と原因の特定 | 直し → VF2・10.0.10.3 の担当に連絡 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 自走（q1727、ユーザーの指示）。今 3,472 のうち 2,215（63.80%） | 100% まで。返却のたびに Q1 が起動し直す |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 自走の 2 回目（q1727-i02）。今 3,472 のうち 2,386（68.72%） | zedBSD の image での build と QEMU → 要素の scroll、baseline、subgrid、View Transitions の残り |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。
 

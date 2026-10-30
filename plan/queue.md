@@ -327,7 +327,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1727 / q1727-i01 | P8（phase-runner-low、worktree p8-ws074） | [ws074-p260](ws074/phase260/phase.md) | 2026-10-30 ユーザーから、Interop 2025 で Chromium が PASS する項目の 100% をゴールに P8 が自走する、という趣旨の指示を受けた。返却のたびに Q1 が次の attempt で起動し直す | in-progress |
+| q1727 / q1727-i01 | P8（phase-runner-low、worktree p8-ws074） | [ws074-p260](ws074/phase260/phase.md) | 2026-10-30 ユーザーから、Interop 2025 で Chromium が PASS する項目の 100% をゴールに P8 が自走する、という趣旨の指示を受けた。返却のたびに Q1 が次の attempt で起動し直す | uncleared（2026-10-31 返却（自走の 1 回目）。2,386 / 3,472 = 68.72%、後退 0、Acid3 100/100。fccca00dc、merge） |
 
 ## 2026-10-30: WS291 p013 を P3 で（q1728）
 
@@ -359,3 +359,4 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1733 / q1733-i01 | P2（phase-runner-high、worktree p2-ws291v、実機 VF2） | [ws291-p020](ws291/phase020/phase.md) | 2026-10-31 ユーザーから、P2 が VF2 で SSH と sudo を使って kernel の入れ替えと計測の program の実行を続けてよい、という趣旨の指示を受けた | in-progress |
+| q1727 / q1727-i02 | P8（phase-runner-low、worktree p8-ws074、host と QEMU） | [ws074-p260](ws074/phase260/phase.md) | i01 の続き（100% まで自走）。最初に zedBSD の image で libbrowser の build と QEMU の起動を確かめる | in-progress |
