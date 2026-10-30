@@ -18,7 +18,8 @@
 #ifndef SE_STORAGE_SCAN_H
 #define SE_STORAGE_SCAN_H
 
-#include <pthread.h>
+#include <keiland/keiland_thread.h>
+
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -63,9 +64,9 @@ struct se_scan_job {
  * wake tells the workers a job came or the scan ends.
  */
 struct se_scan {
-	pthread_mutex_t lock;
-	pthread_cond_t wake;
-	pthread_t threads[SE_SCAN_THREADS];
+	struct kl_mutex lock;
+	struct kl_cond wake;
+	struct kl_thread *threads[SE_SCAN_THREADS];
 	unsigned thread_count;
 	int initialized;
 	char root[SE_SCAN_PATH];
