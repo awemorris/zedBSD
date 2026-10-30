@@ -3,7 +3,7 @@
 # ws307-p014 規約の全文の見直し（WS307 が変えた C）
 
 - 親: [WS307](../ws.md)。Queue: q1665 / q1665-i09（担当 P4、2026-10-29、worktree p4-ws307m、基点 main 3f2370248）。
-- Status: in-progress（直しを commit し build と host の試験まで。q1698-i01 で p011 以降の C を見直した（69f43f4c3）。p007 の C の後に残り。Q1 の判定待ち）
+- Status: in-progress（q1718-i01 で p007 の C を見直した。WS307 の C は全て見直し済み。Q1 の判定待ち）
 - 範囲（Q1）: WS307 が変えた C を `plan/coding-style.md` の全文で見直し、書き方だけを直す（動作は変えない）。conformance-reviewer に頼んでよい。QEMU は使わない（BUG-356）。
 - 依存: p013 は cleared。p015 は cleared。p011（BUG-356）・p012・p004・p007 の残りの code は、入った時に別に見直す（この Phase の後に WS307 が変える C）。
 
@@ -43,3 +43,10 @@
 - 確かめ: `make ZEDBSD_CONFIG=plan/ws307/tests/config-amd64-p009.mk ZEDBSD_IMAGE_PROFILE=installer BUILD=build/p014b build/p014b/dynamic/obj/userland/desktop/installer/screens.o` rc 0、warning 0。`plan/tools/style-check.py` は installer の 4 file で 0、ufs.c・ufs-format.c の新しい行の範囲で 0。`git diff --check` clean。QEMU は p004 の image の試験（installer の画面は通らない）の他は未実施。
 - 残り: p007（UEFI の変数の driver・efiboot）の C は入った時に見直す。
 - 引き継ぎ（2026-10-30 09:13）: branch `agent/p4-ws307o`、69f43f4c3（screens.c）・b388f58e0（記録）。この Queue で後から足した C（p004 の試験の `plan/ws307/tests/p004-hello.c`、2aad28963）は段落の comment を付けた。次の 1 手: p007 の C が入った後にその見直し。
+
+## q1718-i01（2026-10-30、P6、worktree p6-ws307）: p007 の C
+
+- 対象: p007 で変えた C 19 file（`git diff f69189c7e`）: 新しい `src/drivers/platform/pcat/uefi-variables.c/.h`・`userland/base/efiboot/main.c` は全体、他（`bootx64.c`・`uefi.h`・`amd64-handoff.h`・HAL の `boot.c`・`handoff-validation.c/.h`・`space.c`・`pmem.c/.h`・`pcat.c`・`system-device.c`・`system.h`・install-admin の `session.c`・installer の `installer.h`・`flow.c`・`screens.c`）は差分の行。
+- `plan/tools/style-check.py`: 新しい 2 file は全体で 0（efiboot は 25 → 0: 条件の中の呼び出し、閉じ括弧の後の空行、条件演算子 2 つを if に）、他は差分の行で 0（`handoff-validation.c` の段落の空行と `space.c` の lock の解放の前の comment を直した、178c8517b と記録の commit）。
+- 全文の見直し（目で）: 前方宣言、file 変数と型の役割の comment、関数ごとの comment、段落の comment、`Succeeded` の最後の return、`Value(s) referenced:` の block の出典（UEFI 2.10 の節）、開発の管理情報（WS・Phase・plan/ の参照）が source に無いこと（`git diff | grep`）。直した後の build は warning 0（p007 の phase.md）。
+- 直さなかった物: `runtime_range_holds` などの判定の関数は最後が「無い」の return（分類の関数、§11 の分類の形）。

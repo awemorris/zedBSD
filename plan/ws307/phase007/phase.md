@@ -3,7 +3,7 @@
 # ws307-p007 UEFI の runtime services と Boot####
 
 - 親: [WS307](../ws.md)。仕様: [spec.md](../spec.md) §5.8（U5・U15）。Queue: q1665 / q1665-i01（担当 P4、2026-10-29）。
-- Status: in-progress（改訂 5 の案 [proposed/uefi-runtime-window.md](../proposed/uefi-runtime-window.md) でユーザーの判断待ち（2026-10-30 q1711-i01。改訂 4 はユーザーの「ドライバから見て、HALは使えません。…」で作り直し）。code はまだ無い）
+- Status: in-progress（q1718-i01、P6、2026-10-30: 改訂 5 で実装し QEMU（OVMF）の試験が PASS。Q1 の判定待ち。下の「q1718-i01」）
 - 出典: 2026-10-28 U5「…Boot####の作成もWSに入れる。」、U15「末尾に足します。また、KeiではなくzedBSDです。…」。
 
 ## 最初の段（2026-10-29、P4）
@@ -59,3 +59,36 @@
   3. driver（`src/drivers/platform/pcat/`）: system table と RuntimeServices の signature・revision・CRC32 を確かめ、mutex で直列にし、割り込みを止め、FP の状態を fxsave64 で退避して MXCSR 0x1F80・x87 0x037F にし、`__attribute__((ms_abi))` の関数 pointer で GetVariable・SetVariable・GetNextVariableName を呼び、戻す。
   4. UAPI: spec §5.8 の 4 のとおり `/dev/system` の ioctl（root だけ）。名前は GUID の文字列と UTF-8 の名前、値は byte 列（2026-10-30 ユーザー「ご確認の、バイト列にするのはOKです。」）。kernel の中では firmware に依らない口（provider の登録）にし、provider が無い所は ENOTSUP。
 - spec §5.8 の 3 の「SetVirtualAddressMap は呼ばない」は HAL の関数を足す前の案の前提だった。HAL の API を変えずに driver から呼ぶには kernel の半分の VA で実行できる map が要り、それを HAL の実装が起動の時に作るには SetVirtualAddressMap が要る、という理由でこの形に変えた（Q1 の指示の (b) の形）。
+
+## q1718-i01（2026-10-30、P6、worktree p6-ws307、branch agent/p6-ws307、基点 main f69189c7e）: 改訂 5 の実装と試験
+
+- 決定（2026-10-30 のユーザーの決定の要点、Q1 の中継）: firmware の変数は kernel の driver が書く。driver は HAL を知らず kernel の機能だけで map する。runtime services の address は handoff で渡り、kernel・driver が kernel の機能で map する。amd64 の `hal_space_map` が `HAL_SPACE_SYS`（firmware の窓）と実行可を受けるようにするのは API の変更でなく実装の補完（hal.h は変えない）。
+- 形の本体は [spec.md](../spec.md) §5.8（この Queue で書き直した）。
+
+### 実装（commit c4bedbcf5・166aaba80・178c8517b）
+
+| 段 | file | 要点 |
+| --- | --- | --- |
+| G3 loader | `bootloader/uefi/bootx64.c`・`include/uefi.h`・`bootloader/include/amd64-handoff.h` | handoff v8（v7＋32 byte の runtime の部分、flag bit 7）。ExitBootServices の後に `give_runtime_addresses()` が runtime の記述子を low block の 0xb000 に写し、窓 `0xfffffffe80000000`（64 MiB）に map の順で詰めた VirtualStart で `SetVirtualAddressMap` を呼ぶ。入らない・拒まれた時は渡さず起動を続ける |
+| G1 HAL | `src/hal/amd64/bsp-pcat/boot.c`・`handoff-validation.c/.h` | v8 の分類、runtime の部分の検査（low block の boot allocation の中、記述子の大きさ・数、窓の中で昇順、system table を含む）、HAL の領域へ写して名前 `uefi.system-table`・`uefi.runtime-map`・`-count`・`-entry-size`・`-version` で返す |
+| G2 HAL | `src/hal/amd64/space.c` | PDPT の slot 506 に `system_firmware_pd` を常に繋ぐ。`hal_space_map(HAL_SPACE_SYS, …)` は `firmware_window_map()` へ: 窓の中・頁境界・RAM の map の外・未 map の頁だけ、READ/WRITE/EXEC/NOCACHE だけ。leaf table は初めて要る時に確保し kernel の生涯残す。not-present → present なので TLB の shootdown は要らない |
+| G2 kernel | `include/kern/pmem.h`・`src/kern/pmem.c` | `kern_firmware_map(物理, 仮想, 大きさ, KERN_PROT_*, KERN_FIRMWARE_CACHED/UNCACHED)`。他の port は HAL が `HAL_SPACE_SYS` を拒むので EINVAL |
+| driver | `src/drivers/platform/pcat/uefi-variables.c/.h`、`src/kern/platform/pcat.c`（weak で呼ぶ、i386 の pcat は link しない）、`platform/amd64/vmunix.mk` | `kern_boot_handoff` で名前を受け、各範囲を `kern_firmware_map`、表の signature と header の大きさと関数の pointer が code の範囲かを確かめる。mutex・`kern_irq_disable`・fxsave64・fninit・MXCSR 0x1F80・`ms_abi` の呼び出し・fxrstor64。`hal_*`・HAL の header は使わない |
+| UAPI | `include/uapi/system.h`、`src/drivers/generic/system-device.c` | ioctl 22〜24（GET・SET・NEXT）、`struct system_firmware_variable`（576 byte、ILP32 と LP64 で同じ）、root だけ、provider は weak（無い port は EOPNOTSUPP）、値は kernel の写しを通す（上限 64 KiB） |
+| efiboot | `userland/base/efiboot/`（diskpart の `table.c` で GPT を読む）、`config/ci/config-amd64.mk` | `list`・`create [-l label] [-n] disk partition loader`・`delete`・`order`・`next` |
+| installer | `userland/desktop/installer/admin/session.c`、`installer.h`・`flow.c`・`screens.c`、`userland/desktop/locale/ja/installer.tr` | spec §5.8 の「installer の使い方」: 導入の最後（ESP を外した後）に `efiboot create -l zedBSD /dev/<disk> <ESP の slot> /<loader の場所>` を 60 秒の上限で走らせ `STATE boot-entry XXXX|none`。S11 は entry がある時「起動順の最後に追加した」の文（ja 訳あり）、無い時は今までの文 |
+
+- 判断（担当）: driver は system table と runtime services の表の CRC32 を見ない（firmware により SetVirtualAddressMap の後の値が揃わない事があり、Linux も見ない。signature・header の大きさ・関数の pointer の範囲で確かめる）。efiboot は amd64 の config にだけ入れた（他の port の userland を変えない）。名前の古い entry を消す（spec §5.8 の「指す partition がどの disk にも無い zedBSD の entry は消す」）は未実装（残り）。
+
+### 確かめ
+
+- build（warning 0）: `make ZEDBSD_CONFIG=plan/ws307/tests/config-amd64-p009.mk BUILD=build/p007 build/p007/vmunix build/p007/uefi/BOOTX64.EFI build/p007/bin/efiboot` rc 0、`amd64 vmunix check: PASS`、`BOOTX64.EFI check: PASS`。installer の `screens.o`・`flow.o`・install-admin の `session.o`（`ZEDBSD_IMAGE_PROFILE=installer BUILD=build/p007i`）rc 0、warning 0。`tools/i18n/tr.py check` 242 entries 0 problems。
+- host: handoff の v8 の分類と runtime の検査の 13 の場合を scratchpad の C の試験で PASS（v7 の flag に runtime が立つと INVALID、記述子が allocation の外・小さすぎる・多すぎる、窓の外・逆順・頁境界でない・system table を含まない、を拒む）。
+- QEMU（OVMF 4M の VARS の写し、KVM、q35、NVMe、SSH だけで判定）: `plan/ws307/tests/p007-efiboot.sh build/p007/native.img <f69189c7e の BOOTX64.EFI>` PASS（`build/ws307-test/p007-efiboot.r0b3Hw`、image は c4bedbcf5 の source、`config-amd64-p007.mk`）:
+  - create: driver は 5 つの範囲で起動（kernel の log の 1 行を SSH の dmesg で見た）。`efiboot create -n nvme0n1 1 '\EFI\BOOT\BOOTX64.EFI'` → Boot0003、`list` で `Boot0003* zedBSD HD(1,GPT,…,0x800,0x20000)/File(\EFI\BOOT\BOOTX64.EFI)`、BootOrder の末尾、BootNext 0003、同じ path でもう一度 → 同じ Boot0003。
+  - after（同じ VARS で起動し直し）: BootCurrent 0003（その entry で起動）、entry は残り、BootNext は使われて消えた。delete → 一覧と BootOrder から消えた。
+  - gone（もう一度起動）: 消えたまま。
+  - nouefi（ESP の loader を f69189c7e の v7 の loader に替えた image）: kernel は起動し SSH が答え、`efiboot list` は `Operation not supported`（名前が NULL）。
+- QEMU の 2 回目（全部、最後の source 178c8517b の image）: `ZEDBSD_VARIANT=hybrid` の image（`plan/tools/guest/test-image.sh plan/ws307/tests/config-amd64-p007.mk build/amd64 ZEDBSD_VARIANT=hybrid`）で `sh plan/ws307/tests/p007-efiboot.sh build/p007/hybrid2.img <f69189c7e の BOOTX64.EFI> build/p007/hybrid2.img` PASS（`build/ws307-test/p007-efiboot.j32eXu`）: 上の 4 つの起動に加え、SeaBIOS（`-machine pc`、IDE。SeaBIOS は NVMe からこの image を起動しない）で起動し SSH が答え、`efiboot list` は `Operation not supported`。
+- 他の port（warning 0）: `make -j16 ZEDBSD_CONFIG=config/ci/config-<port>.mk BUILD=build/p007-ports/<port> …/vmunix` が pcat・pc98・intelmac・armv7-virt・zybo・m68k-virt・ppc32-mac99・ppc64-pseries・riscv32-virt・riscv64-virt・visionfive2・rpi4・rpi5・odroid-c5 の 14 で rc 0、warning 0（`pmem.c`・`system-device.c` を含む）。CI の config の無い sparcv9・x68k・mips32/64-malta は build していない。
+- 未実施: install-admin の Boot#### の導入の QEMU（installer-image の build が要る）、実機（release の UAT）。
