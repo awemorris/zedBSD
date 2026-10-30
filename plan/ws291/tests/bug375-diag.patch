@@ -1,0 +1,88 @@
+diff --git a/src/drivers/gpu/powervr/display/display.c b/src/drivers/gpu/powervr/display/display.c
+index c4bf4a74a..9175834d7 100644
+--- a/src/drivers/gpu/powervr/display/display.c
++++ b/src/drivers/gpu/powervr/display/display.c
+@@ -911,6 +911,7 @@ output_claim(
+ 
+ 	if (display->owner != NULL) {
+ 		mutex_unlock(&display->mutex);
++		kern_logf("powervr: display: diag EBUSY in %s line %d\n", "output_claim", 914);
+ 		return EBUSY;
+ 	}
+ 
+@@ -1030,6 +1031,7 @@ output_present(
+ 	wait_flip_over(display);
+ 	if (display->owner != session || display->lease != request->lease) {
+ 		mutex_unlock(&display->mutex);
++		kern_logf("powervr: display: diag EBUSY in %s line %d\n", "output_present", 1033);
+ 		return EBUSY;
+ 	}
+ 
+@@ -1116,6 +1118,7 @@ output_wait(
+ 
+ 	if (display->owner != session || display->lease != request->lease) {
+ 		mutex_unlock(&display->mutex);
++		kern_logf("powervr: display: diag EBUSY in %s line %d\n", "output_wait", 1119);
+ 		return EBUSY;
+ 	}
+ 
+@@ -2187,6 +2190,7 @@ output_cursor_set(
+ 
+ 	if (display->owner != session || display->lease != request->lease) {
+ 		mutex_unlock(&display->mutex);
++		kern_logf("powervr: display: diag EBUSY in %s line %d\n", "output_cursor_set", 2190);
+ 		return EBUSY;
+ 	}
+ 	if (resource->owner != session || !display->scanout) {
+@@ -2247,6 +2251,7 @@ output_cursor_move(
+ 	/* The lease's own open, once it has set an image. */
+ 	if (display->owner != session || display->lease != request->lease) {
+ 		mutex_unlock(&display->mutex);
++		kern_logf("powervr: display: diag EBUSY in %s line %d\n", "output_cursor_move", 2250);
+ 		return EBUSY;
+ 	}
+ 	if (display->cursor_image < 0) {
+@@ -2282,6 +2287,7 @@ output_cursor_hide(
+ 	/* The lease's own open. */
+ 	if (display->owner != session || display->lease != request->lease) {
+ 		mutex_unlock(&display->mutex);
++		kern_logf("powervr: display: diag EBUSY in %s line %d\n", "output_cursor_hide", 2285);
+ 		return EBUSY;
+ 	}
+ 	cursor_off(display);
+diff --git a/userland/desktop/libvulkan/context.c b/userland/desktop/libvulkan/context.c
+index 74eb01d66..1831f8c6a 100644
+--- a/userland/desktop/libvulkan/context.c
++++ b/userland/desktop/libvulkan/context.c
+@@ -45,7 +45,8 @@ struct vulkan_transport_storage {
+ 	void *mapping;
+ };
+ 
+-static VkResult vulkan_kernel_error(struct vulkan_context *context, int error);
++static VkResult vulkan_kernel_error_at(struct vulkan_context *context, int error, int line);
++#define vulkan_kernel_error(context, error) vulkan_kernel_error_at((context), (error), __LINE__)
+ static uint32_t vulkan_load_word(const uint8_t *bytes);
+ static VkResult vulkan_context_storage(struct vulkan_context *context, size_t requested, uint64_t *handle, uint32_t *resource, size_t *capacity, void **mapping);
+ static VkResult vulkan_context_transaction(struct vulkan_context *context, const struct vulkan_writer *writer, size_t reply_capacity, struct vulkan_reader *reader);
+@@ -573,9 +574,10 @@ vulkan_context_unlock(
+ 
+ /* Maps kernel allocation pressure separately from a lost renderer session. */
+ static VkResult
+-vulkan_kernel_error(
++vulkan_kernel_error_at(
+ 	struct vulkan_context *context,
+-	int error)
++	int error,
++	int line)
+ {
+ 	/* Keeps transient resource pressure retryable through ordinary Vulkan results. */
+ 	if (error == ENOMEM)
+@@ -592,7 +594,7 @@ vulkan_kernel_error(
+ 		return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+ 
+ 	/* Says which kernel error lost the session; nothing else names it to the user. */
+-	fprintf(stderr, "VULKAN kernel error errno=%d device lost\n", error);
++	fprintf(stderr, "VULKAN kernel error errno=%d device lost (context.c:%d)\n", error, line);
+ 
+ 	/* Marks uncertain transport ownership as lost for every device sharing this context. */
+ 	vulkan_context_error(context, VK_ERROR_DEVICE_LOST);

@@ -34,6 +34,7 @@ It shows a model converted by `tools/fbx2mview.py` (format:
 | `--copies=N` | draws N copies of the model (1–65536) side by side in a grid, the viewer moved back so the grid shows: a heavier scene for measuring (default 1).  Each copy's place is a per-instance vertex attribute (location 3) |
 | `--draws=instanced\|each` | one instanced draw per material group for all copies (default), or each copy its own draws (16 per copy for qs40): many commands in one command buffer |
 | `--submits=N` | splits each frame into N command buffers submitted one by one (1–4096; the first clears, the last presents), the copies shared out among them |
+| `--inflight=N` | how many frames may be in flight (1–2, default 1): with 1 a frame waits for its own fence before the next is recorded; with 2 each frame has its own command buffers, fence and acquire semaphore and waits only for the frame two before it |
 | `--images=N` | the swapchain's image count (2–8, at least the surface's minimum); by default the surface's minimum, at least three.  Linux's RADV gives a Wayland mailbox swapchain four, so the measurements ask four on both systems |
 
 ## Controls
@@ -55,7 +56,7 @@ synthesized. Without a `wl_seat` the viewer still renders, without input.
 
 ```
 MVIEW START run=<t> model=<dir> vertices=<n> triangles=<m> materials=<k> textures=<t>[ shading=pixel]
-MVIEW PRESENT run=<t> asked=<mode> mode=<mode> format=<VkFormat> images=<n> copies=<n> draws=instanced|each submits=<n> content=<type> content_manager=0|1
+MVIEW PRESENT run=<t> asked=<mode> mode=<mode> format=<VkFormat> images=<n> copies=<n> draws=instanced|each submits=<n> inflight=<n> content=<type> content_manager=0|1
 MVIEW INPUT run=<t> kind=motion|button|axis|key <event fields> yaw=<deg> pitch=<deg> distance=<d> pan=<x>,<y>
 MVIEW FRAME run=<t> frame=<n> yaw=<deg> pitch=<deg> distance=<d> pan=<x>,<y>
 MVIEW DONE run=<t> frames=<n> reason=quit|closed|timeout|frames

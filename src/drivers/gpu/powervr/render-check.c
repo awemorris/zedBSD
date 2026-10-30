@@ -550,7 +550,7 @@ check_empty(
 	powervr_firmware_trace_mark(check->render->core);
 	mutex_lock(&check->render->core->lock);
 
-	error = powervr_session_kick_render(check->render, check->session, check->target, 0, check->geometry, check->fragment, check->fragment, NULL, 0, &check->marks);
+	error = powervr_session_kick_render(check->render, check->session, check->target, 0, check->geometry, check->fragment, check->fragment, NULL, 0, NULL, 0, &check->marks);
 
 	mutex_unlock(&check->render->core->lock);
 
@@ -630,7 +630,7 @@ check_kick(
 	powervr_firmware_trace_mark(check->render->core);
 	mutex_lock(&check->render->core->lock);
 
-	error = powervr_session_kick_render(check->render, check->session, check->target, 0, check->geometry, check->fragment, check->fragment, NULL, 0, &check->marks);
+	error = powervr_session_kick_render(check->render, check->session, check->target, 0, check->geometry, check->fragment, check->fragment, NULL, 0, NULL, 0, &check->marks);
 
 	mutex_unlock(&check->render->core->lock);
 

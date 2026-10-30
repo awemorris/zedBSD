@@ -421,11 +421,33 @@ struct powervr_session {
 	uint32_t last_value;
 
 	/*
+	 * Whether a transfer since the session's last other work wrote a
+	 * buffer, and the transfer timeline's value of the newest such one:
+	 * a render's geometry (which reads vertex, index and uniform buffers)
+	 * waits for it, while a transfer that wrote only images holds back
+	 * only the render's 3D.  Changed only by the session's own submissions.
+	 */
+	unsigned transfer_wrote_buffer;
+	uint32_t transfer_buffer_value;
+
+	/*
 	 * The render jobs whose 3D may still run, oldest first, under the
 	 * queue lock; their memory is released once their points are reached.
 	 */
 	struct powervr_job_done *jobs_done;
 	struct powervr_job_done *jobs_done_tail;
+
+	/*
+	 * The submission timing's marks of the session's render jobs (only
+	 * with the timing on): when the last reaped job's TA and 3D were seen
+	 * done, and the 3D values and ends of the last two reaped jobs, one of
+	 * which a later job's geometry waited for.  Under the queue lock.
+	 */
+	uint64_t timing_ta_done;
+	uint64_t timing_fragment_done;
+	uint32_t timing_fragment_values[2];
+	uint64_t timing_fragment_ends[2];
+	unsigned timing_fragment_next;
 
 	/*
 	 * The memory of finished render jobs kept mapped for the next ones
@@ -598,6 +620,9 @@ void powervr_buffer_retain(struct powervr_render *render, struct powervr_buffer 
 /* Drops a reference; the last one frees the buffer, or keeps it after a fault. */
 void powervr_buffer_put(struct powervr_render *render, struct powervr_buffer *buffer);
 
+/* Gives back a list of cached buffers the cache was flushed of: into the pool, or freed. */
+void powervr_buffers_release_flushed(struct powervr_render *render, struct powervr_buffer *list);
+
 /* Frees a list of buffers kept for a reset, linked through next. */
 void powervr_buffers_free(struct powervr_buffer *list);
 
@@ -642,6 +667,13 @@ void powervr_session_point_set(struct powervr_session *session, unsigned kind, u
  */
 void powervr_render_jobs_reap(struct powervr_render *render, struct powervr_session *session, int wait);
 void powervr_render_jobs_forget(struct powervr_render *render, struct powervr_session *session);
+
+/*
+ * Notes when the TA and the 3D of a session's running render jobs were
+ * seen done, for the submission timing; the queue lock is held
+ * (render-job.c).
+ */
+void powervr_render_jobs_stamp(struct powervr_session *session, uint64_t now);
 
 /* Frees the transfer memory a session kept mapped, when the session ends (transfer-job.c). */
 void powervr_transfer_forget(struct powervr_render *render, struct powervr_session *session);
@@ -786,6 +818,12 @@ const struct powervr_target_layout *powervr_target_layout_of(const struct powerv
 /* Takes the half of a target the next render uses; renders alternate between the two (render-target.c). */
 unsigned powervr_target_take_half(struct powervr_target *target);
 
+/* Reports the 3D value of the last render kicked on one half of a target, 0 for none (render-target.c). */
+uint32_t powervr_target_half_fragment(const struct powervr_target *target, unsigned half);
+
+/* Notes the 3D value of the render just kicked on one half of a target (render-target.c). */
+void powervr_target_half_note(struct powervr_target *target, unsigned half, uint32_t fragment_value);
+
 /* Reads the parameter manager's catalogues from one half of a target's record (render-target.c). */
 void powervr_target_catalogues(const struct powervr_target *target, unsigned half, uint64_t catalogues[POWERVR_TARGET_CATALOGUES]);
 
@@ -884,7 +922,7 @@ struct powervr_render_marks {
  * half of a render target, after the syncs it waits for; the core's lock
  * is held.
  */
-int powervr_session_kick_render(struct powervr_render *render, struct powervr_session *session, struct powervr_target *target, unsigned half, const uint8_t *geometry, const uint8_t *partial, const uint8_t *fragment, const struct powervr_sync *waits, unsigned wait_count, struct powervr_render_marks *marks);
+int powervr_session_kick_render(struct powervr_render *render, struct powervr_session *session, struct powervr_target *target, unsigned half, const uint8_t *geometry, const uint8_t *partial, const uint8_t *fragment, const struct powervr_sync *waits, unsigned wait_count, const struct powervr_sync *fragment_waits, unsigned fragment_wait_count, struct powervr_render_marks *marks);
 
 /*
  * Waits, bounded, for a render's fragment to finish and reports its
