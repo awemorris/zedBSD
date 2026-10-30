@@ -2056,7 +2056,7 @@ values_single(
 			value->keyword = 0;
 			return 0;
 		}
-		if (css_ident_equal(&tokens[0], "auto"))
+		if (css_ident_equal(&tokens[0], "auto") || css_ident_equal(&tokens[0], "default"))
 			return EINVAL;
 		value->keyword = 2;
 		if (css_ident_equal(&tokens[0], "match-element")) {
@@ -3811,7 +3811,8 @@ values_view_transition_class(
 	for (index = 0; index < count && error == 0; index++) {
 		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
 			continue;
-		if (tokens[index].type != CSS_TOKEN_IDENT || css_ident_equal(&tokens[index], "none")) {
+		if (tokens[index].type != CSS_TOKEN_IDENT || css_ident_equal(&tokens[index], "none") ||
+		    css_ident_equal(&tokens[index], "default")) {
 			error = EINVAL;
 			break;
 		}
