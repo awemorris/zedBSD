@@ -36,7 +36,10 @@ enum paint_kind {
 	PAINT_UNCLIP,
 	PAINT_IMAGE,
 	/* The filters of backdrop-filter applied to what is drawn so far inside the rectangle. */
-	PAINT_BACKDROP
+	PAINT_BACKDROP,
+	/* The items up to the matching PAINT_GROUP_END are painted apart from the page (over nothing) and the filters applied to the result. */
+	PAINT_GROUP,
+	PAINT_GROUP_END
 };
 
 /* The deepest nesting of clips the renderers keep (deeper clips are ignored). */

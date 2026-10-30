@@ -8,7 +8,7 @@
 set -eu
 cd "$(dirname -- "$0")/../../.."
 program=${BROWSER:-build/ws074-host/plain/browser}
-out=$(mktemp -d build/tmp/wpt-one.XXXXXX)
+out=$(mktemp -d /tmp/wpt-one.XXXXXX)
 n=0
 for id in "$@"; do
 	n=$((n + 1))

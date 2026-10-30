@@ -32,8 +32,8 @@ static int anchor_value(const struct layout_tree *tree, const struct layout_box 
 static int anchor_query(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
 static int anchor_find(const struct layout_tree *tree, const struct layout_box *box, const struct vm_string *name, struct layout_rect *rect);
 static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
+static int anchor_scrolls(const struct layout_box *box);
 static int anchor_has_name(const struct layout_box *box, const struct vm_string *name);
-static const struct layout_box *anchor_containing(const struct layout_box *box);
 static void anchor_flip(struct layout_tree *tree, struct layout_box *box, int how);
 static const struct css_anchor_expr *anchor_turn(struct layout_tree *tree, const struct css_anchor_expr *expr, int how);
 static layout_unit anchor_inset(const struct css_length *length, layout_unit size);
@@ -188,13 +188,13 @@ anchor_query(
 	int found;
 
 	/* The anchor. */
+	vertical = slot == CSS_ANCHOR_SLOT_TOP || slot == CSS_ANCHOR_SLOT_BOTTOM || slot == CSS_ANCHOR_SLOT_HEIGHT ||
+	    slot == CSS_ANCHOR_SLOT_MIN_HEIGHT || slot == CSS_ANCHOR_SLOT_MAX_HEIGHT;
 	found = anchor_find(tree, box, query->name != NULL ? query->name : box->style.position_anchor, &rect);
 	if (!found)
 		return 0;
 
-	/* The axis of the slot, and whether its inset is measured from the far edge (right or bottom). */
-	vertical = slot == CSS_ANCHOR_SLOT_TOP || slot == CSS_ANCHOR_SLOT_BOTTOM || slot == CSS_ANCHOR_SLOT_HEIGHT ||
-	    slot == CSS_ANCHOR_SLOT_MIN_HEIGHT || slot == CSS_ANCHOR_SLOT_MAX_HEIGHT;
+	/* Whether the slot's inset is measured from the far edge (right or bottom). */
 	far = slot == CSS_ANCHOR_SLOT_RIGHT || slot == CSS_ANCHOR_SLOT_BOTTOM;
 	anchor_start = vertical ? rect.y : rect.x;
 	anchor_size = vertical ? rect.height : rect.width;
@@ -269,6 +269,11 @@ anchor_find(
 {
 	const struct layout_box *containing;
 	const struct layout_box *found;
+	const struct layout_box *candidates[1];
+	const struct layout_box *up;
+	const struct layout_box *inner;
+	double scroll_x;
+	double scroll_y;
 	int passed;
 
 	/* A name, and the tree. */
@@ -276,10 +281,12 @@ anchor_find(
 		return 0;
 
 	/* The last acceptable box with the name in tree order. */
-	containing = anchor_containing(box);
-	found = NULL;
+	containing = layout_containing_box(box);
+	candidates[0] = NULL;
 	passed = 0;
-	anchor_search(tree, tree->root, box, containing, name, containing == NULL, &passed, &found, 0);
+	anchor_search(tree, tree->root, box, containing, name, containing == NULL, &passed, candidates, 0);
+
+	found = candidates[0];
 	if (found == NULL || found->node == NULL)
 		return 0;
 
@@ -296,9 +303,22 @@ anchor_find(
 		    found->padding[CSS_RIGHT] + found->border[CSS_RIGHT];
 		rect->height = found->border[CSS_TOP] + found->padding[CSS_TOP] + found->height +
 		    found->padding[CSS_BOTTOM] + found->border[CSS_BOTTOM];
-		return 1;
+	} else if (!layout_node_bounds(tree, found->node, rect)) {
+		return 0;
 	}
-	return layout_node_bounds(tree, found->node, rect);
+
+	/* Where the scroll puts the anchor: by the scroll of the scroll containers it is in that the box's containing block is not in. */
+	for (up = found->parent; up != NULL; up = up->parent) {
+		if (!layout_scroll_offset(up, &scroll_x, &scroll_y))
+			continue;
+		for (inner = containing; inner != NULL && inner != up; inner = inner->parent)
+			;
+		if (inner != NULL)
+			continue;
+		rect->x -= layout_from_px((float)scroll_x);
+		rect->y -= layout_from_px((float)scroll_y);
+	}
+	return 1;
 }
 
 /*
@@ -334,10 +354,18 @@ anchor_search(
 		}
 		child_inside = inside || walk == containing;
 		if (child_inside && anchor_has_name(child, name) &&
-		    (!child->out_of_flow || anchor_containing(child) != containing || !*passed))
-			*found = child;
+		    (!child->out_of_flow || !*passed || (layout_containing_box(child) != containing && !anchor_scrolls(layout_containing_box(child)))))
+			found[0] = child;
 		anchor_search(tree, child, box, containing, name, child_inside, passed, found, depth + 1);
 	}
+}
+
+/* Tells whether a box is a scroll container (an anchor out of the flow in one that follows its box in tree order is not taken). */
+static int
+anchor_scrolls(
+	const struct layout_box *box)
+{
+	return box != NULL && (box->style.overflow_x != CSS_OVERFLOW_VISIBLE || box->style.overflow_y != CSS_OVERFLOW_VISIBLE);
 }
 
 /* Tells whether a box has an anchor name. */
@@ -361,8 +389,8 @@ anchor_has_name(
 }
 
 /* The box a box out of the flow is placed in (NULL for the viewport). */
-static const struct layout_box *
-anchor_containing(
+const struct layout_box *
+layout_containing_box(
 	const struct layout_box *box)
 {
 	const struct layout_box *ancestor;
@@ -466,6 +494,18 @@ layout_anchor_area(
 	box->cb_right_auto = 0;
 	box->cb_top_auto = 0;
 	box->cb_bottom_auto = 0;
+
+	/* Insets of zero against the area leave the box its alignment there, as auto ones do. */
+	if (box->style.width.unit != CSS_UNIT_AUTO && box->style.offset[CSS_LEFT].unit == CSS_UNIT_PX && box->style.offset[CSS_LEFT].value == 0.0f &&
+	    box->style.offset[CSS_RIGHT].unit == CSS_UNIT_PX && box->style.offset[CSS_RIGHT].value == 0.0f) {
+		box->style.offset[CSS_LEFT].unit = CSS_UNIT_AUTO;
+		box->style.offset[CSS_RIGHT].unit = CSS_UNIT_AUTO;
+	}
+	if (box->style.height.unit != CSS_UNIT_AUTO && box->style.offset[CSS_TOP].unit == CSS_UNIT_PX && box->style.offset[CSS_TOP].value == 0.0f &&
+	    box->style.offset[CSS_BOTTOM].unit == CSS_UNIT_PX && box->style.offset[CSS_BOTTOM].value == 0.0f) {
+		box->style.offset[CSS_TOP].unit = CSS_UNIT_AUTO;
+		box->style.offset[CSS_BOTTOM].unit = CSS_UNIT_AUTO;
+	}
 
 	/* Each axis with auto insets is aligned in it. */
 	if (box->style.offset[CSS_LEFT].unit == CSS_UNIT_AUTO && box->style.offset[CSS_RIGHT].unit == CSS_UNIT_AUTO)

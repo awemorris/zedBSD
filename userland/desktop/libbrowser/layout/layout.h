@@ -420,6 +420,10 @@ void layout_anchor_resolve(const struct layout_tree *tree, struct layout_box *bo
 int layout_clips(const struct layout_box *box);
 int layout_position(struct layout_tree *tree);
 int layout_position_box(struct layout_tree *tree, struct layout_box *box);
+/* Scroll containers' offsets (scroll.c): the content of each moves by its scroll, and a box anchored inside one follows it. */
+int layout_scroll_apply(struct layout_tree *tree);
+int layout_scroll_offset(const struct layout_box *box, double *x, double *y);
+const struct layout_box *layout_containing_box(const struct layout_box *box);
 int layout_sticky_build(struct layout_tree *tree, layout_unit scroll_y);
 int layout_sticky_apply(struct layout_tree *tree, layout_unit scroll_y);
 

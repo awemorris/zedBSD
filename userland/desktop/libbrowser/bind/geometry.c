@@ -93,6 +93,7 @@ struct geometry_rect_member {
 static int geometry_measure(struct vm_realm *realm, vm_value this_value, int part, vm_value *result);
 static int geometry_element_this(struct vm_realm *realm, vm_value this_value, struct dom_element **element);
 static int geometry_box(struct bind_window *window, struct dom_element *element, struct bind_box *box);
+static void geometry_element_scroll(struct bind_window *window, struct dom_element *element, double x, int given_x, double y, int given_y);
 static int geometry_is_root(const struct bind_window *window, const struct dom_element *element);
 static void geometry_scroll(const struct bind_window *window, double *x, double *y);
 static double geometry_round(double value);
@@ -490,8 +491,11 @@ bind_scroll_position_set(
 	unsigned count,
 	vm_value *result)
 {
+	struct bind_window *window;
 	struct dom_element *element;
 	double position;
+	double scroll_x;
+	double scroll_y;
 	int status;
 
 	/* The element, and the number, whose conversion may throw. */
@@ -503,7 +507,16 @@ bind_scroll_position_set(
 	if (status != 0)
 		return status;
 
-	/* Succeeded: nothing moves. */
+	/* The root scrolls with the document; another element's content scrolls where it can. */
+	window = bind_window_of(realm);
+	if (geometry_is_root(window, element)) {
+		geometry_scroll(window, &scroll_x, &scroll_y);
+		geometry_scroll_move(window, geometry_finite(position), scroll_y);
+		return 0;
+	}
+	geometry_element_scroll(window, element, position, 1, 0.0, 0);
+
+	/* Succeeded: the content is scrolled. */
 	return 0;
 }
 
@@ -583,10 +596,12 @@ bind_scroll_top_set(
 	if (status != 0)
 		return status;
 
-	/* Only the root scrolls, with the document. */
+	/* The root scrolls with the document; another element's content scrolls where it can. */
 	root = geometry_is_root(window, element);
-	if (!root)
+	if (!root) {
+		geometry_element_scroll(window, element, 0.0, 0, position, 1);
 		return 0;
+	}
 
 	/* Succeeded: the document scrolls down to it. */
 	geometry_scroll(window, &scroll_x, &scroll_y);
@@ -793,10 +808,12 @@ bind_element_scroll_to(
 	if (status != 0)
 		return status;
 
-	/* Only the root scrolls, with the document. */
+	/* The root scrolls with the document; another element's content scrolls where it can. */
 	root = geometry_is_root(window, element);
-	if (!root)
+	if (!root) {
+		geometry_element_scroll(window, element, x, given_x, y, given_y);
 		return 0;
+	}
 
 	/* Succeeded: the document scrolls. */
 	status = bind_window_scroll_to(realm, VM_VALUE_UNDEFINED, args, count, result);
@@ -834,10 +851,12 @@ bind_element_scroll_by(
 	if (status != 0)
 		return status;
 
-	/* Only the root scrolls, with the document. */
+	/* The root scrolls with the document; another element's content scrolls where it can. */
 	root = geometry_is_root(window, element);
-	if (!root)
+	if (!root) {
+		geometry_element_scroll(window, element, element->scroll_x + x, given_x, element->scroll_y + y, given_y);
 		return 0;
+	}
 
 	/* Succeeded: the document scrolls. */
 	status = bind_window_scroll_by(realm, VM_VALUE_UNDEFINED, args, count, result);
@@ -1071,14 +1090,18 @@ geometry_measure(
 			value = box.border_left;
 		break;
 	case GEOMETRY_SCROLL_TOP:
-		/* Only the root scrolls, with the document. */
+		/* The root scrolls with the document; another element by what it was scrolled to. */
 		if (root)
 			value = scroll_y;
+		else if (found && box.block)
+			value = element->scroll_y;
 		break;
 	case GEOMETRY_SCROLL_LEFT:
-		/* Only the root scrolls, with the document. */
+		/* The root scrolls with the document; another element by what it was scrolled to. */
 		if (root)
 			value = scroll_x;
+		else if (found && box.block)
+			value = element->scroll_x;
 		break;
 	case GEOMETRY_OFFSET_WIDTH:
 		/* The border box's width. */
@@ -1159,6 +1182,55 @@ geometry_is_root(
 
 	/* Succeeded: it is the root. */
 	return 1;
+}
+
+/*
+ * Scrolls an element's content to a place on the axes given (its scroll container's range: from zero to its scroll size
+ * less its client size; a box that does not scroll stays), and has the page laid out again when it moved.
+ */
+static void
+geometry_element_scroll(
+	struct bind_window *window,
+	struct dom_element *element,
+	double x,
+	int given_x,
+	double y,
+	int given_y)
+{
+	struct bind_box box;
+	double next_x;
+	double next_y;
+	double range_x;
+	double range_y;
+
+	/* Only a block that clips its overflow scrolls. */
+	if (!geometry_box(window, element, &box) || !box.block || !box.scrolls)
+		return;
+	range_x = box.scroll_width - (box.width - box.border_left - box.border_right);
+	range_y = box.scroll_height - (box.height - box.border_top - box.border_bottom);
+	if (range_x < 0.0)
+		range_x = 0.0;
+	if (range_y < 0.0)
+		range_y = 0.0;
+	next_x = element->scroll_x;
+	next_y = element->scroll_y;
+	if (given_x)
+		next_x = geometry_finite(x);
+	if (given_y)
+		next_y = geometry_finite(y);
+	if (next_x < 0.0)
+		next_x = 0.0;
+	if (next_y < 0.0)
+		next_y = 0.0;
+	if (next_x > range_x)
+		next_x = range_x;
+	if (next_y > range_y)
+		next_y = range_y;
+	if (next_x == element->scroll_x && next_y == element->scroll_y)
+		return;
+	element->scroll_x = next_x;
+	element->scroll_y = next_y;
+	element->node.document->generation++;
 }
 
 /* Finds how far the document is scrolled, in CSS pixels (0 when the host does not say). */

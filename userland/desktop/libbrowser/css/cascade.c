@@ -3253,6 +3253,9 @@ cascade_pseudo_class(
 	case CSS_PSEUDO_TARGET:
 		/* The element the document's URL fragment names. */
 		return element->node.document->target == &element->node;
+	case CSS_PSEUDO_POPOVER_OPEN:
+		/* A popover that is showing. */
+		return element->popover_open;
 	default:
 		return 0;
 	}

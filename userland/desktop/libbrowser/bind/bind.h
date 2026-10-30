@@ -116,6 +116,8 @@ struct bind_box {
 	/* What a block scrolls over: its padding box and the overflow of its content (0 when not known). */
 	double scroll_width;
 	double scroll_height;
+	/* Whether the block scrolls its content (overflow other than visible and clip). */
+	int scrolls;
 };
 
 /*

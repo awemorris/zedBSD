@@ -190,6 +190,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/layout/inline.c \
 	$(LIBBROWSER_DIR)/layout/float.c \
 	$(LIBBROWSER_DIR)/layout/position.c \
+	$(LIBBROWSER_DIR)/layout/scroll.c \
 	$(LIBBROWSER_DIR)/layout/sticky.c \
 	$(LIBBROWSER_DIR)/layout/replaced.c \
 	$(LIBBROWSER_DIR)/layout/control.c \
