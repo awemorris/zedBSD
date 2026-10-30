@@ -3,7 +3,7 @@
 # ws307-p014 規約の全文の見直し（WS307 が変えた C）
 
 - 親: [WS307](../ws.md)。Queue: q1665 / q1665-i09（担当 P4、2026-10-29、worktree p4-ws307m、基点 main 3f2370248）。
-- Status: in-progress（直しを commit し build と host の試験まで。Q1 の判定待ち）
+- Status: in-progress（直しを commit し build と host の試験まで。q1698-i01 で p011 以降の C を見直した（69f43f4c3）。p007 の C の後に残り。Q1 の判定待ち）
 - 範囲（Q1）: WS307 が変えた C を `plan/coding-style.md` の全文で見直し、書き方だけを直す（動作は変えない）。conformance-reviewer に頼んでよい。QEMU は使わない（BUG-356）。
 - 依存: p013 は cleared。p015 は cleared。p011（BUG-356）・p012・p004・p007 の残りの code は、入った時に別に見直す（この Phase の後に WS307 が変える C）。
 
@@ -35,3 +35,10 @@
 - 1 段の `kl_tr("…")` を引数に入れた呼び出し（screens.c などの約 40 か所）は、翻訳の呼び出しの慣例として残した（reviewer の判断を担当が採った）。
 - installer の flow.c・screens.c に短い一語の段落の comment が残る（checker の外）。
 - reviewer 4 が見つけた既存の疑い（WS307 の行ではない）: `src/drivers/fs/ufs.c` の `j3_extents_read` が `return EINVAL;` で確保した `j3->extents` を解放せずに抜ける。触っていない。Q1 に報告した。
+
+## q1698-i01（2026-10-30、P4、worktree p4-ws307o、基点 d3abf7c27）: p011 以降の WS307 の C
+
+- 対象（27c89c707 の後に WS307 が変えた C、branch agent/p4-ws307n の自分の commit）: installer の `flow.c`（67a3dd649、S4 の拒みの log）・`disk.c`（01b12baa6、作った ESP の判定）・`main.c`（f703b3f28、題名の訳）・`screens.c`（4a587ed1f・c9662274b、訳の漏れ）、`src/drivers/fs/ufs.c` の cache の包み（6387b82a0: `ufs_buf_write_pinned`・`ufs_buf_unpin`・`ufs_buf_writeback_range`・`ufs_buf_writeback_cached`・`ufs_buf_prefetch` と呼び手の名前の置き換え）、`userland/base/mkfs/ufs-format.c`（6387b82a0、native の tail）。この Queue で変えた C（p015 の sleep の既定: `sleep-rules.h`・`look.c`・`settings-keys.c` の定数と comment、p004 の試験の `plan/ws307/tests/p004-hello.c`）も見た。
+- 全文（`plan/coding-style.md`）と差分の行を照らした結果: 直したのは `screens.c` の 1 か所（69f43f4c3）: else の本体の段落に comment が無く、`strcmp` の結果の名前 `none_diff` が何を持つかを言わない → `none_differs` に、表の名前の段落と行の段落に comment。動作は同じ（同じ式・同じ文字列）。他は規約どおり（前方宣言 1 行、各段落の comment、分けた呼び出しは 1 引数 1 行の揃え、成功の return が最後で `Succeeded`、条件の中に呼び出し無し）。
+- 確かめ: `make ZEDBSD_CONFIG=plan/ws307/tests/config-amd64-p009.mk ZEDBSD_IMAGE_PROFILE=installer BUILD=build/p014b build/p014b/dynamic/obj/userland/desktop/installer/screens.o` rc 0、warning 0。`plan/tools/style-check.py` は installer の 4 file で 0、ufs.c・ufs-format.c の新しい行の範囲で 0。`git diff --check` clean。QEMU は p004 の image の試験（installer の画面は通らない）の他は未実施。
+- 残り: p007（UEFI の変数の driver・efiboot）の C は入った時に見直す。
