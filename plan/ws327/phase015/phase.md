@@ -133,7 +133,7 @@ docs/howto/keiland-examples/08-language.c docs/howto/keiland-examples/08-network
   平均の時間には含まれない。
 - 進みは worker と同じく kl_app_post の 1 種類（`POST_PROGRESS` / `POST_FINISHED`）。window の post は使わない。
 - `network_finish` は終了時に FINISHED を `kl_app_dispatch(app, -1)` で待つ（thread は必ず FINISHED を post する。post が ENOMEM で失敗すると待ち続けるが、
-  その時は元の worker と同じく結果が失われる事を例のコメントで述べている）。
+  その時は終了が止まる。元の worker は timeout 0 で取りこぼしうる形なので、こちらは待つ形にした。要検討なら Q1 の所見に）。
 - 時刻は `kl_clock_us` でなく `clock_gettime(CLOCK_MONOTONIC)` の小さな関数（別の thread から呼ぶ物の約束が header に無いため）。
 
 未実施: guest での実行と写真（p016）、08-network.png（作らない）、32 bit など他の arch の compile（例は host の clang・gcc のみ）。
