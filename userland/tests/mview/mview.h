@@ -99,6 +99,9 @@ struct mview_renderer;
 void mview_renderer_report_stages(struct mview_renderer *renderer, const char *token, double seconds);
 void mview_renderer_span(struct mview_renderer *renderer, int end);
 
+/* The most frames in flight (--inflight). */
+#define MVIEW_INFLIGHT_MAX	2U
+
 struct mview_renderer {
 	/* Cycles spent in each stage since the counters were last cleared, and the frames counted. */
 	uint64_t stage_cycles[MVIEW_STAGE_COUNT];
@@ -169,6 +172,19 @@ struct mview_renderer {
 	VkCommandBuffer *commands;
 
 	/*
+	 * How many frames may be in flight (--inflight, one by default): with
+	 * one, a frame waits for its own fence before the next is recorded;
+	 * with more, each slot has its command buffers (commands holds
+	 * submits of them a slot), fence and acquire semaphore, and a frame
+	 * waits only for the frame that last used its slot.  fence and
+	 * acquired are the current slot's.
+	 */
+	uint32_t inflight;
+	uint32_t slot;
+	VkFence slot_fences[MVIEW_INFLIGHT_MAX];
+	VkSemaphore slot_acquired[MVIEW_INFLIGHT_MAX];
+
+	/*
 	 * Nonzero when every pipeline culls both faces (--cull=all): the
 	 * vertex work alone, nothing rasterized, for measuring the geometry
 	 * side of the scene.
@@ -192,7 +208,7 @@ int mview_window_dispatch(struct mview_window *window, int timeout);
 void mview_window_close(struct mview_window *window);
 
 /* Renderer cleanup releases Vulkan ownership before the native window closes. */
-VkResult mview_renderer_open(struct mview_renderer *renderer, struct mview_window *window, int pixel_shading, VkPresentModeKHR present_mode, uint32_t copies, int each_draw, uint32_t submits, int cull_all, uint32_t images);
+VkResult mview_renderer_open(struct mview_renderer *renderer, struct mview_window *window, int pixel_shading, VkPresentModeKHR present_mode, uint32_t copies, int each_draw, uint32_t submits, uint32_t inflight, int cull_all, uint32_t images);
 VkResult mview_renderer_load(struct mview_renderer *renderer, const struct mview_model *model);
 VkResult mview_renderer_draw(struct mview_renderer *renderer, const struct mview_model *model, const struct mview_camera *camera);
 VkResult mview_renderer_recreate(struct mview_renderer *renderer, uint32_t width, uint32_t height);
