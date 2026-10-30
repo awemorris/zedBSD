@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 06:07（Q1）
+最終更新: 2026-10-31 06:33（Q1）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P4 | — | — | 返却（07:2x）。WS333 p019（sessiond の熱の要求の口と権限の規則、kernel への呼びは UAPI まで仮）を main に | 午後: Pi 5 の実機 |
 | P5 | [WS302](ws302/ws.md) | デスクトップのスレッドバランサ（DTB） | q1775: p001 設計（WS333 の CPU の口を使う、design-reviewer と問いまで） | WS330 の設計は済み（問いは 0f） |
 | P6 | — | — | 返却（07:1x）。WS333 p016（危ない温度での非常の停止、QEMU で温度を上げて電源断まで確かめた）・p021（温度で CPU の上限を下げる）を main に | 次の割当を Q1 が決める |
-| P7 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1776: p018 Dell の provider（BIOS の熱の mode・fan・boost、host の harness まで） | 5330 の実機は電源の入れ直しの後 |
+| P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,472（71.20%）。flex・grid の baseline、fieldset、CSS の論理の box の property を足した、後退 0 |
 
 実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
@@ -42,6 +42,7 @@
 | p005 | 熱の core（前半） | 前半を main に（b7ac4f576、host 試験 13 場面・QEMU で hw.thermal）。後半は UAPI の review の後 |
 | p008〜p010 | x86 の CPUID・HWP・電力の module（Sonnet 3 人） | cleared（試験は計 1,700 万 checks 余り） |
 | p011 | x86 の CPU の driver の統合（HWP・RAPL・HFI・滞在。QEMU では MSR に触らず topology だけ） | main a058c08d7。host 試験 16 場面・QEMU 2 通り PASS。5330 は p014 |
+| p018・p019 | Dell の provider（BIOS の熱の mode・fan・boost）・sessiond の熱の要求の口 | main に。5330 の実機と UAPI（p004）の後の結線が残り |
 | p016・p021 | 危ない温度での非常の停止・温度で CPU の上限を下げる | cleared（QEMU で温度の上がる表から S5 の電源断まで。init の返事の口は UAPI の後） |
 | p017 | ACPI WMI の層（Dell の BIOS の口の土台） | cleared（5330 の表で 4 device・14 block、SMI の書き 0） |
 | p012 | 全 CPU の tick の時刻を揃える（TSC-deadline） | main 22c629663、QEMU の 2 通り PASS。5330 の電力の前後の数待ち |
@@ -251,7 +252,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 - VF2: 今の main の kernel で HDMI に console の画面が出るか（WS331 p005 の目視の残り、BUG-372 は直った）。
 - installer（BUG-360）: 大きさの欄を全部消して打ち直せるか（QEMU は disk の空きの都合で未実施）。Settings（BUG-306）: 回転を 2 回目に 90° にしても窓が残るか。
-- **5330 の電源の入れ直し（起きたら）**: 入れ直した後、P1 が WS299 の image で NVMe の速さを測り、WS333 p012 の前後の暇な時の電力も測る。 2026-10-31 02:2x、P1 が main の kernel で起動した後に応答しない（遠隔の電源が無い）。入れ直すと Debian に戻る。古い userland と新しい kernel の組み合わせで network が上がらないだけの見込み（BUG-373・371）。P1 はそれまで QEMU で WS299 を進める。
+- **5330 の電源の入れ直し（起きたら）**: 入れ直した後、担当が WS299 の image で NVMe の速さを測り、WS333 p012 の前後の暇な時の電力・p011 の HWP・RAPL・p018 の Dell の mode と fan を実機で確かめる（p014）。 2026-10-31 02:2x、P1 が main の kernel で起動した後に応答しない（遠隔の電源が無い）。入れ直すと Debian に戻る。古い userland と新しい kernel の組み合わせで network が上がらないだけの見込み（BUG-373・371）。P1 はそれまで QEMU で WS299 を進める。
 - **Pi 5（2026-10-31 の午後にユーザーが行う予定）**: image は出来ている（P4、main d26c657c7＋Pi 5 の GPU の branch、戻しの kernel 入り）: `/home/awe/zedBSD-worktrees/p4-ws291pi/build/ws291-p021c/rpi5-p021.img`（sha256 dcadd719…）。Q1 が SD に書く（`sudo dd … bs=4M conv=fsync`）か、ユーザーが書く。起動したら Q1 に知らせると担当が SSH で GPU の clock と fps を測る。起動しなければ config.txt の `kernel=vmunix-fallback`。
 - **ODROID-C5（2026-10-31 の午後、VF2 の最適化の後）**: 試験の image で HDMI に画面が出なかった（ユーザー）。serial（今は VF2 につないでいる）を C5 につないで、起動のどこで止まるかを見る。Q1 が担当（WS313）を起動して声をかける。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
