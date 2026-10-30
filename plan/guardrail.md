@@ -109,6 +109,13 @@ zedBSD の貢献の規則と標準の索引。Queue・backlog・実行許可で�
 - boot loader → HAL は固有の構造体を使ってよい。その定義は HAL の中か `bootloader/` の header に置く（`include/kern/` に置かない）。**`bootloader/` の header を include してよいのは HAL だけ**（2026-10-18 ユーザー「bootloader/のヘッダを見ていいのは、HALだけにします。HALからカーネルへは、名前ごとの値でアクセスします」）。kernel・driver は HAL から名前ごとの値（例 `pcat.framebuffer.phys`）で受ける。
 - `include/kern/boot.h` の PC-98・Raspberry Pi の固有の構造体は削除する（WS261）。
 
+## driver は HAL を知らない（2026-10-30 ユーザー）
+
+ユーザー（2026-10-30）「ドライバから見て、HALは使えません。存在を知りません。カーネルの機能を使ってマッピングするのみです。」「ドライバがHALをincludeしているところがあれば、規約違反ですので、driversをinclude/srcともにgrepしてみてください。」「了解です。ガードレールに記載してください。これを修正するWSを立ててください。P2で実行してください。HALのマップ関数には、カーネル側に相当する関数があるはずです。まずは違反利用された関数が、どの関数に置き換えられるか、一覧を作成してください。そして、ラッパーがない場合、カーネルに関数追加しますので、その一覧をください。」
+
+- driver（`src/drivers/`・`include/drivers/`）は HAL の header（`hal/hal.h`・`hal/<arch>/…`）を include せず、`hal_*` を呼ばない。memory の map・割り込み・I/O・時刻・boot の情報などは kernel の機能（`kern_*` の口、`include/kern/`）だけを使う。kernel に相当の口が無ければ kernel に関数を足す（HAL の API は変えない）。
+- 2026-10-30 の grep で、既存の違反は `src/drivers/` の 38 file・41 か所の include（`include/drivers/` は 0）。直すのは [WS331](ws331/ws.md)。直るまでの既存の違反は残してよいが、新しい code で増やさない。
+
 ## WS141（Raspberry Pi 4 の GPU）の GPL の参照の扱い（2026-10-04 ユーザー）
 
 Linux の vc4・v3d（GPL-2.0）から作る作業の文書は `plan/ws141/temp/` に置き commit しない（書き写し可）。zedBSD の code を書く前に定数を全て一括で独自の名前に変え、WS の最後に license と字面・設計の類似を監査する。BLOB は `userland/firmware/` へ移して file から load。register の定義と packet の形は MIT の Mesa（`src/broadcom/`）・Broadcom の公開の文書・device tree の binding から取り、file ごとに license を監査する。**改訂（2026-10-04 ユーザー、クリックの回答「事実として使う」）**: V3D・HVS・pixelvalve・HDMI の register の offset と bit は GPL の header にしか無いので、値はハードウェアの事実として使ってよい。名前は一括で独自に改名し、配置・comment・構造は写さず自分で書き、WS の最後の類似の監査で確かめる。zedBSD の code は Zlib。詳細は [WS141](ws141/ws.md) の「ライセンスの扱い」。範囲は WS141 と [WS037](ws037/ws.md)（nvrtx、2026-10-04 ユーザー「やりかたはVC4と同じです」。GSP の firmware は `userland/firmware/`）と [WS214](ws214/ws.md)（Pi 4 の HVS の plane、2026-10-12 ユーザー（クリック）「WS214 にも広げる」: 公開の文書の無い HVS5 の scaled の plane の値も同じ規則で使う、値ごとの出典は `plan/ws214/hvs-values.md`）と [WS039](ws039/ws.md)（AMD RDNA の amdrdna、2026-10-15 ユーザー「値は事実として使い、名前・構造・comment は写さない、をこの WS にも広げます。」: Linux の amdgpu の GPL の file の値も同じ規則で使う、MIT の file・Mesa の RADV・ACO は file ごとに license を監査して出典として使う）だけ（他の WS の GPL の参照には適用しない）。

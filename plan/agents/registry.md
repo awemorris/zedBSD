@@ -6,6 +6,7 @@
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
 | P1 | phase-runner-high | ws313 (q1709-i01) | `/home/awe/zedBSD-worktrees/p1-ws313` / `agent/p1-ws313` | in-progress（2026-10-30 起動。WS009 p028 は後で再開） | — |
+| P2 | phase-runner | ws331 p001 (q1713-i01) | `/home/awe/zedBSD-worktrees/p2-ws331` / `agent/p2-ws331` | in-progress（2026-10-30 起動） | — |
 | P5 | phase-runner | ws327 (q1710-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p5-ws327` / `agent/p5-ws327` | in-progress（2026-10-30 起動） | — |
 | P6 | phase-runner | ws307 (q1711-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p6-ws307` / `agent/p6-ws307` | in-progress（2026-10-30 起動） | — |
 | P8 | phase-runner-low | ws074 p260 (q1708-i01) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-30 13:50 起動） | — |

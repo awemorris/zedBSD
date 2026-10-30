@@ -241,3 +241,9 @@
 | q1710 / q1710-i01 | P5（phase-runner、worktree `/home/awe/zedBSD-worktrees/p5-ws327`・branch `agent/p5-ws327`、基点 main 5aca73738、QEMU） | [ws327](ws327/ws.md) p016 受け入れの残り → p017 → WS の完了 | ユーザー「WS327をP5で実行します。P5はこのWSが終わったら返却してください。」 | in-progress |
 | q1711 / q1711-i01 | P6（phase-runner、worktree `/home/awe/zedBSD-worktrees/p6-ws307`・branch `agent/p6-ws307`、基点 main 5aca73738、QEMU） | [ws307](ws307/ws.md) graphical installer の残り（Resume point から） | ユーザー「WS307をP6で実行します。P6はこのWSが終わったら返却してください。」 | in-progress |
 | q1712 / q1712-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws291`・branch `agent/p7-ws291`、基点 main 5aca73738、実機 10.0.10.3） | [ws291](ws291/ws.md) GPU の描画の速さ（NVIDIA の段、p010 の q1700-i01 節から → p012 以降） | ユーザー「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」 | in-progress |
+
+## 2026-10-30 15:0x: WS331 を P2 で（q1713）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1713 / q1713-i01 | P2（phase-runner、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、基点 main、host だけ） | [ws331-p001](ws331/phase001/phase.md) | 一覧の作成だけ（code は変えない）。ユーザー「了解です。ガードレールに記載してください。これを修正するWSを立ててください。P2で実行してください。HALのマップ関数には、カーネル側に相当する関数があるはずです。まずは違反利用された関数が、どの関数に置き換えられるか、一覧を作成してください。そして、ラッパーがない場合、カーネルに関数追加しますので、その一覧をください。」 | in-progress |

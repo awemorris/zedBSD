@@ -1,14 +1,14 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 14:50（Q1）
+最終更新: 2026-10-30 15:05（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 起動（phase-runner-high、q1709）。実機の試験の image（text の console と Keiland）を作る | image をユーザーに渡す → 実機の結果で直す（ws.md の Resume point）。WS009 p028 は後で再開 |
-| P2 | — | — | — | — |
+| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（phase-runner、q1713）。p001: 違反の関数ごとの置き換え先（既存の kern_*）と、wrapper の無い関数の一覧 | 一覧をユーザーに → kernel に足す関数をユーザーが決める → 書き換えの Phase |
 | P3 | — | — | — | — |
 | P4 | — | — | — | — |
 | P5 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | 起動（phase-runner、q1710）。p016 受け入れの残り（QEMU の回帰、Video Player・Photos の FAIL の解析、08-network） | p017 規約 → WS の完了 → 返却 |

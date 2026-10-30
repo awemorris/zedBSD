@@ -21,7 +21,7 @@
 **判断が解決した時（2026-10-30 ユーザー「判断事項が解決されたらcockpit.mdをアップデートするようにmaster.mdに記録してください。」）**: ユーザーが答えたら、同じ turn のうちに cockpit.md を直して commit する。その項目を「ユーザーの判断を待つ事」から外し、「決まった事」の節へ一行（日付・WS・決定の要約・記録した ws.md か ticket の link）で移す。決定で変わった担当の予定・WS の進捗の表も同じ時に直す。「決まった事」の節もセッションをまたいで残し、消すのはユーザーの指示か確認の後。
 
 <!-- master:agents:start -->
-**動いている担当（2026-10-30 14:05、Q1）**: P1 WS313（q1709、まず ODROID-C5 の試験の image）・P5 WS327（q1710）・P6 WS307（q1711）・P7 WS291（q1712、10.0.10.3）・P8 WS074（q1708）。P5・P6・P7 は WS の完了で返却（ユーザー）。P2・P3・P4 は空き。下の表の「次の 1 手」は各 WS の引き継ぎとして今も有効（P1 の WS009 p028、P2→P5 の WS327、P4→P6 の WS307、P5→P7 の WS291）。
+**動いている担当（2026-10-30 14:05、Q1）**: P1 WS313（q1709、まず ODROID-C5 の試験の image）・P5 WS327（q1710）・P6 WS307（q1711）・P7 WS291（q1712、10.0.10.3）・P8 WS074（q1708）。P5・P6・P7 は WS の完了で返却（ユーザー）。P2 WS331（q1713）。P3・P4 は空き。下の表の「次の 1 手」は各 WS の引き継ぎとして今も有効（P1 の WS009 p028、P2→P5 の WS327、P4→P6 の WS307、P5→P7 の WS291）。
 以前の引き継ぎ（2026-10-30 13:2x、Q1）: 全員返却・ラップアップ済み、成果は全部 main に merge 済み。次のセッションの Q1 は [cockpit.md](cockpit.md) と下の表から再開する。
 再開の手順: (1) `git log -1` と registry の SHA を確かめる。(2) 下の「次のセッションの始めにする事」を順に。(3) 担当は同じ名前・同じ worktree で起動し、表の「次の 1 手」の記録から続けさせる。(4) 10.0.10.3 は `/tmp/zedbsd-rdna.lock` を見る（今は free、Debian、NVMe の kernel は vmunix-va1）。5330 は Debian（NVMe の zedBSD の kernel は WS315 の f1）。
 
@@ -119,7 +119,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-370 · q1713 · WS331 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-370 · q1714 · WS332 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -172,6 +172,7 @@ BUG-370 · q1713 · WS331 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS305](ws305/ws.md) | MG006 | デスクトップの GPU の passthrough の試験環境（Linux＋VFIO＋QEMU、素の起動と使い分け）（2026-10-27 ユーザー） | incomplete（再開待ち） | P4 はラップアップ（2026-10-27）。script と guest の image は用意済み、host（10.0.10.3）では未着手。再開は ws.md の「状態と再開点」 |
 | [WS306](ws306/ws.md) | MG006 | GPU の driver の枠組みの「ゲーム最適化」の UAPI（ON/OFF と option の文字列、GPU の名前と driver の版の取得）（2026-10-27 ユーザー） | planning | p001 の設計（使用量が戻ってから） |
 | [WS052](ws052/ws.md) | MG003 | 電源管理（S0ix を 5330 で初めて動かす、modern standby、/dev/system） | incomplete | 再開点 p014（WS300 p002 の後）、並べて p015・p016、約 31 LW |
+| [WS331](ws331/ws.md) | MG001 | driver から HAL への直の依存を除き kernel の口だけに（2026-10-30 ユーザー） | planning | p001 一覧の作成（P2、q1713） |
 | [WS009](ws009/ws.md) | MG001 | 文書 | incomplete（DOC-54 を今書く、2026-10-27 ユーザーの回答「今書く」） | DOC-54（/dev/gpu の UAPI の文書） |
 | [WS068](ws068/ws.md) | MG006 | EGL と OpenGL ES（と desktop GL 3.0〜4.6）を Vulkan と display 拡張の上に実装する（Wayland とディスプレイ直接の両方）（2026-09-26・27 ユーザー指示） | incomplete・継続（空き時間だけ。受け入れは Venus のみ、2026-10-29 ユーザー） | 次は p045（sample shading、Venus の試験だけ）→ p047〜p068（GL 4.x を分けた物）→ p007 規約 |
 | [WS074](ws074/ws.md) | MG006 | zedBSD の Web ブラウザ `userland/base/zdesktop-browser`（HTML5 の layout engine → 最適化にこだわらない JavaScript engine の接続 → CSS の準拠と Chrome との比較で目標値を段階的に上げる。JS と Wasm の実行 engine を共通化。画像は libpng-compat・新しい libjpeg-compat、TLS は当面 OpenSSL）（2026-09-27 ユーザー指示） | incomplete・継続（Codex のセッション） | WPT Interop 2025 の 100%（ws074-q20261019-55 active） |
