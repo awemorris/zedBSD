@@ -136,7 +136,7 @@ Origin: 2026-10-27 ユーザーの指示。
      これだけだと load が画像・style sheet を待たず 62 件が後退したので、window の load を frame・画像・style sheet・web font の完了まで保留し
      （`page_fire_load` の保留と `page_fire_load_resume`、`page_load_waiting`）、style sheet が後続の script を止める（`page_wait_sheets`）ようにした。
   2. iframe の文書をまたぐ navigation（p261 に詳細）、iframe の timer、別 realm の promise の await、beforeunload・pagehide、initial about:blank、detached。
-     navigation-api の Chromium が通す harness 158 件のうち 80 件が PASS（dev20 では 0 に近かった）。
+     navigation-api の Chromium が通す harness 158 件のうち 80 件が PASS（この 158 件は dev20 で全て非 PASS）。
   3. CSS: `linear-gradient`・`repeating-linear-gradient`（`css/gradient.c`、`paint/gradient.c`、背景 image の bitmap に描く。flexbox の legacy 試験 +14）、
      overflow の computed（visible は他の軸が scroll・hidden なら auto）と shorthand の正規化、declaration の comment の除去、
      flow-relative な margin・padding・inset・border の computed、`border-inline`・`border-block` と各 width・style・color の shorthand、
