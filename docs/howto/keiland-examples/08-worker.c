@@ -19,7 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <threads.h>
 
 /* Where the desktop's fonts are (/opt/keiland/share/fonts for a Linux build under /opt/keiland). */
 #ifndef FONT_DIR
@@ -82,7 +81,7 @@ struct primes {
 	uint32_t width;
 	uint32_t height;
 	struct count *count;
-	thrd_t worker;
+	struct kl_thread *worker;
 	unsigned long done;
 	unsigned long found;
 	char status[128];
@@ -100,7 +99,7 @@ static void primes_input(struct primes *primes, const struct kl_window_event *in
 static void primes_post(struct primes *primes, uint32_t code, void *data);
 static void primes_start(struct primes *primes);
 static void primes_finish(struct primes *primes);
-static int primes_count(void *argument);
+static void primes_count(void *argument);
 static int primes_is_prime(unsigned long number);
 
 int
@@ -429,7 +428,8 @@ primes_post(
 	/* The count handed back: its thread is ending, so it is joined; the record is the program's again. */
 	if (code == POST_FINISHED) {
 		count = data;
-		(void)thrd_join(primes->worker, NULL);
+		(void)kl_thread_join(primes->worker);
+		primes->worker = NULL;
 		primes->done = count->done;
 		primes->found = count->primes;
 		how = "Done";
@@ -449,6 +449,7 @@ static void
 primes_start(
 	struct primes *primes)
 {
+	struct kl_thread_options options;
 	struct count *count;
 	int status;
 
@@ -466,8 +467,13 @@ primes_start(
 	atomic_init(&count->stop, 0);
 
 	/* The worker: from here until POST_FINISHED, the record is its own but for stop. */
-	status = thrd_create(&primes->worker, primes_count, count);
-	if (status != thrd_success) {
+	memset(&options, 0, sizeof(options));
+	options.name = "primes";
+	options.run = primes_count;
+	options.argument = count;
+	options.priority = KL_THREAD_PRIORITY_NORMAL;
+	status = kl_thread_start(&options, &primes->worker);
+	if (status != 0) {
 		free(count);
 		snprintf(primes->status, sizeof(primes->status), "No thread to count on.");
 		return;
@@ -521,7 +527,7 @@ primes_finish(
  * numbers, and hands the count back when it is done or asked to stop.  It
  * calls nothing of libkeiland but the two posts, which any thread may.
  */
-static int
+static void
 primes_count(
 	void *argument)
 {
@@ -565,7 +571,6 @@ primes_count(
 		fprintf(stderr, "primes: the count was lost (%s)\n", strerror(status));
 
 	/* The thread's end: the application's thread joins it. */
-	return 0;
 }
 
 /*

@@ -98,4 +98,44 @@ docs/howto/keiland-examples/08-language.c docs/howto/keiland-examples/08-network
 
 ## 結果
 
-（実装の担当が書く）
+実行日: 2026-10-30（host の `date`）。
+
+- 08-worker.c: `<threads.h>` を外し、`thrd_t` → `struct kl_thread *`（join の後に NULL）、`thrd_create` → `kl_thread_start`（名前 `"primes"`、NORMAL）、
+  `thrd_join` → `kl_thread_join`、thread の関数を `static void primes_count(void *)` に。atomic はそのまま。
+- 08-language.c: `mtx_t`/`cnd_t`/`thrd_t` → `struct kl_mutex`/`struct kl_cond`/`struct kl_thread *`、`mtx_*`/`cnd_*` → `kl_mutex_*`/`kl_cond_*`、
+  thread は名前 `"language"`、`language_reader` は `static void`（`return NULL` 相当は `return;`）。振る舞いは同じ。
+- 08-network.c（新）: 08-worker から育てた。window は同じ形。network の thread は loopback の listen socket と非 blocking の connect socket を
+  `kl_socket_poll`（listen の READABLE・connect の WRITABLE・waker）で同時に待ち、accept と `kl_socket_connect_result` の後に `ping N` を 100 回往復
+  （各往復は `network_wait` で socket と waker を待つ）。10 往復ごとに進みを `kl_app_post`、終わりに回数と平均の μs（`CLOCK_MONOTONIC`）を post。
+  Stop は flag を立ててから `kl_socket_waker_ring`、thread は poll が返った後に flag を見る。窓は FINISHED を受けて `kl_thread_join` してから
+  `kl_socket_waker_close`。`kl_socket_resolve` は使わず本文で説明。
+- keiland-programming.md: 章の一覧・Examples の表（`08-network.c` の行）・導入の C11 threads の注意を libkeiland の thread に・8 章の例の写し 2 つと
+  抜粋・本文の `thrd_*`/`mtx_*`/`cnd_*` の説明・`#L` の参照（08-worker 19、08-language 14 の全て）を新しい行に。節「### Talking over the network」
+  （例の写し、読み方、規則、落とし穴）を「When only the latest answer counts」の後に足した。画像の行は置いていない（p016）。
+
+確かめ（worktree の root）:
+
+- `make -j16 -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-p015-linux build/ws327-p015-linux/lib/libkeiland.so` → exit 0、warning 0。
+- `sh plan/ws314/tests/doc-examples.sh build/ws327-p015-linux/lib` → `SUMMARY pass=76 fail=0 not-done=0`（08-worker・08-language・08-network を clang・gcc の
+  `-Werror` で compile、link、本文の写しが file と byte で同じ）。
+- `python3 -I plan/ws327/tests/doc-lines.py 08-worker.c 08-language.c 08-network.c` → `ws327-doc-lines: PASS`。各参照の first・last を、本文が説明する
+  code と照らして読んだ（変えた範囲は元の file との差分で対応を作り、ずれた物は全て目で確かめた）。
+- `sh plan/ws327/tests/check-base.sh p015` → `ws327-check-base: PASS`。`git diff --check` は空。
+- 08-network の thread 側の動き（窓なし）: 08-network.c を include した使い捨ての試験（scratchpad、git の外）で `network_run` を直に呼び、
+  100 往復・error 0・平均 84 μs・約 2.0 秒、別の thread が 300 ms で Stop（flag と ring）すると 15 往復で `ECANCELED`（300 ms）で終わる事を確かめた。
+  （窓・post・join と waker の close の経路は host では未実施、p016 の guest で。）
+- 突然変異: 本文の 08-worker の写しの 1 行を変える → doc-examples.sh が `FAIL shown 08-worker.c`（fail=1）、`#L34-L36` を `#L34-L9999` にする →
+  doc-lines.py が FAIL（範囲が file の外・words と link が不一致）。どちらも戻して `cmp` で一致。
+
+自分で決めた点:
+
+- 往復の間に 20 ms の pause（`PAUSE_MS`）を、waker だけを時間付きで待つ `kl_socket_poll` で入れた（Stop を押す時間を作るのと、時間付きの poll を見せるため）。
+  平均の時間には含まれない。
+- 進みは worker と同じく kl_app_post の 1 種類（`POST_PROGRESS` / `POST_FINISHED`）。window の post は使わない。
+- `network_finish` は終了時に FINISHED を `kl_app_dispatch(app, -1)` で待つ（thread は必ず FINISHED を post する。post が ENOMEM で失敗すると待ち続けるが、
+  その時は元の worker と同じく結果が失われる事を例のコメントで述べている）。
+- 時刻は `kl_clock_us` でなく `clock_gettime(CLOCK_MONOTONIC)` の小さな関数（別の thread から呼ぶ物の約束が header に無いため）。
+
+未実施: guest での実行と写真（p016）、08-network.png（作らない）、32 bit など他の arch の compile（例は host の clang・gcc のみ）。
+
+Q1 への所見: ws.md の Phase の表は触っていない。
