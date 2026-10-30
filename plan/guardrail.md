@@ -100,6 +100,7 @@ zedBSD の貢献の規則と標準の索引。Queue・backlog・実行許可で�
 | 2026-10-19 | WS275 sun4u の firmware framebuffer（ユーザーのクリック「承認する」、改訂 3 の文面で「改訂 3 で承認」2026-10-19）: hal.h は変えない。include/kern/boot.h に `KERN_BOOT_FRAMEBUFFER_XRGB8888`（3、byte が X,R,G,B の順）と `KERN_BOOT_FRAMEBUFFER_RGB332`（4、loader が palette を設定済みの 8 bpp）を足し定義文を直す（各名前は address の小さい順の byte、XRGB8888 は同じ名前の DRM の format と逆で DRM の XRGB8888 は BGRX8888、RGB332 の bit 7-5・4-2・1-0 と ramp）。bsp-sun4u が名前付きの値 `sun4u.framebuffer.phys`・`.size`（linebytes×height）・`.width`・`.height`・`.pitch`・`.format`・`.pci.vendor`・`.pci.device`、`sun4u.i8042.data`・`.command` を返す（意味は「HAL が表示している framebuffer」、Bochs の fallback の時も返し、NULL は画面を出せなかった時だけ。i8042 は loader の受け渡しから、D4 (a)）。案は [plan/ws275/proposed/hal-sun4u-names.md](ws275/proposed/hal-sun4u-names.md)。再レビューで文面が変われば改めて示す | WS275 |
 | 2026-10-19 | 例外: sun4u の kernel が pcat の `src/drivers/platform/pcat/graphics/vgafont.c`（`drv_pcat_vgafont16`）をそのまま compile する（WS275、design-review-1 の M4。boot-test.py が path で読むので移さない）。generic への移動は F-111 で boot-test.py の追従と一緒に | WS275 |
 | 2026-10-30 | hal.h の RTC の説明の comment に残る KERN_CLOCK_HZ（WS332 で削除）の語を、意味を変えずに今の言葉に直す。宣言・型・約束は変えない（ユーザーの承認） | WS332 p002 |
+| 2026-10-30 | include/hal/atomic.h: 契約を macro だけにする（ENTER の直列化は macro の中の block で enter・leave を宣言して呼ぶ、hal_atomic_cookie_t を消す、arch.h・types.h の include を外し、単体の include を認める comment）。hal.h の宣言は変えない（ユーザーの指示） | WS331 p010 |
 
 2026-09-25 以降、hal.h を変えない `src/hal/` の実装の変更は承認を要しない（上の規則）。hal.h の変更はこの表の承認が要る。
 

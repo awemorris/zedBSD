@@ -1,14 +1,14 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 23:20（Q1）
+最終更新: 2026-10-30 23:45（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。zedBSD-firmware を push し branch を merge（b4e549bfc）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
-| P2 | — | — | 返却（WS331: p008 済み、p009 は atomic.h を除いて済み） | atomic.h の形と pc98・pcat の番地の直書きの判断の後 |
+| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（q1723）。p010: atomic.h を HAL の macro だけの契約で分離、pc98・pcat の窓の番地 | p006 規約の見直し |
 | P3 | — | — | 返却（WS332: p001・p002 cleared、KERN_CLOCK_HZ を削除、wlan の UAPI の期限の不具合を直した） | WS332 p003（率を仮定する残りの literal）・p004 規約は未割当 |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
@@ -83,6 +83,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | p007 | HAL の early console の framebuffer の窓を kernel が外せる形に（amd64 の fb_window を arm64・riscv64 へ） | cleared（2026-10-30、QEMU Pi 4 と VF2 の実機で窓が外れる事を確かめた） |
 | p008 | Pi の共通化と ODROID-C5 の分離、残りの HAL_ARCH_* | 実装済み（watch.c の HVS は bsp-rpi4 へ移した） |
 | p009 | kernel の header から HAL を分ける（_private.h） | atomic.h を除いて済み（kern/types.h、sched・thread・vmspace の _private.h） |
+| p010 | atomic.h の HAL の分離、pc98・pcat の窓の番地 | in-progress（P2） |
 | p006 | 規約の全文の見直し | 未作成 |
 
 表 A（kernel に置き換え先が既にある物）:
@@ -131,17 +132,13 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-### 1. WS331（driver から HAL への直の依存を除く）: include/kern/atomic.h の形
-
-- 背景: kernel の header の HAL の分離（p009）は、atomic.h を除いて済んだ。atomic.h は HAL の atomic の macro を inline 関数で包んでいて、driver の 24 file が直に include する。中身そのものが HAL なので、_private.h に分けるだけでは driver から HAL が消えない。
-- 案 1: 関数を out-of-line にし、本体を src/kern/atomic.c に置く。LTO で inline に戻る見込み。欠点: kernel と driver の .c を compile する host 試験の script・mk（約 148 個）の多くで link の手直しが要る。
-- 案 2（P2 の推し）: atomic.h を compiler の組み込みの __atomic で書く。CPU が atomic の命令を持たない port（m68k・i386・ppc32・ppc64・riscv32・mips32）だけ、build が印を足して kernel の割り込みの禁止で囲む。HAL の atomic の方式と同じかは atomic_private.h で確かめる。欠点: HAL の atomic の実装と arch の事実を kernel の側にも写す（二重の持ち方）。
-- 案 3: atomic.h だけ例外として今のまま残す。
+今は無し。
 
 ## 決まった事
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-30 | WS331 driver の HAL 依存 | HAL の atomic.h は macro だけの契約（直列化は macro の中の block で宣言して呼ぶ、cookie の型を消す、2 行の include を外す）、kernel の atomic.h は使った後に undef | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | pc98・pcat の legacy の VRAM・VGA の窓: platform driver は straight map の基底 0x80000000 を知っている前提で、基底は driver の中で定義し、HAL の定数は参照しない（handoff・API は足さない） | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS331・WS332 | driver は rpi-common・s905x5m、HAL は bsp-rpi-common・bsp-s905x5m-common・bsp-odroidc5 に分ける。kernel の header は整数の型を kernel で定義し、sched・atomic・thread・vmspace は _private.h に分ける。KERN_CLOCK_HZ は obsolete なので削除し、tick を API で扱い可変にする WS332 を立てる | [ws331/ws.md](ws331/ws.md)・[ws332/ws.md](ws332/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | rpi4 の console: HAL の BSP の非公開の関数を呼ばない。resume に当たる処理は driver の中に同等の関数を作る（suspend は kernel_putc の約束で、要れば HAL の実装を直す） | [ws331/ws.md](ws331/ws.md) |

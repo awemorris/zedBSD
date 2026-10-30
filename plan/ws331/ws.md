@@ -21,6 +21,7 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 - 2026-10-30 ユーザーから、Raspberry Pi の console は kernel_putc を入れた時に作り直さなかった事が原因なので、今ここで作り直す、という趣旨の指示を受けた。→ p005 で rpi4-console.c（Pi 4・Pi 5・ODROID-C5）を sun4u-console.c と同じ形に作り直す: driver が firmware の framebuffer を kernel の口で map し、自分の文字の表と font で描き、serial の時は UART の送信も driver で行い、kernel_putc を公開する。graphics が画面を持つ間は描かず、返された時に driver が描き直す。HAL の watch.c の描く先の判断は HVS の状態だけで決める。cons.c の rpi_cons_suspend/resume_output は使われなくなる。
 - 2026-10-30 ユーザーから、driver の build の macro HAL_ARCH_*・HAL_BOARD_* はなるべく残さない、kernel の header が HAL を include する件は簡単なら分ける、という趣旨の指示を受け、Q1 の調べ（16 か所、13 header）を受けて p008・p009 の形になった。
 - 2026-10-30 ユーザーから、pc98・pcat の legacy の VRAM・VGA の窓は straight map の範囲の中にあるので、framebuffer のように HAL から handoff したり straight map の基底を取る kernel の API を足したりはせず、platform driver は基底 0x80000000 を知っている前提で作り、その基底は driver の中で定義し直して HAL の定数を参照しない、という趣旨の指示を受けた。
+- 2026-10-30 ユーザーから、include/hal/atomic.h の契約を「macro だけ」にし、ENTER の port の直列化は wrapper の macro の中の scope で hal_atomic_enter・leave を block の中で宣言して呼ぶ形にし、hal_atomic_cookie_t は消すか define にして include 元で undef し、arch.h・types.h の 2 行の include は外す（hal.h の中で include される事を期待し、kernel の atomic.h が単体で include する使い方も認める）、kernel の atomic.h は HAL の macro で inline 関数を定義した後に HAL の macro を undef する、という趣旨の指示を受けた。HAL_ATOMIC_STYLE は kernel の atomic.h が build の設定から一時的に定義して使い、undef する（Q1 の補い）。
 
 ## 調べの起点（2026-10-30 Q1 の grep、main f29e49c3c）
 
@@ -39,4 +40,5 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 | [p007](phase007/phase.md) | HAL の early console の framebuffer の窓を、kernel が外せる形に（amd64 の fb_window を arm64・riscv64 へ） | cleared（2026-10-30 Q1） | p005 |
 | [p008](phase008/phase.md) | Pi の共通化（drivers rpi-common、HAL bsp-rpi-common）、ODROID-C5 の分離（drivers s905x5m、HAL bsp-s905x5m-common と bsp-odroidc5）、残りの HAL_ARCH_* | in-progress（P2、q1721。74d6760d2〜ae0b1b031、20 port の build、driver の HAL_ の grep 0、raspi4b の login・描き直し・end・serial は済み、Pi 5・ODROID-C5 は build だけ、判定は Q1） | p007 |
 | [p009](phase009/phase.md) | kernel の header から HAL を分ける（kernel の整数の型、_private.h） | in-progress（P2、q1721。22e324fc9・e5e316da5、20 port の build、amd64・rpi4・m68k-virt・riscv64-virt の QEMU、atomic.h は判断待ち、判定は Q1） | p008 |
+| [p010](phase010/phase.md) | atomic.h の HAL の分離（HAL の atomic.h を macro だけの契約に）、pc98・pcat の legacy の窓の番地を driver の基底で | in-progress（P2、q1723） | p009 |
 | p006 | 規約の全文の見直し | 未作成 | p003〜p005 |

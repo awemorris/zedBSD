@@ -298,3 +298,9 @@
 | --- | --- | --- | --- | --- |
 | q1721 / q1721-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p008](ws331/phase008/phase.md) → [p009](ws331/phase009/phase.md) | 2026-10-30 ユーザーから、Pi の共通化と ODROID-C5 の分離、kernel の header の _private.h の分離という趣旨の指示を受けた | uncleared（2026-10-30 返却。p008 済み（watch.c の HVS を bsp-rpi4 へ）、p009 は atomic.h を除いて済み。atomic.h はユーザーの判断待ち。570e03603、merge 2aa9aeabd） |
 | q1722 / q1722-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws332`・branch `agent/p3-ws332`、host・QEMU） | [ws332-p001](ws332/phase001/phase.md) → [p002](ws332/phase002/phase.md) | 2026-10-30 ユーザーから、KERN_CLOCK_HZ を今回削除し、tick を API で扱い可変にする WS を Q1 の提案どおり立てる、という趣旨の指示を受けた | cleared（2026-10-30 Q1。p001 設計、p002 KERN_CLOCK_HZ の削除、wlan の UAPI の deadline_ns、x68k の FPU の検査。19 port の build、QEMU 5 port、host 試験。24a5cdb0d、merge 9d6ed7005） |
+
+## 2026-10-30 23:4x: WS331 p010 を P2 で（q1723）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1723 / q1723-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p010](ws331/phase010/phase.md) | 2026-10-30 ユーザーから、HAL の atomic.h を macro だけの契約にして kernel の atomic.h で undef する形と、pc98・pcat の legacy の窓の番地を driver の基底で書く形の趣旨の指示を受けた | in-progress |
