@@ -3,7 +3,7 @@
 # ws326-p018 slice data と macroblock の syntax
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: 実装済み・試験 PASS（2026-10-30、Q1 の受け入れ待ち。p001 で作成）。
+- 状態: cleared（2026-10-30 Q1 の判定。実装と試験は Sonnet 5.5 high、fd42b4a26）。
 - 依存: p002、p008、p009、p012（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 

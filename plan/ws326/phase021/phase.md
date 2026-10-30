@@ -63,3 +63,8 @@ deblocking は chroma の QP に `picture->chroma_qp_offset[0]`・`[1]` を全 m
 
 - memory_management_control_operation 5 の picture は、`h264sw_dpb_store` を呼ぶ前に `frame->frame_num = 0` にする（7.4.3。DPB の項目の frame_num は `current->frame_num` から写る。decoder.h の手順 6 は POC の写しだけを書いている）。
 - gap の非存在の frame の POC（type 0）は DPB の中の最も新しい frame の POC か 0（p006 の判断、phase006/phase.md の結果）。適合の試験の gap の stream（MR9_BT_B など）で出力の順を確かめる。
+
+## p018 から引き継ぐ事（2026-10-30 Q1）
+
+- CABAC の residual（coded_block_flag、8x8 の coded_flags の bit、mb_qp_delta の文脈、CABAC の I_16x16・I_4x4）は p018 の単体試験に無い。統合と適合（CABAC の stream）で確かめる。
+- SP・SI の slice は ENOTSUP（範囲の外の profile）。
