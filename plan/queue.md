@@ -430,3 +430,12 @@
 | q1754 / q1754-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333`・branch `agent/p7-ws333`、host と build） | [ws333](ws333/ws.md) p003 → p006 | kernel の口の header の案と review、cpuperf の枠組みの kernel の実装と host 試験。UAPI（p004）は作らない | in-progress |
 | q1755 / q1755-i01 | O-p021（phase-runner-high、Opus、worktree `/home/awe/zedBSD-worktrees/o-ws326-p021`・branch `agent/o-ws326-p021`） | [ws326-p021](ws326/phase021/phase.md) | phase.md のとおり。h264sw-reflist.h の非存在の frame の印だけ header を直してよい（新しい BASE を記録） | in-progress |
 | q1756 / q1756-i01 | S-p023（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws326-p023`・branch `agent/s-ws326-p023`） | [ws326-p023](ws326/phase023/phase.md) | phase.md のとおり。p021 と並べ、実 stream の試験は p021 の merge の後 | in-progress |
+
+## 2026-10-31: Bug の 3 つ目の束（q1757）
+
+上の q1750 と同じユーザーの指示（Bug を自動でスケジュールして直す）。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1757 / q1757-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs3`・branch `agent/p2-bugs3`、QEMU と host、image は /tmp） | [BUG-360](bugs/BUG-360.md)・[BUG-306](bugs/BUG-306.md)・[BUG-292](bugs/BUG-292.md)・[BUG-289](bugs/BUG-289.md)・[BUG-365](bugs/BUG-365.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
+

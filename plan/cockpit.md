@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 03:11（Q1）
+最終更新: 2026-10-31 03:12（Q1）
 
 ## 担当（P1〜P8）
 
@@ -10,7 +10,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
-| P2 | — | — | 返却（04:0x）。BUG-363・344・366・354・352・328 を直して closed（QEMU） | 次の割当を Q1 が決める |
+| P2 | Bug | open の Bug の 3 つ目の束（QEMU と host） | q1757: BUG-360（installer の Backspace）→ BUG-306（Settings の回転）→ BUG-292（frame callback の保留）→ BUG-289（xHCI の suspend）→ BUG-365（GPU の header・comment の食い違い） | 1 つ目の束の 6 件は closed（main f81fef099） |
 | P3 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除く | q1737: p006 規約の全文の見直し（約 230 file、規約の担当 3 つを並べる）→ WS331 の完了 | 返却（WS332 は P6 へ移した） |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS318](ws318/ws.md) | libmedia の作り直し（Vulkan の device の共有・codec の指定・encoder・カメラ・libavcodec の内部の fallback） | q1752: p001 設計（design-reviewer と問いの一覧まで） | WS306 の設計は済み（main 843847185、問い Q306-7・9 は下の 0b）。WS326 の後にすぐ実装に入れるよう先に設計 |
