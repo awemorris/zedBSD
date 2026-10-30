@@ -7741,6 +7741,7 @@ allocation_run_reserve(
 	uint32_t fragment;
 	uint32_t ndblk;
 	uint32_t free_blocks;
+	uint32_t limit;
 	unsigned count;
 	unsigned n;
 	int wrapped;
@@ -7767,19 +7768,22 @@ allocation_run_reserve(
 		/*
 		 * Finds the first complete free block and its bounded
 		 * contiguous run: from where the last run in this group ended,
-		 * and when nothing is free past that, from the group's start.
+		 * and when nothing is free past that, from the group's start up
+		 * to where the first search began.
 		 */
 		fragment = cg_search_start(ms, cg, ms->super.dblkno, ndblk);
+		limit = ndblk;
 		wrapped = 0;
 		if (fragment == ms->super.dblkno)
 			wrapped = 1;
 		for (;;) {
 			/* Finds the next free block and the free blocks after it. */
-			count = cg_free_blocks(&ms->super, map, fragment, ndblk, run->reserved, &fragment);
+			count = cg_free_blocks(&ms->super, map, fragment, limit, run->reserved, &fragment);
 
 			/* Nothing is free past the hint: the start of the group is searched once. */
 			if (count == 0 && !wrapped) {
 				wrapped = 1;
+				limit = fragment;
 				fragment = ms->super.dblkno;
 				continue;
 			}
@@ -7969,6 +7973,14 @@ allocation_write_run(
 	if (ms->journal_enabled &&
 	    bytes / UFS_SECTOR_SIZE > ms->journal.sector_count - 2U)
 		bytes = (ms->journal.sector_count - 2U) * UFS_SECTOR_SIZE;
+
+	/*
+	 * The tail journal commits the run's content as one group, which
+	 * holds at most UFS_JOURNAL_GROUP_SECTORS.
+	 */
+	if (ms->journal_enabled &&
+	    bytes / UFS_SECTOR_SIZE > UFS_JOURNAL_GROUP_SECTORS)
+		bytes = (size_t)UFS_JOURNAL_GROUP_SECTORS * UFS_SECTOR_SIZE;
 
 	/* Counts the whole blocks that many bytes reach. */
 	count = (unsigned)(bytes / ms->super.bsize);

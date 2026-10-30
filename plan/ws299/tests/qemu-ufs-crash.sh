@@ -1,5 +1,6 @@
 #!/bin/sh
-# ws299: a native UFS (mkfs -t ufs --profile=native, the batched journal) cut off while a long file write is in
+# ws299: a native UFS (mkfs -t ufs --profile=native, the batched journal; PROFILE=journal-snapshot makes the tail
+# journal volume, whose allocation runs are committed through the journal instead) cut off while a long file write is in
 # flight, on the serial console.  Beside the boot disk a blank 2 GiB NVMe.  First boot: format and mount it, write
 # KEPT_MIB MiB of random bytes to /c/kept in 1 MiB writes (many allocation runs, across indirect blocks) and fsync it
 # (sync FILE), then write BIG_MIB MiB more to /c/big in the background and cut the machine off (QEMU killed) after
@@ -18,6 +19,7 @@ IMAGE=${1:?image}
 shift
 [ $# -gt 0 ] || set -- 2 6
 KEPT_MIB=${KEPT_MIB:-72}
+PROFILE=${PROFILE:-native}
 BIG_MIB=${BIG_MIB:-600}
 mkdir -p "${WS299_RUNS:-build/tmp}"
 fresh_out "${WS299_RUNS:-build/tmp}"/qemu-ufs-crash
@@ -70,7 +72,7 @@ for seconds in "$@"; do
 		kill $pid 2> /dev/null
 		continue
 	fi
-	run "reg=\$(echo no | mkfs -t ufs --profile=native nvme1n1 2>&1 | sed -n 's/.*registration=\([0-9]*\).*/\1/p'); echo \"FORMAT nvme1n1:\$reg\" | mkfs -t ufs --profile=native nvme1n1 > /dev/null 2>&1; mkdir -p /c; mount -t ufs /dev/nvme1n1 /c && echo MOUNTED"
+	run "reg=\$(echo no | mkfs -t ufs --profile=$PROFILE nvme1n1 2>&1 | sed -n 's/.*registration=\([0-9]*\).*/\1/p'); echo \"FORMAT nvme1n1:\$reg\" | mkfs -t ufs --profile=$PROFILE nvme1n1 > /dev/null 2>&1; mkdir -p /c; mount -t ufs /dev/nvme1n1 /c && echo MOUNTED"
 	run "dd if=/dev/urandom of=/root/kept bs=1048576 count=$KEPT_MIB 2> /dev/null; dd if=/root/kept of=/c/kept bs=1048576 2> /dev/null && sync /c/kept && cksum < /c/kept | sed 's/^/KEPT /'"
 	kept=$(tr -d '\r' < "$RUN/guest.txt" | sed -n 's/^KEPT //p' | head -1)
 	run "(dd if=/dev/urandom of=/c/big bs=1048576 count=$BIG_MIB > /dev/null 2>&1 &); echo STARTED"

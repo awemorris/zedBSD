@@ -1087,11 +1087,11 @@ write_range(
 	uint64_t amount_blocks;
 	int full;
 	int delayed;
-	int batching;
+	unsigned batch_wait;
 	uint32_t run_blocks;
 
 	in = data;
-	batching = 1;
+	batch_wait = 0;
 
 	/* Rejects a missing buffer, an empty range, or a read-only disk. */
 	if (data == NULL || count == 0)
@@ -1135,13 +1135,15 @@ write_range(
 		/*
 		 * A delayed write of whole lines takes several at once, under
 		 * one hold of the cache lock to look them up and one to give
-		 * them back.  Once the cache has no line to take over, the rest
-		 * of the write goes a line at a time, which allocates.
+		 * them back.  When it cannot (the cache has room to allocate, a
+		 * line is busy, the start is inside a line), the next
+		 * BUF_RUN_LINES lines go one at a time before it is tried again,
+		 * so that a cache with room does not pay for both.
 		 */
-		if (delayed && batching) {
+		if (delayed && batch_wait == 0) {
 			run_blocks = write_cached_lines(disk, leaf, mapped, end - mapped, in);
 			if (run_blocks == 0)
-				batching = 0;
+				batch_wait = BUF_RUN_LINES;
 		}
 		if (run_blocks != 0) {
 			mapped += run_blocks;
@@ -1200,6 +1202,10 @@ write_range(
 
 		in += amount_blocks * leaf->d_block_size;
 		mapped += amount_blocks;
+
+		/* One more line has gone one at a time before the next batch. */
+		if (batch_wait != 0)
+			batch_wait--;
 	}
 
 	/* Reports the completed write. */
@@ -3735,8 +3741,9 @@ evict_one(
  * reports 1.  A line that is referenced, busy, being written or dirty (and
  * not to be discarded) is left, and an unranged walk moves it to the head,
  * so that the lines a writer keeps dirty at the tail are not walked over
- * again by every eviction; they come back to the tail written.  cache_lock
- * is held.
+ * again by every eviction.  This gives such a line a second turn through
+ * the LRU: once written it is evicted after the clean lines that were
+ * older than it.  cache_lock is held.
  */
 static int
 evict_take_locked(
