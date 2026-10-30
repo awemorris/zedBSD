@@ -22,13 +22,18 @@
 | --- | --- | --- | --- |
 | P1 | q1701-i01 in-progress | [ws009](ws009/ws.md) p009（DOC-54 /dev/gpu の文書）を標準廉価実装手順の Phase に組み直す設計（worktree p1-ws009。骨格 docs/reference/gpu*.md 13 本と照合の script plan/ws009/tests/check-gpu-uapi-doc.py は 5fedf634d、次は phase.md 群と design-reviewer）。済んだら Sonnet で節ごとの Phase、その後 WS296 → WS297 を同じ形で 1 つずつ（ユーザー） | — |
 | P2 | q1697-i02 in-progress | [ws327](ws327/ws.md) p003 の guest PASS（89d4d139b、Q1 の判定待ち）、p007 委譲の設計の途中（Win32 の骨格・build-win32.sh・check-layers.py は済み、次は p008〜p017 の phase.md）（worktree p2-ws327、branch は未 merge。Mailer の途中の移行 6bb8c3c8d は build しないので p008 の後に merge） | QEMU |
-| P3 | q1696-i01 返却（09:16） | [ws315](ws315/ws.md) p006 in-progress、branch agent/p3-ws315 b2e867978 は **未 merge**（同時の send が 2347→1030 に落ちる退行。2 倍 1030、1.25 倍 1645、同時の recv は 2334〜2356 で Linux 並み）。次の 1 手は P3 の branch の plan/ws315/phase006/phase.md の「引き継ぎ」（1.5 倍の kernel を 5330 で、往復の延びで広げるのを止める案、決めた後に回帰と 10GbE）。Q1 の残り: build/tmp/p006-base・build/p006a-*・build/p006-k1・p006-g10・p006-g12・p006-amd64 の削除（p3-ws315 の worktree） | 5330（Debian、NVMe の zedBSD は g10 の kernel） |
+| P3 | q1696-i01 返却（09:16） | [ws315](ws315/ws.md) p006 in-progress、main cbd98d6f4 に merge（2026-10-30 ユーザー「WS315はマージしてOKです。再開時に同時sendを解決しましょう。」）。同時の send の退行（2 倍 1030、1.25 倍 1645、前 2347）が残り。次の 1 手は [phase006](ws315/phase006/phase.md) の「引き継ぎ」（1.5 倍の kernel を 5330 で、往復の延びで広げるのを止める案、決めた後に回帰と 10GbE）。Q1 の残り: p3-ws315 の build/tmp/p006-base・build/p006a-*・build/p006-k1・p006-g10・p006-g12・p006-amd64 の削除 | 5330（Debian、NVMe の zedBSD は g10 の kernel） |
 | P4 | q1698-i01 返却（09:13） | [ws307](ws307/ws.md)（main fbdd143a8 に merge、branch agent/p4-ws307o 520360247）: p002 cleared（upload）。p015 sleep Never 実装・host 試験 PASS、QEMU は host の負荷で 2 回未達（load の低い時に 3 回目）。p004 pkgconf と各 package の開発の file、clang・libcxx は build 済み、installer-image を 1 本だけ build → p004-gtk.sh（並行の make は不可）。p008 は p004-gtk.sh の j3 で確かめ直し。p014 は p007 の C を後で。p007 は driver の設計の下書き（改訂 3、SMEP・SMAP の下の 1:1 の map を HAL を変えずに作れるか）。Q1 の残り: proposed/hal-uefi-variables.md・hal-fw-variables.md の削除（link を外してから）。CI の別件 2 つは phase002 | QEMU |
 | P5 | q1700-i01 返却（09:13、計測は未実施） | [ws291](ws291/ws.md) NVIDIA: kernel の build だけ（vmunix-m0）、引き継ぎ c59e5a60e（main 12a2cc467）。次の 1 手は [phase010](ws291/phase010/phase.md) の「q1700-i01」節（main の userland を NVMe に入れ、rtx-desk-profile.sh を 2 回、p012 を立てる） | 10.0.10.3 は free |
 | Sonnet | — | [ws326](ws326/ws.md): cleared 20 Phase（p007 参照の list も main 5d43ad00d）。次: p015（補間と重み）・p017（B の direct）を Sonnet で並べて起動 → p019 → p021 の前に reflist の header の直し（[phase021](ws326/phase021/phase.md) の p007 の引き継ぎ）→ p021（Opus）→ p022 → p026・p023〜p025 | — |
 
 予定（ユーザーの決定、各 ws.md）: WS326 の後に WS318（すぐ）と WS329（H.264 encoder）、WS329 の後に WS330（H.265）。WS315 の後に WS221 と WS299。WS328 は WS074 と調整してから p001。
-ユーザーへの未回答: WS250 を「QEMU の起動の回帰だけ流して完了、fault の app と isolate は Future Work」で閉じてよいか、WS309 p015 の判断 1〜4（phase015/phase.md）。
+**次のセッションの始めにする事（2026-10-30 ユーザー）**:
+1. [BUG-363](bugs/BUG-363.md)（image に /etc/hosts が無い）に取り組む（ユーザー「BUG-363は、次回のセッション開始時に取り組むようにスケジュールしておいてください。」）。
+2. P3 を再起動し WS315 p006 の同時の send の退行を解決（ユーザー「再開時に同時sendを解決しましょう。」）。
+3. [WS250](ws250/ws.md) の QEMU の起動の回帰を流して completed に（ユーザー「WS250は流してよいです。」。fault の app・isolate の道は Future Work へ）。
+4. ユーザーに [WS309 p015](ws309/phase015/phase.md) の「要る判断」1〜4 を聞く（ユーザー「WS309の判断は、次回セッション開始時に聞いてくれるように記録してください。」。聞く前に AGENTS.md §3 の前置き: WS の番号と説明・状態・決まっていない事・用語の説明）。
+5. 上の表の担当（P1・P2・P4・P5）と WS326 の Sonnet（p015・p017）を再開。
 
 止めたまま: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS299](ws299/ws.md)（継続の判断待ち）。
 main に未 merge の branch は [registry](agents/registry.md) の試験待ちの欄。web の GET は「統合の注意」の条件で可。HAL の差分の承認は無い。

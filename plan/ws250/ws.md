@@ -59,3 +59,7 @@ Resume point: 2026-10-29 P5（q1676-i02、worktree p5-ws250、先頭は記録の
 - QEMU の boot の回帰: nvrtx は QEMU（Venus）では読まれないので要らない（amd64 の vmunix の build は main で warning 0 を確かめた）。
 - GPU の fault を出す app の試験と isolate の道: Future Work の候補（その app と stuck の出る条件が無い）。
 - RESET を先にする案（取り消しの停滞 4.3 s → 約 2 s の見込み）: ユーザーの決定 Q250-1（STOP）から外れるのでユーザーに聞いている。答えまで WS250 は incomplete。
+
+## 閉じ方（2026-10-30）
+
+Q1 の案「QEMU の起動の回帰だけ流して完了、GPU の fault の app と isolate の道は Future Work」にユーザー「WS250は流してよいです。」。→ 次のセッションの始めに QEMU の起動の回帰（design.md 6.2）を流し、PASS なら completed の形に書き直す。
