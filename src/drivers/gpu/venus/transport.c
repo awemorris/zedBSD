@@ -24,6 +24,9 @@
 #include <uapi/errno.h>
 #include <limits.h>
 
+/* How long the stop sleeps while the worker leaves, before it reaps again, in milliseconds (a tick at least). */
+#define VENUS_WORKER_EXIT_POLL_MS 1U
+
 #define VENUS_RING_AVAILABLE		1024U
 #define VENUS_RING_USED			1280U
 #ifndef CONFIG_GPU_CONTROL_MS
@@ -2633,6 +2636,7 @@ venus_worker_stop(
 	struct thread *worker;
 	uint64_t deadline;
 	uint64_t now;
+	uint64_t stop_wait;
 	unsigned long irq;
 	int error;
 
@@ -2659,13 +2663,14 @@ venus_worker_stop(
 
 	/* The retained thread must exit before mappings and locks can be destroyed or reset. */
 	now = sched_ticks();
-	if (now > UINT64_MAX - kern_ms_to_ticks(15000U)) {
+	stop_wait = kern_ms_to_ticks(15000U);
+	if (now > UINT64_MAX - stop_wait) {
 		mutex_unlock(&transport->worker_lock);
 		return EOVERFLOW;
 	}
 
 	/* A successful thread_wait consumes the creator's retained thread reference. */
-	deadline = now + kern_ms_to_ticks(15000U);
+	deadline = now + stop_wait;
 	while (1) {
 		error = thread_wait(worker, NULL);
 		if (error == 0)
@@ -2685,7 +2690,7 @@ venus_worker_stop(
 		}
 
 		/* Lets the woken worker finish its final condition check and exit. */
-		sched_sleep(now + 1U);
+		sched_sleep(now + kern_ms_to_ticks(VENUS_WORKER_EXIT_POLL_MS));
 	}
 
 	/* Null now proves the thread no longer retains transport storage. */

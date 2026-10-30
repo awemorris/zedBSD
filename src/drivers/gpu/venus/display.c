@@ -24,6 +24,9 @@
 
 #include <uapi/errno.h>
 
+/* How long a wait for the worker sleeps before it looks again, in milliseconds (a tick at least). */
+#define VENUS_DISPLAY_POLL_MS 1U
+
 #define VENUS_DISPLAY_REFRESH		50000U
 #define VENUS_DISPLAY_MAX_REFRESH	((uint64_t)kern_clock_tick_rate() * 1000U)
 #define VENUS_EDID_BYTES		1024U
@@ -345,7 +348,7 @@ drv_venus_display_stop(
 			return ETIMEDOUT;
 
 		/* A short ordinary sleep lets the requested worker leave its current wait and return. */
-		sched_sleep(now + 1U);
+		sched_sleep(now + kern_ms_to_ticks(VENUS_DISPLAY_POLL_MS));
 	}
 
 	/* A successful reap consumes the creator's only thread reference. */

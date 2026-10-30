@@ -274,14 +274,16 @@ clock_milliseconds(
 	void *context)
 {
 	uint64_t ticks;
+	uint64_t milliseconds;
 
 	(void)context;
 
 	/* Scales the tick counter to milliseconds. */
 	ticks = clock_ticks();
+	milliseconds = kern_ticks_to_ms(ticks);
 
 	/* Reports the elapsed milliseconds. */
-	return kern_ticks_to_ms(ticks);
+	return milliseconds;
 }
 
 /*
@@ -294,8 +296,13 @@ uint64_t
 kern_ms_to_ticks(
 	uint64_t milliseconds)
 {
+	uint64_t ticks;
+
+	/* Rounds the time up to the ticks that cover it. */
+	ticks = scale_ceil(milliseconds, tick_rate, 1000U);
+
 	/* Reports the ticks that cover the time. */
-	return scale_ceil(milliseconds, tick_rate, 1000U);
+	return ticks;
 }
 
 /*
@@ -305,8 +312,13 @@ uint64_t
 kern_us_to_ticks(
 	uint64_t microseconds)
 {
+	uint64_t ticks;
+
+	/* Rounds the time up to the ticks that cover it. */
+	ticks = scale_ceil(microseconds, tick_rate, 1000000U);
+
 	/* Reports the ticks that cover the time. */
-	return scale_ceil(microseconds, tick_rate, 1000000U);
+	return ticks;
 }
 
 /*
@@ -316,8 +328,13 @@ uint64_t
 kern_ns_to_ticks(
 	uint64_t nanoseconds)
 {
+	uint64_t ticks;
+
+	/* Rounds the time up to the ticks that cover it. */
+	ticks = scale_ceil(nanoseconds, tick_rate, KERN_NSEC_PER_SEC);
+
 	/* Reports the ticks that cover the time. */
-	return scale_ceil(nanoseconds, tick_rate, KERN_NSEC_PER_SEC);
+	return ticks;
 }
 
 /*
@@ -327,8 +344,13 @@ uint64_t
 kern_ticks_to_ms(
 	uint64_t ticks)
 {
+	uint64_t milliseconds;
+
+	/* Rounds the ticks down to whole milliseconds. */
+	milliseconds = scale_floor(ticks, 1000U, tick_rate);
+
 	/* Reports no more time than the ticks have counted. */
-	return scale_floor(ticks, 1000U, tick_rate);
+	return milliseconds;
 }
 
 /*
@@ -338,8 +360,13 @@ uint64_t
 kern_ticks_to_us(
 	uint64_t ticks)
 {
+	uint64_t microseconds;
+
+	/* Rounds the ticks down to whole microseconds. */
+	microseconds = scale_floor(ticks, 1000000U, tick_rate);
+
 	/* Reports no more time than the ticks have counted. */
-	return scale_floor(ticks, 1000000U, tick_rate);
+	return microseconds;
 }
 
 /*
@@ -349,8 +376,13 @@ uint64_t
 kern_ticks_to_ns(
 	uint64_t ticks)
 {
+	uint64_t nanoseconds;
+
+	/* Rounds the ticks down to whole nanoseconds. */
+	nanoseconds = scale_floor(ticks, KERN_NSEC_PER_SEC, tick_rate);
+
 	/* Reports no more time than the ticks have counted. */
-	return scale_floor(ticks, KERN_NSEC_PER_SEC, tick_rate);
+	return nanoseconds;
 }
 
 /*
@@ -365,8 +397,13 @@ kern_ticks_to_rate(
 	uint64_t ticks,
 	uint64_t rate)
 {
+	uint64_t count;
+
+	/* Rounds the ticks down to whole counts at the other rate. */
+	count = scale_floor(ticks, rate, tick_rate);
+
 	/* Reports the whole counts the ticks have reached. */
-	return scale_floor(ticks, rate, tick_rate);
+	return count;
 }
 
 /*
@@ -807,29 +844,6 @@ clock_realtime(
 		*nanoseconds = now.tv_nsec;
 }
 
-/* Enters the realtime offset write side of the sequence lock. */
-static void
-realtime_write_begin(
-	void)
-{
-	/* Waits for exclusive writer ownership. */
-	while (!atomic_try_acquire_zero(&realtime_writer))
-		hal_compiler_barrier();
-
-	/* Marks the offset as being written. */
-	(void)atomic_raw_fetch_add_relaxed(&realtime_sequence, 1U);
-}
-
-/* Leaves the realtime offset write side of the sequence lock. */
-static void
-realtime_write_end(
-	void)
-{
-	/* Marks the offset as stable again and releases the writer. */
-	(void)atomic_raw_fetch_add_relaxed(&realtime_sequence, 1U);
-	atomic_store_release(&realtime_writer, 0);
-}
-
 /*
  * Sleeps for at least min_us microseconds, yielding the CPU.
  *
@@ -911,6 +925,29 @@ kern_usleep_range(
 
 		spin_unlock_irqrestore(&lock, enabled);
 	}
+}
+
+/* Enters the realtime offset write side of the sequence lock. */
+static void
+realtime_write_begin(
+	void)
+{
+	/* Waits for exclusive writer ownership. */
+	while (!atomic_try_acquire_zero(&realtime_writer))
+		hal_compiler_barrier();
+
+	/* Marks the offset as being written. */
+	(void)atomic_raw_fetch_add_relaxed(&realtime_sequence, 1U);
+}
+
+/* Leaves the realtime offset write side of the sequence lock. */
+static void
+realtime_write_end(
+	void)
+{
+	/* Marks the offset as stable again and releases the writer. */
+	(void)atomic_raw_fetch_add_relaxed(&realtime_sequence, 1U);
+	atomic_store_release(&realtime_writer, 0);
 }
 
 /*

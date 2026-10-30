@@ -37,6 +37,9 @@
 
 #include <uapi/errno.h>
 
+/* How long a refresh wait sleeps before it looks again, in milliseconds (a tick at least). */
+#define I915_REFRESH_POLL_MS 1U
+
 static void i915_refresh_sample(struct i915_device *device, uint64_t *count, uint64_t *time_ns, int *lit);
 
 /*
@@ -121,8 +124,8 @@ drv_i915_display_refresh_wait(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Looks again a tick later. */
-		sched_sleep(now + 1U);
+		/* Looks again a millisecond later. */
+		sched_sleep(now + kern_ms_to_ticks(I915_REFRESH_POLL_MS));
 	}
 
 	/* Succeeded: the boundary after the cursor. */

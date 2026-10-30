@@ -817,12 +817,14 @@ uint64_t
 ghci_scan_now_ns(void)
 {
 	uint64_t ticks;
+	uint64_t nanoseconds;
 
 	/* The clock's ticks, in nanoseconds. */
 	ticks = clock_ticks();
+	nanoseconds = kern_ticks_to_ns(ticks);
 
 	/* Succeeded: the time. */
-	return kern_ticks_to_ns(ticks);
+	return nanoseconds;
 }
 
 /*

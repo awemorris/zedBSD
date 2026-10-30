@@ -30,9 +30,12 @@
 #include "drivers/gpu/powervr/interface.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
+/* How long a poll of the firmware sleeps before it looks again, in milliseconds (a tick at least). */
+#define COMMAND_POLL_MS 1U
+
 /*
  * How many times a wait reads a return slot before it starts sleeping a
- * tick at a time: most commands are answered within microseconds.
+ * millisecond at a time: most commands are answered within microseconds.
  */
 #define COMMAND_SPINS		4096U
 
@@ -118,7 +121,7 @@ powervr_command_wait(
 	uint32_t executed;
 	unsigned spins;
 
-	/* Reads the return slot, first in a short spin, then once a tick. */
+	/* Reads the return slot, first in a short spin, then once a millisecond. */
 	firmware = &core->firmware;
 	deadline = ms_deadline(milliseconds);
 	spins = 0;
@@ -157,8 +160,8 @@ powervr_command_wait(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Sleeps one tick. */
-		sched_sleep(now + 1U);
+		/* Sleeps a millisecond (a tick at least). */
+		sched_sleep(now + kern_ms_to_ticks(COMMAND_POLL_MS));
 	}
 
 	/* Clears the slot for its next command, now that its answer is read. */
@@ -190,7 +193,7 @@ powervr_command_wait_executed(
 	uint64_t now;
 	uint32_t executed;
 
-	/* Reads the count once a tick until it reaches the command or the bound is spent. */
+	/* Reads the count once a millisecond until it reaches the command or the bound is spent. */
 	firmware = &core->firmware;
 	deadline = ms_deadline(milliseconds);
 	for (;;) {
@@ -205,8 +208,8 @@ powervr_command_wait_executed(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Sleeps one tick. */
-		sched_sleep(now + 1U);
+		/* Sleeps a millisecond (a tick at least). */
+		sched_sleep(now + kern_ms_to_ticks(COMMAND_POLL_MS));
 	}
 }
 
@@ -215,7 +218,7 @@ powervr_command_wait_executed(
  *
  * A kernel buffer that is full only means the firmware has not read the
  * commands before it yet (the kicks of every session share it), so the
- * send is tried again once a tick within the same bound, as a kick's is,
+ * send is tried again once a millisecond within the same bound, as a kick's is,
  * rather than failing the caller's operation (a resource's creation, a
  * flush) at once.
  *
@@ -247,8 +250,8 @@ powervr_command_run(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Sleeps one tick. */
-		sched_sleep(now + 1U);
+		/* Sleeps a millisecond (a tick at least). */
+		sched_sleep(now + kern_ms_to_ticks(COMMAND_POLL_MS));
 	}
 
 	/* The firmware's buffer refused it for another reason. */

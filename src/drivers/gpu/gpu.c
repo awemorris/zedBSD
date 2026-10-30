@@ -42,6 +42,9 @@
 #include <uapi/errno.h>
 #include <limits.h>
 
+/* How long a stop sleeps while a worker leaves, before it reaps again, in milliseconds (a tick at least). */
+#define GPU_WORKER_EXIT_POLL_MS 1U
+
 #define GPU_DEVICE_BASE		0x00090000U
 #define GPU_RESOURCE_STORAGE	1U
 #define GPU_RESOURCE_BLOB	2U
@@ -7557,7 +7560,7 @@ gpu_monitor_stop(
 		}
 
 		/* Lets the woken worker leave its final condition check. */
-		sched_sleep(now + 1U);
+		sched_sleep(now + kern_ms_to_ticks(GPU_WORKER_EXIT_POLL_MS));
 	}
 
 	/* Successful reap consumes the creator's retained thread reference. */

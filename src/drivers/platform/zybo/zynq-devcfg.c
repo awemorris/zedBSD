@@ -69,6 +69,9 @@
 #include <uapi/errno.h>
 #include <uapi/fpga.h>
 
+/* How long a register poll sleeps before the next read, in milliseconds (a tick at least). */
+#define DEVCFG_POLL_MS 1U
+
 /* The device number of /dev/fpga0 (the next free one after the DMA test's 0x00170000 and 0x00180000). */
 #define FPGA_DEVICE_NUMBER		0x00190000U
 
@@ -406,18 +409,18 @@ wait_for(
 	uint64_t now;
 	uint32_t value;
 
-	/* Reads the register a tick at a time until the bits say so or time is up. */
+	/* Reads the register a millisecond at a time until the bits say so or time is up. */
 	deadline = sched_ticks() + kern_ms_to_ticks(milliseconds);
 	for (;;) {
 		value = devcfg_read(offset);
 		if ((value & mask) == expected)
 			break;
 
-		/* Gives up at the deadline, or waits a tick for the next read. */
+		/* Gives up at the deadline, or waits a millisecond for the next read. */
 		now = sched_ticks();
 		if (now >= deadline)
 			return ETIMEDOUT;
-		sched_sleep(now + 1U);
+		sched_sleep(now + kern_ms_to_ticks(DEVCFG_POLL_MS));
 	}
 
 	/* Succeeded: the bits read as expected. */
@@ -771,11 +774,11 @@ configure_logic(
 		if ((interrupts & IXR_D_P_DONE) != 0)
 			break;
 
-		/* Gives up at the deadline, or waits a tick for the next read. */
+		/* Gives up at the deadline, or waits a millisecond for the next read. */
 		now = sched_ticks();
 		if (now >= deadline)
 			break;
-		sched_sleep(now + 1U);
+		sched_sleep(now + kern_ms_to_ticks(DEVCFG_POLL_MS));
 	}
 
 	/* Clears what the transfer raised, but not PCFG_DONE, which is the logic's answer. */

@@ -1907,11 +1907,13 @@ flip_report(
 	struct powervr_display *display)
 {
 	uint64_t now;
+	uint64_t period;
 	uint32_t presents;
 
 	/* Not yet time, or nothing to say. */
 	now = sched_ticks();
-	if (now - display->report_tick < kern_ms_to_ticks(POWERVR_FLIP_REPORT_MS))
+	period = kern_ms_to_ticks(POWERVR_FLIP_REPORT_MS);
+	if (now - display->report_tick < period)
 		return;
 	presents = display->report_presents;
 	display->report_tick = now;

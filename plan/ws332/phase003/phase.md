@@ -39,6 +39,12 @@ clock.c の関数（`kern_ms_to_ticks()`・`kern_us_to_ticks()`）に任せる�
   comment どおりの約 10 秒（1000 回）になった（前は約 100 秒）。`kern_usleep_range()` の途中の起床の回数。他は今のどの率でも同じ値。
 - 書き換えに伴う comment: xd-screen.h の hook の説明「10 ms ticks」→「scheduler ticks」、clock.h の `kern_usleep_range()` の説明（busy の delay と書いていたのを
   実際の yield する sleep に）。`kern_usleep_range()` は書き換えたので、関数の形（宣言・comment・名前）も規約に合わせた。
+- 追加（p004 の見直しの途中で見つけた、同じ類の残り）: design.md の「約 8 か所」は `sched_ticks() + 1U` の形だけを数えており、`now + 1U` の形の
+  「次の tick まで」の待ちが driver にさらに 24 か所あった（zynq-devcfg.c 2、powervr の commands.c 3・render.c 1・render-queue.c 1・firmware-boot.c 2、
+  amdrdna display.c 2、nvrtx present.c 1、venus transport.c 1・display.c 1、gpu.c 1、i915 worker.c 1・control.c 1・xd9-flip.c 1、
+  mali の gpu.c 2・csf.c 1・queue.c 2・mmu.c 1）。同じ規則（各 file の 1 ms の名前、`kern_ms_to_ticks()`）で直し、「a tick」と書いていた comment を
+  「a millisecond」に直した。これは p004 の commit に入っている。venus display.c の `target = now + 1U`（tick の整数で計算する frame の境界の最小）は
+  design.md §2 の F 類（tick の単位の計算）なので残した。
 - 範囲の外として残した物: 期限の補いの `+ 1U`（上の「範囲の外」）、host 試験の偽の時計の tick（i915 contracts の sync_contract_test.c の `+ N`）。
 
 ### 確かめ（P6）

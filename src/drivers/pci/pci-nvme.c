@@ -2598,11 +2598,17 @@ static uint64_t
 nvme_timeout_ticks(
 	unsigned milliseconds)
 {
-	uint64_t ticks =
-		kern_ms_to_ticks(milliseconds);
+	uint64_t ticks;
 
-	/* Returns the computed result. */
-	return ticks == 0U ? 1U : ticks;
+	/* Rounds the timeout up to ticks. */
+	ticks = kern_ms_to_ticks(milliseconds);
+
+	/* A zero timeout still waits a tick. */
+	if (ticks == 0U)
+		return 1U;
+
+	/* Succeeded: the ticks that cover the timeout. */
+	return ticks;
 }
 
 /* Waits for the controller to report that it is ready. */

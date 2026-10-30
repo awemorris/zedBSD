@@ -53,6 +53,9 @@
 
 #include "intel/commands.h"
 
+/* The longest sleep for the worker's answer before it is looked for again, in milliseconds (a tick at least). */
+#define I915_WORKER_SYNC_WAIT_MS 1U
+
 /*
  * How many session contexts of the render engine can be live at once.
  *
@@ -548,9 +551,9 @@ drv_i915_worker_park(
 			break;
 		}
 
-		/* Sleeps until the worker says something, or a tick. */
+		/* Sleeps until the worker says something, or a millisecond at most. */
 		observed = waitq_sequence(&worker->sync_done);
-		(void)waitq_sleep(&worker->sync_done, &device->irq_lock, observed, now + 1U, 0U);
+		(void)waitq_sleep(&worker->sync_done, &device->irq_lock, observed, now + kern_ms_to_ticks(I915_WORKER_SYNC_WAIT_MS), 0U);
 	}
 
 	spin_unlock_irqrestore(&device->irq_lock, irq);

@@ -200,6 +200,7 @@ vm_reclaim_frame(
 {
 	uint64_t started;
 	uint64_t now;
+	uint64_t oom_wait;
 	size_t free_pages;
 	size_t minimum;
 	unsigned long irq;
@@ -250,7 +251,8 @@ vm_reclaim_frame(
 
 		/* Kills the largest process when nothing has been freed for long. */
 		now = sched_ticks();
-		if (now - started < kern_ms_to_ticks((uint64_t)VM_OOM_WAIT_SECONDS * 1000U))
+		oom_wait = kern_ms_to_ticks((uint64_t)VM_OOM_WAIT_SECONDS * 1000U);
+		if (now - started < oom_wait)
 			continue;
 		killed = vm_oom_kill();
 		if (!killed)

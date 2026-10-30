@@ -55,6 +55,9 @@
 #include "drivers/gpu/amdrdna/amdrdna-private.h"
 #include "drivers/gpu/amdrdna/amdrdna-regs.h"
 
+/* The longest sleep for a display event before the state is looked at again, in milliseconds (a tick at least). */
+#define DISPLAY_EVENT_WAIT_MS 1U
+
 /*
  * The plane's pixel format of 32-bit colour (A, R, G, B from the top
  * byte down, B first in memory) and its linear tiling mode: the only
@@ -822,7 +825,7 @@ amdrdna_display_flip_wait(
 	/* The time the flip has to begin. */
 	deadline = sched_ticks() + kern_ms_to_ticks(DISPLAY_FLIP_WAIT_MS);
 
-	/* Looks at the plane after every flip interrupt, and at least each tick. */
+	/* Looks at the plane after every flip interrupt, and at least each millisecond. */
 	for (;;) {
 		/* Whether a flip waits, and what the plane reads. */
 		control = display_read(device, AMDRDNA_DCN_PLANE_FLIP_CONTROL, device->gop.plane);
@@ -836,11 +839,11 @@ amdrdna_display_flip_wait(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Sleeps until the next display event or the next tick. */
+		/* Sleeps until the next display event, or a millisecond at most. */
 		irq = spin_lock_irqsave(&display->lock);
 
 		sequence = waitq_sequence(&display->waitq);
-		(void)waitq_sleep(&display->waitq, &display->lock, sequence, now + 1U, 0U);
+		(void)waitq_sleep(&display->waitq, &display->lock, sequence, now + kern_ms_to_ticks(DISPLAY_EVENT_WAIT_MS), 0U);
 
 		spin_unlock_irqrestore(&display->lock, irq);
 	}
@@ -893,7 +896,7 @@ amdrdna_display_refresh_wait(
 	uint64_t now;
 	unsigned long irq;
 
-	/* Looks at the counter after every frame interrupt, and at least each tick. */
+	/* Looks at the counter after every frame interrupt, and at least each millisecond. */
 	display = &device->display;
 	for (;;) {
 		/* The count now. */
@@ -908,11 +911,11 @@ amdrdna_display_refresh_wait(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Sleeps until the next display event or the next tick. */
+		/* Sleeps until the next display event, or a millisecond at most. */
 		irq = spin_lock_irqsave(&display->lock);
 
 		sequence = waitq_sequence(&display->waitq);
-		(void)waitq_sleep(&display->waitq, &display->lock, sequence, now + 1U, 0U);
+		(void)waitq_sleep(&display->waitq, &display->lock, sequence, now + kern_ms_to_ticks(DISPLAY_EVENT_WAIT_MS), 0U);
 
 		spin_unlock_irqrestore(&display->lock, irq);
 	}
