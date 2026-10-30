@@ -34,7 +34,7 @@
 | P5 | q1700-i01 返却 | [WS291](ws291/ws.md) NVIDIA: [phase010](ws291/phase010/phase.md) の「q1700-i01」節（main の userland を NVMe に入れ desktop を測る → p012 以降） | 10.0.10.3 |
 | P8 | q1708-i01 in-progress | [WS074](ws074/ws.md) Web ブラウザ（libbrowser）: [phase260](ws074/phase260/phase.md) Interop 2025 の Chromium が通る試験を全部通す。local の host で比較の環境を作り直し → dev20 の全件の測定 → gap の大きい原因から（phase-runner-low、2026-10-30 ユーザー） | host |
 | P6・P7 | 返却 | P7 は [WS313](ws313/ws.md) C5 の実機の試験（VF2 が空いてから）。P6 は未割当 | — |
-| Sonnet | — | [WS326](ws326/ws.md) H.264 decoder: 20 Phase cleared。次は p015（補間と重み）・p017（B の direct）を並べて起動 → p019 → reflist の header の直し（[phase021](ws326/phase021/phase.md) の p007 の引き継ぎ）→ p021（Opus）→ p022 → p026・p023〜p025 | — |
+| Sonnet | — | [WS326](ws326/ws.md) H.264 decoder: 20 Phase cleared。次は p015（補間と重み）・p017（B の direct）を並べて起動 → p019 → reflist の header の直し（[phase021](ws326/ws.md) の p007 の引き継ぎ）→ p021（Opus）→ p022 → p026・p023〜p025 | — |
 
 **次のセッションの始めにする事**（ユーザーの指示の原文は各 ws.md・ticket）:
 1. [BUG-363](bugs/BUG-363.md)（image に /etc/hosts が無い）。
@@ -78,7 +78,6 @@
 <!-- master:focus:start -->
 - 公開は rev.5 まで（実質のベータ2）。次に何をやるかは Q1 とユーザーが整理中。「保留の WS」はその整理の対象。
 - 実装の進め方: 外部の標準仕様に基づく物と、手順に分けられる大きな仕事は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../docs/agent/spec-module-delegation.md)、Opus が設計、Sonnet 5.5 high が実装）。今の対象は WS326・WS327・WS009・WS328、次に WS296・WS297・WS329・WS330。
-- **H.264 の software の decoder**（[WS326](ws326/ws.md)）: 2026-10-31 ユーザーから、libmedia の実装の WS を昼までに終わるよう優先度を上げてスケジュールする、という趣旨の指示を受けた。Q1 が P3 の列から外して直に回す（p015・p017 → p019 → p021 → p022・p023 → p024・p026 → p025）。共通部分は H.265 でも使える汎用の名前にする（ユーザー）。
 - **ユーザーの不在の間（2026-10-31 未明〜昼）**: 2026-10-31 ユーザーから、設計だけ進められる WS は設計を、実装できる WS は実装だけでも、試験できるなら試験も進める、という趣旨の指示を受けた。
 - **文書**（[WS009](ws009/ws.md)）: /dev/gpu の UAPI の文書（DOC-54）は完成、残りは build・boot の再現だけ。
 - **GPU の描画の速さ**（[WS291](ws291/ws.md)）: RDNA は Linux と同等、NVIDIA は scene-5000 で NVK と同等（49.5〜49.7 fps）、50 fps を明らかに超える改善と desktop の測り直しが残り。
@@ -193,7 +192,6 @@ BUG-378 · q1781 · WS334 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS323](ws323/ws.md) | MG006 | ODROID-C5（Amlogic S905X5M） の Vulkan Video: H.264・H.265 の decode と encode（Amlogic の VPU、encode は hardware の有無の確認から）を Mali の Vulkan の executor の Vulkan Video として | planning | WS318 の completed の後 |
 | [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | planning | WS318 の completed の後 |
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
-| [WS326](ws326/ws.md) | MG006 | libmedia の H.264 の software の decoder（独自、module の設計は Opus、実装は Sonnet 5.5 high）（2026-10-30 ユーザー） | incomplete（q1695 P1 が p001） | p001 module の設計 |
 | [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
 | [WS329](ws329/ws.md) | MG006 | libmedia の H.264 の software の encoder（標準廉価実装手順、decoder と共通化）（2026-10-30 ユーザー） | planning | WS326 の completed の後に p001 設計（Opus） |
 | [WS330](ws330/ws.md) | MG006 | libmedia の H.265 の software の decoder と encoder（標準廉価実装手順、H.264 と共通化）（2026-10-30 ユーザー） | planning | WS329 の completed の後に p001 設計（Opus） |
