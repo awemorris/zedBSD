@@ -2,7 +2,7 @@
 
 # ws331-p004: i915 の map と MSI、試験の代役
 
-Status: in-progress
+Status: cleared（2026-10-30 Q1。build、i915 の display の host 試験、contract の試験。ktest-sync の 5330 は未実施）
 Parent: [WS331](../ws.md)
 Queue: q1717（P2）
 

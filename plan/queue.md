@@ -272,7 +272,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1717 / q1717-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、main に追従、host・QEMU） | [ws331-p002](ws331/phase002/phase.md)・[p003](ws331/phase003/phase.md)・[p004](ws331/phase004/phase.md) | ユーザー「表A,Bを許可します」 | uncleared（2026-10-30 返却。p002・p003・p004 は実装と確かめが済み（20 port の build、QEMU の起動）、cleared は Q1 の判定待ち。4cccd1200、merge 40d455593） |
+| q1717 / q1717-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、main に追従、host・QEMU） | [ws331-p002](ws331/phase002/phase.md)・[p003](ws331/phase003/phase.md)・[p004](ws331/phase004/phase.md) | ユーザー「表A,Bを許可します」 | cleared（2026-10-30 Q1。p002・p003・p004 cleared） |
 
 ## 2026-10-30 18:3x: WS307 p007 を P6 で（q1718）
 
@@ -284,4 +284,4 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1719 / q1719-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p005](ws331/phase005/phase.md) | 2026-10-30 ユーザーから、Raspberry Pi の console を kernel_putc の形に今作り直す、という趣旨の指示を受けた。pc98 の 3 か所も | in-progress |
+| q1719 / q1719-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p005](ws331/phase005/phase.md) | 2026-10-30 ユーザーから、Raspberry Pi の console を kernel_putc の形に今作り直す、という趣旨の指示を受けた。pc98 の 3 か所も | uncleared（2026-10-30 返却。p005 は実装と QEMU・host・VF2 の起動まで。残り: VF2 の画面の目視、amd64 の Venus、Pi で GPU の最初の flip の EBUSY（HAL が framebuffer の view を持つ）） |

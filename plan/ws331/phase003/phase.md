@@ -2,7 +2,7 @@
 
 # ws331-p003: 表 A の機械的な置き換え
 
-Status: in-progress
+Status: cleared（2026-10-30 Q1。20 port の build、QEMU の起動 pcat・sun4u・rpi4・amd64・riscv64・armv7）
 Parent: [WS331](../ws.md)
 Queue: q1717（P2）
 

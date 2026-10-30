@@ -2,7 +2,7 @@
 
 # ws331-p002: kernel に表 B を足す（driver は変えない）
 
-Status: in-progress
+Status: cleared（2026-10-30 Q1。20 port の build）
 Parent: [WS331](../ws.md)
 Queue: q1717（P2）
 
