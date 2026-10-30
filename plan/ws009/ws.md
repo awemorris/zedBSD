@@ -9,7 +9,7 @@ Related Milestones: MG006, MG008, MG009
 Objectives: O2, O4, O5
 Parent: [Master](../master.md)
 Queue: なし
-Resume point: p001〜p008・p010〜p024 cleared（p009 canceled）。DOC-54 は完了（p024 main d2c8a5969）。2026-10-30 P1（q1705-i01）が WS の完了の条件を確かめ、満ちない条件が残った（下の「WS の受け入れの確認（2026-10-30）」）。満たすために p025〜p028 を立てた（2026-10-30 Q1 の判断「案 A〜D を Phase にする」）: p025（Opus、P1）と p026（Sonnet）は並べてよい、p027（Sonnet）は p025・p026 の後、p028（Opus、P1）は p026 の後。完了の形への書き直しと Phase の directory の片付けは p025〜p028 の後に受け入れを確かめ直してから。照合の script は plan/ws009/tests/check-gpu-uapi-doc.py（基点 4dfcce008）、共通の規則は [gpu-doc-rules.md](gpu-doc-rules.md)。docs の link の試験の既知の失敗: `docs/agent/awesome-plan/README.md` の `img/1.png` ほか 6 件（固定版の欠け、触らない、2026-10-29 Q1）
+Resume point: 2026-10-30 11:12 P1 ラップアップ（q1705-i01）。p025・p026・p027 は cleared（main 581085a8c・2dd8d03b0・13e2ab4b2）。p028 は in-progress: DOC-T60 済み（compatibility-profile.md の `uapi_ptr_t` の macro 名を直した、ac71abd11）。clean tree の build は native の disk-image まで exit 0、boot の判定は script の誤り（QMP の socket の path 長）で未、script は直した。次の 1 手は [phase028](phase028/phase.md) の「次の 1 手」（`P028_BOOT_ONLY=… p028-reproduce.sh native`、その後 hybrid・uefi・bios）。p028 が済んだら WS の受け入れを確かめ直し（下の「WS の受け入れの確認」の表）、ws.md を完了の形の案にし、移す物（`check-relative-links.noct`・`check-docs-current.py`・`check-gpu-uapi-doc.py`（と `gpu-doc-rules.md`）を `plan/tools/docs-check/` へ、Q1 が指示した LLVM cache の asset 名の need 行を `check-docs-current.py` に足す）と消す物（phase001〜phase028 の directory、`check-completed-producer-docs.noct`、`p028-reproduce.sh`、`tests/README.md` の WS009 だけの節）の一覧を Q1 へ送る。照合の script は plan/ws009/tests/check-gpu-uapi-doc.py（基点 4dfcce008）、共通の規則は [gpu-doc-rules.md](gpu-doc-rules.md)。docs の link の試験の既知の失敗: `docs/agent/awesome-plan/README.md` の `img/1.png` ほか 6 件（固定版の欠け、触らない、2026-10-29 Q1）
 Target: **ベータ2**（2026-10-13 ユーザー「WS196、WS172、WS009はベータ2に入れます。」。旧: ベータ3（2026-10-08 ユーザー））
 <!-- awesome-plan-current:end -->
 
@@ -52,7 +52,7 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p025`](phase025/phase.md) | cleared（2026-10-30 Q1、main 581085a8c。managed-wlan.md 全面書き直し・network-console.md、usage の 9 形が一致、link PASS 1037。guest の実行は未確かめ） | 案 A: DOC-55 managed-wlan.md を今の `net wifi`（add・modify・delete・session）と `net lan`・`net startup` に合わせる。依存: なし |
 | [`ws009-p026`](phase026/phase.md) | cleared（2026-10-30 Q1、main 2dd8d03b0。Noct 2.0.3 の値、menuconfig の label、索引から全て辿れる・Status 行の欠け 0、link PASS 1036） | 案 B: build-from-source.md の Noct 2.0.3 と variant の label、evdev.md の Noct の版、索引（media-playback・release の beta2）、状態の行 11 file。依存: なし |
 | [`ws009-p027`](phase027/phase.md) | planned（2026-10-30 P1 の設計、Sonnet 5.5 high、Q1 が起動） | 案 C: DOC-T70〜T72 の照合を source から値を読む `check-docs-current.py` に作り直す、plan/tools/docs-check/ へ移す案。依存: p025・p026 |
-| [`ws009-p028`](phase028/phase.md) | in-progress（2026-10-30 P1。DOC-T60 済み: 不一致 1 件（`uapi_ptr_t` の macro 名）を直した。build・boot の再現は未着手） | 案 D: clean な tree からの build と amd64 QEMU の boot の再現（DOC-T20・T30・T72）、互換の主張と WS001 の照合（DOC-T60）。依存: p026（DOC-T60 は依存なし） |
+| [`ws009-p028`](phase028/phase.md) | in-progress（2026-10-30 P1。DOC-T60 済み: 不一致 1 件（`uapi_ptr_t` の macro 名）を直した。clean tree の native の disk-image は exit 0、boot の判定と hybrid・uefi・bios は未、ラップアップで停止） | 案 D: clean な tree からの build と amd64 QEMU の boot の再現（DOC-T20・T30・T72）、互換の主張と WS001 の照合（DOC-T60）。依存: p026（DOC-T60 は依存なし） |
 
 ## WS の受け入れの確認（2026-10-30 P1、q1705-i01、基点 main aaf2bc280）
 

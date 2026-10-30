@@ -27,6 +27,14 @@ summary=$out/summary.txt
 variants=${*:-native hybrid uefi bios}
 jobs=${P028_JOBS:-16}
 
+# P028_BOOT_ONLY=DIR boots the hdd-VARIANT.img images an earlier run left in
+# DIR again (into new boot-*-<time> directories) without building.
+if [ -n "${P028_BOOT_ONLY:-}" ]; then
+	out=$P028_BOOT_ONLY
+	src=$out/src
+	logs=$out/logs
+	summary=$out/summary.txt
+fi
 mkdir -p "$src" "$logs" || exit 1
 sha=$(git rev-parse HEAD) || exit 1
 
@@ -44,7 +52,30 @@ step() {
 	return $status
 }
 
+boot_one() {
+	local variant=$1 mode=$2 image=$out/hdd-$variant.img
+	# BOOT_TEST_WORK stays the tool's default (a new directory under TMPDIR):
+	# the QMP socket's path must be shorter than 108 bytes.
+	OUTPUT=$out/boot-$variant-$mode-$stamp BOOT_MODE=$mode BOOT_TIMEOUT=300 \
+		timeout 600 "$src/plan/tools/boot-test.sh" "$image" \
+		>"$logs/boot-$variant-$mode-$stamp.log" 2>&1
+	say "boot $variant $mode: exit $? (PNG under $out/boot-$variant-$mode-$stamp)"
+}
+
 say "p028 reproduce: commit $sha, output $out, started $(date '+%Y-%m-%d %H:%M:%S')"
+
+if [ -n "${P028_BOOT_ONLY:-}" ]; then
+	for variant in $variants; do
+		[ -f "$out/hdd-$variant.img" ] || { say "boot $variant: no image"; continue; }
+		case $variant in
+		native|uefi) boot_one "$variant" uefi-nvme ;;
+		hybrid) boot_one "$variant" uefi-nvme; boot_one "$variant" bios-ide ;;
+		bios) boot_one "$variant" bios-ide ;;
+		esac
+	done
+	say "p028 boot only: finished $(date '+%Y-%m-%d %H:%M:%S')"
+	exit 0
+fi
 
 # The clean tree: the committed files only, no build state.
 git archive --format=tar "$sha" | tar -x -C "$src" || { say "FAIL archive"; exit 1; }
@@ -68,14 +99,6 @@ step firmware-licenses 1800 sh -c 'yes | make firmware-licenses'
 # The amd64 sysroot inside the clean tree (part of make toolchain).
 step sysroot-amd64 7200 make -j"$jobs" sysroot-amd64 || { say "FAIL sysroot"; exit 1; }
 
-boot_one() {
-	local variant=$1 mode=$2 image=$out/hdd-$variant.img
-	OUTPUT=$out/boot-$variant-$mode BOOT_TEST_WORK=$out/work-$variant-$mode \
-	BOOT_MODE=$mode BOOT_TIMEOUT=300 \
-		timeout 600 "$src/plan/tools/boot-test.sh" "$image" \
-		>"$logs/boot-$variant-$mode.log" 2>&1
-	say "boot $variant $mode: exit $? (PNG under $out/boot-$variant-$mode)"
-}
 
 for variant in $variants; do
 	# Guide: ZEDBSD_VARIANT is set in config.mk by hand.
