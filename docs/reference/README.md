@@ -30,6 +30,9 @@ structures, constants, errors and permissions that programs and people use
 - [Vulkan Video decode](vulkan-video.md): H.264 decode on Intel Gen12's video
   engine through the Vulkan Video extensions, its limits, result status and
   differences from the specification.
+- [GPU device interface](gpu.md): the /dev/gpuN nodes, their permissions,
+  capabilities, memory, sharing, submission, fences, jobs, display, command
+  stream and sysctl variables, with the index of every request.
 - [VisionFive 2 GPU](visionfive2-gpu.md): the PowerVR BXE-4-32's Vulkan
   range, memory, firmware and licence, start-up stages and the test programs
   gpu-selftest, vkmatrix and vkreset.
