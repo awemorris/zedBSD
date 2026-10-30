@@ -67,7 +67,7 @@ WS326（main 901f5b5fc の `userland/desktop/libmedia/h264sw*.h`、全部読ん�
 | H.264 の module | H.265 での使い方 | 共通化 |
 | --- | --- | --- |
 | h264sw.h（上限・誤りの約束・算術の規則） | 誤りの値と算術の規則は同じ。上限は codec ごと | 誤りの約束・算術の規則・補助を `vcodec.h` へ（[proposed/common/vcodec.h](proposed/common/vcodec.h)）。h264sw.h は上限だけ残し vcodec.h を include |
-| h264sw-bits（u・ue・se・te・more_rbsp_data・trailing） | そのまま（H.265 7.2・9.2 は同じ記述子）。H.265 の `byte_alignment()` を足す | WS326 p026 が `vcodec-bitreader` に移す（[../ws326/phase026/phase.md](../ws326/phase026/phase.md)）。WS330 p002 が `vcodec_bitreader_byte_alignment` を足す（[proposed/common/vcodec-bitreader.h](proposed/common/vcodec-bitreader.h)） |
+| h264sw-bits（u・ue・se・te・more_rbsp_data・trailing） | そのまま（H.265 7.2・9.2 は同じ記述子）。H.265 の `byte_alignment()` を足す | WS326 p026 が `vcodec-bitreader` に移す（[WS326](../ws326/ws.md) p026（phase.md は完了で消した））。WS330 p002 が `vcodec_bitreader_byte_alignment` を足す（[proposed/common/vcodec-bitreader.h](proposed/common/vcodec-bitreader.h)） |
 | h264sw-nal（Annex B の分割・NAL header・RBSP） | 分割と emulation prevention の除去は同じ（H.265 B.2・7.4.2）。header は 2 byte で別 | WS326 p026 が `vcodec-nal`（find と unescape）に移す。header の読みは codec ごと（`h265sw-nal`）。WS330 では足す物無し |
 | h264sw-cabac（engine・文脈の初期化・表 9-44・9-45） | engine と表は同じ（H.265 Table 9-52・9-53 は H.264 の 9-44・9-45 と同じ値）。文脈の初期化の式も同じ（9-6 と 9-5）。文脈の数と (m, n) の出し方（initValue）は別 | WS326 p026 が engine（文脈の byte の pointer を受ける形、表、`vcodec_cabac_context_init`、`vcodec_cabac_pcm`）を `vcodec-cabac` に移し、`struct h264sw_cabac` は engine と 460 の文脈を並べる形になる。WS330 p002 が H.265 用に `vcodec_cabac_bypass_bits` と `vcodec_cabac_position`（terminate の後の byte の位置: H.265 の PCM と substream の切り替え）を足し、`vcodec_cabac_pcm` を position と start で書き直す（[proposed/common/vcodec-cabac.h](proposed/common/vcodec-cabac.h)、p026 §7 の提案と同じ形） |
 | h264sw-cabac-init（(m, n) の表） | 使わない（H.265 は initValue の表、`h265sw-cabac-init`） | 無し |
@@ -80,7 +80,7 @@ WS326（main 901f5b5fc の `userland/desktop/libmedia/h264sw*.h`、全部読ん�
 | h264sw-decoder | 流れの形（NAL → AU の境 → picture の始まりと終わり → 出力、開始と回復、時刻）は同じ考え。code は別 | 無し（形を写すだけ） |
 | h264sw-backend | libmedia の ops の大半（packet の変換、NAL の分割、出力の複写、時刻、遅れた拒否への応え）は codec に依らない | WS318 p006a の後に共通の核を出す（D21、p030） |
 | bits.h（`media_rbsp_unescape`） | 使わない（`vcodec_nal_unescape` が末尾の 0x03 を扱う） | 無し |
-| 試験の道具（`plan/ws326/tests/unit/check.h`・`bitwriter.h`・`cabacwriter.h`） | `check.h` を使う。書きの逆の実装は WS329 の製品の `vcodec-bitwriter`・`vcodec-cabac-enc` を使う（§10.1） | 無し |
+| 試験の道具（`plan/tools/h264sw/unit/check.h`・`bitwriter.h`・`cabacwriter.h`） | `check.h` を使う。書きの逆の実装は WS329 の製品の `vcodec-bitwriter`・`vcodec-cabac-enc` を使う（§10.1） | 無し |
 
 ### 4.2 encoder（WS329）
 
@@ -99,7 +99,7 @@ WS326（main 901f5b5fc の `userland/desktop/libmedia/h264sw*.h`、全部読ん�
 
 ### 5.1 順
 
-1. **WS326 p026**（P4、2026-10-31 に設計、[../ws326/phase026/phase.md](../ws326/phase026/phase.md)）: bit の読み（`vcodec-bitreader`）・NAL の分割と除去（`vcodec-nal`）・CABAC の engine（`vcodec-cabac`）・共通の約束（`vcodec.h`）を移す。frame と DPB は WS330 p001 の設計へ先送り（Q1 の判断）。proposed/common の名前はこの p026 の名前に合わせた（`vcodec-bitreader`、`vcodec_cabac_context_init`、`VCODEC_CABAC_START_BYTES`、`vcodec_cabac_pcm`）。
+1. **WS326 p026**（P4、2026-10-31 に設計、[WS326](../ws326/ws.md) p026（phase.md は完了で消した））: bit の読み（`vcodec-bitreader`）・NAL の分割と除去（`vcodec-nal`）・CABAC の engine（`vcodec-cabac`）・共通の約束（`vcodec.h`）を移す。frame と DPB は WS330 p001 の設計へ先送り（Q1 の判断）。proposed/common の名前はこの p026 の名前に合わせた（`vcodec-bitreader`、`vcodec_cabac_context_init`、`VCODEC_CABAC_START_BYTES`、`vcodec_cabac_pcm`）。
 2. WS326 completed → WS318 → WS329 completed（ユーザーの決定: WS330 の実装は WS329 の completed の後）。
 3. **WS330 p002**（Opus）: decoder 側の残りの共通化（§5.2 の C1〜C4）。frame と DPB を共通にし、H.264 の decoder と **H.264 の encoder（WS329 も `h264sw_frame`・`h264sw_frame_pool`・`h264sw_dpb` を使う）** の両方を移す。
 4. WS330 p003（Opus）: H.265 の decoder の header と骨格を source に、BASE。

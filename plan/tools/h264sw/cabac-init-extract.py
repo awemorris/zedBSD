@@ -3,7 +3,7 @@
 #
 # The (m, n) pair of every ctxIdx and set is read from the pdftotext -layout text of ITU-T H.264
 # (08/2021) Tables 9-12 to 9-24 (PDF pages 250 to 258) and compared with the dump the C test prints.
-#   python3 -I plan/ws326/tests/cabac-init-extract.py <spec.pdf> <dump.txt>
+#   python3 -I plan/tools/h264sw/cabac-init-extract.py <spec.pdf> <dump.txt>
 # <dump.txt> is the output of "test-cabac_init --dump": one line "ctxIdx set m n" per pair
 # (460 x 4 = 1840 lines).  Last line: "cabac-init-extract: PASS (1840 pairs)" or "... FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib

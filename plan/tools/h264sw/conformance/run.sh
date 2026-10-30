@@ -1,25 +1,25 @@
 #!/bin/sh
 # The JVT conformance test of the software H.264 decoder (libmedia's h264sw-*): conform.c is built with every
 # h264sw-*.c and vcodec-*.c except the back end, and bits.c, with ASan and UBSan, and run on each stream of
-# plan/ws326/tests/conformance/list.txt (or the <dir>/<name> given) whose zip fetch.sh has unpacked: the bitstream
+# plan/tools/h264sw/conformance/list.txt (or the <dir>/<name> given) whose zip fetch.sh has unpacked: the bitstream
 # is decoded and each output frame compared with the reference decoder's YUV (size, count, MD5 of each frame).
-#   sh plan/ws326/tests/conformance/run.sh [<dir>/<name>...]
-# The unpacked zips are under $H264SW_CONFORMANCE_DIR (default build/tmp/ws326-conformance/zips), as fetch.sh
+#   sh plan/tools/h264sw/conformance/run.sh [<dir>/<name>...]
+# The unpacked zips are under $H264SW_CONFORMANCE_DIR (default build/tmp/h264sw-conformance/zips), as fetch.sh
 # leaves them.  Each line of the result says the stream, what list.txt expects (in, out:<reason>, or ?) and what
 # happened: PASS (every frame equal), OUT (the decoder refused it, with the reasons conform read), FAIL.
 # An expectation of in must PASS and one of out:<reason> must be OUT with that reason; ? only reports.
 # The conformance streams with arbitrary slice order also use slice groups (FM1_FT_E, FM2_SVA_C), which are out; so
 # the streams of $aso_streams (Baseline and Extended with several slices per picture, in order) are decoded a second
 # time with conform --aso, each picture's slices given in reverse, and must still equal the reference.
-# Last line: conform-run: PASS (<n> in, <m> out) or conform-run: FAIL.  Output under build/tmp/ws326-conform
+# Last line: conform-run: PASS (<n> in, <m> out) or conform-run: FAIL.  Output under build/tmp/h264sw-conform
 # (a fresh run directory): <name>.log per stream and results.txt.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../../.."
 . plan/tools/fresh-out.sh
-list=plan/ws326/tests/conformance/list.txt
-cache=${H264SW_CONFORMANCE_DIR:-build/tmp/ws326-conformance/zips}
-out=build/tmp/ws326-conform
+list=plan/tools/h264sw/conformance/list.txt
+cache=${H264SW_CONFORMANCE_DIR:-build/tmp/h264sw-conformance/zips}
+out=build/tmp/h264sw-conform
 fresh_out "$out"
 status=0
 
@@ -32,7 +32,7 @@ for file in userland/desktop/libmedia/h264sw-*.c userland/desktop/libmedia/vcode
 done
 
 if ! cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined \
-    -fno-omit-frame-pointer -I. plan/ws326/tests/conformance/conform.c $modules userland/desktop/libmedia/bits.c \
+    -fno-omit-frame-pointer -I. plan/tools/h264sw/conformance/conform.c $modules userland/desktop/libmedia/bits.c \
     -lm -o "$out/conform" > "$out/build.log" 2>&1; then
 	echo "conform: FAIL (build)"
 	head -20 "$out/build.log"
@@ -45,7 +45,7 @@ export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 
 # The bitstream and the reference of a zip whose names the extensions do not settle: <name> <bitstream> <reference>
 # [<frames>], paths inside the unpacked zip; <frames> when the reference holds more frames than the bitstream gives.
-overrides=plan/ws326/tests/conformance/files.txt
+overrides=plan/tools/h264sw/conformance/files.txt
 
 # The streams decoded a second time with their slices in reverse order (see above).
 aso_streams="AVCv1/BA1_FT_C AVCv1/BASQP1_Sony_C AVCv1/CI1_FT_B AVCv1/SVA_Base_B AVCv1/SVA_CL1_E AVCv1/CABAST3_Sony_E"

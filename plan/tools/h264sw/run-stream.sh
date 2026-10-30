@@ -10,13 +10,13 @@
 #     the next IDR picture;
 #  3. starts a stream at each of its pictures, and once after a reset.
 # Without ffmpeg the comparisons are skipped (said so) and the decoding still runs.
-#   sh plan/ws326/tests/run-stream.sh
-# Last line: run-stream: PASS or run-stream: FAIL.  Output under build/tmp/ws326-stream (a fresh run directory).
+#   sh plan/tools/h264sw/run-stream.sh
+# Last line: run-stream: PASS or run-stream: FAIL.  Output under build/tmp/h264sw-stream (a fresh run directory).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
 . plan/tools/fresh-out.sh
-out=build/tmp/ws326-stream
+out=build/tmp/h264sw-stream
 fresh_out "$out"
 status=0
 
@@ -29,7 +29,7 @@ for file in userland/desktop/libmedia/h264sw-*.c userland/desktop/libmedia/vcode
 done
 
 if ! cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined \
-    -fno-omit-frame-pointer -I. plan/ws326/tests/stream/decode-stream.c $modules userland/desktop/libmedia/bits.c \
+    -fno-omit-frame-pointer -I. plan/tools/h264sw/stream/decode-stream.c $modules userland/desktop/libmedia/bits.c \
     -lm -o "$out/decode-stream" > "$out/build.log" 2>&1; then
 	echo "decode-stream: FAIL (build)"
 	head -20 "$out/build.log"

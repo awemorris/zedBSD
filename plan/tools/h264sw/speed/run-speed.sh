@@ -13,15 +13,15 @@
 # libx264's output differs a little from run to run; to compare two trees, give the first run's streams/*.h264 as
 # FILEs to the second, which then replace the streams it made under the same names.
 # Prints the summary (also summary.txt in the output directory); the last line is run-speed: PASS or FAIL.
-#   sh plan/ws326/tests/speed/run-speed.sh [FILE...]
-#   SPEED_RUNS=3 SPEED_FRAMES=120 SPEED_PROFILE=0 SPEED_OUT=/tmp/x sh plan/ws326/tests/speed/run-speed.sh
-# Output under $SPEED_OUT (default /tmp/ws326-speed, a fresh run directory).
+#   sh plan/tools/h264sw/speed/run-speed.sh [FILE...]
+#   SPEED_RUNS=3 SPEED_FRAMES=120 SPEED_PROFILE=0 SPEED_OUT=/tmp/x sh plan/tools/h264sw/speed/run-speed.sh
+# Output under $SPEED_OUT (default /tmp/h264sw-speed, a fresh run directory).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../../.."
 root=$(pwd)
 . plan/tools/fresh-out.sh
-out=${SPEED_OUT:-/tmp/ws326-speed}
+out=${SPEED_OUT:-/tmp/h264sw-speed}
 fresh_out "$out"
 out=$(cd "$out" && pwd -P)
 runs=${SPEED_RUNS:-5}
@@ -53,7 +53,7 @@ for file in $lib/h264sw-*.c $lib/vcodec-*.c $lib/bits.c; do
 done
 mkdir -p "$out/obj"
 objects=""
-for file in $modules plan/ws326/tests/speed/speed-bench.c; do
+for file in $modules plan/tools/h264sw/speed/speed-bench.c; do
 	object="$out/obj/$(basename "$file" .c).o"
 	# shellcheck disable=SC2086
 	if ! cc -std=c89 $cflags -g -fno-omit-frame-pointer -Wall -Wextra -Werror -D_DEFAULT_SOURCE -I. -c "$file" \
@@ -167,7 +167,7 @@ if [ "$profile" = 1 ] && [ -n "$first" ]; then
 	else
 		tool="gprof"
 		# shellcheck disable=SC2086
-		cc -std=c89 $cflags -pg -D_DEFAULT_SOURCE -I. $modules plan/ws326/tests/speed/speed-bench.c -lm \
+		cc -std=c89 $cflags -pg -D_DEFAULT_SOURCE -I. $modules plan/tools/h264sw/speed/speed-bench.c -lm \
 		    -o "$out/speed-bench-pg" >> "$out/build.log" 2>&1
 		(cd "$out" && ./speed-bench-pg "$first" 1 > profile.run 2>&1)
 		gprof -b -p "$out/speed-bench-pg" "$out/gmon.out" 2> /dev/null |

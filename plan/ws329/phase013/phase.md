@@ -34,13 +34,13 @@
 ## 変えてはいけない物
 
 - 全部の `userland/desktop/libmedia/h264sw*.h`・`h264enc*.h`・`vcodec-*.h`。header の不備・矛盾・足りない口を見つけたら直さずに止めて Q1 に返す（どの header のどの関数か、何が足りないか、案の差分）。header が黙っている所は自分で決め、「結果」に列挙する。
-- 担当の外の `.c`（他の Phase と decoder の物）、Makefile、`plan/ws329/tests/run-unit.sh`・`check-skeleton.sh`、`plan/ws326/tests/` の全部。
+- 担当の外の `.c`（他の Phase と decoder の物）、Makefile、`plan/ws329/tests/run-unit.sh`・`check-skeleton.sh`、`plan/tools/h264sw/` の全部。
 - HAL・toolchain・共有の build/（AGENTS.md §7）。rm などの削除をしない。
 
 ## 確かめの command（worktree の root で）
 
 - `timeout 900 sh plan/ws329/tests/run-unit.sh refplanes` と `timeout 1800 sh plan/ws329/tests/run-unit.sh all` → 最後の行 `run-unit: PASS`。
-- `timeout 1800 sh plan/ws326/tests/run-unit.sh all` → `run-unit: PASS`（decoder が変わっていない）。
+- `timeout 1800 sh plan/tools/h264sw/run-unit.sh all` → `run-unit: PASS`（decoder が変わっていない）。
 - `BASE=<p003 の SHA（ws.md に記録）> timeout 300 sh plan/ws329/tests/check-skeleton.sh` → `check-skeleton: PASS`。
 - zedBSD amd64: `timeout 1200 make ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-claude1/build/llvm/bin ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-claude1/build/amd64/sysroot -o /home/awe/zedBSD-claude1/build/amd64/sysroot/.zedbsd-sysroot-complete -j8 build/amd64/dynamic/libmedia.so` → exit 0、warning 0
 - `git diff --check`。

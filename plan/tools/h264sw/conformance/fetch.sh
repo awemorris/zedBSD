@@ -1,10 +1,10 @@
 #!/bin/sh
-# Fetches the JVT conformance bitstreams of plan/ws326/tests/conformance/list.txt (ITU-T H.264.1) with
+# Fetches the JVT conformance bitstreams of plan/tools/h264sw/conformance/list.txt (ITU-T H.264.1) with
 # parameter-free GETs from the ITU's public FTP mirror, and checks each zip against the SHA-256 recorded
-# in plan/ws326/tests/conformance/sha256.txt (a zip with no line there is recorded on its first fetch;
+# in plan/tools/h264sw/conformance/sha256.txt (a zip with no line there is recorded on its first fetch;
 # the caller commits the new lines).  A zip already in the cache with the recorded hash is not fetched again.
-#   sh plan/ws326/tests/conformance/fetch.sh [<dir>/<name>...]     (default: every line of list.txt)
-# The cache is $H264SW_CONFORMANCE_DIR (default build/tmp/ws326-conformance/zips); its zips are unpacked
+#   sh plan/tools/h264sw/conformance/fetch.sh [<dir>/<name>...]     (default: every line of list.txt)
+# The cache is $H264SW_CONFORMANCE_DIR (default build/tmp/h264sw-conformance/zips); its zips are unpacked
 # next to them in <name>/, without the reference decoder's trace files (about 9 parts in 10 of the unpacked size;
 # the comparison does not read them: the 204 zips of 3.1 GB unpack to about 7 GB without them, 35 GB with).  An answer that is not a zip (an HTML page, a bot check) stops the run at once:
 # report it, do not retry with another client or User-Agent.
@@ -12,9 +12,9 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../../.."
-list=plan/ws326/tests/conformance/list.txt
-hashes=plan/ws326/tests/conformance/sha256.txt
-cache=${H264SW_CONFORMANCE_DIR:-build/tmp/ws326-conformance/zips}
+list=plan/tools/h264sw/conformance/list.txt
+hashes=plan/tools/h264sw/conformance/sha256.txt
+cache=${H264SW_CONFORMANCE_DIR:-build/tmp/h264sw-conformance/zips}
 base=https://www.itu.int/wftp3/av-arch/jvt-site/draft_conformance
 mkdir -p "$cache"
 [ -f "$hashes" ] || : > "$hashes"
