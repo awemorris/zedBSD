@@ -84,4 +84,36 @@ plan/ws327/phase013/phase.md`（ws.md は Q1）。動作の確かめはしない
 
 ## 結果
 
-（実装の担当が書く）
+実装済み（動作確認は決定 3 により無し）。`userland/desktop/libkeiland/platform/thread-win32.c` の全関数を書いた。
+
+確かめ（`date` 2026-10-30、worktree `s-ws327-p013`）:
+
+- `sh plan/ws327/tests/build-win32.sh` → x86_64・i686 とも thread/socket の compile PASS (warnings 0)・`link win32-link.exe: PASS`、最後に `ws327-win32: PASS`。
+- `sh plan/ws327/tests/check-base.sh p013` → `ws327-check-base: PASS`。
+- `make -j16 -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-p013-linux build/ws327-p013-linux/lib/libkeiland.so` → libkeiland.so の link まで通った。
+- 突然変異: `kl_cond_broadcast` を `#if 0` で消す → compile は PASS、link が FAIL（x86_64・i686）。局所の未使用変数を足す → compile FAIL。戻して `cmp` 一致。
+  （関数の名前だけを替える変異は `-Wmissing-prototypes` で compile が先に落ちる。）
+
+骨格からの変更・判断:
+
+- 骨格の型は変えていない。足した static: `thread_name_keep`（名前の写し）、`thread_once_room`、`thread_describe_function`（`SetThreadDescription` の型）。
+- `kl_thread_start`: 名前を `KL_THREAD_NAME_MAX` で切る時、UTF-8 の文字の途中なら文字ごと外す（途中で切ると `MB_ERR_INVALID_CHARS` で名前が付かないため）。
+  `ResumeThread` が失敗した時は、走った事の無い thread なので `TerminateThread` で終えてから handle を閉じ record を放す（phase.md は閉じて放すだけ）。
+  stack は 32 bit 版で `size_t` と `UINT_MAX` の比較が `-Wtype-limits` になるので `unsigned long long` に直して比べる。
+- `thread_key_destroyed`: POSIX と同じく value を record から外してから `destroy` を呼ぶ（destroy の中の `kl_thread_key_get` は NULL）。
+- `kl_thread_join`: `WaitForSingleObject` が `WAIT_OBJECT_0` 以外を返したら EINVAL（record はそのまま）。header は 0 か EDEADLK のみを約束している。
+
+Q1 へ（Win32 で header の約束が揺れる所。header は変えていない）:
+
+1. `kl_thread_sleep`: `GetTickCount64`（粒度 約 15 ms）の期限まで眠り直すが、開始の読みが tick の切り捨てなので「少なくとも ms」を最大 1 tick 満たさない事がある
+   （MS の文書も `Sleep` が早く返りうると書く）。厳密にするには `QueryPerformanceCounter` が要る（骨格は `GetTickCount64`）。
+2. `kl_thread_cpu_count`: 呼び手の processor group の `GetActiveProcessorCount` で、process の affinity・job の制限を見ない。header の「the program can run on」より多く返しうる。
+3. key の destroy: FLS は 1 回だけ。destroy の中で同じ key に `set` した値は（FLS の callback の中の slot の扱いが文書に無く、確かめていない）漏れうる。
+   header は「on some systems again」と書くので許される範囲。
+4. `kl_thread_key_delete`: `FlsFree` が他の thread の生きた値にも、その場で（呼んだ thread の上で）destroy を呼ぶ。header は未規定と書く。
+5. libkeiland が DLL で、thread が生きている間に unload されると、FLS の callback（`thread_key_destroyed`）が消えた code を指す。header は何も書かない。
+   また process の終わり（`ExitProcess`）では他の thread の destroy は呼ばれない（POSIX の `exit` と同じ）。
+6. `SetThreadDescription` は Windows 10 1607 より前に無く、run time に探して無ければ名前を付けない（header の「付けられない名前は黙って付けない」の内）。
+7. `kl_thread_start` の `stack_size` は reserve。`UINT_MAX` 近い大きさは `_beginthreadex` が失敗し EAGAIN になる（header の EAGAIN の内）。
+
+未実施: 実行（Windows・wine）は決定 3 により無し。FLS の callback の中での振る舞い・`ResumeThread` 失敗の経路は走らせていない。
