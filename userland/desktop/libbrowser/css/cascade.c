@@ -945,6 +945,7 @@ cascade_compute(
 		style->border_spacing[0] = parent->border_spacing[0];
 		style->border_spacing[1] = parent->border_spacing[1];
 		style->border_collapse = parent->border_collapse;
+		style->caption_side = parent->caption_side;
 		style->white_space = parent->white_space;
 		style->text_transform = parent->text_transform;
 		style->cursor = parent->cursor;
@@ -4064,6 +4065,7 @@ cascade_apply(
 		    property == CSS_PROP_BORDER_SPACING_X ||
 		    property == CSS_PROP_BORDER_SPACING_Y ||
 		    property == CSS_PROP_BORDER_COLLAPSE ||
+		    property == CSS_PROP_CAPTION_SIDE ||
 		    property == CSS_PROP_LIST_STYLE_TYPE)
 			inherited = 1;
 
@@ -4374,6 +4376,9 @@ cascade_apply(
 		break;
 	case CSS_PROP_BORDER_COLLAPSE:
 		style->border_collapse = value->keyword;
+		break;
+	case CSS_PROP_CAPTION_SIDE:
+		style->caption_side = value->keyword;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
@@ -4940,6 +4945,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_BORDER_COLLAPSE:
 		style->border_collapse = parent->border_collapse;
+		break;
+	case CSS_PROP_CAPTION_SIDE:
+		style->caption_side = parent->caption_side;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		memcpy(style->columns, parent->columns, sizeof(style->columns));

@@ -270,6 +270,7 @@ static const struct values_name values_names[] = {
 	{ "grid-row-end", CSS_PROP_GRID_ROW_END },
 	{ "container-type", CSS_PROP_CONTAINER_TYPE },
 	{ "border-collapse", CSS_PROP_BORDER_COLLAPSE },
+	{ "caption-side", CSS_PROP_CAPTION_SIDE },
 	{ "-webkit-clip-path", CSS_PROP_CLIP_PATH },
 	{ "flex", SHORT_FLEX },
 	{ "-webkit-flex", SHORT_FLEX },
@@ -420,6 +421,13 @@ static const struct values_keyword values_display[] = {
 static const struct values_keyword values_border_collapse[] = {
 	{ "separate", 0 },
 	{ "collapse", 1 },
+	{ NULL, 0 }
+};
+
+/* The keywords of caption-side. */
+static const struct values_keyword values_caption_side[] = {
+	{ "top", 0 },
+	{ "bottom", 1 },
 	{ NULL, 0 }
 };
 
@@ -2576,6 +2584,9 @@ values_single(
 		break;
 	case CSS_PROP_BORDER_COLLAPSE:
 		table = values_border_collapse;
+		break;
+	case CSS_PROP_CAPTION_SIDE:
+		table = values_caption_side;
 		break;
 	case CSS_PROP_CURSOR:
 		table = values_cursor;

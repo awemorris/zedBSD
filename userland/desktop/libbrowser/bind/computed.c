@@ -96,6 +96,7 @@ enum computed_property {
 	COMPUTED_VERTICAL_ALIGN,
 	COMPUTED_LIST_STYLE_TYPE,
 	COMPUTED_BORDER_COLLAPSE,
+	COMPUTED_CAPTION_SIDE,
 	COMPUTED_FLEX_DIRECTION,
 	COMPUTED_FLEX_WRAP,
 	COMPUTED_FLEX_GROW,
@@ -312,6 +313,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "vertical-align", COMPUTED_VERTICAL_ALIGN },
 	{ "list-style-type", COMPUTED_LIST_STYLE_TYPE },
 	{ "border-collapse", COMPUTED_BORDER_COLLAPSE },
+	{ "caption-side", COMPUTED_CAPTION_SIDE },
 	{ "flex-direction", COMPUTED_FLEX_DIRECTION },
 	{ "flex-wrap", COMPUTED_FLEX_WRAP },
 	{ "flex-grow", COMPUTED_FLEX_GROW },
@@ -465,6 +467,7 @@ static const char *const computed_list_styles[] = { "disc", "circle", "square", 
 
 /* The names of border-collapse. */
 static const char *const computed_collapses[] = { "separate", "collapse" };
+static const char *const computed_caption_sides[] = { "top", "bottom" };
 
 /* The names of flex-direction, by enum css_flex_direction. */
 static const char *const computed_flex_directions[] = { "row", "row-reverse", "column", "column-reverse" };
@@ -1380,6 +1383,9 @@ computed_write_keyword(
 		break;
 	case COMPUTED_BORDER_COLLAPSE:
 		error = computed_name(computed_collapses, 2, style->border_collapse, out);
+		break;
+	case COMPUTED_CAPTION_SIDE:
+		error = computed_name(computed_caption_sides, 2, style->caption_side, out);
 		break;
 	case COMPUTED_FLEX_DIRECTION:
 		error = computed_name(computed_flex_directions, 4, style->flex_direction, out);

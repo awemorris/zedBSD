@@ -897,6 +897,7 @@ struct css_style {
 	/* Tables: the spacing between the cells (across, then down, in pixels), and whether the borders collapse. */
 	float border_spacing[2];
 	int border_collapse;
+	int caption_side;
 	int white_space;
 	int text_transform;
 	int cursor;

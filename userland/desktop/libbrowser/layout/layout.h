@@ -292,6 +292,8 @@ struct layout_box {
 	 */
 	struct css_style *physical_style;
 	int logical_root;
+	/* Set while a flex container lays the item out: its main size is not definite for its children's percentages. */
+	int height_indefinite;
 };
 
 /*

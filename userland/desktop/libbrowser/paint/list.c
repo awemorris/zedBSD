@@ -876,6 +876,17 @@ list_box_own(
 		/* The children in painting order: a flex or grid container's in order-modified document order. */
 		ordered = list_children_ordered(box);
 
+		/* The items of a flex or grid container paint each as a whole, as inline blocks do (no phases across items). */
+		if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+		    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
+			for (index = 0, child = list_child(box, ordered, 0); child != NULL; child = list_child(child, ordered, ++index))
+				list_box(walk, child, layer, depth + 1);
+			free(ordered);
+			if (clips)
+				list_unclip(walk);
+			return;
+		}
+
 		/* Block decorations precede floats; their inline contents follow the floats. */
 		for (index = 0, child = list_child(box, ordered, 0); child != NULL; child = list_child(child, ordered, ++index)) {
 			if (child->floating != CSS_FLOAT_NONE)

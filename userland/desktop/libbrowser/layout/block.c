@@ -165,7 +165,7 @@ layout_block(
 		tree->containing_height_definite = saved_height_definite;
 	} else {
 		tree->containing_height = specified_height;
-		tree->containing_height_definite = height_definite;
+		tree->containing_height_definite = height_definite && !box->height_indefinite;
 	}
 
 	/* Descendants see a resolved percentage as pixels, or an indefinite percentage as auto. */
