@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner-high | ws326 p024 (q1773-i01) | `/home/awe/zedBSD-worktrees/p1-ws326p024` / `agent/p1-ws326p024` | in-progress（2026-10-31 起動） | 5857d62a4（merge f31bbac2e、WS299） |
+| P1 | conformance-reviewer | ws326 p025 (q1778-i01) | `/home/awe/zedBSD-worktrees/p1-ws326p025` / `agent/p1-ws326p025` | in-progress（2026-10-31 起動） | 544298816（merge 13a9ae886、WS326 p024） |
 | P2 | phase-runner-high | 返却（q1772 VF2 の Bug の束） | `/home/awe/zedBSD-worktrees/p2-vf2bugs` / `agent/p2-vf2bugs` | 返却（2026-10-31 06:5x） | f12ef81f2（merge f52088f45） |
 | P4 | phase-runner | ws333 p019 (q1777-i01) | `/home/awe/zedBSD-worktrees/p4-bugs` / `agent/p4-bugs` | in-progress（2026-10-31 起動） | ac38fd1d9（merge 2a13ccfc5、WS326 p026） |
 | P5 | kernel-and-driver-designer | ws302 p001 (q1775-i01) | `/home/awe/zedBSD-worktrees/p5-ws302` / `agent/p5-ws302` | in-progress（2026-10-31 起動） | 84d01a58a（merge 299a2f4b3、WS330） |

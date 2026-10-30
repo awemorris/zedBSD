@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 05:59（Q1）
+最終更新: 2026-10-31 06:02（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,7 +9,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1773: p024 速さ（計測・profile・目標・案を先に、最適化は p026 の後） | WS299 は 5330 の実測待ち |
+| P1 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1778: p025 規約の全文の見直し（WS326 の最後の Phase） | 終われば WS326 を完了の形に |
 | P2 | — | — | 返却（06:5x）。VF2: BUG-338・340・342・343 closed（SD の CRC の誤りの根を直し、10 回の起動で root が毎回 live）、339 は判断待ち（0g） | 次の割当を Q1 が決める |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
 | P4 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1777: p019 sessiond の熱の要求の口（UAPI 待ちの所は仮の口） | 午後: Pi 5 の実機 |
@@ -70,7 +70,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 
 ### WS326 libmedia の H.264 の software の decoder
 
-22 Phase cleared（p022 JVT の適合: 範囲の中の 101 本 14,526 frame が全部一致、decoder の直し 0）。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019・p021（全体の流れ、22 本 408 frame が ffmpeg と一致）・p023（libmedia の backend、実際の stream を h264-software で decode）は cleared ・p022・p026（共通の名前への移し）は cleared → p024 速さ（P1、補間と deblocking の書き直しで 1080p 17 → 24〜37 fps の見込み）→ p025 規約→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
+22 Phase cleared（p022 JVT の適合: 範囲の中の 101 本 14,526 frame が全部一致、decoder の直し 0）。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019・p021（全体の流れ、22 本 408 frame が ffmpeg と一致）・p023（libmedia の backend、実際の stream を h264-software で decode）は cleared ・p022・p026（共通の名前への移し）は cleared ・p024（速さ: 補間と deblocking の書き直しで host 1 thread の 1080p が 1.35〜1.94 倍、例 18.4 → 35.7 fps）は cleared → p025 規約（P1、in-progress）→ WS326 完了→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
 
 ### 最近完了した WS
 
@@ -110,6 +110,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 - 背景: plan/tools/boot-test.sh は /tmp/boot-test.* に作業の directory を作る。夜の間に QEMU の起動の試験を多く流したので溜まっている。Q1 が QEMU の使っていない物だけを消そうとしたら、権限の判定（共有の scratch の一括の削除）で止められた。回避していない。
 - 影響: /tmp（RAM の上）の空きは今約 56 GB あり、急ぎではない。
+- 06:5x にも、担当が消してよいと挙げた /tmp の試験の出力（/tmp/ws326-speed.run.*・/tmp/p1-speed-*.run.*・/tmp/p1-stage・/tmp/p1-video-check、scratchpad の interp）を wildcard で消そうとして、同じ判定で止められた。
 - 決めてほしい事: 00 の worktree の片付けと合わせて、許可を足すか、ユーザーが `! sh plan/tools/q1-clean.sh --tmp` を走らせるか。
 
 ### 0. WS333（/dev/thermal で統一する電力・熱の枠組み）の設計の問い Q333-1〜7（2026-10-31 新しい）
