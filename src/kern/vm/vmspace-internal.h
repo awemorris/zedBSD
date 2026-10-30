@@ -113,6 +113,7 @@ int vmspace_map_region(struct vmspace *vm, uintptr_t start, size_t size, uint32_
 int vmspace_map_anon_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct vm_region **result);
 int vmspace_map_file_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct file *file, off_t file_offset, uintptr_t data_start, size_t data_size, struct vm_object *object, struct vm_region **result);
 int vmspace_map_file_shared_locked(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct file *file, off_t file_offset, size_t data_size, struct vm_object *object, struct vm_region **result);
+int vmspace_map_device_replace(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot, struct vm_device_mapping *mapping);
 
 /*
  * Defined in vmspace-fault.c, part of demand paging of address spaces: the

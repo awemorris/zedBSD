@@ -3718,7 +3718,7 @@ sys_mmap_call(
 	struct file *file;
 	struct vm_device_mapping *device_mapping;
 	int access_mode;
-	int device_exact;
+	int device_placement;
 	uintptr_t mapped;
 	uint32_t prot;
 	size_t data_size;
@@ -3807,10 +3807,12 @@ sys_mmap_call(
 			if (error == 0 && device_mapping == NULL)
 				error = EIO;
 
-			/* Exact placement is requested only by the supported non-replacement mmap flag. */
-			device_exact = 0;
-			if ((args[3] & MAP_FIXED_NOREPLACE) != 0)
-				device_exact = 1;
+			/* MAP_FIXED places the mapping exactly in place of the range's, MAP_FIXED_NOREPLACE only on a free range. */
+			device_placement = VM_DEVICE_PLACE_HINT;
+			if (fixed)
+				device_placement = VM_DEVICE_PLACE_FIXED;
+			else if ((args[3] & MAP_FIXED_NOREPLACE) != 0)
+				device_placement = VM_DEVICE_PLACE_NOREPLACE;
 
 			/* Publishes shared device storage only after protection and backend acquisition succeed. */
 			if (error == 0) {
@@ -3820,7 +3822,7 @@ sys_mmap_call(
 					size,
 					prot,
 					device_mapping,
-					device_exact,
+					device_placement,
 					&mapped);
 			}
 
