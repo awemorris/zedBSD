@@ -37,7 +37,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [ws326-p001](phase001/phase.md) | module の設計: file の骨格・header の interface と仕様の comment・単体と適合の試験の仕様・実装の Phase の割り振り（Opus） | in-progress（設計・骨格・review の反映済み、Q1 の受け入れ待ち） | — |
+| [ws326-p001](phase001/phase.md) | module の設計: file の骨格・header の interface と仕様の comment・単体と適合の試験の仕様・実装の Phase の割り振り（Opus） | cleared（2026-10-30 Q1。header と骨格 fd1d6f88c を main に merge 済み、以後の実装の Phase の BASE） | — |
 | [ws326-p002](phase002/phase.md) | bit reader と NAL: h264sw-bits、h264sw-nal（試験 test-bits、test-nal） | cleared（2026-10-30 Q1、main 711b1ba4c。test-bits 169・test-nal 95 checks） | p001 |
 | [ws326-p003](phase003/phase.md) | 共有の表と parameter set: h264sw-tables、h264sw-ps（試験 test-tables、test-ps） | cleared（2026-10-30 Q1、main a29ef7eaa。test-tables 846・test-ps 41887 checks） | p002 |
 | [ws326-p004](phase004/phase.md) | slice header: h264sw-slice（試験 test-slice） | cleared（2026-10-30 Q1、main a10770ab8。test-slice 141694 checks） | p003 |

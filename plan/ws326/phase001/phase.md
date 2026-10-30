@@ -3,7 +3,7 @@
 # ws326-p001 module の設計（header の interface と仕様、骨格、試験の道、実装の Phase の割り振り）
 
 - 親: [WS326](../ws.md)。Queue: q1695-i01（P1、Opus）。worktree `/home/awe/zedBSD-worktrees/p1-ws326`、branch `agent/p1-ws326`（基点 main 6b8929fff、途中で main e35523984 を fast-forward で取り込み）。
-- 状態: in-progress（2026-10-30 設計・骨格・review の反映が済み、Q1 の受け入れ待ち。cleared は Q1 が決める）。
+- 状態: cleared（2026-10-30 Q1 の判定。header と骨格 fd1d6f88c は main に merge 済みで、実装の Phase の BASE として使われている）。
 - 成果: [design.md](../design.md)、`userland/desktop/libmedia/h264sw*.h`（26 個）と `h264sw-*.c`（25 個の骨格、backend の .c は open が MEDIA_PROBLEM_FORMAT を返すだけで decoder.c の表には未登録）、libmedia の Makefile への source の追加、
   `plan/ws326/tests/`（run-unit.sh・check-skeleton.sh・unit/check.h・unit/bitwriter.h・unit/test-bitwriter.c・conformance/list.txt・conformance/fetch.sh・conformance/sha256.txt）、
   phase002〜phase025 の phase.md、ws.md の Phase の表。
