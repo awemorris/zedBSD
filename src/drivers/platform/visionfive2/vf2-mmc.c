@@ -19,8 +19,16 @@
  * it; the glue writes it to the boot log with the system control block's
  * field the node's starfive,sysreg names, and hands the DesignWare driver
  * a hook that sets it, which the driver uses when a read at high speed
- * fails with a data CRC error (BUG-340).  The controller has no drive
- * phase that Linux sets for the slot, so the glue sets none.
+ * fails with a data CRC error.  The controller has no drive phase that
+ * Linux sets for the slot, so the glue sets none.
+ *
+ * The card clock is held to the default speed's 25 MHz although the slot
+ * and the card allow high speed: the DesignWare driver moves the data by
+ * programmed I/O, and the U74 cores do not drain the 128-byte FIFO as fast
+ * as a 4-bit bus at 49.5 MHz fills it.  The full FIFO stops the card clock
+ * in the middle of a block, and those reads failed their data CRC whatever
+ * the sample phase (measured on the board, a phase sweep read the failed
+ * run at every phase).
  */
 
 #include <drivers/platform/visionfive2/vf2-mmc.h>
@@ -61,6 +69,12 @@
  * (MAX_DELAY_CHAIN).
  */
 #define VF2_MMC_PHASE_COUNT		32U
+
+/*
+ * The fastest card clock the slot is run at: the default speed, which the
+ * driver's programmed I/O keeps up with (see the file's comment).
+ */
+#define VF2_MMC_MAX_HZ			25000000U
 
 /* The unit number of the slot's card, which names its disk mmcblk0. */
 #define VF2_MMC_UNIT			0U
@@ -130,6 +144,10 @@ drv_vf2_mmc_attach(
 	config.bus_width = read_number(fdt, node, "bus-width", 1U);
 	config.max_frequency = read_number(fdt, node, "max-frequency", 0);
 	config.high_speed = has_property(fdt, node, "cap-sd-highspeed");
+
+	/* Holds the card clock to what the programmed I/O keeps up with. */
+	if (config.max_frequency == 0 || config.max_frequency > VF2_MMC_MAX_HZ)
+		config.max_frequency = VF2_MMC_MAX_HZ;
 	config.power_on_delay_ms = read_number(fdt, node, "post-power-on-delay-ms", 0);
 	config.sample_phase = phase;
 	config.sample_phase_count = VF2_MMC_PHASE_COUNT;
