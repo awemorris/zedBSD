@@ -8,18 +8,18 @@
 /* Imports and lists media without dispatching callbacks or modifying the UI's library. */
 #include "media-worker.h"
 #include <keiland/keiland.h>
+#include <keiland/keiland_thread.h>
 #include <wayland-client.h>
 #include <errno.h>
-#include <pthread.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 /* One operation is admitted at a time; its result must be consumed before another is queued. */
 struct media_worker {
-	pthread_mutex_t lock;
-	pthread_cond_t wake;
-	pthread_t thread;
+	struct kl_mutex lock;
+	struct kl_cond wake;
+	struct kl_thread *thread;
 	char path[4096];
 	int running;
 	int stop;
@@ -34,9 +34,9 @@ struct media_worker {
 };
 
 /* The Photos process owns one worker; its mutex protects jobs, cancellation and FD handoff. */
-static struct media_worker worker = {PTHREAD_MUTEX_INITIALIZER,
-				     PTHREAD_COND_INITIALIZER,
-				     0,
+static struct media_worker worker = {KL_MUTEX_INIT,
+				     {{{0}}},
+				     NULL,
 				     {0},
 				     0,
 				     0,
@@ -48,9 +48,32 @@ static struct media_worker worker = {PTHREAD_MUTEX_INITIALIZER,
 				     -1,
 				     {-1, 0, 0, 0, 0}};
 
-static void *media_main(void *unused);
+/* Whether the worker's condition was made (0) or why it was not; set once by media_init. */
+static struct kl_once media_once = KL_ONCE_INIT;
+static int media_wake_error;
+
+static void media_init(void);
+static int media_ready(void);
+static void media_main(void *unused);
 static void media_run(const char *path, int notice, int removing, struct ph_media_result *result);
 static int media_queue(const char *path, int notice, int removing);
+
+/* Makes the worker's condition, once for the program. */
+static void
+media_init(void)
+{
+	/* The condition (a static one cannot be made by its bytes). */
+	media_wake_error = kl_cond_init(&worker.wake);
+}
+
+/* Makes the worker's condition the first time: 0, or why it cannot be. */
+static int
+media_ready(void)
+{
+	/* Once for the program; every later call sees the first one's outcome. */
+	kl_once(&media_once, media_init);
+	return media_wake_error;
+}
 
 /*
  * Starts the background compositor client before any import is queued.
@@ -59,14 +82,26 @@ int
 ph_media_worker_start(
 	void)
 {
+	struct kl_thread_options options;
 	int error;
 
 	/* A started worker retains its synchronization objects across requests. */
 	if (worker.running)
 		return 0;
+
+	/* The condition the worker waits on is made before the worker exists. */
+	error = media_ready();
+	if (error != 0)
+		return error;
 	worker.stop = 0;
 	worker.result.descriptor = -1;
-	error = pthread_create(&worker.thread, NULL, media_main, NULL);
+	/* The thread: its name, what it runs and its priority. */
+	memset(&options, 0, sizeof(options));
+	options.name = "photos-import";
+	options.run = media_main;
+	options.argument = NULL;
+	options.priority = KL_THREAD_PRIORITY_NORMAL;
+	error = kl_thread_start(&options, &worker.thread);
 	if (error != 0)
 		return error;
 	worker.running = 1;
@@ -85,15 +120,16 @@ ph_media_worker_stop(
 	/* Cancellation shuts down only this worker's Wayland connection, never the UI's. */
 	if (!worker.running)
 		return;
-	pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 
 	worker.stop = 1;
 	if (worker.cancel >= 0)
 		(void)shutdown(worker.cancel, SHUT_RDWR);
-	pthread_cond_signal(&worker.wake);
+	kl_cond_signal(&worker.wake);
 
-	pthread_mutex_unlock(&worker.lock);
-	pthread_join(worker.thread, NULL);
+	kl_mutex_unlock(&worker.lock);
+	(void)kl_thread_join(worker.thread);
+	worker.thread = NULL;
 
 	/* The worker no longer owns any live result or outstanding original path. */
 	if (worker.result.descriptor >= 0)
@@ -152,10 +188,10 @@ ph_media_worker_take(
 	struct ph_media_result *result)
 {
 	/* A result becomes visible only after every worker write has completed. */
-	pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 
 	if (!worker.ready) {
-		pthread_mutex_unlock(&worker.lock);
+		kl_mutex_unlock(&worker.lock);
 		return 0;
 	}
 
@@ -165,7 +201,7 @@ ph_media_worker_take(
 	worker.ready = 0;
 	worker.busy = 0;
 
-	pthread_mutex_unlock(&worker.lock);
+	kl_mutex_unlock(&worker.lock);
 
 	/* Succeeded: the UI owns the completed request and its snapshot. */
 	return 1;
@@ -182,11 +218,11 @@ ph_media_worker_busy(
 	int busy;
 
 	/* A short lock samples job state; it never spans compositor IO. */
-	pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 
 	busy = worker.busy;
 
-	pthread_mutex_unlock(&worker.lock);
+	kl_mutex_unlock(&worker.lock);
 
 	/* Succeeded: callers can select a short polling interval while work is pending. */
 	return busy;
@@ -200,6 +236,7 @@ media_queue(
 	int removing)
 {
 	size_t length;
+	int ready;
 
 	/* Copies a chooser path or stable identity before its caller-owned storage expires. */
 	length = 0U;
@@ -209,11 +246,14 @@ media_queue(
 		return ENAMETOOLONG;
 	if (!worker.running)
 		return ENOTSUP;
-	pthread_mutex_lock(&worker.lock);
+
+	/* The condition exists once the worker runs; a failure to make it leaves the signal out. */
+	ready = media_ready();
+	kl_mutex_lock(&worker.lock);
 
 	/* A new job cannot overwrite the identity, path or descriptor of the preceding request. */
 	if (worker.busy || worker.stop) {
-		pthread_mutex_unlock(&worker.lock);
+		kl_mutex_unlock(&worker.lock);
 		return EBUSY;
 	}
 
@@ -225,16 +265,17 @@ media_queue(
 	worker.removing = removing;
 	worker.queued = 1;
 	worker.busy = 1;
-	pthread_cond_signal(&worker.wake);
+	if (ready == 0)
+		kl_cond_signal(&worker.wake);
 
-	pthread_mutex_unlock(&worker.lock);
+	kl_mutex_unlock(&worker.lock);
 
 	/* Succeeded: only the copied job input crosses to the worker. */
 	return 0;
 }
 
 /* Runs jobs using local copies while the UI continues drawing and processing input. */
-static void *
+static void
 media_main(
 	void *unused)
 {
@@ -248,13 +289,13 @@ media_main(
 
 	/* The worker sleeps until a job or close request is available. */
 	for (;;) {
-		pthread_mutex_lock(&worker.lock);
+		kl_mutex_lock(&worker.lock);
 
 		/* Spurious wakes do not turn an empty path into an unsolicited refresh. */
 		while (!worker.stop && !worker.queued)
-			pthread_cond_wait(&worker.wake, &worker.lock);
+			kl_cond_wait(&worker.wake, &worker.lock);
 		if (worker.stop) {
-			pthread_mutex_unlock(&worker.lock);
+			kl_mutex_unlock(&worker.lock);
 			break;
 		}
 
@@ -264,19 +305,18 @@ media_main(
 		removing = worker.removing;
 		worker.queued = 0;
 
-		pthread_mutex_unlock(&worker.lock);
+		kl_mutex_unlock(&worker.lock);
 		media_run(path, notice, removing, &result);
-		pthread_mutex_lock(&worker.lock);
+		kl_mutex_lock(&worker.lock);
 
 		/* Publishes a complete descriptor and status as one result. */
 		worker.result = result;
 		worker.ready = 1;
 
-		pthread_mutex_unlock(&worker.lock);
+		kl_mutex_unlock(&worker.lock);
 	}
 
 	/* Succeeded: close can now release any result not taken by the UI. */
-	return NULL;
 }
 
 /* Uses the public media API on a connection which is exclusively owned by this thread. */
@@ -317,14 +357,14 @@ media_run(
 	}
 
 	/* Publish cancellation before the first blocking compositor handshake. */
-	pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 
 	worker.cancel = cancel;
 	stopped = worker.stop;
 	if (stopped)
 		(void)shutdown(cancel, SHUT_RDWR);
 
-	pthread_mutex_unlock(&worker.lock);
+	kl_mutex_unlock(&worker.lock);
 
 	/* No shared display, system queue, widgets or library are dispatched here. */
 	system = kl_system_open(display);
@@ -356,11 +396,11 @@ media_run(
 	}
 
 	/* Retires the cancellation descriptor under the same lock used by close. */
-	pthread_mutex_lock(&worker.lock);
+	kl_mutex_lock(&worker.lock);
 
 	worker.cancel = -1;
 	close(cancel);
 
-	pthread_mutex_unlock(&worker.lock);
+	kl_mutex_unlock(&worker.lock);
 	wl_display_disconnect(display);
 }

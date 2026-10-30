@@ -82,4 +82,37 @@ plan/ws327/phase010/phase.md`（ws.md は Q1）。
 
 ## 結果
 
-（実装の担当が書く）
+2026-10-30 10:05（実装の担当）
+
+流した command と最後の行:
+
+- `sh plan/ws327/tests/build-zedbsd.sh p010 amd64 "photos"` → `zedbsd amd64 make=0 warnings=0`。arm64・riscv64 も同じ（`make=0 warnings=0`）。
+  3 つとも `build/ws327-p010-<arch>/bin/photos` ができた。最後の整形（comment の追加）の後に amd64 を再 build して `make=0 warnings=0`。
+- `python3 -I plan/ws327/tests/check-layers.py userland/desktop/photos/` → `ws327-check-layers: PASS`（T1 0・N1 0）。
+- host の `cc -std=gnu17 -D_GNU_SOURCE -Wall -Wextra -Werror -fsyntax-only`（thumbs・media-worker）→ どちらも通った。
+- `sh plan/ws327/tests/check-base.sh p010` → `ws327-check-base: PASS`。
+
+突然変異（git の外、控えを取り `cmp` で戻した）:
+
+1. `thumbs.c` の `kl_cond_wait` を `pthread_cond_wait`（cast 付き）に戻す → check-layers が `T1 3 found` で FAIL、amd64 の build も `make=2`。捕まった。
+2. `ph_worker_queue` の signal の判定を `ready != 0` に逆にする → build は `make=0 warnings=0`、check-layers は PASS。host 試験が無いので
+   捕まらない（予想どおり）。p016 の QEMU の縮小で見る。
+3. 戻して `cmp` で一致を確認。
+
+自分で決めた点:
+
+- build の worktree: `build/` が無かったので、`NoctLang`・`distfiles`・`llvm`・`llvm-build`・`llvm-source`・`sources` を main の `build/` への
+  symlink（読むだけ）、`host-noct-state`・`tmp`・`<arch>` は worktree の実 directory にした（`build/<arch>` は link にしていない）。
+- `ph_worker_take` も start の前に呼びうるので、`ph_worker_queue` と同じく lock の前に `worker_ready()` を局所の変数に取り、0 の時だけ signal。
+- `media_queue` は `running` を確かめた後（start が `media_ready` を済ませた後）に `media_ready()` を呼び、0 の時だけ signal。
+- `thumbs.c` の `#include <keiland/keiland_thread.h>` は `<fcntl.h>` の後の字順に置いた（`app.h` は keiland_thread.h を含まない）。
+- 初期化子: thumbs は `.wake` を書かず `.lock = KL_MUTEX_INIT` のみ。media-worker は `{KL_MUTEX_INIT, {{{0}}}, NULL, {0}, ...}`
+  （他の field は今のまま。`-Wall -Wextra -Werror` で missing-braces は出なかった）。
+
+未実施・未試験:
+
+- 縮小・取り込みの動き（start の前の要求、`kl_cond_wait`、join の順序を含む）は host でも QEMU でも**未試験**。p016 の QEMU が見る。
+- Linux の build は Photos が対象外なので流していない。
+
+Q1 へ: 他の worktree（p008・p009）が `build/llvm-source` を自前で build していた（共有の symlink が無かったため）。上の symlink の形を
+共有すると無駄が減る。
