@@ -229,7 +229,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-359](bugs/BUG-359.md) | 遅い USB の mass storage で xHCI の command が時間切れになると device を失い回復しない（QEMU で host の fsync が遅い時、live の stick なら init が動かず SSH が上がらない） | open |
 | [BUG-360](bugs/BUG-360.md) | live の session の入力欄で Backspace が空白を消さない（installer の大きさの欄、IME か key の経路の見込み）。読めない大きさで「作成」が無言で何もしない | open |
 | [BUG-361](bugs/BUG-361.md) | NVIDIA RTX 2070（nvrtx）で Notes が起動しない（executor に stencil の format・test が無い） | fixed（2026-10-30 P5 q1692、実機で Notes の pen と文字、agent/p5-ws243 48f21726b、main に未 merge） |
-| [BUG-362](bugs/BUG-362.md) | 共有の shader の frontend が SPIR-V の NoContraction（precise）を拒み、precise を含む shader が compile されない | open |
+| [BUG-362](bugs/BUG-362.md) | 共有の shader の frontend が SPIR-V の NoContraction（precise）を拒み、precise を含む shader が compile されない | fixed（2026-10-31 P4 q1753-i01、f97f13268: frontend が印を IR に運び nvrtx・i915 が融合しない。host 試験、実機は未実施、未 merge） |
 | [BUG-363](bugs/BUG-363.md) | zedBSD の image に /etc/hosts が無く、localhost の名前の解決が失敗する | open |
 | [BUG-364](bugs/BUG-364.md) | gpu_fence_get の foreign の fence が device を比べず別の GPU の fence を承認なしに受ける | closed（2026-10-30、comment の直し） |
 | [BUG-365](bugs/BUG-365.md) | GPU の文書の調べで見つかった header・comment と code の食い違い（一括、22 件＋p024 の 13 件） | open |
