@@ -1867,8 +1867,11 @@ flex_lay_item(
 	saved.max_height = child->style.max_height;
 	memcpy(saved.margin, child->style.margin, sizeof(saved.margin));
 
-	/* The layout at the flexed size. */
+	/* The layout at the flexed size (the height a flex container gives a table is the whole table's). */
+	child->table_wrapper_height = !row && item->size != item->base &&
+	    (child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE);
 	error = flex_lay_sized(tree, box, item, row);
+	child->table_wrapper_height = 0;
 	child->height_indefinite = 0;
 
 	/* The style is the item's own again, whatever the layout reported. */
@@ -2181,7 +2184,10 @@ flex_relay_cross(
 		child->style.min_height.unit = CSS_UNIT_PX;
 		child->style.min_height.value = 0;
 		child->style.max_height.unit = CSS_UNIT_NONE;
+		child->table_wrapper_height = saved.height.unit == CSS_UNIT_AUTO &&
+		    (child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE);
 		error = layout_block(tree, child, box->width);
+		child->table_wrapper_height = 0;
 		child->style.box_sizing = saved.box_sizing;
 		child->style.width = saved.width;
 		child->style.min_width = saved.min_width;
