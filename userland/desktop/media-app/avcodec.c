@@ -40,7 +40,7 @@
 
 #include <dlfcn.h>
 #include <errno.h>
-#include <pthread.h>
+#include <keiland/keiland_thread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -185,7 +185,7 @@ static const struct codec_name codec_names[] = {
 static struct codec_library codec;
 
 /* Makes codec_load run once, from whichever thread asks first. */
-static pthread_once_t codec_once = PTHREAD_ONCE_INIT;
+static struct kl_once codec_once = KL_ONCE_INIT;
 
 static void codec_load(void);
 static int codec_open_set(const struct codec_version *version);
@@ -243,7 +243,7 @@ static int
 addin_load(void)
 {
 	/* Once for the program. */
-	(void)pthread_once(&codec_once, codec_load);
+	kl_once(&codec_once, codec_load);
 
 	/* Reports whether it can decode. */
 	if (codec.error != 0)

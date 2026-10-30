@@ -19,7 +19,7 @@
 
 #include "userland/desktop/videoplayer/videoplayer.h"
 
-#include <pthread.h>
+#include <keiland/keiland_thread.h>
 
 /*
  * The player: the thread, the sound (libkeiland's stream), and under the lock
@@ -32,12 +32,12 @@
  * while it played (MU_FAIL_*, taken by mu_player_failure).
  */
 struct mu_player {
-	pthread_t thread;
+	struct kl_thread *thread;
 	int thread_started;
 	struct vp_audio audio;
 
-	pthread_mutex_t lock;
-	pthread_cond_t wake;
+	struct kl_mutex lock;
+	struct kl_cond wake;
 	unsigned state;
 	int ended;
 	int draining;

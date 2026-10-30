@@ -34,14 +34,15 @@ else
 fi
 
 # 2. The decoding.
-cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. \
+cc -std=gnu17 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -Iuserland/desktop/include -c userland/desktop/libkeiland/platform/thread-posix.c -o "$out/thread-posix.o" || { echo "run-host-codec: FAIL (build)"; exit 1; }
+cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. -Iuserland/desktop/include \
     plan/tools/media/host-codec.c userland/desktop/media-app/decoder.c userland/desktop/media-app/avcodec.c userland/desktop/media-app/bitstream.c \
     userland/desktop/libmedia/decoder.c userland/desktop/libmedia/bitstream.c userland/desktop/libmedia/picture.c \
     userland/desktop/libmedia/bits.c userland/desktop/libmedia/aac-input.c userland/desktop/libmedia/aac-codec.c \
     userland/desktop/libmedia/aac-huffman.c userland/desktop/libmedia/aac-bands.c userland/desktop/libmedia/aac-frame.c \
     userland/desktop/libmedia/aac-synth.c userland/desktop/libmedia/aac.c userland/desktop/libmedia/sound.c \
     userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c \
-    -ldl -lpthread -lm -o "$out/host-codec" || { echo "run-host-codec: FAIL (build)"; exit 1; }
+    "$out/thread-posix.o" -ldl -lpthread -lm -o "$out/host-codec" || { echo "run-host-codec: FAIL (build)"; exit 1; }
 files=plan/tools/media/sample.mp4
 if command -v ffmpeg > /dev/null 2>&1; then
 	src="-f lavfi -i testsrc2=size=320x180:rate=25 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 4"

@@ -13,5 +13,6 @@ cp userland/desktop/include/keiland/keiland*.h "$dir/inc/keiland/"
 ${CC:-cc} -std=gnu11 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror \
 	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
 	-I. -I"$dir/inc" -Iuserland/desktop/music plan/tools/music/host-music-play.c userland/desktop/music/play.c \
+	userland/desktop/libkeiland/platform/thread-posix.c \
 	-lpthread -o "$out"
 timeout 60 "$out"

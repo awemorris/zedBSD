@@ -733,9 +733,9 @@ vp_toggle(
 	unsigned state;
 
 	/* What it does now. */
-	(void)pthread_mutex_lock(&player->media.lock);
+	kl_mutex_lock(&player->media.lock);
 	state = player->media.state;
-	(void)pthread_mutex_unlock(&player->media.lock);
+	kl_mutex_unlock(&player->media.lock);
 
 	/* The other. */
 	if (state == VP_PLAYING) {
@@ -756,9 +756,9 @@ vp_states(
 	unsigned state;
 
 	/* What is open. */
-	(void)pthread_mutex_lock(&player->media.lock);
+	kl_mutex_lock(&player->media.lock);
 	state = player->media.state;
-	(void)pthread_mutex_unlock(&player->media.lock);
+	kl_mutex_unlock(&player->media.lock);
 
 	/* The playback's actions only with something open. */
 	disabled = 0;
@@ -888,10 +888,10 @@ vp_draw(
 	int overlay_dirty;
 
 	/* A decoder failure is a user-visible playback state, rather than an apparent end of the file. */
-	(void)pthread_mutex_lock(&player->media.lock);
+	kl_mutex_lock(&player->media.lock);
 	failure = player->media.failure;
 	player->media.failure = 0;
-	(void)pthread_mutex_unlock(&player->media.lock);
+	kl_mutex_unlock(&player->media.lock);
 	if (failure != 0) {
 		(void)snprintf(player->notice, sizeof(player->notice), "Playback stopped because the media could not be decoded.");
 		player->dirty = 1;
@@ -931,7 +931,7 @@ vp_draw(
 	}
 
 	/* The end of the file, published once the sound has played out and the last picture is taken. */
-	(void)pthread_mutex_lock(&player->media.lock);
+	kl_mutex_lock(&player->media.lock);
 
 	if (
 		played_out &&
@@ -947,7 +947,7 @@ vp_draw(
 		player->dirty = 1;
 	}
 
-	(void)pthread_mutex_unlock(&player->media.lock);
+	kl_mutex_unlock(&player->media.lock);
 
 	/* Nothing changed: no frame. */
 	if (!player->dirty && now_us > player->bar_until + VP_BAR_US)
@@ -1013,7 +1013,7 @@ vp_played_out(
 	int eof;
 
 	/* The media's state, and whether the reader has come to the end of the file. */
-	(void)pthread_mutex_lock(&player->media.lock);
+	kl_mutex_lock(&player->media.lock);
 
 	state = player->media.state;
 	eof = player->media.eof;
@@ -1021,7 +1021,7 @@ vp_played_out(
 	has_audio = player->media.has_audio;
 	duration = player->media.duration;
 
-	(void)pthread_mutex_unlock(&player->media.lock);
+	kl_mutex_unlock(&player->media.lock);
 
 	/* Not playing at the end, or a seek on its way: not played out, and the watch on the sound starts again. */
 	if (state != VP_PLAYING || !eof || seeking) {
@@ -1086,14 +1086,14 @@ vp_log_clock(
 		return;
 
 	/* The media's state and the pictures decoded ahead. */
-	(void)pthread_mutex_lock(&player->media.lock);
+	kl_mutex_lock(&player->media.lock);
 
 	state = player->media.state;
 	eof = player->media.eof;
 	pictures = player->media.picture_count;
 	late = player->media.late;
 
-	(void)pthread_mutex_unlock(&player->media.lock);
+	kl_mutex_unlock(&player->media.lock);
 
 	/* Only while playing. */
 	if (state != VP_PLAYING)
@@ -1434,9 +1434,9 @@ vp_bar_visible(
 	unsigned state;
 
 	/* The media's state. */
-	(void)pthread_mutex_lock(&player->media.lock);
+	kl_mutex_lock(&player->media.lock);
 	state = player->media.state;
-	(void)pthread_mutex_unlock(&player->media.lock);
+	kl_mutex_unlock(&player->media.lock);
 
 	/* Hidden while playing once its time is over. */
 	if (state == VP_PLAYING && now_us > player->bar_until)
@@ -1505,10 +1505,10 @@ vp_draw_bar(
 	int width;
 
 	/* Shown while paused or ended, and for a while after the pointer moved. */
-	(void)pthread_mutex_lock(&player->media.lock);
+	kl_mutex_lock(&player->media.lock);
 	state = player->media.state;
 	duration = player->media.duration;
-	(void)pthread_mutex_unlock(&player->media.lock);
+	kl_mutex_unlock(&player->media.lock);
 	if (state == VP_PLAYING && now_us > player->bar_until)
 		return;
 
@@ -1598,9 +1598,9 @@ vp_wait(
 		return 0;
 
 	/* While playing, the pictures' pace (a frame's time at most). */
-	(void)pthread_mutex_lock(&player->media.lock);
+	kl_mutex_lock(&player->media.lock);
 	state = player->media.state;
-	(void)pthread_mutex_unlock(&player->media.lock);
+	kl_mutex_unlock(&player->media.lock);
 	wait = VP_IDLE_MS;
 	if (state == VP_PLAYING || player->need_picture)
 		wait = 10;
