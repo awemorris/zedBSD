@@ -9,7 +9,7 @@ Related Milestones: MG006, MG008, MG009
 Objectives: O2, O4, O5
 Parent: [Master](../master.md)
 Queue: なし
-Resume point: p001〜p008・p010〜p024 cleared（p009 canceled）。DOC-54 は完了（p024 main d2c8a5969）。2026-10-30 P1（q1705-i01）が WS の完了の条件を確かめ、満ちない条件が残った（下の「WS の受け入れの確認（2026-10-30）」）。完了の形への書き直しと Phase の directory の片付けは、その条件を満たしてから。照合の script は plan/ws009/tests/check-gpu-uapi-doc.py（基点 4dfcce008）、共通の規則は [gpu-doc-rules.md](gpu-doc-rules.md)。docs の link の試験の既知の失敗: `docs/agent/awesome-plan/README.md` の `img/1.png` ほか 6 件（固定版の欠け、触らない、2026-10-29 Q1）
+Resume point: p001〜p008・p010〜p024 cleared（p009 canceled）。DOC-54 は完了（p024 main d2c8a5969）。2026-10-30 P1（q1705-i01）が WS の完了の条件を確かめ、満ちない条件が残った（下の「WS の受け入れの確認（2026-10-30）」）。満たすために p025〜p028 を立てた（2026-10-30 Q1 の判断「案 A〜D を Phase にする」）: p025（Opus、P1）と p026（Sonnet）は並べてよい、p027（Sonnet）は p025・p026 の後、p028（Opus、P1）は p026 の後。完了の形への書き直しと Phase の directory の片付けは p025〜p028 の後に受け入れを確かめ直してから。照合の script は plan/ws009/tests/check-gpu-uapi-doc.py（基点 4dfcce008）、共通の規則は [gpu-doc-rules.md](gpu-doc-rules.md)。docs の link の試験の既知の失敗: `docs/agent/awesome-plan/README.md` の `img/1.png` ほか 6 件（固定版の欠け、触らない、2026-10-29 Q1）
 Target: **ベータ2**（2026-10-13 ユーザー「WS196、WS172、WS009はベータ2に入れます。」。旧: ベータ3（2026-10-08 ユーザー））
 <!-- awesome-plan-current:end -->
 
@@ -49,6 +49,10 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p022`](phase022/phase.md) | cleared（2026-10-30 Q1、main 4374dde38。照合 --final PASS（placeholder 0）、link PASS） | gpu-requests.md: 索引の 2 列と共通の errno の表。依存: p010〜p021 |
 | [`ws009-p023`](phase023/phase.md) | cleared（2026-10-30 Q1、main 4a3b4e0e4。全 14 file の照合 --final --examples PASS（12 compile）、link PASS 826。Bug の候補 23 は phase023 の結果） | 統合: 全 file の --final・二重の主張の照合・既存の文書の直し。依存: p022 |
 | [`ws009-p024`](phase024/phase.md) | cleared（2026-10-30 Q1、main d2c8a5969。14 file を code と照らし 12 file を直した、照合 --final --examples PASS、link PASS 676。新しい Bug の候補 15 は BUG-365・BUG-366） | 正確さの敵対的レビュー（Opus を推す）。依存: p023 |
+| [`ws009-p025`](phase025/phase.md) | planned（2026-10-30 P1 の設計、Opus = P1 が実行） | 案 A: DOC-55 managed-wlan.md を今の `net wifi`（add・modify・delete・session）と `net lan`・`net startup` に合わせる。依存: なし |
+| [`ws009-p026`](phase026/phase.md) | planned（2026-10-30 P1 の設計、Sonnet 5.5 high、Q1 が起動） | 案 B: build-from-source.md の Noct 2.0.3 と variant の label、evdev.md の Noct の版、索引（media-playback・release の beta2）、状態の行 11 file。依存: なし |
+| [`ws009-p027`](phase027/phase.md) | planned（2026-10-30 P1 の設計、Sonnet 5.5 high、Q1 が起動） | 案 C: DOC-T70〜T72 の照合を source から値を読む `check-docs-current.py` に作り直す、plan/tools/docs-check/ へ移す案。依存: p025・p026 |
+| [`ws009-p028`](phase028/phase.md) | planned（2026-10-30 P1 の設計、Opus = P1 が実行） | 案 D: clean な tree からの build と amd64 QEMU の boot の再現（DOC-T20・T30・T72）、互換の主張と WS001 の照合（DOC-T60）。依存: p026（DOC-T60 は依存なし） |
 
 ## WS の受け入れの確認（2026-10-30 P1、q1705-i01、基点 main aaf2bc280）
 
@@ -74,7 +78,7 @@ WS の完了の条件（下の「WS completion conditions」）を一つずつ�
 5. `check-completed-producer-docs.noct` 自体が古い（文書が正しく試験が古い物）: evdev の「remain implemented and are deprecated」（legacy の console の event は削除済みと文書が正しく書く）、Makefile の `ZEDBSD_VARIANTS_amd64_pcat := hybrid uefi bios`（今は `native hybrid uefi bios`）、variant の label `UEFI + BIOS (for PC/AT)`・`BIOS (for PC/AT)`・「correctly built `uefi` image\nis expected not to boot」の改行の位置、Noct 2.0.1 の 3 件。状態の行の規則（current/experimental/deprecated/planned）は style.md の今の規則（文書の種類を書く）と合わない。
 6. 上の 5 の通り、DOC-T70〜T72 の試験は直すか、AGENTS.md §9 の試験の整理の基準で置き換える必要がある。
 
-満たすための案（Q1 の判断。新しい Phase は Q1 が立てる）:
+満たすための案（2026-10-30 Q1 の判断で p025〜p028 にした）:
 
 | 案 | 内容 | 担当の目安 |
 | --- | --- | --- |
