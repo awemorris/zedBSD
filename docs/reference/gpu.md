@@ -81,8 +81,10 @@ Sources: [`uapi/ioctl.h`](../../include/uapi/ioctl.h),
 device the lowest number that no registered device holds. Numbers are
 assigned in probe order, so the same GPU can get a different number after a
 reboot or a hardware change. A number is free again only after the device
-has been removed and every open of it has been closed; until then a new
-device does not reuse it. A node is published as soon as its driver
+has been removed, every open of it has been closed and every resource or
+allocation descriptor exported from it has been closed; until then the
+driver's removal does not complete and a new device does not reuse the
+number. A node is published as soon as its driver
 registers it, whether or not devfs is mounted. The sysctl variable
 `hw.gpu.attaching` counts the devices that have attached but not yet
 published a node ([GPU sysctl variables](gpu-sysctl.md)).
@@ -141,14 +143,21 @@ open ([Memory](gpu-memory.md)). The limit also applies to later `mprotect`
 calls on the mapping.
 
 **A failed device.** After a device fault, requests fail with the error the
-driver reported, and an open on the failed device fails with the same value,
-which this document calls the device's recorded error. A device can recover
+driver reported, which this document calls the device's recorded error: every
+request that takes the admission, the display requests that run outside it,
+`GPU_JOB_CAPACITY`, and every new submission or job reservation. Requests that
+only look at what the open already has still answer: `GPU_COMMAND_WAIT`
+reports the records the open holds, `GPU_JOB_POLICY` reports the policy, and
+the fence requests do not look at the device's state. An open on the failed
+device fails with the recorded error unless it recovers the device. A device can recover
 only when `gpu_recover_open` finds that the new open is the only one: every
 older open of the device has been closed, no capability exported from the
 device is still held, and the driver offers a reset. The open then resets the
 hardware, clears the recorded error on success and succeeds. A reset failure
 fails the open with the error the reset reported. Old objects are never
-revived; the fresh open starts with new state.
+revived; the fresh open starts with new state. If the device faults again
+while the reset runs, the open fails with the new recorded error, or with
+`EIO` when that fault can no longer be told apart from the reset.
 
 An open that arrives while another open is resetting the same device waits
 for the result. The wait is interruptible, so a signal ends it with `EINTR`,
@@ -227,7 +236,9 @@ failure); the area documents note such exceptions. A request whose copy-out
 fails returns the copy's error.
 
 **Unknown requests.** A request number that no case of `gpu_ioctl_body`
-matches fails with `EOPNOTSUPP`, not `ENOTTY`. A request whose capability the
+matches fails with `EOPNOTSUPP`, not `ENOTTY`. It first takes the admission,
+so on a failed or withdrawn device it fails with the admission's error
+instead, and a signal during the admission wait ends it with `EINTR`. A request whose capability the
 node lacks fails with `EOPNOTSUPP` as well.
 
 **Handles, identifiers and sequences.** The 64-bit handles in these requests
@@ -313,13 +324,16 @@ requests outside it. `O_NONBLOCK` has no effect on any GPU request.
 completion records and its own fence bindings. Two opens of the same node
 share the device: the hardware; a device-wide fault or withdrawal, which fails
 every open (a fault that only one open suffers fails that open alone); the
-capacity of the job queue, which `GPU_JOB_CAPACITY` reports for the whole
-device; and the display, whose lease belongs to one open at a time (another
-open's request on that output fails with the lease error, `EBUSY` in the
-drivers read). Capabilities that an open exports (descriptors from
+capacity of the driver's job queue, which `GPU_JOB_CAPACITY` reports
+together with the open's own free completion records; and the display, whose lease belongs to one open at a time (another
+open's request on that output fails with the driver's lease error, usually
+`EBUSY`; some requests of the i915 and venus drivers answer `EINVAL` or
+`EPERM` instead ([Display](gpu-display.md))). Capabilities that an open exports (descriptors from
 `GPU_RESOURCE_EXPORT`, `GPU_ALLOCATION_EXPORT` and `GPU_FENCE_CREATE`) can be
-used by another open or process and keep the device from recovering and from
-being released until they are closed. Different nodes are different devices to
+used by another open or process. A resource or allocation descriptor keeps
+the device from recovering and from being removed until it is closed. A
+fence descriptor does not: a fence names its device only by `device_id`, so
+the device can recover or be removed while one is open. Different nodes are different devices to
 the framework, even when they come from one physical GPU. They have separate
 error state, separate opens and separate `device_id` values, and they share
 only what a program passes between them: exported allocations and fences. A
@@ -379,7 +393,7 @@ caller asked for.
 
 | Event | When |
 | --- | --- |
-| `POLLIN` (and `POLLRDNORM`, if requested) | The open has a completion record that is complete and not yet consumed (`GPU_COMMAND_WAIT` with `GPU_WAIT_CONSUME` consumes it). The open mode does not matter. |
+| `POLLIN` and `POLLRDNORM`, each only if requested | The open has a completion record that is complete and not yet consumed (`GPU_COMMAND_WAIT` with `GPU_WAIT_CONSUME` consumes it). The open mode does not matter. |
 | `POLLPRI` | The caller asked for it, the open is readable, the node has `GPU_CAP_DISPLAY_EVENTS`, and the driver's topology sequence is above the sequence this open has acknowledged with `GPU_DISPLAY_EVENTS` (a new open has acknowledged none). If the sequence cannot be sampled, `POLLERR` is reported instead. |
 | `POLLERR` | The device has a recorded error, or this open has failed, or the topology sequence could not be sampled. |
 | `POLLERR` and `POLLHUP` | The device has been withdrawn. |
