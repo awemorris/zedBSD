@@ -227,7 +227,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-357](bugs/BUG-357.md) | kernel が先頭の 4 台の disk しか partition を調べず、boot の stick が 5 台目以降だと VFS の初期化が失敗する | closed（2026-10-29 Q1 の判定、fd29cf832、QEMU で確かめた） |
 | [BUG-358](bugs/BUG-358.md) | 4096 byte の sector の disk で native UFS への書き込みが極端に遅い（小さな file の多い導入で 30〜40 KB/s、512 の約 2.4 倍以上の時間） | closed（2026-10-30 Q1 の判定、main ed93695ac、実機は未実施。q1688-i01、6387b82a0。BUG-355 と同じ直し＋4096 の batched journal の sector の単位の誤り、QEMU） |
 | [BUG-359](bugs/BUG-359.md) | 遅い USB の mass storage で xHCI の command が時間切れになると device を失い回復しない（QEMU で host の fsync が遅い時、live の stick なら init が動かず SSH が上がらない） | open |
-| [BUG-360](bugs/BUG-360.md) | live の session の入力欄で Backspace が空白を消さない（installer の大きさの欄、IME か key の経路の見込み）。読めない大きさで「作成」が無言で何もしない | open |
+| [BUG-360](bugs/BUG-360.md) | live の session の入力欄で Backspace が空白を消さない（installer の大きさの欄、IME か key の経路の見込み）。読めない大きさで「作成」が無言で何もしない | fixed（2026-10-31 P2 q1757-i01。原因は空の欄に既定値を毎 frame 入れ直す installer。既定値を disk ごとに一度に。無言の件は 67a3dd649 で済み） |
 | [BUG-361](bugs/BUG-361.md) | NVIDIA RTX 2070（nvrtx）で Notes が起動しない（executor に stencil の format・test が無い） | fixed（2026-10-30 P5 q1692、実機で Notes の pen と文字、agent/p5-ws243 48f21726b、main に未 merge） |
 | [BUG-362](bugs/BUG-362.md) | 共有の shader の frontend が SPIR-V の NoContraction（precise）を拒み、precise を含む shader が compile されない | open |
 | [BUG-363](bugs/BUG-363.md) | zedBSD の image に /etc/hosts が無く、localhost の名前の解決が失敗する | closed（2026-10-31 Q1 の判定、main f81fef099。2026-10-31 P2 q1750-i01、8c8c556b5: base の image に /etc/hosts。QEMU で確かめた） |

@@ -1089,13 +1089,18 @@ screen_edit(
 	if (pressed)
 		app->dialog = INST_DIALOG_DELETE;
 
-	/* The size, its default the largest room (less the ESP's when one is made), and Create. */
-	if (app->create_size.length == 0U && error == 0 && !busy) {
+	/*
+	 * The size, its default the largest room (less the ESP's when one is
+	 * made), and Create.  The default goes in once for the disk: a field
+	 * the person erased is theirs, not filled again behind the next key.
+	 */
+	if (app->create_size_disk != app->disk && error == 0 && !busy) {
 		gap_sectors = gap_sectors * disk->sector_bytes / INST_MIB;
 		if (!esp && gap_sectors > INST_ESP_BYTES / INST_MIB)
 			gap_sectors -= INST_ESP_BYTES / INST_MIB;
 		(void)snprintf(size, sizeof(size), "%llu MiB", (unsigned long long)gap_sectors);
 		kl_field_set(&app->create_size, size);
+		app->create_size_disk = app->disk;
 	}
 
 	/* The size field beside Delete. */
