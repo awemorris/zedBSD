@@ -124,9 +124,14 @@ test_unrotated(void)
 	answer = kwl_scanout_decide(&facts);
 	check(answer == KWL_SCANOUT_SHOT, "a shot");
 	test_facts(&facts);
+	facts.content_type = KWL_SCANOUT_CONTENT_VIDEO;
 	facts.pointer_still_ms = KWL_SCANOUT_POINTER_IDLE_MS - 1U;
 	answer = kwl_scanout_decide(&facts);
-	check(answer == KWL_SCANOUT_POINTER, "a moving pointer");
+	check(answer == KWL_SCANOUT_POINTER, "a moving pointer over a video");
+	test_facts(&facts);
+	facts.pointer_still_ms = 0U;
+	answer = kwl_scanout_decide(&facts);
+	check(answer == KWL_SCANOUT_DIRECT, "a moving pointer over a game, which shows no cursor");
 	test_facts(&facts);
 	facts.refused = 1U;
 	answer = kwl_scanout_decide(&facts);
