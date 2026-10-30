@@ -1,14 +1,14 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 00:18（Q1）
+最終更新: 2026-10-31 01:08（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS291](ws291/ws.md) | GPU の描画の速さ（Intel i915、5330 の Alder Lake の段） | 起動（q1731）。p022: main の kernel の起動と mview の確かめ、5330 の Linux（ANV）で約 50 fps の scene を決める | 今の fps → 改善（WS313 の ODROID-C5 は実機の結果待ちのまま） |
-| P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 起動（q1726）。p020: qs40 × 13・1920x1080 を 26.6 fps から 50 fps 以上へ | profile（TA と 3D の分け、解像度に比例する費用、頂点の側）→ 改善 |
+| P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 返却。direct で qs40 × 13 が 42.35 fps（目標 50）、× 1 が 83.4 fps。VF2 の SSH・sudo の計測が権限の判定で止まった | ユーザーの判断の後: SLC の既定の回帰、present の copy を geometry が待たない直し。BUG-375 の後に branch を merge |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 起動（q1728）。p013: big-1000（52 対 NVK 136 fps）・subs-1000（10.9 対 75.4 fps）の CPU の費用 | profile → nvrtx の record・submit の改善 |
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ（Raspberry Pi 5 の V3D 7.1 の段） | 返却。host で driver の欠け（indexed・instance・直の fetch・mip の第 1 段）を実装、build と host 試験 PASS。実機は未、branch は未 merge（Pi 4 の desktop の回帰の確かめ待ち） | Pi 5 の起動の後: image を作り直し、desktop の回帰、clock の確かめ、fps の計測 |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
@@ -57,7 +57,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | p006・p008・p009 | RDNA の残り | 止め（RX 5600 XT が抜かれて実機なし） |
 | p022 | Intel i915（5330）: Linux（ANV）で約 50 fps の scene を zedBSD で Linux 以上に（ユーザーの指示で実測の Linux が基準） | in-progress（P1） |
 | p021 | Raspberry Pi 5 の model 50 fps（qs40 × スペックの比） | in-progress（P4） |
-| p020 | PowerVR の model 50 fps（qs40 × 13） | in-progress（26.6 fps、2026-10-30） |
+| p020 | PowerVR の model 50 fps（qs40 × 13） | in-progress（direct で 42.35 fps、2026-10-31） |
 
 ### WS331 driver から HAL への直の依存を除く（P2）
 
@@ -123,7 +123,16 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-今は無し。
+### 1. WS291 p020（PowerVR、VF2）: VF2 で SSH と sudo を使った kernel の入れ替えと計測の program の実行を続けてよいか
+
+- 背景: P2 が VF2 で計測している途中、試しの kernel を入れて SSH で sudo して計測の program（vkmatrix）を走らせる command が、auto mode の権限の判定（Interfere With Workloads、動いている処理への干渉）で拒否された。それまで同じ形の操作は何度も通っていた。回避はしていない。板は元の kernel と userland に戻した。
+- 今の数: direct scanout で qs40 × 13 が 42.35 fps（目標 50）、× 1 が 83.4 fps。
+- 許可する場合: AGENTS.md の手順で P2 を許可を添えて起動し直し、cache（SLC）を既定にする前の回帰と、present の copy の待ちを外す直しを続ける。許可しない場合: VF2 の計測を止め、host の側だけにする。
+
+### 2. WS291 p022（i915、5330）: CPU の省電力（idle の C-state・P-state）を先に直すか
+
+- 背景: 5330 の zedBSD は idle で package の電力が 12.99 W（Linux は 3.2〜3.5 W）で、mview の時に電力の上限（PL1 13 W）に張り付いて GPU が 800 MHz（Linux は 1200 MHz）に抑えられている。CPU の idle が HLT（C1）だけで、P-state（CPU の周波数）の制御が無い見込み。GPU が 1200 MHz なら qs40 × 600 は約 45 fps 相当（今 30.1 fps、Linux 50.6 fps）。
+- (a) CPU の idle（MWAIT の C-state）と P-state を先に直す（WS301 を進めるか新しい WS、担当を決める）。(b) 当面は GPU の側の改善だけを続ける（P1 は (b) を続けている）。
 
 ## 決まった事
 

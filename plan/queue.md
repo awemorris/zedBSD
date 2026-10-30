@@ -321,7 +321,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1726 / q1726-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws291v`・branch `agent/p2-ws291v`、実機 VF2） | [ws291-p020](ws291/phase020/phase.md) PowerVR の qs40 × 13 で 50 fps | 2026-10-30 ユーザーから、WS291 の PowerVR の最適化を P2 で実行する、という趣旨の指示を受けた | in-progress |
+| q1726 / q1726-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws291v`・branch `agent/p2-ws291v`、実機 VF2） | [ws291-p020](ws291/phase020/phase.md) PowerVR の qs40 × 13 で 50 fps | 2026-10-30 ユーザーから、WS291 の PowerVR の最適化を P2 で実行する、という趣旨の指示を受けた | uncleared（2026-10-31 返却。direct で c13 42.35 fps（目標 50）。板で計測の command が権限の判定で拒否され止まった。板は元に戻した。branch agent/p2-ws291v dc49bd786 は d983c4ee5（scanout の直し）を含むので BUG-375 が直るまで main に merge しない） |
 
 ## 2026-10-30: WS074 を P8 で自走（q1727）
 
