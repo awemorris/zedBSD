@@ -575,8 +575,10 @@ queue_start(
 	if (error != 0)
 		return error;
 	error = pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC);
-	if (error != 0)
+	if (error != 0) {
+		(void)pthread_condattr_destroy(&attributes);
 		return error;
+	}
 	error = pthread_cond_init(&queue.wake, &attributes);
 	(void)pthread_condattr_destroy(&attributes);
 	if (error != 0)
@@ -632,11 +634,8 @@ queue_add(
 	message = malloc(sizeof(*message) + size);
 	if (message == NULL) {
 		pthread_mutex_lock(&queue.lock);
-
 		queue.dropped++;
-
 		pthread_mutex_unlock(&queue.lock);
-
 		return;
 	}
 
