@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 04:51（Q1）
+最終更新: 2026-10-31 04:54（Q1）
 
 ## 担当（P1〜P8）
 
@@ -14,8 +14,8 @@
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
 | P4 | — | — | 返却（05:0x）。2 つ目の束: BUG-351（/dev/acpi）・359（xHCI の時間切れ）closed、349・362・368 fixed（確かめの残り） | 午後: Pi 5 の実機（image は完成） |
 | P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |
-| P6 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1762: p005 の前半（熱の core: sensor・fan・電力の meter・方針と受け手・3 つの thread、host 試験と QEMU の起動） | UAPI（p004）はユーザーの review の後。WS332 は完了 |
-| P7 | [WS333](ws333/ws.md)・Bug | 電力・熱の枠組み、noct の依存の Bug | q1768: p012（全 CPU の tick の時刻を揃え、全 core が同時に深く休めるように、amd64 の HAL の実装）→ BUG-377（emacs が libEGL 無しで起動しない、config の依存） | 5330 の電力の計測は電源の入れ直しの後 |
+| P6 | — | — | 返却（05:0x）。WS333 p005 の前半（熱の core）を main に | 次の割当を Q1 が決める |
+| P7 | — | — | 返却（05:1x）。WS333 p012（tick の時刻を揃える、QEMU 2 通り PASS）と BUG-377 を main に | p012 は 5330 の電力の前後の数で cleared を決める |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,427（69.90%）。flexbox の auto の最小・表・justify・backdrop-filter・filter・@keyframes を足した |
 
 実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
@@ -39,6 +39,9 @@
 | --- | --- | --- |
 | p001 | 統一の設計（CPU の idle・P-state・P/E core・熱・fan・strategy・非常の停止） | 設計済み（第 2 版、main 9946e22c0）。ユーザーの問い Q333-1〜7 待ち。実装の Phase は p003〜p024（約 70 LW） |
 | p003 | kernel の口の header（cpuperf.h・thermal.h、kern_cpu_count） | cleared（main f197c8a3f、20 port の build warning 0、design-reviewer を反映） |
+| p005 | 熱の core（前半） | 前半を main に（b7ac4f576、host 試験 13 場面・QEMU で hw.thermal）。後半は UAPI の review の後 |
+| p008〜p010 | x86 の CPUID・HWP・電力の module（Sonnet 3 人） | cleared（試験は計 1,700 万 checks 余り） |
+| p012 | 全 CPU の tick の時刻を揃える（TSC-deadline） | main 22c629663、QEMU の 2 通り PASS。5330 の電力の前後の数待ち |
 | p007 | x86 の CPU の register を読む module の設計（標準廉価実装手順、header 5・46 関数・試験の道具） | cleared。AMD と ACPI の仕様は取れず範囲の外（上の 01）。次は p008〜p010 を Sonnet 3 人で並べて |
 | p006 | cpuperf の枠組み（kernel、CPU の速さの制御の要求・方針の写し・上限・idle の統計） | cleared（main b5c8e8f50、host 試験 196 checks、QEMU の起動 4 つ PASS） |
 | p002 | amd64 の CPU の idle を MWAIT に（5330 の idle 12.99 W 対 Linux 3.2〜3.5 W） | MWAIT C6 を main に merge（f740839e5）。idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps。Linux にはまだ遠い（残りは 1 kHz の tick・P-state・ASPM・PSR の見込み、未調査） |
@@ -100,6 +103,12 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 影響: AMD の CPU の P-state の bit を仕様で裏付けられないので、p008 の範囲から外し「仕様未取得」と記録して進める。5330（Intel）には影響しない。Intel の SDM は取得済み。
 - 同じ形でもう 1 件: ACPI 6.5 の第 8 章（_PSS・_PSD・_PPC、firmware が示す P-state の表の形の出典）を uefi.org から取ったら Cloudflare の challenge の page が返り、P7 は再試行せず止めた。p010 から _PSS などの解析を「仕様未取得」として外す。
 - 決めてほしい事: ユーザーが AMD APM Vol 3 と ACPI 6.5 の PDF を手で置くか（置き場所は Q1 が決める、git の外）、その 2 つの部分は後回しにするか。
+
+### 02. 共有の /tmp の試験の作業 directory の片付け（2026-10-31 05:1x、権限の判定で止められた）
+
+- 背景: plan/tools/boot-test.sh は /tmp/boot-test.* に作業の directory を作る。夜の間に QEMU の起動の試験を多く流したので溜まっている。Q1 が QEMU の使っていない物だけを消そうとしたら、権限の判定（共有の scratch の一括の削除）で止められた。回避していない。
+- 影響: /tmp（RAM の上）の空きは今約 56 GB あり、急ぎではない。
+- 決めてほしい事: 00 の worktree の片付けと合わせて、許可を足すか、ユーザーが `! sh plan/tools/q1-clean.sh --tmp` を走らせるか。
 
 ### 0. WS333（/dev/thermal で統一する電力・熱の枠組み）の設計の問い Q333-1〜7（2026-10-31 新しい）
 
@@ -210,7 +219,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 - VF2: 今の main の kernel で HDMI に console の画面が出るか（WS331 p005 の目視の残り、BUG-372 は直った）。
 - installer（BUG-360）: 大きさの欄を全部消して打ち直せるか（QEMU は disk の空きの都合で未実施）。Settings（BUG-306）: 回転を 2 回目に 90° にしても窓が残るか。
-- **5330 の電源の入れ直し（起きたら）**: 2026-10-31 02:2x、P1 が main の kernel で起動した後に応答しない（遠隔の電源が無い）。入れ直すと Debian に戻る。古い userland と新しい kernel の組み合わせで network が上がらないだけの見込み（BUG-373・371）。P1 はそれまで QEMU で WS299 を進める。
+- **5330 の電源の入れ直し（起きたら）**: 入れ直した後、P1 が WS299 の image で NVMe の速さを測り、WS333 p012 の前後の暇な時の電力も測る。 2026-10-31 02:2x、P1 が main の kernel で起動した後に応答しない（遠隔の電源が無い）。入れ直すと Debian に戻る。古い userland と新しい kernel の組み合わせで network が上がらないだけの見込み（BUG-373・371）。P1 はそれまで QEMU で WS299 を進める。
 - **Pi 5（2026-10-31 の午後にユーザーが行う予定）**: image は出来ている（P4、main d26c657c7＋Pi 5 の GPU の branch、戻しの kernel 入り）: `/home/awe/zedBSD-worktrees/p4-ws291pi/build/ws291-p021c/rpi5-p021.img`（sha256 dcadd719…）。Q1 が SD に書く（`sudo dd … bs=4M conv=fsync`）か、ユーザーが書く。起動したら Q1 に知らせると担当が SSH で GPU の clock と fps を測る。起動しなければ config.txt の `kernel=vmunix-fallback`。
 - **ODROID-C5（2026-10-31 の午後、VF2 の最適化の後）**: 試験の image で HDMI に画面が出なかった（ユーザー）。serial（今は VF2 につないでいる）を C5 につないで、起動のどこで止まるかを見る。Q1 が担当（WS313）を起動して声をかける。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
