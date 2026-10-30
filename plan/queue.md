@@ -366,7 +366,7 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1734 / q1734-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws333`・branch `agent/p5-ws333`） | [ws333-p001](ws333/phase001/phase.md) | 2026-10-31 ユーザーから、WS301・WS303 を統合した WS333 で CPU の省電力を先に直す、という趣旨の指示を受けた | in-progress |
-| q1735 / q1735-i01 | P1（phase-runner-high、worktree p1-ws291i、実機 5330） | [ws333-p002](ws333/phase002/phase.md) | 同上（amd64 の idle の MWAIT を先に） | in-progress |
+| q1735 / q1735-i01 | P1（phase-runner-high、worktree p1-ws291i、実機 5330） | [ws333-p002](ws333/phase002/phase.md) | 同上（amd64 の idle の MWAIT を先に） | in-progress（MWAIT C6 を e44a18dd7、main に merge f740839e5。idle 13.00 → 11.70 W） |
 
 ## 2026-10-31: 担当の無い仕事の割り当て（q1736〜q1742）
 
@@ -381,3 +381,8 @@
 | q1740 / q1740-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws291`・branch `agent/p6-ws291`、QEMU） | [BUG-370](bugs/BUG-370.md)（Photos で保存すると全面表示が閉じる） | 上のユーザーの指示 | in-progress |
 | q1741 / q1741-i01 | P6（同じ worktree、q1740 の後、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) | 上のユーザーの指示 | pending |
 | q1742 / q1742-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-bug374`・branch `agent/p4-bug374`、実機 10.0.10.3 は P6 と lock で交代） | [BUG-374](bugs/BUG-374.md)（RTX の cursor の色が逆） | 上のユーザーの指示 | in-progress |
+| q1743 / q1743-i01 | P6（同じ worktree p6-ws291、q1740 の後、q1741 の前、QEMU） | [BUG-376](bugs/BUG-376.md) | 2026-10-31 ユーザーから、PS/2 の aux を起票してどこでもいいので割り当てる、という趣旨の指示を受けた | pending |
+| q1744 / q1744-i01 | 5330 が空いた担当（P1 の q1735・q1731 の後） | [ws299](ws299/ws.md) 5330 の NVMe の速さの続き | 2026-10-31 ユーザーから、WS299 は 5330 が空いたらどの担当でもよいのでスケジュールする、という趣旨の指示を受けた | pending |
+| q1745 / q1745-i01 | P4（Pi 5 の WS291 p021 の後、実機 Pi 5） | [ws304](ws304/ws.md) Pi 5 の外の PCIe の続き（ハードの切り分けを含む） | 2026-10-31 ユーザーから、WS304 は空いている所にスケジュールする、という趣旨の指示を受けた | pending |
+| q1746 / q1746-i01 | P5（WS333 p001 の後） | [ws306](ws306/ws.md) p001 設計 | 2026-10-31 ユーザーから、WS306 は検討済みなので進め、決定事項が不明なら cockpit に書けば答える、という趣旨の指示を受けた | pending |
+| q1747 / q1747-i01 | P4（q1742 BUG-374 の後、実機 10.0.10.3 の ue0、lock で P6 と交代） | [BUG-222](bugs/BUG-222.md) の試験 | 2026-10-31 ユーザーから、BUG-222 は別のチケットで解決済みの見込みなので試験だけ流して完了にする、という趣旨の指示を受けた | pending |

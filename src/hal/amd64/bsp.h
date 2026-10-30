@@ -80,4 +80,7 @@ pcat_cons_output_end(
 
 int bsp_boot_allocation_lifetime(uint32_t index, uint32_t *lifetime);
 
+/* Waits for one interrupt on the current CPU (interrupts masked on entry and return), as hal_cpu_idle(). */
+void bsp_cpu_idle(void);
+
 #endif

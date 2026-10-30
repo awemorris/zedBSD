@@ -30,3 +30,5 @@ Pi 5 の外の PCIe（pcie1、M.2 HAT）の root complex を zedBSD が起こし
 | [p002](phase002/phase.md) | 実装・host 試験・build | p001 | cleared（2026-10-27、host 試験 3 本 PASS、rpi5・rpi4 の build warning 0） |
 | [p003](phase003/phase.md) | 実機（Pi 5 ＋ M.2 の NVMe）での確かめ（手順は phase.md） | p002、実機の用意（ユーザー） | uncleared（q1620-i03: rescal を RP1 の下で行っても link は Polling で落ちる。次はハード側の切り分け＝Raspberry Pi OS の lspci） |
 | p004 | 規約の全文の見直し | p003 | planned |
+
+- 2026-10-31 ユーザーから、WS304 は空いている所にスケジュールする、という趣旨の指示を受けた（q1745、P4 が Pi 5 の WS291 p021 の後に。実機の Pi 5 が要る）。

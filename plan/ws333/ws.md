@@ -19,4 +19,4 @@
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 統一の設計: /dev/thermal の UAPI（CPU の idle・P-state・P/E core・熱の zone・fan・strategy・非常の停止）、kernel の枠組みと driver の分け方、HAL の口で足りるか（足りないと主張する時は理由）、WS301・WS303 の設計からの引き継ぎと食い違いの整理、Phase の分け方。design-reviewer を通す | in-progress（P5、q1734） | — |
-| [p002](phase002/phase.md) | amd64 の CPU の idle を HLT から MWAIT の C-state に（5330 で idle の電力を下げ、i915 の GPU の電力の枠を空ける） | in-progress（P1、q1735） | — |
+| [p002](phase002/phase.md) | amd64 の CPU の idle を HLT から MWAIT の C-state に（5330 で idle の電力を下げ、i915 の GPU の電力の枠を空ける） | in-progress（P1、q1735。2026-10-31: MWAIT C6 を実装、5330 で idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps（GT 800 → 850〜900 MHz）。Linux の idle 3.2〜3.5 W にはまだ遠い） | — |

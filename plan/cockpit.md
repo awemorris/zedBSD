@@ -1,13 +1,13 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:27（Q1）
+最終更新: 2026-10-31 01:41（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS333](ws333/ws.md)・[WS291](ws291/ws.md) | CPU の idle の省電力と、i915（5330）の描画の速さ | WS333 p002: amd64 の idle を HLT から MWAIT に替え、5330 で idle の電力と GPU の周波数を前後で測る | WS291 p022 に戻って測り直す（今 qs40 × 600 で 31.0 fps、Linux 50.6）。Notes は 5330 で起動を確かめた |
+| P1 | [WS333](ws333/ws.md)・[WS291](ws291/ws.md) | CPU の idle の省電力と、i915（5330）の描画の速さ | WS291 p022 に戻った（WS333 p002 の MWAIT は main に merge 済み） | qs40 × 600 を Linux の 50.6 fps へ（今 32.6 fps）。idle の残り（11.6 W 対 Linux 3.2〜3.5 W）は tick・P-state・ASPM などで、WS333 の設計の後 |
 | P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | p020: GPU の memory を cache（SLC）に通す既定の回帰、表示用の copy を頂点の処理が待たない直し | qs40 × 13 を 42.35 → 50 fps 以上へ。branch は BUG-375 が直るまで main に入れない |
 | P3 | [WS307](ws307/ws.md)・[WS331](ws331/ws.md)・[WS332](ws332/ws.md)・[WS326](ws326/ws.md) | 残りの仕事を順に | 起動（q1736）。WS307 p007 の残り（installer の導入の QEMU、古い entry の掃除） | WS331 p006 規約 → WS332 p003・p004 → WS326 p015・p017 以降 |
 | P4 | Bug・[WS291](ws291/ws.md) | BUG-374（RTX の cursor の色が逆）と Pi 5 の GPU | 起動（q1742）。BUG-374 の原因の特定と直し（10.0.10.3 は P6 と lock で交代） | Pi 5 の起動の後に WS291 p021 |
@@ -29,14 +29,14 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | p013・p014 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
 | p020 | PowerVR（VF2） | qs40 × 13・1920x1080・direct scanout で 50 fps（RTX のカタログの FP32 の比） | 42.35 fps（direct） | in-progress（P2） |
 | p021 | Raspberry Pi 5（V3D 7.1） | スペックの比の copies で 50 fps（clock を実機で確定） | 未計測（mview に要る driver の機能を host で実装済み） | in-progress（P4、実機待ち） |
-| p022 | Intel i915（5330） | 5330 の Linux（ANV）で 50.6 fps の qs40 × 600 で Linux 以上 | 31.0 fps（頂点の shader 134 → 67 命令。GPU が電力の上限で 800 MHz、WS333 p002 で CPU の idle を先に直す） | in-progress（P1） |
+| p022 | Intel i915（5330） | 5330 の Linux（ANV）で 50.6 fps の qs40 × 600 で Linux 以上 | 32.6 fps（頂点の shader 134 → 67 命令。CPU の idle を MWAIT にして GPU が 800 → 850〜900 MHz、まだ電力の上限 13 W に張り付く） | in-progress（P1） |
 
 ### WS333 /dev/thermal で統一する電力・熱の枠組み（2026-10-31 新設、WS301・WS303 を統合）
 
 | Phase | 内容 | 状態 |
 | --- | --- | --- |
 | p001 | 統一の設計（CPU の idle・P-state・P/E core・熱・fan・strategy・非常の停止） | in-progress（P5） |
-| p002 | amd64 の CPU の idle を MWAIT に（5330 の idle 12.99 W 対 Linux 3.2〜3.5 W） | in-progress（P1） |
+| p002 | amd64 の CPU の idle を MWAIT に（5330 の idle 12.99 W 対 Linux 3.2〜3.5 W） | MWAIT C6 を main に merge（f740839e5）。idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps。Linux にはまだ遠い（残りは 1 kHz の tick・P-state・ASPM・PSR の見込み、未調査） |
 
 ### WS331 driver から HAL への直の依存を除く
 
@@ -68,7 +68,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 ### WS313 ODROID-C5
 
-試験の image（text と Keiland、公式の bootloader 入り）は出来ている: p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img。zedBSD-firmware は push 済み。実機の結果待ち。
+試験の image（text と Keiland、公式の bootloader 入り）で、2026-10-31 に HDMI に画面が出なかった（ユーザー）。serial で調べるのは VF2 の最適化の後、今日の午後。zedBSD-firmware は push 済み。
 
 ### WS326 libmedia の H.264 の software の decoder
 
@@ -87,59 +87,80 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 | [BUG-372](bugs/BUG-372.md) | VF2 の serial の console が入力を受けない（元から未実装） | 直しを main に merge、VF2 の実機の確かめ待ち |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が EBUSY で終わる（VF2） | 解析中（P7） |
 | [BUG-374](bugs/BUG-374.md) | RTX の mouse の cursor の色が他の GPU と逆 | 解析だけ（nvrtx が受ける画像は正しい、原因は未特定。画面の目視が要る） |
-| [BUG-370](bugs/BUG-370.md) | Photos で保存すると全面表示が閉じる | 担当なし |
+| [BUG-370](bugs/BUG-370.md) | Photos で保存すると全面表示が閉じる | P6 が直す（q1740） |
+| [BUG-376](bugs/BUG-376.md) | PS/2 の mouse の port が mouse が無くても node を作り open のたびに約 80 ms 待つ | P6（q1743） |
+| [BUG-222](bugs/BUG-222.md) | ue0 の SCP が約 10 Mbps（10-06 の UAT） | WS315 で解決済みの見込み。試験を流して閉じる（P4、q1747、10.0.10.3 の ue0） |
 
 ## ユーザーの判断を待つ事
 
-今の作業を止めている判断は無い。以下は、master.md の「ユーザーの未決」に残っている物と、担当の無い仕事の割り当て。急ぐ物から。
+今の作業を止めている判断は無い。
 
-### 1. BUG-374（RTX の cursor の色が逆）の確かめ
+### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
-- 背景: P3 の調べで、nvrtx の driver が受ける cursor の画像は正しく（白 69・黒 49 の画素で矢印の通り）、display の設定の値も NVIDIA の定義と合っていた。原因は未特定。
-- 決めてほしい事: 10.0.10.3 の画面で、cursor が「cursor の plane」（hardware の cursor）か「合成で描いた cursor」かを見分けるため、次に見ていただける時に、game mode（全画面の 3D）の間と desktop の間で cursor の色が同じかを見てほしい（頼みではなく、お手すきの時の試験の一覧に置く形でよいか）。
+- 背景: 2026-10-28 の P1 の報告（[ws299/ws.md](ws299/ws.md) の「結果（2026-10-28 21:50）」）。idle と HWP は WS333 に入れた。WS299 そのものは、5330 が空いたら担当を付ける（2026-10-31 の指示、q1744）。
+- 残り 3 つ:
+  - 時刻の読み（clock_gettime）が 1 ms 刻み。vDSO（kernel に入らずに時刻を読む仕組み）が無いため。
+  - program が main から return した時に、stdout の buffer が書き出されない（libc の不具合）。
+  - libc の memcpy・memset の速さの続き（大きな copy、build の flag -fno-builtin -Os）。
+- 決めてほしい事: この 3 つを Bug にするか、WS にするか。
 
-### 2. WS299（5330 の NVMe の速さ）で担当の外に見つけた物の扱い
+### 2. P4 が 10-27 の記録の監査（q1660）の時に拾った候補（詳しくした物）
 
-- 背景: 2026-10-28 の P1 の報告（[ws299/ws.md](ws299/ws.md) の「結果（2026-10-28 21:50）」）で、NVMe 以外の課題が見つかった。
-  - amd64 の idle（C1 だけ）・HWP・P/E core の置き方 → 2026-10-31 に WS333 に入れた（解決）。
-  - clock_gettime に vDSO（kernel に入らずに時刻を読む仕組み）が無く、時刻が 1 ms 刻み。
-  - main から return した時に stdout が flush されない（libc の不具合）。
-  - libc の memcpy・memset の続き（大きな copy、build の flag -fno-builtin -Os）。
-- 決めてほしい事: 残りの 3 つを Bug にするか WS にするか、いつ直すか。WS299 そのものを続けるか（raw の読みは Debian の約 50%）。
+- 背景: 10-27 に P4 が、完了した WS の記録を片付ける作業（記録の監査）の途中で、判断が要りそうな物を一覧にした。記録が短く、Q1 が調べ直した結果を書く。
+- (a) WS162（FIDO2 の login）を canceled にするか → 調べ直すと、WS162 は 2026-10-27 に「WS172・WS199 で達成」として completed になっていた。**判断は要らない（解決済み）**。
+- (b) WS279 p009（Pi 5 の GPU の license と類似性の監査）の担当 → WS279 は完了したが、p009（Linux・Mesa の code を参考にした所が、license の上で問題無いかと、写しになっていないかの監査）は未実施のまま閉じた。誰がいつ行うかが未決。
+- (c) T1-691（試験の担当 T1 の 691 番の試験）で見た「P4m の時々の失敗」を Bug にするか → 記録に中身が残っておらず、何の失敗かが今は分からない。Q1 が history を調べるか、取り下げるか。
+- (d) `nvrtx.disp.own` の既定 → RTX の driver の起動の parameter で、1 にすると driver が画面を受け取った時に console ではなく driver 自身の画面をすぐに出す。既定を 0 のままにするか 1 にするか。
+- (e) `plan/ws004/tests/pci-msi-qemu.c` を残すか → QEMU の EDU という試験用の PCI の device で MSI の割り込みが届くかを見る kernel の試験の code。これを有効にする唯一の config（CONFIG_KERNEL_TEST_CHECKPOINTS）が消えたので、今は build されない。残す（config を作り直す）か、消すか。
+- (f) master-design-policy.md へ移す候補 約 25 件 → 各 WS の ws.md に書かれたユーザーの決定のうち、WS をまたいで効く物（設計の方針）を、全体の方針の文書に写すかどうか。一覧は Q1 が作り直して改めて聞く。
 
-### 3. PS/2 の aux（mouse の port）
+### 3. UEFI の loader の GOP の mode（画面の解像度）の選び方
 
-- 背景: kernel の PS/2 の driver（src/kern/platform/pcat.c の drv_pcat_ps2_8042_init の辺り）が、mouse が無いのに node を作り、open のたびに約 80 ms 待って EIO を返す。
-- 決めてほしい事: Bug にするか、いつ直すか。
+- 背景: UEFI の firmware は、起動の時の画面の mode（解像度と pixel の形）を GOP（Graphics Output Protocol）という口で出す。zedBSD の UEFI の loader（`bootloader/uefi/video.c`）は、kernel に渡す前に mode を選ぶ。今の動きは次の 3 段。
+  1. 起動の設定（zedbsd.cfg）に `video=幅x高さ` があれば、その大きさの mode にする。
+  2. 無ければ、loader が持つ「好みの大きさ」（今は 1920x1080、起動の splash の大きさ）を firmware が持っていればそれにする。
+  3. 持っていない、または設定に失敗した時は、firmware が起動の時に選んでいた mode のまま。
+- 問題になりうる所: 画面の本来の解像度（monitor の EDID が示す最適な大きさ）が 1920x1080 でない時（4K の monitor、1366x768 の laptop の panel など）、2 で 1920x1080 にすると、画面がぼやける・余白が出る。逆に firmware の既定が小さい（800x600 など）こともある。amd64 の起動の設定（zedbsd.cfg）には `video=640x480` の行がある（WS009 で、BIOS の起動の時に kernel が「知らない parameter」と log に出す件が見つかった）。
+- 案:
+  - (a) 今のまま（1920x1080 を好み、無ければ firmware のまま）。
+  - (b) monitor の最適な大きさ（GOP の EDID の口、EFI_EDID_ACTIVE_PROTOCOL で読める時）を第一にし、読めなければ (a)。
+  - (c) firmware の mode の中で一番大きい物（4K の monitor でも最大になる。splash や console の文字が小さくなる）。
+  - あわせて、amd64 の zedbsd.cfg の `video=640x480` を残すか外すか。
+- 決めてほしい事: (a)〜(c) のどれにするか。推しは (b)（monitor に合う、読めない時は今と同じ）。
 
-### 4. P4 が 10-27 に拾った候補（q1660）
+### 4. WS153（Settings の Apps の頁と third-party の app の repository）の U2〜U15
 
-- WS162 を canceled にするか（WS172 に吸収）。WS279 p009（Pi 5 の GPU の license と類似性の監査）の担当。P4m の時々の失敗（T1-691）を Bug にするか。nvrtx.disp.own の既定。pci-msi-qemu.c（唯一の config が消えた試験の code）を残すか。master-design-policy.md へ移す候補 約 25 件。
+- 背景: [WS153](ws153/ws.md) は、第三者の app を repository から入れる仕組み（package の形、配り方、署名、Settings の Apps の頁）の WS。2026-10-05 に U1（導入の範囲は system 全体の /apps/）はユーザーが決めた。残りの U2〜U15 は「ユーザーが検討中（質問しない）」として止めていて、WS153 は p001 の後で保留。設計の文書は [ws153/design.md](ws153/design.md)（各項目に Q1 の推しがある）。
+- 項目（推しは design.md の表）:
+  - U2 package の形: 自己完結の bundle（推し、依存の衝突が無い）か、共有の依存の package か。
+  - U3 配り方（HTTP と署名か HTTPS か）と U4 署名の検証の実装（Ed25519 などを自前で書くか）。
+  - U5 公式の repository: 運営するか、誰が鍵を持つか、image に既定で入れるか、鍵が漏れた時。
+  - U6 sandbox が無い事（段 1 は無し、入れた app は利用者の全ての権限で動くと画面で示す）。
+  - U7 package の名前と拡張子（`.kapp`）。U8 開発者向けの SDK は別の WS にするか。
+  - U9 第三者の binary に、どの library のどんな変更までを互換と約束するか（platform の ABI の安定の方針）。
+  - U10 手元の署名の無い `.kapp` の導入を許すか（段 1 は許さない）。U11 更新の確認の自動の問い合わせ（1 日 1 回、既定 on）。
+  - U12 展開の上限（package 256 MiB・展開 1 GiB など）。U13 導入の確認の dialog を誰が描くか（compositor）。U14 既定の app の UI を段 1 に入れるか（段 2）。U15 system 全体に入れる特権の helper（setuid root の小さな program）の口。
+- 決めてほしい事: 今は進めないなら、このまま保留（聞かない）。進めるなら、design.md の推しで決めてよい項目と、話し合いたい項目を教えてほしい。
 
-### 5. WS304（Pi 5 の外の PCIe、M.2 の NVMe）
+### 5. 以前からの物（変わっていない）
 
-- 背景: 実機で pcie1 の link が上がらず、ハードの側の切り分けで止まっている。
-- 決めてほしい事: Raspberry Pi OS で、同じ HAT（Geekworm X1001）・FFC の cable・NVMe の link が上がるかを見るか（上がれば zedBSD の driver の問題、上がらなければハードの問題）。
-
-### 6. 以前からの物（変わっていない）
-
-- WS306（ゲーム最適化の UAPI）: 環境変数の名前と書式、知らない option の扱い（p001 の設計で推しを示す予定）。
 - WS282〜WS285（camera など）: 実装を始める時期、WS282 の試験の画面を出す PC と買う webcam。
-- WS286 の後: openXC7 の host への導入、LLVM の cache の asset を GitHub の release に upload してよいか。
-- 保留の WS の整理（以前のベータ3・4 の中身を含む）。
-- OS 名: Keiland・libkeiland は残し、OS 名は zedBSD（仮決め。installer と firmware の repo は zedBSD で進んでいる）。
-- UEFI の loader の GOP の mode の選び方、BUG-222（ue0 の SCP が約 10 Mbps、tracking）、BUG-345（Pi 5 の click、再発したら知らせてもらう）、WS153 U2〜U15（検討中、聞かない）。
+- BUG-345（Pi 5 の click が画面に出ない窓、再発したら知らせてもらう）。
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
-- Pi 5: `/home/awe/zedBSD-worktrees/p4-ws291pi/build/ws291-p021/rpi5-p021.img` を SD に書いて起動し、画面に console の login が出るか（起動しなければ config.txt の `kernel=vmunix-fallback`）。起動したら Q1 に知らせると P4 が SSH で測る。
-- ODROID-C5: 試験の image（上の WS313）で起動と画面。
+- **Pi 5（2026-10-31 の午後にユーザーが行う予定）**: その時の main で最新の image を作り直して渡す（P4）。Q1 が声をかける。画面に console の login が出るか、起動の後に P4 が SSH で GPU の clock と fps を測る。
+- **ODROID-C5（2026-10-31 の午後、VF2 の最適化の後）**: 試験の image で HDMI に画面が出なかった（ユーザー）。serial（今は VF2 につないでいる）を C5 につないで、起動のどこで止まるかを見る。Q1 が担当（WS313）を起動して声をかける。
 - VF2: 新しい kernel で画面と serial の login（BUG-372）。
 
 ## 決まった事
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-31 | WS309・BUG-374 | game mode（全画面の 3D）では platform に関わらず mouse の cursor を表示しない（P7 が全 backend で確かめる）。BUG-374 はユーザーが今画面を見て確かめる | [ws309/ws.md](ws309/ws.md)・[BUG-374](bugs/BUG-374.md) |
+| 2026-10-31 | BUG-222 | 別の対応（WS315 の Realtek USB の vendor mode）で解決済みの見込みなので、試験だけ流して閉じる | [BUG-222](bugs/BUG-222.md) |
+| 2026-10-31 | 名前 | OS 名は zedBSD に決定（仮決めでなく）。Keiland・libkeiland は残す。変える時はユーザーが改めて伝える | [master.md](master.md) |
+| 2026-10-31 | 割り当て・整理 | PS/2 の aux を BUG-376 として起票し P6 へ。WS299 は 5330 が空いたら（q1744）、WS304 は P4 の Pi 5 の後（q1745）、WS306 は検討済みなので P5 が WS333 p001 の後に進める（q1746）。openXC7 の導入と LLVM の cache の upload は済み、保留の WS の整理は済み（項目を消した） | [queue.md](queue.md) |
 | 2026-10-31 | 割り当て | WS307・WS331・WS332・WS326 を P3、BUG-370 と WS291（RTX の続き p014）を P6、BUG-374 を P4 | [queue.md](queue.md) |
 | 2026-10-31 | WS291 PowerVR | VF2 の kernel と userland の入れ替えはすべて自動でよい。P2 は bug-analyzer の subagent を使ってよい | [ws291/ws.md](ws291/ws.md) |
 | 2026-10-31 | WS291 p022・WS333 | CPU の省電力（idle の C-state・P-state）を先に直す。WS333 p002 で amd64 の idle の MWAIT を先に（P1）、p001 で統一の設計（P5） | [ws333/ws.md](ws333/ws.md) |
