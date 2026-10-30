@@ -3,7 +3,7 @@
 # WS330 libmedia の H.265 の software の decoder と encoder の設計（p001）
 
 - 親: [ws.md](ws.md)。作成: ws330-p001（P5、q1763-i01、2026-10-31）。調べた tree: main 901f5b5fc（worktree `p5-ws330`）。
-- 正本: 各 module の仕様は [proposed/](proposed/) の header の comment（decoder の 29 個・encoder の公開の 1 個・共通の 7 個（`vcodec-bits.h` は `vcodec-bitreader.h` に替わった空の物、Q1 が消す）。p003 で source に置き、その commit を実装の Phase の基点 BASE にする）。この文書は全体の地図・決定・H.264 との共通化・試験の道・Phase の割り振り。
+- 正本: 各 module の仕様は [proposed/](proposed/) の header の comment（decoder の 29 個・encoder の公開の 1 個・共通の 7 個。p003 で source に置き、その commit を実装の Phase の基点 BASE にする）。この文書は全体の地図・決定・H.264 との共通化・試験の道・Phase の割り振り。
 - ユーザーの判断を待つ点は [user-questions.md](user-questions.md)（Q330-1〜4）。敵対的レビューと反映は [design-review.md](design-review.md)。
 - HAL（`include/hal/hal.h`）は関係しない（§12）。toolchain も変えない。source は変えていない（この Queue は plan/ws330/ だけ）。
 
@@ -358,7 +358,7 @@ WS329 §10.2 と同じ形: host の道具が raw の I420 を stdin から読み
 ## 14. Q1 への注意（ユーザーの判断ではない物）
 
 1. 仕様の PDF を main の `build/sources/specs/itu-t-h265-202601.pdf` へ写してほしい（今は `/home/awe/zedBSD-worktrees/p5-ws330/build/tmp/ws330-spec/itu-t-h265-202601.pdf`、SHA-256 `78b09348…d4d2`）。phase.md はその path を書いた。worktree の `build/tmp/ws330-spec/`（PDF と index の html）と `build/tmp/ws330-conf/`（3 つの zip、約 7 MB）と `build/tmp/ws330-hdr/` は使い捨て（Q1 が消す）。
-2. WS326 p026（P4 の設計、acb27716b）の名前に proposed/common を合わせた。`plan/ws330/proposed/common/vcodec-bits.h` は `vcodec-bitreader.h` に替わり、中身は空の転送だけ: Q1 が消してほしい（`git rm`、理由: 名前の変更で不要）。p026 の §7 の提案（`vcodec_cabac_pcm` を位置と再開に分ける）は WS330 p002 の C4 で行う。WS329 の encoder も `h264sw_frame`・`h264sw_dpb` を使うので、p002 は WS329 の試験の前後一致も確かめる（§5.2）。
+2. WS326 p026（P4 の設計、acb27716b）の名前に proposed/common を合わせた。旧い `proposed/common/vcodec-bits.h` は Q1 の OK（2026-10-31）で `git rm` した。p026 の §7 の提案（`vcodec_cabac_pcm` を位置と再開に分ける）は WS330 p002 の C4 で行う。WS329 の encoder も `h264sw_frame`・`h264sw_dpb` を使うので、p002 は WS329 の試験の前後一致も確かめる（§5.2）。
 3. WS329 p003 が proposed の header を source に置く時、`vcodec-cabac-enc.h` の表の参照（`h264sw_cabac_range_lps` など）を共通化の後の名前（`vcodec_cabac_range_lps` など）に、comment の「H.265 9.3.4.3」を「H.265 9.3.5」（V11 の encoder の engine の節）にしてほしい。
 4. 適合の cache: zip だけで 129 MB。main の `build/sources/h265-conformance/` に置くのを推す（WS318 §13.3 も同じ場所を予定、共有）。展開しない（`unzip -p`）ので disk はこれだけ。取得は p029 の前に Q1 が `H265SW_CONFORMANCE_DIR=… sh plan/ws330/tests/conformance/fetch.sh` で（パラメータの無い GET 147 回）。
 5. HM の参照の decoder（ITU-T/ISO の配布の C++、host でだけ build）を encoder の厳しい oracle に足すか（WS329 §14-4 の JM と同じ問い）。推しは「足す」（p046 の前、取得は zip 1 つ、SHA-256 を記録）。master.md の web の取得の条件に照らして Q1 が決める。
