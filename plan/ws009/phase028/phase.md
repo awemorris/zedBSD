@@ -2,7 +2,7 @@
 
 # ws009-p028: clean な tree からの build と amd64 QEMU の boot の再現、互換の主張の照合（案 D）
 
-Status: in-progress（2026-10-30 P1。DOC-T60 済み、build と boot の再現は未着手）
+Status: in-progress（2026-10-30 P1。DOC-T60 済み。build・boot は native の image まで、boot の判定は未、ラップアップで停止）
 Parent: [WS009](../ws.md)
 Approval: 2026-10-30 ユーザー「WS009、WS296・WS297は標準廉価実装手順を適用してphaseを作り替え、今から実行してOKです。ただ、1 WSずつ実施します。」。2026-10-30 Q1: 案 D は P1 が実行、QEMU は P1 専用の名前・port・directory で流してよい。
 実行の担当: Opus（P1）
@@ -69,6 +69,43 @@ WS の完了の条件「build and boot instructions are reproduced in a clean en
 
 観察（直していない）: features.h の comment に「XXX: Rename __KERN_* to __LIBC_*」。`ZEDBSD_USER_ABI_LP64` は Noct の patch（userland/base/noct/patches/0002-use-project-llvm-sysroot.patch）が渡す旗で、types.h は見ない（toolchain の範囲、触らない）。
 
-### build と boot の再現
+### build と boot の再現（2026-10-30 11:08〜11:12 P1、ラップアップで停止）
 
-（未着手。toolchain の扱いを Q1 に確かめてから）
+方法は Q1 の判断 (a)（2026-10-30 Q1「(a) で進めてよい。toolchain の 2 手は再現しない（共有の物を使ったと結果に書く。完全な再現は将来の CI か release の UAT の扱い）。config は --defaults、firmware の license の確認は自動で同意してよい…boot は boot-test.sh（画面で login prompt）で判定し…」）。
+script `plan/ws009/tests/p028-reproduce.sh`（初版 04ff4da4e、boot の直しはこの commit）。
+
+1 回目の run: 出力 `/home/awe/zedBSD-worktrees/p1-ws009r/build/tmp/p028-20261030-110805/`（clean tree は `src/`、tree は commit 04ff4da4e の git archive、共有の llvm・llvm-source・llvm-build・NoctLang・host-noct-state へ読み取り専用の symlink。toolchain の 2 手 `make toolchain-cache`・`make -j16 toolchain` は再現していない）。
+
+| step | 結果 |
+| --- | --- |
+| `tools/menuconfig.py --output config.mk --defaults` | exit 0（amd64、`ZEDBSD_VARIANT := native`、clang・libcxx の package 無し） |
+| `make help`・`make list-targets` | exit 0（出力は logs/help.log・list-targets.log。文書との突き合わせは未実施） |
+| `yes \| make firmware-licenses` | exit 0（nvidia-gsp ほかを同意） |
+| `make -j16 sysroot-amd64` | exit 0（11:09:48） |
+| `make -j16 disk-image`（native） | exit 0（11:11:10）。`hdd-native.img` 2,485,125,120 bytes、`check-amd64-native-image: … OK`。log の `warning:` 6 件は全て host の perl の locale（compiler の warning ではない）。third-party の openssl に clang の「2 warnings generated」（product の code ではない） |
+| boot-test.sh（native、uefi-nvme） | **exit 1・判定なし**: `boot-test: no QMP socket`。原因は script の誤り（`BOOT_TEST_WORK` を build/tmp の深い path にしたため QMP の socket の path が 108 bytes を越えた）。guest の問題ではない。script を直した（`BOOT_TEST_WORK` を設定せず tool の既定 TMPDIR に任せる、`P028_BOOT_ONLY=DIR` で build せず boot だけ） |
+| hybrid の disk-image | 途中で停止（ラップアップ、11:12）。uefi・bios は未着手 |
+
+未実施: native の boot の判定、hybrid・uefi・bios の build と boot、`make help`・`list-targets` と文書の突き合わせ。
+
+注意（次の担当へ）: menu の既定は `ZEDBSD_GRAPHICAL_LOGIN := y`。boot-test.sh の既定の pattern は text の `login:` なので、画面が greeter なら pattern が合わない可能性がある。その時は PNG（`OUTPUT/login.png`）を Read で見て、文書（build-from-source.md の「The initial success marker … followed by `login:`」）と menu の既定の食い違いとして記録する（graphical の既定で text の `login:` を成功の印と書くのは文書の誤りの候補）。
+
+### 次の 1 手
+
+```sh
+cd /home/awe/zedBSD-worktrees/p1-ws009r   # main に ff してから
+P028_BOOT_ONLY=/home/awe/zedBSD-worktrees/p1-ws009r/build/tmp/p028-20261030-110805 timeout 900 plan/ws009/tests/p028-reproduce.sh native
+# その後、残りの variant を新しい run で（build から）:
+timeout 36000 plan/ws009/tests/p028-reproduce.sh hybrid uefi bios   # native も要るなら引数なし
+```
+
+消す物（Q1 へ、p028 の後）: `/home/awe/zedBSD-worktrees/p1-ws009r/build/tmp/p028-20261030-110805/`（約 4.5 GB、clean tree と image）、`build/tmp/p028-run.out`。
+
+## 引き継ぎ: WS296 の調べ（2026-10-30 P1、q1705-i01、commit はしていない。WS009 の completed の後に WS296 の設計として書く）
+
+- P6（q1667）が WS296 の p001〜p005 を全部実装済み: branch の先頭 `1809873bd`（基点 main `61630bb0b`、src/drivers の 104 file・+14,854/−8,032、`plan/ws296/tests/check-mgmt.sh`・`check-mgmt.exclude`・`config-amd64-test-options.mk` を含む）。未試験・未 merge。P6 の記録では検査 0・XXX 0・12 の config の vmunix が warning 0、usb.c・usb-rtl8822bu.c は `-S` の関数ごとの比較をした。
+- 今の main（00396e3da）で P6 の check-mgmt.sh を流すと **413 行**（platform 25・generic 18・usb 12・acpi 12・wifi 8・pci 8・typec 6・i2c 3・fs 3・mmc・isa・gpio 各 1 の file）、XXX の file は 11（31,308 行）。
+- 基点の後に main で変わった P6 の file は 10: fs/fat.c・fs/ufs.c・pci/pci-pcat.c・pci/pci.c・platform/pcat/graphics/splash.c・.h・usb/usb-cdc-ecm.c（main 68 行）・usb/usb-cdc-ncm-net.c（**main 1,105 行**）・usb/usb-cdc-ncm.c（261 行）・usb/usb.c（175 行）。他の 94 file は P6 の版をそのまま持ってこられる。
+- 組み直しの案（標準廉価実装手順の形）: 各 Phase は main から始め、自分の file 群について P6 の版を `git merge-file`（基点 61630bb0b、main、1809873bd）で取り込み、検査と「動作を変えない」の機械の確かめをする。
+  - 道具: P6 の check-mgmt.sh（path を引数で絞れる形に）、XXX の数え、**asm-compare.sh**（基点と変更後の 2 つの tree を同じ config・`ZEDBSD_KERNEL_LTO=none` で vmunix まで build し、対象の .o を llvm-objdump の関数ごとの disassembly と rodata で比べる。差は名前の変わった static 関数・log の文字列・HAL_ASSERT/HAL_FATAL/KERN_FATAL の `__LINE__`（drivers の gpu/ 以外で 18 file・42 か所）だけのはずで、残りを読む）。下書き: `/home/awe/zedBSD-worktrees/p1-ws009r/build/tmp/ws296-draft/asm-compare.sh`（未試験。基点の tree の build/ には llvm・llvm-source・llvm-build・NoctLang・host-noct-state だけを link する案）、file ごとの P6 の差と main の差の数え `files.tsv`（列: path、P6 の変更行、基点から main の変更行）。
+  - Phase の群（Sonnet 5.5 high、各 1 回、file が重ならないので並べられる）: (1) 管理情報だけの約 90 file（platform・acpi・wifi・typec・i2c・gpio・isa・mmc・fs・pci・generic の hid-report 以外・usb の小さな物。main で変わった 6 file は merge-file）、(2) HID: generic/hid-report.c・usb-hid.c・usb-hid-checkpoint.c（約 4,200 行の差）、(3) UAS: usb-uas.c・usb-uas-transport.c・usb-uas-disk.c、(4) usb-cdc-ecm.c・usb-cdc-ncm.c、(5) usb-cdc-ncm-net.c（main の変更が大きいので main から当て直し、P6 は参考）、(6) usb.c、(7) usb-rtl8822bu.c、(8) 最後: 全体の検査 0・XXX 0・P6 の 12 の config の build・規約の全文の見直し（Opus を推す）。旧 p001〜p005 は canceled（P6 の branch に置き換え）。
