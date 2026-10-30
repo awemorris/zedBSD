@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 06:36（Q1）
+最終更新: 2026-10-31 06:39（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,10 +9,10 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1778: p025 規約の全文の見直し（WS326 の最後の Phase） | 終われば WS326 を完了の形に |
+| P1 | — | — | 返却（08:2x）。WS326 p025（規約の全文の見直し、style の違反 0、全試験が前と同じ）を main に | 次の割当を Q1 が決める |
 | P2 | — | — | 返却（06:5x）。VF2: BUG-338・340・342・343 closed（SD の CRC の誤りの根を直し、10 回の起動で root が毎回 live）、339 は判断待ち（0g） | 次の割当を Q1 が決める |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
-| P4 | — | — | 返却（07:2x）。WS333 p019（sessiond の熱の要求の口と権限の規則、kernel への呼びは UAPI まで仮）を main に | 午後: Pi 5 の実機 |
+| P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1780: 完了の片付け（試験を plan/tools/h264sw/ へ、ws.md を完了の形に） | 午後: Pi 5 の実機 |
 | P5 | [WS302](ws302/ws.md) | デスクトップのスレッドバランサ（DTB） | q1775: p001 設計（WS333 の CPU の口を使う、design-reviewer と問いまで） | WS330 の設計は済み（問いは 0f） |
 | P6 | [WS310](ws310/ws.md) | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる | q1779: p001 設計（どの _OSC を何の bit で、前後の firmware の振る舞いの差の確かめ方） | WS317（hotplugd）はユーザーの「今は取り組まない」のとおり設計もしない |
 | P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
@@ -72,7 +72,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 
 ### WS326 libmedia の H.264 の software の decoder
 
-22 Phase cleared（p022 JVT の適合: 範囲の中の 101 本 14,526 frame が全部一致、decoder の直し 0）。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019・p021（全体の流れ、22 本 408 frame が ffmpeg と一致）・p023（libmedia の backend、実際の stream を h264-software で decode）は cleared ・p022・p026（共通の名前への移し）は cleared ・p024（速さ: 補間と deblocking の書き直しで host 1 thread の 1080p が 1.35〜1.94 倍、例 18.4 → 35.7 fps）は cleared → p025 規約（P1、in-progress）→ WS326 完了→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
+22 Phase cleared（p022 JVT の適合: 範囲の中の 101 本 14,526 frame が全部一致、decoder の直し 0）。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019・p021（全体の流れ、22 本 408 frame が ffmpeg と一致）・p023（libmedia の backend、実際の stream を h264-software で decode）は cleared ・p022・p026（共通の名前への移し）は cleared ・p024（速さ: 補間と deblocking の書き直しで host 1 thread の 1080p が 1.35〜1.94 倍、例 18.4 → 35.7 fps）は cleared ・p025（規約）も cleared → 完了の片付け（P4、in-progress）→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
 
 ### 最近完了した WS
 

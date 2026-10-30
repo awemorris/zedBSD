@@ -483,3 +483,4 @@
 | q1778 / q1778-i01 | P1（conformance-reviewer、worktree `/home/awe/zedBSD-worktrees/p1-ws326p025`・branch `agent/p1-ws326p025`） | [ws326-p025](ws326/phase025/phase.md) | 書き方だけ、全試験が前と同じ | cleared（181a071ac） |
 | q1779 / q1779-i01 | P6（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p6-ws310`・branch `agent/p6-ws310`） | [ws310](ws310/ws.md) p001 設計 | plan/ws310/ だけ、design-reviewer と問いまで | in-progress |
 | q1727 / q1727-i04 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 4 回目 | 100% までの自走（ユーザーの指示）、計測は /tmp | in-progress |
+| q1780 / q1780-i01 | P4（phase-runner、worktree `/home/awe/zedBSD-worktrees/p4-ws326close`・branch `agent/p4-ws326close`） | [ws326](ws326/ws.md) の完了の片付け | 試験を plan/tools/h264sw/ へ、参照の書き換え、ws.md を完了の形、Phase の directory の git rm（一覧を Q1 に先に） | in-progress |
