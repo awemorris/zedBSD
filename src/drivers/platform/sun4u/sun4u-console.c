@@ -33,8 +33,6 @@
 #include "drivers/platform/sun4u/sun4u-firmware-fb.h"
 #include "drivers/platform/pcat/graphics/vgafont.h"
 
-#include <hal/hal.h>
-
 #include <kern/clock.h>
 #include <kern/device-io.h>
 #include <kern/graphics-backend.h>
