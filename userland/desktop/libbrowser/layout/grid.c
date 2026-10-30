@@ -138,14 +138,29 @@ grid_repeat_track(
 {
 	const struct css_length *length;
 
+	layout_unit size;
+	layout_unit least;
+
 	length = &track->size;
 	if (track->kind != CSS_TRACK_LENGTH)
 		length = &track->minimum;
+	size = 0;
 	if (length->unit == CSS_UNIT_PX)
-		return layout_from_px(length->value);
-	if (length->unit == CSS_UNIT_PERCENT && basis >= 0)
-		return (layout_unit)((float)basis * length->value / 100.0f) + layout_from_px(length->offset);
-	return 0;
+		size = layout_from_px(length->value);
+	else if (length->unit == CSS_UNIT_PERCENT && basis >= 0)
+		size = (layout_unit)((float)basis * length->value / 100.0f) + layout_from_px(length->offset);
+
+	/* A maximum below the minimum counts as the minimum. */
+	if (track->kind == CSS_TRACK_LENGTH && track->minimum_rule != 0) {
+		least = 0;
+		if (track->minimum.unit == CSS_UNIT_PX)
+			least = layout_from_px(track->minimum.value);
+		else if (track->minimum.unit == CSS_UNIT_PERCENT && basis >= 0)
+			least = (layout_unit)((float)basis * track->minimum.value / 100.0f) + layout_from_px(track->minimum.offset);
+		if (least > size)
+			size = least;
+	}
+	return size;
 }
 
 /*
@@ -2686,7 +2701,7 @@ grid_size_columns(
 		/* Fixed tracks resolve their existing absolute lower floor here (a smaller minmax() minimum when it can grow later). */
 		if (track->kind == CSS_TRACK_LENGTH) {
 			grid->columns[column] = grid_track_length(&track->size, box->width, tree->measuring);
-			if (tree->measuring == 0 && grid_track_floor(track, box->width, &width) && width < grid->columns[column])
+			if (tree->measuring == 0 && grid_track_floor(track, box->width, &width))
 				grid->columns[column] = width;
 		}
 
@@ -3575,7 +3590,7 @@ grid_size_rows(
 			continue;
 		if (track->kind == CSS_TRACK_LENGTH) {
 			grid->rows[row] = grid_track_length(&track->size, available, available < 0);
-			if (available >= 0 && grid_track_floor(track, available, &minimum) && minimum < grid->rows[row])
+			if (available >= 0 && grid_track_floor(track, available, &minimum))
 				grid->rows[row] = minimum;
 		}
 		if (track->kind == CSS_TRACK_FR && available >= 0) {
