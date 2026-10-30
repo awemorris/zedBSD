@@ -2,9 +2,9 @@
 
 # ws333-p006: cpuperf の枠組み（kernel）
 
-Status: cleared
+Status: 実装済み・試験 PASS（host 試験・全 port の build・QEMU の起動の回帰。cleared は Q1 の判定の後）
 Parent: [WS333](../ws.md)
-Queue: q1754-i01（P7）
+Queue: q1754-i01（P7）、起動の回帰は q1759-i01（P7）
 
 ## 目的
 
@@ -42,9 +42,24 @@ design.md §9 の p006: [p003](../phase003/phase.md) の header（`include/kern/
   - わざと壊す確かめ: 上限の guaranteed の床を外す・PERFORMANCE の min を lowest に・governor の上げを無効に・`pending` の印を外す・sample の能力の取り込みを外す、の 5 つの改変を scratchpad の写しで compile し、5 つとも FAIL になった。
 - build: `plan/ws333/tests/build-vmunix-all.sh build/p006`（全 20 port の vmunix、各 30 分の上限）で 20 port 全部 rc=0・warning 0。条件の中の関数の呼びを外す style の直しの後にもう一度流した結果も 20 port 全部 rc=0・warning 0（cpuperf.c が amd64・pcat・sun4u・m68k-virt で compile された事を log で見た）。amd64 の vmunix に `kern_cpuperf_init` が link され、`kern_thermal_receiver_register` は weak の未定義（w）で残る事を llvm-nm で見た。
 
+## QEMU の起動の回帰（q1759-i01、2026-10-31 P7）
+
+`kern_cpuperf_init()` が全 port の起動の道（`src/kern/entry.c`、`boot: HAL initialized successfully` の行の直前）に入ったので、`plan/tools/boot-test.sh`（画面の PNG を読む。console・serial の log では判定していない）で確かめた。tree は branch agent/p7-ws333 の c33842bc9（p006 の 44678bac6・c33842bc9）。build の出力は `/tmp/p7-ws333/`（host の / の空きが少ないため）。
+
+| port | build | boot-test | 見た物（画面） | PNG |
+| --- | --- | --- | --- | --- |
+| amd64 | `make -j24 ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=/tmp/p7-ws333/amd64 disk-image`（flock、rc 0、kernel・HAL・driver の warning 0。image 全体の log の warning 477 は userland の package の物） | 既定の uefi-nvme（KVM）、`BOOT_TIMEOUT=300` → PASS | login prompt（`login:`）と init・sessiond・bluetoothd の起動の行 | `build/review/ws333-p006/amd64.png` |
+| armv7-virt | `make ZEDBSD_CONFIG=config/ci/config-armv7-virt.mk … vmunix.bin`（rc 0、warning 0） | `BOOT_MODE=armv7-virt`、pattern `ARMV7 HAL READY`・`ARMV7 CPU 1 ONLINE`・`HAL initialized successfully`・`VFS initialization failed` → PASS | `boot: HAL initialized successfully. [cpu 1, memory 512MB, timer 1ms]` の後に platform の discovery、root 無しの `VFS initialization failed (12); entering idle.` | `build/review/ws333-p006/armv7.png` |
+| riscv64-virt | `make ZEDBSD_CONFIG=config/ci/config-riscv64-virt.mk … vmunix`（rc 0、warning 0） | `BOOT_MODE=riscv64-virt`、pattern `RISCV64 HAL READY`・`RISCV64 SMP 4 ONLINE`・`HAL initialized successfully`・`VFS initialization failed` → PASS | 4 hart が online、`[cpu 4, memory 2048MB, timer 1ms]`、`CPUs ready: 4`、root 無しで `VFS initialization failed` | `build/review/ws333-p006/riscv64.png` |
+| raspi4b（rpi4 の kernel） | `make ZEDBSD_CONFIG=config/ci/config-rpi4.mk … vmunix`（rc 0、warning 0） | `BOOT_MODE=raspi4b KERNEL=/tmp/p7-ws333/rpi4/vmunix`、SD は空の 64 MiB の file（root 無し）、pattern `ARM64 SMP cpu 3 online`・`HAL initialized successfully`・`CPUs ready: 4` → PASS | cpu 1〜3 が online、`[cpu 4, memory 960MB, timer 1ms]`、`CPUs ready: 4`、platform の discovery に進む | `build/review/ws333-p006/raspi4b.png` |
+
+- PNG の path は worktree `/home/awe/zedBSD-worktrees/p7-ws333/` の下（git に入れない）。
+- amd64 の image の build の間（flock の待ちの後）に worktree へ p007 の file（`src/drivers/platform/pcat/cpu-x86/`、`platform/amd64/vmunix.mk` の `CONFIG_CPU_PERF=y` の時だけの block）を足していた。既定の config（`CONFIG_CPU_PERF` 無し）の kernel には入らず（vmunix の symbol に `cpux86` は 0、`kern_cpuperf_init` は有る、llvm-nm で見た）、p006 の kernel と同じ。
+- 未実施: 実機（5330・Pi 4 など）、他の port（sun4u・m68k・ppc・mips・x68k・pc98 など）の起動。
+
 ## 未実施
 
-- QEMU・実機の起動の確かめ（この Phase は host 試験と build まで、image を作らない指示）。`kern_cpuperf_init()` は起動の道に入るので、起動の回帰（boot-test.sh）は p011 か Q1 が割り当てる回帰で要る。
+- 実機の起動の確かめ、上の 4 つ以外の port の QEMU の起動（QEMU の amd64・armv7-virt・riscv64-virt・raspi4b は q1759-i01 で PASS、上の節）。
 - 本物の provider（p011）との結合、熱の core（p005）との結合（受け手の登録・poll の周期・事象）。
 - 規約の全文の見直し（p024）。
 
