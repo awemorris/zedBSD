@@ -14,6 +14,8 @@ Queue: q1719（P2）
 2. `src/hal/arm64/watch.c` の stall の報告の描く先を、HVS の状態（plane の有無）だけで決める（HAL の実装の中、hal.h は不変）。使われなくなる `rpi_cons_suspend_output`・`rpi_cons_resume_output`・`rpi_cons_output_suspended` を整理する。
 3. p001 §4 の pc98 の 3 か所（pc98-lgy98 を kern_io へ、graphics の start・stop を driver へ、JIS の表を driver へ。git mv は Q1 の OK の後）。
 
+- 2026-10-30 ユーザーから、Pi 4 にも /dev/graphics を作り HAL に依存せず描画し、その上で kernel_putc を登録する、という趣旨の指示を受けた。→ 1 は sun4u の形でなく pcat の形にする: Raspberry Pi の graphics の backend を generic の graphics-device（src/drivers/generic/graphics-device.c）に登録して /dev/graphics を出し、その上の text の console が kern_text で描き kernel_putc を公開する。
+
 ## 確かめ
 
 - Pi 4: QEMU raspi4b の起動（boot-test.sh で login）と、graphics の後に console に戻った時の描き直し（AAT か画面の PNG）。Pi 5・ODROID-C5 は build（warning 0）。pc98 は build。
