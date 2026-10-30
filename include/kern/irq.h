@@ -56,6 +56,34 @@ int kern_irq_register_msi(const char *source, kern_irq_handler_t handler,
 int kern_irq_unregister_msi(int mapped_irq);
 
 /*
+ * Allocate a message-signalled interrupt and attach its handler later.
+ *
+ * For a device whose driver programs the message before its handler state
+ * exists. kern_irq_alloc_msi() reserves the vector and reports the message
+ * address and data the device must write, without touching the device and
+ * without a handler; an arrival meanwhile is acknowledged and dropped.
+ * The address is the message destination, not a RAM or DMA address.
+ *
+ * kern_irq_attach_msi() installs the handler, whose argument must be
+ * ready. kern_irq_detach_msi_sync() removes it and waits until no CPU is
+ * still running it, so the argument may then be freed; it waits for the
+ * handler only, not for work the handler queued, and must be called where
+ * sleeping is allowed, never from the handler. kern_irq_free_msi()
+ * releases the vector once the handler is detached and the device no
+ * longer sends; it reports EBUSY while a handler is still attached.
+ *
+ * All report 0 on success, and ENOTSUP on a platform without this kind
+ * of message-signalled interrupt.
+ */
+int kern_irq_alloc_msi(const char *source, int *mapped_irq,
+		       uint64_t *mapped_address, uint32_t *mapped_event);
+int kern_irq_attach_msi(int mapped_irq, kern_irq_handler_t handler,
+			void *argument);
+int kern_irq_detach_msi_sync(int mapped_irq, kern_irq_handler_t handler,
+			     void *argument);
+int kern_irq_free_msi(int mapped_irq);
+
+/*
  * The trigger mode and polarity of a numbered interrupt
  * (kern_irq_set_mode): edge or level, active high or low.
  */

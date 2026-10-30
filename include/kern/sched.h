@@ -194,6 +194,15 @@ kern_preempt_disable(void);
 void
 kern_preempt_enable(void);
 
+/*
+ * Report the number of the CPU the caller runs on.
+ *
+ * The answer is stable only while the caller cannot move: with preemption
+ * or interrupts disabled, or in interrupt context.
+ */
+unsigned
+kern_cpu_current(void);
+
 /* Test-only: current CPU's kern_preempt_disable() nesting depth. */
 unsigned
 sched_test_preempt_count(void);

@@ -79,6 +79,15 @@ kern_platform_shutdown_prepare(void) __attribute__((weak));
 void *kern_boot_handoff(const char *name);
 
 /*
+ * Write one character to the early console.
+ *
+ * Before the kernel console exists this is the platform's own early
+ * console, the firmware's or a serial line; once the kernel console is
+ * published the character is shown there instead.
+ */
+void kern_console_early_putc(int character);
+
+/*
  * The screen the firmware or the boot loader left on, as the kernel reads it.
  *
  * One instance is a copy the caller owns, filled by kern_boot_framebuffer()

@@ -39,6 +39,8 @@ irq_error(
 		return ENOMEM;
 	case HAL_ERR_UNSUPPORTED:
 		return ENOTSUP;
+	case HAL_ERR_STATE:
+		return EBUSY;
 	default:
 		return EIO;
 	}
@@ -110,6 +112,93 @@ kern_irq_unregister_msi(
 {
 	/* Releases the vector and its mapping. */
 	return irq_error(hal_irq_unregister_msi(mapped_irq));
+}
+
+/*
+ * Allocates one message-signalled interrupt without a handler.
+ */
+int
+kern_irq_alloc_msi(
+	const char *source,
+	int *mapped_irq,
+	uint64_t *mapped_address,
+	uint32_t *mapped_event)
+{
+	hal_physaddr_t address;
+	int status;
+
+	/* Reserves the vector and its routing; the device is not touched. */
+	address = 0;
+	status = hal_irq_alloc_msi(source, mapped_irq, &address, mapped_event);
+	if (status != HAL_OK)
+		return irq_error(status);
+
+	/* Publishes the message address the device must write. */
+	if (mapped_address != NULL)
+		*mapped_address = (uint64_t)address;
+
+	/* Succeeded: the vector is reserved for the caller. */
+	return 0;
+}
+
+/*
+ * Attaches a handler to a vector from kern_irq_alloc_msi().
+ */
+int
+kern_irq_attach_msi(
+	int mapped_irq,
+	kern_irq_handler_t handler,
+	void *argument)
+{
+	int status;
+
+	/* The token types match, so the handler passes through unchanged. */
+	status = hal_irq_attach_msi(mapped_irq, (hal_irq_handler_t)handler,
+				    argument);
+	if (status != HAL_OK)
+		return irq_error(status);
+
+	/* Succeeded: the next message runs the handler. */
+	return 0;
+}
+
+/*
+ * Detaches a handler and waits until no CPU still runs it.
+ */
+int
+kern_irq_detach_msi_sync(
+	int mapped_irq,
+	kern_irq_handler_t handler,
+	void *argument)
+{
+	int status;
+
+	/* Removal must name the handler and argument that were attached. */
+	status = hal_irq_detach_msi_sync(mapped_irq,
+					 (hal_irq_handler_t)handler, argument);
+	if (status != HAL_OK)
+		return irq_error(status);
+
+	/* Succeeded: the caller may free the handler's argument. */
+	return 0;
+}
+
+/*
+ * Releases a vector from kern_irq_alloc_msi().
+ */
+int
+kern_irq_free_msi(
+	int mapped_irq)
+{
+	int status;
+
+	/* A vector with a handler still attached is refused as busy. */
+	status = hal_irq_free_msi(mapped_irq);
+	if (status != HAL_OK)
+		return irq_error(status);
+
+	/* Succeeded: the vector may be allocated again. */
+	return 0;
 }
 
 /*

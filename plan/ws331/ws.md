@@ -27,7 +27,7 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 違反の全数と、関数ごとの置き換え先（既存の kern_*）の一覧、wrapper の無い関数（kernel に足す案）の一覧 | cleared（2026-10-30 ユーザーが表 A・B を許可） | — |
-| [p002](phase002/phase.md) | kernel に表 B を足す（driver は変えない） | in-progress（P2、q1717） | p001 |
+| [p002](phase002/phase.md) | kernel に表 B を足す（driver は変えない） | in-progress（P2、q1717。実装と全 port の build は済み、判定は Q1） | p001 |
 | [p003](phase003/phase.md) | 表 A の機械的な置き換えと include だけの file（sparcv9 の 2 file は別の commit） | planned（P2、q1717） | p002 |
 | [p004](phase004/phase.md) | i915 の map（WRITECOMBINE・READONLY）と MSI（B2〜B5）、試験の代役 | planned（P2、q1717） | p002 |
 | p005 | 例外の候補（pc98 の 3 か所、rpi4 の console） | 未作成（rpi4 はユーザーの決定待ち） | p003 |
