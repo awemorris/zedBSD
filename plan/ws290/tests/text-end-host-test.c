@@ -382,6 +382,12 @@ hal_cpu_current(void)
 	return 0;
 }
 
+unsigned
+kern_cpu_current(void)
+{
+	return 0U;
+}
+
 int
 kern_device_map(
 	uint64_t address,

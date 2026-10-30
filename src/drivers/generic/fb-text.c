@@ -567,8 +567,9 @@ text_reveal_fatal(
  * early console if they were not yet, and /dev/graphics and the boot
  * framebuffer give the screen and their mappings up.  Returns the first
  * error they return, or EBUSY when another character path, which may draw
- * anywhere on the screen, was published and the caller gives memory back.
- * Thread context, no lock held.
+ * anywhere on the screen, was published and the caller gives memory back;
+ * ENOTSUP, changing nothing, without a screen or a serial line.  Thread
+ * context, no lock held.
  */
 static int
 text_end(
@@ -580,6 +581,13 @@ text_end(
 	int foreign;
 	int graphics_error;
 	int framebuffer_error;
+
+	/*
+	 * Without a screen or a serial line the hardware layer's early console
+	 * is the only path the characters have: nothing changes.
+	 */
+	if (!text_surface && (text_board == NULL || text_board->serial_write == NULL))
+		return ENOTSUP;
 
 	/* Stops drawing for good, apart from any writer: once this section is left none draws again. */
 	irq = spin_lock_irqsave(&text_lock);

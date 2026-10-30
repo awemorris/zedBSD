@@ -64,7 +64,7 @@
 #define GDC_FIFO_FULL		0x02U
 
 /* The JIS X 0208 table the HAL owns, indexed in row-major order. */
-extern const uint16_t hal_pc98_jisx0208_to_ucs[7896];
+extern const uint16_t drv_pc98_jisx0208_to_ucs[7896];
 
 static uint16_t text_codes[TEXT_CELLS];
 static uint8_t text_attributes[TEXT_CELLS];
@@ -804,7 +804,7 @@ unicode_to_pc98(
 		/* Visits each retained table entry in row-major order. */
 		for (index = 0; index < 7896U; index++) {
 			/* Skips entries for a different scalar. */
-			if (hal_pc98_jisx0208_to_ucs[index] != codepoint)
+			if (drv_pc98_jisx0208_to_ucs[index] != codepoint)
 				continue;
 
 			/* Encodes the JIS row and cell for PC-98 memory. */

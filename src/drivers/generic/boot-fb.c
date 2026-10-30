@@ -100,6 +100,13 @@ static volatile uint8_t *fb_pixels;
 static void *fb_mapping;
 static uint64_t fb_physical;
 static size_t fb_bytes;
+
+/*
+ * The whole screen's memory as the platform handed it over, which the
+ * hardware layer keeps its own view of.  Set once by drv_boot_fb_init()
+ * once the screen is found drawable, mapped or not; 0 before.
+ */
+static uint64_t fb_screen_bytes;
 static unsigned fb_width;
 static unsigned fb_height;
 static unsigned fb_pitch;
@@ -175,6 +182,7 @@ drv_boot_fb_init(
 	/* The screen's rows, which the end judges whether or not they are mapped. */
 	fb_physical = screen->physical_base;
 	fb_bytes = (size_t)rows_bytes;
+	fb_screen_bytes = screen->size;
 
 	/* Maps every row. */
 	error = kern_device_map(screen->physical_base, (size_t)rows_bytes, KERN_DEVICE_UNCACHED, &mapped);
@@ -380,8 +388,8 @@ drv_boot_fb_end(
 	 * fatal reports, so the screen counts as left.
 	 */
 	error = 0;
-	if (fb_bytes != 0) {
-		overlaps = kern_text_range_overlaps(ranges, count, fb_physical, fb_bytes);
+	if (fb_screen_bytes != 0) {
+		overlaps = kern_text_range_overlaps(ranges, count, fb_physical, fb_screen_bytes);
 		if (overlaps)
 			error = EBUSY;
 	}

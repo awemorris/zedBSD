@@ -27,8 +27,7 @@ HAL_PC98_SOURCES := \
 	src/hal/x86/boot-parameters.c src/hal/x86/io.c \
 	src/hal/i386/bsp-pc98/boot.c \
 	src/hal/i386/bsp-pc98/cons.c src/hal/i386/bsp-pc98/pic.c \
-	src/hal/i386/bsp-pc98/pit.c src/hal/i386/bsp-pc98/display.c \
-	src/hal/i386/bsp-pc98/jisx0208.c
+	src/hal/i386/bsp-pc98/pit.c
 HAL_PC98_ASM := src/hal/i386/locore.S src/hal/i386/ap-trampoline.S src/hal/i386/trap.S \
 	src/hal/i386/dispatch.S
 HAL_PC98_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(HAL_PC98_SOURCES)) \
@@ -48,7 +47,8 @@ ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
 PC98_GRAPHICS_OBJS := \
 	$(BUILD)/src/drivers/platform/pc98/graphics/pc98-graphics.o \
 	$(BUILD)/src/drivers/platform/pc98/graphics/backend.o \
-	$(BUILD)/src/drivers/platform/pc98/graphics/text.o
+	$(BUILD)/src/drivers/platform/pc98/graphics/text.o \
+	$(BUILD)/src/drivers/platform/pc98/graphics/jisx0208.o
 PC98_DISPLAY_OBJS := \
 	$(BUILD)/src/drivers/platform/pc98/graphics/display-gdc.o \
 	$(BUILD)/src/drivers/platform/pc98/graphics/display-glyph.o \
@@ -768,14 +768,6 @@ kern-compile: $(KERN_OBJS)
 	@echo "zedBSD kernel glue compile check: PASS"
 .PHONY: hal-pc98-compile kern-compile
 
-$(BUILD)/tests/hal-pc98-keyboard-host-test: \
-	tests/hal-pc98-keyboard-host-test.c \
-	src/hal/i386/bsp-pc98/cons.c \
-	src/hal/i386/bsp-pc98/jisx0208.c
-	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -std=gnu11 -Iinclude -Isrc $< -o $@
-
-HOST_TEST_BINARIES += $(BUILD)/tests/hal-pc98-keyboard-host-test
 CHECK_RUN_TARGETS += hal-pc98-compile kern-compile
 
 # Order user compilation after publication of the current UAPI headers.

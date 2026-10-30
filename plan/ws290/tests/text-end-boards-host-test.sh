@@ -2,7 +2,8 @@
 # Host test of the console's leaving of the display on the boards other than the PC/AT:
 # text-end-boards-host-test.c and text-end-boards-stubs.c with the real src/kern/text-display.c,
 # src/kern/klog.c, the PC-98 text layer, /dev/graphics and backend, the Raspberry Pi 4 and X68000
-# consoles, the VisionFive 2's binding (included by the stubs), the 16550 UART driver, the device
+# consoles over the boot framebuffer's text console (src/drivers/generic/boot-fb.c, fb-text.c),
+# the VisionFive 2's binding (included by the stubs), the 16550 UART driver, the device
 # tree reader and the serial console; ordinary, with the undefined-behaviour sanitizer, and with the
 # address and undefined-behaviour sanitizers (without the PC-98 scenes: the PC-98 text memory's
 # fixed kernel address lies in the address sanitizer's shadow memory); each scene in its own process.
@@ -37,6 +38,8 @@ for mode in ordinary undefined address; do
 		"$repo/src/drivers/generic/fdt.c" "$repo/src/drivers/generic/serial-console.c" \
 		"$repo/src/drivers/serial/ns16550.c" \
 		"$repo/src/drivers/platform/rpi4/rpi4-console.c" "$repo/src/drivers/platform/x68k/x68k-console.c" \
+		"$repo/src/drivers/generic/boot-fb.c" "$repo/src/drivers/generic/fb-text.c" \
+		"$repo/src/drivers/platform/pcat/graphics/vgafont.c" \
 		$pc98 -o "$out/$mode"
 	for scene in $scenes; do
 		UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 timeout 60 "$out/$mode" "$scene" || status=1
