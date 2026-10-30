@@ -9,17 +9,17 @@ Primary Milestone: MG006
 Queue: なし（ユーザーの直接の指示で、Claude Code on the web のセッションが進める。Codex の q55 とは別）
 Origin: 2026-10-27 ユーザーの指示。
 
-## ユーザーの決定（原文）
+## ユーザーの決定
 
-2026-10-27: 「WPT Interop 2025で、chromeが成功している項目に限り、100%を目指しましょう。」
-
-同日の作業の範囲: 「あなたはWebブラウザの改良、ws074を担当します。master.mdには書き込まず、ws074/ws.mdと下位のphaseにのみ書き込めます。」
-「以後、commitしたらこのブランチには自動でpushしてOKです。」（branch は `origin/libbrowser`）
+- 2026-10-27 ユーザーの決定: WPT Interop 2025 のうち Chromium が成功している項目に限り、browser も 100% 通す事を目標にする。
+- 同日の作業の範囲: Web ブラウザの改良（WS074）を担当し、master.md には書かず ws.md と下位の phase だけに書く。commit したらこの branch
+  （`origin/libbrowser`）へ自動で push してよい。
+- 2026-10-30 ユーザーの決定: WS074 の実行は P8 の phase-runner-low（Sonnet 5.5・high）で行う。
 
 ## 目標と受け入れ
 
 - 分母: 固定の Interop 2025 の選定（`plan/ws074/phase173/evidence/20261013-q1012/manifest.json`、3,805 ID、WPT 2d66b9b7998b）のうち、
-  同じ runner・同じ条件で Chromium（Chrome for Testing 153.0.8010.12）が PASS する ID。
+  同じ runner・同じ条件で Chromium が PASS する ID（基準は Chrome for Testing 153.0.8010.12。2026-10-30 からは local の Debian の Chromium 156.0.8078.73、PASS の数は同じ 3,472）。
 - 受け入れ: その全部で browser も PASS（`interop2025-chrome-gap.py compare` の gap が 0）。Chromium が落とす ID は目標に入れない。
 - runner がまだ扱えない ID（https・testdriver・worker など、どの runner の対象でもない物）は、Chromium の結果が無いので今の分母の外。
   分母の外にある事を「未測定」として数で残し、PASS とは数えない。runner を広げる時は Chromium も同じ runner で測り直す。
@@ -77,6 +77,10 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev17（864752041、2026-10-28） | 862 | 1,038 | 113 | 39 | 2,052（59.10%） |
   | ours-dev18（2026-10-28） | 869 | 1,056 | 112 | 39 | 2,076（59.79%） |
   | ours-dev19（ce9775f01、2026-10-28） | 876 | 1,067 | 114 | 39 | 2,096（60.37%） |
+  | ours-dev20（2ba50ae52、2026-10-30、Chromium 156 の PASS で数え直し） | 880 | 1,071 | 115 | 39 | 2,105（60.63%） |
+  | ours-dev24（q1708-i02 の途中、gradient・logical・overflow まで） | 964 | 1,085 | 115 | 39 | 2,203（63.45%） |
+  | ours-dev25（66e610b8a、module・view-transition の parse・zoom まで） | 973 | 1,085 | 115 | 39 | 2,212（63.71%） |
+  | ours-dev26（7727cb0b0、harness だけ測り直し。static・scripted・crash は dev25 のまま） | 976 | 1,085 | 115 | 39 | 2,215（63.80%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -118,4 +122,35 @@ Origin: 2026-10-27 ユーザーの指示。
   `build/ws074-cmp/chrome156`（`--kind chrome --jobs 6`、NODE_PATH・PATH は上のとおり）。`runs.json` ができたら完了。
   次は `python3 plan/ws074/tests/interop2025-chrome-gap.py compare --chrome build/ws074-cmp/chrome156 --ours build/ws074-cmp/ours-dev20`、
   Chromium PASS の数（前回 3,472）と dev20（dev19 は 2,096）を上の表に足す。
-- 未実施: 上の compare、gap の原因分けと engine の修正、Acid の回帰。
+- （q1708-i02 で実施済み。下の結果を参照。）
+
+### q1708-i02 の結果（2026-10-30、P8）
+
+- Chromium 156.0.8078.73 の PASS は harness 1,477・static 1,552・scripted 396・crash 47 の計 3,472（153 と同数）。測定は `build/ws074-cmp/chrome156`。
+- host build は `-Wall -Wextra -Werror` で、全 file を新しい出力先に build した log に warning 0（exit 0）。Acid3 は 100/100 で pixel 差 0（Acid2 は 99.27% のまま、基準と同じ）。
+- 全件の測定で後退 0（dev20 → dev26、4 runner とも dev20 の PASS が全て PASS のまま。dev25 で view-transition の `default` の拒否が足りず 2 件が後退し、dev26 で直した）。
+  harness +96、static +14。
+- 原因の分け方と直した物（commit 4c9ac8262 … 7727cb0b0）:
+  1. 測定の環境: runner が `browser --run` を `--async` 無しで呼ぶため web の iframe が一度も読み込まれず、navigation-api の no_output 99 件などが落ちていた
+     （at-once の読み込みは web の frame を読まない）。runner（`run-interop2025-harness.py`）に `--async` を付けた。Chromium の adapter は無視する。
+     これだけだと load が画像・style sheet を待たず 62 件が後退したので、window の load を frame・画像・style sheet・web font の完了まで保留し
+     （`page_fire_load` の保留と `page_fire_load_resume`、`page_load_waiting`）、style sheet が後続の script を止める（`page_wait_sheets`）ようにした。
+  2. iframe の文書をまたぐ navigation（p261 に詳細）、iframe の timer、別 realm の promise の await、beforeunload・pagehide、initial about:blank、detached。
+     navigation-api の Chromium が通す harness 158 件のうち 80 件が PASS（dev20 では 0 に近かった）。
+  3. CSS: `linear-gradient`・`repeating-linear-gradient`（`css/gradient.c`、`paint/gradient.c`、背景 image の bitmap に描く。flexbox の legacy 試験 +14）、
+     overflow の computed（visible は他の軸が scroll・hidden なら auto）と shorthand の正規化、declaration の comment の除去、
+     flow-relative な margin・padding・inset・border の computed、`border-inline`・`border-block` と各 width・style・color の shorthand、
+     `view-transition-name`・`view-transition-class`・`zoom` の parse と computed（zoom は layout に効かない）。
+  4. JS の module: default import・default export・`export { a as b }`・`import "x"`・外部の `<script type=module src>`・import attributes
+     （key が type 以外なら SyntaxError、type が json 以外なら TypeError）・JSON module。module の失敗は error event で報告する
+     （`bind_report_exception_at`）。html/semantics の import-attributes・json-module のうち 6 件が PASS。
+- 道具: `plan/ws074/tests/wpt-one.sh <ID>...`（1 ID ずつ runner と同じ条件で実行して callback を見る）。
+
+再開点（2026-10-30、q1708-i02 の停止）:
+- 最後の全件の測定は ours-dev25（static・scripted・crash は 66e610b8a、harness は dev26 の 7727cb0b0）。その後に commit は無い。
+- 残りの大きな塊（Chromium が通す ID、dev26 で gap 1,257）: scripted reftest 281、grid の alignment（baseline、harness 68）、
+  anchor positioning の scroll（anchor-scroll・anchor-scroll-position-try 19）と anchor() の CSSOM の正規化（parse-valid 2）、flexbox の baseline（約 25）、
+  View Transitions の `document.startViewTransition` と pseudo-element の selector（約 35）、Web Animations の `Element.animate`（grid・flex の補間の試験約 20）、
+  CSS の zoom の layout、`css-logical` の shorthand を CSSOM の longhand から読む（9）、grid の computed の repeat() の保持（2）、
+  動的 `import()` と module の namespace import、`window.open`・popup・joint session history を使う navigation-api、writing-modes の sideways（static 約 40）。
+- 次の候補（効きが大きい順の見込み）: scripted reftest の gap の原因分け（281 件。今回は未調査）、`Element.animate`、`startViewTransition`。
