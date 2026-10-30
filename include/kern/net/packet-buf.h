@@ -23,11 +23,11 @@
  * 64-bit machine's TCP offers a window of 128 KB to start with, a packet
  * for each kilobyte of it, which grows by itself to a megabyte while the
  * receive queues together take no more than a quarter of the pool, and
- * keeps a copy of each segment it sends until the peer has it (256 of them
+ * keeps a copy of each segment it sends until the peer has it (768 of them
  * a connection): 4096 packets, about 9 MB, leave the rest to the senders'
  * copies and the frames that arrive while one connection has the largest
- * window.  The 32-bit boards keep the small pool their memory map was laid
- * out for and have no jumbo packets.
+ * window and another sends.  The 32-bit boards keep the small pool their
+ * memory map was laid out for and have no jumbo packets.
  *
  * PACKET_BUF_JUMBO_RESERVE jumbo packets are kept for the drivers'
  * receive (PACKET_BUF_ALLOC_RECEIVE): a sender or a copy that would take

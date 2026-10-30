@@ -26,7 +26,7 @@ done
 # shellcheck disable=SC2086
 $cc -o "$out/tcp-model" $objects -lc || { echo "tcp-model: link failed"; exit 2; }
 # ws311-p002: a second build whose limits let A's window and B's take a bottleneck's round trip (the send ring, B's
-# receive queue and reorder queue raised to 1024; the kernel's defaults are 256, 128 and 128): the congestion scenarios.
+# receive queue and reorder queue raised to 1024; the kernel's defaults are 768, 128 and 128): the congestion scenarios.
 # The model's two hosts share one packet pool, 4096 (ws311-p003: A's copies and B's queues of a 1 MB window took all
 # 1024, and the connection died; since ws315-p006 the kernel's own pool is 4096 too).
 mkdir -p "$out/big"
@@ -95,19 +95,20 @@ scenario lan-1500-writes 100 --bytes 67108864 --write-bytes 65536 --expect-mss 1
 scenario pool-held 5 --bytes 16777216 --pool-held 64
 # ws221-p008: Nagle's algorithm: 1024-byte writes over 10 ms of round trip go in full 1460-byte segments (16 MiB is 11492
 # of them, 16384 writes), and with TCP_NODELAY nearly each write is its own segment (only one queued behind a segment the
-# device refused takes the next write's bytes).
+# device refused takes the next write's bytes; since ws315-p006 the ring of 768 and its 1152 KB buffer keep more writes
+# queued while the device is full, 15570 segments).
 scenario nagle-1024 4 --bytes 16777216 --delay-us 5000 --expect-segments-max 11600
-scenario nodelay-1024 4 --bytes 16777216 --delay-us 5000 --nodelay --expect-segments-min 16000
+scenario nodelay-1024 4 --bytes 16777216 --delay-us 5000 --nodelay --expect-segments-min 15000
 # ws221-p008: SO_SNDBUF bounds the payload A's ring holds (16 KB: no more is queued, and the window it keeps busy).
 scenario send-buffer-16k 20 --bytes 16777216 --send-buffer 16384
 # 10 ms of round trip: the rate was the window over the round trip (64 KB: 6.4 MB/s; 128 KB: 12.1 MB/s); since ws315-p006
-# B's buffer grows and A's ring limits (32 MB/s).
+# B's buffer grows (32 MB/s with A's ring of 256, 67 MB/s with 768).
 scenario rtt-10ms 4 --bytes 16777216 --delay-us 5000
 # ws315-p006: B's receive buffer grows by itself (dynamic right-sizing) while its window is what holds the transfer
 # back: over 10 ms of round trip the 128 KB window gave 12.1 MB/s, the buffer grows to the megabyte a connection may take
-# and A's ring of 256 segments limits instead (32 MB/s).  On the clean LAN, where the link limits, it grows no more than
-# about twice what a window's time brings (285 KB; the measured round trip is a window's time, 1.2 ms, not the link's
-# 0.2 ms).  With SO_RCVBUF it stays where it was put: 128 KB keeps the rate at the window over the round trip, and 1 MB,
+# and A's ring limits instead (32 MB/s with 256 segments; 67 MB/s with 768).  On the clean LAN, where the link limits,
+# it grows no more than about twice what a window's time brings (285 KB; the measured round trip is a window's time,
+# 1.2 ms, not the link's 0.2 ms).  With SO_RCVBUF it stays where it was put: 128 KB keeps the rate at the window over the round trip, and 1 MB,
 # larger than the default, is a 1 MB window too (before, the queue's 128 packets kept the window at 128 KB).
 scenario receive-auto-10ms 20 --bytes 16777216 --delay-us 5000 --expect-receive-limit 524288:1048576
 scenario receive-auto-lan 30 --bytes 67108864 --expect-receive-limit 131072:524288

@@ -217,13 +217,13 @@
 
 /*
  * The send buffer a connection starts with: on the 64-bit machines more
- * than their ring holds in segments of an Ethernet MTU (256 of 1460
+ * than their ring holds in segments of an Ethernet MTU (768 of 1460
  * bytes), so the ring bounds a transfer unless SO_SNDBUF sets a smaller
  * buffer; elsewhere the common default, which is more than their ring of
  * 8 holds.
  */
 #if PACKET_BUF_POOL_COUNT >= 1024U
-#define TCP_SEND_BUFFER (384U * 1024U)
+#define TCP_SEND_BUFFER (1152U * 1024U)
 #else
 #define TCP_SEND_BUFFER SOCKET_BUFFER_DEFAULT
 #endif
