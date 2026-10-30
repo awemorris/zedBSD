@@ -2643,6 +2643,12 @@ view_update(
 	if (view->page == NULL)
 		return 0;
 
+	/* A scroll a script asked for that nobody took yet (the page was loading) is the view's now. */
+	if (view->page->scroll_requested) {
+		view->page->scroll_requested = 0;
+		view->scroll_y = layout_from_px((float)view->page->scroll_y);
+	}
+
 	/* A page laid out at the view's size and unchanged since needs at most its focus painted again. */
 	changed = page_needs_layout(view->page);
 	if (!changed && !view->resized) {
@@ -3042,7 +3048,10 @@ view_changed(
 	if (view->page->scroll_requested) {
 		view->page->scroll_requested = 0;
 		view->scroll_y = layout_from_px((float)view->page->scroll_y);
-		view_clamp_scroll(view);
+
+		/* A document not laid out yet has no height to keep the scroll in: the layout does that once it is made. */
+		if (!page_needs_layout(view->page))
+			view_clamp_scroll(view);
 		view_redraw(view);
 	}
 

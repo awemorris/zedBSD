@@ -4037,6 +4037,42 @@ cascade_margin_property(
 	if (property == CSS_PROP_MAX_BLOCK_SIZE)
 		return vertical ? CSS_PROP_MAX_WIDTH : CSS_PROP_MAX_HEIGHT;
 
+	/* The flow-relative corner radii: the corner the block and inline sides name (the axes swap in a vertical mode). */
+	if (property >= CSS_PROP_RADIUS_START_START_X && property <= CSS_PROP_RADIUS_END_START_Y) {
+		int which;
+		int block_side;
+		int inline_side;
+		int first;
+		int second;
+		int corner;
+
+		which = (property - CSS_PROP_RADIUS_START_START_X) / 2;
+		block_side = CSS_TOP;
+		if (writing_mode == CSS_WRITING_VERTICAL_LR)
+			block_side = CSS_LEFT;
+		if (writing_mode == CSS_WRITING_VERTICAL_RL)
+			block_side = CSS_RIGHT;
+		inline_side = vertical ? CSS_TOP : CSS_LEFT;
+		if ((direction == CSS_DIRECTION_RTL) != (vertical && sideways == 1))
+			inline_side = vertical ? CSS_BOTTOM : CSS_RIGHT;
+
+		/* start-start, start-end, end-end, end-start: the block side first, the inline side second. */
+		first = which >= 2 ? (block_side + 2) % 4 : block_side;
+		second = which == 1 || which == 2 ? (inline_side + 2) % 4 : inline_side;
+
+		/* The corner is the one vertical side (top or bottom) with the one horizontal (left or right). */
+		if (first == CSS_LEFT || first == CSS_RIGHT) {
+			corner = first;
+			first = second;
+			second = corner;
+		}
+		if (first == CSS_TOP)
+			corner = second == CSS_LEFT ? CSS_TOP_LEFT : CSS_TOP_RIGHT;
+		else
+			corner = second == CSS_LEFT ? CSS_BOTTOM_LEFT : CSS_BOTTOM_RIGHT;
+		return CSS_PROP_RADIUS_TOP_LEFT_X + 2 * corner + (((property - CSS_PROP_RADIUS_START_START_X) % 2) ^ (vertical ? 1 : 0));
+	}
+
 	/* The logical sides: the group, then the physical side. */
 	for (group = 0; group < sizeof(groups) / sizeof(groups[0]); group++) {
 		if (property < groups[group][0] || property > groups[group][0] + 3)

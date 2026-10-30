@@ -264,6 +264,8 @@ grid_expand_repeats(
 		available = box->width;
 	if (available < 0 && box->style.max_width.unit == CSS_UNIT_PX)
 		available = layout_from_px(box->style.max_width.value);
+	if (available < 0 && box->style.max_width.unit == CSS_UNIT_PERCENT && box->parent != NULL)
+		available = (layout_unit)((float)box->parent->width * box->style.max_width.value / 100.0f);
 	if (available < 0 && box->style.min_width.unit == CSS_UNIT_PX)
 		available = layout_from_px(box->style.min_width.value);
 	if (available < 0 && box->style.min_width.unit == CSS_UNIT_PERCENT && box->parent != NULL)
@@ -291,6 +293,8 @@ grid_expand_repeats(
 			available = 0;
 	} else if (box->style.max_height.unit == CSS_UNIT_PX) {
 		available = layout_from_px(box->style.max_height.value);
+	} else if (box->style.max_height.unit == CSS_UNIT_PERCENT && tree->containing_height_definite) {
+		available = (layout_unit)((float)tree->containing_height * box->style.max_height.value / 100.0f);
 	} else if (box->style.min_height.unit == CSS_UNIT_PX) {
 		available = layout_from_px(box->style.min_height.value);
 	} else if (box->style.min_height.unit == CSS_UNIT_PERCENT && tree->containing_height_definite) {

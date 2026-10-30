@@ -33,9 +33,14 @@ static const struct css_style *anchor_cb_style(const struct layout_tree *tree, c
 static int anchor_axis_reversed(const struct css_style *style, int vertical);
 static int anchor_query(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
 static int anchor_find(const struct layout_tree *tree, const struct layout_box *box, const struct vm_string *name, struct layout_rect *rect);
+static int anchor_find_state(const struct layout_tree *tree, const struct layout_box *box, const struct vm_string *name, struct layout_rect *rect, const struct layout_box **anchor, int *clipped);
 static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
 static int anchor_chain_before(const struct layout_box *candidate, const struct layout_box *box, const struct layout_box *containing);
 static const struct layout_box *anchor_scope_root(const struct layout_box *box, const struct vm_string *name);
+static int anchor_fixed(const struct layout_box *box);
+static int anchor_top_layer(const struct layout_box *box);
+static const struct layout_box *anchor_up(const struct layout_box *box);
+static int anchor_outside(const struct layout_box *scroller, const struct layout_rect *rect);
 static int anchor_scrolls(const struct layout_box *box);
 static int anchor_has_name(const struct layout_box *box, const struct vm_string *name);
 static void anchor_flip(struct layout_tree *tree, struct layout_box *box, int how);
@@ -322,11 +327,25 @@ anchor_find(
 	const struct vm_string *name,
 	struct layout_rect *rect)
 {
+	return anchor_find_state(tree, box, name, rect, NULL, NULL);
+}
+
+/* Finds the anchor as anchor_find does, and tells the box it is and whether a scroll container it is in (the box's containing block is not) clips it away. */
+static int
+anchor_find_state(
+	const struct layout_tree *tree,
+	const struct layout_box *box,
+	const struct vm_string *name,
+	struct layout_rect *rect,
+	const struct layout_box **anchor,
+	int *clipped)
+{
 	const struct layout_box *containing;
 	const struct layout_box *found;
 	const struct layout_box *candidates[1];
 	const struct layout_box *up;
 	const struct layout_box *inner;
+	struct layout_rect original;
 	double scroll_x;
 	double scroll_y;
 	int passed;
@@ -363,7 +382,8 @@ anchor_find(
 	}
 
 	/* Where the scroll puts the anchor: by the scroll of the scroll containers it is in that the box's containing block is not in. */
-	for (up = found->parent; up != NULL; up = up->parent) {
+	original = *rect;
+	for (up = anchor_up(found); up != NULL; up = anchor_up(up)) {
 		if (!layout_scroll_offset(up, &scroll_x, &scroll_y))
 			continue;
 		for (inner = containing; inner != NULL && inner != up; inner = inner->parent)
@@ -373,7 +393,113 @@ anchor_find(
 		rect->x -= layout_from_px((float)scroll_x);
 		rect->y -= layout_from_px((float)scroll_y);
 	}
+
+	/* The box is placed by an anchor that scrolls with the page: it follows it (an anchor that is fixed itself stays with the viewport). */
+	if (!anchor_fixed(found))
+		((struct layout_box *)box)->anchored = 1;
+
+	/* Whether a scroll container in between shows none of it. */
+	if (anchor != NULL)
+		*anchor = found;
+	if (clipped != NULL) {
+		*clipped = 0;
+		for (up = anchor_up(found); up != NULL; up = anchor_up(up)) {
+			if (!anchor_scrolls(up) || up->parent == NULL)
+				continue;
+			for (inner = containing; inner != NULL && inner != up; inner = inner->parent)
+				;
+			if (inner != NULL)
+				continue;
+			if (layout_scroll_offset(up, &scroll_x, &scroll_y)) {
+				original.x -= layout_from_px((float)scroll_x);
+				original.y -= layout_from_px((float)scroll_y);
+			}
+			if (anchor_outside(up, &original))
+				*clipped = 1;
+		}
+	}
 	return 1;
+}
+
+/* Tells whether a box is fixed or inside a fixed box (it stays where the viewport is). */
+static int
+anchor_fixed(
+	const struct layout_box *box)
+{
+	const struct layout_box *up;
+
+	for (up = box; up != NULL; up = up->parent) {
+		if (up->out_of_flow && up->style.position == CSS_POSITION_FIXED)
+			return 1;
+	}
+	return 0;
+}
+
+/* Tells where a box is in the top layer (a modal dialog or an open popover: the later it opened the higher), 0 when it is not in it. */
+static int
+anchor_top_layer(
+	const struct layout_box *box)
+{
+	if (box->node == NULL || box->node->type != DOM_ELEMENT)
+		return 0;
+	return ((const struct dom_element *)box->node)->popover_open;
+}
+
+/* The next box up a box's chain of containing blocks: its parent, or for a box out of the flow where it is placed (NULL at the top). */
+static const struct layout_box *
+anchor_up(
+	const struct layout_box *box)
+{
+	if (box->out_of_flow)
+		return layout_containing_box(box);
+	return box->parent;
+}
+
+/* Tells whether a rectangle (in the frame the scroll container's own box is in) lies wholly outside the container's padding box. */
+static int
+anchor_outside(
+	const struct layout_box *scroller,
+	const struct layout_rect *rect)
+{
+	layout_unit left;
+	layout_unit top;
+	layout_unit right;
+	layout_unit bottom;
+
+	/* The padding box, which clips what scrolls in it. */
+	left = scroller->x + scroller->border[CSS_LEFT];
+	top = scroller->y + scroller->border[CSS_TOP];
+	right = left + scroller->padding[CSS_LEFT] + scroller->width + scroller->padding[CSS_RIGHT];
+	bottom = top + scroller->padding[CSS_TOP] + scroller->height + scroller->padding[CSS_BOTTOM];
+	return rect->x + rect->width <= left || rect->x >= right || rect->y + rect->height <= top || rect->y >= bottom;
+}
+
+/*
+ * Tells whether position-visibility hides a box out of the flow: with anchors-visible, its default anchor is
+ * clipped away by a scroll container in between or is hidden itself.
+ */
+int
+layout_anchor_hides(
+	const struct layout_tree *tree,
+	const struct layout_box *box)
+{
+	struct layout_rect rect;
+	const struct layout_box *anchor;
+	const struct layout_box *up;
+	int clipped;
+
+	/* Only anchors-visible and only for a box with a default anchor. */
+	if ((box->style.position_visibility & 2) == 0 || box->style.position_anchor == NULL)
+		return 0;
+	anchor = NULL;
+	clipped = 0;
+	if (!anchor_find_state(tree, box, box->style.position_anchor, &rect, &anchor, &clipped) || anchor == NULL)
+		return 0;
+	for (up = anchor; up != NULL; up = up->parent) {
+		if (up->anchor_hidden)
+			return 1;
+	}
+	return clipped;
 }
 
 /*
@@ -409,6 +535,7 @@ anchor_search(
 		}
 		child_inside = inside || walk == containing;
 		if (child_inside && anchor_has_name(child, name) && anchor_scope_root(child, name) == anchor_scope_root(box, name) &&
+		    (anchor_top_layer(child) == 0 || (anchor_top_layer(box) != 0 && anchor_top_layer(child) < anchor_top_layer(box))) &&
 		    anchor_chain_before(child, box, containing) &&
 		    (!child->out_of_flow || !*passed || (layout_containing_box(child) != containing && !anchor_scrolls(layout_containing_box(child)))))
 			found[0] = child;

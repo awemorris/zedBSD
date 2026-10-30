@@ -201,6 +201,10 @@ hit_block(
 	layout_unit width;
 	layout_unit height;
 
+	/* A box position-visibility hides cannot be hit. */
+	if (box->anchor_hidden)
+		return NULL;
+
 	/* Stops at the depth the layout stops at, and at boxes that are not blocks. */
 	if (depth > LAYOUT_DEPTH_MAX)
 		return NULL;

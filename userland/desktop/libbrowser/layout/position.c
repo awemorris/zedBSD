@@ -57,6 +57,7 @@ struct position_entry {
 static int position_walk(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing, const struct position_block *viewport, int depth);
 static int position_place(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
 static int position_place_once(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
+static int position_place_fallbacks(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
 static int position_fits(const struct layout_box *box, const struct position_block *containing);
 static uint32_t position_try_key(const struct css_try_list *list);
 static int position_in_scroller(const struct layout_box *box);
@@ -606,6 +607,24 @@ position_place(
 	struct layout_box *box,
 	const struct position_block *containing)
 {
+	int error;
+
+	/* The box, then whether position-visibility hides it. */
+	error = position_place_fallbacks(tree, box, containing);
+	if (error != 0)
+		return error;
+	box->anchor_hidden = layout_anchor_hides(tree, box) ||
+	    ((box->style.position_visibility & 4) != 0 && !position_fits(box, containing));
+	return 0;
+}
+
+/* Lays out and places one box, trying its position-try-fallbacks when it overflows. */
+static int
+position_place_fallbacks(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	const struct position_block *containing)
+{
 	struct layout_box *saved;
 	struct dom_element *element;
 	uint32_t key;
@@ -1095,6 +1114,9 @@ position_collect(
 
 	/* Each child: a positioned one is listed at its outer stacking level, then searched. */
 	for (child = box->first_child; child != NULL; child = child->next) {
+		/* What position-visibility hides stacks nowhere. */
+		if (child->anchor_hidden)
+			continue;
 		positioned = layout_is_layered(child);
 		child_z = child->style.z_index;
 		if (child->style.z_index_auto)
