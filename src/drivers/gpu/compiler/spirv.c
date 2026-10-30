@@ -288,6 +288,7 @@
 #define DEC_INDEX 32U
 #define DEC_BINDING 33U
 #define DEC_DESCRIPTOR_SET 34U
+#define DEC_NO_CONTRACTION 42U
 #define DEC_INPUT_ATTACHMENT_INDEX 43U
 #define DEC_OFFSET 35U
 #define DEC_NON_WRITABLE 24U
@@ -1883,7 +1884,8 @@ drv_gpu_spirv_declare_entry_point(
  * NoPerspective (a fragment input interpolated linearly; a vertex shader's
  * output only carries it).  Without effect on this lowering:
  * RelaxedPrecision (a permission to lose precision, never used here) and
- * Centroid (a draw has one sample per pixel, whose centre is the centroid).
+ * Centroid (a draw has one sample per pixel, whose centre is the centroid),
+ * and NoContraction for a backend that never fuses a product into a sum.
  * Anything else could place or qualify data -- components, buffer blocks --
  * and is refused.
  */
@@ -1939,6 +1941,11 @@ drv_gpu_spirv_declare_decoration(
 	} else {
 		/* A decoration without effect, or one that is refused. */
 		ignored = drv_gpu_spirv_decoration_ignored(word[2]);
+
+		/* A backend that never fuses a product into a sum keeps NoContraction's results already. */
+		if (word[2] == DEC_NO_CONTRACTION &&
+		    (parser->features & DRV_GPU_SPIRV_FEATURE_NO_CONTRACTION) != 0U)
+			ignored = 1;
 		if (ignored == 0) {
 			/*
 			 * Records the unsupported instruction in the caller's
