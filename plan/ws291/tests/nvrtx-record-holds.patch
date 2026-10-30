@@ -1,0 +1,215 @@
+diff --git a/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h b/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h
+index fecf7ce2f..e77c92198 100644
+--- a/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h
++++ b/src/drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h
+@@ -401,7 +401,12 @@ struct nvrtx_vk_record {
+  * records in order (a growing array), the bytes of its push constant
+  * records one after another (a growing run, push_used of push_capacity in
+  * use) and the first error its recording met, which its End reports.  Both
+- * runs stay for the next recording.
++ * runs stay for the next recording.  A kept record's objects are held once
++ * a recording, by holds (hold_count of hold_capacity; each object carries
++ * the recording's hold_mark, 0 until the first is held), not by each
++ * record; a video or query record holds its own, and extras counts the
++ * kept records that hold something of their own (those and the ones with
++ * regions), which the reset visits.
+  */
+ struct nvrtx_vk_command_buffer {
+ 	const void *pool;
+@@ -413,6 +418,11 @@ struct nvrtx_vk_command_buffer {
+ 	uint32_t push_used;
+ 	uint32_t push_capacity;
+ 	int error;
++	struct nvrtx_vk_object **holds;
++	uint32_t hold_count;
++	uint32_t hold_capacity;
++	uint64_t hold_mark;
++	uint32_t extras;
+ };
+ 
+ int nvrtx_vk_memory_route(struct nvrtx_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+diff --git a/src/drivers/gpu/nvrtx/vk/nvrtx-vk.h b/src/drivers/gpu/nvrtx/vk/nvrtx-vk.h
+index ca744df1f..3a48fbe31 100644
+--- a/src/drivers/gpu/nvrtx/vk/nvrtx-vk.h
++++ b/src/drivers/gpu/nvrtx/vk/nvrtx-vk.h
+@@ -53,7 +53,8 @@ struct nvrtx_vk_execute;
+  * lists every published identity, newest first, and buckets indexes them
+  * by hashed identity; object_count counts the published ones, live_objects
+  * the ones whose payload has not been destroyed yet (an unpublished object
+- * lives on while something still holds it).  closing is set once the
++ * lives on while something still holds it); hold_marks counts the marks
++ * given to recordings (vk-record.c).  closing is set once the
+  * session's close has begun: nothing is published after it.  last_opcode
+  * and failed_opcode name the commands the decoder last took and refused.
+  */
+@@ -63,6 +64,7 @@ struct nvrtx_vk_session {
+ 	struct nvrtx_vk_object *buckets[NVRTX_VK_OBJECT_BUCKETS];
+ 	uint32_t object_count;
+ 	uint32_t live_objects;
++	uint64_t hold_marks;
+ 	bool closing;
+ 	uint32_t last_opcode;
+ 	uint32_t failed_opcode;
+@@ -80,7 +82,8 @@ struct nvrtx_vk_session {
+  * points at it, so it unlinks at once), bucket_next into its bucket.
+  * references counts the holders: the registry while published, and every
+  * dependent object or submitted work that retained it; the payload is
+- * destroyed when the count reaches zero.
++ * destroyed when the count reaches zero.  hold_mark is the mark of the
++ * recording that holds it among its command buffer's holds (0: none).
+  */
+ struct nvrtx_vk_object {
+ 	struct nvrtx_vk_object *next;
+@@ -93,6 +96,7 @@ struct nvrtx_vk_object {
+ 	bool published;
+ 	void *payload;
+ 	int (*destroy)(struct nvrtx_vk_session *session, void *payload);
++	uint64_t hold_mark;
+ };
+ 
+ /* A command's handler: takes the command's body from reader and writes its reply; sets *handled when the opcode is its own. */
+diff --git a/src/drivers/gpu/nvrtx/vk/vk-command.c b/src/drivers/gpu/nvrtx/vk/vk-command.c
+index b48a422a0..829102200 100644
+--- a/src/drivers/gpu/nvrtx/vk/vk-command.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-command.c
+@@ -115,21 +115,27 @@ nvrtx_vk_command_reset(
+ 	uint32_t object;
+ 	bool video;
+ 
+-	/* Each record's objects and runs (a video or query command's structure with what it holds). */
+-	for (index = 0U; index < command->record_count; index++) {
++	/* The recording's holds (each object's mark is the recording's own, unique to the session, and is not cleared). */
++	for (index = 0U; index < command->hold_count; index++)
++		(void)nvrtx_vk_object_release(command->holds[index]);
++	command->hold_count = 0U;
++	command->hold_mark = 0U;
++
++	/* The records with something of their own: a video or query command's objects and structure, regions. */
++	for (index = 0U; index < command->record_count && command->extras != 0U; index++) {
+ 		record = &command->records[index];
+-		for (object = 0U; object < record->object_count; object++)
+-			(void)nvrtx_vk_object_release(record->objects[object]);
+-
+-		/* A video or query command's structure goes with what it holds. */
+ 		video = nvrtx_vk_video_recorded(record->opcode);
+-		if (video)
++		if (video) {
++			for (object = 0U; object < record->object_count; object++)
++				(void)nvrtx_vk_object_release(record->objects[object]);
+ 			nvrtx_vk_video_drop(record);
++		}
+ 
+ 		/* The regions, when the record kept them. */
+ 		if (record->regions != NULL)
+ 			kern_free(record->regions);
+ 	}
++	command->extras = 0U;
+ 
+ 	/* The arrays stay for the next recording; the state and the error start over. */
+ 	command->record_count = 0U;
+@@ -552,6 +558,8 @@ command_destroy(
+ 		kern_free(command->records);
+ 	if (command->push_bytes != NULL)
+ 		kern_free(command->push_bytes);
++	if (command->holds != NULL)
++		kern_free(command->holds);
+ 	kern_free(command);
+ 
+ 	/* Succeeded: the command buffer is gone. */
+diff --git a/src/drivers/gpu/nvrtx/vk/vk-record.c b/src/drivers/gpu/nvrtx/vk/vk-record.c
+index 416fe26d8..9a95aad66 100644
+--- a/src/drivers/gpu/nvrtx/vk/vk-record.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-record.c
+@@ -62,6 +62,7 @@ static int record_push(struct i915_wire_reader *reader, struct nvrtx_vk_record *
+ static int record_begin_pass(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
+ static int record_line_width(struct i915_wire_reader *reader);
+ static int record_room(struct nvrtx_vk_command_buffer *command, uint32_t opcode);
++static void record_keep_holds(struct nvrtx_vk_session *session, struct nvrtx_vk_command_buffer *command, struct nvrtx_vk_record *record);
+ static void record_drop(struct nvrtx_vk_record *record);
+ 
+ /*
+@@ -201,6 +202,12 @@ nvrtx_vk_record_route(
+ 	}
+ 	command->record_count++;
+ 
++	/* Its objects held by the recording (a video or query record keeps its own); one with something of its own is visited at the reset. */
++	if (video || record->regions != NULL)
++		command->extras++;
++	if (!video)
++		record_keep_holds(session, command, record);
++
+ 	/* Succeeded: the command is recorded, or its command buffer remembers why not. */
+ 	return 0;
+ }
+@@ -1064,6 +1071,71 @@ record_room(
+ 	return 0;
+ }
+ 
++/*
++ * Moves a kept record's holds to its recording: an object the recording
++ * holds already lets the record's hold go, another is added to the
++ * recording's holds (which grow twice as large when full) and carries its
++ * mark.  When the holds cannot grow the record's hold goes too and the
++ * recording fails (it never runs, so nothing reads the object).
++ */
++static void
++record_keep_holds(
++	struct nvrtx_vk_session *session,
++	struct nvrtx_vk_command_buffer *command,
++	struct nvrtx_vk_record *record)
++{
++	struct nvrtx_vk_object **grown;
++	struct nvrtx_vk_object *object;
++	uint32_t capacity;
++	uint32_t index;
++
++	/* The recording's mark, given at its first hold. */
++	if (command->hold_mark == 0U) {
++		session->hold_marks++;
++		command->hold_mark = session->hold_marks;
++	}
++
++	/* Each object of the record. */
++	for (index = 0U; index < record->object_count; index++) {
++		object = record->objects[index];
++		if (object == NULL)
++			continue;
++
++		/* Held by the recording already: the record's hold is not needed. */
++		if (object->hold_mark == command->hold_mark) {
++			(void)nvrtx_vk_object_release(object);
++			continue;
++		}
++
++		/* A new one: the holds grow when full. */
++		if (command->hold_count == command->hold_capacity) {
++			capacity = RECORD_FIRST_CAPACITY;
++			if (command->hold_capacity != 0U)
++				capacity = command->hold_capacity * 2U;
++			grown = NULL;
++			if (capacity <= RECORD_MAX * NVRTX_VK_SETS_MAX)
++				grown = kern_malloc((size_t)capacity * sizeof(*grown));
++			if (grown == NULL) {
++				(void)nvrtx_vk_object_release(object);
++				if (command->error == 0)
++					command->error = ENOMEM;
++				continue;
++			}
++			if (command->hold_count != 0U)
++				kern_memcpy(grown, command->holds, (size_t)command->hold_count * sizeof(*grown));
++			if (command->holds != NULL)
++				kern_free(command->holds);
++			command->holds = grown;
++			command->hold_capacity = capacity;
++		}
++
++		/* The record's hold becomes the recording's. */
++		command->holds[command->hold_count] = object;
++		command->hold_count++;
++		object->hold_mark = command->hold_mark;
++	}
++}
++
+ /* Lets a record that is not kept go: its objects and its run of regions. */
+ static void
+ record_drop(
