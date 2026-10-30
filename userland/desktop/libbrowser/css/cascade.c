@@ -129,6 +129,10 @@ struct css_engine {
 	int vt_class_count;
 	int vt_names;
 	int vt_siblings;
+	/* The active view transition: whether there is one, and its types. */
+	int vt_active;
+	const struct vm_string *vt_types[8];
+	int vt_type_count;
 	struct cascade_classes *class_table;
 	size_t class_capacity;
 	size_t class_count;
@@ -281,6 +285,7 @@ static int cascade_anchored(struct dom_element *element, int combinator, struct 
 static int cascade_language(struct dom_element *element, const struct vm_string *range);
 static int cascade_language_matches(const struct vm_string *language, const struct vm_string *range);
 static int cascade_pseudo_class(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple);
+static int cascade_vt_type_matches(const struct css_engine *engine, const struct vm_string *list);
 static int cascade_any_matches(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple);
 static int cascade_has(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple);
 static int cascade_has_below(struct css_engine *engine, struct dom_node *node, const struct css_simple *simple, struct dom_element *anchor, int depth);
@@ -746,6 +751,53 @@ css_engine_compute_pseudo(
 
 	/* Succeeded: the pseudo-element's style is computed. */
 	return 0;
+}
+
+/* Tells whether a space-separated list of types has one the active view transition has. */
+static int
+cascade_vt_type_matches(
+	const struct css_engine *engine,
+	const struct vm_string *list)
+{
+	uint16_t word[64];
+	size_t length;
+	size_t used;
+	size_t index;
+	int at;
+
+	length = list->length;
+	used = 0;
+	for (index = 0; index <= length; index++) {
+		if (index < length && vm_string_at(list, index) != ' ') {
+			if (used < 64U)
+				word[used++] = vm_string_at(list, index);
+			continue;
+		}
+		if (used > 0) {
+			for (at = 0; at < engine->vt_type_count; at++) {
+				if (vm_string_equal_units(engine->vt_types[at], word, used))
+					return 1;
+			}
+		}
+		used = 0;
+	}
+	return 0;
+}
+
+/* Tells the engine whether a view transition is active and the types it has (the ones past eight are dropped). */
+void
+css_engine_set_view_transition(
+	struct css_engine *engine,
+	int active,
+	const struct vm_string *const *types,
+	int count)
+{
+	int index;
+
+	engine->vt_active = active;
+	engine->vt_type_count = 0;
+	for (index = 0; index < count && index < 8; index++)
+		engine->vt_types[engine->vt_type_count++] = types[index];
 }
 
 /*
@@ -3067,6 +3119,11 @@ cascade_pseudo_class(
 	switch (simple->pseudo) {
 	case CSS_PSEUDO_ROOT:
 		return element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT;
+	case CSS_PSEUDO_ACTIVE_VT:
+		return engine->vt_active && element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT;
+	case CSS_PSEUDO_ACTIVE_VT_TYPE:
+		return engine->vt_active && element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT &&
+		    cascade_vt_type_matches(engine, simple->value);
 	case CSS_PSEUDO_SCOPE:
 	case CSS_PSEUDO_SCOPE_NEST:
 		/* The scope's root inside @scope, the root element elsewhere. */

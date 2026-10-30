@@ -1653,7 +1653,12 @@
         if (key !== VT) throw new TypeError('Illegal constructor');
         super();
       }
+      add(value) { var r = super.add(String(value)); typesChanged(this); return r; }
+      delete(value) { var r = super.delete(String(value)); typesChanged(this); return r; }
+      clear() { super.clear(); typesChanged(this); }
     }
+    // The style engine matches :active-view-transition-type() against the active transition's types.
+    function typesChanged(set) { if (current && current._types === set) native.viewTransitionActive(1, Array.from(set)); }
     tag(ViewTransitionTypeSet, 'ViewTransitionTypeSet');
     class ViewTransition {
       constructor(key) {
@@ -1695,6 +1700,7 @@
       if (current === t) {
         current = null;
         native.viewTransition(0);
+        native.viewTransitionActive(0, []);
       }
       if (wasPending) setTimeout(function () { callUpdate(t); }, 0);
       t._ready.reject(reason);
@@ -1707,6 +1713,7 @@
       if (current === t) {
         current = null;
         native.viewTransition(0);
+        native.viewTransitionActive(0, []);
       }
       t._finished.resolve(undefined);
     }
@@ -1742,6 +1749,7 @@
       }
       if (current) skip(current, new DOMException('Old view transition aborted by new view transition.', 'AbortError'));
       current = t;
+      native.viewTransitionActive(1, Array.from(t._types));
       // The next rendering opportunity: the old state is captured, then the callback runs and the new state is made.
       requestAnimationFrame(function () {
         if (t._phase === 'done') return;

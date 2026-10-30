@@ -81,6 +81,7 @@ static const struct parser_pseudo_name parser_pseudo_names[] = {
 	{ "defined", CSS_PSEUDO_ALWAYS },
 	{ "scope", CSS_PSEUDO_SCOPE },
 	{ "target", CSS_PSEUDO_TARGET },
+	{ "active-view-transition", CSS_PSEUDO_ACTIVE_VT },
 	{ NULL, 0 }
 };
 
@@ -97,6 +98,7 @@ static const struct parser_pseudo_name parser_pseudo_functions[] = {
 	{ "where", CSS_PSEUDO_IS },
 	{ "has", CSS_PSEUDO_HAS },
 	{ "lang", CSS_PSEUDO_LANG },
+	{ "active-view-transition-type", CSS_PSEUDO_ACTIVE_VT_TYPE },
 	{ "nth-child", CSS_PSEUDO_NTH_CHILD },
 	{ "nth-last-child", CSS_PSEUDO_NTH_LAST_CHILD },
 	{ "nth-of-type", CSS_PSEUDO_NTH_OF_TYPE },
@@ -134,6 +136,7 @@ static int parser_compound(struct vm_heap *heap, struct wb_arena *arena, const s
 static int parser_attribute(struct vm_heap *heap, const struct css_token *tokens, size_t count, struct css_simple *simple);
 static int parser_pseudo(struct vm_heap *heap, struct wb_arena *arena, const struct css_token *tokens, size_t count, size_t *index, struct css_simple *simple, uint32_t *specificity);
 static void parser_pseudo_element(const struct css_token *token, struct css_simple *simple);
+static int parser_type_list(struct vm_heap *heap, struct token_range arguments, struct css_simple *simple);
 static int parser_view_transition_argument(struct vm_heap *heap, const struct css_token *tokens, size_t count, size_t *index, struct css_compound *compound);
 static int parser_pseudo_arguments(struct vm_heap *heap, struct wb_arena *arena, struct token_range arguments, int relative, struct css_simple *simple, uint32_t *specificity);
 static int parser_nth(struct token_range arguments, int *a, int *b);
@@ -2109,6 +2112,13 @@ parser_pseudo(
 		/* Language contributes the specificity of a pseudo-class. */
 		*specificity += 1U << 8;
 		return 0;
+	case CSS_PSEUDO_ACTIVE_VT_TYPE:
+		/* Identifiers separated by commas, kept as one space-separated atom. */
+		error = parser_type_list(heap, arguments, simple);
+		if (error != 0)
+			return error;
+		*specificity += 1U << 8;
+		return 0;
 	case CSS_PSEUDO_NTH_CHILD:
 	case CSS_PSEUDO_NTH_LAST_CHILD:
 	case CSS_PSEUDO_NTH_OF_TYPE:
@@ -2124,6 +2134,46 @@ parser_pseudo(
 		*specificity += 1U << 8;
 		return 0;
 	}
+}
+
+/* Reads the identifiers of :active-view-transition-type() into one space-separated atom. */
+static int
+parser_type_list(
+	struct vm_heap *heap,
+	struct token_range arguments,
+	struct css_simple *simple)
+{
+	uint16_t joined[256];
+	size_t used;
+	size_t index;
+	size_t at;
+	int expect_ident;
+
+	used = 0;
+	expect_ident = 1;
+	for (index = 0; index < arguments.count; index++) {
+		if (arguments.tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (expect_ident) {
+			if (arguments.tokens[index].type != CSS_TOKEN_IDENT)
+				return EINVAL;
+			if (used + arguments.tokens[index].length + 1U > 256U)
+				return EINVAL;
+			if (used != 0)
+				joined[used++] = ' ';
+			for (at = 0; at < arguments.tokens[index].length; at++)
+				joined[used++] = arguments.tokens[index].text[at];
+			expect_ident = 0;
+		} else {
+			if (arguments.tokens[index].type != CSS_TOKEN_COMMA)
+				return EINVAL;
+			expect_ident = 1;
+		}
+	}
+	if (used == 0 || expect_ident)
+		return EINVAL;
+	simple->value = vm_atom_from_units(heap, joined, used);
+	return simple->value == NULL ? ENOMEM : 0;
 }
 
 /* Reads a pseudo-element's name: ::before and ::after make boxes, any other never matches. */

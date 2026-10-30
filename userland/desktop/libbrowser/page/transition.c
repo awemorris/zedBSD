@@ -228,3 +228,26 @@ page_vt_pseudo_style(
 	free(chain);
 	return error;
 }
+
+/* Tells the style engine whether a view transition is active and its types, and has the page styled again. */
+void
+page_view_transition_active(
+	void *context,
+	int active,
+	struct vm_string **types,
+	size_t count)
+{
+	struct page *page;
+	size_t index;
+
+	page = context;
+	page->vt_active = active;
+	page->vt_type_count = 0;
+	for (index = 0; index < count && index < 8U; index++)
+		page->vt_types[page->vt_type_count++] = types[index];
+	css_engine_set_view_transition(page->css, active, page->vt_types, page->vt_type_count);
+	css_engine_forget_styles(page->css);
+	if (page->query_css != NULL)
+		css_engine_set_view_transition(page->query_css, active, page->vt_types, page->vt_type_count);
+	page->document->generation++;
+}

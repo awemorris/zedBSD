@@ -418,6 +418,7 @@ page_start_scripts(
 	host.media = page_media_host;
 	host.image = page_image_host;
 	host.vt_pseudo_style = page_vt_pseudo_style;
+	host.view_transition_active = page_view_transition_active;
 	host.view_transition = page_view_transition;
 	host.view_transition_duration = page_view_transition_duration;
 	error = bind_window_create(page->realm, page->document, &host, &page->window);

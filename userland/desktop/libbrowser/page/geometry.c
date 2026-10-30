@@ -82,7 +82,8 @@ page_selector_engine(
 		return NULL;
 	}
 
-	/* Succeeded: the engine. */
+	/* Succeeded: the engine, told of the active view transition. */
+	css_engine_set_view_transition(page->query_css, page->vt_active, page->vt_types, page->vt_type_count);
 	return page->query_css;
 }
 

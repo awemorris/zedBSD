@@ -41,6 +41,7 @@ static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_va
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_duration(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_utf8_argument(const vm_value *args, unsigned count, unsigned index, struct wb_buffer *out, int *present);
 
@@ -427,6 +428,59 @@ prelude_view_transition(
 		return 0;
 	if (window->host.view_transition(window->host.context, (int)step) != 0)
 		*result = VM_VALUE_TRUE;
+	return 0;
+}
+
+/* viewTransitionActive(on, types): tells the page whether a view transition is active and the strings of its types. */
+static int
+prelude_view_transition_active(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct vm_string *types[8];
+	struct vm_object *list;
+	struct vm_string *string;
+	vm_value item;
+	vm_value length_value;
+	double length;
+	double on;
+	size_t used;
+	size_t index;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	*result = VM_VALUE_UNDEFINED;
+	status = vm_to_number(realm, js_argument(args, count, 0), &on);
+	if (status != 0)
+		return status;
+	used = 0;
+	if (vm_value_is_object(js_argument(args, count, 1))) {
+		list = (struct vm_object *)vm_value_as_cell(js_argument(args, count, 1));
+		status = vm_get(realm, vm_value_cell(list), vm_value_cell(vm_atom_from_ascii(realm->heap, "length")), &length_value);
+		if (status != 0)
+			return status;
+		status = vm_to_number(realm, length_value, &length);
+		if (status != 0)
+			return status;
+		for (index = 0; index < (size_t)length && used < 8U; index++) {
+			status = vm_get(realm, vm_value_cell(list), vm_value_int32((int32_t)index), &item);
+			if (status != 0)
+				return status;
+			status = vm_to_string(realm, item, &string);
+			if (status != 0)
+				return status;
+			string = vm_atom(realm->heap, string);
+			if (string != NULL)
+				types[used++] = string;
+		}
+	}
+	if (window->host.view_transition_active != NULL)
+		window->host.view_transition_active(window->host.context, on != 0.0, types, used);
 	return 0;
 }
 
@@ -919,6 +973,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "viewTransition", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionActive", 2, prelude_view_transition_active, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionActive", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "viewTransitionDuration", 1, prelude_view_transition_duration, NULL, &function);
 	if (status == 0)

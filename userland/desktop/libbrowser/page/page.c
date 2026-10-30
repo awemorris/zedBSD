@@ -1263,6 +1263,7 @@ page_gather_styles(
 		return error;
 	if (page->visited_urls.count != 0)
 		css_engine_set_visited_lookup(page->css, page_link_visited, page);
+	css_engine_set_view_transition(page->css, page->vt_active, page->vt_types, page->vt_type_count);
 
 	/* The document's sheets, parsed once and lent to the engine. */
 	error = page_sheets_add(page);
