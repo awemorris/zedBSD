@@ -327,6 +327,51 @@ sched_ticks(void)
 }
 
 /*
+ * Converts milliseconds to ticks as the kernel does (src/kern/clock.c),
+ * rounding up; the host's tick is a millisecond.
+ */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	/* Reports the ticks of the host clock. */
+	return milliseconds;
+}
+
+/*
+ * Converts nanoseconds to ticks, rounding up.
+ */
+uint64_t
+kern_ns_to_ticks(
+	uint64_t nanoseconds)
+{
+	/* Reports the whole milliseconds that cover the time. */
+	return (nanoseconds + 999999U) / 1000000U;
+}
+
+/*
+ * Converts ticks to milliseconds, rounding down.
+ */
+uint64_t
+kern_ticks_to_ms(
+	uint64_t ticks)
+{
+	/* Reports the milliseconds the ticks counted. */
+	return ticks;
+}
+
+/*
+ * Converts ticks to nanoseconds, rounding down.
+ */
+uint64_t
+kern_ticks_to_ns(
+	uint64_t ticks)
+{
+	/* Reports the nanoseconds the ticks counted. */
+	return ticks * 1000000U;
+}
+
+/*
  * Disables interrupt delivery; returns whether it was enabled.
  */
 bool
