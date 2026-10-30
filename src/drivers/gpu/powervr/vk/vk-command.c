@@ -110,6 +110,7 @@ powervr_vk_command_route(
 	case GPU_OP_CMD_NEXT_SUBPASS:
 	case GPU_OP_CMD_END_RENDER_PASS:
 	case GPU_OP_CMD_CLEAR_ATTACHMENTS:
+	case GPU_OP_CMD_COPY_BUFFER:
 	case GPU_OP_CMD_COPY_BUFFER_TO_IMAGE:
 	case GPU_OP_CMD_COPY_IMAGE_TO_BUFFER:
 	case GPU_OP_CMD_COPY_IMAGE:
@@ -565,7 +566,8 @@ record(
 	} else if (opcode == GPU_OP_CMD_END_RENDER_PASS) {
 		/* No argument. */
 		refused = 0;
-	} else if (opcode == GPU_OP_CMD_COPY_BUFFER_TO_IMAGE || opcode == GPU_OP_CMD_COPY_IMAGE_TO_BUFFER || opcode == GPU_OP_CMD_COPY_IMAGE || opcode == GPU_OP_CMD_BLIT_IMAGE || opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
+	} else if (opcode == GPU_OP_CMD_COPY_BUFFER || opcode == GPU_OP_CMD_COPY_BUFFER_TO_IMAGE || opcode == GPU_OP_CMD_COPY_IMAGE_TO_BUFFER || opcode == GPU_OP_CMD_COPY_IMAGE ||
+		   opcode == GPU_OP_CMD_BLIT_IMAGE || opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
 		refused = powervr_vk_record_transfer(session, opcode, reader, &entry);
 	} else if (opcode != GPU_OP_CMD_PIPELINE_BARRIER) {
 		refused = powervr_vk_record_draw(session, opcode, reader, &entry);

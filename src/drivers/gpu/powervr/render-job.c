@@ -1476,9 +1476,12 @@ draw_place(
 			return ENOTSUP;
 		memory->dmas[dma_count].address = draw->vertex_addresses[attribute->binding] + attribute->offset;
 		memory->dmas[dma_count].stride = 0;
+		memory->dmas[dma_count].instance = false;
 		for (at = 0; at < graphics->fixed.binding_count; at++) {
-			if (graphics->fixed.bindings[at].binding == attribute->binding)
-				memory->dmas[dma_count].stride = graphics->fixed.bindings[at].stride;
+			if (graphics->fixed.bindings[at].binding != attribute->binding)
+				continue;
+			memory->dmas[dma_count].stride = graphics->fixed.bindings[at].stride;
+			memory->dmas[dma_count].instance = graphics->fixed.bindings[at].instance;
 		}
 		error = attribute_words(attribute->format, input->components, &dma_words, &defaults);
 		if (error != 0)
@@ -1501,6 +1504,7 @@ draw_place(
 				return ENOTSUP;
 			memory->dmas[dma_count].address = general + DRAW_DEFAULTS + defaults + dma_words * 4U;
 			memory->dmas[dma_count].stride = 0;
+			memory->dmas[dma_count].instance = false;
 			memory->dmas[dma_count].words = input->components - dma_words;
 			memory->dmas[dma_count].reg = input->reg + dma_words;
 			dma_count++;

@@ -52,11 +52,12 @@
  *
  * Values referenced:
  * Mesa 26.2.5 src/imagination/pco/pco_internal.h (pco_zero 0, pco_one
- * 1, pco_fone 64, pco_true 143, all of the constant class) and
+ * 1, pco_7 7, pco_fone 64, pco_true 143, all of the constant class) and
  * src/imagination/pco/pco_isa.py (SR inst_num 51).
  */
 #define SPECIAL_ZERO		0U
 #define SPECIAL_ONE		1U
+#define SPECIAL_SEVEN		7U
 #define SPECIAL_FLOAT_ONE	64U
 #define SPECIAL_TRUE		143U
 #define SPECIAL_INSTANCE	51U
@@ -3047,7 +3048,8 @@ dead_write(
 	opcode = instruction->opcode;
 	value = instruction->destination;
 	if (opcode < POWERVR_IR_MOVE || opcode == POWERVR_IR_LOAD || opcode == POWERVR_IR_STORE || opcode == POWERVR_IR_OUTPUT ||
-	    opcode == POWERVR_IR_SAMPLE || opcode == POWERVR_IR_PIXEL_LOAD || opcode == POWERVR_IR_PIXEL_STORE || opcode >= POWERVR_IR_OPCODE_COUNT)
+	    opcode == POWERVR_IR_SAMPLE || opcode == POWERVR_IR_PIXEL_LOAD || opcode == POWERVR_IR_PIXEL_STORE || opcode == POWERVR_IR_FEEDBACK ||
+	    opcode >= POWERVR_IR_OPCODE_COUNT)
 		return 0;
 	if (value == 0 || value >= shader->value_count || shader->values[value].width != 1)
 		return 0;
@@ -3943,6 +3945,31 @@ select_instruction(
 			return ENOTSUP;
 		}
 		break;
+	case POWERVR_IR_FEEDBACK:
+		/*
+		 * p0 = the discard is zero; the alpha feedback that passes the
+		 * fragment, run only where p0 holds (a discarded fragment gives
+		 * none); then the wait for its data return counter.
+		 *
+		 * Procedure referenced:
+		 * Mesa 26.2.5 src/imagination/pco/pco_trans_nir.c
+		 * (nir_intrinsic_isp_feedback_pco without depth feedback: tstz
+		 * of the discard into p0 as u32, alphaf drc0 with sources zero,
+		 * zero and 7 under the overlap check, its execution condition
+		 * e1_z1) and pco_schedule.c (a wdf after an instruction that
+		 * names a data return counter).
+		 */
+		if (select->program->stage != POWERVR_SHADER_FRAGMENT)
+			return ENOTSUP;
+		condition = operand_plain(select, &instruction->source[0], 0);
+		operation = append(select, MACHINE_TEST_ZERO);
+		if (operation != NULL)
+			operation->source[0] = condition;
+		operation = append(select, MACHINE_FEEDBACK);
+		if (operation != NULL)
+			operation->condition = POWERVR_USC_RUN_IF_PREDICATE;
+		(void)append(select, MACHINE_WAIT);
+		break;
 	case POWERVR_IR_PIXEL_SHARED:
 		/* The colour the shared program packed (or a literal), moved into the pixel output under the overlap check. */
 		if (instruction->immediate >= 4)
@@ -4792,7 +4819,7 @@ group_register(
  * O_BCSEL, O_TSTZ, O_IADD32, O_IMUL32 (O_IMADD32), O_ADD64_32,
  * O_LOGICAL with O_BBYP0S1, O_SHIFT with O_BBYP0BM, O_PCK, O_UNPCK,
  * O_LD, O_ST32 (O_ST), O_WDF, O_DITRP, O_SMP, O_UVSW_WRITE,
- * O_UVSW_EMIT_ENDTASK, O_NOP, O_CNDST, O_CNDEF, O_CNDSM, O_CNDLT,
+ * O_UVSW_EMIT_ENDTASK, O_ALPHAF, O_NOP, O_CNDST, O_CNDEF, O_CNDSM, O_CNDLT,
  * O_CNDEND, O_BR: the phases, the sources' slots, the internal
  * selectors, the write enables and the header fields) and
  * src/imagination/pco/pco_opt.c (a floor is an add of zero with the
@@ -5130,6 +5157,21 @@ shader_backend_group(
 		}
 		group_register(&group->destination[0], operation->destination[0]);
 		error = powervr_usc_sum_of_products((enum powervr_usc_sum)operation->variant, &group->operation[POWERVR_USC_PHASE_0]);
+		break;
+	case MACHINE_FEEDBACK:
+		/* The alpha test's feedback with sources zero, zero and 7 (the test always passes), no predicate written, under the overlap check. */
+		group->unit = POWERVR_USC_UNIT_MAIN;
+		group->overlap_check = 1;
+		group->source[0].used = 1;
+		group->source[0].bank = POWERVR_USC_BANK_SPECIAL;
+		group->source[0].index = SPECIAL_ZERO;
+		group->source[1].used = 1;
+		group->source[1].bank = POWERVR_USC_BANK_SPECIAL;
+		group->source[1].index = SPECIAL_ZERO;
+		group->source[2].used = 1;
+		group->source[2].bank = POWERVR_USC_BANK_SPECIAL;
+		group->source[2].index = SPECIAL_SEVEN;
+		error = powervr_usc_visibility_test(0, 1, 0, &group->operation[POWERVR_USC_PHASE_BACKEND]);
 		break;
 	case MACHINE_VERTEX_END:
 		group->unit = POWERVR_USC_UNIT_MAIN;

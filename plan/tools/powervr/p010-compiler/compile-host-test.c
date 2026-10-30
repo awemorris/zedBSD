@@ -29,6 +29,7 @@
 
 #include "userland/desktop/libkeiland/ui/shaders.h"
 #include "userland/desktop/wayland/shaders.h"
+#include "userland/tests/mview/shaders.h"
 #include "userland/tests/vkcompute/shader.h"
 #include "userland/tests/vkdemo/shaders.h"
 #include "userland/tests/vkmatrix/shader.h"
@@ -233,6 +234,9 @@ coefficient_word(
 	return reg == 0 ? workgroup_id : 0;
 }
 
+/* Whether sample_words gives some texels an alpha below one half (the discard test). */
+static int sample_alpha_varies;
+
 /* A texture sample: a function of the coordinates and the state words. */
 static void
 sample_words(
@@ -246,6 +250,10 @@ sample_words(
 	result[1] = as_word(as_float(v) * 0.25f);
 	result[2] = as_word(as_float(u) + as_float(v));
 	result[3] = as_word(1.0f + (float)image * 0.001f + (float)sampler * 0.0001f);
+
+	/* The discard test's alpha: below one half where u (whole) is a multiple of four, else one. */
+	if (sample_alpha_varies)
+		result[3] = as_word(((unsigned)as_float(u) % 4U) == 0U ? 0.25f : 1.0f);
 }
 
 static void
@@ -324,6 +332,7 @@ run_prepare(
 {
 	memset(run->values, 0, sizeof(run->values));
 	memset(run->outputs, 0, sizeof(run->outputs));
+	memset(run->dropped, 0, sizeof(run->dropped));
 	pixels_prepare(run->pixels);
 	run->shared = run_shared;
 	run->input = run_input;
@@ -335,6 +344,7 @@ run_prepare(
 }
 
 static void machine_compare_once(const uint32_t *words, size_t count, uint32_t stage, const char *name);
+static void test_discard(void);
 static void test_sum_blends(void);
 
 /*
@@ -479,6 +489,11 @@ machine_compare_once(
 	/* The same pixel outputs. */
 	same = memcmp(machine->pixels, run->pixels, sizeof(run->pixels)) == 0;
 	snprintf(label, sizeof(label), "%s machine pixel outputs match the interpreter", name);
+	check(same, label);
+
+	/* The same fragments dropped by a discard. */
+	same = memcmp(machine->dropped, run->dropped, sizeof(run->dropped)) == 0;
+	snprintf(label, sizeof(label), "%s machine discards match the interpreter", name);
 	check(same, label);
 	memcpy(memory, saved, sizeof(memory));
 }
@@ -1034,6 +1049,73 @@ test_keyed(void)
 }
 
 /*
+ * mview's shaders (its model viewer): the vertex shaders with their
+ * attribute formats, and the fragment shaders to a B8G8R8A8 attachment;
+ * the cutout ones discard (OpKill) where the sampled alpha times the
+ * material's is below one half, which the alpha that varies by texel
+ * makes some lanes do: a program that discards says so, drops those
+ * lanes and keeps the others, the same on the machine simulator.
+ */
+static void
+test_discard(void)
+{
+	static struct powervr_shader_key key;
+	static const struct {
+		const uint32_t *words;
+		size_t bytes;
+		const char *name;
+		int discards;
+	} fragments[] = {
+		{ mview_fragment_shader, sizeof(mview_fragment_shader), "keyed mview fragment", 0 },
+		{ mview_cutout_shader, sizeof(mview_cutout_shader), "keyed mview cutout fragment", 1 },
+		{ mview_pixel_fragment_shader, sizeof(mview_pixel_fragment_shader), "keyed mview pixel fragment", 0 },
+		{ mview_pixel_cutout_shader, sizeof(mview_pixel_cutout_shader), "keyed mview pixel cutout fragment", 1 },
+	};
+	struct powervr_shader_program program;
+	char label[160];
+	unsigned dropped;
+	unsigned index;
+	unsigned lane;
+
+	/* The vertex shaders: three floats, three, two and the copy's four. */
+	memset(&key, 0, sizeof(key));
+	key.attribute_formats[0] = 106;
+	key.attribute_formats[1] = 106;
+	key.attribute_formats[2] = 103;
+	key.attribute_formats[3] = 109;
+	current_key = &key;
+	if (prepare(mview_vertex_shader, sizeof(mview_vertex_shader) / 4U, POWERVR_SHADER_VERTEX, &program, "keyed mview vertex", 0xffffffffU) == 0)
+		machine_compare(mview_vertex_shader, sizeof(mview_vertex_shader) / 4U, POWERVR_SHADER_VERTEX, "keyed mview vertex");
+	if (prepare(mview_pixel_vertex_shader, sizeof(mview_pixel_vertex_shader) / 4U, POWERVR_SHADER_VERTEX, &program, "keyed mview pixel vertex", 0xffffffffU) == 0)
+		machine_compare(mview_pixel_vertex_shader, sizeof(mview_pixel_vertex_shader) / 4U, POWERVR_SHADER_VERTEX, "keyed mview pixel vertex");
+
+	/* The fragment shaders, with the alpha that varies and the material's colour white. */
+	for (lane = 0; lane < 32; lane++)
+		push_words[lane] = as_word(1.0f);
+	memset(&key, 0, sizeof(key));
+	key.output_formats[0] = 44;
+	key.blend[0].write_mask = 0xf;
+	sample_alpha_varies = 1;
+	for (index = 0; index < sizeof(fragments) / sizeof(fragments[0]); index++) {
+		if (prepare(fragments[index].words, fragments[index].bytes / 4U, POWERVR_SHADER_FRAGMENT, &program, fragments[index].name, 0xffffffffU) != 0)
+			continue;
+		snprintf(label, sizeof(label), "%s says whether it discards", fragments[index].name);
+		check((program.discards != 0) == (fragments[index].discards != 0), label);
+		dropped = 0;
+		for (lane = 0; lane < 32; lane++)
+			dropped += run->dropped[lane] != 0;
+		snprintf(label, sizeof(label), "%s drops some lanes and keeps the others (%u of 32 dropped)", fragments[index].name, dropped);
+		if (fragments[index].discards)
+			check(dropped != 0 && dropped != 32, label);
+		else
+			check(dropped == 0, label);
+		machine_compare(fragments[index].words, fragments[index].bytes / 4U, POWERVR_SHADER_FRAGMENT, fragments[index].name);
+	}
+	sample_alpha_varies = 0;
+	current_key = NULL;
+}
+
+/*
  * The blends the sum of products writes (q1548): quad.frag over every
  * channel (the compositor's blend), and vkmatrix's sample and batch
  * colour blended over, subtracted, added and multiplied, each compared
@@ -1328,6 +1410,7 @@ main(
 	}
 
 	test_keyed();
+	test_discard();
 	test_sum_blends();
 	test_vkstage();
 

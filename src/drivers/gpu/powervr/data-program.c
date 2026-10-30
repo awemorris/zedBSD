@@ -56,6 +56,7 @@
  */
 #define VERTEX_INDEX_TEMP64		64U
 #define VERTEX_INDEX_TEMP		0U
+#define INSTANCE_INDEX_TEMP		1U
 #define VERTEX_TEMPS			2U
 
 /*
@@ -344,12 +345,14 @@ powervr_data_shared_build_task(
 
 /*
  * Builds a vertex program: a DMA multiply-add per attribute from the
- * vertex index, a write of the vertex index and of the instance index
+ * vertex index (or the instance index for an attribute stepped per
+ * instance), a write of the vertex index and of the instance index
  * to the registers the shader reads them from (POWERVR_SHADER_NO_REG
  * for none), then the vertex shader's issue from the task word.
  *
- * Every attribute is per vertex; per instance attributes and robust
- * bounds are not taken here.
+ * A per instance attribute steps once an instance (a divisor of one,
+ * from instance 0); other divisors, a base instance and robust bounds
+ * are not taken here.
  *
  * Procedure referenced:
  * Mesa 26.2.5 src/imagination/vulkan/pds/pvr_pipeline_pds.c
@@ -357,7 +360,8 @@ powervr_data_shared_build_task(
  * indirect or base instance: temporaries 0 and 1 the index and instance
  * the vertex data master fills, constants 0 and 1 kept for the task
  * word, eight constants per DDMAD with the zero upper control word of
- * a DDMADT without a test, the DDMAD from the index temporary, the
+ * a DDMADT without a test, the DDMAD from the index temporary, or from
+ * the instance temporary for an instance rate DMA of divisor 1, the
  * DOUTWs of the vertex id from the low half and the instance id from
  * the high half of the 64-bit temporary 0 with controls found by
  * pvr_find_constant, LAST_EN on the last DMA, the DOUTU with cc and
@@ -382,6 +386,7 @@ powervr_data_vertex_build(
 	uint32_t total;
 	uint32_t done;
 	uint32_t code;
+	uint32_t temp;
 	uint32_t top;
 	int error;
 
@@ -437,8 +442,11 @@ powervr_data_vertex_build(
 		result->data[base + DMA_CONTROL] = (uint32_t)control64;
 		result->data[base + DMA_CONTROL + 1U] = (uint32_t)(control64 >> 32);
 
-		/* The address is the base plus the index times the stride. */
-		error = powervr_pds_dma_add(0, 0, base + DMA_STRIDE, VERTEX_INDEX_TEMP, (base + DMA_ADDRESS) >> 1, (base + DMA_CONTROL) >> 1, &result->code[code]);
+		/* The address is the base plus the vertex (or instance) index times the stride. */
+		temp = VERTEX_INDEX_TEMP;
+		if (dma->instance)
+			temp = INSTANCE_INDEX_TEMP;
+		error = powervr_pds_dma_add(0, 0, base + DMA_STRIDE, temp, (base + DMA_ADDRESS) >> 1, (base + DMA_CONTROL) >> 1, &result->code[code]);
 		if (error != 0)
 			return error;
 		code++;

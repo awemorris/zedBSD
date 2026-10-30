@@ -562,7 +562,9 @@ powervr_draw_scissor_words(
  * UNIFORMDATABASE; pvr_setup_ppp_control: drawclippededges,
  * wclampen, flat vertex 0, front and rear clipping, the cull mode by the
  * front face); src/imagination/vulkan/pvr_arch_pipeline.c (the pass type
- * opaque, translucent when the fragment shader blends).
+ * opaque, translucent when the fragment shader blends;
+ * pvr_fragment_state_save: punch-through when it discards, before the
+ * others).
  */
 int
 powervr_draw_ppp_build(
@@ -620,7 +622,9 @@ powervr_draw_ppp_build(
 	}
 	ispa |= compare << ISPA_COMPARE_SHIFT;
 	ispa |= LINE_WIDTH_ONE << ISPA_LINE_WIDTH_SHIFT;
-	if (fixed->blending) {
+	if (fixed->discards) {
+		ispa |= ISPA_PUNCH_THROUGH;
+	} else if (fixed->blending) {
 		ispa |= ISPA_TRANSLUCENT;
 	} else if ((POWERVR_DRAW_TRIAL & POWERVR_DRAW_TRIAL_PUNCH_THROUGH) != 0U) {
 		ispa |= ISPA_PUNCH_THROUGH;
@@ -863,12 +867,14 @@ fixed_vertex(
 	if (input->vertexBindingDescriptionCount > POWERVR_DRAW_BINDINGS || input->vertexAttributeDescriptionCount > POWERVR_DRAW_ATTRIBUTES)
 		return ENOTSUP;
 
-	/* Per-vertex bindings. */
+	/* Bindings stepped per vertex or per instance (a divisor of one). */
 	for (index = 0; index < input->vertexBindingDescriptionCount; index++) {
-		if (input->pVertexBindingDescriptions[index].inputRate != VK_VERTEX_INPUT_RATE_VERTEX)
+		if (input->pVertexBindingDescriptions[index].inputRate != VK_VERTEX_INPUT_RATE_VERTEX &&
+		    input->pVertexBindingDescriptions[index].inputRate != VK_VERTEX_INPUT_RATE_INSTANCE)
 			return ENOTSUP;
 		fixed->bindings[index].binding = input->pVertexBindingDescriptions[index].binding;
 		fixed->bindings[index].stride = input->pVertexBindingDescriptions[index].stride;
+		fixed->bindings[index].instance = input->pVertexBindingDescriptions[index].inputRate == VK_VERTEX_INPUT_RATE_INSTANCE;
 	}
 	fixed->binding_count = input->vertexBindingDescriptionCount;
 

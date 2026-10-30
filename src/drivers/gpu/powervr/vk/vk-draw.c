@@ -113,6 +113,9 @@ powervr_vk_graphics_decode(
 		return error == ENOMEM ? ENOMEM : ENOTSUP;
 	}
 
+	/* A fragment shader that may discard makes its draws punch-through. */
+	graphics->fixed.discards = graphics->fragment.discards != 0;
+
 	/* Succeeded: the pipeline is ready to draw with. */
 	return 0;
 }

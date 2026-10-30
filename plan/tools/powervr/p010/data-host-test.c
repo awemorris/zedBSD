@@ -328,8 +328,8 @@ test_vertex(void)
 	int error;
 
 	/* Two attributes, the vertex index to register 6, the instance index to register 7. */
-	dmas[0] = (struct powervr_data_vertex_dma){ 0x400000ULL, 20, 3, 0 };
-	dmas[1] = (struct powervr_data_vertex_dma){ 0x40000cULL, 20, 2, 3 };
+	dmas[0] = (struct powervr_data_vertex_dma){ 0x400000ULL, 20, 3, 0, false };
+	dmas[1] = (struct powervr_data_vertex_dma){ 0x40000cULL, 20, 2, 3, false };
 	task = 0x0000001234567890ULL;
 	error = powervr_data_vertex_build(dmas, 2, 6, 7, task, &vertex);
 	check(error == 0, "vertex: built");
@@ -349,6 +349,12 @@ test_vertex(void)
 	check(vertex.code[4] == mesa_dout(1, 1, 0, 0, 2), "vertex: DOUTU cc end");
 	check(vertex.code[5] == ((0xdU << 28) | (6U << 23)), "vertex: halt");
 	check(vertex.data_words == 16 && vertex.temps == 2, "vertex: 16 data words, 2 temps");
+
+	/* The second attribute stepped per instance: its DDMAD reads the instance temporary (32-bit temp 1). */
+	dmas[1].instance = true;
+	error = powervr_data_vertex_build(dmas, 2, 6, 7, task, &vertex);
+	check(error == 0 && vertex.code[0] == mesa_ddmad(3, 0, 2, 3) && vertex.code[1] == mesa_ddmad(11, 1, 6, 7), "vertex: instance rate DDMAD from temp 1");
+	dmas[1].instance = false;
 
 	/* One attribute, no index: its DMA is the last. */
 	error = powervr_data_vertex_build(dmas, 1, POWERVR_SHADER_NO_REG, POWERVR_SHADER_NO_REG, task, &vertex);
