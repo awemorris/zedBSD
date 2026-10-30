@@ -79,6 +79,9 @@
  * One independently retained command and its session-owned completion identity.
  * Context fences select a backend-defined completion domain.
  * Submission success means acceptance; it never substitutes for a Vulkan result.
+ * The sequence is copied out before the driver sees the command, so a
+ * refused submission leaves a number in it that names no work (a wait on it
+ * fails with ENOENT); only a successful return makes it a completion.
  */
 struct gpu_command_submit {
 	uint32_t version;
@@ -203,7 +206,11 @@ struct gpu_capset {
 	uint8_t data[GPU_CAPSET_MAX];
 };
 
-/* One backend allocation whose optional map and independent sharing are selected by flags. */
+/*
+ * One backend allocation whose optional map and independent sharing are
+ * selected by flags.  flags is written back on success: a node without
+ * GPU_CAP_HOST_BLOB clears GPU_BLOB_HOST, which the reply then lacks.
+ */
 struct gpu_blob_create {
 	uint32_t version;
 	uint32_t size;

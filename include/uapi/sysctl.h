@@ -49,7 +49,8 @@
 #define HW_GPU_ATTACHING	4
 /*
  * hw.gpu.start (uint64_t): how many GPU devices a driver holds for a start
- * root asks for (the i915 with the boot parameter i915.start=manual).
+ * root asks for (the i915 with the boot parameter i915.start=manual, the
+ * Raspberry Pi 5's V3D unless the boot parameter rpi5gpu.start=boot).
  * Writing 1 as the superuser starts them; with none held the write fails
  * with ENODEV.
  */

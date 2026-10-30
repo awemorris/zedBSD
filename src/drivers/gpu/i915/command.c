@@ -45,6 +45,10 @@
 /* The pool never holds more batch objects than requests can be in flight. */
 #define I915_BATCH_POOL_MAX	I915_REQUEST_SLOTS
 
+/* The one capset the node has: libvulkan's Vulkan record, id 4 version 0. */
+#define I915_CAPSET_ID		4U
+#define I915_CAPSET_VERSION	0U
+
 static int i915_command(void *opaque, void *private_session, const void *buffer, uint32_t bytes);
 static int i915_command_submit(void *opaque, void *private_session, const void *buffer, uint32_t bytes, uint32_t flags, uint32_t timeline, struct drv_gpu_completion *completion);
 static void i915_command_drain(void *opaque, void *private_session);
@@ -321,6 +325,10 @@ i915_get_capset(
 
 	/* A device without the executor reports no capset. */
 	if (device->vk == NULL)
+		return ENOTSUP;
+
+	/* Only the protocol's capset; another id or version is refused, as by every other driver. */
+	if (capset->capset_id != I915_CAPSET_ID || capset->capset_version != I915_CAPSET_VERSION)
 		return ENOTSUP;
 
 	/* Copies the executor's capset; it must fit the requested capacity. */

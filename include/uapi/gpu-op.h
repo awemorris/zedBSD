@@ -8,9 +8,10 @@
 /*
  * The zedBSD GPU command protocol, version 1: the numbers of
  * the Vulkan commands in the stream libvulkan submits to a GPU node
- * (GPU_COMMAND, GPU_COMMAND_SUBMIT in uapi/gpu.h), which the i915 Vulkan
- * executor and the bcm2711 (V3D) Vulkan executor read and a virtual
- * machine's host renders.
+ * (GPU_COMMAND, GPU_COMMAND_SUBMIT in uapi/gpu.h), which the native Vulkan
+ * executors read (the vk/ directories of the amdrdna, bcm2711, ghci,
+ * i915, mali, nvrtx and powervr drivers) and a virtual machine's host
+ * renders.
  *
  * The numbers of version 1 reuse those of the Venus protocol's wire
  * format 1 (virglrenderer 1.1.0) for the same Vulkan commands, so that a
@@ -49,7 +50,10 @@
  *
  * The entry "Sent by" names the libvulkan function that encodes the
  * command (and the public call that reaches it); "Decoded by" names the
- * dispatcher and the handler of each native executor.  The test client
+ * dispatcher and the handler of the i915 and bcm2711 executors, the first
+ * two; the other executors' are in their own vk/ directories and are not
+ * listed, and a file named here may since have been split or renamed
+ * (search the handler's name).  The test client
  * userland/tests/venus-frame/ also sends a subset of the commands
  * directly and is not listed.
  *

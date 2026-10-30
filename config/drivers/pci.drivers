@@ -9,7 +9,7 @@ CONFIG_DRIVER_PCI_RTL8125|bool|Realtek RTL8125/8126/8127 PCIe Ethernet (experime
 CONFIG_DRIVER_PCI_VENUS|bool|Venus GPU (QEMU Vulkan transport)|amd64|y|
 CONFIG_DRIVER_PCI_I915|bool|Intel i915 GPU (Alder Lake-P, experimental)|amd64|y|
 CONFIG_DRIVER_PCI_NVRTX|bool|NVIDIA RTX GPU (Turing and later, experimental)|amd64|y|
-CONFIG_DRIVER_PCI_AMDRDNA|bool|AMD RDNA GPU (Navi 1x and later, experimental)|amd64|n|
+CONFIG_DRIVER_PCI_AMDRDNA|bool|AMD RDNA GPU (Navi 1x and later, experimental)|amd64|y|
 CONFIG_DRIVER_PCI_GHCI|bool|GHCI GPU on PCIe (GPU Host Controller Interface, experimental)|amd64,visionfive2|n|
 CONFIG_DRIVER_PCI_HDA|bool|HD Audio controller (/dev/dsp)|amd64|y|
 CONFIG_DRIVER_PCI_LPSS_I2C|bool|Intel LPSS I2C controller (I2C-HID touchpad)|amd64|y|

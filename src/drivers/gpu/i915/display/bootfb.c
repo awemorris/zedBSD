@@ -1457,7 +1457,7 @@ i915_bootfb_end_lease(
 	/* The display shows no frame of a lease any more. */
 	rd->active = 0;
 
-	kern_logf("i915: bootfb: lease %llu released after %llu frame(s) (%llu shown in all); the text console resumes\n",
+	kern_logf("i915: bootfb: lease %llu released after %llu frame(s) (%llu shown in all); the screen goes back to the text console\n",
 	    (unsigned long long)rd->lease,
 	    (unsigned long long)rd->sequence,
 	    (unsigned long long)i915_bootfb_display.frames);

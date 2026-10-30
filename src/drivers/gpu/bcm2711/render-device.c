@@ -94,7 +94,7 @@ bcm2711_render_register(
 		return error;
 	}
 
-	/* Storage and sharing are complete; Vulkan capabilities remain a later binding. */
+	/* Binds storage, sharing, recovery and the Vulkan runtime's operations, then publishes the node. */
 	bcm2711_render_worker_init(controller);
 	bind_render(controller);
 	error = drv_gpu_register(&controller->operations, controller, &controller->gpu);

@@ -147,11 +147,9 @@ argument when the request fails.
 The kernel does not interpret `capset_id` or `capset_version`; the driver
 decides which capsets it has. Every current driver has one capset, id 4
 version 0, whose layout is described in [Capability set 4](#capability-set-4),
-and (with one exception) a request for any other id or version fails: the
-native drivers return `ENOTSUP` and the Venus driver returns `EOPNOTSUPP` (the
-same value). The exception is the i915 driver, which does not check the
-selectors: it returns its one capset for any id and version, and the reply
-repeats the requested id and version. A program asks for id 4 and version 0.
+and a request for any other id or version fails: the native drivers return
+`ENOTSUP` and the Venus driver returns `EOPNOTSUPP` (the same value). A
+program asks for id 4 and version 0.
 
 If `capacity` is smaller than the capset, the request fails and no payload is
 returned. The drivers report `EINVAL` when the capset does not fit

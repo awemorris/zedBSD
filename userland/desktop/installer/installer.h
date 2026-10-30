@@ -324,11 +324,17 @@ struct inst_app {
 	/* S3: the whole disk (1), partitions chosen (0), or nothing yet (-1). */
 	int whole;
 
-	/* S4: the notice shown, the partition selected, the size asked, what the last write said, a reload that failed. */
+	/*
+	 * S4: the notice shown, the partition selected, the size asked and the
+	 * disk whose largest room it was filled with (0 before any: the field is
+	 * filled once a disk, so a field the person emptied stays empty), what
+	 * the last write said, a reload that failed.
+	 */
 	int edit_notice_shown;
 	struct inst_tuple selected;
 	int has_selected;
 	struct kl_field create_size;
+	uint32_t create_size_disk;
 	char edit_message[INST_MESSAGE_MAX];
 	int edit_failed;
 	int reload_failed;

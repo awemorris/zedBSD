@@ -33,6 +33,8 @@
 #define VENUS_WAIT_POLLS		50000000U
 #define VENUS_REQUIRED_FEATURES		0x19U
 #define VENUS_VENDOR_CAPSET_BYTES	168U
+/* The capset with the native suffix after the vendor one (the vendor words stay at 160 and 164). */
+#define VENUS_NATIVE_CAPSET_BYTES	176U
 #define VENUS_VENDOR_CAPSET_MAGIC	0x5a424453U
 #define VENUS_VENDOR_STRICT_FLAGS	3U
 #define VENUS_VENDOR_QUIESCE_FLAGS	7U
@@ -1857,7 +1859,8 @@ venus_strict_queue_find(
 	transport->strict_queue = 0U;
 	transport->quiesce = 0U;
 	transport->host_scanout = 0U;
-	if (transport->capset_size != VENUS_VENDOR_CAPSET_BYTES)
+	if (transport->capset_size != VENUS_VENDOR_CAPSET_BYTES &&
+	    transport->capset_size != VENUS_NATIVE_CAPSET_BYTES)
 		return 0;
 
 	/* Query the full payload instead of trusting its advertised length as proof of semantics. */
@@ -1876,7 +1879,7 @@ venus_strict_queue_find(
 
 	/* Exact response framing prevents a short tail from borrowing stale success flags. */
 	type = drv_venus_load32(response);
-	if (type != 0x1103U || bytes != VENUS_HEADER_BYTES + VENUS_VENDOR_CAPSET_BYTES)
+	if (type != 0x1103U || bytes != VENUS_HEADER_BYTES + transport->capset_size)
 		return EIO;
 
 	/* Only the acknowledged paired profile proves native-fence success and safe failed retirement. */
