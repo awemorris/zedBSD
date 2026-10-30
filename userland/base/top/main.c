@@ -23,6 +23,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <uapi/process.h>
 #include <uapi/system.h>
 #include <uapi/sysctl.h>
 
@@ -37,6 +38,34 @@
 							: (text))))
 #define puts(text) printf("%s\n", (text))
 
+/* How long the first draw waits between its two samples of the processes' CPU time, in nanoseconds. */
+#define TOP_FIRST_SAMPLE_NANOSECONDS 250000000L
+
+/*
+ * One process's CPU time when the processes were last sampled.
+ */
+struct top_cpu_sample {
+	/* The process. */
+	int32_t pid;
+
+	/* Its CPU time then, in 1/KERN_PROCESS_TIMES_HZ of a second. */
+	uint64_t cpu_ticks;
+};
+
+/*
+ * The processes' CPU times at the last sample, which each draw replaces.
+ *
+ * A draw turns the CPU time each process used since this sample into its
+ * %CPU.  top_previous_count is 0 until the first sample.
+ */
+static struct top_cpu_sample top_previous[TOP_MAX_PROCESSES];
+
+/* How many entries of top_previous the last sample filled. */
+static size_t top_previous_count;
+
+/* When the last sample was taken, on the monotonic clock. */
+static struct timespec top_previous_time;
+
 static void draw(int fd, int batch);
 static int snapshot(int fd, struct process_info *p, size_t *n);
 static void human(uint64_t bytes, char out[16]);
@@ -45,6 +74,10 @@ static char state_letter(unsigned state);
 static const char *leaf(const char *s);
 static void cpu_line(void);
 static int cpu_totals(uint64_t totals[4]);
+static void cpu_prime(int fd);
+static void cpu_remember(const struct process_info *processes, size_t count, const struct timespec *when);
+static double cpu_elapsed(const struct timespec *now);
+static double cpu_percent(const struct process_info *process, double elapsed);
 
 /*
  * Runs the top command.
@@ -105,6 +138,9 @@ main(
 		fputs("\033[?25l", stdout);
 	}
 
+	/* Samples the processes' CPU time once before the first draw, so that its %CPU covers a moment. */
+	cpu_prime(fd);
+
 	/* Process each element required by the operation. */
 	for (i = 0; iterations < 0 || i < iterations; i++) {
 		input.fd = STDIN_FILENO;
@@ -146,6 +182,8 @@ draw(
 	struct vm_statistics vm;
 	struct process_info p[TOP_MAX_PROCESSES];
 	struct timespec now;
+	double elapsed;
+	uint64_t ticks;
 	size_t count, i;
 	unsigned running, sleeping, stopped, zombie;
 	char total[16], freeb[16], used[16], swap[16], swapfree[16];
@@ -176,6 +214,7 @@ draw(
 			sleeping++;
 	}
 	clock_gettime(CLOCK_MONOTONIC, &now);
+	elapsed = cpu_elapsed(&now);
 	human(vm.physical_total, total);
 	human(vm.physical_free, freeb);
 	human(vm.physical_total - vm.physical_free, used);
@@ -206,12 +245,20 @@ draw(
 	for (i = 0; i < count; i++) {
 		u = user_name(p[i].uid, ub);
 		human(p[i].virtual_bytes, virt);
-		printf("%7d %-8.8s  20   0 %7s      0      0 %c   0.0  0.0   "
-		       "0:00.00 %s\n",
+		ticks = p[i].cpu_ticks;
+		printf("%7d %-8.8s  20   0 %7s      0      0 %c %5.1f  0.0 "
+		       "%3llu:%02llu.%02llu %s\n",
 		       p[i].pid, u, virt, state_letter(p[i].state),
+		       cpu_percent(&p[i], elapsed),
+		       (unsigned long long)(ticks / KERN_PROCESS_TIMES_HZ / 60U),
+		       (unsigned long long)(ticks / KERN_PROCESS_TIMES_HZ % 60U),
+		       (unsigned long long)(ticks % KERN_PROCESS_TIMES_HZ * 100U / KERN_PROCESS_TIMES_HZ),
 		       p[i].command[0] ? leaf(p[i].command) : "kernel");
 	}
 	fflush(stdout);
+
+	/* This draw's CPU times are what the next one measures from. */
+	cpu_remember(p, count, &now);
 }
 
 /* Supports the snapshot operation. */
@@ -435,4 +482,111 @@ cpu_totals(
 
 	/* Succeeded: the totals. */
 	return 0;
+}
+
+/*
+ * Takes the first sample of the processes' CPU time and waits a moment, so
+ * that the first draw's %CPU is the share of that moment.
+ */
+static void
+cpu_prime(
+	int fd)
+{
+	struct process_info processes[TOP_MAX_PROCESSES];
+	struct timespec now;
+	struct timespec pause;
+	size_t count;
+	int status;
+
+	/* The processes now; without them the first draw shows no share. */
+	status = snapshot(fd, processes, &count);
+	if (status != 0)
+		return;
+
+	/* Remembers their CPU time and when it was read. */
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	cpu_remember(processes, count, &now);
+
+	/* The moment the first draw's %CPU covers. */
+	pause.tv_sec = 0;
+	pause.tv_nsec = TOP_FIRST_SAMPLE_NANOSECONDS;
+	(void)nanosleep(&pause, NULL);
+}
+
+/* Keeps the processes' CPU times and the time they were read, for the next draw. */
+static void
+cpu_remember(
+	const struct process_info *processes,
+	size_t count,
+	const struct timespec *when)
+{
+	size_t index;
+
+	/* Each process's CPU time. */
+	for (index = 0; index < count && index < TOP_MAX_PROCESSES; index++) {
+		top_previous[index].pid = processes[index].pid;
+		top_previous[index].cpu_ticks = processes[index].cpu_ticks;
+	}
+
+	/* How many there are, and when they were read. */
+	top_previous_count = index;
+	top_previous_time = *when;
+}
+
+/* Gives the seconds since the last sample, or 0 when there was none. */
+static double
+cpu_elapsed(
+	const struct timespec *now)
+{
+	double seconds;
+
+	/* No sample yet: nothing to measure from. */
+	if (top_previous_count == 0U)
+		return 0.0;
+
+	/* The monotonic time between the sample and now. */
+	seconds = (double)(now->tv_sec - top_previous_time.tv_sec);
+	seconds += (double)(now->tv_nsec - top_previous_time.tv_nsec) / 1000000000.0;
+
+	/* The interval, never negative. */
+	if (seconds < 0.0)
+		return 0.0;
+	return seconds;
+}
+
+/*
+ * Gives a process's %CPU: the CPU time it used since the last sample, as a
+ * share of one CPU over the time elapsed.  A process the sample lacks
+ * started since, so all its time counts.  A process busy on several CPUs
+ * passes 100.
+ */
+static double
+cpu_percent(
+	const struct process_info *process,
+	double elapsed)
+{
+	uint64_t previous_ticks;
+	uint64_t ticks;
+	size_t index;
+
+	/* No interval: no share can be told. */
+	if (elapsed <= 0.0)
+		return 0.0;
+
+	/* The time the process had used at the sample. */
+	previous_ticks = 0;
+	for (index = 0; index < top_previous_count; index++) {
+		if (top_previous[index].pid == process->pid) {
+			previous_ticks = top_previous[index].cpu_ticks;
+			break;
+		}
+	}
+
+	/* The time used since; a reused pid whose new process has less counts that one's alone. */
+	ticks = process->cpu_ticks;
+	if (ticks >= previous_ticks)
+		ticks -= previous_ticks;
+
+	/* The share of one CPU over the interval. */
+	return 100.0 * (double)ticks / (elapsed * (double)KERN_PROCESS_TIMES_HZ);
 }
