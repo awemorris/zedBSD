@@ -24,6 +24,7 @@
 #include <uapi/errno.h>
 
 #include <drivers/acpi/acpi.h>
+#include <drivers/acpi/wmi.h>
 #include <kern/system-event.h>
 #include <drivers/pci/pci.h>
 
@@ -57,7 +58,7 @@
 #define FACS_GLOBAL_LOCK	16U
 #define FACS_LOCK_END		20U
 
-/* The FADT's flags, and their bit for a platform that idles in S0 at low power (ws052-p006). */
+/* The FADT's flags, and their bit for a platform that idles in S0 at low power. */
 #define FADT_FLAGS_OFFSET	112U
 #define FADT_LOW_POWER_S0_IDLE	(1U << 21)
 
@@ -75,8 +76,8 @@
  * deeper fails with E2BIG instead of overflowing.  The Dell Latitude 5330's
  * tables, in the interpreter built as the kernel builds it (clang -Os with
  * link-time optimization), take 5.1 KiB to load and 7.1 KiB when every
- * method runs (BUG-195, plan/ws049/tests/check-latitude5330.sh); 10 KiB
- * leaves room for the branches the machine's own values take.
+ * method runs; 10 KiB leaves room for the branches the machine's own
+ * values take.
  */
 #define STACK_BUDGET (10U * 1024U)
 
@@ -239,22 +240,27 @@ drv_acpi_attach(void)
 	if (error != 0 && error != ENODEV)
 		kern_logf("acpi: the Embedded Controller did not attach (error %d)\n", error);
 
-	/* Follows the lid, the AC adapter, the batteries and the buttons (ws132-p002). */
+	/* Follows the lid, the AC adapter, the batteries and the buttons. */
 	error = drv_acpi_power_attach();
 	if (error != 0 && error != ENODEV)
 		kern_logf("acpi: the power devices did not attach (error %d)\n", error);
 
-	/* Reads the temperature sensors for hw.thermal (ws134-p009); a machine without one has none listed. */
+	/* Reads the temperature sensors for the thermal core; a machine without one has none listed. */
 	error = drv_acpi_thermal_attach();
 	if (error != 0 && error != ENODEV)
 		kern_logf("acpi: the temperature sensors did not attach (error %d)\n", error);
 
-	/* Finds the LPS0 device of S0 idle and its _DSM functions (ws052-p003); a platform without one only lacks S0 idle. */
+	/* Lists the WMI blocks of the mapping devices whose _WDG is data; a machine without one has none. */
+	error = drv_acpi_wmi_attach();
+	if (error != 0 && error != ENODEV)
+		kern_logf("acpi: the WMI mapping devices did not attach (error %d)\n", error);
+
+	/* Finds the LPS0 device of S0 idle and its _DSM functions; a platform without one only lacks S0 idle. */
 	error = drv_acpi_lps0_attach();
 	if (error != 0 && error != ENODEV)
 		kern_logf("acpi: the LPS0 device did not attach (error %d)\n", error);
 
-	/* Makes the namespace the platform side of the PCI functions' power (ws052-p004). */
+	/* Makes the namespace the platform side of the PCI functions' power. */
 	(void)drv_acpi_pci_power_attach();
 
 	/* Publishes the namespace to user programs. */
@@ -355,7 +361,7 @@ drv_acpi_os_sleep(
  * taken with the interpreter lock (and the EC's Global Lock) held, a few
  * microseconds for each byte the embedded controller moves.  It spins on
  * the monotonic counter; kern_usleep_range() would sleep to the next tick
- * each time (BUG-202).
+ * each time.
  */
 void
 drv_acpi_os_stall(
@@ -602,7 +608,7 @@ drv_acpi_table_lookup(
 
 /*
  * Puts the machine in ACPI mode when the namespace did not load, so that
- * its fixed hardware still works (BUG-196): without ACPI_ENABLE written to
+ * its fixed hardware still works: without ACPI_ENABLE written to
  * SMI_CMD, SCI_EN stays clear, and a press of the power button turns an
  * Intel PCH off at once instead of reaching the operating system as the
  * power button's fixed event.  The events need no AML; the GPEs whose
@@ -664,7 +670,7 @@ start_events(void)
 		return error;
 
 	/*
-	 * The SCI wakes the system from S0 idle (ws052-p006): every wake source
+	 * The SCI wakes the system from S0 idle: every wake source
 	 * of the platform comes through it, and its handler only records and
 	 * masks, so it may run while the devices are suspended.
 	 */
@@ -838,7 +844,7 @@ event_thread(
 
 /*
  * Takes a press of the fixed power or sleep button: logged, and posted as
- * the system's event for the desktop (ws132-p002).
+ * the system's event for the desktop.
  */
 static void
 power_button(
@@ -862,7 +868,7 @@ power_button(
 
 /*
  * Reports whether the firmware says the platform idles in S0 at low
- * power (the FADT's LOW_POWER_S0_IDLE_CAPABLE, ws052-p006).  Returns 1 or
+ * power (the FADT's LOW_POWER_S0_IDLE_CAPABLE).  Returns 1 or
  * 0.
  */
 int

@@ -1,9 +1,9 @@
 #!/bin/sh
 # WS049 (ws049-p008, BUG-165): loads the Dell Latitude 5330's DSDT and SSDTs
-# (plan/ws049/tests/latitude5330/) in the host harness.
+# (plan/tools/aml-host/latitude5330/) in the host harness.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
-#   make -C plan/ws049/tests && plan/ws049/tests/check-latitude5330.sh
+#   make -C plan/tools/aml-host && plan/tools/aml-host/check-latitude5330.sh
 #
 # The functions 0:10.6 and 0:10.7 (THC0, THC1) are absent, as on the
 # machine (the BIOS disables them).  The checks:
@@ -27,9 +27,9 @@
 # Exits 0 on success.
 set -eu
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
-host="$repo/build/ws049/host/aml-host"
-dir="$repo/plan/ws049/tests/latitude5330"
-out="$repo/build/ws049/latitude5330"
+host="$repo/build/aml-host/aml-host"
+dir="$repo/plan/tools/aml-host/latitude5330"
+out="$repo/build/aml-host/latitude5330"
 mkdir -p "$out"
 tables="$dir/dsdt.dat"
 for number in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
@@ -89,8 +89,9 @@ if [ -x "$clang" ] && [ -n "$budget" ]; then
 	sources=$(ls "$repo"/src/drivers/acpi/aml-*.c)
 	sources="$sources $repo/src/drivers/acpi/acpi-tables.c $repo/src/drivers/acpi/acpi-event.c"
 	sources="$sources $repo/src/drivers/acpi/acpi-ec.c $repo/src/drivers/acpi/acpi-text.c"
-	sources="$sources $repo/src/drivers/acpi/acpi-resource.c $repo/plan/ws049/tests/aml-host.c"
-	sources="$sources $repo/plan/ws049/tests/aml-host-hardware.c"
+	sources="$sources $repo/src/drivers/acpi/acpi-resource.c $repo/plan/tools/aml-host/aml-host.c"
+	sources="$sources $repo/plan/tools/aml-host/aml-host-hardware.c $repo/plan/tools/aml-host/aml-host-wmi.c"
+	sources="$sources $repo/src/drivers/acpi/acpi-wmi.c $repo/src/drivers/acpi/acpi-wmi-table.c"
 	"$clang" -std=gnu11 -Os -flto -fuse-ld=lld -B"$repo/build/llvm/bin" --target=x86_64-linux-gnu \
 	    -mno-red-zone -fno-stack-protector -fno-asynchronous-unwind-tables \
 	    -I"$repo/include" -I"$repo/src" -o "$out/aml-host-lto" $sources

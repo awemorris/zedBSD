@@ -3,7 +3,7 @@
 # table, FADT) and compares the namespace with loading the files directly.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
-#   plan/ws049/tests/compare-firmware.sh [--rsdt] NAME dsdt.dat [TABLE.dat...]
+#   plan/tools/aml-host/compare-firmware.sh [--rsdt] NAME dsdt.dat [TABLE.dat...]
 #
 # The tables are laid out by make-firmware.py (an XSDT, or with --rsdt an
 # RSDT); the SSDTs load in the order given.  Exits 0 when the namespaces
@@ -17,9 +17,9 @@ if [ "$1" = "--rsdt" ]; then
 fi
 name=$1
 shift
-out="$repo/build/ws049/firmware/$name"
-host="$repo/build/ws049/host/aml-host"
-python3 "$repo/plan/ws049/tests/make-firmware.py" $root "$out" "$@" > /dev/null
+out="$repo/build/aml-host/firmware/$name"
+host="$repo/build/aml-host/aml-host"
+python3 "$repo/plan/tools/aml-host/make-firmware.py" $root "$out" "$@" > /dev/null
 aml=""
 for table in "$@"; do
 	case "$(basename "$table")" in

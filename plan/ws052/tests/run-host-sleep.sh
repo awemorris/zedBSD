@@ -14,7 +14,7 @@
 #      armed ones enabled, a runtime GPE held back and handled after the
 #      sleep, the GPE that woke the system).  The printed lines must equal
 #      sleep.expected.
-#   2. the Latitude 5330's DSDT and SSDTs (plan/ws049/tests/latitude5330/):
+#   2. the Latitude 5330's DSDT and SSDTs (plan/tools/aml-host/latitude5330/):
 #      the LPS0 device and its functions (Intel 0x7f, Microsoft 0x1ff), the
 #      entry and the exit, _PS3/_PS0 of the two xHCI controllers, the wake
 #      of the lid and the power button (PPRW, _PSW), and the power button
@@ -60,7 +60,7 @@ else
 fi
 
 # 2. The Latitude 5330's tables.
-dir="$repo/plan/ws049/tests/latitude5330"
+dir="$repo/plan/tools/aml-host/latitude5330"
 tables="$dir/dsdt.dat"
 for number in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
 	tables="$tables $dir/ssdt$number.dat"

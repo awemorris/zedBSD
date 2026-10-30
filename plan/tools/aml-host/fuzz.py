@@ -3,14 +3,14 @@
 
 Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-    plan/ws049/tests/fuzz.py [--iterations N] [--seed S] TABLE...
+    plan/tools/aml-host/fuzz.py [--iterations N] [--seed S] TABLE...
 
 Each iteration takes one of the tables, changes a few bytes of its AML
 (random values, or bytes typical of AML: opcodes, package lengths, name
 characters), and loads it with aml-host --reg --init --methods, which also
 runs every method without arguments.  Errors the interpreter reports are
 fine; a sanitizer report, a crash or a hang is a failure, and the damaged
-table is kept in build/ws049/fuzz/ with its seed.
+table is kept in build/aml-host/fuzz/ with its seed.
 """
 import os
 import random
@@ -19,8 +19,8 @@ import subprocess
 import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-HOST = os.path.join(REPO, "build", "ws049", "host", "aml-host")
-OUT = os.path.join(REPO, "build", "ws049", "fuzz")
+HOST = os.path.join(REPO, "build", "aml-host", "aml-host")
+OUT = os.path.join(REPO, "build", "aml-host", "fuzz")
 TYPICAL = [0x00, 0x01, 0x0A, 0x0B, 0x0C, 0x0E, 0x10, 0x11, 0x12, 0x14, 0x5B, 0x5C, 0x5E,
 	0x60, 0x68, 0x70, 0x72, 0x86, 0x88, 0x8A, 0x93, 0xA0, 0xA1, 0xA2, 0xA4, 0xFF, 0x3F, 0x7F, 0xBF]
 

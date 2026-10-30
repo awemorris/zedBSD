@@ -3,13 +3,13 @@
 
 Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-    plan/ws049/tests/ecdt-check.py [--iterations N] [--seed S]
+    plan/tools/aml-host/ecdt-check.py [--iterations N] [--seed S]
 
-Needs run-asl.py ecdt first (build/ws049/asl/ecdt.aml and the support
+Needs run-asl.py ecdt first (build/aml-host/asl/ecdt.aml and the support
 ECDT).  Six hand-made broken tables must print the expected refusal, and
 N (default 500) randomly changed tables must end with exit code 0 or 1
 (never a sanitizer report, a signal or a hang).  Writes the tables to
-build/ws049/ecdt/.
+build/aml-host/ecdt/.
 """
 import argparse
 import os
@@ -18,10 +18,10 @@ import subprocess
 import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-HOST = os.path.join(REPO, "build", "ws049", "host", "aml-host")
-DSDT = os.path.join(REPO, "build", "ws049", "asl", "ecdt.aml")
-ECDT = os.path.join(REPO, "build", "ws049", "asl", "support", "ecdt.aml")
-OUT = os.path.join(REPO, "build", "ws049", "ecdt")
+HOST = os.path.join(REPO, "build", "aml-host", "aml-host")
+DSDT = os.path.join(REPO, "build", "aml-host", "asl", "ecdt.aml")
+ECDT = os.path.join(REPO, "build", "aml-host", "asl", "support", "ecdt.aml")
+OUT = os.path.join(REPO, "build", "aml-host", "ecdt")
 
 
 def run(path):
