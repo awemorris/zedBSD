@@ -200,11 +200,12 @@ PY
 # old headers keiui.h and keiland-ui.h, or names the public headers as they were before their directories
 # (<keiland.h>, <truetype.h>, <browser.h>, userland/desktop/keiland/; ws131-p026).  Kept: the install paths' macros (paths.h, KEILAND_PREFIX), the environment's
 # variables (KEILAND_DRM_DEVICE, KEILAND_SEAT, KEILAND_DESKTOP_TOKEN, KEILAND_VULKAN_*), include guards (D16), and the
-# WS035 p075 test's own protocol (keiland_generic_*_v1, ws131-p021).
+# WS035 p075 test's own protocol (keiland_generic_*_v1, ws131-p021), and the public headers' own names in their
+# directory (keiland/keiland_thread.h and the like, whose keiland_ is no old name).
 git ls-files userland plan | grep -E '\.(c|h|inc)$' | grep -v -e '^plan/history/' -e '^userland/desktop/libbrowser/' |
 while IFS= read -r file; do
-    grep -noE '\b(kui|KUI|keiland|KEILAND)_[A-Za-z0-9_]*|[<"](keiui|keiland-ui|keiland|truetype|browser)\.h[>"]' "$file" |
-        grep -vE ':(KEILAND_(BINDIR|DATADIR|LIBEXECDIR|SYSCONFDIR|PREFIX|FONT_BOLD|FONT_FALLBACK_MONO|DRM_DEVICE|SEAT|DESKTOP_TOKEN|VULKAN_BACKEND|VULKAN_BACKEND_PATHS|VULKAN_NO_DEEPBIND)|KEILAND_([A-Z0-9_]+_)?H|keiland_generic_[a-z0-9_]+)$' |
+    grep -noE 'keiland/keiland_[a-z0-9_]+\.h|\b(kui|KUI|keiland|KEILAND)_[A-Za-z0-9_]*|[<"](keiui|keiland-ui|keiland|truetype|browser)\.h[>"]' "$file" |
+        grep -vE ':(KEILAND_(BINDIR|DATADIR|LIBEXECDIR|SYSCONFDIR|PREFIX|FONT_BOLD|FONT_FALLBACK_MONO|DRM_DEVICE|SEAT|DESKTOP_TOKEN|VULKAN_BACKEND|VULKAN_BACKEND_PATHS|VULKAN_NO_DEEPBIND)|KEILAND_([A-Z0-9_]+_)?H|keiland_generic_[a-z0-9_]+|keiland/keiland_[a-z0-9_]+\.h)$' |
         sed "s|^|$file:|"
 done > "$work/B5"
 git ls-files userland plan | grep -E '(\.sh|\.py|Makefile[a-z.]*|\.mk)$' | grep -v -e '^plan/history/' -e '^plan/ws131/tools/rename-map\.py$' -e '^plan/tools/keiland-os-boundary/check\.sh$' |

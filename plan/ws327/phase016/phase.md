@@ -63,7 +63,16 @@ P2（q1703-i01、worktree p2-ws327、基点 main b901b1968）。日付は host �
   scratch の clone）で流し、FAIL の行を比べた（`build/tmp/p016-boundary-base.txt`・`p016-boundary-head.txt`）: 110 → 148 行。
   増えた 38 行は全て B5（`#include <keiland/keiland_thread.h>`・`keiland_socket.h` の名前を旧い接頭辞 `keiland_` と拾う既存の誤検出。
   keiland.h・keiland_version.h・platform/・app の include と `plan/ws327/tests/`・`plan/tools/mail/` の試験）。他の check の増減は無い
-  （A1 の libbrowser の行番号の移動 1 件だけ、中身は同じ）。B5 の直しと T1・N1 の check.sh への案は下の「Q1 へ」。
+  （A1 の libbrowser の行番号の移動 1 件だけ、中身は同じ）。
+- B5 の直し（Q1 の指示「今直してよい」2026-10-30）: `check.sh` の B5 が `keiland/keiland_*.h`（directory の付いた今の公開の header の名前）を
+  一つの語として拾い、許す（旧い `<keiland.h>`・`keiui.h` などは今どおり FAIL）。`plan/ws327/tests/win32-link.c` の comment の
+  directory の無い header の名前も直した。数え直し（新しい check.sh を両方の tree で）: WS327 の前 64 行・今 64 行、行番号を除いて
+  同じ一覧（`diff` で差 0）。残る B5 は前からの `plan/tools/powervr/p009/vk-host-test.c` の `KEILAND_B_*` 8 行。
+- T1・N1 を check.sh に入れる案: [check-t1-n1.patch](check-t1-n1.patch)（B5 を直した check.sh の上に `git apply` できる。A1〜A5 の
+  python に T1・N1 の pattern と、libbrowser・libmedia・`libkeiland/platform/` を除く範囲、`app-allow.tsv` に layers-allow.tsv の 19 行）。
+  scratch の clone で確かめた: T1 PASS・N1 PASS・全体 64 行（今と同じ）、突然変異（music/play.c の kl_mutex_lock を pthread_mutex_lock に、
+  settings/look.c に `#include <netdb.h>`）で `T1 FAIL …play.c:133: pthread_mutex_lock`・`N1 FAIL …look.c:977: #include <netdb.h>`。
+  入れたら `plan/ws327/tests/check-layers.py`・`layers-allow.tsv` は WS の完了で消せる（Q1 へ）。
 
 ### 2. build（2026-10-30 10:16〜10:20）
 
