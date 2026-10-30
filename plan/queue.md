@@ -438,7 +438,7 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1757 / q1757-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs3`・branch `agent/p2-bugs3`、QEMU と host、image は /tmp） | [BUG-360](bugs/BUG-360.md)・[BUG-306](bugs/BUG-306.md)・[BUG-292](bugs/BUG-292.md)・[BUG-289](bugs/BUG-289.md)・[BUG-365](bugs/BUG-365.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | cleared（e3c3eb4db〜b3aa69fa2、main 612a2ea04。BUG-289・292 closed、360・306 fixed（確かめの残り）、365 一部） |
-| q1758 / q1758-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws329`・branch `agent/p5-ws329`） | [ws329](ws329/ws.md) p001 設計 | plan/ws329/ だけ、design-reviewer と問いの一覧まで。実装は WS326 の完了の後 | in-progress |
+| q1758 / q1758-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws329`・branch `agent/p5-ws329`） | [ws329](ws329/ws.md) p001 設計 | plan/ws329/ だけ、design-reviewer と問いの一覧まで。実装は WS326 の完了の後 | uncleared（設計 c56fb91dc、merge 455a7d5b4。理由: ユーザーの問い Q329-1〜5 の答え待ち） |
 | q1759 / q1759-i01 | P7（phase-runner-high、同じ worktree p7-ws333） | [ws333](ws333/ws.md) p006 の QEMU の起動の回帰 → p007 x86 の decode の module の設計 | boot-test.sh で amd64・armv7-virt・riscv64-virt・raspi4b。p007 は design.md §9 のとおり、5330 の読みは未実施で可 | in-progress |
 | q1760 / q1760-i01 | O-p022（phase-runner-high、Opus、worktree `/home/awe/zedBSD-worktrees/o-ws326-p022`・branch `agent/o-ws326-p022`） | [ws326-p022](ws326/phase022/phase.md) | phase.md のとおり。h264sw-*.c の修正は可、header は不可。check-skeleton の BASE は 8ddb130a9 | in-progress |
 

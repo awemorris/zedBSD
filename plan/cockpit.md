@@ -13,7 +13,7 @@
 | P2 | Bug | open の Bug の 4 つ目の束（QEMU と host） | q1761: BUG-312（壊れた root の fsck）→ BUG-173（sh の日本語の履歴）→ BUG-238（emacs -nw）→ BUG-199（古い host 試験）→ BUG-281（QEMU の SSH の間欠の停止）→ BUG-308（UFS の journal の窓） | 3 つ目の束は main 612a2ea04。BUG-289・292 closed |
 | P3 | — | — | 返却（06:2x）。WS331 を完了 | 次の割当を Q1 が決める |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
-| P5 | [WS329](ws329/ws.md) | libmedia の H.264 の software の encoder（標準廉価実装手順） | q1758: p001 設計（WS326 の module を入力に共通化、design-reviewer と問いまで） | WS318 の設計は済み（main 85fbeb091、問い Q318-1〜14 は下の 0c） |
+| P5 | — | — | 返却（06:3x）。WS329 の設計は済み（main 455a7d5b4、問い Q329-1〜5 は下の 0d） | 次の割当を Q1 が決める |
 | P6 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1762: p005 の前半（熱の core: sensor・fan・電力の meter・方針と受け手・3 つの thread、host 試験と QEMU の起動） | UAPI（p004）はユーザーの review の後。WS332 は完了 |
 | P7 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1754: p003 kernel の口の header の案と review → p006 cpuperf の枠組み（kernel、host 試験） | p011（x86 の CPU の driver）・p014（5330 の受け入れ）へ。BUG-371・372・373・375 は直して closed |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
@@ -141,6 +141,17 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
   - Q318-13 player の文言で「libavcodec が無い」を先に出す（推し）。
   - **Q318-14** WS326 の完了を待たずに、WS326 に触れない Phase（p002・p003a・p003b・p011a・p011b・p016〜p019）を先に始めるか（推し: 始める）。
 - 止めている物: WS318 の実装（設計の受け入れと Q318-14 の答えまで始めない）。
+
+### 0d. WS329（libmedia の H.264 の software の encoder）の設計の問い Q329-1〜5（2026-10-31 新しい）
+
+- 背景: WS329 は、libmedia に既存の library を使わない H.264 の encoder を作る WS（標準廉価実装手順）。P5 が設計（header の案 26、Phase p002〜p026）を書き、敵対的レビュー（major 10）を反映した（main 455a7d5b4）。encoder は decoder（WS326）の部品と再構成をそのまま使うので、encoder と decoder の画がずれない。実装は WS326 の完了の後。全文は [ws329/user-questions.md](ws329/user-questions.md)。
+- 用語: BD-rate は同じ画質に要る bit の量の差（+40% は x264 より 4 割多く要る）。preset は速さと画質の釣り合いの段。x264 veryfast は広く使われる速い設定。
+- Q329-1 画質の目標: **推し A** 釣り合いの preset で x264 veryfast に対し BD-rate +40% 以内、速い preset で +80% 以内。
+- Q329-2 速さの目標: **推し A** 5330 で速い preset の 720p30 を実時間に（slice の 2〜4 thread）。1080p30 は目標にしない（SIMD を使わないため）。
+- Q329-3 B-frame: **推し A** 入れる（Main・High、参照にしない B を最大 3 枚、既定は 0）。
+- Q329-4 WS318 と並べて進める: **推し A** WS326 の完了の後に p002〜p023 を WS318 と並べ、p024 は WS318 p012a、p025 は WS318 p008 を待つ。
+- Q329-5 libmedia の encoder の設定に速さの欄を足す: **推し A** WS318 の media_encoder_config に `speed` を 1 つ足す。
+- 止めている物: 無し（実装は WS326 の完了待ち）。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
