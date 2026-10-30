@@ -273,3 +273,9 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1717 / q1717-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、main に追従、host・QEMU） | [ws331-p002](ws331/phase002/phase.md)・[p003](ws331/phase003/phase.md)・[p004](ws331/phase004/phase.md) | ユーザー「表A,Bを許可します」 | in-progress |
+
+## 2026-10-30 18:3x: WS307 p007 を P6 で（q1718）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1718 / q1718-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws307`・branch `agent/p6-ws307`、main に追従、QEMU（OVMF）） | [ws307-p007](ws307/phase007/phase.md) → p014 → WS307 の完了 | ユーザー「WS307の判断事項は、HAL_SPACE_SYS で 実行可能フラグが使えない実装になっているから、使えるようにしよう、という指摘ですか？もしそうなら、それは実装の問題であって、HALのAPIの変更ではないです。」（改訂 5 の G1〜G3 で実装） | in-progress |

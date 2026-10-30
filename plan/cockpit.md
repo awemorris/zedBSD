@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 18:25（Q1）
+最終更新: 2026-10-30 18:35（Q1）
 
 ## 担当（P1〜P8）
 
@@ -12,7 +12,7 @@
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 再起動（q1715-i02）。ユーザーが VF2 の HDMI を接続。板を入れ直して framebuffer を確かめ、計測へ | 40 fps 前後の scene を決め 50 fps 以上へ |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
-| P6 | — | — | 返却（WS307: p015・p004・p008 cleared。p007 はユーザーの判断待ち） | — |
+| P6 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 起動（q1718）。p007 firmware 変数の driver を改訂 5（G1〜G3）で実装、OVMF で試験 | p014 規約 → WS307 の完了 → 返却 |
 | P7 | — | — | 返却（WS291: p010 cleared、p012 uncleared、PowerVR は P3 へ） | — |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 再起動（q1708-i02）。Debian の比較の環境は出来た、Chromium 156 の基準と dev20 の全件の測定の完了待ち | compare → gap の大きい原因から直す |
 
@@ -119,27 +119,19 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-### 1. WS307（Keiland の graphical installer）p007: firmware の関数を kernel から実行する map の扱い
-
-- 背景: installer は、導入した disk から起動できるよう UEFI の起動の項目（Boot####）を書く。UEFI の firmware は、OS の起動の後も呼べる関数（runtime services。GetVariable・SetVariable など）を持つ。ユーザーの決定で、これを呼ぶのは kernel の driver で、driver は HAL を知らず kernel の関数（kern_*）だけを使う。
-- 問題: firmware の関数は code なので、kernel の memory に「実行してよい」印で map しないと呼べない。今の kernel には実行可の map を作る関数が無い。その下の HAL も、どの CPU の port でも、kernel の側の領域（HAL_SPACE_SYS）への map を拒む（user の program の領域だけを受ける）。
-- 案（P6 の改訂 5、[proposed/uefi-runtime-window.md](ws307/proposed/uefi-runtime-window.md)）: kernel に新しい関数 kern_firmware_map を足し、driver はそれだけを呼ぶ。その下で amd64 の HAL の実装が、kernel の側の決まった 64 MiB の窓（firmware 専用）にだけ map を受けるようにする。hal.h（HAL の API の宣言）は変えない。
-- 決めてほしい事: この HAL の変更を「hal.h を変えない実装の補完」（承認不要の扱い）と見てよいか、「HAL の契約の変更」として差分を見てから承認するか。別の道として、HAL も kernel も変えず loader が次の起動で Boot#### を書く案（C4）もあるが、起動した後の system から項目の一覧・削除ができない。
-- 用語: loader = zedBSD を読み込む UEFI の program。SetVirtualAddressMap = firmware の関数を OS の仮想 address から呼べるよう配置を一度だけ知らせる UEFI の呼び出し（loader が呼ぶ、HAL とは無関係）。
-
-### 2. WS313（ODROID-C5）: zedBSD-firmware の GitHub への push
+### 1. WS313（ODROID-C5）: zedBSD-firmware の GitHub への push
 
 - 背景: ユーザーの指示で、Hardkernel の公式の ODROID-C5 の image（36 MiB の .img.xz、無変更）と Amlogic の license の本文、Mali の GPU の firmware を zedBSD-firmware の repo に入れる。zedBSD の build はそこから bootloader の区画を切り出す。commit は 43662bd（branch q1-c5-firmware、親は GitHub の main の fcdfccf）。
 - 問題: Q1 の push は権限の判定（Out-of-Place Publication）で止められた。回避はしていない。
 - 決めてほしい事: push してよければ、端末に `! cd /home/awe/zedBSD-firmware && git push origin q1-c5-firmware:main` と打つ（このセッションで実行される）。push の後に Q1 が zedBSD の側の revision の commit を main に merge する。
 
-### 3. WS291（GPU の描画の速さ）p020: VF2 の PowerVR の「model の 50 fps」の基準
+### 2. WS291（GPU の描画の速さ）p020: VF2 の PowerVR の「model の 50 fps」の基準
 
 - 背景: RDNA と NVIDIA では「Linux で約 50 fps になる重さの 3D の scene」を決め、zedBSD が同じ fps 以上を出す事を目標にした。VF2 の今の SD には PowerVR の GPU の driver を持つ Linux が無く、Linux の基準を立てられない。
 - 今の扱い（Q1 の既定）: zedBSD の今の fps で約 40 fps になる scene を決め、profile を見て 50 fps 以上に上げる。P3 が実施中（copies 1 で 62 fps、10 で 31 fps）。
 - 決めてほしい事: この既定でよいか、別の SD に Linux を入れて Linux の基準を立てるか。
 
-### 4. WS331（driver から HAL への直の依存を除く）の残りの未決 3 点
+### 3. WS331（driver から HAL への直の依存を除く）の残りの未決 3 点
 
 - 背景: 表 A・B は 2026-10-30 に許可された。残りは次の 3 点（詳細は下の「WS331」の節と [phase001](ws331/phase001/phase.md) §4・§6）。
 - (1) Raspberry Pi 4 の console の 2 関数（rpi_cons_suspend_output・resume_output）: HAL の early console（起動の早い段の画面の文字の出力）の中の状態と lock を使うので、driver にも kernel にも移せない。案 (a) 当面の例外として残す（P2 の推し）、(b) 汎用の HAL の口を足す（HAL の API の変更、承認が要る）、(c) driver が画面の文字を自分で描く作りにする。
@@ -150,6 +142,8 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-30 | WS307 graphical installer | p007 の G2: amd64 の hal_space_map が HAL_SPACE_SYS（firmware の窓）への実行可の map を受けるのは実装の補完で、HAL の API の変更ではない（ユーザー）。P6 が実装 | [ws307/ws.md](ws307/ws.md) |
+| 2026-10-30 | WS331 driver の HAL 依存 | p001 の表 A・表 B を許可 | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS309 compositor の thread の整理 | p015 ゲームモードの V2: 1 は (a)（app は変更なし、全画面と窓の切り替えは compositor の都合で app は気づかない）、2 は private な Wayland の protocol `keiland_game_surface_v1` を作る、3 は標準の型の組み合わせで画像の memory を出す、4 は同じ画像の再 acquire で画面から外れた事を知る。p015 は planned に戻り、次のセッションで実装 | [ws309/ws.md](ws309/ws.md) |
 | 2026-10-30 | BUG-364 GPU の fence | (A) display はどの GPU の fence も受ける（今の動きを正とする）。Q1 が gpu.c の comment を直し、BUG-364 を閉じた（876b64d55） | [BUG-364](bugs/BUG-364.md) |
 | 2026-10-30 | WS074 Web ブラウザ | Codex を解約、WS074 は Claude（Q1）の管理下に | [ws074/ws.md](ws074/ws.md) |
