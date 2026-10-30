@@ -28,21 +28,45 @@
 - 基準の機械は i915（5330）。
 - H.265（2026-10-30 ユーザー「H.265のパテントプールへの支払いは行う方針です。H.265の実装を行っていいです。」）: WS236（2026-10-14）の「HEVCはライセンスがないのでやらないです」を置き換え、H.265 の decode・encode を実装する。
 
-## Phase（案、設計で置き換える）
+## Phase（p001 の設計の案、2026-10-31 P5。詳細と受け入れは [design.md](design.md) §14）
 
-| Phase | 目的 | 状態 | 依存 |
-| --- | --- | --- | --- |
-| ws318-p001 | 設計（design.md）: API（共有の device・codec の問い合わせと指定・decoder・encoder・カメラ・picture・callback）、backend の表と fallback、形式の変換、thread、移行の手順。design-reviewer | planning | — |
-| ws318-p002 | libavcodec の fallback を libmedia の中へ移し、Keiland の app を libmedia だけに（今の機能のまま入り口を揃える） | planning | p001 |
-| ws318-p003 | Vulkan の device の共有と fd を API から外す（decoder の picture・engine の起こし） | planning | p001 |
-| ws318-p004 | encoder の口（codec の問い合わせと指定）、libavcodec の encode の fallback、AAC-LC の encoder を口に載せ足りない所を独自に | planning | p003 |
-| ws318-p005 | カメラの口（WS282 の UVC が実機で動いた後に実機の試験） | planning | p003、WS282 |
-| ws318-p006 | Vulkan Video の encode の backend（i915 の driver の WS319 の前は Venus か software の検証で） | planning | p004 |
-| ws318-p007 | 解説（docs）と規約の全文の見直し | planning | p002〜p006 |
+設計は [design.md](design.md)、公開の interface の案は [proposed/](proposed/)、ユーザーの判断を待つ点は [user-questions.md](user-questions.md)（Q318-1〜9）。型: O = Opus、S = Sonnet 5.5 high（標準廉価実装手順）、D = 文書・規約。
+
+| Phase | 目的 | 型 | 状態 | 依存 |
+| --- | --- | --- | --- | --- |
+| ws318-p001 | 設計（design.md・proposed の header・問い・design-reviewer） | O | in-progress（q1752 P5） | — |
+| ws318-p002 | 公開の header（media.h・media-vulkan.h）・内部の header・骨格・run-unit と check-skeleton | O | planning | p001、Q318-3 |
+| ws318-p003 | 試験の道具 vkfake（lavapipe の上の偽の Vulkan Video） | O | planning | p002 |
+| ws318-p004 | libavcodec の decode を libmedia の中へ、Video Player・Music を libmedia だけに、media-app を外す（今の機能のまま） | O | planning | WS326 p023 |
+| ws318-p005 | context と device の共有の核（NONE・PRIVATE・SHARED、requirements、queue の lock、旧い口の shim） | O | planning | p003、p004 |
+| ws318-p006 | frame の model と decode の出力（参照の数、VkImage、i915 の plane の copy、software の upload、ops v2） | O | planning | p005、WS326 completed |
+| ws318-p007 | 形式の交渉と GPU の変換（compute の shader） | O | planning | p006 |
+| ws318-p008 | thread の台帳と notify の callback、engine と libbrowser | O | planning | p005 |
+| ws318-p009 | Video Player を共有の device と VkImage の frame へ | O | planning | p007、p008 |
+| ws318-p010 | Music・media-probe・libbrowser を新しい口へ、旧い口と media-decoder.h を消す | O | planning | p009 |
+| ws318-p011 | Vulkan の header の更新（KHR の encode・H.265 の std）、sysroot は Q1 | O | planning | Q318-3 |
+| ws318-p012 | encoder の核・codec の問い合わせ・AAC-LC の backend・libavcodec の encode | O | planning | p007、p011 |
+| ws318-p013 | AAC の追加（窓の切り替え・TNS）の設計（標準廉価） | O | planning | p012、Q318-5 |
+| ws318-p014 | AAC: 窓の切り替えと短い窓 | S | planning | p013 |
+| ws318-p015 | AAC: TNS | S | planning | p013 |
+| ws318-p016 | H.265 の Vulkan Video の decode の設計（標準廉価） | O | planning | p011 |
+| ws318-p017 | H.265: NAL・VPS・SPS | S | planning | p016 |
+| ws318-p018 | H.265: PPS・slice segment header | S | planning | p017 |
+| ws318-p019 | H.265: POC・RPS・DPB | S | planning | p018 |
+| ws318-p020 | H.265 の decode の runtime（vkfake、適合の stream の解析） | O | planning | p006、p019 |
+| ws318-p021 | Vulkan Video の encode（H.264） | O | planning | p012 |
+| ws318-p022 | Vulkan Video の encode（H.265） | O | planning | p021、p017 |
+| ws318-p023 | camera の口と zedBSD の source | O | planning | p007、p012 |
+| ws318-p024 | MJPEG の段 | O（S） | planning | p023、Q318-4 |
+| ws318-p025 | kernel: camera の import を i915 の coherent な memory へ（HAL は変えない） | O | planning | p023 |
+| ws318-p026 | 実機の受け入れ（5330 の Video Player、RTX・Pi 4 の非退行、QEMU Venus） | O | planning | p010、p020 |
+| ws318-p027 | camera の実機（5330 ＋ webcam） | O | planning | p023〜p025、WS282 の実機、Q318-6 |
+| ws318-p028 | 解説の文書と規約の全文の見直し | D | planning | 全部 |
 
 ## Resume point
 
 - 2026-10-30 Q1: 作成。担当は未割当。
+- 2026-10-31 P5（q1752-i01）: p001 の設計を書いた（design.md・proposed/・user-questions.md）。Q1 が受け入れ、ユーザーが Q318-1〜9 に答えた後に p002 から。WS326 に触れない Phase は WS326 の completed を待たずに始められる（design §14）。
 
 ## 日程（2026-10-30 ユーザー、原文）
 
