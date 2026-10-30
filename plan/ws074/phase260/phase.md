@@ -223,6 +223,44 @@ Origin: 2026-10-27 ユーザーの指示。
   - backdrop-filter の parse: drop-shadow()・url("...") の保持、canonical な直列化（blur(0px)・hue-rotate(0deg)・100% の上限）。
   - flexbox の SVG の viewBox と片方の寸法から決まる固有の大きさ、`min-height: min-content`。
 
+### q1727-i03 の途中経過（2026-10-31、P8、host の / の空きが少ないので測定の出力は /tmp/p8out）
+
+- 測定の道具（plan/ws074/tests/）: `measure-snapshot.sh NAME [JOBS]`（host build の browser・wpt-ready-render・libbrowser.so を /tmp/p8out/NAME/bin に複写して 4 runner を測り、static は static-subset.py の並列で流して合わせ、Chromium（build/ws074-cmp/chrome156）と比べて gap.json を作る。約 3 分。build し直してよい）、
+  `gap-diff.py OLD.json NEW.json`（gap に入った ID = 後退、出た ID = 修正）、`harness-fails.py --gap G --ours DIR PREFIX...`（gap の harness の ID の失敗した subtest と message）、
+  `static-subset.py`・`scripted-subset.py` に `--gap gapNN.json`（前回の全件の結果が無くても、Chromium が通り gap に無かった ID を基準にして REGRESSION を出す）、`host-build.sh` に libmedia の h264sw を足した。
+- 測定（gap は build/tmp/p8/gap*.json に残した）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev32（3c8ebb185） | 隔離した filter の group | 998 | 1,146 | 243 | 41 | 2,428（69.93%） |
+  | dev36（edbd03c1a） | 要素の scroll、anchor の解決、popover | 1,006 | 1,146 | 261 | 41 | 2,454（70.68%） |
+  | dev37（1d2ad3ef0） | flex・grid の baseline、fieldset、overflow の clamp | 1,012 | 1,148 | 261 | 41 | 2,462（70.91%） |
+
+  どの測定も後退 0（dev31 または直前の gap との差で、4 runner とも gap に新しく入った ID は無い）。
+- 直した物:
+  1. filter を隔離した group で描く（paint/paint.h の `PAINT_GROUP`・`PAINT_GROUP_END`、paint/software.c の `software_group`: group の items を黒の上と白の上に 2 回描いて各画素の色と coverage を求め、filter の関数を色に掛けて page の上に重ねる）。
+     box の `filter` が box 自身の painting にだけ効く（以前は後ろの backdrop ごと filter していた）。view-transition の木の layer には、子孫の layer まで 1 つの group で包む。backdrop-filter を持つ box は従来の形（backdrop ごと）。
+     css-view-transitions/new-element-on-start が PASS。`document.startViewTransition` を文書の parse 中に呼ぶと css engine が無く segfault していたのを直した（page/transition.c）。
+  2. 要素の scroll: dom_element に `scroll_x`・`scroll_y`、bind/geometry.c の scrollTop・scrollLeft・scrollTo・scroll・scrollBy（root 以外）が overflow を持つ block を範囲内（scroll 幅 - client 幅）で動かし、文書の generation を進める。
+     layout/scroll.c の `layout_scroll_apply` が layout と abspos の配置の後に container の中身（in-flow の部分木と、containing block が container の中の abspos）を scroll 分ずらす（clip は動かない）。
+     anchor（layout/anchor.c の anchor_find）は、anchor を含む scroll container のうち対象の containing block を含まない物の scroll 分だけずれた rect を返す（対象はその位置で配置され、scroll に付いて動く。position-try の溢れの判定もずれた位置で）。
+     scrollWidth・scrollHeight は text の line の端と block の子の終端側の margin を含む。anchor の名前の衝突は、scroller の中の abspos の anchor は対象より後にあれば取らない。
+     css-anchor-position の scripted・harness の anchor-scroll 系 + position-visibility の一部（scripted +18、harness +8）。
+  3. popover（prelude.js、css/ua.c、css/cascade.c）: `popover` 属性、showPopover・hidePopover・togglePopover、`:popover-open`、UA sheet（open は fixed・fit-content・margin auto・z-index 最大。top layer は z-index で近似）。
+     position-area の `inset: 0` は auto と同じ揃えにする（popover の UA の `inset: 0` が position-area を壊さないように）。
+  4. `document.fonts.load()`・`check()`、`Range.getClientRects()`・`getBoundingClientRect()`（text node の rect の和）。
+  5. flex・grid container の baseline の書き出し（layout/inline.c `inline_items_baseline`）: 「最初」は物理的に先頭の line（wrap-reverse・rtl の column の line の逆順を見る）の物理的に先頭の item（row-reverse・rtl の row・column-reverse は逆）、「最後」は反対側。
+     last baseline の flex・grid container の対応。overflow が visible でない box の baseline は border box の中に clamp。table の baseline は caption を除く。fieldset の baseline は legend を除く。
+     fieldset の legend（最初の legend の子）は上の border の位置に載り、border の高さと legend の高さの大きい方だけが上を占める（layout/block.c `block_fieldset_legend`）。
+     flex-align-baseline-001・flex-flex-001・fieldset-001 と grid の同等の物、overflow-001 が PASS。
+- 調べて直さなかった物（次の候補）:
+  - 直交 flow の flex item（`/tmp/p8out/flex-ortho-exp1.patch`: `layout_logical_wanted` が flex の item を物理のままにする所を外すと static の css-flexbox で +5/-5。後退は fit-content-item-002〜004（auto の cross を持つ縦書きの item の inline size が viewport になる）・ortho-table-item-001・stretching-orthogonal-flows）。
+    必要な事: 縦書きの item の cross 方向の inline size を fit-content にする（logical_fits_content が flex の item を除外している所）、stretch された cross の再 layout。
+  - 縦書きの flex・grid の baseline（flex-align-baseline-002・004・fieldset-002/003・grid-self-baseline の vertical 系、約 60）は縦の container での baseline の軸と item の synthesized baseline の規則が要る。
+  - multicol（columns）は未実装（flex-align-baseline-multicol 6、anchor-position-multicol 約 10）。subgrid の配置は未実装（subgrid の grid-gap・line-names・repeat-auto-fill 約 30 は subgrid の track を親の track にする設計が要る）。
+  - CSS Transitions・Animations・Web Animations が computed style を補間しない（flex-grow・flex-basis・order・grid-template-*・backdrop-filter の interpolation・composition、約 25）。prelude.js の `Animation` は時刻の管理だけ。
+  - css-logical の shorthand（margin-inline など）を inline style の longhand に展開して直列化する（logical-box-margin・padding・inset・border-width・border-color が各 11 subtest）。position-try の last-successful の状態（約 10）。navigation-api の window.open・popup・複数 frame（約 80）。
+
 再開点（2026-10-31、q1727-i01 の停止）:
 - 最後の全件の測定は ours-dev28（source 5b032c17b、`build/ws074-cmp/ours-dev28` の harness・scripted・crash と、static は `static-subset.py` の全件の再実行）。2,386 / 3,472 = 68.72%、
   4 runner とも dev25/26 の PASS に対する後退 0。その後に commit は無い（この記録の commit だけ）。Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）。

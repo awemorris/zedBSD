@@ -118,6 +118,7 @@ static int style_wide_keyword(const struct vm_string *value);
 static int style_canonical_overflow(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_canonical_comments(struct vm_realm *realm, struct vm_string *value, struct vm_string **out);
 static int style_canonical_anchor(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
+static int style_box_get(struct vm_realm *realm, const struct style_list *list, const struct vm_string *name, vm_value *result, int *present);
 static int style_grid_get(struct vm_realm *realm, const struct style_list *list, const struct vm_string *name, vm_value *result, int *present);
 static int style_grid_expand(struct vm_realm *realm, struct style_list *list, const struct vm_string *name);
 static int style_grid_remove_covered(struct vm_realm *realm, struct style_list *list, const struct vm_string *name, int *removed);
@@ -2101,6 +2102,312 @@ style_grid_part(
 	return status;
 }
 
+/* A box shorthand: its name, how many values it takes and the longhands they set (a four-sided one top, right, bottom, left). */
+struct style_box_shorthand {
+	const char *name;
+	int sides;
+	const char *longhands[4];
+};
+
+/* The shorthands of the sides of a box. */
+static const struct style_box_shorthand style_box_shorthands[] = {
+	{ "margin", 4, { "margin-top", "margin-right", "margin-bottom", "margin-left" } },
+	{ "padding", 4, { "padding-top", "padding-right", "padding-bottom", "padding-left" } },
+	{ "inset", 4, { "top", "right", "bottom", "left" } },
+	{ "border-width", 4, { "border-top-width", "border-right-width", "border-bottom-width", "border-left-width" } },
+	{ "border-style", 4, { "border-top-style", "border-right-style", "border-bottom-style", "border-left-style" } },
+	{ "border-color", 4, { "border-top-color", "border-right-color", "border-bottom-color", "border-left-color" } },
+	{ "margin-inline", 2, { "margin-inline-start", "margin-inline-end", NULL, NULL } },
+	{ "margin-block", 2, { "margin-block-start", "margin-block-end", NULL, NULL } },
+	{ "padding-inline", 2, { "padding-inline-start", "padding-inline-end", NULL, NULL } },
+	{ "padding-block", 2, { "padding-block-start", "padding-block-end", NULL, NULL } },
+	{ "inset-inline", 2, { "inset-inline-start", "inset-inline-end", NULL, NULL } },
+	{ "inset-block", 2, { "inset-block-start", "inset-block-end", NULL, NULL } },
+	{ "border-inline-width", 2, { "border-inline-start-width", "border-inline-end-width", NULL, NULL } },
+	{ "border-block-width", 2, { "border-block-start-width", "border-block-end-width", NULL, NULL } },
+	{ "border-inline-style", 2, { "border-inline-start-style", "border-inline-end-style", NULL, NULL } },
+	{ "border-block-style", 2, { "border-block-start-style", "border-block-end-style", NULL, NULL } },
+	{ "border-inline-color", 2, { "border-inline-start-color", "border-inline-end-color", NULL, NULL } },
+	{ "border-block-color", 2, { "border-block-start-color", "border-block-end-color", NULL, NULL } },
+	{ NULL, 0, { NULL, NULL, NULL, NULL } }
+};
+
+/* The sides a border shorthand (one to three components: width, style, color) sets, with the side names it takes. */
+static const char *const style_border_sides[][6] = {
+	{ "border", "top", "right", "bottom", "left", NULL },
+	{ "border-top", "top", NULL, NULL, NULL, NULL },
+	{ "border-right", "right", NULL, NULL, NULL, NULL },
+	{ "border-bottom", "bottom", NULL, NULL, NULL, NULL },
+	{ "border-left", "left", NULL, NULL, NULL, NULL },
+	{ "border-inline", "inline-start", "inline-end", NULL, NULL, NULL },
+	{ "border-block", "block-start", "block-end", NULL, NULL, NULL },
+	{ "border-inline-start", "inline-start", NULL, NULL, NULL, NULL },
+	{ "border-inline-end", "inline-end", NULL, NULL, NULL, NULL },
+	{ "border-block-start", "block-start", NULL, NULL, NULL, NULL },
+	{ "border-block-end", "block-end", NULL, NULL, NULL, NULL },
+	{ NULL, NULL, NULL, NULL, NULL, NULL }
+};
+
+/* Cuts a value into its top-level components (spaces outside parentheses and quotes). */
+static int
+style_box_split(
+	char *text,
+	char **parts,
+	int limit)
+{
+	int count;
+	int depth;
+	char quote;
+	char *at;
+
+	count = 0;
+	depth = 0;
+	quote = '\0';
+	at = text;
+	while (*at != '\0') {
+		while (*at == ' ' || *at == '\t' || *at == '\n')
+			at++;
+		if (*at == '\0')
+			break;
+		if (count >= limit)
+			return -1;
+		parts[count++] = at;
+		while (*at != '\0' && (depth > 0 || quote != '\0' || (*at != ' ' && *at != '\t' && *at != '\n'))) {
+			if (quote != '\0') {
+				if (*at == quote)
+					quote = '\0';
+			} else if (*at == '"' || *at == '\'') {
+				quote = *at;
+			} else if (*at == '(') {
+				depth++;
+			} else if (*at == ')') {
+				depth--;
+			}
+			at++;
+		}
+		if (*at != '\0')
+			*at++ = '\0';
+	}
+	return count;
+}
+
+/* Tells which part of a border a component is: 0 width, 1 style, 2 color. */
+static int
+style_box_border_part(
+	const char *word)
+{
+	static const char *const styles[] = { "none", "hidden", "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset", NULL };
+	size_t index;
+
+	for (index = 0; styles[index] != NULL; index++) {
+		if (strcmp(word, styles[index]) == 0)
+			return 1;
+	}
+	if (strcmp(word, "thin") == 0 || strcmp(word, "medium") == 0 || strcmp(word, "thick") == 0)
+		return 0;
+	if ((word[0] >= '0' && word[0] <= '9') || word[0] == '.' || word[0] == '+' || word[0] == '-' || strncmp(word, "calc(", 5U) == 0)
+		return 0;
+	return 2;
+}
+
+/* Reads a longhand of a box shorthand (margin, border-inline-width, border-top and the like) from the last one that sets it. */
+static int
+style_box_get(
+	struct vm_realm *realm,
+	const struct style_list *list,
+	const struct vm_string *name,
+	vm_value *result,
+	int *present)
+{
+	struct wb_buffer want;
+	struct wb_buffer text;
+	char *parts[8];
+	const char *answer;
+	const char *tail;
+	char longhand[STYLE_NAME_MAX];
+	char value[STYLE_NAME_MAX * 4];
+	size_t index;
+	size_t family;
+	size_t side;
+	size_t length;
+	int count;
+	int slot;
+	int found;
+	int each;
+	int status;
+
+	*present = 0;
+	if (name->length >= sizeof(longhand) || name->length < 3U)
+		return 0;
+	for (index = 0; index < name->length; index++)
+		longhand[index] = (char)vm_string_at(name, index);
+	longhand[name->length] = '\0';
+
+	/* The last shorthand in the list that covers the longhand. */
+	answer = NULL;
+	wb_buffer_init(&want);
+	wb_buffer_init(&text);
+	for (index = list->names->length; index > 0 && answer == NULL; index--) {
+		const struct vm_string *shorthand;
+		char shortname[STYLE_NAME_MAX];
+		size_t at;
+
+		shorthand = (const struct vm_string *)vm_value_as_cell(list->names->elements[index - 1U]);
+		if (shorthand->length >= sizeof(shortname))
+			continue;
+		for (at = 0; at < shorthand->length; at++)
+			shortname[at] = (char)vm_string_at(shorthand, at);
+		shortname[shorthand->length] = '\0';
+
+		/* The source text of the declaration. */
+		found = 0;
+		slot = -1;
+		for (family = 0; style_box_shorthands[family].name != NULL && !found; family++) {
+			if (strcmp(style_box_shorthands[family].name, shortname) != 0)
+				continue;
+			for (side = 0; side < (size_t)style_box_shorthands[family].sides; side++) {
+				if (strcmp(style_box_shorthands[family].longhands[side], longhand) == 0) {
+					found = 1;
+					slot = (int)side;
+					break;
+				}
+			}
+			if (found)
+				break;
+		}
+
+		/* A border shorthand of one side is the value of the border shorthand of several sides that sets it. */
+		if (!found) {
+			static const char *const covers[][2] = {
+				{ "border", "border-top" }, { "border", "border-right" }, { "border", "border-bottom" }, { "border", "border-left" },
+				{ "border", "border-inline" }, { "border", "border-block" },
+				{ "border", "border-inline-start" }, { "border", "border-inline-end" }, { "border", "border-block-start" }, { "border", "border-block-end" },
+				{ "border-inline", "border-inline-start" }, { "border-inline", "border-inline-end" },
+				{ "border-block", "border-block-start" }, { "border-block", "border-block-end" },
+				{ NULL, NULL }
+			};
+			size_t at2;
+
+			for (at2 = 0; covers[at2][0] != NULL; at2++) {
+				if (strcmp(covers[at2][0], shortname) == 0 && strcmp(covers[at2][1], longhand) == 0) {
+					found = 4;
+					break;
+				}
+			}
+		}
+		if (found == 4) {
+			wb_buffer_release(&text);
+			wb_buffer_init(&text);
+			status = vm_string_to_utf8((const struct vm_string *)vm_value_as_cell(list->values->elements[index - 1U]), &text);
+			if (status != 0) {
+				wb_buffer_release(&want);
+				wb_buffer_release(&text);
+				return status;
+			}
+			length = text.length < sizeof(value) - 1U ? text.length : sizeof(value) - 1U;
+			memcpy(value, wb_buffer_string(&text), length);
+			value[length] = '\0';
+			answer = value;
+			break;
+		}
+
+		/* A border shorthand: its sides' width, style and color. */
+		if (!found) {
+			size_t kind;
+
+			for (family = 0; style_border_sides[family][0] != NULL && !found; family++) {
+				if (strcmp(style_border_sides[family][0], shortname) != 0)
+					continue;
+				for (side = 1; side < 6U && style_border_sides[family][side] != NULL && !found; side++) {
+					for (kind = 0; kind < 3U; kind++) {
+						static const char *const suffix[3] = { "width", "style", "color" };
+						char expect[STYLE_NAME_MAX];
+
+						snprintf(expect, sizeof(expect), "border-%s-%s", style_border_sides[family][side], suffix[kind]);
+						if (strcmp(expect, longhand) == 0) {
+							found = 2;
+							slot = (int)kind;
+							break;
+						}
+					}
+				}
+				break;
+			}
+			if (found == 2)
+				found = 3;
+		}
+		if (!found)
+			continue;
+
+		/* Its value, cut into components. */
+		wb_buffer_release(&text);
+		wb_buffer_init(&text);
+		status = vm_string_to_utf8((const struct vm_string *)vm_value_as_cell(list->values->elements[index - 1U]), &text);
+		if (status != 0) {
+			wb_buffer_release(&want);
+			wb_buffer_release(&text);
+			return status;
+		}
+		length = text.length < sizeof(value) - 1U ? text.length : sizeof(value) - 1U;
+		memcpy(value, wb_buffer_string(&text), length);
+		value[length] = '\0';
+		count = style_box_split(value, parts, 8);
+		if (count < 1)
+			continue;
+
+		/* A CSS-wide keyword is every longhand's. */
+		if (count == 1 && (strcmp(parts[0], "inherit") == 0 || strcmp(parts[0], "initial") == 0 ||
+		    strcmp(parts[0], "unset") == 0 || strcmp(parts[0], "revert") == 0)) {
+			answer = parts[0];
+			break;
+		}
+		if (found == 1 && style_box_shorthands[family].sides == 4) {
+			if (count > 4)
+				continue;
+			if (slot == 0)
+				answer = parts[0];
+			else if (slot == 1)
+				answer = count >= 2 ? parts[1] : parts[0];
+			else if (slot == 2)
+				answer = count >= 3 ? parts[2] : parts[0];
+			else
+				answer = count == 4 ? parts[3] : (count >= 2 ? parts[1] : parts[0]);
+		} else if (found == 1) {
+			if (count > 2)
+				continue;
+			answer = (slot == 1 && count >= 2) ? parts[1] : parts[0];
+		} else {
+			/* width, style, color in any order; what is missing is the initial value. */
+			tail = longhand + strlen(longhand);
+			if (strlen(longhand) >= 5U && strcmp(tail - 5U, "width") == 0)
+				slot = 0;
+			else if (strlen(longhand) >= 5U && strcmp(tail - 5U, "style") == 0)
+				slot = 1;
+			else
+				slot = 2;
+			answer = slot == 0 ? "medium" : (slot == 1 ? "none" : "currentcolor");
+			for (each = 0; each < count; each++) {
+				if (style_box_border_part(parts[each]) == slot) {
+					answer = parts[each];
+					break;
+				}
+			}
+		}
+		if (answer != NULL)
+			break;
+	}
+	if (answer != NULL) {
+		status = bind_string(realm, answer, result);
+		if (status == 0)
+			*present = 1;
+	} else {
+		status = 0;
+	}
+	wb_buffer_release(&want);
+	wb_buffer_release(&text);
+	return status;
+}
+
 /* Reads a grid longhand from the last grid shorthand that sets it. */
 static int
 style_grid_get(
@@ -2743,6 +3050,8 @@ style_get_property_value(
 		status = style_decoration_get(realm, &list, name, result, &present);
 		if (status == 0 && !present)
 			status = style_grid_get(realm, &list, name, result, &present);
+		if (status == 0 && !present)
+			status = style_box_get(realm, &list, name, result, &present);
 		if (status != 0) {
 			style_list_release(realm, &list);
 			vm_heap_remove_root(realm->heap, &name_root);

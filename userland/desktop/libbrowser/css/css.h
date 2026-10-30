@@ -479,8 +479,7 @@ enum css_white_space {
 };
 
 /*
- * The values of border-style this pass tells apart (groove and ridge parse
- * as solid; every style is drawn solid, but a form control whose borders
+ * The values of border-style this pass tells apart (every style is drawn solid, but a form control whose borders
  * are all inset or outset, as the user agent's sheet gives it, is drawn
  * the way the platform draws such a control).
  */
@@ -491,7 +490,9 @@ enum css_border_style {
 	CSS_BORDER_DOTTED,
 	CSS_BORDER_DOUBLE,
 	CSS_BORDER_INSET,
-	CSS_BORDER_OUTSET
+	CSS_BORDER_OUTSET,
+	CSS_BORDER_GROOVE,
+	CSS_BORDER_RIDGE
 };
 
 /* The values of box-sizing: what width and height size. */
