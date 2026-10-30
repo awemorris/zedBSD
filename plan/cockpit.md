@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:53（Q1）
+最終更新: 2026-10-31 01:58（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,11 +9,11 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS333](ws333/ws.md)・[WS291](ws291/ws.md) | CPU の idle の省電力と、i915（5330）の描画の速さ | WS291 p022 に戻った（WS333 p002 の MWAIT は main に merge 済み） | qs40 × 600 を Linux の 50.6 fps へ（今 32.6 fps）。idle の残り（11.6 W 対 Linux 3.2〜3.5 W）は tick・P-state・ASPM などで、WS333 の設計の後 |
-| P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | p020: GPU の memory を cache（SLC）に通す既定の回帰、表示用の copy を頂点の処理が待たない直し | qs40 × 13 を 45.85 → 50 fps 以上へ（SLC の既定と present の copy の待ちの直しで 42.30 → 45.85、回帰は全部 PASS）。branch は BUG-375 が直るまで main に入れない |
+| P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
+| P2 | Bug | open の小さな Bug をまとめて直す（QEMU と host） | q1750: BUG-363（/etc/hosts）→ BUG-344（fscanf）→ BUG-366（MAP_FIXED）→ BUG-354（top の %CPU）→ BUG-328（静的な route・DNS）→ BUG-352（default route 2 つ） | WS291 p020（PowerVR、c13 45.8 fps 対 目標 50）は返却。branch agent/p2-ws291v は BUG-375 の直しの後に main へ |
 | P3 | [WS307](ws307/ws.md)・[WS331](ws331/ws.md)・[WS332](ws332/ws.md)・[WS326](ws326/ws.md) | 残りの仕事を順に | 起動（q1736）。WS307 p007 の残り（installer の導入の QEMU、古い entry の掃除） | WS331 p006 規約 → WS332 p003・p004 → WS326 p015・p017 以降 |
-| P4 | Bug・[WS291](ws291/ws.md) | BUG-374（RTX の cursor の色が逆）と Pi 5 の GPU | 起動（q1742）。BUG-374 の原因の特定と直し（10.0.10.3 は P6 と lock で交代） | Pi 5 の起動の後に WS291 p021 |
-| P5 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | p001: 統一の設計（WS301・WS303 の設計を入力に） | design-reviewer → ユーザーの判断の一覧 |
+| P4 | [WS291](ws291/ws.md)・Bug | Pi 5 の GPU と BUG-374 | Pi 5 p021 の image を main＋branch で build（main には入れない） | 午後: ユーザーが Pi 5 を起動 → SSH で clock・fps。BUG-374 はユーザーの目視待ち（uncleared） |
+| P5 | [WS306](ws306/ws.md) | GPU の「ゲーム最適化」の UAPI と driver の識別 | q1746: p001 設計（既存の設計を今の code と照らして直す → design-reviewer → 問いの一覧） | WS333 p001 の設計は済み（main 9946e22c0、問い 7 つは下の「判断を待つ事」） |
 | P6 | Bug・[WS291](ws291/ws.md) | BUG-370（Photos）と RTX の CPU の費用 | 起動（q1740）。BUG-370 の直し（QEMU） | WS291 p014: 命令の記録の段と全画面の copy を減らす（10.0.10.3） |
 | P7 | Bug | network と VF2 と compositor の Bug | BUG-371 の QEMU の確かめ、BUG-375（game mode の後に compositor が落ちる）の解析 | 直し → VF2（P2）と 10.0.10.3（P3）で確かめ |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
@@ -37,7 +37,7 @@ Sonnet の実装の担当（標準廉価実装手順）: S-p015・S-p017（[WS32
 
 | Phase | 内容 | 状態 |
 | --- | --- | --- |
-| p001 | 統一の設計（CPU の idle・P-state・P/E core・熱・fan・strategy・非常の停止） | in-progress（P5） |
+| p001 | 統一の設計（CPU の idle・P-state・P/E core・熱・fan・strategy・非常の停止） | 設計済み（第 2 版、main 9946e22c0）。ユーザーの問い Q333-1〜7 待ち。実装の Phase は p003〜p024（約 70 LW） |
 | p002 | amd64 の CPU の idle を MWAIT に（5330 の idle 12.99 W 対 Linux 3.2〜3.5 W） | MWAIT C6 を main に merge（f740839e5）。idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps。Linux にはまだ遠い（残りは 1 kHz の tick・P-state・ASPM・PSR の見込み、未調査） |
 
 ### WS331 driver から HAL への直の依存を除く
@@ -96,6 +96,19 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 ## ユーザーの判断を待つ事
 
 今の作業を止めている判断は無い。
+
+### 0. WS333（/dev/thermal で統一する電力・熱の枠組み）の設計の問い Q333-1〜7（2026-10-31 新しい）
+
+- 背景: WS333 は、CPU の休み方（idle）と速さ（P-state）、温度・fan・方針（strategy）・危ない温度での電源断を、1 つの device `/dev/thermal` と道具 `/sbin/thermal` にまとめる WS（WS301・WS303 を統合）。P5 が設計（p001）を終え、敵対的レビュー（major 8・minor 24）を反映した。先に入れた p002（MWAIT）で 5330 の暇な時の電力は 13.00 → 11.70 W（Linux は 3.2〜3.5 W）。
+- 問いの全文・用語の説明・推しの理由は [ws333/user-questions.md](ws333/user-questions.md)。要点と推し:
+  - Q333-1 起動の時の strategy（速さ優先か省電力かの方針）: **推し B**＝最後に選んだ物を /etc に保存して起動の時に渡す、保存が無ければ balanced。（A は firmware のまま、C は kernel が毎回 balanced）
+  - Q333-2 「細かく電源を切る」軸が何に効くか: **推し C**＝保存と表示だけ、効かせる先（PCIe・NVMe・GPU）は各 WS が足す。
+  - Q333-3 root が CPU の周波数を直に書いた時: **推し A**＝直の値が優先して「custom」と表示、次に strategy を選ぶと消える。
+  - Q333-4 manual の 3 つの軸（速さ・騒音・電源断）の 0〜100 の向き: **推し A**＝どれも「100 = その物が多い」（騒音 100 = 一番うるさくてよい）。**UAPI の意味になるので後で直しにくい**。
+  - Q333-5 Dell の BIOS の Quiet（fan を遅くして CPU の電力を下げる mode）を選んでよいか: **推し A**＝manual で騒音を低く（≤ 33）した時だけ。
+  - Q333-6 電力（RAPL、CPU の電力の積算の計数）と CPU の休みの深さの割合を /dev/thermal で読めるようにするか: **推し A**＝入れる（読みだけ）。
+  - Q333-7 CPU の速さの制御（`CONFIG_CPU_PERF`、今は既定で無効）の既定をいつ有効にするか: **推し A**＝5330 の受け入れの試験（p014）が通ったら amd64 の既定で有効（server の設定は変えない）。
+- 止めている物: 無し。Q1 は推しで進める（CPU の道 p003→p006→p011→p014 は問いを待たない）。Q333-4 だけは UAPI を実装する Phase の前に答えがほしい。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
