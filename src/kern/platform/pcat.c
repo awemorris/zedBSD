@@ -733,6 +733,34 @@ kern_platform_poweroff(
 }
 
 /*
+ * Turns the power off through ACPI's S5 soft-off without _PTS, for the
+ * thermal emergency: the firmware's preparation may wait on the embedded
+ * controller or on the hardware that overheats.
+ *
+ * It returns only the reason the power stayed on, as
+ * kern_platform_poweroff() does.
+ */
+int
+kern_platform_poweroff_emergency(
+	void)
+{
+	int error;
+
+#if CONFIG_DRIVER_ACPI
+	/* Asks the ACPI driver for S5 without telling the firmware first. */
+	error = drv_acpi_poweroff_emergency();
+#else
+	/* A kernel built without the ACPI driver has no way to turn the power off. */
+	error = ENODEV;
+#endif
+	if (error != 0)
+		return error;
+
+	/* The driver returned without an error, which it never does. */
+	return EOPNOTSUPP;
+}
+
+/*
  * Reboots the machine: through the FADT's reset register, then the
  * chipset's reset control register, then the keyboard controller, and
  * halts when none of them reset it.

@@ -46,7 +46,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
 	$(BUILD)/src/kern/kcrt.o $(BUILD)/src/kern/heap.o \
 	$(BUILD)/src/kern/random.o $(BUILD)/src/kern/random-crypto.o \
-	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/cache.o $(BUILD)/src/kern/readahead.o $(BUILD)/src/kern/writeback.o $(BUILD)/src/kern/io.o $(BUILD)/src/kern/sysctl.o $(BUILD)/src/kern/thermal.o \
+	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/cache.o $(BUILD)/src/kern/readahead.o $(BUILD)/src/kern/writeback.o $(BUILD)/src/kern/io.o $(BUILD)/src/kern/sysctl.o $(BUILD)/src/kern/thermal.o $(BUILD)/src/kern/thermal-guard.o \
 	$(BUILD)/src/kern/resource.o \
 	$(BUILD)/src/kern/poll.o \
 	$(BUILD)/src/kern/usync.o \

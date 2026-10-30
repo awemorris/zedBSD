@@ -21,6 +21,14 @@
  * a strategy or a boost waits for the strategy thread with a limit, and
  * never holds a lock of the core while a driver runs.
  *
+ * The guard also decides the two things that act on the machine: the
+ * passive ceiling, which the poll thread lowers on the receivers in steps
+ * while a processor's sensor is past its passive level and raises again
+ * once it is three degrees below, and the emergency, which begins when a
+ * firmware zone gave two readings in a row at its critical level or went
+ * thirty seconds without one after its last reading was there
+ * (thermal-guard.c carries it out).
+ *
  * Lock order: the copy lock, then the event lock, which is a leaf.  The
  * drivers' own locks are never held when the core is called, and the core
  * holds none of its own when it calls a driver.
@@ -74,6 +82,24 @@
 /* A passive or critical level at or above this many thousandths of a degree is a firmware's way of saying none. */
 #define THERMAL_LEVEL_NONE		127000
 
+/*
+ * A critical level the emergency trusts: at least 50 degrees, and at least
+ * five above the sensor's first reading.  A lower one would turn the power
+ * off at boot or on a warm day, so it is taken for none and said once.
+ */
+#define THERMAL_CRITICAL_LOWEST		50000
+#define THERMAL_CRITICAL_MARGIN		5000
+
+/* The readings in a row at the critical level that begin the emergency. */
+#define THERMAL_CRITICAL_READINGS	2U
+
+/*
+ * The passive ceiling: how far one step moves it, in permille of the
+ * receivers' range, and how often the poll thread takes a step.
+ */
+#define THERMAL_PASSIVE_STEP		100U
+#define THERMAL_PASSIVE_PERIOD_MS	5000U
+
 /* The fan reads in a row with no turn, while it should turn, that make it stalled. */
 #define THERMAL_STALL_READS		3U
 
@@ -99,8 +125,13 @@
  * rest is the copy lock's.  valid tells that the latest reading was one;
  * accepted that a reading was ever taken, and the last one taken is
  * millicelsius at taken_tick.  watch_tick is where the guard starts to
- * count a sensor's age after a system sleep.  The two crossed flags are
- * the guard's memory of the levels the temperature is at or past.
+ * count a sensor's age after a system sleep, and resumed says no reading
+ * was taken since then.  The two crossed flags are the guard's memory of
+ * the levels the temperature is at or past.  first_millicelsius is the
+ * first reading ever taken, which a critical level must be above;
+ * critical_readings counts the readings in a row taken at or past the
+ * critical level, and critical_refused says the guard said once that it
+ * does not trust the level.
  */
 struct kern_thermal_sensor {
 	char name[KERN_THERMAL_NAME_MAX];
@@ -110,11 +141,15 @@ struct kern_thermal_sensor {
 	bool accepted;
 	bool jump_dropped;
 	bool stale;
+	bool resumed;
 	bool passive_crossed;
 	bool critical_crossed;
+	bool critical_refused;
 	int32_t millicelsius;
+	int32_t first_millicelsius;
 	int32_t passive;
 	int32_t critical;
+	uint32_t critical_readings;
 	uint64_t taken_tick;
 	uint64_t watch_tick;
 };
@@ -125,7 +160,8 @@ struct kern_thermal_sensor {
  * The name, operations and context are set at registration and never
  * change; the answer is written by the strategy thread under the copy
  * lock.  generation is the strategy's generation the receiver last
- * carried out, 0 before the first.
+ * carried out, 0 before the first.  limit_logged, which only the poll
+ * thread reads and writes, says a failed ceiling was logged once.
  */
 struct thermal_receiver {
 	char name[KERN_THERMAL_RECEIVER_NAME_MAX];
@@ -136,6 +172,7 @@ struct thermal_receiver {
 	uint32_t flags;
 	uint32_t duration_ms;
 	uint64_t ended_tick;
+	bool limit_logged;
 };
 
 /* One range of /dev/thermal's ioctl numbers and its handler, fixed at registration. */
@@ -293,6 +330,18 @@ static struct wait_queue thermal_guard_queue;
 static struct kern_thermal_reader *thermal_readers;
 
 /*
+ * The passive ceiling, under the copy lock: whether the guard found a
+ * processor's sensor past its passive level at its last pass, and the
+ * ceiling the poll thread last handed the receivers, in permille
+ * (KERN_THERMAL_LIMIT_NONE while nothing is cut).
+ */
+static bool thermal_passive_wanted;
+static uint32_t thermal_passive_permille = KERN_THERMAL_LIMIT_NONE;
+
+/* When the poll thread last moved the passive ceiling; only the poll thread reads and writes it. */
+static uint64_t thermal_passive_tick;
+
+/*
  * The first sensor each source of hw.thermal lists; the address of an
  * entry is the source's context, which the sysctl tells apart.  Never
  * written.
@@ -325,6 +374,8 @@ static void thermal_poll_main(void *argument);
 static void thermal_poll_receivers(void);
 static void thermal_poll_meters(void);
 static void thermal_poll_fans(void);
+static void thermal_poll_passive(void);
+static void thermal_passive_apply(uint32_t permille);
 static void thermal_meter_read(struct thermal_meter *meter);
 static void thermal_meter_write_begin(struct thermal_meter *meter);
 static void thermal_meter_write_end(struct thermal_meter *meter);
@@ -332,6 +383,8 @@ static void thermal_fan_read(uint32_t index);
 static void thermal_guard_main(void *argument);
 static void thermal_guard_pass(void);
 static void thermal_guard_sensor(struct kern_thermal_sensor *sensor, uint32_t index, uint64_t now, uint64_t stale_after);
+static bool thermal_guard_emergency(struct kern_thermal_sensor *sensor);
+static bool thermal_critical_trusted(struct kern_thermal_sensor *sensor);
 static int32_t thermal_level(int32_t millicelsius);
 static void thermal_ring_append(struct kern_thermal_reader *reader, const struct kern_thermal_record *record);
 static int thermal_sysctl_copy(void *context, struct thermal_entry *entries, unsigned capacity, unsigned *count);
@@ -575,11 +628,13 @@ kern_thermal_sensor_update(
 	irq = spin_lock_irqsave(&thermal_lock);
 
 	if (!valid) {
-		/* The driver could not read the sensor. */
+		/* The driver could not read the sensor; the readings at the critical level are no longer in a row. */
 		sensor->valid = false;
+		sensor->critical_readings = 0;
 	} else if (millicelsius < THERMAL_READING_LOW || millicelsius > THERMAL_READING_HIGH) {
 		/* A value no sensor has is no reading. */
 		sensor->valid = false;
+		sensor->critical_readings = 0;
 	} else {
 		/* Measures the jump from the last reading taken. */
 		distance = millicelsius - sensor->millicelsius;
@@ -592,12 +647,25 @@ kern_thermal_sensor_update(
 			/* Drops the first far jump; the next reading is taken even if it jumps too. */
 			sensor->jump_dropped = true;
 		} else {
+			/* Keeps the first reading ever taken, which a critical level must be above. */
+			if (!sensor->accepted)
+				sensor->first_millicelsius = millicelsius;
+
 			/* Takes the reading. */
 			sensor->millicelsius = millicelsius;
 			sensor->taken_tick = now;
 			sensor->valid = true;
 			sensor->accepted = true;
 			sensor->jump_dropped = false;
+			sensor->resumed = false;
+
+			/* Counts the readings in a row at or past the critical level. */
+			if (sensor->critical != 0 && millicelsius >= sensor->critical) {
+				if (sensor->critical_readings < THERMAL_CRITICAL_READINGS)
+					sensor->critical_readings++;
+			} else {
+				sensor->critical_readings = 0;
+			}
 		}
 	}
 
@@ -802,7 +870,8 @@ kern_thermal_event(
  * Restarts the watch after a system sleep.
  *
  * The time asleep is not time a sensor went unread, so every sensor's age
- * is counted again from now.
+ * is counted again from now, and a sensor that has had no reading since is
+ * not taken for one that stopped answering.
  */
 void
 kern_thermal_resume(void)
@@ -825,6 +894,7 @@ kern_thermal_resume(void)
 		sensor = &thermal_sensors[index];
 		sensor->watch_tick = now;
 		sensor->stale = false;
+		sensor->resumed = true;
 	}
 
 	spin_unlock_irqrestore(&thermal_lock, irq);
@@ -857,6 +927,7 @@ kern_thermal_status_get(
 	status->receiver_count = atomic_load_acquire(&thermal_receiver_count);
 	status->strategy = thermal_strategy.value;
 	status->generation = thermal_generation;
+	status->passive_permille = thermal_passive_permille;
 	flags = thermal_strategy_flags();
 
 	spin_unlock_irqrestore(&thermal_lock, irq);
@@ -865,6 +936,9 @@ kern_thermal_status_get(
 	if (custom)
 		flags |= KERN_THERMAL_STRATEGY_CUSTOM;
 	status->strategy_flags = flags;
+
+	/* Adds the emergency's state. */
+	kern_thermal_emergency_get(status);
 }
 
 /*
@@ -2002,7 +2076,8 @@ thermal_boost_pass(void)
 
 /*
  * Reads the receivers' copies and the meters every second and the fans
- * every fifth second, for as long as the kernel runs.
+ * every fifth second, and moves the passive ceiling, for as long as the
+ * kernel runs.
  */
 static void
 thermal_poll_main(
@@ -2026,6 +2101,7 @@ thermal_poll_main(
 		thermal_poll_meters();
 		if (pass % THERMAL_FAN_POLLS == 0U)
 			thermal_poll_fans();
+		thermal_poll_passive();
 		pass++;
 
 		/* Sleeps until the next period. */
@@ -2076,6 +2152,104 @@ thermal_poll_fans(void)
 	count = atomic_load_acquire(&thermal_fan_count);
 	for (index = 0; index < count; index++)
 		thermal_fan_read(index);
+}
+
+/*
+ * Moves the passive ceiling one step every five seconds: down while the
+ * guard finds a processor's sensor past its passive level, back up once
+ * none is, until nothing is cut.  The first step down comes at once.
+ */
+static void
+thermal_poll_passive(void)
+{
+	unsigned long irq;
+	uint32_t permille;
+	uint32_t next;
+	uint64_t period;
+	uint64_t now;
+	bool wanted;
+	bool due;
+
+	/* Reads what the guard wants and the ceiling in force. */
+	irq = spin_lock_irqsave(&thermal_lock);
+
+	wanted = thermal_passive_wanted;
+	permille = thermal_passive_permille;
+
+	spin_unlock_irqrestore(&thermal_lock, irq);
+
+	/* Nothing to move while nothing is cut and nothing is wanted. */
+	if (!wanted && permille >= KERN_THERMAL_LIMIT_NONE)
+		return;
+
+	/* Moves only once a period has passed since the last step, except the first one down. */
+	now = sched_ticks();
+	period = thermal_period(THERMAL_PASSIVE_PERIOD_MS);
+	due = false;
+	if (thermal_passive_tick == 0U || now - thermal_passive_tick >= period)
+		due = true;
+	if (!due)
+		return;
+
+	/* One step down to nothing at the least, or one step up to no ceiling. */
+	if (wanted) {
+		next = 0;
+		if (permille > THERMAL_PASSIVE_STEP)
+			next = permille - THERMAL_PASSIVE_STEP;
+	} else {
+		next = permille + THERMAL_PASSIVE_STEP;
+		if (next > KERN_THERMAL_LIMIT_NONE)
+			next = KERN_THERMAL_LIMIT_NONE;
+	}
+
+	/* A ceiling already at the bottom stays there without calling the receivers again. */
+	if (next == permille)
+		return;
+
+	/* Records the step, then hands it to the receivers. */
+	irq = spin_lock_irqsave(&thermal_lock);
+
+	thermal_passive_permille = next;
+
+	spin_unlock_irqrestore(&thermal_lock, irq);
+
+	thermal_passive_tick = now;
+	kern_logf("thermal: passive ceiling %u permille\n", next);
+	thermal_passive_apply(next);
+}
+
+/*
+ * Hands a ceiling for every domain to each receiver that takes one, with
+ * no lock held.  A receiver that fails is logged once; one with nothing to
+ * act on (EOPNOTSUPP) is not.
+ */
+static void
+thermal_passive_apply(
+	uint32_t permille)
+{
+	struct thermal_receiver *receiver;
+	unsigned count;
+	unsigned index;
+	int error;
+
+	/* Calls each receiver's limit. */
+	count = atomic_load_acquire(&thermal_receiver_count);
+	for (index = 0; index < count; index++) {
+		receiver = &thermal_receivers[index];
+		if (receiver->ops->limit == NULL)
+			continue;
+
+		/* Hands it the ceiling. */
+		error = receiver->ops->limit(receiver->context, KERN_THERMAL_DOMAIN_ALL, permille);
+		if (error == 0 || error == EOPNOTSUPP)
+			continue;
+
+		/* Logs the first failure only. */
+		if (!receiver->limit_logged) {
+			receiver->limit_logged = true;
+			kern_logf("thermal: receiver %s refused the passive ceiling (%d)\n", receiver->name, error);
+		}
+	}
 }
 
 /*
@@ -2253,26 +2427,66 @@ thermal_guard_main(
 	}
 }
 
-/* Looks at every sensor's copy under the copy lock, calling no driver. */
+/*
+ * Looks at every sensor's copy under the copy lock, calling no driver;
+ * tells the poll thread whether to cut the passive ceiling, and begins the
+ * emergency with the lock let go when a firmware zone calls for it.
+ */
 static void
 thermal_guard_pass(void)
 {
+	struct kern_thermal_sensor *sensor;
 	unsigned long irq;
 	unsigned count;
 	unsigned index;
 	uint64_t stale_after;
 	uint64_t now;
+	uint32_t emergency_sensor;
+	int32_t emergency_millicelsius;
+	bool emergency;
+	bool passive;
+	bool active;
+	bool calls;
 
 	/* Looks at each sensor, with the age past which it is stale. */
 	stale_after = thermal_period(THERMAL_STALE_MS);
 	now = sched_ticks();
 	count = atomic_load_acquire(&thermal_sensor_count);
+	emergency = false;
+	emergency_sensor = 0;
+	emergency_millicelsius = 0;
+	passive = false;
 	irq = spin_lock_irqsave(&thermal_lock);
 
-	for (index = 0; index < count; index++)
-		thermal_guard_sensor(&thermal_sensors[index], index, now, stale_after);
+	/* Updates each sensor, notes the first that calls for the emergency and whether any wants the passive ceiling. */
+	for (index = 0; index < count; index++) {
+		sensor = &thermal_sensors[index];
+		thermal_guard_sensor(sensor, index, now, stale_after);
+		if (sensor->passive_crossed)
+			passive = true;
+		if (emergency)
+			continue;
+		calls = thermal_guard_emergency(sensor);
+		if (calls) {
+			emergency = true;
+			emergency_sensor = index;
+			emergency_millicelsius = sensor->millicelsius;
+		}
+	}
+
+	thermal_passive_wanted = passive;
 
 	spin_unlock_irqrestore(&thermal_lock, irq);
+
+	/* Nothing more unless a zone calls for the emergency. */
+	if (!emergency)
+		return;
+
+	/* Begins it once; the guard carries it out from here and does not come back when the power goes. */
+	active = kern_thermal_emergency_active();
+	if (active)
+		return;
+	kern_thermal_emergency_run(emergency_sensor, emergency_millicelsius);
 }
 
 /*
@@ -2329,6 +2543,68 @@ thermal_guard_sensor(
 			kern_thermal_event(KERN_THERMAL_EVENT_PASSIVE, index, 0);
 		}
 	}
+}
+
+/*
+ * Tells whether a sensor calls for the emergency: a firmware zone with a
+ * critical level the guard trusts, whose last two readings in a row were
+ * at or past it, or whose last reading was at or past it and which then
+ * went thirty seconds without one (not counting a sleep it has not read
+ * since).  The caller holds the copy lock and has updated the sensor's age.
+ */
+static bool
+thermal_guard_emergency(
+	struct kern_thermal_sensor *sensor)
+{
+	bool trusted;
+
+	/* Only a firmware zone's critical level turns the power off. */
+	if (sensor->kind != KERN_THERMAL_KIND_ZONE)
+		return false;
+	if (sensor->critical == 0 || !sensor->accepted)
+		return false;
+
+	/* Only a level that is not too low for the machine. */
+	trusted = thermal_critical_trusted(sensor);
+	if (!trusted)
+		return false;
+
+	/* Two readings in a row at the level. */
+	if (sensor->critical_readings >= THERMAL_CRITICAL_READINGS)
+		return true;
+
+	/* A zone that stopped answering while it was at the level. */
+	if (sensor->stale && !sensor->resumed && sensor->millicelsius >= sensor->critical)
+		return true;
+
+	/* Succeeded: the zone is below its level, or not long enough. */
+	return false;
+}
+
+/*
+ * Tells whether a sensor's critical level is one the emergency may act
+ * on: 50 degrees or more, and five or more above the first reading.  A
+ * level the guard does not trust is said once.  The caller holds the copy
+ * lock.
+ */
+static bool
+thermal_critical_trusted(
+	struct kern_thermal_sensor *sensor)
+{
+	/* A level at least as high as both floors is trusted. */
+	if (sensor->critical >= THERMAL_CRITICAL_LOWEST &&
+	    sensor->critical >= sensor->first_millicelsius + THERMAL_CRITICAL_MARGIN)
+		return true;
+
+	/* Says once that the level counts as none. */
+	if (!sensor->critical_refused) {
+		sensor->critical_refused = true;
+		kern_logf("thermal: %s: critical level %d mC is too low (first reading %d mC); taken for none\n",
+			  sensor->name, sensor->critical, sensor->first_millicelsius);
+	}
+
+	/* Succeeded: the level is not trusted. */
+	return false;
 }
 
 /* Turns a passive or critical level that means none into 0. */

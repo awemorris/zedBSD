@@ -65,6 +65,19 @@
 /* What a boost request reports beyond its errno, as bits. */
 #define KERN_THERMAL_BOOST_PENDING		0x1U	/* the fan's driver has not answered yet */
 
+/*
+ * How far the thermal emergency went.  It only moves forward: from NONE to
+ * SIGNALED when init has a handler for SIGUSR2 and to CUTTING when it has
+ * none; from SIGNALED to INIT at init's acknowledgement and to CUTTING when
+ * none comes; from INIT to CUTTING when the power is still on two minutes
+ * after the signal; from CUTTING to HALTED when the power stayed on.
+ */
+#define KERN_THERMAL_EMERGENCY_NONE		0U
+#define KERN_THERMAL_EMERGENCY_SIGNALED		1U	/* init was sent SIGUSR2 and has not answered */
+#define KERN_THERMAL_EMERGENCY_INIT		2U	/* init acknowledged and stops the machine */
+#define KERN_THERMAL_EMERGENCY_CUTTING		3U	/* the kernel cuts the power itself */
+#define KERN_THERMAL_EMERGENCY_HALTED		4U	/* the power stayed on; the machine halted */
+
 /* The events one open file holds before the oldest are dropped. */
 #define KERN_THERMAL_READER_RING		64U
 
@@ -77,6 +90,10 @@ struct kern_thermal_status {
 	uint32_t strategy;		/* KERN_THERMAL_STRATEGY_* */
 	uint32_t strategy_flags;	/* KERN_THERMAL_STRATEGY_CUSTOM and the others */
 	uint32_t generation;
+	uint32_t passive_permille;	/* the passive ceiling in force, KERN_THERMAL_LIMIT_NONE: none */
+	uint32_t emergency;		/* KERN_THERMAL_EMERGENCY_* */
+	uint32_t emergency_sensor;	/* the sensor that began it, while it is not NONE */
+	int32_t emergency_millicelsius;	/* that sensor's temperature then */
 };
 
 /* One temperature sensor as the core last saw it. */
@@ -266,5 +283,38 @@ kern_thermal_reader_take(
 bool
 kern_thermal_reader_ready(
 	struct kern_thermal_reader *reader);
+
+/*
+ * Takes init's acknowledgement that it began stopping the machine for the
+ * thermal emergency.
+ *
+ * Thread context; pid is the caller's process id.  Returns EPERM for a
+ * caller other than init, EINVAL when the emergency is not waiting for
+ * init's answer, or 0.
+ */
+int
+kern_thermal_emergency_ack(
+	int pid);
+
+/*
+ * The part of the guard that stops the machine, which the thermal core
+ * calls and nothing else does.
+ */
+
+/*
+ * Begins the thermal emergency for a sensor at a temperature and carries
+ * it out: tells the readers, asks init to stop the machine and cuts the
+ * power when init does not.  Runs in the guard thread with no lock held
+ * and does not return unless another caller began it first.
+ */
+void
+kern_thermal_emergency_run(
+	uint32_t sensor,
+	int32_t millicelsius);
+
+/* Copies the emergency's state into a status.  Thread context. */
+void
+kern_thermal_emergency_get(
+	struct kern_thermal_status *status);
 
 #endif

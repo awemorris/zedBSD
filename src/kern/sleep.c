@@ -6,8 +6,7 @@
  */
 
 /*
- * The system sleep to idle, S0ix (ws052-p006, plan/ws052/proposed/README-v2.md
- * §7, docs/architecture/power-management.md).
+ * The system sleep to idle, S0ix (docs/architecture/power-management.md).
  *
  * The thread of the sleep request is the coordinator.  It freezes the user
  * processes, suspends the devices, tells the firmware (LPS0) and leaves
@@ -30,6 +29,12 @@
  * The drivers' parts are weak: a platform without them builds this file,
  * and kern_sleep_supported() says it cannot sleep before anything is
  * touched.
+ *
+ * The thermal emergency and the sleep exclude each other: a sleep that
+ * finds the emergency begun before it freezes the user processes gives up,
+ * since init could not hear the emergency while frozen.  After a sleep the
+ * thermal guard counts the sensors' ages again, as the tick count jumped
+ * by the time slept.
  */
 
 #include "kern/sleep.h"
@@ -41,6 +46,7 @@
 #include "kern/lock.h"
 #include "kern/sched.h"
 #include "kern/system-event.h"
+#include "kern/thermal.h"
 #include "kern/waitq.h"
 #include <uapi/errno.h>
 #include <uapi/system.h>
@@ -161,6 +167,7 @@ kern_sleep_s0idle(
 	struct kern_sleep_outcome *outcome)
 {
 	unsigned reason;
+	bool emergency;
 	int status;
 
 	/* Nothing yet. */
@@ -170,6 +177,18 @@ kern_sleep_s0idle(
 
 	/* The begin, before the user processes are frozen. */
 	sleep_post("sleep.begin", "");
+
+	/* Gives up while the thermal emergency asks init to stop the machine. */
+	emergency = kern_thermal_emergency_active();
+	if (emergency) {
+		outcome->result = EBUSY;
+		kern_strcpy(outcome->device, "thermal");
+		kern_logf("sleep: abandoned: the thermal emergency began\n");
+		sleep_post("sleep.failed", outcome->device);
+		return;
+	}
+
+	/* Freezes the user processes. */
 	kern_logf("sleep: entering S0 idle\n");
 	kern_freeze_user();
 
@@ -194,6 +213,9 @@ kern_sleep_s0idle(
 	if (status != 0)
 		kern_logf("sleep: the LPS0 exit failed (error %d)\n", status);
 	outcome->resume_result = drv_pci_resume_all();
+
+	/* The thermal guard counts the sensors' ages again from now. */
+	kern_thermal_resume();
 
 	/* The user processes run again, and the end tells why the system woke. */
 	kern_thaw_user();

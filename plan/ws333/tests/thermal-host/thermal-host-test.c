@@ -16,6 +16,12 @@
  * thirty-second age take a fraction of a second.  Mock receivers, fans and
  * meters stand for the drivers.  Each scenario runs in its own process,
  * since the core's tables are for the life of the kernel.
+ *
+ * The thermal guard's emergency (src/kern/thermal-guard.c) runs against a
+ * model of init (whether it exists, its SIGUSR2 disposition, the signals
+ * it was sent), of the sync of the volumes (which may hang) and of the
+ * platform's power-off (which blocks for ever, as a machine whose power
+ * went, or fails) and halt (which blocks for ever).
  */
 
 /* The kernel's sched_yield() is not the host's; the kernel's is renamed while its headers are read. */
@@ -284,6 +290,115 @@ kern_thermal_register(kern_thermal_read_t read, void *context)
 	test_sysctl_context[test_sysctl_count] = context;
 	test_sysctl_count++;
 	return 0;
+}
+
+/* ---- The model of init, the sync and the platform for the emergency. ---- */
+
+/* The kernel's number of SIGUSR2 and the handler address a model init has. */
+#define TEST_KERNEL_SIGUSR2	17
+#define TEST_INIT_HANDLER	0x1000U
+
+struct process {
+	int pid;
+};
+
+struct signal_action {
+	uintptr_t handler;
+	uintptr_t restorer;
+	uint64_t mask;
+	unsigned flags;
+};
+
+/* What the model of init is and what it was sent. */
+static struct process test_init = { 1 };
+static bool test_init_present;
+static uintptr_t test_init_disposition;
+static unsigned test_init_signals;
+static int test_init_signo;
+static uint64_t test_init_signal_tick;
+
+/* The model of the sync and the platform, and what was called when. */
+static bool test_sync_hang;
+static unsigned test_syncs;
+static bool test_sync_finished;
+static int test_poweroff_answer;
+static unsigned test_poweroffs;
+static unsigned test_plain_poweroffs;
+static uint64_t test_poweroff_tick;
+static unsigned test_halts;
+
+struct process *
+process_find_ref(int pid)
+{
+	if (pid != 1 || !test_init_present)
+		return NULL;
+	return &test_init;
+}
+
+void
+process_release(struct process *process)
+{
+	(void)process;
+}
+
+int
+signal_action_set(struct process *process, int signo, const struct signal_action *requested,
+    struct signal_action *previous)
+{
+	CHECK(process == &test_init);
+	CHECK(requested == NULL);
+	CHECK(signo == TEST_KERNEL_SIGUSR2);
+	memset(previous, 0, sizeof(*previous));
+	previous->handler = test_init_disposition;
+	return 0;
+}
+
+int
+signal_send_process(struct process *process, int signo)
+{
+	CHECK(process == &test_init);
+	test_init_signo = signo;
+	test_init_signal_tick = sched_ticks();
+	__atomic_fetch_add(&test_init_signals, 1U, __ATOMIC_SEQ_CST);
+	return 0;
+}
+
+int
+mount_sync_all(void)
+{
+	__atomic_fetch_add(&test_syncs, 1U, __ATOMIC_SEQ_CST);
+	if (test_sync_hang)
+		sleep(30);
+	__atomic_store_n(&test_sync_finished, true, __ATOMIC_SEQ_CST);
+	return 0;
+}
+
+int
+kern_platform_poweroff_emergency(void)
+{
+	test_poweroff_tick = sched_ticks();
+	__atomic_fetch_add(&test_poweroffs, 1U, __ATOMIC_SEQ_CST);
+	if (test_poweroff_answer != 0)
+		return test_poweroff_answer;
+
+	/* The power went: nothing comes back. */
+	for (;;)
+		sleep(60);
+}
+
+int
+kern_platform_poweroff(void)
+{
+	__atomic_fetch_add(&test_plain_poweroffs, 1U, __ATOMIC_SEQ_CST);
+	return EOPNOTSUPP;
+}
+
+void
+kern_platform_halt(void)
+{
+	__atomic_fetch_add(&test_halts, 1U, __ATOMIC_SEQ_CST);
+	for (;;)
+		sleep(60);
 }
 
 /* ---- Helpers. ---- */
@@ -1287,6 +1402,395 @@ scenario_events(void)
 	CHECK(all_reader.count == 2U);
 }
 
+/* ---- The emergency (thermal-guard.c) and the passive ceiling. ---- */
+
+/* Waits up to the given real time for a counter the threads raise to reach a value. */
+static bool
+test_wait_count(unsigned *counter, unsigned target, unsigned milliseconds)
+{
+	unsigned waited;
+
+	for (waited = 0; waited < milliseconds; waited += 5U) {
+		if (__atomic_load_n(counter, __ATOMIC_SEQ_CST) >= target)
+			return true;
+		test_sleep_ms(5U);
+	}
+	return __atomic_load_n(counter, __ATOMIC_SEQ_CST) >= target;
+}
+
+static uint32_t
+test_emergency_state(void)
+{
+	struct kern_thermal_status status;
+
+	kern_thermal_status_get(&status);
+	return status.emergency;
+}
+
+/* Registers a firmware zone with a critical level and gives it its first reading. */
+static struct kern_thermal_sensor *
+test_zone(const char *name, int32_t critical, int32_t first)
+{
+	struct kern_thermal_sensor *zone;
+
+	CHECK(kern_thermal_sensor_register(name, KERN_THERMAL_KIND_ZONE, 0, &zone) == 0);
+	kern_thermal_sensor_levels(zone, 0, critical);
+	kern_thermal_sensor_update(zone, first, true);
+	return zone;
+}
+
+/* Two readings in a row at the critical level, init without a handler: the guard cuts the power at once. */
+static void
+scenario_emergency_no_handler(void)
+{
+	static struct kern_thermal_reader reader;
+	struct kern_thermal_record records[4];
+	struct kern_thermal_status status;
+	struct kern_thermal_sensor *zone;
+
+	test_init_present = true;
+	test_init_disposition = 0;
+	kern_thermal_init();
+	kern_thermal_reader_attach(&reader, 1U << KERN_THERMAL_EVENT_EMERGENCY);
+	(void)test_zone("cool", 90000, 40000);
+	zone = test_zone("zone", 90000, 80000);
+	CHECK(!kern_thermal_emergency_active());
+	CHECK(test_emergency_state() == KERN_THERMAL_EMERGENCY_NONE);
+	CHECK(kern_thermal_emergency_ack(1) == EINVAL);
+
+	/* One reading at the level is not enough. */
+	kern_thermal_sensor_update(zone, 95000, true);
+	test_sleep_ms(200);
+	CHECK(!kern_thermal_emergency_active());
+
+	/* The second in a row begins it. */
+	kern_thermal_sensor_update(zone, 96000, true);
+	WAIT_FOR(kern_thermal_emergency_active());
+	CHECK(test_wait_count(&test_poweroffs, 1U, 2000U));
+	CHECK(test_init_signals == 0U);
+	CHECK(test_syncs == 1U && test_sync_finished);
+	CHECK(test_plain_poweroffs == 0U && test_halts == 0U);
+	kern_thermal_status_get(&status);
+	CHECK(status.emergency == KERN_THERMAL_EMERGENCY_CUTTING);
+	CHECK(status.emergency_sensor == 1U && status.emergency_millicelsius == 96000);
+	CHECK(kern_thermal_reader_take(&reader, records, 4) == 1U);
+	CHECK(records[0].type == KERN_THERMAL_EVENT_EMERGENCY && records[0].index == 1U && records[0].value == 96000);
+
+	/* Init can neither answer nor stop the machine its own way now. */
+	CHECK(kern_thermal_emergency_ack(1) == EINVAL);
+	CHECK(kern_thermal_shutdown_claim() == EBUSY);
+	kern_thermal_reader_detach(&reader);
+}
+
+/* Init has a handler and answers: it gets two minutes, then the guard cuts all the same. */
+static void
+scenario_emergency_ack(void)
+{
+	struct kern_thermal_sensor *zone;
+	uint64_t distance;
+
+	test_init_present = true;
+	test_init_disposition = TEST_INIT_HANDLER;
+	kern_thermal_init();
+	CHECK(kern_thermal_shutdown_claim() == 0);
+	zone = test_zone("zone", 100000, 85000);
+	kern_thermal_sensor_update(zone, 100000, true);
+	kern_thermal_sensor_update(zone, 101000, true);
+	CHECK(test_wait_count(&test_init_signals, 1U, 2000U));
+	CHECK(test_init_signo == TEST_KERNEL_SIGUSR2);
+	CHECK(test_emergency_state() == KERN_THERMAL_EMERGENCY_SIGNALED);
+
+	/* Only init answers, and only once. */
+	CHECK(kern_thermal_emergency_ack(2) == EPERM);
+	CHECK(kern_thermal_emergency_ack(1) == 0);
+	CHECK(test_emergency_state() == KERN_THERMAL_EMERGENCY_INIT);
+	CHECK(kern_thermal_emergency_ack(1) == EINVAL);
+	CHECK(kern_thermal_shutdown_claim() == 0);
+
+	/* Past the ten seconds nothing is cut while init has its two minutes. */
+	test_sleep_ms(2000);
+	CHECK(test_poweroffs == 0U && test_syncs == 0U);
+
+	/* Two minutes after the signal the guard cuts and takes the way from init. */
+	CHECK(test_wait_count(&test_poweroffs, 1U, 8000U));
+	distance = test_poweroff_tick - test_init_signal_tick;
+	CHECK(distance >= kern_ms_to_ticks(120000) && distance < kern_ms_to_ticks(140000));
+	CHECK(test_emergency_state() == KERN_THERMAL_EMERGENCY_CUTTING);
+	CHECK(test_syncs == 1U);
+	CHECK(kern_thermal_shutdown_claim() == EBUSY);
+}
+
+/* Init has a handler but does not answer (frozen): ten seconds, then the guard cuts. */
+static void
+scenario_emergency_no_ack(void)
+{
+	struct kern_thermal_sensor *zone;
+	uint64_t distance;
+
+	test_init_present = true;
+	test_init_disposition = TEST_INIT_HANDLER;
+	kern_thermal_init();
+	zone = test_zone("zone", 100000, 85000);
+	kern_thermal_sensor_update(zone, 100000, true);
+	kern_thermal_sensor_update(zone, 101000, true);
+	CHECK(test_wait_count(&test_init_signals, 1U, 2000U));
+	CHECK(test_wait_count(&test_poweroffs, 1U, 3000U));
+	distance = test_poweroff_tick - test_init_signal_tick;
+	CHECK(distance >= kern_ms_to_ticks(10000) && distance < kern_ms_to_ticks(30000));
+	CHECK(test_emergency_state() == KERN_THERMAL_EMERGENCY_CUTTING);
+	CHECK(kern_thermal_emergency_ack(1) == EINVAL);
+	CHECK(kern_thermal_shutdown_claim() == EBUSY);
+}
+
+/* Init was already stopping the machine and does not answer: the guard waits its two minutes. */
+static void
+scenario_emergency_init_stopping(void)
+{
+	struct kern_thermal_sensor *zone;
+	uint64_t distance;
+
+	test_init_present = true;
+	test_init_disposition = TEST_INIT_HANDLER;
+	kern_thermal_init();
+	CHECK(kern_thermal_shutdown_claim() == 0);
+	zone = test_zone("zone", 100000, 85000);
+	kern_thermal_sensor_update(zone, 100000, true);
+	kern_thermal_sensor_update(zone, 101000, true);
+	CHECK(test_wait_count(&test_init_signals, 1U, 2000U));
+	test_sleep_ms(3000);
+	CHECK(test_poweroffs == 0U);
+	CHECK(test_emergency_state() == KERN_THERMAL_EMERGENCY_CUTTING);
+	CHECK(test_wait_count(&test_poweroffs, 1U, 8000U));
+	distance = test_poweroff_tick - test_init_signal_tick;
+	CHECK(distance >= kern_ms_to_ticks(120000) && distance < kern_ms_to_ticks(140000));
+	CHECK(kern_thermal_shutdown_claim() == EBUSY);
+}
+
+/* No init yet, a sync that hangs and a power-off that fails: ten seconds for the sync, then the halt. */
+static void
+scenario_emergency_cut_fails(void)
+{
+	struct kern_thermal_sensor *zone;
+	uint64_t start;
+	uint64_t distance;
+
+	test_init_present = false;
+	test_sync_hang = true;
+	test_poweroff_answer = ETIMEDOUT;
+	kern_thermal_init();
+	zone = test_zone("zone", 100000, 85000);
+	kern_thermal_sensor_update(zone, 100000, true);
+	start = sched_ticks();
+	kern_thermal_sensor_update(zone, 101000, true);
+	CHECK(test_wait_count(&test_halts, 1U, 3000U));
+	distance = test_poweroff_tick - start;
+	CHECK(distance >= kern_ms_to_ticks(10000) && distance < kern_ms_to_ticks(30000));
+	CHECK(test_syncs == 1U && !test_sync_finished);
+	CHECK(test_poweroffs == 1U && test_plain_poweroffs == 0U);
+	CHECK(test_emergency_state() == KERN_THERMAL_EMERGENCY_HALTED);
+	CHECK(test_init_signals == 0U);
+}
+
+/* Levels and readings that must not begin it. */
+static void
+scenario_emergency_refused(void)
+{
+	struct kern_thermal_sensor *low;
+	struct kern_thermal_sensor *close;
+	struct kern_thermal_sensor *device;
+	struct kern_thermal_sensor *broken;
+	struct kern_thermal_sensor *apart;
+
+	test_init_present = true;
+	test_init_disposition = TEST_INIT_HANDLER;
+	kern_thermal_init();
+
+	/* A level under 50 degrees. */
+	low = test_zone("low", 45000, 30000);
+	kern_thermal_sensor_update(low, 46000, true);
+	kern_thermal_sensor_update(low, 47000, true);
+	kern_thermal_sensor_update(low, 48000, true);
+
+	/* A level less than five degrees above the first reading. */
+	close = test_zone("close", 70000, 68000);
+	kern_thermal_sensor_update(close, 71000, true);
+	kern_thermal_sensor_update(close, 72000, true);
+
+	/* A device's critical level. */
+	CHECK(kern_thermal_sensor_register("device", KERN_THERMAL_KIND_DEVICE, 0, &device) == 0);
+	kern_thermal_sensor_levels(device, 0, 90000);
+	kern_thermal_sensor_update(device, 85000, true);
+	kern_thermal_sensor_update(device, 95000, true);
+	kern_thermal_sensor_update(device, 96000, true);
+
+	/* A failed read between two readings at the level. */
+	broken = test_zone("broken", 90000, 80000);
+	kern_thermal_sensor_update(broken, 95000, true);
+	kern_thermal_sensor_update(broken, 95000, false);
+	kern_thermal_sensor_update(broken, 96000, true);
+
+	/* A reading below the level between two at it. */
+	apart = test_zone("apart", 90000, 80000);
+	kern_thermal_sensor_update(apart, 95000, true);
+	kern_thermal_sensor_update(apart, 85000, true);
+	kern_thermal_sensor_update(apart, 95000, true);
+
+	/* Keeps the zones fresh for a while; none begins it. */
+	test_sleep_ms(400);
+	kern_thermal_sensor_update(broken, 85000, true);
+	kern_thermal_sensor_update(apart, 85000, true);
+	kern_thermal_sensor_update(low, 48000, true);
+	kern_thermal_sensor_update(close, 72000, true);
+	test_sleep_ms(400);
+	CHECK(!kern_thermal_emergency_active());
+	CHECK(test_init_signals == 0U && test_poweroffs == 0U);
+}
+
+/* A zone that went quiet at its level: the emergency thirty seconds later. */
+static void
+scenario_emergency_stale(void)
+{
+	struct kern_thermal_sensor *zone;
+	uint64_t taken;
+	uint64_t distance;
+
+	test_init_present = false;
+	kern_thermal_init();
+	zone = test_zone("zone", 90000, 80000);
+	taken = sched_ticks();
+	kern_thermal_sensor_update(zone, 95000, true);
+	test_sleep_ms(1000);
+	CHECK(!kern_thermal_emergency_active());
+	CHECK(test_wait_count(&test_poweroffs, 1U, 3000U));
+	distance = test_poweroff_tick - taken;
+	CHECK(distance >= kern_ms_to_ticks(30000) && distance < kern_ms_to_ticks(45000));
+}
+
+/* After a sleep a zone with no new reading is not taken for a quiet one; its next reading counts. */
+static void
+scenario_emergency_resume(void)
+{
+	struct kern_thermal_sensor *zone;
+
+	test_init_present = false;
+	kern_thermal_init();
+	zone = test_zone("zone", 90000, 80000);
+	kern_thermal_sensor_update(zone, 95000, true);
+	kern_thermal_resume();
+	test_sleep_ms(2200);
+	CHECK(!kern_thermal_emergency_active());
+	kern_thermal_sensor_update(zone, 95500, true);
+	CHECK(test_wait_count(&test_poweroffs, 1U, 2000U));
+}
+
+/* A receiver of the passive ceiling. */
+struct test_limiter {
+	int answer;
+	unsigned calls;
+	uint32_t values[32];
+	uint32_t domains[32];
+	uint64_t ticks[32];
+};
+
+static int
+test_limit(void *context, uint32_t domain, uint32_t permille)
+{
+	struct test_limiter *limiter;
+	unsigned call;
+
+	limiter = context;
+	call = __atomic_load_n(&limiter->calls, __ATOMIC_SEQ_CST);
+	if (call < 32U) {
+		limiter->values[call] = permille;
+		limiter->domains[call] = domain;
+		limiter->ticks[call] = sched_ticks();
+	}
+	__atomic_fetch_add(&limiter->calls, 1U, __ATOMIC_SEQ_CST);
+	return limiter->answer;
+}
+
+static const struct kern_thermal_receiver_ops test_limiter_ops = {
+	test_apply, test_limit, NULL, NULL, NULL,
+};
+
+/* The passive ceiling: steps of 100 permille every five seconds down to 0, and back up. */
+static void
+scenario_passive(void)
+{
+	static struct test_limiter good;
+	static struct test_limiter failing;
+	static struct test_limiter unsupported;
+	static struct test_receiver plain;
+	struct kern_thermal_status status;
+	struct kern_thermal_sensor *cpu;
+	struct kern_thermal_sensor *zone;
+	unsigned index;
+	bool steps_ok;
+
+	failing.answer = EIO;
+	unsupported.answer = EOPNOTSUPP;
+	kern_thermal_init();
+	CHECK(kern_thermal_receiver_register("plain", &test_receiver_plain, &plain) == 0);
+	CHECK(kern_thermal_receiver_register("good", &test_limiter_ops, &good) == 0);
+	CHECK(kern_thermal_receiver_register("failing", &test_limiter_ops, &failing) == 0);
+	CHECK(kern_thermal_receiver_register("unsupported", &test_limiter_ops, &unsupported) == 0);
+	CHECK(kern_thermal_sensor_register("cpu", KERN_THERMAL_KIND_DEVICE, KERN_THERMAL_SENSOR_CPU, &cpu) == 0);
+	kern_thermal_sensor_levels(cpu, 80000, 0);
+	kern_thermal_sensor_update(cpu, 70000, true);
+
+	/* A zone's passive level does not cut the processors. */
+	zone = test_zone("zone", 0, 70000);
+	kern_thermal_sensor_levels(zone, 60000, 0);
+	test_sleep_ms(400);
+	CHECK(good.calls == 0U);
+	kern_thermal_status_get(&status);
+	CHECK(status.passive_permille == KERN_THERMAL_LIMIT_NONE);
+
+	/* Past the level: the first step at once, then one every five seconds, down to 0, then no more. */
+	kern_thermal_sensor_update(cpu, 81000, true);
+	CHECK(test_wait_count(&good.calls, 1U, 1000U));
+	CHECK(good.values[0] == 900U && good.domains[0] == KERN_THERMAL_DOMAIN_ALL);
+
+	/*
+	 * Within the hysteresis it goes on stepping down.  The receiver notes
+	 * the time a little after the poll thread decided the step, so two
+	 * steps are checked to be at least four and a half seconds apart.
+	 */
+	kern_thermal_sensor_update(cpu, 78000, true);
+	CHECK(test_wait_count(&good.calls, 10U, 4000U));
+	test_sleep_ms(600);
+	CHECK(good.calls == 10U);
+	steps_ok = true;
+	for (index = 0; index < 10U; index++) {
+		if (good.values[index] != 900U - index * 100U)
+			steps_ok = false;
+		if (index > 0U && good.ticks[index] - good.ticks[index - 1U] < kern_ms_to_ticks(4500))
+			steps_ok = false;
+	}
+	CHECK(steps_ok);
+	CHECK(failing.calls == 10U && unsupported.calls == 10U);
+	kern_thermal_status_get(&status);
+	CHECK(status.passive_permille == 0U);
+
+	/* Three degrees below the level: back up step by step to no ceiling, then no more. */
+	kern_thermal_sensor_update(cpu, 76000, true);
+	CHECK(test_wait_count(&good.calls, 20U, 4000U));
+	test_sleep_ms(600);
+	CHECK(good.calls == 20U);
+	steps_ok = true;
+	for (index = 10; index < 20U; index++) {
+		if (good.values[index] != (index - 9U) * 100U)
+			steps_ok = false;
+		if (good.ticks[index] - good.ticks[index - 1U] < kern_ms_to_ticks(4500))
+			steps_ok = false;
+	}
+	CHECK(steps_ok);
+	CHECK(good.values[19] == KERN_THERMAL_LIMIT_NONE);
+	kern_thermal_status_get(&status);
+	CHECK(status.passive_permille == KERN_THERMAL_LIMIT_NONE);
+	CHECK(!kern_thermal_emergency_active());
+}
+
 struct test_scenario {
 	const char *name;
 	void (*run)(void);
@@ -1306,6 +1810,15 @@ static const struct test_scenario test_scenarios[] = {
 	{ "boost-pending", scenario_boost_pending },
 	{ "meters", scenario_meters },
 	{ "events", scenario_events },
+	{ "emergency-no-handler", scenario_emergency_no_handler },
+	{ "emergency-ack", scenario_emergency_ack },
+	{ "emergency-no-ack", scenario_emergency_no_ack },
+	{ "emergency-init-stop", scenario_emergency_init_stopping },
+	{ "emergency-cut-fails", scenario_emergency_cut_fails },
+	{ "emergency-refused", scenario_emergency_refused },
+	{ "emergency-stale", scenario_emergency_stale },
+	{ "emergency-resume", scenario_emergency_resume },
+	{ "passive", scenario_passive },
 };
 
 int

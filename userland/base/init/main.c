@@ -70,6 +70,17 @@
 #define STOP_POLL_MS 100U
 
 /*
+ * The grace of each step once the kernel told init of a thermal emergency
+ * with SIGUSR2: the power must go soon, so every process gets two seconds
+ * after SIGTERM and two after SIGKILL, also in a shutdown already under
+ * way.
+ */
+#define EMERGENCY_GRACE_MS 2000U
+
+/* The record of the thermal emergencies init was told of, one line each. */
+#define EMERGENCY_PATH "/var/log/thermal-emergency"
+
+/*
  * The process states KERN_SYSTEM_GET_PROCESS reports for a process that has
  * already exited (the kernel's PROCESS_ZOMBIE and PROCESS_DEAD).
  */
@@ -157,6 +168,14 @@ static struct service services[SERVICE_MAX];
 static size_t service_count;
 static volatile sig_atomic_t reload_requested;
 static volatile sig_atomic_t action_requested;
+
+/*
+ * Set by SIGUSR2, the kernel's word that the machine overheats: the
+ * shutdown becomes a power-off with a short grace, and no later request
+ * changes that.  emergency_noted says init already wrote it down.
+ */
+static volatile sig_atomic_t emergency_requested;
+static int emergency_noted;
 
 /* Set when the system is being stopped: a replaced service is not started then. */
 static int services_stopping;
@@ -268,6 +287,8 @@ static int send_service(int client, const struct service *service);
 static enum zsv1_service_state zsv1_state(enum service_state state);
 static int send_dependencies(int client, const char *list, enum zsv1_record_type type);
 static void signal_handler(int number);
+static unsigned stop_grace_ms(void);
+static void note_emergency(void);
 
 /*
  * Runs the init command.
@@ -293,6 +314,7 @@ main(
 	(void)signal(SIGHUP, signal_handler);
 	(void)signal(SIGINT, signal_handler);
 	(void)signal(SIGTERM, signal_handler);
+	(void)signal(SIGUSR2, signal_handler);
 	(void)signal(SIGCHLD, SIG_DFL);
 
 	/* A root the kernel could only mount read-only is checked before anything else. */
@@ -1855,6 +1877,9 @@ shutdown_system(
 	index = service_count;
 	services_stopping = 1;
 
+	/* Writes the thermal emergency down before anything else, while the disks still take it. */
+	note_emergency();
+
 	printf("init: stopping services\n");
 
 	/* Stops the services, the last started first. */
@@ -1866,6 +1891,11 @@ shutdown_system(
 
 	/* Writes the volumes out before the kernel is asked to act. */
 	sync();
+
+	/* A thermal emergency that came during the shutdown makes it a power-off. */
+	note_emergency();
+	if (emergency_requested)
+		action = INIT_ACTION_POWEROFF;
 
 	/* A power-off asks the kernel to cut the power; a halt and a reboot ask for those. */
 	if (action == INIT_ACTION_REBOOT) {
@@ -1919,6 +1949,13 @@ shutdown_system(
 		/* Writes the volumes out again before the next try. */
 		(void)sleep(retry_seconds);
 		sync();
+
+		/* A thermal emergency that came meanwhile asks for the power-off again. */
+		note_emergency();
+		if (emergency_requested && system_action != KERN_SYSTEM_POWEROFF) {
+			action_name = "poweroff";
+			system_action = KERN_SYSTEM_POWEROFF;
+		}
 	}
 
 	/* Continue until the operation reaches a terminal state. */
@@ -1954,13 +1991,13 @@ stop_service(
 		return -1;
 
 	/* Gives the service its grace period to exit. */
-	exited = wait_for_exit(service->pid, STOP_GRACE_MS);
+	exited = wait_for_exit(service->pid, stop_grace_ms());
 	if (!exited) {
 		/* Ends the service, and gives the kernel the same time to finish it. */
 		fprintf(stderr, "init: %s (pid %ld) did not stop; killing it\n",
 			service->name, (long)service->pid);
 		(void)kill(service->pid, SIGKILL);
-		exited = wait_for_exit(service->pid, STOP_GRACE_MS);
+		exited = wait_for_exit(service->pid, stop_grace_ms());
 		if (!exited) {
 			fprintf(stderr, "init: %s (pid %ld) did not exit after SIGKILL; leaving it\n",
 				service->name, (long)service->pid);
@@ -1980,12 +2017,14 @@ wait_for_exit(
 	pid_t pid,
 	unsigned milliseconds)
 {
-	uint64_t deadline;
+	uint64_t started;
+	uint64_t now;
+	unsigned limit;
 	pid_t reaped;
 	int status;
 
-	/* Polls the child until it is reaped or the time is up. */
-	deadline = monotonic_milliseconds() + milliseconds;
+	/* Polls the child until it is reaped or the time, which a thermal emergency shortens, is up. */
+	started = monotonic_milliseconds();
 	for (;;) {
 		/* A child that is reaped, or that is no longer ours, has exited. */
 		reaped = waitpid(pid, &status, WNOHANG);
@@ -1994,8 +2033,15 @@ wait_for_exit(
 		if (reaped < 0 && errno == ECHILD)
 			return 1;
 
+		/* Writes down a thermal emergency that came during the wait. */
+		note_emergency();
+
 		/* A child still running when the time is up has not exited. */
-		if (monotonic_milliseconds() >= deadline)
+		limit = stop_grace_ms();
+		if (limit > milliseconds)
+			limit = milliseconds;
+		now = monotonic_milliseconds();
+		if (now - started >= limit)
 			return 0;
 		pause_milliseconds(STOP_POLL_MS);
 	}
@@ -2022,14 +2068,14 @@ stop_other_processes(
 	printf("init: stopping %u other processes\n", count);
 
 	/* Gives them their grace period. */
-	count = wait_for_other_processes(STOP_GRACE_MS);
+	count = wait_for_other_processes(stop_grace_ms());
 	if (count == 0)
 		return;
 
 	/* Ends the ones still running, and gives the kernel the time to finish them. */
 	printf("init: killing %u processes that did not stop\n", count);
 	(void)signal_other_processes(SIGKILL);
-	count = wait_for_other_processes(STOP_GRACE_MS);
+	count = wait_for_other_processes(stop_grace_ms());
 	if (count != 0)
 		fprintf(stderr, "init: %u processes did not exit after SIGKILL; leaving them\n", count);
 }
@@ -2093,13 +2139,15 @@ static unsigned
 wait_for_other_processes(
 	unsigned milliseconds)
 {
-	uint64_t deadline;
+	uint64_t started;
+	uint64_t now;
+	unsigned limit;
 	unsigned count;
 	pid_t reaped;
 	int status;
 
-	/* Polls until no other process is live or the time is up. */
-	deadline = monotonic_milliseconds() + milliseconds;
+	/* Polls until no other process is live or the time, which a thermal emergency shortens, is up. */
+	started = monotonic_milliseconds();
 	for (;;) {
 		/* Reaps every child that has exited, orphans included. */
 		for (;;) {
@@ -2113,8 +2161,15 @@ wait_for_other_processes(
 		if (count == 0)
 			return 0;
 
+		/* Writes down a thermal emergency that came during the wait. */
+		note_emergency();
+
 		/* Reports what is left when the time is up. */
-		if (monotonic_milliseconds() >= deadline)
+		limit = stop_grace_ms();
+		if (limit > milliseconds)
+			limit = milliseconds;
+		now = monotonic_milliseconds();
+		if (now - started >= limit)
 			return count;
 		pause_milliseconds(STOP_POLL_MS);
 	}
@@ -2269,8 +2324,8 @@ dispatch_request(
 	? INIT_ACTION_POWEROFF
 	: INIT_ACTION_HALT;
 
-		/* Handles a failed zsv1 server send ok end fd operation. */
-		if (zsv1_server_send_ok_end_fd(client, "scheduled") == 0)
+		/* Schedules the action, unless the thermal emergency's power-off is under way. */
+		if (zsv1_server_send_ok_end_fd(client, "scheduled") == 0 && !emergency_requested)
 			action_requested = action;
 
 		/* Returns the computed result. */
@@ -2470,11 +2525,75 @@ static void
 signal_handler(
 	int number)
 {
-	/* Handles the number condition. */
+	/* The thermal emergency's power-off stands; nothing changes it afterwards. */
+	if (number == SIGUSR2) {
+		emergency_requested = 1;
+		action_requested = INIT_ACTION_POWEROFF;
+		return;
+	}
+	if (emergency_requested)
+		return;
+
+	/* A reload, a reboot or a halt. */
 	if (number == SIGHUP)
 		reload_requested = 1;
 	else if (number == SIGINT)
 		action_requested = INIT_ACTION_REBOOT;
 	else if (number == SIGTERM)
 		action_requested = INIT_ACTION_HALT;
+}
+
+/* The grace a stopping process gets now: shorter once the thermal emergency began. */
+static unsigned
+stop_grace_ms(
+	void)
+{
+	/* The emergency shortens every grace still to come or under way. */
+	if (emergency_requested)
+		return EMERGENCY_GRACE_MS;
+
+	/* Succeeded: the ordinary grace. */
+	return STOP_GRACE_MS;
+}
+
+/*
+ * Says once that the kernel reported a thermal emergency, on the console
+ * and in its record file, written out at once since the power goes soon.
+ */
+static void
+note_emergency(
+	void)
+{
+	char line[128];
+	uint64_t since_start;
+	time_t now;
+	int descriptor;
+	int length;
+
+	/* Only once, and only in an emergency. */
+	if (!emergency_requested || emergency_noted)
+		return;
+	emergency_noted = 1;
+
+	/* Tells the console. */
+	fprintf(stderr, "init: thermal emergency: turning the power off\n");
+	timeline_record("thermal", "emergency");
+
+	/* The wall time and the time since init started tell the emergency and the boot apart. */
+	now = time(NULL);
+	since_start = monotonic_milliseconds() - init_started_ms;
+	length = snprintf(line, sizeof(line), "thermal emergency at %lld, %llu ms after init started\n",
+		(long long)now, (unsigned long long)since_start);
+	if (length <= 0 || (size_t)length >= sizeof(line))
+		return;
+
+	/* Appends it to the record and writes it out. */
+	descriptor = open(EMERGENCY_PATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
+	if (descriptor < 0) {
+		fprintf(stderr, "init: %s: %s\n", EMERGENCY_PATH, strerror(errno));
+		return;
+	}
+	(void)write(descriptor, line, (size_t)length);
+	(void)fsync(descriptor);
+	(void)close(descriptor);
 }
