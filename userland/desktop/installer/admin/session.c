@@ -3110,7 +3110,10 @@ session_install_release_esp(
  * the same device path again).  Says "STATE boot-entry XXXX" with its
  * number, or "STATE boot-entry none" when the firmware's variables could
  * not be written: a BIOS boot, or a firmware that refused.  Then the last
- * page says to choose the disk in the firmware's boot menu.
+ * page says to choose the disk in the firmware's boot menu.  With the
+ * entry made, the entries of the same name whose partition no disk has
+ * any more (left by earlier installations) are deleted; a failure there
+ * leaves them and does not touch the installation.
  */
 static void
 session_install_boot_entry(
@@ -3122,7 +3125,8 @@ session_install_boot_entry(
 	char loader[SESSION_PATH_MAX + 1U];
 	char output[64];
 	char number[8];
-	int matched;
+	unsigned index;
+	int prefix;
 	int status;
 	int error;
 
@@ -3143,9 +3147,22 @@ session_install_boot_entry(
 	number[0] = '\0';
 	error = session_run(argument, NULL, output, sizeof(output), SESSION_EFIBOOT_SECONDS, &status);
 	if (error == 0 && status == 0) {
-		matched = sscanf(output, "Boot%4[0-9A-F]", number);
-		if (matched != 1)
-			number[0] = '\0';
+		/* The line is "Boot" and the entry's four uppercase hexadecimal digits. */
+		prefix = strncmp(output, "Boot", 4);
+		if (prefix == 0) {
+			for (index = 0; index < 4U; index++) {
+				/* Stops at the first character that is not such a digit, the end included. */
+				if ((output[4U + index] < '0' || output[4U + index] > '9') &&
+				    (output[4U + index] < 'A' || output[4U + index] > 'F'))
+					break;
+				number[index] = output[4U + index];
+			}
+
+			/* Takes the number only when all four digits are there. */
+			number[index] = '\0';
+			if (index != 4U)
+				number[0] = '\0';
+		}
 	}
 
 	/* Tells the installer there is no entry. */
@@ -3153,6 +3170,13 @@ session_install_boot_entry(
 		session_say(installation->session, "STATE boot-entry none\n");
 		return;
 	}
+
+	/* Deletes the entries of the system's name that point at partitions gone from every disk. */
+	argument[1] = "prune";
+	argument[2] = "-l";
+	argument[3] = ZEDBSD_OS_NAME;
+	argument[4] = NULL;
+	(void)session_run(argument, NULL, NULL, 0, SESSION_EFIBOOT_SECONDS, &status);
 
 	/* Succeeded: tells the installer the entry's number. */
 	session_say(installation->session, "STATE boot-entry %s\n", number);

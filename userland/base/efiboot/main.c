@@ -12,9 +12,12 @@
  * Boot#### (one EFI_LOAD_OPTION each), BootOrder, BootNext and
  * BootCurrent.  A new entry points at a loader on a GPT partition with a
  * short-form hard-drive device path, which the firmware expands to the
- * disk that holds the partition.
+ * disk that holds the partition.  An entry whose partition is on no disk
+ * any more, left behind by an earlier installation, can be pruned by its
+ * label.
  */
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -76,6 +79,19 @@ struct boot_entry {
 	uint32_t attributes;
 	char label[LABEL_MAX * 3U + 1U];
 	char path[1024];
+	char partition[37];
+};
+
+/*
+ * The unique GUIDs of every GPT partition on the disks the kernel knows.
+ *
+ * prune fills it once, before it deletes anything, and lets it go at its
+ * end; an entry whose partition is not in it points at no disk.
+ */
+struct partition_set {
+	char (*uuid)[37];
+	size_t count;
+	size_t capacity;
 };
 
 /*
@@ -97,13 +113,20 @@ static int entry_describe(const uint8_t *option, size_t size, struct boot_entry 
 static size_t path_text(const uint8_t *path, size_t size, char *text, size_t capacity);
 static void units_text(const uint8_t *units, size_t count, char *text, size_t capacity);
 static void guid_bytes_text(const uint8_t *bytes, char *text);
+static void path_partition(const uint8_t *path, size_t size, char *uuid);
+static int disk_table_load(const char *disk, struct dp_table *table, uint32_t *sector_size);
 static int partition_find(const char *disk, unsigned slot, struct dp_part *found, uint32_t *sector_size);
+static int partition_set_collect(struct partition_set *set);
+static int partition_set_add(struct partition_set *set, const char *uuid);
+static int partition_set_has(const struct partition_set *set, const char *uuid);
 static int device_read(void *context, uint64_t offset, void *data, size_t size);
 static size_t path_build(const struct dp_part *partition, const char *loader, uint8_t *path, size_t capacity);
 static size_t option_build(const char *label, const uint8_t *path, size_t path_size, uint8_t *option, size_t capacity);
 static int command_list(void);
 static int command_create(int argc, char **argv);
 static int command_delete(const char *operand);
+static int command_prune(int argc, char **argv);
+static int entry_delete(unsigned number);
 static int command_order(const char *operand);
 static int command_next(const char *operand);
 static void usage(void);
@@ -121,6 +144,7 @@ main(
 	int deleting;
 	int ordering;
 	int nexting;
+	int pruning;
 	int error;
 
 	/* Shows the usage without a command. */
@@ -142,6 +166,7 @@ main(
 	deleting = strcmp(argv[1], "delete");
 	ordering = strcmp(argv[1], "order");
 	nexting = strcmp(argv[1], "next");
+	pruning = strcmp(argv[1], "prune");
 	if (listing == 0 && argc == 2) {
 		error = command_list();
 	} else if (creating == 0) {
@@ -152,6 +177,8 @@ main(
 		error = command_order(argv[2]);
 	} else if (nexting == 0 && argc == 3) {
 		error = command_next(argv[2]);
+	} else if (pruning == 0) {
+		error = command_prune(argc - 2, argv + 2);
 	} else {
 		usage();
 		error = EINVAL;
@@ -446,7 +473,8 @@ entry_read(
 }
 
 /*
- * Decodes a load option's attributes, label and device path.
+ * Decodes a load option's attributes, label, device path and the GPT
+ * partition the path names (empty when it names none).
  *
  * Values referenced: UEFI Specification 2.10, 3.1.3 (EFI_LOAD_OPTION:
  * Attributes, FilePathListLength, Description, FilePathList).
@@ -484,6 +512,7 @@ entry_describe(
 	label_units = (label_end - 6U) / 2U;
 	units_text(option + 6U, label_units, entry->label, sizeof(entry->label));
 	(void)path_text(option + label_end + 2U, path_size, entry->path, sizeof(entry->path));
+	path_partition(option + label_end + 2U, path_size, entry->partition);
 
 	/* Succeeded: the entry is described. */
 	return 0;
@@ -619,22 +648,71 @@ guid_bytes_text(
 		 bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]);
 }
 
-/* Finds one partition of a whole disk by its slot in the GPT. */
+/*
+ * Writes the unique GUID of the first GPT partition a device path names,
+ * or an empty text when no hard drive node of the path names one.
+ *
+ * Values referenced: UEFI Specification 2.10, 10.3.5.1 (the hard drive
+ * media device path: PartitionSignature at offset 24, SignatureType at
+ * offset 41).
+ */
+static void
+path_partition(
+	const uint8_t *path,
+	size_t size,
+	char *uuid)
+{
+	size_t offset;
+	size_t node_size;
+	unsigned type;
+	unsigned subtype;
+
+	/* Walks the nodes until the end node or one that does not fit. */
+	uuid[0] = '\0';
+	offset = 0;
+	while (offset + 4U <= size) {
+		type = path[offset];
+		subtype = path[offset + 1U];
+		node_size = (size_t)(path[offset + 2U] | path[offset + 3U] << 8);
+
+		/* Stops at a node that does not fit or the end of the whole path. */
+		if (node_size < 4U || node_size > size - offset)
+			break;
+		if (type == DEVICE_PATH_END && subtype == DEVICE_PATH_END_ENTIRE)
+			break;
+
+		/* Takes the GUID of a hard drive node that names a GPT partition. */
+		if (type == DEVICE_PATH_MEDIA &&
+		    subtype == MEDIA_HARD_DRIVE &&
+		    node_size >= HARD_DRIVE_NODE_SIZE &&
+		    path[offset + 41U] == HARD_DRIVE_SIGNATURE_GUID) {
+			guid_bytes_text(path + offset + 24U, uuid);
+			return;
+		}
+
+		/* Steps to the next node. */
+		offset += node_size;
+	}
+}
+
+/*
+ * Reads the partition table of a whole disk, named with or without /dev/.
+ *
+ * EINVAL names something that is not a whole disk or a disk without a
+ * table efiboot reads; other errors are the disk's own.
+ */
 static int
-partition_find(
+disk_table_load(
 	const char *disk,
-	unsigned slot,
-	struct dp_part *found,
+	struct dp_table *table,
 	uint32_t *sector_size)
 {
 	struct kern_block_info info;
-	struct dp_table table;
 	struct dp_io io;
 	struct stat status;
 	char path[64];
 	const char *name;
 	const char *slash;
-	unsigned index;
 	size_t length;
 	int descriptor;
 	int prefix;
@@ -683,17 +761,40 @@ partition_find(
 		error = EINVAL;
 
 	/* Reads the partition table. */
-	memset(&table, 0, sizeof(table));
+	memset(table, 0, sizeof(*table));
 	memset(&io, 0, sizeof(io));
 	io.context = &descriptor;
 	io.sectors = info.sector_count;
 	io.sector_size = info.sector_size;
 	io.read = device_read;
 	if (error == 0)
-		error = dp_load(&table, &io);
+		error = dp_load(table, &io);
 
 	/* Closes the disk; the table is in memory. */
 	close(descriptor);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: table holds the disk's partitions. */
+	*sector_size = info.sector_size;
+	return 0;
+}
+
+/* Finds one partition of a whole disk by its slot in the GPT. */
+static int
+partition_find(
+	const char *disk,
+	unsigned slot,
+	struct dp_part *found,
+	uint32_t *sector_size)
+{
+	struct dp_table table;
+	uint32_t disk_sector_size;
+	unsigned index;
+	int error;
+
+	/* Reads the disk's partition table. */
+	error = disk_table_load(disk, &table, &disk_sector_size);
 	if (error != 0)
 		return error;
 
@@ -708,7 +809,7 @@ partition_find(
 	for (index = 0; index < table.count; index++) {
 		if (table.parts[index].slot == slot) {
 			*found = table.parts[index];
-			*sector_size = info.sector_size;
+			*sector_size = disk_sector_size;
 			error = 0;
 			break;
 		}
@@ -720,6 +821,134 @@ partition_find(
 		return error;
 
 	/* Succeeded: found describes the partition. */
+	return 0;
+}
+
+/*
+ * Collects the unique GUID of every GPT partition on every whole disk.
+ *
+ * A device that is not a whole disk, and a disk without a table efiboot
+ * reads, add nothing.  A disk that cannot be opened or read stops the
+ * collection with its error, since the partitions on it would be missed.
+ */
+static int
+partition_set_collect(
+	struct partition_set *set)
+{
+	struct dp_table table;
+	struct dirent *found;
+	struct stat status;
+	char path[KERN_BLOCK_NAME_MAX + 8U];
+	uint32_t sector_size;
+	unsigned index;
+	size_t length;
+	DIR *directory;
+	int result;
+	int error;
+
+	/* Opens the directory of the devices. */
+	directory = opendir("/dev");
+	if (directory == NULL)
+		return errno;
+
+	/* Reads the table of each block device. */
+	error = 0;
+	for (;;) {
+		found = readdir(directory);
+		if (found == NULL)
+			break;
+
+		/* Skips a name too long for a device. */
+		length = strlen(found->d_name);
+		if (length >= KERN_BLOCK_NAME_MAX)
+			continue;
+
+		/* Skips what is not a block device. */
+		snprintf(path, sizeof(path), "/dev/%s", found->d_name);
+		result = stat(path, &status);
+		if (result < 0 || (status.st_mode & S_IFMT) != S_IFBLK)
+			continue;
+
+		/* Reads the table; a partition or a disk without a table adds nothing. */
+		error = disk_table_load(found->d_name, &table, &sector_size);
+		if (error == EINVAL) {
+			error = 0;
+			continue;
+		}
+
+		/* Stops at a disk that could not be read. */
+		if (error != 0) {
+			fprintf(stderr, "efiboot: %s: %s\n", path, strerror(error));
+			break;
+		}
+
+		/* Adds every partition of a GPT. */
+		if (table.format == DP_GPT) {
+			for (index = 0; index < table.count && error == 0; index++)
+				error = partition_set_add(set, table.parts[index].uuid);
+		}
+
+		/* Lets the table go, and stops when the set could not grow. */
+		dp_free(&table);
+		if (error != 0)
+			break;
+	}
+
+	/* Closes the directory. */
+	closedir(directory);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: set holds every partition the disks have. */
+	return 0;
+}
+
+/* Adds one partition's unique GUID to the set. */
+static int
+partition_set_add(
+	struct partition_set *set,
+	const char *uuid)
+{
+	char (*grown)[37];
+	size_t capacity;
+
+	/* Makes room for the GUID, doubling the set when it is full. */
+	if (set->count == set->capacity) {
+		capacity = set->capacity * 2U;
+		if (capacity == 0)
+			capacity = 64U;
+		grown = realloc(set->uuid, capacity * sizeof(*grown));
+		if (grown == NULL)
+			return ENOMEM;
+		set->uuid = grown;
+		set->capacity = capacity;
+	}
+
+	/* Keeps the GUID in the lower case its text form has. */
+	snprintf(set->uuid[set->count], sizeof(set->uuid[set->count]), "%s", uuid);
+	set->count++;
+
+	/* Succeeded: the set holds the partition. */
+	return 0;
+}
+
+/* Reports 1 when a partition's unique GUID is in the set, and 0 otherwise. */
+static int
+partition_set_has(
+	const struct partition_set *set,
+	const char *uuid)
+{
+	size_t index;
+	int same;
+
+	/* Compares the GUID with each one the disks have. */
+	for (index = 0; index < set->count; index++) {
+		same = strcmp(set->uuid[index], uuid);
+		if (same == 0)
+			return 1;
+	}
+
+	/* The partition is on no disk. */
 	return 0;
 }
 
@@ -1150,17 +1379,12 @@ command_create(
 	return 0;
 }
 
-/* Deletes one boot entry and takes it out of BootOrder. */
+/* Deletes one boot entry named by its four digits. */
 static int
 command_delete(
 	const char *operand)
 {
-	uint16_t order[BOOT_ORDER_MAX];
-	char name[16];
 	unsigned number;
-	size_t count;
-	size_t index;
-	size_t kept;
 	int error;
 
 	/* Reads the entry's number. */
@@ -1169,6 +1393,120 @@ command_delete(
 		fprintf(stderr, "efiboot: %s: not a boot entry number\n", operand);
 		return error;
 	}
+
+	/* Deletes the entry and takes it out of the order. */
+	error = entry_delete(number);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Deletes every entry with the label (zedBSD by default, or -l label)
+ * whose device path names a GPT partition that no disk has any more.
+ *
+ * An earlier installation on a disk since erased or partitioned again
+ * leaves such an entry behind.  Nothing is deleted when a disk could not
+ * be read, since its partitions would be missed.  Each deleted entry is
+ * written as one line, "Boot####".
+ */
+static int
+command_prune(
+	int argc,
+	char **argv)
+{
+	static uint8_t option[LOAD_OPTION_MAX];
+	static unsigned numbers[BOOT_ORDER_MAX];
+	struct partition_set set;
+	struct boot_entry entry;
+	const char *label;
+	size_t count;
+	size_t size;
+	size_t index;
+	int labeled;
+	int same;
+	int present;
+	int error;
+
+	/* Reads the label, the only option. */
+	label = DEFAULT_LABEL;
+	if (argc == 2) {
+		labeled = strcmp(argv[0], "-l");
+		if (labeled != 0) {
+			usage();
+			return EINVAL;
+		}
+		label = argv[1];
+	} else if (argc != 0) {
+		usage();
+		return EINVAL;
+	}
+
+	/* Collects the partitions every disk has. */
+	memset(&set, 0, sizeof(set));
+	error = partition_set_collect(&set);
+	if (error != 0) {
+		fprintf(stderr, "efiboot: the disks could not all be read; no entry is deleted\n");
+		free(set.uuid);
+		return error;
+	}
+
+	/* Collects the entries. */
+	error = entry_numbers(numbers, BOOT_ORDER_MAX, &count);
+	if (error != 0) {
+		fprintf(stderr, "efiboot: variables: %s\n", strerror(error));
+		free(set.uuid);
+		return error;
+	}
+
+	/* Deletes each entry of the label whose partition is on no disk. */
+	for (index = 0; index < count; index++) {
+		/* Leaves an entry that cannot be read. */
+		error = entry_read(numbers[index], option, sizeof(option), &size);
+		if (error == 0)
+			error = entry_describe(option, size, &entry);
+		if (error != 0)
+			continue;
+
+		/* Leaves an entry of another label, or one that names no GPT partition. */
+		same = strcmp(entry.label, label);
+		if (same != 0 || entry.partition[0] == '\0')
+			continue;
+
+		/* Leaves an entry whose partition a disk still has. */
+		present = partition_set_has(&set, entry.partition);
+		if (present)
+			continue;
+
+		/* Deletes the entry, stopping at a firmware that refuses. */
+		error = entry_delete(numbers[index]);
+		if (error != 0)
+			break;
+		printf("Boot%04X\n", numbers[index]);
+	}
+
+	/* Lets the set go, and reports a deletion the firmware refused. */
+	free(set.uuid);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: no entry of the label points at a missing partition. */
+	return 0;
+}
+
+/* Deletes one boot entry and takes it out of BootOrder. */
+static int
+entry_delete(
+	unsigned number)
+{
+	uint16_t order[BOOT_ORDER_MAX];
+	char name[16];
+	size_t count;
+	size_t index;
+	size_t kept;
+	int error;
 
 	/* Deletes the entry. */
 	snprintf(name, sizeof(name), "Boot%04X", number);
@@ -1201,7 +1539,7 @@ command_delete(
 		}
 	}
 
-	/* Succeeded. */
+	/* Succeeded: the entry is gone from the firmware and the order. */
 	return 0;
 }
 
@@ -1298,5 +1636,6 @@ usage(
 		"       efiboot create [-l label] [-n] disk partition loader\n"
 		"       efiboot delete XXXX\n"
 		"       efiboot order XXXX[,XXXX...]\n"
-		"       efiboot next XXXX\n");
+		"       efiboot next XXXX\n"
+		"       efiboot prune [-l label]\n");
 }
