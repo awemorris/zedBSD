@@ -3,7 +3,7 @@
 # ws327-p016 受け入れ: 境界の check、全 arch・Linux・FreeBSD の build、QEMU の回帰、Win32 の報告
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §1.3・§6.4・§8・§13。担当: P2（設計の担当）。依存: p008〜p015 が main に merge され cleared。
-- Status: in-progress（2026-10-30 P2 ラップアップ、QEMU の回帰が途中。下の「引き継ぎ」）
+- Status: cleared の候補（2026-10-30 P5、q1710-i01。下の「P5 の結果」。FAIL は Q1 が受け入れた物だけ）
 - Disposition: normal
 
 ## 目的
@@ -223,3 +223,71 @@ p011 の後に `plan/ws089/tests/host-wallpaper.sh`（と `host-build.sh` の見
 
 - `08-network.c` の窓の道（進みの post、join の後の waker の close、`network_finish`）は build だけで走っていない。guest で走らせ画面を撮る（08-network.png）。
 - `network_finish` は FINISHED を `kl_app_dispatch(app, -1)` で待つので、thread の FINISHED の `kl_app_post` が ENOMEM で失敗すると終わりで止まる（`primes_finish` は timeout 0 で post を取り逃がしうる）。どちらの形が正しいかを決め、解説と例を合わせる。
+
+## P5 の結果（q1710-i01、worktree p5-ws327、基点 main 5aca73738、2026-10-30）
+
+P2 の引き継ぎの残り 1〜5 を行った。QEMU の回帰は p017（規約の見直し）の後の tree で 1 回にした（同じ image で両方を確かめる）。
+
+### run 2 の FAIL の解析（P2 の `build/ws327-p016-apps2`、読むだけ）
+
+- apps.photos.browse: WS327 と無関係。helper が待つ `PHOTOS IMPORT done`・`PHOTOS LIBRARY root=` の行は 874e12d3b（2026-10-10、
+  Photos の library が mediastorage に移った時）で消えており、置き場も `~/Pictures/Library` から `~/Pictures/Media`（metadata.db、Files/）に
+  変わっていた。画面は Timeline 9 photos と縮小を示していた。Q1 の指示で helper と仕様を今の Photos に合わせて書き直した（c0ce6970f:
+  `plan/tools/aat/scenarios/helpers_photos.py`・`tests/scenarios/apps/photos/browse.md`。順と cell の place を metadata.db と view.c から
+  計算、`PHOTOS MEDIA done`、metadata.db の turns・favorite・album、再取り込みで db の sha256 が変わらない事）。同じ待ちは他の scenario に無い。
+- apps.videoplayer.play: Space の ACTION が END の後に処理されていた（guest が遅く、最初の撮影の時点で再生が 7 s まで進んでいた）。
+  WS327 の差分は lock・cond の機械的な置換だけ。run 3（音の device 無し）で PAUSE・PLAY・SEEK・ENDED が全て通った → 試験の時間の脆さ。
+  試験の直しはしていない（Q1 の判断の条件「時間の脆さが原因なら」に当たるが、run 3 で通ったので変えない）。
+
+### image と run 3（2026-10-30 14:12〜14:24）
+
+- `flock /tmp/zedbsd-image-build.lock sh plan/tools/guest/test-image.sh plan/ws327/tests/config-amd64-aat.mk build/ws327-p016-aat --file
+  /usr/share/keiland/wallpaper.png=userland/desktop/wallpapers/Birch-Lake.png` → exit 0（warning は外部の package の物と perl の locale だけ）。
+  tree は p017 の後（c0ce6970f）。
+- guest-apps.sh の音の device を `GUEST_AUDIO=1` の時だけに（c93588fe4、Q1「音の device を外して残りの回帰を進めてよい」）。
+- `GUEST_RUNTIME=build/ws327-p5-run VENUS_RENDERER=/home/awe/zedBSD-claude1/build/ws035-sq-venus/install sh plan/ws327/tests/guest-apps.sh
+  build/ws327-p016-aat build/ws327-p016-apps3` → 判定（`build/ws327-p016-apps3/{aat,mail-code,ws327}/verdicts.tsv`）:
+
+| 判定 | 項目 | 要点 |
+| --- | --- | --- |
+| pass | apps.terminal.type-command | |
+| pass | ws327.ime.dictionary-at-exit | `にほんご /日本語/`（SIGTERM で writer の thread が書いた） |
+| needs-person | apps.mailer.read-compose | 受信箱 3 通、送信 |
+| needs-person | apps.mailer.sign-in-code | code 7351 |
+| needs-person | apps.videoplayer.play | PAUSE・PLAY・SEEK・ENDED の行、絵が動く（写真を見た） |
+| needs-person | ws327.videoplayer.close-ends | 約 2 s で 174 frames、窓を閉じて videoplayer の process 無し |
+| needs-person | apps.settings.pages | 15 頁 |
+| needs-person | desktop.appearance.wallpaper | |
+| needs-person | desktop.input-method.japanese-textedit | `日本語` を保存 |
+| fail（受け入れ） | apps.music.play・ws327.music.close-ends | 音の device 無しの予想どおり（`no sound (audiod)`）。音ありは run 1・2 で通った |
+| fail（受け入れ、WS327 の外） | apps.photos.browse | 取り込み・順・壊れた file の THUMB・全面表示・R まで通り、R の保存の後に全面表示が閉じ F が効かない: BUG-370（Q1 が登録、main 0a03ece75） |
+| fail → 直した | ws327.settings.storage-scan | 試験の誤り（下） |
+
+- ws327.settings.storage-scan: `~/.local/share/Trash/files` が無いと Settings は trash を空と見て数えの thread を立てず log も出さない
+  （storage.c の `storage_trash_count` → `se_scan_start` の stat の失敗、WS327 の前からの動き）。試験が Trash に 1 file を置いて数えさせる
+  様に直し、guest-apps.sh に `WS327_ONLY=REGEX`（aat_ws327.py の項目だけを、AAT の入力の helper を起こしてから）を足した（dcc209ab8）。
+  再実行 `WS327_ONLY=ws327.settings.storage-scan … guest-apps.sh build/ws327-p016-aat build/ws327-p016-apps5` →
+  `pass ws327.settings.storage-scan ZSETTINGS STORAGE trash bytes=16384 items=1; ZSETTINGS STORAGE done root=/home/user bytes=155648 files=3 unreadable=0`。
+- BUG-368（irq.c の fatal）は run 3・5（音の device 無し）で出ていない。
+
+### 8 章の例（BUG-367 の後、2026-10-30 14:28〜）
+
+- `VENUS_RENDERER=… sh plan/ws314/tests/doc-examples.sh guest build/ws327-p016-doc 08-worker 08-network 08-network-stop 08-network-close
+  08-language` → `SUMMARY pass=21 fail=0 not-done=0`。絵（`build/review/ws314-doc-08-*.png`）を見た: 08-network は「Done: 100 round trips,
+  470 us each.」で Start が戻る、08-network-stop は「Stopped after 16 round trips.」、08-network-close は窓が消えた desktop、08-worker・
+  08-language は前と同じ。
+- 08-network-close の process の残りの数え（`grep -c '[/]tmp/08-network'`）は 2 を出したが、一覧にすると 2 つとも数えの command 自身の
+  shell（words に `/tmp/08-network-close.out` を含む）で、08-network の process は残っていなかった。数えを program の行だけ
+  （`'^ *[0-9]* [/]tmp/08-network'`）に直し一覧を出す形に（`plan/ws314/tests/doc-examples.sh`）。再確かめ（Q1 の例外で image の lock を外し `nice -n 10`、`build/tmp/doc-examples-nolock.sh` は lock の行だけを外した写し）: `SUMMARY pass=17 fail=0`、
+  `08-network-close.alive.txt` は `end-of-list` だけ（残った process 無し）、絵は窓の消えた desktop
+- `docs/howto/keiland-examples/08-network.png`（窓の周りを 08-worker.png と同じ 480x332 に切った）と本文の画像の行を足した（070718c27）。
+  doc-lines PASS、host の doc-examples 76 PASS。
+
+### 受け入れのまとめ
+
+1（境界）・2（build）・3（host）・3b（FreeBSD）・5（Win32）・6（network_finish）は P2 が済ませた（上）。p017 の後に境界 64 行（同じ）・
+check-layers PASS・zedBSD amd64 warning 0・host を流し直した（phase017 の結果）。4（QEMU）は上のとおり、FAIL は Q1 が受け入れた物
+（音の device 無し、BUG-370）だけ。needs-person の 8 項目は人の確かめが要る写真（`build/ws327-p016-apps3/*/png/`）。
+
+Q1 への削除の候補（P2 の物に加えて）: `build/tmp/pyc`（py_compile）、`build/ws327-p017a-linux`・`p017b-linux`・`p017c-linux`・
+`build/ws327-p017b-music`・`build/ws327-p017w-amd64`（使い捨ての build）、`build/ws327-p016-apps4`（aat-input の起動を忘れた失敗の run）、`build/tmp/doc-examples-nolock.sh`（一度だけの写し）。

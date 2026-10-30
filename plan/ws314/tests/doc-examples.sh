@@ -215,7 +215,9 @@ EOF
 			if [ -n "$map_x" ] && [ -n "$map_y" ]; then
 				pointer move $((map_x + 440 - 26)) $((map_y - 30)) sleep 300 down sleep 80 up sleep 2500
 			fi
-			guest "ps -A -o pid,args | grep -c '[/]tmp/08-network'; cat /tmp/$name.out" > "$out/$name.alive.txt" ;;
+			# The processes left (a program, not this command's own shell whose words name the .out file), then its output.
+			guest "ps -A -o pid,args | grep '^ *[0-9]* [/]tmp/08-network'; echo end-of-list; cat /tmp/$name.out" \
+				> "$out/$name.alive.txt" ;;
 		09-sort) pointer move 492 558 sleep 300 down sleep 80 up sleep 2000 ;;
 		# 09-shell: a command, then a password read (zedBSD's sh edits its own prompt without the terminal's echo and
 		# line mode; a read waits with the modes stty set).
