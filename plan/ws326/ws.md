@@ -49,7 +49,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p015](phase015/phase.md) | 補間と重み: h264sw-interp、h264sw-weight（試験 test-interp、test-weight） | planned | p007 |
 | [ws326-p016](phase016/phase.md) | MV の予測と P_Skip: h264sw-mvpred（試験 test-mvpred） | cleared（2026-10-30 Q1、main 4f596bbc6。test-mvpred 83 checks） | p008 |
 | [ws326-p017](phase017/phase.md) | B の direct: h264sw-direct（試験 test-direct） | planned | p007、p008、p016 |
-| [ws326-p018](phase018/phase.md) | slice data と macroblock の syntax: h264sw-macroblock（試験 test-macroblock） | planned | p002、p008、p009、p012 |
+| [ws326-p018](phase018/phase.md) | slice data と macroblock の syntax: h264sw-macroblock（試験 test-macroblock） | 実装済み・試験 PASS（2026-10-30、test-macroblock 1107981 checks、Q1 の受け入れ待ち） | p002、p008、p009、p012 |
 | [ws326-p019](phase019/phase.md) | macroblock の再構成: h264sw-recon（試験 test-recon） | planned | p013〜p018 |
 | [ws326-p020](phase020/phase.md) | deblocking: h264sw-deblock（試験 test-deblock） | planned | p003、p008 |
 | [ws326-p021](phase021/phase.md) | decoder の全体の流れと最初の全体の試験: h264sw-decoder（試験 —） | planned | p002〜p020 |
