@@ -55,13 +55,13 @@
 
 ### q1715-i02（2026-10-30 15:35〜 P3）
 
-- 承認（ユーザーの原文、2026-10-30）: 「WS291のPowerVRの最適化ですが、VF2が空いているので、P3で実行してOKです。」「VF2はHDMIを接続しました。P3を再始動し、必要ならVF2をSwitchbotで再起動してください。」
-- 50 fps の基準（ユーザー「WS291 PowerVRの性能目標は、RTX 2070とIMG B XHE-32-4 MC1の性能比率から立ててください。」、Q1 の写し）: RTX 2070 の scene-5000（約 50 fps）を
-  理論の FP32 の比で割り、600 MHz なら copies 13、400 MHz なら copies 9 で 50 fps 以上。**板の GPU は 594 MHz**（dmesg `powervr: BXE 36.50.54.182 at 594000000 Hz`、
+- 承認（2026-10-30 ユーザーの決定）: VF2 が空いているので PowerVR の最適化を P3 で実行してよい。HDMI をつないだので P3 を再始動し、必要なら VF2 を SwitchBot で入れ直してよい。
+- 50 fps の基準（2026-10-30 ユーザーの決定、ws.md に記録）: Linux の RTX 2070 の scene-5000（約 50 fps）をカタログの FP32 の比で割った重さ＝qs40 × 13、1920x1080 で 50 fps 以上
+  （600 MHz の時。400 MHz なら copies 9）。**板の GPU は 594 MHz**（dmesg `powervr: BXE 36.50.54.182 at 594000000 Hz`、
   firmware `core clock 594000000 Hz`）→ **目標は copies 13 で 50 fps**（1920x1080、mailbox 4 枚、vertex shading、direct scanout）。
 - 表示: 15:35 に SwitchBot 14C19FA80F86 で入れ直した後、元の kernel で `visionfive2: framebuffer 1920x1080`・/dev/gpu1 が出た（HDMI の接続で解消）。
 
-#### 計画に無い依存として足した物（Q1 の判断 2026-10-30 17:0x「discard … の実装を、p020 の範囲として進めてください」）
+#### 計画に無い依存として足した物（discard は Q1 の判断 2026-10-30 で p020 の範囲に含めた）
 
 mview が qs40 を描くのに driver に欠けていた物（どれも HAL は変えない、driver は hal_* を新しく使わない）:
 
@@ -103,3 +103,21 @@ mview が qs40 を描くのに driver に欠けていた物（どれも HAL は�
   partial render の log は無い。解像度に対して非線形な何か（memory の配置、PBE の linear の書き出し、cache・TLB）が疑い。c13 の小さい window は 17 ms で、頂点の側も重い。
 - copies 50 は device lost（16 MiB の global free list が尽きて `parameter memory ran out`→`partial render`→`ta: fail(free list)`。64 MiB にすると log の無い device lost に変わり、元に戻した）。目標の c13 には要らない。
 - 板の SD が不調（dw-mmc の read の失敗が毎回十数回、16:11 に card が消えて `ufs: … refuses writes` → SwitchBot で入れ直して戻った）。
+- 試した事（16:5x）: vkmatrix の 1080p の perf（kernel 1990096130 の build の vkmatrix、render node だけ）: clear 2.4 ms、flat 2.6、texture 3.1、tri128 2.7 ms/frame
+  → 1080p の clear・store の基本の経路は速い。mview の c1 の 1080p の 11〜13 ms は model の描画の側。texture を 1/8 にした model（build/ws291/qs40small）は
+  mview の model の読み込みで失敗（`mview_model_load`、原因は未調べ）。
+
+#### 再開点と次の手（2026-10-30 17:00 P3）
+
+- 今: c13 は direct scanout で 26.57 fps（目標 50）。GPU 律速。改善は未着手（profile の途中）。板は元の kernel に戻した（下の「板」）。
+- 次の手（順に）:
+  1. 解像度に非線形な費用の切り分け: 960x540 で 0.6 ms、1080p で 11.6 ms（c1）。texture の大きさ（mip の level 0 の読み、texture の memory の cache の属性）、
+     fragment の数、ISP の tile の重なりのどれかを、texture を小さくした model（mview_model_load の失敗を直す）・単色の material・小さい window で分ける。
+  2. 頂点の側（c13 の 320x180 で 17 ms）: vertex shader の命令数（mview.vert 632 B）、CAM・instance の設定、TA の PPP の状態、1 draw あたりの頂点の処理を見る。
+  3. punch-through（cutout）の費用 2〜4 ms: Mesa と同じく discard を後ろに寄せる・feedback の位置を見直す。
+  4. 道具: kernel の timing は TA と 3D を分けない（job wait だけ）。firmware の時刻か render の TA・3D の完了の時刻を timing に足すと割合が出る。
+- copies 50 の device lost（free list の grow が無い）は目標の c13 には要らないので残した。
+- 板（17:0x）: 元の kernel に戻して読み返しで照合（/boot/boot0/vmunix cksum 2825517684、vmunix.p7old も 2825517684）、SwitchBot で入れ直して起動、zedbsd.cfg の login の行 0。
+  板に残る物: /boot/boot0/vmunix.p7old（元の写し）、user kei の ~/p7（program・library・qs40・qs40s・vkmatrix・keiland-shot・画面の PNG。次の計測で使う）。
+- 再開の手順: `VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=14C19FA80F86 [TIMING=1] [KEEP=1] COPIES=13 sh plan/ws291/tests/vf2-mview.sh OUT BUILD`
+  （BUILD は `make ZEDBSD_CONFIG=plan/ws291/tests/config-vf2.mk BUILD=… …/vmunix …/bin/wayland …/bin/mview`、timing は `ZEDBSD_TEST_CPPFLAGS=-DPOWERVR_SUBMIT_TIMING=1`）。

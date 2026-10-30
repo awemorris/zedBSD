@@ -2,7 +2,7 @@
 # ws291-p020: mview's scene on the VisionFive 2's PowerVR with one tree's kernel and programs, run from the top of the
 # tree while the board is assigned:
 #   VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=... VF2_PLUG=14C19FA80F86 [COPIES='1 10 50 100 200'] [SPIN=12]
-#       [MVIEW_ARGS='--shading=pixel'] [TIMING=1] [KEEP=1] [SHOT_BUILD=DIR] sh plan/ws291/tests/vf2-mview.sh OUT BUILD
+#       [MODEL=qs40s] [MVIEW_ARGS='--shading=pixel'] [TIMING=1] [KEEP=1] [SHOT_BUILD=DIR] sh plan/ws291/tests/vf2-mview.sh OUT BUILD
 # BUILD is the tree's build of plan/ws291/tests/config-vf2.mk (its vmunix, bin/wayland, bin/mview and the dynamic
 # libraries).  The board's kernel is kept on the board as vmunix.p7old (when not kept already: the original) and read
 # back from it (OUT/board-vmunix), BUILD's kernel
@@ -79,7 +79,7 @@ for copies in ${COPIES:-1 10 50 100 200}; do
 	b 'dmesg' > "$out/c$copies.before" 2>&1
 	shot=
 	[ -n "${SHOT_BUILD:-}" ] && shot="& sleep $((${SPIN:-12} / 2 + 4)); $H/bin/keiland-shot --socket $H/run/keiland-shot.sock $H/shot-c$copies.png; wait"
-	printf '%s\n' "$VF2_PASSWORD" | BT=$((${SPIN:-12} + 120)) b "sudo -S sh -c '$ENV $timing $H/bin/mview --display=$H/run/wayland-0 --model=$H/qs40 --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-} $shot'" > "$out/c$copies.txt" 2>&1
+	printf '%s\n' "$VF2_PASSWORD" | BT=$((${SPIN:-12} + 120)) b "sudo -S sh -c '$ENV $timing $H/bin/mview --display=$H/run/wayland-0 --model=$H/${MODEL:-qs40} --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-} $shot'" > "$out/c$copies.txt" 2>&1
 	if [ -n "${SHOT_BUILD:-}" ]; then
 		bcp "$VF2_HOST:p7/shot-c$copies.png" "$out/" > /dev/null 2>&1
 		say "c$copies shot $(grep KEILAND-SHOT "$out/c$copies.txt" | tr '\n' ' ')"
