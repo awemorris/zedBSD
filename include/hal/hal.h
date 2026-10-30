@@ -551,8 +551,8 @@ hal_irq_send_eoi(
  * each architecture's header (<hal/arch/ARCH.h>), because the rate is chosen per
  * machine: a desktop that renders with Vulkan wants a fine tick, and a small
  * machine kept for demonstration does not.  A BSP derives its timer divisor
- * from this value and never writes a rate of its own, and the kernel's
- * KERN_CLOCK_HZ is the same number.
+ * from this value and never writes a rate of its own, and the kernel's tick
+ * rate, kern_clock_tick_rate(), is the same number.
  */
 
 #ifndef HAL_TIMER_FREQUENCY
