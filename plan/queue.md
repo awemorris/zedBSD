@@ -316,3 +316,9 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1725 / q1725-i01 | P7（phase-runner、worktree `/home/awe/zedBSD-worktrees/p7-ws009`・branch `agent/p7-ws009`、QEMU） | [ws009](ws009/ws.md) p028（clean build と QEMU の起動の再現）→ WS の受け入れの確認 → 完了の形 | 2026-10-30 ユーザーから、WS009 を P7 で実行する、という趣旨の指示を受けた | in-progress |
+
+## 2026-10-30: WS291 p020 を P2 で（q1726）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1726 / q1726-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws291v`・branch `agent/p2-ws291v`、実機 VF2） | [ws291-p020](ws291/phase020/phase.md) PowerVR の qs40 × 13 で 50 fps | 2026-10-30 ユーザーから、WS291 の PowerVR の最適化を P2 で実行する、という趣旨の指示を受けた | in-progress |
