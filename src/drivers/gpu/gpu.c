@@ -4416,7 +4416,7 @@ gpu_commit_ioctl(
 
 	/* Waits for every plane's image, holding no admission or table lock. */
 	for (index = 0; index < request.count; index++) {
-		/* A renderer's fence of the companion GPU is accepted, as for PRESENT_SYNC. */
+		/* A fence from any GPU is accepted, as for PRESENT_SYNC: waiting reads no other device's memory. */
 		error = gpu_dependency_wait(session, request.planes[index].wait_fd, request.planes[index].wait_generation, 1U);
 		if (error != 0) {
 			handle_put(signal);
@@ -6993,7 +6993,10 @@ gpu_dependency_wait(
 	if (fd < 0 || generation == 0U)
 		return EINVAL;
 
-	/* A native display may consume a renderer's fence from its approved companion GPU. */
+	/*
+	 * A display may wait on a fence from any GPU, such as a separate render
+	 * GPU: the device is not compared, since waiting touches no memory of it.
+	 */
 	error = gpu_fence_get(session, fd, foreign, &handle);
 	if (error != 0)
 		return error;
