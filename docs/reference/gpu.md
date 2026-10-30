@@ -87,11 +87,12 @@ registers it, whether or not devfs is mounted. The sysctl variable
 `hw.gpu.attaching` counts the devices that have attached but not yet
 published a node ([GPU sysctl variables](gpu-sysctl.md)).
 
-A program that needs to know whether two nodes belong to the same device, or
-which display node pairs with which render node, does not compare numbers. It
-issues `GPU_DEVICE_QUERY` on each node: `device_id` is the kernel's identity
-of the node, never reused while the kernel runs, and `companion_id` names the
-driver's preferred companion node ([Memory](gpu-memory.md)).
+A program that needs to tell nodes apart, or to pair a display node with a
+render node, does not compare numbers. It issues `GPU_DEVICE_QUERY` on each
+node: `device_id` is the kernel's identity of the node, never reused while the
+kernel runs, and it is different for every node, even for two nodes of one
+physical GPU. `roles` says what the node does, and `companion_id` names the
+driver's preferred companion node when the driver has one ([Memory](gpu-memory.md)).
 
 **Several nodes for one GPU.** A physical GPU may publish more than one node,
 for example a render node and a display node. Each node is registered
@@ -131,8 +132,8 @@ later credential changes.
 | `O_RDWR` | yes | yes |
 
 Requests that observe state need a readable open; requests that change state,
-create objects or export capabilities need a writable open; a few need both
-or neither. The `Open mode` column of the [index](gpu-requests.md) gives the
+create objects or export capabilities need a writable open; a few need neither.
+No request needs both. The `Open mode` column of the [index](gpu-requests.md) gives the
 requirement of each request, and a request that is refused for this reason
 fails with `EACCES`. `mmap` needs a readable open, and it refuses a
 protection bit beyond the open's rights, so `PROT_WRITE` needs a writable
@@ -236,8 +237,9 @@ destroyed, or that another open created identifies no object, and the request
 fails with `EINVAL`. Handles are never reused while the kernel runs, so a
 stale handle cannot name a new object. A command sequence that is unknown or
 already consumed fails with `ENOENT`. A fence is named by a descriptor and a
-generation: a descriptor that does not name a GPU fence fails with `EBADF` or
-`EINVAL`, a fence made by another device fails with `EXDEV`, and an old
+generation: a descriptor that is not an open kernel handle descriptor of the caller fails
+with `EBADF`, a kernel handle descriptor that is not a fence (for example an
+exported resource) fails with `EINVAL`, a fence made by another device fails with `EXDEV`, and an old
 generation fails with `ESTALE`. Display leases and outputs have their own
 identities and errors ([Display](gpu-display.md)).
 
