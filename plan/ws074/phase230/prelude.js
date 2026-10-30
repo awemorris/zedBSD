@@ -449,9 +449,12 @@
     var entries = [];
     var current = 0;
     var classicState = null;
+    // The document an entry belongs to: the entries of the documents that came before this one in its frame are carried over to it.
+    var docId = uuid();
+    var handover = null;
     function makeEntry(url, navState, classic, from) {
       return { url: url, key: uuid(), id: uuid(), navState: navState, classic: classic, scroll: null,
-        scrollMode: from ? from.scrollMode : 'auto', nhe: null };
+        scrollMode: from ? from.scrollMode : 'auto', nhe: null, docId: docId };
     }
     // The first entry follows the document's URL until it is left (the URL is set after this runs).
     var loadedURL = null;
@@ -475,7 +478,7 @@
       get key() { return this._e.key; }
       get id() { return this._e.id; }
       get index() { return entries.indexOf(this._e); }
-      get sameDocument() { return true; }
+      get sameDocument() { return this._e.docId === docId; }
       getState() { return deserialize(this._e.navState); }
     }
     handlerAttribute(NavigationHistoryEntry.prototype, 'dispose');
@@ -616,7 +619,6 @@
     var transition = null;
     var focusChanged = false;
     var suppressScroll = false;
-    var loaded = false;
     function makeTracker(info, navState, key) {
       var t = { committed: deferred(), finished: deferred(), info: info, navState: navState, key: key, entry: null };
       markHandled(t.finished.promise);
@@ -777,6 +779,57 @@
           function (r) { if (rejected) return; rejected = true; failure(r); });
       }
     }
+    // A navigation to another document in this frame: the entries as they will be, handed to the document that loads.
+    function packEntry(e) {
+      return { url: urlOf(e), key: e.key, id: e.id, navState: e.navState, classic: e.classic, scrollMode: e.scrollMode, docId: e.docId };
+    }
+    function leaveForDocument(o) {
+      var frame = null, list, target, index, old, h;
+      frame = native.frameElement();
+      if (!frame || o.formData || (o.downloadRequest !== undefined && o.downloadRequest !== null)) return false;
+      old = entries[current];
+      leave(old);
+      list = entries.slice();
+      index = current;
+      if (o.type === 'push') {
+        target = makeEntry(o.url, o.navState, null, old);
+        target.docId = uuid();
+        list.splice(current + 1);
+        list.push(target);
+        index = list.length - 1;
+      } else if (o.type === 'replace') {
+        target = makeEntry(o.url, o.navState !== null && o.navState !== undefined ? o.navState : old.navState, null, old);
+        target.docId = uuid();
+        target.key = old.key;
+        list[current] = target;
+      } else if (o.type === 'reload') {
+        if (o.navState !== undefined) old.navState = o.navState;
+      } else {
+        index = entries.indexOf(o.entry);
+      }
+      h = { url: o.url, type: o.type, current: index, from: packEntry(old), entries: list.map(packEntry) };
+      Object.defineProperty(frame, '__zedNav', { value: h, writable: true, configurable: true, enumerable: false });
+      if (native.navigateFrame(o.url)) return true;
+      delete frame.__zedNav;
+      return false;
+    }
+    // The document that was loaded after another of its frame: the entries are the ones that were handed over.
+    function unpackEntry(r) {
+      return { url: r.url, key: r.key, id: r.id, navState: r.navState ? { v: structuredClone(r.navState.v) } : null,
+        classic: r.classic ? { v: structuredClone(r.classic.v) } : null, scroll: null, scrollMode: r.scrollMode, nhe: null, docId: r.docId };
+    }
+    function adoptHandover() {
+      var h = handover, i, fromEntry = null;
+      entries = h.entries.map(unpackEntry);
+      current = h.current;
+      docId = entries[current].docId;
+      entries[current].url = null;
+      classicState = entries[current].classic ? deserialize(entries[current].classic) : null;
+      for (i = 0; i < entries.length; i++) if (entries[i].key === h.from.key && entries[i].id === h.from.id) fromEntry = entries[i];
+      if (!fromEntry) fromEntry = unpackEntry(h.from);
+      return new NavigationActivation(KEY, nhe(fromEntry), nhe(entries[current]), h.type);
+    }
+
     // Fires the navigate event of a navigation; o has the navigation's type, url, destination entry (a traversal),
     // navigation API state, classic history state (pushState), sameDocument, hashChange, the source element and
     // commit(), which carries out a navigation of this document that no listener intercepted.
@@ -793,7 +846,7 @@
       ongoingTracker = t;
       controller = new AbortController();
       event = new NavigateEvent('navigate', {
-        cancelable: true,
+        cancelable: o.type !== 'traverse' || o.sameDocument,
         navigationType: o.type,
         destination: new NavigationDestination(KEY, { url: o.url, entry: o.entry || null, index: o.entry ? entries.indexOf(o.entry) : -1,
           navState: o.navState, sameDocument: o.sameDocument }),
@@ -812,14 +865,20 @@
       focusChanged = false;
       suppressScroll = false;
       try { dispatched = fire(navigation, event); } finally { n.dispatching = false; }
+      if (!native.fullyActive()) {
+        if (!controller.signal.aborted) abortOngoing();
+        return;
+      }
       if (!dispatched || n.canceled) {
         if (!controller.signal.aborted) abortOngoing();
         return;
       }
       intercepted = n.state !== 'none';
       if (!intercepted && !o.sameDocument) {
-        // Another document: loading it is not carried out here.
+        // Another document: a frame loads it, and the document that comes carries on the entries; a window
+        // that is not a frame does not load it here.
         if (t) cleanUp(t);
+        leaveForDocument(o);
         return;
       }
       if (intercepted) {
@@ -879,23 +938,23 @@
     }
     // Location's navigation: before the load event finishes, a new entry replaces the current one.
     function locationNavigate(url, handling) {
-      if (handling === 'auto' && !loaded) handling = 'replace';
+      if (handling === 'auto' && !native.loadEnded()) handling = 'replace';
       navigateTo(url, { history: handling, navState: null });
     }
     function locationReload() {
       navigateTo(docURL(), { history: 'reload', navState: entries[current].navState });
     }
-    g.addEventListener('load', function () { setTimeout(function () { loaded = true; }, 0); });
 
     // A traversal runs as a task, like the browser's own back and forward.
     function traverse(find) {
       setTimeout(function () {
-        var entry = find(), t;
+        var entry = find(), t, same;
         if (!entry) return;
         t = upcomingTraverse.get(entry.key) || null;
         if (entry === entries[current]) { if (t) resolveFinished(t); return; }
-        fireNavigate({ type: 'traverse', url: entry.url, entry: entry, navState: entry.navState, sameDocument: true,
-          hashChange: noFrag(entry.url) === noFrag(docURL()) && frag(entry.url) !== frag(docURL()),
+        same = entry.docId === docId;
+        fireNavigate({ type: 'traverse', url: entry.url, entry: entry, navState: entry.navState, sameDocument: same,
+          hashChange: same && noFrag(entry.url) === noFrag(docURL()) && frag(entry.url) !== frag(docURL()),
           commit: function () { commitTraverse(entry); } });
       }, 0);
     }
@@ -919,12 +978,13 @@
         if (key !== KEY) throw new TypeError('Illegal constructor');
         super();
       }
-      entries() { return entries.map(nhe); }
-      get currentEntry() { return nhe(entries[current]); }
+      entries() { return native.fullyActive() ? entries.map(nhe) : []; }
+      get currentEntry() { return native.fullyActive() ? nhe(entries[current]) : null; }
       updateCurrentEntry(options) {
         var state;
         if (arguments.length < 1) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': 1 argument required.");
         options = dictionary(options, 'NavigationUpdateCurrentEntryOptions');
+        if (!native.fullyActive()) throw domError('InvalidStateError', "Failed to execute 'updateCurrentEntry' on 'Navigation': The document is not fully active.");
         if (options.state === undefined) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': required member state is undefined.");
         state = serialize(options.state);
         entries[current].navState = state;
@@ -932,8 +992,8 @@
       }
       get transition() { return transition; }
       get activation() { return activation; }
-      get canGoBack() { return current > 0; }
-      get canGoForward() { return current < entries.length - 1; }
+      get canGoBack() { return native.fullyActive() && current > 0; }
+      get canGoForward() { return native.fullyActive() && current < entries.length - 1; }
       navigate(url, options) {
         var handling, u, state = null, t;
         options = dictionary(options, 'NavigationNavigateOptions');
@@ -944,9 +1004,10 @@
         if (options.state !== undefined) {
           try { state = serialize(options.state); } catch (e) { return earlyError(e); }
         }
+        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'navigate' on 'Navigation': The document is not fully active."));
         t = makeTracker(options.info, state, null);
         upcomingTracker = t;
-        if (handling === 'auto' && !loaded) handling = 'replace';
+        if (handling === 'auto' && !native.loadEnded()) handling = 'replace';
         navigateTo(u, { history: handling, navState: state });
         if (upcomingTracker === t) { upcomingTracker = null; return earlyError(abortError()); }
         return trackerResult(t);
@@ -958,6 +1019,7 @@
         if (options.state !== undefined) {
           try { state = serialize(options.state); } catch (e) { return earlyError(e); }
         }
+        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'reload' on 'Navigation': The document is not fully active."));
         t = makeTracker(options.info, state, null);
         upcomingTracker = t;
         navigateTo(docURL(), { history: 'reload', navState: state });
@@ -968,16 +1030,19 @@
         if (arguments.length < 1) throw new TypeError("Failed to execute 'traverseTo' on 'Navigation': 1 argument required.");
         key = String(key);
         options = dictionary(options, 'NavigationOptions');
+        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'traverseTo' on 'Navigation': The document is not fully active."));
         if (!findEntry(key)) return earlyError(domError('InvalidStateError', "Failed to execute 'traverseTo' on 'Navigation': Invalid key."));
         return traverseToKey(key, options);
       }
       back(options) {
         options = dictionary(options, 'NavigationOptions');
+        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': The document is not fully active."));
         if (current <= 0) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': Cannot go back."));
         return traverseToKey(entries[current - 1].key, options);
       }
       forward(options) {
         options = dictionary(options, 'NavigationOptions');
+        if (!native.fullyActive()) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': The document is not fully active."));
         if (current >= entries.length - 1) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': Cannot go forward."));
         return traverseToKey(entries[current + 1].key, options);
       }
@@ -1108,7 +1173,7 @@
       data = typeof g.FormData === 'function' ? new g.FormData(form) : null;
       if (data && submitter && submitter.name) data.append(submitter.name, submitter.value);
       source = submitter || form;
-      handling = loaded ? 'auto' : 'replace';
+      handling = native.loadEnded() ? 'auto' : 'replace';
       if (method !== 'post') {
         query = data ? new URLSearchParams(data).toString() : '';
         u = noFrag(u).replace(/\?.*$/, '') + '?' + query;
@@ -1136,9 +1201,22 @@
     // window.stop() aborts the navigation under way (loading the document is not stopped).
     def(g, 'stop', function stop() { if (ongoingEvent) abortOngoing(); });
 
-    entries.push(makeEntry(null, null, null, null));
+    // A frame's earlier document leaves its entries on the frame element for the one that replaces it.
+    (function () {
+      var frame = null, h;
+      frame = native.frameElement();
+      if (!frame) return;
+      h = frame.__zedNav;
+      if (h) { delete frame.__zedNav; handover = h; }
+    })();
     var navigation = new Navigation(KEY);
-    var activation = new NavigationActivation(KEY, null, nhe(entries[0]), 'push');
+    var activation;
+    if (handover) {
+      activation = adoptHandover();
+    } else {
+      entries.push(makeEntry(null, null, null, null));
+      activation = new NavigationActivation(KEY, null, nhe(entries[0]), 'push');
+    }
     def(g, 'navigation', navigation);
     def(g, 'history', new History(KEY));
     [['Navigation', Navigation], ['NavigationHistoryEntry', NavigationHistoryEntry], ['NavigationDestination', NavigationDestination],

@@ -402,6 +402,9 @@ struct dom_element {
 	struct vm_cell *child_context;
 	/* Last attempted source and generation invalidate stale asynchronous responses. */
 	struct vm_string *child_source;
+	/* The source attribute as the last scan saw it, and where a script in the child navigated it (until the attribute changes). */
+	struct vm_string *child_attribute;
+	struct vm_string *child_navigation;
 	uint64_t child_epoch;
 	/* The epoch that installed a real child; an older context is not current fallback content. */
 	uint64_t child_loaded_epoch;

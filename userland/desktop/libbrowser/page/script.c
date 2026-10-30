@@ -1290,6 +1290,7 @@ page_fire_load_events(
 	/* The document is complete, and the window's load fires. */
 	bind_window_set_ready_state(page->window, "complete");
 	error = bind_fire_event(page->window, NULL, "load", BIND_EVENT_DOCUMENT, &canceled);
+	bind_window_set_load_ended(page->window);
 	if (error != 0)
 		return error;
 

@@ -298,15 +298,22 @@ frame_load_scan(
 
 					/* String equality prevents reloading when an unchanged attribute has a new allocation. */
 					same = 0;
-					if (source == element->child_source) {
+					if (source == element->child_attribute) {
 						same = 1;
-					} else if (source != NULL && element->child_source != NULL) {
-						same = vm_string_equal(source, element->child_source);
+					} else if (source != NULL && element->child_attribute != NULL) {
+						same = vm_string_equal(source, element->child_attribute);
 					}
 
-					/* First observation and changed source each establish one actual attempt. */
+					/* A changed attribute replaces where a script in the child navigated it. */
 					if (!element->child_load_seen || !same) {
+						element->child_attribute = source;
+						element->child_navigation = NULL;
 						error = frame_load_start(page, element, source);
+						if (error != 0)
+							return error;
+					} else if (element->child_navigation != NULL && element->child_navigation != element->child_source) {
+						/* The child navigated itself: its new location loads, the attribute unchanged. */
+						error = frame_load_start(page, element, element->child_navigation);
 						if (error != 0)
 							return error;
 					}
@@ -590,11 +597,11 @@ frame_load_current(
 	}
 
 	/* Absence remains a real distinct source state. */
-	if (source == element->child_source)
+	if (source == element->child_attribute)
 		return 1;
-	if (source == NULL || element->child_source == NULL)
+	if (source == NULL || element->child_attribute == NULL)
 		return 0;
-	same = vm_string_equal(source, element->child_source);
+	same = vm_string_equal(source, element->child_attribute);
 	if (!same)
 		return 0;
 
@@ -1127,6 +1134,7 @@ frame_load_events(
 	error = bind_fire_event(window, NULL, "load", BIND_EVENT_DOCUMENT, &canceled);
 	if (error != 0)
 		return error;
+	bind_window_set_load_ended(window);
 	current = frame_load_current(load);
 	if (!current || window->detached)
 		return 0;

@@ -204,6 +204,7 @@ bind_frame_install(
 		host.node_box = parent->host.node_box;
 		host.user_agent = parent->host.user_agent;
 		host.checkpoint = parent->host.checkpoint;
+		host.frame = element;
 
 		/* Construct the independently retained owner with this complete abstract host adapter. */
 		error = bind_window_create(realm, document, &host, &made);
@@ -240,6 +241,7 @@ bind_frame_install(
 			retired = previous->host;
 			if (retired != NULL) {
 				retired->frame = NULL;
+				retired->realm->job_target = parent->realm;
 				bind_window_detach(retired);
 			}
 		}

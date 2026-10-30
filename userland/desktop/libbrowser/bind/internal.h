@@ -249,6 +249,8 @@ struct bind_window {
 	int viewport_width;
 	int viewport_height;
 	const char *ready_state;
+	/* Set once the window's load event has finished dispatching. */
+	int load_ended;
 	struct dom_node *current_script;
 	struct vm_object *location;
 	double time_origin;
@@ -481,6 +483,8 @@ void bind_frames_attach(struct bind_window *window);
 void bind_frames_detach(struct bind_window *window);
 void bind_frames_release(struct bind_window *window);
 int bind_frame_parent(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+struct bind_window *bind_frame_child(const struct dom_node *node);
+int bind_frame_navigate(struct bind_window *window, const char *location, size_t length, int *started);
 int bind_frame_top(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_frame_self(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_frame_closed(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);

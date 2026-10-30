@@ -256,6 +256,8 @@ struct bind_host {
 	int (*media)(void *context, struct dom_element *element, int request, double value, struct bind_media *state);
 	/* An <img>'s state (BIND_IMAGE_*); restart loads its source again, a load or error event to follow. */
 	int (*image)(void *context, struct dom_element *element, int restart, struct bind_image *state);
+	/* The frame element of a child window, known from its creation (its scripts may read it at once). */
+	struct dom_element *frame;
 };
 
 /*
@@ -300,6 +302,7 @@ void bind_window_detach(struct bind_window *window);
 void bind_window_set_time(struct bind_window *window, double now);
 void bind_window_set_viewport(struct bind_window *window, int width, int height);
 void bind_window_set_ready_state(struct bind_window *window, const char *state);
+void bind_window_set_load_ended(struct bind_window *window);
 void bind_window_set_current_script(struct bind_window *window, struct dom_node *script);
 /* Borrows active child cascade/viewport until its next DOM mutation; caller roots its Document. */
 int bind_window_child_styles(struct bind_window *window, struct css_engine **engine, int *width, int *height);

@@ -31,6 +31,10 @@
 #define PRELUDE_URL_PARTS	11
 
 static int prelude_set_url(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_navigate_frame(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_load_ended(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_fully_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_element(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_scroll_fragment(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -148,6 +152,118 @@ prelude_set_url(
 
 	/* Succeeded: the document has the new URL. */
 	*result = vm_value_boolean(1);
+	return 0;
+}
+
+/* navigateFrame(url): points the window's own frame at the URL; whether it is a frame (a top-level window is not). */
+static int
+prelude_navigate_frame(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_buffer location;
+	int present;
+	int started;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* The URL as UTF-8. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(0);
+	wb_buffer_init(&location);
+	status = prelude_utf8_argument(args, count, 0, &location, &present);
+	if (status != 0 || !present) {
+		wb_buffer_release(&location);
+		return status;
+	}
+
+	/* The frame loads it at its next scan. */
+	started = 0;
+	status = bind_frame_navigate(window, wb_buffer_string(&location), location.length, &started);
+	wb_buffer_release(&location);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: whether the frame was pointed at the URL. */
+	*result = vm_value_boolean(started);
+	return 0;
+}
+
+/* loadEnded(): whether the window's load event has finished (a navigation before that replaces the current entry). */
+static int
+prelude_load_ended(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The window's flag. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(window->load_ended);
+	return 0;
+}
+
+/* fullyActive(): whether the window's document is the active one of a connected frame or of the top-level view (not a removed frame's). */
+static int
+prelude_fully_active(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* A window that was detached with its removed frame is not. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(!window->detached);
+	return 0;
+}
+
+/* frameElement(): the frame element this window is in, or null; unlike the window's own property it works while the window is being made. */
+static int
+prelude_frame_element(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* A top-level or retired window has none. */
+	window = bind_window_of(realm);
+	*result = VM_VALUE_NULL;
+	if (window->frame == NULL)
+		return 0;
+
+	/* The element's wrapper. */
+	status = bind_wrap(window, &window->frame->node, result);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the frame element. */
 	return 0;
 }
 
@@ -690,6 +806,22 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "setURL", 1, prelude_set_url, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "setURL", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "navigateFrame", 1, prelude_navigate_frame, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "navigateFrame", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "loadEnded", 0, prelude_load_ended, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "loadEnded", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "fullyActive", 0, prelude_fully_active, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "fullyActive", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameElement", 0, prelude_frame_element, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameElement", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "scrollToFragment", 1, prelude_scroll_fragment, NULL, &function);
 	if (status == 0)
