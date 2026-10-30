@@ -704,7 +704,7 @@ retry_lookup:
 		irq = spin_lock_irqsave(&object->lock);
 		if (page->hold_count == 0)
 			HAL_FATAL("VM object coherent read lost fault hold");
-		kern_memcpy(bytes + done, (const uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + in_page,
+		kern_memcpy_ram(bytes + done, (const uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) + in_page,
 		    chunk);
 
 		/* Credits the prefetch that made this page resident. */
@@ -1141,7 +1141,7 @@ vm_object_content_finish(
 				continue;
 
 			/* Copies the overlapping bytes into the page. */
-			kern_memcpy((uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) +
+			kern_memcpy_ram((uint8_t *)hal_pmem_to_kernel(page->pmem.paddr) +
 			       (copy_start - page_start),
 			       (const uint8_t *)buffer +
 			       (copy_start - write_start),

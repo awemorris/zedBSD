@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 04:54（Q1）
+最終更新: 2026-10-31 05:02（Q1）
 
 ## 担当（P1〜P8）
 
@@ -10,12 +10,12 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
-| P2 | Bug | open の Bug の 4 つ目の束（QEMU と host） | q1761: BUG-312（壊れた root の fsck）→ BUG-173（sh の日本語の履歴）→ BUG-238（emacs -nw）→ BUG-199（古い host 試験）→ BUG-281（QEMU の SSH の間欠の停止）→ BUG-308（UFS の journal の窓） | 3 つ目の束は main 612a2ea04。BUG-289・292 closed |
+| P2 | Bug | VF2 の実機の Bug の束 | q1772: BUG-338（hart 0）→ 342（PowerVR の static data）→ 340（SD の CRC）→ 343（root が live にならない）→ 339（U-Boot の DTB）を今の main で実機で | 4 つ目の束は closed 5 件 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
-| P4 | — | — | 返却（05:0x）。2 つ目の束: BUG-351（/dev/acpi）・359（xHCI の時間切れ）closed、349・362・368 fixed（確かめの残り） | 午後: Pi 5 の実機（image は完成） |
+| P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1769: p026 共通部分を codec に依らない名前に（設計を先に、移しは p022 の後） | 午後: Pi 5 の実機 |
 | P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |
-| P6 | — | — | 返却（05:0x）。WS333 p005 の前半（熱の core）を main に | 次の割当を Q1 が決める |
-| P7 | — | — | 返却（05:1x）。WS333 p012（tick の時刻を揃える、QEMU 2 通り PASS）と BUG-377 を main に | p012 は 5330 の電力の前後の数で cleared を決める |
+| P6 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1771: p017 ACPI WMI の層（Dell の BIOS の口の土台、SMI は起こさない） | p018 Dell の provider（5330 の実機） |
+| P7 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1770: p011 x86 の CPU の driver の統合（HWP の道、関門、RAPL の meter） | p014 5330 の受け入れ（電源の入れ直しの後） |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,427（69.90%）。flexbox の auto の最小・表・justify・backdrop-filter・filter・@keyframes を足した |
 
 実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。

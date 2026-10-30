@@ -67,6 +67,16 @@ kern_memcpy(
 }
 
 static __inline void *
+kern_memcpy_ram(
+	void *destination,
+	const void *source,
+	size_t count)
+{
+	/* Copies with the host C library. */
+	return memcpy(destination, source, count);
+}
+
+static __inline void *
 kern_memmove(
 	void *destination,
 	const void *source,
@@ -277,6 +287,17 @@ kern_snprintf(
 
 void *
 kern_memcpy(
+	void *destination,
+	const void *source,
+	size_t count);
+
+/*
+ * Copies count bytes between ranges of ordinary cached memory that do not
+ * overlap, such as buffer-cache lines and pinned user pages.  Device memory
+ * is never given to it.
+ */
+void *
+kern_memcpy_ram(
 	void *destination,
 	const void *source,
 	size_t count);

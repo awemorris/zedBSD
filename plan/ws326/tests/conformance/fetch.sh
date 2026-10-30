@@ -5,7 +5,8 @@
 # the caller commits the new lines).  A zip already in the cache with the recorded hash is not fetched again.
 #   sh plan/ws326/tests/conformance/fetch.sh [<dir>/<name>...]     (default: every line of list.txt)
 # The cache is $H264SW_CONFORMANCE_DIR (default build/tmp/ws326-conformance/zips); its zips are unpacked
-# next to them in <name>/.  An answer that is not a zip (an HTML page, a bot check) stops the run at once:
+# next to them in <name>/, without the reference decoder's trace files (about 9 parts in 10 of the unpacked size;
+# the comparison does not read them: the 204 zips of 3.1 GB unpack to about 7 GB without them, 35 GB with).  An answer that is not a zip (an HTML page, a bot check) stops the run at once:
 # report it, do not retry with another client or User-Agent.
 # Last line: fetch: PASS (<n> zips) or fetch: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -55,7 +56,7 @@ for entry in $names; do
 		exit 1
 	fi
 	mkdir -p "$cache/$name"
-	unzip -oq "$zip" -d "$cache/$name"
+	unzip -oq "$zip" -d "$cache/$name" -x '*[Tt][Rr][Aa][Cc][Ee]*' '*.[Tt][Rr][Cc]' 2> /dev/null
 	count=$((count + 1))
 done
 

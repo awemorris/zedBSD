@@ -6,7 +6,7 @@
 # ends when the guest resets; the script prints how long the reboot took, or leaves QEMU running for gdb (port
 # GDB_PORT) and QMP (W/qmp.sock) when it has not reset within 300 s.
 #   sh plan/ws299/tests/qemu-grow-reboot.sh IMAGE [GIB]          (IMAGE built with CONFIG_PCAT_SERIAL_MIRROR=y)
-# W is build/tmp/qemu-grow-reboot (a fresh run each time).  The last line is "qemu-grow-reboot: PASS|FAIL ...".
+# W is ${WS299_RUNS:-build/tmp}/qemu-grow-reboot (a fresh run each time).  The last line is "qemu-grow-reboot: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 . plan/tools/guest/qemu-accel.sh
@@ -14,8 +14,8 @@ set -u
 IMAGE=${1:?image}
 GIB=${2:-3}
 GDB_PORT=${GDB_PORT:-12990}
-fresh_out build/tmp/qemu-grow-reboot
-W=build/tmp/qemu-grow-reboot
+mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-grow-reboot
+W=${WS299_RUNS:-build/tmp}/qemu-grow-reboot
 mkdir -p "$W/tree/etc"
 [ -x build/zedimage-host ] || make build/zedimage-host > /dev/null
 build/zedimage-host ufs 1024M "$W/tree" "$W/vol.ufs" --inodes=65536

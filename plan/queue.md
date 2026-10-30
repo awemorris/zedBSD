@@ -440,7 +440,7 @@
 | q1757 / q1757-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs3`・branch `agent/p2-bugs3`、QEMU と host、image は /tmp） | [BUG-360](bugs/BUG-360.md)・[BUG-306](bugs/BUG-306.md)・[BUG-292](bugs/BUG-292.md)・[BUG-289](bugs/BUG-289.md)・[BUG-365](bugs/BUG-365.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | cleared（e3c3eb4db〜b3aa69fa2、main 612a2ea04。BUG-289・292 closed、360・306 fixed（確かめの残り）、365 一部） |
 | q1758 / q1758-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws329`・branch `agent/p5-ws329`） | [ws329](ws329/ws.md) p001 設計 | plan/ws329/ だけ、design-reviewer と問いの一覧まで。実装は WS326 の完了の後 | uncleared（設計 c56fb91dc、merge 455a7d5b4。理由: ユーザーの問い Q329-1〜5 の答え待ち） |
 | q1759 / q1759-i01 | P7（phase-runner-high、同じ worktree p7-ws333） | [ws333](ws333/ws.md) p006 の QEMU の起動の回帰 → p007 x86 の decode の module の設計 | boot-test.sh で amd64・armv7-virt・riscv64-virt・raspi4b。p007 は design.md §9 のとおり、5330 の読みは未実施で可 | cleared（p006 の起動の回帰 d76310ea4、p007 39f4a5597・f45480c58） |
-| q1760 / q1760-i01 | O-p022（phase-runner-high、Opus、worktree `/home/awe/zedBSD-worktrees/o-ws326-p022`・branch `agent/o-ws326-p022`） | [ws326-p022](ws326/phase022/phase.md) | phase.md のとおり。h264sw-*.c の修正は可、header は不可。check-skeleton の BASE は 8ddb130a9 | in-progress |
+| q1760 / q1760-i01 | O-p022（phase-runner-high、Opus、worktree `/home/awe/zedBSD-worktrees/o-ws326-p022`・branch `agent/o-ws326-p022`） | [ws326-p022](ws326/phase022/phase.md) | phase.md のとおり。h264sw-*.c の修正は可、header は不可。check-skeleton の BASE は 8ddb130a9 | cleared（4568d794b〜c80e33c37、in 101 本が全 frame 一致） |
 
 ## 2026-10-31: Bug の 4 つ目の束（q1761）
 
@@ -448,7 +448,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1761 / q1761-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs4`・branch `agent/p2-bugs4`、QEMU と host、出力は全部 /tmp） | [BUG-312](bugs/BUG-312.md)・[BUG-173](bugs/BUG-173.md)・[BUG-238](bugs/BUG-238.md)・[BUG-199](bugs/BUG-199.md)・[BUG-281](bugs/BUG-281.md)・[BUG-308](bugs/BUG-308.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
+| q1761 / q1761-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs4`・branch `agent/p2-bugs4`、QEMU と host、出力は全部 /tmp） | [BUG-312](bugs/BUG-312.md)・[BUG-173](bugs/BUG-173.md)・[BUG-238](bugs/BUG-238.md)・[BUG-199](bugs/BUG-199.md)・[BUG-281](bugs/BUG-281.md)・[BUG-308](bugs/BUG-308.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | cleared（4f19b40a4〜b35939531、main 9154dc6db。312・173・238・199・281 closed、308 fixed（review と crash 試験の残り）） |
 | q1762 / q1762-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws333`・branch `agent/p6-ws333`、host と QEMU、出力は /tmp） | [ws333](ws333/ws.md) p005 の前半（熱の core） | UAPI（p004）・/dev/thermal・/sbin/thermal は作らない | in-progress・返却（前半の熱の core b122563a8〜259e45cd7、main b7ac4f576。後半は p004 の後） |
 
 ## 2026-10-31: 空いた P3・P5 の割り当て（q1763・q1764）
@@ -464,3 +464,14 @@
 | q1767 / q1767-i01 | S-333p010（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p010`） | [ws333-p010](ws333/phase010/phase.md) | 同上。legacy の 0xCE の比の道は p011 で使わない（Q1 の判断） | cleared（35d5d4500） |
 | q1768 / q1768-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333b`・branch `agent/p7-ws333b`、QEMU、出力は /tmp） | [ws333](ws333/ws.md) p012（tick の位相を揃える）→ [BUG-377](bugs/BUG-377.md) | p012 は amd64 の HAL の実装と QEMU の起動まで、5330 の計測は後。BUG-377 は config の依存の宣言だけ（noct の規則は変えない） | in-progress・返却（p012 9b86c8c4a は main 22c629663、5330 の電力の数待ち。BUG-377 87a6d4ff7 fixed） |
 | q1727 / q1727-i03 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 3 回目 | 100% までの自走（ユーザーの指示）、計測の出力は /tmp | in-progress |
+
+## 2026-10-31: 空いた P4・P6・P7 の割り当て（q1769〜q1771）
+
+2026-10-31 ユーザーから、不在の間は実装できる WS は実装を、試験できるなら試験も進め、libmedia の WS は昼までに終えるよう優先度を上げる、という趣旨の指示を受けた。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1769 / q1769-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-ws326p026`・branch `agent/p4-ws326p026`） | ws326-p026 | 設計を先に、移しは p022 の merge の後（Q1 が知らせる） | in-progress |
+| q1770 / q1770-i01 | P7（phase-runner-high、worktree p7-ws333b） | [ws333](ws333/ws.md) p011 x86 の CPU の driver の統合 | HWP の道だけ（legacy の 0xCE の比の道は作らない）。5330 は p014 で | in-progress |
+| q1771 / q1771-i01 | P6（phase-runner-high、worktree p6-ws333） | [ws333](ws333/ws.md) p017 ACPI WMI の層 | SMI を起こさない。AML の harness を plan/tools/aml-host/ へ | in-progress |
+| q1772 / q1772-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-vf2bugs`・branch `agent/p2-vf2bugs`、実機 VF2） | [BUG-338](bugs/BUG-338.md)・[BUG-342](bugs/BUG-342.md)・[BUG-340](bugs/BUG-340.md)・[BUG-343](bugs/BUG-343.md)・[BUG-339](bugs/BUG-339.md) | 今の main の kernel で実機で確かめ、残りは直す。出力は /tmp | in-progress |
