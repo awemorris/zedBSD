@@ -60,15 +60,17 @@ RISCV64_PLATFORM_SOURCES_virt := src/kern/platform/riscv-virt.c \
 	src/drivers/serial/ns16550.c src/drivers/generic/serial-console.c \
 	src/drivers/generic/ramdisk.c \
 	src/drivers/disklabel/gpt.c src/drivers/disklabel/pcat.c
-# The VisionFive 2's binding: the teletype console on the hardware layer's
-# output, the initial ramdisk as the boot device, the SoC's system control
+# The VisionFive 2's binding: the console's text over the loader's screen
+# and the UART, the initial ramdisk as the boot device, the SoC's system control
 # blocks, clock and reset generators and pin controllers, and the SD card
 # slot (the DesignWare controller and its JH7110 glue) with the GPT reader
 # its UEFI disk image needs, and the headphone jack (the PWM audio converter
 # fed by the AXI DMA controller).
 RISCV64_PLATFORM_SOURCES_visionfive2 := src/kern/platform/visionfive2.c \
 	src/drivers/serial/ns16550.c \
-	src/drivers/generic/serial-console.c src/drivers/generic/ramdisk.c \
+	src/drivers/generic/boot-fb.c src/drivers/generic/fb-text.c \
+	src/drivers/platform/pcat/graphics/vgafont.c \
+	src/drivers/generic/ramdisk.c \
 	src/drivers/platform/visionfive2/vf2-syscon.c \
 	src/drivers/platform/visionfive2/vf2-crg.c \
 	src/drivers/platform/visionfive2/vf2-pinctrl.c \
@@ -77,6 +79,10 @@ RISCV64_PLATFORM_SOURCES_visionfive2 := src/kern/platform/visionfive2.c \
 	src/drivers/disklabel/gpt.c src/drivers/disklabel/pcat.c \
 	src/drivers/dma/dw-axi-dmac.c src/drivers/platform/visionfive2/vf2-dmac.c \
 	src/drivers/platform/visionfive2/vf2-pwmdac.c
+# /dev/graphics over the loader's screen, when the build has it.
+ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
+RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/generic/graphics-device.c
+endif
 # The test kernel's DMA coherency check (/dev/vf2-dmatest).
 ifeq ($(CONFIG_VF2_DMA_TEST),y)
 RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/platform/visionfive2/vf2-dmatest.c \
