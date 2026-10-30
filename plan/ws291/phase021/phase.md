@@ -109,3 +109,15 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
 - 既知の制限: index の draw は直の fetch でしか動かない（packed の copy は index を CPU で読まないため）。primitive restart は off。
 
 - 2026-10-31 ユーザーから、Pi 5 の試験は今日の午後に行い、その時の main で最新の image を作り直して実施する、Q1 が声をかける、という趣旨の指示を受けた。
+
+### 実機の前の準備（2026-10-31 02:00〜02:45 P4、Q1 の指示「main の最新＋agent/p4-ws291pi の image を build だけ、main への merge はしない」）
+
+- main d26c657c7 を agent/p4-ws291pi に取り込んだ（merge e2feb0871、親 e4f77b9e5 d26c657c7）。競合は plan/ws291/ws.md の p021・p022 の行と、この phase.md だけ（source の競合なし）。
+- vmunix: Pi 5（`plan/ws291/tests/config-rpi5.mk`、`build/p021c-k5`、cksum 2551665408）と Pi 4（`config/ci/config-rpi4.mk`、`build/p021c-k4`、cksum 1523912276）が exit 0・warning 0。
+  host 試験 `plan/ws291/tests/bin-draw-host-test.sh` PASS（4.2・7.1）。
+- 試験の image: host の / が満杯で worktree の build は失敗（clang の No space left on device）、Q1 の指示で BUILD を /tmp（tmpfs）に置いた。
+  `sh plan/ws291/tests/rpi5-image.sh /tmp/p4-p021c` exit 0（`Raspberry Pi 4 image check: PASS`・`ufs-root.img: canonical zedBSD UFS OK`、zedBSD の source の warning 0、
+  外部 package の openssl・openssh の warning は除く）、`FALLBACK=build/tmp/k627/build/rpi5/vmunix sh plan/ws291/tests/rpi5-image-boot.sh /tmp/p4-p021c /tmp/p4-p021c/rpi5-p021.img` exit 0。
+  **`/tmp/p4-p021c/rpi5-p021.img`、321912832 byte、sha256 dcadd719d98e94b4972a55adcf467678daa284e328882954b2c8f9342a3bbcc9**（tree e2feb0871、vmunix-fallback cksum 2365958026、
+  config.txt `kernel=vmunix`・1920x1080、cmdline `login=console v3d.perf=1`）。tmpfs なので host の再起動で消える。git と worktree には写していない。SD への書き込みは Q1。
+- 未実施: 実機（Pi 5・Pi 4）の起動・desktop の回帰・mview。
