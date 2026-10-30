@@ -7,8 +7,7 @@
 
 /*
  * The arithmetic encoding engine of CABAC for libmedia's software video
- * encoders, written from the informative encoder of ITU-T H.264 (08/2021)
- * 9.3.4: InitEncoder (9.3.4.1), EncodeDecision (9.3.4.2, Figure 9-7),
+ * encoders, the informative encoder of H.264 9.3.4: InitEncoder (9.3.4.1), EncodeDecision (9.3.4.2, Figure 9-7),
  * RenormE and PutBit (9.3.4.3, Figures 9-8 and 9-9), EncodeBypass
  * (9.3.4.4, Figure 9-10), EncodeTerminate and EncodeFlush (9.3.4.5,
  * Figures 9-11 and 9-12).  H.265 9.3.4.3 uses the same engine, tables
@@ -32,11 +31,6 @@
 #include <stdint.h>
 
 #include "vcodec-bitwriter.h"
-
-/*
- * The scale of the bit costs: vcodec_cabac_cost gives costs in 1/256 bit.
- */
-#define VCODEC_CABAC_COST_SHIFT 8U
 
 /*
  * One slice's arithmetic encoder.
@@ -100,23 +94,5 @@ void vcodec_cabac_enc_terminate(struct vcodec_cabac_enc *engine, unsigned bin);
  * per-macroblock bit limit of the codecs.
  */
 uint64_t vcodec_cabac_enc_bits(const struct vcodec_cabac_enc *engine);
-
-/*
- * The estimated cost of coding a bin with a context in state
- * pStateIdx s: [s][0] for the most probable symbol, [s][1] for the least,
- * in 1/256 bit.  Not the specification's data: the value for state s is
- * Round( -256 * Log2( 1 - p ) ) and Round( -256 * Log2( p ) ) with
- * p = 0.5 * alpha^s, alpha = ( 0.01875 / 0.5 )^( 1 / 63 ) (the
- * probability model the 64 states were designed from, as D. Marpe, H.
- * Schwarz and T. Wiegand describe it in "Context-based adaptive binary
- * arithmetic coding in the H.264/AVC video compression standard", IEEE
- * Trans. Circuits Syst. Video Technol. 13(7), 2003).  The table is
- * written as data computed from that formula; used only for decisions,
- * never for the bitstream.
- */
-extern const uint16_t vcodec_cabac_cost_table[64][2];
-
-/* Returns the estimated cost in 1/256 bit of coding bin with the context byte (not changing it). */
-uint32_t vcodec_cabac_cost(uint8_t context, unsigned bin);
 
 #endif

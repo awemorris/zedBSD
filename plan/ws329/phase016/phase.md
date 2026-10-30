@@ -21,7 +21,7 @@
 
 ## 試験の項目
 
-- 往復: 試験の中で syntax と entry を組んだ MB（I_4X4・I_8X8・I_16X16 の cbp の全組・P 16x16/16x8/8x16/8x8・B の全 mb_type と sub_mb_type（8x8 以上）・skip の続き・I_PCM・transform 8x8 の有無・qp_delta）を CAVLC と CABAC で書き、decoder の slice の context で `h264sw_macroblock_parse`（と skip の数え方は `h264sw_slice_data`）で読んで、syntax と entry の parser の field が一致。slice の最後の skip の run、end_of_slice、`h264enc_mbwrite_finish` の後に decoder が slice を誤り無く終える。
+- 往復: 試験の中で syntax と entry を組んだ MB（I_4X4・I_8X8・I_16X16 の cbp の全組・P 16x16/16x8/8x16/8x8・B の全 mb_type と sub_mb_type（8x8 以上）・skip の続き・I_PCM・transform 8x8 の有無・qp_delta）を CAVLC と CABAC で書き、decoder の slice の context で `h264sw_macroblock_parse`（と skip の数え方は `h264sw_slice_data`）で読んで、syntax と entry の parser の field が一致（CAVLC は total_coeff だけ・coded_flags 0、CABAC は coded_flags だけ・total_coeff 0、I_PCM は両方、header の h264enc-mb.h 手順 7 のとおり）。試験の土台は `fixture.h`。slice の最後の skip の run、end_of_slice、`h264enc_mbwrite_finish` の後に decoder が slice を誤り無く終える。
 - mark・rewind で書き直した MB（同じ MB を別の内容で）が正しく読める。`h264enc_mbwrite_bits`。
 - ERANGE（CAVLC の level_prefix の上限）で何も残らない（rewind 済みの形）。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。

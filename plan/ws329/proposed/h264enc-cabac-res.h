@@ -10,9 +10,7 @@
  * (residual_block_cabac, 7.3.5.3.3): coded_block_flag, the significance
  * map (significant_coeff_flag and last_significant_coeff_flag), and the
  * levels (coeff_abs_level_minus1 as UEG0 with uCoff 14, and
- * coeff_sign_flag), with the contexts of h264sw-cabac-ctx.h; and an
- * estimate of the bits a block would take, from the context states,
- * without coding it.
+ * coeff_sign_flag), with the contexts of h264sw-cabac-ctx.h.
  */
 
 #ifndef LIBMEDIA_H264ENC_CABAC_RES_H
@@ -49,14 +47,5 @@ struct h264sw_slice_ctx;
  * -2^15..2^15 - 1.
  */
 int h264enc_cabac_residual_block(struct h264enc_cabac *cabac, const struct h264sw_slice_ctx *ctx, unsigned cat, unsigned blk, unsigned component, const int32_t *levels, unsigned start, unsigned end, unsigned max_coeff);
-
-/*
- * Estimates the bits of the same block in 1/256 bit from the current
- * context states (vcodec_cabac_cost for each context-coded bin, 256 for
- * each bypass bin), as if each bin were coded with the state the context
- * has now (the state changes within the block are ignored).  Changes
- * nothing.  0 for bad arguments.
- */
-uint32_t h264enc_cabac_residual_cost(const struct h264enc_cabac *cabac, const struct h264sw_slice_ctx *ctx, unsigned cat, unsigned blk, unsigned component, const int32_t *levels, unsigned start, unsigned end, unsigned max_coeff);
 
 #endif

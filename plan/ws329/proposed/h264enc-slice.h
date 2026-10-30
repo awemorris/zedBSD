@@ -90,7 +90,8 @@ unsigned h264enc_cabac_zero_words(uint64_t bins, uint64_t vcl_bytes, unsigned si
  * ff_byte (0xFF) then rbsp_trailing_bits (one byte 0x80).  total_bytes
  * below 6 writes nothing and returns ERANGE (no filler that small
  * exists); 0 otherwise, or the writer's error.  The 0xFF bytes need no
- * emulation prevention.
+ * emulation prevention.  Its NAL unit header has nal_ref_idc 0 (7.4.1:
+ * 0 for nal_unit_type 12).
  */
 int h264enc_filler_write(struct vcodec_bitwriter *writer, size_t total_bytes);
 

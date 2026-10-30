@@ -26,11 +26,15 @@
  * motion and the frame's samples of the macroblock.
  *
  *  1. Direct: h264sw_direct_quadrant for quadrants 0..3 (the motion in the
- *     entry), the prediction of each quadrant from its lists.  With
+ *     entry; each quadrant's 4x4 bits set in decoded_4x4 after it, as
+ *     the decoder's reconstruction does), the prediction of each quadrant
+ *     from its lists (luma from h264enc_refplanes, chroma by
+ *     h264sw_interp_chroma, two lists averaged).  With
  *     early_skip, when the quantized residual (luma and chroma, inter
  *     offset) has no level, the decision is B_Skip at once.  Otherwise
  *     B_Direct_16x16 is a candidate with cost SATD + mb_type bits (and,
- *     without early_skip, B_Skip with cost SATD).
+ *     without early_skip, B_Skip with cost SATD; a B_Skip decision is
+ *     coded without residual).
  *  2. 16x16 L0: each ref_idx below Min( refs, num_ref_idx_active[0] ) as
  *     P's 16x16 (candidates: mvp, the direct vector of list 0 when the
  *     direct reference index is this one, the neighbours' vectors).  16x16

@@ -23,9 +23,7 @@
  *  2. Large diamond (when large_diamond is 1): from the best, the eight
  *     points ( +-2, 0 ), ( 0, +-2 ), ( +-1, +-1 ) in that order; move to
  *     the best when it is strictly better; repeat at most iterations
- *     times.  (The large and small diamond patterns of S. Zhu and K.-K.
- *     Ma, "A new diamond search algorithm for fast block-matching motion
- *     estimation", IEEE Trans. Image Processing 9(2), 2000.)
+ *     times.
  *  3. Small diamond: from the best, ( 0, -1 ), ( -1, 0 ), ( 1, 0 ), ( 0, 1 )
  *     in that order; move when strictly better; repeat at most iterations
  *     times.  A point outside the window or the range is skipped.
@@ -86,7 +84,12 @@ struct h264enc_me_result {
 };
 
 /*
- * Searches one block.
+ * Searches one block, by the steps above.
+ *
+ * Procedure referenced: S. Zhu and K.-K. Ma, "A new diamond search
+ * algorithm for fast block-matching motion estimation", IEEE Trans.
+ * Image Processing 9(2), 2000 (the large and small diamond patterns of
+ * steps 2 and 3).
  *
  * source is the source plane at the block's upper-left sample (stride
  * source_stride); (x, y) the block's frame location and width by height

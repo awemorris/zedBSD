@@ -81,7 +81,9 @@ struct h264enc_slice_writer {
  * decoder leaves them.
  *
  * Returns 0; ERANGE when a CAVLC level needs a level_prefix above
- * max_prefix (the caller clamps and codes the macroblock again); EINVAL
+ * max_prefix (the caller clamps and codes the macroblock again; the
+ * coding already clamps to ctx->level_limit, so this is a guard that only
+ * a deliberately broken coding reaches); EINVAL
  * for a syntax the slice cannot carry; or the writer's error.  On an
  * error the slice must be rewound to a mark taken before the macroblock
  * (h264enc_mbwrite_mark, h264enc_mbwrite_rewind).
@@ -92,7 +94,8 @@ int h264enc_mbwrite(struct h264enc_slice_writer *slice, struct h264sw_slice_ctx 
  * A saved writing position: the writer's mark, and for CABAC the engine
  * and the context variables (a macroblock may be written again, as I_PCM,
  * when it passed the bit limit).  skip_run and the slice context's
- * prev_mb_addr and prev_qp_delta_nonzero are saved too.
+ * prev_mb_addr, prev_qp_delta_nonzero and qp (QPY,PRED of the next
+ * macroblock) are saved too.
  */
 struct h264enc_mbwrite_mark {
 	struct vcodec_bitmark bits;
@@ -101,6 +104,7 @@ struct h264enc_mbwrite_mark {
 	uint32_t skip_run;
 	int32_t prev_mb_addr;
 	int prev_qp_delta_nonzero;
+	int qp;
 };
 
 /* Saves the position before a macroblock. */
@@ -110,8 +114,8 @@ void h264enc_mbwrite_mark(const struct h264enc_slice_writer *slice, const struct
 void h264enc_mbwrite_rewind(struct h264enc_slice_writer *slice, struct h264sw_slice_ctx *ctx, const struct h264enc_mbwrite_mark *mark);
 
 /*
- * The bits of the macroblock written since mark, as A.3.1 j) counts
- * them: the writer's bits for CAVLC (less the mb_skip_run before the
+ * The bits of the macroblock written since mark, as A.3.1 n) and A.3.2
+ * j) count them: the writer's bits for CAVLC (less the mb_skip_run before the
  * macroblock), vcodec_cabac_enc_bits' growth for CABAC (an upper bound).
  */
 uint64_t h264enc_mbwrite_bits(const struct h264enc_slice_writer *slice, const struct h264enc_mbwrite_mark *mark);

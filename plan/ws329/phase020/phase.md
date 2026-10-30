@@ -24,7 +24,7 @@
 - CQP: 種類ごとの QP と clamp。
 - 合成の model（試験の中: 種類ごとに真の複雑さ X_t を決め、bits = X_t / Qstep(QP) ×（1 ± 雑音 5%））で CBR・VBR を 300 frame 回し、平均の bitrate が目標の ±5%、QP が範囲の中、隣の同じ種類の QP の差が 4 以下、model が正しい時に buffer が空にならない（underflows 0）。
 - 最初の QP（qp0 の式）を手で計算した 3 例。filler: CBR で buffer が溢れる例の byte 数。VBR の max の cap。
-- 初期化の EINVAL。
+- 初期化の EINVAL。QP の手順の順（model → ±4 → buffer → 上下限）が header のとおりになる例。filler を X_t に入れず R に入れること。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。
 
 ## 注意

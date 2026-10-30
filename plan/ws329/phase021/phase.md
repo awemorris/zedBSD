@@ -22,7 +22,7 @@
 ## 試験の項目
 
 - 手で書いた表（試験の中）と一致: b_frames 0・1・2・3 × key_interval 1・5・30 × forced key の位置（群の始め・中・終わり）× drain の時（群が満ちる前・後）で、各 picture の coding の順・type・idr・nal_ref_idc・frame_num・poc_lsb・poc・idr_pic_id・decode_time_us・refs_past。
-- frame_num と poc_lsb の wrap（log2 4 の小さな値で）。B の decode_time が time を超えない、decode_time が増える。
+- frame_num と poc_lsb の wrap（log2 4 の小さな値で）。B の decode_time が time を超えない、decode_time が増える（間隔の揺れる時刻の列でも: 例 0・34・100・133）。key_interval の上限の EINVAL。
 - EBUSY・ENOBUFS・drain の後の push の EINVAL。`h264enc_gop_group` の数。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。
 

@@ -24,7 +24,7 @@
 - preset の表が header の表と同じ（試験の中に書いた期待）。
 - 合成の画: 前の frame と同じ（→ P_Skip、early_skip の有無で）、全体の平行移動（→ 16x16 で既知の vector）、上下で違う移動（→ 16x8）、左右（→ 8x16）、4 象限（→ 8x8）、新しく現れた模様（→ intra）。
 - 決定を `h264enc_mb_code` と `h264enc_mbwrite` で符号化し、decoder で decode した画素が encoder の再構成と一致する短い P の slice（3 preset × CAVLC/CABAC）。
-- 再現: 同じ入力で同じ決定。
+- 再現: 同じ入力で同じ決定。decode した mode・MV・ref が決定と一致（`fixture.h`）。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。
 
 ## 注意

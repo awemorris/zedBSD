@@ -38,11 +38,14 @@
  * right), [2] h (half sample below), [3] j (both).  Each has stride bytes
  * per row and (width + 2 * pad) by (height + 2 * pad) samples; origin[n]
  * points to the sample of frame location (0, 0) in plane n.  width and
- * height are the frame's luma size.  One allocation (buffer), owned by
- * the struct.
+ * height are the frame's luma size.  frame: the frame they were built
+ * from, borrowed (the encoder keeps the planes only while the DPB holds
+ * the frame), for predictions outside the window.  One allocation
+ * (buffer), owned by the struct.
  */
 struct h264enc_refplanes {
 	uint32_t frame_id;
+	const struct h264sw_frame *frame;
 	uint8_t *buffer;
 	uint8_t *origin[4];
 	size_t stride;
@@ -60,7 +63,7 @@ void h264enc_refplanes_free(struct h264enc_refplanes *planes);
  * Fills the planes from a decoded (deblocked) frame of the allocated
  * size: G by copying with the edges repeated into the padding, b, h and j
  * at every padded position by h264sw_interp_luma with fractions (2, 0),
- * (0, 2) and (2, 2).  Sets frame_id.  Returns 0, or EINVAL for a frame of
+ * (0, 2) and (2, 2).  Sets frame_id and frame.  Returns 0, or EINVAL for a frame of
  * another size.
  */
 int h264enc_refplanes_build(struct h264enc_refplanes *planes, const struct h264sw_frame *frame);
@@ -82,9 +85,10 @@ const uint8_t *h264enc_refplanes_full(const struct h264enc_refplanes *planes, in
  * location (x, y) with vector (mv_x, mv_y) in quarter samples: the full
  * position ( x + ( mv_x >> 2 ), ... ) (an arithmetic floor, computed
  * without shifting a negative value) and the fraction ( mv_x & 3,
- * mv_y & 3 ) selected as Table 8-12, from the four planes.  The vector
- * must keep the block inside h264enc_refplanes_window (a caller's
- * mistake otherwise: the block is filled with 128).  out receives the
+ * mv_y & 3 ) selected as Table 8-12, from the four planes.  A vector
+ * that takes the block outside h264enc_refplanes_window (a skip or direct
+ * vector the encoder did not search) is predicted by h264sw_interp_luma
+ * from the frame instead, which gives the same samples.  out receives the
  * samples with out_stride bytes per row.
  */
 void h264enc_refplanes_predict(const struct h264enc_refplanes *planes, unsigned x, unsigned y, int mv_x, int mv_y, unsigned width, unsigned height, uint8_t *out, size_t out_stride);

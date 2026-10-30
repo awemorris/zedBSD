@@ -22,7 +22,7 @@
 ## 試験の項目
 
 - 一致: 乱数の画の frame（32x32、48x80、176x144）を作り、窓の中の乱数の (x, y, mv) の全 16 の分数と 4x4・8x8・16x16（16x8・8x16 も）で `h264enc_refplanes_predict` が `h264sw_interp_luma`（同じ引数）と全画素一致（10 万組以上、frame の外を指す vector を含む）。
-- 窓: `h264enc_refplanes_window` の端の vector で読みが padding の中、1/4 画素の 1 歩も中。
+- 窓: `h264enc_refplanes_window` の端の vector で読みが padding の中、1/4 画素の 1 歩も中。窓の外の vector（frame の遠く外）は `h264sw_interp_luma` に落ちて同じ画素。
 - frame の大きさが違う時の EINVAL、frame_id。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。
 

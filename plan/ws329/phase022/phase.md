@@ -10,7 +10,8 @@
 ## 目的と範囲
 
 - `h264enc-encoder.c`（`h264enc.h` の公開の関数と `h264enc-encoder.h` の流れ）。他の encoder の `.c` の不具合をここで直してよい（直した点を結果に、header の誤りは p026 へ持ち越すか Q1 と相談して直す）。
-- host の道具 `plan/ws329/tests/tool/h264enc-tool.c`（raw の I420 を stdin、`.264` と再構成の framemd5 と PSNR を出す）と build の script、`plan/ws329/tests/roundtrip.sh`（design §10.2: ffmpeg の lavfi を pipe、ffmpeg の厳しい decode の framemd5、自前の decoder（WS326 p022 の host の道具）の framemd5、encoder の再構成の framemd5 の 3 者の一致。最後の行 `roundtrip: PASS`）。
+- host の道具 `plan/ws329/tests/tool/h264enc-tool.c`（raw の I420 を stdin、`.264` と再構成の framemd5 と PSNR を出す）と build の script、`plan/ws329/tests/roundtrip.sh`（design §10.2: ffmpeg の lavfi を pipe、ffmpeg の厳しい decode の framemd5、自前の decoder（WS326 p022 の host の道具）の framemd5、encoder の再構成の framemd5（`h264enc_set_recon_hook` で crop した可視の範囲を表示の順に）の 3 者の一致。最後の行 `roundtrip: PASS`）。
+- 制約の確かめ（decoder が調べない物）: 道具が `h264enc_get_stats` で max_mb_bits ≤ 3200、au_over 0、MV の範囲（level の MaxVmvR）、PCM の 0 の標本無し（profile 66・77）を確かめ、AU の大きさを `h264enc_level_max_au_bytes` と比べる。CABAC の bin の数は zero_words の計算で満たす（9.3.4.6）。
 
 ## 受け入れ
 

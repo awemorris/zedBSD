@@ -15,7 +15,7 @@
 
 ## 受け入れ
 
-- §9 の速さの目標（Q329-1 の答え）、roundtrip full が前後で同じ、run-unit all PASS。
+- §9 の速さの目標（Q329-2 の答え）、roundtrip full が前後で同じ、run-unit all PASS。
 
 ## 変えてはいけない物
 

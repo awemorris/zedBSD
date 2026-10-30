@@ -23,7 +23,6 @@
 
 - 往復: cat 0〜5 × 乱数の block（非零の数 1〜max、level の大小 ±1〜±32767、最後の位置が end、start 1 の AC）を書き、`h264sw_cabac_residual_block` で読んで levels と coded_block_flag が一致（cat 5 は flag 無し）。隣の coded_flags の組み合わせ（入手不可・intra・inter・skip・I_PCM・8x8 の隣）で context が decoder と同じであることを往復で。
 - 全 0 の block（cat 0〜4）は flag 0 だけ。cat 5 の全 0 は EINVAL。
-- 見積もり: 状態を変えないこと、bypass の 256、実際の符号化の bit 数との比が乱数の block で 0.8〜1.25 に入る（性質、目安）。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。
 
 ## 注意

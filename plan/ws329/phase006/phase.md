@@ -24,6 +24,8 @@
 - 往復: profile 3 種 × 大きさ（16x16、176x144、360x240 の crop、1920x1080 の crop 8、4096x2160）× VUI の有無の組（SAR の表の行と 255、full_range、色の記述、chroma の位置、timing）× 参照の数・reorder を書き、`h264sw_ps_read_sps`・`_pps` で読み、struct h264sw_sps・pps の各 field が期待どおり（crop、size_mbs、dpb_frames、sar、signal、colour、restriction、transform_8x8_mode、num_ref_idx_default）。
 - level の選び: 手で決めた例（176x144 15 fps → 1、352x288 30 fps → 1.3 か 2 の判定、1280x720 30 fps 4 Mbit/s → 3.1、1920x1080 30 fps → 4、1920x1080 60 fps → 4.2、3840x2160 30 fps → 5.1）と、dpb_frames で上がる例、bitrate で上がる例、High の 1250 の係数、6.2 でも入らない時の ENOTSUP、`h264enc_level_check` の 9 と表に無い値。
 - 範囲外の field（crop が奇数・大きさより大、log2 の範囲外）は何も書かずに EINVAL。
+- frame rate の上限（level 6 未満で 172 fps、6 以上で 300 fps）で level が上がる例と、300 fps を超える ENOTSUP。`h264enc_level_max_au_bytes` を手で計算した 3 例（720p30 の level 3.1 で 345600 など）。
+- PPS の pic_parameter_set_id・seq_parameter_set_id・pic_init_qs_minus26 が 0 で読める。fixed_frame_rate_flag 0 の timing。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。
 
 ## 注意

@@ -5,7 +5,7 @@
 - 親: [WS329](../ws.md)、設計 [design.md](../design.md)。
 - 状態: planned（2026-10-31 p001 で作成）。
 - 依存: p008、p015、p016（依存の Phase の実装が main に入ってから始める）。
-- 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順）。header は p001 の設計（p003 で source に置いた物）で、変えない。
+- 担当の想定: Opus 5.5（phase-runner）。decoder の鏡の中心（2 回の再構成・mvd・direct・skip・変換の選び・PCM）で、設計の review（2026-10-31）が Sonnet の 1 回に重いとした。手順は他の S の Phase と同じ（header を変えない）。
 
 ## 読む物
 
@@ -24,7 +24,9 @@
 - 全体の一致: 小さな picture（3x3 MB 程度）と参照 frame を試験の中で組み、各 kind の決定（試験が直に作る: intra の mode、inter の vector と ref、direct、分割）を `h264enc_mb_code` → `h264enc_mbwrite` で 1 slice 書き、decoder の `h264sw_slice_data`（同じ list・context）で decode して、decoder の frame の画素と entry が encoder の物と全部一致。CAVLC と CABAC、QP 0・26・51。
 - skip の変換: P 16x16 ref 0 で pskip の vector と同じで残差 0 → P_Skip、B_Direct で残差 0 → B_Skip。違う vector なら P のまま。
 - cbp と I_16x16 の mb_type、transform の選び（CHOOSE で 4x4 と 8x8 のどちらも起きる例）、clamp（CAVLC の非 High で ±2063）。
-- I_PCM の符号化と再構成。誤り（slice の種類に合わない kind、範囲外の ref_idx）。
+- I_PCM の符号化と再構成、Constrained Baseline と Main で 0 の標本が 1 になる（A.2.1・A.2.2）。誤り（slice の種類に合わない kind、範囲外の ref_idx）。
+- 意図との一致（自前の decoder の往復だけでは見えない誤り）: decode した Intra4x4PredMode・Intra8x8PredMode・chroma の mode・MV・ref_idx・mb_type が決定の値と一致。direct の quadrant を含む B_8x8 で後の partition の mvp が decoder と同じ（decoded_4x4 の印）。
+- skip の kind は残差を作らない（source が予測と違っても cbp 0）。entry の total_coeff と coded_flags の規則（CAVLC・CABAC・I_PCM）。試験の土台は `fixture.h`。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。
 
 ## 注意

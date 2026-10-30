@@ -23,7 +23,7 @@
 
 - 合成の画: 前後の frame の中間（→ direct か B_Skip）、前だけと同じ（→ L0）、後だけと同じ（→ L1）、前後の平均（→ Bi）、分割の例。
 - 決定を符号化して decoder で decode した画素と entry が encoder と一致する短い B の slice（direct の quadrant を含む B_8x8、CAVLC/CABAC）。
-- 8x8 より小さい sub_mb_type を出さない。
+- 8x8 より小さい sub_mb_type を出さない。decode した MV・ref・mb_type が決定と一致。chroma の予測（`h264sw_interp_chroma` と平均）の skip の判定。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。
 
 ## 注意

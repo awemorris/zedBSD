@@ -4,21 +4,20 @@
 
 - 親: [ws.md](ws.md)。作成: ws329-p001（P5、q1758-i01、2026-10-31）。調べた tree: main 85fbeb091（worktree `p5-ws329`）。
 - 正本: 各 module の仕様は [proposed/](proposed/) の header の comment（p003 で source に置き、以後の実装の Phase の基点にする）。この文書は全体の地図・決定・共通化・試験の道・Phase の割り振り。
-- ユーザーの判断を待つ点は [user-questions.md](user-questions.md)（Q329-1〜4）。敵対的レビューと反映は [design-review.md](design-review.md)。
+- ユーザーの判断を待つ点は [user-questions.md](user-questions.md)（Q329-1〜5）。敵対的レビューと反映は [design-review.md](design-review.md)。
 - HAL（`include/hal/hal.h`）は関係しない（§12）。toolchain も変えない。
 
 ## 1. 出典と引用
 
 - 仕様: **ITU-T H.264 (08/2021)**（WS326 と同じ版）。PDF `/home/awe/zedBSD-claude1/build/sources/specs/itu-t-h264-202108.pdf`（SHA-256 `d6e09bcc94e5d095e1b2d6d16bf96d82a593d67915a963336ada082a775e9cdf`、git に入れない）。印刷の頁 N = PDF の頁 N + 22（例: 9.3.4.5 は印刷 282 頁 = PDF 304 頁）。
-  encoder が読む節: 7.3〜7.4（構文と意味）、7.4.2.10（cabac_zero_word の制約）、9.1・9.2（Exp-Golomb、CAVLC）、9.3.1〜9.3.3（CABAC の初期化・2 値化・context）、**9.3.4（CABAC の encoder、informative）**、8.2（POC・参照）、8.3〜8.5・8.7（予測・変換・deblocking、再構成は decoder の物を使う）、Annex A（profile・level、表 A-1・A-4、A.3.1 j) の 1 macroblock の bit の上限）、Annex B、Annex E（VUI）。
+  encoder が読む節: 7.3〜7.4（構文と意味）、7.4.2.10（cabac_zero_word の制約）、9.1・9.2（Exp-Golomb、CAVLC）、9.3.1〜9.3.3（CABAC の初期化・2 値化・context）、**9.3.4（CABAC の encoder、informative）**、8.2（POC・参照）、8.3〜8.5・8.7（予測・変換・deblocking、再構成は decoder の物を使う）、Annex A（profile・level、表 A-1・A-4、A.3.1 n)・A.3.2 j) の 1 macroblock の bit の上限、A.3.1 c)・d) の access unit の大きさ、A.2.1・A.2.2 の PCM の標本の制約）、Annex B、Annex E（VUI）。
 - 仕様に無い encoder の判断（mode の選び、動きの探索、量子化の丸め、rate control）は、出典を header の該当の block に書いた公開の文献の考えを、数値まで header で固定した（WS318 D20 の AAC と同じ扱い）:
   - Lagrange 乗数 λ_mode = 0.85·2^((QP−12)/3)、λ_motion = √λ_mode: T. Wiegand ほか, IEEE TCSVT 13(7), 2003。
   - diamond の探索の点の形: S. Zhu, K.-K. Ma, IEEE TIP 9(2), 2000。
   - picture 単位の目標の配分: MPEG-2 Test Model 5（MPEG93/457）の step 1。
-  - CABAC の状態の確率の model（bit の見積もりの表だけ）: D. Marpe ほか, IEEE TCSVT 13(7), 2003。
   - 前向きの変換・量子化の係数 MF は、decoder の normAdjust（式 8-315・8-318）と逆変換の基底から式で導いた（§5.4）。他の実装の表は写さない。
 - 他の実装（x264・openh264・JM・FFmpeg など）の code・comment・構造・名前を写さない（[docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md) §7、[guardrail](../guardrail.md) の出典）。試験で host の ffmpeg（libavcodec の H.264 decoder、libx264）を**副の oracle と比べる物差し**として使うだけ（§10）。
-- 表の値は block ごとに「Values referenced: ITU-T H.264 (08/2021) Table …」。仕様に無い式から作った data（λ、CABAC の bit の見積もり）は「Values computed from …」と式を書く。source の comment に WS・Phase の番号・plan/ への参照・日付を書かない（proposed の header もそう書いてある）。
+- 表の値は block ごとに「Values referenced: ITU-T H.264 (08/2021) Table …」、文献の手順は該当の struct・関数の直前の block に「Procedure referenced: …」（guardrail の書式、複数行の comment）。file の先頭の comment には出典を書かない。λ のように式で計算する値は、式を comment に書き、計算は実行の時に行う（表を写さない）。source の comment に WS・Phase の番号・plan/ への参照・日付を書かない（proposed の header もそう書いてある）。
 
 ## 2. 範囲
 
@@ -48,12 +47,14 @@
 | E7 | scaling matrix を送らない（全部 Flat_16） | MF が式 1 つで済む。画質への効きは小さい | 送る（量子化が list ごとに変わり試験が増える） |
 | E8 | 動きの探索は参照ごとに 1/2 画素の 3 面（b・h・j）を前もって作り（decoder の補間で）、1/4 画素は Table 8-12 の平均で作る | 探索の中で 6 tap の補間を候補ごとにすると遅すぎる（§9 の見積もり）。平均は仕様の式そのもので、decoder と同じ値になる | 候補ごとに `h264sw_interp_luma`（1 MB あたり数十 k 回の演算増） |
 | E9 | mode の選びは SATD + λ_motion·bits（bits は CAVLC の長さで近似、CABAC でも同じ）。inter の 4x4・8x8 の変換の選びだけ SSD + λ_mode·bits | 速さと画質の釣り合い。決まった式で再現でき、Sonnet が header から書ける | 全 mode の RDO（遅い。QUALITY でも入れない。画質の目標に届かなければ p023 で足す） |
-| E10 | 速さの preset は FAST・BALANCED・QUALITY の 3 つで、各 parameter を表で固定（h264enc-mode.h） | 実時間（camera の録画）と画質の両方の使い手。WS318 の config に速さの欄が無いので Q329-4 で問う | 1 つだけ（camera の実時間と file の画質の両立ができない） |
+| E10 | 速さの preset は FAST・BALANCED・QUALITY の 3 つで、各 parameter を表で固定（h264enc-mode.h） | 実時間（camera の録画）と画質の両方の使い手。WS318 の config に速さの欄が無いので Q329-5 で問う | 1 つだけ（camera の実時間と file の画質の両立ができない） |
 | E11 | B は参照にしない（nal_ref_idc 0）、direct は spatial、L1 は次の anchor の 1 枚、max_num_reorder_frames 1 | 構造が単純で DPB と遅れが小さい。spatial は co-located の POC の縮尺が要らず速い | B-pyramid（参照の管理と MMCO が要る）、temporal direct |
 | E12 | IDR だけを key に使う（非 IDR の I は使わない）。B の群が IDR で切れる時は最後の待ちを P にする | open GOP の leading picture を作らない。seek と回復が単純 | open GOP（圧縮は少し良いが decoder の leading の扱いに頼る） |
 | E13 | POC は type 0（log2_max_poc_lsb 8）、frame_num は log2 8、gaps 無し、sliding window | B の並べ替えに type 0 が要る。1 つの道で済む | B が無い時 type 2（数 bit 少ないが道が 2 つ） |
 | E14 | rate control は picture 単位の QP: CQP、TM5 の step 1 の目標の配分＋ Qstep の model ＋ 1 秒の buffer の確かめ、CBR は filler data | 決定的で試験できる（合成の model で収束を確かめる）。MB 単位の適応は PSNR を下げ、試験も重い | MB 単位の TM5 step 2・3（mb_qp_delta の bit と複雑さ）、x264 風の ABR（他の実装の構造に寄る） |
-| E15 | 1 MB の bit が A.3.1 j) の 3200 を超えたら書き直して I_PCM、CAVLC で High 以外は level を ±2063 に clamp（level_prefix ≤ 15、A.2.1〜A.2.3）、CABAC は 9.3.4.6 の cabac_zero_word | どれも適合の要件。低い QP（0 付近）で実際に起きる | QP の下限で避ける（ユーザーの CQP 0 を断ることになる） |
+| E15 | 1 MB の bit が A.3.1 n)・A.3.2 j) の 3200 を超えたら書き直して I_PCM（Constrained Baseline と Main では PCM の標本 0 を 1 に、A.2.1・A.2.2）、CAVLC で High 以外は level を ±2063 に clamp（level_prefix ≤ 15、A.2.1〜A.2.3）、CABAC は 9.3.4.6 の cabac_zero_word、access unit が A.3.1 c)・d) の上限を超えたら QP + 6 で符号化し直す（3 回まで、超えた数を数える） | どれも適合の要件。低い QP（0 付近）と CQP で実際に起きる。自前の decoder も ffmpeg も調べないので、encoder が自分で数え試験が確かめる（stats） | QP の下限で避ける（ユーザーの CQP 0 を断ることになる）、CQP で高い level を選ぶ（level の意味が崩れる） |
+| E19 | skip の kind（P_Skip・B_Skip）は残差を作らない。P 16x16（ref 0、vector が pskip と同じ）と B_Direct_16x16 は cbp 0 なら skip に変える | 残差を持つ skip は書けない（syntax が無い）。逆の変換を決めないと実装で分かれる（review 3） | skip の決定に残差があれば P 16x16 に変える（mvd の導出が pskip と mvpred で違い、規則が増える） |
+| E20 | 試験の口: `h264enc_set_recon_hook`（再構成の frame を符号化の順に）と `h264enc_get_stats`（PCM・MB の最大の bit・zero word・AU の符号化し直し・MV の最大・clamp・underflow）を `h264enc-encoder.h` に | header は p003 で凍結するので今決める。decoder が調べない制約（PCM の 0、MB の bit、AU の大きさ、MV の範囲）を試験が数で確かめる（review 6・7） | encoder の内部を試験が直に読む（構造に依存） |
 | E16 | 出力は Annex B の access unit（4 byte の start code、IDR の前に SPS・PPS）。長さの前置（avcC）への変換は WS318 の `packet-format.c` | WS318 §5.1 の分担。encoder は形式を 1 つだけ持つ | encoder が両方を出す（WS318 と重複） |
 | E17 | 入力は I420・NV12 を CPU で受け、MB の倍数へ端を繰り返して詰める（copy 1 回）。WS318 の `input` には I420 と答える | B の待ちのために保持が要り copy は避けられない。端の繰り返しは padding の bit が少ない | caller の frame の参照を持つ（B の待ちの間 camera の slot を塞ぐ） |
 | E18 | 最初は 1 thread。slice ごとの状態（slice context・writer・MB context）を分けて持ち、p025 で WS318 の `thread.c` の pool で slice を並べる | 正しさが先（WS326 と同じ順）。構造は並列の形にしておく | 最初から並列（試験と debug が難しい） |
@@ -136,21 +137,21 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 | --- | --- | --- |
 | vcodec-bitwriter | u・ue・se・te・整列・trailing・mark/rewind・長さ | — |
 | vcodec-nalwriter | emulation prevention の挿入、Annex B の access unit、cabac_zero_word | — |
-| vcodec-cabac-enc | 9.3.4 の算術の encoder、bin の数、bit の見積もりの表 | bitwriter、h264sw-cabac の表 |
+| vcodec-cabac-enc | 9.3.4 の算術の encoder、bin の数 | bitwriter、h264sw-cabac の表 |
 | h264enc.h | 上限・約束・公開の核の API（create・send・receive・parameter_sets・destroy） | — |
 | h264enc-ps | sequence の選び、level の選び（表 A-1）、SPS・PPS・VUI の書き | bitwriter、h264sw-levels |
 | h264enc-slice | NAL の header、slice header の書き、cabac_zero_word の数、filler | bitwriter、h264sw-slice・ps |
 | h264enc-quant | 前向きの変換、量子化、DC、clamp | h264sw-tables |
 | h264enc-cavlc | residual_block_cavlc の書き、bit 数、cbp の codeNum | bitwriter、h264sw-cavlc-tables |
 | h264enc-cabac-se | MB の構文要素の CABAC の書き、PCM | cabac-enc、h264sw-cabac-ctx |
-| h264enc-cabac-res | residual_block_cabac の書きと bit の見積もり | cabac-se、h264sw-cabac-ctx |
+| h264enc-cabac-res | residual_block_cabac の書き | cabac-se、h264sw-cabac-ctx |
 | h264enc-cost | SAD・SATD・SSD・λ・mvd の bit | bitwriter（長さ） |
 | h264enc-source | 入力の copy と端の詰め | — |
 | h264enc-refplanes | 参照の 1/2 画素の 3 面と 1/4 画素の予測 | h264sw-interp、h264sw-frame |
 | h264enc-me | 動きの探索（候補・大小の diamond・1/2・1/4） | refplanes、cost |
 | h264enc-mbctx.h | preset・MB の context・MB の決定（構造体だけ） | — |
 | h264enc-intra | intra の mode の選び（16x16・4x4・8x8・chroma） | h264sw-intra・transform、quant、cost |
-| h264enc-mb | MB の符号化（2 回の再構成、残差、cbp、skip、entry） | h264sw-recon・mvpred・direct・mb、quant、cavlc |
+| h264enc-mb | MB の符号化（entry の kind・qp を先に、2 回の再構成、残差、cbp、skip、entropy ごとの entry の field、PCM） | h264sw-recon・mvpred・direct・mb、quant、cavlc |
 | h264enc-mbwrite | slice_data と macroblock_layer の書き（CAVLC・CABAC）、mark/rewind | cavlc、cabac-se・res |
 | h264enc-mode | preset の表、I と P の決定 | me、intra、mb、cost |
 | h264enc-mode-b | B の決定 | 同上、h264sw-direct |
@@ -180,7 +181,7 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 - 誤り: 範囲外の config は create で EINVAL・ENOTSUP。send・receive の中の失敗（ENOMEM、内部の矛盾 = bug の EINVAL）は encoder を「失敗」の状態にし、以後の呼び出しは同じ値を返す（壊れた stream を出し続けない）。libmedia の層の写しは WS318 §9（EIO で stream を終える）。
 - 信用できない入力は無い（入力は画素だけ）。ただし画素の値が何でも、levels・mvd・MB の bit が仕様の範囲を出ないことを各 module が保証する（clamp、I_PCM、cabac_zero_word）。
 
-## 9. 速さと画質の目標（Q329-1 で確かめる）
+## 9. 速さと画質の目標（Q329-1・Q329-2 で確かめる）
 
 見積もり（scalar C、SIMD 無し、1 thread、5330 の Alder Lake の P core を 3 G 演算/秒として）:
 
@@ -205,7 +206,8 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 
 ### 10.2 全体の試験（p022・p023、host）
 
-- host の道具 `plan/ws329/tests/tool/h264enc-tool.c`（p022 で作る）: raw の I420 を stdin から読み、`.264` を書き、encoder の再構成の各 frame の MD5 と、source との PSNR を出す。
+- host の道具 `plan/ws329/tests/tool/h264enc-tool.c`（p022 で作る）: raw の I420 を stdin から読み、`.264` を書き、encoder の再構成の各 frame の MD5（`h264enc_set_recon_hook`、crop した可視の範囲を表示の順に）と、source との PSNR を出す。`h264enc_get_stats` で decoder が調べない制約（MB の bit ≤ 3200、AU の大きさ、MV の範囲、PCM の 0）を確かめる。
+- 往復の試験の限り: encoder の再構成 = decoder の再構成なので、意図と違う syntax（予測 mode・MV の誤り）は MD5 では見えない。p017〜p019 の単体試験で「decode した mode・MV・ref が決定と一致」を必ず比べる。
 - `plan/ws329/tests/roundtrip.sh`: host の ffmpeg の lavfi（`testsrc2`・`mandelbrot`・`smptehdbars`・既存の試料 `plan/ws083/tests/streams/*.h264` を decode した自然画）を pipe で渡し（大きな YUV の file を作らない）、出力を (a) `ffmpeg -err_detect +crccheck+bitstream+buffer+explode -f framemd5`、(b) WS326 p022 の host の decoder の道具（`conform` と同じ核）で decode、(c) encoder の再構成の MD5 と 3 者が全 frame で一致することを確かめる。最後の行 `roundtrip: PASS`。
 - 組み合わせ: profile 3 × entropy 2 × B 0/2 × slice 1/3 × preset 3 × 大きさ（176x144、360x240（crop）、1280x720 の短い物）× rate control 3、forced key、drain、QP 0・51。
 - 画質: 同じ試料を libx264（host の ffmpeg）で同じ bitrate の 4 点に encode して BD-rate を出す（§9 の目標）。
@@ -222,7 +224,7 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 
 - WS318 §5.3 の encoder の backend の ops（kind・query・open・input・send_frame・send_sound・receive・codec_data・close）に `h264enc-backend.c` で載せる。表（`encoder.c`）の位置は `{ vkvideo_encode_h264, vkvideo_encode_h265, h264-software, aac_lc, avcodec }`（hardware の後、libavcodec の前。ユーザーの backend の順の決定に合わせる）。
 - query の行: kind SOFTWARE、名前 "h264-software"、profiles CB・Main・High、max_level 62、最大の大きさ 16880、rate_controls CQP・CBR・VBR、max_b_frames 3、max_references 4、memory CPU、formats I420・NV12。
-- open: `media_encoder_config` → `h264enc_config`（profile・level・rate・bitrate・qp・key_interval・b_frames・colour の写し、speed は Q329-4）。範囲の外は MEDIA_PROBLEM_CONFIG。
+- open: `media_encoder_config` → `h264enc_config`（profile・level・rate・bitrate・qp・key_interval・b_frames・colour の写し、speed は Q329-5）。範囲の外は MEDIA_PROBLEM_CONFIG。
 - send_frame: encoder の層が CPU の I420/NV12 に揃えた frame の plane を `h264enc_send` へ（copy は encoder の中、frame の参照はすぐ落とせる）。FORCE_KEY を写す。EAGAIN はそのまま。
 - receive: `h264enc_receive` の packet（Annex B）を、config の output が RAW なら WS318 の `packet-format.c` で長さの前置に。KEY・時刻を写す。
 - codec_data: PARAMETER_SETS は `h264enc_parameter_sets`、AVCC は `packet-format.c` で組む。
@@ -233,7 +235,7 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 - HAL: 変えない。encoder は libmedia の userland の C だけで、kernel・driver・HAL の契約に触れない。
 - toolchain・共有の build/: 変えない。host の試験は host の cc・clang・ffmpeg（既にある）。
 - WS326: p026 の名前の提案（§5.2）、p002 の refactor で decoder の header の基点が移る（§5.3）。
-- WS318: p012a の ops の形、`packet-format.c`、`thread.c`（p025）。Q329-4 は WS318 の公開の config に欄を足すかの問い。
+- WS318: p012a の ops の形、`packet-format.c`、`thread.c`（p025）。Q329-5 は WS318 の公開の config に欄を足すかの問い。
 - WS330: `vcodec-*` の 3 module を H.265 の encoder がそのまま使う。CABAC の engine は context の byte を渡す形で codec を知らない。動きの探索・cost・rate control・gop の枠は WS330 p001 が共通化を判断する。
 
 ## 13. Phase の表
@@ -244,7 +246,7 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 | --- | --- | --- | --- | --- |
 | p001 | 設計（この文書、proposed、問い、review） | O | — | Q1 の受け入れ、Q329 の回答 |
 | p002 | 共通化の refactor R1〜R5（decoder の振る舞いは変えない） | O | WS326 completed（p026 を含む） | WS326 の run-unit all と適合が前後で同じ、新しい test-cabac_ctx・test-levels、amd64 build warning 0 |
-| p003 | encoder の header（proposed → source、p026 の名前に合わせる）・.c の骨格（ENOSYS）・Makefile・`run-unit.sh`・`check-skeleton.sh`・BASE | O | p002 | check-skeleton PASS、amd64 build warning 0、decoder の試験が変わらず PASS |
+| p003 | encoder の header（proposed → source、p026 の名前に合わせる）・.c の骨格（ENOSYS）・Makefile・`run-unit.sh`・`check-skeleton.sh`・試験の土台 `fixture.h`・BASE | O | p002 | check-skeleton PASS、amd64 build warning 0、decoder の試験が変わらず PASS |
 | p004 | vcodec-bitwriter、vcodec-nalwriter | S | p003 | run-unit（bitwriter・nalwriter）、突然変異 |
 | p005 | vcodec-cabac-enc | S | p004 | 往復（h264sw_cabac）、見積もりの表の式の照合 |
 | p006 | h264enc-ps | S | p004 | 往復（h264sw_ps_read_*）、表 A-1 の level の選び |
@@ -257,8 +259,8 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 | p013 | h264enc-refplanes | S | p003 | 全分数で h264sw_interp_luma と一致（端の外を含む） |
 | p014 | h264enc-me | S | p012、p013 | 合成の平行移動で既知の MV、窓と範囲、再現 |
 | p015 | h264enc-intra | S | p008、p012 | 明らかな mode、block の再構成が recon_mb と一致 |
-| p016 | h264enc-mbwrite | S | p007、p009、p011 | MB を書いて h264sw_macroblock_parse で syntax と entry が一致（CAVLC・CABAC、全 kind、PCM、skip の run） |
-| p017 | h264enc-mb | S | p008、p015、p016 | 符号化 → 書き → decoder の slice_data で再構成が一致、skip の変換、cbp |
+| p016 | h264enc-mbwrite | S | p007、p009、p011（試験の土台 fixture.h は p003） | MB を書いて h264sw_macroblock_parse で syntax と entry が一致（CAVLC・CABAC、全 kind、PCM、skip の run） |
+| p017 | h264enc-mb | O | p008、p015、p016 | 符号化 → 書き → decoder の slice_data で再構成が一致、decode した mode・MV が決定と一致、skip の変換、cbp、PCM の 0 |
 | p018 | h264enc-mode（preset、I・P） | S | p014、p017 | 合成の画で skip・16x16・分割・intra の選び、encoder の再構成と decoder の一致（短い P の slice） |
 | p019 | h264enc-mode-b | S | p018 | B の direct・skip・Bi・8x8 の選び、一致 |
 | p020 | h264enc-ratecontrol | S | p003 | 合成の model で収束・buffer・CQP・filler |
@@ -266,7 +268,7 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 | p022 | h264enc-encoder の全体、host の道具と roundtrip.sh、最初の全体の試験 | O | p004〜p021 | roundtrip の基本の組（3 profile × 2 entropy × B 0/2）で 3 者の MD5 一致 |
 | p023 | 品質と適合の行列（§10.2 の全組、BD-rate、極端の QP・大きさ・forced key・drain） | O | p022 | §9 の正しさの門、画質の目標（Q329-1 の答え） |
 | p024 | libmedia の backend（WS318 の encoder の ops）、問い合わせの行、media_encoder の host 試験 | O | p022、WS318 p012a | WS318 の encoder の試験、amd64 build warning 0 |
-| p025 | 速さ（測り、近道、slice の thread、実機の計測） | O | p023、WS318 p008 | §9 の速さの目標（Q329-1 の答え）、近道の前後で MD5 が同じ |
+| p025 | 速さ（測り、近道、slice の thread、実機の計測） | O | p023、WS318 p008 | §9 の速さの目標（Q329-2 の答え）、近道の前後で MD5 が同じ |
 | p026 | 規約の全文の見直し、header の持ち越しの直し | D | p023〜p025 | conformance-reviewer の checklist、全試験 PASS |
 
 - 並べられる組（p003 の後）: {p004 → (p005 → p010 → p011)、(p006 → p007)、p009}、p008、p012、p013、p020、p021。
@@ -285,11 +287,15 @@ R1〜R5 は decoder の header を変えるので、WS326 の `check-skeleton.sh
 
 1. WS326 p026 の設計に §5.2 の `vcodec-` の名前を渡してほしい（p026 の担当が別の名前を選ぶなら WS329 p003 が合わせる）。
 2. p002 は WS326 の header の凍結が外れた後（WS326 completed の後）。WS326 の `check-skeleton.sh` の BASE が p002 の commit に移ることを WS326 の記録に。
-3. WS318 の記録: WS318 §11 が書くとおり、WS329 の p024 の依存に WS318 p012a、p025 に WS318 p008（thread.c）。Q329-4 の答えによっては WS318 の proposed/media.h に `speed` の欄を足す（WS318 の p002 の前なら header の凍結に当たらない）。
+3. WS318 の記録: WS318 §11 が書くとおり、WS329 の p024 の依存に WS318 p012a、p025 に WS318 p008（thread.c）。Q329-5 の答えによっては WS318 の proposed/media.h に `speed` の欄を足す（WS318 の p002 の前なら header の凍結に当たらない）。
 4. JM の参照 decoder（ITU-T/ISO の配布の C、host でだけ build して実行）を p023 の厳しい oracle に足すか: 取得はパラメータの無い GET 1 回（約 5 MB の zip、SHA-256 を記録、cache は main の `build/sources/`）。足さなくても ffmpeg（厳しい設定）と自前の decoder の 2 つで門は作れる。推しは「足す」（ffmpeg は寛容な decoder で、適合の誤りを見逃すことがある）。master.md の web の取得の条件に照らして Q1 が決める。
 5. host の disk が少ない（2026-10-31 に約 11 GB 空き）。§10.2 の試験は YUV を pipe で渡し、file を作らない形にした。
+7. 大きな picture の memory: 参照の面は 4 面 × (refs + 2) 枠。4K で約 200 MB、8192x4320 で約 850 MB。Pi で 4K を encode する時の目安として WS318 の問い合わせの max_width に反映するかは p024 で決める。
+8. WS326 p026 が frame・DPB の共通の部分まで移すと、`h264enc-encoder.h` の `h264sw_frame_pool`・`h264sw_dpb` の名前も変わる。p003 は名前の置き換え以上の差分を review する。
+9. ws.md の「ユーザーの決定（2026-10-30、原文）」は Q1 が書いた原文の記録。AGENTS §8（2026-10-30 以降は原文を載せない）との整理は Q1（この Phase では変えていない）。
+10. WS318 の `media_codec_info` は max_references を出すが `media_encoder_config` に refs・entropy・slices の欄が無い。今は encoder の preset の既定で決める（Q329-5 と一緒に判断）。
 6. この Phase の proposed の header は source に入っていない（この Queue は plan/ws329/ だけ）。標準廉価実装手順の「p001 が header と骨格を source に置く」は p003 に移した。
 
 ## 15. design-reviewer の結果と反映
 
-[design-review.md](design-review.md) を参照（このあと追記）。
+2026-10-31 に design-reviewer を 1 回（29 件: blocker 0・major 10・minor 19）。全件と反映は [design-review.md](design-review.md)。主な変更: MB の符号化で entry の kind・qp を最初に置く（intra の予測 mode の誤り）、entry の total_coeff と coded_flags を entropy ごとに（decoder の parser のとおり）、skip は残差を作らない（E19）、PCM の 0 の標本（E15）、access unit の大きさの確かめと符号化し直し（E15）、試験の口（E20）、出典を block の `Procedure referenced:` に、p003 に試験の土台、p017 を Opus に、使われない CABAC の bit の見積もりの API を外した、問いを 5 つに分けた。

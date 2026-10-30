@@ -41,8 +41,8 @@
  * - Quantization: level = sign( W ) * ( ( |W| * MF + f ) >> qbits ), with
  *   |W| * MF in uint64_t, and the rounding offset f = 2^qbits / 3 for
  *   intra and 2^qbits / 6 for inter blocks (the DC paths use 2f with their
- *   qbits + 1).  The offsets are this encoder's choice (the usual dead
- *   zone of H.264 encoders), not the specification's.
+ *   qbits + 1).  The offsets are this encoder's own choice, not the
+ *   specification's.
  *
  * The encoder never sends scaling matrices, so every scaling list is flat
  * and these factors are the whole story.  All functions are pure.

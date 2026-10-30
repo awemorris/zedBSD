@@ -47,16 +47,18 @@
  * chroma_location is above 0 (both fields that value); timing_info with
  * num_units_in_tick and time_scale (time_scale = 2 * rate_num,
  * num_units_in_tick = rate_den: a frame is two ticks) and
- * fixed_frame_rate_flag 1; no HRD parameters; pic_struct_present_flag 0;
+ * fixed_frame_rate_flag 0 (the input's times may vary; the rate is
+ * nominal); no HRD parameters; pic_struct_present_flag 0;
  * bitstream_restriction_flag 1 with motion_vectors_over_pic_boundaries_flag
  * 1, max_bytes_per_pic_denom 0, max_bits_per_mb_denom 0,
  * log2_max_mv_length_horizontal and _vertical 15, max_num_reorder_frames
  * and max_dec_frame_buffering as given.
  *
- * The PPS: entropy_coding_mode_flag cabac; num_ref_idx_default[0] and
+ * The PPS: pic_parameter_set_id 0, seq_parameter_set_id 0;
+ * entropy_coding_mode_flag cabac; num_ref_idx_default[0] and
  * [1] (1..32; the slices override them when they differ);
  * weighted_pred_flag 0, weighted_bipred_idc 0; pic_init_qp (26 + the
- * minus26 field); chroma_qp_index_offset 0;
+ * minus26 field); pic_init_qs_minus26 0; chroma_qp_index_offset 0;
  * deblocking_filter_control_present_flag 1; constrained_intra_pred_flag
  * 0; redundant_pic_cnt_present_flag 0; and, for profile 100 only, the
  * fields after it: transform_8x8_mode_flag transform_8x8,
@@ -103,7 +105,8 @@ struct h264enc_sequence {
  * when: PicSizeInMbs <= MaxFS; width_mbs and height_mbs each <= Sqrt(
  * 8 * MaxFS ) (A.3.1 f), g)); PicSizeInMbs * rate_num <= MaxMBPS *
  * rate_den (the macroblock rate of A.3.1 a), b) at a constant frame
- * rate); max_bitrate <= MaxBR * cpbBrVclFactor (1000 for profiles 66 and
+ * rate); rate_num <= 172 * rate_den for levels below 6, <= 300 *
+ * rate_den for 6, 6.1, 6.2 (fR of A.3.1 for frames); max_bitrate <= MaxBR * cpbBrVclFactor (1000 for profiles 66 and
  * 77, 1250 for 100; max_bitrate 0 is not checked: a constant quantizer);
  * dpb_frames * PicSizeInMbs <= MaxDpbMbs (A.3.1 h)).  Products are
  * computed in uint64_t.  Returns 0 and *level_idc, or ENOTSUP when even
@@ -115,6 +118,18 @@ int h264enc_level_choose(unsigned profile_idc, unsigned width_mbs, unsigned heig
 int h264enc_level_check(unsigned profile_idc, unsigned level_idc, unsigned width_mbs, unsigned height_mbs, uint32_t rate_num, uint32_t rate_den, uint32_t max_bitrate, unsigned dpb_frames);
 
 /*
+ * The most bytes one access unit may take at a level and a constant
+ * frame rate (A.3.1 c), d); A.3.2 for High is the same with its MinCR):
+ * 384 * MaxMBPS * rate_den / ( rate_num * MinCR ), rounded down, computed
+ * in uint64_t.  For access unit 0, c) allows at least as much (the level
+ * fits PicSizeInMbs * rate <= MaxMBPS and the initial removal delay only
+ * adds), so one bound serves every access unit.  The encoder codes a
+ * picture again at a higher QP when its access unit passes this bound
+ * (h264enc-encoder.h).  0 for a level_idc not in the table.
+ */
+uint64_t h264enc_level_max_au_bytes(unsigned level_idc, uint32_t rate_num, uint32_t rate_den);
+
+/*
  * Writes a sequence parameter set RBSP (7.3.2.1.1), including
  * rbsp_trailing_bits, into writer (which the caller has reset).
  *
@@ -124,7 +139,9 @@ int h264enc_level_check(unsigned profile_idc, unsigned level_idc, unsigned width
  * 0; pic_order_cnt_type 0; gaps_in_frame_num_value_allowed_flag 0;
  * pic_width_in_mbs_minus1, pic_height_in_map_units_minus1,
  * frame_mbs_only_flag 1, direct_8x8_inference_flag 1, the cropping and
- * the VUI as struct h264enc_sequence says.  Returns 0, EINVAL for a
+ * the VUI as struct h264enc_sequence says.  The NAL unit header the
+ * caller gives these RBSPs has nal_ref_idc 3 (7.4.1: not 0 for SPS and
+ * PPS).  Returns 0, EINVAL for a
  * field out of its range (checked before anything is written), or the
  * writer's error.
  */

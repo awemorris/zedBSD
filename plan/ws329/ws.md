@@ -27,14 +27,14 @@
 
 ## Phase
 
-設計は [design.md](design.md)（決定・decoder との共通化・module・試験の道・Phase の割り振り）、各 module の仕様は [proposed/](proposed/) の header の comment（p003 で source に置き、その commit を実装の Phase の基点 BASE にする）。ユーザーの判断を待つ点は [user-questions.md](user-questions.md)（Q329-1〜4）、敵対的レビューは [design-review.md](design-review.md)。
+設計は [design.md](design.md)（決定・decoder との共通化・module・試験の道・Phase の割り振り）、各 module の仕様は [proposed/](proposed/) の header の comment（p003 で source に置き、その commit を実装の Phase の基点 BASE にする）。ユーザーの判断を待つ点は [user-questions.md](user-questions.md)（Q329-1〜5）、敵対的レビューは [design-review.md](design-review.md)。
 型: O = Opus、S = Sonnet 5.5 high（標準廉価実装手順、1 回の起動）、D = conformance-reviewer。
 
 | Phase | 目的 | 型 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
-| ws329-p001 | 設計（Opus 5.5）: decoder との共通化の洗い出しと設計、encoder の module・header の案・試験の道・実装の Phase の表 | O | in-progress（q1758 P5。設計と review の反映は済み、Q1 の受け入れと Q329 の回答待ち） | — |
+| ws329-p001 | 設計（Opus 5.5）: decoder との共通化の洗い出しと設計、encoder の module・header の案・試験の道・実装の Phase の表 | O | in-progress（q1758 P5。設計と review（29 件）の反映は済み、Q1 の受け入れと Q329-1〜5 の回答待ち） | — |
 | [ws329-p002](phase002/phase.md) | 共通化の refactor（CAVLC の表・CABAC の context の選び・context の初期化・表 A-1、decoder の振る舞いは不変） | O | planned | WS326 completed（p026 を含む） |
-| [ws329-p003](phase003/phase.md) | encoder の header と骨格を source に、run-unit・check-skeleton、BASE | O | planned | p002 |
+| [ws329-p003](phase003/phase.md) | encoder の header と骨格を source に、run-unit・check-skeleton・試験の土台 fixture.h、BASE | O | planned | p002 |
 | [ws329-p004](phase004/phase.md) | vcodec-bitwriter、vcodec-nalwriter | S | planned | p003 |
 | [ws329-p005](phase005/phase.md) | vcodec-cabac-enc | S | planned | p004 |
 | [ws329-p006](phase006/phase.md) | h264enc-ps（SPS・PPS・VUI・level の選び） | S | planned | p004 |
@@ -48,7 +48,7 @@
 | [ws329-p014](phase014/phase.md) | h264enc-me（動きの探索） | S | planned | p012、p013 |
 | [ws329-p015](phase015/phase.md) | h264enc-intra（intra の選び） | S | planned | p008、p012 |
 | [ws329-p016](phase016/phase.md) | h264enc-mbwrite（slice_data・macroblock_layer の書き） | S | planned | p007、p009、p011 |
-| [ws329-p017](phase017/phase.md) | h264enc-mb（MB の符号化、2 回の再構成） | S | planned | p008、p015、p016 |
+| [ws329-p017](phase017/phase.md) | h264enc-mb（MB の符号化、2 回の再構成） | O | planned | p008、p015、p016 |
 | [ws329-p018](phase018/phase.md) | h264enc-mode（preset、I・P の決定） | S | planned | p014、p017 |
 | [ws329-p019](phase019/phase.md) | h264enc-mode-b（B の決定） | S | planned | p018 |
 | [ws329-p020](phase020/phase.md) | h264enc-ratecontrol | S | planned | p003 |
@@ -62,4 +62,4 @@
 ## Resume point
 
 - 2026-10-30 Q1: 作成。WS326 の completed の後に p001。
-- 2026-10-31 P5（q1758-i01）: p001 の設計を branch agent/p5-ws329 に（design.md・proposed/ の header 26 個（shared 3 を含む、cc と clang の c89 pedantic で単独 compile を確かめた）・user-questions.md・phase002〜026 の phase.md・design-review.md）。source は変えていない。次: Q1 が受け入れて merge、Q329-1〜4 の回答、WS326 p026 に `vcodec-` の名前を渡す（design §14）。WS326 completed の後に p002。
+- 2026-10-31 P5（q1758-i01）: p001 の設計を branch agent/p5-ws329 に（design.md・proposed/ の header 26 個（shared 3 を含む、cc と clang の c89 pedantic で単独 compile を確かめた）・user-questions.md（Q329-1〜5）・phase002〜026 の phase.md・design-review.md）。design-reviewer の 29 件（blocker 0・major 10・minor 19）を反映。source は変えていない。次: Q1 が受け入れて merge、Q329-1〜5 の回答、WS326 p026 に `vcodec-` の名前を渡す（design §14）。WS326 completed の後に p002。

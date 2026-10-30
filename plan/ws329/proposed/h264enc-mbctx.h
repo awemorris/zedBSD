@@ -110,11 +110,13 @@ struct h264enc_mb_decision {
  * [i]: the planes of RefPicListX[ i ]'s frame (NULL where the entry is
  * missing).  quant, lambda, cavlc: the encoder's tables.  preset: the
  * settings, with me.lambda and the limits set for this picture.  qp: the
- * macroblock's QP (the picture's).  high: the profile is High (Intra_8x8
- * and the 8x8 transform may be used: the PPS's transform_8x8_mode_flag).
- * cabac: the slice codes with CABAC.  level_limit: the largest |level|
- * the entropy coding can send (H264ENC_CAVLC_LEVEL_LIMIT for CAVLC
- * outside High, 32767 otherwise).  scratch: room for the predictions and
+ * macroblock's QP (the picture's).  transform_8x8_mode: the PPS's
+ * transform_8x8_mode_flag (Intra_8x8 and the 8x8 transform may be used;
+ * 1 only in High with a preset that uses either).  cabac: the slice codes
+ * with CABAC.  level_limit: the largest |level| the entropy coding can
+ * send (H264ENC_CAVLC_LEVEL_LIMIT for CAVLC outside High, 32767
+ * otherwise).  pcm_nonzero: 1 in the Constrained Baseline and Main
+ * profiles, whose I_PCM samples must not be 0 (A.2.1, A.2.2).  scratch: room for the predictions and
  * residuals a decision needs (at least H264ENC_SCRATCH bytes).
  */
 #define H264ENC_SCRATCH 4096U
@@ -128,9 +130,10 @@ struct h264enc_mbctx {
 	const struct h264enc_cavlc *cavlc;
 	struct h264enc_preset preset;
 	int qp;
-	int high;
+	int transform_8x8_mode;
 	int cabac;
 	int32_t level_limit;
+	int pcm_nonzero;
 	uint8_t scratch[H264ENC_SCRATCH];
 };
 

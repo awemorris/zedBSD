@@ -15,15 +15,9 @@
  *   [ 1 1 1 1; 1 1 -1 -1; 1 -1 -1 1; 1 -1 1 -1 ], and ( sum of |T| + 1 )
  *   >> 1; the blocks' values summed.
  * - SSD: the sum of squared differences.
- * - The Lagrange multipliers, per QP: lambda_mode = 0.85 *
- *   2^( ( QP - 12 ) / 3 ) for SSD-based costs and lambda_motion = Sqrt(
- *   lambda_mode ) for SAD- and SATD-based costs (T. Wiegand, H. Schwarz,
- *   A. Joch, F. Kossentini and G. J. Sullivan, "Rate-constrained coder
- *   control and comparison of video coding standards", IEEE Trans.
- *   Circuits Syst. Video Technol. 13(7), 2003), kept in fixed point with
- *   8 fraction bits.  A cost is distortion + ( ( lambda * bits ) >> 8 )
- *   with bits a whole number of bits, or + ( ( lambda * cost ) >> 16 )
- *   for a cost in 1/256 bit.
+ * - The Lagrange multipliers, per QP (struct h264enc_lambda), kept in
+ *   fixed point with 8 fraction bits.  A cost is distortion + ( ( lambda
+ *   * bits ) >> 8 ) with bits a whole number of bits.
  */
 
 #ifndef LIBMEDIA_H264ENC_COST_H
@@ -34,8 +28,15 @@
 
 /*
  * The multipliers of every QP 0..51, as Round( 256 * lambda ): ssd[qp]
- * from lambda_mode, sad[qp] from lambda_motion.  Computed with <math.h>
- * by h264enc_lambda_init; owned by the encoder (embedded).
+ * from lambda_mode = 0.85 * 2^( ( QP - 12 ) / 3 ) for SSD-based costs,
+ * sad[qp] from lambda_motion = Sqrt( lambda_mode ) for SAD- and
+ * SATD-based costs.  Computed with <math.h> by h264enc_lambda_init;
+ * owned by the encoder (embedded).
+ *
+ * Procedure referenced: T. Wiegand, H. Schwarz, A. Joch, F. Kossentini
+ * and G. J. Sullivan, "Rate-constrained coder control and comparison of
+ * video coding standards", IEEE Trans. Circuits Syst. Video Technol.
+ * 13(7), 2003 (the Lagrange multipliers of mode and motion decisions).
  */
 struct h264enc_lambda {
 	uint32_t ssd[52];

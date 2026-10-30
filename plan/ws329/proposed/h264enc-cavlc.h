@@ -38,8 +38,9 @@ struct h264enc_code {
  * h264sw_cavlc_coeff_token and column 4 the nC = -1 one (TotalCoeff 0..4
  * there); total_zeros[tzVlcIndex - 1][total_zeros];
  * total_zeros_chroma_dc[tzVlcIndex - 1][total_zeros];
- * run_before[Min( zerosLeft, 7 ) - 1][run_before]; cbp_code[intra][cbp]
- * the codeNum of each coded_block_pattern value 0..47.  Owned by the
+ * run_before[Min( zerosLeft, 7 ) - 1][run_before]; cbp_code[column][cbp]
+ * the codeNum of each coded_block_pattern value 0..47, with the columns
+ * of h264sw_cavlc_cbp: [0] Intra_4x4 and Intra_8x8, [1] Inter.  Owned by the
  * encoder (embedded); constant after init.
  */
 struct h264enc_cavlc {
@@ -99,8 +100,9 @@ unsigned h264enc_cavlc_block_bits(const struct h264enc_cavlc *cavlc, int nc, con
 /*
  * Gives the codeNum of coded_block_pattern me(v) (inverse of Table 9-4 (a)):
  * cbp holds CodedBlockPatternLuma in bits 0..3 and
- * CodedBlockPatternChroma in bits 4..5 (0..47); intra 1 for the Intra_4x4
- * and Intra_8x8 prediction modes.  Returns 0 and *code_num, or EINVAL for
+ * CodedBlockPatternChroma in bits 4..5 (0..47); intra non-zero for the
+ * Intra_4x4 and Intra_8x8 prediction modes (column 0), 0 for Inter
+ * (column 1).  Returns 0 and *code_num, or EINVAL for
  * a cbp above 47 or a chroma part of 3.
  */
 int h264enc_cavlc_cbp(const struct h264enc_cavlc *cavlc, unsigned cbp, int intra, uint32_t *code_num);

@@ -25,7 +25,7 @@
 - 範囲外（first_mb ≥ PicSizeInMbs、frame_num が log2 の外、weighted 1、offset が奇数）で何も書かずに EINVAL。
 - cabac_zero_word: 手で計算した 6 例（k ≤ 0、ちょうど 1、大きい値、size_mbs の大小、Ceil の負の分子）。
 - filler: 6 未満の ERANGE、6・7・1000 byte で `vcodec_nal_append` 後の大きさが total_bytes と一致、`h264sw_nal_parse` で type 12 として読める。
-- NAL の header の byte（範囲外は 0）。
+- NAL の header の byte（範囲外は 0）。SPS・PPS は nal_ref_idc 3、filler は 0（7.4.1）で作る例。
 - 共通: 誤りの引数で落ちず header の誤りを返す。ASan・UBSan の報告 0。期待の値は仕様の表・手の計算・decoder の module の読み戻し（design §10.1）から作り、他の encoder（x264・openh264・JM など）の出力や source を使わない。
 
 ## 注意

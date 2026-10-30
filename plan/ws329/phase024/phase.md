@@ -9,7 +9,7 @@
 
 ## 目的と範囲
 
-- design §11: WS318 の encoder の backend の ops に `h264enc-backend.c` で載せる。表の位置（hardware の後、libavcodec の前）、query の行、config の写し（Q329-4 の答え）、RAW の出力と codec data は WS318 の `packet-format.c`。
+- design §11: WS318 の encoder の backend の ops に `h264enc-backend.c` で載せる。表の位置（hardware の後、libavcodec の前）、query の行、config の写し（Q329-5 の答え）、RAW の出力と codec data は WS318 の `packet-format.c`。
 - WS318 の encoder の host の試験に h264-software の行を足す（往復、CONFIG の断り、implementation の指定）。
 - QEMU の確かめの道（image の中の短い encode の program、判定は console の log でなく SSH の出力）を決めて 1 回流す。
 

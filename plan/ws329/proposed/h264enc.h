@@ -93,17 +93,24 @@
  * Slices per picture: 1..H264ENC_MAX_SLICES (each a run of whole
  * macroblock rows).  The picture: even width and height, 16..16880 luma
  * samples each (H264SW_MAX_SIDE_MBS macroblocks) and at most
- * H264SW_MAX_FRAME_MBS macroblocks.
+ * H264SW_MAX_FRAME_MBS macroblocks.  The frame rate: rate_num and
+ * rate_den 1..2^31 - 1 (time_scale = 2 * rate_num must fit 32 bits), at
+ * most 300 frames per second.  The key frame interval: at most
+ * H264ENC_MAX_KEY_INTERVAL (so the order count 2 * ( index - idr_index )
+ * stays far inside int32_t, 8.2.1).
  */
 #define H264ENC_MAX_REFS 4U
 #define H264ENC_MAX_B_FRAMES 3U
 #define H264ENC_MAX_SLICES 16U
 #define H264ENC_MIN_SIDE 16U
+#define H264ENC_MAX_KEY_INTERVAL 1073741824U
 
 /*
- * The most bits of one macroblock_layer() for 8-bit 4:2:0: 128 + RawMbBits
- * with RawMbBits = 256 * 8 + 2 * 8 * 8 * 8 = 3072 (7-7; A.3.1 j), A.3.3).
- * A macroblock that would exceed it is written as I_PCM.
+ * The most bits of one macroblock_layer() for 8-bit 4:2:0: 3200 (A.3.1 n)
+ * for the Baseline, Constrained Baseline and Main profiles; A.3.2 j)
+ * gives 128 + RawMbBits for High, with RawMbBits = 256 * 8 + 2 * 8 * 8 *
+ * 8 = 3072 by 7-7, the same 3200).  A macroblock that would exceed it is
+ * written as I_PCM.
  */
 #define H264ENC_MB_MAX_BITS 3200U
 
@@ -175,9 +182,12 @@ struct h264enc_picture {
  * unit after 0x00000001; the SPS and the PPS before each IDR picture).
  * data and size stay the encoder's until the next h264enc_receive or
  * h264enc_destroy.  time_us is the picture's presentation time,
- * decode_time_us its decoding time (the presentation times in increasing
- * order, moved earlier by one frame when B-frames are used, so that
- * decode_time_us never exceeds time_us).  flags H264ENC_PACKET_KEY; type
+ * decode_time_us its decoding time: without B-frames the presentation
+ * time itself; with B-frames, for the first packet its presentation time
+ * less one frame duration, and for the n-th packet (n >= 1) the
+ * ( n - 1 )-th smallest of the presentation times given (h264enc-gop.h),
+ * so decoding times increase and never exceed presentation times even
+ * when the input's spacing varies.  flags H264ENC_PACKET_KEY; type
  * the slice type (H264ENC_TYPE_*) and qp the picture's QP, for logs and
  * tests.
  */

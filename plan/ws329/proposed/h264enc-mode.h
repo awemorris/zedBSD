@@ -57,7 +57,10 @@ uint32_t h264enc_mode_i(struct h264enc_mbctx *ctx, struct h264enc_mb_decision *d
  *     (4x4 blocks, inter offset) and chroma (DC and AC, as h264enc-mb.h
  *     quantizes them) is quantized at ctx->qp; when every level is 0 the
  *     decision is P_Skip at once (cost: the SATD).  Without early_skip,
- *     P_Skip is a candidate with cost SATD (no bits).
+ *     P_Skip is a candidate with cost SATD (no bits).  A P_Skip decision
+ *     is coded without residual (h264enc-mb.h).  The chroma prediction of
+ *     the check is h264sw_interp_chroma from the reference frame with the
+ *     chroma vector equal to the luma vector (8.4.1.4, frames).
  *  2. 16x16: for each ref_idx below Min( refs, num_ref_idx_active[0] )
  *     (refs the encoder's P reference count), h264enc_me_search with mvp
  *     from h264sw_mvpred for that ref_idx and candidates: mv_skip (ref 0
@@ -74,8 +77,8 @@ uint32_t h264enc_mode_i(struct h264enc_mbctx *ctx, struct h264enc_mb_decision *d
  *     four ref_idx 0 stays P_8x8 (P_8x8ref0 is never used).
  *  4. Intra: h264enc_intra_decide with try_nxn = intra4x4_always, or 1
  *     when the best inter cost so far is above the Intra_16x16 cost.
- *  5. The least cost.  transform: CHOOSE for inter kinds when ctx->high
- *     and transform_choice, else 4X4.
+ *  5. The least cost.  transform: CHOOSE for inter kinds when
+ *     ctx->transform_8x8_mode and transform_choice, else 4X4.
  *
  * Fills *decision; returns its cost.
  */

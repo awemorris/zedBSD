@@ -54,12 +54,14 @@ struct vcodec_bitwriter {
 
 /*
  * A position of a writer, to go back to (vcodec_bitwriter_rewind): the
- * complete bytes and the pending bits at the time it was taken.
+ * complete bytes, the pending bits and the error at the time it was
+ * taken.
  */
 struct vcodec_bitmark {
 	size_t bytes;
 	uint32_t pending;
 	unsigned pending_bits;
+	int error;
 };
 
 /* Makes an empty writer with no buffer yet; limit is the largest size in bytes it may reach (at least 1). */
@@ -128,9 +130,9 @@ void vcodec_bitwriter_mark(const struct vcodec_bitwriter *writer, struct vcodec_
 
 /*
  * Goes back to a position taken earlier from the same writer since its
- * last reset: what was written after it is dropped; error is cleared
- * when it was set after the mark (an ENOBUFS of a macroblock that is
- * then written another way does not stay).  A mark beyond the current
+ * last reset: what was written after it is dropped, and error becomes
+ * the mark's (an ENOBUFS of a macroblock that is then written another
+ * way does not stay).  A mark beyond the current
  * position is EINVAL.
  */
 void vcodec_bitwriter_rewind(struct vcodec_bitwriter *writer, const struct vcodec_bitmark *mark);

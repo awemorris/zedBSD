@@ -30,9 +30,12 @@
  *   (the order count is twice the presentation distance from the IDR
  *   picture).  idr_pic_id: 0, 1, 0, 1, ... from IDR to IDR (consecutive
  *   IDR pictures differ, 7.4.3).
- * - decode_time_us of the n-th picture coded: the n-th smallest time
- *   given, less one frame duration ( 1 000 000 * rate_den / rate_num,
- *   rounded down ) when b_frames is above 0.
+ * - decode_time_us of the n-th picture coded (n from 0): without B-frames
+ *   its own time; with B-frames, for n 0 its time less one frame duration
+ *   ( 1 000 000 * rate_den / rate_num, rounded down, in int64_t), and for
+ *   n >= 1 the ( n - 1 )-th smallest of the times given so far (counting
+ *   from 0).  With max_num_reorder_frames 1 this never exceeds the
+ *   picture's own time and increases from picture to picture.
  *
  * The module keeps indices and decisions only; the pictures themselves
  * are the encoder's (h264enc-source.h), named by their slot.
@@ -110,7 +113,7 @@ struct h264enc_gop {
 	int draining;
 };
 
-/* Prepares the state; 0, or EINVAL for settings out of range (b_frames above H264ENC_MAX_B_FRAMES, key_interval 0, a zero rate). */
+/* Prepares the state; 0, or EINVAL for settings out of range (b_frames above H264ENC_MAX_B_FRAMES, key_interval 0 or above H264ENC_MAX_KEY_INTERVAL, a zero rate). */
 int h264enc_gop_init(struct h264enc_gop *gop, uint32_t key_interval, unsigned b_frames, unsigned max_refs, unsigned log2_max_frame_num, unsigned log2_max_poc_lsb, uint32_t rate_num, uint32_t rate_den);
 
 /*

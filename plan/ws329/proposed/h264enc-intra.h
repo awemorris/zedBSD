@@ -77,7 +77,8 @@ uint32_t h264enc_intra_chroma(struct h264enc_mbctx *ctx, unsigned *mode);
 /*
  * Decides an intra macroblock (every macroblock of I slices, and the
  * intra candidates of P and B slices): Intra_16x16; Intra_4x4 when
- * try_nxn; Intra_8x8 when try_nxn and the preset's intra8x8 and ctx->high;
+ * try_nxn; Intra_8x8 when try_nxn and the preset's intra8x8 and
+ * ctx->transform_8x8_mode;
  * the least cost wins (ties: 16x16, then 4x4, then 8x8); the chroma mode
  * is chosen once.  decision is filled for the winner (kind, the modes,
  * the levels for I_4X4 and I_8X8, transform 4x4 or 8x8, cost including

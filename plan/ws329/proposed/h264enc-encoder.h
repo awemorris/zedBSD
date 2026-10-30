@@ -14,7 +14,8 @@
  * asked; speed; refs from the preset, at most H264ENC_MAX_REFS;
  * key_interval; rate control); max_num_ref_frames = refs + ( b_frames >
  * 0 ); the level (h264enc_level_choose with dpb_frames =
- * max_num_ref_frames, or h264enc_level_check); the sequence
+ * max_num_ref_frames and max_bitrate the bitrate for CBR, the max_bitrate
+ * for VBR, 0 for CQP; or h264enc_level_check); the sequence
  * (h264enc-ps.h; log2_max_frame_num 8, log2_max_poc_lsb 8; pic_init_qp
  * 26; num_ref_idx_default { refs, 1 }; max_num_reorder_frames 1 with
  * B-frames else 0; max_dec_frame_buffering max_num_ref_frames); the SPS
@@ -54,6 +55,12 @@
  *     and coded as I_PCM; picture->decoded_mbs counted; finish; the NAL
  *     unit appended (the last slice of a CABAC picture with
  *     h264enc_cabac_zero_words).
+ *  3a. The size check (A.3.1 c), d), A.3.2): when the access unit (the
+ *     SPS and PPS included, before filler) is above
+ *     h264enc_level_max_au_bytes, the picture is coded again from step 2
+ *     with QP + 6 (clamped to 51), at most 3 times; the last try is kept
+ *     and counted in stats.au_over.  Nothing of the DPB has changed before
+ *     step 4, so coding again needs no undo but the frame's contents.
  *  4. The picture finished as the decoder's step 6 (no concealment):
  *     h264sw_deblock_picture, the motion copied into the frame, the
  *     order counts, h264sw_dpb_remove and h264sw_dpb_store (output frames
@@ -62,6 +69,13 @@
  *     the slot of a frame no longer in the DPB.
  *  5. The rate control updated; filler data for CBR; the access unit
  *     (the SPS and PPS first for IDR) queued as a packet with its times.
+ *
+ * Limits of the buffers: a slice NAL unit's writer 400 bytes per
+ * macroblock of the slice (H264ENC_MB_MAX_BITS / 8) + 4096; an access
+ * unit 600 bytes per macroblock of the picture (the slices with their
+ * emulation prevention bytes, at most 3 for every 2 bytes) + 65536 + the
+ * CBR buffer size in bytes (the filler).  Passing them is a bug (ENOBUFS,
+ * the encoder fails).
  *
  * Ownership: the encoder owns every allocation; frames are counted
  * references (the DPB's and the picture's); h264enc_destroy drops the
@@ -112,6 +126,40 @@ struct h264enc_queued {
 	int qp;
 };
 
+/*
+ * What the encoder counts for the tests and the log, per stream: pictures
+ * by type, macroblocks coded as I_PCM, the largest macroblock in bits (as
+ * h264enc_mbwrite_bits counts), cabac_zero_word appended, the access units
+ * coded again for the size check and those still over it (au_over), the
+ * largest |mv| component of each direction in quarter samples, the CAVLC
+ * levels clamped, the rate control's underflows.
+ */
+struct h264enc_stats {
+	uint64_t pictures[3];
+	uint64_t pcm_mbs;
+	uint32_t max_mb_bits;
+	uint64_t zero_words;
+	uint64_t au_recoded;
+	uint64_t au_over;
+	int max_mv[2];
+	uint64_t clamped_levels;
+	unsigned underflows;
+};
+
+/*
+ * A hook for the host tools and tests: called after each picture is
+ * reconstructed and deblocked (in coding order), with the frame (its
+ * cropping window and planes; borrowed for the call) and the picture's
+ * presentation index.  NULL for none.  The library itself never sets it.
+ */
+typedef void h264enc_recon_hook(void *data, const struct h264sw_frame *frame, uint64_t index);
+
+/* Sets the hook (or NULL) and its data. */
+void h264enc_set_recon_hook(struct h264enc *encoder, h264enc_recon_hook *hook, void *data);
+
+/* Copies the counters. */
+void h264enc_get_stats(const struct h264enc *encoder, struct h264enc_stats *stats);
+
 /* One slice's state: its header, the decoder's slice context, its writer and its macroblock context. */
 struct h264enc_slice_state {
 	struct h264sw_slice_header header;
@@ -161,6 +209,10 @@ struct h264enc {
 	unsigned packet_head;
 	unsigned packet_count;
 	int state;
+
+	struct h264enc_stats stats;
+	h264enc_recon_hook *recon_hook;
+	void *recon_data;
 };
 
 #endif
