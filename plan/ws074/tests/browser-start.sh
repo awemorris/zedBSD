@@ -1,7 +1,8 @@
 #!/bin/sh
 # ws074: the start page on the Venus guest (build-browser-image.sh).  zdesktop runs at 1280x800 with
 # --glass and the wallpaper; browser starts without an argument at 1000x700.  Checks:
-#  1. start.png: it opens /usr/share/browser/start.html (the package's start page).
+#  1. start.png: it opens /usr/share/browser/start.html (the package's start page; given as the URL, because
+#     without one the window opens the home page on the network).
 #  2. about.png: a click on "About the engine" opens about.html, and Alt+Left comes back.
 #  3. zdesktop's log has no ERROR line.
 # The link's place comes from the host build's --dump=layout of the same page at the same width.
@@ -52,9 +53,18 @@ echo "link: at $link in the page"
 guest "$stop_all" >/dev/null
 guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0
 picture=; [ -f /usr/share/keiland/wallpaper.png ] && picture=--wallpaper=/usr/share/keiland/wallpaper.png
-/bin/wayland --testing --timeout=900 --width=1280 --height=800 --glass $picture > /tmp/zdesktop.log 2>&1 </dev/null & sleep 4; echo started' >/dev/null
-guest "export XDG_RUNTIME_DIR=/tmp; /bin/browser --width=1000 --height=700 > /tmp/b.log 2>&1 </dev/null & sleep 5; echo started" >/dev/null
-set -- $(guest "grep 'KWL MAP client=' /tmp/zdesktop.log | tail -1" | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\).*/\1 \2/p')
+/bin/wayland --testing --timeout=900 --width=1280 --height=800 --glass $picture > /tmp/zdesktop.log 2>&1 </dev/null &
+i=0; while [ ! -S /tmp/wayland-0 ] && [ $i -lt 60 ]; do sleep 1; i=$((i+1)); done; sleep 2; echo started' >/dev/null
+guest "export XDG_RUNTIME_DIR=/tmp; /bin/browser --width=1000 --height=700 $pages/start.html > /tmp/b.log 2>&1 </dev/null & echo started" >/dev/null
+# The window maps a few seconds after the start; wait for its place (up to 60 s).
+i=0
+set --
+while [ $# -lt 2 ] && [ $i -lt 30 ]; do
+	sleep 2
+	set -- $(guest "grep 'KWL MAP client=' /tmp/zdesktop.log | tail -1" | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\).*/\1 \2/p')
+	i=$((i+1))
+done
+sleep 2
 wx=${1:-0}; wy=${2:-0}
 echo "browser: window at $wx,$wy"
 
