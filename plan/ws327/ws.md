@@ -34,17 +34,17 @@
 | [ws327-p004](phase004/phase.md) | app の移行（一括） | — | canceled（p008〜p012 に分けた。Mailer の途中の移行 6bb8c3c8d は p008 が引き継ぐ） | — |
 | ws327-p005 | 解説と規約の全文の見直し（一括） | — | canceled（p015・p017 に分けた） | — |
 | ws327-p006 | Win32 の実装（一括） | — | canceled（p013・p014 に分けた） | — |
-| ws327-p007 | 委譲の設計（手順の §4.4〜§4.8）: p008〜p017 の各 phase.md（触る file、design の節、移す前後の対応、試験のコマンド、突然変異の確かめ、受け入れ）、Win32 の `thread-win32.c`・`socket-win32.c` の骨格と mingw の build の script、app の移行の試験の道（既存の host 試験の link の直し方を含む）、境界の check の script | P2 | planned | p003 |
-| ws327-p008 | Mailer の移行の残り（`sync.c`、`imap.c` の `conn.fd`）、`plan/tools/mail/` の host 試験の link と `host-mail-backend.c` | Sonnet | planned | p007 |
-| ws327-p009 | Music・Video Player・media-app の移行、`plan/tools/music/`・`plan/tools/media/` の host 試験の link | Sonnet | planned | p007 |
-| ws327-p010 | Photos（thumbs・media-worker）の移行 | Sonnet | planned | p007 |
-| ws327-p011 | Settings（look・storage-scan・storage-trash）の移行 | Sonnet | planned | p007 |
-| ws327-p012 | IME の辞書の thread、libkeiland の picker-model・audio の移行 | Sonnet | planned | p007 |
-| ws327-p013 | `thread-win32.c` を書き mingw で cross compile（warning 0）。動作確認は不要（決定 3） | Sonnet | planned | p007 |
-| ws327-p014 | `socket-win32.c` を書き mingw で cross compile（warning 0）。動作確認は不要（決定 3） | Sonnet | planned | p007 |
-| ws327-p015 | 解説（keiland-programming.md の該当の章、08-worker.c・08-language.c を新しい層に） | Sonnet | planned | p008〜p012 |
-| ws327-p016 | 受け入れ: OS の境界の check（design §1.3）、全 app の QEMU の回帰（design §6.4）、Win32 で口が成り立たない所の Q1 への報告 | P2 | planned | p008〜p015 |
-| ws327-p017 | 規約の全文の見直し | Sonnet | planned | p016 |
+| [ws327-p007](phase007/phase.md) | 委譲の設計（手順の §4.4〜§4.8）: p008〜p017 の各 phase.md（触る file、design の節、移す前後の対応、試験のコマンド、突然変異の確かめ、受け入れ）、Win32 の `thread-win32.c`・`socket-win32.c` の骨格と mingw の build の script、app の移行の試験の道（既存の host 試験の link の直し方を含む）、境界の check の script | P2 | in-progress（2026-10-30 q1697-i02） | p003 |
+| [ws327-p008](phase008/phase.md) | Mailer の移行の残り（`sync.c`、6bb8c3c8d の `conn.c`・`tls.c`・`imap.c` の確かめ）、`plan/tools/mail/` の host 試験の link と `host-mail-backend.c`・`host-mail-sync.c` | Sonnet | planned | p007 |
+| [ws327-p009](phase009/phase.md) | Music・Video Player・media-app の移行、`plan/tools/music/`・`plan/tools/media/` の host 試験の link | Sonnet | planned | p007 |
+| [ws327-p010](phase010/phase.md) | Photos（thumbs・media-worker）の移行 | Sonnet | planned | p007 |
+| [ws327-p011](phase011/phase.md) | Settings（look・storage-scan・storage-trash）の移行 | Sonnet | planned | p007 |
+| [ws327-p012](phase012/phase.md) | IME の辞書の thread、libkeiland の picker-model・audio の移行 | Sonnet | planned | p007 |
+| [ws327-p013](phase013/phase.md) | `thread-win32.c` を書き mingw で cross compile（warning 0）。動作確認は不要（決定 3） | Sonnet | planned | p007 |
+| [ws327-p014](phase014/phase.md) | `socket-win32.c` を書き mingw で cross compile（warning 0）。動作確認は不要（決定 3） | Sonnet | planned | p007 |
+| [ws327-p015](phase015/phase.md) | 解説（keiland-programming.md の 8 章、08-worker.c・08-language.c を新しい層に、network の節と 08-network.c） | Sonnet | planned | p007（API は凍結済み。2026-10-30 P2 が p008〜p012 から外した） |
+| [ws327-p016](phase016/phase.md) | 受け入れ: OS の境界の check（design §1.3）、全 app の QEMU の回帰（design §6.4）、Win32 で口が成り立たない所の Q1 への報告 | P2 | planned | p008〜p015 |
+| [ws327-p017](phase017/phase.md) | 規約の全文の見直し | Sonnet | planned | p016 |
 
 ## Resume point
 
@@ -55,3 +55,6 @@
   `conn.c`・`tls.c`・`imap.c`・`mail.h` まで（`sync.c` が残り Mailer は build しない、[phase004](phase004/phase.md)）。guest の image の config は
   `tests/config-amd64-guest.mk`（未 build）。p006（Win32）は未着手。
 - 2026-10-30 Q1: ユーザーの指示で Phase を標準廉価実装手順の形に組み直した（上の表）。P2 を再起動し p003 の guest の実行と p007 の委譲の設計から。
+- 2026-10-30 P2（q1697-i02）: p003 の guest の実行 PASS（cleared の候補）。p007: p008〜p017 の phase.md、design §13（実装の Phase の共通の約束）、
+  Win32 の骨格、試験の道具（`check-layers.py`・`check-base.sh`＋`frozen.sha256`・`build-win32.sh`・`host-apps.sh`・`doc-lines.py`・
+  `guest-layers.sh`）。p015 の依存を p007 に（API は凍結済み）。

@@ -5,7 +5,8 @@
 - 親: [WS327](ws.md)（ws327-p001、2026-10-30 P2）。ユーザーの決定は ws.md の 1・2 の原文。
 - 目的: app が pthread・C11 threads・BSD socket・`poll` を直に呼ばず、POSIX（zedBSD・Linux・FreeBSD）と Win32 で同じ interface の
   libkeiland の層を使う形にする（決定 1）。app の対応も入れる。libbrowser は使わない（決定 2）。
-- 状態: 案（design-reviewer の指摘 18 件を反映、§11。Q1 に問う事は §12）。
+- 状態: p001 の設計（design-reviewer の指摘 18 件を反映、§11。Q1 の答えは §12）。p007（2026-10-30）で標準廉価実装手順の委譲の形に
+  した: 実装の Phase の共通の約束 §13、p007 の design-reviewer の指摘 §14。Phase の番号は ws.md の表（p004〜p006 は p008〜p015 に分けた）。
 
 ## 0. 要約
 
@@ -24,7 +25,7 @@
 grep の語: `pthread_*`・`thrd_`・`mtx_`・`cnd_`・`<threads.h>`・`socket(`・`connect(`・`bind(`・`listen(`・`accept(`・`poll(`・`select(`・
 `getaddrinfo`。kl_app を使う program（`kl_app_open` の呼び手）と libkeiland を link する program を見た。
 
-### 1.1 移す物（p004）
+### 1.1 移す物（p008〜p012。p008 Mailer、p009 Music・Video Player・media-app、p010 Photos、p011 Settings、p012 IME・picker・audio）
 
 | program | file | 使っている物 | 移し先 |
 | --- | --- | --- | --- |
@@ -47,8 +48,8 @@ grep の語: `pthread_*`・`thrd_`・`mtx_`・`cnd_`・`<threads.h>`・`socket(`
 - Terminal・Installer・Phone・Files・PDF Viewer・Browser の shell は thread・socket を直に使っていない（WS314 で `kl_process`・`kl_launch`・
   `kl_app_post` に移った）。依頼文の「Terminal・Installer・Phone の thread」は 2026-10-30 の tree には無い（grep で 0）。
 - Mailer の SMTP・IMAP は `conn.c` の上にあるが、`imap.c:735`（`imap->conn.fd >= 0` で開いているかを見る）と `sync.c:437`（poll に `conn.fd`）が
-  fd を直に見る。p004 で `ml_conn` の関数に直す。Mailer の network の I/O（IMAP・SMTP・TLS）は全て sync の thread の上（`sync.c` の job）。
-- 既存の host 試験が移す source を `-pthread` だけで link している（p004 で build を直す、§6.4）: `plan/tools/mail/run-host-*.sh`
+  fd を直に見る。p008 で `conn.socket` に直す（§6.2）。Mailer の network の I/O（IMAP・SMTP・TLS）は全て sync の thread の上（`sync.c` の job）。
+- 既存の host 試験が移す source を `-pthread` だけで link している（p008・p009 で build を直す、§6.4）: `plan/tools/mail/run-host-*.sh`
   （conn.c・sync.c・tls.c、`host-mail-backend.c:379` は `imap.conn.fd` を poll）、`plan/tools/music/host-music-play.sh`（play.c）、
   `plan/tools/media/run-host-codec.sh`（avcodec.c を `-std=c89`）。
 
@@ -66,9 +67,10 @@ grep の語: `pthread_*`・`thrd_`・`mtx_`・`cnd_`・`<threads.h>`・`socket(`
 | `userland/tests/*` の network の probe | 試験の program（OS の network の試験）。Keiland の app ではない。 |
 | libvulkan・libvulkan-compat・libwayland・libegl・X server の GLX | 描画・Wayland の library（check.sh の `not_applications`）。 |
 
-### 1.3 OS の境界の check（p004）
+### 1.3 OS の境界の check（p007 の道具、p016 で check.sh へ）
 
-`plan/tools/keiland-os-boundary/check.sh` に行を足す（新しい check `T1`・`N1`、`app-allow.tsv` の形）:
+WS327 の間は `plan/ws327/tests/check-layers.py`（許可の表 `layers-allow.tsv`、引数で範囲を絞れる）が T1・N1 を見る。p016 で
+`plan/tools/keiland-os-boundary/check.sh` に移す案を Q1 に出す（`plan/tools/` は Q1 の範囲）。中身:
 
 - `T1`: app（check.sh の「application」の集合）と libkeiland の `platform/` の外が `pthread_*`・`thrd_*`・`mtx_*`・`cnd_*`・`call_once`・
   `<pthread.h>`・`<threads.h>` を使わない。
@@ -88,7 +90,7 @@ grep の語: `pthread_*`・`thrd_`・`mtx_`・`cnd_`・`<threads.h>`・`socket(`
 - 誤りは errno の値（`<errno.h>` の名前、POSIX の値）で返す。Win32 は Win32・WinSock の誤りを同じ名前の errno の値に写す（§5.3）。
   関数は 0 か誤りの値を返し、成果は引数の pointer で返す（libkeiland の他の関数と同じ形）。
 - 呼べる thread: 特に書かない限りどの thread からでも（同じ物を同時に使う時の約束は各節）。`kl_app_*` の「app の thread だけ」とは別。
-- library の中（libkeiland の他の部分）も公開の層を使ってよい（`picker-model.c`・`audio.c` を p004 で移す）。`platform.h` の `keiui_*` は
+- library の中（libkeiland の他の部分）も公開の層を使ってよい（`picker-model.c`・`audio.c` を p012 で移す）。`platform.h` の `keiui_*` は
   library の内部の起こし・lock で、WS314 の物をそのまま残す（Win32 の時に `kl_*` の上に作り直せる）。
 
 ## 3. thread（`keiland_thread.h`、p002、KL_VERSION 103）
@@ -439,7 +441,7 @@ void kl_socket_waker_close(struct kl_socket_waker *waker);
 | `kl_mutex_try` | `pthread_mutex_trylock` → EBUSY | `TryAcquireSRWLockExclusive` → EBUSY |
 | 条件変数 | `pthread_cond_t`（CLOCK_MONOTONIC） | `CONDITION_VARIABLE`、`SleepConditionVariableSRW`（ms は相対なので `wait_for` がそのまま写る。`UINT32_MAX` は 1 引く。`ERROR_TIMEOUT` → ETIMEDOUT） |
 | once | `pthread_once` | `InitOnceExecuteOnce`（callback の引数で `run` を渡す） |
-| thread ごとの値 | `pthread_key_*`（終わりの destroy） | `FlsAlloc`・`FlsSetValue`・`FlsGetValue`（TLS の `TlsAlloc` は destroy を呼ばないので FLS）。callback は NTAPI（x86 の stdcall）なので library の trampoline を渡し、key の 16 byte に FLS の index と `destroy` を入れる。`FlsFree` は生きた値に callback を呼ぶ（§3.2 の未規定） |
+| thread ごとの値 | `pthread_key_*`（終わりの destroy） | `FlsAlloc`・`FlsSetValue`・`FlsGetValue`（TLS の `TlsAlloc` は destroy を呼ばないので FLS）。FLS の callback には値だけが渡り key は渡らないので、各 thread の値を小さな record（`destroy` と値）に包んで FLS に置き、library の callback（NTAPI）が record の `destroy` を呼んで record を放す。key の 16 byte は FLS の index と `destroy`（record を作る時に写す）。`set` は初めての時に record を確保する（ENOMEM、header の約束の内）。`FlsFree` は生きた値に callback を呼ぶ（§3.2 の未規定）。p007 で直した（元の「key に index と destroy を入れ trampoline で」は callback が key を知らず成り立たない） |
 | signal | thread は全 signal を止めて始まる | signal の概念が無い（何もしない） |
 
 ### 5.2 network
@@ -482,7 +484,7 @@ ECONNRESET、`WSAENETDOWN` → ENETDOWN、`WSAEACCES` → EACCES、`WSAEINVAL` �
 `WSAEMSGSIZE` は誤りにせず「切った datagram」として buffer の大きさを返す（§4.3）。MSVC・mingw の errno.h では EAGAIN と EWOULDBLOCK が別の値
 （11・140）なので、library は EAGAIN だけを返す（header に「EWOULDBLOCK と比べない」と書く）。
 
-## 6. app の移行（p004）
+## 6. app の移行（p008〜p012）
 
 ### 6.1 thread の名前と数（WS309 の方針）
 
@@ -496,7 +498,7 @@ ECONNRESET、`WSAENETDOWN` → ENETDOWN、`WSAEACCES` → EACCES、`WSAEINVAL` �
 | IME | `ime-dict-write` | 書く物がある間 1 | `kl_cond_wait` |
 | libkeiland | `kl-picker-scan` | picker の走査中に 1 | `kl_cond_wait` |
 
-数は今の source の数と同じ（移すだけ）。名前は p004 で各 thread の `kl_thread_options.name` に入れる。
+数は今の source の数と同じ（移すだけ）。名前は p008〜p012 で各 thread の `kl_thread_options.name` に入れる。
 
 ### 6.2 Mailer（network）
 
@@ -511,7 +513,7 @@ ECONNRESET、`WSAENETDOWN` → ENETDOWN、`WSAEACCES` → EACCES、`WSAEINVAL` �
   `tls_lock` を `KL_MUTEX_INIT`。
 - `sync.c`: thread と mutex を `kl_*` に、wake の pipe を `kl_socket_waker`（ring は `ml_sync_add` と stop）、`sync_wait` の `poll` を
   `kl_socket_poll`（waker と IDLE の各 socket の READABLE。ready が READABLE か FAILED の socket を今の `POLLIN | POLLHUP | POLLERR` と同じに
-  扱う）。`conn.fd` を直に見る所（`sync.c:437`・`imap.c:735`）は `ml_conn` の関数（socket と、開いているか）に。結果を窓へ返すのは今どおり `ready(context)` → `kl_app_post`（WS314）。
+  扱う）。`conn.fd` を直に見る所（`sync.c:437`・`imap.c:735`）は `conn.socket` を直に見る（p007 で決めた: `imap.c` が既にその形、関数を足さない）。結果を窓へ返すのは今どおり `ready(context)` → `kl_app_post`（WS314）。
 - `mail.h` の `struct ml_conn`・宣言を直す。Mailer の source から `<poll.h>`・`<netdb.h>`・`<sys/socket.h>`・`<pthread.h>`・`<fcntl.h>`（wake の
   非 blocking の分）が消える。
 
@@ -527,7 +529,7 @@ pthread の型と呼び出しを 1 対 1 で写す（`pthread_mutex_lock` → `k
 - `pthread_create` の `void *(*)(void *)` の関数を `void (*)(void *)` に（`return NULL` を消す）。
 - thread の join の有無は今のまま（detach する所は今は無い）。優先度は全て `KL_THREAD_PRIORITY_NORMAL`（動きを変えない、review 17）。
 
-### 6.4 確かめ（p004）
+### 6.4 確かめ（p008〜p012 の各 Phase と p016）
 
 - build warning 0: zedBSD amd64・arm64・riscv64（移した program と libkeiland）、Linux（`keiland-linux.mk`）、FreeBSD（P1 の guest を overlay して
   backend-test.sh）。
@@ -539,7 +541,7 @@ pthread の型と呼び出しを 1 対 1 で写す（`pthread_mutex_lock` → `k
   `--arrivals`）を host で立て、guest の Mailer が接続・IDLE・新着の受け取り・送信）、Music・Video Player の再生の開始・停止、
   Photos の縮小、Settings の storage の page、Terminal の起動（回帰）。画面の PNG と SSH での program の終了の status で判じる（console log は読まない）。
 
-## 7. 解説（p005）
+## 7. 解説（p015）
 
 - `docs/howto/keiland-programming.md` 8 章: `08-worker.c`・`08-language.c` を `kl_thread`・`kl_mutex`・`kl_cond` に（`<stdatomic.h>` は残す）。
   「The threads are standard C11 threads」の文を「libkeiland's threads (`keiland_thread.h`)」に、FreeBSD の C11 threads の注意を外す。
@@ -555,7 +557,7 @@ pthread の型と呼び出しを 1 対 1 で写す（`pthread_mutex_lock` → `k
 | --- | --- | --- |
 | p002 | `plan/ws327/tests/thread-test.c`（Linux の host、clang・gcc、`-fsanitize=thread` の build でも） | 8 thread × 100000 の mutex の加算、条件変数の生産と消費（1 生産・4 消費、数の一致）、`wait_for` の時間切れ（50 ms ± の範囲）、once を 8 thread から（1 回）、key の destroy が thread の終わりに呼ばれる、detach の thread の記録が放される（ASan の build で漏れ 0）、join の EDEADLK、`KL_MUTEX_INIT`・`KL_ONCE_INIT` の静的な使用、名前（Linux は `pthread_getname_np` で読み返す）、`cpu_count >= 1`、各 OS の `PTHREAD_MUTEX_INITIALIZER`・`PTHREAD_ONCE_INIT` の byte が 0 |
 | p003 | `plan/ws327/tests/socket-test.c`（同） | address の parse・format（v4・v6・scope・誤り）、resolve（"localhost"・数字・無い名前 → ENOENT（`.invalid`））、TCP の loopback の往復（IPv4・IPv6、blocking と非 blocking）、非 blocking の connect の成功（WRITABLE → result 0）と失敗（閉じた port → FAILED か WRITABLE → ECONNREFUSED）、accept の flags、`kl_socket_poll` の複数（16 socket の中の 1 つだけ readable）、時間切れ、waker（他の thread の ring で FOREVER の poll が返る、鳴りの合流、空にした後は鳴らない）、相手の close で receive 0、send の EPIPE（SIGPIPE で死なない）、UDP の send_to・receive_from、IPV6_ONLY の既定 1、TSan の build で waker と poll の競合 |
-| p003 | zedBSD の上（QEMU） | thread-test・socket-test を zedBSD 用に build して guest で走らせる（`plan/ws314/tests/guest.sh` の形）。p003 の受け入れの条件（zedBSD に固有の振る舞い: 失敗した非 blocking の connect は SYN_SENT の間だけ POLLOUT・CLOSED では POLLERR だけ、SIGPIPE は thread 宛て、IPV6_V6ONLY は bind の前だけ、review 11） |
+| p003 | zedBSD の上（QEMU） | thread-test・socket-test を zedBSD 用に build して guest で走らせる（`plan/ws327/tests/guest-layers.sh`、image は `config-amd64-layers.mk`。2026-10-30 thread 27・socket 53 PASS。zedBSD の image に `/etc/hosts` が無いので script が loopback の行を足す）。p003 の受け入れの条件（zedBSD に固有の振る舞い: 失敗した非 blocking の connect は SYN_SENT の間だけ POLLOUT・CLOSED では POLLERR だけ、SIGPIPE は thread 宛て、IPV6_V6ONLY は bind の前だけ、review 11） |
 | p003 | waker の stress（review 1） | N 本の thread が「counter を増やして ring」を繰り返し、FOREVER の poll の側が返るたびに counter を読み、期限内に最終値に届く（届かなければ鳴りが失われた） |
 
 FreeBSD は P1 の guest（`/home/awe/zedBSD-worktrees/p1-ws309i/build/ws309/freebsd/guest/guest.qcow2` を書き込まずに overlay）で
@@ -573,7 +575,7 @@ libkeiland の build と同じ試験を走らせる（backend-test.sh の形）�
 - TLS、UNIX domain socket、multicast、raw socket、socket の時間切れの option（`SO_RCVTIMEO`、待ちは poll で）。
 - libbrowser・libmedia・compositor・`libkeiland-backend-*`・sessiond・printd。
 - Win32 の build（interface が移せる事を §5 で示すだけ）。ただし host に mingw-w64 と wine が有るので、`thread-win32.c`・`socket-win32.c` を
-  書いて mingw で cross compile まで（p006、ws.md の決定 3。wine での動作確認はしない）。
+  書いて mingw で cross compile まで（p013・p014、ws.md の決定 3。wine での動作確認はしない）。
 - libkeiland の `platform.h` の `keiui_*` を `kl_*` の上に作り直すこと（Win32 に移す時に）。
 
 ## 11. design-reviewer の指摘と反映（2026-10-30、18 件）
@@ -614,3 +616,115 @@ cross compile（warning 0）まで（wine の試験はしない）を p006 と�
    （p006）で。interface を変えずに足せる。
 3. **`plan/tools/` の既存の host 試験の修正**（§6.4）: `plan/tools/mail/`・`plan/tools/music/`・`plan/tools/media/` は所有の外。p004 で
    移した source を link し直す修正を担当がしてよいか。
+
+## 13. 実装の Phase の共通の約束（p008〜p015・p017、標準廉価実装手順 §4.6）
+
+実装の担当（Sonnet 5.5 high）は自分の phase.md とこの節だけを手順として読む。この WS は外部の標準仕様の実装ではない（「仕様」は
+§3・§4 と header の comment、Win32 は Microsoft の文書）。phase.md と header が食い違えば header に従い、食い違いを報告する。
+
+### 13.1 変えてはいけない物（凍結）
+
+- `userland/desktop/include/keiland/` の全ての header（`keiland_thread.h`・`keiland_socket.h` は BASE）、`libkeiland/exports.map`・`exports.py`、
+  `libkeiland/platform/thread-posix.c`・`socket-posix.c`、libkeiland の Makefile 3 本、この design.md、`plan/ws327/tests/` の全て（試験の道具）。
+  `sh plan/ws327/tests/check-base.sh` が `frozen.sha256` で照合する。
+- HAL・toolchain・共有の `build/`・main の checkout・他の WS の file（`plan/ws*/` の他の WS の試験も読むだけ。`plan/tools/` は phase.md が
+  名指す file だけ）。
+- header・凍結の file・試験の道具に不備を見つけたら、直さずに止めて、どの file のどこで何が足りないかを報告する。
+- 移しで振る舞いを変えない: 待ちの時間・thread の数・join の有無・誤りの値と画面の文・log の文字列は今のまま（例外は phase.md が書く物だけ）。
+
+### 13.2 pthread から kl_* への写し（1 対 1）
+
+| 前 | 後 | 注意 |
+| --- | --- | --- |
+| `#include <pthread.h>` | `#include <keiland/keiland_thread.h>`（`<keiland/keiland.h>` を既に include する file は足さなくてよい） | 他の用途の include（`<time.h>` など）は、使う物が残る間は残す |
+| `pthread_t x;` | `struct kl_thread *x;` | join の後に `x = NULL;` |
+| `pthread_mutex_t` ／ `pthread_cond_t` | `struct kl_mutex` ／ `struct kl_cond` | 構造体に埋め込みのまま |
+| `PTHREAD_MUTEX_INITIALIZER` | `KL_MUTEX_INIT` | 静的な記憶だけ。destroy しない |
+| `PTHREAD_COND_INITIALIZER` | 無い（§13.4 の形で一度だけ `kl_cond_init`） | 静的な条件変数は 0 の byte では使えない（§3.2） |
+| `pthread_once_t o = PTHREAD_ONCE_INIT; pthread_once(&o, f)` | `static struct kl_once o = KL_ONCE_INIT; kl_once(&o, f)` | |
+| `(void)pthread_mutex_init(&m, NULL)` | `kl_mutex_init(&m)`（int: 0・ENOMEM・EAGAIN） | 今の扱い（無視か誤りで返る）を保つ。phase.md が直す所はそれに従う |
+| `pthread_mutex_destroy`・`lock`・`unlock` | `kl_mutex_destroy`・`kl_mutex_lock`・`kl_mutex_unlock` | void を返す。`(void)` の cast を外す |
+| `pthread_mutex_trylock(&m)` | `kl_mutex_try(&m)`（0 か EBUSY） | |
+| `pthread_cond_init(&c, NULL)` | `kl_cond_init(&c)`（int） | 待ちの時計は単調になる（POSIX の層が `CLOCK_MONOTONIC`） |
+| `pthread_cond_destroy`・`wait`・`signal`・`broadcast` | `kl_cond_destroy`・`kl_cond_wait`・`kl_cond_signal`・`kl_cond_broadcast` | void。`(void)` を外す |
+| `clock_gettime(CLOCK_REALTIME)` に ms を足して `pthread_cond_timedwait` | `kl_cond_wait_for(&c, &m, ms)`（0 か ETIMEDOUT） | 絶対の時刻の計算を消す |
+| `pthread_create(&t, NULL, f, a)` | §13.3 | `f` は `static void f(void *argument)`（`return NULL;` を消す） |
+| `pthread_join(t, NULL)` | `kl_thread_join(t)` | 戻り値は今と同じく見ない（`(void)`） |
+| `nanosleep` で ms を眠る補助 | `kl_thread_sleep(ms)` | 補助の関数は残して中身を替えてよい |
+
+### 13.3 thread の起動の形
+
+```c
+struct kl_thread_options options;
+
+/* The thread: its name (design §6.1), what it runs and its priority. */
+memset(&options, 0, sizeof(options));
+options.name = "music-play";
+options.run = play_run;
+options.argument = reader;
+options.priority = KL_THREAD_PRIORITY_NORMAL;
+error = kl_thread_start(&options, &player->thread);
+```
+
+- 名前は §6.1 の表（phase.md にも写す）。優先度は全て NORMAL、`stack_size` は 0（今と同じ）。
+- `kl_thread_start` は失敗の時 `*thread` を NULL にして errno の値を返す。今の失敗の扱いをそのまま使う。
+
+### 13.4 静的な条件変数の形（Photos の thumbs・media-worker、IME）
+
+```c
+/* Whether the worker's condition was made (0) or why it was not; set once by worker_init. */
+static struct kl_once worker_once = KL_ONCE_INIT;
+static int worker_wake_error;
+
+static void worker_init(void);
+static int worker_ready(void);
+
+/* Makes the worker's condition, once for the program. */
+static void
+worker_init(void)
+{
+	/* The condition (a static one cannot be made by its bytes). */
+	worker_wake_error = kl_cond_init(&worker.wake);
+}
+
+/* Makes the worker's condition the first time: 0, or why it cannot be. */
+static int
+worker_ready(void)
+{
+	/* Once for the program; every later call sees the first one's outcome. */
+	kl_once(&worker_once, worker_init);
+	return worker_wake_error;
+}
+```
+
+- 条件変数を使う全ての public の入口（start・queue・stop など、signal・wait の前）で `worker_ready()` を呼ぶ。
+- 0 でなければ: start はその値を返す（thread を作らない。今の「thread を作れない」の扱い）。signal する所は signal を飛ばす（thread が
+  無いので待つ者は無い）。IME は今の「thread が無ければ同期で書く」に落ちる。
+- `kl_cond_destroy` は呼ばない（process の終わりまで使う静的な物）。
+
+### 13.5 build と試験の command（worktree の root で）
+
+- zedBSD（3 arch、warning 0 は `-Werror` で build の失敗になる）: `sh plan/ws327/tests/build-zedbsd.sh <phase> <arch> "<program...>"`
+  を amd64・arm64・riscv64 で。出力は `build/ws327-<phase>-<arch>/`、log は `build/ws327-<phase>-<arch>.log`、最後の行
+  `zedbsd <arch> make=0 warnings=0` を見る。sysroot の build を含み 1 arch 数分〜30 分。3 つを順に（並べない）。各 command に timeout を付ける（script の中で付いている）。
+- Linux（libkeiland と、Linux でも build する Settings・IME）: `make -j16 -f userland/desktop/keiland-linux.mk
+  KEILAND_LINUX_BUILD=build/ws327-<phase>-linux build/ws327-<phase>-linux/lib/libkeiland.so [build/ws327-<phase>-linux/bin/settings]
+  [build/ws327-<phase>-linux/libexec/keiland-ime] > build/ws327-<phase>-linux.log 2>&1; echo $?` と `grep -c 'warning:'` が 0。
+- 境界: `python3 -I plan/ws327/tests/check-layers.py <自分の directory...>` が `ws327-check-layers: PASS`（T1・N1 が 0）。
+- 凍結: `sh plan/ws327/tests/check-base.sh` が `ws327-check-base: PASS`。
+- 各 phase.md の host 試験。
+- `git diff --check`（check-base.sh が branch の分を見る）。
+
+### 13.6 突然変異の確かめ（必須）
+
+host 試験が通った後、移した code をわざと壊し（git の外で、例えば `cp` で控えを取って編集）、試験が FAIL（か時間切れ）になる事を確かめ、
+元に戻して `cmp` で戻った事を確かめる。phase.md が壊し方を挙げる。host 試験の無い所（Photos・Settings・audio）は境界の check で
+（pthread の呼び出しを 1 つ戻すと T1 が出る）確かめ、動きは p016 の QEMU で確かめる。
+
+### 13.7 終わりの条件と報告
+
+- 上の command を全て流し、最後の行を自分で読む。規約（`plan/coding-style.md` の §14 の checklist）で自分の diff を見直す。
+- commit: 新しい file は先に `git add`、`git commit -m WIP -- <phase.md が挙げる path>`。push しない。rm しない（消す物は報告に書く）。
+- phase.md の「結果」の節（日付は host の `date`）: 流した command と最後の行、件数、突然変異の結果、自分で決めた点、未実施、Q1 への所見。
+  ws.md の表のこの行は「実装済み・試験 PASS（日付）」（cleared は Q1）。
+- 報告: commit の SHA、command と最後の行、自分で決めた点、未実施。
