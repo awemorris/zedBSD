@@ -101,6 +101,8 @@ struct bcm2711_vulkan_native_draw {
 	uint32_t index_address;
 	uint32_t index_bytes;
 	uint32_t index_size;
+	/* A space-owned 16-bit copy of the draw's 32-bit indices, of which the draw holds one use until it retires. */
+	struct bcm2711_native_snapshot *index_snapshot;
 	/*
 	 * The draw's clip window in the framebuffer's pixels (x, y, width,
 	 * height): the drawable, render area, viewport and scissor together.

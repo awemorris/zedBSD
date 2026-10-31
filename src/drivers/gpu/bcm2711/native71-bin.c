@@ -193,9 +193,11 @@ bcm2711_native_bin_encode(
 	write_varyings(bytes + 88, 100, state->noperspective);
 	bytes[98] = 88;
 
-	/* Two sixteen-vertex batches match the independently checked live-plus-two-cached shared VPM reservation. */
+	/* The shader's cached sixteen-vertex batches, which its checked VPM segments leave room for (two each without one). */
 	bytes[99] = 71;
 	bytes[100] = 0x22U;
+	if (state->vcm != 0)
+		bytes[100] = (uint8_t)state->vcm;
 	bytes[101] = 64;
 	write_word(bytes + 102, state->shader | state->attributes);
 

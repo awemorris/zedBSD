@@ -304,6 +304,50 @@ bcm2712_clock_set(
 	return 0;
 }
 
+/*
+ * Sends a whole property message the caller laid out (header, tags, end
+ * tag) and copies the firmware's answer back over it.
+ *
+ * words is the message's length in 32-bit words, its first word the
+ * length in bytes.  Returns 0 when the firmware handed the message back;
+ * the caller reads the response code and each tag's own code itself.
+ */
+int
+bcm2712_firmware_message(
+	uint32_t *words,
+	unsigned count)
+{
+	unsigned index;
+	int error;
+
+	/* Refuses a message the buffer cannot hold or whose length word disagrees. */
+	if (words == NULL || count < 3U || count * 4U > FIRMWARE_BUFFER_SIZE)
+		return EINVAL;
+	if (words[PROPERTY_WORD_SIZE] != count * 4U)
+		return EINVAL;
+
+	/* Refuses a request before the mailbox is prepared. */
+	if (mailbox == NULL)
+		return ENODEV;
+
+	/* Takes the buffer, sends the message and copies the answer back. */
+	error = claim_buffer();
+	if (error != 0)
+		return error;
+	for (index = 0; index < count; index++)
+		message[index] = words[index];
+	error = post_request();
+	if (error == 0) {
+		kern_dcache_invalidate_range(message, count * 4U);
+		for (index = 0; index < count; index++)
+			words[index] = message[index];
+	}
+	release_buffer();
+
+	/* Succeeded when the firmware handed the message back. */
+	return error;
+}
+
 /* Takes the buffer for one request, waiting while another request is in flight. */
 static int
 claim_buffer(void)
@@ -513,4 +557,196 @@ bcm2711_board_state_read(
 	answered = 0U;
 	if (bcm2712_firmware_property(FIRMWARE_TAG_THROTTLED, values, 1U, 1U, &answered) == 0 && answered >= 4U)
 		state->throttled = values[0];
+}
+
+/* The display questions of the firmware's property interface. */
+#define SCREEN_TAG_DISPLAYS		0x00040013U
+#define SCREEN_TAG_EDID			0x00030020U
+
+/* The words of the display-count request, and of the EDID one (a block number, a status and 128 bytes). */
+#define SCREEN_COUNT_WORDS		8U
+#define SCREEN_EDID_WORDS		40U
+
+/* The device tree's structure tokens. */
+#define SCREEN_FDT_BEGIN_NODE		1U
+#define SCREEN_FDT_END_NODE		2U
+#define SCREEN_FDT_PROPERTY		3U
+#define SCREEN_FDT_NOP			4U
+
+/* The largest firmware log read, and how many of its display lines are printed. */
+#define SCREEN_LOG_LIMIT		0x100000U
+#define SCREEN_LOG_LINES		24U
+#define SCREEN_LOG_LINE_BYTES		120U
+#define SCREEN_LOG_SHORTEST		8U
+
+/* Reads a big-endian word of the device tree blob. */
+static uint32_t
+screen_be32(
+	const uint8_t *bytes)
+{
+	/* Succeeded: the word in the CPU's order. */
+	return ((uint32_t)bytes[0] << 24) | ((uint32_t)bytes[1] << 16) | ((uint32_t)bytes[2] << 8) | bytes[3];
+}
+
+/* Whether a firmware log line is about the display: its HDMI ports, their EDID and the framebuffer. */
+static bool
+screen_line_wanted(
+	const char *line)
+{
+	static const char *const words[] = { "HDMI", "EDID", "BSC_", "FB ", "isplay" };
+	unsigned index;
+
+	/* A line is wanted when any of the words is in it. */
+	for (index = 0; index < sizeof(words) / sizeof(words[0]); index++)
+		if (kern_strstr(line, words[index]) != NULL)
+			return true;
+
+	/* Not about the display. */
+	return false;
+}
+
+/*
+ * Finds where the firmware's own log lies: the two words of the tree's
+ * /chosen/log property, its physical base and size.  Returns 0 when found.
+ */
+static int
+screen_log_place(
+	const struct drv_fdt *fdt,
+	uint32_t *base,
+	uint32_t *size)
+{
+	const uint8_t *structure;
+	const char *name;
+	uint32_t offset;
+	uint32_t token;
+	uint32_t length;
+	unsigned depth;
+	bool chosen;
+
+	/* Walks the structure block, tracking whether the walk is directly inside /chosen. */
+	structure = fdt->blob + fdt->structure_offset;
+	offset = 0;
+	depth = 0;
+	chosen = false;
+	while (offset + 4U <= fdt->structure_size) {
+		token = screen_be32(structure + offset);
+		offset += 4U;
+		if (token == SCREEN_FDT_BEGIN_NODE) {
+			/* A node: its name, padded to a word; /chosen is a child of the root. */
+			name = (const char *)(structure + offset);
+			length = (uint32_t)kern_strlen(name) + 1U;
+			offset += (length + 3U) & ~3U;
+			depth++;
+			chosen = depth == 2U && kern_strcmp(name, "chosen") == 0;
+		} else if (token == SCREEN_FDT_END_NODE) {
+			/* The end of a node leaves any /chosen. */
+			if (depth == 0)
+				return ENOENT;
+			depth--;
+			chosen = false;
+		} else if (token == SCREEN_FDT_PROPERTY) {
+			/* A property: its length, its name's offset and its value. */
+			if (offset + 8U > fdt->structure_size)
+				return ENOENT;
+			length = screen_be32(structure + offset);
+			name = (const char *)(fdt->blob + fdt->strings_offset + screen_be32(structure + offset + 4U));
+			if (chosen && length >= 8U && kern_strcmp(name, "log") == 0) {
+				*base = screen_be32(structure + offset + 8U);
+				*size = screen_be32(structure + offset + 12U);
+				return 0;
+			}
+			offset += 8U + ((length + 3U) & ~3U);
+		} else if (token != SCREEN_FDT_NOP) {
+			/* The end of the structure, or a token the walk does not know. */
+			return ENOENT;
+		}
+	}
+
+	/* No log in the tree. */
+	return ENOENT;
+}
+
+/* Prints the display lines of the firmware's own log: its printable runs that name the display. */
+static void
+screen_report_log(
+	const struct drv_fdt *fdt)
+{
+	const volatile uint8_t *log;
+	void *mapped;
+	char line[SCREEN_LOG_LINE_BYTES];
+	uint32_t base;
+	uint32_t size;
+	uint32_t index;
+	unsigned length;
+	unsigned printed;
+	uint8_t byte;
+
+	/* Maps the log the tree names; a missing or oversized one is skipped. */
+	if (screen_log_place(fdt, &base, &size) != 0)
+		return;
+	if (base == 0 || size == 0 || size > SCREEN_LOG_LIMIT)
+		return;
+	if (kern_device_map(base, size, KERN_DEVICE_UNCACHED, &mapped) != 0)
+		return;
+	log = mapped;
+
+	/* Splits the log into printable runs and prints the ones about the display. */
+	length = 0;
+	printed = 0;
+	for (index = 0; index <= size && printed < SCREEN_LOG_LINES; index++) {
+		byte = index < size ? log[index] : 0U;
+		if (byte >= 0x20U && byte <= 0x7eU && length < sizeof(line) - 1U) {
+			line[length++] = (char)byte;
+			continue;
+		}
+		line[length] = 0;
+		if (length >= SCREEN_LOG_SHORTEST && screen_line_wanted(line)) {
+			kern_logf("rpi5-screen: firmware: %s\n", line);
+			printed++;
+		}
+		length = 0;
+	}
+}
+
+/*
+ * Reports why the boot found no screen: how many displays the firmware
+ * set up, whether it reads HDMI 0's EDID, and what its own log says about
+ * the display (a monitor whose EDID cannot be read gets no display, and
+ * so no framebuffer, from the Pi 5's firmware).  Changes nothing.
+ */
+void
+bcm2712_screen_report(
+	const struct drv_fdt *fdt)
+{
+	uint32_t words[SCREEN_EDID_WORDS];
+	int count_error;
+	int edid_error;
+	uint32_t count;
+	uint32_t edid_code;
+
+	/* The number of displays the firmware set up. */
+	kern_memset(words, 0, sizeof(words));
+	words[PROPERTY_WORD_SIZE] = SCREEN_COUNT_WORDS * 4U;
+	words[PROPERTY_WORD_TAG] = SCREEN_TAG_DISPLAYS;
+	words[PROPERTY_WORD_CAPACITY] = 4U;
+	count_error = bcm2712_firmware_message(words, SCREEN_COUNT_WORDS);
+	count = words[PROPERTY_WORD_VALUES];
+	if (words[PROPERTY_WORD_CODE] != PROPERTY_SUCCESS)
+		count_error = EIO;
+
+	/* HDMI 0's first EDID block, as the firmware reads it. */
+	kern_memset(words, 0, sizeof(words));
+	words[PROPERTY_WORD_SIZE] = SCREEN_EDID_WORDS * 4U;
+	words[PROPERTY_WORD_TAG] = SCREEN_TAG_EDID;
+	words[PROPERTY_WORD_CAPACITY] = (SCREEN_EDID_WORDS - PROPERTY_WORD_VALUES - 1U) * 4U;
+	words[PROPERTY_WORD_TAG_CODE] = 4U;
+	edid_error = bcm2712_firmware_message(words, SCREEN_EDID_WORDS);
+	edid_code = words[PROPERTY_WORD_CODE];
+	kern_logf("rpi5-screen: no firmware framebuffer; displays %u (%d), HDMI 0 EDID %s (%d, %x)\n",
+		  count, count_error,
+		  edid_error == 0 && edid_code == PROPERTY_SUCCESS && words[PROPERTY_WORD_VALUES + 1] == 0 ? "read" : "unreadable",
+		  edid_error, edid_code);
+
+	/* The firmware's own account of the display. */
+	screen_report_log(fdt);
 }

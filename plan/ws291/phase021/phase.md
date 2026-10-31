@@ -2,9 +2,9 @@
 
 # ws291-p021: Raspberry Pi 5（V3D 7.1）で重い 3D の model を、スペックの比で決めた目標の fps に
 
-Status: in-progress（2026-10-31 00:06 P4 q1730-i01: mview の要る欠け 1〜4（index の draw・instance・直の fetch・mip の image（sample は level 0））を実装、Pi 4・Pi 5 の build と host 試験まで。実機は未起動、mview は未実行）
+Status: in-progress（2026-11-01 02:10 P4 q1784-i04 で再開: ユーザーの決定で Pi 4（p025）から Pi 5 へ。4.2 の成果を 7.1 に移し、1920x1080 の image を作って Q1 が SD に書いた。実機の計測はこれから）
 Parent: [WS291](../ws.md)
-Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）
+Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）
 
 ## 目的
 
@@ -121,3 +121,69 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
   **`/tmp/p4-p021c/rpi5-p021.img`、321912832 byte、sha256 dcadd719d98e94b4972a55adcf467678daa284e328882954b2c8f9342a3bbcc9**（tree e2feb0871、vmunix-fallback cksum 2365958026、
   config.txt `kernel=vmunix`・1920x1080、cmdline `login=console v3d.perf=1`）。tmpfs なので host の再起動で消える。git と worktree には写していない。SD への書き込みは Q1。
 - 未実施: 実機（Pi 5・Pi 4）の起動・desktop の回帰・mview。
+
+## 記録（P4 q1784-i04、2026-11-01 01:52〜）
+
+- 2026-11-01 ユーザーから（Q1 経由）、Pi 4 は熱の throttling が疑われるので Pi 4 の作業を止め、冷却が良く GPU が近い Pi 5 でこの Phase を進める、
+  4.2 の成果を 7.1 に当てはまる所で移す、desktop も Pi 5 で 60 fps を目標にする、という趣旨の指示を受けた。
+- 目標の copies（スペックの比、実機の dmesg で確定する前の見込み）: FP32 ＝ QPU 数 × 8（4 lane × 積と和）× clock。12 QPU・1.15 GHz なら 110 GFLOPS
+  （RTX 2070 の 7.46 TFLOPS の 1/68 → 5000 / 68 ≈ 74 copies）、960 MHz なら 92 GFLOPS（1/81 → 約 62 copies）。参考に Pi 4（8 QPU・500 MHz、32 GFLOPS）は 21。
+
+### 4.2 の成果の 7.1 への移し（branch agent/p4-ws291pi、Pi 4・Pi 5 の vmunix は warning 0、実機は未実行）
+
+- 2a53a5a6d: v3d.perf=1 の 2 s ごとの report の後に `v3d: board arm=設定/実測 core= v3d= MHz temp= throttled=0x…`（firmware の mailbox。Pi 4 と Pi 5）。
+- 04609a6c0:
+  - VCM: 7.1 も VPM の大きさから batch の数を選ぶ（4.2 と同じ式、Mesa の vcm_cache_size。今までは 0x22 の固定）。
+  - TFU: job の語を `bcm2711_native_conversion_words` に分けた（4.2 は V3D33、7.1 は V3D71 の field。Mesa の v3d_tfu.h・v3dx_tfu.c）。4.2 の語は前と同じ。
+  - 7.1 の self-test（V7）に raster → strict UIF の照合（RGBA8 の 5 形、R8・RG8 の各 1 形、見える texel を CPU の配置と 1 つずつ比べ、出力の後ろの guard も）。
+    全て合えば 7.1 でも texture の変換を TFU で行う（今までは 7.1 は常に CPU）。合わなければ CPU のまま、v3d.tfu=0 でも CPU。
+  - mip: tree の配置を共有の native-miptree.c に移し（7.1 の ENOTSUP の stub を外した）、7.1 の texture の record と sampler に level の数・max LOD・mip の filter。
+  - uniform の stream（7974d3365）は共有の vk の code なので 7.1 に既に効く。
+- ee3e43a88: 32-bit の index が全て 16 bit に入る時、16-bit の写しを snapshot（buffer の世代で持つ、host に map された buffer は対象外）として持ち、
+  bin はそれを読む（instance ごとに index を読み直すので、bin の index の読みが半分）。入らない index（0xffff 以上）はその世代の間は試し直さない。
+  Pi 4 と Pi 5 の両方に効く（共有の code）。
+- 道具: `rpi5-mview.sh` に KERNEL=（/boot/boot0/vmunix へ、元は vmunix.p021old、再起動）と run ごとの最後の `v3d: perf`・`v3d: board` の行と
+  board-range（ARM の実測 MHz・温度・throttled）。`rpi5-desk.sh`（pi4-desk.sh の Pi 5 版、MAC で板を探す、既定は CONSOLE=1、board の行）と
+  `config-rpi5-desk.mk`（入力の注入と aat-input）。
+
+### 試験の image（2026-11-01 01:55〜02:05）
+
+- `sh plan/ws291/tests/rpi5-image.sh build/p021-img` rc 0（`Raspberry Pi 4 image check: PASS`・`canonical zedBSD UFS OK`、warning は外部 package の openssl・openssh と
+  perl の locale だけ）、`rpi5-image-boot.sh build/p021-img build/p021-img/rpi5-p021.img`: **322961408 byte、sha256 3bf8f40c636ed8397b0355182131441399bb1e7fa9dc181d7f79da3b9ebf0c75**。
+  kernel は 2a53a5a6d の source（FAT の vmunix cksum 130421877、image から取り出して確かめた）、config.txt 1920x1080、cmdline `login=console v3d.perf=1`、fallback 無し。
+- Q1 が SD（もと Pi 4 のカード、ユーザーの許可）に書き、image と cmp で一致。
+
+### 実機（Pi 5、10.0.30.7、2026-11-01 02:16〜）
+
+- 02:16 板が起きた（zedBSD ce2d6f4、image の kernel cksum 130421877）。`sysctl hw.gpu.start=1` の後の dmesg: `V3D 7.1.10, 12 QPUs, 1150000000 Hz`
+  （V0 は 500 MHz、最大 1150 MHz、V1 で 1150 MHz に上げる）、VPM 64 KiB、self-test は全て ok。rpi5-fan 29.25 °C・fan 0。
+  **目標の copies は 74 に確定**（12 × 8 × 1.15 GHz ＝ 110 GFLOPS、RTX 2070 の 7.46 TFLOPS の 1/68、5000 / 68 ≈ 74、Q1 が受け入れた）。
+- 表示が無い: firmware が `bcm2708_fb.fbwidth=640 fbheight=480` を渡し、kernel に framebuffer が無い（rpi5.framebuffer・P0 の行が無い）ので display を
+  見つけず、compositor は `KWL VULKAN_ERROR operation=display result=-3` で止まる（build/tmp/p021-b0）。HDMI の画面が繋がっていない時の形。
+  Q1 がユーザーに画面を繋ぐよう頼んだ。繋いだ後に再起動（SwitchBot 14C19FA80F86 は P4 が入れ直してよい、Q1）。
+- 02:18 `KERNEL=build/p021-k5b/vmunix`（ee3e43a88、cksum 4200268633）を rpi5-mview.sh で置いて再起動（元は /boot/boot0/vmunix.p021old）。
+  7.1 の TFU の UIF の self-test が実機で通った: `V7 TFU UIF 96x40 x4`・`33x9 x4`・`1x1 x4`・`200x150 x4`・`256x255 x4`・`70x37 x1`・`35x19 x2` の
+  全てで見える texel が CPU の配置と一致、`texture conversion uses the unit`（build/tmp/p021-k1）。mview・mip・16-bit の index は表示が無いので未実行。
+
+## 記録（P4 q1784-i05、2026-11-01 02:25〜）
+
+- main 44ca7739c を取り込んだ（merge 342f00101、親 f8a620b21 44ca7739c、競合なし）。
+- 2026-11-01 ユーザーから（Q1 経由）、Pi 5 の firmware の画面は HDMI の monitor に出ていたので monitor は繋がっている、「monitor が無い」の結論は誤り、原因を card の設定か kernel の framebuffer の求め方で調べる、という趣旨の指示を受けた。
+
+### Pi 5 で framebuffer が無い原因（2026-11-01 02:30〜03:05、実機 10.0.30.7）
+
+- 道具: kernel の 7.1 の attach が boot の framebuffer を見つけない時の報告（`bcm2712_screen_report`、`bcm2712_firmware_message`）。firmware に display の数と HDMI 0 の EDID を問い、
+  firmware 自身の log（tree の `/chosen/log` の場所、0x3ff23000・0x80000 byte）の display の行を出す。何も変えない。`build/p021-k5c/vmunix`（warning 0）。
+- 調べの途中で確かめた事（同じ板、kernel の報告で）: firmware の答えは GET_PHYSICAL 0x0、display の数 0、EDID block 0 は失敗（応答 0x80000001）、HAL と同じ set-up の要求も失敗（0x80000001）、
+  tree に simple-framebuffer は無い。HVS の channel 0〜2 は全て無効（電源の入れ直しの後は ch0 に 640x480 の設定が残り無効）。firmware は 2026-05-11 の bootloader（66f33f7e）。
+- **原因**: firmware の log（電源の入れ直し・SwitchBot 14C19FA80F86 と再起動の両方で同じ）:
+  `Select resolution HDMI0/2 hotplug 1 max_mode 2` → `BSC_A no ACK`（×2）→ `HDMI0: Unable to read EDID block 0`、`Select resolution HDMI1/2 hotplug 0`。
+  monitor は HDMI0 に繋がり hotplug は立つが、DDC（EDID を読む I2C）に monitor が応答しない。Pi 5 の firmware は EDID の無い display に OS の framebuffer を作らない
+  （bootloader の診断の画面は EDID 無しの 640x480 で出るので、ユーザーが見た画面と矛盾しない）。WS279（2026-10-22）は同じ板で 1920x1080 の plane が firmware にあった。
+- config.txt の試し（元は `/boot/boot0/config.txt.p021orig`、全て元に戻した）: WS279 と同じ形（pciex1 無し・1280x720）、`hdmi_force_hotplug=1`、`hdmi_force_hotplug:0=1`＋`:1=1`＋`hdmi_group=1`・`hdmi_mode=16`、
+  `hdmi_ignore_edid=0xa5000080`＋group・mode、`hdmi_edid_file=1`（と `:0`・`hdmi_edid_filename:0=edid.dat`、1080p60 の EDID を自作して /boot/boot0/edid.dat に置いた）は、
+  どれも firmware の log が同じ（EDID を読めない、display 0）。Pi 5 の firmware はこれらを使わない。
+- 結論: card の設定・image の script・zedBSD の kernel の不具合ではない（BUG は立てない）。monitor 側の DDC（cable・変換・切替器・monitor の入力）の問題で、設定では直せない。
+  直すには、EDID を返す接続（cable・micro HDMI の変換の交換、切替器を外す、monitor の電源と入力）が要る。ユーザーの手の作業。
+- 板の状態: /boot/boot0/vmunix は build/p021-k5c/vmunix（cksum 1329488160）、元は vmunix.k5b（ee3e43a88）・vmunix.p021old（image の物）。config.txt は元のまま。
+  /boot/boot0/edid.dat（128 byte、試しの物、firmware は読まない）が残る。

@@ -97,6 +97,56 @@ bcm2711_native_texture_size_texel(
 }
 
 /*
+ * Fills the texture formatting unit's words for a raster-to-tiled
+ * conversion on V3D 7.1: the output format and, for a UIF output, its
+ * height in UIF blocks (the output configuration register, IOC), and the
+ * texture type with raster input (ICFG).
+ * Values referenced: Mesa 25.3.6 src/broadcom/common/v3d_tfu.h (V3D71_TFU_*)
+ * and src/gallium/drivers/v3d/v3dx_tfu.c (V3D_VERSION >= 71).
+ */
+int
+bcm2711_native_conversion_words(
+	const struct bcm2711_native_conversion *conversion,
+	uint32_t *output_format,
+	uint32_t *configuration)
+{
+	uint32_t utile_width;
+	uint32_t utile_height;
+	uint32_t block_height;
+	int error;
+
+	/* Missing words cannot be filled. */
+	if (conversion == NULL || output_format == NULL || configuration == NULL)
+		return EINVAL;
+
+	/* An output tiling the unit writes, and a texture type of seven bits. */
+	if (conversion->tiling < BCM2711_NATIVE_TILING_LINEARTILE || conversion->tiling > BCM2711_NATIVE_TILING_UIF_XOR)
+		return EINVAL;
+	if (conversion->type > 0x7fU)
+		return EINVAL;
+
+	/* A UIF output's rows: whole UIF blocks (two utiles tall), no fewer than the rows converted. */
+	error = utile_extent(conversion->texel_bytes, &utile_width, &utile_height);
+	if (error != 0)
+		return error;
+	block_height = utile_height * 2U;
+	if ((conversion->tiling == BCM2711_NATIVE_TILING_UIF || conversion->tiling == BCM2711_NATIVE_TILING_UIF_XOR) &&
+	    (conversion->padded_height % block_height != 0 || conversion->padded_height < conversion->height))
+		return EINVAL;
+
+	/* The format, and a UIF output's height in blocks. */
+	*output_format = conversion->tiling << 12;
+	if (conversion->tiling == BCM2711_NATIVE_TILING_UIF || conversion->tiling == BCM2711_NATIVE_TILING_UIF_XOR)
+		*output_format |= (conversion->padded_height / block_height) << 16;
+
+	/* The type; raster input is format 0. */
+	*configuration = conversion->type << 16;
+
+	/* Succeeded: both words. */
+	return 0;
+}
+
+/*
  * Finds the byte offset of one texel in a strictly UIF, non-XOR image.
  *
  * Blocks go down a four-block column before moving to the next column; the
@@ -275,26 +325,6 @@ bcm2711_native_texture_copy_texel(
 }
 
 /*
- * Mip trees are not laid out for the 7.1 texture unit yet: its textures are
- * sampled at level 0 alone.
- */
-int
-bcm2711_native_miptree_layout(
-	uint32_t width,
-	uint32_t height,
-	uint32_t levels,
-	struct bcm2711_native_miptree *tree)
-{
-	/* Nothing is described. */
-	(void)width;
-	(void)height;
-	(void)levels;
-	if (tree != NULL)
-		kern_memset(tree, 0, sizeof(*tree));
-	return ENOTSUP;
-}
-
-/*
  * Encodes one complete native texture record for independently owned strict UIF scratch storage.
  *
  * The owner supplies the exact size returned by texture_size and keeps the
@@ -321,10 +351,6 @@ bcm2711_native_texture_encode(
 	if (texture == NULL || bytes == NULL)
 		return EINVAL;
 
-	/* Only single-level textures are described (no mip tree is laid out for this unit). */
-	if (texture->levels > 1U)
-		return ENOTSUP;
-
 	/* A short reservation remains wholly unchanged. */
 	if (capacity < BCM2711_NATIVE_TEXTURE_BYTES)
 		return ENOSPC;
@@ -343,9 +369,18 @@ bcm2711_native_texture_encode(
 	if (error != 0)
 		return error;
 
-	/* The descriptor's layer stride describes exactly the conversion's chosen layout. */
-	if (texture->bytes != storage_bytes)
+	/* The descriptor's layer stride describes exactly the conversion's chosen layout; a mip tree's is the whole tree. */
+	if (texture->levels > 1U) {
+		if (texture->levels > BCM2711_NATIVE_TEXTURE_LEVELS || texture->texel != BCM2711_NATIVE_TEXEL_RGBA8)
+			return EINVAL;
+		if (texture->level0_tiling < BCM2711_NATIVE_TILING_LINEARTILE || texture->level0_tiling > BCM2711_NATIVE_TILING_UIF_XOR)
+			return EINVAL;
+		if (texture->level0_ub_pad > 15U || texture->bytes < storage_bytes || (texture->bytes & 63U) != 0)
+			return EINVAL;
+		storage_bytes = texture->bytes;
+	} else if (texture->bytes != storage_bytes) {
 		return EINVAL;
+	}
 
 	/* Whole scratch storage stays inside the native 32-bit GPU virtual address space. */
 	end = (uint64_t)texture->address + storage_bytes;
@@ -393,8 +428,25 @@ bcm2711_native_texture_encode(
 	write_bits(bytes, 111, 3, green);
 	write_bits(bytes, 114, 3, blue);
 	write_bits(bytes, 117, 3, alpha);
-	write_bits(bytes, 134, 1, 1U);
-	write_bits(bytes, 135, 1, 1U);
+	if (texture->levels <= 1U) {
+		write_bits(bytes, 134, 1, 1U);
+		write_bits(bytes, 135, 1, 1U);
+	} else {
+		/*
+		 * A mip tree: levels 0 to the last, level 0's own tiling (strictly
+		 * UIF when it is UIF, with its XOR and UB pad), and XOR left on so the
+		 * hardware infers the smaller levels' tilings as the layout chose them
+		 * (Mesa's v3dvx_image.c pack_texture_shader_state, the same fields
+		 * on 7.1 as on 4.2).
+		 */
+		write_bits(bytes, 120, 4, texture->levels - 1U);
+		if (texture->level0_tiling == BCM2711_NATIVE_TILING_UIF || texture->level0_tiling == BCM2711_NATIVE_TILING_UIF_XOR) {
+			write_bits(bytes, 134, 1, 1U);
+			write_bits(bytes, 128, 4, texture->level0_ub_pad);
+		}
+		if (texture->level0_tiling == BCM2711_NATIVE_TILING_UIF_XOR)
+			write_bits(bytes, 132, 1, 1U);
+	}
 
 	/* Succeeded: this complete record describes the same layout as the independently bounded pixel converter. */
 	return 0;
@@ -425,11 +477,16 @@ bcm2711_native_sampler_encode(
 	if (sampler->wrap_u > 2U || sampler->wrap_v > 2U)
 		return ENOTSUP;
 
-	/* One mip level uses zero min/max LOD and bias, without anisotropy or depth comparison. */
+	/* The largest level of detail is 4.8 fixed point below sixteen; a linear mip filter is an exact bit. */
+	if (sampler->max_lod > 0xfffU || sampler->mip_linear > 1U)
+		return EINVAL;
+
+	/* Zero min LOD and bias up to max_lod (zero: level 0 alone), without anisotropy or depth comparison. */
 	kern_memset(bytes, 0, BCM2711_NATIVE_SAMPLER_BYTES);
 	write_bits(bytes, 0, 1, sampler->nearest_mag);
 	write_bits(bytes, 1, 1, sampler->nearest_min);
-	write_bits(bytes, 2, 1, 1U);
+	write_bits(bytes, 2, 1, sampler->mip_linear ^ 1U);
+	write_bits(bytes, 20, 12, sampler->max_lod);
 	write_bits(bytes, 7, 1, 1U);
 	write_bits(bytes, 48, 3, sampler->wrap_u);
 	write_bits(bytes, 51, 3, sampler->wrap_v);

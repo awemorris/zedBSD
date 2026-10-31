@@ -29,6 +29,7 @@ static struct bcm2711_v3d_view *cache_take(struct bcm2711_v3d_space *space, uint
 static bool cache_put(struct bcm2711_v3d_space *space, struct bcm2711_v3d_view *view);
 static int storage_cleanable(const struct bcm2711_native_storage *storage);
 static int snapshot_fill(struct bcm2711_native_snapshot *snapshot, const void *raster, size_t raster_bytes);
+static int snapshot_narrow(struct bcm2711_native_snapshot *snapshot, const void *indices, size_t indices_bytes);
 static int snapshot_update(struct bcm2711_v3d_space *space, struct bcm2711_native_snapshot *snapshot, const void *raster, size_t raster_bytes, bool unit, bool *updated);
 static int snapshot_evict(struct bcm2711_v3d_space *space, uint64_t bytes, bool all);
 static int snapshot_release(struct bcm2711_v3d_space *space, struct bcm2711_native_snapshot *snapshot);
@@ -612,6 +613,122 @@ bcm2711_native_snapshot_get_levels(
 }
 
 /*
+ * Finds or makes the 16-bit copy of count 32-bit indices of a buffer.
+ *
+ * The key is the buffer, the offset and the count, with texel_bytes zero so
+ * that no texture snapshot matches it.  A copy is narrowed again only when
+ * its source's generation moved and no draw reads it; a source that held an
+ * index too large is not read again until its generation moves.
+ */
+int
+bcm2711_native_snapshot_get_indices(
+	struct bcm2711_v3d_space *space,
+	struct bcm2711_buffer *buffer,
+	uint64_t offset,
+	uint32_t count,
+	const void *indices,
+	size_t indices_bytes,
+	struct bcm2711_native_snapshot **result)
+{
+	struct bcm2711_native_snapshot *snapshot;
+	uint64_t bytes;
+	bool foreign;
+	int error;
+
+	/* A source a process can write through a CPU mapping has no generation to trust. */
+	*result = NULL;
+	if (space->snapshot_limit == 0 || buffer->host_mapped || indices == NULL)
+		return ENOTSUP;
+	if (count == 0 || (uint64_t)count * 4U > indices_bytes)
+		return EINVAL;
+	bytes = ((uint64_t)count * 2U + 63U) & ~63ULL;
+	space->snapshot_serial++;
+
+	/* Finds the copy of exactly these indices. */
+	for (snapshot = space->snapshots; snapshot != NULL; snapshot = snapshot->next) {
+		/* Every key field must match. */
+		if (snapshot->buffer == buffer &&
+		    snapshot->offset == offset &&
+		    snapshot->texel_bytes == 0 &&
+		    snapshot->width == count)
+			break;
+	}
+
+	/* A known copy: refused at this generation, or narrowed again when its source changed and no draw reads it. */
+	if (snapshot != NULL) {
+		if (snapshot->unfit && snapshot->generation == buffer->generation)
+			return ENOTSUP;
+		foreign = snapshot->owner != 0 && snapshot->owner != space->builder;
+		if (foreign || !snapshot->valid || snapshot->generation != buffer->generation) {
+			if (snapshot->users != 0)
+				return ENOTSUP;
+			if (foreign) {
+				error = snapshot_scrub(snapshot);
+				if (error != 0)
+					return error;
+			}
+			error = snapshot_narrow(snapshot, indices, indices_bytes);
+			if (error != 0)
+				return error;
+			space->snapshot_fills++;
+		}
+		snapshot->users++;
+		snapshot->used = space->snapshot_serial;
+		*result = snapshot;
+		return 0;
+	}
+
+	/* Makes room among unused snapshots; a full cache of used ones leaves the 32-bit indices. */
+	error = snapshot_evict(space, bytes, false);
+	if (error != 0)
+		return error;
+
+	/* The new entry with its own storage, remembering a building session whose bytes the padding may hold. */
+	snapshot = kern_calloc(1, sizeof(*snapshot));
+	if (snapshot == NULL)
+		return ENOMEM;
+	error = bcm2711_native_storage_create_as(space, bytes, BCM2711_NATIVE_STORAGE_OWNED, &snapshot->pixels);
+	if (error != 0) {
+		kern_free(snapshot);
+		return error;
+	}
+	if (snapshot->pixels->stale)
+		snapshot->owner = snapshot->pixels->owner;
+	snapshot->offset = offset;
+	snapshot->width = count;
+	snapshot->height = 1;
+	snapshot->pitch = count * 4U;
+	snapshot->texel_bytes = 0;
+	snapshot->levels = 1;
+
+	/*
+	 * The first narrowing defines the generation; an unfit source is kept
+	 * as a refusal, so its indices are not read again at this generation.
+	 */
+	snapshot->buffer = buffer;
+	error = snapshot_narrow(snapshot, indices, indices_bytes);
+	if (error != 0 && error != ENOTSUP) {
+		snapshot->buffer = NULL;
+		(void)bcm2711_native_storage_release(space, &snapshot->pixels, true);
+		kern_free(snapshot);
+		return error;
+	}
+	space->snapshot_fills++;
+	bcm2711_buffer_retain(buffer);
+	snapshot->used = space->snapshot_serial;
+	snapshot->next = space->snapshots;
+	space->snapshots = snapshot;
+	space->snapshot_bytes += snapshot->pixels->view->bytes;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller's draw reads the copy until it retires. */
+	snapshot->users = 1;
+	*result = snapshot;
+	return 0;
+}
+
+/*
  * Drops one draw's use of a snapshot after the draw's DMA retired.
  */
 void
@@ -820,6 +937,54 @@ snapshot_fill(
 		return error;
 
 	/* Succeeded: the snapshot matches its source until the source's generation moves. */
+	snapshot->valid = true;
+	return 0;
+}
+
+/*
+ * Narrows a copy's source indices to 16 bits and records the source
+ * generation.  ENOTSUP marks the copy unfit when an index is 0xffff or more
+ * (0xffff is the 16-bit restart index); the copy then stays invalid.
+ */
+static int
+snapshot_narrow(
+	struct bcm2711_native_snapshot *snapshot,
+	const void *indices,
+	size_t indices_bytes)
+{
+	const uint32_t *source;
+	uint16_t *copy;
+	uint32_t index;
+	uint32_t value;
+	int error;
+
+	/* The generation is recorded first; the source is read no earlier than this. */
+	snapshot->generation = snapshot->buffer->generation;
+	snapshot->valid = false;
+	snapshot->unfit = false;
+	if ((uint64_t)snapshot->width * 4U > indices_bytes ||
+	    (uint64_t)snapshot->width * 2U > snapshot->pixels->bytes)
+		return EINVAL;
+
+	/* Every index, refused at the first too large for 16 bits. */
+	source = indices;
+	copy = snapshot->pixels->view->buffer->address;
+	for (index = 0; index < snapshot->width; index++) {
+		/* One index. */
+		value = source[index];
+		if (value >= 0xffffU) {
+			snapshot->unfit = true;
+			return ENOTSUP;
+		}
+		copy[index] = (uint16_t)value;
+	}
+
+	/* The device reads the copy only after the CPU cache wrote it back. */
+	error = bcm2711_native_storage_clean(snapshot->pixels);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the copy matches its source until the source's generation moves. */
 	snapshot->valid = true;
 	return 0;
 }

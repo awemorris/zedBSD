@@ -126,7 +126,28 @@ struct bcm2711_native_sampler {
 	uint32_t max_lod;
 };
 
+/*
+ * One raster-to-tiled conversion by the texture formatting unit: the
+ * texels' texture type and size, the output's tiling
+ * (BCM2711_NATIVE_TILING_*), the rows converted, and for a UIF output the
+ * rows it takes with its padding (a whole number of UIF blocks).
+ */
+struct bcm2711_native_conversion {
+	uint32_t type;
+	uint32_t texel_bytes;
+	uint32_t tiling;
+	uint32_t height;
+	uint32_t padded_height;
+};
+
 uint32_t bcm2711_native_shader_bytes(void);
+
+/*
+ * The unit's output-format and configuration words for a conversion (the
+ * job's output_format and configuration), which differ between V3D 4.2 and
+ * 7.1; the input is raster.
+ */
+int bcm2711_native_conversion_words(const struct bcm2711_native_conversion *conversion, uint32_t *output_format, uint32_t *configuration);
 
 /*
  * The VCM Cache Size packet's byte for an encoded shader: how many

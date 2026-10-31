@@ -355,7 +355,7 @@ ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/attach.c \
 	src/drivers/gpu/bcm2711/cl.c src/drivers/gpu/bcm2711/compiler/qpu.c src/drivers/gpu/bcm2711/buffer.c \
 	src/drivers/gpu/bcm2711/compiler/shader.c src/drivers/gpu/bcm2711/compiler/shader-analyze.c \
 	src/drivers/gpu/bcm2711/compiler/shader-lower.c src/drivers/gpu/bcm2711/compiler/shader-output.c src/drivers/gpu/bcm2711/compiler/shader-schedule.c \
-	src/drivers/gpu/bcm2711/native-bin.c src/drivers/gpu/bcm2711/native-pass.c src/drivers/gpu/bcm2711/native-colour.c src/drivers/gpu/bcm2711/native-shader.c src/drivers/gpu/bcm2711/native-texture.c src/drivers/gpu/bcm2711/native-storage.c src/drivers/gpu/bcm2711/native-viewport.c \
+	src/drivers/gpu/bcm2711/native-bin.c src/drivers/gpu/bcm2711/native-pass.c src/drivers/gpu/bcm2711/native-colour.c src/drivers/gpu/bcm2711/native-shader.c src/drivers/gpu/bcm2711/native-texture.c src/drivers/gpu/bcm2711/native-miptree.c src/drivers/gpu/bcm2711/native-storage.c src/drivers/gpu/bcm2711/native-viewport.c \
 	src/drivers/gpu/bcm2711/vk/vulkan-object.c src/drivers/gpu/bcm2711/vk/vulkan-session.c \
 	src/drivers/gpu/bcm2711/vk/vulkan-stream.c src/drivers/gpu/bcm2711/vk/vulkan-dispatch.c src/drivers/gpu/bcm2711/vk/vulkan-device.c src/drivers/gpu/bcm2711/vk/vulkan-sync.c src/drivers/gpu/bcm2711/vk/vulkan-queue.c src/drivers/gpu/bcm2711/vk/vulkan-query.c src/drivers/gpu/bcm2711/vk/vulkan-memory.c src/drivers/gpu/bcm2711/vk/vulkan-resource.c src/drivers/gpu/bcm2711/vk/vulkan-input.c src/drivers/gpu/bcm2711/vk/vulkan-layout.c src/drivers/gpu/bcm2711/vk/vulkan-layout-compat.c src/drivers/gpu/bcm2711/vk/vulkan-descriptor-pool.c src/drivers/gpu/bcm2711/vk/vulkan-descriptor-sets.c src/drivers/gpu/bcm2711/vk/vulkan-descriptor-update.c src/drivers/gpu/bcm2711/vk/vulkan-target.c \
 	src/drivers/gpu/bcm2711/vk/vulkan-pipeline-build.c src/drivers/gpu/bcm2711/vk/vulkan-pipeline-state.c src/drivers/gpu/bcm2711/vk/vulkan-pipeline.c src/drivers/gpu/bcm2711/vk/vulkan-pipeline-decode.c \
@@ -383,7 +383,7 @@ ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/attach71.c src/drivers/gpu/bcm27
 	src/drivers/gpu/bcm2711/display/hvs6-flip.c src/drivers/gpu/bcm2711/display/display-device.c \
 	src/drivers/gpu/bcm2711/share.c \
 	src/drivers/gpu/bcm2711/native71-bin.c src/drivers/gpu/bcm2711/native71-pass.c src/drivers/gpu/bcm2711/native-colour.c \
-	src/drivers/gpu/bcm2711/native71-shader.c src/drivers/gpu/bcm2711/native71-texture.c src/drivers/gpu/bcm2711/native-storage.c \
+	src/drivers/gpu/bcm2711/native71-shader.c src/drivers/gpu/bcm2711/native71-texture.c src/drivers/gpu/bcm2711/native-miptree.c src/drivers/gpu/bcm2711/native-storage.c \
 	src/drivers/gpu/bcm2711/native71-viewport.c \
 	src/drivers/gpu/bcm2711/vk/vulkan-object.c src/drivers/gpu/bcm2711/vk/vulkan-session.c \
 	src/drivers/gpu/bcm2711/vk/vulkan-stream.c src/drivers/gpu/bcm2711/vk/vulkan-dispatch.c src/drivers/gpu/bcm2711/vk/vulkan-device.c src/drivers/gpu/bcm2711/vk/vulkan-sync.c src/drivers/gpu/bcm2711/vk/vulkan-queue.c src/drivers/gpu/bcm2711/vk/vulkan-query.c src/drivers/gpu/bcm2711/vk/vulkan-memory.c src/drivers/gpu/bcm2711/vk/vulkan-resource.c src/drivers/gpu/bcm2711/vk/vulkan-input.c src/drivers/gpu/bcm2711/vk/vulkan-layout.c src/drivers/gpu/bcm2711/vk/vulkan-layout-compat.c src/drivers/gpu/bcm2711/vk/vulkan-descriptor-pool.c src/drivers/gpu/bcm2711/vk/vulkan-descriptor-sets.c src/drivers/gpu/bcm2711/vk/vulkan-descriptor-update.c src/drivers/gpu/bcm2711/vk/vulkan-target.c \
