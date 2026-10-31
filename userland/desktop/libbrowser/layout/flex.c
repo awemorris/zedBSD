@@ -2558,6 +2558,17 @@ flex_place_line(
 		justify = start_edge ? CSS_ALIGN_LEFT : CSS_ALIGN_RIGHT;
 	}
 
+	/*
+	 * A column of a vertical container runs its main axis across the page: left and right are physical sides there, the block start
+	 * (vertical-lr's left, vertical-rl's right) and the block end.
+	 */
+	if (!row && box->physical_style != NULL && layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB &&
+	    (justify == CSS_ALIGN_LEFT || justify == CSS_ALIGN_RIGHT)) {
+		if (layout_physical_mode(box) == CSS_WRITING_VERTICAL_RL)
+			justify = justify == CSS_ALIGN_LEFT ? CSS_ALIGN_RIGHT : CSS_ALIGN_LEFT;
+		physical_edge = 1;
+	}
+
 	/* A safe justify-content that would overflow falls back to the start. */
 	if ((box->style.flex_keywords & 16u) != 0 && free_space < 0 &&
 	    (justify == CSS_ALIGN_END || justify == CSS_ALIGN_CENTER || justify == CSS_ALIGN_LEFT || justify == CSS_ALIGN_RIGHT)) {

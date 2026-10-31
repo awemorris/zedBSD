@@ -1177,6 +1177,10 @@ position_place_once(
 		x = position_align(position_physical(box->style.justify_self, box->style.direction == CSS_DIRECTION_RTL),
 		    area_left + left, area_left + area_width - right,
 		    box->margin[CSS_LEFT], box->margin[CSS_RIGHT], box->width + frame);
+	} else if (has_left && has_right && box->style.width.unit != CSS_UNIT_AUTO && containing->direction == CSS_DIRECTION_RTL &&
+	    !box->area_inset_x) {
+		/* Over-constrained in a right-to-left containing block: the left inset is ignored. */
+		x = area_left + area_width - right - box->margin[CSS_RIGHT] - (box->width + frame);
 	} else if (has_left && !box->area_inset_x) {
 		x = area_left + left + box->margin[CSS_LEFT];
 	} else if (has_right && !box->area_inset_x) {

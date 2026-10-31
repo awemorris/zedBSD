@@ -93,6 +93,9 @@ struct css_filter {
 #define CSS_PSEUDO_ELEMENT_VT_NEW 8
 /* The box around a details element's content (everything but its first summary). */
 #define CSS_PSEUDO_ELEMENT_DETAILS_CONTENT 9
+/* The first letter and the first formatted line of a block container. */
+#define CSS_PSEUDO_ELEMENT_FIRST_LETTER 10
+#define CSS_PSEUDO_ELEMENT_FIRST_LINE 11
 /* The translation a view transition group's style starts with until its rectangle is known (an author's transform replaces it). */
 /* The places a view transition pseudo-element can have among its siblings (for :first-child, :last-child and :only-child). */
 #define CSS_VT_FIRST 1
@@ -1164,6 +1167,7 @@ void css_engine_forget_styles(struct css_engine *engine);
 void css_engine_set_view_transition(struct css_engine *engine, int active, const struct vm_string *const *types, int count);
 int css_engine_compute(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style);
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);
+int css_engine_apply_text(struct css_engine *engine, struct css_style *style, const struct css_style *parent, const char *text);
 int css_engine_compute_vt_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct vm_string *name, const struct vm_string *classes, int siblings, const struct css_style *parent, struct css_style *style);
 void css_initial_style(struct css_style *style);
 void css_engine_query_begin(struct css_engine *engine);

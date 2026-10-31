@@ -396,8 +396,8 @@ transition_ease(
 
 /*
  * How far an animation of a pseudo-element has run, 0 to 1 and eased, once the transition has run for elapsed
- * seconds: it fills both ways, so before its start it is at 0 and after its end at 1.  A paused one stays where
- * its delay put it.
+ * seconds: it fills both ways, so before its start it is at 0 and after its end at 1.  A script sets the time (every animation of
+ * the tree is at it, paused or not).
  */
 float
 layout_transition_progress(
@@ -407,7 +407,7 @@ layout_transition_progress(
 	float seconds;
 	float progress;
 
-	seconds = style->animation_paused ? 0.0f : elapsed;
+	seconds = elapsed;
 	seconds -= style->animation_delay;
 	if (style->animation_duration <= 0.0f)
 		progress = seconds >= 0.0f ? 1.0f : 0.0f;

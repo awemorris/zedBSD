@@ -35,6 +35,9 @@ static void box_append(struct layout_box *parent, struct layout_box *child);
 static int box_is_inline_level(const struct layout_box *box);
 static int box_is_whitespace(const struct layout_box *box);
 static int box_details_content(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *box);
+static int box_first_letter(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *box);
+static int box_first_line(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *box);
+static int box_first_letter_in(struct layout_tree *tree, struct layout_box *parent, const struct css_style *style, int depth, int *done);
 static int box_is_blank(const struct layout_box *box);
 static int box_fix_children(struct layout_tree *tree, struct layout_box *box);
 static int box_table_fix(struct layout_tree *tree, struct layout_box *box);
@@ -608,6 +611,12 @@ box_build_element(
 	error = box_build_pseudo(tree, css, element, box, CSS_PSEUDO_ELEMENT_AFTER);
 	if (error != 0)
 		return error;
+	error = box_first_letter(tree, css, element, box);
+	if (error != 0)
+		return error;
+	error = box_first_line(tree, css, element, box);
+	if (error != 0)
+		return error;
 
 	/* The root element of a page with a view transition on show has the transition's tree. */
 	if (parent == NULL && tree->transition != NULL && tree->transition->show) {
@@ -620,6 +629,177 @@ box_build_element(
 		return error;
 
 	/* Succeeded: the element's boxes are built. */
+	return 0;
+}
+
+/*
+ * Gives the first letter of a block container its ::first-letter style: the text box holding it is split in two, the
+ * letter (with the punctuation around it) taking the pseudo-element's style.  A floating or otherwise boxed first
+ * letter is not made.
+ */
+static int
+box_first_letter(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_element *element,
+	struct layout_box *box)
+{
+	struct css_style *style;
+	int done;
+	int error;
+
+	/* Only a block container some rule gives a ::first-letter. */
+	if ((box->style.pseudo_elements & (1 << CSS_PSEUDO_ELEMENT_FIRST_LETTER)) == 0 || box->kind != LAYOUT_BLOCK ||
+	    box->replaced || box->atomic != 0 || box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID)
+		return 0;
+	style = malloc(sizeof(*style));
+	if (style == NULL)
+		return ENOMEM;
+	error = css_engine_compute_pseudo(css, element, CSS_PSEUDO_ELEMENT_FIRST_LETTER, &box->style, style);
+	if (error != 0 || style->float_side != CSS_FLOAT_NONE || style->position == CSS_POSITION_ABSOLUTE ||
+	    style->position == CSS_POSITION_FIXED) {
+		free(style);
+		return error;
+	}
+	style->display = CSS_DISPLAY_INLINE;
+	done = 0;
+	error = box_first_letter_in(tree, box, style, 0, &done);
+	free(style);
+	return error;
+}
+
+/* Keeps the ::first-line style of a block container for its first line. */
+static int
+box_first_line(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_element *element,
+	struct layout_box *box)
+{
+	struct css_style *style;
+	struct css_style *kept;
+	int error;
+
+	if ((box->style.pseudo_elements & (1 << CSS_PSEUDO_ELEMENT_FIRST_LINE)) == 0 || box->kind != LAYOUT_BLOCK || box->replaced)
+		return 0;
+	style = malloc(sizeof(*style));
+	if (style == NULL)
+		return ENOMEM;
+	error = css_engine_compute_pseudo(css, element, CSS_PSEUDO_ELEMENT_FIRST_LINE, &box->style, style);
+	if (error == 0) {
+		kept = wb_arena_alloc(&tree->arena, sizeof(*kept));
+		if (kept == NULL) {
+			error = ENOMEM;
+		} else {
+			memcpy(kept, style, sizeof(*kept));
+			box->first_line_style = kept;
+		}
+	}
+	free(style);
+	return error;
+}
+
+/* Tells whether a UTF-16 unit is punctuation that belongs to a first letter (quotes and brackets). */
+static int
+box_letter_punctuation(
+	uint16_t unit)
+{
+	return unit == '"' || unit == '\'' || unit == '(' || unit == ')' || unit == '[' || unit == ']' || unit == '{' || unit == '}' ||
+	    unit == 0x00ab || unit == 0x00bb || unit == 0x2018 || unit == 0x2019 || unit == 0x201a || unit == 0x201b ||
+	    unit == 0x201c || unit == 0x201d || unit == 0x201e || unit == 0x201f || unit == 0x2039 || unit == 0x203a ||
+	    unit == '!' || unit == '?' || unit == '.' || unit == ',' || unit == ':' || unit == ';' || unit == '-' || unit == '*' ||
+	    unit == '#' || unit == '@' || unit == '&' || unit == '%' || unit == '/' || unit == '\\' || unit == '_' || unit == '`' ||
+	    unit == '~' || unit == '^' || unit == '|' || unit == '<' || unit == '>' || unit == '=' || unit == '+' || unit == '$';
+}
+
+/* Finds the first text of a block container's first line and splits its first letter off. */
+static int
+box_first_letter_in(
+	struct layout_tree *tree,
+	struct layout_box *parent,
+	const struct css_style *style,
+	int depth,
+	int *done)
+{
+	struct layout_box *child;
+	struct layout_box *letter;
+	size_t start;
+	size_t end;
+	size_t length;
+	uint16_t unit;
+	int error;
+
+	if (depth > 16)
+		return 0;
+	for (child = parent->first_child; child != NULL && !*done; child = child->next) {
+		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE)
+			continue;
+		if (child->kind == LAYOUT_INLINE || child->kind == LAYOUT_BLOCK) {
+			/* Something that is not text before any text stops the search: a replaced or atomic box has no first letter. */
+			if (child->replaced || child->atomic) {
+				*done = 1;
+				return 0;
+			}
+			if (child->style.display == CSS_DISPLAY_FLEX || child->style.display == CSS_DISPLAY_GRID ||
+			    child->style.display == CSS_DISPLAY_INLINE_FLEX || child->style.display == CSS_DISPLAY_INLINE_GRID ||
+			    child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE) {
+				*done = 1;
+				return 0;
+			}
+			error = box_first_letter_in(tree, child, style, depth + 1, done);
+			if (error != 0)
+				return error;
+			continue;
+		}
+		if (child->kind != LAYOUT_TEXT) {
+			*done = 1;
+			return 0;
+		}
+
+		/* The first typographic unit: after the collapsible space, the punctuation, a letter and the punctuation after it. */
+		length = child->text_length;
+		start = 0;
+		while (start < length && (child->text[start] == ' ' || child->text[start] == '\t' || child->text[start] == '\n' ||
+		    child->text[start] == '\r' || child->text[start] == '\f'))
+			start++;
+		if (start >= length)
+			continue;
+		end = start;
+		while (end < length && box_letter_punctuation(child->text[end]) && end + 1U < length)
+			end++;
+		unit = child->text[end];
+		end++;
+		if (unit >= 0xd800 && unit < 0xdc00 && end < length)
+			end++;
+		while (end < length && box_letter_punctuation(child->text[end]) &&
+		    (child->text[end] == '"' || child->text[end] == '\'' || child->text[end] == ')' || child->text[end] == ']' ||
+		    child->text[end] == 0x00bb || child->text[end] == 0x2019 || child->text[end] == 0x201d || child->text[end] == 0x203a))
+			end++;
+
+		/* The letter's text box before the rest, which keeps the text box it was. */
+		letter = box_new(tree, LAYOUT_TEXT, child->node, style);
+		if (letter == NULL)
+			return ENOMEM;
+		letter->text = child->text;
+		letter->text_length = end;
+		letter->parent = parent;
+		letter->next = child;
+		if (parent->first_child == child) {
+			parent->first_child = letter;
+		} else {
+			struct layout_box *before;
+
+			for (before = parent->first_child; before != NULL && before->next != child; before = before->next)
+				;
+			if (before != NULL)
+				before->next = letter;
+		}
+		child->text += end;
+		child->text_length -= end;
+		*done = 1;
+		return 0;
+	}
 	return 0;
 }
 
@@ -868,6 +1048,14 @@ box_transition_pseudo(
 	*error = css_engine_compute_vt_pseudo(css, element, pseudo, name != NULL ? name->name : NULL, name != NULL ? name->classes : NULL, siblings, parent_style, style);
 	if (*error != 0)
 		return NULL;
+
+	/* A script's animation of the pseudo-element has the last word. */
+	if (name != NULL && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW &&
+	    name->animated[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP][0] != '\0') {
+		*error = css_engine_apply_text(css, style, parent_style, name->animated[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP]);
+		if (*error != 0)
+			return NULL;
+	}
 	if (style->display == CSS_DISPLAY_NONE)
 		return NULL;
 	box = box_new(tree, LAYOUT_BLOCK, NULL, style);
@@ -1961,6 +2149,14 @@ box_relative_within(
 	}
 	offset = box->style.offset;
 
+	/* A grid item's containing block is its grid area. */
+	if (box->grid_area_set && !box->out_of_flow && box->parent != NULL && box->parent == containing &&
+	    (containing->style.display == CSS_DISPLAY_GRID || containing->style.display == CSS_DISPLAY_INLINE_GRID)) {
+		width = box->grid_area_width;
+		height = box->grid_area_height;
+		definite = 1;
+	}
+
 	/* Horizontally: left wins over right. */
 	if (offset[CSS_LEFT].unit == CSS_UNIT_PX) {
 		*dx = layout_from_px(offset[CSS_LEFT].value);
@@ -2006,6 +2202,14 @@ box_static_inline(
 		if (child->out_of_flow) {
 			child->static_x = x;
 			child->static_y = y;
+
+			/* A containing block a grid gave it moves with the content box too. */
+			if (child->cb_set && !child->area_from_anchor) {
+				child->cb_left += x;
+				child->cb_right += x;
+				child->cb_top += y;
+				child->cb_bottom += y;
+			}
 
 			/* After a forced break it is on a later line. */
 			if (*breaks != 0 && block->line_count != 0) {
