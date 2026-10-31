@@ -756,6 +756,8 @@ struct css_try_rule {
 	struct vm_string *name;
 	struct css_declaration *declarations;
 	size_t declaration_count;
+	/* The cascade layer the rule is in (0 for none, which outranks every layer). */
+	int layer;
 };
 
 /* One keyframe of an @keyframes rule: its offset (0 to 1) and its declarations. */

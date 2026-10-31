@@ -14,6 +14,7 @@
 #include "css/internal.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -5574,18 +5575,32 @@ cascade_try_rule(
 {
 	const struct cascade_sheet *sheets;
 	const struct css_try_rule *found;
+	size_t found_sheet;
 	size_t index;
 	size_t rule;
+	int rank;
+	int best;
 
 	/* Each sheet's rules in order: the last of the name wins. */
 	found = NULL;
+	found_sheet = 0;
 	sheets = engine->sheets.items;
 	for (index = 0; index < engine->sheets.count; index++) {
 		if (sheets[index].sheet == NULL)
 			continue;
 		for (rule = 0; rule < sheets[index].sheet->try_rule_count; rule++) {
-			if (vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
-				found = &sheets[index].sheet->try_rules[rule];
+			if (!vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
+				continue;
+
+			/* A rule in a later layer outranks one in an earlier layer of the same sheet, and the unlayered outrank all. */
+			if (found != NULL && found_sheet == index) {
+				rank = sheets[index].sheet->try_rules[rule].layer == 0 ? INT_MAX : sheets[index].sheet->try_rules[rule].layer;
+				best = found->layer == 0 ? INT_MAX : found->layer;
+				if (rank < best)
+					continue;
+			}
+			found = &sheets[index].sheet->try_rules[rule];
+			found_sheet = index;
 		}
 	}
 	return found;

@@ -1152,6 +1152,7 @@ parser_position_try(
 	if (name == prelude_count)
 		return 0;
 	memset(&rule, 0, sizeof(rule));
+	rule.layer = state->layer;
 	rule.name = vm_atom_from_units(state->heap, prelude[name].text, prelude[name].length);
 	if (rule.name == NULL)
 		return ENOMEM;
