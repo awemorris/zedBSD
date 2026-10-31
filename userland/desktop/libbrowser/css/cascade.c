@@ -970,6 +970,7 @@ cascade_compute(
 		style->list_style = parent->list_style;
 		style->underline = parent->underline;
 		style->text_decoration_skip_ink = parent->text_decoration_skip_ink;
+		style->text_stroke_width = parent->text_stroke_width;
 		style->text_shadow = parent->text_shadow;
 		style->text_shadow_set = parent->text_shadow_set;
 		style->custom = parent->custom;
@@ -4651,6 +4652,9 @@ cascade_apply(
 	case CSS_PROP_OUTLINE_WIDTH:
 		style->outline_width = cascade_length(engine, value, style->font_size).value;
 		break;
+	case CSS_PROP_TEXT_STROKE_WIDTH:
+		style->text_stroke_width = cascade_length(engine, value, style->font_size).value;
+		break;
 	case CSS_PROP_OUTLINE_STYLE:
 		style->outline_style = value->keyword;
 		break;
@@ -4827,6 +4831,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_OUTLINE_WIDTH:
 		style->outline_width = parent->outline_width;
+		break;
+	case CSS_PROP_TEXT_STROKE_WIDTH:
+		style->text_stroke_width = parent->text_stroke_width;
 		break;
 	case CSS_PROP_OUTLINE_STYLE:
 		style->outline_style = parent->outline_style;

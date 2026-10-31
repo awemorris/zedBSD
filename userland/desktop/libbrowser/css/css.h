@@ -839,6 +839,8 @@ struct css_style {
 	struct css_shadow text_shadow;
 	int text_shadow_set;
 	float outline_width;
+	/* -webkit-text-stroke-width (not painted: only reported). */
+	float text_stroke_width;
 	int outline_style;
 	uint32_t outline_color;
 	float outline_offset;

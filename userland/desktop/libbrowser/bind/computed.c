@@ -158,6 +158,7 @@ enum computed_property {
 	COMPUTED_MIX_BLEND_MODE,
 	COMPUTED_ZOOM,
 	COMPUTED_CONTENT,
+	COMPUTED_TEXT_STROKE_WIDTH,
 
 	/* The flow-relative properties, six families of four (inline-start, inline-end, block-start, block-end): margin, padding, inset, border width, style and color. */
 	COMPUTED_LOGICAL_FIRST,
@@ -246,6 +247,7 @@ static const struct vm_cell_type computed_ref_type = { "computed-style", compute
  */
 static const struct computed_entry computed_entries[] = {
 	{ "content", COMPUTED_CONTENT },
+	{ "-webkit-text-stroke-width", COMPUTED_TEXT_STROKE_WIDTH },
 	{ "border-top-left-radius", COMPUTED_RADIUS_FIRST + 0 },
 	{ "border-top-right-radius", COMPUTED_RADIUS_FIRST + 1 },
 	{ "border-bottom-right-radius", COMPUTED_RADIUS_FIRST + 2 },
@@ -1575,6 +1577,9 @@ computed_write_keyword(
 		break;
 	case COMPUTED_CONTENT:
 		error = computed_write_content(style, out);
+		break;
+	case COMPUTED_TEXT_STROKE_WIDTH:
+		error = computed_pixels(style->text_stroke_width, out);
 		break;
 	case COMPUTED_WIDTH:
 		error = computed_length(&style->width, out);

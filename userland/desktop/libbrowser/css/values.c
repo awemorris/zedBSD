@@ -82,6 +82,7 @@ enum values_shorthand {
 	SHORT_RADIUS_END_END,
 	SHORT_RADIUS_END_START,
 	SHORT_OUTLINE,
+	SHORT_TEXT_STROKE,
 	SHORT_GRID_COLUMN,
 	SHORT_GRID_ROW,
 	SHORT_GRID_AREA,
@@ -254,6 +255,8 @@ static const struct values_name values_names[] = {
 	{ "-webkit-box-shadow", CSS_PROP_BOX_SHADOW },
 	{ "-moz-box-shadow", CSS_PROP_BOX_SHADOW },
 	{ "outline-width", CSS_PROP_OUTLINE_WIDTH },
+	{ "-webkit-text-stroke-width", CSS_PROP_TEXT_STROKE_WIDTH },
+	{ "-webkit-text-stroke", SHORT_TEXT_STROKE },
 	{ "outline-style", CSS_PROP_OUTLINE_STYLE },
 	{ "outline-color", CSS_PROP_OUTLINE_COLOR },
 	{ "outline-offset", CSS_PROP_OUTLINE_OFFSET },
@@ -1062,6 +1065,7 @@ static void values_calc_scale(struct css_calc_sum *sum, float factor);
 static int values_calc_add(struct css_calc_sum *sum, const struct css_calc_sum *other, float sign);
 static size_t values_skip_space(const struct css_token *tokens, size_t count, size_t index);
 static int values_border_radius(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_text_stroke(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_corner_radius(struct css_parse *parse, int corner, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_radii(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *radii);
 static int values_box_shadow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
@@ -1327,6 +1331,8 @@ css_parse_property(
 		return values_corner_radius(parse, 4 + (property - SHORT_RADIUS_START_START), tokens, count, out, out_count);
 	case SHORT_OUTLINE:
 		return values_outline(parse, tokens, count, out, out_count);
+	case SHORT_TEXT_STROKE:
+		return values_text_stroke(parse, tokens, count, out, out_count);
 	case SHORT_GRID_COLUMN:
 		return values_grid_pair(parse, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END, tokens, count, out, out_count);
 	case SHORT_GRID_ROW:
@@ -2437,7 +2443,7 @@ values_single(
 	}
 
 	/* The outline's width is a border's. */
-	if (property == CSS_PROP_OUTLINE_WIDTH) {
+	if (property == CSS_PROP_OUTLINE_WIDTH || property == CSS_PROP_TEXT_STROKE_WIDTH) {
 		/* Parse the selected component with its established native grammar. */
 		error = values_single(parse, CSS_PROP_BORDER_TOP_WIDTH, tokens, count, value);
 		if (error != 0)
@@ -5786,6 +5792,45 @@ values_corner_radius(
 {
 	/* The pair of longhands of the corner. */
 	return values_pair(parse, CSS_PROP_RADIUS_TOP_LEFT_X + 2 * corner, CSS_PROP_RADIUS_TOP_LEFT_Y + 2 * corner, tokens, count, out, made);
+}
+
+/* Parses -webkit-text-stroke: a width and a color in either order (only the width is kept). */
+static int
+values_text_stroke(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_value width;
+	struct css_value candidate;
+	size_t starts[3];
+	size_t lengths[3];
+	size_t components;
+	size_t index;
+	int error;
+
+	/* The defaults: medium. */
+	memset(&width, 0, sizeof(width));
+	width.kind = CSS_VALUE_LENGTH;
+	width.number = 3;
+	width.unit = CSS_DUNIT_PX;
+	components = values_components(tokens, count, starts, lengths, 3);
+	if (components == 0 || components > 2)
+		return EINVAL;
+	for (index = 0; index < components; index++) {
+		error = values_single(parse, CSS_PROP_TEXT_STROKE_WIDTH, tokens + starts[index], lengths[index], &candidate);
+		if (error == 0) {
+			width = candidate;
+			continue;
+		}
+		error = values_single(parse, CSS_PROP_OUTLINE_COLOR, tokens + starts[index], lengths[index], &candidate);
+		if (error != 0)
+			return EINVAL;
+	}
+	values_add(out, made, CSS_PROP_TEXT_STROKE_WIDTH, &width);
+	return 0;
 }
 
 /*
