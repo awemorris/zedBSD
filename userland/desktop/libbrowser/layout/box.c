@@ -651,10 +651,10 @@ box_details_content(
 		return error;
 	}
 
-	/* It is a block unless the rules say otherwise. */
-	if (style->display == CSS_DISPLAY_INLINE || style->display == CSS_DISPLAY_CONTENTS)
+	/* It is a block unless the rules say otherwise; display: contents leaves the children where they are. */
+	if (style->display == CSS_DISPLAY_INLINE)
 		style->display = CSS_DISPLAY_BLOCK;
-	if (style->display == CSS_DISPLAY_NONE) {
+	if (style->display == CSS_DISPLAY_NONE || style->display == CSS_DISPLAY_CONTENTS) {
 		free(style);
 		return 0;
 	}
