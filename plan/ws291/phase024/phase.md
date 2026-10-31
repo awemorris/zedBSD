@@ -154,3 +154,8 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   約 3.8〜4.0 ms、NVK 3.15）と GPU の 1 draw（0.27 µs 対 NVK 約 0.256 µs）。big-100 の lend の遅れ（item 3）は未着手。
 - 未実施: amdrdna・i915・powervr の BUG-381 の直し、Venus の host の側の部分の失敗の調べ、案 A・B の効果の 3 round 交互の比べ、
   nvrtx の runtime_job_command の失敗の道の実機の試し（fault の注入の knob が無い）。
+- 追記（23:15〜23:28）: GPU core の capacity の変化の時の monitor の起床を、その device の open に停止か close が待っている時だけに
+  （`gpu_capacity_changed_locked`、retirement の起床と同じ規則、`gpu_device_stop_waiting_locked`）。host: `run-gpu-job-host.sh` PASS（WS014 の
+  supervision・job・fence の fixture を含む）、RTX・config-amd64・rpi5 の vmunix warning 0。実機（`rtx-p024.sh` ROUNDS=2、libvulkan lv2、js = a99e1411e の
+  kernel、js3 = この変更、build/tmp/p024-js3）: subs-1000 js 32.16・28.56 → js3 34.67・34.31、subs-100 296.1・301.6 → 301.1・297.5、big は揺れの内。
+  戻し cksum 一致、Debian。QEMU の Venus はこの変更の後に流していない（未実施）。
