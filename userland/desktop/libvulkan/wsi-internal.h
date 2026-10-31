@@ -297,15 +297,16 @@ struct vulkan_wsi_platform_ops {
 	 * Tells the window system the chain a creation makes (the fit), and
 	 * takes the images it lends the chain to draw into when the lend it
 	 * offers now fits: at most the capacity's count, each one's fd (the
-	 * caller's to close) and description, and the lend's serial.
+	 * caller's to close), and the lend's serial.
 	 * VK_ERROR_FEATURE_NOT_PRESENT when no lend fits (one offered that does
 	 * not fit is declined).  NULL when the backend lends no images.
 	 */
-	VkResult (*lend)(void *, const struct vulkan_wsi_lend_fit *, uint32_t, uint32_t *, int *, struct gpu_image_descriptor *, uint64_t *);
+	VkResult (*lend)(void *, const struct vulkan_wsi_lend_fit *, uint32_t, uint32_t *, int *, uint64_t *);
 	/*
 	 * Makes the native image of lent image index of the lend serial from
-	 * its fd (which stays the caller's); it is busy until the window system
-	 * gives it to the chain to draw into.
+	 * its fd (which stays the caller's) and the description its import
+	 * took from the kernel; it is busy until the window system gives it to
+	 * the chain to draw into.
 	 */
 	VkResult (*lend_import)(void *, int, const struct gpu_image_descriptor *, uint64_t, uint32_t, void **);
 	/*

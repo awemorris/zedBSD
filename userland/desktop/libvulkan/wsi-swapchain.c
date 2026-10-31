@@ -359,7 +359,7 @@ static VkBool32 swapchain_direct_possible(struct vulkan_swapchain *chain, const 
 static VkResult swapchain_native_images_import(struct vulkan_swapchain *chain);
 static VkResult swapchain_exportable(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info);
 static void swapchain_fit(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info, uint32_t asked);
-static VkResult swapchain_lent_create(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info, uint32_t count, const int *fds, const struct gpu_image_descriptor *descriptors);
+static VkResult swapchain_lent_create(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info, uint32_t count, const int *fds);
 static VkBool32 swapchain_lend_changed(struct vulkan_swapchain *chain);
 static void swapchain_native_images_free(struct vulkan_swapchain *chain);
 static VkResult swapchain_allocate_memory(struct vulkan_swapchain *chain, const VkMemoryRequirements *requirements, VkMemoryPropertyFlags required, const struct vulkan_allocator *policy, VkDeviceMemory *memory);
@@ -1091,7 +1091,6 @@ swapchain_create(
 	struct vulkan_surface *surface;
 	struct vulkan_object *object;
 	const char *log_variable;
-	struct gpu_image_descriptor lent_descriptors[VULKAN_WSI_LEND_MAX];
 	int lent_fds[VULKAN_WSI_LEND_MAX];
 	uint64_t lent_serial;
 	uint32_t lent_count;
@@ -1213,7 +1212,7 @@ swapchain_create(
 	 */
 	swapchain_fit(chain, info, asked);
 	if (shared == NULL && surface->platform->lend != NULL) {
-		error = surface->platform->lend(chain->lease, &chain->fit, VULKAN_WSI_LEND_MAX, &lent_count, lent_fds, lent_descriptors, &lent_serial);
+		error = surface->platform->lend(chain->lease, &chain->fit, VULKAN_WSI_LEND_MAX, &lent_count, lent_fds, &lent_serial);
 
 		/* No lend fits: the chain makes its own images. */
 		if (error == VK_ERROR_FEATURE_NOT_PRESENT) {
@@ -1247,7 +1246,7 @@ swapchain_create(
 	/* A lent chain's images are the lend's, which the compositor shows as they are: nothing is copied. */
 	if (chain->lend_serial != 0U) {
 		chain->direct = VK_TRUE;
-		error = swapchain_lent_create(chain, info, lent_count, lent_fds, lent_descriptors);
+		error = swapchain_lent_create(chain, info, lent_count, lent_fds);
 		if (error != VK_SUCCESS)
 			goto cleanup;
 		chain->gpu_present = VK_TRUE;
@@ -1265,6 +1264,16 @@ swapchain_create(
 	/* Creates an image group only for the first independently owned swapchain. */
 	if (shared == NULL) {
 		error = swapchain_group_create(chain, info);
+
+		/* A direct chain whose shared images cannot be made has images of its own instead (its presents copy). */
+		if (chain->direct != VK_FALSE &&
+		    (error == VK_ERROR_FEATURE_NOT_PRESENT ||
+		     error == VK_ERROR_FORMAT_NOT_SUPPORTED)) {
+			swapchain_group_free(chain->group);
+			chain->group = NULL;
+			chain->direct = VK_FALSE;
+			error = swapchain_group_create(chain, info);
+		}
 		if (error != VK_SUCCESS)
 			goto cleanup;
 	} else {
@@ -2045,8 +2054,7 @@ swapchain_lent_create(
 	struct vulkan_swapchain *chain,
 	const VkSwapchainCreateInfoKHR *info,
 	uint32_t count,
-	const int *fds,
-	const struct gpu_image_descriptor *descriptors)
+	const int *fds)
 {
 	struct wsi_image_group *group;
 	struct vulkan_image *private_image;
@@ -2104,12 +2112,12 @@ swapchain_lent_create(
 	memset(chain->presentation, 0, bytes);
 	chain->presentation_count = count;
 
-	/* Each buffer named as the lend's image, busy until the compositor gives it. */
+	/* Each buffer named as the lend's image (with the kernel's description of it), busy until the compositor gives it. */
 	for (index = 0U; index < count; index++) {
 		error = chain->surface->platform->lend_import(
 			chain->lease,
 			fds[index],
-			&descriptors[index],
+			&group->images[index].descriptor,
 			chain->lend_serial,
 			index,
 			&chain->presentation[index].native_image);

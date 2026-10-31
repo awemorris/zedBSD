@@ -39,28 +39,6 @@ struct kwl_buffer_layout {
 	uint32_t memory_type;
 };
 
-/*
- * The backend's record of one client GPU buffer (the resource's private
- * pointer, from its creation to kl_backend_gpu_resource_free): a duplicate
- * of the image capability's fd and the description as the client sent it,
- * kept for the direct scanout (scanout-zedbsd.c, ws122-p005b), and the
- * scanout's handle of the imported capability (0 for none) with the claim
- * it belongs to.
- */
-#define KWL_GPU_DESCRIPTION_MAX	64U
-struct kwl_gpu_buffer_record {
-	int descriptor;
-	unsigned char description[KWL_GPU_DESCRIPTION_MAX];
-	size_t description_size;
-	uint32_t width;
-	uint32_t height;
-	uint64_t handle;
-	uint64_t claim;
-};
-
-/* Forgets a buffer's scanout handle when the buffer goes (scanout-zedbsd.c). */
-void kwl_scanout_forget(struct kwl_gpu_buffer_record *record);
-
 /* Reports the zedBSD description's wire length. */
 size_t kwl_gpu_buffer_wire_bytes(void);
 /* Decodes and checks every field before it reaches Vulkan. */

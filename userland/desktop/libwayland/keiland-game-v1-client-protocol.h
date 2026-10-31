@@ -13,9 +13,9 @@
  *
  * The client's Vulkan WSI (libvulkan's Wayland surface) speaks it; an
  * application never does.  It tells the chain it draws with (chain); the
- * compositor sends each image it lends (image: its fd and description,
- * as kl_gpu_buffer_v1.create_buffer carries one) and then the lend
- * (lend: the images' count, size, format, uses and layout).  The client
+ * compositor sends each image it lends (image: its fd, whose description
+ * the kernel gives the client's import) and then the lend (lend: the
+ * images' count, size, format, uses and layout).  The client
  * makes a wl_buffer of each image with kl_gpu_buffer_v1 and names it
  * (tag); a lent buffer starts in the compositor's hands, and
  * wl_buffer.release gives it to the client to draw into.  A client that
@@ -53,16 +53,17 @@ struct kl_game_surface_v1 *kl_game_v1_get_game_surface(struct kl_game_v1 *object
 /*
  * kl_game_surface_v1: a surface's game object.
  *
- * image: lent image index of the lend serial, its fd (the listener's) and
- * its description (the bytes kl_gpu_buffer_v1.create_buffer takes).
+ * image: lent image index of the lend serial and its fd (the listener's).
  * lend: every image of the lend serial was sent; count images of width x
  * height, format (a VkFormat), the uses they allow (VkImageUsageFlags) and
- * their layout (KL_GAME_SURFACE_V1_LAYOUT_*).  withdraw: the lend serial
- * is over.
+ * their layout: the kernel's tiling value of the images (GPU_IMAGE_* of
+ * <uapi/gpu.h>, the same as in each image's kernel description), or
+ * KL_GAME_SURFACE_V1_LAYOUT_DESCRIBED when the compositor leaves it to
+ * the images' own descriptions.  withdraw: the lend serial is over.
  */
-#define KL_GAME_SURFACE_V1_LAYOUT_LINEAR 0U
+#define KL_GAME_SURFACE_V1_LAYOUT_DESCRIBED 0U
 struct kl_game_surface_v1_listener {
-	void (*image)(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t index, int32_t fd, struct wl_array *description);
+	void (*image)(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t index, int32_t fd);
 	void (*lend)(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t count, uint32_t width, uint32_t height, uint32_t format, uint32_t usage, uint32_t layout);
 	void (*withdraw)(void *data, struct kl_game_surface_v1 *object, uint32_t serial);
 };

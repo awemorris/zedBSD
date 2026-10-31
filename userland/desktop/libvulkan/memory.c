@@ -620,6 +620,7 @@ vulkan_memory_image_fd(
 	struct memory_allocation *allocation;
 	struct gpu_resource_export request;
 	int status;
+	int error;
 
 	/* Only this device's live allocation may supply a capability. */
 	*fd = -1;
@@ -647,8 +648,13 @@ vulkan_memory_image_fd(
 	vulkan_context_lock(device->object.context);
 
 	status = ioctl(device->object.context->fd, GPU_RESOURCE_EXPORT, &request);
+	error = errno;
 
 	vulkan_context_unlock(device->object.context);
+
+	/* An image the device cannot share so is unsupported, not a lack of memory; no capability was made. */
+	if (status != 0 && (error == EOPNOTSUPP || error == ENOTSUP || error == EINVAL))
+		return VK_ERROR_FEATURE_NOT_PRESENT;
 
 	/* Failed export leaves no caller-owned capability to release. */
 	if (status != 0)

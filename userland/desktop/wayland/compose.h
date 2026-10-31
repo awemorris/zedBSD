@@ -38,6 +38,9 @@
 #define KWL_SWAPCHAIN_MAX	8U
 #define KWL_FRAME_WINDOWS	64U
 
+/* The most images the game mode's display swapchain lends a client (scanout.c). */
+#define KWL_GAME_IMAGES		8U
+
 /* The longest list of an output's windows the log keeps (KWL RENDER, ws113-p007). */
 #define KWL_RENDER_LOG		256U
 
@@ -390,6 +393,49 @@ struct kwl_head {
 
 struct kwl_cursor_thread;
 
+
+/*
+ * Where one image of the game mode's display swapchain is (scanout.c).
+ */
+enum kwl_game_state {
+	/* The swapchain has it: shown, queued for the display, or not acquired yet. */
+	KWL_GAME_CHAIN = 0,
+	/* The present thread acquired it: the client's to draw into, or drawn and committed. */
+	KWL_GAME_FREE,
+	/* Given to the present thread to be presented. */
+	KWL_GAME_PRESENTING
+};
+
+/*
+ * The game mode's display swapchain, whose images are lent to the client
+ * of a fullscreen game or video (scanout.c, game.c): the display surface
+ * and FIFO swapchain the display thread made at the display's mode with
+ * images that may go out (output, in format), the uses they allow, the
+ * client's image count it was made for, the present thread's acquire
+ * fence, and each image's exported fd until it is sent (-1 after).  The
+ * main thread's part: the lend's serial, each image's state, the buffer
+ * that holds it (tagged by the client, NULL before) and whether the game
+ * mode holds that buffer for the swapchain (held), the image in flight on
+ * the present thread (-1 for none), when the lend was offered, and the
+ * lent frames presented.  The main thread owns the record; the display
+ * thread writes only the Vulkan part, inside its jobs.
+ */
+struct kwl_game_chain {
+	struct vkdemo_display output;
+	VkImageUsageFlags usage;
+	uint32_t wanted;
+	VkFence acquired;
+	int fds[KWL_GAME_IMAGES];
+	uint32_t serial;
+	enum kwl_game_state state[KWL_GAME_IMAGES];
+	struct kwl_object *buffers[KWL_GAME_IMAGES];
+	unsigned held[KWL_GAME_IMAGES];
+	int flight;
+	uint64_t lent_ms;
+	uint64_t shown;
+	/* The next game chain whose release the display thread has not done yet (scanout.c's list). */
+	struct kwl_game_chain *next_closing;
+};
 
 /*
  * What is left of a head the main thread let go (heads.c): its swapchain
@@ -1039,9 +1085,8 @@ void kwl_display_open(struct kwl_server *server, kwl_display_fn *then, void *con
 void kwl_display_heads(struct kwl_server *server, struct kwl_head_rest *rests, unsigned rest_count, struct kwl_head_opening *opens, unsigned open_count, kwl_display_fn *then, void *context);
 void kwl_display_list_read(struct kwl_server *server, struct kwl_display_list *list);
 void kwl_display_enumerate(struct kwl_server *server, struct kwl_display_list *list, kwl_display_fn *then, void *context);
-int kwl_display_scanout_query(struct kwl_server *server, uint32_t width, uint32_t height, kwl_display_fn *then, void *context);
-void kwl_display_scanout_open(struct kwl_server *server, uint32_t width, uint32_t height, struct kl_backend_scanout **scanout, kwl_display_fn *then, void *context);
-void kwl_display_scanout_close(struct kwl_server *server, struct kl_backend_scanout *scanout, kwl_display_fn *then, void *context);
+void kwl_display_scanout_open(struct kwl_server *server, struct kwl_game_chain *chain, kwl_display_fn *then, void *context);
+void kwl_display_scanout_close(struct kwl_server *server, struct kwl_game_chain *chain, kwl_display_fn *then, void *context);
 int kwl_display_output_open(struct kwl_server *server, kwl_display_fn *then, void *context);
 int kwl_display_output_close(struct kwl_server *server, kwl_display_fn *then, void *context);
 void kwl_compose_unpark(struct kwl_server *server);

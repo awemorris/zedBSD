@@ -72,17 +72,16 @@ struct wayland_surface {
 
 	/*
 	 * The images of the lend being sent (pending_serial, zero for none):
-	 * each one's fd (-1 until it came) and description.  The lend event
-	 * makes them the lend offered.
+	 * each one's fd, -1 until it came.  The lend event makes them the lend
+	 * offered.
 	 */
 	uint32_t pending_serial;
 	int pending_fds[VULKAN_WSI_LEND_MAX];
-	struct gpu_image_descriptor pending_descriptors[VULKAN_WSI_LEND_MAX];
 
 	/*
 	 * The lend offered now (lend_serial, zero for none): its images' count,
-	 * size, format (a VkFormat), uses, layout, and each one's fd and
-	 * description, which a chain that fits imports.  declined is the last
+	 * size, format (a VkFormat), uses, layout, and each one's fd, which a
+	 * chain that fits imports.  declined is the last
 	 * lend this surface refused, which is not offered to a chain again.
 	 * The surface mutex guards all of them, as the listeners that write
 	 * them run under it.
@@ -95,7 +94,6 @@ struct wayland_surface {
 	uint32_t lend_usage;
 	uint32_t lend_layout;
 	int lend_fds[VULKAN_WSI_LEND_MAX];
-	struct gpu_image_descriptor lend_descriptors[VULKAN_WSI_LEND_MAX];
 	uint32_t declined;
 };
 
@@ -158,10 +156,10 @@ static void wayland_global_remove(void *data, struct wl_registry *registry, uint
 static void wayland_buffer_release(void *data, struct wl_buffer *buffer);
 static void wayland_frame_done(void *data, struct wl_callback *callback, uint32_t milliseconds);
 static int wayland_wait_input(void *private_lease);
-static VkResult wayland_lend(void *private_lease, const struct vulkan_wsi_lend_fit *fit, uint32_t capacity, uint32_t *count, int *fds, struct gpu_image_descriptor *descriptors, uint64_t *serial);
+static VkResult wayland_lend(void *private_lease, const struct vulkan_wsi_lend_fit *fit, uint32_t capacity, uint32_t *count, int *fds, uint64_t *serial);
 static VkResult wayland_lend_import(void *private_lease, int fd, const struct gpu_image_descriptor *descriptor, uint64_t serial, uint32_t index, void **result);
 static VkBool32 wayland_lend_changed(void *private_lease, const struct vulkan_wsi_lend_fit *fit, uint64_t serial);
-static void wayland_game_image(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t index, int32_t fd, struct wl_array *description);
+static void wayland_game_image(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t index, int32_t fd);
 static void wayland_game_lend(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t count, uint32_t width, uint32_t height, uint32_t format, uint32_t usage, uint32_t layout);
 static void wayland_game_withdraw(void *data, struct kl_game_surface_v1 *object, uint32_t serial);
 static VkResult wayland_image_make(struct wayland_lease *lease, int fd, const struct gpu_image_descriptor *descriptor, VkBool32 busy, struct wayland_image **result);
@@ -1549,9 +1547,8 @@ wayland_damage(
 /*
  * Tells the compositor the chain a creation makes (the fit), and gives the
  * images of the lend it offers now when that lend fits the chain: at most
- * capacity of them, each one's fd (a duplicate, the caller's to close) and
- * description, and the lend's serial.  A lend that does not fit is
- * declined.  Returns VK_SUCCESS, VK_ERROR_FEATURE_NOT_PRESENT when no lend
+ * capacity of them, each one's fd (a duplicate, the caller's to close), and
+ * the lend's serial.  A lend that does not fit is declined.  Returns VK_SUCCESS, VK_ERROR_FEATURE_NOT_PRESENT when no lend
  * fits, or VK_ERROR_OUT_OF_HOST_MEMORY.
  */
 static VkResult
@@ -1561,7 +1558,6 @@ wayland_lend(
 	uint32_t capacity,
 	uint32_t *count,
 	int *fds,
-	struct gpu_image_descriptor *descriptors,
 	uint64_t *serial)
 {
 	struct wayland_lease *lease;
@@ -1596,7 +1592,7 @@ wayland_lend(
 	if (fits == VK_FALSE)
 		wayland_lend_decline(surface);
 	if (fits != VK_FALSE && surface->lend_count <= capacity) {
-		/* Each image's fd duplicated for the caller, with its description. */
+		/* Each image's fd duplicated for the caller. */
 		error = VK_SUCCESS;
 		for (index = 0U; index < surface->lend_count; index++) {
 			fds[index] = fcntl(surface->lend_fds[index], F_DUPFD_CLOEXEC, 0);
@@ -1604,7 +1600,6 @@ wayland_lend(
 				error = VK_ERROR_OUT_OF_HOST_MEMORY;
 				break;
 			}
-			descriptors[index] = surface->lend_descriptors[index];
 		}
 
 		/* A duplicate that failed lets go of the ones made before it. */
@@ -1723,8 +1718,8 @@ wayland_lend_changed(
 }
 
 /*
- * Takes one image of a lend being sent: its fd (now the surface's) and its
- * description.  An image of a newer lend drops what an older one sent.
+ * Takes one image of a lend being sent: its fd, now the surface's.  An
+ * image of a newer lend drops what an older one sent.
  */
 static void
 wayland_game_image(
@@ -1732,15 +1727,14 @@ wayland_game_image(
 	struct kl_game_surface_v1 *object,
 	uint32_t serial,
 	uint32_t index,
-	int32_t fd,
-	struct wl_array *description)
+	int32_t fd)
 {
 	struct wayland_surface *surface;
 
-	/* An image beyond the most a chain takes, or with a description of another size, is not kept. */
+	/* An image beyond the most a chain takes is not kept. */
 	(void)object;
 	surface = data;
-	if (index >= VULKAN_WSI_LEND_MAX || description == NULL || description->size != sizeof(surface->pending_descriptors[0])) {
+	if (index >= VULKAN_WSI_LEND_MAX) {
 		if (fd >= 0)
 			close(fd);
 		return;
@@ -1756,7 +1750,6 @@ wayland_game_image(
 	if (surface->pending_fds[index] >= 0)
 		close(surface->pending_fds[index]);
 	surface->pending_fds[index] = fd;
-	memcpy(&surface->pending_descriptors[index], description->data, sizeof(surface->pending_descriptors[index]));
 }
 
 /*
@@ -1803,7 +1796,6 @@ wayland_game_lend(
 	wayland_lend_forget(surface->lend_fds, VULKAN_WSI_LEND_MAX);
 	for (index = 0U; index < VULKAN_WSI_LEND_MAX; index++) {
 		surface->lend_fds[index] = surface->pending_fds[index];
-		surface->lend_descriptors[index] = surface->pending_descriptors[index];
 		surface->pending_fds[index] = -1;
 	}
 	wayland_lend_forget(surface->lend_fds + count, VULKAN_WSI_LEND_MAX - count);
@@ -1868,8 +1860,8 @@ wayland_lend_fits(
 	if (fit->drawable == VK_FALSE)
 		return VK_FALSE;
 
-	/* Linear images (the only layout imported so far) of the chain's extent. */
-	if (surface->lend_layout != KL_GAME_SURFACE_V1_LAYOUT_LINEAR)
+	/* Linear images (the only layout imported so far; the import checks the kernel's own description) of the chain's extent. */
+	if (surface->lend_layout != KL_GAME_SURFACE_V1_LAYOUT_DESCRIBED && surface->lend_layout != GPU_IMAGE_LINEAR)
 		return VK_FALSE;
 	if (surface->lend_width != fit->extent.width || surface->lend_height != fit->extent.height)
 		return VK_FALSE;

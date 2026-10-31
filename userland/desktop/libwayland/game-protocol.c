@@ -44,7 +44,7 @@ static const struct wl_message surface_requests[] = {
 
 /* The events of kl_game_surface_v1, in wire opcode order. */
 static const struct wl_message surface_events[] = {
-	{ "image", "uuha", game_plain_types },
+	{ "image", "uuh", game_plain_types },
 	{ "lend", "uuuuuuu", game_plain_types },
 	{ "withdraw", "u", game_plain_types },
 };
