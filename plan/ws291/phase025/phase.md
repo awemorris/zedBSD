@@ -303,3 +303,7 @@ mview の vkCreateGraphicsPipelines が FEATURE_NOT_PRESENT。足りない機能
 - 板（10.0.30.6）: 1920x1080 の config.txt、cmdline `login=console v3d.perf=1`、kernel は build/p025-4d/vmunix（input inject 入り、c936bdb2d 相当）、/bin/aat-input、
   session の file は元に戻した。元の file は `/boot/boot0/{vmunix,config.txt,cmdline.txt}.p025old` と `/etc/keiland/session.p025old`、host の build/tmp/p025-board/*.orig。
 - 次: P7 の BUG-379 の直しの後に session の desktop の frame-ops（`plan/ws291/tests/pi4-desk.sh`、CONSOLE なし）。mview の c21 は上の候補を試し、届かない分は限界の記録に。
+
+## ユーザーの決定（2026-11-01）
+
+- 2026-11-01 ユーザーから、Pi 4 は熱で throttle されているように見えるので、いったんここでやめて冷却の良い Pi 5 で進める、という趣旨の指示を受けた。p025 はここで止め（in-progress のまま）、p021（Pi 5）へ移る。
