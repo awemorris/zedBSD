@@ -322,7 +322,7 @@ Origin: 2026-10-27 ユーザーの指示。
   iframe の onload が出ず no_output になる試験が残り、得は無かったので戻した）、table-cell を writing-mode の root にする試験（srl-057 など 4 件）、
   shape-outside（engine に無い。css-shapes の選定 16 件は全部 sideways の変種で、clip-path も要る）、bidi。
 
-### q1727-i04 の後半（2026-10-31、P8。dev51〜dev6x）
+### q1727-i04 の後半（2026-10-31、P8。dev51〜dev68）
 
 - 測定（gap は build/tmp/p8/gap51〜gap6x.json、出力は /tmp/p8out/devNN。計は Chromium が通す 3,472 のうちの数）:
 
@@ -345,10 +345,15 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev65 | eab76be30 | 2,672（76.96%） | percent の flex-basis が決まらない時は content と同じ、`::details-content` の display: contents |
   | dev66 | （dev65 の続き） | 2,674（77.02%） | column の ratio の最小（img の content size suggestion）、min/max-width の percent は測定の広い幅では無視 |
   | dev67 | 上の続き | 2,679（77.16%） | auto 高さの column の max-height、overflow が片軸だけ visible でない item の auto minimum、bitmap の `no_ratio` |
+  | dev68 | 3d50a809f（source は dev67 の続き） | 2,680（77.19%、gap 792） | min-width/flex-basis の intrinsic keyword、flex-wrap の min-content |
 
   dev43 → dev64 の後退は static の css-writing-modes/table-column-order-slr-007 と、dev56 で scripted の grid-item-*-stretch 7 件（SVG の `cx="50%"` の円を描くようになり、
   natural size のままの bitmap を拡大するので縁がぼやけ、Chromium の vector の拡大と一致しない。以前は円が描かれず偶然合っていた）。
   それ以外の step の後退は 0（dev60 の 4 件は dev61 で直した）。
+- 結果（2026-10-31 10:26 の host `date`）: 2,507（dev43）→ 2,680 / 3,472 = 77.19%。dev43 から dev68 の差は harness +42・static +103・scripted +36、後退は static 1（slr-007）と scripted 7（grid-item-*-stretch）。
+  最後の source での Acid3 100/100・pixel 差 0（exact match）、Acid2 99.27%（基準と同じ）、host build は `-Wall -Wextra -Werror` で warning 0。dev69 以降は測定していない（dev68 の後の source の commit は無い）。
+  Acid の runner が WPT の tree に残した一時 file（`build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-*.html` 8 個、`acid3/zedbsd-acid3-reference-*.html`・`zedbsd-acid3-diagnostic-*.html` 各 4 個）は Q1 が消す。
+  作業用の `build/tmp/p8/sub-1793396413`・`build/tmp/p8/refa`・`build/tmp/p8/refw` も同様。
 - 直した物（続き。14 以降）:
   14. 絶対配置（layout/position.c）: 両 inset がある時の self-alignment（justify-self・align-self の start・end・center）、fallback の flip で LEFT/RIGHT・FLEX_* の揃えを入れ替え、対角の flip は direction で left/right を直す。position-area の下で size が auto の box は auto inset を 0 に（area の縁まで広がる）。
   15. 要素の `::before`・`::after` の getComputedStyle（content の computed）、background 短縮形の image-set()、`-webkit-text-stroke-width`、LCP の生成 text の幅・data URI の背景（plan/ws074/phase230/prelude.js）。
