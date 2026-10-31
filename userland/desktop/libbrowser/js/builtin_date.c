@@ -12,8 +12,8 @@
  * value is its time value: milliseconds from 1970-01-01T00:00:00Z, or NaN
  * for an invalid date.  The calendar is the proleptic Gregorian one of the
  * specification, computed with whole days from the epoch (the civil
- * algorithms of Howard Hinnant, in doubles); local time is libc's
- * (localtime_r's tm_gmtoff at the moment, so daylight saving follows the
+ * algorithms of Howard Hinnant, in doubles); local time is the system's
+ * (its offset from UTC at the moment, so daylight saving follows the
  * system's zone).  The getters and setters are one native function each
  * for the local and the UTC families: the function's data names the field.
  * Date.parse reads the ISO format of the specification and, like other
@@ -25,12 +25,13 @@
  */
 
 #include "js/builtin.h"
+#include "base/os-time.h"
 
 #include <errno.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /* Milliseconds in a day, an hour, a minute and a second. */
 #define DATE_MS_PER_DAY		86400000.0
@@ -285,8 +286,8 @@ js_builtin_install_date(
 	vm_value utc_string;
 	int error;
 
-	/* The zone libc's local time uses. */
-	tzset();
+	/* The zone the system's local time uses. */
+	wb_os_time_zone_start();
 
 	/* The prototype and the constructor with its functions. */
 	prototype = vm_object_create(realm->heap, realm->object_prototype);
@@ -1447,18 +1448,18 @@ date_zone(
 	size_t size)
 {
 	const struct date_zone_name *entry;
-	struct tm parts;
-	struct tm *found;
-	time_t seconds;
+	char zone[WB_OS_ZONE_NAME_MAX + 1U];
+	int64_t seconds;
 	const char *name;
 	int differs;
+	int error;
 
-	/* The zone's abbreviation at the moment; a zone libc cannot name is UTC. */
+	/* The zone's name at the moment (an abbreviation on POSIX systems); a zone the system cannot name is UTC. */
 	name = "UTC";
-	seconds = (time_t)floor(time / DATE_MS_PER_SECOND);
-	found = localtime_r(&seconds, &parts);
-	if (found != NULL && parts.tm_zone != NULL && parts.tm_zone[0] != '\0')
-		name = parts.tm_zone;
+	seconds = (int64_t)floor(time / DATE_MS_PER_SECOND);
+	error = wb_os_zone_name(seconds, zone, sizeof(zone));
+	if (error == 0 && zone[0] != '\0')
+		name = zone;
 
 	/* Finds the long name browsers write for a common abbreviation. */
 	for (entry = date_zone_names; entry->abbreviation != NULL; entry++) {
@@ -1477,16 +1478,17 @@ date_zone(
 static double
 date_now(void)
 {
-	struct timespec now;
-	int status;
+	int64_t now;
+	int64_t milliseconds;
 
 	/* The real-time clock. */
-	status = clock_gettime(CLOCK_REALTIME, &now);
-	if (status != 0)
-		return 0.0;
+	now = wb_os_wall_ns();
 
-	/* The milliseconds. */
-	return floor((double)now.tv_sec * DATE_MS_PER_SECOND + (double)now.tv_nsec / 1000000.0);
+	/* The whole milliseconds, rounded down (also before 1970). */
+	milliseconds = now / 1000000;
+	if (now % 1000000 < 0)
+		milliseconds--;
+	return (double)milliseconds;
 }
 
 /* Counts the days from 1970-01-01 to a date of the proleptic Gregorian calendar (month 1 to 12). */
@@ -1649,22 +1651,22 @@ static double
 date_offset_at(
 	double time)
 {
-	struct tm parts;
-	struct tm *found;
-	time_t seconds;
+	int64_t seconds;
+	long offset;
 	int finite;
+	int error;
 
-	/* libc's local time at the moment. */
+	/* The system's offset at the moment. */
 	finite = isfinite(time);
 	if (!finite)
 		return 0.0;
-	seconds = (time_t)floor(time / DATE_MS_PER_SECOND);
-	found = localtime_r(&seconds, &parts);
-	if (found == NULL)
+	seconds = (int64_t)floor(time / DATE_MS_PER_SECOND);
+	error = wb_os_local_offset(seconds, &offset);
+	if (error != 0)
 		return 0.0;
 
-	/* Its offset. */
-	return (double)parts.tm_gmtoff * DATE_MS_PER_SECOND;
+	/* In milliseconds. */
+	return (double)offset * DATE_MS_PER_SECOND;
 }
 
 /* Converts a UTC time value to local time (LocalTime). */

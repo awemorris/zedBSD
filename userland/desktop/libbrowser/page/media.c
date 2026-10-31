@@ -26,6 +26,7 @@
  */
 
 #include "page/page.h"
+#include "base/os-file.h"
 #include "net/net.h"
 
 #include "userland/desktop/libmedia/media.h"
@@ -465,6 +466,7 @@ media_add(
 	struct wb_buffer value;
 	int autoplay;
 	int remote;
+	int local;
 	int found;
 	int error;
 
@@ -515,7 +517,8 @@ media_add(
 		return ENOMEM;
 
 	/* A local file by its path. */
-	if (media->location[0] == '/') {
+	local = wb_os_path_is_absolute(media->location);
+	if (local) {
 		media_start(media, NULL, 0U);
 		return 0;
 	}

@@ -19,6 +19,7 @@
  */
 
 #include "vm/internal.h"
+#include "base/os-system.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -133,8 +134,8 @@ vm_heap_destroy(
 				cell->type->finalize(heap, cell);
 		}
 
-		/* Returns the block to the C library. */
-		free(block);
+		/* Returns the block to the system. */
+		wb_os_aligned_free(block);
 		block = next;
 	}
 
@@ -144,8 +145,8 @@ vm_heap_destroy(
 		if (cell->type != NULL && cell->type->finalize != NULL)
 			cell->type->finalize(heap, cell);
 
-		/* Returns the cell's allocation to the C library. */
-		free(heap->large[item]);
+		/* Returns the cell's allocation to the system. */
+		wb_os_aligned_free(heap->large[item]);
 	}
 
 	/* Frees the tables and the record. */
@@ -552,7 +553,7 @@ heap_add_block(
 	int error;
 
 	/* Takes an aligned block, so a cell's block is its address rounded down. */
-	error = posix_memalign(&memory, VM_BLOCK_SIZE, VM_BLOCK_SIZE);
+	error = wb_os_aligned_alloc(VM_BLOCK_SIZE, VM_BLOCK_SIZE, &memory);
 	if (error != 0)
 		return ENOMEM;
 	block = memory;
@@ -567,7 +568,7 @@ heap_add_block(
 	/* Makes the block findable from a stack word. */
 	error = heap_block_set_insert(heap, block);
 	if (error != 0) {
-		free(block);
+		wb_os_aligned_free(block);
 		return error;
 	}
 
@@ -742,7 +743,7 @@ heap_alloc_large(
 	}
 
 	/* Takes the memory, aligned for a cell after the header. */
-	error = posix_memalign(&memory, VM_CELL_ALIGN, HEAP_LARGE_HEADER + size);
+	error = wb_os_aligned_alloc(VM_CELL_ALIGN, HEAP_LARGE_HEADER + size, &memory);
 	if (error != 0)
 		return NULL;
 	large = memory;
@@ -998,11 +999,11 @@ heap_sweep_blocks(
 			heap->freed_cells++;
 		}
 
-		/* A block with no cell left goes back to the C library. */
+		/* A block with no cell left goes back to the system. */
 		if (block->used == 0) {
 			*link = block->next;
 			heap->block_count--;
-			free(block);
+			wb_os_aligned_free(block);
 			freed_block = 1;
 			continue;
 		}
@@ -1064,7 +1065,7 @@ heap_sweep_large(
 		cell = heap_large_cell(large);
 		if (cell->type != NULL && cell->type->finalize != NULL)
 			cell->type->finalize(heap, cell);
-		free(large);
+		wb_os_aligned_free(large);
 		heap->freed_cells++;
 	}
 
