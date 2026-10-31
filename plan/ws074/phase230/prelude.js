@@ -1511,6 +1511,28 @@
     def(g, 'PerformanceObserver', PerformanceObserver);
     def(g, 'LargestContentfulPaint', LargestContentfulPaint);
   })();
+  // ---- Event Timing: the interface and the entry types (no entry is produced; the engine measures no event latency).
+  (function () {
+    var Native = g.PerformanceObserver, Entry = g.PerformanceEntry, KEY2 = {};
+    if (typeof Native !== 'function' || g.PerformanceEventTiming) return;
+    class PerformanceEventTiming {
+      constructor(key) { if (key !== KEY2) throw new TypeError('Illegal constructor'); }
+      get entryType() { return 'event'; }
+      get processingStart() { return this.startTime; }
+      get processingEnd() { return this.startTime; }
+      get cancelable() { return false; }
+      get target() { return null; }
+      get interactionId() { return 0; }
+    }
+    if (Entry) Object.setPrototypeOf(PerformanceEventTiming.prototype, Entry.prototype);
+    tag(PerformanceEventTiming, 'PerformanceEventTiming');
+    def(g, 'PerformanceEventTiming', PerformanceEventTiming);
+    var Wrapped = g.PerformanceObserver, previous = Object.getOwnPropertyDescriptor(Wrapped, 'supportedEntryTypes');
+    Object.defineProperty(Wrapped, 'supportedEntryTypes', {
+      get: function () { return Object.freeze(previous.get.call(Wrapped).concat(['event', 'first-input']).sort()); },
+      configurable: true, enumerable: true
+    });
+  })();
   if (!g.customElements) {
     var registry = new Map();
     def(g, 'customElements', {
