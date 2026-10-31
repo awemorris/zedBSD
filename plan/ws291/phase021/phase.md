@@ -2,7 +2,7 @@
 
 # ws291-p021: Raspberry Pi 5（V3D 7.1）で重い 3D の model を、スペックの比で決めた目標の fps に
 
-Status: in-progress（2026-11-01 05:45 P4 q1784-i06: 画面が出て、画面の mview c74 49.2〜49.9 fps（目標 50 の境）、desktop は定常 60・launch 57・drag 58。再開点は末尾）
+Status: in-progress（2026-11-01 05:45 P4 q1784-i06: 画面が出て、画面の mview c74 49.2〜49.9 fps（目標 50 の境）、desktop は定常 60・launch 57・drag 58。再開点は末尾。06:49 P4 q1817-i01: main b2392803f は Pi 5 で final2 と同じ（回帰なし、checksum 同じ）、VF2 の game mode は c1 136→168・c13 51.6→56.0 fps）
 Parent: [WS291](../ws.md)
 Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）、q1784-i05・i06（P4、2026-11-01）、q1817-i01（P4、2026-11-01、main の計測だけ）
 
@@ -331,6 +331,25 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
   kernel の行の数え（fault・hang・job failed）は各 run 3 で、全部が起動の self-test の V9（self-branch の hang と reset）。
 - 結論: Pi 5 では b2392803f は final2 と同じ（差は起動ごとの揺れの中）。回帰は無い。RTX の (a) の copyin の近道は Pi 5 の mview・desktop の fps に見える差を作らない。(c) は nvrtx だけで V3D は変わらない。
 - 未実施: 起動ごとの揺れ（c21 104〜125、c74 49.7〜53.9）の原因（長く動いた起動が速い。memory の配置か clock か、未調査）。
+
+### VF2 の main b2392803f の計測（2026-11-01 06:31〜06:49、P4 q1817-i01、kei@10.0.30.2、電源はプラグ 3 AC276E432AE6）
+
+- build（b2392803f、warning 0）: timing の build/q1817-vf2t（`ZEDBSD_CONFIG=plan/ws291/tests/config-vf2.mk ZEDBSD_TEST_CPPFLAGS=-DPOWERVR_SUBMIT_TIMING=1`、vmunix 3220583395、wayland・mview・libvulkan・libwayland-client）と
+  回帰の build/q1817-vf2s（`config-vf2-shot.mk`、vmunix 3758577736）。password は環境変数だけで渡した（file・log に無し）。
+- 前 = ws309-p015 の段 4 の new と同じ build（P2 の worktree の build/p015vf2t、vmunix 1381433670、6f9cbfef8）。`plan/ws309/tests/vf2-p015.sh`（`OLD=q1817old COPIES='1 13' SPIN=12`）で同じ日に 2 回（2 回目は arm の順を逆、`CYCLES=2`）。
+  game mode（direct scanout、mailbox 4 枚、1920x1080、qs40）。証拠は build/tmp/q1817/vf2-p015・vf2-p015b。
+
+| fps | ws309-p015 の記録（2026-10-31） | 前（p015 の build、今日 2 回） | 後（b2392803f、今日 2 回） |
+| --- | --- | --- | --- |
+| c1 | 141.25 | 136.44・136.05 | **167.97・169.04** |
+| c13 | 52.50 | 51.51・51.75 | **56.04・55.99** |
+
+- 後は前より c1 で約 +23 %、c13 で約 +8 %（frame 平均 19.3 → 17.8 ms）。両方とも lent=1・direct=1・tiling 0x1、game の chain の copies 0。game ↔ window の往復は前・後とも全部 `MVIEW DONE`（8/8・2/2、refused 0・failed 0）。
+  差は 6f9cbfef8 から b2392803f までの全部（copyin・copyout の 1 page の近道を含む）で、どの commit の効果かは分けていない。
+- 回帰（`plan/ws291/tests/vf2-regress.sh build/tmp/q1817/vf2-regress build/q1817-vf2s`、`KEEP=1 OLD=q1817old`）: vkmatrix 109/109、`-p 3` PASS、`-r 3` 327/327、vkcoherency PASS、vkcompute 4096/4096、
+  desktop の compositor の error 0・desktop の起動 1、keiland-shot の PNG の cksum 518389155（ws291-p020 の s3 と同じ）。`sudo gpu-selftest` → `13 ok, 0 fail, 0 skip`。root は ufs（rw）。
+- 板の起動（[BUG-385](../../bugs/BUG-385.md) に記録）: 計測の 7 回の起動は全部 SSH が戻り、SD の読みの失敗は新しい kernel で 0〜1 回、板の元の kernel（2825517684）で 11・20 回（retry で通った）。
+- 板（06:49）: /boot/boot0/vmunix 3758577736（build/q1817-vf2s、b2392803f、回帰に通った）。元の 2825517684 は vmunix.q1817old（vmunix.p2old・vmunix.q1772orig も同じ）。zedbsd.cfg は触っていない。
 
 ### 板の状態（2026-11-01 06:25、10.0.30.7）
 
