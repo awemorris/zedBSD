@@ -65,9 +65,9 @@ layout_replaced_size(
 	natural_height = 0;
 	has_ratio = 0;
 	if (box->image != NULL) {
-		natural_width = layout_from_px((float)box->image->width * box->style.zoom_eff);
-		natural_height = layout_from_px((float)box->image->height * box->style.zoom_eff);
-		has_ratio = 1;
+		natural_width = layout_from_px((float)img_natural_width(box->image) * box->style.zoom_eff);
+		natural_height = layout_from_px((float)img_natural_height(box->image) * box->style.zoom_eff);
+		has_ratio = !box->image->no_ratio;
 	}
 
 	/* A <video> without a picture yet has HTML's default object size (ws121-p004). */
@@ -446,7 +446,7 @@ layout_replaced_ratio(
 	/* A picture's own size (a width attribute sizes it by itself). */
 	if (box->image != NULL && box->image->width > 0 && box->image->height > 0) {
 		width = 0;
-		if (replaced_attribute(box, "width", &width))
+		if (replaced_attribute(box, "width", &width) || box->image->no_ratio)
 			return 0;
 		*ratio = (float)box->image->width / (float)box->image->height;
 		return 1;

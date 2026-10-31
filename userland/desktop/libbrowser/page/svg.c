@@ -187,6 +187,11 @@ page_svg_render(
 	float shrink;
 	int have_view;
 	int no_size;
+	int has_width;
+	int has_height;
+	int natural_set;
+	int natural_width;
+	int natural_height;
 	int valid;
 	int pixel_width;
 	int pixel_height;
@@ -221,10 +226,13 @@ page_svg_render(
 	/* The size: the attributes' pixels, else the viewBox's, else the default object size. */
 	width = 0.0f;
 	height = 0.0f;
+	has_width = 0;
+	has_height = 0;
 	wb_buffer_init(&buffer);
 	text = svg_attribute(svg, "width", &buffer);
 	if (text != NULL) {
 		width = svg_length(text, &valid);
+		has_width = valid && width >= 0.0f;
 		if (!valid)
 			width = 0.0f;
 	}
@@ -233,11 +241,26 @@ page_svg_render(
 	text = svg_attribute(svg, "height", &buffer);
 	if (text != NULL) {
 		height = svg_length(text, &valid);
+		has_height = valid && height >= 0.0f;
 		if (!valid)
 			height = 0.0f;
 	}
 	wb_buffer_release(&buffer);
 	no_size = width <= 0.0f && height <= 0.0f && !have_view;
+	natural_set = 0;
+	natural_width = 0;
+	natural_height = 0;
+	if (!have_view && (has_width || has_height)) {
+		/* Without a viewBox the attributes give the natural size (zero included), the default size the missing one; a zero or missing side leaves no ratio. */
+		natural_set = 1;
+		natural_width = has_width ? (int)(width + 0.5f) : (int)SVG_DEFAULT_WIDTH;
+		natural_height = has_height ? (int)(height + 0.5f) : (int)SVG_DEFAULT_HEIGHT;
+		no_size = !has_width || !has_height || width <= 0.0f || height <= 0.0f;
+	} else if (!have_view) {
+		natural_set = 1;
+		natural_width = (int)SVG_DEFAULT_WIDTH;
+		natural_height = (int)SVG_DEFAULT_HEIGHT;
+	}
 	if (width <= 0.0f && height <= 0.0f) {
 		if (have_view) {
 			width = view_width;
@@ -247,9 +270,11 @@ page_svg_render(
 			height = SVG_DEFAULT_HEIGHT;
 		}
 	} else if (width <= 0.0f) {
-		width = height * (have_view ? view_width / view_height : 2.0f);
+		width = have_view ? height * view_width / view_height : SVG_DEFAULT_WIDTH;
+		no_size = !have_view;
 	} else if (height <= 0.0f) {
-		height = width / (have_view ? view_width / view_height : 2.0f);
+		height = have_view ? width / (view_width / view_height) : SVG_DEFAULT_HEIGHT;
+		no_size = !have_view;
 	}
 
 	/* A size larger than a bitmap's bound is scaled down, keeping the ratio. */
@@ -333,6 +358,9 @@ page_svg_render(
 		return error;
 	}
 	bitmap->no_ratio = no_size;
+	bitmap->has_natural = natural_set;
+	bitmap->natural_width = natural_width;
+	bitmap->natural_height = natural_height;
 	for (row = 0; row < pixel_height; row++) {
 		for (column = 0; column < pixel_width; column++) {
 			float *pixel;
