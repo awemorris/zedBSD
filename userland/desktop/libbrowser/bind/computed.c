@@ -140,6 +140,7 @@ enum computed_property {
 	COMPUTED_GRID_ROW,
 	COMPUTED_GRID_COLUMN,
 	COMPUTED_GRID_AREA,
+	COMPUTED_GRID_TEMPLATE,
 	COMPUTED_FLEX,
 	COMPUTED_FLEX_FLOW,
 	COMPUTED_ANCHOR_NAME,
@@ -230,6 +231,7 @@ static int computed_write_percent(const struct css_length *length, struct wb_uni
 static int computed_write_url_quoted(const struct vm_string *text, struct wb_units *out);
 static int computed_write_offset(const struct css_style *style, int side, struct wb_units *out);
 static int computed_write_font_family(const struct css_style *style, struct wb_units *out);
+static int computed_grid_template(struct bind_window *window, struct dom_element *element, const struct css_style *style, struct wb_units *out);
 static int computed_write_tracks(const struct css_track *tracks, int count, const struct css_line_names *names, struct wb_units *out);
 static int computed_anchor_names(const struct css_anchor_names *names, const char *none, struct wb_units *out);
 static void computed_line_names(const struct css_line_names *names, const struct css_track_repeat *repeat, int repeats, int line, struct css_line_names *out);
@@ -400,6 +402,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "grid-row", COMPUTED_GRID_ROW },
 	{ "grid-column", COMPUTED_GRID_COLUMN },
 	{ "grid-area", COMPUTED_GRID_AREA },
+	{ "grid-template", COMPUTED_GRID_TEMPLATE },
 	{ "flex", COMPUTED_FLEX },
 	{ "flex-flow", COMPUTED_FLEX_FLOW },
 	{ "anchor-name", COMPUTED_ANCHOR_NAME },
@@ -1093,6 +1096,109 @@ computed_blockify(
 }
 
 /*
+ * Writes the resolved grid-template: the rows and the columns around a slash, and with named areas each area row as
+ * a string followed by its row's size (an auto size is left out).
+ */
+static int
+computed_grid_template(
+	struct bind_window *window,
+	struct dom_element *element,
+	const struct css_style *style,
+	struct wb_units *out)
+{
+	struct wb_units rows;
+	struct wb_units columns;
+	struct wb_units areas;
+	size_t index;
+	size_t start;
+	size_t depth;
+	size_t pos;
+	size_t row;
+	int quoted;
+	int error;
+
+	wb_units_init(&rows);
+	wb_units_init(&columns);
+	wb_units_init(&areas);
+	if (style->row_count > 0)
+		error = computed_write_tracks(style->rows, style->row_count, style->row_names, &rows);
+	else
+		error = computed_write(window, element, COMPUTED_GRID_TEMPLATE_ROWS, &rows);
+	if (error == 0 && style->column_count > 0)
+		error = computed_write_tracks(style->columns, style->column_count, style->column_names, &columns);
+	else if (error == 0)
+		error = computed_write(window, element, COMPUTED_GRID_TEMPLATE_COLUMNS, &columns);
+	if (error == 0)
+		error = css_grid_areas_serialize(style->areas, &areas);
+	if (error != 0 || rows.length == 0 || columns.length == 0 || areas.length == 0) {
+		wb_units_release(&rows);
+		wb_units_release(&columns);
+		wb_units_release(&areas);
+		return error;
+	}
+
+	/* Without areas: the two lists. */
+	if (areas.length == 4U && areas.data[0] == 'n') {
+		error = wb_units_append(out, rows.data, rows.length);
+		if (error == 0)
+			error = computed_ascii(" / ", out);
+		if (error == 0)
+			error = wb_units_append(out, columns.data, columns.length);
+		wb_units_release(&rows);
+		wb_units_release(&columns);
+		wb_units_release(&areas);
+		return error;
+	}
+
+	/* With areas: each string, then the row's size taken from the list of rows (a name in the list is not shown here). */
+	pos = 0;
+	row = 0;
+	for (index = 0; index < areas.length && error == 0; ) {
+		if (areas.data[index] != '"') {
+			index++;
+			continue;
+		}
+		start = index;
+		quoted = 1;
+		for (index++; index < areas.length && quoted; index++) {
+			if (areas.data[index] == '"')
+				quoted = 0;
+		}
+		if (row != 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = wb_units_append(out, areas.data + start, index - start);
+		row++;
+
+		/* The next size in the rows list: a word up to a space outside brackets. */
+		while (pos < rows.length && rows.data[pos] == ' ')
+			pos++;
+		start = pos;
+		depth = 0;
+		for (; pos < rows.length && (depth != 0 || rows.data[pos] != ' '); pos++) {
+			if (rows.data[pos] == '(' || rows.data[pos] == '[')
+				depth++;
+			else if (rows.data[pos] == ')' || rows.data[pos] == ']')
+				depth--;
+		}
+		if (error == 0 && pos > start && !(pos - start == 4U && rows.data[start] == 'a' && rows.data[start + 1] == 'u') &&
+		    !(pos - start == 4U && rows.data[start] == 'n')) {
+			error = computed_ascii(" ", out);
+			if (error == 0)
+				error = wb_units_append(out, rows.data + start, pos - start);
+		}
+	}
+	if (error == 0)
+		error = computed_ascii(" / ", out);
+	if (error == 0)
+		error = wb_units_append(out, columns.data, columns.length);
+	wb_units_release(&rows);
+	wb_units_release(&columns);
+	wb_units_release(&areas);
+	return error;
+}
+
+/*
  * Writes the resolved value of a property of an element: nothing for an
  * element outside the document.
  */
@@ -1174,6 +1280,13 @@ computed_write(
 	/* The computed display of a floated, positioned or flex or grid item box is blockified. */
 	if (property == COMPUTED_DISPLAY)
 		computed_blockify(window, element, style);
+
+	/* The grid-template shorthand is its longhands put together. */
+	if (property == COMPUTED_GRID_TEMPLATE) {
+		error = computed_grid_template(window, element, style, out);
+		free(style);
+		return error;
+	}
 
 	/* Grid template axes resolve from actual track sizing when the host can copy them. */
 	error = computed_write_grid(window, element, style, property, out, &handled);
