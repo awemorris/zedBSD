@@ -266,6 +266,8 @@ struct bind_host {
 	int (*view_transition)(void *context, int step);
 	/* The milliseconds until the shown transition's animations all end (a very large number when one never does). */
 	double (*view_transition_duration)(void *context);
+	/* What a script's animation of a view transition pseudo-element (CSS_PSEUDO_ELEMENT_VT_*) of a name gives now, as declarations (empty: nothing). */
+	void (*view_transition_style)(void *context, int pseudo, const struct vm_string *name, const char *text);
 	/* The frame element of a child window, known from its creation (its scripts may read it at once). */
 	struct dom_element *frame;
 };

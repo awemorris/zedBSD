@@ -189,3 +189,95 @@
         });
       });
     }
+
+    // Animations of a view transition's pseudo-elements (Element.animate with pseudoElement): the values they give now go to the page,
+    // whose layout puts them last in the cascade of that pseudo-element of the name.
+    var VT_KINDS = { group: 5, 'image-pair': 6, old: 7, new: 8 };
+    function vtPseudoOf(text) {
+      var m = /^\s*::view-transition-(group|image-pair|old|new)\(\s*([^\s)]*)\s*\)?\s*$/.exec(text === undefined || text === null ? '' : String(text));
+      return m && m[2] !== '' ? { kind: VT_KINDS[m[1]], name: m[2] } : null;
+    }
+    // The progress an animation is at now (0 to 1 over one iteration, eased), or null when its effect is not in force.
+    function effectProgress(anim) {
+      var t = anim._timing, d = t.duration === 'auto' ? 0 : +t.duration, time = anim.currentTime, local, iteration, p;
+      if (time === null || anim._state === 'idle') return null;
+      local = time - t.delay;
+      if (local < 0) { if (t.fill !== 'backwards' && t.fill !== 'both') return null; local = 0; }
+      if (d <= 0) return null;
+      iteration = local / d;
+      if (iteration >= t.iterations) {
+        if (t.fill !== 'forwards' && t.fill !== 'both') return null;
+        iteration = t.iterations;
+      }
+      p = iteration - Math.floor(iteration);
+      if (iteration > 0 && p === 0) p = 1;
+      return ease(t.easing, p);
+    }
+    // A blend of two values of a property: numbers blend, equal values stay, others change at the halfway point.
+    function blendValue(a, b, p) {
+      var na = Number(a), nb = Number(b);
+      if (a === b) return a;
+      if (isFinite(na) && isFinite(nb) && a !== '' && b !== '') return fmt(na + (nb - na) * p);
+      return p < 0.5 ? a : b;
+    }
+    function pseudoDeclarations(anim) {
+      var p = effectProgress(anim), frames = anim._keyframes, names = {}, text = [], i, key, list, a, b;
+      if (p === null) return '';
+      (Array.isArray(frames) ? frames : [frames]).forEach(function (f) {
+        if (f) Object.keys(f).forEach(function (k) { if (k !== 'offset' && k !== 'easing' && k !== 'composite') names[k] = 1; });
+      });
+      for (key in names) {
+        list = propertyFrames(anim, key).filter(function (f) { return f.value !== null; });
+        if (list.length === 0) continue;
+        for (i = 0; i + 1 < list.length && list[i + 1].offset < p; i++);
+        a = list[i];
+        b = list[Math.min(i + 1, list.length - 1)];
+        text.push(dashOf(key) + ': ' + (b.offset <= a.offset || p <= a.offset ? (p <= a.offset ? a.value : b.value) : blendValue(a.value, b.value, (p - a.offset) / (b.offset - a.offset))) + ';');
+      }
+      return text.join(' ');
+    }
+    function refreshPseudo(anim) {
+      var target = anim._pseudo, text = '';
+      if (!target) return;
+      all.forEach(function (x) {
+        if (x._pseudo && x._pseudo.kind === target.kind && x._pseudo.name === target.name && x._state !== 'idle') text += pseudoDeclarations(x) + ' ';
+      });
+      native.viewTransitionStyle(target.kind, target.name, text.trim());
+    }
+    var plainAnimate = g.Element.prototype.animate;
+    def(g.Element.prototype, 'animate', function animate(keyframes, options) {
+      var anim = plainAnimate.call(this, keyframes, options), pseudo = options && typeof options === 'object' ? vtPseudoOf(options.pseudoElement) : null;
+      if (pseudo && this === document.documentElement) {
+        hidden(anim, '_pseudo', pseudo);
+        refreshPseudo(anim);
+      }
+      return anim;
+    });
+    ['play', 'pause', 'finish', 'cancel', '_finish'].forEach(function (name) {
+      var original = Animation.prototype[name];
+      def(Animation.prototype, name, function () {
+        var r = original.apply(this, arguments);
+        if (this._pseudo) refreshPseudo(this);
+        return r;
+      });
+    });
+    (function () {
+      var desc = Object.getOwnPropertyDescriptor(Animation.prototype, 'currentTime');
+      Object.defineProperty(Animation.prototype, 'currentTime', {
+        get: desc.get,
+        set: function (v) { desc.set.call(this, v); if (this._pseudo) refreshPseudo(this); },
+        configurable: true, enumerable: true
+      });
+    })();
+
+    // How long the animations a script gave to the pseudo-elements of a view transition still run (the transition lasts until they end).
+    def(g, '__vtAnimations', function __vtAnimations() {
+      var longest = 0;
+      all.forEach(function (x) {
+        var left;
+        if (!x._pseudo || (x._state !== 'running' && x._state !== 'paused')) return;
+        left = x._state === 'paused' ? Infinity : x._total() - x.currentTime;
+        if (left > longest) longest = left;
+      });
+      return longest;
+    });

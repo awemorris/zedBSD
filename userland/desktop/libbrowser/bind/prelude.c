@@ -44,6 +44,7 @@ static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, cons
 static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_duration(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_style(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_rule_info(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_rule_replace(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_utf8_argument(const vm_value *args, unsigned count, unsigned index, struct wb_buffer *out, int *present);
@@ -506,6 +507,46 @@ prelude_view_transition_duration(
 	if (window->host.view_transition_duration != NULL)
 		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
 	return 0;
+}
+
+/* viewTransitionStyle(pseudo, name, declarations): what a script's animation gives a view transition pseudo-element now. */
+static int
+prelude_view_transition_style(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct vm_string *name;
+	struct wb_buffer text;
+	uint32_t pseudo;
+	int present;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 3U)
+		return 0;
+	window = bind_window_of(realm);
+	if (window->host.view_transition_style == NULL)
+		return 0;
+	status = vm_to_uint32(realm, args[0], &pseudo);
+	if (status != 0)
+		return status;
+	status = vm_to_string(realm, args[1], &name);
+	if (status != 0)
+		return status;
+	name = vm_atom(realm->heap, name);
+	if (name == NULL)
+		return ENOMEM;
+	wb_buffer_init(&text);
+	status = prelude_utf8_argument(args, count, 2U, &text, &present);
+	if (status == 0)
+		window->host.view_transition_style(window->host.context, (int)pseudo, name, wb_buffer_string(&text));
+	wb_buffer_release(&text);
+	return status;
 }
 
 /* ruleInfo(sheet, index): the rule of a sheet as "id type source", or undefined. */
@@ -1040,6 +1081,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "setPopover", 2, prelude_set_popover, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "setPopover", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionStyle", 3, prelude_view_transition_style, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionStyle", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "ruleInfo", 2, prelude_rule_info, NULL, &function);
 	if (status == 0)

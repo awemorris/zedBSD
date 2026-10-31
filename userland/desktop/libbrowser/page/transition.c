@@ -145,6 +145,32 @@ transition_longest(
 	return longest;
 }
 
+/* Sets what a script's animation of a pseudo-element of a name gives now (empty text: nothing), and has the page laid out again. */
+void
+page_view_transition_style(
+	void *context,
+	int pseudo,
+	const struct vm_string *name,
+	const char *text)
+{
+	struct page *page;
+	struct layout_transition_name *entry;
+	char *slot;
+
+	page = context;
+	if (!page->transition_on || pseudo < CSS_PSEUDO_ELEMENT_VT_GROUP || pseudo > CSS_PSEUDO_ELEMENT_VT_NEW)
+		return;
+	entry = layout_transition_find(&page->transition, name);
+	if (entry == NULL)
+		return;
+	slot = entry->animated[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP];
+	if (strncmp(slot, text, sizeof(entry->animated[0])) == 0)
+		return;
+	strncpy(slot, text, sizeof(entry->animated[0]) - 1U);
+	slot[sizeof(entry->animated[0]) - 1U] = '\0';
+	page->transition_generation++;
+}
+
 /* The milliseconds until the animations of the shown tree have all ended. */
 double
 page_view_transition_duration(

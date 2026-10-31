@@ -421,6 +421,7 @@ page_start_scripts(
 	host.view_transition_active = page_view_transition_active;
 	host.view_transition = page_view_transition;
 	host.view_transition_duration = page_view_transition_duration;
+	host.view_transition_style = page_view_transition_style;
 	error = bind_window_create(page->realm, page->document, &host, &page->window);
 	if (error != 0)
 		return error;

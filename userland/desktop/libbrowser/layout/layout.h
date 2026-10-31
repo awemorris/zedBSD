@@ -371,6 +371,8 @@ struct layout_transition_name {
 	struct layout_rect old_rect;
 	struct layout_rect new_rect;
 	struct paint_snapshot *old_image;
+	/* Declarations a script's animation of a pseudo-element gives now, by the group, pair, old and new pseudo-elements. */
+	char animated[4][192];
 };
 
 /*

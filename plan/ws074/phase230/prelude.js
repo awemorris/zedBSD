@@ -1735,7 +1735,7 @@
         return;
       }
       t._ready.resolve(undefined);
-      requestAnimationFrame(function () { setTimeout(function () { finish(t); }, native.viewTransitionDuration()); });
+      requestAnimationFrame(function () { setTimeout(function () { finish(t); }, Math.max(native.viewTransitionDuration(), typeof g.__vtAnimations === 'function' ? g.__vtAnimations() : 0)); });
     }
     g.Document.prototype.startViewTransition = function startViewTransition(callbackOptions) {
       var t = new ViewTransition(VT), cb = callbackOptions, i, list;
@@ -1768,8 +1768,15 @@
         }
         setTimeout(function () {
           if (t._phase === 'done') return;
+          // The new state is made before the page's own frame callbacks (the update callback's) run: this one is asked for first.
+          var fired = false, waiting = false;
+          requestAnimationFrame(function () {
+            fired = true;
+            if (t._phase === 'done') return;
+            if (t._updateDone === 1) activate(t); else waiting = true;
+          });
           callUpdate(t);
-          then.call(t._done.promise, function () { requestAnimationFrame(function () { activate(t); }); }, function (e) { skip(t, e); });
+          then.call(t._done.promise, function () { if (fired && waiting) requestAnimationFrame(function () { activate(t); }); }, function (e) { skip(t, e); });
         }, 0);
       });
       return t;

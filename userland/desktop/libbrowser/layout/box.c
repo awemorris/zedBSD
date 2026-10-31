@@ -1048,6 +1048,14 @@ box_transition_pseudo(
 	*error = css_engine_compute_vt_pseudo(css, element, pseudo, name != NULL ? name->name : NULL, name != NULL ? name->classes : NULL, siblings, parent_style, style);
 	if (*error != 0)
 		return NULL;
+
+	/* A script's animation of the pseudo-element has the last word. */
+	if (name != NULL && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW &&
+	    name->animated[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP][0] != '\0') {
+		*error = css_engine_apply_text(css, style, parent_style, name->animated[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP]);
+		if (*error != 0)
+			return NULL;
+	}
 	if (style->display == CSS_DISPLAY_NONE)
 		return NULL;
 	box = box_new(tree, LAYOUT_BLOCK, NULL, style);

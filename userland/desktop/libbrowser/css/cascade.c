@@ -774,6 +774,43 @@ css_engine_compute_pseudo(
 	return 0;
 }
 
+/*
+ * Applies the declarations of a text (a script animation's values for a pseudo-element) to a computed style, as
+ * the last word of the cascade; the text's own parse errors drop the declaration they are in.
+ */
+int
+css_engine_apply_text(
+	struct css_engine *engine,
+	struct css_style *style,
+	const struct css_style *parent,
+	const char *text)
+{
+	struct css_declaration *declarations;
+	struct wb_arena arena;
+	struct wb_units units;
+	size_t count;
+	size_t index;
+	int error;
+
+	wb_units_init(&units);
+	error = wb_utf8_to_units((const unsigned char *)text, strlen(text), &units);
+	if (error != 0) {
+		wb_units_release(&units);
+		return error;
+	}
+	wb_arena_init(&arena, 0);
+	declarations = NULL;
+	count = 0;
+	error = css_parse_declarations(engine->heap, &arena, units.data, units.length, &declarations, &count);
+	if (error == 0) {
+		for (index = 0; index < count; index++)
+			cascade_apply(engine, style, parent, &declarations[index]);
+	}
+	wb_arena_release(&arena);
+	wb_units_release(&units);
+	return error == ENOMEM ? error : 0;
+}
+
 /* Tells whether a space-separated list of types has one the active view transition has. */
 static int
 cascade_vt_type_matches(
