@@ -79,7 +79,9 @@ enum bcm2711_qpu_operation {
 	BCM2711_QPU_PIXEL_X,
 	BCM2711_QPU_PIXEL_Y,
 	BCM2711_QPU_INSTANCE_INDEX,
-	BCM2711_QPU_ELEMENT_INDEX
+	BCM2711_QPU_ELEMENT_INDEX,
+	/* Sets the lanes' multisample flags (the coverage of a fragment's tile writes) to the source; zero discards. */
+	BCM2711_QPU_SAMPLE_MASK
 };
 
 /* Signals describe one hardware transaction; delay and termination scheduling stays with the compiler. */

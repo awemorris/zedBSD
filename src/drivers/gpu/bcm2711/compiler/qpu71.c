@@ -426,6 +426,7 @@ bcm2711_qpu_operation_unit(
 	case BCM2711_QPU_PIXEL_Y:
 	case BCM2711_QPU_INSTANCE_INDEX:
 	case BCM2711_QPU_ELEMENT_INDEX:
+	case BCM2711_QPU_SAMPLE_MASK:
 		return BCM2711_QPU_UNIT_ADD;
 	default:
 		break;
@@ -473,6 +474,7 @@ bcm2711_qpu_operation_sources(
 	case BCM2711_QPU_FLOAT_LOGARITHM:
 	case BCM2711_QPU_FLOAT_SINE:
 	case BCM2711_QPU_VPM_LOAD:
+	case BCM2711_QPU_SAMPLE_MASK:
 		return 1;
 	default:
 		break;
@@ -801,6 +803,11 @@ add_operation(
 	case BCM2711_QPU_ELEMENT_INDEX:
 		alu->operation = 187;
 		alu->right = 2;
+		break;
+	case BCM2711_QPU_SAMPLE_MASK:
+		/* SETMSF: variant 6 of opcode 186 (Mesa qpu_pack.c, the 7.1 add table). */
+		alu->operation = 186;
+		alu->right = 6;
 		break;
 	default:
 		return ENOTSUP;

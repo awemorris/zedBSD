@@ -24,6 +24,7 @@ static int preload_inputs(struct bcm2711_shader_compiler *compiler);
 static int lower_instruction(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction);
 static int lower_arithmetic(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction, uint32_t destination);
 static int lower_select(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction, uint32_t destination);
+static int lower_kill(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction);
 static int lower_sample(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction);
 static int operands(struct bcm2711_shader_compiler *compiler, uint32_t left, uint32_t right, struct bcm2711_qpu_source *first, struct bcm2711_qpu_source *second);
 static int force_register(struct bcm2711_shader_compiler *compiler, struct bcm2711_qpu_source *source, uint32_t scratch);
@@ -233,6 +234,16 @@ lower_instruction(
 	/* Sampling allocates four exact result scalars and completes the native TMU transaction before publication. */
 	if (instruction->op == DRV_GPU_IR_SAMPLE) {
 		error = lower_sample(compiler, instruction);
+		if (error != 0)
+			return error;
+
+		/* This source operation has a complete native encoding. */
+		return 0;
+	}
+
+	/* A discard defines no value; it clears the coverage of the lanes it names. */
+	if (instruction->op == DRV_GPU_IR_KILL) {
+		error = lower_kill(compiler, instruction);
 		if (error != 0)
 			return error;
 
@@ -625,6 +636,42 @@ lower_select(
 		return error;
 
 	/* The selection retains exact scalar bits rather than converting a Boolean or integer into a float. */
+	return 0;
+}
+
+/*
+ * Discards the lanes whose Boolean is true: the zero test pushes the lane
+ * flags, and the lanes found nonzero set their multisample flags to zero,
+ * so the tile buffer keeps neither their colour nor their depth.
+ *
+ * Values referenced: Mesa src/broadcom/compiler/nir_to_vir.c (a
+ * conditional discard is a SETMSF of zero to the null address under the
+ * condition's flags).
+ */
+static int
+lower_kill(
+	struct bcm2711_shader_compiler *compiler,
+	const struct drv_gpu_shader_ir_inst *instruction)
+{
+	struct bcm2711_qpu_source condition;
+	struct bcm2711_qpu_source zero;
+	int error;
+
+	/* The zero test records the lane flags. */
+	zero = bcm2711_shader_bits(0);
+	error = bcm2711_shader_operand(compiler, instruction->src[0], BCM2711_SHADER_SCRATCH_WORK, &condition);
+	if (error != 0)
+		return error;
+	error = bcm2711_shader_operation(compiler, BCM2711_QPU_MOVE, 6, 1, condition, zero, 0, 1);
+	if (error != 0)
+		return error;
+
+	/* Only the nonzero (true) lanes lose their coverage. */
+	error = bcm2711_shader_operation(compiler, BCM2711_QPU_SAMPLE_MASK, 6, 1, zero, zero, 3, 0);
+	if (error != 0)
+		return error;
+
+	/* The discarded lanes' tile writes are now masked. */
 	return 0;
 }
 

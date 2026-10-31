@@ -300,6 +300,15 @@ run_alus(
 		delay = 2;
 	if (add_write)
 		write_destination(machine, instruction->alu.add.waddr, instruction->alu.add.magic_write, add_bits, delay);
+
+	/* A SETMSF of zero discards the lane; the tile writes it masks must come in later words. */
+	if (add_write && instruction->alu.add.op == V3D_QPU_A_SETMSF) {
+		if (machine->result->tile_writes != 0 || v3d_qpu_uses_tlb(instruction))
+			fail(machine, "multisample flags set at or after a tile write");
+		if (machine->setup->binary->stage != BCM2711_SHADER_FRAGMENT)
+			fail(machine, "multisample flags set outside a fragment program");
+		machine->result->discarded = add_bits == 0 ? 1U : 0U;
+	}
 	if (mul_write)
 		write_destination(machine, instruction->alu.mul.waddr, instruction->alu.mul.magic_write, mul_bits, 0);
 
@@ -794,6 +803,10 @@ add_result(
 		machine->result->vpm[left] = right;
 		break;
 	case V3D_QPU_A_VPMWT:
+		break;
+	case V3D_QPU_A_SETMSF:
+		/* The new multisample flags; run_alus applies them when the predicate holds. */
+		bits = left;
 		break;
 	default:
 		fprintf(stderr, "unmodeled add operation %s\n", v3d_qpu_add_op_name(instruction->alu.add.op));

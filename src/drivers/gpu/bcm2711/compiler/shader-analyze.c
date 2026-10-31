@@ -264,6 +264,10 @@ analyze_instruction(
 		compiler->outputs[output] = instruction->src[0];
 	}
 
+	/* A discard clears the coverage of a fragment's tile writes, which only a fragment program has. */
+	if (instruction->op == DRV_GPU_IR_KILL && compiler->ir->stage != DRV_GPU_STAGE_FRAGMENT)
+		return ENOTSUP;
+
 	/* Push loads consume exactly one aligned, declared word. */
 	if (instruction->op == DRV_GPU_IR_LOAD_PUSH) {
 		if ((instruction->immediate & 3) != 0 ||
@@ -334,6 +338,7 @@ instruction_shape(
 		break;
 	case DRV_GPU_IR_STORE_OUTPUT:
 	case DRV_GPU_IR_SKIP_BEGIN:
+	case DRV_GPU_IR_KILL:
 		*sources = 1;
 		*destinations = 0;
 		break;
