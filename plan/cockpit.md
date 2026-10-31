@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 03:04（Q1）
+最終更新: 2026-11-01 05:07（Q1）
 
 ## 担当（P1〜P8）
 
@@ -22,64 +22,7 @@
 
 ## WS ごとの進捗
 
-### WS291 GPU の描画の速さ（GPU ごとに desktop 60 fps と重い 3D の model）
-
-| Phase | GPU | 目標 | 今 | 状態 |
-| --- | --- | --- | --- | --- |
-| p001〜p006 | AMD RDNA | Linux（RADV）と同等 | 同等 | cleared（p006・p008・p009 は RX 5600 XT が抜かれて止め） |
-| p010〜p012 | NVIDIA RTX 2070 | desktop 60 fps、scene-5000 で NVK（50.1 fps） | desktop 60〜68 fps、scene-5000 49.9 fps（hardware の限界で NVK と同等） | p010・p011 cleared、p012 uncleared（限界） |
-| p024 | NVIDIA RTX 2070 | NVK 並み（big-1000 136.2、subs-1000 75.4） | big-1000 119、subs-1000 43（main 1e86f4502） | in-progress（判断待ち 0m） |
-| p023 | NVIDIA RTX 2070 | 共有の image の画素の並び（block-linear）で pass ごとの copy を無くす | subs-1000 10.9 → 21 fps、subs-100 103 → 203、画素の差 0（main b30707d0a） | in-progress（残り: scenes、block-linear の画面出しの目視） |
-| p013・p014 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
-| p020 | PowerVR（VF2） | qs40 × 13・1920x1080・direct scanout で 50 fps（RTX のカタログの FP32 の比） | 45.8 fps（direct、main に merge 62eeb340e） | in-progress（P2） |
-| p025 | Raspberry Pi 4（V3D 4.2） | スペックの比の copies で 50 fps（1920x1080） | c21 49.7（CPU の速い run）／42.4（遅い run）fps、inflight=2 で 52.8。desktop（session）drag 53〜56・home 54〜56・wiseview 55〜59・type 59〜61（main 69109d3f2、Terminal の atlas・VCM） | in-progress（P4 i04: CPU の速さの揺れ・16 bit の index・compositor の pace） |
-| p021 | Raspberry Pi 5（V3D 7.1） | スペックの比の copies で 50 fps（clock を実機で確定） | 未計測（mview に要る driver の機能を host で実装済み） | in-progress（P4、実機待ち） |
-| p022 | Intel i915（5330） | 5330 の Linux（ANV）で 50.6 fps の qs40 × 600 で Linux 以上 | 32.6 fps（頂点の shader 134 → 67 命令。CPU の idle を MWAIT にして GPU が 800 → 850〜900 MHz、まだ電力の上限 13 W に張り付く） | in-progress（P1） |
-
-### WS333 /dev/thermal で統一する電力・熱の枠組み（2026-10-31 新設、WS301・WS303 を統合）
-
-| Phase | 内容 | 状態 |
-| --- | --- | --- |
-| p001 | 統一の設計（CPU の idle・P-state・P/E core・熱・fan・strategy・非常の停止） | 設計済み（第 2 版、main 9946e22c0）。ユーザーの問い Q333-1〜7 待ち。実装の Phase は p003〜p024（約 70 LW） |
-| p003 | kernel の口の header（cpuperf.h・thermal.h、kern_cpu_count） | cleared（main f197c8a3f、20 port の build warning 0、design-reviewer を反映） |
-| p005 | 熱の core（前半） | 前半を main に（b7ac4f576、host 試験 13 場面・QEMU で hw.thermal）。後半は UAPI の review の後 |
-| p008〜p010 | x86 の CPUID・HWP・電力の module（Sonnet 3 人） | cleared（試験は計 1,700 万 checks 余り） |
-| p011 | x86 の CPU の driver の統合（HWP・RAPL・HFI・滞在。QEMU では MSR に触らず topology だけ） | main a058c08d7。host 試験 16 場面・QEMU 2 通り PASS。5330 は p014 |
-| p018・p019 | Dell の provider（BIOS の熱の mode・fan・boost）・sessiond の熱の要求の口 | main に。5330 の実機と UAPI（p004）の後の結線が残り |
-| p016・p021 | 危ない温度での非常の停止・温度で CPU の上限を下げる | cleared（QEMU で温度の上がる表から S5 の電源断まで。init の返事の口は UAPI の後） |
-| p017 | ACPI WMI の層（Dell の BIOS の口の土台） | cleared（5330 の表で 4 device・14 block、SMI の書き 0） |
-| p012 | 全 CPU の tick の時刻を揃える（TSC-deadline） | main 22c629663、QEMU の 2 通り PASS。5330 の電力の前後の数待ち |
-| p007 | x86 の CPU の register を読む module の設計（標準廉価実装手順、header 5・46 関数・試験の道具） | cleared。AMD と ACPI の仕様は取れず範囲の外（上の 01）。次は p008〜p010 を Sonnet 3 人で並べて |
-| p006 | cpuperf の枠組み（kernel、CPU の速さの制御の要求・方針の写し・上限・idle の統計） | cleared（main b5c8e8f50、host 試験 196 checks、QEMU の起動 4 つ PASS） |
-| p002 | amd64 の CPU の idle を MWAIT に（5330 の idle 12.99 W 対 Linux 3.2〜3.5 W） | MWAIT C6 を main に merge（f740839e5）。idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps。Linux にはまだ遠い（残りは 1 kHz の tick・P-state・ASPM・PSR の見込み、未調査） |
-
-### WS331 driver から HAL への直の依存を除く
-
-completed（2026-10-31、main 1035ec0a0）。driver の HAL の include と `hal_*` の呼び出しは 0。全 20 port の build、QEMU（amd64・raspi4b の login、armv7・riscv64）PASS。残り（VF2 の画面の目視、amd64 の Venus の flip）は拾える試験へ。
-
-### WS332 tick の周波数を API で扱う
-
-completed（2026-10-31、main 39fc879c5）。KERN_CLOCK_HZ を無くし、tick の数を前提にした残り 32 か所も時間の単位に。全 port の build と amd64 の QEMU の起動 PASS。100 Hz の port の VM の待ちは 100 → 10 ms。周期を実際に変える実装は Future Work。
-
-### WS074 Web ブラウザ（libbrowser）
-
-Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→ 2,386 → 2,427（69.90%）→ 2,454 → 2,472 → 2,507 → 2,544 → 2,573 → 2,606 → 2,645 → 2,680（77.19%、10-31 10:27、main に merge、Acid3 100/100・Acid2 99.27%）。後退は偶然通っていた scripted の 2 件だけ、Acid3 100/100。P8 が 100% まで自走（ユーザーの指示）、5 回目（i05）に入った（flex・grid の baseline、@scope、subgrid、値の補間など）。SVG のベクトルの拡大（約 13 件が通る見込み）は WS328 の範囲。
-
-### WS307 graphical installer
-
-completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の起動の項目を作り、古い zedBSD の項目を消す（QEMU の OVMF で PASS、実機は未実施）。試験は plan/tools/installer/ に。
-
-### WS313 ODROID-C5
-
-試験の image（text と Keiland、公式の bootloader 入り）で、2026-10-31 に HDMI に画面が出なかった（ユーザー）。serial で調べるのは VF2 の最適化の後、今日の午後。zedBSD-firmware は push 済み。
-
-### WS326 libmedia の H.264 の software の decoder
-
-**completed（2026-10-31 06:5x、main 8bf8f0280、ユーザーの昼までの指示どおり）**。既存の library を使わない H.264 の decoder（Constrained Baseline・Main・High、8 bit 4:2:0 progressive）。JVT の適合で範囲の中の 101 本 14,526 frame が全部一致、libmedia の backend の順は Vulkan Video → この decoder → libavcodec。host の 1 thread の 1080p は 17〜36 fps（補間と deblocking の書き直しの後）。試験は plan/tools/h264sw/。速さの続きは 0e の判断待ち。QEMU の Video Player と実機の再生は未実施。
-
-### 最近完了した WS
-
-- **WS326 libmedia の H.264 の software の decoder（2026-10-31）**、WS331 driver から HAL への直の依存を除く（2026-10-31）、WS332 tick の周波数を API で（2026-10-31）、WS307 graphical installer（2026-10-31）、WS009 文書（2026-10-30）、WS327 libkeiland の thread と socket（2026-10-30）、WS315 Realtek USB 2.5G（2026-10-30）。
+（2026-11-01 05:07 ユーザーの指示でクリア。これより後の進捗をここに書く。各 WS の状態は [master.md](master.md) と各 ws.md）
 
 ## open の Bug（今日見つかった物）
 
@@ -346,54 +289,5 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 ## 決まった事
 
-- （2026-11-01）ユーザーから、自前の sshd・ssh の WS を立てる（ed25519 の鍵と最新の鍵の交換 1 つ、WS335 の決定を反映、WS335 と並べて依存は待ち合わせ、標準廉価実装手順、P5 で開始）、という趣旨の指示を受けた（[WS336](ws336/ws.md)）。
+（2026-11-01 05:07 ユーザーの指示でクリア。決定は各 ws.md の「ユーザーの決定」と [master-design-policy.md](master-design-policy.md) にある）
 
-- （2026-11-01）ユーザーから、Pi 4 は熱で throttle されているように見えるので、いったんここでやめて冷却の良い Pi 5 で進める（GPU は同じ系統）、という趣旨の指示を受けた（ws291-p025 を止めて p021 へ、P4 q1784 の中で）。
-
-- （2026-11-01）ユーザーから、WS を立てて libssl-compat を実装する、標準廉価実装手順を使う、今 P6 で始める、という趣旨の指示を受けた（[WS335](ws335/ws.md)）。
-
-- （2026-11-01）WS334: ブラウザの UI はまず libkeiland の Win32 の backend の上で移植する、足りなければ後で Win32 直の版を作る、cross compile は mingw-w64（clang 版も可、arm64 も）、`make browser-win64`、`apps/browser-win32/`、libkeiland はまず要る部分だけ、という趣旨の指示を受けた（[ws334/ws.md](ws334/ws.md) の決定 11〜15）。
-
-- （2026-10-31）ユーザーから、libbrowser のブラウザを Windows に移植する WS を作る（libbrowser の platform 独立を移植で確かめる、libkeiland の Win32 の実装、Windows 用の .exe、名前は OmniGrammaton）、という趣旨の指示を受けた（[WS334](ws334/ws.md)、planning）。
-- （2026-11-01）ユーザーから、WS334 は計画だけ進める、既存の library（libtruetype・png・gif・jpeg の compat・libmedia）はそのまま使う、libbrowser をレンダリング・スクリプト・ストレージの 3 つのエンジンに interface で分ける、libkeiland の移植は Win32 直と Qt6 を比べる、という趣旨の指示を受けた（ws334/ws.md）。
-
-- （2026-10-31）ユーザーから、Pi 4 は desktop を 1920x1080 で 60 fps に最適化してから mview の 3D を最適化する、両者を行き来してもよい、順は担当に任せる、という趣旨の指示を受けた（ws291-p025、P4）。
-
-- （2026-10-31）ユーザーから、P3 は RTX での描画の最適化を目標の達成まで進める、という趣旨の指示を受けた（[ws291-p024](ws291/phase024/phase.md)、q1785）。
-
-- （2026-10-31）ユーザーから、Pi 4 の GPU の driver を改善して mview を動かし最適化する、Pi 4 は 1920x1080 で起動する、終わってから Pi 5 に移る、という趣旨の指示を受けた（[ws291-p025](ws291/phase025/phase.md)、P4）。
-
-- （2026-10-31）ユーザーから、RTX は block-linear で画面を出せるようにし（nvrtx.disp.bl の既定を有効に）、その後に計測し直す、という趣旨の指示を受けた（WS291 p023 の Q1 の目視の前に既定を有効にする。切る口 nvrtx.disp.bl=0 は残す）。P2 が q1782-i02 の中で行う。
-
-- （2026-10-31）ユーザーから、zero copy を RTX と VF2 で実装し、VF2 の後に Pi 4、次に Pi 5 に入れ替えて確かめる、という趣旨の指示を受けた（P2、q1782-i02）。
-
-- （2026-10-31）WS291 p023: block-linear の画面出しの確かめは目視（CRC は作らない）、subs-1000 の固定の費用の内訳は p023 の後に続けて測る（p024）、という趣旨の答えをユーザーから受けた。
-
-- （2026-10-31）ユーザーから、compositor の image（合成の経路と game mode で貸す image）は、描けて scanout できて画質を大きく損なわない物の中で GPU の一番速い物を選ぶ、という趣旨の指示を受けた（Q1 の解釈: 描けて display が読める形式と並び（tiled・block-linear・圧縮）の中で一番速い並び、色の深さは下げない、driver ごとの優先の表）。[ws309-p015](ws309/phase015/phase.md)・[ws291-p023](ws291/phase023/phase.md)。
-- （2026-10-31）ユーザーから、RTX の block-linear（描画の置き方と NVC57E の scanout）は必要なので実装する、という趣旨の指示を受けた。nvrtx の部分は P3 が p023 の設計の後に実装し、共通の経路（protocol・libvulkan・compositor）は P2 が p015 で作る。
-- （2026-10-31）ユーザーから、game mode は文字通りの zero copy（client が compositor と共有する image に直に描く）で全 GPU を直す、compositor の image の形式は compositor が決める、という趣旨の指示を受けた（WS309 p015 を P2 で着手）。
-
-| 日付 | WS | 決定 | 記録 |
-| --- | --- | --- | --- |
-| 2026-10-31 | WS309・BUG-374 | game mode（全画面の 3D）では platform に関わらず mouse の cursor を表示しない（P7 が全 backend で確かめる）。BUG-374 はユーザーが今画面を見て確かめる | [ws309/ws.md](ws309/ws.md)・[BUG-374](bugs/BUG-374.md) |
-| 2026-10-31 | BUG-222 | 別の対応（WS315 の Realtek USB の vendor mode）で解決済みの見込みなので、試験だけ流して閉じる | [BUG-222](bugs/BUG-222.md) |
-| 2026-10-31 | 名前 | OS 名は zedBSD に決定（仮決めでなく）。Keiland・libkeiland は残す。変える時はユーザーが改めて伝える | [master.md](master.md) |
-| 2026-10-31 | 割り当て・整理 | PS/2 の aux を BUG-376 として起票し P6 へ。WS299 は 5330 が空いたら（q1744）、WS304 は P4 の Pi 5 の後（q1745）、WS306 は検討済みなので P5 が WS333 p001 の後に進める（q1746）。openXC7 の導入と LLVM の cache の upload は済み、保留の WS の整理は済み（項目を消した） | [queue.md](queue.md) |
-| 2026-10-31 | 割り当て | WS307・WS331・WS332・WS326 を P3、BUG-370 と WS291（RTX の続き p014）を P6、BUG-374 を P4 | [queue.md](queue.md) |
-| 2026-10-31 | WS291 PowerVR | VF2 の kernel と userland の入れ替えはすべて自動でよい。P2 は bug-analyzer の subagent を使ってよい | [ws291/ws.md](ws291/ws.md) |
-| 2026-10-31 | WS291 p022・WS333 | CPU の省電力（idle の C-state・P-state）を先に直す。WS333 p002 で amd64 の idle の MWAIT を先に（P1）、p001 で統一の設計（P5） | [ws333/ws.md](ws333/ws.md) |
-| 2026-10-31 | WS301・WS303 → WS333 | WS301（CPU の DVFS）と WS303（熱と fan）を廃止し、/dev/thermal で統一して設計する WS333 に統合（CPU の idle も含める） | [ws333/ws.md](ws333/ws.md) |
-| 2026-10-31 | WS291 PowerVR | P2 が VF2 で SSH と sudo を使って kernel の入れ替えと計測の program の実行を続けてよい | [ws291/ws.md](ws291/ws.md) |
-| 2026-10-30 | WS331 driver の HAL 依存 | HAL の atomic.h は macro だけの契約（直列化は macro の中の block で宣言して呼ぶ、cookie の型を消す、2 行の include を外す）、kernel の atomic.h は使った後に undef | [ws331/ws.md](ws331/ws.md) |
-| 2026-10-30 | WS331 driver の HAL 依存 | pc98・pcat の legacy の VRAM・VGA の窓: platform driver は straight map の基底 0x80000000 を知っている前提で、基底は driver の中で定義し、HAL の定数は参照しない（handoff・API は足さない） | [ws331/ws.md](ws331/ws.md) |
-| 2026-10-30 | WS331・WS332 | driver は rpi-common・s905x5m、HAL は bsp-rpi-common・bsp-s905x5m-common・bsp-odroidc5 に分ける。kernel の header は整数の型を kernel で定義し、sched・atomic・thread・vmspace は _private.h に分ける。KERN_CLOCK_HZ は obsolete なので削除し、tick を API で扱い可変にする WS332 を立てる | [ws331/ws.md](ws331/ws.md)・[ws332/ws.md](ws332/ws.md) |
-| 2026-10-30 | WS331 driver の HAL 依存 | rpi4 の console: HAL の BSP の非公開の関数を呼ばない。resume に当たる処理は driver の中に同等の関数を作る（suspend は kernel_putc の約束で、要れば HAL の実装を直す） | [ws331/ws.md](ws331/ws.md) |
-| 2026-10-30 | WS291 GPU の速さ | PowerVR の目標: Linux の RTX 2070 の scene-5000（qs40 × 5000、50 fps）をカタログの FP32 の比（約 392 倍、GPU 594 MHz）で割り、qs40 × 13・1920x1080 で 50 fps 以上 | [ws291/ws.md](ws291/ws.md) |
-| 2026-10-30 | WS331 driver の HAL 依存 | kernel_putc は宣言を kernel の header に。kernel_notify_task は既存の sched_notify_task へ | [ws331/ws.md](ws331/ws.md) |
-| 2026-10-30 | WS313 ODROID-C5 | zedBSD-firmware に Hardkernel の公式の image（無変更）と Amlogic の license、Mali の firmware を入れて push（GitHub の main 43662bd） | [ws313/ws.md](ws313/ws.md) |
-| 2026-10-30 | WS307 graphical installer | p007 の G2: amd64 の hal_space_map が HAL_SPACE_SYS（firmware の窓）への実行可の map を受けるのは実装の補完で、HAL の API の変更ではない（ユーザー）。P6 が実装 | [ws307/ws.md](ws307/ws.md) |
-| 2026-10-30 | WS331 driver の HAL 依存 | p001 の表 A・表 B を許可 | [ws331/ws.md](ws331/ws.md) |
-| 2026-10-30 | WS309 compositor の thread の整理 | p015 ゲームモードの V2: 1 は (a)（app は変更なし、全画面と窓の切り替えは compositor の都合で app は気づかない）、2 は private な Wayland の protocol `keiland_game_surface_v1` を作る、3 は標準の型の組み合わせで画像の memory を出す、4 は同じ画像の再 acquire で画面から外れた事を知る。p015 は planned に戻り、次のセッションで実装 | [ws309/ws.md](ws309/ws.md) |
-| 2026-10-30 | BUG-364 GPU の fence | (A) display はどの GPU の fence も受ける（今の動きを正とする）。Q1 が gpu.c の comment を直し、BUG-364 を閉じた（876b64d55） | [BUG-364](bugs/BUG-364.md) |
-| 2026-10-30 | WS074 Web ブラウザ | Codex を解約、WS074 は Claude（Q1）の管理下に | [ws074/ws.md](ws074/ws.md) |
-| 2026-10-30 | WS328 libbrowser のベクトル描画と SVG | WS074 を止めて WS328 を先に、だったが、同日の後の指示で WS074 を P8 で先に再開（WS328 は未着手） | [ws328/ws.md](ws328/ws.md) |
