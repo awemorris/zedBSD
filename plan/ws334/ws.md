@@ -65,7 +65,7 @@
 | [p014](phase014/phase.md) | module（Sonnet、表の data、旧 T1）: `libkeiland/win32/keys-table.h/.c`（scan code → evdev の番号） | in-progress（2026-11-01 02:54 Sonnet で起動） | p004 |
 | [p015](phase015/phase.md) | module（Sonnet）: `libkeiland/win32/frame.h/.c`（custom frame の幾何: hit test・題の帯の button の配置・DPI の倍率） | in-progress（2026-11-01 02:54 Sonnet で起動） | p004 |
 | [p016](phase016/phase.md) | module（Sonnet）: `libkeiland/platform/platform-win32.c`（`platform.h` の起こし・lock・thread を Win32 で） | planned | p004 |
-| [p017](phase017/phase.md) | module（Sonnet）: `libkeiland/win32/wide.h/.c` と `input.h/.c`（UTF-16 ↔ UTF-8・surrogate の組、wheel の積み・pointer・修飾の鍵の写し） | planned | p004 |
+| [p017](phase017/phase.md) | module（Sonnet）: `libkeiland/win32/wide.h/.c` と `input.h/.c`（UTF-16 ↔ UTF-8・surrogate の組、wheel の積み・pointer・修飾の鍵の写し） | 実装済み・試験 PASS | p004 |
 | [p018](phase018/phase.md) | module（Sonnet、旧 T2）: `libkeiland/win32/cf-html.h/.c`（CF_HTML の encode と decode） | planned | p004 |
 | [p019](phase019/phase.md) | module（Sonnet、旧 T3）: `apps/browser-win32/tools/ico.h/.c`（ICO の writer、PNG と BMP の entry） | planned | p004 |
 | [p020](phase020/phase.md) | glue（Opus、旧 p002）: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の本体（library・DLL・.def・Vulkan の header の取得と遅延の import）、libtruetype `companion.c` の 1 関数と gif の `O_BINARY`、`cross-build.sh` | in-progress（2026-11-01 02:43 第 1 群で起動） | p004 |
