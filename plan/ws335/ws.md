@@ -22,9 +22,49 @@
 ## Resume point
 
 - p001（設計）を P6 が q1789 で進めている。
+- 2026-11-01 P6: 設計を [design.md](design.md)、問い U1〜U6 を [user-questions.md](user-questions.md) に書いた。header（libcrypto-compat 24＋公開 6、libssl-compat 8＋公開 1）・.c の骨格（29＋10）・試験の道具（[tests/](tests/)）を置いた。
+  実装の Phase p002〜p038（提案の p036 を含む）の phase.md を置いた。design-reviewer の 27 件を全部反映した（[design-review.md](design-review.md)）。
+  **header と試験の道具の凍結: 基点 60760d2a0**（`BASE=60760d2a0 sh plan/ws335/tests/check-skeleton.sh`）。起動の順は design.md §9。仕様と試験の data は P6 の worktree の `build/ws335-specs/`・`build/ws335-vectors/`（Q1 が共有の場所へ写す、user-questions.md の Q1 への確認 3）。
 
 ## Phase
 
 | ID | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計（標準廉価実装手順 §4）: 範囲（TLS の版・暗号の組・証明書の確かめ・OpenSSL の API の部分集合）、仕様の入手、module・header・.c の骨格・試験の道具、実装の Phase の表、design-reviewer、ユーザーへの問い | in-progress | — |
+| [p002](phase002/phase.md) | 土台（約束・定数時間の補助・byte 順）、SHA-2、hash の選択・HMAC・HKDF（test-util、test-sha2、test-hash） | planned | p001 |
+| [p003](phase003/phase.md) | SHA-3・SHAKE（Keccak）（test-sha3） | planned | p002 |
+| [p004](phase004/phase.md) | AES（bitsliced、定数時間）と counter mode（test-aes） | planned | p002 |
+| [p005](phase005/phase.md) | AES-GCM（test-gcm） | planned | p004 |
+| [p006](phase006/phase.md) | ChaCha20・Poly1305・AEAD（と 64 bit の counter の ChaCha20）（test-chacha） | planned | p002 |
+| [p007](phase007/phase.md) | 固定幅の整数と Montgomery の算術（test-bn） | planned | p002 |
+| [p008](phase008/phase.md) | GF(2^255-19) と X25519（test-f25519、test-x25519） | planned | p002 |
+| [p009](phase009/phase.md) | Ed25519（test-ed25519） | planned | p008 |
+| [p010](phase010/phase.md) | P-256・P-384 の群（test-ecp） | planned | p007 |
+| [p011](phase011/phase.md) | ECC: 鍵の生成・ECDH・ECDSA の確かめ（test-ecc） | planned | p010 |
+| [p012](phase012/phase.md) | RSA の署名の確かめ（PKCS#1 v1.5・PSS）（test-rsa） | planned | p007、p002 |
+| [p013](phase013/phase.md) | ML-KEM の多項式・符号化・sampling（test-mlkem-poly） | planned | p003 |
+| [p014](phase014/phase.md) | K-PKE と ML-KEM-768（test-mlkem） | planned | p013 |
+| [p015](phase015/phase.md) | OS の層（POSIX と Windows）（test-os） | planned | p002 |
+| [p016](phase016/phase.md) | DER の reader と PEM・base64（test-der、test-pem） | planned | p002 |
+| [p017](phase017/phase.md) | X.509 の parse（証明書・公開鍵・署名の algorithm）（test-x509） | planned | p016 |
+| [p018](phase018/phase.md) | 署名の確かめ（algorithm ごと）（test-sigver） | planned | p017、p011、p012 |
+| [p019](phase019/phase.md) | 名前（Name の比較・host と address の照合・name constraints）（test-name） | planned | p017 |
+| [p020](phase020/phase.md) | trust store と path の検証（test-chain） | planned | p018、p019、p015 |
+| [p021](phase021/phase.md) | 誤りの queue と ERR_・RAND_bytes・OPENSSL_cleanse・CRYPTO_memcmp（test-err） | planned | p015 |
+| [p022](phase022/phase.md) | 公開の X509（d2i_X509 ほか）と内部の store の生成（test-api-x509） | planned | p020、p021 |
+| [p023](phase023/phase.md) | 公開の EVP の digest・ChaCha20・Poly1305（test-api-evp） | planned | p021、p006、p002 |
+| [p024](phase024/phase.md) | 公開の EVP_PKEY（Ed25519・X25519・ML-KEM-768）（test-api-pkey） | planned | p021、p009、p008、p014 |
+| [p025](phase025/phase.md) | TLS の定数・suite の表・presentation language の reader/writer（test-tls、test-buf） | planned | p002 |
+| [p026](phase026/phase.md) | record の保護（test-record） | planned | p025、p005、p006 |
+| [p027](phase027/phase.md) | transcript と鍵の schedule（1.3 と 1.2）（test-keysched） | planned | p025、p002 |
+| [p028](phase028/phase.md) | handshake の message の encode と syntax の確かめ（test-msg） | planned | p025 |
+| [p029](phase029/phase.md) | handshake の共通と TLS 1.3（test-hs13） | planned | p027、p028、p020、p011、p008、p037 |
+| [p030](phase030/phase.md) | TLS 1.2 の handshake（test-hs12） | planned | p029、p037 |
+| [p031](phase031/phase.md) | 接続（record の I/O・再組み立て・alert・close）（test-conn） | planned | p030、p015、p037 |
+| [p032](phase032/phase.md) | 公開の SSL・SSL_CTX（test-api-ssl） | planned | p031、p022 |
+| [p033](phase033/phase.md) | 統合: zedBSD の .so と exports、Windows の DLL、相互接続（OpenSSL s_server）・x509-limbo・RFC 8448・net/tls.c の host 試験（Opus） | planned | p032、p023、p024 |
+| [p034](phase034/phase.md) | 安全の review と hardening: 定数時間・fuzz・checklist（Opus） | planned | p033 |
+| [p035](phase035/phase.md) | 規約の全文の見直しと header の持ち越しの直し | planned | p034 |
+| [p036](phase036/phase.md) | 提案（要承認 U2）: net/tls.c の libssl-compat への切り替え | planning | p033 |
+| [p037](phase037/phase.md) | 試験の道具: scripted な TLS server（tlspeer.h）と試験の側の ECDSA の署名器（Opus。p029〜p032 が使う） | planned | p025、p026、p027、p011、p008 |
+| [p038](phase038/phase.md) | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類（Opus） | planned | p020 |
