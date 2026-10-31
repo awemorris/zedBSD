@@ -580,3 +580,15 @@ Origin: 2026-10-27 ユーザーの指示。
     layout/logical.c の「縦書きの grid の container で子が全て横書きなら物理の座標で置く」の例外を flex から外す試験（flexbox-writing-mode-009 の row wrap は直らず -008 が後退）は戻した。
   - grid の列の再解決（2 度目、行の大きさが分かった後の min-content、grid-item-inline-contribution-002・003）、subgrid の暗黙の track・名前の細部、baseline の shim（baseline-alignment-affects-intrinsic-size-001〜006）、::first-letter・::first-line（6 ID）。
   - navigation-api の cross-document・multi frame（約 60）は frame の model が要る。
+
+### q1727-i08 の中断（2026-10-31、P8。host の再起動のため Q1 の指示で早く止めた）
+
+- 基準: dev104 = 2,848 / 3,472（82.03%）。この attempt では全件の測定をしていない。gap は build/tmp/p8/gap104.json（worktree の中）に残っている。
+- 済み（1 件、回帰は未測定）: layout/inline.c `inline_add_atomic` で、横書きの文脈の inline-block が縦書き（直交）なら baseline を持たない扱い（bottom margin edge を line の baseline に載せる）にした。
+  grid-self-baseline-horiz-002 は ref との差が 82,794 画素から 0 になった（ref-one.py）。host build は warning 0（grep で確認）。
+- 未済: 上の変更の回帰の確認（`static-subset.py --gap build/tmp/p8/gap104.json /css/css-grid/alignment/ /css/css-flexbox/` を流している途中で止めた。結果なし）。
+  同じ原因の見込み: self-baseline の horiz-003〜007・-b、grid-item-self-baseline-001 など（static 約 20）。vertical-lr/rl の self-baseline は縦書きの grid の container の話で別（logical.c の例外、i07 の記録）。
+- 調べた物: css-view-transitions の scripted 50 件の分類（inline 要素の capture 約 11 は multi-line inline の snapshot、shadow ::part 6 は `::part()` セレクタが engine に無い、
+  pseudo-element-overflow-hidden は group の overflow）。いずれも着手していない。
+- 次: (1) 上の回帰を static-subset で確認し、通れば grid・flex の self-baseline 群を数える、(2) ::part() セレクタ（shadow tree をまたぐ rule）、(3) CSSOM rule object の model。
+- Acid は今回は未測定（inline.c の変更の後は未実施）。測定の一時 file: /tmp/p8out（tmpfs、host 再起動で消える）。Acid の runner の一時 file はこの attempt では作っていない。
