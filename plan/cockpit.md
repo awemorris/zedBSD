@@ -16,9 +16,9 @@
 | P5 | — | — | 返却（2026-11-01 04:53）。WS336 の設計を仕上げた（推しの答え、TODO の一覧 T1〜T31、基点 d4ab182d2 のまま）。実装は Sonnet が p002 から | — |
 | P6 | [WS335](ws335/ws.md) | 自前の libssl-compat・libcrypto-compat | 設計の仕上げ（q1789-i02）: 推しの答え、Windows は 1 つの .exe に static link、新しい基点 | 終われば Sonnet が p002 から実装 |
 | P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005〜p020 cleared（最新 p011 files、main c590d87fa） | P7 が p021（統合: OS に触れる所を OS の層へ）を実行中 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 14 回目（q1727-i14）: dev141 = 3,084（88.82%）、shape-outside の 16 件、main cee9d88c2 | 直交の flex の項目 → grid の baseline |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 15 回目（q1727-i15）。i14 で 3,107（89.49%）、Acid2・Acid3 100% | CSS_TRACKS の上限 → col の背景 → 縦の inline の背景 |
 
-実装の担当（Sonnet・Opus の単発）: WS336 の p010・p012・p013（Sonnet、worktree s-ws336-pNNN）。p002 は cleared。p003 は WS335 の新しい基点を待つ。
+実装の担当（Sonnet・Opus の単発）: WS335 の p003（SHA-3）・p006（ChaCha20・Poly1305）・p008（X25519）、WS336 の p004（暗号の組と packet）・p005（鍵）（Sonnet、worktree s-wsNNN-pNNN）。
 
 ## WS ごとの進捗
 
