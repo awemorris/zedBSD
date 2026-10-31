@@ -1187,6 +1187,49 @@
       }
     })();
 
+    // A window that a link, a form or window.open() names: _top and _parent, or a frame of this document with the name; only a window of
+    // this origin (its initial about:blank counts) is navigated, as a navigation of its own that fires its navigate event.
+    function sameOriginWindow(w) {
+      try {
+        if (!w) return null;
+        if (w.location.href === 'about:blank' || w.location.origin === g.location.origin) return w;
+      } catch (e) { /* another origin */ }
+      return null;
+    }
+    function namedFrame(name) {
+      var list, i, w;
+      if (typeof name !== 'string' || name === '' || /^\s*_/.test(name)) return null;
+      list = document.querySelectorAll('iframe[name], frame[name]');
+      for (i = 0; i < list.length; i++) {
+        if (list[i].getAttribute('name') === name) {
+          w = list[i].contentWindow;
+          return w ? sameOriginWindow(w) : null;
+        }
+      }
+      return null;
+    }
+    function navigateTarget(name, u) {
+      var w;
+      if (/^\s*_top\s*$/i.test(name)) w = sameOriginWindow(g.top);
+      else if (/^\s*_parent\s*$/i.test(name)) w = sameOriginWindow(g.parent);
+      else w = namedFrame(name);
+      if (!w) return false;
+      try { w.location.assign(u); } catch (e) { return false; }
+      return true;
+    }
+    (function () {
+      var nativeOpen = g.open;
+      def(g, 'open', function open(url, name) {
+        var w = namedFrame(name), u;
+        if (w) {
+          u = url === undefined || url === null || String(url) === '' ? null : resolveURL(url);
+          if (u !== null) { try { w.location.assign(u); } catch (e) { /* refused */ } }
+          return w;
+        }
+        return typeof nativeOpen === 'function' ? nativeOpen.apply(this, arguments) : null;
+      });
+    })();
+
     // A link a script clicks (an a or area element, or SVG's a) navigates; a download link only fires its navigate event.
     native.setHyperlinkFollower(function (link) {
       var svg = link.namespaceURI === 'http://www.w3.org/2000/svg', href, target, u, download;
@@ -1194,9 +1237,12 @@
       if (href === null && svg) href = link.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
       if (href === null || !link.isConnected) return;
       target = link.getAttribute('target');
-      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) return;
       u = resolveURL(href);
       if (u === null) return;
+      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) {
+        navigateTarget(target, u);
+        return;
+      }
       download = !svg && link.hasAttribute('download') ? link.getAttribute('download') : null;
       if (download !== null) {
         fireNavigate({ type: 'push', url: u, navState: null, sameDocument: false, sourceElement: link, downloadRequest: download });
@@ -1214,9 +1260,19 @@
       var action = attr('formaction', 'action'), method = String(attr('formmethod', 'method') || 'get').toLowerCase();
       var target = attr('formtarget', 'target'), u, data, query, source, handling;
       if (!form.isConnected || method === 'dialog') return;
-      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) return;
       u = resolveURL(action === null || action === '' ? docURL() : action);
       if (u === null) return;
+      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) {
+        // Another window's navigation: a GET goes there with the entries as the query.
+        if (method !== 'post') {
+          data = typeof g.FormData === 'function' ? new g.FormData(form) : null;
+          if (data && submitter && submitter.name) data.append(submitter.name, submitter.value);
+          query = data ? new URLSearchParams(data).toString() : '';
+          u = noFrag(u).replace(/\?.*$/, '') + '?' + query;
+          setTimeout(function () { navigateTarget(target, u); }, 0);
+        }
+        return;
+      }
       data = typeof g.FormData === 'function' ? new g.FormData(form) : null;
       if (data && submitter && submitter.name) data.append(submitter.name, submitter.value);
       source = submitter || form;
