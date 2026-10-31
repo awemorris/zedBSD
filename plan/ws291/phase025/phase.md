@@ -2,7 +2,7 @@
 
 # ws291-p025: Raspberry Pi 4（V3D 4.2）で mview を動かし、qs40 の model をスペックの比で決めた copies・1920x1080 で 50 fps に
 
-Status: in-progress（2026-10-31 20:20 新設、P4 q1784。i03 返却 2026-11-01 01:45: Terminal の atlas で type 60・61、VCM で c21 inflight=1 42〜50・inflight=2 48〜53 fps（CPU の段の速さで揺れる）、bin と render の重ねは測って効かず外した。desktop の drag・home・wiseview は 53〜59 で 60 の手前）
+Status: uncleared（2026-11-01 01:52 P4 q1784-i04: ユーザーの決定で Pi 4 の作業をここで止め Pi 5（p021）へ移る。熱による throttling が疑われ、目標の desktop 60 fps と c21 inflight=1 の 50 fps は未達。再開点は下の i04。i03 までの成果は main 69109d3f2 に merge 済み）
 Parent: [WS291](../ws.md)
 Queue: q1784（P4）
 
@@ -178,6 +178,35 @@ mview の vkCreateGraphicsPipelines が FEATURE_NOT_PRESENT。足りない機能
   pi4-comp.sh 2 回で launch 49・52、type 23・24、output 19・21、drag 57・57、home 57・58、wiseview 59・59。mview c1 184 fps・c21 40.5 fps（GPU で決まり変わらず）。
 - session（pi4-desk.sh、build/tmp/p025-g3）: launch 56・type 53・keys 45（入力）・output 22・scroll 14（入力）・hover 17（入力）・drag 55・home 56・wiseview 58、
   RENDER stalled 0。
+
+## 記録（P4 q1784-i04、2026-11-01 01:44〜01:52）
+
+- 01:44 main 69109d3f2（i03 の a54520ea8 を merge 済み）を取り込み。
+- 2026-11-01 ユーザーから（Q1 経由）、Pi 4 は熱で throttling しているように見えるので Pi 4 の作業をここで止め、冷却が良く GPU が近い Pi 5（V3D 7.1、p021）へ
+  移る、板はユーザーが取り替える、という趣旨の指示を受けた。続けて、Pi 4 の V3D の変更を main に入れることを承認する趣旨の決定を受けた（Q1 経由）。
+- 計測の揃え（Q1 の指示の 1）の途中: 板の dmesg に温度の sensor が無く（hw.thermal sensors=0）、CPU の clock も読めないので、kernel に読みを足した
+  （2a53a5a6d）。v3d.perf=1 の時、2 s ごとの cost report の後に `v3d: board arm=設定/実測 core= v3d= MHz temp= throttled=0x…` の 1 行
+  （firmware の GET_CLOCK_RATE・GET_CLOCK_RATE_MEASURED・GET_TEMPERATURE・GET_THROTTLED。throttled の要求は sticky の bit を消さない、bit 16〜19 は
+  boot からの履歴、bit 0〜3 は今: under-voltage・CPU の clock の上限・throttled・soft の温度の限界）。Pi 4（`bcm2711_firmware_get`）と Pi 5
+  （`bcm2712_firmware_property`）の両方に実装、v3d.perf=1 の無い時は何も変えない。Pi 4・Pi 5 の vmunix（build/p021-k4b・k5b）は rc 0・warning 0。
+  板では未実行（Pi 4 は電源を落とされた）。
+- 観察（未確かめ）: 板の dmesg で core clock が display の floor により 500 MHz と 137.6 MHz の間を何度も行き来する。CPU の段の 2〜2.5 倍の揺れは
+  ARM の clock の 600 MHz と 1.5 GHz の比（2.5）にも近い。どちらが原因かは上の行で測れば分かる（未測定）。
+
+### 再開点（2026-11-01 01:52 P4、q1784-i04）
+
+- branch agent/p4-ws291pi の 2a53a5a6d（board の状態の行）。src の他の変更は main 69109d3f2 と同じ。
+- 板（10.0.30.6）: i03 の再開点と同じ状態のまま（kernel build/p025-4z/vmunix cksum 736120021、cmdline `login=console v3d.perf=1`、/bin/wayland・terminal・
+  files と /lib/libvulkan.so・libc.so は p025-4u、元は *.p025old、/root/p025・p025d・p025desk、元の kernel と設定は /boot/boot0/*.p025old と
+  host の build/tmp/p025-board/*.orig）。ユーザーが電源を落とし、板を取り替える。
+- 再開するなら: (1) 2a53a5a6d の kernel で mview と desktop を流し、`v3d: board` の行で ARM の実測の clock・温度・throttled の bit を run ごとに比べる。
+  throttled の bit 1・2（今）か 17・18（履歴）が立てば熱、bit 0・16 なら電源（under-voltage）で、heatsink か電源の交換（ユーザーの判断）。
+  ARM が 600 MHz のまま throttled が 0 なら、firmware に ARM の clock の最大を頼む（SET_CLOCK_RATE、Linux の cpufreq の代わり）。
+  core clock の 137.6 MHz も CPU・V3D の memory の速さに効くかを同じ行で見る。
+  (2) mview c21: 32-bit の index を 16-bit に写して buffer の世代で持つ（bin の memory の読みの約 2 割、inflight=1 の GPU の側を約 1 ms）。
+  (3) desktop: compositor の frame の pace と部分（dirty の矩形）の再描画（承認済み）。Pi 4 と QEMU Venus で画を確かめ、compositor の host 試験を流す。
+  (4) bin と render の重ねは V3D 4.2 では帯域の取り合いで効かない（cfd09a48c に実装）。
+- 消してほしい物（Q1 へ）: build/p021-k4b（Pi 4 の build の確かめだけの kernel）。
 
 ## 記録（P4 q1784-i03、2026-10-31 23:45〜）
 
