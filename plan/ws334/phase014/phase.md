@@ -27,7 +27,7 @@
 ## 試験の項目
 
 - Microsoft の表の Keyboard/Keypad の全部の行（Scan 1 Make が書かれた行、0x00FF の ErrorRollOver を除く）と Consumer・Generic Desktop の行のうち hid-input.c が evdev を持つ物: scan（下位 8 bit）と extended（0xE0 の前置き）の組から期待の evdev を試験の表に書き、全部を確かめる。試験の表は実装の表と別の手順で作る（例えば試験は HID の usage の列を経て 2 段で引く形、実装は 1 段の表）。
-- header の特別な場合の全部: 0x45 と VK_PAUSE（extended 0 と 1）→ KEY_PAUSE、0x45 と VK_NUMLOCK・他の VK → KEY_NUMLOCK、0x46 extended → KEY_PAUSE、0x46 非 extended → KEY_SCROLLLOCK、0x37 extended → KEY_SYSRQ、0x37 非 extended → KEY_KPASTERISK、0x54 → KEY_SYSRQ、日本語・韓国語の鍵（0x29・0x70・0x73・0x79・0x7B・0x7D・0x72・0xF2・0x71・0xF1・0x78・0x77・0x76）。
+- header の特別な場合の全部: 0x45 と VK_PAUSE（extended 0 と 1）→ KEY_PAUSE、0x45 と VK_NUMLOCK・他の VK → KEY_NUMLOCK、0x46 extended → KEY_PAUSE、0x46 非 extended → KEY_SCROLLLOCK、0x37 extended → KEY_SYSRQ、0x37 非 extended → KEY_KPASTERISK、0x54 → KEY_SYSRQ、日本語・韓国語の鍵（0x29・0x70・0x73・0x79・0x7B・0x7D・0x72・0xF2・0x71・0xF1・0x78・0x77）と 0x76 → KEY_F24（header: F24 と LANG5 が同じ make code で F24 を取る）、0x72・0xF2・0x71・0xF1 は extended 0 と 1 の両方で同じ。
 - extended の有無で違う鍵の組（Enter と keypad Enter 0x1C、左右の Ctrl 0x1D、左右の Alt 0x38、矢印と keypad の数字 0x48 など、Insert・Delete・Home・End・PageUp・PageDown、keypad の / 0x35 と /、左右の Windows 0x5B・0x5C と International6 の 0x5C）。
 - scan 0 → 0、表に無い scan（0x5A〜0x5F の空き、0xFF）→ 0、scan が 256 以上（呼び手の誤り）→ 0、extended が 2 は 1 と同じ。
 - 全部の (scan 0〜255, extended 0・1) の 512 の組で返り値が 0 か 1〜0x2ff。

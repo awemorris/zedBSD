@@ -51,7 +51,8 @@
 
 ## browser の UI（`userland/desktop/browser/`）
 
-1. `main.c`: 今の `main` の中身を `int browser_main(int argc, char **argv)`（新しい `browser/browser-main.h` に宣言）に移し、`main` はそれを呼ぶだけ。`browser/sources.mk` の一覧はそのまま（main.c が両方を持つ）。Windows の入口（p028 の `apps/browser-win32/main.c`）は `main.c` を compile せず、`browser_main` を呼ぶ。そのため `main` だけを新しい `browser/main-posix.c` に移し、`main.c` には `browser_main` を残す（sources.mk に main-posix.c を足し、Windows の Makefile は main-posix.c を除く）。
+1. `main.c`: 今の `main` の中身を `int browser_main(int argc, char **argv)`（新しい `browser/browser-main.h` に宣言）にし、`main.c` に残す。`main` 自身は新しい `browser/main-posix.c`（`browser_main` を呼ぶだけ）へ移す。`browser/sources.mk` の `KEILAND_BROWSER_SOURCES` に `main-posix.c` を足す（zedBSD・Linux の build）。Windows の Makefile（p028）は `main-posix.c` を除き、`apps/browser-win32/main.c` の入口から `browser_main` を呼ぶ。
+1b. `shell/shell.c:782`（設計の時の行。typed の location が絶対の path かの `typed[0] != '/'`）: libkeiland の側に path の判定は無いので、`browser/shell/` に static の `shell_path_is_absolute`（POSIX は '/' で始まる、Windows の形（drive の文字・':'・区切り、または 2 つの区切り）も同じ関数で見る。system の `#ifdef` は書かず、両方の形を常に path と見る: zedBSD で "C:\\x" を打つ人はいないので害が無い）を書いて使い、続く `"file://"` の組み立ては `browser/` の今の file: URL の作り方のまま（Windows の drive の形は "file:///C:/x" に: '\\' を '/' に替え、先頭に '/' を足す）。
 2. `shell/present.c`: 拡張の名前（:64-65）を `kl_window_vulkan_extensions` から。`pApplicationName`（:68）を `SHELL_PRODUCT_NAME`。
 3. **CPU の道**（新 `shell/present-cpu.c`、`browser/sources.mk` に足す）: `--no-gpu` の引数、または Vulkan の instance・surface・device の作りが失敗した時、窓を `KL_PRESENT_SHM` で作り（失敗が窓の後に分かった時は窓を閉じて SHM で作り直す）、`browser_view_draw_pixels` で描いて `kl_window_present` で出す。大きさの変化は `kl_window_present_resize`。描く時は今の Vulkan の道の redraw の契機と同じ（view の redraw の callback と大きさの変化）。`--no-gpu` は `main.c` の引数の表に足す（usage の文も）。zedBSD でも使える。
 4. `shell/keys.c`: event の `text` が空でなく、1 つの印字できる文字（制御の文字でない）の時はそれを DOM の `key` に、それ以外は今の US の表（:9-13・:27-39）。

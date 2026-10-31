@@ -35,8 +35,10 @@
 
 /*
  * The most bytes of queued writes not yet done (64 MiB).  A write that
- * would pass it waits until the thread has done enough (the only time a
- * write waits).
+ * would pass it is refused with ENOSPC rather than wait (the callers may
+ * hold the loader's or the cookie jar's lock and must not wait for the
+ * disk); the engine keeps the state in memory and writes it again at its
+ * next change.
  */
 #define WB_STORAGE_QUEUE_LIMIT		(64UL * 1024UL * 1024UL)
 
@@ -72,11 +74,14 @@ int wb_storage_queue_open(const struct browser_storage_calls *calls, void *conte
  * bytes: length bytes, copied; NULL only when length is 0.
  * Returns 0 (queued, or dropped by a queue without a backend), EINVAL
  * (NULL arguments or an invalid key), EFBIG (length above
- * WB_STORAGE_QUEUE_LIMIT), ENOMEM.  The backend's error, if the write later
- * fails, is kept for wb_storage_queue_take_error.
- * A later write of the same space and key that is queued before the thread
- * has started the earlier one may replace it in the queue (only the last
- * bytes reach the backend).
+ * WB_STORAGE_QUEUE_LIMIT), ENOSPC (the queued bytes would pass
+ * WB_STORAGE_QUEUE_LIMIT), ENOMEM.  Never waits.  The backend's error, if
+ * the write later fails, is kept for wb_storage_queue_take_error.
+ * A later write of the same space and key may replace an earlier write
+ * still waiting in the queue (only the last bytes reach the backend), but
+ * only when no remove, clear, read or list of that space (and key) was
+ * queued after the earlier write; otherwise it is appended, so the order
+ * of writes and removes the backend sees is the order they were queued.
  */
 int wb_storage_queue_write(struct wb_storage_queue *queue, unsigned space, const char *key, const void *bytes, size_t length);
 

@@ -18,10 +18,10 @@
  * names too; the virtual-key code depends on the layout and is used only
  * where Windows gives two keys the same scan code.
  *
- * The table is data: set 1 make code -> USB HID usage (Keyboard/Keypad
- * page 0x07, and the Consumer page 0x0C for the media keys) from the
- * Microsoft documents, then HID usage -> evdev code from the Linux kernel's
- * HID input mapping, used as data.  Pure: no Windows header, no system
+ * The table maps each set 1 make code to the USB HID usage of the key
+ * (Keyboard/Keypad page 0x07, and the Consumer page 0x0C for the media
+ * keys) and that usage to its evdev code; keys-table.c names where the
+ * values come from beside the table.  Pure: no Windows header, no system
  * call, no state; the tests run on the host.
  */
 
@@ -61,8 +61,12 @@
  *    HID table maps it; Windows gives the same scan for the grave key),
  *    0x70 Katakana/Hiragana (KEY_KATAKANAHIRAGANA), 0x73 Ro
  *    (KEY_RO), 0x79 Henkan (KEY_HENKAN), 0x7B Muhenkan (KEY_MUHENKAN), 0x7D
- *    Yen (KEY_YEN), 0x72 and 0xF2 Hangul (KEY_HANGEUL), 0x71 and 0xF1 Hanja
- *    (KEY_HANJA), each without the extended bit.
+ *    Yen (KEY_YEN), each without the extended bit; 0x72 and 0xF2 Hangul
+ *    (KEY_HANGEUL) and 0x71 and 0xF1 Hanja (KEY_HANJA) with or without it
+ *    (keyboards differ in how they report them).
+ *  - 0x76 without the extended bit is both F24 and LANG5 in the scan code
+ *    table; it is KEY_F24 (LANG5 is rarely sent, and F24 is what the make
+ *    code means on the keyboards that have it).
  * Every other entry is the set 1 make code of the Microsoft scan code
  * table (the extended ones are "0xE0 xx" there) mapped through its HID
  * usage.

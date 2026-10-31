@@ -52,7 +52,7 @@
 struct keiui_win32_key_flags {
 	unsigned scan;		/* bits 16 to 23 */
 	int extended;		/* bit 24: 1 or 0 */
-	int repeated;		/* bit 30 on a key down: the key was already down (1 or 0) */
+	int repeated;		/* bit 30 as it is (1 or 0): on a key down, the key was already down; Windows sets it on every key up */
 	int released;		/* bit 31: 1 for a key up */
 };
 

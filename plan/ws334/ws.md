@@ -43,7 +43,7 @@
 ## Resume point
 
 - 2026-11-01 01:30 決定 22（標準廉価実装手順）で Phase の表を組み直した: 設計の Phase p002〜p004 で全部の module の header・.c の骨格・試験の道具・実装の phase.md・design-reviewer を済ませ、
-  p004 が cleared になるまで実装の Phase（p005 以降）を始めない。統合（Opus）の Phase の phase.md も設計の Phase で書き、実装の間に設計の判断を残さない（Q1 の条件）。module の Phase（Sonnet）は表の順が優先の順で、Q1 が 4〜6 本ずつ起動する（目安: 1 組目 p005・p009・p010・p012・p013・p020、2 組目 p006・p007・p008・p011・p014、3 組目 p015〜p019）。P7 が q1790 で p002 から。開発と試験は host の Wine＋llvmpipe（決定 20）。
+  p004 が cleared になるまで実装の Phase（p005 以降）を始めない。統合（Opus）の Phase の phase.md も設計の Phase で書き、実装の間に設計の判断を残さない（Q1 の条件）。module の Phase（Sonnet）は表の順が優先の順で、Q1 が 4〜6 本ずつ起動する（目安: 1 組目 p005・p009・p010・p013・p020、2 組目 p006・p007・p008・p011・p012・p014、3 組目 p015〜p019）。P7 が q1790 で p002 から。開発と試験は host の Wine＋llvmpipe（決定 20）。
 
 ## Phase
 
@@ -60,7 +60,7 @@
 | [p009](phase009/phase.md) | module（Sonnet、表の data）: `base/os-zones.h/.c`（Windows の時刻帯の key → 英語の長い名前、CLDR の data） | planned | p004 |
 | [p010](phase010/phase.md) | module（Sonnet）: `storage/records.h/.c`（key の作り・FNV-1a 64・衝突の番号、cookie・cache・LOCAL v1/v2 の記録の encode と decode） | planned | p004 |
 | [p011](phase011/phase.md) | module（Sonnet）: `storage/files.h/.c`（files の backend、公開の `browser_storage_calls` の実装） | planned | p006・p010 |
-| [p012](phase012/phase.md) | module（Sonnet）: `storage/queue.h/.c`（instance の storage の thread と queue、write-behind と読みの頼み） | planned | p004 |
+| [p012](phase012/phase.md) | module（Sonnet）: `storage/queue.h/.c`（instance の storage の thread と queue、write-behind と読みの頼み） | planned | p005・p010 |
 | [p013](phase013/phase.md) | module（Sonnet）: `libmedia/media-os.h` → `media-os-posix.c`・`media-os-win32.c`（Vulkan の loader の読み込み、file の開き・大きさ・位置の読み） | planned | p004 |
 | [p014](phase014/phase.md) | module（Sonnet、表の data、旧 T1）: `libkeiland/win32/keys-table.h/.c`（scan code → evdev の番号） | planned | p004 |
 | [p015](phase015/phase.md) | module（Sonnet）: `libkeiland/win32/frame.h/.c`（custom frame の幾何: hit test・題の帯の button の配置・DPI の倍率） | planned | p004 |

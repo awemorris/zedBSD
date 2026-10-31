@@ -4,7 +4,7 @@
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
 - 状態: planned（2026-11-01 p002 で作成）。
-- 依存: p004（依存の Phase の実装が main に merge され cleared になってから始める）。
+- 依存: p005・p010（records の `wb_storage_key_valid`・sink の関数を使い、os-system の thread の名前を link する。p010 の実装が無いと試験が通らない）（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 
 ## 読む物
@@ -26,12 +26,12 @@
 - 開く: calls NULL の queue（thread 無し: write は 0 で捨て、read は found 0、list は 0 個）、version 違い・member の欠け → ENOTSUP で close が呼ばれない、queue NULL → EINVAL。
 - 順: write A・write B・remove A・read A（found 0）・read B（bytes）。backend の呼び出しが全部 1 つの同じ thread（試験の thread と違う）から、重ならない（fake が呼び出しの中に入っている数を数えて 1 を超えない）。
 - write-behind: fake の write が 200 ms 眠る時、10 回の write が試験の thread を待たせない（合計 50 ms 未満で返る）。その後の read は 10 回の write の後の値を見る。
-- 合わせ: 同じ key の write を thread が始める前に積むと最後の bytes だけが届いてよい（届いた bytes が最後の物であることだけを確かめる）。
-- 上限: fake を止めた状態で WB_STORAGE_QUEUE_LIMIT を超える write を積むと、超えた write が fake を動かすまで返らない。length > LIMIT → EFBIG。
+- 合わせ: 同じ key の write を thread が始める前に積むと最後の bytes だけが届いてよい（届いた bytes が最後の物であることだけを確かめる）。fake を止めた状態で write(k, A)・remove(k)・write(k, B) を積み、動かした後に k が B で残る（remove が後ろへ回らない）。write(k, A)・read(k)・write(k, B) で read が A を見る。
+- 上限: fake を止めた状態で合計が WB_STORAGE_QUEUE_LIMIT を超える write を積むと、超えた write が ENOSPC で待たずに返る（試験の thread が 50 ms 未満で戻る）。length > LIMIT → EFBIG。
 - 誤り: fake の write が EIO を返すと `take_error` が EIO を 1 回だけ返し、次は 0。read の誤りは found 0 と誤りの値。不正な key → EINVAL。
 - list: fake の不正な key を飛ばし、"key\0key\0" の形と count。
 - flush は全部が済むまで待つ。close は積んだ物を流し切り、backend の close を 1 回、thread を止める（close の後に fake の呼び出しが無い）。close(NULL)。
-- 4 つの thread から 1000 回ずつ write・read を混ぜて ASan・UBSan・(posix は) `-fsanitize=thread` を使わない普通の build で落ちない・順の約束（各 thread の自分の書きを自分の読みが見る）。
+- 4 つの thread から 1000 回ずつ write・read を混ぜて run-unit.sh の build（posix は ASan・UBSan、win32 は UBSan）で落ちず、順の約束（各 thread の自分の書きを自分の読みが見る）。
 
 ## 注意
 

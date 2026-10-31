@@ -93,9 +93,12 @@ int wb_os_random(void *bytes, size_t length);
  * name: NUL-terminated ASCII, at most 15 bytes are used (longer names are
  *       cut); NULL does nothing.
  * Best effort: a system without the facility ignores it.
- * POSIX: pthread_setname_np on Linux and FreeBSD, nothing on zedBSD (the
- * behaviour of the engine today).  Windows: SetThreadDescription, looked
- * up at run time in kernel32.dll (absent before Windows 10 1607).
+ * POSIX: pthread_setname_np(pthread_self(), name) when the build defines
+ * WB_OS_THREAD_NAMES (the Linux and FreeBSD host builds may; it is a build
+ * switch for a facility, not a test of the system's name), nothing
+ * otherwise (zedBSD has no pthread_setname_np: the engine's behaviour
+ * there today).  Windows: SetThreadDescription, looked up at run time in
+ * kernel32.dll (absent before Windows 10 1607).
  */
 void wb_os_thread_name(const char *name);
 
@@ -107,7 +110,9 @@ void wb_os_thread_name(const char *name);
  * library: receives the library, or NULL on failure.
  * Returns 0, EINVAL (names or library NULL, names empty or a name empty),
  * ENOENT (no name could be loaded), ENOMEM.
- * POSIX: dlopen(name, RTLD_NOW | RTLD_LOCAL).  Windows: LoadLibraryExW with
+ * POSIX: dlopen(name, RTLD_NOW | RTLD_LOCAL) (a library's own dependencies
+ * are loaded by the system through its DT_NEEDED entries, so local is
+ * enough for libssl over libcrypto).  Windows: LoadLibraryExW with
  * LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32 only
  * (never the current directory or PATH), so a planted DLL is not loaded.
  */
@@ -155,7 +160,7 @@ const char *wb_os_user_agent_system(void);
  * size:   bytes at buffer; must be more than 0.
  * Returns 0, EINVAL (buffer NULL or size 0), ERANGE (the path and its NUL
  * do not fit; buffer then holds an empty string), EILSEQ, EIO.
- * POSIX: KEILAND_DATADIR of userland/desktop/paths.h ("/usr/share").
+ * POSIX: KEILAND_DATADIR of userland/desktop/paths.h, unchanged.
  * Windows: the directory of the running .exe (GetModuleFileNameW of NULL)
  * followed by "\\share".
  */
@@ -168,8 +173,10 @@ int wb_os_data_directory(char *buffer, size_t size);
  * context: passed to each.
  * Returns 0 when every certificate was handed over (also when the system
  * has none or keeps them where the TLS library reads them itself), the
- * value each returned to stop, EINVAL (each NULL), EIO (a store could not
- * be opened or read).
+ * value each returned to stop, EINVAL (each NULL), EIO (a store that exists
+ * could not be read).  A store the system does not have is skipped, not an
+ * error (opened with CERT_STORE_OPEN_EXISTING_FLAG; its failure to open is
+ * a missing store).
  * POSIX: calls each for nothing and returns 0 (OpenSSL reads the system's
  * file itself).  Windows: every certificate of the current user's and the
  * machine's "ROOT" stores with distrusted 0, then every certificate of

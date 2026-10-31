@@ -19,7 +19,7 @@
 | 2 | `vm/heap.c:555`・`:745` と解放の `:137`・`:570`・`:1005`・`:1067` | `posix_memalign`・`free` | `wb_os_aligned_alloc`・`wb_os_aligned_free`。aligned の block を放す全部の `free` を替える（他の `free` は替えない。どれが aligned の block かを読んで確かめる） |
 | 3 | `page/svg.c:1968` | `memmem` | 新しい `wb_memmem`（`base/base.h` に宣言、`base/buffer.c` に ISO C の素直な実装: needle の長さ 0 は haystack を返す、無ければ NULL。`net/http.c` の `http_memmem` と同じ約束）。`http_memmem` は p022 で `wb_memmem` に替える |
 | 4 | `page/page.c:284` | `realpath(path, NULL)` と strdup の予備 | `wb_os_full_path` を `wb_buffer` に。失敗の時は今と同じく path の写し |
-| 5 | `view/view.c:436` | `getcwd` と "/" の足し | `wb_os_current_directory` と、続く `page_resolve_location` が区切りに使う "/" を足す（Windows の "C:\\x" には "/" を足して "C:\\x/" とし、`page_resolve_location` が file の path として扱う。下の 6 の file: URL の変換と合わせて、Windows の相対の path が `C:\x\name` になることを Wine の試験で確かめる） |
+| 5 | `view/view.c:436` | `getcwd` と "/" の足し | `wb_os_current_directory` で作業の directory を得て、その path を `net_url_from_file_path`（下の 6）で file: URL にし、末尾に "/" を足した URL を `page_resolve_location` の base にする（Windows の "C:\\x" も "file:///C:/x/" になり、相対の location が URL として解ける。`page_resolve_location` が location 自身の絶対の path を見分ける所は下の 17 の `wb_os_path_is_absolute`） |
 | 6 | `net/url.c:412-459` `net_url_file_path`・`net_url_from_file_path` | host が空でなければ ENOENT、path をそのまま | `net_url_file_path` は percent-decode の後に `wb_os_path_from_url(url->host, decoded, out)`。`net_url_from_file_path` は `wb_os_url_from_path(path, &host, &decoded)` で分け、"file://" + host + 今の符号化（`%`・`#`・`?` と `URL_SET_PATH`）の path |
 | 7 | `js/builtin_date.c:289`・`:1459`・`:1484`・`:1662` | `tzset`・`localtime_r`・`clock_gettime(CLOCK_REALTIME)` | `wb_os_time_zone_start`、offset は `wb_os_local_offset`（秒）× 1000、名前は `wb_os_zone_name`（buffer は `WB_OS_ZONE_NAME_MAX + 1`）を今の略号の表（:200-212）に通す（Windows の長い名前は表に当たらずそのまま）、今は `wb_os_wall_ns` を ms の double に。誤りの時は今と同じ（offset 0、名前 "UTC"） |
 | 8 | `page/script.c:450`・`:468`、`view/view.c:2033` | `clock_gettime(CLOCK_MONOTONIC)` | `wb_os_monotonic_ns`（単位の換算を今の計算に合わせる） |
@@ -29,8 +29,10 @@
 | 12 | `net/net.h:25` `NET_USER_AGENT` | 固定の文字列 | `net_user_agent()`（`net/url.c` か新しい行を `net/http.c` に: "Mozilla/5.0 (" + `wb_os_user_agent_system()` + ") AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36" を once で組み立てて static に持つ）。`NET_USER_AGENT` を使う全部の所を替える（navigator.userAgent を含む） |
 | 13 | `text/text.h:39-41`、`text/font.c:74`・`:80` | `KEILAND_DATADIR "/fonts/..."` の固定の path | 既定の font の path を `wb_os_data_directory` + "/fonts/keiland.ttf" などで実行時に組み立てる（`text_default_path(which, buffer)` の static の関数を font.c に）。zedBSD の値は今と同じ "/usr/share/fonts/..."。companion（bold・fallback_mono）は p023 の公開の `browser_fonts` で |
 | 14 | `css/values.c:7012-7013` | `(long)number` で整数かの判定 | `number == floor(number)` と範囲（`fabs(number) < 9007199254740992.0`）の比較にする（LLP64 で 2^31 以上が未定義の動作になるため）。結果が今の 64 bit の host と同じであること |
-| 15 | `libbrowser/sources.mk`・`Makefile` | — | `LIBBROWSER_OS_SOURCES := $(LIBBROWSER_DIR)/base/os-system-posix.c $(LIBBROWSER_DIR)/base/os-file-posix.c $(LIBBROWSER_DIR)/base/os-time-posix.c` を足し `LIBBROWSER_SCRIPT_SOURCES` に入れる（script の core も時刻・乱数・file を使う）。Windows の物は sources.mk に書かない（`list-sources.sh` が拾うため）。`apps/browser-win32/Makefile` が `LIBBROWSER_SCRIPT_SOURCES` から posix の 3 つを除き、win32 の 4 つ（os-win32・os-system-win32・os-file-win32・os-time-win32）と os-zones.c を足す |
+| 15 | `libbrowser/sources.mk`・`Makefile` | — | `LIBBROWSER_OS_SOURCES := $(LIBBROWSER_DIR)/base/os-system-posix.c $(LIBBROWSER_DIR)/base/os-file-posix.c $(LIBBROWSER_DIR)/base/os-time-posix.c` を足し、この 3 つを `LIBBROWSER_SCRIPT_SOURCES` に入れる（script の core も時刻・乱数・file を使う。network の os-net-posix.c は p022 で `LIBBROWSER_ENGINE_SOURCES` に入れる: script の core は network を使わない）。Windows の物は sources.mk に書かない（`list-sources.sh` が拾うため）。`apps/browser-win32/Makefile` が `LIBBROWSER_SCRIPT_SOURCES` から posix の 3 つを除き、win32 の 4 つ（os-win32・os-system-win32・os-file-win32・os-time-win32）と os-zones.c を足す |
 | 16 | `plan/ws074/tests/host-build.sh` | 全部の source を host の cc で | `list-sources.sh` が posix の 3 つを拾うので変更は要らない見込み。拾わなければ Q1 に（WS074 の file） |
+| 17 | `page/link.c:458`・`page/script.c:358`・`page/media.c:518`（設計の時の行） | `[0] == '/'` で「local の path か」を見分ける | `wb_os_path_is_absolute`。`page/script.c:358` の `"file://%s"` の書き出しは `net_url_from_file_path`（符号化と Windows の drive・UNC を正しく）に替える。`page/page.c:284` の後の `page->base` に入るのは Windows で "C:\\x\\a.html" の形なので、この 3 か所が base を path と見分けられること |
+| 18 | `page/page_resolve_location`（`grep -n page_resolve_location`、location の始まりが '/' かの判定） | `[0] == '/'` | `wb_os_path_is_absolute`（Windows の "C:\\x" を URL の scheme "c" と読まないため） |
 
 - 触れた block に開発の管理情報（ws074-pNNN など）の comment があれば、この Phase では直さない（p035 の規約の見直しで）。新しく書かない。
 - OS の header（`<unistd.h>`・`<fcntl.h>`・`<sys/*.h>`・`<dlfcn.h>`・`<pthread_np.h>`）の include を、使わなくなった file から外す。`net/` の 3 つ（loader・http・tls）と `page/storage.c` は p022・p023 で（ここでは触れない）。
@@ -52,7 +54,7 @@
 ## 変えてはいけない物
 
 - module の header と .c、試験の道具（modules.sh・run-unit.sh・check-skeleton.sh・unit/）。header の不足を見つけたら止めて Q1 に。
-- 表の 16 の外の libbrowser の file。network（p022）、storage（p023）。HAL・toolchain・共有の build/。rm をしない。push しない。
+- 表の 18 の外の libbrowser の file。network（p022）、storage（p023）。HAL・toolchain・共有の build/。rm をしない。push しない。
 
 ## 終わりの条件
 

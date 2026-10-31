@@ -76,8 +76,9 @@ int keiui_win32_cf_html_encode(const char *fragment, size_t length, const char *
  * (case-sensitive) before the first ':'; unknown names are skipped; the
  * header ends at the first line that does not have the form name ":"
  * value, or at the smallest offset given; an offset is decimal digits
- * (any number, leading zeros allowed) or "-1"; a value above length, or
- * an end before its start, is invalid.
+ * (leading zeros allowed) or "-1"; a value above length (also one whose
+ * digits would overflow: the parse stops as soon as the value passes
+ * length), or an end before its start, is invalid.
  * Returns 0, EINVAL (data NULL with length above 0, fragment or
  * fragment_length NULL, no Version line, no usable pair of offsets, an
  * invalid offset).  On failure the outputs are NULL and 0.

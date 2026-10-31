@@ -129,10 +129,17 @@ int wb_os_utf8_from_wide(const wchar_t *wide, size_t count, char **text, size_t 
 /*
  * Converts a UTF-8 path to a new UTF-16 path for the W file functions.
  *
- * Every '/' becomes '\\'; nothing else changes (no "\\\\?\\" prefix is
- * added: the build's manifest declares long-path awareness).
+ * Every '/' becomes '\\'.  An absolute path (a drive letter, colon and
+ * separator, or a "\\\\server\\share" UNC path) is then made full with
+ * GetFullPathNameW ("." and ".." removed) and given the extended-length
+ * prefix: "\\\\?\\" before a drive path, "\\\\?\\UNC\\" in place of
+ * the leading "\\\\" of a UNC path, so paths longer than MAX_PATH work
+ * without the system's LongPathsEnabled setting.  A path that already
+ * starts with "\\\\?\\" or "\\\\.\\" and a relative path are not
+ * prefixed (a relative one only has its separators turned).
  * path, wide: as wb_os_wide_from_utf8.  An empty path is EINVAL.
- * Returns 0, EINVAL, EILSEQ, ENAMETOOLONG, ENOMEM.
+ * Returns 0, EINVAL, EILSEQ, ENAMETOOLONG, ENOMEM, EIO (GetFullPathNameW
+ * failed).
  */
 int wb_os_wide_path(const char *path, wchar_t **wide);
 

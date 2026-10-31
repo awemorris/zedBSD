@@ -55,7 +55,9 @@ typedef int (*wb_os_list_each)(void *context, const char *name);
  * EISDIR (path names a directory), EBUSY (Windows: another process holds
  * it without sharing reads), EILSEQ, ENAMETOOLONG, ENOMEM, EIO.
  * The file is read in binary (Windows: no CR-LF translation); a read cut
- * by a signal is retried.
+ * by a signal is retried.  Windows opens it with FILE_SHARE_READ |
+ * FILE_SHARE_WRITE | FILE_SHARE_DELETE, so a reader never blocks
+ * wb_os_file_replace of the same path.
  */
 int wb_os_file_read(const char *path, struct wb_buffer *buffer);
 
@@ -67,7 +69,8 @@ int wb_os_file_read(const char *path, struct wb_buffer *buffer);
  * Returns 0, EINVAL, ENOENT (the directory is missing), EACCES, EISDIR,
  * EBUSY, ENOSPC, EILSEQ, ENAMETOOLONG, ENOMEM, EIO.  A failure part way
  * leaves the file with unspecified contents (use wb_os_file_replace when
- * that matters).  Binary; POSIX creates it with mode 0644.
+ * that matters).  Binary; POSIX creates it with mode 0644 (the umask
+ * applies).
  */
 int wb_os_file_write(const char *path, const void *bytes, size_t length);
 
@@ -85,7 +88,8 @@ int wb_os_file_write(const char *path, const void *bytes, size_t length);
  * MoveFileExW with MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH; when
  * it fails with EACCES or EBUSY (another program, such as a virus scanner,
  * holds path for a moment) it is retried up to 5 more times, 20 ms apart,
- * before the error is returned.  POSIX: fsync then rename.
+ * before the error is returned.  POSIX: fsync then rename; the new file has
+ * mode 0600 (records such as cookies are private to the user).
  */
 int wb_os_file_replace(const char *path, const void *bytes, size_t length);
 
@@ -102,8 +106,12 @@ int wb_os_file_remove(const char *path);
  *
  * path: not NULL, not empty.  A trailing separator is allowed.
  * Returns 0 (also when the directory exists already), EINVAL, ENOTDIR (a
- * part of path is a file), EACCES, ENOSPC, EILSEQ, ENAMETOOLONG, ENOMEM,
- * EIO.  POSIX creates with mode 0755.
+ * part of path, or path itself, exists and is not a directory), EACCES,
+ * ENOSPC, EILSEQ, ENAMETOOLONG, ENOMEM, EIO.  POSIX creates with mode 0700
+ * (the storage directories are private to the user).  Windows tells a
+ * file in the way from a missing parent with GetFileAttributesW (its
+ * CreateDirectoryW reports ERROR_PATH_NOT_FOUND or ERROR_ALREADY_EXISTS for
+ * both).
  */
 int wb_os_make_directories(const char *path);
 
@@ -140,6 +148,19 @@ int wb_os_full_path(const char *path, struct wb_buffer *buffer);
 int wb_os_current_directory(struct wb_buffer *buffer);
 
 /*
+ * Reports whether a path is an absolute local path of this system (the
+ * test the engine makes before it treats a location as a file rather than
+ * a URL).
+ *
+ * POSIX: path starts with '/'.  Windows: an ASCII letter, ':' and '\\' or
+ * '/' ("C:\\x", "c:/x"), or two separators followed by a name ("\\\\srv\\x",
+ * "//srv/x"); "X:" alone, "X:rest" and a single leading separator are not
+ * absolute.  NULL and "" are not.
+ * Returns 1 or 0.  Pure: it does not touch the file system.
+ */
+int wb_os_path_is_absolute(const char *path);
+
+/*
  * Appends the local path a file: URL names.
  *
  * host: the URL's host, already decoded; NULL or "" for this machine.
@@ -151,9 +172,9 @@ int wb_os_current_directory(struct wb_buffer *buffer);
  *    letter): "X:\\rest" with every '/' turned into '\\' ("/X:" alone
  *    gives "X:\\");
  *  - empty host and any other path: ENOENT (no drive to resolve against);
- *  - a host: the UNC path "\\\\host" followed by path with every '/'
- *    turned into '\\'; a path that is empty or "/" alone (no share) is
- *    ENOENT.
+ *  - a host: ENOENT, as on POSIX.  A file: URL naming another machine is
+ *    not opened: on Windows it would be an SMB connection that sends the
+ *    user's credentials to that machine, which a web page could ask for.
  * Returns 0, EINVAL (path or buffer NULL), ENOENT, ENOMEM.  The bytes are
  * not checked as UTF-8 here (the file functions do that when the path is
  * used).
@@ -175,6 +196,8 @@ int wb_os_path_from_url(const char *host, const char *path, struct wb_buffer *bu
  * "/share/rest"; a relative path, "X:rest" (relative to a drive) or a
  * "\\\\?\\" or "\\\\.\\" device path is EINVAL.
  * Returns 0, EINVAL, ENOMEM.  On failure neither buffer's length changes.
+ * A UNC path's URL names another machine, which wb_os_path_from_url does
+ * not open again.
  */
 int wb_os_url_from_path(const char *local, struct wb_buffer *host, struct wb_buffer *path);
 
@@ -187,7 +210,8 @@ int wb_os_url_from_path(const char *local, struct wb_buffer *host, struct wb_buf
  * lock:      receives the lock, or NULL on failure.
  * Returns 0, EINVAL, ENOENT (no directory), EBUSY (another process holds
  * it; the call does not wait), EACCES, EILSEQ, ENAMETOOLONG, ENOMEM, EIO.
- * POSIX: open with O_CLOEXEC and flock(LOCK_EX | LOCK_NB).  Windows:
+ * POSIX: open with O_CLOEXEC (creating with mode 0600) and
+ * flock(LOCK_EX | LOCK_NB).  Windows:
  * CreateFileW with FILE_SHARE_READ | FILE_SHARE_WRITE, not inherited, and
  * LockFileEx(LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY) on its
  * first byte.  Taking the same directory twice in one process is EBUSY on

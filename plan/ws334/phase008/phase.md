@@ -26,7 +26,7 @@
 - monotonic: 100000 回の呼び出しで減らない。試験が 100 ms 眠る（posix `nanosleep`、win32 `Sleep`）前後の差が 90 ms 以上 2 s 未満。
 - wall: `time(NULL)` との差が 2 s 未満、2 回の呼び出しで減らない（時計が変えられない限り）。
 - posix の offset と名前: 試験が `setenv("TZ", ...)` と `wb_os_time_zone_start` で zone を変える。"UTC0" → 0 と "UTC"、"JST-9" → 32400 と "JST"、"EST5EDT,M3.2.0,M11.1.0"（POSIX の TZ の規則の文字列、tzdata の file に依らない）で 2024-07-01 12:00 UTC（1719835200）→ -14400 と "EDT"、2024-01-15 12:00 UTC（1705320000）→ -18000 と "EST"。WB_OS_TIME_FIRST より前の値は FIRST と同じ答え、LAST より後は LAST と同じ答え。
-- win32 の offset: 試験が UCRT の `localtime_s` と `_mkgmtime64` で独立に求めた offset（2000〜2030 年の 20 の時点。UCRT も Windows の zone を使う）と一致。
+- win32 の offset: 試験が `GetTimeZoneInformationForYear`（その年の規則）と `SystemTimeToTzSpecificLocalTime` で独立に求めた offset（2000〜2030 年の 20 の時点）と一致（UCRT の `localtime_s` は今年の規則を全部の年に当てうるので使わない）。
 - win32 の名前: 試験が `GetDynamicTimeZoneInformation` で key を読み、`wb_os_zone_find` が見つける key なら名前が standard か daylight のどちらか（offset が daylight の offset の時 daylight）、見つけない key なら system の StandardName か DaylightName の UTF-8。
 - 誤り: offset NULL・buffer NULL・size 0 → EINVAL。名前の長さちょうどの size + 1 は成功、size が長さ以下 → ERANGE と空の文字列。
 - Wine の zone は host の zone に従う（試験は zone に依らない形で書く。Wine で `TZ` を変えた確かめは任意で、結果に記録）。

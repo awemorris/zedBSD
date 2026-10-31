@@ -9,17 +9,23 @@
  * The checks of WS334's unit tests: each test counts its checks and
  * failures and ends with one line, "test-<name>: PASS (<n> checks)" or
  * "test-<name>: FAIL (<n> of <m>)".  The same file builds on the host and
- * with llvm-mingw for Windows.
+ * with llvm-mingw for Windows.  CHECK and CHECK_EQ may be used from any
+ * thread; check_finish is called once, by the main thread, after the
+ * other threads were joined.
  */
 
 #ifndef WS334_TEST_CHECK_H
 #define WS334_TEST_CHECK_H
 
+#include <pthread.h>
 #include <stdio.h>
 
-/* The checks made so far and the ones that failed, for the summary line. */
+/* The checks made so far and the ones that failed, for the summary line (under check_lock). */
 static unsigned check_count;
 static unsigned check_failures;
+
+/* The lock of the counters and the output: a test may check from several threads. */
+static pthread_mutex_t check_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*
  * Records one check; a failure prints the condition and where it is.
@@ -31,15 +37,17 @@ check_report(
 	const char *file,
 	int line)
 {
-	/* Every check counts, whether it passes or not. */
-	check_count++;
-	if (passed)
-		return;
+	pthread_mutex_lock(&check_lock);
 
-	/* A failure names the condition so the log alone says what broke. */
-	check_failures++;
-	printf("FAIL %s:%d: %s\n", file, line, text);
-	fflush(stdout);
+	/* Every check counts; a failure names the condition so the log alone says what broke. */
+	check_count++;
+	if (!passed) {
+		check_failures++;
+		printf("FAIL %s:%d: %s\n", file, line, text);
+		fflush(stdout);
+	}
+
+	pthread_mutex_unlock(&check_lock);
 }
 
 /* Checks a condition, recording the source text of the condition. */
@@ -59,15 +67,17 @@ check_equal(
 	const char *file,
 	int line)
 {
-	/* Every check counts, whether it passes or not. */
-	check_count++;
-	if (actual == expected)
-		return;
+	pthread_mutex_lock(&check_lock);
 
-	/* A failure names the expression and both values. */
-	check_failures++;
-	printf("FAIL %s:%d: %s is %lld, expected %lld\n", file, line, text, actual, expected);
-	fflush(stdout);
+	/* Every check counts; a failure names the expression and both values. */
+	check_count++;
+	if (actual != expected) {
+		check_failures++;
+		printf("FAIL %s:%d: %s is %lld, expected %lld\n", file, line, text, actual, expected);
+		fflush(stdout);
+	}
+
+	pthread_mutex_unlock(&check_lock);
 }
 
 /*

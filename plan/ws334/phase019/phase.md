@@ -11,7 +11,7 @@
 
 1. AGENTS.md の §4・§7・§9・§10、plan/agents/protocol.md、plan/coding-style.md の全文（§14 の checklist）、docs/agent/spec-module-delegation.md の §5・§7、plan/guardrail.md の「出典」「開発の管理情報」。
 2. [design.md](../design.md) の §6.4（icon の大きさ）、§8 の T3。
-3. 実装する header（各関数の comment が仕様）: `userland/desktop/libbrowser/apps/browser-win32/tools/ico.h`。それが include する header も読む。
+3. 実装する header（各関数の comment が仕様）: `apps/browser-win32/tools/ico.h`。それが include する header も読む。
 4. 仕様: Microsoft「Icons」（MSDN Library, Win32 の icon の file の形、ICONDIR・ICONDIRENTRY・画像の形）: `/home/awe/zedBSD-claude1/build/sources/specs/ws334/icons-ico.html`（SHA-256 `44922354f299da5650bc6a5b067c94cc2c2b1e8952d170963106af48635fca64`、2026-11-01 取得、https://learn.microsoft.com/en-us/previous-versions/ms997538(v=msdn.10)）。BITMAPINFOHEADER は Microsoft Learn の `BITMAPINFOHEADER` の頁。PNG の signature は PNG（ISO/IEC 15948）の §5.2 の 8 byte。git に入れない。
 
 ## 作る物

@@ -31,7 +31,11 @@
 - UTF-8 の名前: "データ.txt"・"emoji-😀.bin" を書き・list・読み・remove。誤りの UTF-8 の名前（"\xff.txt"）→ EILSEQ。
 - full_path: posix は既にある file の結果が `wb_os_current_directory` + "/" + 名前、symbolic link を辿る、無い file → ENOENT。win32 は "a\\..\\b" が current + "\\b"（存在を見ない）。
 - current_directory: posix は `getcwd` と、win32 は `GetCurrentDirectoryW` の UTF-8 と一致（試験が別の道で求める）。
-- path_from_url・url_from_path: header の各場合を表で（posix: host 空・"/a b/c" はそのまま、host "srv" → ENOENT、"rel" → EINVAL。win32: "/C:/x/y" → "C:\\x\\y"、"/C:" → "C:\\"、"/c|/a" → "c:\\a"、"/x" → ENOENT、host "srv" と "/share/a" → "\\\\srv\\share\\a"、host と "/" → ENOENT、"C:\\a\\b" ↔ "/C:/a/b"、"C:/a" → "/C:/a"、"\\\\srv\\share\\x" → host "srv"・path "/share/x"、"C:rel"・"\\\\?\\C:\\x"・"\\\\.\\COM1"・"rel" → EINVAL）。失敗の時に buffer の長さが変わらない。
+- path_from_url・url_from_path: header の各場合を表で（posix: host 空・"/a b/c" はそのまま、host "srv" → ENOENT、"rel" → EINVAL。win32: "/C:/x/y" → "C:\\x\\y"、"/C:" → "C:\\"、"/c|/a" → "c:\\a"、"/x" → ENOENT、host "srv" と "/share/a" → ENOENT（他の機械の file: URL は開かない。header の理由）、"C:\\a\\b" ↔ "/C:/a/b"、"C:/a" → "/C:/a"、"\\\\srv\\share\\x" → host "srv"・path "/share/x"、"C:rel"・"\\\\?\\C:\\x"・"\\\\.\\COM1"・"rel" → EINVAL）。失敗の時に buffer の長さが変わらない。
+- path_is_absolute: posix "/"・"/a" → 1、"a"・""・NULL → 0。win32 "C:\\x"・"c:/x"・"\\\\srv\\x"・"//srv/x" → 1、"C:"・"C:x"・"\\x"・"/x"・"x" → 0（試験は両方の system で両方の表を流さず、自分の system の表だけ）。
+- mode（posix）: replace の file が 0600、make_directories の directory が 0700、lock の file が 0600（umask 022 の下で `stat` で）。write は 0644 と umask。
+- Windows の共有: `wb_os_file_read` の handle を開いたまま（試験が別の handle で読みを開いておく形ではなく、読んでいる途中に別の thread が `wb_os_file_replace` を呼ぶ形は作りにくいので）、試験が `CreateFileW(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)` で開いた handle を持ったまま `wb_os_file_replace` が成功する（読み手が置き換えを止めない約束の確かめ）。
+- make_directories の path 自身が file → ENOTDIR、途中が file → ENOTDIR（Windows は `GetFileAttributesW` で見分ける）。
 - lock: 開く・同じ process で 2 回目 → EBUSY・閉じて開き直せる・lock の file が残る・無い directory → ENOENT。別の process: 試験が自分を引数 "lock-child <directory>" で起動し（posix は `posix_spawn`、win32 は `CreateProcessW`）、子が `wb_os_lock_open` の値を exit の code で返す → EBUSY。親が閉じた後の子 → 0。
 - 共通: NULL・空の path → EINVAL。ASan・UBSan の報告 0。
 

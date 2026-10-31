@@ -23,7 +23,7 @@
 ## 試験の項目
 
 - 試験は win32 だけ（modules.sh で posix は none）。
-- wake: open で event が NULL でなく ends が -1・-1、`keiui_wake_descriptor` が -1、ring の後に `WaitForSingleObject(keiui_wake_event(w), 0)` が WAIT_OBJECT_0、clear の後は WAIT_TIMEOUT、ring を 2 回して clear 1 回で鳴っていない、別の thread の ring が `WaitForSingleObject(..., INFINITE)` で待つ thread を起こす（100 回）、close の後に event の handle が閉じている（`GetHandleInformation` が失敗）。close を 2 回呼んでも落ちない（2 回目は何もしない）。
+- wake: open で event が NULL でなく ends が -1・-1、`keiui_wake_descriptor` が -1、ring の後に `WaitForSingleObject(keiui_wake_event(w), 0)` が WAIT_OBJECT_0、clear の後は WAIT_TIMEOUT、ring を 2 回して clear 1 回で鳴っていない、別の thread の ring が `WaitForSingleObject(..., INFINITE)` で待つ thread を起こす（100 回）、close の後に event の handle が閉じている（`GetHandleInformation` が失敗）。
 - lock: take・give、2 つの thread で 100000 回ずつ counter を増やして合計が正しい。
 - thread: `keiui_thread_self` と `keiui_thread_is`（自分は 1、他の thread の id は 0）、`keiui_thread_start`（join しない thread が走って印を立てる）、`keiui_thread_start_joined` と `keiui_thread_join`、`keiui_thread_name`（NULL・長い名前で落ちない）。
 

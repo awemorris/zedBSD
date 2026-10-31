@@ -2,8 +2,10 @@
 # The unit tests of WS334's modules.  Each test plan/ws334/tests/unit/test-<name>.c is built with the module
 # sources plan/ws334/tests/modules.sh lists for it and run on each system it applies to:
 #   posix  the host's cc with ASan and UBSan (-std=gnu11 -Wall -Wextra -Werror), run on the host;
-#   win32  llvm-mingw's x86_64-w64-mingw32-clang with UBSan in trap mode, run under Wine (a prefix of its
-#          own under build/tmp/ws334-wine, made on first use, which takes a few minutes).
+#   win32  llvm-mingw's x86_64-w64-mingw32-clang with UBSan in trap mode and winpthreads linked statically,
+#          run under Wine (a prefix of its own under build/tmp/ws334-wine, made on first use, which takes a
+#          few minutes, and marked ready only when wineboot succeeded; winedbg is disabled so a trap ends the
+#          test).  The aarch64 Windows code is compiled by check-skeleton.sh but not run (no arm64 Wine).
 # A test runs in a fresh empty directory of its own (its current directory) and may make files there.
 # It gets one argument, "posix" or "win32", and its last line is "test-<name>: PASS (...)" or "... FAIL (...)".
 #   sh plan/ws334/tests/run-unit.sh [--posix|--win32] <name>...
@@ -43,7 +45,7 @@ if [ -z "$names" ]; then
 	exit 2
 fi
 
-host_flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer"
+host_flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -DWB_OS_THREAD_NAMES=1 -fsanitize=address,undefined -fno-omit-frame-pointer"
 host_libs="-lpthread -ldl -lm"
 win_cc=$LLVM_MINGW/bin/x86_64-w64-mingw32-clang
 win_flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE
@@ -86,11 +88,17 @@ for name in $names; do
 			(cd "$run" && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 			    timeout 600 "$program" posix) > "$run.log" 2>&1
 		else
-			if [ ! -d "$wine_prefix" ]; then
-				WINEPREFIX=$wine_prefix WINEDEBUG=-all timeout 600 wineboot -i > "$out/wineboot.log" 2>&1
+			if [ ! -f "$wine_prefix/.ws334-ready" ]; then
+				if WINEPREFIX=$wine_prefix WINEDEBUG=-all timeout 600 wineboot -i > "$out/wineboot.log" 2>&1; then
+					: > "$wine_prefix/.ws334-ready"
+				else
+					echo "test-$name ($system): FAIL (wineboot; log $out/wineboot.log)"
+					status=1
+					continue
+				fi
 			fi
-			(cd "$run" && WINEPREFIX=$wine_prefix WINEDEBUG=-all timeout 600 wine "$program" win32) \
-			    > "$run.log" 2>&1
+			(cd "$run" && WINEPREFIX=$wine_prefix WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d \
+			    timeout 600 wine "$program" win32) > "$run.log" 2>&1
 		fi
 		code=$?
 		last=$(tr -d '\r' < "$run.log" | tail -1)

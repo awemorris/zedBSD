@@ -18,7 +18,7 @@
 
 ## 試験（受け入れ）
 
-- `cross-build.sh` PASS（両方の arch で warning 0）。Linux の Keiland の build と試験の件数が同じ。`run-unit.sh all`・`check-skeleton.sh`（BASE）PASS。
+- `cross-build.sh` PASS（両方の arch で warning 0）。 `plan/tools/keiland-os-boundary/check.sh` に WS334 の file の新しい失敗が無い。Linux の Keiland の build と試験の件数が同じ。`run-unit.sh all`・`check-skeleton.sh`（BASE）PASS。
 - Wine＋xvfb-run（`wine-run.sh` に項を足す）: 題の帯の PNG（4 つの control と 3 つの button）、location の欄に xdotool で英字の URL を打って Enter で移る（log と PNG）、Back の button で戻る、DPI 144 の Wine（`HKCU\Control Panel\Desktop\LogPixels` = 144 の prefix）で帯が 1.5 倍の PNG、clipboard: 欄の copy の後 Wine の clipboard（`xclip -o` が使えれば）に URL。IME の確かめは Wine ではできない（実機の Windows で、p032 の後）と結果に書く。PNG は `build/review/ws334-p029/` に。
 - `git diff --check`。
 

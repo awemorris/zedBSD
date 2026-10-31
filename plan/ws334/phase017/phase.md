@@ -25,7 +25,7 @@
 ## 試験の項目
 
 - `test-wide.c`: ASCII・2〜4 byte・surrogate の組の往復。組でない high・low（先頭・途中・末尾）→ EF BF BD。buffer の大きさで文字の途中で切らない（3 byte の文字の前で止まり consumed がその前まで、ERANGE）、NUL が必ず付く、size 1 は空の文字列と ERANGE（文字があれば）。NUL の unit で早く終わる。UTF-8 → UTF-16: 不正な列の maximal subpart ごとの U+FFFD（Unicode の §3.9 の表 3-8 の例: `61 F1 80 80 E1 80 C2 62 80 63 80 BF 64` → `0061 FFFD FFFD FFFD 0062 FFFD 0063 FFFD FFFD 0064`）、overlong・surrogate・F5 以上、length が文字の途中で終わる、ERANGE の時の count が要る数。`keiui_win32_char_unit`: BMP の文字、組の 2 つの unit、high の後に high（U+FFFD を返し新しい high が待つ）、low だけ（U+FFFD）、NULL の引数で 0。乱数の 10 万の列で往復が落ちない。
-- `test-input.c`: wheel（120 → -60.0、-120 → 60.0、horizontal 120 → 60.0、30 → -15.0、0 → 0）。modifiers（各 bit、AltGr で CTRL・ALT が落ち SHIFT・SUPER が残る、未知の bit を無視）。button（5 つと 5 以上 → 0）。point（0x0010FFF0 → x -16・y 16 など、負の y、NULL の出力）。key flags（bit 16〜23・24・30・31 の組、全部 1、全部 0）。
+- `test-input.c`: wheel（120 → -60.0、-120 → 60.0、horizontal 120 → 60.0、30 → -15.0、0 → 0）。modifiers（各 bit、AltGr で CTRL・ALT が落ち SHIFT・SUPER が残る、未知の bit を無視）。button（5 つと 5 以上 → 0）。point（0x0010FFF0 → x -16・y 16 など、負の y、NULL の出力）。key flags（bit 16〜23・24・30・31 の組、全部 1、全部 0。repeated は bit 30 のそのままで、key の up でも 1 になりうる: header の通り）。wide の consumed: NUL の unit で早く終わった時、NUL の前までの数。
 
 ## 注意
 

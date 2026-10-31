@@ -123,9 +123,15 @@ int wb_os_socket_connect(const struct wb_os_addresses *addresses, size_t index, 
  * Reports how a non-blocking connect ended, once wb_os_poll found the
  * socket WRITABLE or FAILED.
  *
- * Returns 0 (connected), the network error (ECONNREFUSED, ETIMEDOUT, ...),
- * EINVAL (socket is WB_OS_SOCKET_NONE).  POSIX and Windows: the socket's
- * SO_ERROR.
+ * Returns 0 (connected), EINPROGRESS (not finished yet: a wake of the
+ * wait that came early; wait for WRITABLE again), the network error
+ * (ECONNREFUSED, ETIMEDOUT, ...), EINVAL (socket is WB_OS_SOCKET_NONE).
+ * POSIX: the socket's SO_ERROR; an SO_ERROR of EINPROGRESS or EALREADY, or
+ * an SO_ERROR of 0 with getpeername failing with ENOTCONN, is EINPROGRESS
+ * (as the engine checks today).  Windows: SO_ERROR; 0 with getpeername
+ * failing with WSAENOTCONN is EINPROGRESS.  A Windows non-blocking connect
+ * itself fails with WSAEWOULDBLOCK, which wb_os_socket_connect reports as
+ * EINPROGRESS (not the EAGAIN of wb_os_error_from_socket).
  */
 int wb_os_socket_connect_result(wb_os_socket socket);
 

@@ -7,8 +7,7 @@
 
 /*
  * The operating-system layer of the browser engine: everything the engine
- * asks of the system beyond ISO C, the threads of <pthread.h> and
- * getaddrinfo.
+ * asks of the system beyond ISO C and the threads of <pthread.h>.
  *
  * The layer is private to libbrowser.  Its groups each have a header of
  * their own (os-system.h, os-file.h, os-net.h, os-time.h) and two
@@ -43,6 +42,11 @@
  *                    is not
  *      ENOTSUP       the system lacks the facility
  *      EAGAIN        a non-blocking operation would have to wait
+ *      EISDIR        a path names a directory where a file is needed
+ *      ENOTEMPTY     a directory to remove still holds entries
+ *      EMFILE        the process has no descriptor or handle left
+ *      EFBIG         a record or a piece of work is larger than allowed
+ *      ETIMEDOUT     the system gave up waiting
  *      EIO           any other failure of the system
  *    A function's comment lists which of these it returns and when; the
  *    socket functions add the network values listed in os-net.h.

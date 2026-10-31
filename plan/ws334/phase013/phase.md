@@ -30,7 +30,7 @@
 
 ## 注意
 
-- libmedia は libbrowser の base を使わない。UTF-8 → UTF-16 は `MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS)` を直に。誤りの写しは media-os-win32.c の中に（ENOENT・EACCES・EISDIR・ENOMEM・EIO の分だけ）。
+- libmedia は libbrowser の base を使わない。 Windows の誤り: directory を開くと ERROR_ACCESS_DENIED が来るので、`GetFileAttributesW` で directory なら EISDIR にする。path の途中が file の時の ERROR_PATH_NOT_FOUND は ENOENT。UTF-8 → UTF-16 は `MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS)` を直に。誤りの写しは media-os-win32.c の中に（ENOENT・EACCES・EISDIR・ENOMEM・EIO の分だけ）。
 - Windows の read_at は同期の handle に `OVERLAPPED` の offset で `ReadFile`、1 GiB ずつ、短い読みは続ける、0 byte は EIO（縮んだ）。
 - `(void)` で使わない引数を消す（libmedia に UNUSED_PARAMETER は無い）。
 - POSIX の file（`*-posix.c`）と OS に依らない file に `#ifdef _WIN32`・`<windows.h>` を書かない（`check-skeleton.sh` が見る）。Windows の file（`*-win32.c`）は `<windows.h>`・`<winsock2.h>` などを include してよいが、W の API だけを使い（A の API を使わない）、`<jpeglib.h>` を include しない。

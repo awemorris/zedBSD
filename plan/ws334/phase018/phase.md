@@ -23,7 +23,7 @@
 ## 試験の項目
 
 - encode: 空の fragment、"<b>x</b>"、日本語の UTF-8、SourceURL の有無で、出力を header の形に手で組み立てた bytes と比べる（offset の 10 桁の値を手で数える）。size が要る長さちょうど（+1 の NUL）は成功、1 足りないと ERANGE と空の文字列と out_length が要る長さ。URL に CR・LF → EINVAL。
-- decode: encode の往復（fragment と URL が同じ）。仕様の文書の例の data（文書の例を試験に写す。Version 0.9 と 1.0）。StartHTML が -1 で StartFragment・EndFragment がある物。Fragment の offset が無く HTML の offset だけの物。改行が LF だけ・CR だけ。未知の name の行、`StartSelection`・`EndSelection` の行。誤り: Version の行が無い、offset が length を超える、end が start の前、数でない値、"-1" が End に、header だけで本体が無い → EINVAL と出力が NULL・0。
+- decode: encode の往復（fragment と URL が同じ）。手で組み立てた Version 1.0 の data（offset を手で数える。仕様の文書の例は offset が bytes の位置と合わないので写さない。写した時の期待は、header の「header は最小の offset で終わる」で Version が切れて EINVAL）。StartHTML が -1 で StartFragment・EndFragment がある物。Fragment の offset が無く HTML の offset だけの物。改行が LF だけ・CR だけ。未知の name の行、`StartSelection`・`EndSelection` の行。誤り: Version の行が無い、offset が length を超える、end が start の前、数でない値、"-1" が End に、header だけで本体が無い → EINVAL と出力が NULL・0。
 - 乱数: 正しい data の各 byte を変えた物と、乱数の 10 万の列を decode に渡して範囲の外を読まない（ASan）。
 
 ## 注意

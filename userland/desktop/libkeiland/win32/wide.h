@@ -40,7 +40,8 @@ struct keiui_win32_surrogate {
  * buffer:   size bytes; receives UTF-8 and a NUL after it (always, when
  *           size is above 0).
  * consumed: when not NULL, receives how many units were converted (a
- *           character that did not fit is not consumed, nor are its units).
+ *           character that did not fit is not consumed, nor are its units;
+ *           a NUL unit that ended the text is not counted).
  * Unpaired surrogates become U+FFFD (EF BF BD).  When the text does not fit,
  * as many whole characters as fit are written (a character is never cut),
  * and the return says so.
