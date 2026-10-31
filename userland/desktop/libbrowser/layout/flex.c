@@ -1049,8 +1049,33 @@ flex_base_size(
 			/* Uses the replaced content width as its initial base. */
 			item->base = child->width;
 		} else {
+			struct css_length saved_height;
+
+			/* A stretched item of a container with a height of its own has that height, for the percentages inside it. */
+			saved_height = child->style.height;
+			if (box->style.height.unit == CSS_UNIT_PX && box->style.flex_wrap == CSS_FLEX_NOWRAP &&
+			    box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+			    child->style.height.unit == CSS_UNIT_AUTO && flex_align_of(box, child) == CSS_ALIGN_STRETCH &&
+			    child->style.margin[CSS_TOP].unit != CSS_UNIT_AUTO && child->style.margin[CSS_BOTTOM].unit != CSS_UNIT_AUTO &&
+			    !child->max_content_known) {
+				layout_unit inner;
+
+				inner = layout_from_px(box->style.height.value);
+				if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					inner -= box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+				inner -= child->margin[CSS_TOP] + child->margin[CSS_BOTTOM];
+				if (child->style.box_sizing != CSS_BOX_SIZING_BORDER)
+					inner -= child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
+				if (inner < 0)
+					inner = 0;
+				child->style.height.unit = CSS_UNIT_PX;
+				child->style.height.value = layout_to_px(inner);
+				child->style.height.offset = 0;
+			}
+
 			/* The content's width without a limit (measured once, its percentages indefinite). */
 			error = layout_max_content(tree, child, &item->base);
+			child->style.height = saved_height;
 			if (error != 0)
 				return error;
 		}
@@ -1938,10 +1963,13 @@ flex_min_content(
 	struct css_length given;
 	int error;
 
-	/* A replaced box's content is its image, as wide as it is. */
+	/* A replaced box's content is its image, as wide as it is (a button sized by a percentage, as wide as it naturally is). */
 	*width = 0;
 	if (box->replaced) {
 		*width = box->width;
+		if ((box->control == DOM_CONTROL_BUTTON || box->control == DOM_CONTROL_SUBMIT || box->control == DOM_CONTROL_RESET) &&
+		    box->style.width.unit == CSS_UNIT_PERCENT && box->natural_width > 0)
+			*width = box->natural_width;
 		return 0;
 	}
 
