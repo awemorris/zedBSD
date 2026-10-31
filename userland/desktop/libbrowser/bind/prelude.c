@@ -44,6 +44,8 @@ static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, cons
 static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_duration(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_time(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_view_transition_names(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_style(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_rule_info(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_rule_replace(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -507,6 +509,65 @@ prelude_view_transition_duration(
 	if (window->host.view_transition_duration != NULL)
 		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
 	return 0;
+}
+
+/* viewTransitionTime(ms): sets how long the shown transition's animations have run. */
+static int
+prelude_view_transition_time(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	double milliseconds;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 1U)
+		return 0;
+	window = bind_window_of(realm);
+	status = vm_to_number(realm, args[0], &milliseconds);
+	if (status != 0)
+		return status;
+	if (window->host.view_transition_time != NULL)
+		window->host.view_transition_time(window->host.context, milliseconds);
+	return 0;
+}
+
+/* viewTransitionNames(): the shown transition's names, "name flags" per line. */
+static int
+prelude_view_transition_names(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_units units;
+	struct vm_string *string;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	window = bind_window_of(realm);
+	wb_units_init(&units);
+	status = 0;
+	if (window->host.view_transition_names != NULL)
+		status = window->host.view_transition_names(window->host.context, &units);
+	if (status == 0) {
+		string = vm_string_from_units(realm->heap, units.data, units.length);
+		if (string == NULL)
+			status = ENOMEM;
+		else
+			*result = vm_value_cell(&string->cell);
+	}
+	wb_units_release(&units);
+	return status;
 }
 
 /* viewTransitionStyle(pseudo, name, declarations): what a script's animation gives a view transition pseudo-element now. */
@@ -1081,6 +1142,14 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "setPopover", 2, prelude_set_popover, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "setPopover", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionTime", 1, prelude_view_transition_time, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionTime", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "viewTransitionNames", 0, prelude_view_transition_names, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "viewTransitionNames", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "viewTransitionStyle", 3, prelude_view_transition_style, NULL, &function);
 	if (status == 0)

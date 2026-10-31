@@ -281,3 +281,74 @@
       });
       return longest;
     });
+
+    // The UA's CSS animations of a view transition's pseudo-elements, as document.getAnimations() lists them: one per animation name the
+    // pseudo-element's computed style has.  Their time is the transition's (a script setting it moves them all).
+    var vtTime = 0, vtMade = new Map();
+    class ViewTransitionAnimation extends EventTarget {
+      constructor(key, pseudo, name, style) {
+        if (key !== ANIM) throw new TypeError('Illegal constructor');
+        super();
+        hidden(this, '_pseudo', pseudo);
+        hidden(this, '_style', style);
+        this.animationName = name;
+        this.id = '';
+        this.onfinish = null;
+        this.oncancel = null;
+        hidden(this, '_ready', Promise.resolve(this));
+        hidden(this, '_finished', new Promise(function () {}));
+      }
+      get effect() {
+        var a = this, style = this._style;
+        return {
+          target: document.documentElement, pseudoElement: this._pseudo,
+          getTiming: function () { return { delay: 0, endDelay: 0, fill: 'both', iterations: 1, duration: style.animationDuration, direction: 'normal', easing: style.animationTimingFunction }; },
+          getComputedTiming: function () { return { progress: 0, currentIteration: 0 }; },
+          getKeyframes: function () { return []; }
+        };
+      }
+      get currentTime() { return vtTime; }
+      set currentTime(v) { vtTime = +v; native.viewTransitionTime(vtTime); }
+      get playState() { return this._style.animationPlayState === 'paused' ? 'paused' : 'running'; }
+      get pending() { return false; }
+      get replaceState() { return 'active'; }
+      get ready() { return this._ready; }
+      get finished() { return this._finished; }
+      get timeline() { return document.timeline || null; }
+      get startTime() { return 0; }
+      play() {}
+      pause() {}
+      finish() {}
+      cancel() {}
+      reverse() {}
+      updatePlaybackRate() {}
+      persist() {}
+      commitStyles() {}
+    }
+    tag(ViewTransitionAnimation, 'CSSAnimation');
+    function viewTransitionAnimations() {
+      var text, out = [], keys = new Set();
+      if (typeof native.viewTransitionNames !== 'function') return out;
+      text = native.viewTransitionNames();
+      if (!text) { vtMade.clear(); vtTime = 0; return out; }
+      text.split('\n').forEach(function (line) {
+        var sp = line.lastIndexOf(' '), name;
+        if (!line || sp < 0) return;
+        name = line.slice(0, sp);
+        ['group', 'image-pair', 'old', 'new'].forEach(function (kind) {
+          var pseudo = '::view-transition-' + kind + '(' + name + ')', cs = nativeGetComputedStyle.call(g, document.documentElement, pseudo), names = cs.animationName;
+          if (!names || names === 'none') return;
+          names.split(',').forEach(function (n, i) {
+            var key = pseudo + '#' + i + n.trim(), made = vtMade.get(key);
+            if (!made) { made = new ViewTransitionAnimation(ANIM, pseudo, n.trim(), cs); vtMade.set(key, made); }
+            keys.add(key);
+            out.push(made);
+          });
+        });
+      });
+      return out;
+    }
+    (function () {
+      var original = g.Document.prototype.getAnimations;
+      def(g.Document.prototype, 'getAnimations', function getAnimations() { return original.apply(this, arguments).concat(viewTransitionAnimations()); });
+    })();
