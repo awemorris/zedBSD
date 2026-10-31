@@ -1020,7 +1020,9 @@ test_access_and_handles(
 	info.size = sizeof(info);
 	error = cdev_file_ops.ioctl(&reader.file, GPU_GET_INFO, (uintptr_t)&info);
 	expect_error(error, 0);
-	assert(info.capabilities == GPU_CAP_RESOURCE);
+
+	/* The core reports what the backend reported within its registered capabilities: this backend reports none. */
+	assert(info.capabilities == 0U);
 	assert(info.max_resources == TEST_RESOURCE_QUOTA);
 	assert(info.max_resource_bytes == 4096);
 
