@@ -87,7 +87,6 @@ static bool conversion_supported(const struct native_texture_source *source, uin
 static uint64_t texture_area(uint32_t size);
 static int prepare_texture_image(struct bcm2711_vulkan_native_draw *draw, const struct native_texture_source *texture_source, const struct bcm2711_vulkan_sampler *source, uint64_t available, struct bcm2711_vulkan_native_binding *binding);
 static int prepare_conversion(const struct native_texture_source *source, uint32_t address, const struct bcm2711_native_storage *pixels, uint32_t bytes, uint32_t levels, const struct bcm2711_native_miptree *tree, struct bcm2711_v3d_tfu_job *tfu);
-static uint32_t level_padding(const struct bcm2711_native_mip_level *level);
 static int prepare_meta_texture(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_meta_draw *meta, uint64_t available);
 static int prepare_sampler(const struct bcm2711_vulkan_sampler *source, struct bcm2711_native_sampler *sampler);
 static struct bcm2711_native_storage *find_program(const struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_shader_binary *program, uint32_t stage);
@@ -1455,8 +1454,11 @@ prepare_conversion(
 	const struct bcm2711_native_miptree *tree,
 	struct bcm2711_v3d_tfu_job *tfu)
 {
+	struct bcm2711_native_conversion conversion;
 	uint64_t input_bytes;
+	uint32_t block_height;
 	bool supported;
+	int error;
 
 	/* Formats and layouts the unit cannot read stay with the CPU conversion. */
 	supported = conversion_supported(source, address);
@@ -1473,50 +1475,38 @@ prepare_conversion(
 		return EINVAL;
 
 	/*
-	 * Input is raster (input format 0) of the texel's type, R8 0, RG8 2 or
-	 * RGBA8 4, and of the given stride in texels; output is UIF without XOR
-	 * (format 6) at level 0.
+	 * Input is raster of the texel's type and of the given stride in
+	 * texels; output is UIF without XOR at level 0, its rows the image's
+	 * whole UIF blocks.
 	 */
 	kern_memset(tfu, 0, sizeof(*tfu));
 	tfu->input = address;
 	tfu->input_bytes = (uint32_t)input_bytes;
 	tfu->output = pixels->view->address;
 	tfu->output_bytes = bytes;
-	tfu->output_format = 6U;
 	tfu->stride = source->pitch / source->texel_bytes;
 	tfu->size = (source->height << 16) | source->width;
-	tfu->configuration = source->type << 9;
+	kern_memset(&conversion, 0, sizeof(conversion));
+	conversion.type = source->type;
+	conversion.texel_bytes = source->texel_bytes;
+	conversion.tiling = BCM2711_NATIVE_TILING_UIF;
+	conversion.height = source->height;
+	block_height = source->texel_bytes == 1U ? 16U : 8U;
+	conversion.padded_height = (source->height + block_height - 1U) / block_height * block_height;
 
 	/* A mip tree's level 0 goes to its place in the tree, in its own tiling and UB pad (the smaller levels follow, convert_textures). */
 	if (levels > 1U) {
 		tfu->output = pixels->view->address + tree->level[0].offset;
 		tfu->output_bytes = tree->level[0].bytes;
-		tfu->output_format = tree->level[0].tiling;
-		tfu->configuration |= level_padding(&tree->level[0]) << 22;
+		conversion.tiling = tree->level[0].tiling;
+		conversion.padded_height = tree->level[0].padded_height;
 	}
+	error = bcm2711_native_conversion_words(&conversion, &tfu->output_format, &tfu->configuration);
+	if (error != 0)
+		return error;
 
 	/* Succeeded: the pass runs this conversion before any draw samples the pixels. */
 	return 0;
-}
-
-/*
- * The UIF block rows a UIF level has beyond those its height needs, which
- * the texture formatting unit's output padding field gives when it writes
- * the level as a level 0 (Mesa's v3dx_tfu.c); none for other tilings.
- */
-static uint32_t
-level_padding(
-	const struct bcm2711_native_mip_level *level)
-{
-	uint32_t needed;
-
-	/* Only UIF levels are padded. */
-	if (level->tiling != BCM2711_NATIVE_TILING_UIF && level->tiling != BCM2711_NATIVE_TILING_UIF_XOR)
-		return 0;
-
-	/* Succeeded: the rows of eight-texel blocks beyond the height. */
-	needed = (level->height + 7U) & ~7U;
-	return (level->padded_height - needed) / 8U;
 }
 
 /*
@@ -1570,7 +1560,9 @@ bcm2711_vulkan_native_mip_job(
 {
 	struct bcm2711_vulkan_image_level level;
 	struct bcm2711_native_miptree tree;
+	struct bcm2711_native_conversion conversion;
 	uint64_t input_bytes;
+	uint32_t texel_bytes;
 	int error;
 
 	/* Only a tree's smaller levels. */
@@ -1592,10 +1584,20 @@ bcm2711_vulkan_native_mip_job(
 	tfu->input_bytes = (uint32_t)input_bytes;
 	tfu->output = entry->pixels->view->address + tree.level[index].offset;
 	tfu->output_bytes = tree.level[index].bytes;
-	tfu->output_format = tree.level[index].tiling;
 	tfu->stride = level.pitch / 4U;
 	tfu->size = (level.height << 16) | level.width;
-	tfu->configuration = (entry->tfu.configuration & (0x7fU << 9)) | (level_padding(&tree.level[index]) << 22);
+
+	/* The level is RGBA8 (the only texel a tree has) in its own tiling and padded rows. */
+	error = bcm2711_native_texel_layout(BCM2711_NATIVE_TEXEL_RGBA8, &texel_bytes, &conversion.type);
+	if (error != 0)
+		return error;
+	conversion.texel_bytes = texel_bytes;
+	conversion.tiling = tree.level[index].tiling;
+	conversion.height = level.height;
+	conversion.padded_height = tree.level[index].padded_height;
+	error = bcm2711_native_conversion_words(&conversion, &tfu->output_format, &tfu->configuration);
+	if (error != 0)
+		return error;
 
 	/* Succeeded: the pass runs it after level 0's. */
 	return 0;
