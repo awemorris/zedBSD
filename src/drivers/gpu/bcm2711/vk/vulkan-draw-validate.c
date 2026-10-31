@@ -201,7 +201,7 @@ validate_vertices(
 	int error;
 
 	/* Unused attribute declarations do not force an application to bind an unread vertex stream. */
-	program = state->pipeline->programs[BCM2711_SHADER_COORDINATE];
+	program = state->pipeline->programs[BCM2711_SHADER_VERTEX];
 	for (index = 0; index < state->pipeline->attribute_count; index++) {
 		attribute = &state->pipeline->attributes[index];
 		used = false;
