@@ -36,6 +36,7 @@
   17. 2026-11-01 ユーザーが llvm-mingw を host の `~/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64`（clang 23.1.4、UCRT、x86_64・aarch64 の Windows の target）に入れた（U3。Q1 が使用を許可、共有の toolchain/ は変えない）。
   18. 2026-11-01 ユーザーから、信頼する証明書は userland/packages の ca-certificates を使い、その上で Windows の証明書の store も見る、という趣旨の指示を受けた。
   19. 2026-11-01 ユーザーから、Windows の試験の機械は QEMU の guest でもよい、という趣旨の指示と、Vulkan が使えるかの問いを受けた（Q1 の答えは design-notes.md）。
+  20. 2026-11-01 ユーザーから、Windows の host での試験はだいぶ後に回し、host（Linux）の Wine と llvmpipe（Mesa の lavapipe、CPU の Vulkan）で開発する、効率が悪ければ Windows の host に移し、その場合は Q1 ではなく Windows の上の別の Claude の session で実装する、という趣旨の指示を受けた（U12 の答え。QEMU の Windows の guest は前の決定 19 で可）。
 
 ## Resume point
 

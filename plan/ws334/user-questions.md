@@ -105,6 +105,8 @@
 
 ### U12 Windows の host での担当の働き方（決定 11）
 
+- **決まった（2026-11-01、決定 20）**: Windows の host での試験はだいぶ後。host の Wine＋llvmpipe（lavapipe）で開発し、効率が悪ければ Windows の host に移す。移した時は Q1 ではなく Windows の上の別の Claude の session が実装する。
+
 - 背景: shell がある程度できたら Windows の host で開発・試験する。担当は SSH で入って build と試験を流すが、SSH の session からは窓が画面に出ない。
 - 推し: Windows の host に OpenSSH server・llvm-mingw・Git for Windows（sh）・make・python 3・GPU の driver（Vulkan）・（任意で Vulkan SDK）を入れる。
   窓の試験は「利用者が login した画面で走る予定の task」として起動し、画面の PNG と結果を file で回収する 1 本の script にする。
