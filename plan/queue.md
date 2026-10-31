@@ -556,7 +556,8 @@
 | q1822 / q1822-i02 | Sonnet（作り直した worktree s-ws335-p008、361aec12f） | [ws335-p008](ws335/phase008/phase.md) | 同上 | canceled（2026-11-01 08:24、ユーザーの割り振りの変更で起動の直後に止めた。変更なし、branch は作り直した物のまま） |
 | q1823 / q1823-i02 | Sonnet（作り直した worktree s-ws336-p004、2418e1b03） | [ws336-p004](ws336/phase004/phase.md) | 同上 | canceled（2026-11-01 08:24、割り振りの変更で一度止め、i03 で起動し直し。変更なし） |
 | q1824 / q1824-i02 | Sonnet（作り直した worktree s-ws336-p005、e22e7431c） | [ws336-p005](ws336/phase005/phase.md) | 同上 | canceled（2026-11-01 08:24、ユーザーの割り振りの変更で起動の直後に止めた。変更なし、branch は作り直した物のまま） |
-| q1823 / q1823-i03 | Sonnet（worktree s-ws336-p004、2418e1b03） | [ws336-p004](ws336/phase004/phase.md) | i02 と同じ範囲（WS336 は 1 担当、ユーザーの割り振り） | in-progress（2026-11-01 08:24 起動） |
+| q1823 / q1823-i03 | Sonnet（worktree s-ws336-p004、2418e1b03） | [ws336-p004](ws336/phase004/phase.md) | i02 と同じ範囲（WS336 は 1 担当、ユーザーの割り振り） | cleared（2026-11-01 08:40、4c2345ea1、main a7cb17936） |
 | q1825 / q1825-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-bug386`・branch `agent/p1-bug386`、VF2 10.0.30.2 と SwitchBot 3） | [BUG-386](bugs/BUG-386.md) VF2 の en1 の link が上がらない | 2026-11-01 08:24 ユーザーから、まず Bug を全部直す、Bug の担当は VF2 と RTX に 1 人ずつ、という趣旨の指示を受けた。VF2 の板は P1 だけ | in-progress（2026-11-01 08:24 起動） |
 | q1826 / q1826-i01 | P1（同じ worktree、q1825 の後） | [BUG-385](bugs/BUG-385.md) VF2 の SD の誤りで root が ro（SD の読み書きの retry の補強） | 同上 | pending（予約） |
 | q1827 / q1827-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bug374`・branch `agent/p2-bug374`、10.0.10.3 の RTX 2070 と SwitchBot 1） | [BUG-374](bugs/BUG-374.md) RTX の cursor の色が逆 | 同上。10.0.10.3 は P2 だけ | in-progress（2026-11-01 08:24 起動） |
+| q1824 / q1824-i03 | Sonnet（worktree s-ws336-p005、e22e7431c） | [ws336-p005](ws336/phase005/phase.md) | i02 と同じ範囲（WS336 の 1 担当の次、p004 の後） | in-progress（2026-11-01 08:41 起動） |

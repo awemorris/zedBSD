@@ -2,7 +2,7 @@
 
 # ws336-p004: ssh-cipher・ssh-packet（chacha20-poly1305@openssh.com と binary packet）
 
-Status: in-progress（2026-11-01 08:34 実装済み・試験 PASS、Q1 の受け入れ待ち）
+Status: cleared（2026-11-01 08:40 Q1 の判定、main a7cb17936。run-unit cipher・packet を Q1 も流して PASS）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p003

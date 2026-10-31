@@ -1,10 +1,11 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 08:28（Q1。WS334 p021 cleared）
+最終更新: 2026-11-01 08:41（Q1。WS336 p004 cleared、WS336 の担当は p005 へ）
 
 ## 担当（P1〜P8）
 
+**進み（2026-11-01）**: WS334 p021 cleared（main 2c7e666e2）。WS336 p004（ssh の暗号の組と packet）cleared（main a7cb17936）、WS336 の担当は p005（鍵）へ。VF2 の BUG-386 は en1 が attach されるまで確かめた（link up は線の挿し替えが要る、拾える試験へ）。
 **2026-11-01 08:24 の割り振り（ユーザーの指示）**: Bug を先に直す。P1 = VF2 の Bug（[BUG-386](bugs/BUG-386.md) en1 の link → [BUG-385](bugs/BUG-385.md) SD の誤りで root が ro）、P2 = RTX の [BUG-374](bugs/BUG-374.md)（cursor の色が逆）、Sonnet 1 人ずつ WS335 p003（SHA-3）・WS336 p004（暗号の組と packet）、P7 = WS334、P8 = WS074。
 **2026-11-01 08:21 再開**: P7（q1808-i02）・P8（q1727-i16）・Sonnet 5 本（q1820〜q1824 の i02）を起動した。07:22 の再起動で壊れた git は 08:05 に修理済み（master.md の「動いている担当と Queue」）。
 
