@@ -696,6 +696,15 @@ layout_flex_content_width(
 	if (items > 1)
 		width += gap * (items - 1);
 
+	/* A wrapping container laid out narrower than its items side by side has a line at every opportunity: its widest item. */
+	if (box->style.flex_wrap != CSS_FLEX_NOWRAP && box->width < width) {
+		width = 0;
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (!child->out_of_flow && child->flex_hypothetical > width)
+				width = child->flex_hypothetical;
+		}
+	}
+
 	/* Reports the width. */
 	return width;
 }

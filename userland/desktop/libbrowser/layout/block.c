@@ -24,6 +24,7 @@ static layout_unit block_outer_height(const struct layout_box *box);
 static int block_owns_context(const struct layout_box *box);
 static int block_content(struct layout_tree *tree, struct layout_box *box);
 static int block_intrinsic(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
+static int block_min_intrinsic(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 static int block_is_button(const struct layout_box *box);
 static int block_is_intrinsic(const struct css_length *length);
 
@@ -70,6 +71,12 @@ layout_block(
 	intrinsic = block_is_intrinsic(&box->style.width);
 	if (intrinsic && !box->replaced) {
 		error = block_intrinsic(tree, box, containing_width);
+		return error;
+	}
+
+	/* A min-width of max-content, min-content or fit-content is the content's width, measured first. */
+	if (!intrinsic && !box->replaced && block_is_intrinsic(&box->style.min_width)) {
+		error = block_min_intrinsic(tree, box, containing_width);
 		return error;
 	}
 
@@ -445,6 +452,77 @@ block_intrinsic(
 
 	/* Succeeded: the box has its intrinsic width. */
 	return 0;
+}
+
+/* Lays a box out with its intrinsic-keyword min-width replaced by the pixels the keyword stands for. */
+static int
+block_min_intrinsic(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	layout_unit containing_width)
+{
+	struct layout_context context;
+	struct wb_vector floats;
+	struct css_length minimum;
+	struct css_length width;
+	layout_unit most;
+	layout_unit least;
+	layout_unit room;
+	layout_unit used;
+	int error;
+
+	/* The content measured without the minimum. */
+	minimum = box->style.min_width;
+	width = box->style.width;
+	box->style.min_width.unit = CSS_UNIT_AUTO;
+	box->style.width.unit = CSS_UNIT_AUTO;
+	error = layout_max_content(tree, box, &most);
+	if (error != 0) {
+		box->style.min_width = minimum;
+		box->style.width = width;
+		return error;
+	}
+	least = most;
+	if (minimum.unit != CSS_UNIT_MAX_CONTENT) {
+		tree->measuring++;
+		layout_context_begin(tree, &context, &floats);
+		error = layout_block(tree, box, 0);
+		layout_context_end(tree, &context);
+		if (error == 0)
+			least = layout_content_width(box, 0);
+		tree->measuring--;
+		if (error != 0) {
+			box->style.min_width = minimum;
+			box->style.width = width;
+			return error;
+		}
+	}
+	box->style.width = width;
+
+	/* The width the keyword stands for. */
+	used = most;
+	if (minimum.unit == CSS_UNIT_MIN_CONTENT)
+		used = least;
+	layout_box_model(box, containing_width);
+	if (minimum.unit == CSS_UNIT_FIT_CONTENT) {
+		room = containing_width - box->margin[CSS_LEFT] - box->margin[CSS_RIGHT] - box->border[CSS_LEFT] - box->padding[CSS_LEFT] -
+		    box->padding[CSS_RIGHT] - box->border[CSS_RIGHT];
+		used = room;
+		if (used > most)
+			used = most;
+		if (used < least)
+			used = least;
+	}
+	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+		used += box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+
+	/* The layout with that minimum, the keyword put back after it. */
+	box->style.min_width.unit = CSS_UNIT_PX;
+	box->style.min_width.value = layout_to_px(used);
+	box->style.min_width.offset = 0;
+	error = layout_block(tree, box, containing_width);
+	box->style.min_width = minimum;
+	return error;
 }
 
 /* Tells whether a box is an HTML button's. */
