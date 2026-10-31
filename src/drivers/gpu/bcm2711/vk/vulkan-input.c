@@ -39,6 +39,7 @@ static int build_module(const VkShaderModuleCreateInfo *info, struct bcm2711_vul
 static int release_input(struct bcm2711_vulkan_session *session, void *payload);
 static int identity_swizzle(VkComponentSwizzle swizzle, VkComponentSwizzle component);
 static int sampler_wrap(VkSamplerAddressMode mode);
+static uint32_t lod_fixed(uint32_t bits);
 static void input_reply(struct i915_wire_writer *reply, VkResult status, uint64_t identity);
 
 /*
@@ -361,6 +362,9 @@ build_view(
 	view->format = info->format;
 	view->components = info->components;
 	view->plane = plane;
+	view->levels = levels;
+	if (info->subresourceRange.levelCount != VK_REMAINING_MIP_LEVELS)
+		view->levels = info->subresourceRange.levelCount;
 	*payload = &view->owner;
 
 	/* Succeeded: one immutable view owns its exact colour image independently. */
@@ -489,6 +493,9 @@ build_sampler(
 	sampler->min = info->minFilter;
 	sampler->u = info->addressModeU;
 	sampler->v = info->addressModeV;
+	if (info->mipmapMode == VK_SAMPLER_MIPMAP_MODE_LINEAR)
+		sampler->mip_linear = 1;
+	sampler->max_lod = lod_fixed(maximum);
 	*payload = &sampler->owner;
 
 	/* Succeeded: native texture setup can represent every retained sampler field. */
@@ -595,4 +602,34 @@ input_reply(
 
 	/* Succeeded: the reply carries the selected input status and identity. */
 	return;
+}
+
+/*
+ * Converts a level of detail's float bits (zero or more, finite) to the
+ * sampler's 4.8 fixed point, no more than 15 and 255/256, without the
+ * kernel's floating-point registers.
+ */
+static uint32_t
+lod_fixed(
+	uint32_t bits)
+{
+	uint32_t mantissa;
+	int32_t exponent;
+
+	/* Zero, a negative value and anything below 1/256 are level 0. */
+	if ((bits & 0x80000000U) != 0)
+		return 0;
+	exponent = (int32_t)((bits >> 23) & 0xffU) - 127;
+	if (exponent < -8)
+		return 0;
+
+	/* Sixteen and more are the largest. */
+	if (exponent >= 4)
+		return 0xfffU;
+
+	/* value * 256 = mantissa * 2^(exponent - 15), the mantissa with its hidden bit. */
+	mantissa = (bits & 0x7fffffU) | 0x800000U;
+
+	/* Succeeded: the fixed-point value, truncated. */
+	return mantissa >> (15 - exponent);
 }

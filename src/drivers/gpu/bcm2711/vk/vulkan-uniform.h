@@ -26,5 +26,6 @@ struct bcm2711_vulkan_uniform_words {
 /* Call under the controller mutex after earlier queue writes have retired; descriptor-address backing/lifetime belongs to the native job. */
 int bcm2711_vulkan_uniform_create(const struct bcm2711_vulkan_prepared_event *draw, uint32_t stage, const struct bcm2711_vulkan_native_binding bindings[BCM2711_VULKAN_PIPELINE_SETS][BCM2711_VULKAN_LAYOUT_BINDINGS], struct bcm2711_vulkan_uniform_words **words);
 void bcm2711_vulkan_uniform_release(struct bcm2711_vulkan_uniform_words *words);
+int bcm2711_vulkan_uniform_write(const struct bcm2711_vulkan_prepared_event *draw, uint32_t stage, const struct bcm2711_vulkan_native_binding bindings[BCM2711_VULKAN_PIPELINE_SETS][BCM2711_VULKAN_LAYOUT_BINDINGS], uint8_t *destination, uint32_t count);
 
 #endif

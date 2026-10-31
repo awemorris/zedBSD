@@ -488,6 +488,7 @@ convert_textures(
 	uint64_t started;
 	uint64_t step;
 	uint32_t index;
+	uint32_t level;
 	int error;
 
 	/* Nothing has launched yet, so a pass without conversions retires as before. */
@@ -518,6 +519,21 @@ convert_textures(
 			(*jobs)++;
 			if (step > *longest)
 				*longest = step;
+
+			/* A mip tree's smaller levels follow its level 0, each from its own raster. */
+			for (level = 1; level < draw->textures[index].levels; level++) {
+				error = bcm2711_vulkan_native_mip_job(&draw->textures[index], level, &job.command.tfu);
+				if (error != 0)
+					return error;
+				step = clock_ticks();
+				error = bcm2711_v3d_job_run(pass->space->native, &job, result);
+				if (error != 0)
+					return error;
+				step = clock_ticks() - step;
+				(*jobs)++;
+				if (step > *longest)
+					*longest = step;
+			}
 		}
 	}
 	*ticks = clock_ticks() - started;

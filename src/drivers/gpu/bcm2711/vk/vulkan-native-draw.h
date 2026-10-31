@@ -28,6 +28,8 @@ struct bcm2711_vulkan_native_texture_copy {
 	/* The texture formatting unit fills pixels from the raster image when the pass runs, before its draws. */
 	bool convert;
 	struct bcm2711_v3d_tfu_job tfu;
+	/* The mip levels converted: level 0 by tfu, the smaller ones by bcm2711_vulkan_native_mip_job. */
+	uint32_t levels;
 };
 
 /* Draws one chunk of a pass's draw pool holds. */
@@ -142,5 +144,7 @@ int bcm2711_vulkan_native_draw_release(struct bcm2711_vulkan_native_draw **draw,
 
 /* Internal lowering runs only while the unpublished draw root and prepared event are protected by the controller mutex. */
 int bcm2711_vulkan_native_bin_prepare(const struct bcm2711_vulkan_prepared_event *event, struct bcm2711_vulkan_native_draw *draw);
+
+int bcm2711_vulkan_native_mip_job(const struct bcm2711_vulkan_native_texture_copy *entry, uint32_t index, struct bcm2711_v3d_tfu_job *tfu);
 
 #endif

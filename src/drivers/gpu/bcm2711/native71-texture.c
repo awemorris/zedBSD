@@ -275,6 +275,26 @@ bcm2711_native_texture_copy_texel(
 }
 
 /*
+ * Mip trees are not laid out for the 7.1 texture unit yet: its textures are
+ * sampled at level 0 alone.
+ */
+int
+bcm2711_native_miptree_layout(
+	uint32_t width,
+	uint32_t height,
+	uint32_t levels,
+	struct bcm2711_native_miptree *tree)
+{
+	/* Nothing is described. */
+	(void)width;
+	(void)height;
+	(void)levels;
+	if (tree != NULL)
+		kern_memset(tree, 0, sizeof(*tree));
+	return ENOTSUP;
+}
+
+/*
  * Encodes one complete native texture record for independently owned strict UIF scratch storage.
  *
  * The owner supplies the exact size returned by texture_size and keeps the
@@ -300,6 +320,10 @@ bcm2711_native_texture_encode(
 	/* Missing caller storage cannot hold any valid native record. */
 	if (texture == NULL || bytes == NULL)
 		return EINVAL;
+
+	/* Only single-level textures are described (no mip tree is laid out for this unit). */
+	if (texture->levels > 1U)
+		return ENOTSUP;
 
 	/* A short reservation remains wholly unchanged. */
 	if (capacity < BCM2711_NATIVE_TEXTURE_BYTES)

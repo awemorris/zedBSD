@@ -12,6 +12,7 @@
 # login and runs the compositor as root on its own socket with the session's options (--glass, the wallpaper,
 # --log-frames) and its default desktop client instead of the graphical session, whose compositor waits for the
 # display's images forever at 1920x1080 (seen 2026-10-31 with the main kernel and this one).  OUT/summary.txt holds what is printed.
+# LIBS='NAME=PATH ...' puts shared libraries in /lib first (see below).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 out=${1:?usage: pi4-desk.sh OUT}
@@ -56,6 +57,17 @@ timeout 300 scp $SO -q "$KERNEL" "root@$PI:/boot/boot0/vmunix.new" &&
     timeout 120 scp $SO -q plan/ws291/tests/session.sh "root@$PI:/etc/keiland/session" &&
     b 'test "$(cksum < /boot/boot0/vmunix.new | cut -d" " -f1)" = '"$want"' && mv /boot/boot0/vmunix.new /boot/boot0/vmunix && chmod 755 /bin/aat-input && chmod 644 /etc/keiland/session && echo "login='"$login"' v3d.perf=1" > /boot/boot0/cmdline.txt && sync' ||
     { say "FAIL the files were not put in"; exit 1; }
+
+# LIBS='NAME=PATH ...': each PATH becomes the board's /lib/NAME (put beside and renamed over it, the first kept once as
+# /lib/NAME.p025old); they stay after the run.
+for pair in ${LIBS:-}; do
+	name=${pair%%=*}
+	path=${pair#*=}
+	timeout 120 scp $SO -q "$path" "root@$PI:/lib/$name.new" &&
+	    b "test \"\$(cksum < /lib/$name.new | cut -d' ' -f1)\" = $(cksum < "$path" | cut -d' ' -f1) && { test -e /lib/$name.p025old || cp /lib/$name /lib/$name.p025old; } && chmod 755 /lib/$name.new && mv /lib/$name.new /lib/$name && sync" ||
+	    { say "FAIL /lib/$name was not put in"; exit 1; }
+	say "lib $name $(b "cksum < /lib/$name" | cut -d' ' -f1)"
+done
 
 i=1
 while [ $i -le "${RUNS:-1}" ]; do
