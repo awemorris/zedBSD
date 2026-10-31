@@ -213,14 +213,21 @@
     }
 
     // The declarations of a rule are kept in an element's style (the engine validates and writes them); a change is written back.
+    // The element is made when the declarations are first read or changed (a long sheet's rules are mostly only listed).
     function scratchStyle(rule, text) {
-      var el = document.createElement('div');
-      el.style.cssText = text;
-      rule._scratch = el;
-      return el.style;
+      hidden(rule, '_declText', text);
+    }
+    function scratchOf(rule) {
+      var el;
+      if (!rule._scratch) {
+        el = document.createElement('div');
+        el.style.cssText = rule._declText || '';
+        hidden(rule, '_scratch', el);
+      }
+      return rule._scratch;
     }
     function declProxy(rule) {
-      var st = rule._scratch.style;
+      var st = scratchOf(rule).style;
       return new Proxy(st, {
         get: function (t, k) {
           var v = Reflect.get(t, k, t);
@@ -540,7 +547,7 @@
             rule._children.push(makeDecls(items[i].decls, sheet, rule));
           }
         }
-        if (C === CSSStyleRule && !rule._scratch) scratchStyle(rule, '');
+        if (C === CSSStyleRule && rule._declText === undefined) scratchStyle(rule, '');
       } else if (C === CSSPositionTryRule) {
         var d = new CSSPositionTryDescriptors(RK, rule);
         hidden(rule, '_tryDecls', d);
@@ -581,7 +588,7 @@
 
     // --- Serialization
     function indent(text) { return text.split('\n').join('\n  '); }
-    function declsText(rule) { return rule._scratch ? rule._scratch.style.cssText : ''; }
+    function declsText(rule) { return rule._declText !== undefined ? scratchOf(rule).style.cssText : ''; }
     function serialize() {
       var rule = this, kind = rule._kind, head, parts, i, inner;
       switch (kind) {
