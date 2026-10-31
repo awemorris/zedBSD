@@ -1,0 +1,322 @@
+ws291-p024 (diagnostic, not for main): the per-submit stage timing of GPU_JOB_SUBMIT (request, stream take, copyin,
+reserve, driver, finish, tail), the executor (begin, draws, ring submit) and the slowest other opcodes, said by the
+nvrtx perf thread (nvrtx.vk.perf=1) with GPU_IOCTL_TIMING=1 (ZEDBSD_TEST_CPPFLAGS). Includes nvrtx-cmd-timing.patch.
+
+--- a/src/drivers/gpu/gpu.c
++++ b/src/drivers/gpu/gpu.c
+@@ -318,6 +318,10 @@
+  *   EOVERFLOW instead of wrapping into a previously issued generation.
+  */
+ static uint64_t gpu_handle_generation;
++uint64_t gpu_diag_count[8];
++uint64_t gpu_diag_ticks[8];
++static uint64_t gpu_diag_now(void) { uint64_t c, h; (void)kern_rtc_read_counter(&c, &h); return c; }
++#define GPU_DIAG(k, t) do { uint64_t gpu_diag_t = gpu_diag_now(); gpu_diag_count[k]++; gpu_diag_ticks[k] += gpu_diag_t - (t); (t) = gpu_diag_t; } while (0)
+ 
+ /*
+  * Protects session admission, offline transitions, and handle generations.
+@@ -6775,7 +6779,11 @@
+ 	uint32_t outcome;
+ 	unsigned long irq;
+ 	int error;
++	uint64_t diag_t;
++	uint64_t diag_t0;
+ 
++	diag_t = gpu_diag_now();
++	diag_t0 = diag_t;
+ 	/* A job changes device state, and only a backend that runs a job's stream at once takes one in a call. */
+ 	device = session->device;
+ 	if (session->writable == 0U)
+@@ -6805,17 +6813,20 @@
+ 	if (error != 0)
+ 		return error;
+ 
++	GPU_DIAG(6, diag_t);
+ 	/* The stream's kernel copy, before anything is reserved. */
+ 	error = gpu_stream_take(session, request.bytes, &stream);
+ 	if (error != 0)
+ 		return error;
+ 	buffer = stream;
++	GPU_DIAG(7, diag_t);
+ 	error = copyin(pointer, buffer, request.bytes);
+ 	if (error != 0) {
+ 		gpu_stream_give(session, buffer);
+ 		return error;
+ 	}
+ 
++	GPU_DIAG(0, diag_t);
+ 	/* Supervision exists before native submission becomes possible; the payload's reference covers a close. */
+ 	error = gpu_monitor_start(device);
+ 	if (error != 0) {
+@@ -6879,6 +6890,7 @@
+ 
+ 		spin_unlock_irqrestore(&gpu_registry_lock, irq);
+ 
++		GPU_DIAG(1, diag_t);
+ 		/* The stream, at once; a stream that failed is canceled when none of its work reached the GPU, else a fault. */
+ 		error = device->ops->jobs->command(
+ 			device->private_data,
+@@ -6886,10 +6898,12 @@
+ 			buffer,
+ 			request.bytes,
+ 			&outcome);
++		GPU_DIAG(2, diag_t);
+ 		if (error != 0 && outcome != GPU_JOB_SUBMIT_CANCELED)
+ 			outcome = GPU_JOB_SUBMIT_FAULTED;
+ 		request.error = error;
+ 		outcome = gpu_job_submit_finish(session, sequence, completion, reservation, outcome);
++		GPU_DIAG(3, diag_t);
+ 		error = 0;
+ 	}
+ 
+@@ -6910,6 +6924,8 @@
+ 	/* The outcome; a failed copy leaves the job as the outcome says. */
+ 	request.outcome = outcome;
+ 	error = copyout(&request, argument, sizeof(request));
++	GPU_DIAG(4, diag_t);
++	GPU_DIAG(5, diag_t0);
+ 	if (error != 0)
+ 		return error;
+ 
+--- a/src/drivers/gpu/nvrtx/node.c
++++ b/src/drivers/gpu/nvrtx/node.c
+@@ -1171,6 +1171,83 @@
+ 	taken.cursor_set_us = __atomic_exchange_n(&node->counts.cursor_set_us, 0U, __ATOMIC_RELAXED);
+ 	taken.cursor_moves = __atomic_exchange_n(&node->counts.cursor_moves, 0U, __ATOMIC_RELAXED);
+ 	taken.cursor_move_us = __atomic_exchange_n(&node->counts.cursor_move_us, 0U, __ATOMIC_RELAXED);
++	{
++		uint64_t c[6], t[6], counter, hz;
++		unsigned i;
++		(void)kern_rtc_read_counter(&counter, &hz);
++		if (hz == 0U)
++			hz = 1U;
++		for (i = 0U; i < 6U; i++) {
++			c[i] = __atomic_exchange_n(&node->counts.cmd_count[i], 0U, __ATOMIC_RELAXED);
++			t[i] = __atomic_exchange_n(&node->counts.cmd_ticks[i], 0U, __ATOMIC_RELAXED);
++			t[i] = (t[i] / hz) * 1000000U + (t[i] % hz) * 1000000U / hz;
++		}
++		nvrtx_stage_mark("perf: cmd draw %llu %lluus sets %llu %lluus push %llu %lluus",
++		    (unsigned long long)c[0], (unsigned long long)t[0], (unsigned long long)c[1], (unsigned long long)t[1],
++		    (unsigned long long)c[2], (unsigned long long)t[2]);
++		nvrtx_stage_mark("perf: cmd rec %llu %lluus submit %llu %lluus other %llu %lluus",
++		    (unsigned long long)c[3], (unsigned long long)t[3], (unsigned long long)c[4], (unsigned long long)t[4],
++		    (unsigned long long)c[5], (unsigned long long)t[5]);
++	}
++	{
++		extern uint64_t nvrtx_diag_count[8];
++		extern uint64_t nvrtx_diag_ticks[8];
++		extern uint64_t gpu_diag_count[8];
++		extern uint64_t gpu_diag_ticks[8];
++		extern uint64_t nvrtx_diag_op_count[256];
++		extern uint64_t nvrtx_diag_op_ticks[256];
++		uint64_t c[8], t[8], g[8], counter, hz, best[3], bestc[3], bestt[3];
++		unsigned i, j;
++		drv_gpu_ioctl_timing_report();
++		(void)kern_rtc_read_counter(&counter, &hz);
++		if (hz == 0U)
++			hz = 1U;
++		for (i = 0U; i < 8U; i++) {
++			c[i] = __atomic_exchange_n(&nvrtx_diag_count[i], 0U, __ATOMIC_RELAXED);
++			t[i] = __atomic_exchange_n(&nvrtx_diag_ticks[i], 0U, __ATOMIC_RELAXED);
++			t[i] = (t[i] / hz) * 1000000U + (t[i] % hz) * 1000000U / hz;
++			g[i] = __atomic_exchange_n(&gpu_diag_ticks[i], 0U, __ATOMIC_RELAXED);
++			g[i] = (g[i] / hz) * 1000000U + (g[i] % hz) * 1000000U / hz;
++		}
++		nvrtx_stage_mark("perf: exe n%llu all %llu begin %llu draw %llu/%llu sub %llu",
++		    (unsigned long long)c[0], (unsigned long long)t[0], (unsigned long long)t[1],
++		    (unsigned long long)c[2], (unsigned long long)t[2], (unsigned long long)t[4]);
++		nvrtx_stage_mark("perf: js n%llu req %llu take %llu copy %llu res %llu",
++		    (unsigned long long)__atomic_exchange_n(&gpu_diag_count[0], 0U, __ATOMIC_RELAXED),
++		    (unsigned long long)g[6], (unsigned long long)g[7], (unsigned long long)g[0], (unsigned long long)g[1]);
++		nvrtx_stage_mark("perf: js cmd %llu fin %llu out %llu all %llu",
++		    (unsigned long long)g[2], (unsigned long long)g[3], (unsigned long long)g[4], (unsigned long long)g[5]);
++		for (i = 1U; i < 8U; i++)
++			(void)__atomic_exchange_n(&gpu_diag_count[i], 0U, __ATOMIC_RELAXED);
++		for (j = 0U; j < 3U; j++) {
++			best[j] = 0U;
++			bestc[j] = 0U;
++			bestt[j] = 0U;
++		}
++		for (i = 0U; i < 256U; i++) {
++			uint64_t tt = __atomic_exchange_n(&nvrtx_diag_op_ticks[i], 0U, __ATOMIC_RELAXED);
++			uint64_t cc = __atomic_exchange_n(&nvrtx_diag_op_count[i], 0U, __ATOMIC_RELAXED);
++			for (j = 0U; j < 3U; j++) {
++				if (tt > bestt[j]) {
++					unsigned k;
++					for (k = 2U; k > j; k--) {
++						best[k] = best[k - 1U];
++						bestc[k] = bestc[k - 1U];
++						bestt[k] = bestt[k - 1U];
++					}
++					best[j] = i;
++					bestc[j] = cc;
++					bestt[j] = tt;
++					break;
++				}
++			}
++		}
++		for (j = 0U; j < 3U; j++)
++			bestt[j] = (bestt[j] / hz) * 1000000U + (bestt[j] % hz) * 1000000U / hz;
++		nvrtx_stage_mark("perf: op %llu %llu %llu, %llu %llu %llu",
++		    (unsigned long long)best[0], (unsigned long long)bestc[0], (unsigned long long)bestt[0],
++		    (unsigned long long)best[1], (unsigned long long)bestc[1], (unsigned long long)bestt[1]);
++	}
+ 	node->perf_since_us = now;
+ 
+ 	/* The runs and the frames, each line within the log's 79 columns: the runs a wait saw end, from their submission. */
+--- a/src/drivers/gpu/nvrtx/nvrtx-node.h
++++ b/src/drivers/gpu/nvrtx/nvrtx-node.h
+@@ -279,6 +279,8 @@
+ 	uint64_t cursor_set_us;
+ 	uint64_t cursor_moves;
+ 	uint64_t cursor_move_us;
++	uint64_t cmd_count[6];
++	uint64_t cmd_ticks[6];
+ };
+ 
+ /*
+--- a/src/drivers/gpu/nvrtx/runtime.c
++++ b/src/drivers/gpu/nvrtx/runtime.c
+@@ -58,6 +58,7 @@
+ #include <uapi/errno.h>
+ #include <uapi/gpu.h>
+ #include <uapi/gpu-job.h>
++#include <uapi/gpu-op.h>
+ 
+ #include "drivers/gpu/nvrtx/nvrtx-node.h"
+ #include "drivers/gpu/nvrtx/vk/nvrtx-vk.h"
+@@ -154,6 +155,10 @@
+ static bool runtime_park(struct nvrtx_node *node, struct nvrtx_node_entry *entry);
+ static void runtime_dequeued(struct nvrtx_node *node, struct nvrtx_session *owner);
+ static void runtime_retire(struct nvrtx_node *node, struct nvrtx_node_entry *entry);
++static int runtime_dispatch_timed(struct nvrtx_vk_session *vk, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
++static struct nvrtx_node *runtime_timed_node;
++uint64_t nvrtx_diag_op_count[256];
++uint64_t nvrtx_diag_op_ticks[256];
+ static int runtime_execute(struct nvrtx_node *node, struct nvrtx_session *session, const void *wire, uint32_t bytes);
+ static void runtime_channel(struct nvrtx_node *node, struct nvrtx_session *session);
+ static void runtime_enqueue(struct nvrtx_node *node, struct nvrtx_node_entry *entry);
+@@ -1805,7 +1810,12 @@
+ 	taken = 0U;
+ 	if (node->perf != 0)
+ 		taken = nvrtx_now_us();
+-	error = nvrtx_vk_stream_execute(session->vk, wire, bytes, nvrtx_vk_dispatch);
++	if (node->perf != 0) {
++		runtime_timed_node = node;
++		error = nvrtx_vk_stream_execute(session->vk, wire, bytes, runtime_dispatch_timed);
++	} else {
++		error = nvrtx_vk_stream_execute(session->vk, wire, bytes, nvrtx_vk_dispatch);
++	}
+ 
+ 	mutex_unlock(&node->lock);
+ 	mutex_unlock(&session->exec_lock);
+@@ -2090,3 +2100,45 @@
+ 	/* Succeeded: the timeline is the session's. */
+ 	return true;
+ }
++
++/* Diagnostic: times each command by its kind (draw, sets, push, other record, submit, other). */
++static int
++runtime_dispatch_timed(
++	struct nvrtx_vk_session *vk,
++	uint32_t opcode,
++	uint32_t requested,
++	struct i915_wire_reader *reader,
++	struct i915_wire_writer *reply)
++{
++	struct nvrtx_node *node;
++	uint64_t start;
++	uint64_t end;
++	uint64_t hz;
++	uint32_t kind;
++	int error;
++
++	node = runtime_timed_node;
++	(void)kern_rtc_read_counter(&start, &hz);
++	error = nvrtx_vk_dispatch(vk, opcode, requested, reader, reply);
++	(void)kern_rtc_read_counter(&end, &hz);
++
++	if (opcode == GPU_OP_CMD_DRAW || opcode == GPU_OP_CMD_DRAW_INDEXED)
++		kind = 0U;
++	else if (opcode == GPU_OP_CMD_BIND_DESCRIPTOR_SETS)
++		kind = 1U;
++	else if (opcode == GPU_OP_CMD_PUSH_CONSTANTS)
++		kind = 2U;
++	else if (opcode >= GPU_OP_CMD_BIND_PIPELINE && opcode <= GPU_OP_CMD_END_RENDER_PASS)
++		kind = 3U;
++	else if (opcode == GPU_OP_QUEUE_SUBMIT)
++		kind = 4U;
++	else
++		kind = 5U;
++	nvrtx_node_count(node, &node->counts.cmd_count[kind], 1U);
++	nvrtx_node_count(node, &node->counts.cmd_ticks[kind], end - start);
++	if (kind == 5U && opcode < 256U) {
++		nvrtx_diag_op_count[opcode]++;
++		nvrtx_diag_op_ticks[opcode] += end - start;
++	}
++	return error;
++}
+--- a/src/drivers/gpu/nvrtx/vk/vk-execute.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-execute.c
+@@ -43,6 +43,7 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
++#include <kern/clock.h>
+ #include <kern/kcrt.h>
+ #include <kern/klog.h>
+ #include <kern/kmem.h>
+@@ -394,6 +395,10 @@
+ 	uint32_t filter;
+ };
+ 
++uint64_t nvrtx_diag_count[8];
++uint64_t nvrtx_diag_ticks[8];
++static uint64_t diag_now(void) { uint64_t c, h; (void)kern_rtc_read_counter(&c, &h); return c; }
++#define DIAG_ADD(k, t0) do { uint64_t diag_t = diag_now(); nvrtx_diag_count[k]++; nvrtx_diag_ticks[k] += diag_t - (t0); } while (0)
+ static int execute_open(struct nvrtx_vk_session *session, struct nvrtx_vk_execute **execute);
+ static int execute_programs(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute);
+ static int execute_compile(struct nvrtx_draw_ir *program, uint32_t shader_model, uint8_t *cpu, uint32_t *gprs, uint32_t *bytes);
+@@ -458,6 +463,9 @@
+ 	uint32_t index;
+ 	int error;
+ 
++	uint64_t diag_t0, diag_t1;
++
++	diag_t0 = diag_now();
+ 	/* Only an executable command buffer runs. */
+ 	if (command->state != NVRTX_VK_COMMAND_EXECUTABLE)
+ 		return EINVAL;
+@@ -488,6 +496,7 @@
+ 		error = execute_start(session, execute);
+ 	}
+ 
++	DIAG_ADD(1, diag_t0);
+ 	/* Each record in order, the push buffer put on the GPU when it fills (the first one early). */
+ 	execute->early = true;
+ 	for (index = 0U; index < command->record_count && error == 0; index++) {
+@@ -500,8 +509,11 @@
+ 	}
+ 
+ 	/* The rest of the push buffer. */
++	diag_t1 = diag_now();
+ 	if (error == 0)
+ 		error = execute_submit(session, execute);
++	DIAG_ADD(4, diag_t1);
++	DIAG_ADD(0, diag_t0);
+ 
+ 	/* Reports a run that failed. */
+ 	if (error != 0)
+@@ -998,7 +1010,11 @@
+ 		break;
+ 	case GPU_OP_CMD_DRAW:
+ 	case GPU_OP_CMD_DRAW_INDEXED:
+-		error = execute_draw(execute, state, record);
++		{
++			uint64_t diag_t0 = diag_now();
++			error = execute_draw(execute, state, record);
++			DIAG_ADD(2, diag_t0);
++		}
+ 		break;
+ 	case GPU_OP_CMD_COPY_BUFFER:
+ 	case GPU_OP_CMD_COPY_IMAGE:

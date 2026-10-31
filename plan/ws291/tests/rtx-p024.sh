@@ -3,9 +3,9 @@
 # with TIMING=1 libvulkan's submission timing (VULKAN_ZEDBSD_SUBMIT_TIMING=1, about 2 us a part: subs-N is slower
 # with it), run from the top of the tree in the machine's lock:
 #   FILES='DEST=SRC ...' [RESTORE_CKSUM=N] [ROUNDS=1] [SPIN=8] [LIST=plan/ws291/tests/rtx-ab.list] [PERF=0|1]
-#       [TIMING=0|1] [DMESG=REGEX] [SHOT=1] sh plan/ws291/tests/rtx-p024.sh OUT NAME:KERNEL ...
+#       [TIMING=0|1] [DMESG=REGEX] [SHOT=1] sh plan/ws291/tests/rtx-p024.sh OUT NAME:KERNEL[:LIBVULKAN] ...
 # The NVMe kernel is read back (checked against RESTORE_CKSUM), FILES put in (rtx-files.sh); then ROUNDS times, for
-# each arm, its KERNEL put in (zedBSD restarted; with PERF=1 the driver's counts are on, nvrtx.vk.perf=1) and each
+# each arm, its KERNEL (and its LIBVULKAN as /lib/libvulkan.so, else FILES' one) put in (zedBSD restarted; with PERF=1 the driver's counts are on, nvrtx.vk.perf=1) and each
 # LIST line (LABEL|OPTIONS) run as a game-mode mview of SPIN seconds: "NAME LABEL fps= stages", the VULKAN TIMING
 # parts with TIMING=1, and the driver's perf lines when on (and the kernel lines DMESG matches, in OUT/NAME-ROUND/);
 # with SHOT=1 then the three still views of 100 copies (one draw, a draw each, a submit each) captured by keiland-shot
@@ -71,9 +71,12 @@ while [ $failed = 0 ] && [ $round -lt "${ROUNDS:-1}" ]; do
 		[ $failed = 0 ] || break
 		name=${arm%%:*}
 		kernel=${arm#*:}
+		lib=
+		case $kernel in *:*) lib=${kernel#*:}; kernel=${kernel%%:*} ;; esac
+		[ -z "$lib" ] && lib=$(printf '%s\n' ${FILES:-} | sed -n 's|^/lib/libvulkan.so=||p')
 		dir=$out/$name-$round
 		mkdir -p "$dir"
-		timeout 700 $M deploy --kernel "$kernel" > "$dir/deploy.txt" 2>&1 || say "FAIL deploy $name"
+		timeout 700 $M deploy --kernel "$kernel" ${lib:+/lib/libvulkan.so=$lib} > "$dir/deploy.txt" 2>&1 || say "FAIL deploy $name"
 		ip=$($M zedbsd 2> /dev/null | tail -1)
 		[ -n "$ip" ] || { say "FAIL zedBSD did not come up ($name)"; failed=1; break; }
 		if [ "${PERF:-0}" = 1 ] && [ $perf_on = 0 ]; then
@@ -82,7 +85,7 @@ while [ $failed = 0 ] && [ $round -lt "${ROUNDS:-1}" ]; do
 			ip=$($M zedbsd 2> /dev/null | tail -1)
 			[ -n "$ip" ] || { say "FAIL zedBSD did not come up ($name)"; failed=1; break; }
 		fi
-		say "$name round $round kernel $(cksum < "$kernel" | cut -d' ' -f1) on zedBSD $(z 'cksum /boot/boot0/vmunix' 2>&1 | cut -d' ' -f1)"
+		say "$name round $round kernel $(cksum < "$kernel" | cut -d' ' -f1) on zedBSD $(z 'cksum /boot/boot0/vmunix' 2>&1 | cut -d' ' -f1)${lib:+ libvulkan $(cksum < "$lib" | cut -d' ' -f1) on zedBSD $(z 'cksum /lib/libvulkan.so' 2>&1 | cut -d' ' -f1)}"
 		envtiming=
 		[ "${TIMING:-0}" = 1 ] && envtiming=VULKAN_ZEDBSD_SUBMIT_TIMING=1
 		while IFS='|' read -r label opts; do

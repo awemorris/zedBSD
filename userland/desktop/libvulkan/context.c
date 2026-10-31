@@ -23,6 +23,9 @@
 #include "internal.h"
 
 #define VULKAN_REPLY_TRAILER_BYTES 20U
+
+/* The transport framing a transaction adds around its command at most: the reply stream, an external stream's reference and the trailer. */
+#define VULKAN_TRANSACTION_FRAMING_BYTES 256U
 #define VULKAN_TRANSPORT_TIMEOUT_NS UINT64_C(10000000000)
 #define VULKAN_PROTOCOL_XML_VERSION VK_MAKE_VERSION(1, 3, 269)
 #define VULKAN_WINQ_XML_VERSION VK_MAKE_VERSION(1, 4, 343)
@@ -830,6 +833,8 @@ vulkan_context_transaction(
 	/* Encodes small transport framing around the caller's independent command. */
 	vulkan_writer_init(&command);
 	command.allocator = writer->allocator;
+	if (writer->bytes <= GPU_COMMAND_MAX - 128)
+		vulkan_writer_reserve(&command, writer->bytes + VULKAN_TRANSACTION_FRAMING_BYTES);
 	vulkan_encode_reply_stream(&command, context);
 
 	/* Sends large commands through shared storage rather than truncating an ioctl. */
