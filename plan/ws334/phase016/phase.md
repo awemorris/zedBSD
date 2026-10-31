@@ -58,3 +58,30 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+- 状態: 実装済み・試験 PASS（2026-11-01 host の `date` で 03:30 ごろ。cleared は Q1 の判定）。
+- 作った物: `userland/desktop/libkeiland/platform/platform-win32.c`（全部の関数）、`plan/ws334/tests/unit/test-platform-win32.c`。header・試験の道具・他の module は変えていない。
+- 試験: `LC_ALL=C.UTF-8 sh plan/ws334/tests/run-unit.sh platform-win32` → `test-platform-win32: PASS (313 checks) (win32)`、`run-unit: PASS`（posix は modules.sh で none。Wine の prefix 作りを含めて 5 分）。
+  `BASE=d393d3267 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`、`git diff --check` は出力なし。`LC_ALL=C.UTF-8 sh plan/ws334/tests/run-unit.sh all` → 全部 PASS（platform-win32 は 313 checks、他の test も posix・win32 とも PASS）、最後の行 `run-unit: PASS`。
+  試験は、wake の open（garbage の構造への書き込み・event が非 NULL・ends が -1・descriptor が -1・新しい event が quiet・非継承）、ring の後の signaled が wait で消えない（manual-reset）、
+  clear で quiet、2 回 ring して 1 回 clear で quiet、quiet への clear、システムの SetEvent・ResetEvent との往復、2 つの wake の独立、別の thread の ring が wait を起こす（100 回。ring が wait の前・後の両方）、
+  1 回の ring が 2 つの待ち手を起こす、close の後に `GetHandleInformation` が失敗・構造が NULL と -1・2 回目の close と閉じた wake への ring・clear が無害・同じ構造への再 open、
+  lock の open・close の繰り返しと 2 つの thread の 100000 回ずつの加算（合計 200000）、保持中の lock が別の thread を止めて give で進む、
+  thread の self と is（自分は 1、別の thread は 0、start_joined が返す id が thread 自身の self と同じ）、join しない thread が引数を受けて印を立てる、
+  run または thread の NULL の拒否（EINVAL）、`keiui_thread_name`（NULL・短い名前・1・2・3 byte の字・63 byte ちょうど・200 byte・字の途中の切断（3 byte と 2 byte）・UTF-8 でない名前・空の名前）を `GetThreadDescription` で読み戻して見る。
+- 壊して確かめた（git の外で 1 つずつ。各回 Wine で試験を流し、source は無傷）: event を auto-reset にする・初期を signaled にする・descriptor が 0 を返す・ring が ResetEvent・clear が SetEvent・close が CloseHandle しない・
+  close が event を NULL にしない・open が ends を -1 にしない・event を継承可能にする・keiui_wake_event が NULL を返す・lock_take が何もしない・lock_give が何もしない・thread_is の反転・
+  join が何もしない・start_joined の NULL の検査の欠落・start の NULL の検査の欠落・引数を渡さない・名前の上限を 62 にする・字の途中の切断の戻しを外す（2 通り）・MB_ERR_INVALID_CHARS を外す・
+  名前の NULL の検査を外す・UTF-16 の終端を壊す、を全部 FAIL（または hang の timeout、または trap）で捕まえた。
+  捕まえられない物: `platform_wake_error` の ENOMEM・EIO の写し（CreateEventW の失敗を起こせない）、`pthread_create` の失敗の返し、detached の属性（外から見えない）。
+- 自分で決めた点（header が黙っている所）:
+  1. 閉じた（または開いていない NULL の）wake への ring・clear は何もしない。close は 2 回呼んでも無害で、event を NULL、ends を -1 に戻す。open は失敗しても ends を -1、event を NULL にする。
+  2. lock は header の `pthread_mutex_t`（winpthreads）をそのまま使う（design の SRWLOCK・CRITICAL_SECTION の語は header の型に合わせて採らない）。thread も winpthreads の `pthread_create` で、signal は無いので blocking しない。
+  3. `keiui_thread_start`・`keiui_thread_start_joined` は run が NULL なら EINVAL、joined は thread が NULL でも EINVAL（POSIX の file は検査しない。hostile な入力で落ちないため）。
+  4. `keiui_thread_name`: NULL は何もしない。`SetThreadDescription` は kernel32.dll から `GetProcAddress` で実行時に探し、無ければ何もしない。UTF-8 は 63 byte で切り、字の途中なら字の前まで戻す。
+     UTF-8 として正しくない名前は MB_ERR_INVALID_CHARS で拒否し、名前を変えない。空の名前は空の名前にする。
+  5. open の失敗の値は ERROR_NOT_ENOUGH_MEMORY・ERROR_OUTOFMEMORY・ERROR_NO_SYSTEM_RESOURCES・ERROR_COMMITMENT_LIMIT が ENOMEM、他は EIO。
+- 試験の道具について: 他の agent と scratchpad が共有で、同名の file（mut.sh）を上書きされた。壊す試験は自分の directory で流し直した。
+- 未実施: 実際の Windows での実行（Wine 10.0 のみ）、aarch64 Windows の実行（compile のみ）。
