@@ -63,4 +63,29 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-01 07:08 JST、Q1 の指示（host の再起動）で中断。未完（cleared でない）。
+
+### 済んだ事
+
+- `userland/base/libcrypto-compat/cryc-f25519.c` を実装した（header の全関数。10 limb、radix 2^25.5、limb は非負・uint64 で累積、負の shift 無し）。
+  確かめたのは `cc -std=c89 -Wall -Wextra -Werror -fsyntax-only` が通る事だけ（SYNTAX_OK）。試験・動作の確認は未実施。
+- 自分で決めた点（header が黙っている所）: 全 limb を非負に保つ（reduced は各 limb が 2^bits 以下、loose は 3*2^bits 未満、sub は 2p を足す）。
+  square は mul(a, a)。invert・pow_p58 は x_k = a^(2^k-1) の chain（x250 を共有、p-2 = (2^250-1)*32+11、(p-5)/8 = (2^250-1)*4+1）。
+  encode は 2 回の厳密な carry の後、v+19 の carry で p 以上を判定して 19 を足し、2^255 の bit を捨てる。
+  is_zero・is_negative は canonical な encode を使う。
+
+### 未実施
+
+- `cryc-x25519.c`（ladder、clamp、全零の検出を branch 無しで EINVAL にする、public、keygen）。
+- 単体試験 `test-f25519.c`・`test-x25519.c`・定数時間の試験 `ct-x25519.c`。
+- `run-unit.sh`（posix・--win32）、`run-ct.sh`、`check-skeleton.sh`、わざと壊す確かめ、ws.md の行の更新。
+
+### 次の手
+
+1. `cryc-x25519.c` を書く。scalar を local に複写して clamp（byte0 &= 248、byte31 &= 127、|= 64）、u を decode、RFC 7748 5 の ladder を t = 254..0 で
+   （swap ^= bit、cswap、swap = bit。A/B/AA/BB/E/C/D/DA/CB の式、a24 = 121665 は mul_small）、最後に cswap、x2 * invert(z2) を encode。
+   結果の全バイトの OR を cryc_ct_mask_zero32 にして error = (int)(mask & EINVAL)（branch せず返す）。local の状態は cryc_wipe。
+2. test-f25519.c: 参照に byte 配列の簡単な bignum（2^255 = 19 で折り返す）を使い、mul・add・sub・neg・mul_small・carry・invert・pow_p58 を
+   乱数と境界（p-1、p、p+1、2^255-1、全 limb 最大の loose）で照合。
+3. test-x25519.c: RFC 7748 5.2（2 本と 1・1000 回の繰り返し）、6.1、Wycheproof 518 件（全零は EINVAL と out 全零）。
+4. §6 の command を流し、わざと壊す確かめをして cmp で戻す。
