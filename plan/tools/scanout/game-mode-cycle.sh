@@ -49,14 +49,15 @@ while [ "$round" -le "$rounds" ]; do
 	before_window=$(count 'KWL MODE window')
 	g "export XDG_RUNTIME_DIR=/tmp; (/bin/mview --token=r$round --spin=8 --content=game --present=mailbox --images=4 > /tmp/mview-r$round.log 2>&1 &)" >/dev/null
 	if [ "$round" = 1 ]; then
-		g 'for w in $(seq 1 40); do grep -q "KWL SCANOUT direct=1" /tmp/kwl.log && break; sleep 0.5; done' >/dev/null
+		# The first mview loads its model (about 50 s under Venus on a loaded host); up to 120 s.
+		T=150 g 'for w in $(seq 1 240); do grep -q "KWL SCANOUT direct=1" /tmp/kwl.log && break; sleep 0.5; done' >/dev/null
 		sleep 1
 		shot game-direct
 		qmp move 700 450 sleep 100 move 720 460 sleep 100 move 740 470
 		sleep 1
 		shot game-pointer
 	fi
-	T=120 g "for w in \$(seq 1 80); do grep -q 'MVIEW DONE' /tmp/mview-r$round.log && break; sleep 0.5; done; sleep 3" >/dev/null
+	T=150 g "for w in \$(seq 1 240); do grep -q 'MVIEW DONE' /tmp/mview-r$round.log && break; sleep 0.5; done; sleep 3" >/dev/null
 	alive=$(g "ps -A -o args | grep -cE '^/bin/wayland '" | tail -1)
 	direct=$(( $(count 'KWL SCANOUT direct=1') - before_direct ))
 	left=$(( $(count 'KWL SCANOUT direct=0 reason=no-window') - before_left ))

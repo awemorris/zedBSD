@@ -41,6 +41,8 @@
 
 /* The environment variable that turns on one log line for every cursor present. */
 #define WSI_CURSOR_LOG_VARIABLE	"VULKAN_ZEDBSD_CURSOR_LOG"
+/* Set to 1, each window or display chain's images and, at its end, its presents and copies go to stderr. */
+#define WSI_CHAIN_LOG_VARIABLE	"VULKAN_ZEDBSD_WSI_LOG"
 
 /* Shared presentation allocations transfer ownership to another Vulkan instance. */
 #define WSI_QUEUE_FAMILY_EXTERNAL 0xfffffffeU
@@ -146,6 +148,9 @@ struct vulkan_swapchain {
 	struct vulkan_wsi_lend_fit fit;
 	/* The serial of the window system's lend whose images the chain draws into; zero for a chain of its own images. */
 	uint64_t lend_serial;
+	/* With the chain log on: the presents of the chain's images, and those that copied them. */
+	uint64_t log_presents;
+	uint64_t log_copies;
 };
 
 /* The independently ordered workers of one queue: ordinary presents, the cursor plane's, and the overlay planes'. */
@@ -344,6 +349,13 @@ static uint64_t swapchain_serial;
  */
 static int present_cursor_log_on;
 
+/*
+ * Nonzero once a chain was created while the chain log's environment
+ * variable was 1; it never returns to zero.  A present counts its chain's
+ * presents and copies only while it is set.
+ */
+static int swapchain_log_on;
+
 static struct vulkan_swapchain *swapchain_get(VkSwapchainKHR handle);
 static VkResult swapchain_create(struct VkDevice_T *device, const VkSwapchainCreateInfoKHR *info, const VkAllocationCallbacks *allocator, struct wsi_image_group *shared, VkBool32 single, struct vulkan_swapchain **result);
 static VkBool32 swapchain_spare_wanted(struct VkDevice_T *device, struct vulkan_surface *surface, const VkSwapchainCreateInfoKHR *info);
@@ -358,6 +370,7 @@ static VkResult swapchain_native_images_create(struct vulkan_swapchain *chain);
 static VkBool32 swapchain_direct_possible(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info);
 static VkResult swapchain_native_images_import(struct vulkan_swapchain *chain);
 static VkResult swapchain_exportable(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info);
+static void swapchain_log_created(const struct vulkan_swapchain *chain);
 static void swapchain_fit(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info, uint32_t asked);
 static VkResult swapchain_lent_create(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info, uint32_t count, const int *fds);
 static VkBool32 swapchain_lend_changed(struct vulkan_swapchain *chain);
@@ -587,6 +600,14 @@ vkDestroySwapchainKHR(
 		chain->object.allocator.callbacks = *allocator;
 		chain->object.allocator.has_callbacks = VK_TRUE;
 	}
+
+	/* The chain log's last line of the chain: its presents and the copies among them. */
+	if (__atomic_load_n(&swapchain_log_on, __ATOMIC_RELAXED) != 0 && chain->surface != NULL &&
+	    chain->surface->cursor == VK_FALSE && chain->surface->overlay == VK_FALSE)
+		fprintf(stderr, "VULKAN WSI chain=%llu end presents=%llu copies=%llu\n",
+		    (unsigned long long)chain->serial,
+		    (unsigned long long)__atomic_load_n(&chain->log_presents, __ATOMIC_RELAXED),
+		    (unsigned long long)__atomic_load_n(&chain->log_copies, __ATOMIC_RELAXED));
 
 	/* Valid applications externally synchronize use before destroying a chain. */
 	swapchain_free(chain);
@@ -1179,6 +1200,14 @@ swapchain_create(
 			__atomic_store_n(&present_cursor_log_on, 1, __ATOMIC_RELAXED);
 	}
 
+	/* The chain log, asked at each creation and on once 1 is seen. */
+	log_variable = getenv(WSI_CHAIN_LOG_VARIABLE);
+	if (log_variable != NULL) {
+		log_compare = strcmp(log_variable, "1");
+		if (log_compare == 0)
+			__atomic_store_n(&swapchain_log_on, 1, __ATOMIC_RELAXED);
+	}
+
 	/* Retains the instance surface before any native lease can borrow its allocator. */
 	error = vulkan_wsi_surface_retain(surface);
 	if (error != VK_SUCCESS) {
@@ -1249,6 +1278,7 @@ swapchain_create(
 		error = swapchain_lent_create(chain, info, lent_count, lent_fds);
 		if (error == VK_SUCCESS) {
 			chain->gpu_present = VK_TRUE;
+			swapchain_log_created(chain);
 
 			/* Transfers the complete private chain to the publication stage. */
 			*result = chain;
@@ -1334,6 +1364,7 @@ swapchain_create(
 	}
 
 	/* Transfers the complete private chain to the publication stage. */
+	swapchain_log_created(chain);
 	*result = chain;
 	chain = NULL;
 
@@ -1350,6 +1381,51 @@ cleanup:
 
 	/* Succeeded: publication now needs no resource acquisition or wire transaction. */
 	return VK_SUCCESS;
+}
+
+/*
+ * Writes the chain log's line of a new window or display chain (cursor and
+ * overlay chains have their own logs): whether its images are a lend's,
+ * whether its presents copy, its images' count, and the kernel's layout of
+ * its first image (tiling and parameter, 0 for an image that has none).
+ */
+static void
+swapchain_log_created(
+	const struct vulkan_swapchain *chain)
+{
+	uint32_t tiling;
+	uint32_t parameter;
+	uint32_t count;
+
+	/* Only with the log on, and not for the cursor or an overlay. */
+	if (__atomic_load_n(&swapchain_log_on, __ATOMIC_RELAXED) == 0)
+		return;
+	if (chain->surface->cursor != VK_FALSE || chain->surface->overlay != VK_FALSE)
+		return;
+
+	/* The first image's layout, as the kernel describes it. */
+	tiling = 0U;
+	parameter = 0U;
+	count = 0U;
+	if (chain->group != NULL) {
+		count = chain->group->count;
+		if (count != 0U) {
+			tiling = chain->group->images[0].descriptor.tiling;
+			parameter = chain->group->images[0].descriptor.layout_parameter;
+		}
+	}
+
+	/* One line of the chain. */
+	fprintf(stderr, "VULKAN WSI chain=%llu lent=%u direct=%u gpu=%u images=%u extent=%ux%u tiling=0x%x parameter=0x%x\n",
+	    (unsigned long long)chain->serial,
+	    chain->lend_serial != 0U ? 1U : 0U,
+	    chain->direct != VK_FALSE ? 1U : 0U,
+	    chain->gpu_present != VK_FALSE ? 1U : 0U,
+	    count,
+	    chain->extent.width,
+	    chain->extent.height,
+	    tiling,
+	    parameter);
 }
 
 /* Checks the advertised surface contract and the active swapchain association. */
@@ -2922,8 +2998,12 @@ present_record(
 			continue;
 
 		/* A direct chain's image is what the output shows: only the present's waits. */
+		if (__atomic_load_n(&swapchain_log_on, __ATOMIC_RELAXED) != 0)
+			__atomic_add_fetch(&job->chains[index]->log_presents, 1U, __ATOMIC_RELAXED);
 		if (job->chains[index]->direct != VK_FALSE)
 			continue;
+		if (__atomic_load_n(&swapchain_log_on, __ATOMIC_RELAXED) != 0)
+			__atomic_add_fetch(&job->chains[index]->log_copies, 1U, __ATOMIC_RELAXED);
 
 		/* Optional display composition remains GPU-resident on both direct and shared-image paths; a cursor or overlay image is copied whole. */
 		display = NULL;
