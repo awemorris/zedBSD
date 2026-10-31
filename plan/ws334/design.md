@@ -1031,3 +1031,5 @@ make の target の名前（`browser-win64`・`browser-winarm64`）は §6.9 の
   - localStorage の key は origin の bytes の 16 進（hash の形は 100 byte を超える origin だけ）。今の `.ls` の file の名前と同じになり、files の backend は移行の特別な道を持たない（100 byte を超える origin の今の file は読まれない。記録）。
   - libkeiland の platform の wake は Windows で event object（`struct keiui_wake` に `event`、`keiui_wake_event`）。
 - 第 1 段の制限として決めた事: 大きさの変更の modal の loop の間は描き直さない（p028）、headless の mode は storage の backend を持たない（p023）。
+- §6.2 の遅延の import の作り方の訂正（2026-11-01 P7 が確かめた）: llvm-mingw の llvm-dlltool に `--output-delaylib` は無い。普通の import library（`dlltool -d vulkan-1.def -l`）と lld の MinGW の driver の `-Wl,--delayload=vulkan-1.dll` で遅延の import になり、Wine 10 で `vulkan-1.dll` の有る時・無い時の両方で .exe が起動した（p020 に書いた）。
+- winpthreads（§6.1）: llvm-mingw は `-lpthread` を明示しないと winpthreads を link しない。DLL・.exe は動的（`libwinpthread-1.dll` を配る）、単体試験は静的（p020・run-unit.sh）。
