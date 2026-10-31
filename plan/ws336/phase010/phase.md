@@ -2,7 +2,7 @@
 
 # ws336-p010: ssh-ttymodes・ssh-channel（端末の mode と connection protocol）
 
-Status: in-progress（2026-11-01 05:10 q1814、Sonnet）。実装済み・試験 PASS（2026-11-01 06:1x、cleared は Q1 が決める）
+Status: cleared（2026-11-01 06:19 Q1、main 290b99bab）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p002
