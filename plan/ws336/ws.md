@@ -21,7 +21,7 @@
 ## Resume point
 
 - p001（設計）を P5 が q1791 で進めている。成果: [design.md](design.md)、header と骨格 `userland/base/ssh/`、試験の道具 `plan/ws336/tests/`、[design-review.md](design-review.md)、[user-questions.md](user-questions.md)。
-- header の基点: （p001 の最後の commit の SHA を Q1 の merge の時に書く。実装の Phase の `check-skeleton.sh` の BASE）
+- header の基点: `d4ab182d2`（p001 の design-review を反映した header。実装の Phase の `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh`。header を変える時は Q1 が新しい基点をここに書く）
 - 「WS335 header」= WS335 の libcrypto-compat の header（`include/libc/compat/crypto/*.h`）の凍結が main に入った後に始める。「WS335 実装」= libcrypto-compat の該当の実装が main に入り zedBSD の build にある後。他の Phase は host の OpenSSL 3.5 で試すので WS335 を待たない（design.md §7・§12）。
 
 ## Phase
