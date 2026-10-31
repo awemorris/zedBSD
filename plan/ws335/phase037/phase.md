@@ -26,7 +26,7 @@ Parent: [WS335](../ws.md)。担当: Opus（試験の道具の設計を含む。p
 
 ## 3. 終わりの条件
 
-- `sh plan/ws335/tests/run-unit.sh tlspeer all` が PASS。check-skeleton.sh（BASE なし）PASS。commit。
+- `sh plan/ws335/tests/run-unit.sh tlspeer all` と `sh plan/ws335/tests/run-unit.sh --win32 tlspeer` が PASS（tlspeer.h は Windows でも compile できる C89 にする）。check-skeleton.sh（BASE なし）PASS。commit。
 - p029〜p032 の phase.md が使い方を読めるよう、tlspeer.h の冒頭に API の説明（関数ごとの comment）。
 
 ## 結果

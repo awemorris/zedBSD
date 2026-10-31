@@ -182,7 +182,8 @@ void SSL_free(SSL *ssl);
 
 /*
  * Sets the socket: a file descriptor on zedBSD, a SOCKET (as int) on
- * Windows.  Returns 1, or 0 for a negative value.
+ * Windows, where the program has called WSAStartup before (as with
+ * OpenSSL; the library does not).  Returns 1, or 0 for a negative value.
  */
 int SSL_set_fd(SSL *ssl, int descriptor);
 

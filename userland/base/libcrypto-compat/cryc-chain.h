@@ -32,7 +32,7 @@
 #include "cryc-os.h"
 #include "cryc-sigver.h"
 
-/* The most certificates a store holds (the ca-certificates package has about 150; Windows' ROOT store about 400). */
+/* The most certificates a store holds (the ca-certificates package has about 150; Windows fills its ROOT store on demand, a few hundred at most). */
 #define CRYC_STORE_MAX		4096U
 
 /* The most certificates a server may send (OpenSSL's default depth is far larger; real chains have 2 to 4). */
@@ -156,7 +156,7 @@ struct cryc_verify_result {
 /* Makes an empty store.  Returns 0 or ENOMEM. */
 int cryc_store_init(struct cryc_store *store);
 
-/* Frees every entry and the lock; the store must be made again before reuse. */
+/* Frees every entry, the distrusted array and the lock; the store must be made again before reuse. */
 void cryc_store_free(struct cryc_store *store);
 
 /*
@@ -205,9 +205,12 @@ int cryc_store_add_file(struct cryc_store *store, const char *path);
 /*
  * Adds the system's roots and distrusted certificates
  * (cryc_os_system_roots, with this store's add_distrusted, add_der and
- * add_file).  Returns 0 or the first error other than ENOENT
- * (a missing default file leaves the store as it was and is not an error,
- * as OpenSSL's SSL_CTX_set_default_verify_paths is not).
+ * add_file).  The store's lock is not held while cryc_os_system_roots
+ * runs: each callback takes it for its own change (add_file reads the
+ * file first, as cryc_store_add_file does).  Returns 0 or the first error
+ * other than ENOENT (a missing default file leaves the store as it was
+ * and is not an error, as OpenSSL's SSL_CTX_set_default_verify_paths is
+ * not).
  */
 int cryc_store_add_system(struct cryc_store *store);
 
@@ -229,11 +232,18 @@ int cryc_store_add_system(struct cryc_store *store);
  * trusted self-signed server).  A path ends at the first store entry
  * reached.  Each complete path is validated (below); the first valid path
  * is the result; otherwise the search backtracks to the next candidate.
- * The search stops after CRYC_CHAIN_MAX_WORK signature verifications
- * (CRYC_VERIFY_WORK_EXCEEDED if no path was valid by then).
+ * The search stops after CRYC_CHAIN_MAX_WORK signature verifications.
  *
- * Validation of a path, from the certificate below the trust anchor down
- * to the leaf (RFC 5280 6.1.3, 6.1.4, 6.1.5):
+ * Distrusted certificates: before anything else of a complete path is
+ * checked (no signature, so it costs no work), every certificate of the
+ * path, the leaf, the intermediates and the trust anchor, is looked up by
+ * the SHA-256 of its DER among the marks of cryc_store_add_distrusted,
+ * from the leaf upward; the first one found ends the path's validation
+ * with REJECTED at its depth (the lowest distrusted depth).
+ *
+ * Validation of a path that has no distrusted certificate, from the
+ * certificate below the trust anchor down to the leaf (RFC 5280 6.1.3,
+ * 6.1.4, 6.1.5):
  *   - the signature by the issuer's key under the certificate's
  *     signatureAlgorithm (cryc_signature_verify; EBADMSG gives
  *     SIGNATURE_FAILURE, ENOTSUP UNSUPPORTED_ALGORITHM or, for a short
@@ -256,18 +266,16 @@ int cryc_store_add_system(struct cryc_store *store);
  *     suites of TLS 1.2 sign with it); a key that is
  *     CRYC_KEY_UNSUPPORTED (UNSUPPORTED_ALGORITHM) or an RSA key below
  *     CRYC_RSA_MIN_BITS (KEY_TOO_SMALL);
- *   - a path longer than params->max_depth: CHAIN_TOO_LONG;
- *   - a certificate of the path, the trust anchor and the leaf included,
- *     whose SHA-256 of the DER is marked distrusted
- *     (cryc_store_add_distrusted): REJECTED, at that certificate's depth
- *     (checked before its signature, so it costs no work).
+ *   - a path longer than params->max_depth: CHAIN_TOO_LONG.
  * After a valid path, the host or the address of params is matched
  * against the leaf (HOSTNAME_MISMATCH, IP_ADDRESS_MISMATCH).
  *
- * When no path was valid: the code of the first path that reached a
- * trust anchor; when none reached one, DEPTH_ZERO_SELF_SIGNED if the leaf
- * is self-issued, SELF_SIGNED_IN_CHAIN if the search ended at a
- * self-issued peer certificate, and UNABLE_TO_GET_ISSUER otherwise.
+ * When no path was valid, in this order of precedence: the code of the
+ * first complete path (one that reached a trust anchor; REJECTED counts
+ * as such a code); else WORK_EXCEEDED when the work bound stopped the
+ * search; else DEPTH_ZERO_SELF_SIGNED if the leaf is self-issued,
+ * SELF_SIGNED_IN_CHAIN if the search ended at a self-issued peer
+ * certificate, and UNABLE_TO_GET_ISSUER otherwise.
  *
  * The store's lock is held for the whole call and nothing else is taken
  * under it (no file is read and no callback is called with it held).

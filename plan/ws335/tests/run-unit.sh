@@ -14,7 +14,11 @@
 # libcrypto-compat.a and libssl-compat.a, each test is linked with them and -lbcrypt -lcrypt32 -lws2_32 into one
 # .exe, and run under Wine (a prefix of its own, build/tmp/ws335-wine, made on first use and marked ready only
 # when wineboot succeeded; winedbg is disabled so a trap ends the test; WS335_VECTORS is given as its Z: path).
-# A test may test _WIN32 for its Windows-only checks.  The aarch64 Windows build is only compiled and linked
+# Each .exe is built and run in a directory of its own ($out/<test>.run/, its current directory too), so a file
+# a test puts beside its .exe (cert.pem) is seen by that test only.  The prefix is kept between runs: a test that
+# adds certificates to its stores removes them before it ends and first removes any left by an earlier run.
+# A test may test _WIN32 for its Windows-only checks.  Threads in a Windows test are CreateThread or
+# _beginthreadex (no pthread library is linked).  The aarch64 Windows build is only compiled and linked
 # (check-skeleton.sh); there is no arm64 Wine.
 # Last line: run-unit: PASS or run-unit: FAIL.  Output under build/tmp/ws335-unit (a fresh run directory).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -27,6 +31,10 @@ fresh_out "$out"
 mkdir -p "$out/include"
 ln -sfn "$(pwd)/include/libc/compat" "$out/include/compat"
 WS335_VECTORS=${WS335_VECTORS:-$(pwd)/build/ws335-vectors}
+case "$WS335_VECTORS" in
+/*) ;;
+*) WS335_VECTORS=$(pwd)/$WS335_VECTORS ;;
+esac
 export WS335_VECTORS
 
 system=posix
@@ -90,7 +98,8 @@ if [ "$system" = win32 ]; then
 	"$LLVM_MINGW/bin/llvm-ar" rcs "$out/lib/libssl-compat.a" "$out"/lib/ssl-*.o
 	if [ ! -f "$wine_prefix/.ws335-ready" ]; then
 		mkdir -p "$wine_prefix"
-		if WINEPREFIX=$wine_prefix WINEDEBUG=-all timeout 600 wineboot -i > "$out/wineboot.log" 2>&1; then
+		if WINEPREFIX=$wine_prefix WINEDEBUG=-all WINEDLLOVERRIDES='mscoree,mshtml=' timeout 600 wineboot -i \
+		    > "$out/wineboot.log" 2>&1; then
 			: > "$wine_prefix/.ws335-ready"
 		else
 			echo "run-unit: FAIL (wineboot; log $out/wineboot.log)"
@@ -109,7 +118,8 @@ for name in $names; do
 		continue
 	fi
 	if [ "$system" = win32 ]; then
-		program=$out/$label.exe
+		mkdir -p "$out/$label.run"
+		program=$out/$label.run/$label.exe
 		if ! $wcc $wflags "$source" -L"$out/lib" -lssl-compat -lcrypto-compat -lbcrypt -lcrypt32 -lws2_32 \
 		    -o "$program" > "$out/$label.build.log" 2>&1 || [ -s "$out/$label.build.log" ]; then
 			echo "$label (win32): FAIL (build)"
@@ -117,7 +127,6 @@ for name in $names; do
 			status=1
 			continue
 		fi
-		mkdir -p "$out/$label.run"
 		(cd "$out/$label.run" && WINEPREFIX=$wine_prefix WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d \
 		    WS335_VECTORS="Z:$WS335_VECTORS" timeout 600 wine "$top/$program") > "$out/$label.log" 2>&1
 		code=$?

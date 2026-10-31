@@ -14,11 +14,11 @@ Parent: [WS335](../ws.md)。担当: Opus（phase-runner-high を推す。推論�
 
 ## 2. 作る物
 
-- zedBSD: `userland/base/libssl-compat/Makefile`・`exports.map`（node `LIBSSL_COMPAT`、`include/libc/compat/ssl/ssl.h` の関数の全部を名前で）、`platform/common/userland-dynamic.mk` の `libssl-compat.so` の規則（`-l:libcrypto-compat.so -l:libc.so`、`check-dynamic-elf.py --needed libcrypto-compat.so --needed libc.so --soname libssl-compat.so`）、package の登録（既定 n、image は `/lib/libssl-compat.so`）、
+- zedBSD: `userland/base/libssl-compat/Makefile`・`exports.map`（node `LIBSSL_COMPAT`、`include/libc/compat/ssl/ssl.h` の関数の全部を名前で）、`platform/common/userland-dynamic.mk` の `libssl-compat.so` の規則（p039 と同じ flag と `-z nodelete`、`-l:libcrypto-compat.so -l:libc.so`、`check-dynamic-elf.py --needed libcrypto-compat.so --needed libc.so --soname libssl-compat.so`）、package の登録（既定 n、image は `/lib/libssl-compat.so`）、
   `include/libc/compat/ssl/` の sysroot への install（p039 の crypto と同じ道）。`check-exports.sh` で libssl-compat.so も照合する（p039 の script が 2 つの .so を扱えなければ、引数の形を保って足す）。
 - `userland/base/libssl-compat/sources.mk`（変数だけ）: `LIBSSL_COMPAT_SOURCES`（全部の .c。OS に依る file は無い）。libcrypto-compat の `sources.mk` は p039 の物を使う。
 - Windows の成果物は **static library だけ**（`libcrypto-compat.a`・`libssl-compat.a`）。DLL・import library・`.def` は作らない（D23）。この WS の中に Windows の make の target は作らない（D26: 使う側の build が `sources.mk` を読んで作る）。試験のための Windows の build は試験の script の中で行う（下）。
-- 試験:
+- 試験（Wine の prefix は run の間で残るので、Disallowed・ROOT に足した証明書は script の終わりに消し、始めにも前の残りを消す。tls-client.exe は run ごとの dir に置き、`cert.pem` はその隣）:
   - `plan/ws335/tests/tls-client.c`（host・zedBSD・Windows で動く小さな client: 引数の host・port・CA file、`SSL_*` の公開の API だけを使う。Windows では `WSAStartup` と SOCKET を試験の側で）。
   - `plan/ws335/tests/run-interop.sh`（host の `openssl s_server` を版・suite・group・鍵の種類の組で起動し tls-client で繋ぐ。1 本の script で要約だけを出す）。`--win32` で、tls-client.exe を `run-unit.sh --win32` と同じ flag で 2 つの .a に static link し、Wine の上で同じ host の s_server に繋ぐ（組は 1.3 と 1.2 の各 1 suite × ECDSA・RSA。Wine の prefix は `build/tmp/ws335-wine`）。
   - `plan/ws335/tests/run-limbo.sh`（x509-limbo の SERVER 全件を公開の API で流し、一致の数と違いの表。p038 の結果を使う）、`plan/ws335/tests/run-sites.sh`（実の site の一覧、host から、network の無い時は SKIP と書く）。

@@ -42,3 +42,33 @@
 - check-skeleton.sh PASS（cc・clang、zedBSD の clang の x86_64・aarch64、llvm-mingw の x86_64・aarch64）、run-unit.sh all PASS（test-tools 18 checks）、`git diff --check` 空。
 - WS336 の crypto-contract.c（P5）が compat の header と骨格で -Werror の build と link を通る（実行は骨格なので FAIL、実装の後に p023・p024 の受け入れ）。
 - 凍結の基点: 60760d2a0。
+
+## 2 回目（q1789-i02、2026-11-01）: U1〜U6 の答えと Windows の static link の変更
+
+- review の対象: P6 の worktree の 43b8fb577 と da00b1f47 の差（header 5・骨格 4・試験の道具 2・design.md・ws.md・user-questions.md・phase.md、新しい p039）。design-reviewer が 1 本、敵対的に読んだ（worktree は変えていない）。
+- reviewer が自分で確かめた事: tree の写しで check-skeleton.sh PASS（zedBSD の clang と BASE は写しなので流していない）、llvm-nm（COFF）と nm（ELF）の出力の読み、`run-unit.sh --win32 tools` が Wine 10.0 で PASS（18 checks）、UBSan の trap が Wine で FAIL になる事（偽の PASS にならない）、header が winsock2.h・windows.h・wincrypt.h・bcrypt.h の後でも compile できる事、OpenSSL 3.5.8 の `X509_V_ERR_CERT_REJECTED` 28 と文 "certificate rejected"、Wine の ROOT に host の CA が 155、Disallowed に足した証明書が prefix に残る事。
+- 流していない物: zedBSD の clang の段、QEMU、実の Windows（logical store の中身、拡張鍵用途の property、process の終わりの FLS）。
+- 指摘 16 件（高 1・中 6・低 9）。全部を反映した。見送りは無い。
+
+| # | 重さ | 指摘（要点） | 扱い |
+| --- | --- | --- | --- |
+| 1 | 高 | WS334 p030 が net/tls.c の表に OpenSSL だけの関数（`OPENSSL_init_ssl`・`X509_digest`・`X509_STORE_CTX_*`）と証明書ごとの callback を足すので、「開く名前だけ替える」切り替えは zedBSD でも Windows でも成り立たない | 反映: D28（OpenSSL だけの関数は compat に作らない）、design.md §4.2 に compat の下の net/tls.c の変更 1〜4、p036 を直した。Q1 への頼み（p030 の前に P7 と表の印を合わせる）を §4.2 に |
+| 2 | 中 | `CertOpenSystemStoreW` は current user しか開けない | 反映: cryc-os.h に `CertOpenStore(CERT_STORE_PROV_SYSTEM_W, …)` と 4 つの組と flag、X509_ASN_ENCODING でない物を飛ばす。p015 |
+| 3 | 中 | 信頼しない印の確かめの時と深さ、WORK_EXCEEDED との優先が決まっていない | 反映: cryc-chain.h に「完全な path の最初に leaf から上へ、一番下の深さで REJECTED」と、どの path も通らない時の code の優先。p020 の試験 |
+| 4 | 中 | `cryc_store_add_system` の lock の持ち方 | 反映: cryc-chain.h（cryc_os_system_roots の間は持たない、callback ごとに取る） |
+| 5 | 中 | Wine の prefix が run の間で残り、試験が足した証明書が後の run に効く | 反映: run-unit.sh の comment と p015・p033（足した物は終わりに消し、始めにも前の残りを消す） |
+| 6 | 中低 | 同じ run の試験が他の試験の `cert.pem` を見る、p020 の add_system が POSIX だけの言い方 | 反映: run-unit.sh の .exe を試験ごとの dir に。p020 に `--win32` での期待 |
+| 7 | 中（一部未確認） | ROOT の証明書ごとの制限（拡張鍵用途の property、「全部の目的で無効」）を見ない、store の場所 | 反映: cryc-os.h（serverAuth を持たない property の物は飛ばす、logical store が physical の部分を含む事）、D24、p015 |
+| 8 | 中低 | check-skeleton の 7 が nm の失敗・空の glob で黙って PASS | 反映: nm の終わりの値、object の有無、`cryc_`・`ERR_`・`sslc_`・`SSL_` の名前が見える事（正の対照）を FAIL の条件に。壊した nm（存在しない path）で FAIL になる事を確かめた |
+| 9 | 低中 | zedBSD の .so の dlclose と thread の値の destroy、`WSAStartup` の約束 | 反映: cryc-os.h（`-z nodelete`）、p039・p033 の規則、ssl.h の `SSL_set_fd` に `WSAStartup` |
+| 10 | 低中 | 記録が 2 回目の review を「反映した」と先に書いていた | 反映: この節を書いてから commit（ws.md・design.md の文はこの節を指す） |
+| 11 | 低 | gnu11・macro 無しの compile を確かめる道具が無い、§4.4 の言い過ぎ、p037・p038 に `--win32` が無い | 反映: check-skeleton の 6 に `-std=gnu11 -O2`（macro 無し、x86_64）、§4.4 の 5 を直した、p037・p038 に `--win32` |
+| 12 | 低 | `cryc_store_free` が印の配列に触れない、`cryc_os_read_file` の binary の mode、UTF-16 の不正な surrogate | 反映: cryc-chain.h・cryc-os.h（`rb`・`L"rb"`、`WC_ERR_INVALID_CHARS`、変換できない path は無い file と同じ）、p015 |
+| 13 | 低 | p021 の Windows の thread の作り方と、見える事 | 反映: p021（CreateThread・`_beginthreadex`、別の thread の queue が見えない事、1000 の thread） |
+| 14 | 低 | ROOT を Disallowed と照らす filter は重複で、同じ根の code が出所で違う | 反映: filter を外した（cryc-os.h、D24、p015） |
+| 15 | 低 | 相対の `WS335_VECTORS` の Z: の path、wineboot の Mono・Gecko の問い | 反映: run-unit.sh（絶対の path に、`WINEDLLOVERRIDES='mscoree,mshtml='`） |
+| 16 | 低 | test-tools.c の「全部の module を link」、cryc-chain.h の「ROOT は約 400」、user-questions.md の元の問いの DLL の文 | 反映: 前の 2 つを直した。user-questions.md は元の問いの文として残し、「決まった」の行で答えを書いた |
+
+## 2 回目の反映の後の確かめ（2026-11-01 P6）
+
+- 下の基点の commit の前に流した結果は ws.md の Resume point と p001 の結果の節に書く。

@@ -15,6 +15,8 @@
 #     (an implementation Phase must not change them; a fault goes back to Q1);
 #  6. Windows, per arch: the objects make the two static libraries libcrypto-compat.a and libssl-compat.a, and a
 #     program links every object of both (--whole-archive, then -lbcrypt -lcrypt32 -lws2_32) with no message;
+#     every .c except *-posix.c also compiles for x86_64 Windows as a Windows program's build does (-std=gnu11 -O2,
+#     without the version and UNICODE macros), warnings as errors;
 #  7. the namespace: every external name an object defines (nm, for the cc objects and each Windows arch's) is a
 #     public name or starts with cryc_ (libcrypto-compat: cryc_, ERR_, X509_, EVP_, RAND_, OPENSSL_, CRYPTO_,
 #     d2i_X509) or sslc_ (libssl-compat: sslc_, SSL_, TLS_); the Windows static libraries share the namespace of
@@ -47,20 +49,39 @@ library_of() {
 	esac
 }
 
-# <nm> <allowed> <object>...: prints the external names the objects define outside the allowed pattern.
-names_outside() {
-	tool=$1
-	allowed=$2
-	shift 2
-	"$tool" -g --defined-only "$@" 2> /dev/null | awk 'NF >= 3 { print $3 } NF == 2 { print $2 }' |
-	    grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | grep -v '^__' | grep -v -E "$allowed" | sort -u
-}
-
 # <label> <nm> <directory> <prefix>: step 7 for the objects <directory>/<prefix>crypto-*.o and ...ssl-*.o.
+# nm must succeed on objects that exist, and must show the library's own names (cryc_ and ERR_, sslc_ and SSL_),
+# so that a missing tool or an empty list cannot pass.
 check_names() {
 	for library in crypto ssl; do
-		if [ "$library" = crypto ]; then allowed=$crypto_names; else allowed=$ssl_names; fi
-		bad=$(names_outside "$2" "$allowed" "$3"/"$4"$library-*.o)
+		if [ "$library" = crypto ]; then
+			allowed=$crypto_names
+			wanted='^cryc_ ^ERR_'
+		else
+			allowed=$ssl_names
+			wanted='^sslc_ ^SSL_'
+		fi
+		objects=$(ls "$3"/"$4"$library-*.o 2> /dev/null)
+		if [ -z "$objects" ]; then
+			echo "FAILED $1: no lib$library-compat objects to check"
+			status=1
+			continue
+		fi
+		if ! "$2" -g --defined-only $objects > "$out/names.txt" 2> "$out/names.log"; then
+			echo "FAILED $1: $2 failed on lib$library-compat"
+			head -5 "$out/names.log"
+			status=1
+			continue
+		fi
+		awk 'NF >= 3 { print $3 } NF == 2 { print $2 }' "$out/names.txt" |
+		    grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | grep -v '^__' | sort -u > "$out/names.list"
+		for pattern in $wanted; do
+			if ! grep -q -E "$pattern" "$out/names.list"; then
+				echo "FAILED $1: lib$library-compat shows no name matching $pattern (nm output not understood)"
+				status=1
+			fi
+		done
+		bad=$(grep -v -E "$allowed" "$out/names.list")
 		if [ -n "$bad" ]; then
 			echo "FAILED $1: lib$library-compat defines names outside its namespace:"
 			echo "$bad" | head -20
@@ -98,7 +119,7 @@ for compiler in cc clang; do
 		fi
 	done
 done
-if [ -f "$out/cc-crypto-cryc-util.o" ]; then
+if command -v cc > /dev/null 2>&1; then
 	check_names "cc" nm "$out" cc-
 fi
 
@@ -148,6 +169,19 @@ if [ -x "$mingw/bin/x86_64-w64-mingw32-clang" ]; then
 			status=1
 		fi
 		check_names "$target-w64-mingw32" "$mingw/bin/llvm-nm" "$dir" ""
+		if [ "$target" = x86_64 ]; then
+			for source in $crypto/*.c $ssl/*.c; do
+				case "$source" in
+				*-posix.c) continue ;;
+				esac
+				if ! "$wcc" -std=gnu11 -O2 -Wall -Wextra -Werror -I"$out/include" -I. -c "$source" \
+				    -o "$dir/gnu11.o" > "$out/mingw.log" 2>&1; then
+					echo "FAILED $target-w64-mingw32 -std=gnu11 -O2 $source"
+					head -10 "$out/mingw.log"
+					status=1
+				fi
+			done
+		fi
 	done
 else
 	echo "llvm-mingw: skipped (not at $mingw)"

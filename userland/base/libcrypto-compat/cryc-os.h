@@ -102,9 +102,11 @@ void *cryc_os_thread_value(void);
  * the thread exits (pthread_key_create's destructor; FlsAlloc's callback
  * on Windows); it must be the same function on every call.  The first call
  * in the process creates the key (pthread_once; InitOnceExecuteOnce).
- * The key is never deleted (no FlsFree, no DllMain): on Windows the static
- * library is linked into the executable, whose code stays mapped until the
- * process ends, so the callback is there while any thread can still exit.
+ * The key is never deleted (no FlsFree, no pthread_key_delete, no
+ * DllMain), so the destroy function must stay mapped until the process
+ * ends: on Windows the static library is linked into the executable; on
+ * zedBSD the shared object is linked with -z nodelete, so a dlclose never
+ * unmaps it.
  *
  * Returns 0, or ENOMEM when the key cannot be created or the value
  * cannot be stored.
@@ -114,7 +116,9 @@ int cryc_os_thread_set_value(void *value, void (*destroy)(void *));
 /*
  * Reads a whole file into a new buffer.
  *
- * path is UTF-8 (converted to UTF-16 for _wfopen on Windows).  *data
+ * path is UTF-8 (converted to UTF-16 for _wfopen on Windows; a path that
+ * is not valid UTF-8 is EINVAL).  The file is read in binary mode (fopen
+ * "rb", _wfopen L"rb": no CRLF change, no stop at 0x1A).  *data
  * receives a malloc'd buffer of *size bytes (plus one zero byte after
  * them, not counted, so text parsers may stop at it); the caller frees it.
  * Returns 0; ENOENT when the file does not exist; EFBIG when it is larger
@@ -157,19 +161,33 @@ int cryc_os_socket_write(intptr_t descriptor, const uint8_t *buffer, size_t size
  *   POSIX:   add_file(context, CRYC_OS_DEFAULT_CA_FILE).  add_distrusted
  *            and add_der are not called (the bundle holds only trusted
  *            roots).
- *   Windows: first every certificate of the current user's and the local
- *            machine's "Disallowed" system store, as DER through
- *            add_distrusted; then every certificate of the current user's
- *            and the local machine's "ROOT" system store, as DER through
- *            add_der, except those whose SHA-256 of the DER is also that
- *            of a Disallowed certificate (CertOpenSystemStoreW,
- *            CertEnumCertificatesInStore; a store that cannot be opened
- *            is taken as empty); then add_file(context, <directory of the
- *            process's executable>\CRYC_OS_WIN32_CA_FILE)
+ *   Windows: the four logical system stores, each opened with
+ *            CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, location |
+ *            CERT_STORE_READONLY_FLAG | CERT_STORE_OPEN_EXISTING_FLAG,
+ *            name) and read with CertEnumCertificatesInStore, in this
+ *            order: (CERT_SYSTEM_STORE_CURRENT_USER, L"Disallowed"),
+ *            (CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Disallowed"), every
+ *            certificate as DER through add_distrusted; then
+ *            (CERT_SYSTEM_STORE_CURRENT_USER, L"ROOT"),
+ *            (CERT_SYSTEM_STORE_LOCAL_MACHINE, L"ROOT"), as DER through
+ *            add_der, except a certificate whose enhanced key usage
+ *            property (CertGetEnhancedKeyUsage with
+ *            CERT_FIND_PROP_ONLY_ENHKEY_USAGE_FLAG) exists and does not
+ *            hold szOID_PKIX_KP_SERVER_AUTH (an empty list, "disabled for
+ *            all purposes", is skipped too).  The logical stores include
+ *            their physical parts (group policy, enterprise, the local
+ *            machine's part of the user's).  A store that cannot be
+ *            opened is taken as empty; a certificate whose
+ *            dwCertEncodingType is not X509_ASN_ENCODING is skipped.  The
+ *            ROOT certificates are not compared with the Disallowed ones
+ *            here: the store refuses a distrusted certificate in every
+ *            path (cryc-chain.h).  Then add_file(context, <directory of
+ *            the process's executable>\CRYC_OS_WIN32_CA_FILE)
  *            (GetModuleFileNameW(NULL, ...) with a buffer grown up to
  *            32768 UTF-16 units, the part before the last backslash,
- *            converted to UTF-8; a longer path is skipped as if the file
- *            were missing).
+ *            converted with WideCharToMultiByte(CP_UTF8,
+ *            WC_ERR_INVALID_CHARS); a longer path or one that does not
+ *            convert is skipped as if the file were missing).
  *
  * A callback's error is passed back at once; a missing file or an empty
  * store is not an error (the callbacks report ENOENT for a missing file,
