@@ -439,7 +439,8 @@
             if (h.f.call(self, e) === false) e.preventDefault();
           };
           this._handlers[type] = h;
-          this.addEventListener(type, h.l);
+          EventTarget.prototype.addEventListener.call(this, type, h.l);
+          if (this === navigation) keepForReuse();
         },
         configurable: true, enumerable: true
       });
@@ -991,10 +992,37 @@
       return trackerResult(t);
     }
 
+    // A frame's initial about:blank document is replaced by the document that loads in it, which keeps the window (the
+    // Navigation's listeners and handlers stay): the ones set on the initial document wait on the frame element.
+    function keepForReuse() {
+      var frame = native.frameElement();
+      if (!frame || !initialBlank()) return;
+      Object.defineProperty(frame, '__zedNavListeners', { value: { added: navigation._added || [], handlers: navigation._handlers || {} },
+        writable: true, configurable: true, enumerable: false });
+    }
+
     class Navigation extends EventTarget {
       constructor(key) {
         if (key !== KEY) throw new TypeError('Illegal constructor');
         super();
+      }
+      addEventListener(type, callback, options) {
+        var args = arguments;
+        if (initialBlank() && callback !== null && callback !== undefined) {
+          if (!this._added) hidden(this, '_added', []);
+          this._added.push({ type: type, callback: callback, options: options });
+          keepForReuse();
+        }
+        return EventTarget.prototype.addEventListener.apply(this, args);
+      }
+      removeEventListener(type, callback, options) {
+        var list = this._added, i;
+        if (list) {
+          for (i = 0; i < list.length; i++) {
+            if (list[i].type === type && list[i].callback === callback) { list.splice(i, 1); break; }
+          }
+        }
+        return EventTarget.prototype.removeEventListener.apply(this, arguments);
       }
       entries() { return active() ? entries.map(nhe) : []; }
       get currentEntry() { return active() ? nhe(entries[current]) : null; }
@@ -1229,6 +1257,20 @@
       if (h) { delete frame.__zedNav; handover = h; }
     })();
     var navigation = new Navigation(KEY);
+    (function () {
+      var frame = native.frameElement(), kept, type, same = false;
+      if (!frame) return;
+      kept = frame.__zedNavListeners;
+            if (!kept) return;
+      delete frame.__zedNavListeners;
+      try { same = new URL(frame.ownerDocument.URL).origin === new URL(g.document.URL).origin; } catch (e) { same = false; }
+      if (!same) return;
+      kept.added.forEach(function (a) { navigation.addEventListener(a.type, a.callback, a.options); });
+      for (type in kept.handlers) {
+        if (Object.prototype.hasOwnProperty.call(kept.handlers, type) && kept.handlers[type] && typeof kept.handlers[type].f === 'function')
+          navigation['on' + type] = kept.handlers[type].f;
+      }
+    })();
     var activation;
     if (handover) {
       activation = adoptHandover();
