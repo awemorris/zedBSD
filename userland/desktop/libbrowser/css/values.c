@@ -77,7 +77,12 @@ enum values_shorthand {
 	SHORT_RADIUS_TOP_RIGHT,
 	SHORT_RADIUS_BOTTOM_RIGHT,
 	SHORT_RADIUS_BOTTOM_LEFT,
+	SHORT_RADIUS_START_START,
+	SHORT_RADIUS_START_END,
+	SHORT_RADIUS_END_END,
+	SHORT_RADIUS_END_START,
 	SHORT_OUTLINE,
+	SHORT_TEXT_STROKE,
 	SHORT_GRID_COLUMN,
 	SHORT_GRID_ROW,
 	SHORT_GRID_AREA,
@@ -176,6 +181,7 @@ static const struct values_name values_names[] = {
 	{ "background-image", CSS_PROP_BACKGROUND_IMAGE },
 	{ "background-repeat", CSS_PROP_BACKGROUND_REPEAT },
 	{ "background-attachment", CSS_PROP_BACKGROUND_ATTACHMENT },
+	{ "background-clip", CSS_PROP_BACKGROUND_CLIP },
 	{ "background-position-x", CSS_PROP_BACKGROUND_POSITION_X },
 	{ "background-position-y", CSS_PROP_BACKGROUND_POSITION_Y },
 	{ "font-size", CSS_PROP_FONT_SIZE },
@@ -194,6 +200,7 @@ static const struct values_name values_names[] = {
 	{ "text-decoration-color", CSS_PROP_TEXT_DECORATION_COLOR },
 	{ "text-decoration-thickness", CSS_PROP_TEXT_DECORATION_THICKNESS },
 	{ "list-style-type", CSS_PROP_LIST_STYLE_TYPE },
+	{ "list-style-position", CSS_PROP_LIST_STYLE_POSITION },
 	{ "top", CSS_PROP_TOP },
 	{ "right", CSS_PROP_RIGHT },
 	{ "bottom", CSS_PROP_BOTTOM },
@@ -217,6 +224,7 @@ static const struct values_name values_names[] = {
 	{ "overflow-inline", CSS_PROP_OVERFLOW_INLINE },
 	{ "overflow-block", CSS_PROP_OVERFLOW_BLOCK },
 	{ "box-sizing", CSS_PROP_BOX_SIZING },
+	{ "content-visibility", CSS_PROP_CONTENT_VISIBILITY },
 	{ "-webkit-box-sizing", CSS_PROP_BOX_SIZING },
 	{ "content", CSS_PROP_CONTENT },
 	{ "flex-direction", CSS_PROP_FLEX_DIRECTION },
@@ -250,6 +258,8 @@ static const struct values_name values_names[] = {
 	{ "-webkit-box-shadow", CSS_PROP_BOX_SHADOW },
 	{ "-moz-box-shadow", CSS_PROP_BOX_SHADOW },
 	{ "outline-width", CSS_PROP_OUTLINE_WIDTH },
+	{ "-webkit-text-stroke-width", CSS_PROP_TEXT_STROKE_WIDTH },
+	{ "-webkit-text-stroke", SHORT_TEXT_STROKE },
 	{ "outline-style", CSS_PROP_OUTLINE_STYLE },
 	{ "outline-color", CSS_PROP_OUTLINE_COLOR },
 	{ "outline-offset", CSS_PROP_OUTLINE_OFFSET },
@@ -270,6 +280,13 @@ static const struct values_name values_names[] = {
 	{ "grid-row-end", CSS_PROP_GRID_ROW_END },
 	{ "container-type", CSS_PROP_CONTAINER_TYPE },
 	{ "border-collapse", CSS_PROP_BORDER_COLLAPSE },
+	{ "caption-side", CSS_PROP_CAPTION_SIDE },
+	{ "backdrop-filter", CSS_PROP_BACKDROP_FILTER },
+	{ "will-change", CSS_PROP_WILL_CHANGE },
+	{ "contain", CSS_PROP_CONTAIN },
+	{ "filter", CSS_PROP_FILTER },
+	{ "-webkit-filter", CSS_PROP_FILTER },
+	{ "-webkit-backdrop-filter", CSS_PROP_BACKDROP_FILTER },
 	{ "-webkit-clip-path", CSS_PROP_CLIP_PATH },
 	{ "flex", SHORT_FLEX },
 	{ "-webkit-flex", SHORT_FLEX },
@@ -287,10 +304,10 @@ static const struct values_name values_names[] = {
 	{ "-webkit-border-top-right-radius", SHORT_RADIUS_TOP_RIGHT },
 	{ "-webkit-border-bottom-right-radius", SHORT_RADIUS_BOTTOM_RIGHT },
 	{ "-webkit-border-bottom-left-radius", SHORT_RADIUS_BOTTOM_LEFT },
-	{ "border-start-start-radius", SHORT_RADIUS_TOP_LEFT },
-	{ "border-start-end-radius", SHORT_RADIUS_TOP_RIGHT },
-	{ "border-end-end-radius", SHORT_RADIUS_BOTTOM_RIGHT },
-	{ "border-end-start-radius", SHORT_RADIUS_BOTTOM_LEFT },
+	{ "border-start-start-radius", SHORT_RADIUS_START_START },
+	{ "border-start-end-radius", SHORT_RADIUS_START_END },
+	{ "border-end-end-radius", SHORT_RADIUS_END_END },
+	{ "border-end-start-radius", SHORT_RADIUS_END_START },
 	{ "outline", SHORT_OUTLINE },
 	{ "grid-column", SHORT_GRID_COLUMN },
 	{ "grid-row", SHORT_GRID_ROW },
@@ -423,6 +440,13 @@ static const struct values_keyword values_border_collapse[] = {
 	{ NULL, 0 }
 };
 
+/* The keywords of caption-side. */
+static const struct values_keyword values_caption_side[] = {
+	{ "top", 0 },
+	{ "bottom", 1 },
+	{ NULL, 0 }
+};
+
 /* The keywords of container-type. */
 static const struct values_keyword values_container_type[] = {
 	{ "normal", CSS_CONTAINER_NORMAL },
@@ -551,6 +575,14 @@ static const struct values_keyword values_clear[] = {
 	{ NULL, 0 }
 };
 
+/* The keywords of content-visibility. */
+static const struct values_keyword values_content_visibility[] = {
+	{ "visible", 0 },
+	{ "auto", 1 },
+	{ "hidden", 2 },
+	{ NULL, 0 }
+};
+
 /* The keywords of visibility. */
 static const struct values_keyword values_visibility[] = {
 	{ "visible", 0 },
@@ -567,8 +599,8 @@ static const struct values_keyword values_border_style[] = {
 	{ "dashed", CSS_BORDER_DASHED },
 	{ "dotted", CSS_BORDER_DOTTED },
 	{ "double", CSS_BORDER_DOUBLE },
-	{ "groove", CSS_BORDER_SOLID },
-	{ "ridge", CSS_BORDER_SOLID },
+	{ "groove", CSS_BORDER_GROOVE },
+	{ "ridge", CSS_BORDER_RIDGE },
 	{ "inset", CSS_BORDER_INSET },
 	{ "outset", CSS_BORDER_OUTSET },
 	{ NULL, 0 }
@@ -726,6 +758,24 @@ static const struct values_keyword values_list_style[] = {
 	{ "square", CSS_LIST_SQUARE },
 	{ "decimal", CSS_LIST_DECIMAL },
 	{ "none", CSS_LIST_NONE },
+	{ "disclosure-closed", CSS_LIST_DISCLOSURE_CLOSED },
+	{ "disclosure-open", CSS_LIST_DISCLOSURE_OPEN },
+	{ NULL, 0 }
+};
+
+/* The keywords of background-clip. */
+static const struct values_keyword values_background_clip[] = {
+	{ "border-box", 0 },
+	{ "padding-box", 1 },
+	{ "content-box", 2 },
+	{ "text", 0 },
+	{ NULL, 0 }
+};
+
+/* The keywords of list-style-position. */
+static const struct values_keyword values_list_position[] = {
+	{ "outside", 0 },
+	{ "inside", 1 },
 	{ NULL, 0 }
 };
 
@@ -792,6 +842,8 @@ static const struct values_keyword values_units[] = {
 	{ "rem", CSS_DUNIT_REM },
 	{ "ex", CSS_DUNIT_EX },
 	{ "ch", CSS_DUNIT_EX },
+	{ "lh", CSS_DUNIT_LH },
+	{ "rlh", CSS_DUNIT_RLH },
 	{ "pt", CSS_DUNIT_PT },
 	{ "pc", CSS_DUNIT_PC },
 	{ "in", CSS_DUNIT_IN },
@@ -1009,11 +1061,16 @@ static int values_hsl_function(const struct css_token *tokens, size_t count, uin
 static void values_wide_keyword(int property, const struct css_value *value, struct css_declaration *out, size_t *made);
 static int values_background(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static size_t values_function_length(const struct css_token *tokens, size_t count);
+static int values_filter_argument(const struct css_token *token, int kind, struct css_value *amount);
+static int values_filters(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_url(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_image_set(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_view_transition_class(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_animation_single(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_animation(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_repeat_parts(const struct css_token *const *parts, size_t count, struct css_value *value);
+static int values_declared_text(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
+static int values_token_utf8(const struct css_token *token, struct wb_buffer *out);
 static int values_subgrid(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
 static int values_position_parts(const struct css_token *const *parts, size_t count, struct css_value *x, struct css_value *y);
 static int values_position_part(const struct css_token *token, struct css_value *value);
@@ -1040,6 +1097,7 @@ static void values_calc_scale(struct css_calc_sum *sum, float factor);
 static int values_calc_add(struct css_calc_sum *sum, const struct css_calc_sum *other, float sign);
 static size_t values_skip_space(const struct css_token *tokens, size_t count, size_t index);
 static int values_border_radius(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_text_stroke(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_corner_radius(struct css_parse *parse, int corner, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_radii(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *radii);
 static int values_box_shadow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
@@ -1180,6 +1238,7 @@ css_parse_property(
 	struct css_value value;
 	int error;
 	int first;
+	int position;
 	int wide;
 
 	/* Nothing is no value. */
@@ -1197,6 +1256,9 @@ css_parse_property(
 	memset(&value, 0, sizeof(value));
 	wide = values_keyword(values_wide, &tokens[0], &value.kind);
 	if (count == 1 && wide) {
+		/* revert is told from unset by a flag: it takes the user agent's value (the cascade looks it up). */
+		if (value.kind == CSS_VALUE_UNSET && css_ident_equal(&tokens[0], "revert"))
+			value.keyword = 1;
 		values_wide_keyword(property, &value, out, out_count);
 		return 0;
 	}
@@ -1256,6 +1318,14 @@ css_parse_property(
 	case SHORT_TEXT_DECORATION:
 		return values_text_decoration(tokens, count, out, out_count);
 	case SHORT_LIST_STYLE:
+		position = 0;
+		for (first = 0; first < (int)count; first++) {
+			error = values_single(parse, CSS_PROP_LIST_STYLE_POSITION, &tokens[first], 1, &value);
+			if (error == 0) {
+				values_add(out, out_count, CSS_PROP_LIST_STYLE_POSITION, &value);
+				position = 1;
+			}
+		}
 		for (first = 0; first < (int)count; first++) {
 			error = values_single(parse, CSS_PROP_LIST_STYLE_TYPE, &tokens[first], 1, &value);
 			if (error == 0) {
@@ -1264,7 +1334,9 @@ css_parse_property(
 			}
 		}
 
-		/* A list style without a type is not used in this pass. */
+		/* A list style without a type keeps the type. */
+		if (position)
+			return 0;
 		return EINVAL;
 	case SHORT_FONT:
 		return css_parse_font(parse, tokens, count, out, out_count);
@@ -1298,8 +1370,15 @@ css_parse_property(
 		return values_corner_radius(parse, CSS_BOTTOM_RIGHT, tokens, count, out, out_count);
 	case SHORT_RADIUS_BOTTOM_LEFT:
 		return values_corner_radius(parse, CSS_BOTTOM_LEFT, tokens, count, out, out_count);
+	case SHORT_RADIUS_START_START:
+	case SHORT_RADIUS_START_END:
+	case SHORT_RADIUS_END_END:
+	case SHORT_RADIUS_END_START:
+		return values_corner_radius(parse, 4 + (property - SHORT_RADIUS_START_START), tokens, count, out, out_count);
 	case SHORT_OUTLINE:
 		return values_outline(parse, tokens, count, out, out_count);
+	case SHORT_TEXT_STROKE:
+		return values_text_stroke(parse, tokens, count, out, out_count);
 	case SHORT_GRID_COLUMN:
 		return values_grid_pair(parse, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END, tokens, count, out, out_count);
 	case SHORT_GRID_ROW:
@@ -2001,9 +2080,10 @@ values_single(
 
 	/* An inset or a size with anchor functions is kept as a sum the layout finishes. */
 	if (((property >= CSS_PROP_TOP && property <= CSS_PROP_LEFT) ||
-	    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT)) && css_anchor_mentioned(tokens, count)) {
-		error = css_anchor_parse(parse, tokens, count, property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT,
-		    &value->anchor);
+	    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT) ||
+	    (property >= CSS_PROP_MARGIN_TOP && property <= CSS_PROP_MARGIN_LEFT)) && css_anchor_mentioned(tokens, count)) {
+		error = css_anchor_parse(parse, tokens, count, property != CSS_PROP_TOP && property != CSS_PROP_RIGHT &&
+		    property != CSS_PROP_BOTTOM && property != CSS_PROP_LEFT, &value->anchor);
 		if (error != 0)
 			return error;
 		value->kind = CSS_VALUE_ANCHOR;
@@ -2224,6 +2304,10 @@ values_single(
 			return 0;
 		}
 
+		/* image-set(): the first image with its resolution. */
+		if (count > 0 && tokens[0].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[0], "image-set"))
+			return values_image_set(parse, tokens, count, value);
+
 		/* Parse the selected component with its established native grammar. */
 		error = values_url(parse, tokens, count, value);
 		if (error != 0)
@@ -2269,6 +2353,73 @@ values_single(
 			return error;
 
 		/* Succeeded: the selected native scalar component was parsed. */
+		return 0;
+	}
+
+	/* contain takes none, strict, content, or any of size, layout, paint, style and inline-size. */
+	if (property == CSS_PROP_CONTAIN) {
+		size_t at;
+
+		value->kind = CSS_VALUE_KEYWORD;
+		value->keyword = 0;
+		for (at = 0; at < count; at++) {
+			if (tokens[at].type != CSS_TOKEN_IDENT)
+				return EINVAL;
+			if (css_ident_equal(&tokens[at], "none")) {
+				if (count != 1)
+					return EINVAL;
+			} else if (css_ident_equal(&tokens[at], "strict")) {
+				if (count != 1)
+					return EINVAL;
+				value->keyword = 15;
+			} else if (css_ident_equal(&tokens[at], "content")) {
+				if (count != 1)
+					return EINVAL;
+				value->keyword = 14;
+			} else if (css_ident_equal(&tokens[at], "size")) {
+				value->keyword |= 1;
+			} else if (css_ident_equal(&tokens[at], "layout")) {
+				value->keyword |= 2;
+			} else if (css_ident_equal(&tokens[at], "paint")) {
+				value->keyword |= 4;
+			} else if (css_ident_equal(&tokens[at], "style")) {
+				value->keyword |= 8;
+			} else if (css_ident_equal(&tokens[at], "inline-size")) {
+				value->keyword |= 16;
+			} else {
+				return EINVAL;
+			}
+		}
+		return count == 0 ? EINVAL : 0;
+	}
+
+	/* will-change takes auto or a comma-separated list of property names; only whether one makes a containing block is kept. */
+	if (property == CSS_PROP_WILL_CHANGE) {
+		size_t at;
+
+		value->kind = CSS_VALUE_KEYWORD;
+		value->keyword = 0;
+		for (at = 0; at < count; at++) {
+			if (tokens[at].type == CSS_TOKEN_COMMA)
+				continue;
+			if (tokens[at].type != CSS_TOKEN_IDENT)
+				return EINVAL;
+			if (css_ident_equal(&tokens[at], "transform") || css_ident_equal(&tokens[at], "perspective") ||
+			    css_ident_equal(&tokens[at], "filter") || css_ident_equal(&tokens[at], "backdrop-filter"))
+				value->keyword |= 3;
+			if (css_ident_equal(&tokens[at], "clip-path") || css_ident_equal(&tokens[at], "mask") ||
+			    css_ident_equal(&tokens[at], "mask-image") || css_ident_equal(&tokens[at], "mix-blend-mode") ||
+			    css_ident_equal(&tokens[at], "opacity"))
+				value->keyword |= 2;
+		}
+		return count == 0 ? EINVAL : 0;
+	}
+
+	/* backdrop-filter takes none or a list of filter functions. */
+	if (property == CSS_PROP_BACKDROP_FILTER || property == CSS_PROP_FILTER) {
+		error = values_filters(parse, tokens, count, value);
+		if (error != 0)
+			return error;
 		return 0;
 	}
 
@@ -2375,7 +2526,7 @@ values_single(
 	}
 
 	/* The outline's width is a border's. */
-	if (property == CSS_PROP_OUTLINE_WIDTH) {
+	if (property == CSS_PROP_OUTLINE_WIDTH || property == CSS_PROP_TEXT_STROKE_WIDTH) {
 		/* Parse the selected component with its established native grammar. */
 		error = values_single(parse, CSS_PROP_BORDER_TOP_WIDTH, tokens, count, value);
 		if (error != 0)
@@ -2577,6 +2728,9 @@ values_single(
 	case CSS_PROP_BORDER_COLLAPSE:
 		table = values_border_collapse;
 		break;
+	case CSS_PROP_CAPTION_SIDE:
+		table = values_caption_side;
+		break;
 	case CSS_PROP_CURSOR:
 		table = values_cursor;
 		break;
@@ -2596,8 +2750,17 @@ values_single(
 	case CSS_PROP_LIST_STYLE_TYPE:
 		table = values_list_style;
 		break;
+	case CSS_PROP_LIST_STYLE_POSITION:
+		table = values_list_position;
+		break;
+	case CSS_PROP_BACKGROUND_CLIP:
+		table = values_background_clip;
+		break;
 	case CSS_PROP_BOX_SIZING:
 		table = values_box_sizing;
+		break;
+	case CSS_PROP_CONTENT_VISIBILITY:
+		table = values_content_visibility;
 		break;
 	case CSS_PROP_FLEX_DIRECTION:
 		table = values_flex_direction;
@@ -2687,7 +2850,7 @@ values_single(
 
 	/* A corner's radius on one axis: a length or a percentage that is not negative. */
 	if (property >= CSS_PROP_RADIUS_TOP_LEFT_X &&
-	    property <= CSS_PROP_RADIUS_BOTTOM_LEFT_Y) {
+	    property <= CSS_PROP_RADIUS_END_START_Y) {
 		error = values_length(&tokens[0], 0, value);
 		if (error != 0)
 			return error;
@@ -2741,8 +2904,9 @@ values_single(
 	    property == CSS_PROP_COLUMN_GAP) {
 		is_auto = css_ident_equal(&tokens[0], "normal");
 		if (is_auto) {
+			/* A negative length, which no gap can be, stands for normal. */
 			value->kind = CSS_VALUE_LENGTH;
-			value->number = 0;
+			value->number = -1;
 			value->unit = CSS_DUNIT_PX;
 			return 0;
 		}
@@ -3459,6 +3623,9 @@ values_wide_keyword(
 	case SHORT_PADDING:
 		first = CSS_PROP_PADDING_TOP;
 		break;
+	case SHORT_INSET:
+		first = CSS_PROP_TOP;
+		break;
 	case SHORT_BORDER_WIDTH:
 		first = CSS_PROP_BORDER_TOP_WIDTH;
 		break;
@@ -3523,6 +3690,10 @@ values_wide_keyword(
 	case SHORT_RADIUS_TOP_RIGHT:
 	case SHORT_RADIUS_BOTTOM_RIGHT:
 	case SHORT_RADIUS_BOTTOM_LEFT:
+	case SHORT_RADIUS_START_START:
+	case SHORT_RADIUS_START_END:
+	case SHORT_RADIUS_END_END:
+	case SHORT_RADIUS_END_START:
 		/* A corner's two radii. */
 		first = CSS_PROP_RADIUS_TOP_LEFT_X + 2 * (property - SHORT_RADIUS_TOP_LEFT);
 		values_add(out, made, first, value);
@@ -3670,6 +3841,18 @@ values_background(
 			if (error != 0)
 				return error;
 			image.kind = CSS_VALUE_GRADIENT;
+			image_seen = 1;
+			index += rest;
+			continue;
+		}
+
+		/* An image-set() is an image: its first candidate. */
+		if (tokens[index].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[index], "image-set")) {
+			if (image_seen)
+				return EINVAL;
+			error = values_image_set(parse, tokens + index, rest, &image);
+			if (error != 0)
+				return error;
 			image_seen = 1;
 			index += rest;
 			continue;
@@ -4125,6 +4308,65 @@ values_view_transition_class(
 }
 
 /*
+ * Parses image-set(url("..") 2x, ...) into the URL of its first image and that image's resolution
+ * (the number of the value: image pixels per CSS pixel).
+ */
+static int
+values_image_set(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	size_t index;
+	size_t end;
+	size_t unit;
+	float density;
+	int error;
+
+	/* The first candidate: skips the function and its whitespace; a url token, or url( string ). */
+	memset(value, 0, sizeof(*value));
+	index = 1;
+	while (index < count && tokens[index].type == CSS_TOKEN_WHITESPACE)
+		index++;
+	if (index >= count)
+		return EINVAL;
+	end = index + 1;
+	if (tokens[index].type == CSS_TOKEN_FUNCTION) {
+		while (end < count && tokens[end].type != CSS_TOKEN_CLOSE_PAREN)
+			end++;
+		if (end >= count)
+			return EINVAL;
+		end++;
+	} else if (tokens[index].type != CSS_TOKEN_STRING && tokens[index].type != CSS_TOKEN_URL) {
+		return EINVAL;
+	}
+	if (tokens[index].type == CSS_TOKEN_STRING) {
+		value->url = vm_atom_from_units(parse->heap, tokens[index].text, tokens[index].length);
+		if (value->url == NULL)
+			return ENOMEM;
+		value->kind = CSS_VALUE_URL;
+	} else {
+		error = values_url(parse, tokens + index, end - index, value);
+		if (error != 0)
+			return error;
+	}
+
+	/* Its resolution: a number and x (or dppx), 1x when none is given. */
+	density = 1.0f;
+	unit = end;
+	while (unit < count && tokens[unit].type == CSS_TOKEN_WHITESPACE)
+		unit++;
+	if (unit < count && tokens[unit].type == CSS_TOKEN_DIMENSION &&
+	    (css_ident_equal(&tokens[unit], "x") || css_ident_equal(&tokens[unit], "dppx")))
+		density = (float)tokens[unit].number;
+	if (density <= 0.0f)
+		density = 1.0f;
+	value->number = density;
+	return 0;
+}
+
+/*
  * Parses an image: url(...) (a URL token, or the url function with a
  * string) into an atom of its text, or none.
  */
@@ -4531,6 +4773,8 @@ values_takes_length(
 	case CSS_PROP_RIGHT:
 	case CSS_PROP_BOTTOM:
 	case CSS_PROP_LEFT:
+	case CSS_PROP_BORDER_SPACING_X:
+	case CSS_PROP_BORDER_SPACING_Y:
 	case CSS_PROP_FONT_SIZE:
 	case CSS_PROP_LINE_HEIGHT:
 	case CSS_PROP_TEXT_INDENT:
@@ -5648,6 +5892,45 @@ values_corner_radius(
 	return values_pair(parse, CSS_PROP_RADIUS_TOP_LEFT_X + 2 * corner, CSS_PROP_RADIUS_TOP_LEFT_Y + 2 * corner, tokens, count, out, made);
 }
 
+/* Parses -webkit-text-stroke: a width and a color in either order (only the width is kept). */
+static int
+values_text_stroke(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_value width;
+	struct css_value candidate;
+	size_t starts[3];
+	size_t lengths[3];
+	size_t components;
+	size_t index;
+	int error;
+
+	/* The defaults: medium. */
+	memset(&width, 0, sizeof(width));
+	width.kind = CSS_VALUE_LENGTH;
+	width.number = 3;
+	width.unit = CSS_DUNIT_PX;
+	components = values_components(tokens, count, starts, lengths, 3);
+	if (components == 0 || components > 2)
+		return EINVAL;
+	for (index = 0; index < components; index++) {
+		error = values_single(parse, CSS_PROP_TEXT_STROKE_WIDTH, tokens + starts[index], lengths[index], &candidate);
+		if (error == 0) {
+			width = candidate;
+			continue;
+		}
+		error = values_single(parse, CSS_PROP_OUTLINE_COLOR, tokens + starts[index], lengths[index], &candidate);
+		if (error != 0)
+			return EINVAL;
+	}
+	values_add(out, made, CSS_PROP_TEXT_STROKE_WIDTH, &width);
+	return 0;
+}
+
 /*
  * Parses box-shadow: none, or a comma-separated list of
  * shadows (the first CSS_SHADOWS of them are kept), in the parse's arena.
@@ -5708,6 +5991,146 @@ values_box_shadow(
 
 	/* Succeeded: the shadows are parsed. */
 	return 0;
+}
+
+/*
+ * Parses backdrop-filter: none, or a list of filter functions (blur() takes a length, hue-rotate() an angle, the others a
+ * number or a percentage; an argument may be left out).
+ */
+static int
+values_filters(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	static const struct {
+		const char *name;
+		int kind;
+	} names[] = {
+		{ "blur", CSS_FILTER_BLUR }, { "brightness", CSS_FILTER_BRIGHTNESS }, { "contrast", CSS_FILTER_CONTRAST },
+		{ "grayscale", CSS_FILTER_GRAYSCALE }, { "hue-rotate", CSS_FILTER_HUE_ROTATE }, { "invert", CSS_FILTER_INVERT },
+		{ "opacity", CSS_FILTER_OPACITY }, { "saturate", CSS_FILTER_SATURATE }, { "sepia", CSS_FILTER_SEPIA }
+	};
+	struct css_filter_list *list;
+	struct css_declared_filter *filter;
+	size_t index;
+	size_t used;
+	size_t name;
+	int found;
+	int error;
+
+	/* The list, kept in the arena. */
+	list = wb_arena_zalloc(parse->arena, sizeof(*list));
+	if (list == NULL)
+		return ENOMEM;
+	value->kind = CSS_VALUE_FILTERS;
+	value->filters = list;
+
+	/* none is the empty list. */
+	if (count == 1 && tokens[0].type == CSS_TOKEN_IDENT) {
+		if (!css_ident_equal(&tokens[0], "none"))
+			return EINVAL;
+		return 0;
+	}
+
+	/* Each function. */
+	index = 0;
+	while (index < count) {
+		/* A reference to an SVG filter has no function here: it filters nothing. */
+		if (tokens[index].type == CSS_TOKEN_URL) {
+			index++;
+			continue;
+		}
+		if (tokens[index].type != CSS_TOKEN_FUNCTION)
+			return EINVAL;
+		used = values_function_length(tokens + index, count - index);
+		if (used < 2U || tokens[index + used - 1U].type != CSS_TOKEN_CLOSE_PAREN || list->count >= CSS_FILTERS)
+			return EINVAL;
+		found = 0;
+		for (name = 0; name < sizeof(names) / sizeof(names[0]); name++) {
+			if (css_ident_equal(&tokens[index], names[name].name)) {
+				found = 1;
+				break;
+			}
+		}
+		if (!found)
+			return EINVAL;
+		filter = &list->filters[list->count];
+		filter->kind = names[name].kind;
+
+		/* No argument is the default (one, or zero for blur and hue-rotate). */
+		memset(&filter->amount, 0, sizeof(filter->amount));
+		filter->amount.kind = CSS_VALUE_LENGTH;
+		filter->amount.unit = CSS_DUNIT_PX;
+		if (filter->kind != CSS_FILTER_BLUR && filter->kind != CSS_FILTER_HUE_ROTATE)
+			filter->amount.number = 1.0f;
+		if (used > 2U) {
+			if (used != 3U)
+				return EINVAL;
+			error = values_filter_argument(&tokens[index + 1U], filter->kind, &filter->amount);
+			if (error != 0)
+				return error;
+		}
+		list->count++;
+		index += used;
+	}
+
+	/* Succeeded: the functions are parsed. */
+	return 0;
+}
+
+/* Parses one filter function's argument: a length for blur, an angle in degrees for hue-rotate, else a non-negative number or percentage. */
+static int
+values_filter_argument(
+	const struct css_token *token,
+	int kind,
+	struct css_value *amount)
+{
+	size_t index;
+	double number;
+	static const struct {
+		const char *name;
+		double scale;
+	} angles[] = { { "deg", 1.0 }, { "grad", 0.9 }, { "rad", 57.29577951308232 }, { "turn", 360.0 } };
+
+	amount->kind = CSS_VALUE_LENGTH;
+	if (kind == CSS_FILTER_BLUR) {
+		/* A non-negative length. */
+		if (values_length(token, 0, amount) != 0 || amount->unit == CSS_DUNIT_PERCENT || amount->number < 0)
+			return EINVAL;
+		return 0;
+	}
+	if (kind == CSS_FILTER_HUE_ROTATE) {
+		/* An angle, or zero. */
+		amount->unit = CSS_DUNIT_PX;
+		if (token->type == CSS_TOKEN_NUMBER && token->number == 0) {
+			amount->number = 0;
+			return 0;
+		}
+		if (token->type != CSS_TOKEN_DIMENSION)
+			return EINVAL;
+		for (index = 0; index < sizeof(angles) / sizeof(angles[0]); index++) {
+			if (css_ident_equal(token, angles[index].name)) {
+				number = token->number * angles[index].scale;
+				amount->number = (float)number;
+				return 0;
+			}
+		}
+		return EINVAL;
+	}
+
+	/* A non-negative number, or a percentage of one. */
+	amount->unit = CSS_DUNIT_PX;
+	if (token->type == CSS_TOKEN_NUMBER && token->number >= 0) {
+		amount->number = (float)token->number;
+		return 0;
+	}
+	if (token->type == CSS_TOKEN_PERCENTAGE && token->number >= 0) {
+		amount->number = (float)(token->number / 100.0);
+		return 0;
+	}
+	return EINVAL;
 }
 
 /* Parses one sharp text shadow, or none; blur and lists remain unsupported. */
@@ -6090,7 +6513,129 @@ values_tracks(
 	if (list->count == 0)
 		return EINVAL;
 
+	/* A template with a repeat() keeps its text for an element that is not a grid container. */
+	error = values_declared_text(parse, tokens, count, list);
+	if (error != 0)
+		return error;
+
 	/* Succeeded: the template is parsed. */
+	return 0;
+}
+
+/* Writes a number the way a serialization does (an integer without a point, else up to six significant digits). */
+static int
+values_declared_number(
+	double number,
+	struct wb_buffer *out)
+{
+	char text[40];
+
+	if (number == (double)(long)number)
+		snprintf(text, sizeof(text), "%ld", (long)number);
+	else
+		snprintf(text, sizeof(text), "%.6g", number);
+	return wb_buffer_append_string(out, text);
+}
+
+/*
+ * Keeps the text of a track list that has a repeat() (an element that is not a grid container reports its value
+ * as written): the tokens with single spaces, ", " after commas and line names in brackets without inner padding.
+ */
+static int
+values_declared_text(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_track_list *list)
+{
+	struct wb_buffer text;
+	char *kept;
+	size_t index;
+	int repeats;
+	int error;
+	int space;
+
+	/* Only a template with a repeat(). */
+	repeats = 0;
+	for (index = 0; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[index], "repeat"))
+			repeats = 1;
+		if (tokens[index].type == CSS_TOKEN_FUNCTION && !css_ident_equal(&tokens[index], "repeat") &&
+		    !css_ident_equal(&tokens[index], "minmax") && !css_ident_equal(&tokens[index], "fit-content"))
+			return 0;
+	}
+	if (!repeats)
+		return 0;
+
+	/* The tokens. */
+	wb_buffer_init(&text);
+	error = 0;
+	space = 0;
+	for (index = 0; error == 0 && index < count; index++) {
+		switch (tokens[index].type) {
+		case CSS_TOKEN_WHITESPACE:
+			space = 1;
+			continue;
+		case CSS_TOKEN_COMMA:
+			space = 0;
+			error = wb_buffer_append_string(&text, ", ");
+			continue;
+		case CSS_TOKEN_CLOSE_SQUARE:
+		case CSS_TOKEN_CLOSE_PAREN:
+			space = 0;
+			error = wb_buffer_append_byte(&text, tokens[index].type == CSS_TOKEN_CLOSE_SQUARE ? ']' : ')');
+			continue;
+		default:
+			break;
+		}
+		if (space && text.length != 0 && text.data[text.length - 1U] != '[' && text.data[text.length - 1U] != '(' &&
+		    !(text.length >= 2U && text.data[text.length - 1U] == ' ' && text.data[text.length - 2U] == ','))
+			error = wb_buffer_append_byte(&text, ' ');
+		space = 0;
+		if (error != 0)
+			break;
+		switch (tokens[index].type) {
+		case CSS_TOKEN_OPEN_SQUARE:
+			error = wb_buffer_append_byte(&text, '[');
+			break;
+		case CSS_TOKEN_FUNCTION:
+			error = values_token_utf8(&tokens[index], &text);
+			if (error == 0)
+				error = wb_buffer_append_byte(&text, '(');
+			break;
+		case CSS_TOKEN_NUMBER:
+			error = values_declared_number(tokens[index].number, &text);
+			break;
+		case CSS_TOKEN_PERCENTAGE:
+			error = values_declared_number(tokens[index].number, &text);
+			if (error == 0)
+				error = wb_buffer_append_byte(&text, '%');
+			break;
+		case CSS_TOKEN_DIMENSION:
+			error = values_declared_number(tokens[index].number, &text);
+			if (error == 0)
+				error = values_token_utf8(&tokens[index], &text);
+			break;
+		default:
+			error = values_token_utf8(&tokens[index], &text);
+			break;
+		}
+	}
+	if (error != 0) {
+		wb_buffer_release(&text);
+		return error;
+	}
+
+	/* Kept in the parse's arena. */
+	kept = wb_arena_alloc(parse->arena, text.length + 1U);
+	if (kept == NULL) {
+		wb_buffer_release(&text);
+		return ENOMEM;
+	}
+	memcpy(kept, text.data, text.length);
+	kept[text.length] = '\0';
+	list->declared = kept;
+	wb_buffer_release(&text);
 	return 0;
 }
 
@@ -6120,6 +6665,7 @@ values_subgrid_names(
 	size_t count,
 	size_t index,
 	struct wb_buffer *out,
+	struct css_line_names *group,
 	size_t *end)
 {
 	struct vm_string *name;
@@ -6133,6 +6679,10 @@ values_subgrid_names(
 		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
 			continue;
 		error = values_custom_ident(parse, &tokens[index], &name);
+		if (error == 0 && group != NULL && group->count < CSS_LINE_NAMES) {
+			group->names[group->count] = name;
+			group->count++;
+		}
 		if (error == 0 && !first)
 			error = wb_buffer_append_byte(out, ' ');
 		if (error == 0)
@@ -6163,14 +6713,22 @@ values_subgrid(
 	struct css_track_list *list)
 {
 	struct wb_buffer text;
+	struct css_subgrid_names *parts;
+	struct css_subgrid_part *part;
 	char *kept;
 	size_t index;
 	size_t end;
 	size_t inner;
 	size_t comma;
+	struct css_line_names *group;
 	int automatic;
 	int groups;
 	int error;
+
+	/* The names as parts too, for the layout. */
+	parts = wb_arena_zalloc(parse->arena, sizeof(*parts));
+	if (parts == NULL)
+		return ENOMEM;
 
 	/* subgrid, then each component after a space. */
 	wb_buffer_init(&text);
@@ -6188,7 +6746,14 @@ values_subgrid(
 
 		/* A group of names. */
 		if (tokens[index].type == CSS_TOKEN_OPEN_SQUARE) {
-			error = values_subgrid_names(parse, tokens, count, index, &text, &index);
+			part = NULL;
+			if (parts->count < CSS_SUBGRID_PARTS) {
+				part = &parts->parts[parts->count];
+				parts->count++;
+				part->repeat = 0;
+				part->groups = 1;
+			}
+			error = values_subgrid_names(parse, tokens, count, index, &text, part != NULL ? &part->names[0] : NULL, &index);
 			continue;
 		}
 
@@ -6200,14 +6765,24 @@ values_subgrid(
 		end = index + values_function_length(tokens + index, count - index);
 		inner = values_skip_space(tokens, end, index + 1U);
 		error = wb_buffer_append_string(&text, "repeat(");
+		part = NULL;
+		if (parts->count < CSS_SUBGRID_PARTS) {
+			part = &parts->parts[parts->count];
+			parts->count++;
+			part->groups = 0;
+		}
 		if (error == 0 && inner < end && tokens[inner].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[inner], "auto-fill")) {
 			if (automatic)
 				error = EINVAL;
 			automatic = 1;
+			if (part != NULL)
+				part->repeat = -1;
 			if (error == 0)
 				error = wb_buffer_append_string(&text, "auto-fill");
 		} else if (error == 0 && inner < end && tokens[inner].type == CSS_TOKEN_NUMBER && tokens[inner].integer &&
 		    tokens[inner].number >= 1 && tokens[inner].number <= 10000) {
+			if (part != NULL)
+				part->repeat = (int)tokens[inner].number;
 			error = wb_buffer_printf(&text, "%d", (int)tokens[inner].number);
 		} else if (error == 0) {
 			error = EINVAL;
@@ -6228,8 +6803,14 @@ values_subgrid(
 				break;
 			}
 			error = wb_buffer_append_byte(&text, ' ');
-			if (error == 0)
-				error = values_subgrid_names(parse, tokens, end - 1U, inner, &text, &inner);
+			if (error == 0) {
+				group = NULL;
+				if (part != NULL && part->groups < CSS_SUBGRID_GROUPS) {
+					group = &part->names[part->groups];
+					part->groups++;
+				}
+				error = values_subgrid_names(parse, tokens, end - 1U, inner, &text, group, &inner);
+			}
 			groups++;
 		}
 		if (error == 0 && groups == 0)
@@ -6248,6 +6829,7 @@ values_subgrid(
 			memcpy(kept, text.data, text.length);
 			kept[text.length] = '\0';
 			list->subgrid = kept;
+			list->subgrid_names = parts;
 		}
 	}
 	wb_buffer_release(&text);

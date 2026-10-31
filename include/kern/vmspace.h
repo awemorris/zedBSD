@@ -207,6 +207,12 @@ struct vm_region {
 	struct vm_region *next;
 };
 
+/*
+ * One address space: the regions of a process and the machine layer's tables
+ * that translate them.
+ *
+ * It lives until its last reference is released, after which it is reaped.
+ */
 struct vmspace {
 	kern_space_handle_t space;
 	refcount_t refs;
@@ -270,8 +276,17 @@ struct vmspace_pinned_page {
 	struct kern_pmem memory;
 };
 
-/* Maps a retained device extent; exact requires an unoccupied hint address. */
-int vmspace_map_device(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, struct vm_device_mapping *mapping, int exact, uintptr_t *mapped);
+/*
+ * Where vmspace_map_device places a mapping: at a free range near the hint,
+ * exactly at the hint when that range is free (MAP_FIXED_NOREPLACE), or
+ * exactly at the hint in place of whatever the range holds (MAP_FIXED).
+ */
+#define VM_DEVICE_PLACE_HINT		0
+#define VM_DEVICE_PLACE_NOREPLACE	1
+#define VM_DEVICE_PLACE_FIXED		2
+
+/* Maps a retained device extent where placement (a VM_DEVICE_PLACE_ value) says. */
+int vmspace_map_device(struct vmspace *vm, uintptr_t hint, size_t size, uint32_t prot, struct vm_device_mapping *mapping, int placement, uintptr_t *mapped);
 
 extern struct vmspace kernel_vmspace;
 

@@ -50,6 +50,9 @@
 #include "drivers/gpu/powervr/render-pass.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
+/* How long a timeline poll sleeps before it looks again, in milliseconds (a tick at least). */
+#define RENDER_POLL_MS 1U
+
 /*
  * How often, and how far apart, a refused registration is tried again.
  */
@@ -656,6 +659,30 @@ powervr_buffer_put(
 }
 
 /*
+ * Gives back a list of cached buffers, linked through next, whose lines
+ * the system level cache wrote back and dropped: into the pool for reuse
+ * (through the cache no longer), or freed.  A write the cache still made
+ * after the flush would land in memory the GPU keeps, not in the
+ * kernel's.
+ */
+void
+powervr_buffers_release_flushed(
+	struct powervr_render *render,
+	struct powervr_buffer *list)
+{
+	struct powervr_buffer *buffer;
+
+	/* Each buffer of the list. */
+	while (list != NULL) {
+		buffer = list;
+		list = buffer->next;
+		buffer->next = NULL;
+		buffer->gpu_cached = 0;
+		pool_put(render, buffer);
+	}
+}
+
+/*
  * Frees a list of buffers kept for a reset, linked through next.
  */
 void
@@ -733,7 +760,7 @@ powervr_session_wait(
 	uint64_t now;
 	uint32_t current;
 
-	/* Reads the timeline once a tick until it reaches the value or the bound is spent. */
+	/* Reads the timeline once a millisecond until it reaches the value or the bound is spent. */
 	deadline = sched_ticks() + kern_ms_to_ticks(milliseconds);
 	for (;;) {
 		current = powervr_session_timeline(session);
@@ -745,8 +772,8 @@ powervr_session_wait(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Sleeps one tick. */
-		sched_sleep(now + 1U);
+		/* Sleeps a millisecond (a tick at least). */
+		sched_sleep(now + kern_ms_to_ticks(RENDER_POLL_MS));
 	}
 
 	/* Succeeded: the timeline reached the value. */
@@ -1185,6 +1212,12 @@ blob_make(
 		if (session->vk == NULL)
 			return EINVAL;
 		error = powervr_vk_memory_buffer(session->vk, request->blob_id, request->bytes, &buffer);
+
+		/* Memory the system level cache holds lines of: no other view of its pages. */
+		if (error == 0 && buffer->gpu_cached) {
+			powervr_buffer_put(render, buffer);
+			return EINVAL;
+		}
 	} else {
 		error = powervr_buffer_create(render, request->bytes, &buffer);
 	}
@@ -1859,7 +1892,7 @@ same_image(
 	/* The memory type, the use and the layout. */
 	if (first->memory_type != second->memory_type || first->usage != second->usage)
 		return 0;
-	if (first->tiling != second->tiling || first->reserved != second->reserved)
+	if (first->tiling != second->tiling || first->layout_parameter != second->layout_parameter)
 		return 0;
 
 	/* Succeeded: the same image. */

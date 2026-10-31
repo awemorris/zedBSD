@@ -49,7 +49,7 @@ struct mount;
 #define VM_OBJECT_HASH_BITS		10U
 #define VM_OBJECT_HASH_BUCKETS		(1U << VM_OBJECT_HASH_BITS)
 
-/* How many VM_FREE_WAIT_TICKS waits an object-page fault makes before it gives up, ten seconds. */
+/* How many VM_FREE_WAIT_MS waits an object-page fault makes before it gives up, ten seconds. */
 #define VM_OBJECT_FAULT_WAITS		1000U
 
 /*

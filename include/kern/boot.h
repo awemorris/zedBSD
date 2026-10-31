@@ -126,6 +126,8 @@ enum kern_boot_parameter_key {
 	KERN_BOOT_PARAMETER_I915_GEN9,
 	KERN_BOOT_PARAMETER_DC8200_ZEROCOPY,
 	KERN_BOOT_PARAMETER_MAC0,
+	KERN_BOOT_PARAMETER_CPUPERF,
+	KERN_BOOT_PARAMETER_CPUPERF_HWP,
 	KERN_BOOT_PARAMETER_COUNT
 };
 
@@ -310,7 +312,7 @@ kern_boot_parameters_unknown_name(
 
 /*
  * Reports whether a whole token (for example kmsg=quiet) is in a boot
- * parameter string, before the string is parsed (ws035-p097).
+ * parameter string, before the string is parsed.
  */
 int
 kern_boot_parameters_token_present(
@@ -319,7 +321,7 @@ kern_boot_parameters_token_present(
 
 /*
  * Reads a display mode written WxH or WxH@R (the display.mode= boot
- * parameter, ws075-p012): 0 with the width and height in pixels and the
+ * parameter): 0 with the width and height in pixels and the
  * refresh rate in hertz (0 when the text names none), or EINVAL.
  */
 int

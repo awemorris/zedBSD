@@ -301,7 +301,7 @@ struct i915_xd_run_result {
  * The caller's side of an update that must land in one frame: a
  * reference to the pipe's vertical blank interrupt (0, or an error) and
  * its release, a sleep until the pipe's next vertical blank or a number
- * of 10 ms ticks (the ticks left, 0 when the blank did not come),
+ * of scheduler ticks (the ticks left, 0 when the blank did not come),
  * interrupts off and on, the arming writes, the completion event armed
  * for the next blank (NULL: the update has none; the event holds a
  * reference of its own), and an error of the update.

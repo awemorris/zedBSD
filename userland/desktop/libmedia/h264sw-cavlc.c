@@ -686,12 +686,12 @@ static const uint8_t cbp_inter[CAVLC_CBP_COUNT] = {
 };
 
 /* Forward declarations of the static functions. */
-static int cavlc_find(struct h264sw_bits *bits, const struct cavlc_code *codes, unsigned count, unsigned *value);
-static int cavlc_coeff_token(struct h264sw_bits *bits, int nc, unsigned *total, unsigned *trailing);
-static int cavlc_level_prefix(struct h264sw_bits *bits, unsigned *prefix);
-static int cavlc_levels(struct h264sw_bits *bits, unsigned total, unsigned trailing, int32_t *level_values);
-static int cavlc_total_zeros(struct h264sw_bits *bits, unsigned total, unsigned max_coeff, unsigned *zeros);
-static int cavlc_run_before(struct h264sw_bits *bits, unsigned zeros_left, unsigned *run);
+static int cavlc_find(struct vcodec_bitreader *bits, const struct cavlc_code *codes, unsigned count, unsigned *value);
+static int cavlc_coeff_token(struct vcodec_bitreader *bits, int nc, unsigned *total, unsigned *trailing);
+static int cavlc_level_prefix(struct vcodec_bitreader *bits, unsigned *prefix);
+static int cavlc_levels(struct vcodec_bitreader *bits, unsigned total, unsigned trailing, int32_t *level_values);
+static int cavlc_total_zeros(struct vcodec_bitreader *bits, unsigned total, unsigned max_coeff, unsigned *zeros);
+static int cavlc_run_before(struct vcodec_bitreader *bits, unsigned zeros_left, unsigned *run);
 
 /*
  * Reads one residual block (residual_block_cavlc, 7.3.5.3.2, and 9.2).
@@ -703,7 +703,7 @@ static int cavlc_run_before(struct h264sw_bits *bits, unsigned zeros_left, unsig
  */
 int
 h264sw_cavlc_residual_block(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	int nc,
 	unsigned start,
 	unsigned end,
@@ -780,9 +780,12 @@ h264sw_cavlc_residual_block(
 		if (run > zeros_left)
 			return EINVAL;
 
+		/* Keeps the run and takes it off the zeros left. */
 		run_values[index] = run;
 		zeros_left = zeros_left - run;
 	}
+
+	/* The zeros no run took precede the coefficient of the lowest frequency. */
 	run_values[total - 1U] = zeros_left;
 
 	/* Places the levels from the lowest frequency, each after its run of zeros (9.2.4). */
@@ -794,6 +797,7 @@ h264sw_cavlc_residual_block(
 		if (position > end)
 			return EINVAL;
 
+		/* Stores the level at its place in scan order and moves past it. */
 		levels[position] = level_values[index - 1U];
 		position++;
 	}
@@ -915,7 +919,7 @@ h264sw_cavlc_cbp(
  */
 static int
 cavlc_find(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	const struct cavlc_code *codes,
 	unsigned count,
 	unsigned *value)
@@ -925,7 +929,7 @@ cavlc_find(
 	unsigned shift;
 
 	/* Looks at the next bits without moving; bits past the end read as 0 and are caught when the code is skipped. */
-	window = h264sw_bits_peek(bits, CAVLC_WINDOW_BITS);
+	window = vcodec_bitreader_peek(bits, CAVLC_WINDOW_BITS);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -938,7 +942,7 @@ cavlc_find(
 			*value = (unsigned)codes[index].value;
 
 			/* Moves past the code; this fails when the code was made of bits beyond the end. */
-			h264sw_bits_skip(bits, (size_t)codes[index].length);
+			vcodec_bitreader_skip(bits, (size_t)codes[index].length);
 			if (bits->error != 0)
 				return EINVAL;
 
@@ -959,7 +963,7 @@ cavlc_find(
  */
 static int
 cavlc_coeff_token(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	int nc,
 	unsigned *total,
 	unsigned *trailing)
@@ -1014,14 +1018,14 @@ cavlc_coeff_token(
  */
 static int
 cavlc_level_prefix(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	unsigned *prefix)
 {
 	uint32_t window;
 	unsigned zeros;
 
 	/* Looks at the next 32 bits for the first 1. */
-	window = h264sw_bits_peek(bits, 32U);
+	window = vcodec_bitreader_peek(bits, 32U);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -1041,7 +1045,7 @@ cavlc_level_prefix(
 		return EINVAL;
 
 	/* Moves past the zeros and the 1; this fails when they run past the end of the RBSP. */
-	h264sw_bits_skip(bits, (size_t)zeros + 1U);
+	vcodec_bitreader_skip(bits, (size_t)zeros + 1U);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -1058,7 +1062,7 @@ cavlc_level_prefix(
  */
 static int
 cavlc_levels(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	unsigned total,
 	unsigned trailing,
 	int32_t *level_values)
@@ -1078,13 +1082,15 @@ cavlc_levels(
 
 	/* Reads the sign of each trailing one: a 0 bit is +1 and a 1 bit is -1. */
 	for (index = 0; index < trailing; index++) {
-		sign = h264sw_bits_u1(bits);
+		sign = vcodec_bitreader_u1(bits);
 		if (sign == 0U) {
 			level_values[index] = 1;
 		} else {
 			level_values[index] = -1;
 		}
 	}
+
+	/* Refuses sign bits that ran past the end of the RBSP. */
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -1108,7 +1114,7 @@ cavlc_levels(
 		}
 
 		/* Reads level_suffix, which is 0 when its size is 0. */
-		suffix = h264sw_bits_u(bits, suffix_size);
+		suffix = vcodec_bitreader_u(bits, suffix_size);
 		if (bits->error != 0)
 			return EINVAL;
 
@@ -1141,6 +1147,7 @@ cavlc_levels(
 		if (level > CAVLC_LEVEL_MAX || level < CAVLC_LEVEL_MIN)
 			return EINVAL;
 
+		/* Keeps the level in the order it was sent. */
 		level_values[index] = level;
 
 		/* Adapts suffixLength: it starts at 1 after the first level, and grows when a level is large. */
@@ -1166,7 +1173,7 @@ cavlc_levels(
  */
 static int
 cavlc_total_zeros(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	unsigned total,
 	unsigned max_coeff,
 	unsigned *zeros)
@@ -1207,7 +1214,7 @@ cavlc_total_zeros(
  */
 static int
 cavlc_run_before(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	unsigned zeros_left,
 	unsigned *run)
 {

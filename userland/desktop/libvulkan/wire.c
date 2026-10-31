@@ -71,8 +71,10 @@ vulkan_encode_image_external(
 	const void *chain)
 {
 	const VkBaseInStructure *next;
+	const VkBaseInStructure *layout;
 	struct vulkan_external_image_info value;
 	const struct vulkan_external_image_info *info;
+	struct vulkan_image_layout_info placed;
 	uint32_t types;
 
 	/* Public core calls retain an empty native extension chain. */
@@ -90,10 +92,25 @@ vulkan_encode_image_external(
 	memcpy(&value, next, sizeof(value));
 	info = &value;
 
+	/* The layout record chained after it, if the image has one. */
+	layout = info->pNext;
+	while (layout != NULL && layout->sType != VULKAN_STRUCTURE_TYPE_IMAGE_LAYOUT)
+		layout = layout->pNext;
+
 	/* No guest pointer or fd representation reaches the renderer. */
 	vulkan_write_u64(writer, 1U);
 	vulkan_write_u32(writer, VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO);
-	vulkan_write_u64(writer, 0U);
+	if (layout == NULL) {
+		vulkan_write_u64(writer, 0U);
+	} else {
+		/* The layout record, chained as the declaration's next: its type, no next, the tiling and the parameter. */
+		memcpy(&placed, layout, sizeof(placed));
+		vulkan_write_u64(writer, 1U);
+		vulkan_write_u32(writer, VULKAN_STRUCTURE_TYPE_IMAGE_LAYOUT);
+		vulkan_write_u64(writer, 0U);
+		vulkan_write_u32(writer, placed.tiling);
+		vulkan_write_u32(writer, placed.parameter);
+	}
 	types = info->handle_types;
 	if (types == VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
 		types = writer->external_memory_type;

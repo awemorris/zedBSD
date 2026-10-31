@@ -6667,6 +6667,7 @@ ax211_pci_log_rejection(
 	struct ax211_pci_controller *controller)
 {
 	uint64_t now;
+	uint64_t period;
 
 	/*
 	 * Keeps the first diagnostic and emits at most one retry diagnostic per
@@ -6677,10 +6678,11 @@ ax211_pci_log_rejection(
 		return 0;
 
 	/* Sets the next deadline one second ahead, saturating the clock. */
-	if (UINT64_MAX - now < kern_ms_to_ticks(1000U))
+	period = kern_ms_to_ticks(1000U);
+	if (UINT64_MAX - now < period)
 		controller->reject_log_deadline = UINT64_MAX;
 	else
-		controller->reject_log_deadline = now + kern_ms_to_ticks(1000U);
+		controller->reject_log_deadline = now + period;
 
 	/* A diagnostic may be logged. */
 	return 1;

@@ -19,6 +19,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=str(ROOT / "build/tmp/p8/cur"))
     ap.add_argument("--out", default=None)
+    ap.add_argument("--gap", default=None, help="a gap JSON (interop2025-chrome-gap.py compare --write): what Chromium passes (--chrome) and the gap does not list passed before")
+    ap.add_argument("--chrome", default=str(ROOT / "build/ws074-cmp/chrome156"))
     ap.add_argument("--program", default=str(ROOT / "build/ws074-host/plain/browser"))
     ap.add_argument("--jobs", type=int, default=16)
     ap.add_argument("prefixes", nargs="+")
@@ -39,6 +41,10 @@ def main():
     rp = Path(a.base) / "static/report.json"
     if rp.is_file():
         base = {"/" + r["test"]: r["status"] for r in json.loads(rp.read_text())["results"]}
+    if a.gap:
+        gap = set(json.loads(Path(a.gap).read_text())["gap"]["static"])
+        chrome = json.loads((Path(a.chrome) / "static/report.json").read_text())["results"]
+        base = {"/" + r["test"]: "pass" for r in chrome if r["status"] == "pass" and "/" + r["test"] not in gap}
     # split into shards run in parallel
     shards = [sel[i::a.jobs] for i in range(a.jobs)]
     procs = []

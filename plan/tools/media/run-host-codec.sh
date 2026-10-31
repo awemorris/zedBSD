@@ -41,6 +41,7 @@ cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,un
     userland/desktop/libmedia/bits.c userland/desktop/libmedia/aac-input.c userland/desktop/libmedia/aac-codec.c \
     userland/desktop/libmedia/aac-huffman.c userland/desktop/libmedia/aac-bands.c userland/desktop/libmedia/aac-frame.c \
     userland/desktop/libmedia/aac-synth.c userland/desktop/libmedia/aac.c userland/desktop/libmedia/sound.c \
+    userland/desktop/libmedia/h264sw-*.c userland/desktop/libmedia/vcodec-*.c \
     userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c \
     "$out/thread-posix.o" -ldl -lpthread -lm -o "$out/host-codec" || { echo "run-host-codec: FAIL (build)"; exit 1; }
 files=plan/tools/media/sample.mp4

@@ -20,9 +20,9 @@
  * current macroblock's entry must already hold what the element's
  * context needs from the elements read before it in the same macroblock
  * (h264sw-macroblock.c writes them as it goes).  A broken bitstream
- * leaves ctx->cabac.error set or gives a value out of range; each
+ * leaves ctx->cabac.engine.error set or gives a value out of range; each
  * function returns EINVAL for a value it can tell is out of range and
- * the caller checks ctx->cabac.error after each macroblock.
+ * the caller checks ctx->cabac.engine.error after each macroblock.
  */
 
 #ifndef LIBMEDIA_H264SW_CABAC_SE_H
@@ -60,7 +60,7 @@ unsigned h264sw_cabac_mb_skip(struct h264sw_slice_ctx *ctx);
  * slice_type is the current slice's; the value returned is mb_type as
  * the tables of 7.4.5 number it (for P and B slices the intra types are
  * returned as 5 + the I value and 23 + the I value).  The bin of I_PCM
- * (bin 1 of the I binarization) is decoded with h264sw_cabac_terminate.
+ * (bin 1 of the I binarization) is decoded with vcodec_cabac_terminate.
  * Returns 0 and *mb_type, or EINVAL for a bin string that is not in the
  * table.
  */

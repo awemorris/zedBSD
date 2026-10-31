@@ -13,7 +13,7 @@
  * The host powers only the L2; with a command stream front end the
  * firmware powers the shader and tiler cores itself, from the core mask
  * the global interface gives it.  Every wait here polls a raw status
- * register for a bounded time, sleeping a tick between reads, so it does
+ * register for a bounded time, sleeping a millisecond between reads, so it does
  * not depend on an interrupt that a wrong line number would never bring.
  */
 
@@ -29,6 +29,9 @@
 
 #include "drivers/gpu/mali/mali-private.h"
 #include "drivers/gpu/mali/mali-regs.h"
+
+/* How long a register poll sleeps before the next read, in milliseconds (a tick at least). */
+#define MALI_GPU_POLL_MS 1U
 
 /*
  * How long the waits last: the soft reset 100 ms, a power change 20 ms,
@@ -421,8 +424,8 @@ mali_gpu_wait_raw(
 		if (now >= deadline)
 			break;
 
-		/* One tick before the next read. */
-		sched_sleep(now + 1U);
+		/* A millisecond before the next read. */
+		sched_sleep(now + kern_ms_to_ticks(MALI_GPU_POLL_MS));
 	}
 
 	/* One last read, in case the event came during the last sleep. */
@@ -469,8 +472,8 @@ wait_ready(
 		if (now >= deadline)
 			break;
 
-		/* One tick before the next read. */
-		sched_sleep(now + 1U);
+		/* A millisecond before the next read. */
+		sched_sleep(now + kern_ms_to_ticks(MALI_GPU_POLL_MS));
 	}
 
 	/* Succeeded in waiting, but the cores did not settle. */

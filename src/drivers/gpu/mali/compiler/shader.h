@@ -163,14 +163,14 @@ enum mali_shader_stage {
  * What the compiler asks the SPIR-V parse to lower beyond the shared
  * profile: storage images, a compute shader's images, a fragment
  * shader's gl_FragDepth, its gl_SampleMask and gl_SampleMaskIn, its
- * gl_SampleID and its stencil reference (gl_FragStencilRefARB), a
- * module's function calls (inlined), and NoContraction (every product is
- * its own FMA with a zero addend, never fused into a sum).
+ * gl_SampleID and its stencil reference (gl_FragStencilRefARB) and a
+ * module's function calls (inlined).  NoContraction needs nothing more:
+ * every product is its own FMA with a zero addend, never fused into a sum.
  */
 #define MALI_SHADER_SPIRV_FEATURES	(DRV_GPU_SPIRV_FEATURE_COMPUTE_IMAGES | DRV_GPU_SPIRV_FEATURE_STORAGE_IMAGE | \
 					 DRV_GPU_SPIRV_FEATURE_FRAG_DEPTH | DRV_GPU_SPIRV_FEATURE_SAMPLE_MASK | \
 					 DRV_GPU_SPIRV_FEATURE_SAMPLE_ID | DRV_GPU_SPIRV_FEATURE_STENCIL_EXPORT | \
-					 DRV_GPU_SPIRV_FEATURE_INLINE_CALLS | DRV_GPU_SPIRV_FEATURE_NO_CONTRACTION)
+					 DRV_GPU_SPIRV_FEATURE_INLINE_CALLS)
 
 /* The resource tables a program reads (see the shader ABI above). */
 #define MALI_SHADER_TABLE_TEXTURES		0U

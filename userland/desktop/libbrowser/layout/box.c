@@ -23,6 +23,8 @@
 #define BOX_BULLET_DISC		0x2022U
 #define BOX_BULLET_CIRCLE	0x25e6U
 #define BOX_BULLET_SQUARE	0x25aaU
+#define BOX_DISCLOSURE_CLOSED	0x25b8U
+#define BOX_DISCLOSURE_OPEN	0x25beU
 
 static void box_root_flow(struct layout_box *root);
 static int box_build_element(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, const struct css_style *parent_style, struct layout_box *parent, int depth);
@@ -32,6 +34,11 @@ static struct layout_box *box_new(struct layout_tree *tree, int kind, struct dom
 static void box_append(struct layout_box *parent, struct layout_box *child);
 static int box_is_inline_level(const struct layout_box *box);
 static int box_is_whitespace(const struct layout_box *box);
+static int box_details_content(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *box);
+static int box_first_letter(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *box);
+static int box_first_line(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *box);
+static int box_first_letter_in(struct layout_tree *tree, struct layout_box *parent, const struct css_style *style, int depth, int *done);
+static int box_is_blank(const struct layout_box *box);
 static int box_fix_children(struct layout_tree *tree, struct layout_box *box);
 static int box_table_fix(struct layout_tree *tree, struct layout_box *box);
 static int box_table_children(struct layout_tree *tree, struct layout_box *box);
@@ -47,7 +54,7 @@ static void box_relative_within(const struct layout_box *box, const struct layou
 static void box_inline_relative(struct layout_box *block);
 static void box_transform_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
 static void box_apply_scale(struct layout_box *box);
-static void box_static_inline(struct layout_box *box, layout_unit x, layout_unit y);
+static void box_static_inline(const struct layout_box *block, struct layout_box *box, layout_unit x, layout_unit y, size_t *breaks);
 
 /*
  * Builds and lays out the box tree of a document for a viewport of width
@@ -126,6 +133,11 @@ layout_build(
 
 	/* The boxes out of the flow go to their containing blocks (the document grows to hold them). */
 	error = layout_position(tree);
+	if (error != 0)
+		return error;
+
+	/* The scrolled containers move their content. */
+	error = layout_scroll_apply(tree);
 	if (error != 0)
 		return error;
 
@@ -208,6 +220,7 @@ layout_absolute(
 	struct layout_box *child;
 	layout_unit content_x;
 	layout_unit content_y;
+	size_t breaks;
 	layout_unit dx;
 	layout_unit dy;
 
@@ -222,9 +235,10 @@ layout_absolute(
 	content_y = box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
 
 	/* The lines are relative to the block; boxes out of the flow among them start at its content's top. */
-	if (box->children_inline) {
+	if (box->children_inline && !(box->line_count == 0 && box->physical_style == NULL && box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)) {
 		box_inline_relative(box);
-		box_static_inline(box, content_x, content_y);
+		breaks = 0;
+		box_static_inline(box, box, content_x, content_y, &breaks);
 		return;
 	}
 
@@ -285,8 +299,10 @@ int
 layout_contains_fixed(
 	const struct layout_box *box)
 {
-	/* A transformed block. */
-	return box->kind == LAYOUT_BLOCK && box->style.transform_set;
+	/* A transformed block, or one with a backdrop filter or a will-change that makes one. */
+	return box->kind == LAYOUT_BLOCK &&
+	    (box->style.transform_set || box->style.backdrop_filter_count != 0 || (box->style.will_change_contains & 1) ||
+	    (layout_containment(box) & 6U) != 0);
 }
 
 /*
@@ -485,6 +501,8 @@ box_build_element(
 		replaced = 1;
 	if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_VIDEO)
 		replaced = 1;
+	if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_CANVAS)
+		replaced = 1;
 	if (element->ns == DOM_NS_SVG && element->tag == DOM_TAG_SVG && tree->image_lookup != NULL)
 		replaced = tree->image_lookup(tree->image_context, element) != NULL;
 	if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_OBJECT && tree->image_lookup != NULL)
@@ -576,6 +594,10 @@ box_build_element(
 	if (replaced || is_iframe || is_loaded_object)
 		return 0;
 
+	/* The content of a box with content-visibility hidden is skipped: the box has no children, as if it were size-contained. */
+	if (box->style.content_visibility == 2 && parent != NULL)
+		return 0;
+
 	/* The ::before box, the children, the ::after box, then the fix-ups a block needs. */
 	error = box_build_pseudo(tree, css, element, box, CSS_PSEUDO_ELEMENT_BEFORE);
 	if (error != 0)
@@ -583,7 +605,16 @@ box_build_element(
 	error = box_build_children(tree, css, &element->node, &box->style, box, depth + 1);
 	if (error != 0)
 		return error;
+	error = box_details_content(tree, css, element, box);
+	if (error != 0)
+		return error;
 	error = box_build_pseudo(tree, css, element, box, CSS_PSEUDO_ELEMENT_AFTER);
+	if (error != 0)
+		return error;
+	error = box_first_letter(tree, css, element, box);
+	if (error != 0)
+		return error;
+	error = box_first_line(tree, css, element, box);
 	if (error != 0)
 		return error;
 
@@ -599,6 +630,248 @@ box_build_element(
 
 	/* Succeeded: the element's boxes are built. */
 	return 0;
+}
+
+/*
+ * Gives the first letter of a block container its ::first-letter style: the text box holding it is split in two, the
+ * letter (with the punctuation around it) taking the pseudo-element's style.  A floating or otherwise boxed first
+ * letter is not made.
+ */
+static int
+box_first_letter(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_element *element,
+	struct layout_box *box)
+{
+	struct css_style *style;
+	int done;
+	int error;
+
+	/* Only a block container some rule gives a ::first-letter. */
+	if ((box->style.pseudo_elements & (1 << CSS_PSEUDO_ELEMENT_FIRST_LETTER)) == 0 || box->kind != LAYOUT_BLOCK ||
+	    box->replaced || box->atomic != 0 || box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID)
+		return 0;
+	style = malloc(sizeof(*style));
+	if (style == NULL)
+		return ENOMEM;
+	error = css_engine_compute_pseudo(css, element, CSS_PSEUDO_ELEMENT_FIRST_LETTER, &box->style, style);
+	if (error != 0 || style->float_side != CSS_FLOAT_NONE || style->position == CSS_POSITION_ABSOLUTE ||
+	    style->position == CSS_POSITION_FIXED) {
+		free(style);
+		return error;
+	}
+	style->display = CSS_DISPLAY_INLINE;
+	done = 0;
+	error = box_first_letter_in(tree, box, style, 0, &done);
+	free(style);
+	return error;
+}
+
+/* Keeps the ::first-line style of a block container for its first line. */
+static int
+box_first_line(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_element *element,
+	struct layout_box *box)
+{
+	struct css_style *style;
+	struct css_style *kept;
+	int error;
+
+	if ((box->style.pseudo_elements & (1 << CSS_PSEUDO_ELEMENT_FIRST_LINE)) == 0 || box->kind != LAYOUT_BLOCK || box->replaced)
+		return 0;
+	style = malloc(sizeof(*style));
+	if (style == NULL)
+		return ENOMEM;
+	error = css_engine_compute_pseudo(css, element, CSS_PSEUDO_ELEMENT_FIRST_LINE, &box->style, style);
+	if (error == 0) {
+		kept = wb_arena_alloc(&tree->arena, sizeof(*kept));
+		if (kept == NULL) {
+			error = ENOMEM;
+		} else {
+			memcpy(kept, style, sizeof(*kept));
+			box->first_line_style = kept;
+		}
+	}
+	free(style);
+	return error;
+}
+
+/* Tells whether a UTF-16 unit is punctuation that belongs to a first letter (quotes and brackets). */
+static int
+box_letter_punctuation(
+	uint16_t unit)
+{
+	return unit == '"' || unit == '\'' || unit == '(' || unit == ')' || unit == '[' || unit == ']' || unit == '{' || unit == '}' ||
+	    unit == 0x00ab || unit == 0x00bb || unit == 0x2018 || unit == 0x2019 || unit == 0x201a || unit == 0x201b ||
+	    unit == 0x201c || unit == 0x201d || unit == 0x201e || unit == 0x201f || unit == 0x2039 || unit == 0x203a ||
+	    unit == '!' || unit == '?' || unit == '.' || unit == ',' || unit == ':' || unit == ';' || unit == '-' || unit == '*' ||
+	    unit == '#' || unit == '@' || unit == '&' || unit == '%' || unit == '/' || unit == '\\' || unit == '_' || unit == '`' ||
+	    unit == '~' || unit == '^' || unit == '|' || unit == '<' || unit == '>' || unit == '=' || unit == '+' || unit == '$';
+}
+
+/* Finds the first text of a block container's first line and splits its first letter off. */
+static int
+box_first_letter_in(
+	struct layout_tree *tree,
+	struct layout_box *parent,
+	const struct css_style *style,
+	int depth,
+	int *done)
+{
+	struct layout_box *child;
+	struct layout_box *letter;
+	size_t start;
+	size_t end;
+	size_t length;
+	uint16_t unit;
+	int error;
+
+	if (depth > 16)
+		return 0;
+	for (child = parent->first_child; child != NULL && !*done; child = child->next) {
+		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE)
+			continue;
+		if (child->kind == LAYOUT_INLINE || child->kind == LAYOUT_BLOCK) {
+			/* Something that is not text before any text stops the search: a replaced or atomic box has no first letter. */
+			if (child->replaced || child->atomic) {
+				*done = 1;
+				return 0;
+			}
+			if (child->style.display == CSS_DISPLAY_FLEX || child->style.display == CSS_DISPLAY_GRID ||
+			    child->style.display == CSS_DISPLAY_INLINE_FLEX || child->style.display == CSS_DISPLAY_INLINE_GRID ||
+			    child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE) {
+				*done = 1;
+				return 0;
+			}
+			error = box_first_letter_in(tree, child, style, depth + 1, done);
+			if (error != 0)
+				return error;
+			continue;
+		}
+		if (child->kind != LAYOUT_TEXT) {
+			*done = 1;
+			return 0;
+		}
+
+		/* The first typographic unit: after the collapsible space, the punctuation, a letter and the punctuation after it. */
+		length = child->text_length;
+		start = 0;
+		while (start < length && (child->text[start] == ' ' || child->text[start] == '\t' || child->text[start] == '\n' ||
+		    child->text[start] == '\r' || child->text[start] == '\f'))
+			start++;
+		if (start >= length)
+			continue;
+		end = start;
+		while (end < length && box_letter_punctuation(child->text[end]) && end + 1U < length)
+			end++;
+		unit = child->text[end];
+		end++;
+		if (unit >= 0xd800 && unit < 0xdc00 && end < length)
+			end++;
+		while (end < length && box_letter_punctuation(child->text[end]) &&
+		    (child->text[end] == '"' || child->text[end] == '\'' || child->text[end] == ')' || child->text[end] == ']' ||
+		    child->text[end] == 0x00bb || child->text[end] == 0x2019 || child->text[end] == 0x201d || child->text[end] == 0x203a))
+			end++;
+
+		/* The letter's text box before the rest, which keeps the text box it was. */
+		letter = box_new(tree, LAYOUT_TEXT, child->node, style);
+		if (letter == NULL)
+			return ENOMEM;
+		letter->text = child->text;
+		letter->text_length = end;
+		letter->parent = parent;
+		letter->next = child;
+		if (parent->first_child == child) {
+			parent->first_child = letter;
+		} else {
+			struct layout_box *before;
+
+			for (before = parent->first_child; before != NULL && before->next != child; before = before->next)
+				;
+			if (before != NULL)
+				before->next = letter;
+		}
+		child->text += end;
+		child->text_length -= end;
+		*done = 1;
+		return 0;
+	}
+	return 0;
+}
+
+/*
+ * Wraps a details element's content (every child box but its first summary's and the ::before box) in the box of its
+ * ::details-content pseudo-element, when some rule names that.
+ */
+static int
+box_details_content(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_element *element,
+	struct layout_box *box)
+{
+	struct css_style *style;
+	struct layout_box *wrapper;
+	struct layout_box *child;
+	struct layout_box *next;
+	const struct dom_element *summary;
+	int seen_summary;
+	int error;
+
+	/* Only a details element some rule gives a ::details-content. */
+	if (element->ns != DOM_NS_HTML || element->tag != DOM_TAG_DETAILS)
+		return 0;
+	if ((box->style.pseudo_elements & (1 << CSS_PSEUDO_ELEMENT_DETAILS_CONTENT)) == 0)
+		return 0;
+	style = malloc(sizeof(*style));
+	if (style == NULL)
+		return ENOMEM;
+	error = css_engine_compute_pseudo(css, element, CSS_PSEUDO_ELEMENT_DETAILS_CONTENT, &box->style, style);
+	if (error != 0) {
+		free(style);
+		return error;
+	}
+
+	/* It is a block unless the rules say otherwise; display: contents leaves the children where they are. */
+	if (style->display == CSS_DISPLAY_INLINE)
+		style->display = CSS_DISPLAY_BLOCK;
+	if (style->display == CSS_DISPLAY_NONE || style->display == CSS_DISPLAY_CONTENTS) {
+		free(style);
+		return 0;
+	}
+	wrapper = box_new(tree, LAYOUT_BLOCK, NULL, style);
+	free(style);
+	if (wrapper == NULL)
+		return ENOMEM;
+
+	/* The boxes after the first summary move into it; the ones before it stay. */
+	seen_summary = 0;
+	child = box->first_child;
+	box->first_child = NULL;
+	box->last_child = NULL;
+	while (child != NULL) {
+		next = child->next;
+		child->next = NULL;
+		summary = child->node != NULL && child->node->type == DOM_ELEMENT ? (const struct dom_element *)child->node : NULL;
+		if (!seen_summary && (child->node == NULL || (summary != NULL && summary->ns == DOM_NS_HTML && summary->tag == DOM_TAG_SUMMARY))) {
+			if (summary != NULL)
+				seen_summary = 1;
+			box_append(box, child);
+		} else if (!seen_summary && child->node != NULL && child->node->type != DOM_ELEMENT) {
+			box_append(box, child);
+		} else {
+			box_append(wrapper, child);
+		}
+		child = next;
+	}
+	box_append(box, wrapper);
+	wrapper->children_inline = 0;
+	error = box_fix_children(tree, wrapper);
+	return error;
 }
 
 /*
@@ -775,6 +1048,14 @@ box_transition_pseudo(
 	*error = css_engine_compute_vt_pseudo(css, element, pseudo, name != NULL ? name->name : NULL, name != NULL ? name->classes : NULL, siblings, parent_style, style);
 	if (*error != 0)
 		return NULL;
+
+	/* A script's animation of the pseudo-element has the last word. */
+	if (name != NULL && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW &&
+	    name->animated[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP][0] != '\0') {
+		*error = css_engine_apply_text(css, style, parent_style, name->animated[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP]);
+		if (*error != 0)
+			return NULL;
+	}
 	if (style->display == CSS_DISPLAY_NONE)
 		return NULL;
 	box = box_new(tree, LAYOUT_BLOCK, NULL, style);
@@ -819,6 +1100,7 @@ box_build_transition(
 	float picture_width;
 	float picture_height;
 	float group_width;
+	float group_height;
 	size_t first_group;
 	size_t last_group;
 	int siblings;
@@ -869,6 +1151,7 @@ box_build_transition(
 		if (group->style.transform_translate[1].value == CSS_VT_TRANSLATE_PENDING)
 			group->style.transform_translate[1].value = layout_to_px(rect.y);
 		group_width = group->style.width.unit == CSS_UNIT_PX ? group->style.width.value : layout_to_px(rect.width);
+		group_height = group->style.height.unit == CSS_UNIT_PX ? group->style.height.value : layout_to_px(rect.height);
 
 		/* The pair holds the two images. */
 		pair = box_transition_pseudo(tree, css, element, group, &group->style, CSS_PSEUDO_ELEMENT_VT_PAIR, name, CSS_VT_FIRST | CSS_VT_LAST, pair_style, &error);
@@ -901,6 +1184,17 @@ box_build_transition(
 				image->style.height.unit = CSS_UNIT_PX;
 				image->style.height.value = width_px * picture_height / picture_width;
 				image->style.height.offset = 0.0f;
+			}
+
+			/* In a vertical writing mode the height is the inline size, given: the picture's shape gives the width from it. */
+			if (image->style.width.unit == CSS_UNIT_AUTO && picture_height > 0.0f) {
+				float height_px;
+
+				height_px = image->style.height.unit == CSS_UNIT_PERCENT ? group_height * image->style.height.value / 100.0f :
+				    image->style.height.unit == CSS_UNIT_PX ? image->style.height.value : picture_height;
+				image->style.width.unit = CSS_UNIT_PX;
+				image->style.width.value = height_px * picture_width / picture_height;
+				image->style.width.offset = 0.0f;
 			}
 
 			/* The UA's animations fade the old image out and the new one in. */
@@ -1066,8 +1360,8 @@ box_flex_items(
 			continue;
 		}
 
-		/* Whitespace alone between items is dropped. */
-		whitespace = box_is_whitespace(child);
+		/* Whitespace alone between items is dropped (preserved or not). */
+		whitespace = box_is_blank(child);
 		if (anonymous == NULL && whitespace) {
 			child = next;
 			continue;
@@ -1106,6 +1400,22 @@ box_is_inline_level(
 
 	/* Blocks are block-level. */
 	return 0;
+}
+
+/* Tells whether a box is text of nothing but spaces, tabs and line feeds, whether or not they collapse. */
+static int
+box_is_blank(
+	const struct layout_box *box)
+{
+	size_t index;
+
+	if (box->kind != LAYOUT_TEXT)
+		return 0;
+	for (index = 0; index < box->text_length; index++) {
+		if (!text_is_space(box->text[index]))
+			return 0;
+	}
+	return 1;
 }
 
 /* Tells whether a box is text of nothing but collapsible whitespace. */
@@ -1505,6 +1815,8 @@ box_is_table_part(
 		return 1;
 	if (box->style.display == CSS_DISPLAY_TABLE_CELL)
 		return 1;
+	if (box->style.display == CSS_DISPLAY_TABLE_CAPTION)
+		return 1;
 
 	/* Anything else. */
 	return 0;
@@ -1603,6 +1915,14 @@ box_marker(
 		break;
 	case CSS_LIST_SQUARE:
 		box->marker[0] = BOX_BULLET_SQUARE;
+		box->marker_length = 1;
+		break;
+	case CSS_LIST_DISCLOSURE_CLOSED:
+		box->marker[0] = BOX_DISCLOSURE_CLOSED;
+		box->marker_length = 1;
+		break;
+	case CSS_LIST_DISCLOSURE_OPEN:
+		box->marker[0] = BOX_DISCLOSURE_OPEN;
 		box->marker_length = 1;
 		break;
 	case CSS_LIST_DECIMAL:
@@ -1829,6 +2149,14 @@ box_relative_within(
 	}
 	offset = box->style.offset;
 
+	/* A grid item's containing block is its grid area. */
+	if (box->grid_area_set && !box->out_of_flow && box->parent != NULL && box->parent == containing &&
+	    (containing->style.display == CSS_DISPLAY_GRID || containing->style.display == CSS_DISPLAY_INLINE_GRID)) {
+		width = box->grid_area_width;
+		height = box->grid_area_height;
+		definite = 1;
+	}
+
 	/* Horizontally: left wins over right. */
 	if (offset[CSS_LEFT].unit == CSS_UNIT_PX) {
 		*dx = layout_from_px(offset[CSS_LEFT].value);
@@ -1860,17 +2188,36 @@ box_relative_within(
  */
 static void
 box_static_inline(
+	const struct layout_box *block,
 	struct layout_box *box,
 	layout_unit x,
-	layout_unit y)
+	layout_unit y,
+	size_t *breaks)
 {
 	struct layout_box *child;
+	const struct layout_line *line;
 
 	/* The inline boxes are searched through; a box out of the flow or a float is not entered. */
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow) {
 			child->static_x = x;
 			child->static_y = y;
+
+			/* A containing block a grid gave it moves with the content box too. */
+			if (child->cb_set && !child->area_from_anchor) {
+				child->cb_left += x;
+				child->cb_right += x;
+				child->cb_top += y;
+				child->cb_bottom += y;
+			}
+
+			/* After a forced break it is on a later line. */
+			if (*breaks != 0 && block->line_count != 0) {
+				line = &block->lines[*breaks < block->line_count ? *breaks : block->line_count - 1U];
+				child->static_y = y + line->y;
+				if (*breaks >= block->line_count)
+					child->static_y += line->height;
+			}
 			continue;
 		}
 
@@ -1880,7 +2227,11 @@ box_static_inline(
 			continue;
 		}
 
+		/* A forced break starts the next line. */
+		if (child->kind == LAYOUT_LINE_BREAK)
+			(*breaks)++;
+
 		/* An inline box's content. */
-		box_static_inline(child, x, y);
+		box_static_inline(block, child, x, y, breaks);
 	}
 }

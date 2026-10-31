@@ -245,6 +245,7 @@ static int mouse_identify_current(void);
 static int consume_byte(uint8_t value, int32_t *dx, int32_t *dy, int32_t *wheel, int32_t *hwheel, uint32_t *buttons);
 static void publish_sample(int32_t dx, int32_t dy, int32_t wheel, int32_t hwheel, uint32_t buttons, uint32_t changed_buttons);
 static void mouse_interrupt(int interrupt, kern_irq_ack_t acknowledge, void *argument);
+static int mouse_probe(void);
 static int mouse_start(void);
 static void mouse_stop(void);
 static int mouse_input_open(void *context);
@@ -840,6 +841,59 @@ mouse_interrupt(
 	spin_unlock_irqrestore(&controller_lock, irq);
 }
 
+/*
+ * Asks the auxiliary port once whether a mouse is on it: the port enabled
+ * with its interrupt off (a controller without the port leaves it
+ * disabled) and a command the mouse must acknowledge; the port is disabled
+ * again.  The controller's own test of the port (0xa9) is not asked: some
+ * controllers answer it wrongly while their mouse works, and only the
+ * mouse's acknowledgement tells that one is there.  Returns 1 when a mouse
+ * answered, 0 when there is no port or nothing answered on it.
+ */
+static int
+mouse_probe(
+	void)
+{
+	unsigned long irq;
+	uint8_t configuration;
+	int present;
+	int error;
+
+	irq = spin_lock_irqsave(&controller_lock);
+
+	/* The port's interrupt off while the probe reads its answers itself. */
+	present = 0;
+	flush_output();
+	error = read_config(&configuration);
+	if (error == 0) {
+		configuration &= (uint8_t)~I8042_CONFIG_AUX_IRQ;
+		error = write_config(configuration);
+	}
+
+	/* A controller with the port clears the port's disabled bit when told to enable it. */
+	if (error == 0)
+		error = write_command(I8042_ENABLE_AUX);
+	if (error == 0)
+		error = read_config(&configuration);
+	if (error == 0 && (configuration & I8042_CONFIG_AUX_OFF) != 0)
+		error = ENODEV;
+
+	/* A mouse acknowledges a command (stopping a stream it never started changes nothing). */
+	if (error == 0)
+		error = mouse_command(PS2_DISABLE_STREAM);
+	if (error == 0)
+		present = 1;
+
+	/* The port off again until a reader starts the mouse; nothing it sent is left for the keyboard. */
+	(void)write_command(I8042_DISABLE_AUX);
+	flush_output();
+
+	spin_unlock_irqrestore(&controller_lock, irq);
+
+	/* Whether a mouse answered. */
+	return present;
+}
+
 /* Supports the mouse start operation. */
 static int
 mouse_start(
@@ -1341,6 +1395,7 @@ drv_isa_ps2_8042_init(
 	};
 	unsigned long irq;
 	size_t index;
+	int mouse_present;
 	int mouse_irq_taken;
 	int keyboard_irq_taken;
 	int registered;
@@ -1388,9 +1443,20 @@ drv_isa_ps2_8042_init(
 			return error;
 	}
 
-	/* Takes the mouse's interrupt. */
-	if (!i8042_polled) {
+	/*
+	 * Asks once whether a mouse is on the auxiliary port: without one no
+	 * mouse is published, so no reader's open waits for a mouse that
+	 * cannot answer.  A mouse plugged in later is not seen (PS/2 is not
+	 * hot-plugged).
+	 */
+	if (!i8042_polled)
 		kern_irq_mask(i8042_mouse_irq);
+	mouse_present = mouse_probe();
+	if (!mouse_present)
+		kern_logf("i8042: no mouse on the auxiliary port\n");
+
+	/* Takes the mouse's interrupt. */
+	if (!i8042_polled && mouse_present) {
 		error = kern_irq_register(i8042_mouse_irq, mouse_interrupt, NULL);
 		if (error != 0)
 			return EBUSY;
@@ -1398,10 +1464,12 @@ drv_isa_ps2_8042_init(
 	}
 
 	/* Publishes the mouse channel. */
-	error = drv_input_device_register(&mouse_info, &mouse_input);
-	if (error != 0)
-		goto fail;
-	registered = 1;
+	if (mouse_present) {
+		error = drv_input_device_register(&mouse_info, &mouse_input);
+		if (error != 0)
+			goto fail;
+		registered = 1;
+	}
 
 	/* Publishes the keyboard channel of the same controller, no key down. */
 	keyboard_extended = 0;

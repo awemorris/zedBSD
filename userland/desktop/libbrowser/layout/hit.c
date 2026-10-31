@@ -24,6 +24,9 @@
 
 static const struct layout_box *hit_box(const struct layout_box *box, layout_unit x, layout_unit y, int depth);
 static const struct layout_box *hit_block(const struct layout_box *box, layout_unit x, layout_unit y, int depth);
+static int hit_is_items(const struct layout_box *box);
+static const struct layout_box *hit_items(const struct layout_box *box, layout_unit x, layout_unit y, int depth, int text);
+static int hit_before(const struct layout_box *box, const struct layout_box *first, const struct layout_box *second);
 static const struct layout_box *hit_lines(const struct layout_box *box, layout_unit x, layout_unit y);
 static const struct layout_box *hit_in(const struct layout_box *box, layout_unit x, layout_unit y, int what);
 static const struct layout_box *hit_inline_floats(const struct layout_box *box, layout_unit x, layout_unit y, int depth);
@@ -110,6 +113,10 @@ hit_box(
 		return found;
 	}
 
+	/* The items of a flex or grid container are searched from the one painted last. */
+	if (hit_is_items(box))
+		return hit_items(box, x, y, depth, 1);
+
 	/* A block of blocks: the first child with text under the point. */
 	for (child = box->first_child; child != NULL; child = child->next) {
 		found = hit_box(child, x, y, depth + 1);
@@ -194,6 +201,10 @@ hit_block(
 	layout_unit width;
 	layout_unit height;
 
+	/* A box position-visibility hides cannot be hit. */
+	if (box->anchor_hidden)
+		return NULL;
+
 	/* Stops at the depth the layout stops at, and at boxes that are not blocks. */
 	if (depth > LAYOUT_DEPTH_MAX)
 		return NULL;
@@ -207,6 +218,14 @@ hit_block(
 		return NULL;
 	if (y < box->y || y >= box->y + height)
 		return NULL;
+
+	/* The items of a flex or grid container are painted one by one in order, the last on top: it is searched first. */
+	if (!box->children_inline && hit_is_items(box)) {
+		found = hit_items(box, x, y, depth, 0);
+		if (found != NULL)
+			return found;
+		return box;
+	}
 
 	/* A child block that holds it is deeper. */
 	for (child = box->first_child; !box->children_inline && child != NULL; child = child->next) {
@@ -224,6 +243,81 @@ hit_block(
 
 	/* The block itself. */
 	return box;
+}
+
+/* Tells whether a block is a flex or grid container. */
+static int
+hit_is_items(
+	const struct layout_box *box)
+{
+	return box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID;
+}
+
+/* Finds the deepest block holding a point among a container's items, searching them from the last in order painting (order, then document order). */
+static const struct layout_box *
+hit_items(
+	const struct layout_box *box,
+	layout_unit x,
+	layout_unit y,
+	int depth,
+	int text)
+{
+	const struct layout_box *found;
+	const struct layout_box *best;
+	const struct layout_box *child;
+	const struct layout_box *limit_child;
+	int limit_order;
+	int limit_set;
+	int order;
+
+	/* Each step takes the item that paints last among those not yet searched. */
+	limit_set = 0;
+	limit_child = NULL;
+	limit_order = 0;
+	for (;;) {
+		best = NULL;
+		order = 0;
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (limit_set && (child == limit_child || child->style.order > limit_order || (child->style.order == limit_order && !hit_before(box, child, limit_child))))
+				continue;
+			if (best == NULL || child->style.order > order || (child->style.order == order && hit_before(box, best, child))) {
+				best = child;
+				order = child->style.order;
+			}
+		}
+		if (best == NULL)
+			return NULL;
+		found = text ? hit_box(best, x, y, depth + 1) : hit_block(best, x, y, depth + 1);
+		if (found != NULL)
+			return found;
+
+		/* An item over the point without text of its own covers the ones under it. */
+		if (text && x >= best->x && x < best->x + best->border[CSS_LEFT] + best->padding[CSS_LEFT] + best->width + best->padding[CSS_RIGHT] + best->border[CSS_RIGHT] &&
+		    y >= best->y && y < best->y + best->border[CSS_TOP] + best->padding[CSS_TOP] + best->height + best->padding[CSS_BOTTOM] + best->border[CSS_BOTTOM])
+			return NULL;
+		limit_set = 1;
+		limit_child = best;
+		limit_order = best->style.order;
+	}
+}
+
+/* Tells whether a child comes before another among a box's children. */
+static int
+hit_before(
+	const struct layout_box *box,
+	const struct layout_box *first,
+	const struct layout_box *second)
+{
+	const struct layout_box *child;
+
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child == first)
+			return 1;
+		if (child == second)
+			return 0;
+	}
+	return 0;
 }
 
 /* Finds the deepest block holding a point inside the inline blocks among a block's inline content. */

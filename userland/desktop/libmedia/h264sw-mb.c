@@ -304,6 +304,7 @@ h264sw_mb_type_of(
 			mb_type_from_intra(type, mb_type);
 			error = 0;
 		}
+
 		break;
 
 	case H264SW_SLICE_P:
@@ -315,6 +316,7 @@ h264sw_mb_type_of(
 			mb_type_from_intra(type, mb_type - 5U);
 			error = 0;
 		}
+
 		break;
 
 	case H264SW_SLICE_B:
@@ -326,6 +328,7 @@ h264sw_mb_type_of(
 			mb_type_from_intra(type, mb_type - 23U);
 			error = 0;
 		}
+
 		break;
 
 	default:

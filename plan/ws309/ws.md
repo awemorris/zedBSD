@@ -31,6 +31,12 @@
 
 - （Q1 の決定、2026-10-29、ユーザーの原文ではない）J5: 下の表の「spawner の process」は Q1 の解釈だったので取り下げ、io-file の thread から `posix_spawn`、pid・kill・`waitpid(WNOHANG)` は main（ユーザーには Q1 が伝え、覆れば P1 に知らせる）。
   J6: daemon の thread は main で blocking の I/O をする接続だけ（audiod・networkd・bluetoothd・phone・volumed の 5 本）。
+- （2026-10-31、ユーザーの決定を Q1 が趣旨で伝えた。原文は Q1 の記録）「game mode（全画面の 3D）では、platform に関わらず mouse の cursor を表示しない」。
+  Q1 の技術の判断（同日）: game mode（top が fullscreen の content=game）では pointer が動いても直の scanout を出ない（ゲームは mouse を常に動かし、
+  cursor を出さないので出入りは誤り）。game でない fullscreen（動画など）は今の規則のまま。
+  実装（P7、q1732、[BUG-375](../bugs/BUG-375.md)）: `userland/desktop/wayland/scanout.c` の `kwl_scanout_cursor_hidden`（top が fullscreen の game で上に何も
+  描かれていない時）を `compose.c` の合成の cursor と cursor plane の像の選び（`kwl_compose_cursor_source`）が見て出さない。直の scanout の間は
+  lease に cursor を set しないので元から出ない。`scanout-rules.c` の pointer の規則は content が game でない時だけ。
 
 ## 決まった構成（解釈。上の原文が正）
 
@@ -116,7 +122,7 @@
 | [ws309-p012](phase012/phase.md) | display の thread（swapchain・modeset・回転・hotplug の列挙・scanout の可否と claim・release・backlight、seat の pause）。回転の壁紙（`kwl_glass_size_prepare`）を A1・T9 へ（p010 から、2026-10-29 Q1 の判断）。BUG-353 をこの中で直し、受け入れに RTX の再現（`plan/ws291/tests/rtx-mview-order.sh`、実機の枠は Q1、2026-10-29 Q1 の決定） | cleared（q1662-i09: 非同期の park と drain・T3・移動・window mode・ゲームモード・回転・head・列挙・backlight・lid、glass maps と層の絵を保つ。QEMU resize・grave・hand・scanout・rotate PASS、RTX `rtx-bug353-pair.sh` PASS（BUG-353）。backlight・lid の実機は未実施） | p009 |
 | [ws309-p013](phase013/phase.md) | present の常駐の thread（暫定の ioctl、共通の wake） | cleared（QEMU `scanout-guest.sh`・`resize-guest.sh` PASS。実機・arm64・riscv64・FreeBSD の build は未実施） | p012 |
 | [ws309-p014](phase014/phase.md) | process の起動（J5 の形）と clipboard の書き込みを poll で | cleared（libc に addclosefrom_np（Q1 の決定）、QEMU `spawn-guest.sh`・libc の `spawn-closefrom/run.sh`、host `clip-write` PASS。input method の起動と実機は未実施） | p005、J5 |
-| [ws309-p015](phase015/phase.md) | game mode の V2: libvulkan の display の swapchain の image の export、compositor の受け渡し | planned（2026-10-30 判断 1〜4 が決まった。旧: uncleared、2026-10-29: 実装の前に判断が要る（client 側の形・新しい private の protocol・libvulkan の export の口）、phase.md の「要る判断」） | p013 |
+| [ws309-p015](phase015/phase.md) | game mode の V2: libvulkan の display の swapchain の image の export、compositor の受け渡し | in-progress（2026-10-31 P2 q1782-i02: QEMU PASS、VF2 c13 41.9 → 52.5 fps で copy 0、RTX は P3 の直しの後に目視合格、`nvrtx.disp.bl` を既定 1 にして copy 0・quads 0、Pi 4・Pi 5 は未試験）。2026-10-31 14:50 P2 q1782。ユーザーが文字通りの zero copy を全 GPU で、と指示。前: planned（2026-10-30 判断 1〜4 が決まった。旧: uncleared、2026-10-29: 実装の前に判断が要る（client 側の形・新しい private の protocol・libvulkan の export の口）、phase.md の「要る判断」） | p013 |
 | [ws309-p016](phase016/phase.md) | Linux・FreeBSD の seat 経由の入力の open（J4）と seat の callback の detach の ack を wake で受ける形（p004 から） | cleared（seat の let-go・paused_done の契約、logind の TakeDevice を bus で、Linux の gdm の guest PASS、FreeBSD の native の build と host-seat-freebsd PASS。let-go を待つ経路は host 試験だけ） | p003 |
 | [ws309-p017](phase017/phase.md) | QEMU の回帰（Venus: 基準・GPU の境界・`KWL THREADS`・`KWL PERF pass`）と遅さの注入の host 試験 | cleared（WS309 の guest 試験 16・forge・fence PASS、C1・C2 PASS、C9 の p052・p076 は前の image でも FAIL（load）、p126 などの kei→user の追従、io-file の安定化） | p003〜p014 |
 | [ws309-p018](phase018/phase.md) | 規約の全文の見直し | cleared（31 file の書き方、style-check の WS309 の行 88→9） | 全て |

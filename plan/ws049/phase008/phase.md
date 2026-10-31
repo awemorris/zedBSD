@@ -46,7 +46,7 @@ Bug: [BUG-165](../../bugs/BUG-165.md)（共通の根の候補: [BUG-119](../../b
 | `plan/ws049/tests/aml-host.c` | `--absent-pci B:D.F`（繰り返し可、kernel と同じ答え）、`--absent-pci-fails`（古い kernel と同じ ENODEV、再現用）、`--ec-ports D,C`（模擬の EC の port を table の `_CRS` の位置へ。5330 は 0x930/0x934） |
 | `plan/ws049/tests/aml-host-hardware.[ch]` | `hardware_ec_ports()`（模擬の EC の data・command の port。既定は 0x62/0x66 のまま） |
 | `plan/ws049/tests/asl/absentpci.*` | 新しい ASL の試験（harness だけ。acpiexec は全機能を 0 の memory として模擬するので走らせない）: 無い機能の vendor ID が全ビット 1、書きが捨てられる、最上位の `If` が device の定義を飛ばす、64 bit の読み、ある機能は書いた値を保つ、table が最後まで走る |
-| `plan/ws049/tests/latitude5330/` | 5330 の DSDT・SSDT1〜15（BIOS 1.31.1、2026-10-04 に取り出し）と [README](../tests/latitude5330/README.md)（出所・sha256・license の注意） |
+| `plan/tools/aml-host/latitude5330/`（2026-10-31 に移した） | 5330 の DSDT・SSDT1〜15（BIOS 1.31.1、2026-10-04 に取り出し）と [README](../../tools/aml-host/latitude5330/README.md)（出所・sha256・license の注意） |
 | `plan/ws049/tests/check-latitude5330.sh` | 5330 の table の host の試験（受け入れ 1 の 4 項目） |
 
 ## 検証（2026-10-04、host と kernel の build。QEMU・実機は未実施）

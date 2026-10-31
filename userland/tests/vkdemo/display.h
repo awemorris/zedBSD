@@ -23,6 +23,8 @@ struct vkdemo_display {
 	VkFormat format;
 	uint32_t width;
 	uint32_t height;
+	/* A record the swapchain's creation chains (pNext), NULL for none; the caller's, set after the surface opened. */
+	const void *next;
 };
 
 VkResult vkdemo_display_open(VkInstance instance, VkPhysicalDevice physical, uint32_t width, uint32_t height, struct vkdemo_display *display);

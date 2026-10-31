@@ -36,25 +36,11 @@
 /* The instructions in one 128-byte line of code, to which the program is padded. */
 #define NVRTX_SM75_LINE_INSTRUCTIONS	8U
 
-/*
- * The SPIR-V words a decoration is found by: the header's length, OpDecorate
- * and the NoContraction decoration.
- *
- * Values referenced: the SPIR-V 1.6 specification, 2.3 (the five header
- * words), 3.32.2 (OpDecorate, opcode 71: target, decoration) and 3.20
- * (NoContraction, decoration 42).
- */
-#define NVRTX_SM75_SPIRV_HEADER_WORDS	5U
-#define NVRTX_SM75_SPIRV_OP_DECORATE	71U
-#define NVRTX_SM75_SPIRV_NO_CONTRACTION	42U
-
 static int nvrtx_sm75_known_model(uint32_t sm);
 static int nvrtx_sm75_is_global(const struct nvrtx_sm75_word *word);
 static int nvrtx_sm75_prepare(struct nvrtx_sm75_lowering *lowering);
 static int nvrtx_sm75_map_uniforms(struct nvrtx_sm75_lowering *lowering);
 static int nvrtx_sm75_finish(struct nvrtx_sm75_lowering *lowering);
-static int nvrtx_sm75_compile_lowered(const struct drv_gpu_shader_ir *ir, uint32_t sm, uint32_t contract, struct nvrtx_sm75_binary **binary, struct nvrtx_sm75_diagnostic *diagnostic);
-static uint32_t nvrtx_sm75_may_contract(const uint32_t *words, size_t word_count);
 
 /*
  * Compiles a SPIR-V compute module.
@@ -151,7 +137,6 @@ nvrtx_sm75_compile_stage_sm(
 	struct drv_gpu_shader_ir optimized;
 	struct drv_gpu_shader_optimize_options options;
 	struct drv_gpu_compile_diagnostic parse_diagnostic;
-	uint32_t contract;
 	int error;
 
 	/* A refused compile never leaves an old output pointer live. */
@@ -181,9 +166,6 @@ nvrtx_sm75_compile_stage_sm(
 		return error;
 	}
 
-	/* Whether products may fuse into additions: the frontend does not carry NoContraction, so the module is read for it. */
-	contract = nvrtx_sm75_may_contract(words, word_count);
-
 	/* Optimizes a private copy: every block runs (there are no skipped blocks), and the known bits fold. */
 	kern_memset(&options, 0, sizeof(options));
 	options.runs_every_block = 1U;
@@ -197,9 +179,9 @@ nvrtx_sm75_compile_stage_sm(
 
 	/* Lowers the rewritten program, or the parsed one when the optimizer left it alone. */
 	if (optimized.instructions != NULL) {
-		error = nvrtx_sm75_compile_lowered(&optimized, sm, contract, binary, diagnostic);
+		error = nvrtx_sm75_compile_ir_sm(&optimized, sm, binary, diagnostic);
 	} else {
-		error = nvrtx_sm75_compile_lowered(ir, sm, contract, binary, diagnostic);
+		error = nvrtx_sm75_compile_ir_sm(ir, sm, binary, diagnostic);
 	}
 
 	/* A rewritten program refused for any reason but memory is lowered from the parsed one. */
@@ -208,7 +190,7 @@ nvrtx_sm75_compile_stage_sm(
 	    error != ENOMEM) {
 		if (diagnostic != NULL)
 			kern_memset(diagnostic, 0, sizeof(*diagnostic));
-		error = nvrtx_sm75_compile_lowered(ir, sm, contract, binary, diagnostic);
+		error = nvrtx_sm75_compile_ir_sm(ir, sm, binary, diagnostic);
 	}
 
 	/* The IR retires before the program is handed over. */
@@ -224,9 +206,7 @@ nvrtx_sm75_compile_stage_sm(
 }
 
 /*
- * Compiles a parsed program for a shader model.  A parsed program carries
- * no NoContraction, so its products may fuse into the additions that read
- * them, as SPIR-V allows by default.
+ * Compiles a parsed program for a shader model.
  *
  * Returns 0 with the program in *binary, EINVAL for a malformed program,
  * ENOTSUP for one the compiler does not cover or a shader model it does
@@ -236,30 +216,6 @@ int
 nvrtx_sm75_compile_ir_sm(
 	const struct drv_gpu_shader_ir *ir,
 	uint32_t sm,
-	struct nvrtx_sm75_binary **binary,
-	struct nvrtx_sm75_diagnostic *diagnostic)
-{
-	int error;
-
-	/* The lowering, products fused. */
-	error = nvrtx_sm75_compile_lowered(ir, sm, 1U, binary, diagnostic);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the caller owns the program. */
-	return 0;
-}
-
-/*
- * Compiles a parsed program for a shader model, its products fused into
- * the additions that read them only when contract is nonzero; returns as
- * nvrtx_sm75_compile_ir_sm().
- */
-static int
-nvrtx_sm75_compile_lowered(
-	const struct drv_gpu_shader_ir *ir,
-	uint32_t sm,
-	uint32_t contract,
 	struct nvrtx_sm75_binary **binary,
 	struct nvrtx_sm75_diagnostic *diagnostic)
 {
@@ -291,7 +247,6 @@ nvrtx_sm75_compile_lowered(
 	/* The state, empty. */
 	kern_memset(&lowering, 0, sizeof(lowering));
 	lowering.sm = sm;
-	lowering.contract = contract;
 	lowering.ir = ir;
 	lowering.diagnostic = diagnostic;
 
@@ -486,45 +441,6 @@ nvrtx_sm75_emit(
 
 	/* Succeeded: the instruction is in the code. */
 	return 0;
-}
-
-/*
- * Reports nonzero when the module lets the compiler contract a
- * multiplication and an addition into one fused operation: no result of
- * the module is decorated NoContraction (GLSL's precise).  The frontend does
- * not say which IR values come from a decorated result, so one decorated
- * result keeps every product of the module apart.  A module whose words do
- * not walk to their end is treated as decorated (the frontend refuses it).
- */
-static uint32_t
-nvrtx_sm75_may_contract(
-	const uint32_t *words,
-	size_t word_count)
-{
-	size_t at;
-	uint32_t length;
-	uint32_t opcode;
-
-	/* Each instruction after the header: its length and opcode in its first word. */
-	at = NVRTX_SM75_SPIRV_HEADER_WORDS;
-	while (at < word_count) {
-		length = words[at] >> 16;
-		opcode = words[at] & 0xffffU;
-
-		/* A length that does not walk on is a malformed module. */
-		if (length == 0U || length > word_count - at)
-			return 0U;
-
-		/* An OpDecorate of NoContraction keeps the products apart. */
-		if (opcode == NVRTX_SM75_SPIRV_OP_DECORATE &&
-		    length >= 3U &&
-		    words[at + 2U] == NVRTX_SM75_SPIRV_NO_CONTRACTION)
-			return 0U;
-		at += length;
-	}
-
-	/* Succeeded: no result asks to stay apart. */
-	return 1U;
 }
 
 /* Reports nonzero for a shader model the compiler targets: Turing (75), Ampere (86) and Ada (89). */

@@ -83,6 +83,8 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev26（7727cb0b0、harness だけ測り直し。static・scripted・crash は dev25 のまま） | 976 | 1,085 | 115 | 39 | 2,215（63.80%） |
   | ours-dev27（ad3b33639、2026-10-31、q1727-i01、4 runner を測り直し） | 986 | 1,107 | 235 | 41 | 2,369（68.23%） |
   | ours-dev28（5b032c17b、harness・scripted・crash を測り直し。static は同じ source の部分測定の再実行 1,111 pass で後退 0、数えは 1,107） | 996 | 1,107 | 242 | 41 | 2,386（68.72%） |
+  | ours-dev30（4078977d5、2026-10-31、q1727-i02、4 runner を測り直し。static は static-subset.py の全件を並列で。後退あり、下の記述） | 998 | 1,137 | 236 | 41 | 2,412（69.47%） |
+  | ours-dev31（a6fad1068、2026-10-31、q1727-i02、4 runner を測り直し。後退は scripted の 2 件だけ） | 998 | 1,146 | 242 | 41 | 2,427（69.90%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -175,6 +177,254 @@ Origin: 2026-10-27 ユーザーの指示。
   - 未対応（残り）: inline 要素の capture（inline-element-size・new-content-is-inline など約 10）、縦書きの massive element、iframe の transition（約 10）、shadow の ::part（6）、
     Web Animations（getAnimations・set-current-time・web-animations-api 約 8）、dialog・top layer、scrollbar・scroll の rebase、harness の pseudo-elements-valid の URL variant。
 
+### q1727-i02 の途中経過（2026-10-31、P8）
+
+- 確かめ（image・QEMU）: `flock /tmp/zedbsd-image-build.lock sh plan/ws074/tests/build-browser-image.sh build/amd64` が exit 0（libbrowser の warning 無し）。
+  Venus の guest（runtime build/ws074-run）で wayland --glass と `/bin/browser` が起動し、`browser-start.sh` が PASS（start → about → 戻る、zdesktop に ERROR 無し）。
+  browser-start.sh は古かった（既定の頁が google.com に変わった事、待ちが早すぎた事）ので直した（start.html を URL に渡し、wayland の socket と window の map を待つ。7215eef0b）。
+  引数無しの起動は https://www.google.com/ を network から読んで描いた（画面で確認）。
+- 直した物（commit 6aed8bc06、ec73c1d7a、7f65d6e32）:
+  1. flex の自動の最小（min-width: auto）は行が収まる時も、flex-basis より大きい時も効く（収まる時の省略と base での頭打ちを外した）。flex: 0 0 0% の項目が内容の幅になる。
+  2. flex・grid の item は inline-block のように 1 つずつ丸ごと描く（背景を先に全部描いてから文字、をやめた）。隣の item に食い込む文字の重なり順が合う（flexbox_flex-0-* など）。
+  3. table: `caption-side`（top・bottom）、table の height・min-height は行が分け合う（caption を除く）、column の flex で stretch された table は幅を満たす。
+  4. flex の `justify-content: start|end`（flex-start・flex-end でない）は container の writing mode の左・右（column は上・下）で、flex-direction の逆でも変わらない。
+  5. flex-shrink の合計が 1 未満なら、不足の一部（合計倍）だけ縮む（9.7 の規則）。
+  6. 入れ子の column の flex で、auto の高さの container の中の item の % の高さは auto 扱い（`height_indefinite`）。
+  7. 画像の flex item の content-based minimum は、定まった cross size に自然な比を掛けた値。
+  8. `backdrop-filter`（blur・brightness・contrast・grayscale・hue-rotate・invert・opacity・saturate・sepia、url() は読み飛ばし）の parse・cascade・computed、
+     表示 list の PAINT_BACKDROP と software renderer の色行列・Gauss blur（GPU は描かない）。`will-change: transform|perspective|filter|backdrop-filter` と backdrop-filter は fixed・absolute の containing block を作る。
+     filter-effects の static 51 のうち gap だった 20 → 10（残りは border-radius の clip、zoom、opacity と backdrop root、transform、SVG の rect の CSS の幅）。
+- 部分の確認: css-flexbox・css-grid・css-align・css-position・css-writing-modes・css-tables の static（1,413 件の subset）で後退 0、FIXED +16（flexbox 以外の abspos 22 は q1727-i01 の分）。
+
+- 全件の測定（ours-dev30、source 4078977d5、`build/ws074-cmp/ours-dev30`）: 2,412 / 3,472 = 69.47%（dev28 は 2,386）。gap 1,060: harness 479、static 415、scripted 160、crash 6。
+  Acid3 100/100・pixel 差 0（exact match）、Acid2 99.27%（基準と同じ）、host build は `-Wall -Wextra -Werror` で warning 0。
+  **後退あり（dev28 の gap に無く dev30 の gap にある ID）: harness 0、crash 0、static 9、scripted 8**。原因は backdrop-filter の実装で、これまで「test も reference も backdrop-filter を無視して偶然同じ絵」で通っていた物:
+  - static: css-backdrop-filters-animation-{blur,brightness,contrast,grayscale,hue-rotate,invert,saturate,sepia}（8）は reference が backdrop-filter を使い、test が @keyframes の animation（paused、delay -2s）で backdrop-filter を動かす。engine に @keyframes が無いので test に効かない。
+    + css-view-transitions/view-transition-name-is-backdrop-filter-root（1）。
+  - scripted: filter-effects/backdrop-filter-{basic-blur,boundary,edge-clipping-2,edge-mirror,edge-pixels-2}（5）は blur の端（blur は box の外へ滲む、mirror の端）が Chromium と違い maxDifference を超える。
+    css-view-transitions/{backdrop-filter-animated,new-element-on-start,old-content-captures-different-size}（3）は、old-content-captures-different-size は単独で PASS（測定中の負荷による時間切れの疑い）、new-element-on-start は単独でも FAIL（20,000 画素差）、backdrop-filter-animated は @keyframes。
+  次の Attempt は、(1) @keyframes（parser.c の `@position-try` と同じ形で名前付きの rule を sheet に持ち、animation-name から progress を求めて backdrop-filter・filter を補間する）、(2) blur の端（box の外へ滲む filter と mirror の backdrop）で後退を 0 にする。
+  net の増分は +26 だが、後退 17 ID を直すまで dev30 を「後退 0」とは言えない。
+- 追加で直した物（4078977d5）: 入れ子の column の flex で item の主軸の大きさが定まるのは flex-basis が長さの時（basis が auto なら height が長さの時）だけにした（広げすぎて percentage-heights-005〜007・flex-basis-012 が後退したのを直した）。
+  画像の content-based minimum は row だけ（column は比の無い SVG で後退した）。`filter`（同じ関数群、border box に後から適用）と `will-change`（transform・perspective・filter・backdrop-filter は containing block と backdrop root を作る）を足した。
+
+- **最終の測定（ours-dev31、source a6fad1068、`build/ws074-cmp/ours-dev31`）: 2,427 / 3,472 = 69.90%**（dev28 は 2,386、+41）。gap 1,045: harness 479、static 406、scripted 154、crash 6。
+  dev28 の gap に無く dev31 の gap にある ID（後退）は **harness 0・static 0・crash 0・scripted 2**。上の dev30 の後退 17 件のうち 15 件を、blur を描かない（Gauss の blur は box の外へ滲まず端が mirror でないため、無い方が reference に近かった）、
+  `@keyframes`（parser.c の `parser_keyframes`、cascade.c の `cascade_animation`: 名前・delay・duration から時刻 0 の進みを求め、backdrop-filter・filter だけを前後の keyframe の間で補間）、
+  view-transition-name を持つ祖先を backdrop root として直した。残る 2 件（scripted）:
+  `css-view-transitions/new-element-on-start`（view-transition の pseudo-element の `filter: invert(1)` が image-pair の描きに入る。以前は filter を無視した偶然の一致）と
+  `css-view-transitions/backdrop-filter-animated`（pseudo-element の animation で backdrop-filter を動かし `getAnimations()` の currentTime を使う）。次の Attempt で直す。
+  Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）、host build は `-Wall -Wextra -Werror` で warning 0（dev30 の時点。dev31 の source の差は css・paint の追加だけで、build は warning 0）。
+  gap 一覧: `build/tmp/p8/gap31.json`。
+- 調べて直さなかった物（次の候補）:
+  - 直交 flow の flex item（縦書きの item を横の flex に置く）は layout_logical_wanted が flex の item を物理座標のままにするため、base size が inline の max-content になる（flexbox-writing-mode-009〜016、align-self-vert-rtl、align-self-horiz 約 25 件）。
+    正しくは item を論理座標の領域にして block size を base にする。縦の行は折り返さない簡易実装（`vertical_inline`）が前提なので、まず flex の item を領域にする設計が要る。
+  - table の `height` は caption を除く grid box の高さ（caption は外）。flex が与える高さは wrapper 全体（caption を含む）なので両者を区別する印が要る（table-as-item-inflexible-in-row-2、min-height-1）。
+  - backdrop-filter の parse: drop-shadow()・url("...") の保持、canonical な直列化（blur(0px)・hue-rotate(0deg)・100% の上限）。
+  - flexbox の SVG の viewBox と片方の寸法から決まる固有の大きさ、`min-height: min-content`。
+
+### q1727-i03 の途中経過（2026-10-31、P8、host の / の空きが少ないので測定の出力は /tmp/p8out）
+
+- 測定の道具（plan/ws074/tests/）: `measure-snapshot.sh NAME [JOBS]`（host build の browser・wpt-ready-render・libbrowser.so を /tmp/p8out/NAME/bin に複写して 4 runner を測り、static は static-subset.py の並列で流して合わせ、Chromium（build/ws074-cmp/chrome156）と比べて gap.json を作る。約 3 分。build し直してよい）、
+  `gap-diff.py OLD.json NEW.json`（gap に入った ID = 後退、出た ID = 修正）、`harness-fails.py --gap G --ours DIR PREFIX...`（gap の harness の ID の失敗した subtest と message）、
+  `static-subset.py`・`scripted-subset.py` に `--gap gapNN.json`（前回の全件の結果が無くても、Chromium が通り gap に無かった ID を基準にして REGRESSION を出す）、`host-build.sh` に libmedia の h264sw を足した。
+- 測定（gap は build/tmp/p8/gap*.json に残した）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev32（3c8ebb185） | 隔離した filter の group | 998 | 1,146 | 243 | 41 | 2,428（69.93%） |
+  | dev36（edbd03c1a） | 要素の scroll、anchor の解決、popover | 1,006 | 1,146 | 261 | 41 | 2,454（70.68%） |
+  | dev37（1d2ad3ef0） | flex・grid の baseline、fieldset、overflow の clamp | 1,012 | 1,148 | 261 | 41 | 2,462（70.91%） |
+
+  | dev38（813ef1a6a） | CSS logical の CSSOM（shorthand の longhand と computed の直列化、inline-size など）、groove・ridge | 1,021 | 1,149 | 261 | 41 | 2,472（71.20%） |
+  | dev39（zoom まで） | zoom（cascade）、css-viewport/zoom +11 | 1,022 | 1,160 | 263 | 41 | 2,486（71.60%） |
+  | dev40（efd1d8313） | navigation-api の DataCloneError・intercept・detach、Streams・WebAssembly.Memory の stub | 1,039 | 1,160 | 263 | 41 | 2,503（72.09%） |
+  | dev42（cfd40a883） | grid の abspos の descendant、display: contents の blockify、grid-*-gap の computed | 1,041 | 1,160 | 263 | 41 | 2,505（72.15%） |
+  | dev43（hit test の変更まで、source は 0c8adb187 の直前の commit） | flex・grid の hit test の順 | 1,043 | 1,160 | 263 | 41 | 2,507（72.21%） |
+
+  どの測定も後退 0（dev31 または直前の gap との差で、4 runner とも gap に新しく入った ID は無い）。
+- 直した物:
+  1. filter を隔離した group で描く（paint/paint.h の `PAINT_GROUP`・`PAINT_GROUP_END`、paint/software.c の `software_group`: group の items を黒の上と白の上に 2 回描いて各画素の色と coverage を求め、filter の関数を色に掛けて page の上に重ねる）。
+     box の `filter` が box 自身の painting にだけ効く（以前は後ろの backdrop ごと filter していた）。view-transition の木の layer には、子孫の layer まで 1 つの group で包む。backdrop-filter を持つ box は従来の形（backdrop ごと）。
+     css-view-transitions/new-element-on-start が PASS。`document.startViewTransition` を文書の parse 中に呼ぶと css engine が無く segfault していたのを直した（page/transition.c）。
+  2. 要素の scroll: dom_element に `scroll_x`・`scroll_y`、bind/geometry.c の scrollTop・scrollLeft・scrollTo・scroll・scrollBy（root 以外）が overflow を持つ block を範囲内（scroll 幅 - client 幅）で動かし、文書の generation を進める。
+     layout/scroll.c の `layout_scroll_apply` が layout と abspos の配置の後に container の中身（in-flow の部分木と、containing block が container の中の abspos）を scroll 分ずらす（clip は動かない）。
+     anchor（layout/anchor.c の anchor_find）は、anchor を含む scroll container のうち対象の containing block を含まない物の scroll 分だけずれた rect を返す（対象はその位置で配置され、scroll に付いて動く。position-try の溢れの判定もずれた位置で）。
+     scrollWidth・scrollHeight は text の line の端と block の子の終端側の margin を含む。anchor の名前の衝突は、scroller の中の abspos の anchor は対象より後にあれば取らない。
+     css-anchor-position の scripted・harness の anchor-scroll 系 + position-visibility の一部（scripted +18、harness +8）。
+  3. popover（prelude.js、css/ua.c、css/cascade.c）: `popover` 属性、showPopover・hidePopover・togglePopover、`:popover-open`、UA sheet（open は fixed・fit-content・margin auto・z-index 最大。top layer は z-index で近似）。
+     position-area の `inset: 0` は auto と同じ揃えにする（popover の UA の `inset: 0` が position-area を壊さないように）。
+  4. `document.fonts.load()`・`check()`、`Range.getClientRects()`・`getBoundingClientRect()`（text node の rect の和）。
+  5. flex・grid container の baseline の書き出し（layout/inline.c `inline_items_baseline`）: 「最初」は物理的に先頭の line（wrap-reverse・rtl の column の line の逆順を見る）の物理的に先頭の item（row-reverse・rtl の row・column-reverse は逆）、「最後」は反対側。
+     last baseline の flex・grid container の対応。overflow が visible でない box の baseline は border box の中に clamp。table の baseline は caption を除く。fieldset の baseline は legend を除く。
+     fieldset の legend（最初の legend の子）は上の border の位置に載り、border の高さと legend の高さの大きい方だけが上を占める（layout/block.c `block_fieldset_legend`）。
+     flex-align-baseline-001・flex-flex-001・fieldset-001 と grid の同等の物、overflow-001 が PASS。
+  6. CSS logical box properties（bind/style.c `style_box_get`: margin・padding・inset・border-width・style・color と inline・block の shorthand と border の shorthand から longhand を inline style で読む。bind/computed.c `computed_box_shorthand`:
+     shorthand の computed を longhand から作る（4 辺は短い形）、`inline-size`・`block-size` と min・max の computed、`grid-row-gap`・`grid-column-gap`）、sideways-lr の inline-start は下（cascade.c `cascade_margin_property`）、border-style の groove・ridge を区別。
+     css-logical の logical-box-margin・padding・inset・border-width・color・style・shorthands・size が PASS（border-radius は未）。
+  7. zoom（css/cascade.c）: 要素の effective zoom（祖先の積）を `css_style.zoom_eff` に持ち、cascade の長さ（px・pt・in・vw など、calc の px、font-size の em・%・keyword、継承した font-size・line-height・text-indent・border-spacing・text-shadow、rem は root の zoom で割って要素の zoom を掛ける）に掛ける。
+     computed の px の出力は zoom で割る（bind/computed.c `computed_zoom`、`computed_pixels`）。画像の自然な大きさ（layout/replaced.c）も掛ける。css-viewport/zoom の static が 2 → 14。
+  8. navigation-api（plan/ws074/phase230/prelude.js）: structuredClone が EventTarget・Event らしい object を DataCloneError にする（realm をまたいでも）、ReadableStream・WritableStream・TransformStream と WebAssembly.Memory（shared の buffer は clone 不可）の stub、
+     unserializable な state の rejection の順、intercept() が detach 後に InvalidStateError、navigateerror の ErrorEvent の lineno・colno（Error に位置が無いので 1・1）、NavigationHistoryEntry・NavigationDestination の key・id・url・index が detach 後に空・-1。harness +17。
+  9. grid の abspos: grid が containing block の abspos の descendant（親が item の block）も grid-placement の area を containing block にする（layout/grid.c `grid_abspos_deeper`。入れ子の grid・subgrid の下と、名前付きの線は除く）。
+     flex・grid の hit test は item を order の逆（上に描く物から）に探す（layout/hit.c `hit_items`）。computed の blockify は display: contents の親を飛ばす。`::view-transition` の UA の position は absolute。
+- 調べて直さなかった物（次の候補）:
+  - 直交 flow の flex item（`/tmp/p8out/flex-ortho-exp1.patch`: `layout_logical_wanted` が flex の item を物理のままにする所を外すと static の css-flexbox で +5/-5。後退は fit-content-item-002〜004（auto の cross を持つ縦書きの item の inline size が viewport になる）・ortho-table-item-001・stretching-orthogonal-flows）。
+    必要な事: 縦書きの item の cross 方向の inline size を fit-content にする（logical_fits_content が flex の item を除外している所）、stretch された cross の再 layout。
+  - 縦書きの flex・grid の baseline（flex-align-baseline-002・004・fieldset-002/003・grid-self-baseline の vertical 系、約 60）は縦の container での baseline の軸と item の synthesized baseline の規則が要る。
+  - multicol（columns）は未実装（flex-align-baseline-multicol 6、anchor-position-multicol 約 10）。subgrid の配置は未実装（subgrid の grid-gap・line-names・repeat-auto-fill 約 30 は subgrid の track を親の track にする設計が要る）。
+  - CSS Transitions・Animations・Web Animations が computed style を補間しない（flex-grow・flex-basis・order・grid-template-*・backdrop-filter の interpolation・composition、約 25）。prelude.js の `Animation` は時刻の管理だけ。
+  - css-logical の shorthand（margin-inline など）を inline style の longhand に展開して直列化する（logical-box-margin・padding・inset・border-width・border-color が各 11 subtest）。position-try の last-successful の状態（約 10）。navigation-api の window.open・popup・複数 frame（約 80）。
+
+### q1727-i04 の途中経過（2026-10-31、P8）
+
+- 測定（gap は build/tmp/p8/gap44〜47.json、測定の出力は /tmp/p8out/devNN）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev44（4bd58180d） | 直交 flex item、position-try の last-successful・position-area のはみ出し | 1,045 | 1,164 | 263 | 41 | 2,513（72.38%） |
+  | dev45（3220b8c7c） | sideways-lr、table の direction:rtl | 1,047 | 1,193 | 264 | 41 | 2,544（73.27%） |
+  | dev46（9b45c337b） | thead/tfoot の順、position-area の直列化、anchor の scope・containing block の連鎖・logical 側・margin の anchor-size、IMCB での fit、offsetParent の transform | 1,059 | 1,204 | 265 | 41 | 2,569（73.99%） |
+  | dev47（2e179c668） | 縦の行の replaced を central baseline に、minmax の最小が最大より大きい track、image-set（ここまで） | 1,061 | 1,205 | 266 | 41 | 2,573（74.11%） |
+
+  | dev48（08f927f15） | position-visibility、position: fixed を viewport に付ける、dialog、top layer の anchor | 1,062 | 1,209 | 281 | 41 | 2,593（74.68%） |
+  | dev49（e04957d55） | 縦書きの root の view transition の old/new の大きさ（inline-size・block-size）、logical な border radius | 1,063 | 1,209 | 293 | 41 | 2,606（75.06%） |
+  | dev50（36a244fec） | 非 grid の repeat() の computed、table の高さ（caption を除く）、flex の中の table の最小幅 | 1,065 | 1,210 | 293 | 41 | 2,609（75.14%） |
+
+  dev43 → dev47 の差: 後退は static の css-writing-modes/table-column-order-slr-007 の 1 件だけ（sideways-lr で正しい配置になり、以前の合格は
+  縦書きの rtl の偶然の一致。この試験は rtl の中の数字の run を視覚順に並べ替える bidi が要る。engine には bidi が無い）。他の runner は後退 0。
+- 順の判断: gap の数が大きい物から直した。subgrid（約 60）は track の共有の設計が要るので後回し、直交 flex は layout_logical_wanted を
+  flex の item にも使う（直交の item は fit-content の inline size、column の stretch、self-start/self-end、table の最小幅）で +6、
+  flexbox-writing-mode-009〜016（縦の flex container + 横の item）は container が物理座標で layout される経路で未対応。
+- 直した物:
+  1. sideways-lr（layout/logical.c）: vertical-lr の領域で inline の軸を反転する mode（`LOGICAL_SIDEWAYS_LR`）。logical の左＝物理の下。unflip で box の y を
+     親の inline の大きさから反転、行は `vertical_inline = 2`。描画は paint/list.c で反時計回りの glyph（paint_item.vertical = 2、software.c と GPU の shader に
+     kind 4 を足して paint/shaders.h を再生成）。css-writing-modes の slr 系 +25、wm-propagation-body-* 8 件（縦の行の replaced は central baseline、sideways は alphabetic で行の下から上へ）。
+  2. table（layout/table.c）: `direction: rtl` の列を右から、thead の行を先頭・tfoot を末尾（row-progression 系 3 件）。
+  3. position-try（layout/position.c）: 最後に fit した fallback を要素に覚え（`dom_element.anchor_last`、fallbacks の一覧が変わると忘れる）、どれも fit しない時はそれを使う。
+     position-area の normal の揃えではみ出した box は containing block の中へ戻す（scroll container の中は戻さない）。fallback が fit する範囲は inset を引いた
+     containing block（IMCB）。getComputedStyle の offsetParent は transform を持つ祖先も数える。
+  4. anchor（layout/anchor.c、css/anchor.c）: anchor-scope（同じ scope の中だけで anchor が見える）、anchor の containing block の連鎖の最後が abspos で後ろにある時は取らない、
+     anchor() の start/end/% と anchor-size() の block/inline を containing block の writing mode と direction で、margin の anchor-size()、閉じ括弧の無い関数、
+     position-area の setter の直列化（宣言の形を保つ）。rtl の block の max-content は左 margin の余りを数えない。
+  5. grid: repeat(auto-fill, minmax(30px, 6.5%)) のように最大が最小より小さい track は最小を使う。
+  6. image-set()（background-image の最初の候補とその解像度）、zoom を背景画像の固有の大きさに掛ける。
+- dev47 の後に直した物（dev48〜dev50）:
+  7. position-visibility（layout/anchor.c `layout_anchor_hides`、position.c）: anchors-visible は default anchor が間にある scroll container の padding box の外へ出た時・anchor 自身が hidden の時に箱を隠す（paint と hit test は `anchor_hidden` の箱を飛ばす）、no-overflow は fallback の後でも IMCB をはみ出す時。
+  8. position: fixed の箱を viewport に付ける（layout/sticky.c: fixed の箱を sticky と同じ list に入れ、scroll の分だけ下げる。anchor が scroll する物に付いた箱は動かさない）。view の scroll の要求を load 中に取りこぼさない（view/view.c）。
+  9. `<dialog>`（HTMLDialogElement を interface に足し、prelude.js に show・showModal・close・open・returnValue、UA の sheet、top layer は popover と同じ flag に開いた順の番号）、`document.scrollingElement`、top layer の要素を anchor にできるのは先に top layer に入った物だけ。
+  10. view transition の old/new の大きさを UA の sheet の `inline-size: 100%; block-size: auto` に（縦書きの root で高さが 100%、幅は snapshot の比から。layout/box.c）。massive-element-* 10 件と root の縦書き 2 件ほか。
+  11. 非 grid の要素の `grid-template-columns/rows` に repeat() がある時は書いた形で返す（css/values.c `values_declared_text`、cascade.c `cascade_declared`で em を px に）、border-*-radius の logical 4 つ（物理の corner への対応は cascade.c と bind/computed.c）と computed の radius。
+  12. table: `height` は caption を除く grid box の高さ（flex が全体の高さを与える時は `table_wrapper_height` で caption を引く）、flex の row の中の table は columns の最小幅より狭くならない、stretch で内容より低くならない。
+  13. @layer（css/parser.c: layer の名前を sheet の順に、statement と block と無名、`css_rule.layer`。cascade.c: layer の重み、通常の宣言は layer 無しが最強・後の layer が強く、!important は逆）。
+- 調べて直さなかった物: position-try-order（most-width 等）・@position-try の CSSOM（CSSPositionTryRule の class と insertRule）・var() を持つ try rule、
+  navigation-api の initial about:blank（prelude の `initialBlank()` が iframe の作成中は parent を持たず常に false。直すと activation 等が使う経路に入るが、
+  iframe の onload が出ず no_output になる試験が残り、得は無かったので戻した）、table-cell を writing-mode の root にする試験（srl-057 など 4 件）、
+  shape-outside（engine に無い。css-shapes の選定 16 件は全部 sideways の変種で、clip-path も要る）、bidi。
+
+### q1727-i04 の後半（2026-10-31、P8。dev51〜dev68）
+
+- 測定（gap は build/tmp/p8/gap51〜gap6x.json、出力は /tmp/p8out/devNN。計は Chromium が通す 3,472 のうちの数）:
+
+  | 測定 | source の先頭 | 計 | 内容 |
+  | --- | --- | --- | --- |
+  | dev51 | 684f73098 | 2,613（75.26%） | 絶対配置の self-alignment（両 inset がある時の justify-self・align-self）、flip の揃えの入れ替え |
+  | dev52 | 18ba7630f | 2,617 | fixed の scroll を `page_scroll_to` で、`getComputedStyle(el, '::before')` と content、background 短縮形の image-set、LCP の生成 text |
+  | dev53 | 8f1360999 | 2,618 | -webkit-text-stroke-width |
+  | dev54 | d546261c4 より前 | 2,621 | `lh`・`rlh` の単位、非定高の percent row-gap の 2 回目の解決 |
+  | dev55 | d546261c4 | 2,628 | `<canvas>` を replaced に（自然の大きさは属性、既定 300x150）、grid の ratio 寄与 |
+  | dev56 | 82126c0a1 | 2,640 | SVG の percentage の長さ（rect の 100% など）、bare svg の stretch-fit |
+  | dev57 | a5a73f1d9 | 2,645 | zoom の inherit、table の余りの高さは auto の行に先に、canvas の flex-basis: content |
+  | dev58 | 7531d473b | 2,649 | flex・grid の空白だけの text（white-space: pre でも item にしない）、LCP の data URI の背景 |
+  | dev59 | 13d5d98b0 より前 | 2,652 | インライン replaced の getBoundingClientRect は margin を除く、grid の percent の min-width、flex-grow が 1 未満の合計、flex の最小サイズ |
+  | dev60 | （同上の続き） | 2,650 | position-area の auto inset を 0 に（scroll 等で後退 4、dev61 で直した） |
+  | dev61 | ba09c56b9 の前 | 2,656 | auto inset は size が auto の時だけ 0 |
+  | dev62 | ba09c56b9 | 2,661 | HTMLCanvasElement の width・height、チェックボックス・ラジオの zoom、content-visibility、`revert` |
+  | dev63 | 9774120ff | 2,664 | `::details-content`、border-spacing と text-indent の calc() |
+  | dev64 | 71ad40960 | 2,669（76.87%） | details-content: display contents、単一行 flex の line の cross size を min/max-height で挟む |
+  | dev65 | eab76be30 | 2,672（76.96%） | percent の flex-basis が決まらない時は content と同じ、`::details-content` の display: contents |
+  | dev66 | （dev65 の続き） | 2,674（77.02%） | column の ratio の最小（img の content size suggestion）、min/max-width の percent は測定の広い幅では無視 |
+  | dev67 | 上の続き | 2,679（77.16%） | auto 高さの column の max-height、overflow が片軸だけ visible でない item の auto minimum、bitmap の `no_ratio` |
+  | dev68 | 3d50a809f（source は dev67 の続き） | 2,680（77.19%、gap 792） | min-width/flex-basis の intrinsic keyword、flex-wrap の min-content |
+
+  dev43 → dev64 の後退は static の css-writing-modes/table-column-order-slr-007 と、dev56 で scripted の grid-item-*-stretch 7 件（SVG の `cx="50%"` の円を描くようになり、
+  natural size のままの bitmap を拡大するので縁がぼやけ、Chromium の vector の拡大と一致しない。以前は円が描かれず偶然合っていた）。
+  それ以外の step の後退は 0（dev60 の 4 件は dev61 で直した）。
+- 結果（2026-10-31 10:26 の host `date`）: 2,507（dev43）→ 2,680 / 3,472 = 77.19%。dev43 から dev68 の差は harness +42・static +103・scripted +36、後退は static 1（slr-007）と scripted 7（grid-item-*-stretch）。
+  最後の source での Acid3 100/100・pixel 差 0（exact match）、Acid2 99.27%（基準と同じ）、host build は `-Wall -Wextra -Werror` で warning 0。dev69 以降は測定していない（dev68 の後の source の commit は無い）。
+  Acid の runner が WPT の tree に残した一時 file（`build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-*.html` 8 個、`acid3/zedbsd-acid3-reference-*.html`・`zedbsd-acid3-diagnostic-*.html` 各 4 個）は Q1 が消す。
+  作業用の `build/tmp/p8/sub-1793396413`・`build/tmp/p8/refa`・`build/tmp/p8/refw` も同様。
+- 直した物（続き。14 以降）:
+  14. 絶対配置（layout/position.c）: 両 inset がある時の self-alignment（justify-self・align-self の start・end・center）、fallback の flip で LEFT/RIGHT・FLEX_* の揃えを入れ替え、対角の flip は direction で left/right を直す。position-area の下で size が auto の box は auto inset を 0 に（area の縁まで広がる）。
+  15. 要素の `::before`・`::after` の getComputedStyle（content の computed）、background 短縮形の image-set()、`-webkit-text-stroke-width`、LCP の生成 text の幅・data URI の背景（plan/ws074/phase230/prelude.js）。
+  16. `lh`・`rlh`（css/cascade.c: engine に `line_px`・`root_line_px`）。calc() の中は未対応。
+  17. grid: percent の row-gap で高さが auto の時、行を固定部分だけで決めた高さに percent をかけて直す。items の percent の min-width は area の割合（stretch の時）。replaced（img・canvas）の ratio を固定の行から寄与として使う（`grid_ratio_width`）。
+  18. `<canvas>`（layout/box.c・replaced.c・flex.c）: replaced の box、自然の大きさは width・height 属性（無ければ 300x150）で ratio を持つ（presentational hint ではないので属性は style の寸法にしない）、flex-basis: content、column の stretch で ratio から高さ。HTMLCanvasElement の interface と width・height の reflect（getContext は無い）。
+  19. SVG の percentage の長さ（page/svg.c `svg_percent_length`: viewBox（無ければ bitmap）の幅・高さ・半径用の対角に対して）。viewBox だけの bare svg の stretch-fit は margin を引く。
+  20. zoom: `width: inherit` の px は子の zoom を掛ける、チェックボックスとラジオの自然の大きさに zoom、calc() が border-spacing・text-indent で通る。
+  21. table: 余りの高さは高さの指定が無い行に先に配る、caption の min-content が table の最小幅（anonymous table に caption も入れる）。
+  22. flex: flex-grow の合計が 1 未満の時は最初の自由な空間に合計をかけた量が上限（2 周目以降も）、flex-basis が自分の値の item は max-content の測定でも min-content で持ち上げる、percent の flex-basis が決まらない時は content と同じ（高さの指定を無視）、単一行の line の cross size を container の min/max-height で挟む。flex・grid で空白だけの text は white-space: pre でも item にしない。
+  23. getBoundingClientRect: インラインの replaced の piece は margin box なので margin を除く（layout/bounds.c。flex の radiobutton-min-size など）。
+  24. @position-try: layer を持ち、同じ名前は最も高い layer の最後の rule（layer 無しが最強）。
+  26. flex の column: auto の高さが max-height を超える時はその高さで flex する（flex-minimum-size-002）。img の content size suggestion を column にも（ratio の無い SVG は除く: `img_bitmap.no_ratio`）。overflow の一方が visible でないと自動の最小は 0。min/max-width の percent は測定の広い幅（2^24）では限界にしない。
+  27. min-width の `min-content`・`max-content`・`fit-content`（layout/block.c `block_min_intrinsic`）、flex-basis の `min-content`・`max-content`・`fit-content`（row の非 replaced item）、flex-wrap の container を狭く測った時の幅は最も広い item。
+  25. `content-visibility`（visible・auto・hidden。hidden は内容の box を作らない）、UA の sheet の `[hidden=until-found]`、`revert`（author の宣言を UA の宣言に戻す。css/cascade.c `cascade_reverted`）、`::details-content`（css/parser.c・layout/box.c `box_details_content`: summary の後の box を包む。display: contents なら包まない）。
+- 調べて直さなかった物（理由）:
+  - SVG を layout の大きさの vector で描く（bitmap は自然の大きさで作り、layout と paint が `image->width` を自然の大きさとして使う）。grid-item-*-stretch 7 件、css-viewport/zoom の svg 5 件、
+    さらに数件に効く。直すには bitmap に自然の大きさと密度を持たせて layout・paint の約 12 か所を直す。
+  - grid の `CSS_TRACKS`（24）を超える repeat()（grid-limits-001）、table-layout: fixed（flexbox_table-fixed-layout）、quirks mode の percent 高さ、`::details-content` の `::first-letter`/`::first-line`（details-pseudo-elements-005）、
+    @scope の CSSOM（CSSScopeRule・CSSNestedDeclarations）と nesting、flex・grid の baseline（縦書きの item・fieldset・multicol・table の baseline の合成で約 45 件）、
+    scrollIntoView の sideways（要素の負の scrollTop と縦の inline overflow の scrollHeight）、subgrid、computed value の補間、grid の calc() の整数（sibling-index()・sign() を含む）。
+- 次の候補（効きの見込み）: (1) SVG の vector 描画（約 13）、(2) flex・grid の baseline（縦書きの合成 baseline、約 45）、(3) @scope の CSSOM と nesting（約 12）、
+  (4) subgrid の track の共有（約 60）、(5) computed value の補間エンジン（grid・flex の animation、約 25）、(6) `::first-letter`/`::first-line` の pseudo-element、
+  (7) table-layout: fixed、(8) CSS_TRACKS の動的な確保。
+
+### q1727-i05 の途中経過（2026-10-31、P8。dev69〜dev73）
+
+- 測定（gap は build/tmp/p8/gap69〜gap73.json、出力は /tmp/p8out/devNN）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev69 | grid の直交 item を論理座標で layout | 1,084 | 1,262 | 292 | 41 | 2,679（後退 4 は dev70 で解消） |
+  | dev70 | 上に加えて、spanning item の baseline の行・縦の item の justify baseline | 1,090 | 1,262 | 292 | 41 | 2,685 |
+  | dev71 | position-area の inset 内の揃え・anchor が外にある area・containing block の writing mode、`inset: unset` | 1,095 | 1,265 | 292 | 41 | 2,693 |
+  | dev72 | try-tactic の論理 flip、position-try-order、vertical の abspos の static 位置 | 1,098 | 1,267 | 292 | 41 | 2,698（77.71%、gap 774） |
+  | dev73 | flip-start の揃えを入れ替えのままにする | 1,099 | 1,267 | 292 | 41 | 2,699 |
+  | dev74 | flex の column の縦の item の baseline（左・右に寄せる group、wrap-reverse で反転、横の item は合成の baseline で加わる） | 1,102 | 1,267 | 292 | 41 | 2,702 |
+  | dev75 | auto-fill・auto-fit の繰り返しの数を min・max の大きさから（max が最優先、min だけなら切り上げ、percent の min・max-height） | 1,105 | 1,267 | 292 | 41 | 2,705 |
+  | dev76 | aspect-ratio が min-height を幅へ（auto の幅と繰り返しの数） | 1,105 | 1,268 | 294 | 41 | 2,708（78.00%、gap 764。ただし grid-auto-repeat-min-max-size-001 が後退して dev77 で直した） |
+  | dev77 | 上の後退の修正（max-width を測定の間だけ隠している時は切り上げにしない）、最後の source | 1,106 | 1,268 | 294 | 41 | 2,709（78.02%、gap 763） |
+
+  後退（dev68 に対し、dev77 まで）は static の css-grid/subgrid/orthogonal-writing-mode-001 の 1 件だけ（下記）。dev68 から harness +21・static +7（-1）・scripted +2。それ以外の後退は途中の測定で出た物を全て直した。Acid3 は 100/100・pixel 差 0（exact match）、Acid2 は 99.27% のまま（基準と同じ）、host build は warning 0（2026-10-31 11:3x の host `date`）。Acid の runner が残した一時 file は build/ws074-suites/wpt/acid/ の下に増えたので Q1 が消す。
+- 直した物:
+  1. grid の直交 item（縦書きの item を横の grid に）: layout/logical.c の `layout_logical_wanted` が grid の item の直交を論理座標で layout する（subgrid・replaced・atomic は除く）。
+     item の inline 方向の room は固定の行の高さ（無ければ viewport）。stretch で行が確かな時は row の高さ、そうでなければ fit-content（`logical_fits_content`）。
+     track の寄与は block size（`layout_max_content`・`layout_min_content` が `position_orthogonal_width`）。grid-align-baseline-003/004 ほか。
+  2. grid の baseline: 複数の行にまたがる item は最初の baseline を最初の行、最後の baseline を最後の行の group に入れる（grid_row_baselines）。
+     縦の item の justify-self: baseline（行の方向、`grid_column_baseline`）: 最初の baseline は item の block-start 側、最後は block-end 側に寄せる group で、各 group が行に沿って
+     最初・最後の line の中央の baseline を共有する（左に寄せる group・右に寄せる group）。grid-justify-baseline-002、grid-align-baseline-003/004 ほか。
+  3. position-area（layout/anchor.c・position.c・css/anchor.c）: inset が両側にある box は inset を引いた area の中で揃える（span-all は anchor に中央）。anchor が containing block の外にある時は area の
+     線が anchor と CB の和（anchor-outside・partially-outside）。start・end・x-start・y-start は containing block の writing mode・direction、self- は box 自身の物（sideways-lr は mode 3）。
+     grid area が containing block の時はその area から切る。`inset: unset|initial|inherit` の CSS-wide keyword を展開（values.c）。直交の abspos は left・right（top・bottom）の間を block size（inline size）で埋める。
+  4. try-tactic: flip-block・flip-inline は containing block の writing mode に従う、flip-start は block-start と inline-start の間の対角（右上・左下の対角は 2 つの flip を重ねる。揃えは入れ替えのまま）。
+     position-try-order（most-width・most-height・most-block-size・most-inline-size）は各 fallback の IMCB の大きさで安定に並べ替える。
+  6. flex の column（layout/flex.c `flex_column_baseline`・`flex_column_has_vertical`）: 縦の item が cross 軸（左右）で最初・最後の line の中央の baseline を共有する。group は item の block-start 側（最初）・
+     block-end 側（最後）に寄せ、左に寄せる group と右に寄せる group がそれぞれ baseline の両側の余白を line の大きさに足す。wrap-reverse は全ての group を反転。縦の item がある line では横の item も
+     border box の左端（最後は右端）を baseline として加わる。共有の `layout_vertical_baseline`（inline.c）。flex-align-baseline-001/004、align-items-baseline-column-horz ほか。
+  7. grid・flex の auto-fill・auto-fit（layout/grid.c `grid_expand_repeats`・`grid_expand_axis`）: 繰り返しの数は確かな幅・高さ、無ければ max（min が大きくても max 側の床）、min だけなら届く数（切り上げ）。
+     percent の min・max-height は親の高さ（px）から。aspect-ratio の box は min-height から幅の min を作る（layout/position.c の shrink-to-fit も）。
+  5. 縦書きで children_inline だが行が無い box の abspos の子の static 位置を保つ（layout/box.c `layout_absolute`）、block 配下の abspos の static の揃えの値を毎回初期化（block.c）。
+- 後退として残した物: css-grid/subgrid/orthogonal-writing-mode-001（static）。以前は subgrid を実装しない grid の item を旧経路で layout し、reference も同じ旧経路で偶然一致していた。今は
+  reference の方が正しく layout され（行の高さ 21.61）、test の subgrid は track を共有しないので 1 行（10 画素）の縁の濃さが 1/64 px ずれる。subgrid の実装で解消する見込み。
+- 調べて直さなかった物（次の候補）:
+  - flex の column の baseline（flex-align-baseline-001〜004・align-items-baseline-column/row-vert。縦の item が横の cross 軸で central baseline を共有する）と、縦書きの grid（writing-mode が縦の container）の
+    align-self: baseline（grid-align-baseline-001/002、grid-justify-baseline-003/004）。grid の direct な列の baseline と同じ group の考え方（item の block-start 側に寄せる group）で書ける見込み。
+  - subgrid（約 58）。方式の案: subgrid の軸では親の track を借りる。親の track の大きさへの寄与は subgrid の item の寄与を足し（edge の border・padding・margin と gap の差の半分を item の margin に足す）、
+    subgrid の layout では親の track の大きさを注入する。grid.c の列・行の sizing は heuristic の積み重ねなので、先に spec の track sizing（§12.5 から §12.8）を独立の関数に書き直す方が安全。
+  - track sizing の書き直し（grid-definition・layout-algorithm の約 50 ID: 高さが minmax の限界・span の配分・flex の寄与・auto-repeat・percent の row）。
+  - anchor の parse・serialize（`anchor(--foo inside)` の canonical の順、入れ子の anchor() の fallback、`anchor(min(50%, 100%))`）、position-anchor の `normal`・`none`。
+  - @position-try の CSSOM（CSSPositionTryRule）・@scope の CSSOM は rule object の model が要る（CSSRule の class は無い）。
+
 再開点（2026-10-31、q1727-i01 の停止）:
 - 最後の全件の測定は ours-dev28（source 5b032c17b、`build/ws074-cmp/ours-dev28` の harness・scripted・crash と、static は `static-subset.py` の全件の再実行）。2,386 / 3,472 = 68.72%、
   4 runner とも dev25/26 の PASS に対する後退 0。その後に commit は無い（この記録の commit だけ）。Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）。
@@ -196,3 +446,149 @@ Origin: 2026-10-27 ユーザーの指示。
   CSS の zoom の layout、`css-logical` の shorthand を CSSOM の longhand から読む（9）、grid の computed の repeat() の保持（2）、
   動的 `import()` と module の namespace import、`window.open`・popup・joint session history を使う navigation-api、writing-modes の sideways（static 約 40）。
 - 次の候補（効きが大きい順の見込み）: scripted reftest の gap の原因分け（281 件。今回は未調査）、`Element.animate`、`startViewTransition`。
+
+### q1727-i06 の途中経過（2026-10-31、P8。dev78〜dev83）
+
+- 方針: ユーザーの指示（Interop 2025 で Chromium が通す ID を全部通す）の中で、grid の track sizing を CSS Grid の仕様（§12.4〜12.8）どおりに書き直し、その上に subgrid を載せた。
+- 測定（gap は build/tmp/p8/gap78〜gap83.json、出力は /tmp/p8out/devNN。基準 dev77 = 2,709）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev79（0d5f44d62） | 列の track sizing を仕様の関数へ | 1,118 | 1,274 | 295 | 41 | 2,728（78.57%、後退 0） |
+  | dev80（105ca1157） | 行も同じ関数へ（percent 行・min/max-height の stretch） | 1,128 | 1,281 | 296 | 41 | 2,746（79.09%、後退 0） |
+  | dev81（c23e6444f） | 仕様との差の修正（min-content・max-content の plain track、max-content の minimum、min-width の keyword、automatic minimum の clamp、percent 行を内在の高さで再解決） | 1,137 | 1,281 | 296 | 41 | 2,755（79.35%、後退 0） |
+  | dev82 | subgrid（列と行） | 1,137 | 1,297 | 296 | 41 | 2,771（79.81%、subgrid の 2 件が後退して dev83 の前に直した） |
+  | dev83（38a3603f2） | subgrid の後退の修正、growth limit の分配の規則、replaced の border-box の min/max-height | 1,138 | 1,299 | 296 | 41 | 2,774（79.90%、gap 698。後退 0） |
+
+  Acid3 は 100/100・pixel 差 0（exact match）、Acid2 は 99.27%（基準と同じ）、host build は warning 0、host-grid-track は PASS（2026-10-31 の host `date`）。
+  Acid の runner が残した一時 file は Q1 が消した。
+- 直した物:
+  1. `layout/grid-track.c`・`grid-track.h`（新規）: track sizing を数値だけの関数 `grid_track_size` にした。入力は track（最小・最大の sizing function: length・auto・min-content・max-content・fit-content・flex、collapsed）、
+     item（開始と span）、gap、制約（definite・min-content・max-content）、利用できる大きさ、container の min・max、stretch の有無、item の寄与を答える callback。
+     手順は §12.4 初期化、§12.5 の span 1 の item、span の昇順の spanning item（intrinsic minimums・content-based minimums・max-content minimums・limit の引き上げ・intrinsic maximums・max-content maximums。
+     base size は limit まで、limit の分配は infinite な limit の track を先に、残りは intrinsic・max-content の maximum を持つ track へ）、flex の track をまたぐ item（flex factor に比例）、§12.6 maximize、
+     §12.7 flex の展開（find fr size の再試行、max-content 制約では item と track から fr の大きさを求め container の min・max で直す）、§12.8 auto の stretch。host test は plan/ws074/tests/host-grid-track.c。
+  2. `layout/grid.c`: `grid_size_columns`・`grid_size_rows` を書き直して上の関数を呼ぶ。item の寄与（`grid_column_item_contribution`、`grid_row_answer`）は min-content・max-content（min・max-width で押さえる）と
+     minimum contribution（定義された幅、min-width、automatic minimum は overflow が visible で auto の最小の track をまたぐ時だけ。固定の最大の track だけをまたぐ時は margin・border・padding を除いて押さえる）。
+     percent の margin・min・max-width は寄与では無いものとして数える。percent の列・行は大きさが分かるまで auto（高さが不定の percent 行は auto で求めた高さに対して再解決し、container の高さは再解決の前の値）。
+     旧い特例（`grid_span_has_fixed_rows`・`grid_maximize`・fit-content の列の `column_fit`・`grid_item_width` ほか）は消えた。
+  3. subgrid（`layout/grid.c`）: subgrid の軸（`grid-template-columns|rows: subgrid`、`grid: subgrid / subgrid`）の item は、container が grid の item で、writing mode が親と直交でない時に subgrid（`grid_subgrid_axis`）。
+     親は subgrid の子を subgrid が渡る track に置き（`grid_subgrid_prepare`）、親の track sizing の item 一覧に subgrid の子を入れる（`grid_flatten`: 端の margin・border・padding と、子の辺の gap の差の半分を足し、
+     端に item が無ければ端だけの stand-in を置く。入れ子の subgrid は祖先の分を重ねる）。親の track が決まったら subgrid に track と gap を渡し（`grid_subgrid_preset`: 端の分を引き、内側の辺に gap の差の半分を足す。負も許す）、
+     subgrid の layout はその track を使う（`box->subgrid_columns|rows`）。行の subgrid は行が決まった後に渡して layout し直す（`grid_relay_item`）。subgrid の軸では width・height を無視して領域を埋める。
+     `gap: normal` を 0px と区別するため computed の `CSS_UNIT_NORMAL` にした（css/values.c・cascade.c。subgrid は normal の時に親の gap を使う）。layout_box に item_row_span・item_column_span と subgrid_* を足した。
+     static の css-grid/subgrid は 56 件中 11 → 27 件が通る。
+  4. `layout/replaced.c`: border-box の replaced の min-height・max-height から frame を引く（image-as-flexitem-size-007 は 8/18 → 17/18 の subtest だが ID としてはまだ failing）。
+- 調べて直さなかった物（次の候補）:
+  - subgrid の line names と repeat(auto-fill)（line-names-*・repeat-auto-fill-* 約 20）: subgrid の名前の並びは直列化した文字列でしか持たないので、構造のまま cascade に渡し、親の線の名前を引き継ぐ作り直しが要る。
+  - subgrid の baseline・縦書きの subgrid・独立した formatting context（`contain` の property が無い）・暗黙の track（placement-implicit-001）。
+  - 直交 flow の絶対配置の item の grid 内の揃え（grid-self-alignment-positioned-items-with-margin-border-padding-006〜010、grid-row-axis-alignment-positioned-items-010・011・015・016。layout/logical.c の経路）。
+  - baseline の shim（baseline-alignment-affects-intrinsic-size-001〜006）、grid-self-baseline-*（static 約 30、直交 item は baseline の group に入らない規則）。
+
+- 追加（dev84〜dev88、同じ q1727-i06）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev84 | 直交の絶対配置の item の self-start・self-end、min-height と max-height の食い違い | 1,139 | 1,300 | 296 | 41 | 2,776（後退 0） |
+  | dev85 | subgrid の line names（構造のまま parse、auto-fill の展開、親の線の名前を引き継ぐ） | 1,139 | 1,301 | 296 | 41 | 2,777（後退 0） |
+  | dev86 | subgrid の computed の grid-template-*（跨ぐ線ごとの [names]） | 1,139 | 1,301 | 298 | 41 | 2,779（後退 0） |
+  | dev87（275ed120b） | 不定の高さの flex 行を内在の高さに対して再解決、fr の端数の繰り越し | 1,139 | 1,303 | 298 | 41 | 2,781（80.10%、後退 0） |
+  | dev88（8cf265f3f） | 絶対配置の grid・flex が上下の間を埋める時の border-box の width・min-width・min-height | 1,140 | 1,303 | 298 | 41 | 2,782（80.13%、gap 690、後退 0） |
+
+  最後の Acid の測定（dev88 の source）: Acid3 100/100・pixel 差 0（exact match）、Acid2 99.27%（基準と同じ）。host build は warning 0。
+  Acid の runner が残した一時 file は build/ws074-suites/wpt/acid/ の下に増えた（acid2/zedbsd-acid2-3w8a4ub0.html、acid3/zedbsd-acid3-reference-jiv7c4j7.html、acid3/zedbsd-acid3-diagnostic-qx70__sz.html）ので Q1 が消す。
+  1. subgrid の名前（layout/grid.c `grid_subgrid_line_names`、css/grid-text.c `css_subgrid_lines`、css/values.c `values_subgrid`、cascade.c `cascade_subgrid_names`）: subgrid の template の名前の並び（group と repeat(数 または auto-fill, groups)）を
+     `css_subgrid_names` として持ち、subgrid が渡る線の数に敷く（auto-fill は残りを埋める回数、最後の線を越える分は捨てる）。親の同じ線の名前も足して、item の名前による配置に使う。
+     computed の `grid-template-columns|rows` は subgrid が box を持つ時「subgrid [names] …」を跨ぐ線の数だけ出す（bind/computed.c `computed_write_subgrid`、page/geometry.c の `page_grid_tracks` が跨ぐ数を渡す）。
+  2. 行（layout/grid.c `grid_size_rows`）: 高さが不定で percent の行か fr の行がある時は、auto として求めた高さに対して行をもう一度解決し（container の高さは最初の値）、fr の分は端数を次の track へ繰り越して合計が空間に一致する
+     （layout/grid-track.c `gt_expand`）。container の max-height が min-height より小さい時は min が勝つ。
+  3. 絶対配置（layout/grid.c `grid_static_alignment`、layout/position.c）: 水平の grid の直交の item の align-self・justify-self の self-start・self-end は item 自身の方向・writing mode に従う。
+     grid・flex の container が上下の間を埋める時、border-box の width・min-width・min-height は frame を引いて content として渡す。
+  4. 分配の規則（layout/grid-track.c）: base size の分配は growth limit まで、growth limit の分配は、既に有限な limit の track より先に無限の limit の track へ（grid-content-sized-columns-resolution）。
+- 調べて直さなかった物（追加）:
+  - ::first-letter・::first-line が engine に無い（grid の item への適用 6 ID: grid-model/grid-item-accepts-first-letter-001・first-line-001 と static の grid-first-letter-003 ほか）。
+  - repeat() が CSS_TRACKS（24）を越える grid（grid-limits-001、flex-tracks-with-fractional-size）は track の上限が要る。
+  - subgrid の暗黙の track（subgrid の線の数を越える item、repeat-auto-fill-002・placement-implicit-001）、名前の細部（line-names-002・004・005・006・008・010・012）。
+  - baseline の shim（baseline-alignment-affects-intrinsic-size-001〜006）と grid-self-baseline-*: Chromium の値と比べる道具として plan/ws074/tests/chrome-boxes.py（`export NODE_PATH=$PWD/build/ws074-chrome/node/node_modules PATH=$PWD/build/ws074-chrome/bin:$PATH`）が使える。
+    ページの link が /css/... を指す時は sed で WPT の tree の絶対 path に直した複写を作る（`sed "s#href=\"/#href=\"$PWD/build/ws074-suites/wpt/#g"`）。Chromium では parallel の item の baseline が 1・3 番目で揃わない（item の位置から見て 21 離れる）など、group の定義がこの engine の想定と違う所が見えた。
+  - fit-content() の行の直交の item（grid-change-fit-content-argument-001: 幅は fit の上限を room にすると合うが、行が item の max-content の高さになり高さが合わない）。
+- 追加2（dev89・dev90）: dev89（76c1d7e77）は 2,787（80.27%、static 1,308、後退 0）。列の baseline の group を列の track の寄与に足し（`grid_size_columns`: 縦の item が行に沿う baseline を共有する時、group の before と after の和を列が持つ）、
+  暗黙の行（grid-auto-rows）の固定の高さも直交の item の room にした（`grid_room`）。grid-self-baseline-changes-grid-area-size-007・008・010・011・012 が通る。
+  試して戻した物（dev90 = 2,773、後退 16 harness + 3 static、修正 5 static）: layout/logical.c `layout_logical_wanted` の「縦書きの grid の container で子が全て横書きなら物理の座標で置く」の例外を grid から外すと、container の大きさと
+  列の向きは Chromium と合う（grid-self-baseline-003 の縦書きの grid が 125×375）が、grid-self-alignment-stretch-vertical-lr/rl-005〜008・013〜016 と subgrid の orthogonal-writing-mode-005・006、repeat-auto-fill-007 が後退する。
+  直交の item を logical の座標で見る baseline の group（`grid_row_baseline` が `child->style.writing_mode` を物理の style で見る）と stretch の直し込みが要る。縦書きの container を logical にするなら、その 2 つを先に。
+
+### q1727-i07 の途中経過（2026-10-31、P8。dev91〜dev100）
+
+- 方針: 件数あたりの効きで、grid・flex の static の差を Chromium の絵と見比べ、原因が共通の物（描画の画素揃え、intrinsic size、float の置き方、list marker、`contain`）を engine の側で直した。
+  基準 dev89 = 2,787。測定は `measure-snapshot.sh`（出力は /tmp/p8out/devNN、gap は build/tmp/p8/gapNN.json）。
+- 測定（計は Chromium が通す 3,472 のうちの数。harness / static / scripted / crash の gap）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev89 | 基準（i06 の最後） | 2,787（80.27%） | 337 / 244 / 98 / 6 |
+  | dev91（99e10b333） | 横の row の flex の baseline に直交 item、rtl の column の baseline、描画の矩形・画像を画素に揃える（software と GPU） | 2,805 | 335 / 227 / 99 / 6（後退 1、下記） |
+  | dev92（4bbc50ae4） | list-style-position（inside）、disclosure の marker（details の UA style） | 2,806 | 335 / 226 / 99 / 6 |
+  | dev93 | max-content が hanging marker を数えない、U+00A0 は face の space | 2,809 | 335 / 223 / 99 / 6 |
+  | dev94（50b6dc129） | table の flex item（高さ・column の min・caption のみの table）、`<br>` の後の abspos の static 位置、nowrap の row の intrinsic、単独の flex の percent 最小、grid の checkbox・radio の stretch | 2,822 | 335 / 212 / 97 / 6 |
+  | dev95 | flex の min-content（`width: min-content` の flex container は item の min-content の和） | 2,823 | 335 / 211 / 97 / 6 |
+  | dev96 | column の min-height keyword・wrap の column の自動の最小・画像の内容サイズ・stretch した item の definite な高さ・compressible な control | 2,829 | 335 / 205 / 97 / 6 |
+  | dev97（808e09047） | `contain`（size・layout・paint・style・inline-size、container-type が含意）、layout・paint containment の subgrid 無効 | 2,834 | 333 / 203 / 96 / 6 |
+  | dev98（ed35b3b28） | float の top は先に置いた float より上へ行かない、固定の行での percent 高さ・stretch した画像の比 | 2,839 | 333 / 198 / 96 / 6 |
+  | dev99 | 直交 item の inline room（高さを持つ grid の単独の auto 行） | 2,842 | 332 / 197 / 95 / 6 |
+  | dev100（610e4f744） | replaced の min-width・min-height が反対側を比で運ぶ、grid の ratio 幅が min・max を守る | 2,843（81.88%、gap 629） | 331 / 197 / 95 / 6 |
+
+  dev89 から後退は 1 件: css/filter-effects/backdrop-filter-boundary.html（scripted。画素揃えの後、reference の側に 1 画素の列が出る。fuzzy の maxDifference 67 を越える）。
+  それ以外の測定間の後退は 0。host build は warning 0。Acid は最後に測る（下記）。
+- 直した物（要点、すべて userland/desktop/libbrowser/）:
+  1. 描画（paint/software.c・paint/vulkan.c）: 矩形と画像の端を最も近い画素へ揃える（Chromium の snapping）。以前は端の面積で混ぜていたので、同じ位置へ別の道で着く test と reference が 1/64 px の差で食い違った（flex の画像・video・canvas・mbp・paint など static +17）。
+     GPU の instance の rect も同じに揃えた（実機の GPU は未確認）。
+  2. flex baseline（layout/flex.c）: 横の row で直交（縦書き）の item も border box の端を baseline にして加わる。rtl の column は左右反転して layout するので、横の item の baseline の端と group の寄せ側を入れ替える（flexbox-align-self-vert-rtl-001〜005）。
+  3. list（css/・layout/box.c・inline.c・position.c）: list-style-position（inside は marker を行頭に置き内容を送る）、list-style の shorthand、disclosure-closed・disclosure-open（details の summary は inside）、
+     max-content の幅が行の最後の fragment（hanging marker）を数えて 0 になる不具合。
+  4. text/font.c: U+00A0 が face に無い時は space の glyph（fallback の face の ascent で行が高くなっていた）。
+  5. table（layout/table.c・flex.c）: 行が無く caption だけの table も height を持つ、flex の column の table item は最小の高さが行の高さ、flex base size は min-height を数えない。
+  6. flex: nowrap の row の min-content は item の min-content の和（block.c の `width: min-content` は `layout_min_content` を使う）、`min-height: min-content` の keyword、wrap の column は自動の最小を行分割の前に、
+     percent の `width` の specified size suggestion（definite な container）、定義された高さを持つ row の画像・stretch した item の intrinsic、button と compressible な control の percent の最小。
+  7. abspos の static 位置（layout/box.c）: inline の内容の中の abspos が `<br>` の後ろなら後の行の位置。
+  8. `contain`（css/values.c・cascade.c、layout/layout.h `layout_containment`、block.c・box.c・position.c・grid.c）: size・inline-size は intrinsic な幅 0 と auto の高さ 0、layout・paint は新しい formatting context と abspos・fixed の containing block、subgrid を外す。
+     paint の clip と contain-intrinsic-size は未実装。
+  9. float（layout/float.c）: float の top は先に置いた float の top より上へ行かない（grid-floats-no-intrude-002）。
+  10. grid: checkbox・radio の `normal` は stretch、固定の行の percent 高さ・stretch した画像の比で幅、replaced の stretch で反対側を比で、直交 item の inline room（固定でなくても高さを持つ grid の単独の auto 行）、
+      automatic minimum は percent の min-width・min-height を auto と見なす、subgrid のみ・ratio 幅が min・max の px を守る。
+  11. replaced（layout/replaced.c）: min-width・min-height が反対側を比で運ぶ（CSS 2 の表）。
+- 追加（dev101〜dev104、同じ q1727-i07）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev101 | flex の item の percent padding は container の幅の測定中は 0、画像の min-height が幅へ（min-width: auto の ratio）、grid の auto 最小は percent の min を auto と見なす試み（grid-minimum-contribution-with-percentages が後退して dev102 の前に戻した） | 2,844 | 332 / 195 / 95 / 6 |
+  | dev102（486cd8e09） | 上の戻し、percent の row-gap は min-height が支える高さに対して | 2,846 | 331 / 194 / 95 / 6 |
+  | dev103（4810b6120） | auto の cross margin の item は stretch しない、flex の safe な justify-content・align-items・align-content | 2,848（82.03%） | 331 / 192 / 95 / 6 |
+  | dev104（4810b6120） | background-clip（padding-box・content-box、rounded の box と inline の box は未対応）。件数は変わらず、後退 0 | 2,848（82.03%、gap 624） | 331 / 192 / 95 / 6 |
+
+  dev89 から後退は引き続き 1 件（backdrop-filter-boundary、scripted）。Acid は最終の source で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%（以前は 99.27%。画素揃えで残っていた差が消えた）。host build は warning 0。
+  Acid の runner が残した一時 file（Q1 が消す）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-_jbcgx1_.html、acid3/zedbsd-acid3-diagnostic-_nrk70vo.html、acid3/zedbsd-acid3-reference-t2a6q8d1.html（worktree p8-ws074）。
+  測定の出力は /tmp/p8out の dev89・dev91〜dev104（最後の 2 つ以外は Q1 が消してよい）。
+  追加の直した物: flex の auto margin の stretch（flexbox_align-items-stretch-4）、safe な位置（flexbox-safe-overflow-position-001）、min-height が運ぶ画像の min-width（flexbox-min-width-auto-002b）、
+  percent の row-gap（grid-gutters-016）、background-clip（css/ ・paint/list.c の box の背景と画像の painting area）。
+- 調べて直さなかった物（次の候補）:
+  - rule object の model（CSSStyleRule・CSSScopeRule・CSSPositionTryRule・CSSNestedDeclarations）が無い（cssRules は length だけ）。ID としては css-view-transitions/parsing/pseudo-elements-valid・-with-classes（selectorText だけで通る）、
+    css-cascade の @scope 11 件、at-position-try 3 件。bind/cssom.c の CSSOM_RULES に rule の wrapper を足し、css/rule-model.c の source から selectorText・cssText を答える設計が要る。
+  - anchor()・anchor-size() の入れ子の fallback と min()・max()（anchor-parse-valid・anchor-size-parse-valid。入れ子は css_anchor_query が構造を持たないので fallback を expr への pointer にし、layout/anchor.c と cascade.c を再帰にする）、canonical の順（name が先）。
+  - animation（grid-template の interpolation・composition、flex の order・flex-grow・flex-shrink・flex-basis）は page の native な timing が無い（CSS animation は filter の最初の時点だけ）。flex・grid の harness 19 件。
+  - 縦書き: grid・flex の container が縦書きの baseline・abspos・synthesized baseline（約 40）、table の sideways（table-progression ほか 6）、sideways の shape-outside（約 8）、grid の percent size（writing mode 付き 3）。
+    layout/logical.c の「縦書きの grid の container で子が全て横書きなら物理の座標で置く」の例外を flex から外す試験（flexbox-writing-mode-009 の row wrap は直らず -008 が後退）は戻した。
+  - grid の列の再解決（2 度目、行の大きさが分かった後の min-content、grid-item-inline-contribution-002・003）、subgrid の暗黙の track・名前の細部、baseline の shim（baseline-alignment-affects-intrinsic-size-001〜006）、::first-letter・::first-line（6 ID）。
+  - navigation-api の cross-document・multi frame（約 60）は frame の model が要る。
+
+### q1727-i08 の中断（2026-10-31、P8。host の再起動のため Q1 の指示で早く止めた）
+
+- 基準: dev104 = 2,848 / 3,472（82.03%）。この attempt では全件の測定をしていない。gap は build/tmp/p8/gap104.json（worktree の中）に残っている。
+- 済み（1 件、回帰は未測定）: layout/inline.c `inline_add_atomic` で、横書きの文脈の inline-block が縦書き（直交）なら baseline を持たない扱い（bottom margin edge を line の baseline に載せる）にした。
+  grid-self-baseline-horiz-002 は ref との差が 82,794 画素から 0 になった（ref-one.py）。host build は warning 0（grep で確認）。
+- 未済: 上の変更の回帰の確認（`static-subset.py --gap build/tmp/p8/gap104.json /css/css-grid/alignment/ /css/css-flexbox/` を流している途中で止めた。結果なし）。
+  同じ原因の見込み: self-baseline の horiz-003〜007・-b、grid-item-self-baseline-001 など（static 約 20）。vertical-lr/rl の self-baseline は縦書きの grid の container の話で別（logical.c の例外、i07 の記録）。
+- 調べた物: css-view-transitions の scripted 50 件の分類（inline 要素の capture 約 11 は multi-line inline の snapshot、shadow ::part 6 は `::part()` セレクタが engine に無い、
+  pseudo-element-overflow-hidden は group の overflow）。いずれも着手していない。
+- 次: (1) 上の回帰を static-subset で確認し、通れば grid・flex の self-baseline 群を数える、(2) ::part() セレクタ（shadow tree をまたぐ rule）、(3) CSSOM rule object の model。
+- Acid は今回は未測定（inline.c の変更の後は未実施）。測定の一時 file: /tmp/p8out（tmpfs、host 再起動で消える）。Acid の runner の一時 file はこの attempt では作っていない。

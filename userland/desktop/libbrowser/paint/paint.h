@@ -34,7 +34,12 @@ enum paint_kind {
 	PAINT_TEXT,
 	PAINT_CLIP,
 	PAINT_UNCLIP,
-	PAINT_IMAGE
+	PAINT_IMAGE,
+	/* The filters of backdrop-filter applied to what is drawn so far inside the rectangle. */
+	PAINT_BACKDROP,
+	/* The items up to the matching PAINT_GROUP_END are painted apart from the page (over nothing) and the filters applied to the result. */
+	PAINT_GROUP,
+	PAINT_GROUP_END
 };
 
 /* The deepest nesting of clips the renderers keep (deeper clips are ignored). */
@@ -63,7 +68,7 @@ struct paint_glyph {
  */
 struct paint_item {
 	int kind;
-	/* Clockwise sideways glyphs on a physical vertical inline axis. */
+	/* Clockwise sideways glyphs on a physical vertical inline axis (1), or counterclockwise ones running up from y (2). */
 	int vertical;
 	layout_unit x;
 	layout_unit y;
@@ -74,6 +79,9 @@ struct paint_item {
 	const struct paint_glyph *glyphs;
 	size_t glyph_count;
 	const struct img_bitmap *image;
+	/* A backdrop item's filter functions (the box's style, kept by the page). */
+	const struct css_filter *filters;
+	int filter_count;
 };
 
 /*

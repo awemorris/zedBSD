@@ -135,7 +135,8 @@ enum css_pseudo_class {
 	CSS_PSEUDO_LANG,
 	CSS_PSEUDO_SCOPE,
 	CSS_PSEUDO_SCOPE_NEST,
-	CSS_PSEUDO_TARGET
+	CSS_PSEUDO_TARGET,
+	CSS_PSEUDO_POPOVER_OPEN
 };
 
 /*
@@ -170,6 +171,7 @@ enum css_value_kind {
 	CSS_VALUE_UNSET,
 	CSS_VALUE_CONTENT,
 	CSS_VALUE_SHADOWS,
+	CSS_VALUE_FILTERS,
 	CSS_VALUE_INSET,
 	CSS_VALUE_TRACKS,
 	CSS_VALUE_GRID_LINE,
@@ -199,7 +201,9 @@ enum css_declared_unit {
 	CSS_DUNIT_VMAX,
 	CSS_DUNIT_CALC,
 	CSS_DUNIT_CQW,
-	CSS_DUNIT_CQH
+	CSS_DUNIT_CQH,
+	CSS_DUNIT_LH,
+	CSS_DUNIT_RLH
 };
 
 /*
@@ -254,6 +258,8 @@ enum css_property {
 	CSS_PROP_TEXT_DECORATION_COLOR,
 	CSS_PROP_TEXT_DECORATION_THICKNESS,
 	CSS_PROP_LIST_STYLE_TYPE,
+	CSS_PROP_LIST_STYLE_POSITION,
+	CSS_PROP_CONTAIN,
 	CSS_PROP_TOP,
 	CSS_PROP_RIGHT,
 	CSS_PROP_BOTTOM,
@@ -266,6 +272,7 @@ enum css_property {
 	CSS_PROP_BACKGROUND_IMAGE,
 	CSS_PROP_BACKGROUND_REPEAT,
 	CSS_PROP_BACKGROUND_ATTACHMENT,
+	CSS_PROP_BACKGROUND_CLIP,
 	CSS_PROP_BACKGROUND_POSITION_X,
 	CSS_PROP_BACKGROUND_POSITION_Y,
 	CSS_PROP_BACKGROUND_SIZE_WIDTH,
@@ -295,6 +302,14 @@ enum css_property {
 	CSS_PROP_RADIUS_BOTTOM_RIGHT_Y,
 	CSS_PROP_RADIUS_BOTTOM_LEFT_X,
 	CSS_PROP_RADIUS_BOTTOM_LEFT_Y,
+	CSS_PROP_RADIUS_START_START_X,
+	CSS_PROP_RADIUS_START_START_Y,
+	CSS_PROP_RADIUS_START_END_X,
+	CSS_PROP_RADIUS_START_END_Y,
+	CSS_PROP_RADIUS_END_END_X,
+	CSS_PROP_RADIUS_END_END_Y,
+	CSS_PROP_RADIUS_END_START_X,
+	CSS_PROP_RADIUS_END_START_Y,
 	CSS_PROP_OPACITY,
 	CSS_PROP_BOX_SHADOW,
 	CSS_PROP_TEXT_SHADOW,
@@ -302,6 +317,7 @@ enum css_property {
 	CSS_PROP_OUTLINE_STYLE,
 	CSS_PROP_OUTLINE_COLOR,
 	CSS_PROP_OUTLINE_OFFSET,
+	CSS_PROP_TEXT_STROKE_WIDTH,
 	CSS_PROP_CLIP_PATH,
 	CSS_PROP_CLIP,
 	CSS_PROP_DIRECTION,
@@ -319,6 +335,10 @@ enum css_property {
 	CSS_PROP_BORDER_SPACING_X,
 	CSS_PROP_BORDER_SPACING_Y,
 	CSS_PROP_BORDER_COLLAPSE,
+	CSS_PROP_CAPTION_SIDE,
+	CSS_PROP_BACKDROP_FILTER,
+	CSS_PROP_WILL_CHANGE,
+	CSS_PROP_FILTER,
 	CSS_PROP_TEXT_TRANSFORM,
 	CSS_PROP_MARGIN_INLINE_START,
 	CSS_PROP_MARGIN_INLINE_END,
@@ -388,6 +408,7 @@ enum css_property {
 	CSS_PROP_ANIMATION_PLAY_STATE,
 	CSS_PROP_ANIMATION_TIMING_FUNCTION,
 	CSS_PROP_MIX_BLEND_MODE,
+	CSS_PROP_CONTENT_VISIBILITY,
 	CSS_PROP_COUNT
 };
 
@@ -509,6 +530,7 @@ struct css_value {
 	const struct css_calc *calc;
 	const struct css_content *content;
 	const struct css_shadow_list *shadows;
+	const struct css_filter_list *filters;
 	const struct css_declared_inset *inset;
 	const struct css_track_list *tracks;
 	/* A grid line's name (an atom; NULL for none), and grid-template-areas' cells (none when NULL). */
@@ -551,6 +573,10 @@ struct css_track_list {
 	int named;
 	/* A subgrid's value as it serializes ("subgrid" and its line-name lists), NUL-terminated in the arena; NULL otherwise. */
 	const char *subgrid;
+	/* The same line names as parts, in the parse's arena (NULL when none). */
+	const struct css_subgrid_names *subgrid_names;
+	/* A template with a repeat(): its text as written (spaces normalized, lengths in ems unresolved), NUL-terminated in the arena; NULL otherwise. */
+	const char *declared;
 };
 
 /* A declared clip-path: inset(): its four declared lengths, top, right, bottom, left. */
@@ -567,6 +593,18 @@ struct css_declared_shadow {
 	struct css_value lengths[4];
 	uint32_t color;
 	int inset;
+};
+
+/* One declared filter function: its kind and its argument (a number, a percentage, a length or an angle in degrees). */
+struct css_declared_filter {
+	int kind;
+	struct css_value amount;
+};
+
+/* A declared filter list, kept in the parse's arena (none is an empty list). */
+struct css_filter_list {
+	struct css_declared_filter filters[CSS_FILTERS];
+	size_t count;
 };
 
 /* A declared box-shadow list, kept in the parse's arena (none is an empty list). */
@@ -652,6 +690,8 @@ struct css_rule {
 	const struct css_media *media;
 	/* The @scope the rule is in (NULL for none). */
 	const struct css_scope *scope;
+	/* The cascade layer the rule is in: 1 for the first the sheet names, and so on (0 for none: unlayered rules win). */
+	int layer;
 };
 
 /*
@@ -722,6 +762,22 @@ struct css_try_rule {
 	struct vm_string *name;
 	struct css_declaration *declarations;
 	size_t declaration_count;
+	/* The cascade layer the rule is in (0 for none, which outranks every layer). */
+	int layer;
+};
+
+/* One keyframe of an @keyframes rule: its offset (0 to 1) and its declarations. */
+struct css_keyframe {
+	float offset;
+	struct css_declaration *declarations;
+	size_t declaration_count;
+};
+
+/* An @keyframes rule: its name (an atom) and its keyframes in the order written. */
+struct css_keyframes_rule {
+	struct vm_string *name;
+	struct css_keyframe *frames;
+	size_t frame_count;
 };
 
 struct css_sheet {
@@ -735,6 +791,8 @@ struct css_sheet {
 	size_t font_face_count;
 	struct css_try_rule *try_rules;
 	size_t try_rule_count;
+	struct css_keyframes_rule *keyframes;
+	size_t keyframe_count;
 	struct css_rule_index index;
 	int origin;
 };

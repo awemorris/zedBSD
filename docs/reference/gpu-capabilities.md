@@ -58,14 +58,14 @@ Rules:
    the blob is made as any other blob. The check that `GPU_BLOB_HOST` is not
    combined with `GPU_BLOB_SHAREABLE` or `GPU_BLOB_CROSS_DEVICE` comes first and
    fails with `EINVAL` on every node.
-4. A set bit does not promise that every request it guards succeeds on every
-   node. A node may set `GPU_CAP_JOB` and `GPU_CAP_JOB_CAPACITY` while
-   `GPU_JOB_RESERVE` and `GPU_JOB_CAPACITY` fail with `ENOTSUP` (the same value as `EOPNOTSUPP`): a Venus node
-   (a virtual machine's GPU) always sets both bits, and its driver refuses both
-   requests when the host's renderer does not complete native work strictly.
-   The capset tells a program in advance: the host promises strict completion
-   when `VENDOR_STRICT_QUEUE` is set in `vendor_flags` (see [Capability set 4](#capability-set-4)).
-   A bit also does not cover a request's other requirements: a request can still
+4. A node reports a bit only when it can serve the requests the bit guards on
+   that device. A Venus node (a virtual machine's GPU) reports
+   `GPU_CAP_JOB` and `GPU_CAP_JOB_CAPACITY` only when the host's renderer
+   completes native work strictly, which the capset also tells a program:
+   `VENDOR_STRICT_QUEUE` is set in `vendor_flags` (see [Capability set 4](#capability-set-4)).
+   Without strict completion it clears both bits, and `GPU_JOB_RESERVE` and
+   `GPU_JOB_CAPACITY` fail with `EOPNOTSUPP`.
+   A set bit still does not promise that every request it guards succeeds: a request can still
    fail because the driver has no operation for it (a display without a cursor
    plane fails the cursor requests with `EOPNOTSUPP`) or because its arguments are
    not supported.
@@ -147,11 +147,9 @@ argument when the request fails.
 The kernel does not interpret `capset_id` or `capset_version`; the driver
 decides which capsets it has. Every current driver has one capset, id 4
 version 0, whose layout is described in [Capability set 4](#capability-set-4),
-and (with one exception) a request for any other id or version fails: the
-native drivers return `ENOTSUP` and the Venus driver returns `EOPNOTSUPP` (the
-same value). The exception is the i915 driver, which does not check the
-selectors: it returns its one capset for any id and version, and the reply
-repeats the requested id and version. A program asks for id 4 and version 0.
+and a request for any other id or version fails: the native drivers return
+`ENOTSUP` and the Venus driver returns `EOPNOTSUPP` (the same value). A
+program asks for id 4 and version 0.
 
 If `capacity` is smaller than the capset, the request fails and no payload is
 returned. The drivers report `EINVAL` when the capset does not fit

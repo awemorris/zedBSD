@@ -55,12 +55,12 @@ static int32_t reflist_frame_num_wrap(uint32_t entry_frame_num, uint32_t frame_n
 static int32_t reflist_pic_num(const struct h264sw_dpb_entry *entry, uint32_t frame_num, uint32_t max_frame_num);
 static void reflist_make_ref(const struct h264sw_dpb_entry *entry, uint32_t frame_num, uint32_t max_frame_num, struct h264sw_ref *ref);
 static void reflist_make_missing(struct h264sw_ref *ref);
-static unsigned reflist_collect(const struct h264sw_dpb *dpb, unsigned marking, int key_kind, uint32_t frame_num, uint32_t max_frame_num, struct reflist_candidate *out);
+static unsigned reflist_collect(const struct h264sw_dpb *dpb, unsigned marking, int key_kind, int skip_non_existing, uint32_t frame_num, uint32_t max_frame_num, struct reflist_candidate *out);
 static void reflist_sort(struct reflist_candidate *items, unsigned count, int descending);
 static unsigned reflist_select(const struct reflist_candidate *items, unsigned count, int32_t poc, int selection, struct reflist_candidate *out);
 static void reflist_append(unsigned *order, unsigned *count, const struct reflist_candidate *items, unsigned item_count);
 static unsigned reflist_initial_p(const struct h264sw_dpb *dpb, uint32_t frame_num, uint32_t max_frame_num, unsigned *order);
-static unsigned reflist_initial_b(const struct h264sw_dpb *dpb, uint32_t frame_num, uint32_t max_frame_num, int32_t poc, unsigned which, unsigned *order);
+static unsigned reflist_initial_b(const struct h264sw_dpb *dpb, uint32_t frame_num, uint32_t max_frame_num, int32_t poc, int skip_non_existing, unsigned which, unsigned *order);
 static void reflist_load(const struct h264sw_dpb *dpb, const unsigned *order, unsigned order_count, unsigned active, uint32_t frame_num, uint32_t max_frame_num, struct h264sw_ref *list);
 static int reflist_find_short(const struct h264sw_dpb *dpb, int64_t pic_num, uint32_t frame_num, uint32_t max_frame_num, struct h264sw_ref *ref);
 static int reflist_find_long(const struct h264sw_dpb *dpb, uint32_t long_term_pic_num, uint32_t frame_num, uint32_t max_frame_num, struct h264sw_ref *ref);
@@ -83,6 +83,7 @@ h264sw_reflist_build(
 	uint32_t frame_num,
 	uint32_t max_frame_num,
 	int32_t poc,
+	unsigned poc_type,
 	struct h264sw_reflist *lists)
 {
 	unsigned order[2][REFLIST_MAX_ENTRIES];
@@ -92,6 +93,7 @@ h264sw_reflist_build(
 	unsigned which;
 	unsigned position;
 	unsigned slice_type;
+	int skip_non_existing;
 	int same;
 	int found;
 	int error;
@@ -152,8 +154,12 @@ h264sw_reflist_build(
 	/* Orders the DPB's references for the initial lists. */
 	order_count[1] = 0U;
 	if (slice_type == H264SW_SLICE_B) {
-		order_count[0] = reflist_initial_b(dpb, frame_num, max_frame_num, poc, 0U, order[0]);
-		order_count[1] = reflist_initial_b(dpb, frame_num, max_frame_num, poc, 1U, order[1]);
+		/* With pic_order_cnt_type 0 the non-existing frames have no order count and stay out of both lists (8.2.4.2.3). */
+		skip_non_existing = 0;
+		if (poc_type == 0U)
+			skip_non_existing = 1;
+		order_count[0] = reflist_initial_b(dpb, frame_num, max_frame_num, poc, skip_non_existing, 0U, order[0]);
+		order_count[1] = reflist_initial_b(dpb, frame_num, max_frame_num, poc, skip_non_existing, 1U, order[1]);
 
 		/* Compares list 1 with list 0 as they stand before the lists are cut (8.2.4.2.3 step 3, 8.2.4.2). */
 		same = 1;
@@ -180,9 +186,11 @@ h264sw_reflist_build(
 	for (which = 0U;
 	     which < used;
 	     which++) {
+		/* Cuts or pads the initial list to the active length. */
 		lists->count[which] = header->num_ref_idx_active[which];
 		reflist_load(dpb, order[which], order_count[which], lists->count[which], frame_num, max_frame_num, lists->list[which]);
 
+		/* Applies the modification operations of the slice header to the list. */
 		error = reflist_modify(dpb, header, which, frame_num, max_frame_num, lists->list[which]);
 		if (error != 0) {
 			/* A broken modification leaves no usable list. */
@@ -269,6 +277,7 @@ reflist_frame_num_wrap(
 	uint32_t max_frame_num)
 {
 	int64_t wrap;
+	int32_t clamped;
 
 	/* The frame_num of the frame, taken as a signed number. */
 	wrap = (int64_t)entry_frame_num;
@@ -278,7 +287,10 @@ reflist_frame_num_wrap(
 		wrap = wrap - (int64_t)max_frame_num;
 
 	/* The result is far inside the range for a valid DPB; clamps a broken one. */
-	return reflist_clamp32(wrap);
+	clamped = reflist_clamp32(wrap);
+
+	/* Reports FrameNumWrap of the frame. */
+	return clamped;
 }
 
 /*
@@ -290,12 +302,19 @@ reflist_pic_num(
 	uint32_t frame_num,
 	uint32_t max_frame_num)
 {
+	int32_t number;
+
 	/* A long-term frame is numbered by its LongTermFrameIdx. */
-	if (entry->reference == H264SW_REF_LONG)
-		return reflist_clamp32((int64_t)entry->long_term_frame_idx);
+	if (entry->reference == H264SW_REF_LONG) {
+		number = reflist_clamp32((int64_t)entry->long_term_frame_idx);
+		return number;
+	}
 
 	/* A short-term frame is numbered by FrameNumWrap. */
-	return reflist_frame_num_wrap(entry->frame_num, frame_num, max_frame_num);
+	number = reflist_frame_num_wrap(entry->frame_num, frame_num, max_frame_num);
+
+	/* Reports the picture number of the short-term frame. */
+	return number;
 }
 
 /*
@@ -347,7 +366,8 @@ reflist_make_missing(
  * Collects the DPB entries with one marking, with the key they are ordered by.
  *
  * The key is the order count for REFLIST_KEY_POC, else the picture
- * number of the marking.  Returns the number of candidates written to
+ * number of the marking.  With skip_non_existing the frames that stand
+ * for a gap in frame_num are left out.  Returns the number of candidates written to
  * out, at most one per buffer of the DPB.
  */
 static unsigned
@@ -355,6 +375,7 @@ reflist_collect(
 	const struct h264sw_dpb *dpb,
 	unsigned marking,
 	int key_kind,
+	int skip_non_existing,
 	uint32_t frame_num,
 	uint32_t max_frame_num,
 	struct reflist_candidate *out)
@@ -374,6 +395,10 @@ reflist_collect(
 		if (entry->frame == NULL)
 			continue;
 		if (entry->reference != marking)
+			continue;
+
+		/* A frame of a gap is left out when the caller asks. */
+		if (skip_non_existing && entry->frame->non_existing)
 			continue;
 
 		/* Records the buffer with the key of the order it is sorted in. */
@@ -422,10 +447,12 @@ reflist_sort(
 			if (in_place)
 				break;
 
+			/* Moves the candidate that must follow the held one up a place. */
 			items[position] = items[position - 1U];
 			position--;
 		}
 
+		/* Puts the held candidate in the place that was left open. */
 		items[position] = held;
 	}
 }
@@ -447,7 +474,7 @@ reflist_select(
 	unsigned index;
 	int takes;
 
-	/* Looks at each candidate in turn. */
+	/* Takes every candidate whose key is in the requested relation to the current order count. */
 	taken = 0U;
 	for (index = 0U;
 	     index < count;
@@ -462,6 +489,7 @@ reflist_select(
 		if (selection == REFLIST_SELECT_BELOW_OR_EQUAL && items[index].key <= poc)
 			takes = 1;
 
+		/* Keeps the candidate that is in the relation. */
 		if (takes) {
 			out[taken] = items[index];
 			taken++;
@@ -513,8 +541,8 @@ reflist_initial_p(
 	unsigned count;
 
 	/* Collects the two kinds of reference. */
-	short_count = reflist_collect(dpb, H264SW_REF_SHORT, REFLIST_KEY_PIC_NUM, frame_num, max_frame_num, shorts);
-	long_count = reflist_collect(dpb, H264SW_REF_LONG, REFLIST_KEY_PIC_NUM, frame_num, max_frame_num, longs);
+	short_count = reflist_collect(dpb, H264SW_REF_SHORT, REFLIST_KEY_PIC_NUM, 0, frame_num, max_frame_num, shorts);
+	long_count = reflist_collect(dpb, H264SW_REF_LONG, REFLIST_KEY_PIC_NUM, 0, frame_num, max_frame_num, longs);
 
 	/* Short-term frames come first, highest PicNum first. */
 	reflist_sort(shorts, short_count, 1);
@@ -538,8 +566,9 @@ reflist_initial_p(
  * current one by descending order count, then the others by ascending
  * order count; list 1 takes those above the current one by ascending
  * order count, then the others by descending order count.  The
- * long-term frames follow by ascending LongTermPicNum.  Returns how
- * many buffers are in order.
+ * long-term frames follow by ascending LongTermPicNum.  With
+ * skip_non_existing the frames of a gap in frame_num are left out.
+ * Returns how many buffers are in order.
  */
 static unsigned
 reflist_initial_b(
@@ -547,6 +576,7 @@ reflist_initial_b(
 	uint32_t frame_num,
 	uint32_t max_frame_num,
 	int32_t poc,
+	int skip_non_existing,
 	unsigned which,
 	unsigned *order)
 {
@@ -559,8 +589,8 @@ reflist_initial_b(
 	unsigned count;
 
 	/* Collects the two kinds of reference. */
-	short_count = reflist_collect(dpb, H264SW_REF_SHORT, REFLIST_KEY_POC, frame_num, max_frame_num, shorts);
-	long_count = reflist_collect(dpb, H264SW_REF_LONG, REFLIST_KEY_PIC_NUM, frame_num, max_frame_num, longs);
+	short_count = reflist_collect(dpb, H264SW_REF_SHORT, REFLIST_KEY_POC, skip_non_existing, frame_num, max_frame_num, shorts);
+	long_count = reflist_collect(dpb, H264SW_REF_LONG, REFLIST_KEY_PIC_NUM, skip_non_existing, frame_num, max_frame_num, longs);
 	count = 0U;
 
 	/* Builds the short-term part of the list. */
@@ -636,6 +666,7 @@ reflist_find_short(
 {
 	const struct h264sw_dpb_entry *entry;
 	unsigned index;
+	int32_t entry_pic_num;
 
 	/* Looks at each short-term frame for the number. */
 	for (index = 0U;
@@ -646,7 +677,8 @@ reflist_find_short(
 			continue;
 		if (entry->reference != H264SW_REF_SHORT)
 			continue;
-		if ((int64_t)reflist_pic_num(entry, frame_num, max_frame_num) != pic_num)
+		entry_pic_num = reflist_pic_num(entry, frame_num, max_frame_num);
+		if ((int64_t)entry_pic_num != pic_num)
 			continue;
 
 		/* Found the picture the modification names. */
@@ -796,6 +828,7 @@ reflist_modify(
 			if (pic_num_no_wrap > (int64_t)frame_num)
 				pic_num = pic_num_no_wrap - (int64_t)max_frame_num;
 
+			/* Looks the number up among the short-term frames. */
 			found = reflist_find_short(dpb, pic_num, frame_num, max_frame_num, &wanted);
 		} else {
 			/* A difference of MaxFrameNum or more is out of range (7.4.3.1): no picture. */
@@ -828,6 +861,7 @@ reflist_modify(
 				}
 			}
 
+			/* Keeps every entry that is not another copy of the picture. */
 			if (!removes) {
 				work[target] = work[source];
 				target++;

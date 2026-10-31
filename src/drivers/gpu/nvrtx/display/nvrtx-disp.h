@@ -152,6 +152,16 @@
 #define NVRTX_DISP_STORAGE_PITCH_TURING		0x00000010U
 
 /*
+ * The window's storage word for a block-linear surface on Turing: the
+ * memory layout field (bit 4) block linear (0), the block height in GOBs
+ * as its log2 in bits 3:0 (0 for one GOB).
+ *
+ * Values referenced: NVIDIA open-gpu-doc classes/display/clc57e.h
+ * (NVC57E_SET_STORAGE_BLOCK_HEIGHT, NVC57E_SET_STORAGE_MEMORY_LAYOUT_BLOCKLINEAR).
+ */
+#define NVRTX_DISP_STORAGE_BLOCK_HEIGHT_MASK	0x0000000fU
+
+/*
  * The window's pixel formats: A8R8G8B8 is B, G, R, A in memory (BGRA8888),
  * A8B8G8R8 is R, G, B, A.
  *
@@ -344,12 +354,15 @@ struct nvrtx_push {
 #define NVRTX_DISP_PITCH_UNIT		64U
 
 /*
- * One surface a window shows: linear 32-bit pixels in the VRAM.
+ * One surface a window shows: 32-bit pixels in the VRAM.
  *
  * The offset is the surface's VRAM address (a multiple of 256), the pitch
  * the bytes from one row to the next (a multiple of 64), the handle the
  * context DMA object the window reads it through, the format the window's
- * pixel format (NVRTX_DISP_FORMAT_*).
+ * pixel format (NVRTX_DISP_FORMAT_*).  block_linear is nonzero for a
+ * block-linear surface (Turing's window only), its rows then rows of GOBs
+ * pitch bytes wide and its blocks 2^block_height GOBs tall; zero for
+ * linear rows.
  */
 struct nvrtx_disp_surface {
 	uint64_t offset;
@@ -358,6 +371,8 @@ struct nvrtx_disp_surface {
 	uint32_t pitch;
 	uint32_t handle;
 	uint32_t format;
+	int block_linear;
+	uint32_t block_height;
 };
 
 /* The head methods the takeover reads from the armed state, in the order of the NVRTX_DISP_ARMED_ indexes. */
@@ -463,6 +478,24 @@ uint32_t nvrtx_disp_band_color(uint32_t band);
  */
 #define NVRTX_DISP_HANDLE_FB			0xfb000000U
 #define NVRTX_DISP_CONTEXT_DMA_FB_FLAGS		0x00000005U
+
+/*
+ * The context DMA object a window reads a block-linear surface through:
+ * all the VRAM, large pages, and its kind block linear (bit 20).  The
+ * window reads a block-linear surface's GOBs in the order the 3D engine
+ * writes them only through an object of that kind.  The handle is the
+ * window's object base with the memory kind of the block-linear surfaces
+ * the window takes from Turing on in its low byte.
+ *
+ * Values referenced: Linux v6.12
+ * drivers/gpu/drm/nouveau/dispnv50/wndw.c (nv50_wndw_ctxdma_new, an object
+ * for each memory kind, large pages), dispnv50/handles.h
+ * (NV50_DISP_HANDLE_WNDW_CTX), dispnv50/wndwc57e.c (wndwc57e_modifiers,
+ * kind 0x06) and nvkm/engine/dma/usergv100.c (gv100_dmaobj_new, bit 20 for
+ * a kind other than pitch).
+ */
+#define NVRTX_DISP_HANDLE_FB_BLOCK_LINEAR	0xfb000006U
+#define NVRTX_DISP_CONTEXT_DMA_BL_FLAGS		0x00100045U
 
 /*
  * A LUT's bytes: a 32-byte header and 1025 entries of 8 bytes.

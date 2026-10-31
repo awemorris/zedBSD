@@ -177,7 +177,7 @@ checkpoint_completion(
 
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 
-	/* Handles the worker availability. */
+	/* Wakes the worker so it sees the completion. */
 	if (worker != NULL)
 		sched_notify_task(worker->task);
 }
@@ -464,7 +464,7 @@ checkpoint_close_admission(
 
 	spin_unlock_irqrestore(&checkpoint->lock, irq);
 
-	/* Handles the worker availability. */
+	/* Wakes the worker so it sees that admission is closed. */
 	if (worker != NULL)
 		sched_notify_task(worker->task);
 	/* Continue until the operation reaches a terminal state. */
@@ -502,7 +502,10 @@ checkpoint_join_worker(
 	/* Handles the worker condition. */
 	if (worker == curthread)
 		return EBUSY;
+
+	/* Wakes the worker so it sees the stop request. */
 	sched_notify_task(worker->task);
+
 	/* Continue while the operation condition remains true. */
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
 	       THREAD_ZOMBIE)

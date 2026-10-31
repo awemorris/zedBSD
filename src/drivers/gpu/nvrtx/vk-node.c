@@ -215,6 +215,55 @@ nvrtx_vk_memory_kind(
 }
 
 /*
+ * Notes the shape of an image bound to a memory's storage (block linear or
+ * not, its row pitch, size and offset): the first one bound is the shape
+ * an export must describe, and an exported image's description is the
+ * shape every image bound later must have.  The caller holds the node's
+ * lock.  Returns EINVAL for an image of another shape than the described
+ * one.
+ */
+int
+nvrtx_vk_memory_bind_image(
+	void *backing,
+	bool tiled,
+	uint32_t pitch,
+	uint32_t width,
+	uint32_t height,
+	uint64_t offset)
+{
+	struct nvrtx_backing *held;
+	int described_tiled;
+
+	held = backing;
+
+	/* An exported image's readers lay it out as described. */
+	if (held->described) {
+		described_tiled = 0;
+		if (held->image.tiling == GPU_IMAGE_NV_BLOCK_LINEAR)
+			described_tiled = 1;
+		if ((int)tiled != described_tiled)
+			return EINVAL;
+		if (pitch != held->image.stride || width != held->image.width || height != held->image.height)
+			return EINVAL;
+		if (offset != held->image.offset)
+			return EINVAL;
+	}
+
+	/* The first image bound is the shape the storage has. */
+	if (!held->bound) {
+		held->bound = 1;
+		held->bound_tiled = (int)tiled;
+		held->bound_pitch = pitch;
+		held->bound_width = width;
+		held->bound_height = height;
+		held->bound_offset = offset;
+	}
+
+	/* Succeeded: the image reads the storage as it is laid out. */
+	return 0;
+}
+
+/*
  * Takes a blob of the session's as an imported VkDeviceMemory's storage:
  * maps it for the work channel and holds its backing.  The caller holds
  * the node's lock.

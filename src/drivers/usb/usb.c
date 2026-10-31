@@ -970,12 +970,18 @@ drv_usb_trace_now_ns(
 	uint64_t frequency;
 	uint64_t seconds;
 	uint64_t rest;
+	uint64_t ticks;
+	uint64_t nanoseconds;
 	bool have;
 
 	/* The counter; a machine without one has only the clock's ticks. */
 	have = kern_rtc_read_counter(&counter, &frequency);
-	if (!have || frequency == 0U)
-		return kern_ticks_to_ns(sched_ticks());
+	if (!have || frequency == 0U) {
+		/* Without a counter, the scheduler's ticks in nanoseconds. */
+		ticks = sched_ticks();
+		nanoseconds = kern_ticks_to_ns(ticks);
+		return nanoseconds;
+	}
 
 	/* Whole seconds, then the rest, so the product does not overflow. */
 	seconds = counter / frequency;
@@ -2652,11 +2658,15 @@ drv_usb_urb_submit(
 	if (irq_enabled)
 		kern_irq_enable();
 
-	/* Handles the claimed availability. */
+	/*
+	 * A terminal publisher claimed the record; it releases the gates with
+	 * its local interrupts off, so the wait is short and is spun (a
+	 * callback may submit from the controller's interrupt handler, where
+	 * yielding would carry the interrupt's acknowledgement away).
+	 */
 	if (claimed == NULL) {
-		/* Continue while the operation condition remains true. */
 		while (atomic_load_acquire(&commit.finished) == 0)
-			sched_yield();
+			atomic_spin_hint();
 	}
 
 	/* Checks the operation status. */
@@ -7449,6 +7459,7 @@ urb_publish_terminal(
 {
 	struct usb_submit_commit *commit;
 	unsigned expected = 0;
+	bool irq_enabled;
 
 	/* Handles the urb availability. */
 	if (urb == NULL || status == DRV_USB_URB_IDLE ||
@@ -7467,16 +7478,26 @@ urb_publish_terminal(
 	 * gates before a callback can re-enter detach or disconnect.
 	 */
 
-	/* Handles the commit availability. */
+	/*
+	 * Releases the gates, or waits for the path that claimed the record
+	 * to release them.  Every claimer holds its local interrupts off from
+	 * the claim to that release, so the wait is a few stores long and is
+	 * spun, never yielded: this runs in the controller's interrupt
+	 * handler, and a task switch there would carry the interrupt's
+	 * acknowledgement to whatever CPU the thread resumes on.
+	 */
+	irq_enabled = kern_irq_disable();
 	commit = __atomic_exchange_n(&urb->submit_commit, NULL,
 				     __ATOMIC_ACQ_REL);
 	if (commit != NULL)
 		submit_commit_finish(urb, commit);
-	else
-		/* Continue while the operation condition remains true. */
+	if (irq_enabled)
+		kern_irq_enable();
+	if (commit == NULL) {
 		while (atomic_raw_load_acquire(&urb->submit_commit_pending) !=
 		       0)
-			sched_yield();
+			atomic_spin_hint();
+	}
 
 	/* Checks the hal atomic compare exchange acq rel result. */
 	if (!atomic_raw_compare_exchange(&urb->terminal_claimed,

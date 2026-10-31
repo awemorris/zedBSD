@@ -1467,6 +1467,11 @@ scanout_commit(
 	if (error != 0)
 		return error;
 
+	/* Its object for a block-linear surface (the same VRAM, the block-linear kind). */
+	error = scanout_bind(gpu, NVRTX_DISP_CHID_WINDOW_FIRST + display->window, NVRTX_DISP_HANDLE_FB_BLOCK_LINEAR, NVRTX_DISP_CONTEXT_DMA_BL_FLAGS, 0U, gpu->layout.vram_size - 1U);
+	if (error != 0)
+		return error;
+
 	/* Its notifier, cleared before the commit. */
 	error = scanout_notifier_reset(gpu, notifier);
 	if (error != 0)

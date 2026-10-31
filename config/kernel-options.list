@@ -1,5 +1,6 @@
 # key|kind|label|platforms|default|choices
 CONFIG_KERNEL_TEST_CHECKPOINTS|bool|Kernel test checkpoints|amd64|n|
+CONFIG_CPU_PERF|bool|CPU performance control (HWP, energy meters, idle residency)|amd64|n|
 CONFIG_PCAT_SERIAL_MIRROR|bool|Mirror the PC/AT text console to COM1 (output only)|amd64|n|
 CONFIG_INPUT_TEST_INJECT|bool|Test pen and touch screen injector (/dev/input-inject, test builds only)|amd64|n|
 CONFIG_SECURITY_KEY_TEST_LOOPBACK|bool|Test loopback security key (/dev/input/hidraw, test builds only)|amd64|n|

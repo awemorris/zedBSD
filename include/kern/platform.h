@@ -59,6 +59,19 @@ int
 kern_platform_poweroff(void);
 
 /*
+ * Turn the machine's power off at once, for the thermal emergency: like
+ * kern_platform_poweroff() but without asking the firmware to prepare,
+ * which may run code that waits on the hardware that is overheating.
+ *
+ * It returns only when the platform could not, as kern_platform_poweroff()
+ * does.  Optional: it is weak, and a platform whose power-off asks nothing
+ * of the firmware does not define it; the caller then uses
+ * kern_platform_poweroff().
+ */
+int
+kern_platform_poweroff_emergency(void) __attribute__((weak));
+
+/*
  * Stop the platform's own device threads before a shutdown or reboot.
  *
  * Called by system_shutdown_prepare() once the volumes are synced and

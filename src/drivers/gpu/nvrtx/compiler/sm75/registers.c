@@ -576,8 +576,8 @@ nvrtx_sm75_value(
  * that no loop boundary or loop variable update lies between them, is
  * fused: the addition becomes an FFMA and the product emits nothing.  SPIR-V
  * lets a multiplication and an addition contract into one fused operation
- * unless the result is decorated NoContraction; a module with such a result
- * fuses none (lowering->contract is 0).  Then a constant, push
+ * unless either result is decorated NoContraction (the instruction's
+ * no_contraction).  Then a constant, push
  * constant or uniform buffer word every reader of which can take it as its
  * one immediate or constant buffer operand is read in place: its definition
  * emits no move.  A value defined more than once (a loop variable) is
@@ -650,9 +650,8 @@ nvrtx_sm75_plan_folds(
 		}
 	}
 
-	/* The products first, which change what their additions read, unless the module keeps them apart. */
-	if (lowering->contract != 0U)
-		nvrtx_sm75_fuse_products(lowering, uses, defs);
+	/* The products first, which change what their additions read. */
+	nvrtx_sm75_fuse_products(lowering, uses, defs);
 
 	/* Then the words read in place. */
 	nvrtx_sm75_fold_operands(lowering, defs, candidate);
@@ -739,8 +738,10 @@ nvrtx_sm75_fuse_products(
 			continue;
 		}
 
-		/* Only additions and subtractions take a product. */
+		/* Only additions and subtractions take a product, and not a precise one. */
 		if (instruction->op != DRV_GPU_IR_FADD && instruction->op != DRV_GPU_IR_FSUB)
+			continue;
+		if (instruction->no_contraction != 0U)
 			continue;
 
 		/* An operation on one value twice keeps its product. */
@@ -760,7 +761,7 @@ nvrtx_sm75_fuse_products(
 			/* A product defined after the latest boundary, and not fused already. */
 			at = lowering->def[value];
 			product = &ir->instructions[at];
-			if (product->op != DRV_GPU_IR_FMUL)
+			if (product->op != DRV_GPU_IR_FMUL || product->no_contraction != 0U)
 				continue;
 			if (at >= index)
 				continue;

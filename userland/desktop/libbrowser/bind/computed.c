@@ -47,6 +47,7 @@ enum computed_property {
 	COMPUTED_OVERFLOW_INLINE,
 	COMPUTED_OVERFLOW_BLOCK,
 	COMPUTED_BOX_SIZING,
+	COMPUTED_CONTENT_VISIBILITY,
 	COMPUTED_WIDTH,
 	COMPUTED_HEIGHT,
 	COMPUTED_MIN_WIDTH,
@@ -82,6 +83,8 @@ enum computed_property {
 	COMPUTED_BACKGROUND_IMAGE,
 	COMPUTED_OPACITY,
 	COMPUTED_TEXT_SHADOW,
+	COMPUTED_BACKDROP_FILTER,
+	COMPUTED_FILTER,
 	COMPUTED_Z_INDEX,
 	COMPUTED_FONT_SIZE,
 	COMPUTED_FONT_WEIGHT,
@@ -95,7 +98,9 @@ enum computed_property {
 	COMPUTED_CURSOR,
 	COMPUTED_VERTICAL_ALIGN,
 	COMPUTED_LIST_STYLE_TYPE,
+	COMPUTED_LIST_STYLE_POSITION,
 	COMPUTED_BORDER_COLLAPSE,
+	COMPUTED_CAPTION_SIDE,
 	COMPUTED_FLEX_DIRECTION,
 	COMPUTED_FLEX_WRAP,
 	COMPUTED_FLEX_GROW,
@@ -154,10 +159,20 @@ enum computed_property {
 	COMPUTED_ANIMATION_TIMING_FUNCTION,
 	COMPUTED_MIX_BLEND_MODE,
 	COMPUTED_ZOOM,
+	COMPUTED_CONTENT,
+	COMPUTED_TEXT_STROKE_WIDTH,
 
 	/* The flow-relative properties, six families of four (inline-start, inline-end, block-start, block-end): margin, padding, inset, border width, style and color. */
 	COMPUTED_LOGICAL_FIRST,
-	COMPUTED_LOGICAL_LAST = COMPUTED_LOGICAL_FIRST + 23
+	COMPUTED_LOGICAL_LAST = COMPUTED_LOGICAL_FIRST + 23,
+
+	/* The flow-relative sizes: inline-size, block-size, then their minimums and maximums. */
+	COMPUTED_SIZE_FIRST,
+	COMPUTED_SIZE_LAST = COMPUTED_SIZE_FIRST + 5,
+
+	/* The corner radii: the four physical corners (as border-radius lists them), then the flow-relative ones (start-start, start-end, end-end, end-start). */
+	COMPUTED_RADIUS_FIRST,
+	COMPUTED_RADIUS_LAST = COMPUTED_RADIUS_FIRST + 7
 };
 
 /*
@@ -184,13 +199,20 @@ static int computed_pseudo;
 static struct vm_string *computed_pseudo_name;
 
 static void computed_trace(struct vm_heap *heap, struct vm_cell *cell);
+static int computed_box_shorthand(struct vm_realm *realm, struct dom_element *element, const struct vm_string *name, vm_value *result, int *found);
 static int computed_find(const struct vm_string *name, int *property);
 static int computed_write_grid(struct bind_window *window, struct dom_element *element, const struct css_style *style, int property, struct wb_units *out, int *handled);
+static int computed_write_subgrid(struct bind_window *window, struct dom_element *element, const struct css_style *style, int columns, struct wb_units *out);
 static int computed_write(struct bind_window *window, struct dom_element *element, int property, struct wb_units *out);
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
 static int computed_overflow_axis(int own, int other);
+/* The zoom the style being written was laid out in (lengths are reported without it). */
+static float computed_zoom = 1.0f;
+
 static int computed_logical_property(const struct css_style *style, int property);
+static int computed_write_radius(const struct css_style *style, int index, struct wb_units *out);
+static int computed_write_content(const struct css_style *style, struct wb_units *out);
 static int computed_write_overflow(const struct css_style *style, struct wb_units *out);
 static int computed_write_url(const struct vm_string *url, struct wb_units *out);
 static int computed_needs_quotes(const struct vm_string *family);
@@ -216,6 +238,8 @@ static int computed_ascii(const char *ascii, struct wb_units *out);
 static int computed_decoration_append(struct wb_units *out, const struct wb_units *part);
 static int computed_decoration(const struct css_style *style, struct wb_units *out);
 static int computed_text_shadow(const struct css_style *style, struct wb_units *out);
+static int computed_backdrop_filter(const struct css_style *style, struct wb_units *out);
+static int computed_filter_list(const struct css_filter *filters, int count, struct wb_units *out);
 
 /* The state of a computed declaration, which marks its element's object. */
 static const struct vm_cell_type computed_ref_type = { "computed-style", computed_trace, NULL };
@@ -225,6 +249,22 @@ static const struct vm_cell_type computed_ref_type = { "computed-style", compute
  * for the life of the program.
  */
 static const struct computed_entry computed_entries[] = {
+	{ "content", COMPUTED_CONTENT },
+	{ "-webkit-text-stroke-width", COMPUTED_TEXT_STROKE_WIDTH },
+	{ "border-top-left-radius", COMPUTED_RADIUS_FIRST + 0 },
+	{ "border-top-right-radius", COMPUTED_RADIUS_FIRST + 1 },
+	{ "border-bottom-right-radius", COMPUTED_RADIUS_FIRST + 2 },
+	{ "border-bottom-left-radius", COMPUTED_RADIUS_FIRST + 3 },
+	{ "border-start-start-radius", COMPUTED_RADIUS_FIRST + 4 },
+	{ "border-start-end-radius", COMPUTED_RADIUS_FIRST + 5 },
+	{ "border-end-end-radius", COMPUTED_RADIUS_FIRST + 6 },
+	{ "border-end-start-radius", COMPUTED_RADIUS_FIRST + 7 },
+	{ "inline-size", COMPUTED_SIZE_FIRST + 0 },
+	{ "block-size", COMPUTED_SIZE_FIRST + 1 },
+	{ "min-inline-size", COMPUTED_SIZE_FIRST + 2 },
+	{ "min-block-size", COMPUTED_SIZE_FIRST + 3 },
+	{ "max-inline-size", COMPUTED_SIZE_FIRST + 4 },
+	{ "max-block-size", COMPUTED_SIZE_FIRST + 5 },
 	{ "margin-inline-start", COMPUTED_LOGICAL_FIRST + 0 },
 	{ "margin-inline-end", COMPUTED_LOGICAL_FIRST + 1 },
 	{ "margin-block-start", COMPUTED_LOGICAL_FIRST + 2 },
@@ -260,6 +300,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "overflow-inline", COMPUTED_OVERFLOW_INLINE },
 	{ "overflow-block", COMPUTED_OVERFLOW_BLOCK },
 	{ "box-sizing", COMPUTED_BOX_SIZING },
+	{ "content-visibility", COMPUTED_CONTENT_VISIBILITY },
 	{ "width", COMPUTED_WIDTH },
 	{ "height", COMPUTED_HEIGHT },
 	{ "min-width", COMPUTED_MIN_WIDTH },
@@ -295,6 +336,8 @@ static const struct computed_entry computed_entries[] = {
 	{ "background-image", COMPUTED_BACKGROUND_IMAGE },
 	{ "opacity", COMPUTED_OPACITY },
 	{ "text-shadow", COMPUTED_TEXT_SHADOW },
+	{ "backdrop-filter", COMPUTED_BACKDROP_FILTER },
+	{ "filter", COMPUTED_FILTER },
 	{ "z-index", COMPUTED_Z_INDEX },
 	{ "font-size", COMPUTED_FONT_SIZE },
 	{ "font-weight", COMPUTED_FONT_WEIGHT },
@@ -311,7 +354,9 @@ static const struct computed_entry computed_entries[] = {
 	{ "cursor", COMPUTED_CURSOR },
 	{ "vertical-align", COMPUTED_VERTICAL_ALIGN },
 	{ "list-style-type", COMPUTED_LIST_STYLE_TYPE },
+	{ "list-style-position", COMPUTED_LIST_STYLE_POSITION },
 	{ "border-collapse", COMPUTED_BORDER_COLLAPSE },
+	{ "caption-side", COMPUTED_CAPTION_SIDE },
 	{ "flex-direction", COMPUTED_FLEX_DIRECTION },
 	{ "flex-wrap", COMPUTED_FLEX_WRAP },
 	{ "flex-grow", COMPUTED_FLEX_GROW },
@@ -326,6 +371,8 @@ static const struct computed_entry computed_entries[] = {
 	{ "order", COMPUTED_ORDER },
 	{ "row-gap", COMPUTED_ROW_GAP },
 	{ "column-gap", COMPUTED_COLUMN_GAP },
+	{ "grid-row-gap", COMPUTED_ROW_GAP },
+	{ "grid-column-gap", COMPUTED_COLUMN_GAP },
 	{ "outline-width", COMPUTED_OUTLINE_WIDTH },
 	{ "outline-style", COMPUTED_OUTLINE_STYLE },
 	{ "outline-color", COMPUTED_OUTLINE_COLOR },
@@ -390,8 +437,11 @@ static const char *const computed_overflows[] = { "visible", "hidden", "clip", "
 /* The names of box-sizing, by enum css_box_sizing. */
 static const char *const computed_box_sizings[] = { "content-box", "border-box" };
 
+/* The names of content-visibility. */
+static const char *const computed_content_visibilities[] = { "visible", "auto", "hidden" };
+
 /* The names of the border styles, by enum css_border_style. */
-static const char *const computed_border_styles[] = { "none", "solid", "dashed", "dotted", "double", "inset", "outset" };
+static const char *const computed_border_styles[] = { "none", "solid", "dashed", "dotted", "double", "inset", "outset", "groove", "ridge" };
 
 /* The names of text-align, by enum css_text_align. */
 static const char *const computed_text_aligns[] = { "start", "left", "right", "center", "justify", "end" };
@@ -460,11 +510,15 @@ static const char *const computed_vertical_aligns[] = {
 	"baseline", "top", "middle", "bottom", "text-top", "text-bottom", "sub", "super"
 };
 
+/* The names of list-style-position. */
+static const char *const computed_list_positions[] = { "outside", "inside" };
+
 /* The names of list-style-type, by enum css_list_style. */
-static const char *const computed_list_styles[] = { "disc", "circle", "square", "decimal", "none" };
+static const char *const computed_list_styles[] = { "disc", "circle", "square", "decimal", "none", "disclosure-closed", "disclosure-open" };
 
 /* The names of border-collapse. */
 static const char *const computed_collapses[] = { "separate", "collapse" };
+static const char *const computed_caption_sides[] = { "top", "bottom" };
 
 /* The names of flex-direction, by enum css_flex_direction. */
 static const char *const computed_flex_directions[] = { "row", "row-reverse", "column", "column-reverse" };
@@ -519,13 +573,24 @@ computed_pseudo_of(
 	index = 0;
 	while (index < length && units[index] == ' ')
 		index++;
-	if (index + 1U >= length || units[index] != ':' || units[index + 1U] != ':')
+	if (index + 1U >= length || units[index] != ':' || units[index + 1U] != ':') {
+		if (index + 6U == length && units[index] == ':' && units[index + 1U] == 'a' && units[index + 2U] == 'f' &&
+		    units[index + 3U] == 't' && units[index + 4U] == 'e' && units[index + 5U] == 'r')
+			return CSS_PSEUDO_ELEMENT_AFTER;
+		if (index + 7U == length && units[index] == ':' && units[index + 1U] == 'b' && units[index + 2U] == 'e' &&
+		    units[index + 3U] == 'f' && units[index + 4U] == 'o' && units[index + 5U] == 'r' && units[index + 6U] == 'e')
+			return CSS_PSEUDO_ELEMENT_BEFORE;
 		return units[index] == ':' ? 0 : -1;
+	}
 	index += 2U;
 	used = 0;
 	while (index < length && units[index] != '(' && units[index] != ' ' && used < sizeof(word) - 1U)
 		word[used++] = (char)units[index++];
 	word[used] = '\0';
+	if (strcmp(word, "before") == 0)
+		return CSS_PSEUDO_ELEMENT_BEFORE;
+	if (strcmp(word, "after") == 0)
+		return CSS_PSEUDO_ELEMENT_AFTER;
 	if (strncmp(word, "view-transition", 15) != 0)
 		return 0;
 	pseudo = 0;
@@ -687,6 +752,11 @@ bind_computed_value(
 	int found;
 	int status;
 
+	/* A shorthand of the sides of a box is its longhands' values, put together. */
+	status = computed_box_shorthand(realm, element, name, result, &found);
+	if (status != 0 || found)
+		return status;
+
 	/* A property not reported is empty. */
 	found = computed_find(name, &property);
 	if (!found) {
@@ -752,6 +822,175 @@ computed_trace(
 	vm_heap_mark_value(heap, ref->element);
 }
 
+/* A box shorthand a computed declaration reports: its name, whether it is four-sided (4), two-sided (2) or a border (3: width style color), and its longhands. */
+struct computed_box_shorthand {
+	const char *name;
+	int kind;
+	const char *longhands[12];
+};
+
+static const struct computed_box_shorthand computed_box_shorthands[] = {
+	{ "margin", 4, { "margin-top", "margin-right", "margin-bottom", "margin-left" } },
+	{ "padding", 4, { "padding-top", "padding-right", "padding-bottom", "padding-left" } },
+	{ "inset", 4, { "top", "right", "bottom", "left" } },
+	{ "border-width", 4, { "border-top-width", "border-right-width", "border-bottom-width", "border-left-width" } },
+	{ "border-style", 4, { "border-top-style", "border-right-style", "border-bottom-style", "border-left-style" } },
+	{ "border-color", 4, { "border-top-color", "border-right-color", "border-bottom-color", "border-left-color" } },
+	{ "margin-inline", 2, { "margin-inline-start", "margin-inline-end" } },
+	{ "margin-block", 2, { "margin-block-start", "margin-block-end" } },
+	{ "padding-inline", 2, { "padding-inline-start", "padding-inline-end" } },
+	{ "padding-block", 2, { "padding-block-start", "padding-block-end" } },
+	{ "inset-inline", 2, { "inset-inline-start", "inset-inline-end" } },
+	{ "inset-block", 2, { "inset-block-start", "inset-block-end" } },
+	{ "border-inline-width", 2, { "border-inline-start-width", "border-inline-end-width" } },
+	{ "border-block-width", 2, { "border-block-start-width", "border-block-end-width" } },
+	{ "border-inline-style", 2, { "border-inline-start-style", "border-inline-end-style" } },
+	{ "border-block-style", 2, { "border-block-start-style", "border-block-end-style" } },
+	{ "border-inline-color", 2, { "border-inline-start-color", "border-inline-end-color" } },
+	{ "border-block-color", 2, { "border-block-start-color", "border-block-end-color" } },
+	{ "border-top", 3, { "border-top-width", "border-top-style", "border-top-color" } },
+	{ "border-right", 3, { "border-right-width", "border-right-style", "border-right-color" } },
+	{ "border-bottom", 3, { "border-bottom-width", "border-bottom-style", "border-bottom-color" } },
+	{ "border-left", 3, { "border-left-width", "border-left-style", "border-left-color" } },
+	{ "border-inline-start", 3, { "border-inline-start-width", "border-inline-start-style", "border-inline-start-color" } },
+	{ "border-inline-end", 3, { "border-inline-end-width", "border-inline-end-style", "border-inline-end-color" } },
+	{ "border-block-start", 3, { "border-block-start-width", "border-block-start-style", "border-block-start-color" } },
+	{ "border-block-end", 3, { "border-block-end-width", "border-block-end-style", "border-block-end-color" } },
+	{ NULL, 0, { NULL } }
+};
+
+/* The border shorthands of several sides: the name, and the one-side shorthands that must all agree. */
+static const struct { const char *name; const char *sides[4]; } computed_border_groups[] = {
+	{ "border", { "border-top", "border-right", "border-bottom", "border-left" } },
+	{ "border-inline", { "border-inline-start", "border-inline-end", NULL, NULL } },
+	{ "border-block", { "border-block-start", "border-block-end", NULL, NULL } },
+	{ NULL, { NULL, NULL, NULL, NULL } }
+};
+
+/* Reads a computed value as a C string in a buffer of its own. */
+static int
+computed_value_text(
+	struct vm_realm *realm,
+	struct dom_element *element,
+	const char *name,
+	char *out,
+	size_t size)
+{
+	struct vm_string *key;
+	struct wb_buffer text;
+	vm_value value;
+	size_t length;
+	int status;
+
+	key = vm_atom_from_ascii(realm->heap, name);
+	if (key == NULL)
+		return ENOMEM;
+	status = bind_computed_value(realm, element, key, &value);
+	if (status != 0)
+		return status;
+	wb_buffer_init(&text);
+	status = vm_string_to_utf8((const struct vm_string *)vm_value_as_cell(value), &text);
+	if (status == 0) {
+		length = text.length < size - 1U ? text.length : size - 1U;
+		memcpy(out, wb_buffer_string(&text), length);
+		out[length] = '\0';
+	}
+	wb_buffer_release(&text);
+	return status;
+}
+
+/* Reports a shorthand of the sides of a box (margin, border-width, border-top, border-inline and the like) as its longhands' values put together. */
+static int
+computed_box_shorthand(
+	struct vm_realm *realm,
+	struct dom_element *element,
+	const struct vm_string *name,
+	vm_value *result,
+	int *found)
+{
+	char value[4][160];
+	char text[700];
+	size_t family;
+	size_t index;
+	int count;
+	int status;
+
+	*found = 0;
+	for (family = 0; computed_box_shorthands[family].name != NULL; family++) {
+		if (vm_string_equal_ascii(name, computed_box_shorthands[family].name))
+			break;
+	}
+	if (computed_box_shorthands[family].name != NULL) {
+		count = computed_box_shorthands[family].kind == 4 ? 4 : (computed_box_shorthands[family].kind == 2 ? 2 : 3);
+		for (index = 0; index < (size_t)count; index++) {
+			status = computed_value_text(realm, element, computed_box_shorthands[family].longhands[index], value[index], sizeof(value[index]));
+			if (status != 0)
+				return status;
+		}
+		*found = 1;
+		if (count == 4) {
+			if (strcmp(value[0], value[2]) == 0 && strcmp(value[1], value[3]) == 0) {
+				if (strcmp(value[0], value[1]) == 0)
+					snprintf(text, sizeof(text), "%s", value[0]);
+				else
+					snprintf(text, sizeof(text), "%s %s", value[0], value[1]);
+			} else if (strcmp(value[1], value[3]) == 0) {
+				snprintf(text, sizeof(text), "%s %s %s", value[0], value[1], value[2]);
+			} else {
+				snprintf(text, sizeof(text), "%s %s %s %s", value[0], value[1], value[2], value[3]);
+			}
+		} else if (count == 2) {
+			if (strcmp(value[0], value[1]) == 0)
+				snprintf(text, sizeof(text), "%s", value[0]);
+			else
+				snprintf(text, sizeof(text), "%s %s", value[0], value[1]);
+		} else {
+			snprintf(text, sizeof(text), "%s %s %s", value[0], value[1], value[2]);
+		}
+		return bind_string(realm, text, result);
+	}
+
+	/* The border shorthands of several sides agree on every side, or are empty. */
+	for (family = 0; computed_border_groups[family].name != NULL; family++) {
+		if (vm_string_equal_ascii(name, computed_border_groups[family].name))
+			break;
+	}
+	if (computed_border_groups[family].name != NULL) {
+		char first[700];
+		char other[700];
+		struct vm_string *key;
+		vm_value one;
+		struct wb_buffer buffer;
+
+		*found = 1;
+		first[0] = '\0';
+		for (index = 0; index < 4U && computed_border_groups[family].sides[index] != NULL; index++) {
+			key = vm_atom_from_ascii(realm->heap, computed_border_groups[family].sides[index]);
+			if (key == NULL)
+				return ENOMEM;
+			status = bind_computed_value(realm, element, key, &one);
+			if (status != 0)
+				return status;
+			wb_buffer_init(&buffer);
+			status = vm_string_to_utf8((const struct vm_string *)vm_value_as_cell(one), &buffer);
+			if (status != 0) {
+				wb_buffer_release(&buffer);
+				return status;
+			}
+			snprintf(other, sizeof(other), "%.*s", (int)(buffer.length < sizeof(other) - 1U ? buffer.length : sizeof(other) - 1U), wb_buffer_string(&buffer));
+			wb_buffer_release(&buffer);
+			if (index == 0) {
+				snprintf(first, sizeof(first), "%s", other);
+			} else if (strcmp(first, other) != 0) {
+				first[0] = '\0';
+				break;
+			}
+		}
+		return bind_string(realm, first, result);
+	}
+	return 0;
+}
+
 /* Finds the property a CSS name reports; reports whether there is one. */
 static int
 computed_find(
@@ -799,7 +1038,7 @@ computed_blockify(
 	blockify = style->float_side != CSS_FLOAT_NONE || style->position == CSS_POSITION_ABSOLUTE ||
 	    style->position == CSS_POSITION_FIXED;
 	parent = element->node.parent;
-	if (!blockify && parent != NULL && parent->type == DOM_ELEMENT) {
+	while (!blockify && parent != NULL && parent->type == DOM_ELEMENT) {
 		parent_style = malloc(sizeof(*parent_style));
 		if (parent_style == NULL)
 			return;
@@ -807,11 +1046,19 @@ computed_blockify(
 			error = window->host.computed_style(window->host.context, (struct dom_element *)parent, parent_style);
 		else
 			error = bind_style_context_compute(window, (struct dom_element *)parent, parent_style);
+
+		/* A parent that makes no box of its own passes the question on to its own parent. */
+		if (error == 0 && parent_style->display == CSS_DISPLAY_CONTENTS) {
+			free(parent_style);
+			parent = parent->parent;
+			continue;
+		}
 		if (error == 0 && (parent_style->display == CSS_DISPLAY_FLEX ||
 		    parent_style->display == CSS_DISPLAY_INLINE_FLEX ||
 		    parent_style->display == CSS_DISPLAY_GRID || parent_style->display == CSS_DISPLAY_INLINE_GRID))
 			blockify = 1;
 		free(parent_style);
+		break;
 	}
 	if (!blockify)
 		return;
@@ -881,9 +1128,28 @@ computed_write(
 		return error;
 	}
 
+	/* Lengths are reported unzoomed: the zoom the element's lengths were scaled by is taken off in the numbers written. */
+	computed_zoom = style->zoom_eff > 0.0f ? style->zoom_eff : 1.0f;
+
+	/* A corner radius: its horizontal and vertical radii (one when they are alike). */
+	if (property >= COMPUTED_RADIUS_FIRST && property <= COMPUTED_RADIUS_LAST) {
+		error = computed_write_radius(style, property - COMPUTED_RADIUS_FIRST, out);
+		free(style);
+		return error;
+	}
+
 	/* A flow-relative property is the physical one it maps to here. */
 	if (property >= COMPUTED_LOGICAL_FIRST && property <= COMPUTED_LOGICAL_LAST)
 		property = computed_logical_property(style, property);
+	if (property >= COMPUTED_SIZE_FIRST && property <= COMPUTED_SIZE_LAST) {
+		static const int sizes[6][2] = {
+			{ COMPUTED_WIDTH, COMPUTED_HEIGHT }, { COMPUTED_HEIGHT, COMPUTED_WIDTH },
+			{ COMPUTED_MIN_WIDTH, COMPUTED_MIN_HEIGHT }, { COMPUTED_MIN_HEIGHT, COMPUTED_MIN_WIDTH },
+			{ COMPUTED_MAX_WIDTH, COMPUTED_MAX_HEIGHT }, { COMPUTED_MAX_HEIGHT, COMPUTED_MAX_WIDTH }
+		};
+
+		property = sizes[property - COMPUTED_SIZE_FIRST][style->writing_mode != CSS_WRITING_HORIZONTAL_TB];
+	}
 
 	/* The computed display of a floated, positioned or flex or grid item box is blockified. */
 	if (property == COMPUTED_DISPLAY)
@@ -919,6 +1185,162 @@ computed_write(
 	return 0;
 }
 
+/* Writes the computed content: normal for an element, none for a pseudo-element without any, else its strings (quoted) and attr() items. */
+static int
+computed_write_content(
+	const struct css_style *style,
+	struct wb_units *out)
+{
+	size_t index;
+	size_t unit;
+	int error;
+
+	if (style->content == NULL || style->content->count == 0)
+		return computed_ascii(computed_pseudo == CSS_PSEUDO_ELEMENT_BEFORE || computed_pseudo == CSS_PSEUDO_ELEMENT_AFTER ? "none" : "normal", out);
+	error = 0;
+	for (index = 0; error == 0 && index < style->content->count; index++) {
+		if (index != 0)
+			error = computed_ascii(" ", out);
+		if (error != 0)
+			break;
+		if (style->content->items[index].is_attribute) {
+			error = computed_ascii("attr(", out);
+			for (unit = 0; error == 0 && unit < style->content->items[index].text->length; unit++)
+				error = wb_units_append_code_point(out, vm_string_at(style->content->items[index].text, unit));
+			if (error == 0)
+				error = computed_ascii(")", out);
+			continue;
+		}
+		error = computed_ascii("\"", out);
+		for (unit = 0; error == 0 && unit < style->content->items[index].text->length; unit++) {
+			if (vm_string_at(style->content->items[index].text, unit) == '"' || vm_string_at(style->content->items[index].text, unit) == '\\')
+				error = wb_units_append_code_point(out, '\\');
+			if (error == 0)
+				error = wb_units_append_code_point(out, vm_string_at(style->content->items[index].text, unit));
+		}
+		if (error == 0)
+			error = computed_ascii("\"", out);
+	}
+	return error;
+}
+
+/*
+ * Writes a corner's computed radius: the first four are the physical corners, the next four the flow-relative
+ * ones (start-start, start-end, end-end, end-start); a vertical writing mode swaps their horizontal and vertical radii.
+ */
+static int
+computed_write_radius(
+	const struct css_style *style,
+	int index,
+	struct wb_units *out)
+{
+	const struct css_length *first;
+	const struct css_length *second;
+	int vertical;
+	int block_side;
+	int inline_side;
+	int row;
+	int column;
+	int corner;
+	int swap;
+	int error;
+
+	/* A flow-relative corner is the physical one the block and inline sides name. */
+	corner = index;
+	swap = 0;
+	if (index >= 4) {
+		vertical = style->writing_mode != CSS_WRITING_HORIZONTAL_TB;
+		block_side = CSS_TOP;
+		if (style->writing_mode == CSS_WRITING_VERTICAL_LR)
+			block_side = CSS_LEFT;
+		if (style->writing_mode == CSS_WRITING_VERTICAL_RL)
+			block_side = CSS_RIGHT;
+		inline_side = vertical ? CSS_TOP : CSS_LEFT;
+		if ((style->direction == CSS_DIRECTION_RTL) != (vertical && style->writing_sideways == 1))
+			inline_side = vertical ? CSS_BOTTOM : CSS_RIGHT;
+		row = (index - 4) >= 2 ? (block_side + 2) % 4 : block_side;
+		column = (index - 4) == 1 || (index - 4) == 2 ? (inline_side + 2) % 4 : inline_side;
+		if (row == CSS_LEFT || row == CSS_RIGHT) {
+			corner = row;
+			row = column;
+			column = corner;
+		}
+		if (row == CSS_TOP)
+			corner = column == CSS_LEFT ? CSS_TOP_LEFT : CSS_TOP_RIGHT;
+		else
+			corner = column == CSS_LEFT ? CSS_BOTTOM_LEFT : CSS_BOTTOM_RIGHT;
+		swap = 0;
+	}
+
+	/* The radii, horizontal then vertical. */
+	first = &style->radius[corner][0];
+	second = &style->radius[corner][1];
+	error = computed_length(first, out);
+	if (error != 0)
+		return error;
+	if (swap || first->unit != second->unit || first->value != second->value || first->offset != second->offset) {
+		error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_length(second, out);
+	}
+	return error;
+}
+
+/* Writes a subgrid axis: "subgrid" and the names of each of the lines it spans (as it was declared when it has no box in a grid). */
+static int
+computed_write_subgrid(
+	struct bind_window *window,
+	struct dom_element *element,
+	const struct css_style *style,
+	int columns,
+	struct wb_units *out)
+{
+	struct css_line_names lines[CSS_TRACKS + 1];
+	struct wb_vector sizes;
+	const struct css_subgrid_names *declared;
+	int span;
+	int leading;
+	int repeats;
+	int found;
+	int line;
+	int error;
+
+	/* How many tracks of its parent the subgrid spans: the layout's answer. */
+	span = 0;
+	if (window->host.grid_tracks != NULL) {
+		wb_vector_init(&sizes, sizeof(double));
+		leading = 0;
+		repeats = 0;
+		found = 0;
+		error = window->host.grid_tracks(window->host.context, &element->node, columns, &sizes, &leading, &repeats, &found);
+		wb_vector_release(&sizes);
+		if (error != 0)
+			return error;
+		if (found)
+			span = repeats;
+	}
+
+	/* Without a layout, the lists as declared. */
+	if (span <= 0)
+		return computed_ascii(columns ? style->column_subgrid : style->row_subgrid, out);
+
+	/* The declared lists laid over the lines. */
+	if (span > CSS_TRACKS)
+		span = CSS_TRACKS;
+	memset(lines, 0, sizeof(lines));
+	declared = columns ? style->column_subgrid_names : style->row_subgrid_names;
+	css_subgrid_lines(declared, span + 1, lines);
+
+	/* "subgrid", then a bracketed list for each line. */
+	error = computed_ascii("subgrid", out);
+	for (line = 0; error == 0 && line <= span; line++) {
+		error = computed_ascii(" ", out);
+		if (error == 0)
+			error = css_line_names_serialize(&lines[line], out);
+	}
+	return error;
+}
+
 /* Writes a supported Grid template axis from copied actual layout values. */
 static int
 computed_write_grid(
@@ -948,10 +1370,18 @@ computed_write_grid(
 	if (property != COMPUTED_GRID_TEMPLATE_COLUMNS && property != COMPUTED_GRID_TEMPLATE_ROWS)
 		return 0;
 
-	/* A subgrid axis is its line-name lists. */
+	/* An element that is not a grid container reports a template with a repeat() as written. */
+	if (style->display != CSS_DISPLAY_GRID && style->display != CSS_DISPLAY_INLINE_GRID &&
+	    (property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_declared != NULL : style->row_declared != NULL)) {
+		*handled = 1;
+		return computed_ascii(property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_declared : style->row_declared, out);
+	}
+
+	/* A subgrid axis is its line-name lists, one for each line it spans once it has been laid out in a grid. */
 	if (property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid != NULL : style->row_subgrid != NULL) {
 		*handled = 1;
-		return computed_ascii(property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid : style->row_subgrid, out);
+		error = computed_write_subgrid(window, element, style, property == COMPUTED_GRID_TEMPLATE_COLUMNS, out);
+		return error;
 	}
 
 	/* Hosts without this private query retain the established computed-value behavior. */
@@ -1212,6 +1642,15 @@ computed_write_keyword(
 	case COMPUTED_BOX_SIZING:
 		error = computed_name(computed_box_sizings, 2, style->box_sizing, out);
 		break;
+	case COMPUTED_CONTENT_VISIBILITY:
+		error = computed_name(computed_content_visibilities, 3, style->content_visibility, out);
+		break;
+	case COMPUTED_CONTENT:
+		error = computed_write_content(style, out);
+		break;
+	case COMPUTED_TEXT_STROKE_WIDTH:
+		error = computed_pixels(style->text_stroke_width, out);
+		break;
 	case COMPUTED_WIDTH:
 		error = computed_length(&style->width, out);
 		break;
@@ -1258,7 +1697,7 @@ computed_write_keyword(
 	case COMPUTED_BORDER_RIGHT_STYLE:
 	case COMPUTED_BORDER_BOTTOM_STYLE:
 	case COMPUTED_BORDER_LEFT_STYLE:
-		error = computed_name(computed_border_styles, 7, style->border_style[property - COMPUTED_BORDER_TOP_STYLE], out);
+		error = computed_name(computed_border_styles, 9, style->border_style[property - COMPUTED_BORDER_TOP_STYLE], out);
 		break;
 	case COMPUTED_BORDER_TOP_COLOR:
 	case COMPUTED_BORDER_RIGHT_COLOR:
@@ -1283,6 +1722,12 @@ computed_write_keyword(
 		break;
 	case COMPUTED_OPACITY:
 		error = computed_number(style->opacity, out);
+		break;
+	case COMPUTED_BACKDROP_FILTER:
+		error = computed_backdrop_filter(style, out);
+		break;
+	case COMPUTED_FILTER:
+		error = computed_filter_list(style->filters, style->filter_count, out);
 		break;
 	case COMPUTED_TEXT_SHADOW:
 		error = computed_text_shadow(style, out);
@@ -1376,10 +1821,16 @@ computed_write_keyword(
 
 		break;
 	case COMPUTED_LIST_STYLE_TYPE:
-		error = computed_name(computed_list_styles, 5, style->list_style, out);
+		error = computed_name(computed_list_styles, 7, style->list_style, out);
+		break;
+	case COMPUTED_LIST_STYLE_POSITION:
+		error = computed_name(computed_list_positions, 2, style->list_style_inside, out);
 		break;
 	case COMPUTED_BORDER_COLLAPSE:
 		error = computed_name(computed_collapses, 2, style->border_collapse, out);
+		break;
+	case COMPUTED_CAPTION_SIDE:
+		error = computed_name(computed_caption_sides, 2, style->caption_side, out);
 		break;
 	case COMPUTED_FLEX_DIRECTION:
 		error = computed_name(computed_flex_directions, 4, style->flex_direction, out);
@@ -1536,7 +1987,7 @@ computed_write_keyword(
 		error = computed_pixels(style->outline_width, out);
 		break;
 	case COMPUTED_OUTLINE_STYLE:
-		error = computed_name(computed_border_styles, 7, style->outline_style, out);
+		error = computed_name(computed_border_styles, 9, style->outline_style, out);
 		break;
 	case COMPUTED_OUTLINE_COLOR:
 		error = computed_color(style->outline_color, out);
@@ -2296,6 +2747,55 @@ computed_decoration_append(struct wb_units *out, const struct wb_units *part)
 	return wb_units_append(out, part->data, part->length);
 }
 
+/* Serializes backdrop-filter as its functions (blur in px, hue-rotate in deg, the others as numbers), or none. */
+static int
+computed_backdrop_filter(
+	const struct css_style *style,
+	struct wb_units *out)
+{
+	return computed_filter_list(style->backdrop_filters, style->backdrop_filter_count, out);
+}
+
+/* Serializes a filter list. */
+static int
+computed_filter_list(
+	const struct css_filter *filters,
+	int count,
+	struct wb_units *out)
+{
+	static const char *const names[] = {
+		"blur", "brightness", "contrast", "grayscale", "hue-rotate", "invert", "opacity", "saturate", "sepia"
+	};
+	const struct css_filter *filter;
+	int index;
+	int error;
+
+	/* No function. */
+	if (count == 0)
+		return computed_ascii("none", out);
+	error = 0;
+	for (index = 0; index < count && error == 0; index++) {
+		filter = &filters[index];
+		if (index != 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_ascii(names[filter->kind], out);
+		if (error == 0)
+			error = computed_ascii("(", out);
+		if (error == 0 && filter->kind == CSS_FILTER_BLUR)
+			error = computed_pixels(filter->amount, out);
+		else if (error == 0 && filter->kind == CSS_FILTER_HUE_ROTATE) {
+			error = computed_number(filter->amount, out);
+			if (error == 0)
+				error = computed_ascii("deg", out);
+		} else if (error == 0)
+			error = computed_number(filter->amount, out);
+		if (error == 0)
+			error = computed_ascii(")", out);
+	}
+	return error;
+}
+
 /* Serializes the text shadow as its color and its offsets and blur in pixels, or none. */
 static int
 computed_text_shadow(
@@ -2392,7 +2892,7 @@ computed_pixels(
 	int error;
 
 	/* The number and the unit. */
-	error = computed_number(value, out);
+	error = computed_number(value / (double)computed_zoom, out);
 	if (error != 0)
 		return error;
 	error = computed_ascii("px", out);

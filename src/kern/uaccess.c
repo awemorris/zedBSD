@@ -308,7 +308,7 @@ copyin_pinned(
 
 		/* Reads through the backing that pinned the page. */
 		if (page->kind == VMSPACE_PINNED_PRIVATE) {
-			kern_memcpy(bytes, (const uint8_t *)hal_pmem_to_kernel(page->memory.paddr) +
+			kern_memcpy_ram(bytes, (const uint8_t *)hal_pmem_to_kernel(page->memory.paddr) +
 			    page_offset, chunk);
 			error = 0;
 		} else if (page->kind == VMSPACE_PINNED_DEVICE) {
@@ -380,7 +380,7 @@ copyout_pinned(
 
 		/* Writes through the backing that pinned the page. */
 		if (page->kind == VMSPACE_PINNED_PRIVATE) {
-			kern_memcpy((uint8_t *)hal_pmem_to_kernel(page->memory.paddr) + page_offset,
+			kern_memcpy_ram((uint8_t *)hal_pmem_to_kernel(page->memory.paddr) + page_offset,
 			    bytes, chunk);
 
 			/*

@@ -8,13 +8,16 @@
 /*
  * The executor's buffers, images, image views and samplers.
  *
- * An image is 2D, of one level, one layer and one sample, in one of the
- * four-byte colour formats, laid out pitch linear: its rows are the width
- * times four bytes rounded up to NVRTX_VK_PITCH_ALIGN, and it is pitch
- * times height bytes.  The same layout serves the display, the texture
- * header and the colour target, so an image is never converted.  Anything
- * else is refused by name (VK_ERROR_FEATURE_NOT_PRESENT) rather than laid
- * out wrongly.
+ * An image is 2D, of one layer and one sample.  A colour image of one
+ * level is laid out pitch linear (its rows the width times four bytes
+ * rounded up to NVRTX_VK_PITCH_ALIGN), except an optimal-tiling one drawn
+ * to as a colour attachment, which is block linear like the levels of a
+ * mipmapped image: the 3D engine draws with a depth target only into a
+ * block-linear colour target, so such an image needs no shadow.  A
+ * vkCreateImage may name the layout itself (GPU_OP_RECORD_IMAGE_LAYOUT,
+ * linear rows or NVIDIA's block linear in one-GOB blocks), as a shared
+ * image's importer does.  Anything else is refused by name
+ * (VK_ERROR_FEATURE_NOT_PRESENT) rather than laid out wrongly.
  */
 
 #include <stdbool.h>
@@ -26,6 +29,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 #include <uapi/gpu-op.h>
+#include <uapi/gpu.h>
 
 #include "drivers/gpu/nvrtx/nvrtx-gsp.h"
 #include "drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h"
@@ -33,10 +37,30 @@
 
 #include "drivers/gpu/i915/vk/vk-codec.inc"
 
+/*
+ * The records a vkCreateImage chains at most: the external-memory
+ * declaration and zedBSD's layout record.
+ */
+#define RESOURCE_CHAIN_MAX		2U
+
+/*
+ * The layout a vkCreateImage named with zedBSD's record
+ * (GPU_OP_RECORD_IMAGE_LAYOUT), if it chained one: present, the layout
+ * (GPU_IMAGE_*) and its parameter.
+ */
+struct resource_layout_record {
+	bool present;
+	uint32_t tiling;
+	uint32_t parameter;
+};
+
 static int resource_create_buffer(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int resource_create_image(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int resource_image_decode(struct i915_wire_reader *reader, struct i915_wire_arena *arena, VkImageCreateInfo *info, struct resource_layout_record *record);
+static int resource_image_chain(struct i915_wire_reader *reader, struct resource_layout_record *record, uint32_t depth);
 static int resource_image_supported(const VkImageCreateInfo *info);
-static void resource_image_layout(struct nvrtx_vk_image *image);
+static int resource_image_block_linear(const VkImageCreateInfo *info, const struct resource_layout_record *record, bool *block_linear);
+static void resource_image_layout(struct nvrtx_vk_image *image, bool block_linear);
 static int resource_layout(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int resource_create_view(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static uint32_t resource_swizzle(VkComponentSwizzle swizzle, uint32_t identity);
@@ -202,17 +226,22 @@ resource_create_image(
 	struct i915_wire_writer *reply)
 {
 	VkImageCreateInfo info;
+	struct resource_layout_record record;
 	struct nvrtx_vk_image *image;
 	uint64_t identity;
 	bool video;
+	bool block_linear;
 	int supported;
 	int error;
 
-	/* The create info behind the device and its presence word. */
+	/* The create info behind the device and its presence word, with the layout it may name. */
 	kern_memset(&info, 0, sizeof(info));
+	kern_memset(&record, 0, sizeof(record));
 	(void)drv_i915_wire_read_u64(reader);
 	(void)drv_i915_wire_read_u64(reader);
-	i915_vkc_dec_VkImageCreateInfo(reader, &session->arena, &info);
+	error = resource_image_decode(reader, &session->arena, &info, &record);
+	if (error != 0)
+		return error;
 	identity = nvrtx_vk_create_tail(reader);
 	if (reader->error != 0)
 		return EINVAL;
@@ -240,6 +269,19 @@ resource_create_image(
 		error = ENOTSUP;
 	}
 
+	/* The layout: the one the record names, else block linear for an optimal colour attachment. */
+	block_linear = false;
+	if (error == 0) {
+		error = resource_image_block_linear(&info, &record, &block_linear);
+		if (error != 0) {
+			kern_logf("nvrtx: vk: vkCreateImage refused: layout %08x parameter %08x for format %u levels %u\n",
+				  record.tiling,
+				  record.parameter,
+				  (unsigned)info.format,
+				  info.mipLevels);
+		}
+	}
+
 	/* Lays the image out. */
 	image = NULL;
 	if (error == 0) {
@@ -250,7 +292,7 @@ resource_create_image(
 			image->height = info.extent.height;
 			image->usage = info.usage;
 			image->levels = info.mipLevels;
-			resource_image_layout(image);
+			resource_image_layout(image, block_linear);
 		}
 	}
 
@@ -262,11 +304,170 @@ resource_create_image(
 }
 
 /*
+ * Reads a vkCreateImage's VkImageCreateInfo as the shared decoder does,
+ * but with its chain read record by record: the external-memory
+ * declaration is skipped and zedBSD's layout record kept.  EINVAL for a
+ * chain of another record or longer than the two.
+ */
+static int
+resource_image_decode(
+	struct i915_wire_reader *reader,
+	struct i915_wire_arena *arena,
+	VkImageCreateInfo *info,
+	struct resource_layout_record *record)
+{
+	uint64_t count;
+	uint64_t index;
+	uint32_t family;
+	uint32_t *families;
+	int error;
+
+	/* The structure type, then the chain. */
+	info->sType = (VkStructureType)drv_i915_wire_read_u32(reader);
+	error = resource_image_chain(reader, record, 0U);
+	if (error != 0)
+		return error;
+
+	/* The fields, in the order of VkImageCreateInfo. */
+	info->flags = drv_i915_wire_read_u32(reader);
+	info->imageType = (VkImageType)drv_i915_wire_read_u32(reader);
+	info->format = (VkFormat)drv_i915_wire_read_u32(reader);
+	i915_vkc_dec_VkExtent3D(reader, arena, &info->extent);
+	info->mipLevels = drv_i915_wire_read_u32(reader);
+	info->arrayLayers = drv_i915_wire_read_u32(reader);
+	info->samples = (VkSampleCountFlagBits)drv_i915_wire_read_u32(reader);
+	info->tiling = (VkImageTiling)drv_i915_wire_read_u32(reader);
+	info->usage = drv_i915_wire_read_u32(reader);
+	info->sharingMode = (VkSharingMode)drv_i915_wire_read_u32(reader);
+	info->queueFamilyIndexCount = drv_i915_wire_read_u32(reader);
+
+	/* The queue families, counted, into the session's arena. */
+	count = drv_i915_wire_read_u64(reader);
+	info->pQueueFamilyIndices = NULL;
+	if (count != 0U) {
+		families = i915_vkc_array(reader, arena, count, 4U);
+		for (index = 0U; families != NULL && index < count && reader->error == 0; index++) {
+			family = drv_i915_wire_read_u32(reader);
+			families[index] = family;
+		}
+		info->pQueueFamilyIndices = families;
+	}
+	info->initialLayout = (VkImageLayout)drv_i915_wire_read_u32(reader);
+
+	/* A short or malformed stream. */
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* Succeeded: the create info and the layout it names, if any. */
+	return 0;
+}
+
+/*
+ * Reads one record of a vkCreateImage's chain and the records after it:
+ * [u64 present], then [u32 sType], the next record, and the record's own
+ * fields.  The external-memory declaration ([u32 handle types]) is
+ * skipped, zedBSD's layout record ([u32 tiling][u32 parameter]) kept.
+ * EINVAL for another record, a second layout record or a chain longer
+ * than RESOURCE_CHAIN_MAX.
+ */
+static int
+resource_image_chain(
+	struct i915_wire_reader *reader,
+	struct resource_layout_record *record,
+	uint32_t depth)
+{
+	uint64_t present;
+	uint32_t type;
+	int error;
+
+	/* The end of the chain. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present == 0U)
+		return 0;
+	if (depth >= RESOURCE_CHAIN_MAX)
+		return EINVAL;
+
+	/* The record's type, then the records chained after it. */
+	type = drv_i915_wire_read_u32(reader);
+	error = resource_image_chain(reader, record, depth + 1U);
+	if (error != 0)
+		return error;
+
+	/* The external-memory declaration says nothing the layout needs. */
+	if (type == VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO) {
+		(void)drv_i915_wire_read_u32(reader);
+		return 0;
+	}
+
+	/* Any other record but one layout record is not this executor's. */
+	if (type != GPU_OP_RECORD_IMAGE_LAYOUT || record->present)
+		return EINVAL;
+
+	/* Succeeded: the layout the image is asked to have. */
+	record->tiling = drv_i915_wire_read_u32(reader);
+	record->parameter = drv_i915_wire_read_u32(reader);
+	record->present = true;
+	return 0;
+}
+
+/*
+ * Decides whether an image is laid out block linear: as its layout record
+ * says (linear rows, or NVIDIA's block linear in one-GOB blocks of the
+ * ordinary kind, for a colour image of optimal tiling), else for a colour
+ * image of one level and optimal tiling drawn to as a colour attachment
+ * (an image of more levels is tiled anyway).  ENOTSUP for a layout the
+ * executor does not make.
+ */
+static int
+resource_image_block_linear(
+	const VkImageCreateInfo *info,
+	const struct resource_layout_record *record,
+	bool *block_linear)
+{
+	bool colour;
+
+	/* Without a record the executor chooses. */
+	*block_linear = false;
+	colour = nvrtx_vk_format_colour(info->format);
+	if (!record->present) {
+		if (colour &&
+		    info->tiling == VK_IMAGE_TILING_OPTIMAL &&
+		    info->mipLevels == 1U &&
+		    (info->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0U)
+			*block_linear = true;
+		return 0;
+	}
+
+	/* A named layout is a colour image's, of optimal tiling. */
+	if (!colour || info->tiling != VK_IMAGE_TILING_OPTIMAL)
+		return ENOTSUP;
+
+	/* Linear rows: one level, as the display and the importers read them. */
+	if (record->tiling == GPU_IMAGE_LINEAR && record->parameter == 0U) {
+		/* Mipmapped levels are tiled; only one level can be linear rows. */
+		if (info->mipLevels != 1U)
+			return ENOTSUP;
+
+		/* Succeeded: linear rows, as asked. */
+		return 0;
+	}
+
+	/* Block linear in one-GOB blocks of the ordinary kind, the one variant the executor makes. */
+	if (record->tiling != GPU_IMAGE_NV_BLOCK_LINEAR || record->parameter != 0U)
+		return ENOTSUP;
+
+	/* Succeeded: block linear, as asked. */
+	*block_linear = true;
+	return 0;
+}
+
+/*
  * Lays an image out.  A colour image of one level is pitch linear, its rows
- * of its width's pixels on the pitch boundary.  A colour image of more
- * levels is tiled: each level block linear in one-GOB blocks (its rows a
- * whole number of GOBs wide, its height a whole number of GOBs) right after
- * the one before.  A depth image is block linear in one-GOB blocks.
+ * of its width's pixels on the pitch boundary, unless block_linear asks
+ * for it to be tiled.  A tiled colour image (of more levels, or of one so
+ * asked) has each level block linear in one-GOB blocks (its rows a whole
+ * number of GOBs wide, its height a whole number of GOBs) right after the
+ * one before.  A depth image is block linear in one-GOB blocks.
  *
  * Procedure referenced: Mesa 25.0.7 src/nouveau/nil/image.rs (Image::new,
  * the levels of a tiled image one after another, each a whole number of
@@ -274,7 +475,8 @@ resource_create_image(
  */
 static void
 resource_image_layout(
-	struct nvrtx_vk_image *image)
+	struct nvrtx_vk_image *image,
+	bool block_linear)
 {
 	struct nvrtx_video_layout video;
 	uint64_t at;
@@ -313,8 +515,8 @@ resource_image_layout(
 		return;
 	}
 
-	/* A colour image of one level: pitch linear. */
-	if (image->levels == 1U) {
+	/* A colour image of one level not asked to be block linear: pitch linear. */
+	if (image->levels == 1U && !block_linear) {
 		row = image->width * NVRTX_VK_PIXEL_BYTES;
 		image->pitch = (row + NVRTX_VK_PITCH_ALIGN - 1U) & ~(NVRTX_VK_PITCH_ALIGN - 1U);
 		image->bytes = (uint64_t)image->pitch * image->height;
@@ -323,7 +525,7 @@ resource_image_layout(
 		return;
 	}
 
-	/* A tiled image: each level halved from the one before, one pixel at least, in whole GOBs. */
+	/* A tiled image (of one level, or more): each level halved from the one before, one pixel at least, in whole GOBs. */
 	image->tiled = true;
 	at = 0U;
 	width = image->width;
@@ -473,8 +675,11 @@ resource_image_supported(
 /*
  * vkGetImageSubresourceLayout: [device][image][present]
  * [VkImageSubresource][present] -> [present][VkSubresourceLayout].  The one
- * subresource starts at 0 with the image's pitch; an unknown image or
- * subresource reports an empty layout.
+ * subresource of a colour image of one level starts at 0 with the image's
+ * pitch (a block-linear one's too: zedBSD's shared images name its rows of
+ * GOBs so, though Vulkan defines the layout of linear images only); a
+ * mipmapped, depth, video or unknown image or another subresource reports
+ * an empty layout.
  */
 static int
 resource_layout(
@@ -505,18 +710,24 @@ resource_layout(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Level 0 of layer 0 of a pitch-linear image: where it starts, its rows pitch bytes apart. */
+	/*
+	 * Level 0 of layer 0 of a colour image of one level: where it starts,
+	 * its rows pitch bytes apart (rows of GOBs for a block-linear one, as
+	 * its shared description names them), and its bytes.
+	 */
 	kern_memset(&layout, 0, sizeof(layout));
 	image = nvrtx_vk_payload(session, I915_VK_OBJ_IMAGE, identity);
 	if (image != NULL &&
 	    !image->depth &&
-	    !image->tiled &&
 	    !image->video &&
+	    (!image->tiled || image->levels == 1U) &&
 	    subresource.mipLevel == 0U &&
 	    subresource.arrayLayer == 0U) {
 		nvrtx_vk_image_level(image, subresource.mipLevel, &offset, &width, &height, &pitch);
 		layout.offset = offset;
 		layout.size = (uint64_t)pitch * height;
+		if (image->tiled)
+			layout.size = image->bytes;
 		layout.rowPitch = pitch;
 		layout.arrayPitch = image->bytes;
 		layout.depthPitch = layout.size;

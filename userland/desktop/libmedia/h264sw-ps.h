@@ -22,7 +22,7 @@
 #define LIBMEDIA_H264SW_PS_H
 
 #include "h264sw.h"
-#include "h264sw-bits.h"
+#include "vcodec-bitreader.h"
 
 /*
  * The profile_idc values the decoder knows (A.2, 7.4.2.1.1).
@@ -222,7 +222,7 @@ struct h264sw_pps {
  * sps_generation[id] is incremented each time the SPS of that id is
  * replaced by one with different content, so the decoder can tell, when
  * an IDR picture starts, whether the sequence changed (7.4.1.2.1).
- * Owned by the decoder, embedded in it (about 50 KiB).
+ * Owned by the decoder, embedded in it (about 126 KiB).
  */
 struct h264sw_ps_store {
 	int sps_present[H264SW_SPS_IDS];
@@ -261,7 +261,7 @@ void h264sw_ps_init(struct h264sw_ps_store *store);
  * lossless, a size above the limits).  An SPS for an unsupported
  * profile_idc is refused before its profile-specific fields are read.
  */
-int h264sw_ps_read_sps(struct h264sw_ps_store *store, struct h264sw_bits *bits);
+int h264sw_ps_read_sps(struct h264sw_ps_store *store, struct vcodec_bitreader *bits);
 
 /*
  * Reads a picture parameter set RBSP and keeps it in store (7.3.2.2).
@@ -281,7 +281,7 @@ int h264sw_ps_read_sps(struct h264sw_ps_store *store, struct h264sw_bits *bits);
  * groups, the Baseline profile's FMO).  A failed read leaves the store as
  * it was.
  */
-int h264sw_ps_read_pps(struct h264sw_ps_store *store, struct h264sw_bits *bits);
+int h264sw_ps_read_pps(struct h264sw_ps_store *store, struct vcodec_bitreader *bits);
 
 /*
  * Resolves the scaling lists a picture uses from its SPS and PPS (7.4.2.1.1, 7.4.2.2, Table 7-2).

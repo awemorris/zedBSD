@@ -17,12 +17,14 @@
 
 static layout_unit block_resolve(const struct css_length *length, layout_unit containing_width);
 static void block_width(struct layout_box *box, layout_unit containing_width);
+static void block_fieldset_legend(struct layout_box *box);
 static int block_children(struct layout_tree *tree, struct layout_box *box);
 static layout_unit block_collapse(layout_unit first, layout_unit second);
 static layout_unit block_outer_height(const struct layout_box *box);
 static int block_owns_context(const struct layout_box *box);
 static int block_content(struct layout_tree *tree, struct layout_box *box);
 static int block_intrinsic(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
+static int block_min_intrinsic(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 static int block_is_button(const struct layout_box *box);
 static int block_is_intrinsic(const struct css_length *length);
 
@@ -69,6 +71,12 @@ layout_block(
 	intrinsic = block_is_intrinsic(&box->style.width);
 	if (intrinsic && !box->replaced) {
 		error = block_intrinsic(tree, box, containing_width);
+		return error;
+	}
+
+	/* A min-width of max-content, min-content or fit-content is the content's width, measured first. */
+	if (!intrinsic && !box->replaced && block_is_intrinsic(&box->style.min_width)) {
+		error = block_min_intrinsic(tree, box, containing_width);
 		return error;
 	}
 
@@ -165,7 +173,7 @@ layout_block(
 		tree->containing_height_definite = saved_height_definite;
 	} else {
 		tree->containing_height = specified_height;
-		tree->containing_height_definite = height_definite;
+		tree->containing_height_definite = height_definite && !box->height_indefinite;
 	}
 
 	/* Descendants see a resolved percentage as pixels, or an indefinite percentage as auto. */
@@ -212,10 +220,23 @@ layout_block(
 	if (error != 0)
 		return error;
 
+	/* A fieldset's first legend sits in its top border: it replaces the border's height instead of adding to the padding box's. */
+	block_fieldset_legend(box);
+
+	/* Size containment lays the box out as if it had no content. */
+	if ((layout_containment(box) & 1U) != 0 && !height_definite && !box->replaced)
+		box->height = 0;
+
 	/* An explicit height replaces the content's. */
 	content_height = box->height;
-	if (height_definite)
+	if (height_definite) {
 		box->height = specified_height;
+
+		/* A table's height is the least its rows and captions leave. */
+		if ((box->style.display == CSS_DISPLAY_TABLE || box->style.display == CSS_DISPLAY_INLINE_TABLE) &&
+		    content_height > specified_height)
+			box->height = content_height;
+	}
 
 	/* An aspect-ratio height is the least a box that shows its overflow has. */
 	if (ratio_floor && box->height < ratio_height)
@@ -250,6 +271,72 @@ layout_block(
 
 	/* Succeeded: the box has its size. */
 	return 0;
+}
+
+/*
+ * Puts a fieldset's rendered legend (its first child in the flow, a legend element) on its top border: the box
+ * is centered on the larger of the border's width and its own height, and what follows starts there too, so
+ * the legend takes the place of the border instead of lying under it.
+ */
+static void
+block_fieldset_legend(
+	struct layout_box *box)
+{
+	struct layout_box *legend;
+	struct layout_box *child;
+	const struct dom_element *element;
+	layout_unit height;
+	layout_unit border;
+	layout_unit shift;
+	layout_unit zone;
+	int after;
+
+	if (box->node == NULL || box->node->type != DOM_ELEMENT || box->children_inline)
+		return;
+	element = (const struct dom_element *)box->node;
+	if (element->ns != DOM_NS_HTML || element->tag != DOM_TAG_FIELDSET)
+		return;
+
+	/* The rendered legend: the first legend child, wherever it is among them. */
+	legend = NULL;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE || child->node == NULL || child->node->type != DOM_ELEMENT)
+			continue;
+		element = (const struct dom_element *)child->node;
+		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_LEGEND) {
+			legend = child;
+			break;
+		}
+	}
+	if (legend == NULL)
+		return;
+
+	/* The legend's margin box, against the border above. */
+	height = legend->margin[CSS_TOP] + legend->border[CSS_TOP] + legend->padding[CSS_TOP] + legend->height +
+	    legend->padding[CSS_BOTTOM] + legend->border[CSS_BOTTOM] + legend->margin[CSS_BOTTOM];
+	border = box->border[CSS_TOP];
+	shift = height < border ? height : border;
+	zone = height > border ? height : border;
+	if (zone <= 0)
+		return;
+
+	/* The legend is centered in the zone from the border box's top; the rest starts below the zone, instead of after the border. */
+	after = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child == legend) {
+			after = 1;
+			continue;
+		}
+		if (child->out_of_flow) {
+			child->static_y += zone - border - (after ? height : 0);
+			continue;
+		}
+		child->y += zone - border - (after ? height : 0);
+	}
+	legend->y = (zone - height) / 2 - border - box->padding[CSS_TOP];
+	box->height -= shift;
+	if (box->height < 0)
+		box->height = 0;
 }
 
 /*
@@ -302,8 +389,6 @@ block_intrinsic(
 	struct layout_box *box,
 	layout_unit containing_width)
 {
-	struct layout_context context;
-	struct wb_vector floats;
 	struct css_length width;
 	layout_unit most;
 	layout_unit least;
@@ -323,13 +408,7 @@ block_intrinsic(
 	/* The widest word, for min-content and fit-content: the content laid out as narrow as it goes. */
 	least = most;
 	if (width.unit != CSS_UNIT_MAX_CONTENT) {
-		tree->measuring++;
-		layout_context_begin(tree, &context, &floats);
-		error = layout_block(tree, box, 0);
-		layout_context_end(tree, &context);
-		if (error == 0)
-			least = layout_content_width(box, 0);
-		tree->measuring--;
+		error = layout_min_content(tree, box, &least);
 		if (error != 0) {
 			box->style.width = width;
 			return error;
@@ -369,6 +448,69 @@ block_intrinsic(
 
 	/* Succeeded: the box has its intrinsic width. */
 	return 0;
+}
+
+/* Lays a box out with its intrinsic-keyword min-width replaced by the pixels the keyword stands for. */
+static int
+block_min_intrinsic(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	layout_unit containing_width)
+{
+	struct css_length minimum;
+	struct css_length width;
+	layout_unit most;
+	layout_unit least;
+	layout_unit room;
+	layout_unit used;
+	int error;
+
+	/* The content measured without the minimum. */
+	minimum = box->style.min_width;
+	width = box->style.width;
+	box->style.min_width.unit = CSS_UNIT_AUTO;
+	box->style.width.unit = CSS_UNIT_AUTO;
+	error = layout_max_content(tree, box, &most);
+	if (error != 0) {
+		box->style.min_width = minimum;
+		box->style.width = width;
+		return error;
+	}
+	least = most;
+	if (minimum.unit != CSS_UNIT_MAX_CONTENT) {
+		error = layout_min_content(tree, box, &least);
+		if (error != 0) {
+			box->style.min_width = minimum;
+			box->style.width = width;
+			return error;
+		}
+	}
+	box->style.width = width;
+
+	/* The width the keyword stands for. */
+	used = most;
+	if (minimum.unit == CSS_UNIT_MIN_CONTENT)
+		used = least;
+	layout_box_model(box, containing_width);
+	if (minimum.unit == CSS_UNIT_FIT_CONTENT) {
+		room = containing_width - box->margin[CSS_LEFT] - box->margin[CSS_RIGHT] - box->border[CSS_LEFT] - box->padding[CSS_LEFT] -
+		    box->padding[CSS_RIGHT] - box->border[CSS_RIGHT];
+		used = room;
+		if (used > most)
+			used = most;
+		if (used < least)
+			used = least;
+	}
+	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+		used += box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+
+	/* The layout with that minimum, the keyword put back after it. */
+	box->style.min_width.unit = CSS_UNIT_PX;
+	box->style.min_width.value = layout_to_px(used);
+	box->style.min_width.offset = 0;
+	error = layout_block(tree, box, containing_width);
+	box->style.min_width = minimum;
+	return error;
 }
 
 /* Tells whether a box is an HTML button's. */
@@ -543,6 +685,10 @@ block_owns_context(
 	if (box->out_of_flow)
 		return 1;
 
+	/* A box with layout or paint containment is the root of its own formatting context. */
+	if ((layout_containment(box) & 6U) != 0)
+		return 1;
+
 	/* A box that clips its overflow. */
 	clips = layout_clips(box);
 	if (clips)
@@ -699,6 +845,14 @@ block_children(
 		if (child->out_of_flow) {
 			child->static_x = 0;
 			child->static_y = cursor + pending;
+			child->static_x_from_right = 0;
+			child->static_x_area_width = 0;
+			child->static_y_area_height = 0;
+			child->static_x_align = CSS_ALIGN_AUTO;
+			child->static_y_align = CSS_ALIGN_AUTO;
+			child->static_x_align_from_right = 0;
+			child->static_x_safe = 0;
+			child->static_y_safe = 0;
 			if (first && collapse_top)
 				child->static_y = 0;
 			continue;

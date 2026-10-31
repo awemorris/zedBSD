@@ -124,6 +124,8 @@ enum bind_interface_index {
 	BIND_PERFORMANCE_MARK,
 	BIND_PERFORMANCE_OBSERVER,
 	BIND_PERFORMANCE_OBSERVER_ENTRY_LIST,
+	BIND_HTML_DIALOG_ELEMENT,
+	BIND_HTML_CANVAS_ELEMENT,
 	BIND_ERROR_EVENT,
 	BIND_INTERFACES
 };
@@ -373,6 +375,8 @@ extern const struct bind_interface bind_svg_text_path_element_interface;
 /* Scoped branded HTML reflected attributes (html-reflection.c). */
 extern const struct bind_interface bind_html_button_element_interface;
 extern const struct bind_interface bind_html_details_element_interface;
+extern const struct bind_interface bind_html_dialog_element_interface;
+extern const struct bind_interface bind_html_canvas_element_interface;
 extern const struct bind_interface bind_html_label_element_interface;
 extern const struct bind_interface bind_html_meta_element_interface;
 extern const struct bind_interface bind_html_link_element_interface;
@@ -503,6 +507,8 @@ int bind_cssom_sheets_item(struct vm_realm *realm, vm_value receiver, const vm_v
 int bind_cssom_rules_length(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 int bind_cssom_insert(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 int bind_cssom_delete(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
+int bind_cssom_rule_info(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
+int bind_cssom_rule_replace(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 
 /* Inline source association stays native before public CSSOM wrapper construction. */
 int bind_style_sheet_get(struct dom_element *element, struct bind_style_sheet **sheet);

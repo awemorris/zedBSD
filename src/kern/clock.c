@@ -18,6 +18,7 @@
 
 #include "kern/random.h"
 #include "kern/clock.h"
+#include "kern/cpuperf.h"
 #include "kern/atomic.h"
 #include "kern/cred.h"
 #include "kern/process-timer.h"
@@ -44,7 +45,7 @@ static const uint32_t tick_rate = HAL_TIMER_FREQUENCY;
 
 /*
  * The counter's value when CPU 0 last entered suspend-to-idle, and the
- * counts left over from the ticks it brought forward (ws052-p006).  Only
+ * counts left over from the ticks it brought forward.  Only
  * CPU 0's idle loop touches them, around hal_cpu_idle_suspend(); begun is
  * 1 between the two halves.
  */
@@ -124,7 +125,7 @@ kernel_timer_handler(
 
 /*
  * Notes the counter as CPU 0 enters suspend-to-idle, whose tick stops
- * until it returns (ws052-p006).  Only CPU 0 calls it, from its idle loop.
+ * until it returns.  Only CPU 0 calls it, from its idle loop.
  */
 void
 kern_clock_idle_suspend_begin(
@@ -148,7 +149,7 @@ kern_clock_idle_suspend_begin(
 /*
  * Brings kernel_ticks forward by the time CPU 0 spent in suspend-to-idle,
  * from the counter that kept running, carrying the counts short of a tick
- * to the next time (ws052-p006).  Only CPU 0 calls it, from its idle loop.
+ * to the next time.  Only CPU 0 calls it, from its idle loop.
  */
 void
 kern_clock_idle_suspend_end(
@@ -199,6 +200,9 @@ kernel_cpu_notify_handler(
 	/* Counts the notification for the delivery probe. */
 	if (cpu < HAL_CPU_MAX)
 		(void)atomic_raw_fetch_add_relaxed(&cpu_notify_count[cpu], 1U);
+
+	/* Applies the CPU performance work posted for this CPU, if any. */
+	kern_cpuperf_notify(cpu);
 
 	sched_cpu_notify(cpu);
 }
@@ -274,14 +278,16 @@ clock_milliseconds(
 	void *context)
 {
 	uint64_t ticks;
+	uint64_t milliseconds;
 
 	(void)context;
 
 	/* Scales the tick counter to milliseconds. */
 	ticks = clock_ticks();
+	milliseconds = kern_ticks_to_ms(ticks);
 
 	/* Reports the elapsed milliseconds. */
-	return kern_ticks_to_ms(ticks);
+	return milliseconds;
 }
 
 /*
@@ -294,8 +300,13 @@ uint64_t
 kern_ms_to_ticks(
 	uint64_t milliseconds)
 {
+	uint64_t ticks;
+
+	/* Rounds the time up to the ticks that cover it. */
+	ticks = scale_ceil(milliseconds, tick_rate, 1000U);
+
 	/* Reports the ticks that cover the time. */
-	return scale_ceil(milliseconds, tick_rate, 1000U);
+	return ticks;
 }
 
 /*
@@ -305,8 +316,13 @@ uint64_t
 kern_us_to_ticks(
 	uint64_t microseconds)
 {
+	uint64_t ticks;
+
+	/* Rounds the time up to the ticks that cover it. */
+	ticks = scale_ceil(microseconds, tick_rate, 1000000U);
+
 	/* Reports the ticks that cover the time. */
-	return scale_ceil(microseconds, tick_rate, 1000000U);
+	return ticks;
 }
 
 /*
@@ -316,8 +332,13 @@ uint64_t
 kern_ns_to_ticks(
 	uint64_t nanoseconds)
 {
+	uint64_t ticks;
+
+	/* Rounds the time up to the ticks that cover it. */
+	ticks = scale_ceil(nanoseconds, tick_rate, KERN_NSEC_PER_SEC);
+
 	/* Reports the ticks that cover the time. */
-	return scale_ceil(nanoseconds, tick_rate, KERN_NSEC_PER_SEC);
+	return ticks;
 }
 
 /*
@@ -327,8 +348,13 @@ uint64_t
 kern_ticks_to_ms(
 	uint64_t ticks)
 {
+	uint64_t milliseconds;
+
+	/* Rounds the ticks down to whole milliseconds. */
+	milliseconds = scale_floor(ticks, 1000U, tick_rate);
+
 	/* Reports no more time than the ticks have counted. */
-	return scale_floor(ticks, 1000U, tick_rate);
+	return milliseconds;
 }
 
 /*
@@ -338,8 +364,13 @@ uint64_t
 kern_ticks_to_us(
 	uint64_t ticks)
 {
+	uint64_t microseconds;
+
+	/* Rounds the ticks down to whole microseconds. */
+	microseconds = scale_floor(ticks, 1000000U, tick_rate);
+
 	/* Reports no more time than the ticks have counted. */
-	return scale_floor(ticks, 1000000U, tick_rate);
+	return microseconds;
 }
 
 /*
@@ -349,8 +380,13 @@ uint64_t
 kern_ticks_to_ns(
 	uint64_t ticks)
 {
+	uint64_t nanoseconds;
+
+	/* Rounds the ticks down to whole nanoseconds. */
+	nanoseconds = scale_floor(ticks, KERN_NSEC_PER_SEC, tick_rate);
+
 	/* Reports no more time than the ticks have counted. */
-	return scale_floor(ticks, KERN_NSEC_PER_SEC, tick_rate);
+	return nanoseconds;
 }
 
 /*
@@ -365,8 +401,13 @@ kern_ticks_to_rate(
 	uint64_t ticks,
 	uint64_t rate)
 {
+	uint64_t count;
+
+	/* Rounds the ticks down to whole counts at the other rate. */
+	count = scale_floor(ticks, rate, tick_rate);
+
 	/* Reports the whole counts the ticks have reached. */
-	return scale_floor(ticks, rate, tick_rate);
+	return count;
 }
 
 /*
@@ -807,6 +848,89 @@ clock_realtime(
 		*nanoseconds = now.tv_nsec;
 }
 
+/*
+ * Sleeps for at least min_us microseconds, yielding the CPU.
+ *
+ * The earliest return is computed once from the monotonic counter and a
+ * wake never extends it.  Until it is reached the thread sleeps on a
+ * private wait queue for the time that is left, and re-reads the counter
+ * when it wakes: a deadline counts from the last tick, so a wake may come
+ * up to a tick early.  The wake is at tick granularity
+ * (kern_clock_resolution_ns()) and may be later than max_us, which is
+ * advisory; callers re-check their condition after the sleep.  The wait
+ * queue's token is removed on return, so no timer state outlives the call.
+ */
+void
+kern_usleep_range(
+	unsigned min_us,
+	unsigned max_us)
+{
+	struct wait_queue queue;
+	struct spinlock lock;
+	unsigned long enabled;
+	uint64_t base;
+	uint64_t frequency;
+	uint64_t now;
+	uint64_t now_frequency;
+	uint64_t earliest;
+	uint64_t left_us;
+	uint64_t sequence;
+	uint64_t deadline;
+	bool counted;
+
+	/* The upper bound is advisory: the tick decides when the thread wakes. */
+	(void)max_us;
+
+	/* Reads the counter the earliest return is measured on; without one there is nothing to wait on. */
+	base = 0U;
+	frequency = 0U;
+	counted = kern_rtc_read_counter(&base, &frequency);
+	if (!counted)
+		return;
+	if (frequency == 0U)
+		return;
+
+	/* The counter value at which min_us has passed. */
+	earliest = base + ((uint64_t)min_us * frequency) / 1000000U;
+
+	/* Prepares the private wait queue the thread sleeps on. */
+	waitq_init(&queue, "usleep_range");
+	spin_init(&lock, LOCK_RANK_USYNC, "usleep_range");
+
+	/* Sleeps for what is left until the counter passes the earliest return. */
+	for (;;) {
+		/* A counter that fails or changes its rate ends the wait rather than spinning on it. */
+		now = 0U;
+		now_frequency = 0U;
+		counted = kern_rtc_read_counter(&now, &now_frequency);
+		if (!counted)
+			return;
+		if (now_frequency != frequency)
+			return;
+
+		/* Returns once min_us has passed. */
+		if ((int64_t)(now - earliest) >= 0)
+			return;
+
+		/* The time left, rounded up to a whole microsecond. */
+		left_us = scale_ceil(earliest - now, 1000000U, frequency);
+
+		/*
+		 * Sleeps for the time left.  The lock is taken with interrupts
+		 * disabled, as the locked sleep requires: the spinlock does not
+		 * hold off preemption, and a thread preempted between the lock
+		 * and the sleep may resume on another CPU, whose release traps.
+		 */
+		enabled = spin_lock_irqsave(&lock);
+
+		sequence = waitq_sequence(&queue);
+		deadline = sched_ticks() + kern_us_to_ticks(left_us);
+		(void)waitq_sleep(&queue, &lock, sequence, deadline, 0U);
+
+		spin_unlock_irqrestore(&lock, enabled);
+	}
+}
+
 /* Enters the realtime offset write side of the sequence lock. */
 static void
 realtime_write_begin(
@@ -828,59 +952,6 @@ realtime_write_end(
 	/* Marks the offset as stable again and releases the writer. */
 	(void)atomic_raw_fetch_add_relaxed(&realtime_sequence, 1U);
 	atomic_store_release(&realtime_writer, 0);
-}
-
-void
-kern_usleep_range(unsigned min_us, unsigned max_us)
-{
-	/*
-	 * Yielding sleep-range on the EXISTING periodic tick (no HAL change,
-	 * no high-resolution one-shot).  The minimum-wait deadline is computed ONCE
-	 * from the monotonic counter (earliest = base + min_us); a wake re-checks
-	 * that SAME deadline and never extends it.  Whenever the deadline is not yet
-	 * reached we register on a private wait queue with the NEXT scheduler tick as
-	 * its deadline and yield the CPU (waitq_sleep -> sched_sleep_locked), so
-	 * another thread on this CPU runs; on wake we re-read the monotonic counter
-	 * and only return once at least min_us has elapsed.  This is coarse: the
-	 * actual wake is at tick granularity (kern_clock_resolution_ns()) and may be LATER than [min,max_us]
-	 * -- callers (PCODE re-request, register slow polls) MUST re-check their
-	 * condition after the sleep, which they do.  waitq_sleep removes the wait
-	 * token on return, so no timer state outlives this frame.
-	 */
-	uint64_t base = 0, freq = 0, now = 0, nfreq = 0, earliest;
-	struct wait_queue wq;
-	struct spinlock lk;
-	unsigned long enabled;
-
-	(void)max_us;   /* upper bound is advisory; the tick coarsens the wake */
-	if (!kern_rtc_read_counter(&base, &freq) || freq == 0u)
-		return;
-	earliest = base + ((uint64_t)min_us * freq) / 1000000u;
-
-	waitq_init(&wq, "usleep_range");
-	spin_init(&lk, LOCK_RANK_USYNC, "usleep_range");
-
-	for (;;) {
-		uint64_t seq;
-
-		if (!kern_rtc_read_counter(&now, &nfreq) || nfreq != freq)
-			return;   /* time-base fault: propagate (do not spin on a broken source) */
-		if ((int64_t)(now - earliest) >= 0)
-			return;   /* min_us has elapsed */
-
-		/*
-		 * Not yet elapsed: wait for the next tick via the existing wait
-		 * queue.  The lock is taken with interrupts disabled, as the
-		 * locked sleep requires: the spinlock does not hold off
-		 * preemption, and a thread preempted between the lock and the
-		 * sleep may resume on another CPU, whose release traps.
-		 */
-		enabled = spin_lock_irqsave(&lk);
-		seq = waitq_sequence(&wq);
-		(void)waitq_sleep(&wq, &lk, seq, sched_ticks() + 1u, 0u);
-		spin_unlock_irqrestore(&lk, enabled);
-		/* woken (tick expiry or early): the loop re-checks the SAME earliest. */
-	}
 }
 
 /*

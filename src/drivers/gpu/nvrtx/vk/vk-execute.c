@@ -96,6 +96,17 @@
 #define EXECUTE_RECORD_ROOM		32768U
 
 /*
+ * The application draws after which a push buffer is put on the GPU: the
+ * first of a command buffer's run after a few, so the GPU (idle when a
+ * frame is submitted) starts while the CPU writes the rest, the others
+ * after more.  A draw is written in about half the time the GPU takes to
+ * run it, so push buffers this short keep the GPU fed (a long one left
+ * it waiting for the CPU to finish it).
+ */
+#define EXECUTE_FIRST_DRAWS		256U
+#define EXECUTE_RUN_DRAWS		2048U
+
+/*
  * A texture handle: the header's index, and the sampler's from bit 20.
  *
  * Value referenced: Mesa 25.3.6 src/nouveau/vulkan/nvk_descriptor_types.h
@@ -135,6 +146,13 @@
  */
 #define EXECUTE_BUFFER_START_ALIGN	256U
 #define EXECUTE_BUFFER_PITCH_ALIGN	128U
+
+/*
+ * The bytes a GOB keeps together, four pixels of a row (the 16-byte
+ * pieces of execute_gob_offset()).
+ */
+#define EXECUTE_GOB_PIECE_BYTES		16U
+#define EXECUTE_GOB_PIECE_PIXELS	(EXECUTE_GOB_PIECE_BYTES / NVRTX_VK_PIXEL_BYTES)
 
 /*
  * A buffer read as a texture: the texture header holds the address from
@@ -275,7 +293,9 @@ struct execute_held {
  * the last application draw.  at is
  * where the push buffer goes on, constants, headers and samplers how much
  * of their parts the push buffer uses, draws and quads how many
- * application draws and own quads it holds (for the node's counts).  The
+ * application draws and own quads it holds (for the node's counts); early
+ * says the push buffer is a command buffer's first, put on the GPU after
+ * EXECUTE_FIRST_DRAWS draws (the others after EXECUTE_RUN_DRAWS).  The
  * programs are compiled once, into a run of their own.
  */
 struct nvrtx_vk_execute {
@@ -290,6 +310,7 @@ struct nvrtx_vk_execute {
 	uint32_t draws;
 	uint32_t quads;
 	bool started;
+	bool early;
 	bool class_ready;
 	void *program_token;
 	uint8_t *program_cpu;
@@ -455,7 +476,8 @@ nvrtx_vk_execute(
 		error = execute_start(session, execute);
 	}
 
-	/* Each record in order, the push buffer put on the GPU when it fills. */
+	/* Each record in order, the push buffer put on the GPU when it fills (the first one early). */
+	execute->early = true;
 	for (index = 0U; index < command->record_count && error == 0; index++) {
 		error = execute_room(session, execute, state);
 		if (error != 0)
@@ -861,7 +883,8 @@ execute_drain(
 
 /*
  * Makes room for one record: runs the push buffer when the record could
- * pass its end or the run's other parts are nearly used.  The target is
+ * pass its end or the run's other parts are nearly used, or when it holds
+ * its share of draws (fewer for a command buffer's first).  The target is
  * written again in the next push buffer.
  */
 static int
@@ -881,13 +904,20 @@ execute_room(
 		full = true;
 	if (execute->headers + NVRTX_VK_REGIONS_MAX + NVRTX_VK_TEXTURES_MAX > EXECUTE_POOL_ENTRIES)
 		full = true;
+
+	/* The command buffer's first push buffer goes to the idle GPU after a few draws, the others after more. */
+	if (execute->early && execute->draws >= EXECUTE_FIRST_DRAWS)
+		full = true;
+	if (execute->draws >= EXECUTE_RUN_DRAWS)
+		full = true;
 	if (!full)
 		return 0;
 
-	/* Runs what there is. */
+	/* Runs what there is; the push buffers after it fill. */
 	error = execute_flush(session, execute);
 	if (error != 0)
 		return error;
+	execute->early = false;
 
 	/* Succeeded: the next push buffer has room; its target is written anew. */
 	state->target_written = false;
@@ -2558,11 +2588,14 @@ execute_cpu_copy(
 	uint32_t level_pitch;
 	uint32_t row_pixels;
 	uint32_t bytes;
+	uint32_t column;
+	uint32_t run;
 	uint32_t x;
 	uint32_t y;
 	int error;
 
 	/* The two views. */
+	run = 1U;
 	error = nvrtx_vk_buffer_cpu(session, buffer, &buffer_cpu);
 	if (error == 0)
 		error = nvrtx_vk_image_cpu(session, image, &image_cpu);
@@ -2578,16 +2611,22 @@ execute_cpu_copy(
 	for (y = 0U; y < region->imageExtent.height; y++) {
 		buffer_row = buffer_cpu + region->bufferOffset + (uint64_t)y * row_pixels * NVRTX_VK_PIXEL_BYTES;
 
-		/* A tiled image's pixels each where its GOB keeps it. */
+		/*
+		 * A tiled image's pixels where its GOB keeps them: the four pixels
+		 * of a 16-byte piece lie together, so a whole piece goes at once
+		 * and only the row's ragged ends a pixel at a time.
+		 */
 		if (image->tiled) {
-			for (x = 0U; x < region->imageExtent.width; x++) {
-				image_row = image_cpu + level_offset +
-				    execute_gob_offset(level_pitch, ((uint32_t)region->imageOffset.x + x) * NVRTX_VK_PIXEL_BYTES,
-						       (uint32_t)region->imageOffset.y + y);
+			for (x = 0U; x < region->imageExtent.width; x += run) {
+				column = ((uint32_t)region->imageOffset.x + x) * NVRTX_VK_PIXEL_BYTES;
+				run = 1U;
+				if ((column % EXECUTE_GOB_PIECE_BYTES) == 0U && region->imageExtent.width - x >= EXECUTE_GOB_PIECE_PIXELS)
+					run = EXECUTE_GOB_PIECE_PIXELS;
+				image_row = image_cpu + level_offset + execute_gob_offset(level_pitch, column, (uint32_t)region->imageOffset.y + y);
 				if (to_image) {
-					kern_memcpy(image_row, buffer_row + x * NVRTX_VK_PIXEL_BYTES, NVRTX_VK_PIXEL_BYTES);
+					kern_memcpy(image_row, buffer_row + x * NVRTX_VK_PIXEL_BYTES, run * NVRTX_VK_PIXEL_BYTES);
 				} else {
-					kern_memcpy(buffer_row + x * NVRTX_VK_PIXEL_BYTES, image_row, NVRTX_VK_PIXEL_BYTES);
+					kern_memcpy(buffer_row + x * NVRTX_VK_PIXEL_BYTES, image_row, run * NVRTX_VK_PIXEL_BYTES);
 				}
 			}
 			continue;

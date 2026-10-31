@@ -254,6 +254,7 @@ drv_rpi_sdio_host_reset(
 		return error;
 	}
 
+	/* Puts the controller's settings back after the reset. */
 	error = restore_locked(host);
 
 	mutex_unlock(&host->command_lock);
@@ -488,6 +489,8 @@ drv_rpi_sdio_host_card_irq_enable(
 		host->card_irq_armed = 0;
 		host->card_irq_pending = 0;
 	}
+
+	/* Writes the interrupt enables the card's wish now asks for. */
 	write_enables_locked(host);
 
 	spin_unlock_irqrestore(&host->irq_lock, enabled);
@@ -1170,6 +1173,8 @@ pause_us(
 		kern_usleep_range(us, us + 1U);
 		return;
 	}
+
+	/* Works out how many counts the pause takes, rounded up. */
 	ticks = ((uint64_t)us * frequency + 999999U) / 1000000U;
 
 	/* Watches the counter until the counts have passed. */

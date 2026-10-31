@@ -170,6 +170,8 @@ kern_random_read(
 	uint8_t *out;
 	uint64_t observed;
 	unsigned long irq;
+	uint64_t elapsed;
+	uint64_t reseed_interval;
 	size_t chunk;
 	int error;
 
@@ -194,9 +196,15 @@ kern_random_read(
 	}
 
 	/* Replaces the key from the pool now and then. */
-	if (random_is_seeded &&
-	    sched_ticks() - random_reseed_tick >= kern_ms_to_ticks(RANDOM_RESEED_MS))
-		reseed_locked();
+	if (random_is_seeded) {
+		/* Measures the ticks since the key was last replaced. */
+		elapsed = sched_ticks() - random_reseed_tick;
+		reseed_interval = kern_ms_to_ticks(RANDOM_RESEED_MS);
+
+		/* Replaces the key once the interval has passed. */
+		if (elapsed >= reseed_interval)
+			reseed_locked();
+	}
 
 	/* Makes the output a chunk at a time so other callers can interleave. */
 	while (length != 0) {

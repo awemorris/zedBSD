@@ -34,6 +34,9 @@
 #include "drivers/gpu/mali/mali-private.h"
 #include "drivers/gpu/mali/mali-regs.h"
 
+/* How long a poll sleeps before the next read, in milliseconds (a tick at least). */
+#define MALI_QUEUE_POLL_MS 1U
+
 /* The driver's ring buffer's size (64 KiB), and the two blocks after it: the input page, then the output page. */
 #define RING_BYTES		0x10000ULL
 #define RING_BLOCKS_BYTES	0x2000ULL
@@ -379,8 +382,8 @@ mali_queue_wait(
 		if (now >= deadline)
 			break;
 
-		/* One tick before the next read. */
-		sched_sleep(now + 1U);
+		/* A millisecond before the next read. */
+		sched_sleep(now + kern_ms_to_ticks(MALI_QUEUE_POLL_MS));
 	}
 
 	/* The value was not reached in time. */
@@ -581,8 +584,8 @@ wait_stream_started(
 		if (now >= deadline)
 			break;
 
-		/* One tick before the next read. */
-		sched_sleep(now + 1U);
+		/* A millisecond before the next read. */
+		sched_sleep(now + kern_ms_to_ticks(MALI_QUEUE_POLL_MS));
 	}
 
 	/* Succeeded in waiting, but the stream did not start. */

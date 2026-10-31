@@ -700,6 +700,8 @@ putc_locked(
 			newline_locked();
 			return;
 		}
+
+		/* Moves to the stop. */
 		cursor_move_locked(text_cursor_row, index);
 		return;
 	}
@@ -719,6 +721,8 @@ putc_locked(
 		newline_locked();
 		return;
 	}
+
+	/* Moves onto the next cell of the row. */
 	cursor_move_locked(text_cursor_row, text_cursor_column + 1U);
 }
 
@@ -907,13 +911,24 @@ text_test_owner(
 	unsigned height;
 	unsigned column;
 	uint64_t deadline;
+	uint64_t now;
+	uint64_t wait_ticks;
 
 	(void)argument;
 
-	/* The wait, whole even if the sleep comes back early. */
-	deadline = sched_ticks() + kern_ms_to_ticks((uint64_t)KERN_TEST_TEXT_SUSPEND_SECONDS * 1000U);
-	while (sched_ticks() < deadline)
+	/* Works out when the wait ends. */
+	now = sched_ticks();
+	wait_ticks = kern_ms_to_ticks((uint64_t)KERN_TEST_TEXT_SUSPEND_SECONDS * 1000U);
+	deadline = now + wait_ticks;
+
+	/* Waits, whole even if the sleep comes back early. */
+	for (;;) {
+		now = sched_ticks();
+		if (now >= deadline)
+			break;
+
 		sched_sleep(deadline);
+	}
 
 	/* Takes the screen: the console stops drawing, then the owner's image goes on. */
 	kern_logf("text: the test owner takes the screen\n");
@@ -932,9 +947,18 @@ text_test_owner(
 	}
 
 	/* Keeps the screen for the owner's time, a line going to the log meanwhile. */
-	deadline = sched_ticks() + kern_ms_to_ticks((uint64_t)TEXT_TEST_OWNER_SECONDS * 1000U);
-	while (sched_ticks() < deadline)
+	now = sched_ticks();
+	wait_ticks = kern_ms_to_ticks((uint64_t)TEXT_TEST_OWNER_SECONDS * 1000U);
+	deadline = now + wait_ticks;
+	for (;;) {
+		now = sched_ticks();
+		if (now >= deadline)
+			break;
+
 		sched_sleep(deadline);
+	}
+
+	/* Tells the log the owner is done. */
 	kern_logf("text: the test owner gives the screen back\n");
 
 	/* Gives the screen back: the console draws its grid again. */

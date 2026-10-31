@@ -264,12 +264,16 @@ h264sw_macroblock_parse(
 				mb->transform_8x8 = 1;
 			}
 		}
+
+		/* Records the resolved kind in the entry, where the contexts of the neighbours read it. */
 		mb->kind = (uint8_t)syntax->type.kind;
 
+		/* Reads the intra prediction modes of the macroblock. */
 		error = mb_pred_intra(ctx);
 		if (error != 0)
 			return error;
 	} else if (syntax->type.kind == H264SW_MB_I_16X16) {
+		/* Reads the chroma prediction mode; the luma mode is in mb_type. */
 		error = mb_pred_intra(ctx);
 		if (error != 0)
 			return error;
@@ -500,7 +504,7 @@ mb_stream_error(
 		return EINVAL;
 
 	/* CABAC keeps it in the arithmetic decoder. */
-	if (ctx->cabac_mode != 0 && ctx->cabac.error != 0)
+	if (ctx->cabac_mode != 0 && ctx->cabac.engine.error != 0)
 		return EINVAL;
 
 	/* Succeeded: no read failed. */
@@ -527,7 +531,7 @@ mb_read_mb_type(
 	}
 
 	/* Reads the CAVLC code number. */
-	code = h264sw_bits_ue(&ctx->bits);
+	code = vcodec_bitreader_ue(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -556,7 +560,7 @@ mb_read_sub_mb_type(
 	}
 
 	/* Reads the CAVLC code number. */
-	code = h264sw_bits_ue(&ctx->bits);
+	code = vcodec_bitreader_ue(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -601,7 +605,7 @@ mb_read_ref_idx(
 	}
 
 	/* Reads the CAVLC te(v) whose largest value is the last index. */
-	code = h264sw_bits_te(&ctx->bits, active - 1U);
+	code = vcodec_bitreader_te(&ctx->bits, active - 1U);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -638,7 +642,7 @@ mb_read_mvd(
 	}
 
 	/* Reads the CAVLC signed Exp-Golomb code. */
-	value = h264sw_bits_se(&ctx->bits);
+	value = vcodec_bitreader_se(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -670,7 +674,7 @@ mb_read_cbp(
 	}
 
 	/* Reads the CAVLC code number. */
-	code = h264sw_bits_ue(&ctx->bits);
+	code = vcodec_bitreader_ue(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -703,7 +707,7 @@ mb_read_qp_delta(
 	}
 
 	/* Reads the CAVLC signed Exp-Golomb code. */
-	value = h264sw_bits_se(&ctx->bits);
+	value = vcodec_bitreader_se(&ctx->bits);
 	if (ctx->bits.error != 0)
 		return EINVAL;
 
@@ -732,7 +736,7 @@ mb_read_transform_8x8(
 	}
 
 	/* Reads the CAVLC bit; a failed read gives 0 and sets the sticky error of the reader. */
-	flag = h264sw_bits_u1(&ctx->bits);
+	flag = vcodec_bitreader_u1(&ctx->bits);
 
 	/* Succeeded: the flag. */
 	return flag;
@@ -785,27 +789,28 @@ mb_parse_pcm(
 	unsigned index;
 	int error;
 
+	/* Takes the entry being written. */
 	mb = ctx->n.current;
 
 	/* Reads the samples with the CABAC engine, which finds the byte position itself and restarts afterwards. */
 	if (ctx->cabac_mode != 0) {
-		error = h264sw_cabac_pcm(&ctx->cabac, ctx->syntax.pcm, MB_PCM_BYTES);
+		error = vcodec_cabac_pcm(&ctx->cabac.engine, ctx->syntax.pcm, MB_PCM_BYTES);
 		if (error != 0)
 			return error;
 	} else {
 		/* Skips the pcm_alignment_zero_bit bits up to the byte boundary. */
 		skip_bits = (unsigned)(ctx->bits.position % 8U);
 		if (skip_bits != 0U)
-			h264sw_bits_skip(&ctx->bits, 8U - skip_bits);
+			vcodec_bitreader_skip(&ctx->bits, 8U - skip_bits);
 
 		/* Refuses a macroblock whose samples run past the end of the data. */
-		bits_left = h264sw_bits_left(&ctx->bits);
+		bits_left = vcodec_bitreader_left(&ctx->bits);
 		if (bits_left < (size_t)MB_PCM_BYTES * 8U)
 			return EINVAL;
 
 		/* Reads the 256 luma samples and the 2 * 64 chroma samples. */
 		for (index = 0; index < MB_PCM_BYTES; index++)
-			ctx->syntax.pcm[index] = (uint8_t)h264sw_bits_u(&ctx->bits, 8U);
+			ctx->syntax.pcm[index] = (uint8_t)vcodec_bitreader_u(&ctx->bits, 8U);
 	}
 
 	/* An I_PCM macroblock counts as fully coded for the contexts, has QPY 0 for the deblocking filter, and leaves QPY of the slice as it was. */
@@ -839,6 +844,7 @@ mb_pred_intra(
 	uint32_t code;
 	int error;
 
+	/* Takes the entry being written and the syntax being filled. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 
@@ -855,10 +861,12 @@ mb_pred_intra(
 		if (ctx->cabac_mode != 0) {
 			h264sw_cabac_intra_mode(ctx, &flag, &rem);
 		} else {
-			flag = h264sw_bits_u1(&ctx->bits);
+			flag = vcodec_bitreader_u1(&ctx->bits);
 			if (flag == 0U)
-				rem = h264sw_bits_u(&ctx->bits, 3U);
+				rem = vcodec_bitreader_u(&ctx->bits, 3U);
 		}
+
+		/* Records the flag and the remainder of the block's mode. */
 		syntax->prev_intra_flag[index] = (uint8_t)flag;
 		syntax->rem_intra_mode[index] = (uint8_t)rem;
 	}
@@ -867,13 +875,15 @@ mb_pred_intra(
 	if (ctx->cabac_mode != 0) {
 		chroma_mode = h264sw_cabac_chroma_mode(ctx);
 	} else {
-		code = h264sw_bits_ue(&ctx->bits);
+		code = vcodec_bitreader_ue(&ctx->bits);
 		if (ctx->bits.error != 0)
 			return EINVAL;
 		if (code > MB_CHROMA_PRED_MAX)
 			return EINVAL;
 		chroma_mode = code;
 	}
+
+	/* Records the chroma mode in the entry, where the contexts of the neighbours read it. */
 	mb->chroma_pred_mode = (uint8_t)chroma_mode;
 
 	/* Reports a read past the end of the data as an error. */
@@ -905,6 +915,7 @@ mb_pred_inter(
 	int mvd;
 	int error;
 
+	/* Takes the entry being written and the syntax being filled. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 
@@ -929,6 +940,7 @@ mb_pred_inter(
 			if (uses == 0)
 				continue;
 
+			/* Reads the index and records it where the next partition's context reads it. */
 			error = mb_read_ref_idx(ctx, list, x[part], y[part], &ref_idx);
 			if (error != 0)
 				return error;
@@ -945,6 +957,7 @@ mb_pred_inter(
 			if (uses == 0)
 				continue;
 
+			/* Reads both components of the difference and records their magnitudes for the contexts. */
 			for (component = 0; component < 2U; component++) {
 				error = mb_read_mvd(ctx, list, x[part], y[part], component, &mvd);
 				if (error != 0)
@@ -990,6 +1003,7 @@ mb_sub_pred(
 	int mvd;
 	int error;
 
+	/* Takes the entry being written, the syntax being filled and the slice type. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 	slice_type = ctx->header->slice_type;
@@ -1023,6 +1037,7 @@ mb_sub_pred(
 			if (uses == 0)
 				continue;
 
+			/* Finds the origin of the quadrant, which is also the origin of its reference index. */
 			base_x = 8U * (quadrant & 1U);
 			base_y = 8U * (quadrant >> 1);
 			ref_idx = 0;
@@ -1031,6 +1046,8 @@ mb_sub_pred(
 				if (error != 0)
 					return error;
 			}
+
+			/* Records the index where the next quadrant's context reads it. */
 			syntax->ref_idx[list][quadrant] = (int8_t)ref_idx;
 			mb_store_ref_idx(mb, list, base_x, base_y, 8U, 8U, ref_idx);
 		}
@@ -1044,6 +1061,7 @@ mb_sub_pred(
 			if (uses == 0)
 				continue;
 
+			/* Reads the differences of each partition of the sub-macroblock, found from the quadrant's origin. */
 			base_x = 8U * (quadrant & 1U);
 			base_y = 8U * (quadrant >> 1);
 			for (sub = 0; sub < syntax->sub[quadrant].parts; sub++) {
@@ -1110,6 +1128,7 @@ mb_residual_luma(
 	int intra16x16;
 	int error;
 
+	/* Takes the entry being written, the syntax being filled and the kind of the luma prediction. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 	intra16x16 = 0;
@@ -1180,6 +1199,7 @@ mb_residual_chroma(
 	unsigned blk;
 	int error;
 
+	/* Takes the syntax being filled. */
 	syntax = &ctx->syntax;
 
 	/* Reads the chroma DC block of Cb then Cr when any chroma is coded. */
@@ -1229,6 +1249,7 @@ mb_residual_block(
 	int nc;
 	int error;
 
+	/* Takes the entry being written. */
 	mb = ctx->n.current;
 
 	/* Reads the block with CABAC, then records its coded_block_flag in the bit of its category. */
@@ -1261,16 +1282,22 @@ mb_residual_block(
 		return 0;
 	}
 
-	/* Finds nC from the counts of the neighbouring blocks (9.2.1); the chroma DC has its own column, the Intra_16x16 DC block uses block 0's neighbours. */
+	/* Finds nC from the counts of the neighbouring blocks (9.2.1); the chroma DC has its own column. */
 	nc = H264SW_NC_CHROMA_DC;
+
+	/* The Intra_16x16 DC block uses block 0's neighbours. */
 	if (cat == H264SW_CAT_LUMA_DC) {
 		nc_block = 0;
 		nc = h264sw_cavlc_nc(ctx, nc_block);
 	}
+
+	/* A luma block of 4x4 levels uses the neighbours of its own block. */
 	if (cat == H264SW_CAT_LUMA_AC || cat == H264SW_CAT_LUMA_4X4) {
 		nc_block = blk;
 		nc = h264sw_cavlc_nc(ctx, nc_block);
 	}
+
+	/* A chroma AC block uses the neighbours of its own block in the chroma part of the count table. */
 	if (cat == H264SW_CAT_CHROMA_AC) {
 		nc_block = MB_TOTAL_CHROMA_AC + 4U * (component - 1U) + blk;
 		nc = h264sw_cavlc_nc(ctx, nc_block);
@@ -1306,6 +1333,7 @@ mb_slice_skip(
 	uint32_t run;
 	unsigned flag;
 
+	/* Takes the picture, and starts from a macroblock that is coded. */
 	picture = ctx->picture;
 	*skipped = 0;
 
@@ -1316,7 +1344,7 @@ mb_slice_skip(
 	/* CABAC sends one mb_skip_flag per macroblock. */
 	if (ctx->cabac_mode != 0) {
 		flag = h264sw_cabac_mb_skip(ctx);
-		if (ctx->cabac.error != 0)
+		if (ctx->cabac.engine.error != 0)
 			return EINVAL;
 		*skipped = (int)flag;
 
@@ -1326,7 +1354,7 @@ mb_slice_skip(
 
 	/* CAVLC reads mb_skip_run when no run is being counted and no coded macroblock is due; the run may not pass the last macroblock of the picture. */
 	if (ctx->skip_run < 0) {
-		run = h264sw_bits_ue(&ctx->bits);
+		run = vcodec_bitreader_ue(&ctx->bits);
 		if (ctx->bits.error != 0)
 			return EINVAL;
 		if (run > picture->size_mbs - ctx->mb_addr)
@@ -1361,7 +1389,7 @@ mb_slice_end(
 	/* CABAC sends end_of_slice_flag after every macroblock, skipped or not. */
 	if (ctx->cabac_mode != 0) {
 		end = h264sw_cabac_end_of_slice(ctx);
-		if (ctx->cabac.error != 0)
+		if (ctx->cabac.engine.error != 0)
 			return EINVAL;
 		*more_data = 1;
 		if (end != 0U)
@@ -1381,7 +1409,7 @@ mb_slice_end(
 		ctx->skip_run = -1;
 
 	/* Asks whether the RBSP has more data after the last skipped macroblock of a run or after a coded one. */
-	more = h264sw_bits_more_rbsp_data(&ctx->bits);
+	more = vcodec_bitreader_more_rbsp_data(&ctx->bits);
 	if (more == 0)
 		*more_data = 0;
 

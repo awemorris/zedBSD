@@ -11,9 +11,8 @@
  * The console is the text console over the loader's screen and the UART
  * the firmware's console uses: what it writes goes to both, and what the
  * UART receives, by its interrupt, is typed into it beside USB keyboards.
- * The board publishes one boot
- * device: the initial ramdisk the loader read, when there is one, and
- * otherwise the SD card.  The ramdisk holds a disk
+ * The board publishes one boot device: the initial ramdisk the loader read,
+ * when there is one, and otherwise the SD card.  The ramdisk holds a disk
  * image laid out like a Raspberry Pi 4's SD card, a FAT boot partition
  * first and the UFS root beside it, so the kernel's root search finds the
  * root as it does there.  An SD card booted without a ramdisk carries its
@@ -719,7 +718,18 @@ probe_soc(
 
 	/* Maps the system control blocks, which hold the PLL settings. */
 	error = drv_vf2_syscon_init(&fdt);
-	if (error != 0) {
+	if (error == ENODEV) {
+		/*
+		 * A tree without the blocks is not in the binding of Linux's
+		 * mainline device tree, which the board's drivers read: StarFive's
+		 * U-Boot hands over its own tree when bootefi is given
+		 * ${fdtcontroladdr}.  The EFI partition carries the mainline trees.
+		 */
+		kern_logf("visionfive2: system control blocks unavailable (%d)\n", error);
+		kern_logf("visionfive2: the device tree is not Linux's mainline binding; boot with the EFI partition's "
+			  "dtb/jh7110-starfive-visionfive-2-v1.3b.dtb (or -v1.2a.dtb) loaded to ${fdt_addr_r} and passed to bootefi\n");
+		return;
+	} else if (error != 0) {
 		kern_logf("visionfive2: system control blocks unavailable (%d)\n", error);
 		return;
 	}
@@ -1475,6 +1485,8 @@ start_console(
 	/* Gives the console the UART, when the tree named one. */
 	if (console_uart_present)
 		vf2_console_board.serial_write = console_uart_putc;
+
+	/* Lets a fatal stop take the display back to the loader's screen. */
 	vf2_console_board.reveal_fatal = reveal_fatal;
 
 	/* Maps the loader's screen; without one the console is the UART alone. */

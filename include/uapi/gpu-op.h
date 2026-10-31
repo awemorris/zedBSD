@@ -8,9 +8,10 @@
 /*
  * The zedBSD GPU command protocol, version 1: the numbers of
  * the Vulkan commands in the stream libvulkan submits to a GPU node
- * (GPU_COMMAND, GPU_COMMAND_SUBMIT in uapi/gpu.h), which the i915 Vulkan
- * executor and the bcm2711 (V3D) Vulkan executor read and a virtual
- * machine's host renders.
+ * (GPU_COMMAND, GPU_COMMAND_SUBMIT in uapi/gpu.h), which the native Vulkan
+ * executors read (the vk/ directories of the amdrdna, bcm2711, ghci,
+ * i915, mali, nvrtx and powervr drivers) and a virtual machine's host
+ * renders.
  *
  * The numbers of version 1 reuse those of the Venus protocol's wire
  * format 1 (virglrenderer 1.1.0) for the same Vulkan commands, so that a
@@ -49,7 +50,10 @@
  *
  * The entry "Sent by" names the libvulkan function that encodes the
  * command (and the public call that reaches it); "Decoded by" names the
- * dispatcher and the handler of each native executor.  The test client
+ * dispatcher and the handler of the i915 and bcm2711 executors, the first
+ * two; the other executors' are in their own vk/ directories and are not
+ * listed, and a file named here may since have been split or renamed
+ * (search the handler's name).  The test client
  * userland/tests/venus-frame/ also sends a subset of the commands
  * directly and is not listed.
  *
@@ -166,6 +170,19 @@
  */
 #define GPU_OP_RECORD_IMPORT_RESOURCE	1000384002U
 #define GPU_OP_RECORD_QUEUE_TIMELINE	1000384005U
+
+/*
+ * zedBSD's own record a vkCreateImage may chain, in place of a public
+ * extension: [u32 tiling][u32 parameter] (GPU_IMAGE_* and its layout
+ * parameter, uapi/gpu.h) asks for a VK_IMAGE_TILING_OPTIMAL image laid out
+ * so.  It travels as every chained record does ([u64 present][u32 sType]
+ * [the next record][its fields]), beside the external-memory declaration,
+ * and goes only to a context whose device reports GPU_CAP_IMAGE_LAYOUTS
+ * (another executor's decoder knows the external-memory declaration
+ * alone).  The value lies outside Khronos's structure-type ranges.  Read by
+ * nvrtx/vk/vk-resource.c: resource_create_image.
+ */
+#define GPU_OP_RECORD_IMAGE_LAYOUT	0x7a650001U
 
 /*
  * Each command of the protocol, in number order.  The entry of each

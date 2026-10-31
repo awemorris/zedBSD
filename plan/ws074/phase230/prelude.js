@@ -474,11 +474,11 @@
         super();
         hidden(this, '_e', entry);
       }
-      get url() { return urlOf(this._e); }
-      get key() { return this._e.key; }
-      get id() { return this._e.id; }
-      get index() { return entries.indexOf(this._e); }
-      get sameDocument() { return this._e.docId === docId; }
+      get url() { return active() ? urlOf(this._e) : ''; }
+      get key() { return active() ? this._e.key : ''; }
+      get id() { return active() ? this._e.id : ''; }
+      get index() { return active() ? entries.indexOf(this._e) : -1; }
+      get sameDocument() { return active() && this._e.docId === docId; }
       getState() { return deserialize(this._e.navState); }
     }
     handlerAttribute(NavigationHistoryEntry.prototype, 'dispose');
@@ -494,9 +494,9 @@
         hidden(this, '_d', d);
       }
       get url() { return this._d.url; }
-      get key() { return this._d.entry ? this._d.entry.key : ''; }
-      get id() { return this._d.entry ? this._d.entry.id : ''; }
-      get index() { return this._d.index; }
+      get key() { return this._d.entry && active() ? this._d.entry.key : ''; }
+      get id() { return this._d.entry && active() ? this._d.entry.id : ''; }
+      get index() { return active() ? this._d.index : -1; }
       get sameDocument() { return this._d.sameDocument; }
       getState() { return deserialize(this._d.navState); }
     }
@@ -591,6 +591,7 @@
     tag(NavigateEvent, 'NavigateEvent');
     function sharedChecks(event, method) {
       if (!event._n) throw domError('SecurityError', "Failed to execute '" + method + "' on 'NavigateEvent': The event was not fired by the browser.");
+      if (!active()) throw domError('InvalidStateError', "Failed to execute '" + method + "' on 'NavigateEvent': The document is not fully active.");
       if (event.defaultPrevented || event._n.canceled) throw domError('InvalidStateError', "Failed to execute '" + method + "' on 'NavigateEvent': The event was canceled.");
     }
 
@@ -642,11 +643,11 @@
       return '';
     }
     // The events the browser fires are trusted.  A browser error is the document's; a script error's script is not
-    // known, so the document as it was loaded stands for it.
+    // known, so the document as it was loaded stands for it, at line 1 column 1 (the engine keeps no position for an Error).
     function fire(target, event) { return native.fire(target, event); }
     function fireError(e) {
       var filename = browserErrors.has(e) || loadedURL === null ? docURL() : loadedURL;
-      fire(navigation, new ErrorEvent('navigateerror', { error: e, message: errorMessage(e), filename: filename, lineno: 0, colno: 0 }));
+      fire(navigation, new ErrorEvent('navigateerror', { error: e, message: errorMessage(e), filename: filename, lineno: 1, colno: 1 }));
     }
 
     // Aborts the navigate event under way (a new navigation, window.stop(), a canceled event).
@@ -1395,14 +1396,21 @@
           var p = href && picture(new URL(href, (document.baseURI || location.href)).href);
           if (p && shown(element)) image(candidates, element, p.src, p);
         }
-        var bg = /url\(\s*["']?([^"')]+)["']?\s*\)/.exec(s.backgroundImage || '');
+        var bgs = s.backgroundImage || '', bg = bgs.indexOf('url(', bgs.indexOf('url(') + 1) < 0 ? /^\s*url\(\s*(["']?)([\s\S]*)\1\s*\)\s*$/.exec(bgs) : /url\(\s*["']?([^"')]+)["']?\s*\)/.exec(bgs);
+        if (bg && bg.length === 3) bg = [bg[0], bg[2]];
         if (bg && element !== document.body && element !== document.documentElement) {
           var b = picture(new URL(bg[1], (document.baseURI || location.href)).href);
           if (b && shown(element)) image(candidates, element, b.src, b);
         }
         var before = getComputedStyle(element, '::before').content;
         if (before && before !== 'none' && before !== 'normal' && /^["']|attr\(/.test(before) && shown(element)) {
-          var rb = visible(element);
+          var rb = visible(element) || visible(holder(element));
+          if (rb) {
+            // The generated text's own width (about 0.55 em a character), not its block's.
+            var made = /^["']/.test(before) ? before.slice(1, -1) : (element.getAttribute(before.slice(5, -1)) || ''),
+              em = parseFloat(getComputedStyle(element, '::before').fontSize) || 16;
+            rb = [rb[0], rb[1], Math.min(rb[2], rb[0] + made.length * em * 0.55), rb[3]];
+          }
           if (rb && !texts.has(holder(element))) texts.set(holder(element), rb);
         }
       }
@@ -1562,6 +1570,7 @@
     }
     def(g, 'PromiseRejectionEvent', PromiseRejectionEvent);
   }
+// @include plan/ws074/phase260/cssom-rules.js
   // The CSSOM rule interfaces scripts test with instanceof (a rule is told by what it has, as the engine's rules have no class of their own).
   [['CSSRule', function (x) { return !!x && typeof x === 'object' && typeof x.cssText === 'string'; }],
    ['CSSStyleRule', function (x) { return !!x && typeof x.selectorText === 'string'; }],
@@ -1726,7 +1735,15 @@
         return;
       }
       t._ready.resolve(undefined);
-      requestAnimationFrame(function () { setTimeout(function () { finish(t); }, native.viewTransitionDuration()); });
+      requestAnimationFrame(function () {
+        // The transition ends when its animations have; one a script paused does not end.
+        var tick = function () {
+          if (t._phase === 'done') return;
+          if (typeof g.__vtPaused === 'function' && g.__vtPaused()) { setTimeout(tick, 100); return; }
+          finish(t);
+        };
+        setTimeout(tick, Math.max(native.viewTransitionDuration(), typeof g.__vtAnimations === 'function' ? g.__vtAnimations() : 0));
+      });
     }
     g.Document.prototype.startViewTransition = function startViewTransition(callbackOptions) {
       var t = new ViewTransition(VT), cb = callbackOptions, i, list;
@@ -1759,8 +1776,15 @@
         }
         setTimeout(function () {
           if (t._phase === 'done') return;
+          // The new state is made before the page's own frame callbacks (the update callback's) run: this one is asked for first.
+          var fired = false, waiting = false;
+          requestAnimationFrame(function () {
+            fired = true;
+            if (t._phase === 'done') return;
+            if (t._updateDone === 1) activate(t); else waiting = true;
+          });
           callUpdate(t);
-          then.call(t._done.promise, function () { requestAnimationFrame(function () { activate(t); }); }, function (e) { skip(t, e); });
+          then.call(t._done.promise, function () { if (fired && waiting) requestAnimationFrame(function () { activate(t); }); }, function (e) { skip(t, e); });
         }, 0);
       });
       return t;
@@ -1872,5 +1896,204 @@
     });
     def(g.Document.prototype, 'getAnimations', function getAnimations() { return Array.from(all).filter(function (a) { return a._state === 'running' || a._state === 'paused'; }); });
     def(g, 'Animation', Animation);
+// @include plan/ws074/phase260/animation-style.js
+  })();
+  // ---- document.fonts: load() and check() (the faces the page names are loaded or not by its stylesheets alone)
+  (function () {
+    var desc = typeof g.Document === 'function' ? Object.getOwnPropertyDescriptor(g.Document.prototype, 'fonts') : null;
+    if (!desc || !desc.get) return;
+    Object.defineProperty(g.Document.prototype, 'fonts', {
+      get: function () {
+        var set = desc.get.call(this);
+        if (set && typeof set.load !== 'function') {
+          def(set, 'load', function load() { return Promise.resolve([]); });
+          def(set, 'check', function check() { return true; });
+          hidden(set, 'status', 'loaded');
+        }
+        return set;
+      },
+      configurable: true, enumerable: true
+    });
+  })();
+  // ---- Range.getClientRects() and getBoundingClientRect(): the rectangles of the text nodes the range covers (whole nodes)
+  if (typeof g.Range === 'function' && typeof g.DOMRect === 'function' && !g.Range.prototype.getBoundingClientRect) (function () {
+    function rects(range) {
+      var out = [], start = range.startContainer, end = range.endContainer;
+      function add(node) {
+        var r = native.nodeRect(node);
+        if (r) out.push(new g.DOMRect(r[0], r[1], r[2], r[3]));
+      }
+      if (start === end && start.nodeType === 3) { add(start); return out; }
+      var walker = document.createTreeWalker(range.commonAncestorContainer, 4), node;
+      while ((node = walker.nextNode())) {
+        if (typeof range.intersectsNode !== 'function' || range.intersectsNode(node)) add(node);
+      }
+      return out;
+    }
+    def(g.Range.prototype, 'getClientRects', function getClientRects() { return rects(this); });
+    def(g.Range.prototype, 'getBoundingClientRect', function getBoundingClientRect() {
+      var list = rects(this), x0 = 0, y0 = 0, x1 = 0, y1 = 0, i;
+      for (i = 0; i < list.length; i++) {
+        if (i === 0) { x0 = list[i].left; y0 = list[i].top; x1 = list[i].right; y1 = list[i].bottom; continue; }
+        x0 = Math.min(x0, list[i].left); y0 = Math.min(y0, list[i].top);
+        x1 = Math.max(x1, list[i].right); y1 = Math.max(y1, list[i].bottom);
+      }
+      return new g.DOMRect(x0, y0, x1 - x0, y1 - y0);
+    });
+  })();
+  // ---- Popover: the popover attribute and showPopover(), hidePopover(), togglePopover() (the top layer is a high z-index)
+  if (typeof g.Element === 'function' && !g.Element.prototype.showPopover) (function () {
+    function kind(element) {
+      var v = element.getAttribute('popover');
+      if (v === null) return null;
+      v = v.toLowerCase();
+      if (v === '' || v === 'auto') return 'auto';
+      return v === 'hint' ? 'hint' : 'manual';
+    }
+    function open(element) { return element.matches(':popover-open'); }
+    function need(element) {
+      if (kind(element) === null) throw new DOMException('The element has no popover attribute.', 'NotSupportedError');
+    }
+    function change(element, to) {
+      var from = to === 'open' ? 'closed' : 'open', ev;
+      if (typeof g.ToggleEvent === 'function') ev = new g.ToggleEvent('beforetoggle', { oldState: from, newState: to, cancelable: to === 'open' });
+      else { ev = new Event('beforetoggle', { cancelable: to === 'open' }); ev.oldState = from; ev.newState = to; }
+      if (!element.dispatchEvent(ev) && to === 'open') return false;
+      native.setPopover(element, to === 'open');
+      Promise.resolve().then(function () {
+        var t;
+        if (typeof g.ToggleEvent === 'function') t = new g.ToggleEvent('toggle', { oldState: from, newState: to });
+        else { t = new Event('toggle'); t.oldState = from; t.newState = to; }
+        element.dispatchEvent(t);
+      });
+      return true;
+    }
+    Object.defineProperty(g.Element.prototype, 'popover', {
+      get: function () { return kind(this); },
+      set: function (v) { if (v === null) this.removeAttribute('popover'); else this.setAttribute('popover', String(v)); },
+      configurable: true, enumerable: true
+    });
+    def(g.Element.prototype, 'showPopover', function showPopover() {
+      need(this);
+      if (open(this)) return;
+      if (!this.isConnected) throw new DOMException('The element is not connected.', 'InvalidStateError');
+      if (kind(this) === 'auto') {
+        Array.from(document.querySelectorAll('[popover]:popover-open')).forEach(function (other) {
+          if (other !== this && kind(other) === 'auto' && !other.contains(this) && !this.contains(other)) change(other, 'closed');
+        }, this);
+      }
+      change(this, 'open');
+    });
+    def(g.Element.prototype, 'hidePopover', function hidePopover() {
+      need(this);
+      if (!open(this)) return;
+      change(this, 'closed');
+    });
+    def(g.Element.prototype, 'togglePopover', function togglePopover(force) {
+      need(this);
+      var want = force === undefined ? !open(this) : !!force;
+      if (want) this.showPopover(); else this.hidePopover();
+      return open(this);
+    });
+  })();
+  // ---- document.scrollingElement: the root element (this engine has no quirks-mode body scrolling)
+  if (typeof g.Document === 'function' && !('scrollingElement' in g.Document.prototype)) {
+    Object.defineProperty(g.Document.prototype, 'scrollingElement', {
+      get: function () { return this.documentElement; }, configurable: true, enumerable: true
+    });
+  }
+  // ---- Canvas: width and height reflect the attributes (300 by 150 when absent or not a number)
+  if (typeof g.HTMLCanvasElement === 'function') (function () {
+    var P = g.HTMLCanvasElement.prototype;
+    [['width', 300], ['height', 150]].forEach(function (d) {
+      var name = d[0], fallback = d[1];
+      Object.defineProperty(P, name, {
+        get: function () {
+          var v = parseInt(this.getAttribute(name), 10);
+          return isFinite(v) && v >= 0 && v <= 2147483647 ? v : fallback;
+        },
+        set: function (v) {
+          v = Math.trunc(Number(v));
+          this.setAttribute(name, String(isFinite(v) && v >= 0 && v <= 2147483647 ? v : fallback));
+        },
+        configurable: true, enumerable: true
+      });
+    });
+  })();
+  // ---- Dialog: open, returnValue, show(), showModal() and close() (a modal dialog is in the top layer: a high z-index, fixed)
+  if (typeof g.HTMLDialogElement === 'function') (function () {
+    var P = g.HTMLDialogElement.prototype;
+    function isOpen(d) { return d.hasAttribute('open'); }
+    function modal(d) { return d.__zedModal === true; }
+    Object.defineProperty(P, 'open', {
+      get: function () { return isOpen(this); },
+      set: function (v) { if (v) { if (!isOpen(this)) this.setAttribute('open', ''); } else if (isOpen(this)) this.close(); },
+      configurable: true, enumerable: true
+    });
+    Object.defineProperty(P, 'returnValue', {
+      get: function () { return this.__zedReturn === undefined ? '' : this.__zedReturn; },
+      set: function (v) { hidden(this, '__zedReturn', String(v)); },
+      configurable: true, enumerable: true
+    });
+    def(P, 'show', function show() {
+      if (isOpen(this)) {
+        if (modal(this)) throw new DOMException("Failed to execute 'show' on 'HTMLDialogElement': The dialog is already open as a modal dialog, and therefore cannot be opened as a non-modal dialog.", 'InvalidStateError');
+        return;
+      }
+      this.setAttribute('open', '');
+    });
+    def(P, 'showModal', function showModal() {
+      if (isOpen(this)) {
+        if (modal(this)) return;
+        throw new DOMException("Failed to execute 'showModal' on 'HTMLDialogElement': The dialog is already open as a non-modal dialog, and therefore cannot be opened as a modal dialog.", 'InvalidStateError');
+      }
+      if (!this.isConnected) throw new DOMException("Failed to execute 'showModal' on 'HTMLDialogElement': The element is not in a document.", 'InvalidStateError');
+      this.setAttribute('open', '');
+      hidden(this, '__zedModal', true);
+      native.setPopover(this, true);
+    });
+    def(P, 'close', function close(returnValue) {
+      var d = this;
+      if (!isOpen(d)) return;
+      if (returnValue !== undefined) hidden(d, '__zedReturn', String(returnValue));
+      d.removeAttribute('open');
+      if (modal(d)) { hidden(d, '__zedModal', false); native.setPopover(d, false); }
+      Promise.resolve().then(function () { d.dispatchEvent(new Event('close')); });
+    });
+  })();
+  // ---- Streams and WebAssembly.Memory as far as a page can tell them apart from plain data: objects that cannot be cloned
+  (function () {
+    function stream(name) {
+      var C = class { constructor() { } get locked() { return false; } };
+      Object.defineProperty(C, 'name', { value: name });
+      tag(C, name);
+      if (typeof g[name] === 'undefined') def(g, name, C);
+    }
+    stream('ReadableStream');
+    stream('WritableStream');
+    stream('TransformStream');
+    if (typeof g.WebAssembly === 'undefined') {
+      class SharedBuffer { constructor(length) { hidden(this, '_length', length); } get byteLength() { return this._length; } }
+      tag(SharedBuffer, 'SharedArrayBuffer');
+      class Memory {
+        constructor(descriptor) {
+          if (descriptor === null || typeof descriptor !== 'object') throw new TypeError("WebAssembly.Memory(): Argument 0 must be a memory descriptor");
+          if (descriptor.initial === undefined) throw new TypeError("WebAssembly.Memory(): Property 'initial' is required");
+          if (descriptor.shared && descriptor.maximum === undefined) throw new TypeError("WebAssembly.Memory(): If shared is true, maximum property should be defined.");
+          hidden(this, '_shared', !!descriptor.shared);
+          hidden(this, '_pages', Number(descriptor.initial));
+          hidden(this, '_buffer', null);
+        }
+        get buffer() {
+          if (!this._buffer) this._buffer = this._shared ? new SharedBuffer(this._pages * 65536) : new ArrayBuffer(this._pages * 65536);
+          return this._buffer;
+        }
+      }
+      tag(Memory, 'WebAssembly.Memory');
+      var wasm = {};
+      def(wasm, 'Memory', Memory);
+      tag({ prototype: wasm }, 'WebAssembly');
+      def(g, 'WebAssembly', wasm);
+    }
   })();
 })

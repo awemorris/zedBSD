@@ -33,6 +33,9 @@
 #define ENGINE_WAIT_STEP_US 10U
 #define ENGINE_WAIT_STEPS 10000U
 
+/* The longest sleep for an engine event before the caller looks again, in milliseconds. */
+#define ENGINE_EVENT_WAIT_MS 1U
+
 static int identify(struct bcm2711_v3d *engine);
 static int allocate_tables(struct bcm2711_v3d *engine);
 static int bind_tables(struct bcm2711_v3d *engine);
@@ -150,10 +153,10 @@ bcm2711_v3d_hardware_event_sequence(
 }
 
 /*
- * Sleeps until an IRQ comes after the observed sequence, or until the next scheduler tick.
+ * Sleeps until an IRQ comes after the observed sequence, or for a millisecond at most.
  *
  * An IRQ that came between the observation and the sleep ends it at once.
- * The tick bound keeps the caller's progress windows and timeouts unchanged.
+ * The bound keeps the caller's progress windows and timeouts unchanged.
  */
 void
 bcm2711_v3d_hardware_event_wait(
@@ -163,8 +166,8 @@ bcm2711_v3d_hardware_event_wait(
 	unsigned long enabled;
 	uint64_t deadline;
 
-	/* At most until the next tick, as the former short sleep did. */
-	deadline = sched_ticks() + 1U;
+	/* At most a millisecond (a tick at least), as the former short sleep did. */
+	deadline = sched_ticks() + kern_ms_to_ticks(ENGINE_EVENT_WAIT_MS);
 
 	/* Sleeps on the queue unless an IRQ came since the observation. */
 	enabled = spin_lock_irqsave(&engine->hardware.guard);

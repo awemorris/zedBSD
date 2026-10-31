@@ -196,6 +196,13 @@ static int sector_holds_boot_fat(const uint8_t *sector, unsigned signature_offse
  */
 extern int drv_pcat_uefi_variables_init(void) __attribute__((weak));
 
+/*
+ * The x86 processor driver.  Only the amd64 kernel links it, so the i386
+ * PC kernel finds it null and its CPUs keep the performance framework's
+ * default description.
+ */
+extern int drv_cpu_x86_init(void) __attribute__((weak));
+
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 int drv_usb_hid_checkpoint_driver_register(void);
 #endif
@@ -407,7 +414,7 @@ kern_platform_init(
 
 #endif
 #if CONFIG_DRIVER_PCI_LPSS_I2C
-	/* Binds the PCH's I2C controllers, whose buses the I2C-HID touchpad uses (WS159). */
+	/* Binds the PCH's I2C controllers, whose buses the I2C-HID touchpad uses. */
 	lpss_error = drv_pci_lpss_i2c_driver_register();
 	if (lpss_error != 0)
 		kern_logf("pci: LPSS I2C driver registration failed (%d)\n", lpss_error);
@@ -481,6 +488,14 @@ kern_platform_init(
 	 */
 	if (drv_pcat_uefi_variables_init != NULL)
 		(void)drv_pcat_uefi_variables_init();
+
+	/*
+	 * Describes the CPUs to the performance framework: where each sits
+	 * and what kind of core it is, and, in a kernel with the performance
+	 * control, how each is controlled.  Each CPU reads its own place.
+	 */
+	if (drv_cpu_x86_init != NULL)
+		(void)drv_cpu_x86_init();
 
 	/* Lists every BIOS IDE unit as a boot device. */
 	(void)drv_pcat_ide_init();
@@ -628,7 +643,7 @@ kern_platform_input_init(
 #if CONFIG_DRIVER_PCI_LPSS_I2C && CONFIG_DRIVER_ACPI
 	/*
 	 * Starts the HID over I2C devices the ACPI tables name (a laptop's
-	 * touch pad, WS159); each publishes its input device from its own
+	 * touch pad); each publishes its input device from its own
 	 * thread once it has come up, and one that does not come up leaves
 	 * the PS/2 mouse as the pointer.
 	 */
@@ -706,6 +721,34 @@ kern_platform_poweroff(
 #if CONFIG_DRIVER_ACPI
 	/* Asks the ACPI driver for S5, which normally does not return. */
 	error = drv_acpi_poweroff();
+#else
+	/* A kernel built without the ACPI driver has no way to turn the power off. */
+	error = ENODEV;
+#endif
+	if (error != 0)
+		return error;
+
+	/* The driver returned without an error, which it never does. */
+	return EOPNOTSUPP;
+}
+
+/*
+ * Turns the power off through ACPI's S5 soft-off without _PTS, for the
+ * thermal emergency: the firmware's preparation may wait on the embedded
+ * controller or on the hardware that overheats.
+ *
+ * It returns only the reason the power stayed on, as
+ * kern_platform_poweroff() does.
+ */
+int
+kern_platform_poweroff_emergency(
+	void)
+{
+	int error;
+
+#if CONFIG_DRIVER_ACPI
+	/* Asks the ACPI driver for S5 without telling the firmware first. */
+	error = drv_acpi_poweroff_emergency();
 #else
 	/* A kernel built without the ACPI driver has no way to turn the power off. */
 	error = ENODEV;

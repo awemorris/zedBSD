@@ -50,7 +50,47 @@
  * device makes it as it makes every blob.
  */
 #define GPU_BLOB_HOST			8U
+
+/*
+ * The core sets it in a GPU_GET_INFO reply when the device names its own
+ * image layouts (GPU_IMAGE_LAYOUTS may list more than linear rows, and an
+ * image of such a layout can be exported).  A backend never registers it.
+ */
+#define GPU_CAP_IMAGE_LAYOUTS		131072U
+
+/*
+ * An image's layout (gpu_image_descriptor.tiling): a family in the high
+ * 16 bits and the family's own layout in the low 16.  Family 0 is common
+ * to every device; the others are reserved for the vendors named, whose
+ * layouts any driver of that family may read or write.  A device accepts
+ * only the layouts its driver knows.
+ */
+#define GPU_IMAGE_FAMILY_SHIFT		16U
+#define GPU_IMAGE_FAMILY_COMMON		0U
+#define GPU_IMAGE_FAMILY_NVIDIA		1U
+#define GPU_IMAGE_FAMILY_AMD		2U
+#define GPU_IMAGE_FAMILY_INTEL		3U
+#define GPU_IMAGE_FAMILY_IMAGINATION	4U
+#define GPU_IMAGE_FAMILY_ARM		5U
+#define GPU_IMAGE_FAMILY_BROADCOM	6U
+#define GPU_IMAGE_FAMILY_VERISILICON	7U
+#define GPU_IMAGE_FAMILY_LAST		GPU_IMAGE_FAMILY_VERISILICON
+
+/* Rows of pixels one after another, stride bytes apart; layout_parameter is 0. */
 #define GPU_IMAGE_LINEAR		1U
+
+/*
+ * NVIDIA's 2D block linear: GOBs of 64 bytes by 8 rows, in blocks one GOB
+ * wide and 2^h GOBs tall, a row of blocks stride / 64 GOBs wide.  stride
+ * is a multiple of 64, offset a multiple of 512, and the image takes
+ * stride * (height rounded up to 8 * 2^h rows) bytes.  layout_parameter
+ * holds h in bits 3:0 (0 to 5) and the page kind in bits 15:8 (0 for the
+ * device's ordinary kind); its other bits are 0.
+ */
+#define GPU_IMAGE_NV_BLOCK_LINEAR	0x00010001U
+#define GPU_IMAGE_NV_BLOCK_HEIGHT_MASK	0x0000000fU
+#define GPU_IMAGE_NV_KIND_SHIFT		8U
+#define GPU_IMAGE_NV_KIND_MASK		0x0000ff00U
 #define GPU_HANDLE_CLOEXEC		1U
 #define GPU_HANDLE_CLOFORK		2U
 #define GPU_COPY_MAX			65536U
@@ -74,11 +114,15 @@
 #define GPU_RESOURCE_IMPORT		_IOWR('G', 11, struct gpu_resource_import)
 #define GPU_COMMAND_SUBMIT		_IOWR('G', 12, struct gpu_command_submit)
 #define GPU_COMMAND_WAIT			_IOWR('G', 13, struct gpu_command_wait)
+#define GPU_IMAGE_LAYOUTS		_IOWR('G', 46, struct gpu_image_layouts)
 
 /*
  * One independently retained command and its session-owned completion identity.
  * Context fences select a backend-defined completion domain.
  * Submission success means acceptance; it never substitutes for a Vulkan result.
+ * The sequence is copied out before the driver sees the command, so a
+ * refused submission leaves a number in it that names no work (a wait on it
+ * fails with ENOENT); only a successful return makes it a completion.
  */
 struct gpu_command_submit {
 	uint32_t version;
@@ -107,9 +151,11 @@ struct gpu_command_wait {
 
 
 /*
- * One immutable linear image description retained with a shared allocation.
+ * One immutable image description retained with a shared allocation.
  * Version and size describe this 64-byte record. Device identity is assigned
  * by K on export; import returns the authoritative stored description.
+ * tiling names the layout (GPU_IMAGE_*) and layout_parameter the variant
+ * the layout's definition gives it; a linear image has 0 there.
  */
 struct gpu_image_descriptor {
 	uint32_t version;
@@ -123,8 +169,52 @@ struct gpu_image_descriptor {
 	uint32_t memory_type;
 	uint32_t usage;
 	uint32_t tiling;
-	uint32_t reserved;
+	uint32_t layout_parameter;
 	uint64_t device_id;
+};
+
+/* The uses of a listed layout (gpu_image_layout.flags, gpu_image_layouts.uses). */
+#define GPU_LAYOUT_RENDER		1U
+#define GPU_LAYOUT_SAMPLE		2U
+#define GPU_LAYOUT_SCANOUT		4U
+#define GPU_LAYOUT_SHARE		8U
+#define GPU_IMAGE_LAYOUTS_MAX		16U
+
+/*
+ * One layout a device offers: tiling and parameter as an image description
+ * names them (tiling, layout_parameter), and its uses.  RENDER: the
+ * renderer draws to it as a colour attachment.  SAMPLE: the renderer
+ * samples it.  SCANOUT: the display the request names shows it.  SHARE: an
+ * image of it is exported from one open of the device and imported into
+ * another.  reserved is zero.
+ */
+struct gpu_image_layout {
+	uint32_t tiling;
+	uint32_t parameter;
+	uint32_t flags;
+	uint32_t reserved;
+};
+
+/*
+ * One question about the layouts of an image of a format and size, and its
+ * answer, fastest first.  Inputs: version, size, format (GPU_PIXEL_*),
+ * width, height, the uses every listed layout must have, and display_id
+ * (0 when no display is asked about; SCANOUT needs one).  count and the
+ * entries are zero on input.  No listed layout loses colour depth.  A
+ * device that names no layouts of its own answers linear rows with the
+ * uses its operations give it; which display generations take an image is
+ * still GPU_DISPLAY_CONSTRAINTS's answer.
+ */
+struct gpu_image_layouts {
+	uint32_t version;
+	uint32_t size;
+	uint32_t format;
+	uint32_t width;
+	uint32_t height;
+	uint32_t uses;
+	uint32_t display_id;
+	uint32_t count;
+	struct gpu_image_layout entry[GPU_IMAGE_LAYOUTS_MAX];
 };
 
 /*
@@ -203,7 +293,11 @@ struct gpu_capset {
 	uint8_t data[GPU_CAPSET_MAX];
 };
 
-/* One backend allocation whose optional map and independent sharing are selected by flags. */
+/*
+ * One backend allocation whose optional map and independent sharing are
+ * selected by flags.  flags is written back on success: a node without
+ * GPU_CAP_HOST_BLOB clears GPU_BLOB_HOST, which the reply then lacks.
+ */
 struct gpu_blob_create {
 	uint32_t version;
 	uint32_t size;

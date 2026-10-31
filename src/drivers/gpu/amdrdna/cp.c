@@ -120,6 +120,9 @@
 /* How long a fence of the queue setup is waited for. */
 #define CP_FENCE_MS			1000U
 
+/* The longest sleep between two looks at a fence when no event comes, in milliseconds. */
+#define CP_FENCE_POLL_MS		1U
+
 /* The timed steps of a queue's reset, with the start. */
 #define CP_RESET_STEPS			5U
 
@@ -635,13 +638,14 @@ amdrdna_ring_wait(
 	uint64_t started;
 	uint64_t now;
 	uint64_t observed;
+	uint64_t wake;
 	uint32_t value;
 	bool reached;
 
 	/* The fence word. */
 	fence = amdrdna_ring_word(device, ring, CP_WORD_FENCE);
 
-	/* Looks, then sleeps until the next event or tick, until the fence passes the sequence or the time is up. */
+	/* Looks, then sleeps until the next event or a millisecond, until the fence passes the sequence or the time is up. */
 	reached = false;
 	started = clock_milliseconds(NULL);
 	irq = spin_lock_irqsave(&ring->lock);
@@ -662,8 +666,9 @@ amdrdna_ring_wait(
 		if (now - started >= milliseconds)
 			break;
 
-		/* Sleeps until the ring's next event, or the next tick at the latest. */
-		(void)waitq_sleep(&ring->fences, &ring->lock, observed, sched_ticks() + 1U, 0U);
+		/* Sleeps until the ring's next event, or a millisecond at the latest. */
+		wake = sched_ticks() + kern_ms_to_ticks(CP_FENCE_POLL_MS);
+		(void)waitq_sleep(&ring->fences, &ring->lock, observed, wake, 0U);
 	}
 
 	spin_unlock_irqrestore(&ring->lock, irq);

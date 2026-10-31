@@ -201,6 +201,12 @@ struct layout_box {
 	int vertical_inline;
 	/* An in-flow item of a horizontal grid whose writing mode is vertical; its inline room is the row's height (negative: unbounded). */
 	int grid_orthogonal;
+	/* The style of a block container's ::first-line (NULL when it has none); its first line takes the inherited colour and line height from it. */
+	const struct css_style *first_line_style;
+	/* The size of the grid area a grid item was placed in (its containing block); set when grid_area_set. */
+	int grid_area_set;
+	layout_unit grid_area_width;
+	layout_unit grid_area_height;
 	layout_unit grid_room;
 	/*
 	 * Where a grid or flex item was put: 1 + its grid row and column, or
@@ -209,6 +215,20 @@ struct layout_box {
 	 */
 	int item_row;
 	int item_column;
+	/* The tracks a grid item spans in its grid (0 when not known). */
+	int item_row_span;
+	int item_column_span;
+	/*
+	 * A subgrid: how many of its parent's tracks it spans in each axis (0
+	 * when that axis has tracks of its own), and the track sizes and gap the
+	 * parent gave it (NULL until the parent has sized them; in the layout's arena).
+	 */
+	int subgrid_column_span;
+	int subgrid_row_span;
+	const layout_unit *subgrid_columns;
+	const layout_unit *subgrid_rows;
+	layout_unit subgrid_column_gap;
+	layout_unit subgrid_row_gap;
 
 	/* The text of a text box, whitespace kept as it came (the lines collapse it). */
 	const uint16_t *text;
@@ -259,6 +279,30 @@ struct layout_box {
 	int anchor_clamp_x;
 	int anchor_clamp_y;
 	layout_unit anchor_clamp[4];
+	/*
+	 * A position-area's normal alignment keeps a box that overflows its area
+	 * inside the containing block (area_clamp_x or _y, the range left, right, top,
+	 * bottom); area_overflow tells that it did overflow, so that a fallback is tried.
+	 */
+	/* A position-area aligns the box between insets on both sides (x or y). */
+	/* The containing block is the position-area's (not a grid area), and the grid area it was cut from. */
+	/* The box's max-width is set aside while its max-content width is measured. */
+	int max_width_hidden;
+	int area_from_anchor;
+	int area_grid_known;
+	layout_unit area_grid[4];
+	int area_inset_x;
+	int area_inset_y;
+	int area_clamp_x;
+	int area_clamp_y;
+	int area_overflow;
+	int area_scrolls;
+	/* position-visibility hides the box and what is in it (its anchor is clipped or hidden, or it overflows). */
+	int anchor_hidden;
+	/* The inset-modified containing block the last placing used (left, right, top, bottom), which a fallback has to fit in. */
+	layout_unit imcb[4];
+	layout_unit area_clamp[4];
+	layout_unit area_bounds[4];
 
 	/* How a position-try fallback turned the box's position-area: 4 over the diagonal (first), then 1 down and 2 across. */
 	int anchor_flip;
@@ -283,6 +327,10 @@ struct layout_box {
 	/* How far a sticky box is moved from where the flow put it (sticky.c). */
 	layout_unit sticky_dx;
 	layout_unit sticky_dy;
+	/* A box placed by an anchor follows it when the page scrolls, even a fixed one (set by the anchor functions). */
+	int anchored;
+	/* A flex container gave a table its whole height (captions included), not its grid box's (set while it is laid out). */
+	int table_wrapper_height;
 
 	/*
 	 * While a vertical writing mode's domain is laid out in logical
@@ -292,6 +340,8 @@ struct layout_box {
 	 */
 	struct css_style *physical_style;
 	int logical_root;
+	/* Set while a flex container lays the item out: its main size is not definite for its children's percentages. */
+	int height_indefinite;
 };
 
 /*
@@ -321,6 +371,8 @@ struct layout_transition_name {
 	struct layout_rect old_rect;
 	struct layout_rect new_rect;
 	struct paint_snapshot *old_image;
+	/* Declarations a script's animation of a pseudo-element gives now, by the group, pair, old and new pseudo-elements. */
+	char animated[4][192];
 };
 
 /*
@@ -393,11 +445,28 @@ struct layout_context {
 int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, const struct layout_transition *transition);
 void layout_box_model(struct layout_box *box, layout_unit containing_width);
 void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
+int layout_replaced_is_canvas(const struct layout_box *box);
+int layout_replaced_ratio(const struct layout_box *box, float *ratio);
 void layout_replaced_size(struct layout_box *box, layout_unit containing_width, layout_unit containing_height, int height_definite);
 void layout_absolute(struct layout_box *box, layout_unit x, layout_unit y);
 int layout_is_positioned(const struct layout_box *box);
 int layout_is_layered(const struct layout_box *box);
 int layout_contains_absolute(const struct layout_box *box);
+/* The containment of a box: its contain bits and what a container type adds (size 1, layout 2, style 8, inline-size 16). */
+static inline unsigned
+layout_containment(
+	const struct layout_box *box)
+{
+	unsigned bits;
+
+	bits = box->style.contain;
+	if (box->style.container_type == CSS_CONTAINER_SIZE)
+		bits |= 1U | 2U | 8U;
+	else if (box->style.container_type == CSS_CONTAINER_INLINE_SIZE)
+		bits |= 16U | 2U | 8U;
+	return bits;
+}
+
 int layout_contains_fixed(const struct layout_box *box);
 
 /* View transitions (transition.c). */
@@ -410,14 +479,19 @@ float layout_transition_progress(const struct css_style *style, float elapsed);
 int layout_transition_group_rect(const struct layout_transition_name *name, const struct css_style *style, float elapsed, struct layout_rect *rect);
 
 /* Anchor positioning (anchor.c). */
+int layout_anchor_hides(const struct layout_tree *tree, const struct layout_box *box);
 int layout_anchor_wanted(const struct layout_box *box);
 int layout_anchor_try(struct layout_tree *tree, struct layout_box *box, int entry);
 void layout_anchor_center(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
-void layout_anchor_area(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
+void layout_anchor_area(const struct layout_tree *tree, struct layout_box *box, int cb_mode, int cb_direction, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 void layout_anchor_resolve(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 int layout_clips(const struct layout_box *box);
 int layout_position(struct layout_tree *tree);
 int layout_position_box(struct layout_tree *tree, struct layout_box *box);
+/* Scroll containers' offsets (scroll.c): the content of each moves by its scroll, and a box anchored inside one follows it. */
+int layout_scroll_apply(struct layout_tree *tree);
+int layout_scroll_offset(const struct layout_box *box, double *x, double *y);
+const struct layout_box *layout_containing_box(const struct layout_box *box);
 int layout_sticky_build(struct layout_tree *tree, layout_unit scroll_y);
 int layout_sticky_apply(struct layout_tree *tree, layout_unit scroll_y);
 
@@ -438,12 +512,15 @@ int layout_stacking_order(const struct layout_tree *tree, struct wb_vector *boxe
 void layout_release(struct layout_tree *tree);
 int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_inline(struct layout_tree *tree, struct layout_box *box);
+int layout_vertical_baseline(const struct layout_box *box, int last, layout_unit *offset);
 int layout_first_baseline(const struct layout_box *box, layout_unit *baseline);
 int layout_last_baseline(const struct layout_box *box, layout_unit *baseline);
 int layout_flex(struct layout_tree *tree, struct layout_box *box);
 int layout_grid(struct layout_tree *tree, struct layout_box *box);
 void layout_grid_names(struct layout_box *box);
 int layout_physical_mode(const struct layout_box *box);
+/* A style's writing mode as position-area reads it (sideways-lr is the mode 3). */
+int position_area_mode(const struct css_style *style);
 int layout_logical_wanted(const struct layout_tree *tree, const struct layout_box *box);
 int layout_logical(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_table(struct layout_tree *tree, struct layout_box *box);

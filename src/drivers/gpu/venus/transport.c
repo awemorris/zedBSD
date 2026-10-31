@@ -24,6 +24,9 @@
 #include <uapi/errno.h>
 #include <limits.h>
 
+/* How long the stop sleeps while the worker leaves, before it reaps again, in milliseconds (a tick at least). */
+#define VENUS_WORKER_EXIT_POLL_MS 1U
+
 #define VENUS_RING_AVAILABLE		1024U
 #define VENUS_RING_USED			1280U
 #ifndef CONFIG_GPU_CONTROL_MS
@@ -33,6 +36,8 @@
 #define VENUS_WAIT_POLLS		50000000U
 #define VENUS_REQUIRED_FEATURES		0x19U
 #define VENUS_VENDOR_CAPSET_BYTES	168U
+/* The capset with the native suffix after the vendor one (the vendor words stay at 160 and 164). */
+#define VENUS_NATIVE_CAPSET_BYTES	176U
 #define VENUS_VENDOR_CAPSET_MAGIC	0x5a424453U
 #define VENUS_VENDOR_STRICT_FLAGS	3U
 #define VENUS_VENDOR_QUIESCE_FLAGS	7U
@@ -1857,7 +1862,8 @@ venus_strict_queue_find(
 	transport->strict_queue = 0U;
 	transport->quiesce = 0U;
 	transport->host_scanout = 0U;
-	if (transport->capset_size != VENUS_VENDOR_CAPSET_BYTES)
+	if (transport->capset_size != VENUS_VENDOR_CAPSET_BYTES &&
+	    transport->capset_size != VENUS_NATIVE_CAPSET_BYTES)
 		return 0;
 
 	/* Query the full payload instead of trusting its advertised length as proof of semantics. */
@@ -1876,7 +1882,7 @@ venus_strict_queue_find(
 
 	/* Exact response framing prevents a short tail from borrowing stale success flags. */
 	type = drv_venus_load32(response);
-	if (type != 0x1103U || bytes != VENUS_HEADER_BYTES + VENUS_VENDOR_CAPSET_BYTES)
+	if (type != 0x1103U || bytes != VENUS_HEADER_BYTES + transport->capset_size)
 		return EIO;
 
 	/* Only the acknowledged paired profile proves native-fence success and safe failed retirement. */
@@ -2633,6 +2639,7 @@ venus_worker_stop(
 	struct thread *worker;
 	uint64_t deadline;
 	uint64_t now;
+	uint64_t stop_wait;
 	unsigned long irq;
 	int error;
 
@@ -2659,13 +2666,14 @@ venus_worker_stop(
 
 	/* The retained thread must exit before mappings and locks can be destroyed or reset. */
 	now = sched_ticks();
-	if (now > UINT64_MAX - kern_ms_to_ticks(15000U)) {
+	stop_wait = kern_ms_to_ticks(15000U);
+	if (now > UINT64_MAX - stop_wait) {
 		mutex_unlock(&transport->worker_lock);
 		return EOVERFLOW;
 	}
 
 	/* A successful thread_wait consumes the creator's retained thread reference. */
-	deadline = now + kern_ms_to_ticks(15000U);
+	deadline = now + stop_wait;
 	while (1) {
 		error = thread_wait(worker, NULL);
 		if (error == 0)
@@ -2685,7 +2693,7 @@ venus_worker_stop(
 		}
 
 		/* Lets the woken worker finish its final condition check and exit. */
-		sched_sleep(now + 1U);
+		sched_sleep(now + kern_ms_to_ticks(VENUS_WORKER_EXIT_POLL_MS));
 	}
 
 	/* Null now proves the thread no longer retains transport storage. */

@@ -45,6 +45,7 @@ _Static_assert(PAINT_GPU_ATLAS_SIZE == 2048U, "paint/shaders/display.frag names 
 #define GPU_KIND_GLYPH		1.0f
 #define GPU_KIND_IMAGE		2.0f
 #define GPU_KIND_VERTICAL_GLYPH	3.0f
+#define GPU_KIND_UP_GLYPH	4.0f
 
 /*
  * One instance: the exact rectangle in pixels (left, top, right, bottom),
@@ -1205,6 +1206,10 @@ gpu_stage(
 			continue;
 		}
 
+		/* A backdrop filter works on pixels already drawn; the GPU path draws none of it. */
+		if (item->kind == PAINT_BACKDROP || item->kind == PAINT_GROUP || item->kind == PAINT_GROUP_END)
+			continue;
+
 		/* A rectangle is one instance. */
 		if (item->kind == PAINT_RECT) {
 			status = gpu_stage_rect(gpu, item, scroll_y, extent, paint_clips_top(&clips));
@@ -1245,10 +1250,10 @@ gpu_stage_rect(
 
 	/* The rectangle in pixels, scrolled, as the CPU renderer measures it. */
 	memset(&instance, 0, sizeof(instance));
-	instance.rect[0] = layout_to_px(item->x);
-	instance.rect[1] = layout_to_px(item->y - scroll_y);
-	instance.rect[2] = layout_to_px(item->x + item->width);
-	instance.rect[3] = layout_to_px(item->y - scroll_y + item->height);
+	instance.rect[0] = floorf(layout_to_px(item->x) + 0.5f);
+	instance.rect[1] = floorf(layout_to_px(item->y - scroll_y) + 0.5f);
+	instance.rect[2] = floorf(layout_to_px(item->x + item->width) + 0.5f);
+	instance.rect[3] = floorf(layout_to_px(item->y - scroll_y + item->height) + 0.5f);
 
 	/* Cut to the clip; a rectangle outside it draws nothing. */
 	if (instance.rect[0] < clip->left)
@@ -1316,7 +1321,7 @@ gpu_stage_text(
 	/* Each glyph with ink. */
 	memset(&instance, 0, sizeof(instance));
 	gpu_color(item->color, instance.color);
-	instance.atlas[2] = item->vertical ? GPU_KIND_VERTICAL_GLYPH : GPU_KIND_GLYPH;
+	instance.atlas[2] = item->vertical == 2 ? GPU_KIND_UP_GLYPH : item->vertical ? GPU_KIND_VERTICAL_GLYPH : GPU_KIND_GLYPH;
 	for (index = 0; index < item->glyph_count; index++) {
 		error = text_glyph(text, &item->font, item->glyphs[index].code_point, 1, &glyph);
 		if (error != 0)
@@ -1332,7 +1337,11 @@ gpu_stage_text(
 			continue;
 
 		/* The bitmap's top left, from the pen and the baseline, on whole pixels. */
-		if (item->vertical) {
+		if (item->vertical == 2) {
+			origin_x = (int)floorf(layout_to_px(item->x) + 0.5f) - glyph.top;
+			origin_y = baseline -
+			    (int)floorf(layout_to_px(item->glyphs[index].x) + 0.5f) - glyph.left - glyph.width;
+		} else if (item->vertical) {
 			origin_x = (int)floorf(layout_to_px(item->x) + 0.5f) + glyph.top - glyph.height;
 			origin_y = baseline +
 			    (int)floorf(layout_to_px(item->glyphs[index].x) + 0.5f) + glyph.left;
@@ -1367,7 +1376,7 @@ gpu_stage_text(
 			instance.atlas[1] = (float)atlas_y;
 			instance.source[0] = (float)origin_x;
 			instance.source[1] = (float)origin_y;
-			instance.source[2] = (float)glyph.height;
+			instance.source[2] = (float)(item->vertical == 2 ? glyph.width : glyph.height);
 		} else {
 			instance.atlas[0] = (float)(atlas_x + (uint32_t)(left - origin_x));
 			instance.atlas[1] = (float)(atlas_y + (uint32_t)(top - origin_y));
@@ -1468,16 +1477,16 @@ gpu_stage_image(
 
 	/* The rectangle in pixels, scrolled, as the CPU renderer measures it. */
 	memset(&instance, 0, sizeof(instance));
-	instance.rect[0] = layout_to_px(item->x);
-	instance.rect[1] = layout_to_px(item->y - scroll_y);
-	instance.rect[2] = layout_to_px(item->x + item->width);
-	instance.rect[3] = layout_to_px(item->y - scroll_y + item->height);
+	instance.rect[0] = floorf(layout_to_px(item->x) + 0.5f);
+	instance.rect[1] = floorf(layout_to_px(item->y - scroll_y) + 0.5f);
+	instance.rect[2] = floorf(layout_to_px(item->x + item->width) + 0.5f);
+	instance.rect[3] = floorf(layout_to_px(item->y - scroll_y + item->height) + 0.5f);
 
 	/* Where the image starts and its texels to a pixel, before the cut. */
 	instance.source[0] = instance.rect[0];
 	instance.source[1] = instance.rect[1];
-	instance.source[2] = (float)item->image->width / layout_to_px(item->width);
-	instance.source[3] = (float)item->image->height / layout_to_px(item->height);
+	instance.source[2] = instance.rect[2] > instance.rect[0] ? (float)item->image->width / (instance.rect[2] - instance.rect[0]) : 0.0f;
+	instance.source[3] = instance.rect[3] > instance.rect[1] ? (float)item->image->height / (instance.rect[3] - instance.rect[1]) : 0.0f;
 	instance.texels[0] = (float)item->image->width;
 	instance.texels[1] = (float)item->image->height;
 

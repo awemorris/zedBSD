@@ -30,6 +30,9 @@
 #include "drivers/gpu/mali/mali-private.h"
 #include "drivers/gpu/mali/mali-regs.h"
 
+/* How long a register poll sleeps before the next read, in milliseconds (a tick at least). */
+#define MALI_MMU_POLL_MS 1U
+
 /* How long a slot may stay busy with an earlier command (100 ms). */
 #define SLOT_WAIT_MS		100U
 
@@ -515,8 +518,8 @@ wait_slot_idle(
 		if (now >= deadline)
 			break;
 
-		/* One tick before the next read. */
-		sched_sleep(now + 1U);
+		/* A millisecond before the next read. */
+		sched_sleep(now + kern_ms_to_ticks(MALI_MMU_POLL_MS));
 	}
 
 	/* Succeeded in waiting, but the slot stayed busy. */

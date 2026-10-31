@@ -89,7 +89,7 @@
 /*
  * The largest bounce buffer a regular file or block device transfer
  * allocates, so a long read or write reaches the disk as one long request
- * instead of 64 KiB ones (ws299, 2026-10-27 Q1).
+ * instead of 64 KiB ones.
  */
 #define SYSCALL_LARGE_CHUNK (1024U * 1024U)
 #define SYSCALL_SOCKET_BUFFER_MAX (64U * 1024U)
@@ -2863,7 +2863,7 @@ syscall_io_pooled(
  *
  * A short transfer uses the caller's stack buffer.  A transfer of a regular
  * file or a block device longer than one pool batch first gets a heap buffer
- * of up to SYSCALL_LARGE_CHUNK, so the disk sees long requests (ws299).
+ * of up to SYSCALL_LARGE_CHUNK, so the disk sees long requests.
  * Otherwise a regular file or a block device borrows shared scratch without
  * allocation or waiting.  A pipe, socket or other device gets a heap buffer of up to
  * SYSCALL_STREAM_CHUNK: it may block while it holds it, so it does not take
@@ -3718,7 +3718,7 @@ sys_mmap_call(
 	struct file *file;
 	struct vm_device_mapping *device_mapping;
 	int access_mode;
-	int device_exact;
+	int device_placement;
 	uintptr_t mapped;
 	uint32_t prot;
 	size_t data_size;
@@ -3807,10 +3807,12 @@ sys_mmap_call(
 			if (error == 0 && device_mapping == NULL)
 				error = EIO;
 
-			/* Exact placement is requested only by the supported non-replacement mmap flag. */
-			device_exact = 0;
-			if ((args[3] & MAP_FIXED_NOREPLACE) != 0)
-				device_exact = 1;
+			/* MAP_FIXED places the mapping exactly in place of the range's, MAP_FIXED_NOREPLACE only on a free range. */
+			device_placement = VM_DEVICE_PLACE_HINT;
+			if (fixed)
+				device_placement = VM_DEVICE_PLACE_FIXED;
+			else if ((args[3] & MAP_FIXED_NOREPLACE) != 0)
+				device_placement = VM_DEVICE_PLACE_NOREPLACE;
 
 			/* Publishes shared device storage only after protection and backend acquisition succeed. */
 			if (error == 0) {
@@ -3820,7 +3822,7 @@ sys_mmap_call(
 					size,
 					prot,
 					device_mapping,
-					device_exact,
+					device_placement,
 					&mapped);
 			}
 
@@ -4649,6 +4651,7 @@ sys_nanosleep_call(
 		/* Reports the remaining time to a caller interrupted by a signal. */
 		left = kern_deadline_remaining(sched_ticks(), deadline);
 		if (args[1] != 0) {
+			/* Converts the remaining ticks to the time the caller reads. */
 			kern_ticks_to_timespec(left, &remaining);
 			error = copyout(&remaining, args[1], sizeof(remaining));
 			if (error != 0)

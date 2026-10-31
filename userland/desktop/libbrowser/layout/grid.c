@@ -25,6 +25,7 @@
  */
 
 #include "layout/layout.h"
+#include "layout/grid-track.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -62,8 +63,8 @@ struct grid_state {
 	/* Tracks of an auto-fit repeat that no item uses: they take no room (NULL when none). */
 	unsigned char *column_collapsed;
 	unsigned char *row_collapsed;
-	/* What a fit-content() column may grow to with free space (0 for other columns; NULL when none). */
-	layout_unit *column_fit;
+	/* The height the rows gave before percentage rows were resolved against it (-1 when the rows' own sum is the height). */
+	layout_unit intrinsic_height;
 };
 
 /*
@@ -81,13 +82,9 @@ struct grid_sizes {
 	struct css_length margin[4];
 };
 
-static int grid_span_has_fixed_rows(const struct css_style *style, const struct grid_item *item, const struct grid_state *grid, layout_unit gap, layout_unit available);
-static int grid_fixed_span_minimum(const struct layout_box *box, int64_t *minimum);
-static int grid_column_auto_minimum(struct layout_box *box, layout_unit containing_width, layout_unit *minimum);
-static int grid_track_floor(const struct css_track *track, layout_unit whole, layout_unit *floor);
-static int grid_row_stretches(const struct css_track *track);
+static int grid_fixed_rows_height(const struct layout_box *box, const struct grid_item *item, layout_unit gap, layout_unit *height);
+static int grid_normal_starts(const struct layout_box *box);
 static int grid_fixed_area_height(const struct layout_box *box, const struct grid_item *item, layout_unit gap, layout_unit *height);
-static void grid_maximize(const struct css_style *style, int columns, layout_unit *sizes, int count, const unsigned char *collapsed, layout_unit whole, layout_unit free_space);
 static int grid_save_used_tracks(struct layout_tree *tree, struct layout_box *box, const struct grid_state *grid);
 static int grid_copy_used_axis(struct layout_tree *tree, const layout_unit *sizes, int count, double **copy);
 static int grid_collect(struct layout_box *box, struct grid_state *grid);
@@ -97,6 +94,8 @@ static void grid_resolve(const struct css_grid_place *place, int explicit_count,
 static void grid_static_position(struct layout_box *box, const struct grid_state *grid,
     layout_unit column_gap, layout_unit row_gap, layout_unit shift, layout_unit row_shift);
 static void grid_static_vertical_start(struct layout_box *box);
+static void grid_abspos_one(struct layout_box *box, struct layout_box *child, const struct grid_state *grid, layout_unit column_gap, layout_unit row_gap, layout_unit shift, layout_unit row_shift, layout_unit off_x, layout_unit off_y, int direct);
+static void grid_abspos_deeper(struct layout_box *box, struct layout_box *walk, const struct grid_state *grid, layout_unit column_gap, layout_unit row_gap, layout_unit shift, layout_unit row_shift, layout_unit off_x, layout_unit off_y, int depth);
 static void grid_abspos_areas(struct layout_box *box, const struct grid_state *grid,
     layout_unit column_gap, layout_unit row_gap, layout_unit shift, layout_unit row_shift);
 static int grid_place(struct grid_state *grid, int auto_flow);
@@ -106,11 +105,11 @@ static int grid_take(struct grid_state *grid, int row, int column, int row_span,
 static const struct css_track *grid_column_track(const struct css_style *style, int column);
 static const struct css_track *grid_row_track(const struct css_style *style, int row);
 static int grid_size_columns(struct layout_tree *tree, struct layout_box *box, struct grid_state *grid, layout_unit gap);
-static int grid_item_width(struct layout_tree *tree, struct layout_box *item, layout_unit *width);
-static int grid_item_minimum_width(struct layout_tree *tree, struct layout_box *item, layout_unit *width);
-static int grid_column_stretches(const struct layout_box *box, const struct css_track *track);
 static int grid_lay_item(struct layout_tree *tree, struct layout_box *item, layout_unit width, int justify);
-static void grid_size_rows(struct layout_box *box, struct grid_state *grid, layout_unit gap);
+static void grid_size_rows(struct layout_tree *tree, struct layout_box *box, struct grid_state *grid, layout_unit gap);
+static int grid_subgrid_axis(const struct layout_box *box, int columns);
+static int grid_subgrid_prepare(struct layout_tree *tree, struct layout_box *sub, const struct layout_box *parent, int column_first, int row_first);
+static int grid_subgrid_preset(struct layout_tree *tree, struct layout_box *sub, int columns, const layout_unit *sizes, int first, int tracks, layout_unit gap);
 static int grid_relay_item(struct layout_tree *tree, struct layout_box *item, layout_unit width, layout_unit height, int align);
 static layout_unit grid_clamp_height(const struct layout_box *item, layout_unit content, layout_unit area, layout_unit frame);
 static layout_unit grid_clamp_height(const struct layout_box *item, layout_unit content, layout_unit area, layout_unit frame);
@@ -118,6 +117,9 @@ static layout_unit grid_outer_height(const struct layout_box *item);
 static int grid_row_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *above);
 static void grid_row_baselines(const struct layout_box *box, const struct grid_state *grid, int row, layout_unit *first_above, layout_unit *first_below, layout_unit *last_above, layout_unit *last_below);
 static int grid_fixed_column_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *right_extent);
+static int grid_parent_height(const struct layout_tree *tree, const struct layout_box *box, layout_unit *basis);
+static int grid_column_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *before, layout_unit *after, int *flush_right);
+static void grid_column_baselines(const struct layout_box *box, const struct grid_state *grid, int column, layout_unit *left_before, layout_unit *left_after, layout_unit *right_before, layout_unit *right_after);
 static layout_unit grid_track_length(const struct css_length *length, layout_unit whole, int measuring);
 static void grid_release(struct grid_state *grid);
 static void grid_expand_repeats(struct layout_tree *tree, struct layout_box *box);
@@ -136,14 +138,29 @@ grid_repeat_track(
 {
 	const struct css_length *length;
 
+	layout_unit size;
+	layout_unit least;
+
 	length = &track->size;
 	if (track->kind != CSS_TRACK_LENGTH)
 		length = &track->minimum;
+	size = 0;
 	if (length->unit == CSS_UNIT_PX)
-		return layout_from_px(length->value);
-	if (length->unit == CSS_UNIT_PERCENT && basis >= 0)
-		return (layout_unit)((float)basis * length->value / 100.0f) + layout_from_px(length->offset);
-	return 0;
+		size = layout_from_px(length->value);
+	else if (length->unit == CSS_UNIT_PERCENT && basis >= 0)
+		size = (layout_unit)((float)basis * length->value / 100.0f) + layout_from_px(length->offset);
+
+	/* A maximum below the minimum counts as the minimum. */
+	if (track->kind == CSS_TRACK_LENGTH && track->minimum_rule != 0) {
+		least = 0;
+		if (track->minimum.unit == CSS_UNIT_PX)
+			least = layout_from_px(track->minimum.value);
+		else if (track->minimum.unit == CSS_UNIT_PERCENT && basis >= 0)
+			least = (layout_unit)((float)basis * track->minimum.value / 100.0f) + layout_from_px(track->minimum.offset);
+		if (least > size)
+			size = least;
+	}
+	return size;
 }
 
 /*
@@ -156,7 +173,8 @@ grid_expand_axis(
 	int *count,
 	struct css_track_repeat *repeat,
 	layout_unit available,
-	layout_unit gap)
+	layout_unit gap,
+	int at_least)
 {
 	layout_unit others;
 	layout_unit pattern;
@@ -198,6 +216,10 @@ grid_expand_axis(
 		numerator = available - others - gap * (layout_unit)(others_count - 1);
 		if (denominator > 0 && numerator > denominator)
 			times = (int)(numerator / denominator);
+
+		/* Sized by a minimum alone, the room has to be reached: the next repeat that covers it. */
+		if (at_least && denominator > 0 && numerator > 0 && numerator > denominator * (layout_unit)times)
+			times++;
 		if (times < 1)
 			times = 1;
 	}
@@ -228,7 +250,12 @@ grid_expand_repeats(
 	layout_unit available;
 	layout_unit gap;
 	layout_unit frame;
+	layout_unit basis;
+	layout_unit minimum;
+	layout_unit maximum;
 	int definite;
+	int definite_width;
+	int at_least;
 
 	measuring = tree->measuring;
 
@@ -245,42 +272,108 @@ grid_expand_repeats(
 	    !box->out_of_flow);
 	if (definite && !measuring)
 		available = box->width;
+	definite_width = available >= 0;
 	if (available < 0 && box->style.max_width.unit == CSS_UNIT_PX)
 		available = layout_from_px(box->style.max_width.value);
-	if (available < 0 && box->style.min_width.unit == CSS_UNIT_PX)
-		available = layout_from_px(box->style.min_width.value);
-	if (available < 0 && box->style.min_width.unit == CSS_UNIT_PERCENT && box->parent != NULL)
-		available = (layout_unit)((float)box->parent->width * box->style.min_width.value / 100.0f);
+	if (available < 0 && box->style.max_width.unit == CSS_UNIT_PERCENT && box->parent != NULL)
+		available = (layout_unit)((float)box->parent->width * box->style.max_width.value / 100.0f);
+
+	/* A minimum larger than the maximum (or alone) is the size the repeats fill. */
+	minimum = -1;
+	if (box->style.min_width.unit == CSS_UNIT_PX)
+		minimum = layout_from_px(box->style.min_width.value);
+	if (box->style.min_width.unit == CSS_UNIT_PERCENT && box->parent != NULL)
+		minimum = (layout_unit)((float)box->parent->width * box->style.min_width.value / 100.0f);
+
+	/* An aspect-ratio carries a pixel minimum height over to a minimum width. */
+	if (!definite_width && box->style.aspect_ratio > 0.0f && box->style.height.unit == CSS_UNIT_AUTO &&
+	    box->style.min_height.unit == CSS_UNIT_PX) {
+		layout_unit transferred;
+
+		transferred = (layout_unit)((float)layout_from_px(box->style.min_height.value) * box->style.aspect_ratio);
+		if (transferred > minimum)
+			minimum = transferred;
+	}
+	at_least = 0;
+	if (!definite_width && minimum > available) {
+		/* A maximum, even a smaller one, keeps the repeats from overflowing: only a minimum alone has to be reached. */
+		at_least = available < 0 && !box->max_width_hidden;
+		available = minimum;
+	}
 	grid_expand_axis(box->style.columns, &box->style.column_count, &box->style.column_repeat,
-	    available, gap);
+	    available, gap, at_least);
 
 	/* The rows need a definite height. */
 	gap = 0;
 	available = -1;
+	at_least = 0;
 	if (box->style.row_gap.unit == CSS_UNIT_PX)
 		gap = layout_from_px(box->style.row_gap.value);
 	frame = 0;
 	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
 		frame = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	/* The maximum and the minimum height, in pixels or a percentage of a height that is known (-1: none). */
+	maximum = -1;
+	if (box->style.max_height.unit == CSS_UNIT_PX)
+		maximum = layout_from_px(box->style.max_height.value);
+	else if (box->style.max_height.unit == CSS_UNIT_PERCENT && grid_parent_height(tree, box, &basis))
+		maximum = (layout_unit)((float)basis * box->style.max_height.value / 100.0f);
+	minimum = -1;
+	if (box->style.min_height.unit == CSS_UNIT_PX)
+		minimum = layout_from_px(box->style.min_height.value);
+	else if (box->style.min_height.unit == CSS_UNIT_PERCENT && grid_parent_height(tree, box, &basis))
+		minimum = (layout_unit)((float)basis * box->style.min_height.value / 100.0f);
+
+	/* A pixel height is held within them; without one the maximum, or the minimum when it is larger or alone, is the room. */
 	if (box->style.height.unit == CSS_UNIT_PX) {
-		/* A pixel height, within its pixel minimum and maximum. */
 		available = layout_from_px(box->style.height.value);
-		if (box->style.max_height.unit == CSS_UNIT_PX && available > layout_from_px(box->style.max_height.value))
-			available = layout_from_px(box->style.max_height.value);
-		if (box->style.min_height.unit == CSS_UNIT_PX && available < layout_from_px(box->style.min_height.value))
-			available = layout_from_px(box->style.min_height.value);
+		if (maximum >= 0 && available > maximum)
+			available = maximum;
+		if (minimum >= 0 && available < minimum)
+			available = minimum;
 		available -= frame;
 		if (available < 0)
 			available = 0;
-	} else if (box->style.max_height.unit == CSS_UNIT_PX) {
-		available = layout_from_px(box->style.max_height.value);
-	} else if (box->style.min_height.unit == CSS_UNIT_PX) {
-		available = layout_from_px(box->style.min_height.value);
-	} else if (box->style.min_height.unit == CSS_UNIT_PERCENT && tree->containing_height_definite) {
-		available = (layout_unit)((float)tree->containing_height * box->style.min_height.value / 100.0f);
+	} else {
+		available = maximum;
+		at_least = 0;
+		if (minimum > available) {
+			at_least = available < 0;
+			available = minimum;
+		}
 	}
 	grid_expand_axis(box->style.rows, &box->style.row_count, &box->style.row_repeat,
-	    available, gap);
+	    available, gap, at_least);
+}
+
+/* Finds the height a percentage height of a grid is of: its parent's, when that is a length (the tree's when the parent's is not one). */
+static int
+grid_parent_height(
+	const struct layout_tree *tree,
+	const struct layout_box *box,
+	layout_unit *basis)
+{
+	const struct layout_box *parent;
+	layout_unit frame;
+
+	/* A parent with a height in pixels. */
+	parent = box->parent;
+	if (parent != NULL && parent->style.height.unit == CSS_UNIT_PX) {
+		frame = 0;
+		if (parent->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			frame = parent->border[CSS_TOP] + parent->padding[CSS_TOP] + parent->padding[CSS_BOTTOM] + parent->border[CSS_BOTTOM];
+		*basis = layout_from_px(parent->style.height.value) - frame;
+		if (*basis < 0)
+			*basis = 0;
+		return 1;
+	}
+
+	/* Otherwise what the tree knows. */
+	if (tree->containing_height_definite) {
+		*basis = tree->containing_height;
+		return 1;
+	}
+	return 0;
 }
 
 /* Marks the tracks of an auto-fit repeat that hold no item (the others keep their sizes). */
@@ -370,10 +463,13 @@ grid_distribute(
 	layout_unit *offset,
 	layout_unit *extra)
 {
+	int empty;
+
 	*offset = 0;
 	*extra = 0;
-	if (tracks <= 0)
-		return;
+	empty = tracks <= 0;
+	if (empty)
+		tracks = 1;
 
 	/* Distribution needs positive space; an overflow falls back as the specification says. */
 	if (free_space <= 0 || (tracks == 1 && value == CSS_ALIGN_SPACE_BETWEEN)) {
@@ -413,6 +509,10 @@ grid_distribute(
 	default:
 		break;
 	}
+
+	/* No track: the empty grid is positioned by its alignment, and no gap spreads. */
+	if (empty)
+		*extra = 0;
 }
 
 /* Existing in-flow Grid paths use their logical start and end positions. */
@@ -438,6 +538,8 @@ layout_grid(
 	struct layout_tree *tree,
 	struct layout_box *box)
 {
+	int justify_safe;
+	int align_safe;
 	struct grid_state grid;
 	struct grid_item *item;
 	struct layout_box *child;
@@ -462,7 +564,15 @@ layout_grid(
 	layout_unit last_above;
 	layout_unit last_below;
 	layout_unit right_extent;
+	layout_unit col_before;
+	layout_unit col_after;
+	layout_unit left_before;
+	layout_unit left_after;
+	layout_unit right_before;
+	layout_unit right_after;
+	int col_right;
 	layout_unit shared_right_extent;
+	struct css_length subgrid_width;
 	layout_unit free_height;
 	layout_unit saved_height;
 	size_t index;
@@ -501,6 +611,7 @@ layout_grid(
 		child->static_y_align = CSS_ALIGN_AUTO;
 		child->static_grid_area = 0;
 		child->cb_set = 0;
+		child->area_from_anchor = 0;
 		child->static_unsafe = 1;
 		child->static_x_safe = 0;
 		child->static_y_safe = 0;
@@ -537,6 +648,26 @@ layout_grid(
 		return error;
 	}
 
+	/* An item that is a subgrid takes the tracks it spans from this grid: its own items are placed against them. */
+	for (index = 0; index < grid.item_count; index++) {
+		child = grid.items[index].box;
+		child->subgrid_column_span = 0;
+		child->subgrid_row_span = 0;
+		child->subgrid_columns = NULL;
+		child->subgrid_rows = NULL;
+		if (grid_subgrid_axis(child, 1))
+			child->subgrid_column_span = grid.items[index].column_span;
+		if (grid_subgrid_axis(child, 0))
+			child->subgrid_row_span = grid.items[index].row_span;
+		if (child->subgrid_column_span > 0 || child->subgrid_row_span > 0) {
+			error = grid_subgrid_prepare(tree, child, box, grid.items[index].column, grid.items[index].row);
+			if (error != 0) {
+				grid_release(&grid);
+				return error;
+			}
+		}
+	}
+
 	/* The gaps between the tracks. */
 	column_gap = 0;
 	if (box->style.column_gap.unit == CSS_UNIT_PX)
@@ -559,6 +690,9 @@ layout_grid(
 			row_gap = 0;
 		row_gap = (layout_unit)((float)row_gap * box->style.row_gap.value / 100.0f) +
 		    layout_from_px(box->style.row_gap.offset);
+	} else if (box->style.row_gap.unit == CSS_UNIT_PERCENT) {
+		/* An indefinite height sizes the rows with the fixed part of the gap alone. */
+		row_gap = layout_from_px(box->style.row_gap.offset);
 	}
 
 	/* An item with a vertical writing mode lays its lines along the row's height. */
@@ -567,6 +701,8 @@ layout_grid(
 		child = item->box;
 		child->item_row = item->row + 1;
 		child->item_column = item->column + 1;
+		child->item_row_span = item->row_span;
+		child->item_column_span = item->column_span;
 		child->grid_orthogonal = 0;
 		child->grid_room = -1;
 		if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
@@ -574,12 +710,27 @@ layout_grid(
 		    child->replaced || child->atomic)
 			continue;
 		child->grid_orthogonal = 1;
-		if (item->row_span == 1 && item->row < box->style.row_count &&
+		if (item->row_span == 1 &&
 		    grid_row_track(&box->style, item->row)->kind == CSS_TRACK_LENGTH &&
 		    grid_row_track(&box->style, item->row)->size.unit == CSS_UNIT_PX)
 			child->grid_room = layout_from_px(grid_row_track(&box->style, item->row)->size.value);
+		else if (item->row_span == 1 && grid.row_count == 1 && box->style.height.unit == CSS_UNIT_PX &&
+		    grid_row_track(&box->style, item->row)->kind == CSS_TRACK_AUTO) {
+			/* The only row, left to stretch in a grid with a height of its own, is as tall as that. */
+			child->grid_room = layout_from_px(box->style.height.value);
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				child->grid_room -= box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] +
+				    box->border[CSS_BOTTOM];
+			if (child->grid_room < 0)
+				child->grid_room = 0;
+		}
 	}
 
+	/* A subgrid lays its tracks with its own gap (the parent's when it gave none) once the parent has given the tracks. */
+	if (box->subgrid_columns != NULL)
+		column_gap = box->subgrid_column_gap;
+	if (box->subgrid_rows != NULL)
+		row_gap = box->subgrid_row_gap;
 	row_gap_base = row_gap;
 
 	/* The columns' widths. */
@@ -599,6 +750,8 @@ layout_grid(
 	used = column_gap * (layout_unit)(grid.column_count - 1);
 	for (position = 0; position < grid.column_count; position++)
 		used += grid.columns[position];
+	if (grid.column_collapsed != NULL && grid_live_tracks(grid.column_collapsed, grid.column_count) == 0)
+		used = 0;
 	box->grid_content = used;
 	room = box->width - used;
 	/* A safe alignment that would overflow falls back to the start. */
@@ -624,7 +777,7 @@ layout_grid(
 		if (justify == CSS_ALIGN_AUTO)
 			justify = box->style.justify_items;
 		if (justify == CSS_ALIGN_NORMAL)
-			justify = item->box->replaced ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+			justify = grid_normal_starts(item->box) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
 		if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
 		    (item->box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB &&
 		    !item->box->grid_orthogonal) ||
@@ -635,15 +788,37 @@ layout_grid(
 		    item->box->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
 			justify = CSS_ALIGN_START;
 
+		/* A subgrid in columns is given the columns it spans. */
+		if (item->box->subgrid_column_span > 0) {
+			error = grid_subgrid_preset(tree, item->box, 1, grid.columns, item->column, grid.column_count, column_gap);
+			if (error != 0) {
+				grid_release(&grid);
+				return error;
+			}
+		}
+
 		/* Percentage heights are of the grid area: its fixed rows' height, or indefinite while the rows are sized. */
 		saved_height = tree->containing_height;
 		saved_definite = tree->containing_height_definite;
 		if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
 			tree->containing_height_definite = grid_fixed_area_height(box, item, row_gap, &tree->containing_height);
+			if (!tree->containing_height_definite && item->box->grid_orthogonal && item->box->grid_room >= 0) {
+				/* An orthogonal item's lines run along the row, which a grid with a height of its own stretches to. */
+				tree->containing_height = item->box->grid_room;
+				tree->containing_height_definite = 1;
+			}
 			if (!tree->containing_height_definite)
 				tree->containing_height = 0;
 		}
+
+		/* A subgrid in columns fills the area it spans whatever its width says. */
+		subgrid_width = item->box->style.width;
+		if (item->box->subgrid_column_span > 0) {
+			item->box->style.width.unit = CSS_UNIT_AUTO;
+			justify = CSS_ALIGN_STRETCH;
+		}
 		error = grid_lay_item(tree, item->box, area_width, justify);
+		item->box->style.width = subgrid_width;
 		tree->containing_height = saved_height;
 		tree->containing_height_definite = saved_definite;
 		if (error != 0) {
@@ -653,25 +828,53 @@ layout_grid(
 	}
 
 	/* The rows' heights from the items. */
-	grid_size_rows(box, &grid, row_gap);
+	grid_size_rows(tree, box, &grid, row_gap);
 	for (position = 0; grid.row_collapsed != NULL && position < grid.row_count; position++) {
 		if (grid.row_collapsed[position])
 			grid.rows[position] = -row_gap;
 	}
 	row_shift = 0;
 	if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
-	    box->style.height.unit == CSS_UNIT_PX) {
+	    (box->style.height.unit == CSS_UNIT_PX ||
+	    (box->style.height.unit == CSS_UNIT_AUTO &&
+	    (box->style.min_height.unit == CSS_UNIT_PX || box->style.max_height.unit == CSS_UNIT_PX)))) {
 		layout_unit available_height;
+		layout_unit frame_height;
 
-		available_height = layout_from_px(box->style.height.value);
-		if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
-			available_height -= box->border[CSS_TOP] + box->padding[CSS_TOP] +
-			    box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		frame_height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 		used = 0;
 		if (grid.row_count > 0)
 			used = row_gap * (layout_unit)(grid.row_count - 1);
 		for (position = 0; position < grid.row_count; position++)
 			used += grid.rows[position];
+		if (grid.row_collapsed != NULL && grid_live_tracks(grid.row_collapsed, grid.row_count) == 0)
+			used = 0;
+		if (box->style.height.unit == CSS_UNIT_PX) {
+			available_height = layout_from_px(box->style.height.value);
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				available_height -= frame_height;
+		} else {
+			/* An automatic height is the rows' extent held between the minimum and the maximum. */
+			available_height = used;
+			if (box->style.min_height.unit == CSS_UNIT_PX) {
+				layout_unit minimum;
+
+				minimum = layout_from_px(box->style.min_height.value);
+				if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					minimum -= frame_height;
+				if (available_height < minimum)
+					available_height = minimum;
+			}
+			if (box->style.max_height.unit == CSS_UNIT_PX) {
+				layout_unit maximum;
+
+				maximum = layout_from_px(box->style.max_height.value);
+				if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					maximum -= frame_height;
+				if (available_height > maximum)
+					available_height = maximum;
+			}
+		}
 		if (available_height < 0)
 			available_height = 0;
 		grid_distribute((box->style.flex_keywords & 32u) != 0 && available_height < used ? CSS_ALIGN_START :
@@ -689,9 +892,21 @@ layout_grid(
 	 * the items are placed with it resolved against the height that gave.
 	 */
 	if (box->style.row_gap.unit == CSS_UNIT_PERCENT && box->style.height.unit != CSS_UNIT_PX && grid.row_count > 1) {
-		used = 0;
+		used = row_gap * (layout_unit)(grid.row_count - 1);
 		for (position = 0; position < grid.row_count; position++)
 			used += grid.rows[position];
+
+		/* A minimum height holds the container taller, and the gap is of that height. */
+		if (box->style.min_height.unit == CSS_UNIT_PX) {
+			layout_unit minimum_content;
+
+			minimum_content = layout_from_px(box->style.min_height.value);
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				minimum_content -= box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] +
+				    box->border[CSS_BOTTOM];
+			if (used < minimum_content)
+				used = minimum_content;
+		}
 		row_gap = (layout_unit)((float)used * box->style.row_gap.value / 100.0f) +
 		    layout_from_px(box->style.row_gap.offset);
 		if (row_gap < 0)
@@ -739,7 +954,7 @@ layout_grid(
 		if (align == CSS_ALIGN_AUTO)
 			align = box->style.align_items;
 		if (align == CSS_ALIGN_NORMAL)
-			align = child->replaced ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+			align = grid_normal_starts(child) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
 		/* Definite horizontal rows distribute block-axis auto margins after sizing. */
 		auto_top = child->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO;
 		auto_bottom = child->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO;
@@ -765,6 +980,25 @@ layout_grid(
 			align = CSS_ALIGN_BASELINE;
 		else if (align == CSS_ALIGN_BASELINE)
 			align = CSS_ALIGN_START;
+
+		/* A subgrid in rows is given the rows it spans. */
+		if (child->subgrid_row_span > 0) {
+			error = grid_subgrid_preset(tree, child, 0, grid.rows, item->row, grid.row_count, row_gap);
+			if (error != 0) {
+				grid_release(&grid);
+				return error;
+			}
+		}
+
+		/* The area in the physical frame the relative offsets resolve in (a vertical grid is laid out in logical coordinates). */
+		child->grid_area_set = 1;
+		if (box->physical_style != NULL && layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB) {
+			child->grid_area_width = area_height;
+			child->grid_area_height = area_width;
+		} else {
+			child->grid_area_width = area_width;
+			child->grid_area_height = area_height;
+		}
 
 		/* A definite grid area must reach percentage descendants of a stretched item. */
 		error = grid_relay_item(tree, child, area_width, area_height, align);
@@ -795,7 +1029,7 @@ layout_grid(
 			if (justify == CSS_ALIGN_AUTO)
 				justify = box->style.justify_items;
 			if (justify == CSS_ALIGN_NORMAL)
-				justify = child->replaced ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+				justify = grid_normal_starts(child) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
 			if (justify == CSS_ALIGN_STRETCH)
 				justify = CSS_ALIGN_START;
 			if (justify == CSS_ALIGN_SELF_START && child->grid_orthogonal)
@@ -811,13 +1045,24 @@ layout_grid(
 			outer_width = child->margin[CSS_LEFT] + child->border[CSS_LEFT] +
 			    child->padding[CSS_LEFT] + child->width + child->padding[CSS_RIGHT] +
 			    child->border[CSS_RIGHT] + child->margin[CSS_RIGHT];
-			if (area_width > outer_width &&
+			/* An item wider than its area is aligned truly (it overflows on the end side) unless safe is asked for. */
+			justify_safe = (child->style.justify_self != CSS_ALIGN_AUTO ?
+			    (child->style.flex_keywords & 0x1000u) : (box->style.flex_keywords & 0x2000u)) != 0;
+			if ((area_width > outer_width || !justify_safe) &&
 			    (justify == CSS_ALIGN_RIGHT ||
 			    (justify == CSS_ALIGN_END && box->style.direction == CSS_DIRECTION_LTR) ||
 			    (justify == CSS_ALIGN_START && box->style.direction == CSS_DIRECTION_RTL)))
 				child->x += area_width - outer_width;
-			if (area_width > outer_width && justify == CSS_ALIGN_CENTER)
+			if ((area_width > outer_width || !justify_safe) && justify == CSS_ALIGN_CENTER)
 				child->x += (area_width - outer_width) / 2;
+		}
+		/* Vertical items of a column that align by baseline share it: the left group flush left, the right group flush right. */
+		if (grid_column_baseline(box, item, &col_before, &col_after, &col_right)) {
+			grid_column_baselines(box, &grid, item->column, &left_before, &left_after, &right_before, &right_after);
+			if (col_right)
+				child->x = x + area_width - right_after - col_before + child->margin[CSS_LEFT];
+			else
+				child->x = x + left_before - col_before + child->margin[CSS_LEFT];
 		}
 		if (grid_fixed_column_baseline(box, item, &right_extent)) {
 			/* Orthogonal empty items share a border-left baseline in this column. */
@@ -841,18 +1086,26 @@ layout_grid(
 		}
 		if (baseline_group != 0) {
 			/* Members of the row share their group's baseline: the first group's below the row's top, the last's above its bottom. */
-			grid_row_baselines(box, &grid, item->row, &first_above, &first_below, &last_above, &last_below);
+			grid_row_baselines(box, &grid, baseline_group == 1 ? item->row : item->row + item->row_span - 1,
+			    &first_above, &first_below, &last_above, &last_below);
 			if (baseline_group == 1)
 				child->y += first_above - baseline;
 			else
 				child->y += area_height - last_below - baseline;
 		}
 		outer = grid_outer_height(child);
-		if (align == CSS_ALIGN_END && area_height > outer)
+		align_safe = (child->style.align_self != CSS_ALIGN_AUTO ?
+		    (child->style.flex_keywords & 128u) : (box->style.flex_keywords & 64u)) != 0;
+		if (align == CSS_ALIGN_END && (area_height > outer || !align_safe))
 			child->y += area_height - outer;
-		if (align == CSS_ALIGN_CENTER && area_height > outer)
+		if (align == CSS_ALIGN_CENTER && (area_height > outer || !align_safe))
 			child->y += (area_height - outer) / 2;
 	}
+
+	/* The boxes out of the flow deeper in the grid items that the grid contains are placed in their areas too (the items have their places now). */
+	if (box->style.position != CSS_POSITION_STATIC && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    (box->style.direction == CSS_DIRECTION_LTR || box->style.direction == CSS_DIRECTION_RTL))
+		grid_abspos_deeper(box, box, &grid, column_gap, row_gap, shift, row_shift, 0, 0, 0);
 
 	/* The container's content height: its rows and the gaps between them. */
 	row_gap = row_gap_base;
@@ -861,6 +1114,8 @@ layout_grid(
 		box->height = 0;
 	for (position = 0; position < grid.row_count; position++)
 		box->height += grid.rows[position];
+	if (grid.intrinsic_height >= 0)
+		box->height = grid.intrinsic_height;
 
 	/* Keep the actual resolved tracks before the transient sizing arrays leave. */
 	error = grid_save_used_tracks(tree, box, &grid);
@@ -2024,6 +2279,8 @@ grid_static_alignment(
 {
 	int justify;
 	int align;
+	int raw_align;
+	int orthogonal;
 	int rtl;
 
 	rtl = box->style.direction == CSS_DIRECTION_RTL;
@@ -2034,6 +2291,46 @@ grid_static_alignment(
 	if (align == CSS_ALIGN_AUTO)
 		align = box->style.align_items;
 	align = grid_in_flow_align(align);
+
+	/* An item whose writing mode is orthogonal has its inline axis along the column axis: self-start and self-end follow its direction there. */
+	orthogonal = child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB &&
+	    box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB;
+	raw_align = child->style.align_self;
+	if (raw_align == CSS_ALIGN_AUTO)
+		raw_align = box->style.align_items;
+	if (orthogonal && raw_align == CSS_ALIGN_SELF_END)
+		align = child->style.direction == CSS_DIRECTION_RTL ? CSS_ALIGN_START : CSS_ALIGN_END;
+	else if (orthogonal && raw_align == CSS_ALIGN_SELF_START)
+		align = child->style.direction == CSS_DIRECTION_RTL ? CSS_ALIGN_END : CSS_ALIGN_START;
+
+	/*
+	 * A horizontal item of a vertical grid has its inline axis along the grid's block axis and its block axis
+	 * (top to bottom) along the grid's inline axis: self-start and self-end name the item's edges there.
+	 */
+	if (box->physical_style != NULL && layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB &&
+	    child->physical_style == NULL && child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
+		int box_mode;
+		int block_start_left;
+		int inline_start_top;
+		int item_left;
+
+		box_mode = layout_physical_mode(box);
+		block_start_left = box_mode != CSS_WRITING_VERTICAL_RL;
+		inline_start_top = (box->style.direction == CSS_DIRECTION_LTR) !=
+		    (box->physical_style->writing_mode == CSS_WRITING_VERTICAL_LR && box->physical_style->writing_sideways == 1);
+		item_left = child->style.direction == CSS_DIRECTION_LTR;
+		raw_align = child->style.align_self;
+		if (raw_align == CSS_ALIGN_AUTO)
+			raw_align = box->style.align_items;
+		if (raw_align == CSS_ALIGN_SELF_START)
+			align = item_left == block_start_left ? CSS_ALIGN_START : CSS_ALIGN_END;
+		else if (raw_align == CSS_ALIGN_SELF_END)
+			align = item_left == block_start_left ? CSS_ALIGN_END : CSS_ALIGN_START;
+		if (justify == CSS_ALIGN_SELF_START)
+			justify = inline_start_top ? CSS_ALIGN_START : CSS_ALIGN_END;
+		else if (justify == CSS_ALIGN_SELF_END)
+			justify = inline_start_top ? CSS_ALIGN_END : CSS_ALIGN_START;
+	}
 	child->static_x_align = CSS_ALIGN_AUTO;
 	child->static_y_align = CSS_ALIGN_AUTO;
 	if (justify == CSS_ALIGN_END || justify == CSS_ALIGN_SELF_END ||
@@ -2042,7 +2339,11 @@ grid_static_alignment(
 		child->static_x_align = justify;
 		child->static_x_safe = (child->style.justify_self != CSS_ALIGN_AUTO ?
 		    (child->style.flex_keywords & 0x1000u) : (box->style.flex_keywords & 0x2000u)) != 0;
-		if (justify == CSS_ALIGN_SELF_END)
+		if (justify == CSS_ALIGN_SELF_END && orthogonal)
+			child->static_x_align_from_right = child->style.writing_mode == CSS_WRITING_VERTICAL_LR;
+		else if (justify == CSS_ALIGN_SELF_START && orthogonal)
+			child->static_x_align_from_right = child->style.writing_mode == CSS_WRITING_VERTICAL_RL;
+		else if (justify == CSS_ALIGN_SELF_END)
 			child->static_x_align_from_right = child->style.direction == CSS_DIRECTION_LTR;
 		else if (justify == CSS_ALIGN_SELF_START)
 			child->static_x_align_from_right = child->style.direction == CSS_DIRECTION_RTL;
@@ -2116,7 +2417,8 @@ grid_static_position(
 			content_height += row_gap * (layout_unit)(grid->row_count - 1);
 	}
 	for (child = box->first_child; child != NULL; child = child->next) {
-		if (child->style.position != CSS_POSITION_ABSOLUTE)
+		if (child->style.position != CSS_POSITION_ABSOLUTE &&
+		    !(child->style.position == CSS_POSITION_FIXED && layout_containing_box(child) == box))
 			continue;
 		if (!own_block)
 			grid_static_content_box(box, child, content_height);
@@ -2184,6 +2486,74 @@ grid_abspos_areas(
 	layout_unit row_shift)
 {
 	struct layout_box *child;
+
+	/* The grid is the containing block only when positioned; other flows keep their paths. */
+	if (box->style.position == CSS_POSITION_STATIC ||
+	    box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
+	    (box->style.direction != CSS_DIRECTION_LTR && box->style.direction != CSS_DIRECTION_RTL))
+		return;
+	for (child = box->first_child; child != NULL; child = child->next)
+		grid_abspos_one(box, child, grid, column_gap, row_gap, shift, row_shift, 0, 0, 1);
+}
+
+/*
+ * Finds the boxes out of the flow below the grid's items whose containing block is the grid (the grid-placement
+ * properties name their area), with the offset of their parent's content box from the grid's.
+ */
+static void
+grid_abspos_deeper(
+	struct layout_box *box,
+	struct layout_box *walk,
+	const struct grid_state *grid,
+	layout_unit column_gap,
+	layout_unit row_gap,
+	layout_unit shift,
+	layout_unit row_shift,
+	layout_unit off_x,
+	layout_unit off_y,
+	int depth)
+{
+	struct layout_box *child;
+
+	if (depth > 32)
+		return;
+	for (child = walk->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow) {
+			if (walk != box && child->style.position == CSS_POSITION_ABSOLUTE && layout_containing_box(child) == box)
+				grid_abspos_one(box, child, grid, column_gap, row_gap, shift, row_shift, off_x, off_y, 0);
+			continue;
+		}
+		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
+			continue;
+
+		/* A grid inside lays its own items out; what its lines name (a subgrid's) is not the outer grid's. */
+		if (child->style.display == CSS_DISPLAY_GRID || child->style.display == CSS_DISPLAY_INLINE_GRID ||
+		    child->style.column_subgrid != NULL || child->style.row_subgrid != NULL)
+			continue;
+		grid_abspos_deeper(box, child, grid, column_gap, row_gap, shift, row_shift,
+		    off_x + child->x + child->border[CSS_LEFT] + child->padding[CSS_LEFT] + (walk == box ? 0 : 0),
+		    off_y + child->y + child->border[CSS_TOP] + child->padding[CSS_TOP], depth + 1);
+	}
+}
+
+/*
+ * Gives a box out of the flow the grid area its grid-placement properties name as its containing block (and, for a
+ * child of the grid, the static position at the area's start corner).  off_x and off_y are the offsets of its parent's
+ * content box from the grid's, which the cb of a deeper box is relative to.
+ */
+static void
+grid_abspos_one(
+	struct layout_box *box,
+	struct layout_box *child,
+	const struct grid_state *grid,
+	layout_unit column_gap,
+	layout_unit row_gap,
+	layout_unit shift,
+	layout_unit row_shift,
+	layout_unit off_x,
+	layout_unit off_y,
+	int direct)
+{
 	layout_unit begin;
 	layout_unit left;
 	layout_unit right;
@@ -2197,25 +2567,34 @@ grid_abspos_areas(
 	int index;
 	int rtl;
 
-	/* The grid is the containing block only when positioned; other flows keep their paths. */
-	if (box->style.position == CSS_POSITION_STATIC ||
-	    box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
-	    (box->style.direction != CSS_DIRECTION_LTR && box->style.direction != CSS_DIRECTION_RTL))
-		return;
 	rtl = box->style.direction == CSS_DIRECTION_RTL;
-	for (child = box->first_child; child != NULL; child = child->next) {
-		if (child->style.position != CSS_POSITION_ABSOLUTE || child->static_grid_area)
-			continue;
-		if (child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
-			continue;
+	{
+		if ((child->style.position != CSS_POSITION_ABSOLUTE &&
+		    !(child->style.position == CSS_POSITION_FIXED && layout_containing_box(child) == box)) ||
+		    child->static_grid_area)
+			return;
+		if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
+			return;
+		/* A grid without items has no implicit tracks: a line beyond the explicit ones is auto. */
 		grid_abspos_lines(&child->style.grid_column, box->style.column_count,
-		    grid->column_count, &first_column, &last_column);
+		    grid->item_count == 0 ? box->style.column_count : grid->column_count, &first_column, &last_column);
 		grid_abspos_lines(&child->style.grid_row, box->style.row_count,
-		    grid->row_count, &first_row, &last_row);
+		    grid->item_count == 0 ? box->style.row_count : grid->row_count, &first_row, &last_row);
+
+		/* A deeper box that names no line keeps the grid's padding box, and one that names lines by name leaves them to a subgrid. */
+		if (!direct && first_column == 0 && last_column == 0 && first_row == 0 && last_row == 0)
+			return;
+		if (!direct && (child->style.grid_column.start_name != NULL || child->style.grid_column.end_name != NULL ||
+		    child->style.grid_row.start_name != NULL || child->style.grid_row.end_name != NULL))
+			return;
+
 		/* The columns: logical offsets from the start of the track strip. */
+		/* A collapsed (auto-fit) track is as wide as its gutter is negative; with every track collapsed nothing is left. */
 		total = column_gap * (layout_unit)(grid->column_count - 1);
 		for (index = 0; index < grid->column_count; index++)
 			total += grid->columns[index];
+		if (grid->column_collapsed != NULL && grid_live_tracks(grid->column_collapsed, grid->column_count) == 0)
+			total = 0;
 		left = 0;
 		right = 0;
 		begin = 0;
@@ -2226,7 +2605,7 @@ grid_abspos_areas(
 				left = begin;
 			begin += grid->columns[index];
 			if (last_column == index + 2)
-				right = begin;
+				right = begin < 0 ? 0 : begin;
 			begin += column_gap;
 		}
 		if (first_column == grid->column_count + 1)
@@ -2246,19 +2625,21 @@ grid_abspos_areas(
 			physical_right = shift + total - left;
 			child->cb_left_auto = left_auto;
 			child->cb_right_auto = right_auto;
-			child->cb_left = left_auto ? -box->padding[CSS_LEFT] : physical_left;
-			child->cb_right = right_auto ? box->width + box->padding[CSS_RIGHT] : physical_right;
+			child->cb_left = (left_auto ? -box->padding[CSS_LEFT] : physical_left) - off_x;
+			child->cb_right = (right_auto ? box->width + box->padding[CSS_RIGHT] : physical_right) - off_x;
 		} else {
 			child->cb_left_auto = first_column == 0;
 			child->cb_right_auto = last_column == 0;
-			child->cb_left = child->cb_left_auto ? -box->padding[CSS_LEFT] : shift + left;
-			child->cb_right = child->cb_right_auto ? box->width + box->padding[CSS_RIGHT] : shift + right;
+			child->cb_left = (child->cb_left_auto ? -box->padding[CSS_LEFT] : shift + left) - off_x;
+			child->cb_right = (child->cb_right_auto ? box->width + box->padding[CSS_RIGHT] : shift + right) - off_x;
 		}
 
 		/* The rows. */
 		total = row_gap * (layout_unit)(grid->row_count - 1);
 		for (index = 0; index < grid->row_count; index++)
 			total += grid->rows[index];
+		if (grid->row_collapsed != NULL && grid_live_tracks(grid->row_collapsed, grid->row_count) == 0)
+			total = 0;
 		top = 0;
 		bottom = 0;
 		begin = 0;
@@ -2267,7 +2648,7 @@ grid_abspos_areas(
 				top = begin;
 			begin += grid->rows[index];
 			if (last_row == index + 2)
-				bottom = begin;
+				bottom = begin < 0 ? 0 : begin;
 			begin += row_gap;
 		}
 		if (first_row == grid->row_count + 1)
@@ -2276,9 +2657,41 @@ grid_abspos_areas(
 			bottom = 0;
 		child->cb_top_auto = first_row == 0;
 		child->cb_bottom_auto = last_row == 0;
-		child->cb_top = child->cb_top_auto ? -box->padding[CSS_TOP] : row_shift + top;
-		child->cb_bottom = child->cb_bottom_auto ? 0 : row_shift + bottom;
+		child->cb_top = (child->cb_top_auto ? -box->padding[CSS_TOP] : row_shift + top) - off_y;
+		child->cb_bottom = (child->cb_bottom_auto ? 0 : row_shift + bottom) - off_y;
 		child->cb_set = 1;
+		child->area_from_anchor = 0;
+
+		/* A deeper box's auto edges are the grid's padding edges in the same frame as its lines (the grid's own coordinates are not its parent's). */
+		if (!direct) {
+			if (child->cb_left_auto) {
+				child->cb_left = -box->padding[CSS_LEFT] - off_x;
+				child->cb_left_auto = 0;
+			}
+			if (child->cb_right_auto) {
+				child->cb_right = box->width + box->padding[CSS_RIGHT] - off_x;
+				child->cb_right_auto = 0;
+			}
+			if (child->cb_top_auto) {
+				child->cb_top = -box->padding[CSS_TOP] - off_y;
+				child->cb_top_auto = 0;
+			}
+			if (child->cb_bottom_auto) {
+				layout_unit content_height;
+
+				/* The content height is not final yet: the definite height, or the rows. */
+				content_height = box->style.height.unit == CSS_UNIT_PX ? layout_from_px(box->style.height.value) : 0;
+				if (box->style.height.unit != CSS_UNIT_PX) {
+					for (index = 0; index < grid->row_count; index++)
+						content_height += grid->rows[index];
+					if (grid->row_count > 1)
+						content_height += row_gap * (layout_unit)(grid->row_count - 1);
+				}
+				child->cb_bottom = content_height + box->padding[CSS_BOTTOM] - off_y;
+				child->cb_bottom_auto = 0;
+			}
+			return;
+		}
 
 		/* The static position starts at the area's start corner. */
 		child->static_x = rtl ? child->cb_right : child->cb_left;
@@ -2556,11 +2969,757 @@ grid_row_track(
 }
 
 /*
- * Sizes the columns: fixed tracks at their lengths, auto tracks at their
- * one-column items' content widths (widened for the items spanning them),
- * then the fr tracks sharing what is left of the container's width (at
- * least their minimum), or the auto tracks sharing it when there is no fr.
- * While a container is measured its fr tracks are sized as auto ones.
+ * One entry of an axis' sizing: a box (or a stand-in of a fixed size) with
+ * the tracks it covers and what its edges add; the items of a subgrid
+ * stand in the parent's list at the parent's track numbers.
+ */
+struct grid_flat {
+	struct layout_box *box;
+	int start;
+	int span;
+	int row;
+	int row_span;
+	layout_unit extra;
+	/* At least zero: a stand-in of this size, without a box. */
+	layout_unit fixed_size;
+};
+
+/* The entries of one axis' sizing and how many tracks the axis has. */
+struct grid_flat_list {
+	struct grid_flat *entries;
+	size_t count;
+	size_t capacity;
+	int tracks;
+};
+
+/* Tells whether a grid item takes its tracks in an axis from the grid it is in. */
+static int
+grid_subgrid_axis(
+	const struct layout_box *box,
+	int columns)
+{
+	/* Only an in-flow grid container. */
+	if (box->out_of_flow || box->replaced)
+		return 0;
+	if (box->style.display != CSS_DISPLAY_GRID && box->style.display != CSS_DISPLAY_INLINE_GRID)
+		return 0;
+
+	/* A box with layout or paint containment is an independent formatting context, which is no subgrid. */
+	if ((layout_containment(box) & 6U) != 0)
+		return 0;
+
+	/* A subgrid whose writing mode is orthogonal to its parent's keeps tracks of its own. */
+	if (box->parent != NULL &&
+	    (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) !=
+	    (box->parent->style.writing_mode == CSS_WRITING_HORIZONTAL_TB))
+		return 0;
+
+	/* The axis declared as a subgrid. */
+	if (columns)
+		return box->style.column_subgrid != NULL;
+	return box->style.row_subgrid != NULL;
+}
+
+/* Finds how much margin, border and padding a box has on the start (or end) side of an axis. */
+static layout_unit
+grid_edge(
+	const struct layout_box *box,
+	int columns,
+	int start)
+{
+	int side;
+
+	/* The side: the left or top for the start, the right or bottom for the end (a right to left grid starts at the right). */
+	if (columns) {
+		side = start ? CSS_LEFT : CSS_RIGHT;
+		if (box->style.direction == CSS_DIRECTION_RTL)
+			side = start ? CSS_RIGHT : CSS_LEFT;
+	} else {
+		side = start ? CSS_TOP : CSS_BOTTOM;
+	}
+	return box->margin[side] + box->border[side] + box->padding[side];
+}
+
+/* Finds the gap a box lays its tracks of an axis with: its own when it gave a length, else the one of the grid it is in. */
+static layout_unit
+grid_gap_of(
+	const struct layout_box *box,
+	int columns,
+	layout_unit parent_gap)
+{
+	const struct css_length *gap;
+
+	/* A gap in pixels. */
+	gap = columns ? &box->style.column_gap : &box->style.row_gap;
+	if (gap->unit == CSS_UNIT_PX)
+		return layout_from_px(gap->value);
+	return parent_gap;
+}
+
+/* Adds an entry to a list (the tracks it covers are held within the axis). */
+static int
+grid_flat_add(
+	struct grid_flat_list *list,
+	struct layout_box *box,
+	int start,
+	int span,
+	int row,
+	int row_span,
+	layout_unit extra,
+	layout_unit fixed_size)
+{
+	struct grid_flat *grown;
+	size_t capacity;
+
+	/* A place outside the axis counts for nothing. */
+	if (start < 0 || start >= list->tracks)
+		return 0;
+	if (span < 1)
+		span = 1;
+	if (start + span > list->tracks)
+		span = list->tracks - start;
+
+	/* Room for one more. */
+	if (list->count == list->capacity) {
+		capacity = list->capacity == 0 ? 16U : list->capacity * 2U;
+		grown = realloc(list->entries, capacity * sizeof(*grown));
+		if (grown == NULL)
+			return ENOMEM;
+		list->entries = grown;
+		list->capacity = capacity;
+	}
+
+	/* The entry. */
+	list->entries[list->count].box = box;
+	list->entries[list->count].start = start;
+	list->entries[list->count].span = span;
+	list->entries[list->count].row = row;
+	list->entries[list->count].row_span = row_span;
+	list->entries[list->count].extra = extra;
+	list->entries[list->count].fixed_size = fixed_size;
+	list->count++;
+	return 0;
+}
+
+/*
+ * Adds the items of a subgrid to a parent's list, at the parent's track
+ * numbers: what the subgrid's edges (margin, border, padding) add goes to
+ * the items on its first and last tracks, and half of what its gap differs
+ * from the parent's to the items on each interior side.  A track at an edge
+ * with no item of the subgrid on it gets a stand-in for the edge alone.
+ */
+static int
+grid_flatten(
+	struct grid_flat_list *list,
+	struct layout_box *sub,
+	int columns,
+	int first,
+	layout_unit parent_gap,
+	layout_unit extra_start,
+	layout_unit extra_end,
+	layout_unit inherited)
+{
+	struct layout_box *child;
+	layout_unit edge_start;
+	layout_unit edge_end;
+	layout_unit gap;
+	layout_unit half;
+	layout_unit start_extra;
+	layout_unit end_extra;
+	int count;
+	int start;
+	int span;
+	int touched_start;
+	int touched_end;
+	int error;
+
+	/* The subgrid's tracks, its edges and its gap. */
+	count = columns ? sub->subgrid_column_span : sub->subgrid_row_span;
+	layout_box_model(sub, 0);
+	edge_start = grid_edge(sub, columns, 1) + extra_start;
+	edge_end = grid_edge(sub, columns, 0) + extra_end;
+	gap = grid_gap_of(sub, columns, parent_gap);
+	half = inherited + (gap - parent_gap) / 2;
+
+	/* Each item of the subgrid. */
+	touched_start = 0;
+	touched_end = 0;
+	for (child = sub->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow)
+			continue;
+		start = (columns ? child->item_column : child->item_row) - 1;
+		span = columns ? child->item_column_span : child->item_row_span;
+		if (start < 0 || start >= count)
+			continue;
+		if (span < 1)
+			span = 1;
+		if (start + span > count)
+			span = count - start;
+
+		/* What each side adds: the edge on the subgrid's first and last tracks, else half the gap's difference. */
+		start_extra = half;
+		end_extra = half;
+		if (start == 0) {
+			start_extra = edge_start;
+			touched_start = 1;
+		}
+		if (start + span == count) {
+			end_extra = edge_end;
+			touched_end = 1;
+		}
+
+		/* A subgrid inside passes its sides on; any other item stands in the list. */
+		if ((columns && child->subgrid_column_span > 0) || (!columns && child->subgrid_row_span > 0)) {
+			error = grid_flatten(list, child, columns, first + start, gap, start_extra, end_extra, half);
+		} else {
+			error = grid_flat_add(list, child, first + start, span, child->item_row - 1,
+			    child->item_row_span, start_extra + end_extra, -1);
+		}
+		if (error != 0)
+			return error;
+	}
+
+	/* An edge no item reaches still takes room. */
+	if (count == 1 && !touched_start && !touched_end)
+		return grid_flat_add(list, NULL, first, 1, 0, 1, 0, edge_start + edge_end);
+	if (!touched_start) {
+		error = grid_flat_add(list, NULL, first, 1, 0, 1, 0, edge_start);
+		if (error != 0)
+			return error;
+	}
+	if (!touched_end)
+		return grid_flat_add(list, NULL, first + count - 1, 1, 0, 1, 0, edge_end);
+	return 0;
+}
+
+/* Makes the list of an axis' entries: the grid's items, and the items of its subgrids in place of them. */
+static int
+grid_flat_build(
+	struct grid_flat_list *list,
+	const struct grid_state *grid,
+	int columns,
+	layout_unit gap)
+{
+	const struct grid_item *item;
+	size_t index;
+	int error;
+
+	/* Each item of the grid. */
+	list->entries = NULL;
+	list->count = 0;
+	list->capacity = 0;
+	list->tracks = columns ? grid->column_count : grid->row_count;
+	for (index = 0; index < grid->item_count; index++) {
+		item = &grid->items[index];
+		if (columns && item->box->subgrid_column_span > 0) {
+			error = grid_flatten(list, item->box, 1, item->column, gap, 0, 0, 0);
+		} else if (!columns && item->box->subgrid_row_span > 0) {
+			error = grid_flatten(list, item->box, 0, item->row, gap, 0, 0, 0);
+		} else if (columns) {
+			error = grid_flat_add(list, item->box, item->column, item->column_span, item->row, item->row_span, 0, -1);
+		} else {
+			error = grid_flat_add(list, item->box, item->row, item->row_span, item->column, item->column_span, 0, -1);
+		}
+		if (error != 0)
+			return error;
+	}
+	return 0;
+}
+
+/* Adds a line's names (atoms) to another's, once each and no more than a line keeps. */
+static void
+grid_names_merge(
+	struct css_line_names *line,
+	const struct css_line_names *names)
+{
+	int index;
+	int have;
+
+	/* Each name not there yet. */
+	for (index = 0; index < names->count; index++) {
+		for (have = 0; have < line->count; have++) {
+			if (line->names[have] == names->names[index])
+				break;
+		}
+		if (have == line->count && line->count < CSS_LINE_NAMES) {
+			line->names[line->count] = names->names[index];
+			line->count++;
+		}
+	}
+}
+
+/*
+ * Gives a subgrid's axis the names of its lines: the list it declares
+ * (laid out over the lines it spans, a repeat(auto-fill) taking what the
+ * others leave) and the names of the parent's lines that are the same
+ * lines.
+ */
+static int
+grid_subgrid_line_names(
+	struct layout_tree *tree,
+	struct layout_box *sub,
+	int columns,
+	const struct layout_box *parent,
+	int first)
+{
+	const struct css_subgrid_names *declared;
+	const struct css_line_names *outer;
+	struct css_line_names *lines;
+	int line;
+	int count;
+
+	/* The array of the lines it spans plus the last. */
+	count = columns ? sub->subgrid_column_span : sub->subgrid_row_span;
+	if (count > CSS_TRACKS)
+		count = CSS_TRACKS;
+	count++;
+	lines = wb_arena_zalloc(&tree->arena, ((size_t)CSS_TRACKS + 1U) * sizeof(*lines));
+	if (lines == NULL)
+		return ENOMEM;
+
+	/* The declared names over the lines. */
+	declared = columns ? sub->style.column_subgrid_names : sub->style.row_subgrid_names;
+	css_subgrid_lines(declared, count, lines);
+
+	/* The parent's names of the same lines. */
+	outer = columns ? parent->style.column_names : parent->style.row_names;
+	for (line = 0; outer != NULL && line < count && first + line <= CSS_TRACKS; line++)
+		grid_names_merge(&lines[line], &outer[first + line]);
+
+	/* Kept for the placement of its items. */
+	if (columns)
+		sub->style.column_names = lines;
+	else
+		sub->style.row_names = lines;
+	return 0;
+}
+
+/*
+ * Places the items of a subgrid against the tracks it spans (its explicit
+ * grid is those tracks), recording where each went and which of them are
+ * subgrids in turn.
+ */
+static int
+grid_subgrid_prepare(
+	struct layout_tree *tree,
+	struct layout_box *sub,
+	const struct layout_box *parent,
+	int column_first,
+	int row_first)
+{
+	struct grid_state grid;
+	struct grid_item *item;
+	struct layout_box *child;
+	size_t index;
+	int count;
+	int track;
+	int error;
+
+	/* The tracks it spans are its explicit grid: one auto track each. */
+	if (sub->subgrid_column_span > 0) {
+		count = sub->subgrid_column_span;
+		if (count > CSS_TRACKS)
+			count = CSS_TRACKS;
+		sub->style.column_count = count;
+		memset(&sub->style.column_repeat, 0, sizeof(sub->style.column_repeat));
+		for (track = 0; track < count; track++) {
+			memset(&sub->style.columns[track], 0, sizeof(sub->style.columns[track]));
+			sub->style.columns[track].kind = CSS_TRACK_AUTO;
+			sub->style.columns[track].minimum.unit = CSS_UNIT_AUTO;
+		}
+	}
+	if (sub->subgrid_row_span > 0) {
+		count = sub->subgrid_row_span;
+		if (count > CSS_TRACKS)
+			count = CSS_TRACKS;
+		sub->style.row_count = count;
+		memset(&sub->style.row_repeat, 0, sizeof(sub->style.row_repeat));
+		for (track = 0; track < count; track++) {
+			memset(&sub->style.rows[track], 0, sizeof(sub->style.rows[track]));
+			sub->style.rows[track].kind = CSS_TRACK_AUTO;
+			sub->style.rows[track].minimum.unit = CSS_UNIT_AUTO;
+		}
+	}
+
+	/* The line names of the axes it shares: its own list, and the parent's lines it spans. */
+	if (sub->subgrid_column_span > 0) {
+		error = grid_subgrid_line_names(tree, sub, 1, parent, column_first);
+		if (error != 0)
+			return error;
+	}
+	if (sub->subgrid_row_span > 0) {
+		error = grid_subgrid_line_names(tree, sub, 0, parent, row_first);
+		if (error != 0)
+			return error;
+	}
+
+	/* The items placed. */
+	layout_grid_names(sub);
+	memset(&grid, 0, sizeof(grid));
+	error = grid_collect(sub, &grid);
+	if (error == 0)
+		error = grid_place(&grid, sub->style.grid_auto_flow);
+	if (error != 0) {
+		grid_release(&grid);
+		return error;
+	}
+
+	/* Where each went, and the subgrids among them. */
+	for (index = 0; index < grid.item_count; index++) {
+		item = &grid.items[index];
+		child = item->box;
+		child->item_row = item->row + 1;
+		child->item_column = item->column + 1;
+		child->item_row_span = item->row_span;
+		child->item_column_span = item->column_span;
+		child->subgrid_column_span = 0;
+		child->subgrid_row_span = 0;
+		child->subgrid_columns = NULL;
+		child->subgrid_rows = NULL;
+		if (grid_subgrid_axis(child, 1))
+			child->subgrid_column_span = item->column_span;
+		if (grid_subgrid_axis(child, 0))
+			child->subgrid_row_span = item->row_span;
+		if (child->subgrid_column_span > 0 || child->subgrid_row_span > 0) {
+			error = grid_subgrid_prepare(tree, child, sub, item->column, item->row);
+			if (error != 0)
+				break;
+		}
+	}
+	grid_release(&grid);
+	return error;
+}
+
+/*
+ * Gives a subgrid the tracks it spans of its parent's axis: each track of
+ * the parent, less the subgrid's edges at its first and last, with half
+ * the gap's difference added on each interior side.
+ */
+static int
+grid_subgrid_preset(
+	struct layout_tree *tree,
+	struct layout_box *sub,
+	int columns,
+	const layout_unit *sizes,
+	int first,
+	int tracks,
+	layout_unit gap)
+{
+	layout_unit *given;
+	layout_unit own_gap;
+	layout_unit half;
+	layout_unit size;
+	int count;
+	int index;
+
+	/* The tracks it spans that the parent has. */
+	count = columns ? sub->subgrid_column_span : sub->subgrid_row_span;
+	if (first + count > tracks)
+		count = tracks - first;
+	if (count < 1)
+		return 0;
+	given = wb_arena_alloc(&tree->arena, (size_t)count * sizeof(*given));
+	if (given == NULL)
+		return ENOMEM;
+
+	/* Each track as the subgrid has it. */
+	layout_box_model(sub, 0);
+	own_gap = grid_gap_of(sub, columns, gap);
+	half = (gap - own_gap) / 2;
+	for (index = 0; index < count; index++) {
+		size = sizes[first + index];
+		if (index == 0)
+			size -= grid_edge(sub, columns, 1);
+		if (index == count - 1)
+			size -= grid_edge(sub, columns, 0);
+		if (index > 0)
+			size += half;
+		if (index < count - 1)
+			size += half;
+		given[index] = size;
+	}
+
+	/* Kept for its layout. */
+	if (columns) {
+		sub->subgrid_columns = given;
+		sub->subgrid_column_gap = own_gap;
+	} else {
+		sub->subgrid_rows = given;
+		sub->subgrid_row_gap = own_gap;
+	}
+	return 0;
+}
+
+/*
+ * Describes one declared track to the track sizing algorithm: its minimum
+ * and maximum sizing functions, with a percentage resolved against the
+ * definite whole (or taken as auto when the whole is not known yet).
+ */
+static void
+grid_track_spec_of(
+	const struct css_track *track,
+	layout_unit whole,
+	struct grid_track_spec *spec)
+{
+	/* A track starts as auto and auto. */
+	memset(spec, 0, sizeof(*spec));
+	spec->minimum = GRID_TRACK_AUTO;
+	spec->maximum = GRID_TRACK_AUTO;
+
+	/* The maximum, and the minimum a plain length also has. */
+	if (track->kind == CSS_TRACK_LENGTH) {
+		if (track->size.unit == CSS_UNIT_PX || (track->size.unit == CSS_UNIT_PERCENT && whole >= 0)) {
+			spec->maximum = GRID_TRACK_LENGTH;
+			spec->maximum_length = grid_track_length(&track->size, whole, 0);
+			spec->minimum = GRID_TRACK_LENGTH;
+			spec->minimum_length = spec->maximum_length;
+		}
+	} else if (track->kind == CSS_TRACK_FR) {
+		spec->maximum = GRID_TRACK_FLEX;
+		spec->flex = track->fr;
+	} else if (track->maximum_rule == CSS_TRACK_MAXIMUM_MIN_CONTENT) {
+		/* A plain min-content is minmax(min-content, min-content). */
+		spec->maximum = GRID_TRACK_MIN_CONTENT;
+		if (track->minimum_rule == CSS_TRACK_MINIMUM_NONE)
+			spec->minimum = GRID_TRACK_MIN_CONTENT;
+	} else if (track->maximum_rule == CSS_TRACK_MAXIMUM_MAX_CONTENT) {
+		/* A plain max-content is minmax(max-content, max-content). */
+		spec->maximum = GRID_TRACK_MAX_CONTENT;
+		if (track->minimum_rule == CSS_TRACK_MINIMUM_NONE)
+			spec->minimum = GRID_TRACK_MAX_CONTENT;
+	} else if (track->maximum_rule == CSS_TRACK_MAXIMUM_FIT_CONTENT) {
+		/* fit-content(P) with a percentage that is not known yet is max-content. */
+		spec->maximum = GRID_TRACK_MAX_CONTENT;
+		if (track->size.unit == CSS_UNIT_PX || (track->size.unit == CSS_UNIT_PERCENT && whole >= 0)) {
+			spec->maximum = GRID_TRACK_FIT_CONTENT;
+			spec->maximum_length = grid_track_length(&track->size, whole, 0);
+		}
+	}
+
+	/* The minimum a minmax() gave. */
+	if (track->minimum_rule == CSS_TRACK_MINIMUM_LENGTH) {
+		spec->minimum = GRID_TRACK_AUTO;
+		if (track->minimum.unit == CSS_UNIT_PX || (track->minimum.unit == CSS_UNIT_PERCENT && whole >= 0)) {
+			spec->minimum = GRID_TRACK_LENGTH;
+			spec->minimum_length = grid_track_length(&track->minimum, whole, 0);
+		}
+	} else if (track->minimum_rule == CSS_TRACK_MINIMUM_AUTO) {
+		spec->minimum = GRID_TRACK_AUTO;
+	} else if (track->minimum_rule == CSS_TRACK_MINIMUM_MIN_CONTENT) {
+		spec->minimum = GRID_TRACK_MIN_CONTENT;
+	} else if (track->minimum_rule == CSS_TRACK_MINIMUM_MAX_CONTENT) {
+		spec->minimum = GRID_TRACK_MAX_CONTENT;
+	}
+}
+
+/* Resolves a length or percentage bound of an item (a percentage of the definite whole; -1 when it is not known). */
+static layout_unit
+grid_item_bound(
+	const struct css_length *length,
+	layout_unit whole)
+{
+	/* A length. */
+	if (length->unit == CSS_UNIT_PX)
+		return layout_from_px(length->value) + layout_from_px(length->offset);
+
+	/* A percentage of the whole, when that is known. */
+	if (length->unit == CSS_UNIT_PERCENT && whole >= 0)
+		return (layout_unit)((float)whole * length->value / 100.0f) + layout_from_px(length->offset);
+
+	/* Not a bound that can be resolved. */
+	return -1;
+}
+
+/*
+ * Measures what an item contributes to a column: its margin box's width
+ * when its content is sized at its min-content or max-content width (or its
+ * own width, when that is a length), held within its minimum and maximum
+ * widths.  The minimum contribution of an item whose preferred width is
+ * auto is its minimum width, or its automatic minimum.
+ */
+static int
+grid_column_item_contribution(
+	struct layout_tree *tree,
+	const struct grid_item *grid_item,
+	int kind,
+	int automatic,
+	layout_unit *fixed,
+	layout_unit *outer)
+{
+	struct layout_box *item;
+	layout_unit content;
+	layout_unit frame;
+	layout_unit margins;
+	layout_unit bound;
+	layout_unit ratio_width;
+	layout_unit basis;
+	layout_unit rows;
+	struct css_length saved_height;
+	int definite;
+	int error;
+
+	/* A percentage minimum or maximum depends on the area the contribution decides, so it counts as none. */
+	item = grid_item->box;
+	*fixed = -1;
+	basis = -1;
+
+	/* The frame and margins around the content. */
+	layout_box_model(item, 0);
+	frame = item->border[CSS_LEFT] + item->padding[CSS_LEFT] + item->padding[CSS_RIGHT] + item->border[CSS_RIGHT];
+	margins = item->margin[CSS_LEFT] + item->margin[CSS_RIGHT];
+
+	/* A width the fixed rows and the ratio give. */
+	if (kind != GRID_CONTRIBUTION_MINIMUM &&
+	    grid_ratio_width(item->parent, grid_item, grid_fixed_row_gap(item->parent), &ratio_width)) {
+		*outer = ratio_width;
+		return 0;
+	}
+
+	/* The preferred width, when it is a length. */
+	definite = item->style.width.unit == CSS_UNIT_PX;
+
+	/* The minimum contribution of an item with an auto width is its minimum width, when that is a length. */
+	if (kind == GRID_CONTRIBUTION_MINIMUM && !definite) {
+		bound = grid_item_bound(&item->style.min_width, basis);
+		if (bound >= 0) {
+			if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				bound -= frame;
+			if (bound < 0)
+				bound = 0;
+			*outer = bound + frame + margins;
+			return 0;
+		}
+
+		/* An intrinsic minimum width is the content's width of that kind. */
+		if (item->style.min_width.unit == CSS_UNIT_MIN_CONTENT) {
+			kind = GRID_CONTRIBUTION_MIN_CONTENT;
+		} else if (item->style.min_width.unit == CSS_UNIT_MAX_CONTENT || item->style.min_width.unit == CSS_UNIT_FIT_CONTENT) {
+			kind = GRID_CONTRIBUTION_MAX_CONTENT;
+		} else if (!automatic || item->style.overflow_x != CSS_OVERFLOW_VISIBLE || item->style.min_width.unit != CSS_UNIT_AUTO) {
+			/* No automatic minimum: a scroll container, or an item that does not span an auto minimum. */
+			*outer = 0;
+			return 0;
+		} else {
+			/* The automatic minimum is the content's min-content width, or the width the ratio gives. */
+			*fixed = frame + margins;
+			if (grid_ratio_width(item->parent, grid_item, grid_fixed_row_gap(item->parent), &ratio_width)) {
+				*outer = ratio_width;
+				return 0;
+			}
+			kind = GRID_CONTRIBUTION_MIN_CONTENT;
+		}
+	}
+
+	/* A percentage height resolves against the fixed rows the item spans, which are known before the columns are. */
+	saved_height = item->style.height;
+	if (item->style.height.unit == CSS_UNIT_PERCENT && grid_fixed_rows_height(item->parent, grid_item, grid_fixed_row_gap(item->parent), &rows)) {
+		item->style.height.value = layout_to_px((layout_unit)((float)rows * item->style.height.value / 100.0f) + layout_from_px(item->style.height.offset));
+		item->style.height.offset = 0;
+		item->style.height.unit = CSS_UNIT_PX;
+	}
+
+	/* The content's width. */
+	error = 0;
+	if (definite) {
+		content = layout_from_px(item->style.width.value);
+		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			content -= frame;
+	} else if (kind == GRID_CONTRIBUTION_MAX_CONTENT) {
+		error = layout_max_content(tree, item, &content);
+		if (error == 0)
+			layout_box_model(item, 0);
+	} else {
+		error = layout_min_content(tree, item, &content);
+		if (error == 0)
+			layout_box_model(item, 0);
+	}
+	item->style.height = saved_height;
+	if (error != 0)
+		return error;
+
+	/* Held within the maximum and minimum widths. */
+	bound = grid_item_bound(&item->style.max_width, basis);
+	if (bound >= 0) {
+		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			bound -= frame;
+		if (content > bound)
+			content = bound;
+	}
+	bound = grid_item_bound(&item->style.min_width, basis);
+	if (bound >= 0) {
+		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			bound -= frame;
+		if (content < bound)
+			content = bound;
+	}
+	if (content < 0)
+		content = 0;
+
+	/* Succeeded: the margin box. */
+	*outer = content + frame + margins;
+	return 0;
+}
+
+/* What the callback of the column sizing needs to answer for an entry. */
+struct grid_column_context {
+	struct layout_tree *tree;
+	const struct grid_flat *flat;
+	layout_unit whole;
+	int error;
+};
+
+/* Answers the track sizing for a column entry (a failure is kept in the context and answered as nothing). */
+static layout_unit
+grid_column_answer(
+	void *context,
+	size_t index,
+	int kind,
+	int automatic,
+	layout_unit *fixed)
+{
+	struct grid_column_context *state;
+	const struct grid_flat *entry;
+	struct grid_item stand_in;
+	layout_unit outer;
+	int error;
+
+	/* A stand-in for a subgrid's edge has its size. */
+	state = context;
+	entry = &state->flat[index];
+	*fixed = -1;
+	if (entry->fixed_size >= 0)
+		return entry->fixed_size;
+
+	/* The box's contribution. */
+	outer = 0;
+	if (state->error != 0)
+		return 0;
+	memset(&stand_in, 0, sizeof(stand_in));
+	stand_in.box = entry->box;
+	stand_in.column = entry->start;
+	stand_in.column_span = entry->span;
+	stand_in.row = entry->row < 0 ? 0 : entry->row;
+	stand_in.row_span = entry->row_span < 1 ? 1 : entry->row_span;
+	error = grid_column_item_contribution(state->tree, &stand_in, kind, automatic, fixed, &outer);
+	if (error != 0) {
+		state->error = error;
+		return 0;
+	}
+
+	/* What the subgrid's edges and gap add. */
+	outer += entry->extra;
+	if (outer < 0)
+		outer = 0;
+	if (*fixed >= 0 && entry->extra > 0)
+		*fixed += entry->extra;
+	return outer;
+}
+
+/*
+ * Sizes the columns with the track sizing algorithm: the declared tracks
+ * and the items' column contributions go in, and the widths come out.  A
+ * container being measured is sized under a min-content or max-content
+ * constraint, otherwise at its width.
  */
 static int
 grid_size_columns(
@@ -2569,487 +3728,113 @@ grid_size_columns(
 	struct grid_state *grid,
 	layout_unit gap)
 {
-	const struct css_track *track;
-	struct grid_item *item;
-	layout_unit available;
-	layout_unit width;
-	layout_unit used;
-	layout_unit share;
-	layout_unit remainder;
-	layout_unit spanned;
-	float fr_total;
-	float fr_sum;
+	struct grid_column_context context;
+	struct grid_track_input input;
+	struct grid_track_spec *tracks;
+	struct grid_track_item *items;
+	struct grid_flat_list list;
+	layout_unit whole;
+	layout_unit floor_unused;
+	layout_unit outer_unused;
+	layout_unit group_floor;
+	layout_unit left_before;
+	layout_unit left_after;
+	layout_unit right_before;
+	layout_unit right_after;
 	size_t index;
+	int constraint;
 	int column;
-	int autos;
-	int last_auto;
-	int stretches;
-	int intrinsic_minimum;
 	int error;
 
 	/* The row of widths. */
-	grid->columns = calloc((size_t)grid->column_count, sizeof(*grid->columns));
+	grid->columns = calloc((size_t)grid->column_count + 1U, sizeof(*grid->columns));
 	if (grid->columns == NULL)
 		return ENOMEM;
 
+	/* A subgrid has the tracks its parent gave it. */
+	if (box->subgrid_columns != NULL) {
+		for (column = 0; column < grid->column_count && column < box->subgrid_column_span; column++)
+			grid->columns[column] = box->subgrid_columns[column];
+		return 0;
+	}
+
 	/* An empty implicit grid has no track for its auto-column size to occupy. */
-	if (grid->item_count == 0 && box->style.column_count == 0)
+	if (grid->column_count == 0 || (grid->item_count == 0 && box->style.column_count == 0))
 		return 0;
 
-	/* The fixed tracks, and the least of the fr tracks. */
-	fr_total = 0;
+	/* The constraint: the box's width, or the content's size while the tree measures it. */
+	constraint = GRID_TRACK_DEFINITE;
+	whole = box->width;
+	if (tree->measuring != 0 && box->width <= 0) {
+		constraint = GRID_TRACK_MIN_CONSTRAINT;
+		whole = -1;
+	} else if (tree->measuring != 0 && box->width >= ((layout_unit)1 << 23)) {
+		constraint = GRID_TRACK_MAX_CONSTRAINT;
+		whole = -1;
+	}
+
+	/* The tracks and the items in the form the algorithm takes. */
+	error = grid_flat_build(&list, grid, 1, gap);
+
+	/* Vertical items that align by a baseline along the row share it within a column, which the column must hold. */
+	for (index = 0; error == 0 && index < grid->item_count; index++) {
+		if (!grid->items[index].box->grid_orthogonal || grid->items[index].column_span != 1)
+			continue;
+		error = grid_column_item_contribution(tree, &grid->items[index], GRID_CONTRIBUTION_MAX_CONTENT, 0, &floor_unused, &outer_unused);
+	}
+	for (column = 0; error == 0 && column < grid->column_count; column++) {
+		grid_column_baselines(box, grid, column, &left_before, &left_after, &right_before, &right_after);
+		group_floor = left_before + left_after;
+		if (right_before + right_after > group_floor)
+			group_floor = right_before + right_after;
+		if (group_floor > 0)
+			error = grid_flat_add(&list, NULL, column, 1, 0, 1, 0, group_floor);
+	}
+	tracks = calloc((size_t)grid->column_count, sizeof(*tracks));
+	items = calloc(list.count + 1U, sizeof(*items));
+	if (error != 0 || tracks == NULL || items == NULL) {
+		free(list.entries);
+		free(tracks);
+		free(items);
+		return error != 0 ? error : ENOMEM;
+	}
 	for (column = 0; column < grid->column_count; column++) {
-		/* Resolves the current track before excluding collapsed repeat slots. */
-		track = grid_column_track(&box->style, column);
+		grid_track_spec_of(grid_column_track(&box->style, column), whole, &tracks[column]);
 		if (grid->column_collapsed != NULL && grid->column_collapsed[column])
-			continue;
-
-		/* Fixed tracks resolve their existing absolute lower floor here (a smaller minmax() minimum when it can grow later). */
-		if (track->kind == CSS_TRACK_LENGTH) {
-			grid->columns[column] = grid_track_length(&track->size, box->width, tree->measuring);
-			if (tree->measuring == 0 && grid_track_floor(track, box->width, &width) && width < grid->columns[column])
-				grid->columns[column] = width;
-		}
-
-		/* Definite flexible tracks start from their lower breadth. */
-		if (track->kind == CSS_TRACK_FR && tree->measuring == 0) {
-			fr_total += track->fr;
-			grid->columns[column] = grid_track_length(&track->minimum, box->width, tree->measuring);
-		}
+			tracks[column].collapsed = 1;
+	}
+	for (index = 0; index < list.count; index++) {
+		items[index].start = list.entries[index].start;
+		items[index].span = list.entries[index].span;
 	}
 
-	/* A fixed track with an automatic or intrinsic minimum holds its one-column items' minimum contributions. */
-	for (index = 0; index < grid->item_count; index++) {
-		item = &grid->items[index];
-		if (item->column_span != 1)
-			continue;
-		track = grid_column_track(&box->style, item->column);
-		if (track->kind != CSS_TRACK_LENGTH)
-			continue;
-		if (track->minimum_rule == CSS_TRACK_MINIMUM_MAX_CONTENT || track->minimum_rule == CSS_TRACK_MINIMUM_MIN_CONTENT) {
-			if (track->minimum_rule == CSS_TRACK_MINIMUM_MAX_CONTENT)
-				error = grid_item_width(tree, item->box, &width);
-			else
-				error = grid_item_minimum_width(tree, item->box, &width);
-			if (error != 0)
-				return error;
-			if (width > grid->columns[item->column])
-				grid->columns[item->column] = width;
-			continue;
-		}
-		if (track->minimum_rule != CSS_TRACK_MINIMUM_AUTO)
-			continue;
-		if (grid_column_auto_minimum(item->box, box->width, &width) && width > grid->columns[item->column])
-			grid->columns[item->column] = width;
-	}
-
-	/* The auto tracks (and the fr ones while measuring): their one-column items' widths. */
-	for (index = 0; index < grid->item_count; index++) {
-		/* Only one-column items set this first contribution bound. */
-		item = &grid->items[index];
-		if (item->column_span != 1)
-			continue;
-
-		/* Fixed tracks do not collect intrinsic contributions. */
-		column = item->column;
-		track = grid_column_track(&box->style, column);
-		if (track->kind == CSS_TRACK_LENGTH)
-			continue;
-
-		/* Definite flexible tracks receive their free-space share later. */
-		if (track->kind == CSS_TRACK_FR && tree->measuring == 0)
-			continue;
-
-		/* Plain min-content columns use the breakable non-replaced contribution. */
-		intrinsic_minimum = 0;
-		if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
-		    track->maximum_rule == CSS_TRACK_MAXIMUM_MIN_CONTENT &&
-		    track->minimum_rule == CSS_TRACK_MINIMUM_NONE &&
-		    !item->box->replaced)
-			intrinsic_minimum = 1;
-
-		/* Other breadths retain their existing maximum-content contribution. */
-		if (grid_ratio_width(box, item, grid_fixed_row_gap(box), &width)) {
-			/* A ratio and a height the fixed rows resolve give the width. */
-		} else if (intrinsic_minimum) {
-			error = grid_item_minimum_width(tree, item->box, &width);
-			if (error != 0)
-				return error;
-		} else {
-			error = grid_item_width(tree, item->box, &width);
-			if (error != 0)
-				return error;
-		}
-
-		/* Keeps the largest contribution occupying this column. */
-		if (width > grid->columns[column])
-			grid->columns[column] = width;
-	}
-
-	/*
-	 * A fit-content() column starts at its items' minimum contributions (a
-	 * pixel min-width, else min-content) and may grow with free space to its
-	 * content, no wider than its limit.
-	 */
-	for (column = 0; column < grid->column_count; column++) {
-		track = grid_column_track(&box->style, column);
-		if (track->kind != CSS_TRACK_AUTO || track->maximum_rule != CSS_TRACK_MAXIMUM_FIT_CONTENT ||
-		    (track->size.unit != CSS_UNIT_PX && (track->size.unit != CSS_UNIT_PERCENT || tree->measuring != 0)))
-			continue;
-		used = grid_track_length(&track->size, box->width, tree->measuring);
-		share = 0;
-		for (index = 0; index < grid->item_count; index++) {
-			item = &grid->items[index];
-			if (item->column != column || item->column_span != 1)
-				continue;
-			if (item->box->style.min_width.unit == CSS_UNIT_PX) {
-				width = layout_from_px(item->box->style.min_width.value);
-			} else {
-				error = grid_item_minimum_width(tree, item->box, &width);
-				if (error != 0)
-					return error;
-			}
-			if (width > share)
-				share = width;
-		}
-		if (grid->column_fit == NULL) {
-			grid->column_fit = calloc((size_t)grid->column_count, sizeof(*grid->column_fit));
-			if (grid->column_fit == NULL)
-				return ENOMEM;
-		}
-		if (used > grid->columns[column])
-			used = grid->columns[column];
-		grid->column_fit[column] = used > share ? used : share;
-		grid->columns[column] = share;
-	}
-
-	/* An intrinsic track's fixed minmax() minimum is its floor. */
-	for (column = 0; column < grid->column_count; column++) {
-		track = grid_column_track(&box->style, column);
-		if (track->kind != CSS_TRACK_AUTO || track->minimum_rule != CSS_TRACK_MINIMUM_LENGTH ||
-		    (track->minimum.unit != CSS_UNIT_PX && (track->minimum.unit != CSS_UNIT_PERCENT || tree->measuring != 0)))
-			continue;
-		width = grid_track_length(&track->minimum, box->width, tree->measuring);
-		if (width > grid->columns[column])
-			grid->columns[column] = width;
-	}
-
-	/* An item spanning auto tracks widens them, equally, to hold it. */
-	for (index = 0; index < grid->item_count; index++) {
-		/* Single-track contributions were already collected above. */
-		item = &grid->items[index];
-		if (item->column_span < 2)
-			continue;
-
-		/* The spanned width and how many auto tracks share any more. */
-		spanned = gap * (layout_unit)(item->column_span - 1);
-		autos = 0;
-		for (column = item->column; column < item->column + item->column_span; column++) {
-			/* Accumulates the current capacity of every crossed track. */
-			spanned += grid->columns[column];
-			track = grid_column_track(&box->style, column);
-
-			/* The existing span distributor includes coarse intrinsic tracks. */
-			if (track->kind == CSS_TRACK_AUTO)
-				autos++;
-		}
-
-		/* Spanning only fixed or fr tracks widens nothing. */
-		if (autos == 0)
-			continue;
-
-		/* The item's width against it. */
-		error = grid_item_width(tree, item->box, &width);
-		if (error != 0)
-			return error;
-
-		/* Spans that already fit need no extra capacity. */
-		if (width <= spanned)
-			continue;
-
-		/* Distributes the remaining contribution through the existing span algorithm. */
-		share = (width - spanned) / autos;
-		for (column = item->column; column < item->column + item->column_span; column++) {
-			/* Fixed and flexible crossed tracks retain their previous breadths. */
-			track = grid_column_track(&box->style, column);
-			if (track->kind == CSS_TRACK_AUTO)
-				grid->columns[column] += share;
-		}
-	}
-
-	/* What is left of the container's width after the tracks and the gaps. */
-	available = box->width - gap * (layout_unit)(grid->column_count - 1);
-	used = 0;
-	for (column = 0; column < grid->column_count; column++) {
-		/* Resolves the current track before excluding collapsed repeat slots. */
-		track = grid_column_track(&box->style, column);
-		if (grid->column_collapsed != NULL && grid->column_collapsed[column]) {
-			available += gap;
-			continue;
-		}
-
-		/* Definite flexible tracks receive their free-space share later. */
-		if (track->kind == CSS_TRACK_FR && tree->measuring == 0)
-			continue;
-
-		/* Non-flexible columns occupy this part of the available axis. */
-		used += grid->columns[column];
-	}
-
-	/* fit-content() columns grow toward their content by the free space, in order. */
-	for (column = 0; grid->column_fit != NULL && column < grid->column_count; column++) {
-		if (grid->column_fit[column] <= grid->columns[column])
-			continue;
-		width = grid->column_fit[column] - grid->columns[column];
-		if (tree->measuring == 0 && width > available - used)
-			width = available - used;
-		if (width <= 0)
-			continue;
-		grid->columns[column] += width;
-		used += width;
-	}
-
-	/* Fixed minmax() tracks grow toward their maxima by the free space before the fr tracks take what is left. */
-	if (tree->measuring == 0 && available > used) {
-		grid_maximize(&box->style, 1, grid->columns, grid->column_count, grid->column_collapsed, box->width, available - used);
-		used = 0;
-		for (column = 0; column < grid->column_count; column++) {
-			track = grid_column_track(&box->style, column);
-			if ((grid->column_collapsed != NULL && grid->column_collapsed[column]) || track->kind == CSS_TRACK_FR)
-				continue;
-			used += grid->columns[column];
-		}
-	}
-
-	/* The fr tracks share it by their factors (a sum under one shares only that much of it), each at least its minimum. */
-	if (fr_total > 0) {
-		/* Retains the original factor sum before normalizing the denominator. */
-		fr_sum = fr_total;
-
-		/* Fractional totals below one intentionally leave some space undistributed. */
-		if (fr_total < 1.0f)
-			fr_total = 1.0f;
-
-		/* Assigns each non-collapsed flexible track its factor-weighted share. */
-		for (column = 0; column < grid->column_count; column++) {
-			/* Resolves the factor only for an actual flexible track. */
-			track = grid_column_track(&box->style, column);
-			if (track->kind != CSS_TRACK_FR ||
-			    (grid->column_collapsed != NULL && grid->column_collapsed[column]))
-				continue;
-
-			/* Flexible growth never reduces the track below its initial minimum. */
-			width = (layout_unit)((float)(available - used) * track->fr / fr_total);
-			if (width > grid->columns[column])
-				grid->columns[column] = width;
-		}
-
-		/* A sum of factors below one leaves room for the auto tracks. */
-		used = 0;
-		for (column = 0; column < grid->column_count; column++) {
-			/* Collapsed slots occupy none of the grown axis. */
-			if (grid->column_collapsed != NULL && grid->column_collapsed[column])
-				continue;
-
-			/* Recounts actual breadths after flexible growth. */
-			used += grid->columns[column];
-		}
-
-		/* A complete flexible factor sum consumed the distributable space. */
-		if (fr_sum >= 1.0f)
-			return 0;
-	}
-
-	/* Without fr tracks, the auto tracks share the room left (not while the container is measured). */
-	stretches = grid_content_stretches(box->style.justify_content);
-	if (tree->measuring != 0 ||
-	    available <= used ||
-	    !stretches)
-		return 0;
-
-	/* Counts only automatic maxima eligible for alignment stretch. */
-	autos = 0;
-	last_auto = -1;
-	for (column = 0; column < grid->column_count; column++) {
-		/* Intrinsic maximum keywords are not automatic stretch targets. */
-		track = grid_column_track(&box->style, column);
-		stretches = grid_column_stretches(box, track);
-		if (stretches &&
-		    !(grid->column_collapsed != NULL && grid->column_collapsed[column])) {
-			autos++;
-			last_auto = column;
-		}
-	}
-
-	/* Without auto tracks the room stays empty. */
-	if (autos == 0)
-		return 0;
-
-	/* Shares free space while reserving the subpixel remainder for the last auto track. */
-	share = (available - used) / autos;
-	remainder = available - used - share * autos;
-	for (column = 0; column < grid->column_count; column++) {
-		/* Intrinsic maximum keywords are not automatic stretch targets. */
-		track = grid_column_track(&box->style, column);
-		stretches = grid_column_stretches(box, track);
-		if (stretches &&
-		    !(grid->column_collapsed != NULL && grid->column_collapsed[column]))
-			grid->columns[column] += share;
-	}
-
-	/* Publishes the reserved remainder without stretching an intrinsic maximum. */
-	grid->columns[last_auto] += remainder;
-
-	/* Succeeded: the columns are sized. */
-	return 0;
-}
-
-/* Keeps intrinsic maximum breadths out of the automatic column stretch step. */
-static int
-grid_column_stretches(
-	const struct layout_box *box,
-	const struct css_track *track)
-{
-	/* Only the coarse automatic kind ever participated in this stretch step. */
-	if (track->kind != CSS_TRACK_AUTO)
-		return 0;
-
-	/* Horizontal intrinsic maxima have their own growth limit instead of auto stretch. */
-	if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
-	    (track->maximum_rule == CSS_TRACK_MAXIMUM_MIN_CONTENT ||
-	     track->maximum_rule == CSS_TRACK_MAXIMUM_MAX_CONTENT ||
-	     track->maximum_rule == CSS_TRACK_MAXIMUM_FIT_CONTENT))
-		return 0;
-
-	/* Succeeded: this column retains the ordinary automatic stretch path. */
-	return 1;
-}
-
-/* Tells whether a row takes a share of the stretch: an auto maximum, not a content-sized one. */
-static int
-grid_row_stretches(
-	const struct css_track *track)
-{
-	return track->kind == CSS_TRACK_AUTO &&
-	    track->maximum_rule != CSS_TRACK_MAXIMUM_MIN_CONTENT &&
-	    track->maximum_rule != CSS_TRACK_MAXIMUM_MAX_CONTENT &&
-	    track->maximum_rule != CSS_TRACK_MAXIMUM_FIT_CONTENT;
-}
-
-/* Measures a non-replaced single-column item's constrained min-content margin box. */
-static int
-grid_item_minimum_width(
-	struct layout_tree *tree,
-	struct layout_box *item,
-	layout_unit *width)
-{
-	layout_unit measured;
-	int64_t content;
-	int64_t frame;
-	int64_t outside;
-	int64_t bound;
-	int error;
-
-	/* Definite preferred widths contribute their own size before min/max constraints. */
-	if (item->style.width.unit == CSS_UNIT_PX) {
-		content = layout_from_px(item->style.width.value);
-	} else {
-		/* Takes every available line break using the existing intrinsic layout path. */
-		error = layout_min_content(tree, item, &measured);
-		if (error != 0)
-			return error;
-
-		/* Keeps the measured content width separate from the box's frame. */
-		content = measured;
-	}
-
-	/* Restores the ordinary margin/frame calculation after intrinsic child layout. */
-	layout_box_model(item, 0);
-	frame = (int64_t)item->border[CSS_LEFT] + item->padding[CSS_LEFT] +
-		item->padding[CSS_RIGHT] + item->border[CSS_RIGHT];
-	outside = frame + item->margin[CSS_LEFT] + item->margin[CSS_RIGHT];
-
-	/* A definite border-box preferred width includes the frame already counted outside. */
-	if (item->style.width.unit == CSS_UNIT_PX &&
-	    item->style.box_sizing == CSS_BOX_SIZING_BORDER)
-		content -= frame;
-
-	/* Definite maximum constraints cap the contribution before a stronger minimum is applied. */
-	if (item->style.max_width.unit == CSS_UNIT_PX) {
-		bound = layout_from_px(item->style.max_width.value);
-
-		/* Border-box bounds constrain the same content width as the preferred size. */
-		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
-			bound -= frame;
-
-		/* Keeps content within the explicit maximum. */
-		if (content > bound)
-			content = bound;
-	}
-
-	/* Definite minima take precedence when the maximum is smaller. */
-	if (item->style.min_width.unit == CSS_UNIT_PX) {
-		bound = layout_from_px(item->style.min_width.value);
-
-		/* Converts border-box minima into the content coordinate system. */
-		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
-			bound -= frame;
-
-		/* Preserves the explicit minimum contribution. */
-		if (content < bound)
-			content = bound;
-	}
-
-	/* A content box never has negative width even when its frame exceeds a bound. */
-	if (content < 0)
-		content = 0;
-
-	/* Accumulates the margin box widely before publishing the signed layout unit. */
-	content += outside;
-	if (content < 0)
-		content = 0;
-
-	/* Oversized contributions cannot overflow the native track accumulator here. */
-	if (content > INT_MAX)
-		content = INT_MAX;
-
-	/* Succeeded: the constrained min-content margin box is copied to the caller. */
-	*width = (layout_unit)content;
-	return 0;
-}
-
-/* Measures an item's margin box at its content's width (or at its own width, when it has one in pixels). */
-static int
-grid_item_width(
-	struct layout_tree *tree,
-	struct layout_box *item,
-	layout_unit *width)
-{
-	layout_unit content;
-	layout_unit outside;
-	int error;
-
-	/* Its margins, borders and paddings. */
-	layout_box_model(item, 0);
-	outside = item->margin[CSS_LEFT] + item->border[CSS_LEFT] + item->padding[CSS_LEFT] +
-	    item->padding[CSS_RIGHT] + item->border[CSS_RIGHT] + item->margin[CSS_RIGHT];
-
-	/* A width of its own in pixels. */
-	if (item->style.width.unit == CSS_UNIT_PX) {
-		content = layout_from_px(item->style.width.value);
-		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
-			content -= item->border[CSS_LEFT] + item->padding[CSS_LEFT] + item->padding[CSS_RIGHT] + item->border[CSS_RIGHT];
-		*width = content + outside;
-		return 0;
-	}
-
-	/* Otherwise its content's width without a limit. */
-	error = layout_max_content(tree, item, &content);
+	/* The sizing. */
+	memset(&context, 0, sizeof(context));
+	context.tree = tree;
+	context.flat = list.entries;
+	context.whole = whole;
+	memset(&input, 0, sizeof(input));
+	input.tracks = tracks;
+	input.count = grid->column_count;
+	input.items = items;
+	input.item_count = list.count;
+	input.gap = gap;
+	input.constraint = constraint;
+	input.available = whole;
+	input.container_minimum = -1;
+	input.container_maximum = -1;
+	input.stretch_auto = grid_content_stretches(box->style.justify_content);
+	input.contribution = grid_column_answer;
+	input.context = &context;
+	error = grid_track_size(&input, grid->columns);
+	free(list.entries);
+	free(tracks);
+	free(items);
 	if (error != 0)
 		return error;
-	layout_box_model(item, 0);
-	*width = content + outside;
-	return 0;
+
+	/* A failure while measuring an item. */
+	return context.error;
 }
 
 /* The row gap when it is a length (zero otherwise). */
@@ -3082,11 +3867,17 @@ grid_ratio_width(
 	layout_unit height;
 	layout_unit frame_x;
 	layout_unit frame_y;
+	float ratio;
 	int row;
 
-	/* An auto width, a ratio of its own and not a replaced box. */
+	/* An auto width and a ratio: the style's for a box that is not replaced, the picture's for one that is. */
 	child = item->box;
-	if (child->style.width.unit != CSS_UNIT_AUTO || child->style.aspect_ratio <= 0.0f || child->replaced)
+	ratio = child->style.aspect_ratio;
+	if (child->replaced) {
+		if (child->style.aspect_ratio > 0.0f || !layout_replaced_ratio(child, &ratio))
+			return 0;
+	}
+	if (child->style.width.unit != CSS_UNIT_AUTO || ratio <= 0.0f)
 		return 0;
 
 	/* The height: a length, or a percentage of the fixed rows the item spans. */
@@ -3101,6 +3892,24 @@ grid_ratio_width(
 			rows += layout_from_px(track->size.value);
 		}
 		height = (layout_unit)((float)rows * child->style.height.value / 100.0f) + layout_from_px(child->style.height.offset);
+	} else if (child->style.height.unit == CSS_UNIT_AUTO && child->style.margin[CSS_TOP].unit != CSS_UNIT_AUTO &&
+	    child->style.margin[CSS_BOTTOM].unit != CSS_UNIT_AUTO) {
+		int align;
+
+		/* An item stretched in fixed rows is as tall as they are (less its margins). */
+		align = child->style.align_self;
+		if (align == CSS_ALIGN_AUTO)
+			align = box->style.align_items;
+		if (align != CSS_ALIGN_STRETCH)
+			return 0;
+		if (!grid_fixed_rows_height(box, item, gap, &rows))
+			return 0;
+		layout_box_model(child, 0);
+		height = rows - child->margin[CSS_TOP] - child->margin[CSS_BOTTOM];
+		if (child->style.box_sizing != CSS_BOX_SIZING_BORDER)
+			height -= child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
+		if (height < 0)
+			height = 0;
 	} else {
 		return 0;
 	}
@@ -3109,10 +3918,24 @@ grid_ratio_width(
 	layout_box_model(child, 0);
 	frame_x = child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
 	frame_y = child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
+
+	/* The height keeps within its pixel limits first, and the width within its own after. */
+	if (child->replaced && child->style.max_height.unit == CSS_UNIT_PX &&
+	    height > layout_from_px(child->style.max_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0))
+		height = layout_from_px(child->style.max_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0);
+	if (child->replaced && child->style.min_height.unit == CSS_UNIT_PX &&
+	    height < layout_from_px(child->style.min_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0))
+		height = layout_from_px(child->style.min_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0);
 	if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
-		*width = (layout_unit)((float)height * child->style.aspect_ratio);
+		*width = (layout_unit)((float)height * ratio);
 	else
-		*width = (layout_unit)((float)height * child->style.aspect_ratio) + frame_x;
+		*width = (layout_unit)((float)height * ratio) + frame_x;
+	if (child->replaced && child->style.max_width.unit == CSS_UNIT_PX &&
+	    *width > layout_from_px(child->style.max_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x))
+		*width = layout_from_px(child->style.max_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x);
+	if (child->replaced && child->style.min_width.unit == CSS_UNIT_PX &&
+	    *width < layout_from_px(child->style.min_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x))
+		*width = layout_from_px(child->style.min_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x);
 	(void)frame_y;
 	*width += child->margin[CSS_LEFT] + child->margin[CSS_RIGHT];
 
@@ -3139,6 +3962,7 @@ grid_lay_item(
 	layout_unit remaining;
 	layout_unit frame;
 	layout_unit sizing;
+	struct css_length saved_height;
 	int left_auto;
 	int right_auto;
 	int side;
@@ -3194,6 +4018,13 @@ grid_lay_item(
 			content = layout_from_px(saved.max_width.value) - sizing;
 		if (saved.min_width.unit == CSS_UNIT_PX && content < layout_from_px(saved.min_width.value) - sizing)
 			content = layout_from_px(saved.min_width.value) - sizing;
+		if (saved.min_width.unit == CSS_UNIT_PERCENT) {
+			/* A percentage minimum is of the area. */
+			minimum = (layout_unit)((float)width * saved.min_width.value / 100.0f) +
+			    layout_from_px(saved.min_width.offset) - sizing;
+			if (content < minimum)
+				content = minimum;
+		}
 		if (content < 0)
 			content = 0;
 	}
@@ -3224,7 +4055,27 @@ grid_lay_item(
 	item->style.min_width.unit = CSS_UNIT_PX;
 	item->style.min_width.value = 0;
 	item->style.max_width.unit = CSS_UNIT_NONE;
+
+	/* A picture stretched across takes its height from its ratio. */
+	saved_height = item->style.height;
+	if (item->replaced && justify == CSS_ALIGN_STRETCH && item->style.height.unit == CSS_UNIT_AUTO) {
+		layout_unit ratio_width;
+		layout_unit ratio_height;
+
+		ratio_width = item->natural_width;
+		ratio_height = item->natural_height;
+		if (item->image != NULL) {
+			ratio_width = (layout_unit)item->image->width;
+			ratio_height = (layout_unit)item->image->height;
+		}
+		if (ratio_width > 0 && ratio_height > 0) {
+			item->style.height.unit = CSS_UNIT_PX;
+			item->style.height.value = layout_to_px((layout_unit)((float)content * (float)ratio_height / (float)ratio_width));
+			item->style.height.offset = 0;
+		}
+	}
 	error = layout_block(tree, item, width);
+	item->style.height = saved_height;
 	if (error == 0 && (left_auto || right_auto)) {
 		/* Auto margins absorb only the area left after the item's content-sized box. */
 		remaining = width - item->margin[CSS_LEFT] - item->border[CSS_LEFT] -
@@ -3257,386 +4108,255 @@ grid_lay_item(
 	return 0;
 }
 
-/* Tests whether all crossed maxima remain fixed after supported minimum constraints. */
-static int
-grid_span_has_fixed_rows(
-	const struct css_style *style,
-	const struct grid_item *item,
-	const struct grid_state *grid,
-	layout_unit gap,
-	layout_unit available)
-{
-	const struct css_track *track;
-	int64_t capacity;
-	int64_t minimum;
-	int span;
-	int end;
-	int row;
-	int automatic;
-	int known;
-
-	/* The separate vertical sizing paths retain their existing behavior in this partial scope. */
-	if (style->writing_mode != CSS_WRITING_HORIZONTAL_TB)
-		return 0;
-
-	/* Only placed items with an existing row range can constrain this span. */
-	if (item->row < 0 || item->row >= grid->row_count)
-		return 0;
-
-	/* Bound the endpoint before adding indices, even for a very large authored span. */
-	span = item->row_span;
-	if (span <= 0)
-		return 0;
-
-	/* No row past the actual grid can participate in sizing this item. */
-	if (span > grid->row_count - item->row)
-		span = grid->row_count - item->row;
-
-	/* Wide capacity arithmetic preserves every existing track and gap without index overflow. */
-	capacity = (int64_t)gap * (span - 1);
-	automatic = 0;
-	end = item->row + span;
-	for (row = item->row; row < end; row++) {
-		track = grid_row_track(style, row);
-		if (track->kind != CSS_TRACK_LENGTH)
-			return 0;
-
-		/* A min-content or max-content floor needs its complete intrinsic sizing algorithm. */
-		if (track->minimum_rule == CSS_TRACK_MINIMUM_MIN_CONTENT ||
-		    track->minimum_rule == CSS_TRACK_MINIMUM_MAX_CONTENT)
-			return 0;
-
-		/* An unresolved percentage lower bound needs its complete area-dependent calculation. */
-		if (track->minimum_rule == CSS_TRACK_MINIMUM_LENGTH && track->minimum.unit != CSS_UNIT_PX)
-			return 0;
-
-		/* Automatic minima can raise a fixed maximum and require a contribution proof below. */
-		if (track->minimum_rule == CSS_TRACK_MINIMUM_AUTO)
-			automatic = 1;
-
-		/* A resolved absolute maximum has the capacity already held by the row. */
-		if (track->size.unit == CSS_UNIT_PX) {
-			capacity += grid->rows[row];
-			continue;
-		}
-
-		/* A percentage maximum is fixed only with a definite content-height basis. */
-		if (track->size.unit == CSS_UNIT_PERCENT && available >= 0) {
-			capacity += grid->rows[row];
-			continue;
-		}
-
-		/* An unresolved maximum cannot establish the fixed-only overflow rule. */
-		return 0;
-	}
-
-	/* A supported automatic contribution must fit before a fixed maximum can be preserved. */
-	if (automatic) {
-		known = grid_fixed_span_minimum(item->box, &minimum);
-		if (!known)
-			return 0;
-
-		/* Existing minimum growth remains responsible for content larger than this capacity. */
-		if (minimum > capacity)
-			return 0;
-	}
-
-	/* Succeeded: excess content can overflow without discarding a known minimum. */
-	return 1;
-}
-
-/* Bounds the unavoidable outer height for supported automatic-minimum cases. */
-static int
-grid_fixed_span_minimum(
-	const struct layout_box *box,
-	int64_t *minimum)
-{
-	int64_t frame;
-	int64_t outside;
-	int64_t content;
-	layout_unit given;
-
-	/* Ratio-dependent and replaced automatic minima retain their complete existing sizing path. */
-	if (box->style.aspect_ratio > 0.0f)
-		return 0;
-
-	/* Intrinsic replacement dimensions require their own contribution calculation. */
-	if (box->replaced)
-		return 0;
-
-	/* Percentage and intrinsic minima depend on the final area and cannot prove this local bound. */
-	if (box->style.min_height.unit != CSS_UNIT_AUTO && box->style.min_height.unit != CSS_UNIT_PX)
-		return 0;
-
-	/* Borders, padding and margins cannot disappear when the automatic minimum grows. */
-	frame = (int64_t)box->border[CSS_TOP] + box->padding[CSS_TOP] +
-		box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
-	outside = frame + box->margin[CSS_TOP] + box->margin[CSS_BOTTOM];
-
-	/* A definite preferred height has already passed its native minimum/maximum constraints. */
-	if (box->style.height.unit == CSS_UNIT_PX) {
-		content = box->height;
-	} else if (box->style.height.unit == CSS_UNIT_AUTO) {
-		/* Auto preferred height leaves only its definite minimum and unavoidable frame. */
-		content = 0;
-		if (box->style.min_height.unit == CSS_UNIT_PX) {
-			given = layout_from_px(box->style.min_height.value);
-			content = given;
-
-			/* A border-box minimum already includes the frame in its authored length. */
-			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
-				content -= frame;
-		}
-	} else {
-		/* Preferred percentages and intrinsic sizes cannot prove this local bound. */
-		return 0;
-	}
-
-	/* A frame can exceed a border-box minimum without creating negative content. */
-	if (content < 0)
-		content = 0;
-
-	/* Succeeded: this contribution includes all unavoidable outer-height constraints. */
-	*minimum = content + outside;
-	return 1;
-}
+/* What the callback of the row sizing needs to answer for an entry. */
+struct grid_row_context {
+	const struct grid_flat *flat;
+};
 
 /*
- * Finds the minimum contribution of an item to a column whose minimum is
- * auto: its outer width at its preferred width, or at its minimum width
- * when the preferred one is auto.  An item with neither has a content
- * minimum that a fixed maximum clamps, so it adds nothing (0 is returned).
- * https://drafts.csswg.org/css-grid-2/#min-size-auto
+ * Answers the track sizing for a row entry: its margin box's height once
+ * laid out in its columns (a stand-in is a baseline group of a row or a
+ * subgrid's edge).  The minimum contribution of an item with an auto height
+ * is its minimum height, or its automatic minimum.
  */
-static int
-grid_column_auto_minimum(
-	struct layout_box *box,
-	layout_unit containing_width,
-	layout_unit *minimum)
+static layout_unit
+grid_row_answer(
+	void *context,
+	size_t index,
+	int kind,
+	int automatic,
+	layout_unit *fixed)
 {
-	const struct css_length *given;
+	const struct grid_row_context *state;
+	const struct grid_flat *entry;
+	const struct layout_box *item;
+	layout_unit outer;
 	layout_unit frame;
-	layout_unit content;
+	layout_unit bound;
 
-	/* The preferred width when it is a length, else the minimum width. */
-	given = &box->style.width;
-	if (given->unit == CSS_UNIT_AUTO)
-		given = &box->style.min_width;
-	if (given->unit != CSS_UNIT_PX)
+	/* A stand-in has its size. */
+	state = context;
+	entry = &state->flat[index];
+	*fixed = -1;
+	if (entry->fixed_size >= 0)
+		return entry->fixed_size;
+
+	/* The item's margin box, with what a subgrid's edges and gap add. */
+	item = entry->box;
+	outer = grid_outer_height(item) + entry->extra;
+	if (outer < 0)
+		outer = 0;
+	if (kind != GRID_CONTRIBUTION_MINIMUM)
+		return outer;
+
+	/* A height that is a length is the least the item can be. */
+	if (item->style.height.unit == CSS_UNIT_PX)
+		return outer;
+
+	/* A minimum height that is a length is the least. */
+	if (item->style.min_height.unit == CSS_UNIT_PX) {
+		frame = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->padding[CSS_BOTTOM] + item->border[CSS_BOTTOM];
+		bound = layout_from_px(item->style.min_height.value);
+		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			bound -= frame;
+		if (bound < 0)
+			bound = 0;
+		return bound + frame + item->margin[CSS_TOP] + item->margin[CSS_BOTTOM] + entry->extra;
+	}
+
+	/* A scroll container, or an item with another kind of minimum, has none from its content. */
+	if (!automatic || item->style.overflow_y != CSS_OVERFLOW_VISIBLE || item->style.min_height.unit != CSS_UNIT_AUTO)
 		return 0;
 
-	/* The margins, borders and padding around it. */
-	layout_box_model(box, containing_width);
-	frame = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
-	content = layout_from_px(given->value);
-	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
-		content -= frame;
-	if (content < 0)
-		content = 0;
-
-	/* Succeeded: the outer width. */
-	*minimum = content + frame + box->margin[CSS_LEFT] + box->margin[CSS_RIGHT];
-	return 1;
+	/* Otherwise the automatic minimum is its content's height, which a fixed maximum caps. */
+	*fixed = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->padding[CSS_BOTTOM] + item->border[CSS_BOTTOM] +
+	    item->margin[CSS_TOP] + item->margin[CSS_BOTTOM];
+	if (entry->extra > 0)
+		*fixed += entry->extra;
+	return outer;
 }
 
 /*
- * Sizes the rows: a fixed track at its length, the others as tall as
- * their one-row items' margin boxes; an item spanning rows makes the last
- * of them taller when they do not hold it.
+ * Finds the definite content height of a container (-1 when its height is
+ * not one) and its minimum and maximum heights (-1 for none).
+ */
+static layout_unit
+grid_row_space(
+	struct layout_tree *tree,
+	const struct layout_box *box,
+	layout_unit *minimum,
+	layout_unit *maximum)
+{
+	layout_unit frame;
+	layout_unit basis;
+	layout_unit available;
+
+	/* The frame a border-box size includes. */
+	frame = 0;
+	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+		frame = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+
+	/* The minimum and the maximum, in pixels or a percentage of a height that is known. */
+	*maximum = -1;
+	if (box->style.max_height.unit == CSS_UNIT_PX)
+		*maximum = layout_from_px(box->style.max_height.value) - frame;
+	else if (box->style.max_height.unit == CSS_UNIT_PERCENT && grid_parent_height(tree, box, &basis))
+		*maximum = (layout_unit)((float)basis * box->style.max_height.value / 100.0f) - frame;
+	*minimum = -1;
+	if (box->style.min_height.unit == CSS_UNIT_PX)
+		*minimum = layout_from_px(box->style.min_height.value) - frame;
+	else if (box->style.min_height.unit == CSS_UNIT_PERCENT && grid_parent_height(tree, box, &basis))
+		*minimum = (layout_unit)((float)basis * box->style.min_height.value / 100.0f) - frame;
+	if (*maximum >= 0 && *maximum < *minimum)
+		*maximum = *minimum;
+	if (*maximum < -1)
+		*maximum = 0;
+
+	/* A height in pixels is the definite size, held within them. */
+	available = -1;
+	if (box->style.height.unit == CSS_UNIT_PX) {
+		available = layout_from_px(box->style.height.value) - frame;
+		if (*maximum >= 0 && available > *maximum)
+			available = *maximum;
+		if (*minimum >= 0 && available < *minimum)
+			available = *minimum;
+		if (available < 0)
+			available = 0;
+	}
+	return available;
+}
+
+/*
+ * Sizes the rows with the track sizing algorithm: the declared tracks and
+ * the heights of the items laid out in their columns go in, and the row
+ * heights come out.  A height that is not definite sizes the rows under a
+ * max-content constraint; a percentage row of such a grid is then sized
+ * again against the height that gave.
  */
 static void
 grid_size_rows(
+	struct layout_tree *tree,
 	struct layout_box *box,
 	struct grid_state *grid,
 	layout_unit gap)
 {
+	struct grid_row_context context;
+	struct grid_track_input input;
+	struct grid_track_spec *tracks;
+	struct grid_track_item *items;
+	struct grid_flat_list list;
 	const struct css_track *track;
-	struct grid_item *item;
-	layout_unit available;
-	layout_unit height;
-	layout_unit minimum;
-	layout_unit spanned;
-	layout_unit used;
 	layout_unit first_above;
 	layout_unit first_below;
 	layout_unit last_above;
 	layout_unit last_below;
-	int64_t contribution;
-	float fr_total;
+	layout_unit available;
+	layout_unit minimum;
+	layout_unit maximum;
+	layout_unit total;
+	layout_unit group_floor;
 	size_t index;
+	int percentages;
+	int again;
 	int row;
-	int fixed_rows;
+	int error;
 
 	/* The column of heights (none when the grid has no rows). */
+	grid->intrinsic_height = -1;
 	grid->rows = calloc((size_t)grid->row_count + 1U, sizeof(*grid->rows));
 	if (grid->rows == NULL) {
 		grid->row_count = 0;
 		return;
 	}
+	if (grid->row_count == 0)
+		return;
 
-	/* A pixel height is the definite content height available to the tracks. */
-	available = -1;
-	if (box->style.height.unit == CSS_UNIT_PX) {
-		available = layout_from_px(box->style.height.value);
-		if (box->style.box_sizing == CSS_BOX_SIZING_BORDER) {
-			available -= box->border[CSS_TOP] + box->padding[CSS_TOP] +
-			    box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
-		}
-
-		/* No available content height is negative. */
-		if (available < 0)
-			available = 0;
+	/* A subgrid has the tracks its parent gave it. */
+	if (box->subgrid_rows != NULL) {
+		for (row = 0; row < grid->row_count && row < box->subgrid_row_span; row++)
+			grid->rows[row] = box->subgrid_rows[row];
+		return;
 	}
 
-	/* The fixed rows, and each fractional row's minimum. */
-	fr_total = 0;
-	for (row = 0; row < grid->row_count; row++) {
+	/* The room: the definite height, or the container's minimum and maximum. */
+	available = grid_row_space(tree, box, &minimum, &maximum);
+
+	/* The tracks, the items (a subgrid's in its place), and the baseline groups of each row as stand-ins of their own. */
+	error = grid_flat_build(&list, grid, 0, gap);
+	percentages = 0;
+	for (row = 0; row < grid->row_count && error == 0; row++) {
 		track = grid_row_track(&box->style, row);
-		if (grid->row_collapsed != NULL && grid->row_collapsed[row])
-			continue;
-		if (track->kind == CSS_TRACK_LENGTH) {
-			grid->rows[row] = grid_track_length(&track->size, available, available < 0);
-			if (available >= 0 && grid_track_floor(track, available, &minimum) && minimum < grid->rows[row])
-				grid->rows[row] = minimum;
-		}
-		if (track->kind == CSS_TRACK_FR && available >= 0) {
-			fr_total += track->fr;
-			grid->rows[row] = grid_track_length(&track->minimum, available, 0);
-		}
-	}
-
-	/* A fixed row with an automatic minimum holds its one-row items' minimum contributions. */
-	for (index = 0; index < grid->item_count; index++) {
-		item = &grid->items[index];
-		if (item->row_span != 1 || item->row >= grid->row_count)
-			continue;
-		track = grid_row_track(&box->style, item->row);
-		if (track->kind != CSS_TRACK_LENGTH || track->minimum_rule != CSS_TRACK_MINIMUM_AUTO)
-			continue;
-		if (grid_fixed_span_minimum(item->box, &contribution) && contribution > grid->rows[item->row])
-			grid->rows[item->row] = (layout_unit)contribution;
-	}
-
-	/* The auto rows, and fractional rows without a definite height: their one-row items. */
-	for (index = 0; index < grid->item_count; index++) {
-		item = &grid->items[index];
-		if (item->row_span != 1 || item->row >= grid->row_count)
-			continue;
-		track = grid_row_track(&box->style, item->row);
-		if (track->kind == CSS_TRACK_LENGTH || (track->kind == CSS_TRACK_FR && available >= 0))
-			continue;
-
-		/* The item's outer height raises its auto row. */
-		height = grid_outer_height(item->box);
-		if (height > grid->rows[item->row])
-			grid->rows[item->row] = height;
-	}
-
-	/* An intrinsic row holds its baseline groups, each member shifted to its group's baseline. */
-	for (row = 0; row < grid->row_count; row++) {
-		track = grid_row_track(&box->style, row);
-		if (track->kind == CSS_TRACK_LENGTH || (track->kind == CSS_TRACK_FR && available >= 0))
-			continue;
+		if (track->size.unit == CSS_UNIT_PERCENT || track->minimum.unit == CSS_UNIT_PERCENT || track->kind == CSS_TRACK_FR)
+			percentages = 1;
 		grid_row_baselines(box, grid, row, &first_above, &first_below, &last_above, &last_below);
-		if (first_above + first_below > grid->rows[row])
-			grid->rows[row] = first_above + first_below;
-		if (last_above + last_below > grid->rows[row])
-			grid->rows[row] = last_above + last_below;
+		group_floor = first_above + first_below;
+		if (last_above + last_below > group_floor)
+			group_floor = last_above + last_below;
+		if (group_floor > 0)
+			error = grid_flat_add(&list, NULL, row, 1, 0, 1, 0, group_floor);
 	}
-
-	/* The items spanning rows. */
-	for (index = 0; index < grid->item_count; index++) {
-		item = &grid->items[index];
-		if (item->row_span < 2)
-			continue;
-
-		/* Definite fixed tracks retain their maxima even when a spanning item's content is taller. */
-		fixed_rows = grid_span_has_fixed_rows(&box->style, item, grid, gap, available);
-		if (fixed_rows)
-			continue;
-
-		/* Sum occupied rows and internal gaps to find this span's current capacity. */
-		spanned = gap * (layout_unit)(item->row_span - 1);
-		for (row = item->row; row < item->row + item->row_span && row < grid->row_count; row++)
-			spanned += grid->rows[row];
-		height = grid_outer_height(item->box);
-		row = item->row + item->row_span - 1;
-		if (height > spanned && row < grid->row_count)
-			grid->rows[row] += height - spanned;
-	}
-
-	/* Fixed minmax() rows grow toward their maxima by the definite free space. */
-	if (available >= 0) {
-		used = gap * (layout_unit)(grid->row_count - 1);
-		for (row = 0; row < grid->row_count; row++) {
-			track = grid_row_track(&box->style, row);
-			if (grid->row_collapsed != NULL && grid->row_collapsed[row]) {
-				used -= gap;
-				continue;
-			}
-			if (track->kind != CSS_TRACK_FR)
-				used += grid->rows[row];
-		}
-		if (available > used)
-			grid_maximize(&box->style, 0, grid->rows, grid->row_count, grid->row_collapsed, available, available - used);
-	}
-
-	/* Fractional rows share the definite room left after fixed and auto rows and the gaps. */
-	if (fr_total > 0) {
-		used = gap * (layout_unit)(grid->row_count - 1);
-		for (row = 0; row < grid->row_count; row++) {
-			track = grid_row_track(&box->style, row);
-			if (grid->row_collapsed != NULL && grid->row_collapsed[row]) {
-				used -= gap;
-				continue;
-			}
-			if (track->kind == CSS_TRACK_FR)
-				continue;
-			used += grid->rows[row];
-		}
-
-		/* A sum below one leaves the corresponding share unused. */
-		if (fr_total < 1.0f)
-			fr_total = 1.0f;
-		for (row = 0; row < grid->row_count; row++) {
-			track = grid_row_track(&box->style, row);
-			if (track->kind != CSS_TRACK_FR ||
-			    (grid->row_collapsed != NULL && grid->row_collapsed[row]))
-				continue;
-			minimum = (layout_unit)((float)(available - used) * track->fr / fr_total);
-			if (minimum > grid->rows[row])
-				grid->rows[row] = minimum;
-		}
-	}
-
-	/* A definite height gives its free space equally to the auto rows. */
-	if (available < 0 || !grid_content_stretches(box->style.align_content))
+	tracks = calloc((size_t)grid->row_count, sizeof(*tracks));
+	items = calloc(list.count + 1U, sizeof(*items));
+	if (error != 0 || tracks == NULL || items == NULL) {
+		free(list.entries);
+		free(tracks);
+		free(items);
 		return;
-	used = gap * (layout_unit)(grid->row_count - 1);
-	height = 0;
-	for (row = 0; row < grid->row_count; row++) {
-		track = grid_row_track(&box->style, row);
-		if (grid->row_collapsed != NULL && grid->row_collapsed[row]) {
-			used -= gap;
-			continue;
-		}
-		used += grid->rows[row];
-		if (grid_row_stretches(track))
-			height++;
 	}
-	if (height == 0 || available <= used)
-		return;
-	minimum = (available - used) / height;
-	spanned = available - used - minimum * height;
-	for (row = 0; row < grid->row_count; row++) {
-		track = grid_row_track(&box->style, row);
-		if (!grid_row_stretches(track) ||
-		    (grid->row_collapsed != NULL && grid->row_collapsed[row]))
-			continue;
-		grid->rows[row] += minimum;
-		height--;
-		if (height == 0)
-			grid->rows[row] += spanned;
+	for (index = 0; index < list.count; index++) {
+		items[index].start = list.entries[index].start;
+		items[index].span = list.entries[index].span;
+	}
+
+	/* The sizing; a percentage row of an indefinite height is sized once as auto and again against the height that gave. */
+	again = 0;
+	for (;;) {
+		for (row = 0; row < grid->row_count; row++) {
+			grid_track_spec_of(grid_row_track(&box->style, row), available, &tracks[row]);
+			if (grid->row_collapsed != NULL && grid->row_collapsed[row])
+				tracks[row].collapsed = 1;
+		}
+		memset(&context, 0, sizeof(context));
+		context.flat = list.entries;
+		memset(&input, 0, sizeof(input));
+		input.tracks = tracks;
+		input.count = grid->row_count;
+		input.items = items;
+		input.item_count = list.count;
+		input.gap = gap;
+		input.constraint = available >= 0 ? GRID_TRACK_DEFINITE : GRID_TRACK_MAX_CONSTRAINT;
+		input.available = available;
+		input.container_minimum = minimum;
+		input.container_maximum = maximum;
+		input.stretch_auto = grid_content_stretches(box->style.align_content);
+		input.contribution = grid_row_answer;
+		input.context = &context;
+		error = grid_track_size(&input, grid->rows);
+		if (error != 0 || again || available >= 0 || !percentages)
+			break;
+
+		/* The height the rows gave, within the container's limits, is what the percentages are of. */
+		total = gap * (layout_unit)(grid->row_count - 1);
+		for (row = 0; row < grid->row_count; row++) {
+			if (grid->row_collapsed != NULL && grid->row_collapsed[row])
+				total -= gap;
+			else
+				total += grid->rows[row];
+		}
+		if (maximum >= 0 && total > maximum)
+			total = maximum;
+		if (minimum >= 0 && total < minimum)
+			total = minimum;
+		available = total;
+		grid->intrinsic_height = total;
+		again = 1;
+	}
+	free(list.entries);
+	free(tracks);
+	free(items);
+	if (error != 0) {
+		for (row = 0; row < grid->row_count; row++)
+			grid->rows[row] = 0;
 	}
 }
 
@@ -3662,10 +4382,12 @@ grid_relay_item(
 	int justify;
 	int error;
 
-	/* The target content height, from the percentage or the area's stretch. */
+	/* The target content height: the whole area for a subgrid in rows, else from the percentage or the area's stretch. */
 	frame = item->border[CSS_TOP] + item->padding[CSS_TOP] +
 	    item->padding[CSS_BOTTOM] + item->border[CSS_BOTTOM];
-	if (item->style.height.unit == CSS_UNIT_PERCENT) {
+	if (item->subgrid_row_span > 0) {
+		content = height - item->margin[CSS_TOP] - item->margin[CSS_BOTTOM] - frame;
+	} else if (item->style.height.unit == CSS_UNIT_PERCENT) {
 		content = (layout_unit)((float)height * item->style.height.value / 100.0f) +
 		    layout_from_px(item->style.height.offset);
 		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
@@ -3705,7 +4427,9 @@ grid_relay_item(
 	if (justify == CSS_ALIGN_AUTO && item->parent != NULL)
 		justify = item->parent->style.justify_items;
 	if (justify == CSS_ALIGN_NORMAL || justify == CSS_ALIGN_AUTO)
-		justify = item->replaced ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+		justify = grid_normal_starts(item) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+	if (item->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || item->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+		justify = CSS_ALIGN_START;
 	if (item->replaced && saved.width.unit == CSS_UNIT_AUTO && ratio_width > 0 &&
 	    ratio_height > 0 && align == CSS_ALIGN_STRETCH && justify != CSS_ALIGN_STRETCH &&
 	    item->style.height.unit == CSS_UNIT_AUTO) {
@@ -3814,9 +4538,7 @@ grid_row_baseline(
 	if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
 		return 0;
 
-	/* One row, without an auto margin across. */
-	if (item->row_span != 1)
-		return 0;
+	/* Without an auto margin across. */
 	if (child->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO ||
 	    child->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
 		return 0;
@@ -3863,27 +4585,119 @@ grid_row_baselines(
 	layout_unit above;
 	layout_unit outer;
 	size_t index;
+	int span;
 	int group;
 
-	/* Each member of the row. */
+	/* Each member of the row: an item spanning rows takes part in its first row's first group and its last row's last group, and only reaches into those rows by the part towards them. */
 	*first_above = *first_below = *last_above = *last_below = 0;
 	for (index = 0; index < grid->item_count; index++) {
-		if (grid->items[index].row != row)
-			continue;
 		group = grid_row_baseline(box, &grid->items[index], &above);
 		if (group == 0)
+			continue;
+		span = grid->items[index].row_span;
+		if (group == 1 && grid->items[index].row != row)
+			continue;
+		if (group == 2 && grid->items[index].row + span - 1 != row)
 			continue;
 		outer = grid_outer_height(grid->items[index].box);
 		if (group == 1) {
 			if (above > *first_above)
 				*first_above = above;
-			if (outer - above > *first_below)
+			if (span == 1 && outer - above > *first_below)
 				*first_below = outer - above;
 		} else {
-			if (above > *last_above)
+			if (span == 1 && above > *last_above)
 				*last_above = above;
 			if (outer - above > *last_below)
 				*last_below = outer - above;
+		}
+	}
+}
+
+/*
+ * Tells whether a vertical item of a horizontal grid aligns by baseline
+ * along the row (justify-self baseline or last baseline), and where its
+ * baseline is: how far right of its margin box's left edge (before) and how
+ * far its margin box reaches left of it (after).  The item's start side (the
+ * first baseline's) or end side (the last's) is the side its group is
+ * flush to: flush_right is set for the right one.
+ */
+static int
+grid_column_baseline(
+	const struct layout_box *box,
+	const struct grid_item *item,
+	layout_unit *before,
+	layout_unit *after,
+	int *flush_right)
+{
+	const struct layout_box *child;
+	layout_unit baseline;
+	int justify;
+	int last;
+	int found;
+
+	/* Only a vertical item of a horizontal grid, in one column. */
+	child = item->box;
+	if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB || !child->grid_orthogonal || item->column_span != 1)
+		return 0;
+	if (child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+		return 0;
+
+	/* A baseline preference along the row. */
+	justify = child->style.justify_self;
+	last = (child->style.last_baselines & 0x100u) != 0;
+	if (justify == CSS_ALIGN_AUTO) {
+		justify = box->style.justify_items;
+		last = (box->style.last_baselines & 0x200u) != 0;
+	}
+	if (justify != CSS_ALIGN_BASELINE && !last)
+		return 0;
+
+	/* The line's central baseline, or the border box's left (under) edge when it has no line. */
+	found = layout_vertical_baseline(child, last, &baseline);
+	if (!found)
+		baseline = 0;
+	*before = child->margin[CSS_LEFT] + baseline;
+	*after = child->margin[CSS_LEFT] + child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->width +
+	    child->padding[CSS_RIGHT] + child->border[CSS_RIGHT] + child->margin[CSS_RIGHT] - *before;
+
+	/* The first baseline's group is flush to the item's block-start side, the last's to its block-end side. */
+	*flush_right = (child->style.writing_mode == CSS_WRITING_VERTICAL_RL) != (last != 0);
+	return 1;
+}
+
+/* Finds a column's baseline groups: the farthest their baselines lie from the left edge (left group) and from the right edge (right group), and the room beyond. */
+static void
+grid_column_baselines(
+	const struct layout_box *box,
+	const struct grid_state *grid,
+	int column,
+	layout_unit *left_before,
+	layout_unit *left_after,
+	layout_unit *right_before,
+	layout_unit *right_after)
+{
+	layout_unit before;
+	layout_unit after;
+	size_t index;
+	int right;
+
+	*left_before = *left_after = *right_before = *right_after = 0;
+	for (index = 0; index < grid->item_count; index++) {
+		if (grid->items[index].column != column)
+			continue;
+		if (!grid_column_baseline(box, &grid->items[index], &before, &after, &right))
+			continue;
+		if (right) {
+			if (before > *right_before)
+				*right_before = before;
+			if (after > *right_after)
+				*right_after = after;
+		} else {
+			if (before > *left_before)
+				*left_before = before;
+			if (after > *left_after)
+				*left_after = after;
 		}
 	}
 }
@@ -3949,79 +4763,6 @@ grid_fixed_area_height(
 	return 1;
 }
 
-/* Finds a fixed track's minmax() minimum when it is a length of its own (its floor while it grows). */
-static int
-grid_track_floor(
-	const struct css_track *track,
-	layout_unit whole,
-	layout_unit *floor)
-{
-	/* Only a fixed maximum with a fixed minimum. */
-	if (track->kind != CSS_TRACK_LENGTH || track->minimum_rule != CSS_TRACK_MINIMUM_LENGTH)
-		return 0;
-	if (track->minimum.unit != CSS_UNIT_PX && track->minimum.unit != CSS_UNIT_PERCENT)
-		return 0;
-
-	/* Succeeded: the minimum. */
-	*floor = grid_track_length(&track->minimum, whole, 0);
-	return 1;
-}
-
-/*
- * Grows the fixed minmax() tracks of an axis from their minima toward their
- * maxima, equally, by at most the free space (the maximize step).
- */
-static void
-grid_maximize(
-	const struct css_style *style,
-	int columns,
-	layout_unit *sizes,
-	int count,
-	const unsigned char *collapsed,
-	layout_unit whole,
-	layout_unit free_space)
-{
-	const struct css_track *track;
-	layout_unit floor;
-	layout_unit limit;
-	layout_unit share;
-	layout_unit grow;
-	int growing;
-	int index;
-
-	/* Rounds of equal shares until the space or the room to grow runs out. */
-	while (free_space > 0) {
-		growing = 0;
-		for (index = 0; index < count; index++) {
-			track = columns ? grid_column_track(style, index) : grid_row_track(style, index);
-			if ((collapsed != NULL && collapsed[index]) || !grid_track_floor(track, whole, &floor))
-				continue;
-			if (sizes[index] < grid_track_length(&track->size, whole, 0))
-				growing++;
-		}
-		if (growing == 0)
-			return;
-		share = free_space / growing;
-		if (share == 0)
-			share = free_space;
-		for (index = 0; index < count && free_space > 0; index++) {
-			track = columns ? grid_column_track(style, index) : grid_row_track(style, index);
-			if ((collapsed != NULL && collapsed[index]) || !grid_track_floor(track, whole, &floor))
-				continue;
-			limit = grid_track_length(&track->size, whole, 0);
-			if (sizes[index] >= limit)
-				continue;
-			grow = limit - sizes[index];
-			if (grow > share)
-				grow = share;
-			if (grow > free_space)
-				grow = free_space;
-			sizes[index] += grow;
-			free_space -= grow;
-		}
-	}
-}
-
 /* Resolves a track's nonnegative length: pixels or a percentage of the definite whole. */
 static layout_unit
 grid_track_length(
@@ -4062,5 +4803,35 @@ grid_release(
 	free(grid->taken);
 	free(grid->column_collapsed);
 	free(grid->row_collapsed);
-	free(grid->column_fit);
+}
+
+/* Tells whether a normal alignment of a grid item behaves as start: a replaced item does, a checkbox or a radio button stretches like the other controls. */
+static int
+grid_normal_starts(
+	const struct layout_box *box)
+{
+	return box->replaced && box->control != DOM_CONTROL_CHECKBOX && box->control != DOM_CONTROL_RADIO;
+}
+
+/* Adds up the fixed (pixel) rows an item spans and the gaps between them; tells whether every one of them is fixed. */
+static int
+grid_fixed_rows_height(
+	const struct layout_box *box,
+	const struct grid_item *item,
+	layout_unit gap,
+	layout_unit *height)
+{
+	const struct css_track *track;
+	layout_unit rows;
+	int row;
+
+	rows = gap * (layout_unit)(item->row_span - 1);
+	for (row = item->row; row < item->row + item->row_span; row++) {
+		track = grid_row_track(&box->style, row);
+		if (track->kind != CSS_TRACK_LENGTH || track->size.unit != CSS_UNIT_PX)
+			return 0;
+		rows += layout_from_px(track->size.value);
+	}
+	*height = rows;
+	return 1;
 }

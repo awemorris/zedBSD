@@ -11,6 +11,14 @@ root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 
 def convert(source_path, output_name, variable):
     source = open(os.path.join(root, source_path), encoding="utf-8").read()
+    # A line "// @include path" (relative to the repository) is replaced by that file's text.
+    out = []
+    for line in source.split("\n"):
+        if line.startswith("// @include "):
+            out.append(open(os.path.join(root, line[len("// @include "):].strip()), encoding="utf-8").read().rstrip("\n"))
+        else:
+            out.append(line)
+    source = "\n".join(out)
     lines = []
     for line in source.split("\n"):
         escaped = line.replace("\\", "\\\\").replace('"', '\\"')

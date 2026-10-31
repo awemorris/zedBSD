@@ -68,6 +68,9 @@ struct table_state {
 	int *fixed;
 	float *percent;
 	layout_unit *widths;
+	/* The columns run from the right (direction: rtl), over the width the table's cells span. */
+	int rtl;
+	layout_unit span_width;
 };
 
 /*
@@ -87,6 +90,7 @@ struct table_sizes {
 
 static int table_collect(struct layout_box *box, struct table_state *state);
 static int table_collect_row(struct layout_box *row, struct table_state *state);
+static int table_group_pass(const struct layout_box *group);
 static int table_slot_taken(const struct table_state *state, size_t row, int column);
 static int table_span(const struct layout_box *cell, const char *name);
 static int table_measure(struct layout_tree *tree, struct layout_box *box, struct table_state *state);
@@ -94,7 +98,7 @@ static int table_cell_widths(struct layout_tree *tree, struct layout_box *cell, 
 static layout_unit table_wanted(const struct table_state *state, layout_unit spacing, layout_unit sum_most);
 static void table_spread(layout_unit *widths, int first, int span, layout_unit spacing, layout_unit wanted);
 static void table_columns(struct table_state *state, layout_unit room);
-static int table_lay_rows(struct layout_tree *tree, struct table_state *state, layout_unit used, layout_unit *cursor);
+static int table_lay_rows(struct layout_tree *tree, struct table_state *state, layout_unit used, layout_unit *cursor, layout_unit total);
 static void table_place_groups(struct layout_box *box, layout_unit edge, layout_unit used, layout_unit cursor);
 static void table_collapse(struct table_state *state);
 static int table_lay_cell(struct layout_tree *tree, struct layout_box *cell, layout_unit width, layout_unit *wanted);
@@ -122,6 +126,12 @@ layout_table(
 	layout_unit used;
 	layout_unit containing;
 	layout_unit cursor;
+	layout_unit captions;
+	layout_unit rows_start;
+	layout_unit caption_least;
+	layout_unit least;
+	layout_unit total;
+	layout_unit sizing;
 	int column;
 	int error;
 
@@ -129,6 +139,7 @@ layout_table(
 	memset(&state, 0, sizeof(state));
 	state.across = layout_from_px(box->style.border_spacing[0]);
 	state.down = layout_from_px(box->style.border_spacing[1]);
+	state.rtl = box->style.direction == CSS_DIRECTION_RTL;
 
 	/* The rows and cells (collapsed borders overlap instead of the spacing), and each column's narrowest and widest. */
 	wb_vector_init(&state.rows, sizeof(struct layout_box *));
@@ -167,13 +178,32 @@ layout_table(
 		sum_most += state.most[column];
 	}
 
-	/* An auto table is as wide as it wants (at most the room), and never narrower than its columns' least. */
+	/* The widest caption's narrowest width: the table is at least as wide. */
+	caption_least = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->style.display != CSS_DISPLAY_TABLE_CAPTION)
+			continue;
+		error = layout_min_content(tree, child, &least);
+		if (error != 0) {
+			table_release(&state);
+			return error;
+		}
+		least += child->margin[CSS_LEFT] + child->margin[CSS_RIGHT] + table_frame(child);
+		if (least > caption_least)
+			caption_least = least;
+	}
+
+	/* An auto table is as wide as it wants (at most the room), and never narrower than its columns' least or its captions'. */
 	box->grid_content = table_wanted(&state, spacing, sum_most);
+	if (box->grid_content < caption_least)
+		box->grid_content = caption_least;
 	used = box->width;
 	if (box->style.width.unit == CSS_UNIT_AUTO && used > box->grid_content)
 		used = box->grid_content;
 	if (used < sum_least)
 		used = sum_least;
+	if (box->style.width.unit == CSS_UNIT_AUTO && used < caption_least && caption_least <= box->width)
+		used = caption_least;
 
 	/* A narrower (or wider) table takes its auto margins again in the same containing block. */
 	if (used != box->width) {
@@ -185,26 +215,56 @@ layout_table(
 	/* The columns' widths in what the spacing leaves. */
 	table_columns(&state, used - spacing);
 
-	/* The captions above the rows. */
+	/* The captions above the rows (those of caption-side: bottom are laid out for their height, and placed below the rows). */
 	cursor = 0;
+	captions = 0;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow || child->style.display != CSS_DISPLAY_TABLE_CAPTION)
 			continue;
 		error = layout_block(tree, child, used);
 		if (error != 0)
 			break;
+		captions += child->margin[CSS_TOP] + table_frame_down(child) + child->height + child->margin[CSS_BOTTOM];
+		if (child->style.caption_side != 0) {
+			continue;
+		}
 		child->x = child->margin[CSS_LEFT];
 		child->y = cursor + child->margin[CSS_TOP];
 		cursor = child->y + table_frame_down(child) + child->height + child->margin[CSS_BOTTOM];
 	}
 
+	/* A height of the table is the least its rows fill: the rows share what the captions leave. */
+	total = -1;
+	sizing = 0;
+	if (box->style.box_sizing != CSS_BOX_SIZING_BORDER)
+		sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	if (box->style.height.unit == CSS_UNIT_PX)
+		total = layout_from_px(box->style.height.value) - table_frame_down(box) + sizing - (box->table_wrapper_height ? captions : 0);
+	if (box->style.min_height.unit == CSS_UNIT_PX &&
+	    layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing > total)
+		total = layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing;
+
 	/* The rows, then the row groups around them. */
+	rows_start = cursor;
 	if (error == 0)
-		error = table_lay_rows(tree, &state, used, &cursor);
+		error = table_lay_rows(tree, &state, used, &cursor, total);
 	table_release(&state);
 	if (error != 0)
 		return error;
+
+	/* A table with a height is that tall below its captions even when it has no rows. */
+	if (total > 0 && cursor - rows_start < total)
+		cursor = rows_start + total;
 	table_place_groups(box, state.edge_x, used, cursor);
+
+	/* The captions below the rows. */
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->style.display != CSS_DISPLAY_TABLE_CAPTION || child->style.caption_side == 0)
+			continue;
+		child->x = child->margin[CSS_LEFT];
+		child->y = cursor + child->margin[CSS_TOP];
+		cursor = child->y + table_frame_down(child) + child->height + child->margin[CSS_BOTTOM];
+	}
 
 	/* Succeeded: the table is as tall as its captions, rows and spacing. */
 	box->height = cursor;
@@ -219,33 +279,60 @@ table_collect(
 {
 	struct layout_box *child;
 	struct layout_box *row;
+	int pass;
 	int error;
 
-	/* The rows among the table's children, and in its row groups. */
-	for (child = box->first_child; child != NULL; child = child->next) {
-		if (child->out_of_flow)
-			continue;
-		if (child->style.display == CSS_DISPLAY_TABLE_ROW) {
-			error = table_collect_row(child, state);
-			if (error != 0)
-				return error;
-			continue;
-		}
-
-		/* A row group's rows. */
-		if (child->style.display != CSS_DISPLAY_TABLE_ROW_GROUP)
-			continue;
-		for (row = child->first_child; row != NULL; row = row->next) {
-			if (row->out_of_flow || row->style.display != CSS_DISPLAY_TABLE_ROW)
+	/* The rows among the table's children, and in its row groups: the head's first, the foot's last. */
+	for (pass = 0; pass < 3; pass++) {
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (child->out_of_flow)
 				continue;
-			error = table_collect_row(row, state);
-			if (error != 0)
-				return error;
+			if (child->style.display == CSS_DISPLAY_TABLE_ROW) {
+				if (pass != 1)
+					continue;
+				error = table_collect_row(child, state);
+				if (error != 0)
+					return error;
+				continue;
+			}
+
+			/* A row group's rows. */
+			if (child->style.display != CSS_DISPLAY_TABLE_ROW_GROUP)
+				continue;
+			if (table_group_pass(child) != pass)
+				continue;
+			for (row = child->first_child; row != NULL; row = row->next) {
+				if (row->out_of_flow || row->style.display != CSS_DISPLAY_TABLE_ROW)
+					continue;
+				error = table_collect_row(row, state);
+				if (error != 0)
+					return error;
+			}
 		}
 	}
 
 	/* Succeeded: the rows and cells are gathered. */
 	return 0;
+}
+
+/* Tells when a row group's rows go: 0 for a table head (first), 2 for a table foot (last), 1 otherwise. */
+static int
+table_group_pass(
+	const struct layout_box *group)
+{
+	const struct dom_element *element;
+
+	/* Only an HTML thead or tfoot. */
+	if (group->node == NULL || group->node->type != DOM_ELEMENT)
+		return 1;
+	element = (const struct dom_element *)group->node;
+	if (element->ns != DOM_NS_HTML)
+		return 1;
+	if (element->tag == DOM_TAG_THEAD)
+		return 0;
+	if (element->tag == DOM_TAG_TFOOT)
+		return 2;
+	return 1;
 }
 
 /* Adds a row and its cells, left to right; the widest row makes the columns. */
@@ -717,7 +804,8 @@ table_lay_rows(
 	struct layout_tree *tree,
 	struct table_state *state,
 	layout_unit used,
-	layout_unit *cursor)
+	layout_unit *cursor,
+	layout_unit total)
 {
 	struct table_cell *cell;
 	struct layout_box *row;
@@ -764,6 +852,10 @@ table_lay_rows(
 			return error;
 		}
 
+		/* A table of direction rtl has its first column at the right. */
+		if (state->rtl)
+			x = used - 2 * state->edge_x - x - width;
+
 		/* Keeps the cell at its horizontal grid position until rows are placed. */
 		cell->box->x = x;
 		cell->box->y = 0;
@@ -788,6 +880,75 @@ table_lay_rows(
 		if (have < cell->wanted) {
 			missing = cell->wanted - have;
 			heights[last_row - 1U] += missing;
+		}
+	}
+
+	/* A table with a height of its own: the rows grow in proportion to share what its content leaves (the first row's share when none has a height). */
+	if (total >= 0 && state->rows.count != 0) {
+		layout_unit sum;
+		layout_unit extra;
+		layout_unit given;
+
+		sum = state->edge_y + state->edge_y + state->down * (layout_unit)(state->rows.count - 1U);
+		for (number = 0; number < state->rows.count; number++)
+			sum += heights[number];
+		extra = total - sum;
+		if (extra > 0) {
+			layout_unit heights_sum;
+			size_t auto_count;
+			size_t last_taker;
+			int *takes;
+
+			/* Rows with no height of their own (the row's, or a cell's) take the extra first; with none, every row shares it. */
+			takes = calloc(state->rows.count + 1U, sizeof(*takes));
+			if (takes == NULL) {
+				free(heights);
+				return ENOMEM;
+			}
+			for (number = 0; number < state->rows.count; number++) {
+				row = *(struct layout_box **)wb_vector_at(&state->rows, number);
+				takes[number] = row->style.height.unit == CSS_UNIT_AUTO;
+			}
+			for (index = 0; index < state->cells.count; index++) {
+				cell = wb_vector_at(&state->cells, index);
+				if (cell->box->style.height.unit != CSS_UNIT_AUTO)
+					takes[cell->row] = 0;
+			}
+			auto_count = 0;
+			for (number = 0; number < state->rows.count; number++) {
+				if (takes[number])
+					auto_count++;
+			}
+			if (auto_count == 0) {
+				for (number = 0; number < state->rows.count; number++)
+					takes[number] = 1;
+				auto_count = state->rows.count;
+			}
+			heights_sum = 0;
+			last_taker = 0;
+			for (number = 0; number < state->rows.count; number++) {
+				if (takes[number]) {
+					heights_sum += heights[number];
+					last_taker = number;
+				}
+			}
+			given = 0;
+			for (number = 0; number < state->rows.count; number++) {
+				layout_unit share;
+
+				if (!takes[number])
+					continue;
+				if (number == last_taker) {
+					share = extra - given;
+				} else if (heights_sum > 0) {
+					share = (layout_unit)((float)extra * (float)heights[number] / (float)heights_sum);
+				} else {
+					share = extra / (layout_unit)auto_count;
+				}
+				heights[number] += share;
+				given += share;
+			}
+			free(takes);
 		}
 	}
 

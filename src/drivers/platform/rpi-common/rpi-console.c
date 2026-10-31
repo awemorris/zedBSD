@@ -300,6 +300,8 @@ console_input_worker(
 	uint32_t status;
 	uint8_t byte;
 	uint64_t wake;
+	uint64_t now;
+	uint64_t poll_ticks;
 
 	/* The worker is given no argument. */
 	(void)argument;
@@ -326,7 +328,9 @@ console_input_worker(
 		}
 
 		/* Waits until the next look at the port. */
-		wake = sched_ticks() + kern_ms_to_ticks(RPI_CONSOLE_POLL_MS);
+		now = sched_ticks();
+		poll_ticks = kern_ms_to_ticks(RPI_CONSOLE_POLL_MS);
+		wake = now + poll_ticks;
 		sched_sleep(wake);
 	}
 }

@@ -216,7 +216,11 @@ struct gpu_display_present {
  * yet adopted, ETIMEDOUT when the time ran out, EINTR on a signal, EBUSY
  * when the lease is not this open's (also when it ends during the wait),
  * ENXIO when disconnected.  An output whose presents return only once
- * adopted answers at once.
+ * adopted answers at once.  These are the framework's terms; the drivers
+ * still differ (the reference, gpu-display and gpu-drivers, says which):
+ * only bcm2711 and ghci cap a call at a second, only bcm2711 ends the wait
+ * on a signal, and venus refuses another open's lease with EPERM, i915
+ * with EINVAL.
  */
 struct gpu_display_wait {
 	uint32_t version;
@@ -281,8 +285,9 @@ struct gpu_display_refresh {
  * image from the next refresh boundary; a hidden one stays hidden until
  * GPU_DISPLAY_CURSOR_MOVE.  Every field is an input; reserved fields are zero.
  * It needs a writable open: EBUSY when the lease is not this open's, ESTALE
- * for an old generation, ENXIO when disconnected, EOPNOTSUPP without
- * GPU_DISPLAY_HAS_CURSOR.  EBUSY also comes, for a moment, when every
+ * for an old generation, ENXIO when disconnected, EOPNOTSUPP when the
+ * driver has no cursor operation (the request is not checked against the
+ * output's GPU_DISPLAY_HAS_CURSOR).  EBUSY also comes, for a moment, when every
  * cursor image is named by a display list the hardware has not yet left and
  * none holds the same rows; nothing changed, and the call may succeed a
  * refresh later.
@@ -332,8 +337,9 @@ struct gpu_display_cursor_hide {
 
 /*
  * One plane's new state in a commit.  plane is 0 (the primary) or an
- * overlay.  The image is storage of this open, GPU_PIXEL_BGRA8888 or
- * RGBA8888; an overlay's has premultiplied alpha.  Cached storage is
+ * overlay.  The image is a blob or a scanout allocation of this open
+ * (ordinary storage: EINVAL), GPU_PIXEL_BGRA8888 or RGBA8888; an
+ * overlay's has premultiplied alpha.  Cached storage is
  * cleaned when a commit names it as a new image, so the caller writes no
  * image while it is borrowed.  src (inside the image) is shown at dst (inside the
  * output); an overlay may scale within its GPU_DISPLAY_OVERLAY_INFO limits,
@@ -388,8 +394,9 @@ struct gpu_display_plane_state {
  * this open's (also when it ends while the call waits), ENXIO when
  * disconnected.  ETIMEDOUT when the adoption did not come: the output keeps
  * every borrowed image, the lease's later commits and presents fail with
- * EBUSY, and releasing the lease or closing the open returns the output to
- * the console and lets the images go.
+ * EBUSY, and releasing the lease or closing the open lets the images go
+ * (the output then shows what the driver leaves: the text console, which
+ * the first flip of the system ended, does not draw on it again).
  */
 struct gpu_display_commit {
 	uint32_t version;
@@ -407,7 +414,7 @@ struct gpu_display_commit {
 	uint64_t reserved;
 };
 
-/* One overlay plane's limits on the output's current mode (vkGetDisplayPlaneCapabilitiesKHR). */
+/* One overlay plane's limits on the output's current mode (vkGetDisplayPlaneCapabilitiesKHR); it names the output and needs no lease. */
 struct gpu_display_overlay_info {
 	uint32_t version;
 	uint32_t size;

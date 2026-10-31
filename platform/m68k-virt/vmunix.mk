@@ -43,7 +43,7 @@ M68KV_KERNEL_SOURCES := \
 	src/kern/mount.c src/kern/tmpfs.c src/kern/tmpfs-pages.c src/drivers/fs/overlayfs.c \
 	src/kern/vfs.c src/kern/backing-claim.c \
 	src/kern/buf.c src/kern/cache.c src/kern/readahead.c src/kern/writeback.c src/kern/io.c \
-	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
+	src/kern/sysctl.c src/kern/thermal.c src/kern/thermal-guard.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
 	src/kern/device-io.c src/kern/irq.c src/kern/pmem.c \
 	src/kern/test-checkpoint.c src/kern/text-display.c \
 	src/drivers/generic/loop.c \
@@ -54,7 +54,7 @@ M68KV_KERNEL_SOURCES := \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/timer.c src/kern/klog.c \
 	src/kern/lock.c src/kern/waitq.c \
-	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/sleep.c src/kern/freeze.c \
+	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/sleep.c src/kern/cpuperf.c src/kern/freeze.c \
 	$(KERN_VM_SOURCES) \
 	src/kern/filedesc.c src/kern/handle.c src/kern/fd-object.c \
 	src/kern/record-lock.c \

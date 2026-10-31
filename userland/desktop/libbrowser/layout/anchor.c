@@ -29,15 +29,26 @@
 #include <string.h>
 
 static int anchor_value(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_expr *expr, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
+static const struct css_style *anchor_cb_style(const struct layout_tree *tree, const struct layout_box *box);
+static int anchor_axis_reversed(const struct css_style *style, int vertical);
 static int anchor_query(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
 static int anchor_find(const struct layout_tree *tree, const struct layout_box *box, const struct vm_string *name, struct layout_rect *rect);
+static int anchor_find_state(const struct layout_tree *tree, const struct layout_box *box, const struct vm_string *name, struct layout_rect *rect, const struct layout_box **anchor, int *clipped);
 static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
+static int anchor_chain_before(const struct layout_box *candidate, const struct layout_box *box, const struct layout_box *containing);
+static const struct layout_box *anchor_scope_root(const struct layout_box *box, const struct vm_string *name);
+static int anchor_fixed(const struct layout_box *box);
+static int anchor_top_layer(const struct layout_box *box);
+static const struct layout_box *anchor_up(const struct layout_box *box);
+static int anchor_outside(const struct layout_box *scroller, const struct layout_rect *rect);
+static int anchor_scrolls(const struct layout_box *box);
 static int anchor_has_name(const struct layout_box *box, const struct vm_string *name);
-static const struct layout_box *anchor_containing(const struct layout_box *box);
 static void anchor_flip(struct layout_tree *tree, struct layout_box *box, int how);
 static const struct css_anchor_expr *anchor_turn(struct layout_tree *tree, const struct css_anchor_expr *expr, int how);
 static layout_unit anchor_inset(const struct css_length *length, layout_unit size);
 static void anchor_area_align(struct layout_box *box, int across, int align, int first, int last, layout_unit start, layout_unit end, layout_unit anchor_start, layout_unit anchor_size);
+static int anchor_area_aligned(int align);
+static int anchor_start_diagonal(const struct css_style *cb_style, int mode);
 
 /*
  * Finishes a box's insets and sizes that hold anchor functions against
@@ -85,6 +96,12 @@ layout_anchor_resolve(
 		case CSS_ANCHOR_SLOT_MAX_HEIGHT:
 			length = &box->style.max_height;
 			break;
+		case CSS_ANCHOR_SLOT_MARGIN_TOP:
+		case CSS_ANCHOR_SLOT_MARGIN_RIGHT:
+		case CSS_ANCHOR_SLOT_MARGIN_BOTTOM:
+		case CSS_ANCHOR_SLOT_MARGIN_LEFT:
+			length = &box->style.margin[slot - CSS_ANCHOR_SLOT_MARGIN_TOP];
+			break;
 		default:
 			length = &box->style.offset[slot];
 			break;
@@ -96,7 +113,8 @@ layout_anchor_resolve(
 		start = x;
 		size = width;
 		if (slot == CSS_ANCHOR_SLOT_TOP || slot == CSS_ANCHOR_SLOT_BOTTOM || slot == CSS_ANCHOR_SLOT_HEIGHT ||
-		    slot == CSS_ANCHOR_SLOT_MIN_HEIGHT || slot == CSS_ANCHOR_SLOT_MAX_HEIGHT) {
+		    slot == CSS_ANCHOR_SLOT_MIN_HEIGHT || slot == CSS_ANCHOR_SLOT_MAX_HEIGHT ||
+		    slot == CSS_ANCHOR_SLOT_MARGIN_TOP || slot == CSS_ANCHOR_SLOT_MARGIN_BOTTOM) {
 			start = y;
 			size = height;
 		}
@@ -111,6 +129,10 @@ layout_anchor_resolve(
 		length->unit = CSS_UNIT_PX;
 		if (!valid)
 			length->unit = slot == CSS_ANCHOR_SLOT_MAX_WIDTH || slot == CSS_ANCHOR_SLOT_MAX_HEIGHT ? CSS_UNIT_NONE : CSS_UNIT_AUTO;
+		if (!valid && slot >= CSS_ANCHOR_SLOT_MARGIN_TOP) {
+			length->unit = CSS_UNIT_PX;
+			length->value = 0.0f;
+		}
 	}
 }
 
@@ -123,7 +145,7 @@ layout_anchor_wanted(
 
 	/* The insets, then the sizes. */
 	for (side = 0; side < 4; side++) {
-		if (box->style.offset[side].unit == CSS_UNIT_ANCHOR)
+		if (box->style.offset[side].unit == CSS_UNIT_ANCHOR || box->style.margin[side].unit == CSS_UNIT_ANCHOR)
 			return 1;
 	}
 	return box->style.width.unit == CSS_UNIT_ANCHOR || box->style.height.unit == CSS_UNIT_ANCHOR ||
@@ -167,6 +189,38 @@ anchor_value(
 	return 1;
 }
 
+/* The style whose writing mode the logical keywords of a box's anchor functions follow: its containing block's. */
+static const struct css_style *
+anchor_cb_style(
+	const struct layout_tree *tree,
+	const struct layout_box *box)
+{
+	const struct layout_box *containing;
+
+	containing = layout_containing_box(box);
+	if (containing != NULL)
+		return &containing->style;
+	return &tree->root->style;
+}
+
+/* Tells whether an axis (vertical or horizontal) of a style's writing mode runs against the page's (up or leftward). */
+static int
+anchor_axis_reversed(
+	const struct css_style *style,
+	int vertical)
+{
+	int rtl;
+
+	rtl = style->direction == CSS_DIRECTION_RTL;
+	if (style->writing_mode == CSS_WRITING_HORIZONTAL_TB)
+		return vertical ? 0 : rtl;
+
+	/* A vertical mode's block axis is horizontal (leftward for rl), its inline axis vertical (upward for rtl and sideways-lr). */
+	if (!vertical)
+		return style->writing_mode == CSS_WRITING_VERTICAL_RL;
+	return rtl != (style->writing_sideways == 1);
+}
+
 /* Works out one anchor() or anchor-size() for a slot (0 when it has no valid answer). */
 static int
 anchor_query(
@@ -182,19 +236,22 @@ anchor_query(
 	layout_unit edge;
 	layout_unit anchor_start;
 	layout_unit anchor_size;
+	const struct css_style *own_style;
 	int vertical;
+	int reversed;
 	int side;
 	int far;
 	int found;
 
 	/* The anchor. */
+	vertical = slot == CSS_ANCHOR_SLOT_TOP || slot == CSS_ANCHOR_SLOT_BOTTOM || slot == CSS_ANCHOR_SLOT_HEIGHT ||
+	    slot == CSS_ANCHOR_SLOT_MIN_HEIGHT || slot == CSS_ANCHOR_SLOT_MAX_HEIGHT ||
+	    slot == CSS_ANCHOR_SLOT_MARGIN_TOP || slot == CSS_ANCHOR_SLOT_MARGIN_BOTTOM;
 	found = anchor_find(tree, box, query->name != NULL ? query->name : box->style.position_anchor, &rect);
 	if (!found)
 		return 0;
 
-	/* The axis of the slot, and whether its inset is measured from the far edge (right or bottom). */
-	vertical = slot == CSS_ANCHOR_SLOT_TOP || slot == CSS_ANCHOR_SLOT_BOTTOM || slot == CSS_ANCHOR_SLOT_HEIGHT ||
-	    slot == CSS_ANCHOR_SLOT_MIN_HEIGHT || slot == CSS_ANCHOR_SLOT_MAX_HEIGHT;
+	/* Whether the slot's inset is measured from the far edge (right or bottom). */
 	far = slot == CSS_ANCHOR_SLOT_RIGHT || slot == CSS_ANCHOR_SLOT_BOTTOM;
 	anchor_start = vertical ? rect.y : rect.x;
 	anchor_size = vertical ? rect.height : rect.width;
@@ -204,10 +261,12 @@ anchor_query(
 	if (side >= CSS_ANCHOR_WIDTH) {
 		if (side == CSS_ANCHOR_SIZE_DEFAULT)
 			side = vertical ? CSS_ANCHOR_HEIGHT : CSS_ANCHOR_WIDTH;
-		if (side == CSS_ANCHOR_BLOCK || side == CSS_ANCHOR_SELF_BLOCK)
-			side = CSS_ANCHOR_HEIGHT;
-		if (side == CSS_ANCHOR_INLINE || side == CSS_ANCHOR_SELF_INLINE)
-			side = CSS_ANCHOR_WIDTH;
+		/* The block and inline sizes follow the containing block's writing mode (the box's own for self-). */
+		if (side == CSS_ANCHOR_BLOCK || side == CSS_ANCHOR_SELF_BLOCK || side == CSS_ANCHOR_INLINE || side == CSS_ANCHOR_SELF_INLINE) {
+			own_style = (side == CSS_ANCHOR_SELF_BLOCK || side == CSS_ANCHOR_SELF_INLINE) ? &box->style : anchor_cb_style(tree, box);
+			side = ((side == CSS_ANCHOR_BLOCK || side == CSS_ANCHOR_SELF_BLOCK) ==
+			    (own_style->writing_mode == CSS_WRITING_HORIZONTAL_TB)) ? CSS_ANCHOR_HEIGHT : CSS_ANCHOR_WIDTH;
+		}
 		*value = side == CSS_ANCHOR_HEIGHT ? rect.height : rect.width;
 		return 1;
 	}
@@ -232,17 +291,20 @@ anchor_query(
 		break;
 	case CSS_ANCHOR_START:
 	case CSS_ANCHOR_SELF_START:
-		edge = anchor_start;
+		reversed = anchor_axis_reversed(side == CSS_ANCHOR_SELF_START ? &box->style : anchor_cb_style(tree, box), vertical);
+		edge = anchor_start + (reversed ? anchor_size : 0);
 		break;
 	case CSS_ANCHOR_END:
 	case CSS_ANCHOR_SELF_END:
-		edge = anchor_start + anchor_size;
+		reversed = anchor_axis_reversed(side == CSS_ANCHOR_SELF_END ? &box->style : anchor_cb_style(tree, box), vertical);
+		edge = anchor_start + (reversed ? 0 : anchor_size);
 		break;
 	case CSS_ANCHOR_CENTER:
 		edge = anchor_start + anchor_size / 2;
 		break;
 	case CSS_ANCHOR_PERCENT:
-		edge = anchor_start + (layout_unit)((float)anchor_size * query->percent / 100.0f);
+		reversed = anchor_axis_reversed(anchor_cb_style(tree, box), vertical);
+		edge = anchor_start + (layout_unit)((float)anchor_size * (reversed ? 100.0f - query->percent : query->percent) / 100.0f);
 		break;
 	case CSS_ANCHOR_INSIDE:
 		edge = anchor_start + (far ? anchor_size : 0);
@@ -267,8 +329,27 @@ anchor_find(
 	const struct vm_string *name,
 	struct layout_rect *rect)
 {
+	return anchor_find_state(tree, box, name, rect, NULL, NULL);
+}
+
+/* Finds the anchor as anchor_find does, and tells the box it is and whether a scroll container it is in (the box's containing block is not) clips it away. */
+static int
+anchor_find_state(
+	const struct layout_tree *tree,
+	const struct layout_box *box,
+	const struct vm_string *name,
+	struct layout_rect *rect,
+	const struct layout_box **anchor,
+	int *clipped)
+{
 	const struct layout_box *containing;
 	const struct layout_box *found;
+	const struct layout_box *candidates[1];
+	const struct layout_box *up;
+	const struct layout_box *inner;
+	struct layout_rect original;
+	double scroll_x;
+	double scroll_y;
 	int passed;
 
 	/* A name, and the tree. */
@@ -276,10 +357,12 @@ anchor_find(
 		return 0;
 
 	/* The last acceptable box with the name in tree order. */
-	containing = anchor_containing(box);
-	found = NULL;
+	containing = layout_containing_box(box);
+	candidates[0] = NULL;
 	passed = 0;
-	anchor_search(tree, tree->root, box, containing, name, containing == NULL, &passed, &found, 0);
+	anchor_search(tree, tree->root, box, containing, name, containing == NULL, &passed, candidates, 0);
+
+	found = candidates[0];
 	if (found == NULL || found->node == NULL)
 		return 0;
 
@@ -296,9 +379,129 @@ anchor_find(
 		    found->padding[CSS_RIGHT] + found->border[CSS_RIGHT];
 		rect->height = found->border[CSS_TOP] + found->padding[CSS_TOP] + found->height +
 		    found->padding[CSS_BOTTOM] + found->border[CSS_BOTTOM];
-		return 1;
+	} else if (!layout_node_bounds(tree, found->node, rect)) {
+		return 0;
 	}
-	return layout_node_bounds(tree, found->node, rect);
+
+	/* Where the scroll puts the anchor: by the scroll of the scroll containers it is in that the box's containing block is not in. */
+	original = *rect;
+	for (up = anchor_up(found); up != NULL; up = anchor_up(up)) {
+		if (!layout_scroll_offset(up, &scroll_x, &scroll_y))
+			continue;
+		for (inner = containing; inner != NULL && inner != up; inner = inner->parent)
+			;
+		if (inner != NULL)
+			continue;
+		rect->x -= layout_from_px((float)scroll_x);
+		rect->y -= layout_from_px((float)scroll_y);
+	}
+
+	/* The box is placed by an anchor that scrolls with the page: it follows it (an anchor that is fixed itself stays with the viewport). */
+	if (!anchor_fixed(found))
+		((struct layout_box *)box)->anchored = 1;
+
+	/* Whether a scroll container in between shows none of it. */
+	if (anchor != NULL)
+		*anchor = found;
+	if (clipped != NULL) {
+		*clipped = 0;
+		for (up = anchor_up(found); up != NULL; up = anchor_up(up)) {
+			if (!anchor_scrolls(up) || up->parent == NULL)
+				continue;
+			for (inner = containing; inner != NULL && inner != up; inner = inner->parent)
+				;
+			if (inner != NULL)
+				continue;
+			if (layout_scroll_offset(up, &scroll_x, &scroll_y)) {
+				original.x -= layout_from_px((float)scroll_x);
+				original.y -= layout_from_px((float)scroll_y);
+			}
+			if (anchor_outside(up, &original))
+				*clipped = 1;
+		}
+	}
+	return 1;
+}
+
+/* Tells whether a box is fixed or inside a fixed box (it stays where the viewport is). */
+static int
+anchor_fixed(
+	const struct layout_box *box)
+{
+	const struct layout_box *up;
+
+	for (up = box; up != NULL; up = up->parent) {
+		if (up->out_of_flow && up->style.position == CSS_POSITION_FIXED)
+			return 1;
+	}
+	return 0;
+}
+
+/* Tells where a box is in the top layer (a modal dialog or an open popover: the later it opened the higher), 0 when it is not in it. */
+static int
+anchor_top_layer(
+	const struct layout_box *box)
+{
+	if (box->node == NULL || box->node->type != DOM_ELEMENT)
+		return 0;
+	return ((const struct dom_element *)box->node)->popover_open;
+}
+
+/* The next box up a box's chain of containing blocks: its parent, or for a box out of the flow where it is placed (NULL at the top). */
+static const struct layout_box *
+anchor_up(
+	const struct layout_box *box)
+{
+	if (box->out_of_flow)
+		return layout_containing_box(box);
+	return box->parent;
+}
+
+/* Tells whether a rectangle (in the frame the scroll container's own box is in) lies wholly outside the container's padding box. */
+static int
+anchor_outside(
+	const struct layout_box *scroller,
+	const struct layout_rect *rect)
+{
+	layout_unit left;
+	layout_unit top;
+	layout_unit right;
+	layout_unit bottom;
+
+	/* The padding box, which clips what scrolls in it. */
+	left = scroller->x + scroller->border[CSS_LEFT];
+	top = scroller->y + scroller->border[CSS_TOP];
+	right = left + scroller->padding[CSS_LEFT] + scroller->width + scroller->padding[CSS_RIGHT];
+	bottom = top + scroller->padding[CSS_TOP] + scroller->height + scroller->padding[CSS_BOTTOM];
+	return rect->x + rect->width <= left || rect->x >= right || rect->y + rect->height <= top || rect->y >= bottom;
+}
+
+/*
+ * Tells whether position-visibility hides a box out of the flow: with anchors-visible, its default anchor is
+ * clipped away by a scroll container in between or is hidden itself.
+ */
+int
+layout_anchor_hides(
+	const struct layout_tree *tree,
+	const struct layout_box *box)
+{
+	struct layout_rect rect;
+	const struct layout_box *anchor;
+	const struct layout_box *up;
+	int clipped;
+
+	/* Only anchors-visible and only for a box with a default anchor. */
+	if ((box->style.position_visibility & 2) == 0 || box->style.position_anchor == NULL)
+		return 0;
+	anchor = NULL;
+	clipped = 0;
+	if (!anchor_find_state(tree, box, box->style.position_anchor, &rect, &anchor, &clipped) || anchor == NULL)
+		return 0;
+	for (up = anchor; up != NULL; up = up->parent) {
+		if (up->anchor_hidden)
+			return 1;
+	}
+	return clipped;
 }
 
 /*
@@ -333,11 +536,101 @@ anchor_search(
 			continue;
 		}
 		child_inside = inside || walk == containing;
-		if (child_inside && anchor_has_name(child, name) &&
-		    (!child->out_of_flow || anchor_containing(child) != containing || !*passed))
-			*found = child;
+		if (child_inside && anchor_has_name(child, name) && anchor_scope_root(child, name) == anchor_scope_root(box, name) &&
+		    (anchor_top_layer(child) == 0 || (anchor_top_layer(box) != 0 && anchor_top_layer(child) < anchor_top_layer(box))) &&
+		    anchor_chain_before(child, box, containing) &&
+		    (!child->out_of_flow || !*passed || (layout_containing_box(child) != containing && !anchor_scrolls(layout_containing_box(child)))))
+			found[0] = child;
 		anchor_search(tree, child, box, containing, name, child_inside, passed, found, depth + 1);
 	}
+}
+
+/*
+ * Tells whether the last box of a candidate's chain of containing blocks below the box's containing block,
+ * when it is out of the flow, comes before the box in tree order (true when it is not or is the candidate).
+ */
+static int
+anchor_chain_before(
+	const struct layout_box *candidate,
+	const struct layout_box *box,
+	const struct layout_box *containing)
+{
+	const struct layout_box *up;
+	const struct layout_box *outer;
+	const struct layout_box *left;
+	const struct layout_box *right;
+	const struct layout_box *walk;
+
+	/* The last box of the candidate's chain of containing blocks before the box's containing block. */
+	outer = candidate;
+	for (up = candidate; up != NULL; ) {
+		up = up->out_of_flow ? layout_containing_box(up) : up->parent;
+		if (up == NULL || up == containing)
+			break;
+		outer = up;
+	}
+	if (!outer->out_of_flow || outer == candidate)
+		return 1;
+
+	/* An ancestor of the box (or the box) is before it. */
+	for (up = box; up != NULL; up = up->parent) {
+		if (up == outer)
+			return 1;
+	}
+
+	/* Otherwise the first of the two siblings under their closest common ancestor decides. */
+	for (left = outer; left != NULL; left = left->parent) {
+		for (right = box; right != NULL && right->parent != left->parent; right = right->parent)
+			;
+		if (right == NULL)
+			continue;
+		if (left == right)
+			return 1;
+		for (walk = left->parent != NULL ? left->parent->first_child : NULL; walk != NULL; walk = walk->next) {
+			if (walk == left)
+				return 1;
+			if (walk == right)
+				return 0;
+		}
+		return 1;
+	}
+	return 1;
+}
+
+/*
+ * Finds the nearest box (itself included) whose anchor-scope scopes a name: only boxes under the same
+ * scope can see each other's anchors of that name (NULL when none scopes it).
+ */
+static const struct layout_box *
+anchor_scope_root(
+	const struct layout_box *box,
+	const struct vm_string *name)
+{
+	const struct css_anchor_names *scope;
+	const struct layout_box *up;
+	int index;
+
+	/* The box and its ancestors. */
+	for (up = box; up != NULL; up = up->parent) {
+		if (up->style.anchor_scope_all)
+			return up;
+		scope = up->style.anchor_scope;
+		if (scope == NULL)
+			continue;
+		for (index = 0; index < scope->count; index++) {
+			if (scope->names[index] == name || vm_string_equal(scope->names[index], name))
+				return up;
+		}
+	}
+	return NULL;
+}
+
+/* Tells whether a box is a scroll container (an anchor out of the flow in one that follows its box in tree order is not taken). */
+static int
+anchor_scrolls(
+	const struct layout_box *box)
+{
+	return box != NULL && (box->style.overflow_x != CSS_OVERFLOW_VISIBLE || box->style.overflow_y != CSS_OVERFLOW_VISIBLE);
 }
 
 /* Tells whether a box has an anchor name. */
@@ -361,8 +654,8 @@ anchor_has_name(
 }
 
 /* The box a box out of the flow is placed in (NULL for the viewport). */
-static const struct layout_box *
-anchor_containing(
+const struct layout_box *
+layout_containing_box(
 	const struct layout_box *box)
 {
 	const struct layout_box *ancestor;
@@ -392,6 +685,8 @@ void
 layout_anchor_area(
 	const struct layout_tree *tree,
 	struct layout_box *box,
+	int cb_mode,
+	int cb_direction,
 	layout_unit x,
 	layout_unit y,
 	layout_unit width,
@@ -411,8 +706,25 @@ layout_anchor_area(
 	int first;
 	int found;
 
+	/* A grid area that is the box's containing block is the one the position-area is cut from (kept across the tries). */
+	if (box->cb_set && !box->area_from_anchor) {
+		box->area_grid[0] = box->cb_left_auto ? x : box->cb_left;
+		box->area_grid[1] = box->cb_top_auto ? y : box->cb_top;
+		box->area_grid[2] = (box->cb_right_auto ? x + width : box->cb_right) - box->area_grid[0];
+		box->area_grid[3] = (box->cb_bottom_auto ? y + height : box->cb_bottom) - box->area_grid[1];
+		box->area_grid_known = 1;
+	} else if (!box->cb_set) {
+		box->area_grid_known = 0;
+	}
+	if (box->area_grid_known) {
+		x = box->area_grid[0];
+		y = box->area_grid[1];
+		width = box->area_grid[2];
+		height = box->area_grid[3];
+	}
+
 	/* The area's regions, and the anchor. */
-	if (!css_position_area_regions(box->style.position_area, box->style.writing_mode, box->style.direction, &x0, &x1, &y0, &y1))
+	if (!css_position_area_regions(box->style.position_area, cb_mode, cb_direction, position_area_mode(box->physical_style != NULL ? box->physical_style : &box->style), (box->physical_style != NULL ? box->physical_style : &box->style)->direction, &x0, &x1, &y0, &y1))
 		return;
 	found = anchor_find(tree, box, box->style.position_anchor, &rect);
 	if (!found)
@@ -439,14 +751,14 @@ layout_anchor_area(
 	}
 
 	/* The grid's lines: the containing block's edges and the anchor's. */
-	across[0] = x;
+	across[0] = x < rect.x ? x : rect.x;
 	across[1] = rect.x;
 	across[2] = rect.x + rect.width;
-	across[3] = x + width;
-	down[0] = y;
+	across[3] = x + width > rect.x + rect.width ? x + width : rect.x + rect.width;
+	down[0] = y < rect.y ? y : rect.y;
 	down[1] = rect.y;
 	down[2] = rect.y + rect.height;
-	down[3] = y + height;
+	down[3] = y + height > rect.y + rect.height ? y + height : rect.y + rect.height;
 	left = across[x0];
 	right = across[x1 + 1];
 	top = down[y0];
@@ -457,7 +769,12 @@ layout_anchor_area(
 		bottom = top;
 
 	/* The area is the containing block. */
+	box->area_bounds[0] = x;
+	box->area_bounds[1] = x + width;
+	box->area_bounds[2] = y;
+	box->area_bounds[3] = y + height;
 	box->cb_set = 1;
+	box->area_from_anchor = 1;
 	box->cb_left = left;
 	box->cb_right = right;
 	box->cb_top = top;
@@ -467,11 +784,45 @@ layout_anchor_area(
 	box->cb_top_auto = 0;
 	box->cb_bottom_auto = 0;
 
+	/* Insets of zero against the area leave the box its alignment there, as auto ones do. */
+	if (box->style.width.unit != CSS_UNIT_AUTO && box->style.offset[CSS_LEFT].unit == CSS_UNIT_PX && box->style.offset[CSS_LEFT].value == 0.0f &&
+	    box->style.offset[CSS_RIGHT].unit == CSS_UNIT_PX && box->style.offset[CSS_RIGHT].value == 0.0f) {
+		box->style.offset[CSS_LEFT].unit = CSS_UNIT_AUTO;
+		box->style.offset[CSS_RIGHT].unit = CSS_UNIT_AUTO;
+	}
+	if (box->style.height.unit != CSS_UNIT_AUTO && box->style.offset[CSS_TOP].unit == CSS_UNIT_PX && box->style.offset[CSS_TOP].value == 0.0f &&
+	    box->style.offset[CSS_BOTTOM].unit == CSS_UNIT_PX && box->style.offset[CSS_BOTTOM].value == 0.0f) {
+		box->style.offset[CSS_TOP].unit = CSS_UNIT_AUTO;
+		box->style.offset[CSS_BOTTOM].unit = CSS_UNIT_AUTO;
+	}
+
 	/* Each axis with auto insets is aligned in it. */
 	if (box->style.offset[CSS_LEFT].unit == CSS_UNIT_AUTO && box->style.offset[CSS_RIGHT].unit == CSS_UNIT_AUTO)
 		anchor_area_align(box, 1, box->style.justify_self, x0, x1, left, right, rect.x, rect.width);
 	if (box->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO && box->style.offset[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
 		anchor_area_align(box, 0, box->style.align_self, y0, y1, top, bottom, rect.y, rect.height);
+
+	/* Insets on both sides of a box that has a size align it between them, in the area the insets leave. */
+	if (box->style.width.unit != CSS_UNIT_AUTO && box->style.offset[CSS_LEFT].unit == CSS_UNIT_PX &&
+	    box->style.offset[CSS_RIGHT].unit == CSS_UNIT_PX && anchor_area_aligned(box->style.justify_self)) {
+		box->area_inset_x = 1;
+		anchor_area_align(box, 1, box->style.justify_self, x0, x1, left + layout_from_px(box->style.offset[CSS_LEFT].value),
+		    right - layout_from_px(box->style.offset[CSS_RIGHT].value), rect.x, rect.width);
+	}
+	if (box->style.height.unit != CSS_UNIT_AUTO && box->style.offset[CSS_TOP].unit == CSS_UNIT_PX &&
+	    box->style.offset[CSS_BOTTOM].unit == CSS_UNIT_PX && anchor_area_aligned(box->style.align_self)) {
+		box->area_inset_y = 1;
+		anchor_area_align(box, 0, box->style.align_self, y0, y1, top + layout_from_px(box->style.offset[CSS_TOP].value),
+		    bottom - layout_from_px(box->style.offset[CSS_BOTTOM].value), rect.y, rect.height);
+	}
+}
+
+/* Tells whether a self-alignment is the area's own (normal, auto or one of the plain places, not stretch). */
+static int
+anchor_area_aligned(
+	int align)
+{
+	return align != CSS_ALIGN_STRETCH && align != CSS_ALIGN_BASELINE && align != CSS_ALIGN_ANCHOR_CENTER;
 }
 
 /*
@@ -533,6 +884,19 @@ anchor_area_align(
 		}
 	}
 
+	/* A box that overflows its area stays inside the containing block (the one the area was cut from). */
+	if (align == CSS_ALIGN_AUTO || align == CSS_ALIGN_NORMAL) {
+		if (across) {
+			box->area_clamp_x = 1;
+			box->area_clamp[0] = box->area_bounds[0];
+			box->area_clamp[1] = box->area_bounds[1];
+		} else {
+			box->area_clamp_y = 1;
+			box->area_clamp[2] = box->area_bounds[2];
+			box->area_clamp[3] = box->area_bounds[3];
+		}
+	}
+
 	/* The static place: the area and the side. */
 	if (across) {
 		box->static_x = start;
@@ -545,6 +909,35 @@ anchor_area_align(
 		box->static_y_area_height = end - start;
 		box->static_y_align = side == CSS_ALIGN_START ? CSS_ALIGN_AUTO : side;
 	}
+}
+
+/*
+ * Tells whether a containing block's block-start side and inline-start side
+ * lie on the diagonal from the top left to the bottom right (rather than the
+ * one from the top right to the bottom left).
+ */
+static int
+anchor_start_diagonal(
+	const struct css_style *cb_style,
+	int mode)
+{
+	int rtl;
+
+	/* The inline axis runs the other way for rtl, and in sideways-lr (which flows from the bottom). */
+	rtl = cb_style->direction == CSS_DIRECTION_RTL;
+	if (mode == 3)
+		rtl = !rtl;
+
+	/* Horizontal: top with left (ltr) or right (rtl). */
+	if (mode == CSS_WRITING_HORIZONTAL_TB)
+		return !rtl;
+
+	/* vertical-rl: right with top (ltr) or bottom (rtl). */
+	if (mode == CSS_WRITING_VERTICAL_RL)
+		return rtl;
+
+	/* vertical-lr: left with top (ltr) or bottom (rtl). */
+	return !rtl;
 }
 
 /*
@@ -563,8 +956,11 @@ layout_anchor_try(
 {
 	const struct css_try_entry *item;
 	const struct css_try_style *rule;
+	const struct layout_box *containing;
+	const struct css_style *cb_style;
 	struct css_style *style;
 	int tactic;
+	int mode;
 
 	/* The entry. */
 	style = &box->style;
@@ -590,20 +986,34 @@ layout_anchor_try(
 	if (item->area >= 0)
 		style->position_area = item->area;
 
-	/* The tactics. */
+	/* The tactics (flip-block and flip-inline follow the containing block's writing mode). */
 	box->anchor_flip = 0;
+	containing = layout_containing_box(box);
+	cb_style = containing != NULL ? (containing->physical_style != NULL ? containing->physical_style : &containing->style) : &tree->root->style;
+	mode = position_area_mode(cb_style);
 	for (tactic = 0; tactic < item->tactic_count; tactic++) {
 		switch (item->tactics[tactic]) {
 		case 0:
+			anchor_flip(tree, box, mode == CSS_WRITING_HORIZONTAL_TB ? 0 : 1);
+			break;
+		case 1:
+			anchor_flip(tree, box, mode == CSS_WRITING_HORIZONTAL_TB ? 1 : 0);
+			break;
 		case 4:
 			anchor_flip(tree, box, 0);
 			break;
-		case 1:
 		case 3:
 			anchor_flip(tree, box, 1);
 			break;
 		default:
-			anchor_flip(tree, box, 2);
+			/* The block-start side with the inline-start side: over the diagonal that joins them. */
+			if (anchor_start_diagonal(cb_style, mode)) {
+				anchor_flip(tree, box, 2);
+			} else {
+				anchor_flip(tree, box, 2);
+				anchor_flip(tree, box, 5);
+				anchor_flip(tree, box, 6);
+			}
 			break;
 		}
 	}
@@ -626,6 +1036,12 @@ anchor_flip(
 	int count;
 	int index;
 	int align;
+	int align_too;
+
+	/* How 5 and 6 turn the sides like 0 and 1 and leave the self-alignments as they are (the second half of a flip over the other diagonal). */
+	align_too = how < 5;
+	if (!align_too)
+		how -= 5;
 
 	/* The sides and sizes that change places. */
 	style = &box->style;
@@ -678,10 +1094,15 @@ anchor_flip(
 		expr = style->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH];
 		style->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH] = anchor_turn(tree, style->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT], how);
 		style->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT] = anchor_turn(tree, expr, how);
+		/* The alignment along the old inline axis (left and right named by the direction) becomes the one along the block axis. */
 		align = style->align_self;
 		style->align_self = style->justify_self;
+		if (style->align_self == CSS_ALIGN_LEFT)
+			style->align_self = style->direction == CSS_DIRECTION_RTL ? CSS_ALIGN_END : CSS_ALIGN_START;
+		else if (style->align_self == CSS_ALIGN_RIGHT)
+			style->align_self = style->direction == CSS_DIRECTION_RTL ? CSS_ALIGN_START : CSS_ALIGN_END;
 		style->justify_self = align;
-	} else {
+	} else if (align_too) {
 		/* The self-alignment along the flipped axis turns round. */
 		align = how == 0 ? style->align_self : style->justify_self;
 		if (align == CSS_ALIGN_START)
@@ -692,6 +1113,14 @@ anchor_flip(
 			align = CSS_ALIGN_SELF_END;
 		else if (align == CSS_ALIGN_SELF_END)
 			align = CSS_ALIGN_SELF_START;
+		else if (align == CSS_ALIGN_LEFT)
+			align = CSS_ALIGN_RIGHT;
+		else if (align == CSS_ALIGN_RIGHT)
+			align = CSS_ALIGN_LEFT;
+		else if (align == CSS_ALIGN_FLEX_START)
+			align = CSS_ALIGN_FLEX_END;
+		else if (align == CSS_ALIGN_FLEX_END)
+			align = CSS_ALIGN_FLEX_START;
 		if (how == 0)
 			style->align_self = align;
 		else

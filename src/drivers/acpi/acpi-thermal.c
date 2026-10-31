@@ -6,17 +6,15 @@
  */
 
 /*
- * The ACPI temperature sensors (ws134-p009): the thermal zones, and the
- * devices with a _TMP (an Intel laptop's DPTF participants: the Latitude
- * 5330 has no thermal zone, and tells its temperatures through
- * \_SB_.PC00.TCPU and the EC's TMEM, TSKN, NGFF and AMBF), listed in
- * sysctl hw.thermal.
+ * The ACPI temperature sensors: the thermal zones, and the devices with a
+ * _TMP (an Intel laptop's DPTF participants: the Latitude 5330 has no
+ * thermal zone, and tells its temperatures through \_SB_.PC00.TCPU and the
+ * EC's TMEM, TSKN, NGFF and AMBF), registered with the thermal core.
  *
- * _TMP may read the EC and is not to be evaluated at every sysctl, so this
- * file's thread reads every sensor's _TMP, _PSV and _CRT every
- * THERMAL_PERIOD_MS and keeps them; the sysctl copies what was kept.  A
- * sensor named TCPU or B0D4 (the DPTF processor participant) is the
- * processor's.
+ * _TMP may read the EC and is not to be evaluated at every read of the
+ * core's copy, so this file's thread reads every sensor's _TMP, _PSV and
+ * _CRT every THERMAL_PERIOD_MS and pushes them to the core.  A sensor
+ * named TCPU or B0D4 (the DPTF processor participant) is the processor's.
  */
 
 #include <drivers/acpi/acpi.h>
@@ -25,11 +23,10 @@
 #include <kern/klog.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
-#include <kern/sysctl.h>
+#include <kern/thermal.h>
 #include <kern/thread.h>
 #include <kern/waitq.h>
 #include <uapi/errno.h>
-#include <uapi/sysctl.h>
 
 #include <stdbool.h>
 
@@ -51,23 +48,26 @@
 /* 0 degrees Celsius in thousandths of a kelvin. */
 #define THERMAL_ZERO_CELSIUS	273150
 
-/* A millisecond in nanoseconds. */
-#define THERMAL_NS_PER_MS	1000000ULL
+/* The room for a sensor's ACPI path, as the thermal core keeps names. */
+#define THERMAL_NAME_MAX	32U
 
 /*
- * One sensor: its node, and what hw.thermal says of it (its path, kind and
- * flags fixed at attach, its values as the thread last read them).
+ * One sensor: its node, its path, kind and flags fixed at attach, and the
+ * thermal core's handle it pushes its readings through (NULL when the
+ * core refused it).
  */
 struct thermal_sensor {
 	struct drv_acpi_node *node;
-	struct thermal_entry entry;
+	char name[THERMAL_NAME_MAX];
+	uint32_t kind;
+	uint32_t flags;
+	struct kern_thermal_sensor *handle;
 };
 
 /*
  * The sensors and their number, filled once by drv_acpi_thermal_attach()
- * before the thread starts and the sysctl may read them; thermal_lock
- * (with interrupts off) protects their values afterwards.  thermal_waitq is
- * only slept on, for the period.
+ * before the thread starts; only the thread reads them afterwards.
+ * thermal_lock and thermal_waitq are only the period's sleep.
  */
 static struct thermal_sensor thermal_sensors[THERMAL_SENSORS_MAX];
 static unsigned thermal_sensor_count;
@@ -78,20 +78,21 @@ static int thermal_visitor(struct drv_acpi_node *node, unsigned depth, void *arg
 static bool thermal_present(struct drv_acpi_node *node);
 static bool thermal_processor(const char *path);
 static void thermal_thread(void *argument);
-static void thermal_refresh(struct thermal_sensor *sensor);
+static void thermal_refresh(struct thermal_sensor *sensor, int32_t *milli_celsius);
 static bool thermal_read(struct drv_acpi_node *node, const char *method, int32_t *milli_celsius);
-static int thermal_copy(void *context, struct thermal_entry *entries, unsigned capacity, unsigned *count);
 
 /*
- * Finds the thermal zones and the devices with a _TMP, reads them, lists
- * them in hw.thermal and starts the thread that reads them again.  Called
- * once the namespace is ready and the EC is attached.  Returns 0, or
- * ENODEV when the machine has no sensor.
+ * Finds the thermal zones and the devices with a _TMP, registers them with
+ * the thermal core, reads them and starts the thread that reads them
+ * again.  Called once the namespace is ready and the EC is attached.
+ * Returns 0, or ENODEV when the machine has no sensor.
  */
 int
 drv_acpi_thermal_attach(void)
 {
+	struct thermal_sensor *sensor;
 	struct thread *thread;
+	int32_t milli_celsius;
 	unsigned index;
 	int error;
 
@@ -104,14 +105,17 @@ drv_acpi_thermal_attach(void)
 	if (thermal_sensor_count == 0U)
 		return ENODEV;
 
-	/* Their values now. */
-	for (index = 0; index < thermal_sensor_count; index++)
-		thermal_refresh(&thermal_sensors[index]);
-
-	/* Listed for the sysctl. */
-	error = kern_thermal_register(thermal_copy, NULL);
-	if (error != 0)
-		kern_logf("acpi: the temperature sensors are not listed (%d)\n", error);
+	/* Each sensor registered with the core, read now, and said in the log. */
+	for (index = 0; index < thermal_sensor_count; index++) {
+		sensor = &thermal_sensors[index];
+		error = kern_thermal_sensor_register(sensor->name, sensor->kind, sensor->flags, &sensor->handle);
+		if (error != 0) {
+			kern_logf("acpi: temperature sensor %s is not registered (%d)\n", sensor->name, error);
+			sensor->handle = NULL;
+		}
+		thermal_refresh(sensor, &milli_celsius);
+		kern_logf("acpi: temperature sensor %s flags 0x%x %d mC\n", sensor->name, sensor->flags, milli_celsius);
+	}
 
 	/* The thread that reads them again. */
 	error = kthread_create(thermal_thread, NULL, SCHED_PRIORITY_DEFAULT, &thread);
@@ -119,14 +123,7 @@ drv_acpi_thermal_attach(void)
 		return error;
 	thread_start(thread);
 
-	/* Succeeded: the log lists what was found. */
-	for (index = 0; index < thermal_sensor_count; index++) {
-		kern_logf("acpi: temperature sensor %s flags 0x%x valid 0x%x %d mC\n", thermal_sensors[index].entry.name,
-		    thermal_sensors[index].entry.flags, thermal_sensors[index].entry.valid,
-		    thermal_sensors[index].entry.milli_celsius);
-	}
-
-	/* Listed and read. */
+	/* Succeeded: registered and read. */
 	return 0;
 }
 
@@ -152,9 +149,9 @@ thermal_visitor(
 	/* A thermal zone or a device. */
 	type = drv_acpi_node_type(node);
 	if (type == DRV_ACPI_TYPE_THERMAL_ZONE)
-		kind = THERMAL_KIND_ZONE;
+		kind = KERN_THERMAL_KIND_ZONE;
 	else if (type == DRV_ACPI_TYPE_DEVICE)
-		kind = THERMAL_KIND_DEVICE;
+		kind = KERN_THERMAL_KIND_DEVICE;
 	else
 		return 0;
 
@@ -171,16 +168,16 @@ thermal_visitor(
 	if (thermal_sensor_count >= THERMAL_SENSORS_MAX)
 		return -1;
 
-	/* The sensor, its path (cut to the entry's room), kind and flags; its values unknown until it is read. */
+	/* The sensor, its path (cut to the name's room), kind and flags. */
 	sensor = &thermal_sensors[thermal_sensor_count];
 	kern_memset(sensor, 0, sizeof(*sensor));
 	sensor->node = node;
-	(void)drv_acpi_node_path(node, sensor->entry.name, sizeof(sensor->entry.name));
-	sensor->entry.name[sizeof(sensor->entry.name) - 1U] = '\0';
-	sensor->entry.kind = kind;
-	processor = thermal_processor(sensor->entry.name);
+	(void)drv_acpi_node_path(node, sensor->name, sizeof(sensor->name));
+	sensor->name[sizeof(sensor->name) - 1U] = '\0';
+	sensor->kind = kind;
+	processor = thermal_processor(sensor->name);
 	if (processor)
-		sensor->entry.flags |= THERMAL_FLAG_CPU;
+		sensor->flags |= KERN_THERMAL_SENSOR_CPU;
 
 	/* The table holds it. */
 	thermal_sensor_count++;
@@ -240,6 +237,7 @@ thermal_thread(
 	uint64_t observed;
 	uint64_t deadline;
 	uint64_t now;
+	int32_t milli_celsius;
 	unsigned index;
 	int error;
 
@@ -265,50 +263,34 @@ thermal_thread(
 
 		/* Each sensor read again. */
 		for (index = 0; index < thermal_sensor_count; index++)
-			thermal_refresh(&thermal_sensors[index]);
+			thermal_refresh(&thermal_sensors[index], &milli_celsius);
 	}
 }
 
-/* Reads a sensor's _TMP, _PSV and _CRT, and keeps what it answered with the time. */
+/*
+ * Reads a sensor's _TMP, _PSV and _CRT and pushes them to the thermal core
+ * (a level not read is none), with no lock held: the AML may read the EC.
+ * The temperature read, 0 when none, is left for the log.
+ */
 static void
 thermal_refresh(
-	struct thermal_sensor *sensor)
+	struct thermal_sensor *sensor,
+	int32_t *milli_celsius)
 {
-	unsigned long irq;
-	uint64_t time_ns;
 	int32_t temperature;
 	int32_t passive;
 	int32_t critical;
-	uint32_t valid;
 	bool read;
 
-	/* The temperature and when it was read (0 for none), outside the lock: the AML may read the EC. */
-	valid = 0;
-	time_ns = 0;
+	/* The levels first, so a reading past a new level is judged against it. */
+	(void)thermal_read(sensor->node, "_PSV", &passive);
+	(void)thermal_read(sensor->node, "_CRT", &critical);
+	kern_thermal_sensor_levels(sensor->handle, passive, critical);
+
+	/* The temperature, or the lack of one. */
 	read = thermal_read(sensor->node, "_TMP", &temperature);
-	if (read) {
-		valid |= THERMAL_HAVE_TEMPERATURE;
-		time_ns = kern_ticks_to_ms(sched_ticks()) * THERMAL_NS_PER_MS;
-	}
-
-	/* The trip points (a value not read is 0). */
-	read = thermal_read(sensor->node, "_PSV", &passive);
-	if (read)
-		valid |= THERMAL_HAVE_PASSIVE;
-	read = thermal_read(sensor->node, "_CRT", &critical);
-	if (read)
-		valid |= THERMAL_HAVE_CRITICAL;
-
-	/* Kept. */
-	irq = spin_lock_irqsave(&thermal_lock);
-
-	sensor->entry.valid = valid;
-	sensor->entry.milli_celsius = temperature;
-	sensor->entry.passive_milli_celsius = passive;
-	sensor->entry.critical_milli_celsius = critical;
-	sensor->entry.time_ns = time_ns;
-
-	spin_unlock_irqrestore(&thermal_lock, irq);
+	kern_thermal_sensor_update(sensor->handle, temperature, read);
+	*milli_celsius = temperature;
 }
 
 /*
@@ -336,31 +318,4 @@ thermal_read(
 	/* Succeeded: in thousandths of a degree Celsius. */
 	*milli_celsius = (int32_t)decikelvin * 100 - THERMAL_ZERO_CELSIUS;
 	return true;
-}
-
-/* Copies the sensors as they were last read, for hw.thermal (kern_thermal_read_t). */
-static int
-thermal_copy(
-	void *context,
-	struct thermal_entry *entries,
-	unsigned capacity,
-	unsigned *count)
-{
-	unsigned long irq;
-	unsigned index;
-
-	/* No context. */
-	(void)context;
-
-	/* Each sensor, as far as there is room. */
-	irq = spin_lock_irqsave(&thermal_lock);
-
-	for (index = 0; index < thermal_sensor_count && index < capacity; index++)
-		kern_memcpy(&entries[index], &thermal_sensors[index].entry, sizeof(entries[index]));
-
-	spin_unlock_irqrestore(&thermal_lock, irq);
-
-	/* Succeeded: how many were copied. */
-	*count = index;
-	return 0;
 }

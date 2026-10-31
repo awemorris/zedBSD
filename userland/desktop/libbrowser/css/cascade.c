@@ -14,7 +14,9 @@
 #include "css/internal.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 /* The font size of the root before any style sets it, in pixels. */
@@ -106,6 +108,14 @@ struct css_engine {
 	struct vm_string *atom_style;
 	struct vm_string *atom_href;
 	float root_font_size;
+	/* The line height in pixels of the element being styled and of the root (the lh and rlh units). */
+	float line_px;
+	float root_line_px;
+	/* The zoom of the element being styled: the product through its ancestors, and its own factor. */
+	float zoom_eff;
+	float zoom_rel;
+	/* The root element's zoom, which rem units are unscaled by. */
+	float root_zoom;
 	float viewport_width;
 	float viewport_height;
 	struct wb_vector class_keys;
@@ -212,6 +222,8 @@ struct cascade_match {
 	uint32_t specificity;
 	/* How many generations the element is below its @scope root (CASCADE_UNSCOPED outside @scope); nearer wins. */
 	uint32_t proximity;
+	/* The cascade layer's weight (a later layer is more; no layer is the most; the reverse for !important). */
+	uint32_t layer;
 	uint64_t order;
 };
 
@@ -265,7 +277,7 @@ static int cascade_element_keys(struct css_engine *engine, struct dom_element *e
 static int cascade_add_bucket(struct css_engine *engine, const struct css_rule_index *index, const struct css_index_bucket *bucket);
 static int cascade_collect_sheet(struct css_engine *engine, struct dom_element *element, const struct css_sheet *sheet, uint64_t sheet_number, struct vm_string *id, struct wb_vector *matches);
 static int cascade_entry_compare(const void *left, const void *right);
-static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, uint64_t order);
+static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, int layer, uint64_t order);
 static int cascade_scoped_matches(struct css_engine *engine, struct dom_element *element, const struct css_scope *scope, const struct css_selector *selector, uint32_t *proximity);
 static int cascade_scope_root(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
 static int cascade_scope_root_compute(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
@@ -309,12 +321,15 @@ static struct dom_element *cascade_parent_element(struct dom_element *element);
 static struct dom_element *cascade_previous_element(struct dom_element *element);
 static struct dom_element *cascade_next_element(struct dom_element *element);
 static void cascade_apply(struct css_engine *engine, struct css_style *style, const struct css_style *parent, const struct css_declaration *declaration);
-static int cascade_margin_property(int property, int writing_mode, int direction);
+static int cascade_margin_property(int property, int writing_mode, int direction, int sideways);
 static void cascade_inherit(struct css_style *style, const struct css_style *parent, int property);
 static struct css_length cascade_flex_basis(struct css_engine *engine, const struct css_value *value, float font_size);
 static struct css_length cascade_length(struct css_engine *engine, const struct css_value *value, float font_size);
 static void cascade_shadows(struct css_engine *engine, struct css_style *style, const struct css_value *value);
+static void cascade_filters(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_filter *out, int *count);
 static const char *cascade_subgrid(struct css_engine *engine, const struct css_value *value);
+static const struct css_subgrid_names *cascade_subgrid_names(struct css_engine *engine, const struct css_value *value);
+static const char *cascade_declared(struct css_engine *engine, const struct css_style *style, const struct css_value *value);
 static void cascade_text_shadow(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
@@ -322,6 +337,7 @@ static const struct css_line_names *cascade_line_names(struct css_engine *engine
 static const void *cascade_keep(struct css_engine *engine, const void *data, size_t size);
 static const struct css_gradient *cascade_gradient(struct css_engine *engine, const struct css_gradient *gradient, float font_size);
 static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
+static void cascade_animation(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 static const struct css_try_rule *cascade_try_rule(const struct css_engine *engine, const struct vm_string *name);
 static void cascade_anchor(struct css_engine *engine, struct css_style *style, int property, const struct css_anchor_expr *expr);
 static const struct css_grid_areas *cascade_keep_areas(struct css_engine *engine, const struct css_grid_areas *areas);
@@ -349,6 +365,11 @@ css_engine_create(
 		return ENOMEM;
 	created->heap = heap;
 	created->root_font_size = CASCADE_DEFAULT_FONT_SIZE;
+	created->zoom_eff = 1.0f;
+	created->zoom_rel = 1.0f;
+	created->root_zoom = 1.0f;
+	created->line_px = CASCADE_DEFAULT_FONT_SIZE * 1.2f;
+	created->root_line_px = CASCADE_DEFAULT_FONT_SIZE * 1.2f;
 	created->viewport_width = CASCADE_DEFAULT_VIEWPORT_WIDTH;
 	created->viewport_height = CASCADE_DEFAULT_VIEWPORT_HEIGHT;
 	wb_vector_init(&created->sheets, sizeof(struct cascade_sheet));
@@ -753,6 +774,43 @@ css_engine_compute_pseudo(
 	return 0;
 }
 
+/*
+ * Applies the declarations of a text (a script animation's values for a pseudo-element) to a computed style, as
+ * the last word of the cascade; the text's own parse errors drop the declaration they are in.
+ */
+int
+css_engine_apply_text(
+	struct css_engine *engine,
+	struct css_style *style,
+	const struct css_style *parent,
+	const char *text)
+{
+	struct css_declaration *declarations;
+	struct wb_arena arena;
+	struct wb_units units;
+	size_t count;
+	size_t index;
+	int error;
+
+	wb_units_init(&units);
+	error = wb_utf8_to_units((const unsigned char *)text, strlen(text), &units);
+	if (error != 0) {
+		wb_units_release(&units);
+		return error;
+	}
+	wb_arena_init(&arena, 0);
+	declarations = NULL;
+	count = 0;
+	error = css_parse_declarations(engine->heap, &arena, units.data, units.length, &declarations, &count);
+	if (error == 0) {
+		for (index = 0; index < count; index++)
+			cascade_apply(engine, style, parent, &declarations[index]);
+	}
+	wb_arena_release(&arena);
+	wb_units_release(&units);
+	return error == ENOMEM ? error : 0;
+}
+
 /* Tells whether a space-separated list of types has one the active view transition has. */
 static int
 cascade_vt_type_matches(
@@ -861,6 +919,8 @@ cascade_paint_color(
 	struct css_style visited_parent;
 	const struct css_style *alternate_parent;
 	float root_font_size;
+	float root_zoom;
+	float root_line_px;
 	size_t container_uses;
 	int container_missed;
 	int error;
@@ -880,18 +940,52 @@ cascade_paint_color(
 
 	/* An alternate cascade is discarded except for color and cannot affect later layout. */
 	root_font_size = engine->root_font_size;
+	root_zoom = engine->root_zoom;
+	root_line_px = engine->root_line_px;
 	container_uses = engine->container_uses.count;
 	container_missed = engine->container_missed;
 	engine->visited_pass = 1;
 	error = cascade_compute(engine, element, alternate_parent, &visited, pseudo);
 	engine->visited_pass = 0;
 	engine->root_font_size = root_font_size;
+	engine->root_zoom = root_zoom;
+	engine->root_line_px = root_line_px;
 	engine->container_uses.count = container_uses;
 	engine->container_missed = container_missed;
 	if (error != 0)
 		return error;
 	style->paint_color = visited.color;
 	return 0;
+}
+
+/* The line height of a style in pixels (the lh unit): a number scales the font size, and normal is a little over one. */
+static float
+cascade_line_pixels(const struct css_style *style)
+{
+	if (style->line_height.unit == CSS_UNIT_PX)
+		return style->line_height.value;
+	if (style->line_height.unit == CSS_UNIT_NUMBER)
+		return style->line_height.value * style->font_size;
+	return style->font_size * 1.2f;
+}
+
+/* The declaration to apply for a match: a revert of an author declaration is the user agent's winning declaration of the property. */
+static const struct css_declaration *
+cascade_reverted(
+	const struct cascade_match *matches,
+	size_t index)
+{
+	const struct css_declaration *declaration;
+	size_t earlier;
+
+	declaration = matches[index].declaration;
+	if (declaration->value.kind != CSS_VALUE_UNSET || declaration->value.keyword != 1 || matches[index].rank != RANK_AUTHOR)
+		return declaration;
+	for (earlier = index; earlier > 0; earlier--) {
+		if (matches[earlier - 1U].rank == RANK_USER_AGENT && matches[earlier - 1U].declaration->property == declaration->property)
+			return matches[earlier - 1U].declaration;
+	}
+	return declaration;
 }
 
 /* Computes the style of an element, or of one of its pseudo-elements, in the cascade. */
@@ -945,13 +1039,16 @@ cascade_compute(
 		style->border_spacing[0] = parent->border_spacing[0];
 		style->border_spacing[1] = parent->border_spacing[1];
 		style->border_collapse = parent->border_collapse;
+		style->caption_side = parent->caption_side;
 		style->white_space = parent->white_space;
 		style->text_transform = parent->text_transform;
 		style->cursor = parent->cursor;
 		style->visibility = parent->visibility;
 		style->list_style = parent->list_style;
+		style->list_style_inside = parent->list_style_inside;
 		style->underline = parent->underline;
 		style->text_decoration_skip_ink = parent->text_decoration_skip_ink;
+		style->text_stroke_width = parent->text_stroke_width;
 		style->text_shadow = parent->text_shadow;
 		style->text_shadow_set = parent->text_shadow_set;
 		style->custom = parent->custom;
@@ -976,6 +1073,33 @@ cascade_compute(
 	matches = list.items;
 	if (list.count > 1)
 		qsort(matches, list.count, sizeof(*matches), cascade_compare);
+
+	/* The zoom: the winning declaration's factor, and the product with the ancestors'. */
+	engine->zoom_rel = 1.0f;
+	for (index = 0; index < list.count; index++) {
+		if (matches[index].declaration->property == CSS_PROP_ZOOM &&
+		    matches[index].declaration->value.kind != CSS_VALUE_INHERIT && matches[index].declaration->value.number > 0.0f)
+			engine->zoom_rel = matches[index].declaration->value.number;
+	}
+	engine->zoom_eff = (parent != NULL ? parent->zoom_eff : 1.0f) * engine->zoom_rel;
+	style->zoom_eff = engine->zoom_eff;
+	if (engine->zoom_rel != 1.0f && parent == NULL)
+		style->font_size *= engine->zoom_rel;
+	if (engine->zoom_rel != 1.0f && parent != NULL) {
+		/* What the element inherits is in the parent's zoom: it is scaled to its own. */
+		style->font_size *= engine->zoom_rel;
+		if (style->line_height.unit == CSS_UNIT_PX)
+			style->line_height.value *= engine->zoom_rel;
+		if (style->text_indent.unit == CSS_UNIT_PX)
+			style->text_indent.value *= engine->zoom_rel;
+		style->border_spacing[0] *= engine->zoom_rel;
+		style->border_spacing[1] *= engine->zoom_rel;
+		style->text_shadow.x *= engine->zoom_rel;
+		style->text_shadow.y *= engine->zoom_rel;
+		style->text_shadow.blur *= engine->zoom_rel;
+	}
+
+	engine->line_px = cascade_line_pixels(style);
 
 	/* The element's custom properties, then the declarations that wait for them. */
 	error = cascade_customs(engine, style, matches, list.count);
@@ -1030,7 +1154,7 @@ cascade_compute(
 		if (matches[index].declaration->property == CSS_PROP_WRITING_MODE ||
 		    matches[index].declaration->property == CSS_PROP_DIRECTION)
 			continue;
-		cascade_apply(engine, style, parent, matches[index].declaration);
+		cascade_apply(engine, style, parent, cascade_reverted(matches, index));
 	}
 
 	/* The lists are no longer needed. */
@@ -1066,12 +1190,18 @@ cascade_compute(
 	/* The fallbacks of anchor positioning with their @position-try rules applied. */
 	cascade_try_styles(engine, style, parent);
 
+	/* The filters an @keyframes animation gives at the start of the page's time. */
+	cascade_animation(engine, style, parent);
+
 	/* The root's font size is what rem measures (its pseudo-elements do not change it). */
 	is_root = 0;
 	if (pseudo == CSS_PSEUDO_ELEMENT_NONE && element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT)
 		is_root = 1;
-	if (is_root)
+	if (is_root) {
 		engine->root_font_size = style->font_size;
+		engine->root_zoom = style->zoom_eff;
+		engine->root_line_px = cascade_line_pixels(style);
+	}
 
 	/* Succeeded: the style is computed. */
 	return 0;
@@ -1166,6 +1296,7 @@ css_initial_style(
 	style->paint_color = style->color;
 	style->background_color = 0;
 	style->background_image = NULL;
+	style->background_density = 1.0f;
 	style->background_repeat = CSS_REPEAT_BOTH;
 	style->background_attachment = CSS_BACKGROUND_SCROLL;
 	style->transform_translate[0].unit = CSS_UNIT_PX;
@@ -1179,6 +1310,7 @@ css_initial_style(
 	style->position_area = -1;
 	style->position_visibility = 2;
 	style->zoom = 1.0f;
+	style->zoom_eff = 1.0f;
 	style->transform_origin[0].unit = CSS_UNIT_PERCENT;
 	style->transform_origin[0].value = 50.0f;
 	style->transform_origin[0].offset = 0;
@@ -1222,6 +1354,10 @@ css_initial_style(
 	style->auto_columns[0].kind = CSS_TRACK_AUTO;
 	style->auto_row_count = 1;
 	style->auto_rows[0].kind = CSS_TRACK_AUTO;
+
+	/* The gaps are normal: none, but a subgrid takes its parent's. */
+	style->row_gap.unit = CSS_UNIT_NORMAL;
+	style->column_gap.unit = CSS_UNIT_NORMAL;
 
 	/* The decoration's initial values that are not zero: opaque, a medium outline of no style in currentcolor. */
 	style->opacity = 1;
@@ -1309,7 +1445,7 @@ cascade_collect(
 		return 0;
 
 	/* They come after every sheet's rules. */
-	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, (uint64_t)engine->sheets.count << 44);
+	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, 0, (uint64_t)engine->sheets.count << 44);
 	if (error != 0)
 		return error;
 
@@ -1432,7 +1568,7 @@ cascade_presentational(
 	if (error != 0)
 		return 0;
 	return cascade_add_declarations(matches, declarations, declaration_count,
-	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0);
+	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0, 0);
 }
 
 /* Appends an ASCII fragment to a declaration being made. */
@@ -1844,7 +1980,7 @@ cascade_collect_sheet(
 		/* A rule whose selectors all failed does not apply. */
 		if (matched) {
 			order = (sheet_number << 44) | ((uint64_t)candidates[position].rule << 16);
-			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, order);
+			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, rule->layer, order);
 			if (error != 0)
 				return error;
 		}
@@ -2101,6 +2237,7 @@ cascade_add_declarations(
 	int origin,
 	uint32_t specificity,
 	uint32_t proximity,
+	int layer,
 	uint64_t order)
 {
 	struct cascade_match match;
@@ -2112,6 +2249,9 @@ cascade_add_declarations(
 		match.declaration = &declarations[index];
 		match.specificity = specificity;
 		match.proximity = proximity;
+		match.layer = layer != 0 ? (uint32_t)layer : 0x40000000U;
+		if (declarations[index].important)
+			match.layer = layer != 0 ? 0x40000000U - (uint32_t)layer : 0U;
 		match.order = order + (uint64_t)index;
 		if (origin == CSS_ORIGIN_USER_AGENT) {
 			match.rank = RANK_USER_AGENT;
@@ -2525,10 +2665,10 @@ cascade_calc(
 	/* Computes each argument before choosing the outer operation. */
 	any_percent = 0;
 	for (index = 0; index < calc->count; index++) {
-		values[index] = calc->sums[index].px +
+		values[index] = calc->sums[index].px * engine->zoom_eff +
 				calc->sums[index].em * font_size +
 				calc->sums[index].ex * font_size * 0.5f +
-				calc->sums[index].rem * engine->root_font_size +
+				calc->sums[index].rem * engine->root_font_size / engine->root_zoom * engine->zoom_eff +
 				calc->sums[index].vw * engine->viewport_width / 100.0f +
 				calc->sums[index].vh * engine->viewport_height / 100.0f +
 				calc->sums[index].vmin * vmin / 100.0f +
@@ -2712,6 +2852,10 @@ cascade_compare(
 	if (a->rank < b->rank)
 		return -1;
 	if (a->rank > b->rank)
+		return 1;
+	if (a->layer < b->layer)
+		return -1;
+	if (a->layer > b->layer)
 		return 1;
 	if (a->specificity < b->specificity)
 		return -1;
@@ -3247,6 +3391,9 @@ cascade_pseudo_class(
 	case CSS_PSEUDO_TARGET:
 		/* The element the document's URL fragment names. */
 		return element->node.document->target == &element->node;
+	case CSS_PSEUDO_POPOVER_OPEN:
+		/* A popover that is showing. */
+		return element->popover_open;
 	default:
 		return 0;
 	}
@@ -3949,7 +4096,8 @@ static int
 cascade_margin_property(
 	int property,
 	int writing_mode,
-	int direction)
+	int direction,
+	int sideways)
 {
 	static const int groups[][2] = {
 		{ CSS_PROP_MARGIN_INLINE_START, CSS_PROP_MARGIN_TOP },
@@ -3987,6 +4135,42 @@ cascade_margin_property(
 	if (property == CSS_PROP_MAX_BLOCK_SIZE)
 		return vertical ? CSS_PROP_MAX_WIDTH : CSS_PROP_MAX_HEIGHT;
 
+	/* The flow-relative corner radii: the corner the block and inline sides name (the axes swap in a vertical mode). */
+	if (property >= CSS_PROP_RADIUS_START_START_X && property <= CSS_PROP_RADIUS_END_START_Y) {
+		int which;
+		int block_side;
+		int inline_side;
+		int first;
+		int second;
+		int corner;
+
+		which = (property - CSS_PROP_RADIUS_START_START_X) / 2;
+		block_side = CSS_TOP;
+		if (writing_mode == CSS_WRITING_VERTICAL_LR)
+			block_side = CSS_LEFT;
+		if (writing_mode == CSS_WRITING_VERTICAL_RL)
+			block_side = CSS_RIGHT;
+		inline_side = vertical ? CSS_TOP : CSS_LEFT;
+		if ((direction == CSS_DIRECTION_RTL) != (vertical && sideways == 1))
+			inline_side = vertical ? CSS_BOTTOM : CSS_RIGHT;
+
+		/* start-start, start-end, end-end, end-start: the block side first, the inline side second. */
+		first = which >= 2 ? (block_side + 2) % 4 : block_side;
+		second = which == 1 || which == 2 ? (inline_side + 2) % 4 : inline_side;
+
+		/* The corner is the one vertical side (top or bottom) with the one horizontal (left or right). */
+		if (first == CSS_LEFT || first == CSS_RIGHT) {
+			corner = first;
+			first = second;
+			second = corner;
+		}
+		if (first == CSS_TOP)
+			corner = second == CSS_LEFT ? CSS_TOP_LEFT : CSS_TOP_RIGHT;
+		else
+			corner = second == CSS_LEFT ? CSS_BOTTOM_LEFT : CSS_BOTTOM_RIGHT;
+		return CSS_PROP_RADIUS_TOP_LEFT_X + 2 * corner + (((property - CSS_PROP_RADIUS_START_START_X) % 2) ^ (vertical ? 1 : 0));
+	}
+
 	/* The logical sides: the group, then the physical side. */
 	for (group = 0; group < sizeof(groups) / sizeof(groups[0]); group++) {
 		if (property < groups[group][0] || property > groups[group][0] + 3)
@@ -3996,7 +4180,7 @@ cascade_margin_property(
 		/* Inline-start and inline-end. */
 		if (logical == 0 || logical == 1) {
 			side = vertical ? CSS_TOP : CSS_LEFT;
-			if (direction == CSS_DIRECTION_RTL)
+			if ((direction == CSS_DIRECTION_RTL) != (vertical && sideways == 1))
 				side = vertical ? CSS_BOTTOM : CSS_RIGHT;
 			if (logical == 1)
 				side = (side + 2) % 4;
@@ -4040,7 +4224,7 @@ cascade_apply(
 
 	/* The CSS-wide keywords. */
 	value = &declaration->value;
-	property = cascade_margin_property(declaration->property, style->writing_mode, style->direction);
+	property = cascade_margin_property(declaration->property, style->writing_mode, style->direction, style->writing_sideways);
 	if (value->kind == CSS_VALUE_INHERIT || value->kind == CSS_VALUE_UNSET) {
 		/* Unset follows inheritance only for properties whose initial cascade inherits. */
 		inherited = 0;
@@ -4064,13 +4248,23 @@ cascade_apply(
 		    property == CSS_PROP_BORDER_SPACING_X ||
 		    property == CSS_PROP_BORDER_SPACING_Y ||
 		    property == CSS_PROP_BORDER_COLLAPSE ||
-		    property == CSS_PROP_LIST_STYLE_TYPE)
+		    property == CSS_PROP_CAPTION_SIDE ||
+		    property == CSS_PROP_LIST_STYLE_TYPE ||
+		    property == CSS_PROP_LIST_STYLE_POSITION)
 			inherited = 1;
 
 		/* Explicit inheritance and inherited unset take the parent value. */
 		if (value->kind == CSS_VALUE_INHERIT || inherited) {
 			if (parent != NULL)
 				cascade_inherit(style, parent, property);
+
+			/* An inherited length is in the parent's zoom: it is scaled to the element's own. */
+			if (parent != NULL && engine->zoom_rel != 1.0f && value->kind == CSS_VALUE_INHERIT) {
+				if (property == CSS_PROP_WIDTH && style->width.unit == CSS_UNIT_PX)
+					style->width.value *= engine->zoom_rel;
+				if (property == CSS_PROP_HEIGHT && style->height.unit == CSS_UNIT_PX)
+					style->height.value *= engine->zoom_rel;
+			}
 			return;
 		}
 	}
@@ -4251,13 +4445,20 @@ cascade_apply(
 	case CSS_PROP_BACKGROUND_IMAGE:
 		style->background_image = NULL;
 		style->background_gradient = NULL;
-		if (value->kind == CSS_VALUE_URL)
+		style->background_density = 1.0f;
+		if (value->kind == CSS_VALUE_URL) {
 			style->background_image = value->url;
+			if (value->number > 0.0f)
+				style->background_density = value->number;
+		}
 		if (value->kind == CSS_VALUE_GRADIENT)
 			style->background_gradient = cascade_gradient(engine, value->gradient, style->font_size);
 		break;
 	case CSS_PROP_BACKGROUND_REPEAT:
 		style->background_repeat = value->keyword;
+		break;
+	case CSS_PROP_BACKGROUND_CLIP:
+		style->background_clip = value->keyword;
 		break;
 	case CSS_PROP_BACKGROUND_ATTACHMENT:
 		style->background_attachment = value->keyword;
@@ -4315,6 +4516,7 @@ cascade_apply(
 				style->line_height.offset = 0;
 			}
 		}
+		engine->line_px = cascade_line_pixels(style);
 
 		break;
 	case CSS_PROP_TEXT_ALIGN:
@@ -4375,15 +4577,22 @@ cascade_apply(
 	case CSS_PROP_BORDER_COLLAPSE:
 		style->border_collapse = value->keyword;
 		break;
+	case CSS_PROP_CAPTION_SIDE:
+		style->caption_side = value->keyword;
+		break;
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
 		style->column_names = cascade_line_names(engine, value);
 		style->column_subgrid = cascade_subgrid(engine, value);
+		style->column_subgrid_names = cascade_subgrid_names(engine, value);
+		style->column_declared = cascade_declared(engine, style, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		cascade_tracks(engine, style, value, style->rows, &style->row_count, &style->row_repeat);
 		style->row_names = cascade_line_names(engine, value);
 		style->row_subgrid = cascade_subgrid(engine, value);
+		style->row_subgrid_names = cascade_subgrid_names(engine, value);
+		style->row_declared = cascade_declared(engine, style, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
 		/* The areas, in the engine's arena. */
@@ -4465,8 +4674,14 @@ cascade_apply(
 	case CSS_PROP_LIST_STYLE_TYPE:
 		style->list_style = value->keyword;
 		break;
+	case CSS_PROP_LIST_STYLE_POSITION:
+		style->list_style_inside = value->keyword;
+		break;
 	case CSS_PROP_BOX_SIZING:
 		style->box_sizing = value->keyword;
+		break;
+	case CSS_PROP_CONTENT_VISIBILITY:
+		style->content_visibility = value->keyword;
 		break;
 	case CSS_PROP_FLEX_DIRECTION:
 		style->flex_direction = value->keyword;
@@ -4494,9 +4709,17 @@ cascade_apply(
 		break;
 	case CSS_PROP_ROW_GAP:
 		style->row_gap = cascade_length(engine, value, style->font_size);
+		if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_PX && value->number < 0.0f) {
+			style->row_gap.unit = CSS_UNIT_NORMAL;
+			style->row_gap.value = 0;
+		}
 		break;
 	case CSS_PROP_COLUMN_GAP:
 		style->column_gap = cascade_length(engine, value, style->font_size);
+		if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_PX && value->number < 0.0f) {
+			style->column_gap.unit = CSS_UNIT_NORMAL;
+			style->column_gap.value = 0;
+		}
 		break;
 	case CSS_PROP_FLEX_GROW:
 		style->flex_grow = value->number;
@@ -4525,6 +4748,18 @@ cascade_apply(
 	case CSS_PROP_OPACITY:
 		style->opacity = value->number;
 		break;
+	case CSS_PROP_BACKDROP_FILTER:
+		cascade_filters(engine, style, value, style->backdrop_filters, &style->backdrop_filter_count);
+		break;
+	case CSS_PROP_FILTER:
+		cascade_filters(engine, style, value, style->filters, &style->filter_count);
+		break;
+	case CSS_PROP_WILL_CHANGE:
+		style->will_change_contains = value->kind == CSS_VALUE_KEYWORD ? value->keyword : 0;
+		break;
+	case CSS_PROP_CONTAIN:
+		style->contain = value->kind == CSS_VALUE_KEYWORD ? (unsigned)value->keyword : 0U;
+		break;
 	case CSS_PROP_BOX_SHADOW:
 		cascade_shadows(engine, style, value);
 		break;
@@ -4533,6 +4768,9 @@ cascade_apply(
 		break;
 	case CSS_PROP_OUTLINE_WIDTH:
 		style->outline_width = cascade_length(engine, value, style->font_size).value;
+		break;
+	case CSS_PROP_TEXT_STROKE_WIDTH:
+		style->text_stroke_width = cascade_length(engine, value, style->font_size).value;
 		break;
 	case CSS_PROP_OUTLINE_STYLE:
 		style->outline_style = value->keyword;
@@ -4627,6 +4865,9 @@ cascade_inherit(
 	case CSS_PROP_BOX_SIZING:
 		style->box_sizing = parent->box_sizing;
 		break;
+	case CSS_PROP_CONTENT_VISIBILITY:
+		style->content_visibility = parent->content_visibility;
+		break;
 	case CSS_PROP_CONTENT:
 		style->content_kind = parent->content_kind;
 		style->content = parent->content;
@@ -4710,6 +4951,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_OUTLINE_WIDTH:
 		style->outline_width = parent->outline_width;
+		break;
+	case CSS_PROP_TEXT_STROKE_WIDTH:
+		style->text_stroke_width = parent->text_stroke_width;
 		break;
 	case CSS_PROP_OUTLINE_STYLE:
 		style->outline_style = parent->outline_style;
@@ -4853,10 +5097,14 @@ cascade_inherit(
 		break;
 	case CSS_PROP_BACKGROUND_IMAGE:
 		style->background_image = parent->background_image;
+		style->background_density = parent->background_density;
 		style->background_gradient = parent->background_gradient;
 		break;
 	case CSS_PROP_BACKGROUND_REPEAT:
 		style->background_repeat = parent->background_repeat;
+		break;
+	case CSS_PROP_BACKGROUND_CLIP:
+		style->background_clip = parent->background_clip;
 		break;
 	case CSS_PROP_BACKGROUND_ATTACHMENT:
 		style->background_attachment = parent->background_attachment;
@@ -4941,12 +5189,17 @@ cascade_inherit(
 	case CSS_PROP_BORDER_COLLAPSE:
 		style->border_collapse = parent->border_collapse;
 		break;
+	case CSS_PROP_CAPTION_SIDE:
+		style->caption_side = parent->caption_side;
+		break;
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		memcpy(style->columns, parent->columns, sizeof(style->columns));
 		style->column_count = parent->column_count;
 		style->column_repeat = parent->column_repeat;
 		style->column_names = parent->column_names;
 		style->column_subgrid = parent->column_subgrid;
+		style->column_subgrid_names = parent->column_subgrid_names;
+		style->column_declared = parent->column_declared;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		memcpy(style->rows, parent->rows, sizeof(style->rows));
@@ -4954,6 +5207,8 @@ cascade_inherit(
 		style->row_repeat = parent->row_repeat;
 		style->row_names = parent->row_names;
 		style->row_subgrid = parent->row_subgrid;
+		style->row_subgrid_names = parent->row_subgrid_names;
+		style->row_declared = parent->row_declared;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
 		style->areas = parent->areas;
@@ -5007,6 +5262,12 @@ cascade_inherit(
 		break;
 	case CSS_PROP_LIST_STYLE_TYPE:
 		style->list_style = parent->list_style;
+		break;
+	case CSS_PROP_LIST_STYLE_POSITION:
+		style->list_style_inside = parent->list_style_inside;
+		break;
+	case CSS_PROP_CONTAIN:
+		style->contain = parent->contain;
 		break;
 	default:
 		break;
@@ -5244,6 +5505,252 @@ cascade_try_styles(
 	free(copy);
 }
 
+/* The amount of a filter function that changes nothing. */
+static float
+cascade_filter_identity(
+	int kind)
+{
+	if (kind == CSS_FILTER_BRIGHTNESS || kind == CSS_FILTER_CONTRAST || kind == CSS_FILTER_OPACITY ||
+	    kind == CSS_FILTER_SATURATE)
+		return 1.0f;
+	return 0.0f;
+}
+
+/*
+ * Mixes two filter lists by a share (0 to 1): functions of the same kinds in the same order mix their amounts; a list
+ * against none mixes with the identity of its functions; anything else switches halfway.
+ */
+static void
+cascade_filter_mix(
+	const struct css_filter *from,
+	int from_count,
+	const struct css_filter *to,
+	int to_count,
+	float share,
+	struct css_filter *out,
+	int *count)
+{
+	const struct css_filter *shape;
+	float start;
+	float end;
+	int index;
+
+	if (from_count != to_count && from_count != 0 && to_count != 0) {
+		shape = share < 0.5f ? from : to;
+		*count = share < 0.5f ? from_count : to_count;
+		for (index = 0; index < *count; index++)
+			out[index] = shape[index];
+		return;
+	}
+	*count = from_count > to_count ? from_count : to_count;
+	shape = from_count != 0 ? from : to;
+	for (index = 0; index < *count; index++) {
+		if (from_count != 0 && to_count != 0 && from[index].kind != to[index].kind) {
+			out[index] = share < 0.5f ? from[index] : to[index];
+			continue;
+		}
+		start = from_count != 0 ? from[index].amount : cascade_filter_identity(shape[index].kind);
+		end = to_count != 0 ? to[index].amount : cascade_filter_identity(shape[index].kind);
+		out[index].kind = shape[index].kind;
+		out[index].amount = start + (end - start) * share;
+	}
+}
+
+/*
+ * Applies an @keyframes animation's backdrop-filter and filter at the start of the page's time: the animation's
+ * progress with its delay and duration (linear), mixed between the keyframes around it, the style's own value standing
+ * in for a missing 0% or 100%.  Other properties of the keyframes are not applied.
+ */
+static void
+cascade_animation(
+	struct css_engine *engine,
+	struct css_style *style,
+	const struct css_style *parent)
+{
+	const struct cascade_sheet *sheets;
+	const struct css_keyframes_rule *rule;
+	const struct css_keyframe *frame;
+	struct css_style *scratch;
+	struct css_filter *own;
+	struct css_filter from[CSS_FILTERS];
+	struct css_filter to[CSS_FILTERS];
+	struct css_filter mixed[CSS_FILTERS];
+	float from_offset;
+	float to_offset;
+	float progress;
+	float share;
+	size_t index;
+	size_t at;
+	size_t declaration;
+	int from_count;
+	int to_count;
+	int property;
+	int pass;
+	int found_from;
+	int found_to;
+	int count;
+
+	/* Only an animation with a name and a length that has begun. */
+	if (style->animation_name == NULL || style->animation_duration <= 0.0f || style->animation_delay > 0.0f)
+		return;
+	progress = -style->animation_delay / style->animation_duration;
+	if (progress > 1.0f)
+		progress = 1.0f;
+
+	/* The last @keyframes rule of the name. */
+	rule = NULL;
+	sheets = engine->sheets.items;
+	for (index = 0; index < engine->sheets.count; index++) {
+		if (sheets[index].sheet == NULL)
+			continue;
+		for (at = 0; at < sheets[index].sheet->keyframe_count; at++) {
+			if (vm_string_equal(sheets[index].sheet->keyframes[at].name, style->animation_name))
+				rule = &sheets[index].sheet->keyframes[at];
+		}
+	}
+	if (rule == NULL)
+		return;
+	scratch = malloc(sizeof(*scratch));
+	if (scratch == NULL)
+		return;
+
+	/* backdrop-filter, then filter. */
+	for (pass = 0; pass < 2; pass++) {
+		property = pass == 0 ? CSS_PROP_BACKDROP_FILTER : CSS_PROP_FILTER;
+		own = pass == 0 ? style->backdrop_filters : style->filters;
+		from_offset = 0.0f;
+		to_offset = 1.0f;
+		found_from = 0;
+		found_to = 0;
+		from_count = pass == 0 ? style->backdrop_filter_count : style->filter_count;
+		to_count = from_count;
+		memcpy(from, own, sizeof(from));
+		memcpy(to, own, sizeof(to));
+
+		/* The nearest keyframes before and after the progress that set the property. */
+		for (index = 0; index < rule->frame_count; index++) {
+			frame = &rule->frames[index];
+			for (declaration = 0; declaration < frame->declaration_count; declaration++) {
+				if (frame->declarations[declaration].property != property)
+					continue;
+				*scratch = *style;
+				cascade_apply(engine, scratch, parent, &frame->declarations[declaration]);
+				if (frame->offset <= progress && (!found_from || frame->offset >= from_offset)) {
+					from_offset = frame->offset;
+					found_from = 1;
+					from_count = pass == 0 ? scratch->backdrop_filter_count : scratch->filter_count;
+					memcpy(from, pass == 0 ? scratch->backdrop_filters : scratch->filters, sizeof(from));
+				}
+				if (frame->offset >= progress && (!found_to || frame->offset < to_offset)) {
+					to_offset = frame->offset;
+					found_to = 1;
+					to_count = pass == 0 ? scratch->backdrop_filter_count : scratch->filter_count;
+					memcpy(to, pass == 0 ? scratch->backdrop_filters : scratch->filters, sizeof(to));
+				}
+			}
+		}
+		if (!found_from && !found_to)
+			continue;
+		share = to_offset > from_offset ? (progress - from_offset) / (to_offset - from_offset) : 0.0f;
+		if (share < 0.0f)
+			share = 0.0f;
+		if (share > 1.0f)
+			share = 1.0f;
+		cascade_filter_mix(from, from_count, to, to_count, share, mixed, &count);
+		memcpy(own, mixed, sizeof(struct css_filter) * (size_t)count);
+		if (pass == 0)
+			style->backdrop_filter_count = count;
+		else
+			style->filter_count = count;
+	}
+	/* grid-template-columns and -rows: tracks of the same kind blend, the others change at the halfway point. */
+	for (pass = 0; pass < 2; pass++) {
+		const struct css_track *from_tracks;
+		const struct css_track *to_tracks;
+		struct css_track *own_tracks;
+		struct css_track from_copy[CSS_TRACKS];
+		struct css_track to_copy[CSS_TRACKS];
+		int own_count;
+		int from_tracks_count;
+		int to_tracks_count;
+		int track;
+
+		property = pass == 0 ? CSS_PROP_GRID_TEMPLATE_COLUMNS : CSS_PROP_GRID_TEMPLATE_ROWS;
+		own_tracks = pass == 0 ? style->columns : style->rows;
+		own_count = pass == 0 ? style->column_count : style->row_count;
+		from_offset = 0.0f;
+		to_offset = 1.0f;
+		found_from = 0;
+		found_to = 0;
+		from_tracks_count = own_count;
+		to_tracks_count = own_count;
+		memcpy(from_copy, own_tracks, sizeof(from_copy));
+		memcpy(to_copy, own_tracks, sizeof(to_copy));
+		for (index = 0; index < rule->frame_count; index++) {
+			frame = &rule->frames[index];
+			for (declaration = 0; declaration < frame->declaration_count; declaration++) {
+				if (frame->declarations[declaration].property != property)
+					continue;
+				*scratch = *style;
+				cascade_apply(engine, scratch, parent, &frame->declarations[declaration]);
+				from_tracks = pass == 0 ? scratch->columns : scratch->rows;
+				to_tracks = from_tracks;
+				if (frame->offset <= progress && (!found_from || frame->offset >= from_offset)) {
+					from_offset = frame->offset;
+					found_from = 1;
+					from_tracks_count = pass == 0 ? scratch->column_count : scratch->row_count;
+					memcpy(from_copy, from_tracks, sizeof(from_copy));
+				}
+				if (frame->offset >= progress && (!found_to || frame->offset < to_offset)) {
+					to_offset = frame->offset;
+					found_to = 1;
+					to_tracks_count = pass == 0 ? scratch->column_count : scratch->row_count;
+					memcpy(to_copy, to_tracks, sizeof(to_copy));
+				}
+			}
+		}
+		if (!found_from && !found_to)
+			continue;
+		share = to_offset > from_offset ? (progress - from_offset) / (to_offset - from_offset) : 0.0f;
+		if (share < 0.0f)
+			share = 0.0f;
+		if (share > 1.0f)
+			share = 1.0f;
+
+		/* Lists of different lengths do not blend: the value changes at the halfway point. */
+		if (from_tracks_count != to_tracks_count) {
+			memcpy(own_tracks, share < 0.5f ? from_copy : to_copy, sizeof(from_copy));
+			if (pass == 0)
+				style->column_count = share < 0.5f ? from_tracks_count : to_tracks_count;
+			else
+				style->row_count = share < 0.5f ? from_tracks_count : to_tracks_count;
+			continue;
+		}
+		memcpy(own_tracks, from_copy, sizeof(from_copy));
+		if (pass == 0)
+			style->column_count = from_tracks_count;
+		else
+			style->row_count = from_tracks_count;
+		for (track = 0; track < from_tracks_count && track < CSS_TRACKS; track++) {
+			if (from_copy[track].kind == to_copy[track].kind && from_copy[track].kind == CSS_TRACK_LENGTH &&
+			    from_copy[track].size.unit == CSS_UNIT_PX && to_copy[track].size.unit == CSS_UNIT_PX &&
+			    from_copy[track].minimum_rule == to_copy[track].minimum_rule &&
+			    from_copy[track].maximum_rule == to_copy[track].maximum_rule) {
+				own_tracks[track].size.value = from_copy[track].size.value +
+				    (to_copy[track].size.value - from_copy[track].size.value) * share;
+				if (from_copy[track].minimum.unit == CSS_UNIT_PX && to_copy[track].minimum.unit == CSS_UNIT_PX)
+					own_tracks[track].minimum.value = from_copy[track].minimum.value +
+					    (to_copy[track].minimum.value - from_copy[track].minimum.value) * share;
+			} else if (from_copy[track].kind == to_copy[track].kind && from_copy[track].kind == CSS_TRACK_FR) {
+				own_tracks[track].fr = from_copy[track].fr + (to_copy[track].fr - from_copy[track].fr) * share;
+			} else if (share >= 0.5f) {
+				own_tracks[track] = to_copy[track];
+			}
+		}
+	}
+	free(scratch);
+}
+
 /* Finds the @position-try rule of a name that comes last in the sheets (NULL when there is none). */
 static const struct css_try_rule *
 cascade_try_rule(
@@ -5252,21 +5759,99 @@ cascade_try_rule(
 {
 	const struct cascade_sheet *sheets;
 	const struct css_try_rule *found;
+	size_t found_sheet;
 	size_t index;
 	size_t rule;
+	int rank;
+	int best;
 
 	/* Each sheet's rules in order: the last of the name wins. */
 	found = NULL;
+	found_sheet = 0;
 	sheets = engine->sheets.items;
 	for (index = 0; index < engine->sheets.count; index++) {
 		if (sheets[index].sheet == NULL)
 			continue;
 		for (rule = 0; rule < sheets[index].sheet->try_rule_count; rule++) {
-			if (vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
-				found = &sheets[index].sheet->try_rules[rule];
+			if (!vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
+				continue;
+
+			/* A rule in a later layer outranks one in an earlier layer of the same sheet, and the unlayered outrank all. */
+			if (found != NULL && found_sheet == index) {
+				rank = sheets[index].sheet->try_rules[rule].layer == 0 ? INT_MAX : sheets[index].sheet->try_rules[rule].layer;
+				best = found->layer == 0 ? INT_MAX : found->layer;
+				if (rank < best)
+					continue;
+			}
+			found = &sheets[index].sheet->try_rules[rule];
+			found_sheet = index;
 		}
 	}
 	return found;
+}
+
+/* Keeps the text of a template with a repeat() in the engine's arena, its lengths in ems turned to pixels by the font size (NULL for another template). */
+static const char *
+cascade_declared(
+	struct css_engine *engine,
+	const struct css_style *style,
+	const struct css_value *value)
+{
+	struct wb_buffer text;
+	const char *source;
+	const char *kept;
+	char number[40];
+	size_t index;
+	size_t start;
+	size_t length;
+	int error;
+
+	/* Only a parsed template with a repeat() has one. */
+	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL || value->tracks->declared == NULL)
+		return NULL;
+	source = value->tracks->declared;
+	length = strlen(source);
+
+	/* Each number followed by em becomes pixels. */
+	wb_buffer_init(&text);
+	error = 0;
+	for (index = 0; error == 0 && index < length; ) {
+		start = index;
+		if ((source[index] >= '0' && source[index] <= '9') || (source[index] == '.' && index + 1U < length)) {
+			while (index < length && ((source[index] >= '0' && source[index] <= '9') || source[index] == '.'))
+				index++;
+			if (index + 1U < length && source[index] == 'e' && source[index + 1U] == 'm' &&
+			    (index + 2U >= length || !((source[index + 2U] >= 'a' && source[index + 2U] <= 'z') || source[index + 2U] == '-'))) {
+				snprintf(number, sizeof(number), "%.6gpx", atof(source + start) * (double)style->font_size);
+				error = wb_buffer_append_string(&text, number);
+				index += 2U;
+				continue;
+			}
+			error = wb_buffer_append(&text, source + start, index - start);
+			continue;
+		}
+		error = wb_buffer_append_byte(&text, source[index]);
+		index++;
+	}
+	if (error != 0) {
+		wb_buffer_release(&text);
+		return NULL;
+	}
+	kept = cascade_keep(engine, wb_buffer_string(&text), text.length + 1U);
+	wb_buffer_release(&text);
+	return kept;
+}
+
+/* Keeps a subgrid template's line names in the engine's arena (NULL for another template). */
+static const struct css_subgrid_names *
+cascade_subgrid_names(
+	struct css_engine *engine,
+	const struct css_value *value)
+{
+	/* Only a parsed subgrid list has them. */
+	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL || value->tracks->subgrid_names == NULL)
+		return NULL;
+	return cascade_keep(engine, value->tracks->subgrid_names, sizeof(*value->tracks->subgrid_names));
 }
 
 /* Keeps a subgrid template's serialization in the engine's arena (NULL for another template). */
@@ -5389,6 +5974,13 @@ cascade_anchor(
 		slot = CSS_ANCHOR_SLOT_MAX_HEIGHT;
 		length = &style->max_height;
 		break;
+	case CSS_PROP_MARGIN_TOP:
+	case CSS_PROP_MARGIN_RIGHT:
+	case CSS_PROP_MARGIN_BOTTOM:
+	case CSS_PROP_MARGIN_LEFT:
+		slot = CSS_ANCHOR_SLOT_MARGIN_TOP + (property - CSS_PROP_MARGIN_TOP);
+		length = &style->margin[property - CSS_PROP_MARGIN_TOP];
+		break;
 	default:
 		return;
 	}
@@ -5491,6 +6083,35 @@ cascade_shadows(
 	}
 }
 
+/* Computes backdrop-filter: the functions with blur in pixels, hue-rotate in degrees and the others as numbers (at most one for the four that saturate). */
+static void
+cascade_filters(
+	struct css_engine *engine,
+	struct css_style *style,
+	const struct css_value *value,
+	struct css_filter *out,
+	int *count)
+{
+	const struct css_declared_filter *declared;
+	struct css_length length;
+	size_t index;
+
+	/* Anything but a list is no filter. */
+	*count = 0;
+	if (value->kind != CSS_VALUE_FILTERS || value->filters == NULL)
+		return;
+	for (index = 0; index < value->filters->count && index < CSS_FILTERS; index++) {
+		declared = &value->filters->filters[index];
+		out[index].kind = declared->kind;
+		out[index].amount = declared->amount.number;
+		if (declared->kind == CSS_FILTER_BLUR) {
+			length = cascade_length(engine, &declared->amount, style->font_size);
+			out[index].amount = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+		}
+		(*count)++;
+	}
+}
+
 /* Computes the single sharp text shadow supported by this pass. */
 static void
 cascade_text_shadow(
@@ -5574,38 +6195,44 @@ cascade_length(
 	/* Each unit's size in pixels. */
 	switch (value->unit) {
 	case CSS_DUNIT_PX:
-		length.value = value->number;
+		length.value = value->number * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_EM:
 		length.value = value->number * font_size;
 		break;
 	case CSS_DUNIT_REM:
-		length.value = value->number * engine->root_font_size;
+		length.value = value->number * engine->root_font_size / engine->root_zoom * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_EX:
 		length.value = value->number * font_size * 0.5f;
+		break;
+	case CSS_DUNIT_LH:
+		length.value = value->number * engine->line_px;
+		break;
+	case CSS_DUNIT_RLH:
+		length.value = value->number * engine->root_line_px / engine->root_zoom * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_PERCENT:
 		length.value = value->number;
 		length.unit = CSS_UNIT_PERCENT;
 		break;
 	case CSS_DUNIT_PT:
-		length.value = value->number * 96.0f / 72.0f;
+		length.value = value->number * 96.0f / 72.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_PC:
-		length.value = value->number * 16.0f;
+		length.value = value->number * 16.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_IN:
-		length.value = value->number * 96.0f;
+		length.value = value->number * 96.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_CM:
-		length.value = value->number * 96.0f / 2.54f;
+		length.value = value->number * 96.0f / 2.54f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_MM:
-		length.value = value->number * 96.0f / 25.4f;
+		length.value = value->number * 96.0f / 25.4f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_VW:
-		length.value = value->number * engine->viewport_width / 100.0f;
+		length.value = value->number * engine->viewport_width / 100.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_CQW:
 		cascade_container(engine, &container_width, &container_height);
@@ -5616,7 +6243,7 @@ cascade_length(
 		length.value = value->number * container_height / 100.0f;
 		break;
 	case CSS_DUNIT_VH:
-		length.value = value->number * engine->viewport_height / 100.0f;
+		length.value = value->number * engine->viewport_height / 100.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_VMIN:
 		length.value = value->number * engine->viewport_width / 100.0f;
@@ -5647,22 +6274,22 @@ cascade_font_size(
 
 	/* em and percentages measure the parent's size. */
 	if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_PERCENT)
-		return parent_size * value->number / 100.0f;
+		return parent_size * value->number / 100.0f * engine->zoom_rel;
 
 	/* So do a calculation's. */
 	if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_CALC && value->calc != NULL) {
-		length = cascade_calc(engine, value->calc, parent_size);
+		length = cascade_calc(engine, value->calc, parent_size * engine->zoom_rel);
 		if (length.unit == CSS_UNIT_PERCENT)
-			return parent_size * length.value / 100.0f + length.offset;
+			return parent_size * engine->zoom_rel * length.value / 100.0f + length.offset;
 		return length.value;
 	}
 
 	/* A keyword is its size at the default size. */
 	if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_FONT_KEYWORD)
-		return value->number;
+		return value->number * engine->zoom_eff;
 
-	/* Resolves every other length and accepts only a pixel result. */
-	length = cascade_length(engine, value, parent_size);
+	/* Resolves every other length and accepts only a pixel result (an em is the parent's size in the element's zoom). */
+	length = cascade_length(engine, value, parent_size * engine->zoom_rel);
 	if (length.unit != CSS_UNIT_PX)
 		return parent_size;
 

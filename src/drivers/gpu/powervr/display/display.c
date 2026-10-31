@@ -16,9 +16,11 @@
  * reported at 60 Hz -- and one lease at a time.
  *
  * While a lease is held the text console does not draw; the screen is
- * cleared for the lease's frames, and given back to the console (which
- * draws its retained text again) when the lease is released, also when
- * its holder closes or exits without releasing it.
+ * cleared for the lease's frames, and given back to the console when the
+ * lease is released, also when its holder closes or exits without
+ * releasing it.  The console draws its retained text again only when no
+ * flip of the system has ended it (the GPU framework ends it at the first
+ * flip of any node).
  *
  * A presentation copies the frame with the CPU from a resource this node
  * allocated (ordinary cacheable RAM the session writes or maps) onto the
@@ -1584,7 +1586,7 @@ end_lease(
 	}
 
 	if (POWERVR_DEBUG)
-		kern_logf("powervr: display lease %llu released after %llu frame(s); the text console resumes\n",
+		kern_logf("powervr: display lease %llu released after %llu frame(s); the screen goes back to the text console\n",
 			  (unsigned long long)display->lease,
 			  (unsigned long long)display->sequence);
 
@@ -1907,11 +1909,13 @@ flip_report(
 	struct powervr_display *display)
 {
 	uint64_t now;
+	uint64_t period;
 	uint32_t presents;
 
 	/* Not yet time, or nothing to say. */
 	now = sched_ticks();
-	if (now - display->report_tick < kern_ms_to_ticks(POWERVR_FLIP_REPORT_MS))
+	period = kern_ms_to_ticks(POWERVR_FLIP_REPORT_MS);
+	if (now - display->report_tick < period)
 		return;
 	presents = display->report_presents;
 	display->report_tick = now;

@@ -3,7 +3,7 @@
 # WS299 5330 の NVMe の読み書きを速くする
 
 - Master: [plan/master.md](../master.md)（2026-10-27 作成、q1615 P1 の計画）。Primary Milestone: MG004。Related: MG003（[WS298](../ws298/ws.md) VMD の driver、q1612 NVMe から起動）。
-- Status: incomplete（p001・p002・p003・p009 cleared。p004 は実装と試験が済み Q1 の判定待ち、p005 は調べと案（q1634、P1）。現在の状態は下の「現在の状態」）
+- Status: incomplete（p001・p002・p003・p009 cleared。p004 は実装と試験が済み Q1 の判定待ち。p005・p006・p010 in-progress。2026-10-31 q1744 は下の「2026-10-31」）
 - 出典: 2026-10-27 ユーザー「5330でNVMeの最適化（速度向上）をWSを立ててやってほしいです。（あとで順番にやってほしいです）」「新規WSはまず計画を広く進めて、全体の依存関係を見ましょう。」
 - 全体の依存と着手の順: [plan/agents/P1/pm-plan.md](../agents/P1/pm-plan.md)。
 
@@ -77,7 +77,7 @@ Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRA
 | [p002](phase002/phase.md) | buffer cache: header の確保を O(1)（空きの list）にし、irq を止める区間を短く。evict を run 単位に。host 試験で計算量 | p001 | 4 | cleared（2026-10-27 11:41） |
 | [p003](phase003/phase.md) | NVMe の大きな転送: MDTS に合わせた command、PRP list（bounce を使わず page に直接、使う所だけ bounce）、BIO の上限を上げる（`d_max_transfer_blocks`） | p001・p002 | 6 | cleared（2026-10-27、Q1 判定。raw の読み中央値 583 MB/s = p002 の後の 1.52 倍、書き 1.5 倍） |
 | [p004](phase004/phase.md) | raw の block device の先読み（buffer cache の worker で device の待ちと CPU の仕事を重ねる）。複数の queue・VMD の vector は p007 の乱読みの測定の後に要否（2026-10-28 Q1） | p003 | 6 | in-progress（実装・QEMU・5330 済み、raw の読み 4 GiB 中央値 1917 MB/s。Q1 の判定待ち、q1634） |
-| [p005](phase005/phase.md) | 連続の読み書き: UFS の file の readahead の窓と cluster の読み書き、書きの合流（raw の先読みは p004 へ、2026-10-28 Q1） | p002・p004 | 4 | in-progress（raw 書き 119%・raw 読み 150%・UFS 読み 126%、UFS 書き 55% で未達、2026-10-28 P1） |
+| [p005](phase005/phase.md) | 連続の読み書き: UFS の file の readahead の窓と cluster の読み書き、書きの合流（raw の先読みは p004 へ、2026-10-28 Q1） | p002・p004 | 4 | in-progress（raw 書き 119%・raw 読み 150%・UFS 読み 126%、UFS 書き 55% で未達、2026-10-28 P1。2026-10-31 q1744: 書き手の CPU の直し 3a4e64353、QEMU で確かめ、5330 の測り待ち） |
 | [p006](phase006/phase.md) | HMB（DRAM-less の BG5） | p003 | 4 | in-progress（実装・5330 で動作、QD1 98%。QD32 は 44% で未達、2026-10-28 P1） |
 | [p010](phase010/phase.md) | block device の O_DIRECT（2026-10-28 ユーザー「O_DIRECT を UAPI に足す」、Q1 が p010 に確定、p007 の前） | p004・p005 | 4 | in-progress（2026-10-28 q1657: direct 書き 88%（59% は道具の fill の libc memcpy だった）、読み 1 MiB 103%・4 MiB 91%、QD32 99%。下の「結果」、ユーザーの継続の判断待ち） |
 | p007 | 5330 の測定の受け入れと回帰（QEMU の nvme・USB の起動は T、5330 は 1 本の script） | p002〜p006・p010 | 2 | planned |
@@ -164,6 +164,14 @@ Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRA
 
 - 残る差の見立て（未確認の物を含む）: (1) CPU の速さ（idle が C1 だけ・HWP なし・hybrid を知らない置き方）で、書き手の CPU が律速の項目（UFS の書き・direct の書きの fill）は 10〜30% 遅くなる。所有の外（HAL の idle・scheduler）。(2) UFS の書きは buffer cache の line ごとの費用。(3) 時計入りの randread は clock_gettime が syscall（vDSO が無く 1 ms 刻み）のため。(4) read mode の最初の約 900 MiB が遅いのは、乱読みが残した 4 KiB の line を追い出す道が遅いためと見ている（cache は乱読みの後に既に満杯、chunk2 から速い。未確認）。(5) memcpy は 1 KiB〜4 KiB（dst を揃えていない、AVX なし）と 32 MiB（non-temporal の store なし）で glibc より遅い。
 - 再開点: ユーザーの継続の判断待ち（2026-10-28 ユーザー「その上で継続判断させてください。」）。証拠は worktree の `build/hw5330/ws299d/`（切り分け）・`build/hw5330/ws299e/`（全体）、git の外。
+
+## 2026-10-31（q1744、P1）
+
+- 2026-10-31 ユーザーから、WS299 は 5330 が空いたらどの担当でもよいので割り当てる、また不在の間は設計・実装・試験を進められる所まで進める、という趣旨の指示を受けた（Q1 経由）。
+- p004 の commit（ded5ae2e9・36d0d7b5d・1e0ac531a）は main に入っている（Q1 の判定待ちのまま）。
+- 5330: main 9946e22c0 の kernel を WS291 の restore の後の古い userland に入れた起動で network が上がらず止まった（電源の入れ直し待ち、遠隔の電源は無い）。次は main の userland の image（/tmp/p1-ws299/img5330、config-5330.mk）を `--nvme-image` で書いてから測る。
+- 書き手の CPU の直し（3a4e64353、[phase005](phase005/phase.md) の「2026-10-31」）: LRU の歩きで dirty の line を head へ回す、P6 の束の書きの取り込み、UFS の allocation run を 1 MiB・free map の探しを前の run の終わりから、`kern_memcpy_ram`（amd64 は rep movsb）。QEMU の 2 GiB で UFS の新しい file 490 → 851 MB/s、上書き 410 → 852、raw 743 → 835（同じ probe 入りの kernel どうし）。最終の kernel（4e7b2a827、レビューの重大 1 件 = tail journal の volume の run の大きさを直した後）で QEMU の suite・crash 試験 PASS（disk は tmpfs。host の disk に置くと readahead は main も NVMe の queue の recovery で FAIL）。他機種の build warning 0。
+- 再開点（2026-10-31 05:30、P1 返却）: 5330 の電源が戻ったら、worktree p1-ws299e で `sh plan/ws299/temp/run-5330-q1744.sh q1744`（git の外の 1 本の script: (1) `/tmp/p1-ws299/img5330-final.img`（config-5330.mk の main の userland＋kernel 4e7b2a827、vmunix の sha256 先頭 a40a721cd0d2b3f7）を `5330-run.sh --nvme-image` で書いて素の起動、(2) `nvme-bench-5330.sh debian … read write p7raw p7fs p7direct`、(3) `nvme-bench-5330.sh zedbsd … - read write p7rawwrite p7rawread p7fswrite p7fsread p7direct`、log は build/hw5330/q1744）。image が /tmp から消えていたら `make ZEDBSD_CONFIG=plan/tools/hw5330/config-5330.mk BUILD=/tmp/... disk-image` で作り直す。未達が残れば `build/kp-5prof/vmunix`（prof.patch 入り）と `plan/ws299/temp/zb-prof.sh` で 5330 の profile。その後 p007 → p008（測る口の log・規約）。
 
 ## 日程（2026-10-30 ユーザー、原文）
 

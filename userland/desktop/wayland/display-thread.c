@@ -32,10 +32,10 @@
  * run on the event loop's thread, one after the other (display_inline).
  * A change running when such a caller comes ends first (kwl_display_settle).
  *
- * The game mode's question whether the display could show a window
- * straight (kl_backend_scanout_possible, which opens the GPU device), its
- * claim of the display and its release once the present thread's present
- * has returned (kl_backend_scanout_open and _close), the heads' swapchains
+ * The game mode's display swapchain -- made at the display's mode with
+ * images that may go out, their fds exported for the client they are lent
+ * to, and destroyed once the present thread's present has returned
+ * (kwl_display_scanout_open and _close) -- the heads' swapchains
  * (kwl_display_heads) and the reading of the displays connected
  * (kwl_display_enumerate) are the display thread's too.  A job that
  * must run on the event loop's thread waits for the thread's jobs given
@@ -67,11 +67,9 @@ enum display_kind {
 	DISPLAY_CLOSE = 1,
 	/* The display taken, the output's swapchain made, and the cursor plane's. */
 	DISPLAY_OPEN,
-	/* Whether the display could show a window straight (the game mode). */
-	DISPLAY_SCANOUT_QUERY,
-	/* The display claimed for the game mode. */
+	/* The game mode's display swapchain made, its images exported. */
 	DISPLAY_SCANOUT_OPEN,
-	/* The game mode's claim released, once its present has returned. */
+	/* The game mode's display swapchain destroyed, once its present has returned. */
 	DISPLAY_SCANOUT_CLOSE,
 	/* Heads' swapchains destroyed (their displays given back) and made. */
 	DISPLAY_HEADS,
@@ -96,12 +94,11 @@ enum display_kind {
  * display the output's display; parts the cursor plane taken off the
  * output (DISPLAY_CLOSE), plane whether a cursor plane is to be made and
  * cursor, plane_extent and plane_index the one made (DISPLAY_OPEN);
- * readback and scene_supported what the swapchain's images allow; width
- * and height the game mode's size (DISPLAY_SCANOUT_QUERY and _OPEN);
- * scanout the game mode's claim (made by DISPLAY_SCANOUT_OPEN, given back
- * by DISPLAY_SCANOUT_CLOSE) and slot where the main thread takes in the
- * one made; ran says the job was run (a release dropped at the end runs
- * then, a claim made and dropped is given back); rests and opens
+ * readback and scene_supported what the swapchain's images allow; game
+ * the game mode's display swapchain (the main thread's record, whose
+ * Vulkan part DISPLAY_SCANOUT_OPEN makes and DISPLAY_SCANOUT_CLOSE
+ * destroys); ran says the job was run (a release dropped at the end runs
+ * then, a game chain made and dropped is destroyed); rests and opens
  * (rest_count and open_count of them, the caller's until its then) the
  * heads' swapchains to destroy and to make (DISPLAY_HEADS); list the
  * displays read (DISPLAY_ENUMERATE, the caller's until its then);
@@ -125,15 +122,13 @@ struct display_job {
 	uint32_t plane_index;
 	int readback;
 	unsigned scene_supported;
-	uint32_t width;
-	uint32_t height;
+	unsigned lendable;
 	struct kwl_head_rest *rests;
 	unsigned rest_count;
 	struct kwl_head_opening *opens;
 	unsigned open_count;
 	struct kwl_display_list *list;
-	struct kl_backend_scanout *scanout;
-	struct kl_backend_scanout **slot;
+	struct kwl_game_chain *game;
 	unsigned ran;
 	unsigned percent;
 	int error;
@@ -155,6 +150,9 @@ static void display_drop(struct kwl_lane_job *lane);
 static void display_done_step(struct kwl_server *server, struct display_job *job);
 static void display_light_submit(struct kwl_server *server, struct display_job *job, uint64_t key);
 static void display_open_run(struct display_job *job);
+static void display_game_open_run(struct display_job *job);
+static void display_game_close(struct kwl_server *server, struct kwl_game_chain *chain);
+static unsigned display_lendable(struct kwl_compose *compose, const struct vkdemo_display *output);
 static struct display_change *display_change_new(kwl_display_fn *then, void *context);
 static void display_change_end(struct kwl_server *server, struct display_change *change, int error);
 static void display_open_parked(struct kwl_server *server, int error, void *context);
@@ -602,63 +600,39 @@ kwl_display_enumerate(
 }
 
 /*
- * Asks the display thread whether the display could show a window of a
- * size straight (the game mode, without claiming it); then(server, error,
- * context) is called with the backend's answer.  Returns 0.
- */
-int
-kwl_display_scanout_query(
-	struct kwl_server *server,
-	uint32_t width,
-	uint32_t height,
-	kwl_display_fn *then,
-	void *context)
-{
-	struct display_job *job;
-
-	/* The question. */
-	job = display_job_new(server, DISPLAY_SCANOUT_QUERY, then, context);
-	job->width = width;
-	job->height = height;
-	display_submit(server, job);
-	return 0;
-}
-
-/*
- * Asks the display thread to claim the display for the game mode at a size
- * (the swapchain closed); *scanout takes the claim (NULL on a failure) on
- * the event loop's thread, then then(server, error, context) is called
- * with 0 or the claim's failure.
+ * Asks the display thread to make the game mode's display swapchain of a
+ * record (the window swapchain closed): the display's mode, the format and
+ * the client's image count the main thread put in it, images that may go
+ * out, and their fds.  then(server, error, context) is called on the event
+ * loop's thread with 0, ENOTSUP when the display's chain cannot lend its
+ * images, or another failure (nothing of the chain is left then).
  */
 void
 kwl_display_scanout_open(
 	struct kwl_server *server,
-	uint32_t width,
-	uint32_t height,
-	struct kl_backend_scanout **scanout,
+	struct kwl_game_chain *chain,
 	kwl_display_fn *then,
 	void *context)
 {
 	struct display_job *job;
 
-	/* The claim. */
+	/* The swapchain to make. */
 	job = display_job_new(server, DISPLAY_SCANOUT_OPEN, then, context);
-	job->width = width;
-	job->height = height;
-	job->slot = scanout;
+	job->game = chain;
 	display_submit(server, job);
 }
 
 /*
- * Asks the display thread to give the game mode's claim back once the
- * present thread's present (if any) has returned; then(server, 0, context)
- * is called after, on the event loop's thread (at the end too, the release
- * run there if the thread had not run it).
+ * Asks the display thread to destroy the game mode's display swapchain
+ * once the present thread's present (if any) has returned, which gives
+ * the display back; then(server, 0, context) is called after, on the event
+ * loop's thread (at the end too, the release run there if the thread had
+ * not run it).
  */
 void
 kwl_display_scanout_close(
 	struct kwl_server *server,
-	struct kl_backend_scanout *scanout,
+	struct kwl_game_chain *chain,
 	kwl_display_fn *then,
 	void *context)
 {
@@ -666,7 +640,7 @@ kwl_display_scanout_close(
 
 	/* The release. */
 	job = display_job_new(server, DISPLAY_SCANOUT_CLOSE, then, context);
-	job->scanout = scanout;
+	job->game = chain;
 	display_submit(server, job);
 }
 
@@ -922,19 +896,13 @@ display_run(
 	case DISPLAY_OPEN:
 		display_open_run(job);
 		break;
-	case DISPLAY_SCANOUT_QUERY:
-		job->error = kl_backend_scanout_possible(job->server->backend, job->width, job->height);
-		break;
 	case DISPLAY_SCANOUT_OPEN:
-		job->error = kl_backend_scanout_open(job->server->backend, job->width, job->height, &job->scanout);
-		if (job->error != 0)
-			job->scanout = NULL;
+		display_game_open_run(job);
 		break;
 	case DISPLAY_SCANOUT_CLOSE:
-		/* The present running returns first (the display reads its buffer until then), then the display goes back. */
+		/* The present running returns first (the display reads its image until then), then the swapchain goes. */
 		kwl_scanout_present_wait();
-		kl_backend_scanout_close(job->scanout);
-		job->scanout = NULL;
+		display_game_close(job->server, job->game);
 		job->error = 0;
 		break;
 	case DISPLAY_HEADS:
@@ -1046,7 +1014,9 @@ display_done_step(
 
 		/* The swapchain is the output's, and the main thread's part takes it in. */
 		compose->output = job->output;
+		compose->output.next = NULL;
 		compose->readback = (unsigned)job->readback;
+		compose->lendable = job->lendable;
 		scene_supported = job->scene_supported;
 		cursor = job->cursor;
 		plane_extent = job->plane_extent;
@@ -1055,12 +1025,6 @@ display_done_step(
 		started = kwl_milliseconds();
 		error = kwl_compose_output_take(server, scene_supported, cursor, plane_extent, plane_index);
 		printf("KWL DISPLAY step=take ms=%llu\n", (unsigned long long)(kwl_milliseconds() - started));
-		then(server, error, then_context);
-		return;
-	case DISPLAY_SCANOUT_OPEN:
-		/* The claim is the caller's (none on a failure). */
-		*job->slot = job->scanout;
-		display_job_free(job);
 		then(server, error, then_context);
 		return;
 	case DISPLAY_LIGHT_OPEN:
@@ -1207,9 +1171,9 @@ display_drop(
 		job->then(job->server, 0, job->context);
 	}
 
-	/* A claim nobody takes in. */
-	if (job->kind == DISPLAY_SCANOUT_OPEN && job->scanout != NULL)
-		kl_backend_scanout_close(job->scanout);
+	/* A game chain made that nobody takes in. */
+	if (job->kind == DISPLAY_SCANOUT_OPEN && job->ran && job->error == 0)
+		display_game_close(job->server, job->game);
 
 	/* Freed. */
 	display_job_free(job);
@@ -1226,6 +1190,7 @@ static void
 display_open_run(
 	struct display_job *job)
 {
+	VkExternalMemoryImageCreateInfo external;
 	struct kwl_compose *compose;
 	uint64_t started;
 	VkResult result;
@@ -1239,6 +1204,16 @@ display_open_run(
 		job->error = EIO;
 		return;
 	}
+
+	/*
+	 * The images may go out (the swapchain is made so), which tells whether
+	 * the display can lend its images to a game (display_lendable); nothing
+	 * else of window mode changes.
+	 */
+	memset(&external, 0, sizeof(external));
+	external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+	external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+	job->output.next = &external;
 
 	/* Both transfer directions first, for the scene's copies. */
 	started = kwl_milliseconds();
@@ -1276,8 +1251,10 @@ display_open_run(
 		return;
 	}
 
-	/* Reports how long the swapchain took. */
-	printf("KWL STARTUP step=output-swapchain ms=%llu\n", (unsigned long long)(kwl_milliseconds() - started));
+	/* Reports how long the swapchain took, and whether its images can go out (the game mode's lend). */
+	job->output.next = NULL;
+	job->lendable = display_lendable(compose, &job->output);
+	printf("KWL STARTUP step=output-swapchain ms=%llu lendable=%u\n", (unsigned long long)(kwl_milliseconds() - started), job->lendable);
 
 	/* The cursor plane's objects, when the output has such a plane (it borrows the output's claim). */
 	if (job->plane)
@@ -1285,6 +1262,261 @@ display_open_run(
 
 	/* Succeeded: the swapchain for the main thread to take in. */
 	job->error = 0;
+}
+
+/*
+ * Makes the game mode's display swapchain on the display thread: the
+ * display plane's surface at the display's mode, the display taken, then a
+ * FIFO swapchain in the format the main thread chose, whose images allow
+ * drawing, copies and sampling (a client draws into them; window mode
+ * composes them after the lend) and may go out (an external-memory record
+ * in its creation), with enough images for the client's count beside the
+ * two the display holds (the one shown, the one queued), and each image's
+ * fd (vkGetMemoryFdKHR naming the image).  A failure destroys what was
+ * made and gives the display back; ENOTSUP when the images cannot go out.
+ */
+static void
+display_game_open_run(
+	struct display_job *job)
+{
+	VkExternalMemoryImageCreateInfo external;
+	VkSwapchainCreateInfoKHR create;
+	VkSurfaceCapabilitiesKHR capabilities;
+	VkSurfaceFormatKHR formats[8];
+	VkMemoryDedicatedAllocateInfo dedicated;
+	VkMemoryGetFdInfoKHR get;
+	VkFenceCreateInfo fence;
+	PFN_vkGetMemoryFdKHR get_memory_fd;
+	struct kwl_game_chain *chain;
+	struct kwl_compose *compose;
+	VkFormat format;
+	VkResult result;
+	uint32_t count;
+	uint32_t index;
+	unsigned found;
+
+	/* Nothing made yet. */
+	compose = job->server->compose;
+	chain = job->game;
+	format = chain->output.format;
+	job->error = EIO;
+	for (index = 0U; index < KWL_GAME_IMAGES; index++)
+		chain->fds[index] = -1;
+
+	/* The display plane's surface at the display's mode. */
+	result = vkdemo_display_open_on(compose->instance, compose->physical, compose->display, compose->mode_width, compose->mode_height, &chain->output);
+	chain->output.format = format;
+	if (result != VK_SUCCESS) {
+		printf("KWL SCANOUT game chain step=surface result=%d\n", (int)result);
+		vkdemo_display_close(compose->instance, compose->device, &chain->output);
+		return;
+	}
+
+	/* The display's permission before the swapchain. */
+	result = kwl_os_display_acquire(job->server, compose->physical, compose->display);
+	if (result != VK_SUCCESS) {
+		printf("KWL SCANOUT game chain step=display-acquire result=%d\n", (int)result);
+		vkdemo_display_close(compose->instance, compose->device, &chain->output);
+		return;
+	}
+
+	/* The surface shows the format chosen, in the sRGB colour space. */
+	count = sizeof(formats) / sizeof(formats[0]);
+	result = vkGetPhysicalDeviceSurfaceFormatsKHR(compose->physical, chain->output.surface, &count, formats);
+	found = 0U;
+	for (index = 0U; result >= VK_SUCCESS && index < count; index++) {
+		if (formats[index].format == format && formats[index].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+			found = 1U;
+	}
+	if (!found) {
+		printf("KWL SCANOUT game chain step=format format=%d\n", (int)format);
+		job->error = ENOTSUP;
+		goto failed;
+	}
+
+	/* The uses the surface allows of drawing, copies and sampling; drawing and sampling are needed. */
+	result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(compose->physical, chain->output.surface, &capabilities);
+	if (result != VK_SUCCESS)
+		goto failed;
+	chain->usage = capabilities.supportedUsageFlags &
+	    (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+	     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+	if ((chain->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0U ||
+	    (chain->usage & VK_IMAGE_USAGE_SAMPLED_BIT) == 0U) {
+		printf("KWL SCANOUT game chain step=usage usage=0x%x\n", (unsigned)capabilities.supportedUsageFlags);
+		job->error = ENOTSUP;
+		goto failed;
+	}
+
+	/* The client's count beside the two the display holds, within the surface's bounds and the game mode's. */
+	count = chain->wanted + 2U;
+	if (count < capabilities.minImageCount)
+		count = capabilities.minImageCount;
+	if (capabilities.maxImageCount != 0U && count > capabilities.maxImageCount)
+		count = capabilities.maxImageCount;
+	if (count > KWL_GAME_IMAGES)
+		count = KWL_GAME_IMAGES;
+
+	/* The images may go out as opaque fds. */
+	memset(&external, 0, sizeof(external));
+	external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+	external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+	/* A FIFO swapchain of the display's mode, opaque and unturned. */
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	create.pNext = &external;
+	create.surface = chain->output.surface;
+	create.minImageCount = count;
+	create.imageFormat = format;
+	create.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+	create.imageExtent.width = compose->mode_width;
+	create.imageExtent.height = compose->mode_height;
+	create.imageArrayLayers = 1U;
+	create.imageUsage = chain->usage;
+	create.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	create.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	create.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	create.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+	create.clipped = VK_TRUE;
+	result = vkCreateSwapchainKHR(compose->device, &create, NULL, &chain->output.swapchain);
+	if (result != VK_SUCCESS) {
+		printf("KWL SCANOUT game chain step=swapchain result=%d images=%u\n", (int)result, count);
+		goto failed;
+	}
+
+	/* The images, at most as many as the game mode lends. */
+	count = 0U;
+	result = vkGetSwapchainImagesKHR(compose->device, chain->output.swapchain, &count, NULL);
+	if (result != VK_SUCCESS || count == 0U || count > KWL_GAME_IMAGES)
+		goto failed;
+	chain->output.images = calloc(count, sizeof(*chain->output.images));
+	if (chain->output.images == NULL)
+		goto failed;
+	result = vkGetSwapchainImagesKHR(compose->device, chain->output.swapchain, &count, chain->output.images);
+	if (result != VK_SUCCESS)
+		goto failed;
+	chain->output.image_count = count;
+
+	/* Each image's fd: the request names the swapchain image, which has no memory handle of its own. */
+	get_memory_fd = (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(compose->device, "vkGetMemoryFdKHR");
+	if (get_memory_fd == NULL) {
+		job->error = ENOTSUP;
+		goto failed;
+	}
+	for (index = 0U; index < count; index++) {
+		memset(&dedicated, 0, sizeof(dedicated));
+		dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+		dedicated.image = chain->output.images[index];
+		memset(&get, 0, sizeof(get));
+		get.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+		get.pNext = &dedicated;
+		get.memory = VK_NULL_HANDLE;
+		get.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+		result = get_memory_fd(compose->device, &get, &chain->fds[index]);
+		if (result != VK_SUCCESS) {
+			printf("KWL SCANOUT game chain step=export result=%d image=%u\n", (int)result, index);
+			chain->fds[index] = -1;
+			job->error = ENOTSUP;
+			goto failed;
+		}
+	}
+
+	/* The present thread's fence, which tells when an acquired image is the client's. */
+	memset(&fence, 0, sizeof(fence));
+	fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	result = vkCreateFence(compose->device, &fence, NULL, &chain->acquired);
+	if (result != VK_SUCCESS) {
+		chain->acquired = VK_NULL_HANDLE;
+		goto failed;
+	}
+
+	/* Succeeded: the game chain is the main thread's to lend. */
+	job->error = 0;
+	return;
+
+failed:
+	/* What was made goes, and the display goes back. */
+	display_game_close(job->server, chain);
+}
+
+/*
+ * Destroys the game mode's display swapchain (no present of it runs):
+ * the fds not sent, the fence, the swapchain and its surface, and the
+ * display given back.  The memory of an image a client still holds stays
+ * its own until it lets go.
+ */
+static void
+display_game_close(
+	struct kwl_server *server,
+	struct kwl_game_chain *chain)
+{
+	struct kwl_compose *compose;
+	unsigned taken;
+	uint32_t index;
+
+	/* The fds not sent yet. */
+	compose = server->compose;
+	for (index = 0U; index < KWL_GAME_IMAGES; index++) {
+		if (chain->fds[index] >= 0)
+			close(chain->fds[index]);
+		chain->fds[index] = -1;
+	}
+
+	/* The fence. */
+	if (chain->acquired != VK_NULL_HANDLE)
+		vkDestroyFence(compose->device, chain->acquired, NULL);
+	chain->acquired = VK_NULL_HANDLE;
+
+	/* The swapchain and its surface, then the display given back when a swapchain had taken it. */
+	taken = 0U;
+	if (chain->output.surface != VK_NULL_HANDLE)
+		taken = 1U;
+	vkdemo_display_close(compose->instance, compose->device, &chain->output);
+	if (taken)
+		kwl_os_display_release(server, compose->physical, compose->display);
+}
+
+/*
+ * Tells whether a swapchain's images can go out: the first one's fd is
+ * exported (vkGetMemoryFdKHR naming the image) and closed again.  A display
+ * whose chain cannot is never closed for the game mode.  Returns 1 or 0.
+ */
+static unsigned
+display_lendable(
+	struct kwl_compose *compose,
+	const struct vkdemo_display *output)
+{
+	VkMemoryDedicatedAllocateInfo dedicated;
+	VkMemoryGetFdInfoKHR get;
+	PFN_vkGetMemoryFdKHR get_memory_fd;
+	VkResult result;
+	int fd;
+
+	/* An image to ask about, and the export's entry point. */
+	if (output->image_count == 0U || output->images == NULL)
+		return 0U;
+	get_memory_fd = (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(compose->device, "vkGetMemoryFdKHR");
+	if (get_memory_fd == NULL)
+		return 0U;
+
+	/* The first image's fd, the request naming the image. */
+	memset(&dedicated, 0, sizeof(dedicated));
+	dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+	dedicated.image = output->images[0];
+	memset(&get, 0, sizeof(get));
+	get.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+	get.pNext = &dedicated;
+	get.memory = VK_NULL_HANDLE;
+	get.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+	fd = -1;
+	result = get_memory_fd(compose->device, &get, &fd);
+	if (result != VK_SUCCESS)
+		return 0U;
+
+	/* Succeeded: the images can go out; the fd was only a question. */
+	close(fd);
+	return 1U;
 }
 
 /* A change made of steps, for then and context; NULL without memory. */

@@ -59,6 +59,11 @@ void main()
 		vec2 high = min(item_rect.zw, pixel + 1.0);
 		vec2 overlap = clamp(high - low, 0.0, 1.0);
 		coverage = overlap.x * overlap.y;
+	} else if (item_atlas.z > 3.5) {
+		// A counterclockwise sideways glyph: destination x runs through source rows, destination y through columns backwards.
+		ivec2 offset = ivec2(pixel - item_source.xy);
+		ivec2 texel = ivec2(item_atlas.xy) + ivec2(int(item_source.z) - 1 - offset.y, offset.x);
+		coverage = fetch(vec2(texel)).a;
 	} else if (item_atlas.z > 2.5) {
 		// A clockwise sideways glyph: destination x runs through source rows backwards.
 		ivec2 offset = ivec2(pixel - item_source.xy);

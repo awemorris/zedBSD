@@ -60,8 +60,14 @@ kwl_scanout_decide(
 	if (facts->shot)
 		return KWL_SCANOUT_SHOT;
 
-	/* The pointer still (a moving one is drawn), and a display that has not refused it. */
-	if (facts->pointer_still_ms < KWL_SCANOUT_POINTER_IDLE_MS)
+	/*
+	 * The pointer still (a moving one is drawn over a video), and a
+	 * display that has not refused it.  Over a game no cursor is shown on
+	 * any platform, so its moving pointer, which a game moves all the
+	 * time, keeps it straight.
+	 */
+	if (facts->content_type != KWL_SCANOUT_CONTENT_GAME &&
+	    facts->pointer_still_ms < KWL_SCANOUT_POINTER_IDLE_MS)
 		return KWL_SCANOUT_POINTER;
 	if (facts->refused)
 		return KWL_SCANOUT_REFUSED;

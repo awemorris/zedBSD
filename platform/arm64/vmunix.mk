@@ -202,7 +202,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/mount.c src/kern/tmpfs.c src/kern/tmpfs-pages.c src/drivers/fs/overlayfs.c \
 	src/kern/vfs.c src/kern/backing-claim.c \
  src/kern/buf.c src/kern/cache.c src/kern/readahead.c src/kern/writeback.c src/kern/io.c \
-	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
+	src/kern/sysctl.c src/kern/thermal.c src/kern/thermal-guard.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
 	src/kern/device-io.c src/kern/irq.c src/kern/pmem.c \
 	src/kern/test-checkpoint.c src/kern/text-display.c \
 	src/drivers/generic/loop.c \
@@ -211,7 +211,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/timer.c src/kern/klog.c \
 	src/kern/lock.c src/kern/waitq.c \
-	src/kern/process.c src/kern/ptrace.c src/kern/thread.c src/kern/sched.c src/kern/sleep.c src/kern/freeze.c $(KERN_VM_SOURCES) \
+	src/kern/process.c src/kern/ptrace.c src/kern/thread.c src/kern/sched.c src/kern/sleep.c src/kern/cpuperf.c src/kern/freeze.c $(KERN_VM_SOURCES) \
 	src/kern/filedesc.c src/kern/handle.c src/kern/fd-object.c \
 	src/kern/record-lock.c \
 	src/kern/pipe.c src/kern/cred.c \
@@ -777,29 +777,34 @@ $(DYNAMIC_DIR)/obj/src/rtld/tlsdesc.o: src/rtld/tlsdesc-arm64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) -c $< -o $@
 $(DYNAMIC_LIBM_OBJS): $(DYNAMIC_FLOAT_DIR)/math/%.o: src/libc/math/%.c \
-	$(ZEDBSD_LIBM_HEADERS)
+	$(ZEDBSD_LIBM_HEADERS) $(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/softfloat.o: src/libc/softfloat.c src/libc/softfloat.h
+$(DYNAMIC_FLOAT_DIR)/softfloat.o: src/libc/softfloat.c src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/compiler-runtime.o: src/libc/compiler-runtime.c src/libc/softfloat.h
+$(DYNAMIC_FLOAT_DIR)/compiler-runtime.o: src/libc/compiler-runtime.c src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/softfloat128.o: src/libc/softfloat128.c \
-	src/libc/softfloat128.h src/libc/softfloat.h
+	src/libc/softfloat128.h src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/compiler-runtime128.o: src/libc/compiler-runtime128.c \
-	src/libc/softfloat128.h src/libc/softfloat.h
+	src/libc/softfloat128.h src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/float-parse.o: src/libc/float-parse.c src/libc/softfloat.h
+$(DYNAMIC_FLOAT_DIR)/float-parse.o: src/libc/float-parse.c src/libc/softfloat.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) \
  $(DYNAMIC_CFLAGS) -c $< -o $@

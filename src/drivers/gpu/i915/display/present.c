@@ -8,8 +8,12 @@
 /*
  * The present path of the resident node.
  *
- * The node's display is the eDP panel, with one full-output plane and the
- * panel's own mode.  A session claims the display and gets a lease; its
+ * The node's resident display is the eDP panel (or the HDMI output the
+ * boot chose), with one full-output plane and the panel's own mode; the
+ * other connectors are outputs of their own (head.c), and a connected one
+ * that the limit of outputs lit at once keeps dark is marked limited.  The
+ * connectors' hot-plug moves the topology, which the display events
+ * report.  A session claims an output and gets a lease; its
  * presentations name the lease, so a stale presentation after a release is
  * refused.  Two routes show a frame:
  *
@@ -41,9 +45,9 @@
  * drawn into the buffer that flip shows (the newest frame wins, as in a
  * mailbox), and the copy may meet the latch, which tears.
  *
- * XXX: one output, one plane, one lease at a time; a requested mode smaller
+ * XXX: one plane an output, one lease an output; a requested mode smaller
  * than the panel is shown scaled and centred, the display is never
- * re-timed.  No hot-plug and no topology events.
+ * re-timed.
  */
 
 #include "internal.h"

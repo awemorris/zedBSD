@@ -365,7 +365,10 @@ arm64_framebuffer_test_pattern(
 				value = colour(10);
 			if (x >= width / 3U * 2U)
 				value = colour(9);
-			if (x < 16U || y < 16U || x >= width - 16U || y >= height - 16U)
+			if (x < 16U ||
+			    y < 16U ||
+			    x >= width - 16U ||
+			    y >= height - 16U)
 				value = colour(15);
 			put_pixel(pixels, x, y, value);
 		}

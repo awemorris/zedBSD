@@ -795,6 +795,7 @@ inst_start_over(
 	app->disk = 0;
 	app->whole = -1;
 	flow_forget_choices(app);
+	app->create_size_disk = 0;
 	app->edit_message[0] = '\0';
 	app->edit_failed = 0;
 	app->write_count = 0;

@@ -37,6 +37,28 @@
 /* The most sources an @font-face rule keeps (the ones after are dropped). */
 #define CSS_FONT_SOURCES 4
 
+/* The most filter functions a style keeps (the ones after are dropped). */
+#define CSS_FILTERS 8
+
+/* The kinds of filter function. */
+enum css_filter_kind {
+	CSS_FILTER_BLUR,
+	CSS_FILTER_BRIGHTNESS,
+	CSS_FILTER_CONTRAST,
+	CSS_FILTER_GRAYSCALE,
+	CSS_FILTER_HUE_ROTATE,
+	CSS_FILTER_INVERT,
+	CSS_FILTER_OPACITY,
+	CSS_FILTER_SATURATE,
+	CSS_FILTER_SEPIA
+};
+
+/* One filter function of a style: blur's amount is in pixels, hue-rotate's in degrees, the others' a number (1 is 100%). */
+struct css_filter {
+	int kind;
+	float amount;
+};
+
 /* The most box shadows a style keeps (the ones after are dropped). */
 #define CSS_SHADOWS 4
 
@@ -69,6 +91,11 @@
 #define CSS_PSEUDO_ELEMENT_VT_PAIR 6
 #define CSS_PSEUDO_ELEMENT_VT_OLD 7
 #define CSS_PSEUDO_ELEMENT_VT_NEW 8
+/* The box around a details element's content (everything but its first summary). */
+#define CSS_PSEUDO_ELEMENT_DETAILS_CONTENT 9
+/* The first letter and the first formatted line of a block container. */
+#define CSS_PSEUDO_ELEMENT_FIRST_LETTER 10
+#define CSS_PSEUDO_ELEMENT_FIRST_LINE 11
 /* The translation a view transition group's style starts with until its rectangle is known (an author's transform replaces it). */
 /* The places a view transition pseudo-element can have among its siblings (for :first-child, :last-child and :only-child). */
 #define CSS_VT_FIRST 1
@@ -226,6 +253,10 @@ enum css_anchor_slot {
 	CSS_ANCHOR_SLOT_MIN_HEIGHT,
 	CSS_ANCHOR_SLOT_MAX_WIDTH,
 	CSS_ANCHOR_SLOT_MAX_HEIGHT,
+	CSS_ANCHOR_SLOT_MARGIN_TOP,
+	CSS_ANCHOR_SLOT_MARGIN_RIGHT,
+	CSS_ANCHOR_SLOT_MARGIN_BOTTOM,
+	CSS_ANCHOR_SLOT_MARGIN_LEFT,
 	CSS_ANCHOR_SLOTS
 };
 
@@ -457,8 +488,7 @@ enum css_white_space {
 };
 
 /*
- * The values of border-style this pass tells apart (groove and ridge parse
- * as solid; every style is drawn solid, but a form control whose borders
+ * The values of border-style this pass tells apart (every style is drawn solid, but a form control whose borders
  * are all inset or outset, as the user agent's sheet gives it, is drawn
  * the way the platform draws such a control).
  */
@@ -469,7 +499,9 @@ enum css_border_style {
 	CSS_BORDER_DOTTED,
 	CSS_BORDER_DOUBLE,
 	CSS_BORDER_INSET,
-	CSS_BORDER_OUTSET
+	CSS_BORDER_OUTSET,
+	CSS_BORDER_GROOVE,
+	CSS_BORDER_RIDGE
 };
 
 /* The values of box-sizing: what width and height size. */
@@ -484,7 +516,9 @@ enum css_list_style {
 	CSS_LIST_CIRCLE,
 	CSS_LIST_SQUARE,
 	CSS_LIST_DECIMAL,
-	CSS_LIST_NONE
+	CSS_LIST_NONE,
+	CSS_LIST_DISCLOSURE_CLOSED,
+	CSS_LIST_DISCLOSURE_OPEN
 };
 
 /* The values of background-repeat (the two axes together). */
@@ -589,7 +623,7 @@ struct css_try_style {
 	struct css_length min_height;
 	struct css_length max_width;
 	struct css_length max_height;
-	const struct css_anchor_expr *anchor[10];
+	const struct css_anchor_expr *anchor[CSS_ANCHOR_SLOTS];
 	int position_area;
 	struct vm_string *position_anchor;
 	int justify_self;
@@ -701,6 +735,25 @@ struct css_line_names {
 };
 
 /*
+ * One component of a subgrid's list of line names: a bracketed group, or a
+ * repeat() of groups (repeat is 0 for a plain group, the count, or -1 for
+ * auto-fill).
+ */
+#define CSS_SUBGRID_GROUPS	4
+#define CSS_SUBGRID_PARTS	16
+struct css_subgrid_part {
+	int repeat;
+	int groups;
+	struct css_line_names names[CSS_SUBGRID_GROUPS];
+};
+
+/* A subgrid's line names, in the order written (in the engine's arena). */
+struct css_subgrid_names {
+	int count;
+	struct css_subgrid_part parts[CSS_SUBGRID_PARTS];
+};
+
+/*
  * A grid-template-areas value: its rows and columns, and the name of each
  * cell, row after row (atoms; NULL for a null cell token).  The named
  * areas are the rectangles the cells of one name make.
@@ -753,6 +806,8 @@ struct css_style {
 	struct css_length padding[4];
 	struct css_length offset[4];
 	int box_sizing;
+	/* content-visibility: 0 visible, 1 auto, 2 hidden (the content is skipped and the box is size-contained). */
+	int content_visibility;
 
 	/*
 	 * Anchor positioning: the sums of the insets and sizes whose unit is
@@ -776,8 +831,9 @@ struct css_style {
 	struct vm_string *animation_timing;
 	/* mix-blend-mode: 0 normal, 1 plus-lighter, 2 any other blend. */
 	int mix_blend_mode;
-	/* zoom: the factor (1 for normal; not applied to the layout yet). */
+	/* zoom: the factor the element's own declaration gives (1 for normal), and the product of it and its ancestors' that scales its lengths. */
 	float zoom;
+	float zoom_eff;
 	const struct css_anchor_names *anchor_scope;
 	int anchor_scope_all;
 	/* position-area's keywords (css_position_area_parse packs them; -1 for none). */
@@ -799,10 +855,22 @@ struct css_style {
 	float opacity;
 	struct css_shadow shadows[CSS_SHADOWS];
 	int shadow_count;
+	/* backdrop-filter: the functions applied to what is painted behind the box. */
+	struct css_filter backdrop_filters[CSS_FILTERS];
+	int backdrop_filter_count;
+	/* filter: the functions applied to the box's own painting (its border box, over what was painted). */
+	struct css_filter filters[CSS_FILTERS];
+	int filter_count;
+	/* will-change names a property that makes the box a containing block of fixed and absolute boxes (bit 0: transform, filter...) or a backdrop root (bit 1: those and opacity, clip-path, mask, mix-blend-mode). */
+	int will_change_contains;
+	/* contain: size 1, layout 2, paint 4, style 8, inline-size 16. */
+	unsigned contain;
 	/* One inherited sharp text shadow; blur and lists are added by a later phase. */
 	struct css_shadow text_shadow;
 	int text_shadow_set;
 	float outline_width;
+	/* -webkit-text-stroke-width (not painted: only reported). */
+	float text_stroke_width;
 	int outline_style;
 	uint32_t outline_color;
 	float outline_offset;
@@ -844,9 +912,13 @@ struct css_style {
 	 * pixels, a percentage of the padding box or auto).
 	 */
 	struct vm_string *background_image;
+	/* How many image pixels make a CSS pixel of the background image (image-set()'s resolution, 1 otherwise). */
+	float background_density;
 	/* The background image when it is a gradient (in the engine's arena; NULL for none). */
 	const struct css_gradient *background_gradient;
 	int background_repeat;
+	/* background-clip: 0 border-box, 1 padding-box, 2 content-box (text paints as the border box). */
+	int background_clip;
 	int background_attachment;
 	struct css_length background_position[2];
 
@@ -897,6 +969,7 @@ struct css_style {
 	/* Tables: the spacing between the cells (across, then down, in pixels), and whether the borders collapse. */
 	float border_spacing[2];
 	int border_collapse;
+	int caption_side;
 	int white_space;
 	int text_transform;
 	int cursor;
@@ -909,6 +982,8 @@ struct css_style {
 	uint32_t text_decoration_color;
 	int text_decoration_current_color;
 	int list_style;
+	/* list-style-position: 1 for inside. */
+	int list_style_inside;
 
 	/*
 	 * Generated content: what content gives a ::before or
@@ -948,6 +1023,12 @@ struct css_style {
 	/* A subgrid axis's value as it serializes (in the engine's arena), or NULL. */
 	const char *column_subgrid;
 	const char *row_subgrid;
+	/* The line names a subgrid axis lists, structured (NULL when it lists none or is no subgrid). */
+	const struct css_subgrid_names *column_subgrid_names;
+	const struct css_subgrid_names *row_subgrid_names;
+	/* A template with a repeat() as written, ems in pixels (what an element that is not a grid container reports), or NULL. */
+	const char *column_declared;
+	const char *row_declared;
 	const struct css_grid_areas *areas;
 	struct css_track auto_columns[CSS_TRACKS];
 	int auto_column_count;
@@ -1021,6 +1102,8 @@ int css_rule_model_source(const struct css_rule_model *model, uint32_t id, const
 int css_rule_model_text(const struct css_rule_model *model, struct wb_units *units);
 int css_rule_model_insert(struct css_rule_model *model, const uint16_t *units, size_t length, size_t index);
 int css_rule_model_delete(struct css_rule_model *model, size_t index);
+unsigned css_rule_model_closing(const struct css_rule_model *model, uint32_t id);
+int css_rule_model_replace(struct css_rule_model *model, const uint16_t *units, size_t length, size_t index);
 
 /* Sheets (parser.c). */
 int css_sheet_create(struct css_sheet **sheet, struct vm_heap *heap, const uint16_t *units, size_t length);
@@ -1044,6 +1127,7 @@ int css_number_serialize(const uint16_t *units, size_t length, struct wb_units *
 int css_decoration_line_parse(const uint16_t *units, size_t length, int *lines);
 int css_serialize_ident(const struct vm_string *name, struct wb_units *out);
 int css_line_names_serialize(const struct css_line_names *names, struct wb_units *out);
+void css_subgrid_lines(const struct css_subgrid_names *declared, int count, struct css_line_names *lines);
 int css_grid_line_serialize(const struct css_grid_place *place, int end, struct wb_units *out);
 int css_grid_lines_serialize(const struct css_grid_place *place, struct wb_units *out);
 int css_grid_area_serialize(const struct css_grid_place *row, const struct css_grid_place *column, struct wb_units *out);
@@ -1053,13 +1137,14 @@ const char *const *css_grid_shorthand_longhands(const struct vm_string *name);
 const char *const *css_flex_shorthand_longhands(const struct vm_string *name);
 int css_flex_shorthand_parts(const struct vm_string *shorthand, const struct vm_string *value, struct wb_units *canonical, struct wb_units parts[3], int *found);
 int css_position_area_serialize(int packed, struct wb_units *out);
+int css_position_area_serialize_declared(int packed, struct wb_units *out);
 int css_try_fallbacks_serialize(const struct css_try_list *list, struct wb_units *out);
 int css_try_order_serialize(int order, struct wb_units *out);
 const char *const *css_anchor_shorthand_longhands(const struct vm_string *name);
 int css_anchor_shorthand_part(struct vm_heap *heap, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
 int css_anchor_canonical(struct vm_heap *heap, const struct vm_string *name, const struct vm_string *value, struct wb_units *out, int *handled);
 int css_position_visibility_serialize(int bits, struct wb_units *out);
-int css_position_area_regions(int packed, int writing_mode, int direction, int *x0, int *x1, int *y0, int *y1);
+int css_position_area_regions(int packed, int cb_mode, int cb_direction, int self_mode, int self_direction, int *x0, int *x1, int *y0, int *y1);
 int css_grid_shorthand_part(struct vm_heap *heap, const struct vm_string *shorthand, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
 int css_decoration_line_serialize(int lines, struct wb_units *out);
 int css_decoration_shorthand_serialize(const uint16_t *units, size_t length, struct wb_units *shorthand, struct wb_units *line, struct wb_units *thickness, struct wb_units *style, struct wb_units *color);
@@ -1082,6 +1167,7 @@ void css_engine_forget_styles(struct css_engine *engine);
 void css_engine_set_view_transition(struct css_engine *engine, int active, const struct vm_string *const *types, int count);
 int css_engine_compute(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style);
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);
+int css_engine_apply_text(struct css_engine *engine, struct css_style *style, const struct css_style *parent, const char *text);
 int css_engine_compute_vt_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct vm_string *name, const struct vm_string *classes, int siblings, const struct css_style *parent, struct css_style *style);
 void css_initial_style(struct css_style *style);
 void css_engine_query_begin(struct css_engine *engine);

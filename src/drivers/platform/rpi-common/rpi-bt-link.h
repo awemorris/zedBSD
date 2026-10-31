@@ -6,8 +6,8 @@
  */
 
 /*
- * The pure part of the Raspberry Pi 4 onboard Bluetooth's UART transport
- * (ws215-p003): the PL011's baud divisor, the search for a Command Complete
+ * The pure part of the Raspberry Pi 4 onboard Bluetooth's UART transport:
+ * the PL011's baud divisor, the search for a Command Complete
  * or Command Status event to fall in step with after the line was reset
  * ("hunting"), the history of the transport's own resets, and the state of
  * the line with its generation.

@@ -1005,26 +1005,33 @@ report_pin_selections(
 	volatile uint8_t *cfg;
 	volatile uint8_t *registers;
 	uint32_t pins;
+	uint32_t state;
 	uint32_t present[SDIO_CFG_SD_PIN_SEL_MASK + 1U];
 	unsigned selection;
 
+	/* Finds the controller's register window and its configuration block. */
 	registers = wifi->registers;
 	cfg = wifi->cfg_registers;
 
 	/* Nothing to learn when the command line is high. */
-	if ((kern_mmio_read32(registers + SDHCI_PRESENT_STATE) & SDHCI_PRESENT_CMD_LEVEL) != 0)
+	state = kern_mmio_read32(registers + SDHCI_PRESENT_STATE);
+	if ((state & SDHCI_PRESENT_CMD_LEVEL) != 0)
 		return;
 
 	/* Reads the lines under each selection. */
 	pins = kern_mmio_read32(cfg + SDIO_CFG_SD_PIN_SEL) & ~SDIO_CFG_SD_PIN_SEL_MASK;
 	for (selection = 0; selection <= SDIO_CFG_SD_PIN_SEL_MASK; selection++) {
 		kern_mmio_write32(cfg + SDIO_CFG_SD_PIN_SEL, pins | selection);
+
+		/* Restarts the clock so the lines settle under this selection. */
 		(void)drv_rpi_sdio_host_set_clock(&wifi->host, DRV_RPI_SDIO_HOST_IDENTIFY_HZ);
 		present[selection] = kern_mmio_read32(registers + SDHCI_PRESENT_STATE);
 	}
 
 	/* Restores the SD pins. */
 	kern_mmio_write32(cfg + SDIO_CFG_SD_PIN_SEL, pins | SDIO_CFG_SD_PIN_SEL_SD);
+
+	/* Restarts the clock so the lines settle on the SD pins again. */
 	(void)drv_rpi_sdio_host_set_clock(&wifi->host, DRV_RPI_SDIO_HOST_IDENTIFY_HZ);
 
 	/* Records the levels. */

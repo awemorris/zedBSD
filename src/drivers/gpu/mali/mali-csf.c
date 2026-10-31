@@ -32,6 +32,9 @@
 #include "drivers/gpu/mali/mali-private.h"
 #include "drivers/gpu/mali/mali-regs.h"
 
+/* How long a register poll sleeps before the next read, in milliseconds (a tick at least). */
+#define MALI_CSF_POLL_MS 1U
+
 /*
  * How long the microcontroller has to announce its start (1 s), and to
  * answer a request (100 ms).
@@ -541,8 +544,8 @@ wait_acknowledged(
 		if (now >= deadline)
 			break;
 
-		/* One tick before the next read. */
-		sched_sleep(now + 1U);
+		/* A millisecond before the next read. */
+		sched_sleep(now + kern_ms_to_ticks(MALI_CSF_POLL_MS));
 	}
 
 	/* Succeeded in waiting, but the firmware did not answer. */

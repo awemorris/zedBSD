@@ -448,7 +448,7 @@ install-admin（set-user-ID root の helper、1 つの仕事だけ）
   - **installer の image での起動は、既定の利用者での起動だが root での起動に相当する**と扱う。live の利用者の全ての process（browser の中の web の内容など遠隔の内容を含む）が root と同じ力を持つ前提で設計し、live の system の中で利用者と root を分ける守りは求めない（J5「インストーラがrootで動くことは一般的であり、セキュリティ上の懸念は存在しません。」）。
   - **installer の image を運用に使ってはいけない**（規則）。運用は、導入の外の目的で live の system を使い続けること（USB の image を常用の system として起動し続ける、installer の image を内蔵の disk に dd して使う、network の service を載せる、利用者の data を置く）。S11 の「閉じる」の後に live の desktop をそのまま使えること（原文）は、その導入の続きとして許す。利用者に示す所（T25）: S1（§4.1）、S11（§4.11）、文書（p013 の `docs/howto/boot-and-storage.md` の installer の節と `docs/reference` の install-admin）。
   - live の session の lock（compositor の 10 分の idle の lock、`userland/desktop/wayland/main.c:33`・`:153-155`）・log out・sleep の後の lock は普通の image と同じ（password `user` で戻れる）。installer の image のための lock の設定は足さない。`sudo`・`su` も base の既定のとおり（`user` は wheel）。
-  - 配布の installer の image は network の login の service を持たない（openssh は package の unit で live の tree に入らない、§11.2。試験の build の hook（J4）は `plan/ws307/tests/` だけ）。password が公開なので、配布の live の tree に sshd などの network の login を足す変更は J5 の前提の見直しとして扱う。
+  - 配布の installer の image は network の login の service を持たない（openssh は package の unit で live の tree に入らない、§11.2。試験の build の hook（J4）は `plan/tools/installer/` だけ）。password が公開なので、配布の live の tree に sshd などの network の login を足す変更は J5 の前提の見直しとして扱う。
 - helper は **password を聞かない**（U26 の回答「インストーラはsetuidのヘルパーを使うので、パスワード認証を不要にします。これは特別なインストーライメージのみです。」）: security.md の「管理者は変更の時に自分の password を入れる」の例外。installer の image の起動は root 起動相当（J5）なので、password 無しの root の操作はその前提で受け入れる。次の確かめは helper が installer の image の外（普通の image・導入先）と他の利用者で動かないための物（live の system の中の守りの境界ではない）:
   - helper は `make installer-image` の live の tree にだけ入れる（§11.1）。普通の image・導入先には無い。
   - file の mode は 4550、所有者 0:0（root、group wheel。wheel は gid 0、`userland/base/etc/group:1`）。wheel の利用者だけが実行できる（3 回目のレビュー #11。`account-admin` は 4555、`userland/base/account-admin/Makefile:8`）。kernel は実行の許可を egid と補助の group で見る（`src/kern/cred.c:122-140`、sessiond は `initgroups` で補助の group を付ける、`userland/desktop/sessiond/session.c:646`）。
@@ -506,7 +506,7 @@ install-admin（set-user-ID root の helper、1 つの仕事だけ）
 - live の image の起動の選び方: 今の native の image は `rootpart=PARTLABEL=zedBSD-root`・`swap0=PARTLABEL=zedBSD-swap`（`platform/amd64/zedbsd-native-uefi.cfg`）で、同じ image を dd した disk が付いていると EEXIST で起動しない（`src/kern/block-identity.c:184-190`）。zedimage-host は今も build ごとに disk と partition の GUID を乱数で作る（`tools/build/zedimage-host.c:749-760`、3 回目のレビュー #17）。違いは cfg がその PARTUUID を名指すこと: installer の image では zedimage-host に PARTUUID を外から渡す（または作った値を出力する）形を足し、その値を `rootpart=PARTUUID=`・`swap0=PARTUUID=` として BOOT の FAT32 の cfg に書く。同じ image の file を 2 台に dd した時の曖昧さは残る（loader の disk を優先する kernel の規則は Future）。
 - root の大きさと zedimage-host の上限（3 回目のレビュー #17）: zedimage-host は image 全体を host の memory に取り（`calloc`）、上限は 16 GiB（`tools/build/zedimage-host.c:27`）、inode は 65536 まで（`:18` の `MAX_INODES`）。root の大きさは「live の tree ＋ `/opt/installer`（全 unit）＋空き」で、2 段で量る（live の tree と unit を作った後に合計を出し、空きを足して image を作る）。上限を越えれば build を失敗させ、量った値を出す。今の image の検査 `platform/amd64/tools/check-amd64-native-image.py:190-202` は今の cfg（PARTLABEL）を前提にするので、p003 で installer の image の形（PARTUUID の cfg）を検査する形を足す。
 - live だけの上書き: `/etc/keiland/autologin`（`user`）だけ。unit（導入先に入る物）には入れない。password・shadow・session の lock は base の既定のまま（J5、§9.1。J1 のための乱数の password と lock をしない設定は J5 で外した）。
-- 試験の build（3 回目のレビュー #4、J4 の回答「許す (推し)」）: live の image には試験の手段が無い（openssh は package で live に入らない、`aat-input`・`keiland-shot` は tests の menu、`login=graphical` は getty の代わりに graphical の login を出す、`userland/base/etc/rc.conf:33-35`）。そこで、`plan/ws307/tests/` の config.mk だけが使う試験の hook（`ZEDBSD_INSTALLER_TEST_EXTRAS` などの変数）で、`network/openssh`・`aat-input`・`keiland-shot` と試験の SSH の鍵（`user` の `authorized_keys`）を **live の tree にだけ** 足す。unit・index・CI・配布の image には入れない（U24 の「tests・X11 無し」は導入先と配布の image に当てる、と J4 で確かめた）。index の hash は試験の build でも同じ（unit が同じなので）。
+- 試験の build（3 回目のレビュー #4、J4 の回答「許す (推し)」）: live の image には試験の手段が無い（openssh は package で live に入らない、`aat-input`・`keiland-shot` は tests の menu、`login=graphical` は getty の代わりに graphical の login を出す、`userland/base/etc/rc.conf:33-35`）。そこで、`plan/tools/installer/` の config.mk だけが使う試験の hook（`ZEDBSD_INSTALLER_TEST_EXTRAS` などの変数）で、`network/openssh`・`aat-input`・`keiland-shot` と試験の SSH の鍵（`user` の `authorized_keys`）を **live の tree にだけ** 足す。unit・index・CI・配布の image には入れない（U24 の「tests・X11 無し」は導入先と配布の image に当てる、と J4 で確かめた）。index の hash は試験の build でも同じ（unit が同じなので）。
 - 起動時に自動で開く（U1 の回答）: compositor の Welcome の自動起動（`userland/desktop/wayland/desktop.c:857-880`）と同じ仕組みで、`/opt/installer/index` がある時に 1 回 `installer` を起動する。Settings の Welcome と重ならないよう、installer がある時は Welcome を出さない。S1 と S11 は「installer の image を運用に使ってはいけない」規則を出す（J5、§4.1・§4.11・§9.1）。
 
 ### 11.3 base の道具に足す物
@@ -521,7 +521,7 @@ install-admin（set-user-ID root の helper、1 つの仕事だけ）
 | 層 | 方法 |
 | --- | --- |
 | host | 計画の組み立て（配置・ESP の自動作成・検査）、index と依存の閉包、ustar＋deflate の展開（path の安全）、`zedbsd.cfg` の生成、diskpart の batch と mkswap の partition の mode の table・codec。host の C の試験 |
-| QEMU の helper | live の image（`make installer-image` を `plan/ws307/tests/` の config.mk の試験の hook で、§11.2）を USB で起動、導入先の空の disk を `guest.py start --qemu-extra` で足す（NVMe `-device nvme`、SATA は q35 の ich9-ahci に `-device ide-hd`、USB `-device usb-storage`）。試験の鍵の SSH で `install-admin` を直に流す（GUI 無し） |
+| QEMU の helper | live の image（`make installer-image` を `plan/tools/installer/` の config.mk の試験の hook で、§11.2）を USB で起動、導入先の空の disk を `guest.py start --qemu-extra` で足す（NVMe `-device nvme`、SATA は q35 の ich9-ahci に `-device ide-hd`、USB `-device usb-storage`）。試験の鍵の SSH で `install-admin` を直に流す（GUI 無し） |
 | QEMU の GUI | AAT（`plan/tools/aat/`、`aat-input`・`keiland-shot`）で S1〜S11 を操作。installer の READY・画面・control の log で操作する。S1・S11 に「運用に使わない」規則の文が出ること（J5） |
 | 導入先の起動 | 導入先の disk の file だけで `plan/tools/boot-test.sh`（`BOOT_MODE=uefi-nvme`）の login prompt。boot-test.sh が login の画面を読めるよう、起動を確かめる導入は S7a の自動 login を切って行う（自動 login が入だと desktop が出て login prompt が無い）。導入先の中の確かめは OpenSSH を選んで入れ、SSH で行う。USB の image を付けたままの起動でも root が導入先になる（PARTUUID） |
 | 共存 | 前もって「他の OS」の GPT（ESP に `\EFI\BOOT\BOOTX64.EFI` と別の file、Basic Data の partition に file）を作った disk に「partition を選ぶ」で入れ、触らない partition の byte の hash が変わらないこと、既存の fallback の loader が残り `\EFI\ZEDBSD\` に置かれること、Boot#### が書かれ OVMF の変数に残ること（p007 の後） |
@@ -531,7 +531,7 @@ install-admin（set-user-ID root の helper、1 つの仕事だけ）
 | 失敗 | 容量の不足、展開の途中のキャンセル、SHA-256 の不一致（壊した unit）、導入先の partition の mount が外れない。S10 の表示と、導入先から起動しないこと |
 | 実機 | Q1 が割り当てる。導入先は空の USB の disk か空の NVMe（ユーザーの判断）。ユーザーの試験の一覧に置く |
 
-- boot-test.sh の UEFI の mode は disk を 1 台しか取らない（`plan/tools/boot-test.sh:316-335`）ので、導入の試験は guest.py の `--qemu-extra` を使う 1 本の script を `plan/ws307/tests/` に作る（配置 → 起動 → 導入 → 回収 → 導入先だけの起動 → 要約）。
+- boot-test.sh の UEFI の mode は disk を 1 台しか取らない（`plan/tools/boot-test.sh:316-335`）ので、導入の試験は guest.py の `--qemu-extra` を使う 1 本の script を `plan/tools/installer/` に作る（配置 → 起動 → 導入 → 回収 → 導入先だけの起動 → 要約）。
 
 ## 13. 範囲外（Future の候補）
 
@@ -640,7 +640,7 @@ install-admin（set-user-ID root の helper、1 つの仕事だけ）
 | J1 | （3 回目のレビュー、U26 の危険）live の利用者の process が helper で画面無しに全ての disk を書ける | A: 受け入れ、理由の文を直す。B: setgid の `_installer` で helper を 4510（弱い）。C: live の password を非公開に（U26 を変える） | 2026-10-28「live の password を非公開に」→ C（推しと違う）。installer の image の live の利用者の password を公開しない。**J5 の回答で取り消し・置き換え**（公開の既定の password、運用に使わない規則、root 起動相当、§9.1） |
 | J2 | （3 回目のレビュー #5）install-admin の置き場 | A: `userland/base` の外へ移す。B: Guardrail の例外 | 2026-10-28「userland/base の外へ移す (推し)」→ A（`userland/desktop/installer/admin/`、§11.1） |
 | J3 | （3 回目のレビュー #7・#15）OS 名の範囲: GPU の protocol の UAPI の識別子・mark の絵・license の記録の文・GitHub の release の asset の名前 | A: 残す（comment だけ、Files の文字は os-release、記録は変えない、asset の名前は保つ） | 2026-10-28「これらも変える」→ 変える（推しと違う）。取得の道（CI・script）も同じ Phase で直し、移行の手順を p002 に（§13a の「J3 の物」） |
-| J4 | （3 回目のレビュー #4）試験だけの config で live の tree に openssh・aat-input・keiland-shot を足すのを U24 の下で許すか | A: 許す（`plan/ws307/tests/` だけ、unit・index・CI には入れない） | 2026-10-28「許す (推し)」→ A（§11.2） |
+| J4 | （3 回目のレビュー #4）試験だけの config で live の tree に openssh・aat-input・keiland-shot を足すのを U24 の下で許すか | A: 許す（`plan/tools/installer/` だけ、unit・index・CI には入れない） | 2026-10-28「許す (推し)」→ A（§11.2） |
 | J5 | （J1 の回答から）live の password を非公開にする方法 | A: build ごとの乱数の password（平文は捨てる）、root は lock、live の session は lock しない、sudo・su は使えない | 2026-10-28「規定値を作ります。非公開である必要はないです。インストーライメージを運用に使ってはいけないというルールにして、このイメージでの起動は規定ユーザでの起動ではあるが、root起動相当、という扱いにします。インストーラがrootで動くことは一般的であり、セキュリティ上の懸念は存在しません。」→ A は採らない。live の password は公開の既定の値（`user`、T24）、J1 は取り消し。installer の image を運用に使ってはいけない規則（S1・S11・文書、T25）、起動は root 起動相当（§9.1、§17.4） |
 
 ## 16. 担当が決めた技術の判断（理由）
@@ -751,7 +751,7 @@ install-admin（set-user-ID root の helper、1 つの仕事だけ）
 | 26 | minor | 共有の ESP の名前の衝突 | §5.4 |
 | 27 | minor | 作成の既定の大きさ | §4.4 |
 
-### 17.3 3 回目（2026-10-28、opus、2ac2eeaad の版に対して。全文 [design-review3.md](design-review3.md)。blocker 1・major 6・minor 10、ユーザーの判断 J1〜J4）
+### 17.3 3 回目（2026-10-28、opus、2ac2eeaad の版に対して。全文は WS307 の完了の前の `plan/ws307/design-review3.md`（git の履歴）。blocker 1・major 6・minor 10、ユーザーの判断 J1〜J4）
 
 | # | 重さ | 要点 | 反映 |
 | --- | --- | --- | --- |

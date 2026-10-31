@@ -53,6 +53,9 @@
 
 #include "intel/commands.h"
 
+/* The longest sleep for the worker's answer before it is looked for again, in milliseconds (a tick at least). */
+#define I915_WORKER_SYNC_WAIT_MS 1U
+
 /*
  * How many session contexts of the render engine can be live at once.
  *
@@ -87,10 +90,10 @@
 
 /*
  * The longest sleep between two looks at the context status buffer, in
- * scheduler ticks.  The engine's interrupt normally ends it; the bound only
+ * milliseconds.  The engine's interrupt normally ends it; the bound only
  * keeps a lost interrupt from costing more than this.
  */
-#define I915_WORKER_WAIT_TICKS		1U
+#define I915_WORKER_WAIT_MS		1U
 
 /* The pause between two polls of the context status buffer when no interrupt handler is attached. */
 #define I915_WORKER_POLL_US		50U
@@ -395,6 +398,7 @@ drv_i915_worker_serve(
 	struct i915_device *device)
 {
 	struct i915_worker *worker;
+	unsigned cpu;
 	int outcome;
 	int error;
 
@@ -414,7 +418,9 @@ drv_i915_worker_serve(
 		return error;
 	}
 
-	kern_logf("i915: resident: GPU node published; serving (RCS0, one request at a time, woken by the engine interrupt) on cpu %u\n", kern_cpu_current());
+	/* Records which CPU serves the node. */
+	cpu = kern_cpu_current();
+	kern_logf("i915: resident: GPU node published; serving (RCS0, one request at a time, woken by the engine interrupt) on cpu %u\n", cpu);
 
 	/* The panel's light as /dev/backlight/backlight0, answered by this loop; the node works without it (a failure is logged). */
 	(void)drv_i915_display_backlight_register(device);
@@ -548,9 +554,9 @@ drv_i915_worker_park(
 			break;
 		}
 
-		/* Sleeps until the worker says something, or a tick. */
+		/* Sleeps until the worker says something, or a millisecond at most. */
 		observed = waitq_sequence(&worker->sync_done);
-		(void)waitq_sleep(&worker->sync_done, &device->irq_lock, observed, now + 1U, 0U);
+		(void)waitq_sleep(&worker->sync_done, &device->irq_lock, observed, now + kern_ms_to_ticks(I915_WORKER_SYNC_WAIT_MS), 0U);
 	}
 
 	spin_unlock_irqrestore(&device->irq_lock, irq);
@@ -1800,8 +1806,8 @@ i915_worker_emit(
  * Waits until a submitted request has ended, or times out.
  *
  * The context status buffer is processed, and between two looks the worker
- * sleeps until the engine's next interrupt, one tick at most.  Without an
- * interrupt handler it polls every 50 microseconds instead.
+ * sleeps until the engine's next interrupt, a millisecond at most.  Without
+ * an interrupt handler it polls every 50 microseconds instead.
  */
 static int
 i915_worker_wait(
@@ -1818,6 +1824,7 @@ i915_worker_wait(
 	uint64_t observed;
 	uint64_t now;
 	uint32_t timeout_ms;
+	unsigned wait_ticks;
 	int completed;
 	int error;
 
@@ -1830,8 +1837,9 @@ i915_worker_wait(
 	if (gt_index == worker->video_index)
 		timeout_ms = I915_WORKER_VIDEO_TIMEOUT_MS;
 
-	/* Looks at the status buffer until the request ends, for at most the timeout. */
+	/* Looks at the status buffer until the request ends, for at most the timeout, sleeping a millisecond at most between looks. */
 	deadline = sched_ticks() + kern_ms_to_ticks(timeout_ms);
+	wait_ticks = (unsigned)kern_ms_to_ticks(I915_WORKER_WAIT_MS);
 	for (;;) {
 		/* Notes the engine interrupts so far before the look, so one during the look is not missed. */
 		observed = drv_i915_irq_engine_sequence(&device->gt.irq);
@@ -1865,14 +1873,14 @@ i915_worker_wait(
 		if (now >= deadline)
 			break;
 
-		/* Sleeps until the engine's next interrupt, or one tick at most. */
-		error = drv_i915_irq_engine_wait(&device->gt.irq, observed, I915_WORKER_WAIT_TICKS);
+		/* Sleeps until the engine's next interrupt, or a millisecond at most. */
+		error = drv_i915_irq_engine_wait(&device->gt.irq, observed, wait_ticks);
 		if (error == 0) {
 			worker->wait_interrupts++;
 			continue;
 		}
 
-		/* The bound ran out: a lost interrupt costs one tick, not the request. */
+		/* The bound ran out: a lost interrupt costs a millisecond, not the request. */
 		if (error == ETIMEDOUT) {
 			worker->wait_timeouts++;
 			continue;

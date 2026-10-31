@@ -603,6 +603,10 @@ font_measure(
 	/* The font's own face, or the fallback when it lacks the glyph. */
 	face_index = font->face;
 	index = truetype_glyph_index(system->faces[face_index].face, code_point);
+
+	/* A no-break space a face lacks is its space (a fallback face would change the line's height). */
+	if (index == 0 && code_point == 0xa0U)
+		index = truetype_glyph_index(system->faces[face_index].face, 0x20U);
 	if (index == 0 && system->faces[TEXT_FACE_FALLBACK].open) {
 		index = truetype_glyph_index(system->faces[TEXT_FACE_FALLBACK].face, code_point);
 		if (index != 0)

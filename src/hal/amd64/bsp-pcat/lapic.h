@@ -19,8 +19,8 @@
 struct amd64_acpi_info;
 
 /*
- * The CPU-local interrupt sources hal_cpu_idle_suspend() quiets on its CPU
- * (ws052-p006): each LVT entry's value before the wait, and whether the
+ * The CPU-local interrupt sources hal_cpu_idle_suspend() quiets on its CPU:
+ * each LVT entry's value before the wait, and whether the
  * entry exists on this local APIC (the thermal and the corrected
  * machine-check entries are optional).  One lives on the stack of the call.
  */
@@ -43,6 +43,7 @@ uint32_t amd64_lapic_id(void);
 void amd64_lapic_eoi(void);
 int amd64_lapic_timer_start(void);
 void amd64_lapic_timer_stop(void);
+void amd64_lapic_timer_tick(hal_cpu_id_t cpu);
 void amd64_lapic_quiet_sources(struct amd64_lapic_quiet *saved);
 void amd64_lapic_restore_sources(const struct amd64_lapic_quiet *saved);
 int amd64_lapic_send_init(uint32_t apic_id);

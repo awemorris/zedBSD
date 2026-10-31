@@ -396,10 +396,11 @@ anchor_function(
 			return error;
 	}
 
-	/* The closing parenthesis. */
-	if (!anchor_at_close(reader))
+	/* The closing parenthesis (the end of the value closes it too). */
+	if (!anchor_at_close(reader) && reader->at < reader->count)
 		return EINVAL;
-	reader->at++;
+	if (reader->at < reader->count)
+		reader->at++;
 
 	/* Succeeded: one anchor function. */
 	return 0;
@@ -703,7 +704,7 @@ css_position_area_parse(
 	return 0;
 }
 
-/* Writes a position-area value in its canonical form. */
+/* Writes a position-area value as it is computed: the logical keywords in their short forms. */
 int
 css_position_area_serialize(
 	int packed,
@@ -780,6 +781,68 @@ both:
 	return anchor_area_append(out, second->name);
 }
 
+/* Writes a position-area value as a declaration sets it: the keywords as given, in their canonical order. */
+int
+css_position_area_serialize_declared(
+	int packed,
+	struct wb_units *out)
+{
+	const struct anchor_area_keyword *first;
+	const struct anchor_area_keyword *second;
+	const struct anchor_area_keyword *swap;
+	const char *a;
+	const char *b;
+
+	/* none, and one keyword. */
+	if (packed < 0)
+		return anchor_area_append(out, "none");
+	first = &anchor_area_keywords[packed % 256];
+	if (packed / 256 == 0)
+		return anchor_area_append(out, first->name);
+	second = &anchor_area_keywords[packed / 256 - 1];
+
+	/* The same keyword twice is one, as are center center and span-all span-all. */
+	if (first == second)
+		return anchor_area_append(out, first->name);
+	if ((first->axis == ANCHOR_AREA_CENTER || first->axis == ANCHOR_AREA_ALL) &&
+	    (second->axis == ANCHOR_AREA_CENTER || second->axis == ANCHOR_AREA_ALL))
+		goto both;
+
+	/* The generic keywords stay as they are, whatever they are paired with. */
+	if (first->axis == ANCHOR_AREA_GENERIC || first->axis == ANCHOR_AREA_SELF_GENERIC ||
+	    second->axis == ANCHOR_AREA_GENERIC || second->axis == ANCHOR_AREA_SELF_GENERIC) {
+		goto both;
+	}
+
+	/* span-all leaves the other keyword alone. */
+	if (first->axis == ANCHOR_AREA_ALL)
+		return anchor_area_append(out, second->name);
+	if (second->axis == ANCHOR_AREA_ALL)
+		return anchor_area_append(out, first->name);
+
+	/* Horizontal before vertical, block before inline (the logical ones in their short forms), center in the missing place. */
+	if (first->axis == ANCHOR_AREA_Y || first->axis == ANCHOR_AREA_INLINE || first->axis == ANCHOR_AREA_SELF_INLINE ||
+	    (first->axis == ANCHOR_AREA_CENTER && (second->axis == ANCHOR_AREA_X || second->axis == ANCHOR_AREA_BLOCK ||
+	    second->axis == ANCHOR_AREA_SELF_BLOCK))) {
+		swap = first;
+		first = second;
+		second = swap;
+	}
+	a = first->name;
+	b = second->name;
+	if (strcmp(a, b) == 0)
+		return anchor_area_append(out, a);
+	if (anchor_area_append(out, a) != 0 || anchor_area_append(out, " ") != 0)
+		return ENOMEM;
+	return anchor_area_append(out, b);
+
+both:
+	/* The two as they are. */
+	if (anchor_area_append(out, first->name) != 0 || anchor_area_append(out, " ") != 0)
+		return ENOMEM;
+	return anchor_area_append(out, second->name);
+}
+
 /*
  * Finds the regions of the 3x3 grid around the anchor a position-area
  * covers, across (x0 to x1) and down (y0 to y1), for a box of a writing
@@ -789,8 +852,10 @@ both:
 int
 css_position_area_regions(
 	int packed,
-	int writing_mode,
-	int direction,
+	int cb_mode,
+	int cb_direction,
+	int self_mode,
+	int self_direction,
 	int *x0,
 	int *x1,
 	int *y0,
@@ -805,6 +870,10 @@ css_position_area_regions(
 	int last;
 	int flip;
 	int across;
+	int self;
+	int writing_mode;
+	int direction;
+	int logical;
 
 	/* The keywords (one alone stands for both axes when it names none). */
 	if (packed < 0)
@@ -830,7 +899,7 @@ css_position_area_regions(
 			if (count == 1) {
 				/* Both axes. */
 				css_position_area_regions(key - anchor_area_keywords + 256 * (int)(key - anchor_area_keywords + 1),
-				    writing_mode, direction, x0, x1, y0, y1);
+				    cb_mode, cb_direction, self_mode, self_direction, x0, x1, y0, y1);
 				if (axis != ANCHOR_AREA_CENTER)
 					return 1;
 				*x0 = *x1 = *y0 = *y1 = 1;
@@ -858,12 +927,30 @@ css_position_area_regions(
 		if (axis == ANCHOR_AREA_SELF_INLINE)
 			axis = ANCHOR_AREA_INLINE;
 
-		/* The physical axis and its direction. */
+		/* The keywords with self use the box's own writing mode and direction, the others the containing block's. */
+		self = strstr(key->name, "self") != NULL;
+		writing_mode = self ? self_mode : cb_mode;
+		direction = self ? self_direction : cb_direction;
+
+		/* sideways-lr (the mode 3) is vertical-lr with its inline axis the other way up. */
+		if (writing_mode == 3) {
+			writing_mode = CSS_WRITING_VERTICAL_LR;
+			direction = direction == CSS_DIRECTION_RTL ? CSS_DIRECTION_LTR : CSS_DIRECTION_RTL;
+		}
+
+		/* The physical axis and its direction (left, right, top and bottom do not turn with the mode). */
+		logical = strstr(key->name, "start") != NULL || strstr(key->name, "end") != NULL;
 		flip = 0;
 		across = axis == ANCHOR_AREA_X;
-		if (axis == ANCHOR_AREA_X)
-			flip = direction == CSS_DIRECTION_RTL && writing_mode == CSS_WRITING_HORIZONTAL_TB && key->name[0] != 'l' &&
-			    key->name[0] != 'r' && strstr(key->name, "left") == NULL && strstr(key->name, "right") == NULL;
+		if (axis == ANCHOR_AREA_X && logical) {
+			/* The x axis is the inline axis of a horizontal mode, the block axis of a vertical one. */
+			flip = writing_mode == CSS_WRITING_HORIZONTAL_TB ? direction == CSS_DIRECTION_RTL :
+			    writing_mode == CSS_WRITING_VERTICAL_RL;
+		}
+		if (axis == ANCHOR_AREA_Y && logical) {
+			/* The y axis is the inline axis of a vertical mode. */
+			flip = writing_mode != CSS_WRITING_HORIZONTAL_TB && direction == CSS_DIRECTION_RTL;
+		}
 		if (axis == ANCHOR_AREA_BLOCK) {
 			across = writing_mode != CSS_WRITING_HORIZONTAL_TB;
 			flip = writing_mode == CSS_WRITING_VERTICAL_RL;
@@ -1236,6 +1323,7 @@ css_anchor_canonical(
 	int shorthand;
 	int fallbacks;
 	int visibility;
+	int area;
 	int order;
 	int error;
 
@@ -1244,7 +1332,8 @@ css_anchor_canonical(
 	shorthand = vm_string_equal_ascii(name, "position-try");
 	fallbacks = vm_string_equal_ascii(name, "position-try-fallbacks");
 	visibility = vm_string_equal_ascii(name, "position-visibility");
-	if (!shorthand && !fallbacks && !visibility)
+	area = vm_string_equal_ascii(name, "position-area");
+	if (!shorthand && !fallbacks && !visibility && !area)
 		return 0;
 
 	/* The value's tokens. */
@@ -1259,6 +1348,15 @@ css_anchor_canonical(
 		count--;
 	parse.heap = heap;
 	parse.arena = &arena;
+
+	/* position-area. */
+	if (area) {
+		if (css_position_area_parse(tokens, count, &order) == 0) {
+			error = css_position_area_serialize_declared(order, out);
+			*handled = error == 0;
+		}
+		goto cleanup;
+	}
 
 	/* position-visibility. */
 	if (visibility) {

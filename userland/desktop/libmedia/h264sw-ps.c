@@ -145,14 +145,14 @@ static const struct ps_level_limit ps_level_limits[] = {
 
 /* Static function declarations. */
 static int ps_profile_taken(const struct h264sw_sps *sps);
-static int ps_read_scaling_list(struct h264sw_bits *bits, uint8_t *list, unsigned size, const uint8_t *default_list, unsigned *state);
+static int ps_read_scaling_list(struct vcodec_bitreader *bits, uint8_t *list, unsigned size, const uint8_t *default_list, unsigned *state);
 static void ps_fallback_rule_a(unsigned index, uint8_t list4x4[6][16], uint8_t list8x8[2][64]);
-static int ps_read_scaling_matrix(struct h264sw_bits *bits, unsigned count, unsigned state[8], uint8_t list4x4[6][16], uint8_t list8x8[2][64], int apply_fallback);
-static int ps_read_sps_profile(struct h264sw_bits *bits, struct h264sw_sps *sps, int *unsupported);
-static int ps_read_sps_order(struct h264sw_bits *bits, struct h264sw_sps *sps);
-static int ps_read_sps_size(struct h264sw_bits *bits, struct h264sw_sps *sps, int *unsupported);
-static int ps_read_hrd(struct h264sw_bits *bits);
-static int ps_read_vui(struct h264sw_bits *bits, struct h264sw_sps *sps);
+static int ps_read_scaling_matrix(struct vcodec_bitreader *bits, unsigned count, unsigned state[8], uint8_t list4x4[6][16], uint8_t list8x8[2][64], int apply_fallback);
+static int ps_read_sps_profile(struct vcodec_bitreader *bits, struct h264sw_sps *sps, int *unsupported);
+static int ps_read_sps_order(struct vcodec_bitreader *bits, struct h264sw_sps *sps);
+static int ps_read_sps_size(struct vcodec_bitreader *bits, struct h264sw_sps *sps, int *unsupported);
+static int ps_read_hrd(struct vcodec_bitreader *bits);
+static int ps_read_vui(struct vcodec_bitreader *bits, struct h264sw_sps *sps);
 static void ps_vui_reset(struct h264sw_sps *sps);
 static unsigned ps_max_dpb_mbs(const struct h264sw_sps *sps);
 static unsigned ps_dpb_frames(const struct h264sw_sps *sps);
@@ -195,7 +195,7 @@ h264sw_ps_init(
 int
 h264sw_ps_read_sps(
 	struct h264sw_ps_store *store,
-	struct h264sw_bits *bits)
+	struct vcodec_bitreader *bits)
 {
 	struct h264sw_sps sps;
 	int unsupported;
@@ -233,7 +233,7 @@ h264sw_ps_read_sps(
 		return error;
 
 	/* Reads vui_parameters_present_flag, which ends the part that cannot be dropped. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -252,7 +252,7 @@ h264sw_ps_read_sps(
 	/* Checks the trailing bits; after a dropped VUI the position is not trustworthy, so they are not checked. */
 	if (flag == 0U ||
 	    vui_ok != 0) {
-		error = h264sw_bits_trailing(bits);
+		error = vcodec_bitreader_trailing(bits);
 		if (error != 0)
 			return EINVAL;
 	}
@@ -289,7 +289,7 @@ h264sw_ps_read_sps(
 int
 h264sw_ps_read_pps(
 	struct h264sw_ps_store *store,
-	struct h264sw_bits *bits)
+	struct vcodec_bitreader *bits)
 {
 	struct h264sw_pps pps;
 	uint32_t id;
@@ -311,11 +311,11 @@ h264sw_ps_read_pps(
 	memset(&pps, 0, sizeof(pps));
 
 	/* Reads the two ids, the entropy coding mode and the bottom field order flag. */
-	id = h264sw_bits_ue(bits);
-	sps_id = h264sw_bits_ue(bits);
-	pps.cabac = (int)h264sw_bits_u1(bits);
-	pps.bottom_field_poc_present = (int)h264sw_bits_u1(bits);
-	slice_groups = h264sw_bits_ue(bits);
+	id = vcodec_bitreader_ue(bits);
+	sps_id = vcodec_bitreader_ue(bits);
+	pps.cabac = (int)vcodec_bitreader_u1(bits);
+	pps.bottom_field_poc_present = (int)vcodec_bitreader_u1(bits);
+	slice_groups = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -331,44 +331,44 @@ h264sw_ps_read_pps(
 		return ENOTSUP;
 
 	/* Reads the default reference list lengths of both lists. */
-	count = h264sw_bits_ue(bits);
+	count = vcodec_bitreader_ue(bits);
 	if (count > PS_MAX_REF_IDX_DEFAULT_MINUS1)
 		return EINVAL;
 	pps.num_ref_idx_default[0] = count + 1U;
-	count = h264sw_bits_ue(bits);
+	count = vcodec_bitreader_ue(bits);
 	if (count > PS_MAX_REF_IDX_DEFAULT_MINUS1)
 		return EINVAL;
 	pps.num_ref_idx_default[1] = count + 1U;
 
 	/* Reads the weighted prediction modes. */
-	pps.weighted_pred = (int)h264sw_bits_u1(bits);
-	value = h264sw_bits_u(bits, 2U);
+	pps.weighted_pred = (int)vcodec_bitreader_u1(bits);
+	value = vcodec_bitreader_u(bits, 2U);
 	if (value > PS_MAX_BIPRED_IDC)
 		return EINVAL;
 	pps.weighted_bipred_idc = value;
 
 	/* Reads the initial quantization parameter, and skips the one for SP and SI slices after checking it. */
-	signed_value = h264sw_bits_se(bits);
+	signed_value = vcodec_bitreader_se(bits);
 	if (signed_value < PS_MIN_QP_DELTA ||
 	    signed_value > PS_MAX_QP_DELTA)
 		return EINVAL;
 	pps.pic_init_qp = 26 + (int)signed_value;
-	signed_value = h264sw_bits_se(bits);
+	signed_value = vcodec_bitreader_se(bits);
 	if (signed_value < PS_MIN_QP_DELTA ||
 	    signed_value > PS_MAX_QP_DELTA)
 		return EINVAL;
 
 	/* Reads the chroma quantization offset of the Cb component. */
-	signed_value = h264sw_bits_se(bits);
+	signed_value = vcodec_bitreader_se(bits);
 	if (signed_value < PS_MIN_CHROMA_OFFSET ||
 	    signed_value > PS_MAX_CHROMA_OFFSET)
 		return EINVAL;
 	pps.chroma_qp_offset = (int)signed_value;
 
 	/* Reads the three flags that change how slices are decoded. */
-	pps.deblocking_control_present = (int)h264sw_bits_u1(bits);
-	pps.constrained_intra_pred = (int)h264sw_bits_u1(bits);
-	pps.redundant_pic_cnt_present = (int)h264sw_bits_u1(bits);
+	pps.deblocking_control_present = (int)vcodec_bitreader_u1(bits);
+	pps.constrained_intra_pred = (int)vcodec_bitreader_u1(bits);
+	pps.redundant_pic_cnt_present = (int)vcodec_bitreader_u1(bits);
 
 	/* A read that ran past the end of the RBSP is a truncated set. */
 	if (bits->error != 0)
@@ -378,10 +378,10 @@ h264sw_ps_read_pps(
 	pps.second_chroma_qp_offset = pps.chroma_qp_offset;
 
 	/* Reads the fields only the High profile sends, which are present when more data follows. */
-	more = h264sw_bits_more_rbsp_data(bits);
+	more = vcodec_bitreader_more_rbsp_data(bits);
 	if (more != 0) {
-		pps.transform_8x8_mode = (int)h264sw_bits_u1(bits);
-		pps.scaling_matrix_present = (int)h264sw_bits_u1(bits);
+		pps.transform_8x8_mode = (int)vcodec_bitreader_u1(bits);
+		pps.scaling_matrix_present = (int)vcodec_bitreader_u1(bits);
 		if (bits->error != 0)
 			return EINVAL;
 
@@ -394,7 +394,7 @@ h264sw_ps_read_pps(
 		}
 
 		/* Reads the chroma quantization offset of the Cr component. */
-		signed_value = h264sw_bits_se(bits);
+		signed_value = vcodec_bitreader_se(bits);
 		if (bits->error != 0)
 			return EINVAL;
 		if (signed_value < PS_MIN_CHROMA_OFFSET ||
@@ -404,7 +404,7 @@ h264sw_ps_read_pps(
 	}
 
 	/* Checks the trailing bits. */
-	error = h264sw_bits_trailing(bits);
+	error = vcodec_bitreader_trailing(bits);
 	if (error != 0)
 		return EINVAL;
 
@@ -534,7 +534,7 @@ ps_profile_taken(
  */
 static int
 ps_read_scaling_list(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	uint8_t *list,
 	unsigned size,
 	const uint8_t *default_list,
@@ -554,7 +554,7 @@ ps_read_scaling_list(
 	/* Reads the entries; once nextScale is 0 the last value repeats to the end of the list. */
 	for (index = 0U; index < size; index++) {
 		if (next_scale != 0U) {
-			delta_scale = h264sw_bits_se(bits);
+			delta_scale = vcodec_bitreader_se(bits);
 			if (bits->error != 0)
 				return EINVAL;
 			if (delta_scale < PS_MIN_DELTA_SCALE ||
@@ -576,6 +576,8 @@ ps_read_scaling_list(
 		} else {
 			list[index] = (uint8_t)next_scale;
 		}
+
+		/* The entry just kept is the base of the next delta. */
 		last_scale = list[index];
 	}
 
@@ -634,7 +636,7 @@ ps_fallback_rule_a(
  */
 static int
 ps_read_scaling_matrix(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	unsigned count,
 	unsigned state[8],
 	uint8_t list4x4[6][16],
@@ -647,7 +649,7 @@ ps_read_scaling_matrix(
 
 	/* Reads the presence flag of each list and the list itself when it is present. */
 	for (index = 0U; index < count; index++) {
-		present = h264sw_bits_u1(bits);
+		present = vcodec_bitreader_u1(bits);
 		if (bits->error != 0)
 			return EINVAL;
 
@@ -681,7 +683,7 @@ ps_read_scaling_matrix(
  */
 static int
 ps_read_sps_profile(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	struct h264sw_sps *sps,
 	int *unsupported)
 {
@@ -693,19 +695,19 @@ ps_read_sps_profile(
 	int error;
 
 	/* Reads profile_idc. */
-	sps->profile_idc = h264sw_bits_u(bits, 8U);
+	sps->profile_idc = vcodec_bitreader_u(bits, 8U);
 
 	/* Reads constraint_set0..5_flag; bit n of constraint_flags is constraint_setn_flag. */
 	sps->constraint_flags = 0U;
 	for (index = 0U; index < 6U; index++) {
-		flag = h264sw_bits_u1(bits);
+		flag = vcodec_bitreader_u1(bits);
 		sps->constraint_flags |= (unsigned)flag << index;
 	}
 
 	/* Skips reserved_zero_2bits, which decoders ignore, and reads level_idc and the id. */
-	h264sw_bits_skip(bits, 2U);
-	sps->level_idc = h264sw_bits_u(bits, 8U);
-	value = h264sw_bits_ue(bits);
+	vcodec_bitreader_skip(bits, 2U);
+	sps->level_idc = vcodec_bitreader_u(bits, 8U);
+	value = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -727,7 +729,7 @@ ps_read_sps_profile(
 		return 0;
 
 	/* Reads chroma_format_idc, which must be 4:2:0 for this decoder. */
-	value = h264sw_bits_ue(bits);
+	value = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (value > PS_MAX_CHROMA_FORMAT_IDC)
@@ -738,24 +740,24 @@ ps_read_sps_profile(
 		*unsupported = 1;
 
 	/* Reads the luma and chroma bit depths, which must be 8 bits. */
-	value = h264sw_bits_ue(bits);
+	value = vcodec_bitreader_ue(bits);
 	if (value > PS_MAX_BIT_DEPTH_MINUS8)
 		return EINVAL;
 	if (value != 0U)
 		*unsupported = 1;
-	value = h264sw_bits_ue(bits);
+	value = vcodec_bitreader_ue(bits);
 	if (value > PS_MAX_BIT_DEPTH_MINUS8)
 		return EINVAL;
 	if (value != 0U)
 		*unsupported = 1;
 
 	/* Reads qpprime_y_zero_transform_bypass_flag, whose lossless coding is not decoded. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (flag != 0U)
 		*unsupported = 1;
 
 	/* Reads seq_scaling_matrix_present_flag. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	sps->scaling_matrix_present = (int)flag;
@@ -780,7 +782,7 @@ ps_read_sps_profile(
  */
 static int
 ps_read_sps_order(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	struct h264sw_sps *sps)
 {
 	uint32_t value;
@@ -789,7 +791,7 @@ ps_read_sps_order(
 	int32_t offset;
 
 	/* Reads log2_max_frame_num_minus4 and derives MaxFrameNum (7-10). */
-	value = h264sw_bits_ue(bits);
+	value = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (value > PS_MAX_LOG2_MINUS4)
@@ -798,7 +800,7 @@ ps_read_sps_order(
 	sps->max_frame_num = (uint32_t)1U << sps->log2_max_frame_num;
 
 	/* Reads pic_order_cnt_type. */
-	value = h264sw_bits_ue(bits);
+	value = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (value > PS_MAX_POC_TYPE)
@@ -807,12 +809,14 @@ ps_read_sps_order(
 
 	/* Type 0 sends the length of the order count's least significant bits. */
 	if (sps->poc_type == 0U) {
-		value = h264sw_bits_ue(bits);
+		value = vcodec_bitreader_ue(bits);
 		if (bits->error != 0)
 			return EINVAL;
 		if (value > PS_MAX_LOG2_MINUS4)
 			return EINVAL;
 		sps->log2_max_poc_lsb = value + 4U;
+
+		/* Succeeded: type 0 has no further fields. */
 		return 0;
 	}
 
@@ -821,11 +825,11 @@ ps_read_sps_order(
 		return 0;
 
 	/* Type 1 sends the two offsets, the cycle length and the offsets of one cycle. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	sps->delta_pic_order_always_zero = (int)flag;
-	sps->offset_for_non_ref_pic = h264sw_bits_se(bits);
-	sps->offset_for_top_to_bottom_field = h264sw_bits_se(bits);
-	value = h264sw_bits_ue(bits);
+	sps->offset_for_non_ref_pic = vcodec_bitreader_se(bits);
+	sps->offset_for_top_to_bottom_field = vcodec_bitreader_se(bits);
+	value = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (value > H264SW_MAX_POC_CYCLE)
@@ -835,10 +839,12 @@ ps_read_sps_order(
 	/* Reads the offset of each reference frame of the cycle and adds them up (7-12). */
 	sps->expected_delta_per_poc_cycle = 0;
 	for (index = 0U; index < sps->poc_cycle_length; index++) {
-		offset = h264sw_bits_se(bits);
+		offset = vcodec_bitreader_se(bits);
 		sps->offset_for_ref_frame[index] = offset;
 		sps->expected_delta_per_poc_cycle += (int64_t)offset;
 	}
+
+	/* A read that ran past the end of the RBSP is a truncated set. */
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -855,7 +861,7 @@ ps_read_sps_order(
  */
 static int
 ps_read_sps_size(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	struct h264sw_sps *sps,
 	int *unsupported)
 {
@@ -872,7 +878,7 @@ ps_read_sps_size(
 	unsigned crop_unit_y;
 
 	/* Reads max_num_ref_frames, which cannot exceed the 16 frames a decoded picture buffer holds. */
-	value = h264sw_bits_ue(bits);
+	value = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (value > H264SW_MAX_REF_FRAMES)
@@ -880,17 +886,17 @@ ps_read_sps_size(
 	sps->max_num_ref_frames = value;
 
 	/* Reads gaps_in_frame_num_value_allowed_flag. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	sps->gaps_allowed = (int)flag;
 
 	/* Reads the picture width and the height in map units, in 64 bits so the largest codes cannot overflow. */
-	value = h264sw_bits_ue(bits);
+	value = vcodec_bitreader_ue(bits);
 	width_mbs = (uint64_t)value + 1U;
-	value = h264sw_bits_ue(bits);
+	value = vcodec_bitreader_ue(bits);
 	height_mbs = (uint64_t)value + 1U;
 
 	/* Reads frame_mbs_only_flag; interlaced coding is outside the decoder, and its frame height is twice the map unit height (7-18). */
-	frame_mbs_only = h264sw_bits_u1(bits);
+	frame_mbs_only = vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	crop_unit_y = 2U;
@@ -900,11 +906,11 @@ ps_read_sps_size(
 		crop_unit_y = 4U;
 
 		/* Reads mb_adaptive_frame_field_flag, which is not used. */
-		flag = h264sw_bits_u1(bits);
+		flag = vcodec_bitreader_u1(bits);
 	}
 
 	/* Reads direct_8x8_inference_flag, which must be 1 when frames and fields can both occur. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (frame_mbs_only == 0U &&
@@ -928,17 +934,17 @@ ps_read_sps_size(
 	}
 
 	/* Reads frame_cropping_flag. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (flag == 0U)
 		return 0;
 
 	/* Reads the four crop offsets, each in units of 2 luma columns or crop_unit_y luma rows. */
-	crop_left = h264sw_bits_ue(bits);
-	crop_right = h264sw_bits_ue(bits);
-	crop_top = h264sw_bits_ue(bits);
-	crop_bottom = h264sw_bits_ue(bits);
+	crop_left = vcodec_bitreader_ue(bits);
+	crop_right = vcodec_bitreader_ue(bits);
+	crop_top = vcodec_bitreader_ue(bits);
+	crop_bottom = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -963,32 +969,32 @@ ps_read_sps_size(
  */
 static int
 ps_read_hrd(
-	struct h264sw_bits *bits)
+	struct vcodec_bitreader *bits)
 {
 	uint32_t count;
 	unsigned index;
 
 	/* Reads cpb_cnt_minus1, which bounds the loop below. */
-	count = h264sw_bits_ue(bits);
+	count = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (count > PS_MAX_CPB_CNT_MINUS1)
 		return EINVAL;
 
 	/* Skips bit_rate_scale and cpb_size_scale. */
-	h264sw_bits_skip(bits, 8U);
+	vcodec_bitreader_skip(bits, 8U);
 
 	/* Skips the bit rate, the size and the constant bit rate flag of each CPB. */
 	for (index = 0U; index <= count; index++) {
-		(void)h264sw_bits_ue(bits);
-		(void)h264sw_bits_ue(bits);
-		h264sw_bits_skip(bits, 1U);
+		(void)vcodec_bitreader_ue(bits);
+		(void)vcodec_bitreader_ue(bits);
+		vcodec_bitreader_skip(bits, 1U);
 		if (bits->error != 0)
 			return EINVAL;
 	}
 
 	/* Skips the four 5-bit length fields. */
-	h264sw_bits_skip(bits, 20U);
+	vcodec_bitreader_skip(bits, 20U);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -1004,7 +1010,7 @@ ps_read_hrd(
  */
 static int
 ps_read_vui(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	struct h264sw_sps *sps)
 {
 	uint32_t flag;
@@ -1018,12 +1024,12 @@ ps_read_vui(
 	int error;
 
 	/* Reads aspect_ratio_info_present_flag and the sample aspect ratio it announces. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (flag != 0U) {
-		value = h264sw_bits_u(bits, 8U);
+		value = vcodec_bitreader_u(bits, 8U);
 		if (value == PS_EXTENDED_SAR) {
-			sar_width = h264sw_bits_u(bits, 16U);
-			sar_height = h264sw_bits_u(bits, 16U);
+			sar_width = vcodec_bitreader_u(bits, 16U);
+			sar_height = vcodec_bitreader_u(bits, 16U);
 
 			/* A ratio with a zero side is unspecified. */
 			if (sar_width != 0U &&
@@ -1041,42 +1047,42 @@ ps_read_vui(
 	}
 
 	/* Skips overscan_info_present_flag and overscan_appropriate_flag. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (flag != 0U)
-		h264sw_bits_skip(bits, 1U);
+		vcodec_bitreader_skip(bits, 1U);
 
 	/* Reads video_signal_type_present_flag, video_format, video_full_range_flag and the colour description. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (flag != 0U) {
 		sps->signal_present = 1;
-		h264sw_bits_skip(bits, 3U);
-		value = h264sw_bits_u1(bits);
+		vcodec_bitreader_skip(bits, 3U);
+		value = vcodec_bitreader_u1(bits);
 		sps->full_range = (int)value;
-		value = h264sw_bits_u1(bits);
+		value = vcodec_bitreader_u1(bits);
 		if (value != 0U) {
 			sps->colour_present = 1;
-			h264sw_bits_skip(bits, 16U);
-			sps->matrix_coefficients = h264sw_bits_u(bits, 8U);
+			vcodec_bitreader_skip(bits, 16U);
+			sps->matrix_coefficients = vcodec_bitreader_u(bits, 8U);
 		}
 	}
 
 	/* Reads chroma_loc_info_present_flag and checks the two location types. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (flag != 0U) {
-		value = h264sw_bits_ue(bits);
+		value = vcodec_bitreader_ue(bits);
 		if (value > PS_MAX_CHROMA_LOC_TYPE)
 			return EINVAL;
-		value = h264sw_bits_ue(bits);
+		value = vcodec_bitreader_ue(bits);
 		if (value > PS_MAX_CHROMA_LOC_TYPE)
 			return EINVAL;
 	}
 
 	/* Reads timing_info_present_flag; both the tick and the scale must be positive. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (flag != 0U) {
-		units = h264sw_bits_u(bits, 32U);
-		scale = h264sw_bits_u(bits, 32U);
-		h264sw_bits_skip(bits, 1U);
+		units = vcodec_bitreader_u(bits, 32U);
+		scale = vcodec_bitreader_u(bits, 32U);
+		vcodec_bitreader_skip(bits, 1U);
 		if (bits->error != 0)
 			return EINVAL;
 		if (units == 0U ||
@@ -1085,7 +1091,7 @@ ps_read_vui(
 	}
 
 	/* Reads the presence of the NAL HRD parameters and skips them. */
-	nal_hrd = h264sw_bits_u1(bits);
+	nal_hrd = vcodec_bitreader_u1(bits);
 	if (nal_hrd != 0U) {
 		error = ps_read_hrd(bits);
 		if (error != 0)
@@ -1093,7 +1099,7 @@ ps_read_vui(
 	}
 
 	/* Reads the presence of the VCL HRD parameters and skips them. */
-	vcl_hrd = h264sw_bits_u1(bits);
+	vcl_hrd = vcodec_bitreader_u1(bits);
 	if (vcl_hrd != 0U) {
 		error = ps_read_hrd(bits);
 		if (error != 0)
@@ -1103,32 +1109,32 @@ ps_read_vui(
 	/* Skips low_delay_hrd_flag, present with either HRD, and pic_struct_present_flag. */
 	if (nal_hrd != 0U ||
 	    vcl_hrd != 0U)
-		h264sw_bits_skip(bits, 1U);
-	h264sw_bits_skip(bits, 1U);
+		vcodec_bitreader_skip(bits, 1U);
+	vcodec_bitreader_skip(bits, 1U);
 
 	/* Reads bitstream_restriction_flag and the restrictions it announces. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (flag != 0U) {
 		/* Skips motion_vectors_over_pic_boundaries_flag and checks the four limits that have a range. */
-		h264sw_bits_skip(bits, 1U);
-		value = h264sw_bits_ue(bits);
+		vcodec_bitreader_skip(bits, 1U);
+		value = vcodec_bitreader_ue(bits);
 		if (value > PS_MAX_BYTES_PER_PIC_DENOM)
 			return EINVAL;
-		value = h264sw_bits_ue(bits);
+		value = vcodec_bitreader_ue(bits);
 		if (value > PS_MAX_BITS_PER_MB_DENOM)
 			return EINVAL;
-		value = h264sw_bits_ue(bits);
+		value = vcodec_bitreader_ue(bits);
 		if (value > PS_MAX_LOG2_MV_LENGTH)
 			return EINVAL;
-		value = h264sw_bits_ue(bits);
+		value = vcodec_bitreader_ue(bits);
 		if (value > PS_MAX_LOG2_MV_LENGTH)
 			return EINVAL;
 
 		/* Reads the reorder depth and the buffer size, which are limited by each other and by the 16 frames a buffer holds. */
-		sps->max_num_reorder_frames = h264sw_bits_ue(bits);
-		sps->max_dec_frame_buffering = h264sw_bits_ue(bits);
+		sps->max_num_reorder_frames = vcodec_bitreader_ue(bits);
+		sps->max_dec_frame_buffering = vcodec_bitreader_ue(bits);
 		if (bits->error != 0)
 			return EINVAL;
 		if (sps->max_dec_frame_buffering > H264SW_MAX_DPB_FRAMES)

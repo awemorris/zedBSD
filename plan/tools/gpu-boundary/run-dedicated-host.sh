@@ -17,7 +17,7 @@ for mode in ordinary sanitize; do
         extra='-fsanitize=address,undefined -fno-omit-frame-pointer -no-pie'
     fi
     cc -std=c99 -D_GNU_SOURCE -Wall -Wextra -Werror $extra \
-        -I"$work/include" -I"$repo/include" -I"$repo/userland/desktop/libvulkan" \
+        -I"$work/include" -I"$repo/include" -I"$repo" -I"$repo/userland/desktop/libvulkan" \
         "$repo/plan/tools/gpu-boundary/dedicated-host.c" "$repo/userland/desktop/libvulkan/dedicated.c" \
         -pthread -o "$work/$mode"
     echo "== $mode"

@@ -38,16 +38,30 @@ vulkan_dedicated_check(
 {
 	int format_matches;
 
-	/* The capability itself is a linear image that may be sampled. */
-	if (described->tiling != GPU_IMAGE_LINEAR)
-		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+	/* The capability itself is an image that may be sampled. */
 	if ((described->usage & VK_IMAGE_USAGE_SAMPLED_BIT) == 0U)
 		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
 
-	/* The image is one linear 2D layer with one level and one sample, as the capability is. */
+	/*
+	 * A linear capability is read by a linear image; one of another layout
+	 * by an optimal image placed in that same layout (its creation's
+	 * VkImageLayoutZEDBSD) with the described uses, which the placement
+	 * depends on.
+	 */
+	if (described->tiling == GPU_IMAGE_LINEAR) {
+		if (image->tiling != VK_IMAGE_TILING_LINEAR || image->layout_tiling != 0U)
+			return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+	} else {
+		if (image->tiling != VK_IMAGE_TILING_OPTIMAL)
+			return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+		if (image->layout_tiling != described->tiling || image->layout_parameter != described->layout_parameter)
+			return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+		if (image->usage != described->usage)
+			return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+	}
+
+	/* The image is one 2D layer with one level and one sample, as the capability is. */
 	if (image->type != VK_IMAGE_TYPE_2D)
-		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
-	if (image->tiling != VK_IMAGE_TILING_LINEAR)
 		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
 	if (image->mip_levels != 1U)
 		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
@@ -92,10 +106,10 @@ vulkan_dedicated_check(
 	if (requirements->size > described->allocation_bytes)
 		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
 
-	/* The image's rows lie where the capability's rows are. */
-	if (layout->offset != described->offset)
+	/* A linear image's rows lie where the capability's rows are (another layout is placed by its record). */
+	if (described->tiling == GPU_IMAGE_LINEAR && layout->offset != described->offset)
 		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
-	if (layout->rowPitch != described->stride)
+	if (described->tiling == GPU_IMAGE_LINEAR && layout->rowPitch != described->stride)
 		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
 
 	/* Succeeded: the image reads the allocation as the kernel describes it. */

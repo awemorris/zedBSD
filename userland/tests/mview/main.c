@@ -77,6 +77,9 @@ struct main_options {
 	/* How many submissions draw a frame (--submits, one by default). */
 	uint32_t submits;
 
+	/* How many frames may be in flight (--inflight, one by default). */
+	uint32_t inflight;
+
 	/* Nonzero when every triangle is culled (--cull=all), for measuring the vertex work alone. */
 	int cull_all;
 
@@ -162,7 +165,7 @@ main(
 	/* Argument failure starts no connection or GPU namespace. */
 	status = options_parse(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: mview [--display=NAME] [--model=DIR] [--token=NAME] [--frames=N] [--timeout-s=N] [--spin=SECONDS] [--shading=vertex|pixel] [--windowed] [--size=WxH] [--content=none|video|game] [--present=fifo|mailbox|immediate] [--copies=N] [--draws=instanced|each] [--submits=N] [--cull=all] [--images=N]\n");
+		fprintf(stderr, "usage: mview [--display=NAME] [--model=DIR] [--token=NAME] [--frames=N] [--timeout-s=N] [--spin=SECONDS] [--shading=vertex|pixel] [--windowed] [--size=WxH] [--content=none|video|game] [--present=fifo|mailbox|immediate] [--copies=N] [--draws=instanced|each] [--submits=N] [--inflight=N] [--cull=all] [--images=N]\n");
 		return 2;
 	}
 
@@ -207,7 +210,7 @@ main(
 
 	/* Creates renderer ownership only after the native surface is configured. */
 	result = mview_renderer_open(&renderer, &window, options.pixel_shading, options.present, options.copies, options.each_draw, options.submits,
-				     options.cull_all, options.images);
+				     options.inflight, options.cull_all, options.images);
 	operation = renderer.operation;
 	if (result != VK_SUCCESS) {
 		status = -1;
@@ -216,7 +219,7 @@ main(
 
 	/* The presentation mode the swapchain took, the copies drawn and the content said (for the harness). */
 	printf(
-		"MVIEW PRESENT run=%s asked=%s mode=%s format=%u images=%u copies=%u draws=%s submits=%u content=%u content_manager=%d\n",
+		"MVIEW PRESENT run=%s asked=%s mode=%s format=%u images=%u copies=%u draws=%s submits=%u inflight=%u content=%u content_manager=%d\n",
 		options.token,
 		main_present_name(options.present),
 		main_present_name(renderer.present_mode),
@@ -225,6 +228,7 @@ main(
 		options.copies,
 		options.each_draw != 0 ? "each" : "instanced",
 		options.submits,
+		options.inflight,
 		options.content,
 		window.content_manager != NULL ? 1 : 0);
 	fflush(stdout);
@@ -448,6 +452,7 @@ options_parse(
 	options->present = VK_PRESENT_MODE_FIFO_KHR;
 	options->copies = 1U;
 	options->submits = 1U;
+	options->inflight = 1U;
 
 	/* Applies each explicit option in command-line order. */
 	for (index = 1; index < argc; index++) {
@@ -583,6 +588,17 @@ options_parse(
 		match = strcmp(argv[index], "--cull=all");
 		if (match == 0) {
 			options->cull_all = 1;
+			continue;
+		}
+
+		/* The frames in flight, one or two. */
+		match = strncmp(argv[index], "--inflight=", 11U);
+		if (match == 0) {
+			status = option_number(argv[index] + 11U, MVIEW_INFLIGHT_MAX, &options->inflight);
+			if (status != 0)
+				return -1;
+			if (options->inflight == 0U)
+				return -1;
 			continue;
 		}
 

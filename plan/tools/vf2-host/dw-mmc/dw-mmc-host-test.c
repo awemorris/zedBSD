@@ -428,11 +428,17 @@ run_command(
 	raise(S_CD | S_RTO);
 }
 
+/* The driver's preemption nesting, and the FIFO words it moved with preemption on (it must move none). */
+static int preempt_depth;
+static int fifo_preemptible;
+
 /* Takes one word written to the FIFO. */
 static void
 fifo_write(
 	uint32_t value)
 {
+	if (preempt_depth <= 0)
+		fifo_preemptible++;
 	if (!card.writing || card.position >= card.length)
 		return;
 	memcpy(card.buffer + card.position, &value, 4);
@@ -451,6 +457,8 @@ fifo_read(
 	uint32_t value;
 
 	value = 0;
+	if (preempt_depth <= 0)
+		fifo_preemptible++;
 	if (!card.reading || card.position >= card.length)
 		return value;
 	memcpy(&value, card.buffer + card.position, 4);
@@ -615,6 +623,8 @@ struct disk *disk_alloc(void) { return calloc(1, sizeof(struct disk)); }
 int disk_create(struct disk *disk) { (void)disk; return 0; }
 void disk_set_stats_kind(struct disk *disk, uint32_t kind) { (void)disk; (void)kind; }
 void bio_complete(struct bio *bio, int error, size_t transferred) { (void)bio; completed_error = error; completed_bytes = transferred; }
+void kern_preempt_disable(void) { preempt_depth++; }
+void kern_preempt_enable(void) { preempt_depth--; }
 void kern_logf(const char *format, ...) { va_list ap; va_start(ap, format); printf("  log: "); vprintf(format, ap); va_end(ap); }
 
 /* Builds a 128-bit register from fields: sets width bits at start. */
@@ -1047,8 +1057,8 @@ check_glue(
 	check(sequence_is(0, bring_up, sizeof(bring_up) / sizeof(bring_up[0])), "glue: bring-up sequence");
 	error = drv_dw_mmc_card_info(0, &info);
 	check(error == 0 && info.fifo_depth == 32U && info.bus_width == 4U && info.high_speed &&
-	      info.card_clock == 49500000ULL,
-	      "glue: fifo-depth 32, bus-width 4, cap-sd-highspeed from the tree, 49.5 MHz");
+	      info.card_clock == 24750000ULL,
+	      "glue: fifo-depth 32, bus-width 4, cap-sd-highspeed from the tree, held to 24.75 MHz");
 	check(card.divider_count == 3 && card.dividers[0] == 62U, "glue: identification at 399 kHz");
 
 	/* A card whose CSD lacks the switch class stays at the default speed (unit 1, without the glue). */
@@ -1215,6 +1225,7 @@ main(
 		return 2;
 	}
 
+	check(fifo_preemptible == 0 && preempt_depth == 0, "the FIFO is served with preemption off, and it is put back on");
 	printf("%s: %d failure(s)\n", failures == 0 ? "OK" : "FAILED", failures);
 	return failures == 0 ? 0 : 1;
 }

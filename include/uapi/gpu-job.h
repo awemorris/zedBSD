@@ -32,6 +32,8 @@
  * Flags, reserved and the output sequence begin at zero. GPU_COMMAND_WAIT owns
  * terminal observation and consumption of successfully committed sequences.
  * Reserved generations have a producer deadline but are not GPU dependencies.
+ * The sequence is copied out before the driver reserves, so a refused
+ * reservation leaves a number in it that names no record (ENOENT to a wait).
  */
 struct gpu_job_reserve {
 	uint32_t version;

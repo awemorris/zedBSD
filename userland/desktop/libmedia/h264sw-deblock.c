@@ -15,6 +15,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <string.h>
 
 /* The last index of the tables of alpha', beta' and tC0': indexA and indexB are Clip3( 0, 51, ... ) (8-454, 8-455). */
 #define DEBLOCK_INDEX_MAX 51
@@ -105,6 +106,19 @@ static const uint8_t deblock_tc0[3][52] = {
 	}
 };
 
+/*
+ * luma4x4BlkIdx of the 4x4 block at row r and column c of a macroblock,
+ * in 4-sample units (6-38: 8 * ( y / 8 ) + 4 * ( x / 8 ) + 2 * ( ( y % 8 ) /
+ * 4 ) + ( ( x % 8 ) / 4 )).  The table is constant and shared by every
+ * decoder.
+ */
+static const uint8_t deblock_blk_at[4][4] = {
+	{ 0, 1, 4, 5 },
+	{ 2, 3, 6, 7 },
+	{ 8, 9, 12, 13 },
+	{ 10, 11, 14, 15 }
+};
+
 /* Forward declarations of the static functions. */
 static int clip3(int low, int high, int value);
 static int absolute(int value);
@@ -116,14 +130,15 @@ static int luma_qp(const struct h264sw_mb *mb);
 static int chroma_qp(const struct h264sw_picture_ctx *picture, const struct h264sw_mb *mb, unsigned component);
 static int mv_differs(const int16_t *first, const int16_t *second);
 static int motion_differs(const struct h264sw_motion *p_motion, unsigned p_blk, const struct h264sw_motion *q_motion, unsigned q_blk);
+static void edge_strengths(const struct h264sw_mb *p_mb, const struct h264sw_mb *q_mb, int vertical, unsigned edge, uint8_t *bs);
 static void filter_luma_normal(uint8_t *edge, ptrdiff_t across, int beta, int tc0);
 static void filter_luma_strong(uint8_t *edge, ptrdiff_t across, int alpha, int beta);
 static void filter_luma_line(uint8_t *edge, ptrdiff_t across, int strength, int alpha, int beta, int tc0);
 static void filter_chroma_line(uint8_t *edge, ptrdiff_t across, int strength, int alpha, int beta, int tc0);
 static int picture_is_usable(const struct h264sw_picture_ctx *picture);
 static int neighbour_is_filtered(const struct h264sw_picture_ctx *picture, const struct h264sw_mb *q_mb, const struct h264sw_mb *neighbour, unsigned idc);
-static void deblock_luma_edges(const struct h264sw_picture_ctx *picture, unsigned mb_addr, int vertical, int filter_mb_edge, int filter_internal);
-static void deblock_chroma_edges(const struct h264sw_picture_ctx *picture, unsigned mb_addr, unsigned component, int vertical, int filter_mb_edge, int filter_internal);
+static void deblock_luma_edges(const struct h264sw_picture_ctx *picture, unsigned mb_addr, int vertical, int filter_mb_edge, int filter_internal, uint8_t bs[4][4]);
+static void deblock_chroma_edges(const struct h264sw_picture_ctx *picture, unsigned mb_addr, unsigned component, int vertical, int filter_mb_edge, int filter_internal, uint8_t bs[4][4]);
 static void deblock_macroblock(const struct h264sw_picture_ctx *picture, unsigned mb_addr);
 
 /*
@@ -179,15 +194,6 @@ h264sw_deblock_bs(
 	unsigned mb_x;
 	unsigned mb_y;
 	unsigned segment;
-	unsigned q_x;
-	unsigned q_y;
-	unsigned p_x;
-	unsigned p_y;
-	unsigned q_blk;
-	unsigned p_blk;
-	int p_intra;
-	int q_intra;
-	int differs;
 
 	/* Refuses a missing output. */
 	if (bs == NULL)
@@ -225,71 +231,20 @@ h264sw_deblock_bs(
 			if (mb_x == 0U)
 				return;
 
+			/* The p0 samples lie in the macroblock to the left. */
 			p_mb = q_mb - 1;
 		} else {
 			/* A horizontal macroblock edge on the picture's upper border is not filtered. */
 			if (mb_y == 0U)
 				return;
 
+			/* The p0 samples lie in the macroblock above. */
 			p_mb = q_mb - picture->width_mbs;
 		}
 	}
 
-	/* Finds whether p0 or q0 is in a macroblock coded in an intra mode. */
-	p_intra = is_intra(p_mb);
-	q_intra = is_intra(q_mb);
-
 	/* Derives bS of each 4-sample segment along the edge. */
-	for (segment = 0;
-	     segment < 4U;
-	     segment++) {
-		/*
-		 * Locates the 4x4 blocks holding q0 and p0 of the segment's
-		 * first line: p0 is the sample before q0 across the edge, in
-		 * the neighbour's last row or column for a macroblock edge.
-		 */
-		if (vertical != 0) {
-			q_x = 4U * edge;
-			q_y = 4U * segment;
-			p_x = (q_x + 15U) % 16U;
-			p_y = q_y;
-		} else {
-			q_x = 4U * segment;
-			q_y = 4U * edge;
-			p_x = q_x;
-			p_y = (q_y + 15U) % 16U;
-		}
-		q_blk = h264sw_blk4x4_at(q_x, q_y);
-		p_blk = h264sw_blk4x4_at(p_x, p_y);
-
-		/* An intra macroblock gives bS 4 on a macroblock edge and bS 3 on an internal one. */
-		if (p_intra != 0 || q_intra != 0) {
-			if (edge == 0U) {
-				bs[segment] = 4;
-			} else {
-				bs[segment] = 3;
-			}
-			continue;
-		}
-
-		/* A transform block with a non-zero coefficient on either side gives bS 2. */
-		if (((p_mb->nonzero >> p_blk) & 1U) != 0U) {
-			bs[segment] = 2;
-			continue;
-		}
-		if (((q_mb->nonzero >> q_blk) & 1U) != 0U) {
-			bs[segment] = 2;
-			continue;
-		}
-
-		/* Different reference pictures, a different number of vectors, or vectors that differ enough give bS 1; the rest 0. */
-		differs = motion_differs(&p_mb->motion, p_blk, &q_mb->motion, q_blk);
-		if (differs != 0) {
-			bs[segment] = 1;
-		} else {
-			bs[segment] = 0;
-		}
-	}
+	edge_strengths(p_mb, q_mb, vertical, edge, bs);
 }
 
 /*
@@ -635,6 +590,7 @@ motion_differs(
 		if (p_motion->ref_idx[list][p_quad] < 0)
 			continue;
 
+		/* Appends the reference picture and vector of this list. */
 		p_ref[p_count] = p_motion->ref_id[list][p_quad];
 		p_mv[p_count] = p_motion->mv[list][p_blk];
 		p_count++;
@@ -648,6 +604,7 @@ motion_differs(
 		if (q_motion->ref_idx[list][q_quad] < 0)
 			continue;
 
+		/* Appends the reference picture and vector of this list. */
 		q_ref[q_count] = q_motion->ref_id[list][q_quad];
 		q_mv[q_count] = q_motion->mv[list][q_blk];
 		q_count++;
@@ -697,6 +654,7 @@ motion_differs(
 			if (straight_p1 != 0)
 				return 1;
 
+			/* Both vectors are close, so bS is 0. */
 			return 0;
 		}
 
@@ -706,6 +664,7 @@ motion_differs(
 		if (cross_p1 != 0)
 			return 1;
 
+		/* Both crossed vectors are close, so bS is 0. */
 		return 0;
 	}
 
@@ -723,6 +682,84 @@ motion_differs(
 
 	/* Succeeded: one of the pairings is close, so the partitions do not differ. */
 	return 0;
+}
+
+/*
+ * Derives bS of the four segments of one edge (8.7.2.1, frames) whose p0
+ * lies in p_mb and q0 in q_mb (the same macroblock for an internal edge).
+ *
+ * The caller has checked that the edge exists.  Intra is read from the
+ * kind of a macroblock and from the intra flag of its motion alike.
+ */
+static void
+edge_strengths(
+	const struct h264sw_mb *p_mb,
+	const struct h264sw_mb *q_mb,
+	int vertical,
+	unsigned edge,
+	uint8_t *bs)
+{
+	unsigned segment;
+	unsigned q_blk;
+	unsigned p_blk;
+	int p_intra;
+	int q_intra;
+	int differs;
+
+	/* An intra macroblock on either side gives bS 4 on a macroblock edge and bS 3 on an internal one, in every segment. */
+	p_intra = is_intra(p_mb);
+	q_intra = is_intra(q_mb);
+	if (p_intra != 0 || q_intra != 0) {
+		/* Gives every segment the intra strength; the macroblock edge takes the stronger one. */
+		for (segment = 0;
+		     segment < 4U;
+		     segment++) {
+			bs[segment] = 3;
+			if (edge == 0U)
+				bs[segment] = 4;
+		}
+
+		/* Succeeded: an intra edge needs no look at the blocks. */
+		return;
+	}
+
+	/* Derives bS of each 4-sample segment along the edge. */
+	for (segment = 0;
+	     segment < 4U;
+	     segment++) {
+		/*
+		 * Locates the 4x4 blocks holding q0 and p0 of the segment's
+		 * first line: p0 is the sample before q0 across the edge, in
+		 * the neighbour's last row or column for a macroblock edge.
+		 */
+		if (vertical != 0) {
+			q_blk = deblock_blk_at[segment][edge];
+			p_blk = deblock_blk_at[segment][(edge + 3U) % 4U];
+		} else {
+			q_blk = deblock_blk_at[edge][segment];
+			p_blk = deblock_blk_at[(edge + 3U) % 4U][segment];
+		}
+
+		/* A transform block with a non-zero coefficient on either side gives bS 2. */
+		if (((p_mb->nonzero >> p_blk) & 1U) != 0U) {
+			bs[segment] = 2;
+			continue;
+		}
+
+		/* The same holds for the q0 side. */
+		if (((q_mb->nonzero >> q_blk) & 1U) != 0U) {
+			bs[segment] = 2;
+			continue;
+		}
+
+		/* Different reference pictures, a different number of vectors, or vectors that differ enough give bS 1; the rest 0. */
+		differs = motion_differs(&p_mb->motion, p_blk, &q_mb->motion, q_blk);
+		if (differs != 0) {
+			bs[segment] = 1;
+		} else {
+			bs[segment] = 0;
+		}
+	}
 }
 
 /*
@@ -1090,7 +1127,8 @@ deblock_luma_edges(
 	unsigned mb_addr,
 	int vertical,
 	int filter_mb_edge,
-	int filter_internal)
+	int filter_internal,
+	uint8_t bs[4][4])
 {
 	const struct h264sw_mb *q_mb;
 	const struct h264sw_mb *p_mb;
@@ -1098,7 +1136,6 @@ deblock_luma_edges(
 	const struct h264sw_frame *frame;
 	uint8_t *mb_origin;
 	uint8_t *edge_origin;
-	uint8_t bs[4];
 	ptrdiff_t stride;
 	unsigned mb_x;
 	unsigned mb_y;
@@ -1142,19 +1179,20 @@ deblock_luma_edges(
 			}
 		}
 
-		/* Derives bS of the edge's four segments. */
-		h264sw_deblock_bs(picture, mb_addr, vertical, edge, bs);
+		/* An edge whose segments all have bS 0 changes nothing. */
+		if ((bs[edge][0] | bs[edge][1] | bs[edge][2] | bs[edge][3]) == 0U)
+			continue;
 
 		/* Averages the two macroblocks' quantization parameters (8-453). */
 		qp_av = (luma_qp(p_mb) + luma_qp(q_mb) + 1) >> 1;
 
-		/* Filters the 16 lines of the edge, with the offsets of the slice holding q0. */
+		/* Filters the 16 lines of the edge with its strengths, with the offsets of the slice holding q0. */
 		if (vertical != 0) {
 			edge_origin = mb_origin + 4U * edge;
-			h264sw_deblock_luma_edge(edge_origin, 1, stride, bs, qp_av, slice->filter_offset_a, slice->filter_offset_b);
+			h264sw_deblock_luma_edge(edge_origin, 1, stride, bs[edge], qp_av, slice->filter_offset_a, slice->filter_offset_b);
 		} else {
 			edge_origin = mb_origin + (size_t)(4U * edge) * frame->stride[0];
-			h264sw_deblock_luma_edge(edge_origin, stride, 1, bs, qp_av, slice->filter_offset_a, slice->filter_offset_b);
+			h264sw_deblock_luma_edge(edge_origin, stride, 1, bs[edge], qp_av, slice->filter_offset_a, slice->filter_offset_b);
 		}
 	}
 }
@@ -1174,15 +1212,16 @@ deblock_chroma_edges(
 	unsigned component,
 	int vertical,
 	int filter_mb_edge,
-	int filter_internal)
+	int filter_internal,
+	uint8_t bs[4][4])
 {
 	const struct h264sw_mb *q_mb;
 	const struct h264sw_mb *p_mb;
 	const struct h264sw_slice_params *slice;
 	const struct h264sw_frame *frame;
+	const uint8_t *strength;
 	uint8_t *mb_origin;
 	uint8_t *edge_origin;
-	uint8_t bs[4];
 	ptrdiff_t stride;
 	unsigned mb_x;
 	unsigned mb_y;
@@ -1222,8 +1261,10 @@ deblock_chroma_edges(
 			}
 		}
 
-		/* Takes the strengths of the luma edge the chroma edge corresponds to (8.7.2). */
-		h264sw_deblock_bs(picture, mb_addr, vertical, 2U * chroma_edge, bs);
+		/* Takes the strengths of the luma edge the chroma edge corresponds to (8.7.2); all 0 changes nothing. */
+		strength = bs[2U * chroma_edge];
+		if ((strength[0] | strength[1] | strength[2] | strength[3]) == 0U)
+			continue;
 
 		/* Averages the two macroblocks' chroma quantization parameters (8-453). */
 		qp_av = (chroma_qp(picture, p_mb, component) + chroma_qp(picture, q_mb, component) + 1) >> 1;
@@ -1231,10 +1272,10 @@ deblock_chroma_edges(
 		/* Filters the 8 lines of the edge, with the offsets of the slice holding q0. */
 		if (vertical != 0) {
 			edge_origin = mb_origin + 4U * chroma_edge;
-			h264sw_deblock_chroma_edge(edge_origin, 1, stride, bs, qp_av, slice->filter_offset_a, slice->filter_offset_b);
+			h264sw_deblock_chroma_edge(edge_origin, 1, stride, strength, qp_av, slice->filter_offset_a, slice->filter_offset_b);
 		} else {
 			edge_origin = mb_origin + (size_t)(4U * chroma_edge) * frame->stride[1U + component];
-			h264sw_deblock_chroma_edge(edge_origin, stride, 1, bs, qp_av, slice->filter_offset_a, slice->filter_offset_b);
+			h264sw_deblock_chroma_edge(edge_origin, stride, 1, strength, qp_av, slice->filter_offset_a, slice->filter_offset_b);
 		}
 	}
 }
@@ -1253,9 +1294,12 @@ deblock_macroblock(
 	unsigned mb_addr)
 {
 	const struct h264sw_mb *q_mb;
+	uint8_t vertical_bs[4][4];
+	uint8_t horizontal_bs[4][4];
 	unsigned mb_x;
 	unsigned mb_y;
 	unsigned component;
+	unsigned edge;
 	unsigned idc;
 	int filter_internal;
 	int filter_left;
@@ -1292,15 +1336,45 @@ deblock_macroblock(
 	if (mb_y != 0U)
 		filter_top = neighbour_is_filtered(picture, q_mb, q_mb - picture->width_mbs, idc);
 
+	/*
+	 * Derives bS of every edge once (8.7.2.1): they depend only on the
+	 * macroblocks, not on the samples the filter changes, and the chroma
+	 * edges take the luma edges' strengths.  A macroblock edge that is not
+	 * filtered keeps bS 0.
+	 */
+	memset(vertical_bs, 0, sizeof(vertical_bs));
+	memset(horizontal_bs, 0, sizeof(horizontal_bs));
+
+	/* Derives the left macroblock edge against the left neighbour when it is filtered. */
+	if (filter_left != 0)
+		edge_strengths(q_mb - 1, q_mb, 1, 0U, vertical_bs[0]);
+
+	/* Derives the top macroblock edge against the upper neighbour when it is filtered. */
+	if (filter_top != 0)
+		edge_strengths(q_mb - picture->width_mbs, q_mb, 0, 0U, horizontal_bs[0]);
+
+	/* Derives the internal edges; those at 4 and 12 samples exist only for 4x4 transform blocks. */
+	for (edge = 1;
+	     edge < 4U;
+	     edge++) {
+		/* Skips the edges at 4 and 12 samples of a macroblock with 8x8 transform blocks. */
+		if ((edge & 1U) != 0U && q_mb->transform_8x8 != 0U)
+			continue;
+
+		/* Derives the vertical and the horizontal internal edge at this offset. */
+		edge_strengths(q_mb, q_mb, 1, edge, vertical_bs[edge]);
+		edge_strengths(q_mb, q_mb, 0, edge, horizontal_bs[edge]);
+	}
+
 	/* Filters the luma vertical edges, then the luma horizontal edges (8.7, steps 3.a to 3.d). */
-	deblock_luma_edges(picture, mb_addr, 1, filter_left, filter_internal);
-	deblock_luma_edges(picture, mb_addr, 0, filter_top, filter_internal);
+	deblock_luma_edges(picture, mb_addr, 1, filter_left, filter_internal, vertical_bs);
+	deblock_luma_edges(picture, mb_addr, 0, filter_top, filter_internal, horizontal_bs);
 
 	/* Filters Cb and then Cr, each with the vertical edges first (8.7, step 3.e). */
 	for (component = 0;
 	     component < 2U;
 	     component++) {
-		deblock_chroma_edges(picture, mb_addr, component, 1, filter_left, filter_internal);
-		deblock_chroma_edges(picture, mb_addr, component, 0, filter_top, filter_internal);
+		deblock_chroma_edges(picture, mb_addr, component, 1, filter_left, filter_internal, vertical_bs);
+		deblock_chroma_edges(picture, mb_addr, component, 0, filter_top, filter_internal, horizontal_bs);
 	}
 }

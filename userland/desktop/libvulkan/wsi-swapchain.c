@@ -41,6 +41,8 @@
 
 /* The environment variable that turns on one log line for every cursor present. */
 #define WSI_CURSOR_LOG_VARIABLE	"VULKAN_ZEDBSD_CURSOR_LOG"
+/* Set to 1, each window or display chain's images and, at its end, its presents and copies go to stderr. */
+#define WSI_CHAIN_LOG_VARIABLE	"VULKAN_ZEDBSD_WSI_LOG"
 
 /* Shared presentation allocations transfer ownership to another Vulkan instance. */
 #define WSI_QUEUE_FAMILY_EXTERNAL 0xfffffffeU
@@ -136,6 +138,26 @@ struct vulkan_swapchain {
 	 * freed chain's address can be a later chain's.
 	 */
 	uint64_t serial;
+	/*
+	 * The application may give the images away (it named
+	 * VkExternalMemoryImageCreateInfo at creation): a direct chain's image
+	 * goes out as an fd with vkGetMemoryFdKHR.
+	 */
+	VkBool32 exportable;
+	/* The chain's creation, which a window system's lend of images is checked against. */
+	struct vulkan_wsi_lend_fit fit;
+	/* The serial of the window system's lend whose images the chain draws into; zero for a chain of its own images. */
+	uint64_t lend_serial;
+	/*
+	 * A direct chain whose images are not in the renderer's fastest layout
+	 * (the display shows none of the faster ones): its images do not go out
+	 * to be drawn into, since another process draws to them more slowly than
+	 * to its own and a copy of those costs less.
+	 */
+	VkBool32 layout_slower;
+	/* With the chain log on: the presents of the chain's images, and those that copied them. */
+	uint64_t log_presents;
+	uint64_t log_copies;
 };
 
 /* The independently ordered workers of one queue: ordinary presents, the cursor plane's, and the overlay planes'. */
@@ -334,6 +356,13 @@ static uint64_t swapchain_serial;
  */
 static int present_cursor_log_on;
 
+/*
+ * Nonzero once a chain was created while the chain log's environment
+ * variable was 1; it never returns to zero.  A present counts its chain's
+ * presents and copies only while it is set.
+ */
+static int swapchain_log_on;
+
 static struct vulkan_swapchain *swapchain_get(VkSwapchainKHR handle);
 static VkResult swapchain_create(struct VkDevice_T *device, const VkSwapchainCreateInfoKHR *info, const VkAllocationCallbacks *allocator, struct wsi_image_group *shared, VkBool32 single, struct vulkan_swapchain **result);
 static VkBool32 swapchain_spare_wanted(struct VkDevice_T *device, struct vulkan_surface *surface, const VkSwapchainCreateInfoKHR *info);
@@ -347,6 +376,11 @@ static VkResult swapchain_readback_create(struct vulkan_swapchain *chain);
 static VkResult swapchain_native_images_create(struct vulkan_swapchain *chain);
 static VkBool32 swapchain_direct_possible(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info);
 static VkResult swapchain_native_images_import(struct vulkan_swapchain *chain);
+static VkResult swapchain_exportable(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info);
+static void swapchain_log_created(const struct vulkan_swapchain *chain);
+static void swapchain_fit(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info, uint32_t asked);
+static VkResult swapchain_lent_create(struct vulkan_swapchain *chain, const VkSwapchainCreateInfoKHR *info, uint32_t count, const int *fds);
+static VkBool32 swapchain_lend_changed(struct vulkan_swapchain *chain);
 static void swapchain_native_images_free(struct vulkan_swapchain *chain);
 static VkResult swapchain_allocate_memory(struct vulkan_swapchain *chain, const VkMemoryRequirements *requirements, VkMemoryPropertyFlags required, const struct vulkan_allocator *policy, VkDeviceMemory *memory);
 static const VkAllocationCallbacks *swapchain_allocator(const struct vulkan_allocator *allocator);
@@ -574,6 +608,14 @@ vkDestroySwapchainKHR(
 		chain->object.allocator.has_callbacks = VK_TRUE;
 	}
 
+	/* The chain log's last line of the chain: its presents and the copies among them. */
+	if (__atomic_load_n(&swapchain_log_on, __ATOMIC_RELAXED) != 0 && chain->surface != NULL &&
+	    chain->surface->cursor == VK_FALSE && chain->surface->overlay == VK_FALSE)
+		fprintf(stderr, "VULKAN WSI chain=%llu end presents=%llu copies=%llu\n",
+		    (unsigned long long)chain->serial,
+		    (unsigned long long)__atomic_load_n(&chain->log_presents, __ATOMIC_RELAXED),
+		    (unsigned long long)__atomic_load_n(&chain->log_copies, __ATOMIC_RELAXED));
+
 	/* Valid applications externally synchronize use before destroying a chain. */
 	swapchain_free(chain);
 
@@ -702,7 +744,9 @@ vkQueuePresentKHR(
 	struct vulkan_allocator allocator;
 	VkResult error;
 	VkResult combined;
+	VkResult result;
 	VkBool32 published;
+	VkBool32 changed;
 	uint64_t waited;
 	uint64_t present_started;
 	uint64_t part_started;
@@ -817,12 +861,20 @@ vkQueuePresentKHR(
 	/* Publish only results known at enqueue time while caller-owned result storage is still valid. */
 	combined = VK_SUCCESS;
 	for (index = 0U; index < job->count; index++) {
+		/* A target a window system's lend would serve better (or whose lend ended) is presented, and suboptimal. */
+		result = job->results[index];
+		if (result == VK_SUCCESS) {
+			changed = swapchain_lend_changed(job->chains[index]);
+			if (changed != VK_FALSE)
+				result = VK_SUBOPTIMAL_KHR;
+		}
+
 		/* Native asynchronous failures are latched later on the chain, never written into this array. */
 		if (info->pResults != NULL)
-			info->pResults[index] = job->results[index];
+			info->pResults[index] = result;
 
 		/* Each independently validated target contributes its enqueue status. */
-		combined = present_combine(combined, job->results[index]);
+		combined = present_combine(combined, result);
 	}
 
 	/* From this publication onward only the worker may release the owned job. */
@@ -977,6 +1029,58 @@ vulkan_wsi_device_finish(
 	return;
 }
 
+/*
+ * Finds the memory and description of an image of an exportable direct
+ * chain of a device (one created with VkExternalMemoryImageCreateInfo):
+ * what vkGetMemoryFdKHR gives away for a swapchain image, when its layout
+ * is the renderer's fastest.  Returns VK_SUCCESS, or
+ * VK_ERROR_INVALID_EXTERNAL_HANDLE for an image of no such chain.
+ */
+VkResult
+vulkan_wsi_swapchain_image_memory(
+	struct VkDevice_T *device,
+	VkImage image,
+	VkDeviceMemory *memory,
+	struct gpu_image_descriptor *descriptor)
+{
+	struct vulkan_swapchain *chain;
+	uint32_t index;
+	VkBool32 found;
+
+	/* Looks through the device's exportable direct chains for the image. */
+	found = VK_FALSE;
+	pthread_mutex_lock(&swapchain_mutex);
+
+	for (chain = swapchains; chain != NULL && found == VK_FALSE; chain = chain->next) {
+		/* Only this device's direct chain of its own images that may give them away. */
+		if (chain->device != device || chain->exportable == VK_FALSE)
+			continue;
+		if (chain->direct == VK_FALSE || chain->lend_serial != 0U)
+			continue;
+		if (chain->layout_slower != VK_FALSE)
+			continue;
+
+		/* The image among the chain's own. */
+		for (index = 0U; index < chain->group->count; index++) {
+			if (chain->group->images[index].image != image)
+				continue;
+			*memory = chain->group->images[index].memory;
+			*descriptor = chain->group->images[index].descriptor;
+			found = VK_TRUE;
+			break;
+		}
+	}
+
+	pthread_mutex_unlock(&swapchain_mutex);
+
+	/* No exportable chain has the image. */
+	if (found == VK_FALSE)
+		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+
+	/* Succeeded: the caller exports the image's memory with its description. */
+	return VK_SUCCESS;
+}
+
 /* Converts the standard non-dispatchable handle without confusing object kinds. */
 static struct vulkan_swapchain *
 swapchain_get(
@@ -1017,12 +1121,18 @@ swapchain_create(
 	struct vulkan_surface *surface;
 	struct vulkan_object *object;
 	const char *log_variable;
+	int lent_fds[VULKAN_WSI_LEND_MAX];
+	uint64_t lent_serial;
+	uint32_t lent_count;
+	uint32_t asked;
+	uint32_t index;
 	VkResult error;
 	size_t bytes;
 	int log_compare;
 
-	/* Retirement is required even when a later allocation or validation fails. */
+	/* Retirement is required even when a later allocation or validation fails; no lent image fd is held yet. */
 	*result = NULL;
+	lent_count = 0U;
 	surface = vulkan_wsi_surface(info->surface);
 	old = swapchain_get(info->oldSwapchain);
 
@@ -1052,6 +1162,9 @@ swapchain_create(
 	error = swapchain_validate(device, info, &surface);
 	if (error != VK_SUCCESS)
 		return error;
+
+	/* The image count the application asked for, before any spare. */
+	asked = info->minImageCount;
 
 	/* The images the chain makes: the asked count, and one more when a spare is wanted. */
 	if (single != VK_FALSE && swapchain_spare_wanted(device, surface, info)) {
@@ -1096,6 +1209,14 @@ swapchain_create(
 			__atomic_store_n(&present_cursor_log_on, 1, __ATOMIC_RELAXED);
 	}
 
+	/* The chain log, asked at each creation and on once 1 is seen. */
+	log_variable = getenv(WSI_CHAIN_LOG_VARIABLE);
+	if (log_variable != NULL) {
+		log_compare = strcmp(log_variable, "1");
+		if (log_compare == 0)
+			__atomic_store_n(&swapchain_log_on, 1, __ATOMIC_RELAXED);
+	}
+
 	/* Retains the instance surface before any native lease can borrow its allocator. */
 	error = vulkan_wsi_surface_retain(surface);
 	if (error != VK_SUCCESS) {
@@ -1116,8 +1237,38 @@ swapchain_create(
 			goto cleanup;
 	}
 
-	/* Every chain has independent acquisition state even when its images are shared. */
+	/* Whether the application gives the images away (a compositor lending them, vkGetMemoryFdKHR). */
+	error = swapchain_exportable(chain, info);
+	if (error != VK_SUCCESS)
+		goto cleanup;
+
+	/*
+	 * The chain's creation, told to a window system that lends images,
+	 * and the images of its lend when one fits (a compositor's game mode):
+	 * the chain then draws into them.  A chain of a shared creation never
+	 * takes a lend.
+	 */
+	swapchain_fit(chain, info, asked);
+	if (shared == NULL && surface->platform->lend != NULL) {
+		error = surface->platform->lend(chain->lease, &chain->fit, VULKAN_WSI_LEND_MAX, &lent_count, lent_fds, &lent_serial);
+
+		/* No lend fits: the chain makes its own images. */
+		if (error == VK_ERROR_FEATURE_NOT_PRESENT) {
+			lent_count = 0U;
+			error = VK_SUCCESS;
+		}
+		if (error != VK_SUCCESS)
+			goto cleanup;
+
+		/* A lend fits: the chain draws into its images. */
+		if (lent_count != 0U)
+			chain->lend_serial = lent_serial;
+	}
+
+	/* Every chain has independent acquisition state even when its images are shared; room for the lend's count or its own. */
 	bytes = (size_t)info->minImageCount;
+	if (chain->lend_serial != 0U && lent_count > info->minImageCount)
+		bytes = (size_t)lent_count;
 	chain->states = vulkan_allocate(
 		&chain->object.allocator,
 		bytes,
@@ -1130,6 +1281,36 @@ swapchain_create(
 
 	memset(chain->states, WSI_IMAGE_AVAILABLE, bytes);
 
+	/* A lent chain's images are the lend's, which the compositor shows as they are: nothing is copied. */
+	if (chain->lend_serial != 0U) {
+		chain->direct = VK_TRUE;
+		error = swapchain_lent_create(chain, info, lent_count, lent_fds);
+		if (error == VK_SUCCESS) {
+			chain->gpu_present = VK_TRUE;
+			swapchain_log_created(chain);
+
+			/* Transfers the complete private chain to the publication stage. */
+			*result = chain;
+			chain = NULL;
+			goto cleanup;
+		}
+
+		/* Lent images this device cannot import (another layout, another device): refused, and the chain has its own. */
+		if (error != VK_ERROR_FORMAT_NOT_SUPPORTED &&
+		    error != VK_ERROR_FEATURE_NOT_PRESENT &&
+		    error != VK_ERROR_INVALID_EXTERNAL_HANDLE)
+			goto cleanup;
+		swapchain_native_images_free(chain);
+		if (chain->group != NULL)
+			swapchain_group_free(chain->group);
+		chain->group = NULL;
+		if (surface->platform->lend_decline != NULL)
+			surface->platform->lend_decline(chain->lease, chain->lend_serial);
+		chain->lend_serial = 0U;
+		chain->direct = VK_FALSE;
+		memset(chain->states, WSI_IMAGE_AVAILABLE, bytes);
+	}
+
 	/* A chain with its own images on a direct display renders into what the output shows. */
 	if (shared == NULL)
 		chain->direct = swapchain_direct_possible(chain, info);
@@ -1137,6 +1318,16 @@ swapchain_create(
 	/* Creates an image group only for the first independently owned swapchain. */
 	if (shared == NULL) {
 		error = swapchain_group_create(chain, info);
+
+		/* A direct chain whose shared images cannot be made has images of its own instead (its presents copy). */
+		if (chain->direct != VK_FALSE &&
+		    (error == VK_ERROR_FEATURE_NOT_PRESENT ||
+		     error == VK_ERROR_FORMAT_NOT_SUPPORTED)) {
+			swapchain_group_free(chain->group);
+			chain->group = NULL;
+			chain->direct = VK_FALSE;
+			error = swapchain_group_create(chain, info);
+		}
 		if (error != VK_SUCCESS)
 			goto cleanup;
 	} else {
@@ -1182,10 +1373,15 @@ swapchain_create(
 	}
 
 	/* Transfers the complete private chain to the publication stage. */
+	swapchain_log_created(chain);
 	*result = chain;
 	chain = NULL;
 
 cleanup:
+	/* The lent images' fds were the creation's; their images and native buffers hold what they need. */
+	for (index = 0U; index < lent_count; index++)
+		close(lent_fds[index]);
+
 	/* A failed creation still owns its partially acquired private chain. */
 	if (chain != NULL)
 		swapchain_free(chain);
@@ -1194,6 +1390,51 @@ cleanup:
 
 	/* Succeeded: publication now needs no resource acquisition or wire transaction. */
 	return VK_SUCCESS;
+}
+
+/*
+ * Writes the chain log's line of a new window or display chain (cursor and
+ * overlay chains have their own logs): whether its images are a lend's,
+ * whether its presents copy, its images' count, and the kernel's layout of
+ * its first image (tiling and parameter, 0 for an image that has none).
+ */
+static void
+swapchain_log_created(
+	const struct vulkan_swapchain *chain)
+{
+	uint32_t tiling;
+	uint32_t parameter;
+	uint32_t count;
+
+	/* Only with the log on, and not for the cursor or an overlay. */
+	if (__atomic_load_n(&swapchain_log_on, __ATOMIC_RELAXED) == 0)
+		return;
+	if (chain->surface->cursor != VK_FALSE || chain->surface->overlay != VK_FALSE)
+		return;
+
+	/* The first image's layout, as the kernel describes it. */
+	tiling = 0U;
+	parameter = 0U;
+	count = 0U;
+	if (chain->group != NULL) {
+		count = chain->group->count;
+		if (count != 0U) {
+			tiling = chain->group->images[0].descriptor.tiling;
+			parameter = chain->group->images[0].descriptor.layout_parameter;
+		}
+	}
+
+	/* One line of the chain. */
+	fprintf(stderr, "VULKAN WSI chain=%llu lent=%u direct=%u gpu=%u images=%u extent=%ux%u tiling=0x%x parameter=0x%x\n",
+	    (unsigned long long)chain->serial,
+	    chain->lend_serial != 0U ? 1U : 0U,
+	    chain->direct != VK_FALSE ? 1U : 0U,
+	    chain->gpu_present != VK_FALSE ? 1U : 0U,
+	    count,
+	    chain->extent.width,
+	    chain->extent.height,
+	    tiling,
+	    parameter);
 }
 
 /* Checks the advertised surface contract and the active swapchain association. */
@@ -1576,6 +1817,10 @@ swapchain_image_create(
 	const VkAllocationCallbacks *allocator;
 	struct gpu_placement placement;
 	const struct gpu_placement *conditions;
+	struct gpu_image_layouts scanout;
+	uint32_t tiling;
+	uint32_t parameter;
+	VkBool32 fastest;
 	VkResult error;
 
 	/* Internal transfer use is added without restricting the application's declared use. */
@@ -1591,17 +1836,55 @@ swapchain_image_create(
 				return error;
 			conditions = &placement;
 		}
-		error = vulkan_wsi_shared_image_create_usage(
-			chain->device,
-			info->imageFormat,
-			info->imageExtent,
-			info->imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-			allocator,
-			conditions,
-			&image->image,
-			&image->memory,
-			&image->fd,
-			&image->descriptor);
+
+		/* The fastest layout both the renderer and the display take (linear rows unless one comes first). */
+		tiling = GPU_IMAGE_LINEAR;
+		parameter = 0U;
+		fastest = VK_TRUE;
+		if (chain->surface->platform->layouts != NULL &&
+		    vulkan_wsi_layout_choose != NULL &&
+		    vulkan_wsi_shared_image_create_layout != NULL) {
+			memset(&scanout, 0, sizeof(scanout));
+			scanout.format = GPU_PIXEL_RGBA8888;
+			if (info->imageFormat == VK_FORMAT_B8G8R8A8_UNORM || info->imageFormat == VK_FORMAT_B8G8R8A8_SRGB)
+				scanout.format = GPU_PIXEL_BGRA8888;
+			scanout.width = info->imageExtent.width;
+			scanout.height = info->imageExtent.height;
+			error = chain->surface->platform->layouts(chain->lease, &scanout);
+			if (error == VK_SUCCESS)
+				vulkan_wsi_layout_choose(chain->device, info->imageFormat, info->imageExtent, &scanout, &tiling, &parameter, &fastest);
+		}
+		if (fastest == VK_FALSE)
+			chain->layout_slower = VK_TRUE;
+
+		/* The image in that layout (rows of pixels as before when the library has no layouts). */
+		if (tiling != GPU_IMAGE_LINEAR) {
+			error = vulkan_wsi_shared_image_create_layout(
+				chain->device,
+				info->imageFormat,
+				info->imageExtent,
+				info->imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+				tiling,
+				parameter,
+				allocator,
+				conditions,
+				&image->image,
+				&image->memory,
+				&image->fd,
+				&image->descriptor);
+		} else {
+			error = vulkan_wsi_shared_image_create_usage(
+				chain->device,
+				info->imageFormat,
+				info->imageExtent,
+				info->imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+				allocator,
+				conditions,
+				&image->image,
+				&image->memory,
+				&image->fd,
+				&image->descriptor);
+		}
 		if (error != VK_SUCCESS)
 			return error;
 
@@ -1816,6 +2099,200 @@ swapchain_native_images_import(
 
 	/* Succeeded: the output shows the application's own images. */
 	return VK_SUCCESS;
+}
+
+/*
+ * Records whether the application gives the chain's images away: a
+ * VkExternalMemoryImageCreateInfo in the creation's chain names the opaque
+ * fd, which vkGetMemoryFdKHR then gives for an image of a direct chain (a
+ * display's primary plane whose images the output shows).  Vulkan has no
+ * export of swapchain images; this pairing of standard records is the
+ * library's own.  Returns VK_SUCCESS, or VK_ERROR_INITIALIZATION_FAILED for
+ * another handle type.
+ */
+static VkResult
+swapchain_exportable(
+	struct vulkan_swapchain *chain,
+	const VkSwapchainCreateInfoKHR *info)
+{
+	const VkBaseInStructure *extension;
+	const VkExternalMemoryImageCreateInfo *external;
+
+	/* Each record of the creation's chain; only the external memory one counts. */
+	for (extension = info->pNext; extension != NULL; extension = extension->pNext) {
+		if (extension->sType != VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO)
+			continue;
+
+		/* Only the opaque fd, which carries the image's description. */
+		external = (const VkExternalMemoryImageCreateInfo *)extension;
+		if ((external->handleTypes & ~(VkExternalMemoryHandleTypeFlags)VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT) != 0U)
+			return VK_ERROR_INITIALIZATION_FAILED;
+
+		/* An empty set gives nothing away. */
+		if (external->handleTypes != 0U)
+			chain->exportable = VK_TRUE;
+	}
+
+	/* Succeeded: the chain knows whether its images may go out. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Records a window-system chain's creation as a lend is checked against:
+ * its format, extent, uses and the count the application asked for, and
+ * whether this device draws the chain into images it imports -- one layer,
+ * opaque, only uses an imported image has, and a format a linear image
+ * renders to and is sampled from.
+ */
+static void
+swapchain_fit(
+	struct vulkan_swapchain *chain,
+	const VkSwapchainCreateInfoKHR *info,
+	uint32_t asked)
+{
+	VkFormatProperties properties;
+	VkImageUsageFlags allowed;
+
+	/* What the chain is. */
+	memset(&chain->fit, 0, sizeof(chain->fit));
+	chain->fit.format = info->imageFormat;
+	chain->fit.extent = info->imageExtent;
+	chain->fit.usage = info->imageUsage;
+	chain->fit.count = asked;
+
+	/* Only a window system's surface lends images, and the library must import them. */
+	if (chain->surface->display_mode != NULL || vulkan_wsi_shared_image_import_format == NULL)
+		return;
+	if ((chain->device->object.context->capabilities & GPU_CAP_SHARE) == 0U)
+		return;
+
+	/* One layer, opaque, and the uses an imported image has. */
+	if (info->imageArrayLayers != 1U || info->compositeAlpha != VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+		return;
+	allowed = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+	    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	if ((info->imageUsage & ~allowed) != 0U)
+		return;
+
+	/* A format a linear image renders to and is sampled from. */
+	vkGetPhysicalDeviceFormatProperties((VkPhysicalDevice)chain->device->physical, info->imageFormat, &properties);
+	if ((properties.linearTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) == 0U)
+		return;
+	if ((properties.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0U)
+		return;
+
+	/* Succeeded: the chain can draw into lent images. */
+	chain->fit.drawable = VK_TRUE;
+}
+
+/*
+ * Makes a lent chain's images from the lend's fds (which stay the
+ * caller's): each is imported as an image of the chain's format bound to
+ * the lent memory, and its native image is the window system's buffer of
+ * it, busy until the compositor gives it to the chain.
+ */
+static VkResult
+swapchain_lent_create(
+	struct vulkan_swapchain *chain,
+	const VkSwapchainCreateInfoKHR *info,
+	uint32_t count,
+	const int *fds)
+{
+	struct wsi_image_group *group;
+	struct vulkan_image *private_image;
+	const VkAllocationCallbacks *allocator;
+	uint32_t index;
+	size_t bytes;
+	VkResult error;
+
+	/* The group of the lend's count of images, owned by the chain for unwind. */
+	group = vulkan_allocate(
+		&chain->device->object.allocator,
+		sizeof(*group),
+		sizeof(void *),
+		VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
+	if (group == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	memset(group, 0, sizeof(*group));
+	group->allocator = chain->device->object.allocator;
+	group->device = chain->device;
+	group->references = 1U;
+	chain->group = group;
+
+	/* The images' records; none holds an fd. */
+	bytes = (size_t)count * sizeof(*group->images);
+	group->images = vulkan_allocate(&group->allocator, bytes, sizeof(void *), VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
+	if (group->images == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	memset(group->images, 0, bytes);
+	group->count = count;
+	for (index = 0U; index < count; index++)
+		group->images[index].fd = -1;
+
+	/* Each lent image imported as the chain's format, its handle the application's and its lifetime the library's. */
+	allocator = swapchain_allocator(&group->allocator);
+	for (index = 0U; index < count; index++) {
+		error = vulkan_wsi_shared_image_import_format(
+			chain->device,
+			fds[index],
+			info->imageFormat,
+			allocator,
+			&group->images[index].image,
+			&group->images[index].memory,
+			&group->images[index].descriptor);
+		if (error != VK_SUCCESS)
+			return error;
+		private_image = vulkan_image(group->images[index].image);
+		private_image->swapchain_owned = VK_TRUE;
+	}
+
+	/* One native image (the window system's buffer) for each lent image. */
+	bytes = (size_t)count * sizeof(*chain->presentation);
+	chain->presentation = vulkan_allocate(&chain->object.allocator, bytes, sizeof(void *), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+	if (chain->presentation == NULL)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	memset(chain->presentation, 0, bytes);
+	chain->presentation_count = count;
+
+	/* Each buffer named as the lend's image (with the kernel's description of it), busy until the compositor gives it. */
+	for (index = 0U; index < count; index++) {
+		error = chain->surface->platform->lend_import(
+			chain->lease,
+			fds[index],
+			&group->images[index].descriptor,
+			chain->lend_serial,
+			index,
+			&chain->presentation[index].native_image);
+		if (error != VK_SUCCESS)
+			return error;
+	}
+
+	/* Succeeded: the application draws into the compositor's images. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Tells whether a chain is better made again by the application: its
+ * window system offers a lend that fits a chain of its own images, or the
+ * lend a lent chain draws into ended.
+ */
+static VkBool32
+swapchain_lend_changed(
+	struct vulkan_swapchain *chain)
+{
+	VkBool32 changed;
+
+	/* Only a window system that lends images. */
+	if (chain->lease == NULL || chain->surface->platform->lend_changed == NULL)
+		return VK_FALSE;
+
+	/* The window system's answer for the chain's creation and lend. */
+	changed = chain->surface->platform->lend_changed(chain->lease, &chain->fit, chain->lend_serial);
+	if (changed == VK_FALSE)
+		return VK_FALSE;
+
+	/* Succeeded: the chain is suboptimal. */
+	return VK_TRUE;
 }
 
 /* Retires every native destination, including rollback before selecting a copied route. */
@@ -2534,8 +3011,12 @@ present_record(
 			continue;
 
 		/* A direct chain's image is what the output shows: only the present's waits. */
+		if (__atomic_load_n(&swapchain_log_on, __ATOMIC_RELAXED) != 0)
+			__atomic_add_fetch(&job->chains[index]->log_presents, 1U, __ATOMIC_RELAXED);
 		if (job->chains[index]->direct != VK_FALSE)
 			continue;
+		if (__atomic_load_n(&swapchain_log_on, __ATOMIC_RELAXED) != 0)
+			__atomic_add_fetch(&job->chains[index]->log_copies, 1U, __ATOMIC_RELAXED);
 
 		/* Optional display composition remains GPU-resident on both direct and shared-image paths; a cursor or overlay image is copied whole. */
 		display = NULL;

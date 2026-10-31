@@ -309,6 +309,15 @@ CONFIG_DRIVER_PCI_VMD ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 CONFIG_DRIVER_PCI_VENUS ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 CONFIG_DRIVER_PCI_I915 ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 
+# The x86 processor driver's use of the model-specific registers (HWP, the
+# hardware feedback, the energy and idle residency counters) is off by default.
+CONFIG_CPU_PERF ?= n
+
+# The Dell laptop provider's fan boost through the SMM fan call is off by
+# default: it is offered once a Dell machine has shown that a raised state
+# lifts the fan and leaves the firmware free to run it faster.
+CONFIG_DELL_SMM_BOOST ?= n
+
 # The NVIDIA Turing-and-later driver is on by default where it builds (amd64).
 CONFIG_DRIVER_PCI_NVRTX ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 
@@ -608,6 +617,17 @@ endif
 ZEDBSD_TARGET_PACKAGE_HOLD :=
 override ZEDBSD_USER_PROGRAMS := $(filter-out \
 	$(ZEDBSD_TARGET_PACKAGE_HOLD),$(ZEDBSD_USER_PROGRAMS))
+
+#
+# Noct built with its OpenGL ES accelerator (ZEDBSD_NOCT_ACCEL := y, an
+# amd64 option) links libEGL and libGLESv2, so with the option noct needs
+# both libraries in the image, and choosing noct (or Emacs, which runs on
+# it) chooses them.  The noct package's own registration does not name
+# them, for without the option it needs neither.
+#
+ifneq ($(and $(filter amd64,$(ZEDBSD_ARCHITECTURE)),$(filter y,$(ZEDBSD_NOCT_ACCEL))),)
+USERLAND_noct_REQUIRE += desktop/libegl desktop/libglesv2
+endif
 
 #
 # Package dependencies are named by their registered stable path (for
@@ -923,6 +943,8 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_PCI_VMD=$(if $(filter y,$(CONFIG_DRIVER_PCI_VMD)),1,0) \
 	-DCONFIG_DRIVER_PCI_VENUS=$(if $(filter y,$(CONFIG_DRIVER_PCI_VENUS)),1,0) \
 	-DCONFIG_DRIVER_PCI_I915=$(if $(filter y,$(CONFIG_DRIVER_PCI_I915)),1,0) \
+	-DCONFIG_CPU_PERF=$(if $(filter y,$(CONFIG_CPU_PERF)),1,0) \
+	-DCONFIG_DELL_SMM_BOOST=$(if $(filter y,$(CONFIG_DELL_SMM_BOOST)),1,0) \
 	-DCONFIG_DRIVER_PCI_NVRTX=$(if $(filter y,$(CONFIG_DRIVER_PCI_NVRTX)),1,0) \
 	-DCONFIG_DRIVER_PCI_AMDRDNA=$(if $(filter y,$(CONFIG_DRIVER_PCI_AMDRDNA)),1,0) \
 	-DCONFIG_AMDRDNA_CONTROL=$(if $(filter y,$(CONFIG_AMDRDNA_CONTROL)),1,0) \
@@ -1310,13 +1332,15 @@ ZEDBSD_SHADOW := userland/base/etc/shadow
 endif
 
 ZEDBSD_ACCOUNT_INPUTS := userland/base/etc/passwd userland/base/etc/group \
-	$(ZEDBSD_SHADOW) userland/base/etc/services
+	$(ZEDBSD_SHADOW) userland/base/etc/services userland/base/etc/hosts
 ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
 	--file /etc/group=userland/base/etc/group \
 	--file /etc/shadow=$(ZEDBSD_SHADOW) \
 	--file /etc/services=userland/base/etc/services \
+	--file /etc/hosts=userland/base/etc/hosts \
 	--mode /etc/passwd=0644 --mode /etc/group=0644 \
-	--mode /etc/shadow=0400 --mode /etc/services=0644
+	--mode /etc/shadow=0400 --mode /etc/services=0644 \
+	--mode /etc/hosts=0644
 ZEDBSD_BASE_DATA_INPUTS := $(ZEDBSD_USERLAND_DATA_INPUTS)
 ZEDBSD_BASE_DATA_FILES := $(ZEDBSD_USERLAND_DATA_FILES) \
 	$(ZEDBSD_USERLAND_DATA_MODES)

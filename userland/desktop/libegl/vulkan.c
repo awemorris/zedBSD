@@ -474,8 +474,8 @@ zegl_frame_begin(
 				return error;
 		}
 
-		/* The next image the compositor gives back. */
-		result = vkAcquireNextImageKHR(display->device, surface->swapchain, ZEGL_TIMEOUT, surface->acquired, VK_NULL_HANDLE, &surface->image);
+		/* The next image the compositor gives back, however long a busy compositor takes (a closed connection ends the wait with an error). */
+		result = vkAcquireNextImageKHR(display->device, surface->swapchain, UINT64_MAX, surface->acquired, VK_NULL_HANDLE, &surface->image);
 		if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR)
 			break;
 

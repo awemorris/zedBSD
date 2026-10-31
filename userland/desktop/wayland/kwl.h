@@ -338,6 +338,9 @@ enum kwl_kind {
 	/* The sound's playback streams, kl_audio_v1 and its streams (audio-stream.c, WS191). */
 	KWL_AUDIO,
 	KWL_AUDIO_STREAM,
+	/* The game mode's lent images, kl_game_v1 and a surface's kl_game_surface_v1 (game.c, scanout.c). */
+	KWL_GAME_MANAGER,
+	KWL_GAME_SURFACE,
 };
 
 /*
@@ -858,6 +861,24 @@ struct kwl_object {
 	uint32_t pending_content_type;
 	uint32_t content_type;
 	unsigned content_type_changed;
+	/*
+	 * The game mode's lent images (game.c, scanout.c): a surface's
+	 * kl_game_surface_v1 (whose own surface field names it back; each
+	 * cleared from both ends when either goes); on that object, the chain
+	 * the client draws the surface with as it last told (a VkFormat, the
+	 * uses, the size and the image count, zero when it cannot draw into lent
+	 * images); and on a buffer that holds a lent image, the game chain that
+	 * lent it and the image's index (NULL when it holds none, cleared when
+	 * either goes).
+	 */
+	struct kwl_object *game_object;
+	uint32_t game_format;
+	uint32_t game_usage;
+	uint32_t game_width;
+	uint32_t game_height;
+	uint32_t game_count;
+	struct kwl_game_chain *lend_chain;
+	uint32_t lend_index;
 	/*
 	 * ws035-p083 (panels.c): a surface's kl_glass_v1 (whose own surface
 	 * field names it back; each cleared from both ends when either goes),
@@ -1711,23 +1732,20 @@ struct kwl_server {
 	 */
 	unsigned bar_hidden;
 	/*
-	 * The game mode (scanout.c, ws122-p005b): the backend's direct scanout
-	 * while a fullscreen video or game shows alone (NULL in window mode),
-	 * the number of its claim (counted at each claim taken in, so a present
-	 * thread's result for a scanout left meanwhile is known), the window it
-	 * shows, the image the display holds and the one its present in flight
-	 * on the present thread shows next (NULL when none is), the frames
-	 * presented, the last reason it was left or not entered (logged once),
-	 * a window the display refused, the window last logged, the
-	 * pointer's place and when it last moved, and the window being entered
-	 * (the display thread asked whether the display can show it, or the
-	 * output closing for it) and when its entry began.
+	 * The game mode (scanout.c): the display swapchain whose images are
+	 * lent to a fullscreen video or game that shows alone (NULL in window
+	 * mode), the number of its claim (counted at each chain taken in, so a
+	 * present thread's result for a game mode left meanwhile is known), the
+	 * window it shows, the frames presented, the last reason it was left or
+	 * not entered (logged once), a window the display refused, the window
+	 * last logged, the pointer's place and when it last moved, the window
+	 * being entered (the output closing for it, the game chain being made)
+	 * and when its entry began, and whether the display's chain cannot
+	 * lend its images at all (found once, the game mode is not tried again).
 	 */
-	struct kl_backend_scanout *scanout;
+	struct kwl_game_chain *scanout;
 	uint64_t scanout_claim;
 	struct kwl_object *scanout_surface;
-	struct kwl_object *scanout_front;
-	struct kwl_object *scanout_flight;
 	uint64_t scanout_frames;
 	unsigned scanout_reason;
 	struct kwl_object *scanout_refused;
@@ -1736,6 +1754,7 @@ struct kwl_server {
 	uint64_t scanout_motion_ms;
 	struct kwl_object *scanout_entering;
 	uint64_t scanout_entering_ms;
+	unsigned scanout_unlendable;
 	/*
 	 * Wiseview (shell.c): how far it is open (0 closed, 1 open) when settled,
 	 * a gesture from the bottom edge and where it started, the animation to
@@ -2298,8 +2317,16 @@ int kwl_shot_enabled(void);
 int kwl_shot_waiting(void);
 int kwl_shot_option(struct kwl_server *server, const char *argument);
 
-/* The game mode: a fullscreen video or game shown without composing (scanout.c, ws122-p005b). */
-struct kl_backend_scanout;
+/* The game mode: a fullscreen video or game drawn straight into the display's images, without composing (scanout.c, game.c). */
+struct kwl_game_chain;
+int kwl_game_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_game_object_gone(struct kwl_object *object);
+int kwl_game_send_image(struct kwl_object *game, uint32_t serial, uint32_t index, int fd);
+int kwl_game_send_lend(struct kwl_object *game, uint32_t serial, uint32_t count, uint32_t width, uint32_t height, uint32_t format, uint32_t usage, uint32_t layout);
+int kwl_game_send_withdraw(struct kwl_object *game, uint32_t serial);
+void kwl_scanout_tag(struct kwl_server *server, struct kwl_object *game, struct kwl_object *buffer, uint32_t serial, uint32_t index);
+void kwl_scanout_decline(struct kwl_server *server, struct kwl_object *game, uint32_t serial);
+void kwl_scanout_buffer_gone(struct kwl_object *buffer);
 int kwl_scanout_pass(struct kwl_server *server, struct kwl_object *top);
 void kwl_scanout_leave(struct kwl_server *server, unsigned reason);
 void kwl_scanout_start(struct kwl_server *server);
@@ -2308,6 +2335,7 @@ void kwl_scanout_take(struct kwl_server *server);
 void kwl_scanout_present_wait(void);
 void kwl_scanout_surface_gone(struct kwl_server *server, struct kwl_object *surface);
 void kwl_scanout_client_gone(struct kwl_server *server, struct kwl_client *client);
+int kwl_scanout_cursor_hidden(struct kwl_server *server);
 void kwl_shot_open(struct kwl_server *server);
 void kwl_shot_close(struct kwl_server *server);
 void kwl_shot_tick(struct kwl_server *server);

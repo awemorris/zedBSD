@@ -113,6 +113,11 @@ struct list_walk {
 	int vt_hide;
 	int vt_capturing;
 	const struct layout_box *vt_capture;
+	/* Whether the loop over the layers opens and closes a layer's filter group (so its positioned descendants are inside it). */
+	int loop_groups;
+	/* The layers whose filter groups are open in that loop. */
+	const struct layout_box *groups[16];
+	int group_depth;
 };
 
 /*
@@ -144,6 +149,12 @@ static void list_box_part(struct list_walk *walk, const struct layout_box *box, 
 static void list_box_own(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth, int part);
 static const struct layout_box **list_children_ordered(const struct layout_box *box);
 static const struct layout_box *list_child(const struct layout_box *from, const struct layout_box **ordered, size_t index);
+static void list_backdrop(struct list_walk *walk, const struct layout_box *box);
+static void list_group_end(struct list_walk *walk);
+static void list_group_begin(struct list_walk *walk, const struct layout_box *box);
+static void list_groups_close(struct list_walk *walk, const struct layout_box *layer);
+static int list_box_grouped(const struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int part);
+static void list_filter_items(struct list_walk *walk, const struct layout_box *box, const struct css_filter *filters, int filter_count, int kind);
 static void list_fade(struct list_walk *walk, size_t first, float opacity);
 static void list_scale(struct list_walk *walk, size_t first, const struct layout_box *box);
 static int list_border_shape(const struct layout_box *box, struct list_shape *shape);
@@ -245,6 +256,7 @@ paint_build(
 		walk.tree = tree;
 		walk.transition = tree->transition;
 		walk.vt_hide = 1;
+		walk.loop_groups = 1;
 	}
 	if (tree->transition != NULL && tree->transition->show && tree->transition->count != 0 && tree->transition->names[0].is_root) {
 		list->canvas_color = LIST_CANVAS_DEFAULT;
@@ -268,6 +280,14 @@ paint_build(
 				continue;
 			clips = list_layer_clips(&walk, layer, 1);
 			first = list->items.count;
+
+			/* A layer's filter covers the layers of its descendants that follow it. */
+			list_groups_close(&walk, layer);
+			if (layer->style.filter_count != 0 && layer->style.backdrop_filter_count == 0 && walk.group_depth < 16 && walk.error == 0) {
+				list_group_begin(&walk, layer);
+				walk.groups[walk.group_depth++] = layer;
+				first = list->items.count;
+			}
 			list_box(&walk, layer, layer, 0);
 			if (fade < 1.0f)
 				list_fade(&walk, first, fade);
@@ -276,6 +296,7 @@ paint_build(
 				clips--;
 			}
 		}
+		list_groups_close(&walk, NULL);
 		wb_vector_release(&order_vt);
 		if (walk.error != 0) {
 			paint_release(list);
@@ -471,6 +492,24 @@ paint_dump(
 			    (double)layout_to_px(item->width), (double)layout_to_px(item->height));
 			list_color(out, item->color);
 			wb_buffer_append_string(out, "\n");
+			continue;
+		}
+
+		/* A backdrop filter: its rectangle and the number of functions. */
+		if (item->kind == PAINT_BACKDROP) {
+			wb_buffer_printf(out, "backdrop %.2f %.2f %.2f %.2f %d\n", (double)layout_to_px(item->x), (double)layout_to_px(item->y),
+			    (double)layout_to_px(item->width), (double)layout_to_px(item->height), item->filter_count);
+			continue;
+		}
+
+		/* A filtered group: its rectangle and the number of functions. */
+		if (item->kind == PAINT_GROUP) {
+			wb_buffer_printf(out, "group %.2f %.2f %.2f %.2f %d\n", (double)layout_to_px(item->x), (double)layout_to_px(item->y),
+			    (double)layout_to_px(item->width), (double)layout_to_px(item->height), item->filter_count);
+			continue;
+		}
+		if (item->kind == PAINT_GROUP_END) {
+			wb_buffer_append_string(out, "endgroup\n");
 			continue;
 		}
 
@@ -676,6 +715,11 @@ list_box_part(
 	size_t first;
 	int positioned;
 	int clipped;
+	int grouped;
+
+	/* A box position-visibility hides paints nothing, nor does what is in it. */
+	if (box->anchor_hidden)
+		return;
 
 	/* Stops at the depth the layout stops at, or after an error. */
 	if (depth > LAYOUT_DEPTH_MAX || walk->error != 0)
@@ -698,6 +742,11 @@ list_box_part(
 	if (box->style.opacity <= LIST_OPACITY_NONE)
 		return;
 
+	/* The box's filter works on its painting apart from the page: the group starts here and ends after it. */
+	grouped = list_box_grouped(walk, box, layer, part);
+	if (grouped)
+		list_group_begin(walk, box);
+
 	/* The box and its content inside its clip-path, then its outline over them. */
 	first = walk->list->items.count;
 	clipped = list_clip_path(walk, box);
@@ -714,6 +763,67 @@ list_box_part(
 	/* A translucent box fades what was painted for it. */
 	if (box->style.opacity < 1.0f)
 		list_fade(walk, first, box->style.opacity);
+
+	/* The box's filter group ends with its painting. */
+	if (grouped)
+		list_group_end(walk);
+	else if (part != LIST_BOX_DECORATION && box->style.filter_count != 0 && box->parent != NULL && box->style.backdrop_filter_count != 0)
+		list_filter_items(walk, box, box->style.filters, box->style.filter_count, PAINT_BACKDROP);
+}
+
+/* Tells whether a box's painting is its own filter group (a layer's is the loop's when the loop makes the groups). */
+static int
+list_box_grouped(
+	const struct list_walk *walk,
+	const struct layout_box *box,
+	const struct layout_box *layer,
+	int part)
+{
+	if (part == LIST_BOX_DECORATION || box->style.filter_count == 0 || box->parent == NULL)
+		return 0;
+	/* A box with a backdrop filter filters its backdrop and itself together: over what is painted so far. */
+	if (box->style.backdrop_filter_count != 0)
+		return 0;
+	if (walk->loop_groups && box == layer)
+		return 0;
+	return 1;
+}
+
+/* Starts the filter group of a box: its border box. */
+static void
+list_group_begin(
+	struct list_walk *walk,
+	const struct layout_box *box)
+{
+	list_filter_items(walk, box, box->style.filters, box->style.filter_count, PAINT_GROUP);
+}
+
+/* Ends the groups of the layers that are not ancestors of a layer (NULL: all of them). */
+static void
+list_groups_close(
+	struct list_walk *walk,
+	const struct layout_box *layer)
+{
+	const struct layout_box *up;
+	struct paint_item item;
+	int error;
+
+	while (walk->group_depth > 0) {
+		for (up = layer != NULL ? layer->parent : NULL; up != NULL; up = up->parent) {
+			if (up == walk->groups[walk->group_depth - 1])
+				break;
+		}
+		if (up != NULL)
+			return;
+		walk->group_depth--;
+		if (walk->error != 0)
+			continue;
+		memset(&item, 0, sizeof(item));
+		item.kind = PAINT_GROUP_END;
+		error = wb_vector_push(&walk->list->items, &item);
+		if (error != 0)
+			walk->error = error;
+	}
 }
 
 /* Starts the clip of a box's clip-path inset(), and reports whether there is one to end. */
@@ -824,6 +934,10 @@ list_box_own(
 	if (part != LIST_BOX_INLINE && visible)
 		list_shadows(walk, box);
 
+	/* The backdrop filter works on what is drawn so far, under the box's own background. */
+	if (part != LIST_BOX_INLINE && visible && box->style.backdrop_filter_count != 0 && box->parent != NULL)
+		list_backdrop(walk, box);
+
 	/* The background fills the border box, rounded as its corners are, unless it went to the canvas. */
 	width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
 	height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
@@ -831,8 +945,27 @@ list_box_own(
 	if (part != LIST_BOX_INLINE && visible && box != walk->canvas_box && (box->style.background_color >> 24) != 0) {
 		if (rounded) {
 			list_round_fill(walk, &shape, box->style.background_color);
-		} else {
+		} else if (box->style.background_clip == 0) {
 			list_rect(walk, box->x, box->y, width, height, box->style.background_color);
+		} else {
+			layout_unit inset_x;
+			layout_unit inset_y;
+
+			/* background-clip: the padding box inside the borders, the content box inside the padding too. */
+			inset_x = box->border[CSS_LEFT];
+			inset_y = box->border[CSS_TOP];
+			width -= box->border[CSS_LEFT] + box->border[CSS_RIGHT];
+			height -= box->border[CSS_TOP] + box->border[CSS_BOTTOM];
+			if (box->style.background_clip == 2) {
+				inset_x += box->padding[CSS_LEFT];
+				inset_y += box->padding[CSS_TOP];
+				width -= box->padding[CSS_LEFT] + box->padding[CSS_RIGHT];
+				height -= box->padding[CSS_TOP] + box->padding[CSS_BOTTOM];
+			}
+			if (width > 0 && height > 0)
+				list_rect(walk, box->x + inset_x, box->y + inset_y, width, height, box->style.background_color);
+			width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+			height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 		}
 	}
 
@@ -875,6 +1008,17 @@ list_box_own(
 	} else {
 		/* The children in painting order: a flex or grid container's in order-modified document order. */
 		ordered = list_children_ordered(box);
+
+		/* The items of a flex or grid container paint each as a whole, as inline blocks do (no phases across items). */
+		if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+		    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
+			for (index = 0, child = list_child(box, ordered, 0); child != NULL; child = list_child(child, ordered, ++index))
+				list_box(walk, child, layer, depth + 1);
+			free(ordered);
+			if (clips)
+				list_unclip(walk);
+			return;
+		}
 
 		/* Block decorations precede floats; their inline contents follow the floats. */
 		for (index = 0, child = list_child(box, ordered, 0); child != NULL; child = list_child(child, ordered, ++index)) {
@@ -1171,7 +1315,12 @@ list_lines(
 			}
 
 			/* Text and replaced boxes. */
-			if (box->vertical_inline) {
+			if (box->vertical_inline == 2) {
+				/* sideways-lr: the glyphs turn counterclockwise and the line runs up from the content box's bottom. */
+				list_fragment(walk, fragment,
+				    left + line->y + line->baseline + fragment->shift,
+				    top + box->height - line->left - fragment->x, 2);
+			} else if (box->vertical_inline) {
 				list_fragment(walk, fragment,
 				    left + line->y + line->height - line->baseline - fragment->shift,
 				    top + line->left + fragment->x, 1);
@@ -1268,6 +1417,11 @@ list_fragment(
 		return;
 
 	/* An inline replaced box's margin box stands on the baseline (in a vertical line, its block-start side to the right). */
+	if (fragment->box->kind == LAYOUT_REPLACED && vertical == 2) {
+		/* Where the line runs up from the bottom, with the ascent to the left of the baseline. */
+		list_replaced(walk, fragment->box, x - fragment->ascent, baseline - fragment->width);
+		return;
+	}
 	if (fragment->box->kind == LAYOUT_REPLACED && vertical) {
 		list_replaced_vertical(walk, fragment, x, baseline);
 		return;
@@ -2368,11 +2522,23 @@ list_box_background(
 	if (box->background == NULL && box->style.background_gradient == NULL)
 		return;
 
-	/* The border box paints it; the padding box places it. */
+	/* The border box paints it (background-clip narrows that); the padding box places it. */
 	painting.x = box->x;
 	painting.y = box->y;
 	painting.width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
 	painting.height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	if (box->style.background_clip != 0) {
+		painting.x += box->border[CSS_LEFT];
+		painting.y += box->border[CSS_TOP];
+		painting.width -= box->border[CSS_LEFT] + box->border[CSS_RIGHT];
+		painting.height -= box->border[CSS_TOP] + box->border[CSS_BOTTOM];
+		if (box->style.background_clip == 2) {
+			painting.x += box->padding[CSS_LEFT];
+			painting.y += box->padding[CSS_TOP];
+			painting.width -= box->padding[CSS_LEFT] + box->padding[CSS_RIGHT];
+			painting.height -= box->padding[CSS_TOP] + box->padding[CSS_BOTTOM];
+		}
+	}
 	area.x = box->x + box->border[CSS_LEFT];
 	area.y = box->y + box->border[CSS_TOP];
 	area.width = box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT];
@@ -2581,9 +2747,14 @@ list_background_size(
 	int width_auto;
 	int height_auto;
 
-	/* The image's own size. */
-	natural_width = (float)image->width * LAYOUT_UNIT;
-	natural_height = (float)image->height * LAYOUT_UNIT;
+	/* The image's own size (its resolution and the zoom change what a CSS pixel of it is). */
+	scale = box->style.zoom_eff > 0.0f ? box->style.zoom_eff : 1.0f;
+	if (image != box->background)
+		scale = 1.0f;
+	else if (box->style.background_density > 0.0f)
+		scale /= box->style.background_density;
+	natural_width = (float)image->width * LAYOUT_UNIT * scale;
+	natural_height = (float)image->height * LAYOUT_UNIT * scale;
 
 	/* contain: the largest size that fits; cover: the smallest that covers. */
 	if (box->style.background_size_keyword != CSS_BACKGROUND_SIZE_LENGTHS) {
@@ -2708,6 +2879,70 @@ list_rect(
 	item.width = width;
 	item.height = height;
 	item.color = color;
+	error = wb_vector_push(&walk->list->items, &item);
+	if (error != 0)
+		walk->error = error;
+}
+
+/* Adds the backdrop filter of a box (or its own filter, after it is painted): its border box, with the filter functions. */
+static void
+list_backdrop(
+	struct list_walk *walk,
+	const struct layout_box *box)
+{
+	const struct layout_box *ancestor;
+
+	/* Inside a backdrop root the backdrop is only what the root painted: none is drawn before this box here. */
+	for (ancestor = box->parent; ancestor != NULL && ancestor->parent != NULL; ancestor = ancestor->parent) {
+		if (ancestor->style.backdrop_filter_count != 0 || ancestor->style.filter_count != 0 ||
+		    ancestor->style.opacity < 1.0f || ancestor->style.mix_blend_mode != 0 ||
+		    ancestor->style.clip_inset != 0 || ancestor->style.clip_rect != 0 ||
+		    ancestor->style.will_change_contains != 0 || ancestor->style.view_transition_name != NULL)
+			return;
+	}
+	list_filter_items(walk, box, box->style.backdrop_filters, box->style.backdrop_filter_count, PAINT_BACKDROP);
+}
+
+/* Ends the filter group of a box. */
+static void
+list_group_end(
+	struct list_walk *walk)
+{
+	struct paint_item item;
+	int error;
+
+	if (walk->error != 0)
+		return;
+	memset(&item, 0, sizeof(item));
+	item.kind = PAINT_GROUP_END;
+	error = wb_vector_push(&walk->list->items, &item);
+	if (error != 0)
+		walk->error = error;
+}
+
+static void
+list_filter_items(
+	struct list_walk *walk,
+	const struct layout_box *box,
+	const struct css_filter *filters,
+	int filter_count,
+	int kind)
+{
+	struct paint_item item;
+	int error;
+
+	if (walk->error != 0)
+		return;
+	memset(&item, 0, sizeof(item));
+	item.kind = kind;
+	item.x = box->x;
+	item.y = box->y;
+	item.width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+	item.height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	if (item.width <= 0 || item.height <= 0)
+		return;
+	item.filters = filters;
+	item.filter_count = filter_count;
 	error = wb_vector_push(&walk->list->items, &item);
 	if (error != 0)
 		walk->error = error;
@@ -3453,6 +3688,8 @@ list_vt_paint(
 	sub.vt_hide = 1;
 	sub.vt_capturing = 1;
 	sub.vt_capture = capture;
+	sub.loop_groups = 0;
+	sub.group_depth = 0;
 	wb_vector_init(&order, sizeof(const struct layout_box *));
 	error = layout_stacking_order(walk->tree, &order, &flow_index);
 	if (error != 0) {

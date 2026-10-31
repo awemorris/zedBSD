@@ -560,6 +560,8 @@ ehci_retirement_worker_wakeup(
 	}
 
 	__atomic_store_n(&controller->retirement_pending, 1U, __ATOMIC_RELEASE);
+
+	/* Wakes the retirement worker to retire the request. */
 	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -588,6 +590,8 @@ ehci_root_worker_arm(
 	controller->root_ready = 1;
 	controller->root_wake_generation++;
 	worker = controller->root_worker;
+
+	/* Wakes the root worker to scan the ports. */
 	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -3675,6 +3679,8 @@ ehci_root_worker_stop(
 	__atomic_store_n(&controller->root_stopping, 1U, __ATOMIC_RELEASE);
 	controller->root_ready = 0;
 	controller->root_wake_generation++;
+
+	/* Wakes the root worker so it sees the stop request. */
 	sched_notify_task(worker->task);
 
 	/*
@@ -3859,6 +3865,8 @@ ehci_retirement_worker_stop(
 	controller->retirement_joining = 1;
 	__atomic_store_n(&controller->retirement_stopping, 1U,
 			 __ATOMIC_RELEASE);
+
+	/* Wakes the retirement worker so it sees the stop request. */
 	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
@@ -4171,7 +4179,7 @@ ehci_root_worker_request_stop(
 	controller->root_ready = 0;
 	controller->root_wake_generation++;
 
-	/* Handles the worker availability. */
+	/* Wakes the root worker so it sees the stop request, unless a joiner is already reaping it. */
 	worker = controller->root_worker;
 	if (worker != NULL && !controller->root_joining)
 		sched_notify_task(worker->task);
@@ -4202,6 +4210,8 @@ ehci_root_event_defer(
 
 	__atomic_store_n(&controller->root_pending, 1U, __ATOMIC_RELEASE);
 	controller->root_wake_generation++;
+
+	/* Wakes the root worker to handle the deferred event. */
 	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);

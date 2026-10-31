@@ -403,28 +403,36 @@ How to replace the kernel is in the
 
 ```text
 efiboot list
-efiboot create NAME DISK PARTITION LOADER-PATH
+efiboot create [-l LABEL] [-n] DISK PARTITION LOADER-PATH
 efiboot delete NUMBER
-efiboot order NUMBER...
+efiboot order NUMBER[,NUMBER...]
+efiboot next NUMBER
+efiboot prune [-l LABEL]
 ```
 
-- `list` prints `BootOrder` and each entry's number, attributes, name and
-  device path.
-- `create` adds an entry whose device path is the partition's
-  `HD(number, GPT, PARTUUID, start, size)` followed by `File(LOADER-PATH)`,
-  appends it to the end of `BootOrder`, and prints its number. An existing
-  entry with the same device path is reused and appended if missing.
+- `list` prints `BootCurrent`, `BootNext`, `BootOrder` and each entry's
+  number, an `*` when it is active, its label and its device path.
+- `create` adds an entry labelled `LABEL` (`zedBSD` by default) whose device
+  path is the GPT partition's `HD(number, GPT, PARTUUID, start, size)`
+  followed by `File(LOADER-PATH)`, appends it to the end of `BootOrder`, and
+  prints its number (`Boot####`). An existing entry with the same device path
+  is reused and appended if missing. `-n` also sets `BootNext` to it.
 - `delete` removes the entry and its number from `BootOrder`.
-- `order` replaces `BootOrder`.
+- `order` replaces `BootOrder`; `next` sets `BootNext`.
+- `prune` removes every entry labelled `LABEL` (`zedBSD` by default) whose
+  device path names a GPT partition that no present disk has, and prints the
+  number of each one it removed. When a disk cannot be read it removes
+  nothing.
 
-It is built for every platform and fails with `ENOTSUP` where the system was
-not started through UEFI runtime services.
+It is built for amd64 and fails with `EOPNOTSUPP` ("Operation not
+supported") where the system was not started through UEFI runtime services
+(a BIOS boot, or a loader that did not hand them over).
 
-The installer's `finish` step creates an entry named after `NAME` in the
-installed `/etc/os-release` (`zedBSD`) for the loader it wrote, and removes
-entries of that name whose partition is on no present disk. Failing to write
-the entry is reported but does not fail the installation; the installed disk
-can still be chosen in the firmware's boot menu.
+The installer's `finish` step creates an entry labelled with the system's
+name (`zedBSD`) for the loader it wrote, then prunes the entries of that
+label whose partition is on no present disk. Failing to write the entry is
+reported but does not fail the installation; the installed disk can still be
+chosen in the firmware's boot menu.
 
 ## 7. Source
 

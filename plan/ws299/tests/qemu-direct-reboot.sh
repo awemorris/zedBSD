@@ -9,7 +9,7 @@
 # debugger (its pid in W/qemu.pid).
 #   sh plan/ws299/tests/qemu-direct-reboot.sh IMAGE VMUNIX [ROUNDS]
 # IMAGE: plan/tools/posix/config-amd64-serial.mk with ZEDBSD_EXTRA_FILES putting directio and randread in /root.
-# W is build/tmp/qemu-direct-reboot.  The last line is "qemu-direct-reboot: PASS N rounds|HANG round N|FAIL ...".
+# W is ${WS299_RUNS:-build/tmp}/qemu-direct-reboot.  The last line is "qemu-direct-reboot: PASS N rounds|HANG round N|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 . plan/tools/guest/qemu-accel.sh
@@ -21,8 +21,8 @@ SIZE_MIB=${SIZE_MIB:-4096}
 GDB_PORT=${GDB_PORT:-22212}
 QMP_PORT=${QMP_PORT:-22211}
 REBOOT_SECONDS=${REBOOT_SECONDS:-180}
-fresh_out build/tmp/qemu-direct-reboot
-W=build/tmp/qemu-direct-reboot
+mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-direct-reboot
+W=${WS299_RUNS:-build/tmp}/qemu-direct-reboot
 truncate -s 6G "$W/nvme.img"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
 round=1

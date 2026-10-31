@@ -9,10 +9,30 @@
  * Records arbitrary Vulkan 1.0 command streams with ordinary pool ownership.
  */
 
+#include <pthread.h>
 #include <string.h>
 #include "internal.h"
 
 #define VULKAN_RECORDING_BATCH_BYTES (1024U * 1024U)
+
+/*
+ * The recording thread: it sends a long recording's batches, in the order
+ * they were handed to it, while the application records the next one, so
+ * the renderer's decoding of a batch and the encoding of the next run side
+ * by side.  Its lock guards the queue of waiting batches (first and last),
+ * each command buffer's sent_pending and sent_error and a batch's place
+ * while it waits; ready wakes the thread, done wakes a command buffer
+ * waiting for its batches.  started says whether the thread runs (it is
+ * started once, by the first long recording; when it cannot be, batches
+ * are sent by the recording call as before).
+ */
+static pthread_mutex_t command_sender_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t command_sender_ready = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t command_sender_done = PTHREAD_COND_INITIALIZER;
+static struct vulkan_recording_batch *command_sender_first;
+static struct vulkan_recording_batch *command_sender_last;
+static pthread_once_t command_sender_once = PTHREAD_ONCE_INIT;
+static VkBool32 command_sender_started;
 
 /* Recording failures remain local until the standard result-bearing end/reset calls. */
 enum vulkan_command_state {
@@ -37,6 +57,12 @@ static void command_head_add(struct VkCommandBuffer_T *command, uint32_t opcode)
 static VkResult command_send(struct VkCommandBuffer_T *command, size_t bytes, uint32_t last);
 static size_t command_batch_limit(struct VkCommandBuffer_T *command);
 static VkResult command_pending_send(struct VkCommandBuffer_T *command);
+static VkResult command_replies(struct vulkan_context *context, struct vulkan_reader *reader, VkResult status, const uint32_t *expected, uint32_t count);
+static VkResult command_send_later(struct VkCommandBuffer_T *command, size_t start, size_t length);
+static void command_sent_wait(struct VkCommandBuffer_T *command);
+static void command_pool_sent_wait(struct vulkan_command_pool *pool);
+static void command_sender_start(void);
+static void *command_sender(void *argument);
 static void command_encode_color(struct vulkan_writer *writer, const VkClearColorValue *color);
 static void command_encode_depth_ranges(struct vulkan_writer *writer, const VkClearDepthStencilValue *clear, uint32_t count, const VkImageSubresourceRange *ranges);
 static void command_encode_clear_attachment(struct vulkan_writer *writer, const VkClearAttachment *attachment);
@@ -127,6 +153,9 @@ vkDestroyCommandPool(
 		pool->object.allocator.has_callbacks = VK_TRUE;
 	}
 
+	/* The batches its command buffers still send go before the pool. */
+	command_pool_sent_wait(pool);
+
 	/* Native pool destruction consumes its native command buffers in the same operation. */
 	status = vulkan_object_destroy_remote(owner, &pool->object, GPU_OP_DESTROY_COMMAND_POOL);
 	if (status != VK_SUCCESS)
@@ -165,6 +194,7 @@ vkResetCommandPool(
 	/* Preserves the caller's release-resources flag while addressing the ordinary native pool. */
 	owner = vulkan_device(device);
 	pool = (struct vulkan_command_pool *)vulkan_nondispatchable_object((uint64_t)commandPool);
+	command_pool_sent_wait(pool);
 	vulkan_writer_init_for_object(&writer, &pool->object);
 	vulkan_command_begin(&writer, GPU_OP_RESET_COMMAND_POOL);
 	vulkan_write_u64(&writer, owner->object.wire_id);
@@ -340,6 +370,14 @@ vkFreeCommandBuffers(
 	/* Native free consumes exactly the selected command-buffer array, including allowed nulls. */
 	owner = vulkan_device(device);
 	pool = (struct vulkan_command_pool *)vulkan_nondispatchable_object((uint64_t)commandPool);
+
+	/* The batches the command buffers still send go before the free. */
+	for (index = 0; index < commandBufferCount; index++) {
+		command = (struct VkCommandBuffer_T *)pCommandBuffers[index];
+		if (command != NULL)
+			command_sent_wait(command);
+	}
+
 	vulkan_writer_init_for_object(&writer, &pool->object);
 	vulkan_command_begin(&writer, GPU_OP_FREE_COMMAND_BUFFERS);
 	vulkan_write_u64(&writer, owner->object.wire_id);
@@ -390,6 +428,7 @@ vkBeginCommandBuffer(
 	 * latched on the context.
 	 */
 	command = (struct VkCommandBuffer_T *)commandBuffer;
+	command_sent_wait(command);
 	if (command->end_pending != VK_FALSE)
 		(void)command_pending_send(command);
 
@@ -476,6 +515,7 @@ vkEndCommandBuffer(
 
 	/* Prepares the sole result-bearing record after every deferred void command. */
 	command = (struct VkCommandBuffer_T *)commandBuffer;
+	command_sent_wait(command);
 	prior = command->error;
 	vulkan_writer_init_for_object(&writer, &command->object);
 	vulkan_command_begin(&writer, GPU_OP_END_COMMAND_BUFFER);
@@ -572,6 +612,7 @@ vkResetCommandBuffer(
 	 * when either asked to.
 	 */
 	command = (struct VkCommandBuffer_T *)commandBuffer;
+	command_sent_wait(command);
 	pending = 0U;
 	if (command->reset_pending != VK_FALSE)
 		pending = command->reset_flags;
@@ -812,18 +853,15 @@ command_record_finish(
 		}
 	}
 
-	/* Decode the complete prefix before this record when the two would cross the soft limit. */
-	if (status == VK_SUCCESS && start != 0 && command->recording.bytes > limit) {
-		status = command_send(command, start, 0U);
-		if (status == VK_SUCCESS) {
-			memmove(command->recording.data, command->recording.data + start, length);
-			command->recording.bytes = length;
-		} else {
-			command->recording.bytes = 0;
-		}
-	}
+	/* The complete prefix before this record goes (to the recording thread) when the two would cross the soft limit. */
+	if (status == VK_SUCCESS && start != 0 && command->recording.bytes > limit)
+		status = command_send_later(command, start, length);
 
-	/* A single record over the limit is decoded alone through the existing external-stream transport. */
+	/* A single record over the limit is decoded alone through the existing external-stream transport, after the batches before it. */
+	if (status == VK_SUCCESS && length > limit) {
+		command_sent_wait(command);
+		status = command->error;
+	}
 	if (status == VK_SUCCESS && length > limit) {
 		status = vulkan_context_execute(command->object.context, &command->recording, 0, &reader);
 		status = vulkan_reply_finish(command->object.context, &reader, status);
@@ -877,7 +915,6 @@ command_send(
 	uint32_t expected[3];
 	uint32_t count;
 	uint32_t index;
-	uint32_t opcode;
 	VkResult status;
 	VkResult result;
 
@@ -901,30 +938,288 @@ command_send(
 	command->head_replies = 0U;
 	command->head_bytes = 0U;
 
+	/* The replies, in order. */
+	result = command_replies(context, &reader, status, expected, count);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* Succeeded: the bytes ran and every answering command succeeded. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Reads the replies of a transaction that ran with status: each its own
+ * opcode (expected, count of them), then its result.  Returns the
+ * transport's failure, else the first answering command's failure.
+ */
+static VkResult
+command_replies(
+	struct vulkan_context *context,
+	struct vulkan_reader *reader,
+	VkResult status,
+	const uint32_t *expected,
+	uint32_t count)
+{
+	uint32_t index;
+	uint32_t opcode;
+	VkResult result;
+
 	/* Each reply: its own opcode, then its result; the first failure is kept. */
 	result = VK_SUCCESS;
 	for (index = 0U; status == VK_SUCCESS && index < count; index++) {
-		opcode = vulkan_read_u32(&reader);
-		if (reader.error != VK_SUCCESS || opcode != expected[index]) {
-			reader.error = VK_ERROR_DEVICE_LOST;
+		opcode = vulkan_read_u32(reader);
+		if (reader->error != VK_SUCCESS || opcode != expected[index]) {
+			reader->error = VK_ERROR_DEVICE_LOST;
 			vulkan_context_error(context, VK_ERROR_DEVICE_LOST);
 			break;
 		}
-		status = vulkan_read_result(&reader);
+		status = vulkan_read_result(reader);
 		if (status == VK_ERROR_DEVICE_LOST)
 			vulkan_context_error(context, VK_ERROR_DEVICE_LOST);
 		if (result == VK_SUCCESS)
 			result = status;
 		status = VK_SUCCESS;
-		if (reader.error != VK_SUCCESS)
+		if (reader->error != VK_SUCCESS)
 			break;
 	}
-	status = vulkan_reply_finish(context, &reader, status);
+	status = vulkan_reply_finish(context, reader, status);
 	if (status != VK_SUCCESS)
 		return status;
 
-	/* Succeeded: the bytes ran; the first answering command's failure, if any. */
+	/* Reports the first answering command's failure, or success. */
 	return result;
+}
+
+/*
+ * Hands the recording's complete prefix (start bytes, the head's replies
+ * with it) to the recording thread and keeps recording into a place of
+ * its own, the record after the prefix (length bytes) moved there first.
+ * Without the thread the prefix is sent now, as before.  Returns the
+ * failure of a prefix sent now, or of the move.
+ */
+static VkResult
+command_send_later(
+	struct VkCommandBuffer_T *command,
+	size_t start,
+	size_t length)
+{
+	struct vulkan_recording_batch *batch;
+	struct vulkan_writer spare;
+	uint32_t index;
+	VkResult status;
+	int locked;
+
+	/* Starts the recording thread once; without it the prefix is sent here. */
+	(void)pthread_once(&command_sender_once, command_sender_start);
+	if (!command_sender_started) {
+		status = command_send(command, start, 0U);
+		if (status != VK_SUCCESS) {
+			command->recording.bytes = 0;
+			return status;
+		}
+		memmove(command->recording.data, command->recording.data + start, length);
+		command->recording.bytes = length;
+
+		/* Succeeded: the prefix ran and the record moved to the front. */
+		return VK_SUCCESS;
+	}
+
+	/* The next place, once the thread has sent what it held. */
+	batch = &command->batches[command->batch_next];
+	locked = pthread_mutex_lock(&command_sender_lock);
+	if (locked != 0)
+		abort();
+
+	/* Waits while the thread still sends the batch this place held. */
+	while (batch->waiting != VK_FALSE)
+		(void)pthread_cond_wait(&command_sender_done, &command_sender_lock);
+
+	(void)pthread_mutex_unlock(&command_sender_lock);
+
+	/*
+	 * The prefix goes to the place, which gives its storage (kept from an
+	 * earlier batch, or none yet) to the recording; the record is put at
+	 * the recording's start.
+	 */
+	spare = batch->part;
+	batch->part = command->recording;
+	batch->part.bytes = start;
+	batch->part.error = VK_SUCCESS;
+	command->recording = spare;
+	command->recording.allocator = command->object.allocator;
+	command->recording.scope = VK_SYSTEM_ALLOCATION_SCOPE_OBJECT;
+	command->recording.opcode = batch->part.opcode;
+	command->recording.external_memory_type = batch->part.external_memory_type;
+	command->recording.bytes = 0;
+	command->recording.error = VK_SUCCESS;
+	vulkan_write_bytes(&command->recording, batch->part.data + start, length);
+	status = command->recording.error;
+	if (status != VK_SUCCESS) {
+		command->recording.bytes = 0;
+		command->recording.error = VK_SUCCESS;
+		return status;
+	}
+
+	/* The replies the head asks for travel with the prefix; the head has travelled. */
+	batch->command = command;
+	batch->count = command->head_replies;
+	for (index = 0U; index < command->head_replies; index++)
+		batch->expected[index] = command->head_opcodes[index];
+	command->head_replies = 0U;
+	command->head_bytes = 0U;
+
+	/* Queued last: the thread sends batches in the order they were handed over. */
+	locked = pthread_mutex_lock(&command_sender_lock);
+	if (locked != 0)
+		abort();
+
+	batch->waiting = VK_TRUE;
+	batch->next = NULL;
+	if (command_sender_last != NULL)
+		command_sender_last->next = batch;
+	else
+		command_sender_first = batch;
+	command_sender_last = batch;
+	command->sent_pending++;
+	(void)pthread_cond_signal(&command_sender_ready);
+
+	(void)pthread_mutex_unlock(&command_sender_lock);
+
+	command->batch_next = (command->batch_next + 1U) % VULKAN_RECORDING_BATCHES;
+
+	/* Succeeded: the prefix is the thread's to send. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Waits until the recording thread has sent every batch of a command
+ * buffer, and makes the first failure they met the command buffer's.
+ */
+static void
+command_sent_wait(
+	struct VkCommandBuffer_T *command)
+{
+	VkResult failure;
+	int locked;
+
+	/* Nothing was ever handed over. */
+	if (!command_sender_started)
+		return;
+
+	/* The batches sent, their failure taken. */
+	locked = pthread_mutex_lock(&command_sender_lock);
+	if (locked != 0)
+		abort();
+
+	/* Waits while any batch of the command buffer is still to be sent. */
+	while (command->sent_pending != 0U)
+		(void)pthread_cond_wait(&command_sender_done, &command_sender_lock);
+	failure = command->sent_error;
+	command->sent_error = VK_SUCCESS;
+
+	(void)pthread_mutex_unlock(&command_sender_lock);
+
+	/* A batch the renderer refused makes the recording invalid. */
+	if (failure != VK_SUCCESS && command->error == VK_SUCCESS) {
+		command->error = failure;
+		command->state = VULKAN_COMMAND_INVALID;
+	}
+}
+
+/* Waits until the recording thread has sent the batches of every command buffer of a pool. */
+static void
+command_pool_sent_wait(
+	struct vulkan_command_pool *pool)
+{
+	struct vulkan_object *child;
+
+	/* Each command buffer of the pool (the application keeps the pool to this thread). */
+	for (child = pool->object.first_child; child != NULL; child = child->next_sibling)
+		command_sent_wait((struct VkCommandBuffer_T *)child);
+}
+
+/* Starts the recording thread (once); a thread that cannot start leaves batches to the recording calls. */
+static void
+command_sender_start(
+	void)
+{
+	pthread_attr_t attributes;
+	pthread_t thread;
+	int error;
+
+	/* A detached thread for the life of the process. */
+	error = pthread_attr_init(&attributes);
+	if (error != 0)
+		return;
+	(void)pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+	error = pthread_create(&thread, &attributes, command_sender, NULL);
+	(void)pthread_attr_destroy(&attributes);
+	if (error != 0)
+		return;
+
+	/* The thread takes batches from now on. */
+	command_sender_started = VK_TRUE;
+}
+
+/*
+ * Sends the batches handed over, one at a time in their order, each in
+ * one transaction with the replies its head asks for, for the life of
+ * the process.
+ */
+static void *
+command_sender(
+	void *argument)
+{
+	struct vulkan_recording_batch *batch;
+	struct VkCommandBuffer_T *command;
+	struct vulkan_context *context;
+	struct vulkan_reader reader;
+	VkResult status;
+	int locked;
+
+	(void)argument;
+
+	/* One batch after another, waiting when there is none. */
+	for (;;) {
+		/* Takes the first batch waiting. */
+		locked = pthread_mutex_lock(&command_sender_lock);
+		if (locked != 0)
+			abort();
+
+		/* Waits while no batch is handed over. */
+		while (command_sender_first == NULL)
+			(void)pthread_cond_wait(&command_sender_ready, &command_sender_lock);
+		batch = command_sender_first;
+		command_sender_first = batch->next;
+		if (command_sender_first == NULL)
+			command_sender_last = NULL;
+
+		(void)pthread_mutex_unlock(&command_sender_lock);
+
+		/* The batch's transaction and its head's replies. */
+		command = batch->command;
+		context = command->object.context;
+		if (batch->count != 0U)
+			batch->part.opcode = batch->expected[0];
+		status = vulkan_context_execute(context, &batch->part, (size_t)batch->count * 8U, &reader);
+		status = command_replies(context, &reader, status, batch->expected, batch->count);
+
+		/* Sent: its failure is the command buffer's, its place free again. */
+		locked = pthread_mutex_lock(&command_sender_lock);
+		if (locked != 0)
+			abort();
+
+		if (status != VK_SUCCESS && command->sent_error == VK_SUCCESS)
+			command->sent_error = status;
+		command->sent_pending--;
+		batch->waiting = VK_FALSE;
+		(void)pthread_cond_broadcast(&command_sender_done);
+
+		(void)pthread_mutex_unlock(&command_sender_lock);
+	}
+
+	/* Not reached: the thread lives as long as the process. */
+	return NULL;
 }
 
 /* The bytes one transaction of a command buffer's recording may carry. */
@@ -977,9 +1272,19 @@ command_buffer_release(
 	struct vulkan_object *object)
 {
 	struct VkCommandBuffer_T *command;
+	uint32_t index;
 
-	/* Parent destruction may supply compatible callbacks with new user data. */
+	/* The batches still being sent first; parent destruction may supply compatible callbacks with new user data. */
 	command = (struct VkCommandBuffer_T *)object;
+	command_sent_wait(command);
+
+	/* The storage each batch's place kept. */
+	for (index = 0U; index < VULKAN_RECORDING_BATCHES; index++) {
+		command->batches[index].part.allocator = object->allocator;
+		vulkan_writer_finish(&command->batches[index].part);
+	}
+
+	/* The recording's own storage. */
 	command->recording.allocator = object->allocator;
 	vulkan_writer_finish(&command->recording);
 	command->recording.allocator = object->allocator;
@@ -1223,6 +1528,9 @@ static void
 command_buffer_initial(
 	struct VkCommandBuffer_T *command)
 {
+	/* Batches still being sent belong to the discarded recording; they are sent first. */
+	command_sent_wait(command);
+
 	/* Recording errors belong to the discarded old recording and cannot survive a successful reset. */
 	command->recording.bytes = 0;
 	command->recording.error = VK_SUCCESS;

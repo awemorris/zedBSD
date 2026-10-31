@@ -58,55 +58,6 @@ VkResult kl_backend_display_acquire(struct kl_backend *backend, const struct kl_
 VkResult kl_backend_display_release(struct kl_backend *backend, const struct kl_backend_vulkan *vulkan, VkPhysicalDevice physical, VkDisplayKHR display);
 
 /*
- * The direct scanout of a client's buffer (ws122-p005b, the compositor's
- * game mode, the 2026-10-06 user decision B and the Guardrail's exception
- * to "the compositor uses only libvulkan"): while a fullscreen video or
- * game is all that shows, the compositor closes its swapchain, and the
- * backend shows the client's GPU buffer on the display without composing
- * it.  Only zedBSD has it (its kernel's display ioctls, which stay in the
- * backend's zedBSD tree); elsewhere it is ENOTSUP and the compositor keeps
- * composing.
- *
- *   kl_backend_scanout_possible tells, without claiming anything, whether
- *       a scanout of the given size could open (a display that shows shared
- *       images takes the size); 0, ENOTSUP, or the query's failure.  The
- *       compositor asks it before it closes its swapchain, so an output
- *       whose display cannot scan out is not closed and opened again for
- *       nothing (on the Raspberry Pi 4 that closing and opening during a
- *       video's decode stopped the firmware's decoder, ws236-p011)
- *   kl_backend_scanout_open     claims the display for an output of the
- *       given size (after the swapchain has gone); 0, ENOTSUP, or the
- *       claim's failure.  The compositor's display thread calls it
- *   kl_backend_scanout_begin    readies a buffer (one of the GPU buffers'
- *       protocol, keiland-backend-gpu.h, whose rendering is done) to be
- *       shown as the whole output, on the compositor's main thread: it is
- *       imported once, and nothing waits.  0, EINVAL for a buffer that
- *       cannot be scanned out (not a GPU buffer, another size), or the
- *       import's failure
- *   kl_backend_scanout_present  shows the buffer readied last and returns
- *       once the display reads it (at the next refresh): 0 (the display
- *       reads the buffer, and the one it replaces is no longer read), EINVAL
- *       with none readied, or the present's failure.  The compositor's
- *       present thread calls it; one present runs at a time, and the next
- *       buffer is readied only after it has returned
- *   kl_backend_scanout_close    releases the display (the swapchain may be
- *       made again) once no present runs; NULL does nothing.  The
- *       compositor's display thread calls it
- *
- * Only the compositor's main thread readies buffers, and a buffer's record
- * may go (its handle forgotten) on it while the display thread opens or
- * closes a scanout: the backend keeps them apart.
- */
-struct kl_backend_scanout;
-struct kl_backend_protocol_host;
-struct kl_backend_resource;
-int kl_backend_scanout_possible(struct kl_backend *backend, uint32_t width, uint32_t height);
-int kl_backend_scanout_open(struct kl_backend *backend, uint32_t width, uint32_t height, struct kl_backend_scanout **scanout);
-int kl_backend_scanout_begin(struct kl_backend_scanout *scanout, const struct kl_backend_protocol_host *host, struct kl_backend_resource *buffer);
-int kl_backend_scanout_present(struct kl_backend_scanout *scanout);
-void kl_backend_scanout_close(struct kl_backend_scanout *scanout);
-
-/*
  * Fills path with the compositor's default socket for this system (the
  * user's runtime directory, else /tmp, then wayland-keiland).  Returns 0,
  * ENAMETOOLONG, or ENOTSUP where the compositor keeps its own default

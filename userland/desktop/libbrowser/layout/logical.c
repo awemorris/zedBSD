@@ -31,9 +31,19 @@
 #include <errno.h>
 #include <string.h>
 
+/*
+ * sideways-lr is laid out like vertical-lr with the inline axis turned the
+ * other way (its line starts at the bottom): a mode of its own here, next to
+ * the three writing modes of the style.
+ */
+#define LOGICAL_SIDEWAYS_LR	3
+
+static int logical_mode_of(const struct css_style *style);
+
 static int logical_vertical(int mode);
 static layout_unit logical_containing_extent(const struct layout_tree *tree, const struct layout_box *box, int own);
-static int logical_fits_content(const struct layout_box *box);
+static int logical_fits_content(const struct layout_box *box, int room_definite);
+static int logical_grid_orthogonal(const struct layout_box *box);
 static void logical_sides_to_logical(struct css_length *sides, int mode);
 static void logical_floats_to_logical(float *sides, int mode);
 static void logical_ints_to_logical(int *sides, int mode);
@@ -42,11 +52,30 @@ static void logical_units_to_physical(layout_unit *sides, int mode);
 static void logical_units_to_logical(layout_unit *sides, int mode);
 static void logical_style(struct css_style *style, int mode);
 static int logical_convert(struct layout_tree *tree, struct layout_box *box, int mode);
-static void logical_unflip(struct layout_box *box, int mode, layout_unit parent_width, int root);
-static void logical_box_to_physical(struct layout_box *box, int mode, layout_unit parent_width, int place);
+static void logical_unflip(struct layout_box *box, int mode, layout_unit parent_width, layout_unit parent_height, int root);
+static void logical_box_to_physical(struct layout_box *box, int mode, layout_unit parent_width, layout_unit parent_height, int place);
 static void logical_box_to_logical(struct layout_box *box, int mode);
 static void logical_static_to_physical(struct layout_box *child, int mode, layout_unit width);
 static void logical_restore(struct layout_box *box);
+
+/* Reports the mode a style lays its box out in (sideways-lr is its own). */
+static int
+logical_mode_of(
+	const struct css_style *style)
+{
+	/* sideways-lr is vertical-lr flowing the other way along its lines. */
+	if (style->writing_mode == CSS_WRITING_VERTICAL_LR && style->writing_sideways == 1)
+		return LOGICAL_SIDEWAYS_LR;
+	return style->writing_mode;
+}
+
+/* Reports a style's writing mode as position-area reads it: sideways-lr is the mode 3. */
+int
+position_area_mode(
+	const struct css_style *style)
+{
+	return logical_mode_of(style);
+}
 
 /*
  * Reports the writing mode a box was given (its physical style's, when a
@@ -82,7 +111,7 @@ layout_logical_wanted(
 		return 0;
 
 	/* Otherwise its writing mode against the system it is laid out in. */
-	mode = box->style.writing_mode;
+	mode = logical_mode_of(&box->style);
 	if (mode == tree->logical_mode)
 		return 0;
 
@@ -95,8 +124,11 @@ layout_logical_wanted(
 	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB &&
 	    (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID ||
 	    display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)) {
+		/* A grid places its absolute children by its logical lines, so only its items count. */
 		for (child = box->first_child; child != NULL; child = child->next) {
-			if (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+			if (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+			    !(child->style.position == CSS_POSITION_ABSOLUTE &&
+			    (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)))
 				return 0;
 		}
 	}
@@ -107,13 +139,37 @@ layout_logical_wanted(
 	 */
 	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB && box->parent != NULL && !box->out_of_flow) {
 		display = box->parent->style.display;
-		if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)
+		if ((display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID) && !logical_grid_orthogonal(box))
 			return 0;
-		if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
+
+		/* A replaced item is sized by its image's ratio, whatever its writing mode. */
+		if (box->replaced && (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX))
 			return 0;
 	}
 
 	/* Succeeded: the box needs its own coordinates. */
+	return 1;
+}
+
+/*
+ * Tells whether an item of a horizontal grid is laid out in its own
+ * (vertical) coordinates: a vertical item of a horizontal grid whose
+ * size the grid lays out as a block (not a replaced or atomic one).
+ */
+static int
+logical_grid_orthogonal(
+	const struct layout_box *box)
+{
+	/* Only a vertical item of a horizontal grid is orthogonal to it. */
+	if (box->parent->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
+	    box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+		return 0;
+
+	/* Replaced and atomic items keep the grid's own handling. */
+	if (box->replaced || box->atomic)
+		return 0;
+
+	/* Succeeded: the item is orthogonal. */
 	return 1;
 }
 
@@ -139,7 +195,7 @@ layout_logical(
 
 	/* The two systems: the parent's and the box's. */
 	outer = tree->logical_mode;
-	own = box->style.writing_mode;
+	own = logical_mode_of(&box->style);
 
 	/* A vertical box's domain gets its logical styles. */
 	if (logical_vertical(own)) {
@@ -185,7 +241,7 @@ layout_logical(
 	box->logical_root = 1;
 	fit = 0;
 	if (logical_vertical(own) != logical_vertical(outer) && box->parent != NULL)
-		fit = logical_fits_content(box);
+		fit = logical_fits_content(box, saved_definite);
 	if (fit) {
 		error = layout_shrink_to_fit(tree, box, available);
 	} else {
@@ -198,7 +254,7 @@ layout_logical(
 
 	/* The domain back to physical coordinates, and its styles back. */
 	if (logical_vertical(own)) {
-		logical_unflip(box, own, 0, 1);
+		logical_unflip(box, own, 0, 0, 1);
 		logical_restore(box);
 	}
 	if (error != 0)
@@ -218,14 +274,16 @@ layout_logical(
 
 /*
  * Tells whether an orthogonal box's auto inline size fits its content: a
- * float, an inline block, a box out of the flow, or a block-level box of a
- * block container (a flex or grid item is sized by its container).
+ * float, an inline block, a box out of the flow, a flex item, or a block-level box of a
+ * block container or a flex container (a grid item is sized by its container).
  */
 static int
 logical_fits_content(
-	const struct layout_box *box)
+	const struct layout_box *box,
+	int room_definite)
 {
 	int display;
+	int align;
 
 	/* An inline size of its own is kept. */
 	if (box->style.width.unit != CSS_UNIT_AUTO)
@@ -239,12 +297,17 @@ logical_fits_content(
 	if (box->floating != CSS_FLOAT_NONE || box->out_of_flow || box->atomic)
 		return 1;
 
-	/* Flex and grid items are sized by their containers. */
+	/* Grid items are sized by their containers (a flex item's inline size is its content's until the line stretches it). */
 	display = box->parent->style.display;
-	if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)
-		return 0;
-	if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
-		return 0;
+	if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID) {
+		/* A grid item stretches across its row when the row's size is known (its align-self is stretch, its physical height auto). */
+		align = box->style.align_self;
+		if (align == CSS_ALIGN_AUTO || align == CSS_ALIGN_NORMAL)
+			align = box->parent->style.align_items;
+		if (align == CSS_ALIGN_NORMAL || align == CSS_ALIGN_AUTO || align == CSS_ALIGN_STRETCH)
+			return !room_definite;
+		return 1;
+	}
 
 	/* Succeeded: the box fits its content. */
 	return 1;
@@ -334,7 +397,7 @@ logical_convert(
 	column = box->parent != NULL &&
 	    (box->parent->style.display == CSS_DISPLAY_FLEX || box->parent->style.display == CSS_DISPLAY_INLINE_FLEX) &&
 	    (box->parent->style.flex_direction == CSS_FLEX_COLUMN || box->parent->style.flex_direction == CSS_FLEX_COLUMN_REVERSE);
-	if (kept->writing_mode != mode && !column) {
+	if (logical_mode_of(kept) != mode && !column) {
 		if (box->style.align_self == CSS_ALIGN_SELF_START)
 			box->style.align_self = CSS_ALIGN_SELF_END;
 		else if (box->style.align_self == CSS_ALIGN_SELF_END)
@@ -346,11 +409,11 @@ logical_convert(
 	 * (whose box the box's mode places, and whose contents run their own
 	 * way); an orthogonal one starts a domain of its own.
 	 */
-	own = kept->writing_mode;
+	own = logical_mode_of(kept);
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->physical_style != NULL)
 			continue;
-		if (child->style.writing_mode != own &&
+		if (logical_mode_of(&child->style) != own &&
 		    (!logical_vertical(child->style.writing_mode) || !logical_vertical(own)))
 			continue;
 		error = logical_convert(tree, child, own);
@@ -420,7 +483,11 @@ logical_sides_to_logical(
 	memcpy(physical, sides, sizeof(physical));
 	sides[CSS_LEFT] = physical[CSS_TOP];
 	sides[CSS_RIGHT] = physical[CSS_BOTTOM];
-	if (mode == CSS_WRITING_VERTICAL_LR) {
+	if (mode == LOGICAL_SIDEWAYS_LR) {
+		sides[CSS_LEFT] = physical[CSS_BOTTOM];
+		sides[CSS_RIGHT] = physical[CSS_TOP];
+	}
+	if (mode != CSS_WRITING_VERTICAL_RL) {
 		sides[CSS_TOP] = physical[CSS_LEFT];
 		sides[CSS_BOTTOM] = physical[CSS_RIGHT];
 	} else {
@@ -441,7 +508,11 @@ logical_floats_to_logical(
 	memcpy(physical, sides, sizeof(physical));
 	sides[CSS_LEFT] = physical[CSS_TOP];
 	sides[CSS_RIGHT] = physical[CSS_BOTTOM];
-	if (mode == CSS_WRITING_VERTICAL_LR) {
+	if (mode == LOGICAL_SIDEWAYS_LR) {
+		sides[CSS_LEFT] = physical[CSS_BOTTOM];
+		sides[CSS_RIGHT] = physical[CSS_TOP];
+	}
+	if (mode != CSS_WRITING_VERTICAL_RL) {
 		sides[CSS_TOP] = physical[CSS_LEFT];
 		sides[CSS_BOTTOM] = physical[CSS_RIGHT];
 	} else {
@@ -462,7 +533,11 @@ logical_ints_to_logical(
 	memcpy(physical, sides, sizeof(physical));
 	sides[CSS_LEFT] = physical[CSS_TOP];
 	sides[CSS_RIGHT] = physical[CSS_BOTTOM];
-	if (mode == CSS_WRITING_VERTICAL_LR) {
+	if (mode == LOGICAL_SIDEWAYS_LR) {
+		sides[CSS_LEFT] = physical[CSS_BOTTOM];
+		sides[CSS_RIGHT] = physical[CSS_TOP];
+	}
+	if (mode != CSS_WRITING_VERTICAL_RL) {
 		sides[CSS_TOP] = physical[CSS_LEFT];
 		sides[CSS_BOTTOM] = physical[CSS_RIGHT];
 	} else {
@@ -483,7 +558,11 @@ logical_colors_to_logical(
 	memcpy(physical, sides, sizeof(physical));
 	sides[CSS_LEFT] = physical[CSS_TOP];
 	sides[CSS_RIGHT] = physical[CSS_BOTTOM];
-	if (mode == CSS_WRITING_VERTICAL_LR) {
+	if (mode == LOGICAL_SIDEWAYS_LR) {
+		sides[CSS_LEFT] = physical[CSS_BOTTOM];
+		sides[CSS_RIGHT] = physical[CSS_TOP];
+	}
+	if (mode != CSS_WRITING_VERTICAL_RL) {
 		sides[CSS_TOP] = physical[CSS_LEFT];
 		sides[CSS_BOTTOM] = physical[CSS_RIGHT];
 	} else {
@@ -504,7 +583,11 @@ logical_units_to_physical(
 	memcpy(logical, sides, sizeof(logical));
 	sides[CSS_TOP] = logical[CSS_LEFT];
 	sides[CSS_BOTTOM] = logical[CSS_RIGHT];
-	if (mode == CSS_WRITING_VERTICAL_LR) {
+	if (mode == LOGICAL_SIDEWAYS_LR) {
+		sides[CSS_TOP] = logical[CSS_RIGHT];
+		sides[CSS_BOTTOM] = logical[CSS_LEFT];
+	}
+	if (mode != CSS_WRITING_VERTICAL_RL) {
 		sides[CSS_LEFT] = logical[CSS_TOP];
 		sides[CSS_RIGHT] = logical[CSS_BOTTOM];
 	} else {
@@ -525,7 +608,11 @@ logical_units_to_logical(
 	memcpy(physical, sides, sizeof(physical));
 	sides[CSS_LEFT] = physical[CSS_TOP];
 	sides[CSS_RIGHT] = physical[CSS_BOTTOM];
-	if (mode == CSS_WRITING_VERTICAL_LR) {
+	if (mode == LOGICAL_SIDEWAYS_LR) {
+		sides[CSS_LEFT] = physical[CSS_BOTTOM];
+		sides[CSS_RIGHT] = physical[CSS_TOP];
+	}
+	if (mode != CSS_WRITING_VERTICAL_RL) {
 		sides[CSS_TOP] = physical[CSS_LEFT];
 		sides[CSS_BOTTOM] = physical[CSS_RIGHT];
 	} else {
@@ -539,13 +626,15 @@ logical_units_to_logical(
  * down: each box's size, sides and (except the root's, which its parent
  * places) position, its lines painted vertical, and the static places of
  * its children out of the flow.  parent_width is the physical width of
- * the parent's content box (vertical-rl mirrors against it).
+ * the parent's content box (vertical-rl mirrors against it) and parent_height
+ * its physical height (sideways-lr mirrors its inline axis against it).
  */
 static void
 logical_unflip(
 	struct layout_box *box,
 	int mode,
 	layout_unit parent_width,
+	layout_unit parent_height,
 	int root)
 {
 	struct layout_box *child;
@@ -557,12 +646,12 @@ logical_unflip(
 	logical_height = box->height;
 
 	/* The box itself, placed by its parent's mode; its contents run by its own. */
-	logical_box_to_physical(box, mode, parent_width, !root);
-	own = box->physical_style->writing_mode;
+	logical_box_to_physical(box, mode, parent_width, parent_height, !root);
+	own = logical_mode_of(box->physical_style);
 
 	/* Its lines are drawn down the page; vertical-rl stacks them from the right. */
 	if (box->children_inline && box->line_count > 0) {
-		box->vertical_inline = 1;
+		box->vertical_inline = own == LOGICAL_SIDEWAYS_LR ? 2 : 1;
 		if (own == CSS_WRITING_VERTICAL_RL) {
 			for (index = 0; index < box->line_count; index++)
 				box->lines[index].y = logical_height - box->lines[index].y - box->lines[index].height;
@@ -572,9 +661,9 @@ logical_unflip(
 	/* Each child: one of the domain wholly, another domain's root (already physical inside) as one box. */
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->physical_style != NULL) {
-			logical_unflip(child, own, box->width, 0);
+			logical_unflip(child, own, box->width, box->height, 0);
 		} else if (!child->out_of_flow) {
-			logical_box_to_physical(child, own, box->width, 1);
+			logical_box_to_physical(child, own, box->width, box->height, 1);
 		}
 
 		/* A child out of the flow keeps its static place and the area its parent gave it. */
@@ -636,10 +725,12 @@ logical_static_to_physical(
 		align = CSS_ALIGN_END;
 	else if (align == CSS_ALIGN_LEFT)
 		align = CSS_ALIGN_START;
+	else if (align == CSS_ALIGN_SELF_START || align == CSS_ALIGN_SELF_END)
+		align = child->static_x_align_from_right ? CSS_ALIGN_END : CSS_ALIGN_START;
 	child->static_x_align = child->static_y_align;
 	child->static_y_align = align;
 	child->static_x_align_from_right = 0;
-	if (mode == CSS_WRITING_VERTICAL_LR &&
+	if (mode != CSS_WRITING_VERTICAL_RL &&
 	    (child->static_x_align == CSS_ALIGN_END || child->static_x_align == CSS_ALIGN_SELF_END))
 		child->static_x_align_from_right = 1;
 	safe = child->static_x_safe;
@@ -686,17 +777,20 @@ logical_box_to_physical(
 	struct layout_box *box,
 	int mode,
 	layout_unit parent_width,
+	layout_unit parent_height,
 	int place)
 {
 	layout_unit x;
 	layout_unit y;
 	layout_unit outer_height;
+	layout_unit outer_width;
 	layout_unit size;
 
 	/* The logical position and the logical border-box block size. */
 	x = box->x;
 	y = box->y;
 	outer_height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	outer_width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
 
 	/* The size: the inline size is the height. */
 	size = box->width;
@@ -715,6 +809,10 @@ logical_box_to_physical(
 	box->x = y;
 	if (mode == CSS_WRITING_VERTICAL_RL)
 		box->x = parent_width - y - outer_height;
+
+	/* sideways-lr starts its lines at the bottom. */
+	if (mode == LOGICAL_SIDEWAYS_LR)
+		box->y = parent_height - x - outer_width;
 }
 
 /*

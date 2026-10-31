@@ -3,7 +3,7 @@
 # ws299-p005 UFS の file の連続の読み書き（先読みの窓・大きな request・書きの合流）
 
 - 親: [WS299](../ws.md)。Queue: q1634 / q1634-i01（調べ）→ q1640 / q1640-i01（設計・実装、担当 P1）。前提: p002・p004（raw の先読み）。
-- Status: in-progress（2026-10-28 P1: 実装・QEMU・5330。raw の読み書き・file の読みは Debian 超え、file の書きは 55%（下の「結果」））
+- Status: in-progress（2026-10-31 P1 q1744: 書き手の CPU の直し 3a4e64353（LRU の回し・束の書き・1 MiB の run・memcpy）、QEMU で確かめ、5330 の測りは電源の戻り待ち。2026-10-28: raw の読み書き・file の読みは Debian 超え、file の書きは 55%）
 - Disposition: normal
 
 ## 調べた事実（2026-10-28、読みだけの調べ、tree は agent/p1-ws299 36d0d7b5d）
@@ -104,6 +104,25 @@
 - raw の書きを遅らせる（114f6d405）: devfs の claim の無い open の書きは、開いた者だけが使う範囲（`disk_readahead_private`）なら `disk_write_delayed` → `buf_write_delayed` で cache に dirty で残し、cluster・worker・fsync・最後の close（`buf_sync`）で書く。共有の範囲は今どおり write-through。
 - QEMU（`build/tmp/qemu-suite.sh` の形、2026-10-28）: boot-test rc 0、`qemu-readahead`・`qemu-nvme-shapes`・`qemu-grow-reboot`・`qemu-cache-stress`・`qemu-cache32-write` PASS（d173b958e の tree: 遅らせる raw の書き・HMB・bmap の memo・1 MiB の run まで全部 PASS。run を戻した d847e644f は build だけ）。build（d173b958e 以降）: config-5330・pcat・visionfive2・rpi4・m68k-virt で rc 0・warning 0。
 - 未実施: 誤りの注入、crash の整合、claim の隣、NVMe 以外の機種の書きの時間（build だけ）。
+
+## 2026-10-31（q1744、P1）: 書き手の CPU の直し
+
+- 前提（2026-10-31 ユーザー: WS299 は 5330 が空いたらどの担当でもよい・不在の間は設計・実装・試験を進める、という趣旨）。5330 は最初の起動（main 9946e22c0 の kernel を WS291 の restore の後の古い userland に `--nvme-kernel`）で network が上がらず止まった（networkd と kernel の Wi-Fi の ioctl の形の違い、Q1 の見立て、電源の入れ直し待ち）。以下は QEMU（KVM）。
+- 2026-10-28 の 5330 の counter の読み直し（`q57-Z-p7ufswrite`）: 4 GiB の file の書きの間に UFS の metadata の読み 2.87 GB（`IO_UFS_READ` 50 万回）・書き 2.3 GB、64 KiB の allocation run ごとに CG の読み直し（`IO_UFS_CG_MISS` 6.9 万回、hit 0）。cylinder group の free map の探しは run ごとに group の頭から。
+- QEMU の測り（`plan/ws299/temp/qemu-prof.sh`、git の外。2 つ目の NVMe を /dev/shm の file、`patwrite` 2 GiB、guest 4 GiB で cache 512 MiB、`-mem-prealloc`。TSC の内訳の一時の patch `tprobe*.patch`）: main の形で `evict_one` が 1 回に平均 95 本の dirty・journal の pin の line を lock を取って歩く（10.2M 本 / 10.7 万回、半分が pin）。上書きの `acquire_line` が 2 GiB で約 2.7 s。64 KiB の run の新しい file では run の leaf の読みと metadata が約 0.35 s。
+- 直し（3a4e64353）:
+  - `buf.c`: `evict_one`（範囲の無い歩き）と `recycle_line_locked` が、取れない dirty・書き中の line を LRU の head へ回す（`evict_take_locked`）。歩きは始めの head で止める。範囲の有る evict は今のまま。
+  - `buf.c`: P6 の `write_cached_lines`（agent/p6-ws299 の q1681、遅らせる書きの whole line を 16 本ずつ cache_lock の 1 回の保持で引き、1 回で返す）を取り込んだ。
+  - `ufs.c`: allocation run を 1 MiB（128 block）に（10-28 の d173b958e と同じ定数。5330 で 849 MB/s と遅く出た件は下の 5330 で測り直す）。free map の探しを前の run の終わり（`alloc_hint_cg`・`alloc_hint_fragment`、無ければ group の頭から）から、8 fragment の block は byte で見る（`cg_free_blocks`）。
+  - `kcrt`: `kern_memcpy_ram`（RAM どうしの写し、amd64 は 256 byte 以上を `hal_memcpy` の rep movsb、他の機種と host 試験は word の loop）。buffer cache・pinned の user page（`copyin_pinned`・`copyout_pinned`）・VM の page の写しに使う。device memory には使わない（uncached では byte ずつになる）。hal.h は変えていない。
+- QEMU の数（2 GiB、MB/s、`tprobe` 入りの kernel、ぶれは ±10% ほど）: 64 KiB の run（hint・memcpy まで）新しい file 490・上書き 410・raw 743 → 1 MiB の run 715 → 回しを足して 854・738・800 → 束の書きを足して 851・852・835。main の kernel（probe なし）は新しい file 219〜409・上書き 733〜912（QEMU の I/O で頭打ち、CPU の差は 5330 で見る）。
+- 確かめ: build config-5330・serial・cache128・cache32 warning 0。host: `buf-slab-test`・`buf-readahead-test`・`buf-direct-test`・`plan/ws299/tests/host/ufs-cgmap-test.sh`（新規、`cg_free_blocks` を素直な bit の歩きと 315 万通り比べる）・`run-kcrt-host-tests.sh`・`run-copy-sum-host-test.sh` PASS。QEMU（`plan/ws299/tests/qemu-suite.sh`、新規）: cache-stress・nvme-shapes・directio・cache32-write（400 MiB）・boot-test PASS。readahead は試験の disk が host の build/tmp（host の disk が満杯に近く遅い）だと main の kernel も NVMe の `I/O queue recovered` と `writeback_errors` で FAIL、disk を tmpfs（`WS299_RUNS`）に置くと PASS。ws299 の QEMU 試験は `WS299_RUNS` で run の置き場を選べる（suite の既定 /tmp/ws299-runs）。
+- 訂正: 上の QEMU の suite の PASS は hint と memcpy までの kernel（回し・束・1 MiB の前）で流した物だった。最終の kernel で流し直した結果は下。
+- 他の機種の build（3a4e64353）: pcat・visionfive2・rpi4・rpi5・m68k-virt の vmunix が rc 0・warning 0。
+- コードの敵対的レビュー（design-reviewer、3a4e64353）: (1) **重大**: tail journal（v2、journal-snapshot の profile）の volume では run の中身を journal の 1 group（`UFS_JOURNAL_GROUP_SECTORS` 128 sector）で commit するので、1 MiB の run が `drv_ufs_journal_publishv` で EINVAL になり write が失敗する。QEMU で再現（host の `make-ufs-test-image.py --profile journal-snapshot` の 256 MiB の volume に 16 MiB の dd が "Invalid argument"、`plan/ws299/temp/qemu-v2-write.sh`）。→ v2 の volume では run を 128 sector までにした（4e7b2a827）。同じ試験で一致。(2) 束の書きが一度だめだと write の残り全部を 1 line ずつにしていた → 16 line ごとに試し直す。(3) 回しの comment の誤り（回した line は 2 周目を得る、と直した）。(4) wrap の 2 回目の探しを始めの hint までに。(5)〜(8) は軽い（`ms->lock` の保持が run の分だけ長い、j3 の hold の line の pin が run の大きさだけ増える、hit の数え方、`kern_memcpy_ram` の呼び手の buffer が RAM である事を buf.c は保証しない — 辿った呼び手は全部 RAM）。
+- 他: P6 の q1681 の comment の WS の番号の削除（pci-nvme.c・dma.c/h・syscall.c・object-sync.c・ufs.c、p008 の一部）を取り込んだ（609295cd0）。
+- 最終の kernel（4e7b2a827）の QEMU（disk は tmpfs、`WS299_RUNS=/tmp/...`）: `qemu-suite.sh` の cache-stress・readahead・nvme-shapes・directio・cache32-write（400 MiB）・boot-test 全部 PASS、`qemu-ufs-crash.sh` の 2・6・15 秒の切断 3 回とも kept・remount・check ok、v2 の volume の 16 MiB の書きが一致。
+- 試験の追加: `plan/ws299/tests/qemu-ufs-crash.sh`（native の UFS に 72 MiB を書いて fsync、600 MiB の書きの途中で QEMU を kill、次の起動で journal の replay・72 MiB の cksum・新しい file の fsync と再 mount・host の `check-volume.py`）。
 
 ## 変えない物
 

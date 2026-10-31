@@ -507,6 +507,7 @@ h264sw_add_residual(
 				sum = 255;
 			}
 
+			/* Stores the clipped sample at its place in the output block. */
 			out[row * out_stride + column] = (uint8_t)sum;
 		}
 	}
@@ -655,6 +656,7 @@ transform_line4(
 	int32_t e1;
 	int32_t e2;
 	int32_t e3;
+	int32_t half;
 
 	/* Reads the four inputs, already within the range. */
 	d0 = line[0];
@@ -665,8 +667,10 @@ transform_line4(
 	/* Computes the intermediate values (8-338 to 8-341); the sums are formed in int64_t and held to the range. */
 	e0 = transform_clamp((int64_t)d0 + (int64_t)d2);
 	e1 = transform_clamp((int64_t)d0 - (int64_t)d2);
-	e2 = transform_clamp((int64_t)transform_shift_right32(d1, 1U) - (int64_t)d3);
-	e3 = transform_clamp((int64_t)d1 + (int64_t)transform_shift_right32(d3, 1U));
+	half = transform_shift_right32(d1, 1U);
+	e2 = transform_clamp((int64_t)half - (int64_t)d3);
+	half = transform_shift_right32(d3, 1U);
+	e3 = transform_clamp((int64_t)d1 + (int64_t)half);
 
 	/* Computes the outputs (8-342 to 8-345) and stores them. */
 	line[0] = transform_clamp((int64_t)e0 + (int64_t)e3);
@@ -689,6 +693,7 @@ transform_line8(
 	int32_t d[8];
 	int32_t e[8];
 	int32_t f[8];
+	int32_t half;
 	unsigned i;
 
 	/* Reads the eight inputs, already within the range. */
@@ -697,23 +702,33 @@ transform_line8(
 
 	/* Computes the first set of intermediate values (8-358 to 8-365). */
 	e[0] = transform_clamp((int64_t)d[0] + (int64_t)d[4]);
-	e[1] = transform_clamp(-(int64_t)d[3] + (int64_t)d[5] - (int64_t)d[7] - (int64_t)transform_shift_right32(d[7], 1U));
+	half = transform_shift_right32(d[7], 1U);
+	e[1] = transform_clamp(-(int64_t)d[3] + (int64_t)d[5] - (int64_t)d[7] - (int64_t)half);
 	e[2] = transform_clamp((int64_t)d[0] - (int64_t)d[4]);
-	e[3] = transform_clamp((int64_t)d[1] + (int64_t)d[7] - (int64_t)d[3] - (int64_t)transform_shift_right32(d[3], 1U));
-	e[4] = transform_clamp((int64_t)transform_shift_right32(d[2], 1U) - (int64_t)d[6]);
-	e[5] = transform_clamp(-(int64_t)d[1] + (int64_t)d[7] + (int64_t)d[5] + (int64_t)transform_shift_right32(d[5], 1U));
-	e[6] = transform_clamp((int64_t)d[2] + (int64_t)transform_shift_right32(d[6], 1U));
-	e[7] = transform_clamp((int64_t)d[3] + (int64_t)d[5] + (int64_t)d[1] + (int64_t)transform_shift_right32(d[1], 1U));
+	half = transform_shift_right32(d[3], 1U);
+	e[3] = transform_clamp((int64_t)d[1] + (int64_t)d[7] - (int64_t)d[3] - (int64_t)half);
+	half = transform_shift_right32(d[2], 1U);
+	e[4] = transform_clamp((int64_t)half - (int64_t)d[6]);
+	half = transform_shift_right32(d[5], 1U);
+	e[5] = transform_clamp(-(int64_t)d[1] + (int64_t)d[7] + (int64_t)d[5] + (int64_t)half);
+	half = transform_shift_right32(d[6], 1U);
+	e[6] = transform_clamp((int64_t)d[2] + (int64_t)half);
+	half = transform_shift_right32(d[1], 1U);
+	e[7] = transform_clamp((int64_t)d[3] + (int64_t)d[5] + (int64_t)d[1] + (int64_t)half);
 
 	/* Computes the second set of intermediate values (8-366 to 8-373). */
 	f[0] = transform_clamp((int64_t)e[0] + (int64_t)e[6]);
-	f[1] = transform_clamp((int64_t)e[1] + (int64_t)transform_shift_right32(e[7], 2U));
+	half = transform_shift_right32(e[7], 2U);
+	f[1] = transform_clamp((int64_t)e[1] + (int64_t)half);
 	f[2] = transform_clamp((int64_t)e[2] + (int64_t)e[4]);
-	f[3] = transform_clamp((int64_t)e[3] + (int64_t)transform_shift_right32(e[5], 2U));
+	half = transform_shift_right32(e[5], 2U);
+	f[3] = transform_clamp((int64_t)e[3] + (int64_t)half);
 	f[4] = transform_clamp((int64_t)e[2] - (int64_t)e[4]);
-	f[5] = transform_clamp((int64_t)transform_shift_right32(e[3], 2U) - (int64_t)e[5]);
+	half = transform_shift_right32(e[3], 2U);
+	f[5] = transform_clamp((int64_t)half - (int64_t)e[5]);
 	f[6] = transform_clamp((int64_t)e[0] - (int64_t)e[6]);
-	f[7] = transform_clamp((int64_t)e[7] - (int64_t)transform_shift_right32(e[1], 2U));
+	half = transform_shift_right32(e[1], 2U);
+	f[7] = transform_clamp((int64_t)e[7] - (int64_t)half);
 
 	/* Computes the outputs (8-374 to 8-381) and stores them. */
 	line[0] = transform_clamp((int64_t)f[0] + (int64_t)f[7]);

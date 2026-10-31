@@ -7,7 +7,7 @@
 #   sh plan/ws299/tests/qemu-qdprobe.sh IMAGE [SECONDS]
 # IMAGE: plan/tools/posix/config-amd64-serial.mk, ZEDBSD_BOOT_EXTRA_LINES='kern.perf=1', and
 # ZEDBSD_EXTRA_FILES='--file /root/randread=OUT/randread-zedbsd' (OUT from build-randread.sh).
-# W is build/tmp/qemu-qdprobe (a fresh run each time).  The output is the guest's lines; the last line is
+# W is ${WS299_RUNS:-build/tmp}/qemu-qdprobe (a fresh run each time).  The output is the guest's lines; the last line is
 # "qemu-qdprobe: done N runs" or "qemu-qdprobe: FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -15,8 +15,8 @@ set -u
 . plan/tools/fresh-out.sh
 IMAGE=${1:?image}
 SECONDS_EACH=${2:-10}
-fresh_out build/tmp/qemu-qdprobe
-W=build/tmp/qemu-qdprobe
+mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-qdprobe
+W=${WS299_RUNS:-build/tmp}/qemu-qdprobe
 truncate -s 2G "$W/nvme.img"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
 timeout 1800 qemu-system-x86_64 -machine q35 -m 4G -smp 8 $(qemu_accel_args max) \

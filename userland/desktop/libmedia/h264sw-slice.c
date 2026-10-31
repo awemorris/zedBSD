@@ -68,16 +68,16 @@
 #define SLICE_NAL_PARTITION_FIRST H264SW_NAL_PARTITION_A
 #define SLICE_NAL_PARTITION_LAST H264SW_NAL_PARTITION_C
 
-static int slice_read_identity(struct h264sw_bits *bits, const struct h264sw_nal *nal, const struct h264sw_ps_store *store, struct h264sw_slice_header *header, const struct h264sw_pps **pps, const struct h264sw_sps **sps);
-static int slice_read_order(struct h264sw_bits *bits, const struct h264sw_pps *pps, const struct h264sw_sps *sps, struct h264sw_slice_header *header);
-static int slice_read_ref_counts(struct h264sw_bits *bits, const struct h264sw_pps *pps, struct h264sw_slice_header *header);
-static int slice_read_modifications(struct h264sw_bits *bits, const struct h264sw_sps *sps, struct h264sw_slice_header *header, unsigned list);
-static int slice_read_weights(struct h264sw_bits *bits, struct h264sw_slice_header *header);
-static int slice_read_weight_list(struct h264sw_bits *bits, struct h264sw_slice_header *header, unsigned list);
-static int slice_read_weight_value(struct h264sw_bits *bits, int *value);
-static int slice_read_marking(struct h264sw_bits *bits, const struct h264sw_sps *sps, struct h264sw_slice_header *header);
-static int slice_read_operations(struct h264sw_bits *bits, const struct h264sw_sps *sps, struct h264sw_slice_header *header);
-static int slice_read_quantizer_and_filter(struct h264sw_bits *bits, const struct h264sw_pps *pps, struct h264sw_slice_header *header);
+static int slice_read_identity(struct vcodec_bitreader *bits, const struct h264sw_nal *nal, const struct h264sw_ps_store *store, struct h264sw_slice_header *header, const struct h264sw_pps **pps, const struct h264sw_sps **sps);
+static int slice_read_order(struct vcodec_bitreader *bits, const struct h264sw_pps *pps, const struct h264sw_sps *sps, struct h264sw_slice_header *header);
+static int slice_read_ref_counts(struct vcodec_bitreader *bits, const struct h264sw_pps *pps, struct h264sw_slice_header *header);
+static int slice_read_modifications(struct vcodec_bitreader *bits, const struct h264sw_sps *sps, struct h264sw_slice_header *header, unsigned list);
+static int slice_read_weights(struct vcodec_bitreader *bits, struct h264sw_slice_header *header);
+static int slice_read_weight_list(struct vcodec_bitreader *bits, struct h264sw_slice_header *header, unsigned list);
+static int slice_read_weight_value(struct vcodec_bitreader *bits, int *value);
+static int slice_read_marking(struct vcodec_bitreader *bits, const struct h264sw_sps *sps, struct h264sw_slice_header *header);
+static int slice_read_operations(struct vcodec_bitreader *bits, const struct h264sw_sps *sps, struct h264sw_slice_header *header);
+static int slice_read_quantizer_and_filter(struct vcodec_bitreader *bits, const struct h264sw_pps *pps, struct h264sw_slice_header *header);
 
 /*
  * Reads a slice header from a slice RBSP (7.3.3).
@@ -87,7 +87,7 @@ static int slice_read_quantizer_and_filter(struct h264sw_bits *bits, const struc
  */
 int
 h264sw_slice_read(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	const struct h264sw_nal *nal,
 	const struct h264sw_ps_store *store,
 	struct h264sw_slice_header *header)
@@ -115,10 +115,12 @@ h264sw_slice_read(
 		return error;
 
 	/* Reads frame_num and idr_pic_id. */
-	header->frame_num = h264sw_bits_u(bits, sps->log2_max_frame_num);
+	header->frame_num = vcodec_bitreader_u(bits, sps->log2_max_frame_num);
 	if (header->idr != 0) {
-		header->idr_pic_id = h264sw_bits_ue(bits);
+		header->idr_pic_id = vcodec_bitreader_ue(bits);
 	}
+
+	/* A read that ran past the end of the RBSP is a truncated header. */
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -180,7 +182,7 @@ h264sw_slice_read(
 	/* Reads cabac_init_idc, which only the CABAC slices that predict from references send. */
 	if (pps->cabac != 0 &&
 	    header->slice_type != H264SW_SLICE_I) {
-		header->cabac_init_idc = h264sw_bits_ue(bits);
+		header->cabac_init_idc = vcodec_bitreader_ue(bits);
 		if (header->cabac_init_idc > SLICE_MAX_CABAC_INIT_IDC)
 			return EINVAL;
 	}
@@ -294,7 +296,7 @@ h264sw_slice_new_picture(
  */
 static int
 slice_read_identity(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	const struct h264sw_nal *nal,
 	const struct h264sw_ps_store *store,
 	struct h264sw_slice_header *header,
@@ -324,9 +326,9 @@ slice_read_identity(
 		header->idr = 1;
 
 	/* Reads the first macroblock, the slice type and the parameter set id. */
-	first_mb = h264sw_bits_ue(bits);
-	slice_type = h264sw_bits_ue(bits);
-	pps_id = h264sw_bits_ue(bits);
+	first_mb = vcodec_bitreader_ue(bits);
+	slice_type = vcodec_bitreader_ue(bits);
+	pps_id = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -382,36 +384,36 @@ slice_read_identity(
  */
 static int
 slice_read_order(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	const struct h264sw_pps *pps,
 	const struct h264sw_sps *sps,
 	struct h264sw_slice_header *header)
 {
 	/* Order count type 0 sends the low bits of the count, and the bottom field's difference when the PPS says so. */
 	if (sps->poc_type == 0U) {
-		header->poc_lsb = h264sw_bits_u(bits, sps->log2_max_poc_lsb);
+		header->poc_lsb = vcodec_bitreader_u(bits, sps->log2_max_poc_lsb);
 		if (pps->bottom_field_poc_present != 0)
-			header->delta_poc_bottom = h264sw_bits_se(bits);
+			header->delta_poc_bottom = vcodec_bitreader_se(bits);
 	}
 
 	/* Order count type 1 sends the differences from the expected count unless they are always 0. */
 	if (sps->poc_type == 1U &&
 	    sps->delta_pic_order_always_zero == 0) {
-		header->delta_poc[0] = h264sw_bits_se(bits);
+		header->delta_poc[0] = vcodec_bitreader_se(bits);
 		if (pps->bottom_field_poc_present != 0)
-			header->delta_poc[1] = h264sw_bits_se(bits);
+			header->delta_poc[1] = vcodec_bitreader_se(bits);
 	}
 
 	/* Reads redundant_pic_cnt when the PPS says slices send it. */
 	if (pps->redundant_pic_cnt_present != 0) {
-		header->redundant_pic_cnt = (unsigned)h264sw_bits_ue(bits);
+		header->redundant_pic_cnt = (unsigned)vcodec_bitreader_ue(bits);
 		if (header->redundant_pic_cnt > SLICE_MAX_REDUNDANT_PIC_CNT)
 			return EINVAL;
 	}
 
 	/* Reads the choice between the spatial and the temporal direct mode of a B slice. */
 	if (header->slice_type == H264SW_SLICE_B)
-		header->direct_spatial = (int)h264sw_bits_u1(bits);
+		header->direct_spatial = (int)vcodec_bitreader_u1(bits);
 
 	/* A read that ran past the end of the RBSP is a truncated header. */
 	if (bits->error != 0)
@@ -429,7 +431,7 @@ slice_read_order(
  */
 static int
 slice_read_ref_counts(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	const struct h264sw_pps *pps,
 	struct h264sw_slice_header *header)
 {
@@ -446,7 +448,7 @@ slice_read_ref_counts(
 		header->num_ref_idx_active[1] = pps->num_ref_idx_default[1];
 
 	/* Reads whether the slice sends lengths of its own. */
-	override_flag = h264sw_bits_u1(bits);
+	override_flag = vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -455,7 +457,7 @@ slice_read_ref_counts(
 		return 0;
 
 	/* Reads the length of list 0 and checks it before using it. */
-	count_minus1 = h264sw_bits_ue(bits);
+	count_minus1 = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (count_minus1 > SLICE_MAX_REF_IDX_MINUS1)
@@ -464,7 +466,7 @@ slice_read_ref_counts(
 
 	/* Reads the length of list 1, which only a B slice has. */
 	if (header->slice_type == H264SW_SLICE_B) {
-		count_minus1 = h264sw_bits_ue(bits);
+		count_minus1 = vcodec_bitreader_ue(bits);
 		if (bits->error != 0)
 			return EINVAL;
 		if (count_minus1 > SLICE_MAX_REF_IDX_MINUS1)
@@ -484,7 +486,7 @@ slice_read_ref_counts(
  */
 static int
 slice_read_modifications(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	const struct h264sw_sps *sps,
 	struct h264sw_slice_header *header,
 	unsigned list)
@@ -496,7 +498,7 @@ slice_read_modifications(
 	int done;
 
 	/* Reads whether the list is modified at all. */
-	flag = h264sw_bits_u1(bits);
+	flag = vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (flag == 0U)
@@ -506,7 +508,7 @@ slice_read_modifications(
 	count = 0U;
 	done = 0;
 	while (done == 0) {
-		idc = h264sw_bits_ue(bits);
+		idc = vcodec_bitreader_ue(bits);
 		if (bits->error != 0)
 			return EINVAL;
 
@@ -521,7 +523,7 @@ slice_read_modifications(
 			return EINVAL;
 
 		/* Reads the difference (idc 0 and 1) or the long-term picture number (idc 2). */
-		value = h264sw_bits_ue(bits);
+		value = vcodec_bitreader_ue(bits);
 		if (bits->error != 0)
 			return EINVAL;
 
@@ -555,20 +557,20 @@ slice_read_modifications(
  */
 static int
 slice_read_weights(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	struct h264sw_slice_header *header)
 {
 	uint32_t denom;
 	int error;
 
 	/* Reads the denominators of the luma and the chroma weights. */
-	denom = h264sw_bits_ue(bits);
+	denom = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (denom > SLICE_MAX_WEIGHT_DENOM)
 		return EINVAL;
 	header->luma_log2_denom = (unsigned)denom;
-	denom = h264sw_bits_ue(bits);
+	denom = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (denom > SLICE_MAX_WEIGHT_DENOM)
@@ -600,7 +602,7 @@ slice_read_weights(
  */
 static int
 slice_read_weight_list(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	struct h264sw_slice_header *header,
 	unsigned list)
 {
@@ -625,7 +627,7 @@ slice_read_weight_list(
 		weight->chroma_offset[1] = 0;
 
 		/* Reads the luma weight and offset when the flag says they are sent. */
-		flag = h264sw_bits_u1(bits);
+		flag = vcodec_bitreader_u1(bits);
 		if (bits->error != 0)
 			return EINVAL;
 		if (flag != 0U) {
@@ -639,7 +641,7 @@ slice_read_weight_list(
 		}
 
 		/* Reads the weight and offset of Cb and then of Cr when the flag says they are sent. */
-		flag = h264sw_bits_u1(bits);
+		flag = vcodec_bitreader_u1(bits);
 		if (bits->error != 0)
 			return EINVAL;
 		if (flag != 0U) {
@@ -664,13 +666,13 @@ slice_read_weight_list(
 /* Reads one weight or offset, which lies in -128..127 (7.4.3.2). */
 static int
 slice_read_weight_value(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	int *value)
 {
 	int32_t read;
 
 	/* Reads the signed value and checks it before keeping it. */
-	read = h264sw_bits_se(bits);
+	read = vcodec_bitreader_se(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (read < SLICE_MIN_WEIGHT)
@@ -691,7 +693,7 @@ slice_read_weight_value(
  */
 static int
 slice_read_marking(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	const struct h264sw_sps *sps,
 	struct h264sw_slice_header *header)
 {
@@ -699,8 +701,8 @@ slice_read_marking(
 
 	/* An IDR picture sends whether prior pictures are output and whether it is a long-term picture. */
 	if (header->idr != 0) {
-		header->no_output_of_prior_pics = (int)h264sw_bits_u1(bits);
-		header->long_term_reference = (int)h264sw_bits_u1(bits);
+		header->no_output_of_prior_pics = (int)vcodec_bitreader_u1(bits);
+		header->long_term_reference = (int)vcodec_bitreader_u1(bits);
 		if (bits->error != 0)
 			return EINVAL;
 
@@ -709,7 +711,7 @@ slice_read_marking(
 	}
 
 	/* Any other picture sends the marking mode: sliding window (0) or adaptive (1). */
-	header->adaptive_marking = (int)h264sw_bits_u1(bits);
+	header->adaptive_marking = (int)vcodec_bitreader_u1(bits);
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -734,7 +736,7 @@ slice_read_marking(
  */
 static int
 slice_read_operations(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	const struct h264sw_sps *sps,
 	struct h264sw_slice_header *header)
 {
@@ -748,7 +750,7 @@ slice_read_operations(
 	count = 0U;
 	done = 0;
 	while (done == 0) {
-		operation = h264sw_bits_ue(bits);
+		operation = vcodec_bitreader_ue(bits);
 		if (bits->error != 0)
 			return EINVAL;
 
@@ -774,20 +776,20 @@ slice_read_operations(
 		/* Operations 1 and 3 name a short-term picture by the difference of picture numbers. */
 		if (operation == H264SW_MMCO_SHORT_UNUSED ||
 		    operation == H264SW_MMCO_SHORT_TO_LONG)
-			entry->difference_of_pic_nums_minus1 = h264sw_bits_ue(bits);
+			entry->difference_of_pic_nums_minus1 = vcodec_bitreader_ue(bits);
 
 		/* Operation 2 names a long-term picture by its long-term picture number. */
 		if (operation == H264SW_MMCO_LONG_UNUSED)
-			entry->long_term_pic_num = h264sw_bits_ue(bits);
+			entry->long_term_pic_num = vcodec_bitreader_ue(bits);
 
 		/* Operations 3 and 6 give the long-term frame index. */
 		if (operation == H264SW_MMCO_SHORT_TO_LONG ||
 		    operation == H264SW_MMCO_CURRENT_TO_LONG)
-			entry->long_term_frame_idx = h264sw_bits_ue(bits);
+			entry->long_term_frame_idx = vcodec_bitreader_ue(bits);
 
 		/* Operation 4 gives the largest long-term frame index plus 1, at most max_num_ref_frames (7.4.3.3). */
 		if (operation == H264SW_MMCO_MAX_LONG_INDEX) {
-			value = h264sw_bits_ue(bits);
+			value = vcodec_bitreader_ue(bits);
 			if (value > sps->max_num_ref_frames)
 				return EINVAL;
 			entry->max_long_term_frame_idx_plus1 = value;
@@ -797,9 +799,11 @@ slice_read_operations(
 		if (operation == H264SW_MMCO_ALL_UNUSED)
 			header->has_mmco5 = 1;
 
-		/* Keeps the entry once its fields are read. */
+		/* A read that ran past the end of the RBSP is a truncated header. */
 		if (bits->error != 0)
 			return EINVAL;
+
+		/* Keeps the entry now that its fields are read. */
 		count++;
 	}
 
@@ -818,7 +822,7 @@ slice_read_operations(
  */
 static int
 slice_read_quantizer_and_filter(
-	struct h264sw_bits *bits,
+	struct vcodec_bitreader *bits,
 	const struct h264sw_pps *pps,
 	struct h264sw_slice_header *header)
 {
@@ -828,7 +832,7 @@ slice_read_quantizer_and_filter(
 	int32_t offset;
 
 	/* Reads slice_qp_delta; SliceQPY is the PPS's initial value plus it, and lies in 0..51 (7-30). */
-	qp_delta = h264sw_bits_se(bits);
+	qp_delta = vcodec_bitreader_se(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	qp = (int64_t)pps->pic_init_qp + (int64_t)qp_delta;
@@ -843,7 +847,7 @@ slice_read_quantizer_and_filter(
 		return 0;
 
 	/* Reads disable_deblocking_filter_idc. */
-	idc = h264sw_bits_ue(bits);
+	idc = vcodec_bitreader_ue(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (idc > SLICE_MAX_DEBLOCKING_IDC)
@@ -855,7 +859,7 @@ slice_read_quantizer_and_filter(
 		return 0;
 
 	/* Reads slice_alpha_c0_offset_div2 and doubles it to FilterOffsetA (7-32). */
-	offset = h264sw_bits_se(bits);
+	offset = vcodec_bitreader_se(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (offset < SLICE_MIN_FILTER_DIV2)
@@ -865,7 +869,7 @@ slice_read_quantizer_and_filter(
 	header->filter_offset_a = (int)offset * 2;
 
 	/* Reads slice_beta_offset_div2 and doubles it to FilterOffsetB (7-33). */
-	offset = h264sw_bits_se(bits);
+	offset = vcodec_bitreader_se(bits);
 	if (bits->error != 0)
 		return EINVAL;
 	if (offset < SLICE_MIN_FILTER_DIV2)

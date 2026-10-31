@@ -21,7 +21,7 @@
 #define LIBMEDIA_H264SW_CAVLC_H
 
 #include "h264sw.h"
-#include "h264sw-bits.h"
+#include "vcodec-bitreader.h"
 
 struct h264sw_slice_ctx;
 
@@ -58,7 +58,7 @@ struct h264sw_slice_ctx;
  * Main and Extended profiles, and no 8-bit level needs a prefix above
  * 25 (levelSuffixSize stays below 32 bits).
  */
-int h264sw_cavlc_residual_block(struct h264sw_bits *bits, int nc, unsigned start, unsigned end, unsigned max_coeff, int32_t *levels, unsigned *total_coeff);
+int h264sw_cavlc_residual_block(struct vcodec_bitreader *bits, int nc, unsigned start, unsigned end, unsigned max_coeff, int32_t *levels, unsigned *total_coeff);
 
 /*
  * Derives nC for a block of the current macroblock (9.2.1).

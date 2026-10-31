@@ -25,6 +25,9 @@ _Static_assert(__builtin_types_compatible_p(kern_cpu_id_t, hal_cpu_id_t),
 _Static_assert(__builtin_types_compatible_p(kern_task_handle_t, hal_task_t),
 	       "kern_task_handle_t is not hal_task_t");
 
+/* The kernel's limit on CPUs is the HAL's. */
+_Static_assert(KERN_CPU_MAX == HAL_CPU_MAX, "KERN_CPU_MAX is not HAL_CPU_MAX");
+
 void
 sched_wait_task(void);
 

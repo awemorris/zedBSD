@@ -362,6 +362,8 @@ kwl_object_destroy(
 		kwl_content_type_object_gone(object);
 	if (object->kind == KWL_SURFACE)
 		kwl_scanout_surface_gone(object->client->server, object);
+	if (object->kind == KWL_SURFACE || object->kind == KWL_GAME_SURFACE)
+		kwl_game_object_gone(object);
 
 	/* A surface and its glass panels (panels.c). */
 	if (object->kind == KWL_SURFACE || object->kind == KWL_GLASS)
@@ -799,6 +801,10 @@ object_free(
 	struct kwl_object **link;
 	struct kwl_client *client;
 	struct kwl_server *server;
+
+	/* A buffer that held a lent image is no longer named by the game mode (scanout.c). */
+	if (object->kind == KWL_BUFFER)
+		kwl_scanout_buffer_gone(object);
 
 	/* Retired IDs can coexist with a newly created object of the same numeric ID. */
 	client = object->client;

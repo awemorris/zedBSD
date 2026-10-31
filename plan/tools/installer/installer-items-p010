@@ -1,0 +1,19 @@
+# The installer's items without Clang (plan/tools/installer/config-amd64-p010.mk leaves the toolchain's packages out).
+#   ID	PARENT	DEFAULT	LABEL	UNITS
+# PARENT is '-' at the top.  DEFAULT is required (cannot be cleared), on or off.  UNITS
+# are the units the item installs (their requirements come with them), '-' for none.
+# tools/build/installer-units.py copies these to the index and adds, under other, an
+# item for each package unit that no item here names.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+base	-	required	Base System	base
+desktop	-	on	Keiland Desktop	desktop
+firmware	-	on	Firmware	firmware
+packages	-	on	Packages	-
+openssh	packages	on	OpenSSH	network-openssh
+openssl	packages	on	OpenSSL and CA certificates	security-openssl security-ca-certificates
+gtk4	packages	off	GTK4	desktop-gtk4
+fonts	packages	on	Fonts	fonts-noto-color-emoji fonts-hand-hershey
+libavcodec	packages	off	libavcodec	multimedia-libavcodec
+curl	packages	off	curl	network-curl
+python	packages	off	Python	lang-python3
+other	packages	off	Other packages	-

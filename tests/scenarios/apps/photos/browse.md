@@ -25,7 +25,7 @@ EXIF の日付の無い file は取り込んだ日（guest の local の暦）�
 2026 年 9 月 20 日より後に流すと、0〜2 が取り込んだ日の 3 枚（同じ秒なら broken.jpg・sticker.png・wave.gif の順）、3 lake.jpg、4 hill.jpg、5 sea.jpg、
 6 cake.jpg、7 park.jpg、8 garden.jpg。
 
-Photos は library が変わる度（自分の取り込み・保存も）に読み直し（`PHOTOS MEDIA done imported=0 ...`）、そこで表示を Timeline に戻す。
+Photos は library が変わる度（自分の取り込み・保存も）に読み直し（`PHOTOS MEDIA done imported=0 ...`）。読み直しても、見ている list・全面の写真・slideshow は id で保つ（library から消えた物は閉じる）。
 助けは読み直しが止むのを待ってから操作する。
 
 ## 操作と確認
@@ -47,9 +47,9 @@ Photos は library が変わる度（自分の取り込み・保存も）に読�
 5. 操作: Esc、Space、待つ、Space、Esc。
    確認事項: slideshow。正解: `PHOTOS BACK photo=<sea>`、`PHOTOS SLIDESHOW on=1 photo=<sea>`、3 秒ごとに `PHOTOS SLIDE photo=<sea+1>`・
    `PHOTOS SLIDE photo=<sea+2>`、`PHOTOS SLIDESHOW on=0`。確認方法: log、撮影。
-6. 操作: Photos を閉じ、もう一度 `/bin/photos --import=/home/user/AATPhotos`、読み直しが止んでから左の album（Sea）を click。
+6. 操作: grid を最後まで scroll し（view は見せた写真の縮小画像だけを作るので、7 月の行を見せて全部を cache に入れる）、Photos を閉じ、もう一度 `/bin/photos --import=/home/user/AATPhotos`、読み直しが止んでから左の album（Sea）を click。
    確認事項: 重複・読み戻し・cache。正解: `PHOTOS MEDIA done imported=1 error=0 snapshot=0`、metadata.db の sha256 が閉じた時と同じ、
-   `Files` の下は 9 つのまま、`PHOTOS LIST list=2 album=0`、`~/.cache/keiland/photos` に `<id>.ppm` が 8 つ（壊れた file の他）。確認方法: log、sha256sum、ls、撮影。
+   `Files` の下は 9 つのまま、`PHOTOS LIST list=2 album=0`、`~/.cache/keiland/photos` に `<id>.ppm` が 8 つ（壊れた file の他）。確認方法: log、cksum -a sha256（zedBSD に sha256sum は無い）、ls、撮影。
 
 ## 合格
 1〜6 の正解。撮影は人が見る（月の見出し、壊れた file の灰色の四角、正立の hill.jpg、回った sea.jpg と Unfavorite、album の Sea と心の印）。

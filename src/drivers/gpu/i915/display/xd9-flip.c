@@ -23,7 +23,7 @@
  * which take effect at the start of the next vertical blank, so a frame is
  * never shown while it is being drawn and every frame is shown for at
  * least one refresh.  The plane's flip-done interrupt wakes the waiter;
- * the waiter also reads the live surface every tick, so a missing
+ * the waiter also reads the live surface every millisecond, so a missing
  * interrupt makes the waits coarser but never wrong.
  *
  * The end of a lease points the plane back at the firmware's surface, so
@@ -73,6 +73,9 @@
 
 #include <uapi/errno.h>
 #include <stddef.h>
+
+/* The longest sleep for the flip-done interrupt before the surface is read again, in milliseconds (a tick at least). */
+#define I915_XD9_FLIP_POLL_MS 1U
 
 /* How many frames one timing line of the log sums up. */
 #define I915_XD9_FLIP_TIMING_FRAMES	600U
@@ -124,7 +127,7 @@ struct i915_xd9_flip {
 	/* Nonzero while the plane's flip-done interrupt is enabled; the handler acknowledges it only then. */
 	volatile int irq_on;
 
-	/* Completed by the flip-done interrupt; a waiter sleeps on it a tick at a time. */
+	/* Completed by the flip-done interrupt; a waiter sleeps on it a millisecond at a time. */
 	struct i915_completion done;
 
 	/*
@@ -975,7 +978,7 @@ i915_xd9_flip_unmap(
 /*
  * Waits until the plane's live surface is the given one.
  *
- * Sleeps a tick at a time; the flip-done interrupt ends a sleep early.
+ * Sleeps a millisecond at a time; the flip-done interrupt ends a sleep early.
  * Returns 0 with the latch's tick recorded, ETIMEDOUT after
  * I915_XD9_FLIP_LATCH_MS, or EIO when one of the driver's buffers latched
  * but the plane faulted reading it (the screen would show nothing of it);
@@ -1005,8 +1008,8 @@ i915_xd9_flip_latch(
 			return ETIMEDOUT;
 		}
 
-		/* Sleeps until the next tick or the flip-done interrupt. */
-		(void)drv_i915_wait_for_completion(&flip->done, now + 1U);
+		/* Sleeps until the flip-done interrupt, or a millisecond at most. */
+		(void)drv_i915_wait_for_completion(&flip->done, now + kern_ms_to_ticks(I915_XD9_FLIP_POLL_MS));
 	}
 
 	/* The faults the handler saw, and one it has not served yet. */

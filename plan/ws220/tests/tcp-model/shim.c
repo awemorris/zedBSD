@@ -167,65 +167,99 @@ sched_ticks(
 	return model_tick_base + model_now_us / (1000000U / MODEL_TICK_HZ);
 }
 
-/* The kernel's conversions at the model's tick: a wait rounds up, a report rounds down. */
+/*
+ * Converts milliseconds to the model's ticks, rounding up as a wait does.
+ */
 uint64_t
 kern_ms_to_ticks(
 	uint64_t milliseconds)
 {
+	/* Reports the ticks that cover the time. */
 	return (milliseconds * MODEL_TICK_HZ + 999U) / 1000U;
 }
 
+/*
+ * Converts microseconds to the model's ticks, rounding up as a wait does.
+ */
 uint64_t
 kern_us_to_ticks(
 	uint64_t microseconds)
 {
+	/* Reports the ticks that cover the time. */
 	return (microseconds * MODEL_TICK_HZ + 999999U) / 1000000U;
 }
 
+/*
+ * Converts the model's ticks to milliseconds, rounding down as a report does.
+ */
 uint64_t
 kern_ticks_to_ms(
 	uint64_t ticks)
 {
+	/* Reports no more time than the ticks counted. */
 	return ticks * 1000U / MODEL_TICK_HZ;
 }
 
+/*
+ * Converts the model's ticks to microseconds, rounding down as a report does.
+ */
 uint64_t
 kern_ticks_to_us(
 	uint64_t ticks)
 {
+	/* Reports no more time than the ticks counted. */
 	return ticks * (1000000U / MODEL_TICK_HZ);
 }
 
+/*
+ * Converts the model's ticks to a timespec, rounding down.
+ */
 void
 kern_ticks_to_timespec(
 	uint64_t ticks,
 	struct timespec *result)
 {
+	/* Whole seconds, then the rest in nanoseconds. */
 	result->tv_sec = (time_t)(ticks / MODEL_TICK_HZ);
 	result->tv_nsec = (long)(ticks % MODEL_TICK_HZ * (KERN_NSEC_PER_SEC / MODEL_TICK_HZ));
 }
 
+/*
+ * Converts a duration to the model's ticks, rounding up; the model's
+ * durations never overflow.
+ */
 int
 kern_duration_to_ticks_ceil(
 	const struct timespec *duration,
 	uint64_t *ticks)
 {
+	/* The whole seconds and the fraction rounded up to a tick. */
 	*ticks = (uint64_t)duration->tv_sec * MODEL_TICK_HZ +
 	    ((uint64_t)duration->tv_nsec * MODEL_TICK_HZ + KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
+
+	/* Succeeded: the ticks that cover the duration. */
 	return 0;
 }
 
+/*
+ * Reports the time between two of the model's ticks, in nanoseconds.
+ */
 uint64_t
 kern_clock_resolution_ns(
 	void)
 {
+	/* Reports one tick. */
 	return KERN_NSEC_PER_SEC / MODEL_TICK_HZ;
 }
 
+/*
+ * Reports the model's ticks in a second.
+ */
 uint32_t
 kern_clock_tick_rate(
 	void)
 {
+	/* Reports the model's rate. */
 	return MODEL_TICK_HZ;
 }
 

@@ -2,13 +2,16 @@
 # ws291-p020: mview's scene on the VisionFive 2's PowerVR with one tree's kernel and programs, run from the top of the
 # tree while the board is assigned:
 #   VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=... VF2_PLUG=14C19FA80F86 [COPIES='1 10 50 100 200'] [SPIN=12]
-#       [MODEL=qs40s] [MVIEW_ARGS='--shading=pixel'] [TIMING=1] [KEEP=1] [SHOT_BUILD=DIR] sh plan/ws291/tests/vf2-mview.sh OUT BUILD
+#       [MODEL=qs40s] [MVIEW_ARGS='--shading=pixel'] [TIMING=1] [KEEP=1] [REBOOT=1] [SHOT_BUILD=DIR] [OLD=p7old]
+#       sh plan/ws291/tests/vf2-mview.sh OUT BUILD
 # BUILD is the tree's build of plan/ws291/tests/config-vf2.mk (its vmunix, bin/wayland, bin/mview and the dynamic
-# libraries).  The board's kernel is kept on the board as vmunix.p7old (when not kept already: the original) and read
+# libraries).  The board's kernel is kept on the board as vmunix.OLD (vmunix.p7old by default; when not kept already:
+# the original) and read
 # back from it (OUT/board-vmunix), BUILD's kernel
 # put in and the board power-cycled (plan/tools/vf2/run.sh); the programs, the libraries and the qs40 model go to the
 # user's ~/p7 (the board's system files are not changed: they run with LD_LIBRARY_PATH), the compositor is started on
-# its own socket, mview spins in the game mode (mailbox, 4 images) once for each of COPIES, then the compositor is ended,
+# its own socket, mview spins in the game mode (mailbox, 4 images) once for each of COPIES (its whole output in
+# OUT/cN.txt), then the compositor is ended (its whole log in OUT/wayland.log),
 # the board's kernel put back (checked by reading it back) and the board power-cycled again.  The password comes from
 # the environment, never from this file.  OUT/summary.txt holds what is printed.
 # The compositor and mview run as root: the display node opens only for root or its owner.  MVIEW_ARGS are added to
@@ -47,13 +50,20 @@ bcp() {
 
 say "start $(date +%H:%M)"
 say "board $(b 'uname -sm; cksum /boot/boot0/vmunix' 2>&1 | tr '\n' ' ')"
-bsudo 'test -f /boot/boot0/vmunix.p7old || cp -p /boot/boot0/vmunix /boot/boot0/vmunix.p7old; sync'
-bcp "$VF2_HOST:/boot/boot0/vmunix.p7old" "$out/board-vmunix" || { say "FAIL the board's kernel was not read back"; exit 1; }
-say "kept $(b 'cksum /boot/boot0/vmunix.p7old' 2>&1)"
+old=/boot/boot0/vmunix.${OLD:-p7old}
+bsudo "test -f $old || cp -p /boot/boot0/vmunix $old; sync"
+bcp "$VF2_HOST:$old" "$out/board-vmunix" || { say "FAIL the board's kernel was not read back"; exit 1; }
+say "kept $(b "cksum $old" 2>&1)"
 
-# The tree's kernel, the board power-cycled until its render node is up.
-timeout 900 sh plan/tools/vf2/run.sh "$build/vmunix" "$out/boot" > "$out/boot.txt" 2>&1
-say "boot $(tail -3 "$out/boot.txt" | tr '\n' ' ')"
+# The tree's kernel, the board power-cycled until its render node is up; a board already running it (KEEP=1 of an
+# earlier run) is power-cycled only when REBOOT=1.
+running=$(b 'cksum < /boot/boot0/vmunix' 2>/dev/null | cut -d' ' -f1)
+if [ "$running" = "$(cksum < "$build/vmunix" | cut -d' ' -f1)" ] && [ "${REBOOT:-0}" != 1 ]; then
+	say "boot skipped: the board already has BUILD's kernel"
+else
+	timeout 900 sh plan/tools/vf2/run.sh "$build/vmunix" "$out/boot" > "$out/boot.txt" 2>&1
+	say "boot $(tail -3 "$out/boot.txt" | tr '\n' ' ')"
+fi
 say "kernel $(cksum < "$build/vmunix" | cut -d' ' -f1) on the board: $(b 'uname -sm; cksum /boot/boot0/vmunix; sysctl hw.gpu.powervr.stages' 2>&1 | tr '\n' ' ')"
 
 # The programs, the libraries and the model in the user's ~/p7.
@@ -96,11 +106,13 @@ for copies in ${COPIES:-1 10 50 100 200}; do
 done
 b "grep -E 'KWL (SCANOUT|MODE [a-z]|FAILED|VULKAN_ERROR|DIRECT)' $H/wayland.log | sort | uniq -c | head -12" > "$out/scanout.txt" 2>&1
 sed 's/^/compositor /' "$out/scanout.txt" | tee -a "$summary"
+# The compositor's whole log, its lines in order (the kernel errors and the mode changes around a failure).
+bcp "$VF2_HOST:p7/wayland.log" "$out/wayland.log" > /dev/null 2>&1 || say "FAIL the compositor's log was not read back"
 printf '%s\n' "$VF2_PASSWORD" | b "sudo -S sh -c 'kill \$(cat $H/wayland.pid)'; sleep 1; dmesg | grep -iE 'powervr|fault|lost|hang' | grep -v timing: | tail -8" > "$out/kernel.txt" 2>&1
 grep -v '^\[sudo\]' "$out/kernel.txt" | sed 's/^/kernel /' | tee -a "$summary"
 
 if [ "${KEEP:-0}" = 1 ]; then
-	say "kept BUILD's kernel on the board (KEEP=1); board $(b 'cksum /boot/boot0/vmunix /boot/boot0/vmunix.p7old' 2>&1 | tr '\n' ' ')"
+	say "kept BUILD's kernel on the board (KEEP=1); board $(b "cksum /boot/boot0/vmunix $old" 2>&1 | tr '\n' ' ')"
 	say "end $(date +%H:%M)"
 	exit 0
 fi
@@ -108,5 +120,5 @@ fi
 # The board's own kernel again, read back and compared, and the board restarted on it.
 timeout 900 sh plan/tools/vf2/run.sh "$out/board-vmunix" "$out/back" > "$out/back.txt" 2>&1
 say "back $(tail -3 "$out/back.txt" | tr '\n' ' ')"
-say "board now $(b 'uname -sm; cksum /boot/boot0/vmunix /boot/boot0/vmunix.p7old; grep -c login /boot/boot0/zedbsd.cfg' 2>&1 | tr '\n' ' ') expected $(cksum < "$out/board-vmunix" | cut -d' ' -f1)"
+say "board now $(b "uname -sm; cksum /boot/boot0/vmunix $old; grep -c login /boot/boot0/zedbsd.cfg" 2>&1 | tr '\n' ' ') expected $(cksum < "$out/board-vmunix" | cut -d' ' -f1)"
 say "end $(date +%H:%M)"

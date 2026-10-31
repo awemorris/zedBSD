@@ -52,8 +52,8 @@ struct vm_private_page;
 #define VM_FREE_MIN_SHARE		512U
 #define VM_FREE_MIN_FLOOR		256U
 
-/* How long one wait for free memory lasts, in scheduler ticks. */
-#define VM_FREE_WAIT_TICKS		10U
+/* How long one wait for free memory lasts, in milliseconds. */
+#define VM_FREE_WAIT_MS		10U
 
 /*
  * How many frames the fault path takes on one reading of the allocator's

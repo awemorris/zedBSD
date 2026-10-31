@@ -501,8 +501,8 @@ static int xhci_suspend_halt(struct xhci_controller *c);
 static int xhci_resume_restore(struct xhci_controller *c);
 static int xhci_resume_run(struct xhci_controller *c);
 static void xhci_resume_ports(struct xhci_controller *c);
-static void xhci_resume_endpoints(struct xhci_controller *c);
-static void xhci_suspend_end(struct xhci_controller *c);
+static void xhci_resume_endpoints_locked(struct xhci_controller *c);
+static void xhci_suspend_end(struct xhci_controller *c, bool ring);
 static void xhci_resume_fail(struct xhci_controller *c, const char *stage, int error);
 static int xhci_resume_reinit(struct xhci_controller *c);
 static int xhci_reinit_forget_devices(struct xhci_controller *c);
@@ -1313,7 +1313,7 @@ port_change_defer(
 		return;
 	__atomic_store_n(&c->port_pending, 1U, __ATOMIC_RELEASE);
 
-	/* Handles the worker condition. */
+	/* Wakes the port worker, when there is one, to look at the port change. */
 	worker = c->port_worker;
 	if (worker)
 		sched_notify_task(worker->task);
@@ -1357,6 +1357,7 @@ command_ex(
 	bool counter_sampled;
 	int command_error;
 	int matches;
+	int expired;
 	unsigned command_owner;
 	unsigned irq_owner;
 	uint32_t controller_fault;
@@ -1440,27 +1441,35 @@ command_ex(
 	/* Publishes the command before polling its completion. */
 	xhci_ring_doorbell(c, 0, 0);
 
-	/* Bounds completion by elapsed time even when the caller cannot enable IRQ. */
+	/*
+	 * Bounds completion by elapsed time even when the caller cannot enable
+	 * IRQ.  Once the time is up the ring is still read until it is empty:
+	 * the doorbell write itself may have taken the whole wait (an emulated
+	 * controller runs the command inside it, and stopping an endpoint
+	 * there waits for the device's outstanding request, such as a slow
+	 * cache flush), and a completion already posted is not a timeout.
+	 */
+	expired = 0;
 	for (n = 0; n < XHCI_TIMEOUT; n++) {
 		/* Chooses an IRQ-independent clock when the HAL supplies one. */
 		if (have_counter) {
-			/* Treats a lost or changed time base as an uncompleted command. */
+			/* Treats a lost or changed time base as an expired wait. */
 			counter_sampled = kern_rtc_read_counter(
 			    &counter_now,
 			    &sample_frequency);
 			if (!counter_sampled ||
-			    sample_frequency != counter_frequency)
-				break;
-
-			/* Limits a missing completion to the same elapsed wait on every CPU. */
-			if ((counter_now - counter_start) / counter_frequency >=
-			    XHCI_COMMAND_WAIT_SECONDS)
-				break;
+			    sample_frequency != counter_frequency) {
+				expired = 1;
+			} else if ((counter_now - counter_start) / counter_frequency >=
+			    XHCI_COMMAND_WAIT_SECONDS) {
+				/* Limits a missing completion to the same elapsed wait on every CPU. */
+				expired = 1;
+			}
 		} else {
 			/* Uses scheduler time where a hardware counter is unavailable. */
 			tick_now = sched_ticks();
 			if (tick_now - tick_start >= tick_limit)
-				break;
+				expired = 1;
 		}
 
 		/* Lets init and networking run between short event-ring critical sections. */
@@ -1506,9 +1515,12 @@ command_ex(
 		if (enabled)
 			kern_irq_enable();
 
-		/* Waits for the next event when the ring is empty. */
-		if (!available)
+		/* Waits for the next event when the ring is empty, unless the time is up. */
+		if (!available) {
+			if (expired != 0)
+				break;
 			continue;
+		}
 
 		/* Defers claimed transfer callbacks until the command gate is open; isochronous ones go now. */
 		if (type == 32U) {
@@ -3520,7 +3532,10 @@ xhci_worker_stop(
 		return;
 	c->port_worker = NULL;
 	__atomic_store_n(&c->port_stopping, 1U, __ATOMIC_RELEASE);
+
+	/* Wakes the worker so it sees the stop request. */
 	sched_notify_task(worker->task);
+
 	/* Continue while the operation condition remains true. */
 	while (worker->state != THREAD_ZOMBIE)
 		sched_yield();
@@ -7016,8 +7031,7 @@ xhci_suspend(
 	/* Waits for the transfers that send or control; on a failure, what was queued meanwhile is rung. */
 	error = xhci_suspend_wait_idle(c);
 	if (error != 0) {
-		xhci_resume_endpoints(c);
-		xhci_suspend_end(c);
+		xhci_suspend_end(c, true);
 		return error;
 	}
 
@@ -7031,8 +7045,7 @@ xhci_suspend(
 	/* Stops the endpoints; on a failure the stopped ones are rung again. */
 	error = xhci_suspend_stop_endpoints(c);
 	if (error != 0) {
-		xhci_resume_endpoints(c);
-		xhci_suspend_end(c);
+		xhci_suspend_end(c, true);
 		kern_logf("xhci: suspend failed stopping endpoints (%d)\n", error);
 		return error;
 	}
@@ -7045,8 +7058,7 @@ xhci_suspend(
 	if (error != 0) {
 		(void)xhci_resume_run(c);
 		xhci_resume_ports(c);
-		xhci_resume_endpoints(c);
-		xhci_suspend_end(c);
+		xhci_suspend_end(c, true);
 		kern_logf("xhci: suspend failed halting (%d)\n", error);
 		return error;
 	}
@@ -7098,17 +7110,16 @@ xhci_resume(
 		}
 
 		/* Opens the gates; the port worker takes the old devices away and enumerates the ports. */
-		xhci_suspend_end(c);
+		xhci_suspend_end(c, false);
 		kern_logf("xhci: resumed after a reset\n");
 		return 0;
 	}
 
-	/* Wakes the ports and rings the endpoints. */
+	/* Wakes the ports. */
 	xhci_resume_ports(c);
-	xhci_resume_endpoints(c);
 
-	/* Opens the gates and starts the port worker again. */
-	xhci_suspend_end(c);
+	/* Rings the endpoints, opens the gates and starts the port worker again. */
+	xhci_suspend_end(c, true);
 
 	/* Succeeded: the controller and its devices run again. */
 	kern_logf("xhci: resumed\n");
@@ -7385,7 +7396,7 @@ xhci_resume_fail(
 	/* Quarantines the controller and lets the waiting operations see it. */
 	xhci_mark_quarantined(c);
 	c->suspend_worker = 0;
-	xhci_suspend_end(c);
+	xhci_suspend_end(c, false);
 
 	/* Says why. */
 	kern_logf("xhci: the controller did not come back from the sleep at %s (%d); USB is unavailable until a restart\n", stage, error);
@@ -7779,20 +7790,21 @@ xhci_resume_ports(
 	kern_memset(c->suspended_ports, 0, sizeof(c->suspended_ports));
 }
 
-/* Rings every enabled endpoint of every device, which runs the requests the suspend left on the rings. */
+/*
+ * Rings every enabled endpoint of every device, which runs the requests the
+ * suspend left on the rings and those queued while the gates were closed.
+ * The caller holds active_lock, the lock the submissions ring under.
+ */
 static void
-xhci_resume_endpoints(
+xhci_resume_endpoints_locked(
 	struct xhci_controller *c)
 {
 	struct xhci_device *device;
 	struct xhci_endpoint *endpoint;
-	unsigned long irq;
 	unsigned dci;
 	unsigned stream;
 
-	/* Rings the endpoints with the lock that the submissions ring under. */
-	irq = spin_lock_irqsave(&c->active_lock);
-
+	/* Each device's endpoints. */
 	for (device = c->devices;
 	     device != NULL;
 	     device = device->next) {
@@ -7821,21 +7833,28 @@ xhci_resume_endpoints(
 			}
 		}
 	}
-
-	spin_unlock_irqrestore(&c->active_lock, irq);
 }
 
-/* Opens the gates and starts the port worker again when the suspend stopped it. */
+/*
+ * Opens the gates and starts the port worker again when the suspend
+ * stopped it.  With ring, every endpoint is rung first, in the same hold
+ * of active_lock: a submission while the gates were closed queued its TD
+ * without the doorbell, and one that came between a separate ring and the
+ * opening would wait on its ring until another doorbell.
+ */
 static void
 xhci_suspend_end(
-	struct xhci_controller *c)
+	struct xhci_controller *c,
+	bool ring)
 {
 	unsigned long irq;
 	int error;
 
-	/* NONE lets the operations in and the submissions ring again. */
+	/* The doorbells for what waits on the rings, then NONE, which lets the operations in and the submissions ring again. */
 	irq = spin_lock_irqsave(&c->active_lock);
 
+	if (ring)
+		xhci_resume_endpoints_locked(c);
 	c->suspend_state = XHCI_SUSPEND_NONE;
 
 	spin_unlock_irqrestore(&c->active_lock, irq);

@@ -99,9 +99,8 @@
  * there and freed before it returns.
  */
 struct nvrtx_sm75_lowering {
-	/* The shader model, whether products may fuse into additions (no NoContraction), the program, the result being built, and where a refusal is described. */
+	/* The shader model, the program, the result being built, and where a refusal is described. */
 	uint32_t sm;
-	uint32_t contract;
 	const struct drv_gpu_shader_ir *ir;
 	struct nvrtx_sm75_binary *binary;
 	struct nvrtx_sm75_diagnostic *diagnostic;

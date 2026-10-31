@@ -41,6 +41,7 @@
 ## 3. module
 
 全部 `userland/desktop/libmedia/`。関数の接頭辞 `h264sw_`、定数 `H264SW_`。各 header の comment が仕様（入力・出力・前提・誤り・節）。
+codec に依らない部分（p026 で移した、H.265 と WS329 の encoder も使う）は `vcodec.h`（共通の約束・誤りの値）、`vcodec-bitreader`（旧 h264sw-bits）、`vcodec-nal`（Annex B の分割と emulation prevention の除去）、`vcodec-cabac`（算術の engine・表 9-44・9-45・式 9-5）。下の表の h264sw-bits は vcodec-bitreader、h264sw-nal と h264sw-cabac は H.264 の部分（header・context）と読む（p026、[ws.md](ws.md) の「結果」）。
 
 | module（.h/.c） | 内容（節） | 使う module |
 | --- | --- | --- |
@@ -86,7 +87,7 @@
 
 ## 5. 単体試験の仕様（host）
 
-- 置き場: `plan/ws326/tests/unit/test-<name>.c`。流し方: `sh plan/ws326/tests/run-unit.sh <name>...`（`all` で全部）。全部の h264sw-*.c（backend を除く）と bits.c を ASan・UBSan で link（未実装の module は ENOSYS の骨格）。最後の行 `test-<name>: PASS (...)`、全体 `run-unit: PASS`。
+- 置き場: `plan/tools/h264sw/unit/test-<name>.c`。流し方: `sh plan/tools/h264sw/run-unit.sh <name>...`（`all` で全部）。全部の h264sw-*.c（backend を除く）と bits.c を ASan・UBSan で link（未実装の module は ENOSYS の骨格）。最後の行 `test-<name>: PASS (...)`、全体 `run-unit: PASS`。
 - 補助: `check.h`（CHECK と最後の行）、`bitwriter.h`（u・ue・se・trailing・NAL の escape。入力は仕様の syntax から自分で組む）。`test-bitwriter.c` が補助自体を表 9-2・9-3 で確かめる（PASS 済み）。
   CABAC の engine の Phase が `cabacwriter.h`（9.3.4 の informative の符号化 engine）を足し、後の CABAC の試験が共有する。
 - 表の写し間違い: 表を test にもう一度写して比べると同じ読み違いが通るので、表には形の検査を足す（VLC の表は列ごとに prefix-free で Kraft の和が 1、表 9-44・9-45 の単調さと形、(m, n) は pdftotext からの独立の抜き出しと全組の照合）。
@@ -96,7 +97,7 @@
 
 ## 6. 骨格の確かめ
 
-- `sh plan/ws326/tests/check-skeleton.sh`: 各 header の単独 compile（cc と clang、`-std=c89 -Wall -Wextra -Werror -Wpedantic`）と全 .c の compile。`BASE=<p001 の SHA>` で header が変わっていないこと（実装の Phase は header を変えない）。
+- `sh plan/tools/h264sw/check-skeleton.sh`: 各 header の単独 compile（cc と clang、`-std=c89 -Wall -Wextra -Werror -Wpedantic`）と全 .c の compile。`BASE=<p001 の SHA>` で header が変わっていないこと（実装の Phase は header を変えない）。
 - zedBSD amd64: `make ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-claude1/build/llvm/bin ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-claude1/build/amd64/sysroot -o /home/awe/zedBSD-claude1/build/amd64/sysroot/.zedbsd-sysroot-complete -j8 build/amd64/dynamic/libmedia.so`（worktree の中、warning 0）。
 
 ## 7. 全体の試験と適合の試験
@@ -104,7 +105,7 @@
 - **小さな全体の試験**（decoder の Phase）: `plan/ws083/tests/streams/*.h264` と `plan/ws236/tests/*.h264`（既存の試料）と、host の ffmpeg（libx264）で作る短い stream（CAVLC と CABAC、I・P・B、8x8、weighted、複数 slice）。
   期待は host の ffmpeg（`ffmpeg -i x.h264 -f rawvideo -pix_fmt yuv420p`）の frame ごとの MD5（副の oracle。他の decoder の出力を正とするのはここだけで、主の判定は JVT の参照の YUV）。
 - **適合の試験**（適合の Phase）: ITU-T H.264.1 の JVT conformance の bitstream。
-  - 入手: `sh plan/ws326/tests/conformance/fetch.sh [<dir>/<name>...]`。`https://www.itu.int/wftp3/av-arch/jvt-site/draft_conformance/{AVCv1,FRExt}/<name>.zip` のパラメータの無い GET（master.md「統合の注意」の web の取得の条件）。
+  - 入手: `sh plan/tools/h264sw/conformance/fetch.sh [<dir>/<name>...]`。`https://www.itu.int/wftp3/av-arch/jvt-site/draft_conformance/{AVCv1,FRExt}/<name>.zip` のパラメータの無い GET（master.md「統合の注意」の web の取得の条件）。
     zip でない答え（bot の確認など）は即止めて Q1 に報告、別の取り方で再試行しない。SHA-256 は `conformance/sha256.txt` に記録（初回に書き、以後照合）。cache は `$H264SW_CONFORMANCE_DIR`（既定 `build/tmp/ws326-conformance/zips`、全部で約 3.1 GB: AVCv1 135 本 1.7 GB、FRExt 69 本 1.4 GB）。
     p001 で 3 本（BA1_Sony_D・CABA1_SVA_B・BA_MW_D）を取得して確かめた（2026-10-30、PASS、hash を記録）。
   - zip の中: bitstream（`.264`・`.jsv`・`.26l`・`.jvt`・`.avc` など）、参照の復号の出力（`.yuv`・`_rec.yuv`・`_rec.qcif` など、I420 8 bit、出力の順、crop の後）、readme（Frame/Field Coding・Entropy・Slice groups などの記述）、trace。

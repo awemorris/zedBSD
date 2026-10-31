@@ -932,6 +932,56 @@ vmspace_map_region(
 }
 
 /*
+ * Maps retained device storage at an exact range, retiring whatever the
+ * range held (MAP_FIXED).
+ *
+ * The region takes its own reference to the mapping before it can be
+ * faulted on; the caller keeps the reference it holds.
+ */
+int
+vmspace_map_device_replace(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct vm_device_mapping *mapping)
+{
+	struct vm_region *prepared;
+	int error;
+
+	/* Prepares the shared device region fully before the old mappings go. */
+	error = prepare_region(start,
+			       size,
+			       prot,
+			       VM_BACKING_DEVICE,
+			       NULL,
+			       0,
+			       start,
+			       size,
+			       VM_REGION_SHARED,
+			       0,
+			       &prepared);
+	if (error != 0)
+		return error;
+
+	/* The region holds the backing, and its rights never exceed the open's. */
+	vm_device_ref(mapping);
+	prepared->device = mapping;
+	prepared->max_prot = mapping->max_prot;
+
+	/* Publishes the region in place of what the range held. */
+	error = vmspace_replace_prepared(vm, prepared, NULL);
+	if (error != 0) {
+		/* Discarding the region drops its backing reference too. */
+		discard_prepared_region(prepared);
+		return error;
+	}
+
+	/* Succeeded: faults now publish the device pages at the fixed address. */
+	return 0;
+}
+
+/*
  * Maps anonymous memory at a free range; the caller holds the VM locks.
  */
 int

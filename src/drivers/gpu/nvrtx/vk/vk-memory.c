@@ -434,6 +434,13 @@ memory_bind_to(
 	if (bytes > storage->bytes - offset)
 		return EINVAL;
 
+	/* A colour image of one level is what a shared image is: its shape goes with the storage, and an exported one's shape is checked. */
+	if (image && storage->attached && picture->levels == 1U && !picture->depth && !picture->video) {
+		error = nvrtx_vk_memory_bind_image(storage->backing, picture->tiled, picture->pitch, picture->width, picture->height, offset);
+		if (error != 0)
+			return error;
+	}
+
 	/* The resource holds the allocation while it lives. */
 	error = nvrtx_vk_object_retain(memory);
 	if (error != 0)
