@@ -1686,7 +1686,7 @@ flex_auto_minimums(
 			return error;
 
 		/* An image's content size suggestion is its natural ratio applied to a definite cross size. */
-		if (row && child->replaced && child->style.aspect_ratio <= 0.0f &&
+		if (child->replaced && child->style.aspect_ratio <= 0.0f &&
 		    child->image != NULL && child->image->width > 0 && child->image->height > 0) {
 			layout_unit cross;
 
