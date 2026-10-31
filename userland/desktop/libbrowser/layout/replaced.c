@@ -24,7 +24,6 @@ static int replaced_attribute(const struct layout_box *box, const char *name, la
 static int replaced_length(const struct css_length *length, layout_unit containing, layout_unit *value);
 static layout_unit replaced_content_size(const struct layout_box *box, layout_unit size, int first, int second);
 static int replaced_is_video(const struct layout_box *box);
-static int replaced_is_canvas(const struct layout_box *box);
 static int replaced_is_bare_svg(const struct layout_box *box);
 static int replaced_flex_main(const struct layout_box *box);
 static void replaced_limit_ratio(layout_unit *width, layout_unit *height, layout_unit min_width, layout_unit max_width, layout_unit min_height, layout_unit max_height);
@@ -78,7 +77,7 @@ layout_replaced_size(
 	}
 
 	/* A <canvas>'s natural size is its width and height attributes' (300 by 150 when absent), and gives the ratio. */
-	if (box->image == NULL && replaced_is_canvas(box)) {
+	if (box->image == NULL && layout_replaced_is_canvas(box)) {
 		natural_width = (layout_unit)REPLACED_VIDEO_WIDTH * LAYOUT_UNIT;
 		natural_height = (layout_unit)REPLACED_VIDEO_HEIGHT * LAYOUT_UNIT;
 		replaced_attribute(box, "width", &natural_width);
@@ -111,7 +110,7 @@ layout_replaced_size(
 		width = replaced_content_size(box, width, CSS_LEFT, CSS_RIGHT);
 
 	/* Only an unresolved non-control width falls back to the real content attribute. */
-	if (!width_given && box->control == DOM_CONTROL_NONE && !replaced_is_canvas(box))
+	if (!width_given && box->control == DOM_CONTROL_NONE && !layout_replaced_is_canvas(box))
 		width_given = replaced_attribute(box, sideways ? "height" : "width", &width);
 
 	/* The height: the style's (a percentage only with a definite containing height), or the attribute's. */
@@ -124,7 +123,7 @@ layout_replaced_size(
 		height = replaced_content_size(box, height, CSS_TOP, CSS_BOTTOM);
 
 	/* Only an unresolved non-control height falls back to the real content attribute. */
-	if (!height_given && box->control == DOM_CONTROL_NONE && !replaced_is_canvas(box))
+	if (!height_given && box->control == DOM_CONTROL_NONE && !layout_replaced_is_canvas(box))
 		height_given = replaced_attribute(box, sideways ? "width" : "height", &height);
 
 	/*
@@ -411,7 +410,7 @@ layout_replaced_ratio(
 	}
 
 	/* A canvas's attributes (300 by 150 when absent). */
-	if (box->image == NULL && replaced_is_canvas(box)) {
+	if (box->image == NULL && layout_replaced_is_canvas(box)) {
 		width = (layout_unit)REPLACED_VIDEO_WIDTH * LAYOUT_UNIT;
 		height = (layout_unit)REPLACED_VIDEO_HEIGHT * LAYOUT_UNIT;
 		replaced_attribute(box, "width", &width);
@@ -425,8 +424,8 @@ layout_replaced_ratio(
 }
 
 /* Tells whether a box is an HTML <canvas>'s. */
-static int
-replaced_is_canvas(
+int
+layout_replaced_is_canvas(
 	const struct layout_box *box)
 {
 	const struct dom_element *element;

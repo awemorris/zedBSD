@@ -414,6 +414,7 @@ struct layout_context {
 int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, const struct layout_transition *transition);
 void layout_box_model(struct layout_box *box, layout_unit containing_width);
 void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
+int layout_replaced_is_canvas(const struct layout_box *box);
 int layout_replaced_ratio(const struct layout_box *box, float *ratio);
 void layout_replaced_size(struct layout_box *box, layout_unit containing_width, layout_unit containing_height, int height_definite);
 void layout_absolute(struct layout_box *box, layout_unit x, layout_unit y);
