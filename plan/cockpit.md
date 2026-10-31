@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 22:51（Q1）
+最終更新: 2026-10-31 22:56（Q1）
 
 ## 担当（P1〜P8）
 
@@ -89,7 +89,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 | [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking を飛ばす | closed（VF2 の実機で確かめた） |
 | [BUG-372](bugs/BUG-372.md) | VF2 の serial の console が入力を受けない（元から未実装） | closed（VF2 の実機で確かめた） |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が EBUSY で終わる（VF2） | closed（P7: 原因は GPU の kernel の命令の buffer が満杯の時に待たずに失敗する事。待つ形に直し、VF2 で 8 回とも落ちず。main 2c5897f26） |
-| [BUG-379](bugs/BUG-379.md) | Pi 4 の session の中で compositor が描かない。原因は kernel の fork の livelock | open（P7 が直す） |
+| [BUG-379](bugs/BUG-379.md) | Pi 4 の session の中で compositor が描かない。原因は kernel の fork の livelock | closed（Pi 4 の session で描く） |
 | [BUG-380](bugs/BUG-380.md) | Pi 4 で mview（3D）の pipeline が作れない（V3D の executor） | open |
 | [BUG-378](bugs/BUG-378.md) | arm64 の kernel の text が 2 MiB を越えると起動の途中で止まる（Pi 4、全 arm64 の board に効く） | closed（実機の Pi 4 で起動） |
 | [BUG-374](bugs/BUG-374.md) | RTX の mouse の cursor の色が他の GPU と逆 | 診断の kernel を用意済み（矢印の色で原因が分かれる）。ユーザーの目視待ち（下の「拾える試験」） |
