@@ -580,6 +580,9 @@ layout_grid(
 			row_gap = 0;
 		row_gap = (layout_unit)((float)row_gap * box->style.row_gap.value / 100.0f) +
 		    layout_from_px(box->style.row_gap.offset);
+	} else if (box->style.row_gap.unit == CSS_UNIT_PERCENT) {
+		/* An indefinite height sizes the rows with the fixed part of the gap alone. */
+		row_gap = layout_from_px(box->style.row_gap.offset);
 	}
 
 	/* An item with a vertical writing mode lays its lines along the row's height. */
@@ -710,7 +713,7 @@ layout_grid(
 	 * the items are placed with it resolved against the height that gave.
 	 */
 	if (box->style.row_gap.unit == CSS_UNIT_PERCENT && box->style.height.unit != CSS_UNIT_PX && grid.row_count > 1) {
-		used = 0;
+		used = row_gap * (layout_unit)(grid.row_count - 1);
 		for (position = 0; position < grid.row_count; position++)
 			used += grid.rows[position];
 		row_gap = (layout_unit)((float)used * box->style.row_gap.value / 100.0f) +
