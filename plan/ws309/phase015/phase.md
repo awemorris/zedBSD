@@ -181,6 +181,10 @@
   `vulkan_wsi_swapchain_image_memory` が遅い chain を断る → 能力の確かめが lendable=0）。nvrtx の bl=0 は全画面を window mode の合成にする。VF2・Pi・Venus は LINEAR が先頭なので貸す。
   host 試験 PASS、amd64・RTX の build warning 0。その RTX の再計測（new・bl の 2 腕）は Q1 の指示（ユーザーの目視を先に）で new の腕の再起動の途中で止めた（未計測）。
 - 目視の準備（17:4x）: branch の 14 file と kernel、`nvrtx.disp.bl=1`、desktop で `block-linear scanout on`・`first flip`（window mode の chain も block-linear）、lendable=1。
+- ユーザーの目視（2026-10-31 18:1x、Q1 経由）: **不合格**。画は出るが block ごとに崩れてずれる（文字・icon が小さな block に刻まれ、desktop の window mode の chain も同じ）。
+  写真 /home/awe/zedBSD-claude1/build/review/ws291/p023-bl-visual-1.jpg。Q1 の決定: nvrtx の既定は変えない（`nvrtx.disp.bl` は既定 0 のまま）、lend の規則は残す
+  （bl=0 の RTX は貸さない）。block-linear の scanout の直しは P3（WS291 p023）。機械は branch と `nvrtx.disp.bl=1` のまま P3 へ渡した（deploy と戻しの手順は Q1 に送った）。
+  よって RTX の文字通りの zero copy は、mview の側（lent=1・tiling 0x10001・copy 0・quads 0）は確かめたが、画面の正しさは未達（P3 の scanout 待ち）。
 
 ### Pi 4・Pi 5 の用意
 
