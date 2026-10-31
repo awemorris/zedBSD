@@ -250,7 +250,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-380](bugs/BUG-380.md) | Pi 4（V3D 4.2）で mview の pipeline の作成が FEATURE_NOT_PRESENT（V3D の executor が compositor の形だけ） | closed（2026-10-31 22:19、Pi 4 で mview が動く、main に merge） |
 | [BUG-381](bugs/BUG-381.md) | libvulkan が OOM で job を CANCEL するが、nvrtx では前の command buffer がもう GPU で走っている事がある | assigned（P3、残りの driver） |
 | [BUG-382](bugs/BUG-382.md) | 5330 の NVMe の p7 を discard して起動した直後に mkfs が "no registration" で失敗（約 2 分後なら通る、間欠） | in-progress（P2） |
-| [BUG-383](bugs/BUG-383.md) | libbrowser が http の page からも file: の副資源を読む（local の file の読み出し、安全） | assigned（P3） |
+| [BUG-383](bugs/BUG-383.md) | libbrowser が http の page からも file: の副資源を読む（local の file の読み出し、安全） | assigned（P3）、直しと host 試験は済み（2026-11-01、page_fetch が local でない page の file: を EACCES） |
 | [BUG-384](bugs/BUG-384.md) | arm64 の kernel の Image の header の image_size が BSS を含まない（boot の約束に反する、今は症状なし） | in-progress（P1） |
 | [BUG-176](bugs/BUG-176.md) | 起動の直後の約 10 秒「Network service is not …」と出る | reproduced（実機） / resolved（2026-10-08 夜 ユーザー「下記は実装の変更が多かったので、いったんすべてcloseします。」、Q1 の中継）。前: scheduled、低（q726: bar の起動の直後の表示を「Starting the network service...」に、UAT 待ち） | UAT 2026-10-04 | WS131・networkd（[ticket](bugs/BUG-176.md)） |
 | [BUG-159](bugs/BUG-159.md) | バッテリー駆動で描画が 5 fps ほどに落ち、電池切れで警告なく落ちる | reproduced（実機 S1） / tracking | S1（WS133） | WS075（i915）、電源の管理（WS050〜052・WS132）。UAT 2026-10-04: 再現せず（電源の状態は BUG-165 の後） |
