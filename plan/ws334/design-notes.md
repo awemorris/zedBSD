@@ -40,3 +40,14 @@
 - Q1 の推し: build と画面の出る起動・機能の試験は QEMU の Windows の guest（x86_64、KVM）＋ CPU の Vulkan と設計の CPU の描画の道で。GPU の Vulkan の確かめ（速さ・
   Vulkan Video）は passthrough（10.0.10.3）か実機で、shell がある程度できてから。arm64 の Windows は QEMU では遅い（TCG）ので build の確かめまで。
 - Windows の install の media と license（評価版など）はユーザーが用意する。
+
+## Wine で Vulkan が使えるか（2026-11-01 ユーザーの問いへの Q1 の答え）
+
+- Wine は winevulkan（Windows の vulkan-1.dll の呼び出しを host の Linux の Vulkan の driver へ渡す層）を持ち、DXVK などはこれの上で動く。Wine の側の Vulkan は
+  一般によく動く。決め手は host の Linux の Vulkan の driver（Q1 の知識から）。
+- この host（10.0.10.2）: Wine 10.0（wine・wine64・wine32）と mesa-vulkan-drivers 25.0.7 が入っている（Q1 が dpkg で確かめた）。GPU は server の Matrox G200e
+  （Vulkan の driver 無し）なので、使える Vulkan は Mesa の lavapipe（lvp、CPU）だけ。→ Wine で OmniGrammaton の Vulkan の道は動く見込みだが CPU の速さ。描画の正しさと
+  起動・機能の試験には使える（未確かめ）。画面の無い server なので X の仮の display（Xvfb など）が要る。
+- GPU の Vulkan を Wine で使うには、GPU の driver が host の Linux に付いた機械が要る（10.0.10.3 の RTX は今 vfio-pci に付いていて Linux の driver は使っていない）。
+- 推し: 早い段の smoke の試験は host の Wine＋lavapipe（速く回せる）、Windows に固有の挙動（IME・DPI・file の dialog・証明書の store）は QEMU の Windows の guest、
+  GPU の速さは passthrough か実機。
