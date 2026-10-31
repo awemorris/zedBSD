@@ -36,13 +36,13 @@ answer(
 	size_t item,
 	int kind,
 	int automatic,
-	int *clampable)
+	layout_unit *fixed)
 {
 	struct case_items *items;
 
 	/* The case's table. */
 	(void)automatic;
-	*clampable = 0;
+	*fixed = -1;
 	items = context;
 	if (kind == GRID_CONTRIBUTION_MIN_CONTENT)
 		return items->min_content[item] * LAYOUT_UNIT;
@@ -92,6 +92,10 @@ parse_tracks(
 			tracks[count].minimum_length = lower * LAYOUT_UNIT;
 			tracks[count].maximum = GRID_TRACK_LENGTH;
 			tracks[count].maximum_length = used * LAYOUT_UNIT;
+		} else if (sscanf(word, "mxc(%d)", &lower) == 1) {
+			tracks[count].minimum = GRID_TRACK_MAX_CONTENT;
+			tracks[count].maximum = GRID_TRACK_LENGTH;
+			tracks[count].maximum_length = lower * LAYOUT_UNIT;
 		} else if (sscanf(word, "ma(%d)", &lower) == 1) {
 			tracks[count].minimum = GRID_TRACK_AUTO;
 			tracks[count].maximum = GRID_TRACK_LENGTH;
@@ -220,6 +224,9 @@ main(
 	run("fit-content", "fit(20)", GRID_TRACK_DEFINITE, 100, 0, 1, 50, "20");
 	run("fit-content-small", "fit(80)", GRID_TRACK_DEFINITE, 100, 0, 1, 50, "50");
 	minimum_override = -1;
+
+	/* A max-content minimum takes the item's max-content contribution (grid-intrinsic-track-sizes-001). */
+	run("max-content-minimum", "mxc(10) mxc(10)", definite, 120, 0, 2, 60, "30 30");
 	if (failures != 0) {
 		printf("%d failed\n", failures);
 		return 1;

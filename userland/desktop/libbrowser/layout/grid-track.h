@@ -68,10 +68,11 @@ struct grid_track_item {
  * Answers what an item contributes in this axis (its outer size, margins
  * included).  For the minimum contribution, automatic is nonzero when the
  * item's automatic minimum size applies (it spans a track with an auto
- * minimum), and the callback sets *clampable when the answer is an
- * automatic minimum that a fixed maximum may cap.
+ * minimum), and the callback sets *fixed (-1 for none) to the part of the
+ * answer that cannot shrink (margins, borders and padding) when the answer
+ * is an automatic minimum that a fixed maximum may cap.
  */
-typedef layout_unit (*grid_track_contribution_fn)(void *context, size_t item, int kind, int automatic, int *clampable);
+typedef layout_unit (*grid_track_contribution_fn)(void *context, size_t item, int kind, int automatic, layout_unit *fixed);
 
 /* The input of one sizing: the tracks, the items, the space and who answers for the items. */
 struct grid_track_input {

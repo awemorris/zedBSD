@@ -79,6 +79,13 @@ static void gt_expand(struct gt_state *state);
 static void gt_stretch(struct gt_state *state);
 static int gt_compare_items(const void *left, const void *right);
 
+/*
+ * The order of the steps of a distribution (see gt_pass): the max-content
+ * minimums of auto tracks under a max-content constraint (6) come before
+ * the limits are raised (3).
+ */
+static const int gt_step_order[7] = { 0, 1, 2, 6, 3, 4, 5 };
+
 /* The items by span for qsort (the sort key is read through this while the sort runs). */
 static const struct grid_track_item *gt_sort_items;
 
@@ -214,7 +221,7 @@ gt_answer(
 	const struct grid_track_input *input;
 	int64_t value;
 	int64_t cap;
-	int clampable;
+	layout_unit fixed;
 	int automatic;
 	int index;
 
@@ -238,13 +245,15 @@ gt_answer(
 	}
 
 	/* The caller's answer. */
-	clampable = 0;
-	value = input->contribution(input->context, item, kind, automatic, &clampable);
+	fixed = -1;
+	value = input->contribution(input->context, item, kind, automatic, &fixed);
 	if (value < 0)
 		value = 0;
 
 	/* An automatic minimum is no more than what fits an item that spans only tracks with a fixed maximum. */
-	if (kind == GRID_CONTRIBUTION_MINIMUM && clampable && gt_cap(state, item, 0, &cap)) {
+	if (kind == GRID_CONTRIBUTION_MINIMUM && fixed >= 0 && value > fixed && gt_cap(state, item, 0, &cap)) {
+		if (cap < fixed)
+			cap = fixed;
 		if (value > cap)
 			value = cap;
 	}
@@ -733,8 +742,8 @@ gt_spanning_items(
 	for (start = 0; start < count; start = end) {
 		for (end = start; end < count && input->items[order[end]].span == input->items[order[start]].span; end++)
 			continue;
-		for (step = 0; step < 6; step++)
-			gt_pass(state, order + start, end - start, step, 0);
+		for (step = 0; step < 7; step++)
+			gt_pass(state, order + start, end - start, gt_step_order[step], 0);
 	}
 	free(order);
 }
@@ -742,7 +751,8 @@ gt_spanning_items(
 /*
  * One step of the spanning items' distributions for a group of items: the
  * steps are the intrinsic minimums (0), the content-based minimums (1),
- * the max-content minimums under a max-content constraint (2), the
+ * the max-content minimums (2, and 6 for auto minimums under a
+ * max-content constraint), the
  * raising of limits that fell below their base sizes (3), the intrinsic
  * maximums (4) and the max-content maximums (5).
  */
@@ -777,16 +787,16 @@ gt_pass(
 		return;
 	}
 
-	/* A max-content minimum is only distributed under a max-content constraint. */
-	if (step == 2 && input->constraint != GRID_TRACK_MAX_CONSTRAINT)
+	/* An auto minimum takes the limited max-content contribution only under a max-content constraint. */
+	if (step == 6 && input->constraint != GRID_TRACK_MAX_CONSTRAINT)
 		return;
 
 	/* What is distributed to what. */
 	target = GT_BASE;
 	beyond = GT_BEYOND_INTRINSIC;
-	if (step == 2)
+	if (step == 2 || step == 6)
 		beyond = GT_BEYOND_MAX_CONTENT;
-	if (step >= 4) {
+	if (step == 4 || step == 5) {
 		target = GT_LIMIT;
 		beyond = GT_BEYOND_ALL;
 	}
@@ -811,7 +821,9 @@ gt_pass(
 				state->affected[track_index] = 1;
 			else if (step == 1 && (track->minimum == GRID_TRACK_MIN_CONTENT || track->minimum == GRID_TRACK_MAX_CONTENT))
 				state->affected[track_index] = 1;
-			else if (step == 2 && (track->minimum == GRID_TRACK_AUTO || track->minimum == GRID_TRACK_MAX_CONTENT))
+			else if (step == 2 && track->minimum == GRID_TRACK_MAX_CONTENT)
+				state->affected[track_index] = 1;
+			else if (step == 6 && track->minimum == GRID_TRACK_AUTO)
 				state->affected[track_index] = 1;
 			else if (step == 4 && gt_intrinsic_maximum(track->maximum))
 				state->affected[track_index] = 1;
@@ -832,7 +844,7 @@ gt_pass(
 				contribution = gt_answer(state, item, GRID_CONTRIBUTION_MINIMUM);
 		} else if (step == 1 || step == 4) {
 			contribution = gt_answer(state, item, GRID_CONTRIBUTION_MIN_CONTENT);
-		} else if (step == 2) {
+		} else if (step == 6) {
 			contribution = gt_limited(state, item, GRID_CONTRIBUTION_MAX_CONTENT);
 		} else {
 			contribution = gt_answer(state, item, GRID_CONTRIBUTION_MAX_CONTENT);
@@ -895,8 +907,8 @@ gt_flexible_items(
 	}
 
 	/* The base-size steps only: flexible tracks have no growth limit of their own. */
-	for (step = 0; step < 3; step++)
-		gt_pass(state, order, count, step, 1);
+	for (step = 0; step < 4; step++)
+		gt_pass(state, order, count, gt_step_order[step], 1);
 	free(order);
 }
 

@@ -63,6 +63,8 @@ struct grid_state {
 	/* Tracks of an auto-fit repeat that no item uses: they take no room (NULL when none). */
 	unsigned char *column_collapsed;
 	unsigned char *row_collapsed;
+	/* The height the rows gave before percentage rows were resolved against it (-1 when the rows' own sum is the height). */
+	layout_unit intrinsic_height;
 };
 
 /*
@@ -967,6 +969,8 @@ layout_grid(
 		box->height = 0;
 	for (position = 0; position < grid.row_count; position++)
 		box->height += grid.rows[position];
+	if (grid.intrinsic_height >= 0)
+		box->height = grid.intrinsic_height;
 
 	/* Keep the actual resolved tracks before the transient sizing arrays leave. */
 	error = grid_save_used_tracks(tree, box, &grid);
@@ -2767,9 +2771,15 @@ grid_track_spec_of(
 		spec->maximum = GRID_TRACK_FLEX;
 		spec->flex = track->fr;
 	} else if (track->maximum_rule == CSS_TRACK_MAXIMUM_MIN_CONTENT) {
+		/* A plain min-content is minmax(min-content, min-content). */
 		spec->maximum = GRID_TRACK_MIN_CONTENT;
+		if (track->minimum_rule == CSS_TRACK_MINIMUM_NONE)
+			spec->minimum = GRID_TRACK_MIN_CONTENT;
 	} else if (track->maximum_rule == CSS_TRACK_MAXIMUM_MAX_CONTENT) {
+		/* A plain max-content is minmax(max-content, max-content). */
 		spec->maximum = GRID_TRACK_MAX_CONTENT;
+		if (track->minimum_rule == CSS_TRACK_MINIMUM_NONE)
+			spec->minimum = GRID_TRACK_MAX_CONTENT;
 	} else if (track->maximum_rule == CSS_TRACK_MAXIMUM_FIT_CONTENT) {
 		/* fit-content(P) with a percentage that is not known yet is max-content. */
 		spec->maximum = GRID_TRACK_MAX_CONTENT;
@@ -2826,7 +2836,7 @@ grid_column_item_contribution(
 	const struct grid_item *grid_item,
 	int kind,
 	int automatic,
-	int *clampable,
+	layout_unit *fixed,
 	layout_unit *outer)
 {
 	struct layout_box *item;
@@ -2841,7 +2851,7 @@ grid_column_item_contribution(
 
 	/* A percentage minimum or maximum depends on the area the contribution decides, so it counts as none. */
 	item = grid_item->box;
-	*clampable = 0;
+	*fixed = -1;
 	basis = -1;
 
 	/* The frame and margins around the content. */
@@ -2871,17 +2881,24 @@ grid_column_item_contribution(
 			return 0;
 		}
 
-		/* Otherwise the automatic minimum: nothing for a scroll container or when it does not apply, else the content's min-content width. */
-		if (!automatic || item->style.overflow_x != CSS_OVERFLOW_VISIBLE || item->style.min_width.unit != CSS_UNIT_AUTO) {
+		/* An intrinsic minimum width is the content's width of that kind. */
+		if (item->style.min_width.unit == CSS_UNIT_MIN_CONTENT) {
+			kind = GRID_CONTRIBUTION_MIN_CONTENT;
+		} else if (item->style.min_width.unit == CSS_UNIT_MAX_CONTENT || item->style.min_width.unit == CSS_UNIT_FIT_CONTENT) {
+			kind = GRID_CONTRIBUTION_MAX_CONTENT;
+		} else if (!automatic || item->style.overflow_x != CSS_OVERFLOW_VISIBLE || item->style.min_width.unit != CSS_UNIT_AUTO) {
+			/* No automatic minimum: a scroll container, or an item that does not span an auto minimum. */
 			*outer = 0;
 			return 0;
+		} else {
+			/* The automatic minimum is the content's min-content width, or the width the ratio gives. */
+			*fixed = frame + margins;
+			if (grid_ratio_width(item->parent, grid_item, grid_fixed_row_gap(item->parent), &ratio_width)) {
+				*outer = ratio_width;
+				return 0;
+			}
+			kind = GRID_CONTRIBUTION_MIN_CONTENT;
 		}
-		*clampable = 1;
-		if (grid_ratio_width(item->parent, grid_item, grid_fixed_row_gap(item->parent), &ratio_width)) {
-			*outer = ratio_width;
-			return 0;
-		}
-		kind = GRID_CONTRIBUTION_MIN_CONTENT;
 	}
 
 	/* The content's width. */
@@ -2939,7 +2956,7 @@ grid_column_answer(
 	size_t index,
 	int kind,
 	int automatic,
-	int *clampable)
+	layout_unit *fixed)
 {
 	struct grid_column_context *state;
 	layout_unit outer;
@@ -2948,11 +2965,11 @@ grid_column_answer(
 	/* The item's contribution. */
 	state = context;
 	outer = 0;
-	*clampable = 0;
+	*fixed = -1;
 	if (state->error != 0)
 		return 0;
 	error = grid_column_item_contribution(state->tree, &state->grid->items[index], kind, automatic,
-	    clampable, &outer);
+	    fixed, &outer);
 	if (error != 0) {
 		state->error = error;
 		return 0;
@@ -3293,7 +3310,7 @@ grid_row_answer(
 	size_t index,
 	int kind,
 	int automatic,
-	int *clampable)
+	layout_unit *fixed)
 {
 	const struct grid_row_context *state;
 	const struct layout_box *item;
@@ -3303,7 +3320,7 @@ grid_row_answer(
 
 	/* A baseline group's size is the floor of its row. */
 	state = context;
-	*clampable = 0;
+	*fixed = -1;
 	if (index >= state->item_count)
 		return state->floors[index - state->item_count];
 
@@ -3333,7 +3350,8 @@ grid_row_answer(
 		return 0;
 
 	/* Otherwise the automatic minimum is its content's height, which a fixed maximum caps. */
-	*clampable = 1;
+	*fixed = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->padding[CSS_BOTTOM] + item->border[CSS_BOTTOM] +
+	    item->margin[CSS_TOP] + item->margin[CSS_BOTTOM];
 	return outer;
 }
 
@@ -3422,6 +3440,7 @@ grid_size_rows(
 	int error;
 
 	/* The column of heights (none when the grid has no rows). */
+	grid->intrinsic_height = -1;
 	grid->rows = calloc((size_t)grid->row_count + 1U, sizeof(*grid->rows));
 	if (grid->rows == NULL) {
 		grid->row_count = 0;
@@ -3509,6 +3528,7 @@ grid_size_rows(
 		if (minimum >= 0 && total < minimum)
 			total = minimum;
 		available = total;
+		grid->intrinsic_height = total;
 		again = 1;
 	}
 	free(tracks);
