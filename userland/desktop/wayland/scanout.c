@@ -79,8 +79,12 @@
 /* How long an acquired image's fence is waited for (the display stops reading it), in nanoseconds. */
 #define SCANOUT_FENCE_NS	1000000000ULL
 
-/* How long the client has after the lend to draw into a lent image, in milliseconds. */
-#define SCANOUT_ADOPT_MS	2000U
+/*
+ * How long the client has after the lend to draw into a lent image, in
+ * milliseconds: its chain is made again and the images imported first
+ * (about half a second on QEMU's Venus, up to 2.7 s for a first lend).
+ */
+#define SCANOUT_ADOPT_MS	5000U
 
 /* The uses a client's chain may have to draw into lent images. */
 #define SCANOUT_USAGE		(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | \
@@ -419,6 +423,10 @@ kwl_scanout_tag(
 	buffer->lend_index = index;
 	buffer->busy = 1;
 	kwl_buffer_get(buffer);
+
+	/* Logged for the lend's first frame only. */
+	if (chain->shown == 0U)
+		printf("KWL SCANOUT tag index=%u state=%u buffer=%u\n", index, (unsigned)chain->state[index], buffer->id);
 
 	/* The client's image now goes back to it; one the swapchain has stays held until it comes back. */
 	if (chain->state[index] == KWL_GAME_FREE) {
@@ -1100,6 +1108,10 @@ scanout_present_done(
 		chain->state[job->index] = KWL_GAME_CHAIN;
 		chain->flight = -1;
 	}
+
+	/* The lend's first images, logged once. */
+	if (!job->present)
+		printf("KWL SCANOUT lend images=0x%x result=%d serial=%u\n", job->acquired, (int)job->result, chain->serial);
 
 	/* A failure is the display's refusal from now. */
 	if (job->result != VK_SUCCESS && job->result != VK_SUBOPTIMAL_KHR) {

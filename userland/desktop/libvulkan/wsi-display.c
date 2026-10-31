@@ -599,6 +599,14 @@ display_capabilities(
 	    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
 	/*
+	 * A primary plane's images may be sampled too: a compositor lends them
+	 * to a client and composes them after the lend.  A direct chain's
+	 * linear image and a copied chain's own image both allow it.
+	 */
+	if (surface->cursor == VK_FALSE && surface->overlay == VK_FALSE)
+		capabilities->supportedUsageFlags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+
+	/*
 	 * An overlay chain of two images may have both acquired at once, so a
 	 * picture is copied into both by one submission (ws214-p004).
 	 */
