@@ -1993,7 +1993,7 @@ page_svg_decode(
 	start = 0;
 	if (length >= 3U && bytes[0] == 0xefU && bytes[1] == 0xbbU && bytes[2] == 0xbfU)
 		start = 3U;
-	if (length - start < 5U || memmem(bytes + start, length - start < 2048U ? length - start : 2048U, "<svg", 4) == NULL)
+	if (length - start < 5U || wb_memmem(bytes + start, length - start < 2048U ? length - start : 2048U, "<svg", 4) == NULL)
 		return ENOTSUP;
 
 	/* The text as UTF-16 into a scratch document, which the heap's roots keep while it is parsed. */

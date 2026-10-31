@@ -37,6 +37,8 @@
  * (the overscroll of a rubber band), the gap showing the page's canvas.
  */
 
+#include "base/os-file.h"
+#include "base/os-time.h"
 #include "net/net.h"
 #include "page/page.h"
 #include "paint/gpu.h"
@@ -49,7 +51,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 
 /* The most pages the history remembers (the oldest is forgotten first). */
 #define VIEW_HISTORY_MAX	64U
@@ -427,20 +428,34 @@ browser_view_load(
 	struct browser_view *view,
 	const char *location)
 {
-	char directory[1024];
+	struct wb_buffer directory;
+	struct wb_buffer base;
 	struct wb_buffer path;
-	char *found;
 	int error;
 
-	/* The working directory, which a relative path starts from, with a slash to make it a base. */
-	found = getcwd(directory, sizeof(directory) - 1U);
-	if (found == NULL)
-		return errno;
-	strcat(directory, "/");
+	/* The working directory, which a relative path starts from. */
+	wb_buffer_init(&directory);
+	error = wb_os_current_directory(&directory);
+	if (error != 0) {
+		wb_buffer_release(&directory);
+		return error;
+	}
+
+	/* Its file: URL, with a slash to make it a base (a root has one already). */
+	wb_buffer_init(&base);
+	error = net_url_from_file_path(wb_buffer_string(&directory), &base);
+	wb_buffer_release(&directory);
+	if (error == 0 && base.data[base.length - 1U] != '/')
+		error = wb_buffer_append_byte(&base, '/');
+	if (error != 0) {
+		wb_buffer_release(&base);
+		return error;
+	}
 
 	/* The location resolved against it, as a link would be. */
 	wb_buffer_init(&path);
-	error = page_resolve_location(directory, location, &path);
+	error = page_resolve_location(wb_buffer_string(&base), location, &path);
+	wb_buffer_release(&base);
 	if (error == 0)
 		error = view_navigate(view, wb_buffer_string(&path), VIEW_STEP_NEW, view->history_index);
 	wb_buffer_release(&path);
@@ -2026,16 +2041,13 @@ browser_add_ca_file(
 static uint64_t
 view_clock(void)
 {
-	struct timespec now;
-	int status;
+	uint64_t now;
 
 	/* The clock. */
-	status = clock_gettime(CLOCK_MONOTONIC, &now);
-	if (status != 0)
-		return 0U;
+	now = wb_os_monotonic_ns();
 
 	/* In milliseconds. */
-	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+	return now / 1000000U;
 }
 
 /*

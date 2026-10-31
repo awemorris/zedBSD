@@ -23,10 +23,10 @@
  */
 
 #include "bind/internal.h"
+#include "base/os-system.h"
+#include "base/os-time.h"
 #include "js/builtin.h"
 #include "net/net.h"
-
-#include "include/kern/os-name.h"
 
 #include <errno.h>
 #include <float.h>
@@ -34,19 +34,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-/* The processor's name in navigator.platform, as the compiler targets it. */
-#if defined(__x86_64__)
-#define ENVIRONMENT_MACHINE	"x86_64"
-#elif defined(__aarch64__)
-#define ENVIRONMENT_MACHINE	"aarch64"
-#elif defined(__riscv) && __riscv_xlen == 64
-#define ENVIRONMENT_MACHINE	"riscv64"
-#elif defined(__i386__)
-#define ENVIRONMENT_MACHINE	"i686"
-#else
-#define ENVIRONMENT_MACHINE	"unknown"
-#endif
 
 /* The colour depth of the screen, in bits per pixel (the surfaces are 32-bit, with 24 bits of colour). */
 #define ENVIRONMENT_COLOR_DEPTH	24
@@ -226,7 +213,7 @@ static const struct environment_part environment_location_parts[] = {
 static const struct environment_string environment_navigator_strings[] = {
 	{ "appCodeName", "Mozilla" },
 	{ "appName", "Netscape" },
-	{ "platform", ZEDBSD_OS_NAME " " ENVIRONMENT_MACHINE },
+	{ "platform", NULL },
 	{ "product", "Gecko" },
 	{ "productSub", "20030107" },
 	{ "vendor", "" },
@@ -783,16 +770,13 @@ environment_install_observers(
 double
 bind_epoch_milliseconds(void)
 {
-	struct timespec now;
-	int status;
+	int64_t now;
 
 	/* The system's clock. */
-	status = clock_gettime(CLOCK_REALTIME, &now);
-	if (status != 0)
-		return 0.0;
+	now = wb_os_wall_ns();
 
 	/* Succeeded: the whole milliseconds. */
-	return (double)now.tv_sec * 1000.0 + (double)(now.tv_nsec / 1000000L);
+	return (double)(now / 1000000);
 }
 
 /*
@@ -1217,20 +1201,15 @@ environment_random_uuid(
 	unsigned char bytes[16];
 	char text[37];
 	struct vm_string *string;
-	FILE *file;
-	size_t got;
 	unsigned i;
 	unsigned at;
+	int error;
 
 	UNUSED_PARAMETER(this_value);
 	UNUSED_PARAMETER(args);
 	UNUSED_PARAMETER(count);
-	file = fopen("/dev/urandom", "rb");
-	if (file == NULL)
-		return EIO;
-	got = fread(bytes, 1U, sizeof(bytes), file);
-	fclose(file);
-	if (got != sizeof(bytes))
+	error = wb_os_random(bytes, sizeof(bytes));
+	if (error != 0)
 		return EIO;
 	bytes[6] = (unsigned char)((bytes[6] & 0x0fU) | 0x40U);
 	bytes[8] = (unsigned char)((bytes[8] & 0x3fU) | 0x80U);
@@ -1413,12 +1392,16 @@ environment_strings(
 	struct vm_object *object,
 	const struct environment_string *table)
 {
+	const char *text;
 	vm_value value;
 	int error;
 
-	/* Each entry, a string that cannot be assigned. */
+	/* Each entry, a string that cannot be assigned (the system's name for an entry without a value). */
 	for (; table->name != NULL; table++) {
-		error = bind_string(realm, table->value, &value);
+		text = table->value;
+		if (text == NULL)
+			text = wb_os_platform_name();
+		error = bind_string(realm, text, &value);
 		if (error != 0)
 			return error;
 		error = js_builtin_value(realm, object, table->name, value, VM_PROPERTY_ENUMERABLE | VM_PROPERTY_CONFIGURABLE);

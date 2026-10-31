@@ -22,11 +22,6 @@
 
 #include "base/base.h"
 
-/* The User-Agent the browser sends, which navigator.userAgent reports too. */
-#define NET_USER_AGENT		"Mozilla/5.0 (X11; Linux x86_64) " \
-				"AppleWebKit/537.36 (KHTML, like Gecko) " \
-				"Chrome/153.0.0.0 Safari/537.36"
-
 /*
  * A parsed URL.
  *
@@ -151,6 +146,7 @@ int net_url_serialize(const struct net_url *url, int exclude_fragment, struct wb
 int net_url_component(const struct net_url *url, int part, struct wb_buffer *out);
 int net_url_file_path(const struct net_url *url, struct wb_buffer *out);
 int net_url_from_file_path(const char *path, struct wb_buffer *out);
+const char *net_user_agent(void);
 int net_percent_decode(const char *text, size_t length, struct wb_buffer *out);
 
 /* Hosts (host.c). */

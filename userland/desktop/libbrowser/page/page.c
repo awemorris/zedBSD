@@ -12,6 +12,7 @@
  */
 
 #include "page/page.h"
+#include "base/os-file.h"
 #include "bind/internal.h"
 #include "net/net.h"
 #include "xml/dom.h"
@@ -277,13 +278,20 @@ page_load_file(
 	const char *path)
 {
 	struct wb_buffer buffer;
+	struct wb_buffer full;
 	int error;
 
 	/* The page's scripts and images find their files from the page's, by its absolute path. */
 	free(page->base);
-	page->base = realpath(path, NULL);
-	if (page->base == NULL)
+	wb_buffer_init(&full);
+	error = wb_os_full_path(path, &full);
+	if (error == 0) {
+		page->base = strdup(wb_buffer_string(&full));
+	} else {
+		/* A path the system cannot resolve stays as it was given. */
 		page->base = strdup(path);
+	}
+	wb_buffer_release(&full);
 	if (page->base == NULL)
 		return ENOMEM;
 
