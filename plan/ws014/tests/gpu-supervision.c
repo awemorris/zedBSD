@@ -13,6 +13,9 @@
 /* The scheduler peer changes this clock only at an explicit scenario boundary. */
 extern uint64_t gpu_test_ticks;
 
+/* One second of the scheduler peer's clock, in the ticks the core counts deadlines in. */
+#define TEST_SECOND_TICKS	kern_ms_to_ticks(1000U)
+
 /* A selected wait boundary models a different caller retiring actual production ownership. */
 extern int (*gpu_test_wait_hook)(struct wait_queue *, struct spinlock *, uint64_t, uint64_t, unsigned);
 
@@ -267,7 +270,7 @@ main(
 
 	/* A normally completing job may run beyond the former ten-second execution limit. */
 	first_sequence = submit_job(&first, 1U);
-	gpu_test_ticks += 11U * KERN_CLOCK_HZ;
+	gpu_test_ticks += 11U * TEST_SECOND_TICKS;
 	next = gpu_monitor_step(job_device);
 	assert(next > gpu_test_ticks && owner->error == 0 && global_faults == 0U);
 	deliver_session(&first, 0);
@@ -276,9 +279,9 @@ main(
 
 	/* A committed owner's expiry does not fail a later independent submission. */
 	first_sequence = submit_job(&first, 1U);
-	gpu_test_ticks += 5U * KERN_CLOCK_HZ;
+	gpu_test_ticks += 5U * TEST_SECOND_TICKS;
 	second_sequence = submit_job(&second, 1U);
-	gpu_test_ticks += 55U * KERN_CLOCK_HZ;
+	gpu_test_ticks += 55U * TEST_SECOND_TICKS;
 	(void)gpu_monitor_step(job_device);
 	assert(owner->error == ETIMEDOUT && peer->error == 0);
 	assert(local_starts == 1U && global_faults == 0U);
@@ -293,7 +296,7 @@ main(
 	deliver_session(&second, 0);
 	error = job_observe(&second, second_sequence, 1U, &status);
 	assert(error == 0 && status == 0);
-	gpu_test_ticks += KERN_CLOCK_HZ;
+	gpu_test_ticks += TEST_SECOND_TICKS;
 	(void)gpu_monitor_step(job_device);
 	assert(owner->stop_state == GPU_STOP_FINISHED && local_polls == 1U);
 	assert(job_device->error == 0 && global_faults == 0U);
@@ -306,10 +309,10 @@ main(
 
 	/* Unknown native acceptance in an expired reservation cannot claim a graceful stop. */
 	second_sequence = submit_job(&second, 0U);
-	gpu_test_ticks += 10U * KERN_CLOCK_HZ;
+	gpu_test_ticks += 10U * TEST_SECOND_TICKS;
 	(void)gpu_monitor_step(job_device);
 	assert(peer->error == ETIMEDOUT && global_faults == 0U);
-	gpu_test_ticks += 10U * KERN_CLOCK_HZ;
+	gpu_test_ticks += 10U * TEST_SECOND_TICKS;
 	(void)gpu_monitor_step(job_device);
 	assert(global_faults == 1U && job_device->error != 0);
 	error = job_observe(&second, second_sequence, 1U, &status);
@@ -339,10 +342,10 @@ main(
 	assert(error == 0);
 	peer = second.file.f_data;
 	second_sequence = submit_job(&second, 0U);
-	gpu_test_ticks += 10U * KERN_CLOCK_HZ;
+	gpu_test_ticks += 10U * TEST_SECOND_TICKS;
 	(void)gpu_monitor_step(job_device);
 	assert(peer->error == ETIMEDOUT && isolations == 0U);
-	gpu_test_ticks += 10U * KERN_CLOCK_HZ;
+	gpu_test_ticks += 10U * TEST_SECOND_TICKS;
 	(void)gpu_monitor_step(job_device);
 	assert(isolations == 1U && global_faults == 1U && job_device->error == 0);
 	assert(peer->stop_state == GPU_STOP_QUARANTINED && job_device->quarantined == 1U);
@@ -365,7 +368,7 @@ main(
 	/* An expired reservation on a proven-idle context is withdrawn by the common layer through cancel. */
 	owner = first.file.f_data;
 	second_sequence = submit_job(&first, 0U);
-	gpu_test_ticks += 10U * KERN_CLOCK_HZ;
+	gpu_test_ticks += 10U * TEST_SECOND_TICKS;
 	(void)gpu_monitor_step(job_device);
 	assert(owner->error == ETIMEDOUT && job_device->error == 0);
 	(void)gpu_monitor_step(job_device);

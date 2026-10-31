@@ -27,6 +27,7 @@
 #include <kern/uaccess.h>
 #include <kern/vm-device.h>
 #include <kern/device-io.h>
+#include <kern/platform.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -2626,4 +2627,35 @@ test_mapping(void)
 	/* Succeeded: session tokens, shared bytes and final close retain their ordinary ownership rules. */
 	puts("GPU mapping: offset isolation, bounds, rollback, shared bytes and retained close PASS");
 	return;
+}
+
+/* Turns a time into ticks of the fixture's 1000 Hz clock, rounding up, for the core's deadlines. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	/* Succeeded: one tick a millisecond. */
+	return milliseconds;
+}
+
+/* Turns nanoseconds into ticks of the fixture's 1000 Hz clock, rounding up. */
+uint64_t
+kern_ns_to_ticks(
+	uint64_t nanoseconds)
+{
+	/* Succeeded: whole milliseconds, a part counted as one. */
+	return (nanoseconds + 999999U) / 1000000U;
+}
+
+/* Reports that the host handed over no boot framebuffer. */
+int
+kern_boot_framebuffer(
+	const char *prefix,
+	struct kern_boot_framebuffer *framebuffer)
+{
+	(void)prefix;
+	(void)framebuffer;
+
+	/* Succeeded: there is none. */
+	return ENOENT;
 }

@@ -1,5 +1,5 @@
 #!/bin/sh
-# ws291-p024: kernels side by side on the RTX 2070 (10.0.10.3) with one tree's programs, each mview run with
+# ws291-p024: kernels side by side on the RTX 2070 (10.0.10.3) with one tree's programs, each mview run,
 # with TIMING=1 libvulkan's submission timing (VULKAN_ZEDBSD_SUBMIT_TIMING=1, about 2 us a part: subs-N is slower
 # with it), run from the top of the tree in the machine's lock:
 #   FILES='DEST=SRC ...' [RESTORE_CKSUM=N] [ROUNDS=1] [SPIN=8] [LIST=plan/ws291/tests/rtx-ab.list] [PERF=0|1]
