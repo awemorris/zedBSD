@@ -2,7 +2,7 @@
 
 # ws335-p002: 土台（約束・定数時間の補助・byte 順）、SHA-2、hash の選択・HMAC・HKDF
 
-Status: in-progress（2026-11-01 05:47 q1818、Sonnet）
+Status: 実装済み・試験 PASS（2026-11-01 06:58、Sonnet。cleared は Q1）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -66,4 +66,54 @@ git diff --check
 
 ## 結果
 
-（未着手）
+実装済み・試験 PASS（2026-11-01 06:58、Sonnet）。cleared の判定は Q1。
+
+### 作った物
+
+- `userland/base/libcrypto-compat/cryc-util.c`（wipe、定数時間の比較・mask・選択、byte 順）、`cryc-sha2.c`（SHA-256・384・512）、`cryc-hash.c`（hash の選択、HMAC、HKDF）。header は変えていない。
+- 単体試験 `plan/ws335/tests/unit/test-util.c`・`test-sha2.c`・`test-hash.c`、定数時間の試験 `ct-util.c`・`ct-hash.c`。
+
+### 実行した command と最後の行
+
+- `sh plan/ws335/tests/run-unit.sh util sha2 hash`: `test-util: PASS (169160 checks)`、`test-sha2: PASS (14092 checks)`、`test-hash: PASS (12965 checks)`、`run-unit: PASS`。
+- `sh plan/ws335/tests/run-unit.sh --win32 util sha2 hash`: 同じ 3 つが `(win32)` 付きで同じ件数の PASS、`run-unit: PASS`。
+- `sh plan/ws335/tests/run-unit.sh all`: 上の 3 つと `test-tools: PASS (18 checks)`、`ct-hash: PASS (37 checks)`、`ct-util: PASS (33 checks)`、`run-unit: PASS`。
+- `sh plan/ws335/tests/run-ct.sh util hash`: `ct-util: PASS (33 checks)`、`ct-hash: PASS (37 checks)`、`run-ct: PASS`。
+- `BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh`: `check-skeleton: PASS`（-Werror の build で warning 0）。
+- `git diff --check`: 出力なし。
+
+### 試験の中身と件数
+
+- 公式の vector: CAVP の SHA-256 ShortMsg 65・LongMsg 64、SHA-384 ShortMsg 129・LongMsg 128、SHA-512 ShortMsg 129・LongMsg 128、Monte 各 100（計 743 record）。各 record を一括・1〜1000 byte の細切れ・途中の複製の 3 通りで確かめる。RFC 4231 の case 1〜7（SHA-256・384・512、case 5 は 128 bit に切った MAC）、RFC 5869 付録 A.1〜A.3 の PRK と OKM、Wycheproof hmac 各 174 件、hkdf は sha256 86・sha384 83・sha512 83 件（無効の件は EINVAL を確かめる）。
+- NIST の例の値（"abc"、448 bit の文、a を 100 万個）は FIPS 180-4 の元の版に付く例として知られる値。CAVP で確かめた実装と一致することで裏付けた（他の実装の出力ではない）。
+- 長さの欄: 全ての total（2^32 を越える値、2^61 手前まで）と使用中の byte 数で、padding の最後の block を手で組み、同じ状態から圧縮した結果と final の出力を比べる。
+- 境界・誤り: 長さ 0・1・block の境（CAVP の全 byte 長と 0〜299 byte の乱数）、NULL と長さ 0、不明な id（0・4 以上・-1）の ENOTSUP、prk の短さ・出力の過大（255 * HashLen + 1、(size_t)-1）の EINVAL と出力が書かれないこと（前後の canary）、HMAC の鍵の長さ 0〜block+3、RFC 2104 の式の手の組み立て（鍵が短ければ 0 詰め、長ければ digest）。
+- 定数時間: 比較・mask・選択・byte 順（ct-util）、3 つの hash、HMAC（鍵長 0・20・128・300）、HKDF の extract・expand（ct-hash）を Valgrind で。
+
+### わざと壊す確かめ
+
+作業木のコピー（`build/tmp/p002/mut/`、git の外）で 38 通りを壊して試験を流し、毎回本物の source から書き戻した。壊した所: K の定数 2、padding の境界 2、長さの shift 2、SHA-384 の IV と出力長、sigma の rotate、Maj、update の block 境、final で消さない、ipad・opad、長い鍵の境界、HMAC の連結、counter の始まり、最大 block 数、前の block の連鎖、zero salt、prk_size の検査、out_size 0、hash の長さ・id、hmac_clear、wipe の無効化と 1 つ足りない場合、ct_equal の `>>`・ループの端・早期 return、mask の向き・反転、選択の反転、copy_if の mask 無視、load/store の byte の位置。最初の 1 巡で 34 件が FAIL（捕まえた。早期 return の 1 件は run-ct が FAIL）、4 件を見逃した。試験を足して 2 件を捕まえ、残りは試験で見えない物と等価な変更で、結局 36 件を捕まえ 2 件は見えない物:
+
+- 最初の試験は SHA-512 の length の上位 64 bit（total >> 61 を >> 60 に）を見逃したので、2^60 以上 2^61 未満の total を足し、再実行で FAIL を確かめた。
+- zero salt を HashLen より 1 byte 短くする変更は、HMAC の鍵が 0 詰めされるので結果が同じ（等価な変更。試験の対象から外し、代わりに zero salt の値を 1 にする変更を入れて FAIL を確かめた）。
+- hmac_init の鍵 block を最後に消さない変更は、関数の局所変数の消去なので試験から見えない（review で確かめる）。
+- `cryc_ct_mask_eq32` を `if` に替える変更は run-ct が見逃した: -O2 の compiler が分岐の無い命令列にするため（生成 code が定数時間なので memcheck が何も出さない）。
+- 戻した確かめ: 壊した copy を毎回 repo の source から書き戻して内容の一致を確かめ、最後に `cmp` で copy の 3 つの .c が repo の物と一致することを確かめた。repo の source は壊していない。
+
+### 自分で決めた点（header が黙っている所）
+
+- 不正な引数: `data == NULL` で size > 0 の update は何もしない（読まない）。`cryc_wipe(NULL, n)` は何もしない。`cryc_ct_equal`・`select_bytes`・`copy_if` の NULL（size > 0）は読み書きしない（equal は 0）。`cryc_hmac_init` で key == NULL かつ key_size > 0、`cryc_hkdf_extract` で ikm == NULL かつ ikm_size > 0、`cryc_hkdf_expand` で prk == NULL または info == NULL かつ info_size > 0 は EINVAL（header は ENOTSUP だけを書くが、黙って別の MAC を返すより安全として追加。HKDF extract の NULL salt は header どおり零）。
+- `used` が block 長以上など壊れた構造は、update は何もせず、final は空の block とみなす。`out_size` が 64 を越える構造は 64 に切る（範囲外を書かない）。
+- `cryc_hash_init` は不明な id でも構造を 0 で埋めてから ENOTSUP を返す。`cryc_hmac_init` は失敗時に hmac 全体を消す。id が無い構造の update・final は何もしない（final は出力を書かない、構造は消す）。
+- `cryc_ct_select_bytes` の mask は下位 8 bit だけを使う（0 または 0xffffffff の約束の範囲では header と同じ）。
+- HKDF-Expand は PRK で HMAC を一度だけ鍵付けし、各 block はその複製から始める。prk_size が HashLen を越える時は PRK 全体を HMAC の鍵にする（RFC 5869 の 2.3）。out_size 0 は検査の後に 0 を返す。
+- SHA-2 の内部は sigma・Ch・Maj を static 関数に分け、rotate は関数（C89 に inline が無いため）。圧縮の message schedule は終わりに消す。
+
+### 環境の問題（Wine）
+
+`run-unit.sh --win32` の最初の実行は、この host で Wine の prefix の作成（`wineboot -i`）が約 5 分で失敗した（`wine: could not load kernel32.dll, status c0000135`。syswow64 が空のまま。DISPLAY が無く、Xvfb を付けても同じ）。壊れた prefix は `build/tmp/ws335-wine-broken-1`〜`-4` に退避した（削除は Q1 へ）。別の担当（ws334 の p019）の完成した prefix を `build/tmp/ws335-wine` に複写して `.ws335-ready` を置いたところ、`--win32` は 29 秒で PASS した。スクリプトは変えていない。他の担当が新しく prefix を作るなら同じ問題に当たりうる。
+
+### 未実施
+
+- 2^61 byte を越える total の挙動（header が呼び出し側の誤りとする範囲）。実際に 4 GiB 以上を流す試験（長さの欄は状態の直接設定で確かめた）。
+- 実機・QEMU は対象外。
