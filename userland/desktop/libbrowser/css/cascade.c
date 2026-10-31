@@ -1008,6 +1008,7 @@ cascade_compute(
 		style->cursor = parent->cursor;
 		style->visibility = parent->visibility;
 		style->list_style = parent->list_style;
+		style->list_style_inside = parent->list_style_inside;
 		style->underline = parent->underline;
 		style->text_decoration_skip_ink = parent->text_decoration_skip_ink;
 		style->text_stroke_width = parent->text_stroke_width;
@@ -4211,7 +4212,8 @@ cascade_apply(
 		    property == CSS_PROP_BORDER_SPACING_Y ||
 		    property == CSS_PROP_BORDER_COLLAPSE ||
 		    property == CSS_PROP_CAPTION_SIDE ||
-		    property == CSS_PROP_LIST_STYLE_TYPE)
+		    property == CSS_PROP_LIST_STYLE_TYPE ||
+		    property == CSS_PROP_LIST_STYLE_POSITION)
 			inherited = 1;
 
 		/* Explicit inheritance and inherited unset take the parent value. */
@@ -4631,6 +4633,9 @@ cascade_apply(
 		break;
 	case CSS_PROP_LIST_STYLE_TYPE:
 		style->list_style = value->keyword;
+		break;
+	case CSS_PROP_LIST_STYLE_POSITION:
+		style->list_style_inside = value->keyword;
 		break;
 	case CSS_PROP_BOX_SIZING:
 		style->box_sizing = value->keyword;
@@ -5211,6 +5216,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_LIST_STYLE_TYPE:
 		style->list_style = parent->list_style;
+		break;
+	case CSS_PROP_LIST_STYLE_POSITION:
+		style->list_style_inside = parent->list_style_inside;
 		break;
 	default:
 		break;

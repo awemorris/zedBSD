@@ -513,7 +513,9 @@ enum css_list_style {
 	CSS_LIST_CIRCLE,
 	CSS_LIST_SQUARE,
 	CSS_LIST_DECIMAL,
-	CSS_LIST_NONE
+	CSS_LIST_NONE,
+	CSS_LIST_DISCLOSURE_CLOSED,
+	CSS_LIST_DISCLOSURE_OPEN
 };
 
 /* The values of background-repeat (the two axes together). */
@@ -973,6 +975,8 @@ struct css_style {
 	uint32_t text_decoration_color;
 	int text_decoration_current_color;
 	int list_style;
+	/* list-style-position: 1 for inside. */
+	int list_style_inside;
 
 	/*
 	 * Generated content: what content gives a ::before or

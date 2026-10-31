@@ -23,6 +23,8 @@
 #define BOX_BULLET_DISC		0x2022U
 #define BOX_BULLET_CIRCLE	0x25e6U
 #define BOX_BULLET_SQUARE	0x25aaU
+#define BOX_DISCLOSURE_CLOSED	0x25b8U
+#define BOX_DISCLOSURE_OPEN	0x25beU
 
 static void box_root_flow(struct layout_box *root);
 static int box_build_element(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, const struct css_style *parent_style, struct layout_box *parent, int depth);
@@ -1722,6 +1724,14 @@ box_marker(
 		break;
 	case CSS_LIST_SQUARE:
 		box->marker[0] = BOX_BULLET_SQUARE;
+		box->marker_length = 1;
+		break;
+	case CSS_LIST_DISCLOSURE_CLOSED:
+		box->marker[0] = BOX_DISCLOSURE_CLOSED;
+		box->marker_length = 1;
+		break;
+	case CSS_LIST_DISCLOSURE_OPEN:
+		box->marker[0] = BOX_DISCLOSURE_OPEN;
 		box->marker_length = 1;
 		break;
 	case CSS_LIST_DECIMAL:
