@@ -410,6 +410,7 @@ buffer_image(
 	VkDeviceMemory *memory)
 {
 	VkExternalMemoryImageCreateInfo external;
+	VkImageLayoutZEDBSD placed;
 	VkImageCreateInfo create;
 	VkMemoryRequirements requirements;
 	VkImageSubresource subresource;
@@ -432,7 +433,15 @@ buffer_image(
 	external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
 	external.handleTypes = kwl_gpu_buffer_handle_type();
 
-	/* Describe the linear image whose dedicated allocation is imported. */
+	/* An image of another layout than linear rows is placed as its maker placed it (libvulkan's record). */
+	memset(&placed, 0, sizeof(placed));
+	placed.sType = VK_STRUCTURE_TYPE_IMAGE_LAYOUT_ZEDBSD;
+	placed.tiling = image->tiling;
+	placed.parameter = image->parameter;
+	if (!image->linear)
+		external.pNext = &placed;
+
+	/* Describe the image whose dedicated allocation is imported. */
 	memset(&create, 0, sizeof(create));
 	create.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	create.pNext = &external;
@@ -446,6 +455,10 @@ buffer_image(
 	create.samples = VK_SAMPLE_COUNT_1_BIT;
 	create.tiling = VK_IMAGE_TILING_LINEAR;
 	create.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+	if (!image->linear) {
+		create.tiling = VK_IMAGE_TILING_OPTIMAL;
+		create.usage = image->usage;
+	}
 	create.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	create.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -464,12 +477,15 @@ buffer_image(
 	memset(&subresource, 0, sizeof(subresource));
 	subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-	/* Queries the image layout and refuses a mismatched client allocation. */
-	vkGetImageSubresourceLayout(device->device, *created, &subresource, &layout);
+	/* Queries a linear image's rows (an optimal image has none to ask) and refuses a mismatched client allocation. */
+	memset(&layout, 0, sizeof(layout));
+	if (image->linear)
+		vkGetImageSubresourceLayout(device->device, *created, &subresource, &layout);
 	if ((requirements.memoryTypeBits & (1U << image->memory_type)) == 0U ||
 	    requirements.size > image->allocation_bytes ||
-	    layout.offset != image->offset ||
-	    layout.rowPitch != image->stride) {
+	    (image->linear &&
+	     (layout.offset != image->offset ||
+	      layout.rowPitch != image->stride))) {
 		printf("KWL VULKAN_IMPORT_LAYOUT types=0x%x type=%u size=%llu bytes=%llu offset=%llu/%llu pitch=%llu/%u\n",
 		       requirements.memoryTypeBits,
 		       image->memory_type,

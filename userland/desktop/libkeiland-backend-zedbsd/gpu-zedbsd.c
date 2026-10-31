@@ -80,9 +80,6 @@ kwl_gpu_buffer_decode(
 	if (image.height == 0U || image.height > limits->max_dimension)
 		return EINVAL;
 
-	/* Only linear rows are shared. */
-	if (image.tiling != GPU_IMAGE_LINEAR)
-		return EINVAL;
 
 	/* One of the two four-channel formats, in its byte order. */
 	if (image.format == GPU_PIXEL_BGRA8888) {
@@ -107,9 +104,19 @@ kwl_gpu_buffer_decode(
 	if (image.offset > UINT64_MAX - rows_bytes)
 		return EINVAL;
 
-	/* Refuses an image whose last pixel extends past the shared allocation. */
+	/*
+	 * A linear image's last pixel ends inside the allocation.  Another
+	 * layout's placement is its device's (the kernel checked it against the
+	 * allocation when the image went out); its start is inside here.
+	 */
 	end = image.offset + rows_bytes;
-	if (end > image.allocation_bytes)
+	if (image.tiling == GPU_IMAGE_LINEAR && end > image.allocation_bytes)
+		return EINVAL;
+	if (image.tiling != GPU_IMAGE_LINEAR && image.offset >= image.allocation_bytes)
+		return EINVAL;
+
+	/* An image of another layout is read with exactly its uses, sampling among them. */
+	if (image.tiling != GPU_IMAGE_LINEAR && (image.usage & VK_IMAGE_USAGE_SAMPLED_BIT) == 0U)
 		return EINVAL;
 
 	/* A memory type the device has. */
@@ -124,6 +131,12 @@ kwl_gpu_buffer_decode(
 	layout->offset = image.offset;
 	layout->allocation_bytes = image.allocation_bytes;
 	layout->memory_type = image.memory_type;
+	layout->linear = 0U;
+	if (image.tiling == GPU_IMAGE_LINEAR)
+		layout->linear = 1U;
+	layout->tiling = image.tiling;
+	layout->parameter = image.layout_parameter;
+	layout->usage = image.usage;
 
 	/* Succeeded: every value is one Vulkan can take. */
 	return 0;

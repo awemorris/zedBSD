@@ -143,9 +143,20 @@ vkCreateImage(
 	VkResult status;
 	uint64_t handle;
 	struct vulkan_image *image;
+	const VkBaseInStructure *next;
+	const VkImageLayoutZEDBSD *placed;
+
+	/* The layout record, if any; only a device that names its own layouts takes one. */
+	owner = vulkan_device(device);
+	placed = NULL;
+	for (next = pCreateInfo->pNext; next != NULL; next = next->pNext) {
+		if (next->sType == VK_STRUCTURE_TYPE_IMAGE_LAYOUT_ZEDBSD)
+			placed = (const VkImageLayoutZEDBSD *)next;
+	}
+	if (placed != NULL && (owner->object.context->capabilities & GPU_CAP_IMAGE_LAYOUTS) == 0U)
+		return VK_ERROR_FORMAT_NOT_SUPPORTED;
 
 	/* Reserves local ownership before any renderer creation can have side effects. */
-	owner = vulkan_device(device);
 	status = resource_allocate(owner, VULKAN_OBJECT_IMAGE, sizeof(struct vulkan_image), pAllocator, &object);
 	if (status != VK_SUCCESS)
 		return status;
@@ -174,6 +185,10 @@ vkCreateImage(
 	image->usage = pCreateInfo->usage;
 	image->tiling = pCreateInfo->tiling;
 	image->sharing_mode = pCreateInfo->sharingMode;
+	if (placed != NULL) {
+		image->layout_tiling = placed->tiling;
+		image->layout_parameter = placed->parameter;
+	}
 
 	/* Changes caller output only after local and native creation succeeded. */
 	handle = vulkan_nondispatchable_handle(object);

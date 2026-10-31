@@ -17,6 +17,7 @@
 #include <pthread.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_wayland.h>
+#include "include/libc/vulkan/vulkan_zedbsd.h"
 #include <uapi/gpu-op.h>
 
 /* The pinned renderer reserves ring zero and owns at most sixty-three device timelines. */
@@ -282,6 +283,12 @@ struct vulkan_image {
 	VkImageUsageFlags usage;
 	VkImageTiling tiling;
 	VkSharingMode sharing_mode;
+	/*
+	 * The layout the image was placed in (VkImageLayoutZEDBSD at its
+	 * creation): a GPU_IMAGE_* tiling and its parameter; zero for none.
+	 */
+	uint32_t layout_tiling;
+	uint32_t layout_parameter;
 	VkBool32 swapchain_owned;
 	/*
 	 * The renderer's answers about this image, kept after the first query:
@@ -321,7 +328,7 @@ struct vulkan_external_image_info {
  * names its own layouts (GPU_CAP_IMAGE_LAYOUTS); its type is the library's
  * own, the native executor's private record.
  */
-#define VULKAN_STRUCTURE_TYPE_IMAGE_LAYOUT ((VkStructureType)0x7a650001)
+#define VULKAN_STRUCTURE_TYPE_IMAGE_LAYOUT VK_STRUCTURE_TYPE_IMAGE_LAYOUT_ZEDBSD
 struct vulkan_image_layout_info {
 	VkStructureType sType;
 	const void *pNext;

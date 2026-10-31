@@ -121,3 +121,28 @@
   道具の判定は FAIL: 1 回目の mview の起動（model の読み込み）が約 50 秒かかり、道具の 40 秒の待ちの後に終わったため 1 回目の no-window・window が 2 回目に数えられた（2〜6 回目は全部の数が 1）。
   log: build/review/ws309/p015-cycle5-kwl.log・p015-cycle5.txt。画面の PNG は Venus の VNC が直の scanout を映さない（道具の注のとおり）ので判定に使わない。
 - 手で 1 回（m8、spin 12 s）: `frames=184` の貸した image の present、mview の SPIN fps 18.8（QEMU の lavapipe、参考）。
+
+### 再開点（2026-10-31 16:39 P2、Q1 の指示でラップアップ: host の再起動）
+
+- 状態: in-progress（未 cleared）。branch `agent/p2-ws309v2`。main の merge は 0747be69a（6dcfbfaef = P3 の I1 core を含む main）。
+- 済み・確かめ: libvulkan の export・Wayland の lend・kl_game protocol・compositor の貸し出し・T4・暫定の経路の撤去（scanout-zedbsd.c の git rm、v1-check の例外を外した）、
+  lend の能力の確かめ（window の chain の export）、`GPU_IMAGE_LAYOUTS` の選び。build（amd64・VF2）warning 0、v1-check PASS、vulkan-overlay-host PASS、host-scanout-rules PASS、
+  QEMU の game-mode-cycle 6 回の実の往復（上の節。道具の判定は 1 回目の時間の都合で FAIL）。
+- 途中（この commit、未 build・未確かめ）: compositor の側の LINEAR でない取り込み（P3 の design §9 の 8）。`include/libc/vulkan/vulkan_zedbsd.h`（新、VkImageLayoutZEDBSD、
+  sType 0x7a650001）、libvulkan の vkCreateImage が record を覚え GPU_CAP_IMAGE_LAYOUTS の無い device では断る、`dedicated.c` が LINEAR でない記述に OPTIMAL・record・usage を
+  確かめる、`gpu-zedbsd.c` の decode が LINEAR でない記述を受ける、`gpu-buffer-zedbsd.c` の buffer_image が OPTIMAL と record と記述の usage。
+  build が host の負荷で止められ、まだ通していない。次: build（下）と `plan/tools/gpu-boundary/run-dedicated-host.sh`（LINEAR でない case を足す）。
+- 未実施: VF2（password 待ち、Q1 がユーザーに聞く）、RTX（10.0.10.3 は Q1 に聞いてから）、scanout-guest.sh（forge の image は greeter が display を持つ）、
+  QEMU の道具の PASS の取り直し、Pi 4 の game mode（未確かめ、能力の確かめで入らない形）、nvrtx の block-linear（P3）。
+- 再開の command:
+  1. build: `make -j16 ZEDBSD_CONFIG=plan/ws309/tests/config-amd64-p1.mk BUILD=build/p015 build/p015/dynamic/libvulkan.so build/p015/bin/wayland`、
+     `sh plan/tools/gpu-boundary/v1-check.sh`、`sh plan/ws214/tests/vulkan-overlay-host.sh /tmp/p2/oh`、`sh plan/tools/gpu-boundary/run-dedicated-host.sh`。
+  2. QEMU: `plan/tools/titlebar/build-menu-image.sh build/p015menu`（flock /tmp/zedbsd-image-build.lock）、
+     `GUEST_RUNTIME=$PWD/build/p015run VENUS_RENDERER=/home/awe/zedBSD-claude1/build/ws035-sq-venus/install plan/tools/scanout/game-mode-cycle.sh build/p015menu/hdd-image.img OUT 6`
+     （host の負荷の低い時に。1 回目の mview の起動が遅い時は道具の 40 秒の待ちを超える）。手での 1 回は build/p015save/run-m.sh（guest の /tmp に置き `sh /tmp/run-m.sh NAME`）。
+  3. VF2（Q1 の割り当てと password の後）: 前（main）= `VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=14C19FA80F86 OLD=p2old TIMING=1 KEEP=1 COPIES=1 SPIN=12 sh plan/ws291/tests/vf2-mview.sh OUT-c1 build/tmp/p015base/build/vf2t`
+     と COPIES=13 を別の run（BUG-375 の前の注意どおり 1 つずつ）、後 = 同じ command の BUILD を build/p015vf2t（どちらも `-DPOWERVR_SUBMIT_TIMING=1`）。最後は KEEP を外し元の kernel に戻して cksum で照合。
+     WSI の copy の無い事は kernel の `powervr: timing: transfer:` の数（前後で比べる）と compositor の `KWL SCANOUT direct=0 ... frames=N` で見る。
+     注: build/p015vf2t は 0b48946c0 の時点（SAMPLED の直し a3e740841 と adoption 5 秒の前）なので、作り直す:
+     `make -j8 ZEDBSD_CONFIG=plan/ws291/tests/config-vf2.mk BUILD=build/p015vf2t ZEDBSD_TEST_CPPFLAGS=-DPOWERVR_SUBMIT_TIMING=1 build/p015vf2t/vmunix build/p015vf2t/bin/wayland build/p015vf2t/bin/mview build/p015vf2t/dynamic/libvulkan.so build/p015vf2t/dynamic/libwayland-client.so`。
+- 保存: QEMU の log は build/p015save/（cycle5）と build/review/ws309/。消してよい物（Q1 へ）: build/tmp/p015base（基準の tree、VF2 の後）、build/p015img・build/p015run。

@@ -10,6 +10,7 @@
 #define KWL_GPU_ZEDBSD_H
 
 #include "userland/desktop/libkeiland-backend/keiland-backend-gpu.h"
+#include "include/libc/vulkan/vulkan_zedbsd.h"
 
 /*
  * What the compositor's Vulkan device can take, against which a description
@@ -37,6 +38,15 @@ struct kwl_buffer_layout {
 	uint64_t offset;
 	uint64_t allocation_bytes;
 	uint32_t memory_type;
+	/*
+	 * The image's layout: linear rows (linear set), or another layout the
+	 * device that made it names (tiling and parameter, the kernel's), which
+	 * an image of exactly the described uses reads.
+	 */
+	unsigned linear;
+	uint32_t tiling;
+	uint32_t parameter;
+	VkImageUsageFlags usage;
 };
 
 /* Reports the zedBSD description's wire length. */
