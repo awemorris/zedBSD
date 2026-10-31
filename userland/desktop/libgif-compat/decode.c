@@ -28,6 +28,15 @@
 #define GIF_EXTENSION_INTRODUCER	0x21
 #define GIF_TRAILER			0x3B
 
+/*
+ * The Windows C runtime opens a file in text mode (turning CR LF into LF
+ * and stopping at a ^Z) unless told O_BINARY; a system without the flag
+ * gets 0 for it.
+ */
+#ifndef O_BINARY
+#define O_BINARY	0
+#endif
+
 static GifFileType *gif_open(InputFunc read_function, void *user, int fd, int owns_fd, int *error);
 static ColorMapObject *gif_read_color_map(GifFileType *gif, int bits, int sorted);
 static int gif_read_image(GifFileType *gif);
@@ -51,7 +60,7 @@ DGifOpenFileName(
 	int fd;
 
 	/* The file, read only. */
-	fd = open(GifFileName, O_RDONLY);
+	fd = open(GifFileName, O_RDONLY | O_BINARY);
 	if (fd < 0) {
 		if (Error != NULL)
 			*Error = D_GIF_ERR_OPEN_FAILED;
