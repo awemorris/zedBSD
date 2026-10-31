@@ -86,3 +86,24 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   1 本に。今は amdrdna が先の予定で nvrtx は対象外。
 - 提案 3（libvulkan、製品の判断）: fence も signal の semaphore も無い submit に私用の fence の job を付けない（queue の後の job が順に監督する）。
   NVK と同じ 1 submit 1 ioctl に近づく唯一の道だが、WS014 の「native の submission は全部 job の監督の下」の決定を変える。
+
+### 実機の A/B（10.0.10.3、`rtx-p024.sh`、main の 14 file、timing 無し、SPIN 8 s の game mode の mview、fps）
+
+| kernel（window） | subs-1000 | subs-100 | big-1000 | big-100 |
+| --- | --- | --- | --- | --- |
+| base（main の RTX kernel 3084829296）ab2・ab4 ×2・ab5 | 19.93・17.04・19.21・19.97 | 184.1・187.9・186.7・176.0 | 109.8・110.4・111.2・110.4 | 536.3・535.8・531.9・541.5 |
+| c3（slot の続き＋USERD 1 回＋marker をその場で）ab2 | 21.92 | 224.5 | 110.9 | 567.4 |
+| c5（＋USERD を BAR1、GR の読みを 1 ms に 1 回 = 613c725f1）ab2 | 25.46 | 238.3 | 110.8 | 583.4 |
+| c7（＋header・sampler を object に）ab4 ×2 | 29.43・29.24 | 258.7・256.3 | 109.7・113.7 | 582.4・568.8 |
+| c8（＋put32 の word の store = 692209073、kernel 2191527267）ab5 | 28.72 | 258.5 | 113.3 | 586.0 |
+| NVK（p010・p013） | 75.4 | — | 136.2 | — |
+
+- 証拠: build/tmp/p024-ab2・ab4・ab5（worktree の build、git の外）の summary.txt。subs-1000 は boot ごとの揺れが大きい（base 17.0〜20.0）。
+- 画素（ab5、SHOT=1）: 100 copies の still（one・each・subs）の keiland-shot を base の round 1 と比べ、c8 は 3 枚とも max 0・differ 0（2073600 画素）、
+  c8 の one と subs も差 0。base の one と subs も差 0。
+- 各 window の終わりに 14 file と NVMe の kernel を戻して cksum 一致（vmunix 1463007375、nvrtx.vk.perf 行 0）、Debian（RTX 4 function vfio-pci）。
+- game mode の往復・画面・desktop（`plan/ws309/tests/rtx-p015.sh` PARTS='cycle scenes desk'、base と c8、22:12〜22:27、build/tmp/p024-v1）:
+  - 往復: 両腕とも mview 3 回が direct=3 left=3 window=3、failed 0、refused 0、`lend images=0x3f`。
+  - 画面（keiland-shot、c8 対 base）: desktop・Notes・browser とも差は右上の時計の箱（x=1881..1894、y=17..27）だけ（96〜105 画素）。
+  - desktop（frame-ops）: base launch 63・type 61・output 65・drag 61・home 63・wiseview 64、c8 63・61・66・61・63・64 fps（scroll・hover・keys は入力の間隔）。後退なし。
+  - 起動の dmesg の `vram-window retry` の行は base・c8 の両方に出る（前からの行）。戻し: 14 file と NVMe の kernel の cksum 一致、cfg の bl 行 0、Debian。
