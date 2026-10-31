@@ -248,13 +248,26 @@
 - Pi 5: main a090d4e6f（BUG-378 の直しを含む）を 6b8a08f57 で merge、image build/p015rpi5/hdd-image.img（322961408 byte、sha256 d8b3f891…）、1080p・login=console の card
   build/p015rpi5/card-1080p.img（sha256 71b6b26b…）。
 
-### 再開点（2026-10-31 18:3x、P2 q1782-i02）
+### 再開点（2026-10-31 20:2x、P2 q1782-i02 のラップアップ）
 
-- 済み: QEMU PASS、VF2 PASS（c13 52.5 fps、copy 0、往復 8/8、板を戻した）、RTX は貸し出しの側（block-linear の lend、copy 0、quads 0、往復 3/3）まで。branch の先頭 e0a6a4f40 を Q1 の merge へ。
-- 未達: big-100 の貸す時の約 20% の低下（fence の待ちと段の外、原因は未特定）、Pi 5（板の入れ替え待ち）。
-- Pi の手順: 板が guest の鍵の root で zedBSD を動かしていれば、
-  `PI=<addr> PROGRAMS=build/p015rpi4 VIDEO=build/p015video/high-1080p30.mp4 sh plan/ws309/tests/pi-p015.sh OUT`（Pi 5 は `PROGRAMS=build/p015rpi5`、VIDEO 無しでよい）。
-  そうでなければ上の image を card（Pi 5 は NVMe）に書く（Pi 5 の 1080p は `plan/ws291/tests/rpi5-image-boot.sh`）。合否: probe の lendable=1、game の 3 回とも `lent=1 … copies=0`、
-  compositor の direct=1・window へ戻る・refused 0。Pi 4 の動画: PLAYBACK failed・came back unread・not answered・no firmware decoder が 0、shown が止まらない。止まる時は Pi 4 の
-  content=video を game mode から外し、ここに記録する。
-- 消してよい物（Q1 へ）: build/p015rtxd、build/tmp/rtx-p015-i02b、build/tmp/p015base-ea（RTX の後）、build/tmp/p015base（VF2 の後）、build/p015img・build/p015run。
+- 状態: in-progress（未 cleared）。branch `agent/p2-ws309v2`（main a090d4e6f を 6b8a08f57 で merge 済み）。Q1 が 86a259989 までを main に merge 済み。
+- 2026-10-31 ユーザーの決定（Q1 経由）: Pi 4 の GPU の driver（mview を動かし 1920x1080 で速くする、WS291 p025・P4・q1784）が先、Pi 5 はその後。Pi 4 の板（10.0.30.6）は P4 の物。
+- 済み（受け入れの 4 つに対して）:
+  1. RTX: 動き確かめた。P3 の scanout の直しの後にユーザーの目視が合格、`nvrtx.disp.bl` を既定 1 に（16cd986f0）、boot の parameter 無しで lent=1・tiling 0x10001・copy 0・quads 0・往復 3/3、
+     desktop の fps と画面の撮影は base と同じ（時計だけ違う）。機械は戻した。
+  2. VF2: 動き確かめた（c13 41.9 → 52.5 fps、frame ごとの GPU の copy 無し、往復 8/8、板は 2825517684 に戻した）。
+  3. Pi 4: lend は動画で確かめた（videoplayer の SUBOPTIMAL の直し db2371212 の後、全画面で lent=1・copy 0、firmware の decoder は止まらない）。3D の game（mview）は V3D 4.2 が
+     pipeline を断るので未確かめ（WS291 p025 の後に `pi-p015.sh` で）。Pi 5 は未試験（image は用意済み）。
+  4. main への merge: VF2 の合格の後に Q1 が merge（81f6a2676・86a259989）。この後の db2371212〜の commit は未 merge。
+- p015 の受け入れに残る物:
+  - Pi 4 の 3D の game の lend（WS291 p025 で mview が動いた後）: `PI=<addr> PROGRAMS=<Pi 4 の build> sh plan/ws309/tests/pi-p015.sh OUT`（login=graphical の板は `SESSION=1`）。
+  - Pi 5: main から作り直す（`sh plan/ws291/tests/rpi5-image.sh build/p015rpi5` → `rpi5-image-boot.sh build/p015rpi5 <新しい path>`、今の物は 6b8a08f57 の
+    build/p015rpi5/card-1080p.img（sha256 71b6b26b…、1080p・login=console）と hdd-image.img（d8b3f891…））。板の後に `PI=<addr> PROGRAMS=build/p015rpi5 sh plan/ws309/tests/pi-p015.sh OUT`
+    と `PI=<addr> sh plan/ws309/tests/pi4-video.sh /root/p015`（video.mp4 を置いて）。mview は V3D 7.1 でも断られ得る（ws291-p021）。
+  - 未分析: 貸す時の big-100 の約 20% の低下（RTX、fence の待ちと段の外）。session（login=graphical）の中の Pi 4 の動画の約 1 fps は base も同じ（既存、Q1 が BUG に）。
+  - README（libvulkan の非適合点: swapchain の image の export の組み合わせ、`VkImageLayoutZEDBSD`、`VULKAN_ZEDBSD_WSI_LOG`）の記述は未了。
+  - WS の最後の「規約の全文の見直し」は p015 の後。
+- 消してよい物（Q1 へ）: build/tmp/p015base-ea・build/tmp/p015base（基準の tree）、build/tmp/rtx-p015-i02・build/tmp/rtx-p015-i02c・build/tmp/vf2-p015-i02・build/tmp/pi4-p015
+  （証拠は build/review/ws309/ に写した）、build/p015img・build/p015run・build/p015vf2・build/p015menu（QEMU の image、再び要る時は作り直す）、build/tmp/find-pi.sh・
+  build/tmp/rtx-build.sh・build/tmp/pi4-video.sh・build/tmp/oh-i02・build/tmp/oh-i02b・build/tmp/dedicated.*・build/tmp/gpu-zedbsd-host.*・build/tmp/v1-check.*・build/tmp/nvrtx-vk*。
+  残す物: build/p015rpi5（Pi 5）、build/p015rpi4（Pi 4 の PROGRAMS）、build/p015video、build/p015vf2t、build/p015rtx、build/review/ws309。
