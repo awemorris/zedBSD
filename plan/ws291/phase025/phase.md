@@ -63,3 +63,27 @@ mview の vkCreateGraphicsPipelines が FEATURE_NOT_PRESENT。足りない機能
 - c21 の内訳（v3d perf、1 frame に約 3 submit）: bin 約 8.7 ms、render 約 17 ms、CPU の段（acquire・record・submit・present）約 1〜6 ms。inflight=1 なので直列。
   `--cull=all` の c21 は bin 8.2 ms・render 1.4 ms（bin は頂点と binning で決まる）。render は c5 7.6・c10 10.9・c21 17 ms（copy あたり約 0.62 ms ＋ 固定 約 4.5 ms）。
 - 試し（採らず、patch は build/tmp/exp-vcm4.patch）: VCM の cache を 2 → 4 batch: c21 33.65 → 34.7 fps（bin 2.9 → 2.75 ms/submit）、出力の segment を足しても同じ。
+
+### desktop の計測（2026-10-31 21:20〜21:35）
+
+- 道具: `plan/ws291/tests/config-rpi4-desk.mk`（shot の build ＋ CONFIG_INPUT_TEST_INJECT と aat-input）、`plan/ws291/tests/pi4-desk.sh`（板に kernel・/bin/aat-input・
+  `--log-frames` の session を置き、再起動して frame-ops、表は frame-times.py）。arm64 の vmunix.mk に input-inject の規則が無かったので足した（527ff7e18、Q1 OK）。
+- graphical login の session（autologin user）は 1920x1080 で 1 frame も描かない（`KWL RENDER stalled` が続く、output の acquire が TIMEOUT のまま）。main の kernel（eff578c）でも同じ。
+  console の boot で root の compositor は描くが、`/dev/gpu*` を user の物にして user で動かすと再現 → BUG-379（Q1 が ticket を更新、P4 が直す）。
+- console の boot の root の compositor（`--glass --log-frames --wallpaper`、既定の desktop の client、CONSOLE=1）での frame-ops（kernel build/p025-4d/vmunix cksum 2532187830）:
+
+| 段 | frames | work p50/max | period p50/max | fps |
+| --- | --- | --- | --- | --- |
+| launch | 24 | 5/19 | 16/47 | 58 |
+| type | 55 | 5/11 | 16/21 | 61 |
+| keys | 21 | 16/23 | — | — |
+| output | 5 | 13/17 | 34/37 | 31 |
+| scroll | 184 | 12/23 | 25/46 | 38 |
+| hover | 0 | — | — | — |
+| drag | 122 | 13/19 | 29/39 | 35 |
+| home | 44 | 14/25 | 26/43 | 37 |
+| wiseview | 29 | 12/31 | 24/43 | 38 |
+
+- 注: App Home の検索が 0 件（`KWL HOME search query="terminal" results=0`、`KWL HOME read` の行が出ない）で Terminal が起動せず、launch 以降の段は RTX の表と同じ操作になっていない。
+- 1 frame の内訳（drag）: 毎 frame 全画面（dirty 1、2073600 px、1 pass、約 30 draw）。pace 7〜16、cpu 4〜7、submit 2〜3、present 4〜7（work 12〜16）、period 25〜36、shown 7〜13 ms。
+  kernel の v3d perf: submit あたり prep 1.3〜2.1 ms、render 4.0〜4.4 ms（frame に約 1.8 submit で GPU 約 8 ms）、bin 0.1〜0.2 ms。flip perf の wait 平均 7.5〜10 ms。
