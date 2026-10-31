@@ -4,14 +4,18 @@
 
 lb=userland/desktop/libbrowser
 lm=userland/desktop/libmedia
+lk=userland/desktop/libkeiland
+ab=apps/browser-win32
 
-ws334_includes="-I. -Iuserland/desktop/include -I$lb -I$lm -Iplan/ws334/tests/unit"
+ws334_includes="-I. -Iuserland/desktop/include -I$lb -I$lm -I$ab/tools -Iplan/ws334/tests/unit"
 
 # The headers that are the modules' contracts (fixed once the design is frozen).
 ws334_headers="$lb/base/os.h $lb/base/os-win32.h $lb/base/os-system.h $lb/base/os-file.h $lb/base/os-net.h
 	$lb/base/os-time.h $lb/base/os-zones.h
 	userland/desktop/include/browser/storage.h $lb/storage/records.h $lb/storage/files.h $lb/storage/queue.h
-	$lm/media-os.h"
+	$lm/media-os.h
+	$lk/win32/keys-table.h $lk/win32/frame.h $lk/win32/wide.h $lk/win32/input.h $lk/win32/cf-html.h
+	$lk/platform/platform.h $ab/tools/ico.h"
 
 # The modules' sources.
 ws334_sources="$lb/base/os-win32.c
@@ -21,7 +25,9 @@ ws334_sources="$lb/base/os-win32.c
 	$lb/base/os-time-posix.c $lb/base/os-time-win32.c
 	$lb/base/os-zones.c
 	$lb/storage/records.c $lb/storage/files.c $lb/storage/queue.c
-	$lm/media-os-posix.c $lm/media-os-win32.c"
+	$lm/media-os-posix.c $lm/media-os-win32.c
+	$lk/win32/keys-table.c $lk/win32/frame.c $lk/win32/wide.c $lk/win32/input.c $lk/win32/cf-html.c
+	$lk/platform/platform-win32.c $ab/tools/ico.c"
 
 # The test tools an implementation Phase must not change.
 ws334_tools="plan/ws334/tests/modules.sh plan/ws334/tests/run-unit.sh plan/ws334/tests/check-skeleton.sh
@@ -52,6 +58,14 @@ ws334_test_sources() {
 	queue:posix) echo "$lb/storage/queue.c $lb/storage/records.c $lb/base/os-system-posix.c $ws334_base" ;;
 	queue:win32) echo "$lb/storage/queue.c $lb/storage/records.c $lb/base/os-system-win32.c $lb/base/os-win32.c $ws334_base" ;;
 	tools:*) echo "$ws334_base" ;;
+	keys-table:*) echo "$lk/win32/keys-table.c" ;;
+	frame:*) echo "$lk/win32/frame.c" ;;
+	wide:*) echo "$lk/win32/wide.c" ;;
+	input:*) echo "$lk/win32/input.c" ;;
+	cf-html:*) echo "$lk/win32/cf-html.c" ;;
+	platform-win32:posix) echo none ;;
+	platform-win32:win32) echo "$lk/platform/platform-win32.c" ;;
+	ico:*) echo "$ab/tools/ico.c" ;;
 	media-os:posix) echo "$lm/media-os-posix.c" ;;
 	media-os:win32) echo "$lm/media-os-win32.c" ;;
 	*) echo unknown ;;

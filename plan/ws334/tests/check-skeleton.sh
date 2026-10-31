@@ -81,7 +81,7 @@ for file in $ws334_headers $ws334_sources; do
 	case "$file" in
 	*-win32.c|*/os-win32.h) continue ;;
 	esac
-	if grep -n '_WIN32\|<windows.h>\|<winsock2.h>' "$file"; then
+	if grep -nE '(^|[^A-Za-z0-9_])_WIN32([^A-Za-z0-9_]|$)|<windows\.h>|<winsock2\.h>' "$file"; then
 		echo "FAILED $file tests the system (above)"
 		status=1
 	fi

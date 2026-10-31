@@ -5,7 +5,8 @@
 # Output under $(BROWSER_WIN32_BUILD) (build/browser-win64 or build/browser-winarm64 by default).
 #
 # This is the build's skeleton: it finds the toolchain, writes what it found, and compiles the files
-# of the operating-system layers (libbrowser's base/os-*, its storage, libmedia's media-os), so their
+# of the operating-system layers (libbrowser's base/os-*, its storage, libmedia's media-os, libkeiland's
+# Windows files), so their
 # skeletons and implementations are built with the Windows compiler and its warnings.  The libraries,
 # DLLs, programs and resources join it later.
 #
@@ -63,7 +64,13 @@ BROWSER_WIN32_LAYER_SOURCES := \
 	userland/desktop/libbrowser/storage/records.c \
 	userland/desktop/libbrowser/storage/files.c \
 	userland/desktop/libbrowser/storage/queue.c \
-	userland/desktop/libmedia/media-os-win32.c
+	userland/desktop/libmedia/media-os-win32.c \
+	userland/desktop/libkeiland/platform/platform-win32.c \
+	userland/desktop/libkeiland/win32/keys-table.c \
+	userland/desktop/libkeiland/win32/frame.c \
+	userland/desktop/libkeiland/win32/wide.c \
+	userland/desktop/libkeiland/win32/input.c \
+	userland/desktop/libkeiland/win32/cf-html.c
 
 BROWSER_WIN32_OBJ := $(BROWSER_WIN32_BUILD)/obj
 BROWSER_WIN32_LAYER_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_WIN32_LAYER_SOURCES))
