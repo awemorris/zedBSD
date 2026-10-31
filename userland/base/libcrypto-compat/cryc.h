@@ -21,6 +21,17 @@
  * a private version node, with no promise to any other program; sslc_
  * names are libssl-compat's own and are not exported.
  *
+ * Two forms of build.  On zedBSD (and POSIX hosts) each library is a
+ * shared object.  On Windows both are static libraries linked into the
+ * program's executable (there is no DLL of these libraries and no
+ * DllMain): every external name of the two libraries then shares the
+ * namespace of the program's own code.  So every
+ * function or object that is not static is either a public name of the
+ * subset (in <compat/crypto/...> or <compat/ssl/...>) or starts with
+ * cryc_ (libcrypto-compat) or sslc_ (libssl-compat); everything else is
+ * static.  No header carries an export, import or visibility attribute:
+ * what a shared object exports is set by its version script alone.
+ *
  * Untrusted input.  Every byte that comes from the network, from a
  * certificate file, or from a caller of the public interface is untrusted.
  * A function that reads untrusted bytes never reads or writes outside its

@@ -32,9 +32,11 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 ## 4. 注意
 
 - 仕事の上限（CRYC_CHAIN_MAX_WORK）と深さ。
+- 信頼しない証明書（`cryc_store_add_distrusted`、[design.md](../design.md) D24）: 印は DER 全体の SHA-256 だけ、重複は足さない、CRYC_STORE_MAX で ENOBUFS、size 0 は EINVAL。path の確かめでは、trust anchor・中間・leaf のどれでも印の付いた物があれば CRYC_VERIFY_REJECTED（その深さ）で、その path は無効、探索は次の候補へ戻る（別の path、例えば cross-sign の別の中間で通れば OK）。署名の確かめの前に見るので仕事の数に入らない。試験: 印の付いた leaf・中間・anchor のそれぞれで REJECTED、印の付いた中間を避ける別の path で OK、印の付いた anchor が store に有っても他の anchor で通る件、印の後に同じ証明書を `cryc_store_add_der` で足しても REJECTED のまま。cryc_store_add_system は試験の側の偽の cryc_os_system_roots を使わず、posix の実の物（`/etc/ssl/cert.pem` が無い host では ENOENT を無視して 0）で確かめる。
 - x509-limbo は id が `rfc5280::`・`pathlen::`・`webpki::`・`pathological::` の件（約 190 件）だけを流し、期待と一致した件数と、違った件の id と理由（policy の処理をしない、CN を見ない、trust anchor の制約を見ない等の決めた違い）を結果の節に表で。全件（9,792）の照合は p038。
 - 自分の試験の chain は試験の側で作る: 鍵と証明書は derwriter.h と cryc の検証済みの部品（p011 の ECDSA の確かめに通る署名は p037 の署名器を待たず、固定の自己署名の root と中間を host の `openssl req`・`openssl x509` で作って試験の data として置く。期待の判定は RFC 5280 6.1 から手で決める）。
 - 他の実装（OpenSSL・BoringSSL・LibreSSL・mbedTLS・wolfSSL・libsodium・BearSSL・Go の crypto・Rust の crypto ほか）の code・comment・構造・内部の名前を写さない。表・定数は data として block ごとに直前の複数行の comment で「Values referenced: <仕様の名前と版> <節・表>」。file の先頭に出典を書かない。source に開発の管理情報（WS・Phase の番号、plan/ への参照、日付）を書かない。
+- Windows（static link）: 同じ source が llvm-mingw で Windows の static library になり、OmniGrammaton の 1 つの .exe に link される（[design.md](../design.md) D23・D25）。`long` は Windows で 32 bit（LLP64）なので、32 bit を越える値に `long`・`unsigned long` を使わない（`uint64_t`・`size_t`）。static でない関数・object の名前は公開の名前か `cryc_`・`sslc_` で始める（check-skeleton の 7 が照合）。試験で binary の file を読む時は `fopen(…, "rb")`（Windows の text mode を避ける）。
 - header が黙っている内部の事（static の補助の分け方、内部の表の形、loop の順など、interface に出ない事）は自分で決め、結果の節に列挙する。interface の不備（足りない引数、矛盾する comment、header だけでは決められない約束）は §5 のとおり止めて返す。phase.md が仕様と食い違えば仕様に従い、報告する。
 
 ## 5. 変えてはいけない物
@@ -46,14 +48,15 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 
 ```
 sh plan/ws335/tests/run-unit.sh chain     # この module
+sh plan/ws335/tests/run-unit.sh --win32 chain     # 同じ試験を Windows（x86_64、static link、Wine）で
 sh plan/ws335/tests/run-unit.sh all
-BASE=60760d2a0 sh plan/ws335/tests/check-skeleton.sh
+BASE=NEWBASE sh plan/ws335/tests/check-skeleton.sh
 git diff --check
 ```
 
 ## 7. 終わりの条件
 
-- §6 の command が全部 PASS（最後の行を自分で読む）。check-skeleton.sh の warning 0（cc・clang・zedBSD の clang・llvm-mingw の 2 arch）。
+- §6 の command が全部 PASS（最後の行を自分で読む）。check-skeleton.sh の warning 0（cc・clang・zedBSD の clang・llvm-mingw の 2 arch）と、Windows の static link・名前の範囲（check-skeleton の 6・7）。
 - [coding-style.md](../../coding-style.md) §14 の checklist で自分の diff を見直した。表の block ごとの出典の comment。
 - commit: 新しい file は先に `git add`、`git commit -m WIP -- <path>...`。push しない。rm しない。
 - 「結果」の節: 日付（host の `date`）、実行した command と最後の行、試験の件数、わざと壊す確かめの内容と結果、自分で決めた点、未実施。ws.md の行を「実装済み・試験 PASS」に。

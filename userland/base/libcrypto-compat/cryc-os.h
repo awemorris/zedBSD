@@ -37,8 +37,8 @@
 
 /*
  * The name of the CA bundle a Windows build reads from the directory of
- * the libcrypto-compat DLL (or of the executable that links it
- * statically): the module that holds cryc_os_system_roots.
+ * the process's executable (the .exe that was started, which the static
+ * libraries are linked into).
  */
 #define CRYC_OS_WIN32_CA_FILE	"cert.pem"
 
@@ -102,6 +102,9 @@ void *cryc_os_thread_value(void);
  * the thread exits (pthread_key_create's destructor; FlsAlloc's callback
  * on Windows); it must be the same function on every call.  The first call
  * in the process creates the key (pthread_once; InitOnceExecuteOnce).
+ * The key is never deleted (no FlsFree, no DllMain): on Windows the static
+ * library is linked into the executable, whose code stays mapped until the
+ * process ends, so the callback is there while any thread can still exit.
  *
  * Returns 0, or ENOMEM when the key cannot be created or the value
  * cannot be stored.
@@ -148,23 +151,31 @@ int cryc_os_socket_read(intptr_t descriptor, uint8_t *buffer, size_t size, size_
 int cryc_os_socket_write(intptr_t descriptor, const uint8_t *buffer, size_t size, size_t *done, int *os_error);
 
 /*
- * Hands the system's trusted roots to the two callbacks, in this order:
+ * Hands the system's trust decisions to the three callbacks, in this
+ * order:
  *
- *   POSIX:   add_file(context, CRYC_OS_DEFAULT_CA_FILE).
- *   Windows: every certificate of the current user's and the local
- *            machine's "ROOT" system store (CertOpenSystemStoreW,
- *            CertEnumCertificatesInStore), as DER through add_der, except
- *            those whose SHA-256 of the DER is also in a "Disallowed"
- *            store; then add_file(context, <directory of the module>\
- *            CRYC_OS_WIN32_CA_FILE) (GetModuleHandleExW with
- *            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS on this function,
- *            GetModuleFileNameW, converted to UTF-8).
+ *   POSIX:   add_file(context, CRYC_OS_DEFAULT_CA_FILE).  add_distrusted
+ *            and add_der are not called (the bundle holds only trusted
+ *            roots).
+ *   Windows: first every certificate of the current user's and the local
+ *            machine's "Disallowed" system store, as DER through
+ *            add_distrusted; then every certificate of the current user's
+ *            and the local machine's "ROOT" system store, as DER through
+ *            add_der, except those whose SHA-256 of the DER is also that
+ *            of a Disallowed certificate (CertOpenSystemStoreW,
+ *            CertEnumCertificatesInStore; a store that cannot be opened
+ *            is taken as empty); then add_file(context, <directory of the
+ *            process's executable>\CRYC_OS_WIN32_CA_FILE)
+ *            (GetModuleFileNameW(NULL, ...) with a buffer grown up to
+ *            32768 UTF-16 units, the part before the last backslash,
+ *            converted to UTF-8; a longer path is skipped as if the file
+ *            were missing).
  *
  * A callback's error is passed back at once; a missing file or an empty
  * store is not an error (the callbacks report ENOENT for a missing file,
  * which this function ignores).  Returns 0 or the first error other than
  * ENOENT.
  */
-int cryc_os_system_roots(int (*add_der)(void *context, const uint8_t *der, size_t size), int (*add_file)(void *context, const char *path), void *context);
+int cryc_os_system_roots(int (*add_distrusted)(void *context, const uint8_t *der, size_t size), int (*add_der)(void *context, const uint8_t *der, size_t size), int (*add_file)(void *context, const char *path), void *context);
 
 #endif

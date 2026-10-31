@@ -152,8 +152,9 @@ void SSL_CTX_set_verify(SSL_CTX *ctx, int mode, SSL_verify_cb callback);
 int SSL_CTX_load_verify_locations(SSL_CTX *ctx, const char *file, const char *path);
 
 /*
- * Adds the system's roots: /etc/ssl/cert.pem on zedBSD; the Windows ROOT
- * stores (minus Disallowed) and cert.pem beside the DLL on Windows.
+ * Adds the system's roots: /etc/ssl/cert.pem on zedBSD; on Windows the
+ * ROOT stores (minus Disallowed) and cert.pem beside the program's .exe,
+ * and the Disallowed certificates are refused in every chain from then on.
  * Returns 1 even when there are none (OpenSSL's behaviour), 0 on a read
  * error other than a missing file.
  */
