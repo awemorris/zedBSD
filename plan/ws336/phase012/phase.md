@@ -2,7 +2,7 @@
 
 # ws336-p012: ssh-privsep（monitor との frame と同期の呼び出し）
 
-Status: in-progress（2026-11-01 05:10 q1815、Sonnet）
+Status: cleared（2026-11-01 06:22 Q1、main e8b028959）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p002
@@ -55,4 +55,28 @@ WS335 の待ち: 無し
 
 ## 結果
 
-（未着手）
+2026-11-01 06:16（host の `date`）、実装済み・試験 PASS。cleared は Q1 が決める。
+
+作った物: `userland/base/ssh/ssh-privsep.c`（frame の書き・読み・同期の呼び出し）、`plan/ws336/tests/unit/test-privsep.c`。header・他の .c・試験の道具は変えていない（`BASE=d4ab182d2` で header 不変を確認）。
+
+実行した command と最後の行:
+
+- `sh plan/ws336/tests/run-unit.sh privsep` → `test-privsep: PASS (947 checks)` / `run-unit: PASS`（ASan・UBSan）
+- `sh plan/ws336/tests/run-unit.sh all` → test-buf 323・test-common 2316・test-privsep 947・test-tools 13 checks、`run-unit: PASS`
+- `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh` → `check-skeleton: PASS`（cc・clang 警告 0、zedBSD の clang での compile を含む）
+- `git diff --check` → 出力なし（exit 0）
+
+試験の内容: 限界の値の手の計算（FRAME_MAX 65536、STATE_MAX 331796）、全 11 型の put_frame を wire.h の bytes と比較、各型の限界の両側（長さ = 限界は可、+1 は EMSGSIZE で out 不変）、parser の全 prefix で EAGAIN と入力の不変、長さ 0・未知の型 0..255・限界 +1・0x80000000・0xffffffff の EINVAL（body を待たずに）、2 つの frame の連続と 1 byte ずつの供給、body の buffer が secret にされること、body の limit が小さい時の EMSGSIZE と入力の不変、ランダム 15 万回（受理・拒否・不足の 3 通りが各 1000 回超）と 1 byte 変異 9000 回、mon_call は fork した子と socketpair で往復・返事を 1 byte ずつ・返事の後ろの frame を読み残すこと・250000 byte の要求と 331795 byte の返事・子が閉じる（要求の後・返事の途中・要求の前）で EIO・SIGALRM（SA_RESTART 無し）が read と write（短い write）を中断しても続くこと・敵対的な返事 7 通りで EINVAL・要求の限界超え/未知の型/fd -1/返事の buffer の limit。
+
+試験の確かめ（実装を git の外でわざと壊し、元に戻して `cmp` で一致を確認）: 限界の比較を 1 つずらす（2 通り）、`length > limit` を `limit + 1`、length 0 の拒否を外す、STATE_MAX を超える拒否を外す、長さに +1 を足さない、必要な分だけ読まず chunk 分を読む、EINTR の再試行を外す、body の secret 化を外す、SESSION_START の限界を FRAME_MAX に、RESULT を大きい型に、frame の完了の判定を 1 ずらす、body の長さを 1 ずらす、consume を 1 ずらす、短い write を全部書けたと扱う、4 byte・5 byte の待ちを 1 ずらす、NULL の body の確かめを外す、入力 buffer の limit を小さく、は全て FAIL（または hang。hang は子の alarm と待ちの上限で FAIL に変えた）。FAIL しなかった 5 通りは同値だった: parser の `limit == 0` の確かめ（後の `length > limit` が同じ結果）、put_frame の型の上限 255→12（`mon_length_limit` が 0 を返す）、put_frame 冒頭の `out->error` の確かめ（`ssh_buf_reserve` が同じ誤りを返す）、write が 0 を返す場合（実在しない）の EIO、失敗時の `ssh_buf_reset(body)`（reserve が先に失敗し body は空のまま）。
+
+自分で決めた点（header が黙っている所）:
+
+- 長さ（4 byte の field）は型の byte と body の和。限界はこの長さに掛ける: 長さ ≤ SSH_MON_FRAME_MAX（CONFIG・AUTH_DONE・SESSION_START は SSH_MON_STATE_MAX）、つまり body は限界 - 1 byte まで。
+- put_frame は型が列挙の外（負の値を含む）・body が NULL で size が 0 でないとき EINVAL を返す（header は EMSGSIZE か out の誤りだけを書く）。これらと body の限界超え（EMSGSIZE）では out に誤りを記録せず out は不変で使い続けられる。out が元から誤りを持てばその誤りを返す。
+- next_frame は body を必ず `secret = 1` にして空にしてから始める（呼び出し側が非 secret を渡しても秘密を漏らさない）。失敗では入力は不変で body は空。body の limit が小さい時は header の列挙外の EMSGSIZE を返す（body の buffer の誤りをそのまま）。
+- next_frame は、長さ 4 byte が揃えば長さ 0 と STATE_MAX 超えを、型 byte が揃えば型の範囲とその型の限界を、body が届く前に EINVAL にする。
+- mon_call は返事の frame に必要な byte だけを読み（後続の frame を読み込まない）、要求の frame・読み途中の入力・読みの chunk を secret の buffer に置いて最後に消す（password を含み得る）。blocking の descriptor を前提にし、EAGAIN を含む他の read/write の失敗は EIO。SIGPIPE を無視するのは呼び出す process の側（無視しないと相手が閉じた descriptor への write で process が落ちる）。失敗時に `*reply_type` は触らない。
+- 型の limit は表でなく switch（`mon_length_limit`）で与える。
+
+未実施: ssh-crypto.c が骨格のため `ssh_wipe` は何もしない。secret の消去が実際に memory を 0 にすることの確かめは crypto の phase 以降（この試験は消去を見ない）。実際の monitor・pre-auth の process を使う確かめは p016・p017。phase.md の第 3 節は put_frame の限界超えを EINVAL と書くが header は EMSGSIZE で、header に従った（next_frame の限界超えは phase.md・header とも EINVAL）。
