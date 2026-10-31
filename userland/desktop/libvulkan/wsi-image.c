@@ -61,7 +61,111 @@ vulkan_wsi_shared_image_create_usage(
 	int *fd,
 	struct gpu_image_descriptor *descriptor)
 {
+	VkResult error;
+
+	/* Rows of pixels, the layout every device shares. */
+	error = vulkan_wsi_shared_image_create_layout(device, format, extent, usage, GPU_IMAGE_LINEAR, 0U, allocator, placement, image, memory, fd, descriptor);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: the caller owns the image, its memory and the fd. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Chooses the layout of a shared image a display shows (a direct
+ * swapchain's): the first of the renderer's layouts, fastest first, that it
+ * draws to, samples and shares (GPU_IMAGE_LAYOUTS) and that the display's
+ * answer (scanout, NULL for none) lists for the same image.  Linear rows,
+ * which every device has, unless such a layout comes before them.  A device
+ * that names no layouts of its own (no GPU_CAP_IMAGE_LAYOUTS) has only
+ * linear rows.
+ */
+void
+vulkan_wsi_layout_choose(
+	struct VkDevice_T *device,
+	VkFormat format,
+	VkExtent2D extent,
+	const struct gpu_image_layouts *scanout,
+	uint32_t *tiling,
+	uint32_t *parameter)
+{
+	struct gpu_image_layouts renderer;
+	const struct gpu_image_layout *entry;
+	uint32_t index;
+	uint32_t shown;
+	int status;
+
+	/* Linear rows unless a faster layout both ends take is found. */
+	*tiling = GPU_IMAGE_LINEAR;
+	*parameter = 0U;
+	if ((device->object.context->capabilities & GPU_CAP_IMAGE_LAYOUTS) == 0U || scanout == NULL)
+		return;
+
+	/* The renderer's layouts of the image that it draws to, samples and shares. */
+	memset(&renderer, 0, sizeof(renderer));
+	renderer.version = GPU_ABI_VERSION;
+	renderer.size = sizeof(renderer);
+	renderer.format = GPU_PIXEL_RGBA8888;
+	if (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB)
+		renderer.format = GPU_PIXEL_BGRA8888;
+	renderer.width = extent.width;
+	renderer.height = extent.height;
+	renderer.uses = GPU_LAYOUT_RENDER | GPU_LAYOUT_SAMPLE | GPU_LAYOUT_SHARE;
+	vulkan_context_lock(device->object.context);
+
+	status = ioctl(device->object.context->fd, GPU_IMAGE_LAYOUTS, &renderer);
+
+	vulkan_context_unlock(device->object.context);
+
+	/* A device that does not answer keeps linear rows. */
+	if (status != 0 || renderer.count > GPU_IMAGE_LAYOUTS_MAX)
+		return;
+
+	/* The renderer's layouts, fastest first: the first the display shows too, or linear rows when they come first. */
+	for (index = 0U; index < renderer.count; index++) {
+		entry = &renderer.entry[index];
+		if (entry->tiling == GPU_IMAGE_LINEAR)
+			return;
+		for (shown = 0U; shown < scanout->count && shown < GPU_IMAGE_LAYOUTS_MAX; shown++) {
+			if (scanout->entry[shown].tiling != entry->tiling || scanout->entry[shown].parameter != entry->parameter)
+				continue;
+			if ((scanout->entry[shown].flags & GPU_LAYOUT_SCANOUT) == 0U)
+				continue;
+
+			/* Succeeded: both the renderer and the display take this faster layout. */
+			*tiling = entry->tiling;
+			*parameter = entry->parameter;
+			return;
+		}
+	}
+}
+
+/*
+ * Creates one shared GPU image in a layout (a GPU_IMAGE_* tiling and its
+ * parameter): linear rows as a linear image, another layout as an optimal
+ * image the renderer places so (the layout record chained after the
+ * external-memory declaration).  The returned fd and Vulkan objects have
+ * separate, explicit ownership.  A usage of zero is the copy destination's.
+ */
+VkResult
+vulkan_wsi_shared_image_create_layout(
+	struct VkDevice_T *device,
+	VkFormat format,
+	VkExtent2D extent,
+	VkImageUsageFlags usage,
+	uint32_t tiling,
+	uint32_t parameter,
+	const VkAllocationCallbacks *allocator,
+	const struct gpu_placement *placement,
+	VkImage *image,
+	VkDeviceMemory *memory,
+	int *fd,
+	struct gpu_image_descriptor *descriptor)
+{
 	struct vulkan_external_image_info external;
+	struct vulkan_image_layout_info placed;
+	VkFormatFeatureFlags features;
 	VkImageCreateInfo create;
 	VkMemoryAllocateInfo allocate;
 	VkExportMemoryAllocateInfo export;
@@ -82,9 +186,16 @@ vulkan_wsi_shared_image_create_usage(
 	if ((device->object.context->capabilities & GPU_CAP_SHARE) == 0U)
 		return VK_ERROR_FEATURE_NOT_PRESENT;
 
-	/* Linear presentation storage is separate from optimal rendering attachments. */
+	/* Another layout than linear rows only on a device that names its own. */
+	if (tiling != GPU_IMAGE_LINEAR && (device->object.context->capabilities & GPU_CAP_IMAGE_LAYOUTS) == 0U)
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+
+	/* The image is sampled in its tiling. */
 	vkGetPhysicalDeviceFormatProperties((VkPhysicalDevice)device->physical, format, &properties);
-	if ((properties.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0U)
+	features = properties.linearTilingFeatures;
+	if (tiling != GPU_IMAGE_LINEAR)
+		features = properties.optimalTilingFeatures;
+	if ((features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0U)
 		return VK_ERROR_FORMAT_NOT_SUPPORTED;
 
 	/* Only the renderer sees this external-memory declaration, never a guest dma-buf API. */
@@ -94,6 +205,14 @@ vulkan_wsi_shared_image_create_usage(
 	if (device->object.context->xml_version == VK_MAKE_VERSION(1, 4, 343) &&
 	    device->object.context->copy_display == VK_FALSE)
 		external.handle_types = VULKAN_EXTERNAL_MEMORY_OPAQUE;
+
+	/* Another layout than linear rows: the renderer places the optimal image so. */
+	memset(&placed, 0, sizeof(placed));
+	placed.sType = VULKAN_STRUCTURE_TYPE_IMAGE_LAYOUT;
+	placed.tiling = tiling;
+	placed.parameter = parameter;
+	if (tiling != GPU_IMAGE_LINEAR)
+		external.pNext = &placed;
 
 	/* One progressive color image supports GPU copies and later renderer sampling. */
 	memset(&create, 0, sizeof(create));
@@ -108,6 +227,8 @@ vulkan_wsi_shared_image_create_usage(
 	create.arrayLayers = 1U;
 	create.samples = VK_SAMPLE_COUNT_1_BIT;
 	create.tiling = VK_IMAGE_TILING_LINEAR;
+	if (tiling != GPU_IMAGE_LINEAR)
+		create.tiling = VK_IMAGE_TILING_OPTIMAL;
 	create.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
 	    VK_IMAGE_USAGE_SAMPLED_BIT;
 	if (usage != 0U)
@@ -204,7 +325,8 @@ selected:
 	/* Renderer layout, rather than application guesses, supplies stride and allocation offset. */
 	descriptor->stride = (uint32_t)layout.rowPitch;
 	descriptor->offset = layout.offset;
-	descriptor->tiling = GPU_IMAGE_LINEAR;
+	descriptor->tiling = tiling;
+	descriptor->layout_parameter = parameter;
 	descriptor->usage = create.usage;
 	error = vulkan_memory_image_fd(device, *memory, descriptor, fd);
 
@@ -309,6 +431,7 @@ vulkan_wsi_shared_image_import_format(
 {
 	struct gpu_resource_import request;
 	struct vulkan_external_image_info external;
+	struct vulkan_image_layout_info placed;
 	VkImageCreateInfo create;
 	VkMemoryAllocateInfo allocate;
 	VkExportMemoryAllocateInfo export;
@@ -341,10 +464,14 @@ vulkan_wsi_shared_image_import_format(
 	if (status != 0)
 		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
 
-	/* Only the negotiated initial linear four-channel image family is supported. */
+	/* Linear rows, or another layout on a device that names its own (the kernel took it from this device's export). */
 	error = VK_ERROR_FORMAT_NOT_SUPPORTED;
-	if (request.image.tiling != GPU_IMAGE_LINEAR ||
-	    (request.image.format != GPU_PIXEL_RGBA8888 &&
+	if (request.image.tiling != GPU_IMAGE_LINEAR &&
+	    (device->object.context->capabilities & GPU_CAP_IMAGE_LAYOUTS) == 0U)
+		goto cleanup;
+
+	/* Only the four-channel image family is supported. */
+	if ((request.image.format != GPU_PIXEL_RGBA8888 &&
 	     request.image.format != GPU_PIXEL_BGRA8888) ||
 	    request.image.memory_type >= device->physical->memory.memoryTypeCount)
 		goto cleanup;
@@ -356,6 +483,14 @@ vulkan_wsi_shared_image_import_format(
 	if (device->object.context->xml_version == VK_MAKE_VERSION(1, 4, 343) &&
 	    device->object.context->copy_display == VK_FALSE)
 		external.handle_types = VULKAN_EXTERNAL_MEMORY_OPAQUE;
+
+	/* Another layout than linear rows: the renderer places the optimal image as the description says. */
+	memset(&placed, 0, sizeof(placed));
+	placed.sType = VULKAN_STRUCTURE_TYPE_IMAGE_LAYOUT;
+	placed.tiling = request.image.tiling;
+	placed.parameter = request.image.layout_parameter;
+	if (request.image.tiling != GPU_IMAGE_LINEAR)
+		external.pNext = &placed;
 
 	/* Geometry and usage exactly reproduce the allocation's immutable exported description. */
 	memset(&create, 0, sizeof(create));
@@ -390,6 +525,8 @@ vulkan_wsi_shared_image_import_format(
 	create.arrayLayers = 1U;
 	create.samples = VK_SAMPLE_COUNT_1_BIT;
 	create.tiling = VK_IMAGE_TILING_LINEAR;
+	if (request.image.tiling != GPU_IMAGE_LINEAR)
+		create.tiling = VK_IMAGE_TILING_OPTIMAL;
 	create.usage = request.image.usage;
 	create.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	create.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -410,8 +547,9 @@ vulkan_wsi_shared_image_import_format(
 	vkGetImageSubresourceLayout((VkDevice)device, *image, &subresource, &layout);
 	if ((requirements.memoryTypeBits & (1U << request.image.memory_type)) == 0U ||
 	    requirements.size > request.image.allocation_bytes ||
-	    layout.offset != request.image.offset ||
-	    layout.rowPitch != request.image.stride) {
+	    (request.image.tiling == GPU_IMAGE_LINEAR &&
+	     (layout.offset != request.image.offset ||
+	      layout.rowPitch != request.image.stride))) {
 		error = VK_ERROR_FORMAT_NOT_SUPPORTED;
 		goto cleanup;
 	}

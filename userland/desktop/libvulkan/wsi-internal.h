@@ -316,6 +316,15 @@ struct vulkan_wsi_platform_ops {
 	 * the backend lends no images.
 	 */
 	VkBool32 (*lend_changed)(void *, const struct vulkan_wsi_lend_fit *, uint64_t);
+	/* Refuses the lend serial: the chain made for it could not import its images.  NULL when none is lent. */
+	void (*lend_decline)(void *, uint64_t);
+	/*
+	 * Asks the lease's display which layouts of an image (the request's
+	 * format, width and height) it shows (GPU_IMAGE_LAYOUTS, SCANOUT);
+	 * VK_SUCCESS with the answer, or an error when it does not answer.
+	 * NULL when the backend has no display of its own.
+	 */
+	VkResult (*layouts)(void *, struct gpu_image_layouts *);
 };
 
 VkResult vulkan_wsi_display_node_query(struct VkPhysicalDevice_T *physical, uint32_t index, uint32_t *count, struct gpu_display_info *request, uint64_t *device_id, char *path);
@@ -355,6 +364,14 @@ VkResult vulkan_wsi_shared_image_create(struct VkDevice_T *device, VkFormat form
  * wsi-image.c without it; a null test there leaves the chain on its copy.
  */
 extern VkResult vulkan_wsi_shared_image_create_usage(struct VkDevice_T *device, VkFormat format, VkExtent2D extent, VkImageUsageFlags usage, const VkAllocationCallbacks *allocator, const struct gpu_placement *placement, VkImage *image, VkDeviceMemory *memory, int *fd, struct gpu_image_descriptor *descriptor) __attribute__((weak));
+
+/*
+ * The shared image in a layout, and the choice of a display's image layout
+ * (wsi-image.c), weak for the same host tests; without them a direct chain
+ * keeps linear rows.
+ */
+extern VkResult vulkan_wsi_shared_image_create_layout(struct VkDevice_T *device, VkFormat format, VkExtent2D extent, VkImageUsageFlags usage, uint32_t tiling, uint32_t parameter, const VkAllocationCallbacks *allocator, const struct gpu_placement *placement, VkImage *image, VkDeviceMemory *memory, int *fd, struct gpu_image_descriptor *descriptor) __attribute__((weak));
+extern void vulkan_wsi_layout_choose(struct VkDevice_T *device, VkFormat format, VkExtent2D extent, const struct gpu_image_layouts *scanout, uint32_t *tiling, uint32_t *parameter) __attribute__((weak));
 
 VkResult vulkan_wsi_shared_image_import(struct VkDevice_T *device, int fd, const VkAllocationCallbacks *allocator, VkImage *image, VkDeviceMemory *memory, struct gpu_image_descriptor *descriptor);
 

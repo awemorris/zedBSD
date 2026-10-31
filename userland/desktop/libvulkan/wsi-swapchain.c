@@ -1227,9 +1227,9 @@ swapchain_create(
 			chain->lend_serial = lent_serial;
 	}
 
-	/* Every chain has independent acquisition state even when its images are shared; a lent chain has the lend's count. */
+	/* Every chain has independent acquisition state even when its images are shared; room for the lend's count or its own. */
 	bytes = (size_t)info->minImageCount;
-	if (chain->lend_serial != 0U)
+	if (chain->lend_serial != 0U && lent_count > info->minImageCount)
 		bytes = (size_t)lent_count;
 	chain->states = vulkan_allocate(
 		&chain->object.allocator,
@@ -1247,14 +1247,29 @@ swapchain_create(
 	if (chain->lend_serial != 0U) {
 		chain->direct = VK_TRUE;
 		error = swapchain_lent_create(chain, info, lent_count, lent_fds);
-		if (error != VK_SUCCESS)
-			goto cleanup;
-		chain->gpu_present = VK_TRUE;
+		if (error == VK_SUCCESS) {
+			chain->gpu_present = VK_TRUE;
 
-		/* Transfers the complete private chain to the publication stage. */
-		*result = chain;
-		chain = NULL;
-		goto cleanup;
+			/* Transfers the complete private chain to the publication stage. */
+			*result = chain;
+			chain = NULL;
+			goto cleanup;
+		}
+
+		/* Lent images this device cannot import (another layout, another device): refused, and the chain has its own. */
+		if (error != VK_ERROR_FORMAT_NOT_SUPPORTED &&
+		    error != VK_ERROR_FEATURE_NOT_PRESENT &&
+		    error != VK_ERROR_INVALID_EXTERNAL_HANDLE)
+			goto cleanup;
+		swapchain_native_images_free(chain);
+		if (chain->group != NULL)
+			swapchain_group_free(chain->group);
+		chain->group = NULL;
+		if (surface->platform->lend_decline != NULL)
+			surface->platform->lend_decline(chain->lease, chain->lend_serial);
+		chain->lend_serial = 0U;
+		chain->direct = VK_FALSE;
+		memset(chain->states, WSI_IMAGE_AVAILABLE, bytes);
 	}
 
 	/* A chain with its own images on a direct display renders into what the output shows. */
@@ -1717,6 +1732,9 @@ swapchain_image_create(
 	const VkAllocationCallbacks *allocator;
 	struct gpu_placement placement;
 	const struct gpu_placement *conditions;
+	struct gpu_image_layouts scanout;
+	uint32_t tiling;
+	uint32_t parameter;
 	VkResult error;
 
 	/* Internal transfer use is added without restricting the application's declared use. */
@@ -1732,17 +1750,52 @@ swapchain_image_create(
 				return error;
 			conditions = &placement;
 		}
-		error = vulkan_wsi_shared_image_create_usage(
-			chain->device,
-			info->imageFormat,
-			info->imageExtent,
-			info->imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-			allocator,
-			conditions,
-			&image->image,
-			&image->memory,
-			&image->fd,
-			&image->descriptor);
+
+		/* The fastest layout both the renderer and the display take (linear rows unless one comes first). */
+		tiling = GPU_IMAGE_LINEAR;
+		parameter = 0U;
+		if (chain->surface->platform->layouts != NULL &&
+		    vulkan_wsi_layout_choose != NULL &&
+		    vulkan_wsi_shared_image_create_layout != NULL) {
+			memset(&scanout, 0, sizeof(scanout));
+			scanout.format = GPU_PIXEL_RGBA8888;
+			if (info->imageFormat == VK_FORMAT_B8G8R8A8_UNORM || info->imageFormat == VK_FORMAT_B8G8R8A8_SRGB)
+				scanout.format = GPU_PIXEL_BGRA8888;
+			scanout.width = info->imageExtent.width;
+			scanout.height = info->imageExtent.height;
+			error = chain->surface->platform->layouts(chain->lease, &scanout);
+			if (error == VK_SUCCESS)
+				vulkan_wsi_layout_choose(chain->device, info->imageFormat, info->imageExtent, &scanout, &tiling, &parameter);
+		}
+
+		/* The image in that layout (rows of pixels as before when the library has no layouts). */
+		if (tiling != GPU_IMAGE_LINEAR) {
+			error = vulkan_wsi_shared_image_create_layout(
+				chain->device,
+				info->imageFormat,
+				info->imageExtent,
+				info->imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+				tiling,
+				parameter,
+				allocator,
+				conditions,
+				&image->image,
+				&image->memory,
+				&image->fd,
+				&image->descriptor);
+		} else {
+			error = vulkan_wsi_shared_image_create_usage(
+				chain->device,
+				info->imageFormat,
+				info->imageExtent,
+				info->imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+				allocator,
+				conditions,
+				&image->image,
+				&image->memory,
+				&image->fd,
+				&image->descriptor);
+		}
 		if (error != VK_SUCCESS)
 			return error;
 

@@ -159,6 +159,7 @@ static int wayland_wait_input(void *private_lease);
 static VkResult wayland_lend(void *private_lease, const struct vulkan_wsi_lend_fit *fit, uint32_t capacity, uint32_t *count, int *fds, uint64_t *serial);
 static VkResult wayland_lend_import(void *private_lease, int fd, const struct gpu_image_descriptor *descriptor, uint64_t serial, uint32_t index, void **result);
 static VkBool32 wayland_lend_changed(void *private_lease, const struct vulkan_wsi_lend_fit *fit, uint64_t serial);
+static void wayland_lend_refuse(void *private_lease, uint64_t serial);
 static void wayland_game_image(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t index, int32_t fd);
 static void wayland_game_lend(void *data, struct kl_game_surface_v1 *object, uint32_t serial, uint32_t count, uint32_t width, uint32_t height, uint32_t format, uint32_t usage, uint32_t layout);
 static void wayland_game_withdraw(void *data, struct kl_game_surface_v1 *object, uint32_t serial);
@@ -175,7 +176,8 @@ static const struct vulkan_wsi_platform_ops wayland_platform = {
 	wayland_commit_early, wayland_composite_alpha, wayland_damage, NULL,
 	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 	wayland_wait_input,
-	wayland_lend, wayland_lend_import, wayland_lend_changed
+	wayland_lend, wayland_lend_import, wayland_lend_changed, wayland_lend_refuse,
+	NULL
 };
 
 /* Registry discovery and buffer ownership are delivered only on the WSI queue. */
@@ -1715,6 +1717,33 @@ wayland_lend_changed(
 
 	/* Succeeded: the application should make the chain again. */
 	return VK_TRUE;
+}
+
+/*
+ * Refuses the lend serial after a chain made for it could not import its
+ * images: the compositor composes the surface, and the lend is not offered
+ * to a chain again.
+ */
+static void
+wayland_lend_refuse(
+	void *private_lease,
+	uint64_t serial)
+{
+	struct wayland_lease *lease;
+	struct wayland_surface *surface;
+
+	/* Only with the game object, under the lock the lend's listeners hold. */
+	lease = private_lease;
+	surface = lease->surface;
+	if (surface->game == NULL)
+		return;
+	pthread_mutex_lock(&surface->mutex);
+
+	/* The lend offered now, declined once. */
+	if (surface->lend_serial == (uint32_t)serial)
+		wayland_lend_decline(surface);
+
+	pthread_mutex_unlock(&surface->mutex);
 }
 
 /*

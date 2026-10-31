@@ -314,6 +314,21 @@ struct vulkan_external_image_info {
 	uint32_t handle_types;
 };
 
+/*
+ * The layout a WSI image is placed in (a GPU_IMAGE_* tiling and its
+ * parameter), chained after the external-image declaration: the renderer
+ * places an optimal-tiling image so.  Sent only to a context whose device
+ * names its own layouts (GPU_CAP_IMAGE_LAYOUTS); its type is the library's
+ * own, the native executor's private record.
+ */
+#define VULKAN_STRUCTURE_TYPE_IMAGE_LAYOUT ((VkStructureType)0x7a650001)
+struct vulkan_image_layout_info {
+	VkStructureType sType;
+	const void *pNext;
+	uint32_t tiling;
+	uint32_t parameter;
+};
+
 /* Private buffer storage declaration uses the renderer's external-memory ABI. */
 struct vulkan_external_buffer_info {
 	VkStructureType sType;
