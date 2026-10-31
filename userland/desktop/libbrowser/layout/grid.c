@@ -856,6 +856,18 @@ layout_grid(
 		used = row_gap * (layout_unit)(grid.row_count - 1);
 		for (position = 0; position < grid.row_count; position++)
 			used += grid.rows[position];
+
+		/* A minimum height holds the container taller, and the gap is of that height. */
+		if (box->style.min_height.unit == CSS_UNIT_PX) {
+			layout_unit minimum_content;
+
+			minimum_content = layout_from_px(box->style.min_height.value);
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				minimum_content -= box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] +
+				    box->border[CSS_BOTTOM];
+			if (used < minimum_content)
+				used = minimum_content;
+		}
 		row_gap = (layout_unit)((float)used * box->style.row_gap.value / 100.0f) +
 		    layout_from_px(box->style.row_gap.offset);
 		if (row_gap < 0)
