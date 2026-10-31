@@ -32,6 +32,7 @@ static struct layout_box *box_new(struct layout_tree *tree, int kind, struct dom
 static void box_append(struct layout_box *parent, struct layout_box *child);
 static int box_is_inline_level(const struct layout_box *box);
 static int box_is_whitespace(const struct layout_box *box);
+static int box_details_content(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *box);
 static int box_is_blank(const struct layout_box *box);
 static int box_fix_children(struct layout_tree *tree, struct layout_box *box);
 static int box_table_fix(struct layout_tree *tree, struct layout_box *box);
@@ -596,6 +597,9 @@ box_build_element(
 	error = box_build_children(tree, css, &element->node, &box->style, box, depth + 1);
 	if (error != 0)
 		return error;
+	error = box_details_content(tree, css, element, box);
+	if (error != 0)
+		return error;
 	error = box_build_pseudo(tree, css, element, box, CSS_PSEUDO_ELEMENT_AFTER);
 	if (error != 0)
 		return error;
@@ -612,6 +616,77 @@ box_build_element(
 
 	/* Succeeded: the element's boxes are built. */
 	return 0;
+}
+
+/*
+ * Wraps a details element's content (every child box but its first summary's and the ::before box) in the box of its
+ * ::details-content pseudo-element, when some rule names that.
+ */
+static int
+box_details_content(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_element *element,
+	struct layout_box *box)
+{
+	struct css_style *style;
+	struct layout_box *wrapper;
+	struct layout_box *child;
+	struct layout_box *next;
+	const struct dom_element *summary;
+	int seen_summary;
+	int error;
+
+	/* Only a details element some rule gives a ::details-content. */
+	if (element->ns != DOM_NS_HTML || element->tag != DOM_TAG_DETAILS)
+		return 0;
+	if ((box->style.pseudo_elements & (1 << CSS_PSEUDO_ELEMENT_DETAILS_CONTENT)) == 0)
+		return 0;
+	style = malloc(sizeof(*style));
+	if (style == NULL)
+		return ENOMEM;
+	error = css_engine_compute_pseudo(css, element, CSS_PSEUDO_ELEMENT_DETAILS_CONTENT, &box->style, style);
+	if (error != 0) {
+		free(style);
+		return error;
+	}
+
+	/* It is a block unless the rules say otherwise. */
+	if (style->display == CSS_DISPLAY_INLINE || style->display == CSS_DISPLAY_CONTENTS)
+		style->display = CSS_DISPLAY_BLOCK;
+	if (style->display == CSS_DISPLAY_NONE) {
+		free(style);
+		return 0;
+	}
+	wrapper = box_new(tree, LAYOUT_BLOCK, NULL, style);
+	free(style);
+	if (wrapper == NULL)
+		return ENOMEM;
+
+	/* The boxes after the first summary move into it; the ones before it stay. */
+	seen_summary = 0;
+	child = box->first_child;
+	box->first_child = NULL;
+	box->last_child = NULL;
+	while (child != NULL) {
+		next = child->next;
+		child->next = NULL;
+		summary = child->node != NULL && child->node->type == DOM_ELEMENT ? (const struct dom_element *)child->node : NULL;
+		if (!seen_summary && (child->node == NULL || (summary != NULL && summary->ns == DOM_NS_HTML && summary->tag == DOM_TAG_SUMMARY))) {
+			if (summary != NULL)
+				seen_summary = 1;
+			box_append(box, child);
+		} else if (!seen_summary && child->node != NULL && child->node->type != DOM_ELEMENT) {
+			box_append(box, child);
+		} else {
+			box_append(wrapper, child);
+		}
+		child = next;
+	}
+	box_append(box, wrapper);
+	wrapper->children_inline = 0;
+	error = box_fix_children(tree, wrapper);
+	return error;
 }
 
 /*

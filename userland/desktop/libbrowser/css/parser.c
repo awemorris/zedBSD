@@ -2108,7 +2108,7 @@ parser_compound(
 				*specificity += 1U;
 
 				/* A view transition one reads its name; a functional pseudo-element's other arguments are skipped. */
-				if (simple->pseudo >= CSS_PSEUDO_ELEMENT_VT_ROOT) {
+				if (simple->pseudo >= CSS_PSEUDO_ELEMENT_VT_ROOT && simple->pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW) {
 					error = parser_view_transition_argument(heap, tokens, count, index, compound);
 					if (error != 0)
 						return error;
@@ -2480,6 +2480,11 @@ parser_pseudo_element(
 		return;
 	simple->pseudo = CSS_PSEUDO_ELEMENT_VT_NEW;
 	if (css_ident_equal(token, "view-transition-new"))
+		return;
+
+	/* The box around a details element's content. */
+	simple->pseudo = CSS_PSEUDO_ELEMENT_DETAILS_CONTENT;
+	if (css_ident_equal(token, "details-content"))
 		return;
 
 	/* Any other (::placeholder, ::-webkit-scrollbar, ::first-line ...) is not drawn. */
