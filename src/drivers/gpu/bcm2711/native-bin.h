@@ -43,6 +43,8 @@ struct bcm2711_native_bin {
 	uint32_t window[4];
 	uint32_t shader;
 	uint32_t attributes;
+	/* The VCM Cache Size packet's byte (bcm2711_native_shader_vcm); zero takes two batches each. */
+	uint32_t vcm;
 	/* The vertices, or for an indexed draw the indices, of one instance. */
 	uint32_t vertices;
 	uint32_t instances;

@@ -88,6 +88,8 @@ struct bcm2711_vulkan_native_draw {
 	uint32_t count;
 	uint32_t shader;
 	uint32_t attributes;
+	/* The VCM Cache Size packet's byte for its shader (bcm2711_native_shader_vcm). */
+	uint32_t vcm;
 	/* The draw's vertices or indices, instances and bases, in bcm2711_native_bin's meanings. */
 	uint32_t vertices;
 	uint32_t instances;

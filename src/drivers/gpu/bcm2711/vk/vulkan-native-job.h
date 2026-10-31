@@ -37,6 +37,14 @@ struct bcm2711_vulkan_native_job {
 	uint64_t copy_ticks;
 	/* The last step failed while preparing, before it launched anything or left a translation unpublished. */
 	bool prepare_failed;
+	/*
+	 * A pass prepared ahead, and its bin queue run, while the pass before it
+	 * rendered: ahead_event is the event it is for and ahead_next the event
+	 * after it.  The step that reaches ahead_event takes it as its pass.
+	 */
+	struct bcm2711_vulkan_native_pass *ahead;
+	const struct bcm2711_vulkan_prepared_event *ahead_event;
+	const struct bcm2711_vulkan_prepared_event *ahead_next;
 };
 
 /* The renderer must own the same Vulkan session before a primary can become independently pending native work. */
