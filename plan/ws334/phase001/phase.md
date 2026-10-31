@@ -2,7 +2,7 @@
 
 # ws334-p001: 設計（OmniGrammaton の Windows 移植）
 
-Status: in-progress（2026-11-01 00:24 P7 q1787）
+Status: cleared（2026-11-01 01:25 Q1 の判定。設計 1deb49bff、main b2a7e8454、ユーザーの答え U1〜U15 が揃った）
 Parent: [WS334](../ws.md)
 
 ## 範囲

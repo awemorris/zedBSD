@@ -37,15 +37,31 @@
   18. 2026-11-01 ユーザーから、信頼する証明書は userland/packages の ca-certificates を使い、その上で Windows の証明書の store も見る、という趣旨の指示を受けた。
   19. 2026-11-01 ユーザーから、Windows の試験の機械は QEMU の guest でもよい、という趣旨の指示と、Vulkan が使えるかの問いを受けた（Q1 の答えは design-notes.md）。
   20. 2026-11-01 ユーザーから、Windows の host での試験はだいぶ後に回し、host（Linux）の Wine と llvmpipe（Mesa の lavapipe、CPU の Vulkan）で開発する、効率が悪ければ Windows の host に移し、その場合は Q1 ではなく Windows の上の別の Claude の session で実装する、という趣旨の指示を受けた（U12 の答え。QEMU の Windows の guest は前の決定 19 で可）。
+  21. 2026-11-01 ユーザーから、残りの問い U1・U2・U4〜U9・U11・U13〜U15 は推しの案でよい、という趣旨の答えを受けた（内容は [user-questions.md](user-questions.md) の推し: U1 Win32 を直に使う backend・最小の部分は WS334・全体は WS234、U2 UI の source は今の場所、U4 第 1 段は拡大しない、U5 cache の disk は第 2 段、U6 同梱の font、U7 libtruetype・libgif-compat の小さな直しだけ、U8 Windows の Chrome の名乗り、U9 名前は両方 OmniGrammaton・icon は今の物・発行者 Awe Morris、U11 第 1 段は zip、U13 公開の header は作らない、U14 第 1 段は平文・DPAPI は後半、U15 差し替えはストレージバックエンドだけ）。
 
 ## Resume point
 
-- 2026-11-01 ユーザーから、P8（WS074）を止めずに P7 で WS334 に取りかかる、libbrowser の修正の範囲は限られ、その後は shell と libkeiland の移植の開発になる、という趣旨の指示を受けた。P7 が p001（設計）を q1787 で始めた。
-- 2026-11-01 P7: p001 の設計を [design.md](design.md) に、ユーザーへの問い U1〜U13 を [user-questions.md](user-questions.md) に、design-reviewer の指摘を [design-review.md](design-review.md) に書いた。
-  実装の Phase の案は design.md §8（p002〜p016、約 112 LW）。ws.md の Phase の表に載せるのは Q1 の確認と問いの答えの後。libbrowser の変える file の一覧は design.md §9.1（P8 との調整用）。
+- 2026-11-01 p001 の設計が cleared（ユーザーの答えが揃った）。次は p002 から（実装の担当の割当は Q1 がユーザーの指示で）。開発と試験は host の Wine＋llvmpipe（決定 20）。
 
 ## Phase
 
 | ID | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計: libbrowser の 3 つのエンジン（レンダリング・スクリプト・ストレージ）への分割と interface（DOM の access、スクリプトの core と binding の分離）、libkeiland の Windows の backend（Win32 直か Qt6 か、window・入力・描画・IME・clipboard・file・thread・socket）、libmedia と Vulkan・Vulkan Video の Windows での使い方、既存の library（libtruetype・png・gif・jpeg の compat）の build、cross compile の toolchain、.exe・DLL・resource、名前 OmniGrammaton、試験の方法、Phase の分け方、ユーザーへの問い | in-progress（2026-11-01 00:24 P7 q1787。設計の文書・問い・レビューを書いた、Q1 の確認待ち） | — |
+| [p001](phase001/phase.md) | 設計: libbrowser の 3 つのエンジン（レンダリング・スクリプト・ストレージ）への分割と interface（DOM の access、スクリプトの core と binding の分離）、libkeiland の Windows の backend（Win32 直か Qt6 か、window・入力・描画・IME・clipboard・file・thread・socket）、libmedia と Vulkan・Vulkan Video の Windows での使い方、既存の library（libtruetype・png・gif・jpeg の compat）の build、cross compile の toolchain、.exe・DLL・resource、名前 OmniGrammaton、試験の方法、Phase の分け方、ユーザーへの問い | cleared（2026-11-01 01:25、設計 main b2a7e8454、問い U1〜U15 は全部答えが出た） | — |
+| p002 | build の土台（sources.mk の分け、`apps/browser-win32/Makefile`、`make browser-win64`・`browser-winarm64`）（design.md §8、約 6 LW） | planned | p001 |
+| p003 | libbrowser の OS の層（posix・win32）と OS に直に触れる所の直し（design.md §8、約 9 LW） | planned | p002 |
+| p004 | network の Windows（loader・http・tls）、libmedia の wake の callback（design.md §8、約 10 LW） | planned | p003 |
+| p005 | instance と API v4、cookie・Web Storage を instance へ、storage の thread、ストレージバックエンド（design.md §8、約 12 LW） | planned | p004 |
+| p006 | 永続の HTTP の cache（U5 の答えで第 2 段、後へ）（design.md §8、約 6 LW） | planned | p005 |
+| p007 | script の core の archive と link の確かめ（design.md §8、約 2 LW） | planned | p003 |
+| p008 | libmedia の Windows と mediafile（design.md §8、約 5 LW） | planned | p004 |
+| p009 | browser の UI の準備（browser_main への分け、libkeiland の header の追加）（design.md §8、約 5 LW） | planned | p005 |
+| p010 | 鍵の表 scan code → evdev（標準廉価実装手順 T1）（design.md §8、約 3 LW） | planned | p002 |
+| p011 | libkeiland の Win32 の最小の部分その 1（app・window・loop・入力・枠）（design.md §8、約 14 LW） | planned | p007・p008・p009・p010 |
+| p012 | その 2（題の帯、IMM32、clipboard、DPI）（design.md §8、約 12 LW） | planned | p011 |
+| p013 | OpenSSL の Windows の build と証明書（packages の ca-certificates ＋ Windows の store）（design.md §8、約 5 LW） | planned | p004 |
+| p014 | 配る形（zip、license、icon、版の情報）（design.md §8、約 5 LW） | planned | p012・p013 |
+| p015 | Wine＋llvmpipe での確かめの第 1 回（決定 20。実機の Windows は後）（design.md §8、約 8 LW） | planned | p014 |
+| p016 | 後半の Windows の口（TSF・drag と drop・touchpad・accent・Mica・DPAPI、arm64）（design.md §8、約 14 LW） | planned | p015 |
+| p017 | libbrowser の試験を Windows（Wine）で（design.md §8、約 5 LW） | planned | p015 |
+| p018 | 規約の全文の見直し（design.md §8、約 4 LW） | planned | p016・p017 |
