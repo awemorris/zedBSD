@@ -1,8 +1,0 @@
-viewport 1024.00 x 768.00, document height 27.00
-block <html> 0.00 0.00 1024.00 27.00
-  block <body> 0.00 0.00 1024.00 27.00
-    block <button> 0.00 0.00 120.00 27.00
-      block <span> 9.00 9.00 102.00 9.00
-        anonymous 9.00 9.00 27.73 9.00
-          line 9.00 9.00 height 9.00 baseline 18.00
-            text 9.00 w 27.73 12px "play"
