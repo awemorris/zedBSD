@@ -491,6 +491,8 @@ box_build_element(
 		replaced = 1;
 	if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_VIDEO)
 		replaced = 1;
+	if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_CANVAS)
+		replaced = 1;
 	if (element->ns == DOM_NS_SVG && element->tag == DOM_TAG_SVG && tree->image_lookup != NULL)
 		replaced = tree->image_lookup(tree->image_context, element) != NULL;
 	if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_OBJECT && tree->image_lookup != NULL)

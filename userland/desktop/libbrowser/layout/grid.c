@@ -3183,11 +3183,17 @@ grid_ratio_width(
 	layout_unit height;
 	layout_unit frame_x;
 	layout_unit frame_y;
+	float ratio;
 	int row;
 
-	/* An auto width, a ratio of its own and not a replaced box. */
+	/* An auto width and a ratio: the style's for a box that is not replaced, the picture's for one that is. */
 	child = item->box;
-	if (child->style.width.unit != CSS_UNIT_AUTO || child->style.aspect_ratio <= 0.0f || child->replaced)
+	ratio = child->style.aspect_ratio;
+	if (child->replaced) {
+		if (child->style.aspect_ratio > 0.0f || !layout_replaced_ratio(child, &ratio))
+			return 0;
+	}
+	if (child->style.width.unit != CSS_UNIT_AUTO || ratio <= 0.0f)
 		return 0;
 
 	/* The height: a length, or a percentage of the fixed rows the item spans. */
@@ -3211,9 +3217,9 @@ grid_ratio_width(
 	frame_x = child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
 	frame_y = child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
 	if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
-		*width = (layout_unit)((float)height * child->style.aspect_ratio);
+		*width = (layout_unit)((float)height * ratio);
 	else
-		*width = (layout_unit)((float)height * child->style.aspect_ratio) + frame_x;
+		*width = (layout_unit)((float)height * ratio) + frame_x;
 	(void)frame_y;
 	*width += child->margin[CSS_LEFT] + child->margin[CSS_RIGHT];
 
