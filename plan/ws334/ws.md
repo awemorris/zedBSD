@@ -36,9 +36,11 @@
 ## Resume point
 
 - 2026-11-01 ユーザーから、P8（WS074）を止めずに P7 で WS334 に取りかかる、libbrowser の修正の範囲は限られ、その後は shell と libkeiland の移植の開発になる、という趣旨の指示を受けた。P7 が p001（設計）を q1787 で始めた。
+- 2026-11-01 P7: p001 の設計を [design.md](design.md) に、ユーザーへの問い U1〜U13 を [user-questions.md](user-questions.md) に、design-reviewer の指摘を [design-review.md](design-review.md) に書いた。
+  実装の Phase の案は design.md §8（p002〜p016、約 112 LW）。ws.md の Phase の表に載せるのは Q1 の確認と問いの答えの後。libbrowser の変える file の一覧は design.md §9.1（P8 との調整用）。
 
 ## Phase
 
 | ID | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計: libbrowser の 3 つのエンジン（レンダリング・スクリプト・ストレージ）への分割と interface（DOM の access、スクリプトの core と binding の分離）、libkeiland の Windows の backend（Win32 直か Qt6 か、window・入力・描画・IME・clipboard・file・thread・socket）、libmedia と Vulkan・Vulkan Video の Windows での使い方、既存の library（libtruetype・png・gif・jpeg の compat）の build、cross compile の toolchain、.exe・DLL・resource、名前 OmniGrammaton、試験の方法、Phase の分け方、ユーザーへの問い | in-progress（2026-11-01 00:24 P7 q1787） | — |
+| [p001](phase001/phase.md) | 設計: libbrowser の 3 つのエンジン（レンダリング・スクリプト・ストレージ）への分割と interface（DOM の access、スクリプトの core と binding の分離）、libkeiland の Windows の backend（Win32 直か Qt6 か、window・入力・描画・IME・clipboard・file・thread・socket）、libmedia と Vulkan・Vulkan Video の Windows での使い方、既存の library（libtruetype・png・gif・jpeg の compat）の build、cross compile の toolchain、.exe・DLL・resource、名前 OmniGrammaton、試験の方法、Phase の分け方、ユーザーへの問い | in-progress（2026-11-01 00:24 P7 q1787。設計の文書・問い・レビューを書いた、Q1 の確認待ち） | — |

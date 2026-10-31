@@ -10,7 +10,7 @@
   Windows 版は tree の一番上の `apps/browser-win32/` に置き、`make browser-win64`（arm64 は `make browser-winarm64`）で作る（決定 12・13）。
 - **今の状態**: planning。p001（設計）を P7 が書いた（[design.md](design.md)）。実装の担当の割当はまだ（ユーザーの決定で、今は計画だけ）。
   ブラウザの窓の部分は決定 15 で決まった: 今の zedBSD のブラウザの UI のまま、その下の libkeiland に Windows の backend を作って動かす（足りなければ後で Win32 を直に使う版）。
-- **決まっていない事**: 下の U1〜U13（統括の「Q1」と紛れないよう U の番号にした）。どれも推しの案を書いた。推しのままでよければ「推しで」で足りる。
+- **決まっていない事**: 下の U1〜U15（統括の「Q1」と紛れないよう U の番号にした）。どれも推しの案を書いた。推しのままでよければ「推しで」で足りる。
 
 ## 用語
 
@@ -48,8 +48,10 @@
 ### U3 cross compile の toolchain（決定 11。統括の Q1 の許可も要る）
 
 - 問い: llvm-mingw（版を固定した release を取得・照合）を host と Windows の host に入れてよいか。
-- 推し: 入れる。arm64 の Windows（`make browser-winarm64`）に要る。入るまでは、今の host にある Debian の mingw-w64 gcc で x86_64 だけを先に作る。
+- 推し: 入れる。arm64 の Windows（`make browser-winarm64`）に要る。入るまでは、Debian の UCRT 版の mingw-w64 の gcc（package `gcc-mingw-w64-ucrt64`、apt で入る。
+  今入っている版は古い C の runtime（msvcrt）で作られていて新しい runtime（UCRT）と混ぜられない）で x86_64 だけを先に作る。この package の導入も許可の対象。
   共有の LLVM（toolchain/）は変えない（design.md §6.1）。
+- 対象の Windows: Windows 10 1903 以降（x64）と Windows 11（arm64）。日本語の名前の folder の file を開くための設定（UTF-8 の code page）が 1903 から働くため。
 
 ### U4 高 DPI（150% などの拡大の画面）の page の中身
 
@@ -73,6 +75,8 @@
 
 - 背景: 決定 6 は「そのまま使う」。Windows では libtruetype の 1 関数（font の file を開く所）が compile できず、binary の file を text として読む恐れがある。
 - 推し: 決定 6 を「zedBSD の library を Windows でも使う（他社の FreeType などに替えない）」と読み、この 1 関数と libgif-compat の 1 行だけを直す。
+- 補い: これらの library は Windows の compiler で warning が出るかもしれない（Linux の試験の build でも warning を誤りにしていない）。推し: warning を消すための直しはせず
+  数を記録するだけにし、「warning 0」の約束は WS334 が書く・変える code に当てる。
 
 ### U8 web site に名乗る名前（User-Agent・navigator.platform）
 
@@ -106,6 +110,20 @@
 
 - 背景: 決定 9 で JavaScript の core（vm・js）を単独の library として build できるようにする。今の engine の中の header のままでも build はできる。
 - 推し: 今は公開の header を作らず、「core だけで library になる」事を試験で保証する。外の program が使いたくなった時に公開の口を決める。
+
+### U14 cookie を暗号にして保存するか
+
+- 背景: 再起動の後も cookie（login の状態など）を残すため、disk に保存する。今の設計では平文（今の zedBSD の localStorage も平文）。Windows の Chrome は利用者の
+  login に結び付いた暗号（DPAPI）で cookie を保存する。平文だと、同じ PC の他の program が cookie を読める。
+- 推し: 第 1 段は平文で保存し、Windows の暗号（DPAPI）は WS334 の後半（p016）で足す。zedBSD・Linux での暗号は後で別に決める。
+
+### U15 決定 9 の読み（どの engine を差し替えられるようにするか）
+
+- 背景: 決定 9 は「描画・JavaScript・保存の 3 つの engine がそれぞれ interface を持ち、その実装を libbrowser の instance に登録する」。決定 10 は「描画と JavaScript は今の
+  source で分かれているので、その分離を保てばよい」。
+- 推し: instance に**登録して差し替えられる**のは保存（ストレージバックエンド）だけにし、描画と JavaScript は今の内部の interface で libbrowser の中で結ぶ（差し替えの口は作らない）。
+  JavaScript の core が単独の library になる事は試験で保証する（U13）。
+- 代案: 描画と JavaScript も instance に登録する公開の口を作る（公開の API が大きくなり、WS074 の作業と重なる）。
 
 ## make の target の名前（問いにしない、案の記録）
 
