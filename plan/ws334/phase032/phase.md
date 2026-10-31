@@ -4,7 +4,7 @@
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §7.1・§7.3（最小の合格の組 M1〜M8）、決定 20（host の Wine と lavapipe で開発する。実機の Windows はだいぶ後）。
 - 状態: planned（2026-11-01 p003 で作成）。
-- **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: `omnigrammaton-cli.exe` は `OmniGrammaton.exe`（同じ引数、出力は redirect で読む）に読み替える。
+- **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: `omnigrammaton-cli.exe` は作らない（2026-11-01 ユーザーの答え: 配るのは `OmniGrammaton.exe` だけ）。本文の `omnigrammaton-cli.exe` は試験の program（`plan/ws334/tests` の配らない .exe、p036 の `test-program` で同じ static library を link）に読み替える。
 - 依存: p031。
 - 担当の想定: Opus（phase-runner）を 1 回（約 8 LW）。直しは見つけた不具合ごとに小さく、元の Phase の範囲（その file）の中で。範囲の外の直しが要れば Q1 に。
 
