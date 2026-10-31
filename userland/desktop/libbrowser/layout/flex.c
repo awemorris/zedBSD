@@ -2350,6 +2350,10 @@ flex_relay_cross(
 			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
 				height -= frame;
 		} else if (child->style.height.unit == CSS_UNIT_AUTO && align == CSS_ALIGN_STRETCH) {
+			/* An auto margin across takes the free space instead: the item is not stretched. */
+			if (child->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO || child->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
+				continue;
+
 			/* Ratio items with auto cross margins keep their intrinsic height. */
 			if (!child->replaced) {
 				if (child->style.aspect_ratio > 0.0f) {
