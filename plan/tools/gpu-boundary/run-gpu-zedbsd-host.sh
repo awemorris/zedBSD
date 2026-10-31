@@ -15,7 +15,7 @@ for mode in ordinary sanitize; do
     if test "$mode" = sanitize; then
         extra='-fsanitize=address,undefined -fno-omit-frame-pointer -no-pie'
     fi
-    cc -std=c89 -D_GNU_SOURCE -Wall -Wextra -Werror $extra \
+    cc -std=c99 -D_GNU_SOURCE -Wall -Wextra -Werror $extra \
         -I"$work/include" -I"$repo/include" -I"$repo" \
         "$repo/plan/tools/gpu-boundary/gpu-zedbsd-host.c" "$repo/userland/desktop/libkeiland-backend-zedbsd/gpu-zedbsd.c" \
         -o "$work/$mode"

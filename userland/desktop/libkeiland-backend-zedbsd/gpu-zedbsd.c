@@ -40,9 +40,10 @@ kwl_gpu_buffer_wire_bytes(
  *
  * Nothing of the description reaches Vulkan before it is known to be an
  * image Vulkan can make: a nonzero size within the device's largest image,
- * one of the two four-channel formats in linear rows, rows of at least the
- * width that start inside and end inside the allocation, and a memory type
- * the device has.  Returns EINVAL for anything else.
+ * one of the two four-channel formats, rows of at least the width, an
+ * image that starts inside the allocation (and, in linear rows, ends inside
+ * it; another layout is sampled with exactly its described uses), and a
+ * memory type the device has.  Returns EINVAL for anything else.
  */
 int
 kwl_gpu_buffer_decode(
@@ -80,6 +81,9 @@ kwl_gpu_buffer_decode(
 	if (image.height == 0U || image.height > limits->max_dimension)
 		return EINVAL;
 
+	/* A named layout (the kernel's description always names one). */
+	if (image.tiling == 0U)
+		return EINVAL;
 
 	/* One of the two four-channel formats, in its byte order. */
 	if (image.format == GPU_PIXEL_BGRA8888) {
