@@ -117,6 +117,14 @@ struct disk {
 	unsigned d_opening;
 	unsigned d_closing;
 	unsigned d_cache_users;
+	/*
+	 * Cache admissions made through this disk itself (d_cache_users
+	 * counts them on the physical device), and the requests in flight on
+	 * a physical device, so that a partition's reservation can tell a
+	 * sibling's work from work on its own range; registry lock.
+	 */
+	unsigned d_cache_entries;
+	struct bio *d_inflight_head;
 	/* Resident buffer pins are distinct from external users; registry lock. */
 	unsigned d_buffer_refs;
 	/*
@@ -209,6 +217,10 @@ struct bio {
 	 */
 	const uint64_t *b_pages;
 	uint32_t b_page_count;
+	/* Its place among its physical device's requests in flight; registry lock. */
+	struct bio *b_inflight_previous;
+	struct bio *b_inflight_next;
+	unsigned b_inflight_listed;
 };
 
 void disk_set_stats_kind(struct disk *disk, uint32_t kind);
@@ -229,10 +241,11 @@ int disk_transfer_pages_claimed(struct disk *disk, enum bio_op op, uint64_t bloc
 /*
  * Admits a transfer that bypasses the cache under the reload and lifetime
  * barriers of a cached access, so that it may first bring the cache's lines
- * of its range in line with the disk; disk_direct_end() takes the leaf back.
+ * of its range in line with the disk; disk_direct_end() takes the token
+ * (as disk_cache_acquire's) back.
  */
-int disk_direct_begin(struct disk *disk, struct disk **leaf);
-void disk_direct_end(struct disk *leaf);
+int disk_direct_begin(struct disk *disk, struct disk **token);
+void disk_direct_end(struct disk *token);
 int disk_page_vector_supported(struct disk *disk);
 /*
  * Whether reading ahead a block range of a disk can only be seen by its one
@@ -392,9 +405,14 @@ int
 bio_flush(
 	struct disk *disk);
 
-/* Pins cached file access against detach and partition reload. */
+/*
+ * Pins cached file access against detach and partition reload.  The token
+ * is the disk the access came through (a partition's reservation tells it
+ * from a sibling's); disk_cache_leaf names its physical device.
+ */
 int disk_cache_acquire(struct disk *, struct disk **);
 void disk_cache_release(struct disk *);
+struct disk *disk_cache_leaf(struct disk *token);
 
 /* Lifecycle-checked metadata copies and validation of their pinned cache identities. */
 int disk_read_view(struct disk *, uint64_t, uint32_t, void *, struct buf_view *);

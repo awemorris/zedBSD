@@ -47,7 +47,9 @@
 struct readahead_job {
 	struct file *origin;
 	struct mount *mount;
+	/* The physical device the job reads from, and its cache admission there. */
 	struct disk *leaf;
+	struct disk *token;
 	struct vm_object_prefetch fill;
 	uint64_t order;
 	unsigned state;
@@ -253,6 +255,7 @@ readahead_submit(
 	struct readahead_worker *worker;
 	struct readahead_worker *empty;
 	struct readahead_job *job;
+	struct disk *token;
 	struct disk *leaf;
 	struct mount *mount;
 	off_t offset;
@@ -285,7 +288,7 @@ readahead_submit(
 		return error;
 	if (!mutex_trylock(&control))
 		return EAGAIN;
-	error = writeback_domain_acquire(mount->m_disk, &leaf);
+	error = writeback_domain_acquire(mount->m_disk, &token, &leaf);
 	if (error != 0) {
 		mutex_unlock(&control);
 		return error;
@@ -293,14 +296,14 @@ readahead_submit(
 
 	/* Serializes the admission identity against reset/close before publishing a slot. */
 	if (!mutex_trylock(&origin->f_lock)) {
-		disk_cache_release(leaf);
+		disk_cache_release(token);
 		mutex_unlock(&control);
 		return EAGAIN;
 	}
 
 	if (!readahead_current(&origin->f_readahead, request)) {
 		mutex_unlock(&origin->f_lock);
-		disk_cache_release(leaf);
+		disk_cache_release(token);
 		mutex_unlock(&control);
 		return EAGAIN;
 	}
@@ -341,7 +344,7 @@ readahead_submit(
 		counters.refusals++;
 		spin_unlock_irqrestore(&registry, irq);
 		mutex_unlock(&origin->f_lock);
-		disk_cache_release(leaf);
+		disk_cache_release(token);
 		mutex_unlock(&control);
 		return EAGAIN;
 	}
@@ -350,6 +353,7 @@ readahead_submit(
 	job->origin = origin;
 	job->mount = mount;
 	job->leaf = leaf;
+	job->token = token;
 	job->order = ++next_order;
 	job->state = RA_PREPARING;
 	counters.jobs++;
@@ -851,14 +855,14 @@ retire_job(
 	struct readahead_worker *worker,
 	struct readahead_job *job)
 {
-	struct disk *leaf;
+	struct disk *token;
 	unsigned long irq;
 
 	/* Keeps the visible slot busy throughout potentially sleeping cleanup. */
 	vm_object_prefetch_abort(&job->fill);
-	leaf = job->leaf;
-	if (leaf != NULL)
-		disk_cache_release(leaf);
+	token = job->token;
+	if (token != NULL)
+		disk_cache_release(token);
 	irq = spin_lock_irqsave(&registry);
 
 	kern_memset(job, 0, sizeof(*job));

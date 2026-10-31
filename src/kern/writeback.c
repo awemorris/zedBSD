@@ -49,7 +49,9 @@
 struct writeback_worker {
 	struct writeback_unmount *unmount;
 	struct writeback_budget budget;
+	/* The physical device it writes for, and the cache admission it holds there. */
 	struct disk *leaf;
+	struct disk *token;
 	struct io_scratch memory;
 	struct wait_queue wake;
 	unsigned state;
@@ -499,18 +501,21 @@ writeback_budget_read(
 int
 writeback_domain_acquire(
 	struct disk *disk,
+	struct disk **domain_token,
 	struct disk **leaf)
 {
 	struct disk *tokens[IO_CONTEXT_DEPTH_MAX];
 	struct disk *token;
+	struct disk *layer;
 	struct disk *backing;
 	unsigned count;
 	unsigned index;
 	int error;
 
 	/* Rejects a missing output and admits the initial mounted device. */
-	if (leaf == NULL)
+	if (domain_token == NULL || leaf == NULL)
 		return EINVAL;
+	*domain_token = NULL;
 	*leaf = NULL;
 	count = 0;
 	error = disk_cache_acquire(disk, &token);
@@ -531,18 +536,20 @@ writeback_domain_acquire(
 			break;
 		}
 
-		/* Keeps this layer admitted and asks for the one below it. */
+		/* Keeps this layer admitted and asks its device for the one below it. */
 		tokens[count] = token;
 		count++;
+		layer = disk_cache_leaf(token);
 		backing = NULL;
 		if (drv_loop_backing_disk_ref != NULL)
-			error = drv_loop_backing_disk_ref(token, &backing);
+			error = drv_loop_backing_disk_ref(layer, &backing);
 		else
 			error = EOPNOTSUPP;
 
 		/* A layer with no backing relation is the physical domain. */
 		if (error == EOPNOTSUPP) {
-			*leaf = token;
+			*domain_token = token;
+			*leaf = layer;
 			count--;
 			error = 0;
 			break;
@@ -1262,7 +1269,7 @@ static int
 worker_dispose(struct writeback_worker *worker)
 {
 	struct io_scratch memory;
-	struct disk *leaf;
+	struct disk *token;
 	unsigned long irq;
 	int error;
 
@@ -1288,15 +1295,16 @@ worker_dispose(struct writeback_worker *worker)
 
 	irq = spin_lock_irqsave(&policy_registry);
 
-	leaf = worker->leaf;
+	token = worker->token;
 	worker->leaf = NULL;
+	worker->token = NULL;
 	worker->state = WB_OFF;
 	worker->requested = 0;
 
 	spin_unlock_irqrestore(&policy_registry, irq);
 
-	if (leaf != NULL)
-		disk_cache_release(leaf);
+	if (token != NULL)
+		disk_cache_release(token);
 	return 0;
 }
 
@@ -1306,6 +1314,7 @@ policy_enable(struct mount *mount)
 {
 	struct writeback_mount_policy *policy;
 	struct writeback_worker *worker;
+	struct disk *token;
 	struct disk *leaf;
 	unsigned index;
 	unsigned long irq;
@@ -1330,7 +1339,7 @@ policy_enable(struct mount *mount)
 
 	if (policy == NULL)
 		return ENOSPC;
-	error = writeback_domain_acquire(mount->m_disk, &leaf);
+	error = writeback_domain_acquire(mount->m_disk, &token, &leaf);
 	if (error != 0)
 		return error;
 
@@ -1352,15 +1361,16 @@ policy_enable(struct mount *mount)
 		}
 
 		if (worker == NULL) {
-			disk_cache_release(leaf);
+			disk_cache_release(token);
 			return EAGAIN;
 		}
 
 		irq = spin_lock_irqsave(&policy_registry);
 		worker->leaf = leaf;
+		worker->token = token;
 		spin_unlock_irqrestore(&policy_registry, irq);
 	} else {
-		disk_cache_release(leaf);
+		disk_cache_release(token);
 		if (worker->unmount != NULL)
 			return EBUSY;
 	}

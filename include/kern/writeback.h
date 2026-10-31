@@ -34,8 +34,11 @@ struct writeback_budget_stats {
 	unsigned devices;
 };
 
-/* Returns one physical cache token; release with disk_cache_release. */
-int writeback_domain_acquire(struct disk *disk, struct disk **leaf);
+/*
+ * Admits the physical domain under a mounted disk: the admission's token
+ * (release it with disk_cache_release) and the physical device it is on.
+ */
+int writeback_domain_acquire(struct disk *disk, struct disk **token, struct disk **leaf);
 
 struct writeback_policy_stats {
 	uint64_t memory_bytes;

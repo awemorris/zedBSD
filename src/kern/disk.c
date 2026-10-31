@@ -166,7 +166,10 @@ static int disk_admin_conflict_locked(struct disk *, uint64_t, uint64_t, int);
 static int disk_media_idle_locked(struct disk *parent, unsigned extra);
 static int disk_reload_replace_locked(struct disk *parent, struct disk **new_disks, unsigned count);
 static int disk_cache_enter(struct disk *disk, struct disk **leaf_out);
-static void disk_cache_leave(struct disk *leaf);
+static void disk_cache_leave(struct disk *disk);
+static void bio_inflight_link(struct disk *leaf, struct bio *bio);
+static void bio_inflight_unlink(struct disk *leaf, struct bio *bio);
+static int disk_inflight_overlaps(const struct disk *leaf, uint64_t first, uint64_t count);
 static int disk_transfer_pages_owned(struct disk *disk, enum bio_op op, uint64_t block, uint32_t count, const uint64_t *pages, uint32_t page_count, const struct backing_claim *claim, uint32_t *completed, const struct io_context *context);
 static int disk_cached_transfer(struct disk *disk, uint64_t block, uint32_t count, void *data, int write, struct buf_view *view, const struct io_context *context);
 static int sector_whole_blocks(struct disk *disk, uint64_t block, uint32_t count, void *data, int write, int direct, const struct io_context *context);
@@ -252,9 +255,19 @@ disk_admin_idle(struct disk *target)
 		return EINVAL;
 	if (target == leaf)
 		return disk_reload_idle(target);
-	/* Initial quiescence is conservatively leaf-wide; later disjoint I/O is allowed. */
-	if (leaf->d_inflight != 0 || leaf->d_cache_users != 0)
+
+	/*
+	 * A transfer in flight on the target's blocks refuses it; a sibling's
+	 * transfers elsewhere on the device do not.
+	 */
+	if (disk_inflight_overlaps(leaf, first, target->d_block_count))
 		return EBUSY;
+
+	/*
+	 * Every disk over the target's blocks (the target, the physical device
+	 * and any alias) must have no other opener and no cache user admitted
+	 * through it; a sibling's cache users cannot reach the target.
+	 */
 	for (other = disk_head; other != NULL; other = other->d_next) {
 		if (disk_admin_span(other, 0, other->d_block_count, &other_leaf, &other_first) != 0)
 			return EBUSY;
@@ -262,7 +275,8 @@ disk_admin_idle(struct disk *target)
 		    other_first >= first + target->d_block_count)
 			continue;
 		if (other->d_open_count != (other == target ? 1U : 0U) ||
-		    other->d_opening != 0 || other->d_closing != 0)
+		    other->d_opening != 0 || other->d_closing != 0 ||
+		    other->d_cache_entries != 0)
 			return EBUSY;
 		/* The physical parent's references include its nonoverlapping children. */
 		if (other != target && other != leaf && refcount_load(&other->d_refs) != 1)
@@ -1961,6 +1975,7 @@ bio_submit(
 		disk_write_retire(leaf, bio, error, 0);
 		enabled = disk_lock_stamped(leaf, &now);
 		leaf->d_inflight--;
+		bio_inflight_unlink(leaf, bio);
 		disk_stats_end(leaf, bio, 0, 0, now);
 		(void)refcount_put_not_last(&leaf->d_refs);
 		bio->b_state = BIO_NEW;
@@ -2048,6 +2063,8 @@ bio_complete(
 		leaf->d_inflight--;
 		disk_stats_end(leaf, bio, transferred, 1, now);
 	}
+	if (leaf != NULL)
+		bio_inflight_unlink(leaf, bio);
 
 	/* The completion's pin on the leaf is dropped. */
 	if (leaf != NULL)
@@ -2226,7 +2243,7 @@ bio_flush(
 			error = waitq_sleep(&leaf->d_waitq, &leaf->d_lock, sequence, 0, 0);
 			if (error != 0 && error != EAGAIN) {
 				spin_unlock_irqrestore(&leaf->d_lock, irq);
-				disk_cache_leave(leaf);
+				disk_cache_leave(disk);
 				return error;
 			}
 		}
@@ -2240,7 +2257,7 @@ bio_flush(
 		leaf->d_write_stable >= target;
 	if (reusable) {
 		spin_unlock_irqrestore(&leaf->d_lock, irq);
-		disk_cache_leave(leaf);
+		disk_cache_leave(disk);
 		return 0;
 	}
 
@@ -2273,7 +2290,7 @@ bio_flush(
 
 	spin_unlock_irqrestore(&leaf->d_lock, irq);
 
-	disk_cache_leave(leaf);
+	disk_cache_leave(disk);
 
 	/* Preserves the physical barrier result for upper dirty owners. */
 	if (error != 0)
@@ -2533,7 +2550,7 @@ disk_view_matches(
 		return 0;
 
 	matches = buf_view_matches(view);
-	disk_cache_leave(leaf);
+	disk_cache_leave(disk);
 
 	/* Reports a valid copy at this observation point. */
 	return matches;
@@ -2697,21 +2714,23 @@ disk_write_filesystem_context(
 int
 disk_cache_acquire(
 	struct disk *disk,
-	struct disk **leaf)
+	struct disk **token)
 {
+	struct disk *leaf;
 	int error;
 
 	/* Requires an output token before taking the device reference. */
-	if (leaf == NULL)
+	if (token == NULL)
 		return EINVAL;
-	*leaf = NULL;
+	*token = NULL;
 
-	/* Reports the acquired token or the lifecycle refusal. */
-	error = disk_cache_enter(disk, leaf);
+	/* Admits the access through the disk it names, which is the token. */
+	error = disk_cache_enter(disk, &leaf);
 	if (error != 0)
 		return error;
 
-	/* Succeeded. */
+	/* Succeeded: the token is the admitted disk. */
+	*token = disk;
 	return 0;
 }
 
@@ -2720,12 +2739,34 @@ disk_cache_acquire(
  */
 void
 disk_cache_release(
-	struct disk *leaf)
+	struct disk *token)
 {
 	/* Ignores callers whose filesystem has no block backing. */
-	if (leaf == NULL)
+	if (token == NULL)
 		return;
-	disk_cache_leave(leaf);
+
+	/* Ends the admission made through the token's disk. */
+	disk_cache_leave(token);
+}
+
+/*
+ * Reports the physical device under an admission token, which stays the
+ * same while the admission lasts.
+ */
+struct disk *
+disk_cache_leaf(
+	struct disk *token)
+{
+	struct disk *leaf;
+	bool enabled;
+
+	/* Follows the token's partition stack under the registry lock. */
+	enabled = disk_lock();
+	leaf = disk_leaf(token);
+	disk_unlock(enabled);
+
+	/* Succeeded: the physical device. */
+	return leaf;
 }
 
 int
@@ -3552,6 +3593,7 @@ bio_admit(
 	bio->b_error = 0;
 	bio->b_state = BIO_SUBMITTED;
 	leaf->d_inflight++;
+	bio_inflight_link(leaf, bio);
 	disk_stats_start(leaf, bio, now);
 	refcount_get(&leaf->d_refs);
 	disk_unlock(enabled);
@@ -3723,6 +3765,72 @@ disk_reload_replace_locked(
 	return 0;
 }
 
+/* Puts an admitted request among its physical device's requests in flight. */
+static void
+bio_inflight_link(
+	struct disk *leaf,
+	struct bio *bio)
+{
+	/* Pushes the request at the head of the device's list. */
+	bio->b_inflight_previous = NULL;
+	bio->b_inflight_next = leaf->d_inflight_head;
+	if (leaf->d_inflight_head != NULL)
+		leaf->d_inflight_head->b_inflight_previous = bio;
+	leaf->d_inflight_head = bio;
+	bio->b_inflight_listed = 1;
+}
+
+/* Takes a request that has left the device off its list, once. */
+static void
+bio_inflight_unlink(
+	struct disk *leaf,
+	struct bio *bio)
+{
+	/* A request that was never listed, or is off already, has nothing to undo. */
+	if (!bio->b_inflight_listed)
+		return;
+
+	/* Joins its neighbours around it. */
+	if (bio->b_inflight_previous != NULL)
+		bio->b_inflight_previous->b_inflight_next = bio->b_inflight_next;
+	else
+		leaf->d_inflight_head = bio->b_inflight_next;
+	if (bio->b_inflight_next != NULL)
+		bio->b_inflight_next->b_inflight_previous = bio->b_inflight_previous;
+	bio->b_inflight_previous = NULL;
+	bio->b_inflight_next = NULL;
+	bio->b_inflight_listed = 0;
+}
+
+/*
+ * Tells whether a transfer in flight on a physical device touches the
+ * device's blocks first to first + count - 1.  A flush moves no blocks of
+ * any range.  The caller holds the registry lock.
+ */
+static int
+disk_inflight_overlaps(
+	const struct disk *leaf,
+	uint64_t first,
+	uint64_t count)
+{
+	const struct bio *bio;
+	uint64_t start;
+	uint64_t end;
+
+	/* Looks at each request in flight on the device. */
+	for (bio = leaf->d_inflight_head; bio != NULL; bio = bio->b_inflight_next) {
+		if (bio->b_op == BIO_FLUSH)
+			continue;
+		start = bio->b_mapped_block;
+		end = start + bio->b_block_count;
+		if (start < first + count && first < end)
+			return 1;
+	}
+
+	/* No transfer reaches the range. */
+	return 0;
+}
+
 /* Keeps cache hits under the same reload admission boundary as physical I/O. */
 /* Admits a cached access under the disk's reload and lifetime barriers. */
 static int
@@ -3760,9 +3868,16 @@ disk_cache_enter(
 		return EBUSY;
 	}
 
-	/* Admits the caller as a cache user of the physical device. */
+	/*
+	 * Admits the caller as a cache user of the physical device and counts
+	 * the admission on the disk it came through, which it pins as well, so
+	 * that a reservation sees which range the user can reach.
+	 */
 	leaf->d_cache_users++;
 	refcount_get(&leaf->d_refs);
+	disk->d_cache_entries++;
+	if (disk != leaf)
+		refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
 	*leaf_out = leaf;
 
@@ -3770,16 +3885,24 @@ disk_cache_enter(
 	return 0;
 }
 
-/* Releases one cached-access admission. */
+/* Releases one cached-access admission made through disk. */
 static void
 disk_cache_leave(
-	struct disk *leaf)
+	struct disk *disk)
 {
+	struct disk *leaf;
 	bool enabled;
 
+	/* Takes the admission off the disk and its physical device. */
 	enabled = disk_lock();
+
+	leaf = disk_leaf(disk);
+	disk->d_cache_entries--;
+	if (disk != leaf)
+		(void)refcount_put_not_last(&disk->d_refs);
 	leaf->d_cache_users--;
 	(void)refcount_put_not_last(&leaf->d_refs);
+
 	disk_unlock(enabled);
 }
 
@@ -3809,7 +3932,7 @@ disk_cached_transfer(
 		error = buf_read_view(disk, block, count, data, view);
 	else
 		error = buf_read(disk, block, count, data);
-	disk_cache_leave(leaf);
+	disk_cache_leave(disk);
 
 	/* Preserves the cache operation's result. */
 	if (error != 0)
@@ -4314,18 +4437,19 @@ disk_transfer_pages_claimed(
 int
 disk_direct_begin(
 	struct disk *disk,
-	struct disk **leaf)
+	struct disk **token)
 {
-	/* Admits the caller as a cache user of the physical device. */
-	return disk_cache_enter(disk, leaf);
+	/* Admits the caller as a cache user, the token being the admitted disk. */
+	return disk_cache_acquire(disk, token);
 }
 
 /* Releases an admission disk_direct_begin() gave. */
 void
 disk_direct_end(
-	struct disk *leaf)
+	struct disk *token)
 {
-	disk_cache_leave(leaf);
+	/* Ends the admission made through the token's disk. */
+	disk_cache_leave(token);
 }
 
 /* Transfers whole physical pages, guarding a write under the caller's claim. */
