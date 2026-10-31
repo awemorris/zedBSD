@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 02:19（Q1）
+最終更新: 2026-11-01 02:28（Q1）
 
 ## 担当（P1〜P8）
 
@@ -16,7 +16,7 @@
 | P5 | [WS336](ws336/ws.md) | 自前の sshd・ssh（OpenSSH 互換、ed25519・鍵の交換 1 つ） | p001 の設計（q1791、標準廉価実装手順）。WS335 の暗号の口と揃える | 設計・design-reviewer・問いまで |
 | P6 | [WS335](ws335/ws.md) | libssl-compat（OpenSSL 互換の自前の TLS） | p001 の設計（q1789、標準廉価実装手順）: 範囲・module・header・試験の道具 | 設計・design-reviewer・問いまで |
 | P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | q1790: 標準廉価実装手順（決定 22）の設計の段: module・header・骨格・試験の道具・実装の phase.md、build の土台 | その後 Sonnet の実装の担当を Q1 が起動 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 12 回目（q1727-i12）: subgrid の残り・multicol・grid の baseline など | 今 3,472 のうち 3,005（86.55%）、Acid3 100/100・Acid2 100%。11 回目は animation の補間・dynamic import()・@property など（+30、後退 0） |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 13 回目（q1727-i13）: golden の試験の整理 → 負の向きの scroll・直交の subgrid など | 今 3,472 のうち 3,039（87.53%）、Acid3 100/100・Acid2 100%。12 回目は subgrid・grid の絶対配置など（+34、後退 0） |
 
 実装の担当（Sonnet・Opus の単発）: 今は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
 

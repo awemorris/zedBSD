@@ -11,7 +11,7 @@
 | P5 | kernel-and-driver-designer | ws336 p001 設計 (q1791-i01) | `/home/awe/zedBSD-worktrees/p5-ws336` / `agent/p5-ws336` | in-progress（2026-11-01 01:56 起動） | — |
 | P6 | kernel-and-driver-designer | ws335 p001 設計 (q1789-i01) | `/home/awe/zedBSD-worktrees/p6-ws335` / `agent/p6-ws335` | in-progress（2026-11-01 01:20 起動） | — |
 | P3 | phase-runner-high | ws291 p024 RTX 最適化 (q1785-i02) | `/home/awe/zedBSD-worktrees/p3-ws291wsi` / `agent/p3-ws291wsi` | 返却（2026-11-01 02:19） | 6dd842057（merge 1e86f4502） |
-| P8 | phase-runner-low | ws074 p260 自走 (q1727-i12) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-11-01 00:16 起動し直し） | 5dadd7966（merge fd4449c07） |
+| P8 | phase-runner-low | ws074 p260 自走 (q1727-i13) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-11-01 02:28 起動し直し） | 4e24c4121（merge cca3023fa） |
 | P7 | phase-runner-high | ws334 実装 (q1790-i01) | `/home/awe/zedBSD-worktrees/p7-ws334` / `agent/p7-ws334` | in-progress（2026-11-01 01:26 起動） | 1deb49bff（merge b2a7e8454） |
 
 - 同時に動かす数は 6（2026-10-29 ユーザーの P1〜P6 の指示）。VF2（主）と 5330（従）は P3、10.0.10.3 は空き（2026-10-30 09:13 P5 返却）。
