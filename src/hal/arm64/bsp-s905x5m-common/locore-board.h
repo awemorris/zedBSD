@@ -53,9 +53,11 @@
 arm64_boot_copy_rest:
 	/*
 	 * Copies the whole loaded image, the stub's bytes again unchanged.  Its
-	 * length is the header's image size, the raw file the bootloader read.
+	 * length is the image up to the BSS, which covers the raw file the
+	 * bootloader read, not the header's image size, which also counts the
+	 * BSS that was never loaded.
 	 */
-	ldr x6, [x1, #16]
+	ldr x6, =__arm64_image_file_size
 	mov x4, x1
 	mov x5, x2
 2:	ldp x7, x8, [x4], #16

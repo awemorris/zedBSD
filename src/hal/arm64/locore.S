@@ -9,8 +9,12 @@ _start:
 	b arm64_boot
 	nop
 	.quad 0x0000000000080000
-	/* Patched to the final raw-file length by check-arm64-vmunix.py. */
-	.quad 0
+	/*
+	 * The image size, from the linker script: the image once it runs, BSS
+	 * included, the range a bootloader must leave free (the Linux arm64
+	 * boot protocol's image_size).
+	 */
+	.quad __arm64_image_size
 	.quad 0
 	.quad 0
 	.quad 0
