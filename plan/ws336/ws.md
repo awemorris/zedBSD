@@ -35,7 +35,7 @@
 | ID | 目的 | 状態 | 依存 | WS335 の待ち |
 | --- | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計（標準廉価実装手順 §4）: SSH の protocol の範囲（RFC 4251〜4254・8709 ほか）、鍵の交換の 1 つ、暗号の組、sshd と ssh の機能の範囲、module・header・骨格・試験の道具、実装の Phase の表、WS335 との待ち合わせ、design-reviewer、問い | cleared（2026-11-01 04:54 Q1、main 451dd0f9e。基点 d4ab182d2、TODO の一覧 T1〜T31） | — | — |
-| [p002](phase002/phase.md) | ssh-common・ssh-buf | in-progress（2026-11-01 04:54 q1809、Sonnet） | p001 | — |
+| [p002](phase002/phase.md) | ssh-common・ssh-buf | 実装済み・試験 PASS（2026-11-01 05:10、Sonnet 5.5。cleared は Q1） | p001 | — |
 | [p003](phase003/phase.md) | ssh-crypto（libcrypto-compat の呼び出し） | planned | p002 | WS335 header（解けた: 基点 60760d2a0 が main にある） |
 | [p004](phase004/phase.md) | ssh-cipher・ssh-packet | planned | p003 | p003 経由 |
 | [p005](phase005/phase.md) | ssh-key | planned | p003 | p003 経由 |

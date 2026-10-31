@@ -2,7 +2,7 @@
 
 # ws336-p002: ssh-common・ssh-buf（約束・byte 順・name-list・base64、RFC 4251 の型）
 
-Status: in-progress（2026-11-01 04:54 q1809、Sonnet）
+Status: 実装済み・試験 PASS（2026-11-01 05:10、Sonnet 5.5。cleared は Q1 が決める）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p001
@@ -59,4 +59,54 @@ WS335 の待ち: 無し
 
 ## 結果
 
-（未着手）
+実施: 2026-11-01（host の `date`）。worktree `s-ws336-p002`、基点 main 71b604808。
+
+### 作った物
+
+- `userland/base/ssh/ssh-common.c`（byte 順、name-list の確認と検索、base64 の符号化・復号）
+- `userland/base/ssh/ssh-buf.c`（RFC 4251 の型を書く buffer と読む reader）
+- `plan/ws336/tests/unit/test-common.c`、`plan/ws336/tests/unit/test-buf.c`
+
+### 実行した command と最後の行
+
+- `sh plan/ws336/tests/run-unit.sh common buf`: `test-buf: PASS (323 checks)`、`test-common: PASS (2316 checks)`、`run-unit: PASS`
+- `sh plan/ws336/tests/run-unit.sh all`: `test-buf: PASS (323 checks)`、`test-common: PASS (2316 checks)`、`test-tools: PASS (13 checks)`、`run-unit: PASS`
+- `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh`: `check-skeleton: PASS`
+- `git diff --check`: 出力なし（成功）
+- 単体試験は run-unit.sh の設定（`-std=c89 -O1 -Wall -Wextra -Werror`、ASan・UBSan、leak 検出あり）で実行。cc と clang の警告 0 は check-skeleton の中で確認。
+
+### 試験の期待値の出所
+
+RFC 4648 §10 の vector（"" から "foobar"）、Table 1 の alphabet（0 から 63 の 6 bit 値を試験の中の別の packer で 48 byte に詰め、alphabet の文字列と比べる）、RFC 4251 §5 の例（uint32 0x29b7f4aa、"testing"、"zlib,none"）、手の計算（unused bit の mask、境界の値）。他の実装の出力は使っていない。`ssh_buf` の書きは `wire.h` で組んだ bytes と比べた。
+
+### 壊して確かめた物（git の外、元に戻して `cmp` で一致を確認）
+
+30 通りの変異を試験が捕まえるか確かめた（name の上限 +1、name-list の上限 +1、許す byte の範囲の両端、byte 順の入れ替え、末尾の comma の確認を外す、unused bit の mask を 3 通り、長さが 4 の倍数の確認を外す、`=` を 1 つ減らす、prefix 一致、符号化の capacity の比較、復号の capacity の比較、encoded_size の上限、reserve の limit の比較、string の長さの比較、cstring の capacity の比較、NUL の確認を外す、name-list の確認を外す、finish の残りの確認を外す、bool の正規化、成長の copy の長さ、consume の move、string の +4、u32 の残りの確認、get_bytes の残りの確認、成長の倍増と limit の切り詰め）。
+最初の実行で 2 件の見逃し: (1) 復号の「`=` が 1 つの時の unused bit」の mask を 0x03 から 0x01 にしても通った。bit 1 だけが立つ入力（"AAC=" など）が無かったので試験を足し、3 通りの mask の変異が全て FAIL することを確かめた。(2) `ssh_buf_consume` の `size >= buf->size` を `>` にする変異は、size が等しい時に memmove 0 byte と wipe 0 byte になるだけで、動作が同じ（等価な変異）。
+最終の実装は変異の script が `cmp` で元の file と一致することを確認済み。
+
+### header が黙っていて自分で決めた点
+
+1. `ssh_base64_encode` の capacity は、pad が 0 でも padded の長さ + 1 で確かめる（header の文言どおり）。pad 0 の出力は短くなる。size が大きすぎて `ssh_base64_encoded_size` が 0 を返す時は ENOBUFS。`in` が NULL で size > 0 は EINVAL、`out` が NULL は ENOBUFS（header に無い値は引数の誤りの EINVAL）。
+2. `ssh_base64_decode` は入力全体を確かめてから capacity を比べるので、不正な入力は capacity に関わらず EINVAL（ENOBUFS より優先）。`=` は最後の 4 文字の末尾にだけ許し、途中の `=` や `====`、"Z===" は EINVAL。size 0 は成功で 0 byte（`out` が NULL でもよい）。`in` が NULL で size > 0 は EINVAL。`*out_size` は最初に 0 にする。
+3. `ssh_namelist_check`: size > SSH_NAMELIST_MAX を先に判定して EMSGSIZE（中身が不正でも）。size > 0 で list が NULL は EINVAL。
+4. `ssh_namelist_contains`: name か list が NULL、name が空は 0。
+5. `ssh_buf_init`: limit が 0 の扱いは決めていない（header は 1 以上）。最初の capacity は 64 で、limit を超えない。以後は倍にし、limit で切る。成長は secret の有無に関わらず malloc・copy・（secret なら capacity 全体を wipe）・free の 1 本の経路。
+6. `ssh_buf_free` は capacity 全体を wipe、`ssh_buf_reset` は使った分だけ wipe（header どおり）。`ssh_buf_consume` は移した後の末尾の古い写しも wipe し、エラーが記録されていても動く（書きではないため）。
+7. 書きの引数の誤り: `data` が NULL で size > 0 の put_bytes・put_string と、`text` が NULL の put_cstring は EINVAL を記録して何も書かない（記録済みの誤りは上書きしない）。put_string は長さと中身の分を先にまとめて reserve するので、入らない時に長さだけが残ることはない。
+8. `ssh_buf_put_space`: size 0 でも成功時は NULL でない pointer を返す（memory が無ければ 1 byte 分を確保する）。NULL は失敗だけ。
+9. `ssh_reader_init`: data が NULL で size > 0 は EINVAL を記録し、size を 0 にする。
+10. 失敗した読み（u8・u32・u64・get_bytes・string・cstring・namelist）は offset を動かさない（string・cstring・namelist は始まりに戻す）。`ssh_reader_get_bytes` は size 0 で成功し、data が NULL の reader では NULL を返す（誤りではない）。
+11. `ssh_reader_get_cstring`: capacity 0 は NUL も置けないので EINVAL を記録し、何も書かない。NUL を含む string と capacity 不足が両方の時は EINVAL（NUL を先に判定）。
+12. `ssh_buf_put_bytes` の `data` が自分の buffer の中を指す場合（成長で古い memory が解放される）は保証しない。呼び出し側が避ける。
+
+### 契約への注意（header の変更案ではない）
+
+- `ssh_reader_get_bool` の戻りは `int` で、成功は 0 か 1、失敗時は 0 を返す（sticky error は `ssh_reader_error` で見る）。骨格の `return ENOSYS` は実装で置き換えた。
+
+### 未実施・後に確かめる物
+
+- secret の buffer の古い memory が実際に消えることは確かめていない。`ssh_wipe` は p003 まで骨格（何もしない）で、試験は消去を調べない。p003 の後に p021 で確かめる。試験が確かめたのは、成長・reset・consume・free の後で内容が正しく写ること。
+- ENOMEM（malloc の失敗）の経路は host の試験で起こしていない（allocator を差し替えていない）。code は new memory の確保に失敗したら ENOMEM を記録して古い buffer を保つ。
+- zedBSD 向けの交差 build は check-skeleton の項目 7（sysroot がある時だけ実行）の結果に従う。出力が PASS のみで、skip の注記は出なかった。
+- QEMU・実機の試験は無し（この Phase は host の単体試験だけ）。
