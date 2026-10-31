@@ -5626,6 +5626,91 @@ cascade_animation(
 		else
 			style->filter_count = count;
 	}
+	/* grid-template-columns and -rows: tracks of the same kind blend, the others change at the halfway point. */
+	for (pass = 0; pass < 2; pass++) {
+		const struct css_track *from_tracks;
+		const struct css_track *to_tracks;
+		struct css_track *own_tracks;
+		struct css_track from_copy[CSS_TRACKS];
+		struct css_track to_copy[CSS_TRACKS];
+		int own_count;
+		int from_tracks_count;
+		int to_tracks_count;
+		int track;
+
+		property = pass == 0 ? CSS_PROP_GRID_TEMPLATE_COLUMNS : CSS_PROP_GRID_TEMPLATE_ROWS;
+		own_tracks = pass == 0 ? style->columns : style->rows;
+		own_count = pass == 0 ? style->column_count : style->row_count;
+		from_offset = 0.0f;
+		to_offset = 1.0f;
+		found_from = 0;
+		found_to = 0;
+		from_tracks_count = own_count;
+		to_tracks_count = own_count;
+		memcpy(from_copy, own_tracks, sizeof(from_copy));
+		memcpy(to_copy, own_tracks, sizeof(to_copy));
+		for (index = 0; index < rule->frame_count; index++) {
+			frame = &rule->frames[index];
+			for (declaration = 0; declaration < frame->declaration_count; declaration++) {
+				if (frame->declarations[declaration].property != property)
+					continue;
+				*scratch = *style;
+				cascade_apply(engine, scratch, parent, &frame->declarations[declaration]);
+				from_tracks = pass == 0 ? scratch->columns : scratch->rows;
+				to_tracks = from_tracks;
+				if (frame->offset <= progress && (!found_from || frame->offset >= from_offset)) {
+					from_offset = frame->offset;
+					found_from = 1;
+					from_tracks_count = pass == 0 ? scratch->column_count : scratch->row_count;
+					memcpy(from_copy, from_tracks, sizeof(from_copy));
+				}
+				if (frame->offset >= progress && (!found_to || frame->offset < to_offset)) {
+					to_offset = frame->offset;
+					found_to = 1;
+					to_tracks_count = pass == 0 ? scratch->column_count : scratch->row_count;
+					memcpy(to_copy, to_tracks, sizeof(to_copy));
+				}
+			}
+		}
+		if (!found_from && !found_to)
+			continue;
+		share = to_offset > from_offset ? (progress - from_offset) / (to_offset - from_offset) : 0.0f;
+		if (share < 0.0f)
+			share = 0.0f;
+		if (share > 1.0f)
+			share = 1.0f;
+
+		/* Lists of different lengths do not blend: the value changes at the halfway point. */
+		if (from_tracks_count != to_tracks_count) {
+			memcpy(own_tracks, share < 0.5f ? from_copy : to_copy, sizeof(from_copy));
+			if (pass == 0)
+				style->column_count = share < 0.5f ? from_tracks_count : to_tracks_count;
+			else
+				style->row_count = share < 0.5f ? from_tracks_count : to_tracks_count;
+			continue;
+		}
+		memcpy(own_tracks, from_copy, sizeof(from_copy));
+		if (pass == 0)
+			style->column_count = from_tracks_count;
+		else
+			style->row_count = from_tracks_count;
+		for (track = 0; track < from_tracks_count && track < CSS_TRACKS; track++) {
+			if (from_copy[track].kind == to_copy[track].kind && from_copy[track].kind == CSS_TRACK_LENGTH &&
+			    from_copy[track].size.unit == CSS_UNIT_PX && to_copy[track].size.unit == CSS_UNIT_PX &&
+			    from_copy[track].minimum_rule == to_copy[track].minimum_rule &&
+			    from_copy[track].maximum_rule == to_copy[track].maximum_rule) {
+				own_tracks[track].size.value = from_copy[track].size.value +
+				    (to_copy[track].size.value - from_copy[track].size.value) * share;
+				if (from_copy[track].minimum.unit == CSS_UNIT_PX && to_copy[track].minimum.unit == CSS_UNIT_PX)
+					own_tracks[track].minimum.value = from_copy[track].minimum.value +
+					    (to_copy[track].minimum.value - from_copy[track].minimum.value) * share;
+			} else if (from_copy[track].kind == to_copy[track].kind && from_copy[track].kind == CSS_TRACK_FR) {
+				own_tracks[track].fr = from_copy[track].fr + (to_copy[track].fr - from_copy[track].fr) * share;
+			} else if (share >= 0.5f) {
+				own_tracks[track] = to_copy[track];
+			}
+		}
+	}
 	free(scratch);
 }
 
