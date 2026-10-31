@@ -963,6 +963,32 @@ flex_base_size(
 		}
 	}
 
+	/* An intrinsic keyword basis of a row: the narrowest, the widest or the fit-content width of the item's content. */
+	if (item->base < 0 && row && !child->replaced &&
+	    (basis->unit == CSS_UNIT_MIN_CONTENT || basis->unit == CSS_UNIT_MAX_CONTENT || basis->unit == CSS_UNIT_FIT_CONTENT) &&
+	    child->style.writing_mode == box->style.writing_mode) {
+		layout_unit least;
+		layout_unit most;
+
+		error = flex_min_content(tree, child, &least);
+		if (error != 0)
+			return error;
+		most = least;
+		if (basis->unit != CSS_UNIT_MIN_CONTENT) {
+			error = flex_content_basis(tree, box, child, row, &most);
+			if (error != 0)
+				return error;
+		}
+		item->base = basis->unit == CSS_UNIT_MIN_CONTENT ? least : most;
+		if (basis->unit == CSS_UNIT_FIT_CONTENT) {
+			resolved = box->width - item->frame - item->margin_start - item->margin_end;
+			if (resolved < least)
+				resolved = least;
+			if (item->base > resolved)
+				item->base = resolved;
+		}
+	}
+
 	/* An explicit content basis ignores the non-replaced preferred main size. */
 	if (item->base < 0 &&
 	    (basis->unit == CSS_UNIT_CONTENT || (basis == &child->style.flex_basis && basis->unit == CSS_UNIT_PERCENT)) &&
