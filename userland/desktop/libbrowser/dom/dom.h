@@ -368,6 +368,8 @@ struct dom_element {
 	struct dom_node *content;
 	/* The element's shadow root (a dom_shadow_root), or NULL. */
 	struct dom_node *shadow_root;
+	/* A style element made by new CSSStyleSheet() (it has a sheet while detached). */
+	int constructed_sheet;
 	struct dom_control *control;
 	/* Inline declaration precision survives canonical attribute serialization until an external style mutation. */
 	struct vm_string *inline_style_source;
@@ -435,6 +437,8 @@ struct dom_shadow_root {
 	int slot_manual;
 	/* The binding's SameObject styleSheets list. */
 	struct vm_object *style_sheets;
+	/* A fragment whose children are the style elements of the constructed sheets adopted by the root. */
+	struct dom_node *adopted;
 };
 
 /*
@@ -491,6 +495,8 @@ struct dom_document {
 	struct vm_object *images_collection;
 	/* The current native inline stylesheet query retains its SameObject wrapper. */
 	struct vm_object *style_sheets;
+	/* A fragment of the style elements of the constructed sheets the document adopted. */
+	struct dom_node *adopted;
 	/* Initial FontFaceSet.ready and its SameObject wrapper survive GC with this Document. */
 	struct vm_object *font_set;
 	struct vm_cell *font_ready;
@@ -556,6 +562,8 @@ struct dom_element *dom_slot_of(const struct dom_node *node);
 const struct vm_string *dom_slot_name(const struct dom_node *node);
 struct dom_node *dom_flat_parent(const struct dom_node *node);
 int dom_is_connected(const struct dom_node *node);
+struct dom_node *dom_adopted_sheets(struct dom_node *root, int create);
+void dom_adopted_set(struct dom_node *root, struct dom_node **nodes, size_t count);
 int dom_assigned_to(const struct dom_element *slot, const struct dom_node *node);
 int dom_adopt(struct dom_document *document, struct dom_node *node);
 void dom_append_child(struct dom_node *parent, struct dom_node *child);

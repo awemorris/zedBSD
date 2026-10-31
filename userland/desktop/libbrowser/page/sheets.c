@@ -64,6 +64,7 @@ struct sheets_resolving {
 	const char *location;
 };
 
+static int sheets_add_adopted(struct page *page, struct dom_node *root);
 static int sheets_walk(struct page *page, struct dom_node *node, int depth);
 static int sheets_add_style(struct page *page, struct dom_element *element);
 static int sheets_add_link(struct page *page, struct dom_element *element);
@@ -117,6 +118,11 @@ page_sheets_add(
 	if (error != 0)
 		return error;
 
+	/* The constructed sheets the document adopted come after them. */
+	error = sheets_add_adopted(page, &page->document->node);
+	if (error != 0)
+		return error;
+
 	/* The <style> texts no element has any more. */
 	sheets_drop_unused(page);
 
@@ -165,6 +171,28 @@ page_sheets_release(
 	/* The table itself. */
 	wb_vector_release(&page->sheets);
 	wb_vector_release(&page->link_events);
+}
+
+/* Adds the sheets of the constructed style sheets a document or shadow root adopted, in the tree they belong to. */
+static int
+sheets_add_adopted(
+	struct page *page,
+	struct dom_node *root)
+{
+	struct dom_node *holder;
+	struct dom_node *child;
+	int error;
+
+	holder = dom_adopted_sheets(root, 0);
+	if (holder == NULL)
+		return 0;
+	for (child = holder->first_child; child != NULL; child = child->next) {
+		error = sheets_add_style(page, (struct dom_element *)child);
+		if (error != 0)
+			return error;
+		css_engine_set_scope(page->css, dom_shadow_of(root) != NULL ? root : NULL);
+	}
+	return 0;
 }
 
 /* Adds the sheets of a node and its descendants in tree order. */
@@ -216,6 +244,9 @@ sheets_walk(
 			if (error != 0)
 				return error;
 		}
+		error = sheets_add_adopted(page, ((struct dom_element *)node)->shadow_root);
+		if (error != 0)
+			return error;
 	}
 
 	/* Succeeded: the subtree's sheets are added. */

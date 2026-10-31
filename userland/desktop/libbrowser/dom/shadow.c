@@ -168,3 +168,84 @@ dom_is_connected(
 	}
 	return 0;
 }
+
+/*
+ * Reports the fragment holding the style elements of the constructed sheets a document or shadow root
+ * adopted (made when asked to), or NULL.
+ */
+struct dom_node *
+dom_adopted_sheets(
+	struct dom_node *root,
+	int create)
+{
+	struct dom_shadow_root *shadow;
+	struct dom_node **slot;
+
+	shadow = dom_shadow_of(root);
+	if (shadow != NULL)
+		slot = &shadow->adopted;
+	else if (root->type == DOM_DOCUMENT)
+		slot = &((struct dom_document *)root)->adopted;
+	else
+		return NULL;
+	if (*slot == NULL && create)
+		*slot = dom_fragment_create(root->document);
+	return *slot;
+}
+
+/* Takes a node out of a holder's child list without any of the notifications dom_remove makes. */
+static void
+shadow_unlink(
+	struct dom_node *node)
+{
+	struct dom_node *parent;
+
+	parent = node->parent;
+	if (node->previous != NULL)
+		node->previous->next = node->next;
+	else
+		parent->first_child = node->next;
+	if (node->next != NULL)
+		node->next->previous = node->previous;
+	else
+		parent->last_child = node->previous;
+	node->parent = NULL;
+	node->previous = NULL;
+	node->next = NULL;
+}
+
+/*
+ * Sets the style elements of the constructed sheets a document or shadow root adopts.  They are linked
+ * under the root's holder fragment quietly: moving a sheet's holder must not retire the sheet.
+ */
+void
+dom_adopted_set(
+	struct dom_node *root,
+	struct dom_node **nodes,
+	size_t count)
+{
+	struct dom_node *holder;
+	size_t index;
+
+	holder = dom_adopted_sheets(root, 1);
+	if (holder == NULL)
+		return;
+	while (holder->first_child != NULL)
+		shadow_unlink(holder->first_child);
+	for (index = 0; index < count; index++) {
+		/* A node in the real tree stays there. */
+		if (nodes[index]->parent != NULL) {
+			if (nodes[index]->parent->type != DOM_DOCUMENT_FRAGMENT || dom_shadow_of(nodes[index]->parent) != NULL)
+				continue;
+			shadow_unlink(nodes[index]);
+		}
+		nodes[index]->parent = holder;
+		nodes[index]->previous = holder->last_child;
+		if (holder->last_child != NULL)
+			holder->last_child->next = nodes[index];
+		else
+			holder->first_child = nodes[index];
+		holder->last_child = nodes[index];
+	}
+	root->document->generation++;
+}

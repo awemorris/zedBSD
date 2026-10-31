@@ -44,7 +44,7 @@ bind_style_sheet_get(
 	same = vm_string_equal_ascii(element->local_name, "style");
 	if (!same)
 		return 0;
-	connected = dom_is_connected(&element->node);
+	connected = dom_is_connected(&element->node) || element->constructed_sheet;
 	if (!connected)
 		return 0;
 
@@ -165,7 +165,7 @@ bind_style_sheet_changed(
 		return;
 
 	/* Detached owners must not invalidate the rendering generation of a current Document. */
-	connected = dom_is_connected(&owner->node);
+	connected = dom_is_connected(&owner->node) || owner->constructed_sheet;
 	if (!connected)
 		return;
 

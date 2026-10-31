@@ -81,6 +81,8 @@ struct cascade_sheet {
 	size_t media_count;
 	/* The element whose sheet it is (a <style>; NULL for none), whose parent an implicit @scope's root is. */
 	struct dom_element *owner;
+	/* The shadow root whose tree the sheet's selectors stay in (NULL for the document's). */
+	struct dom_node *scope;
 };
 
 /* A value copied into the engine's arena: where it is and how many bytes it has. */
@@ -583,6 +585,21 @@ css_engine_set_owner(
 		return;
 	sheets = engine->sheets.items;
 	sheets[engine->sheets.count - 1U].owner = owner;
+	sheets[engine->sheets.count - 1U].scope = owner != NULL ? cascade_tree_scope(owner) : NULL;
+}
+
+/* Records the shadow root whose tree the most recently added sheet belongs to (a constructed sheet a root adopted). */
+void
+css_engine_set_scope(
+	struct css_engine *engine,
+	struct dom_node *scope)
+{
+	struct cascade_sheet *sheets;
+
+	if (engine->sheets.count == 0)
+		return;
+	sheets = engine->sheets.items;
+	sheets[engine->sheets.count - 1U].scope = scope;
 }
 
 /* Records that the page has shadow trees. */
@@ -1459,8 +1476,7 @@ cascade_collect(
 		engine->scope_generation++;
 		engine->sheet_scope = NULL;
 		engine->scope_any = !engine->shadow_scopes || sheets[sheet].sheet->origin != CSS_ORIGIN_AUTHOR;
-		if (sheets[sheet].owner != NULL)
-			engine->sheet_scope = cascade_tree_scope(sheets[sheet].owner);
+		engine->sheet_scope = sheets[sheet].scope;
 		error = cascade_collect_sheet(engine, element, sheets[sheet].sheet, (uint64_t)sheet, id, matches);
 		engine->sheet_owner = NULL;
 		engine->sheet_scope = NULL;
@@ -2160,6 +2176,8 @@ cascade_scope_root_compute(
 		owner = NULL;
 		if (engine->sheet_owner != NULL)
 			owner = cascade_selector_parent(engine, engine->sheet_owner);
+		if (owner == NULL && engine->sheet_scope != NULL && engine->sheet_owner != NULL && cascade_tree_scope(engine->sheet_owner) != engine->sheet_scope)
+			owner = dom_shadow_host(engine->sheet_scope);
 		if (owner == NULL) {
 			if (root->node.parent == NULL || root->node.parent->type != DOM_DOCUMENT)
 				return 0;
@@ -6160,7 +6178,7 @@ cascade_try_rule(
 			const struct dom_element *host;
 			const struct dom_node *sheet_tree;
 
-			sheet_tree = sheets[index].owner != NULL ? cascade_tree_scope(sheets[index].owner) : NULL;
+			sheet_tree = sheets[index].scope;
 			visible = tree;
 			while (visible != sheet_tree) {
 				host = visible != NULL ? dom_shadow_host(visible) : NULL;

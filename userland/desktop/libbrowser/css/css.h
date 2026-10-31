@@ -1172,6 +1172,7 @@ void css_engine_set_owner(struct css_engine *engine, struct dom_element *owner);
 
 /* Tells the engine that a page has shadow trees, so its selectors stay in their own tree. */
 void css_engine_set_shadow_scopes(struct css_engine *engine);
+void css_engine_set_scope(struct css_engine *engine, struct dom_node *scope);
 int css_engine_parse_media(struct css_engine *engine, const uint16_t *units, size_t length, const struct css_media **media);
 void css_engine_set_viewport(struct css_engine *engine, float width, float height);
 void css_engine_set_container_lookup(struct css_engine *engine, css_container_lookup lookup, void *context);

@@ -47,6 +47,8 @@ static int prelude_view_transition_duration(struct vm_realm *realm, vm_value thi
 static int prelude_view_transition_time(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_names(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_style(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_sheet_mark(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_sheet_adopt(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_rule_info(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_rule_replace(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_utf8_argument(const vm_value *args, unsigned count, unsigned index, struct wb_buffer *out, int *present);
@@ -568,6 +570,57 @@ prelude_view_transition_names(
 	}
 	wb_units_release(&units);
 	return status;
+}
+
+/* sheetMark(element): the style element is the holder of a constructed sheet, which has a sheet while detached. */
+static int
+prelude_sheet_mark(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_node *node;
+
+	UNUSED_PARAMETER(realm);
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	node = bind_node_of(js_argument(args, count, 0));
+	if (node != NULL && node->type == DOM_ELEMENT)
+		((struct dom_element *)node)->constructed_sheet = 1;
+	return 0;
+}
+
+/* sheetAdopt(root, element...): the constructed sheets (their holders) the document or shadow root adopts, in order. */
+static int
+prelude_sheet_adopt(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_node *root;
+	struct dom_node *nodes[64];
+	struct dom_node *node;
+	size_t made;
+	unsigned index;
+
+	UNUSED_PARAMETER(realm);
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	root = bind_node_of(js_argument(args, count, 0));
+	if (root == NULL)
+		return 0;
+	made = 0;
+	for (index = 1; index < count && made < 64U; index++) {
+		node = bind_node_of(args[index]);
+		if (node != NULL && node->type == DOM_ELEMENT)
+			nodes[made++] = node;
+	}
+	dom_adopted_set(root, nodes, made);
+	return 0;
 }
 
 /* viewTransitionStyle(pseudo, name, declarations): what a script's animation gives a view transition pseudo-element now. */
@@ -1154,6 +1207,14 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "viewTransitionStyle", 3, prelude_view_transition_style, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "viewTransitionStyle", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "sheetMark", 1, prelude_sheet_mark, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "sheetMark", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "sheetAdopt", 1, prelude_sheet_adopt, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "sheetAdopt", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "ruleInfo", 2, prelude_rule_info, NULL, &function);
 	if (status == 0)

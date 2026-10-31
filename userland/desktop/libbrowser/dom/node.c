@@ -995,6 +995,8 @@ node_trace(
 		/* A Document alone preserves its current live stylesheet query identity. */
 		if (node->document->style_sheets != NULL)
 			vm_heap_mark(heap, &node->document->style_sheets->cell);
+		if (node->document->adopted != NULL)
+			vm_heap_mark(heap, &node->document->adopted->cell);
 		if (node->document->font_set != NULL)
 			vm_heap_mark(heap, &node->document->font_set->cell);
 		if (node->document->font_ready != NULL)
@@ -1163,6 +1165,8 @@ shadow_trace(
 		vm_heap_mark(heap, &root->host->node.cell);
 	if (root->style_sheets != NULL)
 		vm_heap_mark(heap, &root->style_sheets->cell);
+	if (root->adopted != NULL)
+		vm_heap_mark(heap, &root->adopted->cell);
 }
 
 /*
