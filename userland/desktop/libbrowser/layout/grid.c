@@ -2243,6 +2243,35 @@ grid_static_alignment(
 		align = child->style.direction == CSS_DIRECTION_RTL ? CSS_ALIGN_START : CSS_ALIGN_END;
 	else if (orthogonal && raw_align == CSS_ALIGN_SELF_START)
 		align = child->style.direction == CSS_DIRECTION_RTL ? CSS_ALIGN_END : CSS_ALIGN_START;
+
+	/*
+	 * A horizontal item of a vertical grid has its inline axis along the grid's block axis and its block axis
+	 * (top to bottom) along the grid's inline axis: self-start and self-end name the item's edges there.
+	 */
+	if (box->physical_style != NULL && layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB &&
+	    child->physical_style == NULL && child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
+		int box_mode;
+		int block_start_left;
+		int inline_start_top;
+		int item_left;
+
+		box_mode = layout_physical_mode(box);
+		block_start_left = box_mode != CSS_WRITING_VERTICAL_RL;
+		inline_start_top = (box->style.direction == CSS_DIRECTION_LTR) !=
+		    (box->physical_style->writing_mode == CSS_WRITING_VERTICAL_LR && box->physical_style->writing_sideways == 1);
+		item_left = child->style.direction == CSS_DIRECTION_LTR;
+		raw_align = child->style.align_self;
+		if (raw_align == CSS_ALIGN_AUTO)
+			raw_align = box->style.align_items;
+		if (raw_align == CSS_ALIGN_SELF_START)
+			align = item_left == block_start_left ? CSS_ALIGN_START : CSS_ALIGN_END;
+		else if (raw_align == CSS_ALIGN_SELF_END)
+			align = item_left == block_start_left ? CSS_ALIGN_END : CSS_ALIGN_START;
+		if (justify == CSS_ALIGN_SELF_START)
+			justify = inline_start_top ? CSS_ALIGN_START : CSS_ALIGN_END;
+		else if (justify == CSS_ALIGN_SELF_END)
+			justify = inline_start_top ? CSS_ALIGN_END : CSS_ALIGN_START;
+	}
 	child->static_x_align = CSS_ALIGN_AUTO;
 	child->static_y_align = CSS_ALIGN_AUTO;
 	if (justify == CSS_ALIGN_END || justify == CSS_ALIGN_SELF_END ||
@@ -2329,7 +2358,8 @@ grid_static_position(
 			content_height += row_gap * (layout_unit)(grid->row_count - 1);
 	}
 	for (child = box->first_child; child != NULL; child = child->next) {
-		if (child->style.position != CSS_POSITION_ABSOLUTE)
+		if (child->style.position != CSS_POSITION_ABSOLUTE &&
+		    !(child->style.position == CSS_POSITION_FIXED && layout_containing_box(child) == box))
 			continue;
 		if (!own_block)
 			grid_static_content_box(box, child, content_height);
@@ -2483,14 +2513,17 @@ grid_abspos_one(
 
 	rtl = box->style.direction == CSS_DIRECTION_RTL;
 	{
-		if (child->style.position != CSS_POSITION_ABSOLUTE || child->static_grid_area)
+		if ((child->style.position != CSS_POSITION_ABSOLUTE &&
+		    !(child->style.position == CSS_POSITION_FIXED && layout_containing_box(child) == box)) ||
+		    child->static_grid_area)
 			return;
 		if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
 			return;
+		/* A grid without items has no implicit tracks: a line beyond the explicit ones is auto. */
 		grid_abspos_lines(&child->style.grid_column, box->style.column_count,
-		    grid->column_count, &first_column, &last_column);
+		    grid->item_count == 0 ? box->style.column_count : grid->column_count, &first_column, &last_column);
 		grid_abspos_lines(&child->style.grid_row, box->style.row_count,
-		    grid->row_count, &first_row, &last_row);
+		    grid->item_count == 0 ? box->style.row_count : grid->row_count, &first_row, &last_row);
 
 		/* A deeper box that names no line keeps the grid's padding box, and one that names lines by name leaves them to a subgrid. */
 		if (!direct && first_column == 0 && last_column == 0 && first_row == 0 && last_row == 0)
