@@ -2,7 +2,7 @@
 
 # ws333-p011: x86 の CPU の driver の統合
 
-Status: in-progress（受け入れの確かめ（host 試験・amd64 の 2 通りの build・全 port の build・QEMU）は全部済み。cleared は Q1 の判定。5330 は p014）
+Status: in-progress（受け入れの確かめ（host 試験・amd64 の 2 通りの build・全 port の build・QEMU）は全部済み。2026-11-01 q1788 で 5330 の実機（HWP・HFI・RAPL・`cpuperf=off`）も動いた。cleared は Q1 の判定）
 Parent: [WS333](../ws.md)
 Queue: q1770-i01（P7）
 
@@ -52,10 +52,31 @@ design.md §9 の p011: [p006](../phase006/phase.md) の cpuperf の枠組みの
   - `CONFIG_CPU_PERF=y`（[tests/config-amd64-cpuperf.mk](../tests/config-amd64-cpuperf.mk)、9eec145cc の tree、`IMAGE_BUILD=/tmp/p7-ws333-p011/qemu-y/img … /tmp/p7-ws333-p011/qemu-y2`）: **PASS**。画面に `cpu-x86: running under a hypervisor; the model-specific registers are left alone` と `cpu-x86: family 06H model 55H, 4 CPUs described`。HMP: `cpuperf_provider` = `cpu_x86_provider`（0xffffffff80f79850）、topology・describe だけが非 0 で start・apply・sample・measure・feedback・idle などは全部 0（関門で止まり、MSR の道の provider が無い）。PNG `build/review/ws333-p011/qemu-cpuperf-y.png`（worktree の中、git に入れない）。1 回目（qemu-y）は BOOT_THEN が root の password を待たずに落ちた（道具の手順の誤り、HMP の判定は同じく PASS）ので直してやり直した。
   - 既定（n、[tests/config-amd64-cpu-x86.mk](../tests/config-amd64-cpu-x86.mk)、`/tmp/p7-ws333-p011/qemu-n`）: **PASS**。画面に `cpu-x86: family 06H model 55H, 4 CPUs described`（hypervisor の行は無い: n の kernel は関門の code を持たない）、HMP は y と同じ形（0xffffffff80f78880）。driver は全 amd64 の kernel で topology を読むので、既定の kernel の起動の回帰として流した。PNG `build/review/ws333-p011/qemu-default.png`。
 
+## 5330 の実機（2026-11-01、q1788-i01、P1）
+
+- 道具: [tests/hw5330/](../tests/hw5330/)。`5330-thermal.sh p011 VMUNIX NAME`（kernel を NVMe の p4 へ → BootNext で起動 → 60 秒 → 測る → Debian へ戻す → `cpuperf=off` を zedbsd.cfg に足してもう 1 回起動 → cfg を戻す → 要約）。`/dev/thermal` の UAPI（p004）がまだ無いので、試験だけの kernel の patch `thermal-diag.patch`（main に入れない）で root の `hostname td-dump`・`td-s-NAME` が `kern_thermal_*`・`kern_cpuperf_*` を呼び、kernel の log に `thermal-diag:` の行を出す。判定は SSH の dmesg（実機）。要約は `td-summary.py`。
+- kernel: main 82c6ef325 ＋ `CONFIG_CPU_PERF=y` ＋ thermal-diag.patch ＋ `plan/ws291/tests/i915-stats-diag.patch`（`sh plan/ws333/tests/hw5330/kbuild.sh build/q1788/kA "CONFIG_CPU_PERF=y" …`、rc 0、warning 0、sha256 先頭 e3a19c937043b189）。userland は main 82c6ef325 の image（config-5330.mk）。
+- 3 回流した: q1788-p011（負荷が動かず）、q1788-p011b（同じ。`sysctl -n` が zedBSD に無く CPU の数が読めなかった。道具の誤り）、q1788-p011c（直した後、下の数）。起動の行と idle・strategy の結果は 3 回とも同じ形。log は worktree の `build/hw5330/ws333/q1788-p011c/`（git の外）。
+
+| 確かめ | 結果（q1788-p011c） |
+| --- | --- |
+| 起動の行 | `cpu-x86: family 06H model 9aH, 12 CPUs described, hybrid`、`HWP on first request, feedback on first request, base 2500 MHz, 1 package`、`4 energy meters, 1/2^14 J per count`、`cpuperf: provider registered; 12 of 12 CPUs answered, 10 domains`（P-core の SMT の 2 組と E-core 8 つ） |
+| HWP の start（strategy performance の最初の request） | error 0、receiver "cpu" の apply 100 ms。全 CPU が HAS_CONTROL。HWP の能力 P 1/11/21/56、E 1/8/12/33（lowest/efficient/guaranteed/highest。host の模型の efficient 20・15 と違う、模型の値は推定だった） |
+| Highest の MHz の測り | `cpuperf: cpu 0 (kind 1) runs at most about 4310 MHz`（他の回 4344）、`cpu 4 (kind 2) … 3300 MHz` |
+| HFI | start の後に全 CPU で feedback が読める: P 56/92、E 33/100（available/efficiency）、相対 P 100・E 77。start の前は UNKNOWN |
+| RAPL の meter | 4 本とも進む。idle 11 秒: package 6.44 W・cores 1.12・graphics 0.67・platform 18.04。全 CPU の負荷（performance）13 秒: package 25.19・cores 19.43・platform 37.89 |
+| strategy の request（domain の min/max/desired/EPP） | performance P 21/56/0/0・E 12/33/0/0、powersave P 1/21/0/192・E 1/12/0/192、balanced P 1/56/0/128・E 1/33/0/128。どれも error 0 |
+| 全 CPU の負荷での delivered MHz | performance: P 1399〜1400・E 1199〜1200（package 25.2 W、TCPU 71 °C）、powersave: P 1600・E 1200（11.6 W、67 °C）。performance の P が powersave より低い理由は未確認（一部の CPU に PLATFORM_LIMIT の印 0x8）。Linux の同じ負荷の数は取っていない |
+| package の C-state の滞在 | idle で PC2・PC3・PC6・PC7 とも増えない（PC2 は起動の頃の 16.8 ms のまま）。package が深い C-state に入っていない（p012 の件） |
+| `cpuperf=off` | `cpu-x86: turned off by cpuperf=off; the CPUs keep the default description`、meter 0 本、CPU の class 0（既定の記述）、package の滞在は EOPNOTSUPP。起動と SSH は普通 |
+
+- 参考（Debian 6.19、同じ機械、iGPU は vfio-pci で画面の driver なし、powercap の energy_uj を 10 秒）: package 3.75 W・core 0.04 W・psys 13.91 W。条件が違うので比は出さない。
+- 判定: 起動の関門・HWP の enable の順・HFI・RAPL・`cpuperf=off` は実機で動いた。cleared は Q1 の判定。
+
 ## 未実施
 
 - 他の amd64 の QEMU の形（TCG の `-cpu max`、hypervisor の bit の無い CPU の模型）、Intel Mac の config の起動。
-- 5330 の実機（止まっている。p014 で）。HWP の enable・REQUEST の書き・HFI・RAPL・滞在の値は host の模型までで、実の processor では確かめていない。
+- 5330 の実機: 2026-11-01 に上の表（q1788）。E-core の 4 つ組が clock を共有するか、0xE2 の lock、MC6 は未確認。全 CPU の負荷で performance の P-core が 1.4 GHz に留まる理由は未確認。
 - PC8〜PC10（630H〜632H）の滞在は読まない（allow list に無い、§15.8 の Q1-c）。5330 の 0xE2 の lock の bit も未読（Q1-e）。
 
 ## 持ち越し

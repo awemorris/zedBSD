@@ -24,10 +24,15 @@
 /*
  * A wake: rung from any thread, waited for among the dispatch's
  * descriptors (keiui_wake_descriptor), and cleared by the thread that waits.
- * Ringing it again before it is cleared adds nothing.
+ * Ringing it again before it is cleared adds nothing.  On POSIX it is a
+ * pipe (ends; event unused).  On Windows (platform-win32.c) it is a
+ * manual-reset event object (event, a HANDLE; ends unused, -1): there is no
+ * descriptor, keiui_wake_descriptor returns -1, and the dispatch waits for
+ * keiui_wake_event with MsgWaitForMultipleObjectsEx.
  */
 struct keiui_wake {
 	int ends[2];
+	void *event;
 };
 
 /* A lock between the application's thread and the library's others. */
@@ -60,6 +65,11 @@ void keiui_wake_close(struct keiui_wake *wake);
 void keiui_wake_ring(struct keiui_wake *wake);
 void keiui_wake_clear(struct keiui_wake *wake);
 int keiui_wake_descriptor(const struct keiui_wake *wake);
+/*
+ * The wake's event object, for a Windows dispatch's wait (platform-win32.c
+ * only; the POSIX file does not define it).  NULL when the wake is not open.
+ */
+void *keiui_wake_event(const struct keiui_wake *wake);
 
 /* The lock (platform-posix.c). */
 int keiui_lock_open(struct keiui_lock *lock);

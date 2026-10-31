@@ -1,10 +1,5 @@
+include $(dir $(lastword $(MAKEFILE_LIST)))sources.mk
 # The native FreeBSD build of libjpeg-compat.so; the zedBSD build remains in Makefile.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KEILAND_FREEBSD_JPEG_COMPAT_SOURCES := userland/desktop/libjpeg-compat/error.c \
-	userland/desktop/libjpeg-compat/memory.c \
-	userland/desktop/libjpeg-compat/source.c \
-	userland/desktop/libjpeg-compat/marker.c \
-	userland/desktop/libjpeg-compat/huffman.c \
-	userland/desktop/libjpeg-compat/idct.c \
-	userland/desktop/libjpeg-compat/decompress.c
+KEILAND_FREEBSD_JPEG_COMPAT_SOURCES := $(LIBJPEG_COMPAT_SOURCES)
 $(eval $(call KEILAND_FREEBSD_LIBRARY,jpeg-compat,libjpeg-compat.so,$(KEILAND_FREEBSD_JPEG_COMPAT_SOURCES),,-lm,userland/desktop/libjpeg-compat/exports.map))

@@ -1,4 +1,5 @@
+include $(dir $(lastword $(MAKEFILE_LIST)))sources.mk
 # The native FreeBSD build of libpng-compat.so; the zedBSD build remains in Makefile.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KEILAND_FREEBSD_PNG_COMPAT_SOURCES := userland/desktop/libpng-compat/read.c
+KEILAND_FREEBSD_PNG_COMPAT_SOURCES := $(LIBPNG_COMPAT_SOURCES)
 $(eval $(call KEILAND_FREEBSD_LIBRARY,png-compat,libpng-compat.so,$(KEILAND_FREEBSD_PNG_COMPAT_SOURCES),libz-compat.so,-lm,userland/desktop/libpng-compat/exports.map))

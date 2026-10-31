@@ -57,6 +57,7 @@ ZEDBSD_CONFIG_OPTIONAL_GOALS := menuconfig help list-user-programs \
 	keiland-linux keiland-linux-install keiland-linux-install-session keiland-linux-clean \
 	keiland-deb-amd64 keiland-deb-arm64 keiland-deb-rpi \
 	keiland-freebsd keiland-freebsd-install \
+	browser-win64 browser-winarm64 browser-win64-clean browser-winarm64-clean \
 	menuconfig-host-test rtl8822b-firmware-fixture-cache \
 	intelax211-firmware-fixture-cache i915-firmware-fixture-cache \
 	intelbt-firmware-fixture-cache brcmbt-firmware-fixture-cache \
@@ -832,6 +833,18 @@ keiland-linux-install-session:
 	$(MAKE) -f userland/desktop/keiland-linux.mk install-session
 keiland-linux-clean:
 	$(MAKE) -f userland/desktop/keiland-linux.mk clean
+
+# OmniGrammaton for Windows, cross-built by apps/browser-win32/Makefile (which also runs alone, as on a
+# Windows host); config.mk is not needed.  LLVM_MINGW=<root of llvm-mingw> chooses the toolchain.
+.PHONY: browser-win64 browser-winarm64 browser-win64-clean browser-winarm64-clean
+browser-win64:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-win64)
+browser-winarm64:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=aarch64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-winarm64)
+browser-win64-clean:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-win64) clean
+browser-winarm64-clean:
+	$(MAKE) -f apps/browser-win32/Makefile WIN32_ARCH=aarch64 BROWSER_WIN32_BUILD=$(or $(BROWSER_WIN32_BUILD),build/browser-winarm64) clean
 
 # FreeBSD also has a BSD make entry; GNU make uses the same independent native rules.
 .PHONY: keiland-freebsd keiland-freebsd-install

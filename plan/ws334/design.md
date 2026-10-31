@@ -1018,3 +1018,60 @@ make の target の名前（`browser-win64`・`browser-winarm64`）は §6.9 の
   指摘ごとの扱いと直した節は [design-review.md](design-review.md)。主な直し: `vm/heap.c` の `posix_memalign`（O30）、Vulkan の遅延の import（§6.2）、memory の HTTP の
   cache は loader ごとのまま・storage の thread の write-behind と lock の順（§3.5）、libmedia の起こしを open の引数と `net_loader_ring` に（M1）、M7 は Pi 4 の回避、
   key の衝突と `.ls` の移行（§3.5.3）、UCRT の版の toolchain と Windows 10 1903（§6.1）、TLS の根と OpenSSL の設定（§6.6）、Phase の分け直し（§8）と file の一覧（§9）。
+
+## 15. 標準廉価実装手順への組み直し（2026-11-01、ws.md の決定 22）
+
+- 決定 22 で、§8 の Phase の表を設計の Phase（p002 設計 A、p003 設計 B、p004 確定）・module の Phase（p005〜p019、Sonnet 5.5 high）・統合の Phase（p020〜p035、Opus）に組み直した。番号の対応は ws.md の表の「旧 pNNN」。§8 の表は経緯として残す（今の Phase は ws.md）。
+- module の分けと header の一覧は [phase002/phase.md](phase002/phase.md)（libbrowser・libmedia）と [phase003/phase.md](phase003/phase.md)（libkeiland の Win32・apps）。試験の道具は `plan/ws334/tests/`（modules.sh・run-unit.sh・check-skeleton.sh・unit/check.h）。
+- §3.4 からの変更（header を書く中で決めた事）:
+  - OS の層を 1 つの `os.h` でなく群ごとの header に分けた（`os-system.h`・`os-file.h`・`os-net.h`・`os-time.h`、共通の約束は `os.h`、Windows の共通の補助は `os-win32.h`、時刻帯の名前の表は `os-zones.h`）。module ごとに 1 回の起動で済む大きさにするため。
+  - 名前の解決も OS の層に入れた（`wb_os_resolve`）。`getaddrinfo` を直に使うと engine の file が `<netdb.h>` と `<ws2tcpip.h>` を選ぶ `#ifdef` を持つため。
+  - ストレージバックエンドの公開の型は新しい公開の header `include/browser/storage.h` に置いた（browser.h は p023 で版を上げる時に include する。設計の間に browser.h を変えない）。
+  - files の backend の directory の lock は OS の層（`wb_os_lock_open`）。同じ process の 2 回目も EBUSY。
+  - localStorage の key は origin の bytes の 16 進（hash の形は 100 byte を超える origin だけ）。今の `.ls` の file の名前と同じになり、files の backend は移行の特別な道を持たない（100 byte を超える origin の今の file は読まれない。記録）。
+  - libkeiland の platform の wake は Windows で event object（`struct keiui_wake` に `event`、`keiui_wake_event`）。
+- 第 1 段の制限として決めた事: 大きさの変更の modal の loop の間は描き直さない（p028）、headless の mode は storage の backend を持たない（p023）。
+- §6.2 の遅延の import の作り方の訂正（2026-11-01 P7 が確かめた）: llvm-mingw の llvm-dlltool に `--output-delaylib` は無い。普通の import library（`dlltool -d vulkan-1.def -l`）と lld の MinGW の driver の `-Wl,--delayload=vulkan-1.dll` で遅延の import になり、Wine 10 で `vulkan-1.dll` の有る時・無い時の両方で .exe が起動した（p020 に書いた）。
+- winpthreads（§6.1）: llvm-mingw は `-lpthread` を明示しないと winpthreads を link しない。DLL・.exe は動的（`libwinpthread-1.dll` を配る）、単体試験は静的（p020・run-unit.sh）。
+- §0・§1・§7.1 の古い所（design-reviewer #32）: Wine は決定 20 で開発の試験の道（「任意・Vulkan の判定に使わない」は決定 20 の前の書き方）、Phase の数と番号は ws.md の表、OS の層の file の名前は上の通り（`base/os-posix.c` ではなく群ごとの `os-*-posix.c`）。§0 から §14 は経緯として残し、食い違う所は §15・§16 と ws.md が正。
+
+## 16. 設計の確定の design-reviewer（p004、2026-11-01）
+
+design-reviewer 1 本（HEAD 34aed7a3a を読んだ）の指摘 34 件。全部を反映か理由付きの見送りにした。
+
+| # | 重さ | 指摘 | 扱い |
+| --- | --- | --- | --- |
+| 1 | 高 | p012（queue）が p010（records）の実装なしに試験を通せない | 反映: p012 の依存を p005・p010 に、2 組目へ（ws.md・phase012） |
+| 2 | 高 | Windows で file: URL の host を UNC にすると web の頁が SMB の認証（NTLM の hash）を起こせる | 反映: `wb_os_path_from_url` は host があれば Windows も ENOENT（os-file.h）。file: の下位の資源を file: の頁に限る直しは engine の今の穴（POSIX でも local の file を読める）なので Bug として Q1 に送った |
+| 3 | 高 | Windows の絶対の path を `[0] == '/'` で見分ける所が p021 に無い | 反映: `wb_os_path_is_absolute` を os-file.h に足し、p021 の表に link.c・script.c・media.c・page_resolve_location（17・18）、p027 に shell.c（1b）、view.c の base は file: URL に（5） |
+| 4 | 高 | queue の書きの合わせが remove を越えて順を変え data を失う | 反映: queue.h の合わせの条件（間に remove・clear・read・list が無い時だけ）、p012 に write・remove・write の試験 |
+| 5 | 高 | Windows の MAX_PATH（LongPathsEnabled は既定で無効）で record の path が失敗し、Wine では見えない | 反映: `wb_os_wide_path` が絶対の path に `\\?\`・`\\?\UNC\` を付ける（os-win32.h）、p005 の試験 |
+| 6 | 高 | 1 つの HWND で GDI の題の帯と Vulkan の swapchain が重なる | 反映: 親の HWND（枠・題の帯）と中身の子の HWND の形に決めた（p028） |
+| 7 | 高 | winpthreads の `pthread_condattr_setclock` が効かない見込みで、予備を Q1 に残していた | 反映: setclock を使わず、単調の時計で残りを求め直して `timespec_get` の壁の時刻で待つ形に決めた（p022 の 7） |
+| 8 | 中 | `wb_os_socket_connect_result` が「まだ」を言えない | 反映: EINPROGRESS を足し、POSIX の getpeername の確かめと Windows の WSAEWOULDBLOCK の扱いを header に（os-net.h、p007） |
+| 9 | 中 | 保存の directory と file が他の利用者に読める（0755・0644） | 反映: make_directories 0700、replace と lock の file 0600（os-file.h、p006 の試験） |
+| 10 | 中 | header の file の先頭の comment に出典（guardrail 違反） | 反映: keys-table.h・os-zones.h の先頭から出典を外した（表の出典は .c の block に、phase.md の通り） |
+| 11 | 中 | os-system.h の comment の `"/usr/share"` が boundary checker の C4 に当たる | 反映: 文字列を書かない形に。checker で WS334 の file に失敗が無いことを確かめた |
+| 12 | 中 | POSIX の thread の名前の選び方が L1 に当たる `#if defined(__linux__)` になる | 反映: build の macro `WB_OS_THREAD_NAMES`（os-system.h、p005、run-unit.sh の posix は定義） |
+| 13 | 中 | p009 の期待の値の誤り（China・AUS Eastern・Eastern に daylight がある、Arabian は Gulf）と zone の上書きの規則が header に無い | 反映: p009 の値を CLDR 48 で確かめて直し、規則を `struct wb_os_zone_names` の comment に |
+| 14 | 中 | scan 0x76 が F24 と LANG5 の両方 | 反映: KEY_F24 に決めた（keys-table.h、p014） |
+| 15 | 中 | p008 の Windows の offset の照合の道（UCRT）が年ごとの規則を使わない | 反映: `GetTimeZoneInformationForYear` と `SystemTimeToTzSpecificLocalTime` に |
+| 16 | 中 | p018 の仕様の文書の例の offset が bytes の位置と合わない | 反映: 手で組み立てた例に替え、文書の例の期待（EINVAL）を書いた |
+| 17 | 中 | p023 の cookie の保存の未決（session への置き換え・used の書き・SameSite・既定の instance と thread） | 反映: 置き換えで remove、used は memory だけ、SameSite は UNSET、既定の instance は thread ごと（p023） |
+| 18 | 中 | p024 が作成の時に cache の全部を読み、lock の順に無い lock を足す | 反映: 索引の record（key `0`）だけを読む形、`cache_lock` を lock の順に入れた（p024） |
+| 19 | 中 | Windows の誤りの写し（directory の ERROR_ACCESS_DENIED、途中の file）が書かれていない | 反映: os-file.h の make_directories、p006・p013 の注意に `GetFileAttributesW` |
+| 20 | 中 | 無い証明書の store 1 つで全部が EIO | 反映: 無い store は飛ばす（os-system.h、p005 の試験） |
+| 21 | 中 | caption の button の上の mouse が WM_NC* で来る | 反映: p028 に WM_NC* の扱い |
+| 22 | 中 | boundary checker の T1・N1 が libkeiland/win32 に当たる | 反映: win32 の file は keiui_lock・keiui_thread を使い、p028・p029 の受け入れに checker |
+| 23 | 中 | 統合の Phase に未決（p022 の 7、p027 の 1、p028 の版、p033） | 反映: p022・p027 は決めた、版は `OMNIGRAMMATON_VERSION := 0.1.0` の仮の値（ユーザーが決めるまで）、p033 は前に設計の小さな Phase が要ると明記 |
+| 24 | 中 | check.h の counter が thread の間で競う | 反映: check.h に mutex |
+| 25 | 低 | os.h の文と誤りの値の一覧の欠け | 反映 |
+| 26 | 低 | p019 の header の path の誤り | 反映 |
+| 27 | 低 | 約束の外を試す項（2 回目の close、key up の repeated、consumed、数字の飽和） | 反映: p016 から外し、input.h・wide.h・cf-html.h に約束を足した |
+| 28 | 低 | queue の上限の待ちが lock を持つ呼び手を待たせる | 反映: 待たずに ENOSPC（queue.h、p012） |
+| 29 | 低 | `RTLD_LOCAL` と tls.c の `RTLD_GLOBAL` | 反映: header に理由、p022 に確かめ |
+| 30 | 低 | Wine の prefix の作りかけの再使用、winedbg、aarch64 は走らない | 反映: run-unit.sh に ready の印・winedbg の無効・aarch64 は compile だけと明記 |
+| 31 | 低 | OpenSSL の prefix が利用者の作れる `C:\` の下 | 反映: 作れない path に（p030） |
+| 32 | 低 | design.md の §0・§1・§7.1 が古い | 反映: §15 の最後に正の所を書いた |
+| 33 | 低 | Hangul・Hanja の extended の bit | 反映: どちらでも同じ（keys-table.h、p014） |
+| 34 | 低 | `WB_OS_POLL_MAX` と loader、os-net-posix の一覧、file の読みの共有の flag | 反映: p022 の 8b と一覧の明記、os-file.h の read の share の flag と p006 の試験 |

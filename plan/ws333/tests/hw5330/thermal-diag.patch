@@ -1,0 +1,198 @@
+--- a/src/kern/sysctl.c
++++ b/src/kern/sysctl.c
+@@ -592,6 +592,13 @@
+ 				if (newlen == 0 || newlen > KERN_HOST_NAME_MAX)
+ 					return EINVAL;
+ 
++				/* Test-only, never merged: the thermal core's diagnostic commands. */
++				if (newlen > 3U && new_name[0] == 't' && new_name[1] == 'd' && new_name[2] == '-') {
++					extern int kern_thermal_diag_command(const char *text, unsigned length);
++
++					return kern_thermal_diag_command(new_name, (unsigned)newlen);
++				}
++
+ 				/* Rejects a name with a terminator, slash, or whitespace. */
+ 				for (i = 0; i < newlen; i++) {
+ 					if (new_name[i] == '\0' ||
+--- a/src/kern/thermal.c
++++ b/src/kern/thermal.c
+@@ -2717,3 +2717,179 @@
+ 	*count = filled;
+ 	return 0;
+ }
++
++/*
++ * Test-only, never merged: commands a root gives through the host name
++ * (hostname td-...), each answered on lines of the kernel log that begin
++ * with "thermal-diag:".  td-dump reports the core, the meters, the fans,
++ * the sensors, the package's idle residency and every CPU, td-idle only
++ * the status, the meters and the package's idle residency; td-s-NAME sets
++ * the strategy firmware, performance, balanced or powersave; td-m-S.N.G
++ * the manual strategy; td-b-F.L the boost of fan F.
++ */
++#include <kern/cpuperf.h>
++
++int kern_thermal_diag_command(const char *text, unsigned length);
++
++static const char *const thermal_diag_names[] = {
++	"firmware", "performance", "balanced", "powersave",
++};
++
++static bool
++thermal_diag_number(
++	const char **cursor,
++	const char *end,
++	uint32_t *value)
++{
++	const char *p;
++	uint32_t v;
++
++	p = *cursor;
++	v = 0U;
++	if (p >= end || *p < '0' || *p > '9')
++		return false;
++	while (p < end && *p >= '0' && *p <= '9') {
++		v = v * 10U + (uint32_t)(*p - '0');
++		p++;
++	}
++	*value = v;
++	*cursor = p;
++	return true;
++}
++
++static void
++thermal_diag_dump(bool full)
++{
++	struct kern_thermal_status status;
++	struct kern_thermal_strategy_info strategy;
++	struct kern_thermal_receiver_info receiver;
++	struct kern_thermal_fan_info fan;
++	struct kern_thermal_meter_info meter;
++	struct kern_thermal_sensor_info sensor;
++	struct kern_cpuperf_idle idle;
++	struct kern_cpuperf_cpu cpu;
++	struct kern_cpuperf_domain domain;
++	uint32_t i;
++	uint32_t count;
++	int error;
++
++	kern_thermal_status_get(&status);
++	kern_thermal_strategy_get(&strategy);
++	kern_logf("thermal-diag: status now_ns=%llu sensors=%u fans=%u meters=%u receivers=%u strategy=%u flags=0x%x gen=%u passive=%u firmware=%s\n",
++	    (unsigned long long)kern_ticks_to_ns(sched_ticks()), status.sensor_count, status.fan_count,
++	    status.meter_count, status.receiver_count, status.strategy, status.strategy_flags,
++	    status.generation, status.passive_permille, strategy.firmware_name);
++	for (i = 0U; full && i < status.receiver_count; i++) {
++		if (kern_thermal_receiver_get(i, &receiver) != 0)
++			continue;
++		kern_logf("thermal-diag: receiver %u %s error=%d flags=0x%x gen=%u ms=%u\n", i, receiver.name,
++		    receiver.error, receiver.flags, receiver.generation, receiver.duration_ms);
++	}
++	for (i = 0U; full && i < status.fan_count; i++) {
++		if (kern_thermal_fan_get(i, &fan) != 0)
++			continue;
++		kern_logf("thermal-diag: fan %u %s copy=0x%x rpm=%u level=%u/%u boost_count=%u boost=%u time_ns=%llu\n",
++		    i, fan.name, fan.copy, fan.state.rpm, fan.state.level, fan.state.level_count,
++		    fan.state.boost_count, fan.boost, (unsigned long long)fan.time_ns);
++	}
++	for (i = 0U; i < status.meter_count; i++) {
++		if (kern_thermal_meter_get(i, &meter) != 0)
++			continue;
++		kern_logf("thermal-diag: meter %u %s kind=%u copy=0x%x energy_nj=%llu time_ns=%llu\n", i, meter.name,
++		    meter.kind, meter.copy, (unsigned long long)meter.energy_nj, (unsigned long long)meter.time_ns);
++	}
++	for (i = 0U; full && i < status.sensor_count; i++) {
++		if (kern_thermal_sensor_get(i, &sensor) != 0)
++			continue;
++		kern_logf("thermal-diag: sensor %u %s reading=0x%x mC=%d\n", i, sensor.name, sensor.reading,
++		    sensor.millicelsius);
++	}
++	error = kern_cpuperf_idle_package(0U, &idle);
++	kern_logf("thermal-diag: pkg-idle error=%d count=%u available=0x%x time_ns=%llu\n", error,
++	    error == 0 ? idle.count : 0U, error == 0 ? idle.available : 0U,
++	    error == 0 ? (unsigned long long)idle.time_ns : 0ULL);
++	for (i = 0U; error == 0 && i < idle.count && i < KERN_CPUPERF_IDLE_STATE_MAX; i++)
++		kern_logf("thermal-diag: pkg-idle state=%u ns=%llu\n", idle.state[i],
++		    (unsigned long long)idle.residency_ns[i]);
++	count = full ? kern_cpu_count() : 0U;
++	for (i = 0U; i < count; i++) {
++		kern_memset(&cpu, 0, sizeof(cpu));
++		error = kern_cpuperf_cpu(i, KERN_CPUPERF_READ_SAMPLE, &cpu);
++		kern_logf("thermal-diag: cpu %u error=%d class=%u core=%u module=%u domain=%u levels=%u/%u/%u/%u highest_mhz=%u delivered_mhz=%u relative=%u available=%u efficiency=%u flags=0x%x\n",
++		    i, error, cpu.topology.core_class, cpu.topology.core, cpu.topology.module, cpu.domain,
++		    cpu.lowest, cpu.efficient, cpu.guaranteed, cpu.highest, cpu.highest_mhz, cpu.delivered_mhz,
++		    cpu.relative, cpu.available, cpu.efficiency, cpu.flags);
++	}
++	count = full ? kern_cpuperf_domain_count() : 0U;
++	for (i = 0U; i < count; i++) {
++		if (kern_cpuperf_domain(i, &domain) != 0)
++			continue;
++		kern_logf("thermal-diag: domain %u cpus=%u request=%u/%u/%u/%u limit=%u flags=0x%x\n", i,
++		    domain.cpu_count, domain.request.minimum, domain.request.maximum, domain.request.desired,
++		    domain.request.preference, domain.limit, domain.flags);
++	}
++}
++
++int
++kern_thermal_diag_command(
++	const char *text,
++	unsigned length)
++{
++	struct kern_thermal_strategy strategy;
++	const char *cursor;
++	const char *end;
++	uint32_t fan;
++	uint32_t level;
++	uint32_t flags;
++	uint32_t a;
++	uint32_t b;
++	uint32_t c;
++	unsigned i;
++	unsigned n;
++	int error;
++	char shown[72];
++
++	n = length < sizeof(shown) - 1U ? length : (unsigned)sizeof(shown) - 1U;
++	kern_memcpy(shown, text, n);
++	shown[n] = '\0';
++	end = text + length;
++	flags = 0U;
++	error = EINVAL;
++	if (length == 7U && kern_memcmp(text, "td-dump", 7U) == 0) {
++		thermal_diag_dump(true);
++		error = 0;
++	} else if (length == 7U && kern_memcmp(text, "td-idle", 7U) == 0) {
++		thermal_diag_dump(false);
++		error = 0;
++	} else if (length > 5U && kern_memcmp(text, "td-s-", 5U) == 0) {
++		for (i = 0U; i < sizeof(thermal_diag_names) / sizeof(thermal_diag_names[0]); i++) {
++			if (kern_strlen(thermal_diag_names[i]) != length - 5U ||
++			    kern_memcmp(text + 5, thermal_diag_names[i], length - 5U) != 0)
++				continue;
++			kern_memset(&strategy, 0, sizeof(strategy));
++			strategy.value = i;
++			error = kern_thermal_strategy_set(&strategy, &flags);
++			break;
++		}
++	} else if (length > 5U && kern_memcmp(text, "td-m-", 5U) == 0) {
++		cursor = text + 5;
++		if (thermal_diag_number(&cursor, end, &a) && cursor < end && *cursor++ == '.' &&
++		    thermal_diag_number(&cursor, end, &b) && cursor < end && *cursor++ == '.' &&
++		    thermal_diag_number(&cursor, end, &c) && cursor == end && a < 256U && b < 256U && c < 256U) {
++			kern_memset(&strategy, 0, sizeof(strategy));
++			strategy.value = KERN_THERMAL_STRATEGY_MANUAL;
++			strategy.speed = (uint8_t)a;
++			strategy.noise = (uint8_t)b;
++			strategy.gating = (uint8_t)c;
++			error = kern_thermal_strategy_set(&strategy, &flags);
++		}
++	} else if (length > 5U && kern_memcmp(text, "td-b-", 5U) == 0) {
++		cursor = text + 5;
++		if (thermal_diag_number(&cursor, end, &fan) && cursor < end && *cursor++ == '.' &&
++		    thermal_diag_number(&cursor, end, &level) && cursor == end)
++			error = kern_thermal_boost_set(fan, level, &flags);
++	}
++	kern_logf("thermal-diag: cmd %s error=%d flags=0x%x now_ns=%llu\n", shown, error, flags,
++	    (unsigned long long)kern_ticks_to_ns(sched_ticks()));
++	return error;
++}
