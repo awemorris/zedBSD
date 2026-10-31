@@ -611,7 +611,10 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev111 | grid-template の CSS animation の補間（native）、Web Animations の grid-template（JS、neutral keyframe） | 2,901 | 295 / 178 / 92 / 6 |
   | dev112 | Element.animate の pseudoElement（view transition の group・pair・old・new に値を渡す）、activate を frame callback の前に | 2,910 | 293 / 178 / 85 / 6 |
   | dev113 | view transition の UA animation の名前、document.getAnimations()、animation の currentTime（native.viewTransitionTime） | 2,913（83.90%） | 291 / 178 / 84 / 6 |
-  | dev114 | paused な UA animation で transition が終わらない、column の flex の justify-content: left・right（縦書き） | （下に追記） | |
+  | dev114 | paused な UA animation で transition が終わらない、column の flex の justify-content: left・right（縦書き） | 2,916（83.99%） | 289 / 177 / 84 / 6 |
+  | dev115 | 変更なしの確認（新しい block 内の宣言を関数の先頭へ移した後） | 2,916 | 289 / 177 / 84 / 6 |
+  | dev116（e04c80d48） | view transition の疑似要素の selector の検証（pseudo-elements-invalid）、`:has()` を forgiving にしない、CSSOM の宣言の element を遅延 | 2,917 | 288 / 177 / 84 / 6 |
+  | dev117（1d348223b、最終） | animation-iteration-count・animation-direction・isolation の計算値と mix-blend-mode の全 keyword、view transition の image が plus-lighter になるのは animation の間かつ両方の snapshot がある時 | 2,919（84.07%、gap 553） | 286 / 177 / 84 / 6 |
 
 - 直した物（要点。source は userland/desktop/libbrowser/、JS は plan/ws074/phase260/*.js を make-prelude.py が prelude に取り込む（`// @include`））:
   1. CSSOM の rule object（plan/ws074/phase260/cssom-rules.js）: `cssRules`・`rules` は Proxy の CSSRuleList、CSSStyleRule・CSSGroupingRule・CSSConditionRule・CSSMediaRule・CSSSupportsRule・CSSContainerRule・CSSScopeRule・
@@ -635,7 +638,11 @@ Origin: 2026-10-27 ユーザーの指示。
      update callback の後の activate を、callback が登録する frame callback より前に走る形にした（仕様の「rendering の更新で pending な transition の処理が rAF より前」）。
      document.getAnimations() に view transition の UA animation（pseudo の computed な animation-name ごと）を足し、currentTime の set は native.viewTransitionTime で全体の時刻にする（set-current-time）。
      UA の animation-name を snapshot の有無で変える（dynamic-stylesheet-animations）。
-  7. 未対応で調べた物: constructable stylesheet（new CSSStyleSheet・replaceSync。css-cascade の scope-declarations・scope-shadow）、@container・@starting-style の rule（parser が捨てる。scope-container・scope-starting-style）、
+  7. selector（css/parser.c）: view transition の疑似要素は selector の最後で、後ろに付けられるのは `:only-child`（::view-transition 自身には付かない）だけ、引数は `<custom-ident>`（default・unset・initial・inherit・revert・revert-layer は不可）が空でない事、
+     `:not()`・`:has()` の中に置けない。`:has()` は読めない引数で selector 全体が無効（forgiving ではない）。css-view-transitions/parsing/pseudo-elements-invalid が通った。
+  8. 計算値: animation-iteration-count・animation-direction・isolation、mix-blend-mode の 17 keyword を style に持つ。UA の sheet は image-pair に isolation: isolate、old・new は plus-lighter を持たず、両方の snapshot がある時だけ
+     animation が走る間 plus-lighter（computed.c・box.c・page/transition.c）。style-inheritance・mix-blend-mode-only-on-transition。animation shorthand は iteration・direction を読む（animation の進みでの使用は未実装）。
+  9. 未対応で調べた物: constructable stylesheet（new CSSStyleSheet・replaceSync。css-cascade の scope-declarations・scope-shadow）、@container・@starting-style の rule（parser が捨てる。scope-container・scope-starting-style）、
      CSS_TRACKS = 24 の固定長（grid-limits-001）、直交 item の stretch の一般化（縦書き grid の中の横書き item は logical 座標の grid の「直交 item」にならない。grid-self-baseline-vertical-lr/rl の 12 件など）、
      anchor() の入れ子の fallback と min()・max()（anchor-parse-valid・anchor-size-parse-valid は 2,000 件超の subtest 全部が要る）。
 - shadow DOM の設計メモ（::part()・:host・scope-shadow・anchor の tree-scoped が要る。engine に shadow DOM が全く無い。18 ID が触れる: css-anchor-position の anchor-name-in-shadow・anchor-scope-shadow-*・position-try-tree-scoped・
@@ -648,3 +655,16 @@ Origin: 2026-10-27 ユーザーの指示。
   - layout: box の構築が flat tree を歩く（shadow root を持つ host の子は shadow の子へ置き換え、slot の位置に assigned node、割り当てが無ければ fallback）。box の node は元の node のまま。
   - 手順の案: (1) declarative shadow root + tree scope の style + flat tree の layout + ::part()（shadow-part 5 件と scope-part、約 7 ID）、(2) attachShadow・ShadowRoot の interface（scope-shadow、anchor の shadow の試験）、
     (3) slot・::slotted、(4) event の retarget・composed path。全体で数日の規模。
+
+- 最終（2026-10-31 20:25、dev117）: 2,919 / 3,472（84.07%）。dev104 から +71、後退 0（毎回の測定で直前と dev104 の両方と比べた）。host build は `-Wall -Wextra -Werror` で warning 0。
+  Acid は最終の source で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%。
+  Acid の runner が残した一時 file（Q1 が消す）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-djctoxx2.html、acid3/zedbsd-acid3-reference-y2za7kja.html、acid3/zedbsd-acid3-diagnostic-97ea2019.html（worktree p8-ws074）。
+  この attempt の道具が残した一時物（Q1 が消す）: build/ws074-suites/wpt/zz_dbg/（dbg.sh が作る試験の複写。worktree の中）、/tmp/p8out の下の full.*・sub-*・sone・phase-i09.md・dbg-server.pid と、dev89〜dev111 の測定の出力
+    （最後の 2 つ dev116・dev117 は残す）。
+- 次の候補（件数の見込み順）:
+  - grid・flex の baseline の群（約 65 ID。vertical-lr/rl の self-baseline、flex・grid の baseline の試験の縦書き、synthesized baseline）。縦書きの grid の中の横書き item を直交の item として扱う一般化（logical.c の例外の除去）が要る。
+    試した所、例外を全部外すと grid-self-alignment-stretch-vertical-* 16 件が後退した（直交の stretch の軸）。
+  - shadow DOM（上の設計メモ。18 ID）、@container・@starting-style の rule、constructable stylesheet。
+  - animation: transition と CSS animation の補間を engine で（interpolation・composition の試験は 4 つの method を全部通す必要がある。約 19 ID）。
+  - view transition の group が捕えた element の style（mix-blend-mode・text-orientation・color-scheme）を持つ事（pseudo-get-computed-style）、animationstart 等の event、KeyframeEffect・new Animation()、getAnimations({subtree}) の疑似要素。
+  - 丸い overflow clip（border-radius）を描画の clip に持つ（backdrop-filter の 3〜5 ID と他）。
