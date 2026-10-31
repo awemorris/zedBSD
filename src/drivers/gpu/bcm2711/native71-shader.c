@@ -139,6 +139,16 @@ bcm2711_native_shader_encode(
 	return 0;
 }
 
+/* Reports the VCM Cache Size packet's byte: two batches for the bin and the render, as the 7.1 record reserves. */
+uint32_t
+bcm2711_native_shader_vcm(
+	const struct bcm2711_native_shader *shader)
+{
+	/* The same for every shader. */
+	(void)shader;
+	return 0x22U;
+}
+
 /*
  * Reports the bytes of the shader state record this encoder writes (the
  * 7.1 record), after which the attribute records follow.

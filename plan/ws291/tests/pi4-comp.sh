@@ -2,9 +2,9 @@
 # ws291-p025: the Raspberry Pi 4's desktop frames (frame-ops) with a compositor of the tree, without a reboot, run from the
 # top of the tree on a board already running the kernel of plan/ws291/tests/config-rpi4-desk.mk (pi4-desk.sh put it in)
 # with the console login:
-#   [PI=ADDRESS] [WAYLAND=BIN] [TIMING=1] [SETTLE=SECONDS] [RUNS=1] [OPTIONS='...'] sh plan/ws291/tests/pi4-comp.sh OUT
+#   [PI=ADDRESS] [WAYLAND=BIN] [TERMINAL=BIN] [TIMING=1] [SETTLE=SECONDS] [RUNS=1] [OPTIONS='...'] sh plan/ws291/tests/pi4-comp.sh OUT
 # Each run stops the compositor running (and its clients), starts WAYLAND (copied to /root/p025desk/wayland; the board's
-# /bin/wayland without it) as root on a new socket with the session's options (--glass, the wallpaper, --log-frames,
+# /bin/wayland without it; TERMINAL likewise to /root/p025desk/terminal for the Terminal) as root on a new socket with the session's options (--glass, the wallpaper, --log-frames,
 # OPTIONS), VULKAN_ZEDBSD_SUBMIT_TIMING=1 with TIMING=1, waits SETTLE seconds (default 40) of a still desktop and runs
 # plan/tools/frame-ops/frame-ops.sh with the Terminal started by the shell (TERMINAL_PERF=1; OUT/runN: terminal.log, session.log, marks, table.txt and frames.txt of frame-times.py, shot.png
 # of keiland-shot at the end, SHOT or build/p025-4d/bin/keiland-shot).  The board's files are not changed.  OUT/summary.txt holds what is printed.
@@ -36,6 +36,13 @@ if [ -n "${WAYLAND:-}" ]; then
 	    b "test \"\$(cksum < $D/wayland.new | cut -d' ' -f1)\" = $(cksum < "$WAYLAND" | cut -d' ' -f1) && chmod 755 $D/wayland.new && mv $D/wayland.new $D/wayland" ||
 	    { say "FAIL the compositor was not put in"; exit 1; }
 fi
+term=/bin/terminal
+if [ -n "${TERMINAL:-}" ]; then
+	term=$D/terminal
+	timeout 120 scp $SO -q "$TERMINAL" "root@$PI:$D/terminal.new" &&
+	    b "test \"\$(cksum < $D/terminal.new | cut -d' ' -f1)\" = $(cksum < "$TERMINAL" | cut -d' ' -f1) && chmod 755 $D/terminal.new && mv $D/terminal.new $D/terminal" ||
+	    { say "FAIL the terminal was not put in"; exit 1; }
+fi
 timeout 120 scp $SO -q "${SHOT:-build/p025-4d/bin/keiland-shot}" "root@$PI:$D/keiland-shot" || say "FAIL keiland-shot was not put in"
 # Settings' Welcome is not started (root's welcome.done=1; the file is kept once as desktop.conf.p025old): its spawn
 # stalls the compositor until the kernel's fork is fixed (BUG-379).
@@ -66,13 +73,13 @@ while [ $i -le "${RUNS:-1}" ]; do
 		sleep 3
 		n=$((n + 1))
 	done
-	say "run$i $bin cksum $(b "cksum < $bin" | cut -d' ' -f1) log $(b "wc -l < $log" 2>&1)"
+	say "run$i $bin cksum $(b "cksum < $bin" | cut -d' ' -f1) $term cksum $(b "cksum < $term" | cut -d' ' -f1) log $(b "wc -l < $log" 2>&1)"
 	sleep "${SETTLE:-40}"
 	# The launch step closes App Home (Super) instead of starting the Terminal, which the shell starts (the compositor's spawn
 	# stalls until BUG-379 is fixed); frame-ops then finds the Terminal's KWL MAP as before.
 	sed '0,/^input key enter$/s//input key super; sh -c "$LAUNCH" \&/' plan/tools/frame-ops/frame-ops.sh > "$d/frame-ops.sh"
 	timeout 120 scp $SO -q "$d/frame-ops.sh" "root@$PI:/tmp/frame-ops.sh"
-	BT=400 b "LAUNCH='XDG_RUNTIME_DIR=$run WAYLAND_DISPLAY=wayland-0 HOME=/root TERMINAL_PERF=1 $env exec /bin/terminal > /tmp/terminal.log 2>&1 < /dev/null' sh /tmp/frame-ops.sh $log /tmp/marks 1920 1080 > /tmp/frame-ops.out 2>&1 < /dev/null" > /dev/null 2>&1
+	BT=400 b "LAUNCH='XDG_RUNTIME_DIR=$run WAYLAND_DISPLAY=wayland-0 HOME=/root TERMINAL_PERF=1 $env exec $term > /tmp/terminal.log 2>&1 < /dev/null' sh /tmp/frame-ops.sh $log /tmp/marks 1920 1080 > /tmp/frame-ops.out 2>&1 < /dev/null" > /dev/null 2>&1
 	BT=90 b "cd $D; timeout 60 $D/keiland-shot --socket $run/keiland-shot.sock /tmp/p025-shot.png > /tmp/shot.out 2>&1" > /dev/null 2>&1
 	timeout 120 scp $SO -q "root@$PI:$log" "$d/session.log"
 	timeout 120 scp $SO -q "root@$PI:/tmp/marks" "root@$PI:/tmp/frame-ops.out" "root@$PI:/tmp/p025-shot.png" "root@$PI:/tmp/terminal.log" "$d/" || say "run$i FAIL not all collected"

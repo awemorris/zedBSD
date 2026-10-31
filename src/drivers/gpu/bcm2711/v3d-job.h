@@ -125,6 +125,47 @@ struct bcm2711_v3d_job_result {
 	uint32_t bin_counters[BCM2711_V3D_COUNTERS];
 };
 
+/*
+ * A CL job whose render queue runs on after bcm2711_v3d_job_launch: the
+ * caller may bin the next job meanwhile (bcm2711_v3d_job_prebin) and ends
+ * it with bcm2711_v3d_job_land, which holds the worker slot until then.
+ * The fields are the runner's.
+ */
+struct bcm2711_v3d_flight {
+	const struct bcm2711_v3d_cl_job *job;
+	struct bcm2711_v3d_job_result *result;
+	/* When the job started (busy clock) and its render queue was launched (clock ticks). */
+	uint64_t started;
+	uint64_t render_started;
+	/* The counters when the render queue was launched. */
+	uint32_t before[BCM2711_V3D_COUNTERS];
+	/* Completion events another wait consumed meanwhile, core and hub. */
+	uint32_t kept[2];
+	/* A failure of the next job's bin, which leaves this render uncertain too. */
+	int error;
+	/* Whether a render queue runs on (the runner of a 7.1 core runs the whole job in launch). */
+	bool active;
+};
+
 int bcm2711_v3d_job_run(struct bcm2711_v3d *engine, const struct bcm2711_v3d_job *job, struct bcm2711_v3d_job_result *result);
+
+/*
+ * Runs a job like bcm2711_v3d_job_run, except that a CL job's render queue
+ * is only launched: flight->active says it runs on, and bcm2711_v3d_job_land
+ * must follow (with nothing but bcm2711_v3d_job_prebin between).  binned
+ * says the CL job's bin queue already ran (bcm2711_v3d_job_prebin).
+ */
+int bcm2711_v3d_job_launch(struct bcm2711_v3d *engine, const struct bcm2711_v3d_job *job, struct bcm2711_v3d_job_result *result, struct bcm2711_v3d_flight *flight, bool binned);
+
+/*
+ * Runs the bin queue of the next CL job while the flight's render queue
+ * runs.  ENOTSUP when the next job cannot be binned so (nothing launched);
+ * any other failure leaves both jobs uncertain (result->retired is false,
+ * and bcm2711_v3d_job_land reports the failure for the flight).
+ */
+int bcm2711_v3d_job_prebin(struct bcm2711_v3d *engine, struct bcm2711_v3d_flight *flight, const struct bcm2711_v3d_cl_job *next, struct bcm2711_v3d_job_result *result);
+
+/* Waits for the flight's render queue, cleans the output and ends the job (nothing when the flight is not active). */
+int bcm2711_v3d_job_land(struct bcm2711_v3d *engine, struct bcm2711_v3d_flight *flight);
 
 #endif

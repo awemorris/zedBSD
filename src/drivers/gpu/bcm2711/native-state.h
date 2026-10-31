@@ -127,6 +127,13 @@ struct bcm2711_native_sampler {
 };
 
 uint32_t bcm2711_native_shader_bytes(void);
+
+/*
+ * The VCM Cache Size packet's byte for an encoded shader: how many
+ * sixteen-vertex batches the bin (bits 0-3) and the render (bits 4-7) keep
+ * cached in the VPM.
+ */
+uint32_t bcm2711_native_shader_vcm(const struct bcm2711_native_shader *shader);
 int bcm2711_native_shader_encode(const struct bcm2711_native_shader *shader, uint8_t *bytes, size_t capacity);
 int bcm2711_native_attribute_encode(const struct bcm2711_native_attribute *attribute, uint8_t *bytes, size_t capacity);
 int bcm2711_native_texture_encode(const struct bcm2711_native_texture *texture, uint8_t *bytes, size_t capacity);

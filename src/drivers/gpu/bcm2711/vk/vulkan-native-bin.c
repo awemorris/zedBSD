@@ -106,6 +106,7 @@ bcm2711_vulkan_native_bin_prepare(
 	/* Only complete owned shader/fetch intervals enter the numerical BCL sequence. */
 	state.shader = draw->shader;
 	state.attributes = draw->attributes;
+	state.vcm = draw->vcm;
 	state.vertices = draw->vertices;
 	state.instances = draw->instances;
 	state.first = draw->first;

@@ -128,10 +128,39 @@ bcm2711_vulkan_native_pass_launch(
 	struct bcm2711_vulkan_native_pass *pass,
 	struct bcm2711_v3d_job_result *result)
 {
+	struct bcm2711_v3d_flight flight;
+	int error;
+
+	/* Both halves, with nothing between them. */
+	error = bcm2711_vulkan_native_pass_launch_begin(pass, result, &flight);
+	error = bcm2711_vulkan_native_pass_launch_end(pass, result, &flight, error);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the jobs ran; the finish checks retirement. */
+	return 0;
+}
+
+/*
+ * Runs the pass's texture conversions and its bin queue, and launches its
+ * render queue (only the render queue when its bin already ran).
+ *
+ * Inside the executor's window this runs without the controller mutex, so
+ * it writes only the pass, the result and the flight.
+ */
+int
+bcm2711_vulkan_native_pass_launch_begin(
+	struct bcm2711_vulkan_native_pass *pass,
+	struct bcm2711_v3d_job_result *result,
+	struct bcm2711_v3d_flight *flight)
+{
 	uint64_t converted;
 	uint64_t longest;
 	uint32_t jobs;
 	int error;
+
+	/* Nothing runs on until the render queue is launched. */
+	kern_memset(flight, 0, sizeof(*flight));
 
 	/* The texture formatting unit fills every converted texture before any draw samples it. */
 	error = convert_textures(pass, result, &converted, &jobs, &longest);
@@ -140,8 +169,10 @@ bcm2711_vulkan_native_pass_launch(
 		return error;
 	pass->converted = true;
 
-	/* The draws run once all their textures are in place. */
-	error = bcm2711_v3d_job_run(pass->space->native, &pass->job, result);
+	/* The draws run once all their textures are in place; a pass binned ahead launches its render queue alone. */
+	error = bcm2711_v3d_job_launch(pass->space->native, &pass->job, result, flight, pass->binned);
+	if (pass->binned)
+		result->bin_ticks = pass->bin_ticks;
 	pass->retired = result->retired;
 	result->tfu_ticks = converted;
 	result->tfu_jobs = jobs;
@@ -149,8 +180,95 @@ bcm2711_vulkan_native_pass_launch(
 	if (error != 0)
 		return error;
 
+	/* Succeeded: the jobs ran, or the render queue runs on in the flight. */
+	return 0;
+}
+
+/* Waits for the render queue the first half left running, if any; error is the first half's. */
+int
+bcm2711_vulkan_native_pass_launch_end(
+	struct bcm2711_vulkan_native_pass *pass,
+	struct bcm2711_v3d_job_result *result,
+	struct bcm2711_v3d_flight *flight,
+	int error)
+{
+	int landed;
+
+	/* The render queue's end, whose retirement the pass keeps. */
+	if (flight->active) {
+		landed = bcm2711_v3d_job_land(pass->space->native, flight);
+		pass->retired = result->retired;
+		if (error == 0)
+			error = landed;
+	}
+	if (error != 0)
+		return error;
+
 	/* Succeeded: the jobs ran; the finish checks retirement. */
 	return 0;
+}
+
+/*
+ * Runs the bin queue of a prepared pass that has not started, while the
+ * flight's render runs.
+ *
+ * The bin reads the pass's own lists and prepared inputs; the caller has
+ * checked that the pass samples nothing the flight's pass renders into.
+ */
+int
+bcm2711_vulkan_native_pass_prebin(
+	struct bcm2711_vulkan_native_pass *pass,
+	struct bcm2711_v3d_flight *flight)
+{
+	struct bcm2711_v3d_job_result result;
+	int error;
+
+	/* Only a whole prepared graphics pass that has not run. */
+	if (pass == NULL || pass->executed || pass->binned || pass->job.kind != BCM2711_V3D_JOB_CL)
+		return ENOTSUP;
+
+	/* The bin queue beside the running render. */
+	error = bcm2711_v3d_job_prebin(pass->space->native, flight, &pass->job.command.cl, &result);
+	if (error != 0) {
+		/* A bin that launched and failed leaves the pass uncertain; it can no longer run. */
+		if (!result.retired) {
+			pass->executed = true;
+			pass->retired = false;
+		}
+		return error;
+	}
+
+	/* Succeeded: its tile lists wait for its render. */
+	pass->binned = true;
+	pass->bin_ticks = result.bin_ticks;
+	return 0;
+}
+
+/* Whether any draw of the pass samples the colour or depth target of the other pass. */
+bool
+bcm2711_vulkan_native_pass_samples(
+	const struct bcm2711_vulkan_native_pass *pass,
+	const struct bcm2711_vulkan_native_pass *other)
+{
+	const struct bcm2711_vulkan_native_draw *draw;
+	const struct bcm2711_vulkan_resource *image;
+	uint32_t index;
+
+	/* Each texture of each draw, by the memory it lies in. */
+	for (draw = pass->first; draw != NULL; draw = draw->next) {
+		for (index = 0; index < draw->texture_count; index++) {
+			image = draw->textures[index].image;
+			if (image == NULL)
+				return true;
+			if (other->target != NULL && image->memory == other->target->memory)
+				return true;
+			if (other->depth_target != NULL && image->memory == other->depth_target->memory)
+				return true;
+		}
+	}
+
+	/* Succeeded: no draw samples them. */
+	return false;
 }
 
 /*

@@ -870,6 +870,7 @@ prepare_records(
 	/* No pointer can reach the native BCL before the complete records are CPU-clean. */
 	kern_dcache_clean_range(destination, bytes);
 	draw->shader = records;
+	draw->vcm = bcm2711_native_shader_vcm(shader);
 
 	/* Succeeded: one aligned native shader pointer and its exact attribute count describe this complete owned draw. */
 	return 0;

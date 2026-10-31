@@ -227,6 +227,13 @@ int bcm2711_render_execution_admit(struct bcm2711_render_session *session, uint6
  * the mutex again, then unmaps the views released meanwhile.
  */
 void bcm2711_render_window_open(struct bcm2711_render_device *controller);
+
+/*
+ * Opens the window again while a job the step launched still runs on: the
+ * mappers waiting keep waiting (no mapping is admitted while a job runs) and
+ * go first at the next window_open, after the step.
+ */
+void bcm2711_render_window_reopen(struct bcm2711_render_device *controller);
 int bcm2711_render_window_close(struct bcm2711_render_device *controller);
 
 /* Takes the controller mutex outside the window, for an ioctl that maps; unlock gives it back. */
