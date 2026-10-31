@@ -78,8 +78,8 @@ layout_control_measure(
 
 	/* A checkbox or a radio button is a small square that stands on the baseline. */
 	if (box->control == DOM_CONTROL_CHECKBOX || box->control == DOM_CONTROL_RADIO) {
-		box->natural_width = CONTROL_CHECK_SIZE * LAYOUT_UNIT;
-		box->natural_height = CONTROL_CHECK_SIZE * LAYOUT_UNIT;
+		box->natural_width = layout_from_px((float)CONTROL_CHECK_SIZE * box->style.zoom_eff);
+		box->natural_height = layout_from_px((float)CONTROL_CHECK_SIZE * box->style.zoom_eff);
 		box->has_baseline = 0;
 		return 0;
 	}
