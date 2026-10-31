@@ -18,8 +18,12 @@
  */
 
 #include "net/net.h"
+#include "base/os-file.h"
+#include "base/os-system.h"
 
 #include <errno.h>
+#include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -120,7 +124,12 @@ static const struct url_special url_specials[] = {
 	{ NULL, 0 }
 };
 
+/* The User-Agent, made once from the system's part. */
+static pthread_once_t url_agent_once = PTHREAD_ONCE_INIT;
+static char url_agent[256];
+
 static void url_parts_init(struct url_parts *parts);
+static void url_agent_make(void);
 static void url_parts_release(struct url_parts *parts);
 static int url_clean(const char *input, size_t length, struct wb_buffer *cleaned);
 static int url_step(struct url_parser *parser, int c);
@@ -413,18 +422,26 @@ net_url_file_path(
 	const struct net_url *url,
 	struct wb_buffer *out)
 {
+	struct wb_buffer decoded;
 	int differs;
 	int error;
 
-	/* Only file: URLs on this machine name local files. */
+	/* Only file: URLs name local files. */
 	differs = strcmp(url->scheme, "file");
 	if (differs != 0)
 		return EPROTONOSUPPORT;
-	if (url->host != NULL && url->host[0] != '\0')
-		return ENOENT;
 
 	/* The path's bytes, decoded. */
-	error = net_percent_decode(url->path, strlen(url->path), out);
+	wb_buffer_init(&decoded);
+	error = net_percent_decode(url->path, strlen(url->path), &decoded);
+	if (error != 0) {
+		wb_buffer_release(&decoded);
+		return error;
+	}
+
+	/* The local path the system makes of the host and the path (ENOENT for another machine). */
+	error = wb_os_path_from_url(url->host, wb_buffer_string(&decoded), out);
+	wb_buffer_release(&decoded);
 	if (error != 0)
 		return error;
 
@@ -433,28 +450,47 @@ net_url_file_path(
 }
 
 /*
- * Writes the file: URL of an absolute local path (its bytes
- * percent-encoded as a path, with % ? and # escaped too).
+ * Writes the file: URL of an absolute local path (the host the system
+ * splits off, then the path's bytes percent-encoded as a path, with % ?
+ * and # escaped too).  Returns EINVAL for a path that is not absolute.
  */
 int
 net_url_from_file_path(
 	const char *path,
 	struct wb_buffer *out)
 {
+	struct wb_buffer host;
+	struct wb_buffer local;
+	const char *bytes;
 	size_t index;
 	int c;
 	int error;
 
-	/* The scheme and the empty host, then each byte of the path. */
+	/* The URL's host and path, as the system splits the local path. */
+	wb_buffer_init(&host);
+	wb_buffer_init(&local);
+	error = wb_os_url_from_path(path, &host, &local);
+	if (error != 0) {
+		wb_buffer_release(&host);
+		wb_buffer_release(&local);
+		return error;
+	}
+
+	/* The scheme and the host, then each byte of the path. */
 	error = wb_buffer_append_string(out, "file://");
-	for (index = 0; error == 0 && path[index] != '\0'; index++) {
-		c = (unsigned char)path[index];
+	if (error == 0)
+		error = wb_buffer_append(out, host.data, host.length);
+	bytes = wb_buffer_string(&local);
+	for (index = 0; error == 0 && index < local.length; index++) {
+		c = (unsigned char)bytes[index];
 		if (c == '%' || c == '#' || c == '?') {
 			error = wb_buffer_printf(out, "%%%02X", (unsigned)c);
 		} else {
 			error = url_encode(out, c, URL_SET_PATH);
 		}
 	}
+	wb_buffer_release(&host);
+	wb_buffer_release(&local);
 
 	/* A buffer that could not grow. */
 	if (error != 0)
@@ -462,6 +498,20 @@ net_url_from_file_path(
 
 	/* Succeeded: the URL is written. */
 	return 0;
+}
+
+/*
+ * Reports the User-Agent the browser sends, which navigator.userAgent
+ * reports too.  The string is static; any thread may call this.
+ */
+const char *
+net_user_agent(void)
+{
+	/* Made on the first call. */
+	pthread_once(&url_agent_once, url_agent_make);
+
+	/* Succeeded: the string lives as long as the program. */
+	return url_agent;
 }
 
 /*
@@ -2029,4 +2079,19 @@ url_named(
 	if (differs != 0)
 		return 0;
 	return 1;
+}
+
+/* Makes the User-Agent from the system's part of it. */
+static void
+url_agent_make(void)
+{
+	const char *system;
+
+	/* The browser's names around the system's. */
+	system = wb_os_user_agent_system();
+	snprintf(
+		url_agent,
+		sizeof(url_agent),
+		"Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+		system);
 }

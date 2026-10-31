@@ -7,7 +7,13 @@ LIBBROWSER_DIR := userland/desktop/libbrowser
 # generators, and the licences' notices are installed with the library (plan/ws074/design.md §17 D4).
 # The script core (the base library, the virtual machine and the JavaScript language), then the engine
 # over it (HTML, the DOM, CSS, the bindings, the network, the pages, the layout and the painting).
-LIBBROWSER_SCRIPT_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
+# The operating-system layer for the POSIX systems (zedBSD, Linux, FreeBSD); the script core uses its
+# clocks, random bytes and files.  The Windows files are listed by apps/browser-win32/Makefile.
+LIBBROWSER_OS_SOURCES := $(LIBBROWSER_DIR)/base/os-system-posix.c \
+	$(LIBBROWSER_DIR)/base/os-file-posix.c \
+	$(LIBBROWSER_DIR)/base/os-time-posix.c
+LIBBROWSER_SCRIPT_SOURCES := $(LIBBROWSER_OS_SOURCES) \
+	$(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/base/buffer.c \
 	$(LIBBROWSER_DIR)/base/vector.c \
 	$(LIBBROWSER_DIR)/base/utf.c \

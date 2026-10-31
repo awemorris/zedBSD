@@ -7080,9 +7080,17 @@ values_declared_number(
 	struct wb_buffer *out)
 {
 	char text[40];
+	int whole;
 
-	if (number == (double)(long)number)
-		snprintf(text, sizeof(text), "%ld", (long)number);
+	/* A whole number that a 64-bit integer holds is written without a point (NaN and the infinities are not). */
+	whole = 0;
+	if (number >= -9223372036854775808.0 && number < 9223372036854775808.0) {
+		if (number == floor(number))
+			whole = 1;
+	}
+
+	if (whole)
+		snprintf(text, sizeof(text), "%lld", (long long)number);
 	else
 		snprintf(text, sizeof(text), "%.6g", number);
 	return wb_buffer_append_string(out, text);

@@ -235,6 +235,39 @@ wb_buffer_string(
 }
 
 /*
+ * Finds the first place a run of bytes appears in others: haystack itself
+ * for an empty run, NULL when it does not appear.
+ */
+const void *
+wb_memmem(
+	const void *haystack,
+	size_t length,
+	const void *needle,
+	size_t needle_length)
+{
+	const unsigned char *bytes;
+	size_t index;
+	int differs;
+
+	/* An empty run is found where the bytes start; a longer run than the bytes nowhere. */
+	bytes = haystack;
+	if (needle_length == 0)
+		return bytes;
+	if (length < needle_length)
+		return NULL;
+
+	/* Each place the run could start. */
+	for (index = 0; index + needle_length <= length; index++) {
+		differs = memcmp(bytes + index, needle, needle_length);
+		if (differs == 0)
+			return bytes + index;
+	}
+
+	/* Not there. */
+	return NULL;
+}
+
+/*
  * Prepares an empty UTF-16 buffer.
  */
 void
