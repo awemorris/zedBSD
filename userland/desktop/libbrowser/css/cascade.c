@@ -1307,9 +1307,9 @@ cascade_compute(
 			style->direction = parent->direction;
 	}
 
-	/* A cell of the other orientation than its row is not laid out in a flow of its own (the table lays its cells out in its own). */
-	if (parent != NULL && style->display == CSS_DISPLAY_TABLE_CELL &&
-	    (style->writing_mode == CSS_WRITING_HORIZONTAL_TB) != (parent->writing_mode == CSS_WRITING_HORIZONTAL_TB)) {
+	/* A horizontal cell of a vertical table is not laid out in a flow of its own (the table lays its cells out in its own). */
+	if (parent != NULL && style->display == CSS_DISPLAY_TABLE_CELL && style->writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    parent->writing_mode != CSS_WRITING_HORIZONTAL_TB) {
 		style->writing_mode = parent->writing_mode;
 		style->writing_sideways = parent->writing_sideways;
 	}
