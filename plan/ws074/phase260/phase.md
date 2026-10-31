@@ -675,3 +675,48 @@ Origin: 2026-10-27 ユーザーの指示。
   - animation: transition と CSS animation の補間を engine で（interpolation・composition の試験は 4 つの method を全部通す必要がある。約 19 ID）。
   - view transition の group が捕えた element の style（mix-blend-mode・text-orientation・color-scheme）を持つ事（pseudo-get-computed-style）、animationstart 等の event、KeyframeEffect・new Animation()、getAnimations({subtree}) の疑似要素。
   - 丸い overflow clip（border-radius）を描画の clip に持つ（backdrop-filter の 3〜5 ID と他）。
+
+### q1727-i10 の途中経過（2026-10-31、P8。dev120〜dev124）
+
+- 基準: dev119 = 2,922 / 3,472（84.16%）。measure-snapshot.sh（jobs 6、1 回約 5 分）で測り、gap は build/tmp/p8/gapNNN.json、測定の出力は /tmp/p8out/devNNN。
+- 測定（計は Chromium が通す 3,472 のうち。後退は直前の測定と dev119 の両方と比べた）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev119 | 基準（i09） | 2,922（84.16%） | 283 / 177 / 84 / 6 |
+  | dev120（7926433cb） | shadow DOM 段階 1・CSS nesting | 2,936 | 277 / 177 / 76 / 6 |
+  | dev121（358c0a770） | position-try の tree scope・ShadowRoot.styleSheets・constructable stylesheet・grid/flex の baseline の grid container | 2,950 | 262 / 179 / 75 / 6 |
+  | dev122（f3f5d6a の後、@container・縦書き central baseline の修正を含む） | 後退 4（baseline-synthesis・grid-baseline-004）を直した後 | 2,956 | 259 / 176 / 75 / 6 |
+  | dev123（46ba00f44 の前の source） | table の row baseline、fieldset・overflow の縦書き baseline、module の top-level await | 2,971（85.57%） | 249 / 176 / 74 / 2 |
+  | dev124（46ba00f44） | link・@import の implicit @scope の owner（件数は変わらず） | 2,971（85.57%、gap 501） | 249 / 176 / 74 / 2 |
+
+  dev119 から +49、後退 0（毎回 dev119 と直前の測定の両方と比べた）。host build は `-Wall -Wextra -Werror` で warning 0。
+  Acid は最終の source（46ba00f44）で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%（/tmp/p8out/acid124）。
+
+- 直した物（要点。source は userland/desktop/libbrowser/）:
+  1. shadow DOM（dom/shadow.c・dom/node.c・bind/shadow.c ほか）: element に `shadow_root`（`struct dom_shadow_root`：host・closed・styleSheets・adopted）、tree root と flat parent（`dom_tree_root`・`dom_flat_parent`）、slot の割当（`dom_slot_of`）。
+     parser は `<template shadowrootmode=open|closed>` を親 element の shadow root にする（html/modes.c。fragment の parse は対象外）。JS は `attachShadow`・`shadowRoot`・ShadowRoot（mode・host・innerHTML・getElementById・styleSheets・adoptedStyleSheets）・`getRootNode({composed})`。
+     box の構築は flat tree（layout/box.c `box_build_children`：host は shadow の子、slot は割り当てた node か fallback）。UA sheet の `slot { display: contents }`。getComputedStyle・offsetParent・connected の判定は flat parent を歩く。
+  2. style の tree scope（css/cascade.c・css/parser.c）: sheet が owner の tree（shadow root か document）を持ち、selector は自分の tree の element だけに当たる（host は featureless で `:host`・`:scope` と `:is()` だけが当たる）。
+     `:host`・`:host()`・`:host-context()`・`::part()`（exportparts を辿る）・`::slotted()`。context の優先（外の tree の通常の宣言が内に勝つ、!important は逆）。view-transition-name・-class・anchor-name・anchor-scope・position-anchor・anchor()・position-try-fallbacks は
+     宣言した tree の物として扱い、別の tree からは見えない（layout/anchor.c は名前と参照の tree が同じ時だけ解く。@position-try は自分の tree と内側から見える）。
+  3. CSS nesting（css/parser.c `parser_style_rule`・`parser_nested_selectors`）: style rule の中の style rule（`&` は親の selector の :is()、`&` が無ければ子孫、先頭の combinator）と、入れ子の `@media`。
+  4. `@container`（css/parser.c・css/cascade.c `cascade_container_holds`・css/media.c）: 条件を media query の形で読み、rule の element の最も近い query container の size に対して評価（inline-size・block-size の名前も）。container の名前は未対応（最も近い物）。
+  5. constructable stylesheet（plan/ws074/phase260/cssom-rules.js の末尾・bind/prelude.c `sheetMark`・`sheetAdopt`・dom/shadow.c `dom_adopted_set`）: `new CSSStyleSheet()` は detached な style element の sheet（`constructed_sheet` で detached でも sheet を持つ）、
+     replaceSync・replace、`adoptedStyleSheets`（Document・ShadowRoot。root の holder fragment に静かに繋ぐ）。engine は adopted の sheet を document の sheet の後に、explicit な scope（shadow root）で足す（page/sheets.c）。
+  6. baseline（layout/inline.c・grid.c・flex.c・table.c）: grid container の baseline は first-row の item のうち matching な baseline に参加する物を先に、次に他方の baseline（1 行のみの item）、最後に grid order の先頭（`last baseline` は end の整列と flag で持つ）。
+     縦書き（physical mode が縦）の grid・flex は logical frame の central baseline（行の中心）で整列し、baseline を持たない item は border box の中央（sideways は従来のまま整列しない）。縦書きの baseline（legend を除く・scroll container は border box へ clamp）は
+     layout_logical_central_baseline・layout_vertical_baseline。table の cell は `vertical-align: baseline` の行の baseline に揃う。
+  7. module の top-level await（js/parser.c・js/compile.c）: top level に await がある module の program は async function として走る。link・@import の sheet の implicit @scope の root は owner の親（css_engine_set_owner_from）。
+- 通った ID（dev119 から）の主な物: css-view-transitions の shadow-part-* 5・names-are-tree-scoped・modify-style-via-cssom、css-anchor-position の anchor-name-in-shadow（2）・anchor-name-cross-shadow・anchor-scope-shadow-*（3）・position-try-tree-scoped・
+  at-position-try-invalidation-shadow-dom・anchor-position-dynamic-002・003・anchor-scroll-composited-scrolling（crash 4・scripted 1）・position-try-container-query、css-cascade の scope-shadow・scope-shadow-sharing・scope-declarations・scope-container、
+  css-flexbox/alignment と css-grid/alignment の baseline（grid・flex・fieldset・overflow の縦書き・横書き variant 約 20）、flexbox-align-self-horiz-001-table ほか。
+- 調べて直さなかった物（次の候補）:
+  - custom elements（`customElements.define` の upgrade と constructor。css-cascade の scope-part）、multicol の layout（baseline・anchor の multicol 約 10 ID）、`CSS.registerProperty`、dynamic `import()`（json-module・dynamic-import の 4 ID。compile が未対応）、
+    `caretPositionFromPoint`、style element の @import の load event（scope-implicit-external の 2 つ目）。
+  - transitions・animation の補間（flex-grow・flex-shrink・order・flex-basis・backdrop-filter・grid-template の composition・anchor-name・position-anchor・position-area の discrete）は style の変化の検出・CSS transitions・keyframes の補間（background-color なども）が engine に無い。約 20 ID。
+  - baseline: table の last baseline（flex-align-baseline-table-001 の 3 つ目）、縦書き grid の中の横書き item・orthogonal item の baseline（grid-align-baseline-001・002、synthesized 9 ID）、baseline が intrinsic size を決める（baseline-alignment-affects-intrinsic-size 6 ID・baseline-shim 3 ID）。
+  - @scope の入れ子（scope-nesting。style rule の中の @scope と CSSOM の入れ子）、@starting-style と transitions（scope-starting-style）、@keyframes・@property の @scope（scope-name-defining-rules。keyframes の background-color の補間が要る）。
+  - anchor() の min()・max() と canonical の順、CSS_TRACKS = 24 の固定長（grid-limits-001）、grid の `calc(sign())`・`sibling-index()`、backdrop-filter の drop-shadow・url。
+- 一時物（Q1 が消す。worktree p8-ws074）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-n1td3xaj.html、acid3/zedbsd-acid3-reference-mxis9kd3.html、acid3/zedbsd-acid3-diagnostic-t8qqg83w.html、build/ws074-suites/wpt/zz_dbg/、build/tmp/p8/sone/、build/tmp/p8/t/ の a〜l の html と dump.sh・ho・ho2。
+  /tmp/p8out の下の dev118〜dev122 の測定の出力とその .log（dev123・dev124 と acid124 を残す）、sub-tab・sone・t・dbg-server.pid・acid119・acid119.log。一覧は build/tmp/p8/delete-list-i10.txt。
