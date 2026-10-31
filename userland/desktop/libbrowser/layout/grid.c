@@ -120,6 +120,9 @@ static layout_unit grid_outer_height(const struct layout_box *item);
 static int grid_row_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *above);
 static void grid_row_baselines(const struct layout_box *box, const struct grid_state *grid, int row, layout_unit *first_above, layout_unit *first_below, layout_unit *last_above, layout_unit *last_below);
 static int grid_fixed_column_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *right_extent);
+static int grid_parent_height(const struct layout_tree *tree, const struct layout_box *box, layout_unit *basis);
+static int grid_column_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *before, layout_unit *after, int *flush_right);
+static void grid_column_baselines(const struct layout_box *box, const struct grid_state *grid, int column, layout_unit *left_before, layout_unit *left_after, layout_unit *right_before, layout_unit *right_after);
 static layout_unit grid_track_length(const struct css_length *length, layout_unit whole, int measuring);
 static void grid_release(struct grid_state *grid);
 static void grid_expand_repeats(struct layout_tree *tree, struct layout_box *box);
@@ -173,7 +176,8 @@ grid_expand_axis(
 	int *count,
 	struct css_track_repeat *repeat,
 	layout_unit available,
-	layout_unit gap)
+	layout_unit gap,
+	int at_least)
 {
 	layout_unit others;
 	layout_unit pattern;
@@ -215,6 +219,10 @@ grid_expand_axis(
 		numerator = available - others - gap * (layout_unit)(others_count - 1);
 		if (denominator > 0 && numerator > denominator)
 			times = (int)(numerator / denominator);
+
+		/* Sized by a minimum alone, the room has to be reached: the next repeat that covers it. */
+		if (at_least && denominator > 0 && numerator > 0 && numerator > denominator * (layout_unit)times)
+			times++;
 		if (times < 1)
 			times = 1;
 	}
@@ -245,7 +253,12 @@ grid_expand_repeats(
 	layout_unit available;
 	layout_unit gap;
 	layout_unit frame;
+	layout_unit basis;
+	layout_unit minimum;
+	layout_unit maximum;
 	int definite;
+	int definite_width;
+	int at_least;
 
 	measuring = tree->measuring;
 
@@ -262,46 +275,108 @@ grid_expand_repeats(
 	    !box->out_of_flow);
 	if (definite && !measuring)
 		available = box->width;
+	definite_width = available >= 0;
 	if (available < 0 && box->style.max_width.unit == CSS_UNIT_PX)
 		available = layout_from_px(box->style.max_width.value);
 	if (available < 0 && box->style.max_width.unit == CSS_UNIT_PERCENT && box->parent != NULL)
 		available = (layout_unit)((float)box->parent->width * box->style.max_width.value / 100.0f);
-	if (available < 0 && box->style.min_width.unit == CSS_UNIT_PX)
-		available = layout_from_px(box->style.min_width.value);
-	if (available < 0 && box->style.min_width.unit == CSS_UNIT_PERCENT && box->parent != NULL)
-		available = (layout_unit)((float)box->parent->width * box->style.min_width.value / 100.0f);
+
+	/* A minimum larger than the maximum (or alone) is the size the repeats fill. */
+	minimum = -1;
+	if (box->style.min_width.unit == CSS_UNIT_PX)
+		minimum = layout_from_px(box->style.min_width.value);
+	if (box->style.min_width.unit == CSS_UNIT_PERCENT && box->parent != NULL)
+		minimum = (layout_unit)((float)box->parent->width * box->style.min_width.value / 100.0f);
+
+	/* An aspect-ratio carries a pixel minimum height over to a minimum width. */
+	if (!definite_width && box->style.aspect_ratio > 0.0f && box->style.height.unit == CSS_UNIT_AUTO &&
+	    box->style.min_height.unit == CSS_UNIT_PX) {
+		layout_unit transferred;
+
+		transferred = (layout_unit)((float)layout_from_px(box->style.min_height.value) * box->style.aspect_ratio);
+		if (transferred > minimum)
+			minimum = transferred;
+	}
+	at_least = 0;
+	if (!definite_width && minimum > available) {
+		/* A maximum, even a smaller one, keeps the repeats from overflowing: only a minimum alone has to be reached. */
+		at_least = available < 0 && !box->max_width_hidden;
+		available = minimum;
+	}
 	grid_expand_axis(box->style.columns, &box->style.column_count, &box->style.column_repeat,
-	    available, gap);
+	    available, gap, at_least);
 
 	/* The rows need a definite height. */
 	gap = 0;
 	available = -1;
+	at_least = 0;
 	if (box->style.row_gap.unit == CSS_UNIT_PX)
 		gap = layout_from_px(box->style.row_gap.value);
 	frame = 0;
 	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
 		frame = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	/* The maximum and the minimum height, in pixels or a percentage of a height that is known (-1: none). */
+	maximum = -1;
+	if (box->style.max_height.unit == CSS_UNIT_PX)
+		maximum = layout_from_px(box->style.max_height.value);
+	else if (box->style.max_height.unit == CSS_UNIT_PERCENT && grid_parent_height(tree, box, &basis))
+		maximum = (layout_unit)((float)basis * box->style.max_height.value / 100.0f);
+	minimum = -1;
+	if (box->style.min_height.unit == CSS_UNIT_PX)
+		minimum = layout_from_px(box->style.min_height.value);
+	else if (box->style.min_height.unit == CSS_UNIT_PERCENT && grid_parent_height(tree, box, &basis))
+		minimum = (layout_unit)((float)basis * box->style.min_height.value / 100.0f);
+
+	/* A pixel height is held within them; without one the maximum, or the minimum when it is larger or alone, is the room. */
 	if (box->style.height.unit == CSS_UNIT_PX) {
-		/* A pixel height, within its pixel minimum and maximum. */
 		available = layout_from_px(box->style.height.value);
-		if (box->style.max_height.unit == CSS_UNIT_PX && available > layout_from_px(box->style.max_height.value))
-			available = layout_from_px(box->style.max_height.value);
-		if (box->style.min_height.unit == CSS_UNIT_PX && available < layout_from_px(box->style.min_height.value))
-			available = layout_from_px(box->style.min_height.value);
+		if (maximum >= 0 && available > maximum)
+			available = maximum;
+		if (minimum >= 0 && available < minimum)
+			available = minimum;
 		available -= frame;
 		if (available < 0)
 			available = 0;
-	} else if (box->style.max_height.unit == CSS_UNIT_PX) {
-		available = layout_from_px(box->style.max_height.value);
-	} else if (box->style.max_height.unit == CSS_UNIT_PERCENT && tree->containing_height_definite) {
-		available = (layout_unit)((float)tree->containing_height * box->style.max_height.value / 100.0f);
-	} else if (box->style.min_height.unit == CSS_UNIT_PX) {
-		available = layout_from_px(box->style.min_height.value);
-	} else if (box->style.min_height.unit == CSS_UNIT_PERCENT && tree->containing_height_definite) {
-		available = (layout_unit)((float)tree->containing_height * box->style.min_height.value / 100.0f);
+	} else {
+		available = maximum;
+		at_least = 0;
+		if (minimum > available) {
+			at_least = available < 0;
+			available = minimum;
+		}
 	}
 	grid_expand_axis(box->style.rows, &box->style.row_count, &box->style.row_repeat,
-	    available, gap);
+	    available, gap, at_least);
+}
+
+/* Finds the height a percentage height of a grid is of: its parent's, when that is a length (the tree's when the parent's is not one). */
+static int
+grid_parent_height(
+	const struct layout_tree *tree,
+	const struct layout_box *box,
+	layout_unit *basis)
+{
+	const struct layout_box *parent;
+	layout_unit frame;
+
+	/* A parent with a height in pixels. */
+	parent = box->parent;
+	if (parent != NULL && parent->style.height.unit == CSS_UNIT_PX) {
+		frame = 0;
+		if (parent->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			frame = parent->border[CSS_TOP] + parent->padding[CSS_TOP] + parent->padding[CSS_BOTTOM] + parent->border[CSS_BOTTOM];
+		*basis = layout_from_px(parent->style.height.value) - frame;
+		if (*basis < 0)
+			*basis = 0;
+		return 1;
+	}
+
+	/* Otherwise what the tree knows. */
+	if (tree->containing_height_definite) {
+		*basis = tree->containing_height;
+		return 1;
+	}
+	return 0;
 }
 
 /* Marks the tracks of an auto-fit repeat that hold no item (the others keep their sizes). */
@@ -483,6 +558,13 @@ layout_grid(
 	layout_unit last_above;
 	layout_unit last_below;
 	layout_unit right_extent;
+	layout_unit col_before;
+	layout_unit col_after;
+	layout_unit left_before;
+	layout_unit left_after;
+	layout_unit right_before;
+	layout_unit right_after;
+	int col_right;
 	layout_unit shared_right_extent;
 	layout_unit free_height;
 	layout_unit saved_height;
@@ -522,6 +604,7 @@ layout_grid(
 		child->static_y_align = CSS_ALIGN_AUTO;
 		child->static_grid_area = 0;
 		child->cb_set = 0;
+		child->area_from_anchor = 0;
 		child->static_unsafe = 1;
 		child->static_x_safe = 0;
 		child->static_y_safe = 0;
@@ -843,6 +926,14 @@ layout_grid(
 			if (area_width > outer_width && justify == CSS_ALIGN_CENTER)
 				child->x += (area_width - outer_width) / 2;
 		}
+		/* Vertical items of a column that align by baseline share it: the left group flush left, the right group flush right. */
+		if (grid_column_baseline(box, item, &col_before, &col_after, &col_right)) {
+			grid_column_baselines(box, &grid, item->column, &left_before, &left_after, &right_before, &right_after);
+			if (col_right)
+				child->x = x + area_width - right_after - col_before + child->margin[CSS_LEFT];
+			else
+				child->x = x + left_before - col_before + child->margin[CSS_LEFT];
+		}
 		if (grid_fixed_column_baseline(box, item, &right_extent)) {
 			/* Orthogonal empty items share a border-left baseline in this column. */
 			shared_right_extent = 0;
@@ -865,7 +956,8 @@ layout_grid(
 		}
 		if (baseline_group != 0) {
 			/* Members of the row share their group's baseline: the first group's below the row's top, the last's above its bottom. */
-			grid_row_baselines(box, &grid, item->row, &first_above, &first_below, &last_above, &last_below);
+			grid_row_baselines(box, &grid, baseline_group == 1 ? item->row : item->row + item->row_span - 1,
+			    &first_above, &first_below, &last_above, &last_below);
 			if (baseline_group == 1)
 				child->y += first_above - baseline;
 			else
@@ -2377,6 +2469,7 @@ grid_abspos_one(
 		child->cb_top = (child->cb_top_auto ? -box->padding[CSS_TOP] : row_shift + top) - off_y;
 		child->cb_bottom = (child->cb_bottom_auto ? 0 : row_shift + bottom) - off_y;
 		child->cb_set = 1;
+		child->area_from_anchor = 0;
 
 		if (!direct)
 			return;
@@ -3928,9 +4021,7 @@ grid_row_baseline(
 	if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
 		return 0;
 
-	/* One row, without an auto margin across. */
-	if (item->row_span != 1)
-		return 0;
+	/* Without an auto margin across. */
 	if (child->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO ||
 	    child->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
 		return 0;
@@ -3977,27 +4068,119 @@ grid_row_baselines(
 	layout_unit above;
 	layout_unit outer;
 	size_t index;
+	int span;
 	int group;
 
-	/* Each member of the row. */
+	/* Each member of the row: an item spanning rows takes part in its first row's first group and its last row's last group, and only reaches into those rows by the part towards them. */
 	*first_above = *first_below = *last_above = *last_below = 0;
 	for (index = 0; index < grid->item_count; index++) {
-		if (grid->items[index].row != row)
-			continue;
 		group = grid_row_baseline(box, &grid->items[index], &above);
 		if (group == 0)
+			continue;
+		span = grid->items[index].row_span;
+		if (group == 1 && grid->items[index].row != row)
+			continue;
+		if (group == 2 && grid->items[index].row + span - 1 != row)
 			continue;
 		outer = grid_outer_height(grid->items[index].box);
 		if (group == 1) {
 			if (above > *first_above)
 				*first_above = above;
-			if (outer - above > *first_below)
+			if (span == 1 && outer - above > *first_below)
 				*first_below = outer - above;
 		} else {
-			if (above > *last_above)
+			if (span == 1 && above > *last_above)
 				*last_above = above;
 			if (outer - above > *last_below)
 				*last_below = outer - above;
+		}
+	}
+}
+
+/*
+ * Tells whether a vertical item of a horizontal grid aligns by baseline
+ * along the row (justify-self baseline or last baseline), and where its
+ * baseline is: how far right of its margin box's left edge (before) and how
+ * far its margin box reaches left of it (after).  The item's start side (the
+ * first baseline's) or end side (the last's) is the side its group is
+ * flush to: flush_right is set for the right one.
+ */
+static int
+grid_column_baseline(
+	const struct layout_box *box,
+	const struct grid_item *item,
+	layout_unit *before,
+	layout_unit *after,
+	int *flush_right)
+{
+	const struct layout_box *child;
+	layout_unit baseline;
+	int justify;
+	int last;
+	int found;
+
+	/* Only a vertical item of a horizontal grid, in one column. */
+	child = item->box;
+	if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB || !child->grid_orthogonal || item->column_span != 1)
+		return 0;
+	if (child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+		return 0;
+
+	/* A baseline preference along the row. */
+	justify = child->style.justify_self;
+	last = (child->style.last_baselines & 0x100u) != 0;
+	if (justify == CSS_ALIGN_AUTO) {
+		justify = box->style.justify_items;
+		last = (box->style.last_baselines & 0x200u) != 0;
+	}
+	if (justify != CSS_ALIGN_BASELINE && !last)
+		return 0;
+
+	/* The line's central baseline, or the border box's left (under) edge when it has no line. */
+	found = layout_vertical_baseline(child, last, &baseline);
+	if (!found)
+		baseline = 0;
+	*before = child->margin[CSS_LEFT] + baseline;
+	*after = child->margin[CSS_LEFT] + child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->width +
+	    child->padding[CSS_RIGHT] + child->border[CSS_RIGHT] + child->margin[CSS_RIGHT] - *before;
+
+	/* The first baseline's group is flush to the item's block-start side, the last's to its block-end side. */
+	*flush_right = (child->style.writing_mode == CSS_WRITING_VERTICAL_RL) != (last != 0);
+	return 1;
+}
+
+/* Finds a column's baseline groups: the farthest their baselines lie from the left edge (left group) and from the right edge (right group), and the room beyond. */
+static void
+grid_column_baselines(
+	const struct layout_box *box,
+	const struct grid_state *grid,
+	int column,
+	layout_unit *left_before,
+	layout_unit *left_after,
+	layout_unit *right_before,
+	layout_unit *right_after)
+{
+	layout_unit before;
+	layout_unit after;
+	size_t index;
+	int right;
+
+	*left_before = *left_after = *right_before = *right_after = 0;
+	for (index = 0; index < grid->item_count; index++) {
+		if (grid->items[index].column != column)
+			continue;
+		if (!grid_column_baseline(box, &grid->items[index], &before, &after, &right))
+			continue;
+		if (right) {
+			if (before > *right_before)
+				*right_before = before;
+			if (after > *right_after)
+				*right_after = after;
+		} else {
+			if (before > *left_before)
+				*left_before = before;
+			if (after > *left_after)
+				*left_after = after;
 		}
 	}
 }

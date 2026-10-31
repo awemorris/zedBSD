@@ -38,7 +38,8 @@ def main():
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     fonts = rwr.font_directory()
-    program = ROOT / "build/ws074-host/plain/browser"
+    import os
+    program = ROOT / os.environ.get("BROWSER", "build/ws074-host/plain/browser")
     cprogram = ROOT / "plan/ws074/tests/chrome-run.js"
     tmp = Path(tempfile.mkdtemp(prefix="ref-", dir=out)); data = tmp / "data"; data.mkdir()
     with rwr.suite_server() as base:

@@ -2100,6 +2100,53 @@ layout_first_baseline(
 }
 
 /*
+ * Finds the first (or last) line's central baseline of a vertical box as a
+ * distance right of its border box's left edge.  Reports whether it has one.
+ */
+int
+layout_vertical_baseline(
+	const struct layout_box *box,
+	int last,
+	layout_unit *offset)
+{
+	const struct layout_box *child;
+	const struct layout_line *line;
+	layout_unit centre;
+	layout_unit inner;
+	int found;
+
+	/* A replaced box has no baseline. */
+	if (box->replaced)
+		return 0;
+
+	/* A block of lines: the line's centre (a vertical box's lines keep their physical offset from the content box's left edge). */
+	if (box->children_inline) {
+		if (box->line_count == 0)
+			return 0;
+		line = last ? &box->lines[box->line_count - 1] : &box->lines[0];
+		centre = line->y + line->height / 2;
+		*offset = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + centre;
+		return 1;
+	}
+
+	/* A block of blocks: the first (or last) child in the flow that has one. */
+	found = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE || child->replaced)
+			continue;
+		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
+			continue;
+		if (!layout_vertical_baseline(child, last, &inner))
+			continue;
+		*offset = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + child->x + inner;
+		found = 1;
+		if (!last)
+			break;
+	}
+	return found;
+}
+
+/*
  * Finds a laid out box's last baseline as a distance below the top of its
  * border box.  Reports whether it has one.
  */

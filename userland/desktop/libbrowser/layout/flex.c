@@ -91,6 +91,8 @@ static void flex_place_line(struct layout_box *box, struct flex_item *items, siz
 static layout_unit flex_cross_outer(const struct layout_box *item, int row);
 static int flex_align_of(const struct layout_box *box, const struct layout_box *item);
 static int flex_baseline_above(const struct layout_box *box, const struct layout_box *item, int row, layout_unit *above);
+static int flex_column_baseline(const struct layout_box *box, const struct layout_box *item, int row, int horizontal, layout_unit *before, layout_unit *after, int *flush_right);
+static int flex_column_has_vertical(const struct layout_box *box, const struct flex_item *items, size_t count, int row);
 static layout_unit flex_length(const struct css_length *length, layout_unit basis);
 
 /* One flex line while the container's lines are being sized. */
@@ -122,7 +124,12 @@ layout_flex(
 	layout_unit line_cross;
 	layout_unit max_above[2];
 	layout_unit max_below[2];
+	layout_unit column_before[2];
+	layout_unit column_after[2];
 	layout_unit above;
+	layout_unit below;
+	int column_right;
+	int horizontal;
 	int group;
 	layout_unit cross_cursor;
 	layout_unit sizing;
@@ -284,6 +291,8 @@ layout_flex(
 		line_cross = 0;
 		max_above[0] = max_above[1] = 0;
 		max_below[0] = max_below[1] = 0;
+		column_before[0] = column_before[1] = 0;
+		column_after[0] = column_after[1] = 0;
 		for (index = start; index < end; index++) {
 			error = flex_lay_item(tree, box, &items[index], row);
 			if (error != 0) {
@@ -306,9 +315,22 @@ layout_flex(
 					max_below[group - 1] = cross - above;
 			}
 		}
+
+		/* A column's items share baselines across it: the group flush left and the group flush right each need room either side of theirs. */
+		horizontal = flex_column_has_vertical(box, items + start, end - start, row);
+		for (index = start; index < end; index++) {
+			if (flex_column_baseline(box, items[index].box, row, horizontal, &above, &below, &column_right)) {
+				if (above > column_before[column_right])
+					column_before[column_right] = above;
+				if (below > column_after[column_right])
+					column_after[column_right] = below;
+			}
+		}
 		for (group = 0; group < 2; group++) {
 			if (max_above[group] + max_below[group] > line_cross)
 				line_cross = max_above[group] + max_below[group];
+			if (column_before[group] + column_after[group] > line_cross)
+				line_cross = column_before[group] + column_after[group];
 		}
 
 		/* A single line of a row fills a container of a height of its own; a column's line fills its width. */
@@ -2328,8 +2350,13 @@ flex_place_line(
 	size_t index;
 	int reverse;
 	layout_unit above;
+	layout_unit below;
 	layout_unit max_above;
 	layout_unit max_below;
+	layout_unit column_before[2];
+	layout_unit column_after[2];
+	int column_right;
+	int horizontal;
 	int group;
 	int align;
 	int auto_first;
@@ -2345,12 +2372,26 @@ flex_place_line(
 	 */
 	max_above = 0;
 	max_below = 0;
+	column_before[0] = column_before[1] = 0;
+	column_after[0] = column_after[1] = 0;
 	for (index = 0; index < count; index++) {
 		group = flex_baseline_above(box, items[index].box, row, &above);
 		if (group == 1 && above > max_above)
 			max_above = above;
 		if (group == 2 && flex_cross_outer(items[index].box, row) - above > max_below)
 			max_below = flex_cross_outer(items[index].box, row) - above;
+
+	}
+
+	/* The shared baselines across a column: each side's group needs room either side of its baseline. */
+	horizontal = flex_column_has_vertical(box, items, count, row);
+	for (index = 0; index < count; index++) {
+		if (flex_column_baseline(box, items[index].box, row, horizontal, &above, &below, &column_right)) {
+			if (above > column_before[column_right])
+				column_before[column_right] = above;
+			if (below > column_after[column_right])
+				column_after[column_right] = below;
+		}
 	}
 
 	/* Keep overflow signed for end and center; only an indefinite size has no remaining space. */
@@ -2526,6 +2567,15 @@ flex_place_line(
 				child->y += frame;
 			else
 				child->x += frame;
+		} else if (flex_column_baseline(box, child, row, horizontal, &above, &below, &column_right)) {
+			/* A vertical item of a column moves until its baseline is its group's: flush left, or flush right. */
+			if (column_right)
+				frame = line_cross - column_after[1] - above;
+			else
+				frame = column_before[0] - above;
+			if (box->style.flex_wrap == CSS_FLEX_WRAP_REVERSE)
+				frame = line_cross - frame - cross_outer;
+			child->x += frame;
 		} else if ((group = flex_baseline_above(box, child, row, &above)) != 0) {
 			/* A baseline-aligned item moves down until its baseline is its group's (before wrap-reverse mirrors the line). */
 			if (group == 1)
@@ -2653,6 +2703,90 @@ flex_baseline_above(
 		    item->border[CSS_BOTTOM];
 	*above = item->margin[CSS_TOP] + baseline;
 	return last ? 2 : 1;
+}
+
+/*
+ * Tells whether a vertical item of a column takes part in the baseline
+ * alignment across it (align-self baseline or last baseline), and where its
+ * baseline is: how far right of its margin box's left edge (before), and how
+ * far its margin box reaches right of it (after).  The group is flush left or
+ * flush right (flush_right) by the side the item's first baseline starts from
+ * (its block start) or its last baseline ends at (its block end).
+ */
+static int
+flex_column_baseline(
+	const struct layout_box *box,
+	const struct layout_box *item,
+	int row,
+	int horizontal,
+	layout_unit *before,
+	layout_unit *after,
+	int *flush_right)
+{
+	layout_unit baseline;
+	int align;
+	int last;
+	int found;
+
+	/* Only an item of a column of a horizontal container, with no auto margin across (a horizontal item only when a vertical one shares the line). */
+	if (row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
+	    layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB || item->replaced || item->out_of_flow)
+		return 0;
+	if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && !horizontal)
+		return 0;
+	if (item->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || item->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+		return 0;
+
+	/* A baseline preference. */
+	align = item->style.align_self;
+	last = (item->style.last_baselines & 8u) != 0;
+	if (align == CSS_ALIGN_AUTO) {
+		align = box->style.align_items;
+		last = (box->style.last_baselines & 4u) != 0;
+	}
+	if (align != CSS_ALIGN_BASELINE && !last)
+		return 0;
+
+	/* The central baseline of its first (or last) line, or its border box's left edge (a horizontal item's, whose last baseline is its right edge). */
+	found = 0;
+	if (item->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
+		found = layout_vertical_baseline(item, last, &baseline);
+	if (!found)
+		baseline = 0;
+	if (!found && item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && last)
+		baseline = item->border[CSS_LEFT] + item->padding[CSS_LEFT] + item->width + item->padding[CSS_RIGHT] + item->border[CSS_RIGHT];
+	*before = item->margin[CSS_LEFT] + baseline;
+	*after = flex_cross_outer(item, 0) - *before;
+	*flush_right = (item->style.writing_mode == CSS_WRITING_VERTICAL_RL) != (last != 0);
+	if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+		*flush_right = last != 0;
+
+	/* wrap-reverse runs the cross axis the other way, which turns every group round. */
+	if (box->style.flex_wrap == CSS_FLEX_WRAP_REVERSE)
+		*flush_right = !*flush_right;
+	return 1;
+}
+
+/* Tells whether any item of a column baseline-aligns as a vertical item (so that horizontal ones share its baselines). */
+static int
+flex_column_has_vertical(
+	const struct layout_box *box,
+	const struct flex_item *items,
+	size_t count,
+	int row)
+{
+	layout_unit before;
+	layout_unit after;
+	size_t index;
+	int right;
+
+	for (index = 0; index < count; index++) {
+		if (items[index].box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+			continue;
+		if (flex_column_baseline(box, items[index].box, row, 0, &before, &after, &right))
+			return 1;
+	}
+	return 0;
 }
 
 /* Resolves a length (pixels, or a percentage with its added pixels) against a basis; anything else is zero. */

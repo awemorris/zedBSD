@@ -853,6 +853,14 @@ block_children(
 		if (child->out_of_flow) {
 			child->static_x = 0;
 			child->static_y = cursor + pending;
+			child->static_x_from_right = 0;
+			child->static_x_area_width = 0;
+			child->static_y_area_height = 0;
+			child->static_x_align = CSS_ALIGN_AUTO;
+			child->static_y_align = CSS_ALIGN_AUTO;
+			child->static_x_align_from_right = 0;
+			child->static_x_safe = 0;
+			child->static_y_safe = 0;
 			if (first && collapse_top)
 				child->static_y = 0;
 			continue;

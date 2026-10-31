@@ -229,7 +229,7 @@ layout_absolute(
 	content_y = box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
 
 	/* The lines are relative to the block; boxes out of the flow among them start at its content's top. */
-	if (box->children_inline) {
+	if (box->children_inline && !(box->line_count == 0 && box->physical_style == NULL && box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)) {
 		box_inline_relative(box);
 		box_static_inline(box, content_x, content_y);
 		return;

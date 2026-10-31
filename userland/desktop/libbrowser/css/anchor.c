@@ -852,8 +852,10 @@ both:
 int
 css_position_area_regions(
 	int packed,
-	int writing_mode,
-	int direction,
+	int cb_mode,
+	int cb_direction,
+	int self_mode,
+	int self_direction,
 	int *x0,
 	int *x1,
 	int *y0,
@@ -868,6 +870,10 @@ css_position_area_regions(
 	int last;
 	int flip;
 	int across;
+	int self;
+	int writing_mode;
+	int direction;
+	int logical;
 
 	/* The keywords (one alone stands for both axes when it names none). */
 	if (packed < 0)
@@ -893,7 +899,7 @@ css_position_area_regions(
 			if (count == 1) {
 				/* Both axes. */
 				css_position_area_regions(key - anchor_area_keywords + 256 * (int)(key - anchor_area_keywords + 1),
-				    writing_mode, direction, x0, x1, y0, y1);
+				    cb_mode, cb_direction, self_mode, self_direction, x0, x1, y0, y1);
 				if (axis != ANCHOR_AREA_CENTER)
 					return 1;
 				*x0 = *x1 = *y0 = *y1 = 1;
@@ -921,12 +927,30 @@ css_position_area_regions(
 		if (axis == ANCHOR_AREA_SELF_INLINE)
 			axis = ANCHOR_AREA_INLINE;
 
-		/* The physical axis and its direction. */
+		/* The keywords with self use the box's own writing mode and direction, the others the containing block's. */
+		self = strstr(key->name, "self") != NULL;
+		writing_mode = self ? self_mode : cb_mode;
+		direction = self ? self_direction : cb_direction;
+
+		/* sideways-lr (the mode 3) is vertical-lr with its inline axis the other way up. */
+		if (writing_mode == 3) {
+			writing_mode = CSS_WRITING_VERTICAL_LR;
+			direction = direction == CSS_DIRECTION_RTL ? CSS_DIRECTION_LTR : CSS_DIRECTION_RTL;
+		}
+
+		/* The physical axis and its direction (left, right, top and bottom do not turn with the mode). */
+		logical = strstr(key->name, "start") != NULL || strstr(key->name, "end") != NULL;
 		flip = 0;
 		across = axis == ANCHOR_AREA_X;
-		if (axis == ANCHOR_AREA_X)
-			flip = direction == CSS_DIRECTION_RTL && writing_mode == CSS_WRITING_HORIZONTAL_TB && key->name[0] != 'l' &&
-			    key->name[0] != 'r' && strstr(key->name, "left") == NULL && strstr(key->name, "right") == NULL;
+		if (axis == ANCHOR_AREA_X && logical) {
+			/* The x axis is the inline axis of a horizontal mode, the block axis of a vertical one. */
+			flip = writing_mode == CSS_WRITING_HORIZONTAL_TB ? direction == CSS_DIRECTION_RTL :
+			    writing_mode == CSS_WRITING_VERTICAL_RL;
+		}
+		if (axis == ANCHOR_AREA_Y && logical) {
+			/* The y axis is the inline axis of a vertical mode. */
+			flip = writing_mode != CSS_WRITING_HORIZONTAL_TB && direction == CSS_DIRECTION_RTL;
+		}
 		if (axis == ANCHOR_AREA_BLOCK) {
 			across = writing_mode != CSS_WRITING_HORIZONTAL_TB;
 			flip = writing_mode == CSS_WRITING_VERTICAL_RL;

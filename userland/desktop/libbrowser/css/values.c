@@ -3547,6 +3547,9 @@ values_wide_keyword(
 	case SHORT_PADDING:
 		first = CSS_PROP_PADDING_TOP;
 		break;
+	case SHORT_INSET:
+		first = CSS_PROP_TOP;
+		break;
 	case SHORT_BORDER_WIDTH:
 		first = CSS_PROP_BORDER_TOP_WIDTH;
 		break;

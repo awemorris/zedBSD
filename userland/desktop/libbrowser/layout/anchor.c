@@ -47,6 +47,8 @@ static void anchor_flip(struct layout_tree *tree, struct layout_box *box, int ho
 static const struct css_anchor_expr *anchor_turn(struct layout_tree *tree, const struct css_anchor_expr *expr, int how);
 static layout_unit anchor_inset(const struct css_length *length, layout_unit size);
 static void anchor_area_align(struct layout_box *box, int across, int align, int first, int last, layout_unit start, layout_unit end, layout_unit anchor_start, layout_unit anchor_size);
+static int anchor_area_aligned(int align);
+static int anchor_start_diagonal(const struct css_style *cb_style, int mode);
 
 /*
  * Finishes a box's insets and sizes that hold anchor functions against
@@ -683,6 +685,8 @@ void
 layout_anchor_area(
 	const struct layout_tree *tree,
 	struct layout_box *box,
+	int cb_mode,
+	int cb_direction,
 	layout_unit x,
 	layout_unit y,
 	layout_unit width,
@@ -702,8 +706,25 @@ layout_anchor_area(
 	int first;
 	int found;
 
+	/* A grid area that is the box's containing block is the one the position-area is cut from (kept across the tries). */
+	if (box->cb_set && !box->area_from_anchor) {
+		box->area_grid[0] = box->cb_left_auto ? x : box->cb_left;
+		box->area_grid[1] = box->cb_top_auto ? y : box->cb_top;
+		box->area_grid[2] = (box->cb_right_auto ? x + width : box->cb_right) - box->area_grid[0];
+		box->area_grid[3] = (box->cb_bottom_auto ? y + height : box->cb_bottom) - box->area_grid[1];
+		box->area_grid_known = 1;
+	} else if (!box->cb_set) {
+		box->area_grid_known = 0;
+	}
+	if (box->area_grid_known) {
+		x = box->area_grid[0];
+		y = box->area_grid[1];
+		width = box->area_grid[2];
+		height = box->area_grid[3];
+	}
+
 	/* The area's regions, and the anchor. */
-	if (!css_position_area_regions(box->style.position_area, box->style.writing_mode, box->style.direction, &x0, &x1, &y0, &y1))
+	if (!css_position_area_regions(box->style.position_area, cb_mode, cb_direction, position_area_mode(box->physical_style != NULL ? box->physical_style : &box->style), (box->physical_style != NULL ? box->physical_style : &box->style)->direction, &x0, &x1, &y0, &y1))
 		return;
 	found = anchor_find(tree, box, box->style.position_anchor, &rect);
 	if (!found)
@@ -730,14 +751,14 @@ layout_anchor_area(
 	}
 
 	/* The grid's lines: the containing block's edges and the anchor's. */
-	across[0] = x;
+	across[0] = x < rect.x ? x : rect.x;
 	across[1] = rect.x;
 	across[2] = rect.x + rect.width;
-	across[3] = x + width;
-	down[0] = y;
+	across[3] = x + width > rect.x + rect.width ? x + width : rect.x + rect.width;
+	down[0] = y < rect.y ? y : rect.y;
 	down[1] = rect.y;
 	down[2] = rect.y + rect.height;
-	down[3] = y + height;
+	down[3] = y + height > rect.y + rect.height ? y + height : rect.y + rect.height;
 	left = across[x0];
 	right = across[x1 + 1];
 	top = down[y0];
@@ -748,11 +769,12 @@ layout_anchor_area(
 		bottom = top;
 
 	/* The area is the containing block. */
-	box->area_bounds[0] = across[0];
-	box->area_bounds[1] = across[3];
-	box->area_bounds[2] = down[0];
-	box->area_bounds[3] = down[3];
+	box->area_bounds[0] = x;
+	box->area_bounds[1] = x + width;
+	box->area_bounds[2] = y;
+	box->area_bounds[3] = y + height;
 	box->cb_set = 1;
+	box->area_from_anchor = 1;
 	box->cb_left = left;
 	box->cb_right = right;
 	box->cb_top = top;
@@ -779,6 +801,28 @@ layout_anchor_area(
 		anchor_area_align(box, 1, box->style.justify_self, x0, x1, left, right, rect.x, rect.width);
 	if (box->style.offset[CSS_TOP].unit == CSS_UNIT_AUTO && box->style.offset[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
 		anchor_area_align(box, 0, box->style.align_self, y0, y1, top, bottom, rect.y, rect.height);
+
+	/* Insets on both sides of a box that has a size align it between them, in the area the insets leave. */
+	if (box->style.width.unit != CSS_UNIT_AUTO && box->style.offset[CSS_LEFT].unit == CSS_UNIT_PX &&
+	    box->style.offset[CSS_RIGHT].unit == CSS_UNIT_PX && anchor_area_aligned(box->style.justify_self)) {
+		box->area_inset_x = 1;
+		anchor_area_align(box, 1, box->style.justify_self, x0, x1, left + layout_from_px(box->style.offset[CSS_LEFT].value),
+		    right - layout_from_px(box->style.offset[CSS_RIGHT].value), rect.x, rect.width);
+	}
+	if (box->style.height.unit != CSS_UNIT_AUTO && box->style.offset[CSS_TOP].unit == CSS_UNIT_PX &&
+	    box->style.offset[CSS_BOTTOM].unit == CSS_UNIT_PX && anchor_area_aligned(box->style.align_self)) {
+		box->area_inset_y = 1;
+		anchor_area_align(box, 0, box->style.align_self, y0, y1, top + layout_from_px(box->style.offset[CSS_TOP].value),
+		    bottom - layout_from_px(box->style.offset[CSS_BOTTOM].value), rect.y, rect.height);
+	}
+}
+
+/* Tells whether a self-alignment is the area's own (normal, auto or one of the plain places, not stretch). */
+static int
+anchor_area_aligned(
+	int align)
+{
+	return align != CSS_ALIGN_STRETCH && align != CSS_ALIGN_BASELINE && align != CSS_ALIGN_ANCHOR_CENTER;
 }
 
 /*
@@ -868,6 +912,35 @@ anchor_area_align(
 }
 
 /*
+ * Tells whether a containing block's block-start side and inline-start side
+ * lie on the diagonal from the top left to the bottom right (rather than the
+ * one from the top right to the bottom left).
+ */
+static int
+anchor_start_diagonal(
+	const struct css_style *cb_style,
+	int mode)
+{
+	int rtl;
+
+	/* The inline axis runs the other way for rtl, and in sideways-lr (which flows from the bottom). */
+	rtl = cb_style->direction == CSS_DIRECTION_RTL;
+	if (mode == 3)
+		rtl = !rtl;
+
+	/* Horizontal: top with left (ltr) or right (rtl). */
+	if (mode == CSS_WRITING_HORIZONTAL_TB)
+		return !rtl;
+
+	/* vertical-rl: right with top (ltr) or bottom (rtl). */
+	if (mode == CSS_WRITING_VERTICAL_RL)
+		return rtl;
+
+	/* vertical-lr: left with top (ltr) or bottom (rtl). */
+	return !rtl;
+}
+
+/*
  * Gives a box the style of one of its position-try-fallbacks entries
  * (its @position-try rule's properties, its position-area, then its
  * try-tactics in order: flip-block and flip-y swap the box's top and
@@ -883,8 +956,11 @@ layout_anchor_try(
 {
 	const struct css_try_entry *item;
 	const struct css_try_style *rule;
+	const struct layout_box *containing;
+	const struct css_style *cb_style;
 	struct css_style *style;
 	int tactic;
+	int mode;
 
 	/* The entry. */
 	style = &box->style;
@@ -910,20 +986,34 @@ layout_anchor_try(
 	if (item->area >= 0)
 		style->position_area = item->area;
 
-	/* The tactics. */
+	/* The tactics (flip-block and flip-inline follow the containing block's writing mode). */
 	box->anchor_flip = 0;
+	containing = layout_containing_box(box);
+	cb_style = containing != NULL ? (containing->physical_style != NULL ? containing->physical_style : &containing->style) : &tree->root->style;
+	mode = position_area_mode(cb_style);
 	for (tactic = 0; tactic < item->tactic_count; tactic++) {
 		switch (item->tactics[tactic]) {
 		case 0:
+			anchor_flip(tree, box, mode == CSS_WRITING_HORIZONTAL_TB ? 0 : 1);
+			break;
+		case 1:
+			anchor_flip(tree, box, mode == CSS_WRITING_HORIZONTAL_TB ? 1 : 0);
+			break;
 		case 4:
 			anchor_flip(tree, box, 0);
 			break;
-		case 1:
 		case 3:
 			anchor_flip(tree, box, 1);
 			break;
 		default:
-			anchor_flip(tree, box, 2);
+			/* The block-start side with the inline-start side: over the diagonal that joins them. */
+			if (anchor_start_diagonal(cb_style, mode)) {
+				anchor_flip(tree, box, 2);
+			} else {
+				anchor_flip(tree, box, 2);
+				anchor_flip(tree, box, 5);
+				anchor_flip(tree, box, 6);
+			}
 			break;
 		}
 	}
@@ -946,6 +1036,12 @@ anchor_flip(
 	int count;
 	int index;
 	int align;
+	int align_too;
+
+	/* How 5 and 6 turn the sides like 0 and 1 and leave the self-alignments as they are (the second half of a flip over the other diagonal). */
+	align_too = how < 5;
+	if (!align_too)
+		how -= 5;
 
 	/* The sides and sizes that change places. */
 	style = &box->style;
@@ -1006,7 +1102,7 @@ anchor_flip(
 		else if (style->align_self == CSS_ALIGN_RIGHT)
 			style->align_self = style->direction == CSS_DIRECTION_RTL ? CSS_ALIGN_START : CSS_ALIGN_END;
 		style->justify_self = align;
-	} else {
+	} else if (align_too) {
 		/* The self-alignment along the flipped axis turns round. */
 		align = how == 0 ? style->align_self : style->justify_self;
 		if (align == CSS_ALIGN_START)

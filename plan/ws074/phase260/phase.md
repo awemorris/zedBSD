@@ -379,6 +379,52 @@ Origin: 2026-10-27 ユーザーの指示。
   (4) subgrid の track の共有（約 60）、(5) computed value の補間エンジン（grid・flex の animation、約 25）、(6) `::first-letter`/`::first-line` の pseudo-element、
   (7) table-layout: fixed、(8) CSS_TRACKS の動的な確保。
 
+### q1727-i05 の途中経過（2026-10-31、P8。dev69〜dev73）
+
+- 測定（gap は build/tmp/p8/gap69〜gap73.json、出力は /tmp/p8out/devNN）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev69 | grid の直交 item を論理座標で layout | 1,084 | 1,262 | 292 | 41 | 2,679（後退 4 は dev70 で解消） |
+  | dev70 | 上に加えて、spanning item の baseline の行・縦の item の justify baseline | 1,090 | 1,262 | 292 | 41 | 2,685 |
+  | dev71 | position-area の inset 内の揃え・anchor が外にある area・containing block の writing mode、`inset: unset` | 1,095 | 1,265 | 292 | 41 | 2,693 |
+  | dev72 | try-tactic の論理 flip、position-try-order、vertical の abspos の static 位置 | 1,098 | 1,267 | 292 | 41 | 2,698（77.71%、gap 774） |
+  | dev73 | flip-start の揃えを入れ替えのままにする | 1,099 | 1,267 | 292 | 41 | 2,699 |
+  | dev74 | flex の column の縦の item の baseline（左・右に寄せる group、wrap-reverse で反転、横の item は合成の baseline で加わる） | 1,102 | 1,267 | 292 | 41 | 2,702 |
+  | dev75 | auto-fill・auto-fit の繰り返しの数を min・max の大きさから（max が最優先、min だけなら切り上げ、percent の min・max-height） | 1,105 | 1,267 | 292 | 41 | 2,705 |
+  | dev76 | aspect-ratio が min-height を幅へ（auto の幅と繰り返しの数） | 1,105 | 1,268 | 294 | 41 | 2,708（78.00%、gap 764。ただし grid-auto-repeat-min-max-size-001 が後退して dev77 で直した） |
+  | dev77 | 上の後退の修正（max-width を測定の間だけ隠している時は切り上げにしない）、最後の source | 1,106 | 1,268 | 294 | 41 | 2,709（78.02%、gap 763） |
+
+  後退（dev68 に対し、dev77 まで）は static の css-grid/subgrid/orthogonal-writing-mode-001 の 1 件だけ（下記）。dev68 から harness +21・static +7（-1）・scripted +2。それ以外の後退は途中の測定で出た物を全て直した。Acid3 は 100/100・pixel 差 0（exact match）、Acid2 は 99.27% のまま（基準と同じ）、host build は warning 0（2026-10-31 11:3x の host `date`）。Acid の runner が残した一時 file は build/ws074-suites/wpt/acid/ の下に増えたので Q1 が消す。
+- 直した物:
+  1. grid の直交 item（縦書きの item を横の grid に）: layout/logical.c の `layout_logical_wanted` が grid の item の直交を論理座標で layout する（subgrid・replaced・atomic は除く）。
+     item の inline 方向の room は固定の行の高さ（無ければ viewport）。stretch で行が確かな時は row の高さ、そうでなければ fit-content（`logical_fits_content`）。
+     track の寄与は block size（`layout_max_content`・`layout_min_content` が `position_orthogonal_width`）。grid-align-baseline-003/004 ほか。
+  2. grid の baseline: 複数の行にまたがる item は最初の baseline を最初の行、最後の baseline を最後の行の group に入れる（grid_row_baselines）。
+     縦の item の justify-self: baseline（行の方向、`grid_column_baseline`）: 最初の baseline は item の block-start 側、最後は block-end 側に寄せる group で、各 group が行に沿って
+     最初・最後の line の中央の baseline を共有する（左に寄せる group・右に寄せる group）。grid-justify-baseline-002、grid-align-baseline-003/004 ほか。
+  3. position-area（layout/anchor.c・position.c・css/anchor.c）: inset が両側にある box は inset を引いた area の中で揃える（span-all は anchor に中央）。anchor が containing block の外にある時は area の
+     線が anchor と CB の和（anchor-outside・partially-outside）。start・end・x-start・y-start は containing block の writing mode・direction、self- は box 自身の物（sideways-lr は mode 3）。
+     grid area が containing block の時はその area から切る。`inset: unset|initial|inherit` の CSS-wide keyword を展開（values.c）。直交の abspos は left・right（top・bottom）の間を block size（inline size）で埋める。
+  4. try-tactic: flip-block・flip-inline は containing block の writing mode に従う、flip-start は block-start と inline-start の間の対角（右上・左下の対角は 2 つの flip を重ねる。揃えは入れ替えのまま）。
+     position-try-order（most-width・most-height・most-block-size・most-inline-size）は各 fallback の IMCB の大きさで安定に並べ替える。
+  6. flex の column（layout/flex.c `flex_column_baseline`・`flex_column_has_vertical`）: 縦の item が cross 軸（左右）で最初・最後の line の中央の baseline を共有する。group は item の block-start 側（最初）・
+     block-end 側（最後）に寄せ、左に寄せる group と右に寄せる group がそれぞれ baseline の両側の余白を line の大きさに足す。wrap-reverse は全ての group を反転。縦の item がある line では横の item も
+     border box の左端（最後は右端）を baseline として加わる。共有の `layout_vertical_baseline`（inline.c）。flex-align-baseline-001/004、align-items-baseline-column-horz ほか。
+  7. grid・flex の auto-fill・auto-fit（layout/grid.c `grid_expand_repeats`・`grid_expand_axis`）: 繰り返しの数は確かな幅・高さ、無ければ max（min が大きくても max 側の床）、min だけなら届く数（切り上げ）。
+     percent の min・max-height は親の高さ（px）から。aspect-ratio の box は min-height から幅の min を作る（layout/position.c の shrink-to-fit も）。
+  5. 縦書きで children_inline だが行が無い box の abspos の子の static 位置を保つ（layout/box.c `layout_absolute`）、block 配下の abspos の static の揃えの値を毎回初期化（block.c）。
+- 後退として残した物: css-grid/subgrid/orthogonal-writing-mode-001（static）。以前は subgrid を実装しない grid の item を旧経路で layout し、reference も同じ旧経路で偶然一致していた。今は
+  reference の方が正しく layout され（行の高さ 21.61）、test の subgrid は track を共有しないので 1 行（10 画素）の縁の濃さが 1/64 px ずれる。subgrid の実装で解消する見込み。
+- 調べて直さなかった物（次の候補）:
+  - flex の column の baseline（flex-align-baseline-001〜004・align-items-baseline-column/row-vert。縦の item が横の cross 軸で central baseline を共有する）と、縦書きの grid（writing-mode が縦の container）の
+    align-self: baseline（grid-align-baseline-001/002、grid-justify-baseline-003/004）。grid の direct な列の baseline と同じ group の考え方（item の block-start 側に寄せる group）で書ける見込み。
+  - subgrid（約 58）。方式の案: subgrid の軸では親の track を借りる。親の track の大きさへの寄与は subgrid の item の寄与を足し（edge の border・padding・margin と gap の差の半分を item の margin に足す）、
+    subgrid の layout では親の track の大きさを注入する。grid.c の列・行の sizing は heuristic の積み重ねなので、先に spec の track sizing（§12.5 から §12.8）を独立の関数に書き直す方が安全。
+  - track sizing の書き直し（grid-definition・layout-algorithm の約 50 ID: 高さが minmax の限界・span の配分・flex の寄与・auto-repeat・percent の row）。
+  - anchor の parse・serialize（`anchor(--foo inside)` の canonical の順、入れ子の anchor() の fallback、`anchor(min(50%, 100%))`）、position-anchor の `normal`・`none`。
+  - @position-try の CSSOM（CSSPositionTryRule）・@scope の CSSOM は rule object の model が要る（CSSRule の class は無い）。
+
 再開点（2026-10-31、q1727-i01 の停止）:
 - 最後の全件の測定は ours-dev28（source 5b032c17b、`build/ws074-cmp/ours-dev28` の harness・scripted・crash と、static は `static-subset.py` の全件の再実行）。2,386 / 3,472 = 68.72%、
   4 runner とも dev25/26 の PASS に対する後退 0。その後に commit は無い（この記録の commit だけ）。Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）。

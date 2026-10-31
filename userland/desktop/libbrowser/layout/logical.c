@@ -42,7 +42,8 @@ static int logical_mode_of(const struct css_style *style);
 
 static int logical_vertical(int mode);
 static layout_unit logical_containing_extent(const struct layout_tree *tree, const struct layout_box *box, int own);
-static int logical_fits_content(const struct layout_box *box);
+static int logical_fits_content(const struct layout_box *box, int room_definite);
+static int logical_grid_orthogonal(const struct layout_box *box);
 static void logical_sides_to_logical(struct css_length *sides, int mode);
 static void logical_floats_to_logical(float *sides, int mode);
 static void logical_ints_to_logical(int *sides, int mode);
@@ -66,6 +67,14 @@ logical_mode_of(
 	if (style->writing_mode == CSS_WRITING_VERTICAL_LR && style->writing_sideways == 1)
 		return LOGICAL_SIDEWAYS_LR;
 	return style->writing_mode;
+}
+
+/* Reports a style's writing mode as position-area reads it: sideways-lr is the mode 3. */
+int
+position_area_mode(
+	const struct css_style *style)
+{
+	return logical_mode_of(style);
 }
 
 /*
@@ -127,7 +136,7 @@ layout_logical_wanted(
 	 */
 	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB && box->parent != NULL && !box->out_of_flow) {
 		display = box->parent->style.display;
-		if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
+		if ((display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID) && !logical_grid_orthogonal(box))
 			return 0;
 
 		/* A replaced item is sized by its image's ratio, whatever its writing mode. */
@@ -136,6 +145,28 @@ layout_logical_wanted(
 	}
 
 	/* Succeeded: the box needs its own coordinates. */
+	return 1;
+}
+
+/*
+ * Tells whether an item of a horizontal grid is laid out in its own
+ * (vertical) coordinates: a vertical item of a horizontal grid whose
+ * size the grid lays out as a block (not a replaced or atomic one).
+ */
+static int
+logical_grid_orthogonal(
+	const struct layout_box *box)
+{
+	/* Only a vertical item of a horizontal grid is orthogonal to it. */
+	if (box->parent->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
+	    box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+		return 0;
+
+	/* Replaced and atomic items keep the grid's own handling. */
+	if (box->replaced || box->atomic)
+		return 0;
+
+	/* Succeeded: the item is orthogonal. */
 	return 1;
 }
 
@@ -207,7 +238,7 @@ layout_logical(
 	box->logical_root = 1;
 	fit = 0;
 	if (logical_vertical(own) != logical_vertical(outer) && box->parent != NULL)
-		fit = logical_fits_content(box);
+		fit = logical_fits_content(box, saved_definite);
 	if (fit) {
 		error = layout_shrink_to_fit(tree, box, available);
 	} else {
@@ -245,9 +276,11 @@ layout_logical(
  */
 static int
 logical_fits_content(
-	const struct layout_box *box)
+	const struct layout_box *box,
+	int room_definite)
 {
 	int display;
+	int align;
 
 	/* An inline size of its own is kept. */
 	if (box->style.width.unit != CSS_UNIT_AUTO)
@@ -263,8 +296,15 @@ logical_fits_content(
 
 	/* Grid items are sized by their containers (a flex item's inline size is its content's until the line stretches it). */
 	display = box->parent->style.display;
-	if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
-		return 0;
+	if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID) {
+		/* A grid item stretches across its row when the row's size is known (its align-self is stretch, its physical height auto). */
+		align = box->style.align_self;
+		if (align == CSS_ALIGN_AUTO || align == CSS_ALIGN_NORMAL)
+			align = box->parent->style.align_items;
+		if (align == CSS_ALIGN_NORMAL || align == CSS_ALIGN_AUTO || align == CSS_ALIGN_STRETCH)
+			return !room_definite;
+		return 1;
+	}
 
 	/* Succeeded: the box fits its content. */
 	return 1;

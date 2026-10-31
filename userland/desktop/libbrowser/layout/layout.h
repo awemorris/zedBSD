@@ -264,6 +264,15 @@ struct layout_box {
 	 * inside the containing block (area_clamp_x or _y, the range left, right, top,
 	 * bottom); area_overflow tells that it did overflow, so that a fallback is tried.
 	 */
+	/* A position-area aligns the box between insets on both sides (x or y). */
+	/* The containing block is the position-area's (not a grid area), and the grid area it was cut from. */
+	/* The box's max-width is set aside while its max-content width is measured. */
+	int max_width_hidden;
+	int area_from_anchor;
+	int area_grid_known;
+	layout_unit area_grid[4];
+	int area_inset_x;
+	int area_inset_y;
 	int area_clamp_x;
 	int area_clamp_y;
 	int area_overflow;
@@ -437,7 +446,7 @@ int layout_anchor_hides(const struct layout_tree *tree, const struct layout_box 
 int layout_anchor_wanted(const struct layout_box *box);
 int layout_anchor_try(struct layout_tree *tree, struct layout_box *box, int entry);
 void layout_anchor_center(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
-void layout_anchor_area(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
+void layout_anchor_area(const struct layout_tree *tree, struct layout_box *box, int cb_mode, int cb_direction, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 void layout_anchor_resolve(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 int layout_clips(const struct layout_box *box);
 int layout_position(struct layout_tree *tree);
@@ -466,12 +475,15 @@ int layout_stacking_order(const struct layout_tree *tree, struct wb_vector *boxe
 void layout_release(struct layout_tree *tree);
 int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_inline(struct layout_tree *tree, struct layout_box *box);
+int layout_vertical_baseline(const struct layout_box *box, int last, layout_unit *offset);
 int layout_first_baseline(const struct layout_box *box, layout_unit *baseline);
 int layout_last_baseline(const struct layout_box *box, layout_unit *baseline);
 int layout_flex(struct layout_tree *tree, struct layout_box *box);
 int layout_grid(struct layout_tree *tree, struct layout_box *box);
 void layout_grid_names(struct layout_box *box);
 int layout_physical_mode(const struct layout_box *box);
+/* A style's writing mode as position-area reads it (sideways-lr is the mode 3). */
+int position_area_mode(const struct css_style *style);
 int layout_logical_wanted(const struct layout_tree *tree, const struct layout_box *box);
 int layout_logical(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_table(struct layout_tree *tree, struct layout_box *box);

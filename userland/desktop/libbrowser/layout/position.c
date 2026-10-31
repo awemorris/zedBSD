@@ -44,6 +44,9 @@ struct position_block {
 	layout_unit y;
 	layout_unit width;
 	layout_unit height;
+	/* The block's writing mode and direction (what start and end mean to a box placed in it). */
+	int mode;
+	int direction;
 };
 
 /*
@@ -90,6 +93,8 @@ layout_position(
 	viewport.y = 0;
 	viewport.width = tree->viewport_width;
 	viewport.height = tree->viewport_height;
+	viewport.mode = CSS_WRITING_HORIZONTAL_TB;
+	viewport.direction = CSS_DIRECTION_LTR;
 
 	/* Walks from the root, whose own containing block is the viewport (a new pass: no box is placed yet). */
 	tree->position_pass++;
@@ -123,6 +128,8 @@ layout_position_box(
 	containing.y = 0;
 	containing.width = tree->viewport_width;
 	containing.height = tree->viewport_height;
+	containing.mode = CSS_WRITING_HORIZONTAL_TB;
+	containing.direction = CSS_DIRECTION_LTR;
 	for (ancestor = box->parent; ancestor != NULL; ancestor = ancestor->parent) {
 		if (box->style.position == CSS_POSITION_FIXED ? layout_contains_fixed(ancestor) : layout_contains_absolute(ancestor)) {
 			position_padding_box(ancestor, &containing);
@@ -266,9 +273,12 @@ layout_shrink_to_fit(
 
 	/* The content's width without a limit (the box's own max-width limits the result, not the content). */
 	maximum = box->style.max_width;
-	if (maximum.unit == CSS_UNIT_PX)
+	if (maximum.unit == CSS_UNIT_PX) {
 		box->style.max_width.unit = CSS_UNIT_NONE;
+		box->max_width_hidden = 1;
+	}
 	error = layout_max_content(tree, box, &content);
+	box->max_width_hidden = 0;
 	box->style.max_width = maximum;
 	if (error != 0) {
 		box->style.width = width;
@@ -296,6 +306,26 @@ layout_shrink_to_fit(
 			content = box->max_content;
 	}
 
+	/* An aspect-ratio carries a pixel minimum (or maximum) height over to the width. */
+	if (!box->replaced && box->style.aspect_ratio > 0.0f && box->style.height.unit == CSS_UNIT_AUTO) {
+		layout_unit transferred;
+		layout_unit frame_y;
+
+		frame_y = 0;
+		if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			frame_y = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		if (box->style.min_height.unit == CSS_UNIT_PX) {
+			transferred = (layout_unit)((float)(layout_from_px(box->style.min_height.value) - frame_y) * box->style.aspect_ratio);
+			if (content < transferred)
+				content = transferred;
+		}
+		if (box->style.max_height.unit == CSS_UNIT_PX) {
+			transferred = (layout_unit)((float)(layout_from_px(box->style.max_height.value) - frame_y) * box->style.aspect_ratio);
+			if (content > transferred)
+				content = transferred;
+		}
+	}
+
 	/* Under box-sizing: border-box the width given is the border box's. */
 	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
 		content += position_frame(box);
@@ -310,6 +340,45 @@ layout_shrink_to_fit(
 		return error;
 
 	/* Succeeded: the box has shrunk to fit. */
+	return 0;
+}
+
+/*
+ * Measures the width an orthogonal grid item takes: its block size, laid out
+ * along the inline room its row gives (the row's height when the row has a
+ * fixed one, otherwise the viewport's, as a fit-content size).
+ */
+static int
+position_orthogonal_width(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	layout_unit *width)
+{
+	struct layout_context context;
+	struct wb_vector floats;
+	layout_unit saved_height;
+	int saved_definite;
+	int error;
+
+	/* The room the row gives along the item's inline axis. */
+	saved_height = tree->containing_height;
+	saved_definite = tree->containing_height_definite;
+	tree->containing_height_definite = box->grid_room >= 0;
+	tree->containing_height = box->grid_room >= 0 ? box->grid_room : 0;
+
+	/* The item laid out in a context of its own. */
+	tree->measuring++;
+	layout_context_begin(tree, &context, &floats);
+	error = layout_block(tree, box, 0);
+	layout_context_end(tree, &context);
+	tree->measuring--;
+	tree->containing_height = saved_height;
+	tree->containing_height_definite = saved_definite;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: its physical width is its block size. */
+	*width = box->width;
 	return 0;
 }
 
@@ -329,6 +398,11 @@ layout_max_content(
 	struct layout_context context;
 	struct wb_vector floats;
 	int error;
+
+	/* An orthogonal grid item's width is its block size. */
+	if (box->grid_orthogonal && !box->out_of_flow && !box->logical_root && box->physical_style == NULL &&
+	    layout_logical_wanted(tree, box))
+		return position_orthogonal_width(tree, box, width);
 
 	/* A box measured before has its width already. */
 	if (box->max_content_known) {
@@ -378,6 +452,11 @@ layout_min_content(
 		*width = box->width;
 		return 0;
 	}
+
+	/* An orthogonal grid item's width is its block size. */
+	if (box->grid_orthogonal && !box->out_of_flow && !box->logical_root && box->physical_style == NULL &&
+	    layout_logical_wanted(tree, box))
+		return position_orthogonal_width(tree, box, width);
 
 	/* Lay it out in zero room to take every allowed line break. */
 	given = box->style.width;
@@ -631,7 +710,14 @@ position_place_fallbacks(
 	struct layout_box *saved;
 	struct dom_element *element;
 	uint32_t key;
+	layout_unit metric[CSS_TRY_ENTRIES];
+	layout_unit wide;
+	layout_unit high;
+	int order[CSS_TRY_ENTRIES];
 	int entry;
+	int index;
+	int item;
+	int other;
 	int error;
 
 	/* The box as it is, placed in this pass. */
@@ -656,7 +742,49 @@ position_place_fallbacks(
 	if (box->node != NULL && box->node->type == DOM_ELEMENT)
 		element = (struct dom_element *)box->node;
 	key = position_try_key(saved->style.position_try);
-	for (entry = 0; entry < saved->style.position_try->count; entry++) {
+
+	/* position-try-order sorts the fallbacks by the size of the inset-modified containing block each gives (the largest first). */
+	for (entry = 0; entry < CSS_TRY_ENTRIES; entry++) {
+		order[entry] = entry;
+		metric[entry] = 0;
+	}
+	if (saved->style.position_try_order != 0) {
+		for (entry = 0; entry < saved->style.position_try->count; entry++) {
+			*box = *saved;
+			metric[entry] = -1;
+			if (!layout_anchor_try(tree, box, entry))
+				continue;
+			error = position_place_once(tree, box, containing);
+			if (error != 0)
+				return error;
+			wide = box->imcb[1] - box->imcb[0];
+			high = box->imcb[3] - box->imcb[2];
+			switch (saved->style.position_try_order) {
+			case 1:
+				metric[entry] = wide;
+				break;
+			case 2:
+				metric[entry] = high;
+				break;
+			case 3:
+				metric[entry] = containing->mode == CSS_WRITING_HORIZONTAL_TB ? high : wide;
+				break;
+			default:
+				metric[entry] = containing->mode == CSS_WRITING_HORIZONTAL_TB ? wide : high;
+				break;
+			}
+		}
+
+		/* A stable insertion sort, the largest first. */
+		for (entry = 1; entry < saved->style.position_try->count; entry++) {
+			item = order[entry];
+			for (other = entry; other > 0 && metric[order[other - 1]] < metric[item]; other--)
+				order[other] = order[other - 1];
+			order[other] = item;
+		}
+	}
+	for (index = 0; index < saved->style.position_try->count; index++) {
+		entry = order[index];
 		*box = *saved;
 		if (!layout_anchor_try(tree, box, entry))
 			continue;
@@ -770,6 +898,9 @@ position_place_once(
 	layout_unit saved_height;
 	struct css_length saved_style_height;
 	int saved_sizing;
+	int saved_width_sizing;
+	struct css_length saved_width;
+	struct css_length saved_orthogonal_height;
 	int saved_definite;
 	int has_left;
 	int has_right;
@@ -780,6 +911,8 @@ position_place_once(
 	/* The position-area clamp is set again by the area. */
 	box->area_clamp_x = 0;
 	box->area_clamp_y = 0;
+	box->area_inset_x = 0;
+	box->area_inset_y = 0;
 	box->area_overflow = 0;
 	box->area_scrolls = position_in_scroller(box);
 
@@ -789,7 +922,8 @@ position_place_once(
 
 	/* A position-area makes an area of the grid around the anchor the containing block; anchor-center centers on the anchor. */
 	if (box->style.position_area >= 0)
-		layout_anchor_area(tree, box, containing->x, containing->y, containing->width, containing->height);
+		layout_anchor_area(tree, box, containing->mode, containing->direction,
+		    containing->x, containing->y, containing->width, containing->height);
 	layout_anchor_center(tree, box, containing->x, containing->y, containing->width, containing->height);
 
 	/* A definite Grid area, when supplied, is the inset containing block. */
@@ -897,6 +1031,37 @@ position_place_once(
 		box->style.box_sizing = CSS_BOX_SIZING_CONTENT;
 	}
 
+	/* An orthogonal box between a left and a right (or a top and a bottom) fills the room with its block (inline) size. */
+	saved_width = box->style.width;
+	saved_orthogonal_height = box->style.height;
+	saved_width_sizing = -1;
+	if (!box->replaced && (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) != (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB) &&
+	    ((box->style.width.unit == CSS_UNIT_AUTO && has_left && has_right) ||
+	    (box->style.height.unit == CSS_UNIT_AUTO && has_top && has_bottom)) &&
+	    layout_logical_wanted(tree, box)) {
+		layout_box_model(box, area_width);
+		saved_width_sizing = box->style.box_sizing;
+		box->style.box_sizing = CSS_BOX_SIZING_CONTENT;
+		if (box->style.width.unit == CSS_UNIT_AUTO && has_left && has_right) {
+			content = room - box->margin[CSS_LEFT] - box->margin[CSS_RIGHT] - box->border[CSS_LEFT] - box->padding[CSS_LEFT] -
+			    box->padding[CSS_RIGHT] - box->border[CSS_RIGHT];
+			if (content < 0)
+				content = 0;
+			box->style.width.unit = CSS_UNIT_PX;
+			box->style.width.value = layout_to_px(content);
+			box->style.width.offset = 0;
+		}
+		if (box->style.height.unit == CSS_UNIT_AUTO && has_top && has_bottom) {
+			content = area_height - top - bottom - box->margin[CSS_TOP] - box->margin[CSS_BOTTOM] - box->border[CSS_TOP] -
+			    box->padding[CSS_TOP] - box->padding[CSS_BOTTOM] - box->border[CSS_BOTTOM];
+			if (content < 0)
+				content = 0;
+			box->style.height.unit = CSS_UNIT_PX;
+			box->style.height.value = layout_to_px(content);
+			box->style.height.offset = 0;
+		}
+	}
+
 	/* A width set, or both sides set, lays the box out in that room; otherwise it shrinks to fit. */
 	if (box->style.width.unit != CSS_UNIT_AUTO || (has_left && has_right)) {
 		/* A percentage width is of the containing block, not of the room between the offsets. */
@@ -907,6 +1072,10 @@ position_place_once(
 	}
 	box->style.height = saved_style_height;
 	box->style.box_sizing = saved_sizing;
+	box->style.width = saved_width;
+	box->style.height = saved_orthogonal_height;
+	if (saved_width_sizing >= 0)
+		box->style.box_sizing = saved_width_sizing;
 	tree->containing_height = saved_height;
 	tree->containing_height_definite = saved_definite;
 
@@ -933,9 +1102,9 @@ position_place_once(
 		x = position_align(position_physical(box->style.justify_self, box->style.direction == CSS_DIRECTION_RTL),
 		    area_left + left, area_left + area_width - right,
 		    box->margin[CSS_LEFT], box->margin[CSS_RIGHT], box->width + frame);
-	} else if (has_left) {
+	} else if (has_left && !box->area_inset_x) {
 		x = area_left + left + box->margin[CSS_LEFT];
-	} else if (has_right) {
+	} else if (has_right && !box->area_inset_x) {
 		x = area_left + area_width - right - box->margin[CSS_RIGHT] - (box->width + frame);
 	} else if (box->static_x_align == CSS_ALIGN_END ||
 	    box->static_x_align == CSS_ALIGN_SELF_END ||
@@ -1001,9 +1170,9 @@ placed_x:
 	if (has_top && has_bottom && box->style.height.unit != CSS_UNIT_AUTO && position_aligned(box->style.align_self)) {
 		y = position_align(box->style.align_self, area_top + top, area_top + area_height - bottom,
 		    box->margin[CSS_TOP], box->margin[CSS_BOTTOM], position_outer_height(box));
-	} else if (has_top) {
+	} else if (has_top && !box->area_inset_y) {
 		y = area_top + top + box->margin[CSS_TOP];
-	} else if (has_bottom) {
+	} else if (has_bottom && !box->area_inset_y) {
 		y = area_top + area_height - bottom - box->margin[CSS_BOTTOM] - position_outer_height(box);
 	} else if ((box->static_y_align == CSS_ALIGN_END ||
 	    box->static_y_align == CSS_ALIGN_SELF_END) && box->static_y_safe &&
@@ -1114,11 +1283,16 @@ position_padding_box(
 	const struct layout_box *box,
 	struct position_block *block)
 {
+	const struct css_style *style;
+
 	/* Inside the borders, around the paddings. */
 	block->x = box->x + box->border[CSS_LEFT];
 	block->y = box->y + box->border[CSS_TOP];
 	block->width = box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT];
 	block->height = box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM];
+	style = box->physical_style != NULL ? box->physical_style : &box->style;
+	block->mode = position_area_mode(style);
+	block->direction = style->direction;
 }
 
 /* Resolves an offset (top, right, bottom or left) against a size; zero when it is auto. */

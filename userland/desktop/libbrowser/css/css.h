@@ -1108,7 +1108,7 @@ const char *const *css_anchor_shorthand_longhands(const struct vm_string *name);
 int css_anchor_shorthand_part(struct vm_heap *heap, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
 int css_anchor_canonical(struct vm_heap *heap, const struct vm_string *name, const struct vm_string *value, struct wb_units *out, int *handled);
 int css_position_visibility_serialize(int bits, struct wb_units *out);
-int css_position_area_regions(int packed, int writing_mode, int direction, int *x0, int *x1, int *y0, int *y1);
+int css_position_area_regions(int packed, int cb_mode, int cb_direction, int self_mode, int self_direction, int *x0, int *x1, int *y0, int *y1);
 int css_grid_shorthand_part(struct vm_heap *heap, const struct vm_string *shorthand, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
 int css_decoration_line_serialize(int lines, struct wb_units *out);
 int css_decoration_shorthand_serialize(const uint16_t *units, size_t length, struct wb_units *shorthand, struct wb_units *line, struct wb_units *thickness, struct wb_units *style, struct wb_units *color);
