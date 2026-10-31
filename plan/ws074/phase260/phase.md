@@ -342,6 +342,9 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev62 | ba09c56b9 | 2,661 | HTMLCanvasElement の width・height、チェックボックス・ラジオの zoom、content-visibility、`revert` |
   | dev63 | 9774120ff | 2,664 | `::details-content`、border-spacing と text-indent の calc() |
   | dev64 | 71ad40960 | 2,669（76.87%） | details-content: display contents、単一行 flex の line の cross size を min/max-height で挟む |
+  | dev65 | eab76be30 | 2,672（76.96%） | percent の flex-basis が決まらない時は content と同じ、`::details-content` の display: contents |
+  | dev66 | （dev65 の続き） | 2,674（77.02%） | column の ratio の最小（img の content size suggestion）、min/max-width の percent は測定の広い幅では無視 |
+  | dev67 | 上の続き | 2,679（77.16%） | auto 高さの column の max-height、overflow が片軸だけ visible でない item の auto minimum、bitmap の `no_ratio` |
 
   dev43 → dev64 の後退は static の css-writing-modes/table-column-order-slr-007 と、dev56 で scripted の grid-item-*-stretch 7 件（SVG の `cx="50%"` の円を描くようになり、
   natural size のままの bitmap を拡大するので縁がぼやけ、Chromium の vector の拡大と一致しない。以前は円が描かれず偶然合っていた）。
@@ -358,11 +361,13 @@ Origin: 2026-10-27 ユーザーの指示。
   22. flex: flex-grow の合計が 1 未満の時は最初の自由な空間に合計をかけた量が上限（2 周目以降も）、flex-basis が自分の値の item は max-content の測定でも min-content で持ち上げる、percent の flex-basis が決まらない時は content と同じ（高さの指定を無視）、単一行の line の cross size を container の min/max-height で挟む。flex・grid で空白だけの text は white-space: pre でも item にしない。
   23. getBoundingClientRect: インラインの replaced の piece は margin box なので margin を除く（layout/bounds.c。flex の radiobutton-min-size など）。
   24. @position-try: layer を持ち、同じ名前は最も高い layer の最後の rule（layer 無しが最強）。
+  26. flex の column: auto の高さが max-height を超える時はその高さで flex する（flex-minimum-size-002）。img の content size suggestion を column にも（ratio の無い SVG は除く: `img_bitmap.no_ratio`）。overflow の一方が visible でないと自動の最小は 0。min/max-width の percent は測定の広い幅（2^24）では限界にしない。
+  27. min-width の `min-content`・`max-content`・`fit-content`（layout/block.c `block_min_intrinsic`）、flex-basis の `min-content`・`max-content`・`fit-content`（row の非 replaced item）、flex-wrap の container を狭く測った時の幅は最も広い item。
   25. `content-visibility`（visible・auto・hidden。hidden は内容の box を作らない）、UA の sheet の `[hidden=until-found]`、`revert`（author の宣言を UA の宣言に戻す。css/cascade.c `cascade_reverted`）、`::details-content`（css/parser.c・layout/box.c `box_details_content`: summary の後の box を包む。display: contents なら包まない）。
 - 調べて直さなかった物（理由）:
   - SVG を layout の大きさの vector で描く（bitmap は自然の大きさで作り、layout と paint が `image->width` を自然の大きさとして使う）。grid-item-*-stretch 7 件、css-viewport/zoom の svg 5 件、
     さらに数件に効く。直すには bitmap に自然の大きさと密度を持たせて layout・paint の約 12 か所を直す。
-  - grid の `CSS_TRACKS`（24）を超える repeat()（grid-limits-001）、table-layout: fixed（flexbox_table-fixed-layout）、quirks mode の percent 高さ、position-area の `::first-letter`/`::first-line`（details-pseudo-elements-005）、
+  - grid の `CSS_TRACKS`（24）を超える repeat()（grid-limits-001）、table-layout: fixed（flexbox_table-fixed-layout）、quirks mode の percent 高さ、`::details-content` の `::first-letter`/`::first-line`（details-pseudo-elements-005）、
     @scope の CSSOM（CSSScopeRule・CSSNestedDeclarations）と nesting、flex・grid の baseline（縦書きの item・fieldset・multicol・table の baseline の合成で約 45 件）、
     scrollIntoView の sideways（要素の負の scrollTop と縦の inline overflow の scrollHeight）、subgrid、computed value の補間、grid の calc() の整数（sibling-index()・sign() を含む）。
 - 次の候補（効きの見込み）: (1) SVG の vector 描画（約 13）、(2) flex・grid の baseline（縦書きの合成 baseline、約 45）、(3) @scope の CSSOM と nesting（約 12）、
