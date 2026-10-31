@@ -1735,7 +1735,15 @@
         return;
       }
       t._ready.resolve(undefined);
-      requestAnimationFrame(function () { setTimeout(function () { finish(t); }, Math.max(native.viewTransitionDuration(), typeof g.__vtAnimations === 'function' ? g.__vtAnimations() : 0)); });
+      requestAnimationFrame(function () {
+        // The transition ends when its animations have; one a script paused does not end.
+        var tick = function () {
+          if (t._phase === 'done') return;
+          if (typeof g.__vtPaused === 'function' && g.__vtPaused()) { setTimeout(tick, 100); return; }
+          finish(t);
+        };
+        setTimeout(tick, Math.max(native.viewTransitionDuration(), typeof g.__vtAnimations === 'function' ? g.__vtAnimations() : 0));
+      });
     }
     g.Document.prototype.startViewTransition = function startViewTransition(callbackOptions) {
       var t = new ViewTransition(VT), cb = callbackOptions, i, list;

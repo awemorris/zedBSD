@@ -309,15 +309,15 @@
       }
       get currentTime() { return vtTime; }
       set currentTime(v) { vtTime = +v; native.viewTransitionTime(vtTime); }
-      get playState() { return this._style.animationPlayState === 'paused' ? 'paused' : 'running'; }
+      get playState() { return this._paused === true || (this._paused === undefined && this._style.animationPlayState === 'paused') ? 'paused' : 'running'; }
       get pending() { return false; }
       get replaceState() { return 'active'; }
       get ready() { return this._ready; }
       get finished() { return this._finished; }
       get timeline() { return document.timeline || null; }
       get startTime() { return 0; }
-      play() {}
-      pause() {}
+      play() { this._paused = false; }
+      pause() { this._paused = true; }
       finish() {}
       cancel() {}
       reverse() {}
@@ -352,3 +352,9 @@
       var original = g.Document.prototype.getAnimations;
       def(g.Document.prototype, 'getAnimations', function getAnimations() { return original.apply(this, arguments).concat(viewTransitionAnimations()); });
     })();
+    // Whether a script paused one of the UA animations of the view transition (the transition then does not end).
+    def(g, '__vtPaused', function __vtPaused() {
+      var paused = false;
+      vtMade.forEach(function (x) { if (x._paused === true) paused = true; });
+      return paused;
+    });
