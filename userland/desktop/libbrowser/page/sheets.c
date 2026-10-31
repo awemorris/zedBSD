@@ -265,6 +265,7 @@ sheets_add_style(
 	struct page_sheet *entry;
 	struct page_sheet *candidate;
 	struct wb_units units;
+	size_t first;
 	const struct css_media *chain[CSS_MEDIA_CHAIN_MAX];
 	uint32_t hash;
 	size_t index;
@@ -338,12 +339,13 @@ sheets_add_style(
 	error = sheets_element_media(page, element, chain);
 	if (error != 0)
 		return error;
+	first = css_engine_sheet_count(page->css);
 	error = sheets_add_loaded(page, entry, chain, 1);
 	if (error != 0)
 		return error;
 
-	/* The sheet's implicit @scope is under the element's parent. */
-	css_engine_set_owner(page->css, element);
+	/* The sheet's (and its imports') implicit @scope is under the element's parent. */
+	css_engine_set_owner_from(page->css, first, element);
 
 	/* Succeeded: the element's sheet is in the engine. */
 	return 0;
@@ -362,6 +364,7 @@ sheets_add_link(
 	struct wb_buffer location;
 	const struct css_media *chain[CSS_MEDIA_CHAIN_MAX];
 	struct page_link_event event;
+	size_t first;
 	int is_sheet;
 	int error;
 
@@ -401,9 +404,11 @@ sheets_add_link(
 	error = sheets_element_media(page, element, chain);
 	if (error != 0)
 		return error;
+	first = css_engine_sheet_count(page->css);
 	error = sheets_add_loaded(page, entry, chain, 1);
 	if (error != 0)
 		return error;
+	css_engine_set_owner_from(page->css, first, element);
 
 	/* A link whose sheet is in (or failed) has its load or error event queued, once. */
 	if ((element->node.flags & DOM_NODE_LINK_LOADED) == 0U && (entry->sheet != NULL || entry->failed)) {

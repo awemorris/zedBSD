@@ -589,6 +589,34 @@ css_engine_set_owner(
 	sheets[engine->sheets.count - 1U].scope = owner != NULL ? cascade_tree_scope(owner) : NULL;
 }
 
+/* Reports how many sheets the engine has (the next one added has this index). */
+size_t
+css_engine_sheet_count(
+	const struct css_engine *engine)
+{
+	return engine->sheets.count;
+}
+
+/*
+ * Records the element whose sheet the engine's sheets from an index on are (a <style> with its @imports, or
+ * a <link>): the parent of the element is the root of their implicit @scope.
+ */
+void
+css_engine_set_owner_from(
+	struct css_engine *engine,
+	size_t first,
+	struct dom_element *owner)
+{
+	struct cascade_sheet *sheets;
+	size_t index;
+
+	sheets = engine->sheets.items;
+	for (index = first; index < engine->sheets.count; index++) {
+		sheets[index].owner = owner;
+		sheets[index].scope = owner != NULL ? cascade_tree_scope(owner) : NULL;
+	}
+}
+
 /* Records the shadow root whose tree the most recently added sheet belongs to (a constructed sheet a root adopted). */
 void
 css_engine_set_scope(
