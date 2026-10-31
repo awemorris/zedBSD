@@ -320,6 +320,16 @@ page_vt_pseudo_style(
 	if (error == 0)
 		*style = chain[count];
 
+	/* The UA's isolation is for a name with both snapshots, and its images blend as plus-lighter while their animation runs. */
+	if (error == 0 && page->transition_on && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW) {
+		entry = layout_transition_find(&page->transition, name);
+		if (entry != NULL && !(entry->has_old && entry->has_new) && pseudo == CSS_PSEUDO_ELEMENT_VT_PAIR)
+			style->isolation = 0;
+		if (entry != NULL && entry->has_old && entry->has_new && style->animation_name != NULL && style->mix_blend_mode == 0 &&
+		    (pseudo == CSS_PSEUDO_ELEMENT_VT_OLD || pseudo == CSS_PSEUDO_ELEMENT_VT_NEW))
+			style->mix_blend_mode = 1;
+	}
+
 	/* The UA's animations by the snapshots a name has: the group moves only between two, an image fades by its state, and a group's mix-blend-mode needs both. */
 	if (error == 0 && page->transition_on && style->animation_name != NULL && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW) {
 		entry = layout_transition_find(&page->transition, name);

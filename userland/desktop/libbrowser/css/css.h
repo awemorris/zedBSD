@@ -829,7 +829,11 @@ struct css_style {
 	int animation_paused;
 	/* The timing function as text: a keyword, "steps N position" or "bezier a b c d" (NULL for ease). */
 	struct vm_string *animation_timing;
-	/* mix-blend-mode: 0 normal, 1 plus-lighter, 2 any other blend. */
+	/* animation-iteration-count (a negative number is infinite), animation-direction (normal, reverse, alternate, alternate-reverse) and isolation (1 isolate). */
+	float animation_iterations;
+	int animation_direction;
+	int isolation;
+	/* mix-blend-mode: 0 normal, 1 plus-lighter, 2 and up the other blend modes (css_blend_names). */
 	int mix_blend_mode;
 	/* zoom: the factor the element's own declaration gives (1 for normal), and the product of it and its ancestors' that scales its lengths. */
 	float zoom;
@@ -1167,6 +1171,8 @@ void css_engine_forget_styles(struct css_engine *engine);
 void css_engine_set_view_transition(struct css_engine *engine, int active, const struct vm_string *const *types, int count);
 int css_engine_compute(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style);
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);
+/* The mix-blend-mode keywords after normal and plus-lighter, in the order of the style's mix_blend_mode numbers from 2. */
+extern const char *const css_blend_names[];
 int css_engine_apply_text(struct css_engine *engine, struct css_style *style, const struct css_style *parent, const char *text);
 int css_engine_compute_vt_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct vm_string *name, const struct vm_string *classes, int siblings, const struct css_style *parent, struct css_style *style);
 void css_initial_style(struct css_style *style);

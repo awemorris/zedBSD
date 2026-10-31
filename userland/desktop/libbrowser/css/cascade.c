@@ -1310,6 +1310,7 @@ css_initial_style(
 	style->position_area = -1;
 	style->position_visibility = 2;
 	style->zoom = 1.0f;
+	style->animation_iterations = 1.0f;
 	style->zoom_eff = 1.0f;
 	style->transform_origin[0].unit = CSS_UNIT_PERCENT;
 	style->transform_origin[0].value = 50.0f;
@@ -4342,6 +4343,15 @@ cascade_apply(
 	case CSS_PROP_MIX_BLEND_MODE:
 		style->mix_blend_mode = value->keyword;
 		break;
+	case CSS_PROP_ANIMATION_ITERATION_COUNT:
+		style->animation_iterations = value->number;
+		break;
+	case CSS_PROP_ANIMATION_DIRECTION:
+		style->animation_direction = value->keyword;
+		break;
+	case CSS_PROP_ISOLATION:
+		style->isolation = value->keyword;
+		break;
 	case CSS_PROP_DISPLAY:
 		style->display = value->keyword;
 		break;
@@ -5066,6 +5076,15 @@ cascade_inherit(
 		break;
 	case CSS_PROP_MIX_BLEND_MODE:
 		style->mix_blend_mode = parent->mix_blend_mode;
+		break;
+	case CSS_PROP_ANIMATION_ITERATION_COUNT:
+		style->animation_iterations = parent->animation_iterations;
+		break;
+	case CSS_PROP_ANIMATION_DIRECTION:
+		style->animation_direction = parent->animation_direction;
+		break;
+	case CSS_PROP_ISOLATION:
+		style->isolation = parent->isolation;
 		break;
 	case CSS_PROP_Z_INDEX:
 		style->z_index = parent->z_index;

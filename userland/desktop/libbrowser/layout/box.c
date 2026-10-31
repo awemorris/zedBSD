@@ -1048,6 +1048,13 @@ box_transition_pseudo(
 	if (*error != 0)
 		return NULL;
 
+	/* The UA's isolation is for a name with both snapshots, and its images blend as plus-lighter while their animation runs. */
+	if (name != NULL && !(name->has_old && name->has_new) && pseudo == CSS_PSEUDO_ELEMENT_VT_PAIR)
+		style->isolation = 0;
+	if (name != NULL && name->has_old && name->has_new && style->animation_name != NULL && style->mix_blend_mode == 0 &&
+	    (pseudo == CSS_PSEUDO_ELEMENT_VT_OLD || pseudo == CSS_PSEUDO_ELEMENT_VT_NEW))
+		style->mix_blend_mode = 1;
+
 	/* A script's animation of the pseudo-element has the last word. */
 	if (name != NULL && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW &&
 	    name->animated[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP][0] != '\0') {
