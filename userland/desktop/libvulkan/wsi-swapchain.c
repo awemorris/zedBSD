@@ -334,6 +334,14 @@ struct wsi_queue_worker {
 
 /* Serializes only WSI linkage and image ownership, never a pending GPU fence. */
 static pthread_mutex_t swapchain_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/*
+ * Serializes the start of presentation workers, so that one queue's lane
+ * never gets two.  A thread is made under this lock alone: making one may
+ * wait for the dynamic loader (behind a fork in another thread), and
+ * acquire and present must not wait behind it on swapchain_mutex.
+ */
+static pthread_mutex_t worker_start_mutex = PTHREAD_MUTEX_INITIALIZER;
 /* Live chains retain their surface and image ownership until all queued jobs have retired. */
 static struct vulkan_swapchain *swapchains;
 
@@ -411,6 +419,7 @@ static void present_finish(struct wsi_present_job *job, const VkPresentInfoKHR *
 static VkResult present_combine(VkResult first, VkResult second);
 static VkResult swapchain_device_lost(struct VkDevice_T *device);
 static VkResult present_worker_get(struct VkQueue_T *queue, enum wsi_lane lane, struct wsi_queue_worker **result);
+static struct wsi_queue_worker *present_worker_find(struct VkQueue_T *queue, enum wsi_lane lane);
 static void present_lane(struct wsi_present_job *job);
 static enum wsi_route present_route(struct wsi_present_job *job, const VkPresentInfoKHR *info);
 static VkBool32 present_waits_consume(struct wsi_present_job *job, const VkPresentInfoKHR *info);
@@ -4138,7 +4147,14 @@ present_worker_get(
 	struct wsi_queue_worker *candidate;
 	int status;
 
-	/* Allocation callbacks run before entering the global WSI state lock. */
+	/* A started worker is found under the state lock alone. */
+	worker = present_worker_find(queue, lane);
+	if (worker != NULL) {
+		*result = worker;
+		return VK_SUCCESS;
+	}
+
+	/* Allocation callbacks run before entering either lock. */
 	candidate = vulkan_allocate(&queue->device->object.allocator, sizeof(*candidate), sizeof(void *), VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
 	if (candidate == NULL)
 		return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -4147,6 +4163,51 @@ present_worker_get(
 	memset(candidate, 0, sizeof(*candidate));
 	candidate->queue = queue;
 	candidate->lane = lane;
+
+	/* One starter at a time; another may have started this worker meanwhile. */
+	pthread_mutex_lock(&worker_start_mutex);
+	worker = present_worker_find(queue, lane);
+	if (worker != NULL) {
+		pthread_mutex_unlock(&worker_start_mutex);
+		vulkan_free(&queue->device->object.allocator, candidate);
+		*result = worker;
+		return VK_SUCCESS;
+	}
+
+	/*
+	 * Makes the thread without swapchain_mutex held.  The new thread
+	 * sleeps under that mutex until a job is published to it; nothing
+	 * else can see the candidate before it is linked below.
+	 */
+	status = pthread_create(&candidate->thread, NULL, present_worker_main, candidate);
+	if (status != 0) {
+		pthread_mutex_unlock(&worker_start_mutex);
+		vulkan_free(&queue->device->object.allocator, candidate);
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	/* Publication keeps the worker discoverable by device drain and teardown. */
+	pthread_mutex_lock(&swapchain_mutex);
+
+	candidate->next = workers;
+	workers = candidate;
+
+	pthread_mutex_unlock(&swapchain_mutex);
+	pthread_mutex_unlock(&worker_start_mutex);
+
+	/* Succeeded: this queue has an owned worker ready for its next accepted presentation. */
+	*result = candidate;
+	return VK_SUCCESS;
+}
+
+/* Finds the started worker of a queue's lane under the state lock, or NULL. */
+static struct wsi_queue_worker *
+present_worker_find(
+	struct VkQueue_T *queue,
+	enum wsi_lane lane)
+{
+	struct wsi_queue_worker *worker;
+
 	pthread_mutex_lock(&swapchain_mutex);
 
 	/* Concurrent work on other queues or lanes cannot replace this ordering domain. */
@@ -4156,31 +4217,10 @@ present_worker_get(
 			break;
 	}
 
-	/* Reuse a previously started worker without allocating another native thread. */
-	if (worker != NULL) {
-		*result = worker;
-		pthread_mutex_unlock(&swapchain_mutex);
-		vulkan_free(&queue->device->object.allocator, candidate);
-		return VK_SUCCESS;
-	}
-
-	/* The new thread initially waits for this same mutex before inspecting any job. */
-	status = pthread_create(&candidate->thread, NULL, present_worker_main, candidate);
-	if (status != 0) {
-		pthread_mutex_unlock(&swapchain_mutex);
-		vulkan_free(&queue->device->object.allocator, candidate);
-		return VK_ERROR_OUT_OF_HOST_MEMORY;
-	}
-
-	/* Publication keeps the worker discoverable by device drain and teardown. */
-	candidate->next = workers;
-	workers = candidate;
-	*result = candidate;
-
 	pthread_mutex_unlock(&swapchain_mutex);
 
-	/* Succeeded: this queue has an owned worker ready for its next accepted presentation. */
-	return VK_SUCCESS;
+	/* The worker, or NULL when this lane has none yet. */
+	return worker;
 }
 
 /* Waits for real producer completion before submitting each native presentation in queue order. */

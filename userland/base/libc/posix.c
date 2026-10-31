@@ -176,7 +176,17 @@ static void aio_notify(const struct sigevent *event);
 static struct __spawn_action *spawn_action_add(posix_spawn_file_actions_t *actions);
 static int posix_spawn_common(pid_t *result, const char *path, const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr, char *const argv[], char *const envp[], int search);
 static int posix_spawn_fork(pid_t *result, const char *path, const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr, char *const argv[], char *const envp[], int search);
-#if defined(__x86_64__)
+/*
+ * The ports whose system call entry has __vfork_spawn: posix_spawn runs
+ * its child in this address space until the exec, rather than copy the
+ * address space with fork.  A fork waits out every thread that faults
+ * meanwhile and holds the library's locks around the copy.
+ */
+#if defined(__x86_64__) || defined(__aarch64__)
+#define SPAWN_VFORK 1
+#endif
+
+#if defined(SPAWN_VFORK)
 /* The size of the stack a posix_spawn child runs on until it execs. */
 #define SPAWN_CHILD_STACK 24576
 
@@ -8811,7 +8821,7 @@ posix_spawn_fork(
 	return 0;
 }
 
-#if defined(__x86_64__)
+#if defined(SPAWN_VFORK)
 /*
  * Spawns a program the way the vfork system call allows: the child runs
  * in this process's memory, on a stack of its own, until it execs, and
