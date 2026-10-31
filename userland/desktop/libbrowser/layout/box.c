@@ -1622,6 +1622,8 @@ box_is_table_part(
 		return 1;
 	if (box->style.display == CSS_DISPLAY_TABLE_CELL)
 		return 1;
+	if (box->style.display == CSS_DISPLAY_TABLE_CAPTION)
+		return 1;
 
 	/* Anything else. */
 	return 0;
