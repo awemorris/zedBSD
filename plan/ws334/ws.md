@@ -29,6 +29,7 @@
   10. 2026-11-01 ユーザーから、レンダリングエンジンと JS エンジンは今の source tree で分かれているので、その interface の分離を保てばよい、という趣旨の見立てを受けた（DOM を別の部品に出す事はしない）。
   11. 2026-11-01 ユーザーから、cross compile は mingw-w64 でよく、clang 版の mingw（llvm-mingw の類、arm64 の Windows にも対応）でもよい、shell をある程度作った後は開発を Windows の host に移せる（Wine では Vulkan があまり動かない見込みのため）、という趣旨の指示を受けた。
   12. 2026-11-01 ユーザーから、`make browser-win64` で build できるとよい、という趣旨の希望を受けた（x86_64 の Windows 用。arm64 の target の名前は設計で案を出す）。
+  13. 2026-11-01 ユーザーから、tree の一番上に `apps/` を作り、その中に `apps/browser/Makefile` を置く構成でよい、一番上の Makefile からも呼ぶ（`make browser-win64` など）、という趣旨の指示を受けた。
 
 ## Resume point
 
