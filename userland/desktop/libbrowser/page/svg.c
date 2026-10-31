@@ -89,6 +89,10 @@ struct svg_shape {
 	size_t capacity;
 };
 
+/* The size of the viewport (the viewBox, else the bitmap) that percentage lengths of the picture being drawn are of. */
+static float svg_view_width;
+static float svg_view_height;
+
 /* The bitmap being drawn: premultiplied float RGBA, and a row's coverage. */
 struct svg_canvas {
 	float *pixels;
@@ -152,6 +156,7 @@ static struct dom_element *svg_find_root(struct dom_node *node, int depth);
 static const struct dom_element *svg_find_id(const struct dom_node *node, const char *id, int depth);
 static uint32_t svg_gradient_color(const struct dom_element *svg, const char *reference, uint32_t fallback, int *found);
 static float svg_parse_attribute_number(const struct dom_element *element, const char *name, float fallback);
+static float svg_percent_length(const char *text, const char *name, float fallback);
 
 /*
  * Draws an <svg> element into a new bitmap at its width and height (its
@@ -280,6 +285,8 @@ page_svg_render(
 		shift_x = ((float)pixel_width - view_width * scale) / 2.0f - box[0] * scale;
 		shift_y = ((float)pixel_height - view_height * scale) / 2.0f - box[1] * scale;
 	}
+	svg_view_width = have_view ? view_width : width;
+	svg_view_height = have_view ? view_height : height;
 	matrix.a = scale_x;
 	matrix.d = scale_y;
 	matrix.e = shift_x;
@@ -703,10 +710,32 @@ svg_parse_attribute_number(
 	if (text != NULL) {
 		value = svg_length(text, &valid);
 		if (!valid)
-			value = fallback;
+			value = svg_percent_length(text, name, fallback);
 	}
 	wb_buffer_release(&buffer);
 	return value;
+}
+
+/* Reads a percentage as the share of the viewport's width, height or (for a radius) normalized diagonal; else the fallback. */
+static float
+svg_percent_length(
+	const char *text,
+	const char *name,
+	float fallback)
+{
+	const char *cursor;
+	float percent;
+	float basis;
+
+	cursor = text;
+	if (!svg_number(&cursor, &percent) || *cursor != '%')
+		return fallback;
+	basis = svg_view_width;
+	if (name[0] == 'y' || name[0] == 'h' || strcmp(name, "cy") == 0 || strcmp(name, "ry") == 0)
+		basis = svg_view_height;
+	else if (strcmp(name, "r") == 0)
+		basis = sqrtf((svg_view_width * svg_view_width + svg_view_height * svg_view_height) / 2.0f);
+	return percent * basis / 100.0f;
 }
 
 /*
