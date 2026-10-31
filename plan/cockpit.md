@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 08:24（Q1。割り振りの変更、P1・P2 を Bug に）
+最終更新: 2026-11-01 08:28（Q1。WS334 p021 cleared）
 
 ## 担当（P1〜P8）
 
@@ -16,7 +16,7 @@
 | P4 | — | — | 返却（2026-11-01 06:53）。main の計測: Pi 5 は前後で差なし（c74 約 50 fps、desktop 59〜67）、VF2 は c1 168・c13 56.0 fps（記録 141・52.5）、gpu-selftest 13/13 | — |
 | P5 | — | — | 返却（2026-11-01 04:53）。WS336 の設計を仕上げた（推しの答え、TODO の一覧 T1〜T31、基点 d4ab182d2 のまま）。実装は Sonnet が p002 から | — |
 | P6 | [WS335](ws335/ws.md) | 自前の libssl-compat・libcrypto-compat | 設計の仕上げ（q1789-i02）: 推しの答え、Windows は 1 つの .exe に static link、新しい基点 | 終われば Sonnet が p002 から実装 |
-| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005〜p020 cleared（最新 p011 files、main c590d87fa） | P7 が p021（統合: OS に触れる所を OS の層へ）を実行中 |
+| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | p021（統合: OS に触れる所を OS の層へ）cleared（2026-11-01 08:28、run-unit all PASS: posix 16・win32 18、main 2c7e666e2） | 同じ Queue の残り: 単一の .exe（DLL を作らない）→ 新しい Phase の行 → libkeiland の Windows を pthread 無しに |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 15 回目（q1727-i15）。i14 で 3,107（89.49%）、Acid2・Acid3 100% | CSS_TRACKS の上限 → col の背景 → 縦の inline の背景 |
 
 実装の担当（Sonnet・Opus の単発）: WS335 の p003（SHA-3）・p006（ChaCha20・Poly1305）・p008（X25519）、WS336 の p004（暗号の組と packet）・p005（鍵）（Sonnet、worktree s-wsNNN-pNNN）。
