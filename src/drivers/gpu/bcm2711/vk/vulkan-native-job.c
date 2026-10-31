@@ -974,6 +974,8 @@ void
 bcm2711_vulkan_native_perf_flush(
 	void)
 {
+	struct bcm2711_board_state board;
+
 	/* Nothing waits. */
 	if (native_perf_used == 0U)
 		return;
@@ -983,6 +985,21 @@ bcm2711_vulkan_native_perf_flush(
 	if (native_perf_text[native_perf_used - 1U] != '\n')
 		kern_log_write("\n", 1U);
 	native_perf_used = 0U;
+
+	/*
+	 * The board's clocks, temperature and throttling with each report, so
+	 * that runs measured at different CPU speeds can be told apart.  Asked
+	 * here, outside the controller's mutex, once a window.
+	 */
+	bcm2711_board_state_read(&board);
+	kern_logf("v3d: board arm=%u/%u core=%u v3d=%u MHz temp=%u.%u throttled=0x%05x\n",
+		  (unsigned)(board.arm_hz / 1000000U),
+		  (unsigned)(board.arm_measured_hz / 1000000U),
+		  (unsigned)(board.core_hz / 1000000U),
+		  (unsigned)(board.v3d_hz / 1000000U),
+		  (unsigned)(board.milli_celsius / 1000U),
+		  (unsigned)(board.milli_celsius % 1000U / 100U),
+		  (unsigned)board.throttled);
 }
 
 /* Converts a tick total into microseconds per item, rounding down. */
