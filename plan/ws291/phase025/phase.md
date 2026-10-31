@@ -2,7 +2,7 @@
 
 # ws291-p025: Raspberry Pi 4（V3D 4.2）で mview を動かし、qs40 の model をスペックの比で決めた copies・1920x1080 で 50 fps に
 
-Status: in-progress（2026-10-31 20:20 新設、P4 q1784。i02 23:35 返却: mip で c21 40.5 fps、desktop は session で 51〜57 fps、どちらも目標の手前）
+Status: in-progress（2026-10-31 20:20 新設、P4 q1784。i02 実行中: mip で c21 40.5 fps、desktop は session で 53〜58 fps、どちらも目標の手前）
 Parent: [WS291](../ws.md)
 Queue: q1784（P4）
 
@@ -169,17 +169,28 @@ mview の vkCreateGraphicsPipelines が FEATURE_NOT_PRESENT。足りない機能
 - 注意: graphical login の session の後に pi4-comp.sh を流すと greeter の compositor と画面を取り合う。pi4-desk.sh の後は再起動してから（script に確かめを足した）。
   23:17〜23:29 の 2 つの A/B（p025-pa）は前の run と重なって無効。
 
-### 再開点（2026-10-31 23:35 P4、q1784-i02）
+### draw ごとの uniform の stream（23:35〜23:45、7974d3365）
 
-- branch agent/p4-ws291pi の先頭（この commit）。main c3291b1f9 の上に 86ab82eec（mip）・6ff4e210a ほか。Q1 の merge 待ち。
-- 板（10.0.30.6）: kernel build/p025-4f/vmunix（cksum 3091423017、mip 入り、input inject）、cmdline `login=console v3d.perf=1`、/lib/libc.so・/lib/libvulkan.so は main
-  c3291b1f9 の build（元は /lib/*.p025old）、/bin/aat-input、root の desktop.conf は元のまま（pi4-comp.sh を流すと welcome.done=1 を足す、元は desktop.conf.p025old）。
-  元の kernel と設定は /boot/boot0/*.p025old と host の build/tmp/p025-board/*.orig。
-- 達していない: desktop の 60 fps（session で drag 51〜52・home 54〜57・wiseview 55〜57・launch 55〜56、type 52・output 19〜43 は Terminal の client の速さ）、
+- 7974d3365: draw の準備で各 stage の uniform の stream を upload の storage へ直に書く（bcm2711_vulkan_uniform_write、語の順と確かめは同じ）。前は stage ごとに
+  heap の確保 2 回・写し・解放 2 回。kernel の `prog`（submit あたり）は desktop の drag で 232〜286 → 50〜81 µs、prep は 840〜880 → 581〜594 µs、
+  home・wiseview の prog は 450〜518 → 93〜145 µs。
+- 確かめ: Pi 4・Pi 5 の vmunix warning 0、bin-draw-host-test PASS、desktop の画（pi4-desktop.sh）は基準と完全一致。実機（kernel cksum 2311229471）:
+  pi4-comp.sh 2 回で launch 49・52、type 23・24、output 19・21、drag 57・57、home 57・58、wiseview 59・59。mview c1 184 fps・c21 40.5 fps（GPU で決まり変わらず）。
+- session（pi4-desk.sh、build/tmp/p025-g3）: launch 56・type 53・keys 45（入力）・output 22・scroll 14（入力）・hover 17（入力）・drag 55・home 56・wiseview 58、
+  RENDER stalled 0。
+
+### 再開点（2026-10-31 23:50 P4、q1784-i02）
+
+- branch agent/p4-ws291pi の先頭（この commit）。main c3291b1f9 の上に 86ab82eec（mip）・7974d3365（uniform）と記録・道具。Q1 の merge 待ち。
+- 板（10.0.30.6）: kernel build/p025-4f/vmunix（cksum 2311229471、mip と uniform の直し、input inject）。今は pi4-desk.sh の後で graphical の session が動いたまま、
+  次の起動は `login=console v3d.perf=1`（pi4-comp.sh の前に再起動）。/lib/libc.so・/lib/libvulkan.so は main c3291b1f9 の build（元は /lib/*.p025old）、/bin/aat-input、
+  root の desktop.conf は元のまま（pi4-comp.sh を流すと welcome.done=1 を足す、元は desktop.conf.p025old）。元の kernel と設定は /boot/boot0/*.p025old と
+  host の build/tmp/p025-board/*.orig。
+- 達していない: desktop の 60 fps（session で drag 55・home 56・wiseview 58・launch 56・type 53、output 22 は Terminal の client の速さ）、
   mview c21 の 50 fps（40.5、上の限界の証拠）。
 - 次の候補: (1) Terminal の atlas を optimal ＋ staging の更新に（範囲の外、Q1 の判断）。(2) kernel の worker で次の job の bin を今の job の render と重ねる
-  （inflight=2 と desktop の client と compositor の重なりに効く、inflight=1 の c21 には効かない）。(3) compositor の frame の始めから GPU の完了まで約 21 ms
-  （drag）を縮める: vkQueueSubmit・vkQueuePresentKHR の kernel の prep（1 submit 約 1〜2 ms）。(4) VCM の 4 batch を shader の VPM の大きさで選ぶ（bin −5%）。
+  （inflight=2 と desktop の client と compositor の重なりに効く、inflight=1 の c21 には効かない）。(3) desktop の部分の frame の render（約 3.5 ms/pass、
+  QPU の stall が多い）。(4) VCM の 4 batch を shader の VPM の大きさで選ぶ（bin −5%）。
 
 ### 前の再開点（2026-10-31 22:17 P4、i01、上の i02 で置き換え）
 
