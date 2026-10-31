@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 01:26（Q1）
+最終更新: 2026-11-01 01:27（Q1）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | p025（q1784）: Pi 4 の desktop を 1920x1080 で 60 fps に → mview の 3D（21 体で 50 fps、今 28.9） | Pi 4（10.0.30.6）。この後に Pi 5（p021） |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | [WS335](ws335/ws.md) | libssl-compat（OpenSSL 互換の自前の TLS） | p001 の設計（q1789、標準廉価実装手順）: 範囲・module・header・試験の道具 | 設計・design-reviewer・問いまで |
-| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 実装（q1790）: p002 build の土台から順に | host の Wine＋llvmpipe で試す |
+| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | q1790: 標準廉価実装手順（決定 22）の設計の段: module・header・骨格・試験の道具・実装の phase.md、build の土台 | その後 Sonnet の実装の担当を Q1 が起動 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 12 回目（q1727-i12）: subgrid の残り・multicol・grid の baseline など | 今 3,472 のうち 3,005（86.55%）、Acid3 100/100・Acid2 100%。11 回目は animation の補間・dynamic import()・@property など（+30、後退 0） |
 
 実装の担当（Sonnet・Opus の単発）: 今は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
