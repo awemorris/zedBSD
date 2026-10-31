@@ -67,7 +67,7 @@
 | [p016](phase016/phase.md) | module（Sonnet）: `libkeiland/platform/platform-win32.c`（`platform.h` の起こし・lock・thread を Win32 で） | in-progress（2026-11-01 03:07 Sonnet で起動） | p004 |
 | [p017](phase017/phase.md) | module（Sonnet）: `libkeiland/win32/wide.h/.c` と `input.h/.c`（UTF-16 ↔ UTF-8・surrogate の組、wheel の積み・pointer・修飾の鍵の写し） | in-progress（2026-11-01 03:07 Sonnet で起動） | p004 |
 | [p018](phase018/phase.md) | module（Sonnet、旧 T2）: `libkeiland/win32/cf-html.h/.c`（CF_HTML の encode と decode） | in-progress（2026-11-01 03:09 Sonnet で起動） | p004 |
-| [p019](phase019/phase.md) | module（Sonnet、旧 T3）: `apps/browser-win32/tools/ico.h/.c`（ICO の writer、PNG と BMP の entry） | in-progress（2026-11-01 03:09 Sonnet で起動） | p004 |
+| [p019](phase019/phase.md) | module（Sonnet、旧 T3）: `apps/browser-win32/tools/ico.h/.c`（ICO の writer、PNG と BMP の entry） | 実装済み・試験 PASS（2026-11-01 03:20、cleared は Q1） | p004 |
 | [p020](phase020/phase.md) | glue（Opus、旧 p002）: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の本体（library・DLL・.def・Vulkan の header の取得と遅延の import）、libtruetype `companion.c` の 1 関数と gif の `O_BINARY`、`cross-build.sh` | cleared（2026-11-01 03:15 Q1、main 29c250f65。sources-same PASS、zedBSD amd64・arm64 の 9 target と keiland-linux warning 0、cross-build PASS（Wine で遅延の import）、check-skeleton PASS） | p004 |
 | [p021](phase021/phase.md) | 統合（Opus、旧 p003）: libbrowser の OS に触れる所（O13〜O24・O28〜O31・O34）を OS の層へ、`wb_memmem`、Makefile の posix・win32 の選び | planned | p005・p006・p008・p020 |
 | [p022](phase022/phase.md) | 統合（Opus、旧 p004）: network の Windows（O1〜O10・O32・O33 を os-net へ）、libmedia の wake の callback と `net_loader_ring` | planned | p007・p021 |
