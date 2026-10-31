@@ -1298,6 +1298,22 @@ cascade_compute(
 	/* The filters an @keyframes animation gives at the start of the page's time. */
 	cascade_animation(engine, style, parent);
 
+	/* The writing mode of a table's row groups, rows and columns is the table's (and so is their direction in a vertical table, whose columns the table orders). */
+	if (parent != NULL && (style->display == CSS_DISPLAY_TABLE_ROW || style->display == CSS_DISPLAY_TABLE_ROW_GROUP ||
+	    style->display == CSS_DISPLAY_TABLE_COLUMN)) {
+		style->writing_mode = parent->writing_mode;
+		style->writing_sideways = parent->writing_sideways;
+		if (parent->writing_mode != CSS_WRITING_HORIZONTAL_TB)
+			style->direction = parent->direction;
+	}
+
+	/* A cell of the other orientation than its row is not laid out in a flow of its own (the table lays its cells out in its own). */
+	if (parent != NULL && style->display == CSS_DISPLAY_TABLE_CELL &&
+	    (style->writing_mode == CSS_WRITING_HORIZONTAL_TB) != (parent->writing_mode == CSS_WRITING_HORIZONTAL_TB)) {
+		style->writing_mode = parent->writing_mode;
+		style->writing_sideways = parent->writing_sideways;
+	}
+
 	/* An element without a box forgets the position option that last fit. */
 	if (pseudo == CSS_PSEUDO_ELEMENT_NONE && style->display == CSS_DISPLAY_NONE)
 		((struct dom_element *)element)->anchor_last = 0;
