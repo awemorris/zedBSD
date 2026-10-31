@@ -225,6 +225,19 @@ layout_replaced_size(
 				max_height = 0;
 		}
 	}
+	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER) {
+		limit_frame = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+		if (min_width > 0) {
+			min_width -= limit_frame;
+			if (min_width < 0)
+				min_width = 0;
+		}
+		if (max_width >= 0) {
+			max_width -= limit_frame;
+			if (max_width < 0)
+				max_width = 0;
+		}
+	}
 	if (max_width >= 0 && max_width < min_width)
 		max_width = min_width;
 	if (max_height >= 0 && max_height < min_height)
