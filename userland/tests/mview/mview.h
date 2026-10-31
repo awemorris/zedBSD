@@ -200,6 +200,16 @@ struct mview_renderer {
 	int blit_mipmaps;
 	int linear_filter;
 	const char *operation;
+
+	/*
+	 * Nonzero when the viewer draws with no window (--offscreen): its own
+	 * colour images stand in for the swapchain's, frames are drawn into
+	 * them in turn and never presented, and mview_renderer_read copies the
+	 * latest one back.  offscreen_images has count entries.
+	 */
+	int offscreen;
+	struct mview_image *offscreen_images;
+	uint32_t offscreen_latest;
 };
 
 /* Window lifetime encloses all renderer use of the borrowed native surface. */
@@ -208,10 +218,11 @@ int mview_window_dispatch(struct mview_window *window, int timeout);
 void mview_window_close(struct mview_window *window);
 
 /* Renderer cleanup releases Vulkan ownership before the native window closes. */
-VkResult mview_renderer_open(struct mview_renderer *renderer, struct mview_window *window, int pixel_shading, VkPresentModeKHR present_mode, uint32_t copies, int each_draw, uint32_t submits, uint32_t inflight, int cull_all, uint32_t images);
+VkResult mview_renderer_open(struct mview_renderer *renderer, struct mview_window *window, uint32_t width, uint32_t height, int pixel_shading, VkPresentModeKHR present_mode, uint32_t copies, int each_draw, uint32_t submits, uint32_t inflight, int cull_all, uint32_t images);
 VkResult mview_renderer_load(struct mview_renderer *renderer, const struct mview_model *model);
 VkResult mview_renderer_draw(struct mview_renderer *renderer, const struct mview_model *model, const struct mview_camera *camera);
 VkResult mview_renderer_recreate(struct mview_renderer *renderer, uint32_t width, uint32_t height);
 VkResult mview_renderer_close(struct mview_renderer *renderer);
+VkResult mview_renderer_read(struct mview_renderer *renderer, const char *path, uint32_t *checksum);
 
 #endif

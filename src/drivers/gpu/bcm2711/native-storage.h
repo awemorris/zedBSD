@@ -54,6 +54,11 @@ struct bcm2711_native_snapshot {
 	/* One, or the levels of a mip tree (which the texture formatting unit converts whole). */
 	uint32_t levels;
 	uint64_t generation;
+	/*
+	 * A 16-bit copy of 32-bit indices (texel_bytes zero, width the
+	 * indices) whose source at generation held an index too large for it.
+	 */
+	bool unfit;
 	/* Pixels converted at generation; false while the texture formatting unit has yet to fill them. */
 	bool valid;
 	struct bcm2711_native_storage *pixels;
@@ -102,6 +107,14 @@ int bcm2711_native_storage_drain(struct bcm2711_v3d_space *space);
 int bcm2711_native_snapshot_get(struct bcm2711_v3d_space *space, struct bcm2711_buffer *buffer, uint64_t offset, uint32_t width, uint32_t height, uint32_t pitch, const void *raster, size_t raster_bytes, bool unit, struct bcm2711_native_snapshot **result);
 int bcm2711_native_snapshot_get_texel(struct bcm2711_v3d_space *space, struct bcm2711_buffer *buffer, uint64_t offset, uint32_t width, uint32_t height, uint32_t pitch, uint32_t texel_bytes, const void *raster, size_t raster_bytes, bool unit, struct bcm2711_native_snapshot **result);
 int bcm2711_native_snapshot_get_levels(struct bcm2711_v3d_space *space, struct bcm2711_buffer *buffer, uint64_t offset, uint32_t width, uint32_t height, uint32_t pitch, uint32_t texel_bytes, const void *raster, size_t raster_bytes, bool unit, uint32_t levels, uint32_t tree_bytes, struct bcm2711_native_snapshot **result);
+
+/*
+ * Finds or makes the 16-bit copy of count 32-bit indices at offset in a
+ * buffer, kept like a texture snapshot until the buffer's generation moves.
+ * ENOTSUP leaves the caller reading the 32-bit indices: a host-mapped
+ * source, an index of 0xffff or more, or a copy every draw still uses.
+ */
+int bcm2711_native_snapshot_get_indices(struct bcm2711_v3d_space *space, struct bcm2711_buffer *buffer, uint64_t offset, uint32_t count, const void *indices, size_t indices_bytes, struct bcm2711_native_snapshot **result);
 void bcm2711_native_snapshot_put(struct bcm2711_native_snapshot *snapshot);
 void bcm2711_native_snapshot_filled(struct bcm2711_native_snapshot *snapshot);
 

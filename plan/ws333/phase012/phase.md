@@ -2,7 +2,7 @@
 
 # ws333-p012: tick の位相を揃える（amd64 の HAL の実装）
 
-Status: in-progress（実装と QEMU の確かめは済み。受け入れの 5330 の前後の数が未実施）
+Status: in-progress（実装と QEMU の確かめは済み。2026-11-01 q1788 の 5330: idle の package 10.08 → 6.44 W（periodic → TSC-deadline）。cleared は Q1 の判定）
 Parent: [WS333](../ws.md)
 Queue: q1768-i01（P7）
 
@@ -41,9 +41,25 @@ host の / の空きが少ないため build・image・QEMU は /tmp（`/tmp/p7-
 | 起動（新しい道） | 同じで `-cpu host,+invtsc` | PASS（`/tmp/p7-ws333b/boot3-invtsc/login.png`）。4 CPU とも LVTT `tsc-deadline` |
 | tick の rate | `plan/ws333/tests/tick-phase/tick-rate.sh OUT host IMAGE`・`OUT host,+invtsc IMAGE` | periodic 997.7 ticks/s（4 CPU periodic）、TSC-deadline 995.8 ticks/s（4 CPU tsc-deadline）。どちらも 1000 Hz（差は HMP の読みの時刻の誤差の内、10 秒で数十 ms） |
 
+## 5330 の前後の計測（2026-11-01、q1788-i01、P1）
+
+- 道具: `sh plan/ws333/tests/hw5330/5330-thermal.sh p012 build/q1788/kA/vmunix build/q1788/kB/vmunix q1788-p012`（kernel ごとに NVMe の p4 へ → 起動 → 120 秒置く → idle の 20 秒の窓を 3 回 → Debian へ戻す → 要約）。窓の両端で試験だけの diag の `hostname td-idle`（status・meter・package の滞在だけ、CPU を起こす sample はしない）と、p002 と同じ器具の `sysctl hw.gputelemetry`（`plan/ws291/tests/i915-stats-diag.patch` の MCHBAR の package の energy）。画面は graphical login の desktop（session は起動のまま、操作なし）。
+- kernel: 2 つとも main 82c6ef325 ＋ `CONFIG_CPU_PERF=y` ＋ thermal-diag.patch ＋ i915-stats-diag.patch（strategy は firmware のまま、HWP は start しない）。A = 既定（TSC-deadline、sha256 先頭 e3a19c937043b189）、B = A ＋ `plan/ws333/tests/hw5330/tick-periodic.patch`（`LAPIC_TICK_TSC_DEADLINE` を 0、940880aaf59467ea）。どちらも rc 0・warning 0。userland は main 82c6ef325 の image（config-5330.mk）。
+
+| kernel | package（RAPL の meter、窓 1/2/3） | i915 の診断の package | cores | graphics | platform | PC2・PC3・PC6・PC7 の滞在 |
+| --- | --- | --- | --- | --- | --- | --- |
+| A: TSC-deadline（揃える） | 6.42 / 6.46 / 6.43 W | 6.42 / 6.46 / 6.44 W | 1.09〜1.12 W | 0.67 W | 18.0 W | 全部 0.0% |
+| B: periodic（今までの形） | 10.06 / 10.08 / 10.11 W | 10.06 / 10.08 / 10.11 W | 4.36〜4.39 W | 0.88〜0.90 W | 22.0 W | 全部 0.0% |
+
+- tick の位相を揃えると idle の package は 10.08 → 6.44 W（−3.64 W、−36%）、cores は 4.37 → 1.10 W。2 つの器具（RAPL の meter と i915 の診断）は 0.02 W 以内で合う。
+- p002（MWAIT C6、HLT の前 13.00 W）の 11.70 W は同じ i915 の器具で、periodic の B（10.08 W）が近い形（image と main の版が違う: p002 は main 48a27d158 と WS291 の config）。
+- package の C-state は A・B どちらでも PC2〜PC7 に入っていない（滞在の計数が増えない）。下がった分は core の側（cores 4.4 → 1.1 W）。package が深い状態に入れない理由は未調査（PCIe の ASPM・display・他の妨げ）。Debian（iGPU は vfio-pci で画面の driver なし、powercap）の idle は package 3.75 W。
+- 起動の行 `A64 TIMER TICK source=…` は dmesg に出ない（HAL の行は kernel の log に入らない、p002 と同じ）。A が TSC-deadline で走った事は電力の差からの推定で、直には見ていない（B の vmunix には `source=tsc-deadline` の文字列が無い事は確かめた）。
+- 全 CPU が同じ時刻に tick を処理する事による遅れ・lock の取り合いは測っていない。WS299 の bench・p011 の負荷・desktop は A の形（既定）の kernel で問題なく動いた（観察だけ）。
+
 ## 未実施
 
-- **5330 の前後の package の電力と PC（package の C-state）の滞在の率**: 5330 が止まっているので未実施（後で）。比べる物は同じ image で kernel だけ替えた 2 つ（既定と `-DLAPIC_TICK_TSC_DEADLINE=0`）。器具は p002 と同じ診断の patch か、p011 の後なら meter（design.md §9）。方式の採否はこの数で決める（下がらなくても記録する）。
+- 5330 の前後の電力は 2026-11-01 に上の表（q1788）。PC の滞在は両方 0 で、位相の揃いの直の観察にはならなかった。
 - tick の位相が実際に揃っていることの直の観察（QEMU の HMP では `IA32_TSC_DEADLINE` を読めない）。5330 の PC の滞在の率で間接に見る。
 - 全 CPU が同じ時刻に tick を処理することによる lock の取り合い・遅れ（design.md の危険の表）: 5330 の計測で見る。悪ければ macro で戻す。
 - QEMU の TCG（`-cpu max`）の道。
@@ -51,4 +67,4 @@ host の / の空きが少ないため build・image・QEMU は /tmp（`/tmp/p7-
 
 ## 残り
 
-- 5330 の計測（上）の後に cleared の判定（Q1）。
+- 5330 の計測（上、2026-11-01）を見て cleared の判定（Q1）。

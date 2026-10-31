@@ -13,7 +13,10 @@
  *
  *   V5  a shader-free 1x1 bin/render job (both completion interrupts)
  *   V6  a 64x64 RGBA8 clear stored to memory (every pixel)
- *   V7  a texture formatting job, raster to UB-linear (every texel)
+ *   V7  a texture formatting job, raster to UB-linear (every texel), then
+ *       raster to strict UIF for the shapes and texel sizes textures
+ *       have; when every texel lands where the CPU conversion puts it,
+ *       texture conversion uses the unit (v3d.tfu=0 keeps the CPU's)
  *   V8  a compute dispatch that does nothing, then one that stores a word
  *   V9  a bin list that branches to itself: the hang is detected, the
  *       engine is reset through its sequencer and power manager, and the
@@ -32,6 +35,7 @@
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/buffer.h"
+#include "drivers/gpu/bcm2711/native-state.h"
 #include "drivers/gpu/bcm2711/v3d-job.h"
 #include "drivers/gpu/bcm2711/v3d71-private.h"
 
@@ -48,6 +52,9 @@
 #define DIAGNOSTIC_SHADER_OFFSET 0x1c0000U
 #define DIAGNOSTIC_UNIFORM_OFFSET 0x1c1000U
 #define DIAGNOSTIC_STORE_OFFSET 0x1c2000U
+
+/* The bytes after a UIF conversion's output that must keep their fill. */
+#define DIAGNOSTIC_TFU_GUARD 64U
 
 /* The clear colour and the word the compute shader stores. */
 #define DIAGNOSTIC_COLOR 0xff317ce0U
@@ -102,6 +109,8 @@ static void cl_job(const struct bcm2711_v3d_noop *lists, struct bcm2711_v3d_job 
 static int run_noop(struct bcm2711_v3d *engine, const char *stage);
 static int run_clear(struct bcm2711_v3d *engine);
 static int run_tfu(struct bcm2711_v3d *engine);
+static void check_tfu_uif(struct bcm2711_v3d *engine);
+static int run_tfu_uif(struct bcm2711_v3d *engine, enum bcm2711_native_texel texel, uint32_t width, uint32_t height, uint32_t pitch, uint32_t offset);
 static int run_compute(struct bcm2711_v3d *engine, bool store);
 static int run_timeout(struct bcm2711_v3d *engine);
 static uint32_t pattern_pixel(uint32_t x, uint32_t y);
@@ -161,6 +170,10 @@ bcm2711_v3d_diagnostic(
 		if (allowed)
 			error = run_tfu(engine);
 		results[STEP_TFU] = error;
+
+		/* The unit's UIF output decides whether textures are converted by it; a mismatch is not a failure. */
+		if (error == 0)
+			check_tfu_uif(engine);
 	}
 
 	/* Runs the empty compute dispatch, then the one that stores a word. */
@@ -398,6 +411,183 @@ run_tfu(
 	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V7 TFU ok IRQ %x, all 64 tiled texels", result.hub_events);
 
 	/* Succeeded: the conversion matched for every texel. */
+	return 0;
+}
+
+/*
+ * Lets texture conversion use the unit only after its strict UIF output
+ * matches the CPU conversion for every shape the runtime gives it: whole and
+ * partial columns and block rows, a pitch wider than the row and not a
+ * multiple of 64 bytes, a single pixel, an image starting inside its run, and
+ * the one- and two-byte texels of a picture's planes.  A mismatch is reported
+ * and leaves the CPU conversion in charge without failing the self-test; an
+ * engine a failed job left faulted is reset (boot owns all of its DMA here).
+ */
+static void
+check_tfu_uif(
+	struct bcm2711_v3d *engine)
+{
+	int converted;
+	int error;
+
+	/* Three whole columns and five block rows with a padded pitch, then partial ones packed at 132 bytes. */
+	converted = run_tfu_uif(engine, BCM2711_NATIVE_TEXEL_RGBA8, 96U, 40U, 512U, 0U);
+	if (converted == 0)
+		converted = run_tfu_uif(engine, BCM2711_NATIVE_TEXEL_RGBA8, 33U, 9U, 132U, 0U);
+
+	/* One pixel, and an image 64 bytes into its run, partial in both directions. */
+	if (converted == 0)
+		converted = run_tfu_uif(engine, BCM2711_NATIVE_TEXEL_RGBA8, 1U, 1U, 4U, 0U);
+	if (converted == 0)
+		converted = run_tfu_uif(engine, BCM2711_NATIVE_TEXEL_RGBA8, 200U, 150U, 1024U, 64U);
+
+	/* The largest the diagnostic run holds, which also gives the unit's speed. */
+	if (converted == 0)
+		converted = run_tfu_uif(engine, BCM2711_NATIVE_TEXEL_RGBA8, 256U, 255U, 1024U, 0U);
+
+	/* A picture's planes: one-byte and two-byte texels, partial blocks. */
+	if (converted == 0)
+		converted = run_tfu_uif(engine, BCM2711_NATIVE_TEXEL_R8, 70U, 37U, 128U, 0U);
+	if (converted == 0)
+		converted = run_tfu_uif(engine, BCM2711_NATIVE_TEXEL_RG8, 35U, 19U, 128U, 0U);
+
+	/* The outcome, which the boot line's v3d.tfu=0 overrides. */
+	if (converted == 0 && bcm2711_stage_tfu_off()) {
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V7 TFU UIF self-test passed; v3d.tfu=0 keeps conversion on the CPU");
+	} else if (converted == 0) {
+		engine->hardware.tfu_uif_ready = true;
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V7 TFU UIF self-test passed; texture conversion uses the unit");
+	} else if (engine->hardware.faulted) {
+		error = bcm2711_v3d_hardware_reset(engine);
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V7 TFU UIF error %d; CPU conversion, reset %d", converted, error);
+	} else {
+		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V7 TFU UIF unavailable %d; CPU conversion", converted);
+	}
+}
+
+/*
+ * Converts one raster image of a texel size to strict UIF with the unit
+ * and checks every visible texel at the place the CPU conversion puts it
+ * (bcm2711_native_texture_offset) and the guard after the output.
+ */
+static int
+run_tfu_uif(
+	struct bcm2711_v3d *engine,
+	enum bcm2711_native_texel texel,
+	uint32_t width,
+	uint32_t height,
+	uint32_t pitch,
+	uint32_t offset)
+{
+	struct bcm2711_native_conversion conversion;
+	struct bcm2711_v3d_job job;
+	struct bcm2711_v3d_job_result result;
+	uint8_t *storage;
+	uint8_t *input;
+	uint8_t *output;
+	uint32_t texel_bytes;
+	uint32_t type;
+	uint32_t bytes;
+	uint32_t place;
+	uint32_t block_height;
+	uint32_t x;
+	uint32_t y;
+	uint32_t index;
+	uint64_t started;
+	uint64_t finished;
+	uint64_t frequency;
+	bool started_valid;
+	bool finished_valid;
+	int error;
+
+	/* The texel's size and type, and the output's size; both images and the guard fit the diagnostic run. */
+	error = bcm2711_native_texel_layout(texel, &texel_bytes, &type);
+	if (error != 0)
+		return error;
+	error = bcm2711_native_texture_size_texel(width, height, texel_bytes, &bytes);
+	if (error != 0)
+		return error;
+	if (offset + pitch * height > DIAGNOSTIC_TFU_OFFSET - DIAGNOSTIC_TARGET_OFFSET)
+		return EINVAL;
+	if (bytes + DIAGNOSTIC_TFU_GUARD > DIAGNOSTIC_SHADER_OFFSET - DIAGNOSTIC_TFU_OFFSET)
+		return EINVAL;
+
+	/* Each byte depends on its texel's coordinates and its place in the texel, so a misplaced one cannot match. */
+	storage = engine->hardware.diagnostic->address;
+	input = storage + DIAGNOSTIC_TARGET_OFFSET + offset;
+	output = storage + DIAGNOSTIC_TFU_OFFSET;
+	for (y = 0; y < height; y++) {
+		/* Fills the visible part of each row. */
+		for (x = 0; x < width * texel_bytes; x++)
+			input[y * pitch + x] = (uint8_t)(x * 7U + y * 13U + 1U);
+	}
+	kern_memset(output, 0xa5, bytes + DIAGNOSTIC_TFU_GUARD);
+
+	/* Raster in, strict UIF without XOR out over the image's whole block rows, as texture sampling uses it. */
+	kern_memset(&conversion, 0, sizeof(conversion));
+	conversion.type = type;
+	conversion.texel_bytes = texel_bytes;
+	conversion.tiling = BCM2711_NATIVE_TILING_UIF;
+	conversion.height = height;
+	block_height = texel_bytes == 1U ? 16U : 8U;
+	conversion.padded_height = (height + block_height - 1U) / block_height * block_height;
+	kern_memset(&job, 0, sizeof(job));
+	job.kind = BCM2711_V3D_JOB_TFU;
+	job.command.tfu.input = DIAGNOSTIC_ADDRESS + DIAGNOSTIC_TARGET_OFFSET + offset;
+	job.command.tfu.input_bytes = (height - 1U) * pitch + width * texel_bytes;
+	job.command.tfu.output = DIAGNOSTIC_ADDRESS + DIAGNOSTIC_TFU_OFFSET;
+	job.command.tfu.output_bytes = bytes;
+	job.command.tfu.stride = pitch / texel_bytes;
+	job.command.tfu.size = (height << 16) | width;
+	error = bcm2711_native_conversion_words(&conversion, &job.command.tfu.output_format, &job.command.tfu.configuration);
+	if (error != 0)
+		return error;
+	kern_dcache_clean_range(input, pitch * height);
+	kern_dcache_clean_range(output, bytes + DIAGNOSTIC_TFU_GUARD);
+	kern_io_write_barrier();
+
+	/* The counter brackets only the unit's job, including its interrupt wait. */
+	started_valid = kern_rtc_read_counter(&started, &frequency);
+	error = bcm2711_v3d_job_run(engine, &job, &result);
+	if (error != 0)
+		return error;
+	finished_valid = kern_rtc_read_counter(&finished, &frequency);
+	kern_dcache_invalidate_range(output, bytes + DIAGNOSTIC_TFU_GUARD);
+	kern_io_read_barrier();
+	if (started_valid && finished_valid && frequency != 0) {
+		bcm2711_stage_mark(
+			BCM2711_FAMILY_V3D,
+			"V7 TFU UIF %ux%u x%u us=%llu",
+			width,
+			height,
+			texel_bytes,
+			(unsigned long long)((finished - started) * 1000000U / frequency));
+	}
+
+	/* The bytes after the UIF size keep their fill. */
+	for (index = 0; index < DIAGNOSTIC_TFU_GUARD; index++) {
+		if (output[bytes + index] != 0xa5U) {
+			bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V7 TFU UIF %ux%u x%u wrote past %u bytes", width, height, texel_bytes, bytes);
+			return EBADMSG;
+		}
+	}
+
+	/* Every visible texel's bytes at the CPU conversion's place. */
+	for (y = 0; y < height; y++) {
+		/* One row's texels. */
+		for (x = 0; x < width; x++) {
+			/* Refuses the first texel out of place. */
+			error = bcm2711_native_texture_offset(x, y, height, texel_bytes, &place);
+			if (error != 0)
+				return error;
+			if (kern_memcmp(output + place, input + y * pitch + x * texel_bytes, texel_bytes) != 0) {
+				bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V7 TFU UIF %ux%u x%u mismatch at %u,%u", width, height, texel_bytes, x, y);
+				return EBADMSG;
+			}
+		}
+	}
+
+	/* Succeeded: the unit's layout is the CPU's for this shape. */
 	return 0;
 }
 

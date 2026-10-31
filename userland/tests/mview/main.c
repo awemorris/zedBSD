@@ -33,6 +33,9 @@
 #define MAIN_COPIES_MAX		65536U
 #define MAIN_SUBMITS_MAX	4096U
 
+/* The nearest an offscreen run looks (--zoom), in times the framed distance. */
+#define MAIN_ZOOM_MAX		64U
+
 /* The most swapchain images (--images). */
 #define MAIN_IMAGES_MAX		8U
 
@@ -85,6 +88,24 @@ struct main_options {
 
 	/* The swapchain's image count (--images), 0 for the viewer's own choice (at least three). */
 	uint32_t images;
+
+	/*
+	 * Nonzero to draw with no window (--offscreen): --frames frames of the
+	 * first view at --size into the viewer's own images, timed, and the
+	 * last one read back (to --shot, a PPM file, when given).
+	 */
+	int offscreen;
+	const char *shot;
+
+	/*
+	 * How many times nearer than the framed view an offscreen run looks
+	 * (--zoom, one by default), and the pixel of the framed view it looks
+	 * at (--look=XxY, the centre by default; look_set says one was given).
+	 */
+	uint32_t zoom;
+	uint32_t look_x;
+	uint32_t look_y;
+	int look_set;
 };
 
 /* The frame-rate measurement of the spin demonstration. */
@@ -126,6 +147,7 @@ static void main_frame_log(const char *token, uint32_t frame, const struct mview
 static double main_seconds(const struct timespec *from, const struct timespec *to);
 static void main_spin_turn(struct main_spin *spin, struct mview_camera *camera);
 static int main_spin_presented(struct main_spin *spin, const char *token, uint32_t duration);
+static VkResult main_offscreen(const struct main_options *options, const struct mview_model *model, struct mview_camera *camera, struct mview_renderer *renderer, uint32_t *completed);
 
 /*
  * Loads the model, opens the window and renderer, and runs until quit.
@@ -165,7 +187,7 @@ main(
 	/* Argument failure starts no connection or GPU namespace. */
 	status = options_parse(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: mview [--display=NAME] [--model=DIR] [--token=NAME] [--frames=N] [--timeout-s=N] [--spin=SECONDS] [--shading=vertex|pixel] [--windowed] [--size=WxH] [--content=none|video|game] [--present=fifo|mailbox|immediate] [--copies=N] [--draws=instanced|each] [--submits=N] [--inflight=N] [--cull=all] [--images=N]\n");
+		fprintf(stderr, "usage: mview [--display=NAME] [--model=DIR] [--token=NAME] [--frames=N] [--timeout-s=N] [--spin=SECONDS] [--shading=vertex|pixel] [--windowed] [--size=WxH] [--content=none|video|game] [--present=fifo|mailbox|immediate] [--copies=N] [--draws=instanced|each] [--submits=N] [--inflight=N] [--cull=all] [--images=N] [--offscreen [--shot=FILE.ppm] [--zoom=N] [--look=XxY]]\n");
 		return 2;
 	}
 
@@ -198,6 +220,25 @@ main(
 	/* Input events apply to the camera from the first dispatch on. */
 	mview_input_init(&input, &camera, options.token, 0U);
 
+	/* Without a window the frames are drawn offscreen and the run ends after them. */
+	if (options.offscreen) {
+		result = mview_renderer_open(&renderer, NULL, options.width, options.height, options.pixel_shading, options.present,
+					     options.copies, options.each_draw, options.submits, options.inflight, options.cull_all, options.images);
+		operation = renderer.operation;
+		if (result == VK_SUCCESS) {
+			result = mview_renderer_load(&renderer, &model);
+			operation = renderer.operation;
+		}
+		if (result == VK_SUCCESS) {
+			result = main_offscreen(&options, &model, &camera, &renderer, &completed);
+			operation = renderer.operation;
+		}
+		if (result != VK_SUCCESS)
+			status = -1;
+		reason = "frames";
+		goto cleanup;
+	}
+
 	/* Creates the configured fullscreen window and binds the seat if there is one. */
 	operation = "mview_window_open";
 	status = mview_window_open(&window, options.display, &input, options.width, options.height, !options.windowed, options.content);
@@ -209,7 +250,7 @@ main(
 	fflush(stdout);
 
 	/* Creates renderer ownership only after the native surface is configured. */
-	result = mview_renderer_open(&renderer, &window, options.pixel_shading, options.present, options.copies, options.each_draw, options.submits,
+	result = mview_renderer_open(&renderer, &window, 0U, 0U, options.pixel_shading, options.present, options.copies, options.each_draw, options.submits,
 				     options.inflight, options.cull_all, options.images);
 	operation = renderer.operation;
 	if (result != VK_SUCCESS) {
@@ -453,6 +494,7 @@ options_parse(
 	options->copies = 1U;
 	options->submits = 1U;
 	options->inflight = 1U;
+	options->zoom = 1U;
 
 	/* Applies each explicit option in command-line order. */
 	for (index = 1; index < argc; index++) {
@@ -524,6 +566,41 @@ options_parse(
 			if (match != 0)
 				return -1;
 			options->pixel_shading = 0;
+			continue;
+		}
+
+		/* No window: the frames are drawn offscreen. */
+		match = strcmp(argv[index], "--offscreen");
+		if (match == 0) {
+			options->offscreen = 1;
+			continue;
+		}
+
+		/* How much nearer an offscreen run looks. */
+		match = strncmp(argv[index], "--zoom=", 7U);
+		if (match == 0) {
+			status = option_number(argv[index] + 7U, MAIN_ZOOM_MAX, &options->zoom);
+			if (status != 0 || options->zoom == 0U)
+				return -1;
+			continue;
+		}
+
+		/* The pixel of the framed view an offscreen run looks at. */
+		match = strncmp(argv[index], "--look=", 7U);
+		if (match == 0) {
+			status = option_size(argv[index] + 7U, &options->look_x, &options->look_y);
+			if (status != 0)
+				return -1;
+			options->look_set = 1;
+			continue;
+		}
+
+		/* Where an offscreen run writes its last frame. */
+		match = strncmp(argv[index], "--shot=", 7U);
+		if (match == 0) {
+			options->shot = argv[index] + 7U;
+			if (*options->shot == '\0')
+				return -1;
 			continue;
 		}
 
@@ -992,4 +1069,91 @@ main_spin_presented(
 
 	/* The spin is over. */
 	return 1;
+}
+
+/*
+ * Draws an offscreen run: the first view framed as a window of --size
+ * would be (--zoom times nearer, centred on the --look pixel), --frames frames (one when none is asked), each waited for as
+ * the windowed viewer waits; then reads the last frame back.  Prints the
+ * frame times past the first frame (which pays for first-use costs), the
+ * stages, and the picture's checksum.
+ */
+static VkResult
+main_offscreen(
+	const struct main_options *options,
+	const struct mview_model *model,
+	struct mview_camera *camera,
+	struct mview_renderer *renderer,
+	uint32_t *completed)
+{
+	struct timespec first;
+	struct timespec previous;
+	struct timespec now;
+	double gap;
+	double shortest;
+	double longest;
+	uint32_t frames;
+	uint32_t checksum;
+	VkResult result;
+
+	/* The first view frames the whole model from the front. */
+	mview_camera_fit(camera, model->minimum, model->maximum, renderer->extent.width, renderer->extent.height);
+	if (options->look_set)
+		mview_camera_pan(camera, 0.5f * (float)renderer->extent.width - (float)options->look_x,
+				 0.5f * (float)renderer->extent.height - (float)options->look_y, renderer->extent.height);
+	camera->distance /= (float)options->zoom;
+	frames = options->frames != 0U ? options->frames : 1U;
+
+	/* Draws the frames, timing each one past the first. */
+	shortest = 0.0;
+	longest = 0.0;
+	memset(&first, 0, sizeof(first));
+	memset(&previous, 0, sizeof(previous));
+	for (*completed = 0U; *completed < frames; (*completed)++) {
+		/* The stages count from the second frame on. */
+		if (*completed == 1U) {
+			memset(renderer->stage_cycles, 0, sizeof(renderer->stage_cycles));
+			renderer->stage_frames = 0U;
+			mview_renderer_span(renderer, 0);
+		}
+
+		result = mview_renderer_draw(renderer, model, camera);
+		if (result != VK_SUCCESS)
+			return result;
+
+		/* The time between frame ends, past the first. */
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		if (*completed == 0U) {
+			first = now;
+			main_frame_log(options->token, 1U, camera);
+		} else {
+			gap = 1000.0 * main_seconds(&previous, &now);
+			if (*completed == 1U || gap < shortest)
+				shortest = gap;
+			if (gap > longest)
+				longest = gap;
+		}
+		previous = now;
+	}
+
+	/* The rate over the frames after the first. */
+	if (frames > 1U) {
+		mview_renderer_span(renderer, 1);
+		printf("MVIEW OFFSCREEN run=%s size=%ux%u copies=%u frames=%u fps=%.2f ms=%.2f min=%.2f max=%.2f\n",
+		    options->token, renderer->extent.width, renderer->extent.height, options->copies, frames - 1U,
+		    (double)(frames - 1U) / main_seconds(&first, &previous),
+		    1000.0 * main_seconds(&first, &previous) / (double)(frames - 1U), shortest, longest);
+		mview_renderer_report_stages(renderer, options->token, main_seconds(&first, &previous));
+	}
+
+	/* Reads the last frame back, into the file when asked. */
+	result = mview_renderer_read(renderer, options->shot, &checksum);
+	if (result != VK_SUCCESS)
+		return result;
+	printf("MVIEW SHOT run=%s size=%ux%u checksum=%08x file=%s\n", options->token, renderer->extent.width, renderer->extent.height,
+	    checksum, options->shot != NULL ? options->shot : "-");
+	fflush(stdout);
+
+	/* Succeeded: the frames were drawn and the last one read. */
+	return VK_SUCCESS;
 }

@@ -199,12 +199,19 @@ mview の vkCreateGraphicsPipelines が FEATURE_NOT_PRESENT。足りない機能
 - 板（10.0.30.6）: i03 の再開点と同じ状態のまま（kernel build/p025-4z/vmunix cksum 736120021、cmdline `login=console v3d.perf=1`、/bin/wayland・terminal・
   files と /lib/libvulkan.so・libc.so は p025-4u、元は *.p025old、/root/p025・p025d・p025desk、元の kernel と設定は /boot/boot0/*.p025old と
   host の build/tmp/p025-board/*.orig）。ユーザーが電源を落とし、板を取り替える。
+  2026-11-01 02:08 追記: この Pi 4 の SD カードは Q1 が Pi 5 の image（rpi5-p021.img）で上書きした（ユーザーの許可）。上の板の状態
+  （p025-4z の kernel・/bin・/lib の差し替え・*.p025old）はもう無い。再開する時は Pi 4 の image を作り直す（host の build/tmp/p025-board/*.orig は残る）。
 - 再開するなら: (1) 2a53a5a6d の kernel で mview と desktop を流し、`v3d: board` の行で ARM の実測の clock・温度・throttled の bit を run ごとに比べる。
   throttled の bit 1・2（今）か 17・18（履歴）が立てば熱、bit 0・16 なら電源（under-voltage）で、heatsink か電源の交換（ユーザーの判断）。
   ARM が 600 MHz のまま throttled が 0 なら、firmware に ARM の clock の最大を頼む（SET_CLOCK_RATE、Linux の cpufreq の代わり）。
   core clock の 137.6 MHz も CPU・V3D の memory の速さに効くかを同じ行で見る。
   (2) mview c21: 32-bit の index を 16-bit に写して buffer の世代で持つ（bin の memory の読みの約 2 割、inflight=1 の GPU の側を約 1 ms）。
   (3) desktop: compositor の frame の pace と部分（dirty の矩形）の再描画（承認済み）。Pi 4 と QEMU Venus で画を確かめ、compositor の host 試験を流す。
+  注（i04、build/tmp/p025-g4/desk1 の frames.txt を読み直した、未確かめの見立て）: drag の 53 fps は compositor の遅れでなく入力の注入の間隔に見える。
+  aat-input の drag は 15 ms の nanosleep ごとに 1 動き（1 ms の timer で約 16〜17 ms）で、表示の 60 Hz と拍を打ち、動きの来ない vsync で frame が
+  出ない（work は p50 6 ms、period は 15〜20 ms と揺れ、`next` が 19〜25 ms の後の period が 29〜32 ms）。本物の mouse（125 Hz 以上）では起きない。
+  測り方を直すなら drag の間隔を 8 ms にするか、表示の frame 数でなく「動きのあった vsync に frame が出た割合」で数える（frame-ops は共有の道具なので Q1 の判断）。
+  home・wiseview は animation の始めの 1〜2 frame の shown が 32〜38 ms（area が 2〜3 倍の最初の frame）で、そこが 60 に届かない分。
   (4) bin と render の重ねは V3D 4.2 では帯域の取り合いで効かない（cfd09a48c に実装）。
 - 消してほしい物（Q1 へ）: build/p021-k4b（Pi 4 の build の確かめだけの kernel）。
 

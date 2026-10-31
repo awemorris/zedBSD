@@ -18,3 +18,13 @@ Parent: [WS335](../ws.md)
 5. 標準廉価実装手順の §4: 仕様を消えない場所に置く（git の外）、module の分け方、header の書き方、.c の骨格、試験の道具、実装の Phase の表と phase.md、
    design-reviewer、Q1 へ返す物。ユーザーへの問いは AGENTS.md §3 の前置きの形で。
 6. code は header・骨格・試験の道具の他は書かない。
+
+## 結果（2026-11-01 P6、q1789-i01）
+
+- 範囲の変更（ユーザーの決定、ws.md）: libbrowser の net/tls.c と WS336 の ssh・sshd が使う物の和だけ、libcrypto-compat と libssl-compat の 2 つ、header は `include/libc/compat/crypto/`・`ssl/`。
+- 作った物: [design.md](../design.md)、[user-questions.md](../user-questions.md)（U1〜U6、Q1 への確認 3 件）、header（`userland/base/libcrypto-compat/` 24、`userland/base/libssl-compat/` 8、公開 7）、
+  .c の骨格（29＋10、全部 ENOSYS か失敗の値）、試験の道具（[tests/](../tests/): check-skeleton.sh・run-unit.sh・run-ct.sh・fetch.sh・vectors.py・unit/check.h・vecfile.h・derwriter.h・ct.h・test-tools.c）、
+  実装の Phase の phase.md（p002〜p035、提案の p036）、ws.md の Phase の表。design-reviewer の記録は [design-review.md](../design-review.md)。
+- 仕様と試験の data: P6 の worktree の `build/ws335-specs/`（RFC 33・NIST/SECG/ITU の PDF 11）と `build/ws335-vectors/`（Wycheproof・x509-limbo・CAVP 9 本、`rec/` に 169 個の record file）。SHA-256 は fetch.sh と design.md §1。共有の場所への写しは Q1。
+- 確かめ: check-skeleton.sh PASS（cc・clang の -std=c89 -Wpedantic、zedBSD の clang の x86_64 と aarch64、llvm-mingw の x86_64 と aarch64）、run-unit.sh tools PASS（18 checks）、fetch.sh vectors PASS。
+- 未実施: zedBSD の .so の build の規則（p033）、QEMU・実機の試験（実装の後）、IACR ePrint の 2 本の取得（server の 403、別の経路で取り直していない）。

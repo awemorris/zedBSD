@@ -2,7 +2,7 @@
 
 # ws333-p018: Dell の provider（DDV・熱の mode・受け手・SMM の boost の確かめ）
 
-Status: in-progress（q1776-i01 の範囲（host の harness まで）を実装し確かめた。5330 の実機の試験が残る）
+Status: in-progress（q1776-i01 の範囲（host の harness まで）を実装し確かめた。2026-11-01 q1788 の 5330: attach・4 つの mode・Debian の読み・起動の `\ODV0` は通り、boost は rpm が上がらず既定 n のまま。cleared は Q1 の判定）
 Parent: [WS333](../ws.md)
 Queue: q1776-i01（P7）
 
@@ -91,8 +91,28 @@ design.md §9 の p018（WS303 design §4.2・§4.5 と WS333 design §4.7・§4
 - 全 20 port の vmunix（`sh plan/tools/ports/build-vmunix-all.sh /tmp/p7-ws333/b-all`、2923e980e と同じ kernel の source）: 20 port 全部 rc=0、warning 0。
 - QEMU amd64（`make ZEDBSD_CONFIG=plan/ws333/tests/config-amd64-boot.mk BUILD=/tmp/p7-ws333/img disk-image` rc=0・warning 0、vmunix に `drv_acpi_dell_attach`。`BOOT_MODE=uefi-usb OUTPUT=/tmp/p7-ws333/boot plan/tools/boot-test.sh /tmp/p7-ws333/img/hdd-image.img`）: PASS、画面の PNG（`/tmp/p7-ws333/boot/login.png`）で login prompt を見た。q35 に PNP0C14 は無いので Dell の WMI が無い道（WMI の attach が ENODEV、Dell の attach が ENODEV で log なし）の回帰。console・serial の log は判定に使っていない。
 
+## 5330 の実機（2026-11-01、q1788-i01、P1）
+
+- 道具: `sh plan/ws333/tests/hw5330/5330-thermal.sh p018 build/q1788/kA/vmunix build/q1788/kC/vmunix q1788-p018`（1 本の script: Debian の前の確かめ → 起動 1 で 4 つの mode と負荷 → Debian で mode を読む → 起動 2 で boost → Debian を元に戻す → 要約）。`/dev/thermal` の UAPI（p004）がまだ無いので、strategy と boost は試験だけの diag の patch（`thermal-diag.patch`、main に入れない）の root の `hostname td-s-…`・`td-m-…`・`td-b-F.L` から `kern_thermal_strategy_set`・`kern_thermal_boost_set` を呼んだ。判定は SSH の dmesg と diag の行。
+- kernel: kA（main 82c6ef325 ＋ `CONFIG_CPU_PERF=y` ＋ diag、e3a19c937043b189）と kC（kA ＋ `CONFIG_DELL_SMM_BOOST=y`、31a02559a2be51de）。どちらも rc 0・warning 0。log は worktree の `build/hw5330/ws333/q1788-p018/`（git の外）。
+- **Debian の power-profiles-daemon**（2026-11-01 Q1 の了承）: 前の状態は enabled・active・保存の Profile=performance・platform_profile performance。thermald・tuned・tlp は inactive。daemon は起動の時に保存の profile を書き直すので、この run の間だけ `systemctl mask --now` し、終わりに（失敗の時も EXIT の trap で）`unmask` と `start`。終わりの状態: enabled・active・Profile=performance・platform_profile performance（前と同じ）。
+
+| 確かめ | 結果 |
+| --- | --- |
+| 前の確かめ（Debian、daemon を mask） | quiet を書いて読むと quiet、Debian を再起動しても quiet（mode は再起動で残る）。他の profile の daemon は無い |
+| (1) attach | Debian が cool にした後の起動で `dell: thermal mode Cool`・`dell: 1 fans, fan 0 at 5278 rpm`。受け手 "dell-wmi"（error 0）と fan "dell-fan0"（4300〜5730 rpm）。WMI の行は `\_SB_.WFDE` 3 block・`WFTE` 2・`AMW0` 7・`AMWV` 2、`AMW2`・`AMW5`・`AMW4`・`DIAG`・`ECMO` は `_WDG` が method で評価しない |
+| 起動の時の `\ODV0` | BIOS の mode を映す: Debian が cool → zedBSD の起動で Cool、zedBSD が Quiet を書いた後（間に Debian の起動）→ 次の zedBSD の起動で Quiet |
+| (2) 4 つの mode の set | performance・powersave・balanced・manual 50:20:50 とも error 0、受け手の apply 7 ms（1 回の SMI の呼び）、firmware の名前は Performance → Cool → Optimized → Quiet と変わり、`the firmware shows`・`did not run`・`status` の log は無い（`\ODV0` が毎回合う）。起動の mode と同じ mode の set（p011 の run の performance）は 0 ms（SMI を出さない） |
+| (3) Debian での読み | zedBSD が Quiet（manual 50:20:50）を set した後の Debian（daemon を mask）で `platform_profile` が quiet。Debian で読んだのは Quiet だけ。他の 3 つは zedBSD の側の `\ODV0` の読み直しで合う |
+| 記録: mode ごとの 60 秒の全 CPU の負荷 | Performance 5682〜5732 rpm・最高 69 °C、Cool 5357〜5401 rpm・70 °C、Optimized 4302〜4720 rpm・72 °C、Quiet 4373〜4428 rpm・82 °C（15 秒ごとの読み、TCPU が最も高い） |
+| boost（kC、Quiet の mode のまま） | `td-b-0.2` は error 0、fan の boost 2・boost_count 2。rpm は前 4383〜4413、後 4398〜4413（30 秒）、boost のまま 60 秒の負荷で 4383〜4428（最高 76 °C）。上がらない。`td-b-0.0` も error 0。「firmware put it back」の log も出ない |
+
+- 判定: (1)〜(3) は通った。boost の (a)「state を上げると rpm が上がる」は通らない（rpm が変わらない）ので、boost は既定 n（「無し」）のまま。boost の後に戻しの log が出なかったので、GET が既に 2 以上を返して SET を出さなかった見込み（SMI の数は実機では数えていない、未確認）。(b) は (a) が通らないので見ていない。90 °C の止めは働く場面が無かった（最高 76 °C）。SMM の fan の番号と DDV の並びは fan が 1 つで差が出ない。
+- cleared は Q1 の判定。
+
 ## 未実施・残り
 
+- 5330 の実機の試験は 2026-11-01 に上の表（q1788）。下は元の手順:
 - **5330 の実機の試験**（この Queue の外、電源の入れ直しの後に Q1 が割り当てる。WS303 §6.3 の 1〜4、review m18 の合否と記録の分け）:
   - 前の確かめ（v5 M8、読みだけ）: Debian で `platform_profile` を set → 再起動 → 読んで、mode が再起動で残る事と、profile を書き直す daemon（power-profiles-daemon など）が無い事。残らなければ試験 3 の方法が使えないので Q1 へ。
   - 合否: (1) dmesg に `dell: thermal mode …`・`dell: 1 fans, fan 0 at N rpm`、受け手 "dell-wmi" と fan "dell-fan0" の rpm（idle の 0 も可、負荷の後に 0 でない）。(2) 4 つの mode を set して EIO が無い（sentinel が書き換わり status 0）。(3) zedBSD で set した mode が Debian の `platform_profile` で同じ名前に読める（bit と名前の対、音響の byte 0 で `\ODV0` が更新される）。起動の時の `\ODV0` が BIOS の設定の mode を映すか。
