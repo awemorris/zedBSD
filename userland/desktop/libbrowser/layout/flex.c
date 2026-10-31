@@ -2209,7 +2209,9 @@ flex_lay_sized(
 		child->style.width.value = layout_to_px(room);
 		child->style.width.offset = 0;
 	}
-	if ((align == CSS_ALIGN_STRETCH && box->style.flex_wrap == CSS_FLEX_NOWRAP) ||
+	/* An auto margin across takes the free room instead of a stretch: the item is as wide as its content (and placed by its margins). */
+	if ((align == CSS_ALIGN_STRETCH && box->style.flex_wrap == CSS_FLEX_NOWRAP &&
+	    child->style.margin[CSS_LEFT].unit != CSS_UNIT_AUTO && child->style.margin[CSS_RIGHT].unit != CSS_UNIT_AUTO) ||
 	    child->style.width.unit != CSS_UNIT_AUTO) {
 		/* A table stretched across is as wide as the room (an auto-width table would be as wide as its content). */
 		if (align == CSS_ALIGN_STRETCH && child->style.width.unit == CSS_UNIT_AUTO &&
@@ -2236,6 +2238,12 @@ flex_lay_sized(
 	if (error != 0)
 		return error;
 
+	/* Its auto margins across are shared out when the line places it, not by the width it was laid out in. */
+	if (child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO)
+		child->margin[CSS_LEFT] = 0;
+	if (child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+		child->margin[CSS_RIGHT] = 0;
+
 	/* Succeeded: the item is laid out. */
 	return 0;
 }
@@ -2259,6 +2267,10 @@ flex_relay_column(
 	for (index = 0; index < count; index++) {
 		child = items[index].box;
 		if (flex_align_of(box, child) != CSS_ALIGN_STRETCH || child->style.width.unit != CSS_UNIT_AUTO)
+			continue;
+
+		/* An auto margin across takes the free room: the item is not stretched. */
+		if (child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
 			continue;
 		frame = child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
 		width = line_cross - child->margin[CSS_LEFT] - child->margin[CSS_RIGHT] - frame;
