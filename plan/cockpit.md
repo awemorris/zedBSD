@@ -18,7 +18,7 @@
 | P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005〜p020 cleared（最新 p011 files、main c590d87fa） | P7 が p021（統合: OS に触れる所を OS の層へ）を実行中 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 14 回目（q1727-i14）: dev141 = 3,084（88.82%）、shape-outside の 16 件、main cee9d88c2 | 直交の flex の項目 → grid の baseline |
 
-実装の担当（Sonnet・Opus の単発）: WS336 の p002（Sonnet、worktree s-ws336-p002）。
+実装の担当（Sonnet・Opus の単発）: WS336 の p010・p012・p013（Sonnet、worktree s-ws336-pNNN）。p002 は cleared。p003 は WS335 の新しい基点を待つ。
 
 ## WS ごとの進捗
 

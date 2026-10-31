@@ -2,7 +2,7 @@
 
 # ws335-p001: 設計（libssl-compat、標準廉価実装手順 §4）
 
-Status: in-progress（2026-11-01 01:20 P6 q1789）
+Status: cleared（2026-11-01 05:45 Q1、main 8e44fa17e）
 Parent: [WS335](../ws.md)
 
 ## 範囲
@@ -28,3 +28,6 @@ Parent: [WS335](../ws.md)
 - 仕様と試験の data: P6 の worktree の `build/ws335-specs/`（RFC 33・NIST/SECG/ITU の PDF 11）と `build/ws335-vectors/`（Wycheproof・x509-limbo・CAVP 9 本、`rec/` に 169 個の record file）。SHA-256 は fetch.sh と design.md §1。共有の場所への写しは Q1。
 - 確かめ: check-skeleton.sh PASS（cc・clang の -std=c89 -Wpedantic、zedBSD の clang の x86_64 と aarch64、llvm-mingw の x86_64 と aarch64）、run-unit.sh tools PASS（18 checks）、fetch.sh vectors PASS。
 - 未実施: zedBSD の .so の build の規則（p033）、QEMU・実機の試験（実装の後）、IACR ePrint の 2 本の取得（server の 403、別の経路で取り直していない）。
+- 2026-11-01 q1789-i02（P6）: U1〜U6 の答え（全部 A、Windows は DLL を作らず 1 つの .exe に static link）を入れた。header（cryc.h・cryc-os.h・cryc-chain.h・compat/crypto/x509.h・compat/ssl/ssl.h）、骨格（cryc-os-posix.c・cryc-os-win32.c・cryc-chain.c・api-ssl.c）、
+  試験の道具（run-unit.sh `--win32`、check-skeleton.sh の 6・7、unit/test-tools.c の comment）、design.md（D1・D4・D14・D18・D23〜D28、§4.2〜§4.4、§8、§9、§13）、ws.md、user-questions.md、phase.md（全部の実装の Phase、新しい p039）。
+  design-reviewer の 2 回目 16 件を全部反映（[design-review.md](../design-review.md)）。**新しい基点 b7dfd3952**。確かめは design-review.md の「2 回目の反映の後の確かめ」。

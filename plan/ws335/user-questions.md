@@ -7,7 +7,8 @@
 - **WS335**（libcrypto-compat と libssl-compat: OpenSSL と同じ名前の関数を持つ、zedBSD の自前の暗号と TLS の library）。
   WS の種類: library の新規の実装（外部の標準に沿うので標準廉価実装手順。設計は Opus、実装は Sonnet が module ごとに）。
 - 今の状態: p001（設計）を P6 が進め、header・骨格・試験の道具・実装の Phase の案（p002〜p036）を置いた。実装はまだ。設計は [design.md](design.md)。
-- 決まっていない事: 下の U1〜U6。どれも推しの案で設計を書いてあり、違う答えなら header と Phase を直す。
+- **2026-11-01 全部決まった**（[ws.md](ws.md) のユーザーの決定の最後の 2 行）: U1〜U6 は推しの A。ただし Windows は DLL を作らず、OmniGrammaton の 1 つの .exe に static library を link する（U2・U4・U5 の Windows の部分を直した）。
+  反映は q1789-i02（[design.md](design.md) §13）。元の文: 下の U1〜U6。
 - 用語:
   - **TLS**: https の暗号の通信の規格。1.3 が今の版、1.2 が一つ前。
   - **OCSP・CRL**: 証明書が取り消されていないかを確かめる仕組み。
@@ -24,6 +25,7 @@ CBC の暗号（古い暗号の組）、TLS 1.0・1.1、P-521・Ed25519・SHA-1 
 
 - **A（推し）**: この一覧のとおり範囲の外にする。
 - B: このうち（ ）は範囲に入れる。
+- **決まった（2026-11-01）**: A。この一覧のとおり範囲の外。
 
 ## U2 libbrowser の net/tls.c を本家の OpenSSL と libssl-compat のどちらで動かすかの切り替え
 
@@ -33,11 +35,13 @@ net/tls.c は今、OpenSSL の library を名前で開く（dlopen）。
   切り替えの変更は WS335 の最後の Phase（p036）として、WS074（ブラウザ）と WS334（Windows 版）と調整して行う。
 - B: dlopen をやめ、`<compat/ssl/ssl.h>` を include して直に link する（変更が大きく、package の無い時の扱いが変わる）。
 - C: 切り替えは WS335 では行わず、WS074・WS334 の側の Phase にする。
+- **決まった（2026-11-01）**: zedBSD は A（`-DWB_TLS_COMPAT` で開く名前を `libssl-compat.so`・`libcrypto-compat.so` に）。Windows は開かず、2 つの static library を .exe に link し、net/tls.c の関数の表を link した関数で満たす（design.md D23・§4.2）。切り替えは p036（WS074・WS334 と調整）。
 
 ## U3 自前の ssh・sshd（WS336）の鍵の交換
 
 - **A（推し）**: mlkem768x25519-sha256（OpenSSH 10 の既定。OpenSSH 10.1 以降は量子耐性でない鍵の交換に警告を出す）。libcrypto-compat に SHA-3 と ML-KEM-768 を作る（実装の Phase が 3 つ増える）。
 - B: curve25519-sha256 だけ（追加の費用は無いが、OpenSSH が警告を出す）。
+- **決まった（2026-11-01）**: A。mlkem768x25519-sha256、SHA-3 と ML-KEM-768 を作る（p003・p013・p014）。
 
 ## U4 library と header の名前・置き場所
 
@@ -45,19 +49,22 @@ net/tls.c は今、OpenSSL の library を名前で開く（dlopen）。
   `include/libc/compat/crypto/`（err・x509・evp・rand・crypto・types）と `include/libc/compat/ssl/ssl.h`。program は `#include <compat/ssl/ssl.h>` と書く。
 - B: header を `include/libc/compat/openssl/` の 1 つにまとめる（WS336 の担当の案。2 つの library の header が 1 つの dir に混ざる）。
 - C: 置き場所を desktop にする（base の program が使えなくなる）。
+- **決まった（2026-11-01）**: A。Windows は `libcrypto-compat.a`・`libssl-compat.a`（DLL は無い）。使う側の build（OmniGrammaton の `apps/browser-win32/Makefile`）が `userland/base/libcrypto-compat/sources.mk`・`userland/base/libssl-compat/sources.mk` を読んで作り、その build の object の dir に置いて .exe に link する（design.md D26・§4.3）。
 
 ## U5 Windows で信頼する根の証明書
 
 - **A（推し）**: libssl-compat が、Windows の根の store（利用者と機械の両方、「信頼しない」store の物を除く）と、DLL の隣の `cert.pem`（ca-certificates と同じ物）を読む。ブラウザは zedBSD と同じ呼び方のまま。
 - B: library は読まず、ブラウザ（WS334）が Windows の store を読んで渡す（WS334 の設計の今の形）。
+- **決まった（2026-11-01）**: A。static link なので `cert.pem` は実行された .exe の隣（DLL の隣ではない）。Disallowed の証明書は根から除くだけでなく、鎖のどこに出ても拒む（design.md D14・D24）。
 
 ## U6 証明書の host 名の照合で CN を見るか
 
 - **A（推し）**: 見ない（RFC 9525。今の公開の証明書は全部 SAN を持ち、zedBSD の試験の CA も SAN を付けている）。
 - B: OpenSSL の既定と同じく、SAN に host 名が無い時は CN を見る。
+- **決まった（2026-11-01）**: A。CN を見ない（RFC 9525）。
 
 ## Q1 への確認（ユーザーに聞く前の技術の判断）
 
 1. 公開の関数・型の名前と数値を OpenSSL 3.5 と同じにし、値は block ごとに「Values referenced: OpenSSL 3.5.8 include/openssl/…」で出典を書く（libz-compat の zlib と同じ扱い）。`OSSL_PARAM` の struct の配置も同じ（型を完全にするため）。Guardrail の出典の規則に合うかの確認。
 2. IACR ePrint の 2 本の PDF の取得が server の 403 で止まった。別の経路で取り直していない。設計はこれに依らない（design.md §1）。
-3. 仕様と試験の data を共有の `/home/awe/zedBSD-claude1/build/sources/specs/tls/` と `/home/awe/zedBSD-claude1/build/sources/tls-vectors/` に写す事（p001 の担当は main の checkout に書かない）。元は `/home/awe/zedBSD-worktrees/p6-ws335/build/ws335-specs/` と `.../build/ws335-vectors/`。
+3. （2026-11-01 済み: 共有の場所に写されている事を P6 が確かめた）仕様と試験の data を共有の `/home/awe/zedBSD-claude1/build/sources/specs/tls/` と `/home/awe/zedBSD-claude1/build/sources/tls-vectors/` に写す事（p001 の担当は main の checkout に書かない）。元は `/home/awe/zedBSD-worktrees/p6-ws335/build/ws335-specs/` と `.../build/ws335-vectors/`。

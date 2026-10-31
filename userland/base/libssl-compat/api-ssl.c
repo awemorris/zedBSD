@@ -92,8 +92,9 @@ SSL_CTX_load_verify_locations(
 }
 
 /*
- * Adds the system's roots: /etc/ssl/cert.pem on zedBSD; the Windows ROOT
- * stores (minus Disallowed) and cert.pem beside the DLL on Windows.
+ * Adds the system's roots: /etc/ssl/cert.pem on zedBSD; on Windows the
+ * ROOT stores (minus Disallowed) and cert.pem beside the program's .exe,
+ * and the Disallowed certificates are refused in every chain from then on.
  */
 int
 SSL_CTX_set_default_verify_paths(

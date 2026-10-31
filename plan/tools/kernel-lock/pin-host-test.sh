@@ -5,8 +5,8 @@
 # vmspace-region.c (their declarations and constants from vmspace-internal.h), and
 # compiled with the real struct vmspace, struct vm_region and struct vm_page
 # against a fake fault, fake backings and a counting metadata lock:
-#  - a copy of a few ready pages enters the metadata lock once and faults
-#    nothing, and its bytes arrive;
+#  - a copy of a few ready pages, or of a range within one page, enters the
+#    metadata lock once and faults nothing, and its bytes arrive;
 #  - a range whose later half is unmapped, or not writable for a copyout,
 #    fails with EFAULT before any page is faulted or written;
 #  - pages that are not ready are faulted in once each, then pinned;
@@ -15,7 +15,8 @@
 #  - a copy-on-write page is faulted before a write pin;
 #  - a page the fault leaves not ready is still pinned on the next pass
 #    (no fault loop), and a fault's ENOMEM is reported as ENOMEM;
-#  - with real pthreads (the Pi 4's four CPUs), three threads copy in and out
+#  - with real pthreads (the Pi 4's four CPUs), four threads (one within a
+#    single page) copy in and out
 #    of one address space while a fourth unmaps pages, makes them
 #    copy-on-write and takes a region away and back under the locks: every
 #    vm->lock release is by its holder, the metadata lock is taken before
@@ -55,6 +56,7 @@ grep -E '^#define (PAGE_SIZE|VM_COPY_STACK_PAGES)[[:space:]]' $vm/vmspace-intern
 } > "$out/pin-functions.inc"
 
 cat > "$out/pin-main.c" <<'EOT'
+#include <hal/hal.h>
 #include "kern/vmspace.h"
 #include "kern/vm-object.h"
 #include "kern/vm-device.h"
@@ -190,7 +192,7 @@ vm_private_page_pin(struct vm_private_page *backing, struct kern_pmem *memory)
 }
 
 void vm_private_page_unpin(struct vm_private_page *backing) { __atomic_fetch_sub(&backing->pin_count, 1U, __ATOMIC_RELAXED); }
-void vm_private_page_mark_dirty(struct vm_private_page *backing) { backing->generation++; }
+void vm_private_page_mark_dirty(struct vm_private_page *backing) { __atomic_fetch_add(&backing->generation, 1U, __ATOMIC_RELAXED); }
 void vm_private_page_ref(struct vm_private_page *backing) { (void)backing; }
 void vm_private_page_put(struct vm_private_page *backing) { (void)backing; }
 int vm_private_page_wait_idle(struct vm_private_page *backing) { (void)backing; return 0; }
@@ -457,7 +459,7 @@ unmap_loop(void *argument)
 static void
 run_concurrent(void)
 {
-	struct copier copiers[3];
+	struct copier copiers[4];
 	void *unmapper;
 	unsigned index;
 
@@ -475,21 +477,23 @@ run_concurrent(void)
 	copiers[2].address = 0x20000U + 50U;
 	copiers[2].size = 6U * 4096U;
 	copiers[2].may_vanish = 1;
-	for (index = 0; index < 3U; index++) {
+	copiers[3].address = 0x13000U + 200U;
+	copiers[3].size = 64U;
+	for (index = 0; index < 4U; index++) {
 		copiers[index].seed = index * 77U;
 		copiers[index].thread = host_thread_start(copy_loop, &copiers[index]);
 	}
 	unmapper = host_thread_start(unmap_loop, NULL);
 	host_thread_join(unmapper);
-	for (index = 0; index < 3U; index++)
+	for (index = 0; index < 4U; index++)
 		host_thread_join(copiers[index].thread);
 	concurrent = 0;
 
-	printf("pin-host-test: concurrent: %u faults, copies %u/%u/%u, vanished %u\n",
-	       faults, copiers[0].copies, copiers[1].copies, copiers[2].copies, copiers[2].efaults);
-	for (index = 0; index < 3U; index++)
+	printf("pin-host-test: concurrent: %u faults, copies %u/%u/%u/%u, vanished %u\n",
+	       faults, copiers[0].copies, copiers[1].copies, copiers[2].copies, copiers[3].copies, copiers[2].efaults);
+	for (index = 0; index < 4U; index++)
 		check(copiers[index].wrong == 0, "concurrent: every copy succeeds and reads back");
-	check(copiers[0].copies != 0 && copiers[1].copies != 0 && copiers[2].copies != 0,
+	check(copiers[0].copies != 0 && copiers[1].copies != 0 && copiers[2].copies != 0 && copiers[3].copies != 0,
 	      "concurrent: every thread copied");
 	check(faults != 0, "concurrent: the copies faulted pages back in");
 	check(lock_violations == 0, "concurrent: every lock released by its holder, in order");
@@ -536,6 +540,19 @@ main(void)
 	error = copyin(0x10000U + 100U, readback, 5000U);
 	check(error == 0 && memcmp(readback, buffer, 5000U) == 0, "ready: copyin reads them back");
 	check(metadata_entries == 2, "ready: copyin is one more entry");
+
+	/* A ready range within one page: one entry each way, no fault, the bytes arrive, the pin released. */
+	make_region(0, 0x10000U, 1, rw, 1);
+	make_space(1);
+	error = copyout(buffer, 0x10000U + 300U, 64U);
+	check(error == 0 && metadata_entries == 1 && faults == 0 && callocs == 0, "one page: copyout is one entry");
+	check(memcmp(&memory[0][0][300], buffer, 64U) == 0, "one page: bytes");
+	check(pins_held() == 0, "one page: pin released");
+	memset(readback, 0, 64U);
+	error = copyin(0x10000U + 300U, readback, 64U);
+	check(error == 0 && memcmp(readback, buffer, 64U) == 0 && metadata_entries == 2, "one page: copyin reads them back");
+	error = copyout(buffer, 0x10000U + 4096U - 8U, 16U);
+	check(error == EFAULT && faults == 0, "one page: a range past the region is EFAULT, no fault");
 
 	/* The later half unmapped: EFAULT before any fault or write. */
 	make_region(0, 0x10000U, 1, rw, 0);
