@@ -1010,6 +1010,8 @@ expr_unary(
 		if (parser->context.in_class_field || parser->context.in_static_block)
 			js_fail(parser, "await is not allowed here");
 		node = js_node_new(parser, JS_NODE_AWAIT);
+		if (parser->module && !parser->context.in_function)
+			parser->top_await = 1;
 		js_next(parser);
 		node->first = expr_unary(parser);
 		return node;

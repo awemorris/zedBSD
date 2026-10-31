@@ -87,6 +87,8 @@ js_parse(
 	/* The first token (where an expression may start), then the program. */
 	js_lexer_next(&parser->lexer, 1);
 	program->root = parser_program(parser);
+	if (parser->top_await)
+		program->root->flags |= JS_FLAG_ASYNC;
 	js_lexer_release(&parser->lexer);
 
 	/* Succeeded: the tree. */
