@@ -143,6 +143,19 @@ nvrtx_vk_memory_kind(void *owner, void *backing, uint64_t offset, uint64_t va, u
 	return 0;
 }
 
+/* The host's storage keeps no shape: every image binds. */
+int
+nvrtx_vk_memory_bind_image(void *backing, bool tiled, uint32_t pitch, uint32_t width, uint32_t height, uint64_t offset)
+{
+	(void)backing;
+	(void)tiled;
+	(void)pitch;
+	(void)width;
+	(void)height;
+	(void)offset;
+	return 0;
+}
+
 int
 nvrtx_vk_memory_import(void *owner, uint32_t resource_id, uint64_t bytes, uint8_t **cpu, uint64_t *va, void **backing)
 {

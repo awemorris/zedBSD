@@ -19,6 +19,7 @@
 
 #include <uapi/errno.h>
 #include <uapi/gpu-op.h>
+#include <uapi/gpu.h>
 
 #include "drivers/gpu/nvrtx/vk/nvrtx-vk-objects.h"
 #include "userland/desktop/libvulkan/internal.h"
@@ -51,10 +52,13 @@ static void command_begin(struct vulkan_writer *writer, uint32_t opcode);
 static void write_tail(struct vulkan_writer *writer, uint64_t identity);
 static void write_allocate(struct vulkan_writer *writer, uint64_t identity, uint64_t bytes, uint32_t imported);
 static void write_image(struct vulkan_writer *writer, uint64_t identity, uint32_t format, uint32_t width, uint32_t height, uint32_t levels);
+static void write_image_tiled(struct vulkan_writer *writer, uint64_t identity, uint32_t format, uint32_t width, uint32_t height, uint32_t levels, uint32_t tiling);
 static void write_buffer(struct vulkan_writer *writer, uint64_t identity, uint64_t bytes);
 static void write_pair(struct vulkan_writer *writer, uint32_t opcode, uint64_t first, uint64_t second);
 static void write_bind(struct vulkan_writer *writer, uint32_t opcode, uint64_t resource, uint64_t memory, uint64_t offset);
 static void test_memory(void);
+static void test_layouts(void);
+static void write_image_record(struct vulkan_writer *writer, uint64_t identity, uint32_t usage, uint32_t tiling, uint32_t parameter);
 static void test_views(void);
 static uint32_t *read_spirv(const char *directory, const char *name, size_t *bytes);
 static void write_create(struct vulkan_writer *writer, uint32_t opcode);
@@ -170,6 +174,19 @@ nvrtx_vk_memory_kind(void *owner, void *backing, uint64_t offset, uint64_t va, u
 	(void)va;
 	(void)bytes;
 	(void)kind;
+	return 0;
+}
+
+/* The host's storage keeps no shape: every image binds. */
+int
+nvrtx_vk_memory_bind_image(void *backing, bool tiled, uint32_t pitch, uint32_t width, uint32_t height, uint64_t offset)
+{
+	(void)backing;
+	(void)tiled;
+	(void)pitch;
+	(void)width;
+	(void)height;
+	(void)offset;
 	return 0;
 }
 
@@ -514,6 +531,7 @@ main(int argc, char **argv)
 		return 2;
 	}
 	test_memory();
+	test_layouts();
 	test_views();
 	test_pipeline(argv[1]);
 	test_submit(argv[1]);
@@ -629,9 +647,20 @@ write_allocate(struct vulkan_writer *writer, uint64_t identity, uint64_t bytes, 
 	write_tail(writer, identity);
 }
 
-/* vkCreateImage as resources-generated.inc writes it. */
+/*
+ * vkCreateImage as resources-generated.inc writes it: linear tiling, so a
+ * colour image of one level is pitch linear (the layout these checks
+ * expect); an optimal one drawn to is block linear (write_image_tiled).
+ */
 static void
 write_image(struct vulkan_writer *writer, uint64_t identity, uint32_t format, uint32_t width, uint32_t height, uint32_t levels)
+{
+	write_image_tiled(writer, identity, format, width, height, levels, VK_IMAGE_TILING_LINEAR);
+}
+
+/* vkCreateImage of a tiling, as resources-generated.inc writes it. */
+static void
+write_image_tiled(struct vulkan_writer *writer, uint64_t identity, uint32_t format, uint32_t width, uint32_t height, uint32_t levels, uint32_t tiling)
 {
 	VkImageCreateInfo info;
 
@@ -645,7 +674,7 @@ write_image(struct vulkan_writer *writer, uint64_t identity, uint32_t format, ui
 	info.mipLevels = levels;
 	info.arrayLayers = 1;
 	info.samples = VK_SAMPLE_COUNT_1_BIT;
-	info.tiling = VK_IMAGE_TILING_OPTIMAL;
+	info.tiling = (VkImageTiling)tiling;
 	info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	command_begin(writer, GPU_OP_CREATE_IMAGE);
 	vulkan_write_u64(writer, TEST_DEVICE);
@@ -690,6 +719,83 @@ write_bind(struct vulkan_writer *writer, uint32_t opcode, uint64_t resource, uin
 	vulkan_write_u64(writer, resource);
 	vulkan_write_u64(writer, memory);
 	vulkan_write_u64(writer, offset);
+}
+
+/*
+ * vkCreateImage with zedBSD's layout record chained before the
+ * external-memory declaration, as libvulkan writes a shared image's.
+ */
+static void
+write_image_record(struct vulkan_writer *writer, uint64_t identity, uint32_t usage, uint32_t tiling, uint32_t parameter)
+{
+	command_begin(writer, GPU_OP_CREATE_IMAGE);
+	vulkan_write_u64(writer, TEST_DEVICE);
+	vulkan_write_u64(writer, 1);
+	vulkan_write_u32(writer, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO);
+	vulkan_write_u64(writer, 1);
+	vulkan_write_u32(writer, GPU_OP_RECORD_IMAGE_LAYOUT);
+	vulkan_write_u64(writer, 1);
+	vulkan_write_u32(writer, VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO);
+	vulkan_write_u64(writer, 0);
+	vulkan_write_u32(writer, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT);
+	vulkan_write_u32(writer, tiling);
+	vulkan_write_u32(writer, parameter);
+	vulkan_write_u32(writer, 0);
+	vulkan_write_u32(writer, VK_IMAGE_TYPE_2D);
+	vulkan_write_u32(writer, VK_FORMAT_B8G8R8A8_UNORM);
+	vulkan_write_u32(writer, 100);
+	vulkan_write_u32(writer, 10);
+	vulkan_write_u32(writer, 1);
+	vulkan_write_u32(writer, 1);
+	vulkan_write_u32(writer, 1);
+	vulkan_write_u32(writer, VK_SAMPLE_COUNT_1_BIT);
+	vulkan_write_u32(writer, VK_IMAGE_TILING_OPTIMAL);
+	vulkan_write_u32(writer, usage);
+	vulkan_write_u32(writer, VK_SHARING_MODE_EXCLUSIVE);
+	vulkan_write_u32(writer, 0);
+	vulkan_write_u64(writer, 0);
+	vulkan_write_u32(writer, VK_IMAGE_LAYOUT_UNDEFINED);
+	write_tail(writer, identity);
+}
+
+/*
+ * An optimal colour attachment of one level is block linear (no shadow for
+ * its depth passes), a sampled-only one stays pitch linear, and the layout
+ * record names either layout whatever the usage; another variant is refused.
+ */
+static void
+test_layouts(void)
+{
+	struct nvrtx_vk_session *session;
+	struct vulkan_writer client;
+	struct nvrtx_vk_image *image;
+	int error;
+
+	check(nvrtx_vk_session_open(NULL, &session) == 0, "layouts: session opened");
+
+	/* The executor's choice, then three records: block linear, linear rows, a block height it does not make. */
+	frame_begin(&client);
+	write_image_tiled(&client, 0x301, VK_FORMAT_B8G8R8A8_UNORM, 100, 10, 1, VK_IMAGE_TILING_OPTIMAL);
+	write_image_record(&client, 0x302, VK_IMAGE_USAGE_SAMPLED_BIT, GPU_IMAGE_NV_BLOCK_LINEAR, 0U);
+	write_image_record(&client, 0x303, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, GPU_IMAGE_LINEAR, 0U);
+	write_image_record(&client, 0x304, VK_IMAGE_USAGE_SAMPLED_BIT, GPU_IMAGE_NV_BLOCK_LINEAR, 1U);
+	error = frame_run(session, &client);
+	check(error == 0, "layouts: the creates ran");
+
+	/* Rows of GOBs (400 bytes to 448) and two GOB rows (16 rows). */
+	image = nvrtx_vk_payload(session, I915_VK_OBJ_IMAGE, 0x301);
+	check(image != NULL && image->tiled && image->pitch == 448 && image->bytes == 7168,
+	    "layouts: an optimal colour attachment of one level is block linear");
+	image = nvrtx_vk_payload(session, I915_VK_OBJ_IMAGE, 0x302);
+	check(image != NULL && image->tiled && image->pitch == 448 && image->bytes == 7168,
+	    "layouts: the record's block linear, even for a sampled-only image");
+	image = nvrtx_vk_payload(session, I915_VK_OBJ_IMAGE, 0x303);
+	check(image != NULL && !image->tiled && image->pitch == 512 && image->bytes == 5120,
+	    "layouts: the record's linear rows, even for a colour attachment");
+	image = nvrtx_vk_payload(session, I915_VK_OBJ_IMAGE, 0x304);
+	check(image == NULL, "layouts: a block height the executor does not make is refused");
+
+	check(nvrtx_vk_session_close(&session) == 0, "layouts: session closed");
 }
 
 /*

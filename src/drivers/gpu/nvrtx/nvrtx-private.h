@@ -444,6 +444,12 @@ bool
 nvrtx_stage_disp_test_wanted(void);
 
 /*
+ * Reports whether the display scans out block-linear images (nvrtx.disp.bl=1).
+ */
+bool
+nvrtx_stage_disp_bl_wanted(void);
+
+/*
  * Reports whether the boot asked for the first compute launch (nvrtx.compute=1).
  */
 bool

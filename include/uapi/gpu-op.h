@@ -172,6 +172,19 @@
 #define GPU_OP_RECORD_QUEUE_TIMELINE	1000384005U
 
 /*
+ * zedBSD's own record a vkCreateImage may chain, in place of a public
+ * extension: [u32 tiling][u32 parameter] (GPU_IMAGE_* and its layout
+ * parameter, uapi/gpu.h) asks for a VK_IMAGE_TILING_OPTIMAL image laid out
+ * so.  It travels as every chained record does ([u64 present][u32 sType]
+ * [the next record][its fields]), beside the external-memory declaration,
+ * and goes only to a context whose device reports GPU_CAP_IMAGE_LAYOUTS
+ * (another executor's decoder knows the external-memory declaration
+ * alone).  The value lies outside Khronos's structure-type ranges.  Read by
+ * nvrtx/vk/vk-resource.c: resource_create_image.
+ */
+#define GPU_OP_RECORD_IMAGE_LAYOUT	0x7a650001U
+
+/*
  * Each command of the protocol, in number order.  The entry of each
  * names the Vulkan command it carries, where its number is defined, what
  * it does in zedBSD, its arguments after the header and its reply, and

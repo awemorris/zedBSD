@@ -42,6 +42,7 @@
 #include <drivers/gpu/gpu-display.h>
 #include <kern/clock.h>
 #include <kern/kcrt.h>
+#include <kern/klog.h>
 #include <kern/sched.h>
 #include <uapi/errno.h>
 #include <uapi/gpu.h>
@@ -584,6 +585,12 @@ present_present(
 	if (error == 0) {
 		present_shown(node, resource, blob);
 		request->sequence = node->sequence;
+
+		/* The first block-linear frame on the screen is said once, for whoever checks the picture by eye. */
+		if (surface.block_linear != 0 && node->disp_bl_shown == 0) {
+			node->disp_bl_shown = 1;
+			kern_logf("nvrtx: display: block-linear scanout first flip %ux%u\n", surface.width, surface.height);
+		}
 	} else {
 		present_broken(node, error);
 		if (blob)
@@ -801,9 +808,11 @@ present_refresh(
 /*
  * Checks a presentation against the lease and the display and describes the
  * surface it flips to: the blob itself, or the node's frame not on the
- * screen, which the storage is to be copied into.  The caller holds the
- * node's present lock and its lock.  Returns 0, EINVAL, ESTALE or EIO as
- * present_present() does.
+ * screen, which the storage is to be copied into.  A blob exported as an
+ * image is shown as its description says (block linear only while the
+ * display scans block linear), and the request must describe it the same
+ * way.  The caller holds the node's present lock and its lock.  Returns 0,
+ * EINVAL, ESTALE or EIO as present_present() does.
  */
 static int
 present_admit(
@@ -814,6 +823,7 @@ present_admit(
 	bool blob,
 	struct nvrtx_disp_surface *surface)
 {
+	const struct gpu_image_descriptor *image;
 	uint64_t offset;
 
 	/* Only the lease's holder presents. */
@@ -835,11 +845,33 @@ present_admit(
 			return EINVAL;
 		offset = resource->backing->bo.vram + request->offset;
 		if ((offset % PRESENT_OFFSET_ALIGN) != 0U ||
+		    request->stride == 0U ||
 		    (request->stride % PRESENT_PITCH_ALIGN) != 0U)
 			return EINVAL;
 
 		surface->offset = offset;
 		surface->pitch = request->stride;
+		surface->block_linear = 0;
+		surface->block_height = 0U;
+
+		/* An exported image is shown as described: its rows, its size, its format and its layout. */
+		if (resource->backing->described) {
+			image = &resource->backing->image;
+			if (request->stride != image->stride ||
+			    request->offset != image->offset ||
+			    request->width != image->width ||
+			    request->height != image->height ||
+			    request->format != image->format)
+				return EINVAL;
+
+			/* Block linear only while the display scans it. */
+			if (image->tiling == GPU_IMAGE_NV_BLOCK_LINEAR) {
+				if (node->disp_bl == 0)
+					return EINVAL;
+				surface->block_linear = 1;
+				surface->block_height = image->layout_parameter & GPU_IMAGE_NV_BLOCK_HEIGHT_MASK;
+			}
+		}
 	} else {
 		if (resource->kind != NVRTX_RESOURCE_STORAGE || (request->offset % 4U) != 0U)
 			return EINVAL;

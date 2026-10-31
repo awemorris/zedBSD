@@ -332,6 +332,16 @@ keiland-shot は display が読んだ画素を見ない（§1.4）。2026-10-31 
    `gpu-zedbsd.c` に置く（v1-check）。版 1〜3 の client が新しい compositor で動く確かめに `forge-guest.sh`・`fence-guest.sh` を使う。
 6. 今の V1 の game mode が client の buffer を scanout する間は、`scanout-zedbsd.c` が kernel の記述（`import.image`）を使い LINEAR でない物を断る（指摘 3）。
 7. deviceLUID の案（第 1 版 §7.3）は取り下げた（`GPU_IMAGE_LAYOUTS` と fd で device を問えるので要らない。指摘 9）。
+8. compositor の側の LINEAR でない取り込み（2026-10-31 P2 の指摘を受けて足した。設計は P3、実装は P2）: game mode を外れた（withdraw の）後、compositor は貸した buffer を
+   `kl_gpu_buffer_v1` の取り込み（今は LINEAR だけ）で合成する。nvrtx が block-linear を SCANOUT 付きで答える（`nvrtx.disp.bl=1`）前に、次が要る:
+   - `gpu-zedbsd.c` の `kwl_gpu_buffer_decode`: `tiling` が LINEAR でない記述を受ける（`stride`・`offset` は記述のまま、範囲は kernel の記録が正なので allocation の中かだけを見る）。
+     `struct kwl_buffer_layout` に tiling・layout_parameter・usage を足す。kernel の型を読むのは今どおりこの file だけ（v1-check）。
+   - `gpu-buffer-zedbsd.c` の `buffer_image`: LINEAR でない時は `VK_IMAGE_TILING_OPTIMAL`、usage は記述の usage、pNext に私用の record（sType `GPU_OP_RECORD_IMAGE_LAYOUT`、
+     {tiling, parameter}）を付ける。record の構造の型は libvulkan が公開の header（zedBSD の拡張の header）に置き、compositor は標準の Vulkan の呼び出しに chain する
+     だけにする（compositor は libvulkan だけを使う、Guardrail）。row pitch の比べは LINEAR の時だけ（LINEAR でない時は libvulkan の dedicated の確かめと nvrtx の bind の確かめ）。
+   - libvulkan の dedicated の確かめ（`dedicated.c`）: LINEAR でない記述は image の tiling が OPTIMAL・record が記述と同じ・usage が記述と同じ事を確かめる。
+   - nvrtx の側は済み（499f18262）: record の decode、記述のある backing への bind は同じ形だけ（`nvrtx_vk_memory_bind_image`）。
+   - それまでは nvrtx の SCANOUT の block-linear は出ない（`nvrtx.disp.bl` 既定 0）ので、貸す image は LINEAR のまま（P2 と Q1 の合意どおり）。
 
 ## 10. 試験
 
@@ -369,9 +379,9 @@ keiland-shot は display が読んだ画素を見ない（§1.4）。2026-10-31 
 | I4 | nvrtx の口・私用の record・記録・import と present の規則・subresource layout | §10.1 I4、amd64 の vmunix warning 0 | 4 LW |
 | I5 | block-linear の scanout と present（`nvrtx.disp.bl`、既定 0） | §10.1 I5、§10.3 の block-linear の scanout（P3 の確かめ）、画素はユーザーの目視（phase.md） | 3 LW |
 | I6 | tip で回帰をまとめて 1 回 | §10.3 の全部 | 2 LW |
-| I7 | subs の run ごとの固定費（約 56 µs）を 1 つずつ測って削る（2026-10-31 ユーザーの答え）: run の始めの texture pool と shader cache の無効化、最初の draw の全 state、pass の始めと終わりの barrier の WFI、run の終わりの fence の WFI、channel の切り替えの有無。各項を外す診断の kernel（`plan/ws291/tests/nvrtx-run-cost-diag.patch` と `rtx-runcost.sh` の変種 0〜5、p014 で用意済み・未計測）で 1 項ずつ測り、要らない物を外す | I3〜I6 | 各項の前後の subs-100・subs-1000 の GPU の 1 run の µs と fps（PROF）、画素差 0、big・scene・desktop の後退なし | 計測 3 LW、削る実装 3〜6 LW（何が削れるかで変わる） |
+| I7（= ws291-p024、別の Phase） | subs の run ごとの固定費（約 56 µs）を 1 つずつ測って削る（2026-10-31 ユーザーの答え）: run の始めの texture pool と shader cache の無効化、最初の draw の全 state、pass の始めと終わりの barrier の WFI、run の終わりの fence の WFI、channel の切り替えの有無。各項を外す診断の kernel（`plan/ws291/tests/nvrtx-run-cost-diag.patch` と `rtx-runcost.sh` の変種 0〜5、p014 で用意済み・未計測）で 1 項ずつ測り、要らない物を外す | I3〜I6 | 各項の前後の subs-100・subs-1000 の GPU の 1 run の µs と fps（PROF）、画素差 0、big・scene・desktop の後退なし | 計測 3 LW、削る実装 3〜6 LW（何が削れるかで変わる） |
 
-- I1〜I6 の合計 約 19 LW（8 LW ≈ 2〜3 時間の換算で約 5〜7 時間）、I7 は別に 6〜9 LW。I1 は済み（7b0a6644e）、I2 と I3 は I1 と独立に進められる。
+- I1〜I6 の合計 約 19 LW（8 LW ≈ 2〜3 時間の換算で約 5〜7 時間）、I7（= ws291-p024）は別の Phase で 6〜9 LW。I1 は済み（7b0a6644e）、I2 と I3 は I1 と独立に進められる。
 - 各 Phase の C には `plan/coding-style.md` の全文を当て、source の comment に開発の管理情報を書かない。出典は該当の block の直前の複数行の comment（Guardrail）。
 - WS291 の最後の「規約の全文の見直し」の Phase は WS の既存の計画に従う。
 
