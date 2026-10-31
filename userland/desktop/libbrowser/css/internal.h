@@ -84,6 +84,10 @@ enum css_simple_kind {
 	CSS_SIMPLE_ATTRIBUTE,
 	CSS_SIMPLE_PSEUDO_CLASS,
 	CSS_SIMPLE_PSEUDO_ELEMENT,
+	/* ::part(): the words of its argument are the simple's value (one atom, space separated). */
+	CSS_SIMPLE_PART,
+	/* ::slotted(): the selector list of its argument. */
+	CSS_SIMPLE_SLOTTED,
 	CSS_SIMPLE_NEVER
 };
 
@@ -136,7 +140,10 @@ enum css_pseudo_class {
 	CSS_PSEUDO_SCOPE,
 	CSS_PSEUDO_SCOPE_NEST,
 	CSS_PSEUDO_TARGET,
-	CSS_PSEUDO_POPOVER_OPEN
+	CSS_PSEUDO_POPOVER_OPEN,
+	CSS_PSEUDO_HOST,
+	CSS_PSEUDO_HOST_FN,
+	CSS_PSEUDO_HOST_CONTEXT
 };
 
 /*

@@ -98,6 +98,7 @@ static const struct bind_attribute element_attributes[] = {
 	{ "scrollHeight", bind_scroll_height, NULL },
 	{ "scrollTop", bind_scroll_top, bind_scroll_top_set },
 	{ "scrollLeft", bind_scroll_left, bind_scroll_position_set },
+	{ "shadowRoot", bind_shadow_root_get, NULL },
 	{ "innerHTML", bind_inner_html_get, bind_inner_html_set },
 	{ "outerHTML", bind_outer_html_get, bind_outer_html_set },
 	{ NULL, NULL, NULL }
@@ -108,6 +109,7 @@ static const struct bind_attribute element_attributes[] = {
  * is constant for the life of the program.
  */
 static const struct bind_operation element_operations[] = {
+	{ "attachShadow", 1, bind_attach_shadow },
 	{ "getAttribute", 1, element_get_attribute },
 	{ "setAttribute", 2, element_set_attribute },
 	{ "removeAttribute", 1, element_remove_attribute },

@@ -43,7 +43,7 @@ static int anchor_find(const struct layout_tree *tree, const struct layout_box *
 static int anchor_find_state(const struct layout_tree *tree, const struct layout_box *box, const struct vm_string *name, struct layout_rect *rect, const struct layout_box **anchor, int *clipped);
 static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
 static int anchor_chain_before(const struct layout_box *candidate, const struct layout_box *box, const struct layout_box *containing);
-static const struct layout_box *anchor_scope_root(const struct layout_box *box, const struct vm_string *name);
+static const struct layout_box *anchor_scope_root(const struct layout_box *box, const struct vm_string *name, const void *tree);
 static int anchor_fixed(const struct layout_box *box);
 static int anchor_top_layer(const struct layout_box *box);
 static const struct layout_box *anchor_up(const struct layout_box *box);
@@ -573,7 +573,8 @@ anchor_search(
 			continue;
 		}
 		child_inside = inside || walk == containing;
-		if (child_inside && anchor_has_name(child, name) && anchor_scope_root(child, name) == anchor_scope_root(box, name) &&
+		if (child_inside && anchor_has_name(child, name) && child->style.anchor_names_tree == box->style.anchor_tree &&
+		    anchor_scope_root(child, name, box->style.anchor_tree) == anchor_scope_root(box, name, box->style.anchor_tree) &&
 		    (anchor_top_layer(child) == 0 || (anchor_top_layer(box) != 0 && anchor_top_layer(child) < anchor_top_layer(box))) &&
 		    anchor_chain_before(child, box, containing) &&
 		    (!child->out_of_flow || !*passed || (layout_containing_box(child) != containing && !anchor_scrolls(layout_containing_box(child)))))
@@ -641,7 +642,8 @@ anchor_chain_before(
 static const struct layout_box *
 anchor_scope_root(
 	const struct layout_box *box,
-	const struct vm_string *name)
+	const struct vm_string *name,
+	const void *tree)
 {
 	const struct css_anchor_names *scope;
 	const struct layout_box *up;
@@ -649,6 +651,9 @@ anchor_scope_root(
 
 	/* The box and its ancestors. */
 	for (up = box; up != NULL; up = up->parent) {
+		/* A scope names the names of the tree it was declared in. */
+		if (up->style.anchor_scope_tree != tree)
+			continue;
 		if (up->style.anchor_scope_all)
 			return up;
 		scope = up->style.anchor_scope;

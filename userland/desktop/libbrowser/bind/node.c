@@ -78,6 +78,7 @@ static const struct bind_operation node_operations[] = {
 	{ "hasChildNodes", 0, node_has_child_nodes },
 	{ "contains", 1, node_contains },
 	{ "cloneNode", 0, node_clone },
+	{ "getRootNode", 0, bind_get_root_node },
 	{ NULL, 0, NULL }
 };
 
@@ -1583,6 +1584,8 @@ node_prototype_index(
 		break;
 	}
 
-	/* A document fragment. */
+	/* A shadow root, or another document fragment. */
+	if (dom_shadow_of(node) != NULL)
+		return BIND_SHADOW_ROOT;
 	return BIND_DOCUMENT_FRAGMENT;
 }

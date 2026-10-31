@@ -82,6 +82,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/dom/xml.c \
 	$(LIBBROWSER_DIR)/dom/removal.c \
 	$(LIBBROWSER_DIR)/dom/adopt.c \
+	$(LIBBROWSER_DIR)/dom/shadow.c \
 	$(LIBBROWSER_DIR)/dom/names.c \
 	$(LIBBROWSER_DIR)/dom/control.c \
 	$(LIBBROWSER_DIR)/dom/form.c \
@@ -118,6 +119,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/bind/encoding.c \
 	$(LIBBROWSER_DIR)/bind/storage.c \
 	$(LIBBROWSER_DIR)/bind/markup.c \
+	$(LIBBROWSER_DIR)/bind/shadow.c \
 	$(LIBBROWSER_DIR)/bind/media.c \
 	$(LIBBROWSER_DIR)/bind/computed.c \
 	$(LIBBROWSER_DIR)/bind/exception.c \

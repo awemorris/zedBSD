@@ -56,6 +56,18 @@ struct parser_state {
 };
 
 /*
+ * The selectors of the style rule whose nested rules are being read: & in a nested selector stands for them
+ * (as :is() of them), with the greatest specificity among them.
+ */
+struct parser_nest {
+	const struct css_selector *selectors;
+	size_t count;
+	uint32_t specificity;
+};
+
+static const struct parser_nest *parser_nest_parent;
+
+/*
  * A pseudo-class name and what it is.
  */
 struct parser_pseudo_name {
@@ -86,6 +98,7 @@ static const struct parser_pseudo_name parser_pseudo_names[] = {
 	{ "scope", CSS_PSEUDO_SCOPE },
 	{ "target", CSS_PSEUDO_TARGET },
 	{ "popover-open", CSS_PSEUDO_POPOVER_OPEN },
+	{ "host", CSS_PSEUDO_HOST },
 	{ "active-view-transition", CSS_PSEUDO_ACTIVE_VT },
 	{ NULL, 0 }
 };
@@ -103,6 +116,8 @@ static const struct parser_pseudo_name parser_pseudo_functions[] = {
 	{ "where", CSS_PSEUDO_IS },
 	{ "has", CSS_PSEUDO_HAS },
 	{ "lang", CSS_PSEUDO_LANG },
+	{ "host", CSS_PSEUDO_HOST_FN },
+	{ "host-context", CSS_PSEUDO_HOST_CONTEXT },
 	{ "active-view-transition-type", CSS_PSEUDO_ACTIVE_VT_TYPE },
 	{ "nth-child", CSS_PSEUDO_NTH_CHILD },
 	{ "nth-last-child", CSS_PSEUDO_NTH_LAST_CHILD },
@@ -145,8 +160,12 @@ static int parser_compound(struct vm_heap *heap, struct wb_arena *arena, const s
 static int parser_attribute(struct vm_heap *heap, const struct css_token *tokens, size_t count, struct css_simple *simple);
 static int parser_pseudo(struct vm_heap *heap, struct wb_arena *arena, const struct css_token *tokens, size_t count, size_t *index, struct css_simple *simple, uint32_t *specificity);
 static void parser_pseudo_element(const struct css_token *token, struct css_simple *simple);
+static int parser_shadow_pseudo(struct vm_heap *heap, struct wb_arena *arena, const struct css_token *tokens, size_t count, size_t *index, struct css_simple *simple, uint32_t *specificity);
 static int parser_type_list(struct vm_heap *heap, struct token_range arguments, struct css_simple *simple);
 static int parser_view_transition_argument(struct vm_heap *heap, const struct css_token *tokens, size_t count, size_t *index, struct css_compound *compound);
+static int parser_style_rule(struct parser_state *state, const struct css_selector *selectors, size_t selector_count, struct token_range block, const struct css_media *media, int depth);
+static int parser_nested_selectors(struct parser_state *state, const struct css_selector *parents, size_t parent_count, struct token_range prelude, struct css_selector **selectors, size_t *count);
+static int parser_prepend_nest(struct wb_arena *arena, struct css_selector *selector, const struct parser_nest *nest, int combinator);
 static int parser_pseudo_arguments(struct vm_heap *heap, struct wb_arena *arena, struct token_range arguments, int relative, struct css_simple *simple, uint32_t *specificity);
 static int parser_nth(struct token_range arguments, int *a, int *b);
 static int parser_declarations(struct vm_heap *heap, struct wb_arena *arena, struct token_range block, struct css_declaration **declarations, size_t *count);
@@ -1839,9 +1858,6 @@ parser_add_rule(
 
 	/* Reads the selectors (relative to the scope's root inside @scope); a selector list that does not parse drops the rule. */
 	memset(&rule, 0, sizeof(rule));
-	rule.media = media;
-	rule.scope = state->scope;
-	rule.layer = state->layer;
 	if (state->scope != NULL) {
 		error = parser_scoped_selectors(state, prelude, &rule.selectors, &rule.selector_count);
 	} else {
@@ -1850,17 +1866,345 @@ parser_add_rule(
 	if (error != 0)
 		return error;
 
-	/* Reads the declarations. */
-	error = parser_declarations(state->heap, &state->sheet->arena, block, &rule.declarations, &rule.declaration_count);
+	/* The rule, and the rules nested in it. */
+	error = parser_style_rule(state, rule.selectors, rule.selector_count, block, media, 0);
+	return error;
+}
+
+/* The most specific selector's specificity of a list. */
+static uint32_t
+parser_best_specificity(
+	const struct css_selector *selectors,
+	size_t count)
+{
+	uint32_t best;
+	size_t index;
+
+	best = 0;
+	for (index = 0; index < count; index++) {
+		if (selectors[index].specificity > best)
+			best = selectors[index].specificity;
+	}
+	return best;
+}
+
+/* A part of a style rule's block: a nested style rule, or a nested group rule whose block holds more of the rule. */
+struct parser_nested {
+	int group;
+	struct token_range prelude;
+	struct token_range body;
+};
+
+/*
+ * Adds a style rule from its selectors and its block, and the rules nested in the block (style rules, whose
+ * selectors are relative to this rule's, and @media blocks, whose declarations and rules are this rule's).
+ * https://drafts.csswg.org/css-nesting-1/
+ */
+static int
+parser_style_rule(
+	struct parser_state *state,
+	const struct css_selector *selectors,
+	size_t selector_count,
+	struct token_range block,
+	const struct css_media *media,
+	int depth)
+{
+	struct wb_vector nested;
+	struct parser_nested item;
+	struct parser_nested *items;
+	struct css_rule rule;
+	struct token_range kept;
+	struct css_token *kept_tokens;
+	struct css_selector *list;
+	struct css_media *group_media;
+	size_t made;
+	size_t index;
+	size_t start;
+	size_t end;
+	size_t open;
+	size_t position;
+	int custom;
+	int error;
+
+	/* Splits the block into declarations and nested rules. */
+	wb_vector_init(&nested, sizeof(struct parser_nested));
+	kept_tokens = wb_arena_alloc(&state->sheet->arena, (block.count + 1U) * sizeof(struct css_token));
+	kept.tokens = kept_tokens;
+	if (kept_tokens == NULL) {
+		wb_vector_release(&nested);
+		return ENOMEM;
+	}
+	kept.count = 0;
+	index = 0;
+	while (index < block.count && depth < 8) {
+		if (block.tokens[index].type == CSS_TOKEN_WHITESPACE || block.tokens[index].type == CSS_TOKEN_SEMICOLON) {
+			index++;
+			continue;
+		}
+		start = index;
+
+		/* A nested @media; any other at-rule is dropped. */
+		if (block.tokens[index].type == CSS_TOKEN_AT_KEYWORD) {
+			end = parser_skip_at_rule(block.tokens, block.count, index);
+			open = start + 1U;
+			while (open < end && block.tokens[open].type != CSS_TOKEN_OPEN_CURLY)
+				open++;
+			if (css_ident_equal(&block.tokens[start], "media") && open < end) {
+				item.group = 1;
+				item.prelude.tokens = block.tokens + start + 1U;
+				item.prelude.count = open - start - 1U;
+				item.body.tokens = block.tokens + open + 1U;
+				item.body.count = end - open - 1U;
+				if (item.body.count > 0 && item.body.tokens[item.body.count - 1U].type == CSS_TOKEN_CLOSE_CURLY)
+					item.body.count--;
+				if (wb_vector_push(&nested, &item) != 0) {
+					wb_vector_release(&nested);
+					return ENOMEM;
+				}
+			}
+			index = end;
+			continue;
+		}
+
+		/* A custom property's value may hold braces; everything else is a rule when a block comes before its semicolon. */
+		custom = block.tokens[index].type == CSS_TOKEN_IDENT && block.tokens[index].length >= 2U &&
+		    block.tokens[index].text[0] == '-' && block.tokens[index].text[1] == '-';
+		position = index;
+		open = block.count;
+		while (position < block.count && block.tokens[position].type != CSS_TOKEN_SEMICOLON) {
+			if (block.tokens[position].type == CSS_TOKEN_OPEN_CURLY && !custom) {
+				open = position;
+				break;
+			}
+			if (block.tokens[position].type == CSS_TOKEN_OPEN_PAREN || block.tokens[position].type == CSS_TOKEN_OPEN_SQUARE ||
+			    block.tokens[position].type == CSS_TOKEN_FUNCTION || block.tokens[position].type == CSS_TOKEN_OPEN_CURLY) {
+				position = parser_skip_block(block.tokens, block.count, position);
+				continue;
+			}
+			position++;
+		}
+		if (open < block.count) {
+			end = parser_skip_block(block.tokens, block.count, open);
+			item.group = 0;
+			item.prelude.tokens = block.tokens + start;
+			item.prelude.count = open - start;
+			item.body.tokens = block.tokens + open + 1U;
+			item.body.count = end - open - 1U;
+			if (item.body.count > 0 && item.body.tokens[item.body.count - 1U].type == CSS_TOKEN_CLOSE_CURLY)
+				item.body.count--;
+			if (wb_vector_push(&nested, &item) != 0) {
+				wb_vector_release(&nested);
+				return ENOMEM;
+			}
+			index = end;
+			continue;
+		}
+
+		/* A declaration, kept (with its semicolon). */
+		end = position < block.count ? position + 1U : position;
+		memcpy(kept_tokens + kept.count, block.tokens + start, (end - start) * sizeof(struct css_token));
+		kept.count += end - start;
+		index = end;
+	}
+	if (depth >= 8) {
+		memcpy(kept_tokens, block.tokens, block.count * sizeof(struct css_token));
+		kept.count = block.count;
+	}
+
+	/* The rule itself (a group's, only when it has declarations). */
+	memset(&rule, 0, sizeof(rule));
+	rule.media = media;
+	rule.scope = state->scope;
+	rule.layer = state->layer;
+	rule.selectors = (struct css_selector *)selectors;
+	rule.selector_count = selector_count;
+	error = parser_declarations(state->heap, &state->sheet->arena, kept, &rule.declarations, &rule.declaration_count);
+	if (error != 0) {
+		wb_vector_release(&nested);
+		return error;
+	}
+	if (depth == 0 || rule.declaration_count != 0) {
+		error = wb_vector_push(&state->rules, &rule);
+		if (error != 0) {
+			wb_vector_release(&nested);
+			return ENOMEM;
+		}
+	}
+
+	/* The nested rules, after it (the later rule wins at equal specificity). */
+	items = nested.items;
+	for (made = 0; made < nested.count; made++) {
+		if (items[made].group) {
+			error = css_media_parse(&state->sheet->arena, items[made].prelude.tokens, items[made].prelude.count, media, &group_media);
+			if (error == ENOMEM) {
+				wb_vector_release(&nested);
+				return error;
+			}
+			if (error != 0)
+				continue;
+			error = parser_style_rule(state, selectors, selector_count, items[made].body, group_media, depth + 1);
+		} else {
+			error = parser_nested_selectors(state, selectors, selector_count, items[made].prelude, &list, &position);
+			if (error == ENOMEM) {
+				wb_vector_release(&nested);
+				return error;
+			}
+			if (error != 0)
+				continue;
+			error = parser_style_rule(state, list, position, items[made].body, media, depth + 1);
+		}
+		if (error == ENOMEM) {
+			wb_vector_release(&nested);
+			return error;
+		}
+	}
+	wb_vector_release(&nested);
+
+	/* Succeeded: the rule and the rules nested in it are the sheet's. */
+	return 0;
+}
+
+/*
+ * Reads the selector list of a nested style rule: & stands for the parent's selectors, and a selector
+ * without & (or starting with a combinator) is relative to them.
+ */
+static int
+parser_nested_selectors(
+	struct parser_state *state,
+	const struct css_selector *parents,
+	size_t parent_count,
+	struct token_range prelude,
+	struct css_selector **selectors,
+	size_t *count)
+{
+	struct parser_nest nest;
+	const struct parser_nest *saved;
+	struct css_selector *list;
+	struct token_range one;
+	size_t commas;
+	size_t made;
+	size_t start;
+	size_t index;
+	size_t scan;
+	int depth;
+	int combinator;
+	int has_amp;
+	int error;
+
+	/* The list's size. */
+	commas = 0;
+	depth = 0;
+	for (index = 0; index < prelude.count; index++) {
+		if (prelude.tokens[index].type == CSS_TOKEN_FUNCTION || prelude.tokens[index].type == CSS_TOKEN_OPEN_PAREN)
+			depth++;
+		if (prelude.tokens[index].type == CSS_TOKEN_CLOSE_PAREN)
+			depth--;
+		if (prelude.tokens[index].type == CSS_TOKEN_COMMA && depth == 0)
+			commas++;
+	}
+	list = wb_arena_zalloc(&state->sheet->arena, (commas + 1U) * sizeof(*list));
+	if (list == NULL)
+		return ENOMEM;
+
+	/* & is any of the parents. */
+	nest.selectors = parents;
+	nest.count = parent_count;
+	nest.specificity = parser_best_specificity(parents, parent_count);
+	saved = parser_nest_parent;
+	parser_nest_parent = &nest;
+
+	/* Each selector between the top-level commas. */
+	made = 0;
+	start = 0;
+	depth = 0;
+	error = 0;
+	for (index = 0; index <= prelude.count && error == 0; index++) {
+		if (index < prelude.count) {
+			if (prelude.tokens[index].type == CSS_TOKEN_FUNCTION || prelude.tokens[index].type == CSS_TOKEN_OPEN_PAREN)
+				depth++;
+			if (prelude.tokens[index].type == CSS_TOKEN_CLOSE_PAREN)
+				depth--;
+			if (prelude.tokens[index].type != CSS_TOKEN_COMMA || depth != 0)
+				continue;
+		}
+		one.tokens = prelude.tokens + start;
+		one.count = index - start;
+		one = parser_trim(one);
+		start = index + 1U;
+
+		/* A leading combinator relates the selector to &. */
+		combinator = CSS_COMBINATOR_NONE;
+		if (one.count > 0 && one.tokens[0].type == CSS_TOKEN_DELIM) {
+			if (one.tokens[0].delim == '>')
+				combinator = CSS_COMBINATOR_CHILD;
+			if (one.tokens[0].delim == '+')
+				combinator = CSS_COMBINATOR_NEXT;
+			if (one.tokens[0].delim == '~')
+				combinator = CSS_COMBINATOR_SUBSEQUENT;
+			if (combinator != CSS_COMBINATOR_NONE) {
+				one.tokens++;
+				one.count--;
+				one = parser_trim(one);
+			}
+		}
+
+		/* Without & anywhere, the selector is below &. */
+		has_amp = 0;
+		for (scan = 0; scan < one.count; scan++) {
+			if (one.tokens[scan].type == CSS_TOKEN_DELIM && one.tokens[scan].delim == '&')
+				has_amp = 1;
+		}
+		error = parser_selector(state->heap, &state->sheet->arena, one, &list[made]);
+		if (error != 0)
+			break;
+		if (!has_amp || combinator != CSS_COMBINATOR_NONE) {
+			error = parser_prepend_nest(&state->sheet->arena, &list[made], &nest, combinator == CSS_COMBINATOR_NONE ? CSS_COMBINATOR_DESCENDANT : combinator);
+			if (error != 0)
+				break;
+		}
+		made++;
+	}
+	parser_nest_parent = saved;
 	if (error != 0)
 		return error;
 
-	/* Appends the rule. */
-	error = wb_vector_push(&state->rules, &rule);
-	if (error != 0)
-		return ENOMEM;
+	/* Succeeded: the list is relative to the parent rule. */
+	*selectors = list;
+	*count = made;
+	return 0;
+}
 
-	/* Succeeded: the rule is the sheet's. */
+/* Puts & (any of the parent's selectors) before a selector, joined by a combinator. */
+static int
+parser_prepend_nest(
+	struct wb_arena *arena,
+	struct css_selector *selector,
+	const struct parser_nest *nest,
+	int combinator)
+{
+	struct css_compound *compounds;
+	struct css_simple *simple;
+
+	simple = wb_arena_zalloc(arena, sizeof(*simple));
+	if (simple == NULL)
+		return ENOMEM;
+	simple->kind = CSS_SIMPLE_PSEUDO_CLASS;
+	simple->pseudo = CSS_PSEUDO_IS;
+	simple->arguments = nest->selectors;
+	simple->argument_count = nest->count;
+	compounds = wb_arena_alloc(arena, (selector->count + 1U) * sizeof(*compounds));
+	if (compounds == NULL)
+		return ENOMEM;
+	memset(&compounds[0], 0, sizeof(compounds[0]));
+	compounds[0].simples = simple;
+	compounds[0].count = 1;
+	compounds[0].combinator = CSS_COMBINATOR_NONE;
+	compounds[0].pseudo_element = CSS_PSEUDO_ELEMENT_NONE;
+	memcpy(compounds + 1, selector->compounds, selector->count * sizeof(*compounds));
+	compounds[1].combinator = combinator;
+	selector->compounds = compounds;
+	selector->count++;
+	selector->specificity += nest->specificity;
 	return 0;
 }
 
@@ -2076,6 +2420,13 @@ parser_compound(
 			*specificity += 1U;
 		} else if (token->type == CSS_TOKEN_DELIM && token->delim == '*' && made == 0) {
 			simple->kind = CSS_SIMPLE_UNIVERSAL;
+		} else if (token->type == CSS_TOKEN_DELIM && token->delim == '&' && parser_nest_parent != NULL) {
+			/* The nesting selector inside a style rule: any of the parent rule's selectors. */
+			simple->kind = CSS_SIMPLE_PSEUDO_CLASS;
+			simple->pseudo = CSS_PSEUDO_IS;
+			simple->arguments = parser_nest_parent->selectors;
+			simple->argument_count = parser_nest_parent->count;
+			*specificity += parser_nest_parent->specificity;
 		} else if (token->type == CSS_TOKEN_DELIM && token->delim == '&') {
 			/* The nesting selector: the scope's root (or the root element), adding no specificity. */
 			simple->kind = CSS_SIMPLE_PSEUDO_CLASS;
@@ -2115,6 +2466,17 @@ parser_compound(
 				(*index)++;
 				if (*index >= count)
 					return EINVAL;
+
+				/* ::part() and ::slotted() keep the subject element's own compound. */
+				if (tokens[*index].type == CSS_TOKEN_FUNCTION &&
+				    (css_ident_equal(&tokens[*index], "part") || css_ident_equal(&tokens[*index], "slotted"))) {
+					error = parser_shadow_pseudo(heap, arena, tokens, count, index, simple, specificity);
+					if (error != 0)
+						return error;
+					made++;
+					(*index)++;
+					continue;
+				}
 				parser_pseudo_element(&tokens[*index], simple);
 				compound->pseudo_element = simple->pseudo;
 				*specificity += 1U;
@@ -2350,6 +2712,8 @@ parser_pseudo(
 	switch (simple->pseudo) {
 	case CSS_PSEUDO_NOT:
 	case CSS_PSEUDO_IS:
+	case CSS_PSEUDO_HOST_FN:
+	case CSS_PSEUDO_HOST_CONTEXT:
 		/* Selectors; :where() adds nothing to the specificity. */
 		same = css_ident_equal(token, "where");
 		if (same) {
@@ -2361,7 +2725,7 @@ parser_pseudo(
 		/* :not() with an argument it cannot read drops the rule; :is() and :where() forgive it. */
 		if (error == ENOMEM)
 			return error;
-		if (error != 0 && simple->pseudo == CSS_PSEUDO_NOT)
+		if (error != 0 && (simple->pseudo == CSS_PSEUDO_NOT || simple->pseudo == CSS_PSEUDO_HOST_FN || simple->pseudo == CSS_PSEUDO_HOST_CONTEXT))
 			return error;
 		if (error != 0)
 			simple->pseudo = CSS_PSEUDO_NEVER;
@@ -2455,6 +2819,62 @@ parser_type_list(
 		return EINVAL;
 	simple->value = vm_atom_from_units(heap, joined, used);
 	return simple->value == NULL ? ENOMEM : 0;
+}
+
+/* Reads ::part(ident+) or ::slotted(selector); the index is the function token and ends on its closing parenthesis. */
+static int
+parser_shadow_pseudo(
+	struct vm_heap *heap,
+	struct wb_arena *arena,
+	const struct css_token *tokens,
+	size_t count,
+	size_t *index,
+	struct css_simple *simple,
+	uint32_t *specificity)
+{
+	struct token_range arguments;
+	uint16_t joined[256];
+	size_t used;
+	size_t end;
+	size_t position;
+	size_t at;
+	int part;
+	int error;
+
+	part = css_ident_equal(&tokens[*index], "part");
+	end = parser_skip_block(tokens, count, *index);
+	if (end <= *index + 1U || tokens[end - 1U].type != CSS_TOKEN_CLOSE_PAREN)
+		return EINVAL;
+	arguments.tokens = tokens + *index + 1U;
+	arguments.count = end - *index - 2U;
+	arguments = parser_trim(arguments);
+	if (arguments.count == 0)
+		return EINVAL;
+	*index = end - 1U;
+	*specificity += 1U;
+	if (!part) {
+		simple->kind = CSS_SIMPLE_SLOTTED;
+		return parser_pseudo_arguments(heap, arena, arguments, 0, simple, specificity);
+	}
+
+	/* The part names, whitespace separated. */
+	simple->kind = CSS_SIMPLE_PART;
+	used = 0;
+	for (position = 0; position < arguments.count; position++) {
+		if (arguments.tokens[position].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (arguments.tokens[position].type != CSS_TOKEN_IDENT)
+			return EINVAL;
+		if (used + arguments.tokens[position].length + 1U > 256U)
+			return EINVAL;
+		if (used != 0)
+			joined[used++] = ' ';
+		for (at = 0; at < arguments.tokens[position].length; at++)
+			joined[used++] = arguments.tokens[position].text[at];
+	}
+	simple->value = vm_atom_from_units(heap, joined, used);
+	error = simple->value == NULL ? ENOMEM : 0;
+	return error;
 }
 
 /* Reads a pseudo-element's name: ::before and ::after make boxes, any other never matches. */

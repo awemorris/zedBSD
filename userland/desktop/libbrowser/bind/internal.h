@@ -127,6 +127,7 @@ enum bind_interface_index {
 	BIND_HTML_DIALOG_ELEMENT,
 	BIND_HTML_CANVAS_ELEMENT,
 	BIND_ERROR_EVENT,
+	BIND_SHADOW_ROOT,
 	BIND_INTERFACES
 };
 
@@ -465,6 +466,7 @@ extern const struct bind_interface bind_text_encoder_interface;
 extern const struct bind_interface bind_text_decoder_interface;
 extern const struct bind_interface bind_storage_interface;
 extern const struct bind_interface bind_html_template_element_interface;
+extern const struct bind_interface bind_shadow_root_interface;
 extern const struct bind_interface bind_dom_exception_interface;
 
 /* Native node classification and range/options construction share these entry points. */
@@ -536,6 +538,9 @@ int bind_environment_child_mutation(struct bind_window *window, struct dom_node 
 
 /* Markup (markup.c). */
 int bind_template_contents(struct dom_element *element, struct dom_node **contents);
+int bind_attach_shadow(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_shadow_root_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_get_root_node(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_inner_html_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_inner_html_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_outer_html_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);

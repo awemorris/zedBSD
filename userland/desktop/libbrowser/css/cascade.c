@@ -158,6 +158,20 @@ struct css_engine {
 	/* The owner of the sheet whose rules are being matched (NULL for none). */
 	struct dom_element *sheet_owner;
 	/*
+	 * The tree a sheet's selectors are matched in: the shadow root of its owner (NULL for the
+	 * document's tree).  scope_any is set when every tree is matchable (the user agent's sheet,
+	 * a script's query, or a page without shadow trees); scope_bypass is an element exempt from
+	 * the tree check (the subject of ::part(), the host in :host()).
+	 */
+	struct dom_node *sheet_scope;
+	int scope_any;
+	int shadow_scopes;
+	const struct dom_element *scope_bypass;
+	/* The shadow tree the declaration being applied came from (NULL: the document's). */
+	const struct dom_node *apply_tree;
+	struct vm_string *atom_part;
+	struct vm_string *atom_exportparts;
+	/*
 	 * Which elements are roots of which @scope (allocated when first used;
 	 * NULL before), and the generation that makes its entries current:
 	 * it moves on for each sheet of each cascade, so nothing is cleared.
@@ -225,6 +239,9 @@ struct cascade_match {
 	/* The cascade layer's weight (a later layer is more; no layer is the most; the reverse for !important). */
 	uint32_t layer;
 	uint64_t order;
+	/* The declaration comes from a shadow tree (its sheet's, or its element's own style): that tree's root. */
+	int scoped;
+	const struct dom_node *tree;
 };
 
 /* One legacy keyword and the declaration it stands for. */
@@ -277,7 +294,7 @@ static int cascade_element_keys(struct css_engine *engine, struct dom_element *e
 static int cascade_add_bucket(struct css_engine *engine, const struct css_rule_index *index, const struct css_index_bucket *bucket);
 static int cascade_collect_sheet(struct css_engine *engine, struct dom_element *element, const struct css_sheet *sheet, uint64_t sheet_number, struct vm_string *id, struct wb_vector *matches);
 static int cascade_entry_compare(const void *left, const void *right);
-static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, int layer, uint64_t order);
+static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, int layer, uint64_t order, const struct dom_node *tree);
 static int cascade_scoped_matches(struct css_engine *engine, struct dom_element *element, const struct css_scope *scope, const struct css_selector *selector, uint32_t *proximity);
 static int cascade_scope_root(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
 static int cascade_scope_root_compute(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
@@ -318,6 +335,11 @@ static void cascade_style_keep(struct css_engine *engine, struct dom_element *el
 static int cascade_style_grow(struct css_engine *engine);
 static void cascade_style_forget(struct css_engine *engine);
 static struct dom_element *cascade_parent_element(struct dom_element *element);
+static struct dom_element *cascade_selector_parent(const struct css_engine *engine, struct dom_element *element);
+static struct dom_node *cascade_tree_scope(const struct dom_element *element);
+static int cascade_shadow_matches(struct css_engine *engine, struct dom_element *element, const struct css_selector *selector, size_t index, struct dom_element *anchor, size_t part);
+static struct dom_element *cascade_part_host(struct css_engine *engine, struct dom_element *element, const struct vm_string *requested);
+static int cascade_host_matches(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple);
 static struct dom_element *cascade_previous_element(struct dom_element *element);
 static struct dom_element *cascade_next_element(struct dom_element *element);
 static void cascade_apply(struct css_engine *engine, struct css_style *style, const struct css_style *parent, const struct css_declaration *declaration);
@@ -387,6 +409,9 @@ css_engine_create(
 	created->atom_class = vm_atom_from_ascii(heap, "class");
 	created->atom_style = vm_atom_from_ascii(heap, "style");
 	created->atom_href = vm_atom_from_ascii(heap, "href");
+	created->atom_part = vm_atom_from_ascii(heap, "part");
+	created->atom_exportparts = vm_atom_from_ascii(heap, "exportparts");
+	created->scope_any = 1;
 	if (created->atom_id == NULL || created->atom_class == NULL || created->atom_style == NULL || created->atom_href == NULL) {
 		free(created);
 		return ENOMEM;
@@ -558,6 +583,14 @@ css_engine_set_owner(
 		return;
 	sheets = engine->sheets.items;
 	sheets[engine->sheets.count - 1U].owner = owner;
+}
+
+/* Records that the page has shadow trees. */
+void
+css_engine_set_shadow_scopes(
+	struct css_engine *engine)
+{
+	engine->shadow_scopes = 1;
 }
 
 /*
@@ -1155,7 +1188,15 @@ cascade_compute(
 		if (matches[index].declaration->property == CSS_PROP_WRITING_MODE ||
 		    matches[index].declaration->property == CSS_PROP_DIRECTION)
 			continue;
+		engine->apply_tree = matches[index].tree;
 		cascade_apply(engine, style, parent, cascade_reverted(matches, index));
+		engine->apply_tree = NULL;
+
+		/* View transition names and classes belong to the tree they are declared in: a shadow tree's are not the document's. */
+		if (matches[index].scoped && matches[index].declaration->property == CSS_PROP_VIEW_TRANSITION_NAME)
+			style->view_transition_name = NULL;
+		if (matches[index].scoped && matches[index].declaration->property == CSS_PROP_VIEW_TRANSITION_CLASS)
+			style->view_transition_class = NULL;
 	}
 
 	/* The lists are no longer needed. */
@@ -1416,8 +1457,14 @@ cascade_collect(
 		/* The sheet's matching rules. */
 		engine->sheet_owner = sheets[sheet].owner;
 		engine->scope_generation++;
+		engine->sheet_scope = NULL;
+		engine->scope_any = !engine->shadow_scopes || sheets[sheet].sheet->origin != CSS_ORIGIN_AUTHOR;
+		if (sheets[sheet].owner != NULL)
+			engine->sheet_scope = cascade_tree_scope(sheets[sheet].owner);
 		error = cascade_collect_sheet(engine, element, sheets[sheet].sheet, (uint64_t)sheet, id, matches);
 		engine->sheet_owner = NULL;
+		engine->sheet_scope = NULL;
+		engine->scope_any = 1;
 		if (error != 0)
 			return error;
 	}
@@ -1447,7 +1494,8 @@ cascade_collect(
 		return 0;
 
 	/* They come after every sheet's rules. */
-	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, 0, (uint64_t)engine->sheets.count << 44);
+	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, 0, (uint64_t)engine->sheets.count << 44,
+	    engine->shadow_scopes ? cascade_tree_scope(element) : NULL);
 	if (error != 0)
 		return error;
 
@@ -1570,7 +1618,7 @@ cascade_presentational(
 	if (error != 0)
 		return 0;
 	return cascade_add_declarations(matches, declarations, declaration_count,
-	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0, 0);
+	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0, 0, 0);
 }
 
 /* Appends an ASCII fragment to a declaration being made. */
@@ -1982,7 +2030,8 @@ cascade_collect_sheet(
 		/* A rule whose selectors all failed does not apply. */
 		if (matched) {
 			order = (sheet_number << 44) | ((uint64_t)candidates[position].rule << 16);
-			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, rule->layer, order);
+			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, rule->layer, order,
+			    engine->scope_any ? NULL : engine->sheet_scope);
 			if (error != 0)
 				return error;
 		}
@@ -2018,7 +2067,7 @@ cascade_scoped_matches(
 	/* Each ancestor (and the element itself), nearest first, as a possible root. */
 	saved = engine->scope_root;
 	generations = 0;
-	for (root = element; root != NULL; root = cascade_parent_element(root)) {
+	for (root = element; root != NULL; root = cascade_selector_parent(engine, root)) {
 		is_root = cascade_scope_root(engine, root, scope);
 		if (is_root) {
 			inside = cascade_in_scope(engine, element, root, scope);
@@ -2110,7 +2159,7 @@ cascade_scope_root_compute(
 	if (scope->roots == NULL) {
 		owner = NULL;
 		if (engine->sheet_owner != NULL)
-			owner = cascade_parent_element(engine->sheet_owner);
+			owner = cascade_selector_parent(engine, engine->sheet_owner);
 		if (owner == NULL) {
 			if (root->node.parent == NULL || root->node.parent->type != DOM_DOCUMENT)
 				return 0;
@@ -2121,7 +2170,7 @@ cascade_scope_root_compute(
 		/* Nested in another scope, it must be in that one too. */
 		if (scope->parent == NULL)
 			return 1;
-		for (outer = root; outer != NULL; outer = cascade_parent_element(outer)) {
+		for (outer = root; outer != NULL; outer = cascade_selector_parent(engine, outer)) {
 			is_root = cascade_scope_root(engine, outer, scope->parent);
 			if (!is_root)
 				continue;
@@ -2134,7 +2183,7 @@ cascade_scope_root_compute(
 
 	/* Each outer root the element is in (or none at the top). */
 	saved = engine->scope_root;
-	for (outer = root; outer != NULL; outer = cascade_parent_element(outer)) {
+	for (outer = root; outer != NULL; outer = cascade_selector_parent(engine, outer)) {
 		if (scope->parent != NULL) {
 			is_root = cascade_scope_root(engine, outer, scope->parent);
 			if (!is_root)
@@ -2188,7 +2237,7 @@ cascade_in_scope(
 	/* The element and its ancestors up to the root itself (a limit of :scope excludes everything). */
 	saved = engine->scope_root;
 	engine->scope_root = root;
-	for (between = element; between != NULL; between = cascade_parent_element(between)) {
+	for (between = element; between != NULL; between = cascade_selector_parent(engine, between)) {
 		for (index = 0; index < scope->limit_count; index++) {
 			matches = cascade_candidate_matches(engine, between, &scope->limits[index]);
 			if (matches) {
@@ -2240,7 +2289,8 @@ cascade_add_declarations(
 	uint32_t specificity,
 	uint32_t proximity,
 	int layer,
-	uint64_t order)
+	uint64_t order,
+	const struct dom_node *tree)
 {
 	struct cascade_match match;
 	size_t index;
@@ -2248,6 +2298,8 @@ cascade_add_declarations(
 
 	/* Each declaration with its rank. */
 	for (index = 0; index < count; index++) {
+		match.scoped = tree != NULL;
+		match.tree = tree;
 		match.declaration = &declarations[index];
 		match.specificity = specificity;
 		match.proximity = proximity;
@@ -2855,6 +2907,13 @@ cascade_compare(
 		return -1;
 	if (a->rank > b->rank)
 		return 1;
+
+	/* Then the context: an outer tree's normal declarations win over an inner tree's, and the reverse for !important. */
+	if (a->scoped != b->scoped) {
+		if (a->declaration->important)
+			return a->scoped ? 1 : -1;
+		return a->scoped ? -1 : 1;
+	}
 	if (a->layer < b->layer)
 		return -1;
 	if (a->layer > b->layer)
@@ -2928,10 +2987,17 @@ cascade_selector_matches(
 {
 	const struct css_compound *compound;
 	struct dom_element *other;
+	size_t part;
 	int matches;
 
-	/* The compound at index must match the element itself. */
+	/* ::part() and ::slotted() make the element the subject of a compound written about another element. */
 	compound = &selector->compounds[index];
+	for (part = 0; part < compound->count; part++) {
+		if (compound->simples[part].kind == CSS_SIMPLE_PART || compound->simples[part].kind == CSS_SIMPLE_SLOTTED)
+			return cascade_shadow_matches(engine, element, selector, index, anchor, part);
+	}
+
+	/* The compound at index must match the element itself. */
 	matches = cascade_compound_matches(engine, element, compound);
 	if (!matches)
 		return 0;
@@ -2947,12 +3013,12 @@ cascade_selector_matches(
 	/* Then the compound on its left, through the combinator. */
 	switch (compound->combinator) {
 	case CSS_COMBINATOR_CHILD:
-		other = cascade_parent_element(element);
+		other = cascade_selector_parent(engine, element);
 		if (other == NULL || other == anchor)
 			return 0;
 		return cascade_selector_matches(engine, other, selector, index - 1U, anchor);
 	case CSS_COMBINATOR_DESCENDANT:
-		for (other = cascade_parent_element(element); other != NULL && other != anchor; other = cascade_parent_element(other)) {
+		for (other = cascade_selector_parent(engine, element); other != NULL && other != anchor; other = cascade_selector_parent(engine, other)) {
 			matches = cascade_selector_matches(engine, other, selector, index - 1U, anchor);
 			if (matches)
 				return 1;
@@ -3023,9 +3089,17 @@ cascade_compound_matches(
 	const struct css_compound *compound)
 {
 	const struct css_simple *simple;
+	struct dom_node *scope;
 	size_t index;
 	int matches;
 	int after;
+
+	/* A selector reaches only the elements of its sheet's tree, and the host of that tree (through its simple selectors that can name it). */
+	if (!engine->scope_any && element != engine->scope_bypass) {
+		scope = cascade_tree_scope(element);
+		if (scope != engine->sheet_scope && (engine->sheet_scope == NULL || dom_shadow_host(engine->sheet_scope) != element))
+			return 0;
+	}
 
 	/* Every simple selector must match. */
 	after = 0;
@@ -3090,6 +3164,16 @@ cascade_simple_matches(
 	int insensitive;
 	int html_type;
 	int error;
+
+	/* The host of the sheet's tree is featureless: only :host, :scope and the lists that hold them can match it. */
+	if (!engine->scope_any && engine->sheet_scope != NULL && element != engine->scope_bypass &&
+	    dom_shadow_host(engine->sheet_scope) == element) {
+		if (simple->kind != CSS_SIMPLE_PSEUDO_CLASS)
+			return 0;
+		if (simple->pseudo != CSS_PSEUDO_HOST && simple->pseudo != CSS_PSEUDO_HOST_FN && simple->pseudo != CSS_PSEUDO_HOST_CONTEXT &&
+		    simple->pseudo != CSS_PSEUDO_SCOPE && simple->pseudo != CSS_PSEUDO_SCOPE_NEST && simple->pseudo != CSS_PSEUDO_IS)
+			return 0;
+	}
 
 	/* The kind of selector. */
 	switch (simple->kind) {
@@ -3276,10 +3360,14 @@ cascade_pseudo_class(
 		if (engine->scope_root != NULL)
 			return element == engine->scope_root;
 		return element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT;
+	case CSS_PSEUDO_HOST:
+	case CSS_PSEUDO_HOST_FN:
+	case CSS_PSEUDO_HOST_CONTEXT:
+		return cascade_host_matches(engine, element, simple);
 	case CSS_PSEUDO_FIRST_CHILD:
-		return cascade_previous_element(element) == NULL && cascade_parent_element(element) != NULL;
+		return cascade_previous_element(element) == NULL && element->node.parent != NULL && element->node.parent->type != DOM_DOCUMENT;
 	case CSS_PSEUDO_LAST_CHILD:
-		return cascade_next_element(element) == NULL && cascade_parent_element(element) != NULL;
+		return cascade_next_element(element) == NULL && element->node.parent != NULL && element->node.parent->type != DOM_DOCUMENT;
 	case CSS_PSEUDO_ONLY_CHILD:
 		return cascade_previous_element(element) == NULL && cascade_next_element(element) == NULL;
 	case CSS_PSEUDO_LANG:
@@ -4053,6 +4141,272 @@ cascade_parent_element(
 	return (struct dom_element *)element->node.parent;
 }
 
+/*
+ * Finds the element a selector's combinator reaches from an element: its parent, and for an element at
+ * the top of the sheet's own shadow tree the host (which only :host and :scope match).
+ */
+static struct dom_element *
+cascade_selector_parent(
+	const struct css_engine *engine,
+	struct dom_element *element)
+{
+	struct dom_node *parent;
+
+	parent = element->node.parent;
+	if (parent == NULL)
+		return NULL;
+	if (parent->type == DOM_ELEMENT)
+		return (struct dom_element *)parent;
+	if (!engine->scope_any && engine->sheet_scope != NULL && parent == engine->sheet_scope)
+		return dom_shadow_host(parent);
+	return NULL;
+}
+
+/* Reports the shadow root an element is in, or NULL for any other tree. */
+static struct dom_node *
+cascade_tree_scope(
+	const struct dom_element *element)
+{
+	struct dom_node *root;
+
+	root = dom_tree_root(&element->node);
+	if (dom_shadow_of(root) != NULL)
+		return root;
+	return NULL;
+}
+
+/* A word of an attribute (a part name), at most 63 UTF-16 units. */
+struct cascade_word {
+	uint16_t units[64];
+	size_t length;
+};
+
+/* Splits an attribute's words (ASCII whitespace or comma separated) into at most `max` words. */
+static size_t
+cascade_words(
+	const struct vm_string *value,
+	struct cascade_word *words,
+	size_t max)
+{
+	size_t count;
+	size_t at;
+	size_t length;
+	uint16_t unit;
+
+	count = 0;
+	at = 0;
+	length = value->length;
+	while (at < length && count < max) {
+		/* Skips the separators. */
+		unit = vm_string_at(value, at);
+		if (unit == ' ' || unit == '\t' || unit == '\n' || unit == '\r' || unit == '\f' || unit == ',') {
+			at++;
+			continue;
+		}
+
+		/* One word. */
+		words[count].length = 0;
+		while (at < length) {
+			unit = vm_string_at(value, at);
+			if (unit == ' ' || unit == '\t' || unit == '\n' || unit == '\r' || unit == '\f' || unit == ',')
+				break;
+			if (words[count].length < 64U)
+				words[count].units[words[count].length++] = unit;
+			at++;
+		}
+		count++;
+	}
+	return count;
+}
+
+/* Finds the host an element's part names reach in the sheet's tree, or NULL when the element is not those parts there. */
+static struct dom_element *
+cascade_part_host(
+	struct css_engine *engine,
+	struct dom_element *element,
+	const struct vm_string *requested)
+{
+	struct cascade_word wanted[8];
+	struct cascade_word visible[16];
+	struct cascade_word mapped[16];
+	struct cascade_word entries[16];
+	const struct dom_attribute *attribute;
+	struct dom_element *current;
+	struct dom_element *host;
+	size_t wanted_count;
+	size_t visible_count;
+	size_t mapped_count;
+	size_t entry_count;
+	size_t index;
+	size_t other;
+	size_t colon;
+	size_t depth;
+	int found;
+
+	wanted_count = cascade_words(requested, wanted, 8);
+	attribute = dom_element_find_attribute(element, DOM_NS_NONE, engine->atom_part);
+	if (attribute == NULL)
+		return NULL;
+	visible_count = cascade_words(attribute->value, visible, 16);
+	current = element;
+	for (depth = 0; depth < 8; depth++) {
+		host = dom_shadow_host(dom_tree_root(&current->node));
+		if (host == NULL)
+			return NULL;
+
+		/* The host is in the sheet's tree: the names must all be among the visible ones. */
+		if (engine->scope_any || cascade_tree_scope(host) == engine->sheet_scope) {
+			for (index = 0; index < wanted_count; index++) {
+				found = 0;
+				for (other = 0; other < visible_count; other++) {
+					if (visible[other].length == wanted[index].length &&
+					    memcmp(visible[other].units, wanted[index].units, wanted[index].length * sizeof(uint16_t)) == 0)
+						found = 1;
+				}
+				if (!found)
+					return NULL;
+			}
+			return host;
+		}
+
+		/* Otherwise the host exports some of them under its own names (name, or name:alias). */
+		attribute = dom_element_find_attribute(host, DOM_NS_NONE, engine->atom_exportparts);
+		if (attribute == NULL)
+			return NULL;
+		entry_count = cascade_words(attribute->value, entries, 16);
+		mapped_count = 0;
+		for (index = 0; index < entry_count; index++) {
+			struct cascade_word inner;
+			struct cascade_word outer;
+
+			inner = entries[index];
+			outer = entries[index];
+			for (colon = 0; colon < entries[index].length; colon++) {
+				if (entries[index].units[colon] == ':') {
+					inner.length = colon;
+					outer.length = entries[index].length - colon - 1U;
+					memmove(outer.units, entries[index].units + colon + 1U, outer.length * sizeof(uint16_t));
+					break;
+				}
+			}
+			if (inner.length == 0 || outer.length == 0)
+				continue;
+			for (other = 0; other < visible_count; other++) {
+				if (visible[other].length == inner.length &&
+				    memcmp(visible[other].units, inner.units, inner.length * sizeof(uint16_t)) == 0 && mapped_count < 16U)
+					mapped[mapped_count++] = outer;
+			}
+		}
+		memcpy(visible, mapped, mapped_count * sizeof(visible[0]));
+		visible_count = mapped_count;
+		current = host;
+	}
+	return NULL;
+}
+
+/* Tells whether an element is the host :host, :host() or :host-context() stand for in the sheet's tree. */
+static int
+cascade_host_matches(
+	struct css_engine *engine,
+	struct dom_element *element,
+	const struct css_simple *simple)
+{
+	const struct dom_element *saved;
+	struct dom_element *current;
+	struct dom_node *parent;
+	int matches;
+
+	if (engine->sheet_scope == NULL || dom_shadow_host(engine->sheet_scope) != element)
+		return 0;
+	if (simple->pseudo == CSS_PSEUDO_HOST)
+		return 1;
+
+	/* The argument is matched against the host (or, for :host-context(), against it and its ancestors, across shadow trees). */
+	saved = engine->scope_bypass;
+	matches = 0;
+	current = element;
+	while (current != NULL && !matches) {
+		engine->scope_bypass = current;
+		matches = cascade_any_matches(engine, current, simple);
+		if (simple->pseudo == CSS_PSEUDO_HOST_FN)
+			break;
+		parent = current->node.parent;
+		current = NULL;
+		if (parent != NULL && parent->type == DOM_ELEMENT)
+			current = (struct dom_element *)parent;
+		else if (parent != NULL && dom_shadow_host(parent) != NULL)
+			current = dom_shadow_host(parent);
+	}
+	engine->scope_bypass = saved;
+	return matches;
+}
+
+/*
+ * Matches a compound with ::part() or ::slotted(): the element is the subject of the pseudo-element, and
+ * the simple selectors before it (and the selector's compounds before them) are about the host or slot.
+ */
+static int
+cascade_shadow_matches(
+	struct css_engine *engine,
+	struct dom_element *element,
+	const struct css_selector *selector,
+	size_t index,
+	struct dom_element *anchor,
+	size_t part)
+{
+	const struct css_compound *compound;
+	const struct css_simple *simple;
+	struct css_compound copy[16];
+	struct css_selector sub;
+	const struct dom_element *saved;
+	struct dom_node *saved_scope;
+	struct dom_element *host;
+	size_t at;
+	size_t item;
+	int matches;
+
+	/* The simple selectors after the pseudo-element are about the subject itself. */
+	compound = &selector->compounds[index];
+	simple = &compound->simples[part];
+	saved = engine->scope_bypass;
+	engine->scope_bypass = element;
+	matches = 1;
+	for (at = part + 1U; at < compound->count && matches; at++)
+		matches = cascade_simple_matches(engine, element, &compound->simples[at]);
+	engine->scope_bypass = saved;
+	if (!matches || index >= 16U)
+		return 0;
+
+	/* The host the part belongs to, or the slot the element is assigned to. */
+	if (simple->kind == CSS_SIMPLE_PART) {
+		host = cascade_part_host(engine, element, simple->value);
+	} else {
+		host = dom_slot_of(&element->node);
+		if (host != NULL && !engine->scope_any && cascade_tree_scope(host) != engine->sheet_scope)
+			host = NULL;
+		saved_scope = engine->sheet_scope;
+		for (item = 0; host != NULL && item < simple->argument_count; item++) {
+			engine->sheet_scope = cascade_tree_scope(element);
+			matches = cascade_selector_matches(engine, element, &simple->arguments[item], simple->arguments[item].count - 1U, NULL);
+			engine->sheet_scope = saved_scope;
+			if (matches)
+				break;
+		}
+		if (simple->argument_count != 0 && item == simple->argument_count)
+			host = NULL;
+	}
+	if (host == NULL)
+		return 0;
+
+	/* The rest of the selector is matched with the compound cut at the pseudo-element, from the host or slot. */
+	memcpy(copy, selector->compounds, (index + 1U) * sizeof(copy[0]));
+	copy[index].count = part;
+	sub.compounds = copy;
+	sub.count = index + 1U;
+	sub.specificity = selector->specificity;
+	return cascade_selector_matches(engine, host, &sub, index, anchor);
+}
+
 /* Finds the element sibling before an element, or NULL. */
 static struct dom_element *
 cascade_previous_element(
@@ -4281,6 +4635,7 @@ cascade_apply(
 	/* A sum with anchor functions goes to the property's anchor slot. */
 	if (value->kind == CSS_VALUE_ANCHOR) {
 		cascade_anchor(engine, style, property, value->anchor);
+		style->anchor_tree = engine->apply_tree;
 		return;
 	}
 
@@ -4305,10 +4660,12 @@ cascade_apply(
 		break;
 	case CSS_PROP_ANCHOR_NAME:
 		style->anchor_names = NULL;
+		style->anchor_names_tree = engine->apply_tree;
 		if (value->kind == CSS_VALUE_ANCHOR_NAMES)
 			style->anchor_names = cascade_keep(engine, value->anchor_names, sizeof(*value->anchor_names));
 		break;
 	case CSS_PROP_ANCHOR_SCOPE:
+		style->anchor_scope_tree = engine->apply_tree;
 		style->anchor_scope = NULL;
 		style->anchor_scope_all = value->kind == CSS_VALUE_KEYWORD && value->keyword == 1;
 		if (value->kind == CSS_VALUE_ANCHOR_NAMES)
@@ -4316,6 +4673,7 @@ cascade_apply(
 		break;
 	case CSS_PROP_POSITION_ANCHOR:
 		style->position_anchor = value->keyword == 1 ? value->ident : NULL;
+		style->anchor_tree = engine->apply_tree;
 		break;
 	case CSS_PROP_VIEW_TRANSITION_NAME:
 		style->view_transition_name = value->keyword == 2 ? value->ident : NULL;

@@ -822,6 +822,10 @@ struct css_style {
 	const struct css_anchor_expr *anchor[CSS_ANCHOR_SLOTS];
 	const struct css_anchor_names *anchor_names;
 	struct vm_string *position_anchor;
+	/* The shadow trees (their root nodes; NULL for the document's) the anchor names and the anchor references were declared in. */
+	const void *anchor_names_tree;
+	const void *anchor_tree;
+	const void *anchor_scope_tree;
 	/* view-transition-name: NULL for none, "match-element", or the custom identifier; view-transition-class: none (NULL) or the identifiers joined by spaces (atoms). */
 	struct vm_string *view_transition_name;
 	struct vm_string *view_transition_class;
@@ -1164,6 +1168,9 @@ int css_engine_add_sheet(struct css_engine *engine, const uint16_t *units, size_
 int css_engine_add_sheet_origin(struct css_engine *engine, const uint16_t *units, size_t length, int origin);
 int css_engine_add_parsed(struct css_engine *engine, const struct css_sheet *sheet, const struct css_media *const *media, size_t media_count);
 void css_engine_set_owner(struct css_engine *engine, struct dom_element *owner);
+
+/* Tells the engine that a page has shadow trees, so its selectors stay in their own tree. */
+void css_engine_set_shadow_scopes(struct css_engine *engine);
 int css_engine_parse_media(struct css_engine *engine, const uint16_t *units, size_t length, const struct css_media **media);
 void css_engine_set_viewport(struct css_engine *engine, float width, float height);
 void css_engine_set_container_lookup(struct css_engine *engine, css_container_lookup lookup, void *context);

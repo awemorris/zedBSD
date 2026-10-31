@@ -30,6 +30,10 @@ static const struct vm_cell_type document_type = { "document", node_trace, docum
 /* A document fragment (a template's contents, a fragment being parsed). */
 static const struct vm_cell_type fragment_type = { "document-fragment", node_trace, NULL };
 
+/* A shadow root, which also refers to its host. */
+static void shadow_trace(struct vm_heap *heap, struct vm_cell *cell);
+static const struct vm_cell_type shadow_type = { "shadow-root", shadow_trace, NULL };
+
 /* An element, which also refers to its names, attributes and template contents. */
 static const struct vm_cell_type element_type = { "element", element_trace, element_finalize };
 
@@ -508,6 +512,8 @@ dom_is_node(
 	if (cell->type == &document_type)
 		return 1;
 	if (cell->type == &fragment_type)
+		return 1;
+	if (cell->type == &shadow_type)
 		return 1;
 	if (cell->type == &element_type)
 		return 1;
@@ -1033,6 +1039,8 @@ element_trace(
 	/* Template and frame ownership remain independent of namespace identity. */
 	if (element->content != NULL)
 		vm_heap_mark(heap, &element->content->cell);
+	if (element->shadow_root != NULL)
+		vm_heap_mark(heap, &element->shadow_root->cell);
 	if (element->child_context != NULL)
 		vm_heap_mark(heap, element->child_context);
 
@@ -1136,6 +1144,129 @@ character_data_finalize(
 	/* Frees the buffer. */
 	text = (struct dom_character_data *)cell;
 	wb_units_release(&text->data);
+}
+
+/* Marks what a shadow root refers to: its links and its host. */
+static void
+shadow_trace(
+	struct vm_heap *heap,
+	struct vm_cell *cell)
+{
+	struct dom_shadow_root *root;
+
+	/* Marks the links every node has. */
+	node_trace(heap, cell);
+
+	/* Marks the host. */
+	root = (struct dom_shadow_root *)cell;
+	if (root->host != NULL)
+		vm_heap_mark(heap, &root->host->node.cell);
+}
+
+/*
+ * Gives an element a shadow root, or returns NULL when memory runs out.
+ */
+struct dom_shadow_root *
+dom_shadow_attach(
+	struct dom_element *host,
+	int closed)
+{
+	struct dom_shadow_root *root;
+	struct vm_cell *host_root;
+	int error;
+
+	/* The host stays alive while the root is allocated. */
+	host_root = &host->node.cell;
+	error = vm_heap_add_root(host->node.document->heap, &host_root);
+	if (error != 0)
+		return NULL;
+	root = (struct dom_shadow_root *)node_alloc(host->node.document, &shadow_type, sizeof(*root), DOM_DOCUMENT_FRAGMENT);
+	vm_heap_remove_root(host->node.document->heap, &host_root);
+	if (root == NULL)
+		return NULL;
+
+	/* The root belongs to its host. */
+	root->host = host;
+	root->closed = closed;
+	host->shadow_root = &root->node;
+	host->node.document->generation++;
+
+	/* Succeeded: the host has its shadow tree. */
+	return root;
+}
+
+/* Reports the shadow root a node is, or NULL when it is another kind of node. */
+struct dom_shadow_root *
+dom_shadow_of(
+	const struct dom_node *node)
+{
+	if (node == NULL || node->type != DOM_DOCUMENT_FRAGMENT || node->cell.type != &shadow_type)
+		return NULL;
+	return (struct dom_shadow_root *)node;
+}
+
+/* Reports the host of a shadow root node, or NULL for another node. */
+struct dom_element *
+dom_shadow_host(
+	const struct dom_node *node)
+{
+	const struct dom_shadow_root *root;
+
+	root = dom_shadow_of(node);
+	if (root == NULL)
+		return NULL;
+	return root->host;
+}
+
+/* Reports the root of the tree a node is in: the node itself when it has no parent. */
+struct dom_node *
+dom_tree_root(
+	const struct dom_node *node)
+{
+	while (node->parent != NULL)
+		node = node->parent;
+	return (struct dom_node *)node;
+}
+
+/* Tells whether an element may host a shadow tree (HTML elements other than the few that must not). */
+int
+dom_can_attach_shadow(
+	const struct dom_element *element)
+{
+	size_t index;
+
+	if (element->node.type != DOM_ELEMENT || element->ns != DOM_NS_HTML || element->shadow_root != NULL)
+		return 0;
+	switch (element->tag) {
+	case DOM_TAG_ARTICLE:
+	case DOM_TAG_ASIDE:
+	case DOM_TAG_BLOCKQUOTE:
+	case DOM_TAG_BODY:
+	case DOM_TAG_DIV:
+	case DOM_TAG_FOOTER:
+	case DOM_TAG_H1:
+	case DOM_TAG_H2:
+	case DOM_TAG_H3:
+	case DOM_TAG_H4:
+	case DOM_TAG_H5:
+	case DOM_TAG_H6:
+	case DOM_TAG_HEADER:
+	case DOM_TAG_MAIN:
+	case DOM_TAG_NAV:
+	case DOM_TAG_P:
+	case DOM_TAG_SECTION:
+	case DOM_TAG_SPAN:
+		return 1;
+	case DOM_TAG_UNKNOWN:
+		/* A custom element's name has a hyphen. */
+		for (index = 0; index < element->local_name->length; index++) {
+			if (vm_string_at(element->local_name, index) == '-')
+				return 1;
+		}
+		return 0;
+	default:
+		return 0;
+	}
 }
 
 /* Marks what a DOCTYPE refers to: its links and strings. */

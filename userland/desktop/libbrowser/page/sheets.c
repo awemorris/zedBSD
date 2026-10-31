@@ -208,6 +208,16 @@ sheets_walk(
 			return error;
 	}
 
+	/* An element's shadow tree has its own sheets. */
+	if (node->type == DOM_ELEMENT && ((struct dom_element *)node)->shadow_root != NULL) {
+		css_engine_set_shadow_scopes(page->css);
+		for (child = ((struct dom_element *)node)->shadow_root->first_child; child != NULL; child = child->next) {
+			error = sheets_walk(page, child, depth + 1);
+			if (error != 0)
+				return error;
+		}
+	}
+
 	/* Succeeded: the subtree's sheets are added. */
 	return 0;
 }
