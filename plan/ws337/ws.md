@@ -1,12 +1,13 @@
 <!-- awesome-plan project=zedbsd record=ws337 -->
 
-# WS337 RISC-V 64 で x86_64・arm64 の Linux の binary を動かす（事前の変換と cache、interpreter の予備）
+# WS337 shanglira: RISC-V 64 で x86_64・arm64 の binary を動かす（事前の変換と cache、interpreter の予備）
 
 - Master: [plan/master.md](../master.md)（2026-11-01 作成）。Primary Milestone: MG002。
 - Status: planning（2026-11-01 05:45 新設。ユーザーとの質疑の途中、設計の Phase はまだ始めていない）
-- 目標: RISC-V 64 の zedBSD の上で、x86_64 と arm64 の Linux の user mode の program を動かす。SoC は揃ったが app の無い RISC-V で、
-  x86_64・arm64 の資産を使えるようにする。QEMU の user mode（TCG、その場で少しずつ変換する方式）より速くするため、
-  実行 file と動的 library ごとに事前に RISC-V の命令へ変換して cache に置き、変換しきれなかった所だけを interpreter で動かす。
+- 目標: shanglira（RISC-V という理想郷・約束の地への移住の意）を、単体の repository の OSS として作る。RISC-V 64 の上で x86_64 と arm64 の
+  user mode の program を、実行 file と動的 library ごとの事前の変換と cache、変換しきれなかった所の interpreter で動かす。
+  **project の goal は、Linux の商用 software を動かすことと、Windows の game を動かすこと**（2026-11-01 ユーザーの変更）。
+  先に Linux（RISC-V の Linux）で開発して Linux で動く OSS にし、zedBSD には `userland/packages/` の package（git clone して build）として image に入れる。
 - 進め方: 未定（設計の Phase で決める。標準廉価実装手順を使うかもユーザーが決める）。
 
 ## ユーザーの決定
@@ -29,6 +30,10 @@
 - 2026-11-01 ユーザーから、Linux の binary に link されている .so が既知の物なら、zedBSD で真似るための専用の library に link する、という趣旨の
   答えを受けた。
 
+- 2026-11-01 ユーザーから、software の名前を shanglira（RISC-V という理想郷・約束の地への移住の意）とする、単体の repository にする、zedBSD には
+  `packages/` に入れて git clone して build することで image に入れる、先に Linux で開発して Linux で動く OSS にする、project の goal を
+  Linux の商用 software の emulation と Windows の game の emulation に変える、という趣旨の指示を受けた。
+
 ## まだ決まっていない事（設計の Phase で案を作り、ユーザーに問う）
 
 - 事前の変換をいつするか（初回の実行・package の導入・裏での作り直し）、cache の置き場所と鍵（中身の hash）と無効化。
@@ -38,10 +43,13 @@
 - binfmt の hook を kernel の exec のどこに置くか（kernel に入れる最小の物）、Linux の system call を真似る層の範囲（/proc・/sys・futex・epoll・clone など）。
 - 既知の .so の一覧と、専用の library（thunk）の作り方。
 - 標準廉価実装手順を使うか、担当。
+- repository の置き場所・license・公開の時期。zedBSD の外部 package の規則（tarball を取得・検証して patch）との関係（ユーザーの決定は git clone して build）。
+- Windows の game の道（Wine・Proton など Windows の API の層を変換して動かすか、何を自前で持つか）、game が要る GPU の API（Direct3D → Vulkan の層、Vulkan の thunk）。
+- 「Linux の商用 software」の代表（完了の印にする app）。
 
 ## Resume point
 
-- 2026-11-01 05:45 Q1: WS を planning で立てた。上の「まだ決まっていない事」をユーザーに問い終えたら、p001（設計）を立てる。
+- 2026-11-01 05:45 Q1: WS を planning で立てた。2026-11-01 05:57 名前・repository・goal の決定を足した。上の「まだ決まっていない事」をユーザーに問い終えたら、p001（設計）を立てる。
 
 ## Phase
 
