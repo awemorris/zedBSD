@@ -4193,6 +4193,14 @@ cascade_apply(
 		if (value->kind == CSS_VALUE_INHERIT || inherited) {
 			if (parent != NULL)
 				cascade_inherit(style, parent, property);
+
+			/* An inherited length is in the parent's zoom: it is scaled to the element's own. */
+			if (parent != NULL && engine->zoom_rel != 1.0f && value->kind == CSS_VALUE_INHERIT) {
+				if (property == CSS_PROP_WIDTH && style->width.unit == CSS_UNIT_PX)
+					style->width.value *= engine->zoom_rel;
+				if (property == CSS_PROP_HEIGHT && style->height.unit == CSS_UNIT_PX)
+					style->height.value *= engine->zoom_rel;
+			}
 			return;
 		}
 	}
