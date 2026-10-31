@@ -3,7 +3,7 @@
 # WS334 libbrowser の Web ブラウザ OmniGrammaton を Windows に移植する（libkeiland の Win32 の実装、Windows 用の .exe）
 
 - Master: [plan/master.md](../master.md)（2026-10-31 作成）。Primary Milestone: MG006。
-- Status: planning（2026-11-01 00:24 P7 が p001 の設計を q1787 で始めた。2026-10-31 23:59 新設）
+- Status: incomplete（2026-11-01 01:26 p001 cleared、P7 が q1790 で p002 から実装）
 - 目標: libbrowser を使う Web ブラウザを Windows（Win32）で動く .exe にする。その移植を通して、libbrowser が platform に依らない事を結果として確かめる。
   そのために libkeiland の Win32 の実装（window・入力・描画・thread・socket ほか）を作る。ブラウザの名前は OmniGrammaton。
 - 関係: [WS074](../ws074/ws.md)（libbrowser と browser の shell、zedBSD の上の Web ブラウザ）、[WS327](../ws327/ws.md)（libkeiland の thread・socket の
@@ -48,7 +48,7 @@
 | ID | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計: libbrowser の 3 つのエンジン（レンダリング・スクリプト・ストレージ）への分割と interface（DOM の access、スクリプトの core と binding の分離）、libkeiland の Windows の backend（Win32 直か Qt6 か、window・入力・描画・IME・clipboard・file・thread・socket）、libmedia と Vulkan・Vulkan Video の Windows での使い方、既存の library（libtruetype・png・gif・jpeg の compat）の build、cross compile の toolchain、.exe・DLL・resource、名前 OmniGrammaton、試験の方法、Phase の分け方、ユーザーへの問い | cleared（2026-11-01 01:25、設計 main b2a7e8454、問い U1〜U15 は全部答えが出た） | — |
-| p002 | build の土台（sources.mk の分け、`apps/browser-win32/Makefile`、`make browser-win64`・`browser-winarm64`）（design.md §8、約 6 LW） | planned | p001 |
+| p002 | build の土台（sources.mk の分け、`apps/browser-win32/Makefile`、`make browser-win64`・`browser-winarm64`）（design.md §8、約 6 LW） | in-progress（2026-11-01 01:26 P7 q1790）
 | p003 | libbrowser の OS の層（posix・win32）と OS に直に触れる所の直し（design.md §8、約 9 LW） | planned | p002 |
 | p004 | network の Windows（loader・http・tls）、libmedia の wake の callback（design.md §8、約 10 LW） | planned | p003 |
 | p005 | instance と API v4、cookie・Web Storage を instance へ、storage の thread、ストレージバックエンド（design.md §8、約 12 LW） | planned | p004 |
