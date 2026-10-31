@@ -446,3 +446,41 @@ Origin: 2026-10-27 ユーザーの指示。
   CSS の zoom の layout、`css-logical` の shorthand を CSSOM の longhand から読む（9）、grid の computed の repeat() の保持（2）、
   動的 `import()` と module の namespace import、`window.open`・popup・joint session history を使う navigation-api、writing-modes の sideways（static 約 40）。
 - 次の候補（効きが大きい順の見込み）: scripted reftest の gap の原因分け（281 件。今回は未調査）、`Element.animate`、`startViewTransition`。
+
+### q1727-i06 の途中経過（2026-10-31、P8。dev78〜dev83）
+
+- 方針: ユーザーの指示（Interop 2025 で Chromium が通す ID を全部通す）の中で、grid の track sizing を CSS Grid の仕様（§12.4〜12.8）どおりに書き直し、その上に subgrid を載せた。
+- 測定（gap は build/tmp/p8/gap78〜gap83.json、出力は /tmp/p8out/devNN。基準 dev77 = 2,709）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev79（0d5f44d62） | 列の track sizing を仕様の関数へ | 1,118 | 1,274 | 295 | 41 | 2,728（78.57%、後退 0） |
+  | dev80（105ca1157） | 行も同じ関数へ（percent 行・min/max-height の stretch） | 1,128 | 1,281 | 296 | 41 | 2,746（79.09%、後退 0） |
+  | dev81（c23e6444f） | 仕様との差の修正（min-content・max-content の plain track、max-content の minimum、min-width の keyword、automatic minimum の clamp、percent 行を内在の高さで再解決） | 1,137 | 1,281 | 296 | 41 | 2,755（79.35%、後退 0） |
+  | dev82 | subgrid（列と行） | 1,137 | 1,297 | 296 | 41 | 2,771（79.81%、subgrid の 2 件が後退して dev83 の前に直した） |
+  | dev83（38a3603f2） | subgrid の後退の修正、growth limit の分配の規則、replaced の border-box の min/max-height | 1,138 | 1,299 | 296 | 41 | 2,774（79.90%、gap 698。後退 0） |
+
+  Acid3 は 100/100・pixel 差 0（exact match）、Acid2 は 99.27%（基準と同じ）、host build は warning 0、host-grid-track は PASS（2026-10-31 の host `date`）。
+  Acid の runner が残した一時 file は Q1 が消した。
+- 直した物:
+  1. `layout/grid-track.c`・`grid-track.h`（新規）: track sizing を数値だけの関数 `grid_track_size` にした。入力は track（最小・最大の sizing function: length・auto・min-content・max-content・fit-content・flex、collapsed）、
+     item（開始と span）、gap、制約（definite・min-content・max-content）、利用できる大きさ、container の min・max、stretch の有無、item の寄与を答える callback。
+     手順は §12.4 初期化、§12.5 の span 1 の item、span の昇順の spanning item（intrinsic minimums・content-based minimums・max-content minimums・limit の引き上げ・intrinsic maximums・max-content maximums。
+     base size は limit まで、limit の分配は infinite な limit の track を先に、残りは intrinsic・max-content の maximum を持つ track へ）、flex の track をまたぐ item（flex factor に比例）、§12.6 maximize、
+     §12.7 flex の展開（find fr size の再試行、max-content 制約では item と track から fr の大きさを求め container の min・max で直す）、§12.8 auto の stretch。host test は plan/ws074/tests/host-grid-track.c。
+  2. `layout/grid.c`: `grid_size_columns`・`grid_size_rows` を書き直して上の関数を呼ぶ。item の寄与（`grid_column_item_contribution`、`grid_row_answer`）は min-content・max-content（min・max-width で押さえる）と
+     minimum contribution（定義された幅、min-width、automatic minimum は overflow が visible で auto の最小の track をまたぐ時だけ。固定の最大の track だけをまたぐ時は margin・border・padding を除いて押さえる）。
+     percent の margin・min・max-width は寄与では無いものとして数える。percent の列・行は大きさが分かるまで auto（高さが不定の percent 行は auto で求めた高さに対して再解決し、container の高さは再解決の前の値）。
+     旧い特例（`grid_span_has_fixed_rows`・`grid_maximize`・fit-content の列の `column_fit`・`grid_item_width` ほか）は消えた。
+  3. subgrid（`layout/grid.c`）: subgrid の軸（`grid-template-columns|rows: subgrid`、`grid: subgrid / subgrid`）の item は、container が grid の item で、writing mode が親と直交でない時に subgrid（`grid_subgrid_axis`）。
+     親は subgrid の子を subgrid が渡る track に置き（`grid_subgrid_prepare`）、親の track sizing の item 一覧に subgrid の子を入れる（`grid_flatten`: 端の margin・border・padding と、子の辺の gap の差の半分を足し、
+     端に item が無ければ端だけの stand-in を置く。入れ子の subgrid は祖先の分を重ねる）。親の track が決まったら subgrid に track と gap を渡し（`grid_subgrid_preset`: 端の分を引き、内側の辺に gap の差の半分を足す。負も許す）、
+     subgrid の layout はその track を使う（`box->subgrid_columns|rows`）。行の subgrid は行が決まった後に渡して layout し直す（`grid_relay_item`）。subgrid の軸では width・height を無視して領域を埋める。
+     `gap: normal` を 0px と区別するため computed の `CSS_UNIT_NORMAL` にした（css/values.c・cascade.c。subgrid は normal の時に親の gap を使う）。layout_box に item_row_span・item_column_span と subgrid_* を足した。
+     static の css-grid/subgrid は 56 件中 11 → 27 件が通る。
+  4. `layout/replaced.c`: border-box の replaced の min-height・max-height から frame を引く（image-as-flexitem-size-007 は 8/18 → 17/18 の subtest だが ID としてはまだ failing）。
+- 調べて直さなかった物（次の候補）:
+  - subgrid の line names と repeat(auto-fill)（line-names-*・repeat-auto-fill-* 約 20）: subgrid の名前の並びは直列化した文字列でしか持たないので、構造のまま cascade に渡し、親の線の名前を引き継ぐ作り直しが要る。
+  - subgrid の baseline・縦書きの subgrid・独立した formatting context（`contain` の property が無い）・暗黙の track（placement-implicit-001）。
+  - 直交 flow の絶対配置の item の grid 内の揃え（grid-self-alignment-positioned-items-with-margin-border-padding-006〜010、grid-row-axis-alignment-positioned-items-010・011・015・016。layout/logical.c の経路）。
+  - baseline の shim（baseline-alignment-affects-intrinsic-size-001〜006）、grid-self-baseline-*（static 約 30、直交 item は baseline の group に入らない規則）。
