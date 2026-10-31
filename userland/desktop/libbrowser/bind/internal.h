@@ -128,6 +128,8 @@ enum bind_interface_index {
 	BIND_HTML_CANVAS_ELEMENT,
 	BIND_ERROR_EVENT,
 	BIND_SHADOW_ROOT,
+	BIND_HTML_ANCHOR_ELEMENT,
+	BIND_HTML_AREA_ELEMENT,
 	BIND_INTERFACES
 };
 
@@ -379,6 +381,8 @@ extern const struct bind_interface bind_svg_text_path_element_interface;
 extern const struct bind_interface bind_html_button_element_interface;
 extern const struct bind_interface bind_html_details_element_interface;
 extern const struct bind_interface bind_html_dialog_element_interface;
+extern const struct bind_interface bind_html_anchor_element_interface;
+extern const struct bind_interface bind_html_area_element_interface;
 extern const struct bind_interface bind_html_canvas_element_interface;
 extern const struct bind_interface bind_html_label_element_interface;
 extern const struct bind_interface bind_html_meta_element_interface;

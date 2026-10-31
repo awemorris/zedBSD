@@ -198,6 +198,15 @@ const struct bind_interface bind_html_canvas_element_interface = {
 	"HTMLCanvasElement", BIND_HTML_ELEMENT, 0, NULL, NULL, NULL, NULL
 };
 
+/* The a and area elements have their own interfaces (their members, the hyperlink utilities, are made by the prelude). */
+const struct bind_interface bind_html_anchor_element_interface = {
+	"HTMLAnchorElement", BIND_HTML_ELEMENT, 0, NULL, NULL, NULL, NULL
+};
+
+const struct bind_interface bind_html_area_element_interface = {
+	"HTMLAreaElement", BIND_HTML_ELEMENT, 0, NULL, NULL, NULL, NULL
+};
+
 /*
  * The attributes of HTMLImageElement.  The table is constant for the life
  * of the program.

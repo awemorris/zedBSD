@@ -938,6 +938,8 @@
     // gets its navigate event.
     function navigateTo(url, o) {
       var handling = o.history, now = docURL(), f;
+      if (o.sourceElement === undefined && g.__zedSource) { o.sourceElement = g.__zedSource; delete g.__zedSource; }
+      if (o.formData === undefined && g.__zedForm) { o.formData = g.__zedForm; delete g.__zedForm; }
       if (/^javascript:/i.test(url)) return;
       // A page that is not a local file cannot navigate to one.
       if (/^file:/i.test(url) && !/^file:/i.test(now)) return;
@@ -1187,6 +1189,52 @@
       }
     })();
 
+    // A window that a link, a form or window.open() names: _top and _parent, or a frame of this document with the name; only a window of
+    // this origin (its initial about:blank counts) is navigated, as a navigation of its own that fires its navigate event.
+    function sameOriginWindow(w) {
+      try {
+        if (!w) return null;
+        if (w.location.href === 'about:blank' || w.location.origin === g.location.origin) return w;
+      } catch (e) { /* another origin */ }
+      return null;
+    }
+    function namedFrame(name) {
+      var list, i, w;
+      if (typeof name !== 'string' || name === '' || /^\s*_/.test(name)) return null;
+      list = document.querySelectorAll('iframe[name], frame[name]');
+      for (i = 0; i < list.length; i++) {
+        if (list[i].getAttribute('name') === name) {
+          w = list[i].contentWindow;
+          return w ? sameOriginWindow(w) : null;
+        }
+      }
+      return null;
+    }
+    function navigateTarget(name, u, source, formData) {
+      var w;
+      if (/^\s*_top\s*$/i.test(name)) w = sameOriginWindow(g.top);
+      else if (/^\s*_parent\s*$/i.test(name)) w = sameOriginWindow(g.parent);
+      else w = namedFrame(name);
+      if (!w) return false;
+      // The element that started it, for the navigate event of the window that is navigated.
+      if (source) Object.defineProperty(w, '__zedSource', { value: source, writable: true, configurable: true, enumerable: false });
+      if (formData) Object.defineProperty(w, '__zedForm', { value: formData, writable: true, configurable: true, enumerable: false });
+      try { w.location.assign(u); } catch (e) { return false; }
+      return true;
+    }
+    (function () {
+      var nativeOpen = g.open;
+      def(g, 'open', function open(url, name) {
+        var w = namedFrame(name), u;
+        if (w) {
+          u = url === undefined || url === null || String(url) === '' ? null : resolveURL(url);
+          if (u !== null) { try { w.location.assign(u); } catch (e) { /* refused */ } }
+          return w;
+        }
+        return typeof nativeOpen === 'function' ? nativeOpen.apply(this, arguments) : null;
+      });
+    })();
+
     // A link a script clicks (an a or area element, or SVG's a) navigates; a download link only fires its navigate event.
     native.setHyperlinkFollower(function (link) {
       var svg = link.namespaceURI === 'http://www.w3.org/2000/svg', href, target, u, download;
@@ -1194,9 +1242,12 @@
       if (href === null && svg) href = link.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
       if (href === null || !link.isConnected) return;
       target = link.getAttribute('target');
-      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) return;
       u = resolveURL(href);
       if (u === null) return;
+      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) {
+        navigateTarget(target, u, link);
+        return;
+      }
       download = !svg && link.hasAttribute('download') ? link.getAttribute('download') : null;
       if (download !== null) {
         fireNavigate({ type: 'push', url: u, navState: null, sameDocument: false, sourceElement: link, downloadRequest: download });
@@ -1207,6 +1258,11 @@
 
     // A form's submission navigates to its action: GET with the entries as the query, POST with them as the
     // navigate event's formData (before the load event finishes, in place of the current entry), as a task.  requestSubmit() fires the submit event first, which a listener may cancel.
+    // The action URL with its query replaced (its fragment is kept).
+    function withQuery(url, query) {
+      var i = url.indexOf('#'), hash = i < 0 ? '' : url.slice(i), base = i < 0 ? url : url.slice(0, i);
+      return base.replace(/\?.*$/, '') + '?' + query + hash;
+    }
     function submitForm(form, submitter) {
       function attr(name, own) {
         return submitter && submitter.hasAttribute(name) ? submitter.getAttribute(name) : form.getAttribute(own);
@@ -1214,16 +1270,27 @@
       var action = attr('formaction', 'action'), method = String(attr('formmethod', 'method') || 'get').toLowerCase();
       var target = attr('formtarget', 'target'), u, data, query, source, handling;
       if (!form.isConnected || method === 'dialog') return;
-      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) return;
       u = resolveURL(action === null || action === '' ? docURL() : action);
       if (u === null) return;
+      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) {
+        // Another window's navigation: a GET goes there with the entries as the query.
+        data = typeof g.FormData === 'function' ? new g.FormData(form) : null;
+        if (data && submitter && submitter.name) data.append(submitter.name, submitter.value);
+        if (method !== 'post') {
+          query = data ? new URLSearchParams(data).toString() : '';
+          u = withQuery(u, query);
+          data = null;
+        }
+        setTimeout(function () { navigateTarget(target, u, submitter || form, data); }, 0);
+        return;
+      }
       data = typeof g.FormData === 'function' ? new g.FormData(form) : null;
       if (data && submitter && submitter.name) data.append(submitter.name, submitter.value);
       source = submitter || form;
       handling = native.loadEnded() ? 'auto' : 'replace';
       if (method !== 'post') {
         query = data ? new URLSearchParams(data).toString() : '';
-        u = noFrag(u).replace(/\?.*$/, '') + '?' + query;
+        u = withQuery(u, query);
         data = null;
       }
       setTimeout(function () { navigateTo(u, { history: handling, navState: null, sourceElement: source, formData: data }); }, 0);
@@ -1302,6 +1369,117 @@
       configurable: true, enumerable: true
     });
   }
+  // ---- HTMLAnchorElement and HTMLAreaElement: the hyperlink members (href and its parts, which a script reads and writes through the href
+  // attribute) and the reflected attributes.
+  (function () {
+    var PARTS = ['protocol', 'username', 'password', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'];
+    function parsedHref(element) {
+      var v = element.getAttribute('href');
+      if (v === null) return null;
+      try { return new URL(v, element.baseURI); } catch (e) { return null; }
+    }
+    function reflect(P, prop, attr) {
+      Object.defineProperty(P, prop, {
+        get: function () { var v = this.getAttribute(attr); return v === null ? '' : v; },
+        set: function (v) { this.setAttribute(attr, String(v)); },
+        configurable: true, enumerable: true
+      });
+    }
+    function install(C, extra) {
+      var P, name;
+      if (typeof C !== 'function') return;
+      P = C.prototype;
+      Object.defineProperty(P, 'href', {
+        get: function () {
+          var v = this.getAttribute('href'), u;
+          if (v === null) return '';
+          u = parsedHref(this);
+          return u ? u.href : v;
+        },
+        set: function (v) { this.setAttribute('href', String(v)); },
+        configurable: true, enumerable: true
+      });
+      Object.defineProperty(P, 'origin', {
+        get: function () { var u = parsedHref(this); return u ? u.origin : ''; },
+        configurable: true, enumerable: true
+      });
+      PARTS.forEach(function (part) {
+        Object.defineProperty(P, part, {
+          get: function () { var u = parsedHref(this); return u ? u[part] : ''; },
+          set: function (v) {
+            var u = parsedHref(this);
+            if (!u) return;
+            try { u[part] = String(v); } catch (e) { return; }
+            this.setAttribute('href', u.href);
+          },
+          configurable: true, enumerable: true
+        });
+      });
+      def(P, 'toString', function toString() { return this.href; });
+      extra.forEach(function (pair) { reflect(P, pair[0], pair[1]); });
+    }
+    install(g.HTMLAnchorElement, [['target', 'target'], ['download', 'download'], ['ping', 'ping'], ['rel', 'rel'], ['hreflang', 'hreflang'],
+      ['type', 'type'], ['referrerPolicy', 'referrerpolicy']]);
+    install(g.HTMLAreaElement, [['alt', 'alt'], ['coords', 'coords'], ['shape', 'shape'], ['target', 'target'], ['download', 'download'], ['ping', 'ping'],
+      ['rel', 'rel'], ['referrerPolicy', 'referrerpolicy']]);
+    if (g.HTMLAnchorElement) {
+      Object.defineProperty(g.HTMLAnchorElement.prototype, 'text', {
+        get: function () { return this.textContent; },
+        set: function (v) { this.textContent = String(v); },
+        configurable: true, enumerable: true
+      });
+    }
+  })();
+  // ---- HTMLFormElement's reflected attributes: the action (resolved, the document's URL when empty), the enumerated method and enctype, and the
+  // plain strings.
+  (function () {
+    var P;
+    function reflect(prop, attr, fallback) {
+      Object.defineProperty(P, prop, {
+        get: function () { var v = this.getAttribute(attr); return v === null ? fallback : v; },
+        set: function (v) { this.setAttribute(attr, String(v)); },
+        configurable: true, enumerable: true
+      });
+    }
+    function enumerated(prop, attr, values, fallback) {
+      Object.defineProperty(P, prop, {
+        get: function () {
+          var v = this.getAttribute(attr);
+          v = v === null ? '' : v.toLowerCase();
+          return values.indexOf(v) >= 0 ? v : fallback;
+        },
+        set: function (v) { this.setAttribute(attr, String(v)); },
+        configurable: true, enumerable: true
+      });
+    }
+    if (!g.HTMLFormElement) return;
+    P = g.HTMLFormElement.prototype;
+    if (!('action' in P)) {
+      Object.defineProperty(P, 'action', {
+        get: function () {
+          var v = this.getAttribute('action');
+          if (v === null || v === '') return this.ownerDocument.URL;
+          try { return new URL(v, this.baseURI).href; } catch (e) { return v; }
+        },
+        set: function (v) { this.setAttribute('action', String(v)); },
+        configurable: true, enumerable: true
+      });
+    }
+    if (!('method' in P)) enumerated('method', 'method', ['get', 'post', 'dialog'], 'get');
+    if (!('enctype' in P)) enumerated('enctype', 'enctype', ['application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain'], 'application/x-www-form-urlencoded');
+    if (!('encoding' in P)) Object.defineProperty(P, 'encoding', Object.getOwnPropertyDescriptor(P, 'enctype'));
+    if (!('target' in P)) reflect('target', 'target', '');
+    if (!('name' in P)) reflect('name', 'name', '');
+    if (!('acceptCharset' in P)) reflect('acceptCharset', 'accept-charset', '');
+    if (!('autocomplete' in P)) enumerated('autocomplete', 'autocomplete', ['on', 'off'], 'on');
+    if (!('noValidate' in P)) {
+      Object.defineProperty(P, 'noValidate', {
+        get: function () { return this.hasAttribute('novalidate'); },
+        set: function (v) { if (v) this.setAttribute('novalidate', ''); else this.removeAttribute('novalidate'); },
+        configurable: true, enumerable: true
+      });
+    }
+  })();
   if (!g.getSelection) {
     def(g, 'getSelection', function getSelection() {
       return { rangeCount: 0, isCollapsed: true, type: 'None', anchorNode: null, focusNode: null,
