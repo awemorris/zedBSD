@@ -36,6 +36,7 @@
 
 - 表は data。block の前に「Values referenced: Microsoft Learn, Keyboard Input Overview, Scan codes table (retrieved 2026-11-01); USB HID Usage Tables 1.5 §10; Linux v6.12 drivers/hid/hid-input.c hid_keyboard[] (values only)」の複数行の comment。
 - 値は 2 つの方法で照合する（手順 §5.3）: (1) html の表を `python3 -I` の自分の script（git に入れない）で読んだ一覧と、(2) `scancode.doc` の text と HUT の PDF の頁の画で数十件を手で。照合の弱い所（Note の付いた cell）を結果に書く。
+- license: `hid-input.c` は GPL-2.0。そこから取るのは HID の usage → evdev の番号の事実の値だけ（Q1 の確認、2026-11-01）。表の並べ方・comment・関数と変数の名前・code の構造を写さない。`input-event-codes.h`（GPL-2.0 WITH Linux-syscall-note）も番号の値だけ。試験の期待の値の 2 段目（usage → evdev）も同じく値だけを書く。
 - 表の形は自由（256 × 2 の配列など）。1 つの関数が pure であること。
 - POSIX の file（`*-posix.c`）と OS に依らない file に `#ifdef _WIN32`・`<windows.h>` を書かない（`check-skeleton.sh` が見る）。Windows の file（`*-win32.c`）は `<windows.h>`・`<winsock2.h>` などを include してよいが、W の API だけを使い（A の API を使わない）、`<jpeglib.h>` を include しない。
 - 他の実装（Chromium・Firefox・Wine・curl・libuv・glib・Qt など）の code・comment・構造・名前を写さない。Win32・POSIX の API の使い方は API の reference から書く。

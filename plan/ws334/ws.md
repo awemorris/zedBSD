@@ -62,12 +62,12 @@
 | [p011](phase011/phase.md) | module（Sonnet）: `storage/files.h/.c`（files の backend、公開の `browser_storage_calls` の実装） | planned | p006・p010 |
 | [p012](phase012/phase.md) | module（Sonnet）: `storage/queue.h/.c`（instance の storage の thread と queue、write-behind と読みの頼み） | planned | p004 |
 | [p013](phase013/phase.md) | module（Sonnet）: `libmedia/media-os.h` → `media-os-posix.c`・`media-os-win32.c`（Vulkan の loader の読み込み、file の開き・大きさ・位置の読み） | planned | p004 |
-| p014 | module（Sonnet、表の data、旧 T1）: `libkeiland/win32/keys-table.h/.c`（scan code → evdev の番号） | planned | p004 |
-| p015 | module（Sonnet）: `libkeiland/win32/frame.h/.c`（custom frame の幾何: hit test・題の帯の button の配置・DPI の倍率） | planned | p004 |
-| p016 | module（Sonnet）: `libkeiland/platform/platform-win32.c`（`platform.h` の起こし・lock・thread を Win32 で） | planned | p004 |
-| p017 | module（Sonnet）: `libkeiland/win32/wide.h/.c` と `input.h/.c`（UTF-16 ↔ UTF-8・surrogate の組、wheel の積み・pointer・修飾の鍵の写し） | planned | p004 |
-| p018 | module（Sonnet、旧 T2）: `libkeiland/win32/cf-html.h/.c`（CF_HTML の encode と decode） | planned | p004 |
-| p019 | module（Sonnet、旧 T3）: `apps/browser-win32/tools/ico.h/.c`（ICO の writer、PNG と BMP の entry） | planned | p004 |
+| [p014](phase014/phase.md) | module（Sonnet、表の data、旧 T1）: `libkeiland/win32/keys-table.h/.c`（scan code → evdev の番号） | planned | p004 |
+| [p015](phase015/phase.md) | module（Sonnet）: `libkeiland/win32/frame.h/.c`（custom frame の幾何: hit test・題の帯の button の配置・DPI の倍率） | planned | p004 |
+| [p016](phase016/phase.md) | module（Sonnet）: `libkeiland/platform/platform-win32.c`（`platform.h` の起こし・lock・thread を Win32 で） | planned | p004 |
+| [p017](phase017/phase.md) | module（Sonnet）: `libkeiland/win32/wide.h/.c` と `input.h/.c`（UTF-16 ↔ UTF-8・surrogate の組、wheel の積み・pointer・修飾の鍵の写し） | planned | p004 |
+| [p018](phase018/phase.md) | module（Sonnet、旧 T2）: `libkeiland/win32/cf-html.h/.c`（CF_HTML の encode と decode） | planned | p004 |
+| [p019](phase019/phase.md) | module（Sonnet、旧 T3）: `apps/browser-win32/tools/ico.h/.c`（ICO の writer、PNG と BMP の entry） | planned | p004 |
 | [p020](phase020/phase.md) | glue（Opus、旧 p002）: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の本体（library・DLL・.def・Vulkan の header の取得と遅延の import）、libtruetype `companion.c` の 1 関数と gif の `O_BINARY`、`cross-build.sh` | planned | p004 |
 | [p021](phase021/phase.md) | 統合（Opus、旧 p003）: libbrowser の OS に触れる所（O13〜O24・O28〜O31・O34）を OS の層へ、`wb_memmem`、Makefile の posix・win32 の選び | planned | p005・p006・p008・p020 |
 | [p022](phase022/phase.md) | 統合（Opus、旧 p004）: network の Windows（O1〜O10・O32・O33 を os-net へ）、libmedia の wake の callback と `net_loader_ring` | planned | p007・p021 |
@@ -76,11 +76,11 @@
 | [p025](phase025/phase.md) | 統合（Opus、旧 p007）: script の core の archive と link の確かめ | planned | p021 |
 | [p026](phase026/phase.md) | 統合（Opus、旧 p008）: libmedia の Windows（M2・M4・M7・M9 を media-os へ）と mediafile | planned | p013・p022 |
 | [p027](phase027/phase.md) | 統合（Opus、旧 p009）: browser の UI の準備（`browser_main`、libkeiland の header の追加と Wayland の実装、present・CPU の道・鍵の text・時計） | planned | p023 |
-| p028 | 統合（Opus、旧 p011）: libkeiland の Win32 その 1（共通の file の棚卸し、kl_app・kl_window・loop・入力・枠・暗い mode・Vulkan の surface・CPU の表示・stub）、`apps/browser-win32/` の入口・単一の起動・resource。Wine＋xvfb-run で画面を撮る | planned | p014・p015・p016・p017・p025・p026・p027 |
-| p029 | 統合（Opus、旧 p012）: その 2（題の帯の controls、IMM32、clipboard、DPI） | planned | p018・p028 |
+| [p028](phase028/phase.md) | 統合（Opus、旧 p011）: libkeiland の Win32 その 1（共通の file の棚卸し、kl_app・kl_window・loop・入力・枠・暗い mode・Vulkan の surface・CPU の表示・stub）、`apps/browser-win32/` の入口・単一の起動・resource。Wine＋xvfb-run で画面を撮る | planned | p014・p015・p016・p017・p025・p026・p027 |
+| [p029](phase029/phase.md) | 統合（Opus、旧 p012）: その 2（題の帯の controls、IMM32、clipboard、DPI） | planned | p018・p028 |
 | [p030](phase030/phase.md) | 統合（Opus、旧 p013）: OpenSSL の Windows の build と根（packages の ca-certificates ＋ Windows の store） | planned | p005・p022 |
-| p031 | 統合（Opus、旧 p014）: 配る形（zip、license、icon、版の情報） | planned | p019・p029・p030 |
-| p032 | 試験（Opus、旧 p015）: Wine＋llvmpipe での確かめの第 1 回（決定 20） | planned | p031 |
-| p033 | 統合（Opus、旧 p016）: 後半の Windows の口（TSF・drag と drop・touchpad・accent・Mica・DPAPI、arm64） | planned | p032 |
-| p034 | 試験（Opus、旧 p017）: libbrowser の試験を Windows（Wine）で | planned | p032 |
-| p035 | 規約の全文の見直し（旧 p018）と header の持ち越しの直し | planned | p033・p034 |
+| [p031](phase031/phase.md) | 統合（Opus、旧 p014）: 配る形（zip、license、icon、版の情報） | planned | p019・p029・p030 |
+| [p032](phase032/phase.md) | 試験（Opus、旧 p015）: Wine＋llvmpipe での確かめの第 1 回（決定 20） | planned | p031 |
+| [p033](phase033/phase.md) | 統合（Opus、旧 p016）: 後半の Windows の口（TSF・drag と drop・touchpad・accent・Mica・DPAPI、arm64） | planned | p032 |
+| [p034](phase034/phase.md) | 試験（Opus、旧 p017）: libbrowser の試験を Windows（Wine）で | planned | p032 |
+| [p035](phase035/phase.md) | 規約の全文の見直し（旧 p018）と header の持ち越しの直し | planned | p033・p034 |

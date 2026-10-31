@@ -1018,3 +1018,16 @@ make の target の名前（`browser-win64`・`browser-winarm64`）は §6.9 の
   指摘ごとの扱いと直した節は [design-review.md](design-review.md)。主な直し: `vm/heap.c` の `posix_memalign`（O30）、Vulkan の遅延の import（§6.2）、memory の HTTP の
   cache は loader ごとのまま・storage の thread の write-behind と lock の順（§3.5）、libmedia の起こしを open の引数と `net_loader_ring` に（M1）、M7 は Pi 4 の回避、
   key の衝突と `.ls` の移行（§3.5.3）、UCRT の版の toolchain と Windows 10 1903（§6.1）、TLS の根と OpenSSL の設定（§6.6）、Phase の分け直し（§8）と file の一覧（§9）。
+
+## 15. 標準廉価実装手順への組み直し（2026-11-01、ws.md の決定 22）
+
+- 決定 22 で、§8 の Phase の表を設計の Phase（p002 設計 A、p003 設計 B、p004 確定）・module の Phase（p005〜p019、Sonnet 5.5 high）・統合の Phase（p020〜p035、Opus）に組み直した。番号の対応は ws.md の表の「旧 pNNN」。§8 の表は経緯として残す（今の Phase は ws.md）。
+- module の分けと header の一覧は [phase002/phase.md](phase002/phase.md)（libbrowser・libmedia）と [phase003/phase.md](phase003/phase.md)（libkeiland の Win32・apps）。試験の道具は `plan/ws334/tests/`（modules.sh・run-unit.sh・check-skeleton.sh・unit/check.h）。
+- §3.4 からの変更（header を書く中で決めた事）:
+  - OS の層を 1 つの `os.h` でなく群ごとの header に分けた（`os-system.h`・`os-file.h`・`os-net.h`・`os-time.h`、共通の約束は `os.h`、Windows の共通の補助は `os-win32.h`、時刻帯の名前の表は `os-zones.h`）。module ごとに 1 回の起動で済む大きさにするため。
+  - 名前の解決も OS の層に入れた（`wb_os_resolve`）。`getaddrinfo` を直に使うと engine の file が `<netdb.h>` と `<ws2tcpip.h>` を選ぶ `#ifdef` を持つため。
+  - ストレージバックエンドの公開の型は新しい公開の header `include/browser/storage.h` に置いた（browser.h は p023 で版を上げる時に include する。設計の間に browser.h を変えない）。
+  - files の backend の directory の lock は OS の層（`wb_os_lock_open`）。同じ process の 2 回目も EBUSY。
+  - localStorage の key は origin の bytes の 16 進（hash の形は 100 byte を超える origin だけ）。今の `.ls` の file の名前と同じになり、files の backend は移行の特別な道を持たない（100 byte を超える origin の今の file は読まれない。記録）。
+  - libkeiland の platform の wake は Windows で event object（`struct keiui_wake` に `event`、`keiui_wake_event`）。
+- 第 1 段の制限として決めた事: 大きさの変更の modal の loop の間は描き直さない（p028）、headless の mode は storage の backend を持たない（p023）。
