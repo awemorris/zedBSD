@@ -263,6 +263,15 @@ layout_flex(
 			return ENOMEM;
 		}
 	}
+	/* A wrapping column breaks lines by the items' hypothetical sizes, which hold their automatic minimums. */
+	if (wrap && !row && available >= 0 && count != 0) {
+		error = flex_auto_minimums(tree, box, row, items, count, available, gap_main);
+		if (error != 0) {
+			free(lines);
+			free(items);
+			return error;
+		}
+	}
 	start = 0;
 	while (start < count) {
 		/* The items of the line: all of them without wrapping or a size to wrap in. */
@@ -1146,6 +1155,31 @@ flex_base_size(
 	    item->minimum < item->base)
 		item->minimum = item->base;
 
+	/* An intrinsic keyword minimum height is the content's height: in the block axis it is the automatic size. */
+	if (!row && child->style.writing_mode == box->style.writing_mode &&
+	    (child->style.min_height.unit == CSS_UNIT_MIN_CONTENT || child->style.min_height.unit == CSS_UNIT_MAX_CONTENT ||
+	    child->style.min_height.unit == CSS_UNIT_FIT_CONTENT)) {
+		layout_unit content_height;
+		layout_unit cross;
+
+		content_height = 0;
+		if (child->replaced) {
+			/* A picture's height through its ratio from the stretched width. */
+			cross = flex_ratio_cross_size(tree, box, child, row);
+			if (child->image != NULL && child->image->width > 0 && child->image->height > 0 && cross >= 0) {
+				if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					cross -= child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
+				content_height = (layout_unit)((double)(cross < 0 ? 0 : cross) * child->image->height / child->image->width);
+			}
+		} else {
+			error = flex_content_height(tree, box, child, &content_height);
+			if (error != 0)
+				return error;
+		}
+		if (item->minimum < content_height)
+			item->minimum = content_height;
+	}
+
 	/* A table of a column is no shorter than its rows, whatever minimum it is given. */
 	if (!row && (child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE) &&
 	    child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
@@ -1821,6 +1855,10 @@ flex_auto_minimums(
 					least = (layout_unit)((double)cross * child->image->width / child->image->height);
 				else
 					least = (layout_unit)((double)cross * child->image->height / child->image->width);
+			} else if (row && child->style.width.unit == CSS_UNIT_PX && child->style.height.unit == CSS_UNIT_AUTO &&
+			    child->style.max_height.unit == CSS_UNIT_NONE) {
+				/* Without a definite cross size the picture's own width is its content size. */
+				least = (layout_unit)child->image->width * LAYOUT_UNIT;
 			}
 		}
 
