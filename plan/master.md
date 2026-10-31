@@ -23,6 +23,7 @@
 <!-- master:agents:start -->
 **引き継ぎ（2026-11-01 07:07、Q1、host の再起動の前）**: ユーザーが host を再起動する（Vivado などで負荷が高い）。全担当をラップアップした。次のセッションの Q1 は [cockpit.md](cockpit.md)・この表・[queue.md](queue.md) の最後の行から再開する。
 **再起動の後の修理（2026-11-01 08:05、Q1）**: 07:22 の host の再起動で、06:56〜07:10 に書いた file が空になった（main の .git の object 242 個、作業ツリーの file）。GitHub の main（e33011813、07:11 に push 済み）から object を補い（空の object は /home/awe/zedBSD-recovery/empty-objects へ退避）、空の file を HEAD から戻した（main の 35 個、p8-ws074 の 49 個）。Sonnet の 5 本（s-ws335-p003・p006・p008、s-ws336-p004・p005）は push されておらず commit と checkout が消えたので、main e33011813 から worktree を作り直し、残っていた source と phase.md を commit し直した（下の表の SHA は作り直した物）。担当の worktree の build/ に、その時間の出力が空で残っている（約 850 個）。使う前にその出力を作り直す。`~/.local/bin/python3`・`~/.local/bin/vivado` も空（別のセッションの wrapper）。PATH の python3 は何もせずに 0 で終わるので、直るまで `/usr/bin/python3` を使う。
+**今の割り振り（2026-11-01 08:2x、ユーザーの指示）**: まず open の Bug を全部直す。Bug の担当は VF2（P1: BUG-386 → BUG-385）と RTX（P2: BUG-374）に 1 人ずつ。他は WS335（Sonnet p003）・WS336（Sonnet p004）・WS334（P7）・WS074（P8）に 1 人ずつ。
 再開の手順: (1) `git log -1` と registry の SHA を確かめる。(2) 担当は同じ名前・同じ worktree で起動し、phase.md の「再開点」・「結果」から続けさせる。worktree の build/ の toolchain は main の build/ への symlink（無ければ作ってから起動）。
 (3) /tmp は tmpfs で消える（P8 の /tmp/p8out の dev148・acid148 も消える。次の自走は測り直しから）。(4) 新しい worktree の作成は 10 分ほどかかる事がある（disk の負荷）。(5) Wine の新しい prefix は `wineboot -i` で作れない（WS335 の担当は s-ws335-p002 の build/tmp/ws335-wine を写す）。
 
@@ -112,7 +113,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-387 · q1825 · WS338 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1830 · WS338 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

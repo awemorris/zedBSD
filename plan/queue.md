@@ -552,7 +552,14 @@
 | q1808 / q1808-i02 | P7（phase-runner-high、同じ worktree p7-ws334） | [ws334-p021](ws334/phase021/phase.md) の再開（run-unit all の単独の実行 → 単一の .exe → libkeiland の pthread 抜き） | i01 と同じ範囲。phase.md の「再開の点」から。再起動で空になった build/ の出力は作り直す。大きな I/O の後は sync | in-progress（2026-11-01 08:21 起動） |
 | q1727 / q1727-i16 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 16 回目 | 100% までの自走。i14 の 3,107（89.49%）から測り直し（/tmp/p8out は消えた）。build/ws074-host/plain の空の出力は作り直す。大きな I/O の後は sync | in-progress（2026-11-01 08:21 起動） |
 | q1820 / q1820-i02 | Sonnet（作り直した worktree s-ws335-p003、83a9cd131） | [ws335-p003](ws335/phase003/phase.md) | i01 と同じ範囲。phase.md の結果の「次の手順」から（試験を書く → 流す → 壊す確かめ）。大きな I/O の後は sync | in-progress（2026-11-01 08:21 起動） |
-| q1821 / q1821-i02 | Sonnet（作り直した worktree s-ws335-p006、c27c65007） | [ws335-p006](ws335/phase006/phase.md) | 同上 | in-progress（2026-11-01 08:21 起動） |
-| q1822 / q1822-i02 | Sonnet（作り直した worktree s-ws335-p008、361aec12f） | [ws335-p008](ws335/phase008/phase.md) | 同上 | in-progress（2026-11-01 08:21 起動） |
-| q1823 / q1823-i02 | Sonnet（作り直した worktree s-ws336-p004、2418e1b03） | [ws336-p004](ws336/phase004/phase.md) | 同上 | in-progress（2026-11-01 08:21 起動） |
-| q1824 / q1824-i02 | Sonnet（作り直した worktree s-ws336-p005、e22e7431c） | [ws336-p005](ws336/phase005/phase.md) | 同上 | in-progress（2026-11-01 08:21 起動） |
+| q1821 / q1821-i02 | Sonnet（作り直した worktree s-ws335-p006、c27c65007） | [ws335-p006](ws335/phase006/phase.md) | 同上 | canceled（2026-11-01 08:24、ユーザーの割り振りの変更で起動の直後に止めた。変更なし、branch は作り直した物のまま） |
+| q1822 / q1822-i02 | Sonnet（作り直した worktree s-ws335-p008、361aec12f） | [ws335-p008](ws335/phase008/phase.md) | 同上 | canceled（2026-11-01 08:24、ユーザーの割り振りの変更で起動の直後に止めた。変更なし、branch は作り直した物のまま） |
+| q1823 / q1823-i02 | Sonnet（作り直した worktree s-ws336-p004、2418e1b03） | [ws336-p004](ws336/phase004/phase.md) | 同上 | canceled（2026-11-01 08:24、割り振りの変更で一度止め、i03 で起動し直し。変更なし） |
+| q1824 / q1824-i02 | Sonnet（作り直した worktree s-ws336-p005、e22e7431c） | [ws336-p005](ws336/phase005/phase.md) | 同上 | canceled（2026-11-01 08:24、ユーザーの割り振りの変更で起動の直後に止めた。変更なし、branch は作り直した物のまま） |
+| q1823 / q1823-i03 | Sonnet（worktree s-ws336-p004、2418e1b03） | [ws336-p004](ws336/phase004/phase.md) | i02 と同じ範囲（WS336 は 1 担当、ユーザーの割り振り） | cleared（2026-11-01 08:40、4c2345ea1、main a7cb17936） |
+| q1825 / q1825-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-bug386`・branch `agent/p1-bug386`、VF2 10.0.30.2 と SwitchBot 3） | [BUG-386](bugs/BUG-386.md) VF2 の en1 の link が上がらない | 2026-11-01 08:24 ユーザーから、まず Bug を全部直す、Bug の担当は VF2 と RTX に 1 人ずつ、という趣旨の指示を受けた。VF2 の板は P1 だけ | in-progress（2026-11-01 08:24 起動） |
+| q1826 / q1826-i01 | P1（同じ worktree、q1825 の後） | [BUG-385](bugs/BUG-385.md) VF2 の SD の誤りで root が ro（SD の読み書きの retry の補強） | 同上 | pending（予約） |
+| q1827 / q1827-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bug374`・branch `agent/p2-bug374`、10.0.10.3 の RTX 2070 と SwitchBot 1） | [BUG-374](bugs/BUG-374.md) RTX の cursor の色が逆 | 同上。10.0.10.3 は P2 だけ | in-progress（2026-11-01 08:24 起動） |
+| q1824 / q1824-i03 | Sonnet（worktree s-ws336-p005、e22e7431c） | [ws336-p005](ws336/phase005/phase.md) | i02 と同じ範囲（WS336 の 1 担当の次、p004 の後） | in-progress（2026-11-01 08:41 起動） |
+| q1828 / q1828-i01 | P1（同じ worktree p1-bug386、q1826 の後。VF2 と Pi 5 は P1 だけ） | [BUG-387](bugs/BUG-387.md) VF2 と Pi 5 で console から Wayland の desktop を起動できない | 2026-11-01 08:42 ユーザーの報告。Bug を先に直す割り振りの中（VF2 の Bug の担当） | pending（予約） |
+| q1829 / q1829-i01 | P1（同じ worktree p1-bug386。VF2 は P1 だけ） | [BUG-388](bugs/BUG-388.md) VF2 で USB の keyboard から console に login できない | 2026-11-01 08:43 ユーザーの報告。BUG-387 と一緒に調べてよい | pending（予約） |
