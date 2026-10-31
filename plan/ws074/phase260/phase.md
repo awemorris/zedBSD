@@ -484,3 +484,36 @@ Origin: 2026-10-27 ユーザーの指示。
   - subgrid の baseline・縦書きの subgrid・独立した formatting context（`contain` の property が無い）・暗黙の track（placement-implicit-001）。
   - 直交 flow の絶対配置の item の grid 内の揃え（grid-self-alignment-positioned-items-with-margin-border-padding-006〜010、grid-row-axis-alignment-positioned-items-010・011・015・016。layout/logical.c の経路）。
   - baseline の shim（baseline-alignment-affects-intrinsic-size-001〜006）、grid-self-baseline-*（static 約 30、直交 item は baseline の group に入らない規則）。
+
+- 追加（dev84〜dev88、同じ q1727-i06）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev84 | 直交の絶対配置の item の self-start・self-end、min-height と max-height の食い違い | 1,139 | 1,300 | 296 | 41 | 2,776（後退 0） |
+  | dev85 | subgrid の line names（構造のまま parse、auto-fill の展開、親の線の名前を引き継ぐ） | 1,139 | 1,301 | 296 | 41 | 2,777（後退 0） |
+  | dev86 | subgrid の computed の grid-template-*（跨ぐ線ごとの [names]） | 1,139 | 1,301 | 298 | 41 | 2,779（後退 0） |
+  | dev87（275ed120b） | 不定の高さの flex 行を内在の高さに対して再解決、fr の端数の繰り越し | 1,139 | 1,303 | 298 | 41 | 2,781（80.10%、後退 0） |
+  | dev88（8cf265f3f） | 絶対配置の grid・flex が上下の間を埋める時の border-box の width・min-width・min-height | 1,140 | 1,303 | 298 | 41 | 2,782（80.13%、gap 690、後退 0） |
+
+  最後の Acid の測定（dev88 の source）: Acid3 100/100・pixel 差 0（exact match）、Acid2 99.27%（基準と同じ）。host build は warning 0。
+  Acid の runner が残した一時 file は build/ws074-suites/wpt/acid/ の下に増えた（acid2/zedbsd-acid2-3w8a4ub0.html、acid3/zedbsd-acid3-reference-jiv7c4j7.html、acid3/zedbsd-acid3-diagnostic-qx70__sz.html）ので Q1 が消す。
+  1. subgrid の名前（layout/grid.c `grid_subgrid_line_names`、css/grid-text.c `css_subgrid_lines`、css/values.c `values_subgrid`、cascade.c `cascade_subgrid_names`）: subgrid の template の名前の並び（group と repeat(数 または auto-fill, groups)）を
+     `css_subgrid_names` として持ち、subgrid が渡る線の数に敷く（auto-fill は残りを埋める回数、最後の線を越える分は捨てる）。親の同じ線の名前も足して、item の名前による配置に使う。
+     computed の `grid-template-columns|rows` は subgrid が box を持つ時「subgrid [names] …」を跨ぐ線の数だけ出す（bind/computed.c `computed_write_subgrid`、page/geometry.c の `page_grid_tracks` が跨ぐ数を渡す）。
+  2. 行（layout/grid.c `grid_size_rows`）: 高さが不定で percent の行か fr の行がある時は、auto として求めた高さに対して行をもう一度解決し（container の高さは最初の値）、fr の分は端数を次の track へ繰り越して合計が空間に一致する
+     （layout/grid-track.c `gt_expand`）。container の max-height が min-height より小さい時は min が勝つ。
+  3. 絶対配置（layout/grid.c `grid_static_alignment`、layout/position.c）: 水平の grid の直交の item の align-self・justify-self の self-start・self-end は item 自身の方向・writing mode に従う。
+     grid・flex の container が上下の間を埋める時、border-box の width・min-width・min-height は frame を引いて content として渡す。
+  4. 分配の規則（layout/grid-track.c）: base size の分配は growth limit まで、growth limit の分配は、既に有限な limit の track より先に無限の limit の track へ（grid-content-sized-columns-resolution）。
+- 調べて直さなかった物（追加）:
+  - ::first-letter・::first-line が engine に無い（grid の item への適用 6 ID: grid-model/grid-item-accepts-first-letter-001・first-line-001 と static の grid-first-letter-003 ほか）。
+  - repeat() が CSS_TRACKS（24）を越える grid（grid-limits-001、flex-tracks-with-fractional-size）は track の上限が要る。
+  - subgrid の暗黙の track（subgrid の線の数を越える item、repeat-auto-fill-002・placement-implicit-001）、名前の細部（line-names-002・004・005・006・008・010・012）。
+  - baseline の shim（baseline-alignment-affects-intrinsic-size-001〜006）と grid-self-baseline-*: Chromium の値と比べる道具として plan/ws074/tests/chrome-boxes.py（`export NODE_PATH=$PWD/build/ws074-chrome/node/node_modules PATH=$PWD/build/ws074-chrome/bin:$PATH`）が使える。
+    ページの link が /css/... を指す時は sed で WPT の tree の絶対 path に直した複写を作る（`sed "s#href=\"/#href=\"$PWD/build/ws074-suites/wpt/#g"`）。Chromium では parallel の item の baseline が 1・3 番目で揃わない（item の位置から見て 21 離れる）など、group の定義がこの engine の想定と違う所が見えた。
+  - fit-content() の行の直交の item（grid-change-fit-content-argument-001: 幅は fit の上限を room にすると合うが、行が item の max-content の高さになり高さが合わない）。
+- 追加2（dev89・dev90）: dev89（76c1d7e77）は 2,787（80.27%、static 1,308、後退 0）。列の baseline の group を列の track の寄与に足し（`grid_size_columns`: 縦の item が行に沿う baseline を共有する時、group の before と after の和を列が持つ）、
+  暗黙の行（grid-auto-rows）の固定の高さも直交の item の room にした（`grid_room`）。grid-self-baseline-changes-grid-area-size-007・008・010・011・012 が通る。
+  試して戻した物（dev90 = 2,773、後退 16 harness + 3 static、修正 5 static）: layout/logical.c `layout_logical_wanted` の「縦書きの grid の container で子が全て横書きなら物理の座標で置く」の例外を grid から外すと、container の大きさと
+  列の向きは Chromium と合う（grid-self-baseline-003 の縦書きの grid が 125×375）が、grid-self-alignment-stretch-vertical-lr/rl-005〜008・013〜016 と subgrid の orthogonal-writing-mode-005・006、repeat-auto-fill-007 が後退する。
+  直交の item を logical の座標で見る baseline の group（`grid_row_baseline` が `child->style.writing_mode` を物理の style で見る）と stretch の直し込みが要る。縦書きの container を logical にするなら、その 2 つを先に。
