@@ -15,12 +15,15 @@
 
 #include "base/base.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
+static void *tools_thread(void *argument);
+
 /*
- * Checks the arguments, a buffer of the base helpers and a file in the
- * test's own directory.
+ * Checks the arguments, a buffer of the base helpers, a thread (winpthreads
+ * linked statically on Windows) and a file in the test's own directory.
  */
 int
 main(
@@ -28,6 +31,8 @@ main(
 	char **argv)
 {
 	struct wb_buffer buffer;
+	pthread_t thread;
+	void *result;
 	FILE *file;
 	int differs;
 	int error;
@@ -46,6 +51,15 @@ main(
 	CHECK_EQ(buffer.length, 6);
 	wb_buffer_release(&buffer);
 
+	/* A thread runs and is joined. */
+	result = NULL;
+	error = pthread_create(&thread, NULL, tools_thread, &buffer);
+	CHECK_EQ(error, 0);
+	if (error == 0)
+		error = pthread_join(thread, &result);
+	CHECK_EQ(error, 0);
+	CHECK(result == &buffer);
+
 	/* The current directory is the test's own and can be written. */
 	file = fopen("tools-test.txt", "wb");
 	CHECK(file != NULL);
@@ -54,4 +68,13 @@ main(
 
 	/* Reports the result. */
 	return check_finish("tools");
+}
+
+/* Hands its argument back, so the joiner sees the thread ran. */
+static void *
+tools_thread(
+	void *argument)
+{
+	/* The argument is the result. */
+	return argument;
 }

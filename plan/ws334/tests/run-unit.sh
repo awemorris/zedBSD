@@ -48,7 +48,7 @@ host_libs="-lpthread -ldl -lm"
 win_cc=$LLVM_MINGW/bin/x86_64-w64-mingw32-clang
 win_flags="-std=gnu11 -O1 -g -Wall -Wextra -Werror -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE
 	-fsanitize=undefined -fsanitize-trap=undefined"
-win_libs="-lws2_32 -lbcrypt -lcrypt32 -lshell32 -lole32"
+win_libs="-lws2_32 -lbcrypt -lcrypt32 -lshell32 -lole32 -Wl,-Bstatic -lpthread -Wl,-Bdynamic"
 
 status=0
 ran=0
