@@ -62,4 +62,47 @@ git diff --check
 
 ## 結果
 
-（未着手）
+中断（host の再起動のため Q1 の指示で打ち切り。未完。cleared でも「実装済み・試験 PASS」でもない）。
+
+### できた物
+
+- `userland/base/libcrypto-compat/cryc-sha3.c`: 全関数を実装（Keccak-p[1600,24] の permute、4 つの init、absorb、final、shake_squeeze、clear）。
+  確かめたのは単体の compile だけ: `cc -std=c89 -Wall -Wextra -Werror -pedantic -c cryc-sha3.c -I.` が警告 0。
+  **試験は 1 本も流していない**（run-unit.sh・run-ct.sh・check-skeleton.sh・--win32 は全て未実施）。正しさは未確認。
+
+### 自分で決めた点（header が黙っている所）
+
+- 表の data: rho の offset は FIPS 202 Table 2 の値を x+5y の順に並べ直した 25 個（回転は 64 で割った余り）。round 定数は Algorithm 5・6 を
+  host の python（build/tmp/p003/rc.py、git 外）で ir=0..23 について評価した 24 個を data として置いた。block ごとに "Values referenced" の出典を書いた。
+- permute の作業用の配列は終わりに cryc_wipe。lanes が NULL なら何もしない。
+- 使えない sponge（rate が 72・136・168 以外＝未起動・wipe 済み・壊れた物、または position が rate を越える物）への absorb・final は何もしない。
+  squeeze は out に 0 を書く（古い memory を出さない）。sponge が NULL なら全関数が何もしない。
+- absorb は data が NULL で size>0 なら何もしない（sha2 の update と同じ）。squeeze 開始後の absorb は何もしない。block が満ちたらすぐ permute（absorb の終わりで position < rate）。
+- final は SHA-3（suffix 0x06）で未 squeeze の sponge だけ digest を書く（rate 136 なら 32 byte、rate 72 なら 64 byte）。それ以外は何も書かず、どの場合も sponge を wipe する。
+  wipe 済みの sponge は rate 0 なので以後の呼び出しは全て何もしない。
+- shake_squeeze の最初の呼び出しは size 0 でも padding と permute をして squeezing=1 にする。out が NULL で size>0 でも padding までは行い、書き込みはしない。
+- SHAKE 用でない（suffix 0x06 の）sponge を squeeze しても定義された動作（SHA-3 の domain での XOF）にした。
+- padding は suffix の byte を position に、0x80 を rate-1 に XOR（同じ byte なら 0x86 / 0x9f になる。FIPS 202 B.2 Table 6）。
+
+### 未実施
+
+- `plan/ws335/tests/unit/test-sha3.c`・`ct-sha3.c` は未作成。
+- run-unit.sh sha3、--win32 sha3、run-unit.sh all、run-ct.sh sha3、check-skeleton.sh（BASE=b7dfd3952）、git diff --check: 全て未実施。
+- わざと壊す確かめ、coding-style §14 の見直し、ws.md の行の更新: 未実施。
+
+### 次の手順（そのまま再開できる形）
+
+1. `plan/ws335/tests/unit/test-sha3.c` を書く。計画:
+   - FIPS 202 の Algorithm 1〜7 を bit 配列（A[5][5][64]、S[64(5y+x)+z] は byte の bit z%8、B.1）で素直に書いた参照の permute を試験の中に持ち、
+     cryc_keccak_permute を 0・全 1・乱数の状態（lane は little-endian の 8 byte）で照合。
+   - Table 6（B.2）の padding を手で組んだ参照の sponge（block ごとに XOR → 参照 permute）で、4 関数の長さ 0..2*rate+3 を one-shot・分割 absorb・分割 squeeze で照合
+     （q=1・2・>2 を含む）。
+   - 公式 vector（`WS335_VECTORS/rec/`）: cavp-sha-3bytetestvectors-SHA3_256/512 の ShortMsg・LongMsg・Monte（Seed から MD(i)=SHA3(MD(i-1)) を 1000 回、100 checkpoint）、
+     cavp-shakebytetestvectors-SHAKE128/256 の ShortMsg・LongMsg・VariableOut（Outputlen は bit。Len=0 の record は Msg=00 だが空の message）。SHAKE Monte は任意。件数を数えて結果に書く。
+   - 誤りの入力: NULL の sponge、NULL の data（size>0）、squeeze 後の absorb（出力不変）、wipe 後・final 後の呼び出し（out 不変・squeeze は 0）、
+     SHAKE の sponge への final（何も書かない）、position>rate や rate 不正の壊れた構造体と乱数の構造体（ASan・UBSan で落ちない）、init 後の各 field、clear 後が全 0、構造体の複写後の続行。
+2. `plan/ws335/tests/unit/ct-sha3.c`（ct-hash.c の形。秘密の message・seed を CT_SECRET、出力を CT_PUBLIC）を書く。
+3. §6 の command を全部流して最後の行を読む（`sh plan/ws335/tests/run-unit.sh sha3`、`--win32 sha3`、`all`、`sh plan/ws335/tests/run-ct.sh sha3`、`BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh`、`git diff --check`）。
+   Wine の prefix が無ければ /home/awe/zedBSD-worktrees/s-ws335-p002/build/tmp/ws335-wine を build/tmp/ws335-wine に複写して `.ws335-ready` を touch。
+4. わざと壊す確かめ（round 定数 1 つ、rho の offset 1 つ、padding の 0x80 の位置、position の境界 `>=` を `>`、chi の ~ の位置）を git の外で行い、FAIL を確かめて戻し `cmp`。
+5. この節を実績で書き直し、ws.md の表のこの行を「実装済み・試験 PASS」に。
