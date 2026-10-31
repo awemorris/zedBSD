@@ -175,8 +175,9 @@ p7fswrite)
 	# MKFS=0 keeps the UFS Debian put on p7 (bench-debian.sh p7ufs).
 	if [ "${MKFS:-1}" = 1 ]; then
 	# mkfs asks for the device's registration, which a first refused run prints (it writes nothing).
-	reg=$(echo no | mkfs -t ufs --profile=native nvme0n1p7 2>&1 | sed -n 's/.*registration=\([0-9]*\).*/\1/p')
-	[ -n "$reg" ] || { echo "mkfs failed: no registration"; exit 1; }
+	refused=$(echo no | mkfs -t ufs --profile=native nvme0n1p7 2>&1)
+	reg=$(echo "$refused" | sed -n 's/.*registration=\([0-9]*\).*/\1/p')
+	[ -n "$reg" ] || { echo "$refused"; echo "mkfs failed: no registration"; exit 1; }
 	echo "FORMAT nvme0n1p7:$reg" | mkfs -t ufs --profile=native nvme0n1p7 || { echo "mkfs failed"; exit 1; }
 	fi
 	mkdir -p $P7_MNT
