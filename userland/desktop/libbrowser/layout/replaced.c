@@ -191,6 +191,14 @@ layout_replaced_size(
 		min_width = 0;
 	if (!replaced_length(&box->style.max_width, containing_width, &max_width))
 		max_width = -1;
+
+	/* A percentage width limit has no basis while the content is measured in a very wide room: it is no limit. */
+	if (containing_width >= ((layout_unit)1 << 24)) {
+		if (box->style.min_width.unit == CSS_UNIT_PERCENT)
+			min_width = 0;
+		if (box->style.max_width.unit == CSS_UNIT_PERCENT)
+			max_width = -1;
+	}
 	if (box->style.min_height.unit == CSS_UNIT_PX ||
 	    (box->style.min_height.unit == CSS_UNIT_PERCENT && height_definite)) {
 		if (!replaced_length(&box->style.min_height, containing_height, &min_height))

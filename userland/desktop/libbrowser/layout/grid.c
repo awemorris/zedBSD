@@ -3301,6 +3301,13 @@ grid_lay_item(
 			content = layout_from_px(saved.max_width.value) - sizing;
 		if (saved.min_width.unit == CSS_UNIT_PX && content < layout_from_px(saved.min_width.value) - sizing)
 			content = layout_from_px(saved.min_width.value) - sizing;
+		if (saved.min_width.unit == CSS_UNIT_PERCENT) {
+			/* A percentage minimum is of the area. */
+			minimum = (layout_unit)((float)width * saved.min_width.value / 100.0f) +
+			    layout_from_px(saved.min_width.offset) - sizing;
+			if (content < minimum)
+				content = minimum;
+		}
 		if (content < 0)
 			content = 0;
 	}

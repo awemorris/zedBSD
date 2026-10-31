@@ -821,6 +821,30 @@ position_place_once(
 	has_top = position_offset(&offset[CSS_TOP], area_height, &top);
 	has_bottom = position_offset(&offset[CSS_BOTTOM], area_height, &bottom);
 
+	/* Under a position-area an inset that is auto is zero when the size is auto: the box fills the area's edges. */
+	if (box->style.position_area >= 0 && box->cb_set) {
+		if (box->style.width.unit == CSS_UNIT_AUTO) {
+			if (!has_left) {
+				has_left = 1;
+				left = 0;
+			}
+			if (!has_right) {
+				has_right = 1;
+				right = 0;
+			}
+		}
+		if (box->style.height.unit == CSS_UNIT_AUTO) {
+			if (!has_top) {
+				has_top = 1;
+				top = 0;
+			}
+			if (!has_bottom) {
+				has_bottom = 1;
+				bottom = 0;
+			}
+		}
+	}
+
 	/* The containing block the insets leave: what a fallback has to fit in. */
 	box->imcb[0] = area_left + (has_left ? left : 0);
 	box->imcb[1] = area_left + area_width - (has_right ? right : 0);

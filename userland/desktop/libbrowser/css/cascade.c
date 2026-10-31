@@ -14,6 +14,7 @@
 #include "css/internal.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -930,6 +931,25 @@ cascade_line_pixels(const struct css_style *style)
 	return style->font_size * 1.2f;
 }
 
+/* The declaration to apply for a match: a revert of an author declaration is the user agent's winning declaration of the property. */
+static const struct css_declaration *
+cascade_reverted(
+	const struct cascade_match *matches,
+	size_t index)
+{
+	const struct css_declaration *declaration;
+	size_t earlier;
+
+	declaration = matches[index].declaration;
+	if (declaration->value.kind != CSS_VALUE_UNSET || declaration->value.keyword != 1 || matches[index].rank != RANK_AUTHOR)
+		return declaration;
+	for (earlier = index; earlier > 0; earlier--) {
+		if (matches[earlier - 1U].rank == RANK_USER_AGENT && matches[earlier - 1U].declaration->property == declaration->property)
+			return matches[earlier - 1U].declaration;
+	}
+	return declaration;
+}
+
 /* Computes the style of an element, or of one of its pseudo-elements, in the cascade. */
 static int
 cascade_compute(
@@ -1095,7 +1115,7 @@ cascade_compute(
 		if (matches[index].declaration->property == CSS_PROP_WRITING_MODE ||
 		    matches[index].declaration->property == CSS_PROP_DIRECTION)
 			continue;
-		cascade_apply(engine, style, parent, matches[index].declaration);
+		cascade_apply(engine, style, parent, cascade_reverted(matches, index));
 	}
 
 	/* The lists are no longer needed. */
@@ -4608,6 +4628,9 @@ cascade_apply(
 	case CSS_PROP_BOX_SIZING:
 		style->box_sizing = value->keyword;
 		break;
+	case CSS_PROP_CONTENT_VISIBILITY:
+		style->content_visibility = value->keyword;
+		break;
 	case CSS_PROP_FLEX_DIRECTION:
 		style->flex_direction = value->keyword;
 		break;
@@ -4778,6 +4801,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_BOX_SIZING:
 		style->box_sizing = parent->box_sizing;
+		break;
+	case CSS_PROP_CONTENT_VISIBILITY:
+		style->content_visibility = parent->content_visibility;
 		break;
 	case CSS_PROP_CONTENT:
 		style->content_kind = parent->content_kind;
@@ -5574,18 +5600,32 @@ cascade_try_rule(
 {
 	const struct cascade_sheet *sheets;
 	const struct css_try_rule *found;
+	size_t found_sheet;
 	size_t index;
 	size_t rule;
+	int rank;
+	int best;
 
 	/* Each sheet's rules in order: the last of the name wins. */
 	found = NULL;
+	found_sheet = 0;
 	sheets = engine->sheets.items;
 	for (index = 0; index < engine->sheets.count; index++) {
 		if (sheets[index].sheet == NULL)
 			continue;
 		for (rule = 0; rule < sheets[index].sheet->try_rule_count; rule++) {
-			if (vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
-				found = &sheets[index].sheet->try_rules[rule];
+			if (!vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
+				continue;
+
+			/* A rule in a later layer outranks one in an earlier layer of the same sheet, and the unlayered outrank all. */
+			if (found != NULL && found_sheet == index) {
+				rank = sheets[index].sheet->try_rules[rule].layer == 0 ? INT_MAX : sheets[index].sheet->try_rules[rule].layer;
+				best = found->layer == 0 ? INT_MAX : found->layer;
+				if (rank < best)
+					continue;
+			}
+			found = &sheets[index].sheet->try_rules[rule];
+			found_sheet = index;
 		}
 	}
 	return found;

@@ -127,6 +127,8 @@ layout_table(
 	layout_unit containing;
 	layout_unit cursor;
 	layout_unit captions;
+	layout_unit caption_least;
+	layout_unit least;
 	layout_unit total;
 	layout_unit sizing;
 	int column;
@@ -175,13 +177,32 @@ layout_table(
 		sum_most += state.most[column];
 	}
 
-	/* An auto table is as wide as it wants (at most the room), and never narrower than its columns' least. */
+	/* The widest caption's narrowest width: the table is at least as wide. */
+	caption_least = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->style.display != CSS_DISPLAY_TABLE_CAPTION)
+			continue;
+		error = layout_min_content(tree, child, &least);
+		if (error != 0) {
+			table_release(&state);
+			return error;
+		}
+		least += child->margin[CSS_LEFT] + child->margin[CSS_RIGHT] + table_frame(child);
+		if (least > caption_least)
+			caption_least = least;
+	}
+
+	/* An auto table is as wide as it wants (at most the room), and never narrower than its columns' least or its captions'. */
 	box->grid_content = table_wanted(&state, spacing, sum_most);
+	if (box->grid_content < caption_least)
+		box->grid_content = caption_least;
 	used = box->width;
 	if (box->style.width.unit == CSS_UNIT_AUTO && used > box->grid_content)
 		used = box->grid_content;
 	if (used < sum_least)
 		used = sum_least;
+	if (box->style.width.unit == CSS_UNIT_AUTO && used < caption_least && caption_least <= box->width)
+		used = caption_least;
 
 	/* A narrower (or wider) table takes its auto margins again in the same containing block. */
 	if (used != box->width) {

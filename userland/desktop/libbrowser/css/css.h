@@ -91,6 +91,8 @@ struct css_filter {
 #define CSS_PSEUDO_ELEMENT_VT_PAIR 6
 #define CSS_PSEUDO_ELEMENT_VT_OLD 7
 #define CSS_PSEUDO_ELEMENT_VT_NEW 8
+/* The box around a details element's content (everything but its first summary). */
+#define CSS_PSEUDO_ELEMENT_DETAILS_CONTENT 9
 /* The translation a view transition group's style starts with until its rectangle is known (an author's transform replaces it). */
 /* The places a view transition pseudo-element can have among its siblings (for :first-child, :last-child and :only-child). */
 #define CSS_VT_FIRST 1
@@ -780,6 +782,8 @@ struct css_style {
 	struct css_length padding[4];
 	struct css_length offset[4];
 	int box_sizing;
+	/* content-visibility: 0 visible, 1 auto, 2 hidden (the content is skipped and the box is size-contained). */
+	int content_visibility;
 
 	/*
 	 * Anchor positioning: the sums of the insets and sizes whose unit is

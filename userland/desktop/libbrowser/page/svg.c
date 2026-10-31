@@ -186,6 +186,7 @@ page_svg_render(
 	float shift_y;
 	float shrink;
 	int have_view;
+	int no_size;
 	int valid;
 	int pixel_width;
 	int pixel_height;
@@ -236,6 +237,7 @@ page_svg_render(
 			height = 0.0f;
 	}
 	wb_buffer_release(&buffer);
+	no_size = width <= 0.0f && height <= 0.0f && !have_view;
 	if (width <= 0.0f && height <= 0.0f) {
 		if (have_view) {
 			width = view_width;
@@ -330,6 +332,7 @@ page_svg_render(
 		free(canvas.coverage);
 		return error;
 	}
+	bitmap->no_ratio = no_size;
 	for (row = 0; row < pixel_height; row++) {
 		for (column = 0; column < pixel_width; column++) {
 			float *pixel;

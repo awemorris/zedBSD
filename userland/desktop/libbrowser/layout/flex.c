@@ -229,6 +229,23 @@ layout_flex(
 			available = used;
 	}
 
+	/* An auto-height, unwrapped column taller than its maximum height is flexed in the maximum. */
+	if (!row && !wrap && box->style.height.unit == CSS_UNIT_AUTO && box->style.max_height.unit == CSS_UNIT_PX) {
+		sizing = 0;
+		if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		used = 0;
+		for (index = 0; index < count; index++)
+			used += items[index].size + items[index].frame + items[index].margin_start + items[index].margin_end;
+		if (count > 1)
+			used += gap_main * (layout_unit)(count - 1U);
+		if (used > layout_from_px(box->style.max_height.value) - sizing) {
+			available = layout_from_px(box->style.max_height.value) - sizing;
+			if (available < 0)
+				available = 0;
+		}
+	}
+
 	/* Line by line: the items that fit, flexed and laid out; their cross sizes decide the lines'. */
 	lines = NULL;
 	line_count = 0;
@@ -300,6 +317,19 @@ layout_flex(
 			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
 				sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 			line_cross = layout_from_px(box->style.height.value) - sizing;
+		}
+
+		/* A single line of a row in a container with a minimum or maximum height is held within it. */
+		if (!wrap && row && box->style.height.unit != CSS_UNIT_PX) {
+			sizing = 0;
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+			if (box->style.max_height.unit == CSS_UNIT_PX && line_cross > layout_from_px(box->style.max_height.value) - sizing)
+				line_cross = layout_from_px(box->style.max_height.value) - sizing;
+			if (box->style.min_height.unit == CSS_UNIT_PX && line_cross < layout_from_px(box->style.min_height.value) - sizing)
+				line_cross = layout_from_px(box->style.min_height.value) - sizing;
+			if (line_cross < 0)
+				line_cross = 0;
 		}
 
 		/* A column's single line is as wide as the container. */
@@ -666,6 +696,15 @@ layout_flex_content_width(
 	if (items > 1)
 		width += gap * (items - 1);
 
+	/* A wrapping container laid out narrower than its items side by side has a line at every opportunity: its widest item. */
+	if (box->style.flex_wrap != CSS_FLEX_NOWRAP && box->width < width) {
+		width = 0;
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (!child->out_of_flow && child->flex_hypothetical > width)
+				width = child->flex_hypothetical;
+		}
+	}
+
 	/* Reports the width. */
 	return width;
 }
@@ -823,6 +862,7 @@ flex_base_size(
 	layout_unit sizing;
 	layout_unit cross;
 	layout_unit resolved;
+	float picture_ratio;
 	int start_side;
 	int end_side;
 	int error;
@@ -910,7 +950,7 @@ flex_base_size(
 	/* An image's natural ratio transfers a stretched cross size too (a size of its own goes through its layout). */
 	if (item->base < 0 && child->replaced && child->style.aspect_ratio <= 0.0f &&
 	    (row ? child->style.height.unit : child->style.width.unit) == CSS_UNIT_AUTO &&
-	    child->image != NULL && child->image->width > 0 && child->image->height > 0) {
+	    ((child->image != NULL && child->image->width > 0 && child->image->height > 0) || layout_replaced_is_canvas(child))) {
 		cross = flex_ratio_cross_size(tree, box, child, row);
 		if (cross >= 0) {
 			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER && row)
@@ -921,16 +961,46 @@ flex_base_size(
 				    child->border[CSS_RIGHT];
 			if (cross < 0)
 				cross = 0;
-			if (row)
+			if (child->image == NULL) {
+				layout_replaced_ratio(child, &picture_ratio);
+				item->base = row ? (layout_unit)((double)cross * picture_ratio) : (layout_unit)((double)cross / picture_ratio);
+			} else if (row) {
 				item->base = (layout_unit)((double)cross * child->image->width / child->image->height);
-			else
+			} else {
 				item->base = (layout_unit)((double)cross * child->image->height / child->image->width);
+			}
+		}
+	}
+
+	/* An intrinsic keyword basis of a row: the narrowest, the widest or the fit-content width of the item's content. */
+	if (item->base < 0 && row && !child->replaced &&
+	    (basis->unit == CSS_UNIT_MIN_CONTENT || basis->unit == CSS_UNIT_MAX_CONTENT || basis->unit == CSS_UNIT_FIT_CONTENT) &&
+	    child->style.writing_mode == box->style.writing_mode) {
+		layout_unit least;
+		layout_unit most;
+
+		error = flex_min_content(tree, child, &least);
+		if (error != 0)
+			return error;
+		most = least;
+		if (basis->unit != CSS_UNIT_MIN_CONTENT) {
+			error = flex_content_basis(tree, box, child, row, &most);
+			if (error != 0)
+				return error;
+		}
+		item->base = basis->unit == CSS_UNIT_MIN_CONTENT ? least : most;
+		if (basis->unit == CSS_UNIT_FIT_CONTENT) {
+			resolved = box->width - item->frame - item->margin_start - item->margin_end;
+			if (resolved < least)
+				resolved = least;
+			if (item->base > resolved)
+				item->base = resolved;
 		}
 	}
 
 	/* An explicit content basis ignores the non-replaced preferred main size. */
 	if (item->base < 0 &&
-	    basis->unit == CSS_UNIT_CONTENT &&
+	    (basis->unit == CSS_UNIT_CONTENT || (basis == &child->style.flex_basis && basis->unit == CSS_UNIT_PERCENT)) &&
 	    (!child->replaced || layout_replaced_is_canvas(child))) {
 		error = flex_content_basis(tree, box, child, row, &item->base);
 		if (error != 0)
@@ -970,13 +1040,16 @@ flex_base_size(
 	item->minimum = 0;
 	item->maximum = -1;
 	item->auto_minimum = 0;
+	/* An axis that is visible computes to auto when the other one scrolls or clips, so both must be visible (or clip). */
 	if (row &&
 	    child->style.min_width.unit == CSS_UNIT_AUTO &&
-	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP))
+	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP) &&
+	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
 	if (!row && child->style.aspect_ratio <= 0.0f && child->style.writing_mode == box->style.writing_mode &&
 	    child->style.min_height.unit == CSS_UNIT_AUTO &&
-	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP))
+	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP) &&
+	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
 
 	/* Resolves the main-axis limits after the unconstrained base is measured. */
@@ -1071,6 +1144,7 @@ flex_grow(
 {
 	layout_unit used;
 	layout_unit remaining;
+	layout_unit initial;
 	layout_unit share;
 	layout_unit target;
 	int64_t total_violation;
@@ -1087,6 +1161,7 @@ flex_grow(
 	}
 
 	/* Each violation freezes at least one item, so the bounded loop terminates. */
+	initial = 0;
 	for (round = 0; round <= count; round++) {
 		used = 0;
 		total = 0;
@@ -1115,10 +1190,12 @@ flex_grow(
 			return;
 		}
 
-		/* Factors below one leave a proportional part of the free space unused. */
-		weight = total;
-		if (weight < 1)
-			weight = 1;
+		/* Factors below one leave a proportional part of the first round's free space unused. */
+		if (round == 0)
+			initial = remaining;
+		weight = total > 0 ? total : 1;
+		if (total < 1 && (layout_unit)((float)initial * total) < remaining)
+			remaining = (layout_unit)((float)initial * total);
 		total_violation = 0;
 		for (index = 0; index < count; index++) {
 			if (items[index].frozen)
@@ -1633,11 +1710,11 @@ flex_auto_minimums(
 	layout_unit least;
 	layout_unit given;
 	size_t index;
+	int measuring_only;
 	int error;
 
 	/* A row line without a definite size does not flex (a column's minimums always hold). */
-	if (row && available < 0)
-		return 0;
+	measuring_only = row && available < 0;
 	used = 0;
 	for (index = 0; index < count; index++)
 		used += items[index].size + items[index].frame + items[index].margin_start + items[index].margin_end;
@@ -1651,6 +1728,10 @@ flex_auto_minimums(
 			continue;
 		child = items[index].box;
 
+		/* With no room to flex in, only an item whose basis is its own gets its size raised to its content's narrowest. */
+		if (measuring_only && (child->style.flex_basis.unit == CSS_UNIT_AUTO || child->style.flex_basis.unit == CSS_UNIT_CONTENT))
+			continue;
+
 		/* The content's narrowest width, or a column item's content height at the container's width. */
 		if (row)
 			error = flex_min_content(tree, child, &least);
@@ -1660,8 +1741,9 @@ flex_auto_minimums(
 			return error;
 
 		/* An image's content size suggestion is its natural ratio applied to a definite cross size. */
-		if (row && child->replaced && child->style.aspect_ratio <= 0.0f &&
-		    child->image != NULL && child->image->width > 0 && child->image->height > 0) {
+		if (child->replaced && child->style.aspect_ratio <= 0.0f &&
+		    child->image != NULL && child->image->width > 0 && child->image->height > 0 &&
+		    (row || !child->image->no_ratio)) {
 			layout_unit cross;
 
 			cross = flex_ratio_cross_size(tree, box, child, row);
@@ -1698,8 +1780,10 @@ flex_auto_minimums(
 			items[index].minimum = least;
 
 		/* The hypothetical size holds the minimum. */
-		if (items[index].size < items[index].minimum)
+		if (items[index].size < items[index].minimum) {
 			items[index].size = items[index].minimum;
+			child->flex_hypothetical = items[index].size + items[index].frame + items[index].margin_start + items[index].margin_end;
+		}
 	}
 
 	/* Succeeded: the minimums are known. */

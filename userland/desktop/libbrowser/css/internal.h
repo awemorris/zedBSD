@@ -405,6 +405,7 @@ enum css_property {
 	CSS_PROP_ANIMATION_PLAY_STATE,
 	CSS_PROP_ANIMATION_TIMING_FUNCTION,
 	CSS_PROP_MIX_BLEND_MODE,
+	CSS_PROP_CONTENT_VISIBILITY,
 	CSS_PROP_COUNT
 };
 
@@ -756,6 +757,8 @@ struct css_try_rule {
 	struct vm_string *name;
 	struct css_declaration *declarations;
 	size_t declaration_count;
+	/* The cascade layer the rule is in (0 for none, which outranks every layer). */
+	int layer;
 };
 
 /* One keyframe of an @keyframes rule: its offset (0 to 1) and its declarations. */
