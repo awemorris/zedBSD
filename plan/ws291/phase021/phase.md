@@ -187,3 +187,36 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
   直すには、EDID を返す接続（cable・micro HDMI の変換の交換、切替器を外す、monitor の電源と入力）が要る。ユーザーの手の作業。
 - 板の状態: /boot/boot0/vmunix は build/p021-k5c/vmunix（cksum 1329488160）、元は vmunix.k5b（ee3e43a88）・vmunix.p021old（image の物）。config.txt は元のまま。
   /boot/boot0/edid.dat（128 byte、試しの物、firmware は読まない）が残る。
+
+### 画面の無い原因の続き（2026-11-01 03:00〜03:15、Q1 経由のユーザーの仮説ごとに確かめた。全て SwitchBot の電源の入れ直しの後）
+
+- ユーザーが LCD の電源を入れ直した後も同じ（`BSC_A no ACK`・`HDMI0: Unable to read EDID block 0`、display 0）。
+- 起動の設定の仮説: config.txt を丸ごと置き換えて試した（元は config.txt.p021orig、試しの後に戻した）。
+  (1) WS279 の時の config（git b7d9a75ba の platform/arm64/config-rpi5.txt、今との差は `dtparam=pciex1` だけ）、(2) Raspberry Pi OS の Pi 5 の既定（vc4-kms-v3d・max_framebuffers=2・disable_fw_kms_setup=1・display_auto_detect=1 ほか）＋kernel の行、
+  (3) kernel・kernel_address・pciex4_reset だけ。どれも firmware の log は同じ。firmware は HDMI を config の dtb・cmdline・kernel を読む前に調べる（log の順: Select resolution → dtb_file → cmdline → Starting OS）。
+- firmware の取り違えの仮説: FAT は dtb 2 つ（今の pin、10-21 からの物と byte で同じ）・COPYING.linux・config・cmdline・vmunix・data.img・swapfile・log/ と私の backup だけ。start*.elf・overlays・pieeprom.upd・recovery.bin は無い。
+  bootloader は 66f33f7e（2026-05-11、update-timestamp 0）。10-22 の版は記録に無く比べられない（未確認）。image の script は rpi5 に Pi 4 の firmware を入れない。
+- ユーザーの以前の image（/home/awe/rpi5.img、読むだけ）: dtb 2 つ・COPYING.linux は今と同じ、config.txt は WS279 の物（上の (1) で試した）、cmdline は `login=console`、違うのは vmunix（2026-10-22 の build、7536640 byte）だけ。
+  この kernel は板で起動していない（今の rootfs で SSH が上がらないと FAT に戻れない危険、Q1 に判断を返した）。
+- Q1 の判断で bug-analyzer が板を使う（2026-11-01 03:19）。P4 は板の使用を止めた。
+
+### 板の状態（2026-11-01 03:19、P4 が手を離した時、10.0.30.7、鍵 /home/awe/zedBSD-worktrees/p2-ws309v2/plan/tmp/guest/id_ed25519 または この worktree の plan/tmp/guest/id_ed25519）
+
+- /boot/boot0/vmunix: build/p021-k5c/vmunix、cksum 3716769917（tree fba292f54 = main 44ca7739c ＋ agent/p4-ws291pi。画面が無い時の報告 `rpi5-screen:`、bin の overflow の大きさ、7.1 の性能 counter を含む）。
+- /boot/boot0/vmunix.k5b: build/p021-k5b/vmunix、cksum 4200268633（ee3e43a88）。/boot/boot0/vmunix.p021old: image の kernel、cksum 130421877（2a53a5a6d）。
+- /boot/boot0/config.txt と config.txt.p021orig: 同じ（image の物、1920x1080、`dtparam=pciex1`）。cmdline.txt と cmdline.txt.p021orig: 同じ（`login=console v3d.perf=1`）。
+- /root/p021/bin/mview-off（--offscreen の付いた mview）と /root/p021/qs40（model）。
+- 入れ替え: `scp <vmunix> root@10.0.30.7:/boot/boot0/vmunix.new`、板で cksum を確かめて `mv /boot/boot0/vmunix.new /boot/boot0/vmunix && sync`、`(sleep 1; /sbin/reboot) &` か SwitchBot `python3 -I plan/tools/switchbot.py cycle 14C19FA80F86`。
+  戻し: 板で `cp /boot/boot0/vmunix.k5b /boot/boot0/vmunix`（または vmunix.p021old）。config・cmdline の戻しは *.p021orig を写す。
+- 画面の調べ: 今の kernel は boot の framebuffer が無い時に dmesg へ `rpi5-screen: no firmware framebuffer; displays N (..), HDMI 0 EDID ...` と firmware の log（/chosen/log、0x3ff23000）の display の行を出す。
+
+### offscreen の mview と c74（2026-11-01 02:50〜03:15）
+
+- mview に `--offscreen [--shot=FILE.ppm] [--zoom=N] [--look=XxY]`（1ec25b5d1、window と compositor 無しで自分の image に描き、最後の frame を読み戻す）。`plan/ws291/tests/rpi5-offscreen.sh`（TFU=0|1 は cmdline の v3d.tfu=0 と再起動、qs40 を /root/p021/qs40 へ写す。arm64 の image に mview の package の data と /bin/mview が無いため）。
+- 1920x1080、qs40（37000 三角形）、kernel k5c: c1 2.77〜3.03 ms、c21 9.43 ms（v3d.tfu=0 では 15.95 ms）、c62 19.2 ms、c74 21.6〜22.9 ms（43.7〜46.3 fps、目標 50）。絵は正しい（build/tmp/off-k5c/c74.png ほか）。
+- TFU と CPU の変換の比較: 枠の全体では細部だけ違う（TFU は mip tree を sample、CPU は level 0 だけ、設計どおり）。zoom 10 で bit 一致（dbaae78e）、zoom 6 の服の絵で 748 px・最大 11。
+- c74 は bin の overflow（256 KiB × 4 の固定）が足りず ENOMEM だった → e80f836e5: 4 つの pool の大きさを pass の頂点・index × instance × 2 byte から（256 KiB 単位、1 つ最大 16 MiB）。4.2・7.1 共有。c1・c21 の checksum は変わらない。
+- --inflight=2 は効かない（kernel は bin と render を順に流す）。
+- 7.1 の性能 counter（fba292f54、Mesa 25.3.6 の 7.1 の表、register は 4.2 と同じ）。c74 の定常（88 run）: bin 14.73 M cycle（12.8 ms）、render 9.9 M cycle（8.6 ms）。
+  bin の QPU active は 19.3 M（12 QPU で 11 %）、stall は少ない → bin は shader でなく前段（頂点の取り込み・PTB）で詰まる。binned 2.74 M、reversed 2.11 M。
+- 次の手（未着手）: coordinate shader が位置に要る attribute だけを読む（今は CS も VS と同じく全ての attribute を全成分読む: 位置 3・法線 3・uv 2・instance 4 の 12 語、要るのは 7 語）。compiler の CS の入力を使う成分に絞り、attribute record の coordinate_values を location ごとに。
