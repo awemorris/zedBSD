@@ -2763,10 +2763,28 @@ flex_place_line(
 			frame = line_cross - cross_outer;
 			if (frame < 0)
 				frame = 0;
-			if (!auto_first)
-				frame = 0;
-			else if (auto_last)
+			/* The margins take the room: the used values (what getComputedStyle reports), the first side's share moving the item. */
+			if (auto_first && auto_last) {
+				if (row) {
+					child->margin[CSS_TOP] += frame / 2;
+					child->margin[CSS_BOTTOM] += frame - frame / 2;
+				} else {
+					child->margin[CSS_LEFT] += frame / 2;
+					child->margin[CSS_RIGHT] += frame - frame / 2;
+				}
 				frame = frame / 2;
+			} else if (auto_first) {
+				if (row)
+					child->margin[CSS_TOP] += frame;
+				else
+					child->margin[CSS_LEFT] += frame;
+			} else {
+				if (row)
+					child->margin[CSS_BOTTOM] += frame;
+				else
+					child->margin[CSS_RIGHT] += frame;
+				frame = 0;
+			}
 			if (row)
 				child->y += frame;
 			else
@@ -2859,6 +2877,16 @@ flex_align_of(
 	}
 	if (align == CSS_ALIGN_NORMAL)
 		align = CSS_ALIGN_STRETCH;
+
+	/* An item with an auto margin across is not stretched: the margin takes the room (css-flexbox-1 8.1). */
+	if (align == CSS_ALIGN_STRETCH && item->style.writing_mode == box->style.writing_mode) {
+		if (box->style.flex_direction == CSS_FLEX_ROW || box->style.flex_direction == CSS_FLEX_ROW_REVERSE) {
+			if (item->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO || item->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
+				align = CSS_ALIGN_START;
+		} else if (item->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || item->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO) {
+			align = CSS_ALIGN_START;
+		}
+	}
 
 	/* Baselines are not measured in this pass. */
 	if (align == CSS_ALIGN_BASELINE)
