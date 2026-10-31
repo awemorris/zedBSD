@@ -50,13 +50,23 @@ enum css_filter_kind {
 	CSS_FILTER_INVERT,
 	CSS_FILTER_OPACITY,
 	CSS_FILTER_SATURATE,
-	CSS_FILTER_SEPIA
+	CSS_FILTER_SEPIA,
+	CSS_FILTER_DROP_SHADOW,
+	CSS_FILTER_URL
 };
 
-/* One filter function of a style: blur's amount is in pixels, hue-rotate's in degrees, the others' a number (1 is 100%). */
+/*
+ * One filter function of a style: blur's amount is in pixels, hue-rotate's in degrees, the others' a number (1 is 100%);
+ * drop-shadow's offsets, blur and color (it is kept for the computed style and not drawn).
+ */
 struct css_filter {
 	int kind;
 	float amount;
+	float dx;
+	float dy;
+	float blur;
+	uint32_t color;
+	const struct vm_string *url;
 };
 
 /* The most box shadows a style keeps (the ones after are dropped). */

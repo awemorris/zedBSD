@@ -2839,7 +2839,7 @@ computed_filter_list(
 	struct wb_units *out)
 {
 	static const char *const names[] = {
-		"blur", "brightness", "contrast", "grayscale", "hue-rotate", "invert", "opacity", "saturate", "sepia"
+		"blur", "brightness", "contrast", "grayscale", "hue-rotate", "invert", "opacity", "saturate", "sepia", "drop-shadow", "url"
 	};
 	const struct css_filter *filter;
 	int index;
@@ -2853,11 +2853,29 @@ computed_filter_list(
 		filter = &filters[index];
 		if (index != 0)
 			error = computed_ascii(" ", out);
+		if (error == 0 && filter->kind == CSS_FILTER_URL) {
+			error = computed_write_url(filter->url, out);
+			continue;
+		}
 		if (error == 0)
 			error = computed_ascii(names[filter->kind], out);
 		if (error == 0)
 			error = computed_ascii("(", out);
-		if (error == 0 && filter->kind == CSS_FILTER_BLUR)
+		if (error == 0 && filter->kind == CSS_FILTER_DROP_SHADOW) {
+			error = computed_color(filter->color, out);
+			if (error == 0)
+				error = computed_ascii(" ", out);
+			if (error == 0)
+				error = computed_pixels(filter->dx, out);
+			if (error == 0)
+				error = computed_ascii(" ", out);
+			if (error == 0)
+				error = computed_pixels(filter->dy, out);
+			if (error == 0)
+				error = computed_ascii(" ", out);
+			if (error == 0)
+				error = computed_pixels(filter->blur, out);
+		} else if (error == 0 && filter->kind == CSS_FILTER_BLUR)
 			error = computed_pixels(filter->amount, out);
 		else if (error == 0 && filter->kind == CSS_FILTER_HUE_ROTATE) {
 			error = computed_number(filter->amount, out);

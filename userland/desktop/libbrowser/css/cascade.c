@@ -1271,6 +1271,16 @@ cascade_compute(
 	if (style->outline_style == CSS_BORDER_NONE)
 		style->outline_width = 0;
 
+	/* And in the drop shadows of the filters. */
+	for (side = 0; side < style->filter_count; side++) {
+		if (style->filters[side].kind == CSS_FILTER_DROP_SHADOW && style->filters[side].color == CSS_CURRENT_COLOR)
+			style->filters[side].color = style->color;
+	}
+	for (side = 0; side < style->backdrop_filter_count; side++) {
+		if (style->backdrop_filters[side].kind == CSS_FILTER_DROP_SHADOW && style->backdrop_filters[side].color == CSS_CURRENT_COLOR)
+			style->backdrop_filters[side].color = style->color;
+	}
+
 	/* And in the shadows' colors. */
 	for (side = 0; side < style->shadow_count; side++) {
 		if (style->shadows[side].color == CSS_CURRENT_COLOR)
@@ -5554,6 +5564,14 @@ cascade_inherit(
 	case CSS_PROP_ISOLATION:
 		style->isolation = parent->isolation;
 		break;
+	case CSS_PROP_BACKDROP_FILTER:
+		memcpy(style->backdrop_filters, parent->backdrop_filters, sizeof(style->backdrop_filters));
+		style->backdrop_filter_count = parent->backdrop_filter_count;
+		break;
+	case CSS_PROP_FILTER:
+		memcpy(style->filters, parent->filters, sizeof(style->filters));
+		style->filter_count = parent->filter_count;
+		break;
 	case CSS_PROP_TRANSITION_PROPERTY:
 		style->transition_property = parent->transition_property;
 		break;
@@ -6059,7 +6077,7 @@ cascade_filter_mix(
 		}
 		start = from_count != 0 ? from[index].amount : cascade_filter_identity(shape[index].kind);
 		end = to_count != 0 ? to[index].amount : cascade_filter_identity(shape[index].kind);
-		out[index].kind = shape[index].kind;
+		out[index] = shape[index];
 		out[index].amount = start + (end - start) * share;
 	}
 }
@@ -6668,6 +6686,20 @@ cascade_filters(
 		declared = &value->filters->filters[index];
 		out[index].kind = declared->kind;
 		out[index].amount = declared->amount.number;
+		out[index].dx = 0.0f;
+		out[index].dy = 0.0f;
+		out[index].blur = 0.0f;
+		out[index].color = 0;
+		out[index].url = declared->url;
+		if (declared->kind == CSS_FILTER_DROP_SHADOW) {
+			length = cascade_length(engine, &declared->shadow.lengths[0], style->font_size);
+			out[index].dx = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+			length = cascade_length(engine, &declared->shadow.lengths[1], style->font_size);
+			out[index].dy = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+			length = cascade_length(engine, &declared->shadow.lengths[2], style->font_size);
+			out[index].blur = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+			out[index].color = declared->shadow.color;
+		}
 		if (declared->kind == CSS_FILTER_BLUR) {
 			length = cascade_length(engine, &declared->amount, style->font_size);
 			out[index].amount = length.unit == CSS_UNIT_PX ? length.value : 0.0f;

@@ -6239,7 +6239,8 @@ values_filters(
 	} names[] = {
 		{ "blur", CSS_FILTER_BLUR }, { "brightness", CSS_FILTER_BRIGHTNESS }, { "contrast", CSS_FILTER_CONTRAST },
 		{ "grayscale", CSS_FILTER_GRAYSCALE }, { "hue-rotate", CSS_FILTER_HUE_ROTATE }, { "invert", CSS_FILTER_INVERT },
-		{ "opacity", CSS_FILTER_OPACITY }, { "saturate", CSS_FILTER_SATURATE }, { "sepia", CSS_FILTER_SEPIA }
+		{ "opacity", CSS_FILTER_OPACITY }, { "saturate", CSS_FILTER_SATURATE }, { "sepia", CSS_FILTER_SEPIA },
+		{ "drop-shadow", CSS_FILTER_DROP_SHADOW }
 	};
 	struct css_filter_list *list;
 	struct css_declared_filter *filter;
@@ -6266,9 +6267,26 @@ values_filters(
 	/* Each function. */
 	index = 0;
 	while (index < count) {
-		/* A reference to an SVG filter has no function here: it filters nothing. */
-		if (tokens[index].type == CSS_TOKEN_URL) {
+		/* Whitespace between the functions. */
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE) {
 			index++;
+			continue;
+		}
+
+		/* A reference to an SVG filter is kept by its URL; it filters nothing here. */
+		if (tokens[index].type == CSS_TOKEN_URL || (tokens[index].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[index], "url"))) {
+			struct css_value reference;
+
+			used = tokens[index].type == CSS_TOKEN_URL ? 1U : values_function_length(tokens + index, count - index);
+			if (used == 0 || list->count >= CSS_FILTERS)
+				return EINVAL;
+			error = values_url(parse, tokens + index, used, &reference);
+			if (error != 0)
+				return error;
+			list->filters[list->count].kind = CSS_FILTER_URL;
+			list->filters[list->count].url = reference.url;
+			list->count++;
+			index += used;
 			continue;
 		}
 		if (tokens[index].type != CSS_TOKEN_FUNCTION)
@@ -6287,6 +6305,22 @@ values_filters(
 			return EINVAL;
 		filter = &list->filters[list->count];
 		filter->kind = names[name].kind;
+
+		/* drop-shadow() takes a shadow's offsets, an optional blur and a color (no inset, no spread). */
+		if (filter->kind == CSS_FILTER_DROP_SHADOW) {
+			if (used < 3U)
+				return EINVAL;
+			error = values_one_shadow(tokens + index + 1U, used - 2U, &filter->shadow);
+			if (error != 0)
+				return error;
+			if (filter->shadow.inset || filter->shadow.lengths[3].number != 0.0f || filter->shadow.lengths[0].unit == CSS_DUNIT_PERCENT ||
+			    filter->shadow.lengths[1].unit == CSS_DUNIT_PERCENT || filter->shadow.lengths[2].unit == CSS_DUNIT_PERCENT ||
+			    filter->shadow.lengths[2].number < 0)
+				return EINVAL;
+			list->count++;
+			index += used;
+			continue;
+		}
 
 		/* No argument is the default (one, or zero for blur and hue-rotate). */
 		memset(&filter->amount, 0, sizeof(filter->amount));

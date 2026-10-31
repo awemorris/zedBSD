@@ -156,7 +156,6 @@
         for (i = 0; i < a.items.length; i++) if ((a.items[i].t === 'repeat') !== (b.items[i].t === 'repeat')) return null;
         items = [];
         for (i = 0; i < a.items.length; i++) {
-          if (trackKind(a.items[i]) !== trackKind(b.items[i]) && trackKind(a.items[i]) !== 'kw' && trackKind(b.items[i]) !== 'kw') return p < 0.5 ? a : b;
           r = mixValues(a.items[i], b.items[i], p);
           if (r === null && a.items[i].t === 'repeat') return null;
           items.push(r === null ? (p < 0.5 ? a.items[i] : b.items[i]) : r);
@@ -209,14 +208,47 @@
     var FILTER_IDENTITY = {
       blur: 0, brightness: 1, contrast: 1, grayscale: 0, invert: 0, opacity: 1, saturate: 1, sepia: 0, 'hue-rotate': 0
     };
+    function parseColor(text) {
+      var m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(text.trim());
+      return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null;
+    }
+    // The text of a color as the engine writes a computed one (the alpha as the shortest fraction of up to three decimals with its byte).
+    function colorText(c) {
+      var a = Math.min(1, Math.max(0, c.a)), alpha = Math.round(a * 255), frac = alpha / 255, d, scale, rounded = frac, r, g, b;
+      r = Math.min(255, Math.max(0, Math.round(c.r)));
+      g = Math.min(255, Math.max(0, Math.round(c.g)));
+      b = Math.min(255, Math.max(0, Math.round(c.b)));
+      if (alpha === 255) return 'rgb(' + r + ', ' + g + ', ' + b + ')';
+      for (d = 1; d <= 3; d++) {
+        scale = Math.pow(10, d);
+        rounded = Math.floor(frac * scale + 0.5) / scale;
+        if (Math.floor(rounded * 255 + 0.5) === alpha) break;
+      }
+      return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + rounded + ')';
+    }
     function parseFilters(text) {
-      var list, items = [], i, m, w, arg;
+      var list, items = [], i, m, w, arg, parts, color;
       if (text === 'none') return { t: 'filters', items: [] };
       list = words(text);
       for (i = 0; i < list.length; i++) {
         w = list[i];
         m = /^([a-z-]+)\((.*)\)$/.exec(w);
-        if (!m || FILTER_ARGS[m[1]] === undefined) return null;
+        if (!m) return null;
+        if (m[1] === 'url') {
+          parts = /^\s*"(.*)"\s*$/.exec(m[2]);
+          if (!parts) return null;
+          items.push({ name: 'url', s: parts[1] });
+          continue;
+        }
+        if (m[1] === 'drop-shadow') {
+          parts = /^(rgba?\([^)]*\))\s+(\S+)px\s+(\S+)px\s+(\S+)px$/.exec(m[2].trim());
+          if (!parts) return null;
+          color = parseColor(parts[1]);
+          if (!color) return null;
+          items.push({ name: 'drop-shadow', dx: parseFloat(parts[2]), dy: parseFloat(parts[3]), blur: parseFloat(parts[4]), c: color });
+          continue;
+        }
+        if (FILTER_ARGS[m[1]] === undefined) return null;
         arg = m[2].trim();
         if (FILTER_ARGS[m[1]][0] === 'len') {
           if (!/^[+-]?[\d.]+(?:e[+-]?\d+)?px$/i.test(arg)) return null;
@@ -239,6 +271,14 @@
       if (v.items.length === 0) return 'none';
       for (i = 0; i < v.items.length; i++) {
         f = v.items[i];
+        if (f.name === 'url') {
+          out.push('url("' + f.s + '")');
+          continue;
+        }
+        if (f.name === 'drop-shadow') {
+          out.push('drop-shadow(' + colorText(f.c) + ' ' + r4(f.dx) + 'px ' + r4(f.dy) + 'px ' + r4(f.blur) + 'px)');
+          continue;
+        }
         unit = f.name === 'blur' ? 'px' : f.name === 'hue-rotate' ? 'deg' : '';
         out.push(f.name + '(' + r4(f.v) + unit + ')');
       }
@@ -252,13 +292,29 @@
       else v = Math.max(0, v);
       return { name: f.name, v: v };
     }
+    // The identity of a filter function: what it mixes with when the other list has none there.
+    function filterIdentity(f) {
+      return f.name === 'drop-shadow' ? { name: 'drop-shadow', dx: 0, dy: 0, blur: 0, c: { r: 0, g: 0, b: 0, a: 0 } } : { name: f.name, v: FILTER_IDENTITY[f.name] };
+    }
+    // Mixes two colors with their channels premultiplied by the alpha (the alpha is limited to 0 to 1 after the mix).
+    function mixColor(a, b, p) {
+      var alpha = mixNumber(a.a, b.a, p), pr = mixNumber(a.r * a.a, b.r * b.a, p), pg = mixNumber(a.g * a.a, b.g * b.a, p), pb = mixNumber(a.b * a.a, b.b * b.a, p), clamped = Math.min(1, Math.max(0, alpha));
+      if (clamped === 0) return { r: 0, g: 0, b: 0, a: 0 };
+      return { r: pr / clamped, g: pg / clamped, b: pb / clamped, a: clamped };
+    }
     function mixFilters(a, b, p) {
       var n = Math.max(a.items.length, b.items.length), items = [], i, x, y;
       var common = Math.min(a.items.length, b.items.length);
       for (i = 0; i < common; i++) if (a.items[i].name !== b.items[i].name) return null;
+      for (i = 0; i < a.items.length; i++) if (a.items[i].name === 'url') return null;
+      for (i = 0; i < b.items.length; i++) if (b.items[i].name === 'url') return null;
       for (i = 0; i < n; i++) {
-        x = a.items[i] || { name: b.items[i].name, v: FILTER_IDENTITY[b.items[i].name] };
-        y = b.items[i] || { name: a.items[i].name, v: FILTER_IDENTITY[a.items[i].name] };
+        x = a.items[i] || filterIdentity(b.items[i]);
+        y = b.items[i] || filterIdentity(a.items[i]);
+        if (x.name === 'drop-shadow') {
+          items.push({ name: 'drop-shadow', dx: mixNumber(x.dx, y.dx, p), dy: mixNumber(x.dy, y.dy, p), blur: Math.max(0, mixNumber(x.blur, y.blur, p)), c: mixColor(x.c, y.c, p) });
+          continue;
+        }
         items.push(filterClamp({ name: x.name, v: mixNumber(x.v, y.v, p) }));
       }
       return { t: 'filters', items: items };
@@ -346,12 +402,17 @@
     }
     // The value of a keyframe: the specified text turned into the computed text (inherit and initial; the rest is as written).
     function keyframeText(el, prop, text) {
-      var t = text.trim(), parent;
+      var t = text.trim(), parent, v;
       if (t === 'initial' || t === 'unset') return INITIAL_OF[prop] !== undefined ? INITIAL_OF[prop] : t;
       if (t === 'inherit') {
         parent = el.parentElement || el.parentNode;
         if (parent && parent.nodeType === 1) return nativeGetComputedStyle.call(g, parent).getPropertyValue(prop);
         return INITIAL_OF[prop] !== undefined ? INITIAL_OF[prop] : t;
+      }
+      if (TYPE_OF[prop] === 'filter' && /currentcolor/i.test(t)) t = t.replace(/currentcolor/gi, nativeGetComputedStyle.call(g, el).getPropertyValue('color'));
+      if (TYPE_OF[prop] !== undefined) {
+        v = parseValue(TYPE_OF[prop], t);
+        if (!v || (v.t === 'kw' && t !== 'none' && t !== 'auto' && t !== 'content')) return canonical(prop, t);
       }
       return t;
     }

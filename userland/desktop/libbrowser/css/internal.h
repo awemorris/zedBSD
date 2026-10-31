@@ -616,6 +616,8 @@ struct css_declared_shadow {
 struct css_declared_filter {
 	int kind;
 	struct css_value amount;
+	struct css_declared_shadow shadow;
+	const struct vm_string *url;
 };
 
 /* A declared filter list, kept in the parse's arena (none is an empty list). */
