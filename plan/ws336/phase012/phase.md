@@ -2,7 +2,7 @@
 
 # ws336-p012: ssh-privsep（monitor との frame と同期の呼び出し）
 
-Status: in-progress（実装済み・試験 PASS、cleared は Q1 が決める。2026-11-01 06:16）
+Status: cleared（2026-11-01 06:22 Q1、main e8b028959）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p002

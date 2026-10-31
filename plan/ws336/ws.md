@@ -45,7 +45,7 @@
 | [p009](phase009/phase.md) | ssh-auth | planned | p005 | p003 経由 |
 | [p010](phase010/phase.md) | ssh-ttymodes・ssh-channel | cleared（2026-11-01 06:19 Q1、main 290b99bab。ssh-ttymodes・ssh-channel 実装、run-unit ttymodes 20682・channel 1603651 checks PASS（Q1 再実行で確認）。phase.md と header の食い違い 2 件（長さの上限を越えた要求は header の通り OTHER、no-more-sessions は want_reply なら SUCCESS）は担当の判断を採り、header の comment の直しは規約の見直しの Phase で） | p002 | — |
 | [p011](phase011/phase.md) | ssh-config | planned | p006 | p003 経由 |
-| [p012](phase012/phase.md) | ssh-privsep（frame） | in-progress（実装済み・試験 PASS 2026-11-01 06:16、cleared は Q1 が決める、Sonnet） | p002 | — |
+| [p012](phase012/phase.md) | ssh-privsep（frame） | cleared（2026-11-01 06:22 Q1、main e8b028959。ssh-privsep（monitor との frame と同期の呼び出し）実装、run-unit privsep 947 checks PASS（Q1 再実行で確認）。mon_call を呼ぶ process は SIGPIPE を無視する前提（p016・p017 で守る）） | p002 | — |
 | [p013](phase013/phase.md) | ssh-sftp（Q3 の A: sftp-server のため） | cleared（2026-11-01 06:09 Q1、main 8872d89fe。ssh-sftp（SFTP v3）実装、run-unit sftp 1836 checks PASS（Q1 再実行で確認）、ASan・UBSan、c89。READ の長さは parser が 64 KiB に切る（担当の判断、phase.md の結果）） | p002 | — |
 | [p014](phase014/phase.md) | ssh-keygen の program | planned | p006 | p003 経由 |
 | [p015](phase015/phase.md) | ssh の program・host の相互運用 A（Opus） | planned | p006・p008・p009・p010・p011 | p003 経由 |
