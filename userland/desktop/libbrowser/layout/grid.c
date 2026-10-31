@@ -705,6 +705,16 @@ layout_grid(
 		    grid_row_track(&box->style, item->row)->kind == CSS_TRACK_LENGTH &&
 		    grid_row_track(&box->style, item->row)->size.unit == CSS_UNIT_PX)
 			child->grid_room = layout_from_px(grid_row_track(&box->style, item->row)->size.value);
+		else if (item->row_span == 1 && grid.row_count == 1 && box->style.height.unit == CSS_UNIT_PX &&
+		    grid_row_track(&box->style, item->row)->kind == CSS_TRACK_AUTO) {
+			/* The only row, left to stretch in a grid with a height of its own, is as tall as that. */
+			child->grid_room = layout_from_px(box->style.height.value);
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				child->grid_room -= box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] +
+				    box->border[CSS_BOTTOM];
+			if (child->grid_room < 0)
+				child->grid_room = 0;
+		}
 	}
 
 	/* A subgrid lays its tracks with its own gap (the parent's when it gave none) once the parent has given the tracks. */
@@ -781,6 +791,11 @@ layout_grid(
 		saved_definite = tree->containing_height_definite;
 		if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
 			tree->containing_height_definite = grid_fixed_area_height(box, item, row_gap, &tree->containing_height);
+			if (!tree->containing_height_definite && item->box->grid_orthogonal && item->box->grid_room >= 0) {
+				/* An orthogonal item's lines run along the row, which a grid with a height of its own stretches to. */
+				tree->containing_height = item->box->grid_room;
+				tree->containing_height_definite = 1;
+			}
 			if (!tree->containing_height_definite)
 				tree->containing_height = 0;
 		}
@@ -841,6 +856,18 @@ layout_grid(
 		used = row_gap * (layout_unit)(grid.row_count - 1);
 		for (position = 0; position < grid.row_count; position++)
 			used += grid.rows[position];
+
+		/* A minimum height holds the container taller, and the gap is of that height. */
+		if (box->style.min_height.unit == CSS_UNIT_PX) {
+			layout_unit minimum_content;
+
+			minimum_content = layout_from_px(box->style.min_height.value);
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				minimum_content -= box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] +
+				    box->border[CSS_BOTTOM];
+			if (used < minimum_content)
+				used = minimum_content;
+		}
 		row_gap = (layout_unit)((float)used * box->style.row_gap.value / 100.0f) +
 		    layout_from_px(box->style.row_gap.offset);
 		if (row_gap < 0)
@@ -3743,6 +3770,24 @@ grid_ratio_width(
 			rows += layout_from_px(track->size.value);
 		}
 		height = (layout_unit)((float)rows * child->style.height.value / 100.0f) + layout_from_px(child->style.height.offset);
+	} else if (child->style.height.unit == CSS_UNIT_AUTO && child->style.margin[CSS_TOP].unit != CSS_UNIT_AUTO &&
+	    child->style.margin[CSS_BOTTOM].unit != CSS_UNIT_AUTO) {
+		int align;
+
+		/* An item stretched in fixed rows is as tall as they are (less its margins). */
+		align = child->style.align_self;
+		if (align == CSS_ALIGN_AUTO)
+			align = box->style.align_items;
+		if (align != CSS_ALIGN_STRETCH)
+			return 0;
+		if (!grid_fixed_rows_height(box, item, gap, &rows))
+			return 0;
+		layout_box_model(child, 0);
+		height = rows - child->margin[CSS_TOP] - child->margin[CSS_BOTTOM];
+		if (child->style.box_sizing != CSS_BOX_SIZING_BORDER)
+			height -= child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
+		if (height < 0)
+			height = 0;
 	} else {
 		return 0;
 	}
@@ -3751,10 +3796,24 @@ grid_ratio_width(
 	layout_box_model(child, 0);
 	frame_x = child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
 	frame_y = child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
+
+	/* The height keeps within its pixel limits first, and the width within its own after. */
+	if (child->replaced && child->style.max_height.unit == CSS_UNIT_PX &&
+	    height > layout_from_px(child->style.max_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0))
+		height = layout_from_px(child->style.max_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0);
+	if (child->replaced && child->style.min_height.unit == CSS_UNIT_PX &&
+	    height < layout_from_px(child->style.min_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0))
+		height = layout_from_px(child->style.min_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0);
 	if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
 		*width = (layout_unit)((float)height * ratio);
 	else
 		*width = (layout_unit)((float)height * ratio) + frame_x;
+	if (child->replaced && child->style.max_width.unit == CSS_UNIT_PX &&
+	    *width > layout_from_px(child->style.max_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x))
+		*width = layout_from_px(child->style.max_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x);
+	if (child->replaced && child->style.min_width.unit == CSS_UNIT_PX &&
+	    *width < layout_from_px(child->style.min_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x))
+		*width = layout_from_px(child->style.min_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x);
 	(void)frame_y;
 	*width += child->margin[CSS_LEFT] + child->margin[CSS_RIGHT];
 
@@ -3781,6 +3840,7 @@ grid_lay_item(
 	layout_unit remaining;
 	layout_unit frame;
 	layout_unit sizing;
+	struct css_length saved_height;
 	int left_auto;
 	int right_auto;
 	int side;
@@ -3873,7 +3933,27 @@ grid_lay_item(
 	item->style.min_width.unit = CSS_UNIT_PX;
 	item->style.min_width.value = 0;
 	item->style.max_width.unit = CSS_UNIT_NONE;
+
+	/* A picture stretched across takes its height from its ratio. */
+	saved_height = item->style.height;
+	if (item->replaced && justify == CSS_ALIGN_STRETCH && item->style.height.unit == CSS_UNIT_AUTO) {
+		layout_unit ratio_width;
+		layout_unit ratio_height;
+
+		ratio_width = item->natural_width;
+		ratio_height = item->natural_height;
+		if (item->image != NULL) {
+			ratio_width = (layout_unit)item->image->width;
+			ratio_height = (layout_unit)item->image->height;
+		}
+		if (ratio_width > 0 && ratio_height > 0) {
+			item->style.height.unit = CSS_UNIT_PX;
+			item->style.height.value = layout_to_px((layout_unit)((float)content * (float)ratio_height / (float)ratio_width));
+			item->style.height.offset = 0;
+		}
+	}
 	error = layout_block(tree, item, width);
+	item->style.height = saved_height;
 	if (error == 0 && (left_auto || right_auto)) {
 		/* Auto margins absorb only the area left after the item's content-sized box. */
 		remaining = width - item->margin[CSS_LEFT] - item->border[CSS_LEFT] -
@@ -4226,6 +4306,8 @@ grid_relay_item(
 		justify = item->parent->style.justify_items;
 	if (justify == CSS_ALIGN_NORMAL || justify == CSS_ALIGN_AUTO)
 		justify = grid_normal_starts(item) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+	if (item->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || item->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+		justify = CSS_ALIGN_START;
 	if (item->replaced && saved.width.unit == CSS_UNIT_AUTO && ratio_width > 0 &&
 	    ratio_height > 0 && align == CSS_ALIGN_STRETCH && justify != CSS_ALIGN_STRETCH &&
 	    item->style.height.unit == CSS_UNIT_AUTO) {
