@@ -33,6 +33,9 @@
   14. 2026-11-01 ユーザーから、libkeiland はまず browser が動くのに要る部分だけを部分的に移植して動かすところまで進め、全体の移植は後でじっくり行う、という趣旨の指示を受けた（決定 3 の進め方。全体の移植を WS334 の後半か WS234 などに分けるかは設計で案を出す）。
   15. 2026-11-01 ユーザーから、ブラウザの UI はまず libkeiland の Win32 の backend の上で今の Keiland の UI のまま移植する（A）、libkeiland で足りなければ後で Win32 を直に使う版を作ればよい（大きな実装ではないため）、という趣旨の指示を受けた。Chrome も Fluent を使わない事、font は自前でよい事、menu は最近のブラウザに無く要る時は HMENU に写せばよい事、libkeiland が作るのは HWND 1 つである事が理由。
   16. 2026-11-01 ユーザーから、https の libssl は当面 OpenSSL の物を使い、後で libssl-compat を開発した時にそれへ切り替える、という趣旨の指示を受けた（U10 の A に当たる。切り替えやすいように、OpenSSL への依存は libbrowser の net/tls.c などの口に閉じ込めておく）。
+  17. 2026-11-01 ユーザーが llvm-mingw を host の `~/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64`（clang 23.1.4、UCRT、x86_64・aarch64 の Windows の target）に入れた（U3。Q1 が使用を許可、共有の toolchain/ は変えない）。
+  18. 2026-11-01 ユーザーから、信頼する証明書は userland/packages の ca-certificates を使い、その上で Windows の証明書の store も見る、という趣旨の指示を受けた。
+  19. 2026-11-01 ユーザーから、Windows の試験の機械は QEMU の guest でもよい、という趣旨の指示と、Vulkan が使えるかの問いを受けた（Q1 の答えは design-notes.md）。
 
 ## Resume point
 

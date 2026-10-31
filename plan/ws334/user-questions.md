@@ -47,6 +47,8 @@
 
 ### U3 cross compile の toolchain（決定 11。統括の Q1 の許可も要る）
 
+- **決まった（2026-11-01、決定 17）**: ユーザーが llvm-mingw を `~/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64` に入れた。Q1 が使用を許可。Debian の gcc-mingw-w64-ucrt64 は要らない。
+
 - 問い: llvm-mingw（版を固定した release を取得・照合）を host と Windows の host に入れてよいか。
 - 推し: 入れる。arm64 の Windows（`make browser-winarm64`）に要る。入るまでは、Debian の UCRT 版の mingw-w64 の gcc（package `gcc-mingw-w64-ucrt64`、apt で入る。
   今入っている版は古い C の runtime（msvcrt）で作られていて新しい runtime（UCRT）と混ぜられない）で x86_64 だけを先に作る。この package の導入も許可の対象。

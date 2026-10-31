@@ -29,3 +29,14 @@
 - IndexedDB など他の保存は見当たらない。
 - ストレージバックエンドに分ける時の要点: cookie の jar が process の global なので instance ごとにする、cookie と HTTP の cache の保存（disk）は今は無い、
   localStorage の file の場所と口が POSIX と XDG に直に依る。
+
+## Windows を QEMU の guest で試す時の Vulkan（2026-11-01 ユーザーの問いへの Q1 の答え、Q1 の知識から・未確かめ）
+
+- QEMU の普通の Windows の guest（virtio-gpu・VGA）には、GPU の Vulkan の driver が無い。Venus（virtio-gpu の Vulkan）は Mesa の Linux の guest 用で、Windows の guest の
+  driver は無い。virtio-gpu の 3D の Windows の driver（viogpu3d）は試験的で OpenGL（VirGL）だけ。
+- 使える道: (1) CPU の Vulkan（Mesa の lavapipe か SwiftShader の Windows 版の DLL を同梱して loader に見せる）: 動くが遅い。描画が正しいかの確かめと smoke の試験には足りる。
+  (2) GPU の passthrough（VFIO）: 10.0.10.3 の RTX 2070 は既に vfio-pci にあるので、Windows の VM に渡せば NVIDIA の本物の Vulkan が使える（WS305 の領域、保留中）。
+  (3) 実機の Windows の PC。
+- Q1 の推し: build と画面の出る起動・機能の試験は QEMU の Windows の guest（x86_64、KVM）＋ CPU の Vulkan と設計の CPU の描画の道で。GPU の Vulkan の確かめ（速さ・
+  Vulkan Video）は passthrough（10.0.10.3）か実機で、shell がある程度できてから。arm64 の Windows は QEMU では遅い（TCG）ので build の確かめまで。
+- Windows の install の media と license（評価版など）はユーザーが用意する。
