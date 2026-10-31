@@ -43,43 +43,43 @@
 ## Resume point
 
 - 2026-11-01 01:30 決定 22（標準廉価実装手順）で Phase の表を組み直した: 設計の Phase p002〜p004 で全部の module の header・.c の骨格・試験の道具・実装の phase.md・design-reviewer を済ませ、
-  p004 が cleared になるまで実装の Phase（p005 以降）を始めない。P7 が q1790 で p002 から。開発と試験は host の Wine＋llvmpipe（決定 20）。
+  p004 が cleared になるまで実装の Phase（p005 以降）を始めない。統合（Opus）の Phase の phase.md も設計の Phase で書き、実装の間に設計の判断を残さない（Q1 の条件）。module の Phase（Sonnet）は表の順が優先の順で、Q1 が 4〜6 本ずつ起動する（目安: 1 組目 p005・p009・p010・p012・p013・p020、2 組目 p006・p007・p008・p011・p014、3 組目 p015〜p019）。P7 が q1790 で p002 から。開発と試験は host の Wine＋llvmpipe（決定 20）。
 
 ## Phase
 
 | ID | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計: libbrowser の 3 つのエンジン（レンダリング・スクリプト・ストレージ）への分割と interface（DOM の access、スクリプトの core と binding の分離）、libkeiland の Windows の backend（Win32 直か Qt6 か、window・入力・描画・IME・clipboard・file・thread・socket）、libmedia と Vulkan・Vulkan Video の Windows での使い方、既存の library（libtruetype・png・gif・jpeg の compat）の build、cross compile の toolchain、.exe・DLL・resource、名前 OmniGrammaton、試験の方法、Phase の分け方、ユーザーへの問い | cleared（2026-11-01 01:25、設計 main b2a7e8454、問い U1〜U15 は全部答えが出た） | — |
-| p002 | 設計 A（libbrowser・libmedia・build）: module の分け、header（`base/os-*.h`・`storage/*.h`・公開の `include/browser/storage.h`・`libmedia/media-os.h`）、.c の骨格、build の骨格（`apps/browser-win32/Makefile`・一番上の `browser-win64`・`browser-winarm64`、骨格の .c だけを compile）、試験の道具（`plan/ws334/tests/`: run-unit.sh・check-skeleton.sh・check.h、Windows の側は llvm-mingw で cross compile して Wine で流す）、実装の phase.md（p005〜p015・p021〜p027・p030） | in-progress（2026-11-01 01:30 P7 q1790） | p001 |
-| p003 | 設計 B（libkeiland の Win32・apps）: module の分け、header（`libkeiland/win32/keys-table.h`・`cf-html.h`・`frame.h`・`input.h`・`wide.h`、`platform/platform.h` の OS ごとの形、`apps/browser-win32/tools/ico.h`）、.c の骨格、試験の道具の追加、実装の phase.md（p010・p016〜p020・p028・p029・p031〜p035） | planned | p002 |
+| p002 | 設計 A（libbrowser・libmedia・build）: module の分け、header（`base/os.h`・`os-win32.h`・`os-system.h`・`os-file.h`・`os-net.h`・`os-time.h`・`os-zones.h`、`storage/records.h`・`files.h`・`queue.h`、公開の `include/browser/storage.h`、`libmedia/media-os.h`）、.c の骨格、build の骨格（`apps/browser-win32/Makefile`・一番上の `browser-win64`・`browser-winarm64`、骨格の .c を compile）、試験の道具（`plan/ws334/tests/`: run-unit.sh・check-skeleton.sh・check.h。Windows の側は llvm-mingw で cross compile して Wine で流す）、実装の phase.md（p005〜p013・p020〜p027・p030） | in-progress（2026-11-01 01:30 P7 q1790） | p001 |
+| p003 | 設計 B（libkeiland の Win32・apps）: module の分け、header（`libkeiland/win32/keys-table.h`・`frame.h`・`wide.h`・`input.h`・`cf-html.h`、`platform/platform.h` の OS ごとの形、`apps/browser-win32/tools/ico.h`）、.c の骨格、試験の道具の追加、実装の phase.md（p014〜p019・p028・p029・p031〜p035） | planned | p002 |
 | p004 | 設計の確定: design-reviewer の 1 本と指摘の反映（design.md に表）、header の確定の commit（= 基点の SHA、全 phase.md に記録）、骨格の照合の PASS | planned | p003 |
-| p005 | 実装（glue、Opus）: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の本体（library・DLL・.def・Vulkan の header の取得と遅延の import）、libtruetype `companion.c` の 1 関数と gif の `O_BINARY`、`cross-build.sh`（旧 p002、design §8） | planned | p004 |
-| p006 | 実装 module（Sonnet）: `base/os-file.h` → `os-file-posix.c`・`os-file-win32.c`（file の読み書き・置き換え・path・作業の directory・directory の作り・一覧・file: の path ↔ URL・data の directory） | planned | p004 |
-| p007 | 実装 module（Sonnet）: `base/os-time.h` → `os-time-posix.c`・`os-time-win32.c`（単調の時計・壁の時計・地域の時差・時刻帯の名前） | planned | p004・p008 |
-| p008 | 実装 module（Sonnet、表の data）: `base/os-zones.h/.c`（Windows の時刻帯の key → 英語の長い名前、CLDR の data） | planned | p004 |
-| p009 | 実装 module（Sonnet）: `base/os-net.h` → `os-net-posix.c`・`os-net-win32.c`（socket・待ち・起こし・socket の誤り） | planned | p004 |
-| p010 | 実装 module（Sonnet、表の data、旧 p010 = T1）: `libkeiland/win32/keys-table.h/.c`（scan code → evdev の番号） | planned | p004 |
-| p011 | 実装 module（Sonnet）: `base/os-system.h` → `os-system-posix.c`・`os-system-win32.c`（揃えた確保・乱数・thread の名前・library の読み込み・名乗り・根の証明書の列挙） | planned | p004 |
-| p012 | 実装 module（Sonnet）: `storage/records.h/.c`（key の作り・FNV-1a 64・衝突の番号、cookie・cache・LOCAL v1/v2 の記録の encode と decode） | planned | p004 |
-| p013 | 実装 module（Sonnet）: `storage/files.h/.c`（files の backend、`browser_storage_calls` の実装、OS の lock） | planned | p006・p012 |
-| p014 | 実装 module（Sonnet）: `storage/queue.h/.c`（instance の storage の thread と queue、write-behind と読みの頼み） | planned | p004 |
-| p015 | 実装 module（Sonnet）: `libmedia/media-os.h` → `media-os-posix.c`・`media-os-win32.c`（Vulkan の loader の読み込み、file の開き・大きさ・位置の読み） | planned | p004 |
-| p016 | 実装 module（Sonnet、旧 T2）: `libkeiland/win32/cf-html.h/.c`（CF_HTML の encode と decode） | planned | p004 |
-| p017 | 実装 module（Sonnet、旧 T3）: `apps/browser-win32/tools/ico.h/.c`（ICO の writer、PNG と BMP の entry） | planned | p004 |
-| p018 | 実装 module（Sonnet）: `libkeiland/win32/frame.h/.c`（custom frame の幾何: hit test・題の帯の button の配置・DPI の倍率） | planned | p004 |
-| p019 | 実装 module（Sonnet）: `libkeiland/platform/platform-win32.c`（`platform.h` の起こし・lock・thread を Win32 で） | planned | p004 |
-| p020 | 実装 module（Sonnet）: `libkeiland/win32/wide.h/.c` と `input.h/.c`（UTF-16 ↔ UTF-8・surrogate の組、wheel の積み・pointer・修飾の鍵の写し） | planned | p004 |
-| p021 | 統合（Opus、旧 p003）: libbrowser の OS に触れる所（O13〜O24・O28〜O31・O34）を OS の層へ、`wb_memmem`、Makefile の posix・win32 の選び | planned | p005・p006・p007・p011 |
-| p022 | 統合（Opus、旧 p004）: network の Windows（O1〜O10・O32・O33 を os-net へ）、libmedia の wake の callback と `net_loader_ring` | planned | p009・p021 |
-| p023 | 統合（Opus、旧 p005）: instance と API v4、cookie の jar・Web Storage を instance へ、storage の module をつなぐ、利用側の v4 | planned | p012・p013・p014・p022 |
+| p005 | module（Sonnet）: `base/os-win32.h/.c`（Win32 の誤り → errno、UTF-8 ↔ UTF-16）と `base/os-system.h` → `os-system-posix.c`・`os-system-win32.c`（揃えた確保・乱数・thread の名前・library の読み込み・名乗り・data の directory・根の証明書の列挙） | planned | p004 |
+| p006 | module（Sonnet）: `base/os-file.h` → `os-file-posix.c`・`os-file-win32.c`（file の読み書き・置き換え・full path・作業の directory・directory の作りと一覧・file: の path ↔ URL・file の lock） | planned | p005 |
+| p007 | module（Sonnet）: `base/os-net.h` → `os-net-posix.c`・`os-net-win32.c`（socket・待ち・起こし） | planned | p005 |
+| p008 | module（Sonnet）: `base/os-time.h` → `os-time-posix.c`・`os-time-win32.c`（単調の時計・壁の時計・地域の時差・時刻帯の名前） | planned | p005・p009 |
+| p009 | module（Sonnet、表の data）: `base/os-zones.h/.c`（Windows の時刻帯の key → 英語の長い名前、CLDR の data） | planned | p004 |
+| p010 | module（Sonnet）: `storage/records.h/.c`（key の作り・FNV-1a 64・衝突の番号、cookie・cache・LOCAL v1/v2 の記録の encode と decode） | planned | p004 |
+| p011 | module（Sonnet）: `storage/files.h/.c`（files の backend、公開の `browser_storage_calls` の実装） | planned | p006・p010 |
+| p012 | module（Sonnet）: `storage/queue.h/.c`（instance の storage の thread と queue、write-behind と読みの頼み） | planned | p004 |
+| p013 | module（Sonnet）: `libmedia/media-os.h` → `media-os-posix.c`・`media-os-win32.c`（Vulkan の loader の読み込み、file の開き・大きさ・位置の読み） | planned | p004 |
+| p014 | module（Sonnet、表の data、旧 T1）: `libkeiland/win32/keys-table.h/.c`（scan code → evdev の番号） | planned | p004 |
+| p015 | module（Sonnet）: `libkeiland/win32/frame.h/.c`（custom frame の幾何: hit test・題の帯の button の配置・DPI の倍率） | planned | p004 |
+| p016 | module（Sonnet）: `libkeiland/platform/platform-win32.c`（`platform.h` の起こし・lock・thread を Win32 で） | planned | p004 |
+| p017 | module（Sonnet）: `libkeiland/win32/wide.h/.c` と `input.h/.c`（UTF-16 ↔ UTF-8・surrogate の組、wheel の積み・pointer・修飾の鍵の写し） | planned | p004 |
+| p018 | module（Sonnet、旧 T2）: `libkeiland/win32/cf-html.h/.c`（CF_HTML の encode と decode） | planned | p004 |
+| p019 | module（Sonnet、旧 T3）: `apps/browser-win32/tools/ico.h/.c`（ICO の writer、PNG と BMP の entry） | planned | p004 |
+| p020 | glue（Opus、旧 p002）: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の本体（library・DLL・.def・Vulkan の header の取得と遅延の import）、libtruetype `companion.c` の 1 関数と gif の `O_BINARY`、`cross-build.sh` | planned | p004 |
+| p021 | 統合（Opus、旧 p003）: libbrowser の OS に触れる所（O13〜O24・O28〜O31・O34）を OS の層へ、`wb_memmem`、Makefile の posix・win32 の選び | planned | p005・p006・p008・p020 |
+| p022 | 統合（Opus、旧 p004）: network の Windows（O1〜O10・O32・O33 を os-net へ）、libmedia の wake の callback と `net_loader_ring` | planned | p007・p021 |
+| p023 | 統合（Opus、旧 p005）: instance と API v4、cookie の jar・Web Storage を instance へ、storage の module をつなぐ、利用側の v4 | planned | p010・p011・p012・p022 |
 | p024 | 統合（Opus、旧 p006）: 永続の HTTP の cache（U5 で第 2 段、後へ） | planned | p023 |
 | p025 | 統合（Opus、旧 p007）: script の core の archive と link の確かめ | planned | p021 |
-| p026 | 統合（Opus、旧 p008）: libmedia の Windows（M2・M4・M7・M9 を media-os へ）と mediafile | planned | p015・p022 |
+| p026 | 統合（Opus、旧 p008）: libmedia の Windows（M2・M4・M7・M9 を media-os へ）と mediafile | planned | p013・p022 |
 | p027 | 統合（Opus、旧 p009）: browser の UI の準備（`browser_main`、libkeiland の header の追加と Wayland の実装、present・CPU の道・鍵の text・時計） | planned | p023 |
-| p028 | 統合（Opus、旧 p011）: libkeiland の Win32 その 1（共通の file の棚卸し、kl_app・kl_window・loop・入力・枠・暗い mode・Vulkan の surface・CPU の表示・stub）、`apps/browser-win32/` の入口・単一の起動・resource。Wine＋xvfb-run で画面を撮る | planned | p010・p018・p019・p020・p025・p026・p027 |
-| p029 | 統合（Opus、旧 p012）: その 2（題の帯の controls、IMM32、clipboard、DPI） | planned | p016・p028 |
-| p030 | 統合（Opus、旧 p013）: OpenSSL の Windows の build と根（packages の ca-certificates ＋ Windows の store） | planned | p011・p022 |
-| p031 | 統合（Opus、旧 p014）: 配る形（zip、license、icon、版の情報） | planned | p017・p029・p030 |
+| p028 | 統合（Opus、旧 p011）: libkeiland の Win32 その 1（共通の file の棚卸し、kl_app・kl_window・loop・入力・枠・暗い mode・Vulkan の surface・CPU の表示・stub）、`apps/browser-win32/` の入口・単一の起動・resource。Wine＋xvfb-run で画面を撮る | planned | p014・p015・p016・p017・p025・p026・p027 |
+| p029 | 統合（Opus、旧 p012）: その 2（題の帯の controls、IMM32、clipboard、DPI） | planned | p018・p028 |
+| p030 | 統合（Opus、旧 p013）: OpenSSL の Windows の build と根（packages の ca-certificates ＋ Windows の store） | planned | p005・p022 |
+| p031 | 統合（Opus、旧 p014）: 配る形（zip、license、icon、版の情報） | planned | p019・p029・p030 |
 | p032 | 試験（Opus、旧 p015）: Wine＋llvmpipe での確かめの第 1 回（決定 20） | planned | p031 |
 | p033 | 統合（Opus、旧 p016）: 後半の Windows の口（TSF・drag と drop・touchpad・accent・Mica・DPAPI、arm64） | planned | p032 |
 | p034 | 試験（Opus、旧 p017）: libbrowser の試験を Windows（Wine）で | planned | p032 |
