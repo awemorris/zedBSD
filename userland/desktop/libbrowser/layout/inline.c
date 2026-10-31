@@ -740,6 +740,9 @@ inline_add_atomic(
 	box->has_baseline = 0;
 	box->control_baseline = 0;
 	clips = layout_clips(box);
+	/* An orthogonal inline block has no baseline along the line: its bottom margin edge stands on it. */
+	if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB && cutter->tree->logical_mode == CSS_WRITING_HORIZONTAL_TB)
+		clips = 1;
 	if (!clips) {
 		/* An inline flex or grid container stands on its first baseline instead. */
 		if (box->style.display == CSS_DISPLAY_INLINE_FLEX || box->style.display == CSS_DISPLAY_INLINE_GRID)
