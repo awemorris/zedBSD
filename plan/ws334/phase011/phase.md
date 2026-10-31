@@ -3,7 +3,7 @@
 # ws334-p011 files の backend: files
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: 実装済み・試験 PASS（cleared は Q1。2026-11-01 p002 で作成）。
 - 依存: p006・p010（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 
@@ -61,3 +61,29 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+- 日時: 2026-11-01 04:47（host の `date`）。実装の担当: Sonnet 5.5（phase-runner-low）。状態: 実装済み・試験 PASS（cleared は Q1）。
+- 作った物: `userland/desktop/libbrowser/storage/files.c`（open と table の 6 つの call）、`plan/ws334/tests/unit/test-files.c`。header・試験の道具・他の module は変えていない。
+- 試験: `LC_ALL=C.UTF-8 sh plan/ws334/tests/run-unit.sh files` → `test-files: PASS (679 checks) (posix)`・`(win32)`（Wine）、`run-unit: PASS`。
+  `run-unit.sh all` → 全部 PASS（files は posix・win32 とも 679）、`run-unit: PASS`。`BASE=d393d3267 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`（headers 19・sources 22）。`git diff --check` は出力なし。
+- 試験の内容: open（親ごとの作成、同じ process の 2 回目の open は EBUSY で出力が NULL、close の後は開ける、NULL・空・出力の NULL は EINVAL、file と file の下は ENOTDIR、失敗で lock が残らない）、
+  table の version と全 member、space 1・2・3・7 の write・read・上書き（短くする上書きも）・remove・list・clear の往復と space どうしの分離、0 byte・1 byte・CR/LF/0x1a を含む bytes・3 MiB（prefix の後ろに足す）・200 文字の key、
+  64 MiB ちょうどの file は found 1、64 MiB + 1 は sink の EFBIG、list（不正な名前・一時の file・長すぎる名前・".ls" の無い file・大文字の ".LS" を出さない、each の停止値が ENOENT でも 4 でもそのまま返る）、
+  clear が不正な名前の file を残すこと、layout（`cookies/<key>`・`cache/<key>`・`local-storage/<key>.ls`・`space-7/<key>`・`space-0`・`space-4294967295`・`lock`）、
+  今の localStorage の file（origin の 16 進の名前、`wb_storage_key_text` と手の 16 進が一致、read と list で見つかる）、不正な key（""・大文字・'/'・'.'・'\\'・UTF-8・201 文字）が space 1〜4 の read・write・remove で EINVAL で何も作らない、
+  壊れた・切れた file（0〜39 byte の全部の長さ）がそのまま渡ること、record の名前の directory（read・remove は失敗、write は失敗して directory と一時の file が残らない、clear は他を消して失敗を返す）、
+  space の場所にある普通の file（read は found 0、list は空、remove・clear は 0、write は ENOTDIR）、crash で残った一時の file が record にならず同じ key の write が進むこと、
+  相対の directory が current directory の変更の後も同じ所を指すこと、末尾の '/' の directory が同じ lock、別の process（"files-child" が EBUSY、close の後の "files-free" が成功）。
+- 壊しての確認（git の外、`cmp` で戻りを確認。posix で実行）: ".ls" の長さ、list の停止値の保存、list の ENOENT の扱いの削除、read の found、key の長さの境界（200 を 199 に。初回は見逃し、
+  200 文字の key が list に出る確認を足して FAIL）、clear の最初の失敗の保持、"space-" の名前、lock の取得の削除、read の piece の進み、write の key の検査の削除が全部 FAIL。
+- 自分で決めた点（header が黙っている所）:
+  - open は directory の絶対の形（`wb_os_full_path`、末尾の '/' を除く）を保ち、以後の path はそれから組む（current directory を変えられても同じ所を指す）。lock は絶対の形で取る。
+  - read は `found` が NULL の時も含め、`found` を最初に 0 にする。context・key・sink が NULL は EINVAL。read は ENOENT と ENOTDIR（space の場所に普通の file）を found 0 にする。他の error（EISDIR・EACCES など）はそのまま返す。
+  - remove の ENOENT・ENOTDIR は 0。list の ENOENT・ENOTDIR は何も出さず 0。list の each の戻り値は、directory の walk 自身の error（ENOENT など）と区別して保ち、そのまま返す。
+  - write の bytes が NULL で length 0 は 0 byte の record（有効）。bytes が NULL で length が 0 より大きいのは EINVAL。write の前に space の directory を毎回 `wb_os_make_directories` で確かめる（既にあれば 0）。
+  - clear は先に key を全部集めてから消す（walk の途中で directory を変えない）。最初の失敗を返し、残りも試す。record の名前の directory は list に出るので clear は EISDIR 相当の失敗を返す（stat の口が無く file と区別しない）。
+  - 空の file は found 1 で sink に何も足さない。64 MiB を超える file も `wb_os_file_read` で全部読んでから sink が EFBIG にする（header の「whole を読む」に従う）。
+  - Windows は末尾が '.' の名前を落とす（"0d." は "0d" になる）ので、試験の不正な名前に使わない。
+- 未実施: ENOMEM の経路（確保の失敗の注入）、実機の Windows、aarch64 の Windows の実行（arm64 の Wine が無い、compile は check-skeleton で通る）、壊しての確認の win32 での実行（posix のみ）。
