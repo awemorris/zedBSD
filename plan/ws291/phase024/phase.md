@@ -258,3 +258,28 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
 
 - b256: big-100 +8 %（record の段 0.65 → 0.53 ms）、big-1000 +3〜4 %（record 3.9 → 3.55 ms）、subs は揺れの内。画素は 3 腕とも差 0。
   QEMU の Venus は lv6・lv5 とも PASS（build/tmp/p024i2-venus4）。
+- 256 KiB と 128 KiB（01:35〜01:48、build/tmp/p024i2-ab5）: b256 big-100 608.5・587.5、big-1000 118.7・119.3、subs-100 359.7・361.2、
+  subs-1000 41.66・40.34。b128（lv7 729938090）617.5・619.1、117.9・118.7、347.6・360.1、38.16・40.96。128 KiB は big-100 で少し上だが
+  揺れの内で、transaction が倍になるので 256 KiB を採った（commit 8a3a95131、libvulkan 1775217122 = lv6 と同じ）。画素は差 0（13 比べ）。
+
+### 再開点（2026-11-01 02:0x P3、q1785-i02 を返す）
+
+- branch agent/p3-ws291wsi の commit（main 71f8b7d8b の上）: 1e75e4de4（GPU core の stream の buffer と monitor の起床、executor の state、
+  libvulkan の writer、rtx-p024.sh、診断の patch）、09d54c61b（記録）、8a3a95131（recording の batch 256 KiB と記録）と、この記録の commit。
+- 到達（RTX 2070、同じ window の main の腕との比べ、main = 案 A・B と js3 の後）: subs-1000 35.0 → 43 fps 前後（i2a・b256、窓ごとの揺れ 39〜44）、
+  subs-100 304 → 355〜365、big-1000 114 → 118〜119、big-100 555 → 590〜610。目標（NVK subs-1000 75.4、big-1000 136.2）は未達。
+- 残りの見立て（d3 の内訳から）:
+  - subs-1000 の 1 submit は約 23 µs（vkQueueSubmit 約 17 µs、record 約 5.6 µs）。kernel の GPU_JOB_SUBMIT 約 15 µs は、executor 6（draw 16 本 3.3、
+    ring 1.0）、decode 1.7、RESET 0.8、user の copy 4 回 約 3（要求の copyin 1.0、stream 0.7、copyout 2 回）、GPU core の記録の出し入れ約 3.5 と散らばり、
+    1 つで 3.5 µs を越える物は無い。NVK（1 submit 約 13 µs、record 込み）に届くには形を変える要がある:
+    (a) 小さな copyin・copyout の速い道（kernel の VM、`vmspace_copy_*` が page を pin する: WS291 の外、Q1 の判断）、
+    (b) 記録の時に push buffer まで作る（kernel の decode と executor を recording の thread の側に寄せ、submit は ring だけ: 設計の Phase が要る）、
+    (c) fence の無い submit の job（製品の判断、Q1 がユーザーに聞いている）。
+  - big-1000（frame 約 8.4 ms）: client の encode 約 3.5 ms（GPU は待つ）＋ GPU 約 4.4 ms（submit の始めから、1 draw 約 0.22 µs で NVK の 0.256 より
+    速い）＋ 0.3。136.2 fps（7.35 ms）には encode を約 2.6 ms に縮めるか、GPU を encode の間に走らせる（(b) と Vulkan の submit の意味の外）要がある。
+    vkCmd* 1 本 約 45 ns（push 128 byte の draw で 4 本）。target 上に user の profiler が無く、encode の内訳は未計測。
+  - 一覧の 5（game mode の lend の時の big-100 の遅れ）は未着手（b256 で big-100 は 555 → 600 前後に上がったが、lend との関係は調べていない）。
+- 未実施: amdrdna・i915・powervr の BUG-381 の直し（前から）、i2a・b256 の 3 round 交互の比べ（2 round まで）。
+- 消す物（Q1 へ）: build/tmp/p024i2-*（診断と A/B の出力、tree の写し p024i2-diag・p024i2-d3t・p024i2-main・p024i2-cfg）、build/p024/{bench0,bench0fp,
+  bench1fp,cfg-i2a,i2c,lv4,lv5,lv7,u-i2a,u-main}（使い終わり）、build/p024/u-i2a/bin/'*' と u-main/bin/'*'（誤って作った壊れた symlink、u-main は v2 の後）。残す: build/p024/{base,js3,lv2,i2a,lv3,lv6,
+  lv8,u-fin,forge2}。
