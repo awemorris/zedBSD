@@ -65,7 +65,7 @@
   - `timeout 3600 sh plan/ws334/tests/run-unit.sh all` → 全部の試験が posix・win32 とも PASS、`run-unit: PASS`。
   - `BASE=d393d3267 timeout 1800 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`（headers: 19、sources: 22）。
   - `git diff --check` → 出力なし。
-- 期待の値: encode は header の形に従い行の長さを手で数えた bytes（空 = StartHTML 105・EndHTML 175、"<b>x</b>" = 105・183・139・147、URL "http://a/" 付き = 126・204・160・168 など）。decode の 70 弱の data は、offset を text の中の marker の位置から求めた（C の code と別の道、Python で生成して literal として貼った）。仕様の文書の例（offset が bytes の位置と合わない物）は EINVAL の試験にだけ使った（header が最小の offset で切れて Version が読めない）。
+- 期待の値: encode は header の形に従い行の長さを手で数えた bytes（空 = StartHTML 105・EndHTML 175、"<b>x</b>" = 105・183・139・147、URL "http://a/" 付き = 126・204・160・168 など）。decode の 64 の data は、offset を text の中の marker の位置から求めた（C の code と別の道、Python で生成して literal として貼った）。仕様の文書の例（offset が bytes の位置と合わない物）は EINVAL の試験にだけ使った（header が最小の offset で切れて Version が読めない）。
 - 試験の内容: encode の exact bytes・size の境（要る長さ + NUL ちょうど / 1 足りない / 0）・CR/LF の URL・NULL の引数・9999999999 の限度と size_t の wrap（64 bit のみ限度の値）、decode の手作りの data（LF のみ・CR のみ・0 の詰め・-1・未知の name・Selection の行・SourceURL の重複・順序）、誤りの data（Version 無し・範囲外・end < start・数でない・-1・header のみ・offset が header の中）の EINVAL と出力の NULL・0、encode → decode の往復（NUL を長さに含む・含まない）、全ての短縮の長さ、全 byte × 256 値の変更、乱数 10 万（乱数の bytes・語の列・形の正しい header）。decode は毎回ちょうどの大きさの heap の block に複写して渡す（ASan）。
 - 自分で決めた点（header が黙っている所）:
   - decode の header は 2 回読む: 1 回目で全ての offset の最小値を求め（無ければ data の長さ）、2 回目はその位置より前で終わる行だけを読む（最小の offset で header が切れる。位置にかかる行、改行の無い最後の行は読まない）。
