@@ -1637,11 +1637,11 @@ flex_auto_minimums(
 	layout_unit least;
 	layout_unit given;
 	size_t index;
+	int measuring_only;
 	int error;
 
 	/* A row line without a definite size does not flex (a column's minimums always hold). */
-	if (row && available < 0)
-		return 0;
+	measuring_only = row && available < 0;
 	used = 0;
 	for (index = 0; index < count; index++)
 		used += items[index].size + items[index].frame + items[index].margin_start + items[index].margin_end;
@@ -1654,6 +1654,10 @@ flex_auto_minimums(
 		if (!items[index].auto_minimum)
 			continue;
 		child = items[index].box;
+
+		/* With no room to flex in, only an item whose basis is its own gets its size raised to its content's narrowest. */
+		if (measuring_only && (child->style.flex_basis.unit == CSS_UNIT_AUTO || child->style.flex_basis.unit == CSS_UNIT_CONTENT))
+			continue;
 
 		/* The content's narrowest width, or a column item's content height at the container's width. */
 		if (row)
@@ -1702,8 +1706,10 @@ flex_auto_minimums(
 			items[index].minimum = least;
 
 		/* The hypothetical size holds the minimum. */
-		if (items[index].size < items[index].minimum)
+		if (items[index].size < items[index].minimum) {
 			items[index].size = items[index].minimum;
+			child->flex_hypothetical = items[index].size + items[index].frame + items[index].margin_start + items[index].margin_end;
+		}
 	}
 
 	/* Succeeded: the minimums are known. */
