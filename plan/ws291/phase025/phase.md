@@ -87,3 +87,30 @@ mview の vkCreateGraphicsPipelines が FEATURE_NOT_PRESENT。足りない機能
 - 注: App Home の検索が 0 件（`KWL HOME search query="terminal" results=0`、`KWL HOME read` の行が出ない）で Terminal が起動せず、launch 以降の段は RTX の表と同じ操作になっていない。
 - 1 frame の内訳（drag）: 毎 frame 全画面（dirty 1、2073600 px、1 pass、約 30 draw）。pace 7〜16、cpu 4〜7、submit 2〜3、present 4〜7（work 12〜16）、period 25〜36、shown 7〜13 ms。
   kernel の v3d perf: submit あたり prep 1.3〜2.1 ms、render 4.0〜4.4 ms（frame に約 1.8 submit で GPU 約 8 ms）、bin 0.1〜0.2 ms。flip perf の wait 平均 7.5〜10 ms。
+
+### V3D の改善と解析（2026-10-31 21:40〜22:17）
+
+- c936bdb2d: user の pipeline の program の code を最初の draw で 1 回だけ GPU に上げ、pipeline に持たせる（pipeline の解放は、それを名指す command buffer の job が全部終わった後、
+  worker の上で起きるので、そこで返す）。internal の draw（meta）は今のまま pass ごと。mview の submit あたりの `prog` 50〜180 → 9〜14 µs。desktop の `prog` 430〜545 µs は
+  残る（多くは draw ごとの uniform の stream の組み立てで、code の upload ではない）。
+- 同じ commit: bin の run の性能 counter（`v3d: gpu bin ...`、bin の間だけ counter の source を Mesa の v3d_performance_counters.h の番号で切り替える）。
+- 確かめ: Pi 4・Pi 5 の vmunix warning 0、bin-draw-host-test PASS、shader-host-test PASS。実機: mview c21 33.9〜34.0 fps・c1 132.9 fps（kernel の fault の行は起動時の自己試験の 1 行だけ）、
+  desktop の frame-ops（CONSOLE=1）は前と揺れの内で同じ（launch 57・type 57・output 29・scroll 36・drag 33・home 37・wiseview 38）。
+- c21 の bin の counter（1 run あたり千）: cycles 4343（500 MHz で 8.7 ms）、QPU の命令 6236・idle 227・coordinate shading 6160、命令 cache の miss 0、uniform cache の miss 0、
+  VDW・VCD の stall 0、binned 777（primitive）・reversed 434、**L2T の miss 718**。cull=all でも cycles 4164・binned 777。
+  → bin は primitive あたり約 5.5 cycle で、QPU は 2 割も使っていない。L2T の miss（約 46 MB/pass と見積もると 5 GB/s 台）から、頂点と index の読みの memory の帯域で決まる見込み
+  （21 copy が同じ model の頂点 0.83 MB と index を毎回読む）。render も 1 run 8749 千 cycle のうち QPU の valid は約 1 割、tmustall 6240。
+- 見込み: c21 の 50 fps（20 ms/frame）は、bin（約 8.7 ms）と render（約 17 ms、うち 1920x1080 の tile の store だけで約 2.6 ms）が直列の今の形では届かない。
+  残る候補（未着手）: VCM の cache を 4 batch（試しで bin −5%）、coordinate shader が使わない attribute を読まない、vertex/coordinate の program の scheduling（今は source の順で
+  pairing 0）、bin と render の重ね（inflight=1 の mview では効かない）。desktop は compositor の側（全画面の再描画、pace）の話が大きい（Q1 に先に相談する約束）。
+
+### BUG-379（2026-10-31 22:10）
+
+- bug-analyzer の解析で原因が分かった（kernel の fork の livelock、BUG-379.md）。Q1 の決定で直しは P7（q1786）。session での desktop の計測は P7 の直しの後に Q1 と合わせて行う。
+
+### 再開点（2026-10-31 22:17 P4）
+
+- branch agent/p4-ws291pi の先頭（この commit）。main への merge は Q1（BUG-380 の直し・desktop の後退なしは確かめ済み）。
+- 板（10.0.30.6）: 1920x1080 の config.txt、cmdline `login=console v3d.perf=1`、kernel は build/p025-4d/vmunix（input inject 入り、c936bdb2d 相当）、/bin/aat-input、
+  session の file は元に戻した。元の file は `/boot/boot0/{vmunix,config.txt,cmdline.txt}.p025old` と `/etc/keiland/session.p025old`、host の build/tmp/p025-board/*.orig。
+- 次: P7 の BUG-379 の直しの後に session の desktop の frame-ops（`plan/ws291/tests/pi4-desk.sh`、CONSOLE なし）。mview の c21 は上の候補を試し、届かない分は限界の記録に。
