@@ -12,7 +12,7 @@
 | P6 | kernel-and-driver-designer | 返却（q1779 WS310 p001） | `/home/awe/zedBSD-worktrees/p6-ws310` / `agent/p6-ws310` | 返却（2026-10-31 07:1x） | 38f8c85eb（merge a2aa89c4f） |
 | P3 | phase-runner-high | ws291 p024 RTX 最適化 (q1785-i02) | `/home/awe/zedBSD-worktrees/p3-ws291wsi` / `agent/p3-ws291wsi` | in-progress（2026-10-31 23:41 起動し直し） | 9cbb0e590（merge 7055ea569） |
 | P8 | phase-runner-low | ws074 p260 自走 (q1727-i12) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-11-01 00:16 起動し直し） | 5dadd7966（merge fd4449c07） |
-| P7 | kernel-and-driver-designer | ws334 p001 設計 (q1787-i01) | `/home/awe/zedBSD-worktrees/p7-ws334` / `agent/p7-ws334` | in-progress（2026-11-01 00:24 起動） | — |
+| P7 | kernel-and-driver-designer | ws334 p001 設計 (q1787-i01) | `/home/awe/zedBSD-worktrees/p7-ws334` / `agent/p7-ws334` | 返却（2026-11-01 01:12） | 1deb49bff（merge b2a7e8454） |
 
 - 同時に動かす数は 6（2026-10-29 ユーザーの P1〜P6 の指示）。VF2（主）と 5330（従）は P3、10.0.10.3 は空き（2026-10-30 09:13 P5 返却）。
 - P6 の branch（merge しない）: agent/p6-ws296→p6-ws296b（2d17bf9ed から）→p6-ws296c（f31a4954d から）、agent/p6-ws282→p6-ws282b（1190b629c から）→p6-ws282c（c60cdbd44 から）、WS296 は agent/p6-ws296c 1809873bd で全 Phase 実装済み、agent/p6-ws243b（飛ばした記録 b13f3dae7）、agent/p6-ws223（未着手）。

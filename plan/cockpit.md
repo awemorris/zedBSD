@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 01:02（Q1）
+最終更新: 2026-11-01 01:12（Q1）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | p025（q1784）: Pi 4 の desktop を 1920x1080 で 60 fps に → mview の 3D（21 体で 50 fps、今 28.9） | Pi 4（10.0.30.6）。この後に Pi 5（p021） |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | — | — | 返却（07:1x）。WS310 の設計を main に（問い Q310-1〜6 は下の 0i） | 次の割当を Q1 が決める |
-| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | p001 の設計（q1787）: libbrowser の 3 つのエンジンの interface・storage の backend・libkeiland の Windows の backend・build | 設計・design-reviewer・問いまで |
+| P7 | — | — | 返却（2026-11-01 01:12）。WS334 の設計を main に（b2a7e8454、design.md 1,020 行・design-reviewer の 24 件を反映、実装の Phase p002〜p018 約 131 LW）。問い U1〜U15 は下の 0l | 次の割当を Q1 が決める |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 12 回目（q1727-i12）: subgrid の残り・multicol・grid の baseline など | 今 3,472 のうち 3,005（86.55%）、Acid3 100/100・Acid2 100%。11 回目は animation の補間・dynamic import()・@property など（+30、後退 0） |
 
 実装の担当（Sonnet・Opus の単発）: 今は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
@@ -259,6 +259,11 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 問いの本文: [user-questions.md](ws291/phase023/user-questions.md)。どちらも実装を止めない。
 - Q1: RTX の display が block-linear を正しく出したかの確かめ（(a) 推し: display の CRC を読む仕組みを足す、約 3 LW／(b) 目視を拾える試験に、確かめまで既定で切る）。
 - Q2: subs-1000 を NVK の 75 fps に近づける続き（(a) 推し: 実装の結果を見てから別の Phase で決める／(b) 続けて内訳を測る Phase を足す／(c) 約 16 fps で止める）。
+
+### 0l. WS334（OmniGrammaton の Windows 移植）の設計の問い U1〜U15（2026-11-01 01:12 新しい）
+
+- 問いの本文: [ws334/user-questions.md](ws334/user-questions.md)（前置き・用語の表つき）。設計は [ws334/design.md](ws334/design.md)。どれも推しの案があり、推しのままなら「推しで」。
+- U3（toolchain の llvm-mingw と Debian の gcc-mingw-w64-ucrt64 の導入）は Q1 の許可も要る（ユーザーが推しでよければ Q1 が許可する）。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
