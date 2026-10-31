@@ -654,6 +654,34 @@ condition_holds(
 	return true;
 }
 
+/*
+ * The minimum and maximum of two floats with -0 below +0, whichever order
+ * they come in: SPIR-V's FMin and FMax may return either zero for two
+ * zeros, and the native compiler may exchange the operands, so the reference
+ * and the lane model both take the one order-independent answer.
+ */
+static float
+ordered_minimum(
+	float a,
+	float b)
+{
+	/* Two zeros give -0 when either is -0. */
+	if (a == 0.0f && b == 0.0f)
+		return signbit(a) || signbit(b) ? -0.0f : 0.0f;
+	return fminf(a, b);
+}
+
+static float
+ordered_maximum(
+	float a,
+	float b)
+{
+	/* Two zeros give +0 when either is +0. */
+	if (a == 0.0f && b == 0.0f)
+		return signbit(a) && signbit(b) ? -0.0f : 0.0f;
+	return fmaxf(a, b);
+}
+
 /* Computes one add ALU operation and, when it pushes flags, the new flag A. */
 static uint32_t
 add_result(
@@ -685,10 +713,10 @@ add_result(
 		bits = float_bits(a - b);
 		break;
 	case V3D_QPU_A_FMIN:
-		bits = float_bits(fminf(a, b));
+		bits = float_bits(ordered_minimum(a, b));
 		break;
 	case V3D_QPU_A_FMAX:
-		bits = float_bits(fmaxf(a, b));
+		bits = float_bits(ordered_maximum(a, b));
 		break;
 	case V3D_QPU_A_ADD:
 		bits = left + right;
