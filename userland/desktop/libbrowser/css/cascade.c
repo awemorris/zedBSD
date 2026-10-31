@@ -1298,6 +1298,22 @@ cascade_compute(
 	/* The filters an @keyframes animation gives at the start of the page's time. */
 	cascade_animation(engine, style, parent);
 
+	/* The writing mode of a table's row groups, rows and columns is the table's (and so is their direction in a vertical table, whose columns the table orders). */
+	if (parent != NULL && (style->display == CSS_DISPLAY_TABLE_ROW || style->display == CSS_DISPLAY_TABLE_ROW_GROUP ||
+	    style->display == CSS_DISPLAY_TABLE_COLUMN)) {
+		style->writing_mode = parent->writing_mode;
+		style->writing_sideways = parent->writing_sideways;
+		if (parent->writing_mode != CSS_WRITING_HORIZONTAL_TB)
+			style->direction = parent->direction;
+	}
+
+	/* A horizontal cell of a vertical table is not laid out in a flow of its own (the table lays its cells out in its own). */
+	if (parent != NULL && style->display == CSS_DISPLAY_TABLE_CELL && style->writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    parent->writing_mode != CSS_WRITING_HORIZONTAL_TB) {
+		style->writing_mode = parent->writing_mode;
+		style->writing_sideways = parent->writing_sideways;
+	}
+
 	/* An element without a box forgets the position option that last fit. */
 	if (pseudo == CSS_PSEUDO_ELEMENT_NONE && style->display == CSS_DISPLAY_NONE)
 		((struct dom_element *)element)->anchor_last = 0;
@@ -2223,6 +2239,7 @@ cascade_scope_root_compute(
 	int is_root;
 	int inside;
 	int matches;
+	int wanted;
 
 	/* An implicit scope's root is its sheet owner's parent element (the root element without one). */
 	if (scope->roots == NULL) {
@@ -2265,14 +2282,18 @@ cascade_scope_root_compute(
 			engine->scope_root = outer;
 		}
 
-		/* The root selectors, relative to that outer root. */
+		/* The root selectors, relative to that outer root (an element's root is the element's, whichever pseudo-element is being styled). */
+		wanted = engine->pseudo_wanted;
+		engine->pseudo_wanted = CSS_PSEUDO_ELEMENT_NONE;
 		for (index = 0; index < scope->root_count; index++) {
 			matches = cascade_candidate_matches(engine, root, &scope->roots[index]);
 			if (matches) {
+				engine->pseudo_wanted = wanted;
 				engine->scope_root = saved;
 				return 1;
 			}
 		}
+		engine->pseudo_wanted = wanted;
 		engine->scope_root = saved;
 
 		/* At the top there is no outer root to try. */
@@ -2300,6 +2321,7 @@ cascade_in_scope(
 	struct dom_element *saved;
 	size_t index;
 	int matches;
+	int wanted;
 
 	/* No limits, nothing is excluded. */
 	if (scope->limit_count == 0)
@@ -2308,10 +2330,13 @@ cascade_in_scope(
 	/* The element and its ancestors up to the root itself (a limit of :scope excludes everything). */
 	saved = engine->scope_root;
 	engine->scope_root = root;
+	wanted = engine->pseudo_wanted;
+	engine->pseudo_wanted = CSS_PSEUDO_ELEMENT_NONE;
 	for (between = element; between != NULL; between = cascade_selector_parent(engine, between)) {
 		for (index = 0; index < scope->limit_count; index++) {
 			matches = cascade_candidate_matches(engine, between, &scope->limits[index]);
 			if (matches) {
+				engine->pseudo_wanted = wanted;
 				engine->scope_root = saved;
 				return 0;
 			}
@@ -2319,6 +2344,7 @@ cascade_in_scope(
 		if (between == root)
 			break;
 	}
+	engine->pseudo_wanted = wanted;
 	engine->scope_root = saved;
 
 	/* No limit cuts the element off. */

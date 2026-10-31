@@ -1126,7 +1126,7 @@ static int values_corner_radius(struct css_parse *parse, int corner, const struc
 static int values_radii(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *radii);
 static int values_box_shadow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_text_shadow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
-static int values_one_shadow(const struct css_token *tokens, size_t count, struct css_declared_shadow *shadow);
+static int values_one_shadow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declared_shadow *shadow);
 static int values_outline(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_clip_path(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_shape_outside(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
@@ -6524,7 +6524,7 @@ values_box_shadow(
 
 		/* One shadow from start to here, kept while there is room. */
 		if (list->count < CSS_SHADOWS) {
-			error = values_one_shadow(tokens + start, index - start, &list->shadows[list->count]);
+			error = values_one_shadow(parse, tokens + start, index - start, &list->shadows[list->count]);
 			if (error != 0)
 				return error;
 			list->count++;
@@ -6627,7 +6627,7 @@ values_filters(
 		if (filter->kind == CSS_FILTER_DROP_SHADOW) {
 			if (used < 3U)
 				return EINVAL;
-			error = values_one_shadow(tokens + index + 1U, used - 2U, &filter->shadow);
+			error = values_one_shadow(NULL, tokens + index + 1U, used - 2U, &filter->shadow);
 			if (error != 0)
 				return error;
 			if (filter->shadow.inset || filter->shadow.lengths[3].number != 0.0f || filter->shadow.lengths[0].unit == CSS_DUNIT_PERCENT ||
@@ -6732,7 +6732,7 @@ values_text_shadow(
 	if (count == 1 && tokens[0].type == CSS_TOKEN_IDENT && css_ident_equal(tokens, "none"))
 		return 0;
 
-	error = values_one_shadow(tokens, count, &list->shadows[0]);
+	error = values_one_shadow(parse, tokens, count, &list->shadows[0]);
 	if (error != 0)
 		return error;
 	if (list->shadows[0].inset || list->shadows[0].lengths[2].number != 0.0f ||
@@ -6745,6 +6745,7 @@ values_text_shadow(
 /* Parses one shadow: inset, two to four lengths and a color, the keyword and the color at either end. */
 static int
 values_one_shadow(
+	struct css_parse *parse,
 	const struct css_token *tokens,
 	size_t count,
 	struct css_declared_shadow *shadow)
@@ -6785,6 +6786,14 @@ values_one_shadow(
 		error = EINVAL;
 		if (lengths[index] == 1 && lengths_seen < 4U)
 			error = values_length(&tokens[starts[index]], 0, &candidate);
+
+		/* A calculation (calc(), min(), max(), clamp()) is a length too. */
+		if (error != 0 && parse != NULL && lengths_seen < 4U && tokens[starts[index]].type == CSS_TOKEN_FUNCTION &&
+		    (css_ident_equal(&tokens[starts[index]], "calc") || css_ident_equal(&tokens[starts[index]], "min") ||
+		    css_ident_equal(&tokens[starts[index]], "max") || css_ident_equal(&tokens[starts[index]], "clamp"))) {
+			memset(&candidate, 0, sizeof(candidate));
+			error = values_calc(parse, CSS_PROP_TEXT_SHADOW, tokens + starts[index], lengths[index], &candidate);
+		}
 		if (error == 0) {
 			shadow->lengths[lengths_seen] = candidate;
 			lengths_seen++;
