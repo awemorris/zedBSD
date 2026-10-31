@@ -1,7 +1,8 @@
 # The symbols the Windows build's libraries may leave undefined, one a line (cross-build.sh compares the
 # output of nm -u with it, a __imp_ prefix taken off).  Each is a function of the Windows C runtime (UCRT,
 # under the names mingw-w64's import libraries give it), of the toolchain's runtime, or of kernel32,
-# ws2_32, bcrypt or crypt32.  A new name goes here with the library it comes from.
+# ws2_32, bcrypt or crypt32, or of winpthreads (linked statically).  A new name goes here with the
+# library it comes from.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 # The toolchain's runtime (compiler-rt): the stack probe of a large frame (___chkstk_ms on x86_64).
@@ -42,3 +43,140 @@ read
 ceilf
 floorf
 lroundf
+
+# What libbrowser without its network and storage, with its Windows operating-system layer, leaves
+# undefined (cross-build.sh, the libbrowser-core check).
+
+# kernel32: files, directories and locks.
+CloseHandle
+CreateDirectoryW
+CreateFileW
+DeleteFileW
+FindClose
+FindFirstFileW
+FindNextFileW
+FlushFileBuffers
+GetCurrentDirectoryW
+GetFileAttributesW
+GetFileInformationByHandle
+GetFullPathNameW
+LockFileEx
+MoveFileExW
+ReadFile
+UnlockFileEx
+WriteFile
+
+# kernel32: modules and libraries.
+FreeLibrary
+GetModuleFileNameW
+GetModuleHandleW
+GetProcAddress
+LoadLibraryExW
+
+# kernel32: clocks and time zones.
+FileTimeToSystemTime
+GetDynamicTimeZoneInformation
+GetSystemTimePreciseAsFileTime
+GetTimeZoneInformationForYear
+QueryPerformanceCounter
+QueryPerformanceFrequency
+Sleep
+SystemTimeToFileTime
+SystemTimeToTzSpecificLocalTime
+
+# kernel32: errors, processes and threads.
+GetCurrentProcessId
+GetCurrentThread
+GetLastError
+SetLastError
+
+# bcrypt: the system's random generator.
+BCryptGenRandom
+
+# crypt32: the certificate stores.
+CertCloseStore
+CertEnumCertificatesInStore
+CertFreeCertificateContext
+CertOpenStore
+
+# UCRT: the maths.
+acos
+acosh
+asin
+asinh
+atan
+atan2
+atanh
+cbrt
+ceil
+cos
+cosf
+cosh
+exp
+expm1
+floor
+fmod
+frexp
+ldexp
+log
+log10
+log1p
+log2
+nearbyint
+nextafter
+pow
+powf
+sin
+sinf
+sinh
+sqrt
+sqrtf
+tan
+tanf
+tanh
+trunc
+
+# UCRT: memory, strings and conversions.
+_aligned_free
+_aligned_malloc
+atof
+memchr
+memcmp
+memmove
+qsort
+strchr
+strcmp
+strcspn
+strdup
+strerror
+strlen
+strncat
+strncmp
+strncpy
+strrchr
+strtod
+strtof
+strtol
+strtoul
+vsnprintf
+wcscmp
+wcslen
+wcsncmp
+
+# UCRT: the C streams, the environment and the end of the program.
+abort
+fflush
+fputc
+fwrite
+getenv
+printf
+
+# UCRT: setjmp and longjmp (_setjmp on x86_64, _setjmpex on arm64), assert and time.
+_setjmp
+_setjmpex
+_time64
+_wassert
+longjmp
+
+# winpthreads (linked statically): the once.
+pthread_once

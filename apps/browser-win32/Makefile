@@ -109,6 +109,18 @@ BROWSER_WIN32_LAYER_SOURCES := \
 
 BROWSER_WIN32_LAYER_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_WIN32_LAYER_SOURCES))
 
+# libbrowser without the network and the storage (they come with their Windows layers later): the
+# zedBSD build's list less its POSIX operating-system layer, which the Windows layer above replaces.
+include userland/desktop/libbrowser/sources.mk
+LIBBROWSER_CORE_EXCLUDED := $(LIBBROWSER_OS_SOURCES) \
+	$(LIBBROWSER_DIR)/net/loader.c \
+	$(LIBBROWSER_DIR)/net/http.c \
+	$(LIBBROWSER_DIR)/net/tls.c \
+	$(LIBBROWSER_DIR)/net/cookie.c \
+	$(LIBBROWSER_DIR)/page/storage.c
+LIBBROWSER_CORE_SOURCES := $(filter-out $(LIBBROWSER_CORE_EXCLUDED),$(LIBBROWSER_SOURCES))
+LIBBROWSER_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBBROWSER_CORE_SOURCES))
+
 # libtruetype and the compat libraries: the zedBSD build's source lists, each a static library that
 # libbrowser.dll takes in.
 include userland/desktop/libtruetype/sources.mk
@@ -142,10 +154,11 @@ VULKAN_LOADER_SHA256 := ddfeca84a868899fbb2c7f28b7c8fd1006e34b2b13ce653a63bddfb6
 WIN32_VULKAN_HEADERS := $(BROWSER_WIN32_OBJ)/include/vulkan/vulkan.h
 WIN32_VULKAN_LIBRARY := $(BROWSER_WIN32_OBJ)/libvulkan-1.a
 
-.PHONY: all layers libraries vulkan runtime fetch flags clean
-all: layers libraries vulkan runtime $(BROWSER_WIN32_OBJ)/toolchain.txt
+.PHONY: all layers libbrowser-core libraries vulkan runtime fetch flags clean
+all: layers libbrowser-core libraries vulkan runtime $(BROWSER_WIN32_OBJ)/toolchain.txt
 
 layers: $(BROWSER_WIN32_LAYER_OBJECTS)
+libbrowser-core: $(LIBBROWSER_CORE_OBJECTS)
 libraries: $(WIN32_COMPAT_ARCHIVES)
 vulkan: $(WIN32_VULKAN_HEADERS) $(WIN32_VULKAN_LIBRARY)
 runtime: $(BROWSER_WIN32_DIST)/libwinpthread-1.dll
@@ -154,6 +167,9 @@ fetch: $(VULKAN_HEADERS_TARBALL) $(VULKAN_LOADER_TARBALL)
 $(BROWSER_WIN32_OBJ)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(WIN32_CC) $(WIN32_CFLAGS) -c $< -o $@
+
+# libbrowser includes the compat headers (the images) and the Vulkan headers (the GPU renderer).
+$(LIBBROWSER_CORE_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
 
 # A compat object keeps what the compiler said in <object>.log, and shows it only when the compile fails.
 $(WIN32_COMPAT_OBJECTS): $(BROWSER_WIN32_OBJ)/%.o: %.c | $(WIN32_COMPAT_HEADER_COPIES)
@@ -222,6 +238,7 @@ flags:
 	@echo 'WIN32_CFLAGS=$(WIN32_CFLAGS)'
 	@echo 'WIN32_THREAD_LDFLAGS=$(WIN32_THREAD_LDFLAGS)'
 	@echo 'WIN32_VULKAN_LDFLAGS=$(WIN32_VULKAN_LDFLAGS)'
+	@echo 'LIBBROWSER_CORE_OBJECTS=$(LIBBROWSER_CORE_OBJECTS)'
 
 # Removes this build's output only; refuses an output directory that is empty, the root or build itself.
 clean:
@@ -231,4 +248,4 @@ clean:
 .PHONY: FORCE
 FORCE:
 
--include $(BROWSER_WIN32_LAYER_OBJECTS:.o=.d) $(WIN32_COMPAT_OBJECTS:.o=.d)
+-include $(BROWSER_WIN32_LAYER_OBJECTS:.o=.d) $(LIBBROWSER_CORE_OBJECTS:.o=.d) $(WIN32_COMPAT_OBJECTS:.o=.d)
