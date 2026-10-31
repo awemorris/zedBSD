@@ -2,7 +2,7 @@
 
 # ws336-p004: ssh-cipher・ssh-packet（chacha20-poly1305@openssh.com と binary packet）
 
-Status: planned（2026-11-01 p001 の設計で作成）
+Status: in-progress（2026-11-01 06:59 q1823、Sonnet）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p003

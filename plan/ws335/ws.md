@@ -38,12 +38,12 @@
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計（標準廉価実装手順 §4）: 範囲（TLS の版・暗号の組・証明書の確かめ・OpenSSL の API の部分集合）、仕様の入手、module・header・.c の骨格・試験の道具、実装の Phase の表、design-reviewer、ユーザーへの問い | cleared（2026-11-01 05:45 Q1、main 8e44fa17e。基点 b7dfd3952、Windows は 1 つの .exe に static link、p039 を足した） | — |
 | [p002](phase002/phase.md) | 土台（約束・定数時間の補助・byte 順）、SHA-2、hash の選択・HMAC・HKDF（test-util、test-sha2、test-hash） | cleared（2026-11-01 06:59 Q1、main 6ea18b1a1。土台・SHA-2・hash の選択・HMAC・HKDF 実装、run-unit util 169160・sha2 14092・hash 12965 checks PASS（posix は Q1 再実行で確認、win32 は担当の Wine で PASS）、run-ct PASS。header の黙る所で HKDF の NULL と長さの組を EINVAL に（header は ENOTSUP だけを約束、規約の見直しの Phase で header の comment を直す）） | p001 |
-| [p003](phase003/phase.md) | SHA-3・SHAKE（Keccak）（test-sha3） | planned | p002 |
+| [p003](phase003/phase.md) | SHA-3・SHAKE（Keccak）（test-sha3） | in-progress（2026-11-01 06:59 q1820、Sonnet） | p002 |
 | [p004](phase004/phase.md) | AES（bitsliced、定数時間）と counter mode（test-aes） | planned | p002 |
 | [p005](phase005/phase.md) | AES-GCM（test-gcm） | planned | p004 |
-| [p006](phase006/phase.md) | ChaCha20・Poly1305・AEAD（と 64 bit の counter の ChaCha20）（test-chacha） | planned | p002 |
+| [p006](phase006/phase.md) | ChaCha20・Poly1305・AEAD（と 64 bit の counter の ChaCha20）（test-chacha） | in-progress（2026-11-01 06:59 q1821、Sonnet） | p002 |
 | [p007](phase007/phase.md) | 固定幅の整数と Montgomery の算術（test-bn） | planned | p002 |
-| [p008](phase008/phase.md) | GF(2^255-19) と X25519（test-f25519、test-x25519） | planned | p002 |
+| [p008](phase008/phase.md) | GF(2^255-19) と X25519（test-f25519、test-x25519） | in-progress（2026-11-01 06:59 q1822、Sonnet） | p002 |
 | [p009](phase009/phase.md) | Ed25519（test-ed25519） | planned | p008 |
 | [p010](phase010/phase.md) | P-256・P-384 の群（test-ecp） | planned | p007 |
 | [p011](phase011/phase.md) | ECC: 鍵の生成・ECDH・ECDSA の確かめ（test-ecc） | planned | p010 |
