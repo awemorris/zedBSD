@@ -12,7 +12,7 @@
 # login and runs the compositor as root on its own socket with the session's options (--glass, the wallpaper,
 # --log-frames) and its default desktop client instead of the graphical session, whose compositor waits for the
 # display's images forever at 1920x1080 (seen 2026-10-31 with the main kernel and this one).  OUT/summary.txt holds what is printed.
-# LIBS='NAME=PATH ...' puts shared libraries in /lib first (see below).
+# LIBS='NAME=PATH ...' puts shared libraries in /lib first, BINS='NAME=PATH ...' programs in /bin (see below).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 out=${1:?usage: pi4-desk.sh OUT}
@@ -67,6 +67,16 @@ for pair in ${LIBS:-}; do
 	    b "test \"\$(cksum < /lib/$name.new | cut -d' ' -f1)\" = $(cksum < "$path" | cut -d' ' -f1) && { test -e /lib/$name.p025old || cp /lib/$name /lib/$name.p025old; } && chmod 755 /lib/$name.new && mv /lib/$name.new /lib/$name && sync" ||
 	    { say "FAIL /lib/$name was not put in"; exit 1; }
 	say "lib $name $(b "cksum < /lib/$name" | cut -d' ' -f1)"
+done
+
+# BINS='NAME=PATH ...': the same for the board's /bin/NAME (the compositor, the Terminal, Files of a tree's build).
+for pair in ${BINS:-}; do
+	name=${pair%%=*}
+	path=${pair#*=}
+	timeout 120 scp $SO -q "$path" "root@$PI:/bin/$name.new" &&
+	    b "test \"\$(cksum < /bin/$name.new | cut -d' ' -f1)\" = $(cksum < "$path" | cut -d' ' -f1) && { test -e /bin/$name.p025old || cp /bin/$name /bin/$name.p025old; } && chmod 755 /bin/$name.new && mv /bin/$name.new /bin/$name && sync" ||
+	    { say "FAIL /bin/$name was not put in"; exit 1; }
+	say "bin $name $(b "cksum < /bin/$name" | cut -d' ' -f1)"
 done
 
 i=1

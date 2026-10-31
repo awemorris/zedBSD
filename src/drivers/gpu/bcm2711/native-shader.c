@@ -113,6 +113,43 @@ bcm2711_native_shader_encode(
 }
 
 /*
+ * Reports the VCM Cache Size packet's byte for a shader that
+ * bcm2711_native_shader_encode accepted: each vertex stage caches as many
+ * batches as its half of the VPM holds beside the one being shaded, two to
+ * four (the field allows one to four; GFXH-1744 needs at least two).
+ * Values referenced: Mesa 25.0.7 src/broadcom/compiler/vir.c
+ * (v3d_vs_set_prog_data, vcm_cache_size) with shared input and output
+ * segments, as this encoder's record uses.
+ */
+uint32_t
+bcm2711_native_shader_vcm(
+	const struct bcm2711_native_shader *shader)
+{
+	uint32_t half_vpm;
+	uint32_t segments;
+	uint32_t batches[2];
+	uint32_t stage;
+	int error;
+
+	/* Each vertex stage's batches in its half of the VPM, its segments as the record has them. */
+	half_vpm = shader->vpm_bytes / NATIVE_VPM_SECTOR / 2U;
+	for (stage = 0; stage < 2U; stage++) {
+		batches[stage] = 2U;
+		error = output_segments(shader->programs[stage].binary, half_vpm, &segments);
+		if (error != 0 || segments == 0)
+			continue;
+		batches[stage] = half_vpm / segments - 1U;
+		if (batches[stage] < 2U)
+			batches[stage] = 2U;
+		if (batches[stage] > 4U)
+			batches[stage] = 4U;
+	}
+
+	/* Succeeded: the bin's count, then the render's. */
+	return batches[0] | batches[1] << 4;
+}
+
+/*
  * Reports the bytes of the shader state record this encoder writes (the
  * 4.2 record), after which the attribute records follow.
  */

@@ -70,6 +70,7 @@ static int font_read(const char *path, void **data, size_t *size);
 static int font_measure(struct terminal_font *font, unsigned pixels);
 static unsigned font_lookup(struct terminal_font *font, uint32_t key, unsigned *slot);
 static void font_draw(struct terminal_font *font, unsigned slot, uint32_t codepoint, unsigned cells);
+static void font_mark(struct terminal_font *font, unsigned x, unsigned y, unsigned width, unsigned height);
 static void font_slot_origin(const struct terminal_font *font, unsigned slot, unsigned *x, unsigned *y);
 
 /*
@@ -248,6 +249,14 @@ terminal_font_attach(
 		for (x = 0U; x < font->cell_width; x++)
 			row[x] = 0xffffffffU;
 	}
+
+	/*
+	 * The first row of slots goes to the GPU's image again; the slots below
+	 * it are taken there as they are drawn (no frame samples a slot that
+	 * has not been drawn).
+	 */
+	font->dirty_right = 0U;
+	font_mark(font, 0U, 0U, width, font->cell_height);
 
 	/* Slots 1 and 2 are the replacement character two cells wide, for a wide character a full atlas cannot draw. */
 	font_draw(font, font->wide_replacement, FONT_REPLACEMENT, 2U);
@@ -533,6 +542,10 @@ font_draw(
 	int target_y;
 	int error;
 
+	/* The slot's cells go to the GPU's image, drawn or left blank. */
+	font_slot_origin(font, slot, &origin_x, &origin_y);
+	font_mark(font, origin_x, origin_y, cells * font->cell_width, font->cell_height);
+
 	/* The font's glyph, or the fallback's when the font has none and the fallback has one. */
 	face = font->face;
 	index = truetype_glyph_index(font->face, codepoint);
@@ -597,6 +610,35 @@ font_draw(
 			}
 		}
 	}
+}
+
+/* Adds a box of the atlas's pixels to the box the renderer copies to the GPU's image. */
+static void
+font_mark(
+	struct terminal_font *font,
+	unsigned x,
+	unsigned y,
+	unsigned width,
+	unsigned height)
+{
+	/* An empty box becomes this one. */
+	if (font->dirty_right == 0U) {
+		font->dirty_left = x;
+		font->dirty_top = y;
+		font->dirty_right = x + width;
+		font->dirty_bottom = y + height;
+		return;
+	}
+
+	/* Otherwise the box grows to hold both. */
+	if (x < font->dirty_left)
+		font->dirty_left = x;
+	if (y < font->dirty_top)
+		font->dirty_top = y;
+	if (x + width > font->dirty_right)
+		font->dirty_right = x + width;
+	if (y + height > font->dirty_bottom)
+		font->dirty_bottom = y + height;
 }
 
 /* Finds where a slot's cell starts in the atlas. */

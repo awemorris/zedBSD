@@ -23,9 +23,17 @@
 #include "drivers/gpu/bcm2711/vk/vulkan-native-image.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-buffer-copy.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
+#include "drivers/gpu/bcm2711/vk/vulkan-queue.h"
 
 /* All concurrently resident native pass/draw uploads share this submission-wide padded budget. */
 #define NATIVE_JOB_BYTES (256ULL * 1024U * 1024U)
+
+/*
+ * The shortest bin, in microseconds, after which the next pass is prepared
+ * and binned beside the render: a shorter one gains less than the mappers
+ * lose, which wait while a job runs on outside the window.
+ */
+#define NATIVE_AHEAD_BIN_US 2000U
 
 /* The room of one window's cost report, formatted under the controller mutex and logged after it. */
 #define NATIVE_PERF_TEXT_BYTES 2048U
@@ -45,6 +53,10 @@ static size_t native_perf_used;
 static int native_perf_state;
 
 static int release_job(struct bcm2711_vulkan_native_job *job);
+static void job_begin(struct bcm2711_vulkan_native_job *job);
+static int look_ahead(struct bcm2711_render_device *controller, struct bcm2711_render_session *session, struct bcm2711_vulkan_native_job *job, const struct bcm2711_vulkan_prepared_event *next, uint64_t *remaining, struct bcm2711_v3d_flight *flight);
+static bool ahead_wanted(struct bcm2711_render_session *session, struct bcm2711_vulkan_native_job *job, const struct bcm2711_vulkan_prepared_event *next);
+static bool ahead_eligible(const struct bcm2711_vulkan_native_pass *ahead, const struct bcm2711_vulkan_native_pass *current);
 static int retire_closed_sessions(struct bcm2711_render_device *controller);
 static void report_perf(struct bcm2711_v3d_perf *perf);
 static bool perf_enabled(void);
@@ -120,6 +132,7 @@ bcm2711_vulkan_native_job_step(
 	const struct bcm2711_vulkan_prepared_event *event;
 	const struct bcm2711_vulkan_prepared_event *next;
 	struct bcm2711_v3d_job_result completion;
+	struct bcm2711_v3d_flight flight;
 	uint64_t remaining;
 	uint64_t bytes;
 	uint64_t started;
@@ -137,6 +150,7 @@ bcm2711_vulkan_native_job_step(
 	int tiled;
 	int error;
 	int closed;
+	int landed;
 	int synchronized;
 
 	/* Initial refusals launch no work and therefore retain no device borrow. */
@@ -171,19 +185,9 @@ bcm2711_vulkan_native_job_step(
 	    !controller->space.native->power.ready)
 		return EIO;
 
-	/* The first step starts the job: one finite resident upload budget covers every pass and its complete independent draw input prefix. */
-	if (!job->executed) {
-		job->executed = true;
-		job->stepping = true;
-		job->started = clock_ticks();
-		job->prepare_ticks = 0;
-		job->execute_ticks = 0;
-		job->release_ticks = 0;
-		job->copy_ticks = 0;
-		job->remaining = NATIVE_JOB_BYTES;
-		job->region = 0;
-		job->cursor = job->prepared->first;
-	}
+	/* The first step starts the job (unless the pass before it started it, to prepare its first pass ahead). */
+	if (!job->executed)
+		job_begin(job);
 
 	/* This step continues where the last one stopped. */
 	perf = &controller->space.native->hardware.perf;
@@ -311,50 +315,60 @@ bcm2711_vulkan_native_job_step(
 		}
 #endif
 
-		/* Measures preparation while deferring input translations until one checked publication. */
-		step = clock_ticks();
-		error = bcm2711_v3d_memory_begin(&controller->space);
-		if (error != 0)
-			return error;
-
-		/*
-		 * Graphics, clears and copied image regions acquire complete
-		 * independent native owners; their owned storage carries this
-		 * session's mark only while they are built.
-		 */
-		controller->space.builder = session->owner;
-		if (tiled == 0) {
+		/* A pass prepared ahead, its bin run while the pass before it rendered, is this step's as it is. */
+		if (job->ahead != NULL && job->ahead_event == event && tiled != 0) {
+			job->pass = job->ahead;
+			next = job->ahead_next;
+			job->ahead = NULL;
+			job->ahead_event = NULL;
+			job->ahead_next = NULL;
 			error = 0;
-			next = event->next;
-		} else if (event->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
-			error = bcm2711_vulkan_native_pass_create(&controller->space, event, &remaining, &job->pass, &next);
-		} else if (event->opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
-			error = bcm2711_vulkan_native_clear_create(&controller->space, event, &remaining, &job->pass);
-			next = event->next;
-		} else if (event->opcode == GPU_OP_CMD_COPY_IMAGE || event->opcode == GPU_OP_CMD_BLIT_IMAGE) {
-			error = bcm2711_vulkan_native_image_create(&controller->space, (const struct bcm2711_vulkan_transfer *)event->record, region, &remaining, &job->pass);
-			region++;
-			next = event;
-			if (region == event->record->count) {
-				next = event->next;
-				region = 0;
-			}
 		} else {
-			error = ENOTSUP;
+			/* Measures preparation while deferring input translations until one checked publication. */
+			step = clock_ticks();
+			error = bcm2711_v3d_memory_begin(&controller->space);
+			if (error != 0)
+				return error;
+
+			/*
+			 * Graphics, clears and copied image regions acquire complete
+			 * independent native owners; their owned storage carries this
+			 * session's mark only while they are built.
+			 */
+			controller->space.builder = session->owner;
+			if (tiled == 0) {
+				error = 0;
+				next = event->next;
+			} else if (event->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
+				error = bcm2711_vulkan_native_pass_create(&controller->space, event, &remaining, &job->pass, &next);
+			} else if (event->opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
+				error = bcm2711_vulkan_native_clear_create(&controller->space, event, &remaining, &job->pass);
+				next = event->next;
+			} else if (event->opcode == GPU_OP_CMD_COPY_IMAGE || event->opcode == GPU_OP_CMD_BLIT_IMAGE) {
+				error = bcm2711_vulkan_native_image_create(&controller->space, (const struct bcm2711_vulkan_transfer *)event->record, region, &remaining, &job->pass);
+				region++;
+				next = event;
+				if (region == event->record->count) {
+					next = event->next;
+					region = 0;
+				}
+			} else {
+				error = ENOTSUP;
+			}
+			controller->space.builder = 0;
+
+			/* Even a rolled-back preparation must flush its edits before any retired VA or RAM is reused. */
+			synchronized = bcm2711_v3d_memory_end(&controller->space);
+			if (synchronized != 0)
+				error = synchronized;
+
+			/* A refusal whose edits were flushed failed only in preparation. */
+			if (error != 0 && synchronized == 0)
+				job->prepare_failed = true;
+
+			/* Accumulate preparation separately from device execution and retirement. */
+			prepare_ticks += clock_ticks() - step;
 		}
-		controller->space.builder = 0;
-
-		/* Even a rolled-back preparation must flush its edits before any retired VA or RAM is reused. */
-		synchronized = bcm2711_v3d_memory_end(&controller->space);
-		if (synchronized != 0)
-			error = synchronized;
-
-		/* A refusal whose edits were flushed failed only in preparation. */
-		if (error != 0 && synchronized == 0)
-			job->prepare_failed = true;
-
-		/* Accumulate preparation separately from device execution and retirement. */
-		prepare_ticks += clock_ticks() - step;
 
 		/* A copy whose destination already holds its source's bytes prepared no pass. */
 		if (error == 0 && job->pass == NULL) {
@@ -392,7 +406,9 @@ bcm2711_vulkan_native_job_step(
 		 * Exact clear, supervised bin/render and GPU cache visibility execute
 		 * while every independent owner is held.  The native jobs run inside
 		 * the window, without the controller mutex: the decoder and ioctls
-		 * proceed meanwhile, and no translation changes.
+		 * proceed meanwhile, and no translation changes.  While the render
+		 * queue runs, the session's next pass is prepared (the window closed)
+		 * and its bin queue run (in a window again) beside it.
 		 */
 		step = clock_ticks();
 		error = bcm2711_vulkan_native_pass_start(job->pass, &completion);
@@ -401,8 +417,20 @@ bcm2711_vulkan_native_job_step(
 			job->prepare_failed = true;
 		} else {
 			bcm2711_render_window_open(controller);
-			error = bcm2711_vulkan_native_pass_launch(job->pass, &completion);
+			error = bcm2711_vulkan_native_pass_launch_begin(job->pass, &completion, &flight);
+			if (flight.active &&
+			    (error != 0 || kern_ticks_to_us(completion.bin_ticks) < NATIVE_AHEAD_BIN_US || !ahead_wanted(session, job, next)))
+				error = bcm2711_vulkan_native_pass_launch_end(job->pass, &completion, &flight, error);
 			closed = bcm2711_render_window_close(controller);
+			if (flight.active) {
+				if (error == 0 && closed == 0)
+					closed = look_ahead(controller, session, job, next, &remaining, &flight);
+				bcm2711_render_window_reopen(controller);
+				error = bcm2711_vulkan_native_pass_launch_end(job->pass, &completion, &flight, error);
+				landed = bcm2711_render_window_close(controller);
+				if (closed == 0)
+					closed = landed;
+			}
 			error = bcm2711_vulkan_native_pass_finish(job->pass, &completion, error);
 			if (error == 0 && closed != 0)
 				error = closed;
@@ -631,8 +659,11 @@ release_job(
 	int first;
 	int error;
 
-	/* Checked DMA retirement consumes all mapped inputs, including incomplete allocation prefixes. */
+	/* Checked DMA retirement consumes all mapped inputs, including incomplete allocation prefixes, and a pass prepared ahead. */
 	first = bcm2711_vulkan_native_pass_release(&job->pass, true);
+	error = bcm2711_vulkan_native_pass_release(&job->ahead, true);
+	if (first == 0 && error != 0)
+		first = error;
 
 	/* Pending counts and cloned descriptors remain valid through the last native pass destructor. */
 	error = bcm2711_vulkan_prepared_release(job->prepared, true);
@@ -644,6 +675,200 @@ release_job(
 
 	/* Succeeded: every independently pending primary and native pass input has retired once. */
 	return 0;
+}
+
+/* Starts a job: one finite resident upload budget covers every pass and its complete independent draw input prefix. */
+static void
+job_begin(
+	struct bcm2711_vulkan_native_job *job)
+{
+	/* The job runs from its first event, its sums from zero. */
+	job->executed = true;
+	job->stepping = true;
+	job->started = clock_ticks();
+	job->prepare_ticks = 0;
+	job->execute_ticks = 0;
+	job->release_ticks = 0;
+	job->copy_ticks = 0;
+	job->remaining = NATIVE_JOB_BYTES;
+	job->region = 0;
+	job->cursor = job->prepared->first;
+
+	/* Succeeded: its first step continues from here. */
+	return;
+}
+
+/*
+ * Prepares the pass the session runs after the current one and runs its
+ * bin queue while the flight's render runs; the step that reaches it then
+ * launches only its render queue.
+ *
+ * Only a render pass right after the current one (the next event of the
+ * job, or the first of the job after it) is taken, and only when it
+ * samples nothing the current pass renders into and its coordinate
+ * shaders sample nothing (its textures are converted when it launches).
+ * The CPU work of the preparation reads the session's buffers, which the
+ * running render does not write.  next is the event after the current
+ * pass, remaining the job's budget.  Returns nonzero only when the
+ * translations could not be published or the window could not be closed
+ * (the engine's failure).
+ */
+static int
+look_ahead(
+	struct bcm2711_render_device *controller,
+	struct bcm2711_render_session *session,
+	struct bcm2711_vulkan_native_job *job,
+	const struct bcm2711_vulkan_prepared_event *next,
+	uint64_t *remaining,
+	struct bcm2711_v3d_flight *flight)
+{
+	struct bcm2711_vulkan_native_job *target;
+	struct bcm2711_vulkan_native_pass *ahead;
+	const struct bcm2711_vulkan_prepared_event *event;
+	const struct bcm2711_vulkan_prepared_event *after;
+	uint64_t *budget;
+	uint64_t kept;
+	int synchronized;
+	int closed;
+	int error;
+
+	/* The next event of this job, or the first of the job after it. */
+	target = job;
+	event = next;
+	budget = remaining;
+	if (event == NULL) {
+		target = bcm2711_vulkan_queue_next_job(session, job);
+		if (target == NULL || target->quarantined || target->session != session || target->prepared == NULL)
+			return 0;
+		if (!target->executed)
+			job_begin(target);
+		if (!target->stepping)
+			return 0;
+		event = target->cursor;
+		budget = &target->remaining;
+	}
+
+	/* Only a render pass not prepared yet. */
+	if (event == NULL || event->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS || target->ahead != NULL)
+		return 0;
+
+	/* Its preparation, as its own step's would be. */
+	kept = *budget;
+	error = bcm2711_v3d_memory_begin(&controller->space);
+	if (error != 0)
+		return error;
+	controller->space.builder = session->owner;
+	ahead = NULL;
+	after = NULL;
+	error = bcm2711_vulkan_native_pass_create(&controller->space, event, budget, &ahead, &after);
+
+	/* One that may not bin ahead is dropped (its step prepares it again), giving its budget back. */
+	if (error == 0 && !ahead_eligible(ahead, job->pass))
+		error = ENOTSUP;
+	if (error != 0) {
+		(void)bcm2711_vulkan_native_pass_release(&ahead, true);
+		*budget = kept;
+	}
+	controller->space.builder = 0;
+	synchronized = bcm2711_v3d_memory_end(&controller->space);
+	if (synchronized != 0) {
+		/* Unpublished translations are the engine's failure; a prepared pass stays with its job for disposal. */
+		target->ahead = ahead;
+		target->ahead_event = event;
+		target->ahead_next = after;
+		return synchronized;
+	}
+	if (error != 0)
+		return 0;
+
+	/* The step that reaches the event takes the pass. */
+	target->ahead = ahead;
+	target->ahead_event = event;
+	target->ahead_next = after;
+
+	/* Its bin queue beside the render, inside the window; one that launched and failed leaves its job uncertain. */
+	bcm2711_render_window_reopen(controller);
+	error = bcm2711_vulkan_native_pass_prebin(ahead, flight);
+	closed = bcm2711_render_window_close(controller);
+	if (error != 0 && ahead->executed && !ahead->retired)
+		target->retired = false;
+
+	/* Succeeded: the pass is binned, or its own step bins it. */
+	return closed;
+}
+
+/*
+ * Whether the session has a render pass to prepare ahead right after the
+ * current one (see look_ahead).  It reads only the executor's own job
+ * state, so it runs inside the window.
+ */
+static bool
+ahead_wanted(
+	struct bcm2711_render_session *session,
+	struct bcm2711_vulkan_native_job *job,
+	const struct bcm2711_vulkan_prepared_event *next)
+{
+	struct bcm2711_vulkan_native_job *target;
+	const struct bcm2711_vulkan_prepared_event *event;
+
+	/* The next event of this job, or the first of the job after it. */
+	target = job;
+	event = next;
+	if (event == NULL) {
+		target = bcm2711_vulkan_queue_next_job(session, job);
+		if (target == NULL || target->quarantined || target->session != session || target->prepared == NULL)
+			return false;
+		event = target->prepared->first;
+		if (target->executed)
+			event = target->cursor;
+		if (target->executed && !target->stepping)
+			return false;
+	}
+
+	/* A render pass not prepared yet. */
+	if (event == NULL || event->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS || target->ahead != NULL)
+		return false;
+
+	/* Succeeded: there is one. */
+	return true;
+}
+
+/* Whether a prepared pass may bin while the current pass renders. */
+static bool
+ahead_eligible(
+	const struct bcm2711_vulkan_native_pass *ahead,
+	const struct bcm2711_vulkan_native_pass *current)
+{
+	const struct bcm2711_vulkan_native_draw *draw;
+	const struct bcm2711_shader_binary *binary;
+	uint32_t program;
+	uint32_t index;
+
+	/* A graphics pass with a bin list, after a graphics pass. */
+	if (ahead == NULL || current == NULL || ahead->draws == 0)
+		return false;
+	if (ahead->job.kind != BCM2711_V3D_JOB_CL || ahead->job.command.cl.bin_start == 0)
+		return false;
+
+	/* None of its textures is a target of the running pass. */
+	if (bcm2711_vulkan_native_pass_samples(ahead, current))
+		return false;
+
+	/* Its coordinate shaders, which run in the bin, sample nothing. */
+	for (draw = ahead->first; draw != NULL; draw = draw->next) {
+		for (program = 0; program < 3U; program++) {
+			binary = draw->programs[program];
+			if (binary == NULL || binary->stage != BCM2711_SHADER_COORDINATE)
+				continue;
+			for (index = 0; index < binary->uniform_count; index++) {
+				if (binary->uniforms[index].kind == BCM2711_SHADER_TEXTURE || binary->uniforms[index].kind == BCM2711_SHADER_SAMPLER)
+					return false;
+			}
+		}
+	}
+
+	/* Succeeded: it may bin now. */
+	return true;
 }
 
 /* Releases closed renderer descriptors only after their final Vulkan dependency graph and protocol arena can retire. */
