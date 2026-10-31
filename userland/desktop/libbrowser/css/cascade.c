@@ -107,6 +107,9 @@ struct css_engine {
 	struct vm_string *atom_style;
 	struct vm_string *atom_href;
 	float root_font_size;
+	/* The line height in pixels of the element being styled and of the root (the lh and rlh units). */
+	float line_px;
+	float root_line_px;
 	/* The zoom of the element being styled: the product through its ancestors, and its own factor. */
 	float zoom_eff;
 	float zoom_rel;
@@ -363,6 +366,8 @@ css_engine_create(
 	created->zoom_eff = 1.0f;
 	created->zoom_rel = 1.0f;
 	created->root_zoom = 1.0f;
+	created->line_px = CASCADE_DEFAULT_FONT_SIZE * 1.2f;
+	created->root_line_px = CASCADE_DEFAULT_FONT_SIZE * 1.2f;
 	created->viewport_width = CASCADE_DEFAULT_VIEWPORT_WIDTH;
 	created->viewport_height = CASCADE_DEFAULT_VIEWPORT_HEIGHT;
 	wb_vector_init(&created->sheets, sizeof(struct cascade_sheet));
@@ -876,6 +881,7 @@ cascade_paint_color(
 	const struct css_style *alternate_parent;
 	float root_font_size;
 	float root_zoom;
+	float root_line_px;
 	size_t container_uses;
 	int container_missed;
 	int error;
@@ -896,6 +902,7 @@ cascade_paint_color(
 	/* An alternate cascade is discarded except for color and cannot affect later layout. */
 	root_font_size = engine->root_font_size;
 	root_zoom = engine->root_zoom;
+	root_line_px = engine->root_line_px;
 	container_uses = engine->container_uses.count;
 	container_missed = engine->container_missed;
 	engine->visited_pass = 1;
@@ -903,12 +910,24 @@ cascade_paint_color(
 	engine->visited_pass = 0;
 	engine->root_font_size = root_font_size;
 	engine->root_zoom = root_zoom;
+	engine->root_line_px = root_line_px;
 	engine->container_uses.count = container_uses;
 	engine->container_missed = container_missed;
 	if (error != 0)
 		return error;
 	style->paint_color = visited.color;
 	return 0;
+}
+
+/* The line height of a style in pixels (the lh unit): a number scales the font size, and normal is a little over one. */
+static float
+cascade_line_pixels(const struct css_style *style)
+{
+	if (style->line_height.unit == CSS_UNIT_PX)
+		return style->line_height.value;
+	if (style->line_height.unit == CSS_UNIT_NUMBER)
+		return style->line_height.value * style->font_size;
+	return style->font_size * 1.2f;
 }
 
 /* Computes the style of an element, or of one of its pseudo-elements, in the cascade. */
@@ -1021,6 +1040,8 @@ cascade_compute(
 		style->text_shadow.blur *= engine->zoom_rel;
 	}
 
+	engine->line_px = cascade_line_pixels(style);
+
 	/* The element's custom properties, then the declarations that wait for them. */
 	error = cascade_customs(engine, style, matches, list.count);
 	if (error == 0)
@@ -1120,6 +1141,7 @@ cascade_compute(
 	if (is_root) {
 		engine->root_font_size = style->font_size;
 		engine->root_zoom = style->zoom_eff;
+		engine->root_line_px = cascade_line_pixels(style);
 	}
 
 	/* Succeeded: the style is computed. */
@@ -4419,6 +4441,7 @@ cascade_apply(
 				style->line_height.offset = 0;
 			}
 		}
+		engine->line_px = cascade_line_pixels(style);
 
 		break;
 	case CSS_PROP_TEXT_ALIGN:
@@ -5963,6 +5986,12 @@ cascade_length(
 		break;
 	case CSS_DUNIT_EX:
 		length.value = value->number * font_size * 0.5f;
+		break;
+	case CSS_DUNIT_LH:
+		length.value = value->number * engine->line_px;
+		break;
+	case CSS_DUNIT_RLH:
+		length.value = value->number * engine->root_line_px / engine->root_zoom * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_PERCENT:
 		length.value = value->number;

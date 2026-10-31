@@ -201,7 +201,9 @@ enum css_declared_unit {
 	CSS_DUNIT_VMAX,
 	CSS_DUNIT_CALC,
 	CSS_DUNIT_CQW,
-	CSS_DUNIT_CQH
+	CSS_DUNIT_CQH,
+	CSS_DUNIT_LH,
+	CSS_DUNIT_RLH
 };
 
 /*

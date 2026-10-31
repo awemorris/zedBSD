@@ -812,6 +812,8 @@ static const struct values_keyword values_units[] = {
 	{ "rem", CSS_DUNIT_REM },
 	{ "ex", CSS_DUNIT_EX },
 	{ "ch", CSS_DUNIT_EX },
+	{ "lh", CSS_DUNIT_LH },
+	{ "rlh", CSS_DUNIT_RLH },
 	{ "pt", CSS_DUNIT_PT },
 	{ "pc", CSS_DUNIT_PC },
 	{ "in", CSS_DUNIT_IN },
