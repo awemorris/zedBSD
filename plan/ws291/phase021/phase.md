@@ -164,3 +164,26 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
 - 02:18 `KERNEL=build/p021-k5b/vmunix`（ee3e43a88、cksum 4200268633）を rpi5-mview.sh で置いて再起動（元は /boot/boot0/vmunix.p021old）。
   7.1 の TFU の UIF の self-test が実機で通った: `V7 TFU UIF 96x40 x4`・`33x9 x4`・`1x1 x4`・`200x150 x4`・`256x255 x4`・`70x37 x1`・`35x19 x2` の
   全てで見える texel が CPU の配置と一致、`texture conversion uses the unit`（build/tmp/p021-k1）。mview・mip・16-bit の index は表示が無いので未実行。
+
+## 記録（P4 q1784-i05、2026-11-01 02:25〜）
+
+- main 44ca7739c を取り込んだ（merge 342f00101、親 f8a620b21 44ca7739c、競合なし）。
+- 2026-11-01 ユーザーから（Q1 経由）、Pi 5 の firmware の画面は HDMI の monitor に出ていたので monitor は繋がっている、「monitor が無い」の結論は誤り、原因を card の設定か kernel の framebuffer の求め方で調べる、という趣旨の指示を受けた。
+
+### Pi 5 で framebuffer が無い原因（2026-11-01 02:30〜03:05、実機 10.0.30.7）
+
+- 道具: kernel の 7.1 の attach が boot の framebuffer を見つけない時の報告（`bcm2712_screen_report`、`bcm2712_firmware_message`）。firmware に display の数と HDMI 0 の EDID を問い、
+  firmware 自身の log（tree の `/chosen/log` の場所、0x3ff23000・0x80000 byte）の display の行を出す。何も変えない。`build/p021-k5c/vmunix`（warning 0）。
+- 調べの途中で確かめた事（同じ板、kernel の報告で）: firmware の答えは GET_PHYSICAL 0x0、display の数 0、EDID block 0 は失敗（応答 0x80000001）、HAL と同じ set-up の要求も失敗（0x80000001）、
+  tree に simple-framebuffer は無い。HVS の channel 0〜2 は全て無効（電源の入れ直しの後は ch0 に 640x480 の設定が残り無効）。firmware は 2026-05-11 の bootloader（66f33f7e）。
+- **原因**: firmware の log（電源の入れ直し・SwitchBot 14C19FA80F86 と再起動の両方で同じ）:
+  `Select resolution HDMI0/2 hotplug 1 max_mode 2` → `BSC_A no ACK`（×2）→ `HDMI0: Unable to read EDID block 0`、`Select resolution HDMI1/2 hotplug 0`。
+  monitor は HDMI0 に繋がり hotplug は立つが、DDC（EDID を読む I2C）に monitor が応答しない。Pi 5 の firmware は EDID の無い display に OS の framebuffer を作らない
+  （bootloader の診断の画面は EDID 無しの 640x480 で出るので、ユーザーが見た画面と矛盾しない）。WS279（2026-10-22）は同じ板で 1920x1080 の plane が firmware にあった。
+- config.txt の試し（元は `/boot/boot0/config.txt.p021orig`、全て元に戻した）: WS279 と同じ形（pciex1 無し・1280x720）、`hdmi_force_hotplug=1`、`hdmi_force_hotplug:0=1`＋`:1=1`＋`hdmi_group=1`・`hdmi_mode=16`、
+  `hdmi_ignore_edid=0xa5000080`＋group・mode、`hdmi_edid_file=1`（と `:0`・`hdmi_edid_filename:0=edid.dat`、1080p60 の EDID を自作して /boot/boot0/edid.dat に置いた）は、
+  どれも firmware の log が同じ（EDID を読めない、display 0）。Pi 5 の firmware はこれらを使わない。
+- 結論: card の設定・image の script・zedBSD の kernel の不具合ではない（BUG は立てない）。monitor 側の DDC（cable・変換・切替器・monitor の入力）の問題で、設定では直せない。
+  直すには、EDID を返す接続（cable・micro HDMI の変換の交換、切替器を外す、monitor の電源と入力）が要る。ユーザーの手の作業。
+- 板の状態: /boot/boot0/vmunix は build/p021-k5c/vmunix（cksum 1329488160）、元は vmunix.k5b（ee3e43a88）・vmunix.p021old（image の物）。config.txt は元のまま。
+  /boot/boot0/edid.dat（128 byte、試しの物、firmware は読まない）が残る。
