@@ -482,5 +482,6 @@
 | q1777 / q1777-i01 | P4（phase-runner、worktree p4-bugs） | [ws333](ws333/ws.md) p019 sessiond の THERMAL の要求 | UAPI（p004）待ちの kernel への呼びは仮の口 | in-progress・返却（370fccb1e を main に。rules の host 試験 113 checks、kernel への呼びは UAPI まで stub） |
 | q1778 / q1778-i01 | P1（conformance-reviewer、worktree `/home/awe/zedBSD-worktrees/p1-ws326p025`・branch `agent/p1-ws326p025`） | [ws326-p025](ws326/ws.md) | 書き方だけ、全試験が前と同じ | cleared（181a071ac） |
 | q1779 / q1779-i01 | P6（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p6-ws310`・branch `agent/p6-ws310`） | [ws310](ws310/ws.md) p001 設計 | plan/ws310/ だけ、design-reviewer と問いまで | uncleared（設計 38f8c85eb、merge a2aa89c4f。理由: ユーザーの問い Q310-1〜6 の答え待ち） |
-| q1727 / q1727-i04 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 4 回目 | 100% までの自走（ユーザーの指示）、計測は /tmp | in-progress |
+| q1727 / q1727-i04 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 4 回目 | 100% までの自走（ユーザーの指示）、計測は /tmp | in-progress・返却（2,507 → 2,680（77.19%）、main 335892b7b、Acid3 100/100。i05 へ） |
 | q1780 / q1780-i01 | P4（phase-runner、worktree `/home/awe/zedBSD-worktrees/p4-ws326close`・branch `agent/p4-ws326close`） | [ws326](ws326/ws.md) の完了の片付け | 試験を plan/tools/h264sw/ へ、参照の書き換え、ws.md を完了の形、Phase の directory の git rm（一覧を Q1 に先に） | cleared（684d0512b、main 8bf8f0280。WS326 completed） |
+| q1727 / q1727-i05 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 5 回目 | 100% までの自走（ユーザーの指示）。SVG のベクトルの拡大は WS328 の範囲なので触らない | in-progress |
