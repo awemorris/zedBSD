@@ -2075,33 +2075,6 @@ bcm2711_render_window_open(
 	return;
 }
 
-/*
- * Opens the window again while a job the step launched runs on, without
- * letting the waiting mappers through: they could not map while the job
- * runs, and wait for the mutex instead.
- */
-void
-bcm2711_render_window_reopen(
-	struct bcm2711_render_device *controller)
-{
-	unsigned long enabled;
-
-	/* No translation changes from here until the window closes. */
-	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
-
-	if (controller->space.native->hardware.window)
-		__builtin_trap();
-	controller->space.native->hardware.window = true;
-
-	spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
-
-	mutex_unlock(&controller->mutex);
-	controller->worker.released_at = clock_ticks();
-
-	/* Succeeded: the window is open and the mutex is free. */
-	return;
-}
-
 /* Closes the window: takes the controller mutex again and unmaps the views released inside it. */
 int
 bcm2711_render_window_close(

@@ -168,68 +168,6 @@ bcm2711_v3d_job_run(
 	return 0;
 }
 
-/*
- * Runs a job whole: the 7.1 runner does not keep a render queue running
- * after its launch, so the flight is never active, and no job is binned
- * ahead (binned is refused, launching nothing).
- */
-int
-bcm2711_v3d_job_launch(
-	struct bcm2711_v3d *engine,
-	const struct bcm2711_v3d_job *job,
-	struct bcm2711_v3d_job_result *result,
-	struct bcm2711_v3d_flight *flight,
-	bool binned)
-{
-	int error;
-
-	/* Nothing runs on; a job binned ahead cannot come from this runner. */
-	kern_memset(flight, 0, sizeof(*flight));
-	if (binned) {
-		kern_memset(result, 0, sizeof(*result));
-		result->retired = true;
-		return ENOTSUP;
-	}
-
-	/* The whole job. */
-	error = bcm2711_v3d_job_run(engine, job, result);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the job ran whole. */
-	return 0;
-}
-
-/* Refuses: no render queue runs on here (see bcm2711_v3d_job_launch); nothing is launched. */
-int
-bcm2711_v3d_job_prebin(
-	struct bcm2711_v3d *engine,
-	struct bcm2711_v3d_flight *flight,
-	const struct bcm2711_v3d_cl_job *next,
-	struct bcm2711_v3d_job_result *result)
-{
-	/* Nothing launched. */
-	(void)engine;
-	(void)flight;
-	(void)next;
-	kern_memset(result, 0, sizeof(*result));
-	result->retired = true;
-	return ENOTSUP;
-}
-
-/* Has nothing to wait for: the launch ran the whole job. */
-int
-bcm2711_v3d_job_land(
-	struct bcm2711_v3d *engine,
-	struct bcm2711_v3d_flight *flight)
-{
-	/* No flight runs on. */
-	(void)engine;
-	(void)flight;
-	return 0;
-}
-
-
 /* Checks the register fields and all directly described GPU address spans. */
 static int
 validate_job(

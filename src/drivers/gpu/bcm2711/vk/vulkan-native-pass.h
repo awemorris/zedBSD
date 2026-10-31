@@ -61,13 +61,6 @@ struct bcm2711_vulkan_native_pass {
 	bool retired;
 	/* Every texture conversion of the launch completed; the finish marks their snapshots filled. */
 	bool converted;
-	/*
-	 * The bin queue already ran, while the pass before it rendered
-	 * (bcm2711_vulkan_native_pass_prebin), for bin_ticks: the launch runs
-	 * only the render queue.
-	 */
-	bool binned;
-	uint64_t bin_ticks;
 	/* A whole-image copy records which source state its output now equals, for later incremental copies. */
 	bool sync;
 	uint64_t sync_identity;
@@ -96,26 +89,6 @@ int bcm2711_vulkan_native_pass_run(struct bcm2711_vulkan_native_pass *pass, stru
 int bcm2711_vulkan_native_pass_start(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result);
 int bcm2711_vulkan_native_pass_launch(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result);
 int bcm2711_vulkan_native_pass_finish(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result, int error);
-
-/*
- * The launch in two halves: the first runs the texture conversions and the
- * bin queue and launches the render queue, which flight then holds
- * (flight->active), so that the caller may prepare and bin the next pass
- * meanwhile (bcm2711_vulkan_native_pass_prebin); the second waits for it.
- * The second half always follows the first; error is the first half's.
- */
-int bcm2711_vulkan_native_pass_launch_begin(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result, struct bcm2711_v3d_flight *flight);
-int bcm2711_vulkan_native_pass_launch_end(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result, struct bcm2711_v3d_flight *flight, int error);
-
-/*
- * Runs a prepared pass's bin queue while the flight's render runs.  A
- * refusal leaves the pass to bin as usual; a failure after the launch
- * leaves it uncertain (executed, not retired).
- */
-int bcm2711_vulkan_native_pass_prebin(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_flight *flight);
-
-/* Whether a pass samples an image another pass renders into (its colour or depth target). */
-bool bcm2711_vulkan_native_pass_samples(const struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_native_pass *other);
 
 /* Adds the draws' and lists' diagnostic preparation times, draw count and staged bytes to a report under the controller mutex. */
 void bcm2711_vulkan_native_pass_costs(const struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_perf *perf);

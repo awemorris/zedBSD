@@ -1,7 +1,7 @@
 #!/bin/sh
 # ws291-p025: mview's scene on the Raspberry Pi 4's V3D 4.2 with one tree's kernel and programs, run from the top of
 # the tree on a board running zedBSD with root's SSH key of the guest harness (plan/tmp/guest/id_ed25519):
-#   [PI=ADDRESS] [KERNEL=VMUNIX] [PROGRAMS=BUILD] [WINDOWED=1] [STILL=1] [COPIES='1 21'] [SPIN=12] [MVIEW_ARGS=...]
+#   [PI=ADDRESS] [KERNEL=VMUNIX] [PROGRAMS=BUILD] [WINDOWED=1] [STILL=1] [COPIES='1 21'] [SPIN=12] [MVIEW_ARGS=...] [MVIEW_ENV='NAME=VALUE ...']
 #       [SHOT=1] sh plan/ws291/tests/pi4-mview.sh OUT
 # KERNEL, when its checksum differs from the board's /boot/boot0/vmunix, is copied there and the board rebooted
 # (the board's first kernel is kept once as vmunix.p025old).  PROGRAMS is a build of the board's config: its
@@ -81,6 +81,7 @@ say "nodes $(b 'ls /dev/gpu*' 2>&1 | tr '\n' ' ')"
 # The programs, copied to /root/p025.
 D=/root/p025
 ENV="XDG_RUNTIME_DIR=$D/run VULKAN_ZEDBSD_WSI_LOG=1"
+MVIEW_ENV=${MVIEW_ENV:-}
 WAYLAND=/bin/wayland
 MVIEW=/bin/mview
 b "mkdir -p $D/run $D/bin $D/lib && chmod 700 $D/run"
@@ -108,7 +109,7 @@ run() {
 	b 'dmesg' > "$out/$name.before" 2>&1
 	take=
 	[ "${SHOT:-0}" = 1 ] && take="& sleep $((${SPIN:-12} / 2 + 6)); $D/bin/keiland-shot --socket $D/run/keiland-shot.sock $D/shot-$name.png; wait"
-	BT=$((${SPIN:-12} + 150)) b "env $ENV $MVIEW --display=$D/run/wayland-0 --model=$D/qs40 --token=$name $* ${MVIEW_ARGS:-} $take" > "$out/$name.txt" 2>&1
+	BT=$((${SPIN:-12} + 150)) b "env $ENV $MVIEW_ENV $MVIEW --display=$D/run/wayland-0 --model=$D/qs40 --token=$name $* ${MVIEW_ARGS:-} $take" > "$out/$name.txt" 2>&1
 	say "$name $(grep -E 'MVIEW (PRESENT|SPIN|STAGES|FAILED|HITCHES)' "$out/$name.txt" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')"
 	grep -E 'VULKAN WSI' "$out/$name.txt" | sed "s/^/$name /" | tee -a "$summary"
 	grep -vE 'MVIEW|VULKAN WSI' "$out/$name.txt" | head -4 | sed "s/^/$name other /" | tee -a "$summary"
