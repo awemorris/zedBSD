@@ -1071,6 +1071,7 @@ flex_grow(
 {
 	layout_unit used;
 	layout_unit remaining;
+	layout_unit initial;
 	layout_unit share;
 	layout_unit target;
 	int64_t total_violation;
@@ -1087,6 +1088,7 @@ flex_grow(
 	}
 
 	/* Each violation freezes at least one item, so the bounded loop terminates. */
+	initial = 0;
 	for (round = 0; round <= count; round++) {
 		used = 0;
 		total = 0;
@@ -1115,10 +1117,12 @@ flex_grow(
 			return;
 		}
 
-		/* Factors below one leave a proportional part of the free space unused. */
-		weight = total;
-		if (weight < 1)
-			weight = 1;
+		/* Factors below one leave a proportional part of the first round's free space unused. */
+		if (round == 0)
+			initial = remaining;
+		weight = total > 0 ? total : 1;
+		if (total < 1 && (layout_unit)((float)initial * total) < remaining)
+			remaining = (layout_unit)((float)initial * total);
 		total_violation = 0;
 		for (index = 0; index < count; index++) {
 			if (items[index].frozen)
