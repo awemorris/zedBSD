@@ -59,7 +59,9 @@ static void fork_batch_release(struct vmspace *source, struct vm_region *source_
  * Copies a vmspace for fork, sharing private pages copy-on-write.
  *
  * A page whose backing is busy is waited for outside the locks and the
- * whole copy is retried.
+ * whole copy is retried.  While a copy runs, the source's faults wait
+ * for it, so only a change of the layout itself (a mapping made, a
+ * page reclaimed) makes it start over.
  */
 int
 vmspace_fork(
@@ -68,6 +70,7 @@ vmspace_fork(
 {
 	struct vm_private_page *wait_backing;
 	struct vmspace *failed_copy;
+	uint64_t sequence;
 	int error;
 	int wait_error;
 
@@ -86,10 +89,31 @@ vmspace_fork(
 		vm_metadata_enter();
 		mutex_lock(&source->lock);
 
+		/*
+		 * Waits for another fork of the same space to end: each
+		 * advances the generation after every batch, so two at once
+		 * would keep making each other start over.
+		 */
+		while (source->forking) {
+			sequence = waitq_sequence(&source->fault_waitq);
+			mutex_unlock(&source->lock);
+			vm_metadata_leave();
+			vmspace_wait_fault_event(source, sequence);
+			vm_metadata_enter();
+			mutex_lock(&source->lock);
+		}
+
+		/* Holds the source's faults off until this copy ends. */
+		source->forking = 1;
+
 		/* A copy made changes the source's layout: its PTEs are read-only. */
 		error = vmspace_fork_locked(source, result, &wait_backing, &failed_copy);
 		if (error == 0)
 			vmspace_generation_advance_locked(source);
+
+		/* Lets the faults that waited for the copy go on. */
+		source->forking = 0;
+		vmspace_fault_wake_locked(source);
 
 		/* Leaves the source locks. */
 		mutex_unlock(&source->lock);
