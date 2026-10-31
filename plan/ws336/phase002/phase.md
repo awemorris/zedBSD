@@ -2,7 +2,7 @@
 
 # ws336-p002: ssh-common・ssh-buf（約束・byte 順・name-list・base64、RFC 4251 の型）
 
-Status: planned（2026-11-01 p001 の設計で作成）
+Status: in-progress（2026-11-01 04:54 q1809、Sonnet）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p001
