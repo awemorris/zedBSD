@@ -9,8 +9,8 @@
 # plan/tools/frame-ops/frame-ops.sh run in the session (OUT/deskN: session.log, marks, the table of
 # plan/tools/frame-ops/frame-times.py, every frame and dmesg).  By default (CONSOLE=1) the console login stays and the
 # compositor runs as root on its own socket with the session's options (--glass, the wallpaper, --log-frames) and its
-# default desktop client; CONSOLE=0 uses the graphical login (cmdline.txt login=graphical, the board's autologin
-# account).  Each run's summary keeps the kernel's last board line (the CPU clock as set and measured, the temperature
+# default desktop client; CONSOLE=0 uses the graphical login (cmdline.txt login=graphical rpi5gpu.start=boot, the
+# board's autologin account).  Each run's summary keeps the kernel's last board line (the CPU clock as set and measured, the temperature
 # and the firmware's throttling flags, v3d.perf=1).  At the end the console login and the board's own session file are
 # put back.  OUT/summary.txt holds what is printed.
 # LIBS='NAME=PATH ...' puts shared libraries in /lib first, BINS='NAME=PATH ...' programs in /bin.
@@ -73,12 +73,15 @@ zedBSD*) ;;
 esac
 login=graphical
 [ "${CONSOLE:-0}" = 1 ] && login=console
+# The Pi 5 holds its GPU until root starts it; a graphical login needs it started at boot.
+gpu=
+[ "$login" = graphical ] && gpu=" rpi5gpu.start=boot"
 b 'cd /boot/boot0 && for f in vmunix cmdline.txt; do test -e $f.p021old || cp $f $f.p021old; done; test -e /etc/keiland/session.p021old || cp /etc/keiland/session /etc/keiland/session.p021old'
 want=$(cksum < "$KERNEL" | cut -d' ' -f1)
 timeout 300 scp $SO -q "$KERNEL" "root@$PI:/boot/boot0/vmunix.new" &&
     timeout 120 scp $SO -q "$AAT" "root@$PI:/bin/aat-input" &&
     timeout 120 scp $SO -q plan/ws291/tests/session.sh "root@$PI:/etc/keiland/session" &&
-    b 'test "$(cksum < /boot/boot0/vmunix.new | cut -d" " -f1)" = '"$want"' && mv /boot/boot0/vmunix.new /boot/boot0/vmunix && chmod 755 /bin/aat-input && chmod 644 /etc/keiland/session && echo "login='"$login"' v3d.perf=1" > /boot/boot0/cmdline.txt && sync' ||
+    b 'test "$(cksum < /boot/boot0/vmunix.new | cut -d" " -f1)" = '"$want"' && mv /boot/boot0/vmunix.new /boot/boot0/vmunix && chmod 755 /bin/aat-input && chmod 644 /etc/keiland/session && echo "login='"$login$gpu"' v3d.perf=1" > /boot/boot0/cmdline.txt && sync' ||
     { say "FAIL the files were not put in"; exit 1; }
 
 # LIBS='NAME=PATH ...': each PATH becomes the board's /lib/NAME (put beside and renamed over it, the first kept once as
