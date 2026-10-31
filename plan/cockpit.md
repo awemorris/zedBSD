@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 21:32（Q1）
+最終更新: 2026-10-31 22:08（Q1）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | p025（q1784）: Pi 4 の desktop を 1920x1080 で 60 fps に → mview の 3D（21 体で 50 fps、今 28.9） | Pi 4（10.0.30.6）。この後に Pi 5（p021） |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | — | — | 返却（07:1x）。WS310 の設計を main に（問い Q310-1〜6 は下の 0i） | 次の割当を Q1 が決める |
-| P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
+| P7 | — | — | [BUG-379](bugs/BUG-379.md)（q1786）: kernel の fork の livelock（親の別の thread が書く間 fork が終わらない）で Pi 4 の session の compositor が止まる。kernel の VM・libc・libvulkan の 3 か所を直す | QEMU、Pi 4 は P4 と調整 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 10 回目（q1727-i10）: shadow DOM → 縦書きの grid の揃え → animation | 今 3,472 のうち 2,922（84.16%）、Acid3 100/100・Acid2 100%。9 回目は +74、後退 0 |
 
 実装の担当（Sonnet・Opus の単発）: 今は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
@@ -89,7 +89,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 | [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking を飛ばす | closed（VF2 の実機で確かめた） |
 | [BUG-372](bugs/BUG-372.md) | VF2 の serial の console が入力を受けない（元から未実装） | closed（VF2 の実機で確かめた） |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が EBUSY で終わる（VF2） | closed（P7: 原因は GPU の kernel の命令の buffer が満杯の時に待たずに失敗する事。待つ形に直し、VF2 で 8 回とも落ちず。main 2c5897f26） |
-| [BUG-379](bugs/BUG-379.md) | Pi 4 の session の中で compositor が描かない（720p で約 1 fps、1080p で 0、前から） | open（P4 が p025 で） |
+| [BUG-379](bugs/BUG-379.md) | Pi 4 の session の中で compositor が描かない。原因は kernel の fork の livelock | open（P7 が直す） |
 | [BUG-380](bugs/BUG-380.md) | Pi 4 で mview（3D）の pipeline が作れない（V3D の executor） | open |
 | [BUG-378](bugs/BUG-378.md) | arm64 の kernel の text が 2 MiB を越えると起動の途中で止まる（Pi 4、全 arm64 の board に効く） | closed（実機の Pi 4 で起動） |
 | [BUG-374](bugs/BUG-374.md) | RTX の mouse の cursor の色が他の GPU と逆 | 診断の kernel を用意済み（矢印の色で原因が分かれる）。ユーザーの目視待ち（下の「拾える試験」） |
