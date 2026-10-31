@@ -160,3 +160,53 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   kernel、js3 = この変更、build/tmp/p024-js3）: subs-1000 js 32.16・28.56 → js3 34.67・34.31、subs-100 296.1・301.6 → 301.1・297.5、big は揺れの内。
   戻し cksum 一致、Debian。QEMU の Venus（この変更の kernel で forge の image を作り直し、23:30〜23:39）: `venus-reg: PASS`（forge・fence 600・wltest・
   mview mailbox・mview 20 submit・compositor の VULKAN_ERROR 0）。
+
+## q1785-i02（2026-10-31 23:41〜 P3、worktree p3-ws291wsi を main 71f8b7d8b に fast-forward）
+
+- 承認: Queue q1785-i02（上のユーザーの指示のまま、残りの一覧 1〜5 を順に）。fence の無い submit に job を付けるかは変えない（製品の判断、Q1 がユーザーに聞く）。
+  実機 10.0.10.3（RTX 2070）、lock /tmp/zedbsd-rdna.lock を window ごと。各 window の終わりに 14 file と NVMe の kernel を戻して cksum 一致
+  （vmunix 1463007375、nvrtx.vk.perf 行 0）、Debian（RTX 4 function vfio-pci）。main の腕 = kernel js3（3682022559、HEAD の build と cksum 一致）＋
+  libvulkan lv2（3748472591）＋ base の 13 file。
+
+### 1 submit の kernel の内訳（診断 kernel d1・d2、`nvrtx-submit-stages-diag.patch`、23:48〜00:03、build/tmp/p024i2-d1・d2）
+
+- 診断: GPU_IOCTL_TIMING＝1 と nvrtx の perf の行に、GPU_JOB_SUBMIT の段（要求・stream の copyin・reserve・driver・finish・後始末）、executor の段
+  （begin・draw・ring の submit）、opcode ごとの dispatch の時間（`plan/ws291/tests/nvrtx-submit-stages-diag.patch`、nvrtx-cmd-timing.patch を含む）。
+  時計の読み 1 対が約 45 ns なので、細かい段ほど水増し。
+- subs-1000（d2、5 s の窓、144739 submit）の GPU_JOB_SUBMIT 1 本 23.4 µs: stream の kern_malloc と copyin 3.8、reserve 1.6、driver 15.3、finish 1.0、
+  後始末（pin を外す・copyout）1.5。driver の中: executor 10.0（begin 1.65 = 主に execute_state の kern_calloc、draw 16 本 3.5、ring の submit 1.0）、
+  record の decode 約 2.2、RESET_COMMAND_BUFFER 1.0（record の object の参照を外す）。
+- big-1000（d1・d2）: RESET_COMMAND_BUFFER 1 frame 330 µs（80000 record）、executor の draw 1 本 約 140 ns（時計込み）。frame は record（client の
+  encode）3.7〜3.9 ms・submit 3.3〜3.5 ms・fence 1.1〜1.2 ms: GPU は submit の始めから約 4.5 ms（1 draw 約 0.22 µs、NVK の 0.256 より速い）で、
+  残りの差は client の encode（NVK 136.2 fps = 7.35 ms には record を約 2.6 ms に縮める要）。
+
+### 直したこと（i2a、commit 1e75e4de4）
+
+- `vk-execute.c`: executor の state を session の executor に持ち、submit ごとの kern_calloc・kern_free を無くした（kernel の heap は first-fit で lock を取る）。
+- `gpu.c`（GPU core）:
+  - open ごとに stream の kernel の写しの buffer を持つ（16 KiB まで、GPU_COMMAND と GPU_JOB_SUBMIT。admission が 1 本ずつに限り、backend は
+    callback の後に持たない: venus は自分の写しを作る）。submit ごとの kern_malloc・kern_free が無くなる。
+  - 監督の thread（monitor）の起床を、それが眠っている時（全体の scan の後）は、record の期限が眠る期限より早い時と、open の停止か close が待つ時
+    だけに（`gpu_monitor_notify_locked`、`monitor_asleep`・`monitor_until`）。scan の途中なら今どおり起こす。reserve・admit・pin を外す時の 5 か所。
+    一覧の 2（monitor の起床の残り 3 回）。
+- libvulkan: transaction の writer を最初に必要な大きさで取る（`context.c`、`commands.c` の pending の recording。256 byte から倍々の realloc が
+  submit ごとに 2 つの writer で約 4 回ずつあった）。
+- host: `run-gpu-job-host.sh` PASS（WS014 の fixture と gpu-job-submit、plain と ASan/UBSan）、nvrtx vk 94/0、vk-d3 228/0、sm75 308/0。
+  config/ci の 19 の vmunix（commit 1e75e4de4 の写しから）と RTX の vmunix warning 0。
+- QEMU の Venus（forge の image を i2a の tree から build/p024/forge2 に、libvulkan はその build）: 1 回目は guest が 240 s で SSH に答えず
+  （変更なしでもう 1 回）、2 回目 `venus-reg: PASS`（forge・fence 600・wltest・mview mailbox・mview 20 submit・compositor の VULKAN_ERROR 0）。
+
+### 実機の A/B（`rtx-p024.sh` ROUNDS=2 SHOT=1、00:07〜00:22、build/tmp/p024i2-ab1、腕ごとに kernel と libvulkan）
+
+| 腕 | big-100 | big-1000 | subs-100 | subs-1000 | scene-1500 | scene-5000 |
+| --- | --- | --- | --- | --- | --- | --- |
+| main（js3 ＋ lv2）r1・r2 | 554.9・548.5 | 113.3・115.4 | 304.1・303.9 | 34.81・35.14 | 155.6・157.0 | 49.68・49.76 |
+| i2a（49188371 ＋ lv3 4209590221）r1・r2 | 555.3・555.1 | 117.4・116.1 | 347.4・365.0 | 42.39・43.69 | 157.6・157.2 | 49.79・49.86 |
+
+- subs-1000 の vkQueueSubmit 22.4 → 17.2 µs（+23 %）。big は揺れの内か小さく上。
+- 画素: 100 copies の still（one・each・subs）は両 round とも main の round 1 と max 0・differ 0、one と subs も差 0。
+- `rtx-p024.sh` に腕の 3 つ目の field（その腕の libvulkan）を足した。
+- game mode の往復・画面・desktop（`plan/ws309/tests/rtx-p015.sh` PARTS='cycle scenes desk'、main と i2a、00:22〜00:37、build/tmp/p024i2-v1）:
+  往復は両腕とも direct=3 left=3 window=3、failed 0、refused 0。画面（keiland-shot、i2a 対 main）: desktop・Notes・browser とも差は右上の時計の箱
+  （x=1881..1894、y=17..27）だけ。desktop（frame-ops）: main launch 64・type 61・output 69・drag 60・home 63・wiseview 64、i2a 63・62・67・61・64・64 fps
+  （後退なし）。起動の dmesg の `vram-window` の行は両腕に出る（前から）。戻し cksum 一致、bl 行 0、Debian。
