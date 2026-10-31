@@ -186,6 +186,24 @@
   （bl=0 の RTX は貸さない）。block-linear の scanout の直しは P3（WS291 p023）。機械は branch と `nvrtx.disp.bl=1` のまま P3 へ渡した（deploy と戻しの手順は Q1 に送った）。
   よって RTX の文字通りの zero copy は、mview の側（lent=1・tiling 0x10001・copy 0・quads 0）は確かめたが、画面の正しさは未達（P3 の scanout 待ち）。
 
+### 段 4（VF2、kei@10.0.30.2、`plan/ws309/tests/vf2-p015.sh`、18:18〜18:25）
+
+- password は env だけで渡した（file・log に無し）。timing の kernel を作り直した（build/p015vf2t、6f9cbfef8、`-DPOWERVR_SUBMIT_TIMING=1`、vmunix 1381433670、warning 0）。
+  base = build/tmp/p015base/build/vf2t（この worktree の 16:0x の基準の tree の timing の build、kernel 3302329568。その compositor は game mode を backend の errno=21 で断り合成する）。
+  c1・c13 はそれぞれ別の compositor（root、自分の socket）。証拠 build/review/ws309/vf2-p015-i02/。
+
+| | c1 fps | c13 fps | kernel の transfer（run の合計） | WSI の chain |
+| --- | --- | --- | --- | --- |
+| base | 73.58 | 41.89 | c1 963、c13 518（frame ごと） | （診断の無い libvulkan） |
+| new | **141.25** | **52.50** | c1 161、c13 154（最初の 1 期間だけ、game の期間は 0 行） | lent=1 direct=1 tiling=0x1、copies 0（1680・621 present） |
+
+- frame ごとの GPU の copy（transfer の job）は無い: new の c13 の 2 期間目に transfer の行が無い（base は 2 期間とも 306・212）。最初の期間の 154 は window mode の合成の frame
+  （chain=1 の presents 10 copies 10）と model の upload の見込み（内訳は未確かめ）。
+- c13 は 52.50 fps で ws291-p020 の目標（50）を越えた（direct の 42.35 から）。
+- game ↔ window の往復（BUG-375 の道、1 つの compositor で 8 回）: new は 8/8 `MVIEW DONE`、direct=8 left=8 window=9、refused 0、failed 0、EBUSY 0。base は game mode に入らず（refused 7）。
+  script の「compositor alive」の確かめは user の ps が root の process を見ないので 0 と出た（誤り、`kill -0` に直した）。8 回目の後の log は通常の PERF の行で終わる。
+- 戻し: 板の kernel 2825517684（vmunix.p2old と同じ）を戻し、読み戻して一致、板は zedBSD で起動。
+
 ### Pi 4・Pi 5 の用意
 
 - `plan/ws309/tests/config-rpi4-p015.mk`（CI の Pi 4 に mview・Ethernet の DHCP・root の SSH の鍵）、Pi 5 は `plan/ws291/tests/config-rpi5.mk`。image: build/p015rpi4/hdd-image.img、
