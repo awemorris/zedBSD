@@ -10,6 +10,12 @@ set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 mkdir -p "$repo/build/tmp"
 work=$(mktemp -d "$repo/build/tmp/gpu-core.XXXXXX")
+# The UAPI's sizes, offsets and ioctl numbers for 32- and 64-bit callers (ws014's layout checks, which compile or fail).
+for abi in 32 64; do
+    timeout 60 cc -std=c89 -m$abi -ffreestanding -Wall -Wextra -Werror -I"$repo/include" -I"$repo/include/libc" \
+        -DKERN_UAPI_NATIVE -c "$repo/plan/ws014/tests/gpu-uapi-layout.c" -o "$work/layout$abi.o"
+done
+echo "GPU UAPI: ILP32/LP64 layout PASS"
 cores="$repo/src/kern/cdev.c $repo/src/kern/handle.c $repo/src/drivers/gpu/gpu-fence.c $repo/src/kern/fd-object.c \
 $repo/src/kern/filedesc.c $repo/src/kern/vm/device.c $repo/src/drivers/pci/pci.c"
 for mode in ordinary sanitize; do

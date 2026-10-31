@@ -240,6 +240,18 @@ typedef char gpu_job_reserve_command_check[GPU_JOB_RESERVE == 0xc0284722UL ? 1 :
 typedef char gpu_job_commit_command_check[GPU_JOB_COMMIT == 0x80184723UL ? 1 : -1];
 typedef char gpu_job_cancel_command_check[GPU_JOB_CANCEL == 0x80184724UL ? 1 : -1];
 
+/* One-call jobs and batched retirement keep pointer-free fields at the same offsets on both ABIs. */
+typedef char gpu_job_submit_size_check[sizeof(struct gpu_job_submit) == 56 ? 1 : -1];
+typedef char gpu_job_submit_generation_check[offsetof(struct gpu_job_submit, generation) == 16 ? 1 : -1];
+typedef char gpu_job_submit_address_check[offsetof(struct gpu_job_submit, address) == 32 ? 1 : -1];
+typedef char gpu_job_submit_sequence_check[offsetof(struct gpu_job_submit, sequence) == 40 ? 1 : -1];
+typedef char gpu_job_submit_error_check[offsetof(struct gpu_job_submit, error) == 52 ? 1 : -1];
+typedef char gpu_job_retire_entry_size_check[sizeof(struct gpu_job_retire_entry) == 16 ? 1 : -1];
+typedef char gpu_job_retire_size_check[sizeof(struct gpu_job_retire) == 32 ? 1 : -1];
+typedef char gpu_job_retire_address_check[offsetof(struct gpu_job_retire, address) == 16 ? 1 : -1];
+typedef char gpu_job_submit_command_check[GPU_JOB_SUBMIT == 0xc0384731UL ? 1 : -1];
+typedef char gpu_job_retire_command_check[GPU_JOB_RETIRE == 0xc0204732UL ? 1 : -1];
+
 /* Capacity query and wait share a pointer-free 48-byte request on both process ABIs. */
 typedef char gpu_capacity_size_check[sizeof(struct gpu_job_capacity) == 48 ? 1 : -1];
 
