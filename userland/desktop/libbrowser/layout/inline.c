@@ -92,7 +92,7 @@ static void inline_cut_text(struct inline_cutter *cutter, struct layout_box *box
 static void inline_add_replaced(struct inline_cutter *cutter, struct layout_box *box);
 static void inline_add_atomic(struct inline_cutter *cutter, struct layout_box *box);
 static int inline_first_baseline(const struct layout_box *box, layout_unit *baseline, int depth);
-static int inline_items_baseline(const struct layout_box *box, layout_unit *baseline, int last);
+static int inline_items_baseline(const struct layout_box *box, layout_unit *baseline, int last, int vertical);
 static int inline_is_legend(const struct layout_box *box, const struct layout_box *child);
 static int inline_last_baseline(const struct layout_box *box, layout_unit *baseline, int depth);
 static void inline_align(struct layout_tree *tree, struct layout_box *box, struct layout_line *line, struct inline_reach *reach, size_t count, layout_unit *above, layout_unit *below);
@@ -818,7 +818,7 @@ inline_last_baseline(
 	/* A flex or grid container's: its last row's or line's (when its items know where they were put). */
 	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
 	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
-		found = inline_items_baseline(box, baseline, 1);
+		found = inline_items_baseline(box, baseline, 1, 0);
 		if (found >= 0)
 			return found;
 	}
@@ -1953,7 +1953,8 @@ static int
 inline_items_baseline(
 	const struct layout_box *box,
 	layout_unit *baseline,
-	int last)
+	int last,
+	int vertical)
 {
 	const struct layout_box *child;
 	const struct layout_box *best;
@@ -1971,6 +1972,7 @@ inline_items_baseline(
 	int any;
 	int align;
 	int item_last;
+	int best_last;
 
 	/*
 	 * Where a flex container's start is: its lines and its items run the other way when its direction (or a right to
@@ -2003,9 +2005,10 @@ inline_items_baseline(
 			wanted_row = child->item_row;
 	}
 
-	/* Its items, a baseline-aligned one before the others, then the one at that end. */
+	/* Its items, one aligned by the baseline asked for first, then one aligned by the other baseline (a grid's), then the one at that end. */
 	best = NULL;
 	best_aligned = 0;
+	best_last = last != 0;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow || wanted_row == 0 || child->item_row != wanted_row)
 			continue;
@@ -2015,21 +2018,34 @@ inline_items_baseline(
 			align = box->style.align_items;
 			item_last = (box->style.last_baselines & 4u) != 0;
 		}
-		aligned = align == CSS_ALIGN_BASELINE && item_last == (last != 0);
+		/* A last baseline is stored as the end alignment with its flag. */
+		aligned = 0;
+		if (align == CSS_ALIGN_BASELINE || (item_last && align == CSS_ALIGN_END))
+			aligned = item_last == (last != 0) ? 2 : (flex ? 0 : 1);
 		if (flex && last && item_last && align != CSS_ALIGN_BASELINE)
-			aligned = 1;
+			aligned = 2;
 		better = best == NULL || (last_item ? child->item_column > best->item_column : child->item_column < best->item_column);
-		if (best == NULL || (aligned && !best_aligned) || (aligned == best_aligned && better)) {
+		if (best == NULL || aligned > best_aligned || (aligned == best_aligned && better)) {
 			best = child;
 			best_aligned = aligned;
+			best_last = aligned == 1 ? item_last : last != 0;
 		}
 	}
 	if (best == NULL)
 		return any ? -1 : 0;
 
+	/* In a vertical container the central baseline is a distance right of the content box's left edge. */
+	if (vertical) {
+		if (best->style.writing_mode != box->style.writing_mode || !layout_vertical_baseline(best, best_last, &inner))
+			inner = best->border[CSS_LEFT] + best->padding[CSS_LEFT] + best->width + best->padding[CSS_RIGHT] +
+			    best->border[CSS_RIGHT];
+		*baseline = best->x + inner;
+		return 1;
+	}
+
 	/* Its baseline, or its border box's bottom (an orthogonal item's always), below the container's content box's top. */
 	if (best->style.writing_mode != box->style.writing_mode ||
-	    !(last ? layout_last_baseline(best, &inner) : layout_first_baseline(best, &inner)))
+	    !(best_last ? layout_last_baseline(best, &inner) : layout_first_baseline(best, &inner)))
 		inner = best->border[CSS_TOP] + best->padding[CSS_TOP] + best->height + best->padding[CSS_BOTTOM] +
 		    best->border[CSS_BOTTOM];
 	*baseline = best->y + inner;
@@ -2062,7 +2078,7 @@ inline_first_baseline(
 	/* A flex or grid container's: its first row's or line's (when its items know where they were put). */
 	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
 	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
-		found = inline_items_baseline(box, baseline, 0);
+		found = inline_items_baseline(box, baseline, 0, 0);
 		if (found >= 0)
 			return found;
 	}
@@ -2144,6 +2160,18 @@ layout_vertical_baseline(
 	/* A replaced box has no baseline. */
 	if (box->replaced)
 		return 0;
+
+	/* A flex or grid container's: its items' (when they know where they were put). */
+	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
+		found = inline_items_baseline(box, &inner, last, 1);
+		if (found > 0) {
+			*offset = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + inner;
+			return 1;
+		}
+		if (found == 0)
+			return 0;
+	}
 
 	/* A block of lines: the line's centre (a vertical box's lines keep their physical offset from the content box's left edge). */
 	if (box->children_inline) {
