@@ -266,6 +266,9 @@ static const struct values_name values_names[] = {
 	{ "outline-offset", CSS_PROP_OUTLINE_OFFSET },
 	{ "clip-path", CSS_PROP_CLIP_PATH },
 	{ "clip", CSS_PROP_CLIP },
+	{ "shape-outside", CSS_PROP_SHAPE_OUTSIDE },
+	{ "shape-margin", CSS_PROP_SHAPE_MARGIN },
+	{ "shape-image-threshold", CSS_PROP_SHAPE_IMAGE_THRESHOLD },
 	{ "direction", CSS_PROP_DIRECTION },
 	{ "writing-mode", CSS_PROP_WRITING_MODE },
 	{ "text-orientation", CSS_PROP_TEXT_ORIENTATION },
@@ -864,6 +867,14 @@ static const struct values_keyword values_units[] = {
 	{ "vh", CSS_DUNIT_VH },
 	{ "vmin", CSS_DUNIT_VMIN },
 	{ "vmax", CSS_DUNIT_VMAX },
+	{ "vi", CSS_DUNIT_VI },
+	{ "svi", CSS_DUNIT_VI },
+	{ "lvi", CSS_DUNIT_VI },
+	{ "dvi", CSS_DUNIT_VI },
+	{ "vb", CSS_DUNIT_VB },
+	{ "svb", CSS_DUNIT_VB },
+	{ "lvb", CSS_DUNIT_VB },
+	{ "dvb", CSS_DUNIT_VB },
 	{ "svw", CSS_DUNIT_VW },
 	{ "lvw", CSS_DUNIT_VW },
 	{ "dvw", CSS_DUNIT_VW },
@@ -1093,6 +1104,7 @@ static int values_background_size(const struct css_token *tokens, size_t count, 
 static int values_takes_length(int property);
 static int values_flex(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_unitless_function(const struct css_token *tokens, size_t count);
+static int values_flex_number(struct css_parse *parse, const struct css_token *tokens, size_t count, float *number);
 static int values_position_try(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_place(struct css_parse *parse, const struct css_token *tokens, size_t count, int align, int justify, struct css_declaration *out, size_t *made);
 static size_t values_place_value(const struct css_token *tokens, const size_t *starts, size_t components, size_t first);
@@ -1117,6 +1129,7 @@ static int values_text_shadow(struct css_parse *parse, const struct css_token *t
 static int values_one_shadow(const struct css_token *tokens, size_t count, struct css_declared_shadow *shadow);
 static int values_outline(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_clip_path(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_shape_outside(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_clip(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_tracks(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_auto_tracks(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
@@ -2281,6 +2294,7 @@ values_single(
 	int is_last;
 	int is_safe;
 	int is_unsafe;
+	float flex_factor;
 
 	/* A logical side or size takes the grammar of a physical one. */
 	property = values_physical_grammar(property);
@@ -2675,6 +2689,31 @@ values_single(
 			return error;
 
 		/* Succeeded: the selected native scalar component was parsed. */
+		return 0;
+	}
+
+	/* shape-outside takes a shape, a box or an image. */
+	if (property == CSS_PROP_SHAPE_OUTSIDE)
+		return values_shape_outside(parse, tokens, count, value);
+
+	/* shape-margin: a length or percentage that is not negative. */
+	if (property == CSS_PROP_SHAPE_MARGIN) {
+		error = values_length(&tokens[0], 0, value);
+		if (error != 0 || value->number < 0)
+			return EINVAL;
+		return 0;
+	}
+
+	/* shape-image-threshold: a number, held in range. */
+	if (property == CSS_PROP_SHAPE_IMAGE_THRESHOLD) {
+		if (tokens[0].type != CSS_TOKEN_NUMBER && tokens[0].type != CSS_TOKEN_PERCENTAGE)
+			return EINVAL;
+		value->kind = CSS_VALUE_NUMBER;
+		value->number = (float)(tokens[0].type == CSS_TOKEN_PERCENTAGE ? tokens[0].number / 100.0 : tokens[0].number);
+		if (value->number < 0)
+			value->number = 0;
+		if (value->number > 1)
+			value->number = 1;
 		return 0;
 	}
 
@@ -3108,6 +3147,14 @@ values_single(
 	/* flex-grow and flex-shrink: a number that is not negative. */
 	if (property == CSS_PROP_FLEX_GROW ||
 	    property == CSS_PROP_FLEX_SHRINK) {
+		if (values_unitless_function(&tokens[0], count)) {
+			error = values_flex_number(parse, &tokens[0], count, &flex_factor);
+			if (error != 1)
+				return EINVAL;
+			value->kind = CSS_VALUE_NUMBER;
+			value->number = flex_factor;
+			return 0;
+		}
 		if (tokens[0].type != CSS_TOKEN_NUMBER ||
 		    tokens[0].number < 0)
 			return EINVAL;
@@ -5307,7 +5354,8 @@ values_calc(
 
 	/* A calculation of plain numbers is a number: line-height's, or zero for a length. */
 	if (calc.count == 0) {
-		if (property == CSS_PROP_LINE_HEIGHT || property == CSS_PROP_ZOOM) {
+		if (property == CSS_PROP_LINE_HEIGHT || property == CSS_PROP_ZOOM || property == CSS_PROP_FLEX_GROW || property == CSS_PROP_FLEX_SHRINK ||
+		    property == CSS_PROP_ORDER) {
 			value->kind = CSS_VALUE_NUMBER;
 			value->number = calc.sums[0].px;
 			return 0;
@@ -5714,9 +5762,11 @@ values_calc_unit(
 		sum->rem += number;
 		break;
 	case CSS_DUNIT_VW:
+	case CSS_DUNIT_VI:
 		sum->vw += number;
 		break;
 	case CSS_DUNIT_VH:
+	case CSS_DUNIT_VB:
 		sum->vh += number;
 		break;
 	case CSS_DUNIT_VMIN:
@@ -5968,6 +6018,8 @@ values_flex(
 	size_t components;
 	size_t index;
 	size_t last_number;
+	float factor;
+	int is_number;
 	int numbers;
 	int basis_set;
 	int is_word;
@@ -6012,17 +6064,22 @@ values_flex(
 	numbers = 0;
 	last_number = 0;
 	for (index = 0; index < components; index++) {
+		/* A factor is a number, or a calculation of numbers. */
+		is_number = values_flex_number(parse, tokens + starts[index], lengths[index], &factor);
+		if (is_number < 0)
+			return EINVAL;
+
 		/* The two factors are adjacent: a basis between them is invalid. */
-		if (lengths[index] == 1 && tokens[starts[index]].type == CSS_TOKEN_NUMBER) {
+		if (is_number) {
 			if (numbers > 0 && index != last_number + 1U)
 				return EINVAL;
 			last_number = index;
 		}
-		if (lengths[index] == 1 && tokens[starts[index]].type == CSS_TOKEN_NUMBER && tokens[starts[index]].number != 0) {
+		if (is_number && factor != 0) {
 			if (numbers == 0)
-				grow.number = (float)tokens[starts[index]].number;
+				grow.number = factor;
 			else if (numbers == 1)
-				shrink.number = (float)tokens[starts[index]].number;
+				shrink.number = factor;
 			else
 				return EINVAL;
 			numbers++;
@@ -6030,7 +6087,7 @@ values_flex(
 		}
 
 		/* A zero is a factor where one is expected, else a basis. */
-		if (lengths[index] == 1 && tokens[starts[index]].type == CSS_TOKEN_NUMBER && numbers < 2 && (numbers == 0 || index == 1)) {
+		if (is_number && numbers < 2 && (numbers == 0 || index == 1)) {
 			if (numbers == 0)
 				grow.number = 0;
 			else
@@ -6038,6 +6095,8 @@ values_flex(
 			numbers++;
 			continue;
 		}
+		if (is_number && lengths[index] != 1)
+			return EINVAL;
 
 		/* The basis, once (a calculation without units is not one). */
 		if (basis_set || values_unitless_function(tokens + starts[index], lengths[index]))
@@ -6171,6 +6230,36 @@ values_position_try(
 	values_add(out, made, CSS_PROP_POSITION_TRY_ORDER, &order);
 	values_add(out, made, CSS_PROP_POSITION_TRY_FALLBACKS, &fallbacks);
 	return 0;
+}
+
+/*
+ * Reads a flex factor from a component: a number token, or a calculation of numbers (negative ones are zero, as the
+ * computed factor is).  Reports 1 for a factor, 0 for another component, -1 for a calculation that is not valid.
+ */
+static int
+values_flex_number(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	float *number)
+{
+	struct css_value value;
+	int error;
+
+	if (count == 1 && tokens[0].type == CSS_TOKEN_NUMBER) {
+		if (tokens[0].number < 0)
+			return -1;
+		*number = (float)tokens[0].number;
+		return 1;
+	}
+	if (!values_unitless_function(tokens, count))
+		return 0;
+	memset(&value, 0, sizeof(value));
+	error = values_calc(parse, CSS_PROP_FLEX_GROW, tokens, count, &value);
+	if (error != 0 || value.kind != CSS_VALUE_NUMBER)
+		return -1;
+	*number = value.number < 0 ? 0.0f : value.number;
+	return 1;
 }
 
 /* Tells whether a component is a function whose arguments have no dimension or percentage (a number). */
@@ -6864,6 +6953,437 @@ values_clip_path(
 	return 0;
 }
 
+/* Collects the tokens between commas or the end as items without whitespace; returns how many (up to max). */
+static size_t
+values_shape_items(
+	const struct css_token *tokens,
+	size_t count,
+	const struct css_token **items,
+	size_t max)
+{
+	size_t index;
+	size_t made;
+
+	/* Each token that is not whitespace is an item. */
+	made = 0;
+	for (index = 0; index < count && made < max; index++) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		items[made] = &tokens[index];
+		made++;
+	}
+
+	/* Reports how many. */
+	return made;
+}
+
+/* Parses a length or percentage that is not negative; a non-negative number of zero is allowed. */
+static int
+values_shape_length(
+	const struct css_token *token,
+	int allow_negative,
+	struct css_value *value)
+{
+	int error;
+
+	/* A length or a percentage. */
+	error = values_length(token, 0, value);
+	if (error != 0)
+		return error;
+	if (!allow_negative && value->number < 0)
+		return EINVAL;
+	return 0;
+}
+
+/* Sets a value to a percentage. */
+static void
+values_shape_percent(
+	struct css_value *value,
+	float percent)
+{
+	memset(value, 0, sizeof(*value));
+	value->kind = CSS_VALUE_LENGTH;
+	value->number = percent;
+	value->unit = CSS_DUNIT_PERCENT;
+}
+
+/* Parses the position after "at" in circle() and ellipse() into the shape's center. */
+static int
+values_shape_position(
+	const struct css_token **items,
+	size_t count,
+	struct css_declared_shape *shape)
+{
+	struct css_value offset;
+	size_t index;
+	int axis;
+	int set[2];
+	int is_length;
+	int end;
+	int error;
+
+	/* The center unless said otherwise. */
+	values_shape_percent(&shape->at[0], 50.0f);
+	values_shape_percent(&shape->at[1], 50.0f);
+	set[0] = 0;
+	set[1] = 0;
+	if (count == 0 || count > 4U)
+		return EINVAL;
+	for (index = 0; index < count; index++) {
+		is_length = items[index]->type != CSS_TOKEN_IDENT;
+
+		/* A length or a percentage alone is the x, then the y. */
+		if (is_length) {
+			axis = set[0] ? 1 : 0;
+			if (set[axis])
+				return EINVAL;
+			error = values_length(items[index], 0, &shape->at[axis]);
+			if (error != 0)
+				return error;
+			set[axis] = 1;
+			continue;
+		}
+
+		/* A keyword names a side, or the center of the axis not yet set. */
+		end = 0;
+		axis = -1;
+		if (css_ident_equal(items[index], "left")) {
+			axis = 0;
+		} else if (css_ident_equal(items[index], "right")) {
+			axis = 0;
+			end = 1;
+		} else if (css_ident_equal(items[index], "top")) {
+			axis = 1;
+		} else if (css_ident_equal(items[index], "bottom")) {
+			axis = 1;
+			end = 1;
+		} else if (css_ident_equal(items[index], "center")) {
+			axis = set[0] ? 1 : 0;
+			if (!set[0] && index + 1U < count && items[index + 1U]->type == CSS_TOKEN_IDENT &&
+			    (css_ident_equal(items[index + 1U], "left") || css_ident_equal(items[index + 1U], "right")))
+				axis = 1;
+		} else {
+			return EINVAL;
+		}
+		if (set[axis])
+			return EINVAL;
+		set[axis] = 1;
+		if (css_ident_equal(items[index], "center")) {
+			values_shape_percent(&shape->at[axis], 50.0f);
+			continue;
+		}
+
+		/* The offset from that side. */
+		memset(&offset, 0, sizeof(offset));
+		offset.kind = CSS_VALUE_LENGTH;
+		offset.unit = CSS_DUNIT_PX;
+		if (index + 1U < count && items[index + 1U]->type != CSS_TOKEN_IDENT) {
+			error = values_length(items[index + 1U], 0, &offset);
+			if (error != 0)
+				return error;
+			index++;
+		}
+		shape->at[axis] = offset;
+		shape->at_end[axis] = end;
+	}
+
+	/* Succeeded: the center is read. */
+	return 0;
+}
+
+/* Parses a radius of circle() or ellipse(): a length, a percentage, or closest-side or farthest-side. */
+static int
+values_shape_radius(
+	const struct css_token *token,
+	struct css_declared_shape *shape,
+	size_t axis)
+{
+	if (token->type == CSS_TOKEN_IDENT) {
+		if (css_ident_equal(token, "closest-side")) {
+			shape->radius_keyword[axis] = CSS_SHAPE_CLOSEST;
+			return 0;
+		}
+		if (css_ident_equal(token, "farthest-side")) {
+			shape->radius_keyword[axis] = CSS_SHAPE_FARTHEST;
+			return 0;
+		}
+		return EINVAL;
+	}
+	return values_shape_length(token, 0, &shape->radius[axis]);
+}
+
+/* Reads border-radius style lists (one to four values) into the four corners of one axis. */
+static int
+values_shape_corners(
+	const struct css_token **items,
+	size_t count,
+	struct css_declared_shape *shape,
+	size_t axis)
+{
+	struct css_value list[4];
+	size_t index;
+	int error;
+
+	/* One to four non-negative lengths. */
+	if (count == 0 || count > 4U)
+		return EINVAL;
+	for (index = 0; index < count; index++) {
+		error = values_shape_length(items[index], 0, &list[index]);
+		if (error != 0)
+			return error;
+	}
+
+	/* The corners as border-radius gives them: top left, top right, bottom right, bottom left. */
+	shape->round[0][axis] = list[0];
+	shape->round[1][axis] = count > 1U ? list[1] : list[0];
+	shape->round[2][axis] = count > 2U ? list[2] : list[0];
+	shape->round[3][axis] = count > 3U ? list[3] : (count > 1U ? list[1] : list[0]);
+	return 0;
+}
+
+/* Parses a basic shape function (circle, ellipse, inset, polygon) into a declared shape. */
+static int
+values_shape_basic(
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declared_shape *shape)
+{
+	const struct css_token *items[64];
+	const struct css_token *args;
+	size_t arg_count;
+	size_t found;
+	size_t at;
+	size_t slash;
+	size_t index;
+	size_t point;
+	size_t part;
+	int error;
+
+	/* The arguments between the parentheses. */
+	if (count < 2U || tokens[count - 1U].type != CSS_TOKEN_CLOSE_PAREN)
+		return EINVAL;
+	args = tokens + 1;
+	arg_count = count - 2U;
+
+	/* circle() and ellipse(): radii, then "at" and a position. */
+	if (css_ident_equal(&tokens[0], "circle") || css_ident_equal(&tokens[0], "ellipse")) {
+		found = values_shape_items(args, arg_count, items, 64);
+		at = found;
+		for (index = 0; index < found; index++) {
+			if (items[index]->type == CSS_TOKEN_IDENT && css_ident_equal(items[index], "at")) {
+				at = index;
+				break;
+			}
+		}
+		if (css_ident_equal(&tokens[0], "circle")) {
+			shape->kind = CSS_SHAPE_CIRCLE;
+			if (at > 1U)
+				return EINVAL;
+			shape->radius_keyword[0] = CSS_SHAPE_CLOSEST;
+			if (at == 1U) {
+				shape->radius_keyword[0] = 0;
+				error = values_shape_radius(items[0], shape, 0);
+				if (error != 0)
+					return error;
+			}
+		} else {
+			shape->kind = CSS_SHAPE_ELLIPSE;
+			if (at != 0 && at != 2U)
+				return EINVAL;
+			shape->radius_keyword[0] = CSS_SHAPE_CLOSEST;
+			shape->radius_keyword[1] = CSS_SHAPE_CLOSEST;
+			for (index = 0; index < at; index++) {
+				shape->radius_keyword[index] = 0;
+				error = values_shape_radius(items[index], shape, index);
+				if (error != 0)
+					return error;
+			}
+		}
+		if (at < found)
+			return values_shape_position(items + at + 1U, found - at - 1U, shape);
+		values_shape_percent(&shape->at[0], 50.0f);
+		values_shape_percent(&shape->at[1], 50.0f);
+		return 0;
+	}
+
+	/* inset(): up to four lengths, then "round" and the corner radii. */
+	if (css_ident_equal(&tokens[0], "inset")) {
+		shape->kind = CSS_SHAPE_INSET;
+		found = values_shape_items(args, arg_count, items, 64);
+		at = found;
+		for (index = 0; index < found; index++) {
+			if (items[index]->type == CSS_TOKEN_IDENT && css_ident_equal(items[index], "round")) {
+				at = index;
+				break;
+			}
+		}
+		if (at == 0 || at > 4U)
+			return EINVAL;
+		for (index = 0; index < at; index++) {
+			error = values_length(items[index], 0, &shape->inset[index]);
+			if (error != 0)
+				return error;
+		}
+		if (at < 2U)
+			shape->inset[1] = shape->inset[0];
+		if (at < 3U)
+			shape->inset[2] = shape->inset[0];
+		if (at < 4U)
+			shape->inset[3] = shape->inset[1];
+		if (at == found)
+			return 0;
+
+		/* The radii: the horizontal list, then "/" and the vertical list. */
+		slash = found;
+		for (index = at + 1U; index < found; index++) {
+			if (items[index]->type == CSS_TOKEN_DELIM && items[index]->delim == '/') {
+				slash = index;
+				break;
+			}
+		}
+		shape->rounded = 1;
+		error = values_shape_corners(items + at + 1U, slash - at - 1U, shape, 0);
+		if (error != 0)
+			return error;
+		if (slash < found)
+			return values_shape_corners(items + slash + 1U, found - slash - 1U, shape, 1);
+		for (index = 0; index < 4U; index++)
+			shape->round[index][1] = shape->round[index][0];
+		return 0;
+	}
+
+	/* polygon(): an optional fill rule, then comma-separated pairs of lengths. */
+	if (css_ident_equal(&tokens[0], "polygon")) {
+		shape->kind = CSS_SHAPE_POLYGON;
+		index = 0;
+		point = 0;
+
+		/* The fill rule and its comma. */
+		while (index < arg_count && args[index].type == CSS_TOKEN_WHITESPACE)
+			index++;
+		if (index < arg_count && args[index].type == CSS_TOKEN_IDENT &&
+		    (css_ident_equal(&args[index], "nonzero") || css_ident_equal(&args[index], "evenodd"))) {
+			index++;
+			while (index < arg_count && args[index].type == CSS_TOKEN_WHITESPACE)
+				index++;
+			if (index >= arg_count || args[index].type != CSS_TOKEN_COMMA)
+				return EINVAL;
+			index++;
+		}
+
+		/* Each vertex: two lengths up to the next comma. */
+		while (index < arg_count) {
+			part = 0;
+			while (index < arg_count && args[index].type != CSS_TOKEN_COMMA) {
+				if (args[index].type != CSS_TOKEN_WHITESPACE) {
+					if (part >= 2U || point >= CSS_SHAPE_POINTS)
+						return EINVAL;
+					error = values_length(&args[index], 0, &shape->points[point][part]);
+					if (error != 0)
+						return error;
+					part++;
+				}
+				index++;
+			}
+			if (part != 2U)
+				return EINVAL;
+			point++;
+			if (index < arg_count)
+				index++;
+		}
+		if (point == 0)
+			return EINVAL;
+		shape->point_count = (unsigned)point;
+		return 0;
+	}
+
+	/* Anything else is not a basic shape. */
+	return EINVAL;
+}
+
+/*
+ * Parses shape-outside: none, a shape box, a basic shape (with a shape box),
+ * or a gradient; any other image is an error here.
+ */
+static int
+values_shape_outside(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	struct css_declared_shape *shape;
+	size_t starts[4];
+	size_t lengths[4];
+	size_t components;
+	size_t index;
+	int have_box;
+	int error;
+
+	/* None is the keyword 0. */
+	value->kind = CSS_VALUE_KEYWORD;
+	value->keyword = 0;
+	components = values_components(tokens, count, starts, lengths, 4);
+	if (components == 0)
+		return EINVAL;
+	if (components == 1U && tokens[starts[0]].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[starts[0]], "none"))
+		return 0;
+
+	/* The shape, in the parse's arena. */
+	shape = wb_arena_zalloc(parse->arena, sizeof(*shape));
+	if (shape == NULL)
+		return ENOMEM;
+	have_box = 0;
+	for (index = 0; index < components; index++) {
+		const struct css_token *token = &tokens[starts[index]];
+
+		/* A reference box. */
+		if (token->type == CSS_TOKEN_IDENT) {
+			if (have_box)
+				return EINVAL;
+			have_box = 1;
+			if (css_ident_equal(token, "margin-box")) {
+				shape->box = CSS_SHAPE_MARGIN_BOX;
+			} else if (css_ident_equal(token, "border-box")) {
+				shape->box = CSS_SHAPE_BORDER_BOX;
+			} else if (css_ident_equal(token, "padding-box")) {
+				shape->box = CSS_SHAPE_PADDING_BOX;
+			} else if (css_ident_equal(token, "content-box")) {
+				shape->box = CSS_SHAPE_CONTENT_BOX;
+			} else {
+				return EINVAL;
+			}
+			continue;
+		}
+
+		/* A gradient, or a basic shape. */
+		if (token->type != CSS_TOKEN_FUNCTION || shape->kind != 0)
+			return EINVAL;
+		if (css_ident_equal(token, "linear-gradient") || css_ident_equal(token, "repeating-linear-gradient")) {
+			shape->kind = CSS_SHAPE_GRADIENT;
+			error = css_gradient_parse(parse, token, lengths[index], &shape->gradient);
+		} else {
+			error = values_shape_basic(token, lengths[index], shape);
+		}
+		if (error != 0)
+			return error;
+	}
+
+	/* A shape box alone is the box itself; a gradient has no box. */
+	if (shape->kind == 0) {
+		if (!have_box)
+			return EINVAL;
+		shape->kind = CSS_SHAPE_BOX;
+	} else if (shape->kind == CSS_SHAPE_GRADIENT && have_box) {
+		return EINVAL;
+	}
+
+	/* Succeeded: the shape is parsed. */
+	value->kind = CSS_VALUE_SHAPE;
+	value->shape = shape;
+	return 0;
+}
+
 /*
  * Parses clip: auto, or rect() with four lengths or auto edges (top, right,
  * bottom, left; separated by commas or spaces) as an inset in the parse's
@@ -7407,6 +7927,9 @@ values_track_list(
 	size_t time;
 	size_t first;
 	size_t added;
+	size_t used;
+	size_t after_count;
+	struct css_value calculated;
 	int is_repeat;
 	int last_was_names;
 	int prefix;
@@ -7499,10 +8022,24 @@ values_track_list(
 				last_was_names = 0;
 				continue;
 			}
-			if (inner >= end || tokens[inner].type != CSS_TOKEN_NUMBER || !tokens[inner].integer || tokens[inner].number < 1)
-				return EINVAL;
-			times = (size_t)tokens[inner].number;
-			comma = inner + 1U + values_split_at(tokens + inner + 1U, end - inner - 1U, CSS_TOKEN_COMMA, 0);
+			after_count = inner + 1U;
+			if (inner < end && tokens[inner].type == CSS_TOKEN_FUNCTION) {
+				/* A calculation of numbers, rounded to an integer. */
+				used = values_function_length(tokens + inner, end - inner);
+				memset(&calculated, 0, sizeof(calculated));
+				if (used == 0 || !values_unitless_function(tokens + inner, used))
+					return EINVAL;
+				error = values_calc(parse, CSS_PROP_ORDER, tokens + inner, used, &calculated);
+				if (error != 0 || calculated.kind != CSS_VALUE_NUMBER || calculated.number < 0.5f)
+					return EINVAL;
+				times = calculated.number > 1000.0f ? 1000U : (size_t)floorf(calculated.number + 0.5f);
+				after_count = inner + used;
+			} else {
+				if (inner >= end || tokens[inner].type != CSS_TOKEN_NUMBER || !tokens[inner].integer || tokens[inner].number < 1)
+					return EINVAL;
+				times = (size_t)tokens[inner].number;
+			}
+			comma = after_count + values_split_at(tokens + after_count, end - after_count, CSS_TOKEN_COMMA, 0);
 			if (comma >= end)
 				return EINVAL;
 
@@ -8138,15 +8675,19 @@ values_grid_line(
 	size_t count,
 	struct css_value *value)
 {
+	struct css_value calculated;
 	struct vm_string *name;
 	size_t index;
+	size_t used;
 	int is_span;
 	int has_number;
+	int from_calc;
 	int number;
 	int same;
 	int error;
 
 	/* Starts from auto. */
+	from_calc = 0;
 	value->kind = CSS_VALUE_GRID_LINE;
 	value->number = 0;
 	value->keyword = 0;
@@ -8184,6 +8725,19 @@ values_grid_line(
 			if ((has_number || name != NULL) && values_skip_space(tokens, count, index + 1U) != count)
 				return EINVAL;
 			is_span = 1;
+		} else if (tokens[index].type == CSS_TOKEN_FUNCTION) {
+			/* A calculation of numbers: rounded to an integer, and a span counts at least one. */
+			used = values_function_length(tokens + index, count - index);
+			if (has_number || used == 0 || !values_unitless_function(tokens + index, used))
+				return EINVAL;
+			memset(&calculated, 0, sizeof(calculated));
+			error = values_calc(parse, CSS_PROP_ORDER, tokens + index, used, &calculated);
+			if (error != 0 || calculated.kind != CSS_VALUE_NUMBER)
+				return EINVAL;
+			number = calculated.number > 10000.0f ? 10000 : calculated.number < -10000.0f ? -10000 : (int)floorf(calculated.number + 0.5f);
+			from_calc = 1;
+			has_number = 1;
+			index += used - 1U;
 		} else if (tokens[index].type == CSS_TOKEN_NUMBER) {
 			/* One integer other than zero. */
 			if (has_number || !tokens[index].integer || tokens[index].number == 0)
@@ -8206,6 +8760,8 @@ values_grid_line(
 
 	/* A span counts at least one line; a line names its number, its name or both. */
 	if (is_span) {
+		if (has_number && number < 1 && from_calc)
+			number = 1;
 		if (has_number && number < 1)
 			return EINVAL;
 		if (!has_number && name == NULL)
@@ -8214,6 +8770,8 @@ values_grid_line(
 		if (has_number)
 			value->keyword = number;
 	} else {
+		if (from_calc && number == 0)
+			return EINVAL;
 		value->number = (float)number;
 	}
 

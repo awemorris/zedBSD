@@ -830,3 +830,39 @@ Origin: 2026-10-27 ユーザーの指示。
   `--run` は layout を待たないので `getBoundingClientRect` の値は 0 になる（`--dump=layout` の console 行で読む）。Chromium の寸法は `NODE_PATH=build/ws074-chrome/node/node_modules node plan/ws074/tests/chrome-run.js --run FILE` の console で測れる（Chromium の行の高さは我々と少し違い、y は 6px ほどずれる）。
   `pgrep -f` で待つ loop を同じ command line に書くと自分に当たって終わらない。
 - 一時物（Q1 が消す）: 一覧は build/tmp/p8/delete-list-i12b.txt（1 行 1 path）。/tmp/p8out には dev136・dev137・acid137 を残す。dev135・acid136 は消してよい。
+
+### q1727-i13 の途中経過（2026-11-01、P8。dev138〜dev140。途中で止めた）
+
+- 先に golden の layout dump（plan/ws074/tests/golden-dumps.sh）を調べた。plan/tools.md・tests/scenarios・未完の Phase・依頼のどれからも参照されておらず（完了済みの Phase の履歴だけ）、
+  試験の整理の規則で直さずに削除する物とし、Q1 に 82 path の一覧を渡した。Q1 が main で削除済み。
+- 測定（計は Chromium が通す 3,472 のうち）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev137 | 基準（i12 の最終） | 3,039（87.53%） | 213 / 147 / 71 / 2 |
+  | dev138（af7bb8543） | 符号付き scroll、scrollIntoView、vi/vb、last successful の遅延 | 3,056 | 196 / 147 / 71 / 2（後退 2 は次で直した） |
+  | dev139（550a86024） | 数の calc（sign・sibling-index）、SVG の ratio、fixed の static position | 3,061（88.16%） | 後退 static 3（clamp が原因、のち直した。再測定は dev140） |
+  | dev140（761877ca2） | 上の後退の修正、integrity と module の load/error、beforematch、handler の type の追加 | 測定を開始した（結果は /tmp/p8out/dev140.log。未確認） | 未確認 |
+
+- 直した物（要点。source は userland/desktop/libbrowser/）:
+  1. 符号付き scrollable overflow: `bind_box` に `scroll_flip_x/y`・`scroll_vertical`（page/geometry.c `geometry_flows`、rtl・vertical-rl・column-reverse・wrap-reverse・sideways-lr で原点が右か下）。
+     element の scroll は `[-range, 0]` に clamp（bind/geometry.c `geometry_element_scroll`）。viewport も root の flip で符号付き（page/geometry.c `page_scroll_to` が x も受ける。view は水平に描かない）。
+     block の子の end 側 margin も flip に従う。scroll_x は layout の tree にも渡す（`layout_build` の引数、fixed の box は built の scroll の viewport に置き、sticky.c は差で動かす。static position は built の scroll 分ずらす）。
+  2. `scrollIntoView` を入れ子の scroll container に広げた（block・inline の start・end・center・nearest、flip 対応。bind/geometry.c）。通った ID: scrollIntoView-sideways-* の 4、anchor-scroll-position-try-002〜011・014。
+  3. 単位 `vi`・`vb`（root の writing mode に従う。css/values.c・cascade.c）。
+  4. 最後に成功した position-try は rendering の更新（animation frame の前、`bind_host.rendering` → `page_rendering`）でだけ記憶し、script が強制した layout では更新しない。
+     key に @position-try の rule の内容を足す。display:none の element は忘れる。last-successful-intermediate-ignored・-change-try-rule。
+  5. 数の calc: flex-grow・flex-shrink・flex shorthand の因子、grid の line・span・repeat の個数が calc() を受ける。sign()・sibling-index()・sibling-count() は pending の declaration として
+     cascade が token を数に置き換えて（css/cascade.c `cascade_dynamic_math`）から parse する。通った ID: flex-computed、grid-area-computed、grid-template-columns-computed。
+     残り: flex-valid・grid-area-valid（calc の canonical な直列化 `calc(10 + (5 * sign(...)))` が要る）。
+  6. SVG の intrinsic: width だけ・height だけで viewBox が無い物は欠けた辺を 300 / 150 にして ratio 無し（0 の辺は natural size 0）。no_ratio の画像は ratio で大きさを決めない（replaced.c・grid.c）。
+     inline-block の baseline が箱の外にある時も行の高さは margin box の高さ（inline_replaced_extent の below が負を許す）。grid-item-no-aspect-ratio-stretch-2・3・6。
+  7. `<script type=module src>` に load・error の event、integrity 属性（SHA-256・384・512、page/integrity.c を sources.mk に足した。hashlib と照合済み）。json-module の integrity・script-element-json-src。
+  8. event handler の IDL 属性を足した（onbeforematch・onscrollend・ontoggle・onpointer* ほか。bind/handler.c）。beforematch の ancestor revealing は removal だけで止める。beforematch-element-fragment-navigation・removal-002。
+- 調べて直さなかった物（次の候補）:
+  - 直交する subgrid（10 ID 前後）は track の共有と intrinsic の寄与が要り大きい。grid の self-baseline（static 約 25）と baseline-alignment-affects-intrinsic-size（9）も未着手。
+  - scroll・scrollend の event は element・viewport とも発火しない（scrollend-* の 2 ID に要る）。URLPattern・WebAssembly の js-string・LCP は未実装。position-try-cascade は cascade の層が要る。
+- 止めた理由: 自分の command に `rm -f /dev/null` を誤って書いた（規則違反）ため auto mode の分類器が以後の Bash を拒否した。回避せずに Q1 へ返した。
+  Acid はこの attempt では未実行。dev139・dev140 の後退の確認（dev140 の gap）も未実施。
+- 一時物（Q1 が消す。worktree p8-ws074）: build/tmp/p8/t/・build/tmp/p8/s1out/・build/tmp/p8/st1/・build/tmp/p8/st2/・build/tmp/p8/integ/・build/tmp/p8/h1out/、
+  /tmp/p8out の dev138（と dev138.log）。dev139・dev140 を残す（直近の 2 つ）。

@@ -6,7 +6,7 @@ Status: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p002
-WS335 の待ち: 無し。**Q3 で sftp を入れる答えの時だけ**（入れない時は canceled）
+WS335 の待ち: 無し。Q3 は A（sftp-server を入れる、2026-11-01）なので行う
 
 ## 1. 読む物
 

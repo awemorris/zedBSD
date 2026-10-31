@@ -119,6 +119,8 @@ struct css_engine {
 	/* The root element's zoom, which rem units are unscaled by. */
 	float root_zoom;
 	float viewport_width;
+	/* Whether the root element's writing mode is vertical (vi and vb follow it). */
+	int root_vertical;
 	float viewport_height;
 	struct wb_vector class_keys;
 	struct wb_vector candidates;
@@ -350,6 +352,7 @@ static int cascade_margin_property(int property, int writing_mode, int direction
 static void cascade_inherit(struct css_style *style, const struct css_style *parent, int property);
 static struct css_length cascade_flex_basis(struct css_engine *engine, const struct css_value *value, float font_size);
 static struct css_length cascade_length(struct css_engine *engine, const struct css_value *value, float font_size);
+static const struct css_shape *cascade_shape(struct css_engine *engine, const struct css_declared_shape *declared, float font_size);
 static void cascade_shadows(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_filters(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_filter *out, int *count);
 static const char *cascade_subgrid(struct css_engine *engine, const struct css_value *value);
@@ -1295,6 +1298,10 @@ cascade_compute(
 	/* The filters an @keyframes animation gives at the start of the page's time. */
 	cascade_animation(engine, style, parent);
 
+	/* An element without a box forgets the position option that last fit. */
+	if (pseudo == CSS_PSEUDO_ELEMENT_NONE && style->display == CSS_DISPLAY_NONE)
+		((struct dom_element *)element)->anchor_last = 0;
+
 	/* The root's font size is what rem measures (its pseudo-elements do not change it). */
 	is_root = 0;
 	if (pseudo == CSS_PSEUDO_ELEMENT_NONE && element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT)
@@ -1303,6 +1310,7 @@ cascade_compute(
 		engine->root_font_size = style->font_size;
 		engine->root_zoom = style->zoom_eff;
 		engine->root_line_px = cascade_line_pixels(style);
+		engine->root_vertical = style->writing_mode != CSS_WRITING_HORIZONTAL_TB;
 	}
 
 	/* Succeeded: the style is computed. */
@@ -2635,6 +2643,116 @@ cascade_keep_tokens(
 	return 0;
 }
 
+/* Finds the end of the function whose name token is at an index: the index of its closing parenthesis. */
+static size_t
+cascade_function_end(
+	const struct css_token *tokens,
+	size_t count,
+	size_t start)
+{
+	size_t depth;
+	size_t index;
+
+	depth = 0;
+	for (index = start; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_FUNCTION || tokens[index].type == CSS_TOKEN_OPEN_PAREN)
+			depth++;
+		else if (tokens[index].type == CSS_TOKEN_CLOSE_PAREN && --depth == 0)
+			return index;
+	}
+	return count;
+}
+
+/*
+ * Evaluates a sign() of a calculation (-1, 0 or 1; the length inside measured as the element's style does) and
+ * sibling-index() and sibling-count() in a declaration's tokens, and puts the numbers they make in their places, so
+ * that the value parser sees plain calculations.  Reports EINVAL when an argument is not a calculation.
+ */
+static int
+cascade_dynamic_math(
+	struct css_engine *engine,
+	const struct css_style *style,
+	struct css_parse *parse,
+	struct wb_vector *tokens)
+{
+	static const uint16_t calc_text[] = { 'c', 'a', 'l', 'c' };
+	struct css_declaration made_declaration[CASCADE_EXPANSION_MAX];
+	struct wb_vector inner;
+	struct css_token number;
+	struct css_token *items;
+	const struct dom_node *sibling;
+	struct css_length length;
+	size_t index;
+	size_t end;
+	size_t made;
+	double result;
+	int is_sign;
+	int is_index;
+	int is_count;
+	int error;
+
+	for (index = 0; index < tokens->count; index++) {
+		items = tokens->items;
+		if (items[index].type != CSS_TOKEN_FUNCTION)
+			continue;
+		is_sign = css_ident_equal(&items[index], "sign");
+		is_index = css_ident_equal(&items[index], "sibling-index");
+		is_count = css_ident_equal(&items[index], "sibling-count");
+		if (!is_sign && !is_index && !is_count)
+			continue;
+		end = cascade_function_end(items, tokens->count, index);
+		if (end >= tokens->count)
+			return EINVAL;
+		result = 0.0;
+		if (is_index || is_count) {
+			if (end != index + 1U || engine->current == NULL)
+				return EINVAL;
+			result = 0.0;
+			if (engine->current->node.parent != NULL) {
+				for (sibling = engine->current->node.parent->first_child; sibling != NULL; sibling = sibling->next) {
+					if (sibling->type != DOM_ELEMENT)
+						continue;
+					result += 1.0;
+					if (is_index && sibling == &engine->current->node)
+						break;
+				}
+			}
+		} else {
+			/* calc(inner), parsed as a line-height (a number or a length). */
+			wb_vector_init(&inner, sizeof(struct css_token));
+			number = items[index];
+			number.text = calc_text;
+			number.length = 4;
+			error = wb_vector_push(&inner, &number);
+			for (made = index + 1U; error == 0 && made <= end; made++)
+				error = wb_vector_push(&inner, &items[made]);
+			made = 0;
+			if (error == 0)
+				error = css_parse_property(parse, CSS_PROP_LINE_HEIGHT, inner.items, inner.count, made_declaration, &made);
+			wb_vector_release(&inner);
+			if (error != 0 || made == 0)
+				return EINVAL;
+			if (made_declaration[0].value.kind == CSS_VALUE_NUMBER) {
+				result = made_declaration[0].value.number;
+			} else {
+				length = cascade_length(engine, &made_declaration[0].value, style->font_size);
+				result = length.value + length.offset;
+			}
+			result = result > 0.0 ? 1.0 : result < 0.0 ? -1.0 : 0.0;
+		}
+
+		/* The number replaces the function. */
+		memset(&number, 0, sizeof(number));
+		number.type = CSS_TOKEN_NUMBER;
+		number.number = result;
+		number.integer = 1;
+		items[index] = number;
+		memmove(&items[index + 1U], &items[end + 1U], (tokens->count - end - 1U) * sizeof(*items));
+		tokens->count -= end - index;
+	}
+	return 0;
+}
+
 /*
  * Replaces each declaration that waits for var() in a sorted list of
  * matches by the declarations its value makes once the element's custom
@@ -2698,6 +2816,8 @@ cascade_resolve_pending(
 		wb_vector_clear(&tokens);
 		made = 0;
 		error = cascade_substitute(style->custom, matches[index].declaration->raw, matches[index].declaration->raw_count, 0, &tokens);
+		if (error == 0)
+			error = cascade_dynamic_math(engine, style, &parse, &tokens);
 		if (error == 0)
 			error = css_parse_property(&parse, matches[index].declaration->pending_property, tokens.items, tokens.count, expanded, &made);
 		if (error == ENOMEM)
@@ -5302,6 +5422,18 @@ cascade_apply(
 				style->clip_edges[side] = cascade_length(engine, &value->inset->lengths[side], style->font_size);
 		}
 		break;
+	case CSS_PROP_SHAPE_OUTSIDE:
+		/* A shape the float's lines wrap around, or none. */
+		style->shape_outside = NULL;
+		if (value->kind == CSS_VALUE_SHAPE && value->shape != NULL)
+			style->shape_outside = cascade_shape(engine, value->shape, style->font_size);
+		break;
+	case CSS_PROP_SHAPE_MARGIN:
+		style->shape_margin = cascade_length(engine, value, style->font_size);
+		break;
+	case CSS_PROP_SHAPE_IMAGE_THRESHOLD:
+		style->shape_threshold = value->number;
+		break;
 	case CSS_PROP_VERTICAL_ALIGN:
 		/* A keyword, or a length that raises the box by it. */
 		if (value->kind == CSS_VALUE_KEYWORD) {
@@ -5472,6 +5604,15 @@ cascade_inherit(
 	case CSS_PROP_CLIP:
 		style->clip_rect = parent->clip_rect;
 		memcpy(style->clip_edges, parent->clip_edges, sizeof(style->clip_edges));
+		break;
+	case CSS_PROP_SHAPE_OUTSIDE:
+		style->shape_outside = parent->shape_outside;
+		break;
+	case CSS_PROP_SHAPE_MARGIN:
+		style->shape_margin = parent->shape_margin;
+		break;
+	case CSS_PROP_SHAPE_IMAGE_THRESHOLD:
+		style->shape_threshold = parent->shape_threshold;
 		break;
 	case CSS_PROP_WIDTH:
 		style->width = parent->width;
@@ -6480,6 +6621,57 @@ cascade_subgrid(
 	return cascade_keep(engine, value->tracks->subgrid, strlen(value->tracks->subgrid) + 1U);
 }
 
+/* Keeps a declared shape in the engine's arena with its lengths computed. */
+static const struct css_shape *
+cascade_shape(
+	struct css_engine *engine,
+	const struct css_declared_shape *declared,
+	float font_size)
+{
+	struct css_shape *made;
+	size_t index;
+
+	/* The shape, zeroed. */
+	made = wb_arena_zalloc(&engine->arena, sizeof(*made));
+	if (made == NULL)
+		return NULL;
+	made->kind = declared->kind;
+	made->box = declared->box;
+	made->rounded = declared->rounded;
+	made->gradient = declared->gradient == NULL ? NULL : cascade_gradient(engine, declared->gradient, font_size);
+	made->point_count = declared->point_count;
+
+	/* Radii and the center. */
+	for (index = 0; index < 2U; index++) {
+		made->radius_keyword[index] = declared->radius_keyword[index];
+		made->at_end[index] = declared->at_end[index];
+		if (declared->kind == CSS_SHAPE_CIRCLE || declared->kind == CSS_SHAPE_ELLIPSE) {
+			made->radius[index] = cascade_length(engine, &declared->radius[index], font_size);
+			made->at[index] = cascade_length(engine, &declared->at[index], font_size);
+		}
+	}
+
+	/* The inset's sides and corners. */
+	if (declared->kind == CSS_SHAPE_INSET) {
+		for (index = 0; index < 4U; index++) {
+			made->inset[index] = cascade_length(engine, &declared->inset[index], font_size);
+			if (declared->rounded) {
+				made->round[index][0] = cascade_length(engine, &declared->round[index][0], font_size);
+				made->round[index][1] = cascade_length(engine, &declared->round[index][1], font_size);
+			}
+		}
+	}
+
+	/* The polygon's vertices. */
+	for (index = 0; index < declared->point_count; index++) {
+		made->points[index][0] = cascade_length(engine, &declared->points[index][0], font_size);
+		made->points[index][1] = cascade_length(engine, &declared->points[index][1], font_size);
+	}
+
+	/* The shape is kept. */
+	return made;
+}
+
 /* Keeps a gradient in the engine's arena, its stops in ems turned to pixels by the font size. */
 static const struct css_gradient *
 cascade_gradient(
@@ -6886,6 +7078,12 @@ cascade_length(
 		break;
 	case CSS_DUNIT_VH:
 		length.value = value->number * engine->viewport_height / 100.0f * engine->zoom_eff;
+		break;
+	case CSS_DUNIT_VI:
+		length.value = value->number * (engine->root_vertical ? engine->viewport_height : engine->viewport_width) / 100.0f * engine->zoom_eff;
+		break;
+	case CSS_DUNIT_VB:
+		length.value = value->number * (engine->root_vertical ? engine->viewport_width : engine->viewport_height) / 100.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_VMIN:
 		length.value = value->number * engine->viewport_width / 100.0f;

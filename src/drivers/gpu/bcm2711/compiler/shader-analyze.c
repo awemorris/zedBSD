@@ -17,6 +17,7 @@
 #define SHADER_MAX_VALUES 16384U
 
 static int input_interface(struct bcm2711_shader_compiler *compiler);
+static uint32_t read_components(const struct drv_gpu_shader_ir *ir, uint32_t location, uint32_t declared);
 static int analyze_instruction(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction, uint32_t *skip_depth);
 static int instruction_shape(enum drv_gpu_shader_ir_op operation, uint32_t *sources, uint32_t *destinations);
 static int note_read(struct bcm2711_shader_compiler *compiler, uint32_t number);
@@ -92,6 +93,37 @@ bcm2711_shader_analyze(
 	return 0;
 }
 
+/*
+ * Counts the leading components of an input location a program reads: one
+ * past the highest component any of its input loads names, at most the
+ * declared count, and zero when none reads the location.
+ */
+static uint32_t
+read_components(
+	const struct drv_gpu_shader_ir *ir,
+	uint32_t location,
+	uint32_t declared)
+{
+	const struct drv_gpu_shader_ir_inst *instruction;
+	uint32_t index;
+	uint32_t count;
+
+	/* The highest component a load of the location names. */
+	count = 0;
+	for (index = 0; index < ir->instruction_count; index++) {
+		instruction = &ir->instructions[index];
+		if (instruction->op != DRV_GPU_IR_LOAD_INPUT || instruction->location != location)
+			continue;
+		if (instruction->component >= count)
+			count = instruction->component + 1U;
+	}
+
+	/* Succeeded: never more than the declaration has. */
+	if (count > declared)
+		count = declared;
+	return count;
+}
+
 /* Establishes once-only scalar input FIFO order without relying on frontend declaration order. */
 static int
 input_interface(
@@ -104,6 +136,7 @@ input_interface(
 	uint32_t index;
 	uint32_t scalar;
 	uint32_t match;
+	uint32_t components;
 
 	/* A pipeline must supply a complete, bounded varying key before either vertex variant is lowered. */
 	binary = compiler->binary;
@@ -139,9 +172,17 @@ input_interface(
 		if (match == BCM2711_SHADER_ABSENT)
 			continue;
 
-		/* Appends each scalar with its interpolation contract preserved. */
+		/*
+		 * Appends each scalar with its interpolation contract preserved; a
+		 * coordinate program, which passes on its position alone, takes
+		 * only the leading components it reads, so the vertex fetch reads
+		 * nothing more for the bin.
+		 */
 		input = &compiler->ir->inputs[match];
-		for (scalar = 0; scalar < input->components; scalar++) {
+		components = input->components;
+		if (binary->stage == BCM2711_SHADER_COORDINATE)
+			components = read_components(compiler->ir, location, components);
+		for (scalar = 0; scalar < components; scalar++) {
 			if (binary->input_count == BCM2711_SHADER_INTERFACE_WORDS)
 				return E2BIG;
 			component = &binary->inputs[binary->input_count];

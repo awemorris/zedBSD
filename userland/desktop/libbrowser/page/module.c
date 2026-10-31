@@ -21,6 +21,9 @@ struct page_inline_module {
 	struct wb_units source;
 	/* A root named by the script's src: fetched like any dependency, not held here. */
 	int external;
+	/* The script element of an external root, which hears load or error, and its integrity attribute (NULL when it has none). */
+	struct dom_element *element;
+	char *integrity;
 };
 
 static int module_resolve(void *context, const char *base, const uint16_t *specifier,
@@ -56,6 +59,7 @@ page_modules_release(
 		entry = *(struct page_inline_module **)wb_vector_at(&page->module_scripts, index);
 		wb_units_release(&entry->source);
 		free(entry->url);
+		free(entry->integrity);
 		free(entry);
 	}
 	wb_vector_release(&page->module_scripts);
@@ -76,6 +80,7 @@ page_module_enqueue(
 	const char *base;
 	const char *fragment;
 	size_t index;
+	size_t integrity;
 	int status;
 
 	entry = calloc(1, sizeof(*entry));
@@ -100,8 +105,22 @@ page_module_enqueue(
 			if (status == 0) {
 				entry->url = strdup(wb_buffer_string(&url));
 				entry->external = 1;
+				entry->element = script;
 				if (entry->url == NULL)
 					status = ENOMEM;
+			}
+			for (integrity = 0; status == 0 && integrity < script->attribute_count; integrity++) {
+				if (script->attributes[integrity].ns != DOM_NS_NONE ||
+				    !vm_string_equal_ascii(script->attributes[integrity].name, "integrity"))
+					continue;
+				wb_buffer_init(&href);
+				status = vm_string_to_utf8(script->attributes[integrity].value, &href);
+				if (status == 0) {
+					entry->integrity = strdup(wb_buffer_string(&href));
+					if (entry->integrity == NULL)
+						status = ENOMEM;
+				}
+				wb_buffer_release(&href);
 			}
 			if (status == 0)
 				status = wb_vector_push(&page->module_scripts, &entry);
@@ -109,6 +128,7 @@ page_module_enqueue(
 			if (status != 0) {
 				wb_units_release(&entry->source);
 				free(entry->url);
+				free(entry->integrity);
 				free(entry);
 			}
 
@@ -160,6 +180,7 @@ page_modules_run(
 	struct page_inline_module *entry;
 	struct js_syntax_error syntax;
 	size_t index;
+	int canceled;
 	int status;
 
 	if (page->module_scripts.count == 0)
@@ -180,6 +201,13 @@ page_modules_run(
 			return status;
 		if (status != 0)
 			module_report(page, entry, status, &syntax);
+
+		/* A script with a src hears load when its graph fetched (even if it threw), else error. */
+		if (entry->external && entry->element != NULL) {
+			status = bind_fire_event(page->window, &entry->element->node, status == 0 || status == VM_THROWN ? "load" : "error", 0, &canceled);
+			if (status == ENOMEM)
+				return status;
+		}
 		status = bind_checkpoint(page->window);
 		if (status != 0)
 			return status;
@@ -275,6 +303,14 @@ module_fetch(
 	    !module_javascript_mime(&response.content_type)) {
 		net_response_release(&response);
 		return EINVAL;
+	}
+	for (index = 0; index < page->module_scripts.count; index++) {
+		entry = *(struct page_inline_module **)wb_vector_at(&page->module_scripts, index);
+		if (entry->external && entry->integrity != NULL && strcmp(entry->url, url) == 0 &&
+		    !page_integrity_matches(entry->integrity, response.body.data, response.body.length)) {
+			net_response_release(&response);
+			return EINVAL;
+		}
 	}
 	bytes = response.body.data;
 	length = response.body.length;

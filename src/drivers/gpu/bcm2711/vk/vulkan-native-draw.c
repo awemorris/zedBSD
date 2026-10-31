@@ -899,6 +899,8 @@ prepare_fetch(
 	const struct bcm2711_shader_binary *vertex;
 	uint32_t locations[BCM2711_VULKAN_VERTEX_ATTRIBUTES];
 	uint32_t widths[BCM2711_VULKAN_VERTEX_ATTRIBUTES];
+	uint32_t coordinate_widths[BCM2711_VULKAN_VERTEX_ATTRIBUTES];
+	bool read_any;
 	uint32_t input;
 	uint32_t location;
 	uint32_t components;
@@ -907,15 +909,11 @@ prepare_fetch(
 	bool direct;
 	int error;
 
-	/* Current native variants use one identical canonical input FIFO; differing metadata cannot share this fetch. */
+	/* The coordinate variant reads at most the vertex variant's canonical inputs. */
 	coordinate = event->pipeline->programs[BCM2711_SHADER_COORDINATE];
 	vertex = event->pipeline->programs[BCM2711_SHADER_VERTEX];
-	if (coordinate->input_count != vertex->input_count || vertex->input_count > BCM2711_SHADER_INTERFACE_WORDS)
+	if (coordinate->input_count > vertex->input_count || vertex->input_count > BCM2711_SHADER_INTERFACE_WORDS)
 		return EINVAL;
-	for (input = 0; input < vertex->input_count; input++) {
-		if (coordinate->inputs[input].location != vertex->inputs[input].location || coordinate->inputs[input].component != vertex->inputs[input].component)
-			return EINVAL;
-	}
 
 	/* Shader locations are ascending and every declared component is a leading consecutive scalar. */
 	count = 0;
@@ -938,6 +936,24 @@ prepare_fetch(
 		count++;
 	}
 
+	/*
+	 * The coordinate variant's leading components of each location, in
+	 * the same ascending order; a location it does not read has none.
+	 */
+	input = 0;
+	for (index = 0; index < count; index++) {
+		coordinate_widths[index] = 0;
+		while (input < coordinate->input_count && coordinate->inputs[input].location == locations[index]) {
+			if (coordinate->inputs[input].component != coordinate_widths[index] ||
+			    coordinate_widths[index] == widths[index])
+				return EINVAL;
+			coordinate_widths[index]++;
+			input++;
+		}
+	}
+	if (input != coordinate->input_count)
+		return EINVAL;
+
 	/* An indexed draw's indices are read in place as well. */
 	if (event->opcode == GPU_OP_CMD_DRAW_INDEXED) {
 		error = prepare_indices(draw, event);
@@ -958,23 +974,36 @@ prepare_fetch(
 		}
 	}
 
-	/* The hardware reads every location in place. */
+	/* The hardware reads every location in place, or from the packed copy, which holds one instance of a vertex array only. */
 	if (direct) {
 		draw->attributes = count;
-
-		/* Succeeded: every attribute record points into its vertex buffer. */
-		return 0;
+	} else {
+		if (event->opcode != GPU_OP_CMD_DRAW || draw->instances != 1 || draw->base_instance != 0)
+			return ENOTSUP;
+		kern_memset(attributes, 0, sizeof(*attributes) * BCM2711_VULKAN_VERTEX_ATTRIBUTES);
+		error = pack_fetch(draw, event, available, locations, widths, count, attributes);
+		if (error != 0)
+			return error;
 	}
 
-	/* The packed copy holds one instance of a vertex array only. */
-	if (event->opcode != GPU_OP_CMD_DRAW || draw->instances != 1 || draw->base_instance != 0)
-		return ENOTSUP;
-	kern_memset(attributes, 0, sizeof(*attributes) * BCM2711_VULKAN_VERTEX_ATTRIBUTES);
-	error = pack_fetch(draw, event, available, locations, widths, count, attributes);
-	if (error != 0)
-		return error;
+	/*
+	 * The coordinate variant is given only the components it reads.  The
+	 * hardware needs at least one value read by each variant (GFXH-930),
+	 * so a coordinate variant that reads nothing is given one value of
+	 * the first attribute, which it never loads.
+	 * Procedure referenced: Mesa 25.3.6 src/broadcom/vulkan/v3dvx_cmd_buffer.c
+	 * (the GFXH-930 dummy coordinate shader load).
+	 */
+	read_any = false;
+	for (index = 0; index < count; index++) {
+		attributes[index].coordinate_values = coordinate_widths[index];
+		if (coordinate_widths[index] != 0)
+			read_any = true;
+	}
+	if (count != 0 && !read_any)
+		attributes[0].coordinate_values = 1;
 
-	/* Succeeded: every attribute record points into the draw's packed copy. */
+	/* Succeeded: every attribute record points into its vertex buffer or the packed copy. */
 	return 0;
 }
 

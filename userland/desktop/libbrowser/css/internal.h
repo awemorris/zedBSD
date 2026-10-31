@@ -180,6 +180,7 @@ enum css_value_kind {
 	CSS_VALUE_SHADOWS,
 	CSS_VALUE_FILTERS,
 	CSS_VALUE_INSET,
+	CSS_VALUE_SHAPE,
 	CSS_VALUE_TRACKS,
 	CSS_VALUE_GRID_LINE,
 	CSS_VALUE_AREAS,
@@ -210,7 +211,9 @@ enum css_declared_unit {
 	CSS_DUNIT_CQW,
 	CSS_DUNIT_CQH,
 	CSS_DUNIT_LH,
-	CSS_DUNIT_RLH
+	CSS_DUNIT_RLH,
+	CSS_DUNIT_VI,
+	CSS_DUNIT_VB
 };
 
 /*
@@ -327,6 +330,9 @@ enum css_property {
 	CSS_PROP_TEXT_STROKE_WIDTH,
 	CSS_PROP_CLIP_PATH,
 	CSS_PROP_CLIP,
+	CSS_PROP_SHAPE_OUTSIDE,
+	CSS_PROP_SHAPE_MARGIN,
+	CSS_PROP_SHAPE_IMAGE_THRESHOLD,
 	CSS_PROP_DIRECTION,
 	CSS_PROP_WRITING_MODE,
 	CSS_PROP_GRID_TEMPLATE_COLUMNS,
@@ -549,6 +555,7 @@ struct css_value {
 	const struct css_shadow_list *shadows;
 	const struct css_filter_list *filters;
 	const struct css_declared_inset *inset;
+	const struct css_declared_shape *shape;
 	const struct css_track_list *tracks;
 	/* A grid line's name (an atom; NULL for none), and grid-template-areas' cells (none when NULL). */
 	struct vm_string *ident;
@@ -594,6 +601,22 @@ struct css_track_list {
 	const struct css_subgrid_names *subgrid_names;
 	/* A template with a repeat(): its text as written (spaces normalized, lengths in ems unresolved), NUL-terminated in the arena; NULL otherwise. */
 	const char *declared;
+};
+
+/* A declared shape-outside: the shape as css_shape has it, with declared lengths. */
+struct css_declared_shape {
+	int kind;
+	int box;
+	struct css_value radius[2];
+	int radius_keyword[2];
+	struct css_value at[2];
+	int at_end[2];
+	struct css_value inset[4];
+	int rounded;
+	struct css_value round[4][2];
+	struct css_value points[CSS_SHAPE_POINTS][2];
+	unsigned point_count;
+	const struct css_gradient *gradient;
 };
 
 /* A declared clip-path: inset(): its four declared lengths, top, right, bottom, left. */

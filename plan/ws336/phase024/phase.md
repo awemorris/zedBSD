@@ -6,7 +6,7 @@ Status: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
 依存: p022・p023
-WS335 の待ち: **WS335 の実装**。**Q6 の答え**（時期と範囲）
+WS335 の待ち: **WS335 の実装**。Q6 は A（p022 が通ったら既定の config をまとめて替える、OpenSSH の package は残す、2026-11-01）
 
 ## 1. 読む物
 
@@ -23,7 +23,7 @@ WS335 の待ち: **WS335 の実装**。**Q6 の答え**（時期と範囲）
 
 - 既定の config（Q6 の範囲。`config/ci/config-amd64-server.mk` はユーザーの物なので Q1 に頼む）
 - 自前の package の menu を `base`・既定 y に
-- Q3 の答えに従い `scp -O` を使う 4 本（plan/tools/gpu-perf/measure.sh、plan/tools/rtx-video/rtx-*-check.sh）を直すか旧の scp を入れる（他の WS の道具なので Q1 の承認の後）
+- Q3 の A に従い `scp -O` を使う 4 本（plan/tools/gpu-perf/measure.sh、plan/tools/rtx-video/rtx-*-check.sh）から `-O` を外す（他の WS の道具なので Q1 の承認の後）
 - 実機の試験の一覧（Q1 がユーザーの拾える試験の一覧に置く）
 - この phase.md の「結果」の節、[ws.md](../ws.md) の表のこの行
 

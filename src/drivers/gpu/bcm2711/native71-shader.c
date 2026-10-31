@@ -80,8 +80,8 @@ bcm2711_native_shader_encode(
 			return error;
 	}
 
-	/* The two vertex stages share the same FIFO input packing and emitted varying count. */
-	if (shader->programs[0].binary->input_count != shader->programs[1].binary->input_count)
+	/* The coordinate stage reads the leading components of some of the vertex stage's inputs. */
+	if (shader->programs[0].binary->input_count > shader->programs[1].binary->input_count)
 		return EINVAL;
 
 	/* Fragment inputs must consume exactly the vertex stage's varying payload. */

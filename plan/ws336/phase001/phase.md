@@ -2,7 +2,7 @@
 
 # ws336-p001: 設計（自前の sshd・ssh、標準廉価実装手順 §4）
 
-Status: in-progress（2026-11-01 01:56 P5 q1791）
+Status: cleared（2026-11-01 04:54 Q1、main 451dd0f9e）
 Parent: [WS336](../ws.md)
 
 ## 範囲

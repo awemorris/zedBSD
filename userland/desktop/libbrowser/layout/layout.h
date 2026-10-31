@@ -36,6 +36,9 @@
 /* How many layout units make a pixel. */
 #define LAYOUT_UNIT		64
 
+/* The writing mode of sideways-lr in a tree's logical_mode (the three of the style are 0 to 2). */
+#define LAYOUT_SIDEWAYS_LR	3
+
 /* The deepest box nesting laid out (deeper boxes are dropped). */
 #define LAYOUT_DEPTH_MAX	256
 
@@ -335,6 +338,8 @@ struct layout_box {
 	/* How far a sticky box is moved from where the flow put it (sticky.c). */
 	layout_unit sticky_dx;
 	layout_unit sticky_dy;
+	/* A fixed box's static position was moved to the scroll the tree was built for (position.c). */
+	int static_scrolled;
 	/* A box placed by an anchor follows it when the page scrolls, even a fixed one (set by the anchor functions). */
 	int anchored;
 	/* A flex container gave a table its whole height (captions included), not its grid box's (set while it is laid out). */
@@ -431,6 +436,12 @@ struct layout_tree {
 	struct layout_box **sticky;
 	size_t sticky_count;
 	layout_unit sticky_scroll;
+	layout_unit sticky_scroll_x;
+	/* The scroll of the viewport the tree is built for (fixed boxes are placed in the viewport at that scroll); sticky.c moves them from it. */
+	layout_unit scroll_x;
+	layout_unit scroll_y;
+	/* A layout a script forced placed a box by its position-try-fallbacks without remembering the option; the next rendering does (position.c). */
+	int try_pending;
 	/* The placing of the boxes out of the flow: which pass it is (layout_box.placed_pass names the pass that placed a box). */
 	int position_pass;
 	/* The writing mode whose logical coordinates the boxes are being laid out in (horizontal-tb outside any vertical domain). */
@@ -450,7 +461,7 @@ struct layout_context {
 };
 
 /* The layout (box.c, block.c, inline.c, float.c, position.c, replaced.c, dump.c, hit.c). */
-int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, const struct layout_transition *transition);
+int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
 void layout_box_model(struct layout_box *box, layout_unit containing_width);
 void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
 int layout_replaced_is_canvas(const struct layout_box *box);
@@ -500,8 +511,9 @@ int layout_position_box(struct layout_tree *tree, struct layout_box *box);
 int layout_scroll_apply(struct layout_tree *tree);
 int layout_scroll_offset(const struct layout_box *box, double *x, double *y);
 const struct layout_box *layout_containing_box(const struct layout_box *box);
-int layout_sticky_build(struct layout_tree *tree, layout_unit scroll_y);
-int layout_sticky_apply(struct layout_tree *tree, layout_unit scroll_y);
+void layout_try_remember(int remember);
+int layout_sticky_build(struct layout_tree *tree);
+int layout_sticky_apply(struct layout_tree *tree, layout_unit scroll_x, layout_unit scroll_y);
 
 /* Centers a button's content in the height it has beyond content_height (block.c). */
 void layout_center_button(struct layout_box *box, layout_unit content_height);
@@ -509,6 +521,11 @@ layout_unit layout_content_width(const struct layout_box *box, int depth);
 void layout_context_begin(struct layout_tree *tree, struct layout_context *context, struct wb_vector *floats);
 void layout_context_end(struct layout_tree *tree, const struct layout_context *context);
 int layout_place_float(struct layout_tree *tree, struct layout_box *box, layout_unit y_min, layout_unit width);
+int layout_floats_shaped(const struct layout_tree *tree);
+/* shape-outside (shape.c): the shape of a float in the coordinates of the tree's writing mode, and the extent it takes in a band. */
+struct layout_shape;
+int layout_shape_build(struct layout_tree *tree, const struct layout_box *box, layout_unit container_width, struct layout_shape **shape);
+int layout_shape_extent(const struct layout_shape *shape, layout_unit top, layout_unit bottom, layout_unit *left, layout_unit *right);
 void layout_line_room(const struct layout_tree *tree, layout_unit top, layout_unit bottom, layout_unit width, layout_unit *left, layout_unit *right);
 layout_unit layout_below_float(const struct layout_tree *tree, layout_unit top);
 layout_unit layout_clearance(const struct layout_tree *tree, int clear);
@@ -528,6 +545,8 @@ int layout_flex(struct layout_tree *tree, struct layout_box *box);
 int layout_grid(struct layout_tree *tree, struct layout_box *box);
 void layout_grid_names(struct layout_box *box);
 int layout_physical_mode(const struct layout_box *box);
+/* Reorders four sides (top, right, bottom, left) of a box laid out in a writing mode's coordinates into physical ones. */
+void layout_sides_physical(const layout_unit logical[4], int mode, layout_unit physical[4]);
 /* A style's writing mode as position-area reads it (sideways-lr is the mode 3). */
 int position_area_mode(const struct css_style *style);
 int layout_logical_wanted(const struct layout_tree *tree, const struct layout_box *box);
