@@ -196,12 +196,24 @@ bind_style_install(
 		return status;
 
 	/* The CSS namespace consults the same declaration parser as inline style. */
-	css = vm_object_create(window->realm->heap, window->realm->object_prototype);
-	if (css == NULL)
-		return ENOMEM;
-	status = js_builtin_value(window->realm, window->realm->global, "CSS", vm_value_cell(css), JS_BUILTIN_METHOD);
-	if (status != 0)
-		return status;
+	css = NULL;
+	{
+		/* The prelude may have made the namespace already (it adds methods written in the page's own language). */
+		vm_value existing;
+		vm_value key;
+
+		key = vm_key_from_ascii(window->realm->heap, "CSS");
+		if (key != VM_VALUE_EMPTY && vm_object_get(window->realm->global, key, &existing) == 0 && vm_value_is_object(existing))
+			css = (struct vm_object *)vm_value_as_cell(existing);
+	}
+	if (css == NULL) {
+		css = vm_object_create(window->realm->heap, window->realm->object_prototype);
+		if (css == NULL)
+			return ENOMEM;
+		status = js_builtin_value(window->realm, window->realm->global, "CSS", vm_value_cell(css), JS_BUILTIN_METHOD);
+		if (status != 0)
+			return status;
+	}
 	status = js_builtin_method(window->realm, css, "supports", 2, style_css_supports);
 	if (status != 0)
 		return status;

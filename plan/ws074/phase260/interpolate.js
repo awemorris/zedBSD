@@ -11,7 +11,7 @@
     // The type of each animatable property: how its value is blended.  A property that is only named in DISCRETE changes at the halfway.
     var TYPE_OF = {
       'flex-grow': 'number+', 'flex-shrink': 'number+', 'order': 'integer', 'flex-basis': 'lp',
-      'grid-template-columns': 'tracks', 'grid-template-rows': 'tracks', 'backdrop-filter': 'filter'
+      'grid-template-columns': 'tracks', 'grid-template-rows': 'tracks', 'backdrop-filter': 'filter', 'background-color': 'color', 'color': 'color'
     };
     var DISCRETE = {
       'anchor-name': 1, 'position-anchor': 1, 'position-area': 1, 'position-try-fallbacks': 1, 'position-try-order': 1
@@ -111,6 +111,10 @@
         }
         return { t: 'list', items: tracks, lines: list.lines, text: text };
       }
+      if (type === 'color') {
+        filters = parseColor(text);
+        return filters ? { t: 'color', c: filters } : { t: 'kw', s: text };
+      }
       if (type === 'filter') {
         filters = parseFilters(text);
         return filters || { t: 'kw', s: text };
@@ -127,6 +131,7 @@
         return trackText({ tracks: tracks, lines: v.lines });
       }
       if (v.t === 'filters') return filtersText(v);
+      if (v.t === 'color') return colorText(v.c);
       return v.s;
     }
     function mixNumber(a, b, p) { return a + (b - a) * p; }
@@ -163,6 +168,7 @@
         return { t: 'list', items: items, lines: p < 0.5 ? a.lines : b.lines };
       }
       if (a.t === 'filters') return mixFilters(a, b, p);
+      if (a.t === 'color') return { t: 'color', c: mixColor(a.c, b.c, p) };
       return null;
     }
     function trackKind(v) { return v.t === 'fn' ? v.name : v.t; }
@@ -460,14 +466,25 @@
     }
     // The keyframes of an @keyframes rule for one property: [{offset, value, easing, composite}], and the rule's other properties' names.
     var keyframesCache = new Map();
+    function findKeyframesIn(rules, name) {
+      var j, rule, found;
+      for (j = rules.length - 1; j >= 0; j--) {
+        rule = rules[j];
+        if (!rule) continue;
+        if (rule.type === 7 && rule.name === name) return rule;
+        if (rule.cssRules && rule.type !== 7) {
+          found = findKeyframesIn(rule.cssRules, name);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
     function findKeyframes(name) {
-      var sheets = document.styleSheets, i, rules, j, rule;
+      var sheets = document.styleSheets, i, rules, found;
       for (i = sheets.length - 1; i >= 0; i--) {
         try { rules = sheets[i].cssRules; } catch (e) { continue; }
-        for (j = rules.length - 1; j >= 0; j--) {
-          rule = rules[j];
-          if (rule && rule.type === 7 && rule.name === name) return rule;
-        }
+        found = findKeyframesIn(rules, name);
+        if (found) return found;
       }
       return null;
     }
@@ -587,6 +604,55 @@
       }
       return value;
     }
+    // ---- registered custom properties (CSS.registerProperty and @property): an unset one reads as its initial value.
+    var registered = {};
+    function domError(message, name) { return new DOMException(message, name); }
+    var SYNTAX_RE = /^\*$|^\s*(<[a-z-]+>[+#]?|[A-Za-z_][\w-]*)(\s*\|\s*(<[a-z-]+>[+#]?|[A-Za-z_][\w-]*))*\s*$/;
+    function independent(text) { return !/anchor\(|anchor-size\(|var\(|[\d.]\s*(em|rem|ex|rex|ch|rch|cap|rcap|ic|ric|lh|rlh)\b/i.test(text); }
+    if (!g.CSS) def(g, 'CSS', {});
+    if (g.CSS && !g.CSS.registerProperty) {
+      def(g.CSS, 'registerProperty', function registerProperty(descriptor) {
+        var name, syntax, inherits, initial;
+        if (descriptor === null || typeof descriptor !== 'object') throw new TypeError('registerProperty needs a descriptor');
+        name = String(descriptor.name);
+        if (descriptor.syntax === undefined) throw new TypeError('syntax is required');
+        if (descriptor.inherits === undefined) throw new TypeError('inherits is required');
+        syntax = String(descriptor.syntax);
+        inherits = !!descriptor.inherits;
+        initial = descriptor.initialValue === undefined ? null : String(descriptor.initialValue);
+        if (!/^--./.test(name)) throw domError('The property name must start with --', 'SyntaxError');
+        if (!SYNTAX_RE.test(syntax)) throw domError('The syntax is not valid', 'SyntaxError');
+        if (syntax.trim() !== '*') {
+          if (initial === null) throw domError('initialValue is required for a syntax other than *', 'SyntaxError');
+          if (!independent(initial)) throw domError('The initial value is not computationally independent', 'SyntaxError');
+        }
+        if (Object.prototype.hasOwnProperty.call(registered, name)) throw domError('The property is already registered', 'InvalidModificationError');
+        registered[name] = { syntax: syntax, inherits: inherits, initial: initial };
+      });
+    }
+    function findPropertyRule(rules, name) {
+      var j, rule, found;
+      for (j = rules.length - 1; j >= 0; j--) {
+        rule = rules[j];
+        if (!rule) continue;
+        if (rule.type === 0 && rule.constructor && rule.constructor.name === 'CSSPropertyRule' && rule.name === name) return rule;
+        if (rule.cssRules && rule.type !== 7) {
+          found = findPropertyRule(rule.cssRules, name);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+    function initialOfRegistered(name) {
+      var sheets = document.styleSheets, i, rule, rules, value;
+      for (i = sheets.length - 1; i >= 0; i--) {
+        try { rules = sheets[i].cssRules; } catch (e) { continue; }
+        rule = findPropertyRule(rules, name);
+        if (rule) { value = rule.initialValue; return value === null ? null : value.trim(); }
+      }
+      if (Object.prototype.hasOwnProperty.call(registered, name)) return registered[name].initial;
+      return null;
+    }
     var nativeGetComputedStyle = g.getComputedStyle;
     if (typeof nativeGetComputedStyle === 'function') {
       def(g, 'getComputedStyle', function getComputedStyle(element, pseudo) {
@@ -600,7 +666,16 @@
               if (animatable(dashed)) return animatedValue(element, dashed, target[key], target);
               if (key === 'getPropertyValue') {
                 return function (name) {
-                  var n = String(name).toLowerCase(), v = target.getPropertyValue(n);
+                  var n = String(name).toLowerCase(), v;
+                  if (n.charAt(0) === '-' && n.charAt(1) === '-') {
+                    v = target.getPropertyValue(name);
+                    if (v === '') {
+                      v = initialOfRegistered(String(name));
+                      if (v === null) v = '';
+                    }
+                    return v;
+                  }
+                  v = target.getPropertyValue(n);
                   return animatable(n) ? animatedValue(element, n, v, target) : v;
                 };
               }
