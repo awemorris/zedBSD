@@ -21,26 +21,24 @@
 **判断が解決した時（2026-10-30 ユーザー「判断事項が解決されたらcockpit.mdをアップデートするようにmaster.mdに記録してください。」）**: ユーザーが答えたら、同じ turn のうちに cockpit.md を直して commit する。その項目を「ユーザーの判断を待つ事」から外し、「決まった事」の節へ一行（日付・WS・決定の要約・記録した ws.md か ticket の link）で移す。決定で変わった担当の予定・WS の進捗の表も同じ時に直す。「決まった事」の節もセッションをまたいで残し、消すのはユーザーの指示か確認の後。
 
 <!-- master:agents:start -->
-**引き継ぎ（2026-10-31 16:40、Q1、host の再起動の前）**: ユーザーが host の負荷の異常で再起動する。全担当をラップアップした。次のセッションの Q1 は [cockpit.md](cockpit.md) とこの表から再開する。
-再開の手順: (1) `git log -1` と registry の SHA を確かめる。(2) 担当は同じ名前・同じ worktree で起動し、表の記録の「再開点」から続けさせる。担当の worktree の build/ の toolchain は main の build/ への symlink（作り直す時は memory の sonnet-worktree-toolchain-links）。
-(3) /tmp は tmpfs で再起動で消える（P8 の /tmp/p8out、P2 の /tmp の出力は担当が worktree の build/ に写した）。(4) 10.0.10.3 は `/tmp/zedbsd-rdna.lock` が消えるので、使う前に機械の状態（Debian、NVMe の kernel の cksum 1463007375）を確かめる。
+**引き継ぎ（2026-11-01 07:07、Q1、host の再起動の前）**: ユーザーが host を再起動する（Vivado などで負荷が高い）。全担当をラップアップした。次のセッションの Q1 は [cockpit.md](cockpit.md)・この表・[queue.md](queue.md) の最後の行から再開する。
+再開の手順: (1) `git log -1` と registry の SHA を確かめる。(2) 担当は同じ名前・同じ worktree で起動し、phase.md の「再開点」・「結果」から続けさせる。worktree の build/ の toolchain は main の build/ への symlink（無ければ作ってから起動）。
+(3) /tmp は tmpfs で消える（P8 の /tmp/p8out の dev148・acid148 も消える。次の自走は測り直しから）。(4) 新しい worktree の作成は 10 分ほどかかる事がある（disk の負荷）。(5) Wine の新しい prefix は `wineboot -i` で作れない（WS335 の担当は s-ws335-p002 の build/tmp/ws335-wine を写す）。
 
-| 担当 | 最後の Queue | WS と次の 1 手（記録の場所） | branch・SHA（main への merge） | 実機 |
-| --- | --- | --- | --- | --- |
-| P2 | q1782-i01 返却（uncleared ではなく途中） | [WS309 p015](ws309/phase015/phase.md) game mode の V2（文字通りの zero copy、全 GPU）。QEMU（Venus）で client が貸された image に直に描く 6 往復を確かめた。最後の commit（compositor の非 LINEAR の取り込み）は未 build。phase.md の「再開点」: build → QEMU の cycle → VF2（timing kernel の build/p015vf2t は作り直し）→ RTX | agent/p2-ws309v2 89d86ef95（**main に未 merge**: VF2 の実機の後に入れる。全 GPU の game mode の経路を変えたため） | VF2（**ユーザーから VF2 の password を受けてから**）、後で 10.0.10.3 |
-| P3 | q1781-i02 返却 | [WS291 p023](ws291/phase023/phase.md) 共有の image の画素の並び（RTX の block-linear）。全部 main。10.0.10.3 の A/B: subs-1000 10.9 → 20.4〜21.3 fps、subs-100 103〜106 → 202〜204、big-100・big-1000・scene は同等以上、画素の差 0、desktop の後退なし。残り: new と `nvrtx.disp.bl=1` の腕の scenes（phase.md の再開点）、block-linear の画面出しの目視（ユーザー、p015 の後） | agent/p3-ws291wsi 0f1cce8fd（main b30707d0a） | 10.0.10.3（元に戻した、lock は返却） |
-| P8 | q1727-i08 返却 | [WS074](ws074/ws.md) Web ブラウザ: Interop 2025 で Chromium が通る試験の 100% まで自走（ユーザーの指示、返却のたびに同じ目標で起動し直す）。今 2,848 / 3,472（82.03%、dev104）、Acid3 100/100・Acid2 100%。i08 は inline.c の 1 件（後退の確かめは未実施）。次: static-subset.py で確かめ → `::part()` → CSSOM の rule の object（[phase260](ws074/phase260/phase.md) の q1727-i08 節） | agent/p8-ws074 b2a9ef175（main fc2d32861） | host |
-| P1・P4〜P7 | 返却 | 割当なし。cockpit の「判断を待つ事」と「拾える試験」を参照 | 全部 main | — |
+| 担当 | 最後の Queue | WS と次の 1 手（記録の場所） | 実機 |
+| --- | --- | --- | --- |
+| P7 | q1808-i01 ラップアップ | [WS334 p021](ws334/phase021/phase.md) 統合: 525bc577a・781ec96c8・8c4fc75b4 の merge（run-unit all の結果を見てから）→ 1 つの .exe の build と libkeiland の pthread 抜き（ws.md の 2026-11-01 の決定） | — |
+| P8 | q1727-i15 ラップアップ | [WS074](ws074/ws.md) phase260 の自走（100% まで、返却のたびに同じ目標で起動し直す）。i14 の終わりで 3,107（89.49%）、Acid2・3 100% | — |
+| Sonnet | q1820〜q1824 ラップアップ | WS335 の p003（SHA-3）・p006（ChaCha20・Poly1305）・p008（X25519）、WS336 の p004（cipher・packet）・p005（key）。各 phase.md の結果の節から続ける、受け入れは accept の手順（ws.md の行と phase.md を cleared に） | — |
+| P1〜P6 | 返却・ラップアップ | 割当なし（P3 の RTX は uncleared: G1 は (b) の設計とユーザーの判断が要る） | — |
 
 **次のセッションの始めにする事**:
-1. P3 で p023 の残りの scenes（new と disp.bl=1 の腕）→ p024（subs の 1 run の固定の費用）。
-2. ユーザーに VF2 の password を聞き（記録しない、担当には環境変数で渡す）、P2 で WS309 p015 の VF2 → RTX の実機 → main に merge → Guardrail の GPU_DISPLAY_PRESENT の例外を閉じる。
-3. P8 を q1727-i09 で起動し直す。
-4. 5330 の電源の入れ直しの後: P1 の WS299（`plan/ws299/temp/run-5330-q1744.sh q1744`、worktree p1-ws299e）と WS333 p011・p012・p014・p018 の実機。
-5. 午後の予定だった Pi 5（image は p4-ws291pi）と ODROID-C5 の serial（p1-ws313）、BUG-374 の目視（p4-bug374 の build/b374）。cockpit の「拾える試験」。
-6. Q1 の片付け: P2 が挙げた p2-ws309v2 の build/tmp/p015base（VF2 の後）・build/p015img・build/p015run。
+1. ラップアップした担当の SHA を受け入れて merge（P7 は run-unit all を見てから、Sonnet は試験を流し直してから）。
+2. P8 を q1727-i16 で起動し直す。WS335・WS336 の Sonnet を各 phase の続きで起動し直す（WS335 の次の群: p004・p007・p015・p016・p025、WS336: p006・p007・p009）。
+3. WS337 shangrila: ユーザーとの質疑の続き（ws.md の「まだ決まっていない事」）。
+4. 未割当の Bug: [BUG-385](bugs/BUG-385.md)（VF2 の SD の retry を補強して ro にしない、ユーザーの指示で後で）・[BUG-386](bugs/BUG-386.md)（VF2 の en1）。
+5. 実機の今: Pi 5（10.0.30.7、SwitchBot 14C19FA80F86）と VF2（10.0.30.2、LAN は en0、SwitchBot 3 AC276E432AE6）は main b2392803f の kernel、5330 は BUG-382 を直した kernel、10.0.10.3 は Debian（RTX は vfio）。
 
-**予定**（ユーザーの決定、各 ws.md）: WS329（H.264 encoder）・WS330（H.265）・WS318（libmedia の作り直し）は設計済みで問いの答え待ち。WS333 は UAPI（p004）の review と Q333-1〜7 待ち。
 **止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd。HAL の差分の承認は無い。
 <!-- master:agents:end -->
 
