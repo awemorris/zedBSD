@@ -2117,7 +2117,7 @@ block_pdirect(
 	struct devfs_block_io_range range;
 	const struct backing_claim *claim;
 	struct disk *disk;
-	struct disk *leaf;
+	struct disk *token;
 	uint64_t stack_pages[BLOCK_DIRECT_STACK_PAGES];
 	uint64_t *pages;
 	uint64_t first;
@@ -2178,11 +2178,11 @@ block_pdirect(
 
 	/* Admits the transfer: a reserved device by its claim, any other as a cache user. */
 	admitted = 0;
-	leaf = NULL;
+	token = NULL;
 	if (claim != NULL)
 		error = disk_admin_io_begin(disk, claim);
 	else
-		error = disk_direct_begin(disk, &leaf);
+		error = disk_direct_begin(disk, &token);
 	if (error == 0)
 		admitted = 1;
 
@@ -2254,7 +2254,7 @@ block_pdirect(
 	if (admitted && claim != NULL)
 		disk_admin_io_end(disk, claim);
 	else if (admitted)
-		disk_direct_end(leaf);
+		disk_direct_end(token);
 	if (pages != stack_pages)
 		kern_free(pages);
 

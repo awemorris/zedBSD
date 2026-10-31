@@ -121,9 +121,10 @@ disjoint partitions may have separate reservations. Nested partitions and
 file-backed disks remain unsupported. The target must have only its owning
 open description, with no overlapping opens, mounts or backing claims.
 
-Acquisition conservatively requires an idle physical I/O/cache frontier, so
-transient sibling activity may return `EBUSY`; it does not permanently exclude
-an idle mounted sibling. Owner reads and writes stay within the target range.
+Acquisition requires that no transfer is in flight on the target's sectors and
+that no cache user came in through the target, the physical disk or an
+overlapping alias; a nonoverlapping sibling's I/O and cache use, even at the
+moment of acquisition, do not return `EBUSY`. Owner reads and writes stay within the target range.
 `BLKREREADPART` on a partition returns `EINVAL`: only a whole-disk owner may
 replace partition mappings. Formatting a partition belongs to
 [mkfs and mkswap](image-formatters.md).
