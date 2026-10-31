@@ -3548,7 +3548,8 @@ parser_special(
 	is_var = 0;
 	for (index = 0; index < value.count && !is_var; index++) {
 		if (value.tokens[index].type == CSS_TOKEN_FUNCTION)
-			is_var = css_ident_equal(&value.tokens[index], "var");
+			is_var = css_ident_equal(&value.tokens[index], "var") || css_ident_equal(&value.tokens[index], "sign") ||
+			    css_ident_equal(&value.tokens[index], "sibling-index") || css_ident_equal(&value.tokens[index], "sibling-count");
 	}
 
 	/* An ordinary value. */

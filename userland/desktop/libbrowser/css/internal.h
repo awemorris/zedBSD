@@ -210,7 +210,9 @@ enum css_declared_unit {
 	CSS_DUNIT_CQW,
 	CSS_DUNIT_CQH,
 	CSS_DUNIT_LH,
-	CSS_DUNIT_RLH
+	CSS_DUNIT_RLH,
+	CSS_DUNIT_VI,
+	CSS_DUNIT_VB
 };
 
 /*

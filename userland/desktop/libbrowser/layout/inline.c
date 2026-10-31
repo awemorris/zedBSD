@@ -880,8 +880,6 @@ inline_replaced_extent(
 	/* A control's text baseline is its margin, border and padding above its content, and its text's baseline in it. */
 	*above = box->margin[CSS_TOP] + box->border[CSS_TOP] + box->padding[CSS_TOP] + box->control_baseline;
 	*below = height - *above;
-	if (*below < 0)
-		*below = 0;
 }
 
 /* Measures a box's margin box height. */

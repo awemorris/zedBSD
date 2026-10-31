@@ -41,7 +41,26 @@ struct img_bitmap {
 	uint64_t serial;
 	/* Set for a vector picture that has no size and no ratio of its own (the default size stands in). */
 	int no_ratio;
+	/* A vector picture whose width or height attribute is zero has that natural size though its bitmap has a pixel at least (has_natural). */
+	int has_natural;
+	int natural_width;
+	int natural_height;
 };
+
+/* The size layout gives a picture: its natural size when it has one apart from its bitmap's. */
+static inline int
+img_natural_width(
+	const struct img_bitmap *bitmap)
+{
+	return bitmap->has_natural ? bitmap->natural_width : bitmap->width;
+}
+
+static inline int
+img_natural_height(
+	const struct img_bitmap *bitmap)
+{
+	return bitmap->has_natural ? bitmap->natural_height : bitmap->height;
+}
 
 /* The largest image decoded, in pixels (the decoders refuse more). */
 #define IMG_PIXELS_MAX		((size_t)64 * 1024U * 1024U)

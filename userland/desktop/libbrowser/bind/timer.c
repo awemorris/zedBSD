@@ -614,6 +614,8 @@ timer_run(
 	/* A function gets the time (an animation frame's) or the arguments given with it. */
 	count = 0;
 	if (timer->animation) {
+		if (window->host.rendering != NULL)
+			window->host.rendering(window->host.context);
 		arguments[0] = vm_value_number(window->now);
 		count = 1;
 	} else if (timer->arguments != VM_VALUE_UNDEFINED) {

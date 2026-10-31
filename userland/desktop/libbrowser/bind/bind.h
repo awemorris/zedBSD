@@ -116,6 +116,10 @@ struct bind_box {
 	/* What a block scrolls over: its padding box and the overflow of its content (0 when not known). */
 	double scroll_width;
 	double scroll_height;
+	/* Whether the scroll origin is at the right (flip_x) or bottom (flip_y) edge, so the scroll positions are zero or negative; and whether the block axis is horizontal. */
+	int scroll_flip_x;
+	int scroll_flip_y;
+	int scroll_vertical;
 	/* Whether the block scrolls its content (overflow other than visible and clip). */
 	int scrolls;
 };
@@ -245,6 +249,8 @@ struct bind_host {
 	const struct bind_storage_calls *storage;
 	int (*computed_style)(void *context, struct dom_element *element, struct css_style *style);
 	void (*scroll_to)(void *context, double x, double y);
+	/* An animation frame is about to run its callbacks: the rendering update before them happens (may be NULL). */
+	void (*rendering)(void *context);
 	int (*node_inserted)(void *context, struct dom_node *node);
 	int (*checkpoint)(void *context);
 	/* Starts a request; done is called once, from here or later, and *handle names it for request_cancel. */

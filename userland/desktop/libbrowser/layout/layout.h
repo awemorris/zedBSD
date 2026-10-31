@@ -335,6 +335,8 @@ struct layout_box {
 	/* How far a sticky box is moved from where the flow put it (sticky.c). */
 	layout_unit sticky_dx;
 	layout_unit sticky_dy;
+	/* A fixed box's static position was moved to the scroll the tree was built for (position.c). */
+	int static_scrolled;
 	/* A box placed by an anchor follows it when the page scrolls, even a fixed one (set by the anchor functions). */
 	int anchored;
 	/* A flex container gave a table its whole height (captions included), not its grid box's (set while it is laid out). */
@@ -431,6 +433,12 @@ struct layout_tree {
 	struct layout_box **sticky;
 	size_t sticky_count;
 	layout_unit sticky_scroll;
+	layout_unit sticky_scroll_x;
+	/* The scroll of the viewport the tree is built for (fixed boxes are placed in the viewport at that scroll); sticky.c moves them from it. */
+	layout_unit scroll_x;
+	layout_unit scroll_y;
+	/* A layout a script forced placed a box by its position-try-fallbacks without remembering the option; the next rendering does (position.c). */
+	int try_pending;
 	/* The placing of the boxes out of the flow: which pass it is (layout_box.placed_pass names the pass that placed a box). */
 	int position_pass;
 	/* The writing mode whose logical coordinates the boxes are being laid out in (horizontal-tb outside any vertical domain). */
@@ -450,7 +458,7 @@ struct layout_context {
 };
 
 /* The layout (box.c, block.c, inline.c, float.c, position.c, replaced.c, dump.c, hit.c). */
-int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, const struct layout_transition *transition);
+int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, layout_unit scroll_x, layout_unit scroll_y, const struct layout_transition *transition);
 void layout_box_model(struct layout_box *box, layout_unit containing_width);
 void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
 int layout_replaced_is_canvas(const struct layout_box *box);
@@ -500,8 +508,9 @@ int layout_position_box(struct layout_tree *tree, struct layout_box *box);
 int layout_scroll_apply(struct layout_tree *tree);
 int layout_scroll_offset(const struct layout_box *box, double *x, double *y);
 const struct layout_box *layout_containing_box(const struct layout_box *box);
-int layout_sticky_build(struct layout_tree *tree, layout_unit scroll_y);
-int layout_sticky_apply(struct layout_tree *tree, layout_unit scroll_y);
+void layout_try_remember(int remember);
+int layout_sticky_build(struct layout_tree *tree);
+int layout_sticky_apply(struct layout_tree *tree, layout_unit scroll_x, layout_unit scroll_y);
 
 /* Centers a button's content in the height it has beyond content_height (block.c). */
 void layout_center_button(struct layout_box *box, layout_unit content_height);

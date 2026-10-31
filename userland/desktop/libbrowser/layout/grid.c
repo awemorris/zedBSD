@@ -4184,8 +4184,8 @@ grid_lay_item(
 		ratio_width = item->natural_width;
 		ratio_height = item->natural_height;
 		if (item->image != NULL) {
-			ratio_width = (layout_unit)item->image->width;
-			ratio_height = (layout_unit)item->image->height;
+			ratio_width = item->image->no_ratio ? 0 : (layout_unit)item->image->width;
+			ratio_height = item->image->no_ratio ? 0 : (layout_unit)item->image->height;
 		}
 		if (ratio_width > 0 && ratio_height > 0) {
 			item->style.height.unit = CSS_UNIT_PX;
@@ -4540,8 +4540,8 @@ grid_relay_item(
 	ratio_width = item->natural_width;
 	ratio_height = item->natural_height;
 	if (item->image != NULL) {
-		ratio_width = (layout_unit)item->image->width;
-		ratio_height = (layout_unit)item->image->height;
+		ratio_width = item->image->no_ratio ? 0 : (layout_unit)item->image->width;
+		ratio_height = item->image->no_ratio ? 0 : (layout_unit)item->image->height;
 	}
 	justify = item->style.justify_self;
 	if (justify == CSS_ALIGN_AUTO && item->parent != NULL)
