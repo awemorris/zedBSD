@@ -546,6 +546,6 @@
 | q1820 / q1820-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws335-p003`） | [ws335-p003](ws335/phase003/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | uncleared（2026-11-01 07:07 host の再起動でラップアップ、8e06b344e: cryc-sha3.c だけ、試験は未作成・未実行。続きは phase.md の結果の節） |
 | q1821 / q1821-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws335-p006`） | [ws335-p006](ws335/phase006/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1822 / q1822-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws335-p008`） | [ws335-p008](ws335/phase008/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
-| q1823 / q1823-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p004`） | [ws336-p004](ws336/phase004/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
+| q1823 / q1823-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p004`） | [ws336-p004](ws336/phase004/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | uncleared（2026-11-01 07:07 host の再起動でラップアップ、8a9d00e6d: ssh-cipher.c・ssh-packet.c だけ、試験は未作成・未実行。続きは phase.md の結果の節） |
 | q1824 / q1824-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p005`） | [ws336-p005](ws336/phase005/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1727 / q1727-i15 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 15 回目 | 100% までの自走（ユーザーの指示）。i14 は 3,107（89.49%）、main 6502faa92。CSS_TRACKS の上限 → col・colgroup の背景 → 縦の行の inline の背景・枠 など | in-progress |
