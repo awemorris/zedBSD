@@ -826,6 +826,7 @@ struct css_style {
 	const void *anchor_names_tree;
 	const void *anchor_tree;
 	const void *anchor_scope_tree;
+	const void *try_tree;
 	/* view-transition-name: NULL for none, "match-element", or the custom identifier; view-transition-class: none (NULL) or the identifiers joined by spaces (atoms). */
 	struct vm_string *view_transition_name;
 	struct vm_string *view_transition_class;

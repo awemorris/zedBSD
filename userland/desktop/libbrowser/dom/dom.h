@@ -433,6 +433,8 @@ struct dom_shadow_root {
 	struct dom_element *host;
 	int closed;
 	int slot_manual;
+	/* The binding's SameObject styleSheets list. */
+	struct vm_object *style_sheets;
 };
 
 /*
@@ -553,6 +555,7 @@ struct dom_element *dom_slot_first(const struct dom_node *shadow, const struct v
 struct dom_element *dom_slot_of(const struct dom_node *node);
 const struct vm_string *dom_slot_name(const struct dom_node *node);
 struct dom_node *dom_flat_parent(const struct dom_node *node);
+int dom_is_connected(const struct dom_node *node);
 int dom_assigned_to(const struct dom_element *slot, const struct dom_node *node);
 int dom_adopt(struct dom_document *document, struct dom_node *node);
 void dom_append_child(struct dom_node *parent, struct dom_node *child);

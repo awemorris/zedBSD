@@ -31,6 +31,7 @@ static const struct bind_attribute shadow_attributes[] = {
 	{ "serializable", shadow_false_get, NULL },
 	{ "slotAssignment", shadow_slot_assignment_get, NULL },
 	{ "innerHTML", bind_inner_html_get, bind_inner_html_set },
+	{ "styleSheets", bind_cssom_shadow_sheets, NULL },
 	{ NULL, NULL, NULL }
 };
 

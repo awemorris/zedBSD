@@ -1161,6 +1161,8 @@ shadow_trace(
 	root = (struct dom_shadow_root *)cell;
 	if (root->host != NULL)
 		vm_heap_mark(heap, &root->host->node.cell);
+	if (root->style_sheets != NULL)
+		vm_heap_mark(heap, &root->style_sheets->cell);
 }
 
 /*

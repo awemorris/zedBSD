@@ -361,7 +361,7 @@ static const struct css_anchor_expr *cascade_anchor_resolve(struct css_engine *e
 static const struct css_gradient *cascade_gradient(struct css_engine *engine, const struct css_gradient *gradient, float font_size);
 static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 static void cascade_animation(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
-static const struct css_try_rule *cascade_try_rule(const struct css_engine *engine, const struct vm_string *name);
+static const struct css_try_rule *cascade_try_rule(const struct css_engine *engine, const struct vm_string *name, const void *tree);
 static void cascade_anchor(struct css_engine *engine, struct css_style *style, int property, const struct css_anchor_expr *expr);
 static const struct css_grid_areas *cascade_keep_areas(struct css_engine *engine, const struct css_grid_areas *areas);
 static float cascade_font_size(struct css_engine *engine, const struct css_value *value, float parent_size);
@@ -4648,6 +4648,7 @@ cascade_apply(
 		style->position_area = value->kind == CSS_VALUE_NUMBER ? (int)value->number : -1;
 		break;
 	case CSS_PROP_POSITION_TRY_FALLBACKS:
+		style->try_tree = engine->apply_tree;
 		style->position_try = NULL;
 		if (value->kind == CSS_VALUE_TRY && value->try_list != NULL)
 			style->position_try = cascade_keep(engine, value->try_list, sizeof(*value->try_list));
@@ -5844,7 +5845,7 @@ cascade_try_styles(
 	for (entry = 0; entry < style->position_try->count; entry++) {
 		if (style->position_try->entries[entry].name == NULL)
 			continue;
-		rule = cascade_try_rule(engine, style->position_try->entries[entry].name);
+		rule = cascade_try_rule(engine, style->position_try->entries[entry].name, style->try_tree);
 		if (rule == NULL)
 			continue;
 
@@ -6132,7 +6133,8 @@ cascade_animation(
 static const struct css_try_rule *
 cascade_try_rule(
 	const struct css_engine *engine,
-	const struct vm_string *name)
+	const struct vm_string *name,
+	const void *tree)
 {
 	const struct cascade_sheet *sheets;
 	const struct css_try_rule *found;
@@ -6151,6 +6153,26 @@ cascade_try_rule(
 	for (index = 0; index < engine->sheets.count; index++) {
 		if (sheets[index].sheet == NULL)
 			continue;
+
+		/* A rule is seen from its own tree and the trees inside it (names are tree-scoped). */
+		if (engine->shadow_scopes && sheets[index].sheet->origin == CSS_ORIGIN_AUTHOR) {
+			const struct dom_node *visible;
+			const struct dom_element *host;
+			const struct dom_node *sheet_tree;
+
+			sheet_tree = sheets[index].owner != NULL ? cascade_tree_scope(sheets[index].owner) : NULL;
+			visible = tree;
+			while (visible != sheet_tree) {
+				host = visible != NULL ? dom_shadow_host(visible) : NULL;
+				if (host == NULL) {
+					visible = NULL;
+					break;
+				}
+				visible = cascade_tree_scope(host);
+			}
+			if (visible != sheet_tree)
+				continue;
+		}
 
 		/* A sheet whose media do not hold gives no rules. */
 		holds = 1;

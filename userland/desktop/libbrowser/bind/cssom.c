@@ -27,6 +27,8 @@ struct cssom_state {
 	enum cssom_kind kind;
 	struct dom_document *document;
 	struct bind_style_sheet *source;
+	/* The shadow root a sheet list is of (NULL for the document's). */
+	struct dom_node *root;
 };
 
 /* Sheet access belongs to actual HTML style elements rather than arbitrary HTMLElement expandos. */
@@ -107,12 +109,13 @@ static void cssom_trace(struct vm_heap *heap, struct vm_cell *cell);
 static const struct vm_cell_type *cssom_type(void);
 static const struct vm_native_operations *cssom_native(void);
 static int cssom_make(struct vm_realm *realm, struct dom_document *document, struct bind_style_sheet *source, enum cssom_kind kind, struct vm_object **out);
+static int cssom_make_root(struct vm_realm *realm, struct dom_document *document, struct dom_node *root, struct bind_style_sheet *source, enum cssom_kind kind, struct vm_object **out);
 static int cssom_this(struct vm_realm *realm, vm_value receiver, enum cssom_kind kind, struct cssom_state **out);
 static int cssom_wrap(struct vm_realm *realm, struct dom_element *element, vm_value *result);
-static struct dom_node *cssom_next(struct dom_document *document, struct dom_node *node);
+static struct dom_node *cssom_next(struct dom_node *root, struct dom_node *node);
 static int cssom_member(struct dom_node *node);
-static struct dom_element *cssom_index(struct dom_document *document, uint32_t index);
-static int cssom_count(struct dom_document *document, uint32_t *count);
+static struct dom_element *cssom_index(struct dom_node *root, uint32_t index);
+static int cssom_count(struct dom_node *root, uint32_t *count);
 static int cssom_key(vm_value key, uint32_t *index);
 static int cssom_get_own(struct vm_object *object, vm_value key, struct vm_property *property);
 static int cssom_own_keys(struct vm_heap *heap, struct vm_object *object, struct wb_vector *keys);
@@ -159,6 +162,38 @@ bind_cssom_document_sheets(
 
 	/* Succeeded: the saved query observes the actual current Document tree. */
 	*result = vm_value_cell(document->style_sheets);
+	return 0;
+}
+
+/* Returns a shadow root's sheet list (its style elements, in tree order). */
+int
+bind_cssom_shadow_sheets(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_node *node;
+	struct dom_shadow_root *shadow;
+	struct vm_object *wrapper;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	status = bind_this_node(realm, receiver, &node);
+	if (status != 0)
+		return status;
+	shadow = dom_shadow_of(node);
+	if (shadow == NULL)
+		return bind_throw_illegal(realm);
+	if (shadow->style_sheets == NULL) {
+		status = cssom_make_root(realm, node->document, node, NULL, CSSOM_SHEETS, &wrapper);
+		if (status != 0)
+			return status;
+		shadow->style_sheets = wrapper;
+	}
+	*result = vm_value_cell(shadow->style_sheets);
 	return 0;
 }
 
@@ -222,7 +257,7 @@ bind_cssom_owner(
 	owner = state->source->owner;
 	if (owner->style_sheet != &state->source->cell)
 		return 0;
-	connected = dom_is_inclusive_ancestor(&owner->node.document->node, &owner->node);
+	connected = dom_is_connected(&owner->node);
 	if (!connected)
 		return 0;
 
@@ -314,7 +349,7 @@ bind_cssom_sheets_length(
 	status = cssom_this(realm, receiver, CSSOM_SHEETS, &state);
 	if (status != 0)
 		return status;
-	status = cssom_count(state->document, &length);
+	status = cssom_count(state->root != NULL ? state->root : &state->document->node, &length);
 	if (status != 0)
 		return status;
 
@@ -359,7 +394,7 @@ bind_cssom_sheets_item(
 	}
 
 	/* Current native membership is read after conversion may have changed actual DOM links. */
-	element = cssom_index(state->document, index);
+	element = cssom_index(state->root != NULL ? state->root : &state->document->node, index);
 	*result = VM_VALUE_NULL;
 	if (element != NULL)
 		status = cssom_wrap(realm, element, result);
@@ -735,6 +770,8 @@ cssom_trace(
 	/* The actual Document retains its relevant realm or private prototype snapshot. */
 	state = (struct cssom_state *)cell;
 	vm_heap_mark(heap, &state->document->node.cell);
+	if (state->root != NULL)
+		vm_heap_mark(heap, &state->root->cell);
 	if (state->source != NULL)
 		vm_heap_mark(heap, &state->source->cell);
 
@@ -773,6 +810,19 @@ static int
 cssom_make(
 	struct vm_realm *realm,
 	struct dom_document *document,
+	struct bind_style_sheet *source,
+	enum cssom_kind kind,
+	struct vm_object **out)
+{
+	return cssom_make_root(realm, document, NULL, source, kind, out);
+}
+
+/* Constructs a wrapper whose sheet list is of a shadow root's tree (root NULL: the document's). */
+static int
+cssom_make_root(
+	struct vm_realm *realm,
+	struct dom_document *document,
+	struct dom_node *root,
 	struct bind_style_sheet *source,
 	enum cssom_kind kind,
 	struct vm_object **out)
@@ -844,6 +894,7 @@ cssom_make(
 	/* Publish no public edge until both owner fields and the independent state root exist. */
 	state->kind = kind;
 	state->document = document;
+	state->root = root;
 	state->source = source;
 	state_root = &state->cell;
 	status = vm_heap_add_root(heap, &state_root);
@@ -956,13 +1007,10 @@ cssom_wrap(
 /* Advances in actual Document preorder without entering template contents or iframe Documents. */
 static struct dom_node *
 cssom_next(
-	struct dom_document *document,
+	struct dom_node *root,
 	struct dom_node *node)
 {
-	struct dom_node *root;
-
 	/* Only ordinary native tree links supply descendant membership. */
-	root = &document->node;
 	if (node == NULL)
 		return root->first_child;
 	if (node->first_child != NULL)
@@ -1002,14 +1050,14 @@ cssom_member(
 /* Selects an actual current eligible descendant without caching a stale DOM member list. */
 static struct dom_element *
 cssom_index(
-	struct dom_document *document,
+	struct dom_node *root,
 	uint32_t index)
 {
 	struct dom_node *node;
 	int member;
 
 	/* Every read traverses the actual current owner tree in sheet order. */
-	node = cssom_next(document, NULL);
+	node = cssom_next(root, NULL);
 	while (node != NULL) {
 		member = cssom_member(node);
 		if (member) {
@@ -1019,7 +1067,7 @@ cssom_index(
 		}
 
 		/* Continue through the actual current descendant links. */
-		node = cssom_next(document, node);
+		node = cssom_next(root, node);
 	}
 
 	/* Exhausted: the index has no current member. */
@@ -1029,7 +1077,7 @@ cssom_index(
 /* Counts only currently eligible actual inline source owners, with checked unsigned bounds. */
 static int
 cssom_count(
-	struct dom_document *document,
+	struct dom_node *root,
 	uint32_t *count)
 {
 	struct dom_node *node;
@@ -1037,7 +1085,7 @@ cssom_count(
 
 	/* No source parsing or model allocation is needed to inspect actual connected membership. */
 	*count = 0;
-	node = cssom_next(document, NULL);
+	node = cssom_next(root, NULL);
 	while (node != NULL) {
 		member = cssom_member(node);
 		if (member) {
@@ -1047,7 +1095,7 @@ cssom_count(
 		}
 
 		/* Continue through the actual current descendant links. */
-		node = cssom_next(document, node);
+		node = cssom_next(root, node);
 	}
 
 	/* Succeeded: the current native membership fits the WebIDL unsigned length. */
@@ -1121,7 +1169,7 @@ cssom_get_own(
 	indexed = cssom_key(key, &index);
 	if (!indexed)
 		return 0;
-	element = cssom_index(state->document, index);
+	element = cssom_index(state->root != NULL ? state->root : &state->document->node, index);
 	if (element == NULL)
 		return 0;
 
@@ -1157,7 +1205,7 @@ cssom_own_keys(
 	state = (struct cssom_state *)vm_value_as_cell(object->internal);
 	if (state->kind != CSSOM_SHEETS)
 		return 0;
-	status = cssom_count(state->document, &count);
+	status = cssom_count(state->root != NULL ? state->root : &state->document->node, &count);
 	if (status != 0)
 		return status;
 
@@ -1259,7 +1307,7 @@ cssom_delete(
 
 	/* Current supported membership decides deletion after any previous DOM changes. */
 	*handled = 1;
-	element = cssom_index(state->document, index);
+	element = cssom_index(state->root != NULL ? state->root : &state->document->node, index);
 	if (element != NULL)
 		*deleted = 0;
 

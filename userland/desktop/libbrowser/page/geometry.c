@@ -731,7 +731,7 @@ geometry_child_box(
 	window = document->view;
 	if (window == NULL || document->context == NULL)
 		return 0;
-	connected = dom_is_inclusive_ancestor(&node->document->node, node);
+	connected = dom_is_connected(node);
 	if (!connected)
 		return 0;
 

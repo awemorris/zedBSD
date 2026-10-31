@@ -152,3 +152,19 @@ dom_flat_parent(
 	}
 	return parent;
 }
+
+/* Tells whether a node is in its document's shadow-including tree. */
+int
+dom_is_connected(
+	const struct dom_node *node)
+{
+	while (node != NULL) {
+		if (node == &node->document->node)
+			return 1;
+		if (node->parent != NULL)
+			node = node->parent;
+		else
+			node = dom_shadow_of(node) != NULL ? &dom_shadow_of(node)->host->node : NULL;
+	}
+	return 0;
+}

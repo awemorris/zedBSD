@@ -1052,7 +1052,7 @@ node_is_connected(
 		return status;
 
 	/* Connected when the document is its inclusive ancestor. */
-	connected = dom_is_inclusive_ancestor(&node->document->node, node);
+	connected = dom_is_connected(node);
 
 	/* Succeeded: the answer is reported. */
 	*result = vm_value_boolean(connected);

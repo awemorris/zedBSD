@@ -538,6 +538,7 @@ int bind_environment_child_mutation(struct bind_window *window, struct dom_node 
 
 /* Markup (markup.c). */
 int bind_template_contents(struct dom_element *element, struct dom_node **contents);
+int bind_cssom_shadow_sheets(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 int bind_attach_shadow(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_shadow_root_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_get_root_node(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
