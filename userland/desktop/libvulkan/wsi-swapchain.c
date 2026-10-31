@@ -148,6 +148,13 @@ struct vulkan_swapchain {
 	struct vulkan_wsi_lend_fit fit;
 	/* The serial of the window system's lend whose images the chain draws into; zero for a chain of its own images. */
 	uint64_t lend_serial;
+	/*
+	 * A direct chain whose images are not in the renderer's fastest layout
+	 * (the display shows none of the faster ones): its images do not go out
+	 * to be drawn into, since another process draws to them more slowly than
+	 * to its own and a copy of those costs less.
+	 */
+	VkBool32 layout_slower;
 	/* With the chain log on: the presents of the chain's images, and those that copied them. */
 	uint64_t log_presents;
 	uint64_t log_copies;
@@ -1025,9 +1032,9 @@ vulkan_wsi_device_finish(
 /*
  * Finds the memory and description of an image of an exportable direct
  * chain of a device (one created with VkExternalMemoryImageCreateInfo):
- * what vkGetMemoryFdKHR gives away for a swapchain image.  Returns
- * VK_SUCCESS, or VK_ERROR_INVALID_EXTERNAL_HANDLE for an image of no such
- * chain.
+ * what vkGetMemoryFdKHR gives away for a swapchain image, when its layout
+ * is the renderer's fastest.  Returns VK_SUCCESS, or
+ * VK_ERROR_INVALID_EXTERNAL_HANDLE for an image of no such chain.
  */
 VkResult
 vulkan_wsi_swapchain_image_memory(
@@ -1049,6 +1056,8 @@ vulkan_wsi_swapchain_image_memory(
 		if (chain->device != device || chain->exportable == VK_FALSE)
 			continue;
 		if (chain->direct == VK_FALSE || chain->lend_serial != 0U)
+			continue;
+		if (chain->layout_slower != VK_FALSE)
 			continue;
 
 		/* The image among the chain's own. */
@@ -1811,6 +1820,7 @@ swapchain_image_create(
 	struct gpu_image_layouts scanout;
 	uint32_t tiling;
 	uint32_t parameter;
+	VkBool32 fastest;
 	VkResult error;
 
 	/* Internal transfer use is added without restricting the application's declared use. */
@@ -1830,6 +1840,7 @@ swapchain_image_create(
 		/* The fastest layout both the renderer and the display take (linear rows unless one comes first). */
 		tiling = GPU_IMAGE_LINEAR;
 		parameter = 0U;
+		fastest = VK_TRUE;
 		if (chain->surface->platform->layouts != NULL &&
 		    vulkan_wsi_layout_choose != NULL &&
 		    vulkan_wsi_shared_image_create_layout != NULL) {
@@ -1841,8 +1852,10 @@ swapchain_image_create(
 			scanout.height = info->imageExtent.height;
 			error = chain->surface->platform->layouts(chain->lease, &scanout);
 			if (error == VK_SUCCESS)
-				vulkan_wsi_layout_choose(chain->device, info->imageFormat, info->imageExtent, &scanout, &tiling, &parameter);
+				vulkan_wsi_layout_choose(chain->device, info->imageFormat, info->imageExtent, &scanout, &tiling, &parameter, &fastest);
 		}
+		if (fastest == VK_FALSE)
+			chain->layout_slower = VK_TRUE;
 
 		/* The image in that layout (rows of pixels as before when the library has no layouts). */
 		if (tiling != GPU_IMAGE_LINEAR) {

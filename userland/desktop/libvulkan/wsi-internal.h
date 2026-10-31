@@ -371,7 +371,7 @@ extern VkResult vulkan_wsi_shared_image_create_usage(struct VkDevice_T *device, 
  * keeps linear rows.
  */
 extern VkResult vulkan_wsi_shared_image_create_layout(struct VkDevice_T *device, VkFormat format, VkExtent2D extent, VkImageUsageFlags usage, uint32_t tiling, uint32_t parameter, const VkAllocationCallbacks *allocator, const struct gpu_placement *placement, VkImage *image, VkDeviceMemory *memory, int *fd, struct gpu_image_descriptor *descriptor) __attribute__((weak));
-extern void vulkan_wsi_layout_choose(struct VkDevice_T *device, VkFormat format, VkExtent2D extent, const struct gpu_image_layouts *scanout, uint32_t *tiling, uint32_t *parameter) __attribute__((weak));
+extern void vulkan_wsi_layout_choose(struct VkDevice_T *device, VkFormat format, VkExtent2D extent, const struct gpu_image_layouts *scanout, uint32_t *tiling, uint32_t *parameter, VkBool32 *fastest) __attribute__((weak));
 
 VkResult vulkan_wsi_shared_image_import(struct VkDevice_T *device, int fd, const VkAllocationCallbacks *allocator, VkImage *image, VkDeviceMemory *memory, struct gpu_image_descriptor *descriptor);
 

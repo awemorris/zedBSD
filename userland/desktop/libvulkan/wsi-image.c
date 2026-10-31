@@ -79,7 +79,9 @@ vulkan_wsi_shared_image_create_usage(
  * answer (scanout, NULL for none) lists for the same image.  Linear rows,
  * which every device has, unless such a layout comes before them.  A device
  * that names no layouts of its own (no GPU_CAP_IMAGE_LAYOUTS) has only
- * linear rows.
+ * linear rows.  fastest tells whether the layout is the renderer's fastest
+ * (its first, or the only one it has): a display that shows only a slower
+ * one gets an image the renderer draws to more slowly than to its own.
  */
 void
 vulkan_wsi_layout_choose(
@@ -88,7 +90,8 @@ vulkan_wsi_layout_choose(
 	VkExtent2D extent,
 	const struct gpu_image_layouts *scanout,
 	uint32_t *tiling,
-	uint32_t *parameter)
+	uint32_t *parameter,
+	VkBool32 *fastest)
 {
 	struct gpu_image_layouts renderer;
 	const struct gpu_image_layout *entry;
@@ -99,6 +102,7 @@ vulkan_wsi_layout_choose(
 	/* Linear rows unless a faster layout both ends take is found. */
 	*tiling = GPU_IMAGE_LINEAR;
 	*parameter = 0U;
+	*fastest = VK_TRUE;
 	if ((device->object.context->capabilities & GPU_CAP_IMAGE_LAYOUTS) == 0U || scanout == NULL)
 		return;
 
@@ -125,8 +129,11 @@ vulkan_wsi_layout_choose(
 	/* The renderer's layouts, fastest first: the first the display shows too, or linear rows when they come first. */
 	for (index = 0U; index < renderer.count; index++) {
 		entry = &renderer.entry[index];
-		if (entry->tiling == GPU_IMAGE_LINEAR)
+		if (entry->tiling == GPU_IMAGE_LINEAR) {
+			if (index != 0U)
+				*fastest = VK_FALSE;
 			return;
+		}
 		for (shown = 0U; shown < scanout->count && shown < GPU_IMAGE_LAYOUTS_MAX; shown++) {
 			if (scanout->entry[shown].tiling != entry->tiling || scanout->entry[shown].parameter != entry->parameter)
 				continue;
@@ -136,9 +143,15 @@ vulkan_wsi_layout_choose(
 			/* Succeeded: both the renderer and the display take this faster layout. */
 			*tiling = entry->tiling;
 			*parameter = entry->parameter;
+			if (index != 0U)
+				*fastest = VK_FALSE;
 			return;
 		}
 	}
+
+	/* None the display shows: linear rows, slower than the renderer's first. */
+	if (renderer.count != 0U)
+		*fastest = VK_FALSE;
 }
 
 /*
