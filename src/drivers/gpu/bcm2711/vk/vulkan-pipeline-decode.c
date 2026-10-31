@@ -331,7 +331,7 @@ colour_dynamic(
 	uint32_t index;
 	int error;
 
-	/* The sole colour attachment selects full replacement or supported premultiplied blending at native compilation. */
+	/* The sole colour attachment selects full replacement or a supported blend equation at native compilation. */
 	present = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 || present != 1)
 		return EINVAL;

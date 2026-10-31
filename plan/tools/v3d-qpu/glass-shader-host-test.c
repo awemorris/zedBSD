@@ -11,10 +11,11 @@
  * generic shader) is interpreted at the source level over a grid of pixels,
  * wallpaper colours under the glass, glass colours, flatness, rims, opacity
  * and both appearances, with the per-shape values glass.c works out
- * (glass_shape_glass_constants), and compared with an independent C
- * evaluation of the glass as panel.frag drew it before p011 (every value
- * worked out per pixel).  It reports the largest difference of a colour
- * channel, on the 0 to 1 scale of an 8-bit channel.
+ * (glass_shape_glass_constants).  It reports, for information only, the
+ * largest difference of a colour channel (0 to 1 scale of an 8-bit
+ * channel) from an independent C evaluation of the glass as panel.frag drew
+ * it before p011; panel.frag has since changed the glass's look on purpose,
+ * so that difference is no longer a check.
  *
  * The same three shaders are also compiled by the kernel's native compiler
  * and run, for every fragment, on the timing model of one QPU lane
@@ -565,10 +566,9 @@ main(void)
 	drv_gpu_shader_ir_free(light);
 	drv_gpu_shader_ir_free(dark);
 	drv_gpu_shader_ir_free(generic);
-	printf("glass-shader-host-test: %lu fragments, largest channel difference %.3g (%.5f of an 8-bit step)\n", samples, (double)largest, (double)(largest * 255.0f));
+	printf("glass-shader-host-test: %lu fragments, largest channel difference from the pre-p011 glass %.3g (%.5f of an 8-bit step, information only)\n", samples, (double)largest, (double)(largest * 255.0f));
 
-	/* Far below one step of an 8-bit channel (and of the tile buffer's 16-bit float). */
-	assert(largest < 1.0e-5f);
+	/* The check: every fragment's native tile channels equal the interpreted shader's, bit for bit. */
 	printf("glass-shader-host-test: %lu fragments also run natively, every tile channel equal bit for bit\n", samples);
 	printf("glass-shader-host-test: PASS\n");
 	return 0;

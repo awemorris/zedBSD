@@ -45,6 +45,8 @@ struct bcm2711_native_attribute {
 	uint32_t components;
 	uint32_t coordinate_values;
 	uint32_t vertex_values;
+	/* Zero: one element per vertex; n: one element per n instances. */
+	uint32_t divisor;
 };
 
 /*

@@ -17,6 +17,7 @@
 
 static int release_barrier(struct bcm2711_vulkan_command_node *node);
 static int retain_barrier(struct bcm2711_vulkan_barrier *barrier);
+static void barrier_levels(const struct bcm2711_vulkan_barrier_entry *entry, const struct bcm2711_vulkan_resource *resource, uint32_t *first, uint32_t *last);
 
 /*
  * Records one complete reply-free barrier with independently retained typed dependencies.
@@ -124,6 +125,10 @@ bcm2711_vulkan_barrier_run(
 	uint64_t bytes;
 	uint32_t address;
 	uint32_t index;
+	uint32_t first;
+	uint32_t last;
+	uint32_t level;
+	VkImageLayout current;
 	int error;
 
 	/* Prepared graph ownership supplies the same immutable derived node until native retirement. */
@@ -156,9 +161,14 @@ bcm2711_vulkan_barrier_run(
 			return EIO;
 
 		/* Image source layout is FIFO state, not a recording-time guess before preceding passes or transitions execute. */
-		if (entry->object->kind == I915_VK_OBJ_IMAGE &&
-		    entry->before != VK_IMAGE_LAYOUT_UNDEFINED && entry->before != resource->layout)
-			return EINVAL;
+		if (entry->object->kind != I915_VK_OBJ_IMAGE || entry->before == VK_IMAGE_LAYOUT_UNDEFINED)
+			continue;
+		barrier_levels(entry, resource, &first, &last);
+		for (level = first; level < last; level++) {
+			current = bcm2711_vulkan_image_level_layout(resource, level);
+			if (entry->before != current)
+				return EINVAL;
+		}
 	}
 
 	/* Normal uncached RAM needs no data-cache maintenance; the worker already waits for whole native completion and GPU cache retirement. */
@@ -171,7 +181,9 @@ bcm2711_vulkan_barrier_run(
 		if (entry->object == NULL || entry->object->kind != I915_VK_OBJ_IMAGE)
 			continue;
 		resource = entry->object->payload;
-		resource->layout = entry->after;
+		barrier_levels(entry, resource, &first, &last);
+		for (level = first; level < last; level++)
+			bcm2711_vulkan_image_set_level_layout(resource, level, entry->after);
 	}
 
 	/* Succeeded: full serial dependency ordering and each exact image layout are visible to following FIFO operations. */
@@ -232,4 +244,29 @@ release_barrier(
 
 	/* Succeeded: no typed dependency or immutable dependency-array storage remains owned by this node. */
 	return 0;
+}
+
+/* Reports the run of mip levels a validated image barrier moves, first to before last. */
+static void
+barrier_levels(
+	const struct bcm2711_vulkan_barrier_entry *entry,
+	const struct bcm2711_vulkan_resource *resource,
+	uint32_t *first,
+	uint32_t *last)
+{
+	uint32_t levels;
+
+	/* A one-level image (levels zero or one) has only level 0. */
+	levels = resource->levels;
+	if (levels == 0)
+		levels = 1;
+	*first = entry->range.baseMipLevel;
+	*last = levels;
+
+	/* An explicit count stops before the remaining levels end; validation bounded both. */
+	if (entry->range.levelCount != VK_REMAINING_MIP_LEVELS && entry->range.levelCount < levels - *first)
+		*last = *first + entry->range.levelCount;
+
+	/* Succeeded: the caller walks exactly the moved levels. */
+	return;
 }

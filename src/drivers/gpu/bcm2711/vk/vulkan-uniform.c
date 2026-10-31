@@ -46,9 +46,9 @@ bcm2711_vulkan_uniform_create(
 	*words = NULL;
 
 	/* Only a real prepared draw can supply immutable pipeline and stage-specific copied state. */
-	if (draw == NULL ||
-	    draw->opcode != GPU_OP_CMD_DRAW ||
-	    draw->pipeline == NULL)
+	if (draw == NULL || draw->pipeline == NULL)
+		return EINVAL;
+	if (draw->opcode != GPU_OP_CMD_DRAW && draw->opcode != GPU_OP_CMD_DRAW_INDEXED)
 		return EINVAL;
 
 	/* Native coordinates, render vertices and fragments occupy exactly three compiled slots. */

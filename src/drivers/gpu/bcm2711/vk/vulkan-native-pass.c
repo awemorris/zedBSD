@@ -653,7 +653,9 @@ collect_draws(
 
 	/* Only ordered draw events belonging to the same immutable BEGIN record can enter this native pass. */
 	event = begin->next;
-	while (event != NULL && event->opcode == GPU_OP_CMD_DRAW) {
+	while (event != NULL &&
+	    (event->opcode == GPU_OP_CMD_DRAW ||
+	     event->opcode == GPU_OP_CMD_DRAW_INDEXED)) {
 		/* A foreign pass pointer cannot extend one native framebuffer's lifetime or command list. */
 		if (event->pass != begin->pass)
 			return EINVAL;

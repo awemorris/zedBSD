@@ -14,6 +14,7 @@
 #endif
 #include "drivers/gpu/bcm2711/vk/vulkan-device.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
+#include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/render-device.h"
 
@@ -386,6 +387,14 @@ image_query(
 		properties.maxArrayLayers = 1;
 		properties.sampleCounts = VK_SAMPLE_COUNT_1_BIT;
 		properties.maxResourceSize = (uint64_t)VULKAN_IMAGE_SIDE * VULKAN_IMAGE_SIDE * 4;
+
+		/* An optimally tiled RGBA8 or BGRA8 image has its whole mip chain, which at most doubles its bytes. */
+		if (tiling == VK_IMAGE_TILING_OPTIMAL &&
+		    (format == VK_FORMAT_R8G8B8A8_UNORM ||
+		     format == VK_FORMAT_B8G8R8A8_UNORM)) {
+			properties.maxMipLevels = BCM2711_VULKAN_IMAGE_LEVELS;
+			properties.maxResourceSize *= 2U;
+		}
 	}
 
 	/* Failure returns a complete zero output record instead of leaving uninitialized client storage. */

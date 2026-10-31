@@ -155,6 +155,7 @@ validate_image(
 	const struct bcm2711_vulkan_resource *resource)
 {
 	uint32_t required;
+	uint32_t levels;
 	int error;
 
 	/* A depth/stencil attachment image has its own aspects and layouts (ws141-p017). */
@@ -165,11 +166,15 @@ validate_image(
 		return 0;
 	}
 
-	/* One mip and one array layer have no depth/stencil or partial-subresource ownership transition. */
-	if (entry->range.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
-	    entry->range.baseMipLevel != 0 || entry->range.baseArrayLayer != 0)
+	/* One array layer of colour; any run of the image's mip levels moves on its own. */
+	if (entry->range.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT || entry->range.baseArrayLayer != 0)
 		return ENOTSUP;
-	if (entry->range.levelCount != 1 && entry->range.levelCount != VK_REMAINING_MIP_LEVELS)
+	levels = resource->levels;
+	if (levels == 0)
+		levels = 1;
+	if (entry->range.baseMipLevel >= levels || entry->range.levelCount == 0)
+		return EINVAL;
+	if (entry->range.levelCount != VK_REMAINING_MIP_LEVELS && entry->range.levelCount > levels - entry->range.baseMipLevel)
 		return EINVAL;
 	if (entry->range.layerCount != 1 && entry->range.layerCount != VK_REMAINING_ARRAY_LAYERS)
 		return EINVAL;

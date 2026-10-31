@@ -224,6 +224,8 @@ bcm2711_vulkan_buffer_copy_run(
 	void *cpu[2];
 	uint32_t image_slot;
 	uint32_t index;
+	uint32_t level;
+	VkImageLayout current;
 	uint32_t row;
 	uint64_t source_offset;
 	uint64_t destination_offset;
@@ -260,8 +262,14 @@ bcm2711_vulkan_buffer_copy_run(
 		image_slot = 0;
 		if (record->opcode == GPU_OP_CMD_COPY_BUFFER_TO_IMAGE)
 			image_slot = 1;
-		if (resources[image_slot]->layout != record->layout)
-			return EINVAL;
+
+		/* Every region's mip level is in the layout the command names. */
+		for (index = 0; index < record->count; index++) {
+			level = copy->regions.images[index].imageSubresource.mipLevel;
+			current = bcm2711_vulkan_image_level_layout(resources[image_slot], level);
+			if (current != record->layout)
+				return EINVAL;
+		}
 	}
 
 	/* A finite heap vector completes every fallible row calculation before the first output byte changes. */
@@ -535,6 +543,7 @@ prepare_spans(
 	const VkBufferImageCopy *image_region;
 	const VkBufferCopy *buffer_region;
 	struct bcm2711_vulkan_resource *image;
+	struct bcm2711_vulkan_image_level level;
 	uint32_t image_slot;
 	uint32_t buffer_slot;
 	uint32_t width;
@@ -577,12 +586,16 @@ prepare_spans(
 		}
 #endif
 		if (image_region->imageSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
-		    image_region->imageSubresource.mipLevel != 0 ||
 		    image_region->imageSubresource.baseArrayLayer != 0 ||
 		    image_region->imageSubresource.layerCount != 1)
 			return EINVAL;
 
-		/* Two-dimensional origins and extents must contain actual nonempty rows wholly inside the image. */
+		/* The selected mip level's own raster rows. */
+		error = bcm2711_vulkan_image_level(image, image_region->imageSubresource.mipLevel, &level);
+		if (error != 0)
+			return error;
+
+		/* Two-dimensional origins and extents must contain actual nonempty rows wholly inside the level. */
 		width = image_region->imageExtent.width;
 		height = image_region->imageExtent.height;
 		if (image_region->imageOffset.x < 0 ||
@@ -591,8 +604,8 @@ prepare_spans(
 		    image_region->imageExtent.depth != 1 ||
 		    width == 0 || height == 0)
 			return EINVAL;
-		if ((uint64_t)image_region->imageOffset.x + width > image->width ||
-		    (uint64_t)image_region->imageOffset.y + height > image->height)
+		if ((uint64_t)image_region->imageOffset.x + width > level.width ||
+		    (uint64_t)image_region->imageOffset.y + height > level.height)
 			return EINVAL;
 
 		/* Zero strides mean packed extent; explicit row and layer strides cannot be smaller than the selected image region. */
@@ -610,8 +623,8 @@ prepare_spans(
 		/* The single layer touches only its selected rows; explicit image height introduces no trailing unused-row requirement. */
 		spans[buffer_slot].offset = image_region->bufferOffset;
 		spans[buffer_slot].pitch = (uint64_t)row_length * 4U;
-		spans[image_slot].offset = (uint64_t)image_region->imageOffset.y * image->pitch + (uint64_t)image_region->imageOffset.x * 4U;
-		spans[image_slot].pitch = image->pitch;
+		spans[image_slot].offset = level.offset + (uint64_t)image_region->imageOffset.y * level.pitch + (uint64_t)image_region->imageOffset.x * 4U;
+		spans[image_slot].pitch = level.pitch;
 		spans[0].bytes = (uint64_t)width * 4U;
 		spans[1].bytes = spans[0].bytes;
 		spans[0].rows = height;
@@ -637,13 +650,17 @@ validate_span(
 	const struct bcm2711_vulkan_resource *resource)
 {
 	uint64_t remaining;
+	uint64_t limit;
 
-	/* Nonempty first-row placement is bounded by the exact logical resource rather than rounded storage. */
+	/* Nonempty first-row placement is bounded by the exact logical resource (with a mip-mapped image's levels) rather than rounded storage. */
+	limit = resource->bytes;
+	if (resource->storage_bytes > limit)
+		limit = resource->storage_bytes;
 	if (span->rows == 0 ||
 	    span->bytes == 0 ||
-	    span->offset >= resource->bytes)
+	    span->offset >= limit)
 		return EINVAL;
-	remaining = resource->bytes - span->offset;
+	remaining = limit - span->offset;
 	if (span->bytes > remaining)
 		return EINVAL;
 	remaining -= span->bytes;
@@ -742,6 +759,12 @@ written_box(
 	/* Only uploads write an image. */
 	if (copy->record.opcode != GPU_OP_CMD_COPY_BUFFER_TO_IMAGE)
 		return false;
+
+	/* A smaller mip level's rows lie outside level 0's box; such a write is of unknown extent. */
+	for (index = 0; index < copy->record.count; index++) {
+		if (copy->regions.images[index].imageSubresource.mipLevel != 0)
+			return false;
+	}
 
 	/* The union of every region's box. */
 	box[0] = UINT32_MAX;
