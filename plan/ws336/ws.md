@@ -20,10 +20,34 @@
 
 ## Resume point
 
-- p001（設計）を P5 が q1791 で進めている。
+- p001（設計）を P5 が q1791 で進めている。成果: [design.md](design.md)、header と骨格 `userland/base/ssh/`、試験の道具 `plan/ws336/tests/`、[design-review.md](design-review.md)、[user-questions.md](user-questions.md)。
+- header の基点: （p001 の最後の commit の SHA を Q1 の merge の時に書く。実装の Phase の `check-skeleton.sh` の BASE）
+- 「WS335 header」= WS335 の libcrypto-compat の header（`include/libc/compat/crypto/*.h`）の凍結が main に入った後に始める。「WS335 実装」= libcrypto-compat の該当の実装が main に入り zedBSD の build にある後。他の Phase は host の OpenSSL 3.5 で試すので WS335 を待たない（design.md §7・§12）。
 
 ## Phase
 
-| ID | 目的 | 状態 | 依存 |
-| --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計（標準廉価実装手順 §4）: SSH の protocol の範囲（RFC 4251〜4254・8709 ほか）、鍵の交換の 1 つ、暗号の組、sshd と ssh の機能の範囲、module・header・骨格・試験の道具、実装の Phase の表、WS335 との待ち合わせ、design-reviewer、問い | in-progress | — |
+設計は [design.md](design.md)。並べて起動できる組は design.md §12。
+
+| ID | 目的 | 状態 | 依存 | WS335 の待ち |
+| --- | --- | --- | --- | --- |
+| [p001](phase001/phase.md) | 設計（標準廉価実装手順 §4）: SSH の protocol の範囲（RFC 4251〜4254・8709 ほか）、鍵の交換の 1 つ、暗号の組、sshd と ssh の機能の範囲、module・header・骨格・試験の道具、実装の Phase の表、WS335 との待ち合わせ、design-reviewer、問い | in-progress | — | — |
+| [p002](phase002/phase.md) | ssh-common・ssh-buf | planned | p001 | — |
+| [p003](phase003/phase.md) | ssh-crypto（libcrypto-compat の呼び出し） | planned | p002 | **WS335 header** |
+| [p004](phase004/phase.md) | ssh-cipher・ssh-packet | planned | p003 | p003 経由 |
+| [p005](phase005/phase.md) | ssh-key | planned | p003 | p003 経由 |
+| [p006](phase006/phase.md) | ssh-hostfile | planned | p005 | p003 経由 |
+| [p007](phase007/phase.md) | ssh-kex | planned | p004 | p003 経由 |
+| [p008](phase008/phase.md) | ssh-transport（Opus） | planned | p005・p007 | p003 経由 |
+| [p009](phase009/phase.md) | ssh-auth | planned | p005 | p003 経由 |
+| [p010](phase010/phase.md) | ssh-ttymodes・ssh-channel | planned | p002 | — |
+| [p011](phase011/phase.md) | ssh-config | planned | p006 | p003 経由 |
+| [p012](phase012/phase.md) | ssh-privsep（frame） | planned | p002 | — |
+| [p013](phase013/phase.md) | ssh-sftp（Q3 次第） | planned | p002 | — |
+| [p014](phase014/phase.md) | ssh-keygen の program | planned | p006 | p003 経由 |
+| [p015](phase015/phase.md) | ssh の program・host の相互運用 A（Opus） | planned | p006・p008・p009・p010・p011 | p003 経由 |
+| [p016](phase016/phase.md) | sshd の program・相互運用 B（Opus） | planned | p008・p009・p010・p011・p012・p014・p015 | p003 経由 |
+| [p017](phase017/phase.md) | sftp-server の program（Q3 次第） | planned | p013・p016 | — |
+| [p018](phase018/phase.md) | 敵対的な入力と privsep の見直し（Opus） | planned | p016・p017 | — |
+| [p019](phase019/phase.md) | image への組み込み・libcrypto-compat での確かめ・QEMU（Opus） | planned | p018 | **WS335 実装** |
+| [p020](phase020/phase.md) | OpenSSH からの入れ替え（Opus、Q6） | planned | p019 | **WS335 実装** |
+| [p021](phase021/phase.md) | 規約の全文の見直し（conformance-reviewer） | planned | p020 | — |
