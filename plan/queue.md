@@ -542,4 +542,4 @@
 | q1815 / q1815-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p012`） | [ws336-p012](ws336/phase012/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | cleared（2026-11-01 06:22、6864e6371、main e8b028959） |
 | q1816 / q1816-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p013`） | [ws336-p013](ws336/phase013/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | cleared（2026-11-01 06:09、d194e8b3a、main 8872d89fe） |
 | q1818 / q1818-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws335-p002`） | [ws335-p002](ws335/phase002/phase.md) | 標準廉価実装手順の実装（土台・SHA-2・HMAC・HKDF）。header・試験の道具は変えない | in-progress |
-| q1819 / q1819-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p003`） | [ws336-p003](ws336/phase003/phase.md) | 標準廉価実装手順の実装（ssh-crypto）。WS335 の header の基点は b7dfd3952 に替わった。header・試験の道具は変えない | in-progress |
+| q1819 / q1819-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p003`） | [ws336-p003](ws336/phase003/phase.md) | 標準廉価実装手順の実装（ssh-crypto）。WS335 の header の基点は b7dfd3952 に替わった。header・試験の道具は変えない | cleared（2026-11-01 06:52、ee84f0793、main 28213c738） |
