@@ -1447,3 +1447,88 @@ grid_text_template_side(
 	/* Succeeded: the part is written. */
 	return 0;
 }
+
+/* Adds a line's names (atoms) to another's, once each and no more than a line keeps. */
+static void
+grid_text_merge_names(
+	struct css_line_names *line,
+	const struct css_line_names *names)
+{
+	int index;
+	int have;
+
+	/* Each name not there yet. */
+	for (index = 0; index < names->count; index++) {
+		for (have = 0; have < line->count; have++) {
+			if (line->names[have] == names->names[index])
+				break;
+		}
+		if (have == line->count && line->count < CSS_LINE_NAMES) {
+			line->names[line->count] = names->names[index];
+			line->count++;
+		}
+	}
+}
+
+/*
+ * Lays a subgrid's declared line-name lists over the lines it spans: the
+ * lists in order, a repeat() as many times as it says (an auto-fill one as
+ * many as fills what the others leave), anything past the last line dropped.
+ * The lines' names are added to the lines array, which has count entries.
+ */
+void
+css_subgrid_lines(
+	const struct css_subgrid_names *declared,
+	int count,
+	struct css_line_names *lines)
+{
+	const struct css_subgrid_part *part;
+	int fixed;
+	int fill_groups;
+	int repeats;
+	int line;
+	int index;
+	int round;
+	int group;
+
+	/* Nothing is declared. */
+	if (declared == NULL)
+		return;
+
+	/* How many lines the lists that are not an auto-fill repeat take, and how many lists the auto-fill one repeats. */
+	fixed = 0;
+	fill_groups = 0;
+	for (index = 0; index < declared->count; index++) {
+		part = &declared->parts[index];
+		if (part->repeat < 0)
+			fill_groups = part->groups;
+		else if (part->repeat == 0)
+			fixed++;
+		else
+			fixed += part->repeat * part->groups;
+	}
+
+	/* An auto-fill repeat is as many times as fills the lines (none when they are full). */
+	repeats = 0;
+	if (fill_groups > 0 && count > fixed)
+		repeats = (count - fixed) / fill_groups;
+
+	/* The lists, line after line. */
+	line = 0;
+	for (index = 0; index < declared->count; index++) {
+		part = &declared->parts[index];
+		if (part->repeat == 0) {
+			if (line < count)
+				grid_text_merge_names(&lines[line], &part->names[0]);
+			line++;
+			continue;
+		}
+		round = part->repeat < 0 ? repeats : part->repeat;
+		for (; round > 0 && line < count; round--) {
+			for (group = 0; group < part->groups && line < count; group++) {
+				grid_text_merge_names(&lines[line], &part->names[group]);
+				line++;
+			}
+		}
+	}
+}

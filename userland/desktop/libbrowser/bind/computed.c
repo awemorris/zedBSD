@@ -201,6 +201,7 @@ static void computed_trace(struct vm_heap *heap, struct vm_cell *cell);
 static int computed_box_shorthand(struct vm_realm *realm, struct dom_element *element, const struct vm_string *name, vm_value *result, int *found);
 static int computed_find(const struct vm_string *name, int *property);
 static int computed_write_grid(struct bind_window *window, struct dom_element *element, const struct css_style *style, int property, struct wb_units *out, int *handled);
+static int computed_write_subgrid(struct bind_window *window, struct dom_element *element, const struct css_style *style, int columns, struct wb_units *out);
 static int computed_write(struct bind_window *window, struct dom_element *element, int property, struct wb_units *out);
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
@@ -1280,6 +1281,61 @@ computed_write_radius(
 	return error;
 }
 
+/* Writes a subgrid axis: "subgrid" and the names of each of the lines it spans (as it was declared when it has no box in a grid). */
+static int
+computed_write_subgrid(
+	struct bind_window *window,
+	struct dom_element *element,
+	const struct css_style *style,
+	int columns,
+	struct wb_units *out)
+{
+	struct css_line_names lines[CSS_TRACKS + 1];
+	struct wb_vector sizes;
+	const struct css_subgrid_names *declared;
+	int span;
+	int leading;
+	int repeats;
+	int found;
+	int line;
+	int error;
+
+	/* How many tracks of its parent the subgrid spans: the layout's answer. */
+	span = 0;
+	if (window->host.grid_tracks != NULL) {
+		wb_vector_init(&sizes, sizeof(double));
+		leading = 0;
+		repeats = 0;
+		found = 0;
+		error = window->host.grid_tracks(window->host.context, &element->node, columns, &sizes, &leading, &repeats, &found);
+		wb_vector_release(&sizes);
+		if (error != 0)
+			return error;
+		if (found)
+			span = repeats;
+	}
+
+	/* Without a layout, the lists as declared. */
+	if (span <= 0)
+		return computed_ascii(columns ? style->column_subgrid : style->row_subgrid, out);
+
+	/* The declared lists laid over the lines. */
+	if (span > CSS_TRACKS)
+		span = CSS_TRACKS;
+	memset(lines, 0, sizeof(lines));
+	declared = columns ? style->column_subgrid_names : style->row_subgrid_names;
+	css_subgrid_lines(declared, span + 1, lines);
+
+	/* "subgrid", then a bracketed list for each line. */
+	error = computed_ascii("subgrid", out);
+	for (line = 0; error == 0 && line <= span; line++) {
+		error = computed_ascii(" ", out);
+		if (error == 0)
+			error = css_line_names_serialize(&lines[line], out);
+	}
+	return error;
+}
+
 /* Writes a supported Grid template axis from copied actual layout values. */
 static int
 computed_write_grid(
@@ -1316,10 +1372,11 @@ computed_write_grid(
 		return computed_ascii(property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_declared : style->row_declared, out);
 	}
 
-	/* A subgrid axis is its line-name lists. */
+	/* A subgrid axis is its line-name lists, one for each line it spans once it has been laid out in a grid. */
 	if (property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid != NULL : style->row_subgrid != NULL) {
 		*handled = 1;
-		return computed_ascii(property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid : style->row_subgrid, out);
+		error = computed_write_subgrid(window, element, style, property == COMPUTED_GRID_TEMPLATE_COLUMNS, out);
+		return error;
 	}
 
 	/* Hosts without this private query retain the established computed-value behavior. */

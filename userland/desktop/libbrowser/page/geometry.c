@@ -194,6 +194,12 @@ page_grid_tracks(
 		*repeats = box->style.column_repeat.count;
 	}
 
+	/* A subgrid axis reports how many tracks of its parent it spans. */
+	if (columns && box->subgrid_column_span > 0)
+		*repeats = box->subgrid_column_span;
+	if (!columns && box->subgrid_row_span > 0)
+		*repeats = box->subgrid_row_span;
+
 	/* Copy every value while the current arena is still alive and unchanged. */
 	for (index = 0; index < count; index++) {
 		error = wb_vector_push(sizes, &tracks[index]);

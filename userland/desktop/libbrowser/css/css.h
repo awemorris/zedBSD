@@ -1114,6 +1114,7 @@ int css_number_serialize(const uint16_t *units, size_t length, struct wb_units *
 int css_decoration_line_parse(const uint16_t *units, size_t length, int *lines);
 int css_serialize_ident(const struct vm_string *name, struct wb_units *out);
 int css_line_names_serialize(const struct css_line_names *names, struct wb_units *out);
+void css_subgrid_lines(const struct css_subgrid_names *declared, int count, struct css_line_names *lines);
 int css_grid_line_serialize(const struct css_grid_place *place, int end, struct wb_units *out);
 int css_grid_lines_serialize(const struct css_grid_place *place, struct wb_units *out);
 int css_grid_area_serialize(const struct css_grid_place *row, const struct css_grid_place *column, struct wb_units *out);

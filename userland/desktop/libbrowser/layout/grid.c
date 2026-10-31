@@ -3108,16 +3108,9 @@ grid_subgrid_line_names(
 	int first)
 {
 	const struct css_subgrid_names *declared;
-	const struct css_subgrid_part *part;
 	const struct css_line_names *outer;
 	struct css_line_names *lines;
-	int fixed;
-	int fill_groups;
-	int repeats;
 	int line;
-	int index;
-	int round;
-	int group;
 	int count;
 
 	/* The array of the lines it spans plus the last. */
@@ -3129,43 +3122,9 @@ grid_subgrid_line_names(
 	if (lines == NULL)
 		return ENOMEM;
 
-	/* How many lines the names that are not an auto-fill repeat take, and how many names the auto-fill one repeats. */
+	/* The declared names over the lines. */
 	declared = columns ? sub->style.column_subgrid_names : sub->style.row_subgrid_names;
-	fixed = 0;
-	fill_groups = 0;
-	for (index = 0; declared != NULL && index < declared->count; index++) {
-		part = &declared->parts[index];
-		if (part->repeat < 0)
-			fill_groups = part->groups;
-		else if (part->repeat == 0)
-			fixed++;
-		else
-			fixed += part->repeat * part->groups;
-	}
-
-	/* An auto-fill repeat is as many times as fills the lines (none when they are full). */
-	repeats = 0;
-	if (fill_groups > 0 && count > fixed)
-		repeats = (count - fixed) / fill_groups;
-
-	/* The declared names, line after line. */
-	line = 0;
-	for (index = 0; declared != NULL && index < declared->count; index++) {
-		part = &declared->parts[index];
-		if (part->repeat == 0) {
-			if (line < count)
-				grid_names_merge(&lines[line], &part->names[0]);
-			line++;
-			continue;
-		}
-		round = part->repeat < 0 ? repeats : part->repeat;
-		for (; round > 0 && line < count; round--) {
-			for (group = 0; group < part->groups && line < count; group++) {
-				grid_names_merge(&lines[line], &part->names[group]);
-				line++;
-			}
-		}
-	}
+	css_subgrid_lines(declared, count, lines);
 
 	/* The parent's names of the same lines. */
 	outer = columns ? parent->style.column_names : parent->style.row_names;
