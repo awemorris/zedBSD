@@ -50,12 +50,21 @@ struct drv_gpu_command_ops {
  * the backend only retains the uncertain callback. After a proven stop the
  * core withdraws every unpublished reservation with a normal cancel.
  * The ordinary command drain also retires every accepted job callback.
+ * Optional command (GPU_JOB_SUBMIT) runs a native command stream at once on
+ * the caller's thread, as the command op does, between the core's reserve
+ * and its commit or cancel, and sets the outcome (GPU_JOB_SUBMIT_*):
+ * COMMITTED when the stream ran queue operations and every one was
+ * accepted, CANCELED when no work of the stream reached the GPU, FAULTED
+ * when some may have and not all was accepted, DEFERRED (nothing ran) when
+ * it cannot run the stream now.  It returns 0, or the stream's error with
+ * the outcome CANCELED or FAULTED (never EAGAIN).
  */
 struct drv_gpu_job_ops {
 	int (*reserve)(void *, void *, uint32_t, struct drv_gpu_completion *, void **);
 	int (*commit)(void *, void *, void *, struct drv_gpu_completion *);
 	int (*cancel)(void *, void *, void *, struct drv_gpu_completion *, unsigned);
 	int (*capacity)(void *, void *, uint32_t, unsigned *);
+	int (*command)(void *, void *, const void *, uint32_t, uint32_t *);
 };
 
 /*

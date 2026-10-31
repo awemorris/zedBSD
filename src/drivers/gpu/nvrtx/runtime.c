@@ -135,6 +135,7 @@ static int runtime_reserve(void *private_data, void *session, uint32_t timeline,
 static int runtime_commit(void *private_data, void *session, void *token, struct drv_gpu_completion *completion);
 static int runtime_cancel(void *private_data, void *session, void *token, struct drv_gpu_completion *completion, unsigned fault);
 static int runtime_capacity(void *private_data, void *session, uint32_t timeline, unsigned *available);
+static int runtime_job_command(void *private_data, void *session, const void *wire, uint32_t bytes, uint32_t *outcome);
 static int runtime_stop_begin(void *private_data, void *session, int error);
 static int runtime_stop_poll(void *private_data, void *session);
 static void runtime_fault(void *private_data, int error);
@@ -171,7 +172,8 @@ static const struct drv_gpu_job_ops runtime_jobs = {
 	runtime_reserve,
 	runtime_commit,
 	runtime_cancel,
-	runtime_capacity
+	runtime_capacity,
+	runtime_job_command
 };
 
 /* The recovery operations: a session's stop and its poll, the device's fault and a session's isolation (no reset). */
@@ -816,6 +818,87 @@ runtime_cancel(
 	spin_unlock_irqrestore(&node->queue_lock, enabled);
 
 	/* Succeeded: the reservation is withdrawn without a completion (the GPU core tells capacity observers). */
+	return 0;
+}
+
+/*
+ * Runs a supervised job's frame at once on the caller's thread
+ * (GPU_JOB_SUBMIT), as runtime_command() does, and tells its outcome from
+ * the queue submissions the frame ran and the runs it put on the GPU:
+ * committed when it ran at least one submission and every one succeeded;
+ * else canceled when no run reached the GPU (a failed frame's error is
+ * returned with it); else faulted (a submission that failed may have put
+ * part of its work on the GPU).  Deferred, with nothing run, while frames
+ * or markers of the session are queued.  Returns 0 or the frame's error
+ * (with the outcome set), or EIO with nothing run on a faulted device.
+ */
+static int
+runtime_job_command(
+	void *private_data,
+	void *session,
+	const void *wire,
+	uint32_t bytes,
+	uint32_t *outcome)
+{
+	struct nvrtx_node *node;
+	struct nvrtx_session *owner;
+	unsigned long enabled;
+	uint32_t queued;
+	int faulted;
+	int error;
+
+	node = private_data;
+	owner = session;
+	*outcome = GPU_JOB_SUBMIT_FAULTED;
+
+	/* Whole words, within the command's bound. */
+	if (bytes == 0U || bytes > GPU_COMMAND_MAX || (bytes & 3U) != 0U)
+		return EINVAL;
+
+	/* Looks at the session's queued work and the fault; a frame that runs counts as pending. */
+	enabled = spin_lock_irqsave(&node->queue_lock);
+
+	queued = owner->queued;
+	faulted = node->faulted;
+	if (owner->stopping != 0)
+		faulted = 1;
+	if (faulted == 0 && queued == 0U)
+		owner->pending++;
+
+	spin_unlock_irqrestore(&node->queue_lock, enabled);
+
+	/* A faulted device, or a session being stopped, takes nothing; queued work goes first. */
+	if (faulted != 0)
+		return EIO;
+	if (queued != 0U) {
+		*outcome = GPU_JOB_SUBMIT_DEFERRED;
+		return 0;
+	}
+
+	/* Runs the frame, its queue submissions and runs counted from zero (nothing else runs the session's frames now). */
+	owner->vk->queue_ran = 0U;
+	owner->vk->queue_accepted = 0U;
+	owner->vk->gpu_sends = 0U;
+	error = runtime_execute(node, owner, wire, bytes);
+	*outcome = GPU_JOB_SUBMIT_FAULTED;
+	if (error == 0 && owner->vk->queue_ran != 0U && owner->vk->queue_accepted == owner->vk->queue_ran)
+		*outcome = GPU_JOB_SUBMIT_COMMITTED;
+	else if (owner->vk->gpu_sends == 0U)
+		*outcome = GPU_JOB_SUBMIT_CANCELED;
+
+	/* The frame has ended: the drains look again. */
+	enabled = spin_lock_irqsave(&node->queue_lock);
+
+	owner->pending--;
+	waitq_wake_all(&node->retired);
+
+	spin_unlock_irqrestore(&node->queue_lock, enabled);
+
+	/* Reports a frame that failed. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the outcome is the frame's. */
 	return 0;
 }
 

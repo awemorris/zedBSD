@@ -54,7 +54,8 @@ static const struct drv_gpu_job_ops job_operations = {
 	job_reserve,
 	job_commit,
 	job_cancel,
-	job_capacity
+	job_capacity,
+	NULL
 };
 
 static struct bcm2711_render_request *find_reservation(struct bcm2711_render_device *controller, struct bcm2711_render_session *session, void *token, struct drv_gpu_completion *completion);

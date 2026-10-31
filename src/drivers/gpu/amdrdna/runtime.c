@@ -128,7 +128,8 @@ static const struct drv_gpu_job_ops runtime_jobs = {
 	runtime_reserve,
 	runtime_commit,
 	runtime_cancel,
-	runtime_capacity
+	runtime_capacity,
+	NULL
 };
 
 /*

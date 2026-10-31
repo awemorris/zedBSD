@@ -162,6 +162,11 @@ queue_submit(
 		nvrtx_vk_gpu_last(session->owner, &fence->run);
 	}
 
+	/* Counted for a job's outcome (the renderer's GPU_JOB_SUBMIT): one more ran, and whether it succeeded. */
+	session->queue_ran++;
+	if (error == 0)
+		session->queue_accepted++;
+
 	/* The submission's result. */
 	result = queue_result(error);
 	drv_i915_wire_reply_u32(reply, result);
