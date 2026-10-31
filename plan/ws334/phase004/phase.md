@@ -3,7 +3,7 @@
 # ws334-p004 設計の確定: design-reviewer と基点の SHA
 
 - 親: [WS334](../ws.md)。手順 docs/agent/spec-module-delegation.md の §4.7・§4.8。
-- 状態: in-progress（2026-11-01 02:15 P7 q1790。完了を報告、cleared は Q1）。
+- 状態: cleared（2026-11-01 02:43 Q1 の判定、main 5ea437eb7）
 - 依存: p003。
 
 ## 目的

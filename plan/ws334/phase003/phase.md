@@ -3,7 +3,7 @@
 # ws334-p003 設計 B: libkeiland の Win32 と apps の module（標準廉価実装手順）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §4・§6.4・§6.7・§6.8・§8（T1〜T3）。
-- 状態: in-progress（2026-11-01 P7 q1790。完了を報告、cleared は Q1。基点 d393d3267）。
+- 状態: cleared（2026-11-01 02:43 Q1 の判定、main 5ea437eb7）
 - 依存: p002。
 
 ## 目的

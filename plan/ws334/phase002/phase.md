@@ -3,7 +3,7 @@
 # ws334-p002 設計 A: libbrowser・libmedia の module と build の骨格（標準廉価実装手順）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。手順は docs/agent/spec-module-delegation.md の §4（ws.md の決定 22）。
-- 状態: in-progress（2026-11-01 P7 q1790。完了を報告、cleared は Q1。基点 d393d3267）。
+- 状態: cleared（2026-11-01 02:43 Q1 の判定、main 5ea437eb7）
 - 依存: p001。
 
 ## 目的

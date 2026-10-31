@@ -3,7 +3,7 @@
 # ws334-p020 glue: source の一覧の分け（sources.mk）と Windows の build の本体の第 1 段
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §4.1 の 2、§6.1〜§6.3、§6.9、§9。
-- 状態: in-progress（2026-11-01 03:20 実装済み・試験 PASS、Q1 の判定待ち。q1796-i01、P7）。
+- 状態: cleared（2026-11-01 03:15 Q1、main 29c250f65）
 - 依存: p004（設計の確定）。module の Phase と並べて起動してよい（module の file に触れない）。
 - 担当の想定: Opus（phase-runner）を 1 回。統合の glue なので標準廉価実装手順の module ではないが、手順と受け入れはここに全部書いた。設計の判断を残していない。判断が要る所が出たら止めて Q1 に返す。
 

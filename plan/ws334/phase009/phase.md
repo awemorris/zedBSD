@@ -3,7 +3,7 @@
 # ws334-p009 Windows の時刻帯の名前の表: os-zones（表の data）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: cleared（2026-11-01 02:53 Q1、main 70f0a3bf1）
 - 依存: p004（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 
