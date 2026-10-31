@@ -59,8 +59,14 @@ struct bcm2711_native_bin {
 	uint32_t forward;
 	uint32_t reverse;
 	uint32_t clockwise;
-	/* One: the tile buffer blends premultiplied source-over; zero: the fragment replaces the target. */
+	/* One: the tile buffer blends with blend_factors; zero: the fragment replaces the target. */
 	uint32_t blend;
+	/*
+	 * The blend equation: the Blend Cfg's colour destination factor (bits
+	 * 20-23), source factor (16-19) and mode (12-15), and the alpha's
+	 * (8-11, 4-7, 0-3).
+	 */
+	uint32_t blend_factors;
 	/* The colour channels of target zero the draw leaves unwritten: bit 0 red through bit 3 alpha. */
 	uint32_t colour_skip;
 	/* One: the tile buffer's depth test runs with depth_compare, and depth_write stores passing depths; zero: every fragment passes. */

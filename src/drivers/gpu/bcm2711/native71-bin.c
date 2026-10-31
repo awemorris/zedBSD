@@ -30,8 +30,7 @@ static void write_stencil(uint8_t *bytes, const struct bcm2711_native_stencil *s
  * Encodes complete fixed graphics state followed by one triangle-list draw, indexed or not, of one or more instances.
  *
  * Every inherited flag is reset explicitly.  A blending draw uses the tile
- * buffer's premultiplied source-over, so fragment code never reads the tile
- * buffer.  The depth and stencil tests and the colour write mask follow the
+ * buffer's blend equation, so fragment code never reads the tile buffer.  The depth and stencil tests and the colour write mask follow the
  * draw; both faces' stencil configurations are always written, so no
  * draw inherits another's.  Early-Z, multisampling, transform feedback and
  * queries remain disabled.  The caller owns every referenced native interval and
@@ -77,7 +76,8 @@ bcm2711_native_bin_encode(
 	if (state->forward > 1 ||
 	    state->reverse > 1 ||
 	    state->clockwise > 1 ||
-	    state->blend > 1)
+	    state->blend > 1 ||
+	    state->blend_factors > 0xffffffU)
 		return EINVAL;
 
 	/* Depth, stencil and colour-mask state names only the hardware's fields and codes. */
@@ -200,12 +200,12 @@ bcm2711_native_bin_encode(
 	write_word(bytes + 102, state->shader | state->attributes);
 
 	/*
-	 * Target zero's blend is premultiplied source-over for colour and alpha:
-	 * one times the source plus one minus source alpha times the target.
-	 * It takes effect only while the blend enables above select the target.
+	 * Target zero's blend equation, the draw's factors and modes for colour
+	 * and alpha.  It takes effect only while the blend enables above select
+	 * the target.
 	 */
 	bytes[106] = 84;
-	write_word(bytes + 107, (1U << 24) | (7U << 20) | (1U << 16) | (7U << 8) | (1U << 4));
+	write_word(bytes + 107, (1U << 24) | state->blend_factors);
 
 	/*
 	 * The forward-facing (front) and the reverse-facing (back) stencil

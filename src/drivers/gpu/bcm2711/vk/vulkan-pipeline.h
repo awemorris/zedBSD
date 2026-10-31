@@ -28,6 +28,12 @@ struct bcm2711_vulkan_pipeline {
 	VkCullModeFlags cull;
 	VkFrontFace front;
 	bool blend;
+	/*
+	 * The tile buffer's blend equation (the native Blend Cfg's factor and
+	 * mode fields, bits 0 to 23); premultiplied source-over when the
+	 * pipeline does not blend.
+	 */
+	uint32_t blend_factors;
 	/* The colour channels the pipeline leaves unwritten: bit 0 red through bit 3 alpha, the native mask's order. */
 	uint32_t colour_skip;
 	/*

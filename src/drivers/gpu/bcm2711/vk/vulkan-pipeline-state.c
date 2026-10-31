@@ -16,6 +16,7 @@ static int raster_state(struct bcm2711_vulkan_pipeline *pipeline, const VkPipeli
 static int blend_state(struct bcm2711_vulkan_pipeline *pipeline, const VkPipelineColorBlendStateCreateInfo *blend);
 static int dynamic_state(const VkPipelineDynamicStateCreateInfo *dynamic);
 static int depth_state(struct bcm2711_vulkan_pipeline *pipeline, const VkPipelineDepthStencilStateCreateInfo *depth);
+static int blend_equation(VkBlendFactor source, VkBlendFactor destination, VkBlendOp operation, uint32_t *fields);
 static int stencil_face(const VkStencilOpState *face, VkStencilOpState *copy);
 
 /*
@@ -90,7 +91,7 @@ bcm2711_vulkan_pipeline_state(
 			return ENOTSUP;
 	}
 
-	/* Exact colour state selects opaque replacement or the compiler's supported premultiplied source-over path. */
+	/* Exact colour state selects opaque replacement or a blend equation of the tile buffer. */
 	error = blend_state(pipeline, info->pColorBlendState);
 	if (error != 0)
 		return error;
@@ -216,13 +217,16 @@ raster_state(
 	return 0;
 }
 
-/* Selects exact opaque replacement or premultiplied alpha source-over, and the channels written. */
+/* Selects opaque replacement or the blend equation, and the channels written. */
 static int
 blend_state(
 	struct bcm2711_vulkan_pipeline *pipeline,
 	const VkPipelineColorBlendStateCreateInfo *blend)
 {
 	const VkPipelineColorBlendAttachmentState *attachment;
+	uint32_t colour;
+	uint32_t alpha;
+	int error;
 
 	/* One full colour attachment and disabled logic operation match the finite fragment tile-output ABI. */
 	if (blend->sType != VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO ||
@@ -243,20 +247,56 @@ blend_state(
 	pipeline->colour_skip = ~attachment->colorWriteMask & 0xfU;
 	if (attachment->blendEnable != VK_FALSE && attachment->blendEnable != VK_TRUE)
 		return EINVAL;
+
+	/* A pipeline that does not blend keeps premultiplied source-over in the unused equation. */
 	pipeline->blend = false;
-	if (attachment->blendEnable == VK_TRUE) {
-		if (attachment->srcColorBlendFactor != VK_BLEND_FACTOR_ONE ||
-		    attachment->dstColorBlendFactor != VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA ||
-		    attachment->colorBlendOp != VK_BLEND_OP_ADD)
-			return ENOTSUP;
-		if (attachment->srcAlphaBlendFactor != VK_BLEND_FACTOR_ONE ||
-		    attachment->dstAlphaBlendFactor != VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA ||
-		    attachment->alphaBlendOp != VK_BLEND_OP_ADD)
-			return ENOTSUP;
-		pipeline->blend = true;
-	}
+	pipeline->blend_factors = (7U << 20) | (1U << 16) | (7U << 8) | (1U << 4);
+	if (attachment->blendEnable == VK_FALSE)
+		return 0;
+
+	/* The colour and the alpha equations, each its destination factor, source factor and mode. */
+	error = blend_equation(attachment->srcColorBlendFactor, attachment->dstColorBlendFactor, attachment->colorBlendOp, &colour);
+	if (error != 0)
+		return error;
+	error = blend_equation(attachment->srcAlphaBlendFactor, attachment->dstAlphaBlendFactor, attachment->alphaBlendOp, &alpha);
+	if (error != 0)
+		return error;
+	pipeline->blend = true;
+	pipeline->blend_factors = colour << 12 | alpha;
 
 	/* Succeeded: ignored blend constants and disabled-logic fields do not become native state. */
+	return 0;
+}
+
+/*
+ * Encodes one blend equation as the native fields: the destination factor
+ * in bits 8 to 11, the source factor in bits 4 to 7 and the mode in bits 0
+ * to 3.
+ *
+ * Vulkan's factors from ZERO to ONE_MINUS_DST_ALPHA and SRC_ALPHA_SATURATE,
+ * and its operations from ADD to MAX, have the native codes' values (Mesa
+ * src/broadcom/cle/v3d_packet.xml, the Blend Factor and Blend Mode enums).
+ * The constant factors are refused: the pass sets no blend constant.
+ */
+static int
+blend_equation(
+	VkBlendFactor source,
+	VkBlendFactor destination,
+	VkBlendOp operation,
+	uint32_t *fields)
+{
+	/* Each factor is a non-constant one. */
+	if ((uint32_t)source > (uint32_t)VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA && source != VK_BLEND_FACTOR_SRC_ALPHA_SATURATE)
+		return ENOTSUP;
+	if ((uint32_t)destination > (uint32_t)VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA && destination != VK_BLEND_FACTOR_SRC_ALPHA_SATURATE)
+		return ENOTSUP;
+
+	/* The operation is one of the five basic ones. */
+	if ((uint32_t)operation > (uint32_t)VK_BLEND_OP_MAX)
+		return ENOTSUP;
+
+	/* Succeeded: the codes are the native ones. */
+	*fields = (uint32_t)destination << 8 | (uint32_t)source << 4 | (uint32_t)operation;
 	return 0;
 }
 
