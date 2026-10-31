@@ -33,6 +33,7 @@ static int validate_span(struct bcm2711_v3d *engine, uint32_t address, uint64_t 
 static int admit_job(struct bcm2711_v3d *engine);
 static void finish_job(struct bcm2711_v3d *engine, bool failed_dma);
 static void counters_prepare(struct bcm2711_v3d *engine);
+static void counters_select(struct bcm2711_v3d *engine, const uint8_t *sources);
 static void counters_read(struct bcm2711_v3d *engine, uint32_t *values);
 static int run_cl(struct bcm2711_v3d *engine, const struct bcm2711_v3d_cl_job *job, struct bcm2711_v3d_job_result *result);
 static int run_tfu(struct bcm2711_v3d *engine, const struct bcm2711_v3d_tfu_job *job, struct bcm2711_v3d_job_result *result);
@@ -336,6 +337,21 @@ run_cl(
 	const struct bcm2711_v3d_cl_job *job,
 	struct bcm2711_v3d_job_result *result)
 {
+	/*
+	 * The counter sources of a bin run (cycles, QPU idle, coordinate
+	 * shading, valid instructions, waits for coordinate shading,
+	 * instruction and uniform cache hits and misses, VDW and VCD stalls,
+	 * bin-thread cycles, L2T hits and misses, primitives binned, reversed
+	 * primitives discarded) and of a render run (counters_prepare's).
+	 * Values referenced: Mesa src/broadcom/common/v3d_performance_counters.h
+	 * (the V3D 4.2 counter numbers).
+	 */
+	static const uint8_t bin_sources[BCM2711_V3D_COUNTERS] = {
+		32, 13, 14, 16, 33, 20, 21, 22, 23, 26, 27, 28, 30, 31, 35, 12
+	};
+	static const uint8_t render_sources[BCM2711_V3D_COUNTERS] = {
+		32, 13, 15, 16, 17, 18, 19, 34, 24, 25, 54, 29, 3, 9, 84, 82
+	};
 	const struct job_queue bin = {2, 0, 0x110, 0x118};
 	const struct job_queue render = {1, 0, 0x114, 0x11c};
 	uint32_t before[BCM2711_V3D_COUNTERS];
@@ -374,6 +390,9 @@ run_cl(
 		kern_mmio_write32(engine->core.mapped + 0x15c, job->state_address | 2U);
 		kern_mmio_write32(engine->core.mapped + 0x160, job->bin_start);
 		result->retired = false;
+		counters_prepare(engine);
+		counters_select(engine, bin_sources);
+		counters_read(engine, before);
 		kern_mmio_write32(engine->core.mapped + 0x168, job->bin_end);
 
 		spin_unlock_irqrestore(&engine->hardware.guard, enabled);
@@ -384,6 +403,9 @@ run_cl(
 		bin_ticks = clock_ticks() - step;
 		if (error != 0)
 			return error;
+		counters_read(engine, after);
+		for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
+			result->bin_counters[index] = after[index] - before[index];
 	}
 
 	/* The render cache sees bin-produced tile lists only after its IRQ fence. */
@@ -400,6 +422,8 @@ run_cl(
 
 	/* The counters before the run, as the render queue alone runs from here. */
 	counters_prepare(engine);
+	if (job->bin_start != 0)
+		counters_select(engine, render_sources);
 	counters_read(engine, before);
 
 	/* No bin-dependent renderer is placed in a hardware FIFO before software completion. */
@@ -758,4 +782,23 @@ counters_read(
 	/* Free-running 32-bit counts; their differences give a run's share. */
 	for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
 		values[index] = kern_mmio_read32(engine->core.mapped + 0x680 + index * 4U);
+}
+
+/* Points the sixteen counters at the given sources; their free-running counts go on from where they were. */
+static void
+counters_select(
+	struct bcm2711_v3d *engine,
+	const uint8_t *sources)
+{
+	uint32_t index;
+	uint32_t word;
+
+	/* Four sources a register. */
+	for (index = 0; index < BCM2711_V3D_COUNTERS / 4U; index++) {
+		word = (uint32_t)sources[index * 4U] |
+		    (uint32_t)sources[index * 4U + 1U] << 8 |
+		    (uint32_t)sources[index * 4U + 2U] << 16 |
+		    (uint32_t)sources[index * 4U + 3U] << 24;
+		kern_mmio_write32(engine->core.mapped + 0x660 + index * 4U, word);
+	}
 }

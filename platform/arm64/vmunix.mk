@@ -326,6 +326,10 @@ ARM64_KERNEL_SOURCES += $(ARM64_USB_SOURCES)
 ifneq ($(filter y,$(CONFIG_DRIVER_CAMERA) $(CONFIG_DRIVER_USB_UVC)),)
 ARM64_KERNEL_SOURCES += src/drivers/camera/cam.c
 endif
+# The test-only input injection (aat-input), as on amd64.
+ifeq ($(CONFIG_INPUT_TEST_INJECT),y)
+ARM64_KERNEL_SOURCES += src/drivers/generic/input-inject.c
+endif
 # /dev/input/bridge (ws143-p005, ws215-p002): the Bluetooth daemon's HID devices, on the HID input glue; it refuses a FIDO
 # descriptor with hidraw-describe.c.  Both come with usb-hid, or here without it.
 ifeq ($(CONFIG_INPUT_BRIDGE),y)
