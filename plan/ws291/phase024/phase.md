@@ -158,4 +158,5 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   （`gpu_capacity_changed_locked`、retirement の起床と同じ規則、`gpu_device_stop_waiting_locked`）。host: `run-gpu-job-host.sh` PASS（WS014 の
   supervision・job・fence の fixture を含む）、RTX・config-amd64・rpi5 の vmunix warning 0。実機（`rtx-p024.sh` ROUNDS=2、libvulkan lv2、js = a99e1411e の
   kernel、js3 = この変更、build/tmp/p024-js3）: subs-1000 js 32.16・28.56 → js3 34.67・34.31、subs-100 296.1・301.6 → 301.1・297.5、big は揺れの内。
-  戻し cksum 一致、Debian。QEMU の Venus はこの変更の後に流していない（未実施）。
+  戻し cksum 一致、Debian。QEMU の Venus（この変更の kernel で forge の image を作り直し、23:30〜23:39）: `venus-reg: PASS`（forge・fence 600・wltest・
+  mview mailbox・mview 20 submit・compositor の VULKAN_ERROR 0）。
