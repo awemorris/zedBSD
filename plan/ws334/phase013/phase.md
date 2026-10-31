@@ -59,3 +59,30 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+- 状態: 実装済み・試験 PASS（2026-11-01 host の `date` で 03:0x 時点。cleared は Q1 の判定）。
+- 作った物: `userland/desktop/libmedia/media-os-posix.c`・`media-os-win32.c`（全部の関数）、`plan/ws334/tests/unit/test-media-os.c`。header・試験の道具・他の module は変えていない。
+- 試験: `sh plan/ws334/tests/run-unit.sh media-os` → posix 159 checks PASS（ASan・UBSan・LSan）、win32 158 checks PASS（Wine）、`run-unit: PASS`。
+  試験は、vulkan（loader・symbol・無い symbol・NULL）、0・1 byte・5 MiB の大きさと先頭・中・末尾の読み、4 GiB を越える sparse file の offset（OffsetHigh）、
+  EIO（末尾を越える・2^63 以上の offset）、EINVAL（overflow の境界 2^64 と 2^64-1、NULL の引数）、ENOENT・EISDIR・ENAMETOOLONG・UTF-8 の名前・EILSEQ（win32）、
+  書き手が開いている間の open と削除後の読み（共有の flag）、`/dev/null`・`NUL` の拒否、EACCES、`media_os_close_descriptor` を見る。
+- 壊して確かめた（git の外で 1 つずつ。各回 run-unit、元に戻して `cmp` で確認）: posix は ENOTDIR の写し・overflow の境界・directory の検査・pread の offset が done を足さない・
+  close_descriptor が何もしない・末尾の 0 byte を成功にする、win32 は FILE_SHARE_WRITE の欠落・FILE_SHARE_DELETE の欠落・MB_ERR_INVALID_CHARS の欠落・OffsetHigh を 0 にする・
+  FILE_TYPE_DISK の検査の欠落・directory の判定・ERROR_PATH_NOT_FOUND の写し・path の長さの上限・overflow の境界、を全部 FAIL で捕まえた。
+  捕まえられない物: win32 の `LOAD_LIBRARY_SEARCH_SYSTEM32`（Wine では観測できない）、posix の loader の名前の先頭の誤り（次の名前に落ちるので同じ結果）、
+  win32 の read_at の「0 byte 読めた」の枝（Windows は末尾で FALSE を返すので届かない防御）、`O_CLOEXEC`・非継承の handle（結果が外から見えない）。
+- 自分で決めた点（header が黙っている所）:
+  1. `media_os_library` は新しい記憶を持たず、`dlopen` の handle・`HMODULE` をそのまま不透明な pointer にした（ENOMEM は返らない。同じ loader の二度目の open は同じ pointer）。
+  2. POSIX は path の byte を検査せず渡す（POSIX の名前は byte。Latin-1 の名前の file を開けなくしないため）。EILSEQ は Windows だけ。試験は posix で誤りの UTF-8 の名前が ENOENT になることを見る。
+  3. 通常の file 以外（POSIX は `S_ISREG` でない、Windows は `FILE_TYPE_DISK` でない: device・pipe）は EIO。大きさが負も EIO。
+  4. POSIX の ENOTDIR は ENOENT、EPERM は EACCES、EMFILE・ENFILE は ENOMEM。Windows の ERROR_SHARING_VIOLATION・ERROR_LOCK_VIOLATION は EACCES、
+     ERROR_INVALID_NAME・ERROR_BAD_PATHNAME・ERROR_BAD_NETPATH・ERROR_DIRECTORY は ENOENT、ERROR_FILENAME_EXCED_RANGE は ENAMETOOLONG、ERROR_TOO_MANY_OPEN_FILES は ENOMEM。
+  5. Windows の path は UTF-8 で 98301 byte（32767 単位 × 3）を越えれば ENAMETOOLONG、変換後に 32767 単位を越えても ENAMETOOLONG。
+  6. `media_os_file_open` は `file` が NULL でなければ、`size` が NULL で EINVAL の時も `*file = NULL` にする。
+  7. read_at の範囲の最後の byte が file の offset（POSIX は `off_t` の非負、Windows は 2^63 未満）で表せない時は EIO（どの file もそこまで届かない）。EINVAL は 64 bit の overflow だけ。
+  8. size 0 の read は offset がどこでも成功（file が NULL の時だけ EINVAL）。
+- 環境の注意: この host の shell は `LC_CTYPE=ja_JP.UTF-8`（この host に無い locale）で、Wine が unix の file 名を UTF-8 にできず、win32 の試験が非 ASCII の名前の file を作れない。
+  その時の試験は「作れない」と注意を出し、変換だけ（正しい UTF-8 が EILSEQ にならず ENOENT になる）を確かめる。`LC_ALL=C.UTF-8` で流せば非 ASCII の file の open と読みまで確かめる（どちらも PASS を確認）。
+- 未実施: aarch64 Windows の実行（check-skeleton が compile のみ）、実際の Windows、1 GiB を越える read（記憶の都合）、複数 thread からの呼び出し、`O_CLOEXEC` の観測。
