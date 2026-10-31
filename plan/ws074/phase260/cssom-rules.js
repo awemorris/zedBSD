@@ -695,3 +695,14 @@
       ['CSSKeyframeRule', CSSKeyframeRule], ['CSSViewTransitionRule', CSSViewTransitionRule],
       ['CSSPositionTryRule', CSSPositionTryRule], ['CSSPositionTryDescriptors', CSSPositionTryDescriptors]].forEach(function (p) { def(g, p[0], p[1]); });
   })();
+
+  // HTMLStyleElement.media and HTMLLinkElement.media reflect the media attribute (which sheets the page uses depends on it).
+  ['HTMLStyleElement', 'HTMLLinkElement'].forEach(function (name) {
+    var C = g[name];
+    if (typeof C !== 'function' || !C.prototype || Object.getOwnPropertyDescriptor(C.prototype, 'media')) return;
+    Object.defineProperty(C.prototype, 'media', {
+      get: function () { var v = this.getAttribute('media'); return v === null ? '' : v; },
+      set: function (v) { this.setAttribute('media', String(v)); },
+      configurable: true, enumerable: true
+    });
+  });

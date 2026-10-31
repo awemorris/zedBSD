@@ -5780,6 +5780,8 @@ cascade_try_rule(
 	size_t found_sheet;
 	size_t index;
 	size_t rule;
+	size_t media;
+	int holds;
 	int rank;
 	int best;
 
@@ -5789,6 +5791,13 @@ cascade_try_rule(
 	sheets = engine->sheets.items;
 	for (index = 0; index < engine->sheets.count; index++) {
 		if (sheets[index].sheet == NULL)
+			continue;
+
+		/* A sheet whose media do not hold gives no rules. */
+		holds = 1;
+		for (media = 0; media < sheets[index].media_count && holds; media++)
+			holds = css_media_matches(sheets[index].media[media], engine->viewport_width, engine->viewport_height);
+		if (!holds)
 			continue;
 		for (rule = 0; rule < sheets[index].sheet->try_rule_count; rule++) {
 			if (!vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))

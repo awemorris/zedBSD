@@ -47,6 +47,7 @@ static const struct bind_attribute cssom_css_attributes[] = {
 	{ "cssRules", bind_cssom_rules, NULL },
 	/* The legacy name of the same list. */
 	{ "rules", bind_cssom_rules, NULL },
+	{ "disabled", bind_cssom_disabled_get, bind_cssom_disabled_set },
 	{ NULL, NULL, NULL }
 };
 
@@ -562,6 +563,52 @@ bind_cssom_delete(
 
 	/* Succeeded: saved and current rule counts observe the actual native deletion. */
 	*result = VM_VALUE_UNDEFINED;
+	return 0;
+}
+
+/*
+ * Reads CSSStyleSheet.disabled.
+ */
+int
+bind_cssom_disabled_get(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct cssom_state *state;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	status = cssom_this(realm, receiver, CSSOM_SHEET, &state);
+	if (status != 0)
+		return status;
+	*result = vm_value_boolean(state->source->disabled != 0);
+	return 0;
+}
+
+/*
+ * Sets CSSStyleSheet.disabled: a disabled sheet gives the page no rules.
+ */
+int
+bind_cssom_disabled_set(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct cssom_state *state;
+	int status;
+
+	*result = VM_VALUE_UNDEFINED;
+	status = cssom_this(realm, receiver, CSSOM_SHEET, &state);
+	if (status != 0)
+		return status;
+	state->source->disabled = count > 0 && vm_to_boolean(args[0]) ? 1 : 0;
+	bind_style_sheet_changed(state->source);
 	return 0;
 }
 

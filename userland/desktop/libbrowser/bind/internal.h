@@ -275,6 +275,8 @@ struct bind_style_sheet {
 	struct wb_units original;
 	/* A genuine model edit selects current rule sources instead of untouched original DOM Text. */
 	int changed;
+	/* CSSStyleSheet.disabled: the sheet gives no rules to the page. */
+	int disabled;
 	/* Current source identity retains its independently collectible public wrappers. */
 	struct vm_object *wrapper;
 	struct vm_object *rules;
@@ -507,6 +509,8 @@ int bind_cssom_sheets_item(struct vm_realm *realm, vm_value receiver, const vm_v
 int bind_cssom_rules_length(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 int bind_cssom_insert(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 int bind_cssom_delete(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
+int bind_cssom_disabled_get(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
+int bind_cssom_disabled_set(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 int bind_cssom_rule_info(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 int bind_cssom_rule_replace(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);
 
