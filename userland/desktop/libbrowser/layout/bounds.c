@@ -209,6 +209,14 @@ bounds_lines(
 			/* The fragment's run, from its ascent above the baseline to its descent below. */
 			x = left + line->left + fragment->x;
 			y = top + line->y + line->baseline + fragment->shift - fragment->ascent;
+
+			/* An inline replaced box's piece is its margin box: the box itself is inside the margins. */
+			if (fragment->box != NULL && fragment->box->kind == LAYOUT_REPLACED && fragment->box->node == node) {
+				bounds_add(rect, found, x + fragment->box->margin[CSS_LEFT], y + fragment->box->margin[CSS_TOP],
+				    fragment->width - fragment->box->margin[CSS_LEFT] - fragment->box->margin[CSS_RIGHT],
+				    fragment->ascent + fragment->descent - fragment->box->margin[CSS_TOP] - fragment->box->margin[CSS_BOTTOM]);
+				continue;
+			}
 			bounds_add(rect, found, x, y, fragment->width, fragment->ascent + fragment->descent);
 		}
 	}
