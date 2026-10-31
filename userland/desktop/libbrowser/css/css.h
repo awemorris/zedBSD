@@ -1099,6 +1099,8 @@ int css_rule_model_source(const struct css_rule_model *model, uint32_t id, const
 int css_rule_model_text(const struct css_rule_model *model, struct wb_units *units);
 int css_rule_model_insert(struct css_rule_model *model, const uint16_t *units, size_t length, size_t index);
 int css_rule_model_delete(struct css_rule_model *model, size_t index);
+unsigned css_rule_model_closing(const struct css_rule_model *model, uint32_t id);
+int css_rule_model_replace(struct css_rule_model *model, const uint16_t *units, size_t length, size_t index);
 
 /* Sheets (parser.c). */
 int css_sheet_create(struct css_sheet **sheet, struct vm_heap *heap, const uint16_t *units, size_t length);

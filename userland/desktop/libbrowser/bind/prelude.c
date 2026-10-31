@@ -44,6 +44,8 @@ static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, cons
 static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_duration(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_rule_info(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_rule_replace(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_utf8_argument(const vm_value *args, unsigned count, unsigned index, struct wb_buffer *out, int *present);
 
 /* parseURL(input, base): the parts of the URL as an array of strings, or null when it does not parse. */
@@ -504,6 +506,38 @@ prelude_view_transition_duration(
 	if (window->host.view_transition_duration != NULL)
 		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
 	return 0;
+}
+
+/* ruleInfo(sheet, index): the rule of a sheet as "id type source", or undefined. */
+static int
+prelude_rule_info(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 2U)
+		return 0;
+	return bind_cssom_rule_info(realm, args[0], args + 1, count - 1U, result);
+}
+
+/* ruleReplace(sheet, index, text): replaces a rule of a sheet and gives its new identity. */
+static int
+prelude_rule_replace(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 3U)
+		return 0;
+	return bind_cssom_rule_replace(realm, args[0], args + 1, count - 1U, result);
 }
 
 /* setPopover(element, open): whether the popover of an element is showing (the page is styled again). */
@@ -1006,6 +1040,14 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "setPopover", 2, prelude_set_popover, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "setPopover", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "ruleInfo", 2, prelude_rule_info, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "ruleInfo", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "ruleReplace", 3, prelude_rule_replace, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "ruleReplace", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
 	if (status == 0)
