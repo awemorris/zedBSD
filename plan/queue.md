@@ -511,7 +511,7 @@
 | q1791 / q1791-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws336`・branch `agent/p5-ws336`） | [ws336-p001](ws336/phase001/phase.md) 設計（標準廉価実装手順 §4） | plan/ws336/ と header・骨格・試験の道具。WS335（P6）の暗号の口と揃え、重ねて作らない | in-progress |
 | q1727 / q1727-i13 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 13 回目 | 100% までの自走（ユーザーの指示）。golden の layout の試験の整理 → 負の向きの scroll の範囲・直交の subgrid など。SVG のベクトルの拡大は WS328 の範囲 | in-progress |
 | q1792 / q1792-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p005`） | [ws334-p005](ws334/phase005/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |
-| q1793 / q1793-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p009`） | [ws334-p009](ws334/phase009/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |
+| q1793 / q1793-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p009`） | [ws334-p009](ws334/phase009/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | cleared（2026-11-01 02:53、ee145f9cb、main 70f0a3bf1） |
 | q1794 / q1794-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p010`） | [ws334-p010](ws334/phase010/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |
 | q1795 / q1795-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p013`） | [ws334-p013](ws334/phase013/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |
 | q1796 / q1796-i01 | P7 Opus（worktree `/home/awe/zedBSD-worktrees/p7-ws334`） | [ws334-p020](ws334/phase020/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |

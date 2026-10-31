@@ -81,3 +81,9 @@
   - 「現在の metazone」は `to` の無い usesMetazone。`to` の無い物が 2 つ以上ある zone は無い（抽出の script が assert した）。territory "001" の type が空白で区切った複数なら最初（CLDR 48 の "001" には複数の物は無く、grep で 0 件）。
 - 壊して確かめた（git の外、`--posix` で、終わりに `cmp` で原本に戻ったことを確認）: Tokyo の daylight の 1 字（FAIL 2）、隣り合う 2 key の入れ替え（FAIL 3）、比較の向きの反転（FAIL 156）、探す範囲の上端を 1 つ小さく（FAIL 2）、最後の行の削除（FAIL 3）、試験の期待に無い行（Fiji の daylight）の 1 字（digest だけが捕まえた、FAIL 1）、daylight の NULL を ""（FAIL 3）、key の NULL の検査の削除（試験が crash し FAIL）、Türkiye を ASCII の u に（FAIL 2）、count を 1 つ小さく（FAIL 2）、大小を区別しない比較（FAIL 17）。見逃しは無かった。
 - 未実施: 実機の Windows での実行（Wine のみ）。os-time-win32.c との結び付き（p008 の範囲）。
+
+## Q1 の受け入れ（2026-11-01 02:53）
+
+- 「Turkey Standard Time」の CLDR 48 の名前「Türkiye Standard Time」「Türkiye Summer Time」を UTF-8（octal escape）のまま採る（CLDR が正、os-time の出力は UTF-8）。
+- header（os-zones.h の struct wb_os_zone_names）の comment の「名前は ASCII」は誤り。実装の間は header を固定するので、規約の見直しの Phase（p035）で直す。
+- `wb_os_zone_table(NULL)` を許す決めを受け入れる。
