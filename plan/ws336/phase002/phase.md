@@ -2,7 +2,7 @@
 
 # ws336-p002: ssh-common・ssh-buf（約束・byte 順・name-list・base64、RFC 4251 の型）
 
-Status: 実装済み・試験 PASS（2026-11-01 05:10、Sonnet 5.5。cleared は Q1 が決める）
+Status: cleared（2026-11-01 05:10 Q1、main 87c8caf2d）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p001
