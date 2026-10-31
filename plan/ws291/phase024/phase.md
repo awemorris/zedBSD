@@ -210,3 +210,51 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   往復は両腕とも direct=3 left=3 window=3、failed 0、refused 0。画面（keiland-shot、i2a 対 main）: desktop・Notes・browser とも差は右上の時計の箱
   （x=1881..1894、y=17..27）だけ。desktop（frame-ops）: main launch 64・type 61・output 69・drag 60・home 63・wiseview 64、i2a 63・62・67・61・64・64 fps
   （後退なし）。起動の dmesg の `vram-window` の行は両腕に出る（前から）。戻し cksum 一致、bl 行 0、Debian。
+
+### i2a の後の 1 submit の内訳（診断 d3 = i2a ＋ 診断、libvulkan lv3 の TIMING も、00:41〜00:48、build/tmp/p024i2-d3）
+
+- subs-1000 の GPU_JOB_SUBMIT 1 本 15.8 µs（d2 の 23.4 から）: 要求の copyin と確かめ 1.0、stream の buffer 0.04（d2 の kern_malloc を含む 3.8 から）、
+  stream の copyin 0.7、reserve 1.4（要求の copyout を含む）、driver 10.5、finish 0.9、後始末 1.2（outcome の copyout を含む）。
+  driver の中: executor 6.0（d2 の 10.0 から。begin 0.1（d2 1.65）、draw 16 本 3.3、ring の submit 1.0）、record の decode 約 1.7、
+  RESET_COMMAND_BUFFER 0.8、BEGIN 0.1。user の側は TIMING の水増しが大きく、reap が 7 submit に 1 回（1 回 約 7 µs）、private_fence 約 1 µs。
+- big-1000: 段は record（client の encode）4.0・submit 4.0・fence 0.9 ms（timing と診断込み）。
+
+### 試して採らなかった物: libvulkan の reap の閾値 8 → 24（i2b、00:48〜01:03、build/tmp/p024i2-ab2、kernel i2a、libvulkan lv4 3919355289）
+
+| 腕 r1・r2 | big-100 | big-1000 | subs-100 | subs-1000 |
+| --- | --- | --- | --- | --- |
+| i2a（lv3） | 567.6・571.3 | 115.6・113.9 | 369.5・357.0 | 41.45・39.93 |
+| i2b（lv4、閾値 24） | 552.5・549.9 | 115.6・115.7 | 374.6・367.6 | 43.85・44.33 |
+
+- subs-1000 は同じ window で +6〜11 %（i2a の 2 round の揺れ 1.5 fps を越える）が、big-100 が −3 %（揺れ 3.7 を越える）。台帳に消費されない
+  record が長く残ると fence・WSI の image の「終わったか」の問いが system call に回る。big-100（game mode の主の場面）を下げるので採らない
+  （sync.c は戻した）。画素は両腕とも差 0。QEMU の Venus は lv4 で PASS（build/tmp/p024i2-venus3）。
+
+### 試して採らなかった物: blob の stream の写しを session に持つ（i2c、01:04〜01:12、build/tmp/p024i2-ab3、kernel 1921706631、libvulkan lv3）
+
+- big-1000 の長い recording は約 1 MiB の blob ごとに recording の thread が送る（d3: 1 本の transaction 約 0.7〜0.8 ms、client の 1 MiB の encode
+  約 0.75 ms とほぼ同じ）。kernel の 1 MiB の kern_malloc を省けば送る側が速くなる見込みで、`vk-stream.c` の top level の写しを session に
+  持つ形を試した（host: nvrtx vk の stream の試験の「写しを free」の数え方を直して 94/0）。
+
+| 腕 r1・r2 | big-100 | big-1000 | subs-100 | subs-1000 |
+| --- | --- | --- | --- | --- |
+| i2a | 559.6・541.8 | 113.4・114.9 | 360.8・361.5 | 42.89・43.10 |
+| i2c | 552.4・533.4 | 113.5・112.7 | 354.5・360.0 | 43.67・39.09 |
+
+- 効果なし（big-1000 は揺れの内）。採らない（4 file を戻した）。画素は差 0。窓をまたぐ i2a の揺れ（big-100 541〜571、subs-1000 39.9〜43.7）が
+  大きいので、上の i2b の big-100 の −3 % も確かではない（i2b は採らないまま、記録だけ）。
+
+### 長い recording の batch を小さく（libvulkan `commands.c` の VULKAN_RECORDING_BATCH_BYTES、01:16〜01:33、build/tmp/p024i2-ab4、kernel i2a）
+
+- 長い recording は recording の thread が batch ごとに送り、renderer がそれを decode する間に client は次を encode する。vkEndCommandBuffer は
+  送り終わるのを待つので、最後の batch の送り（1 MiB で約 0.7 ms）がそのまま record の段に乗る。big-100（2000 draw、約 0.5 MiB）は 1 MiB に
+  満たず、まったく重ならない。batch を小さくすれば最後の待ちが短くなり、big-100 も重なる。
+
+| 腕 r1・r2 | big-100 | big-1000 | subs-100 | subs-1000 |
+| --- | --- | --- | --- | --- |
+| i2a（1 MiB、lv3） | 553.6・563.6 | 113.2・115.8 | 347.8・359.0 | 42.22・43.39 |
+| b512（512 KiB、lv5 416424967） | 560.9・569.3 | 117.2・116.7 | 351.3・363.0 | 42.39・41.47 |
+| b256（256 KiB、lv6 1775217122） | 610.3・596.3 | 119.0・118.3 | 362.4・354.3 | 41.38・43.24 |
+
+- b256: big-100 +8 %（record の段 0.65 → 0.53 ms）、big-1000 +3〜4 %（record 3.9 → 3.55 ms）、subs は揺れの内。画素は 3 腕とも差 0。
+  QEMU の Venus は lv6・lv5 とも PASS（build/tmp/p024i2-venus4）。
