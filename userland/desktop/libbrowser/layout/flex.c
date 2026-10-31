@@ -2247,6 +2247,12 @@ flex_lay_sized(
 			child->style.width.offset = 0;
 		}
 		error = layout_block(tree, child, box->width);
+
+		/* Its auto margins across are shared out when the line places it, not by the width it was laid out in. */
+		if (error == 0 && child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO)
+			child->margin[CSS_LEFT] = 0;
+		if (error == 0 && child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+			child->margin[CSS_RIGHT] = 0;
 		return error;
 	}
 
