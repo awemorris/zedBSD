@@ -877,6 +877,10 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev140 | 基準（i13 の最終） | 3,068（88.36%） | 189 / 147 / 66 / 2 |
   | dev141（18be805bf） | shape-outside | 3,084 | 189 / 131 / 66 / 2（後退 0） |
   | dev142（6c77c8039） | orthogonal の flex item の max-content、frame の initial about:blank の Navigation の listener の引き継ぎ | 3,088（88.94%） | 187 / 129 / 66 / 2（後退 0） |
+  | dev143（e3866bc87） | 同じ origin の名前付き frame への移動（link・form・window.open）、HTMLAnchorElement・HTMLAreaElement・form の members | 3,099（89.26%） | 176 / 129 / 66 / 2（後退 0） |
+  | dev144（993c5515a） | `<style>` の @import の load event、window.open の `_self` | 3,101 | 174 / 129 / 66 / 2（後退 0） |
+  | dev145（c3ccd9174） | flex item の cross の auto margin（stretch しない・used の値を報告） | 3,103（89.37%） | 174 / 127 / 65 / 2（後退 0） |
+  | dev146（e6c916a1a） | @scope の中の ::before・::after | 3,104 | 174 / 127 / 65 / 2（後退 0） |
 
 - 直した物（source は userland/desktop/libbrowser/）:
   1. `shape-outside`・`shape-margin`・`shape-image-threshold`（css/values.c の parse、css/cascade.c、新しい layout/shape.c、layout/float.c、layout/inline.c）。css-shapes の 16 ID（全て縦書き）が通った。
@@ -889,4 +893,9 @@ Origin: 2026-10-27 ユーザーの指示。
      - frame の initial about:blank に付けた Navigation の listener・on* handler を、その frame に読み込まれる同じ origin の document の Navigation が引き継ぐ（window が使い回される振る舞い）。
      - `target` が frame の名前（と _top・_parent）の link・form・`window.open(url, name)` は、その frame の window の `location.assign` で移動する（その window に navigate event が出る。sourceElement と POST の formData は渡す）。form の GET は fragment を残す（`withQuery`）。
      - `HTMLAnchorElement`・`HTMLAreaElement` を足し（bind/element.c・node.c・window.c・internal.h）、href とその部品・target・download・rel ほかの members を prelude に定義した。`HTMLFormElement` に action・method・enctype・target・name・acceptCharset・autocomplete・noValidate。
+  4. @scope の rule の中の pseudo-element（css/cascade.c `cascade_scope_root_compute`・`cascade_in_scope`）: ::before などを styling している間、scope の root の selector と limit は element のものとして matching する
+     （pseudo_wanted を一時的に none にする。以前は root が見つからず scope 内の ::before が出なかった）。css-cascade/scope-pseudo-element。
+  5. table の row group・row・column の writing-mode は table のもの（縦書きの table では direction も）。向きが違う cell は table の向きにそろえる（css/cascade.c）。
+     table-progression-slr-001・srl-001。cell の向きが違う場合の本来の layout（orthogonal な cell）は未実装。
+  6. `getComputedStyle` の margin: flex item の cross の auto margin の used 値（layout/flex.c）。auto margin のある item は stretch しない（`flex_align_of`）。flexbox/auto-margins-001・flexbox-align-self-horiz-005。
 - 道具: plan/ws074/phase260/tools/st1.sh（static の 1 ID を実行し、失敗の画像を build/tmp/p8/st1/ に残す）。
