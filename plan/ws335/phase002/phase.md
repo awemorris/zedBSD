@@ -2,7 +2,7 @@
 
 # ws335-p002: 土台（約束・定数時間の補助・byte 順）、SHA-2、hash の選択・HMAC・HKDF
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: なし）
+Status: in-progress（2026-11-01 05:47 q1818、Sonnet）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

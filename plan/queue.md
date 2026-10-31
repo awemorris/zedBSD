@@ -541,3 +541,4 @@
 | q1814 / q1814-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p010`） | [ws336-p010](ws336/phase010/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1815 / q1815-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p012`） | [ws336-p012](ws336/phase012/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1816 / q1816-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p013`） | [ws336-p013](ws336/phase013/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
+| q1818 / q1818-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws335-p002`） | [ws335-p002](ws335/phase002/phase.md) | 標準廉価実装手順の実装（土台・SHA-2・HMAC・HKDF）。header・試験の道具は変えない | in-progress |
