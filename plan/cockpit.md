@@ -15,10 +15,10 @@
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 4（p025）は熱の throttle の見込みで止め、Pi 5（p021）へ: V3D 7.1 への移し・1920x1080 の SD の image を作る | ユーザーが板を Pi 5 に替え、Q1 が SD を書く |
 | P5 | — | — | 返却（2026-11-01 03:03）。WS336 の設計を main に（a1d9f18fb、header の基点 d4ab182d2、実装の Phase p002〜p025）。問い Q1〜Q9 は下の 0n | 答えの後に実装（Sonnet と Opus） |
 | P6 | — | — | 返却（2026-11-01 03:04）。WS335 の設計を main に（header の基点 60760d2a0、実装の Phase p002〜p038）。問い U1〜U6 は下の 0o | 答えの後に実装 |
-| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005・p008〜p010・p013〜p020 cleared（最新 p008 os-time、main ff026d05a） | Sonnet が p006（os-file）・p007（os-net）・p012（保存の queue）を実装中。次は p011（p006 の後） |
+| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005・p008〜p010・p012〜p020 cleared（最新 p012 保存の queue、main 63d1d3c1b） | Sonnet が p006（os-file）・p007（os-net）を実装中。次は p011（p006 の後） |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 13 回目（q1727-i13）: golden の試験の整理 → 負の向きの scroll・直交の subgrid など | 今 3,472 のうち 3,039（87.53%）、Acid3 100/100・Acid2 100%。12 回目は subgrid・grid の絶対配置など（+34、後退 0） |
 
-実装の担当（Sonnet・Opus の単発）: WS334 の p006・p007・p012（Sonnet、worktree s-ws334-pNNN）。
+実装の担当（Sonnet・Opus の単発）: WS334 の p006・p007（Sonnet、worktree s-ws334-pNNN）。
 
 ## WS ごとの進捗
 
