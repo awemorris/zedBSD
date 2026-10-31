@@ -1063,6 +1063,7 @@ flex_base_size(
 			item->base = child->width;
 		} else {
 			struct css_length saved_height;
+			int orthogonal;
 
 			/* A stretched item of a container with a height of its own has that height, for the percentages inside it. */
 			saved_height = child->style.height;
@@ -1086,8 +1087,24 @@ flex_base_size(
 				child->style.height.offset = 0;
 			}
 
+			/*
+			 * An item of another writing mode is as wide as its block size: it is laid out in its own coordinates, along the
+			 * height it is given.
+			 */
+			orthogonal = box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB &&
+			    !child->atomic && !child->out_of_flow && child->style.display != CSS_DISPLAY_TABLE &&
+			    child->style.display != CSS_DISPLAY_INLINE_TABLE && !child->max_content_known;
+			if (orthogonal) {
+				child->grid_orthogonal = 1;
+				child->grid_room = child->style.height.unit == CSS_UNIT_PX ? layout_from_px(child->style.height.value) : -1;
+			}
+
 			/* The content's width without a limit (measured once, its percentages indefinite). */
 			error = layout_max_content(tree, child, &item->base);
+			if (orthogonal) {
+				child->grid_orthogonal = 0;
+				child->grid_room = -1;
+			}
 			child->style.height = saved_height;
 			if (error != 0)
 				return error;
