@@ -3,8 +3,9 @@
 # harness (plan/tmp/guest/id_ed25519), from the top of the tree:
 #   PI=ADDRESS PROGRAMS=BUILD [CYCLES=3] [COPIES=10] [SPIN=8] [VIDEO=FILE.mp4] sh plan/ws309/tests/pi-p015.sh OUT
 # PROGRAMS is a build of the board's config (bin/wayland, bin/mview, bin/videoplayer and the dynamic libraries), copied
-# to /root/p015 and run with LD_LIBRARY_PATH (the board's own files are not changed).  The GPU is started when it is
-# still held (sysctl hw.gpu.start=1).  The compositor runs on its own socket with no desktop client; mview runs in the
+# with mview's qs40 model to /root/p015 and run with LD_LIBRARY_PATH (the board's own files are not changed).  The GPU
+# is started when it is still held (sysctl hw.gpu.start=1).  The compositor runs on its own socket with no desktop
+# client; mview runs in the
 # game mode CYCLES times with libvulkan's chain log (VULKAN_ZEDBSD_WSI_LOG: whether its chain drew into lent images,
 # their layout, its presents and the copies among them); with VIDEO, videoplayer plays the file full screen for 15 s
 # (its PLAYBACK and FRAMES lines, the kernel's firmware decoder and display lines of the run).  The compositor's
@@ -56,6 +57,8 @@ say "programs $(b "cksum $D/bin/wayland $D/bin/mview $D/lib/libvulkan.so" 2>&1 |
 if [ -n "${VIDEO:-}" ]; then
 	timeout 300 scp $SO -q "$VIDEO" "root@$PI:$D/video.mp4" || say "FAIL the video was not copied"
 fi
+# mview's model (the image may not carry it).
+timeout 300 scp $SO -q -r userland/tests/mview/models/qs40 "root@$PI:$D/" || say "FAIL the model was not copied"
 
 # The compositor on its own socket (a socket of an earlier run removed first).
 b "rm -f $D/run/wayland-0; env $ENV nohup $D/bin/wayland --socket=$D/run/wayland-0 --desktop-client=none > $D/wayland.log 2>&1 < /dev/null & echo \$! > $D/wayland.pid; sleep 8; test -S $D/run/wayland-0 && grep -q 'step=socket' $D/wayland.log && echo compositor up || { echo compositor down; tail -5 $D/wayland.log; }" > "$out/compositor.txt" 2>&1
@@ -66,7 +69,7 @@ say "probe $(b "grep -E 'step=output-swapchain' $D/wayland.log | tail -1" 2>&1)"
 i=0
 while [ $i -lt "${CYCLES:-3}" ]; do
 	i=$((i + 1))
-	BT=$((${SPIN:-8} + 120)) b "env $ENV $D/bin/mview --display=$D/run/wayland-0 --token=g$i --spin=${SPIN:-8} --copies=${COPIES:-10} --content=game --present=mailbox --images=4" > "$out/game$i.txt" 2>&1
+	BT=$((${SPIN:-8} + 120)) b "env $ENV $D/bin/mview --display=$D/run/wayland-0 --model=$D/qs40 --token=g$i --spin=${SPIN:-8} --copies=${COPIES:-10} --content=game --present=mailbox --images=4" > "$out/game$i.txt" 2>&1
 	say "game $i $(grep -E 'MVIEW (SPIN|FAILED)' "$out/game$i.txt" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')"
 	grep -E 'VULKAN WSI' "$out/game$i.txt" | sed "s/^/game $i /" | tee -a "$summary"
 	sleep 3
