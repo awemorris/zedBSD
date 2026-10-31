@@ -1,0 +1,11 @@
+--- a/src/hal/amd64/bsp-pcat/lapic.c
++++ b/src/hal/amd64/bsp-pcat/lapic.c
+@@ -97,7 +97,7 @@
+  * build to compare against.
+  */
+ #ifndef LAPIC_TICK_TSC_DEADLINE
+-#define LAPIC_TICK_TSC_DEADLINE       1
++#define LAPIC_TICK_TSC_DEADLINE       0
+ #endif
+ 
+ static volatile uint32_t *lapic;
