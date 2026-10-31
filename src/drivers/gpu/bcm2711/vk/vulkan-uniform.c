@@ -98,6 +98,62 @@ bcm2711_vulkan_uniform_create(
 }
 
 /*
+ * Writes a draw's stream for one stage straight into native upload storage
+ * (count words at destination, little-endian), in the order and with the
+ * checks of bcm2711_vulkan_uniform_create, without a CPU copy on the heap.
+ * A refusal leaves destination partly written; the caller publishes nothing
+ * that names it.
+ */
+int
+bcm2711_vulkan_uniform_write(
+	const struct bcm2711_vulkan_prepared_event *draw,
+	uint32_t stage,
+	const struct bcm2711_vulkan_native_binding bindings[BCM2711_VULKAN_PIPELINE_SETS][BCM2711_VULKAN_LAYOUT_BINDINGS],
+	uint8_t *destination,
+	uint32_t count)
+{
+	const struct bcm2711_shader_binary *program;
+	struct bcm2711_native_viewport viewport;
+	uint32_t index;
+	uint32_t word;
+	int error;
+
+	/* The same draw, stage and stream checks as a created stream. */
+	if (draw == NULL || draw->pipeline == NULL || destination == NULL)
+		return EINVAL;
+	if (draw->opcode != GPU_OP_CMD_DRAW && draw->opcode != GPU_OP_CMD_DRAW_INDEXED)
+		return EINVAL;
+	if (stage >= 3U)
+		return EINVAL;
+	program = draw->pipeline->programs[stage];
+	if (program == NULL || (uint32_t)program->stage != stage)
+		return EINVAL;
+	if (program->uniform_count > VULKAN_UNIFORM_BYTES / sizeof(uint32_t) || program->uniform_count != count)
+		return EINVAL;
+	if (program->uniform_count != 0 && program->uniforms == NULL)
+		return EINVAL;
+
+	/* The viewport's fixed-point words, once for the stream. */
+	error = bcm2711_native_viewport_prepare(draw->viewport, &viewport);
+	if (error != 0)
+		return error;
+
+	/* Each consumed word in emitted order, byte by byte so that any upload alignment holds it. */
+	for (index = 0; index < count; index++) {
+		error = prepare_word(draw, stage, bindings, &viewport, &program->uniforms[index], &word);
+		if (error != 0)
+			return error;
+		destination[(size_t)index * 4U] = (uint8_t)word;
+		destination[(size_t)index * 4U + 1U] = (uint8_t)(word >> 8);
+		destination[(size_t)index * 4U + 2U] = (uint8_t)(word >> 16);
+		destination[(size_t)index * 4U + 3U] = (uint8_t)(word >> 24);
+	}
+
+	/* Succeeded: the stream is complete in the upload. */
+	return 0;
+}
+
+/*
  * Releases one complete or unpublished CPU uniform stream without altering native DMA ownership.
  */
 void

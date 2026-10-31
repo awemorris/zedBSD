@@ -709,7 +709,6 @@ prepare_programs(
 	struct bcm2711_native_shader *shader)
 {
 	const struct bcm2711_shader_binary *program;
-	struct bcm2711_vulkan_uniform_words *words;
 	struct bcm2711_native_storage *code;
 	uint32_t uniforms;
 	struct bcm2711_native_storage *defaults;
@@ -754,27 +753,20 @@ prepare_programs(
 		draw->programs[stage] = program;
 		draw->code[stage] = code;
 
-		/* Push constants and texture bindings always produce this draw's own scalar stream. */
-		error = bcm2711_vulkan_uniform_create(event, stage, draw->bindings, &words);
-		if (error != 0)
-			return error;
-
 		/* Empty streams still receive a valid aligned placeholder, without fabricating a consumed word. */
-		bytes = (uint64_t)words->count * 4U;
+		bytes = (uint64_t)program->uniform_count * 4U;
 		if (bytes == 0)
 			bytes = 4;
 		error = upload_take(draw, bytes, available, &destination, &uniforms);
-		if (error != 0) {
-			bcm2711_vulkan_uniform_release(words);
+		if (error != 0)
 			return error;
-		}
 
-		/* Scalar words are copied before their temporary CPU owner is retired; an empty stream's placeholder is a written zero. */
-		for (index = 0; index < words->count; index++)
-			write_word(destination + (size_t)index * 4U, words->words[index]);
-		if (words->count == 0)
+		/* Push constants and texture bindings always produce this draw's own scalar stream, written in place; an empty stream's placeholder is a written zero. */
+		error = bcm2711_vulkan_uniform_write(event, stage, draw->bindings, destination, program->uniform_count);
+		if (error != 0)
+			return error;
+		if (program->uniform_count == 0)
 			write_word(destination, 0U);
-		bcm2711_vulkan_uniform_release(words);
 		kern_dcache_clean_range(destination, (size_t)bytes);
 		shader->programs[stage].binary = program;
 		shader->programs[stage].code = code->view->address;
