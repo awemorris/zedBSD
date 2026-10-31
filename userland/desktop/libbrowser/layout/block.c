@@ -218,8 +218,14 @@ layout_block(
 
 	/* An explicit height replaces the content's. */
 	content_height = box->height;
-	if (height_definite)
+	if (height_definite) {
 		box->height = specified_height;
+
+		/* A table's height is the least its rows and captions leave. */
+		if ((box->style.display == CSS_DISPLAY_TABLE || box->style.display == CSS_DISPLAY_INLINE_TABLE) &&
+		    content_height > specified_height)
+			box->height = content_height;
+	}
 
 	/* An aspect-ratio height is the least a box that shows its overflow has. */
 	if (ratio_floor && box->height < ratio_height)

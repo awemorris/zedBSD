@@ -368,6 +368,10 @@ page_scroll_to(
 	if (y > limit)
 		y = limit;
 
+	/* The boxes that stay with the viewport (fixed ones) move with the scroll now, and the display list is built again. */
+	if (laid_out && layout_sticky_apply(&page->layout, layout_from_px((float)y)))
+		page->painted = 0;
+
 	/* Succeeded: the view takes it. */
 	page->scroll_x = 0.0;
 	page->scroll_y = y;

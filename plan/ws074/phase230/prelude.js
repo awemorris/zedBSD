@@ -1396,14 +1396,21 @@
           var p = href && picture(new URL(href, (document.baseURI || location.href)).href);
           if (p && shown(element)) image(candidates, element, p.src, p);
         }
-        var bg = /url\(\s*["']?([^"')]+)["']?\s*\)/.exec(s.backgroundImage || '');
+        var bgs = s.backgroundImage || '', bg = bgs.indexOf('url(', bgs.indexOf('url(') + 1) < 0 ? /^\s*url\(\s*(["']?)([\s\S]*)\1\s*\)\s*$/.exec(bgs) : /url\(\s*["']?([^"')]+)["']?\s*\)/.exec(bgs);
+        if (bg && bg.length === 3) bg = [bg[0], bg[2]];
         if (bg && element !== document.body && element !== document.documentElement) {
           var b = picture(new URL(bg[1], (document.baseURI || location.href)).href);
           if (b && shown(element)) image(candidates, element, b.src, b);
         }
         var before = getComputedStyle(element, '::before').content;
         if (before && before !== 'none' && before !== 'normal' && /^["']|attr\(/.test(before) && shown(element)) {
-          var rb = visible(element);
+          var rb = visible(element) || visible(holder(element));
+          if (rb) {
+            // The generated text's own width (about 0.55 em a character), not its block's.
+            var made = /^["']/.test(before) ? before.slice(1, -1) : (element.getAttribute(before.slice(5, -1)) || ''),
+              em = parseFloat(getComputedStyle(element, '::before').fontSize) || 16;
+            rb = [rb[0], rb[1], Math.min(rb[2], rb[0] + made.length * em * 0.55), rb[3]];
+          }
           if (rb && !texts.has(holder(element))) texts.set(holder(element), rb);
         }
       }

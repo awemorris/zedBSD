@@ -998,8 +998,13 @@ anchor_flip(
 		expr = style->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH];
 		style->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH] = anchor_turn(tree, style->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT], how);
 		style->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT] = anchor_turn(tree, expr, how);
+		/* The alignment along the old inline axis (left and right named by the direction) becomes the one along the block axis. */
 		align = style->align_self;
 		style->align_self = style->justify_self;
+		if (style->align_self == CSS_ALIGN_LEFT)
+			style->align_self = style->direction == CSS_DIRECTION_RTL ? CSS_ALIGN_END : CSS_ALIGN_START;
+		else if (style->align_self == CSS_ALIGN_RIGHT)
+			style->align_self = style->direction == CSS_DIRECTION_RTL ? CSS_ALIGN_START : CSS_ALIGN_END;
 		style->justify_self = align;
 	} else {
 		/* The self-alignment along the flipped axis turns round. */
@@ -1012,6 +1017,14 @@ anchor_flip(
 			align = CSS_ALIGN_SELF_END;
 		else if (align == CSS_ALIGN_SELF_END)
 			align = CSS_ALIGN_SELF_START;
+		else if (align == CSS_ALIGN_LEFT)
+			align = CSS_ALIGN_RIGHT;
+		else if (align == CSS_ALIGN_RIGHT)
+			align = CSS_ALIGN_LEFT;
+		else if (align == CSS_ALIGN_FLEX_START)
+			align = CSS_ALIGN_FLEX_END;
+		else if (align == CSS_ALIGN_FLEX_END)
+			align = CSS_ALIGN_FLEX_START;
 		if (how == 0)
 			style->align_self = align;
 		else

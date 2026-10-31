@@ -184,6 +184,18 @@ page_vt_pseudo_style(
 	int error;
 
 	page = context;
+
+	/* ::before and ::after of any element: the cascade's style for the pseudo-element, inheriting from the element's. */
+	if (pseudo == CSS_PSEUDO_ELEMENT_BEFORE || pseudo == CSS_PSEUDO_ELEMENT_AFTER) {
+		chain = malloc(sizeof(*chain));
+		if (chain == NULL)
+			return ENOMEM;
+		error = page_computed_style(page, element, chain);
+		if (error == 0)
+			error = css_engine_compute_pseudo(page->css, element, pseudo, chain, style);
+		free(chain);
+		return error;
+	}
 	if (element != (struct dom_element *)page->document->node.first_child && element->node.parent != &page->document->node)
 		return ENOENT;
 	chain = malloc(5U * sizeof(*chain));

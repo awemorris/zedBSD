@@ -15,6 +15,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 /* The font size of the root before any style sets it, in pixels. */
@@ -106,6 +107,9 @@ struct css_engine {
 	struct vm_string *atom_style;
 	struct vm_string *atom_href;
 	float root_font_size;
+	/* The line height in pixels of the element being styled and of the root (the lh and rlh units). */
+	float line_px;
+	float root_line_px;
 	/* The zoom of the element being styled: the product through its ancestors, and its own factor. */
 	float zoom_eff;
 	float zoom_rel;
@@ -217,6 +221,8 @@ struct cascade_match {
 	uint32_t specificity;
 	/* How many generations the element is below its @scope root (CASCADE_UNSCOPED outside @scope); nearer wins. */
 	uint32_t proximity;
+	/* The cascade layer's weight (a later layer is more; no layer is the most; the reverse for !important). */
+	uint32_t layer;
 	uint64_t order;
 };
 
@@ -270,7 +276,7 @@ static int cascade_element_keys(struct css_engine *engine, struct dom_element *e
 static int cascade_add_bucket(struct css_engine *engine, const struct css_rule_index *index, const struct css_index_bucket *bucket);
 static int cascade_collect_sheet(struct css_engine *engine, struct dom_element *element, const struct css_sheet *sheet, uint64_t sheet_number, struct vm_string *id, struct wb_vector *matches);
 static int cascade_entry_compare(const void *left, const void *right);
-static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, uint64_t order);
+static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, int layer, uint64_t order);
 static int cascade_scoped_matches(struct css_engine *engine, struct dom_element *element, const struct css_scope *scope, const struct css_selector *selector, uint32_t *proximity);
 static int cascade_scope_root(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
 static int cascade_scope_root_compute(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
@@ -321,6 +327,7 @@ static struct css_length cascade_length(struct css_engine *engine, const struct 
 static void cascade_shadows(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_filters(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_filter *out, int *count);
 static const char *cascade_subgrid(struct css_engine *engine, const struct css_value *value);
+static const char *cascade_declared(struct css_engine *engine, const struct css_style *style, const struct css_value *value);
 static void cascade_text_shadow(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
@@ -359,6 +366,8 @@ css_engine_create(
 	created->zoom_eff = 1.0f;
 	created->zoom_rel = 1.0f;
 	created->root_zoom = 1.0f;
+	created->line_px = CASCADE_DEFAULT_FONT_SIZE * 1.2f;
+	created->root_line_px = CASCADE_DEFAULT_FONT_SIZE * 1.2f;
 	created->viewport_width = CASCADE_DEFAULT_VIEWPORT_WIDTH;
 	created->viewport_height = CASCADE_DEFAULT_VIEWPORT_HEIGHT;
 	wb_vector_init(&created->sheets, sizeof(struct cascade_sheet));
@@ -872,6 +881,7 @@ cascade_paint_color(
 	const struct css_style *alternate_parent;
 	float root_font_size;
 	float root_zoom;
+	float root_line_px;
 	size_t container_uses;
 	int container_missed;
 	int error;
@@ -892,6 +902,7 @@ cascade_paint_color(
 	/* An alternate cascade is discarded except for color and cannot affect later layout. */
 	root_font_size = engine->root_font_size;
 	root_zoom = engine->root_zoom;
+	root_line_px = engine->root_line_px;
 	container_uses = engine->container_uses.count;
 	container_missed = engine->container_missed;
 	engine->visited_pass = 1;
@@ -899,12 +910,24 @@ cascade_paint_color(
 	engine->visited_pass = 0;
 	engine->root_font_size = root_font_size;
 	engine->root_zoom = root_zoom;
+	engine->root_line_px = root_line_px;
 	engine->container_uses.count = container_uses;
 	engine->container_missed = container_missed;
 	if (error != 0)
 		return error;
 	style->paint_color = visited.color;
 	return 0;
+}
+
+/* The line height of a style in pixels (the lh unit): a number scales the font size, and normal is a little over one. */
+static float
+cascade_line_pixels(const struct css_style *style)
+{
+	if (style->line_height.unit == CSS_UNIT_PX)
+		return style->line_height.value;
+	if (style->line_height.unit == CSS_UNIT_NUMBER)
+		return style->line_height.value * style->font_size;
+	return style->font_size * 1.2f;
 }
 
 /* Computes the style of an element, or of one of its pseudo-elements, in the cascade. */
@@ -966,6 +989,7 @@ cascade_compute(
 		style->list_style = parent->list_style;
 		style->underline = parent->underline;
 		style->text_decoration_skip_ink = parent->text_decoration_skip_ink;
+		style->text_stroke_width = parent->text_stroke_width;
 		style->text_shadow = parent->text_shadow;
 		style->text_shadow_set = parent->text_shadow_set;
 		style->custom = parent->custom;
@@ -1015,6 +1039,8 @@ cascade_compute(
 		style->text_shadow.y *= engine->zoom_rel;
 		style->text_shadow.blur *= engine->zoom_rel;
 	}
+
+	engine->line_px = cascade_line_pixels(style);
 
 	/* The element's custom properties, then the declarations that wait for them. */
 	error = cascade_customs(engine, style, matches, list.count);
@@ -1115,6 +1141,7 @@ cascade_compute(
 	if (is_root) {
 		engine->root_font_size = style->font_size;
 		engine->root_zoom = style->zoom_eff;
+		engine->root_line_px = cascade_line_pixels(style);
 	}
 
 	/* Succeeded: the style is computed. */
@@ -1355,7 +1382,7 @@ cascade_collect(
 		return 0;
 
 	/* They come after every sheet's rules. */
-	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, (uint64_t)engine->sheets.count << 44);
+	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, 0, (uint64_t)engine->sheets.count << 44);
 	if (error != 0)
 		return error;
 
@@ -1478,7 +1505,7 @@ cascade_presentational(
 	if (error != 0)
 		return 0;
 	return cascade_add_declarations(matches, declarations, declaration_count,
-	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0);
+	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0, 0);
 }
 
 /* Appends an ASCII fragment to a declaration being made. */
@@ -1890,7 +1917,7 @@ cascade_collect_sheet(
 		/* A rule whose selectors all failed does not apply. */
 		if (matched) {
 			order = (sheet_number << 44) | ((uint64_t)candidates[position].rule << 16);
-			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, order);
+			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, rule->layer, order);
 			if (error != 0)
 				return error;
 		}
@@ -2147,6 +2174,7 @@ cascade_add_declarations(
 	int origin,
 	uint32_t specificity,
 	uint32_t proximity,
+	int layer,
 	uint64_t order)
 {
 	struct cascade_match match;
@@ -2158,6 +2186,9 @@ cascade_add_declarations(
 		match.declaration = &declarations[index];
 		match.specificity = specificity;
 		match.proximity = proximity;
+		match.layer = layer != 0 ? (uint32_t)layer : 0x40000000U;
+		if (declarations[index].important)
+			match.layer = layer != 0 ? 0x40000000U - (uint32_t)layer : 0U;
 		match.order = order + (uint64_t)index;
 		if (origin == CSS_ORIGIN_USER_AGENT) {
 			match.rank = RANK_USER_AGENT;
@@ -2758,6 +2789,10 @@ cascade_compare(
 	if (a->rank < b->rank)
 		return -1;
 	if (a->rank > b->rank)
+		return 1;
+	if (a->layer < b->layer)
+		return -1;
+	if (a->layer > b->layer)
 		return 1;
 	if (a->specificity < b->specificity)
 		return -1;
@@ -4158,6 +4193,14 @@ cascade_apply(
 		if (value->kind == CSS_VALUE_INHERIT || inherited) {
 			if (parent != NULL)
 				cascade_inherit(style, parent, property);
+
+			/* An inherited length is in the parent's zoom: it is scaled to the element's own. */
+			if (parent != NULL && engine->zoom_rel != 1.0f && value->kind == CSS_VALUE_INHERIT) {
+				if (property == CSS_PROP_WIDTH && style->width.unit == CSS_UNIT_PX)
+					style->width.value *= engine->zoom_rel;
+				if (property == CSS_PROP_HEIGHT && style->height.unit == CSS_UNIT_PX)
+					style->height.value *= engine->zoom_rel;
+			}
 			return;
 		}
 	}
@@ -4406,6 +4449,7 @@ cascade_apply(
 				style->line_height.offset = 0;
 			}
 		}
+		engine->line_px = cascade_line_pixels(style);
 
 		break;
 	case CSS_PROP_TEXT_ALIGN:
@@ -4473,11 +4517,13 @@ cascade_apply(
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
 		style->column_names = cascade_line_names(engine, value);
 		style->column_subgrid = cascade_subgrid(engine, value);
+		style->column_declared = cascade_declared(engine, style, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		cascade_tracks(engine, style, value, style->rows, &style->row_count, &style->row_repeat);
 		style->row_names = cascade_line_names(engine, value);
 		style->row_subgrid = cascade_subgrid(engine, value);
+		style->row_declared = cascade_declared(engine, style, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
 		/* The areas, in the engine's arena. */
@@ -4636,6 +4682,9 @@ cascade_apply(
 		break;
 	case CSS_PROP_OUTLINE_WIDTH:
 		style->outline_width = cascade_length(engine, value, style->font_size).value;
+		break;
+	case CSS_PROP_TEXT_STROKE_WIDTH:
+		style->text_stroke_width = cascade_length(engine, value, style->font_size).value;
 		break;
 	case CSS_PROP_OUTLINE_STYLE:
 		style->outline_style = value->keyword;
@@ -4813,6 +4862,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_OUTLINE_WIDTH:
 		style->outline_width = parent->outline_width;
+		break;
+	case CSS_PROP_TEXT_STROKE_WIDTH:
+		style->text_stroke_width = parent->text_stroke_width;
 		break;
 	case CSS_PROP_OUTLINE_STYLE:
 		style->outline_style = parent->outline_style;
@@ -5054,6 +5106,7 @@ cascade_inherit(
 		style->column_repeat = parent->column_repeat;
 		style->column_names = parent->column_names;
 		style->column_subgrid = parent->column_subgrid;
+		style->column_declared = parent->column_declared;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		memcpy(style->rows, parent->rows, sizeof(style->rows));
@@ -5061,6 +5114,7 @@ cascade_inherit(
 		style->row_repeat = parent->row_repeat;
 		style->row_names = parent->row_names;
 		style->row_subgrid = parent->row_subgrid;
+		style->row_declared = parent->row_declared;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
 		style->areas = parent->areas;
@@ -5537,6 +5591,58 @@ cascade_try_rule(
 	return found;
 }
 
+/* Keeps the text of a template with a repeat() in the engine's arena, its lengths in ems turned to pixels by the font size (NULL for another template). */
+static const char *
+cascade_declared(
+	struct css_engine *engine,
+	const struct css_style *style,
+	const struct css_value *value)
+{
+	struct wb_buffer text;
+	const char *source;
+	const char *kept;
+	char number[40];
+	size_t index;
+	size_t start;
+	size_t length;
+	int error;
+
+	/* Only a parsed template with a repeat() has one. */
+	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL || value->tracks->declared == NULL)
+		return NULL;
+	source = value->tracks->declared;
+	length = strlen(source);
+
+	/* Each number followed by em becomes pixels. */
+	wb_buffer_init(&text);
+	error = 0;
+	for (index = 0; error == 0 && index < length; ) {
+		start = index;
+		if ((source[index] >= '0' && source[index] <= '9') || (source[index] == '.' && index + 1U < length)) {
+			while (index < length && ((source[index] >= '0' && source[index] <= '9') || source[index] == '.'))
+				index++;
+			if (index + 1U < length && source[index] == 'e' && source[index + 1U] == 'm' &&
+			    (index + 2U >= length || !((source[index + 2U] >= 'a' && source[index + 2U] <= 'z') || source[index + 2U] == '-'))) {
+				snprintf(number, sizeof(number), "%.6gpx", atof(source + start) * (double)style->font_size);
+				error = wb_buffer_append_string(&text, number);
+				index += 2U;
+				continue;
+			}
+			error = wb_buffer_append(&text, source + start, index - start);
+			continue;
+		}
+		error = wb_buffer_append_byte(&text, source[index]);
+		index++;
+	}
+	if (error != 0) {
+		wb_buffer_release(&text);
+		return NULL;
+	}
+	kept = cascade_keep(engine, wb_buffer_string(&text), text.length + 1U);
+	wb_buffer_release(&text);
+	return kept;
+}
+
 /* Keeps a subgrid template's serialization in the engine's arena (NULL for another template). */
 static const char *
 cascade_subgrid(
@@ -5888,6 +5994,12 @@ cascade_length(
 		break;
 	case CSS_DUNIT_EX:
 		length.value = value->number * font_size * 0.5f;
+		break;
+	case CSS_DUNIT_LH:
+		length.value = value->number * engine->line_px;
+		break;
+	case CSS_DUNIT_RLH:
+		length.value = value->number * engine->root_line_px / engine->root_zoom * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_PERCENT:
 		length.value = value->number;

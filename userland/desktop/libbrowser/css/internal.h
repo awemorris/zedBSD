@@ -201,7 +201,9 @@ enum css_declared_unit {
 	CSS_DUNIT_VMAX,
 	CSS_DUNIT_CALC,
 	CSS_DUNIT_CQW,
-	CSS_DUNIT_CQH
+	CSS_DUNIT_CQH,
+	CSS_DUNIT_LH,
+	CSS_DUNIT_RLH
 };
 
 /*
@@ -312,6 +314,7 @@ enum css_property {
 	CSS_PROP_OUTLINE_STYLE,
 	CSS_PROP_OUTLINE_COLOR,
 	CSS_PROP_OUTLINE_OFFSET,
+	CSS_PROP_TEXT_STROKE_WIDTH,
 	CSS_PROP_CLIP_PATH,
 	CSS_PROP_CLIP,
 	CSS_PROP_DIRECTION,
@@ -566,6 +569,8 @@ struct css_track_list {
 	int named;
 	/* A subgrid's value as it serializes ("subgrid" and its line-name lists), NUL-terminated in the arena; NULL otherwise. */
 	const char *subgrid;
+	/* A template with a repeat(): its text as written (spaces normalized, lengths in ems unresolved), NUL-terminated in the arena; NULL otherwise. */
+	const char *declared;
 };
 
 /* A declared clip-path: inset(): its four declared lengths, top, right, bottom, left. */
@@ -679,6 +684,8 @@ struct css_rule {
 	const struct css_media *media;
 	/* The @scope the rule is in (NULL for none). */
 	const struct css_scope *scope;
+	/* The cascade layer the rule is in: 1 for the first the sheet names, and so on (0 for none: unlayered rules win). */
+	int layer;
 };
 
 /*

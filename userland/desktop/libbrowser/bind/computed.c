@@ -157,6 +157,8 @@ enum computed_property {
 	COMPUTED_ANIMATION_TIMING_FUNCTION,
 	COMPUTED_MIX_BLEND_MODE,
 	COMPUTED_ZOOM,
+	COMPUTED_CONTENT,
+	COMPUTED_TEXT_STROKE_WIDTH,
 
 	/* The flow-relative properties, six families of four (inline-start, inline-end, block-start, block-end): margin, padding, inset, border width, style and color. */
 	COMPUTED_LOGICAL_FIRST,
@@ -207,6 +209,7 @@ static float computed_zoom = 1.0f;
 
 static int computed_logical_property(const struct css_style *style, int property);
 static int computed_write_radius(const struct css_style *style, int index, struct wb_units *out);
+static int computed_write_content(const struct css_style *style, struct wb_units *out);
 static int computed_write_overflow(const struct css_style *style, struct wb_units *out);
 static int computed_write_url(const struct vm_string *url, struct wb_units *out);
 static int computed_needs_quotes(const struct vm_string *family);
@@ -243,6 +246,8 @@ static const struct vm_cell_type computed_ref_type = { "computed-style", compute
  * for the life of the program.
  */
 static const struct computed_entry computed_entries[] = {
+	{ "content", COMPUTED_CONTENT },
+	{ "-webkit-text-stroke-width", COMPUTED_TEXT_STROKE_WIDTH },
 	{ "border-top-left-radius", COMPUTED_RADIUS_FIRST + 0 },
 	{ "border-top-right-radius", COMPUTED_RADIUS_FIRST + 1 },
 	{ "border-bottom-right-radius", COMPUTED_RADIUS_FIRST + 2 },
@@ -557,13 +562,24 @@ computed_pseudo_of(
 	index = 0;
 	while (index < length && units[index] == ' ')
 		index++;
-	if (index + 1U >= length || units[index] != ':' || units[index + 1U] != ':')
+	if (index + 1U >= length || units[index] != ':' || units[index + 1U] != ':') {
+		if (index + 6U == length && units[index] == ':' && units[index + 1U] == 'a' && units[index + 2U] == 'f' &&
+		    units[index + 3U] == 't' && units[index + 4U] == 'e' && units[index + 5U] == 'r')
+			return CSS_PSEUDO_ELEMENT_AFTER;
+		if (index + 7U == length && units[index] == ':' && units[index + 1U] == 'b' && units[index + 2U] == 'e' &&
+		    units[index + 3U] == 'f' && units[index + 4U] == 'o' && units[index + 5U] == 'r' && units[index + 6U] == 'e')
+			return CSS_PSEUDO_ELEMENT_BEFORE;
 		return units[index] == ':' ? 0 : -1;
+	}
 	index += 2U;
 	used = 0;
 	while (index < length && units[index] != '(' && units[index] != ' ' && used < sizeof(word) - 1U)
 		word[used++] = (char)units[index++];
 	word[used] = '\0';
+	if (strcmp(word, "before") == 0)
+		return CSS_PSEUDO_ELEMENT_BEFORE;
+	if (strcmp(word, "after") == 0)
+		return CSS_PSEUDO_ELEMENT_AFTER;
 	if (strncmp(word, "view-transition", 15) != 0)
 		return 0;
 	pseudo = 0;
@@ -1158,6 +1174,45 @@ computed_write(
 	return 0;
 }
 
+/* Writes the computed content: normal for an element, none for a pseudo-element without any, else its strings (quoted) and attr() items. */
+static int
+computed_write_content(
+	const struct css_style *style,
+	struct wb_units *out)
+{
+	size_t index;
+	size_t unit;
+	int error;
+
+	if (style->content == NULL || style->content->count == 0)
+		return computed_ascii(computed_pseudo == CSS_PSEUDO_ELEMENT_BEFORE || computed_pseudo == CSS_PSEUDO_ELEMENT_AFTER ? "none" : "normal", out);
+	error = 0;
+	for (index = 0; error == 0 && index < style->content->count; index++) {
+		if (index != 0)
+			error = computed_ascii(" ", out);
+		if (error != 0)
+			break;
+		if (style->content->items[index].is_attribute) {
+			error = computed_ascii("attr(", out);
+			for (unit = 0; error == 0 && unit < style->content->items[index].text->length; unit++)
+				error = wb_units_append_code_point(out, vm_string_at(style->content->items[index].text, unit));
+			if (error == 0)
+				error = computed_ascii(")", out);
+			continue;
+		}
+		error = computed_ascii("\"", out);
+		for (unit = 0; error == 0 && unit < style->content->items[index].text->length; unit++) {
+			if (vm_string_at(style->content->items[index].text, unit) == '"' || vm_string_at(style->content->items[index].text, unit) == '\\')
+				error = wb_units_append_code_point(out, '\\');
+			if (error == 0)
+				error = wb_units_append_code_point(out, vm_string_at(style->content->items[index].text, unit));
+		}
+		if (error == 0)
+			error = computed_ascii("\"", out);
+	}
+	return error;
+}
+
 /*
  * Writes a corner's computed radius: the first four are the physical corners, the next four the flow-relative
  * ones (start-start, start-end, end-end, end-start); a vertical writing mode swaps their horizontal and vertical radii.
@@ -1248,6 +1303,13 @@ computed_write_grid(
 	*handled = 0;
 	if (property != COMPUTED_GRID_TEMPLATE_COLUMNS && property != COMPUTED_GRID_TEMPLATE_ROWS)
 		return 0;
+
+	/* An element that is not a grid container reports a template with a repeat() as written. */
+	if (style->display != CSS_DISPLAY_GRID && style->display != CSS_DISPLAY_INLINE_GRID &&
+	    (property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_declared != NULL : style->row_declared != NULL)) {
+		*handled = 1;
+		return computed_ascii(property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_declared : style->row_declared, out);
+	}
 
 	/* A subgrid axis is its line-name lists. */
 	if (property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid != NULL : style->row_subgrid != NULL) {
@@ -1512,6 +1574,12 @@ computed_write_keyword(
 		break;
 	case COMPUTED_BOX_SIZING:
 		error = computed_name(computed_box_sizings, 2, style->box_sizing, out);
+		break;
+	case COMPUTED_CONTENT:
+		error = computed_write_content(style, out);
+		break;
+	case COMPUTED_TEXT_STROKE_WIDTH:
+		error = computed_pixels(style->text_stroke_width, out);
 		break;
 	case COMPUTED_WIDTH:
 		error = computed_length(&style->width, out);

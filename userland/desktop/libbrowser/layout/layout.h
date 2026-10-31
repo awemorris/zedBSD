@@ -300,6 +300,8 @@ struct layout_box {
 	layout_unit sticky_dy;
 	/* A box placed by an anchor follows it when the page scrolls, even a fixed one (set by the anchor functions). */
 	int anchored;
+	/* A flex container gave a table its whole height (captions included), not its grid box's (set while it is laid out). */
+	int table_wrapper_height;
 
 	/*
 	 * While a vertical writing mode's domain is laid out in logical
@@ -412,6 +414,8 @@ struct layout_context {
 int layout_build(struct layout_tree *tree, struct css_engine *css, struct text_system *text, struct dom_document *document, layout_image_lookup image_lookup, layout_url_lookup url_lookup, void *image_context, int width, int height, const struct layout_transition *transition);
 void layout_box_model(struct layout_box *box, layout_unit containing_width);
 void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
+int layout_replaced_is_canvas(const struct layout_box *box);
+int layout_replaced_ratio(const struct layout_box *box, float *ratio);
 void layout_replaced_size(struct layout_box *box, layout_unit containing_width, layout_unit containing_height, int height_definite);
 void layout_absolute(struct layout_box *box, layout_unit x, layout_unit y);
 int layout_is_positioned(const struct layout_box *box);

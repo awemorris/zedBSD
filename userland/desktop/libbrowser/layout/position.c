@@ -59,6 +59,9 @@ static int position_place(struct layout_tree *tree, struct layout_box *box, cons
 static int position_place_once(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
 static int position_place_fallbacks(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
 static int position_fits(const struct layout_box *box, const struct position_block *containing);
+static int position_aligned(int alignment);
+static int position_physical(int alignment, int rtl);
+static layout_unit position_align(int alignment, layout_unit start, layout_unit end, layout_unit margin_start, layout_unit margin_end, layout_unit size);
 static uint32_t position_try_key(const struct css_try_list *list);
 static int position_in_scroller(const struct layout_box *box);
 static void position_padding_box(const struct layout_box *box, struct position_block *block);
@@ -900,7 +903,13 @@ position_place_once(
 
 	/* Horizontally: from the left, from the right, or where it would have been. */
 	frame = position_frame(box);
-	if (has_left) {
+	if (has_left && has_right && box->style.width.unit != CSS_UNIT_AUTO &&
+	    position_aligned(position_physical(box->style.justify_self, box->style.direction == CSS_DIRECTION_RTL))) {
+		/* Both insets set and a width that does not stretch: justify-self aligns the box between them. */
+		x = position_align(position_physical(box->style.justify_self, box->style.direction == CSS_DIRECTION_RTL),
+		    area_left + left, area_left + area_width - right,
+		    box->margin[CSS_LEFT], box->margin[CSS_RIGHT], box->width + frame);
+	} else if (has_left) {
 		x = area_left + left + box->margin[CSS_LEFT];
 	} else if (has_right) {
 		x = area_left + area_width - right - box->margin[CSS_RIGHT] - (box->width + frame);
@@ -965,7 +974,10 @@ placed_x:
 	}
 
 	/* Vertically: from the top, from the bottom, or where it would have been. */
-	if (has_top) {
+	if (has_top && has_bottom && box->style.height.unit != CSS_UNIT_AUTO && position_aligned(box->style.align_self)) {
+		y = position_align(box->style.align_self, area_top + top, area_top + area_height - bottom,
+		    box->margin[CSS_TOP], box->margin[CSS_BOTTOM], position_outer_height(box));
+	} else if (has_top) {
 		y = area_top + top + box->margin[CSS_TOP];
 	} else if (has_bottom) {
 		y = area_top + area_height - bottom - box->margin[CSS_BOTTOM] - position_outer_height(box);
@@ -1028,6 +1040,48 @@ placed_x:
 
 	/* Succeeded: the box is placed. */
 	return 0;
+}
+
+/* A self-alignment along the horizontal axis as left, right, center or (the start side) anything else: start and end follow the direction. */
+static int
+position_physical(
+	int alignment,
+	int rtl)
+{
+	if (alignment == CSS_ALIGN_START || alignment == CSS_ALIGN_SELF_START || alignment == CSS_ALIGN_FLEX_START)
+		return rtl ? CSS_ALIGN_RIGHT : CSS_ALIGN_LEFT;
+	if (alignment == CSS_ALIGN_END || alignment == CSS_ALIGN_SELF_END || alignment == CSS_ALIGN_FLEX_END)
+		return rtl ? CSS_ALIGN_LEFT : CSS_ALIGN_RIGHT;
+	return alignment;
+}
+
+/* Tells whether a self-alignment moves a box that has both insets away from the start (end, center and their relatives). */
+static int
+position_aligned(
+	int alignment)
+{
+	return alignment == CSS_ALIGN_END || alignment == CSS_ALIGN_CENTER || alignment == CSS_ALIGN_FLEX_END ||
+	    alignment == CSS_ALIGN_RIGHT || alignment == CSS_ALIGN_SELF_END;
+}
+
+/* Puts a margin box of a size between two edges as an alignment says (the start when it does not fit); returns the border box's start. */
+static layout_unit
+position_align(
+	int alignment,
+	layout_unit start,
+	layout_unit end,
+	layout_unit margin_start,
+	layout_unit margin_end,
+	layout_unit size)
+{
+	layout_unit room;
+
+	room = end - start - margin_start - margin_end - size;
+	if (room < 0)
+		room = 0;
+	if (alignment == CSS_ALIGN_CENTER)
+		room /= 2;
+	return start + margin_start + room;
 }
 
 /* Reports a box's padding box as a containing block. */

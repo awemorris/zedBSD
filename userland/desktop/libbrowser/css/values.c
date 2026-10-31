@@ -82,6 +82,7 @@ enum values_shorthand {
 	SHORT_RADIUS_END_END,
 	SHORT_RADIUS_END_START,
 	SHORT_OUTLINE,
+	SHORT_TEXT_STROKE,
 	SHORT_GRID_COLUMN,
 	SHORT_GRID_ROW,
 	SHORT_GRID_AREA,
@@ -254,6 +255,8 @@ static const struct values_name values_names[] = {
 	{ "-webkit-box-shadow", CSS_PROP_BOX_SHADOW },
 	{ "-moz-box-shadow", CSS_PROP_BOX_SHADOW },
 	{ "outline-width", CSS_PROP_OUTLINE_WIDTH },
+	{ "-webkit-text-stroke-width", CSS_PROP_TEXT_STROKE_WIDTH },
+	{ "-webkit-text-stroke", SHORT_TEXT_STROKE },
 	{ "outline-style", CSS_PROP_OUTLINE_STYLE },
 	{ "outline-color", CSS_PROP_OUTLINE_COLOR },
 	{ "outline-offset", CSS_PROP_OUTLINE_OFFSET },
@@ -809,6 +812,8 @@ static const struct values_keyword values_units[] = {
 	{ "rem", CSS_DUNIT_REM },
 	{ "ex", CSS_DUNIT_EX },
 	{ "ch", CSS_DUNIT_EX },
+	{ "lh", CSS_DUNIT_LH },
+	{ "rlh", CSS_DUNIT_RLH },
 	{ "pt", CSS_DUNIT_PT },
 	{ "pc", CSS_DUNIT_PC },
 	{ "in", CSS_DUNIT_IN },
@@ -1034,6 +1039,8 @@ static int values_view_transition_class(struct css_parse *parse, const struct cs
 static int values_animation_single(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_animation(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_repeat_parts(const struct css_token *const *parts, size_t count, struct css_value *value);
+static int values_declared_text(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
+static int values_token_utf8(const struct css_token *token, struct wb_buffer *out);
 static int values_subgrid(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
 static int values_position_parts(const struct css_token *const *parts, size_t count, struct css_value *x, struct css_value *y);
 static int values_position_part(const struct css_token *token, struct css_value *value);
@@ -1060,6 +1067,7 @@ static void values_calc_scale(struct css_calc_sum *sum, float factor);
 static int values_calc_add(struct css_calc_sum *sum, const struct css_calc_sum *other, float sign);
 static size_t values_skip_space(const struct css_token *tokens, size_t count, size_t index);
 static int values_border_radius(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_text_stroke(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_corner_radius(struct css_parse *parse, int corner, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_radii(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *radii);
 static int values_box_shadow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
@@ -1325,6 +1333,8 @@ css_parse_property(
 		return values_corner_radius(parse, 4 + (property - SHORT_RADIUS_START_START), tokens, count, out, out_count);
 	case SHORT_OUTLINE:
 		return values_outline(parse, tokens, count, out, out_count);
+	case SHORT_TEXT_STROKE:
+		return values_text_stroke(parse, tokens, count, out, out_count);
 	case SHORT_GRID_COLUMN:
 		return values_grid_pair(parse, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END, tokens, count, out, out_count);
 	case SHORT_GRID_ROW:
@@ -2435,7 +2445,7 @@ values_single(
 	}
 
 	/* The outline's width is a border's. */
-	if (property == CSS_PROP_OUTLINE_WIDTH) {
+	if (property == CSS_PROP_OUTLINE_WIDTH || property == CSS_PROP_TEXT_STROKE_WIDTH) {
 		/* Parse the selected component with its established native grammar. */
 		error = values_single(parse, CSS_PROP_BORDER_TOP_WIDTH, tokens, count, value);
 		if (error != 0)
@@ -3737,6 +3747,18 @@ values_background(
 			if (error != 0)
 				return error;
 			image.kind = CSS_VALUE_GRADIENT;
+			image_seen = 1;
+			index += rest;
+			continue;
+		}
+
+		/* An image-set() is an image: its first candidate. */
+		if (tokens[index].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[index], "image-set")) {
+			if (image_seen)
+				return EINVAL;
+			error = values_image_set(parse, tokens + index, rest, &image);
+			if (error != 0)
+				return error;
 			image_seen = 1;
 			index += rest;
 			continue;
@@ -5774,6 +5796,45 @@ values_corner_radius(
 	return values_pair(parse, CSS_PROP_RADIUS_TOP_LEFT_X + 2 * corner, CSS_PROP_RADIUS_TOP_LEFT_Y + 2 * corner, tokens, count, out, made);
 }
 
+/* Parses -webkit-text-stroke: a width and a color in either order (only the width is kept). */
+static int
+values_text_stroke(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_value width;
+	struct css_value candidate;
+	size_t starts[3];
+	size_t lengths[3];
+	size_t components;
+	size_t index;
+	int error;
+
+	/* The defaults: medium. */
+	memset(&width, 0, sizeof(width));
+	width.kind = CSS_VALUE_LENGTH;
+	width.number = 3;
+	width.unit = CSS_DUNIT_PX;
+	components = values_components(tokens, count, starts, lengths, 3);
+	if (components == 0 || components > 2)
+		return EINVAL;
+	for (index = 0; index < components; index++) {
+		error = values_single(parse, CSS_PROP_TEXT_STROKE_WIDTH, tokens + starts[index], lengths[index], &candidate);
+		if (error == 0) {
+			width = candidate;
+			continue;
+		}
+		error = values_single(parse, CSS_PROP_OUTLINE_COLOR, tokens + starts[index], lengths[index], &candidate);
+		if (error != 0)
+			return EINVAL;
+	}
+	values_add(out, made, CSS_PROP_TEXT_STROKE_WIDTH, &width);
+	return 0;
+}
+
 /*
  * Parses box-shadow: none, or a comma-separated list of
  * shadows (the first CSS_SHADOWS of them are kept), in the parse's arena.
@@ -6356,7 +6417,129 @@ values_tracks(
 	if (list->count == 0)
 		return EINVAL;
 
+	/* A template with a repeat() keeps its text for an element that is not a grid container. */
+	error = values_declared_text(parse, tokens, count, list);
+	if (error != 0)
+		return error;
+
 	/* Succeeded: the template is parsed. */
+	return 0;
+}
+
+/* Writes a number the way a serialization does (an integer without a point, else up to six significant digits). */
+static int
+values_declared_number(
+	double number,
+	struct wb_buffer *out)
+{
+	char text[40];
+
+	if (number == (double)(long)number)
+		snprintf(text, sizeof(text), "%ld", (long)number);
+	else
+		snprintf(text, sizeof(text), "%.6g", number);
+	return wb_buffer_append_string(out, text);
+}
+
+/*
+ * Keeps the text of a track list that has a repeat() (an element that is not a grid container reports its value
+ * as written): the tokens with single spaces, ", " after commas and line names in brackets without inner padding.
+ */
+static int
+values_declared_text(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_track_list *list)
+{
+	struct wb_buffer text;
+	char *kept;
+	size_t index;
+	int repeats;
+	int error;
+	int space;
+
+	/* Only a template with a repeat(). */
+	repeats = 0;
+	for (index = 0; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[index], "repeat"))
+			repeats = 1;
+		if (tokens[index].type == CSS_TOKEN_FUNCTION && !css_ident_equal(&tokens[index], "repeat") &&
+		    !css_ident_equal(&tokens[index], "minmax") && !css_ident_equal(&tokens[index], "fit-content"))
+			return 0;
+	}
+	if (!repeats)
+		return 0;
+
+	/* The tokens. */
+	wb_buffer_init(&text);
+	error = 0;
+	space = 0;
+	for (index = 0; error == 0 && index < count; index++) {
+		switch (tokens[index].type) {
+		case CSS_TOKEN_WHITESPACE:
+			space = 1;
+			continue;
+		case CSS_TOKEN_COMMA:
+			space = 0;
+			error = wb_buffer_append_string(&text, ", ");
+			continue;
+		case CSS_TOKEN_CLOSE_SQUARE:
+		case CSS_TOKEN_CLOSE_PAREN:
+			space = 0;
+			error = wb_buffer_append_byte(&text, tokens[index].type == CSS_TOKEN_CLOSE_SQUARE ? ']' : ')');
+			continue;
+		default:
+			break;
+		}
+		if (space && text.length != 0 && text.data[text.length - 1U] != '[' && text.data[text.length - 1U] != '(' &&
+		    !(text.length >= 2U && text.data[text.length - 1U] == ' ' && text.data[text.length - 2U] == ','))
+			error = wb_buffer_append_byte(&text, ' ');
+		space = 0;
+		if (error != 0)
+			break;
+		switch (tokens[index].type) {
+		case CSS_TOKEN_OPEN_SQUARE:
+			error = wb_buffer_append_byte(&text, '[');
+			break;
+		case CSS_TOKEN_FUNCTION:
+			error = values_token_utf8(&tokens[index], &text);
+			if (error == 0)
+				error = wb_buffer_append_byte(&text, '(');
+			break;
+		case CSS_TOKEN_NUMBER:
+			error = values_declared_number(tokens[index].number, &text);
+			break;
+		case CSS_TOKEN_PERCENTAGE:
+			error = values_declared_number(tokens[index].number, &text);
+			if (error == 0)
+				error = wb_buffer_append_byte(&text, '%');
+			break;
+		case CSS_TOKEN_DIMENSION:
+			error = values_declared_number(tokens[index].number, &text);
+			if (error == 0)
+				error = values_token_utf8(&tokens[index], &text);
+			break;
+		default:
+			error = values_token_utf8(&tokens[index], &text);
+			break;
+		}
+	}
+	if (error != 0) {
+		wb_buffer_release(&text);
+		return error;
+	}
+
+	/* Kept in the parse's arena. */
+	kept = wb_arena_alloc(parse->arena, text.length + 1U);
+	if (kept == NULL) {
+		wb_buffer_release(&text);
+		return ENOMEM;
+	}
+	memcpy(kept, text.data, text.length);
+	kept[text.length] = '\0';
+	list->declared = kept;
+	wb_buffer_release(&text);
 	return 0;
 }
 

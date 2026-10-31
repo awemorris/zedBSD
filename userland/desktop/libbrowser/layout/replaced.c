@@ -76,6 +76,19 @@ layout_replaced_size(
 		natural_height = (layout_unit)REPLACED_VIDEO_HEIGHT * LAYOUT_UNIT;
 	}
 
+	/* A <canvas>'s natural size is its width and height attributes' (300 by 150 when absent), and gives the ratio. */
+	if (box->image == NULL && layout_replaced_is_canvas(box)) {
+		natural_width = (layout_unit)REPLACED_VIDEO_WIDTH * LAYOUT_UNIT;
+		natural_height = (layout_unit)REPLACED_VIDEO_HEIGHT * LAYOUT_UNIT;
+		replaced_attribute(box, "width", &natural_width);
+		replaced_attribute(box, "height", &natural_height);
+		natural_width = (layout_unit)((float)natural_width * box->style.zoom_eff);
+		natural_height = (layout_unit)((float)natural_height * box->style.zoom_eff);
+		box->natural_width = natural_width;
+		box->natural_height = natural_height;
+		has_ratio = 1;
+	}
+
 	/* A form control's natural size is its text's, and has no ratio. */
 	if (box->control != DOM_CONTROL_NONE) {
 		natural_width = box->natural_width;
@@ -97,7 +110,7 @@ layout_replaced_size(
 		width = replaced_content_size(box, width, CSS_LEFT, CSS_RIGHT);
 
 	/* Only an unresolved non-control width falls back to the real content attribute. */
-	if (!width_given && box->control == DOM_CONTROL_NONE)
+	if (!width_given && box->control == DOM_CONTROL_NONE && !layout_replaced_is_canvas(box))
 		width_given = replaced_attribute(box, sideways ? "height" : "width", &width);
 
 	/* The height: the style's (a percentage only with a definite containing height), or the attribute's. */
@@ -110,7 +123,7 @@ layout_replaced_size(
 		height = replaced_content_size(box, height, CSS_TOP, CSS_BOTTOM);
 
 	/* Only an unresolved non-control height falls back to the real content attribute. */
-	if (!height_given && box->control == DOM_CONTROL_NONE)
+	if (!height_given && box->control == DOM_CONTROL_NONE && !layout_replaced_is_canvas(box))
 		height_given = replaced_attribute(box, sideways ? "width" : "height", &height);
 
 	/*
@@ -162,7 +175,9 @@ layout_replaced_size(
 
 		/* An inline <svg> with a viewBox but no width or height has a ratio only: it fills its containing block's width (ws074-p228). */
 		if (replaced_is_bare_svg(box) && containing_width > 0 && natural_width > 0) {
-			width = containing_width;
+			width = containing_width - box->margin[CSS_LEFT] - box->margin[CSS_RIGHT];
+			if (width < 0)
+				width = 0;
 			height = (layout_unit)((int64_t)width * natural_height / natural_width);
 		}
 	}
@@ -374,6 +389,52 @@ replaced_is_video(
 		return 0;
 	element = (const struct dom_element *)box->node;
 	return element->ns == DOM_NS_HTML && element->tag == DOM_TAG_VIDEO;
+}
+
+/* Finds the width over height of a replaced box's picture or canvas (the ratio its height gives its width by). */
+int
+layout_replaced_ratio(
+	const struct layout_box *box,
+	float *ratio)
+{
+	layout_unit width;
+	layout_unit height;
+
+	/* A picture's own size (a width attribute sizes it by itself). */
+	if (box->image != NULL && box->image->width > 0 && box->image->height > 0) {
+		width = 0;
+		if (replaced_attribute(box, "width", &width))
+			return 0;
+		*ratio = (float)box->image->width / (float)box->image->height;
+		return 1;
+	}
+
+	/* A canvas's attributes (300 by 150 when absent). */
+	if (box->image == NULL && layout_replaced_is_canvas(box)) {
+		width = (layout_unit)REPLACED_VIDEO_WIDTH * LAYOUT_UNIT;
+		height = (layout_unit)REPLACED_VIDEO_HEIGHT * LAYOUT_UNIT;
+		replaced_attribute(box, "width", &width);
+		replaced_attribute(box, "height", &height);
+		if (width <= 0 || height <= 0)
+			return 0;
+		*ratio = (float)width / (float)height;
+		return 1;
+	}
+	return 0;
+}
+
+/* Tells whether a box is an HTML <canvas>'s. */
+int
+layout_replaced_is_canvas(
+	const struct layout_box *box)
+{
+	const struct dom_element *element;
+
+	/* An element's box. */
+	if (box->node == NULL || box->node->type != DOM_ELEMENT)
+		return 0;
+	element = (const struct dom_element *)box->node;
+	return element->ns == DOM_NS_HTML && element->tag == DOM_TAG_CANVAS;
 }
 
 /* Tells whether a box is an inline <svg>'s with no width and no height attribute (only its viewBox's ratio). */

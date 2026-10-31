@@ -126,7 +126,7 @@ layout_table(
 	layout_unit used;
 	layout_unit containing;
 	layout_unit cursor;
-	layout_unit below;
+	layout_unit captions;
 	layout_unit total;
 	layout_unit sizing;
 	int column;
@@ -195,15 +195,15 @@ layout_table(
 
 	/* The captions above the rows (those of caption-side: bottom are laid out for their height, and placed below the rows). */
 	cursor = 0;
-	below = 0;
+	captions = 0;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow || child->style.display != CSS_DISPLAY_TABLE_CAPTION)
 			continue;
 		error = layout_block(tree, child, used);
 		if (error != 0)
 			break;
+		captions += child->margin[CSS_TOP] + table_frame_down(child) + child->height + child->margin[CSS_BOTTOM];
 		if (child->style.caption_side != 0) {
-			below += child->margin[CSS_TOP] + table_frame_down(child) + child->height + child->margin[CSS_BOTTOM];
 			continue;
 		}
 		child->x = child->margin[CSS_LEFT];
@@ -217,10 +217,10 @@ layout_table(
 	if (box->style.box_sizing != CSS_BOX_SIZING_BORDER)
 		sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 	if (box->style.height.unit == CSS_UNIT_PX)
-		total = layout_from_px(box->style.height.value) - table_frame_down(box) + sizing - below;
+		total = layout_from_px(box->style.height.value) - table_frame_down(box) + sizing - (box->table_wrapper_height ? captions : 0);
 	if (box->style.min_height.unit == CSS_UNIT_PX &&
-	    layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing - below > total)
-		total = layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing - below;
+	    layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing > total)
+		total = layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing;
 
 	/* The rows, then the row groups around them. */
 	if (error == 0)
@@ -862,30 +862,66 @@ table_lay_rows(
 		layout_unit extra;
 		layout_unit given;
 
-		sum = *cursor + state->edge_y + state->edge_y + state->down * (layout_unit)(state->rows.count - 1U);
+		sum = state->edge_y + state->edge_y + state->down * (layout_unit)(state->rows.count - 1U);
 		for (number = 0; number < state->rows.count; number++)
 			sum += heights[number];
 		extra = total - sum;
 		if (extra > 0) {
 			layout_unit heights_sum;
+			size_t auto_count;
+			size_t last_taker;
+			int *takes;
 
+			/* Rows with no height of their own (the row's, or a cell's) take the extra first; with none, every row shares it. */
+			takes = calloc(state->rows.count + 1U, sizeof(*takes));
+			if (takes == NULL) {
+				free(heights);
+				return ENOMEM;
+			}
+			for (number = 0; number < state->rows.count; number++) {
+				row = *(struct layout_box **)wb_vector_at(&state->rows, number);
+				takes[number] = row->style.height.unit == CSS_UNIT_AUTO;
+			}
+			for (index = 0; index < state->cells.count; index++) {
+				cell = wb_vector_at(&state->cells, index);
+				if (cell->box->style.height.unit != CSS_UNIT_AUTO)
+					takes[cell->row] = 0;
+			}
+			auto_count = 0;
+			for (number = 0; number < state->rows.count; number++) {
+				if (takes[number])
+					auto_count++;
+			}
+			if (auto_count == 0) {
+				for (number = 0; number < state->rows.count; number++)
+					takes[number] = 1;
+				auto_count = state->rows.count;
+			}
 			heights_sum = 0;
-			for (number = 0; number < state->rows.count; number++)
-				heights_sum += heights[number];
+			last_taker = 0;
+			for (number = 0; number < state->rows.count; number++) {
+				if (takes[number]) {
+					heights_sum += heights[number];
+					last_taker = number;
+				}
+			}
 			given = 0;
 			for (number = 0; number < state->rows.count; number++) {
 				layout_unit share;
 
-				if (number + 1U == state->rows.count) {
+				if (!takes[number])
+					continue;
+				if (number == last_taker) {
 					share = extra - given;
 				} else if (heights_sum > 0) {
 					share = (layout_unit)((float)extra * (float)heights[number] / (float)heights_sum);
 				} else {
-					share = extra / (layout_unit)state->rows.count;
+					share = extra / (layout_unit)auto_count;
 				}
 				heights[number] += share;
 				given += share;
 			}
+			free(takes);
 		}
 	}
 
