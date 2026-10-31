@@ -267,7 +267,7 @@ prelude_initial_blank(
 
 	/* A top-level window has its page's resource; a frame without a loaded resource is blank. */
 	window = bind_window_of(realm);
-	blank = window->parent_global != NULL && window->document->resource_url == NULL;
+	blank = (window->parent_global != NULL || window->frame != NULL) && window->document->resource_url == NULL;
 	*result = vm_value_boolean(blank);
 	return 0;
 }
