@@ -119,6 +119,17 @@ layout_place_float(
 	clear = layout_clearance(tree, box->style.clear);
 	if (clear > top)
 		top = clear;
+	if (tree->floats != NULL) {
+		size_t at;
+
+		for (at = 0; at < tree->floats->count; at++) {
+			const struct float_rect *earlier;
+
+			earlier = wb_vector_at(tree->floats, at);
+			if (earlier->y - tree->origin_y > top)
+				top = earlier->y - tree->origin_y;
+		}
+	}
 
 	/* Moves down past floats until the box fits between the others (or is alone on its band). */
 	for (tries = 0; tries < 1000; tries++) {
