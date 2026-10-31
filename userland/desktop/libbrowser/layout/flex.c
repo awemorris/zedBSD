@@ -1883,9 +1883,21 @@ flex_auto_minimums(
 				else
 					least = (layout_unit)((double)cross * child->image->height / child->image->width);
 			} else if (row && child->style.width.unit == CSS_UNIT_PX && child->style.height.unit == CSS_UNIT_AUTO &&
-			    child->style.max_height.unit == CSS_UNIT_NONE) {
+			    child->style.max_height.unit == CSS_UNIT_NONE && child->style.min_height.unit != CSS_UNIT_PX) {
 				/* Without a definite cross size the picture's own width is its content size. */
 				least = (layout_unit)child->image->width * LAYOUT_UNIT;
+			} else if (row && child->style.min_height.unit == CSS_UNIT_PX && child->style.height.unit == CSS_UNIT_AUTO &&
+			    child->style.max_height.unit == CSS_UNIT_NONE) {
+				layout_unit minimum_height;
+
+				/* A minimum height carries over to the width through the ratio. */
+				minimum_height = layout_from_px(child->style.min_height.value);
+				if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					minimum_height -= child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] +
+					    child->border[CSS_BOTTOM];
+				if (minimum_height < 0)
+					minimum_height = 0;
+				least = (layout_unit)((double)minimum_height * child->image->width / child->image->height);
 			}
 		}
 
