@@ -46,7 +46,7 @@
 | [p010](phase010/phase.md) | ssh-ttymodes・ssh-channel | in-progress（2026-11-01 05:10 q1814、Sonnet） | p002 | — |
 | [p011](phase011/phase.md) | ssh-config | planned | p006 | p003 経由 |
 | [p012](phase012/phase.md) | ssh-privsep（frame） | in-progress（2026-11-01 05:10 q1815、Sonnet） | p002 | — |
-| [p013](phase013/phase.md) | ssh-sftp（Q3 の A: sftp-server のため） | in-progress（2026-11-01 05:10 q1816、Sonnet） | p002 | — |
+| [p013](phase013/phase.md) | ssh-sftp（Q3 の A: sftp-server のため） | 実装済み・試験 PASS（2026-11-01 06:06、run-unit sftp 1836 checks、cleared は Q1 が決める） | p002 | — |
 | [p014](phase014/phase.md) | ssh-keygen の program | planned | p006 | p003 経由 |
 | [p015](phase015/phase.md) | ssh の program・host の相互運用 A（Opus） | planned | p006・p008・p009・p010・p011 | p003 経由 |
 | [p016](phase016/phase.md) | sshd の monitor と login の確かめ（Opus） | planned | p009・p011・p012・p014 | p003 経由 |
