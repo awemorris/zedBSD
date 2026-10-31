@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 01:12（Q1）
+最終更新: 2026-11-01 01:20（Q1）
 
 ## 担当（P1〜P8）
 
@@ -14,7 +14,7 @@
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ | p024（q1785）: RTX の描画の最適化を目標（NVK 並み: big-1000 136・subs-1000 75 fps）まで。まず subs の 1 run の固定の費用 | 10.0.10.3 |
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | p025（q1784）: Pi 4 の desktop を 1920x1080 で 60 fps に → mview の 3D（21 体で 50 fps、今 28.9） | Pi 4（10.0.30.6）。この後に Pi 5（p021） |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
-| P6 | — | — | 返却（07:1x）。WS310 の設計を main に（問い Q310-1〜6 は下の 0i） | 次の割当を Q1 が決める |
+| P6 | [WS335](ws335/ws.md) | libssl-compat（OpenSSL 互換の自前の TLS） | p001 の設計（q1789、標準廉価実装手順）: 範囲・module・header・試験の道具 | 設計・design-reviewer・問いまで |
 | P7 | — | — | 返却（2026-11-01 01:12）。WS334 の設計を main に（b2a7e8454、design.md 1,020 行・design-reviewer の 24 件を反映、実装の Phase p002〜p018 約 131 LW）。問い U1〜U15 は下の 0l | 次の割当を Q1 が決める |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 12 回目（q1727-i12）: subgrid の残り・multicol・grid の baseline など | 今 3,472 のうち 3,005（86.55%）、Acid3 100/100・Acid2 100%。11 回目は animation の補間・dynamic import()・@property など（+30、後退 0） |
 
@@ -327,6 +327,8 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
 
 ## 決まった事
+
+- （2026-11-01）ユーザーから、WS を立てて libssl-compat を実装する、標準廉価実装手順を使う、今 P6 で始める、という趣旨の指示を受けた（[WS335](ws335/ws.md)）。
 
 - （2026-11-01）WS334: ブラウザの UI はまず libkeiland の Win32 の backend の上で移植する、足りなければ後で Win32 直の版を作る、cross compile は mingw-w64（clang 版も可、arm64 も）、`make browser-win64`、`apps/browser-win32/`、libkeiland はまず要る部分だけ、という趣旨の指示を受けた（[ws334/ws.md](ws334/ws.md) の決定 11〜15）。
 
