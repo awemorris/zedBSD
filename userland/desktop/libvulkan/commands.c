@@ -13,7 +13,13 @@
 #include <string.h>
 #include "internal.h"
 
-#define VULKAN_RECORDING_BATCH_BYTES (1024U * 1024U)
+/*
+ * The bytes of a long recording's batch: the renderer decodes one while the
+ * application records the next, and End waits for the last one sent, so a
+ * short batch keeps that wait short and lets a recording of a few hundred
+ * KiB overlap too (each batch is one transaction).
+ */
+#define VULKAN_RECORDING_BATCH_BYTES (256U * 1024U)
 
 /* The room a submission's transaction keeps after the recordings written ahead of it (its own command, waits and signals). */
 #define COMMAND_PENDING_SLACK 512U
