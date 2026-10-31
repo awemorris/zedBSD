@@ -1,0 +1,4 @@
+# ws291-p024: the runs nvk-profile.sh takes apart, LABEL|OPTIONS.
+subs-1000|--draws=each --copies=1000 --submits=1000
+big-1000|--draws=each --copies=1000
+subs-100|--draws=each --copies=100 --submits=100

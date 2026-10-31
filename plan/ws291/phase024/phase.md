@@ -289,3 +289,103 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
 - 消す物（Q1 へ）: build/tmp/p024i2-*（診断と A/B の出力、tree の写し p024i2-diag・p024i2-d3t・p024i2-main・p024i2-cfg）、build/p024/{bench0,bench0fp,
   bench1fp,cfg-i2a,i2c,lv4,lv5,lv7,u-i2a,u-main}（使い終わり）、build/p024/u-i2a/bin/'*' と u-main/bin/'*'（誤って作った壊れた symlink、u-main は v2 の後）。残す: build/p024/{base,js3,lv2,i2a,lv3,lv6,
   lv8,u-fin,forge2}。
+
+## q1785-i03（2026-11-01 04:38〜 P3、worktree p3-ws291wsi に main bad74894e を取り込み）
+
+- 承認: Queue q1785-i03。2026-11-01 ユーザーから、0m の問いへの答えとして次の趣旨の指示を受けた: (1) Linux（Debian の NVK）と段ごとに比べ（submit
+  ごとの user の時間・ioctl の数と費用・kernel の時間・GPU の時間・record と encode）、遅い所を全部名指しして直し、目標まで続ける。(2) (a) kernel の VM の
+  小さな copyin・copyout の速い道は、主の道と判断すれば行う（copy の道だけ、HAL の API は変えない、全 arch の kernel を warning 0、QEMU の回帰を amd64 と
+  arm64 の 1 つ以上）。(3) (c) fence も signal の semaphore も無い submit に私用の fence の job を付けない形は、libvulkan の変更で他の GPU driver
+  （amdrdna・i915・powervr・v3d・Venus）に副作用が無い時だけ（nvrtx だけが使う GPU_JOB_SUBMIT の道に限るか、他の driver が変わらない事を示す。
+  Venus の回帰）。副作用無しにできなければ行わず理由を報告。(4) (b) 記録の時の push buffer は始めない。代わりに短い説明を書く。
+
+### NVK（Debian）との段ごとの比べ（`plan/ws291/tests/nvk-profile.sh`・`nvk-stat.py`・`nvk-profile.list`、04:41〜04:47、build/tmp/p024i3-nvk3）
+
+- 手順: RTX を vfio-pci から nouveau（GSP）へ移し、weston（kiosk、DRM）の上の Debian の ~/linux-mview（cksum 209491786）を 4 回: そのまま（fps と段）、
+  `perf stat -I 1000`（root、system call の数を 1 秒ごとに、中央の秒 ÷ fps で 1 frame あたり）、`perf trace -s`（system call の数と平均の時間）、
+  `perf record -a`（4 s 目から、comm と DSO ごと）。終わりに weston を止め vfio-pci に戻した（4 function とも vfio-pci）。linux-perf を Debian に入れた。
+
+| 段（subs-1000、1 submit あたり） | NVK | zedBSD main（i2a ＋ lv6、d3 の内訳） |
+| --- | --- | --- |
+| fps（frame） | 75.4（13.25 ms） | 42.5（23.45 ms） |
+| record（client） | 6.2 µs（vkCmd* が push buffer を直に書く） | 5.7 µs（stream に encode するだけ） |
+| vkQueueSubmit | 4.65 µs | 17.4 µs |
+| GPU の ioctl | 1.02 本（DRM_NOUVEAU_EXEC、perf trace の平均 約 4.7 µs） | 1 本（GPU_JOB_SUBMIT 約 15.8 µs）＋ 7 submit に 1 本の RETIRE |
+| kernel の中身 | job を drm_sched に積むだけ。ring への書きは kworker（別の CPU、perf record の 24〜30 %） | 呼び手の thread で: user の copy 4 回 約 3、GPU core の job の出し入れ 約 3.5、nvrtx の decode・executor・reset 約 8.5、ring 約 1 |
+| libvulkan の user の時間 | — | 私用の fence と ledger の reap 約 2 |
+
+- subs-100: NVK 683 fps（1 submit の record 5.6・submit 4.6 µs）、zedBSD 362。big-1000: NVK 127〜135 fps（record 3.2〜3.4 ms、ioctl 17 本 / frame）、zedBSD 118
+  （record 3.7・submit 3.3・fence 1.1 ms）。
+- 差の名指し（subs-1000 の 1 submit、計 約 12 µs）: G1 push buffer を submit の時に呼び手の thread で組む（約 8 µs。NVK は record の中で組み、ring は
+  別の thread）、G2 user の copy 4 回（約 3 µs、Linux の copy_from_user は 0.1 µs 程度）、G3 fence の無い submit にも付く job の出し入れ（約 3.5 µs）、
+  G4 私用の fence と reap（約 2 µs）。big-1000 の差は client の encode（約 0.4 ms）と submit の段の kernel の decode・executor（約 3.3 ms、NVK は 0.03）。
+
+### 直したこと（i3）
+
+- (c) libvulkan `queue.c`（`queue_unfenced`）: fence が無く、どの submit にも wait・signal の semaphore も pNext も無い公の vkQueueSubmit（WSI の
+  lock を持つ呼び手と sparse を除く）は、私用の fence も job も作らず GPU_COMMAND 1 本で送る。条件に `GPU_CAP_JOB_SUBMIT` と同期の command を入れた。
+  kernel（gpu.c `gpu_get_info`）はこの cap を backend の job の表に `command` がある時だけ立て、その表を持つのは nvrtx だけ（amdrdna・i915・powervr・
+  bcm2711（v3d）・venus・mali・ghci の表の `command` は NULL）。よって他の driver の道は変わらない。その仕事は queue の順で次の job の marker より前に
+  走るので、次の job（frame の fence、vkQueueWaitIdle の空の job）が監督し退かせる。job の無い submit の native の失敗は、確かな拒否（OOM）の他は
+  device lost（job の取り消しと同じ扱い）。
+- (a) kernel の VM `src/kern/vm/vmspace-copy.c` の `copy_backing`: 1 page に収まる範囲で、1 つの region の、resident の private page（copy-on-write
+  の後）は、locks を 1 回取って region を 1 回たどり、同じ確かめ（範囲・権限・BUSY と MAPPED・private が 1 つ・resident・書きは COW でない）の後に
+  pin して copy する。それ以外（複数 page、device・object の page、準備のできていない page、pin の EBUSY）は今の道へ。今の道は 1 page の copy で
+  region の list を 4 回たどっていた（範囲の確かめ・準備の確かめ・検証・pin）。HAL の API は変えない。触った file: `src/kern/vm/vmspace-copy.c` と
+  その host 試験 `plan/tools/kernel-lock/pin-host-test.sh`。
+- `pin-host-test.sh`: main で build できなかった（HAL_SPACE_* と hal_physaddr_t が hal.h に移った）ので `#include <hal/hal.h>` を足した。1 page の
+  copy の場合（1 entry、fault 無し、bytes、pin の解放、region の外は EFAULT）と、並行の試験に 1 page の範囲の 4 つ目の thread を足した。偽の
+  `vm_private_page_mark_dirty` の数え方を atomic に（2 つの thread が同じ page に書くと ThreadSanitizer が偽の競合を出した）。
+
+### 確かめ（i3）
+
+- host: `pin-host-test.sh` PASS（plain・ASan/UBSan・TSan、TSan の警告 0）、`run-gpu-job-host.sh` PASS、nvrtx vk 94/0、vk-d3 228/0、sm75 308/0。
+- build（warning 0）: config/ci の 19 の vmunix（amd64・amd64-server・intelmac・pcat・pc98・rpi4・rpi4-server・rpi5・odroid-c5・odroid-c5-keiland・
+  armv7-virt・zybo・riscv32-virt・riscv64-virt・visionfive2・visionfive2-keiland・m68k-virt・ppc32-mac99・ppc64-pseries）と plan/tools/ports の
+  mips32-malta・mips64-malta・sun4u・x68k、RTX の config の vmunix（i3a 2764259344）と libvulkan（lv9 509112954）。
+- QEMU の回帰（copy の道）: `plan/tools/process/forkrace-qemu.sh`（fork・posix_spawn と並行の copyin・copyout の COW fault）amd64 PASS、rpi4（arm64、
+  raspi4b）PASS（build/tmp/p024i3-fr-amd64・-rpi4）。
+
+### (b)「記録の時に push buffer まで作る」の説明（2026-11-01 ユーザーの指示で、始めずに説明だけ）
+
+- 今の流れ: アプリが vkCmd* を呼ぶと libvulkan は命令を中間の形（stream）に書くだけ（record）。vkQueueSubmit の時に kernel がその stream を読み解き
+  （decode）、GPU が読む命令の列（push buffer）に組み立て（executor）、ring に入れる。組み立ては毎回の submit で、submit を呼んだ thread の上で行う。
+- (b) の形: vkEndCommandBuffer の時（記録の終わり）に push buffer まで組み立てておき、vkQueueSubmit は出来上がった push buffer を ring に入れるだけに
+  する。Linux の NVK は vkCmd* の時に push buffer を直に書くので、これに近い。組み立ては libvulkan の recording の thread（今も長い記録を送っている
+  別の thread）の側で走り、アプリが次の command buffer を記録する間に重なる。同じ command buffer を何度も submit する時は組み立てが 1 回で済む。
+- 見込み: subs-1000 の 1 submit 約 17 µs（(a)(c) の後 約 11 µs）のうち、decode と executor の約 8 µs が submit から消える。毎 frame 記録し直す subs では
+  組み立ての費用は消えずに record の側へ移るが、別の thread に重なれば 1 submit 約 5〜6 µs（NVK 4.65 µs）に近づき、subs-1000 は 59 → 70 fps 台の見込み
+  （未計測の見積もり）。big-1000 の submit の段（約 3.3 ms）も同じ形で縮む。
+- 費用: nvrtx の Vulkan の backend の作り直し。submit の時にしか決まらない物（image の置き場所、texture・sampler の pool の slot、前の submit の後の
+  GPU の状態を知った上での省略、render pass の target）を記録の時に決めるか、submit の時に少しだけ書き換える仕組みが要る。command buffer の
+  reset・再記録・同時の使用、記録した push buffer の memory の持ち方と解放も決め直す。設計の Phase と design review が要り、数日の規模。HAL と
+  uapi は変えない見込み。
+- 実機の A/B（10.0.10.3、`rtx-p024.sh` ROUNDS=2 SHOT=1、04:59〜05:35、build/tmp/p024i3-ab2、userland は build/p024/base の 14 file（14 番目は
+  /lib/libwayland-client.so: 1 回目 ab1 は 13 file で入れて compositor が `ld.so: undefined symbol` になり、止めて戻した）、kernel main = k-main
+  49188371（HEAD の tree の写しから build、i2a と cksum 一致）、i3a 2764259344、libvulkan main = lv6 1775217122、c = lv9 509112954）:
+
+| 腕 r1・r2 | big-100 | big-1000 | subs-100 | subs-1000 | scene-1500 | scene-5000 |
+| --- | --- | --- | --- | --- | --- | --- |
+| main | 582.2・596.4 | 118.0・117.6 | 362.4・362.6 | 42.52・42.84 | 156.1・156.6 | 49.68・49.71 |
+| c（job の無い submit） | 589.6・598.2 | 119.7・119.9 | 445.6・443.7 | 55.11・53.35 | 157.7・158.1 | 49.90・49.82 |
+| a（copy の速い道） | 602.2・610.8 | 118.3・119.5 | 409.8・421.1 | 46.06・47.39 | 158.3・158.3 | 49.89・49.79 |
+| ac（両方） | 621.8・623.6 | 115.1・118.3 | 479.9・481.8 | 58.68・58.41 | 157.7・157.9 | 49.96・49.78 |
+| NVK | — | 136.2（i3 で 127〜135） | 683 | 75.4 | 165.6 | 50.1 |
+
+- subs-1000 の vkQueueSubmit（frame の submit の段 ÷ 1000）: main 17.3 µs → c 12.2〜12.6 → a 14.9〜15.4 → ac 11.0〜11.1。record 5.6〜5.9 µs は不変。
+  ac は subs-1000 +37 %、subs-100 +33 %、big-100 +5 %、big-1000 と scene は揺れの内。
+- 画素: 100 copies の still（one・each・subs）を main の round 1 と比べ、31 の比べが max 0・differ 0。c の round 2 の one の PNG だけ取り込みが切れて
+  （688128 byte、PIL の truncated）比べられなかった（同じ腕の each・subs と round 1 の 3 枚は差 0）。
+- 戻し: 14 file と NVMe の kernel の cksum が元と一致（vmunix 1463007375、nvrtx.vk.perf 行 0）、Debian（RTX 4 function vfio-pci）。
+
+### 再開点（2026-11-01 05:40 P3、q1785-i03 の途中、BUG-383・BUG-381 へ移る前）
+
+- この記録の commit に入る物: `src/kern/vm/vmspace-copy.c`（a）、`userland/desktop/libvulkan/queue.c`（c）、`plan/tools/kernel-lock/pin-host-test.sh`、
+  `plan/ws291/tests/nvk-profile.sh`・`nvk-stat.py`・`nvk-profile.list`、この phase.md。
+- 走っている物（結果はこの後の commit で足す）: QEMU の Venus の回帰（forge の image を build/p024/forge3 にこの tree から、`venus-reg.sh`、
+  build/tmp/p024i3-venus.txt）と、game mode の往復・画面・desktop（`rtx-p015.sh` PARTS='cycle scenes desk'、main と ac、build/tmp/p024i3-v1）。
+- 到達: subs-1000 42.7 → 58.5 fps（NVK 75.4）、subs-100 362 → 481（NVK 683）、big-1000 118 前後のまま（NVK 136.2）。目標は未達。
+- 次の手（残りの差、subs-1000 の 1 submit 約 11 µs 対 NVK 4.65）: (1) G1 nvrtx の decode・executor・reset 約 8 µs（submit の時に呼び手の thread で
+  push buffer を組む。(b) の形か、executor の draw ごとの費用の削り: 16 draw で 3.3 µs、texture の handle と constants）、(2) GPU_COMMAND の残りの
+  kernel の費用（要求と stream の copy 2 回、admission、GPU core の stream の写し）、(3) libvulkan の queue_attempt の user の時間（writer の組み立て、
+  device の mutex）。big-1000 は client の encode（3.6 ms 対 NVK 3.2〜3.4）と submit の段の decode・executor（3.3 ms 対 NVK 0.03）。
