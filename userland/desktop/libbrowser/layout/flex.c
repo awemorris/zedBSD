@@ -823,6 +823,7 @@ flex_base_size(
 	layout_unit sizing;
 	layout_unit cross;
 	layout_unit resolved;
+	float picture_ratio;
 	int start_side;
 	int end_side;
 	int error;
@@ -910,7 +911,7 @@ flex_base_size(
 	/* An image's natural ratio transfers a stretched cross size too (a size of its own goes through its layout). */
 	if (item->base < 0 && child->replaced && child->style.aspect_ratio <= 0.0f &&
 	    (row ? child->style.height.unit : child->style.width.unit) == CSS_UNIT_AUTO &&
-	    child->image != NULL && child->image->width > 0 && child->image->height > 0) {
+	    ((child->image != NULL && child->image->width > 0 && child->image->height > 0) || layout_replaced_is_canvas(child))) {
 		cross = flex_ratio_cross_size(tree, box, child, row);
 		if (cross >= 0) {
 			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER && row)
@@ -921,10 +922,14 @@ flex_base_size(
 				    child->border[CSS_RIGHT];
 			if (cross < 0)
 				cross = 0;
-			if (row)
+			if (child->image == NULL) {
+				layout_replaced_ratio(child, &picture_ratio);
+				item->base = row ? (layout_unit)((double)cross * picture_ratio) : (layout_unit)((double)cross / picture_ratio);
+			} else if (row) {
 				item->base = (layout_unit)((double)cross * child->image->width / child->image->height);
-			else
+			} else {
 				item->base = (layout_unit)((double)cross * child->image->height / child->image->width);
+			}
 		}
 	}
 

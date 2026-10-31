@@ -189,6 +189,7 @@ static const struct bind_interface *const window_interfaces[BIND_INTERFACES] = {
 	&bind_performance_observer_interface,
 	&bind_performance_observer_entry_list_interface,
 	&bind_html_dialog_element_interface,
+	&bind_html_canvas_element_interface,
 	&bind_error_event_interface
 };
 

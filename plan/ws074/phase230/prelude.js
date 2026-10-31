@@ -1985,6 +1985,24 @@
       get: function () { return this.documentElement; }, configurable: true, enumerable: true
     });
   }
+  // ---- Canvas: width and height reflect the attributes (300 by 150 when absent or not a number)
+  if (typeof g.HTMLCanvasElement === 'function') (function () {
+    var P = g.HTMLCanvasElement.prototype;
+    [['width', 300], ['height', 150]].forEach(function (d) {
+      var name = d[0], fallback = d[1];
+      Object.defineProperty(P, name, {
+        get: function () {
+          var v = parseInt(this.getAttribute(name), 10);
+          return isFinite(v) && v >= 0 && v <= 2147483647 ? v : fallback;
+        },
+        set: function (v) {
+          v = Math.trunc(Number(v));
+          this.setAttribute(name, String(isFinite(v) && v >= 0 && v <= 2147483647 ? v : fallback));
+        },
+        configurable: true, enumerable: true
+      });
+    });
+  })();
   // ---- Dialog: open, returnValue, show(), showModal() and close() (a modal dialog is in the top layer: a high z-index, fixed)
   if (typeof g.HTMLDialogElement === 'function') (function () {
     var P = g.HTMLDialogElement.prototype;

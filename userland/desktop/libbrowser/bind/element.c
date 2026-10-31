@@ -191,6 +191,11 @@ const struct bind_interface bind_html_dialog_element_interface = {
 	"HTMLDialogElement", BIND_HTML_ELEMENT, 0, NULL, NULL, NULL, NULL
 };
 
+/* A canvas element has its own interface (its members are made by the prelude) and inherits all HTMLElement members. */
+const struct bind_interface bind_html_canvas_element_interface = {
+	"HTMLCanvasElement", BIND_HTML_ELEMENT, 0, NULL, NULL, NULL, NULL
+};
+
 /*
  * The attributes of HTMLImageElement.  The table is constant for the life
  * of the program.
