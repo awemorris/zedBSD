@@ -139,6 +139,8 @@ drv_bcm2712_gpu_attach(
 	display_error = ENODEV;
 	if (screen_error == 0)
 		display_error = bcm2712_display_discover(&fdt, &attach_display, &screen);
+	else
+		bcm2712_screen_report(&fdt);
 
 	/* Runs discovery, which reads nothing behind the engine's power domain. */
 	error = bcm2712_v3d_discover(&fdt, &attach_v3d);

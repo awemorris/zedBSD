@@ -3,7 +3,7 @@
 # ws334-p011 files の backend: files
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: in-progress（2026-11-01 04:08 q1807、Sonnet）。
 - 依存: p006・p010（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 

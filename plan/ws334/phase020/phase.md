@@ -3,7 +3,7 @@
 # ws334-p020 glue: source の一覧の分け（sources.mk）と Windows の build の本体の第 1 段
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §4.1 の 2、§6.1〜§6.3、§6.9、§9。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: in-progress（2026-11-01 03:20 実装済み・試験 PASS、Q1 の判定待ち。q1796-i01、P7）。
 - 依存: p004（設計の確定）。module の Phase と並べて起動してよい（module の file に触れない）。
 - 担当の想定: Opus（phase-runner）を 1 回。統合の glue なので標準廉価実装手順の module ではないが、手順と受け入れはここに全部書いた。設計の判断を残していない。判断が要る所が出たら止めて Q1 に返す。
 
@@ -57,3 +57,40 @@
 
 - 上が全部 PASS（出力を自分で読む）。遅延の import が働かなかった時は、それを結果に書いて Q1 に返す（予備の thunk は p021 の範囲を変えるので Q1 が決める）。
 - `git commit -m WIP -- <変えた path>`。SHA・command と最後の行・未実施を Q1 に。この phase.md に「結果」の節、ws.md の行を「実装済み・試験 PASS」に。
+
+## 結果（2026-11-01、P7、q1796-i01、基点 15b14621f）
+
+- **sources.mk**: 9 つの directory に作った。Makefile・Makefile.linux・Makefile.freebsd は 1 行目の `include $(dir $(lastword $(MAKEFILE_LIST)))sources.mk` で読む
+  （`../package.mk` の include より前に置く。後ろだと `lastword` が package.mk を指す）。libbrowser は `LIBBROWSER_SCRIPT_SOURCES`（base・vm・js、58 個）と
+  `LIBBROWSER_ENGINE_SOURCES` に分けた。`Makefile.freebsd` は BSD make ではなく GNU make（`keiland-freebsd.mk` が include する）なので、全部同じ形に変えた（FreeBSD の build は未実施、一覧の一致は sources-same.sh で確かめた）。
+- **libkeiland の一覧の順**: zedBSD の Makefile と Makefile.linux の一覧は同じ集合で順が 1 つ違った（`settings-keys/settings-keys.c` の位置）。Q1 に返し、
+  2026-11-01 Q1 から一つの一覧（`LIBKEILAND_SOURCES` の順）に揃えよという指示を受けた。Linux の libkeiland.so の link の順が 1 file 変わるだけ。Linux の build の
+  libkeiland.so の object は前と同じ 73 個（link の行を数えて照合）。
+- **companion.c・decode.c**: `O_CLOEXEC`・`O_BINARY` が無い system は 0（`#ifndef`）。companion の open は `O_RDONLY | O_CLOEXEC | O_BINARY`、gif の file の口は `O_RDONLY | O_BINARY`。
+- **apps/browser-win32/Makefile**: `libraries`（libtruetype・png・jpeg・gif・z の .a、`WIN32_COMPAT_CFLAGS` は `-Werror` 無し、compiler の出力は `<object>.log` に置き、
+  make の出力に warning を出さない: check-skeleton.sh が make の出力の `warning:` を数えるため）、`vulkan`（`fetch` が Vulkan-Headers と Vulkan-Loader の
+  `vulkan-sdk-1.4.309.0` の tarball を `$(BROWSER_WIN32_SOURCES)`（既定 `$(BROWSER_WIN32_BUILD)/sources`）に取って SHA-256 を照合、header を `obj/include/` に、
+  `vulkan-1.def` から dlltool で `obj/libvulkan-1.a`）、`runtime`（`libwinpthread-1.dll` を `OmniGrammaton/` に）、`toolchain.txt` に compat の warning の数、
+  `flags`（外の試験が同じ flags で build するための表示）。link の flags は `WIN32_THREAD_LDFLAGS`（`-lpthread`）と `WIN32_VULKAN_LDFLAGS`（`-lvulkan-1 -Wl,--delayload=vulkan-1.dll`）。
+  compat の header の写しは design §6.9 の `$(BROWSER_WIN32_BUILD)/include/compat/` ではなく `obj/include/compat/`（Vulkan の header と同じ 1 つの include の根）。
+  - SHA-256（2026-11-01 取得、GitHub の tag の archive）: Vulkan-Headers `2bc1b4127950badc80212abf1edfa5c3b5032f3425edf37255863ba7592c1969`、Vulkan-Loader `ddfeca84a868899fbb2c7f28b7c8fd1006e34b2b13ce653a63bddfb65cbc8d13`。
+  - Debian の UCRT 版 gcc（T-B）の道は未確かめ（GNU ld に `--delayload` は無い）。
+- **遅延の import**: 働いた。`delay-load.c` の x86_64 の .exe は `vulkan-1.dll` が delay-import の表にあり、普通の import の表に無い（llvm-readobj）。Wine 10 で
+  `vulkan-1.dll` がある時 `delay-load: Vulkan 1.4`・exit 0、`WINEDLLOVERRIDES=vulkan-1=d` の時 `delay-load: no vulkan-1.dll, no Vulkan call`・exit 0。arm64 は link と表だけ（host で走らない）。
+- **compat・libtruetype の warning**: x86_64・arm64 とも 0。未定義の symbol は x86_64 26・arm64 24、全部 `allowed-imports.txt` の中（UCRT と compiler-rt の `__chkstk`・`___chkstk_ms`）。
+
+| 確かめ | 結果 |
+| --- | --- |
+| `timeout 600 sh plan/ws334/tests/sources-same.sh` | 20 の Makefile が基点と同じ（libkeiland/Makefile.linux は同じ集合・zedBSD の順）、list-sources.sh の 201 行が同じ、`sources-same: PASS` |
+| zedBSD amd64 の 9 target（`config-amd64.mk`） | exit 0、warning 0（companion.c・decode.c の変更の後にも再 build） |
+| zedBSD arm64 の 9 target（`config-rpi4.mk`、`build/arm64/...`） | exit 0、warning 0 |
+| Linux の Keiland（`make -f userland/desktop/keiland-linux.mk all KEILAND_LINUX_BUILD=build/tmp/p020/keiland-linux`） | exit 0、warning 0 |
+| `sh plan/ws074/tests/host-build.sh plain`（前: 基点の tree を `git archive` で展開、後: worktree） | 前後とも exit 0、built 93、warning 0、built の一覧が同じ |
+| `timeout 1800 sh plan/ws334/tests/cross-build.sh` | `cross-build: PASS` |
+| `BASE=d393d3267 timeout 1800 sh plan/ws334/tests/check-skeleton.sh` | headers 19・sources 22、`check-skeleton: PASS` |
+| `git diff --check` | 出力なし |
+
+- zedBSD の build の注意: main の `build/amd64/sysroot`・`build/arm64/sysroot` の `browser/browser.h`・`keiland/keiland.h` などが tree より古く、そのまま
+  `ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-claude1/build/amd64/sysroot` で build すると `view/view.c` が compile error になる（この Phase と無関係。基点でも同じ）。
+  sysroot を `build/tmp/p020/sysroot-<arch>` に複写し、tree の `include/libc`・`userland/desktop/include` の header を重ねて build した（sysroot.mk は使っていない）。
+- 未実施: FreeBSD の build、`make keiland-linux`（一番上の入口。`keiland-linux.mk` を直に流した）、Windows の実機。

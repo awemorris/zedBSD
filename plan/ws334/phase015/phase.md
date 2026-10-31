@@ -57,3 +57,24 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+- 日付: 2026-11-01 03:10（host の `date`）。担当: Sonnet 5.5（phase-runner-low）。状態: 実装済み・試験 PASS（cleared は Q1）。
+- 実装: `userland/desktop/libkeiland/win32/frame.c`（`keiui_win32_scale`・`keiui_win32_frame_buttons`・`keiui_win32_frame_hit` と static の補助 4 つ）。試験: `plan/ws334/tests/unit/test-frame.c`。header は変えていない。
+- 実行した command と最後の行（`LC_ALL=C.UTF-8` は Q1 の指示。frame の試験に非 ASCII は無い）:
+  - `timeout 1800 sh plan/ws334/tests/run-unit.sh frame` → `test-frame: PASS (1079182 checks) (posix)`・`test-frame: PASS (1079798 checks) (win32)`・`run-unit: PASS`。
+  - `LC_ALL=C.UTF-8 timeout 3600 sh plan/ws334/tests/run-unit.sh all` → frame・os-zones・tools が posix・win32 とも PASS、`run-unit: PASS`。
+  - `BASE=d393d3267 timeout 1800 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - `git diff --check` → 出力なし。
+- 期待の値は header の規則と手の計算（dpi 96・120・144・192 の band・corner・button の x を表にして点ごとに求めた）。乱数の部分（固定の種、100000 点）は性質だけ（15 の値のどれか、範囲の外は NOWHERE・中は NOWHERE でない、全画面は CLIENT、最大化は端の値が無い、band の深さより内は端の値が無い、close の x）。
+- 自分で決めた点（header が黙っている所）:
+  - button の x は int32_t に収まらない時、範囲に clamp する（幅が UINT32_MAX 近い、dpi が極端に大きい時だけ）。大きさ（幅・高さ）は scale の飽和のまま。
+  - 全画面・caption 0 の空の矩形は x・y・width・height を全部 0 にする。
+  - 窓が小さく反対側の band が重なる時（幅・高さが band の 2 倍未満）は、点に近い方の端が決める。同じ距離なら低い側（左・上）。corner の reach が両端に届く時も同じ。
+  - top band を 4 px にするのは、点の x が（空でない）3 つの button のどれかの x の範囲にある時（y は見ない。button は y 0 から）。左右の band は thin にならない。
+  - 縦の band（左右）の点は、y が corner の reach の中なら corner（TOP_・BOTTOM_）、横の band の点は x が reach の中なら corner。最大化では band 自体が無い。
+  - button の判定は close・maximize・minimize の順（重ならないので結果は同じ）。`controls` が NULL で `control_count` が 0 でない時は controls なしと見る。
+  - dpi は band・corner・button・caption の全部に `keiui_win32_scale` で同じ dpi を使う。caption の判定は `y < scale(caption_height)`。
+- 壊して確かめた（git の外、scratchpad の複写で、posix の ASan 版。原本は変えていないことを `cmp` で確認）: 丸めを半分未満に（FAIL 12）、飽和の上限をずらす（3）、band の深さ +1（622）、top band の thin を無くす（27）、corner の境の比較 > にする（28）、band の下側の比較 <= にする（164）、MAXIMIZE を MINIMIZE に（19）、caption の境 <=（20）、button の x の段を 1 つずらす（5625）、最大化でも band（1751）、全画面の分岐を無効に（1397）、controls を読まない（10）、近い端の同点の向き（1）、clamp の上限を 1 つ大きく・下限を 1 つ小さく（初めは見逃した。int32 の端ちょうどの試験を足して捕まえた、各 1）、x の範囲の比較 >（122）、矩形の端を 32 bit に切る（1）、buttons NULL の検査の削除（crash）、dpi 0 の扱い（69）、corner の reach を 1 つ小さく（8）、close の判定の削除（22）、button の幅に 96 dpi 固定（5533）。最終は見逃し無し。
+- 未実施: 実機の Windows（Wine のみ）。aarch64 の Windows での実行（compile のみ）。

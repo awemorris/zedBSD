@@ -3,7 +3,7 @@
 # ws334-p018 CF_HTML: cf-html（旧 T2）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: 実装済み・試験 PASS（2026-11-01 03:28、cleared は Q1）。
 - 依存: p004（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 
@@ -55,3 +55,27 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+- 日付: 2026-11-01 03:28（host の `date`）。担当: Sonnet 5.5（phase-runner-low）。状態: 実装済み・試験 PASS（cleared は Q1）。
+- 実装: `userland/desktop/libkeiland/win32/cf-html.c`（encode・decode と static の補助）。試験: `plan/ws334/tests/unit/test-cf-html.c`。header は変えていない。
+- 実行した command と最後の行（`LC_ALL=C.UTF-8`）:
+  - `timeout 1800 sh plan/ws334/tests/run-unit.sh cf-html` → `test-cf-html: PASS (155072 checks) (posix)`・`test-cf-html: PASS (155072 checks) (win32)`・`run-unit: PASS`。
+  - `timeout 3600 sh plan/ws334/tests/run-unit.sh all` → 全部の試験が posix・win32 とも PASS、`run-unit: PASS`。
+  - `BASE=d393d3267 timeout 1800 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`（headers: 19、sources: 22）。
+  - `git diff --check` → 出力なし。
+- 期待の値: encode は header の形に従い行の長さを手で数えた bytes（空 = StartHTML 105・EndHTML 175、"<b>x</b>" = 105・183・139・147、URL "http://a/" 付き = 126・204・160・168 など）。decode の 64 の data は、offset を text の中の marker の位置から求めた（C の code と別の道、Python で生成して literal として貼った）。仕様の文書の例（offset が bytes の位置と合わない物）は EINVAL の試験にだけ使った（header が最小の offset で切れて Version が読めない）。
+- 試験の内容: encode の exact bytes・size の境（要る長さ + NUL ちょうど / 1 足りない / 0）・CR/LF の URL・NULL の引数・9999999999 の限度と size_t の wrap（64 bit のみ限度の値）、decode の手作りの data（LF のみ・CR のみ・0 の詰め・-1・未知の name・Selection の行・SourceURL の重複・順序）、誤りの data（Version 無し・範囲外・end < start・数でない・-1・header のみ・offset が header の中）の EINVAL と出力の NULL・0、encode → decode の往復（NUL を長さに含む・含まない）、全ての短縮の長さ、全 byte × 256 値の変更、乱数 10 万（乱数の bytes・語の列・形の正しい header）。decode は毎回ちょうどの大きさの heap の block に複写して渡す（ASan）。
+- 自分で決めた点（header が黙っている所）:
+  - decode の header は 2 回読む: 1 回目で全ての offset の最小値を求め（無ければ data の長さ）、2 回目はその位置より前で終わる行だけを読む（最小の offset で header が切れる。位置にかかる行、改行の無い最後の行は読まない）。
+  - header の行の name は ASCII の英数字・'-'・'_' の 1 文字以上。それ以外（HTML の `<a href="http:` など）の行で header は終わる。空行でも終わる。
+  - Version の値は検査しない（行が在れば良い）。同じ name の行は最初の物を使う（offset も SourceURL も）。StartSelection・EndSelection は未知の name と同じに飛ばす（値も検査せず、header の切れにも使わない）。
+  - offset の値は数字だけ（空白・'+'・'0x' は EINVAL）か "-1" ちょうど。'-1' は StartHTML と EndHTML の組でだけ許し（StartHTML が -1 で EndHTML が無いか -1）、EndHTML だけが -1、StartHTML が -1 で EndHTML が数、StartFragment・EndFragment が -1 は EINVAL。
+  - 与えられた offset の誤りは飛ばさず EINVAL（Fragment の組が正しく HTML の組が誤りでも EINVAL）。組の片方だけの物は使わず無視する。start は data の中の byte を指す（start < length）。start == length は本体が無く EINVAL。end == start（空の fragment）は良い。
+  - length に NUL を含む data で、EndHTML == length は良い（長さをそのまま上限にする）。
+  - SourceURL の値は行の末尾まで（空白を削らない）。空の値は NULL でなく長さ 0 の pointer。source_url が NULL で source_url_length が NULL でない時も長さは書く。URL の行が header の中に無ければ NULL・0。
+  - encode: 空の URL "" は "SourceURL:" の行を書く。EINVAL の時も buffer を空の文字列（size > 0）、out_length を 0 にする。buffer と out_length のどちらかが NULL なら何も書かず EINVAL。size 0 の ERANGE は buffer に触れない。
+- 壊して確かめた（git の外、scratchpad の複写で、posix の ASan 版）: encode の offset を 1 つずらす（FAIL 56）、ERANGE の境 <（5）と <= +1（27）、空文字列にしない（24）、CR の検査を消す（9）、限度 +1（3）、URL 行の改行を消す（24）、桁の計算（54）、end < start の比較（6）、start >= length の比較（2）、offset の上限 +1（7）、"-1" の規則の 4 つの検査（各 3、初めは試験が足りず見逃した 3 つに case を足して捕まえた）、name の大小の区別（6）、Version の検査（6）、lone CR の扱い（ASan 中止）、最小の offset による切り（9、初めは見逃し。仕様の例と header の中の offset の case を足した）、SourceURL の最初の物（1）、fragment の優先（104）、name の '-' と '_'（6）、URL の長さ +1（18）、CR LF の範囲検査（中止）。最終は下の 2 つ以外の見逃し無し。
+  - 見逃し（意図的に残した）: (1) 数字の桁あふれの検査（`value > (SIZE_MAX - digit) / 10`）は、value が毎回 length 以下に収まるので length が SIZE_MAX / 10 を超える data でしか効かず、試験できない（防御として残す）。(2) 行の終わりがちょうど最小の offset の位置にある時（`line_end >= limit` と `>` の違い）は、header が黙っている境で、どちらでも良いと判断し試験で固定しなかった。
+- 未実施: 実機の Windows（Wine のみ）。aarch64 の Windows での実行（compile のみ、check-skeleton）。32 bit の size_t での試験。

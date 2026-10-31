@@ -125,6 +125,8 @@ extern bool bcm2712_v3d_draw_index_record;
 /* The Pi 5's firmware mailbox for the clock questions (v3d71-firmware.c). */
 int bcm2712_firmware_init(const struct drv_fdt *fdt);
 int bcm2712_firmware_property(uint32_t tag, uint32_t *values, unsigned request_count, unsigned capacity, uint32_t *answered);
+int bcm2712_firmware_message(uint32_t *words, unsigned count);
+void bcm2712_screen_report(const struct drv_fdt *fdt);
 int bcm2712_clock_get(uint32_t tag, uint32_t clock_id, uint32_t *value);
 int bcm2712_clock_set(uint32_t tag, uint32_t clock_id, uint32_t value);
 

@@ -415,6 +415,7 @@ bcm2711_vulkan_native_job_step(
 		perf->bin_ticks += completion.bin_ticks;
 		perf->render_ticks += completion.render_ticks;
 		perf->output_clean_ticks += completion.clean_ticks;
+		perf->counters_71 = completion.counters_71;
 		if (completion.bin_counters[0] != 0U) {
 			for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
 				perf->bin_counters[index] += completion.bin_counters[index];
@@ -765,6 +766,8 @@ report_perf(
 	/* The render runs' performance counters, in thousands per run. */
 	if (perf->counter_runs != 0U) {
 		perf_append(
+			perf->counters_71 ?
+			"v3d: gpu runs=%u k/run cycles=%llu cle=%llu qactive=%llu qfrag=%llu qstall=%llu qfragwait=%llu stmu=%llu stlb=%llu sother=%llu tmu=%llu tmustall=%llu texquads=%llu l2miss=%llu quads=%llu written=%llu prims=%llu\n" :
 			"v3d: gpu runs=%u k/run cycles=%llu qidle=%llu qfrag=%llu qvalid=%llu qtmu=%llu qsb=%llu qvary=%llu qstall=%llu tmu=%llu tmumiss=%llu tmustall=%llu cle=%llu quads=%llu written=%llu tlbrd=%llu tlbwr=%llu\n",
 			perf->counter_runs,
 			(unsigned long long)(perf->counters[0] / perf->counter_runs / 1000U),
@@ -788,6 +791,8 @@ report_perf(
 	/* The bin runs' counters, in thousands per run (the bin sources of run_cl in v3d-job.c). */
 	if (perf->bin_counter_runs != 0U) {
 		perf_append(
+			perf->counters_71 ?
+			"v3d: gpu bin runs=%u k/run cycles=%llu core=%llu cle=%llu qactive=%llu qstall=%llu svpm=%llu suni=%llu sother=%llu bubble=%llu ihit=%llu imiss=%llu vcdhit=%llu vcdmiss=%llu binned=%llu reversed=%llu outside=%llu\n" :
 			"v3d: gpu bin runs=%u k/run cycles=%llu qidle=%llu qcoord=%llu qvalid=%llu qwait=%llu ihit=%llu imiss=%llu uhit=%llu umiss=%llu vdw=%llu vcd=%llu cle=%llu l2hit=%llu l2miss=%llu binned=%llu reversed=%llu\n",
 			perf->bin_counter_runs,
 			(unsigned long long)(perf->bin_counters[0] / perf->bin_counter_runs / 1000U),

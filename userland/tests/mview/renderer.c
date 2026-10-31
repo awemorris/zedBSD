@@ -56,6 +56,7 @@ static VkResult renderer_swapchain(struct mview_renderer *renderer, VkSwapchainK
 static VkResult renderer_pass(struct mview_renderer *renderer);
 static VkResult renderer_depth(struct mview_renderer *renderer);
 static VkResult renderer_targets(struct mview_renderer *renderer);
+static VkResult renderer_offscreen_images(struct mview_renderer *renderer);
 static void renderer_targets_free(struct mview_renderer *renderer);
 static VkResult renderer_commands(struct mview_renderer *renderer);
 static VkResult renderer_layout(struct mview_renderer *renderer);
@@ -85,12 +86,16 @@ static void renderer_buffer_free(struct mview_renderer *renderer, struct mview_b
 /*
  * Creates the device, swapchain, pass, depth image, pipelines and commands.
  *
- * Model resources are created separately by mview_renderer_load.
+ * Without a window (window NULL) the viewer draws offscreen at width by
+ * height into images of its own, with no surface or swapchain.  Model
+ * resources are created separately by mview_renderer_load.
  */
 VkResult
 mview_renderer_open(
 	struct mview_renderer *renderer,
 	struct mview_window *window,
+	uint32_t width,
+	uint32_t height,
 	int pixel_shading,
 	VkPresentModeKHR present_mode,
 	uint32_t copies,
@@ -108,8 +113,13 @@ mview_renderer_open(
 
 	/* Initializes renderer ownership, the configured native image extent and the shading. */
 	memset(renderer, 0, sizeof(*renderer));
-	renderer->extent.width = window->width;
-	renderer->extent.height = window->height;
+	renderer->offscreen = window == NULL;
+	renderer->extent.width = width;
+	renderer->extent.height = height;
+	if (window != NULL) {
+		renderer->extent.width = window->width;
+		renderer->extent.height = window->height;
+	}
 	renderer->pixel_shading = pixel_shading;
 	renderer->wanted_present = present_mode;
 	renderer->copies = copies;
@@ -136,28 +146,35 @@ mview_renderer_open(
 	instance.pApplicationInfo = &application;
 	instance.enabledExtensionCount = 2U;
 	instance.ppEnabledExtensionNames = extensions;
+	if (renderer->offscreen)
+		instance.enabledExtensionCount = 0U;
 	renderer->operation = "vkCreateInstance";
 	error = vkCreateInstance(&instance, NULL, &renderer->instance);
 	if (error != VK_SUCCESS)
 		return error;
 
 	/* This is the only native-window description supplied to Vulkan. */
-	memset(&surface, 0, sizeof(surface));
-	surface.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
-	surface.display = window->display;
-	surface.surface = window->surface;
-	renderer->operation = "vkCreateWaylandSurfaceKHR";
-	error = vkCreateWaylandSurfaceKHR(renderer->instance, &surface, NULL, &renderer->surface);
-	if (error != VK_SUCCESS)
-		return error;
+	if (!renderer->offscreen) {
+		memset(&surface, 0, sizeof(surface));
+		surface.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
+		surface.display = window->display;
+		surface.surface = window->surface;
+		renderer->operation = "vkCreateWaylandSurfaceKHR";
+		error = vkCreateWaylandSurfaceKHR(renderer->instance, &surface, NULL, &renderer->surface);
+		if (error != VK_SUCCESS)
+			return error;
+	}
 
-	/* Selects a graphics queue with presentation support for this surface. */
+	/* Selects a graphics queue with presentation support for this surface (any graphics queue offscreen). */
 	error = renderer_device(renderer);
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* Creates the first chain using the native window configuration. */
-	error = renderer_swapchain(renderer, VK_NULL_HANDLE);
+	/* Creates the first chain using the native window configuration, or offscreen the images that stand in for it. */
+	if (renderer->offscreen)
+		error = renderer_offscreen_images(renderer);
+	else
+		error = renderer_swapchain(renderer, VK_NULL_HANDLE);
 	if (error != VK_SUCCESS)
 		return error;
 
@@ -350,11 +367,16 @@ mview_renderer_draw(
 		renderer_stage(renderer, MVIEW_STAGE_FENCE, &mark);
 	}
 
-	/* The acquire semaphore is signaled only after the compositor releases an image. */
-	renderer->operation = "vkAcquireNextImageKHR";
-	acquired = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, RENDERER_GPU_TIMEOUT, renderer->acquired, VK_NULL_HANDLE, &image);
-	if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR)
-		return acquired;
+	/* The acquire semaphore is signaled only after the compositor releases an image; offscreen the images are used in turn. */
+	if (renderer->offscreen) {
+		acquired = VK_SUCCESS;
+		image = (renderer->offscreen_latest + 1U) % renderer->count;
+	} else {
+		renderer->operation = "vkAcquireNextImageKHR";
+		acquired = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, RENDERER_GPU_TIMEOUT, renderer->acquired, VK_NULL_HANDLE, &image);
+		if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR)
+			return acquired;
+	}
 	renderer_stage(renderer, MVIEW_STAGE_ACQUIRE, &mark);
 
 	/* The fence of the previous frame has been waited on and can be reused. */
@@ -389,7 +411,7 @@ mview_renderer_draw(
 		stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 		memset(&submit, 0, sizeof(submit));
 		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		if (part == 0U) {
+		if (part == 0U && !renderer->offscreen) {
 			submit.waitSemaphoreCount = 1U;
 			submit.pWaitSemaphores = &renderer->acquired;
 			submit.pWaitDstStageMask = &stage;
@@ -398,8 +420,10 @@ mview_renderer_draw(
 		submit.pCommandBuffers = &renderer->command;
 		fence = VK_NULL_HANDLE;
 		if (part + 1U == renderer->submits) {
-			submit.signalSemaphoreCount = 1U;
-			submit.pSignalSemaphores = &renderer->targets[image].rendered;
+			if (!renderer->offscreen) {
+				submit.signalSemaphoreCount = 1U;
+				submit.pSignalSemaphores = &renderer->targets[image].rendered;
+			}
 			fence = renderer->fence;
 		}
 
@@ -412,16 +436,21 @@ mview_renderer_draw(
 	}
 	renderer->command = renderer->commands[renderer->slot * renderer->submits];
 
-	/* Transfers the completed acquired image to the surface. */
-	memset(&present, 0, sizeof(present));
-	present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-	present.waitSemaphoreCount = 1U;
-	present.pWaitSemaphores = &renderer->targets[image].rendered;
-	present.swapchainCount = 1U;
-	present.pSwapchains = &renderer->swapchain;
-	present.pImageIndices = &image;
-	renderer->operation = "vkQueuePresentKHR";
-	presented = vkQueuePresentKHR(renderer->queue, &present);
+	/* Transfers the completed acquired image to the surface; offscreen it is only kept as the latest. */
+	presented = VK_SUCCESS;
+	if (renderer->offscreen) {
+		renderer->offscreen_latest = image;
+	} else {
+		memset(&present, 0, sizeof(present));
+		present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		present.waitSemaphoreCount = 1U;
+		present.pWaitSemaphores = &renderer->targets[image].rendered;
+		present.swapchainCount = 1U;
+		present.pSwapchains = &renderer->swapchain;
+		present.pImageIndices = &image;
+		renderer->operation = "vkQueuePresentKHR";
+		presented = vkQueuePresentKHR(renderer->queue, &present);
+	}
 	renderer_stage(renderer, MVIEW_STAGE_PRESENT, &mark);
 
 	/* Command-buffer reuse is ordered by the rendering fence whatever the present did (with one frame in flight, here). */
@@ -567,7 +596,13 @@ mview_renderer_close(
 		renderer_buffer_free(renderer, &renderer->scene);
 		renderer_buffer_free(renderer, &renderer->instances);
 
-		/* Releases attachments before the objects referenced by their recorded rendering. */
+		/* Releases attachments before the objects referenced by their recorded rendering, then the offscreen images. */
+		if (renderer->offscreen_images != NULL) {
+			for (index = 0U; index < renderer->count; index++)
+				renderer_image_free(renderer, &renderer->offscreen_images[index]);
+		}
+		free(renderer->offscreen_images);
+		renderer->offscreen_images = NULL;
 		renderer_targets_free(renderer);
 		renderer_image_free(renderer, &renderer->depth);
 
@@ -685,7 +720,11 @@ renderer_device(
 
 			/* Queries support for this exact native surface before choosing its queue. */
 			supported = VK_FALSE;
-			error = vkGetPhysicalDeviceSurfaceSupportKHR(devices[index], family, renderer->surface, &supported);
+			error = VK_SUCCESS;
+			if (renderer->offscreen)
+				supported = VK_TRUE;
+			else
+				error = vkGetPhysicalDeviceSurfaceSupportKHR(devices[index], family, renderer->surface, &supported);
 			if (error == VK_SUCCESS && supported != VK_FALSE) {
 				renderer->physical = devices[index];
 				renderer->family = family;
@@ -729,7 +768,7 @@ renderer_device(
 	create.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	create.queueCreateInfoCount = 1U;
 	create.pQueueCreateInfos = &queue;
-	create.enabledExtensionCount = 1U;
+	create.enabledExtensionCount = renderer->offscreen ? 0U : 1U;
 	create.ppEnabledExtensionNames = &extension;
 	renderer->operation = "vkCreateDevice";
 	error = vkCreateDevice(renderer->physical, &create, NULL, &renderer->device);
@@ -952,6 +991,155 @@ renderer_swapchain(
 }
 
 /*
+ * Creates the colour images an offscreen viewer draws into in place of a
+ * swapchain's: --images of them (three by default), B8G8R8A8 UNORM like
+ * the swapchain the viewer prefers, copied back by mview_renderer_read.
+ */
+static VkResult
+renderer_offscreen_images(
+	struct mview_renderer *renderer)
+{
+	VkFormatProperties properties;
+	uint32_t index;
+	VkResult error;
+
+	/* The viewer's preferred swapchain format, when it can be drawn into and copied from. */
+	renderer->format = VK_FORMAT_B8G8R8A8_UNORM;
+	vkGetPhysicalDeviceFormatProperties(renderer->physical, renderer->format, &properties);
+	renderer->operation = "offscreen format";
+	if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) == 0U)
+		return VK_ERROR_FORMAT_NOT_SUPPORTED;
+
+	/* The size is the asked one, within what a framebuffer may be. */
+	renderer->operation = "offscreen size";
+	if (renderer->extent.width < 16U || renderer->extent.height < 16U ||
+	    renderer->extent.width > renderer->max_texture_side || renderer->extent.height > renderer->max_texture_side)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* Three images unless --images asks for another count. */
+	renderer->count = renderer->images != 0U ? renderer->images : 3U;
+	renderer->offscreen_images = calloc(renderer->count, sizeof(*renderer->offscreen_images));
+	if (renderer->offscreen_images == NULL) {
+		renderer->operation = "calloc";
+		renderer->count = 0U;
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	/* Each image is drawn into and copied from. */
+	for (index = 0U; index < renderer->count; index++) {
+		error = renderer_image(renderer, &renderer->offscreen_images[index], renderer->format,
+				       renderer->extent.width, renderer->extent.height, 1U,
+				       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+		if (error != VK_SUCCESS)
+			return error;
+	}
+
+	/* The first frame draws into image 0. */
+	renderer->offscreen_latest = renderer->count - 1U;
+	renderer->present_mode = renderer->wanted_present;
+
+	/* Succeeded: the images stand in for a swapchain's. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Copies the offscreen image drawn last back to the host and writes it to
+ * path as a binary PPM (when path is not NULL), with an FNV-1a checksum of
+ * its RGB bytes in checksum.  The frame must have finished (every draw
+ * waits for its fence with one frame in flight; with more, the device is
+ * idled first).
+ */
+VkResult
+mview_renderer_read(
+	struct mview_renderer *renderer,
+	const char *path,
+	uint32_t *checksum)
+{
+	struct mview_buffer readback;
+	VkBufferImageCopy region;
+	const uint8_t *pixel;
+	uint32_t hash;
+	uint32_t index;
+	uint32_t pixels;
+	uint8_t rgb[3];
+	FILE *file;
+	VkResult error;
+
+	/* Only an offscreen viewer has an image to read. */
+	renderer->operation = "mview_renderer_read";
+	if (!renderer->offscreen || renderer->count == 0U)
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+
+	/* Every frame in flight finishes before its image is read. */
+	renderer->operation = "vkDeviceWaitIdle";
+	error = vkDeviceWaitIdle(renderer->device);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* A mapped buffer of the image's bytes. */
+	memset(&readback, 0, sizeof(readback));
+	pixels = renderer->extent.width * renderer->extent.height;
+	error = renderer_buffer(renderer, &readback, (VkDeviceSize)pixels * 4U, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 1);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Copies the image, left in the general layout by the frame's pass, into the buffer. */
+	renderer->command = renderer->commands[0];
+	error = renderer_begin(renderer);
+	if (error != VK_SUCCESS) {
+		renderer_buffer_free(renderer, &readback);
+		return error;
+	}
+	memset(&region, 0, sizeof(region));
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.layerCount = 1U;
+	region.imageExtent.width = renderer->extent.width;
+	region.imageExtent.height = renderer->extent.height;
+	region.imageExtent.depth = 1U;
+	vkCmdCopyImageToBuffer(renderer->command, renderer->offscreen_images[renderer->offscreen_latest].image,
+			       VK_IMAGE_LAYOUT_GENERAL, readback.buffer, 1U, &region);
+	error = renderer_finish(renderer);
+	if (error != VK_SUCCESS) {
+		renderer_buffer_free(renderer, &readback);
+		return error;
+	}
+
+	/* Hashes the pixels as RGB and writes them out when asked. */
+	file = NULL;
+	if (path != NULL) {
+		file = fopen(path, "wb");
+		if (file == NULL) {
+			renderer->operation = "fopen";
+			renderer_buffer_free(renderer, &readback);
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+		fprintf(file, "P6\n%u %u\n255\n", renderer->extent.width, renderer->extent.height);
+	}
+	hash = 2166136261U;
+	pixel = readback.mapping;
+	for (index = 0U; index < pixels; index++, pixel += 4) {
+		rgb[0] = pixel[2];
+		rgb[1] = pixel[1];
+		rgb[2] = pixel[0];
+		hash = (hash ^ rgb[0]) * 16777619U;
+		hash = (hash ^ rgb[1]) * 16777619U;
+		hash = (hash ^ rgb[2]) * 16777619U;
+		if (file != NULL)
+			fwrite(rgb, 1U, 3U, file);
+	}
+	if (file != NULL && fclose(file) != 0) {
+		renderer->operation = "fclose";
+		renderer_buffer_free(renderer, &readback);
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+	*checksum = hash;
+
+	/* Succeeded: the image is in the file and the checksum. */
+	renderer_buffer_free(renderer, &readback);
+	return VK_SUCCESS;
+}
+
+/*
  * Creates the pass that draws a frame whole, and with more than one
  * submission a frame the passes of its parts: the first, the middle ones
  * and the last.
@@ -1014,6 +1202,8 @@ renderer_pass_kind(
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 	attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	if (renderer->offscreen)
+		attachments[0].finalLayout = VK_IMAGE_LAYOUT_GENERAL;
 
 	/* Depth is cleared every frame and never read afterwards. */
 	attachments[1].format = renderer->depth_format;
@@ -1124,12 +1314,14 @@ renderer_targets(
 	uint32_t index;
 	VkResult error;
 
-	/* Partial target acquisition remains reachable through the renderer for cleanup. */
-	renderer->operation = "vkGetSwapchainImagesKHR";
-	renderer->count = 0U;
-	error = vkGetSwapchainImagesKHR(renderer->device, renderer->swapchain, &renderer->count, NULL);
-	if (error != VK_SUCCESS)
-		return error;
+	/* Partial target acquisition remains reachable through the renderer for cleanup; offscreen the count is the images'. */
+	if (!renderer->offscreen) {
+		renderer->operation = "vkGetSwapchainImagesKHR";
+		renderer->count = 0U;
+		error = vkGetSwapchainImagesKHR(renderer->device, renderer->swapchain, &renderer->count, NULL);
+		if (error != VK_SUCCESS)
+			return error;
+	}
 
 	/* An empty chain has no image that the renderer can acquire. */
 	if (renderer->count == 0U)
@@ -1148,10 +1340,15 @@ renderer_targets(
 	}
 
 	/* Copies the borrowed image inventory before creating any dependent views. */
-	error = vkGetSwapchainImagesKHR(renderer->device, renderer->swapchain, &renderer->count, images);
-	if (error != VK_SUCCESS) {
-		free(images);
-		return error;
+	if (renderer->offscreen) {
+		for (index = 0U; index < renderer->count; index++)
+			images[index] = renderer->offscreen_images[index].image;
+	} else {
+		error = vkGetSwapchainImagesKHR(renderer->device, renderer->swapchain, &renderer->count, images);
+		if (error != VK_SUCCESS) {
+			free(images);
+			return error;
+		}
 	}
 
 	/* Constructs independently reclaimable attachment owners for each borrowed image. */
@@ -1233,7 +1430,8 @@ renderer_targets_free(
 	/* Clears the attachment collection so later cleanup cannot reuse stale identities. */
 	free(renderer->targets);
 	renderer->targets = NULL;
-	renderer->count = 0U;
+	if (!renderer->offscreen)
+		renderer->count = 0U;
 
 	/* Succeeded: all application image attachments have retired. */
 	return;

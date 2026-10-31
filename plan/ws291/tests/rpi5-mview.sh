@@ -1,15 +1,18 @@
 #!/bin/sh
 # ws291-p021: mview's scene on the Raspberry Pi 5's V3D 7.1, on the board booted from the measurement image
 # (rpi5-image.sh, rpi5-image-boot.sh), from the top of the tree:
-#   [PI5=ADDRESS] [COPIES='1 10 50 74'] [SPIN=12] [MVIEW_ARGS=...] [PROGRAMS=BUILD] sh plan/ws291/tests/rpi5-mview.sh OUT
+#   [PI5=ADDRESS] [KERNEL=VMUNIX] [COPIES='1 10 50 74'] [SPIN=12] [MVIEW_ARGS=...] [PROGRAMS=BUILD] sh plan/ws291/tests/rpi5-mview.sh OUT
 # The board is found by its Ethernet MAC (98:fe:54:22:65:c3) on 10.0.30.0/24 unless PI5 names it, and must answer
 # uname with zedBSD; root is reached with the guest harness's key (plan/tmp/guest/id_ed25519).  The GPU is started
 # when it is still held (sysctl hw.gpu.start=1) and its stage lines (QPUs, clock) kept; the compositor runs on its own
 # socket with no desktop client, mview spins in the game mode (fullscreen, direct scanout, mailbox, 4 images) once for
 # each of COPIES, the compositor's scanout lines and the kernel's GPU lines are kept, and the compositor is ended.
 # PROGRAMS names a build of the same config whose bin/wayland, bin/mview and dynamic libraries are copied to
-# /root/p021 and run with LD_LIBRARY_PATH (the image's own files are not changed).  Nothing is power-cycled or rebooted.
-# OUT/summary.txt holds what is printed.
+# /root/p021 and run with LD_LIBRARY_PATH (the image's own files are not changed).  KERNEL, when its checksum differs
+# from the board's /boot/boot0/vmunix, is copied there (the board's first kernel kept once as vmunix.p021old) and the
+# board rebooted; nothing is power-cycled.  Each run's summary keeps the kernel's last cost report and its board line
+# (the CPU clock as set and measured, the temperature and the firmware's throttling flags, with v3d.perf=1), so runs
+# at different CPU speeds can be told apart.  OUT/summary.txt holds what is printed.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 out=${1:?usage: rpi5-mview.sh OUT}
@@ -52,6 +55,36 @@ zedBSD*) ;;
 esac
 say "board $PI5 $os"
 
+# Waits up to four minutes for the board's SSH after a reboot.
+wait_up() {
+	n=0
+	while [ $n -lt 48 ]; do
+		sleep 5
+		if b 'uname -s' 2> /dev/null | grep -q zedBSD; then
+			return 0
+		fi
+		n=$((n + 1))
+	done
+	return 1
+}
+
+# The kernel, with a reboot when it changes.
+if [ -n "${KERNEL:-}" ]; then
+	want=$(cksum < "$KERNEL" | cut -d' ' -f1)
+	have=$(b 'cksum < /boot/boot0/vmunix' | cut -d' ' -f1)
+	if [ "$want" != "$have" ]; then
+		b 'test -e /boot/boot0/vmunix.p021old || cp /boot/boot0/vmunix /boot/boot0/vmunix.p021old'
+		timeout 300 scp $SO -q "$KERNEL" "root@$PI5:/boot/boot0/vmunix.new" &&
+		    b 'test "$(cksum < /boot/boot0/vmunix.new | cut -d" " -f1)" = '"$want"' && mv /boot/boot0/vmunix.new /boot/boot0/vmunix && sync' ||
+		    { say "FAIL the kernel was not copied"; exit 1; }
+		b 'sync; (sleep 1; /sbin/reboot) > /dev/null 2>&1 &'
+		sleep 20
+		wait_up || { say "FAIL the board did not come back after the reboot"; exit 1; }
+		say "rebooted $(date +%H:%M:%S)"
+	fi
+fi
+say "kernel vmunix $(b 'cksum < /boot/boot0/vmunix' | cut -d' ' -f1) $(b 'uname -v' 2>&1) cmdline $(b 'cat /boot/boot0/cmdline.txt' 2>&1)"
+
 # The GPU, started once per boot.
 if b 'dmesg' | grep -q 'held; root starts it'; then
 	if ! b 'dmesg' | grep -q 'V1 ok'; then
@@ -88,7 +121,10 @@ for copies in ${COPIES:-1 10 50 74}; do
 	say "c$copies $(grep -E 'MVIEW (SPIN|STAGES|FAILED|HITCHES)' "$out/c$copies.txt" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')"
 	b 'dmesg' > "$out/c$copies.after" 2>&1
 	grep -F -x -v -f "$out/c$copies.before" "$out/c$copies.after" > "$out/c$copies.kernel"
-	head -6 "$out/c$copies.kernel" | sed "s/^/c$copies kernel /" | tee -a "$summary"
+	grep -vE 'v3d: (perf|gpu|board)|display: perf|flip report' "$out/c$copies.kernel" | head -6 | sed "s/^/c$copies kernel /" | tee -a "$summary"
+	grep -E 'v3d: perf' "$out/c$copies.kernel" | tail -1 | sed "s/^/c$copies perf /" | tee -a "$summary"
+	grep -E 'v3d: board' "$out/c$copies.kernel" | tail -1 | sed "s/^/c$copies /" | tee -a "$summary"
+	say "c$copies board-range $(grep -E 'v3d: board' "$out/c$copies.kernel" | sed -n 's/.*arm=[0-9]*\/\([0-9]*\) .*temp=\([0-9.]*\) throttled=\(0x[0-9a-f]*\).*/\1 \2 \3/p' | sort -u | tr '\n' ',')"
 done
 b "grep -E 'KWL (SCANOUT|MODE [a-z]|FAILED|VULKAN_ERROR|DIRECT|OUTPUT)' $D/wayland.log | sort | uniq -c | head -12" > "$out/scanout.txt" 2>&1
 sed 's/^/compositor /' "$out/scanout.txt" | tee -a "$summary"

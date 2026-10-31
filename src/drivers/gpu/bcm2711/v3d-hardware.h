@@ -84,6 +84,8 @@ struct bcm2711_v3d_perf {
 	/* The same sums over the bin runs, and how many. */
 	uint64_t bin_counters[16];
 	uint32_t bin_counter_runs;
+	/* Whether the counters are V3D 7.1's sources instead of 4.2's. */
+	bool counters_71;
 	/* The cycle counter split between passes without draws (tile copies and clears) and with draws, and their tiles. */
 	uint64_t copy_cycles;
 	uint64_t draw_cycles;
