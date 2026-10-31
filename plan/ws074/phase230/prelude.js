@@ -1225,7 +1225,14 @@
     (function () {
       var nativeOpen = g.open;
       def(g, 'open', function open(url, name) {
-        var w = namedFrame(name), u;
+        var w, u;
+        // The window itself: a navigation of this one.
+        if (typeof name === 'string' && /^\s*_self\s*$/i.test(name) && url !== undefined && url !== null && String(url) !== '') {
+          u = resolveURL(url);
+          if (u !== null) navigateTo(u, { history: 'auto', navState: null });
+          return g;
+        }
+        w = namedFrame(name);
         if (w) {
           u = url === undefined || url === null || String(url) === '' ? null : resolveURL(url);
           if (u !== null) { try { w.location.assign(u); } catch (e) { /* refused */ } }
