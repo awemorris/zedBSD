@@ -1817,7 +1817,7 @@ flex_auto_minimums(
 
 		/* A size in pixels that is smaller is the minimum instead. */
 		size = row ? &child->style.width : &child->style.height;
-		if (size->unit == CSS_UNIT_PX || (!row && size->unit == CSS_UNIT_PERCENT && available >= 0)) {
+		if (size->unit == CSS_UNIT_PX || (size->unit == CSS_UNIT_PERCENT && available >= 0)) {
 			given = layout_from_px(size->value);
 			if (size->unit == CSS_UNIT_PERCENT)
 				given = (layout_unit)((float)available * size->value / 100.0f) + layout_from_px(size->offset);
