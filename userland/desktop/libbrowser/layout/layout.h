@@ -229,6 +229,8 @@ struct layout_box {
 	const layout_unit *subgrid_rows;
 	layout_unit subgrid_column_gap;
 	layout_unit subgrid_row_gap;
+	/* A subgrid in rows: for each row it spans the baseline groups the parent shares with it (first above, first below, last above, last below). */
+	const layout_unit *subgrid_baselines;
 
 	/* The text of a text box, whitespace kept as it came (the lines collapse it). */
 	const uint16_t *text;
@@ -312,6 +314,10 @@ struct layout_box {
 	/* The implicit tracks a Grid put before its explicit ones (grid-names.c). */
 	int grid_leading_columns;
 	int grid_leading_rows;
+
+	/* The row sizes of a first pass over a grid, which the columns of the second pass resolve percentage heights against (NULL outside it). */
+	const layout_unit *grid_row_hint;
+	int grid_row_hint_count;
 
 	/*
 	 * The width the box's content takes laid out without a limit (its

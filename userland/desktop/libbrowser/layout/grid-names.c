@@ -40,6 +40,7 @@ static int grid_names_find(const struct css_style *style, int columns, const str
 static int grid_names_count_from(const struct css_style *style, int columns, const struct vm_string *name, int from, int count, int forward);
 static int grid_names_axis(const struct css_style *style, int columns, struct css_grid_place *place);
 static void grid_names_prepend(struct layout_box *box, int columns, int count);
+static void grid_names_clamp(struct css_grid_place *place, int lines, int positioned);
 static void grid_names_settle(struct css_grid_place *place);
 
 /*
@@ -66,10 +67,14 @@ layout_grid_names(
 	row_first = 1;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		first = grid_names_axis(&box->style, 1, &child->style.grid_column);
-		if (!child->out_of_flow && first < column_first)
+		if (box->subgrid_column_span > 0)
+			grid_names_clamp(&child->style.grid_column, box->subgrid_column_span + 1, child->out_of_flow);
+		else if (!child->out_of_flow && first < column_first)
 			column_first = first;
 		first = grid_names_axis(&box->style, 0, &child->style.grid_row);
-		if (!child->out_of_flow && first < row_first)
+		if (box->subgrid_row_span > 0)
+			grid_names_clamp(&child->style.grid_row, box->subgrid_row_span + 1, child->out_of_flow);
+		else if (!child->out_of_flow && first < row_first)
 			row_first = first;
 	}
 
@@ -259,6 +264,68 @@ grid_names_prepend(
 		if (place->end != GRID_NAMES_AUTO)
 			place->end += count;
 	}
+}
+
+/*
+ * Keeps a place of a subgrid's axis inside its lines (1 to lines): a
+ * subgrid has no implicit tracks, so a line outside them is the nearest
+ * one, and a place left with no width takes the track next to it.
+ */
+static void
+grid_names_clamp(
+	struct css_grid_place *place,
+	int lines,
+	int positioned)
+{
+	int start;
+	int end;
+	int swap;
+
+	/* A positioned box keeps an auto side (the containing block's edge): each line is held inside alone. */
+	start = place->start;
+	end = place->end;
+	if (positioned) {
+		if (start != GRID_NAMES_AUTO)
+			place->start = start < 1 ? 1 : (start > lines ? lines : start);
+		if (end != GRID_NAMES_AUTO)
+			place->end = end < 1 ? 1 : (end > lines ? lines : end);
+		return;
+	}
+
+	/* Only a place with a definite line is clamped; the span beside it is worked out first. */
+	if (start == GRID_NAMES_AUTO && end == GRID_NAMES_AUTO)
+		return;
+	if (start != GRID_NAMES_AUTO && end == GRID_NAMES_AUTO)
+		end = start + (place->end_span > 0 ? place->end_span : 1);
+	else if (start == GRID_NAMES_AUTO && end != GRID_NAMES_AUTO)
+		start = end - (place->start_span > 0 ? place->start_span : 1);
+
+	/* A reversed pair is the other way round. */
+	if (start > end) {
+		swap = start;
+		start = end;
+		end = swap;
+	}
+
+	/* Both lines inside; where they met, the track next to them. */
+	if (start < 1)
+		start = 1;
+	if (start > lines)
+		start = lines;
+	if (end < 1)
+		end = 1;
+	if (end > lines)
+		end = lines;
+	if (end == start) {
+		if (start == lines)
+			start--;
+		else
+			end++;
+	}
+	place->start = start;
+	place->end = end;
+	place->start_span = 0;
+	place->end_span = 0;
 }
 
 /* Leaves a place in the grid layout's terms: lines from 1, 0 for auto (a line still before the grid is auto). */

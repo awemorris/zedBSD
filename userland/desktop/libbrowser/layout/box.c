@@ -2260,6 +2260,13 @@ box_static_inline(
 		if (child->out_of_flow) {
 			child->static_x = x;
 			child->static_y = y;
+			child->static_x_from_right = 0;
+			child->static_x_align = CSS_ALIGN_AUTO;
+			if (block->style.direction == CSS_DIRECTION_RTL && block->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
+				/* In a right to left block it would have started at the right edge. */
+				child->static_x = x + block->width;
+				child->static_x_from_right = 1;
+			}
 
 			/* A containing block a grid gave it moves with the content box too. */
 			if (child->cb_set && !child->area_from_anchor) {

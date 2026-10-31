@@ -108,6 +108,9 @@ static int grid_size_columns(struct layout_tree *tree, struct layout_box *box, s
 static int grid_lay_item(struct layout_tree *tree, struct layout_box *item, layout_unit width, int justify);
 static void grid_size_rows(struct layout_tree *tree, struct layout_box *box, struct grid_state *grid, layout_unit gap);
 static int grid_subgrid_axis(const struct layout_box *box, int columns);
+static int grid_percent_below(const struct layout_box *box, int depth);
+static int grid_hint_rows_height(const struct layout_box *box, const struct grid_item *item, layout_unit gap, layout_unit *height);
+static int grid_subgrid_flipped(const struct layout_box *sub, int columns);
 static int grid_subgrid_prepare(struct layout_tree *tree, struct layout_box *sub, const struct layout_box *parent, int column_first, int row_first);
 static int grid_subgrid_preset(struct layout_tree *tree, struct layout_box *sub, int columns, const layout_unit *sizes, int first, int tracks, layout_unit gap);
 static int grid_relay_item(struct layout_tree *tree, struct layout_box *item, layout_unit width, layout_unit height, int align);
@@ -116,6 +119,8 @@ static layout_unit grid_clamp_height(const struct layout_box *item, layout_unit 
 static layout_unit grid_outer_height(const struct layout_box *item);
 static int grid_row_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *above);
 static void grid_row_baselines(const struct layout_box *box, const struct grid_state *grid, int row, layout_unit *first_above, layout_unit *first_below, layout_unit *last_above, layout_unit *last_below);
+static void grid_subgrid_baselines(const struct layout_box *sub, int first, int row, layout_unit *first_above, layout_unit *first_below, layout_unit *last_above, layout_unit *last_below);
+static int grid_subgrid_baseline_preset(struct layout_tree *tree, struct layout_box *box, const struct grid_state *grid, struct layout_box *sub, int first);
 static int grid_fixed_column_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *right_extent);
 static int grid_parent_height(const struct layout_tree *tree, const struct layout_box *box, layout_unit *basis);
 static int grid_column_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *before, layout_unit *after, int *flush_right);
@@ -577,6 +582,8 @@ layout_grid(
 	int col_right;
 	layout_unit shared_right_extent;
 	struct css_length subgrid_width;
+	struct css_length subgrid_min;
+	struct css_length subgrid_max;
 	layout_unit free_height;
 	layout_unit saved_height;
 	size_t index;
@@ -659,6 +666,7 @@ layout_grid(
 		child->subgrid_row_span = 0;
 		child->subgrid_columns = NULL;
 		child->subgrid_rows = NULL;
+		child->subgrid_baselines = NULL;
 		if (grid_subgrid_axis(child, 1))
 			child->subgrid_column_span = grid.items[index].column_span;
 		if (grid_subgrid_axis(child, 0))
@@ -785,8 +793,10 @@ layout_grid(
 		if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
 		    (item->box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB &&
 		    !item->box->grid_orthogonal) ||
-		    item->box->style.min_width.unit != CSS_UNIT_AUTO ||
-		    item->box->style.max_width.unit != CSS_UNIT_NONE)
+		    item->box->style.min_width.unit == CSS_UNIT_PERCENT ||
+		    item->box->style.max_width.unit == CSS_UNIT_PERCENT ||
+		    (item->box->replaced && (item->box->style.min_width.unit != CSS_UNIT_AUTO ||
+		    item->box->style.max_width.unit != CSS_UNIT_NONE)))
 			justify = CSS_ALIGN_STRETCH;
 		if (item->box->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO ||
 		    item->box->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
@@ -817,12 +827,18 @@ layout_grid(
 
 		/* A subgrid in columns fills the area it spans whatever its width says. */
 		subgrid_width = item->box->style.width;
+		subgrid_min = item->box->style.min_width;
+		subgrid_max = item->box->style.max_width;
 		if (item->box->subgrid_column_span > 0) {
 			item->box->style.width.unit = CSS_UNIT_AUTO;
+			item->box->style.min_width.unit = CSS_UNIT_AUTO;
+			item->box->style.max_width.unit = CSS_UNIT_NONE;
 			justify = CSS_ALIGN_STRETCH;
 		}
 		error = grid_lay_item(tree, item->box, area_width, justify);
 		item->box->style.width = subgrid_width;
+		item->box->style.min_width = subgrid_min;
+		item->box->style.max_width = subgrid_max;
 		tree->containing_height = saved_height;
 		tree->containing_height_definite = saved_definite;
 		if (error != 0) {
@@ -833,6 +849,34 @@ layout_grid(
 
 	/* The rows' heights from the items. */
 	grid_size_rows(tree, box, &grid, row_gap);
+
+	/* An item whose height is a percentage of rows that were not fixed contributes to the columns by that height: the columns are resolved once more with the rows the first pass gave. */
+	if (box->grid_row_hint == NULL && tree->measuring == 0 && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
+		size_t again;
+
+		for (again = 0; again < grid.item_count; again++) {
+			item = &grid.items[again];
+			if (item->box->style.width.unit == CSS_UNIT_AUTO && !grid_fixed_rows_height(box, item, row_gap, &area_height) &&
+			    (item->box->style.height.unit == CSS_UNIT_PERCENT ||
+			    (item->box->style.height.unit == CSS_UNIT_AUTO && grid_percent_below(item->box, 0))))
+				break;
+		}
+		if (again < grid.item_count && grid.row_count > 0) {
+			layout_unit *hint;
+
+			hint = wb_arena_alloc(&tree->arena, (size_t)grid.row_count * sizeof(*hint));
+			if (hint != NULL) {
+				memcpy(hint, grid.rows, (size_t)grid.row_count * sizeof(*hint));
+				box->grid_row_hint = hint;
+				box->grid_row_hint_count = grid.row_count;
+				grid_release(&grid);
+				error = layout_grid(tree, box);
+				box->grid_row_hint = NULL;
+				box->grid_row_hint_count = 0;
+				return error;
+			}
+		}
+	}
 	for (position = 0; grid.row_collapsed != NULL && position < grid.row_count; position++) {
 		if (grid.row_collapsed[position])
 			grid.rows[position] = -row_gap;
@@ -978,9 +1022,15 @@ layout_grid(
 		else if (align == CSS_ALIGN_BASELINE)
 			align = CSS_ALIGN_START;
 
+		/* A subgrid in rows fills the area whatever its alignment says. */
+		if (child->subgrid_row_span > 0)
+			align = CSS_ALIGN_STRETCH;
+
 		/* A subgrid in rows is given the rows it spans. */
 		if (child->subgrid_row_span > 0) {
 			error = grid_subgrid_preset(tree, child, 0, grid.rows, item->row, grid.row_count, row_gap);
+			if (error == 0)
+				error = grid_subgrid_baseline_preset(tree, box, &grid, child, item->row);
 			if (error != 0) {
 				grid_release(&grid);
 				return error;
@@ -1010,7 +1060,8 @@ layout_grid(
 			child->height = area_height - child->margin[CSS_TOP] - child->margin[CSS_BOTTOM] - frame;
 			if (child->height < 0)
 				child->height = 0;
-			child->height = grid_clamp_height(child, child->height, area_height, frame);
+			if (child->subgrid_row_span == 0)
+				child->height = grid_clamp_height(child, child->height, area_height, frame);
 		}
 
 		/* Its place, moved down by the room it leaves when it is at the end or the center. */
@@ -1018,8 +1069,9 @@ layout_grid(
 		if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
 		    (child->style.width.unit != CSS_UNIT_AUTO ||
 		    ((child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB || child->grid_orthogonal) &&
-		    child->style.min_width.unit == CSS_UNIT_AUTO &&
-		    child->style.max_width.unit == CSS_UNIT_NONE &&
+		    child->style.min_width.unit != CSS_UNIT_PERCENT &&
+		    child->style.max_width.unit != CSS_UNIT_PERCENT &&
+		    (!child->replaced || (child->style.min_width.unit == CSS_UNIT_AUTO && child->style.max_width.unit == CSS_UNIT_NONE)) &&
 		    child->style.margin[CSS_LEFT].unit != CSS_UNIT_AUTO &&
 		    child->style.margin[CSS_RIGHT].unit != CSS_UNIT_AUTO))) {
 			justify = child->style.justify_self;
@@ -3015,6 +3067,20 @@ grid_subgrid_axis(
 	return box->style.row_subgrid != NULL;
 }
 
+/* Tells whether a subgrid's columns run the other way round to its parent's (the two directions differ). */
+static int
+grid_subgrid_flipped(
+	const struct layout_box *sub,
+	int columns)
+{
+	/* Only the inline axis of a horizontal grid has a direction. */
+	if (!columns || sub->parent == NULL)
+		return 0;
+	if (sub->style.writing_mode != CSS_WRITING_HORIZONTAL_TB || sub->parent->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
+		return 0;
+	return sub->style.direction != sub->parent->style.direction;
+}
+
 /* Finds how much margin, border and padding a box has on the start (or end) side of an axis. */
 static layout_unit
 grid_edge(
@@ -3112,7 +3178,8 @@ grid_flatten(
 	layout_unit parent_gap,
 	layout_unit extra_start,
 	layout_unit extra_end,
-	layout_unit inherited)
+	layout_unit inherited,
+	int flipped)
 {
 	struct layout_box *child;
 	layout_unit edge_start;
@@ -3128,11 +3195,12 @@ grid_flatten(
 	int touched_end;
 	int error;
 
-	/* The subgrid's tracks, its edges and its gap. */
+	/* The subgrid's tracks, its edges and its gap; the edges and the items are counted in the order of the grid it is laid in. */
 	count = columns ? sub->subgrid_column_span : sub->subgrid_row_span;
 	layout_box_model(sub, 0);
-	edge_start = grid_edge(sub, columns, 1) + extra_start;
-	edge_end = grid_edge(sub, columns, 0) + extra_end;
+	flipped ^= grid_subgrid_flipped(sub, columns);
+	edge_start = grid_edge(sub, columns, flipped ? 0 : 1) + extra_start;
+	edge_end = grid_edge(sub, columns, flipped ? 1 : 0) + extra_end;
 	gap = grid_gap_of(sub, columns, parent_gap);
 	half = inherited + (gap - parent_gap) / 2;
 
@@ -3150,6 +3218,8 @@ grid_flatten(
 			span = 1;
 		if (start + span > count)
 			span = count - start;
+		if (flipped)
+			start = count - start - span;
 
 		/* What each side adds: the edge on the subgrid's first and last tracks, else half the gap's difference. */
 		start_extra = half;
@@ -3165,7 +3235,7 @@ grid_flatten(
 
 		/* A subgrid inside passes its sides on; any other item stands in the list. */
 		if ((columns && child->subgrid_column_span > 0) || (!columns && child->subgrid_row_span > 0)) {
-			error = grid_flatten(list, child, columns, first + start, gap, start_extra, end_extra, half);
+			error = grid_flatten(list, child, columns, first + start, gap, start_extra, end_extra, half, flipped);
 		} else {
 			error = grid_flat_add(list, child, first + start, span, child->item_row - 1,
 			    child->item_row_span, start_extra + end_extra, -1);
@@ -3207,9 +3277,9 @@ grid_flat_build(
 	for (index = 0; index < grid->item_count; index++) {
 		item = &grid->items[index];
 		if (columns && item->box->subgrid_column_span > 0) {
-			error = grid_flatten(list, item->box, 1, item->column, gap, 0, 0, 0);
+			error = grid_flatten(list, item->box, 1, item->column, gap, 0, 0, 0, 0);
 		} else if (!columns && item->box->subgrid_row_span > 0) {
-			error = grid_flatten(list, item->box, 0, item->row, gap, 0, 0, 0);
+			error = grid_flatten(list, item->box, 0, item->row, gap, 0, 0, 0, 0);
 		} else if (columns) {
 			error = grid_flat_add(list, item->box, item->column, item->column_span, item->row, item->row_span, 0, -1);
 		} else {
@@ -3278,8 +3348,12 @@ grid_subgrid_line_names(
 
 	/* The parent's names of the same lines. */
 	outer = columns ? parent->style.column_names : parent->style.row_names;
-	for (line = 0; outer != NULL && line < count && first + line <= CSS_TRACKS; line++)
-		grid_names_merge(&lines[line], &outer[first + line]);
+	for (line = 0; outer != NULL && line < count && first + line <= CSS_TRACKS; line++) {
+		if (grid_subgrid_flipped(sub, columns))
+			grid_names_merge(&lines[line], &outer[first + count - 1 - line]);
+		else
+			grid_names_merge(&lines[line], &outer[first + line]);
+	}
 
 	/* Kept for the placement of its items. */
 	if (columns)
@@ -3371,6 +3445,7 @@ grid_subgrid_prepare(
 		child->subgrid_row_span = 0;
 		child->subgrid_columns = NULL;
 		child->subgrid_rows = NULL;
+		child->subgrid_baselines = NULL;
 		if (grid_subgrid_axis(child, 1))
 			child->subgrid_column_span = item->column_span;
 		if (grid_subgrid_axis(child, 0))
@@ -3422,7 +3497,7 @@ grid_subgrid_preset(
 	own_gap = grid_gap_of(sub, columns, gap);
 	half = (gap - own_gap) / 2;
 	for (index = 0; index < count; index++) {
-		size = sizes[first + index];
+		size = sizes[first + (grid_subgrid_flipped(sub, columns) ? count - 1 - index : index)];
 		if (index == 0)
 			size -= grid_edge(sub, columns, 1);
 		if (index == count - 1)
@@ -3611,6 +3686,28 @@ grid_column_item_contribution(
 		item->style.height.value = layout_to_px((layout_unit)((float)rows * item->style.height.value / 100.0f) + layout_from_px(item->style.height.offset));
 		item->style.height.offset = 0;
 		item->style.height.unit = CSS_UNIT_PX;
+	}
+
+	/* An item that stretches to rows the first pass sized has their height, which its percentages resolve against. */
+	if (item->style.height.unit == CSS_UNIT_AUTO && item->parent != NULL && item->parent->grid_row_hint != NULL &&
+	    item->style.margin[CSS_TOP].unit != CSS_UNIT_AUTO && item->style.margin[CSS_BOTTOM].unit != CSS_UNIT_AUTO &&
+	    grid_hint_rows_height(item->parent, grid_item, grid_fixed_row_gap(item->parent), &rows)) {
+		int align;
+
+		align = grid_in_flow_align(item->style.align_self);
+		if (align == CSS_ALIGN_AUTO)
+			align = item->parent->style.align_items;
+		if (align == CSS_ALIGN_NORMAL)
+			align = grid_normal_starts(item) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+		if (align == CSS_ALIGN_STRETCH) {
+			rows -= item->margin[CSS_TOP] + item->margin[CSS_BOTTOM] + item->border[CSS_TOP] + item->padding[CSS_TOP] +
+			    item->padding[CSS_BOTTOM] + item->border[CSS_BOTTOM];
+			if (rows < 0)
+				rows = 0;
+			item->style.height.value = layout_to_px(rows);
+			item->style.height.offset = 0;
+			item->style.height.unit = CSS_UNIT_PX;
+		}
 	}
 
 	/* The content's width. */
@@ -3882,8 +3979,11 @@ grid_ratio_width(
 		rows = gap * (layout_unit)(item->row_span - 1);
 		for (row = item->row; row < item->row + item->row_span; row++) {
 			track = grid_row_track(&box->style, row);
-			if (track->kind != CSS_TRACK_LENGTH || track->size.unit != CSS_UNIT_PX)
-				return 0;
+			if (track->kind != CSS_TRACK_LENGTH || track->size.unit != CSS_UNIT_PX) {
+				if (!grid_hint_rows_height(box, item, gap, &rows))
+					return 0;
+				break;
+			}
 			rows += layout_from_px(track->size.value);
 		}
 		height = (layout_unit)((float)rows * child->style.height.value / 100.0f) + layout_from_px(child->style.height.offset);
@@ -4040,6 +4140,18 @@ grid_lay_item(
 			content = minimum;
 		if (content > intrinsic)
 			content = intrinsic;
+	}
+
+	/* A shrunk width too stays within the item's pixel maximum and minimum. */
+	if (justify != CSS_ALIGN_STRETCH) {
+		frame = item->border[CSS_LEFT] + item->padding[CSS_LEFT] + item->padding[CSS_RIGHT] + item->border[CSS_RIGHT];
+		sizing = saved.box_sizing == CSS_BOX_SIZING_BORDER ? frame : 0;
+		if (saved.max_width.unit == CSS_UNIT_PX && content > layout_from_px(saved.max_width.value) - sizing)
+			content = layout_from_px(saved.max_width.value) - sizing;
+		if (saved.min_width.unit == CSS_UNIT_PX && content < layout_from_px(saved.min_width.value) - sizing)
+			content = layout_from_px(saved.min_width.value) - sizing;
+		if (content < 0)
+			content = 0;
 	}
 
 	/* The layout at that width. */
@@ -4397,8 +4509,9 @@ grid_relay_item(
 	if (content < 0)
 		content = 0;
 
-	/* The definite height keeps within the item's own maximum and minimum heights. */
-	content = grid_clamp_height(item, content, height, frame);
+	/* The definite height keeps within the item's own maximum and minimum heights (a subgrid in rows fills the area). */
+	if (item->subgrid_row_span == 0)
+		content = grid_clamp_height(item, content, height, frame);
 
 	/* Keep the item's style while the definite content box is laid out. */
 	saved.box_sizing = item->style.box_sizing;
@@ -4529,6 +4642,10 @@ grid_row_baseline(
 	int found;
 
 	child = item->box;
+	/* A subgrid in rows is no member itself: its own items are. */
+	if (child->subgrid_row_span > 0)
+		return 0;
+
 	/* The current group shares a horizontal block axis (a vertical grid's, in its logical layout). */
 	if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
 		return 0;
@@ -4577,6 +4694,131 @@ grid_row_baseline(
 	return last ? 2 : 1;
 }
 
+/*
+ * Adds the baseline groups of a subgrid's items on one of its parent's rows
+ * to the groups of the row (the subgrid's own edges lie beyond its first and
+ * last rows); first is the parent's row the subgrid starts on.
+ */
+static void
+grid_subgrid_baselines(
+	const struct layout_box *sub,
+	int first,
+	int row,
+	layout_unit *first_above,
+	layout_unit *first_below,
+	layout_unit *last_above,
+	layout_unit *last_below)
+{
+	const struct layout_box *child;
+	struct grid_item item;
+	layout_unit above;
+	layout_unit before;
+	layout_unit after;
+	layout_unit outer;
+	int group;
+	int start;
+	int span;
+
+	/* Each in-flow item of the subgrid. */
+	for (child = sub->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->item_row < 1)
+			continue;
+		start = child->item_row - 1;
+		span = child->item_row_span;
+		if (span < 1)
+			span = 1;
+		if (start >= sub->subgrid_row_span)
+			continue;
+		if (start + span > sub->subgrid_row_span)
+			span = sub->subgrid_row_span - start;
+
+		/* A subgrid inside shares its parent's rows in turn. */
+		if (child->subgrid_row_span > 0) {
+			if (first + start <= row && row < first + start + span)
+				grid_subgrid_baselines(child, first + start, row, first_above, first_below, last_above, last_below);
+			continue;
+		}
+
+		/* The item's group, on the row it joins (its first row for the first group, its last for the last). */
+		memset(&item, 0, sizeof(item));
+		item.box = (struct layout_box *)child;
+		item.row = start;
+		item.row_span = span;
+		group = grid_row_baseline(sub, &item, &above);
+		if (group == 0)
+			continue;
+		if (group == 1 && first + start != row)
+			continue;
+		if (group == 2 && first + start + span - 1 != row)
+			continue;
+
+		/* How far it reaches above and below its baseline, with the subgrid's edge when it is on the first or last row. */
+		outer = grid_outer_height(child);
+		before = above;
+		after = outer - above;
+		if (start == 0)
+			before += grid_edge(sub, 0, 1);
+		if (start + span == sub->subgrid_row_span)
+			after += grid_edge(sub, 0, 0);
+		if (group == 1) {
+			if (before > *first_above)
+				*first_above = before;
+			if (span == 1 && after > *first_below)
+				*first_below = after;
+		} else {
+			if (span == 1 && before > *last_above)
+				*last_above = before;
+			if (after > *last_below)
+				*last_below = after;
+		}
+	}
+}
+
+/* Gives a subgrid the baseline groups of the rows it spans (the parent's, less the subgrid's own edges). */
+static int
+grid_subgrid_baseline_preset(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	const struct grid_state *grid,
+	struct layout_box *sub,
+	int first)
+{
+	layout_unit *given;
+	layout_unit first_above;
+	layout_unit first_below;
+	layout_unit last_above;
+	layout_unit last_below;
+	int count;
+	int index;
+
+	/* Nothing to share without a baseline in the rows. */
+	count = sub->subgrid_row_span;
+	if (first + count > grid->row_count)
+		count = grid->row_count - first;
+	if (count < 1)
+		return 0;
+	given = wb_arena_alloc(&tree->arena, (size_t)count * 4U * sizeof(*given));
+	if (given == NULL)
+		return ENOMEM;
+	for (index = 0; index < count; index++) {
+		grid_row_baselines(box, grid, first + index, &first_above, &first_below, &last_above, &last_below);
+		if (index == 0) {
+			first_above -= grid_edge(sub, 0, 1);
+			last_above -= grid_edge(sub, 0, 1);
+		}
+		if (index == count - 1) {
+			first_below -= grid_edge(sub, 0, 0);
+			last_below -= grid_edge(sub, 0, 0);
+		}
+		given[4 * index] = first_above > 0 ? first_above : 0;
+		given[4 * index + 1] = first_below > 0 ? first_below : 0;
+		given[4 * index + 2] = last_above > 0 ? last_above : 0;
+		given[4 * index + 3] = last_below > 0 ? last_below : 0;
+	}
+	sub->subgrid_baselines = given;
+	return 0;
+}
+
 /* Finds a row's baseline groups: how far their baselines lie below the row's top (first) and above its bottom (last). */
 static void
 grid_row_baselines(
@@ -4594,9 +4836,24 @@ grid_row_baselines(
 	int span;
 	int group;
 
-	/* Each member of the row: an item spanning rows takes part in its first row's first group and its last row's last group, and only reaches into those rows by the part towards them. */
+	/* A subgrid takes the groups its parent worked out for the rows it spans. */
 	*first_above = *first_below = *last_above = *last_below = 0;
+	if (box->subgrid_baselines != NULL && row >= 0 && row < box->subgrid_row_span) {
+		*first_above = box->subgrid_baselines[4 * row];
+		*first_below = box->subgrid_baselines[4 * row + 1];
+		*last_above = box->subgrid_baselines[4 * row + 2];
+		*last_below = box->subgrid_baselines[4 * row + 3];
+		return;
+	}
+
+	/* Each member of the row: an item spanning rows takes part in its first row's first group and its last row's last group, and only reaches into those rows by the part towards them. */
 	for (index = 0; index < grid->item_count; index++) {
+		if (grid->items[index].box->subgrid_row_span > 0 && grid->items[index].row <= row &&
+		    row < grid->items[index].row + grid->items[index].row_span) {
+			grid_subgrid_baselines(grid->items[index].box, grid->items[index].row, row,
+			    first_above, first_below, last_above, last_below);
+			continue;
+		}
 		group = grid_row_baseline(box, &grid->items[index], &above);
 		if (group == 0)
 			continue;
@@ -4761,7 +5018,7 @@ grid_fixed_area_height(
 		track = grid_row_track(&box->style, row);
 		if (track->kind != CSS_TRACK_LENGTH || track->size.unit != CSS_UNIT_PX ||
 		    track->minimum_rule != CSS_TRACK_MINIMUM_NONE)
-			return 0;
+			return grid_hint_rows_height(box, item, gap, height);
 		*height += layout_from_px(track->size.value);
 	}
 
@@ -4819,6 +5076,46 @@ grid_normal_starts(
 	return box->replaced && box->control != DOM_CONTROL_CHECKBOX && box->control != DOM_CONTROL_RADIO;
 }
 
+/* Tells whether a box has a descendant (a few levels down) whose height is a percentage. */
+static int
+grid_percent_below(
+	const struct layout_box *box,
+	int depth)
+{
+	const struct layout_box *child;
+
+	if (depth > 4)
+		return 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow)
+			continue;
+		if (child->style.height.unit == CSS_UNIT_PERCENT || grid_percent_below(child, depth + 1))
+			return 1;
+	}
+	return 0;
+}
+
+/* Adds up the rows an item spans from a first pass's sizes (and the gaps between them); tells whether they are known. */
+static int
+grid_hint_rows_height(
+	const struct layout_box *box,
+	const struct grid_item *item,
+	layout_unit gap,
+	layout_unit *height)
+{
+	layout_unit rows;
+	int row;
+
+	/* Only the second pass has them. */
+	if (box->grid_row_hint == NULL || item->row < 0 || item->row + item->row_span > box->grid_row_hint_count)
+		return 0;
+	rows = gap * (layout_unit)(item->row_span - 1);
+	for (row = item->row; row < item->row + item->row_span; row++)
+		rows += box->grid_row_hint[row];
+	*height = rows;
+	return 1;
+}
+
 /* Adds up the fixed (pixel) rows an item spans and the gaps between them; tells whether every one of them is fixed. */
 static int
 grid_fixed_rows_height(
@@ -4835,7 +5132,7 @@ grid_fixed_rows_height(
 	for (row = item->row; row < item->row + item->row_span; row++) {
 		track = grid_row_track(&box->style, row);
 		if (track->kind != CSS_TRACK_LENGTH || track->size.unit != CSS_UNIT_PX)
-			return 0;
+			return grid_hint_rows_height(box, item, gap, height);
 		rows += layout_from_px(track->size.value);
 	}
 	*height = rows;

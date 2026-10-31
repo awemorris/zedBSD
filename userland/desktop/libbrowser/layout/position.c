@@ -1107,6 +1107,15 @@ position_place_once(
 		room -= left;
 	if (has_right)
 		room -= right;
+
+	/* Both sides auto in a grid area: the box starts at its static position and has the area's end side of it. */
+	if (box->cb_set && !has_left && !has_right && !box->cb_left_auto && !box->cb_right_auto &&
+	    box->style.width.unit == CSS_UNIT_AUTO && box->static_x_align == CSS_ALIGN_AUTO) {
+		if (box->static_x_from_right)
+			room = box->static_x - area_left;
+		else if (containing->direction == CSS_DIRECTION_LTR)
+			room = area_left + area_width - box->static_x;
+	}
 	if (room < 0)
 		room = 0;
 

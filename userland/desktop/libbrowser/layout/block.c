@@ -846,6 +846,11 @@ block_children(
 			child->static_x = 0;
 			child->static_y = cursor + pending;
 			child->static_x_from_right = 0;
+			if (box->style.direction == CSS_DIRECTION_RTL && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
+				/* In a right to left block the box would have started at the right edge. */
+				child->static_x = box->width;
+				child->static_x_from_right = 1;
+			}
 			child->static_x_area_width = 0;
 			child->static_y_area_height = 0;
 			child->static_x_align = CSS_ALIGN_AUTO;
