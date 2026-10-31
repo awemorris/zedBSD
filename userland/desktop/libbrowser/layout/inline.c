@@ -2021,7 +2021,7 @@ inline_items_baseline(
 		/* A last baseline is stored as the end alignment with its flag. */
 		aligned = 0;
 		if (align == CSS_ALIGN_BASELINE || (item_last && align == CSS_ALIGN_END))
-			aligned = item_last == (last != 0) ? 2 : 1;
+			aligned = item_last == (last != 0) ? 2 : (child->item_row_span > 1 ? 0 : 1);
 		if (flex && last && item_last && align != CSS_ALIGN_BASELINE)
 			aligned = 2;
 		better = best == NULL || (last_item ? child->item_column > best->item_column : child->item_column < best->item_column);
@@ -2037,8 +2037,8 @@ inline_items_baseline(
 	/* In a vertical container's logical frame the central baseline is a distance below the content box's top. */
 	if (vertical == 2) {
 		if (!layout_logical_central_baseline(best, best_last, &inner))
-			inner = best->border[CSS_TOP] + best->padding[CSS_TOP] + best->height + best->padding[CSS_BOTTOM] +
-			    best->border[CSS_BOTTOM];
+			inner = (best->border[CSS_TOP] + best->padding[CSS_TOP] + best->height + best->padding[CSS_BOTTOM] +
+			    best->border[CSS_BOTTOM]) / 2;
 		*baseline = best->y + inner;
 		return 1;
 	}

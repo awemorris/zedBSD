@@ -310,6 +310,7 @@ static int cascade_resolve_pending(struct css_engine *engine, const struct css_s
 static struct css_length cascade_calc(struct css_engine *engine, const struct css_calc *calc, float font_size);
 static float cascade_calc_pixels(struct css_engine *engine, const struct css_calc *calc, float font_size);
 static void cascade_container(struct css_engine *engine, float *width, float *height);
+static int cascade_container_holds(struct css_engine *engine, const struct css_media *conditions);
 static int cascade_candidate_matches(struct css_engine *engine, struct dom_element *element, const struct css_selector *selector);
 static int cascade_selector_matches(struct css_engine *engine, struct dom_element *element, const struct css_selector *selector, size_t index, struct dom_element *anchor);
 static int cascade_anchored(struct dom_element *element, int combinator, struct dom_element *anchor);
@@ -2024,6 +2025,8 @@ cascade_collect_sheet(
 		holds = 1;
 		if (rule->media != NULL)
 			holds = css_media_matches(rule->media, engine->viewport_width, engine->viewport_height);
+		if (holds && rule->container != NULL)
+			holds = cascade_container_holds(engine, rule->container);
 
 		/* Every candidate selector of the rule (in @scope, from the nearest root that it matches from). */
 		proximity = CASCADE_UNSCOPED;
@@ -2885,6 +2888,40 @@ cascade_container(
 		/* The container is found. */
 		return;
 	}
+}
+
+/*
+ * Tells whether the @container conditions of a rule hold for the element being styled: they test the size of
+ * its nearest query container (the width only for a container of the inline size), and fail without one.
+ */
+static int
+cascade_container_holds(
+	struct css_engine *engine,
+	const struct css_media *conditions)
+{
+	struct cascade_cached *cached;
+	struct dom_node *node;
+	float width;
+	float height;
+	int missed;
+
+	if (engine->current == NULL || engine->style_capacity == 0)
+		return 0;
+	for (node = engine->current->node.parent; node != NULL && node->type == DOM_ELEMENT; node = node->parent) {
+		cached = cascade_style_slot(engine, (struct dom_element *)node);
+		if (cached->element == NULL || cached->style->container_type == CSS_CONTAINER_NORMAL)
+			continue;
+
+		/* The container's size, as the layout (the page) knows it. */
+		missed = engine->container_missed;
+		cascade_container(engine, &width, &height);
+		if (engine->container_missed != missed)
+			return 0;
+		if (cached->style->container_type != CSS_CONTAINER_SIZE)
+			height = -1.0f;
+		return css_media_matches(conditions, width, height);
+	}
+	return 0;
 }
 
 /*

@@ -698,6 +698,8 @@ struct css_rule {
 	struct css_declaration *declarations;
 	size_t declaration_count;
 	const struct css_media *media;
+	/* The @container conditions the rule is in (NULL for none): the size of its element's nearest query container is what they test. */
+	const struct css_media *container;
 	/* The @scope the rule is in (NULL for none). */
 	const struct css_scope *scope;
 	/* The cascade layer the rule is in: 1 for the first the sheet names, and so on (0 for none: unlayered rules win). */

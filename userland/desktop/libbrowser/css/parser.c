@@ -53,6 +53,8 @@ struct parser_state {
 	/* The cascade layers named so far (full names, in the order they appeared) and the one whose block is being read (0 for none). */
 	struct wb_vector layers;
 	int layer;
+	/* The @container conditions of the block being read (NULL outside one). */
+	const struct css_media *container;
 };
 
 /*
@@ -163,6 +165,7 @@ static void parser_pseudo_element(const struct css_token *token, struct css_simp
 static int parser_shadow_pseudo(struct vm_heap *heap, struct wb_arena *arena, const struct css_token *tokens, size_t count, size_t *index, struct css_simple *simple, uint32_t *specificity);
 static int parser_type_list(struct vm_heap *heap, struct token_range arguments, struct css_simple *simple);
 static int parser_view_transition_argument(struct vm_heap *heap, const struct css_token *tokens, size_t count, size_t *index, struct css_compound *compound);
+static int parser_container(struct parser_state *state, const struct css_token *prelude, size_t prelude_count, const struct css_token *body, size_t body_count, const struct css_media *media);
 static int parser_style_rule(struct parser_state *state, const struct css_selector *selectors, size_t selector_count, struct token_range block, const struct css_media *media, int depth);
 static int parser_nested_selectors(struct parser_state *state, const struct css_selector *parents, size_t parent_count, struct token_range prelude, struct css_selector **selectors, size_t *count);
 static int parser_prepend_nest(struct wb_arena *arena, struct css_selector *selector, const struct parser_nest *nest, int combinator);
@@ -201,6 +204,7 @@ css_parse_sheet(
 	state.heap = heap;
 	state.sheet = sheet;
 	state.scope = NULL;
+	state.container = NULL;
 	state.layer = 0;
 	wb_vector_init(&state.layers, sizeof(struct vm_string *));
 	wb_vector_init(&state.rules, sizeof(struct css_rule));
@@ -947,6 +951,7 @@ parser_at_rule(
 	int is_import;
 	int is_font_face;
 	int is_scope;
+	int is_container;
 	int is_try;
 	int is_keyframes;
 	int holds;
@@ -969,9 +974,10 @@ parser_at_rule(
 	is_layer = css_ident_equal(&tokens[0], "layer");
 	is_font_face = css_ident_equal(&tokens[0], "font-face");
 	is_scope = css_ident_equal(&tokens[0], "scope");
+	is_container = css_ident_equal(&tokens[0], "container");
 	is_try = css_ident_equal(&tokens[0], "position-try");
 	is_keyframes = css_ident_equal(&tokens[0], "keyframes") || css_ident_equal(&tokens[0], "-webkit-keyframes");
-	if (!is_media && !is_supports && !is_layer && !is_font_face && !is_scope && !is_try && !is_keyframes)
+	if (!is_media && !is_supports && !is_layer && !is_font_face && !is_scope && !is_container && !is_try && !is_keyframes)
 		return 0;
 	open = 1;
 	while (open < count && tokens[open].type != CSS_TOKEN_OPEN_CURLY)
@@ -1014,6 +1020,12 @@ parser_at_rule(
 	/* An @scope block's rules apply in its scope. */
 	if (is_scope) {
 		error = parser_scope(state, tokens + 1, open - 1U, tokens + open + 1U, body_count, media);
+		return error;
+	}
+
+	/* An @container block's rules hold while its condition does of the nearest query container. */
+	if (is_container) {
+		error = parser_container(state, tokens + 1, open - 1U, tokens + open + 1U, body_count, media);
 		return error;
 	}
 
@@ -1548,6 +1560,7 @@ parser_scope_self(
 	/* The declarations. */
 	memset(&rule, 0, sizeof(rule));
 	rule.media = media;
+	rule.container = state->container;
 	rule.scope = state->scope;
 	rule.layer = state->layer;
 	rule.selectors = selector;
@@ -1871,6 +1884,43 @@ parser_add_rule(
 	return error;
 }
 
+/*
+ * Reads an @container block: an optional container name, then the condition (read like a media query list of
+ * size features), and the rules under it.
+ */
+static int
+parser_container(
+	struct parser_state *state,
+	const struct css_token *prelude,
+	size_t prelude_count,
+	const struct css_token *body,
+	size_t body_count,
+	const struct css_media *media)
+{
+	struct css_media *condition;
+	const struct css_media *saved;
+	size_t start;
+	int error;
+
+	/* A leading name (an identifier that is not a condition keyword) is skipped: the nearest container answers. */
+	start = 0;
+	while (start < prelude_count && prelude[start].type == CSS_TOKEN_WHITESPACE)
+		start++;
+	if (start < prelude_count && prelude[start].type == CSS_TOKEN_IDENT && !css_ident_equal(&prelude[start], "not") &&
+	    !css_ident_equal(&prelude[start], "and") && !css_ident_equal(&prelude[start], "or") && !css_ident_equal(&prelude[start], "only"))
+		start++;
+	error = css_media_parse(&state->sheet->arena, prelude + start, prelude_count - start, state->container, &condition);
+	if (error == ENOMEM)
+		return error;
+	if (error != 0)
+		return 0;
+	saved = state->container;
+	state->container = condition;
+	error = parser_rules(state, body, body_count, media);
+	state->container = saved;
+	return error;
+}
+
 /* The most specific selector's specificity of a list. */
 static uint32_t
 parser_best_specificity(
@@ -2014,6 +2064,7 @@ parser_style_rule(
 	/* The rule itself (a group's, only when it has declarations). */
 	memset(&rule, 0, sizeof(rule));
 	rule.media = media;
+	rule.container = state->container;
 	rule.scope = state->scope;
 	rule.layer = state->layer;
 	rule.selectors = (struct css_selector *)selectors;

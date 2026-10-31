@@ -2839,7 +2839,7 @@ flex_baseline_above(
 	vertical = layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB;
 	if (!row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
 		return 0;
-	if (vertical && layout_physical_mode(item) != layout_physical_mode(box))
+	if (vertical && (layout_physical_mode(item) != layout_physical_mode(box) || item->style.text_orientation == CSS_TEXT_ORIENTATION_SIDEWAYS))
 		return 0;
 	align = item->style.align_self;
 	last = (item->style.last_baselines & 8u) != 0;
@@ -2858,9 +2858,14 @@ flex_baseline_above(
 		found = layout_logical_central_baseline(item, last, &baseline);
 	else if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
 		found = last ? layout_last_baseline(item, &baseline) : layout_first_baseline(item, &baseline);
-	if (!found)
+	if (!found) {
 		baseline = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->height + item->padding[CSS_BOTTOM] +
 		    item->border[CSS_BOTTOM];
+
+		/* The central baseline of a vertical item is synthesized in the middle of its border box. */
+		if (vertical && item->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS)
+			baseline /= 2;
+	}
 	*above = item->margin[CSS_TOP] + baseline;
 	return last ? 2 : 1;
 }
