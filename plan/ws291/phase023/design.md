@@ -3,7 +3,7 @@
 # ws291-p023 設計: 共有の image の画素の並び（明示の並びの値・driver の好みの一覧・nvrtx の block-linear）
 
 - 親: [phase.md](phase.md)・[WS291](../ws.md)。Queue: q1781-i01（P3、2026-10-31、worktree `p3-ws291wsi`、基点 main d1014941e）。
-- 状態: 設計の第 2 版（2026-10-31）。第 1 版（commit 2b92488b1）を design-reviewer の指摘（[design-review.md](design-review.md)）と、その後のユーザーの決定と
+- 状態: 設計の第 2 版（2026-10-31）。ユーザーの答え（§8.1・§11 の I7）を同日に反映。第 1 版（commit 2b92488b1）を design-reviewer の指摘（[design-review.md](design-review.md)）と、その後のユーザーの決定と
   Q1 の interface の決め（下の §0.1）で書き直した。ユーザーへの残りの問いは [user-questions.md](user-questions.md)。
 - この文書の行番号は基点 d1014941e の物。
 
@@ -310,10 +310,12 @@ subs-1000 約 10.9 → 約 16 fps、subs-100 約 106 → 約 150。big-1000・sc
     `drivers/gpu/drm/nouveau/dispnv50/wndwc57e.c`（`wndwc57e_image_set`）と `wndw.c`（block-linear の pitch の値）。値だけを使い、名前・構造・comment は写さない（Guardrail の WS037 の規則）。
 - cursor・overlay の plane は今のまま pitch。
 
-### 8.1 画素の確かめ（ユーザーへの問い Q1）
+### 8.1 画素の確かめ（ユーザーの答え済み）
 
-keiland-shot は display が読んだ画素を見ない（§1.4）。自動の確かめには display の head の CRC（Linux の nouveau の `crcc57d.c` の類）を nvrtx に足す必要がある（約 3 LW）。
-CRC 無しなら、画面を見る確かめを「ユーザーが拾える試験の一覧」に置き、それまで `nvrtx.disp.bl` は既定 0。実装（I5）はこの答えを待たずに進める（既定の値だけが答えで決まる）。
+keiland-shot は display が読んだ画素を見ない（§1.4）。2026-10-31 ユーザーから、CRC は作らず目で見て確かめる、見るまでは block-linear の scanout を起動の parameter
+で既定 0 にする、その間 RTX の game mode は 1 frame に 1 回の copy のままでよい、という趣旨の答えを受けた。→ `nvrtx.disp.bl`（既定 0）。目視の手順は
+[phase.md](phase.md) の「ユーザーの目視の確かめ」。P3 の自分の確かめ（I2 の probe、display の例外の通知と flip の完了）は行う。nvrtx は `nvrtx.disp.bl=0` の間、
+`GPU_IMAGE_LAYOUTS` の block-linear に SCANOUT を付けず、`GPU_IMPORT_SCANOUT` の block-linear を `ENOTSUP` で断る（compositor は LINEAR を貸す）。
 
 ## 9. P2 側との約束（libvulkan・protocol・compositor・WSI）
 
@@ -365,10 +367,11 @@ CRC 無しなら、画面を見る確かめを「ユーザーが拾える試験�
 | I2 | R3 の probe（診断の patch と実機の script） | probe の結果を記録（読める・kind が要る・読めない） | 2 LW |
 | I3 | 段 A と CPU の copy の 16 B 化 | §10.1 I3、§10.3 の A/B（構造・fps・画素）と desktop | 実装 3 LW、実機 2 LW |
 | I4 | nvrtx の口・私用の record・記録・import と present の規則・subresource layout | §10.1 I4、amd64 の vmunix warning 0 | 4 LW |
-| I5 | block-linear の scanout と present | §10.1 I5、§10.3 の block-linear の scanout（CRC か一覧） | 3 LW（CRC を足すなら +3 LW） |
+| I5 | block-linear の scanout と present（`nvrtx.disp.bl`、既定 0） | §10.1 I5、§10.3 の block-linear の scanout（P3 の確かめ）、画素はユーザーの目視（phase.md） | 3 LW |
 | I6 | tip で回帰をまとめて 1 回 | §10.3 の全部 | 2 LW |
+| I7 | subs の run ごとの固定費（約 56 µs）を 1 つずつ測って削る（2026-10-31 ユーザーの答え）: run の始めの texture pool と shader cache の無効化、最初の draw の全 state、pass の始めと終わりの barrier の WFI、run の終わりの fence の WFI、channel の切り替えの有無。各項を外す診断の kernel（`plan/ws291/tests/nvrtx-run-cost-diag.patch` と `rtx-runcost.sh` の変種 0〜5、p014 で用意済み・未計測）で 1 項ずつ測り、要らない物を外す | I3〜I6 | 各項の前後の subs-100・subs-1000 の GPU の 1 run の µs と fps（PROF）、画素差 0、big・scene・desktop の後退なし | 計測 3 LW、削る実装 3〜6 LW（何が削れるかで変わる） |
 
-- 合計 約 19 LW（CRC 無し、8 LW ≈ 2〜3 時間の換算で約 5〜7 時間）。I1 は最初に、I2 と I3 は I1 と独立に進められる。
+- I1〜I6 の合計 約 19 LW（8 LW ≈ 2〜3 時間の換算で約 5〜7 時間）、I7 は別に 6〜9 LW。I1 は済み（7b0a6644e）、I2 と I3 は I1 と独立に進められる。
 - 各 Phase の C には `plan/coding-style.md` の全文を当て、source の comment に開発の管理情報を書かない。出典は該当の block の直前の複数行の comment（Guardrail）。
 - WS291 の最後の「規約の全文の見直し」の Phase は WS の既存の計画に従う。
 
