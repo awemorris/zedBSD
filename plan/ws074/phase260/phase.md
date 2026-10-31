@@ -866,3 +866,27 @@ Origin: 2026-10-27 ユーザーの指示。
   Acid はこの attempt では未実行。dev139・dev140 の後退の確認（dev140 の gap）も未実施。
 - 一時物（Q1 が消す。worktree p8-ws074）: build/tmp/p8/t/・build/tmp/p8/s1out/・build/tmp/p8/st1/・build/tmp/p8/st2/・build/tmp/p8/integ/・build/tmp/p8/h1out/、
   /tmp/p8out の dev138（と dev138.log）。dev139・dev140 を残す（直近の 2 つ）。
+
+### q1727-i14 の途中経過（2026-11-01、P8。dev141〜）
+
+- 先に i13 の dev140 を読んだ（3,068、後退 0、dev139 から +7）。main を merge して 2 つの親を確かめた。以後、測定の前に main を merge した（P7 の WS334 の call-site の置換は衝突なし）。
+- 測定（計は Chromium が通す 3,472 のうち。gap は build/tmp/p8/gapNNN.json、出力は /tmp/p8out/devNNN）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev140 | 基準（i13 の最終） | 3,068（88.36%） | 189 / 147 / 66 / 2 |
+  | dev141（18be805bf） | shape-outside | 3,084 | 189 / 131 / 66 / 2（後退 0） |
+  | dev142（6c77c8039） | orthogonal の flex item の max-content、frame の initial about:blank の Navigation の listener の引き継ぎ | 3,088（88.94%） | 187 / 129 / 66 / 2（後退 0） |
+
+- 直した物（source は userland/desktop/libbrowser/）:
+  1. `shape-outside`・`shape-margin`・`shape-image-threshold`（css/values.c の parse、css/cascade.c、新しい layout/shape.c、layout/float.c、layout/inline.c）。css-shapes の 16 ID（全て縦書き）が通った。
+     - 値: `none`・shape-box・circle()・ellipse()・inset(... round ...)・polygon()・linear-gradient（alpha が threshold を超える所）。基準の box は margin-box（shape-box を書けば border・padding・content）。
+     - float の shape は physical の座標で解き、float を置く時に layout の座標（縦書きの domain の logical 座標。vertical-lr は転置、vertical-rl は block 軸を反転、sideways-lr は inline 軸を反転）に写す（layout_shape_build）。
+     - 行の room は float の margin box でなく、帯の上の shape の extent（shape-margin で広げ、margin box で切る。layout_shape_extent）。帯の端の行は、帯の内側へ少しずらして評価する（端に触れるだけの shape は帯の中にない）。
+     - 行の高さが帯を決める（inline-block の高さなど）。shape を持つ float がある時だけ、行を作った後に実際の高さで room を測り直し、違えば帯の高さを足して同じ行を作り直す（`inline_line_settled`、最大 3 回）。
+  2. orthogonal な flex item（行の flex container の中の縦書きの item）の auto の幅は block size（layout/flex.c。item を自分の座標で max-content として測る）。flexbox-basic-block-horiz-001v・flexbox-mbp-horiz-002v。
+  3. Navigation API（plan/ws074/phase230/prelude.js → bind/prelude-source.inc）:
+     - frame の initial about:blank に付けた Navigation の listener・on* handler を、その frame に読み込まれる同じ origin の document の Navigation が引き継ぐ（window が使い回される振る舞い）。
+     - `target` が frame の名前（と _top・_parent）の link・form・`window.open(url, name)` は、その frame の window の `location.assign` で移動する（その window に navigate event が出る。sourceElement と POST の formData は渡す）。form の GET は fragment を残す（`withQuery`）。
+     - `HTMLAnchorElement`・`HTMLAreaElement` を足し（bind/element.c・node.c・window.c・internal.h）、href とその部品・target・download・rel ほかの members を prelude に定義した。`HTMLFormElement` に action・method・enctype・target・name・acceptCharset・autocomplete・noValidate。
+- 道具: plan/ws074/phase260/tools/st1.sh（static の 1 ID を実行し、失敗の画像を build/tmp/p8/st1/ に残す）。
