@@ -2,7 +2,7 @@
 
 # ws336-p003: ssh-crypto（libcrypto-compat の呼び出し）
 
-Status: in-progress（2026-11-01 06:23 q1819、Sonnet）
+Status: 実装済み・試験 PASS（2026-11-01、cleared は Q1 が決める）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p002
@@ -69,4 +69,47 @@ WS335 の待ち: **WS335 の libcrypto-compat の header の凍結（main に me
 
 ## 結果
 
-（未着手）
+実装済み・試験 PASS（2026-11-01 host の `date` で 06:50。cleared は Q1 が決める）。
+
+作った物: `userland/base/ssh/ssh-crypto.c`（全 17 関数。header は変えていない）、`plan/ws336/tests/unit/test-crypto.c`。
+
+実行した command と最後の行:
+
+- `sh plan/ws336/tests/run-unit.sh crypto` → `test-crypto: PASS (1656 checks)` / `run-unit: PASS`（host の OpenSSL 3.5.6、ASan・UBSan、leak 検出あり）
+- `sh plan/ws336/tests/run-unit.sh all` → buf 323・channel 1603651・common 2316・crypto 1656・privsep 947・sftp 1836・tools 13・ttymodes 20682 checks、全部 PASS、`run-unit: PASS`
+- `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh` → `check-skeleton: PASS`（4 番目の libcrypto-compat の header だけでの compile、7 番目の zedBSD 向け compile を含む。compat.log は空、zedbsd.log あり）
+- `git diff --check` → exit 0
+
+試験の中身（期待の値は FIPS 180-2 B.1〜B.3、RFC 8032 7.1 TEST 1〜3、RFC 8439 2.4.2・A.1 #1〜#5・2.5.2・A.3 #1・#5〜#7、FIPS 203 7.2、draft 2.4 の定義。他の実装の出力は使っていない）:
+
+- SHA-256: "abc"・空・448 bit・百万個の 'a'（1000 回の update）、分けた update、NULL の空 update、init 後の free、zero の構造への update・final（EIO、出力を wipe）。
+- Ed25519: TEST 1〜3 の公開鍵・署名・確かめ、署名の 3 か所・公開鍵・message の 1 bit の変更と S+L（RFC 8032 5.1.7 の S の範囲）で EBADMSG、デコードできない公開鍵は成功しない、R が壊れた署名は EBADMSG。
+- hybrid: client_start → server → client_finish で K が一致、K を試験の中で library を直接呼んで求めた SHA-256(K_PQ||K_CL) と比較、C_INIT・S_REPLY の長さ ±1 と 0 で EINVAL（出力と K を wipe、client の状態を clear）、ek の最初の係数 4095 で EINVAL、X25519 の小さい位数の点（0・1・p-1・p・p+1）を server 側・client 側の両方で EINVAL、S_CT2 の 3 か所の 1 bit の変更は成功して K が違う、zero の状態の finish は EIO、2 回の exchange で鍵が違う。
+- chacha20_xor: 2.4.2（別 buffer と同じ buffer、復号）、A.1 #1〜#5 の keystream（nonce の最後の byte が 0 でない #5 を含む）、counter 0 の 2 block 目 = counter 1 の 1 block 目。
+- poly1305: 2.5.2、空 message の tag = s、A.3 #1・#5・#6・#7。
+- ct_equal（全 bit の違い、size 0 の NULL）、wipe（範囲の外を触らない）、random（2 回が違う、70000 bytes の大きい塊）。
+
+壊しの確認（実装を git の外で `sed` で壊し、試験が FAIL するか。script は `build/tmp/p003/mutate.sh`、原本 `build/tmp/p003/orig.c`、最後に `cp` で戻して `cmp` が同一）:
+
+- FAIL した（試験が見つけた）17 通り: counter の byte 順、K の結合の順、server・client の長さの境界、EBADMSG の値、sha256_final の free 抜け（leak）、client_finish の clear 抜け、poly1305 の update 抜け、server の失敗時の wipe 抜け、ct_equal の size 0、wipe を何もしない、random を何もしない、Ed25519 の message 長の 1 ずれ、client・server の S_PK1・C_PK1 の offset のずれ、ek 拒否の errno、nonce の 1 byte 抜け（最初は PASS して見逃した。A.1 の vector を足して FAIL する事を確かめた）。
+- 見逃した（試験では見つけられない）1 通り: ssh_x25519_agree の「derive が通っても全 0」の自前の確かめを外す。host の OpenSSL 3.5 は全 0 の derive を自分で失敗させるので、この確かめに届く入力を作れない（phase.md の注意どおり、p021 で libcrypto-compat に対して流す）。
+
+自分で決めた点（header が黙っている所）:
+
+- ENOMEM は、object を作る `*_new` が NULL を返した時だけ（header が ENOMEM を挙げる関数: ssh_sha256_init・ssh_sha256・hybrid 3 関数）。ed25519・chacha20・poly1305 は header が EIO だけなので NULL でも EIO。ML-KEM の鍵の import の NULL は EINVAL、Ed25519 の公開鍵の import の NULL は header どおり EINVAL。
+- 失敗時に出力を wipe するのは header が書く所に加え、ssh_ed25519_public（公開鍵だが部分的な値を残さない）、ssh_sha256（init・update の失敗でも out を wipe）。
+- ssh_sha256_update・ssh_sha256_final・ssh_hybrid_client_finish を zero の状態で呼ぶ（呼び出しの誤り）時は EIO（header の許す値の中で、peer の値を拒否する EINVAL と区別するため）。final は out を wipe し、finish は client を clear する。
+- ssh_sha256_update が失敗しても計算は壊さない（caller が ssh_sha256_free する）。ssh_sha256_final は失敗しても context を free し、構造を zero にする。
+- ssh_sha256_init は呼ばれた時に構造に何が入っていても上書きする（header: 「hash は何も持たない」が前提）。ssh_hybrid_client_start も同じ（client は何も持たない前提で、最初に NULL・0 にする）。
+- 空の message（size 0）の時は NULL でなく module 内の 1 byte の定数の番地を library に渡す（libcrypto-compat が NULL の tbs を受けるか header に書いていないため）。poly1305 は size 0 の時 EVP_MAC_update を呼ばない。
+- ssh_x25519_agree は派生した結果が 0 長でない事・32 bytes である事を確かめ、全 0 の確かめは `ssh_ct_equal` で自分で行う（EINVAL）。EVP_PKEY_derive の失敗は EINVAL（header の「derive の拒否」）、EVP_PKEY_derive_init の失敗は EIO。
+- ssh_random・ssh_chacha20_xor は INT_MAX 以下の塊に分ける。2 GiB を超える塊は host の試験で確かめられない（未実施）。
+
+未実施・残り:
+
+- libcrypto-compat の実装に対する試験（WS335 の実装が入った後。p019 と p021）。今回の試験は host の OpenSSL 3.5.6 だけ。
+- INT_MAX を超える size の ssh_random・ssh_chacha20_xor の塊分けの動作（2 GiB の buffer が要る）。
+- 全 0 の derive の自前の確かめ（上記）。
+- QEMU・実機の試験は無い（この Phase の範囲外）。
+
+header への指摘: なし（ssh-crypto.h の冒頭の関数の一覧にある関数だけを呼び、`BASE=d4ab182d2` の照合と libcrypto-compat の header だけでの compile が通った）。phase.md と design.md の食い違い: 見つけていない。
