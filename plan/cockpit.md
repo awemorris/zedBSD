@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 01:48（Q1）
+最終更新: 2026-11-01 01:56（Q1）
 
 ## 担当（P1〜P8）
 
@@ -13,7 +13,7 @@
 | P2 | — | — | 返却（2026-10-31 20:23）。WS309 p015 zero copy: RTX（block-linear 既定で有効）・VF2（c13 52.5 fps）・Pi 4 の全画面の動画で確かめ、main d8e39d789 | 残り: Pi 4 の 3D（P4 の p025 の後）・Pi 5 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ | p024（q1785）: RTX の描画の最適化を目標（NVK 並み: big-1000 136・subs-1000 75 fps）まで。まず subs の 1 run の固定の費用 | 10.0.10.3 |
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 4（p025）は熱の throttle の見込みで止め、Pi 5（p021）へ: V3D 7.1 への移し・1920x1080 の SD の image を作る | ユーザーが板を Pi 5 に替え、Q1 が SD を書く |
-| P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
+| P5 | [WS336](ws336/ws.md) | 自前の sshd・ssh（OpenSSH 互換、ed25519・鍵の交換 1 つ） | p001 の設計（q1791、標準廉価実装手順）。WS335 の暗号の口と揃える | 設計・design-reviewer・問いまで |
 | P6 | [WS335](ws335/ws.md) | libssl-compat（OpenSSL 互換の自前の TLS） | p001 の設計（q1789、標準廉価実装手順）: 範囲・module・header・試験の道具 | 設計・design-reviewer・問いまで |
 | P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | q1790: 標準廉価実装手順（決定 22）の設計の段: module・header・骨格・試験の道具・実装の phase.md、build の土台 | その後 Sonnet の実装の担当を Q1 が起動 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 12 回目（q1727-i12）: subgrid の残り・multicol・grid の baseline など | 今 3,472 のうち 3,005（86.55%）、Acid3 100/100・Acid2 100%。11 回目は animation の補間・dynamic import()・@property など（+30、後退 0） |
@@ -329,6 +329,8 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
 
 ## 決まった事
+
+- （2026-11-01）ユーザーから、自前の sshd・ssh の WS を立てる（ed25519 の鍵と最新の鍵の交換 1 つ、WS335 の決定を反映、WS335 と並べて依存は待ち合わせ、標準廉価実装手順、P5 で開始）、という趣旨の指示を受けた（[WS336](ws336/ws.md)）。
 
 - （2026-11-01）ユーザーから、Pi 4 は熱で throttle されているように見えるので、いったんここでやめて冷却の良い Pi 5 で進める（GPU は同じ系統）、という趣旨の指示を受けた（ws291-p025 を止めて p021 へ、P4 q1784 の中で）。
 
