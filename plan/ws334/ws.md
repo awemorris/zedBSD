@@ -40,6 +40,7 @@
   21. 2026-11-01 ユーザーから、残りの問い U1・U2・U4〜U9・U11・U13〜U15 は推しの案でよい、という趣旨の答えを受けた（内容は [user-questions.md](user-questions.md) の推し: U1 Win32 を直に使う backend・最小の部分は WS334・全体は WS234、U2 UI の source は今の場所、U4 第 1 段は拡大しない、U5 cache の disk は第 2 段、U6 同梱の font、U7 libtruetype・libgif-compat の小さな直しだけ、U8 Windows の Chrome の名乗り、U9 名前は両方 OmniGrammaton・icon は今の物・発行者 Awe Morris、U11 第 1 段は zip、U13 公開の header は作らない、U14 第 1 段は平文・DPAPI は後半、U15 差し替えはストレージバックエンドだけ）。
   22. 2026-11-01 ユーザーから、今回のブラウザ（WS334）は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)）を使う、という趣旨の指示を受けた。設計の担当（Opus、P7）が module・header・.c の骨格・試験の道具と実装の Phase の phase.md を作り、実装の担当（Sonnet 5.5 high）が module ごとに実装する。 同日、設計をきちんと終えてから実装に入る Phase の組み方にする、という趣旨の指示も受けた（全部の module の header・骨格・試験の道具・実装の phase.md と design-reviewer が済むまで、実装の Phase を始めない）。
 - 2026-11-01 ユーザーから、Windows では DLL を作らず 1 つの .exe にする（libbrowser も static link でよい）、という趣旨の指示を受けた（design.md §6 の libbrowser・libmedia・libkeiland・OpenSSL・winpthreads の DLL を全部 static link に替える。OS が出す DLL（Vulkan の loader `vulkan-1.dll` など）はこの限りでない。理由: 同じ著者・同じ license の source を DLL に分ける必然性が無い、という趣旨）。
+- 2026-11-01 ユーザーから、libkeiland の Windows の port は native の port なので pthread を使わない（Win32 の API を直に使う）、libbrowser・libmedia の pthread は後で書き換える（[Future Work](../future-work.md) の F-WS334-win32-threads、今は winpthreads を .exe に静的に組み込む）、という趣旨の指示を受けた。
 
 ## Resume point
 
