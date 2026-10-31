@@ -1461,6 +1461,10 @@ node_prototype_index(
 			return BIND_HTML_DIALOG_ELEMENT;
 		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_CANVAS)
 			return BIND_HTML_CANVAS_ELEMENT;
+		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_A)
+			return BIND_HTML_ANCHOR_ELEMENT;
+		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_AREA)
+			return BIND_HTML_AREA_ELEMENT;
 		/* Reflected HTML attributes live on their exact tagged interfaces. */
 		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_BUTTON)
 			return BIND_HTML_BUTTON_ELEMENT;
