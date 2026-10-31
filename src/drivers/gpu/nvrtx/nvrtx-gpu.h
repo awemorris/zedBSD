@@ -348,7 +348,10 @@ struct nvrtx_bo {
  * with the video decoder, nvrtx.video=1).
  * instance and userd are its instance block and USERD in the VRAM (in
  * the space's arena for the driver's channel, in the channel's own arena
- * for a session's, which also holds the channel's own context buffers).
+ * for a session's, which also holds the channel's own context buffers);
+ * userd_window is a session's USERD page in the CPU's window when it could
+ * be mapped there (the ring's put is then one store, else it goes through
+ * the register window).
  * physical and virtual_address are where each context buffer lies and
  * where the channel's promote names it: the golden context's addresses for
  * the driver's channel, the channel's region of the space for a session's.
@@ -386,6 +389,7 @@ struct nvrtx_work_channel {
 	struct nvrtx_bo arena;
 	uint64_t instance;
 	uint64_t userd;
+	struct nvrtx_bo userd_window;
 	uint64_t physical[NVRTX_GR_BUFFER_MAX];
 	uint64_t virtual_address[NVRTX_GR_BUFFER_MAX];
 	uint64_t region;
@@ -870,6 +874,7 @@ int nvrtx_bo_map(struct nvrtx_gpu *gpu, struct nvrtx_bo *bo);
 int nvrtx_bo_clear(struct nvrtx_gpu *gpu, struct nvrtx_bo *bo);
 void nvrtx_bo_window_use(struct nvrtx_gpu *gpu, uint64_t *used, uint64_t *peak, uint64_t *size);
 void nvrtx_bo_free(struct nvrtx_gpu *gpu, struct nvrtx_bo *bo);
+void nvrtx_bo_unmap(struct nvrtx_gpu *gpu, struct nvrtx_bo *bo);
 volatile uint8_t *nvrtx_bo_cpu(struct nvrtx_gpu *gpu, const struct nvrtx_bo *bo);
 uint64_t nvrtx_bo_bus(struct nvrtx_gpu *gpu, const struct nvrtx_bo *bo);
 

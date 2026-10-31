@@ -18,6 +18,8 @@
  * parked, and the completer thread completes the parked markers in order
  * as their runs end, waiting without the node's lock (a run that does not
  * end in time completes its marker with EIO and loses the session's runs).
+ * A marker committed while its session has nothing queued is taken at once
+ * on the committing thread, as the worker would take it.
  * A fault stops new work: frames and markers still queued or parked
  * complete with EIO.
  *
@@ -691,7 +693,13 @@ runtime_reserve(
 	return 0;
 }
 
-/* Queues a reserved marker after the frames queued before it. */
+/*
+ * Commits a reserved marker: after the frames queued before it (the
+ * worker takes it), or, when the session has nothing queued or running in
+ * the worker, at once on the caller's thread as the worker would take it
+ * (parked for the completer while its run has not ended), so the session's
+ * next command does not find it queued and runs at once.
+ */
 static int
 runtime_commit(
 	void *private_data,
@@ -700,12 +708,16 @@ runtime_commit(
 	struct drv_gpu_completion *completion)
 {
 	struct nvrtx_node *node;
+	struct nvrtx_session *owner;
 	struct nvrtx_node_entry *entry;
 	unsigned long enabled;
+	bool parked;
+	int error;
 
 	node = private_data;
+	owner = session;
 
-	/* Finds the reservation, queues it unless the device faulted. */
+	/* Finds the reservation, unless the device faulted. */
 	enabled = spin_lock_irqsave(&node->queue_lock);
 
 	entry = runtime_marker(node, session, token, completion);
@@ -719,11 +731,29 @@ runtime_commit(
 		return EIO;
 	}
 
-	runtime_enqueue(node, entry);
+	/* Behind the session's queued work it goes to the worker. */
+	if (owner->queued != 0U) {
+		runtime_enqueue(node, entry);
+		spin_unlock_irqrestore(&node->queue_lock, enabled);
+		return 0;
+	}
+
+	/* Else it is taken here, counted as the worker's while it is (runtime_park takes it off). */
+	entry->state = NVRTX_ENTRY_RUNNING;
+	entry->next = NULL;
+	owner->queued++;
 
 	spin_unlock_irqrestore(&node->queue_lock, enabled);
 
-	/* Succeeded: the worker completes the marker in order. */
+	/* Parked while its run has not ended; else completed and retired now. */
+	parked = runtime_park(node, entry);
+	if (!parked) {
+		error = nvrtx_vk_node_run_wait(owner, entry->run_fence, entry->run_us);
+		drv_gpu_complete(entry->completion, error);
+		runtime_retire(node, entry);
+	}
+
+	/* Succeeded: the marker completes in order. */
 	return 0;
 }
 
