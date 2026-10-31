@@ -1403,7 +1403,13 @@
         }
         var before = getComputedStyle(element, '::before').content;
         if (before && before !== 'none' && before !== 'normal' && /^["']|attr\(/.test(before) && shown(element)) {
-          var rb = visible(element);
+          var rb = visible(element) || visible(holder(element));
+          if (rb) {
+            // The generated text's own width (about 0.55 em a character), not its block's.
+            var made = /^["']/.test(before) ? before.slice(1, -1) : (element.getAttribute(before.slice(5, -1)) || ''),
+              em = parseFloat(getComputedStyle(element, '::before').fontSize) || 16;
+            rb = [rb[0], rb[1], Math.min(rb[2], rb[0] + made.length * em * 0.55), rb[3]];
+          }
           if (rb && !texts.has(holder(element))) texts.set(holder(element), rb);
         }
       }

@@ -3744,6 +3744,18 @@ values_background(
 			continue;
 		}
 
+		/* An image-set() is an image: its first candidate. */
+		if (tokens[index].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[index], "image-set")) {
+			if (image_seen)
+				return EINVAL;
+			error = values_image_set(parse, tokens + index, rest, &image);
+			if (error != 0)
+				return error;
+			image_seen = 1;
+			index += rest;
+			continue;
+		}
+
 		/* An image: url(...) or none. */
 		is_url = 0;
 		named = css_ident_equal(&tokens[index], "url");
