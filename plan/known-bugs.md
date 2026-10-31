@@ -246,7 +246,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-376](bugs/BUG-376.md) | PS/2 の mouse の port が mouse が無くても node を作り、open のたびに約 80 ms 待って EIO | closed（2026-10-31 P6 q1743、933563341、QEMU と実機で確かめた。main に merge） |
 | [BUG-377](bugs/BUG-377.md) | ZEDBSD_NOCT_ACCEL=y で emacs を選び libegl を選ばない image で、/bin/noct が libEGL.so を要り emacs が起動しない | fixed（2026-10-31 P7 q1768-i01。ZEDBSD_NOCT_ACCEL=y の amd64 で noct の依存に libegl・libglesv2 を足す（Makefile・menuconfig）。make の解決と make -n で確かめた。image での起動は未実施） |
 | [BUG-378](bugs/BUG-378.md) | arm64 の kernel の text が物理の 2 MiB を越えると、越えた所の関数で実行の許可の fault で止まる（Pi 4） | closed（2026-10-31 19:42、実機の Pi 4 で起動、main e8f43510d） |
-| [BUG-379](bugs/BUG-379.md) | Pi 4 の graphical login の session の中で videoplayer が約 1 fps（session の外では 30 fps、前から） | open |
+| [BUG-379](bugs/BUG-379.md) | Pi 4 の graphical login の session の中で compositor の描画が止まる（720p で約 1 fps、1080p で 0 frame、前から） | open（P4、ws291-p025） |
 | [BUG-380](bugs/BUG-380.md) | Pi 4（V3D 4.2）で mview の pipeline の作成が FEATURE_NOT_PRESENT（V3D の executor が compositor の形だけ） | open |
 | [BUG-176](bugs/BUG-176.md) | 起動の直後の約 10 秒「Network service is not …」と出る | reproduced（実機） / resolved（2026-10-08 夜 ユーザー「下記は実装の変更が多かったので、いったんすべてcloseします。」、Q1 の中継）。前: scheduled、低（q726: bar の起動の直後の表示を「Starting the network service...」に、UAT 待ち） | UAT 2026-10-04 | WS131・networkd（[ticket](bugs/BUG-176.md)） |
 | [BUG-159](bugs/BUG-159.md) | バッテリー駆動で描画が 5 fps ほどに落ち、電池切れで警告なく落ちる | reproduced（実機 S1） / tracking | S1（WS133） | WS075（i915）、電源の管理（WS050〜052・WS132）。UAT 2026-10-04: 再現せず（電源の状態は BUG-165 の後） |
