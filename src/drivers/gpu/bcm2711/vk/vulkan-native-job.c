@@ -35,6 +35,9 @@
  */
 #define NATIVE_AHEAD_BIN_US 2000U
 
+/* The most jobs with nothing but barriers the search for the next render pass passes over. */
+#define NATIVE_AHEAD_JOBS 4U
+
 /* The room of one window's cost report, formatted under the controller mutex and logged after it. */
 #define NATIVE_PERF_TEXT_BYTES 2048U
 
@@ -56,6 +59,8 @@ static int release_job(struct bcm2711_vulkan_native_job *job);
 static void job_begin(struct bcm2711_vulkan_native_job *job);
 static int look_ahead(struct bcm2711_render_device *controller, struct bcm2711_render_session *session, struct bcm2711_vulkan_native_job *job, const struct bcm2711_vulkan_prepared_event *next, uint64_t *remaining, struct bcm2711_v3d_flight *flight);
 static bool ahead_wanted(struct bcm2711_render_session *session, struct bcm2711_vulkan_native_job *job, const struct bcm2711_vulkan_prepared_event *next);
+static struct bcm2711_vulkan_native_job *ahead_target(struct bcm2711_render_session *session, struct bcm2711_vulkan_native_job *job, const struct bcm2711_vulkan_prepared_event *next, const struct bcm2711_vulkan_prepared_event **pass);
+static const struct bcm2711_vulkan_prepared_event *skip_barriers(const struct bcm2711_vulkan_prepared_event *event);
 static bool ahead_eligible(const struct bcm2711_vulkan_native_pass *ahead, const struct bcm2711_vulkan_native_pass *current);
 static int retire_closed_sessions(struct bcm2711_render_device *controller);
 static void report_perf(struct bcm2711_v3d_perf *perf);
@@ -133,6 +138,7 @@ bcm2711_vulkan_native_job_step(
 	const struct bcm2711_vulkan_prepared_event *next;
 	struct bcm2711_v3d_job_result completion;
 	struct bcm2711_v3d_flight flight;
+	int parts[7];
 	uint64_t remaining;
 	uint64_t bytes;
 	uint64_t started;
@@ -411,6 +417,7 @@ bcm2711_vulkan_native_job_step(
 		 * and its bin queue run (in a window again) beside it.
 		 */
 		step = clock_ticks();
+		kern_memset(parts, 0, sizeof(parts));
 		error = bcm2711_vulkan_native_pass_start(job->pass, &completion);
 		if (error != 0) {
 			/* Nothing launched: the pass failed only in preparation. */
@@ -418,20 +425,27 @@ bcm2711_vulkan_native_job_step(
 		} else {
 			bcm2711_render_window_open(controller);
 			error = bcm2711_vulkan_native_pass_launch_begin(job->pass, &completion, &flight);
+			parts[0] = error;
 			if (flight.active &&
 			    (error != 0 || kern_ticks_to_us(completion.bin_ticks) < NATIVE_AHEAD_BIN_US || !ahead_wanted(session, job, next)))
 				error = bcm2711_vulkan_native_pass_launch_end(job->pass, &completion, &flight, error);
+			parts[1] = error;
 			closed = bcm2711_render_window_close(controller);
+			parts[2] = closed;
 			if (flight.active) {
 				if (error == 0 && closed == 0)
 					closed = look_ahead(controller, session, job, next, &remaining, &flight);
+				parts[3] = closed;
 				bcm2711_render_window_reopen(controller);
 				error = bcm2711_vulkan_native_pass_launch_end(job->pass, &completion, &flight, error);
+				parts[4] = error;
 				landed = bcm2711_render_window_close(controller);
+				parts[5] = landed;
 				if (closed == 0)
 					closed = landed;
 			}
 			error = bcm2711_vulkan_native_pass_finish(job->pass, &completion, error);
+			parts[6] = error;
 			if (error == 0 && closed != 0)
 				error = closed;
 		}
@@ -474,6 +488,16 @@ bcm2711_vulkan_native_job_step(
 				job->pass->state.height,
 				error,
 				(unsigned)completion.retired);
+			bcm2711_stage_mark(
+				BCM2711_FAMILY_V3D,
+				"submit parts %d/%d/%d/%d/%d/%d/%d",
+				parts[0],
+				parts[1],
+				parts[2],
+				parts[3],
+				parts[4],
+				parts[5],
+				parts[6]);
 			return error;
 		}
 
@@ -732,25 +756,16 @@ look_ahead(
 	int closed;
 	int error;
 
-	/* The next event of this job, or the first of the job after it. */
-	target = job;
-	event = next;
+	/* The session's next render pass, in this job or the job after it, started when it was not. */
+	target = ahead_target(session, job, next, &event);
+	if (target == NULL)
+		return 0;
 	budget = remaining;
-	if (event == NULL) {
-		target = bcm2711_vulkan_queue_next_job(session, job);
-		if (target == NULL || target->quarantined || target->session != session || target->prepared == NULL)
-			return 0;
+	if (target != job) {
 		if (!target->executed)
 			job_begin(target);
-		if (!target->stepping)
-			return 0;
-		event = target->cursor;
 		budget = &target->remaining;
 	}
-
-	/* Only a render pass not prepared yet. */
-	if (event == NULL || event->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS || target->ahead != NULL)
-		return 0;
 
 	/* Its preparation, as its own step's would be. */
 	kept = *budget;
@@ -763,9 +778,14 @@ look_ahead(
 	error = bcm2711_vulkan_native_pass_create(&controller->space, event, budget, &ahead, &after);
 
 	/* One that may not bin ahead is dropped (its step prepares it again), giving its budget back. */
-	if (error == 0 && !ahead_eligible(ahead, job->pass))
+	if (error != 0)
+		controller->space.native->hardware.perf.ahead_opcode = 1000U + (uint32_t)error;
+	if (error == 0 && !ahead_eligible(ahead, job->pass)) {
+		controller->space.native->hardware.perf.ahead_opcode = 2000U;
 		error = ENOTSUP;
+	}
 	if (error != 0) {
+		controller->space.native->hardware.perf.ahead_dropped++;
 		(void)bcm2711_vulkan_native_pass_release(&ahead, true);
 		*budget = kept;
 	}
@@ -790,6 +810,8 @@ look_ahead(
 	bcm2711_render_window_reopen(controller);
 	error = bcm2711_vulkan_native_pass_prebin(ahead, flight);
 	closed = bcm2711_render_window_close(controller);
+	if (error == 0)
+		controller->space.native->hardware.perf.ahead_passes++;
 	if (error != 0 && ahead->executed && !ahead->retired)
 		target->retired = false;
 
@@ -811,26 +833,80 @@ ahead_wanted(
 	struct bcm2711_vulkan_native_job *target;
 	const struct bcm2711_vulkan_prepared_event *event;
 
-	/* The next event of this job, or the first of the job after it. */
-	target = job;
-	event = next;
-	if (event == NULL) {
-		target = bcm2711_vulkan_queue_next_job(session, job);
-		if (target == NULL || target->quarantined || target->session != session || target->prepared == NULL)
-			return false;
-		event = target->prepared->first;
-		if (target->executed)
-			event = target->cursor;
-		if (target->executed && !target->stepping)
-			return false;
-	}
+	/* Counted for the cost report. */
+	session->device->space.native->hardware.perf.ahead_long++;
 
-	/* A render pass not prepared yet. */
-	if (event == NULL || event->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS || target->ahead != NULL)
+	/* A render pass to prepare. */
+	target = ahead_target(session, job, next, &event);
+	if (target == NULL)
 		return false;
 
 	/* Succeeded: there is one. */
 	return true;
+}
+
+/*
+ * Finds the render pass the session runs after the current one, and its
+ * job: past the pipeline barriers left in this job (they only order and
+ * move layouts, which the bin does not read), the next event of this job,
+ * or else the first of the job after it.  NULL when that is not a render
+ * pass, or its job has one prepared already.
+ */
+static struct bcm2711_vulkan_native_job *
+ahead_target(
+	struct bcm2711_render_session *session,
+	struct bcm2711_vulkan_native_job *job,
+	const struct bcm2711_vulkan_prepared_event *next,
+	const struct bcm2711_vulkan_prepared_event **pass)
+{
+	struct bcm2711_vulkan_native_job *target;
+	const struct bcm2711_vulkan_prepared_event *event;
+	uint32_t looked;
+
+	/* This job's next event other than a barrier. */
+	*pass = NULL;
+	target = job;
+	event = skip_barriers(next);
+
+	/* None: the first of the jobs after it (past a few with only barriers), where that job has not run past it. */
+	for (looked = 0; event == NULL && looked < NATIVE_AHEAD_JOBS; looked++) {
+		target = bcm2711_vulkan_queue_next_job(session, target);
+		if (target == NULL || target->quarantined || target->session != session || target->prepared == NULL) {
+			session->device->space.native->hardware.perf.ahead_nojob++;
+			return NULL;
+		}
+		if (target->executed && !target->stepping)
+			return NULL;
+		event = target->prepared->first;
+		if (target->executed)
+			event = target->cursor;
+		event = skip_barriers(event);
+	}
+
+	/* A render pass not prepared yet. */
+	if (event == NULL || event->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS || target->ahead != NULL) {
+		session->device->space.native->hardware.perf.ahead_notpass++;
+		if (event != NULL)
+			session->device->space.native->hardware.perf.ahead_opcode = event->opcode;
+		return NULL;
+	}
+
+	/* Succeeded: the pass and its job. */
+	*pass = event;
+	return target;
+}
+
+/* Passes over pipeline barriers, giving the first other event (NULL at the end). */
+static const struct bcm2711_vulkan_prepared_event *
+skip_barriers(
+	const struct bcm2711_vulkan_prepared_event *event)
+{
+	/* Each barrier in turn. */
+	while (event != NULL && event->opcode == GPU_OP_CMD_PIPELINE_BARRIER)
+		event = event->next;
+
+	/* Succeeded: the first other event, or none. */
+	return event;
 }
 
 /* Whether a prepared pass may bin while the current pass renders. */
@@ -947,7 +1023,7 @@ report_perf(
 
 	/* Prints the window's per-submission averages and its worst submission. */
 	perf_append(
-		"v3d: perf ms=%llu busy=%llu%% subs=%llu passes=%u/%u/%u skipped=%u draws=%u kib=%llu avg_us total=%llu prep=%llu tex=%llu copy=%llu prog=%llu rec=%llu alloc=%llu map=%llu clean=%llu exec=%llu tfu=%llu bin=%llu render=%llu oclean=%llu rel=%llu xfer=%llu max_us=%llu snap=%u/%u/%u/%u upd=%u mapped_kib=%llu largest=%ux%u%c tiles=%u/%u worker=%llu%%\n",
+		"v3d: perf ms=%llu busy=%llu%% subs=%llu passes=%u/%u/%u skipped=%u ahead=%u/%u/%u/%u/%u/%u draws=%u kib=%llu avg_us total=%llu prep=%llu tex=%llu copy=%llu prog=%llu rec=%llu alloc=%llu map=%llu clean=%llu exec=%llu tfu=%llu bin=%llu render=%llu oclean=%llu rel=%llu xfer=%llu max_us=%llu snap=%u/%u/%u/%u upd=%u mapped_kib=%llu largest=%ux%u%c tiles=%u/%u worker=%llu%%\n",
 		(unsigned long long)kern_ticks_to_ms(now - perf->window_start),
 		(unsigned long long)busy,
 		(unsigned long long)count,
@@ -955,6 +1031,12 @@ report_perf(
 		perf->clear_passes,
 		perf->image_passes,
 		perf->skipped_copies,
+		perf->ahead_passes,
+		perf->ahead_dropped,
+		perf->ahead_long,
+		perf->ahead_nojob,
+		perf->ahead_notpass,
+		perf->ahead_opcode,
 		perf->draws,
 		(unsigned long long)(perf->staged_bytes / 1024U),
 		(unsigned long long)average_us(perf->total_ticks, count),

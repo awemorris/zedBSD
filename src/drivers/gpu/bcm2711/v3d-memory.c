@@ -17,6 +17,7 @@ static int synchronize_range(struct bcm2711_v3d_space *space, uint32_t address, 
 static bool memory_ready(struct bcm2711_v3d_space *space);
 static bool window_open(struct bcm2711_v3d_space *space);
 static bool job_running(struct bcm2711_v3d_space *space);
+static bool batch_ready(struct bcm2711_v3d_space *space);
 static bool changes_locked(const struct bcm2711_buffer *buffer, uint64_t offset, uint64_t since, uint32_t *box);
 static bool changes_boxes_locked(const struct bcm2711_buffer *buffer, uint64_t offset, uint64_t since, uint32_t (*boxes)[4], uint32_t capacity, uint32_t *count);
 static void boxes_add(uint32_t (*boxes)[4], uint32_t capacity, uint32_t *count, const uint32_t *box);
@@ -39,8 +40,13 @@ bcm2711_v3d_memory_begin(
 	if (space->deferred)
 		return EBUSY;
 
-	/* An active or faulted engine cannot edit translations underneath native work. */
-	ready = memory_ready(space);
+	/*
+	 * A faulted engine, or one inside the executor's window, cannot edit
+	 * translations underneath native work.  A job that runs on beside the
+	 * executor's preparation keeps every address it reads: new maps only
+	 * add entries, and releases wait (bcm2711_v3d_memory_release).
+	 */
+	ready = batch_ready(space);
 	if (!ready)
 		return EIO;
 
@@ -125,9 +131,13 @@ bcm2711_v3d_memory_map(
 	bool ready;
 	int error;
 
-	/* Only the checked ready engine can publish new native mappings. */
+	/*
+	 * Only the checked ready engine can publish new native mappings, outside
+	 * the executor's window.  A job that runs on beside the executor's
+	 * preparation reads none of the new addresses; the flush only adds them.
+	 */
 	*result = NULL;
-	ready = memory_ready(space);
+	ready = batch_ready(space);
 	if (!ready)
 		return EIO;
 	bytes = buffer->memory.size;
@@ -531,6 +541,29 @@ memory_ready(
 	spin_unlock_irqrestore(&space->native->hardware.guard, enabled);
 
 	/* Succeeded: the caller knows whether one serialized mapping operation can be admitted. */
+	return ready;
+}
+
+/* Tells whether a translation batch may open: the engine is ready, not faulted, and the executor's window is closed. */
+static bool
+batch_ready(
+	struct bcm2711_v3d_space *space)
+{
+	unsigned long enabled;
+	bool ready;
+
+	/* The same admission as memory_ready's, but a job may hold the worker slot. */
+	enabled = spin_lock_irqsave(&space->native->hardware.guard);
+
+	ready = false;
+	if (space->native->hardware.ready &&
+	    !space->native->hardware.faulted &&
+	    !space->native->hardware.window)
+		ready = true;
+
+	spin_unlock_irqrestore(&space->native->hardware.guard, enabled);
+
+	/* Succeeded: the caller knows whether a batch may open. */
 	return ready;
 }
 

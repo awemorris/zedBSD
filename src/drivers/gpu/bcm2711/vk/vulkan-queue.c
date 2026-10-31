@@ -824,17 +824,17 @@ execution_step(
 	return 0;
 }
 
-/* The most submissions without a command the search for the next job passes over. */
-#define QUEUE_NEXT_SKIPPED 4U
+/* The most submissions the search for the next job looks through. */
+#define QUEUE_NEXT_EXECUTIONS 6U
 
 /*
  * Finds the job the executor runs after current in its session.
  *
- * The waits and signals between two commands only count; no command's
- * input depends on them, so submissions of them alone (a presentation's)
- * are passed over.  The running execution is the session's head; the ones
- * behind it are read under the guard a submit links them under, and only
- * the executor ends executions, so they stay while it looks.
+ * current is a command of the running execution (the session's head) or of
+ * one of the few queued behind it; the waits and signals between two
+ * commands only count, and no command's input depends on them.  The
+ * executions behind the head are read under the guard a submit links them
+ * under, and only the executor ends executions, so they stay while it looks.
  */
 struct bcm2711_vulkan_native_job *
 bcm2711_vulkan_queue_next_job(
@@ -842,23 +842,24 @@ bcm2711_vulkan_queue_next_job(
 	const struct bcm2711_vulkan_native_job *current)
 {
 	struct bcm2711_render_execution *base;
-	struct bcm2711_render_execution *later;
 	struct bcm2711_vulkan_native_job *found;
 	struct queue_execution *execution;
 	struct queue_action *action;
 	unsigned long enabled;
-	uint32_t skipped;
+	uint32_t looked;
 	uint32_t index;
 	bool passed;
 
-	/* The running execution must be the submission that runs current. */
+	/* The executions from the running one, until the command after current. */
 	found = NULL;
+	passed = false;
 	enabled = spin_lock_irqsave(&render->device->space.native->hardware.guard);
 
 	base = render->execution_head;
-	passed = false;
-	if (base != NULL && base->step == execution_step) {
-		/* Its commands after current's. */
+	for (looked = 0; base != NULL && found == NULL && looked < QUEUE_NEXT_EXECUTIONS; looked++) {
+		/* Only submissions hold commands. */
+		if (base->step != execution_step)
+			break;
 		execution = (struct queue_execution *)base;
 		for (index = execution->cursor; index < execution->owner.action_count && found == NULL; index++) {
 			action = &execution->owner.actions[index];
@@ -869,22 +870,7 @@ bcm2711_vulkan_queue_next_job(
 			if (action->job == current)
 				passed = true;
 		}
-	}
-
-	/* Otherwise the first command of the submissions behind, past a few with none. */
-	later = NULL;
-	if (passed && found == NULL)
-		later = base->next;
-	for (skipped = 0; later != NULL && found == NULL && skipped < QUEUE_NEXT_SKIPPED; skipped++) {
-		if (later->step != execution_step)
-			break;
-		execution = (struct queue_execution *)later;
-		for (index = execution->cursor; index < execution->owner.action_count && found == NULL; index++) {
-			action = &execution->owner.actions[index];
-			if (action->kind == QUEUE_COMMAND)
-				found = action->job;
-		}
-		later = later->next;
+		base = base->next;
 	}
 
 	spin_unlock_irqrestore(&render->device->space.native->hardware.guard, enabled);

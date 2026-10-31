@@ -451,7 +451,9 @@ static int
 admit_job(
 	struct bcm2711_v3d *engine)
 {
+	static bool admit_reported;
 	struct bcm2711_v3d_hardware *hardware;
+	struct bcm2711_v3d_events events;
 	unsigned long enabled;
 
 	/* Failed boot and reset refuse native access before a guard or table is assumed. */
@@ -465,9 +467,23 @@ admit_job(
 		return EBUSY;
 	}
 
-	/* Sticky faults cannot be hidden by discarding an earlier queue's event latches. */
+	/* Sticky faults cannot be hidden by discarding an earlier queue's event latches; the first refusal says which fault it was. */
 	if (hardware->faulted || !hardware->irq_live) {
+		events = hardware->events;
 		spin_unlock_irqrestore(&hardware->guard, enabled);
+		if (!admit_reported) {
+			admit_reported = true;
+			bcm2711_stage_mark(
+				BCM2711_FAMILY_V3D,
+				"job refused faulted=%u irq_live=%u events=%x/%x fault=%x:%x error=%d",
+				(unsigned)hardware->faulted,
+				(unsigned)hardware->irq_live,
+				events.core,
+				events.hub,
+				events.fault_client,
+				events.fault_address,
+				events.error);
+		}
 		return EIO;
 	}
 
