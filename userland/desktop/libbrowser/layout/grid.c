@@ -699,7 +699,7 @@ layout_grid(
 		    child->replaced || child->atomic)
 			continue;
 		child->grid_orthogonal = 1;
-		if (item->row_span == 1 && item->row < box->style.row_count &&
+		if (item->row_span == 1 &&
 		    grid_row_track(&box->style, item->row)->kind == CSS_TRACK_LENGTH &&
 		    grid_row_track(&box->style, item->row)->size.unit == CSS_UNIT_PX)
 			child->grid_room = layout_from_px(grid_row_track(&box->style, item->row)->size.value);
@@ -3567,6 +3567,13 @@ grid_size_columns(
 	struct grid_track_item *items;
 	struct grid_flat_list list;
 	layout_unit whole;
+	layout_unit floor_unused;
+	layout_unit outer_unused;
+	layout_unit group_floor;
+	layout_unit left_before;
+	layout_unit left_after;
+	layout_unit right_before;
+	layout_unit right_after;
 	size_t index;
 	int constraint;
 	int column;
@@ -3601,6 +3608,21 @@ grid_size_columns(
 
 	/* The tracks and the items in the form the algorithm takes. */
 	error = grid_flat_build(&list, grid, 1, gap);
+
+	/* Vertical items that align by a baseline along the row share it within a column, which the column must hold. */
+	for (index = 0; error == 0 && index < grid->item_count; index++) {
+		if (!grid->items[index].box->grid_orthogonal || grid->items[index].column_span != 1)
+			continue;
+		error = grid_column_item_contribution(tree, &grid->items[index], GRID_CONTRIBUTION_MAX_CONTENT, 0, &floor_unused, &outer_unused);
+	}
+	for (column = 0; error == 0 && column < grid->column_count; column++) {
+		grid_column_baselines(box, grid, column, &left_before, &left_after, &right_before, &right_after);
+		group_floor = left_before + left_after;
+		if (right_before + right_after > group_floor)
+			group_floor = right_before + right_after;
+		if (group_floor > 0)
+			error = grid_flat_add(&list, NULL, column, 1, 0, 1, 0, group_floor);
+	}
 	tracks = calloc((size_t)grid->column_count, sizeof(*tracks));
 	items = calloc(list.count + 1U, sizeof(*items));
 	if (error != 0 || tracks == NULL || items == NULL) {
