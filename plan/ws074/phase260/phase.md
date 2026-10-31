@@ -791,10 +791,11 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev133（c2f4559f2） | subgrid（行の clamp・向きの反転・area 名以外）、baseline の共有、place-* の inherit、abspos の static position | 3,026 | 220 / 152 / 72 / 2 |
   | dev134（69ee48524） | grid の 2 回目の column 解決、marquee、subgrid の area 名、abspos の 2/2/2/2 | 3,034 | 218 / 147 / 71 / 2 |
   | dev135（8463b7a95） | grid-template の computed、replaced の border-box の min/max-width | 3,037 | 215 / 147 / 71 / 2 |
-  | dev136（6eee8bdbe、最終） | `:nth-child(an+b of S)` | 3,038（87.50%、gap 434） | 214 / 147 / 71 / 2 |
+  | dev136（6eee8bdbe） | `:nth-child(an+b of S)` | 3,038 | 214 / 147 / 71 / 2 |
+  | dev137（2d57da7b1、最終） | grid の area を containing block とする abspos の anchor() は area の端から測る | 3,039（87.53%、gap 433） | 213 / 147 / 71 / 2 |
 
-  dev132 から +33、後退 0（dev132 と直前の測定の両方に対し。dev133 だけ grid-automatic-minimum-intrinsic-aspect-ratio-001 が落ちたが次で直した）。
-  host build は `-Wall -Wextra -Werror` で warning 0。Acid は最終の source（6eee8bdbe）で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%（/tmp/p8out/acid136）。
+  dev132 から +34、後退 0（dev132 と直前の測定の両方に対し。dev133 だけ grid-automatic-minimum-intrinsic-aspect-ratio-001 が落ちたが次で直した）。
+  host build は `-Wall -Wextra -Werror` で warning 0。Acid は最終の source（2d57da7b1）で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%（/tmp/p8out/acid137）。
 - 直した物（要点。source は userland/desktop/libbrowser/）:
   1. subgrid（layout/grid.c・grid-names.c）。Chromium（chrome-run.js）で寸法を測って仕様の振る舞いを確かめた:
      - subgrid の軸では、subgrid の線の外（0 以下、最後の線より後）を指す placement は最も近い線へ clamp し、幅が 0 になれば隣の 1 track を使う（`grid_names_clamp`。abspos は auto の側を保って線ごとに clamp）。
@@ -814,6 +815,7 @@ Origin: 2026-10-27 ユーザーの指示。
      descendant-static-position-001〜004。UA sheet に `marquee { display: inline-block; overflow: hidden !important }`（positioned-grid-descendants-017・positioned-grid-items-023、grid-items-percentage-paddings-015）。
   6. `getComputedStyle().gridTemplate`（bind/computed.c `computed_grid_template`）: 明示の track は宣言どおり、none の軸は used の大きさ、areas があれば各行の文字列に続けて行の大きさ（auto は省く）。grid-layout-properties。
   7. replaced の min-width・max-width が border-box の時に frame を引く（layout/replaced.c、height の側にはあった）。image-as-flexitem-size-007・007v。
+  9. abspos の anchor()（layout/position.c）: grid の area が containing block の時（`static_grid_area` と `cb_set`）、area の端から測る（padding box から測って area の位置を二重に足していた）。position-try-grid-001。
   8. `:nth-child(an+b of S)`・`:nth-last-child(an+b of S)`（css/parser.c・cascade.c）: S に合う兄弟だけを数え、要素自身も S に合う必要がある。css-cascade/scope-invalidation。
 - 調べて直さなかった物（次の候補）:
   - subgrid が残る 12 件のうち 10 件は direction・writing-mode が親と直交する subgrid（orthogonal-writing-mode-001〜004、repeat-auto-fill-003、subgrid-stretch の縦書き、subgrid-baseline-002・004、grid-gap-008・009）。
@@ -827,4 +829,4 @@ Origin: 2026-10-27 ユーザーの指示。
 - 道具: 開発用の script を plan/ws074/phase260/tools/ に置いた（lay.sh: 比較用の font で layout の dump、cmp.sh: reftest とその ref の box の差、h1.sh: harness の 1 ID。runner に `--font-dir userland/desktop/fonts` を渡す）。
   `--run` は layout を待たないので `getBoundingClientRect` の値は 0 になる（`--dump=layout` の console 行で読む）。Chromium の寸法は `NODE_PATH=build/ws074-chrome/node/node_modules node plan/ws074/tests/chrome-run.js --run FILE` の console で測れる（Chromium の行の高さは我々と少し違い、y は 6px ほどずれる）。
   `pgrep -f` で待つ loop を同じ command line に書くと自分に当たって終わらない。
-- 一時物（Q1 が消す）: 一覧は build/tmp/p8/delete-list-i12.txt（/tmp/p8out の dev131〜dev134 と dev135 の .log・acid132、Acid の一時 file、build/tmp/p8 の scratch）。/tmp/p8out には dev135・dev136・acid136 を残す。
+- 一時物（Q1 が消す）: 一覧は build/tmp/p8/delete-list-i12b.txt（1 行 1 path）。/tmp/p8out には dev136・dev137・acid137 を残す。dev135・acid136 は消してよい。
