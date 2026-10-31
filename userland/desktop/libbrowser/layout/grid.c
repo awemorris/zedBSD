@@ -2512,6 +2512,8 @@ grid_abspos_lines(
 		start = end;
 		end = swap;
 	}
+	if (start != 0 && start == end)
+		end = start + 1;
 	if (start < 1 || start > tracks + 1)
 		start = 0;
 	if (end < 1 || end > tracks + 1)
@@ -3408,6 +3410,16 @@ grid_subgrid_prepare(
 			sub->style.rows[track].kind = CSS_TRACK_AUTO;
 			sub->style.rows[track].minimum.unit = CSS_UNIT_AUTO;
 		}
+	}
+
+	/* The areas of the grid it sits in (or those that grid inherits) name lines it shares. */
+	if (!grid_subgrid_flipped(sub, 1) && sub->subgrid_column_span > 0) {
+		sub->style.outer_areas = parent->style.areas != NULL ? parent->style.areas : parent->style.outer_areas;
+		sub->style.outer_area_columns = column_first + (parent->style.areas != NULL ? 0 : parent->style.outer_area_columns);
+	}
+	if (sub->subgrid_row_span > 0) {
+		sub->style.outer_areas = parent->style.areas != NULL ? parent->style.areas : parent->style.outer_areas;
+		sub->style.outer_area_rows = row_first + (parent->style.areas != NULL ? 0 : parent->style.outer_area_rows);
 	}
 
 	/* The line names of the axes it shares: its own list, and the parent's lines it spans. */

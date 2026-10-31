@@ -33,7 +33,7 @@ static int grid_names_explicit(const struct css_style *style, int columns);
 static int grid_names_has(const struct css_style *style, int columns, int line, const struct vm_string *name, const char *suffix);
 static int grid_names_template_has(const struct css_line_names *names, int tracks, const struct css_track_repeat *repeat, int line, const struct vm_string *name, const char *suffix);
 static int grid_names_range(const struct css_line_names *names, int first, int last, const struct vm_string *name, const char *suffix);
-static int grid_names_area_edge(const struct css_style *style, int columns, int line, const struct vm_string *name, const char *suffix);
+static int grid_names_area_edge(const struct css_grid_areas *areas, int columns, int line, const struct vm_string *name, const char *suffix);
 static int grid_names_equal(const struct vm_string *atom, const struct vm_string *base, const char *suffix);
 static int grid_names_edge(const struct vm_string *name, const char *suffix, const struct vm_string *area, const char *edge);
 static int grid_names_find(const struct css_style *style, int columns, const struct vm_string *name, const char *suffix, int count);
@@ -509,7 +509,12 @@ grid_names_has(
 	}
 
 	/* The implicit NAME-start and NAME-end of the named areas. */
-	same = grid_names_area_edge(style, columns, line, name, suffix);
+	same = grid_names_area_edge(style->areas, columns, line, name, suffix);
+	if (same)
+		return 1;
+
+	/* A subgrid has the implicit names of the areas of the grid it sits in, on the lines it shares. */
+	same = grid_names_area_edge(style->outer_areas, columns, line + (columns ? style->outer_area_columns : style->outer_area_rows), name, suffix);
 	if (same)
 		return 1;
 
@@ -601,13 +606,12 @@ grid_names_range(
  */
 static int
 grid_names_area_edge(
-	const struct css_style *style,
+	const struct css_grid_areas *areas,
 	int columns,
 	int line,
 	const struct vm_string *name,
 	const char *suffix)
 {
-	const struct css_grid_areas *areas;
 	struct vm_string *cell;
 	int row;
 	int column;
@@ -616,7 +620,6 @@ grid_names_area_edge(
 	int same;
 
 	/* No areas, no implicit names. */
-	areas = style->areas;
 	if (areas == NULL)
 		return 0;
 
