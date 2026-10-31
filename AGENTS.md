@@ -65,6 +65,7 @@
 - build は個別の target を名指す（`$(BUILD)/vmunix`・`$(BUILD)/bin/<app>` など）。target 無しの make・disk-image は、image が要る試験の時だけ。
   使い捨ての出力は自分の `BUILD=build/<phase>/`。
 - 同じ条件で変更なしの再試行は 3 回まで。各コマンドと VM に時間の上限を付ける。
+- **大きな I/O の後は `sync`**（2026-11-01 ユーザーの決定）: QEMU の終了の後、disk image・大きな tarball の作成の後、大きな build の後など、大量に書いた後は必ず `sync` を流す。書き込みが cache に溜まったまま host が止まると、書いた file が空になる。
 - 結果は、実行したコマンド・結果・成果物の path・未実施の確認・残りを具体的に。観測していない事を成功と書かない。QEMU と実機の証拠を分ける。
 
 ## 5. 記録の置き場所
