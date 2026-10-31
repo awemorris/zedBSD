@@ -63,7 +63,7 @@
 | [p012](phase012/phase.md) | module（Sonnet）: `storage/queue.h/.c`（instance の storage の thread と queue、write-behind と読みの頼み） | planned | p005・p010 |
 | [p013](phase013/phase.md) | module（Sonnet）: `libmedia/media-os.h` → `media-os-posix.c`・`media-os-win32.c`（Vulkan の loader の読み込み、file の開き・大きさ・位置の読み） | cleared（2026-11-01 03:05 Q1、main 82365a39b。test-media-os posix 159・win32 158（LC_ALL=C.UTF-8）、変異 15/18） | p004 |
 | [p014](phase014/phase.md) | module（Sonnet、表の data、旧 T1）: `libkeiland/win32/keys-table.h/.c`（scan code → evdev の番号） | in-progress（2026-11-01 02:54 Sonnet で起動） | p004 |
-| [p015](phase015/phase.md) | module（Sonnet）: `libkeiland/win32/frame.h/.c`（custom frame の幾何: hit test・題の帯の button の配置・DPI の倍率） | in-progress（2026-11-01 02:54 Sonnet で起動） | p004 |
+| [p015](phase015/phase.md) | module（Sonnet）: `libkeiland/win32/frame.h/.c`（custom frame の幾何: hit test・題の帯の button の配置・DPI の倍率） | 実装済み・試験 PASS（2026-11-01、cleared は Q1。test-frame 1079182 checks posix・1079798 win32） | p004 |
 | [p016](phase016/phase.md) | module（Sonnet）: `libkeiland/platform/platform-win32.c`（`platform.h` の起こし・lock・thread を Win32 で） | in-progress（2026-11-01 03:07 Sonnet で起動） | p004 |
 | [p017](phase017/phase.md) | module（Sonnet）: `libkeiland/win32/wide.h/.c` と `input.h/.c`（UTF-16 ↔ UTF-8・surrogate の組、wheel の積み・pointer・修飾の鍵の写し） | in-progress（2026-11-01 03:07 Sonnet で起動） | p004 |
 | [p018](phase018/phase.md) | module（Sonnet、旧 T2）: `libkeiland/win32/cf-html.h/.c`（CF_HTML の encode と decode） | planned | p004 |
