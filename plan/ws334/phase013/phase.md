@@ -86,3 +86,8 @@
 - 環境の注意: この host の shell は `LC_CTYPE=ja_JP.UTF-8`（この host に無い locale）で、Wine が unix の file 名を UTF-8 にできず、win32 の試験が非 ASCII の名前の file を作れない。
   その時の試験は「作れない」と注意を出し、変換だけ（正しい UTF-8 が EILSEQ にならず ENOENT になる）を確かめる。`LC_ALL=C.UTF-8` で流せば非 ASCII の file の open と読みまで確かめる（どちらも PASS を確認）。
 - 未実施: aarch64 Windows の実行（check-skeleton が compile のみ）、実際の Windows、1 GiB を越える read（記憶の都合）、複数 thread からの呼び出し、`O_CLOEXEC` の観測。
+
+## Q1 の受け入れ（2026-11-01 03:05）
+
+- 自分で決めた 8 点を受け入れる（POSIX は名前の UTF-8 を確かめない、普通の file でない物は EIO など）。
+- host の shell の LC_CTYPE=ja_JP.UTF-8 が入っておらず、Wine で英字でない名前の file が作れない。試験の道具（run-unit.sh）は基点で固定なので今は変えず、実装の担当は `LC_ALL=C.UTF-8` を付けて流す。道具の直しは p035 へ持ち越し。

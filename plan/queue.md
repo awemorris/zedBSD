@@ -513,7 +513,7 @@
 | q1792 / q1792-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p005`） | [ws334-p005](ws334/phase005/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |
 | q1793 / q1793-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p009`） | [ws334-p009](ws334/phase009/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | cleared（2026-11-01 02:53、ee145f9cb、main 70f0a3bf1） |
 | q1794 / q1794-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p010`） | [ws334-p010](ws334/phase010/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |
-| q1795 / q1795-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p013`） | [ws334-p013](ws334/phase013/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |
+| q1795 / q1795-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p013`） | [ws334-p013](ws334/phase013/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | cleared（2026-11-01 03:05、a273d4f72、main 82365a39b） |
 | q1796 / q1796-i01 | P7 Opus（worktree `/home/awe/zedBSD-worktrees/p7-ws334`） | [ws334-p020](ws334/phase020/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |
 | q1797 / q1797-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p014`） | [ws334-p014](ws334/phase014/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1798 / q1798-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p015`） | [ws334-p015](ws334/phase015/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
