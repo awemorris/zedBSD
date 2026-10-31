@@ -100,8 +100,10 @@ int ssh_authorized_keys_find(const char *text, size_t size, const uint8_t *publi
 /*
  * Checks a host key against the known_hosts text.
  *
- * host is the name the user gave (or an address), port the port.  The
- * name looked up is host when port is 22 and "[host]:port" otherwise
+ * host is the name ssh connects to (the HostName of ssh_config when one
+ * applies, otherwise the name the user gave; OpenSSH looks up the same
+ * name), port the port.  The name looked up is host when port is 22 and
+ * "[host]:port" otherwise
  * (sshd(8) SSH_KNOWN_HOSTS FILE FORMAT); a line's first field is a
  * pattern list (ssh_pattern_list_match, fold 1) that must match it.  The
  * answer is SSH_KNOWN_REVOKED when an @revoked ssh-ed25519 line has
@@ -122,5 +124,15 @@ int ssh_known_hosts_check(const char *text, size_t size, const char *host, uint1
  * out.  Returns 0, EINVAL (host as above) or the error recorded in out.
  */
 int ssh_known_hosts_put_line(const char *host, uint16_t port, const uint8_t *public_key, struct ssh_buf *out);
+
+/*
+ * Appends to out the known_hosts text without the lines that name host
+ * and port (as ssh_known_hosts_check matches them, any key type, also
+ * @revoked lines; hashed lines are kept), every other line kept byte for
+ * byte (ssh-keygen -R).  *removed receives the number of lines left out.
+ * Returns 0, EINVAL (host as above), EMSGSIZE or the error recorded in
+ * out.
+ */
+int ssh_known_hosts_remove(const char *text, size_t size, const char *host, uint16_t port, struct ssh_buf *out, unsigned *removed);
 
 #endif

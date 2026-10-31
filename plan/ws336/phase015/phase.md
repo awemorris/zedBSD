@@ -35,6 +35,7 @@ WS335 の待ち: p003 経由
 - design §11.3 の相手 A の全項目（exec と exit status、8 MiB の stdin の往復の cmp、`-tt` と `stty size`、known_hosts の accept-new・CHANGED の拒否・BatchMode、`RekeyLimit 1M` の相手で 64 MiB、ServerAliveInterval）
 - 相手が KexAlgorithms=curve25519-sha256 だけの時に「no matching」で 255
 - 終了の値: 相手の exit 3 → 3、signal → 255
+- known_hosts は HostName の名前で引き、書く（ssh_config の HostName を使った接続で、OpenSSH の ssh が同じ known_hosts を受ける）
 
 ## 4. 注意
 

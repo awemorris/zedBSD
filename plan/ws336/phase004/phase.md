@@ -17,7 +17,8 @@ WS335 の待ち: p003 経由（header の凍結の後）
 - `userland/base/ssh/ssh-common.h` の冒頭の約束（誤りの値・信用できない入力・秘密・ANSI C）
 - `userland/base/ssh/ssh-cipher.h`・`ssh-packet.h`
 - `/home/awe/zedBSD-claude1/build/sources/specs/ssh/draft-ietf-sshm-chacha20-poly1305-04.txt`（SHA-256 `a8aa91696db885d2…`、全桁は同じ directory の SHA256SUMS）: §6（K_1 と K_2、nonce、counter）、§7（受けでは tag を先に確かめる）
-- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/rfc4253.txt`（SHA-256 `b471173305154f6c…`、全桁は同じ directory の SHA256SUMS）: §4.2（識別の行）、§6（packet の形、padding 4〜255、最小 16 bytes）、§6.4（seq）
+- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/rfc4253.txt`（SHA-256 `b471173305154f6c…`、全桁は同じ directory の SHA256SUMS）: §4.2（識別の行）、§6（packet の形、padding 4〜255。§6 の「最小 16 bytes」は送り手の規則で、受けは packet_length 5 以上を受ける。鍵ありの NEWKEYS は packet_length 8 になる）、§6.4（seq）
+- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/draft-ietf-sshm-chacha20-poly1305-04.txt`（SHA-256 `a8aa91696db885d2…`、全桁は同じ directory の SHA256SUMS）: Appendix A（完全な例: 64 bytes の鍵、seq 7、packet と tag。既知の答えの試験にする）
 - `/home/awe/zedBSD-claude1/build/sources/specs/ssh/draft-ietf-sshm-strict-kex-02.txt`（SHA-256 `c08126dcaaf63958…`、全桁は同じ directory の SHA256SUMS）: §3.3（seq の 0 への戻し）
 - `plan/ws336/design.md` の §1（出典の扱い）・§5（module）・§8（安全）
 
@@ -31,6 +32,7 @@ WS335 の待ち: p003 経由（header の凍結の後）
 
 期待の値は仕様の表・式・試験の vector と手の計算、`plan/ws336/tests/unit/wire.h` で組んだ bytes だけから作る。他の実装の出力を期待の値にしない（host の OpenSSH との相互運用は別の確かめで、期待の値の生成ではない）。
 
+- cipher の既知の答え: draft-ietf-sshm-chacha20-poly1305-04 の Appendix A の鍵・seq・平文の packet（padding を含む）で `ssh_chachapoly_seal` の暗号と tag が Appendix A の値と byte ごとに一致し、`ssh_chachapoly_length` と `ssh_chachapoly_open` が元に戻す（値は spec の text から取り、取った行を試験の comment に書く）
 - cipher: 64 bytes の鍵の前半が K_1・後半が K_2 である事を、試験の中で `ssh_chacha20_xor` と `ssh_poly1305` を直に呼んで組み立てた期待の bytes と比べる（seq 0・1・0xffffffff）。length の復号、seal → open の往復、tag・暗号の長さ・暗号の本体の各 1 bit の変更で EBADMSG かつ packet が変わらない
 - packet（鍵なし）: payload 1・最大の長さで送り、`wire.h` で組んだ期待の枠（長さ・padding_length・payload）と、padding の長さが 4 以上で整列する事を確かめる。分けて feed（1 byte ずつ）しても同じ payload、2 つの packet を一度に feed
 - packet（鍵あり）: 2 つの `struct ssh_packet` をつなぎ、送りと受けの鍵を入れて往復、seq の増加、1 bit の変更で EBADMSG、packet_length が 4・SSH_PACKET_LIMIT+1 で EMSGSIZE、padding_length が 3・packet_length 以上で EINVAL、tag の途中で EAGAIN

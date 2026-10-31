@@ -45,8 +45,10 @@ sshd_account_allowed(
 
 /*
  * Reports whether public_key is in the account's authorized_keys file
- * (AuthorizedKeysFile, expanded), after the StrictModes checks of the
- * file and of every directory from it up to the home directory.
+ * (AuthorizedKeysFile, expanded): a child with the account's ids reads
+ * the file as described above and passes at most SSH_HOSTFILE_MAX bytes
+ * back over a pipe, and the monitor looks for the key with
+ * ssh_authorized_keys_find.
  */
 int
 sshd_key_authorized(
@@ -65,9 +67,9 @@ sshd_key_authorized(
 
 
 /*
- * Checks a password with the console login's rule (login_verify of
- * userland/base/login/verify.h), refusing an empty one unless
- * PermitEmptyPasswords.
+ * Checks a password with the console login's rule (login_verify),
+ * refusing an empty one unless PermitEmptyPasswords; for an account that
+ * does not exist or is locked, crypt still runs on a dummy hash.
  */
 int
 sshd_password_ok(

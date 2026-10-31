@@ -1,12 +1,12 @@
 <!-- awesome-plan project=zedbsd record=ws336-p020 -->
 
-# ws336-p020: OpenSSH からの入れ替え
+# ws336-p020: 敵対的な入力と privsep の見直し
 
 Status: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
-依存: p019
-WS335 の待ち: **WS335 の実装**（p019 と同じ）。**Q6 の答え**（時期と範囲）
+依存: p018・p019
+WS335 の待ち: 無し
 
 ## 1. 読む物
 
@@ -15,39 +15,39 @@ WS335 の待ち: **WS335 の実装**（p019 と同じ）。**Q6 の答え**（�
 - `plan/guardrail.md` の「MIT・GPL の出典のデータの引用」と「source の中の開発の管理情報」
 - `docs/agent/spec-module-delegation.md` の §5.3（実装の担当が守ること）と §7（出典と license）
 - `userland/base/ssh/ssh-common.h` の冒頭の約束（誤りの値・信用できない入力・秘密・ANSI C）
-- `plan/ws336/design.md` §10・§11.5
-- [user-questions.md](../user-questions.md) の Q3・Q6 の答え
+- `plan/ws336/design.md` §6.2・§8・§9
+- sshd・ssh・sftp-server の全 source
+- [design-review.md](../design-review.md)（見送った指摘と受け入れた危険）
 - `plan/ws336/design.md` の §1（出典の扱い）・§5（module）・§8（安全）
 
 ## 2. 作る物
 
-- 既定の config（Q6 の範囲。`config/ci/config-amd64-server.mk` はユーザーの物なので Q1 に頼む）
-- 自前の package の menu を `base`・既定 y に
-- Q3 の答えに従い `scp -O` を使う 4 本（plan/tools/gpu-perf/measure.sh、plan/tools/rtx-video/rtx-*-check.sh）を直すか旧の scp を入れる（他の WS の道具なので Q1 の承認の後）
-- 実機の試験の一覧（Q1 がユーザーの拾える試験の一覧に置く）
+- `plan/ws336/tests/fuzz-host.sh`（各 parser と transport・auth・channel・monitor の request の確かめ・sftp に、仕様の形を保った変異の入力を ASan・UBSan で長く流す 1 本の script。最後の行 `fuzz-host: PASS`）
+- 見つけた不具合の修正（library の .c の修正は可。header の修正が要る時は Q1 に返す）
+- 見直しの記録（この phase.md の結果）
 - この phase.md の「結果」の節、[ws.md](../ws.md) の表のこの行
 
 ## 3. 試験の項目
 
 期待の値は仕様の表・式・試験の vector と手の計算、`plan/ws336/tests/unit/wire.h` で組んだ bytes だけから作る。他の実装の出力を期待の値にしない（host の OpenSSH との相互運用は別の確かめで、期待の値の生成ではない）。
 
-- amd64 の既定の image で `plan/tools/guest/guest.sh` の start・wait・run・put・get が通る
-- `plan/tools/ssh-rtt/qemu-ssh-rtt.sh` が PASS（SSH の往復の回帰）
-- `plan/tools/tcp-close/qemu-close.sh` が PASS
-- 他 arch の既定の config の build（警告 0）
+- 各 parser 100 万回以上（host の時間で 30 分以内）
+- monitor: 乗っ取られた pre-auth・session を模した request の列で許可が出ない事（p016 の試験の延長）
+- 時間の差: 存在する user と存在しない user、正しい password と違う password の応答の時間の差が 50 ms 未満（sshd.h の Timing の規則で）
+- descriptor の漏れ: shell の子に monitor の socket・listener の socket が無い
 
 ## 4. 注意
 
-- OpenSSH の package は tree に残す（消すのは別の判断）。
+- clang の libFuzzer は toolchain の変更なしに host の clang で使えるなら使ってよい（host の clang は Debian 19.1.7）。使えなければ自前の変異の loop。
 - 他の実装（OpenSSH・libssh・Dropbear・PuTTY など）の code・comment・構造・名前を写さない。仕様の本文から書く。source の comment に開発の管理情報（WS・Phase・Queue・Bug の番号、plan/ への参照、日付）を書かない。
 
 ## 5. 変えてはいけない物
 
-全ての library の header、HAL・toolchain・共有の `build/`、ユーザーの物（`config/ci/config-amd64-server.mk`）。
+全ての header（`userland/base/ssh/*.h`）、（library の .c の不具合の修正は可）、`plan/ws336/tests/` の道具（`run-unit.sh`・`check-skeleton.sh`・`crypto-contract.*`・`unit/check.h`・`unit/wire.h`・`host-crypto/`）、Makefile（この WS はまだ Makefile を置かない）、HAL・toolchain・共有の `build/`、他の WS の file。header の不備（足りない関数・誤った約束・矛盾）を見つけたら直さずに止め、どの header のどの関数で何が足りないかを Q1 に返す。header が黙っている所は自分で決め、この phase.md の「結果」に列挙する。phase.md と仕様が食い違えば仕様に従い、食い違いを報告する。
 
 ## 6. 確かめの command
 
-- 上の 3 本の script
+- `sh plan/ws336/tests/fuzz-host.sh`
 - `sh plan/ws336/tests/run-unit.sh all`
 - `BASE=<header の基点> sh plan/ws336/tests/check-skeleton.sh`
 - `git diff --check`

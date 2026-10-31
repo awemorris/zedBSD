@@ -1,12 +1,12 @@
 <!-- awesome-plan project=zedbsd record=ws336-p021 -->
 
-# ws336-p021: 規約の全文の見直し
+# ws336-p021: package と amd64 の build、libcrypto-compat での確かめ
 
 Status: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
-担当（推し）: conformance-reviewer
+担当（推し）: phase-runner（Opus）
 依存: p020
-WS335 の待ち: 無し
+WS335 の待ち: **WS335 の実装**（libcrypto-compat の SHA-256・SHA-3・ML-KEM-768・X25519・Ed25519・ChaCha20・Poly1305・RAND が実装され main に入り、zedBSD の build に `libcrypto-compat.so` がある事）
 
 ## 1. 読む物
 
@@ -15,34 +15,39 @@ WS335 の待ち: 無し
 - `plan/guardrail.md` の「MIT・GPL の出典のデータの引用」と「source の中の開発の管理情報」
 - `docs/agent/spec-module-delegation.md` の §5.3（実装の担当が守ること）と §7（出典と license）
 - `userland/base/ssh/ssh-common.h` の冒頭の約束（誤りの値・信用できない入力・秘密・ANSI C）
-- `plan/coding-style.md` の全文
-- この WS が足した全 source（`userland/base/ssh/`、`plan/ws336/tests/` の C）
-- 各 Phase の結果の「header の持ち越しの直し」
+- `plan/ws336/design.md` §10・§11.2
+- `platform/common/userland-dynamic.mk:569〜588`（外部の library を link する規則の例）
+- `Makefile:470〜503`・`:538〜551`（package の登録と installer の image）
+- `userland/packages/network/openssh/`（今の package の file）
+- WS335 の記録（libcrypto-compat の host の build の作り方）
 - `plan/ws336/design.md` の §1（出典の扱い）・§5（module）・§8（安全）
 
 ## 2. 作る物
 
-- 書き方だけの修正（動作は変えない）。実装の間に見つかった header の comment の誤りの直し（この Phase でだけ header を変えてよい。BASE は新しい SHA になる）
+- `userland/base/ssh/Makefile`（ssh・sshd・ssh-keygen・sftp-server の package。menu は `tests`、既定 n。sshd は login/verify.c の source を共有）
+- `platform/common/userland-dynamic.mk` の link の規則（libcrypto-compat.so）
+- `userland/base/ssh/files/`（sshd_config・ssh_config・sshd-start・sshd.service）
 - この phase.md の「結果」の節、[ws.md](../ws.md) の表のこの行
 
 ## 3. 試験の項目
 
 期待の値は仕様の表・式・試験の vector と手の計算、`plan/ws336/tests/unit/wire.h` で組んだ bytes だけから作る。他の実装の出力を期待の値にしない（host の OpenSSH との相互運用は別の確かめで、期待の値の生成ではない）。
 
-- `run-unit.sh all`・`crypto-contract.sh`・`interop-host.sh`・`check-skeleton.sh`（BASE なし）・p019 の `qemu-interop.sh` が見直しの前後で PASS
+- `SSH_CRYPTO_INCLUDE`・`SSH_CRYPTO_LIB` で libcrypto-compat の host の build を指し、`crypto-contract.sh`・`run-unit.sh all`・`interop-host.sh`・`sshd-pair-host.sh` が PASS
+- amd64 の `$(BUILD)/bin/ssh`・`sshd`・`ssh-keygen`・`sftp-server` の build（警告 0）と `check-dynamic-elf.py` の needed（libcrypto-compat.so・libc.so）
 
 ## 4. 注意
 
-- 無し
+- libcrypto-compat の host の build が無ければ Q1 に返す。
 - 他の実装（OpenSSH・libssh・Dropbear・PuTTY など）の code・comment・構造・名前を写さない。仕様の本文から書く。source の comment に開発の管理情報（WS・Phase・Queue・Bug の番号、plan/ への参照、日付）を書かない。
 
 ## 5. 変えてはいけない物
 
-HAL・toolchain・共有の `build/`、他の WS の file。動作を変える修正は別の Phase に回す。
+全ての library の header、HAL・toolchain・共有の `build/`、OpenSSH の package（`userland/packages/network/openssh/`）、既定の config（`config/ci/`、p024 まで変えない）、他の WS の file。header の不備は Q1 に返す。
 
 ## 6. 確かめの command
 
-- `sh plan/ws336/tests/interop-host.sh`
+- `sh plan/ws336/tests/crypto-contract.sh`（libcrypto-compat で）
 - `sh plan/ws336/tests/run-unit.sh all`
 - `BASE=<header の基点> sh plan/ws336/tests/check-skeleton.sh`
 - `git diff --check`

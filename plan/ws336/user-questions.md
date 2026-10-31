@@ -50,7 +50,7 @@
 
 ### Q5. 権限の分離の深さ
 
-- **推し: B OpenSSH と同じ深さ**: 接続ごとに root の monitor、認証の前の通信は `/var/empty` に閉じ込めた uid `sshd` の process、login の後は利用者の uid の process。host key と password の確かめは monitor だけ。
+- **推し: B OpenSSH と同じ深さ**: 接続ごとに root の monitor、認証の前の通信は `/var/empty` に閉じ込めた uid `sshd` の process、login の後は利用者の uid の process。host key と password の確かめは monitor だけ。子の process は新しく program を起こし直して（execve）始めるので、host key などの秘密の写しを持たない。
 - A 分離しない（1 つの root の process。Dropbear の形）
 - C B に加えて、認証の前の process を zedBSD の `sandbox_spawn`（使える system call を絞る仕組み、WS168）で動かす
 - 理由: A は認証の前の不具合がそのまま root の乗っ取りになる。C は一段強いが、暗号の library を static に link する build が要り、WS335 の側の作業が増える。B で始めて、C は後の Phase の候補にする。

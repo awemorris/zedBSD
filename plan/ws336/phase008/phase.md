@@ -35,11 +35,12 @@ WS335 の待ち: p003 経由
 
 - client と server の 2 つの transport を memory の中でつなぐ（pending → input）。host_key と sign は試験の中の鍵（ssh-key）、check_host_key は受ける・拒む
 - 初回の交換の後に session_id が両方で同じ、upper の message の往復（5・50・94・200）
+- 相手が始めた re-key の間（自分の KEXINIT を送った後、自分の NEWKEYS の前）の `ssh_transport_send` が held に溜まり、自分の NEWKEYS の後に順に出る。held と出力が満ちると ENOBUFS で何も積まれない
 - re-key: tick で 1 時間を越える・byte の上限を越える（上限は試験で到達しにくいので、packet の counter を直に大きくして tick）で KEXINIT、相手からの re-key、re-key の間の upper の message が held に溜まり NEWKEYS の後に順に出る、session_id は変わらない
 - strict: 最初の受けが IGNORE で EPROTO、初回の交換の中の DEBUG・IGNORE・SERVICE_REQUEST・2 回目の HYBRID_INIT で EPROTO、相手の印が無いと EPROTO と DISCONNECT 3、seq の 0 への戻り
 - 相手の識別の行: 前置きの行（client だけ）、65 行目で EPROTO、`SSH-1.5-` で EPROTO、253 文字ちょうど
 - 交換の誤り: 署名の 1 bit、host key の拒否（EACCES と DISCONNECT 9）、S_REPLY の長さ、KEXINIT の一覧の不一致で DISCONNECT 3
-- UNIMPLEMENTED: 番号 8・128 の message に seq 付きの UNIMPLEMENTED が返る
+- UNIMPLEMENTED: 番号 8・128 の message に seq 付きの UNIMPLEMENTED が返る。EXT_INFO（7）は捨てる。交換の外の 30・31 と、段に合わない 21 は EPROTO
 - DISCONNECT の受けで ECONNABORTED と理由
 - export → import の往復で通信が続く（鍵・seq・残りの input）、import の壊れた入力（各欄の長さ・role）で EINVAL
 - 乱数の入力: 交換の各段の後で random な message を送り込み、落ちずに誤りで終わる

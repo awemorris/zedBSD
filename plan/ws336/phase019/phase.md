@@ -1,12 +1,12 @@
 <!-- awesome-plan project=zedbsd record=ws336-p019 -->
 
-# ws336-p019: image への組み込み、libcrypto-compat での確かめ、QEMU の相互運用
+# ws336-p019: sftp-server の program（と Q3 次第で旧の scp の受け手）
 
 Status: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
-担当（推し）: phase-runner（Opus）
-依存: p018
-WS335 の待ち: **WS335 の実装**（libcrypto-compat の SHA-256・SHA-3・ML-KEM-768・X25519・Ed25519・ChaCha20・Poly1305・RAND が実装され main に入り、zedBSD の build に `libcrypto-compat.so` がある事）
+担当（推し）: phase-runner-low（Sonnet 5.5 high）
+依存: p013・p018
+WS335 の待ち: 無し。**Q3 の答え次第**（sftp を入れない時は canceled、その時 p020 の依存は p018 になる）
 
 ## 1. 読む物
 
@@ -15,46 +15,41 @@ WS335 の待ち: **WS335 の実装**（libcrypto-compat の SHA-256・SHA-3・ML
 - `plan/guardrail.md` の「MIT・GPL の出典のデータの引用」と「source の中の開発の管理情報」
 - `docs/agent/spec-module-delegation.md` の §5.3（実装の担当が守ること）と §7（出典と license）
 - `userland/base/ssh/ssh-common.h` の冒頭の約束（誤りの値・信用できない入力・秘密・ANSI C）
-- `plan/ws336/design.md` §10・§11.2・§11.4
-- `platform/common/userland-dynamic.mk:569〜588`（外部の library を link する規則の例）
-- `Makefile:470〜503`・`:538〜551`（package の登録と installer の image）
-- `userland/packages/network/openssh/`（今の package の file）
-- `plan/tools/guest/`（guest.py・config-amd64-ssh.mk）
-- `plan/tools.md` の「QEMU の解析」
+- `userland/base/ssh/ssh-sftp.h`（SYMLINK の引数の順の注意）
+- `plan/ws336/design.md` §4.2・§11.3
+- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/draft-ietf-secsh-filexfer-02.txt`（SHA-256 `3f69664d8050a28a…`、全桁は同じ directory の SHA256SUMS）: §6・§7
+- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/openssh-10.5p1-PROTOCOL`（SHA-256 `4a9e7f6d26d3f59d…`、全桁は同じ directory の SHA256SUMS）: §4.1（SYMLINK の逆順）
+- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/openssh-10.5p1-scp.1`（SHA-256 `32966f40938f813b…`、全桁は同じ directory の SHA256SUMS）: SFTP mode と -O
 - `plan/ws336/design.md` の §1（出典の扱い）・§5（module）・§8（安全）
 
 ## 2. 作る物
 
-- `userland/base/ssh/Makefile`（ssh・sshd・ssh-keygen・sftp-server の package。menu は `tests`、既定 n）
-- `platform/common/userland-dynamic.mk` の link の規則（libcrypto-compat.so）
-- `userland/base/ssh/files/`（sshd_config・ssh_config・sshd-start・sshd.service）
-- `plan/ws336/tests/config-amd64-ssh.mk`
-- `plan/ws336/tests/qemu-interop.sh`（1 本の script。最後の行 `qemu-interop: PASS`）
+- `userland/base/ssh/sftp-server-main.c`
+- （Q3 で旧の scp を入れる時）`userland/base/ssh/scp-main.c`（protocol の扱いは Q1 の判断で design に足す）
+- `plan/ws336/tests/interop-host.sh` に scp・sftp を足す
 - この phase.md の「結果」の節、[ws.md](../ws.md) の表のこの行
 
 ## 3. 試験の項目
 
 期待の値は仕様の表・式・試験の vector と手の計算、`plan/ws336/tests/unit/wire.h` で組んだ bytes だけから作る。他の実装の出力を期待の値にしない（host の OpenSSH との相互運用は別の確かめで、期待の値の生成ではない）。
 
-- `SSH_CRYPTO_INCLUDE`・`SSH_CRYPTO_LIB` で libcrypto-compat の host の build を指し、`crypto-contract.sh` と `run-unit.sh all` と `interop-host.sh` が PASS
-- image の build（警告 0）と `plan/tools/boot-test.sh`
-- design §11.4 の全項目（root の sshd、鍵と password の login、scp、ControlMaster、`-tt`、re-key、guest の ssh から host の OpenSSH sshd と guest 自身へ、privsep の uid と root の確かめ）
-- aarch64・riscv64・armv7 の config で ssh・sshd の build（警告 0）
+- host の OpenSSH の scp（既定の SFTP mode）で 8 MiB の往復の cmp、`scp -r` の directory、`scp -p` の時刻と mode
+- `sftp -b` で ls・put・get・mkdir・rmdir・rename・rm・symlink（OpenSSH の順で正しい向きの link ができる）・readlink
+- 権限の無い file で PERMISSION_DENIED、無い file で NO_SUCH_FILE
+- 壊れた packet で落ちない（sftp-server を stdin に random な bytes で 1 万回起こす）
 
 ## 4. 注意
 
-- QEMU の console・serial の log で判定しない。起動しない・固まる時は gdbstub・QMP（AGENTS.md §9）。QEMU の名前・port・directory は Q1 の割当。
-- libcrypto-compat の host の build の作り方は WS335 の記録に従う。無ければ Q1 に返す。
+- handle は sftp-server の中の表の番号（4 bytes）。開ける数の上限を決めて結果に書く。
 - 他の実装（OpenSSH・libssh・Dropbear・PuTTY など）の code・comment・構造・名前を写さない。仕様の本文から書く。source の comment に開発の管理情報（WS・Phase・Queue・Bug の番号、plan/ への参照、日付）を書かない。
 
 ## 5. 変えてはいけない物
 
-全ての library の header、HAL・toolchain・共有の `build/`、OpenSSH の package（`userland/packages/network/openssh/`、この Phase では変えない）、既定の config（`config/ci/`、p020 まで変えない）、他の WS の file。header の不備は Q1 に返す。
+全ての header（`userland/base/ssh/*.h`）、library の module の .c、`plan/ws336/tests/` の道具（`run-unit.sh`・`check-skeleton.sh`・`crypto-contract.*`・`unit/check.h`・`unit/wire.h`・`host-crypto/`）、Makefile（この WS はまだ Makefile を置かない）、HAL・toolchain・共有の `build/`、他の WS の file。header の不備（足りない関数・誤った約束・矛盾）を見つけたら直さずに止め、どの header のどの関数で何が足りないかを Q1 に返す。header が黙っている所は自分で決め、この phase.md の「結果」に列挙する。phase.md と仕様が食い違えば仕様に従い、食い違いを報告する。
 
 ## 6. 確かめの command
 
-- `sh plan/ws336/tests/crypto-contract.sh`（libcrypto-compat で）
-- `sh plan/ws336/tests/qemu-interop.sh`
+- `sh plan/ws336/tests/interop-host.sh`
 - `sh plan/ws336/tests/run-unit.sh all`
 - `BASE=<header の基点> sh plan/ws336/tests/check-skeleton.sh`
 - `git diff --check`

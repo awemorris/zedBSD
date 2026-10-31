@@ -108,7 +108,9 @@ void ssh_buf_put_cstring(struct ssh_buf *buf, const char *text);
 /*
  * Reserves room for size bytes at the end, counts them as used, and
  * returns where they start, for a caller that fills them itself (an
- * encryption in place).  Returns NULL on a failure (recorded).
+ * encryption in place).  Returns NULL on a failure (recorded).  The
+ * pointer is valid only until the next call that writes to buf (a write
+ * may move the memory).
  */
 uint8_t *ssh_buf_put_space(struct ssh_buf *buf, size_t size);
 

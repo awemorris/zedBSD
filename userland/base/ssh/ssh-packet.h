@@ -125,9 +125,10 @@ int ssh_packet_next(struct ssh_packet *packet, struct ssh_buf *payload);
  * (setting wrapped as for receive), send.bytes and send.packets grow.
  *
  * size is 1 to SSH_PACKET_LIMIT - 255 - 1 (EINVAL otherwise; the first
- * payload byte is the message number).  Returns 0, EINVAL, EMSGSIZE (the
- * output would pass SSH_PACKET_OUTPUT_MAX), ENOMEM or EIO; on an error
- * nothing is appended.
+ * payload byte is the message number).  Returns 0, EINVAL, ENOBUFS (the
+ * output would pass SSH_PACKET_OUTPUT_MAX: write pending output and send
+ * again), ENOMEM or EIO; on an error nothing is appended and the sequence
+ * number is unchanged.
  */
 int ssh_packet_send(struct ssh_packet *packet, const uint8_t *payload, size_t size);
 
@@ -153,7 +154,7 @@ void ssh_packet_reset_seq(struct ssh_packet *packet, int send);
  * Appends size bytes to the output as they are, unframed (the
  * identification line of RFC 4253 4.2, sent before any packet).
  *
- * Returns 0, EMSGSIZE or ENOMEM.
+ * Returns 0, ENOBUFS or ENOMEM.
  */
 int ssh_packet_send_raw(struct ssh_packet *packet, const uint8_t *data, size_t size);
 

@@ -7,8 +7,13 @@
 #  4. when libcrypto-compat's headers are present (include/libc/compat/crypto/evp.h), ssh-crypto.c also compiles
 #     against them alone, so it uses nothing libcrypto-compat does not declare;
 #  5. no source names development records (a WS, Phase, Queue or Bug number, or plan/);
-#  6. with BASE=<commit>, the headers are unchanged since that commit (an implementation Phase must not change
-#     them; a header fault goes back to Q1).
+#  6. with BASE=<commit>, the library headers (ssh-*.h except the program-internal ssh-client-*.h, and sshd.h) are
+#     unchanged since that commit (an implementation Phase must not change them; a header fault goes back to Q1);
+#     program-internal headers (ssh-client-*.h, sshd-*.h) that the program Phases add are not frozen;
+#  7. every .c compiles for zedBSD (amd64) against zedBSD's own C library headers with the project's clang
+#     (build/llvm/bin/clang, --target=x86_64-unknown-zedbsd) and the sysroot of the main checkout's build
+#     (SSH_ZEDBSD_SYSROOT, default /home/awe/zedBSD-claude1/build/amd64/sysroot, used read-only), so a program does
+#     not drift onto host-only interfaces; skipped with a note when either is missing.
 #   sh plan/ws336/tests/check-skeleton.sh
 #   BASE=<sha> sh plan/ws336/tests/check-skeleton.sh
 # Last line: check-skeleton: PASS or check-skeleton: FAIL.  Output under build/tmp/ssh-skeleton.
@@ -70,11 +75,37 @@ if grep -n -E '\b(WS|ws)[0-9]{3}\b|\bq[0-9]{3,4}\b|BUG-[0-9]+|plan/' userland/ba
 fi
 
 if [ -n "${BASE:-}" ]; then
-	if ! git diff --quiet "$BASE" -- 'userland/base/ssh/*.h'; then
+	frozen=$(git ls-tree --name-only "$BASE" -- userland/base/ssh/ | grep -E '/(ssh-[a-z0-9-]+|sshd)\.h$' | grep -v '/ssh-client-')
+	if [ -z "$frozen" ]; then
+		echo "FAILED no headers at $BASE"
+		status=1
+	elif ! git diff --quiet "$BASE" -- $frozen; then
 		echo "FAILED headers changed since $BASE:"
-		git diff --stat "$BASE" -- 'userland/base/ssh/*.h'
+		git diff --stat "$BASE" -- $frozen
 		status=1
 	fi
+fi
+
+zedbsd_cc=build/llvm/bin/clang
+zedbsd_sysroot=${SSH_ZEDBSD_SYSROOT:-/home/awe/zedBSD-claude1/build/amd64/sysroot}
+if [ -x "$zedbsd_cc" ] && [ -d "$zedbsd_sysroot/usr/include" ]; then
+	for source in userland/base/ssh/*.c; do
+		extra=""
+		case "$source" in
+		*/ssh-crypto.c)
+			[ -d "$out/compat-root" ] || continue
+			extra="-I$out/compat-root" ;;
+		esac
+		if ! timeout 120 "$zedbsd_cc" --target=x86_64-unknown-zedbsd -nostdinc -I. -Iinclude \
+		    -isystem "$zedbsd_sysroot/usr/include" $extra -DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64 -DKERN_DYNAMIC_LIBC \
+		    -ffreestanding -fno-builtin -Wall -Wextra -Werror -fsyntax-only "$source" > "$out/zedbsd.log" 2>&1; then
+			echo "FAILED zedBSD headers $source"
+			grep error "$out/zedbsd.log" | head -10
+			status=1
+		fi
+	done
+else
+	echo "zedBSD toolchain or sysroot: not present (check 7 skipped)"
 fi
 
 if [ "$status" = 0 ]; then echo "check-skeleton: PASS"; else echo "check-skeleton: FAIL"; fi

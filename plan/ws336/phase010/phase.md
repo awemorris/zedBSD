@@ -35,7 +35,10 @@ WS335 の待ち: 無し
 - ttymodes: 既知の termios（cfmakeraw の後・既定）を put → apply で同じ flag と文字、opcode 160 で止まる、未知の 1〜159 を飛ばす、長さの途中で切れた引数で EINVAL かつ terminal が変わらない、1024 bytes を超えて EINVAL、速度 9600・38400・未知
 - channel: open_session → accept_open → open_reply の往復、11 個目で RESOURCE_SHORTAGE、session 以外の型・no_more_sessions で ADMINISTRATIVELY_PROHIBITED、data の window の消費と window の超過・SSH_CHANNEL_PACKET の超過で EPROTO、consumed による WINDOW_ADJUST の量、adjust で 2^32 を越えて EPROTO、EOF・CLOSE の二重で EPROTO、EOF の後の data で EPROTO、closed で slot が戻る
 - request の各型の parse（`wire.h` で組む）と put の往復、長さの上限 +1 で EINVAL、未知の request は SSH_CREQ_OTHER と name
-- global_request: keepalive@openssh.com が want_reply で REQUEST_FAILURE、no-more-sessions が印を立てる
+- global_request: keepalive@openssh.com が want_reply で REQUEST_FAILURE、no-more-sessions が印を立てる、hostkeys-00@openssh.com の後に key blob の string が 2 つ続く payload を EINVAL にせず want_reply FALSE で何も返さない、名前 100 bytes を切って読む
+- channel request: x11-req・auth-agent-req@openssh.com（余りの data 付き）・100 bytes の名前・上限 +1 の env の値・exec の command が SSH_CREQ_OTHER で 0 を返す
+- CLOSING: 自分が CLOSE を送った後の相手の data・EOF・window-change を読める（data は window から引く）
+- put_global_request の bytes
 - 乱数の入力
 
 ## 4. 注意

@@ -46,7 +46,7 @@ WS335 の待ち: **WS335 の libcrypto-compat の header の凍結（main に me
 
 ## 4. 注意
 
-- library の失敗（0 以下・NULL）は EIO（ssh-crypto.h の冒頭）。ただし ML-KEM の ek の取り込みの拒否と X25519 の全 0 の結果は EINVAL（相手の値の拒否）。derive の失敗が全 0 によるのか他の理由かは library から区別できないので、derive の失敗は EINVAL とする（header の約束どおり）。
+- library の失敗（0 以下・NULL）は EIO（ssh-crypto.h の冒頭）。ただし相手の値の拒否は EINVAL: ML-KEM の ek の取り込みの拒否、X25519 の相手の点の取り込みか derive の拒否、そして derive が通っても K_CL が全 0 の時（`ssh_ct_equal` で自分で確かめる。library に頼らない）。試験は derive が全 0 を返す偽の場合を作れないので、自前の確かめは p021 で libcrypto-compat に対しても流す。
 - K_CL は X25519 の出力の 32 bytes そのまま（draft §2.4。mpint にしない）。
 - `RAND_bytes` の引数は int なので、大きい size は INT_MAX 以下の塊に分ける。
 - host の OpenSSL で試験する（`run-unit.sh` の既定）。WS335 の実装が入った後の libcrypto-compat での試験は p019。

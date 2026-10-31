@@ -1,11 +1,11 @@
 <!-- awesome-plan project=zedbsd record=ws336-p016 -->
 
-# ws336-p016: sshd の program（listener・monitor・pre-auth・session・login）と相互運用（相手 B）
+# ws336-p016: sshd の monitor と login の確かめ（sshd-monitor.c・sshd-login.c）
 
 Status: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner（Opus）
-依存: p008・p009・p010・p011・p012・p014・p015
+依存: p009・p011・p012・p014
 WS335 の待ち: p003 経由
 
 ## 1. 読む物
@@ -15,34 +15,33 @@ WS335 の待ち: p003 経由
 - `plan/guardrail.md` の「MIT・GPL の出典のデータの引用」と「source の中の開発の管理情報」
 - `docs/agent/spec-module-delegation.md` の §5.3（実装の担当が守ること）と §7（出典と license）
 - `userland/base/ssh/ssh-common.h` の冒頭の約束（誤りの値・信用できない入力・秘密・ANSI C）
-- `userland/base/ssh/sshd.h`・`ssh-privsep.h`（monitor の約束）
-- `plan/ws336/design.md` §6.2・§6.4・§8・§9
+- `userland/base/ssh/sshd.h`・`ssh-privsep.h`（monitor の約束、受け入れた危険）
+- `plan/ws336/design.md` §6.2・§8・§9
 - `userland/base/login/verify.c`・`main.c`（login の確かめと utmpx の書き方）
-- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/openssh-10.5p1-sshd.8`（SHA-256 `74dde0667a4c99e6…`、全桁は同じ directory の SHA256SUMS）: LOGIN PROCESS・AUTHORIZED_KEYS（StrictModes）
-- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/rfc4254.txt`（SHA-256 `bfc727e9350067ea…`、全桁は同じ directory の SHA256SUMS）: §6（session）
-- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/openssh-10.5p1-sshd_config.5`（SHA-256 `c6ff3f09207fc448…`、全桁は同じ directory の SHA256SUMS）: 使う keyword
+- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/openssh-10.5p1-sshd.8`（SHA-256 `74dde0667a4c99e6…`、全桁は同じ directory の SHA256SUMS）: AUTHORIZED_KEYS FILE FORMAT と StrictModes
+- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/rfc4252.txt`（SHA-256 `a36b882cf77b1073…`、全桁は同じ directory の SHA256SUMS）: §7（署名される data）
 - `plan/ws336/design.md` の §1（出典の扱い）・§5（module）・§8（安全）
 
 ## 2. 作る物
 
-- `userland/base/ssh/sshd-main.c`・`sshd-monitor.c`・`sshd-preauth.c`・`sshd-session.c`・`sshd-login.c`（必要なら `sshd-*.{h,c}` を足してよい。sshd.h の宣言は変えない）
-- `plan/ws336/tests/interop-host.sh` に相手 B と自前どうしを足す
+- `userland/base/ssh/sshd-monitor.c`・`sshd-login.c`（必要なら monitor の内部の関数を出す `sshd-monitor.h` を足してよい。sshd.h の宣言は変えない）
+- `plan/ws336/tests/unit/test-monitor.c`（` * run-unit-sources:` の行で `userland/base/ssh/sshd-monitor.c`・`sshd-login.c` と `userland/base/login/verify.c` を名指す。shadow を読む所は host では root が要るので、試験は password の道を crypt の呼び出しの回数と時間で確かめ、実の shadow での確かめは p022）
 - この phase.md の「結果」の節、[ws.md](../ws.md) の表のこの行
 
 ## 3. 試験の項目
 
 期待の値は仕様の表・式・試験の vector と手の計算、`plan/ws336/tests/unit/wire.h` で組んだ bytes だけから作る。他の実装の出力を期待の値にしない（host の OpenSSH との相互運用は別の確かめで、期待の値の生成ではない）。
 
-- design §11.3 の相手 B の全項目（host の OpenSSH の ssh からの exec・`-tt`・ControlMaster 3 session・PQ の警告が出ない・KexAlgorithms と Ciphers の拒否の後も sshd が生きる）
-- 自前の ssh → 自前の sshd
-- root でない mode の範囲（他の user を拒む、password を拒む）
-- privsep の部分は host では root が要るので p019 の QEMU で確かめる。host では monitor の request の確かめを unit 風の試験（`plan/ws336/tests/unit/test-monitor.c` を足してよい、sshd-monitor.c の内部の関数を static でなく sshd 内部の header に出す）で確かめる: 署名 data の user・session id・blob の不一致の拒否、試行回数、AUTH_DONE の前の SESSION 系の拒否
+- monitor の request の確かめを、乗っ取られた子を模した request の列で: 署名 data の session id・user・service・method・algorithm・blob の各 1 つの不一致、末尾の余り、AUTH_DONE の前の SESSION 系、2 回目の AUTH_DONE、SSHD_PREAUTH_SIGN_MAX +1 回目の SIGN、長さ 31・33 の h、PASSWORD_LOGIN の後の PUBKEY_LOGIN の試行回数の合計（MaxAuthTries）
+- SIGN の間隔: session の段で続けての SIGN が SSHD_SIGN_INTERVAL_MS 待たされる
+- 時間: 応答の時刻が要求から SSHD_FAIL_DELAY_MS 以上後（clock_gettime で測る）、存在しない user でも crypt が走る（呼ばれた回数を試験で数える）
+- authorized_keys の子: FIFO・device・symlink・group 書き込み可の file・directory を拒み、user の uid で読む（host の試験では自分の uid で、他の user の file を置けない場合は理由を結果に書く）
+- login_record: /dev/pts 以外・他の user の tty を拒む
 
 ## 4. 注意
 
-- 環境変数は LANG・LC_*・TERM だけを受ける。子の環境は login と同じ（HOME・USER・LOGNAME・PATH・SHELL）に TERM・SSH_CONNECTION・SSH_TTY を足す。
-- 失敗の応答の固定の遅れ（SSHD_FAIL_DELAY_MS）は monitor が持つ。存在しない user も同じ。
-- pre-auth の process は chroot の前に必要な物（/dev/null など）を開いておく。
+- monitor の子は fork と execve（sshd.h）。この Phase の試験は host で root なしに流すので、execve と chroot を通る道は p017・p018 と p022 で確かめる。
+- 環境変数は LANG・LC_*・TERM だけを受ける（session の process の仕事だが、monitor から CONFIG で渡す値に入れない事をここで決める）。
 - 他の実装（OpenSSH・libssh・Dropbear・PuTTY など）の code・comment・構造・名前を写さない。仕様の本文から書く。source の comment に開発の管理情報（WS・Phase・Queue・Bug の番号、plan/ への参照、日付）を書かない。
 
 ## 5. 変えてはいけない物
@@ -51,7 +50,7 @@ WS335 の待ち: p003 経由
 
 ## 6. 確かめの command
 
-- `sh plan/ws336/tests/interop-host.sh`
+- `sh plan/ws336/tests/run-unit.sh monitor`
 - `sh plan/ws336/tests/run-unit.sh all`
 - `BASE=<header の基点> sh plan/ws336/tests/check-skeleton.sh`
 - `git diff --check`

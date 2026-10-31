@@ -27,8 +27,11 @@
 #define WIRE_UNUSED
 #endif
 
-/* The room of one wire buffer: enough for a KEXINIT, a hybrid reply, a key file. */
-#define WIRE_MAX	65536U
+/*
+ * The room of one wire buffer: a packet at the 256 KiB limit and a little
+ * more.  A struct wire is large: tests declare it static, not on the stack.
+ */
+#define WIRE_MAX	(256U * 1024U + 4096U)
 
 /* One message being built: size bytes used of data; overflow 1 after a write that did not fit. */
 struct wire {
@@ -96,6 +99,27 @@ wire_u32(
 
 	/* Appends them. */
 	wire_bytes(wire, bytes, 4);
+}
+
+/* Appends a 64-bit big-endian integer (RFC 4251 5, uint64). */
+WIRE_UNUSED static void
+wire_u64(
+	struct wire *wire,
+	uint64_t value)
+{
+	/* The high half, then the low half. */
+	wire_u32(wire, (uint32_t)(value >> 32));
+	wire_u32(wire, (uint32_t)(value & 0xffffffffU));
+}
+
+/* Appends a boolean (RFC 4251 5) as the byte given, so tests can also write values other than 0 and 1. */
+WIRE_UNUSED static void
+wire_bool(
+	struct wire *wire,
+	unsigned value)
+{
+	/* One byte. */
+	wire_u8(wire, value);
 }
 
 /* Appends a string (RFC 4251 5): the uint32 length, then the bytes. */

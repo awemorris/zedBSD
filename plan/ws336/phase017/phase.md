@@ -1,12 +1,12 @@
 <!-- awesome-plan project=zedbsd record=ws336-p017 -->
 
-# ws336-p017: sftp-server の program（と Q3 次第で旧の scp の受け手）
+# ws336-p017: sshd の pre-auth と session の process（sshd-preauth.c・sshd-session.c）
 
 Status: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
-担当（推し）: phase-runner-low（Sonnet 5.5 high）
-依存: p013・p016
-WS335 の待ち: 無し。**Q3 の答え次第**（sftp を入れない時は canceled）
+担当（推し）: phase-runner（Opus）
+依存: p008・p010・p016
+WS335 の待ち: p003 経由
 
 ## 1. 読む物
 
@@ -15,40 +15,40 @@ WS335 の待ち: 無し。**Q3 の答え次第**（sftp を入れない時は ca
 - `plan/guardrail.md` の「MIT・GPL の出典のデータの引用」と「source の中の開発の管理情報」
 - `docs/agent/spec-module-delegation.md` の §5.3（実装の担当が守ること）と §7（出典と license）
 - `userland/base/ssh/ssh-common.h` の冒頭の約束（誤りの値・信用できない入力・秘密・ANSI C）
-- `userland/base/ssh/ssh-sftp.h`
-- `plan/ws336/design.md` §4.2・§11.3
-- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/draft-ietf-secsh-filexfer-02.txt`（SHA-256 `3f69664d8050a28a…`、全桁は同じ directory の SHA256SUMS）: §6・§7
-- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/openssh-10.5p1-scp.1`（SHA-256 `32966f40938f813b…`、全桁は同じ directory の SHA256SUMS）: SFTP mode と -O
+- `userland/base/ssh/sshd.h`（process・descriptor・root なしの mode）
+- `plan/ws336/design.md` §6.2・§6.4・§8
+- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/rfc4254.txt`（SHA-256 `bfc727e9350067ea…`、全桁は同じ directory の SHA256SUMS）: §6（session: pty-req・env・shell・exec・subsystem・window-change・signal・exit-status・exit-signal）
+- `/home/awe/zedBSD-claude1/build/sources/specs/ssh/openssh-10.5p1-sshd.8`（SHA-256 `74dde0667a4c99e6…`、全桁は同じ directory の SHA256SUMS）: LOGIN PROCESS（子の環境）
 - `plan/ws336/design.md` の §1（出典の扱い）・§5（module）・§8（安全）
 
 ## 2. 作る物
 
-- `userland/base/ssh/sftp-server-main.c`
-- （Q3 で旧の scp を入れる時）`userland/base/ssh/scp-main.c` と、その protocol の扱いを design に足す Q1 の判断
-- `plan/ws336/tests/interop-host.sh` に scp・sftp を足す
+- `userland/base/ssh/sshd-preauth.c`・`sshd-session.c`（必要なら `sshd-*.{h,c}` を足してよい）
+- 試験の道具: `plan/ws336/tests/sshd-pair-host.sh`（host で root なしに monitor・pre-auth・session の 3 つの process を自前の ssh とつなぎ、AUTH_DONE・export・import・SESSION_START・LOGIN_RECORD を通す 1 本の script。最後の行 `sshd-pair-host: PASS`）
 - この phase.md の「結果」の節、[ws.md](../ws.md) の表のこの行
 
 ## 3. 試験の項目
 
 期待の値は仕様の表・式・試験の vector と手の計算、`plan/ws336/tests/unit/wire.h` で組んだ bytes だけから作る。他の実装の出力を期待の値にしない（host の OpenSSH との相互運用は別の確かめで、期待の値の生成ではない）。
 
-- host の OpenSSH の scp（既定の SFTP mode）で 8 MiB の往復の cmp、`scp -r` の directory、`scp -p` の時刻と mode
-- `sftp -b` で ls・put・get・mkdir・rmdir・rename・rm・symlink・readlink
-- 権限の無い file で PERMISSION_DENIED、無い file で NO_SUCH_FILE
-- 壊れた packet で落ちない（unit の乱数の入力に加え、sftp-server を stdin に random な bytes で 1 万回起こす）
+- pre-auth: CONFIG を受け、crypto を 1 回ずつ使ってから（root の時は）chroot と setresuid、`closefrom(SSHD_FD_MONITOR + 1)`、USERAUTH_SUCCESS を書き切ってから AUTH_DONE
+- session: SESSION_START の後に ids（root の時）、import、shell・exec・subsystem、pty を自分で開く、環境は LANG・LC_*・TERM だけを受ける、exit-status と exit-signal、子の出力を全部送ってから EOF と CLOSE、CLOSING の channel の request に FAILURE
+- descriptor: shell・command の子に monitor の socket が無い（子で `ls -l /proc/self/fd` 相当、または fcntl で確かめる）
+- re-key の SIGN が monitor を通る（相手 OpenSSH の `RekeyLimit` で）
 
 ## 4. 注意
 
-- handle は sftp-server の中の表の番号（4 bytes）。開ける数の上限を持つ（OpenSSH の既定に倣わず自分で決めて結果に書く）。
+- root でない mode でも 3 つの process と socketpair を使う（sshd.h）。
+- pty は session の process が user の uid で開く（kernel が持ち主を ruid にする、design §2.3）。
 - 他の実装（OpenSSH・libssh・Dropbear・PuTTY など）の code・comment・構造・名前を写さない。仕様の本文から書く。source の comment に開発の管理情報（WS・Phase・Queue・Bug の番号、plan/ への参照、日付）を書かない。
 
 ## 5. 変えてはいけない物
 
-全ての header（`userland/base/ssh/*.h`）、library の module の .c、`plan/ws336/tests/` の道具（`run-unit.sh`・`check-skeleton.sh`・`crypto-contract.*`・`unit/check.h`・`unit/wire.h`・`host-crypto/`）、Makefile（この WS はまだ Makefile を置かない）、HAL・toolchain・共有の `build/`、他の WS の file。header の不備（足りない関数・誤った約束・矛盾）を見つけたら直さずに止め、どの header のどの関数で何が足りないかを Q1 に返す。header が黙っている所は自分で決め、この phase.md の「結果」に列挙する。phase.md と仕様が食い違えば仕様に従い、食い違いを報告する。
+全ての header（`userland/base/ssh/*.h`）、library の module の .c（ssh-*.c）、`plan/ws336/tests/` の道具（`run-unit.sh`・`check-skeleton.sh`・`crypto-contract.*`・`unit/check.h`・`unit/wire.h`・`host-crypto/`）、Makefile（この WS はまだ Makefile を置かない）、HAL・toolchain・共有の `build/`、他の WS の file。header の不備（足りない関数・誤った約束・矛盾）を見つけたら直さずに止め、どの header のどの関数で何が足りないかを Q1 に返す。header が黙っている所は自分で決め、この phase.md の「結果」に列挙する。phase.md と仕様が食い違えば仕様に従い、食い違いを報告する。
 
 ## 6. 確かめの command
 
-- `sh plan/ws336/tests/interop-host.sh`
+- `sh plan/ws336/tests/sshd-pair-host.sh`
 - `sh plan/ws336/tests/run-unit.sh all`
 - `BASE=<header の基点> sh plan/ws336/tests/check-skeleton.sh`
 - `git diff --check`

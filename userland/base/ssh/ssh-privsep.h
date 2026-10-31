@@ -22,36 +22,63 @@
  *
  * The frame: uint32 length (of what follows), byte type, then the body
  * in RFC 4251 types.  A frame longer than SSH_MON_FRAME_MAX, or
- * SSH_MON_STATE_MAX for the one that carries the exported transport, is
+ * SSH_MON_STATE_MAX for the two that carry the exported transport
+ * (AUTH_DONE, SESSION_START) and for CONFIG (which carries a whole
+ * configuration file), is
  * refused.
+ *
+ * Messages from the monitor that start a child (sent first, without a
+ * request):
+ *
+ *   CONFIG          string sshd_config text (the file as the listener read
+ *                   it; the child parses it with sshd_config_parse),
+ *                   string host key blob, string peer, uint32 privileged
+ *   SESSION_START   string user, string exported transport (to the
+ *                   session process only, after CONFIG)
  *
  * Requests (pre-authentication process to monitor) and their replies:
  *
  *   SIGN            string h (32 bytes)            -> SIGNATURE string blob
- *                   (the first h signed becomes the session identifier
- *                   the monitor keeps; at most one per key exchange)
- *   HOST_KEY        (empty)                        -> HOST_KEY string blob
+ *                   (the first h signed becomes the session identifier the
+ *                   monitor keeps; at most SSHD_PREAUTH_SIGN_MAX in all)
  *   PUBKEY_QUERY    string user, string key blob   -> RESULT uint32 0 or
  *                   (is this key in the user's authorized_keys?) EACCES
  *   PUBKEY_LOGIN    string user, string key blob, string signed data,
  *                   string signature blob          -> RESULT
- *                   (the monitor checks that the signed data begins with
- *                   its session identifier and names this user, the
- *                   connection service, "publickey" and this key, that the
- *                   key is authorized, and the signature)
+ *                   (the monitor reads the signed data itself and checks
+ *                   that it is its session identifier as a string, then
+ *                   SSH_MSG_USERAUTH_REQUEST, this user, "ssh-connection",
+ *                   "publickey", TRUE, "ssh-ed25519" and this key blob,
+ *                   and nothing after; that the key is authorized; and the
+ *                   signature)
  *   PASSWORD_LOGIN  string user, string password   -> RESULT
  *   AUTH_DONE       string exported transport      -> (no reply; the
  *                   pre-authentication process exits, the monitor starts
- *                   the session process)
+ *                   the session process; allowed only after a RESULT 0 of
+ *                   a login, and only once)
  *
  * Requests (session process to monitor):
  *
- *   SIGN            as above (a re-exchange), only an h of 32 bytes,
- *                   counted against a limit per hour
+ *   SIGN            as above (a re-exchange): only an h of 32 bytes, at
+ *                   most one per SSHD_SIGN_INTERVAL_MS (a sooner request
+ *                   waits)
  *   LOGIN_RECORD    string tty path, uint32 pid    -> RESULT (the monitor
- *                   checks that the tty is owned by the user and writes the
- *                   USER_PROCESS record)
- *   LOGOUT_RECORD   string tty path, uint32 pid    -> RESULT (DEAD_PROCESS)
+ *                   checks that the tty is a /dev/pts path owned by the
+ *                   user and that pid is a child of the session process it
+ *                   started, then writes the USER_PROCESS record)
+ *   LOGOUT_RECORD   string tty path, uint32 pid    -> RESULT (DEAD_PROCESS;
+ *                   only for a record this session wrote)
+ *
+ * A request of a type not listed for the process's stage, or out of order,
+ * ends the connection (the monitor kills the child and exits).
+ *
+ * Accepted risk: the session identifier is whatever h the pre-
+ * authentication process asks to sign first.  A compromised pre-
+ * authentication process working with a man in the middle could have the
+ * monitor sign an exchange hash of another connection and relay a
+ * victim's login; the monitor cannot see the exchange it did not take
+ * part in.  OpenSSH's monitor has the same limit.  The bound on the number
+ * of signatures keeps the process from being a signing service.
  *
  * RESULT 0 means granted; EACCES refused; another value a failure.  A
  * refused login does not say why (the log does).
@@ -73,14 +100,15 @@
 enum ssh_mon_type {
 	SSH_MON_SIGN = 1,
 	SSH_MON_SIGNATURE = 2,
-	SSH_MON_HOST_KEY = 3,
-	SSH_MON_PUBKEY_QUERY = 4,
-	SSH_MON_PUBKEY_LOGIN = 5,
-	SSH_MON_PASSWORD_LOGIN = 6,
-	SSH_MON_AUTH_DONE = 7,
-	SSH_MON_LOGIN_RECORD = 8,
-	SSH_MON_LOGOUT_RECORD = 9,
-	SSH_MON_RESULT = 10
+	SSH_MON_PUBKEY_QUERY = 3,
+	SSH_MON_PUBKEY_LOGIN = 4,
+	SSH_MON_PASSWORD_LOGIN = 5,
+	SSH_MON_AUTH_DONE = 6,
+	SSH_MON_LOGIN_RECORD = 7,
+	SSH_MON_LOGOUT_RECORD = 8,
+	SSH_MON_RESULT = 9,
+	SSH_MON_CONFIG = 10,
+	SSH_MON_SESSION_START = 11
 };
 
 /*
@@ -93,8 +121,10 @@ int ssh_mon_put_frame(enum ssh_mon_type type, const uint8_t *body, size_t size, 
 /*
  * Takes one whole frame from the front of input (bytes read from the
  * socketpair): *type and the body (copied into body, which the caller
- * reset; secret when the type carries a secret).  A length over the limit
- * of the type, a type outside the enumeration, or a length of 0 is
+ * reset).  The caller always passes a secret body buffer: PASSWORD_LOGIN,
+ * AUTH_DONE and SESSION_START carry secrets, and the type is not known
+ * until the frame is read.  A length over the limit of the type, a type
+ * outside the enumeration, or a length of 0 is
  * EINVAL.  Returns 0, EAGAIN (incomplete), EINVAL or ENOMEM.
  */
 int ssh_mon_next_frame(struct ssh_buf *input, enum ssh_mon_type *type, struct ssh_buf *body);

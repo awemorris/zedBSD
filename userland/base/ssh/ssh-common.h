@@ -56,7 +56,9 @@
  *              that is not offered.
  *   EMSGSIZE   A packet, a line or a field is longer than the limit
  *              below allows.
- *   ENOBUFS    A buffer the caller sized is too small.
+ *   ENOBUFS    A buffer the caller sized is too small, or an output
+ *              queue is full (back-pressure: write pending output, then
+ *              try again; not an error of the connection).
  *   ENOMEM     An allocation failed.
  *   EOVERFLOW  A counter or a window would wrap.
  *   EAGAIN     More input is needed before anything can be returned.

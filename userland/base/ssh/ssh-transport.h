@@ -34,9 +34,13 @@
  * receiving it, the receiving direction does; with strict key exchange
  * each direction's sequence number is set to 0 at that point (3.3).  The
  * H of the first exchange is the session identifier (7.2) and never
- * changes.  While an exchange this side started is in progress, upper-
- * layer messages given to ssh_transport_send are held and sent after this
- * side's NEWKEYS (RFC 4253 7.1 forbids sending them in between).
+ * changes.  From the moment this side sends KEXINIT until it sends
+ * NEWKEYS, in every exchange whoever started it, upper-layer messages
+ * given to ssh_transport_send are held and sent after this side's NEWKEYS
+ * in order (RFC 4253 7.1 forbids sending them in between).  Upper-layer
+ * messages the peer sends before its own KEXINIT are delivered; after its
+ * KEXINIT and before its NEWKEYS they are a protocol error (answered with
+ * UNIMPLEMENTED and dropped, as below).
  *
  * Strict key exchange (required, ssh-kex.h): until the initial exchange
  * has ended, the first received packet must be KEXINIT, and only KEXINIT,
@@ -83,6 +87,9 @@
 #define SSH_TRANSPORT_REKEY_BYTES	(1024UL * 1024UL * 1024UL)
 #define SSH_TRANSPORT_REKEY_PACKETS	0x10000000UL
 #define SSH_TRANSPORT_REKEY_SECONDS	3600U
+
+/* The most bytes of upper-layer payloads held during an exchange (with their length fields). */
+#define SSH_TRANSPORT_HELD_MAX	(4U * 1024U * 1024U)
 
 /* The longest description kept from a peer's SSH_MSG_DISCONNECT. */
 #define SSH_TRANSPORT_REASON_MAX	256U
@@ -195,9 +202,12 @@ int ssh_transport_input(struct ssh_transport *transport, const uint8_t *data, si
  * SSH_VERSION_PRELUDE_LINES other lines, SSH_VERSION_PRELUDE_BYTES in
  * all; the line must start with "SSH-2.0-" or "SSH-1.99-", else the
  * connection ends with EPROTO; a server takes no other line), the key
- * exchange messages, IGNORE, DEBUG and UNIMPLEMENTED (dropped), and
- * DISCONNECT (state CLOSED, reason_code and reason kept, returns
- * ECONNABORTED).  A message number outside every layer (8 to 19, 22 to
+ * exchange messages, IGNORE, DEBUG, UNIMPLEMENTED and EXT_INFO
+ * (dropped; these programs do not ask for EXT_INFO), and DISCONNECT (state
+ * CLOSED, reason_code and reason kept, returns ECONNABORTED).  A key
+ * exchange message (21, 30 to 49) that does not fit the step of the
+ * exchange in progress, or arrives with no exchange in progress, is
+ * EPROTO.  A message number outside every layer (8 to 19, 22 to
  * 29, 50 or more while a key exchange of the peer is in progress, 128 to
  * 191) is answered with SSH_MSG_UNIMPLEMENTED carrying its sequence
  * number (RFC 4253 11.4) and dropped; inside an initial strict exchange it
@@ -217,8 +227,12 @@ int ssh_transport_next(struct ssh_transport *transport, struct ssh_buf *payload)
  * above).  While this side's exchange is in progress it is held and sent
  * after this side's NEWKEYS, in order.
  *
- * Returns 0, EINVAL (empty, or a number the transport owns), EPIPE (state
- * CLOSED), EMSGSIZE, ENOMEM or EIO.
+ * Returns 0; EINVAL (empty, a number the transport owns, or a payload
+ * longer than ssh_packet_send takes: a caller's mistake); ENOBUFS when the
+ * output (SSH_PACKET_OUTPUT_MAX) or the held messages
+ * (SSH_TRANSPORT_HELD_MAX) are full: nothing is queued, and the caller
+ * sends again after writing pending output (back-pressure, not an error of
+ * the connection); EPIPE (state CLOSED); ENOMEM or EIO.
  */
 int ssh_transport_send(struct ssh_transport *transport, const uint8_t *payload, size_t size);
 

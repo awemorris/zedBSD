@@ -15,18 +15,13 @@
 #include "sshd.h"
 
 /*
- * Runs the pre-authentication process: the transport and the user
- * authentication on client, asking the monitor on monitor.
+ * Runs the pre-authentication process (sshd started with
+ * SSHD_EXEC_PREAUTH): reads the settings from the monitor, warms the
+ * crypto up, confines itself, then runs the transport and the user
+ * authentication.
  */
 void
-sshd_preauth_run(
-	const struct sshd_context *context,
-	int client,
-	int monitor)
+sshd_preauth_run(void)
 {
-	/* Marks the arguments used until the function is implemented. */
-	(void)context;
-	(void)client;
-	(void)monitor;
 }
 

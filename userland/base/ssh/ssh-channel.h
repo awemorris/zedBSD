@@ -25,6 +25,23 @@
  * exit-status, exit-signal, eow@openssh.com; any other is read as
  * SSH_CREQ_OTHER (failed when a reply is wanted).
  *
+ * Requests that are refused are read only as far as their name and
+ * want_reply, and the rest of the payload is not looked at: an unknown or
+ * refused global request or channel request may carry any data (OpenSSH's
+ * server sends hostkeys-00@openssh.com with key blobs after the login; a
+ * client run with -X or -A sends x11-req or auth-agent-req@openssh.com).
+ * A request name longer than its field is read as SSH_CREQ_OTHER with
+ * the name cut, not as an error, and a known request whose string is
+ * longer than its limit below is read as SSH_CREQ_OTHER too, so the
+ * program fails that request and keeps the connection.  EINVAL is kept for
+ * a payload too short for the recipient, the name and want_reply, or for
+ * the fields of a known request that run past the end.
+ *
+ * Closing (RFC 4254 5.3): after this side sends CLOSE, the peer may still
+ * send data, EOF and requests until its own CLOSE crosses ours.  They are
+ * read normally on a CLOSING channel (data still takes from the window),
+ * and the program drops them and answers a wanted reply with FAILURE.
+ *
  * Windows (RFC 4254 5.2): local_window is what the peer may still send
  * here, remote_window what this side may still send.  Data beyond the
  * local window or longer than the announced maximum packet is a protocol
@@ -220,10 +237,10 @@ struct ssh_channel *ssh_channel_find(struct ssh_channels *channels, uint32_t id)
 /*
  * Reads CHANNEL_DATA or CHANNEL_EXTENDED_DATA: *channel, *data and *size
  * (pointing into the payload) and *extended (0 for data, else the type).
- * The size is taken from the channel's local window.  An unknown
- * recipient, data after the peer's EOF or CLOSE, data beyond the window
- * or longer than SSH_CHANNEL_PACKET is EPROTO.  Returns 0, EINVAL or
- * EPROTO.
+ * The size is taken from the channel's local window (also when CLOSING,
+ * where the program drops the data).  An unknown recipient, data after the
+ * peer's EOF or CLOSE, data beyond the window or longer than
+ * SSH_CHANNEL_PACKET is EPROTO.  Returns 0, EINVAL or EPROTO.
  */
 int ssh_channel_parse_data(struct ssh_channels *channels, const uint8_t *payload, size_t size, struct ssh_channel **channel, const uint8_t **data, size_t *data_size, uint32_t *extended);
 
@@ -275,9 +292,10 @@ void ssh_channel_put_close(struct ssh_channel *channel, struct ssh_buf *out);
 int ssh_channel_closed(struct ssh_channels *channels, struct ssh_channel *channel);
 
 /*
- * Reads a CHANNEL_REQUEST into request (the channel must be OPEN; an
- * unknown recipient is EPROTO).  A malformed request, or a string longer
- * than its limit above, is EINVAL.  Returns 0, EINVAL or EPROTO.
+ * Reads a CHANNEL_REQUEST into request (the channel must be OPEN or
+ * CLOSING; another recipient is EPROTO).  Malformed framing is EINVAL; a
+ * refused, unknown or over-long request is read as described at the top
+ * (SSH_CREQ_OTHER).  Returns 0, EINVAL or EPROTO.
  */
 int ssh_channel_parse_request(struct ssh_channels *channels, const uint8_t *payload, size_t size, struct ssh_channel_request *request);
 
@@ -323,15 +341,24 @@ void ssh_channel_put_exit_status(const struct ssh_channel *channel, uint32_t sta
 void ssh_channel_put_exit_signal(const struct ssh_channel *channel, const char *name, int core_dumped, struct ssh_buf *out);
 
 /*
- * Reads a GLOBAL_REQUEST: name (capacity SSH_NAME_MAX + 1) and
- * *want_reply.  Sets channels->no_more_sessions for
- * no-more-sessions@openssh.com.  When a reply is wanted, appends
- * REQUEST_FAILURE (every global request is refused) to out.  Returns 0,
- * EINVAL or the error recorded in out.
+ * Reads a GLOBAL_REQUEST: name (capacity SSH_NAME_MAX + 1; a longer name
+ * is cut) and *want_reply; the data after them is not read (see the top).
+ * Sets channels->no_more_sessions for no-more-sessions@openssh.com.
+ * When a reply is wanted, appends REQUEST_FAILURE (every global request is
+ * refused) to out.  Returns 0, EINVAL (a payload too short for the name
+ * and want_reply) or the error recorded in out.
  */
 int ssh_channel_global_request(struct ssh_channels *channels, const uint8_t *payload, size_t size, char *name, int *want_reply, struct ssh_buf *out);
 
 /* Appends the client's GLOBAL_REQUEST "no-more-sessions@openssh.com", want_reply FALSE. */
 void ssh_channel_put_no_more_sessions(struct ssh_buf *out);
+
+/*
+ * Appends a GLOBAL_REQUEST with name and want_reply and no data (the
+ * keepalive@openssh.com of ServerAliveInterval and ClientAliveInterval,
+ * want_reply TRUE: the peer's REQUEST_SUCCESS or REQUEST_FAILURE shows it
+ * is alive).
+ */
+void ssh_channel_put_global_request(const char *name, int want_reply, struct ssh_buf *out);
 
 #endif

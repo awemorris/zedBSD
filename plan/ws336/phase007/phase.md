@@ -33,7 +33,7 @@ WS335 の待ち: p003 経由
 期待の値は仕様の表・式・試験の vector と手の計算、`plan/ws336/tests/unit/wire.h` で組んだ bytes だけから作る。他の実装の出力を期待の値にしない（host の OpenSSH との相互運用は別の確かめで、期待の値の生成ではない）。
 
 - kexinit_put: server・client、initial 0・1 の各一覧を `wire.h` で組んだ期待の bytes（cookie の 16 bytes は除いて）と比べる
-- kexinit_parse: OpenSSH 10.5 の既定の一覧（myproposal.h の名前の並びを試験の中に文字で書く。他の実装の出力ではなく公開の名前の一覧）を含む KEXINIT を読む、一覧の誤り・余りの bytes・短い payload
+- kexinit_parse: OpenSSH 10.5 の既定の一覧（`openssh-10.5p1-ssh_config.5` の KexAlgorithms・HostKeyAlgorithms・Ciphers・MACs の既定の値の節に書かれた名前の並びを試験の中に文字で書く。OpenSSH の source は読まない）を含む KEXINIT を読む、一覧の誤り・余りの bytes・短い payload
 - choose: 相手に名前が無い各種類で ENOTSUP と kind、strict の印の 4 通り（標準・旧・両方・無し）、initial 0 では印を見ない、first_kex_packet_follows の当たり・外れ（ignore_next）
 - hybrid の message の put・parse の往復と誤り
 - hash: 試験の中で `wire.h` で H の入力を組んで `ssh_sha256` した値と一致（各欄の string の符号）

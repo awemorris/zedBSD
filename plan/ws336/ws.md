@@ -5,7 +5,7 @@
 - Master: [plan/master.md](../master.md)（2026-11-01 作成）。Primary Milestone: MG005。
 - Status: planning（2026-11-01 01:56 新設、P5 が p001 の設計を q1791 で始めた）
 - 目標: OpenSSH（`userland/packages/network/openssh`）を置き換える、zedBSD の自前の sshd と ssh を作る。OpenSSH の sshd と自前の sshd の両方に接続でき、
-  OpenSSH の ssh から自前の sshd に接続できる。暗号の部品は [WS335](../ws335/ws.md)（libssl-compat）の内部の口を使う。
+  OpenSSH の ssh から自前の sshd に接続できる。暗号の部品は [WS335](../ws335/ws.md) の libcrypto-compat（OpenSSL 3.5 互換の API）を使う（下の決定 4）。
 - 進め方: 標準廉価実装手順（[docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)）。設計を終えてから実装に入る。WS335 と並べて進め、
   WS335 の暗号の module の口に依る所は待ち合わせる（WS335 の設計の凍結を待ってから、その header を使う実装の Phase を始める）。
 
@@ -45,9 +45,13 @@
 | [p013](phase013/phase.md) | ssh-sftp（Q3 次第） | planned | p002 | — |
 | [p014](phase014/phase.md) | ssh-keygen の program | planned | p006 | p003 経由 |
 | [p015](phase015/phase.md) | ssh の program・host の相互運用 A（Opus） | planned | p006・p008・p009・p010・p011 | p003 経由 |
-| [p016](phase016/phase.md) | sshd の program・相互運用 B（Opus） | planned | p008・p009・p010・p011・p012・p014・p015 | p003 経由 |
-| [p017](phase017/phase.md) | sftp-server の program（Q3 次第） | planned | p013・p016 | — |
-| [p018](phase018/phase.md) | 敵対的な入力と privsep の見直し（Opus） | planned | p016・p017 | — |
-| [p019](phase019/phase.md) | image への組み込み・libcrypto-compat での確かめ・QEMU（Opus） | planned | p018 | **WS335 実装** |
-| [p020](phase020/phase.md) | OpenSSH からの入れ替え（Opus、Q6） | planned | p019 | **WS335 実装** |
-| [p021](phase021/phase.md) | 規約の全文の見直し（conformance-reviewer） | planned | p020 | — |
+| [p016](phase016/phase.md) | sshd の monitor と login の確かめ（Opus） | planned | p009・p011・p012・p014 | p003 経由 |
+| [p017](phase017/phase.md) | sshd の pre-auth と session の process（Opus） | planned | p008・p010・p016 | p003 経由 |
+| [p018](phase018/phase.md) | sshd の listener・相互運用 B（Opus） | planned | p015・p017 | p003 経由 |
+| [p019](phase019/phase.md) | sftp-server の program（Q3 次第） | planned | p013・p018 | — |
+| [p020](phase020/phase.md) | 敵対的な入力と privsep の見直し（Opus） | planned | p018・p019 | — |
+| [p021](phase021/phase.md) | package と amd64 の build・libcrypto-compat での確かめ（Opus） | planned | p020 | **WS335 実装** |
+| [p022](phase022/phase.md) | QEMU の相互運用（Opus） | planned | p021 | **WS335 実装** |
+| [p023](phase023/phase.md) | 他の arch の build | planned | p021 | **WS335 実装** |
+| [p024](phase024/phase.md) | OpenSSH からの入れ替え（Opus、Q6） | planned | p022・p023 | **WS335 実装** |
+| [p025](phase025/phase.md) | 規約の全文の見直し（conformance-reviewer） | planned | p024 | — |

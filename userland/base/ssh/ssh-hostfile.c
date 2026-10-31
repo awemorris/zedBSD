@@ -127,3 +127,30 @@ ssh_known_hosts_put_line(
 	/* Reports that the function is not implemented yet. */
 	return ENOSYS;
 }
+
+/*
+ * Appends to out the known_hosts text without the lines that name host
+ * and port (as ssh_known_hosts_check matches them, any key type, also
+ * @revoked lines; hashed lines are kept), every other line kept byte for
+ * byte (ssh-keygen -R).
+ */
+int
+ssh_known_hosts_remove(
+	const char *text,
+	size_t size,
+	const char *host,
+	uint16_t port,
+	struct ssh_buf *out,
+	unsigned *removed)
+{
+	/* Marks the arguments used until the function is implemented. */
+	(void)text;
+	(void)size;
+	(void)host;
+	(void)port;
+	(void)out;
+	(void)removed;
+
+	/* Reports that the function is not implemented yet. */
+	return ENOSYS;
+}

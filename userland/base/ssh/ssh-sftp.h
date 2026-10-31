@@ -118,7 +118,11 @@ struct ssh_sftp_attrs {
  *
  * type and id; path and path_size, target and target_size (RENAME's new
  * path, SYMLINK's second path), handle and handle_size, data and
- * data_size (WRITE) point into the packet the caller keeps; pflags
+ * data_size (WRITE) point into the packet the caller keeps (for SYMLINK,
+ * path is the first string and target the second as they come: OpenSSH
+ * sends the link's target first and the new link's path second, the
+ * reverse of the draft's 6.10, OpenSSH PROTOCOL 4.1; the server follows
+ * OpenSSH); pflags
  * (OPEN), offset and length (READ, WRITE), attrs (OPEN, SETSTAT,
  * FSETSTAT, MKDIR), version (INIT, with id unused).
  */
@@ -141,9 +145,9 @@ struct ssh_sftp_request {
 };
 
 /*
- * Takes one whole packet from the front of input: *packet and *size (the
- * bytes after the length field, copied into packet_out which the caller
- * reset).  A length of 0 or over SSH_SFTP_PACKET_MAX is EINVAL.  Returns
+ * Takes one whole packet from the front of input and copies the bytes
+ * after its length field (type first) into packet_out, which the caller
+ * reset.  A length of 0 or over SSH_SFTP_PACKET_MAX is EINVAL.  Returns
  * 0, EAGAIN or EINVAL.
  */
 int ssh_sftp_next_packet(struct ssh_buf *input, struct ssh_buf *packet_out);

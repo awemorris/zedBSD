@@ -15,25 +15,13 @@
 #include "sshd.h"
 
 /*
- * Runs the session process for the authenticated user: imports the
- * transport from size bytes at state, then the connection protocol on
- * client.
+ * Runs the session process (sshd started with SSHD_EXEC_SESSION): reads
+ * the settings, the user and the exported transport from the monitor,
+ * takes the user's ids, imports the transport and runs the connection
+ * protocol.
  */
 void
-sshd_session_run(
-	const struct sshd_context *context,
-	int client,
-	int monitor,
-	const char *user,
-	const uint8_t *state,
-	size_t size)
+sshd_session_run(void)
 {
-	/* Marks the arguments used until the function is implemented. */
-	(void)context;
-	(void)client;
-	(void)monitor;
-	(void)user;
-	(void)state;
-	(void)size;
 }
 

@@ -33,7 +33,7 @@ WS335 の待ち: p003 経由
 - -t ed25519 -f F -N "" -C c -q: F（0600）と F.pub（0644）、F.pub の行の形、`-l -f F.pub` の指紋の形、`-y -f F` が F.pub と同じ鍵
 - -t rsa・-N の空でない値で断る（終了の値 1 と文）、既にある F を上書きしない（`-f` に既存の file、問わずに断る。OpenSSH は問うが、ここは問わない事を結果に書く）
 - -A: 一時の root の代わりに `-f prefix` に相当する試験用の環境変数は作らない（試験用の切り替えを製品に入れない、coding-style §12）。-A は p019 の QEMU で確かめる
-- -R host: known_hosts から消して `.old` を残す
+- -R host: `ssh_known_hosts_remove` で消して `.old` を残す
 - 相互: host の OpenSSH の ssh-keygen が作った鍵を -l・-y で読み、自前が作った鍵を OpenSSH の `ssh-keygen -l -f`・`-y -f` が読む（interop は他の実装との相互の確かめで、期待の値の生成ではない）
 
 ## 4. 注意

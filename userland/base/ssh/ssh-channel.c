@@ -278,8 +278,8 @@ ssh_channel_closed(
 }
 
 /*
- * Reads a CHANNEL_REQUEST into request (the channel must be OPEN; an
- * unknown recipient is EPROTO).
+ * Reads a CHANNEL_REQUEST into request (the channel must be OPEN or
+ * CLOSING; another recipient is EPROTO).
  */
 int
 ssh_channel_parse_request(
@@ -484,8 +484,9 @@ ssh_channel_put_exit_signal(
 }
 
 /*
- * Reads a GLOBAL_REQUEST: name (capacity SSH_NAME_MAX + 1) and
- * want_reply.
+ * Reads a GLOBAL_REQUEST: name (capacity SSH_NAME_MAX + 1; a longer name
+ * is cut) and *want_reply; the data after them is not read (see the
+ * top).
  */
 int
 ssh_channel_global_request(
@@ -517,5 +518,23 @@ ssh_channel_put_no_more_sessions(
 	struct ssh_buf *out)
 {
 	/* Marks the arguments used until the function is implemented. */
+	(void)out;
+}
+
+/*
+ * Appends a GLOBAL_REQUEST with name and want_reply and no data (the
+ * keepalive@openssh.com of ServerAliveInterval and ClientAliveInterval,
+ * want_reply TRUE: the peer's REQUEST_SUCCESS or REQUEST_FAILURE shows
+ * it is alive).
+ */
+void
+ssh_channel_put_global_request(
+	const char *name,
+	int want_reply,
+	struct ssh_buf *out)
+{
+	/* Marks the arguments used until the function is implemented. */
+	(void)name;
+	(void)want_reply;
 	(void)out;
 }

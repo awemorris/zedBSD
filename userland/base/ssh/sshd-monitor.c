@@ -20,12 +20,16 @@
  */
 int
 sshd_monitor_run(
-	struct sshd_context *context,
-	int client)
+	const struct sshd_context *context,
+	struct ssh_key *host_key,
+	int client,
+	int started)
 {
 	/* Marks the arguments used until the function is implemented. */
 	(void)context;
+	(void)host_key;
 	(void)client;
+	(void)started;
 
 	/* Reports that the function is not implemented yet. */
 	return ENOSYS;

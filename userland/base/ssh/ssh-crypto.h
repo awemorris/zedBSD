@@ -196,8 +196,12 @@ int ssh_hybrid_client_start(struct ssh_hybrid_client *client, uint8_t *c_init);
  * X25519 pair is made as in ssh_hybrid_client_start, giving S_PK1, and
  * K_CL = X25519(server private, C_PK1) (EVP_PKEY_new_raw_public_key of
  * C_PK1, EVP_PKEY_derive_init, EVP_PKEY_derive_set_peer,
- * EVP_PKEY_derive); an all-zero K_CL (RFC 8731 3, RFC 7748 6.1), which the
- * library reports as a failure of the derivation, is EINVAL.  K_CL is the
+ * EVP_PKEY_derive).  The peer's point is refused (EINVAL) when the library
+ * refuses it at import or at the derivation (OpenSSL 3.5 fails the
+ * derivation of an all-zero result), and also when the derivation
+ * succeeds with an all-zero K_CL, which this function checks itself with
+ * ssh_ct_equal against 32 zero bytes (RFC 8731 3, RFC 7748 6.1), so the
+ * check does not depend on the library.  K_CL is the
  * 32 bytes of the X25519 output as they are (section 2.4: the fixed-size
  * big-endian re-encoding of RFC 8731's integer is those bytes).  Then
  * k = SHA-256(K_PQ || K_CL) (section 2.4).
@@ -218,8 +222,8 @@ int ssh_hybrid_server(const uint8_t *c_init, size_t c_init_size, uint8_t *s_repl
  * NULL parameters, EVP_PKEY_decapsulate; ML-KEM's implicit rejection means
  * a forged ciphertext gives a wrong K_PQ, not an error, and the exchange
  * then fails at the signature or the first packet); K_CL = X25519(client
- * private, S_PK1), an all-zero result being EINVAL; k = SHA-256(K_PQ ||
- * K_CL).
+ * private, S_PK1), refused (EINVAL) as in ssh_hybrid_server; k =
+ * SHA-256(K_PQ || K_CL).
  *
  * The client's state is wiped and freed whatever the result.  Returns 0,
  * EINVAL, ENOMEM or EIO; on an error k is wiped.
