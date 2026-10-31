@@ -2,9 +2,9 @@
 
 # ws291-p021: Raspberry Pi 5（V3D 7.1）で重い 3D の model を、スペックの比で決めた目標の fps に
 
-Status: in-progress（2026-11-01 02:10 P4 q1784-i04 で再開: ユーザーの決定で Pi 4（p025）から Pi 5 へ。4.2 の成果を 7.1 に移し、1920x1080 の image を作って Q1 が SD に書いた。実機の計測はこれから）
+Status: in-progress（2026-11-01 05:45 P4 q1784-i06: 画面が出て、画面の mview c74 49.2〜49.9 fps（目標 50 の境）、desktop は定常 60・launch 57・drag 58。再開点は末尾）
 Parent: [WS291](../ws.md)
-Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）
+Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）、q1784-i05・i06（P4、2026-11-01）
 
 ## 目的
 
@@ -235,3 +235,73 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
 1. 板が戻ったら: build/p021-k5d/vmunix を入れ、`MVIEW=build/p021-u5/bin/mview TFU=1 COPIES='1 21 62 74' FRAMES=301 sh plan/ws291/tests/rpi5-offscreen.sh OUT` で checksum と速さ（gpu bin の行）。
 2. c74 の残り（bin 12.8 ms・render 8.6 ms、QPU の使用率 11 %・9 %）: VCM cache・追加の segment の数（shader record の byte 5・7、今は 0）を変えて試す。bin と render の重ね（次の frame の bin を今の frame の render と並べる、job の流しの変更）。
 3. 画面が出たら: 画面の mview（rpi5-mview.sh、c1・c21・c62・c74）と desktop（rpi5-desk.sh）、60 fps を目標に。
+
+## 記録（P4 q1784-i06、2026-11-01 04:10〜05:45）
+
+- 2026-11-01 04:08 ユーザーが別の画面を繋ぎ、Pi 5 の画面が出た（firmware が前の monitor の EDID を読めず 640x480・表示なしを渡していた。kernel の変更なし）。板の boot の引数は `bcm2708_fb.fbwidth=1920 bcm2708_fb.fbheight=1080`。
+- main e95314557 を取り込んだ（merge 5967b5287、親 d2e905352 e95314557、競合なし、V3D の driver の変更なし）。
+
+### offscreen（bd1f58c4a の coordinate shader の入力の絞りを含む tip、`build/p021-k5e/vmunix` cksum 1246399471）
+
+- `MVIEW=build/p021-u5e/bin/mview TFU=1 COPIES='1 21 62 74' FRAMES=301 sh plan/ws291/tests/rpi5-offscreen.sh build/tmp/off-k5e`（04:16）:
+  c1 2.74 ms（checksum 0c6e08c7）、c21 9.29 ms・107.6 fps（dd5f82af）、c62 17.77 ms・56.3 fps（90ab3e0f）、c74 20.69 ms・48.3 fps（224da3e7）。checksum は k5c と同じ。
+  c74 の GPU: bin 12.8 → 9.3 ms、render 8.9 ms（順に流す）。
+- 同じ kernel の c74 の繰り返しは 2 つの値に分かれる: 20.3 ms（GPU の busy 95 %）と 23.8 ms（busy 77 %、frame の間に GPU の空き）。GPU の 1 submission の時間は同じ（19.1 ms）。原因は未調査。
+
+### desktop（graphical login、1920x1080）
+
+- Pi 5 の graphical login は GPU を boot で起こす必要がある（`rpi5gpu.start=boot`）。rpi5-desk.sh の CONSOLE=0 に足した（d9b5f0247、main 44055ff83）。
+- `PI5=10.0.30.7 CONSOLE=0 KERNEL=build/p021-s5/vmunix AAT=build/p021-s5/bin/aat-input sh plan/ws291/tests/rpi5-desk.sh build/tmp/desk-s5g2`（04:26、kernel cksum 3198913914、image の Keiland）:
+
+| 段 | fps | period p50/max ms | compositor の work p50/max ms |
+| --- | --- | --- | --- |
+| launch | 57 | 17/55 | 1/3 |
+| type | 61 | 17/17 | 1/2 |
+| output | 64 | 16/19 | 1/2 |
+| drag | 58 | 17/33 | 1/2 |
+| home | 61 | 17/43 | 1/3 |
+| wiseview | 61 | 17/45 | 2/29 |
+| keys・scroll・hover | 111・19・20 | 入力の間隔で決まる | 1 |
+
+  - 定常の frame は vblank の 60。60 を切るのは launch（窓が出る時の 2 frame、GPU の側 42〜54 ms）と drag（176 frame 中 7 frame が 32 ms、入力の注入の間隔と vblank のうなり。lag が 3 → 17 ms と増えて戻る）。
+  - 窓が出る時の遅い pass（下の slow pass の行）: 新しい image（窓・layer・2048x2048 の atlas）の初めての TFU の変換（1920x1080 で 3〜5 ms、2048x2048 で 10〜11 ms）と、glass の blur の pass の render（1920x1080 で 8〜16 ms）。
+- tree の wayland・Files・Terminal と keiland-shot での画面: `plan/ws291/tests/rpi5-desktop.sh`（新、`config-rpi5-shot.mk`、keiland-shot の platform に rpi5 を足した）。
+  `build/tmp/desk-s5a/desk.png`（1920x1080、compositor の error 0、kernel の fault 0）。
+
+### 画面の mview（game・mailbox・4 枚、direct scanout を `KWL SCANOUT direct=1` で確かめた）
+
+- `PI5=10.0.30.7 PROGRAMS=build/p021-s5 COPIES='1 21 62 74' SPIN=12 MVIEW_ARGS=--model=/root/p021/qs40 sh plan/ws291/tests/rpi5-mview.sh build/tmp/mview-s5b`（04:30）:
+  c1 321.6 fps、c21 111.6、c62 56.2、c74 49.94（frame 平均 19.99 ms）。ARM 1500 MHz、52 °C、throttled 0。
+- 最後の kernel（2dd4c7e20、cksum 524920034）で c21 114.6・c74 49.18 fps（build/tmp/mview-final2）。
+
+### bin と render の重ね（試して入れない）
+
+- 実装: job の最後の render を走らせたまま返し（tail）、次の job の bin を並べる。完了は executor の settling の list で待つ。tail の出力を CPU が書く・texture に変換する時は待つ。
+  checksum は同じ（c1・c21・c74）。
+- 結果（offscreen）: c74 inflight=2 で 22.56 ms（順に流す 20.69 より遅い）。並べると bin 9.3 → 13.6 ms、render 8.9 → 約 17 ms と互いに遅くなる。
+  bin の始めの L2T・slice の cache の無効化を tail の横で省くと（安全でない、試しだけ）19.95 ms、順に流すより約 4 % 速いだけ。inflight=1 は完了の検出の遅れで 21.9 ms。
+- 結論: この front-end で詰まる scene では V3D 7.1 の bin と render が競合し、重ねは危険に見合わない。差分は `plan/ws291/tests/v3d71-overlap.patch`（a94ea9cfb）に残し、source は戻した。
+
+### render の出力を UIF にも書く（mirror、試して入れない）
+
+- 実装: sample される image を書く pass が、tile を raster と別に texture の snapshot（strict UIF）にも store する（Store Tile Buffer General の 2 回目、memory format 4）。snapshot が無ければ作る（SAMPLED の usage、全 tile の pass）。
+- 結果: desktop の TFU の回数は変わらない。変換される texture は全て generation 1（新しい image の初めての sample）で、layer の pass は一部の tile だけの pass か、SAMPLED の無い image。
+  差分は `plan/ws291/tests/v3d71-mirror.patch`（a94ea9cfb）に残し、source は戻した。
+
+### 足した診断（v3d.perf=1）
+
+- a94ea9cfb・2dd4c7e20: 20 ms 以上かかった pass ごとに `v3d: slow pass op= draws= size= us prep= exec= tex= copy= prog= alloc= tfu=時間/数 bin= render=` と
+  `v3d: slow pass output=… tfu=run:WxH:g世代…`（2 秒の window に 4 行まで）。board の行（firmware に問う）は window の report の時だけにした（slow pass の行ごとに問うと c62 が 135 ms になった）。
+- 確かめ: Pi 5（config-rpi5-shot.mk）・Pi 4（config/ci/config-rpi4.mk）の vmunix が warning 0、bin-draw-host-test PASS、Pi 5 の offscreen の checksum が同じ（c1・c21・c62・c74）。
+
+### 板の状態（2026-11-01 05:45、10.0.30.7）
+
+- /boot/boot0/vmunix: build/tmp/vmunix-final2（cksum 524920034、tree 2dd4c7e20、config-rpi5-shot.mk: 入力の注入と画面の capture を含む）。/boot/boot0/vmunix.old: k5c（3716769917）。vmunix.k5b・vmunix.p021old・vmunix.k5c・vmunix.delay30 も残る。
+- cmdline.txt `login=console v3d.perf=1`、/root/p021（mview-off・qs40・bin・lib）、/root/p021d（rpi5-desktop.sh の programs）、/bin/aat-input と /etc/keiland/session.p021old。
+
+### 再開点（2026-11-01 05:45、P4 q1784-i06）
+
+1. c74 の offscreen が 20.3 ms と 23.8 ms に分かれる原因（GPU の busy 95 % と 77 %）: executor と mview の thread の CPU の配置、submit から fence の起床までの遅れを測る。23.8 の側を無くせば 50 fps の余裕が増える。
+2. c74 の GPU（bin 9.3・render 8.9 ms、どちらも front-end で詰まる、3.7〜3.9 cycle/primitive）: primitive の数を減らす手（back-face の cull の material は少ない）は scene の側。driver の側は残りが小さい。
+3. desktop の窓が出る時の hitch: 新しい image の初めての TFU（1920x1080 で 3〜5 ms、2048x2048 で 10 ms）と glass の blur の render（8〜16 ms）。image を作る時から sample できる配置（OPTIMAL の image を UIF で持つ）にするのが根の直しで、大きい。
+4. drag の 58 fps は入力の注入の間隔と vblank のうなりで、driver ではない（frame-ops の入力の間隔を 16.67 ms に合わせれば消える見込み、未確認）。

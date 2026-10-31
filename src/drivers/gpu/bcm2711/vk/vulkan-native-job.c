@@ -30,6 +30,10 @@
 /* The room of one window's cost report, formatted under the controller mutex and logged after it. */
 #define NATIVE_PERF_TEXT_BYTES 2048U
 
+/* A pass this slow (prepared and run, in milliseconds) gets its own line, a few a window. */
+#define NATIVE_SLOW_MS 20U
+#define NATIVE_SLOW_LINES 4U
+
 /* Whether the boot asked for the cost report (v3d.perf=1): not read yet, on, or off. */
 #define NATIVE_PERF_UNREAD 0
 #define NATIVE_PERF_ON 1
@@ -44,9 +48,19 @@ static char native_perf_text[NATIVE_PERF_TEXT_BYTES];
 static size_t native_perf_used;
 static int native_perf_state;
 
+/*
+ * Whether the text holds a window's report (the board's line follows it),
+ * and how many slow-pass lines the window has given (at most
+ * NATIVE_SLOW_LINES, so that a scene slow in every frame does not flood
+ * the log).
+ */
+static bool native_perf_window;
+static uint32_t native_slow_lines;
+
 static int release_job(struct bcm2711_vulkan_native_job *job);
 static int retire_closed_sessions(struct bcm2711_render_device *controller);
 static void report_perf(struct bcm2711_v3d_perf *perf);
+static void slow_pass(const struct bcm2711_vulkan_native_pass *pass, uint32_t opcode, uint64_t prepare, uint64_t execute, const struct bcm2711_v3d_job_result *completion);
 static bool perf_enabled(void);
 static void perf_append(const char *format, ...) __attribute__((format(printf, 1, 2)));
 static uint64_t average_us(uint64_t ticks, uint64_t count);
@@ -131,6 +145,7 @@ bcm2711_vulkan_native_job_step(
 	uint64_t release_ticks;
 	uint64_t copy_ticks;
 	uint64_t elapsed;
+	uint64_t pass_prepare;
 	struct bcm2711_v3d_perf *perf;
 	uint32_t region;
 	uint32_t index;
@@ -354,7 +369,8 @@ bcm2711_vulkan_native_job_step(
 			job->prepare_failed = true;
 
 		/* Accumulate preparation separately from device execution and retirement. */
-		prepare_ticks += clock_ticks() - step;
+		pass_prepare = clock_ticks() - step;
+		prepare_ticks += pass_prepare;
 
 		/* A copy whose destination already holds its source's bytes prepared no pass. */
 		if (error == 0 && job->pass == NULL) {
@@ -408,6 +424,7 @@ bcm2711_vulkan_native_job_step(
 				error = closed;
 		}
 		execute_ticks += clock_ticks() - step;
+		slow_pass(job->pass, event->opcode, pass_prepare, clock_ticks() - step, &completion);
 		perf->tfu_ticks += completion.tfu_ticks;
 		perf->tfu_jobs += completion.tfu_jobs;
 		if (completion.tfu_max_ticks > perf->tfu_max_ticks)
@@ -916,6 +933,8 @@ report_perf(
 	in_use = perf->memory_bytes;
 	kern_memset(perf, 0, sizeof(*perf));
 	perf->window_start = now;
+	native_perf_window = true;
+	native_slow_lines = 0;
 	perf->memory_bytes = in_use;
 	perf->memory_max = in_use;
 }
@@ -934,6 +953,87 @@ perf_enabled(
 
 	/* On only when asked for. */
 	return native_perf_state == NATIVE_PERF_ON;
+}
+
+/*
+ * Reports a pass that took NATIVE_SLOW_MS or more to prepare and run (v3d.perf=1):
+ * its preparation and execution, the texture work, program builds and
+ * allocations of its draws, and its unit, bin and render times, in
+ * microseconds.  A frame that misses the display's refresh is found by it.
+ */
+static void
+slow_pass(
+	const struct bcm2711_vulkan_native_pass *pass,
+	uint32_t opcode,
+	uint64_t prepare,
+	uint64_t execute,
+	const struct bcm2711_v3d_job_result *completion)
+{
+	const struct bcm2711_vulkan_native_draw *draw;
+	uint64_t texture;
+	uint64_t copy;
+	uint64_t program;
+	uint64_t allocation;
+	uint32_t index;
+
+	/* Only a slow pass, a few a window, and only with the report. */
+	if (pass == NULL ||
+	    kern_ticks_to_ms(prepare + execute) < NATIVE_SLOW_MS ||
+	    native_slow_lines >= NATIVE_SLOW_LINES ||
+	    !perf_enabled())
+		return;
+	native_slow_lines++;
+
+	/* The draws' own costs. */
+	texture = 0;
+	copy = 0;
+	program = 0;
+	allocation = 0;
+	for (draw = pass->first; draw != NULL; draw = draw->next) {
+		texture += draw->texture_ticks;
+		copy += draw->copy_ticks;
+		program += draw->program_ticks;
+		for (index = 0; index < draw->count; index++)
+			allocation += draw->storage[index]->allocation_ticks;
+	}
+	for (index = 0; index < pass->count; index++)
+		allocation += pass->storage[index]->allocation_ticks;
+
+	/* One line for the pass. */
+	perf_append(
+		"v3d: slow pass op=%u draws=%u size=%ux%u us prep=%llu exec=%llu tex=%llu copy=%llu prog=%llu alloc=%llu tfu=%llu/%u bin=%llu render=%llu\n",
+		opcode,
+		pass->draws,
+		pass->state.width,
+		pass->state.height,
+		(unsigned long long)average_us(prepare, 1),
+		(unsigned long long)average_us(execute, 1),
+		(unsigned long long)average_us(texture, 1),
+		(unsigned long long)average_us(copy, 1),
+		(unsigned long long)average_us(program, 1),
+		(unsigned long long)average_us(allocation, 1),
+		(unsigned long long)average_us(completion->tfu_ticks, 1),
+		completion->tfu_jobs,
+		(unsigned long long)average_us(completion->bin_ticks, 1),
+		(unsigned long long)average_us(completion->render_ticks, 1));
+
+	/* The pass's output and the textures the unit converted for it: their run, size, and the run's generation. */
+	perf_append(
+		"v3d: slow pass output=%llx",
+		(unsigned long long)(uintptr_t)(pass->output != NULL ? pass->output->buffer : NULL) & 0xffffffULL);
+	for (draw = pass->first; draw != NULL; draw = draw->next) {
+		for (index = 0; index < draw->texture_count; index++) {
+			if (!draw->textures[index].convert || draw->textures[index].snapshot == NULL)
+				continue;
+			perf_append(
+				" tfu=%llx:%ux%u:g%llu",
+				(unsigned long long)(uintptr_t)draw->textures[index].snapshot->buffer & 0xffffffULL,
+				draw->textures[index].snapshot->width,
+				draw->textures[index].snapshot->height,
+				(unsigned long long)draw->textures[index].snapshot->generation);
+		}
+	}
+	perf_append("\n");
 }
 
 /*
@@ -994,8 +1094,12 @@ bcm2711_vulkan_native_perf_flush(
 	/*
 	 * The board's clocks, temperature and throttling with each report, so
 	 * that runs measured at different CPU speeds can be told apart.  Asked
-	 * here, outside the controller's mutex, once a window.
+	 * here, outside the controller's mutex, once a window (a slow-pass line
+	 * alone does not ask: the firmware's answer is slow).
 	 */
+	if (!native_perf_window)
+		return;
+	native_perf_window = false;
 	bcm2711_board_state_read(&board);
 	kern_logf("v3d: board arm=%u/%u core=%u v3d=%u MHz temp=%u.%u throttled=0x%05x\n",
 		  (unsigned)(board.arm_hz / 1000000U),
