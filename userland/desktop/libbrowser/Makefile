@@ -184,6 +184,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/layout/flex.c \
 	$(LIBBROWSER_DIR)/layout/grid.c \
 	$(LIBBROWSER_DIR)/layout/grid-names.c \
+	$(LIBBROWSER_DIR)/layout/grid-track.c \
 	$(LIBBROWSER_DIR)/layout/logical.c \
 	$(LIBBROWSER_DIR)/layout/anchor.c \
 	$(LIBBROWSER_DIR)/layout/table.c \
