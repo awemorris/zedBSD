@@ -184,7 +184,27 @@
 - ユーザーの目視（2026-10-31 18:1x、Q1 経由）: **不合格**。画は出るが block ごとに崩れてずれる（文字・icon が小さな block に刻まれ、desktop の window mode の chain も同じ）。
   写真 /home/awe/zedBSD-claude1/build/review/ws291/p023-bl-visual-1.jpg。Q1 の決定: nvrtx の既定は変えない（`nvrtx.disp.bl` は既定 0 のまま）、lend の規則は残す
   （bl=0 の RTX は貸さない）。block-linear の scanout の直しは P3（WS291 p023）。機械は branch と `nvrtx.disp.bl=1` のまま P3 へ渡した（deploy と戻しの手順は Q1 に送った）。
-  よって RTX の文字通りの zero copy は、mview の側（lent=1・tiling 0x10001・copy 0・quads 0）は確かめたが、画面の正しさは未達（P3 の scanout 待ち）。
+  よって RTX の文字通りの zero copy は、mview の側（lent=1・tiling 0x10001・copy 0・quads 0）は確かめたが、画面の正しさは未達（P3 の scanout 待ち）。→ P3 の直しの後の 2 回目の目視で合格（下の節）。
+
+### RTX の 2 回目の目視と既定の変更（2026-10-31 18:3x〜19:07）
+
+- P3 の直し（effb3d149、block-linear の kind の ctxdma）の kernel 3845779468 と branch の 14 file・`nvrtx.disp.bl=1` で、ユーザーの 2 回目の目視は**合格**（desktop が正常、Q1 経由）。
+- Q1 の許可（P3 の領域の 1 つの既定の変更）で `nvrtx.disp.bl` の既定を 1 にした（16cd986f0、`stage.c` の token を `nvrtx.disp.bl=0` で切る形に、`share.c`・`nvrtx-node.h`・
+  `nvrtx-private.h` の comment）。その前に main f42bb6d3b を merge（cf75c4ec8）。確かめ: RTX の組（plan/ws291/tests/config.mk）と config/ci/config-amd64.mk の vmunix warning 0、nvrtx-vk 94/0。
+- 再計測（boot の parameter 無し、`rtx-p015.sh` の base:main ea4317337 の file と kernel 2917063051、new:branch と kernel 3084829296、証拠 build/review/ws309/rtx-p015-i02c/）:
+
+| fps | big-100 | big-1000 | subs-100 | subs-1000 | scene-1500 | scene-5000 |
+| --- | --- | --- | --- | --- | --- | --- |
+| base | 686.5 | 112.0 | 199.2 | 20.21 | 159.3 | 50.26 |
+| new（既定で block-linear） | 543.3 | 108.2 | 188.4 | 19.91 | 155.6 | 49.96 |
+
+  - new: kernel `block-linear scanout on`・`first flip 1920x1080`（cfg の行 0）、lendable=1、game chain `lent=1 direct=1 tiling=0x10001`、copies 0（1850・1223 present）、
+    nvrtx の quads の定常 0（base は 975・589）。往復 3/3（両腕、failed 0、refused 0）。
+  - 画面の撮影（keiland-shot、desktop・Notes・browser）: base との差は 3 枚とも右上の時計の 55 画素だけ（09:49 と 09:59、他は同一）。keiland-shot は GPU で読むので scanout の正しさはユーザーの目視が根拠。
+  - desktop（frame-ops）: launch 63→64、type 61→61、output 67→67、drag 61→60、home 63→63、wiseview 65→66 fps（後退なし）。
+  - big-100 の差（1.46 → 1.84 ms）の段: acquire 0.03→0.08、record 0.67→0.65、submit 0.32→0.33、present 0.04→0.05、fence 0.36→0.55、段の外 約 +0.15。
+    release の往復（acquire）は 0.05 ms だけで、主は fence（前の frame の GPU の完了の待ち）と段の外。前の見込み（release の往復が主）は誤り。原因は未特定。
+- 戻し: 14 file を元の cksum に、NVMe の vmunix 1463007375、cfg の nvrtx.disp.bl 0 行、Debian（RTX 4 function vfio-pci）。
 
 ### 段 4（VF2、kei@10.0.30.2、`plan/ws309/tests/vf2-p015.sh`、18:18〜18:25）
 
@@ -214,8 +234,7 @@
 ### 再開点（2026-10-31 18:3x、P2 q1782-i02）
 
 - 済み: QEMU PASS、VF2 PASS（c13 52.5 fps、copy 0、往復 8/8、板を戻した）、RTX は貸し出しの側（block-linear の lend、copy 0、quads 0、往復 3/3）まで。branch の先頭 e0a6a4f40 を Q1 の merge へ。
-- 未達: RTX の画面（目視で block ごとに崩れる、P3 の block-linear の scanout の直し待ち。`nvrtx.disp.bl` は既定 0 のまま、bl=0 の RTX は lend の規則で貸さない）、
-  RTX の bl=0 の再計測（lend の規則の後の new の腕、未計測）、big-100 の貸す時の約 30% の低下（release の往復の見込み、未計測）、Pi 4・Pi 5（板の入れ替え待ち）、
+- 未達: big-100 の貸す時の約 20% の低下（fence の待ちと段の外、原因は未特定）、Pi 4・Pi 5（板の入れ替え待ち）、
   Pi 4 の全画面の動画で firmware の decoder が止まらないかの確かめ。
 - Pi の手順: 板が guest の鍵の root で zedBSD を動かしていれば、
   `PI=<addr> PROGRAMS=build/p015rpi4 VIDEO=build/p015video/high-1080p30.mp4 sh plan/ws309/tests/pi-p015.sh OUT`（Pi 5 は `PROGRAMS=build/p015rpi5`、VIDEO 無しでよい）。

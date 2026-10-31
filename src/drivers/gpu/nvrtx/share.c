@@ -344,8 +344,8 @@ share_image_layout(
  * Answers the layouts of an image: block linear first (the executor draws
  * in it fastest), then linear rows.  Both are shared between the device's
  * opens; the renderer, when bound, draws and samples both; the display,
- * when asked about, shows linear rows, and block linear only when the boot
- * let it (nvrtx.disp.bl=1).  Only entries with every use asked for.
+ * when asked about, shows linear rows, and block linear unless the boot
+ * keeps it off (nvrtx.disp.bl=0).  Only entries with every use asked for.
  */
 static int
 share_image_layouts(
