@@ -82,6 +82,7 @@ struct grid_sizes {
 	struct css_length margin[4];
 };
 
+static int grid_fixed_rows_height(const struct layout_box *box, const struct grid_item *item, layout_unit gap, layout_unit *height);
 static int grid_normal_starts(const struct layout_box *box);
 static int grid_fixed_area_height(const struct layout_box *box, const struct grid_item *item, layout_unit gap, layout_unit *height);
 static int grid_save_used_tracks(struct layout_tree *tree, struct layout_box *box, const struct grid_state *grid);
@@ -2854,6 +2855,10 @@ grid_subgrid_axis(
 	if (box->style.display != CSS_DISPLAY_GRID && box->style.display != CSS_DISPLAY_INLINE_GRID)
 		return 0;
 
+	/* A box with layout or paint containment is an independent formatting context, which is no subgrid. */
+	if ((layout_containment(box) & 6U) != 0)
+		return 0;
+
 	/* A subgrid whose writing mode is orthogonal to its parent's keeps tracks of its own. */
 	if (box->parent != NULL &&
 	    (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) !=
@@ -3399,6 +3404,8 @@ grid_column_item_contribution(
 	layout_unit bound;
 	layout_unit ratio_width;
 	layout_unit basis;
+	layout_unit rows;
+	struct css_length saved_height;
 	int definite;
 	int error;
 
@@ -3454,22 +3461,32 @@ grid_column_item_contribution(
 		}
 	}
 
+	/* A percentage height resolves against the fixed rows the item spans, which are known before the columns are. */
+	saved_height = item->style.height;
+	if (item->style.height.unit == CSS_UNIT_PERCENT && grid_fixed_rows_height(item->parent, grid_item, grid_fixed_row_gap(item->parent), &rows)) {
+		item->style.height.value = layout_to_px((layout_unit)((float)rows * item->style.height.value / 100.0f) + layout_from_px(item->style.height.offset));
+		item->style.height.offset = 0;
+		item->style.height.unit = CSS_UNIT_PX;
+	}
+
 	/* The content's width. */
+	error = 0;
 	if (definite) {
 		content = layout_from_px(item->style.width.value);
 		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
 			content -= frame;
 	} else if (kind == GRID_CONTRIBUTION_MAX_CONTENT) {
 		error = layout_max_content(tree, item, &content);
-		if (error != 0)
-			return error;
-		layout_box_model(item, 0);
+		if (error == 0)
+			layout_box_model(item, 0);
 	} else {
 		error = layout_min_content(tree, item, &content);
-		if (error != 0)
-			return error;
-		layout_box_model(item, 0);
+		if (error == 0)
+			layout_box_model(item, 0);
 	}
+	item->style.height = saved_height;
+	if (error != 0)
+		return error;
 
 	/* Held within the maximum and minimum widths. */
 	bound = grid_item_bound(&item->style.max_width, basis);
@@ -4590,4 +4607,27 @@ grid_normal_starts(
 	const struct layout_box *box)
 {
 	return box->replaced && box->control != DOM_CONTROL_CHECKBOX && box->control != DOM_CONTROL_RADIO;
+}
+
+/* Adds up the fixed (pixel) rows an item spans and the gaps between them; tells whether every one of them is fixed. */
+static int
+grid_fixed_rows_height(
+	const struct layout_box *box,
+	const struct grid_item *item,
+	layout_unit gap,
+	layout_unit *height)
+{
+	const struct css_track *track;
+	layout_unit rows;
+	int row;
+
+	rows = gap * (layout_unit)(item->row_span - 1);
+	for (row = item->row; row < item->row + item->row_span; row++) {
+		track = grid_row_track(&box->style, row);
+		if (track->kind != CSS_TRACK_LENGTH || track->size.unit != CSS_UNIT_PX)
+			return 0;
+		rows += layout_from_px(track->size.value);
+	}
+	*height = rows;
+	return 1;
 }

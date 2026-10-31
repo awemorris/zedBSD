@@ -263,6 +263,15 @@ layout_flex(
 			return ENOMEM;
 		}
 	}
+	/* A wrapping column breaks lines by the items' hypothetical sizes, which hold their automatic minimums. */
+	if (wrap && !row && available >= 0 && count != 0) {
+		error = flex_auto_minimums(tree, box, row, items, count, available, gap_main);
+		if (error != 0) {
+			free(lines);
+			free(items);
+			return error;
+		}
+	}
 	start = 0;
 	while (start < count) {
 		/* The items of the line: all of them without wrapping or a size to wrap in. */
@@ -1040,13 +1049,47 @@ flex_base_size(
 			/* Uses the replaced content width as its initial base. */
 			item->base = child->width;
 		} else {
+			struct css_length saved_height;
+
+			/* A stretched item of a container with a height of its own has that height, for the percentages inside it. */
+			saved_height = child->style.height;
+			if (box->style.height.unit == CSS_UNIT_PX && box->style.flex_wrap == CSS_FLEX_NOWRAP &&
+			    box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+			    child->style.height.unit == CSS_UNIT_AUTO && flex_align_of(box, child) == CSS_ALIGN_STRETCH &&
+			    child->style.margin[CSS_TOP].unit != CSS_UNIT_AUTO && child->style.margin[CSS_BOTTOM].unit != CSS_UNIT_AUTO &&
+			    !child->max_content_known) {
+				layout_unit inner;
+
+				inner = layout_from_px(box->style.height.value);
+				if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					inner -= box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+				inner -= child->margin[CSS_TOP] + child->margin[CSS_BOTTOM];
+				if (child->style.box_sizing != CSS_BOX_SIZING_BORDER)
+					inner -= child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
+				if (inner < 0)
+					inner = 0;
+				child->style.height.unit = CSS_UNIT_PX;
+				child->style.height.value = layout_to_px(inner);
+				child->style.height.offset = 0;
+			}
+
 			/* The content's width without a limit (measured once, its percentages indefinite). */
 			error = layout_max_content(tree, child, &item->base);
+			child->style.height = saved_height;
 			if (error != 0)
 				return error;
 		}
 	} else if (item->base < 0) {
+		struct css_length saved_min_height;
+
+		/* The content's height is measured without the item's own minimum height, which only clamps the result. */
+		saved_min_height = child->style.min_height;
+		if (!child->replaced && child->style.min_height.unit == CSS_UNIT_PX) {
+			child->style.min_height.unit = CSS_UNIT_AUTO;
+			child->style.min_height.value = 0.0f;
+		}
 		error = layout_block(tree, child, box->width);
+		child->style.min_height = saved_min_height;
 		if (error != 0)
 			return error;
 
@@ -1136,6 +1179,54 @@ flex_base_size(
 	    child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
 	    item->minimum < item->base)
 		item->minimum = item->base;
+
+	/* An intrinsic keyword minimum height is the content's height: in the block axis it is the automatic size. */
+	if (!row && child->style.writing_mode == box->style.writing_mode &&
+	    (child->style.min_height.unit == CSS_UNIT_MIN_CONTENT || child->style.min_height.unit == CSS_UNIT_MAX_CONTENT ||
+	    child->style.min_height.unit == CSS_UNIT_FIT_CONTENT)) {
+		layout_unit content_height;
+		layout_unit cross;
+
+		content_height = 0;
+		if (child->replaced) {
+			/* A picture's height through its ratio from the stretched width. */
+			cross = flex_ratio_cross_size(tree, box, child, row);
+			if (child->image != NULL && child->image->width > 0 && child->image->height > 0 && cross >= 0) {
+				if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					cross -= child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
+				content_height = (layout_unit)((double)(cross < 0 ? 0 : cross) * child->image->height / child->image->width);
+			}
+		} else {
+			error = flex_content_height(tree, box, child, &content_height);
+			if (error != 0)
+				return error;
+		}
+		if (item->minimum < content_height)
+			item->minimum = content_height;
+	}
+
+	/* A table of a column is no shorter than its rows, whatever minimum it is given. */
+	if (!row && (child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE) &&
+	    child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    !child->replaced) {
+		struct layout_context table_context;
+		struct wb_vector table_floats;
+		struct css_length table_height;
+
+		/* Laid out with its height auto, its height is what its rows and captions need. */
+		table_height = child->style.height;
+		child->style.height.unit = CSS_UNIT_AUTO;
+		tree->measuring++;
+		layout_context_begin(tree, &table_context, &table_floats);
+		error = layout_block(tree, child, box->width);
+		layout_context_end(tree, &table_context);
+		tree->measuring--;
+		child->style.height = table_height;
+		if (error != 0)
+			return error;
+		if (item->minimum < child->height)
+			item->minimum = child->height;
+	}
 
 	/* The base stays unconstrained; the hypothetical size is limited for line breaking. */
 	item->size = item->base;
@@ -1419,9 +1510,18 @@ flex_ratio_cross_size(
 		basis = container->width;
 	}
 
-	/* Intrinsic measurement does not establish a percentage or stretch basis. */
-	if (tree->measuring != 0)
+	/* Intrinsic measurement does not establish a percentage or stretch basis, but a row's own definite height is one. */
+	if (tree->measuring != 0) {
 		basis = -1;
+		if (row && container->style.height.unit == CSS_UNIT_PX) {
+			basis = layout_from_px(container->style.height.value);
+			if (container->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				basis -= container->border[CSS_TOP] + container->padding[CSS_TOP] + container->padding[CSS_BOTTOM] +
+				    container->border[CSS_BOTTOM];
+			if (basis < 0)
+				basis = 0;
+		}
+	}
 
 	/* A definite author-specified cross size needs no stretch inference. */
 	cross = flex_ratio_definite_length(length, basis);
@@ -1780,15 +1880,25 @@ flex_auto_minimums(
 					least = (layout_unit)((double)cross * child->image->width / child->image->height);
 				else
 					least = (layout_unit)((double)cross * child->image->height / child->image->width);
+			} else if (row && child->style.width.unit == CSS_UNIT_PX && child->style.height.unit == CSS_UNIT_AUTO &&
+			    child->style.max_height.unit == CSS_UNIT_NONE) {
+				/* Without a definite cross size the picture's own width is its content size. */
+				least = (layout_unit)child->image->width * LAYOUT_UNIT;
 			}
 		}
 
 		/* A size in pixels that is smaller is the minimum instead. */
 		size = row ? &child->style.width : &child->style.height;
-		if (size->unit == CSS_UNIT_PX || (!row && size->unit == CSS_UNIT_PERCENT && available >= 0)) {
+		if (size->unit == CSS_UNIT_PX || (size->unit == CSS_UNIT_PERCENT && available >= 0)) {
 			given = layout_from_px(size->value);
-			if (size->unit == CSS_UNIT_PERCENT)
+			if (size->unit == CSS_UNIT_PERCENT) {
 				given = (layout_unit)((float)available * size->value / 100.0f) + layout_from_px(size->offset);
+
+				/* A compressible control (not a button) counts the percentage of its width as zero. */
+				if (row && child->replaced && child->control != DOM_CONTROL_NONE && child->control != DOM_CONTROL_BUTTON &&
+				    child->control != DOM_CONTROL_SUBMIT && child->control != DOM_CONTROL_RESET)
+					given = layout_from_px(size->offset);
+			}
 			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
 				given -= items[index].frame;
 			if (given < least)
@@ -1859,10 +1969,12 @@ flex_min_content(
 	struct css_length given;
 	int error;
 
-	/* A replaced box's content is its image, as wide as it is. */
+	/* A replaced box's content is its image, as wide as it is (a control sized by a percentage, as wide as it naturally is). */
 	*width = 0;
 	if (box->replaced) {
 		*width = box->width;
+		if (box->control != DOM_CONTROL_NONE && box->style.width.unit == CSS_UNIT_PERCENT && box->natural_width > 0)
+			*width = box->natural_width;
 		return 0;
 	}
 

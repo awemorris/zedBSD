@@ -223,6 +223,10 @@ layout_block(
 	/* A fieldset's first legend sits in its top border: it replaces the border's height instead of adding to the padding box's. */
 	block_fieldset_legend(box);
 
+	/* Size containment lays the box out as if it had no content. */
+	if ((layout_containment(box) & 1U) != 0 && !height_definite && !box->replaced)
+		box->height = 0;
+
 	/* An explicit height replaces the content's. */
 	content_height = box->height;
 	if (height_definite) {
@@ -385,8 +389,6 @@ block_intrinsic(
 	struct layout_box *box,
 	layout_unit containing_width)
 {
-	struct layout_context context;
-	struct wb_vector floats;
 	struct css_length width;
 	layout_unit most;
 	layout_unit least;
@@ -406,13 +408,7 @@ block_intrinsic(
 	/* The widest word, for min-content and fit-content: the content laid out as narrow as it goes. */
 	least = most;
 	if (width.unit != CSS_UNIT_MAX_CONTENT) {
-		tree->measuring++;
-		layout_context_begin(tree, &context, &floats);
-		error = layout_block(tree, box, 0);
-		layout_context_end(tree, &context);
-		if (error == 0)
-			least = layout_content_width(box, 0);
-		tree->measuring--;
+		error = layout_min_content(tree, box, &least);
 		if (error != 0) {
 			box->style.width = width;
 			return error;
@@ -461,8 +457,6 @@ block_min_intrinsic(
 	struct layout_box *box,
 	layout_unit containing_width)
 {
-	struct layout_context context;
-	struct wb_vector floats;
 	struct css_length minimum;
 	struct css_length width;
 	layout_unit most;
@@ -484,13 +478,7 @@ block_min_intrinsic(
 	}
 	least = most;
 	if (minimum.unit != CSS_UNIT_MAX_CONTENT) {
-		tree->measuring++;
-		layout_context_begin(tree, &context, &floats);
-		error = layout_block(tree, box, 0);
-		layout_context_end(tree, &context);
-		if (error == 0)
-			least = layout_content_width(box, 0);
-		tree->measuring--;
+		error = layout_min_content(tree, box, &least);
 		if (error != 0) {
 			box->style.min_width = minimum;
 			box->style.width = width;
@@ -695,6 +683,10 @@ block_owns_context(
 	if (box->floating != CSS_FLOAT_NONE)
 		return 1;
 	if (box->out_of_flow)
+		return 1;
+
+	/* A box with layout or paint containment is the root of its own formatting context. */
+	if ((layout_containment(box) & 6U) != 0)
 		return 1;
 
 	/* A box that clips its overflow. */
