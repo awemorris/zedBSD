@@ -207,6 +207,19 @@
 ### Pi 4・Pi 5 の用意
 
 - `plan/ws309/tests/config-rpi4-p015.mk`（CI の Pi 4 に mview・Ethernet の DHCP・root の SSH の鍵）、Pi 5 は `plan/ws291/tests/config-rpi5.mk`。image: build/p015rpi4/hdd-image.img、
-  build/p015rpi5/hdd-image.img（sha256 f99893937f0e…、7b50dcc17）。mview は arm64 の package の一覧に無いので target を名指して build（qs40 の model は script が送る）。
+  build/p015rpi5/hdd-image.img（e0a6a4f40 で作り直した: Pi 4 sha256 ac9cce142c4a97d9…、Pi 5 e55f31fceae1b6b8…）。mview は arm64 の package の一覧に無いので target を名指して build（qs40 の model は script が送る）。
 - 試験の script `plan/ws309/tests/pi-p015.sh`（PI=address PROGRAMS=build、compositor を自分の socket で、mview の game を CYCLES 回、WSI の log、VIDEO で videoplayer の全画面 15 秒と
   firmware の decoder の kernel の行）。動画は build/p015video/high-{1080,720}p30.mp4（ffmpeg の testsrc2、H.264 High）。
+
+### 再開点（2026-10-31 18:3x、P2 q1782-i02）
+
+- 済み: QEMU PASS、VF2 PASS（c13 52.5 fps、copy 0、往復 8/8、板を戻した）、RTX は貸し出しの側（block-linear の lend、copy 0、quads 0、往復 3/3）まで。branch の先頭 e0a6a4f40 を Q1 の merge へ。
+- 未達: RTX の画面（目視で block ごとに崩れる、P3 の block-linear の scanout の直し待ち。`nvrtx.disp.bl` は既定 0 のまま、bl=0 の RTX は lend の規則で貸さない）、
+  RTX の bl=0 の再計測（lend の規則の後の new の腕、未計測）、big-100 の貸す時の約 30% の低下（release の往復の見込み、未計測）、Pi 4・Pi 5（板の入れ替え待ち）、
+  Pi 4 の全画面の動画で firmware の decoder が止まらないかの確かめ。
+- Pi の手順: 板が guest の鍵の root で zedBSD を動かしていれば、
+  `PI=<addr> PROGRAMS=build/p015rpi4 VIDEO=build/p015video/high-1080p30.mp4 sh plan/ws309/tests/pi-p015.sh OUT`（Pi 5 は `PROGRAMS=build/p015rpi5`、VIDEO 無しでよい）。
+  そうでなければ上の image を card（Pi 5 は NVMe）に書く（Pi 5 の 1080p は `plan/ws291/tests/rpi5-image-boot.sh`）。合否: probe の lendable=1、game の 3 回とも `lent=1 … copies=0`、
+  compositor の direct=1・window へ戻る・refused 0。Pi 4 の動画: PLAYBACK failed・came back unread・not answered・no firmware decoder が 0、shown が止まらない。止まる時は Pi 4 の
+  content=video を game mode から外し、ここに記録する。
+- 消してよい物（Q1 へ）: build/p015rtxd、build/tmp/rtx-p015-i02b、build/tmp/p015base-ea（RTX の後）、build/tmp/p015base（VF2 の後）、build/p015img・build/p015run。
