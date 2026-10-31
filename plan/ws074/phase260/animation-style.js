@@ -1,7 +1,4 @@
-    // The effect of a script animation on the computed style: a property the animation's keyframes name reads as the keyframes' blend at the
-    // animation's current time (getComputedStyle), over the value the element would have without it (the neutral keyframe's).  Properties
-    // handled so far: grid-template-columns and grid-template-rows (track lists).
-    var EFFECT_PROPS = { 'grid-template-columns': 1, 'grid-template-rows': 1 };
+    // The helpers of the animations' effect on the computed style (the effect itself is in interpolate.js).
     function camelOf(name) { return name.replace(/-([a-z])/g, function (m, c) { return c.toUpperCase(); }); }
     function dashOf(name) { return name.replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); }); }
     // The keyframes of an animation for a property: [{ offset, value (null for the neutral keyframe) }] in order.
@@ -71,34 +68,6 @@
       if (list.lines[list.tracks.length].length) out.push('[' + list.lines[list.tracks.length].join(' ') + ']');
       return out.join(' ');
     }
-    // Blends two values of one track (a length, a flexible length, minmax() or fit-content()); the first when they do not match at less than half.
-    function blendTrack(a, b, p) {
-      var ma = /^(-?[\d.]+(?:e-?\d+)?)(px|%|fr)$/.exec(a), mb = /^(-?[\d.]+(?:e-?\d+)?)(px|%|fr)$/.exec(b);
-      if (ma && mb && ma[2] === mb[2]) return fmt(+ma[1] + (+mb[1] - +ma[1]) * p) + ma[2];
-      var fa = /^(minmax|fit-content)\((.*)\)$/.exec(a), fb = /^(minmax|fit-content)\((.*)\)$/.exec(b);
-      if (fa && fb && fa[1] === fb[1]) {
-        var pa = fa[2].split(/\s*,\s*/), pb = fb[2].split(/\s*,\s*/), parts = [], i, r;
-        if (pa.length === pb.length) {
-          for (i = 0; i < pa.length; i++) {
-            r = blendTrack(pa[i], pb[i], p);
-            if (r === null) { parts = null; break; }
-            parts.push(r);
-          }
-          if (parts) return fa[1] + '(' + parts.join(', ') + ')';
-        }
-      }
-      return a === b ? a : null;
-    }
-    function blendTrackList(from, to, p) {
-      var a = parseTracks(from), b = parseTracks(to), tracks = [], lines = [], i, r;
-      if (!a || !b || a.tracks.length !== b.tracks.length) return p < 0.5 ? from : to;
-      for (i = 0; i < a.tracks.length; i++) {
-        r = blendTrack(a.tracks[i], b.tracks[i], p);
-        tracks.push(r === null ? (p < 0.5 ? a.tracks[i] : b.tracks[i]) : r);
-      }
-      lines = (p < 0.5 ? a : b).lines;
-      return trackText({ tracks: tracks, lines: lines });
-    }
     // The easing of a keyframe pair: linear and the keywords, steps(), and cubic-bezier().
     function ease(timing, x) {
       var m;
@@ -127,69 +96,6 @@
       }
       return x;
     }
-    // The value of a property an animation gives now, or null when it gives none (underlying: the value without any animation).
-    function effectValue(anim, camel, underlying) {
-      var t = anim._timing, d = t.duration === 'auto' ? 0 : +t.duration, time = anim.currentTime, local, iteration, frames, i, a, b, p;
-      if (time === null || anim._state === 'idle') return null;
-      local = time - t.delay;
-      if (local < 0) { if (t.fill !== 'backwards' && t.fill !== 'both') return null; local = 0; }
-      if (d <= 0) return null;
-      iteration = local / d;
-      if (iteration >= t.iterations) {
-        if (t.fill !== 'forwards' && t.fill !== 'both') return null;
-        iteration = t.iterations;
-      }
-      p = iteration - Math.floor(iteration);
-      if (iteration > 0 && p === 0) p = 1;
-      p = ease(t.easing, p);
-      frames = propertyFrames(anim, camel);
-      if (frames.length === 0) return null;
-      for (i = 0; i < frames.length; i++) if (frames[i].value === null) frames[i].value = underlying;
-      if (frames.length === 1) return frames[0].value;
-      for (i = 0; i + 1 < frames.length && frames[i + 1].offset < p; i++);
-      a = frames[i];
-      b = frames[Math.min(i + 1, frames.length - 1)];
-      if (p <= a.offset) return a.value;
-      if (b.offset <= a.offset) return b.value;
-      return blendTrackList(a.value, b.value, ease('linear', (p - a.offset) / (b.offset - a.offset)));
-    }
-    function animatedValue(el, dashed, native) {
-      var camel = camelOf(dashed), value = native, list = [], a;
-      all.forEach(function (x) { if (x._target === el && (x._state === 'running' || x._state === 'paused' || x._state === 'finished')) list.push(x); });
-      for (a = 0; a < list.length; a++) {
-        var v = effectValue(list[a], camel, native);
-        if (v !== null) value = v;
-      }
-      return value;
-    }
-    var nativeGetComputedStyle = g.getComputedStyle;
-    if (typeof nativeGetComputedStyle === 'function') {
-      def(g, 'getComputedStyle', function getComputedStyle(element, pseudo) {
-        var cs = nativeGetComputedStyle.apply(this, arguments), animated = false;
-        if (pseudo || all.size === 0 || !element) return cs;
-        all.forEach(function (x) { if (x._target === element) animated = true; });
-        if (!animated) return cs;
-        return new Proxy(cs, {
-          get: function (target, key) {
-            var dashed;
-            if (typeof key === 'string') {
-              dashed = dashOf(key);
-              if (EFFECT_PROPS[dashed]) return animatedValue(element, dashed, target[key]);
-              if (key === 'getPropertyValue') {
-                return function (name) {
-                  var n = String(name).toLowerCase(), v = target.getPropertyValue(n);
-                  return EFFECT_PROPS[n] ? animatedValue(element, n, v) : v;
-                };
-              }
-              if (key === 'cssText') return target.cssText;
-            }
-            var v2 = Reflect.get(target, key, target);
-            return typeof v2 === 'function' ? v2.bind(target) : v2;
-          }
-        });
-      });
-    }
-
     // Animations of a view transition's pseudo-elements (Element.animate with pseudoElement): the values they give now go to the page,
     // whose layout puts them last in the cascade of that pseudo-element of the name.
     var VT_KINDS = { group: 5, 'image-pair': 6, old: 7, new: 8 };

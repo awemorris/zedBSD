@@ -841,6 +841,14 @@ struct css_style {
 	float animation_iterations;
 	int animation_direction;
 	int isolation;
+	/* The transition and animation lists a script reads: each as the text of its comma-separated list (NULL for the initial value). */
+	struct vm_string *transition_property;
+	struct vm_string *transition_duration;
+	struct vm_string *transition_delay;
+	struct vm_string *transition_timing;
+	struct vm_string *transition_behavior;
+	struct vm_string *animation_fill_mode;
+	struct vm_string *animation_composition;
 	/* mix-blend-mode: 0 normal, 1 plus-lighter, 2 and up the other blend modes (css_blend_names). */
 	int mix_blend_mode;
 	/* zoom: the factor the element's own declaration gives (1 for normal), and the product of it and its ancestors' that scales its lengths. */
@@ -1174,6 +1182,10 @@ void css_engine_set_owner(struct css_engine *engine, struct dom_element *owner);
 void css_engine_set_shadow_scopes(struct css_engine *engine);
 size_t css_engine_sheet_count(const struct css_engine *engine);
 void css_engine_set_owner_from(struct css_engine *engine, size_t first, struct dom_element *owner);
+
+/* Turns off (1) or on (0) the value an @keyframes animation gives to the filters and the grid tracks of a computed style (a script reading the unanimated value). */
+void css_animation_off(int off);
+int css_animation_is_off(void);
 void css_engine_set_scope(struct css_engine *engine, struct dom_node *scope);
 int css_engine_parse_media(struct css_engine *engine, const uint16_t *units, size_t length, const struct css_media **media);
 void css_engine_set_viewport(struct css_engine *engine, float width, float height);

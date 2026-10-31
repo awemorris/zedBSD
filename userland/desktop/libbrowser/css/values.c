@@ -333,6 +333,13 @@ static const struct values_name values_names[] = {
 	{ "animation-iteration-count", CSS_PROP_ANIMATION_ITERATION_COUNT },
 	{ "animation-direction", CSS_PROP_ANIMATION_DIRECTION },
 	{ "isolation", CSS_PROP_ISOLATION },
+	{ "transition-property", CSS_PROP_TRANSITION_PROPERTY },
+	{ "transition-duration", CSS_PROP_TRANSITION_DURATION },
+	{ "transition-delay", CSS_PROP_TRANSITION_DELAY },
+	{ "transition-timing-function", CSS_PROP_TRANSITION_TIMING_FUNCTION },
+	{ "transition-behavior", CSS_PROP_TRANSITION_BEHAVIOR },
+	{ "animation-fill-mode", CSS_PROP_ANIMATION_FILL_MODE },
+	{ "animation-composition", CSS_PROP_ANIMATION_COMPOSITION },
 	{ "animation", SHORT_ANIMATION },
 	{ "container", SHORT_CONTAINER },
 	{ "border-spacing", SHORT_BORDER_SPACING },
@@ -1069,6 +1076,7 @@ static int values_filters(struct css_parse *parse, const struct css_token *token
 static int values_url(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_image_set(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_view_transition_class(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_effect_list(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_animation_single(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_animation(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_repeat_parts(const struct css_token *const *parts, size_t count, struct css_value *value);
@@ -2208,6 +2216,10 @@ values_single(
 	    property == CSS_PROP_ANIMATION_ITERATION_COUNT || property == CSS_PROP_ANIMATION_DIRECTION ||
 	    property == CSS_PROP_ISOLATION)
 		return values_animation_single(parse, property, tokens, count, value);
+
+	/* The transition properties and animation-fill-mode and -composition: comma-separated lists kept as text. */
+	if (property >= CSS_PROP_TRANSITION_PROPERTY && property <= CSS_PROP_ANIMATION_COMPOSITION)
+		return values_effect_list(parse, property, tokens, count, value);
 
 	/* view-transition-class: none, or custom identifiers. */
 	if (property == CSS_PROP_VIEW_TRANSITION_CLASS) {
@@ -4342,6 +4354,134 @@ values_animation(
 	value.number = iterations;
 	values_add(out, made, CSS_PROP_ANIMATION_ITERATION_COUNT, &value);
 	return 0;
+}
+
+/* Whether an identifier is one of the words (a NULL-ended list). */
+static int
+values_word_in(
+	const struct css_token *token,
+	const char *const *words)
+{
+	size_t word;
+
+	if (token->type != CSS_TOKEN_IDENT)
+		return 0;
+	for (word = 0; words[word] != NULL; word++) {
+		if (css_ident_equal(token, words[word]))
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * Parses transition-property, -duration, -delay, -timing-function, -behavior and animation-fill-mode and -composition:
+ * comma-separated lists of one item each, kept as one atom with the items joined by ", " (times in seconds, timing functions
+ * in the form animation-timing-function has).
+ */
+static int
+values_effect_list(
+	struct css_parse *parse,
+	int property,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	static const char *const behaviors[] = { "normal", "allow-discrete", NULL };
+	static const char *const fills[] = { "none", "forwards", "backwards", "both", NULL };
+	static const char *const compositions[] = { "replace", "add", "accumulate", NULL };
+	struct wb_units joined;
+	char text[96];
+	uint16_t units[100];
+	size_t index;
+	size_t start;
+	size_t end;
+	size_t used;
+	size_t items;
+	size_t length;
+	size_t depth;
+	float seconds;
+	int error;
+
+	wb_units_init(&joined);
+	error = 0;
+	items = 0;
+	index = 0;
+	while (error == 0 && index <= count) {
+		/* One item: the tokens up to the next comma, without the whitespace around them. */
+		start = index;
+		depth = 0;
+		while (index < count && (depth > 0 || tokens[index].type != CSS_TOKEN_COMMA)) {
+			if (tokens[index].type == CSS_TOKEN_FUNCTION || tokens[index].type == CSS_TOKEN_OPEN_PAREN)
+				depth++;
+			else if (tokens[index].type == CSS_TOKEN_CLOSE_PAREN && depth > 0)
+				depth--;
+			index++;
+		}
+		end = index;
+		while (start < end && tokens[start].type == CSS_TOKEN_WHITESPACE)
+			start++;
+		while (end > start && tokens[end - 1].type == CSS_TOKEN_WHITESPACE)
+			end--;
+		index++;
+		if (end == start) {
+			error = EINVAL;
+			break;
+		}
+		text[0] = '\0';
+		if (property == CSS_PROP_TRANSITION_PROPERTY) {
+			if (end - start != 1 || tokens[start].type != CSS_TOKEN_IDENT)
+				error = EINVAL;
+			else if (css_ident_equal(&tokens[start], "inherit") || css_ident_equal(&tokens[start], "initial") ||
+			    css_ident_equal(&tokens[start], "unset") || css_ident_equal(&tokens[start], "default") ||
+			    (css_ident_equal(&tokens[start], "none") && (items != 0 || index <= count)))
+				error = EINVAL;
+			else {
+				for (used = 0; used < tokens[start].length && used < 95; used++)
+					text[used] = (char)tokens[start].text[used];
+				text[used] = '\0';
+			}
+		} else if (property == CSS_PROP_TRANSITION_DURATION || property == CSS_PROP_TRANSITION_DELAY) {
+			if (end - start != 1 || !values_time(&tokens[start], &seconds) ||
+			    (property == CSS_PROP_TRANSITION_DURATION && seconds < 0))
+				error = EINVAL;
+			else
+				snprintf(text, sizeof(text), "%gs", (double)seconds);
+		} else if (property == CSS_PROP_TRANSITION_TIMING_FUNCTION) {
+			if (values_timing(tokens + start, end - start, text, sizeof(text)) != end - start)
+				error = EINVAL;
+		} else {
+			const char *const *words = property == CSS_PROP_TRANSITION_BEHAVIOR ? behaviors :
+			    property == CSS_PROP_ANIMATION_FILL_MODE ? fills : compositions;
+
+			if (end - start != 1 || !values_word_in(&tokens[start], words))
+				error = EINVAL;
+			else {
+				for (used = 0; used < tokens[start].length && used < 95; used++)
+					text[used] = (char)tokens[start].text[used];
+				text[used] = '\0';
+			}
+		}
+		if (error != 0)
+			break;
+		length = 0;
+		if (items != 0) {
+			units[length++] = ',';
+			units[length++] = ' ';
+		}
+		for (used = 0; text[used] != '\0'; used++)
+			units[length++] = (uint16_t)(unsigned char)text[used];
+		error = wb_units_append(&joined, units, length);
+		items++;
+	}
+	if (error == 0) {
+		value->kind = CSS_VALUE_KEYWORD;
+		value->keyword = 2;
+		value->ident = vm_atom_from_units(parse->heap, joined.data, joined.length);
+		if (value->ident == NULL)
+			error = ENOMEM;
+	}
+	wb_units_release(&joined);
+	return error;
 }
 
 /* Parses view-transition-class: none, or one or more custom identifiers, kept as one atom of them joined by spaces. */

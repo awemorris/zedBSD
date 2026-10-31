@@ -1897,6 +1897,7 @@
     def(g.Document.prototype, 'getAnimations', function getAnimations() { return Array.from(all).filter(function (a) { return a._state === 'running' || a._state === 'paused'; }); });
     def(g, 'Animation', Animation);
 // @include plan/ws074/phase260/animation-style.js
+// @include plan/ws074/phase260/interpolate.js
   })();
   // ---- document.fonts: load() and check() (the faces the page names are loaded or not by its stylesheets alone)
   (function () {

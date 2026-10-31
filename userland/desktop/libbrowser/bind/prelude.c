@@ -16,6 +16,7 @@
  */
 
 #include "bind/internal.h"
+#include "css/css.h"
 #include "js/builtin.h"
 #include "net/net.h"
 
@@ -510,6 +511,29 @@ prelude_view_transition_duration(
 	*result = vm_value_number(0.0);
 	if (window->host.view_transition_duration != NULL)
 		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
+	return 0;
+}
+
+/* animationOff(flag): a computed style is read without the value an @keyframes animation gives its filters and grid tracks. */
+static int
+prelude_animation_off(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	double flag;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	if (count < 1U)
+		return 0;
+	status = vm_to_number(realm, args[0], &flag);
+	if (status != 0)
+		return status;
+	css_animation_off(flag != 0.0);
 	return 0;
 }
 
@@ -1195,6 +1219,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "setPopover", 2, prelude_set_popover, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "setPopover", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "animationOff", 1, prelude_animation_off, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "animationOff", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "viewTransitionTime", 1, prelude_view_transition_time, NULL, &function);
 	if (status == 0)
