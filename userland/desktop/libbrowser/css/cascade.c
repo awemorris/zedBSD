@@ -5962,6 +5962,19 @@ cascade_line_names(
 	return copy;
 }
 
+/* Whether a @position-try rule can set a property. */
+static int
+cascade_try_property(
+	int property)
+{
+	return (property >= CSS_PROP_TOP && property <= CSS_PROP_LEFT) ||
+	    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT) ||
+	    (property >= CSS_PROP_MARGIN_TOP && property <= CSS_PROP_MARGIN_LEFT) ||
+	    property == CSS_PROP_POSITION_AREA || property == CSS_PROP_POSITION_ANCHOR ||
+	    property == CSS_PROP_ALIGN_SELF || property == CSS_PROP_JUSTIFY_SELF ||
+	    (property >= CSS_PROP_INSET_INLINE_START && property <= CSS_PROP_MAX_BLOCK_SIZE);
+}
+
 /*
  * Works out the styles of a style's position-try-fallbacks entries that
  * name a @position-try rule: the style with the rule's declarations of
@@ -5998,17 +6011,36 @@ cascade_try_styles(
 		if (rule == NULL)
 			continue;
 
-		/* The style with the rule's declarations that a fallback can set. */
+		/* The style with the rule's declarations that a fallback can set (a value with var() takes the element's custom properties). */
 		*copy = *style;
 		for (index = 0; index < rule->declaration_count; index++) {
 			declaration = &rule->declarations[index];
 			property = declaration->property;
-			if (!((property >= CSS_PROP_TOP && property <= CSS_PROP_LEFT) ||
-			    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT) ||
-			    (property >= CSS_PROP_MARGIN_TOP && property <= CSS_PROP_MARGIN_LEFT) ||
-			    property == CSS_PROP_POSITION_AREA || property == CSS_PROP_POSITION_ANCHOR ||
-			    property == CSS_PROP_ALIGN_SELF || property == CSS_PROP_JUSTIFY_SELF ||
-			    (property >= CSS_PROP_INSET_INLINE_START && property <= CSS_PROP_MAX_BLOCK_SIZE)))
+			if (property == CSS_PROP_PENDING) {
+				struct css_declaration expanded[CASCADE_EXPANSION_MAX];
+				struct css_parse parse;
+				struct wb_arena scratch;
+				struct wb_vector tokens;
+				size_t made;
+				size_t item;
+
+				wb_arena_init(&scratch, 0);
+				wb_vector_init(&tokens, sizeof(struct css_token));
+				parse.heap = engine->heap;
+				parse.arena = &scratch;
+				made = 0;
+				if (cascade_substitute(style->custom, declaration->raw, declaration->raw_count, 0, &tokens) == 0 &&
+				    css_parse_property(&parse, declaration->pending_property, tokens.items, tokens.count, expanded, &made) == 0) {
+					for (item = 0; item < made; item++) {
+						if (cascade_try_property(expanded[item].property))
+							cascade_apply(engine, copy, parent, &expanded[item]);
+					}
+				}
+				wb_vector_release(&tokens);
+				wb_arena_release(&scratch);
+				continue;
+			}
+			if (!cascade_try_property(property))
 				continue;
 			cascade_apply(engine, copy, parent, declaration);
 		}

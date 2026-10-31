@@ -724,3 +724,56 @@ Origin: 2026-10-27 ユーザーの指示。
   - anchor() の min()・max() と canonical の順、CSS_TRACKS = 24 の固定長（grid-limits-001）、grid の `calc(sign())`・`sibling-index()`、backdrop-filter の drop-shadow・url。
 - 一時物（Q1 が消す。worktree p8-ws074）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-n1td3xaj.html・zedbsd-acid2-uyv91yet.html、acid3/zedbsd-acid3-reference-mxis9kd3.html・zedbsd-acid3-reference-8qimgb3q.html、acid3/zedbsd-acid3-diagnostic-t8qqg83w.html・zedbsd-acid3-diagnostic-ndlhdxo3.html、build/ws074-suites/wpt/zz_dbg/、build/tmp/p8/sone/、build/tmp/p8/t/ の a〜l の html と dump.sh・ho・ho2。
   /tmp/p8out の下の dev118〜dev123 の測定の出力とその .log、acid124（dev124・dev125 と acid125 を残す）、sub-tab・sone・t・dbg-server.pid・acid119・acid119.log。一覧は build/tmp/p8/delete-list-i10.txt。
+
+### q1727-i11 の途中経過（2026-11-01、P8。dev126〜dev132）
+
+- 設計の短い覚え書き（transitions / CSS animation の補間）: engine の C には補間を作らず、getComputedStyle を包む JS（plan/ws074/phase260/interpolate.js）が、値の text を型付きの値
+  （数・長さ+%・track list・filter list・color・離散）に読み、transitions（前回読んだ値との差で開始、遅延と時間と easing は computed の transition-*）、
+  CSS animations（@keyframes を CSSOM から探す、composite は animation-composition）、script の animation（Element.animate）の順に重ねて、engine が出す形の text にして返す。
+  C 側は computed に出す property を足しただけ（transition-property・-duration・-delay・-timing-function・-behavior、animation-fill-mode・-composition。text の list として持つ）。
+  animation の最初の時刻だけ native が filter と grid の track に当てる値は、JS が「animation 無しの値」を要る時だけ `native.animationOff` で止める（style の cache も使わない）。
+  限界: 描画（layout・paint）は変わらない。transitions は computed の読み出しで見える物だけ（読まれない transition は画面に出ない）。
+- 測定（計は Chromium が通す 3,472 のうち。後退は dev125 と直前の測定の両方と比べた）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev125 | 基準（i10 の最終） | 2,975（85.69%） | 249 / 172 / 74 / 2 |
+  | dev126（4b065daed） | 補間の JS と transition-* の property（後退 4 は grid の neutral-keyframe） | 2,983 | 241 / 172 / 74 / 2 |
+  | dev127（eeef5f4ac） | 後退を直す、backdrop-filter の drop-shadow・url・複数 function・initial/inherit | 2,992 | 232 / 172 / 74 / 2 |
+  | dev128（8ceca3b89） | dynamic import()、CSS.registerProperty・@property の initial value、@scope の中の @keyframes・color の補間、position-anchor の normal・none | 2,997 | 227 / 172 / 74 / 2 |
+  | dev129（e805d7c37） | 最後に成功した position-try（後退 3 を出した: key が list だけだった） | 2,996 | 228 / 172 / 74 / 2 |
+  | dev130（b3b2021c1） | key に base style と position-try-order を足す、疑似要素を anchor に | 3,001 | 223 / 172 / 74 / 2 |
+  | dev131（43b820323） | backdrop-filter の指定値の canonical な直列化 | 3,002 | 222 / 172 / 74 / 2 |
+  | dev132（eae90685a、最終） | Event Timing の interface と entry type、@position-try の var() | 3,005（86.55%、gap 467） | 219 / 172 / 74 / 2 |
+
+  dev125 から +30、後退 0（dev125 と dev131 の両方に対し）。host build は `-Wall -Wextra -Werror` で warning 0（host-build.sh の全部）。
+  Acid は最終の source（eae90685a）で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%（/tmp/p8out/acid132）。
+  host 試験: host-module-import・-graph・-export、host-cssom、host-style-sheet は 0。host-css-rule-model は終了 2（model_case の準備が失敗。
+  css/rule-model.c と css/parser.c はこの attempt で変えていない。i10 より前からの失敗かは未確認）。
+- 直した物（要点。source は userland/desktop/libbrowser/）:
+  1. 補間（plan/ws074/phase260/interpolate.js、animation-style.js の古い grid 専用の補間を置き換え）: flex-grow・flex-shrink・order・flex-basis の補間と composition、
+     grid-template-columns・rows の補間と composition（repeat()、line name、minmax・fit-content、fr、per-track の離散）、backdrop-filter（blur・hue-rotate・各 amount・drop-shadow・url）、
+     background-color・color、離散の anchor-name・position-anchor・position-area・position-try-*。通った ID: css-flexbox/animation の 5、css-grid/animation の 4+neutral-keyframe 2 件の維持、
+     filter-effects/animation/backdrop-filter-interpolation-001〜004、css-anchor-position の position-area-interpolation・property-interpolations。
+  2. C: transition-* と animation-fill-mode・-composition の property（css/values.c `values_effect_list`、cascade.c、bind/computed.c）、`css_animation_off`（cascade.c、page/geometry.c は style の cache を使わない）。
+     filter: 関数の間の whitespace を読む、drop-shadow（css_filter に dx・dy・blur・color）と url() を kind に持つ、backdrop-filter・filter の initial/inherit/unset（cascade_inherit に case が無かった）、
+     `css_filter_canonical`（bind/style.c から。blur(0)→0px、hue-rotate(0)→0deg、drop-shadow の color を先頭、% の上限 100%）。
+  3. dynamic import()（js/parse_expr.c が `__zedImport(specifier, options)` の呼び出しに直す、prelude.js の `__zedImport` が with の検証と URL 解決、native.importModule →
+     page_import_module → js_module_graph_import → js_module_namespace。実行は同期で、promise は成否だけを後で知らせる）。通った ID: dynamic-import-with-attributes-argument.any、json-module の charset-bom.any・non-object.any。
+  4. CSS.registerProperty（引数の検証と InvalidModificationError）と @property の initial value（未設定の custom property の getPropertyValue が初期値を返す。CSSOM の @property を @scope の中まで探す）。
+     bind/style.c は prelude が先に作った CSS namespace を使う。通った ID: anchor-query-custom-property-registration、scope-name-defining-rules。
+  5. position-anchor の normal（initial）・none・auto を区別（computed に出す）。pseudo-element の box を anchor にする（node が無い block box の geometry を使う）。
+     最後に成功した position-try の option を、base が合う時も先に試す（layout/position.c。key は list・base style の長さ・position-try-order。box の初回の style を `try_base` に持って pass ごとに戻す）。
+     @position-try の declaration の var() を custom property で置き換える（cascade_try_styles）。通った ID: position-anchor-basics、pseudo-element-anchor・-dynamic、anchor-scroll-position-try-001、
+     position-try-custom-property、try-tactic-anchor。
+  6. Event Timing: `PerformanceEventTiming` と PerformanceObserver.supportedEntryTypes の event・first-input（entry は作らない）。event-timing/supported-types。
+- 道具の注意: 単体試験の h1.sh は runner に `--font-dir userland/desktop/fonts` を渡さないと layout の結果が measurement と食い違う（pseudo-element-anchor が font 無しで偽の失敗、anchor-scroll-position-try-002〜014 が偽の成功になった）。
+- 調べて直さなかった物（次の候補）:
+  - 最後に成功した option の更新を rendering の時刻まで遅らせる（last-successful-intermediate-ignored・-change-try-rule・-iframe。今は強制 layout でも更新する）、anchor-scroll-position-try-002〜014（RTL の負の scroll・viewport の scroll 補正）。
+  - calc() の数（flex・grid の line・repeat の個数）と sign()・abs()・mod()・sibling-index()（flex-computed・flex-valid、grid-area-computed・-valid、grid-template-columns-computed の 5 ID。数の calc は line-height と zoom 以外に無い）。
+  - grid の baseline が intrinsic size を決める（baseline-alignment-affects-intrinsic-size-001〜006、baseline-shim 3 件）、subgrid の static 25 件、multicol（css-multicol・anchor・baseline の 10 ID 前後）、
+    @starting-style（scope-starting-style）、scope-nesting（12 subtest）、document.implementation.createHTMLDocument が無い（caretPositionFromPoint の 2 ID）、PerformancePaintTiming（LCP の 2〜3 ID）、
+    writing-modes/forms の textarea・select（no_output 4 ID）、view transition の疑似要素の computed style・iframe・inline の群。
+- 一時物（Q1 が消す。worktree p8-ws074 と /tmp/p8out）: 一覧は build/tmp/p8/delete-list-i11.txt（h1-* の出力、dev126〜dev128、zz_dbg）。加えて dev130・dev131・dev132 の測定の出力とその .log、acid132 は最後の 2 つの規則で dev131・dev132 を残し、dev130 は消してよい。
+  Acid の runner が残した一時 file: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-c1cexgqo.html、acid3/zedbsd-acid3-reference-0ynnfzzj.html、acid3/zedbsd-acid3-diagnostic-149roxuf.html と、build/ws074-suites/wpt/acid/ の他の zedbsd-acid*-*.html。
+  build/tmp/p8/t/（道具と probe の html）、/tmp/p8out/hb-full.log・*.out・acidtmp.txt・acid132.log。
