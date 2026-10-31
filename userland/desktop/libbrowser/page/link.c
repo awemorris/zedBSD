@@ -16,6 +16,7 @@
  */
 
 #include "page/page.h"
+#include "base/os-file.h"
 #include "net/net.h"
 
 #include <errno.h>
@@ -459,12 +460,14 @@ link_resolve(
 {
 	struct wb_buffer base_text;
 	struct net_url base_url;
+	int local;
 	int error;
 
 	/* The base as a URL. */
 	wb_buffer_init(&base_text);
 	error = 0;
-	if (base[0] == '/') {
+	local = wb_os_path_is_absolute(base);
+	if (local) {
 		error = net_url_from_file_path(base, &base_text);
 		if (error != 0) {
 			wb_buffer_release(&base_text);

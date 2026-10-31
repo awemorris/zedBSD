@@ -18,6 +18,7 @@
  */
 
 #include "js/builtin.h"
+#include "base/os-system.h"
 
 #include <errno.h>
 #include <math.h>
@@ -1369,17 +1370,12 @@ js_typed_random_fill(
 {
 	unsigned char *bytes;
 	size_t length;
-	FILE *file;
-	size_t got;
+	int error;
 
 	if (!js_typed_bytes(value, &bytes, &length))
 		return EINVAL;
-	file = fopen("/dev/urandom", "rb");
-	if (file == NULL)
-		return EIO;
-	got = fread(bytes, 1U, length, file);
-	fclose(file);
-	if (got != length)
+	error = wb_os_random(bytes, length);
+	if (error != 0)
 		return EIO;
 	return 0;
 }

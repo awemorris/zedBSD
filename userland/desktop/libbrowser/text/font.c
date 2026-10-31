@@ -13,8 +13,11 @@
  */
 
 #include "text/text.h"
+#include "base/os-system.h"
+#include "base/os.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <truetype/truetype.h>
@@ -42,6 +45,25 @@ struct text_glyph_entry {
 	int bold_face;
 };
 
+/*
+ * The file names of the default sans, monospace and fallback fonts, under
+ * the directory of the system's bundled data.  The table is constant for
+ * the life of the program.
+ */
+static const char *const font_default_names[TEXT_FACE_WEB] = {
+	"/fonts/keiland.ttf",
+	"/fonts/keiland-mono.ttf",
+	"/fonts/keiland-fallback.ttf"
+};
+
+/*
+ * The paths of the default fonts, made once on the first request and kept
+ * for the life of the program (an empty path when it could not be made).
+ */
+static pthread_once_t font_defaults_once = PTHREAD_ONCE_INIT;
+static struct wb_buffer font_defaults[TEXT_FACE_WEB];
+
+static void font_defaults_make(void);
 static uint64_t font_key(const struct text_font *font, uint32_t code_point);
 static struct text_glyph_entry **font_slot(struct text_system *system, uint64_t key);
 static int font_grow(struct text_system *system);
@@ -84,6 +106,27 @@ text_system_open(
 
 	/* Succeeded: the fonts are open. */
 	return 0;
+}
+
+/*
+ * Reports the path of a default font (TEXT_FACE_SANS, TEXT_FACE_MONO or
+ * TEXT_FACE_FALLBACK) in the directory of the system's bundled data, or
+ * NULL for another face.  The string lives as long as the program; any
+ * thread may call this.
+ */
+const char *
+text_default_path(
+	int face)
+{
+	/* Only the three default faces have a path. */
+	if (face < TEXT_FACE_SANS || face > TEXT_FACE_FALLBACK)
+		return NULL;
+
+	/* The paths, made on the first call. */
+	pthread_once(&font_defaults_once, font_defaults_make);
+
+	/* Succeeded: the face's path (empty when the system named no directory). */
+	return wb_buffer_string(&font_defaults[face]);
 }
 
 /*
@@ -803,4 +846,37 @@ font_open_face(
 	/* Succeeded: the face is open. */
 	face->open = 1;
 	return 0;
+}
+
+/* Makes the default fonts' paths from the directory of the system's bundled data. */
+static void
+font_defaults_make(void)
+{
+	char *directory;
+	int face;
+	int error;
+
+	/* Every path starts empty. */
+	for (face = TEXT_FACE_SANS; face <= TEXT_FACE_FALLBACK; face++)
+		wb_buffer_init(&font_defaults[face]);
+
+	/* The directory, which may be as long as any path. */
+	directory = malloc(WB_OS_PATH_MAX + 1U);
+	if (directory == NULL)
+		return;
+	error = wb_os_data_directory(directory, WB_OS_PATH_MAX + 1U);
+	if (error != 0) {
+		free(directory);
+		return;
+	}
+
+	/* Each font's file under it; a path that could not be made stays empty. */
+	for (face = TEXT_FACE_SANS; face <= TEXT_FACE_FALLBACK; face++) {
+		error = wb_buffer_append_string(&font_defaults[face], directory);
+		if (error == 0)
+			error = wb_buffer_append_string(&font_defaults[face], font_default_names[face]);
+		if (error != 0)
+			wb_buffer_clear(&font_defaults[face]);
+	}
+	free(directory);
 }
