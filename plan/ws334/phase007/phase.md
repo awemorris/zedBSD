@@ -3,7 +3,7 @@
 # ws334-p007 network: os-net
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
-- 状態: 実装済み・試験 PASS（2026-11-01 担当 Sonnet 5.5。cleared は Q1）。
+- 状態: cleared（2026-11-01 04:40 Q1、main 3cbfe88a2）
 - 依存: p005（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 
