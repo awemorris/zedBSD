@@ -2,8 +2,8 @@
 
 # WS334 設計: OmniGrammaton（libbrowser の Web ブラウザ）の Windows への移植
 
-- 親: [WS334](ws.md)（ws334-p001、2026-11-01 P7、q1787-i01）。ユーザーの決定は ws.md の 1〜14（要点）。Q1 の覚え書きは [design-notes.md](design-notes.md)。
-  決定 12〜14（`make browser-win64`、tree の上の `apps/browser-win32/`、後の `apps/browser-qt`・`apps/browser-gtk4`、libkeiland はまず browser に要る部分だけ）は設計の途中で受けた。§4 と §6.9 はそれに合わせた形。
+- 親: [WS334](ws.md)（ws334-p001、2026-11-01 P7、q1787-i01）。ユーザーの決定は ws.md の 1〜15（要点）。Q1 の覚え書きは [design-notes.md](design-notes.md)。
+  決定 12〜15（`make browser-win64`、tree の上の `apps/browser-win32/`、後の `apps/browser-qt`・`apps/browser-gtk4`、libkeiland はまず browser に要る部分だけ、UI は libkeiland の上の今の UI のまま）は設計の途中で受けた。§4 と §6.9 はそれに合わせた形。
 - 読んだ物: AGENTS.md、plan/agents/protocol.md、plan/master-design-policy.md（§2.6 interface と遅い抽象、§11）、plan/guardrail.md（範囲・出典）、
   plan/standards/browser-component.md、plan/ws327/design.md（§2・§5）、plan/ws327/ws.md、plan/future-work.md（F-WS327-win32-build）、
   plan/ws234/ws.md（保留中の libkeiland の DLL 版）、docs/agent/spec-module-delegation.md、そして下の §2 に挙げる source。
@@ -18,9 +18,8 @@
 | libbrowser の OS の層 | libbrowser の中に private の OS の層 `base/os.h` と `base/os-posix.c`・`base/os-win32.c` を足し、socket・poll・起こし・file・path・時刻帯・乱数・library の読み込みをそこへ集める。thread の基本（mutex・cond・create）は mingw の winpthreads を使い、書き換えない（§3.4）。libkeiland の `kl_thread`・`kl_socket` は使わない（WS327 の決定 2） |
 | 3 つの engine（決定 9・10） | レンダリング（dom・html・xml・css・layout・paint・text・image）とスクリプト（vm・js）の分離は今の tree の通り保つ（DOM を出さない）。スクリプトの core（base・vm・js）を単独の archive として build できる事を試験で保証する。ストレージバックエンドは**新しい公開の interface**（`struct browser_storage_calls`）で、新しい公開の `struct browser_instance` に登録する（§3） |
 | instance | `browser_instance` が cookie の jar・HTTP の cache・Web Storage の領域とストレージバックエンドを持つ。view は instance の中に作る。`BROWSER_API_VERSION` 3 → 4（§3.8） |
-| frontend の構成（決定 13・14） | libkeiland に依らない共通の shell（`apps/browser-shell/`、新）と toolkit ごとの層。Keiland の層（今の `userland/desktop/browser/shell/`）は zedBSD のまま。Qt・GTK4 の frontend は将来。libbrowser とストレージバックエンドは全部が共有（§4.1） |
-| Windows の層（一番上の問い Q1） | 案 A: Keiland の層を libkeiland の Win32 の最小の部分の上で（Keiland の見た目、決定 14 の通り、約 26 LW）。案 B: `apps/browser-win32/` に native の Win32 の層（Windows の見た目、約 12 LW、libkeiland の移植は WS234 へ）。Q1（統括）と P7 の推しは B（§4.2） |
-| libkeiland の Windows（決定 3・8・14） | backend は Win32 直（Qt6 は `apps/browser-qt` の frontend として使う）。案 A では最小の部分（§4.5.2 の表）を WS334 で、全体の移植は WS234 を推す（§4.8、問い Q2） |
+| browser の UI と libkeiland（決定 3・8・13・14・15） | 決定 15 で案 A: browser の UI（今の `userland/desktop/browser/`）は 1 つで、どの OS でも同じ source。OS と toolkit の差は libkeiland の backend（Wayland・Win32、将来 Qt6・GTK4）が吸収する。`apps/browser-win32/`（将来 `apps/browser-qt`・`apps/browser-gtk4`）は入口・resource・build だけ。libkeiland の Win32 の backend は Win32 直で、まず browser に要る最小の部分（§4.5）、Windows の口の 9 項目（§4.4）のうち snap・IME の composition・DPI・clipboard・pointer・暗い mode を最初に。Win32 を直に使う版（案 B）は libkeiland で足りない時の予備（§4.2） |
+| libkeiland の全体の移植 | browser の質に効く口（TSF・drag と drop・DirectManipulation・accent・UIA）は WS334 の後半、browser の使わない API の全部は WS234（§4.9） |
 | build（決定 11・12） | 一番上で `make browser-win64`（x86_64）・`make browser-winarm64`（arm64）。`apps/browser-win32/Makefile` を呼び、出力は `build/browser-win64/`・`build/browser-winarm64/`。toolchain は llvm-mingw を `LLVM_MINGW` か PATH で探し、x86_64 は Debian の mingw-w64 gcc も使える。UCRT（§6.1・§6.9） |
 | 試験 | 初めは host の cross build の warning 0 と、Linux の host での既存の試験（OS の層の posix の側）。shell がある程度できたら実機の Windows（ユーザーの host）で。Wine は任意で、Vulkan の判定に使わない（決定 11、§7） |
 | Phase | p002〜p015 の 14 Phase、計 約 100 LW（§8）。libbrowser の変更は §9 の file の一覧に限る |
@@ -85,7 +84,7 @@ ISO C の `<stdio.h>`・`<time.h>` の `time` などは除いた。
 | O9 | `net/tls.c:19`・`SSL_CTX_set_default_verify_paths` | 既定の根の証明書（`/etc/ssl/cert.pem`） | Win32 は §6.6（Windows の根の store を読み込む） |
 | O10 | `net/tls.c:158`・`:172-174`・`:899-930`、`net/cookie.c:28`・`:58` | pthread の mutex・key・once | winpthreads のまま |
 | O11 | `net/http.c:70-77`、`bind/prelude.c:921`・`:1078`、`js/builtin_global.c:106-110`、`page/script.c:1790` | `getenv` の試験・調べの切り替え（BROWSER_NET_DUMP など） | Win32 の `getenv` で動く（ANSI の環境。UTF-8 の値は要らない） |
-| O12 | `net/net.h:25` | User-Agent `"Mozilla/5.0 (X11; Linux x86_64) ..."` | OS ごとの定数を OS の層から（Win32 は `Windows NT 10.0; Win64; x64`、arm64 も同じ文字列が慣例）。問い Q9 |
+| O12 | `net/net.h:25` | User-Agent `"Mozilla/5.0 (X11; Linux x86_64) ..."` | OS ごとの定数を OS の層から（Win32 は `Windows NT 10.0; Win64; x64`、arm64 も同じ文字列が慣例）。問い U8 |
 | O13 | `net/url.c:412-459` | file: URL ↔ local の path（`/` で始まる POSIX の path） | `wb_os_path_from_url`・`wb_os_url_from_path`（Win32: `/C:/x` ↔ `C:\x`、`\\host\share` ↔ `file://host/share`） |
 | O14 | `base/file.c:15-17`・`:37`・`:91` | `open`・`read`・`write`・`close` | `wb_os_file_*`（Win32 は UTF-8 → UTF-16 の `_wopen`、`O_BINARY`） |
 | O15 | `page/page.c:284` | `realpath` | `wb_os_full_path`（Win32 `GetFullPathNameW`） |
@@ -96,7 +95,7 @@ ISO C の `<stdio.h>`・`<time.h>` の `time` などは除いた。
 | O20 | `js/builtin_date.c:1484`、`bind/environment.c:790` | `clock_gettime(CLOCK_REALTIME)` | O17 と同じ |
 | O21 | `js/builtin_typed.c:1377`、`bind/environment.c:1228` | `fopen("/dev/urandom")`（crypto.getRandomValues・randomUUID） | `wb_os_random`（Win32 `BCryptGenRandom` の system の RNG） |
 | O22 | `js/builtin_math.c:542` | `time(NULL)` で Math.random の種 | ISO C で動く。そのまま |
-| O23 | `bind/environment.c:29`・`:38-49`・`:229` | `navigator.platform` = `ZEDBSD_OS_NAME " " 機械名`（"zedBSD x86_64"） | OS の層の名前（Win32 は "Win32"。Chrome の Windows の値）。問い Q9 |
+| O23 | `bind/environment.c:29`・`:38-49`・`:229` | `navigator.platform` = `ZEDBSD_OS_NAME " " 機械名`（"zedBSD x86_64"） | OS の層の名前（Win32 は "Win32"。Chrome の Windows の値）。問い U8 |
 | O24 | `text/text.h:28`・`:39-41`、`text/font.c:74`・`:80` | 既定の font の絶対の path（`KEILAND_DATADIR` = `/usr/share`、`paths.h:36-48`） | 公開の `browser_fonts` に bold と fallback_mono を足し、既定は OS の層の data の directory（Win32 は .exe の隣の `share\fonts`）（§3.8） |
 | O25 | `page/media.c:132`・`:698`、`net/loader.c:736` | libmedia の wake の fd を loader の poll で待つ | wake を callback に変える（§5、O4 の fd の watch は不要になる） |
 | O26 | `vm/heap.c:59`・`:270`、`vm/vm.h`・`vm/bytecode.h`・`vm/interpreter.c` | `__attribute__((noinline))`・`__builtin_unwind_init`・`__builtin_frame_address`（保守的な stack の走査） | gcc・clang の拡張。mingw の gcc と clang で使える。MSVC は対象にしない（§6.1） |
@@ -194,7 +193,7 @@ ISO C の `<stdio.h>`・`<time.h>` の `time` などは除いた。
 
 | library | 行 | ISO C の外 | Windows |
 | --- | --- | --- | --- |
-| libtruetype | 4,208 | `companion.c:32-35`・`:250-284`（`open(O_RDONLY\|O_CLOEXEC)`・`fstat`・`read`） | mingw に `O_CLOEXEC` が無い（compile が通らない）。`O_BINARY` が無いと text の mode で読む。1 関数を直す（決定 6 の解釈、§6.3・問い Q8） |
+| libtruetype | 4,208 | `companion.c:32-35`・`:250-284`（`open(O_RDONLY\|O_CLOEXEC)`・`fstat`・`read`） | mingw に `O_CLOEXEC` が無い（compile が通らない）。`O_BINARY` が無いと text の mode で読む。1 関数を直す（決定 6 の解釈、§6.3・問い U7） |
 | libpng-compat | 950 | なし（`fopen("rb")`） | そのまま |
 | libjpeg-compat | 3,890 | なし | そのまま。`jpeglib.h:66` の `typedef int boolean` は `windows.h` と同じ翻訳単位で衝突するので、`windows.h` を include する file（`os-win32.c` など）と分ける |
 | libgif-compat | 1,150 | `decode.c:54`（`open` の file の口、`DGifOpenFileHandle(int)`） | compile は通る（mingw の io.h）。libbrowser は使わない（memory の口）。`O_BINARY` の欠けは file の口だけの問題として記録 |
@@ -276,7 +275,7 @@ Explore の補助の報告のうち、設計が頼る次の行を P7 が grep �
 | Node の binding・libuv | bind（DOM の binding）・net の loader（thread と poll） |
 
 - 決め: core の**公開の header は今は作らない**。core の interface は internal の `js/js.h`・`vm/vm.h` のまま。理由: 決定 9 が求めるのは「core だけで build して
-  library にできる」事で、公開の安定な API は外の embedder が現れてからの判断（master-design-policy §2.6: 公開の header は大きな interface の決定の後）。問い Q14。
+  library にできる」事で、公開の安定な API は外の embedder が現れてからの判断（master-design-policy §2.6: 公開の header は大きな interface の決定の後）。問い U13。
 - build: libbrowser の Makefile に「core の source の一覧」（`LIBBROWSER_SCRIPT_SOURCES`）を分けて書き、libbrowser.so はその一覧と残りから作る（source の重複は無い）。
   archive の target は試験と Windows の build で作る。
 
@@ -362,7 +361,7 @@ struct browser_storage_calls {
   LOCAL は今と同じく初めて使う時に読む。
 - cookie の期限: jar の cookie に期限（UTC の ms）を足し、Expires・Max-Age を保つ（今は過去の時の削除だけ）。期限の過ぎた cookie は使う時と開く時に捨てる。
 - cache の上限: backend の cache の space の合計を `BROWSER_INSTANCE_CACHE_LIMIT`（既定 256 MiB、instance の options で変えられる）で LRU にする。
-  disk の cache を第 1 段で入れるかは問い Q6。
+  disk の cache を第 1 段で入れるかは問い U5。
 
 #### 3.5.5 実装（backend）
 
@@ -372,8 +371,8 @@ struct browser_storage_calls {
 | files | `libbrowser/storage/files.c`（新、libbrowser に入れ公開の関数 `browser_storage_files_open(directory, &calls, &context)` で渡す） | `<directory>/<space の名前>/<key>`。LOCAL は `<directory>/local-storage/<key>.ls`（**今の path と形のまま**: 今の zedBSD の localStorage がそのまま読める）。書きは一時の file → `wb_os_replace`。OS の呼び出しは §3.4 の層だけ |
 | program の物 | program | 表を満たせば何でもよい（試験の fake など） |
 
-- directory を決めるのは program（frontend の層が `storage_directory` で共通の shell に教える、§4.1）: zedBSD・Linux は `$XDG_DATA_HOME/keiland/browser`（無ければ `~/.local/share/keiland/browser`。今の localStorage と同じ親）、
-  Windows は `%LOCALAPPDATA%\OmniGrammaton\User Data`（`SHGetKnownFolderPath(FOLDERID_LocalAppData)`）。libbrowser は環境変数を読まなくなる（O18 が消える）。
+- directory を決めるのは program（browser の UI。§4.5 の `kl_app_storage_directory`）: zedBSD・Linux は `$XDG_DATA_HOME/keiland/browser`（無ければ `~/.local/share/keiland/browser`。今の localStorage と同じ親）、
+  Windows は `%LOCALAPPDATA%\OmniGrammaton`（`SHGetKnownFolderPath(FOLDERID_LocalAppData)`）。browser の UI は libkeiland の `kl_app_storage_directory`（§4.5）で受け取る。libbrowser は環境変数を読まなくなる（O18 が消える）。
 - 2 つの process が同じ directory を使う時: 今の libbrowser にも同じ問題がある（localStorage の file は最後に書いた物が勝つ）。files の backend は directory に
   lock の file を置き、取れなければ ENOLCK を返して instance は memory だけで動く（console に知らせる）。Windows の 2 つ目の起動は、shell が既にある窓に URL を渡す
   （§4.3 の単一の起動）ので普通は起きない。
@@ -412,233 +411,177 @@ struct browser_storage_calls {
   WS334 の Phase で全部を v4 に直す（試験の file は WS074 の物なので Q1 と P8 の調整、§9）。
 - `exports.map` に `browser_instance_*`・`browser_storage_*`・`browser_free` を足す。Windows の DLL の export は exports.map の glob を .def に展開して作る（§6.2）。
 
-## 4. frontend の構成（`apps/`）と libkeiland の Windows
+## 4. browser の UI・libkeiland の backend・`apps/`
 
-### 4.1 どちらの案にも共通の形（決定 13）
+### 4.1 形（案 A、推し。決定 13・14）
 
 ```
- apps/browser-shell/      共通の shell（C。toolkit・OS の header を include しない。browser.h と ISO C だけ。libkeiland にも依らない）
-   ▲                         ▲                          ▲                     ▲
- Keiland の層（libkeiland）    Windows の層               apps/browser-qt/(将来)  apps/browser-gtk4/(将来)
- userland/desktop/browser/     案 A: Keiland の層 + libkeiland の Win32 の最小の部分
- shell/（zedBSD・Linux）        案 B: apps/browser-win32/ の native の Win32 の層
-             │                         │
-             └────────────┬────────────┘
-                          ▼
+ userland/desktop/browser/        browser の UI（main.c の中身・shell/）。source は 1 つ。libkeiland だけを使う
+   ▲ 同じ source を compile
+ ├─ zedBSD・Linux: /bin/browser    (userland/desktop/browser/Makefile、今の package のまま)
+ ├─ apps/browser-win32/            Windows の入口・resource・manifest・Makefile（make browser-win64・browser-winarm64）
+ ├─ apps/browser-qt/   (将来)      Qt6 の backend で動かす時の入口・Makefile
+ └─ apps/browser-gtk4/ (将来)      GTK4 の backend で動かす時の入口・Makefile
+             │
+             ▼
+ libkeiland（公開の API は 1 つ）
+   backend: Wayland（今の ui/ ほか）・Win32（libkeiland/win32/、新）・Qt6・GTK4（将来）
+             │
  libbrowser（engine 3 つ・ストレージバックエンド files・OS の層）、libmedia、libtruetype・compat
 ```
 
-- **共通の shell**（`apps/browser-shell/`）が持つ物: 引数と headless の mode（今の `browser/main.c` の窓でない部分）、instance と storage の directory の選び
-  （場所は層が教える）、view の callback の受け、navigation の操作（戻る・進む・再読み込み・止める・location の確定）、題の作り方（「page の題 - OmniGrammaton」）、
-  location の欄の文字（今の `titlebar.c` の `titlebar_state`・`titlebar_scheme_length` の論理）、鍵の名前（evdev の番号と文字 → DOM の `key`・`code`、今の `keys.c`）、
-  wake の受け渡し（network の thread の wake → 層の post、今の `shell.c:991-1000`）、Vulkan の device・swapchain・record（今の `present.c` から Wayland の 2 行を
-  除いた物。instance の拡張と surface の作成は層が渡す）、CPU の道（`browser_view_draw_pixels`）。
-- **層が持つ物**: 窓・event の loop・入力の device の値 → 共通の形（evdev の番号・pointer・wheel・touch）・IME・clipboard・drag・titlebar や toolbar の部品・
-  Vulkan の surface・CPU の絵の表示・touch の慣性（Keiland は `kl_gesture`・`kl_scroller`）・OS の場所（data・storage）・単一の起動。
-- **共通の shell と層の interface**（`apps/browser-shell/shell.h`、案）:
-  - 層 → 共通: `browser_shell_open(options, frontend calls, &shell)`、`_event(shell, const struct browser_shell_event *)`（鍵・pointer・wheel・focus・
-    大きさ・text の確定・preedit・command の id）、`_process(shell)`（wake の後に層の thread で）、`_draw(shell, target)`、`_timeout(shell)`、`_close`。
-  - 共通 → 層（`struct browser_shell_frontend` の callback）: `post_wake`（任意の thread）、`set_title`、`set_location`（文字と戻る・進むの可否）、
-    `request_redraw`、`text_input`（caret の矩形・周りの文字・目的、今の `browser_view_text_*` の結果）、`copy`（MIME と bytes）、`vulkan_extensions`・
-    `vulkan_surface`、`present_pixels`、`data_directory`・`storage_directory`、`monotonic_ms`（時計。今の `clock_gettime` の 2 か所）。
-  - event の鍵は evdev の番号（今の Keiland と同じ）と、層が分かれば打つ文字（`text`）。Windows は scan code を evdev の番号に写す（§8 T1。案 A は libkeiland の中、
-    案 B は `apps/browser-win32/` の中に同じ表）。Qt・GTK4 の層も native の scan code から同じ写しを持つ（Linux では evdev の番号 + 8 = X11 の keycode）。
-- **共通の shell が libkeiland に依らない事の代価**: 今の shell の論理のうち kl に結び付いた所（touch の `kl_gesture`・`kl_scroller`、`kl_app_post` の wake、
-  titlebar の controls の宣言、mail）を Keiland の層に残し、共通の shell との境を callback にする。refactor の量は共通の shell を作る Phase（p008、約 10 LW）の中で、
-  案 A でも同じだけ要る（Qt・GTK4 の frontend のため）。案 B ではさらに、Keiland で `kl_gesture`・`kl_scroller` が受け持つ touch の慣性の scroll を Windows の層で
-  作り直す（第 1 段は wheel と touchpad の細かい値だけ、慣性は OS の精密 touchpad の値に任せる。touch の画面の慣性は第 2 段）。
+- **UI は 1 つ**: browser の窓・titlebar の controls・入力の扱い・touch は今の `userland/desktop/browser/shell/` のまま、どの OS でも同じ source を使う。
+  OS と toolkit の差は libkeiland の backend が吸収する（2026-11-01 のユーザーの見立ての要点: Windows の Chrome も Windows の標準の部品の見た目ではなく自前の
+  見た目で、自前の font でよい。今のブラウザに menu の帯は無く、menu が要る所は libkeiland の Win32 の backend が HMENU に写せる。libkeiland が作るのは HWND 1 つ）。
+- **`apps/browser-<backend>/` は入口と build だけ**（決定 13 の `apps/browser-win32/`、将来の `apps/browser-qt/`・`apps/browser-gtk4/`）:
+  - 入口: その OS の `main`（Windows は `wWinMain`・`wmain` で UTF-16 → UTF-8）から browser の `browser_main(argc, argv)` を呼ぶ。
+  - build: libbrowser・libmedia・libkeiland（その backend の file の組）と browser の UI を compile し、その OS の形に包む（Windows は .exe・DLL・zip、Qt・GTK4 は
+    Linux・macOS の配布の形）。
+  - resource: icon・版の情報・manifest（Windows）、desktop file（Linux）など。
+  - 中身の code（窓・入力・描画）は持たない。持つと UI が 2 つになり、zedBSD と別れる。
 - **zedBSD の build と別れない仕組み**:
-  1. Keiland の層は zedBSD・Linux（と案 A の Windows）で同じ source。
-  2. source の一覧を 1 か所に: libbrowser・libmedia・libtruetype・compat・（案 A は libkeiland も）・browser の shell の source の一覧を各 directory の `sources.mk`
-     （変数だけ）に移し、zedBSD の `Makefile`・Linux の `Makefile.linux`・`apps/browser-win32/Makefile`・WS074 の `plan/ws074/tests/list-sources.sh` が同じ
+  1. UI・libkeiland の共通の部分・libbrowser の source は 1 つで、`apps/` は compile するだけ。
+  2. source の一覧を 1 か所に: libbrowser・libmedia・libtruetype・compat・libkeiland（共通の file と backend ごとの file）・browser の UI の source の一覧を各 directory の
+     `sources.mk`（変数だけ）に移し、zedBSD の `Makefile`・Linux の `Makefile.linux`・`apps/browser-win32/Makefile`・WS074 の `plan/ws074/tests/list-sources.sh` が同じ
      `sources.mk` を読む（list-sources.sh は WS074 の物。1 行の直しを Q1・P8 と調整）。
-  3. 共通の shell の host の試験（`apps/browser-shell/tests/`）を Linux の host で流し、zedBSD・Windows の両方の build の前提にする。
-- **今の `userland/desktop/browser/` を `apps/` へ移すか**: 移さない（推し）。zedBSD の image の package の仕組み（`ZEDBSD_USERLAND_PACKAGE`、apps.conf の
-  `/bin/browser`）に乗っているため。問い Q3。
+  3. libkeiland の公開の API は backend に依らず 1 つ（`include/keiland/`）。backend に無い機能は ENOTSUP を返す約束にし、UI はそれで続く（今の mail が system の無い時に
+     続く `mail.c:72-79` と同じ形）。
+- **UI の source を `apps/` へ移すか**: 移さない（推し）。zedBSD の image の package の仕組み（`ZEDBSD_USERLAND_PACKAGE`、apps.conf の `/bin/browser`）に乗っているため。問い U2。
 
-### 4.2 Windows の層: 案 A（Keiland の見た目、libkeiland の最小の移植）か案 B（Windows の native の見た目）か（問い Q1、一番上の問い）
+### 4.2 決定 15: libkeiland の Win32 の backend の上で今の UI のまま（案 A）。Win32 を直に使う版（案 B）は予備
 
-用語: **L&F**（look and feel）= 窓・ボタン・menu などの見た目と触り心地。**chrome** = page の外側の部品（tab・toolbar・location の欄・menu・設定の画面）。
-**native** = Windows の標準の部品（Windows の button・入力の欄・menu）とその見た目。
+- 2026-11-01 ユーザーから、ブラウザの UI はまず libkeiland の Win32 の backend の上で今の Keiland の UI のまま移植し、libkeiland で足りなければ後で Win32 を直に使う版を
+  作ればよい（大きな実装ではない）、という趣旨の決定を受けた（ws.md の決定 15）。理由の要点: Windows の Chrome も Windows の標準の部品の見た目（Fluent）を使わない、
+  font は自前でよい、今のブラウザに menu の帯は無く要る時は HMENU に写せる、libkeiland が作るのは HWND 1 つ。
+- 用語: **chrome** = page の外側の部品（toolbar・location の欄・tab・menu・設定の画面）。**backend** = libkeiland の中で OS・toolkit に合わせて差し替える部分。
+- この決定で: browser の UI は 1 つ（§4.1）。Windows の app らしさは libkeiland の Win32 の backend が Windows の口に写して保つ（§4.4 の 9 項目）。将来の Qt・GTK4 も
+  libkeiland の backend で、`apps/browser-qt`・`apps/browser-gtk4` は入口と build だけ（§4.1・§4.7）。
+- **予備の案 B**（Win32 を直に使う版。今は作らない）:
+  - 形: `apps/browser-win32/` に Windows の標準の部品の chrome（button・EDIT の location の欄）を書き、libkeiland に依らない共通の shell（`apps/browser-shell/`: 引数と
+    headless・instance と storage の場所・view の callback・navigation・題・location の文字・鍵の名前・wake・Vulkan の手順・CPU の道）を browser の UI から分けて使う。
+    量の目安: 共通の shell の refactor 約 10 LW と Windows の層 約 12 LW。
+  - 切り替えの印（どれかが p014 の実機の確かめ・p015 の後で残った時に、Q1 がユーザーに切り替えを諮る）:
+    1. libkeiland の Win32 の backend で、Windows の app として要る口（§4.4 の N1〜N3・N6・N7）が、Wayland の backend と同じ公開の API の約束を変えずには満たせない
+       （libkeiland の公開の header の約束の変更が要り、zedBSD の app に響く）。
+    2. location の欄など libkeiland の text の欄で、日本語の IME（TSF を含む）の振る舞いが Windows の利用者の期待に届かず、直す量が案 B の量（約 22 LW）を超える見込み。
+    3. libkeiland の共通に compile できる file が少なく（R9b）、Win32 の backend の量が見積もり（p010・p011 で 26 LW）の 2 倍を超える。
+    4. ユーザーが Windows の標準の部品の見た目を求めた時。
+  - 切り替えても失わない物: libbrowser の OS の層・ストレージバックエンド・libmedia・build（`make browser-win64`）・試験・鍵の表（T1）・CF_HTML（T2）・ICO（T3）。
 
-| 項目 | 案 A: Keiland の層 + libkeiland の Win32 の最小の部分 | 案 B: `apps/browser-win32/` の native の Win32 の層 |
+### 4.3 libkeiland の backend の作り方: Win32 直か Qt6 か（決定 8）
+
+| 項目 | Win32 直（`libkeiland/win32/`） | Qt6 の backend（`libkeiland/qt/`） |
 | --- | --- | --- |
-| chrome の見た目 | Keiland の見た目（libkeiland が部品を自分で描く）。窓の枠・IME の候補の窓・file の dialog は Windows の物 | Windows の見た目（標準の button・EDIT の欄・menu、暗い mode・Mica） |
-| zedBSD の browser と共有する code | 共通の shell + Keiland の層の全部（Windows だけの code は入口と場所の数個） | 共通の shell だけ。窓・入力・IME・clipboard は Windows の層に別に書く |
-| libkeiland の移植 | 要る（kl_app・kl_window・text input・copy・titlebar の controls・Vulkan の surface・CPU の表示の最小の部分、§4.5）。決定 14 の通り | 要らない。libkeiland の移植は WS234 の別の目標に（決定 3・14 は WS234 で）。shell が libkeiland の部品（例: `kl_gesture` の慣性）を使いたくなった時だけ、その部品を最小に移す |
-| IME・UI Automation | libkeiland の text の欄は IME（IMM32）と UIA を自分で作る（page の中の欄と同じ） | location の欄は Windows の EDIT で IME・undo・clipboard・UIA が最初から働く（page の中の欄は IMM32 を自分で） |
-| qt・gtk4 の計画との合い方 | Windows だけ Keiland の見た目、Qt・GTK4 は各 toolkit の見た目 | どの frontend もその toolkit の native の見た目（決定 13 の「toolkit ごとの層」と同じ考え） |
-| 作業の量（§8） | 約 26 LW（libkeiland の最小の部分 2 Phase） | 約 12 LW（native の層 1 Phase） |
-| 危険 | libkeiland の共通に compile できる file の範囲が未確かめ（§2.12、R9b）。titlebar の controls を libkeiland で描き直す（compositor の描き方は持ち込めない） | 窓・入力の code が zedBSD と別になる（共有は共通の shell の interface が守る） |
-
-- **Q1（統括）の推し: 案 B**。理由: (1) Windows の利用者には Windows の見た目が自然で、Q1 がユーザーに答えた通り libkeiland の部品は Keiland の見た目になる。
-  (2) 決定 13 の toolkit ごとの frontend の計画と同じ考え（各 toolkit の native の見た目）。(3) 作業が少なく、OmniGrammaton の .exe に早く届く。
-  (4) libkeiland の Win32 の移植は WS234（同じ .exe が zedBSD と Windows で動く libkeiland の DLL）の目標そのもので、そこで「じっくり」行える（決定 14 の後半）。
-- 案 A の利点: zedBSD と Windows で chrome の code が 1 つ。決定 14 を文字通りに進められ、libkeiland の Win32 の土台が早くできる。
-- この設計はどちらでも成り立つ: 共通の shell（libkeiland に依らない）・libbrowser・libmedia・build・試験・p002〜p009 は両方で同じ。分かれるのは §8 の p010B（案 B）か p010A・p011A（案 A）だけ。
-- P7 の見立て: 案 B に同意する。案 A の「最小の部分」は titlebar の controls（libkeiland の canvas で location の欄の編集まで描く）が大きく、それが Windows では
-  native の EDIT 1 つで済むため。
-
-### 4.3 libkeiland の Windows の backend: Win32 直か Qt6 か（決定 8）
-
-| 項目 | Win32 直（`libkeiland/win32/`） | Qt6（`libkeiland-qt6`） |
-| --- | --- | --- |
-| window と message loop | `CreateWindowExW`・`MsgWaitForMultipleObjectsEx` で `kl_app_dispatch(timeout)`。`kl_app_post` は内部の queue と event（`PostMessageW` は queue が満ちると失敗する） | `QGuiApplication`・`QWindow`。dispatch は `processEvents(timeout)`。`kl_app_post` は `postEvent`。C の libkeiland から C++ の層を呼ぶ |
-| DWM・窓の枠 | 暗い mode（`DWMWA_USE_IMMERSIVE_DARK_MODE`）・Mica（`DWMWA_SYSTEMBACKDROP_TYPE`、Windows 11 22H2 以降）を直に。題の帯に controls を入れる形（`WM_NCCALCSIZE`・`DwmExtendFrameIntoClientArea`・`WM_NCHITTEST`、snap の配置の hit test）も直に | frameless + 自前、または OS の枠。Mica・snap は native の handle で Win32 を呼ぶ |
-| 入力 | scan code → evdev の番号の表、`ToUnicodeEx`・`WM_CHAR`、`WM_POINTER*`（mouse・touch・pen）、`WM_MOUSEWHEEL` | `QKeyEvent::nativeScanCode()` → 同じ表、`QTouchEvent`・`QTabletEvent` |
-| IME | IMM32（`WM_IME_COMPOSITION`、`ImmSetCompositionWindow`・`ImmSetCandidateWindow`）を先に、TSF（`ITextStoreACP`、C の vtable）を後に | `QInputMethod`（Qt が TSF を包む。質は Qt の版に依る） |
-| clipboard | `CF_UNICODETEXT`・`CF_HTML` | `QClipboard` |
-| file の dialog | `IFileOpenDialog`（browser は使わない） | `QFileDialog`（Qt Widgets が要る） |
+| window と message loop | `CreateWindowExW`・`MsgWaitForMultipleObjectsEx` で `kl_app_dispatch(timeout)`。`kl_app_post` は内部の queue と event（`PostMessageW` は queue が満ちると失敗する） | `QGuiApplication`・`QWindow`、`processEvents(timeout)`、`postEvent`。C の libkeiland から C++ の層を呼ぶ |
+| 窓の枠・snap | `WM_NCCALCSIZE`・`WM_NCHITTEST`（最大化の button の `HTMAXBUTTON` で Windows 11 の snap の配置）を直に | frameless の QWindow の上で、結局 native の handle（`winId()`）で Win32 を呼ぶ |
+| IME | TSF（`ITfThreadMgr`・`ITextStoreACP`、C の vtable）を直に | `QInputMethod`（Qt が TSF を包む。質は Qt の版に依る） |
 | DPI | manifest の Per-Monitor V2、`WM_DPICHANGED` | Qt が扱う |
-| font | 自前（libtruetype、同梱の font）。どちらでも同じ | 同じ（Qt の font は使わない） |
-| 描画の面 | Vulkan `VK_KHR_win32_surface`。予備は DIB section → `BitBlt` | `QVulkanInstance`。予備は `QBackingStore` |
-| thread・socket | WS327 の `thread-win32.c`・`socket-win32.c`（既にある） | 同じ |
-| accessibility | UI Automation の provider（今は木が無い、§4.6） | `QAccessible`（木が無いのは同じ） |
 | 配布 | 追加の DLL 無し | Qt6Core・Gui（約 15 MB）・`qwindows.dll`、LGPLv3 の動的 link の約束 |
-| build | mingw の C だけ。x86_64・arm64 とも llvm-mingw | Qt6 を Windows の x86_64・arm64 に cross build（Debian に無い）、C++ |
-| 他の OS | Windows だけ | macOS・X11 にも同じ code（Keiland は Linux・FreeBSD では Wayland の実装を既に持つ） |
-| 似た例（知識、出典の取得はしていない） | Chrome は自前の toolkit（Views）で描き、OS には窓・DWM・IME（TSF）・UIA・dialog を頼る | Ladybird は Qt6 の UI（自前の toolkit が無い） |
+| build | mingw の C。x86_64・arm64 とも llvm-mingw | Qt6 を Windows の x86_64・arm64 に cross build（Debian に無い）、C++ |
+| 他の OS | Windows だけ | macOS・X11 にも同じ backend（Keiland は Linux・FreeBSD では Wayland の backend を既に持つ） |
+| 似た例（知識、出典の取得はしていない） | Chrome は自前の toolkit（Views）で描き、OS には窓・DWM・IME（TSF）・UIA・dialog を頼る | Ladybird は Qt6 の UI |
 
-- **推し: Win32 直**（問い Q2、確かめ。案 A を選ぶ時と、WS234 で全体を移す時の両方に効く）。理由: (1) libkeiland は部品を自分で描くので、Qt は窓と入力の中継だけになり Qt の部品の native らしさを使わない（design-notes の (1)）。
-  (2) DWM・TSF・UIA は Win32 の方が直に細かく使える。(3) 追加の DLL と LGPL の約束、Qt6 の x86_64・arm64 の cross build を持ち込まない。(4) Chrome と同じ形。
-- 決定 13 で Qt6 には別の使い道ができた: **libkeiland の backend でなく `apps/browser-qt` の frontend** として使えば、Qt の部品（Widgets）をそのまま生かせる。
-  Qt6 を libkeiland の下に入れる理由は、なお無い。
+- **推し: Windows は Win32 直**（問い U1、確かめ）。libkeiland は部品を自分で描くので Qt は窓と入力の中継だけになり、Windows では DLL と license の約束が増えるだけ。
+  Qt6・GTK4 の backend は macOS や X11 など Wayland の無い所に出す時の物（将来の `apps/browser-qt`・`apps/browser-gtk4`）。
 
-### 4.4 案 B: `apps/browser-win32/` の native の層
+### 4.4 libkeiland の Win32 の backend が受け持つ Windows の口（9 項目）
 
-| file（案） | 中身 |
-| --- | --- |
-| `Makefile` | §6.9 |
-| `main.c` | `wWinMain`（GUI）と `wmain`（`omnigrammaton-cli.exe`、console）。UTF-16 の argv → UTF-8 → 共通の shell |
-| `window.c` | 窓の class `OmniGrammaton`、message loop、wake、大きさ、modal な大きさの変更の間の描画（`WM_ENTERSIZEMOVE` で timer）、単一の起動（名前付きの mutex と `WM_COPYDATA`） |
-| `frame.c` | DWM（暗い mode・Mica）、第 2 段の題の帯の一体化 |
-| `toolbar.c` | 戻る・進む・再読み込み（button）と location（EDIT）。共通の shell の `set_location` を映し、Enter で command を返す。toolbar の高さと部品は DPI で |
-| `input.c` | 鍵・pointer・wheel・touch・pen → `browser_shell_event` |
-| `keys-table.c` | scan code（set 1、拡張の bit）→ evdev の番号の表（§8 T1） |
-| `ime.c` | IMM32（第 1 段）、TSF（第 2 段、p015） |
-| `clipboard.c`・`cf-html.c` | `CF_UNICODETEXT`、`CF_HTML` の encode（§8 T2） |
-| `present.c` | `vkCreateWin32SurfaceKHR`、拡張の名前、CPU の絵の `BitBlt` |
-| `platform.c` | `%LOCALAPPDATA%\OmniGrammaton\User Data`、.exe の directory の `share\` |
-| `resources/OmniGrammaton.rc`・`OmniGrammaton.manifest`・`OmniGrammaton.ico` | §6.4 |
-| `tools/make-ico.c` | host の道具: 共通の icon の絵を各大きさに描き ICO に書く（§8 T3）。host の cc で build |
-| `exports/*.def.in` | DLL の export の .def の元（§6.2） |
+| # | 口 | 最初の最小の部分（決定 14） | 後（WS334 の後半） |
+| --- | --- | --- | --- |
+| N1 | HWND 1 つ、custom frame（`WM_NCCALCSIZE` で client を題の帯まで広げる、`DwmExtendFrameIntoClientArea` で影）、`WM_NCHITTEST`（題の帯の drag、縁の大きさの変更、最大化の button の `HTMAXBUTTON` で Windows 11 の snap の配置）、最小化・最大化・閉じるの button（libkeiland が描き、hover と押下を自分で） | ○ 全部（titlebar の controls を題の帯に置くのが Keiland の browser の形のため） | Mica（`DWMWA_SYSTEMBACKDROP_TYPE`）の背景 |
+| N2 | TSF の IME（composition と候補の窓の位置） | IMM32 の口で composition（`WM_IME_COMPOSITION`）と候補の位置（`ImmSetCompositionWindow`・`ImmSetCandidateWindow`）。MS-IME・Google 日本語入力は IMM32 の互換で動く | TSF（`ITextStoreACP`）: 周りの文字（`kl_window_text_context`）・再変換・touch keyboard・絵文字の panel |
+| N3 | Per-Monitor DPI V2 | ○ manifest、`WM_DPICHANGED` の矩形、libkeiland の部品と titlebar を倍率で描く（libkeiland の canvas の倍率は p011A で確かめる）。page の中身は §4.6 | — |
+| N4 | `IFileDialog`（`IFileOpenDialog`・`IFileSaveDialog`）を `kl_file_chooser_open` に | —（browser は使わない。ENOTSUP） | ○ |
+| N5 | HMENU（`kl_menu_*` を `CreatePopupMenu`・`TrackPopupMenuEx` に） | —（browser は menu を使わない） | ○ |
+| N6 | clipboard と OLE の drag と drop | clipboard の copy（`CF_UNICODETEXT`・`CF_HTML`） | 貼り付け、OLE の `DoDragDrop`（画像を外へ、`kl_window_start_drag_icon`）と drop の受け |
+| N7 | 精密 touchpad の scroll・pen・touch | `EnableMouseInPointer(TRUE)` と `WM_POINTER*`（mouse・touch・pen を 1 つの口で）、`WM_MOUSEWHEEL`・`WM_MOUSEHWHEEL` の細かい値（精密 touchpad は 120 未満の値で滑らかに来る）。touch の慣性は今の `kl_gesture`・`kl_scroller` | DirectManipulation による精密 touchpad の慣性と pinch、pen の圧力・傾き（`POINTER_PEN_INFO`） |
+| N8 | 暗い mode と accent の色 | 暗い mode: system の設定（`AppsUseLightTheme`）を読み `DWMWA_USE_IMMERSIVE_DARK_MODE` と libkeiland の theme に | accent の色（`DwmGetColorizationColor` か WinRT の `UISettings`）を libkeiland の theme の accent に、設定の変更の通知（`WM_SETTINGCHANGE`） |
+| N9 | UI Automation の accessibility | — | ○（libkeiland の部品の木を `IRawElementProviderSimple`・`Fragment` に。page の中身は libbrowser に accessibility の木が無く範囲の外） |
 
-- `windows.h` を include するのはこの directory と `libbrowser/base/os-win32.c`・`libmedia/media-os-win32.c` だけ（`jpeglib.h` の `boolean` の衝突を避ける、§2.9）。
-- shell の **Win32 の層に libkeiland を使わない**。WS327 の `kl_thread`・`kl_socket` も使わない（wake は Win32 の event、network は libbrowser の中）。
+- 最小の部分の目安: browser が Windows で起動し、page を表示・操作でき、location の欄に日本語を入れられ、snap・DPI・暗い mode が Windows の app として働く所まで。
 
-#### 4.4.1 項目ごとの写し（案 B）
-
-- **window と message loop**: `MsgWaitForMultipleObjectsEx(内部の起こしの event, 共通の shell の timeout, QS_ALLINPUT, MWMO_INPUTAVAILABLE)` → `PeekMessageW`。
-  libbrowser の wake（network の thread）は共通の shell の atomic の印 → 層の `post_wake` → `SetEvent`。
-- **DWM**: §4.2。第 1 段は普通の枠 + client の上の toolbar。題の帯の一体化（Chrome・Edge の形）は第 2 段（p015）。
-- **入力**: 鍵は `WM_KEYDOWN`・`WM_SYSKEYDOWN` の lParam の bit 16-23（scan code）と 24（拡張）→ evdev の番号、修飾は `GetKeyState`、打つ文字は
-  `ToUnicodeEx`（dead key を壊さないよう `WM_CHAR` と合わせる）。共通の shell は `text` があればそれを DOM の `key` に使い、無ければ今の US の表
-  （JIS の配列で記号が正しく出る）。pointer・touch・pen は `EnableMouseInPointer(TRUE)` と `WM_POINTER*`。wheel は 120 で 1 段、精密 touchpad の細かい値。
-- **IME**: page の中の文字の欄は `browser_view_text_target`・`_text_context`・`_compose`・`_commit_text`（`browser.h:340-384`）。IMM32: `GCS_COMPSTR` → compose、
-  `GCS_RESULTSTR` → commit、`ImmSetCompositionWindow`・`ImmSetCandidateWindow` に caret の矩形。toolbar の EDIT の欄は OS の IME がそのまま働く。
-  TSF（周りの文字・再変換・touch keyboard）は第 2 段。
-- **clipboard**: `kl_window_copy` に当たる共通の `copy` を `CF_UNICODETEXT` と `CF_HTML`（`RegisterClipboardFormatW(L"HTML Format")`）。drag で画像を外へ出す
-  （今の Keiland の shell の機能、`shell.c:1153-1172`）は OLE の `DoDragDrop` で第 2 段。
-- **file の dialog**: 使わない（今の shell に download・upload が無い）。
-- **DPI**: Per-Monitor V2。toolbar は system の DPI の font で。page の中身は §4.6.1。
-- **font**: page は同梱の font（§6.8）。Windows の font を使う設定は問い Q7。
-- **描画の面**: 共通の shell が `vulkan_extensions`（`VK_KHR_surface`・`VK_KHR_win32_surface`）で instance を作り、`vulkan_surface` で surface、FIFO の swapchain、
-  `browser_view_record`。Vulkan の loader（`vulkan-1.dll`、GPU の driver が入れる）が無い・device が作れない時は CPU の道: `browser_view_draw_pixels` → DIB section →
-  `BitBlt`（`WM_PAINT`）。`--no-gpu` の引数で CPU の道を選べる（試験用）。Direct3D 12 は使わない（WS234 の D3D12 の記述とは別。WS234 の再開の時に決める）。
-- **thread・socket（WS327）**: 使わない（§4.4）。
-- **accessibility**: toolbar は native の部品で UIA が付く。page の中身は libbrowser に accessibility の木が無く範囲の外（Future Work の候補「libbrowser の
-  accessibility の木と UIA・AT-SPI の provider」、Q1 に登録を頼む）。
-
-### 4.5 案 A: Keiland の層 + libkeiland の Win32 の最小の部分（決定 14）
-
-#### 4.5.1 `apps/browser-win32/` の中（案 A）
-
-| file（案） | 中身 |
-| --- | --- |
-| `Makefile` | §6.9。libbrowser・libmedia・libkeiland（Win32 の最小の部分）と共通の shell・Keiland の層・この directory を compile |
-| `main.c` | `wWinMain`（`OmniGrammaton.exe`、GUI）と `wmain`（`omnigrammaton-cli.exe`、console）。UTF-16 の argv → UTF-8 → 共通の shell |
-| `platform.c` | `%LOCALAPPDATA%\OmniGrammaton\User Data`、.exe の directory の `share\`、単一の起動（名前付きの mutex と `WM_COPYDATA` で既にある窓に URL を渡す） |
-| `resources/OmniGrammaton.rc`・`OmniGrammaton.manifest`・`OmniGrammaton.ico` | §6.4 |
-| `tools/make-ico.c` | host の道具: 今の browser の icon の絵を各大きさに描き ICO に書く（§8 T3）。host の cc で build |
-
-- Keiland の層の Windows での差: `present.c` の拡張の名前（`kl_window_vulkan_extensions`）、`window.c`・`touch.c` の `clock_gettime`（kl の時計へ）、`mail.c`（`kl_app_system` が
-  NULL の道が既にある、`mail.c:72-79`）。どれも zedBSD と同じ source で済む形にする（§4.7）。`#ifdef _WIN32` を Keiland の層に入れない。
-- `windows.h` を include するのは `apps/browser-win32/`・`libkeiland/win32/`・`libkeiland/platform/*-win32.c`・`libbrowser/base/os-win32.c`・`libmedia/media-os-win32.c` だけ
-  （`jpeglib.h` の `boolean` の衝突を避ける、§2.9）。
-
-#### 4.5.2 libkeiland の Win32 の最小の部分（案 A）
+### 4.5 libkeiland の Win32 の最小の部分（関数の一覧）
 
 - **形**: libkeiland の Wayland の実装（`ui/window.c` ほか 14 の file が `struct kl_window` の Wayland の field を直に使う、§2.7）に継ぎ目を入れる案は選ばない（§11 A5）。
   代わりに **同じ公開の関数を Win32 の別の file の組（`libkeiland/win32/`）で持つ**（master-design-policy §2.6: 同じ契約の独立した実装）。OS と Wayland に触れない
   file（gesture・scroller・motion・canvas・text・theme など）は両方で compile する。どれが共通にできるかは p010A の最初に「Wayland・POSIX の header を include しない」を
-  checker（grep）で決めて表にする（未確かめ、§2.12）。
-- **最小の部分の一覧**（OmniGrammaton の Keiland の層が呼ぶ物、§2.6。Windows で働かせる）:
+  checker（grep）で決めて表にする（未確かめ、§2.12）。将来の Qt・GTK4 の backend も同じ形（`libkeiland/qt/`・`libkeiland/gtk4/`）。
+- **一覧**（browser の UI が呼ぶ物、§2.6。Windows で働かせる）:
 
 | 群 | 関数 | Win32 の写し |
 | --- | --- | --- |
 | app | `kl_app_open`・`kl_app_window_create`（`KL_PRESENT_NONE` と CPU の予備）・`kl_app_dispatch`・`kl_app_take`・`kl_app_post`・`kl_app_close` | 窓の class、`MsgWaitForMultipleObjectsEx` と `PeekMessageW`、内部の queue と event。modal な大きさの変更の間は `WM_ENTERSIZEMOVE` で timer を立て、`WM_TIMER`・`WM_SIZE` で event を出す |
-| window | `kl_window_size`・`kl_window_set_title`・`kl_window_close`、event（`KL_WINDOW_KEY`・pointer・wheel・touch・focus・大きさ・閉じ）（`window.c:228-291`） | `WM_KEYDOWN`・`WM_SYSKEYDOWN` の scan code（lParam の bit 16-23）と拡張の bit（24）→ evdev の番号（表、§8 T1）、打つ文字を `ToUnicodeEx` で event の `text` に、`EnableMouseInPointer(TRUE)` と `WM_POINTER*`、`WM_MOUSEWHEEL`（120 で 1 段） |
-| text input | `kl_window_text_input`・`kl_window_text_cursor`・`kl_window_text_context`、event `KL_WINDOW_TEXT_COMMIT`・`PREEDIT`・`DELETE` | IMM32: `GCS_COMPSTR` → PREEDIT、`GCS_RESULTSTR` → COMMIT、`ImmSetCompositionWindow`・`ImmSetCandidateWindow` に caret の矩形 |
-| clipboard | `kl_window_copy` | `CF_UNICODETEXT`、`text/html` は `CF_HTML`（§8 T2） |
-| titlebar の controls | `kl_window_set_controls`・`kl_window_focus_control_mode`・`kl_window_set_action_state`・`kl_window_set_control_parts`・`kl_window_set_control_text`・`kl_window_set_control_value`、event `KL_WINDOW_ACTION`・`KL_WINDOW_CONTROL_DONE` | 第 1 段: OS の普通の枠の下の client の上端に、libkeiland の canvas と theme で controls の帯を描く（戻る・進む・再読み込み・location の欄）。欄の編集は libkeiland の text の欄。題の帯に入れる形（DWM の一体化）は全体の移植で（問い Q15） |
+| window | `kl_window_size`・`kl_window_set_title`・`kl_window_close`、event（`KL_WINDOW_KEY`・pointer・wheel・touch・focus・大きさ・閉じ）（`window.c:228-291`） | N1・N7。鍵は scan code（lParam の bit 16-23）と拡張の bit（24）→ evdev の番号（表、§8 T1）、打つ文字を `ToUnicodeEx` で event の `text` に |
+| text input | `kl_window_text_input`・`kl_window_text_cursor`・`kl_window_text_context`、event `KL_WINDOW_TEXT_COMMIT`・`PREEDIT`・`DELETE` | N2 の最初の段 |
+| clipboard | `kl_window_copy` | N6 の最初の段（§8 T2 CF_HTML） |
+| titlebar の controls | `kl_window_set_controls`・`kl_window_focus_control_mode`・`kl_window_set_action_state`・`kl_window_set_control_parts`・`kl_window_set_control_text`・`kl_window_set_control_value`、event `KL_WINDOW_ACTION`・`KL_WINDOW_CONTROL_DONE` | N1 の題の帯に、libkeiland の canvas と theme で controls（戻る・進む・再読み込み・location の欄）を描く。欄の編集は libkeiland の text の欄（IME は N2）。Keiland では compositor が描く物（`browser/shell/titlebar.c:8-20`）で、compositor の code は持ち込めないので libkeiland の側で作る |
 | Vulkan | `kl_window_vulkan_surface`（`vkCreateWin32SurfaceKHR`）、新 `kl_window_vulkan_extensions`（下の header の追加） | — |
-| CPU の表示 | Keiland の層の CPU の道（新）が使う present | DIB section → `BitBlt`（`WM_PAINT`） |
+| CPU の表示 | browser の CPU の道（新）が使う present | DIB section → `BitBlt`（`WM_PAINT`） |
 | touch | `kl_gesture_*`・`kl_scroller_*` | 共通の file（OS に触れない見込み、p010A で確かめ） |
+| 場所 | 新 `kl_app_storage_directory`・`kl_data_directory`（下の header の追加） | `%LOCALAPPDATA%\<application>`（`SHGetKnownFolderPath(FOLDERID_LocalAppData)`）、.exe の directory の `share\` |
 | system | `kl_app_system` | NULL を返す（mail の道は system 無しで続く） |
-| drag | `kl_window_start_drag_icon`・`kl_window_drag_fill`・`kl_window_press_serial` | ENOTSUP（shell は失敗を無視する。全体の移植で OLE の `DoDragDrop`） |
+| drag | `kl_window_start_drag_icon`・`kl_window_drag_fill`・`kl_window_press_serial` | 最初は ENOTSUP（shell は失敗を無視する）。N6 の後の段 |
 | 内部 | `platform/platform.h` の `keiui_*`（`keiui_thread_id` = `pthread_t`、`platform.h:21`・`:55`） | `platform-win32.c`（起こしと lock を Win32 で） |
 | thread・socket | WS327 の `thread-win32.c`・`socket-win32.c` | そのまま link。F-WS327-win32-build の W5（libkeiland.dll を thread の生きている間に unload しない = 静的な依存で load）と S8（`-lws2_32 -liphlpapi`、`_WIN32_WINNT=0x0A00`）を Windows の Makefile の約束にする |
 
 - **最小の部分の外の公開の関数**: compile と link は通し、Windows では ENOTSUP か NULL を返す stub（`libkeiland/win32/unsupported.c`、export の一覧から作る）。
   Wayland の型を返す関数（`kl_app_display` など、`keiland_app.h:159`）も NULL。header は前方宣言なので変えない。
-- **公開の header の追加（KL_VERSION を 1 上げる、加えるだけ）**:
+- **公開の header の追加（KL_VERSION を 1 上げる、加えるだけ。Wayland の backend にも実装を足す）**:
   - `kl_window_vulkan_extensions(const char *const **names, uint32_t *count)`: 窓の Vulkan の instance に要る拡張（Wayland は `VK_KHR_surface`・`VK_KHR_wayland_surface`、
-    Win32 は `VK_KHR_surface`・`VK_KHR_win32_surface`）。Keiland の層が拡張の名前を持たなくて済む（`present.c:64-65` の直し）。Wayland の実装も足す（`ui/window.c`）。
-  - 鍵の event の `text`（`struct kl_window_event` の既にある field、`keiland_window.h:159-186`）に打つ文字を入れる約束を足す（Wayland の実装は今のまま空でよい）。
+    Win32 は `VK_KHR_surface`・`VK_KHR_win32_surface`）。browser の UI が拡張の名前を持たなくて済む（`present.c:64-65` の直し）。
+  - `kl_app_storage_directory(app, buffer, size)`（app の保存の場所。Wayland の backend は `$XDG_DATA_HOME/keiland/<application>`、無ければ `~/.local/share/keiland/<application>`。
+    今の localStorage の親 `keiland/browser` と同じ）と `kl_data_directory(buffer, size)`（同梱の data。Wayland は `KEILAND_DATADIR`）。browser の UI に OS の path の code を置かないため。
+  - 鍵の event の `text`（`struct kl_window_event` の既にある field、`keiland_window.h:159-186`）に打つ文字を入れる約束を足す（Wayland の backend は今のまま空でよい）。
   - `keiland_window.h:648-656` の comment を「`kl_window_vulkan_extensions` の拡張」に直す。
 
-### 4.6 両方に共通の補い
+### 4.6 両方の案に共通の補い
 
-- **DWM**: 第 1 段は OS の普通の枠（暗い mode・Mica を当てる）。題の帯に controls を入れる形（Chrome・Edge）は全体の移植で（問い Q15）。
-- **DPI**: Per-Monitor V2。libkeiland は窓の大きさを物理の pixel で出し、`WM_DPICHANGED` の提案の矩形に動かす。controls の帯は DPI の倍率で描く（libkeiland の canvas が
-  倍率を持てるかは未確かめ、p011A）。page の中身は §4.6.1。
-- **font**: 同梱の font（§6.8）。Windows の font を使う設定は問い Q7。
-- **描画の面**: Windows の Vulkan の loader（`vulkan-1.dll`）は GPU の driver が入れる。共通の shell が `vulkan_extensions` で instance を作り、surface、FIFO の swapchain、
-  `browser_view_record`。loader・device が無い時は CPU の道（`browser_view_draw_pixels` → CPU の表示）。`--no-gpu` の引数で CPU の道を選べる（試験用。zedBSD でも使える）。
-  Direct3D 12 は使わない（WS234 の記述の D3D12 とは別。WS234 の再開の時に決める）。
-- **file の dialog**: 使わない（今の shell に download・upload が無い）。
-- **accessibility**: libbrowser に accessibility の木が無く（aria の属性を DOM に持つだけ）、libkeiland にも無い。範囲の外（Future Work の候補「libbrowser・libkeiland の
-  accessibility の木と UIA・AT-SPI の provider」、Q1 に登録を頼む）。
+- **高 DPI の page の中身**: libbrowser に device scale が無い（`devicePixelRatio` は 1 に固定、`bind/environment.c:1310`）。150% の画面で中身を CSS の 1 px = 物理の
+  1 px で描くと文字が小さく、1/倍率で描いて GPU で拡大するとぼやける。engine の device scale は layout・paint・text に及び WS074 の範囲に触れる。問い U4（推し: 第 1 段は
+  1 px のまま、engine の device scale は WS074 と調整した別の Phase）。
+- **font**: 同梱の font（§6.8）。Windows の font を使う設定は問い U6。
+- **描画の面**: Windows の Vulkan の loader（`vulkan-1.dll`）は GPU の driver が入れる。browser の UI が `kl_window_vulkan_extensions` で instance を作り、surface、FIFO の
+  swapchain、`browser_view_record`。loader・device が無い時は CPU の道（`browser_view_draw_pixels` → CPU の表示）。`--no-gpu` の引数で CPU の道を選べる（試験用。zedBSD でも
+  使える）。Direct3D 12 は使わない（WS234 の記述の D3D12 とは別。WS234 の再開の時に決める）。
+- **accessibility**: libbrowser に accessibility の木が無い（aria の属性を DOM に持つだけ）。page の中身の UIA は範囲の外（Future Work の候補「libbrowser の accessibility の木と
+  UIA・AT-SPI の provider」、Q1 に登録を頼む）。chrome の UIA は N9。
+- `windows.h` を include するのは `apps/browser-win32/`・`libkeiland/win32/`・`libkeiland/platform/*-win32.c`・`libbrowser/base/os-win32.c`・`libmedia/media-os-win32.c` だけ
+  （`jpeglib.h` の `boolean` の衝突を避ける、§2.9）。
 
-#### 4.6.1 高 DPI の page の中身
+### 4.7 `apps/browser-win32/` の中（案 A）
 
-- libbrowser に device scale が無い（`devicePixelRatio` は 1 に固定、`bind/environment.c:1310`）。150% の画面で中身を CSS の 1 px = 物理の 1 px で描くと文字が小さく、
-  1/倍率で描いて GPU で拡大するとぼやける。engine の device scale は layout・paint・text に及び WS074 の範囲に触れる。問い Q5（推し: 第 1 段は 1 px のまま、
-  engine の device scale は WS074 と調整した別の Phase）。
+| file（案） | 中身 |
+| --- | --- |
+| `Makefile` | §6.9。libbrowser・libmedia・libkeiland（共通の file と `win32/`）と browser の UI を compile |
+| `main.c` | `wWinMain`（`OmniGrammaton.exe`、GUI）と `wmain`（`omnigrammaton-cli.exe`、console）。UTF-16 の argv → UTF-8 → `browser_main` |
+| `single.c` | 単一の起動（名前付きの mutex と `WM_COPYDATA` で既にある窓に URL を渡す） |
+| `resources/OmniGrammaton.rc`・`OmniGrammaton.manifest`・`OmniGrammaton.ico` | §6.4 |
+| `tools/make-ico.c` | host の道具: 今の browser の icon の絵を各大きさに描き ICO に書く（§8 T3）。host の cc で build |
 
-### 4.7 Keiland の層（`userland/desktop/browser/`）の変更
+- 将来の `apps/browser-qt/`・`apps/browser-gtk4/` も同じ形（`Makefile`・入口・その OS の resource）。
+
+### 4.8 browser の UI（`userland/desktop/browser/`）の変更（案 A）
 
 | file | 変更 |
 | --- | --- |
-| `main.c` | 引数と headless の mode を共通の shell へ移し、Keiland の `main` だけを残す |
-| `shell/shell.c` | view の callback・navigation・wake・text input の論理を共通の shell へ。kl の event の受けと kl の呼び出しを残す |
-| `shell/present.c` | 共通の shell の Vulkan に移し、`kl_window_vulkan_surface` と `kl_window_vulkan_extensions` だけを層に |
-| `shell/present-cpu.c`（新） | CPU の道（Vulkan が無い時。zedBSD は `KL_PRESENT_SHM`、Windows は libkeiland の DIB） |
-| `shell/keys.c` | 共通の shell へ（evdev の番号の表はそのまま。event の `text` を優先） |
-| `shell/titlebar.c` | location の文字の論理を共通へ、`kl_window_set_controls` の宣言は層に残す |
-| `shell/window.c`・`touch.c` | 層に残す。`clock_gettime`（:210・:369）を kl の時計（`keiland_thread.h`）へ |
-| `shell/mail.c` | 変更なし |
-| `Makefile`・`sources.mk`（新） | `apps/browser-shell/*.c` を足す。一覧を `sources.mk` へ |
+| `main.c` | `main` の中身を `browser_main(argc, argv)` に（zedBSD の `main` はそれを呼ぶだけ。Windows の入口も呼ぶ） |
+| `shell/present.c` | 拡張の名前を `kl_window_vulkan_extensions` から（:64-65）。`pApplicationName` を製品の名前に（:68）。Vulkan が無い時の CPU の道への切り替え |
+| `shell/present-cpu.c`（新） | CPU の道（zedBSD は `KL_PRESENT_SHM`、Windows は libkeiland の DIB） |
+| `shell/keys.c` | event の `text` があればそれを DOM の `key` に（JIS 配列で記号が正しく出る）。無ければ今の US の表 |
+| `shell/window.c`・`shell/touch.c` | `clock_gettime`（:210・:369）を kl の時計（`keiland_thread.h`）へ。application の名前を build の定数に（§6.5） |
+| `shell/shell.c`・`main.c` | instance と files の backend（場所は `kl_app_storage_directory`）、font の既定（`kl_data_directory`）（p005） |
+| `shell/mail.c`・`shell/titlebar.c` | 変更なし |
+| `Makefile`・`sources.mk`（新） | 一覧を `sources.mk` へ |
 
-- この分けは zedBSD の browser の挙動を変えない refactor（guardrail の「refactor は build と最後の boot test」）。WS074 の guest の browser の試験で確かめる（§7.1 段 5）。
+- zedBSD の挙動を変えない（guardrail の「refactor は build と最後の boot test」）。WS074 の guest の browser の試験で確かめる（§7.1 段 5）。
 
-### 4.8 libkeiland の全体の移植（決定 14 の「後でじっくり」）と WS234
+### 4.9 libkeiland の全体の移植の置き場（決定 14 の「後でじっくり」）
 
-- 中身: 最小の部分の外の全部（menu・設定・system・file の選び・media の選び・drag と drop・primary の選択・tablet・glass・desktop・titlebar の DWM の一体化・TSF・
-  UIA）と、Windows の上で Keiland の他の app（Files・Terminal など）が動く事。
-- 置き場の推し: **WS234**（libkeiland の DLL 版、保留中）。WS234 の目標（Windows の libkeiland の DLL と、同じ .exe が zedBSD と Windows で動く）はこの全体の移植を含み、
-  WS334 は「OmniGrammaton の .exe」という 1 つの目標に保てる（AGENTS.md §2: WS は一つの具体的な到達目標）。WS234 は 2026-10-14 にユーザーが保留にしたので、再開の時期は
-  ユーザーが決める。問い Q2（確かめ）。
+- WS334 の後半（p015 以降）: browser の質に効く Windows の口（N2 の TSF、N6 の drag と drop、N7 の DirectManipulation と pen、N8 の accent、N1 の Mica、N9 の UIA の chrome の部分）。
+- WS234（libkeiland の DLL 版、保留中）: browser が使わない libkeiland の API の全部の Win32 化（N4 の file の dialog、N5 の menu、設定・system・media の選び・glass・desktop など）と、
+  Windows の上で Keiland の他の app（Files・Terminal など）が動く事。WS234 の「同じ .exe が zedBSD と Windows で動く」目標はこの上に立つ。WS234 は 2026-10-14 にユーザーが
+  保留にしたので、再開の時期はユーザーが決める。
+- この分け方は WS の目標から決まる（AGENTS.md §2: WS は一つの具体的な到達目標。WS334 は OmniGrammaton の .exe）ので、問い U1 では確かめだけにする。
 - WS334 から WS234 へ渡す物: `libkeiland/win32/` の最小の部分、checker の表（共通に compile できる file）、§4.3 の比較、WS234 の D3D12 の記述と Vulkan の食い違い。
 
 ## 5. libmedia（決定 7）
@@ -659,7 +602,7 @@ struct browser_storage_calls {
 
 ## 6. build
 
-### 6.1 cross compile の toolchain（案。導入は Q1 の許可、問い Q4）
+### 6.1 cross compile の toolchain（案。導入は Q1 の許可、問い U3）
 
 | 案 | 中身 | x86_64 | arm64 | 今の host |
 | --- | --- | --- | --- | --- |
@@ -682,9 +625,9 @@ struct browser_storage_calls {
 build/browser-win64/                 (arm64 は build/browser-winarm64/)
   obj/ ...                           中間の物（object・.def・import library・resource の .o・toolchain.txt）
   OmniGrammaton/                     配る形（zip の中身、§6.7）
-    OmniGrammaton.exe                GUI の subsystem（-mwindows）。apps/browser-shell + Windows の層（案 B: apps/browser-win32、案 A: Keiland の層）
+    OmniGrammaton.exe                GUI の subsystem（-mwindows）。browser の UI（userland/desktop/browser）+ apps/browser-win32 の入口
     omnigrammaton-cli.exe            console の subsystem。同じ共通の shell の headless の mode（試験・script 用）
-    libbrowser.dll  libmedia.dll     (案 A は libkeiland.dll も)
+    libbrowser.dll  libmedia.dll  libkeiland.dll
     libssl-3-x64.dll  libcrypto-3-x64.dll   (arm64 は libssl-3-arm64.dll・libcrypto-3-arm64.dll)
     share/fonts/*.ttf  share/browser/{start,about,text}.html
     share/licenses/...               (§6.8)
@@ -693,7 +636,7 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
 ```
 
 - DLL にする物: libbrowser・libmedia（公開の API の境。決定 9 の engine の単体性）。libtruetype・compat の library（png・jpeg・gif・z）は libbrowser.dll に
-  静的に link（libmedia は compat を使わない）。案 B では libkeiland は入らない。案 A では `libkeiland.dll`（Win32 の最小の部分）が加わる（§4.5）。
+  静的に link（libmedia は compat を使わない）。`libkeiland.dll`（共通の file と Win32 の backend）も DLL（F-WS327 の W5、WS234 の DLL 版の土台）。
 - export: libbrowser は `exports.map` の glob を objects の `nm` で展開した .def（build の規則の中）。libmedia は `libmedia/exports.map` から。
   `__declspec(dllexport)` を公開の header に足さない（header を変えない）。
 - import library: `vulkan-1.dll` の .def（Khronos の loader の export。`llvm-dlltool`・`x86_64-w64-mingw32-dlltool` で .a）。OpenSSL は libbrowser が実行時に
@@ -703,18 +646,18 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
 
 - 「そのまま使う」を「zedBSD の library を Windows の build にも使う（FreeType・本物の libpng などに替えない）」と解釈する。Windows で compile が通らない・壊れる
   所だけを最小に直す: libtruetype の `companion.c:250` の 1 関数（`O_CLOEXEC` が無い時は 0、`O_BINARY` を付ける。あるいは `fopen("rb")`）。
-  png・jpeg・z は変えない。gif は file の口の `O_BINARY` を足す（使わないが、壊れた口を残さない）。問い Q8 で確かめる。
+  png・jpeg・z は変えない。gif は file の口の `O_BINARY` を足す（使わないが、壊れた口を残さない）。問い U7 で確かめる。
 
 ### 6.4 resource と名前（OmniGrammaton）
 
-- `.rc`: `VERSIONINFO`（`ProductName` OmniGrammaton、`FileDescription` "OmniGrammaton Web Browser"、`CompanyName` は問い Q10、`LegalCopyright`
+- `.rc`: `VERSIONINFO`（`ProductName` OmniGrammaton、`FileDescription` "OmniGrammaton Web Browser"、`CompanyName` は問い U9、`LegalCopyright`
   "(C) 2026 Awe Morris"、`ProductVersion` は zedBSD の版の番号の決め方に合わせる = Q1）、icon（`.ico`、16・20・24・32・40・48・64・256 px）、manifest。
 - manifest: `dpiAwareness` PerMonitorV2、`activeCodePage` UTF-8（Windows 10 1903 以降。A の API と CRT の narrow の関数が UTF-8 になる。保険で、code は W の API を使う）、
   `supportedOS` Windows 10・11、`longPathAware`、Common Controls は要らない。
 - icon: 今の browser の icon は compositor の code で描く（`wayland/icons.c`）。推し: その絵を host の道具で各大きさに描いて .ico にする（ICO の形の writer、§8 T3）。
-  新しい図案にするかは問い Q10。
+  新しい図案にするかは問い U9。
 - 窓の題: 「page の題 - OmniGrammaton」（Chrome・Edge の慣例）。窓の class・Vulkan の application の名前・storage の directory も OmniGrammaton。
-- zedBSD の上の名前との関係: 今の zedBSD の app は `/bin/browser`、apps.conf の「Browser」（`wayland/apps.conf:21`）。zedBSD でも OmniGrammaton と呼ぶかは問い Q10
+- zedBSD の上の名前との関係: 今の zedBSD の app は `/bin/browser`、apps.conf の「Browser」（`wayland/apps.conf:21`）。zedBSD でも OmniGrammaton と呼ぶかは問い U9
   （推し: 製品の名前は両方で OmniGrammaton、zedBSD の command の名前 `/bin/browser` は変えない）。
 
 ### 6.5 2 つの名前の定数
@@ -730,15 +673,15 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
 | S-B | S-A の根を Mozilla の `cacert.pem`（`ca-certificates` の package と同じ、MPL-2.0）にして同梱 | 予備（Windows の store が読めない時に `--ca-file` で） |
 | S-C | SChannel（Windows の TLS、SSPI）で `net_tls_*`（`net/net.h:176-188`）の別の実装 `net/tls-schannel.c` | 将来の案。DLL が要らず、OS の失効の確かめ・根の更新が効く。code が大きく（`InitializeSecurityContextW` の loop）、zedBSD と TLS の挙動が分かれる |
 
-- 推し S-A（問い Q11）。理由: zedBSD と同じ TLS の code（`net/tls.c`）で、libbrowser の変更が library の名前と根の読み込みだけ。TLS は当面 OpenSSL という WS074 の
+- 推し S-A（問い U10）。理由: zedBSD と同じ TLS の code（`net/tls.c`）で、libbrowser の変更が library の名前と根の読み込みだけ。TLS は当面 OpenSSL という WS074 の
   決め（master.md の WS074 の行）とも合う。
 - OpenSSL の build は外部 package の規則（tarball を取得・照合・patch、`userland/packages/` の境界、license は Apache-2.0）。置き場は
   `userland/packages/security/openssl/Makefile.windows`（新）か WS334 の build の script（p012 で決める）。
 
 ### 6.7 配布
 
-- 第 1 段は zip（`make browser-win64-zip` の出力 `OmniGrammaton-<版>-win64.zip`、展開して .exe を開く、利用者の権限だけ）。installer（MSIX・WiX）と code の署名（無いと SmartScreen が警告する）は問い Q12（推し: zip、署名は後）。
-- 保存の場所（§3.5.5）は `%LOCALAPPDATA%\OmniGrammaton\User Data`。zip の中に書かない。
+- 第 1 段は zip（`make browser-win64-zip` の出力 `OmniGrammaton-<版>-win64.zip`、展開して .exe を開く、利用者の権限だけ）。installer（MSIX・WiX）と code の署名（無いと SmartScreen が警告する）は問い U11（推し: zip、署名は後）。
+- 保存の場所（§3.5.5）は `%LOCALAPPDATA%\OmniGrammaton`。zip の中に書かない。
 
 ### 6.8 license の同梱
 
@@ -769,8 +712,8 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
   5. どれも無ければ make を止め、要る物（llvm-mingw の入手の案内と `LLVM_MINGW=` の例）を 1 行で出す。
   - 同じ探し方で `WIN32_WINDRES`（`<triple>-windres`、無ければ `llvm-windres`・`llvm-rc`）、`WIN32_DLLTOOL`、`WIN32_AR`、`WIN32_NM`、`WIN32_OBJDUMP` を決める。
   - 使った compiler の名前と版を `build/browser-win64/obj/toolchain.txt` に書く（試験の記録の再現のため）。
-- **Makefile の中身**: libbrowser・libmedia・libtruetype・compat の source の一覧は各 directory の `sources.mk` を include して読む（§4.1 の 2。zedBSD の
-  Makefile と同じ一覧）。共通の shell は `apps/browser-shell/sources.mk`。Windows だけの source（`os-win32.c`・`media-os-win32.c`・`apps/browser-win32/*.c`）を足し、
+- **Makefile の中身**: libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI の source の一覧は各 directory の `sources.mk` を include して読む（§4.1 の 2。zedBSD の
+  Makefile と同じ一覧）。Windows だけの source（`os-win32.c`・`media-os-win32.c`・`libkeiland/win32/*.c`・`libkeiland/platform/*-win32.c`・`apps/browser-win32/*.c`）を足し、
   posix の物を外す。object は `$(BROWSER_WIN32_BUILD)/obj/<tree の path>.o`。
 - **Windows の host で**: 同じ Makefile を Windows の上の GNU make と llvm-mingw の Windows 版で走らせる（`make browser-win64 LLVM_MINGW=C:/llvm-mingw`）。
   recipe は `sh` を前提にする（Git for Windows か MSYS2 の `sh`。cmd を前提にしない）。§7.4。
@@ -797,7 +740,7 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
   再起動の後の cookie と localStorage、今の `.ls` の file が読める事。
 - `script-core-link.sh`: §3.2 の archive と `nm -u` の照合。
 - `cross-build.sh`: §7.1 の段 2 を 1 本で（`make browser-win64`・`browser-winarm64` を流し、warning の数・export・依存の DLL を照合、最後の行 PASS・FAIL）。
-- `apps/browser-shell/tests/`（共通の shell の host の試験。今後の frontend が皆使うので plan でなく tree に置く）: 鍵の名前、location の文字、題、wake の受け渡し、引数の解析。
+- `libkeiland/win32/` の host でできる試験: 鍵の表（T1）・CF_HTML（T2）の単体試験（Linux の host の cc で、Win32 の header に依らない形の module にする）。
 
 ### 7.3 実機の Windows（ユーザーの host）
 
@@ -809,7 +752,7 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
   `omnigrammaton-cli.exe` で `run-js-tests.py`・`run-test262.py`（test262 は `fetch-suites.sh` の取得物）・`run-html5lib-tree.py`・`run-url-tests.py`、
   `--render-gpu` の数枚と Linux の lavapipe の結果の比較（`gpu-compare.py`）。Interop 2025 の全部は流さない（時間。代表の 100 件程度、p015 で選ぶ）。
   python の runner は Windows の python で走らせる（`subprocess` の program の path を引数で渡せるかは p015 で確かめる。runner は WS074 の物なので変えるなら Q1・P8 と調整）。
-- 担当の働き方（決定 11、問い Q13）: Windows の host で要る物は §7.4。
+- 担当の働き方（決定 11、問い U12）: Windows の host で要る物は §7.4。
 
 ### 7.4 Windows の host に要る物
 
@@ -840,20 +783,20 @@ LW は Q1 の目安（8 LW ≈ 2〜3 時間）。「標準」= 標準廉価実�
 | p005 | ストレージバックエンドと instance（API v4）、cookie の期限、cache の索引、files の backend、利用側の v4 への直し | `include/browser/browser.h`・`exports.map`・`net/cookie.c`・`net/loader.c`（cache）・`page/storage.c`・`page/script.c`・`page/network.c`・`view/view.c`・`storage/*`（新）・Keiland の shell・browser-probe・試験の client | 段 1、`storage-test.c`、2 instance の分離、今の `.ls` の読み | p004 | 12 | — |
 | p006 | script の core の archive と link の確かめ | `libbrowser/sources.mk`・`plan/ws334/tests/script-core-link.sh` | `nm -u` が libc・OS の層・libm だけ、archive だけの program で `--js` が走る | p003 | 2 | — |
 | p007 | libmedia の Windows（M2・M4・M7）と mediafile | `libmedia/*`・`mediafile/mediafile.c` | Linux の host の media の試験が同じ、cross compile warning 0 | p002 | 5 | — |
-| p008 | 共通の shell（`apps/browser-shell/`）を作り、Keiland の層（`userland/desktop/browser/`）をそれに乗せる（§4.1・§4.7） | `apps/browser-shell/*`（新）・`browser/main.c`・`browser/shell/*`・`browser/Makefile` | zedBSD の browser の build が warning 0、`plan/ws074/tests/host-build.sh` の headless の試験の件数が同じ、共通の shell の host の試験、zedBSD の guest の browser の確かめ（§7.1 段 5、Q1 の割当） | p005 | 10 | — |
-| p009 | 鍵の表: scan code（set 1・拡張の bit）→ evdev の番号（案 B は `apps/browser-win32/keys-table.c`、案 A は `libkeiland/win32/keys-table.c`。中身は同じ） | 上の 1 file | 表の単体試験（全 key、拡張の bit、Pause・PrintScreen の特別な列） | p008 の header | 3 | ○ T1 |
-| p010B | **案 B**: native の Win32 の層: 窓・loop・wake・入力・toolbar（button と EDIT）・Vulkan の surface・CPU の道・IMM32・clipboard（CF_HTML）・場所・単一の起動・resource・manifest | `apps/browser-win32/*` | `make browser-win64` で `OmniGrammaton.exe`・`omnigrammaton-cli.exe` が warning 0 | p008・p009 | 12 | 一部（T2 CF_HTML） |
-| p010A | **案 A**: libkeiland の Win32 の最小の部分その 1: 共通に compile できる file の棚卸し、platform-win32、kl_app・kl_window・loop・入力・Vulkan の surface・`kl_window_vulkan_extensions`・CPU の表示・ENOTSUP の stub、`apps/browser-win32/` の入口・場所・resource | `libkeiland/win32/*`・`apps/browser-win32/*` | libkeiland.dll と .exe が warning 0、export が Linux の一覧と同じ名前、Linux の Keiland の build と試験が同じ | p008・p009 | 14 | — |
-| p011A | **案 A**: その 2: titlebar の controls（libkeiland で描く帯と location の欄の編集）、IMM32、clipboard（CF_HTML）、DPI | `libkeiland/win32/*` | warning 0。実機は p014 | p010A | 12 | 一部（T2 CF_HTML） |
+| p008 | browser の UI の準備（案 A）: `browser_main` への分け、`kl_window_vulkan_extensions`・`kl_app_storage_directory`・`kl_data_directory` を libkeiland の公開の header と Wayland の backend に足す、present の拡張の名前・CPU の道・鍵の `text`・時計（§4.8） | `browser/main.c`・`browser/shell/*`・`include/keiland/*`・`libkeiland/ui/window.c` ほか | zedBSD の browser・libkeiland の build が warning 0、`plan/ws074/tests/host-build.sh` の headless の試験の件数が同じ、zedBSD の guest の browser の確かめ（§7.1 段 5、Q1 の割当） | p005 | 5 | — |
+| p009 | 鍵の表: scan code（set 1・拡張の bit）→ evdev の番号（`libkeiland/win32/keys-table.c`） | 上の 1 file | 表の単体試験（全 key、拡張の bit、Pause・PrintScreen の特別な列） | p002 | 3 | ○ T1 |
+| p010 | libkeiland の Win32 の最小の部分その 1: 共通に compile できる file の棚卸し、`libkeiland/sources.mk`、platform-win32、kl_app・kl_window・loop・入力（N7 の最初の段）・N1 の custom frame と hit test・N8 の暗い mode・Vulkan の surface・CPU の表示・場所・ENOTSUP の stub、`apps/browser-win32/` の入口・単一の起動・resource・manifest | `libkeiland/win32/*`・`apps/browser-win32/*` | `make browser-win64` で libkeiland.dll と .exe が warning 0、export が Linux の一覧と同じ名前、Linux の Keiland の build と試験が同じ | p008・p009 | 14 | — |
+| p011 | その 2: titlebar の controls を題の帯に（location の欄の編集を含む）、N2 の最初の段（IMM32 の composition と候補の位置）、N6 の clipboard（CF_HTML）、N3 の DPI | `libkeiland/win32/*` | warning 0。実機は p014 | p010 | 12 | 一部（T2 CF_HTML） |
 | p012 | OpenSSL の Windows の build（S-A）と Windows の根 | `userland/packages/security/openssl/Makefile.windows`（か script）・`net/tls.c`・`base/os-win32.c` | OpenSSL の DLL が build できる（tarball の SHA-256 照合）、cross compile warning 0 | p004 | 5 | — |
-| p013 | 配る形: `browser-win64-zip`、license の同梱、icon の道具（`tools/make-ico.c`）、版の情報 | `apps/browser-win32/*` | zip の中身が §6.2 の一覧、`objdump -p` の依存の DLL が一覧だけ | p007・p010B（か p011A）・p012 | 5 | ○ T3 ICO |
+| p013 | 配る形: `browser-win64-zip`、license の同梱、icon の道具（`tools/make-ico.c`）、版の情報 | `apps/browser-win32/*` | zip の中身が §6.2 の一覧、`objdump -p` の依存の DLL が一覧だけ | p007・p011・p012 | 5 | ○ T3 ICO |
 | p014 | 実機の Windows（x86_64）の第 1 回: Windows の host の準備（§7.4、Q1 の割当）、§7.3 の確かめを 1 本の script に | `plan/ws334/tests/windows-run.ps1` ほか | §7.3 の項目（観測した物だけを記録） | p013 | 8 | — |
-| p015 | 第 2 段: TSF、題の帯の一体化（Q15 の答えによる）、画像の drag、touch の慣性（案 B）、arm64 の実機（T-A、許可の後） | Windows の層 | 実機で IME の再変換・周りの文字、arm64 の起動 | p014 | 10 | — |
+| p015 | 後半の Windows の口（§4.9）: N2 の TSF、N6 の drag と drop、N7 の DirectManipulation と pen、N8 の accent、N1 の Mica、arm64 の実機（T-A、許可の後） | `libkeiland/win32/*` | 実機で IME の再変換・周りの文字・drag・touchpad の慣性、arm64 の起動 | p014 | 12 | — |
 | p016 | libbrowser の試験を Windows で（§7.3 の一覧）、規約の全文の見直し（WS334 が変えた C の全行） | — | 試験の件数の記録、規約の見直しの結果 | p015 | 6 | — |
 
-- 計: 案 B は 約 101 LW（p002〜p009・p010B・p012〜p016）、案 A は 約 115 LW（p010B の代わりに p010A・p011A）。どちらの案でも作らない方の Phase は作らない
-  （ws.md の表に載せるのは Q1 の問いの答えの後）。libkeiland の全体の移植（§4.8）は WS334 に入れない。
-- 並行できる組: p006・p007 は p002・p003 の後に並べられる。p009 は p008 の header が決まれば並行。p012 は p004 の後に p005〜p011 と並行。
+- 計 約 112 LW（p002〜p016、決定 15 の案 A）。予備の案 B に切り替える時は p008 を「libkeiland に依らない共通の shell（`apps/browser-shell/`）を作る refactor（10 LW）」、p010・p011 を
+  「`apps/browser-win32/` の Windows の標準の部品の層（12 LW）」、p015 を Windows の層の第 2 段（10 LW）に置き換え、約 101 LW。N9（chrome の UIA）は案 A の後の Phase
+  か WS234 で（page の中身の accessibility は範囲の外）。
+- 並行できる組: p006・p007 は p002・p003 の後に並べられる。p009 は p002 の後に並行。p012 は p004 の後に p005〜p011 と並行。
 - **標準廉価実装手順に回せる module**（外部の標準で振る舞いが決まり、host で単体試験できる物）:
   - T1 鍵の表: Microsoft の「Keyboard Scan Code Specification」（scan code の set 1）と USB HID Usage Tables（Keyboard の page 0x07）の対応、Linux の
     evdev の番号（`input-event-codes.h` の値をデータとして引用、guardrail の GPL の値の規則）、W3C UI Events KeyboardEvent code の名前。Qt・GTK4 の frontend も使う。
@@ -903,9 +846,8 @@ LW は Q1 の目安（8 LW ≈ 2〜3 時間）。「標準」= 標準廉価実�
 | path | Phase | 何を |
 | --- | --- | --- |
 | `Makefile`（一番上） | p002 | `browser-win64`・`browser-winarm64` ほか（§6.9）、`ZEDBSD_CONFIG_OPTIONAL_GOALS` |
-| `apps/browser-win32/*`（新） | p002・p009・p010B か p010A・p013・p015 | §4.4（案 B）か §4.5.1（案 A）・§6.9 |
-| `apps/browser-shell/*`（新） | p008 | §4.1 |
-| `userland/desktop/browser/main.c`・`shell/*`・`Makefile` | p005・p008 | v4、共通の shell へ移す（§4.7） |
+| `apps/browser-win32/*`（新） | p002・p010・p013 | §4.7・§6.9 |
+| `userland/desktop/browser/main.c`・`shell/*`・`Makefile`・`sources.mk`（新） | p002・p005・p008 | 一覧の分け、v4、§4.8 |
 | `libtruetype/companion.c`・`libtruetype/sources.mk`（新）・`Makefile`・`Makefile.linux` | p002 | 1 関数、一覧の分け |
 | `libpng-compat`・`libjpeg-compat`・`libgif-compat`・`userland/base/libz-compat` の `sources.mk`（新）と Makefile、`libgif-compat/decode.c`（`O_BINARY`） | p002 | 一覧の分け・1 行 |
 | `libmedia/engine.c`・`media.h`・`exports.map`・`vkvideo-runtime.c`・`media-os.h`・`media-os-posix.c`・`media-os-win32.c`（新）・`sources.mk`（新）・`Makefile` | p002・p004・p007 | §5 |
@@ -914,8 +856,8 @@ LW は Q1 の目安（8 LW ≈ 2〜3 時間）。「標準」= 標準廉価実�
 | `plan/tools/browser-component/client.c` | p005 | v4（plan/tools は Q1 の物、Q1 に頼む） |
 | `plan/ws074/tests/host-view.c`・`host-form.c`・`host-sticky.c`・`wpt-ready-render.c`・`host-build.sh`・`list-sources.sh` | p002・p005 | v4、storage の source、`sources.mk` を読む（WS074 の物。Q1・P8 と調整） |
 | `userland/packages/security/openssl/Makefile.windows`（か script） | p012 | 新 |
-| （案 A の時だけ）`libkeiland/win32/*`・`libkeiland/sources.mk`（新）・`include/keiland/keiland_window.h`（加えるだけ）・`libkeiland/ui/window.c`（`kl_window_vulkan_extensions` の Wayland の実装）・`libkeiland/exports.py` | p010A・p011A | §4.5.2 |
-| `include/keiland/keiland_window.h`・`libkeiland/ui/window.c`（`kl_window_vulkan_extensions`） | p008 | 両方の案: Keiland の層が拡張の名前を持たないため（§4.7）。加えるだけ |
+| `libkeiland/win32/*`（新）・`libkeiland/sources.mk`（新）・`libkeiland/Makefile`・`Makefile.linux`（一覧の include）・`libkeiland/exports.py` | p009〜p011・p015 | §4.4・§4.5 |
+| `include/keiland/keiland_window.h`・`keiland_app.h`・`libkeiland/ui/window.c`・`ui/app.c`（`kl_window_vulkan_extensions`・`kl_app_storage_directory`・`kl_data_directory`） | p008 | 加えるだけ（§4.5） |
 
 ## 10. 出典と引用
 
@@ -941,7 +883,7 @@ LW は Q1 の目安（8 LW ≈ 2〜3 時間）。「標準」= 標準廉価実�
 | A5 | libkeiland の Wayland の実装の中に window system の継ぎ目（backend の表）を作る | `struct kl_window` の Wayland の field を 14 の file が直に使い、Keiland の今の開発と競合し、zedBSD の回帰の危険が大きい。同じ契約の別の実装（§4.6）で足りる |
 | A6 | Windows の最初の frontend を Qt6 にする（`apps/browser-qt` を先に） | DLL と LGPL の約束、Qt6 の x86_64・arm64 の cross build。Qt の frontend は他の OS に出す時に（§4.3） |
 | A6d | libkeiland の backend を Qt6 にする（libkeiland-qt6） | §4.3 |
-| A6b | 案 A（Keiland の層を libkeiland の Win32 の最小の部分の上で） | 選ぶかはユーザー（問い Q1）。Q1 と P7 の推しは案 B（§4.2）: 見た目が Keiland になる、作業が約 14 LW 多い |
+| A6b | 案 B（Windows の標準の部品の chrome を `apps/browser-win32/` に別に書く） | 決定 15 で案 A。B は予備（§4.2 の切り替えの印） |
 | A6c | 共通の shell を別の DLL（`libbrowser-shell.dll`）にする | 公開の ABI が 1 つ増える。frontend ごとに static に compile すれば足りる（source は 1 か所） |
 | A7 | Direct3D 12 で描く | libbrowser の renderer と libmedia が Vulkan。2 つ目の GPU の道を作る理由が無い |
 | A8 | ストレージバックエンドが cookie の照合・cache の鮮度まで受け持つ | backend ごとに RFC の論理を重ねて書く事になる。論理は libbrowser、backend は記録の保存だけ |
@@ -961,19 +903,20 @@ LW は Q1 の目安（8 LW ≈ 2〜3 時間）。「標準」= 標準廉価実�
 | R5 | Windows の Vulkan の driver の Vulkan Video の対応 | software の H.264 に落ちる（今の順）。§7.3 で両方を確かめる |
 | R6 | libbrowser は 1 process・sandbox 無し。Windows の利用者は一般の web を見る | WS334 の範囲の外。WS074 と同じ危険。実機の試験は既知の site だけ。sandbox は Future Work の候補 |
 | R7 | P8 との競合（§9.1 の「中・高」） | Q1 の調整（§9.1 の案） |
-| R8 | 高 DPI の中身（§4.5） | 問い Q5 |
+| R8 | 高 DPI の中身（§4.5） | 問い U4 |
 | R9 | 今の Keiland の shell の中の、共通にできる論理と kl に結び付いた所の境が未確かめ（`shell.c` 1,462 行の中身の細部） | p008 の最初に関数ごとの表を作る。思ったより絡んでいれば p008 の LW が増える（Q1 に報告） |
-| R9b | （案 A の時）libkeiland の共通に compile できる file の範囲が未確かめ（§2.12） | p010A の最初の棚卸し |
+| R9b | libkeiland の共通に compile できる file の範囲が未確かめ（§2.12） | p010 の最初の棚卸し。少なければ p010 の LW が増える（Q1 に報告） |
 | R12 | `sources.mk` への分けで zedBSD の package の build が変わる | p002 で zedBSD の libbrowser・browser の object の一覧が前後で同じ事を照合 |
 | R10 | Chrome・Ladybird・node.js の記述の細部（§10） | 判断はそれに頼らない |
 | R11 | 公開の API v4 は WS074 の試験の file と browser-component の client を変える | §9.2、Q1 の調整 |
 
 ## 13. ユーザーへの問い（本文は [user-questions.md](user-questions.md)）
 
-Q1（一番上）Windows の層: 案 A（Keiland の見た目、libkeiland の最小の移植）か案 B（Windows の native の見た目）か ／ Q2 libkeiland の Windows の backend（Win32 直の確かめ）と全体の移植の置き場（WS234）／
-Q3 共通の shell の置き場と Keiland の層の場所 ／ Q4 toolchain（llvm-mingw の導入）／ Q5 高 DPI ／ Q6 HTTP の cache を disk に残すか ／ Q7 Windows の font ／
-Q8 libtruetype・gif の小さな直し ／ Q9 User-Agent と navigator.platform ／ Q10 名前（zedBSD の上）・icon・発行者 ／ Q11 TLS ／ Q12 配布と署名 ／
-Q13 Windows の host での担当の働き方 ／ Q14 script の core の公開の header ／ Q15 Windows の窓の題の帯（普通の枠 + toolbar か、Chrome の形か）。
+統括の Q1 と紛れないよう、問いの番号は U1〜U13 にした。前の版の「案 A か B か」は決定 15 で決まり、「題の帯の見た目」は決定 15 と §4.4 の N1（題の帯に controls）で決まったので外した。
+
+U1 libkeiland の Windows の backend（Win32 直の確かめ）と全体の移植の置き場（WS234）／ U2 browser の UI の source の置き場 ／ U3 toolchain（llvm-mingw の導入）／
+U4 高 DPI ／ U5 HTTP の cache を disk に残すか ／ U6 Windows の font ／ U7 libtruetype・gif の小さな直し ／ U8 User-Agent と navigator.platform ／
+U9 名前（zedBSD の上）・icon・発行者 ／ U10 TLS ／ U11 配布と署名 ／ U12 Windows の host での担当の働き方 ／ U13 script の core の公開の header。
 make の target の名前（`browser-win64`・`browser-winarm64`）は §6.9 の案で、問いにしない（Windows の慣例の名前に合わせた）。
 
 ## 14. design-reviewer の指摘と反映
