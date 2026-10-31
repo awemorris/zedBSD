@@ -10,7 +10,7 @@
 | P4 | phase-runner | 返却（q1780 WS326 の完了の片付け） | `/home/awe/zedBSD-worktrees/p4-ws326close` / `agent/p4-ws326close` | 返却（2026-10-31 06:5x） | 684d0512b（merge 8bf8f0280） |
 | P5 | kernel-and-driver-designer | 返却（q1775 WS302 p001） | `/home/awe/zedBSD-worktrees/p5-ws302` / `agent/p5-ws302` | 返却（2026-10-31 06:4x） | e6d67143f（merge 896d3e3db） |
 | P6 | kernel-and-driver-designer | 返却（q1779 WS310 p001） | `/home/awe/zedBSD-worktrees/p6-ws310` / `agent/p6-ws310` | 返却（2026-10-31 07:1x） | 38f8c85eb（merge a2aa89c4f） |
-| P3 | phase-runner-high | 返却（q1764 WS291 p014） | `/home/awe/zedBSD-worktrees/p3-ws291r2` / `agent/p3-ws291r2` | 返却（2026-10-31 07:1x） | 1f66a9e89（merge 7dd9f1538） |
+| P3 | kernel-and-driver-designer | ws291 p023 設計 (q1781-i01) | `/home/awe/zedBSD-worktrees/p3-ws291wsi` / `agent/p3-ws291wsi` | in-progress（2026-10-31 14:39 起動） | — |
 | P8 | phase-runner-low | ws074 p260 自走 (q1727-i07) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-31 14:04 起動し直し） | bf1f165d7（merge eaf70b23b） |
 | P7 | phase-runner-high | 返却（q1776 WS333 p018、5330 待ち） | `/home/awe/zedBSD-worktrees/p7-ws333b` / `agent/p7-ws333b` | 返却（2026-10-31 07:4x） | cf6ed87fb（merge 4d656bf2e） |
 
