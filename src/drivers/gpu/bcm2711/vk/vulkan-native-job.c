@@ -415,6 +415,11 @@ bcm2711_vulkan_native_job_step(
 		perf->bin_ticks += completion.bin_ticks;
 		perf->render_ticks += completion.render_ticks;
 		perf->output_clean_ticks += completion.clean_ticks;
+		if (completion.bin_counters[0] != 0U) {
+			for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
+				perf->bin_counters[index] += completion.bin_counters[index];
+			perf->bin_counter_runs++;
+		}
 		if (completion.counters[0] != 0U) {
 			for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
 				perf->counters[index] += completion.counters[index];
@@ -778,6 +783,29 @@ report_perf(
 			(unsigned long long)(perf->counters[13] / perf->counter_runs / 1000U),
 			(unsigned long long)(perf->counters[14] / perf->counter_runs / 1000U),
 			(unsigned long long)(perf->counters[15] / perf->counter_runs / 1000U));
+	}
+
+	/* The bin runs' counters, in thousands per run (the bin sources of run_cl in v3d-job.c). */
+	if (perf->bin_counter_runs != 0U) {
+		perf_append(
+			"v3d: gpu bin runs=%u k/run cycles=%llu qidle=%llu qcoord=%llu qvalid=%llu qwait=%llu ihit=%llu imiss=%llu uhit=%llu umiss=%llu vdw=%llu vcd=%llu cle=%llu l2hit=%llu l2miss=%llu binned=%llu reversed=%llu\n",
+			perf->bin_counter_runs,
+			(unsigned long long)(perf->bin_counters[0] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[1] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[2] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[3] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[4] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[5] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[6] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[7] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[8] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[9] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[10] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[11] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[12] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[13] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[14] / perf->bin_counter_runs / 1000U),
+			(unsigned long long)(perf->bin_counters[15] / perf->bin_counter_runs / 1000U));
 	}
 
 	/* Worker requests' FIFO waits and worker time, and the final buffer releases, in the window. */

@@ -121,6 +121,8 @@ struct bcm2711_v3d_job_result {
 	uint64_t tfu_max_ticks;
 	/* The performance counters' increase over the render queue's run (BCM2711_V3D_COUNTER_* order). */
 	uint32_t counters[BCM2711_V3D_COUNTERS];
+	/* The same counters' increase over the bin queue's run, when there was one. */
+	uint32_t bin_counters[BCM2711_V3D_COUNTERS];
 };
 
 int bcm2711_v3d_job_run(struct bcm2711_v3d *engine, const struct bcm2711_v3d_job *job, struct bcm2711_v3d_job_result *result);
