@@ -346,8 +346,8 @@ vp_present_frame(
 	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
 		return error;
 
-	/* Succeeded: the frame is on its way to the window. */
-	return VK_SUCCESS;
+	/* Succeeded: the frame is on its way to the window (a suboptimal swapchain is told, to be made again). */
+	return error;
 }
 
 /*
