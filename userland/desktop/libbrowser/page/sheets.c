@@ -71,6 +71,7 @@ static int sheets_add_link(struct page *page, struct dom_element *element);
 static int sheets_is_stylesheet_link(const struct dom_element *element);
 static int sheets_word_in(const struct vm_string *list, const char *word);
 static int sheets_add_loaded(struct page *page, struct page_sheet *entry, const struct css_media **chain, size_t depth);
+static int sheets_imports_settled(const struct page *page, const struct page_sheet *entry, size_t depth, int *failed);
 static int sheets_element_media(struct page *page, const struct dom_element *element, const struct css_media **chain);
 static int sheets_external(struct page *page, const char *location, struct page_sheet **found);
 static struct page_sheet *sheets_find_location(const struct page *page, const char *location);
@@ -347,8 +348,75 @@ sheets_add_style(
 	/* The sheet's (and its imports') implicit @scope is under the element's parent. */
 	css_engine_set_owner_from(page->css, first, element);
 
+	/* A <style> that imports sheets has its load (or error) event queued, once, when they have all arrived (or failed). */
+	if ((element->node.flags & DOM_NODE_LINK_LOADED) == 0U && entry->sheet != NULL && css_sheet_import_count(entry->sheet) != 0) {
+		int failed;
+
+		failed = 0;
+		if (sheets_imports_settled(page, entry, 1, &failed)) {
+			struct page_link_event event;
+
+			event.element = element;
+			event.failed = failed;
+			element->node.flags |= DOM_NODE_LINK_LOADED;
+			error = wb_vector_push(&page->link_events, &event);
+			if (error != 0)
+				return error;
+		}
+	}
+
 	/* Succeeded: the element's sheet is in the engine. */
 	return 0;
+}
+
+/*
+ * Tells whether every sheet a sheet imports (and the ones those import) has arrived or failed; failed is set when one failed.
+ */
+static int
+sheets_imports_settled(
+	const struct page *page,
+	const struct page_sheet *entry,
+	size_t depth,
+	int *failed)
+{
+	const struct page_sheet *imported;
+	struct wb_buffer text;
+	struct wb_buffer location;
+	const char *base;
+	size_t count;
+	size_t index;
+	int error;
+	int settled;
+
+	/* A sheet that is not there yet has not settled. */
+	if (entry->sheet == NULL)
+		return entry->failed ? 1 : 0;
+	count = css_sheet_import_count(entry->sheet);
+	base = entry->location;
+	if (base == NULL)
+		base = page->base;
+	for (index = 0; index < count && depth < SHEETS_IMPORT_DEPTH && base != NULL; index++) {
+		wb_buffer_init(&text);
+		wb_buffer_init(&location);
+		error = vm_string_to_utf8(css_sheet_import(entry->sheet, index), &text);
+		if (error == 0)
+			error = page_resolve_location(base, wb_buffer_string(&text), &location);
+		wb_buffer_release(&text);
+		imported = NULL;
+		if (error == 0)
+			imported = sheets_find_location(page, wb_buffer_string(&location));
+		wb_buffer_release(&location);
+		if (imported == NULL)
+			return 0;
+		if (imported->failed)
+			*failed = 1;
+		if (imported->sheet == NULL && !imported->failed)
+			return 0;
+		settled = sheets_imports_settled(page, imported, depth + 1U, failed);
+		if (!settled)
+			return 0;
+	}
+	return 1;
 }
 
 /* Adds the sheet a <link rel=stylesheet href> names, fetching it the first time. */
