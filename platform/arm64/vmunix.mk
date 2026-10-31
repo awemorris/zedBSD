@@ -967,8 +967,6 @@ $(BUILD)/kernel.elf: $(ARM64_VMUNIX_OBJS) $(ARM64_PLATFORM)/vmunix.ld \
 $(BUILD)/vmunix: $(BUILD)/kernel.elf \
 	platform/arm64/tools/check-arm64-vmunix.py
 	$(ARM64_OBJCOPY) -O binary $< $@
-	$(PYTHON) platform/arm64/tools/check-arm64-vmunix.py \
- --elf $< --image $@ --fix-image
 	$(PYTHON) platform/arm64/tools/check-arm64-vmunix.py --elf $< --image $@
 
 .PHONY: rpi4-fdt-host-test sdhci-host-test cadence-gem-host-test
