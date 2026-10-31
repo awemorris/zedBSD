@@ -480,6 +480,24 @@ uint32_t nvrtx_disp_band_color(uint32_t band);
 #define NVRTX_DISP_CONTEXT_DMA_FB_FLAGS		0x00000005U
 
 /*
+ * The context DMA object a window reads a block-linear surface through:
+ * all the VRAM, large pages, and its kind block linear (bit 20).  The
+ * window reads a block-linear surface's GOBs in the order the 3D engine
+ * writes them only through an object of that kind.  The handle is the
+ * window's object base with the memory kind of the block-linear surfaces
+ * the window takes from Turing on in its low byte.
+ *
+ * Values referenced: Linux v6.12
+ * drivers/gpu/drm/nouveau/dispnv50/wndw.c (nv50_wndw_ctxdma_new, an object
+ * for each memory kind, large pages), dispnv50/handles.h
+ * (NV50_DISP_HANDLE_WNDW_CTX), dispnv50/wndwc57e.c (wndwc57e_modifiers,
+ * kind 0x06) and nvkm/engine/dma/usergv100.c (gv100_dmaobj_new, bit 20 for
+ * a kind other than pitch).
+ */
+#define NVRTX_DISP_HANDLE_FB_BLOCK_LINEAR	0xfb000006U
+#define NVRTX_DISP_CONTEXT_DMA_BL_FLAGS		0x00100045U
+
+/*
  * A LUT's bytes: a 32-byte header and 1025 entries of 8 bytes.
  *
  * Value referenced: Linux v6.19 drivers/gpu/drm/nouveau/dispnv50/headc57d.c
