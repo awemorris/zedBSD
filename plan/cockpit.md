@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 00:24（Q1）
+最終更新: 2026-11-01 00:58（Q1）
 
 ## 担当（P1〜P8）
 
@@ -322,6 +322,8 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
 
 ## 決まった事
+
+- （2026-11-01）WS334: ブラウザの UI はまず libkeiland の Win32 の backend の上で移植する、足りなければ後で Win32 直の版を作る、cross compile は mingw-w64（clang 版も可、arm64 も）、`make browser-win64`、`apps/browser-win32/`、libkeiland はまず要る部分だけ、という趣旨の指示を受けた（[ws334/ws.md](ws334/ws.md) の決定 11〜15）。
 
 - （2026-10-31）ユーザーから、libbrowser のブラウザを Windows に移植する WS を作る（libbrowser の platform 独立を移植で確かめる、libkeiland の Win32 の実装、Windows 用の .exe、名前は OmniGrammaton）、という趣旨の指示を受けた（[WS334](ws334/ws.md)、planning）。
 - （2026-11-01）ユーザーから、WS334 は計画だけ進める、既存の library（libtruetype・png・gif・jpeg の compat・libmedia）はそのまま使う、libbrowser をレンダリング・スクリプト・ストレージの 3 つのエンジンに interface で分ける、libkeiland の移植は Win32 直と Qt6 を比べる、という趣旨の指示を受けた（ws334/ws.md）。
