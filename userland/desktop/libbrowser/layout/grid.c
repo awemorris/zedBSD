@@ -2191,6 +2191,8 @@ grid_static_alignment(
 {
 	int justify;
 	int align;
+	int raw_align;
+	int orthogonal;
 	int rtl;
 
 	rtl = box->style.direction == CSS_DIRECTION_RTL;
@@ -2201,6 +2203,17 @@ grid_static_alignment(
 	if (align == CSS_ALIGN_AUTO)
 		align = box->style.align_items;
 	align = grid_in_flow_align(align);
+
+	/* An item whose writing mode is orthogonal has its inline axis along the column axis: self-start and self-end follow its direction there. */
+	orthogonal = child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB &&
+	    box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB;
+	raw_align = child->style.align_self;
+	if (raw_align == CSS_ALIGN_AUTO)
+		raw_align = box->style.align_items;
+	if (orthogonal && raw_align == CSS_ALIGN_SELF_END)
+		align = child->style.direction == CSS_DIRECTION_RTL ? CSS_ALIGN_START : CSS_ALIGN_END;
+	else if (orthogonal && raw_align == CSS_ALIGN_SELF_START)
+		align = child->style.direction == CSS_DIRECTION_RTL ? CSS_ALIGN_END : CSS_ALIGN_START;
 	child->static_x_align = CSS_ALIGN_AUTO;
 	child->static_y_align = CSS_ALIGN_AUTO;
 	if (justify == CSS_ALIGN_END || justify == CSS_ALIGN_SELF_END ||
@@ -2209,7 +2222,11 @@ grid_static_alignment(
 		child->static_x_align = justify;
 		child->static_x_safe = (child->style.justify_self != CSS_ALIGN_AUTO ?
 		    (child->style.flex_keywords & 0x1000u) : (box->style.flex_keywords & 0x2000u)) != 0;
-		if (justify == CSS_ALIGN_SELF_END)
+		if (justify == CSS_ALIGN_SELF_END && orthogonal)
+			child->static_x_align_from_right = child->style.writing_mode == CSS_WRITING_VERTICAL_LR;
+		else if (justify == CSS_ALIGN_SELF_START && orthogonal)
+			child->static_x_align_from_right = child->style.writing_mode == CSS_WRITING_VERTICAL_RL;
+		else if (justify == CSS_ALIGN_SELF_END)
 			child->static_x_align_from_right = child->style.direction == CSS_DIRECTION_LTR;
 		else if (justify == CSS_ALIGN_SELF_START)
 			child->static_x_align_from_right = child->style.direction == CSS_DIRECTION_RTL;
@@ -2439,7 +2456,7 @@ grid_abspos_one(
 	{
 		if (child->style.position != CSS_POSITION_ABSOLUTE || child->static_grid_area)
 			return;
-		if (child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
+		if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
 			return;
 		grid_abspos_lines(&child->style.grid_column, box->style.column_count,
 		    grid->column_count, &first_column, &last_column);
@@ -3864,7 +3881,9 @@ grid_row_space(
 		*minimum = layout_from_px(box->style.min_height.value) - frame;
 	else if (box->style.min_height.unit == CSS_UNIT_PERCENT && grid_parent_height(tree, box, &basis))
 		*minimum = (layout_unit)((float)basis * box->style.min_height.value / 100.0f) - frame;
-	if (*maximum >= 0 && *maximum < 0)
+	if (*maximum >= 0 && *maximum < *minimum)
+		*maximum = *minimum;
+	if (*maximum < -1)
 		*maximum = 0;
 
 	/* A height in pixels is the definite size, held within them. */
