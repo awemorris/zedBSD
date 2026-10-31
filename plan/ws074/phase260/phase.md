@@ -690,8 +690,10 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev123（5f54b8c82） | table の row baseline、fieldset・overflow の縦書き baseline、module の top-level await | 2,971（85.57%） | 249 / 176 / 74 / 2 |
   | dev124（46ba00f44） | link・@import の implicit @scope の owner（件数は変わらず） | 2,971（85.57%、gap 501） | 249 / 176 / 74 / 2 |
 
-  dev119 から +49、後退 0（毎回 dev119 と直前の測定の両方と比べた）。host build は `-Wall -Wextra -Werror` で warning 0。
-  Acid は最終の source（46ba00f44）で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%（/tmp/p8out/acid124）。
+  | dev125（5405281ee、最終） | 列の flex で cross の auto margin の item は stretch しない・fit-content で測る（auto-margins-003・align-self-015・fit-content-item-001・flexbox-column-row-gap-001） | 2,975（85.69%、gap 497） | 249 / 172 / 74 / 2 |
+
+  dev119 から +53、後退 0（毎回 dev119 と直前の測定の両方と比べた）。host build は `-Wall -Wextra -Werror` で warning 0。
+  Acid は最終の source（5405281ee）で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%（/tmp/p8out/acid125）。
 
 - 直した物（要点。source は userland/desktop/libbrowser/）:
   1. shadow DOM（dom/shadow.c・dom/node.c・bind/shadow.c ほか）: element に `shadow_root`（`struct dom_shadow_root`：host・closed・styleSheets・adopted）、tree root と flat parent（`dom_tree_root`・`dom_flat_parent`）、slot の割当（`dom_slot_of`）。
@@ -707,7 +709,9 @@ Origin: 2026-10-27 ユーザーの指示。
   6. baseline（layout/inline.c・grid.c・flex.c・table.c）: grid container の baseline は first-row の item のうち matching な baseline に参加する物を先に、次に他方の baseline（1 行のみの item）、最後に grid order の先頭（`last baseline` は end の整列と flag で持つ）。
      縦書き（physical mode が縦）の grid・flex は logical frame の central baseline（行の中心）で整列し、baseline を持たない item は border box の中央（sideways は従来のまま整列しない）。縦書きの baseline（legend を除く・scroll container は border box へ clamp）は
      layout_logical_central_baseline・layout_vertical_baseline。table の cell は `vertical-align: baseline` の行の baseline に揃う。
-  7. module の top-level await（js/parser.c・js/compile.c）: top level に await がある module の program は async function として走る。link・@import の sheet の implicit @scope の root は owner の親（css_engine_set_owner_from）。
+  7. flex の列（layout/flex.c）: cross の auto margin（左右）の item は stretch せず content の幅（shrink-to-fit）で測り、auto margin は line が配る（flex_lay_sized・flex_relay_column・flex_content_basis・flex_content_height）。
+     stretch でない item の flex base size は fit-content の幅での高さ（その幅の割合の padding が基準）。
+  8. module の top-level await（js/parser.c・js/compile.c）: top level に await がある module の program は async function として走る。link・@import の sheet の implicit @scope の root は owner の親（css_engine_set_owner_from）。
 - 通った ID（dev119 から）の主な物: css-view-transitions の shadow-part-* 5・names-are-tree-scoped・modify-style-via-cssom、css-anchor-position の anchor-name-in-shadow（2）・anchor-name-cross-shadow・anchor-scope-shadow-*（3）・position-try-tree-scoped・
   at-position-try-invalidation-shadow-dom・anchor-position-dynamic-002・003・anchor-scroll-composited-scrolling（crash 4・scripted 1）・position-try-container-query、css-cascade の scope-shadow・scope-shadow-sharing・scope-declarations・scope-container、
   css-flexbox/alignment と css-grid/alignment の baseline（grid・flex・fieldset・overflow の縦書き・横書き variant 約 20）、flexbox-align-self-horiz-001-table ほか。
@@ -718,5 +722,5 @@ Origin: 2026-10-27 ユーザーの指示。
   - baseline: table の last baseline（flex-align-baseline-table-001 の 3 つ目）、縦書き grid の中の横書き item・orthogonal item の baseline（grid-align-baseline-001・002、synthesized 9 ID）、baseline が intrinsic size を決める（baseline-alignment-affects-intrinsic-size 6 ID・baseline-shim 3 ID）。
   - @scope の入れ子（scope-nesting。style rule の中の @scope と CSSOM の入れ子）、@starting-style と transitions（scope-starting-style）、@keyframes・@property の @scope（scope-name-defining-rules。keyframes の background-color の補間が要る）。
   - anchor() の min()・max() と canonical の順、CSS_TRACKS = 24 の固定長（grid-limits-001）、grid の `calc(sign())`・`sibling-index()`、backdrop-filter の drop-shadow・url。
-- 一時物（Q1 が消す。worktree p8-ws074）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-n1td3xaj.html、acid3/zedbsd-acid3-reference-mxis9kd3.html、acid3/zedbsd-acid3-diagnostic-t8qqg83w.html、build/ws074-suites/wpt/zz_dbg/、build/tmp/p8/sone/、build/tmp/p8/t/ の a〜l の html と dump.sh・ho・ho2。
-  /tmp/p8out の下の dev118〜dev122 の測定の出力とその .log（dev123・dev124 と acid124 を残す）、sub-tab・sone・t・dbg-server.pid・acid119・acid119.log。一覧は build/tmp/p8/delete-list-i10.txt。
+- 一時物（Q1 が消す。worktree p8-ws074）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-n1td3xaj.html・zedbsd-acid2-uyv91yet.html、acid3/zedbsd-acid3-reference-mxis9kd3.html・zedbsd-acid3-reference-8qimgb3q.html、acid3/zedbsd-acid3-diagnostic-t8qqg83w.html・zedbsd-acid3-diagnostic-ndlhdxo3.html、build/ws074-suites/wpt/zz_dbg/、build/tmp/p8/sone/、build/tmp/p8/t/ の a〜l の html と dump.sh・ho・ho2。
+  /tmp/p8out の下の dev118〜dev123 の測定の出力とその .log、acid124（dev124・dev125 と acid125 を残す）、sub-tab・sone・t・dbg-server.pid・acid119・acid119.log。一覧は build/tmp/p8/delete-list-i10.txt。
