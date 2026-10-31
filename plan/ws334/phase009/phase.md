@@ -12,7 +12,8 @@
 1. AGENTS.md の §4・§7・§9・§10、plan/agents/protocol.md、plan/coding-style.md の全文（§14 の checklist）、docs/agent/spec-module-delegation.md の §5・§7、plan/guardrail.md の「出典」「開発の管理情報」。
 2. [design.md](../design.md) の §3.4 の時刻の行（略号の表が Windows で使えない理由）。
 3. 実装する header（各関数の comment が仕様）: `userland/desktop/libbrowser/base/os-zones.h`。それが include する header も読む。
-4. 仕様: Unicode CLDR 48（Unicode License V3）: `common/supplemental/windowsZones.xml`（SHA-256 `9cf3db6a31fb382fee21b70be6feba1e82766b0fcd06e6261fb7936a73e537ff`）、`common/supplemental/metaZones.xml`（`985247ef22cfb5d1af6c91ceb34f255e392a3569247904afb7839ba3bc1a12d6`）、`common/main/en.xml`（`416fb34c500e969a9e3e9bd1e363f8af5938df3cdda72aa7e636fa7e72123aae`）。置き場は Q1 が `/home/awe/zedBSD-claude1/build/sources/specs/cldr-48/`（git に入れない。P7 が `https://raw.githubusercontent.com/unicode-org/cldr/release-48/<path>` から取得した物）。
+4. 仕様: Unicode CLDR 48（Unicode License V3）: `common/supplemental/windowsZones.xml`（SHA-256 `9cf3db6a31fb382fee21b70be6feba1e82766b0fcd06e6261fb7936a73e537ff`）、`common/supplemental/metaZones.xml`（`985247ef22cfb5d1af6c91ceb34f255e392a3569247904afb7839ba3bc1a12d6`）、`common/main/en.xml`（`416fb34c500e969a9e3e9bd1e363f8af5938df3cdda72aa7e636fa7e72123aae`）。置き場は `/home/awe/zedBSD-claude1/build/sources/specs/cldr-48/`（2026-11-01 Q1 が置き SHA-256 を照合した。git に入れない。元は `https://raw.githubusercontent.com/unicode-org/cldr/release-48/<path>`）。
+   - license: CLDR の data は Unicode License V3（CLDR の repository の `LICENSE`、release-48 で "UNICODE LICENSE V3"、Copyright © 2004-2025 Unicode, Inc.。2026-11-01 P7 が確かめた）。data から作った表を配る時は copyright と許諾の文を同梱する: libbrowser は既に `userland/base/licenses/browser/Unicode-License-V3`（Unicode の case の表の物、libbrowser と一緒に入る）を持ち、Windows の配る形（p031）も同じ file を `share\licenses\` に入れる。この Phase は表の block の comment に出典と license の名前を書くだけで、license の file を足さない（同じ Unicode License V3 の文。年の範囲は file の方が新しい）。
 
 ## 作る物
 
