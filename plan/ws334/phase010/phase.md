@@ -3,7 +3,7 @@
 # ws334-p010 storage の記録: records
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: 実装済み・試験 PASS（2026-11-01 03:01、cleared は Q1。p002 で作成）。
 - 依存: p004（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 
@@ -64,3 +64,27 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+- 日時: 2026-11-01 03:01（host の `date`）。実装の担当: Sonnet 5.5（phase-runner-low）。状態: 実装済み・試験 PASS（cleared は Q1）。
+- 作った物: `userland/desktop/libbrowser/storage/records.c`（全部の関数）、`plan/ws334/tests/unit/test-records.c`。header・試験の道具・他の module は変えていない。
+- 試験: `sh plan/ws334/tests/run-unit.sh records` → `test-records: PASS (60948 checks) (posix)`・`(win32)`（Wine）、`run-unit: PASS`。
+  `run-unit.sh all` → records と tools が posix・win32 とも PASS、`run-unit: PASS`。`BASE=d393d3267 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`。`git diff --check` は出力なし。
+- 試験の内容: phase.md の項目に加え、cookie・cache・LOCAL の全ての prefix（切れた record）、各長さ field の +1・-1・0xffffffff、magic の各 byte、unknown flag の最下位・最上位の bit、
+  v2 の prefix が item の境界でだけ 0 になること（4 つ）、record の各 byte の書き換え（byte ごとに 4〜8 通り）、10000 個の乱数の record（4 つの magic の 1 つを前に付けた物を含む）、
+  sink の 64 MiB ちょうど・その上の 1 byte・SIZE_MAX の append。decode の入力は全部ちょうどの大きさの heap の block に複写して ASan に見せた。
+  hand の期待: header の layout から組んだ cookie・cache・LOCAL v1/v2 の bytes と byte ごとに比べた。FNV の期待は公開の値と、素数 2^40+0x1b3 に分けた手の計算。
+- 壊しての確認（git の外、`cmp` で戻りを確認）: 素数の 1 桁、16 進の長さの境界、unknown flag の検査の削除、field の長さの境界、i64 の符号の復元、sink の上限の比較、
+  LOCAL の 2 byte 掛け、cookie の original の照合、no_cache の上限、失敗時の truncate、key_valid の長さ、field の順、末尾の余りの検査（cookie・cache）、max_age の境界、each の戻り値、
+  sink の error の持ち越し、hash の XOR と掛け算の順、32 bit の長さの検査の削除など 24 通りが全部 FAIL。
+- 自分で決めた点（header が黙っている所）:
+  - `wb_storage_sink_error` の NULL の sink は EINVAL を返す。`browser_storage_sink_append` の引数の誤り（sink・bytes が NULL、sink の buffer が NULL）は EINVAL で、sink の error には持ち越さない
+    （呼び手の誤りで record は壊れていない）。EFBIG と ENOMEM は持ち越し、以後の append（長さ 0 も）は同じ error。上限は sink が bind した時からの長さで数える。
+  - `wb_storage_cookie_decode` の `original`・`original_length` は NULL でもよい（要らない呼び手）。`cookie` が NULL は EINVAL。`wb_storage_local_decode` の `origin`・`origin_length` も NULL でもよい。`each` が NULL は EINVAL。
+  - LOCAL v2 の origin の長さ 0 の record は EINVAL（encode が書かないため。original key は長さ 1 以上）。
+  - cookie の original の照合は、再構築せず record の original を domain・path・name の順に field ごとに読んで比べる（allocation をしないので decode は ENOMEM を返さない）。
+  - LOCAL decode の key・value の units は呼び手の関数に渡す時に必ず非 NULL（長さ 0 でも）。item の key の重複は decode では扱わない（each の側）。
+  - 長さ field の 32 bit の上限は encode で EINVAL、record の大きさの上限（64 MiB）は encode では見ない（sink が見る）。
+  - 空の bytes（NULL かつ長さ 0）の decode は magic が無いので EINVAL。NULL で長さ 1 以上も EINVAL。
+- 未実施: ENOMEM の経路（確保の失敗の注入）、32 bit の size_t の環境（長さの上限の試験は `SIZE_MAX > UINT32_MAX` の時だけ）、aarch64 の Windows の実行（arm64 の Wine が無い、compile は check-skeleton で通る）。
