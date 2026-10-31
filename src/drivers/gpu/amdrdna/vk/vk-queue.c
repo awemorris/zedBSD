@@ -156,6 +156,14 @@ queue_submit(
 		}
 	}
 
+	/*
+	 * A failure after an earlier command buffer's runs went to the GPU is
+	 * a lost submission, never a refusal: a caller that took it for one
+	 * would cancel a job part of which runs.
+	 */
+	if (error != 0 && index > 0U)
+		error = EIO;
+
 	/* The fence is signaled once the runs on the queues now have ended. */
 	fence = amdrdna_vk_payload(session, I915_VK_OBJ_FENCE, fence_id);
 	if (error == 0 && fence != NULL) {

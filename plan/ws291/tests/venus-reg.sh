@@ -8,7 +8,8 @@
 # a swapchain made again at frame 100, mview in mailbox mode with 4 images and mview with one draw a copy and 20
 # submissions a frame (each must end with status 0; the compositor's VULKAN_ERROR lines are counted).  The guest
 # is ended by QEMU's monitor (quit).  Prints one line a check and "venus-reg: PASS" or "venus-reg: FAIL".
-#   usage: plan/ws291/tests/venus-reg.sh OUT IMAGE LIBVULKAN...
+#   usage: [START_TIMEOUT=300] plan/ws291/tests/venus-reg.sh OUT IMAGE LIBVULKAN...  (START_TIMEOUT: seconds for the start,
+#   which copies the image: a busy host disk needs more)
 # The renderer is build/ws035-sq-venus (a link to main's), as plan/ws035/tests/zdesktop-guest.sh needs.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -30,7 +31,7 @@ check() {
 	fi
 }
 
-timeout 300 sh plan/ws035/tests/zdesktop-guest.sh start "$image" > "$out/start.log" 2>&1
+timeout "${START_TIMEOUT:-300}" sh plan/ws035/tests/zdesktop-guest.sh start "$image" > "$out/start.log" 2>&1
 g wait > "$out/wait.log" 2>&1 || { echo "venus-reg: the guest did not answer"; failed=1; }
 sleep 30
 stop_all='service stop greeter >/dev/null 2>&1; for p in $(ps -A -o pid,args | grep -E "[w]ayland( |$)|[w]ltest|[m]view" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[w]ayland( |$)|[w]ltest|[m]view" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'

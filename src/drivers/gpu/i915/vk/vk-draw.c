@@ -470,7 +470,8 @@ drv_i915_gfx_batch_run(
 	drv_i915_gfx_emit_batch_end(batch);
 	kern_io_write_barrier();
 
-	/* Runs it in the session's context of the engine, to its end. */
+	/* Runs it in the session's context of the engine, to its end; it counts as sent even when it fails. */
+	session->gpu_sends++;
 	error = drv_i915_worker_run_sync(session->vk->i915, &session->gpu->contexts[engine], batch_va);
 	if (error != 0)
 		return error;

@@ -188,6 +188,7 @@ struct submission {
 	uint32_t stream_at;
 	uint32_t kernels;
 	uint32_t dispatches;
+	uint32_t sent;
 	const struct powervr_vk_pipeline *pipeline;
 	const struct powervr_vk_descriptor_set *sets[POWERVR_VK_SETS_MAX];
 };
@@ -421,6 +422,15 @@ submit(
 		error = run(&build);
 	if (error != 0)
 		kern_logf("powervr: vk: a submission did not run (%d)\n", error);
+
+	/*
+	 * A failure once work of this submission went to the core (a stream,
+	 * a render pass's job or a transfer) is a lost submission, never a
+	 * refusal: a caller that took it for one would cancel a job part of
+	 * which runs.
+	 */
+	if (error != 0 && build.sent != 0U)
+		error = EIO;
 
 	/* The submission's time (the timing's own thread says the sums). */
 	powervr_timing_add(POWERVR_TIMING_SUBMIT, started);
@@ -864,6 +874,7 @@ build_command_buffer(
 			error = run_flush(build);
 			if (error == 0) {
 				started = powervr_timing_now();
+				build->sent++;
 				error = powervr_vk_transfer_run(build->session, entry);
 				powervr_timing_add(POWERVR_TIMING_TRANSFER, started);
 			}
@@ -1376,6 +1387,7 @@ run(
 	mutex_lock(&render->core->lock);
 
 	value = owner->submitted + 1U;
+	build->sent++;
 	error = powervr_session_kick_compute(render, owner, value, command, POWERVR_COMPUTE_COMMAND_WORDS);
 	if (error == 0)
 		owner->submitted = value;
@@ -1523,7 +1535,8 @@ run_job(
 	if (error != 0)
 		return error;
 
-	/* The job on the session's render context; a synchronous submission waits for it. */
+	/* The job on the session's render context (counted as sent even when it fails); a synchronous submission waits for it. */
+	build->sent++;
 	error = powervr_render_job_run(owner->render, owner, job);
 	if (error == 0)
 		error = settle(build);

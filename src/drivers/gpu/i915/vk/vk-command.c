@@ -3751,6 +3751,7 @@ i915_queue_submit(
 	struct i915_gfx_cmdbuf *cmdbuf;
 	struct i915_vk_fence *fence;
 	uint64_t identity;
+	uint64_t sends;
 	uint32_t family;
 	uint64_t submits;
 	uint64_t submit;
@@ -3829,6 +3830,7 @@ i915_queue_submit(
 	 * A submission on the video decode family runs in the video part, with
 	 * the render batch open for its query resets.
 	 */
+	sends = session->gpu_sends;
 	if (family == 1U) {
 		for (index = 0U; index < total; index++) {
 			lists[index] = cmdbufs[index]->ops;
@@ -3841,6 +3843,8 @@ i915_queue_submit(
 		end_error = drv_i915_gfx_submit_end(session);
 		if (result == 0U && end_error != 0)
 			result = i915_command_result(end_error);
+		if (result != 0U && session->gpu_sends != sends)
+			result = (uint32_t)VK_ERROR_DEVICE_LOST;
 		if (result == 0U && fence != NULL)
 			drv_i915_fence_signal(fence);
 		drv_i915_wire_reply_u32(reply, result);
@@ -3862,6 +3866,15 @@ i915_queue_submit(
 	end_error = drv_i915_gfx_submit_end(session);
 	if (error == 0)
 		error = end_error;
+
+	/*
+	 * A failure once a batch of this submission went to the GPU (a full
+	 * batch or window run early, or what was recorded before the failure)
+	 * is a lost submission, never a refusal: a caller that took it for
+	 * one would cancel a job part of which ran.
+	 */
+	if (error != 0 && session->gpu_sends != sends)
+		error = EIO;
 
 	/* Signals the fence: everything the submission asked for has been done by now. */
 	if (error == 0 && fence != NULL) {

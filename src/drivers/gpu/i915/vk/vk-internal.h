@@ -188,6 +188,9 @@ struct i915_render_session {
 
 	/* What the session's draws keep between them; NULL until the first draw. */
 	struct i915_gfx_session *gfx;
+
+	/* The batches handed to the GPU so far, on any engine (counted before each runs). */
+	uint64_t gpu_sends;
 };
 
 /*
