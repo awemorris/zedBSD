@@ -18,6 +18,8 @@
  */
 
 #include "page/page.h"
+#include "base/os-file.h"
+#include "base/os-time.h"
 #include "net/net.h"
 
 #include <errno.h>
@@ -347,6 +349,7 @@ page_url(
 	struct net_url *url)
 {
 	struct wb_buffer text;
+	int local;
 	int error;
 
 	/* A page without a location. */
@@ -355,8 +358,9 @@ page_url(
 
 	/* A path becomes a file: URL. */
 	wb_buffer_init(&text);
-	if (page->base[0] == '/') {
-		error = wb_buffer_printf(&text, "file://%s", page->base);
+	local = wb_os_path_is_absolute(page->base);
+	if (local) {
+		error = net_url_from_file_path(page->base, &text);
 	} else {
 		error = wb_buffer_append_string(&text, page->base);
 	}
@@ -395,7 +399,7 @@ page_start_scripts(
 	memset(&host, 0, sizeof(host));
 	host.context = page;
 	host.console = script_console;
-	host.user_agent = NET_USER_AGENT;
+	host.user_agent = net_user_agent();
 	host.location = script_location;
 	host.url_set = script_url_set;
 	host.cookie_get = script_cookie_get;
@@ -441,16 +445,13 @@ script_settle_network(
 	double wait,
 	double *elapsed)
 {
-	struct timespec before;
-	struct timespec after;
+	uint64_t before;
+	uint64_t after;
 	int timeout;
-	int status;
 
 	/* Headless network integration uses the same supported monotonic clock as the native view and loader. */
 	*elapsed = 0;
-	status = clock_gettime(CLOCK_MONOTONIC, &before);
-	if (status != 0)
-		return errno;
+	before = wb_os_monotonic_ns();
 
 	/* The loader's network thread times its requests out itself; a missing loader cannot make request progress. */
 	if (page->loader == NULL)
@@ -466,15 +467,12 @@ script_settle_network(
 
 	/* A borrowed completion callback copies C metadata; outer Page timing drains child scripts and events later. */
 	net_loader_dispatch(page->loader);
-	status = clock_gettime(CLOCK_MONOTONIC, &after);
-	if (status != 0)
-		return errno;
+	after = wb_os_monotonic_ns();
 
 	/* Monotonic elapsed duration, rather than a fabricated fixed tick, advances pending child waits. */
-	*elapsed = (double)(after.tv_sec - before.tv_sec) * 1000;
-	*elapsed += (double)(after.tv_nsec - before.tv_nsec) / 1000000;
-	if (*elapsed < 0)
+	if (after < before)
 		return EIO;
+	*elapsed = (double)(after - before) / 1000000;
 
 	/* Succeeded: one actual network step completed outside child script/event dispatch. */
 	return 0;

@@ -396,7 +396,7 @@ net_http_request_text_send(
 	if (error == 0 && url->port >= 0)
 		error = wb_buffer_printf(request, ":%d", url->port);
 	if (error == 0)
-		error = wb_buffer_printf(request, "\r\nUser-Agent: %s\r\n", NET_USER_AGENT);
+		error = wb_buffer_printf(request, "\r\nUser-Agent: %s\r\n", net_user_agent());
 
 	/* The fixed headers; a script's request keeps its own Accept and Accept-Language. */
 	if (error == 0 && kind == NET_FETCH_SCRIPT_API) {

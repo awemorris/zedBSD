@@ -111,6 +111,7 @@ int wb_buffer_printf(struct wb_buffer *buffer, const char *format, ...) __attrib
 void wb_buffer_clear(struct wb_buffer *buffer);
 void wb_buffer_release(struct wb_buffer *buffer);
 const char *wb_buffer_string(const struct wb_buffer *buffer);
+const void *wb_memmem(const void *haystack, size_t length, const void *needle, size_t needle_length);
 
 /* The UTF-16 buffer (buffer.c). */
 void wb_units_init(struct wb_units *units);
