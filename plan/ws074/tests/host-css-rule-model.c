@@ -368,7 +368,7 @@ model_case(
 	/* Unparsed trailing input rejects single-rule insertion. */
 	count = css_rule_model_count(model);
 	model_check(status == EINVAL && count == 3U, "unparsed trailing input rejects single-rule insertion");
-	status = model_insert_text(model, "@media screen{img{height:1px}}", 0);
+	status = model_insert_text(model, "@import url(x.css);", 0);
 	if (status != ENOTSUP) {
 		css_rule_model_destroy(model);
 		return EIO;
