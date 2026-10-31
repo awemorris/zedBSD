@@ -12,7 +12,7 @@ vmunix=$1
 out=$2
 : "${VF2_HOST:?VF2_HOST=user@host}"
 : "${VF2_PASSWORD:?VF2_PASSWORD}"
-plug=${VF2_PLUG:-AC276E42B252}
+plug=${VF2_PLUG:-AC276E432AE6}
 mkdir -p "$out"
 ssh_run() { sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$VF2_HOST" "$@"; }
 export SSHPASS="$VF2_PASSWORD"

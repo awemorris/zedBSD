@@ -5,7 +5,7 @@
 # board cycled again.  The live serial line is kept beside each boot (OUT/bootN/serial.txt) as a clue for the boots
 # that did not come back; the verdict comes from SSH and dmesg.  Run from the top of the tree while the board is
 # assigned:
-#   VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=... VF2_PLUG=14C19FA80F86 [GPU=1] [LOAD='command'] [KEEP=1] [LIMIT=180]
+#   VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=... VF2_PLUG=AC276E432AE6 [GPU=1] [LOAD='command'] [KEEP=1] [LIMIT=180]
 #       [SERIAL=/dev/ttyUSB0]
 #       [ORIG=vmunix.q1772orig] sh plan/tools/vf2/boot-cycle.sh KERNEL OUT COUNT
 # The board's kernel is first kept as /boot/boot0/ORIG (when not kept already) and read back to OUT/board-vmunix.
