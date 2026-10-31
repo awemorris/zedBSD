@@ -29,7 +29,7 @@
 | --- | --- | --- | --- |
 | P7 | q1808-i01 ラップアップ | [WS334 p021](ws334/phase021/phase.md) 統合: p021 の commit は全部 main（8a27af470）、残りは run-unit all の単独の実行（phase.md の再開点のコマンド）→ 1 つの .exe の build と libkeiland の pthread 抜き（ws.md の 2026-11-01 の決定） | — |
 | P8 | q1727-i15 ラップアップ | [WS074](ws074/ws.md) phase260 の自走（100% まで、返却のたびに同じ目標で起動し直す）。i14 の終わりで 3,107（89.49%）、Acid2・3 100% | — |
-| Sonnet | q1820〜q1824 ラップアップ（全部 uncleared、source だけ commit、試験は未作成・未実行） | WS335 p003（s-ws335-p003 の 8e06b344e、cryc-sha3.c）・p006（s-ws335-p006 の e95bacc79、cryc-chacha.c）・p008（s-ws335-p008 の 1e11aeaca、cryc-f25519.c、x25519 は未）、WS336 p004（s-ws336-p004 の 8a9d00e6d、ssh-cipher・ssh-packet）・p005（s-ws336-p005 の 4b01c55e5、ssh-key）。同じ worktree で起動し直し、各 phase.md の結果の節の「次の手」（試験を書く → 流す → 壊す確かめ）から続ける。main には未 merge | — |
+| Sonnet | q1820〜q1824 ラップアップ（全部 uncleared、source だけ commit、試験は未作成・未実行） | WS335 p003（s-ws335-p003 の 83a9cd131、cryc-sha3.c）・p006（s-ws335-p006 の c27c65007、cryc-chacha.c）・p008（s-ws335-p008 の 361aec12f、cryc-f25519.c、x25519 は未）、WS336 p004（s-ws336-p004 の 2418e1b03、ssh-cipher・ssh-packet）・p005（s-ws336-p005 の e22e7431c、ssh-key）。同じ worktree で起動し直し、各 phase.md の結果の節の「次の手」（試験を書く → 流す → 壊す確かめ）から続ける。main には未 merge | — |
 | P1〜P6 | 返却・ラップアップ | 割当なし（P3 の RTX は uncleared: G1 は (b) の設計とユーザーの判断が要る） | — |
 
 **次のセッションの始めにする事**:
