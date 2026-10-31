@@ -1101,6 +1101,7 @@ static int values_background_size(const struct css_token *tokens, size_t count, 
 static int values_takes_length(int property);
 static int values_flex(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_unitless_function(const struct css_token *tokens, size_t count);
+static int values_flex_number(struct css_parse *parse, const struct css_token *tokens, size_t count, float *number);
 static int values_position_try(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_place(struct css_parse *parse, const struct css_token *tokens, size_t count, int align, int justify, struct css_declaration *out, size_t *made);
 static size_t values_place_value(const struct css_token *tokens, const size_t *starts, size_t components, size_t first);
@@ -2289,6 +2290,7 @@ values_single(
 	int is_last;
 	int is_safe;
 	int is_unsafe;
+	float flex_factor;
 
 	/* A logical side or size takes the grammar of a physical one. */
 	property = values_physical_grammar(property);
@@ -3116,6 +3118,14 @@ values_single(
 	/* flex-grow and flex-shrink: a number that is not negative. */
 	if (property == CSS_PROP_FLEX_GROW ||
 	    property == CSS_PROP_FLEX_SHRINK) {
+		if (values_unitless_function(&tokens[0], count)) {
+			error = values_flex_number(parse, &tokens[0], count, &flex_factor);
+			if (error != 1)
+				return EINVAL;
+			value->kind = CSS_VALUE_NUMBER;
+			value->number = flex_factor;
+			return 0;
+		}
 		if (tokens[0].type != CSS_TOKEN_NUMBER ||
 		    tokens[0].number < 0)
 			return EINVAL;
@@ -5315,7 +5325,8 @@ values_calc(
 
 	/* A calculation of plain numbers is a number: line-height's, or zero for a length. */
 	if (calc.count == 0) {
-		if (property == CSS_PROP_LINE_HEIGHT || property == CSS_PROP_ZOOM) {
+		if (property == CSS_PROP_LINE_HEIGHT || property == CSS_PROP_ZOOM || property == CSS_PROP_FLEX_GROW || property == CSS_PROP_FLEX_SHRINK ||
+		    property == CSS_PROP_ORDER) {
 			value->kind = CSS_VALUE_NUMBER;
 			value->number = calc.sums[0].px;
 			return 0;
@@ -5978,6 +5989,8 @@ values_flex(
 	size_t components;
 	size_t index;
 	size_t last_number;
+	float factor;
+	int is_number;
 	int numbers;
 	int basis_set;
 	int is_word;
@@ -6022,17 +6035,22 @@ values_flex(
 	numbers = 0;
 	last_number = 0;
 	for (index = 0; index < components; index++) {
+		/* A factor is a number, or a calculation of numbers. */
+		is_number = values_flex_number(parse, tokens + starts[index], lengths[index], &factor);
+		if (is_number < 0)
+			return EINVAL;
+
 		/* The two factors are adjacent: a basis between them is invalid. */
-		if (lengths[index] == 1 && tokens[starts[index]].type == CSS_TOKEN_NUMBER) {
+		if (is_number) {
 			if (numbers > 0 && index != last_number + 1U)
 				return EINVAL;
 			last_number = index;
 		}
-		if (lengths[index] == 1 && tokens[starts[index]].type == CSS_TOKEN_NUMBER && tokens[starts[index]].number != 0) {
+		if (is_number && factor != 0) {
 			if (numbers == 0)
-				grow.number = (float)tokens[starts[index]].number;
+				grow.number = factor;
 			else if (numbers == 1)
-				shrink.number = (float)tokens[starts[index]].number;
+				shrink.number = factor;
 			else
 				return EINVAL;
 			numbers++;
@@ -6040,7 +6058,7 @@ values_flex(
 		}
 
 		/* A zero is a factor where one is expected, else a basis. */
-		if (lengths[index] == 1 && tokens[starts[index]].type == CSS_TOKEN_NUMBER && numbers < 2 && (numbers == 0 || index == 1)) {
+		if (is_number && numbers < 2 && (numbers == 0 || index == 1)) {
 			if (numbers == 0)
 				grow.number = 0;
 			else
@@ -6048,6 +6066,8 @@ values_flex(
 			numbers++;
 			continue;
 		}
+		if (is_number && lengths[index] != 1)
+			return EINVAL;
 
 		/* The basis, once (a calculation without units is not one). */
 		if (basis_set || values_unitless_function(tokens + starts[index], lengths[index]))
@@ -6181,6 +6201,36 @@ values_position_try(
 	values_add(out, made, CSS_PROP_POSITION_TRY_ORDER, &order);
 	values_add(out, made, CSS_PROP_POSITION_TRY_FALLBACKS, &fallbacks);
 	return 0;
+}
+
+/*
+ * Reads a flex factor from a component: a number token, or a calculation of numbers (negative ones are zero, as the
+ * computed factor is).  Reports 1 for a factor, 0 for another component, -1 for a calculation that is not valid.
+ */
+static int
+values_flex_number(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	float *number)
+{
+	struct css_value value;
+	int error;
+
+	if (count == 1 && tokens[0].type == CSS_TOKEN_NUMBER) {
+		if (tokens[0].number < 0)
+			return -1;
+		*number = (float)tokens[0].number;
+		return 1;
+	}
+	if (!values_unitless_function(tokens, count))
+		return 0;
+	memset(&value, 0, sizeof(value));
+	error = values_calc(parse, CSS_PROP_FLEX_GROW, tokens, count, &value);
+	if (error != 0 || value.kind != CSS_VALUE_NUMBER)
+		return -1;
+	*number = value.number < 0 ? 0.0f : value.number;
+	return 1;
 }
 
 /* Tells whether a component is a function whose arguments have no dimension or percentage (a number). */
@@ -7417,6 +7467,9 @@ values_track_list(
 	size_t time;
 	size_t first;
 	size_t added;
+	size_t used;
+	size_t after_count;
+	struct css_value calculated;
 	int is_repeat;
 	int last_was_names;
 	int prefix;
@@ -7509,10 +7562,24 @@ values_track_list(
 				last_was_names = 0;
 				continue;
 			}
-			if (inner >= end || tokens[inner].type != CSS_TOKEN_NUMBER || !tokens[inner].integer || tokens[inner].number < 1)
-				return EINVAL;
-			times = (size_t)tokens[inner].number;
-			comma = inner + 1U + values_split_at(tokens + inner + 1U, end - inner - 1U, CSS_TOKEN_COMMA, 0);
+			after_count = inner + 1U;
+			if (inner < end && tokens[inner].type == CSS_TOKEN_FUNCTION) {
+				/* A calculation of numbers, rounded to an integer. */
+				used = values_function_length(tokens + inner, end - inner);
+				memset(&calculated, 0, sizeof(calculated));
+				if (used == 0 || !values_unitless_function(tokens + inner, used))
+					return EINVAL;
+				error = values_calc(parse, CSS_PROP_ORDER, tokens + inner, used, &calculated);
+				if (error != 0 || calculated.kind != CSS_VALUE_NUMBER || calculated.number < 0.5f)
+					return EINVAL;
+				times = calculated.number > 1000.0f ? 1000U : (size_t)floorf(calculated.number + 0.5f);
+				after_count = inner + used;
+			} else {
+				if (inner >= end || tokens[inner].type != CSS_TOKEN_NUMBER || !tokens[inner].integer || tokens[inner].number < 1)
+					return EINVAL;
+				times = (size_t)tokens[inner].number;
+			}
+			comma = after_count + values_split_at(tokens + after_count, end - after_count, CSS_TOKEN_COMMA, 0);
 			if (comma >= end)
 				return EINVAL;
 
@@ -8148,15 +8215,19 @@ values_grid_line(
 	size_t count,
 	struct css_value *value)
 {
+	struct css_value calculated;
 	struct vm_string *name;
 	size_t index;
+	size_t used;
 	int is_span;
 	int has_number;
+	int from_calc;
 	int number;
 	int same;
 	int error;
 
 	/* Starts from auto. */
+	from_calc = 0;
 	value->kind = CSS_VALUE_GRID_LINE;
 	value->number = 0;
 	value->keyword = 0;
@@ -8194,6 +8265,19 @@ values_grid_line(
 			if ((has_number || name != NULL) && values_skip_space(tokens, count, index + 1U) != count)
 				return EINVAL;
 			is_span = 1;
+		} else if (tokens[index].type == CSS_TOKEN_FUNCTION) {
+			/* A calculation of numbers: rounded to an integer, and a span counts at least one. */
+			used = values_function_length(tokens + index, count - index);
+			if (has_number || used == 0 || !values_unitless_function(tokens + index, used))
+				return EINVAL;
+			memset(&calculated, 0, sizeof(calculated));
+			error = values_calc(parse, CSS_PROP_ORDER, tokens + index, used, &calculated);
+			if (error != 0 || calculated.kind != CSS_VALUE_NUMBER)
+				return EINVAL;
+			number = calculated.number > 10000.0f ? 10000 : calculated.number < -10000.0f ? -10000 : (int)floorf(calculated.number + 0.5f);
+			from_calc = 1;
+			has_number = 1;
+			index += used - 1U;
 		} else if (tokens[index].type == CSS_TOKEN_NUMBER) {
 			/* One integer other than zero. */
 			if (has_number || !tokens[index].integer || tokens[index].number == 0)
@@ -8216,6 +8300,8 @@ values_grid_line(
 
 	/* A span counts at least one line; a line names its number, its name or both. */
 	if (is_span) {
+		if (has_number && number < 1 && from_calc)
+			number = 1;
 		if (has_number && number < 1)
 			return EINVAL;
 		if (!has_number && name == NULL)
@@ -8224,6 +8310,8 @@ values_grid_line(
 		if (has_number)
 			value->keyword = number;
 	} else {
+		if (from_calc && number == 0)
+			return EINVAL;
 		value->number = (float)number;
 	}
 

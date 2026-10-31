@@ -2642,6 +2642,116 @@ cascade_keep_tokens(
 	return 0;
 }
 
+/* Finds the end of the function whose name token is at an index: the index of its closing parenthesis. */
+static size_t
+cascade_function_end(
+	const struct css_token *tokens,
+	size_t count,
+	size_t start)
+{
+	size_t depth;
+	size_t index;
+
+	depth = 0;
+	for (index = start; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_FUNCTION || tokens[index].type == CSS_TOKEN_OPEN_PAREN)
+			depth++;
+		else if (tokens[index].type == CSS_TOKEN_CLOSE_PAREN && --depth == 0)
+			return index;
+	}
+	return count;
+}
+
+/*
+ * Evaluates a sign() of a calculation (-1, 0 or 1; the length inside measured as the element's style does) and
+ * sibling-index() and sibling-count() in a declaration's tokens, and puts the numbers they make in their places, so
+ * that the value parser sees plain calculations.  Reports EINVAL when an argument is not a calculation.
+ */
+static int
+cascade_dynamic_math(
+	struct css_engine *engine,
+	const struct css_style *style,
+	struct css_parse *parse,
+	struct wb_vector *tokens)
+{
+	static const uint16_t calc_text[] = { 'c', 'a', 'l', 'c' };
+	struct css_declaration made_declaration[CASCADE_EXPANSION_MAX];
+	struct wb_vector inner;
+	struct css_token number;
+	struct css_token *items;
+	const struct dom_node *sibling;
+	struct css_length length;
+	size_t index;
+	size_t end;
+	size_t made;
+	double result;
+	int is_sign;
+	int is_index;
+	int is_count;
+	int error;
+
+	for (index = 0; index < tokens->count; index++) {
+		items = tokens->items;
+		if (items[index].type != CSS_TOKEN_FUNCTION)
+			continue;
+		is_sign = css_ident_equal(&items[index], "sign");
+		is_index = css_ident_equal(&items[index], "sibling-index");
+		is_count = css_ident_equal(&items[index], "sibling-count");
+		if (!is_sign && !is_index && !is_count)
+			continue;
+		end = cascade_function_end(items, tokens->count, index);
+		if (end >= tokens->count)
+			return EINVAL;
+		result = 0.0;
+		if (is_index || is_count) {
+			if (end != index + 1U || engine->current == NULL)
+				return EINVAL;
+			result = 0.0;
+			if (engine->current->node.parent != NULL) {
+				for (sibling = engine->current->node.parent->first_child; sibling != NULL; sibling = sibling->next) {
+					if (sibling->type != DOM_ELEMENT)
+						continue;
+					result += 1.0;
+					if (is_index && sibling == &engine->current->node)
+						break;
+				}
+			}
+		} else {
+			/* calc(inner), parsed as a line-height (a number or a length). */
+			wb_vector_init(&inner, sizeof(struct css_token));
+			number = items[index];
+			number.text = calc_text;
+			number.length = 4;
+			error = wb_vector_push(&inner, &number);
+			for (made = index + 1U; error == 0 && made <= end; made++)
+				error = wb_vector_push(&inner, &items[made]);
+			made = 0;
+			if (error == 0)
+				error = css_parse_property(parse, CSS_PROP_LINE_HEIGHT, inner.items, inner.count, made_declaration, &made);
+			wb_vector_release(&inner);
+			if (error != 0 || made == 0)
+				return EINVAL;
+			if (made_declaration[0].value.kind == CSS_VALUE_NUMBER) {
+				result = made_declaration[0].value.number;
+			} else {
+				length = cascade_length(engine, &made_declaration[0].value, style->font_size);
+				result = length.value + length.offset;
+			}
+			result = result > 0.0 ? 1.0 : result < 0.0 ? -1.0 : 0.0;
+		}
+
+		/* The number replaces the function. */
+		memset(&number, 0, sizeof(number));
+		number.type = CSS_TOKEN_NUMBER;
+		number.number = result;
+		number.integer = 1;
+		items[index] = number;
+		memmove(&items[index + 1U], &items[end + 1U], (tokens->count - end - 1U) * sizeof(*items));
+		tokens->count -= end - index;
+	}
+	return 0;
+}
+
 /*
  * Replaces each declaration that waits for var() in a sorted list of
  * matches by the declarations its value makes once the element's custom
@@ -2705,6 +2815,8 @@ cascade_resolve_pending(
 		wb_vector_clear(&tokens);
 		made = 0;
 		error = cascade_substitute(style->custom, matches[index].declaration->raw, matches[index].declaration->raw_count, 0, &tokens);
+		if (error == 0)
+			error = cascade_dynamic_math(engine, style, &parse, &tokens);
 		if (error == 0)
 			error = css_parse_property(&parse, matches[index].declaration->pending_property, tokens.items, tokens.count, expanded, &made);
 		if (error == ENOMEM)
