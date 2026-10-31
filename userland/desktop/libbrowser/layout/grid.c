@@ -105,6 +105,9 @@ static const struct css_track *grid_row_track(const struct css_style *style, int
 static int grid_size_columns(struct layout_tree *tree, struct layout_box *box, struct grid_state *grid, layout_unit gap);
 static int grid_lay_item(struct layout_tree *tree, struct layout_box *item, layout_unit width, int justify);
 static void grid_size_rows(struct layout_tree *tree, struct layout_box *box, struct grid_state *grid, layout_unit gap);
+static int grid_subgrid_axis(const struct layout_box *box, int columns);
+static int grid_subgrid_prepare(struct layout_box *sub);
+static int grid_subgrid_preset(struct layout_tree *tree, struct layout_box *sub, int columns, const layout_unit *sizes, int first, int tracks, layout_unit gap);
 static int grid_relay_item(struct layout_tree *tree, struct layout_box *item, layout_unit width, layout_unit height, int align);
 static layout_unit grid_clamp_height(const struct layout_box *item, layout_unit content, layout_unit area, layout_unit frame);
 static layout_unit grid_clamp_height(const struct layout_box *item, layout_unit content, layout_unit area, layout_unit frame);
@@ -558,6 +561,7 @@ layout_grid(
 	layout_unit right_after;
 	int col_right;
 	layout_unit shared_right_extent;
+	struct css_length subgrid_width;
 	layout_unit free_height;
 	layout_unit saved_height;
 	size_t index;
@@ -633,6 +637,26 @@ layout_grid(
 		return error;
 	}
 
+	/* An item that is a subgrid takes the tracks it spans from this grid: its own items are placed against them. */
+	for (index = 0; index < grid.item_count; index++) {
+		child = grid.items[index].box;
+		child->subgrid_column_span = 0;
+		child->subgrid_row_span = 0;
+		child->subgrid_columns = NULL;
+		child->subgrid_rows = NULL;
+		if (grid_subgrid_axis(child, 1))
+			child->subgrid_column_span = grid.items[index].column_span;
+		if (grid_subgrid_axis(child, 0))
+			child->subgrid_row_span = grid.items[index].row_span;
+		if (child->subgrid_column_span > 0 || child->subgrid_row_span > 0) {
+			error = grid_subgrid_prepare(child);
+			if (error != 0) {
+				grid_release(&grid);
+				return error;
+			}
+		}
+	}
+
 	/* The gaps between the tracks. */
 	column_gap = 0;
 	if (box->style.column_gap.unit == CSS_UNIT_PX)
@@ -666,6 +690,8 @@ layout_grid(
 		child = item->box;
 		child->item_row = item->row + 1;
 		child->item_column = item->column + 1;
+		child->item_row_span = item->row_span;
+		child->item_column_span = item->column_span;
 		child->grid_orthogonal = 0;
 		child->grid_room = -1;
 		if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
@@ -679,6 +705,11 @@ layout_grid(
 			child->grid_room = layout_from_px(grid_row_track(&box->style, item->row)->size.value);
 	}
 
+	/* A subgrid lays its tracks with its own gap (the parent's when it gave none) once the parent has given the tracks. */
+	if (box->subgrid_columns != NULL)
+		column_gap = box->subgrid_column_gap;
+	if (box->subgrid_rows != NULL)
+		row_gap = box->subgrid_row_gap;
 	row_gap_base = row_gap;
 
 	/* The columns' widths. */
@@ -734,6 +765,15 @@ layout_grid(
 		    item->box->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
 			justify = CSS_ALIGN_START;
 
+		/* A subgrid in columns is given the columns it spans. */
+		if (item->box->subgrid_column_span > 0) {
+			error = grid_subgrid_preset(tree, item->box, 1, grid.columns, item->column, grid.column_count, column_gap);
+			if (error != 0) {
+				grid_release(&grid);
+				return error;
+			}
+		}
+
 		/* Percentage heights are of the grid area: its fixed rows' height, or indefinite while the rows are sized. */
 		saved_height = tree->containing_height;
 		saved_definite = tree->containing_height_definite;
@@ -742,7 +782,15 @@ layout_grid(
 			if (!tree->containing_height_definite)
 				tree->containing_height = 0;
 		}
+
+		/* A subgrid in columns fills the area it spans whatever its width says. */
+		subgrid_width = item->box->style.width;
+		if (item->box->subgrid_column_span > 0) {
+			item->box->style.width.unit = CSS_UNIT_AUTO;
+			justify = CSS_ALIGN_STRETCH;
+		}
 		error = grid_lay_item(tree, item->box, area_width, justify);
+		item->box->style.width = subgrid_width;
 		tree->containing_height = saved_height;
 		tree->containing_height_definite = saved_definite;
 		if (error != 0) {
@@ -864,6 +912,15 @@ layout_grid(
 			align = CSS_ALIGN_BASELINE;
 		else if (align == CSS_ALIGN_BASELINE)
 			align = CSS_ALIGN_START;
+
+		/* A subgrid in rows is given the rows it spans. */
+		if (child->subgrid_row_span > 0) {
+			error = grid_subgrid_preset(tree, child, 0, grid.rows, item->row, grid.row_count, row_gap);
+			if (error != 0) {
+				grid_release(&grid);
+				return error;
+			}
+		}
 
 		/* A definite grid area must reach percentage descendants of a stretched item. */
 		error = grid_relay_item(tree, child, area_width, area_height, align);
@@ -2744,6 +2801,400 @@ grid_row_track(
 }
 
 /*
+ * One entry of an axis' sizing: a box (or a stand-in of a fixed size) with
+ * the tracks it covers and what its edges add; the items of a subgrid
+ * stand in the parent's list at the parent's track numbers.
+ */
+struct grid_flat {
+	struct layout_box *box;
+	int start;
+	int span;
+	int row;
+	int row_span;
+	layout_unit extra;
+	/* At least zero: a stand-in of this size, without a box. */
+	layout_unit fixed_size;
+};
+
+/* The entries of one axis' sizing and how many tracks the axis has. */
+struct grid_flat_list {
+	struct grid_flat *entries;
+	size_t count;
+	size_t capacity;
+	int tracks;
+};
+
+/* Tells whether a grid item takes its tracks in an axis from the grid it is in. */
+static int
+grid_subgrid_axis(
+	const struct layout_box *box,
+	int columns)
+{
+	/* Only an in-flow grid container. */
+	if (box->out_of_flow || box->replaced)
+		return 0;
+	if (box->style.display != CSS_DISPLAY_GRID && box->style.display != CSS_DISPLAY_INLINE_GRID)
+		return 0;
+
+	/* A subgrid whose writing mode is orthogonal to its parent's keeps tracks of its own. */
+	if (box->parent != NULL &&
+	    (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) !=
+	    (box->parent->style.writing_mode == CSS_WRITING_HORIZONTAL_TB))
+		return 0;
+
+	/* The axis declared as a subgrid. */
+	if (columns)
+		return box->style.column_subgrid != NULL;
+	return box->style.row_subgrid != NULL;
+}
+
+/* Finds how much margin, border and padding a box has on the start (or end) side of an axis. */
+static layout_unit
+grid_edge(
+	const struct layout_box *box,
+	int columns,
+	int start)
+{
+	int side;
+
+	/* The side: the left or top for the start, the right or bottom for the end (a right to left grid starts at the right). */
+	if (columns) {
+		side = start ? CSS_LEFT : CSS_RIGHT;
+		if (box->style.direction == CSS_DIRECTION_RTL)
+			side = start ? CSS_RIGHT : CSS_LEFT;
+	} else {
+		side = start ? CSS_TOP : CSS_BOTTOM;
+	}
+	return box->margin[side] + box->border[side] + box->padding[side];
+}
+
+/* Finds the gap a box lays its tracks of an axis with: its own when it gave a length, else the one of the grid it is in. */
+static layout_unit
+grid_gap_of(
+	const struct layout_box *box,
+	int columns,
+	layout_unit parent_gap)
+{
+	const struct css_length *gap;
+
+	/* A gap in pixels. */
+	gap = columns ? &box->style.column_gap : &box->style.row_gap;
+	if (gap->unit == CSS_UNIT_PX)
+		return layout_from_px(gap->value);
+	return parent_gap;
+}
+
+/* Adds an entry to a list (the tracks it covers are held within the axis). */
+static int
+grid_flat_add(
+	struct grid_flat_list *list,
+	struct layout_box *box,
+	int start,
+	int span,
+	int row,
+	int row_span,
+	layout_unit extra,
+	layout_unit fixed_size)
+{
+	struct grid_flat *grown;
+	size_t capacity;
+
+	/* A place outside the axis counts for nothing. */
+	if (start < 0 || start >= list->tracks)
+		return 0;
+	if (span < 1)
+		span = 1;
+	if (start + span > list->tracks)
+		span = list->tracks - start;
+
+	/* Room for one more. */
+	if (list->count == list->capacity) {
+		capacity = list->capacity == 0 ? 16U : list->capacity * 2U;
+		grown = realloc(list->entries, capacity * sizeof(*grown));
+		if (grown == NULL)
+			return ENOMEM;
+		list->entries = grown;
+		list->capacity = capacity;
+	}
+
+	/* The entry. */
+	list->entries[list->count].box = box;
+	list->entries[list->count].start = start;
+	list->entries[list->count].span = span;
+	list->entries[list->count].row = row;
+	list->entries[list->count].row_span = row_span;
+	list->entries[list->count].extra = extra;
+	list->entries[list->count].fixed_size = fixed_size;
+	list->count++;
+	return 0;
+}
+
+/*
+ * Adds the items of a subgrid to a parent's list, at the parent's track
+ * numbers: what the subgrid's edges (margin, border, padding) add goes to
+ * the items on its first and last tracks, and half of what its gap differs
+ * from the parent's to the items on each interior side.  A track at an edge
+ * with no item of the subgrid on it gets a stand-in for the edge alone.
+ */
+static int
+grid_flatten(
+	struct grid_flat_list *list,
+	struct layout_box *sub,
+	int columns,
+	int first,
+	layout_unit parent_gap,
+	layout_unit extra_start,
+	layout_unit extra_end,
+	layout_unit inherited)
+{
+	struct layout_box *child;
+	layout_unit edge_start;
+	layout_unit edge_end;
+	layout_unit gap;
+	layout_unit half;
+	layout_unit start_extra;
+	layout_unit end_extra;
+	int count;
+	int start;
+	int span;
+	int touched_start;
+	int touched_end;
+	int error;
+
+	/* The subgrid's tracks, its edges and its gap. */
+	count = columns ? sub->subgrid_column_span : sub->subgrid_row_span;
+	layout_box_model(sub, 0);
+	edge_start = grid_edge(sub, columns, 1) + extra_start;
+	edge_end = grid_edge(sub, columns, 0) + extra_end;
+	gap = grid_gap_of(sub, columns, parent_gap);
+	half = inherited + (gap - parent_gap) / 2;
+
+	/* Each item of the subgrid. */
+	touched_start = 0;
+	touched_end = 0;
+	for (child = sub->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow)
+			continue;
+		start = (columns ? child->item_column : child->item_row) - 1;
+		span = columns ? child->item_column_span : child->item_row_span;
+		if (start < 0 || start >= count)
+			continue;
+		if (span < 1)
+			span = 1;
+		if (start + span > count)
+			span = count - start;
+
+		/* What each side adds: the edge on the subgrid's first and last tracks, else half the gap's difference. */
+		start_extra = half;
+		end_extra = half;
+		if (start == 0) {
+			start_extra = edge_start;
+			touched_start = 1;
+		}
+		if (start + span == count) {
+			end_extra = edge_end;
+			touched_end = 1;
+		}
+
+		/* A subgrid inside passes its sides on; any other item stands in the list. */
+		if ((columns && child->subgrid_column_span > 0) || (!columns && child->subgrid_row_span > 0)) {
+			error = grid_flatten(list, child, columns, first + start, gap, start_extra, end_extra, half);
+		} else {
+			error = grid_flat_add(list, child, first + start, span, child->item_row - 1,
+			    child->item_row_span, start_extra + end_extra, -1);
+		}
+		if (error != 0)
+			return error;
+	}
+
+	/* An edge no item reaches still takes room. */
+	if (count == 1 && !touched_start && !touched_end)
+		return grid_flat_add(list, NULL, first, 1, 0, 1, 0, edge_start + edge_end);
+	if (!touched_start) {
+		error = grid_flat_add(list, NULL, first, 1, 0, 1, 0, edge_start);
+		if (error != 0)
+			return error;
+	}
+	if (!touched_end)
+		return grid_flat_add(list, NULL, first + count - 1, 1, 0, 1, 0, edge_end);
+	return 0;
+}
+
+/* Makes the list of an axis' entries: the grid's items, and the items of its subgrids in place of them. */
+static int
+grid_flat_build(
+	struct grid_flat_list *list,
+	const struct grid_state *grid,
+	int columns,
+	layout_unit gap)
+{
+	const struct grid_item *item;
+	size_t index;
+	int error;
+
+	/* Each item of the grid. */
+	list->entries = NULL;
+	list->count = 0;
+	list->capacity = 0;
+	list->tracks = columns ? grid->column_count : grid->row_count;
+	for (index = 0; index < grid->item_count; index++) {
+		item = &grid->items[index];
+		if (columns && item->box->subgrid_column_span > 0) {
+			error = grid_flatten(list, item->box, 1, item->column, gap, 0, 0, 0);
+		} else if (!columns && item->box->subgrid_row_span > 0) {
+			error = grid_flatten(list, item->box, 0, item->row, gap, 0, 0, 0);
+		} else if (columns) {
+			error = grid_flat_add(list, item->box, item->column, item->column_span, item->row, item->row_span, 0, -1);
+		} else {
+			error = grid_flat_add(list, item->box, item->row, item->row_span, item->column, item->column_span, 0, -1);
+		}
+		if (error != 0)
+			return error;
+	}
+	return 0;
+}
+
+/*
+ * Places the items of a subgrid against the tracks it spans (its explicit
+ * grid is those tracks), recording where each went and which of them are
+ * subgrids in turn.
+ */
+static int
+grid_subgrid_prepare(
+	struct layout_box *sub)
+{
+	struct grid_state grid;
+	struct grid_item *item;
+	struct layout_box *child;
+	size_t index;
+	int count;
+	int track;
+	int error;
+
+	/* The tracks it spans are its explicit grid: one auto track each. */
+	if (sub->subgrid_column_span > 0) {
+		count = sub->subgrid_column_span;
+		if (count > CSS_TRACKS)
+			count = CSS_TRACKS;
+		sub->style.column_count = count;
+		memset(&sub->style.column_repeat, 0, sizeof(sub->style.column_repeat));
+		for (track = 0; track < count; track++) {
+			memset(&sub->style.columns[track], 0, sizeof(sub->style.columns[track]));
+			sub->style.columns[track].kind = CSS_TRACK_AUTO;
+			sub->style.columns[track].minimum.unit = CSS_UNIT_AUTO;
+		}
+	}
+	if (sub->subgrid_row_span > 0) {
+		count = sub->subgrid_row_span;
+		if (count > CSS_TRACKS)
+			count = CSS_TRACKS;
+		sub->style.row_count = count;
+		memset(&sub->style.row_repeat, 0, sizeof(sub->style.row_repeat));
+		for (track = 0; track < count; track++) {
+			memset(&sub->style.rows[track], 0, sizeof(sub->style.rows[track]));
+			sub->style.rows[track].kind = CSS_TRACK_AUTO;
+			sub->style.rows[track].minimum.unit = CSS_UNIT_AUTO;
+		}
+	}
+
+	/* The items placed. */
+	layout_grid_names(sub);
+	memset(&grid, 0, sizeof(grid));
+	error = grid_collect(sub, &grid);
+	if (error == 0)
+		error = grid_place(&grid, sub->style.grid_auto_flow);
+	if (error != 0) {
+		grid_release(&grid);
+		return error;
+	}
+
+	/* Where each went, and the subgrids among them. */
+	for (index = 0; index < grid.item_count; index++) {
+		item = &grid.items[index];
+		child = item->box;
+		child->item_row = item->row + 1;
+		child->item_column = item->column + 1;
+		child->item_row_span = item->row_span;
+		child->item_column_span = item->column_span;
+		child->subgrid_column_span = 0;
+		child->subgrid_row_span = 0;
+		child->subgrid_columns = NULL;
+		child->subgrid_rows = NULL;
+		if (grid_subgrid_axis(child, 1))
+			child->subgrid_column_span = item->column_span;
+		if (grid_subgrid_axis(child, 0))
+			child->subgrid_row_span = item->row_span;
+		if (child->subgrid_column_span > 0 || child->subgrid_row_span > 0) {
+			error = grid_subgrid_prepare(child);
+			if (error != 0)
+				break;
+		}
+	}
+	grid_release(&grid);
+	return error;
+}
+
+/*
+ * Gives a subgrid the tracks it spans of its parent's axis: each track of
+ * the parent, less the subgrid's edges at its first and last, with half
+ * the gap's difference added on each interior side.
+ */
+static int
+grid_subgrid_preset(
+	struct layout_tree *tree,
+	struct layout_box *sub,
+	int columns,
+	const layout_unit *sizes,
+	int first,
+	int tracks,
+	layout_unit gap)
+{
+	layout_unit *given;
+	layout_unit own_gap;
+	layout_unit half;
+	layout_unit size;
+	int count;
+	int index;
+
+	/* The tracks it spans that the parent has. */
+	count = columns ? sub->subgrid_column_span : sub->subgrid_row_span;
+	if (first + count > tracks)
+		count = tracks - first;
+	if (count < 1)
+		return 0;
+	given = wb_arena_alloc(&tree->arena, (size_t)count * sizeof(*given));
+	if (given == NULL)
+		return ENOMEM;
+
+	/* Each track as the subgrid has it. */
+	layout_box_model(sub, 0);
+	own_gap = grid_gap_of(sub, columns, gap);
+	half = (gap - own_gap) / 2;
+	for (index = 0; index < count; index++) {
+		size = sizes[first + index];
+		if (index == 0)
+			size -= grid_edge(sub, columns, 1);
+		if (index == count - 1)
+			size -= grid_edge(sub, columns, 0);
+		if (index > 0)
+			size += half;
+		if (index < count - 1)
+			size += half;
+		given[index] = size;
+	}
+
+	/* Kept for its layout. */
+	if (columns) {
+		sub->subgrid_columns = given;
+		sub->subgrid_column_gap = own_gap;
+	} else {
+		sub->subgrid_rows = given;
+		sub->subgrid_row_gap = own_gap;
+	}
+	return 0;
+}
+
+/*
  * Describes one declared track to the track sizing algorithm: its minimum
  * and maximum sizing functions, with a percentage resolved against the
  * definite whole (or taken as auto when the whole is not known yet).
@@ -2941,15 +3392,15 @@ grid_column_item_contribution(
 	return 0;
 }
 
-/* What the callback of the column sizing needs to answer for an item. */
+/* What the callback of the column sizing needs to answer for an entry. */
 struct grid_column_context {
 	struct layout_tree *tree;
-	const struct grid_state *grid;
+	const struct grid_flat *flat;
 	layout_unit whole;
 	int error;
 };
 
-/* Answers the track sizing for a column item (a failure is kept in the context and answered as nothing). */
+/* Answers the track sizing for a column entry (a failure is kept in the context and answered as nothing). */
 static layout_unit
 grid_column_answer(
 	void *context,
@@ -2959,21 +3410,40 @@ grid_column_answer(
 	layout_unit *fixed)
 {
 	struct grid_column_context *state;
+	const struct grid_flat *entry;
+	struct grid_item stand_in;
 	layout_unit outer;
 	int error;
 
-	/* The item's contribution. */
+	/* A stand-in for a subgrid's edge has its size. */
 	state = context;
-	outer = 0;
+	entry = &state->flat[index];
 	*fixed = -1;
+	if (entry->fixed_size >= 0)
+		return entry->fixed_size;
+
+	/* The box's contribution. */
+	outer = 0;
 	if (state->error != 0)
 		return 0;
-	error = grid_column_item_contribution(state->tree, &state->grid->items[index], kind, automatic,
-	    fixed, &outer);
+	memset(&stand_in, 0, sizeof(stand_in));
+	stand_in.box = entry->box;
+	stand_in.column = entry->start;
+	stand_in.column_span = entry->span;
+	stand_in.row = entry->row < 0 ? 0 : entry->row;
+	stand_in.row_span = entry->row_span < 1 ? 1 : entry->row_span;
+	error = grid_column_item_contribution(state->tree, &stand_in, kind, automatic, fixed, &outer);
 	if (error != 0) {
 		state->error = error;
 		return 0;
 	}
+
+	/* What the subgrid's edges and gap add. */
+	outer += entry->extra;
+	if (outer < 0)
+		outer = 0;
+	if (*fixed >= 0 && entry->extra > 0)
+		*fixed += entry->extra;
 	return outer;
 }
 
@@ -2994,17 +3464,24 @@ grid_size_columns(
 	struct grid_track_input input;
 	struct grid_track_spec *tracks;
 	struct grid_track_item *items;
+	struct grid_flat_list list;
 	layout_unit whole;
 	size_t index;
 	int constraint;
 	int column;
-	int span;
 	int error;
 
 	/* The row of widths. */
 	grid->columns = calloc((size_t)grid->column_count + 1U, sizeof(*grid->columns));
 	if (grid->columns == NULL)
 		return ENOMEM;
+
+	/* A subgrid has the tracks its parent gave it. */
+	if (box->subgrid_columns != NULL) {
+		for (column = 0; column < grid->column_count && column < box->subgrid_column_span; column++)
+			grid->columns[column] = box->subgrid_columns[column];
+		return 0;
+	}
 
 	/* An empty implicit grid has no track for its auto-column size to occupy. */
 	if (grid->column_count == 0 || (grid->item_count == 0 && box->style.column_count == 0))
@@ -3022,38 +3499,35 @@ grid_size_columns(
 	}
 
 	/* The tracks and the items in the form the algorithm takes. */
+	error = grid_flat_build(&list, grid, 1, gap);
 	tracks = calloc((size_t)grid->column_count, sizeof(*tracks));
-	items = calloc(grid->item_count + 1U, sizeof(*items));
-	if (tracks == NULL || items == NULL) {
+	items = calloc(list.count + 1U, sizeof(*items));
+	if (error != 0 || tracks == NULL || items == NULL) {
+		free(list.entries);
 		free(tracks);
 		free(items);
-		return ENOMEM;
+		return error != 0 ? error : ENOMEM;
 	}
 	for (column = 0; column < grid->column_count; column++) {
 		grid_track_spec_of(grid_column_track(&box->style, column), whole, &tracks[column]);
 		if (grid->column_collapsed != NULL && grid->column_collapsed[column])
 			tracks[column].collapsed = 1;
 	}
-	for (index = 0; index < grid->item_count; index++) {
-		items[index].start = grid->items[index].column;
-		span = grid->items[index].column_span;
-		if (items[index].start + span > grid->column_count)
-			span = grid->column_count - items[index].start;
-		if (span < 1)
-			span = 1;
-		items[index].span = span;
+	for (index = 0; index < list.count; index++) {
+		items[index].start = list.entries[index].start;
+		items[index].span = list.entries[index].span;
 	}
 
 	/* The sizing. */
 	memset(&context, 0, sizeof(context));
 	context.tree = tree;
-	context.grid = grid;
+	context.flat = list.entries;
 	context.whole = whole;
 	memset(&input, 0, sizeof(input));
 	input.tracks = tracks;
 	input.count = grid->column_count;
 	input.items = items;
-	input.item_count = grid->item_count;
+	input.item_count = list.count;
 	input.gap = gap;
 	input.constraint = constraint;
 	input.available = whole;
@@ -3063,6 +3537,7 @@ grid_size_columns(
 	input.contribution = grid_column_answer;
 	input.context = &context;
 	error = grid_track_size(&input, grid->columns);
+	free(list.entries);
 	free(tracks);
 	free(items);
 	if (error != 0)
@@ -3290,19 +3765,16 @@ grid_lay_item(
 	return 0;
 }
 
-/* What the callback of the row sizing needs to answer for an item. */
+/* What the callback of the row sizing needs to answer for an entry. */
 struct grid_row_context {
-	const struct layout_box *box;
-	const struct grid_state *grid;
-	const layout_unit *floors;
-	size_t item_count;
+	const struct grid_flat *flat;
 };
 
 /*
- * Answers the track sizing for a row item: its margin box's height once
- * laid out in its columns (the baseline groups of a row stand in as items
- * of their own after the real ones).  The minimum contribution of an item
- * with an auto height is its minimum height, or its automatic minimum.
+ * Answers the track sizing for a row entry: its margin box's height once
+ * laid out in its columns (a stand-in is a baseline group of a row or a
+ * subgrid's edge).  The minimum contribution of an item with an auto height
+ * is its minimum height, or its automatic minimum.
  */
 static layout_unit
 grid_row_answer(
@@ -3313,20 +3785,24 @@ grid_row_answer(
 	layout_unit *fixed)
 {
 	const struct grid_row_context *state;
+	const struct grid_flat *entry;
 	const struct layout_box *item;
 	layout_unit outer;
 	layout_unit frame;
 	layout_unit bound;
 
-	/* A baseline group's size is the floor of its row. */
+	/* A stand-in has its size. */
 	state = context;
+	entry = &state->flat[index];
 	*fixed = -1;
-	if (index >= state->item_count)
-		return state->floors[index - state->item_count];
+	if (entry->fixed_size >= 0)
+		return entry->fixed_size;
 
-	/* The item's margin box. */
-	item = state->grid->items[index].box;
-	outer = grid_outer_height(item);
+	/* The item's margin box, with what a subgrid's edges and gap add. */
+	item = entry->box;
+	outer = grid_outer_height(item) + entry->extra;
+	if (outer < 0)
+		outer = 0;
 	if (kind != GRID_CONTRIBUTION_MINIMUM)
 		return outer;
 
@@ -3342,7 +3818,7 @@ grid_row_answer(
 			bound -= frame;
 		if (bound < 0)
 			bound = 0;
-		return bound + frame + item->margin[CSS_TOP] + item->margin[CSS_BOTTOM];
+		return bound + frame + item->margin[CSS_TOP] + item->margin[CSS_BOTTOM] + entry->extra;
 	}
 
 	/* A scroll container, or an item with another kind of minimum, has none from its content. */
@@ -3352,6 +3828,8 @@ grid_row_answer(
 	/* Otherwise the automatic minimum is its content's height, which a fixed maximum caps. */
 	*fixed = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->padding[CSS_BOTTOM] + item->border[CSS_BOTTOM] +
 	    item->margin[CSS_TOP] + item->margin[CSS_BOTTOM];
+	if (entry->extra > 0)
+		*fixed += entry->extra;
 	return outer;
 }
 
@@ -3421,8 +3899,8 @@ grid_size_rows(
 	struct grid_track_input input;
 	struct grid_track_spec *tracks;
 	struct grid_track_item *items;
+	struct grid_flat_list list;
 	const struct css_track *track;
-	layout_unit *floors;
 	layout_unit first_above;
 	layout_unit first_below;
 	layout_unit last_above;
@@ -3431,12 +3909,11 @@ grid_size_rows(
 	layout_unit minimum;
 	layout_unit maximum;
 	layout_unit total;
-	size_t count;
+	layout_unit group_floor;
 	size_t index;
 	int percentages;
 	int again;
 	int row;
-	int span;
 	int error;
 
 	/* The column of heights (none when the grid has no rows). */
@@ -3449,40 +3926,41 @@ grid_size_rows(
 	if (grid->row_count == 0)
 		return;
 
+	/* A subgrid has the tracks its parent gave it. */
+	if (box->subgrid_rows != NULL) {
+		for (row = 0; row < grid->row_count && row < box->subgrid_row_span; row++)
+			grid->rows[row] = box->subgrid_rows[row];
+		return;
+	}
+
 	/* The room: the definite height, or the container's minimum and maximum. */
 	available = grid_row_space(tree, box, &minimum, &maximum);
 
-	/* The tracks, the items, and the baseline groups of each row as items of their own. */
-	count = grid->item_count + (size_t)grid->row_count;
-	tracks = calloc((size_t)grid->row_count, sizeof(*tracks));
-	items = calloc(count, sizeof(*items));
-	floors = calloc((size_t)grid->row_count, sizeof(*floors));
-	if (tracks == NULL || items == NULL || floors == NULL) {
-		free(tracks);
-		free(items);
-		free(floors);
-		return;
-	}
+	/* The tracks, the items (a subgrid's in its place), and the baseline groups of each row as stand-ins of their own. */
+	error = grid_flat_build(&list, grid, 0, gap);
 	percentages = 0;
-	for (row = 0; row < grid->row_count; row++) {
+	for (row = 0; row < grid->row_count && error == 0; row++) {
 		track = grid_row_track(&box->style, row);
 		if (track->size.unit == CSS_UNIT_PERCENT || track->minimum.unit == CSS_UNIT_PERCENT)
 			percentages = 1;
 		grid_row_baselines(box, grid, row, &first_above, &first_below, &last_above, &last_below);
-		floors[row] = first_above + first_below;
-		if (last_above + last_below > floors[row])
-			floors[row] = last_above + last_below;
-		items[grid->item_count + (size_t)row].start = row;
-		items[grid->item_count + (size_t)row].span = 1;
+		group_floor = first_above + first_below;
+		if (last_above + last_below > group_floor)
+			group_floor = last_above + last_below;
+		if (group_floor > 0)
+			error = grid_flat_add(&list, NULL, row, 1, 0, 1, 0, group_floor);
 	}
-	for (index = 0; index < grid->item_count; index++) {
-		items[index].start = grid->items[index].row;
-		span = grid->items[index].row_span;
-		if (items[index].start + span > grid->row_count)
-			span = grid->row_count - items[index].start;
-		if (span < 1)
-			span = 1;
-		items[index].span = span;
+	tracks = calloc((size_t)grid->row_count, sizeof(*tracks));
+	items = calloc(list.count + 1U, sizeof(*items));
+	if (error != 0 || tracks == NULL || items == NULL) {
+		free(list.entries);
+		free(tracks);
+		free(items);
+		return;
+	}
+	for (index = 0; index < list.count; index++) {
+		items[index].start = list.entries[index].start;
+		items[index].span = list.entries[index].span;
 	}
 
 	/* The sizing; a percentage row of an indefinite height is sized once as auto and again against the height that gave. */
@@ -3494,15 +3972,12 @@ grid_size_rows(
 				tracks[row].collapsed = 1;
 		}
 		memset(&context, 0, sizeof(context));
-		context.box = box;
-		context.grid = grid;
-		context.floors = floors;
-		context.item_count = grid->item_count;
+		context.flat = list.entries;
 		memset(&input, 0, sizeof(input));
 		input.tracks = tracks;
 		input.count = grid->row_count;
 		input.items = items;
-		input.item_count = count;
+		input.item_count = list.count;
 		input.gap = gap;
 		input.constraint = available >= 0 ? GRID_TRACK_DEFINITE : GRID_TRACK_MAX_CONSTRAINT;
 		input.available = available;
@@ -3531,9 +4006,9 @@ grid_size_rows(
 		grid->intrinsic_height = total;
 		again = 1;
 	}
+	free(list.entries);
 	free(tracks);
 	free(items);
-	free(floors);
 	if (error != 0) {
 		for (row = 0; row < grid->row_count; row++)
 			grid->rows[row] = 0;
@@ -3562,10 +4037,12 @@ grid_relay_item(
 	int justify;
 	int error;
 
-	/* The target content height, from the percentage or the area's stretch. */
+	/* The target content height: the whole area for a subgrid in rows, else from the percentage or the area's stretch. */
 	frame = item->border[CSS_TOP] + item->padding[CSS_TOP] +
 	    item->padding[CSS_BOTTOM] + item->border[CSS_BOTTOM];
-	if (item->style.height.unit == CSS_UNIT_PERCENT) {
+	if (item->subgrid_row_span > 0) {
+		content = height - item->margin[CSS_TOP] - item->margin[CSS_BOTTOM] - frame;
+	} else if (item->style.height.unit == CSS_UNIT_PERCENT) {
 		content = (layout_unit)((float)height * item->style.height.value / 100.0f) +
 		    layout_from_px(item->style.height.offset);
 		if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)

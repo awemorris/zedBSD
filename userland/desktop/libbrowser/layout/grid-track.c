@@ -519,6 +519,9 @@ gt_spread(
 				state->room[index] = state->limit[index] - state->base[index];
 		} else if (track->maximum == GRID_TRACK_FIT_CONTENT) {
 			state->room[index] = track->maximum_length - gt_size_of(state, index, target);
+		} else if (state->limit[index] < GT_INFINITE && !state->growable[index]) {
+			/* A growth limit already finite does not take space before the infinite ones do. */
+			state->room[index] = 0;
 		}
 		if (state->room[index] < 0)
 			state->room[index] = 0;

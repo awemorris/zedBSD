@@ -175,6 +175,71 @@ run(
 	}
 }
 
+/* Runs a case of two items: a spanning one over the first two tracks and a one-track one on the second. */
+static void
+run_two(
+	const char *name,
+	const char *tracks_text,
+	int available,
+	int span_min,
+	int span_max,
+	int single,
+	const char *expected)
+{
+	struct grid_track_spec tracks[16];
+	struct grid_track_item items[2];
+	struct grid_track_input input;
+	struct case_items content;
+	layout_unit sizes[16];
+	char got[256];
+	int count;
+	int index;
+	int length;
+
+	/* The tracks and the two items. */
+	count = parse_tracks(tracks_text, tracks);
+	items[0].start = 0;
+	items[0].span = 2;
+	items[1].start = 1;
+	items[1].span = 1;
+	memset(&content, 0, sizeof(content));
+	content.min_content[0] = span_min;
+	content.minimum[0] = span_min;
+	content.max_content[0] = span_max;
+	content.min_content[1] = single;
+	content.minimum[1] = single;
+	content.max_content[1] = single;
+	memset(&input, 0, sizeof(input));
+	input.tracks = tracks;
+	input.count = count;
+	input.items = items;
+	input.item_count = 2U;
+	input.constraint = GRID_TRACK_DEFINITE;
+	input.available = available * LAYOUT_UNIT;
+	input.container_minimum = -1;
+	input.container_maximum = -1;
+	input.stretch_auto = 1;
+	input.contribution = answer;
+	input.context = &content;
+	if (grid_track_size(&input, sizes) != 0) {
+		printf("FAIL %s: error\n", name);
+		failures++;
+		return;
+	}
+
+	/* The sizes in pixels. */
+	length = 0;
+	got[0] = '\0';
+	for (index = 0; index < count; index++) {
+		length += snprintf(got + length, sizeof(got) - (size_t)length, index ? " %g" : "%g",
+		    (double)sizes[index] / LAYOUT_UNIT);
+	}
+	if (strcmp(got, expected) != 0) {
+		printf("FAIL %s: tracks [%s] got [%s] expected [%s]\n", name, tracks_text, got, expected);
+		failures++;
+	}
+}
+
 /* Runs the cases. */
 int
 main(
@@ -227,6 +292,9 @@ main(
 
 	/* A max-content minimum takes the item's max-content contribution (grid-intrinsic-track-sizes-001). */
 	run("max-content-minimum", "mxc(10) mxc(10)", definite, 120, 0, 2, 60, "30 30");
+
+	/* The spanning item's extra space goes to the track that is not at its limit first (gridAutoAndAutoUnsorted). */
+	run_two("span-then-single", "auto auto", 90, 40, 90, 30, "60 30");
 	if (failures != 0) {
 		printf("%d failed\n", failures);
 		return 1;

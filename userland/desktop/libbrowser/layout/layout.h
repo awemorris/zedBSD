@@ -209,6 +209,20 @@ struct layout_box {
 	 */
 	int item_row;
 	int item_column;
+	/* The tracks a grid item spans in its grid (0 when not known). */
+	int item_row_span;
+	int item_column_span;
+	/*
+	 * A subgrid: how many of its parent's tracks it spans in each axis (0
+	 * when that axis has tracks of its own), and the track sizes and gap the
+	 * parent gave it (NULL until the parent has sized them; in the layout's arena).
+	 */
+	int subgrid_column_span;
+	int subgrid_row_span;
+	const layout_unit *subgrid_columns;
+	const layout_unit *subgrid_rows;
+	layout_unit subgrid_column_gap;
+	layout_unit subgrid_row_gap;
 
 	/* The text of a text box, whitespace kept as it came (the lines collapse it). */
 	const uint16_t *text;

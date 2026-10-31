@@ -1316,6 +1316,10 @@ css_initial_style(
 	style->auto_row_count = 1;
 	style->auto_rows[0].kind = CSS_TRACK_AUTO;
 
+	/* The gaps are normal: none, but a subgrid takes its parent's. */
+	style->row_gap.unit = CSS_UNIT_NORMAL;
+	style->column_gap.unit = CSS_UNIT_NORMAL;
+
 	/* The decoration's initial values that are not zero: opaque, a medium outline of no style in currentcolor. */
 	style->opacity = 1;
 	style->outline_width = 3;
@@ -4657,9 +4661,17 @@ cascade_apply(
 		break;
 	case CSS_PROP_ROW_GAP:
 		style->row_gap = cascade_length(engine, value, style->font_size);
+		if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_PX && value->number < 0.0f) {
+			style->row_gap.unit = CSS_UNIT_NORMAL;
+			style->row_gap.value = 0;
+		}
 		break;
 	case CSS_PROP_COLUMN_GAP:
 		style->column_gap = cascade_length(engine, value, style->font_size);
+		if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_PX && value->number < 0.0f) {
+			style->column_gap.unit = CSS_UNIT_NORMAL;
+			style->column_gap.value = 0;
+		}
 		break;
 	case CSS_PROP_FLEX_GROW:
 		style->flex_grow = value->number;

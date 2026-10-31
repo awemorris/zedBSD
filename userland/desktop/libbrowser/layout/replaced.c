@@ -50,6 +50,7 @@ layout_replaced_size(
 	layout_unit max_height;
 	layout_unit frame_x;
 	layout_unit frame_y;
+	layout_unit limit_frame;
 	int ratio_override;
 	int has_ratio;
 	int width_given;
@@ -208,6 +209,21 @@ layout_replaced_size(
 	    (box->style.max_height.unit == CSS_UNIT_PERCENT && height_definite)) {
 		if (!replaced_length(&box->style.max_height, containing_height, &max_height))
 			max_height = -1;
+	}
+
+	/* A border-box height limit includes the frame that the content height does not. */
+	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER) {
+		limit_frame = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		if (min_height > 0) {
+			min_height -= limit_frame;
+			if (min_height < 0)
+				min_height = 0;
+		}
+		if (max_height >= 0) {
+			max_height -= limit_frame;
+			if (max_height < 0)
+				max_height = 0;
+		}
 	}
 	if (max_width >= 0 && max_width < min_width)
 		max_width = min_width;
