@@ -450,15 +450,26 @@ vertex_interface(
 	uint32_t candidate;
 	uint32_t components;
 
-	/* Both vertex variants must consume the same canonical attributes for native state to use one fetch declaration. */
+	/*
+	 * The coordinate variant reads a subset of the vertex variant's
+	 * canonical scalars (the leading components of its locations), so one
+	 * fetch declaration serves both.
+	 */
 	coordinate = pipeline->programs[BCM2711_SHADER_COORDINATE];
 	vertex = pipeline->programs[BCM2711_SHADER_VERTEX];
-	if (coordinate->input_count != vertex->input_count)
+	if (coordinate->input_count > vertex->input_count)
 		return EINVAL;
 	for (index = 0; index < coordinate->input_count; index++) {
 		input = &coordinate->inputs[index];
-		if (input->location != vertex->inputs[index].location || input->component != vertex->inputs[index].component)
+		for (candidate = 0; candidate < vertex->input_count; candidate++) {
+			if (vertex->inputs[candidate].location == input->location && vertex->inputs[candidate].component == input->component)
+				break;
+		}
+		if (candidate == vertex->input_count)
 			return EINVAL;
+	}
+	for (index = 0; index < vertex->input_count; index++) {
+		input = &vertex->inputs[index];
 		attribute = NULL;
 		for (candidate = 0; candidate < pipeline->attribute_count; candidate++) {
 			if (pipeline->attributes[candidate].location == input->location)

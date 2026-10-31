@@ -220,3 +220,18 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
 - 7.1 の性能 counter（fba292f54、Mesa 25.3.6 の 7.1 の表、register は 4.2 と同じ）。c74 の定常（88 run）: bin 14.73 M cycle（12.8 ms）、render 9.9 M cycle（8.6 ms）。
   bin の QPU active は 19.3 M（12 QPU で 11 %）、stall は少ない → bin は shader でなく前段（頂点の取り込み・PTB）で詰まる。binned 2.74 M、reversed 2.11 M。
 - 次の手（未着手）: coordinate shader が位置に要る attribute だけを読む（今は CS も VS と同じく全ての attribute を全成分読む: 位置 3・法線 3・uv 2・instance 4 の 12 語、要るのは 7 語）。compiler の CS の入力を使う成分に絞り、attribute record の coordinate_values を location ごとに。
+
+### coordinate shader の入力を絞る（2026-11-01 03:20〜03:40、host だけ、実機は未実行）
+
+- bd1f58c4a: compiler（shader-analyze.c）が coordinate の variant の入力を、最適化の後に読む location の先頭の成分だけにする（読まない location は 0）。
+  描画（vulkan-native-draw.c の prepare_fetch）は attribute record の coordinate_values を location ごとの CS の成分の数に（0 の location は VCD が CS に送らない）。CS が何も読まない時は GFXH-930 のため最初の attribute の 1 値（Mesa と同じ考え）。
+  pipeline の検査・draw の検査は VS の入力で attribute の要否を決め、CS は VS の部分集合であることを確かめる。4.2・7.1 共有。
+- host 試験: qpu-format・shader-host-test（全ての shader の variant の模擬と SPIR-V の解釈の bit 一致）・glass・bin-draw が PASS。mview の coord は 135 語 → 107 語（入力 12 語 → 位置と instance の 7 語）。
+  Pi 5（build/p021-k5d/vmunix、cksum 1246399471）・Pi 4（build/p021-k4d/vmunix、cksum 2640223046）の vmunix は warning 0。
+- 未実施: 実機（板は bug-analyzer が使用中）。確かめる事: c1・c21・c74 の checksum が k5c と同じ（0c6e08c7・dd5f82af・224da3e7）、c74 の bin の cycle が減るか、Keiland の desktop の回帰（Pi 4・Pi 5）。
+
+### 再開点（2026-11-01 03:40、P4 q1784-i05）
+
+1. 板が戻ったら: build/p021-k5d/vmunix を入れ、`MVIEW=build/p021-u5/bin/mview TFU=1 COPIES='1 21 62 74' FRAMES=301 sh plan/ws291/tests/rpi5-offscreen.sh OUT` で checksum と速さ（gpu bin の行）。
+2. c74 の残り（bin 12.8 ms・render 8.6 ms、QPU の使用率 11 %・9 %）: VCM cache・追加の segment の数（shader record の byte 5・7、今は 0）を変えて試す。bin と render の重ね（次の frame の bin を今の frame の render と並べる、job の流しの変更）。
+3. 画面が出たら: 画面の mview（rpi5-mview.sh、c1・c21・c62・c74）と desktop（rpi5-desk.sh）、60 fps を目標に。

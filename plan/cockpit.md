@@ -12,13 +12,13 @@
 | P1 | — | — | 返却（2026-11-01 03:01）。5330: WS299 の file write 90%（目標 95%）、WS333 p011（HWP・RAPL・HFI）・p012（tick を揃えて暇な時 −3.64 W）・p018（Dell の 4 つの mode・fan）を実機で確かめた（main dbf2059a7） | 次の割当を Q1 が決める |
 | P2 | — | — | 返却（2026-10-31 20:23）。WS309 p015 zero copy: RTX（block-linear 既定で有効）・VF2（c13 52.5 fps）・Pi 4 の全画面の動画で確かめ、main d8e39d789 | 残り: Pi 4 の 3D（P4 の p025 の後）・Pi 5 |
 | P3 | — | — | 返却（2026-11-01 02:19）。WS291 p024: subs-1000 35 → 43 fps、big-1000 114 → 119 fps（main 1e86f4502）。目標（75.4・136.2）は未達 | 続きは判断の後（下の 0m） |
-| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 5（p021、q1784-i06）: ディスプレイを替えて画面が出た（2026-11-01 04:08）。bd1f58c4a の実機の確かめ → 画面の mview と desktop の 60 fps | 実行中 |
+| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 5（p021、q1784-i06）: 画面が出た。bd1f58c4a を実機で確かめ（checksum 一致、c74 48.3 fps）、desktop は 1920x1080 で定常 60 fps（窓を出す瞬間に引っかかり）、画面の mview c74 49.9 fps。merge 04:40（main は下の commit） | bin と render の重ねを実装中 |
 | P5 | — | — | 返却（2026-11-01 03:03）。WS336 の設計を main に（a1d9f18fb、header の基点 d4ab182d2、実装の Phase p002〜p025）。問い Q1〜Q9 は下の 0n | 答えの後に実装（Sonnet と Opus） |
 | P6 | — | — | 返却（2026-11-01 03:04）。WS335 の設計を main に（header の基点 60760d2a0、実装の Phase p002〜p038）。問い U1〜U6 は下の 0o | 答えの後に実装 |
-| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005・p008〜p010・p006・p012〜p020 cleared（最新 p006 os-file、main 782c4483d） | Sonnet が p007（os-net）・p011（files の backend）を実装中。次は p021（統合、Opus） |
+| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005〜p020 cleared（最新 p011 files、main c590d87fa） | P7 が p021（統合: OS に触れる所を OS の層へ）を実行中 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 13 回目（q1727-i13）: golden の試験の整理 → 負の向きの scroll・直交の subgrid など | 今 3,472 のうち 3,039（87.53%）、Acid3 100/100・Acid2 100%。12 回目は subgrid・grid の絶対配置など（+34、後退 0） |
 
-実装の担当（Sonnet・Opus の単発）: WS334 の p007・p011（Sonnet、worktree s-ws334-pNNN）。
+実装の担当（Sonnet・Opus の単発）: 無し（WS334 の module は p005〜p020 が全部 cleared）。
 
 ## WS ごとの進捗
 
@@ -269,17 +269,17 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 問いの本文: [ws334/user-questions.md](ws334/user-questions.md)（前置き・用語の表つき）。設計は [ws334/design.md](ws334/design.md)。どれも推しの案があり、推しのままなら「推しで」。
 - U3（toolchain の llvm-mingw と Debian の gcc-mingw-w64-ucrt64 の導入）は Q1 の許可も要る（ユーザーが推しでよければ Q1 が許可する）。
 
-### 0m. WS291 p024（RTX の描画の速さ）の続きの進め方（2026-11-01 02:19 新しい）
+### 0m. WS291 p024（RTX の描画の速さ）の続きの進め方（2026-11-01 02:19、2026-11-01 04:45 答え: profile で NVK より遅い所を直し目標まで、(a) は本筋なら、(c) は他の driver に副作用が無ければ、(b) は説明を求められた）
 
 - 背景: RTX の subs-1000 は 43 fps（目標 NVK 75.4）、big-1000 は 119 fps（目標 136.2）。submit 1 回 15.8 µs の中に 3.5 µs を越える項目が無く、小さな削りでは半分にならない。big-1000 は app の側の命令の書き出し 3.5 ms（GPU は空く）が残り。
 - 残る道（P3 の案）: (a) kernel の VM の小さな copyin・copyout の速い道（WS291 の外、kernel の VM）、(b) 命令の記録の時に push buffer を組み、submit では ring に載せるだけにする（大きな作り変え、設計の Phase が要る）、(c) fence の無い submit に job を作らない（製品の判断、前から問い中）。
 - 決めてほしい事: 続けるか、どの道か。
 
-### 0n. WS336（自前の sshd・ssh）の設計の問い Q1〜Q9（2026-11-01 03:03 新しい）
+### 0n. WS336（自前の sshd・ssh）の設計の問い Q1〜Q9（2026-11-01 03:03、2026-11-01 04:45 答え: 推し、TODO の一覧を WS に）
 
 - 問いの本文: [ws336/user-questions.md](ws336/user-questions.md)（前置き・用語つき）。推し: Q1 password の login を入れる、Q2 port の転送は入れない、Q3 sftp-server だけ（scp -O を使う道具 4 本は -O を外す）、Q4 agent は入れない、Q5 OpenSSH と同じ深さの権限の分離、Q6 QEMU の相互運用の試験が通ったら既定を替える（OpenSSH の package は残す）、Q7 鍵の交換は mlkem768x25519-sha256 だけ、Q8 chacha20-poly1305 だけ、Q9 passphrase の無い鍵だけ。
 
-### 0o. WS335（libssl-compat・libcrypto-compat）の設計の問い U1〜U6（2026-11-01 03:04 新しい）
+### 0o. WS335（libssl-compat・libcrypto-compat）の設計の問い U1〜U6（2026-11-01 03:04、2026-11-01 04:45 答え: 推し、Windows は static link）
 
 - 問いの本文: [ws335/user-questions.md](ws335/user-questions.md)。推し（どれも A）: U1 範囲の外の一覧、U2 net/tls.c の切り替えは -DWB_TLS_COMPAT（dlopen の名前だけ、p036 の案）、U3 ssh の鍵の交換 mlkem768x25519-sha256、U4 名前と置き場所、U5 Windows の ROOT の store から Disallowed を除き、DLL の横の cert.pem を足す、U6 証明書の CN への fallback をしない。推しでない答えは header の変更（新しい基点）になる。
 
