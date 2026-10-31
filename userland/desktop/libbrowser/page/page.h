@@ -235,6 +235,7 @@ void page_modules_init(struct page *page);
 void page_modules_release(struct page *page);
 int page_module_enqueue(struct page *page, struct dom_element *script);
 int page_modules_run(struct page *page);
+int page_import_module(void *context, const char *url, int json, vm_value *namespace_object);
 int page_deferred_run(struct page *page);
 int page_sheets_fire_links(struct page *page);
 

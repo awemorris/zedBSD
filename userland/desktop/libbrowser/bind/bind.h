@@ -269,6 +269,8 @@ struct bind_host {
 	/* What a script's animation of a view transition pseudo-element (CSS_PSEUDO_ELEMENT_VT_*) of a name gives now, as declarations (empty: nothing). */
 	/* Sets how long the shown transition's animations have run. */
 	void (*view_transition_time)(void *context, double milliseconds);
+	/* Loads, links and evaluates a module (a JSON module when json) at a URL for import(); gives its namespace, or throws. */
+	int (*import_module)(void *context, const char *url, int json, vm_value *namespace_object);
 	/* Appends the shown transition's names, "name flags" per line (1: old snapshot, 2: new snapshot). */
 	int (*view_transition_names)(void *context, struct wb_units *units);
 	void (*view_transition_style)(void *context, int pseudo, const struct vm_string *name, const char *text);

@@ -648,6 +648,45 @@ js_module_export(
 	return ENOENT;
 }
 
+/* Makes the namespace of an evaluated module: an object without a prototype with the values its exports hold now. */
+int
+js_module_namespace(
+	struct js_module *module,
+	vm_value *object)
+{
+	struct vm_object *made;
+	struct vm_string *name;
+	struct js_module_export *entry;
+	vm_value key;
+	vm_value value;
+	size_t index;
+	int error;
+
+	*object = VM_VALUE_UNDEFINED;
+	if (!module->evaluated || module->eval_status != 0)
+		return EAGAIN;
+	made = vm_object_create(module->realm->heap, NULL);
+	if (made == NULL)
+		return ENOMEM;
+	for (index = 0; index < module->export_count; index++) {
+		entry = &module->exports[index];
+		value = vm_env_slots(module->env)[entry->slot];
+		if (value == VM_VALUE_EMPTY)
+			continue;
+		name = vm_string_from_units(module->realm->heap, entry->name, entry->length);
+		if (name == NULL)
+			return ENOMEM;
+		error = vm_key_from_string(module->realm->heap, name, &key);
+		if (error != 0)
+			return error;
+		error = vm_object_define(module->realm->heap, made, key, value, VM_PROPERTY_WRITABLE | VM_PROPERTY_ENUMERABLE);
+		if (error != 0)
+			return error;
+	}
+	*object = vm_value_cell(made);
+	return 0;
+}
+
 /* Returns the stable import names that a graph loader must resolve. */
 size_t
 js_module_import_count(

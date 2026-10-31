@@ -423,6 +423,7 @@ page_start_scripts(
 	host.view_transition_duration = page_view_transition_duration;
 	host.view_transition_style = page_view_transition_style;
 	host.view_transition_time = page_view_transition_time;
+	host.import_module = page_import_module;
 	host.view_transition_names = page_view_transition_names;
 	error = bind_window_create(page->realm, page->document, &host, &page->window);
 	if (error != 0)

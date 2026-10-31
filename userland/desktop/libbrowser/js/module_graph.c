@@ -92,6 +92,32 @@ js_module_graph_run(
 	return status;
 }
 
+/* Loads, links and evaluates one module (a JSON module when json) at a canonical URL, and gives its namespace. */
+int
+js_module_graph_import(
+	struct js_module_graph *graph,
+	const char *url,
+	int json,
+	struct js_syntax_error *error,
+	vm_value *namespace_object)
+{
+	struct js_module_graph_entry *entry;
+	int status;
+
+	*namespace_object = VM_VALUE_UNDEFINED;
+	if (graph == NULL || url == NULL || url[0] == '\0' || error == NULL)
+		return EINVAL;
+	memset(error, 0, sizeof(*error));
+	status = module_graph_get(graph, url, json, &entry, error);
+	if (status == 0)
+		status = module_graph_link(graph, entry, error);
+	if (status == 0)
+		status = module_graph_evaluate(entry);
+	if (status == 0)
+		status = js_module_namespace(entry->module, namespace_object);
+	return status;
+}
+
 /* Releases all instances before their realm and heap are destroyed. */
 void
 js_module_graph_release(

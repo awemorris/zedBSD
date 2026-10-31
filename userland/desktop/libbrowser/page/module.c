@@ -187,6 +187,37 @@ page_modules_run(
 	return 0;
 }
 
+/* Loads a module for import(): through the page's graph (a SyntaxError or TypeError is thrown for a module that does not load). */
+int
+page_import_module(
+	void *context,
+	const char *url,
+	int json,
+	vm_value *namespace_object)
+{
+	struct js_syntax_error syntax;
+	struct page *page;
+	int status;
+
+	page = context;
+	*namespace_object = VM_VALUE_UNDEFINED;
+	if (page->module_graph == NULL) {
+		status = js_module_graph_create(page->realm, module_resolve, module_fetch,
+		    page, &page->module_graph);
+		if (status != 0)
+			return status;
+		status = js_module_graph_set_json_fetch(page->module_graph, module_fetch_json);
+		if (status != 0)
+			return status;
+	}
+	status = js_module_graph_import(page->module_graph, url, json, &syntax, namespace_object);
+	if (status == 0 || status == VM_THROWN || status == ENOMEM)
+		return status;
+	if (status == EINVAL && syntax.message[0] != '\0')
+		return vm_throw_error(page->realm, VM_ERROR_SYNTAX, syntax.message);
+	return vm_throw_error(page->realm, VM_ERROR_TYPE, "Failed to fetch dynamically imported module");
+}
+
 /* Resolves a dependency against its owning module, within the document origin. */
 static int
 module_resolve(
