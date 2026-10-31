@@ -138,6 +138,7 @@ static void fake_init(struct fake *fake);
 static void fake_destroy(struct fake *fake);
 static void fake_set_gate(struct fake *fake, int mask);
 static void fake_wait_entered(struct fake *fake, int count);
+static void fake_wait_calls(struct fake *fake, int count);
 static void fake_fail(struct fake *fake, int mask, int first, int second);
 static int fake_enter(struct fake *fake, char kind, unsigned space, const char *key, size_t length);
 static void fake_leave(struct fake *fake);
@@ -497,6 +498,22 @@ test_write_behind(void)
 		CHECK(expect_record(queue, SPACE_ONE, key, value));
 	}
 
+	wb_storage_queue_close(queue);
+	fake_destroy(&fake);
+
+	/* A queued write reaches the backend by itself, without any later call to wake the thread. */
+	fake_init(&fake);
+	queue = open_queue(&fake);
+	if (queue == NULL) {
+		fake_destroy(&fake);
+		return;
+	}
+	put(queue, SPACE_ONE, "a1", "v");
+	fake_wait_calls(&fake, 1);
+	CHECK(fake_has(&fake, SPACE_ONE, "a1", "v"));
+	CHECK_EQ(wb_storage_queue_remove(queue, SPACE_ONE, "a1"), 0);
+	fake_wait_calls(&fake, 2);
+	CHECK(!fake_has(&fake, SPACE_ONE, "a1", "v"));
 	wb_storage_queue_close(queue);
 	fake_destroy(&fake);
 }
@@ -912,6 +929,15 @@ test_read_errors(void)
 	CHECK(memcmp(out.data, "preabcdef", 10) == 0);
 	fake.big_read = 0;
 
+	/* A backend that ignores the failed append and returns 0 is still a failed read. */
+	fake.big_read = 2;
+	error = wb_storage_queue_read(queue, SPACE_ONE, "a1", &out, &found);
+	CHECK_EQ(error, EFBIG);
+	CHECK_EQ(found, 0);
+	CHECK_EQ(out.length, 9);
+	CHECK(memcmp(out.data, "preabcdef", 10) == 0);
+	fake.big_read = 0;
+
 	wb_buffer_release(&out);
 	wb_storage_queue_close(queue);
 	fake_destroy(&fake);
@@ -1312,6 +1338,29 @@ fake_wait_entered(
 }
 
 /*
+ * Waits until the given number of calls have been made and finished; fails after ten seconds.
+ */
+static void
+fake_wait_calls(
+	struct fake *fake,
+	int count)
+{
+	int reached;
+	int tries;
+
+	reached = 0;
+	for (tries = 0; tries < 10000 && !reached; tries++) {
+		pthread_mutex_lock(&fake->lock);
+		if (fake->total_calls >= count && fake->inside == 0)
+			reached = 1;
+		pthread_mutex_unlock(&fake->lock);
+		if (!reached)
+			sleep_ms(1);
+	}
+	CHECK(reached);
+}
+
+/*
  * Makes the next calls of the given kinds fail with the given errors in turn (second 0: only one failure).
  */
 static void
@@ -1488,6 +1537,10 @@ fake_read(
 			sink_error = browser_storage_sink_append(sink, zero_megabyte, sizeof(zero_megabyte));
 		*found = 1;
 		fake_leave(fake);
+
+		/* A big read of kind 2 is a backend that ignores a failed append and reports success. */
+		if (fake->big_read == 2)
+			return 0;
 		return sink_error;
 	}
 
