@@ -184,7 +184,7 @@
 - ユーザーの目視（2026-10-31 18:1x、Q1 経由）: **不合格**。画は出るが block ごとに崩れてずれる（文字・icon が小さな block に刻まれ、desktop の window mode の chain も同じ）。
   写真 /home/awe/zedBSD-claude1/build/review/ws291/p023-bl-visual-1.jpg。Q1 の決定: nvrtx の既定は変えない（`nvrtx.disp.bl` は既定 0 のまま）、lend の規則は残す
   （bl=0 の RTX は貸さない）。block-linear の scanout の直しは P3（WS291 p023）。機械は branch と `nvrtx.disp.bl=1` のまま P3 へ渡した（deploy と戻しの手順は Q1 に送った）。
-  よって RTX の文字通りの zero copy は、mview の側（lent=1・tiling 0x10001・copy 0・quads 0）は確かめたが、画面の正しさは未達（P3 の scanout 待ち）。
+  よって RTX の文字通りの zero copy は、mview の側（lent=1・tiling 0x10001・copy 0・quads 0）は確かめたが、画面の正しさは未達（P3 の scanout 待ち）。→ P3 の直しの後の 2 回目の目視で合格（下の節）。
 
 ### RTX の 2 回目の目視と既定の変更（2026-10-31 18:3x〜19:07）
 
