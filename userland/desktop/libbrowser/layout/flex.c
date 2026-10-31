@@ -1005,13 +1005,16 @@ flex_base_size(
 	item->minimum = 0;
 	item->maximum = -1;
 	item->auto_minimum = 0;
+	/* An axis that is visible computes to auto when the other one scrolls or clips, so both must be visible (or clip). */
 	if (row &&
 	    child->style.min_width.unit == CSS_UNIT_AUTO &&
-	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP))
+	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP) &&
+	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
 	if (!row && child->style.aspect_ratio <= 0.0f && child->style.writing_mode == box->style.writing_mode &&
 	    child->style.min_height.unit == CSS_UNIT_AUTO &&
-	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP))
+	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP) &&
+	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
 
 	/* Resolves the main-axis limits after the unconstrained base is measured. */
