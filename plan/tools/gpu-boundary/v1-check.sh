@@ -8,10 +8,7 @@
 #     compositor source (the zedBSD Makefile's list, without libkeiland-backend's) is compiled with -fsyntax-only (the
 #     zedBSD build's compiler and flags); a source that reads a GPU UAPI header, directly or through another header, fails.
 #  3. the compositor opens no GPU node and has no --gpu option.
-# The one exception (ws122-p005b, the 2026-10-06 user decision B, plan/guardrail.md): the game mode's direct scanout,
-# libkeiland-backend-zedbsd/scanout-zedbsd.c, reads the GPU UAPI headers, opens the GPU node and calls the display's
-# ioctls; it is the backend's (never the compositor's), and the compositor reaches it only through
-# keiland-backend-display.h's kl_backend_scanout_*.
+# There is no exception: the game mode's images are lent and shown through libvulkan (ws309-p015).
 # Prints "v1-check: PASS" or "v1-check: FAIL ...".
 #   sh plan/tools/gpu-boundary/v1-check.sh [BUILD]     (BUILD for the sysroot, default build/amd64)
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -20,15 +17,14 @@ cd "$(dirname -- "$0")/../../.."
 build=${1:-build/amd64}
 dir=userland/desktop/wayland
 backend=userland/desktop/libkeiland-backend-zedbsd/gpu-zedbsd.c
-scanout=userland/desktop/libkeiland-backend-zedbsd/scanout-zedbsd.c
 files=$(find "$dir" userland/desktop/libkeiland-backend-zedbsd -name "*.[ch]" -print | sort)
 failures=0
 fail() { echo "v1-check: FAIL $*"; failures=$((failures + 1)); }
 
 # 1. The GPU UAPI headers only in the backend, and no GPU ioctl anywhere.
-readers=$(grep -ln '#include <uapi/gpu' $files | grep -v -e "^$backend$" -e "^$scanout$")
+readers=$(grep -ln '#include <uapi/gpu' $files | grep -v -e "^$backend$")
 [ -z "$readers" ] || fail "GPU UAPI included by: $readers"
-calls=$(grep -n 'ioctl([^,]*, *GPU_' $(echo "$files" | grep -v "^$scanout$"))
+calls=$(grep -n 'ioctl([^,]*, *GPU_' $files)
 [ -z "$calls" ] || fail "GPU ioctl: $calls"
 backend_calls=$(grep -c 'ioctl(' $backend)
 [ "$backend_calls" = 0 ] || fail "the backend calls ioctl"
@@ -66,7 +62,7 @@ done
 echo "v1-check: $compiled sources compiled with the GPU UAPI headers poisoned"
 
 # 3. No GPU node and no --gpu option.
-nodes=$(grep -n '"/dev/gpu' $(echo "$files" | grep -v "^$scanout$"))
+nodes=$(grep -n '"/dev/gpu' $files)
 [ -z "$nodes" ] || fail "GPU node: $nodes"
 option=$(grep -n '"--gpu' $(find "$dir" -name "*.c" -print))
 [ -z "$option" ] || fail "--gpu option: $option"
