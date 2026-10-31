@@ -178,8 +178,14 @@ anchor_value(
 		if (!valid) {
 			if (!expr->terms[index].has_fallback)
 				return 0;
-			part = layout_from_px(expr->terms[index].fallback_px) +
-			    (layout_unit)((float)cb_size * expr->terms[index].fallback_percent / 100.0f);
+			if (expr->terms[index].fallback_expr != NULL) {
+				valid = anchor_value(tree, box, expr->terms[index].fallback_expr, slot, cb_start, cb_size, &part);
+				if (!valid)
+					return 0;
+			} else {
+				part = layout_from_px(expr->terms[index].fallback_px) +
+				    (layout_unit)((float)cb_size * expr->terms[index].fallback_percent / 100.0f);
+			}
 		}
 		total += (layout_unit)((float)part * expr->terms[index].coef);
 	}

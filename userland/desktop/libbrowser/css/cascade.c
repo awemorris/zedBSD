@@ -335,6 +335,7 @@ static void cascade_align(struct css_style *style, unsigned bit, int *field, int
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
 static const struct css_line_names *cascade_line_names(struct css_engine *engine, const struct css_value *value);
 static const void *cascade_keep(struct css_engine *engine, const void *data, size_t size);
+static const struct css_anchor_expr *cascade_anchor_resolve(struct css_engine *engine, const struct css_style *style, const struct css_anchor_expr *expr);
 static const struct css_gradient *cascade_gradient(struct css_engine *engine, const struct css_gradient *gradient, float font_size);
 static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 static void cascade_animation(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
@@ -5951,6 +5952,37 @@ cascade_keep(
 	return copy;
 }
 
+/* Keeps a sum with anchor functions with its ems and rems in pixels, its fallbacks with anchor functions of their own too (NULL when memory runs out). */
+static const struct css_anchor_expr *
+cascade_anchor_resolve(
+	struct css_engine *engine,
+	const struct css_style *style,
+	const struct css_anchor_expr *expr)
+{
+	struct css_anchor_expr resolved;
+	struct css_anchor_query *query;
+	int index;
+
+	memset(&resolved, 0, sizeof(resolved));
+	resolved.px = expr->px + expr->em * style->font_size + expr->rem * engine->root_font_size;
+	resolved.percent = expr->percent;
+	resolved.has_percent = expr->has_percent;
+	resolved.count = expr->count;
+	for (index = 0; index < expr->count; index++) {
+		query = &resolved.terms[index];
+		*query = expr->terms[index];
+		query->fallback_px += query->fallback_em * style->font_size + query->fallback_rem * engine->root_font_size;
+		query->fallback_em = 0;
+		query->fallback_rem = 0;
+		if (query->fallback_expr != NULL) {
+			query->fallback_expr = cascade_anchor_resolve(engine, style, query->fallback_expr);
+			if (query->fallback_expr == NULL)
+				return NULL;
+		}
+	}
+	return cascade_keep(engine, &resolved, sizeof(resolved));
+}
+
 /*
  * Puts a sum with anchor functions in an inset's or a size's anchor slot
  * (ems and rems in pixels) and marks the property's length as anchored.
@@ -5962,11 +5994,8 @@ cascade_anchor(
 	int property,
 	const struct css_anchor_expr *expr)
 {
-	struct css_anchor_expr resolved;
-	struct css_anchor_query *query;
 	struct css_length *length;
 	int slot;
-	int index;
 
 	/* The slot and the length of the property. */
 	switch (property) {
@@ -6012,22 +6041,8 @@ cascade_anchor(
 		return;
 	}
 
-	/* The sum in pixels. */
-	memset(&resolved, 0, sizeof(resolved));
-	resolved.px = expr->px + expr->em * style->font_size + expr->rem * engine->root_font_size;
-	resolved.percent = expr->percent;
-	resolved.has_percent = expr->has_percent;
-	resolved.count = expr->count;
-	for (index = 0; index < expr->count; index++) {
-		query = &resolved.terms[index];
-		*query = expr->terms[index];
-		query->fallback_px += query->fallback_em * style->font_size + query->fallback_rem * engine->root_font_size;
-		query->fallback_em = 0;
-		query->fallback_rem = 0;
-	}
-
-	/* Kept, and the length marked. */
-	style->anchor[slot] = cascade_keep(engine, &resolved, sizeof(resolved));
+	/* The sum in pixels, kept (its fallbacks with anchor functions too), and the length marked. */
+	style->anchor[slot] = cascade_anchor_resolve(engine, style, expr);
 	length->unit = CSS_UNIT_ANCHOR;
 	length->value = 0;
 	length->offset = 0;

@@ -158,6 +158,7 @@ enum css_anchor_side {
  * box's default anchor), what it asks for, the factor the sum gives it,
  * and its fallback (a length and a percentage) when it has one.
  */
+struct css_anchor_expr;
 struct css_anchor_query {
 	struct vm_string *name;
 	int side;
@@ -169,6 +170,8 @@ struct css_anchor_query {
 	float fallback_rem;
 	float fallback_percent;
 	int fallback_has_percent;
+	/* A fallback with anchor functions of its own (kept in the arena; the length fields above are then unused). */
+	const struct css_anchor_expr *fallback_expr;
 };
 
 /* A value with anchor functions: pixels (ems and rems before the cascade), a percentage, and the functions times their factors. */
