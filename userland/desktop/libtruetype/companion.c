@@ -37,6 +37,19 @@
 /* The largest companion file read, in bytes. */
 #define COMPANION_FILE_MAX	(64U * 1024U * 1024U)
 
+/*
+ * The flags of a companion's open.  The Windows C runtime has no
+ * close-on-exec and opens a file in text mode (turning CR LF into LF and
+ * stopping at a ^Z) unless told O_BINARY; a system without one of the
+ * flags gets 0 for it.
+ */
+#ifndef O_CLOEXEC
+#define O_CLOEXEC	0
+#endif
+#ifndef O_BINARY
+#define O_BINARY	0
+#endif
+
 static int companion_open(const char *path, struct truetype_face **face);
 static int companion_same_widths(const struct truetype_face *face, const struct truetype_face *bold);
 static int companion_read(const char *path, void **data, size_t *size);
@@ -247,7 +260,7 @@ companion_read(
 	int error;
 
 	/* The file. */
-	descriptor = open(path, O_RDONLY | O_CLOEXEC);
+	descriptor = open(path, O_RDONLY | O_CLOEXEC | O_BINARY);
 	if (descriptor < 0)
 		return errno;
 
