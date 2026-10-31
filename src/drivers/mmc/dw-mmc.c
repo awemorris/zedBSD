@@ -292,6 +292,17 @@
 #define DW_MMC_RUN_TRIES		5U
 #define DW_MMC_RECOVER_TRIES		3U
 
+/*
+ * The slowest card clock a block that fails every try moves the card
+ * down to.  Such a block has the card clock halved and its tries again,
+ * while the halved clock stays at or above this: from the default speed's
+ * 24.75 MHz twice, to 6.19 MHz.  A slower card fills the controller's
+ * FIFO more slowly, so a FIFO the driver cannot serve in time (the data
+ * CRC errors of a full FIFO stopping the card clock) has more time; the
+ * card stays slow until it is attached again.
+ */
+#define DW_MMC_SLOWEST_HZ		5000000ULL
+
 /* The clocks the card runs at while identified, by default and at high speed. */
 #define DW_MMC_IDENTIFY_HZ		400000ULL
 #define DW_MMC_DEFAULT_HZ		25000000ULL
@@ -479,6 +490,8 @@ static int wait_card_ready(struct dw_mmc_unit *unit);
 static int transfer_run(struct dw_mmc_unit *unit, int write, uint64_t block, uint32_t count, uint8_t *data);
 static int transfer_run_recovering(struct dw_mmc_unit *unit, int write, uint64_t block, uint32_t count, uint8_t *data);
 static int transfer_run_tries(struct dw_mmc_unit *unit, int write, uint64_t block, uint32_t count, uint8_t *data);
+static int transfer_block_slowing(struct dw_mmc_unit *unit, int write, uint64_t block, uint8_t *data, int tried);
+static int slow_card_clock(struct dw_mmc_unit *unit);
 static int recover_card(struct dw_mmc_unit *unit);
 static int recover_card_tries(struct dw_mmc_unit *unit, const char *during);
 static int adapt_bus(struct dw_mmc_unit *unit, int write, uint64_t block, uint32_t count, uint8_t *data);
@@ -2138,8 +2151,9 @@ transfer_run(
 }
 
 /*
- * Moves one run, recovering the card and trying again when it fails, and
- * a block at a time when the whole run never moves.
+ * Moves one run, recovering the card and trying again when it fails, a
+ * block at a time when the whole run never moves, and at a slower card
+ * clock for a block that never moves.
  *
  * A card that cannot be recovered marks the unit failed.
  */
@@ -2156,8 +2170,18 @@ transfer_run_recovering(
 
 	/* The whole run, with its tries. */
 	error = transfer_run_tries(unit, write, block, count, data);
-	if (error == 0 || unit->failed || count == 1U)
+	if (error == 0 || unit->failed)
 		return error;
+
+	/* A single block that never moved has had its tries; only a slower clock is left. */
+	if (count == 1U) {
+		error = transfer_block_slowing(unit, write, block, data, 1);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the block has moved at a slower clock. */
+		return 0;
+	}
 
 	/* A run of several blocks that never moved goes a block at a time, each with its own tries. */
 	unit->split_runs++;
@@ -2165,12 +2189,91 @@ transfer_run_recovering(
 		  write ? "write" : "read", count, (unsigned long long)block,
 		  (unsigned long long)unit->errors, (unsigned long long)unit->split_runs);
 	for (index = 0; index < count; index++) {
-		error = transfer_run_tries(unit, write, block + index, 1U, data + (size_t)index * DW_MMC_BLOCK_BYTES);
+		error = transfer_block_slowing(unit, write, block + index, data + (size_t)index * DW_MMC_BLOCK_BYTES, 0);
 		if (error != 0)
 			return error;
 	}
 
 	/* Succeeded: every block has moved. */
+	return 0;
+}
+
+/*
+ * Moves one block: its tries at the card clock as it is (unless tried
+ * says it has had them), then, while it still fails, its tries again at
+ * half the card clock each time, down to DW_MMC_SLOWEST_HZ: a block that
+ * fails every try must not reach the file system as an error while a
+ * slower card could still move it.
+ *
+ * Returns 0, or the errno of the block's last try.
+ */
+static int
+transfer_block_slowing(
+	struct dw_mmc_unit *unit,
+	int write,
+	uint64_t block,
+	uint8_t *data,
+	int tried)
+{
+	int slowed;
+	int error;
+
+	/* The block's tries at the clock as it is, unless it has had them. */
+	error = EIO;
+	if (!tried)
+		error = transfer_run_tries(unit, write, block, 1U, data);
+
+	/* Halves the clock and tries the block again while it fails and the clock can still go down. */
+	while (error != 0 && !unit->failed) {
+		/* A clock that cannot go down further ends the tries with the block's error. */
+		slowed = slow_card_clock(unit);
+		if (slowed != 0)
+			break;
+
+		/* The block's tries at the slower clock. */
+		error = transfer_run_tries(unit, write, block, 1U, data);
+	}
+
+	/* Reports why the block did not move. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the block has moved. */
+	return 0;
+}
+
+/*
+ * Halves the card clock for a block that failed every try, while the
+ * halved clock stays at or above DW_MMC_SLOWEST_HZ.
+ *
+ * Returns 0, ERANGE when the clock is as slow as it goes, or the errno of
+ * a clock change that failed.
+ */
+static int
+slow_card_clock(
+	struct dw_mmc_unit *unit)
+{
+	uint64_t target;
+	int error;
+
+	/* Refuses a clock that halving would take below the slowest. */
+	target = unit->card.card_clock / 2ULL;
+	if (target < DW_MMC_SLOWEST_HZ)
+		return ERANGE;
+
+	/* Moves the card clock down; the card stays in the transfer state. */
+	error = set_card_clock(unit, target);
+	if (error != 0)
+		return error;
+
+	/* Keeps the bus from being adapted upwards again, and says so in the card's information. */
+	unit->bus_step = DW_MMC_BUS_SLOWED;
+	unit->card.slowed = 1;
+	kern_logf("dw-mmc: a block failed every try, card clock down to %llu Hz (errors %llu)\n",
+		  (unsigned long long)unit->card.card_clock,
+		  (unsigned long long)unit->errors);
+
+	/* Succeeded: the next try runs at the slower clock. */
 	return 0;
 }
 
