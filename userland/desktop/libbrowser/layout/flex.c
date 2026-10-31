@@ -1451,9 +1451,18 @@ flex_ratio_cross_size(
 		basis = container->width;
 	}
 
-	/* Intrinsic measurement does not establish a percentage or stretch basis. */
-	if (tree->measuring != 0)
+	/* Intrinsic measurement does not establish a percentage or stretch basis, but a row's own definite height is one. */
+	if (tree->measuring != 0) {
 		basis = -1;
+		if (row && container->style.height.unit == CSS_UNIT_PX) {
+			basis = layout_from_px(container->style.height.value);
+			if (container->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				basis -= container->border[CSS_TOP] + container->padding[CSS_TOP] + container->padding[CSS_BOTTOM] +
+				    container->border[CSS_BOTTOM];
+			if (basis < 0)
+				basis = 0;
+		}
+	}
 
 	/* A definite author-specified cross size needs no stretch inference. */
 	cross = flex_ratio_definite_length(length, basis);
