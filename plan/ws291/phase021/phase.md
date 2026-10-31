@@ -2,9 +2,9 @@
 
 # ws291-p021: Raspberry Pi 5（V3D 7.1）で重い 3D の model を、スペックの比で決めた目標の fps に
 
-Status: in-progress（2026-10-31 00:06 P4 q1730-i01: mview の要る欠け 1〜4（index の draw・instance・直の fetch・mip の image（sample は level 0））を実装、Pi 4・Pi 5 の build と host 試験まで。実機は未起動、mview は未実行）
+Status: in-progress（2026-11-01 02:10 P4 q1784-i04 で再開: ユーザーの決定で Pi 4（p025）から Pi 5 へ。4.2 の成果を 7.1 に移し、1920x1080 の image を作って Q1 が SD に書いた。実機の計測はこれから）
 Parent: [WS291](../ws.md)
-Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）
+Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）
 
 ## 目的
 
@@ -121,3 +121,34 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
   **`/tmp/p4-p021c/rpi5-p021.img`、321912832 byte、sha256 dcadd719d98e94b4972a55adcf467678daa284e328882954b2c8f9342a3bbcc9**（tree e2feb0871、vmunix-fallback cksum 2365958026、
   config.txt `kernel=vmunix`・1920x1080、cmdline `login=console v3d.perf=1`）。tmpfs なので host の再起動で消える。git と worktree には写していない。SD への書き込みは Q1。
 - 未実施: 実機（Pi 5・Pi 4）の起動・desktop の回帰・mview。
+
+## 記録（P4 q1784-i04、2026-11-01 01:52〜）
+
+- 2026-11-01 ユーザーから（Q1 経由）、Pi 4 は熱の throttling が疑われるので Pi 4 の作業を止め、冷却が良く GPU が近い Pi 5 でこの Phase を進める、
+  4.2 の成果を 7.1 に当てはまる所で移す、desktop も Pi 5 で 60 fps を目標にする、という趣旨の指示を受けた。
+- 目標の copies（スペックの比、実機の dmesg で確定する前の見込み）: FP32 ＝ QPU 数 × 8（4 lane × 積と和）× clock。12 QPU・1.15 GHz なら 110 GFLOPS
+  （RTX 2070 の 7.46 TFLOPS の 1/68 → 5000 / 68 ≈ 74 copies）、960 MHz なら 92 GFLOPS（1/81 → 約 62 copies）。参考に Pi 4（8 QPU・500 MHz、32 GFLOPS）は 21。
+
+### 4.2 の成果の 7.1 への移し（branch agent/p4-ws291pi、Pi 4・Pi 5 の vmunix は warning 0、実機は未実行）
+
+- 2a53a5a6d: v3d.perf=1 の 2 s ごとの report の後に `v3d: board arm=設定/実測 core= v3d= MHz temp= throttled=0x…`（firmware の mailbox。Pi 4 と Pi 5）。
+- 04609a6c0:
+  - VCM: 7.1 も VPM の大きさから batch の数を選ぶ（4.2 と同じ式、Mesa の vcm_cache_size。今までは 0x22 の固定）。
+  - TFU: job の語を `bcm2711_native_conversion_words` に分けた（4.2 は V3D33、7.1 は V3D71 の field。Mesa の v3d_tfu.h・v3dx_tfu.c）。4.2 の語は前と同じ。
+  - 7.1 の self-test（V7）に raster → strict UIF の照合（RGBA8 の 5 形、R8・RG8 の各 1 形、見える texel を CPU の配置と 1 つずつ比べ、出力の後ろの guard も）。
+    全て合えば 7.1 でも texture の変換を TFU で行う（今までは 7.1 は常に CPU）。合わなければ CPU のまま、v3d.tfu=0 でも CPU。
+  - mip: tree の配置を共有の native-miptree.c に移し（7.1 の ENOTSUP の stub を外した）、7.1 の texture の record と sampler に level の数・max LOD・mip の filter。
+  - uniform の stream（7974d3365）は共有の vk の code なので 7.1 に既に効く。
+- ee3e43a88: 32-bit の index が全て 16 bit に入る時、16-bit の写しを snapshot（buffer の世代で持つ、host に map された buffer は対象外）として持ち、
+  bin はそれを読む（instance ごとに index を読み直すので、bin の index の読みが半分）。入らない index（0xffff 以上）はその世代の間は試し直さない。
+  Pi 4 と Pi 5 の両方に効く（共有の code）。
+- 道具: `rpi5-mview.sh` に KERNEL=（/boot/boot0/vmunix へ、元は vmunix.p021old、再起動）と run ごとの最後の `v3d: perf`・`v3d: board` の行と
+  board-range（ARM の実測 MHz・温度・throttled）。`rpi5-desk.sh`（pi4-desk.sh の Pi 5 版、MAC で板を探す、既定は CONSOLE=1、board の行）と
+  `config-rpi5-desk.mk`（入力の注入と aat-input）。
+
+### 試験の image（2026-11-01 01:55〜02:05）
+
+- `sh plan/ws291/tests/rpi5-image.sh build/p021-img` rc 0（`Raspberry Pi 4 image check: PASS`・`canonical zedBSD UFS OK`、warning は外部 package の openssl・openssh と
+  perl の locale だけ）、`rpi5-image-boot.sh build/p021-img build/p021-img/rpi5-p021.img`: **322961408 byte、sha256 3bf8f40c636ed8397b0355182131441399bb1e7fa9dc181d7f79da3b9ebf0c75**。
+  kernel は 2a53a5a6d の source（FAT の vmunix cksum 130421877、image から取り出して確かめた）、config.txt 1920x1080、cmdline `login=console v3d.perf=1`、fallback 無し。
+- Q1 が SD（もと Pi 4 のカード、ユーザーの許可）に書き、image と cmp で一致。
