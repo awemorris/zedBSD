@@ -1297,6 +1297,10 @@ cascade_compute(
 	/* The filters an @keyframes animation gives at the start of the page's time. */
 	cascade_animation(engine, style, parent);
 
+	/* An element without a box forgets the position option that last fit. */
+	if (pseudo == CSS_PSEUDO_ELEMENT_NONE && style->display == CSS_DISPLAY_NONE)
+		((struct dom_element *)element)->anchor_last = 0;
+
 	/* The root's font size is what rem measures (its pseudo-elements do not change it). */
 	is_root = 0;
 	if (pseudo == CSS_PSEUDO_ELEMENT_NONE && element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT)

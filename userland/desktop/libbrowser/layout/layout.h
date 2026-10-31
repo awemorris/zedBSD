@@ -335,6 +335,8 @@ struct layout_box {
 	/* How far a sticky box is moved from where the flow put it (sticky.c). */
 	layout_unit sticky_dx;
 	layout_unit sticky_dy;
+	/* A fixed box's static position was moved to the scroll the tree was built for (position.c). */
+	int static_scrolled;
 	/* A box placed by an anchor follows it when the page scrolls, even a fixed one (set by the anchor functions). */
 	int anchored;
 	/* A flex container gave a table its whole height (captions included), not its grid box's (set while it is laid out). */

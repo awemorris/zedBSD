@@ -744,6 +744,13 @@ position_place(
 {
 	int error;
 
+	/* A fixed box without insets sits where the flow would put it in the viewport: at the scroll the tree was built for. */
+	if (box->style.position == CSS_POSITION_FIXED && !box->static_scrolled) {
+		box->static_x += tree->scroll_x;
+		box->static_y += tree->scroll_y;
+		box->static_scrolled = 1;
+	}
+
 	/* The box, then whether position-visibility hides it. */
 	error = position_place_fallbacks(tree, box, containing);
 	if (error != 0)
