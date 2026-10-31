@@ -1,8 +1,6 @@
-diff --git a/src/drivers/gpu/nvrtx/objects.c b/src/drivers/gpu/nvrtx/objects.c
-index 4455883ee..799a3f63b 100644
 --- a/src/drivers/gpu/nvrtx/objects.c
 +++ b/src/drivers/gpu/nvrtx/objects.c
-@@ -560,6 +560,8 @@ nvrtx_channel_params(
+@@ -560,6 +560,8 @@
   *
   * Returns the length in bytes (a multiple of 4).
   */
@@ -11,25 +9,37 @@ index 4455883ee..799a3f63b 100644
  size_t
  nvrtx_push_fence(
  	uint8_t *push,
-@@ -568,8 +570,11 @@ nvrtx_push_fence(
+@@ -568,8 +570,25 @@
  {
  	size_t length;
  
 -	/* A release that waits for the work before it. */
 -	length = objects_fence(push, semaphore, value, OBJECTS_SEM_RELEASE | OBJECTS_SEM_RELEASE_WFI);
-+	/* A release that waits for the work before it (DIAG: not in variants 3, 4 and 5). */
-+	if (nvrtx_diag_variant == 3U || nvrtx_diag_variant == 4U || nvrtx_diag_variant == 5U)
-+		length = objects_fence(push, semaphore, value, OBJECTS_SEM_RELEASE);
-+	else
-+		length = objects_fence(push, semaphore, value, OBJECTS_SEM_RELEASE | OBJECTS_SEM_RELEASE_WFI);
++	/* DIAG: 3, 6, 7 no WFI; 4, 6, 7 no membar and no non-stall. */
++	{
++		uint32_t v = nvrtx_diag_variant;
++		uint32_t execute = OBJECTS_SEM_RELEASE;
++		if (!(v == 3U || v == 6U || v == 7U))
++			execute |= OBJECTS_SEM_RELEASE_WFI;
++		if (v == 4U || v == 6U || v == 7U) {
++			size_t at = objects_method(push, 0U, OBJECTS_HOST_SEM_ADDRESS_LOW, 3U);
++			nvrtx_put32(push, at, (uint32_t)(semaphore & 0xfffffffcU));
++			nvrtx_put32(push, at + 4U, (uint32_t)(semaphore >> 32));
++			nvrtx_put32(push, at + 8U, value);
++			at += 12U;
++			at = objects_method(push, at, OBJECTS_HOST_SEM_EXECUTE, 1U);
++			nvrtx_put32(push, at, execute);
++			at += 4U;
++			return at;
++		}
++		length = objects_fence(push, semaphore, value, execute);
++	}
  
  	/* Succeeded: the push buffer's length. */
  	return length;
-diff --git a/src/drivers/gpu/nvrtx/vk/exec-push.c b/src/drivers/gpu/nvrtx/vk/exec-push.c
-index 3e342bd60..adec7ba97 100644
 --- a/src/drivers/gpu/nvrtx/vk/exec-push.c
 +++ b/src/drivers/gpu/nvrtx/vk/exec-push.c
-@@ -1338,13 +1338,16 @@ nvrtx_exec_clear_stencil(
+@@ -1338,13 +1338,16 @@
   * Values referenced: Mesa 25.3.6 src/nouveau/vulkan/nvk_cmd_buffer.c
   * (nvk_cmd_flush_wait_dep, nvk_cmd_invalidate_deps).
   */
@@ -42,17 +52,15 @@ index 3e342bd60..adec7ba97 100644
  {
 -	/* Everything before has finished. */
 -	at = exec_set(push, at, M_WAIT_FOR_IDLE, 0U);
-+	/* Everything before has finished (DIAG: not in variants 2, 4 and 5). */
-+	if (nvrtx_diag_variant != 2U && nvrtx_diag_variant != 4U && nvrtx_diag_variant != 5U)
++	/* Everything before has finished (DIAG: not in 2, 6). */
++	if (nvrtx_diag_variant != 2U && nvrtx_diag_variant != 6U)
 +		at = exec_set(push, at, M_WAIT_FOR_IDLE, 0U);
  
  	/* Nothing after reads a stale texel or constant. */
  	at = exec_set(push, at, M_INVALIDATE_TEXTURE_DATA_CACHE_NO_WFI, 0U);
-diff --git a/src/drivers/gpu/nvrtx/vk/vk-execute.c b/src/drivers/gpu/nvrtx/vk/vk-execute.c
-index c195ce571..3f4d990a4 100644
 --- a/src/drivers/gpu/nvrtx/vk/vk-execute.c
 +++ b/src/drivers/gpu/nvrtx/vk/vk-execute.c
-@@ -322,8 +322,14 @@ struct nvrtx_vk_execute {
+@@ -329,8 +329,14 @@
  	/* The owner's generation: the shader model of the programs and the 3D class of the push buffers. */
  	uint32_t shader_model;
  	uint32_t threed_class;
@@ -62,12 +70,12 @@ index c195ce571..3f4d990a4 100644
 +/* DIAG (not for commit): each new executor takes the next variant, round robin; the one running now. */
 +static uint32_t execute_diag_count;
 +uint32_t nvrtx_diag_variant;
-+#define EXECUTE_DIAG_VARIANTS	6U
++#define EXECUTE_DIAG_VARIANTS	8U
 +
  /*
   * What a command buffer's records have bound so far, and the pass they
   * are in; push_bytes are the command buffer's push constant bytes, push
-@@ -454,6 +460,11 @@ nvrtx_vk_execute(
+@@ -461,6 +467,11 @@
  	error = execute_open(session, &execute);
  	if (error != 0)
  		return error;
@@ -79,24 +87,25 @@ index c195ce571..3f4d990a4 100644
  
  	/* The state starts empty. */
  	state = kern_calloc(1U, sizeof(*state));
-@@ -790,7 +801,8 @@ execute_begin(
+@@ -797,7 +808,8 @@
  					       execute->va + EXECUTE_SAMPLERS_AT, EXECUTE_POOL_ENTRIES);
  
  	/* The programs and constants the CPU wrote since the last run are read anew, once for every draw of this push buffer. */
 -	execute->at = nvrtx_push_draw_invalidate(push, execute->at);
-+	if (nvrtx_diag_variant != 1U && nvrtx_diag_variant != 4U && nvrtx_diag_variant != 5U)
++	if (nvrtx_diag_variant != 1U && nvrtx_diag_variant != 6U)
 +		execute->at = nvrtx_push_draw_invalidate(push, execute->at);
  
  	/* Nothing of the parts is used: no texture handle of an earlier push buffer is good here. */
  	execute->reuse.pools++;
-@@ -1307,6 +1319,10 @@ execute_end_pass(
- 	if (x1 <= x0 || y1 <= y0)
- 		return 0;
+@@ -934,8 +946,10 @@
+ {
+ 	int error;
  
-+	/* DIAG: variant 5 writes no copy. */
-+	if (nvrtx_diag_variant == 5U)
+-	/* The record's command. */
++	/* The record's command (DIAG: none in 5, 7). */
+ 	error = 0;
++	if (nvrtx_diag_variant == 5U || nvrtx_diag_variant == 7U)
 +		return 0;
-+
- 	/* The shadow's area onto the target, then ordered before what follows. */
- 	execute_shadow_copy(&state->resolve, &state->target, x0, y0, x1, y1, &quad);
- 	quad.source_tiled = true;
+ 	switch (record->opcode) {
+ 	case GPU_OP_CMD_BIND_PIPELINE:
+ 	case GPU_OP_CMD_SET_VIEWPORT:

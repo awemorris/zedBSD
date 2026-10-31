@@ -686,8 +686,22 @@ prepare_programs(
 		    program->code_count == 0 ||
 		    (uint32_t)program->stage != stage)
 			return EINVAL;
-		/* Only exact compiled program identity permits an earlier immutable upload to be reused. */
-		code = find_program(draw, program, stage);
+		/*
+		 * A user pipeline's code is uploaded once and kept with the pipeline;
+		 * an internal draw's program is uploaded once in the pass (only exact
+		 * compiled program identity permits an earlier upload to be reused).
+		 */
+		code = NULL;
+		if (event->meta == NULL && event->pipeline->code[stage] != NULL && event->pipeline->code[stage]->space == draw->space)
+			code = event->pipeline->code[stage];
+		if (code == NULL)
+			code = find_program(draw, program, stage);
+		if (code == NULL && event->meta == NULL && event->pipeline->code[stage] == NULL) {
+			error = bcm2711_native_program_upload(draw->space, program, &code);
+			if (error != 0)
+				return error;
+			event->pipeline->code[stage] = code;
+		}
 		if (code == NULL) {
 			bytes = (uint64_t)program->code_count * 8U;
 			error = allocate_storage(draw, bytes, available, program, BCM2711_NATIVE_STORAGE_WRITTEN, &code);

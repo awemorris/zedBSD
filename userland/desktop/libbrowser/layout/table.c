@@ -816,6 +816,8 @@ table_lay_rows(
 	layout_unit wanted;
 	layout_unit target;
 	layout_unit offset;
+	layout_unit baseline;
+	layout_unit *row_baselines;
 	layout_unit have;
 	layout_unit missing;
 	size_t index;
@@ -981,6 +983,20 @@ table_lay_rows(
 		}
 	}
 
+	/* The baseline of each row: the farthest down the first baselines of its baseline-aligned cells lie. */
+	row_baselines = calloc(state->rows.count + 1U, sizeof(*row_baselines));
+	if (row_baselines == NULL) {
+		free(heights);
+		return ENOMEM;
+	}
+	for (index = 0; index < state->cells.count; index++) {
+		cell = wb_vector_at(&state->cells, index);
+		if (cell->box->style.vertical_align != CSS_VALIGN_BASELINE || cell->row_span != 1 || cell->row >= state->rows.count)
+			continue;
+		if (layout_first_baseline(cell->box, &offset) && offset > row_baselines[cell->row])
+			row_baselines[cell->row] = offset;
+	}
+
 	/* Each cell fills all the rows it spans, with its content vertically aligned. */
 	for (index = 0; index < state->cells.count; index++) {
 		cell = wb_vector_at(&state->cells, index);
@@ -999,12 +1015,16 @@ table_lay_rows(
 			offset = (target - cell->box->height) / 2;
 		if (align == CSS_VALIGN_BOTTOM)
 			offset = target - cell->box->height;
+		if (align == CSS_VALIGN_BASELINE && cell->row_span == 1 && cell->row < state->rows.count &&
+		    layout_first_baseline(cell->box, &baseline) && row_baselines[cell->row] > baseline)
+			offset = row_baselines[cell->row] - baseline;
 		if (offset > 0)
 			table_shift(cell->box, offset);
 		cell->box->height = target;
 	}
 
 	/* The row heights are no longer needed. */
+	free(row_baselines);
 	free(heights);
 
 	/* Succeeded: the rows are laid out. */

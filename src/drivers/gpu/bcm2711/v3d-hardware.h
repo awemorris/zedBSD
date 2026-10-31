@@ -81,6 +81,9 @@ struct bcm2711_v3d_perf {
 	/* The performance counters' sums over the window's render runs, and how many runs. */
 	uint64_t counters[16];
 	uint32_t counter_runs;
+	/* The same sums over the bin runs, and how many. */
+	uint64_t bin_counters[16];
+	uint32_t bin_counter_runs;
 	/* The cycle counter split between passes without draws (tile copies and clears) and with draws, and their tiles. */
 	uint64_t copy_cycles;
 	uint64_t draw_cycles;

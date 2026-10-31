@@ -221,6 +221,8 @@ struct js_parser {
 	struct js_syntax_error *error;
 	jmp_buf failure;
 	int module;
+	/* A module's top level awaits (its program runs as an async function). */
+	int top_await;
 	int no_in;
 	int cover_pending;
 	uint32_t cover_line;

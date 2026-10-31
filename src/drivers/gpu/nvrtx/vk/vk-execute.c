@@ -14,10 +14,12 @@
  * corners of a quad.  The records are turned into methods in order
  * (exec-push.c and draw-push.c) and the push buffer is put on the work
  * channel when it is full, when a copy must be done by the CPU, and at the
- * end, without waiting for the GPU: the next push buffer is written in a
- * slot whose run has ended (a new slot is made while one is to be had,
- * else the oldest run is waited for), so the CPU writes one while the GPU
- * runs the others.  The runs on the one work channel run in order, each
+ * end, without waiting for the GPU: the next push buffer is written after
+ * it in the same slot while the slot has room (the GPU still reads the
+ * runs before it; a slot's ticket is its newest run's), else in a slot
+ * whose run has ended (a new slot is made while one is to be had, else
+ * the oldest run is waited for), so the CPU writes one while the GPU runs
+ * the others.  The runs on the one work channel run in order, each
  * after the one before has finished (its fence waits for idle).  What
  * needs the GPU done with the session's work first waits for its newest
  * run: a copy by the CPU, a shadow given back, the session's close (and,
@@ -290,9 +292,10 @@ struct execute_held {
  * class_ready that a run on the session's channel set the 3D class's
  * initial state and the channel keeps it; kept is what the shadow holds,
  * reuse what one draw leaves the next, held what the GPU holds after
- * the last application draw.  at is
- * where the push buffer goes on, constants, headers and samplers how much
- * of their parts the push buffer uses, draws and quads how many
+ * the last application draw.  segment is where the push buffer begun
+ * last starts in the slot's push part and at where it goes on;
+ * constants, headers and samplers how much of their parts the slot's push
+ * buffers use (from the slot's first, at segment 0), draws and quads how many
  * application draws and own quads it holds (for the node's counts); early
  * says the push buffer is a command buffer's first, put on the GPU after
  * EXECUTE_FIRST_DRAWS draws (the others after EXECUTE_RUN_DRAWS).  The
@@ -303,6 +306,7 @@ struct nvrtx_vk_execute {
 	uint32_t slot;
 	uint8_t *cpu;
 	uint64_t va;
+	size_t segment;
 	size_t at;
 	uint32_t constants;
 	uint32_t headers;
@@ -393,7 +397,8 @@ static int execute_programs(struct nvrtx_vk_session *session, struct nvrtx_vk_ex
 static int execute_compile(struct nvrtx_draw_ir *program, uint32_t shader_model, uint8_t *cpu, uint32_t *gprs, uint32_t *bytes);
 static int execute_slot_make(struct nvrtx_vk_session *session, struct execute_slot *slot);
 static int execute_start(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute);
-static void execute_begin(struct nvrtx_vk_execute *execute);
+static void execute_begin(struct nvrtx_vk_execute *execute, size_t segment);
+static bool execute_continues(const struct nvrtx_vk_execute *execute);
 static int execute_submit(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute);
 static int execute_flush(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute);
 static int execute_drain(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute);
@@ -415,7 +420,7 @@ static int execute_draw_constants(struct nvrtx_vk_execute *execute, const struct
 static void execute_draw_load(struct nvrtx_vk_execute *execute, uint32_t offset, const uint32_t *words, uint32_t *held_words, uint32_t count);
 static int execute_textures(struct nvrtx_vk_execute *execute, const struct execute_state *state, uint32_t *handles);
 static bool execute_texture_kept(const struct execute_reuse *reuse, uint32_t place, const void *view, const void *sampler);
-static int execute_texture(struct nvrtx_vk_execute *execute, const struct nvrtx_vk_view *view, const struct nvrtx_vk_sampler *sampler, uint32_t *handle);
+static int execute_texture(struct nvrtx_vk_execute *execute, struct nvrtx_vk_view *view, struct nvrtx_vk_sampler *sampler, uint32_t *handle);
 static int execute_pool_entry(struct nvrtx_vk_execute *execute, const uint32_t *header, const uint32_t *sampler, uint32_t *handle);
 static int execute_constants(struct nvrtx_vk_execute *execute, uint8_t **cpu, uint64_t *va);
 static void execute_vertex_input(const struct nvrtx_vk_pipeline *pipeline, const struct execute_state *state, struct nvrtx_exec_vertex *vertex);
@@ -468,10 +473,16 @@ nvrtx_vk_execute(
 		return ENOMEM;
 	state->push_bytes = command->push_bytes;
 
-	/* A push buffer begun before and never submitted (its command buffer failed) is begun again; else a slot is taken. */
+	/*
+	 * A push buffer begun before and never submitted (its command buffer
+	 * failed) is begun again in its place; else one goes on after the last
+	 * one in the slot while it has room, or a slot is taken.
+	 */
 	error = 0;
 	if (execute->started) {
-		execute_begin(execute);
+		execute_begin(execute, execute->segment);
+	} else if (execute_continues(execute)) {
+		execute_begin(execute, execute->at);
 	} else {
 		error = execute_start(session, execute);
 	}
@@ -765,18 +776,46 @@ execute_start(
 	execute->slot = chosen;
 	execute->cpu = slot->cpu;
 	execute->va = slot->va;
-	execute_begin(execute);
+	execute_begin(execute, 0U);
 
 	/* Succeeded: the push buffer is begun. */
 	return 0;
 }
 
 /*
- * Begins a push buffer in the current slot: the 3D class's state a queue
- * starts with (once on a channel that keeps it from one run to the next;
- * its vertex stream substitute is the first slot's zero page, which lives
- * as long as the session's runs), the header and sampler pools, and the
- * shader caches emptied; nothing of the slot's parts is used yet.
+ * Tells whether the next push buffer goes on in the current slot after the
+ * last one submitted there: the slot holds a push buffer, and its push,
+ * constant and pool parts keep room for two records of the most they take
+ * (one the push buffer's first, so it does not run nearly empty).
+ */
+static bool
+execute_continues(
+	const struct nvrtx_vk_execute *execute)
+{
+	/* Nothing submitted in the slot yet: a slot is taken. */
+	if (execute->at == 0U)
+		return false;
+
+	/* Room in each part. */
+	if (execute->at + 2U * EXECUTE_RECORD_ROOM > EXECUTE_PUSH_BYTES)
+		return false;
+	if (execute->constants + 2U * NVRTX_VK_REGIONS_MAX * EXECUTE_CONSTANTS_SLOT > EXECUTE_CONSTANTS_BYTES)
+		return false;
+	if (execute->headers + 2U * (NVRTX_VK_REGIONS_MAX + NVRTX_VK_TEXTURES_MAX) > EXECUTE_POOL_ENTRIES)
+		return false;
+
+	/* Succeeded: the slot takes another push buffer. */
+	return true;
+}
+
+/*
+ * Begins a push buffer in the current slot at segment of its push part:
+ * the 3D class's state a queue starts with (once on a channel that keeps
+ * it from one run to the next; its vertex stream substitute is the first
+ * slot's zero page, which lives as long as the session's runs), the
+ * header and sampler pools, and the shader caches emptied.  At segment 0
+ * nothing of the slot's parts is used yet; after it, the parts the runs
+ * before use stay theirs.
  *
  * Procedure referenced: Mesa 25.3.6 src/nouveau/vulkan/nvk_queue.c
  * (nvk_queue_init_context_state) and src/nouveau/vulkan/nvk_cmd_draw.c
@@ -784,26 +823,30 @@ execute_start(
  */
 static void
 execute_begin(
-	struct nvrtx_vk_execute *execute)
+	struct nvrtx_vk_execute *execute,
+	size_t segment)
 {
 	uint8_t *push;
 
 	/* The state and the pools. */
 	push = execute->cpu + EXECUTE_PUSH_AT;
-	execute->at = 0U;
+	execute->segment = segment;
+	execute->at = segment;
 	if (!execute->class_ready)
-		execute->at = nvrtx_push_draw_init_class(push, 0U, execute->va + EXECUTE_ZERO_AT, execute->threed_class);
+		execute->at = nvrtx_push_draw_init_class(push, execute->at, execute->va + EXECUTE_ZERO_AT, execute->threed_class);
 	execute->at = nvrtx_push_draw_textures(push, execute->at, execute->va + EXECUTE_HEADERS_AT, EXECUTE_POOL_ENTRIES,
 					       execute->va + EXECUTE_SAMPLERS_AT, EXECUTE_POOL_ENTRIES);
 
 	/* The programs and constants the CPU wrote since the last run are read anew, once for every draw of this push buffer. */
 	execute->at = nvrtx_push_draw_invalidate(push, execute->at);
 
-	/* Nothing of the parts is used: no texture handle of an earlier push buffer is good here. */
+	/* No texture handle of an earlier push buffer is good here; at a slot's start nothing of its parts is used. */
 	execute->reuse.pools++;
-	execute->constants = 0U;
-	execute->headers = 0U;
-	execute->samplers = 0U;
+	if (segment == 0U) {
+		execute->constants = 0U;
+		execute->headers = 0U;
+		execute->samplers = 0U;
+	}
 	execute->draws = 0U;
 	execute->quads = 0U;
 	execute->started = true;
@@ -824,7 +867,8 @@ execute_submit(
 	/* Counts its draws, then submits it; the slot keeps its run. */
 	slot = &execute->slots[execute->slot];
 	nvrtx_vk_gpu_drawn(session->owner, execute->draws, execute->quads);
-	error = nvrtx_vk_gpu_submit(session->owner, execute->va + EXECUTE_PUSH_AT, (uint32_t)execute->at, &slot->ticket);
+	error = nvrtx_vk_gpu_submit(session->owner, execute->va + EXECUTE_PUSH_AT + execute->segment, (uint32_t)(execute->at - execute->segment),
+				    &slot->ticket);
 	if (error != 0)
 		return error;
 
@@ -1896,8 +1940,8 @@ execute_textures(
 	const struct nvrtx_vk_program *program;
 	const struct nvrtx_vk_descriptor_set *set;
 	const struct nvrtx_vk_descriptor_slot *slot;
-	const struct nvrtx_vk_view *view;
-	const struct nvrtx_vk_sampler *sampler;
+	struct nvrtx_vk_view *view;
+	struct nvrtx_vk_sampler *sampler;
 	struct execute_reuse *reuse;
 	uint64_t mixed;
 	uint32_t handle;
@@ -1972,14 +2016,12 @@ execute_texture_kept(
 static int
 execute_texture(
 	struct nvrtx_vk_execute *execute,
-	const struct nvrtx_vk_view *view,
-	const struct nvrtx_vk_sampler *sampler,
+	struct nvrtx_vk_view *view,
+	struct nvrtx_vk_sampler *sampler,
 	uint32_t *handle)
 {
 	const struct nvrtx_vk_image *image;
 	struct nvrtx_exec_sampler words;
-	uint32_t header[8];
-	uint32_t sampled[8];
 	uint64_t va;
 	uint64_t offset;
 	uint32_t width;
@@ -1997,39 +2039,49 @@ execute_texture(
 		return error;
 
 	/*
-	 * The header: a video plane's (the luma plane full size, the chroma
+	 * The header, made once for the view while its image's storage stays
+	 * where it is: a video plane's (the luma plane full size, the chroma
 	 * plane's pairs half each way), a tiled image's with the view's levels,
-	 * a pitch-linear image's of its one level; the sampler.
+	 * a pitch-linear image's of its one level.
 	 */
-	if (image->video) {
-		if (view->plane == 1U) {
-			nvrtx_exec_texture_header_plane(header, va + image->plane_offset[0], image->width, image->height, 1U,
-							view->swizzle);
+	if (view->header_va != va || va == 0U) {
+		kern_memset(view->header, 0, sizeof(view->header));
+		if (image->video) {
+			if (view->plane == 1U) {
+				nvrtx_exec_texture_header_plane(view->header, va + image->plane_offset[0], image->width, image->height,
+								1U, view->swizzle);
+			} else {
+				nvrtx_exec_texture_header_plane(view->header, va + image->plane_offset[1], image->width / 2U,
+								image->height / 2U, 2U, view->swizzle);
+			}
+		} else if (image->tiled) {
+			nvrtx_exec_texture_header_tiled(view->header, va, image->width, image->height, image->levels, view->base_level,
+							view->level_count, view->format, view->swizzle);
 		} else {
-			nvrtx_exec_texture_header_plane(header, va + image->plane_offset[1], image->width / 2U,
-							image->height / 2U, 2U, view->swizzle);
+			nvrtx_vk_image_level(image, 0U, &offset, &width, &height, &pitch);
+			nvrtx_exec_texture_header(view->header, va + offset, width, height, pitch, view->format, view->swizzle);
 		}
-	} else if (image->tiled) {
-		nvrtx_exec_texture_header_tiled(header, va, image->width, image->height, image->levels, view->base_level,
-						view->level_count, view->format, view->swizzle);
-	} else {
-		nvrtx_vk_image_level(image, 0U, &offset, &width, &height, &pitch);
-		nvrtx_exec_texture_header(header, va + offset, width, height, pitch, view->format, view->swizzle);
+		view->header_va = va;
 	}
-	kern_memset(&words, 0, sizeof(words));
-	words.mag_filter = sampler->mag_filter;
-	words.min_filter = sampler->min_filter;
-	words.mipmap_mode = sampler->mipmap_mode;
-	words.min_lod = sampler->min_lod;
-	words.max_lod = sampler->max_lod;
-	words.address_u = sampler->address_u;
-	words.address_v = sampler->address_v;
-	words.address_w = sampler->address_w;
-	words.unnormalized = sampler->unnormalized;
-	nvrtx_exec_sampler_words(sampled, &words);
+
+	/* The sampler's words, made once. */
+	if (!sampler->words_made) {
+		kern_memset(&words, 0, sizeof(words));
+		words.mag_filter = sampler->mag_filter;
+		words.min_filter = sampler->min_filter;
+		words.mipmap_mode = sampler->mipmap_mode;
+		words.min_lod = sampler->min_lod;
+		words.max_lod = sampler->max_lod;
+		words.address_u = sampler->address_u;
+		words.address_v = sampler->address_v;
+		words.address_w = sampler->address_w;
+		words.unnormalized = sampler->unnormalized;
+		nvrtx_exec_sampler_words(sampler->words, &words);
+		sampler->words_made = true;
+	}
 
 	/* Into the pools. */
-	error = execute_pool_entry(execute, header, sampled, handle);
+	error = execute_pool_entry(execute, view->header, sampler->words, handle);
 	if (error != 0)
 		return error;
 

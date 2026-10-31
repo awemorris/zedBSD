@@ -11,7 +11,7 @@
 | P5 | kernel-and-driver-designer | 返却（q1775 WS302 p001） | `/home/awe/zedBSD-worktrees/p5-ws302` / `agent/p5-ws302` | 返却（2026-10-31 06:4x） | e6d67143f（merge 896d3e3db） |
 | P6 | kernel-and-driver-designer | 返却（q1779 WS310 p001） | `/home/awe/zedBSD-worktrees/p6-ws310` / `agent/p6-ws310` | 返却（2026-10-31 07:1x） | 38f8c85eb（merge a2aa89c4f） |
 | P3 | phase-runner-high | ws291 p024 RTX 最適化 (q1785-i01) | `/home/awe/zedBSD-worktrees/p3-ws291wsi` / `agent/p3-ws291wsi` | in-progress（2026-10-31 21:04 起動） | 6bb35e399（main） |
-| P8 | phase-runner-low | ws074 p260 自走 (q1727-i10) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-31 20:40 起動し直し） | cfd6e43f0（merge b827c1b43） |
+| P8 | phase-runner-low | ws074 p260 自走 (q1727-i11) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-31 22:51 起動し直し） | 2084d3b0d（merge 11159cbbe） |
 | P7 | phase-runner-high | BUG-379 (q1786-i01) | `/home/awe/zedBSD-worktrees/p7-bug379` / `agent/p7-bug379` | in-progress（2026-10-31 22:08 起動） | — |
 
 - 同時に動かす数は 6（2026-10-29 ユーザーの P1〜P6 の指示）。VF2（主）と 5330（従）は P3、10.0.10.3 は空き（2026-10-30 09:13 P5 返却）。
