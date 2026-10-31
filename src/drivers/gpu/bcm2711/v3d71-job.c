@@ -60,6 +60,24 @@
 #define PTB_BPOA 0x308U
 #define PTB_BPOS 0x30cU
 
+/* The performance counters' enable, clear, overflow, source and count registers. */
+#define PCTR_ENABLE 0x650U
+#define PCTR_CLEAR 0x654U
+#define PCTR_OVERFLOW 0x658U
+#define PCTR_SOURCES 0x660U
+#define PCTR_COUNT 0x680U
+
+/*
+ * The counter sources of a render run: cycles, render thread active, QPU
+ * active, fragment shading active, QPU stalls, fragment shading waits,
+ * stalls on the TMU, the TLB and others, TMU active and stalled cycles,
+ * texture quads, L2T misses, valid quads, quads written and primitives
+ * with rendered pixels.
+ * Values referenced: Mesa 25.3.6 src/broadcom/common/v3d_performance_counters.h
+ * (the V3D 7.1 counter table).
+ */
+#define RENDER_SOURCES { 0, 3, 83, 84, 85, 86, 87, 88, 92, 22, 23, 24, 29, 8, 12, 6 }
+
 /* The tile state's enable bit in its queue register. */
 #define CLE_TILE_STATE_ENABLE 0x2U
 
@@ -104,6 +122,9 @@ static int run_tfu(struct bcm2711_v3d *engine, const struct bcm2711_v3d_tfu_job 
 static int run_compute(struct bcm2711_v3d *engine, const struct bcm2711_v3d_compute_job *job, struct bcm2711_v3d_job_result *result);
 static int wait_queue(struct bcm2711_v3d *engine, const struct job_queue *queue, const struct bcm2711_v3d_cl_job *bin, struct bcm2711_v3d_job_result *result);
 static int feed_overflow(struct bcm2711_v3d *engine, const struct bcm2711_v3d_cl_job *job, struct bcm2711_v3d_job_result *result);
+static void counters_prepare(struct bcm2711_v3d *engine);
+static void counters_select(struct bcm2711_v3d *engine, const uint8_t *sources);
+static void counters_read(struct bcm2711_v3d *engine, uint32_t *values);
 static int launch_admit_locked(struct bcm2711_v3d *engine);
 static void report_failure(struct bcm2711_v3d *engine, const struct bcm2711_v3d_job *job, const struct bcm2711_v3d_job_result *result, int error);
 
@@ -386,8 +407,25 @@ run_cl(
 	const struct bcm2711_v3d_cl_job *job,
 	struct bcm2711_v3d_job_result *result)
 {
+	/*
+	 * The counter sources of a bin run (cycles, core active, bin thread
+	 * active, QPU active, QPU stalls, stalls on the VPM, on uniforms and
+	 * others, wait bubbles, instruction cache hits and misses, L2T VCD read
+	 * hits and misses, primitives binned, reversed and outside the
+	 * viewport) and of a render run (counters_prepare's), in
+	 * the order of the cost report's bin line.
+	 * Values referenced: Mesa 25.3.6 src/broadcom/common/v3d_performance_counters.h
+	 * (the V3D 7.1 counter table).
+	 */
+	static const uint8_t bin_sources[BCM2711_V3D_COUNTERS] = {
+		0, 1, 2, 83, 85, 89, 90, 92, 81, 18, 19, 46, 47, 16, 17, 15
+	};
+	static const uint8_t render_sources[BCM2711_V3D_COUNTERS] = RENDER_SOURCES;
 	const struct job_queue bin = {BCM2712_V3D_CORE_BIN_DONE, 0, CLE_CT0CA, CLE_CT0RA};
 	const struct job_queue render = {BCM2712_V3D_CORE_RENDER_DONE, 0, CLE_CT1CA, CLE_CT1RA};
+	uint32_t before[BCM2711_V3D_COUNTERS];
+	uint32_t after[BCM2711_V3D_COUNTERS];
+	uint32_t index;
 	unsigned long enabled;
 	uint64_t step;
 	uint64_t bin_ticks;
@@ -421,6 +459,9 @@ run_cl(
 		kern_mmio_write32(engine->core.mapped + CLE_CT0QTS, job->state_address | CLE_TILE_STATE_ENABLE);
 		kern_mmio_write32(engine->core.mapped + CLE_CT0QBA, job->bin_start);
 		result->retired = false;
+		counters_prepare(engine);
+		counters_select(engine, bin_sources);
+		counters_read(engine, before);
 		kern_mmio_write32(engine->core.mapped + CLE_CT0QEA, job->bin_end);
 
 		spin_unlock_irqrestore(&engine->hardware.guard, enabled);
@@ -431,6 +472,10 @@ run_cl(
 		bin_ticks = clock_ticks() - step;
 		if (error != 0)
 			return error;
+		counters_read(engine, after);
+		for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
+			result->bin_counters[index] = after[index] - before[index];
+		result->counters_71 = true;
 	}
 
 	/* The render caches see bin-produced tile lists only after its IRQ. */
@@ -445,6 +490,12 @@ run_cl(
 		return error;
 	}
 
+	/* The counters before the run, as the render queue alone runs from here. */
+	counters_prepare(engine);
+	if (job->bin_start != 0)
+		counters_select(engine, render_sources);
+	counters_read(engine, before);
+
 	/* Starts the render queue; its end write launches it. */
 	kern_mmio_write32(engine->core.mapped + CLE_CT1QBA, job->render_start);
 	result->retired = false;
@@ -458,6 +509,10 @@ run_cl(
 	render_ticks = clock_ticks() - step;
 	if (error != 0)
 		return error;
+	counters_read(engine, after);
+	for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
+		result->counters[index] = after[index] - before[index];
+	result->counters_71 = true;
 
 	/* Cleans the output out of the GPU caches when the caller asked for it. */
 	if (job->clean_output) {
@@ -778,4 +833,61 @@ report_failure(
 		kern_mmio_read32(engine->core.mapped + CLE_PCS),
 		kern_mmio_read32(engine->hub.mapped + TFU_CS),
 		kern_mmio_read32(engine->core.mapped + CSD_STATUS));
+}
+
+/*
+ * Gives the performance counters their sources and starts them, once after
+ * each power-up or reset: the render run's sources, four 8-bit fields a
+ * register, then all sixteen enabled, cleared and without overflow.
+ * Values referenced: Linux drivers/gpu/drm/v3d/v3d_regs.h (V3D_V4_PCTR_0_EN,
+ * _CLR, _OVERFLOW, _SRC_0_3 and V3D_PCTR_0_PCTR0, which 7.x keeps).
+ */
+static void
+counters_prepare(
+	struct bcm2711_v3d *engine)
+{
+	static const uint8_t sources[BCM2711_V3D_COUNTERS] = RENDER_SOURCES;
+
+	/* Already counting. */
+	if (engine->hardware.counters_ready)
+		return;
+
+	/* The sources, then enabled, cleared and without overflow. */
+	counters_select(engine, sources);
+	kern_mmio_write32(engine->core.mapped + PCTR_ENABLE, 0xffffU);
+	kern_mmio_write32(engine->core.mapped + PCTR_CLEAR, 0xffffU);
+	kern_mmio_write32(engine->core.mapped + PCTR_OVERFLOW, 0xffffU);
+	engine->hardware.counters_ready = true;
+}
+
+/* Reads the performance counters 0 to 15. */
+static void
+counters_read(
+	struct bcm2711_v3d *engine,
+	uint32_t *values)
+{
+	uint32_t index;
+
+	/* Free-running 32-bit counts; their differences give a run's share. */
+	for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
+		values[index] = kern_mmio_read32(engine->core.mapped + PCTR_COUNT + index * 4U);
+}
+
+/* Points the sixteen counters at the given sources; their free-running counts go on from where they were. */
+static void
+counters_select(
+	struct bcm2711_v3d *engine,
+	const uint8_t *sources)
+{
+	uint32_t index;
+	uint32_t word;
+
+	/* Four sources a register. */
+	for (index = 0; index < BCM2711_V3D_COUNTERS / 4U; index++) {
+		word = (uint32_t)sources[index * 4U] |
+		    (uint32_t)sources[index * 4U + 1U] << 8 |
+		    (uint32_t)sources[index * 4U + 2U] << 16 |
+		    (uint32_t)sources[index * 4U + 3U] << 24;
+		kern_mmio_write32(engine->core.mapped + PCTR_SOURCES + index * 4U, word);
+	}
 }

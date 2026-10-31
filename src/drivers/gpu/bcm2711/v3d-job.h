@@ -130,6 +130,8 @@ struct bcm2711_v3d_job_result {
 	uint32_t counters[BCM2711_V3D_COUNTERS];
 	/* The same counters' increase over the bin queue's run, when there was one. */
 	uint32_t bin_counters[BCM2711_V3D_COUNTERS];
+	/* Whether the counters are V3D 7.1's sources (v3d71-job.c) instead of 4.2's. */
+	bool counters_71;
 };
 
 int bcm2711_v3d_job_run(struct bcm2711_v3d *engine, const struct bcm2711_v3d_job *job, struct bcm2711_v3d_job_result *result);
