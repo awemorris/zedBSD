@@ -3,7 +3,7 @@
 # ws334-p005 Win32 の補助と system の services: os-win32・os-system
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: 実装済み・試験 PASS（2026-11-01 03:11、cleared は Q1）。
 - 依存: p004（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 
@@ -74,3 +74,34 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+日付: 2026-11-01（host の `date`）。担当 Sonnet 5.5。実行は `LC_ALL=C.UTF-8`（Q1 の注意: この host の LC_CTYPE=ja_JP.UTF-8 は未導入で Wine が非 ASCII の file 名を作れない。run-unit.sh は変えていない）。
+
+作った物: `os-win32.c`・`os-system-posix.c`・`os-system-win32.c`（骨格を実装）、`plan/ws334/tests/unit/test-os-win32.c`・`test-os-system.c`。header・他の module・Makefile・試験の道具は変えていない。
+
+実行した command と最後の行:
+
+- `sh plan/ws334/tests/run-unit.sh all`: `test-os-system: PASS (220 checks) (posix)`、`test-os-system: PASS (231 checks) (win32)`、`test-os-win32: PASS (3126 checks) (win32)`、`test-tools` 両方 PASS、`run-unit: PASS`。
+- `BASE=d393d3267 sh plan/ws334/tests/check-skeleton.sh`: `check-skeleton: PASS`（headers 19、sources 22、`make browser-win64`・`browser-winarm64` 通る、header と道具は基点から不変）。
+- `git diff --check`: 出力なし。
+- 実装の compile は cc・clang（-DWB_OS_THREAD_NAMES の有無とも）、x86_64 と aarch64 の llvm-mingw で warning 0。
+
+わざと壊した確認（git の外で変えて元に戻し、`cmp` で一致を確認）: 27 通り（誤りの写し 1 つ、UTF-8 の先頭 byte・第 2 byte の範囲、長さの境界 `>`/`>=`、surrogate の計算、UNC の接頭辞、alignment の上限、`ERANGE` の境界、乱数の読みの進み方と残りの数え、`BCryptGenRandom` の長さ、UA の文字、空の名前の検査、根の store の抜け、distrusted の値、stop の伝播、LoadLibraryExW の flag ほか）。26 は FAIL で検出。最初は見逃した 2 つ（乱数が複数回の read になる大きさ、現在の directory に置いた DLL を読まないこと）は試験を足して検出するようにした。見逃しが残るのは 1 つ: `Disallowed` の store の distrusted を 0 にする壊し方。Wine でその store は空で、試験から書き込んでも（CertAddEncodedCertificateToStore は成功するが）enumerate に現れず、distrusted 1 の経路を Wine では確かめられない。実機の Windows で確かめる必要がある（未実施）。
+
+自分で決めた点（header が黙っている所）:
+
+- `wb_os_wide_path`: 絶対と見なすのは「drive 文字 + `:` + separator」と「`\\` で始まる」だけ。`C:rel`・`\rooted` は相対として separator の変換だけ。`\\?\`・`\\.\` で始まる物は（`/` を `\` に変えた後）そのまま。GetFullPathNameW の結果が `\\?\`・`\\.\` で始まる時もそのまま。prefix 付きの長さが 32767 unit を超えると ENAMETOOLONG、GetFullPathNameW が ERROR_FILENAME_EXCED_RANGE で失敗しても ENAMETOOLONG、他の失敗は EIO。
+- 失敗した時の出力は、引数が NULL でない限り常に NULL・0 に直す（引数の誤りの時も）。`wb_os_library_open` は names が NULL でも `*library` を NULL にする。
+- `wb_os_library_open`: 空の名前は位置に関係なく先に全部検査して EINVAL。Windows では UTF-8 でない名前・長すぎる名前は読めない名前として次へ進み、全部だめなら ENOENT。
+- `wb_os_utf8_from_wide`: ENAMETOOLONG と EILSEQ は先に見つかった方（先頭から順に走る）。`count` が `(size_t)-1` の時、high surrogate の次の unit が NUL なら EILSEQ（その NUL までは読む）。
+- `wb_os_data_directory` の Windows: 最後の `\`（または `/`）で切って `\share` を足す。GetModuleFileNameW の buffer は 260 から 65536 unit まで倍にして広げ、それでも足りなければ EIO。UTF-8 にして長さが WB_OS_PATH_MAX を超えると EIO（header の戻り値の一覧に ENAMETOOLONG が無いため）。
+- `wb_os_trust_roots`: 順は current user の ROOT、machine の ROOT、current user の Disallowed、machine の Disallowed。store を開けない時は無い store として飛ばす。列挙の終わりは last error が 0 か CRYPT_E_NOT_FOUND の時だけ正常で、他は EIO。DER が 0 byte の物と X509_ASN_ENCODING でない物は飛ばす（0x30 で始まるかは見ない）。
+- `wb_os_thread_name` の POSIX: `WB_OS_THREAD_NAMES` の時だけ `_GNU_SOURCE` を（未定義なら）file の先頭で定義して `pthread_setname_np` を呼ぶ。Windows は名前を 15 byte に切ってから UTF-16 にし、`SetThreadDescription` を呼ぶたびに探す（状態を持たない）。
+- 乱数の POSIX は 1 MiB ずつ read し、EINTR は再試行、read が 0 を返したら EIO。
+- ENOMEM（`wb_os_aligned_alloc` が posix で）の試験は ASan の allocator が巨大な要求で abort するため posix では飛ばし、Windows の側だけ（`1 << 62`）。
+
+header の不備の指摘: なし（止める必要は無かった）。
+
+未実施: aarch64 Windows の実行（compile だけ）、実機の Windows、Disallowed の distrusted 1 の経路の確認（上記）、`libbrowser` の既存 code を新しい OS の層へ替える作業（p021）。Wine の prefix（`build/tmp/ws334-wine`）の Disallowed の store へ書き込みを試みたが、enumerate に現れないので影響は見えていない。
