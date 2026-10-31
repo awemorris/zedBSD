@@ -39,6 +39,8 @@ struct img_bitmap {
 	int width;
 	int height;
 	uint64_t serial;
+	/* Set for a vector picture that has no size and no ratio of its own (the default size stands in). */
+	int no_ratio;
 };
 
 /* The largest image decoded, in pixels (the decoders refuse more). */
