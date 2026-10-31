@@ -3461,8 +3461,7 @@ grid_column_item_contribution(
 			kind = GRID_CONTRIBUTION_MIN_CONTENT;
 		} else if (item->style.min_width.unit == CSS_UNIT_MAX_CONTENT || item->style.min_width.unit == CSS_UNIT_FIT_CONTENT) {
 			kind = GRID_CONTRIBUTION_MAX_CONTENT;
-		} else if (!automatic || item->style.overflow_x != CSS_OVERFLOW_VISIBLE ||
-		    (item->style.min_width.unit != CSS_UNIT_AUTO && item->style.min_width.unit != CSS_UNIT_PERCENT)) {
+		} else if (!automatic || item->style.overflow_x != CSS_OVERFLOW_VISIBLE || item->style.min_width.unit != CSS_UNIT_AUTO) {
 			/* No automatic minimum: a scroll container, or an item that does not span an auto minimum. */
 			*outer = 0;
 			return 0;
@@ -4032,8 +4031,7 @@ grid_row_answer(
 	}
 
 	/* A scroll container, or an item with another kind of minimum, has none from its content. */
-	if (!automatic || item->style.overflow_y != CSS_OVERFLOW_VISIBLE ||
-	    (item->style.min_height.unit != CSS_UNIT_AUTO && item->style.min_height.unit != CSS_UNIT_PERCENT))
+	if (!automatic || item->style.overflow_y != CSS_OVERFLOW_VISIBLE || item->style.min_height.unit != CSS_UNIT_AUTO)
 		return 0;
 
 	/* Otherwise the automatic minimum is its content's height, which a fixed maximum caps. */
