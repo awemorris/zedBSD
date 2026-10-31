@@ -592,3 +592,59 @@ Origin: 2026-10-27 ユーザーの指示。
   pseudo-element-overflow-hidden は group の overflow）。いずれも着手していない。
 - 次: (1) 上の回帰を static-subset で確認し、通れば grid・flex の self-baseline 群を数える、(2) ::part() セレクタ（shadow tree をまたぐ rule）、(3) CSSOM rule object の model。
 - Acid は今回は未測定（inline.c の変更の後は未実施）。測定の一時 file: /tmp/p8out（tmpfs、host 再起動で消える）。Acid の runner の一時 file はこの attempt では作っていない。
+
+### q1727-i09 の途中経過（2026-10-31、P8。dev105〜dev114）
+
+- 基準: dev104 = 2,848 / 3,472。measure-snapshot.sh（jobs 6、1 回約 5 分）で測り、gap は build/tmp/p8/gapNNN.json（worktree の中）。測定の出力は /tmp/p8out/devNNN。
+- 先に i08 の inline.c（直交 inline-block の baseline）の回帰を static の全件（1,561）で確かめた: 後退 0、FIXED 6。
+- 測定（計は Chromium が通す 3,472 のうち。後退は直前の測定との比較、dev104 との比較でも 0）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev104 | 基準（i07） | 2,848（82.03%） | 331 / 192 / 95 / 6 |
+  | dev105（f6a5d0c5e） | CSSOM の rule object（JS）、@scope・@position-try の model、CSS.supports(selector()) | 2,858 | 323 / 190 / 95 / 6 |
+  | dev106 | 縦書き grid の「横書きの子がいれば物理座標」の例外を外した試し（stretch-vertical 16 件が後退したので戻した） | 2,844 | 339 / 188 / 95 / 6 |
+  | dev107 | 縦書き grid の abspos の整列（例外を abspos の子だけ外す）、self-start/end、item の無い grid の暗黙の線 | 2,876 | 312 / 183 / 95 / 6 |
+  | dev108 | deeper abspos・fixed の grid CB・RTL の over-constrained・auto-fit の collapsed（後退 4: autofit-tracks 004〜007） | 2,876 | 313 / 183 / 94 / 6 |
+  | dev109 | 後退 4 を直し、unsafe な整列の overflow、min/max-height の content 分配、grid item の相対位置の % | 2,885（83.09%） | 305 / 182 / 94 / 6 |
+  | dev110 | ::first-letter・::first-line（block container） | 2,891 | 303 / 178 / 94 / 6 |
+  | dev111 | grid-template の CSS animation の補間（native）、Web Animations の grid-template（JS、neutral keyframe） | 2,901 | 295 / 178 / 92 / 6 |
+  | dev112 | Element.animate の pseudoElement（view transition の group・pair・old・new に値を渡す）、activate を frame callback の前に | 2,910 | 293 / 178 / 85 / 6 |
+  | dev113 | view transition の UA animation の名前、document.getAnimations()、animation の currentTime（native.viewTransitionTime） | 2,913（83.90%） | 291 / 178 / 84 / 6 |
+  | dev114 | paused な UA animation で transition が終わらない、column の flex の justify-content: left・right（縦書き） | （下に追記） | |
+
+- 直した物（要点。source は userland/desktop/libbrowser/、JS は plan/ws074/phase260/*.js を make-prelude.py が prelude に取り込む（`// @include`））:
+  1. CSSOM の rule object（plan/ws074/phase260/cssom-rules.js）: `cssRules`・`rules` は Proxy の CSSRuleList、CSSStyleRule・CSSGroupingRule・CSSConditionRule・CSSMediaRule・CSSSupportsRule・CSSContainerRule・CSSScopeRule・
+     CSSLayerBlockRule・CSSStartingStyleRule・CSSPositionTryRule（+ CSSPositionTryDescriptors）・CSSNestedDeclarations・CSSFontFaceRule・CSSKeyframesRule など。source の text から parse し、変更は canonical な text にして
+     native の ruleReplace で model に書き戻す（rendering が次の style で見る）。宣言は element の style（engine が検証）を使う。
+     C 側: css/rule-model.c が @scope・@position-try・@container・@layer・@property・@keyframes などの top-level rule を model に残し（これまでは捨てて、CSSOM の編集の後で効かなくなった）、@scope の prelude を検証、
+     css_rule_model_replace、bind/cssom.c の ruleInfo・ruleReplace、bind/style.c の `CSS.supports("selector(...)")`。
+     通った ID: css-view-transitions/parsing/pseudo-elements-valid・-with-classes、css-anchor-position/at-position-try-{parse,allowed-declarations,cssom}、css-cascade/{scope-cssom,at-scope-parsing,at-scope-relative-syntax}。
+  2. 縦書き grid の abspos（layout/logical.c・grid.c）: logical 座標で layout する（abspos の横書きの子は数えない）。物理座標の例外は in-flow の横書きの子がある時だけ。self-start・self-end を直交の item の辺で解く。
+     grid-self-alignment-positioned-items-with-margin-border-padding-006〜010、grid-row-axis-alignment-positioned-items-010・011・015・016、non-static-positioned-items-012 と static の vertWM 7 件。
+  3. grid の abspos: item の無い grid の暗黙の線は auto（implicit-grid-001）、深い所の abspos は item を置いた後に area を決める（wrapper の位置が要る。absolute-positioning-grid-container-containing-block-001）、
+     auto の辺を同じ frame へ（layout/grid.c）、inline の内容の block の cb も content box の分動かす（layout/box.c）、RTL の over-constrained は left を無視（position.c）、auto-fit の collapsed が全部の時の total を 0 に、
+     grid_distribute は track が無くても整列で置く、変形した grid の中の fixed は grid の area が CB で offsetParent も変形した祖先（bind/geometry.c）。
+  4. grid の整列: item が area より大きい時は safe でなければ真の中央・末尾（grid-align-justify-overflow）、auto な高さの content 分配は min/max-height を数える（grid-content-alignment-overflow-001・002）、
+     grid item の相対位置の % は grid area に対して（縦書きは物理の frame へ入れ替え）。
+  5. ::first-letter・::first-line（css/parser.c・layout/box.c・inline.c）: 疑似要素の番号 10・11。first-letter は最初の text box を letter（前後の約物を含む）と残りに分け、letter に pseudo の style。float の first-letter は未対応。
+     first-line は block に style を持たせ、inline_finish_line が最初の行の継承された color と line-height を pseudo のに替える（font の変更は未対応）。grid-item-accepts-first-letter・-line、grid-{,inline-}first-{letter,line}-003。
+  6. animation: native の cascade_animation が grid-template-columns・rows を補間（同じ長さの list は track ごと、違えば 0.5 で切替。css-grid/animation/grid-template-{columns,rows}-001）。
+     JS（animation-style.js）は Element.animate の effect を getComputedStyle の値へ重ねる（grid-template の neutral keyframe 8 件）。pseudoElement 付きの animate は view transition の group・pair・old・new の style に
+     宣言を渡す（native.viewTransitionStyle → layout_transition_name.animated → box_transition_pseudo が最後に適用。web-animations-api と -parse-pseudo-argument の 6 variant）。
+     update callback の後の activate を、callback が登録する frame callback より前に走る形にした（仕様の「rendering の更新で pending な transition の処理が rAF より前」）。
+     document.getAnimations() に view transition の UA animation（pseudo の computed な animation-name ごと）を足し、currentTime の set は native.viewTransitionTime で全体の時刻にする（set-current-time）。
+     UA の animation-name を snapshot の有無で変える（dynamic-stylesheet-animations）。
+  7. 未対応で調べた物: constructable stylesheet（new CSSStyleSheet・replaceSync。css-cascade の scope-declarations・scope-shadow）、@container・@starting-style の rule（parser が捨てる。scope-container・scope-starting-style）、
+     CSS_TRACKS = 24 の固定長（grid-limits-001）、直交 item の stretch の一般化（縦書き grid の中の横書き item は logical 座標の grid の「直交 item」にならない。grid-self-baseline-vertical-lr/rl の 12 件など）、
+     anchor() の入れ子の fallback と min()・max()（anchor-parse-valid・anchor-size-parse-valid は 2,000 件超の subtest 全部が要る）。
+- shadow DOM の設計メモ（::part()・:host・scope-shadow・anchor の tree-scoped が要る。engine に shadow DOM が全く無い。18 ID が触れる: css-anchor-position の anchor-name-in-shadow・anchor-scope-shadow-*・position-try-tree-scoped・
+  at-position-try-invalidation-shadow-dom、css-cascade の scope-shadow・scope-part・scope-shadow-sharing、css-view-transitions の shadow-part-* 5 件と names-are-tree-scoped）:
+  - DOM: element に shadow_root（DocumentFragment の一種、host・mode・slot assignment mode）。node ごとの tree scope（root の node）を持つ。getRootNode・parentNode（root の親は null、host は `host`）。
+  - parser: `<template shadowrootmode=open|closed>` は、親が shadow root を持たない element なら、その element に shadow root を作り、template の内容をそこへ parse する（template 自体は出さない）。
+  - JS: `Element.attachShadow({mode})`・`shadowRoot`（open のみ）・ShadowRoot（DocumentFragment の継承、mode・host・innerHTML・getElementById・adoptedStyleSheets）、`<slot>`（assignedNodes・name）、slotchange。
+  - style: sheet に tree scope を持たせ、shadow root の中の `<style>` はその tree の element だけに当てる。外の sheet は中へ入らない（継承と ::part() だけ）。`:host`・`:host()`・`:host-context()`・`::slotted()`・`::part()` の
+    selector と、part 属性の table（element ごとの part 名）を cascade に足す。継承の親は flat tree の親（slot の assigned node は slot から、shadow の root の子は host から）。
+  - layout: box の構築が flat tree を歩く（shadow root を持つ host の子は shadow の子へ置き換え、slot の位置に assigned node、割り当てが無ければ fallback）。box の node は元の node のまま。
+  - 手順の案: (1) declarative shadow root + tree scope の style + flat tree の layout + ::part()（shadow-part 5 件と scope-part、約 7 ID）、(2) attachShadow・ShadowRoot の interface（scope-shadow、anchor の shadow の試験）、
+    (3) slot・::slotted、(4) event の retarget・composed path。全体で数日の規模。
