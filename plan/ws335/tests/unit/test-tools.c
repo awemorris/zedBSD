@@ -8,8 +8,9 @@
 /*
  * Checks the test tools themselves: hex_decode, and that the record
  * files of the fetched vectors read back with their documented counts.
- * It also links every module of both libraries, so a missing definition
- * shows here first.
+ * It also links the modules of both libraries (every module on POSIX; on
+ * Windows the members the test refers to), so a missing definition shows
+ * here first.
  */
 
 #include "check.h"

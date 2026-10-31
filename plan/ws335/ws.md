@@ -26,7 +26,11 @@
 - p001（設計）を P6 が q1789 で進めている。
 - 2026-11-01 P6: 設計を [design.md](design.md)、問い U1〜U6 を [user-questions.md](user-questions.md) に書いた。header（libcrypto-compat 24＋公開 6、libssl-compat 8＋公開 1）・.c の骨格（29＋10）・試験の道具（[tests/](tests/)）を置いた。
   実装の Phase p002〜p038（提案の p036 を含む）の phase.md を置いた。design-reviewer の 27 件を全部反映した（[design-review.md](design-review.md)）。
-  **header と試験の道具の凍結: 基点 60760d2a0**（`BASE=60760d2a0 sh plan/ws335/tests/check-skeleton.sh`）。起動の順は design.md §9。仕様と試験の data は P6 の worktree の `build/ws335-specs/`・`build/ws335-vectors/`（Q1 が共有の場所へ写す、user-questions.md の Q1 への確認 3）。
+  最初の凍結の基点は 60760d2a0。
+- 2026-11-01 P6（q1789-i02）: U1〜U6 の答え（全部 A、Windows は DLL を作らず 1 つの .exe への static link）を入れた。Windows は `libcrypto-compat.a`・`libssl-compat.a` を使う側の build が `sources.mk` から作り .exe に link（design.md D23・D26、§4.3・§4.4）、
+  `cert.pem` は .exe の隣、Disallowed は鎖の全部で拒む（D24）、名前の約束（D25）。header 5 個・骨格 4 個・試験の道具 2 個（`run-unit.sh --win32`、check-skeleton の 6・7）を直した。WS336 のために libcrypto-compat.so だけを先に作る p039（p023・p024 の後、D27）を足し、p033 から外した。
+  design-reviewer の 2 回目を反映した（[design-review.md](design-review.md)）。
+  **header と試験の道具の凍結: 基点 b7dfd3952**（`BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh`）。起動の順は design.md §9。仕様と試験の data は共有の `/home/awe/zedBSD-claude1/build/sources/specs/tls/`・`/home/awe/zedBSD-claude1/build/sources/tls-vectors/`（`WS335_VECTORS` に渡す）。
 
 ## Phase
 
@@ -64,9 +68,10 @@
 | [p030](phase030/phase.md) | TLS 1.2 の handshake（test-hs12） | planned | p029、p037 |
 | [p031](phase031/phase.md) | 接続（record の I/O・再組み立て・alert・close）（test-conn） | planned | p030、p015、p037 |
 | [p032](phase032/phase.md) | 公開の SSL・SSL_CTX（test-api-ssl） | planned | p031、p022 |
-| [p033](phase033/phase.md) | 統合: zedBSD の .so と exports、Windows の DLL、相互接続（OpenSSL s_server）・x509-limbo・RFC 8448・net/tls.c の host 試験（Opus） | planned | p032、p023、p024 |
+| [p033](phase033/phase.md) | 統合: zedBSD の libssl-compat.so と exports、Windows の static library の一覧、相互接続（OpenSSL s_server、Wine も）・x509-limbo・net/tls.c の host 試験（Opus） | planned | p032、p023、p024、p039 |
 | [p034](phase034/phase.md) | 安全の review と hardening: 定数時間・fuzz・checklist（Opus） | planned | p033 |
 | [p035](phase035/phase.md) | 規約の全文の見直しと header の持ち越しの直し | planned | p034 |
-| [p036](phase036/phase.md) | 提案（要承認 U2）: net/tls.c の libssl-compat への切り替え | planning | p033 |
+| [p036](phase036/phase.md) | 提案（U2 は A で答え済み）: net/tls.c の libssl-compat への切り替え（zedBSD は開く名前、Windows は static link の表）。WS074・WS334 と調整 | planning | p033、WS334 の p022・p030 |
 | [p037](phase037/phase.md) | 試験の道具: scripted な TLS server（tlspeer.h）と試験の側の ECDSA の署名器（Opus。p029〜p032 が使う） | planned | p025、p026、p027、p011、p008 |
 | [p038](phase038/phase.md) | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類（Opus） | planned | p020 |
+| [p039](phase039/phase.md) | zedBSD の libcrypto-compat.so（build の規則・exports・package と image の登録、`sources.mk`）。TLS は無し。WS336 の zedBSD の Phase が待つ | planned | p023、p024 |

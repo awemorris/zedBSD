@@ -31,7 +31,9 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 
 - d2i_X509 の *in の進め方は OpenSSL の約束どおり。
 - X509_VERIFY_PARAM_set1_ip_asc は IPv4 と IPv6 の text（RFC 4291 2.2）。
+- `cryc_verify_code_to_x509`: CRYC_VERIFY_REJECTED は `X509_V_ERR_CERT_REJECTED`（28）、`X509_verify_cert_error_string(28)` は "certificate rejected"（OpenSSL 3.5.8 `crypto/x509/x509_txt.c` の文の値。data として）。
 - 他の実装（OpenSSL・BoringSSL・LibreSSL・mbedTLS・wolfSSL・libsodium・BearSSL・Go の crypto・Rust の crypto ほか）の code・comment・構造・内部の名前を写さない。表・定数は data として block ごとに直前の複数行の comment で「Values referenced: <仕様の名前と版> <節・表>」。file の先頭に出典を書かない。source に開発の管理情報（WS・Phase の番号、plan/ への参照、日付）を書かない。
+- Windows（static link）: 同じ source が llvm-mingw で Windows の static library になり、OmniGrammaton の 1 つの .exe に link される（[design.md](../design.md) D23・D25）。`long` は Windows で 32 bit（LLP64）なので、32 bit を越える値に `long`・`unsigned long` を使わない（`uint64_t`・`size_t`）。static でない関数・object の名前は公開の名前か `cryc_`・`sslc_` で始める（check-skeleton の 7 が照合）。試験で binary の file を読む時は `fopen(…, "rb")`（Windows の text mode を避ける）。
 - header が黙っている内部の事（static の補助の分け方、内部の表の形、loop の順など、interface に出ない事）は自分で決め、結果の節に列挙する。interface の不備（足りない引数、矛盾する comment、header だけでは決められない約束）は §5 のとおり止めて返す。phase.md が仕様と食い違えば仕様に従い、報告する。
 
 ## 5. 変えてはいけない物
@@ -43,14 +45,15 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 
 ```
 sh plan/ws335/tests/run-unit.sh api-x509     # この module
+sh plan/ws335/tests/run-unit.sh --win32 api-x509     # 同じ試験を Windows（x86_64、static link、Wine）で
 sh plan/ws335/tests/run-unit.sh all
-BASE=60760d2a0 sh plan/ws335/tests/check-skeleton.sh
+BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh
 git diff --check
 ```
 
 ## 7. 終わりの条件
 
-- §6 の command が全部 PASS（最後の行を自分で読む）。check-skeleton.sh の warning 0（cc・clang・zedBSD の clang・llvm-mingw の 2 arch）。
+- §6 の command が全部 PASS（最後の行を自分で読む）。check-skeleton.sh の warning 0（cc・clang・zedBSD の clang・llvm-mingw の 2 arch）と、Windows の static link・名前の範囲（check-skeleton の 6・7）。
 - [coding-style.md](../../coding-style.md) §14 の checklist で自分の diff を見直した。表の block ごとの出典の comment。
 - commit: 新しい file は先に `git add`、`git commit -m WIP -- <path>...`。push しない。rm しない。
 - 「結果」の節: 日付（host の `date`）、実行した command と最後の行、試験の件数、わざと壊す確かめの内容と結果、自分で決めた点、未実施。ws.md の行を「実装済み・試験 PASS」に。

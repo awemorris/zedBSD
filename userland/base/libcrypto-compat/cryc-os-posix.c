@@ -202,16 +202,19 @@ cryc_os_socket_write(
 }
 
 /*
- * Hands the system's trusted roots to the two callbacks, in this order:
- * POSIX:   add_file(context, CRYC_OS_DEFAULT_CA_FILE).
+ * Hands the system's trust decisions to the three callbacks, in this
+ * order (POSIX: the default CA file; Windows: Disallowed, ROOT, then
+ * cert.pem beside the executable).
  */
 int
 cryc_os_system_roots(
+	int (*add_distrusted)(void *context, const uint8_t *der, size_t size),
 	int (*add_der)(void *context, const uint8_t *der, size_t size),
 	int (*add_file)(void *context, const char *path),
 	void *context)
 {
 	/* The parameters are used once the function is written. */
+	UNUSED_PARAMETER(add_distrusted);
 	UNUSED_PARAMETER(add_der);
 	UNUSED_PARAMETER(add_file);
 	UNUSED_PARAMETER(context);

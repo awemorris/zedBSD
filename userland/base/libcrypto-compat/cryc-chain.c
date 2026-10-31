@@ -56,6 +56,25 @@ cryc_store_add_der(
 }
 
 /*
+ * Marks one certificate as distrusted, from its DER (only its SHA-256 is
+ * kept).
+ */
+int
+cryc_store_add_distrusted(
+	struct cryc_store *store,
+	const uint8_t *der,
+	size_t size)
+{
+	/* The parameters are used once the function is written. */
+	UNUSED_PARAMETER(store);
+	UNUSED_PARAMETER(der);
+	UNUSED_PARAMETER(size);
+
+	/* Not implemented: ENOSYS. */
+	return ENOSYS;
+}
+
+/*
  * Adds every CERTIFICATE block of a PEM text (cryc_pem_next_certificate).
  */
 int
@@ -93,8 +112,9 @@ cryc_store_add_file(
 }
 
 /*
- * Adds the system's roots (cryc_os_system_roots, with this store's add_der
- * and add_file).
+ * Adds the system's roots and distrusted certificates
+ * (cryc_os_system_roots, with this store's add_distrusted, add_der and
+ * add_file).
  */
 int
 cryc_store_add_system(
