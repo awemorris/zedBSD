@@ -463,10 +463,13 @@ grid_distribute(
 	layout_unit *offset,
 	layout_unit *extra)
 {
+	int empty;
+
 	*offset = 0;
 	*extra = 0;
-	if (tracks <= 0)
-		return;
+	empty = tracks <= 0;
+	if (empty)
+		tracks = 1;
 
 	/* Distribution needs positive space; an overflow falls back as the specification says. */
 	if (free_space <= 0 || (tracks == 1 && value == CSS_ALIGN_SPACE_BETWEEN)) {
@@ -506,6 +509,10 @@ grid_distribute(
 	default:
 		break;
 	}
+
+	/* No track: the empty grid is positioned by its alignment, and no gap spreads. */
+	if (empty)
+		*extra = 0;
 }
 
 /* Existing in-flow Grid paths use their logical start and end positions. */
@@ -531,6 +538,8 @@ layout_grid(
 	struct layout_tree *tree,
 	struct layout_box *box)
 {
+	int justify_safe;
+	int align_safe;
 	struct grid_state grid;
 	struct grid_item *item;
 	struct layout_box *child;
@@ -741,6 +750,8 @@ layout_grid(
 	used = column_gap * (layout_unit)(grid.column_count - 1);
 	for (position = 0; position < grid.column_count; position++)
 		used += grid.columns[position];
+	if (grid.column_collapsed != NULL && grid_live_tracks(grid.column_collapsed, grid.column_count) == 0)
+		used = 0;
 	box->grid_content = used;
 	room = box->width - used;
 	/* A safe alignment that would overflow falls back to the start. */
@@ -824,18 +835,46 @@ layout_grid(
 	}
 	row_shift = 0;
 	if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
-	    box->style.height.unit == CSS_UNIT_PX) {
+	    (box->style.height.unit == CSS_UNIT_PX ||
+	    (box->style.height.unit == CSS_UNIT_AUTO &&
+	    (box->style.min_height.unit == CSS_UNIT_PX || box->style.max_height.unit == CSS_UNIT_PX)))) {
 		layout_unit available_height;
+		layout_unit frame_height;
 
-		available_height = layout_from_px(box->style.height.value);
-		if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
-			available_height -= box->border[CSS_TOP] + box->padding[CSS_TOP] +
-			    box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		frame_height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 		used = 0;
 		if (grid.row_count > 0)
 			used = row_gap * (layout_unit)(grid.row_count - 1);
 		for (position = 0; position < grid.row_count; position++)
 			used += grid.rows[position];
+		if (grid.row_collapsed != NULL && grid_live_tracks(grid.row_collapsed, grid.row_count) == 0)
+			used = 0;
+		if (box->style.height.unit == CSS_UNIT_PX) {
+			available_height = layout_from_px(box->style.height.value);
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				available_height -= frame_height;
+		} else {
+			/* An automatic height is the rows' extent held between the minimum and the maximum. */
+			available_height = used;
+			if (box->style.min_height.unit == CSS_UNIT_PX) {
+				layout_unit minimum;
+
+				minimum = layout_from_px(box->style.min_height.value);
+				if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					minimum -= frame_height;
+				if (available_height < minimum)
+					available_height = minimum;
+			}
+			if (box->style.max_height.unit == CSS_UNIT_PX) {
+				layout_unit maximum;
+
+				maximum = layout_from_px(box->style.max_height.value);
+				if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					maximum -= frame_height;
+				if (available_height > maximum)
+					available_height = maximum;
+			}
+		}
 		if (available_height < 0)
 			available_height = 0;
 		grid_distribute((box->style.flex_keywords & 32u) != 0 && available_height < used ? CSS_ALIGN_START :
@@ -951,6 +990,16 @@ layout_grid(
 			}
 		}
 
+		/* The area in the physical frame the relative offsets resolve in (a vertical grid is laid out in logical coordinates). */
+		child->grid_area_set = 1;
+		if (box->physical_style != NULL && layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB) {
+			child->grid_area_width = area_height;
+			child->grid_area_height = area_width;
+		} else {
+			child->grid_area_width = area_width;
+			child->grid_area_height = area_height;
+		}
+
 		/* A definite grid area must reach percentage descendants of a stretched item. */
 		error = grid_relay_item(tree, child, area_width, area_height, align);
 		if (error != 0) {
@@ -996,12 +1045,15 @@ layout_grid(
 			outer_width = child->margin[CSS_LEFT] + child->border[CSS_LEFT] +
 			    child->padding[CSS_LEFT] + child->width + child->padding[CSS_RIGHT] +
 			    child->border[CSS_RIGHT] + child->margin[CSS_RIGHT];
-			if (area_width > outer_width &&
+			/* An item wider than its area is aligned truly (it overflows on the end side) unless safe is asked for. */
+			justify_safe = (child->style.justify_self != CSS_ALIGN_AUTO ?
+			    (child->style.flex_keywords & 0x1000u) : (box->style.flex_keywords & 0x2000u)) != 0;
+			if ((area_width > outer_width || !justify_safe) &&
 			    (justify == CSS_ALIGN_RIGHT ||
 			    (justify == CSS_ALIGN_END && box->style.direction == CSS_DIRECTION_LTR) ||
 			    (justify == CSS_ALIGN_START && box->style.direction == CSS_DIRECTION_RTL)))
 				child->x += area_width - outer_width;
-			if (area_width > outer_width && justify == CSS_ALIGN_CENTER)
+			if ((area_width > outer_width || !justify_safe) && justify == CSS_ALIGN_CENTER)
 				child->x += (area_width - outer_width) / 2;
 		}
 		/* Vertical items of a column that align by baseline share it: the left group flush left, the right group flush right. */
@@ -1042,11 +1094,18 @@ layout_grid(
 				child->y += area_height - last_below - baseline;
 		}
 		outer = grid_outer_height(child);
-		if (align == CSS_ALIGN_END && area_height > outer)
+		align_safe = (child->style.align_self != CSS_ALIGN_AUTO ?
+		    (child->style.flex_keywords & 128u) : (box->style.flex_keywords & 64u)) != 0;
+		if (align == CSS_ALIGN_END && (area_height > outer || !align_safe))
 			child->y += area_height - outer;
-		if (align == CSS_ALIGN_CENTER && area_height > outer)
+		if (align == CSS_ALIGN_CENTER && (area_height > outer || !align_safe))
 			child->y += (area_height - outer) / 2;
 	}
+
+	/* The boxes out of the flow deeper in the grid items that the grid contains are placed in their areas too (the items have their places now). */
+	if (box->style.position != CSS_POSITION_STATIC && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    (box->style.direction == CSS_DIRECTION_LTR || box->style.direction == CSS_DIRECTION_RTL))
+		grid_abspos_deeper(box, box, &grid, column_gap, row_gap, shift, row_shift, 0, 0, 0);
 
 	/* The container's content height: its rows and the gaps between them. */
 	row_gap = row_gap_base;
@@ -2435,9 +2494,6 @@ grid_abspos_areas(
 		return;
 	for (child = box->first_child; child != NULL; child = child->next)
 		grid_abspos_one(box, child, grid, column_gap, row_gap, shift, row_shift, 0, 0, 1);
-
-	/* The boxes out of the flow deeper in the grid items that the grid contains are placed in their areas too. */
-	grid_abspos_deeper(box, box, grid, column_gap, row_gap, shift, row_shift, 0, 0, 0);
 }
 
 /*
@@ -2533,9 +2589,12 @@ grid_abspos_one(
 			return;
 
 		/* The columns: logical offsets from the start of the track strip. */
+		/* A collapsed (auto-fit) track is as wide as its gutter is negative; with every track collapsed nothing is left. */
 		total = column_gap * (layout_unit)(grid->column_count - 1);
 		for (index = 0; index < grid->column_count; index++)
 			total += grid->columns[index];
+		if (grid->column_collapsed != NULL && grid_live_tracks(grid->column_collapsed, grid->column_count) == 0)
+			total = 0;
 		left = 0;
 		right = 0;
 		begin = 0;
@@ -2546,7 +2605,7 @@ grid_abspos_one(
 				left = begin;
 			begin += grid->columns[index];
 			if (last_column == index + 2)
-				right = begin;
+				right = begin < 0 ? 0 : begin;
 			begin += column_gap;
 		}
 		if (first_column == grid->column_count + 1)
@@ -2579,6 +2638,8 @@ grid_abspos_one(
 		total = row_gap * (layout_unit)(grid->row_count - 1);
 		for (index = 0; index < grid->row_count; index++)
 			total += grid->rows[index];
+		if (grid->row_collapsed != NULL && grid_live_tracks(grid->row_collapsed, grid->row_count) == 0)
+			total = 0;
 		top = 0;
 		bottom = 0;
 		begin = 0;
@@ -2587,7 +2648,7 @@ grid_abspos_one(
 				top = begin;
 			begin += grid->rows[index];
 			if (last_row == index + 2)
-				bottom = begin;
+				bottom = begin < 0 ? 0 : begin;
 			begin += row_gap;
 		}
 		if (first_row == grid->row_count + 1)
@@ -2601,8 +2662,36 @@ grid_abspos_one(
 		child->cb_set = 1;
 		child->area_from_anchor = 0;
 
-		if (!direct)
+		/* A deeper box's auto edges are the grid's padding edges in the same frame as its lines (the grid's own coordinates are not its parent's). */
+		if (!direct) {
+			if (child->cb_left_auto) {
+				child->cb_left = -box->padding[CSS_LEFT] - off_x;
+				child->cb_left_auto = 0;
+			}
+			if (child->cb_right_auto) {
+				child->cb_right = box->width + box->padding[CSS_RIGHT] - off_x;
+				child->cb_right_auto = 0;
+			}
+			if (child->cb_top_auto) {
+				child->cb_top = -box->padding[CSS_TOP] - off_y;
+				child->cb_top_auto = 0;
+			}
+			if (child->cb_bottom_auto) {
+				layout_unit content_height;
+
+				/* The content height is not final yet: the definite height, or the rows. */
+				content_height = box->style.height.unit == CSS_UNIT_PX ? layout_from_px(box->style.height.value) : 0;
+				if (box->style.height.unit != CSS_UNIT_PX) {
+					for (index = 0; index < grid->row_count; index++)
+						content_height += grid->rows[index];
+					if (grid->row_count > 1)
+						content_height += row_gap * (layout_unit)(grid->row_count - 1);
+				}
+				child->cb_bottom = content_height + box->padding[CSS_BOTTOM] - off_y;
+				child->cb_bottom_auto = 0;
+			}
 			return;
+		}
 
 		/* The static position starts at the area's start corner. */
 		child->static_x = rtl ? child->cb_right : child->cb_left;

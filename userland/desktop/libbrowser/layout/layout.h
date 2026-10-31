@@ -201,6 +201,12 @@ struct layout_box {
 	int vertical_inline;
 	/* An in-flow item of a horizontal grid whose writing mode is vertical; its inline room is the row's height (negative: unbounded). */
 	int grid_orthogonal;
+	/* The style of a block container's ::first-line (NULL when it has none); its first line takes the inherited colour and line height from it. */
+	const struct css_style *first_line_style;
+	/* The size of the grid area a grid item was placed in (its containing block); set when grid_area_set. */
+	int grid_area_set;
+	layout_unit grid_area_width;
+	layout_unit grid_area_height;
 	layout_unit grid_room;
 	/*
 	 * Where a grid or flex item was put: 1 + its grid row and column, or

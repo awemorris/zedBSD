@@ -93,6 +93,9 @@ struct css_filter {
 #define CSS_PSEUDO_ELEMENT_VT_NEW 8
 /* The box around a details element's content (everything but its first summary). */
 #define CSS_PSEUDO_ELEMENT_DETAILS_CONTENT 9
+/* The first letter and the first formatted line of a block container. */
+#define CSS_PSEUDO_ELEMENT_FIRST_LETTER 10
+#define CSS_PSEUDO_ELEMENT_FIRST_LINE 11
 /* The translation a view transition group's style starts with until its rectangle is known (an author's transform replaces it). */
 /* The places a view transition pseudo-element can have among its siblings (for :first-child, :last-child and :only-child). */
 #define CSS_VT_FIRST 1

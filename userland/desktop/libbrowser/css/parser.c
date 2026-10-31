@@ -2487,7 +2487,15 @@ parser_pseudo_element(
 	if (css_ident_equal(token, "details-content"))
 		return;
 
-	/* Any other (::placeholder, ::-webkit-scrollbar, ::first-line ...) is not drawn. */
+	/* The first letter and the first line of a block container. */
+	simple->pseudo = CSS_PSEUDO_ELEMENT_FIRST_LETTER;
+	if (css_ident_equal(token, "first-letter"))
+		return;
+	simple->pseudo = CSS_PSEUDO_ELEMENT_FIRST_LINE;
+	if (css_ident_equal(token, "first-line"))
+		return;
+
+	/* Any other (::placeholder, ::-webkit-scrollbar ...) is not drawn. */
 	simple->pseudo = CSS_PSEUDO_ELEMENT_OTHER;
 }
 
