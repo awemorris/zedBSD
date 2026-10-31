@@ -335,6 +335,7 @@ static void cascade_align(struct css_style *style, unsigned bit, int *field, int
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
 static const struct css_line_names *cascade_line_names(struct css_engine *engine, const struct css_value *value);
 static const void *cascade_keep(struct css_engine *engine, const void *data, size_t size);
+static const struct css_anchor_expr *cascade_anchor_resolve(struct css_engine *engine, const struct css_style *style, const struct css_anchor_expr *expr);
 static const struct css_gradient *cascade_gradient(struct css_engine *engine, const struct css_gradient *gradient, float font_size);
 static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 static void cascade_animation(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
@@ -1310,6 +1311,7 @@ css_initial_style(
 	style->position_area = -1;
 	style->position_visibility = 2;
 	style->zoom = 1.0f;
+	style->animation_iterations = 1.0f;
 	style->zoom_eff = 1.0f;
 	style->transform_origin[0].unit = CSS_UNIT_PERCENT;
 	style->transform_origin[0].value = 50.0f;
@@ -4342,6 +4344,15 @@ cascade_apply(
 	case CSS_PROP_MIX_BLEND_MODE:
 		style->mix_blend_mode = value->keyword;
 		break;
+	case CSS_PROP_ANIMATION_ITERATION_COUNT:
+		style->animation_iterations = value->number;
+		break;
+	case CSS_PROP_ANIMATION_DIRECTION:
+		style->animation_direction = value->keyword;
+		break;
+	case CSS_PROP_ISOLATION:
+		style->isolation = value->keyword;
+		break;
 	case CSS_PROP_DISPLAY:
 		style->display = value->keyword;
 		break;
@@ -5067,6 +5078,15 @@ cascade_inherit(
 	case CSS_PROP_MIX_BLEND_MODE:
 		style->mix_blend_mode = parent->mix_blend_mode;
 		break;
+	case CSS_PROP_ANIMATION_ITERATION_COUNT:
+		style->animation_iterations = parent->animation_iterations;
+		break;
+	case CSS_PROP_ANIMATION_DIRECTION:
+		style->animation_direction = parent->animation_direction;
+		break;
+	case CSS_PROP_ISOLATION:
+		style->isolation = parent->isolation;
+		break;
 	case CSS_PROP_Z_INDEX:
 		style->z_index = parent->z_index;
 		style->z_index_auto = parent->z_index_auto;
@@ -5589,6 +5609,15 @@ cascade_animation(
 	int found_from;
 	int found_to;
 	int count;
+	const struct css_track *from_tracks;
+	const struct css_track *to_tracks;
+	struct css_track *own_tracks;
+	struct css_track from_copy[CSS_TRACKS];
+	struct css_track to_copy[CSS_TRACKS];
+	int own_count;
+	int from_tracks_count;
+	int to_tracks_count;
+	int track;
 
 	/* Only an animation with a name and a length that has begun. */
 	if (style->animation_name == NULL || style->animation_duration <= 0.0f || style->animation_delay > 0.0f)
@@ -5665,16 +5694,6 @@ cascade_animation(
 	}
 	/* grid-template-columns and -rows: tracks of the same kind blend, the others change at the halfway point. */
 	for (pass = 0; pass < 2; pass++) {
-		const struct css_track *from_tracks;
-		const struct css_track *to_tracks;
-		struct css_track *own_tracks;
-		struct css_track from_copy[CSS_TRACKS];
-		struct css_track to_copy[CSS_TRACKS];
-		int own_count;
-		int from_tracks_count;
-		int to_tracks_count;
-		int track;
-
 		property = pass == 0 ? CSS_PROP_GRID_TEMPLATE_COLUMNS : CSS_PROP_GRID_TEMPLATE_ROWS;
 		own_tracks = pass == 0 ? style->columns : style->rows;
 		own_count = pass == 0 ? style->column_count : style->row_count;
@@ -5762,6 +5781,8 @@ cascade_try_rule(
 	size_t found_sheet;
 	size_t index;
 	size_t rule;
+	size_t media;
+	int holds;
 	int rank;
 	int best;
 
@@ -5771,6 +5792,13 @@ cascade_try_rule(
 	sheets = engine->sheets.items;
 	for (index = 0; index < engine->sheets.count; index++) {
 		if (sheets[index].sheet == NULL)
+			continue;
+
+		/* A sheet whose media do not hold gives no rules. */
+		holds = 1;
+		for (media = 0; media < sheets[index].media_count && holds; media++)
+			holds = css_media_matches(sheets[index].media[media], engine->viewport_width, engine->viewport_height);
+		if (!holds)
 			continue;
 		for (rule = 0; rule < sheets[index].sheet->try_rule_count; rule++) {
 			if (!vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
@@ -5924,6 +5952,37 @@ cascade_keep(
 	return copy;
 }
 
+/* Keeps a sum with anchor functions with its ems and rems in pixels, its fallbacks with anchor functions of their own too (NULL when memory runs out). */
+static const struct css_anchor_expr *
+cascade_anchor_resolve(
+	struct css_engine *engine,
+	const struct css_style *style,
+	const struct css_anchor_expr *expr)
+{
+	struct css_anchor_expr resolved;
+	struct css_anchor_query *query;
+	int index;
+
+	memset(&resolved, 0, sizeof(resolved));
+	resolved.px = expr->px + expr->em * style->font_size + expr->rem * engine->root_font_size;
+	resolved.percent = expr->percent;
+	resolved.has_percent = expr->has_percent;
+	resolved.count = expr->count;
+	for (index = 0; index < expr->count; index++) {
+		query = &resolved.terms[index];
+		*query = expr->terms[index];
+		query->fallback_px += query->fallback_em * style->font_size + query->fallback_rem * engine->root_font_size;
+		query->fallback_em = 0;
+		query->fallback_rem = 0;
+		if (query->fallback_expr != NULL) {
+			query->fallback_expr = cascade_anchor_resolve(engine, style, query->fallback_expr);
+			if (query->fallback_expr == NULL)
+				return NULL;
+		}
+	}
+	return cascade_keep(engine, &resolved, sizeof(resolved));
+}
+
 /*
  * Puts a sum with anchor functions in an inset's or a size's anchor slot
  * (ems and rems in pixels) and marks the property's length as anchored.
@@ -5935,11 +5994,8 @@ cascade_anchor(
 	int property,
 	const struct css_anchor_expr *expr)
 {
-	struct css_anchor_expr resolved;
-	struct css_anchor_query *query;
 	struct css_length *length;
 	int slot;
-	int index;
 
 	/* The slot and the length of the property. */
 	switch (property) {
@@ -5985,22 +6041,8 @@ cascade_anchor(
 		return;
 	}
 
-	/* The sum in pixels. */
-	memset(&resolved, 0, sizeof(resolved));
-	resolved.px = expr->px + expr->em * style->font_size + expr->rem * engine->root_font_size;
-	resolved.percent = expr->percent;
-	resolved.has_percent = expr->has_percent;
-	resolved.count = expr->count;
-	for (index = 0; index < expr->count; index++) {
-		query = &resolved.terms[index];
-		*query = expr->terms[index];
-		query->fallback_px += query->fallback_em * style->font_size + query->fallback_rem * engine->root_font_size;
-		query->fallback_em = 0;
-		query->fallback_rem = 0;
-	}
-
-	/* Kept, and the length marked. */
-	style->anchor[slot] = cascade_keep(engine, &resolved, sizeof(resolved));
+	/* The sum in pixels, kept (its fallbacks with anchor functions too), and the length marked. */
+	style->anchor[slot] = cascade_anchor_resolve(engine, style, expr);
 	length->unit = CSS_UNIT_ANCHOR;
 	length->value = 0;
 	length->offset = 0;

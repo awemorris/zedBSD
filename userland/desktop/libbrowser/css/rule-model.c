@@ -658,6 +658,7 @@ model_scope_selector(
 	size_t length)
 {
 	struct css_query *query;
+	struct wb_units relative;
 	size_t index;
 	int status;
 
@@ -671,8 +672,6 @@ model_scope_selector(
 	for (index = 0; index < length && (units[index] == ' ' || units[index] == '\t' || units[index] == '\n'); index++)
 		;
 	if (index < length && (units[index] == '>' || units[index] == '+' || units[index] == '~')) {
-		struct wb_units relative;
-
 		wb_units_init(&relative);
 		status = wb_units_append_code_point(&relative, '&');
 		if (status == 0)

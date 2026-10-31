@@ -125,6 +125,10 @@ bind_style_sheet_source(
 	if (error != 0)
 		return error;
 
+	/* A disabled sheet gives the page nothing. */
+	if (sheet != NULL && sheet->disabled)
+		return 0;
+
 	/* Existing non-associated source handling keeps its original rendering semantics. */
 	if (sheet == NULL) {
 		error = sheet_original(element, units);

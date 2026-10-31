@@ -540,6 +540,10 @@ layout_grid(
 {
 	int justify_safe;
 	int align_safe;
+	layout_unit available_height;
+	layout_unit frame_height;
+	layout_unit minimum;
+	layout_unit maximum;
 	struct grid_state grid;
 	struct grid_item *item;
 	struct layout_box *child;
@@ -838,9 +842,6 @@ layout_grid(
 	    (box->style.height.unit == CSS_UNIT_PX ||
 	    (box->style.height.unit == CSS_UNIT_AUTO &&
 	    (box->style.min_height.unit == CSS_UNIT_PX || box->style.max_height.unit == CSS_UNIT_PX)))) {
-		layout_unit available_height;
-		layout_unit frame_height;
-
 		frame_height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 		used = 0;
 		if (grid.row_count > 0)
@@ -857,8 +858,6 @@ layout_grid(
 			/* An automatic height is the rows' extent held between the minimum and the maximum. */
 			available_height = used;
 			if (box->style.min_height.unit == CSS_UNIT_PX) {
-				layout_unit minimum;
-
 				minimum = layout_from_px(box->style.min_height.value);
 				if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
 					minimum -= frame_height;
@@ -866,8 +865,6 @@ layout_grid(
 					available_height = minimum;
 			}
 			if (box->style.max_height.unit == CSS_UNIT_PX) {
-				layout_unit maximum;
-
 				maximum = layout_from_px(box->style.max_height.value);
 				if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
 					maximum -= frame_height;
@@ -2282,6 +2279,10 @@ grid_static_alignment(
 	int raw_align;
 	int orthogonal;
 	int rtl;
+	int box_mode;
+	int block_start_left;
+	int inline_start_top;
+	int item_left;
 
 	rtl = box->style.direction == CSS_DIRECTION_RTL;
 	justify = child->style.justify_self;
@@ -2309,11 +2310,6 @@ grid_static_alignment(
 	 */
 	if (box->physical_style != NULL && layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB &&
 	    child->physical_style == NULL && child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
-		int box_mode;
-		int block_start_left;
-		int inline_start_top;
-		int item_left;
-
 		box_mode = layout_physical_mode(box);
 		block_start_left = box_mode != CSS_WRITING_VERTICAL_RL;
 		inline_start_top = (box->style.direction == CSS_DIRECTION_LTR) !=
@@ -2560,6 +2556,7 @@ grid_abspos_one(
 	layout_unit top;
 	layout_unit bottom;
 	layout_unit total;
+	layout_unit content_height;
 	int first_column;
 	int last_column;
 	int first_row;
@@ -2677,8 +2674,6 @@ grid_abspos_one(
 				child->cb_top_auto = 0;
 			}
 			if (child->cb_bottom_auto) {
-				layout_unit content_height;
-
 				/* The content height is not final yet: the definite height, or the rows. */
 				content_height = box->style.height.unit == CSS_UNIT_PX ? layout_from_px(box->style.height.value) : 0;
 				if (box->style.height.unit != CSS_UNIT_PX) {

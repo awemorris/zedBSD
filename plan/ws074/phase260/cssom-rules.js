@@ -183,40 +183,51 @@
     });
     tag(CSSRule, 'CSSRule');
 
-    // The rules inside a rule, as a live list.
-    function makeList(owner, items) {
+    // The rules inside a rule or a sheet, as a live list: size() is the number of rules now, at(i) the rule at an index.
+    function makeList(size, at) {
       var target = Object.create(g.CSSRuleList ? g.CSSRuleList.prototype : Object.prototype);
       function isIndex(k) { return typeof k === 'string' && /^(0|[1-9][0-9]*)$/.test(k); }
       return new Proxy(target, {
         get: function (t, k, r) {
-          if (k === 'length') return items().length;
-          if (k === 'item') return function item(i) { return items()[i >>> 0] || null; };
-          if (isIndex(k)) return items()[+k];
+          if (k === 'length') return size();
+          if (k === 'item') return function item(i) { i = i >>> 0; return i < size() ? at(i) : null; };
+          if (isIndex(k)) return +k < size() ? at(+k) : undefined;
           return Reflect.get(t, k, r);
         },
-        has: function (t, k) { return isIndex(k) ? +k < items().length : Reflect.has(t, k); },
+        has: function (t, k) { return isIndex(k) ? +k < size() : Reflect.has(t, k); },
         getOwnPropertyDescriptor: function (t, k) {
-          if (isIndex(k) && +k < items().length) return { value: items()[+k], writable: false, enumerable: true, configurable: true };
+          if (isIndex(k) && +k < size()) return { value: at(+k), writable: false, enumerable: true, configurable: true };
           return Reflect.getOwnPropertyDescriptor(t, k);
         },
         ownKeys: function (t) {
-          var keys = [], i, n = items().length;
+          var keys = [], i, n = size();
           for (i = 0; i < n; i++) keys.push(String(i));
           return keys.concat(Reflect.ownKeys(t));
         },
         set: function (t, k, v, r) { return isIndex(k) ? false : Reflect.set(t, k, v, r); }
       });
     }
+    // The list of an array of rule objects (a rule's own).
+    function arrayList(rule) {
+      return makeList(function () { return rule._children.length; }, function (i) { return rule._children[i]; });
+    }
 
     // The declarations of a rule are kept in an element's style (the engine validates and writes them); a change is written back.
+    // The element is made when the declarations are first read or changed (a long sheet's rules are mostly only listed).
     function scratchStyle(rule, text) {
-      var el = document.createElement('div');
-      el.style.cssText = text;
-      rule._scratch = el;
-      return el.style;
+      hidden(rule, '_declText', text);
+    }
+    function scratchOf(rule) {
+      var el;
+      if (!rule._scratch) {
+        el = document.createElement('div');
+        el.style.cssText = rule._declText || '';
+        hidden(rule, '_scratch', el);
+      }
+      return rule._scratch;
     }
     function declProxy(rule) {
-      var st = rule._scratch.style;
+      var st = scratchOf(rule).style;
       return new Proxy(st, {
         get: function (t, k) {
           var v = Reflect.get(t, k, t);
@@ -235,7 +246,7 @@
 
     class CSSGroupingRule extends CSSRule {
       get cssRules() {
-        if (!this._list) hidden(this, '_list', makeList(this, function () { return this._children; }.bind(this)));
+        if (!this._list) hidden(this, '_list', arrayList(this));
         return this._list;
       }
       insertRule(text, index) {
@@ -341,7 +352,7 @@
     class CSSKeyframesRule extends CSSRule {
       get name() { return this._prelude; }
       get cssRules() {
-        if (!this._list) hidden(this, '_list', makeList(this, function () { return this._children; }.bind(this)));
+        if (!this._list) hidden(this, '_list', arrayList(this));
         return this._list;
       }
     }
@@ -536,7 +547,7 @@
             rule._children.push(makeDecls(items[i].decls, sheet, rule));
           }
         }
-        if (C === CSSStyleRule && !rule._scratch) scratchStyle(rule, '');
+        if (C === CSSStyleRule && rule._declText === undefined) scratchStyle(rule, '');
       } else if (C === CSSPositionTryRule) {
         var d = new CSSPositionTryDescriptors(RK, rule);
         hidden(rule, '_tryDecls', d);
@@ -577,7 +588,7 @@
 
     // --- Serialization
     function indent(text) { return text.split('\n').join('\n  '); }
-    function declsText(rule) { return rule._scratch ? rule._scratch.style.cssText : ''; }
+    function declsText(rule) { return rule._declText !== undefined ? scratchOf(rule).style.cssText : ''; }
     function serialize() {
       var rule = this, kind = rule._kind, head, parts, i, inner;
       switch (kind) {
@@ -659,11 +670,7 @@
     function sheetList(sheet) {
       var l = lists.get(sheet);
       if (!l) {
-        l = makeList(sheet, function () {
-          var n = lengthOf(sheet), out = [], i;
-          for (i = 0; i < n; i++) out.push(ruleAt(sheet, i));
-          return out;
-        });
+        l = makeList(function () { return lengthOf(sheet); }, function (i) { return ruleAt(sheet, i); });
         lists.set(sheet, l);
       }
       return l;
@@ -688,3 +695,14 @@
       ['CSSKeyframeRule', CSSKeyframeRule], ['CSSViewTransitionRule', CSSViewTransitionRule],
       ['CSSPositionTryRule', CSSPositionTryRule], ['CSSPositionTryDescriptors', CSSPositionTryDescriptors]].forEach(function (p) { def(g, p[0], p[1]); });
   })();
+
+  // HTMLStyleElement.media and HTMLLinkElement.media reflect the media attribute (which sheets the page uses depends on it).
+  ['HTMLStyleElement', 'HTMLLinkElement'].forEach(function (name) {
+    var C = g[name];
+    if (typeof C !== 'function' || !C.prototype || Object.getOwnPropertyDescriptor(C.prototype, 'media')) return;
+    Object.defineProperty(C.prototype, 'media', {
+      get: function () { var v = this.getAttribute('media'); return v === null ? '' : v; },
+      set: function (v) { this.setAttribute('media', String(v)); },
+      configurable: true, enumerable: true
+    });
+  });

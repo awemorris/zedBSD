@@ -724,6 +724,7 @@ box_first_letter_in(
 {
 	struct layout_box *child;
 	struct layout_box *letter;
+	struct layout_box *before;
 	size_t start;
 	size_t end;
 	size_t length;
@@ -788,8 +789,6 @@ box_first_letter_in(
 		if (parent->first_child == child) {
 			parent->first_child = letter;
 		} else {
-			struct layout_box *before;
-
 			for (before = parent->first_child; before != NULL && before->next != child; before = before->next)
 				;
 			if (before != NULL)
@@ -1048,6 +1047,13 @@ box_transition_pseudo(
 	*error = css_engine_compute_vt_pseudo(css, element, pseudo, name != NULL ? name->name : NULL, name != NULL ? name->classes : NULL, siblings, parent_style, style);
 	if (*error != 0)
 		return NULL;
+
+	/* The UA's isolation is for a name with both snapshots, and its images blend as plus-lighter while their animation runs. */
+	if (name != NULL && !(name->has_old && name->has_new) && pseudo == CSS_PSEUDO_ELEMENT_VT_PAIR)
+		style->isolation = 0;
+	if (name != NULL && name->has_old && name->has_new && style->animation_name != NULL && style->mix_blend_mode == 0 &&
+	    (pseudo == CSS_PSEUDO_ELEMENT_VT_OLD || pseudo == CSS_PSEUDO_ELEMENT_VT_NEW))
+		style->mix_blend_mode = 1;
 
 	/* A script's animation of the pseudo-element has the last word. */
 	if (name != NULL && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW &&
