@@ -155,6 +155,9 @@ struct drv_gpu_ops {
 	const struct drv_gpu_scanout_ops *scanout;
 	const struct drv_gpu_job_ops *jobs;
 	const struct drv_gpu_recovery_ops *recovery;
+
+	/* Optional image layouts besides linear rows (gpu-share.h); without them only linear images are shared. */
+	const struct drv_gpu_layout_ops *layouts;
 };
 
 /*

@@ -377,7 +377,8 @@ venus_publish(
 		&commands,
 		&drv_venus_scanout_operations,
 		&jobs,
-		&recovery
+		&recovery,
+		NULL
 	};
 	struct venus_controller *controller;
 	int error;

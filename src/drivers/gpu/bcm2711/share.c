@@ -345,7 +345,7 @@ same_image(
 	    first->memory_type != second->memory_type ||
 	    first->usage != second->usage ||
 	    first->tiling != second->tiling ||
-	    first->reserved != second->reserved)
+	    first->layout_parameter != second->layout_parameter)
 		return false;
 
 	/* Succeeded: the two descriptions identify the same immutable image layout. */

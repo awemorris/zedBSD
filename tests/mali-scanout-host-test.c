@@ -179,7 +179,7 @@ good_image(
 	image->memory_type = 0U;
 	image->usage = 16U;
 	image->tiling = GPU_IMAGE_LINEAR;
-	image->reserved = 0U;
+	image->layout_parameter = 0U;
 	image->device_id = 0U;
 }
 

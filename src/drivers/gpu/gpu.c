@@ -481,7 +481,12 @@ static int gpu_device_query_ioctl(struct gpu_session *session, uintptr_t argumen
 static int gpu_constraints_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_scanout_import(struct gpu_session *session, struct gpu_shared_resource *shared, void **object);
 static int gpu_allocation_validate(struct gpu_resource *resource, const struct gpu_allocation_descriptor *allocation);
-static int gpu_image_validate(struct gpu_resource *resource, const struct gpu_image_descriptor *image);
+static int gpu_image_validate(struct drv_gpu_device *device, struct gpu_resource *resource, const struct gpu_image_descriptor *image);
+static int gpu_image_layout_bytes(struct drv_gpu_device *device, const struct gpu_image_descriptor *image, uint64_t limit);
+static int gpu_layouts_ioctl(struct gpu_session *session, uintptr_t argument);
+static void gpu_layouts_default(struct drv_gpu_device *device, struct gpu_image_layouts *request);
+static int gpu_layouts_check(const struct drv_gpu_device *device, const struct gpu_image_layouts *request);
+static bool gpu_layout_named(uint32_t tiling, uint32_t parameter);
 static void gpu_shared_release(void *object);
 static int gpu_shared_hold_device(struct drv_gpu_device *device);
 static int gpu_export_install(struct kernel_handle *handle, void *request, size_t bytes, uint32_t policy, int32_t *fd, uintptr_t argument);
@@ -1404,6 +1409,11 @@ gpu_ops_validate(
 		    (!(ops->capabilities & GPU_CAP_DISPLAY) || ops->scanout->constraints == NULL))
 			return EINVAL;
 	}
+
+	/* A device that names layouts both lists them and checks a description of one. */
+	if (ops->layouts != NULL &&
+	    (ops->layouts->image_layout == NULL || ops->layouts->image_layouts == NULL))
+		return EINVAL;
 
 	/* Succeeded: every advertised operation has its required lifecycle. */
 	return 0;
@@ -2329,6 +2339,10 @@ gpu_ioctl_body(
 		/* Resolves stable node roles without requiring a renderer capset. */
 		error = gpu_device_query_ioctl(session, argument);
 		break;
+	case GPU_IMAGE_LAYOUTS:
+		/* Lists the device's image layouts for a format and size, fastest first. */
+		error = gpu_layouts_ioctl(session, argument);
+		break;
 	case GPU_DISPLAY_CONSTRAINTS:
 		/* Display allocation requirements precede swapchain path selection. */
 		error = gpu_constraints_ioctl(session, argument);
@@ -2672,6 +2686,10 @@ gpu_info_ioctl(
 	information.size = sizeof(information);
 	information.capabilities &= device->ops->capabilities;
 	information.driver_name[sizeof(information.driver_name) - 1U] = '\0';
+
+	/* A device with its own layouts says so, whatever its backend reported. */
+	if (device->ops->layouts != NULL)
+		information.capabilities |= GPU_CAP_IMAGE_LAYOUTS;
 
 	/* Returns the initialized snapshot to the requesting process. */
 	error = copyout(&information, argument, sizeof(information));
@@ -5156,6 +5174,216 @@ gpu_constraints_ioctl(
 	return 0;
 }
 
+/*
+ * Answers which layouts an image of a format and size can have on this
+ * device, fastest first: the backend's own answer, checked, or linear rows
+ * with the uses the device's operations give it.
+ */
+static int
+gpu_layouts_ioctl(
+	struct gpu_session *session,
+	uintptr_t argument)
+{
+	struct gpu_image_layouts request;
+	struct gpu_image_layouts question;
+	struct drv_gpu_device *device;
+	uint32_t index;
+	int error;
+
+	/* Snapshots the whole question before any part of it is believed. */
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+
+	/* The ABI, a known format of full colour depth, a size, known uses and a display for a scanout. */
+	if (request.version != GPU_ABI_VERSION || request.size != sizeof(request))
+		return EINVAL;
+	if (request.format != GPU_PIXEL_BGRA8888 && request.format != GPU_PIXEL_RGBA8888)
+		return EOPNOTSUPP;
+	if (request.width == 0U || request.height == 0U)
+		return EINVAL;
+	if ((request.uses & ~(GPU_LAYOUT_RENDER | GPU_LAYOUT_SAMPLE | GPU_LAYOUT_SCANOUT | GPU_LAYOUT_SHARE)) != 0U)
+		return EINVAL;
+	if ((request.uses & GPU_LAYOUT_SCANOUT) != 0U && request.display_id == 0U)
+		return EINVAL;
+
+	/* An answer on input would conceal an incomplete backend reply. */
+	if (request.count != 0U)
+		return EINVAL;
+
+	/* Every entry of the answer starts empty. */
+	for (index = 0U; index < GPU_IMAGE_LAYOUTS_MAX; index++) {
+		/* A stale entry is refused like a stale count. */
+		if (request.entry[index].tiling != 0U ||
+		    request.entry[index].parameter != 0U ||
+		    request.entry[index].flags != 0U ||
+		    request.entry[index].reserved != 0U)
+			return EINVAL;
+	}
+
+	/* The backend's list, or linear rows for a device without layouts of its own. */
+	question = request;
+	device = session->device;
+	if (device->ops->layouts != NULL) {
+		error = device->ops->layouts->image_layouts(device->private_data, session->backend, &request);
+		if (error != 0)
+			return error;
+	} else {
+		gpu_layouts_default(device, &request);
+	}
+
+	/* A backend cannot change the question it answers. */
+	if (request.version != question.version ||
+	    request.size != question.size ||
+	    request.format != question.format ||
+	    request.width != question.width ||
+	    request.height != question.height ||
+	    request.uses != question.uses ||
+	    request.display_id != question.display_id)
+		return EIO;
+
+	/* The answer, the backend's or the core's, keeps every promise of the contract. */
+	error = gpu_layouts_check(device, &request);
+	if (error != 0)
+		return error;
+
+	/* Publishes the answer with the core's ABI header. */
+	request.version = GPU_ABI_VERSION;
+	request.size = sizeof(request);
+	error = copyout(&request, argument, sizeof(request));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller has the layouts, fastest first. */
+	return 0;
+}
+
+/*
+ * Answers for a device that names no layouts: linear rows, drawn and
+ * sampled by a renderer, shared by a sharing device, shown by its display
+ * when one is asked about; nothing when that misses a use asked for.
+ */
+static void
+gpu_layouts_default(
+	struct drv_gpu_device *device,
+	struct gpu_image_layouts *request)
+{
+	uint32_t flags;
+
+	/* The uses the device's operations give linear rows. */
+	flags = 0U;
+	if ((device->ops->capabilities & GPU_CAP_COMMAND) != 0U)
+		flags |= GPU_LAYOUT_RENDER | GPU_LAYOUT_SAMPLE;
+	if ((device->ops->capabilities & GPU_CAP_SHARE) != 0U)
+		flags |= GPU_LAYOUT_SHARE;
+	if (request->display_id != 0U && (device->ops->capabilities & GPU_CAP_DISPLAY) != 0U)
+		flags |= GPU_LAYOUT_SCANOUT;
+
+	/* No layout has every use asked for. */
+	if ((flags & request->uses) != request->uses)
+		return;
+
+	/* Linear rows, the one layout every device shares. */
+	request->entry[0].tiling = GPU_IMAGE_LINEAR;
+	request->entry[0].parameter = 0U;
+	request->entry[0].flags = flags;
+	request->count = 1U;
+}
+
+/*
+ * Checks an answer: at most the entries there is room for, each a layout
+ * this machine can name with known uses that include every one asked for,
+ * a scanout only for a display asked about, a layout other than linear rows
+ * only from a device that names layouts, and nothing after the last entry.
+ * EIO for a backend that broke the contract.
+ */
+static int
+gpu_layouts_check(
+	const struct drv_gpu_device *device,
+	const struct gpu_image_layouts *request)
+{
+	const struct gpu_image_layout *entry;
+	bool named;
+	uint32_t index;
+
+	/* The answer fits the reply. */
+	if (request->count > GPU_IMAGE_LAYOUTS_MAX)
+		return EIO;
+
+	/* Each listed entry, then the empty rest. */
+	for (index = 0U; index < GPU_IMAGE_LAYOUTS_MAX; index++) {
+		entry = &request->entry[index];
+
+		/* An entry past the answer stays empty. */
+		if (index >= request->count) {
+			if (entry->tiling != 0U || entry->parameter != 0U || entry->flags != 0U || entry->reserved != 0U)
+				return EIO;
+			continue;
+		}
+
+		/* Known uses including every one asked for, and no reserved bits. */
+		if ((entry->flags & ~(GPU_LAYOUT_RENDER | GPU_LAYOUT_SAMPLE | GPU_LAYOUT_SCANOUT | GPU_LAYOUT_SHARE)) != 0U ||
+		    (entry->flags & request->uses) != request->uses ||
+		    entry->flags == 0U ||
+		    entry->reserved != 0U)
+			return EIO;
+
+		/* A scanout belongs to the display asked about. */
+		if ((entry->flags & GPU_LAYOUT_SCANOUT) != 0U && request->display_id == 0U)
+			return EIO;
+
+		/* A layout this machine can name. */
+		named = gpu_layout_named(entry->tiling, entry->parameter);
+		if (!named)
+			return EIO;
+
+		/* Only a device that names layouts can export or read one other than linear rows. */
+		if (entry->tiling != GPU_IMAGE_LINEAR && device->ops->layouts == NULL)
+			return EIO;
+	}
+
+	/* Succeeded: the answer keeps the contract. */
+	return 0;
+}
+
+/*
+ * Tells whether a layout and its variant are ones this interface names:
+ * linear rows with no variant, or a layout of a reserved vendor family
+ * (its meaning is the drivers' of that family).
+ */
+static bool
+gpu_layout_named(
+	uint32_t tiling,
+	uint32_t parameter)
+{
+	uint32_t family;
+
+	/* Linear rows have no variant. */
+	if (tiling == GPU_IMAGE_LINEAR) {
+		if (parameter != 0U)
+			return false;
+
+		/* Succeeded: plain linear rows. */
+		return true;
+	}
+
+	/* The common family has no other layout. */
+	family = tiling >> GPU_IMAGE_FAMILY_SHIFT;
+	if (family == GPU_IMAGE_FAMILY_COMMON || family > GPU_IMAGE_FAMILY_LAST)
+		return false;
+
+	/* NVIDIA's block linear: a block height of at most 32 GOBs and a page kind, nothing else. */
+	if (tiling == GPU_IMAGE_NV_BLOCK_LINEAR) {
+		if ((parameter & ~(GPU_IMAGE_NV_BLOCK_HEIGHT_MASK | GPU_IMAGE_NV_KIND_MASK)) != 0U)
+			return false;
+		if ((parameter & GPU_IMAGE_NV_BLOCK_HEIGHT_MASK) > 5U)
+			return false;
+	}
+
+	/* Succeeded: a reserved family's layout, whose drivers give it meaning. */
+	return true;
+}
+
 /* Validates foreign physical backing through the destination display driver's native import. */
 static int
 gpu_scanout_import(
@@ -5210,28 +5438,42 @@ gpu_scanout_import(
 	return 0;
 }
 
-/* Validates the complete linear image extent before an export reaches the backend. */
+/*
+ * Validates the complete image extent before an export reaches the
+ * backend: linear rows by their stride, any other layout by the bytes the
+ * exporting device says it takes.
+ */
 static int
 gpu_image_validate(
+	struct drv_gpu_device *device,
 	struct gpu_resource *resource,
 	const struct gpu_image_descriptor *image)
 {
 	uint64_t bytes;
+	int error;
 
-	/* The first sharing contract has one fixed public metadata layout. */
+	/* The sharing contract has one fixed public metadata layout. */
 	if (image->version != GPU_ABI_VERSION || image->size != sizeof(*image))
 		return EINVAL;
 
-	/* K supplies the device identity and accepts no reserved metadata. */
-	if (image->device_id != 0U || image->reserved != 0U)
+	/* K supplies the device identity. */
+	if (image->device_id != 0U)
 		return EINVAL;
 
 	/* Shared allocations describe exactly the resource being exported. */
 	if (resource->kind != GPU_RESOURCE_BLOB || image->allocation_bytes != resource->bytes)
 		return EINVAL;
 
-	/* The initial scanout contract accepts complete linear packed-color images. */
-	if (image->tiling != GPU_IMAGE_LINEAR || image->memory_type >= 32U)
+	/* Linear rows have no variant; a layout of the device's own needs a device that names layouts. */
+	if (image->tiling == GPU_IMAGE_LINEAR) {
+		if (image->layout_parameter != 0U)
+			return EINVAL;
+	} else if (device->ops->layouts == NULL) {
+		return EOPNOTSUPP;
+	}
+
+	/* A memory type a Vulkan memory type mask can name. */
+	if (image->memory_type >= 32U)
 		return EOPNOTSUPP;
 
 	/* Vulkan 1.0 image usages form the supported nonempty description domain. */
@@ -5256,12 +5498,55 @@ gpu_image_validate(
 	if (image->offset > UINT32_MAX || image->offset > resource->bytes)
 		return EINVAL;
 
-	/* Bounds the full image only after the offset subtraction is safe. */
+	/* Bounds another layout by the bytes its device says the image takes, after the offset. */
+	if (image->tiling != GPU_IMAGE_LINEAR) {
+		error = gpu_image_layout_bytes(device, image, resource->bytes - image->offset);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the device's layout keeps every pixel inside this allocation. */
+		return 0;
+	}
+
+	/* Bounds the full linear image only after the offset subtraction is safe. */
 	bytes = (uint64_t)image->stride * image->height;
 	if (bytes > resource->bytes - image->offset)
 		return EINVAL;
 
 	/* Succeeded: no described pixel can address storage outside this allocation. */
+	return 0;
+}
+
+/*
+ * Asks a device how many bytes from its offset an image of a layout other
+ * than linear rows takes, and bounds them by limit.  EOPNOTSUPP when the
+ * device names no layouts or refuses this one, EINVAL when the image does
+ * not fit.
+ */
+static int
+gpu_image_layout_bytes(
+	struct drv_gpu_device *device,
+	const struct gpu_image_descriptor *image,
+	uint64_t limit)
+{
+	uint64_t bytes;
+	int error;
+
+	/* Only a device that names layouts can say what one takes. */
+	if (device->ops->layouts == NULL)
+		return EOPNOTSUPP;
+
+	/* The device checks the layout, its variant and the rows it needs. */
+	bytes = 0U;
+	error = device->ops->layouts->image_layout(device->private_data, image, &bytes);
+	if (error != 0)
+		return error;
+
+	/* A layout that names no storage, or more than the allocation has, describes no image here. */
+	if (bytes == 0U || bytes > limit)
+		return EINVAL;
+
+	/* Succeeded: the image lies inside the limit. */
 	return 0;
 }
 
@@ -5428,7 +5713,7 @@ gpu_export_ioctl(
 		return error;
 
 	/* Validate and stamp immutable metadata before the backend retains it. */
-	error = gpu_image_validate(resource, &request.image);
+	error = gpu_image_validate(device, resource, &request.image);
 	if (error != 0)
 		return error;
 
@@ -5560,6 +5845,15 @@ gpu_import_ioctl(
 	if (foreign != 0 && !(request.flags & GPU_IMPORT_SCANOUT)) {
 		handle_put(handle);
 		return EXDEV;
+	}
+
+	/* Another device reads a layout other than linear rows only when its own driver accepts that layout. */
+	if (foreign != 0 && shared->image.tiling != GPU_IMAGE_LINEAR) {
+		error = gpu_image_layout_bytes(device, &shared->image, shared->image.allocation_bytes - shared->image.offset);
+		if (error != 0) {
+			handle_put(handle);
+			return EXDEV;
+		}
 	}
 
 	/* Reserve a new session-local identity before acquiring the backend attachment. */
