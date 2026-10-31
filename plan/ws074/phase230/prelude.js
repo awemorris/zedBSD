@@ -1396,7 +1396,8 @@
           var p = href && picture(new URL(href, (document.baseURI || location.href)).href);
           if (p && shown(element)) image(candidates, element, p.src, p);
         }
-        var bg = /url\(\s*["']?([^"')]+)["']?\s*\)/.exec(s.backgroundImage || '');
+        var bgs = s.backgroundImage || '', bg = bgs.indexOf('url(', bgs.indexOf('url(') + 1) < 0 ? /^\s*url\(\s*(["']?)([\s\S]*)\1\s*\)\s*$/.exec(bgs) : /url\(\s*["']?([^"')]+)["']?\s*\)/.exec(bgs);
+        if (bg && bg.length === 3) bg = [bg[0], bg[2]];
         if (bg && element !== document.body && element !== document.documentElement) {
           var b = picture(new URL(bg[1], (document.baseURI || location.href)).href);
           if (b && shown(element)) image(candidates, element, b.src, b);
