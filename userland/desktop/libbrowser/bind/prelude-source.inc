@@ -3008,7 +3008,7 @@ static const char prelude_source[] =
 	"    };\n"
 	"    var INITIAL_OF = {\n"
 	"      'flex-grow': '0', 'flex-shrink': '1', 'order': '0', 'flex-basis': 'auto', 'grid-template-columns': 'none', 'grid-template-rows': 'none',\n"
-	"      'backdrop-filter': 'none', 'anchor-name': 'none', 'position-anchor': 'auto', 'position-area': 'none', 'position-try-fallbacks': 'none',\n"
+	"      'backdrop-filter': 'none', 'anchor-name': 'none', 'position-anchor': 'normal', 'position-area': 'none', 'position-try-fallbacks': 'none',\n"
 	"      'position-try-order': 'normal'\n"
 	"    };\n"
 	"    function animatable(prop) { return TYPE_OF[prop] !== undefined || DISCRETE[prop] === 1; }\n"

@@ -1889,7 +1889,7 @@ computed_write_keyword(
 		break;
 	case COMPUTED_POSITION_ANCHOR:
 		if (style->position_anchor == NULL)
-			error = computed_ascii("auto", out);
+			error = computed_ascii(style->position_anchor_kind == 2 ? "auto" : style->position_anchor_kind == 1 ? "none" : "normal", out);
 		else
 			error = css_serialize_ident(style->position_anchor, out);
 		break;

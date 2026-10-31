@@ -832,6 +832,8 @@ struct css_style {
 	const struct css_anchor_expr *anchor[CSS_ANCHOR_SLOTS];
 	const struct css_anchor_names *anchor_names;
 	struct vm_string *position_anchor;
+	/* The keyword of a position-anchor that names no anchor: 0 normal, 1 none, 2 auto. */
+	int position_anchor_kind;
 	/* The shadow trees (their root nodes; NULL for the document's) the anchor names and the anchor references were declared in. */
 	const void *anchor_names_tree;
 	const void *anchor_tree;

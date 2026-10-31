@@ -18,7 +18,7 @@
     };
     var INITIAL_OF = {
       'flex-grow': '0', 'flex-shrink': '1', 'order': '0', 'flex-basis': 'auto', 'grid-template-columns': 'none', 'grid-template-rows': 'none',
-      'backdrop-filter': 'none', 'anchor-name': 'none', 'position-anchor': 'auto', 'position-area': 'none', 'position-try-fallbacks': 'none',
+      'backdrop-filter': 'none', 'anchor-name': 'none', 'position-anchor': 'normal', 'position-area': 'none', 'position-try-fallbacks': 'none',
       'position-try-order': 'normal'
     };
     function animatable(prop) { return TYPE_OF[prop] !== undefined || DISCRETE[prop] === 1; }

@@ -775,6 +775,19 @@ position_place_fallbacks(
 	if (saved == NULL)
 		return ENOMEM;
 	*saved = *box;
+
+	/* The position option that last fit is kept while it still fits (even when the base position fits again). */
+	element = NULL;
+	if (box->node != NULL && box->node->type == DOM_ELEMENT)
+		element = (struct dom_element *)box->node;
+	key = position_try_key(saved->style.position_try);
+	if (element != NULL && element->anchor_last > 0 && element->anchor_last_key == key &&
+	    element->anchor_last <= saved->style.position_try->count && layout_anchor_try(tree, box, element->anchor_last - 1)) {
+		error = position_place_once(tree, box, containing);
+		if (error != 0 || position_fits(box, containing))
+			return error;
+	}
+	*box = *saved;
 	error = position_place_once(tree, box, containing);
 	if (error != 0 || position_fits(box, containing)) {
 		/* The base position fits: nothing is remembered. */
@@ -784,10 +797,6 @@ position_place_fallbacks(
 	}
 
 	/* Each fallback, from the box as it was. */
-	element = NULL;
-	if (box->node != NULL && box->node->type == DOM_ELEMENT)
-		element = (struct dom_element *)box->node;
-	key = position_try_key(saved->style.position_try);
 
 	/* position-try-order sorts the fallbacks by the size of the inset-modified containing block each gives (the largest first). */
 	for (entry = 0; entry < CSS_TRY_ENTRIES; entry++) {

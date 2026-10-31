@@ -2238,6 +2238,11 @@ values_single(
 			value->keyword = 0;
 			return 0;
 		}
+		if (css_ident_equal(&tokens[0], "normal") || css_ident_equal(&tokens[0], "none")) {
+			value->kind = CSS_VALUE_KEYWORD;
+			value->keyword = css_ident_equal(&tokens[0], "normal") ? 2 : 3;
+			return 0;
+		}
 		if (tokens[0].type != CSS_TOKEN_IDENT || tokens[0].length < 3 || tokens[0].text[0] != '-' || tokens[0].text[1] != '-')
 			return EINVAL;
 		value->ident = vm_atom_from_units(parse->heap, tokens[0].text, tokens[0].length);
