@@ -868,24 +868,60 @@ table_lay_rows(
 		extra = total - sum;
 		if (extra > 0) {
 			layout_unit heights_sum;
+			size_t auto_count;
+			size_t last_taker;
+			int *takes;
 
+			/* Rows with no height of their own (the row's, or a cell's) take the extra first; with none, every row shares it. */
+			takes = calloc(state->rows.count + 1U, sizeof(*takes));
+			if (takes == NULL) {
+				free(heights);
+				return ENOMEM;
+			}
+			for (number = 0; number < state->rows.count; number++) {
+				row = *(struct layout_box **)wb_vector_at(&state->rows, number);
+				takes[number] = row->style.height.unit == CSS_UNIT_AUTO;
+			}
+			for (index = 0; index < state->cells.count; index++) {
+				cell = wb_vector_at(&state->cells, index);
+				if (cell->box->style.height.unit != CSS_UNIT_AUTO)
+					takes[cell->row] = 0;
+			}
+			auto_count = 0;
+			for (number = 0; number < state->rows.count; number++) {
+				if (takes[number])
+					auto_count++;
+			}
+			if (auto_count == 0) {
+				for (number = 0; number < state->rows.count; number++)
+					takes[number] = 1;
+				auto_count = state->rows.count;
+			}
 			heights_sum = 0;
-			for (number = 0; number < state->rows.count; number++)
-				heights_sum += heights[number];
+			last_taker = 0;
+			for (number = 0; number < state->rows.count; number++) {
+				if (takes[number]) {
+					heights_sum += heights[number];
+					last_taker = number;
+				}
+			}
 			given = 0;
 			for (number = 0; number < state->rows.count; number++) {
 				layout_unit share;
 
-				if (number + 1U == state->rows.count) {
+				if (!takes[number])
+					continue;
+				if (number == last_taker) {
 					share = extra - given;
 				} else if (heights_sum > 0) {
 					share = (layout_unit)((float)extra * (float)heights[number] / (float)heights_sum);
 				} else {
-					share = extra / (layout_unit)state->rows.count;
+					share = extra / (layout_unit)auto_count;
 				}
 				heights[number] += share;
 				given += share;
 			}
+			free(takes);
 		}
 	}
 
