@@ -2,7 +2,7 @@
 
 # ws291-p025: Raspberry Pi 4（V3D 4.2）で mview を動かし、qs40 の model をスペックの比で決めた copies・1920x1080 で 50 fps に
 
-Status: in-progress（2026-10-31 20:20 新設、P4 q1784。i02 実行中: mip で c21 40.5 fps、desktop は session で 53〜58 fps、どちらも目標の手前）
+Status: in-progress（2026-10-31 20:20 新設、P4 q1784。i03 返却 2026-11-01 01:45: Terminal の atlas で type 60・61、VCM で c21 inflight=1 42〜50・inflight=2 48〜53 fps（CPU の段の速さで揺れる）、bin と render の重ねは測って効かず外した。desktop の drag・home・wiseview は 53〜59 で 60 の手前）
 Parent: [WS291](../ws.md)
 Queue: q1784（P4）
 
@@ -179,7 +179,112 @@ mview の vkCreateGraphicsPipelines が FEATURE_NOT_PRESENT。足りない機能
 - session（pi4-desk.sh、build/tmp/p025-g3）: launch 56・type 53・keys 45（入力）・output 22・scroll 14（入力）・hover 17（入力）・drag 55・home 56・wiseview 58、
   RENDER stalled 0。
 
-### 再開点（2026-10-31 23:50 P4、q1784-i02）
+## 記録（P4 q1784-i03、2026-10-31 23:45〜）
+
+- 23:45 main d9846754e を取り込み（fast-forward）。Q1 の決定（i03）: Terminal（userland/desktop/terminal）の glyph atlas を device-local・optimal の image と
+  staging の更新（変わった矩形だけ）に変えてよい（QEMU Venus でも確かめる）。c21 は 40.5 では受け入れない: kernel の worker で次の job の bin を今の job の
+  render と重ねる、CPU の段を削る、VCM の batch を shader の VPM の大きさで選ぶ。mview は既定の inflight で動かし、inflight=1 と 2 の両方を報告する（既定を変えない）。
+- 注: main の取り込みで kernel と libvulkan の間の protocol が変わり、古い userland（build/p025-4s）の libvulkan は新しい kernel で動かない。以後の計測の
+  userland は tree の build（`build/p025-4u`: wayland・mview・keiland-shot・terminal・files・aat-input と dynamic の lib、config-rpi4-desk.mk）。
+
+### Terminal の glyph atlas（44cf7da27）
+
+- atlas（2048x2048 B8G8R8A8）を OPTIMAL・device-local の image にし、font は host-visible の staging buffer（行は atlas の幅で詰める）に描く。font が描いた
+  slot の箱（`dirty_*`、attach は最初の slot の行）を、frame の前に 1 本の command buffer（barrier → vkCmdCopyBufferToImage の 1 region → barrier）で
+  image に写し、frame と同じ vkQueueSubmit に入れる。glyph が増えない frame は写しも TFU も無い。descriptor は SHADER_READ_ONLY_OPTIMAL。
+- Pi 4（`pi4-comp.sh` に TERMINAL= を足した、同じ compositor 1440941112、kernel 2311229471）: 前の terminal（board の /bin/terminal）で type 27・output 21、
+  新しい terminal で type 31・32、output 24・25、drag 55・56、home 53・58、wiseview 59（build/tmp/p025-ta・tb）。ZTERM PERF の present 3.5〜3.9 → 1.6〜2.2 ms、
+  submit 約 1.1 ms（同じ）。今の Terminal は acquire（compositor が buffer を返すのを待つ、type で平均 約 12 ms）で待つ。画は前の terminal と時計の 49 px だけ違う。
+- vkQueuePresentKHR と vkQueueSubmit の内訳（VULKAN_ZEDBSD_SUBMIT_TIMING、build/tmp/p025-tc）: present ＝ present_record 約 1 ms ＋ present_submit 約 2 ms
+  （WSI の窓の swapchain の画を compositor の buffer へ写す copy の記録と submit）、submit ＝ kernel の execute 約 1 ms（同じ command buffer を毎 frame
+  submit し直す decode）。どちらも libvulkan の WSI と kernel の decode の側で、Terminal の側では減らせない。
+- QEMU Venus（`plan/tools/titlebar/build-menu-image.sh build/p025-menu` の amd64 image、runtime build/p025-run）: compositor と Terminal を起こし、文字・記号・
+  `ls /` の出力が正しく描かれ、Ctrl+- の zoom（atlas の作り直し）の後も正しい（build/tmp/p025-venus-t/text16.png・text-small.png）。`menu-p003.sh` は
+  compositor の起動が遅い（Venus で settings の段に約 3 s）ので Terminal が socket の前に起きて失敗した（試験の待ちの問題、今回の変更と無関係）。
+  host の `plan/tools/terminal/run-host-terminal-pace.sh` PASS（29 checks）。
+
+### kernel の bin と render の重ね（06fe78394・cfd09a48c で実装、測って効かず fac220b76 で外した）
+
+- 実装（Q1 の指示の 1）: v3d-job（4.2）を `bcm2711_v3d_job_launch`（bin を走らせ待ち、render を launch して worker の slot を持ったまま戻る）・
+  `bcm2711_v3d_job_prebin`（render の間に次の job の bin を走らせ待つ）・`bcm2711_v3d_job_land`（render を待ち clean して slot を返す）に分け、待ちは他の
+  queue の完了の event を残す。vk の executor は、今の pass の bin が 2 ms 以上で session の次の render pass（同じ job の次の event か、後ろの submission の
+  最初の command。間の barrier と command の無い submission は飛ばす）がある時、render の間に window を閉じてその pass を準備し、bin を render の横で
+  走らせ、その pass の step は render だけを launch する（pass が今の pass の target を sample する、coordinate shader が sample する時は重ねない）。
+  job の間は mapper を通さず、view の解放は遅らせ、translation の batch と新しい map は job の間も許す（新しい entry を足すだけ）。7.1 は今の動きのまま。
+- 途中の失敗（記録）: (1) render の途中で window を閉じ開けした版は、待っていた mapper が job の間に map できず EIO になり、compositor の client の buffer の
+  import が失敗した（build/tmp/p025-o3）。(2) translation の batch（`bcm2711_v3d_memory_begin`）は job の間 EIO を返す設計で、重ねる準備がそれを engine の
+  失敗として返し、device lost になった（mview の game mode の切り替え・desktop の session の起動の glass map の pass で再現、`submit parts 0/0/0/5/...` で
+  look-ahead の戻りと確かめた。build/tmp/p025-g4 の desk2・x5・y1〜y6）。(3) 重ねる相手の探し方が狭く、実は一度も重なっていなかった版がある
+  （cost report に `ahead=重ねた/捨てた/長い bin/次の job 無し/pass 無し/理由` を足して確かめた）。
+- 重なった時の測り（build/p025-4d3、c21 inflight=2、build/tmp/p025-y9）: 2 s に 56 pass が bin を前の render の横で走らせ（106 の長い bin のうち、50 は次の
+  frame がまだ submit されていない）、submission あたりの bin 約 2.8 → 4.8〜5.2 ms・render 約 3.0 → 5.2〜5.6 ms と両方が遅くなり、51.1 fps
+  （重ならない同じ kernel の run は 52.7・52.9 fps、p025-y7・y8・x3・x4）。bin（頂点と index の memory の読みで決まる）と render（TMU と tile の memory）が
+  同じ memory の帯域と QPU を取り合い、V3D 4.2 のこの負荷では重ねても速くならない。安全を増やさずに複雑さだけが残るので、重ねる部分は fac220b76 で main の
+  形に戻した（実装は cfd09a48c に残る。Pi 5（V3D 7.1）や別の負荷で試す時の元）。
+
+### VCM の batch（06fe78394、残す）
+
+- VCM Cache Size を shader ごとに: VPM の半分（IDENT1 の VPM 64 KiB → 64 sector）に入る出力の batch の数 −1、2〜4（Mesa の vcm_cache_size と同じ式、
+  shared segments）。今までは bin・render とも 2。7.1 は 0x22 のまま（`bcm2711_native_shader_vcm` を 7.1 の encoder も持つ）。
+- kernel の perf（c21、submission あたり）: bin 2896 → 2734〜2770 µs、render 3309 → 3016〜3097 µs。
+
+### c21 の結果（VCM、重ねなし）
+
+- 注: Pi 4 の CPU の速さが run ごとに大きく揺れる（同じ kernel・同じ userland で mview の acquire・record・submit・present が 2〜2.5 倍違う run がある。
+  温度か clock の制御と見る、板に温度の sensor は無い）。CPU の段が速い run と遅い run の両方を示す。
+
+| mview（1920x1080、game mode、tree の userland p025-4u） | CPU の段が速い run | CPU の段が遅い run（最後の kernel fac220b76 の build p025-4z、736120021） |
+| --- | --- | --- |
+| c1（inflight=1） | 184 fps（p025-w1） | 127 fps（z1） |
+| c21 inflight=1（mview の既定） | 49.7 fps、20.1 ms ＝ acquire 0.29・record 0.29・submit 0.67・present 0.67・fence 17.68・other 0.49（x1） | 42.4・42.7 fps、23.4 ms ＝ acquire 0.66・record 0.73・submit 1.46・present 1.51・fence 18.09・other 1.07（z1・z3） |
+| c21 inflight=2 | 52.7〜52.9 fps、18.9 ms（x3・x4・y7・y8） | 48.1 fps、20.7 ms（z2） |
+
+- 速い run の kernel（p025-4w・4d2）は重ねる code を持つが、cost report の `ahead=0/…` の通り一度も重ならなかった run で、VCM だけの今の kernel と同じ動き。
+- 前（i02、mip まで）: c21 inflight=1 40.5、inflight=2 45.95（どちらも CPU の段の速さは未記録）。
+- 確かめ（fac220b76、build/p025-4z）: Pi 4・Pi 5 の vmunix warning 0、bin-draw-host-test PASS。mview の正面の静止の画は mip の kernel の画と完全一致
+  （0 px、p025-z3 と p025-m2）、pi4-desktop.sh の desktop の画は main の kernel（build/p025-4m、177203853）の画と完全一致（0 px、p025-dm と dz）、compositor の
+  import の失敗 0、kernel の fault の行 0（起動時の既知の 1 行の他）。
+
+- inflight=1 の残り: 1 frame は CPU の直列の段（acquire＋record＋submit＋other）と GPU の側（present の後の fence まで、bin 約 8.2 ＋ render 約 9.1 ＋ kernel の
+  prep・launch 約 1 ms）の和。mview は fence を待ってから次の frame を記録するので重ねる相手が無く、CPU が速い run で約 20 ms（50 fps 前後）、遅い run で
+  21.7〜23.4 ms（42〜46 fps）。50 を安定して超えるには GPU の側を削る（候補: 32-bit の index を 16-bit に写して持つ、bin の memory の読みの約 2 割）。
+
+### desktop（session）
+
+- `pi4-desk.sh` に BINS= を足し（/bin の program を tree の build に、元は /bin/NAME.p025old）、LIBS で /lib/libvulkan.so・libc.so を tree の build に
+  （p025-4u）。graphical login の本当の session の frame-ops（kernel は 06fe78394 の build p025-4w。desktop の pass の bin は短く、重ねは g8 の cost report で 0。
+  build/tmp/p025-g4 の desk1・g5・g7・g8、main の kernel は p025-g6、どちらも /bin・/lib は p025-4u）:
+
+| 段 | 06fe78394（run ごと） | main の kernel（3 run） |
+| --- | --- | --- |
+| launch | 56・55・55・56・53・56・57・56・55・56 | 55・52・57 |
+| type | 61・61・60・60・60・60・59・60・60・60 | 60・60・61 |
+| output | 23・23・21・23・29・57・49・53 | 51・20・21 |
+| drag | 53・53・55・56・53・54・53・54・54・53 | 53・53・54 |
+| home | 56・54・55・55・56・55・56・56・55・55 | 53・55・55 |
+| wiseview | 56・55・57・57・58・59・59・57・57・58 | 58・58・58 |
+
+- type は Terminal の atlas の直しで 53 → 60・61（main の kernel でも同じ、Terminal の側の効果）。drag・home・wiseview は 53〜59 で main と同じ（60 に届かない）。
+  kernel の fault の行は起動時の既知の 1 行だけ（g4 の desk2 の device lost は上の (2)）。
+
+### 再開点（2026-11-01 01:45 P4、q1784-i03）
+
+- branch agent/p4-ws291pi の先頭（この commit）。main d9846754e の上に 44cf7da27（Terminal の atlas）・06fe78394（重ね＋VCM）・cfd09a48c（重ねの直しと
+  cost report の `ahead=`）・fac220b76（重ねる部分を main の形に戻す。残るのは VCM）と記録・道具（pi4-comp.sh の TERMINAL=、pi4-desk.sh の BINS=、
+  pi4-mview.sh の MVIEW_ENV=）。src の main との差は Terminal（3 file）と VCM（8 file）だけ。Q1 の merge 待ち。
+- 板（10.0.30.6）: kernel build/p025-4z/vmunix（cksum 736120021、fac220b76、input inject）、cmdline `login=console v3d.perf=1`。/bin/wayland・terminal・files は
+  p025-4u の build（元は /bin/*.p025old）、/lib/libvulkan.so（2248044845）・libc.so は p025-4u（元は /lib/*.p025old）、/bin/aat-input。一時の
+  /root/p025・/root/p025d・/root/p025desk。元の kernel と設定は /boot/boot0/*.p025old と host の build/tmp/p025-board/*.orig。
+- 消してほしい物（Q1 へ）: build/tmp/p025-junk/amd64-sysroot-link（誤って作った main の build/amd64/sysroot への symlink を退けた物）、QEMU の
+  runtime build/p025-run（guest は止めた）、image build/p025-menu、使い捨ての kernel の build build/p025-4g・4h・4v・4w・4d2・4d3 と build/p025-t
+  （残す: 板の kernel の build/p025-4z、userland の build/p025-4u、main の比べの build/p025-4m）。
+- 達していない: desktop の 60 fps（drag 53〜56・home 53〜56・wiseview 55〜59、main の kernel と同じ。type は 60・61）、mview c21 の 50 fps は mview の既定の
+  inflight=1 で CPU の段が速い run だけ（49.7、遅い run 42.4〜42.7）。
+- 次の候補: (1) 32-bit の index を 16-bit に写して buffer の世代で持つ（bin の memory の読みの約 2 割、inflight=1 の GPU の側を約 1 ms）。
+  (2) Pi 4 の CPU の段の速さの揺れの原因（温度・clock）を確かめ、計測の条件を揃える。(3) desktop は compositor の frame の pace と部分の再描画
+  （GPU は 1 frame 約 8 ms で余る）。(4) bin と render の重ねは V3D 4.2 では帯域の取り合いで効かない（cfd09a48c に実装、Pi 5 で試す時の元）。
+
+### 前の再開点（2026-10-31 23:50 P4、q1784-i02、下の i03 で置き換え）
 
 - branch agent/p4-ws291pi の先頭（この commit）。main c3291b1f9 の上に 86ab82eec（mip）・7974d3365（uniform）と記録・道具。Q1 の merge 待ち。
 - 板（10.0.30.6）: kernel build/p025-4f/vmunix（cksum 2311229471、mip と uniform の直し、input inject）。今は pi4-desk.sh の後で graphical の session が動いたまま、
