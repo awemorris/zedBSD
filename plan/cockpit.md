@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 20:05（Q1）
+最終更新: 2026-10-31 20:20（Q1）
 
 ## 担当（P1〜P8）
 
@@ -12,7 +12,7 @@
 | P1 | — | — | 返却（06:4x）。WS326 p025（規約の全文の見直し、style の違反 0、全試験が前と同じ）を main に | 次の割当を Q1 が決める |
 | P2 | [WS309](ws309/ws.md) | Keiland の game mode | p015（q1782-i02）: zero copy は VF2・RTX（block-linear）・Pi 4（全画面の動画、copy 0、decoder は止まらない）で確かめた。main 38c4d082f。Pi 4 の mview は BUG-380 で不可 | Pi 5 の板への入れ替えを待つ（image は用意済み） |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ | p023（q1781-i03）: RTX の block-linear の画面出しが block 単位で乱れる（ユーザーの目視）の原因を調べて直す | 10.0.10.3。自分で確かめてから次の目視を用意する |
-| P4 | — | — | 返却（2026-10-31 19:16）。[BUG-378](bugs/BUG-378.md) を直した（main e8f43510d、QEMU の Pi 4 で起動）。直した image は SD に書いた | 実機の Pi 4 は P2 が試験の始めに確かめる |
+| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | p025（q1784）: Pi 4 の GPU の driver を直して mview を動かし、1920x1080 で最適化（BUG-380） | Pi 4（10.0.30.6）。この後に Pi 5（p021） |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | — | — | 返却（07:1x）。WS310 の設計を main に（問い Q310-1〜6 は下の 0i） | 次の割当を Q1 が決める |
 | P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
@@ -31,6 +31,7 @@
 | p023 | NVIDIA RTX 2070 | 共有の image の画素の並び（block-linear）で pass ごとの copy を無くす | subs-1000 10.9 → 21 fps、subs-100 103 → 203、画素の差 0（main b30707d0a） | in-progress（残り: scenes、block-linear の画面出しの目視） |
 | p013・p014 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
 | p020 | PowerVR（VF2） | qs40 × 13・1920x1080・direct scanout で 50 fps（RTX のカタログの FP32 の比） | 45.8 fps（direct、main に merge 62eeb340e） | in-progress（P2） |
+| p025 | Raspberry Pi 4（V3D 4.2） | スペックの比の copies で 50 fps（1920x1080） | mview が動かない（BUG-380）、p021 の host の実装を合わせて直す | in-progress（P4） |
 | p021 | Raspberry Pi 5（V3D 7.1） | スペックの比の copies で 50 fps（clock を実機で確定） | 未計測（mview に要る driver の機能を host で実装済み） | in-progress（P4、実機待ち） |
 | p022 | Intel i915（5330） | 5330 の Linux（ANV）で 50.6 fps の qs40 × 600 で Linux 以上 | 32.6 fps（頂点の shader 134 → 67 命令。CPU の idle を MWAIT にして GPU が 800 → 850〜900 MHz、まだ電力の上限 13 W に張り付く） | in-progress（P1） |
 
@@ -320,6 +321,8 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
 
 ## 決まった事
+
+- （2026-10-31）ユーザーから、Pi 4 の GPU の driver を改善して mview を動かし最適化する、Pi 4 は 1920x1080 で起動する、終わってから Pi 5 に移る、という趣旨の指示を受けた（[ws291-p025](ws291/phase025/phase.md)、P4）。
 
 - （2026-10-31）ユーザーから、RTX は block-linear で画面を出せるようにし（nvrtx.disp.bl の既定を有効に）、その後に計測し直す、という趣旨の指示を受けた（WS291 p023 の Q1 の目視の前に既定を有効にする。切る口 nvrtx.disp.bl=0 は残す）。P2 が q1782-i02 の中で行う。
 

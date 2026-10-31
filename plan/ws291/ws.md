@@ -60,6 +60,7 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 | [p022](phase022/phase.md) | Intel（i915、5330 の Alder Lake）で qs40 の model を、Linux（ANV）の実測で決めた scene（qs40 × 600、1920x1080、Linux 50.6 fps）以上で | p011 | in-progress（P1、q1731。2026-10-31: zedBSD 23.0 → 32.6 fps（MOCS、compiler の直読み・MAD、WS333 p002 の MWAIT）。主因は package の電力の上限 13 W で GT 850〜900 MHz（Linux 1100〜1200）、zedBSD の idle 11.6 W（Linux 3.3 W）。Notes は窓が出た） |
 | [p023](phase023/phase.md) | NVIDIA ほか: 共有の image の画素の並びを client と compositor で決める（WSI の block-linear）、pass の終わりの copy を submit ごとから外す | p014 | in-progress（2026-10-31 設計の第 2 版 ffd702bdb、P3 q1781-i02 で実装。ユーザーの 0j の (b) と RTX の block-linear の実装の指示。q1781-i03 で block-linear の scanout の崩れ（window の ctxdma の kind）を直した effb3d149、画面は目視の再確認待ち） |
 | [p024](phase024/phase.md) | NVIDIA: subs-1000 の 1 run ごとの固定の費用（約 56 µs）を内訳ごとに測って縮める | p023 | planned（2026-10-31 新設、ユーザーの p023 Q2 の答え） |
+| [p025](phase025/phase.md) | Raspberry Pi 4（V3D 4.2）で mview を動かし、スペックの比の copies・1920x1080 で 50 fps | p021 の host の実装（agent/p4-ws291pi） | in-progress（2026-10-31 20:20 P4 q1784、ユーザーの指示。この後に p021 の Pi 5） |
 | 最後 | 規約の全文の見直し | 実装の全部 | — |
 
 - 2026-10-27 04:44 ユーザー（Q1 の問い「NGG の A〜C をどう進めますか？」へのクリック）「A〜C を今進める（推し）」。
