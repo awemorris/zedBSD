@@ -176,7 +176,9 @@ layout_replaced_size(
 
 		/* An inline <svg> with a viewBox but no width or height has a ratio only: it fills its containing block's width (ws074-p228). */
 		if (replaced_is_bare_svg(box) && containing_width > 0 && natural_width > 0) {
-			width = containing_width;
+			width = containing_width - box->margin[CSS_LEFT] - box->margin[CSS_RIGHT];
+			if (width < 0)
+				width = 0;
 			height = (layout_unit)((int64_t)width * natural_height / natural_width);
 		}
 	}
