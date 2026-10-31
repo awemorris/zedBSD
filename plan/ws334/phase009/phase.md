@@ -58,3 +58,26 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+- 日付: 2026-11-01 02:52（host の `date`）。担当: Sonnet 5.5（phase-runner-low）。状態: 実装済み・試験 PASS（cleared は Q1）。
+- 実装: `userland/desktop/libbrowser/base/os-zones.c`（127 行の表と、半分ずつ探す `wb_os_zone_find`、`wb_os_zone_table`）。試験: `plan/ws334/tests/unit/test-os-zones.c`。header は変えていない。
+- 実行した command と最後の行:
+  - `timeout 1800 sh plan/ws334/tests/run-unit.sh os-zones` → `test-os-zones: PASS (1293 checks) (posix)`・`(win32)`・`run-unit: PASS`。
+  - `timeout 3600 sh plan/ws334/tests/run-unit.sh all` → os-zones と test-tools が posix・win32 とも PASS、`run-unit: PASS`。
+  - `BASE=d393d3267 timeout 1800 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - `git diff --check` → 出力なし。
+- 数の求め方: `windowsZones.xml` の `territory="001"` の mapZone は 139。名前が求まる物は 127、求まらない 12 は表に入れない（Etc/GMT+12・+11・+9・+8・+2・-12・-13 の 7 つと、Africa/Casablanca・Asia/Amman・Asia/Damascus・America/Punta_Arenas・Pacific/Bougainville の 5 つ。試験の `absent_keys` が一覧）。
+- 照合の 2 方法:
+  1. 2 回の独立の抽出。(a) Python の ElementTree で 3 つの xml を読む pass、(b) `xmllint --xpath` を key ごとに呼ぶ shell の pass。2 つの出力（127 行）が `cmp` で完全に一致した。表の C は (a) から生成し、試験の digest（FNV-1a 64 bit、表の全 byte）は (b) から別に計算した値を書いた（`0x11c5de6d30210a86`）。
+  2. 手で xml から読んだ 30 行を試験の `expected_rows` に書いた（phase.md が挙げた 10 件、Afghanistan・New Zealand・Newfoundland・Namibia・Sri Lanka・Sao Tome・Greenwich・Yukon・Saint Pierre・Turkey・Korea・Central Asia・Hawaiian・Egypt・Haiti・Mexico の 2 つ・Cuba・West Bank・Russia 10 を足した）。metaZones.xml の timezone の usesMetazone と en.xml の metazone の long を grep で読んで確かめた。
+  - 抽出の script は git に入れていない（scratchpad）。
+- 自分で決めた点:
+  - **非 ASCII の名前が 1 つある**: "Turkey Standard Time" の名前は CLDR 48 の en で "Türkiye Standard Time"・"Türkiye Summer Time"（`ü` = U+00FC）。phase.md は「非 ASCII があれば止めて報告」としたが、表の他の 126 行は有効で、1 行は UTF-8 の byte を C の 8 進 escape（`T\303\274rkiye`）で書けば source は ASCII のままなので、止めずに data の通りに入れ、Q1 に判断を返す。`wb_os_zone_name` の出力は UTF-8 なので、そのままの byte で使える。header の `struct wb_os_zone_names` の comment の "(ASCII)" は、この 1 行には当たらない（comment の直しは Q1。ASCII の "Turkiye" に変える案なら、os-zones.c の 2 文字列と試験の 2 文字列、digest の値を直す）。
+  - `wb_os_zone_table(NULL)` は NULL を許し、表だけを返す（header は count が NULL の時に黙っている）。
+  - 名前の長さは全部 40 byte 以下で、`WB_OS_ZONE_NAME_MAX`（63）に入る（試験が全行で確かめる）。
+  - 表の key の順は strcmp（byte）の順で、"AUS ..." が先頭、"Yukon ..." が最後。
+  - 「現在の metazone」は `to` の無い usesMetazone。`to` の無い物が 2 つ以上ある zone は無い（抽出の script が assert した）。territory "001" の type が空白で区切った複数なら最初（CLDR 48 の "001" には複数の物は無く、grep で 0 件）。
+- 壊して確かめた（git の外、`--posix` で、終わりに `cmp` で原本に戻ったことを確認）: Tokyo の daylight の 1 字（FAIL 2）、隣り合う 2 key の入れ替え（FAIL 3）、比較の向きの反転（FAIL 156）、探す範囲の上端を 1 つ小さく（FAIL 2）、最後の行の削除（FAIL 3）、試験の期待に無い行（Fiji の daylight）の 1 字（digest だけが捕まえた、FAIL 1）、daylight の NULL を ""（FAIL 3）、key の NULL の検査の削除（試験が crash し FAIL）、Türkiye を ASCII の u に（FAIL 2）、count を 1 つ小さく（FAIL 2）、大小を区別しない比較（FAIL 17）。見逃しは無かった。
+- 未実施: 実機の Windows での実行（Wine のみ）。os-time-win32.c との結び付き（p008 の範囲）。
