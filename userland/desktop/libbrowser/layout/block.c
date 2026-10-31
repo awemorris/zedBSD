@@ -385,8 +385,6 @@ block_intrinsic(
 	struct layout_box *box,
 	layout_unit containing_width)
 {
-	struct layout_context context;
-	struct wb_vector floats;
 	struct css_length width;
 	layout_unit most;
 	layout_unit least;
@@ -406,13 +404,7 @@ block_intrinsic(
 	/* The widest word, for min-content and fit-content: the content laid out as narrow as it goes. */
 	least = most;
 	if (width.unit != CSS_UNIT_MAX_CONTENT) {
-		tree->measuring++;
-		layout_context_begin(tree, &context, &floats);
-		error = layout_block(tree, box, 0);
-		layout_context_end(tree, &context);
-		if (error == 0)
-			least = layout_content_width(box, 0);
-		tree->measuring--;
+		error = layout_min_content(tree, box, &least);
 		if (error != 0) {
 			box->style.width = width;
 			return error;
@@ -461,8 +453,6 @@ block_min_intrinsic(
 	struct layout_box *box,
 	layout_unit containing_width)
 {
-	struct layout_context context;
-	struct wb_vector floats;
 	struct css_length minimum;
 	struct css_length width;
 	layout_unit most;
@@ -484,13 +474,7 @@ block_min_intrinsic(
 	}
 	least = most;
 	if (minimum.unit != CSS_UNIT_MAX_CONTENT) {
-		tree->measuring++;
-		layout_context_begin(tree, &context, &floats);
-		error = layout_block(tree, box, 0);
-		layout_context_end(tree, &context);
-		if (error == 0)
-			least = layout_content_width(box, 0);
-		tree->measuring--;
+		error = layout_min_content(tree, box, &least);
 		if (error != 0) {
 			box->style.min_width = minimum;
 			box->style.width = width;

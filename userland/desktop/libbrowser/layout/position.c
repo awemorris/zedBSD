@@ -472,6 +472,44 @@ layout_min_content(
 
 	/* The widest remaining line or child is the min-content width. */
 	*width = layout_content_width(box, 0);
+
+	/* A single-line row of flex items is as narrow as its items' min-content contributions side by side, whatever they would shrink to. */
+	if ((box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX) &&
+	    box->style.flex_wrap == CSS_FLEX_NOWRAP && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    (box->style.flex_direction == CSS_FLEX_ROW || box->style.flex_direction == CSS_FLEX_ROW_REVERSE)) {
+		struct layout_box *item;
+		layout_unit sum;
+		layout_unit least;
+		layout_unit frame;
+		int items;
+
+		sum = 0;
+		items = 0;
+		for (item = box->first_child; item != NULL; item = item->next) {
+			if (item->out_of_flow)
+				continue;
+			if (item->style.writing_mode != CSS_WRITING_HORIZONTAL_TB || item->grid_orthogonal)
+				return 0;
+			frame = item->border[CSS_LEFT] + item->padding[CSS_LEFT] + item->padding[CSS_RIGHT] + item->border[CSS_RIGHT];
+			if (item->style.width.unit == CSS_UNIT_PX) {
+				least = layout_from_px(item->style.width.value);
+				if (item->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					least -= frame;
+			} else if (item->style.width.unit == CSS_UNIT_AUTO) {
+				error = layout_min_content(tree, item, &least);
+				if (error != 0)
+					return error;
+			} else {
+				return 0;
+			}
+			sum += least + frame + item->margin[CSS_LEFT] + item->margin[CSS_RIGHT];
+			items++;
+		}
+		if (items > 1 && box->style.column_gap.unit == CSS_UNIT_PX)
+			sum += (layout_unit)(items - 1) * layout_from_px(box->style.column_gap.value);
+		if (sum < *width)
+			*width = sum;
+	}
 	return 0;
 }
 
