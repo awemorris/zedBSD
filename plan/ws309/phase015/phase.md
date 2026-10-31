@@ -102,4 +102,22 @@
 - build（`ZEDBSD_CONFIG=plan/ws309/tests/config-amd64-p1.mk BUILD=build/p015`: libwayland-client.so・libvulkan.so・bin/wayland）warning 0。
 - `plan/tools/gpu-boundary/v1-check.sh` PASS（135 source）、`plan/ws214/tests/vulkan-overlay-host.sh` PASS、`plan/ws217/tests/host-scanout-rules.sh` PASS。
 - commit: 09527b021（libvulkan・libwayland）、9b09b8bb7（compositor・backend・libvulkan の fallback）。
-- 未実施: QEMU（Venus）、VF2、RTX、BUG-375 の往復。
+- 未実施（15:3x 時点）: QEMU（Venus）、VF2、RTX、BUG-375 の往復。
+
+### QEMU（Venus）の確かめ（2026-10-31 16:0x〜16:4x）
+
+- 足した物（8d7f92a09・0b48946c0・a3e740841）: window の display の chain を「出せる」印で作り、開いた時に image 0 の fd の export を一度試す（`KWL STARTUP step=output-swapchain ... lendable=N`）。
+  出せない display（の chain）は game mode に入らない（window の swapchain を閉じない。Pi 4 の ws236-p011 の心配への Q1 の指示: driver の名でなく能力で決める）。
+  libvulkan: display の primary plane の surface の usage に SAMPLED を足した（Venus の display の surface が COLOR・TRANSFER だけで、game chain が作れなかった）。
+  `GPU_IMAGE_LAYOUTS` の配線（display の node に SCANOUT を問い、renderer の RENDER|SAMPLE|SHARE と共にある最初の並び。LINEAR が先なら LINEAR）、LINEAR でない image は
+  `VK_IMAGE_TILING_OPTIMAL` と私用の record（0x7a650001）、client の import は `GPU_CAP_IMAGE_LAYOUTS` の時だけ LINEAR でない物を受け、受けられない時は自分の image へ戻って decline。
+  adoption の待ちを 5 秒に（Venus で client の作り直しと import に 0.4〜2.7 秒かかった）。
+- 環境の事（code の結果でない）: host の負荷の高い時に guest の NVMe の時間切れで UFS が読み取り専用になった（1 回目）。この worktree に `build/ws035-sq-venus` が無く、
+  `VENUS_RENDERER=/home/awe/zedBSD-claude1/build/ws035-sq-venus/install`（読むだけ、Q1 の OK）で動かした。ws309 の forge の image は greeter が display を持つので、
+  道具の想定の menu の image（`plan/tools/titlebar/build-menu-image.sh build/p015menu`）を使った。
+- `GUEST_RUNTIME=build/p015run VENUS_RENDERER=… plan/tools/scanout/game-mode-cycle.sh build/p015menu/hdd-image.img /tmp/p2/cycle5 6`（menu の image は a3e740841 ＋ main の merge）:
+  6 回とも `KWL SCANOUT direct=1 ... images=6 format=44`、`lend images=0x3f`（6 枚を client へ）、貸した image への present が 78〜106 frame（`direct=0 reason=no-window ... frames=N`、
+  N は client が貸された image に描いて compositor が `vkQueuePresentKHR` した数）、毎回 `KWL MODE window` で window mode へ戻った。`KWL FAILED`・`MODE_ERROR` 0、pointer で出た回 0。
+  道具の判定は FAIL: 1 回目の mview の起動（model の読み込み）が約 50 秒かかり、道具の 40 秒の待ちの後に終わったため 1 回目の no-window・window が 2 回目に数えられた（2〜6 回目は全部の数が 1）。
+  log: build/review/ws309/p015-cycle5-kwl.log・p015-cycle5.txt。画面の PNG は Venus の VNC が直の scanout を映さない（道具の注のとおり）ので判定に使わない。
+- 手で 1 回（m8、spin 12 s）: `frames=184` の貸した image の present、mview の SPIN fps 18.8（QEMU の lavapipe、参考）。
