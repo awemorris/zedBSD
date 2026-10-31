@@ -3,7 +3,7 @@
 # ws334-p012 storage の thread と queue: queue
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: cleared（2026-11-01 03:57 Q1、main 63d1d3c1b）
 - 依存: p005・p010（records の `wb_storage_key_valid`・sink の関数を使い、os-system の thread の名前を link する。p010 の実装が無いと試験が通らない）（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 
