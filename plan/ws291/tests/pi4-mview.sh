@@ -1,14 +1,15 @@
 #!/bin/sh
 # ws291-p025: mview's scene on the Raspberry Pi 4's V3D 4.2 with one tree's kernel and programs, run from the top of
 # the tree on a board running zedBSD with root's SSH key of the guest harness (plan/tmp/guest/id_ed25519):
-#   [PI=ADDRESS] [KERNEL=VMUNIX] [PROGRAMS=BUILD] [WINDOWED=1] [COPIES='1 21'] [SPIN=12] [MVIEW_ARGS=...]
+#   [PI=ADDRESS] [KERNEL=VMUNIX] [PROGRAMS=BUILD] [WINDOWED=1] [STILL=1] [COPIES='1 21'] [SPIN=12] [MVIEW_ARGS=...]
 #       [SHOT=1] sh plan/ws291/tests/pi4-mview.sh OUT
 # KERNEL, when its checksum differs from the board's /boot/boot0/vmunix, is copied there and the board rebooted
 # (the board's first kernel is kept once as vmunix.p025old).  PROGRAMS is a build of the board's config: its
 # bin/wayland, bin/mview (and bin/keiland-shot with SHOT=1, a build with ZEDBSD_TEST_SCREEN_CAPTURE=y) and dynamic
 # libraries go to /root/p025 and run with LD_LIBRARY_PATH; the board's own files are not changed.  The GPU is started
 # when it is still held.  The compositor runs on its own socket with no desktop client; with WINDOWED=1, mview first
-# spins once in a window of 1280x720; then, once for each of COPIES, in the game mode (full screen, direct scan-out
+# spins once in a window of 1280x720; with STILL=1, it shows the
+# first view (the model from the front, not turning) in that window for SPIN seconds; then, once for each of COPIES, in the game mode (full screen, direct scan-out
 # of the compositor's lent images, mailbox, 4 images) with libvulkan's chain log (VULKAN_ZEDBSD_WSI_LOG=1).  The kernel's
 # lines of each run, the compositor's SCANOUT and MODE lines and OUT/summary.txt are collected.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -107,7 +108,7 @@ run() {
 	b 'dmesg' > "$out/$name.before" 2>&1
 	take=
 	[ "${SHOT:-0}" = 1 ] && take="& sleep $((${SPIN:-12} / 2 + 6)); $D/bin/keiland-shot --socket $D/run/keiland-shot.sock $D/shot-$name.png; wait"
-	BT=$((${SPIN:-12} + 150)) b "env $ENV $MVIEW --display=$D/run/wayland-0 --model=$D/qs40 --token=$name --spin=${SPIN:-12} $* ${MVIEW_ARGS:-} $take" > "$out/$name.txt" 2>&1
+	BT=$((${SPIN:-12} + 150)) b "env $ENV $MVIEW --display=$D/run/wayland-0 --model=$D/qs40 --token=$name $* ${MVIEW_ARGS:-} $take" > "$out/$name.txt" 2>&1
 	say "$name $(grep -E 'MVIEW (PRESENT|SPIN|STAGES|FAILED|HITCHES)' "$out/$name.txt" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')"
 	grep -E 'VULKAN WSI' "$out/$name.txt" | sed "s/^/$name /" | tee -a "$summary"
 	grep -vE 'MVIEW|VULKAN WSI' "$out/$name.txt" | head -4 | sed "s/^/$name other /" | tee -a "$summary"
@@ -121,9 +122,10 @@ run() {
 	sleep 3
 }
 
-[ "${WINDOWED:-0}" = 1 ] && run windowed --windowed --size=1280x720 --copies=1
-for copies in ${COPIES:-1 21}; do
-	run "c$copies" --copies="$copies" --content=game --present=mailbox --images=4
+[ "${WINDOWED:-0}" = 1 ] && run windowed --spin="${SPIN:-12}" --windowed --size=1280x720 --copies=1
+[ "${STILL:-0}" = 1 ] && run still --timeout-s="${SPIN:-12}" --windowed --size=1280x720 --copies=1
+for copies in ${COPIES-1 21}; do
+	run "c$copies" --spin="${SPIN:-12}" --copies="$copies" --content=game --present=mailbox --images=4
 done
 
 b "tail -n +1 $D/wayland.log" > "$out/wayland.log" 2>&1
