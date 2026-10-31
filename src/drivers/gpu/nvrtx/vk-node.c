@@ -60,8 +60,8 @@
 
 /*
  * The 3D engine's pending interrupt, trap and GPC exception registers, read
- * after a run to tell a run the engine trapped in without stopping the
- * channel; the first few such runs are told.
+ * after a run (once a millisecond at most) to tell a run the engine trapped
+ * in without stopping the channel; the first few such runs are told.
  *
  * Values referenced: Linux v6.19
  * drivers/gpu/drm/nouveau/nvkm/engine/gr/gf100.c (gf100_gr_intr 0x400100,
@@ -71,6 +71,7 @@
 #define VK_NODE_GR_TRAP			0x400108U
 #define VK_NODE_GR_GPC_EXCEPTION	0x400118U
 #define VK_NODE_GR_TOLD_MAX		4U
+#define VK_NODE_GR_CHECK_US		1000U
 
 /*
  * One run of the executor's own GPU memory: the VRAM, or the coherent
@@ -1001,18 +1002,28 @@ vk_node_passed(
 	return passed;
 }
 
-/* Tells a trap or exception the 3D engine holds after a run, the first few times. */
+/*
+ * Tells a trap or exception the 3D engine holds after a run, the first few
+ * times; looked at once in VK_NODE_GR_CHECK_US at most (a trap stays
+ * pending, and each register read crosses the bus).
+ */
 static void
 vk_node_gr_check(
 	struct nvrtx_node *node)
 {
 	static uint32_t told;
+	static uint64_t looked_us;
+	uint64_t now;
 	uint32_t intr;
 	uint32_t trap;
 	uint32_t gpc;
 
 	if (told >= VK_NODE_GR_TOLD_MAX)
 		return;
+	now = nvrtx_now_us();
+	if (now - __atomic_load_n(&looked_us, __ATOMIC_RELAXED) < VK_NODE_GR_CHECK_US)
+		return;
+	__atomic_store_n(&looked_us, now, __ATOMIC_RELAXED);
 	intr = nvrtx_rd32(node->gpu, VK_NODE_GR_INTR);
 	trap = nvrtx_rd32(node->gpu, VK_NODE_GR_TRAP);
 	gpc = nvrtx_rd32(node->gpu, VK_NODE_GR_GPC_EXCEPTION);

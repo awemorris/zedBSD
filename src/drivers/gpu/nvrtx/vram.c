@@ -554,6 +554,36 @@ nvrtx_bo_free(
 }
 
 /*
+ * Takes a buffer object out of the CPU's window, leaving its VRAM as it is
+ * (the object names a part of a run another object owns).
+ */
+void
+nvrtx_bo_unmap(
+	struct nvrtx_gpu *gpu,
+	struct nvrtx_bo *bo)
+{
+	struct nvrtx_memory_state *memory;
+	int error;
+
+	memory = &gpu->memory_state;
+
+	/* Clears the window's entries and gives the window's run back. */
+	mutex_lock(&memory->lock);
+
+	if (bo->bar1_mapped != 0) {
+		error = vram_write_ptes(gpu, bo->bar1, bo->vram, bo->size, 1);
+		if (error == 0)
+			(void)nvrtx_heap_free(&memory->bar1, bo->bar1, bo->size);
+	}
+
+	mutex_unlock(&memory->lock);
+
+	/* Succeeded: the object is not in the window. */
+	bo->bar1 = 0U;
+	bo->bar1_mapped = 0;
+}
+
+/*
  * Reports where the CPU reads and writes a mapped buffer object.
  */
 volatile uint8_t *

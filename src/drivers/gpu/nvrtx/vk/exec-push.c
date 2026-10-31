@@ -1843,15 +1843,19 @@ exec_field(
 	unsigned bits,
 	uint32_t value)
 {
-	unsigned bit;
-	unsigned position;
+	unsigned word;
+	unsigned shift;
 
-	/* Bit by bit, so a field may cross a word. */
-	for (bit = 0U; bit < bits; bit++) {
-		position = low + bit;
-		if (((value >> bit) & 1U) != 0U)
-			words[position / 32U] |= 1U << (position % 32U);
-	}
+	/* The value's bits only (a field of 32 bits takes it whole). */
+	if (bits < 32U)
+		value &= (1U << bits) - 1U;
+
+	/* Into its first word, and the rest into the next one when it crosses it. */
+	word = low / 32U;
+	shift = low % 32U;
+	words[word] |= value << shift;
+	if (shift + bits > 32U)
+		words[word + 1U] |= value >> (32U - shift);
 }
 
 /*

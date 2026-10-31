@@ -199,7 +199,8 @@ static int work_channel_free(struct nvrtx_gpu *gpu, struct nvrtx_work_channel *c
 static int work_map_entries(struct nvrtx_gpu *gpu, uint64_t va, const uint8_t *entries, uint64_t pages);
 static int work_entries_write(struct nvrtx_gpu *gpu, uint64_t va, const uint8_t *entries, uint64_t pages);
 static int work_ring_wait(struct nvrtx_work_channel *channel, uint32_t entry);
-static int work_ring_put(struct nvrtx_gpu *gpu, struct nvrtx_work_channel *channel, uint32_t entry, uint64_t va, size_t length);
+static void work_ring_put(struct nvrtx_work_channel *channel, uint32_t entry, uint64_t va, size_t length);
+static int work_ring_publish(struct nvrtx_gpu *gpu, struct nvrtx_work_channel *channel, uint32_t next);
 static int work_doorbell(struct nvrtx_gpu *gpu, const struct nvrtx_work_channel *channel);
 static uint32_t work_semaphore(const struct nvrtx_work_channel *channel);
 static uint32_t work_semaphore_word(const struct nvrtx_work_channel *channel, size_t at);
@@ -493,8 +494,9 @@ nvrtx_work_channel_close(
 		channel->region_made = 0;
 	}
 
-	/* Its system-memory buffers and its arena. */
+	/* Its system-memory buffers, USERD's place in the window and its arena. */
 	work_buffers_free(gpu, channel);
+	nvrtx_bo_unmap(gpu, &channel->userd_window);
 	if (channel->arena_made != 0) {
 		nvrtx_bo_free(gpu, &channel->arena);
 		channel->arena_made = 0;
@@ -1100,26 +1102,19 @@ nvrtx_work_channel_submit(
 	record_va = channel->semaphore_va + work_run_record(value);
 	slot = (uint8_t *)channel->fences.dma.address + (size_t)entries[0] * NVRTX_WORK_FENCE_BYTES;
 	slot_length = nvrtx_push_stamp(slot, record_va, value);
-	error = work_ring_put(gpu, channel, entries[0], channel->fences_va + (uint64_t)entries[0] * NVRTX_WORK_FENCE_BYTES, slot_length);
-	if (error == 0)
-		error = work_ring_put(gpu, channel, entries[1], push_va, length);
-	if (error == 0 && channel->timed != 0) {
+	work_ring_put(channel, entries[0], channel->fences_va + (uint64_t)entries[0] * NVRTX_WORK_FENCE_BYTES, slot_length);
+	work_ring_put(channel, entries[1], push_va, length);
+	if (channel->timed != 0) {
 		slot = (uint8_t *)channel->fences.dma.address + (size_t)entries[2] * NVRTX_WORK_FENCE_BYTES;
 		slot_length = nvrtx_push_fence_timed(slot, record_va + WORK_RUN_END_AT, value);
-		error = work_ring_put(gpu, channel, entries[2], channel->fences_va + (uint64_t)entries[2] * NVRTX_WORK_FENCE_BYTES, slot_length);
+		work_ring_put(channel, entries[2], channel->fences_va + (uint64_t)entries[2] * NVRTX_WORK_FENCE_BYTES, slot_length);
 	}
 
-	/* The fence; the doorbell after the put moved past them all. */
+	/* The fence; then the put moved past them all at once. */
 	slot = (uint8_t *)channel->fences.dma.address + (size_t)entries[count - 1U] * NVRTX_WORK_FENCE_BYTES;
 	slot_length = nvrtx_push_fence(slot, channel->semaphore_va, value);
-	if (error == 0) {
-		error = work_ring_put(
-			gpu,
-			channel,
-			entries[count - 1U],
-			channel->fences_va + (uint64_t)entries[count - 1U] * NVRTX_WORK_FENCE_BYTES,
-			slot_length);
-	}
+	work_ring_put(channel, entries[count - 1U], channel->fences_va + (uint64_t)entries[count - 1U] * NVRTX_WORK_FENCE_BYTES, slot_length);
+	error = work_ring_publish(gpu, channel, (entries[count - 1U] + 1U) & (NVRTX_WORK_RING_ENTRIES - 1U));
 
 	/* The doorbell, once every entry is on the ring; it counts as a submission. */
 	if (error == 0)
@@ -1596,6 +1591,12 @@ work_session_arena(
 	error = nvrtx_vram_zero(gpu, channel->instance, 2U * NVRTX_INSTANCE_BYTES);
 	if (error != 0)
 		return error;
+
+	/* USERD's page in the CPU's window, when it has room (else the ring's put goes through the register window). */
+	kern_memset(&channel->userd_window, 0, sizeof(channel->userd_window));
+	channel->userd_window.vram = channel->userd & ~((uint64_t)NVRTX_GSP_PAGE_SIZE - 1U);
+	channel->userd_window.size = NVRTX_GSP_PAGE_SIZE;
+	(void)nvrtx_bo_map(gpu, &channel->userd_window);
 
 	/* Succeeded: the arena is laid out. */
 	return 0;
@@ -2088,34 +2089,58 @@ work_ring_wait(
 	return 0;
 }
 
-/* Writes one ring entry and moves the put in USERD past it. */
-static int
+/* Writes one ring entry; the GPU takes it once the put in USERD moves past it. */
+static void
 work_ring_put(
-	struct nvrtx_gpu *gpu,
 	struct nvrtx_work_channel *channel,
 	uint32_t entry,
 	uint64_t va,
 	size_t length)
 {
+	/* The entry. */
+	nvrtx_ring_entry((uint8_t *)channel->ring.dma.address + (size_t)entry * 8U, va, (uint32_t)(length / 4U));
+}
+
+/*
+ * Moves the ring's put in USERD to next, after the entries before it are
+ * written; one write for all of a submission's entries: a store through
+ * the CPU's window when USERD's page is there, else through the register
+ * window (two register reads and three writes).
+ *
+ * Procedure referenced: NVIDIA open-gpu-kernel-modules 570.144
+ * kernel-open/nvidia-uvm/uvm_channel.c (uvm_channel_ring_doorbell: the put
+ * written to the mapped USERD, a write barrier, then the doorbell).
+ */
+static int
+work_ring_publish(
+	struct nvrtx_gpu *gpu,
+	struct nvrtx_work_channel *channel,
+	uint32_t next)
+{
+	volatile uint8_t *userd;
 	uint8_t put[4];
-	uint32_t next;
 	int error;
 
-	/* The entry, written before the put that hands it to the GPU. */
-	nvrtx_ring_entry((uint8_t *)channel->ring.dma.address + (size_t)entry * 8U, va, (uint32_t)(length / 4U));
+	/* The entries, written before the put that hands them to the GPU. */
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 
-	/* The ring's put in USERD, wrapping at the ring's end. */
-	next = (entry + 1U) & (NVRTX_WORK_RING_ENTRIES - 1U);
+	/* The ring's put in USERD, by the window when it is mapped. */
+	if (channel->userd_window.bar1_mapped != 0) {
+		userd = nvrtx_bo_cpu(gpu, &channel->userd_window) + (channel->userd - channel->userd_window.vram);
+		*(volatile uint32_t *)(volatile void *)(userd + WORK_USERD_RING_PUT) = next;
+		__atomic_thread_fence(__ATOMIC_SEQ_CST);
+		channel->put = next;
+		return 0;
+	}
 	nvrtx_put32(put, 0U, next);
 	error = nvrtx_vram_write(gpu, channel->userd + WORK_USERD_RING_PUT, put, sizeof(put));
 	if (error != 0)
 		return error;
 
-	/* The next submission starts after this entry. */
+	/* The next submission starts after these entries. */
 	channel->put = next;
 
-	/* Succeeded: the entry is the GPU's once the doorbell rings. */
+	/* Succeeded: the entries are the GPU's once the doorbell rings. */
 	return 0;
 }
 
