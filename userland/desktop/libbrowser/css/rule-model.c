@@ -40,6 +40,8 @@ struct css_rule_model {
 static int model_parse(struct css_rule_model *model, const uint16_t *units, size_t length, int strict);
 static int model_next(const struct css_token *tokens, size_t count, size_t start, size_t *end, int *type, unsigned *closing, int *semicolon);
 static int model_at_type(const struct css_token *token);
+static int model_scope_valid(struct vm_heap *heap, const struct css_token *tokens, size_t count, size_t start, const uint16_t *units, size_t length);
+static int model_scope_selector(struct vm_heap *heap, const uint16_t *units, size_t length);
 static int model_keep(struct css_rule_model *model, const uint16_t *units, size_t length, int type, unsigned closing, int semicolon);
 static void model_source_destroy(struct model_source *source);
 
@@ -137,6 +139,25 @@ css_rule_model_id(
 
 	/* Succeeded: this identity survives insertion, reordering and later deletion. */
 	return source->id;
+}
+
+/*
+ * Reports how many closing braces the source of a rule omitted at its end.
+ */
+unsigned
+css_rule_model_closing(
+	const struct css_rule_model *model,
+	uint32_t id)
+{
+	struct model_source *entry;
+	size_t index;
+
+	for (index = 0; index < model->entries.count; index++) {
+		entry = *(struct model_source **)wb_vector_at(&model->entries, index);
+		if (entry->id == id)
+			return entry->closing;
+	}
+	return 0;
 }
 
 /*
@@ -278,7 +299,7 @@ css_rule_model_insert(
 
 	/* At-rule placement and mutation need their own CSSOM design rather than unchecked insertion. */
 	source = *(struct model_source **)wb_vector_at(&candidate->rules, 0);
-	if (source->type != 1) {
+	if (source->type == 3 || source->type == 10) {
 		css_rule_model_destroy(candidate);
 		return ENOTSUP;
 	}
@@ -309,6 +330,40 @@ css_rule_model_insert(
 	css_rule_model_destroy(candidate);
 
 	/* Succeeded: the current source model owns the inserted immutable rule. */
+	return 0;
+}
+
+/*
+ * Replaces one indexed rule with a newly parsed single rule, giving it a new stable identity.
+ */
+int
+css_rule_model_replace(
+	struct css_rule_model *model,
+	const uint16_t *units,
+	size_t length,
+	size_t index)
+{
+	struct model_source **ordered;
+	struct model_source *old;
+	size_t count;
+	int status;
+
+	/* A missing index changes nothing. */
+	count = model->rules.count;
+	if (index >= count)
+		return ERANGE;
+
+	/* The new source is inserted after the old one, then the old one retires. */
+	status = css_rule_model_insert(model, units, length, index);
+	if (status != 0)
+		return status;
+	ordered = model->rules.items;
+	old = ordered[index + 1U];
+	old->present = 0;
+	memmove(ordered + index + 1U, ordered + index + 2U, (count - index - 1U) * sizeof(*ordered));
+	wb_vector_pop(&model->rules);
+
+	/* Succeeded: the list keeps its length and the new rule sits at the index. */
 	return 0;
 }
 
@@ -431,6 +486,9 @@ model_parse(
 
 			/* Only copied source text survives temporary qualified-rule validation. */
 			css_sheet_destroy(parsed);
+		} else if (type == 102) {
+			/* A scope rule's prelude must be its optional root and limit selector lists. */
+			valid = model_scope_valid(model->heap, tokens, count, index, units, length);
 		} else if (type != 0) {
 			/* Recognized groups remain top-level sources even when their condition is false. */
 			valid = 1;
@@ -531,7 +589,12 @@ model_next(
 			/* Grouping and font-face rules cannot replace their required block with a semicolon. */
 			if (*type == 4 ||
 			    *type == 5 ||
-			    *type == 12)
+			    *type == 12 ||
+			    *type == 6 ||
+			    *type == 7 ||
+			    *type == 11 ||
+			    *type == 14 ||
+			    (*type >= 101 && *type <= 107))
 				*type = 0;
 
 			/* Succeeded: this complete semicolon source ends before the following rule. */
@@ -587,6 +650,121 @@ model_next(
 	return 0;
 }
 
+/* Whether a text is the selector list of a scope rule's root or limit. */
+static int
+model_scope_selector(
+	struct vm_heap *heap,
+	const uint16_t *units,
+	size_t length)
+{
+	struct css_query *query;
+	size_t index;
+	int status;
+
+	/* Pseudo-elements cannot be scoped. */
+	for (index = 0; index + 1U < length; index++) {
+		if (units[index] == ':' && units[index + 1U] == ':')
+			return 0;
+	}
+	/* A relative selector (a leading combinator) is read with the implied nesting selector before it. */
+	query = NULL;
+	for (index = 0; index < length && (units[index] == ' ' || units[index] == '\t' || units[index] == '\n'); index++)
+		;
+	if (index < length && (units[index] == '>' || units[index] == '+' || units[index] == '~')) {
+		struct wb_units relative;
+
+		wb_units_init(&relative);
+		status = wb_units_append_code_point(&relative, '&');
+		if (status == 0)
+			status = wb_units_append(&relative, units + index, length - index);
+		if (status == 0)
+			status = css_query_parse(heap, relative.data, relative.length, &query);
+		wb_units_release(&relative);
+	} else {
+		status = css_query_parse(heap, units, length, &query);
+	}
+	if (status != 0)
+		return 0;
+	css_query_destroy(query);
+	return 1;
+}
+
+/* Reads one parenthesized selector list at *at, leaving *at after its closing parenthesis. */
+static int
+model_scope_paren(
+	struct vm_heap *heap,
+	const struct css_token *tokens,
+	size_t count,
+	size_t *at,
+	const uint16_t *units,
+	size_t length)
+{
+	size_t index;
+	size_t open;
+	unsigned depth;
+	int token;
+
+	open = *at;
+	depth = 0;
+	for (index = open; index < count; index++) {
+		token = tokens[index].type;
+		if (token == CSS_TOKEN_FUNCTION || token == CSS_TOKEN_OPEN_PAREN || token == CSS_TOKEN_OPEN_SQUARE) {
+			depth++;
+		} else if (token == CSS_TOKEN_CLOSE_PAREN || token == CSS_TOKEN_CLOSE_SQUARE) {
+			if (depth == 0)
+				return 0;
+			depth--;
+			if (depth == 0)
+				break;
+		} else if (token == CSS_TOKEN_EOF || (token == CSS_TOKEN_OPEN_CURLY && depth == 0)) {
+			return 0;
+		}
+	}
+	if (index >= count || tokens[index].type != CSS_TOKEN_CLOSE_PAREN)
+		return 0;
+	if (tokens[open].source_end > tokens[index].source_start || tokens[index].source_start > length)
+		return 0;
+	if (!model_scope_selector(heap, units + tokens[open].source_end, tokens[index].source_start - tokens[open].source_end))
+		return 0;
+	*at = index + 1U;
+	return 1;
+}
+
+/* Checks "[ ( <selector-list> ) ]? [ to ( <selector-list> ) ]?" before the block of a scope rule. */
+static int
+model_scope_valid(
+	struct vm_heap *heap,
+	const struct css_token *tokens,
+	size_t count,
+	size_t start,
+	const uint16_t *units,
+	size_t length)
+{
+	size_t index;
+
+	index = start + 1U;
+	while (index < count && tokens[index].type == CSS_TOKEN_WHITESPACE)
+		index++;
+	if (index < count && tokens[index].type == CSS_TOKEN_OPEN_PAREN) {
+		if (!model_scope_paren(heap, tokens, count, &index, units, length))
+			return 0;
+		while (index < count && tokens[index].type == CSS_TOKEN_WHITESPACE)
+			index++;
+	}
+	if (index < count && tokens[index].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[index], "to")) {
+		index++;
+		while (index < count && tokens[index].type == CSS_TOKEN_WHITESPACE)
+			index++;
+		if (index >= count || tokens[index].type != CSS_TOKEN_OPEN_PAREN)
+			return 0;
+		if (!model_scope_paren(heap, tokens, count, &index, units, length))
+			return 0;
+		while (index < count && tokens[index].type == CSS_TOKEN_WHITESPACE)
+			index++;
+	}
+	return index < count && tokens[index].type == CSS_TOKEN_OPEN_CURLY;
+}
+
 /* Classifies supported top-level at-rule sources without claiming nested CSSOM interfaces. */
 static int
 model_at_type(
@@ -607,6 +785,45 @@ model_at_type(
 	same = css_ident_equal(token, "supports");
 	if (same)
 		return 12;
+	same = css_ident_equal(token, "page");
+	if (same)
+		return 6;
+	same = css_ident_equal(token, "keyframes") || css_ident_equal(token, "-webkit-keyframes");
+	if (same)
+		return 7;
+	same = css_ident_equal(token, "namespace");
+	if (same)
+		return 10;
+	same = css_ident_equal(token, "counter-style");
+	if (same)
+		return 11;
+	same = css_ident_equal(token, "font-feature-values");
+	if (same)
+		return 14;
+	same = css_ident_equal(token, "layer");
+	if (same)
+		return 100;
+	same = css_ident_equal(token, "container");
+	if (same)
+		return 101;
+	same = css_ident_equal(token, "scope");
+	if (same)
+		return 102;
+	same = css_ident_equal(token, "starting-style");
+	if (same)
+		return 103;
+	same = css_ident_equal(token, "position-try");
+	if (same)
+		return 104;
+	same = css_ident_equal(token, "property");
+	if (same)
+		return 105;
+	same = css_ident_equal(token, "view-transition");
+	if (same)
+		return 106;
+	same = css_ident_equal(token, "font-palette-values");
+	if (same)
+		return 107;
 
 	/* Succeeded: unsupported at-rule sources contribute no native model entry. */
 	return 0;

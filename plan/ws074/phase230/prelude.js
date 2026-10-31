@@ -1570,6 +1570,7 @@
     }
     def(g, 'PromiseRejectionEvent', PromiseRejectionEvent);
   }
+// @include plan/ws074/phase260/cssom-rules.js
   // The CSSOM rule interfaces scripts test with instanceof (a rule is told by what it has, as the engine's rules have no class of their own).
   [['CSSRule', function (x) { return !!x && typeof x === 'object' && typeof x.cssText === 'string'; }],
    ['CSSStyleRule', function (x) { return !!x && typeof x.selectorText === 'string'; }],

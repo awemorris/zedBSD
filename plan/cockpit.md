@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 18:39（Q1）
+最終更新: 2026-10-31 19:42（Q1）
 
 ## 担当（P1〜P8）
 
@@ -12,7 +12,7 @@
 | P1 | — | — | 返却（06:4x）。WS326 p025（規約の全文の見直し、style の違反 0、全試験が前と同じ）を main に | 次の割当を Q1 が決める |
 | P2 | [WS309](ws309/ws.md) | Keiland の game mode | p015（q1782-i02）: zero copy を main に（73ed273fa）。VF2: c13 41.9 → 52.5 fps（目標 50 を越えた）、c1 73.6 → 141.3、WSI の copy 0、frame ごとの GPU の copy 0、往復 8/8。RTX は block-linear の画面出しの直し待ち（P3） | ユーザーが板を Pi 4 → Pi 5 に入れ替えた後に確かめる（image は用意済み） |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ | p023（q1781-i03）: RTX の block-linear の画面出しが block 単位で乱れる（ユーザーの目視）の原因を調べて直す | 10.0.10.3。自分で確かめてから次の目視を用意する |
-| P4 | — | — | 返却（06:5x）。WS326 の完了の片付け（試験を plan/tools/h264sw/ へ） | 午後: Pi 5 の実機 |
+| P4 | — | — | 返却（2026-10-31 19:16）。[BUG-378](bugs/BUG-378.md) を直した（main e8f43510d、QEMU の Pi 4 で起動）。直した image は SD に書いた | 実機の Pi 4 は P2 が試験の始めに確かめる |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | — | — | 返却（07:1x）。WS310 の設計を main に（問い Q310-1〜6 は下の 0i） | 次の割当を Q1 が決める |
 | P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
@@ -87,6 +87,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 | [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking を飛ばす | closed（VF2 の実機で確かめた） |
 | [BUG-372](bugs/BUG-372.md) | VF2 の serial の console が入力を受けない（元から未実装） | closed（VF2 の実機で確かめた） |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が EBUSY で終わる（VF2） | closed（P7: 原因は GPU の kernel の命令の buffer が満杯の時に待たずに失敗する事。待つ形に直し、VF2 で 8 回とも落ちず。main 2c5897f26） |
+| [BUG-378](bugs/BUG-378.md) | arm64 の kernel の text が 2 MiB を越えると起動の途中で止まる（Pi 4、全 arm64 の board に効く） | closed（実機の Pi 4 で起動） |
 | [BUG-374](bugs/BUG-374.md) | RTX の mouse の cursor の色が他の GPU と逆 | 診断の kernel を用意済み（矢印の色で原因が分かれる）。ユーザーの目視待ち（下の「拾える試験」） |
 | [BUG-370](bugs/BUG-370.md) | Photos で保存すると全面表示が閉じる | closed（QEMU で確かめた） |
 | [BUG-376](bugs/BUG-376.md) | PS/2 の mouse が無くても aux の node を作り、open のたびに約 80 ms 待つ | closed（QEMUと実機 で確かめた） |
