@@ -68,7 +68,7 @@
   - `timeout 3600 sh plan/ws334/tests/run-unit.sh all` → os-zones と test-tools が posix・win32 とも PASS、`run-unit: PASS`。
   - `BASE=d393d3267 timeout 1800 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`。
   - `git diff --check` → 出力なし。
-- 数の求め方: `windowsZones.xml` の `territory="001"` の mapZone は 139。名前が求まる物は 127、求まらない 12 は表に入れない（Etc/GMT+12・+11・+9・+8・+2・-12・-13 の 6 つ、Africa/Casablanca・Asia/Amman・Asia/Damascus・America/Punta_Arenas・Pacific/Bougainville の 5 つと UTC-02 など。試験の `absent_keys` が一覧）。
+- 数の求め方: `windowsZones.xml` の `territory="001"` の mapZone は 139。名前が求まる物は 127、求まらない 12 は表に入れない（Etc/GMT+12・+11・+9・+8・+2・-12・-13 の 7 つと、Africa/Casablanca・Asia/Amman・Asia/Damascus・America/Punta_Arenas・Pacific/Bougainville の 5 つ。試験の `absent_keys` が一覧）。
 - 照合の 2 方法:
   1. 2 回の独立の抽出。(a) Python の ElementTree で 3 つの xml を読む pass、(b) `xmllint --xpath` を key ごとに呼ぶ shell の pass。2 つの出力（127 行）が `cmp` で完全に一致した。表の C は (a) から生成し、試験の digest（FNV-1a 64 bit、表の全 byte）は (b) から別に計算した値を書いた（`0x11c5de6d30210a86`）。
   2. 手で xml から読んだ 30 行を試験の `expected_rows` に書いた（phase.md が挙げた 10 件、Afghanistan・New Zealand・Newfoundland・Namibia・Sri Lanka・Sao Tome・Greenwich・Yukon・Saint Pierre・Turkey・Korea・Central Asia・Hawaiian・Egypt・Haiti・Mexico の 2 つ・Cuba・West Bank・Russia 10 を足した）。metaZones.xml の timezone の usesMetazone と en.xml の metazone の long を grep で読んで確かめた。
@@ -78,6 +78,6 @@
   - `wb_os_zone_table(NULL)` は NULL を許し、表だけを返す（header は count が NULL の時に黙っている）。
   - 名前の長さは全部 40 byte 以下で、`WB_OS_ZONE_NAME_MAX`（63）に入る（試験が全行で確かめる）。
   - 表の key の順は strcmp（byte）の順で、"AUS ..." が先頭、"Yukon ..." が最後。
-  - 「現在の metazone」は `to` の無い usesMetazone。`to` の無い物が 2 つ以上ある zone は無い（抽出の script が assert した）。territory "001" の type が複数の zone なら最初（実際に複数の物は 001 では無かった、確かめは script が最初の語を使う形）。
+  - 「現在の metazone」は `to` の無い usesMetazone。`to` の無い物が 2 つ以上ある zone は無い（抽出の script が assert した）。territory "001" の type が空白で区切った複数なら最初（CLDR 48 の "001" には複数の物は無く、grep で 0 件）。
 - 壊して確かめた（git の外、`--posix` で、終わりに `cmp` で原本に戻ったことを確認）: Tokyo の daylight の 1 字（FAIL 2）、隣り合う 2 key の入れ替え（FAIL 3）、比較の向きの反転（FAIL 156）、探す範囲の上端を 1 つ小さく（FAIL 2）、最後の行の削除（FAIL 3）、試験の期待に無い行（Fiji の daylight）の 1 字（digest だけが捕まえた、FAIL 1）、daylight の NULL を ""（FAIL 3）、key の NULL の検査の削除（試験が crash し FAIL）、Türkiye を ASCII の u に（FAIL 2）、count を 1 つ小さく（FAIL 2）、大小を区別しない比較（FAIL 17）。見逃しは無かった。
 - 未実施: 実機の Windows での実行（Wine のみ）。os-time-win32.c との結び付き（p008 の範囲）。
