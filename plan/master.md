@@ -27,13 +27,13 @@
 
 | 担当 | 最後の Queue | WS と次の 1 手（記録の場所） | 実機 |
 | --- | --- | --- | --- |
-| P7 | q1808-i01 ラップアップ | [WS334 p021](ws334/phase021/phase.md) 統合: 525bc577a・781ec96c8・8c4fc75b4 の merge（run-unit all の結果を見てから）→ 1 つの .exe の build と libkeiland の pthread 抜き（ws.md の 2026-11-01 の決定） | — |
+| P7 | q1808-i01 ラップアップ | [WS334 p021](ws334/phase021/phase.md) 統合: p021 の commit は全部 main（8a27af470）、残りは run-unit all の単独の実行（phase.md の再開点のコマンド）→ 1 つの .exe の build と libkeiland の pthread 抜き（ws.md の 2026-11-01 の決定） | — |
 | P8 | q1727-i15 ラップアップ | [WS074](ws074/ws.md) phase260 の自走（100% まで、返却のたびに同じ目標で起動し直す）。i14 の終わりで 3,107（89.49%）、Acid2・3 100% | — |
-| Sonnet | q1820〜q1824 ラップアップ | WS335 の p003（SHA-3）・p006（ChaCha20・Poly1305）・p008（X25519）、WS336 の p004（cipher・packet）・p005（key）。各 phase.md の結果の節から続ける、受け入れは accept の手順（ws.md の行と phase.md を cleared に） | — |
+| Sonnet | q1820〜q1824 ラップアップ（全部 uncleared、source だけ commit、試験は未作成・未実行） | WS335 p003（s-ws335-p003 の 8e06b344e、cryc-sha3.c）・p006（s-ws335-p006 の e95bacc79、cryc-chacha.c）・p008（s-ws335-p008 の 1e11aeaca、cryc-f25519.c、x25519 は未）、WS336 p004（s-ws336-p004 の 8a9d00e6d、ssh-cipher・ssh-packet）・p005（s-ws336-p005 の 4b01c55e5、ssh-key）。同じ worktree で起動し直し、各 phase.md の結果の節の「次の手」（試験を書く → 流す → 壊す確かめ）から続ける。main には未 merge | — |
 | P1〜P6 | 返却・ラップアップ | 割当なし（P3 の RTX は uncleared: G1 は (b) の設計とユーザーの判断が要る） | — |
 
 **次のセッションの始めにする事**:
-1. ラップアップした担当の SHA を受け入れて merge（P7 は run-unit all を見てから、Sonnet は試験を流し直してから）。
+1. P7 を同じ worktree で起動し直し、run-unit all の単独の実行から。Sonnet 5 人は同じ worktree で続きから（試験が通ってから受け入れて merge）。
 2. P8 を q1727-i16 で起動し直す。WS335・WS336 の Sonnet を各 phase の続きで起動し直す（WS335 の次の群: p004・p007・p015・p016・p025、WS336: p006・p007・p009）。
 3. WS337 shangrila: ユーザーとの質疑の続き（ws.md の「まだ決まっていない事」）。
 4. 未割当の Bug: [BUG-385](bugs/BUG-385.md)（VF2 の SD の retry を補強して ro にしない、ユーザーの指示で後で）・[BUG-386](bugs/BUG-386.md)（VF2 の en1）。
