@@ -32,6 +32,7 @@
 #include <drivers/gpu/gpu.h>
 #include <kern/clock.h>
 #include <kern/kcrt.h>
+#include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/pmem.h>
 #include <kern/sched.h>
@@ -168,6 +169,19 @@ nvrtx_node_start(
 	node->ops.display = &nvrtx_display_ops;
 	node->ops.share = &nvrtx_share_ops;
 	node->ops.scanout = &nvrtx_scanout_ops;
+	node->ops.layouts = &nvrtx_layout_ops;
+
+	/*
+	 * Block-linear scanout only when the boot asks for it (its pixels are
+	 * checked by eye first) and the window has a layout field (Turing's;
+	 * Ampere's window reads linear rows here).
+	 */
+	node->disp_bl = 0;
+	node->disp_bl_shown = 0;
+	if (nvrtx_stage_disp_bl_wanted() && gpu->identity.chip.profile->window_storage_pitch != 0U) {
+		node->disp_bl = 1;
+		kern_logf("nvrtx: display: block-linear scanout on\n");
+	}
 
 	/* With nvrtx.vk=1 the device is also a renderer. */
 	vk_wanted = nvrtx_stage_vk_wanted();

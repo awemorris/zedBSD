@@ -46,6 +46,11 @@
  *                         waits: for a GPU the firmware's console is not on
  *                         (a VFIO guest), so the GPU device is still
  *                         registered
+ *   nvrtx.disp.bl=1       the display scans out block-linear images
+ *                         (applications' and the compositor's shared
+ *                         images in the GPU's own layout); without it a
+ *                         block-linear image is refused for scanout and
+ *                         shown by a copy
  *   nvrtx.disp.test=1     the takeover shows two test surfaces of bands,
  *                         flips between them and waits 5 s at each step, so
  *                         the monitor can be watched
@@ -95,6 +100,9 @@
 
 /* The whole token that makes the takeover show the driver's own surfaces at once (no console on the GPU, no waits). */
 #define STAGE_DISP_OWN_TOKEN		"nvrtx.disp.own=1"
+
+/* The whole token that lets the display scan out block-linear images. */
+#define STAGE_DISP_BL_TOKEN		"nvrtx.disp.bl=1"
 
 /* The whole token that asks for the first compute launch. */
 #define STAGE_COMPUTE_TOKEN		"nvrtx.compute=1"
@@ -235,6 +243,24 @@ nvrtx_stage_disp_wanted(void)
 
 	/* The takeover runs by default. */
 	return true;
+}
+
+/*
+ * Reports whether the display scans out block-linear images
+ * (nvrtx.disp.bl=1).
+ */
+bool
+nvrtx_stage_disp_bl_wanted(void)
+{
+	bool present;
+
+	/* Looks for nvrtx.disp.bl=1 among the boot parameters. */
+	present = stage_token_present(STAGE_DISP_BL_TOKEN);
+	if (present)
+		return true;
+
+	/* Without it the display shows linear rows only. */
+	return false;
 }
 
 /*

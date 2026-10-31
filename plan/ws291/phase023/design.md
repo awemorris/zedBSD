@@ -369,9 +369,9 @@ keiland-shot は display が読んだ画素を見ない（§1.4）。2026-10-31 
 | I4 | nvrtx の口・私用の record・記録・import と present の規則・subresource layout | §10.1 I4、amd64 の vmunix warning 0 | 4 LW |
 | I5 | block-linear の scanout と present（`nvrtx.disp.bl`、既定 0） | §10.1 I5、§10.3 の block-linear の scanout（P3 の確かめ）、画素はユーザーの目視（phase.md） | 3 LW |
 | I6 | tip で回帰をまとめて 1 回 | §10.3 の全部 | 2 LW |
-| I7 | subs の run ごとの固定費（約 56 µs）を 1 つずつ測って削る（2026-10-31 ユーザーの答え）: run の始めの texture pool と shader cache の無効化、最初の draw の全 state、pass の始めと終わりの barrier の WFI、run の終わりの fence の WFI、channel の切り替えの有無。各項を外す診断の kernel（`plan/ws291/tests/nvrtx-run-cost-diag.patch` と `rtx-runcost.sh` の変種 0〜5、p014 で用意済み・未計測）で 1 項ずつ測り、要らない物を外す | I3〜I6 | 各項の前後の subs-100・subs-1000 の GPU の 1 run の µs と fps（PROF）、画素差 0、big・scene・desktop の後退なし | 計測 3 LW、削る実装 3〜6 LW（何が削れるかで変わる） |
+| I7（= ws291-p024、別の Phase） | subs の run ごとの固定費（約 56 µs）を 1 つずつ測って削る（2026-10-31 ユーザーの答え）: run の始めの texture pool と shader cache の無効化、最初の draw の全 state、pass の始めと終わりの barrier の WFI、run の終わりの fence の WFI、channel の切り替えの有無。各項を外す診断の kernel（`plan/ws291/tests/nvrtx-run-cost-diag.patch` と `rtx-runcost.sh` の変種 0〜5、p014 で用意済み・未計測）で 1 項ずつ測り、要らない物を外す | I3〜I6 | 各項の前後の subs-100・subs-1000 の GPU の 1 run の µs と fps（PROF）、画素差 0、big・scene・desktop の後退なし | 計測 3 LW、削る実装 3〜6 LW（何が削れるかで変わる） |
 
-- I1〜I6 の合計 約 19 LW（8 LW ≈ 2〜3 時間の換算で約 5〜7 時間）、I7 は別に 6〜9 LW。I1 は済み（7b0a6644e）、I2 と I3 は I1 と独立に進められる。
+- I1〜I6 の合計 約 19 LW（8 LW ≈ 2〜3 時間の換算で約 5〜7 時間）、I7（= ws291-p024）は別の Phase で 6〜9 LW。I1 は済み（7b0a6644e）、I2 と I3 は I1 と独立に進められる。
 - 各 Phase の C には `plan/coding-style.md` の全文を当て、source の comment に開発の管理情報を書かない。出典は該当の block の直前の複数行の comment（Guardrail）。
 - WS291 の最後の「規約の全文の見直し」の Phase は WS の既存の計画に従う。
 

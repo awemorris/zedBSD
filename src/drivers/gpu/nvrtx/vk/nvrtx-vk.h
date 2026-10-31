@@ -158,6 +158,16 @@ void nvrtx_vk_memory_detach(void *owner, void *backing, uint64_t va, uint64_t by
 int nvrtx_vk_memory_kind(void *owner, void *backing, uint64_t offset, uint64_t va, uint64_t bytes, uint32_t kind);
 
 /*
+ * Notes an image bound to a memory's storage: its shape (block linear or
+ * not, its row pitch, size and offset in the storage).  The first image
+ * bound gives the storage the shape an export of it must describe; once
+ * the storage was exported as an image, every image bound must have the
+ * described shape (EINVAL otherwise).  Provided by the node; the caller
+ * holds the node's lock.
+ */
+int nvrtx_vk_memory_bind_image(void *backing, bool tiled, uint32_t pitch, uint32_t width, uint32_t height, uint64_t offset);
+
+/*
  * Takes a blob of the owner's as the storage of an imported VkDeviceMemory
  * of bytes (provided by the node): maps it for the GPU, holds its backing,
  * and gives the CPU's view, the GPU's address and the backing, which
