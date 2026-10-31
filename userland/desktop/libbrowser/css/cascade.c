@@ -931,6 +931,25 @@ cascade_line_pixels(const struct css_style *style)
 	return style->font_size * 1.2f;
 }
 
+/* The declaration to apply for a match: a revert of an author declaration is the user agent's winning declaration of the property. */
+static const struct css_declaration *
+cascade_reverted(
+	const struct cascade_match *matches,
+	size_t index)
+{
+	const struct css_declaration *declaration;
+	size_t earlier;
+
+	declaration = matches[index].declaration;
+	if (declaration->value.kind != CSS_VALUE_UNSET || declaration->value.keyword != 1 || matches[index].rank != RANK_AUTHOR)
+		return declaration;
+	for (earlier = index; earlier > 0; earlier--) {
+		if (matches[earlier - 1U].rank == RANK_USER_AGENT && matches[earlier - 1U].declaration->property == declaration->property)
+			return matches[earlier - 1U].declaration;
+	}
+	return declaration;
+}
+
 /* Computes the style of an element, or of one of its pseudo-elements, in the cascade. */
 static int
 cascade_compute(
@@ -1096,7 +1115,7 @@ cascade_compute(
 		if (matches[index].declaration->property == CSS_PROP_WRITING_MODE ||
 		    matches[index].declaration->property == CSS_PROP_DIRECTION)
 			continue;
-		cascade_apply(engine, style, parent, matches[index].declaration);
+		cascade_apply(engine, style, parent, cascade_reverted(matches, index));
 	}
 
 	/* The lists are no longer needed. */

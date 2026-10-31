@@ -1234,6 +1234,9 @@ css_parse_property(
 	memset(&value, 0, sizeof(value));
 	wide = values_keyword(values_wide, &tokens[0], &value.kind);
 	if (count == 1 && wide) {
+		/* revert is told from unset by a flag: it takes the user agent's value (the cascade looks it up). */
+		if (value.kind == CSS_VALUE_UNSET && css_ident_equal(&tokens[0], "revert"))
+			value.keyword = 1;
 		values_wide_keyword(property, &value, out, out_count);
 		return 0;
 	}
