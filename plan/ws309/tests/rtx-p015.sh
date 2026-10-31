@@ -95,6 +95,8 @@ for arm in ${ARMS:-base new bl}; do
 	ip=$(timeout 700 $M zedbsd 2> /dev/null | tail -1)
 	[ -n "$ip" ] || { say "$arm FAIL zedBSD did not come up"; break; }
 	files_put "$dir" || { say "$arm FAIL files"; break; }
+	# The machine's own files (the first arm's kept list) are what files_back checks against.
+	[ -s "$out/files-old.txt" ] || cp "$dir/files-old.txt" "$out/files-old.txt"
 	# The arm's boot line, zedBSD restarted (the new compositor and libraries load).
 	if [ $arm = bl ]; then
 		timeout 900 $M cfg nvrtx.disp.bl 1 > "$dir/cfg.txt" 2>&1 || say "$arm FAIL cfg"
