@@ -10,9 +10,9 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | — | — | 返却。BUG-384 を直した（main 98179a6a2、Pi 5 の実機で起動）。空き | — |
-| P2 | [BUG-382](bugs/BUG-382.md) | 5330 で discard の直後に mkfs が no registration | 原因を調べて直す（q1811、優先、5330 の実機） | 5 回以上の繰り返しで確かめ |
+| P2 | — | — | ラップアップ（2026-11-01 06:53）。BUG-382 を直した（main ecad7fc74、5330 で確かめ） | — |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（RTX） | p024: NVK と段ごとに比べ、差 G1〜G4 を詰める（q1785-i03） | RTX の区切りの後に BUG-383（http の page から file: を読む）→ BUG-381 の残りの driver → RTX に戻る |
-| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 5（p021、q1784-i06）: 画面が出た。bd1f58c4a を実機で確かめ（checksum 一致、c74 48.3 fps）、desktop は 1920x1080 で定常 60 fps（窓を出す瞬間に引っかかり）、画面の mview c74 49.9 fps。merge 04:40（main は下の commit） | bin と render の重ねを実装中 |
+| P4 | — | — | 返却（2026-11-01 06:53）。main の計測: Pi 5 は前後で差なし（c74 約 50 fps、desktop 59〜67）、VF2 は c1 168・c13 56.0 fps（記録 141・52.5）、gpu-selftest 13/13 | — |
 | P5 | — | — | 返却（2026-11-01 04:53）。WS336 の設計を仕上げた（推しの答え、TODO の一覧 T1〜T31、基点 d4ab182d2 のまま）。実装は Sonnet が p002 から | — |
 | P6 | [WS335](ws335/ws.md) | 自前の libssl-compat・libcrypto-compat | 設計の仕上げ（q1789-i02）: 推しの答え、Windows は 1 つの .exe に static link、新しい基点 | 終われば Sonnet が p002 から実装 |
 | P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005〜p020 cleared（最新 p011 files、main c590d87fa） | P7 が p021（統合: OS に触れる所を OS の層へ）を実行中 |

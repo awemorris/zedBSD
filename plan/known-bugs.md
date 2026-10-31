@@ -249,7 +249,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-379](bugs/BUG-379.md) | Pi 4 の graphical login の session の中で compositor の描画が止まる（720p で約 1 fps、1080p で 0 frame、前から） | closed（2026-10-31 22:56、Pi 4 の session で描く、main c3291b1f9） |
 | [BUG-380](bugs/BUG-380.md) | Pi 4（V3D 4.2）で mview の pipeline の作成が FEATURE_NOT_PRESENT（V3D の executor が compositor の形だけ） | closed（2026-10-31 22:19、Pi 4 で mview が動く、main に merge） |
 | [BUG-381](bugs/BUG-381.md) | libvulkan が OOM で job を CANCEL するが、nvrtx では前の command buffer がもう GPU で走っている事がある | assigned（P3、残りの driver） |
-| [BUG-382](bugs/BUG-382.md) | 5330 の NVMe の p7 を discard して起動した直後に mkfs が "no registration" で失敗（約 2 分後なら通る、間欠） | in-progress（P2） |
+| [BUG-382](bugs/BUG-382.md) | 5330 の NVMe の p7 を discard して起動した直後に mkfs が "no registration" で失敗（約 2 分後なら通る、間欠） | closed（2026-11-01 06:53、main ecad7fc74） |
 | [BUG-383](bugs/BUG-383.md) | libbrowser が http の page からも file: の副資源を読む（local の file の読み出し、安全） | closed（2026-11-01 06:14、main 81d028d39） |
 | [BUG-384](bugs/BUG-384.md) | arm64 の kernel の Image の header の image_size が BSS を含まない（boot の約束に反する、今は症状なし） | closed（2026-11-01 06:26、main 98179a6a2） |
 | [BUG-385](bugs/BUG-385.md) | VF2 が SD card の誤りで root を ro で mount して起動した（2026-11-01 ユーザーの目視） | open |
