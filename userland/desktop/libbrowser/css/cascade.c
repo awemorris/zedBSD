@@ -352,6 +352,7 @@ static int cascade_margin_property(int property, int writing_mode, int direction
 static void cascade_inherit(struct css_style *style, const struct css_style *parent, int property);
 static struct css_length cascade_flex_basis(struct css_engine *engine, const struct css_value *value, float font_size);
 static struct css_length cascade_length(struct css_engine *engine, const struct css_value *value, float font_size);
+static const struct css_shape *cascade_shape(struct css_engine *engine, const struct css_declared_shape *declared, float font_size);
 static void cascade_shadows(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_filters(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_filter *out, int *count);
 static const char *cascade_subgrid(struct css_engine *engine, const struct css_value *value);
@@ -5421,6 +5422,18 @@ cascade_apply(
 				style->clip_edges[side] = cascade_length(engine, &value->inset->lengths[side], style->font_size);
 		}
 		break;
+	case CSS_PROP_SHAPE_OUTSIDE:
+		/* A shape the float's lines wrap around, or none. */
+		style->shape_outside = NULL;
+		if (value->kind == CSS_VALUE_SHAPE && value->shape != NULL)
+			style->shape_outside = cascade_shape(engine, value->shape, style->font_size);
+		break;
+	case CSS_PROP_SHAPE_MARGIN:
+		style->shape_margin = cascade_length(engine, value, style->font_size);
+		break;
+	case CSS_PROP_SHAPE_IMAGE_THRESHOLD:
+		style->shape_threshold = value->number;
+		break;
 	case CSS_PROP_VERTICAL_ALIGN:
 		/* A keyword, or a length that raises the box by it. */
 		if (value->kind == CSS_VALUE_KEYWORD) {
@@ -5591,6 +5604,15 @@ cascade_inherit(
 	case CSS_PROP_CLIP:
 		style->clip_rect = parent->clip_rect;
 		memcpy(style->clip_edges, parent->clip_edges, sizeof(style->clip_edges));
+		break;
+	case CSS_PROP_SHAPE_OUTSIDE:
+		style->shape_outside = parent->shape_outside;
+		break;
+	case CSS_PROP_SHAPE_MARGIN:
+		style->shape_margin = parent->shape_margin;
+		break;
+	case CSS_PROP_SHAPE_IMAGE_THRESHOLD:
+		style->shape_threshold = parent->shape_threshold;
 		break;
 	case CSS_PROP_WIDTH:
 		style->width = parent->width;
@@ -6597,6 +6619,57 @@ cascade_subgrid(
 	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL || value->tracks->subgrid == NULL)
 		return NULL;
 	return cascade_keep(engine, value->tracks->subgrid, strlen(value->tracks->subgrid) + 1U);
+}
+
+/* Keeps a declared shape in the engine's arena with its lengths computed. */
+static const struct css_shape *
+cascade_shape(
+	struct css_engine *engine,
+	const struct css_declared_shape *declared,
+	float font_size)
+{
+	struct css_shape *made;
+	size_t index;
+
+	/* The shape, zeroed. */
+	made = wb_arena_zalloc(&engine->arena, sizeof(*made));
+	if (made == NULL)
+		return NULL;
+	made->kind = declared->kind;
+	made->box = declared->box;
+	made->rounded = declared->rounded;
+	made->gradient = declared->gradient == NULL ? NULL : cascade_gradient(engine, declared->gradient, font_size);
+	made->point_count = declared->point_count;
+
+	/* Radii and the center. */
+	for (index = 0; index < 2U; index++) {
+		made->radius_keyword[index] = declared->radius_keyword[index];
+		made->at_end[index] = declared->at_end[index];
+		if (declared->kind == CSS_SHAPE_CIRCLE || declared->kind == CSS_SHAPE_ELLIPSE) {
+			made->radius[index] = cascade_length(engine, &declared->radius[index], font_size);
+			made->at[index] = cascade_length(engine, &declared->at[index], font_size);
+		}
+	}
+
+	/* The inset's sides and corners. */
+	if (declared->kind == CSS_SHAPE_INSET) {
+		for (index = 0; index < 4U; index++) {
+			made->inset[index] = cascade_length(engine, &declared->inset[index], font_size);
+			if (declared->rounded) {
+				made->round[index][0] = cascade_length(engine, &declared->round[index][0], font_size);
+				made->round[index][1] = cascade_length(engine, &declared->round[index][1], font_size);
+			}
+		}
+	}
+
+	/* The polygon's vertices. */
+	for (index = 0; index < declared->point_count; index++) {
+		made->points[index][0] = cascade_length(engine, &declared->points[index][0], font_size);
+		made->points[index][1] = cascade_length(engine, &declared->points[index][1], font_size);
+	}
+
+	/* The shape is kept. */
+	return made;
 }
 
 /* Keeps a gradient in the engine's arena, its stops in ems turned to pixels by the font size. */
