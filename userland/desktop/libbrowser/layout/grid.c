@@ -705,6 +705,16 @@ layout_grid(
 		    grid_row_track(&box->style, item->row)->kind == CSS_TRACK_LENGTH &&
 		    grid_row_track(&box->style, item->row)->size.unit == CSS_UNIT_PX)
 			child->grid_room = layout_from_px(grid_row_track(&box->style, item->row)->size.value);
+		else if (item->row_span == 1 && grid.row_count == 1 && box->style.height.unit == CSS_UNIT_PX &&
+		    grid_row_track(&box->style, item->row)->kind == CSS_TRACK_AUTO) {
+			/* The only row, left to stretch in a grid with a height of its own, is as tall as that. */
+			child->grid_room = layout_from_px(box->style.height.value);
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				child->grid_room -= box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] +
+				    box->border[CSS_BOTTOM];
+			if (child->grid_room < 0)
+				child->grid_room = 0;
+		}
 	}
 
 	/* A subgrid lays its tracks with its own gap (the parent's when it gave none) once the parent has given the tracks. */
@@ -781,6 +791,11 @@ layout_grid(
 		saved_definite = tree->containing_height_definite;
 		if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
 			tree->containing_height_definite = grid_fixed_area_height(box, item, row_gap, &tree->containing_height);
+			if (!tree->containing_height_definite && item->box->grid_orthogonal && item->box->grid_room >= 0) {
+				/* An orthogonal item's lines run along the row, which a grid with a height of its own stretches to. */
+				tree->containing_height = item->box->grid_room;
+				tree->containing_height_definite = 1;
+			}
 			if (!tree->containing_height_definite)
 				tree->containing_height = 0;
 		}
