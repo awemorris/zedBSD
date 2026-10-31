@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 14:50（Q1）
+最終更新: 2026-10-31 15:06（Q1）
 
 ## 担当（P1〜P8）
 
@@ -302,6 +302,10 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
 
 ## 決まった事
+
+- （2026-10-31）ユーザーから、compositor の image（合成の経路と game mode で貸す image）は、描けて scanout できて画質を大きく損なわない物の中で GPU の一番速い物を選ぶ、という趣旨の指示を受けた（Q1 の解釈: 描けて display が読める形式と並び（tiled・block-linear・圧縮）の中で一番速い並び、色の深さは下げない、driver ごとの優先の表）。[ws309-p015](ws309/phase015/phase.md)・[ws291-p023](ws291/phase023/phase.md)。
+- （2026-10-31）ユーザーから、RTX の block-linear（描画の置き方と NVC57E の scanout）は必要なので実装する、という趣旨の指示を受けた。nvrtx の部分は P3 が p023 の設計の後に実装し、共通の経路（protocol・libvulkan・compositor）は P2 が p015 で作る。
+- （2026-10-31）ユーザーから、game mode は文字通りの zero copy（client が compositor と共有する image に直に描く）で全 GPU を直す、compositor の image の形式は compositor が決める、という趣旨の指示を受けた（WS309 p015 を P2 で着手）。
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
