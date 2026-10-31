@@ -32,6 +32,7 @@
   13. 2026-11-01 ユーザーから、tree の一番上に `apps/` を作り、Windows 版は `apps/browser-win32/`（その Makefile）に置く、一番上の Makefile からも呼ぶ（`make browser-win64` など）、という趣旨の指示を受けた（最初は `apps/browser/` と言い、同日 `apps/browser-win32/` に改めた。後で `apps/browser-qt`・`apps/browser-gtk4` も足す予定）。
   14. 2026-11-01 ユーザーから、libkeiland はまず browser が動くのに要る部分だけを部分的に移植して動かすところまで進め、全体の移植は後でじっくり行う、という趣旨の指示を受けた（決定 3 の進め方。全体の移植を WS334 の後半か WS234 などに分けるかは設計で案を出す）。
   15. 2026-11-01 ユーザーから、ブラウザの UI はまず libkeiland の Win32 の backend の上で今の Keiland の UI のまま移植する（A）、libkeiland で足りなければ後で Win32 を直に使う版を作ればよい（大きな実装ではないため）、という趣旨の指示を受けた。Chrome も Fluent を使わない事、font は自前でよい事、menu は最近のブラウザに無く要る時は HMENU に写せばよい事、libkeiland が作るのは HWND 1 つである事が理由。
+  16. 2026-11-01 ユーザーから、https の libssl は当面 OpenSSL の物を使い、後で libssl-compat を開発した時にそれへ切り替える、という趣旨の指示を受けた（U10 の A に当たる。切り替えやすいように、OpenSSL への依存は libbrowser の net/tls.c などの口に閉じ込めておく）。
 
 ## Resume point
 

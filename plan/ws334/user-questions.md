@@ -91,6 +91,8 @@
 
 ### U10 https の暗号の部品
 
+- **決まった（2026-11-01、決定 16）**: 当面 OpenSSL を使い、後で libssl-compat を開発した時に切り替える（A）。
+
 - 案:
   - A（推し）: zedBSD と同じ OpenSSL の DLL を同梱し、信頼する証明書は Windows に登録された物を読む（会社の証明書も効く）。
   - B: Windows 内蔵の SChannel を使う（DLL 不要。code が大きく、zedBSD と挙動が分かれる）。将来の案。
