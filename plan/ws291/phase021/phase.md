@@ -152,3 +152,15 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
   perl の locale だけ）、`rpi5-image-boot.sh build/p021-img build/p021-img/rpi5-p021.img`: **322961408 byte、sha256 3bf8f40c636ed8397b0355182131441399bb1e7fa9dc181d7f79da3b9ebf0c75**。
   kernel は 2a53a5a6d の source（FAT の vmunix cksum 130421877、image から取り出して確かめた）、config.txt 1920x1080、cmdline `login=console v3d.perf=1`、fallback 無し。
 - Q1 が SD（もと Pi 4 のカード、ユーザーの許可）に書き、image と cmp で一致。
+
+### 実機（Pi 5、10.0.30.7、2026-11-01 02:16〜）
+
+- 02:16 板が起きた（zedBSD ce2d6f4、image の kernel cksum 130421877）。`sysctl hw.gpu.start=1` の後の dmesg: `V3D 7.1.10, 12 QPUs, 1150000000 Hz`
+  （V0 は 500 MHz、最大 1150 MHz、V1 で 1150 MHz に上げる）、VPM 64 KiB、self-test は全て ok。rpi5-fan 29.25 °C・fan 0。
+  **目標の copies は 74 に確定**（12 × 8 × 1.15 GHz ＝ 110 GFLOPS、RTX 2070 の 7.46 TFLOPS の 1/68、5000 / 68 ≈ 74、Q1 が受け入れた）。
+- 表示が無い: firmware が `bcm2708_fb.fbwidth=640 fbheight=480` を渡し、kernel に framebuffer が無い（rpi5.framebuffer・P0 の行が無い）ので display を
+  見つけず、compositor は `KWL VULKAN_ERROR operation=display result=-3` で止まる（build/tmp/p021-b0）。HDMI の画面が繋がっていない時の形。
+  Q1 がユーザーに画面を繋ぐよう頼んだ。繋いだ後に再起動（SwitchBot 14C19FA80F86 は P4 が入れ直してよい、Q1）。
+- 02:18 `KERNEL=build/p021-k5b/vmunix`（ee3e43a88、cksum 4200268633）を rpi5-mview.sh で置いて再起動（元は /boot/boot0/vmunix.p021old）。
+  7.1 の TFU の UIF の self-test が実機で通った: `V7 TFU UIF 96x40 x4`・`33x9 x4`・`1x1 x4`・`200x150 x4`・`256x255 x4`・`70x37 x1`・`35x19 x2` の
+  全てで見える texel が CPU の配置と一致、`texture conversion uses the unit`（build/tmp/p021-k1）。mview・mip・16-bit の index は表示が無いので未実行。
