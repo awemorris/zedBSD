@@ -278,7 +278,7 @@ user「AX211のpassthruは、きちんとLinuxドライバをblacklistして再�
 | 例外 | 範囲 | 理由・決定 | 期限 |
 | --- | --- | --- | --- |
 | base の `/usr/libexec/passkey-fido2` と `userland/base/libpasskey`（WS172）が package の OpenSSL の libcrypto を使う（`/sbin/passkey` は libc の crypt だけ、2026-10-05 ユーザーの P1 の決定で範囲を変更） | FIDO2 の暗号（SHA-256・HMAC・AES・P-256）だけ。2026-10-06 夜 ユーザー（クリック「広げる」）で、同じ libpasskey を使う base の道具 `fidoctl`（WS161 p004）も範囲に含める | ユーザー 2026-10-05「passkeyはbaseに起きます。OpenSSLはリリースまでに独自実装に置き換える予定なので、問題ないです。」（master-design-policy §2.1 の例外） | リリースの前（WS172 p005） |
-| compositor の game mode の直の scanout（BUG-223、ws122-p005b）: libkeiland-backend-zedbsd に display の直接の口（old の fullscreen mode の GPU_DISPLAY_CLAIM・PRESENT・RELEASE などの ioctl）を置き、compositor はその backend の口を通して client の buffer を出す | app が明示に頼む全画面（game mode）の時だけ。普通の全画面と全ての合成は libvulkan だけのまま。ioctl は backend の zedBSD の tree の中だけで、compositor の source には入れない | 2026-10-06 ユーザー（クリックの回答「B backend に direct の口」、P2 の A/B/C の案から）。「compositor は libvulkan だけを使う」（2026-09-30）の限定の例外 | 無し（設計の変更の時に見直す） |
+| compositor の game mode の直の scanout（BUG-223、ws122-p005b）: libkeiland-backend-zedbsd に display の直接の口（old の fullscreen mode の GPU_DISPLAY_CLAIM・PRESENT・RELEASE などの ioctl）を置き、compositor はその backend の口を通して client の buffer を出す | app が明示に頼む全画面（game mode）の時だけ。普通の全画面と全ての合成は libvulkan だけのまま。ioctl は backend の zedBSD の tree の中だけで、compositor の source には入れない | 2026-10-06 ユーザー（クリックの回答「B backend に direct の口」、P2 の A/B/C の案から）。「compositor は libvulkan だけを使う」（2026-09-30）の限定の例外 | **閉じた（2026-10-31）**: WS309 p015 で backend の直接の口（kl_backend_scanout_*・scanout-zedbsd.c）を除き、game mode は libvulkan の display の swapchain の image を client に貸す形になった（main 73ed273fa）。compositor は libvulkan だけ |
 
 ## 寸法の単位（2026-10-06 ユーザー）
 
