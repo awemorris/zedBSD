@@ -214,8 +214,11 @@ validate_job(
 		if (cl->overflow_count > 4)
 			return EINVAL;
 		for (index = 0; index < cl->overflow_count; index++) {
-			/* Each overflow pool is a mapped, page-aligned 256 KiB. */
-			if ((cl->overflow[index].address & 4095U) != 0 || cl->overflow[index].bytes != 0x40000U)
+			/* Each overflow pool is mapped, page-aligned and whole 256 KiB units, at most 16 MiB. */
+			if ((cl->overflow[index].address & 4095U) != 0 ||
+			    cl->overflow[index].bytes == 0 ||
+			    (cl->overflow[index].bytes % BCM2711_V3D_OVERFLOW_UNIT) != 0 ||
+			    cl->overflow[index].bytes > BCM2711_V3D_OVERFLOW_MAX)
 				return EINVAL;
 			error = validate_span(engine, cl->overflow[index].address, cl->overflow[index].bytes);
 			if (error != 0)

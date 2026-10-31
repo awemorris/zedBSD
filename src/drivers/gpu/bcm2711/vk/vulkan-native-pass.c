@@ -19,6 +19,9 @@
 /* All padded native inputs across the enclosing submission share one finite staging budget. */
 #define NATIVE_PASS_BYTES (256ULL * 1024U * 1024U)
 
+/* The tile-list bytes reserved for each vertex or index a pass's draws read (a triangle's three: six bytes). */
+#define NATIVE_PASS_LIST_BYTES 2U
+
 static int prepare_clear(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_record *record);
 static int prepare_target(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_prepared_event *begin);
 static int prepare_target_clear(struct bcm2711_vulkan_native_pass *pass);
@@ -26,6 +29,7 @@ static int prepare_depth(struct bcm2711_vulkan_native_pass *pass, const struct b
 static int collect_draws(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_prepared_event *begin, uint64_t *remaining, const struct bcm2711_vulkan_prepared_event **next);
 static int allocate_storage(struct bcm2711_vulkan_native_pass *pass, uint64_t bytes, unsigned fill, uint64_t *remaining, struct bcm2711_native_storage **storage);
 static int prepare_lists(struct bcm2711_vulkan_native_pass *pass, uint64_t *remaining);
+static uint32_t overflow_bytes(const struct bcm2711_vulkan_native_pass *pass);
 static void select_boxes(struct bcm2711_vulkan_native_pass *pass);
 static bool box_add(struct bcm2711_native_pass *state, const uint32_t *box);
 static void prepare_image(struct bcm2711_native_storage *storage, struct bcm2711_native_pass_image *image);
@@ -841,6 +845,7 @@ prepare_lists(
 	struct bcm2711_native_storage *storage;
 	struct bcm2711_vulkan_native_draw *draw;
 	struct bcm2711_v3d_cl_job *job;
+	uint32_t overflow;
 	uint32_t index;
 	uint32_t cursor;
 	int error;
@@ -892,11 +897,15 @@ prepare_lists(
 	if (error != 0)
 		return error;
 
-	/* Four independently mapped overflow reserves support supervised native binning without allocation in IRQ service. */
+	/*
+	 * Four independently mapped overflow reserves support supervised native
+	 * binning without allocation in IRQ service, sized by the pass's work.
+	 */
 	job = &pass->job.command.cl;
+	overflow = overflow_bytes(pass);
 	for (index = 0; index < 4U; index++) {
 		/* The binner reads only what it wrote into an overflow reserve; a reused one is not zeroed. */
-		error = allocate_storage(pass, 256U * 1024U, BCM2711_NATIVE_STORAGE_WRITTEN, remaining, &storage);
+		error = allocate_storage(pass, overflow, BCM2711_NATIVE_STORAGE_WRITTEN, remaining, &storage);
 		if (error != 0)
 			return error;
 		job->overflow[index].address = storage->view->address;
@@ -924,6 +933,39 @@ prepare_lists(
 
 	/* Succeeded: the caller owns a complete cleaned native graphics job without any target mutation or launch. */
 	return 0;
+}
+
+/*
+ * The size of each of a pass's four overflow pools: enough for the tile
+ * lists of its primitives (every vertex or index of every instance counted
+ * at NATIVE_PASS_LIST_BYTES), in whole 256 KiB units between one unit and
+ * the largest pool.  Running out stops the pass, so the estimate errs
+ * high: a triangle the binner keeps takes about one to two bytes in each
+ * tile it meets.
+ */
+static uint32_t
+overflow_bytes(
+	const struct bcm2711_vulkan_native_pass *pass)
+{
+	const struct bcm2711_vulkan_native_draw *draw;
+	uint64_t elements;
+	uint64_t pool;
+
+	/* Every vertex or index the pass's draws read, over all their instances. */
+	elements = 0;
+	for (draw = pass->first; draw != NULL; draw = draw->next)
+		elements += (uint64_t)draw->vertices * (draw->instances != 0 ? draw->instances : 1U);
+
+	/* A quarter of the estimate a pool, rounded up to whole units and bounded. */
+	pool = (elements * NATIVE_PASS_LIST_BYTES + 3U) / 4U;
+	pool = (pool + BCM2711_V3D_OVERFLOW_UNIT - 1U) / BCM2711_V3D_OVERFLOW_UNIT * BCM2711_V3D_OVERFLOW_UNIT;
+	if (pool < BCM2711_V3D_OVERFLOW_UNIT)
+		pool = BCM2711_V3D_OVERFLOW_UNIT;
+	if (pool > BCM2711_V3D_OVERFLOW_MAX)
+		pool = BCM2711_V3D_OVERFLOW_MAX;
+
+	/* Succeeded: the size of each pool. */
+	return (uint32_t)pool;
 }
 
 /* Copies one complete owned mapping's numerical and CPU interval into an unpublished serializer descriptor. */
