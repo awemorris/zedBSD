@@ -327,6 +327,23 @@ int bcm2711_clock_hz(uint32_t clock_id, uint32_t *hz);
 int bcm2711_clock_prepare(uint32_t clock_id, uint32_t minimum_hz, uint32_t *hz);
 void bcm2711_clock_report(const char *family, const char *name, uint32_t clock_id);
 
+/*
+ * What the firmware says about the board while frames run: the CPU clock it
+ * set and the one it measures, the core and V3D clocks, the SoC's temperature
+ * and its throttling flags.  A question it did not answer leaves zero.
+ */
+struct bcm2711_board_state {
+	uint32_t arm_hz;
+	uint32_t arm_measured_hz;
+	uint32_t core_hz;
+	uint32_t v3d_hz;
+	uint32_t milli_celsius;
+	uint32_t throttled;
+};
+
+/* Asks the firmware for the board's state (firmware.c on the Pi 4, v3d71-firmware.c on the Pi 5). */
+void bcm2711_board_state_read(struct bcm2711_board_state *state);
+
 /* The decoding of a compositor display list (list.c). */
 void bcm2711_list_decode(const volatile uint32_t *memory, uint32_t start, struct bcm2711_list *list);
 bool bcm2711_list_copy_prepare(const uint32_t *snapshot, uint32_t source, const struct bcm2711_list_range *reserved, unsigned reserved_count, uint32_t *image, uint32_t image_words, struct bcm2711_list_copy *copy);

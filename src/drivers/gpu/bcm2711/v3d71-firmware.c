@@ -83,6 +83,23 @@
 #define MAILBOX_POLL_LIMIT		100000U
 
 /*
+ * The board's state while frames run (Raspberry Pi firmware wiki, "Mailbox
+ * property interface"; Linux drivers/hwmon/raspberrypi-hwmon.c for the
+ * throttling flags): a clock's rate as set and as measured, the SoC's
+ * temperature in thousandths of a degree (sensor 0), and the throttling
+ * flags, whose request word names the sticky bits to clear (zero keeps
+ * them).  The clock numbers are those of the Pi 4's firmware.
+ */
+#define FIRMWARE_TAG_CLOCK_HZ		0x00030002U
+#define FIRMWARE_TAG_CLOCK_MEASURED_HZ	0x00030047U
+#define FIRMWARE_TAG_TEMPERATURE	0x00030006U
+#define FIRMWARE_TAG_THROTTLED		0x00030046U
+#define FIRMWARE_CLOCK_ARM		3U
+#define FIRMWARE_CLOCK_CORE		4U
+#define FIRMWARE_CLOCK_V3D		5U
+#define FIRMWARE_TEMPERATURE_SOC	0U
+
+/*
  * The mailbox registers.
  *
  * Mapped once by bcm2712_firmware_init() and kept for as long as the kernel
@@ -461,4 +478,39 @@ read_answer(
 
 	/* Succeeded: values holds the answer. */
 	return 0;
+}
+
+/*
+ * Asks the firmware for the board's state; each question it does not
+ * answer leaves its field zero.
+ */
+void
+bcm2711_board_state_read(
+	struct bcm2711_board_state *state)
+{
+	uint32_t values[1];
+	uint32_t answered;
+
+	/* Every field starts unanswered. */
+	kern_memset(state, 0, sizeof(*state));
+
+	/* The clocks: the CPU's as set and as measured, the core's and V3D's. */
+	if (bcm2712_clock_get(FIRMWARE_TAG_CLOCK_HZ, FIRMWARE_CLOCK_ARM, &state->arm_hz) != 0)
+		state->arm_hz = 0U;
+	if (bcm2712_clock_get(FIRMWARE_TAG_CLOCK_MEASURED_HZ, FIRMWARE_CLOCK_ARM, &state->arm_measured_hz) != 0)
+		state->arm_measured_hz = 0U;
+	if (bcm2712_clock_get(FIRMWARE_TAG_CLOCK_HZ, FIRMWARE_CLOCK_CORE, &state->core_hz) != 0)
+		state->core_hz = 0U;
+	if (bcm2712_clock_get(FIRMWARE_TAG_CLOCK_HZ, FIRMWARE_CLOCK_V3D, &state->v3d_hz) != 0)
+		state->v3d_hz = 0U;
+
+	/* The SoC's temperature. */
+	if (bcm2712_clock_get(FIRMWARE_TAG_TEMPERATURE, FIRMWARE_TEMPERATURE_SOC, &state->milli_celsius) != 0)
+		state->milli_celsius = 0U;
+
+	/* The throttling flags, the sticky ones kept. */
+	values[0] = 0U;
+	answered = 0U;
+	if (bcm2712_firmware_property(FIRMWARE_TAG_THROTTLED, values, 1U, 1U, &answered) == 0 && answered >= 4U)
+		state->throttled = values[0];
 }
