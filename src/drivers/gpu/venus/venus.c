@@ -345,7 +345,8 @@ venus_publish(
 		venus_job_reserve,
 		venus_job_commit,
 		venus_job_cancel,
-		venus_job_capacity
+		venus_job_capacity,
+		NULL
 	};
 	static const struct drv_gpu_recovery_ops recovery = {
 		venus_stop_begin,

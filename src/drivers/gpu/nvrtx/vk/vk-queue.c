@@ -111,6 +111,7 @@ queue_submit(
 	struct nvrtx_vk_fence *fence;
 	uint32_t command_count;
 	uint32_t taken;
+	uint32_t sent;
 	uint64_t submits;
 	uint64_t index;
 	uint64_t fence_id;
@@ -140,6 +141,7 @@ queue_submit(
 
 	/* Puts each command buffer's runs on the GPU; the first that fails ends the submission. */
 	error = 0;
+	sent = session->gpu_sends;
 	for (index = 0U; index < command_count; index++) {
 		command = nvrtx_vk_payload(session, I915_VK_OBJ_COMMAND_BUFFER, commands[index]);
 		if (command == NULL) {
@@ -161,6 +163,19 @@ queue_submit(
 		fence->submitted = true;
 		nvrtx_vk_gpu_last(session->owner, &fence->run);
 	}
+
+	/*
+	 * A failure after some of the submission's runs were put on the GPU is
+	 * not a refusal (the runs go on): the submission is lost (EIO), so no
+	 * caller takes it for work that never started.
+	 */
+	if (error != 0 && session->gpu_sends != sent)
+		error = EIO;
+
+	/* Counted for a job's outcome (the renderer's GPU_JOB_SUBMIT): one more ran, and whether it succeeded. */
+	session->queue_ran++;
+	if (error == 0)
+		session->queue_accepted++;
 
 	/* The submission's result. */
 	result = queue_result(error);

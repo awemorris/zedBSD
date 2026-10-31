@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=ws291-job-submit-design -->
 
-# 案: reserve・command・commit を 1 本の ioctl に（GPU core の job の ABI、未実装）
+# 案: reserve・command・commit を 1 本の ioctl に（GPU core の job の ABI）
 
 - 親: [WS291](ws.md)、[ws291-p006](phase006/phase.md) の q1668-i02 節。書いた: 2026-10-29 P2。状態: 案 A・B ともユーザーが採った（2026-10-29、
   ws.md の q1668-i02 節）。design-reviewer の後に Q1 へ送ってから実装。番号は WS306 の予定（'G' 46〜48、GPU_CAP 131072）と重ならない物（Q1）。
@@ -142,7 +142,7 @@ struct gpu_job_retire {
   残りは GPU_COMMAND の中の kernel の frame（decode・executor・ring、約 13 µs）と libvulkan の encode・system call。
 - 案 B: reap の 8〜14 本が 1 本に。1 submit あたり約 1 µs の見込み（record ごとの system call 約 1 本分）。
 
-## 効果の基準（測る前に決める、ユーザー「足してみて効果のなかったioctlは、採用しなくてもいいです。」）
+## 効果の基準（測る前に決める。2026-10-29 ユーザーから、足して効果の無かった ioctl は採らなくてよい、という趣旨の答えを受けた）
 
 - 実機（RDNA、timing 無し、bench の subs-1000 と subs-100、同じ kernel・libvulkan の組で前後を 3 run ずつ交互に）で、subs-1000 の submit の ms/frame
   の差が、同じ build の run の間の揺れ（最大 − 最小、2 つの値に分かれる時は同じ側の値どうし）を越えて減った時だけ効果ありとする。
@@ -188,3 +188,49 @@ struct gpu_job_retire {
   copyout の EFAULT、別の thread の COMMIT・CANCEL・WAIT CONSUME、B の copyout の失敗・重複・PENDING・MISSING）、venus-reg、全 driver の build。
 - 問題が無いと確かめられた所（reviewer）: admission の中の reserve に deadlock は無い、deadline 切れ・device lost は admit の ENODEV で FAULTED、
   別の thread は job_action の EBUSY と後の EALREADY、取りこぼしは無い、marker の順は今より厳しい、layout に padding 無し、番号は空き。
+
+## 2026-10-31 の改訂（P3、q1785、main b689bbf66 の上、nvrtx を最初の driver に）
+
+2026-10-31 Q1 から、採られた案 A・B を q1785 の中で今の main に合わせて直し、design-reviewer に通して Q1 に送り、uapi・gpu.c・libvulkan・nvrtx に
+実装する指示を受けた（他の driver は任意の op と今の道で動き続ける）。上の本文と reviewer の節を前提に、変わる所だけを書く。
+
+### 今の main との違い
+
+- 番号: p023 が 'G' 46（GPU_IMAGE_LAYOUTS）と GPU_CAP 131072（IMAGE_LAYOUTS）を使った。案 A・B は上の 'G' 49・50 と GPU_CAP 262144・524288
+  のまま（'G' 47・48 は空き、WS306 の予定は Q1 が 'G' 51〜53・GPU_CAP 1048576 に移した）。
+- 最初の driver は amdrdna でなく nvrtx（RX 5600 XT は抜かれている。amdrdna は後で同じ形、それまで bit を出さず今の道）。
+- nvrtx の今（WS291 p024、692209073）: runtime_command は session の worker の queue が空なら呼び手の thread で frame を走らせる。runtime_commit は
+  queue が空なら marker をその場で取る（park か完了）ので、reviewer の M1（marker が worker の queue に残って次の同期の frame が EAGAIN）は nvrtx
+  では起きない（実機 subs-1000 で command_ran 61923 回に deferred 24 回）。
+- 実機の内訳（RTX 2070、subs-1000、c5 の診断、`GPU_IOCTL_TIMING`）: 1 submit に RESERVE kernel 4 µs、GPU_COMMAND kernel 21 µs、COMMIT kernel 2 µs、
+  reap の WAIT 平均 1 本 2 µs、ioctl の間の user 計 約 11 µs。GPU core の monitor の起床を外した診断で subs-1000 +9 %（1 submit 約 3 µs）。
+
+### 足す・変える所（design-reviewer の 2 回目 [job-submit-review2.md](job-submit-review2.md) を反映）
+
+1. **outcome の規則（BL1・M-A、上の B1 を置き換える）**: CANCELED は「stream の仕事が 1 つも GPU に届いていない」時だけ。nvrtx では OOM などの
+   失敗でも、前の command buffer や最初の push buffer が既に GPU に出ていることがある（vk-queue.c の queue_submit は最初の失敗で止まる、
+   vk-execute.c は最初の push buffer を早く出す）。よって driver は frame の間に GPU に出した run の数を数え（nvrtx: `nvrtx_vk_gpu_submit` の
+   成功ごとに `gpu_sends`）、COMMITTED（queue の操作を 1 つ以上走らせ全部成功）、CANCELED（GPU に出した run が 0）、FAULTED（他）。stream が
+   失敗しても run が 0 なら CANCELED で、その errno を `gpu_job_submit.error`（旧 reserved、出力）で返す（kernel の一時の OOM で context を
+   失わない）。op の約束: 0 か stream の errno を返し、outcome は必ず置く（EAGAIN は返さない）。
+2. **monitor の起床（M-B・M-C）**: GPU_JOB_SUBMIT の中は reserve の時の起床をせず、action の pin を外す時に 1 回。その代わり、admit の前に
+   reservation の期限（10 s）が過ぎていないかを確かめ、過ぎていれば FAULTED（monitor が見ていれば session を失わせたのと同じ）。今の道の
+   1 submit の起床は 5 回（runtime_retire の capacity を含む）で、新しい道は 3 回になる見込み。+9 % の診断（4 回を外した）は期待値ではない。
+3. **fence の無い submit の job**: 案 A の中でも job を残す（WS014 の決定を変えない、2026-10-31 Q1 も同意）。
+4. **libvulkan（M-F）**: context の mutex は再帰しないので、GPU_JOB_SUBMIT は transaction の中で reserve の準備（fence の prepare・notification の
+   作成）を済ませてから 1 本で送り、DEFERRED・EBUSY の時は mutex を外してから今の 3 本の道に戻る。EBUSY（payload が他で bind 中）は今の
+   reserve の EBUSY と同じ扱い。今の 3 本の道の OOM の CANCEL も規則 1 で直す（BUG-381、COMMAND の reply が OOM でも GPU に出たかもしれない時は
+   CANCEL_FAULT）。
+5. **RETIRE**: libvulkan の reap は pin の無い record を 64 個ずつ。kernel は entry を stack に 64 個（1 KiB）持ち、registry lock の下で
+   64×64 を見る（reviewer の minor、今は許容して記録）。
+6. **試験（M-D・M-E）**: GPU core の fixture（plan/ws014/tests、9246cf6ea で全部 PASS）と新しい `plan/ws291/tests/gpu-job-submit.c`
+   （committed・canceled（errno 付き）・deferred・faulted・期限切れ・RETIRE の pending・retired・missing・重複）を
+   `plan/ws291/tests/run-gpu-job-host.sh` で、plain と ASan/UBSan。nvrtx の数え（queue_ran・queue_accepted）は vk-d3 の host 試験。
+   nvrtx の runtime_job_command 自体と gpu_sends は host 試験に入らない（runtime.c・vk-node.c は host で build しない）: 実機の RTX で
+   成功の道、失敗の道は未試験（fault の注入の knob は後の課題）。Venus は SUBMIT の bit を出さず、今の道と RETIRE だけを通る。
+
+### 実装と実機の結果（2026-10-31 P3、[ws291-p024](phase024/phase.md) に詳細）
+
+- kernel 84f786dce・5a03a0e95、libvulkan は phase024 の記録の commit。RTX 2070 の subs-1000（timing 無し）: c8（3 本の道）28.7 → 案 A・B 32.6 fps、
+  subs-100 258.5 → 299.5 fps、big は揺れの内、100 copies の still は画素差 0。効果の基準（上）は 1 round ずつの比べで、boot ごとの揺れ（base で
+  17.0〜20.0）より大きいが、同じ window の 3 round 交互の比べは未実施。

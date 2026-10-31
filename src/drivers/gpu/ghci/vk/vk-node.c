@@ -72,7 +72,8 @@ static const struct drv_gpu_job_ops job_operations = {
 	node_reserve,
 	node_commit,
 	node_cancel,
-	node_capacity
+	node_capacity,
+	NULL
 };
 
 /* The GPU core's recovery calls; the table lives as long as the kernel. */

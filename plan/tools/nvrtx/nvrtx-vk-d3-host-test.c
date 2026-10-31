@@ -2079,8 +2079,11 @@ test_submit(const char *directory)
 	command_begin(&client, GPU_OP_GET_FENCE_STATUS);
 	vulkan_write_u64(&client, TEST_DEVICE);
 	vulkan_write_u64(&client, 0x514);
+	session->queue_ran = 0U;
+	session->queue_accepted = 0U;
 	error = frame_run(session, &client);
 	check(error == 0, "submit: the submission ran");
+	check(session->queue_ran == 1U && session->queue_accepted == 1U, "submit: one queue submission counted, accepted");
 	at = TEST_REPLY_AT / 4U;
 	check(reply_u32(&at) == GPU_OP_QUEUE_SUBMIT && reply_u32(&at) == VK_SUCCESS, "submit: success");
 	check(reply_u32(&at) == GPU_OP_GET_FENCE_STATUS && reply_u32(&at) == VK_SUCCESS, "submit: the fence is signaled");

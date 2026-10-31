@@ -452,6 +452,10 @@ static void gpu_job_unbind(struct gpu_session *session, uint64_t sequence);
 static int gpu_job_admit(struct gpu_session *session, uint64_t sequence);
 static int gpu_job_observe(struct gpu_session *session, uint64_t sequence, struct drv_gpu_completion **result);
 static int gpu_wait_ioctl(struct gpu_session *session, uintptr_t argument);
+static int gpu_job_submit_ioctl(struct gpu_session *session, uintptr_t argument);
+static int gpu_job_retire_ioctl(struct gpu_session *session, uintptr_t argument);
+static uint32_t gpu_job_submit_finish(struct gpu_session *session, uint64_t sequence, struct drv_gpu_completion *completion,
+				      void *reservation, uint32_t outcome);
 static int gpu_fence_ioctl(struct gpu_session *session, unsigned long command, uintptr_t argument);
 static int gpu_fence_create_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_fence_bind_ioctl(struct gpu_session *session, uintptr_t argument);
@@ -2174,6 +2178,16 @@ gpu_ioctl_body(
 		return 0;
 	}
 
+	/* Retiring ended jobs, like a wait, leaves this open's other operations going. */
+	if (command == GPU_JOB_RETIRE) {
+		error = gpu_job_retire_ioctl(session, argument);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the named records that had ended are consumed. */
+		return 0;
+	}
+
 	/* A completion wait must allow another thread on this fd to submit work. */
 	if (command == GPU_COMMAND_WAIT) {
 		error = gpu_wait_ioctl(session, argument);
@@ -2301,6 +2315,10 @@ gpu_ioctl_body(
 	case GPU_COMMAND:
 		/* Submits an independent kernel copy of the backend command stream. */
 		error = gpu_command_ioctl(session, argument);
+		break;
+	case GPU_JOB_SUBMIT:
+		/* Reserves a job, runs its native command stream and commits or cancels it, as one operation. */
+		error = gpu_job_submit_ioctl(session, argument);
 		break;
 	case GPU_RESOURCE_EXPORT:
 		/* Exports one allocation capability without granting session-wide authority. */
@@ -2690,6 +2708,13 @@ gpu_info_ioctl(
 	/* A device with its own layouts says so, whatever its backend reported. */
 	if (device->ops->layouts != NULL)
 		information.capabilities |= GPU_CAP_IMAGE_LAYOUTS;
+
+	/* Jobs whose stream the backend runs at once may be submitted in one call; ended jobs retire in batches. */
+	if ((information.capabilities & GPU_CAP_JOB) != 0U) {
+		information.capabilities |= GPU_CAP_JOB_RETIRE;
+		if ((information.capabilities & GPU_CAP_COMMAND) != 0U && device->ops->jobs->command != NULL)
+			information.capabilities |= GPU_CAP_JOB_SUBMIT;
+	}
 
 	/* Returns the initialized snapshot to the requesting process. */
 	error = copyout(&information, argument, sizeof(information));
@@ -6643,6 +6668,349 @@ gpu_wait_ioctl(
 		return error;
 
 	/* Succeeded: userspace received the exact terminal transport status. */
+	return 0;
+}
+
+/*
+ * Reserves a job, runs its native command stream at once on the caller's
+ * thread through the backend's job command, and commits or cancels the job
+ * as the stream's outcome says, in one call (GPU_JOB_SUBMIT).  The
+ * reservation is made as GPU_JOB_RESERVE makes it (its sequence copied out
+ * before the backend reserves), and holds the job's action pin until the
+ * outcome is settled, so no other action and no supervisor withdrawal
+ * touches it meanwhile; the supervisor is woken once, at the end.
+ */
+static int
+gpu_job_submit_ioctl(
+	struct gpu_session *session,
+	uintptr_t argument)
+{
+	struct gpu_job_submit request;
+	struct drv_gpu_completion *completion;
+	struct drv_gpu_device *device;
+	struct kernel_handle *handle;
+	uintptr_t pointer;
+	void *reservation;
+	uint8_t *buffer;
+	uint64_t sequence;
+	uint32_t outcome;
+	unsigned long irq;
+	int error;
+
+	/* A job changes device state, and only a backend that runs a job's stream at once takes one in a call. */
+	device = session->device;
+	if (session->writable == 0U)
+		return EACCES;
+	if ((device->ops->capabilities & GPU_CAP_JOB) == 0U ||
+	    (device->ops->capabilities & GPU_CAP_COMMAND) == 0U ||
+	    device->ops->jobs->command == NULL)
+		return EOPNOTSUPP;
+
+	/* The fixed-width request. */
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+
+	/* The reservation's fields as GPU_JOB_RESERVE checks them, the stream's as GPU_COMMAND does. */
+	if (request.version != GPU_ABI_VERSION ||
+	    request.size != sizeof(request) ||
+	    request.flags != 0U || request.error != 0 ||
+	    request.sequence != 0U || request.outcome != 0U || request.fd < -1)
+		return EINVAL;
+	if ((request.fd == -1 && request.generation != 0U) ||
+	    (request.fd != -1 && request.generation == 0U))
+		return EINVAL;
+	if (request.bytes == 0U || request.bytes > GPU_COMMAND_MAX || (request.bytes & 3U) != 0U)
+		return EINVAL;
+	error = gpu_user_range(request.address, request.bytes, &pointer);
+	if (error != 0)
+		return error;
+
+	/* The stream's kernel copy, before anything is reserved. */
+	buffer = kern_malloc(request.bytes);
+	if (buffer == NULL)
+		return ENOMEM;
+	error = copyin(pointer, buffer, request.bytes);
+	if (error != 0) {
+		kern_free(buffer);
+		return error;
+	}
+
+	/* Supervision exists before native submission becomes possible; the payload's reference covers a close. */
+	error = gpu_monitor_start(device);
+	if (error != 0) {
+		kern_free(buffer);
+		return error;
+	}
+	handle = NULL;
+	if (request.fd != -1) {
+		error = gpu_fence_get(session, request.fd, 0U, &handle);
+		if (error != 0) {
+			kern_free(buffer);
+			return error;
+		}
+	}
+
+	/* The identity, then its record. */
+	error = gpu_handle_allocate(&request.sequence);
+	if (error == 0)
+		error = gpu_completion_reserve(session, request.sequence, &completion);
+	if (error != 0) {
+		handle_put(handle);
+		kern_free(buffer);
+		return error;
+	}
+	sequence = request.sequence;
+
+	/* The record is a reservation, pinned for this action until its outcome is settled. */
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	completion->observers++;
+	completion->job_action = 1U;
+	completion->job_state = GPU_JOB_RESERVED;
+	completion->job_deadline = gpu_monitor_deadline(CONFIG_GPU_JOB_RESERVATION_MS);
+	completion->backend_owned = 1U;
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The payload, then the identity disclosed, then the backend's reservation. */
+	error = gpu_job_bind(session, completion, handle, request.generation);
+	if (error == 0)
+		error = copyout(&request, argument, sizeof(request));
+	reservation = NULL;
+	if (error == 0) {
+		error = device->ops->jobs->reserve(
+			device->private_data, session->backend, request.timeline,
+			completion, &reservation);
+	}
+
+	/* A refused reservation leaves nothing: no callback, no binding, no record. */
+	outcome = 0U;
+	if (error != 0) {
+		gpu_job_unbind(session, sequence);
+		gpu_completion_discard(completion);
+	} else {
+		irq = spin_lock_irqsave(&gpu_registry_lock);
+
+		completion->job_reservation = reservation;
+		completion->reservation_pending = 1U;
+		completion->unpublished = 0U;
+		session->native_submitted = 1U;
+
+		spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+		/* The stream, at once; a stream that failed is canceled when none of its work reached the GPU, else a fault. */
+		error = device->ops->jobs->command(
+			device->private_data,
+			session->backend,
+			buffer,
+			request.bytes,
+			&outcome);
+		if (error != 0 && outcome != GPU_JOB_SUBMIT_CANCELED)
+			outcome = GPU_JOB_SUBMIT_FAULTED;
+		request.error = error;
+		outcome = gpu_job_submit_finish(session, sequence, completion, reservation, outcome);
+		error = 0;
+	}
+
+	/* The action's pin goes; the supervisor looks once at what changed. */
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	completion->job_action = 0U;
+	waitq_wake_all(&device->monitor_waitq);
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	gpu_completion_observer_leave(completion, 0U, 0U);
+	handle_put(handle);
+	kern_free(buffer);
+	if (error != 0)
+		return error;
+
+	/* The outcome; a failed copy leaves the job as the outcome says. */
+	request.outcome = outcome;
+	error = copyout(&request, argument, sizeof(request));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the job is committed, gone or faulted, as the outcome says. */
+	return 0;
+}
+
+/*
+ * Settles a GPU_JOB_SUBMIT job after its stream ran, as GPU_JOB_COMMIT or
+ * GPU_JOB_CANCEL would: committed (admitted, then the backend's commit),
+ * withdrawn (the backend's normal cancel, the payload unbound and the
+ * record discarded), or faulted (the backend's fault cancel, the open
+ * lost).  A commit or withdrawal that fails becomes a fault.  Returns the
+ * outcome that holds.
+ */
+static uint32_t
+gpu_job_submit_finish(
+	struct gpu_session *session,
+	uint64_t sequence,
+	struct drv_gpu_completion *completion,
+	void *reservation,
+	uint32_t outcome)
+{
+	struct drv_gpu_device *device;
+	unsigned long irq;
+	unsigned lost;
+	int error;
+
+	device = session->device;
+	lost = 0U;
+
+	/*
+	 * Accepted work: admitted before it is published, so even an immediate
+	 * completion signals its generation.  A reservation whose deadline
+	 * passed while its stream ran (the supervisor was not woken for it) is
+	 * a fault, as the supervisor would have made it.
+	 */
+	if (outcome == GPU_JOB_SUBMIT_COMMITTED) {
+		error = 0;
+		irq = spin_lock_irqsave(&gpu_registry_lock);
+
+		if (completion->job_deadline != 0U && completion->job_deadline <= sched_ticks())
+			error = ETIMEDOUT;
+
+		spin_unlock_irqrestore(&gpu_registry_lock, irq);
+		if (error == 0)
+			error = gpu_job_admit(session, sequence);
+		if (error == 0)
+			error = device->ops->jobs->commit(device->private_data, session->backend, reservation, completion);
+		if (error != 0)
+			outcome = GPU_JOB_SUBMIT_FAULTED;
+	}
+
+	/* Definitely nothing accepted: the reservation is withdrawn without a completion. */
+	if (outcome == GPU_JOB_SUBMIT_CANCELED || outcome == GPU_JOB_SUBMIT_DEFERRED) {
+		error = device->ops->jobs->cancel(device->private_data, session->backend, reservation, completion, 0U);
+		if (error == 0) {
+			gpu_job_unbind(session, sequence);
+			gpu_completion_discard(completion);
+			drv_gpu_capacity_changed(device);
+		} else {
+			outcome = GPU_JOB_SUBMIT_FAULTED;
+		}
+	}
+
+	/* Anything else is uncertain: the job ends with an error and the open is lost. */
+	if (outcome != GPU_JOB_SUBMIT_COMMITTED && outcome != GPU_JOB_SUBMIT_CANCELED && outcome != GPU_JOB_SUBMIT_DEFERRED) {
+		outcome = GPU_JOB_SUBMIT_FAULTED;
+		error = device->ops->jobs->cancel(device->private_data, session->backend, reservation, completion, 1U);
+		if (error == 0)
+			lost = 1U;
+	}
+
+	/* A lost open is published at once to its fences and descriptors. */
+	if (lost != 0U) {
+		irq = spin_lock_irqsave(&gpu_registry_lock);
+
+		gpu_session_fail_locked(session, EIO, 1U);
+
+		spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+		poll_notify();
+	}
+
+	/* Succeeded: the outcome that holds. */
+	return outcome;
+}
+
+/*
+ * Consumes the named job records of this open that have ended
+ * (GPU_JOB_RETIRE): each as a GPU_COMMAND_WAIT of no time with consumption
+ * would, all in one call.  A record not ended, observed for consumption by
+ * another caller, or named twice is PENDING; a sequence naming no job
+ * record of this open is MISSING.  A failed copy back consumes nothing.
+ */
+static int
+gpu_job_retire_ioctl(
+	struct gpu_session *session,
+	uintptr_t argument)
+{
+	struct gpu_job_retire request;
+	struct gpu_job_retire_entry entries[GPU_JOB_RETIRE_MAX];
+	struct drv_gpu_completion *taken[GPU_JOB_RETIRE_MAX];
+	struct drv_gpu_completion *completion;
+	uintptr_t pointer;
+	unsigned long irq;
+	uint32_t index;
+	uint32_t slot;
+	uint32_t retired;
+	int error;
+
+	/* Observation follows read authority, of a backend with jobs. */
+	if (session->readable == 0U)
+		return EACCES;
+	if ((session->device->ops->capabilities & GPU_CAP_JOB) == 0U)
+		return EOPNOTSUPP;
+
+	/* The request and its entries. */
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+	if (request.version != GPU_ABI_VERSION || request.size != sizeof(request) ||
+	    request.count == 0U || request.count > GPU_JOB_RETIRE_MAX ||
+	    request.flags != 0U || request.retired != 0U || request.reserved != 0U)
+		return EINVAL;
+	error = gpu_user_range(request.address, (uint32_t)(request.count * sizeof(entries[0])), &pointer);
+	if (error != 0)
+		return error;
+	error = copyin(pointer, entries, request.count * sizeof(entries[0]));
+	if (error != 0)
+		return error;
+	for (index = 0U; index < request.count; index++) {
+		if (entries[index].sequence == 0U || entries[index].state != 0U || entries[index].status != 0U)
+			return EINVAL;
+	}
+
+	/* Each ended job record not being consumed is pinned for consumption; the slots are looked at once each. */
+	retired = 0U;
+	irq = spin_lock_irqsave(&gpu_registry_lock);
+
+	for (index = 0U; index < request.count; index++) {
+		taken[index] = NULL;
+		entries[index].state = GPU_JOB_RETIRE_MISSING;
+		for (slot = 0U; slot < GPU_SUBMIT_MAX; slot++) {
+			completion = &session->completions[slot];
+			if (completion->listed == 0U || completion->sequence != entries[index].sequence ||
+			    completion->job_state == GPU_JOB_NONE)
+				continue;
+			entries[index].state = GPU_JOB_RETIRE_PENDING;
+			if (completion->completed == 0U || completion->consuming != 0U || completion->observers == UINT_MAX)
+				break;
+			completion->observers++;
+			completion->consuming = 1U;
+			entries[index].state = GPU_JOB_RETIRE_RETIRED;
+			entries[index].status = (uint32_t)completion->error;
+			taken[index] = completion;
+			retired++;
+			break;
+		}
+	}
+
+	spin_unlock_irqrestore(&gpu_registry_lock, irq);
+
+	/* The states back to the caller; only a complete copy consumes. */
+	request.retired = retired;
+	error = copyout(entries, pointer, request.count * sizeof(entries[0]));
+	if (error == 0)
+		error = copyout(&request, argument, sizeof(request));
+	for (index = 0U; index < request.count; index++) {
+		if (taken[index] == NULL)
+			continue;
+		if (error == 0) {
+			gpu_completion_observer_leave(taken[index], 1U, 1U);
+		} else {
+			gpu_completion_observer_leave(taken[index], 0U, 1U);
+		}
+	}
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the ended records named are consumed. */
 	return 0;
 }
 

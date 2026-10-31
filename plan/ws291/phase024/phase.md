@@ -107,3 +107,32 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   - 画面（keiland-shot、c8 対 base）: desktop・Notes・browser とも差は右上の時計の箱（x=1881..1894、y=17..27）だけ（96〜105 画素）。
   - desktop（frame-ops）: base launch 63・type 61・output 65・drag 61・home 63・wiseview 64、c8 63・61・66・61・63・64 fps（scroll・hover・keys は入力の間隔）。後退なし。
   - 起動の dmesg の `vram-window retry` の行は base・c8 の両方に出る（前からの行）。戻し: 14 file と NVMe の kernel の cksum 一致、cfg の bl 行 0、Debian。
+
+### 案 A・B（GPU_JOB_SUBMIT・GPU_JOB_RETIRE、[job-submit-design.md](../job-submit-design.md)）の実装（2026-10-31 Q1 の指示、q1785 の中）
+
+- 2026-10-31 Q1 から、ユーザーが 2026-10-29 に採った案 A・B を今の main に合わせて直し、design-reviewer に通して Q1 に送り、uapi・gpu.c・libvulkan・
+  nvrtx に実装する指示を受けた（他の driver は任意の op と今の道で動く。fence の無い submit も job を残す）。あわせて WS014 の GPU core の fixture を
+  今の tree で動くように直す指示（ab2ddbf7c・9246cf6ea、`plan/ws291/tests/run-gpu-job-host.sh`、21 run PASS）。
+- design-reviewer の 2 回目 [job-submit-review2.md](../job-submit-review2.md): blocker 1（BL1: nvrtx では OOM でも前の仕事が GPU に出ている → CANCELED は
+  GPU に何も出していない時だけ）、major 6（M-A〜M-F）、minor 10。design の末尾の節に反映。今の 3 本の道の同じ欠陥は Q1 が BUG-381 に。
+- kernel の部分（84f786dce）: uapi（'G' 49・50、GPU_CAP 262144・524288、`gpu_job_submit.error` は出力）、gpu.h の任意の `jobs->command`（8 driver の表に
+  NULL）、gpu.c（SUBMIT は admission の中で reserve → backend の command → admit・commit か cancel、起床は最後の 1 回、admit の前に reservation の期限、
+  RETIRE は名指しの job の record を 64 個まで consume、bit は backend が JOB を報告する時だけ core が足す）、nvrtx（`runtime_job_command`、frame ごとに
+  queue の submit の数・成功の数・GPU に出した run の数 `gpu_sends` を数えて outcome）。host: `run-gpu-job-host.sh`（ws014 の 10 fixture と新しい
+  `gpu-job-submit.c`、plain と ASan/UBSan）PASS、nvrtx vk-d3 228/0、config/ci の 19 と RTX の vmunix warning 0。host 試験に入らない所: nvrtx の
+  runtime_job_command と gpu_sends（runtime.c・vk-node.c は host で build しない）。
+- libvulkan（未 commit の時点の記録）: `vulkan_writer.job` を付けた queue の transaction は GPU_JOB_SUBMIT 1 本（context の mutex の中、fence の prepare と
+  ledger の entry は前に作る）。ioctl の失敗・DEFERRED は何も走っていないので今の 3 本の道へ。ledger の reap は `GPU_CAP_JOB_RETIRE` の時 64 個ずつ
+  GPU_JOB_RETIRE。BUG-381: 一度 libvulkan で全 driver の OOM を fault にする保守的な形を入れたが、Q1 の指摘（一時の OOM が全 driver で device lost）で
+  取りやめ、答えを返す driver が「GPU に出した後の失敗」を EIO（device lost）で答える形にした。nvrtx は直した（queue_submit の間に gpu_sends が
+  増えていたら EIO）。他の driver の調べと直し方は [BUG-381](../../bugs/BUG-381.md)。
+- 実機（10.0.10.3、`rtx-p024.sh`、kernel 84f786dce = js-config 1912060278、libvulkan はこの節の未 commit の版 lv1、他は main の 13 file、22:47〜）:
+  - js1（TIMING=1、SHOT=1）: subs-1000 の vkQueueSubmit は reserve の数 177/97455（3 本の道に戻ったのは 0.2 %）、submit 43 µs（timing 込み、
+    c2 の 65 µs・base の 75 µs）、context_hold 28 µs。still の one・each・subs は ab5 の base と 3 枚とも max 0・differ 0、one と subs も差 0。
+    戻し cksum 一致、Debian。
+  - js2（timing 無し）: subs-1000 32.56（c8 28.72）、subs-100 299.5（c8 258.5）、big-1000 115.7、big-100 568.4 fps。
+  - c8b（同じ window の直後、kernel 692209073、main の 14 file = 3 本の道）: subs-1000 27.89・subs-100 255.3 fps。案 A・B は subs-1000 +17 %・subs-100 +17 %。
+- QEMU の Venus（23:00 前後、`plan/ws291/tests/venus-reg.sh`、forge の image を今の tree（kernel 84f786dce・libvulkan のこの版）で
+  `build-forge-image.sh build/p024/forge` から作り、libvulkan は lv2）: 起動、forge-guest・fence-guest（600 frame）・wltest（mailbox、100 frame で
+  swapchain を作り直し）・mview mailbox・mview の draw ごと・20 submit、compositor の VULKAN_ERROR 0、`venus-reg: PASS`。Venus は jobs->command を
+  持たないので SUBMIT は通らず（今の 3 本の道）、RETIRE は通る（GPU_CAP_JOB を報告する backend）。

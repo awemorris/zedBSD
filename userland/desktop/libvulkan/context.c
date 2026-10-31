@@ -19,6 +19,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <uapi/gpu.h>
+#include <uapi/gpu-job.h>
 #include "internal.h"
 
 #define VULKAN_REPLY_TRAILER_BYTES 20U
@@ -785,6 +786,7 @@ vulkan_context_transaction(
 	struct vulkan_writer command;
 	struct gpu_command request;
 	struct gpu_command_submit submission;
+	struct gpu_job_submit job;
 	uint64_t sequence;
 	uint64_t mark;
 	uint8_t *response;
@@ -871,7 +873,50 @@ vulkan_context_transaction(
 	sequence = 0;
 	ran = VK_FALSE;
 	status = 0;
-	if (context->sync_command != VK_FALSE) {
+
+	/*
+	 * A queue submission sent as one job: reserved, run and committed or
+	 * canceled by the kernel in one call.  A call that failed before any
+	 * native work, or that the renderer deferred, sends nothing: the
+	 * caller goes the three-call way instead (VK_NOT_READY).
+	 */
+	if (writer->job != NULL) {
+		memset(&job, 0, sizeof(job));
+		job.version = GPU_ABI_VERSION;
+		job.size = sizeof(job);
+		job.fd = writer->job->fd;
+		job.generation = writer->job->generation;
+		job.timeline = writer->job->timeline;
+		job.address = (uintptr_t)command.data;
+		job.bytes = (uint32_t)command.bytes;
+		mark = vulkan_timing_start();
+		vulkan_sync_reap_locked(context);
+		error = __atomic_load_n(&context->error, __ATOMIC_ACQUIRE);
+		if (error != VK_SUCCESS) {
+			vulkan_writer_finish(&command);
+			return error;
+		}
+		status = ioctl(context->fd, GPU_JOB_SUBMIT, &job);
+		writer->job->outcome = 0U;
+		if (status == 0)
+			writer->job->outcome = job.outcome;
+		if (status != 0 || job.outcome == GPU_JOB_SUBMIT_DEFERRED) {
+			vulkan_writer_finish(&command);
+			return VK_NOT_READY;
+		}
+		writer->job->sequence = job.sequence;
+		writer->job->error = job.error;
+		vulkan_sync_job_submitted_locked(context, writer->job);
+		vulkan_timing_add(VULKAN_TIMING_COMMAND_RAN, mark, 0);
+
+		/* A stream the renderer failed wrote no reply: its error stands for one. */
+		if (job.error != 0) {
+			vulkan_writer_finish(&command);
+			return vulkan_kernel_error(context, job.error);
+		}
+		ran = VK_TRUE;
+	}
+	if (context->sync_command != VK_FALSE && writer->job == NULL) {
 		memset(&request, 0, sizeof(request));
 		request.version = GPU_ABI_VERSION;
 		request.size = sizeof(request);

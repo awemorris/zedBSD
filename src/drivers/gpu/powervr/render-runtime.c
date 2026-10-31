@@ -79,7 +79,8 @@ static const struct drv_gpu_job_ops job_operations = {
 	runtime_reserve,
 	runtime_commit,
 	runtime_cancel,
-	runtime_capacity
+	runtime_capacity,
+	NULL
 };
 
 /*

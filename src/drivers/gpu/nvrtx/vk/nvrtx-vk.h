@@ -71,6 +71,14 @@ struct nvrtx_vk_session {
 	uint64_t timelines;
 	/* The run its submissions are written into and the executor's programs (vk-execute.c), made at the first one. */
 	struct nvrtx_vk_execute *execute;
+	/*
+	 * The queue submissions the frames ran since the renderer last cleared
+	 * them, how many of those succeeded, and the runs put on the GPU
+	 * meanwhile (a job's outcome, GPU_JOB_SUBMIT).
+	 */
+	uint32_t queue_ran;
+	uint32_t queue_accepted;
+	uint32_t gpu_sends;
 };
 
 /*

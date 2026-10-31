@@ -41,7 +41,8 @@ static const struct drv_gpu_job_ops i915_job_ops = {
 	i915_job_reserve,
 	i915_job_commit,
 	i915_job_cancel,
-	i915_job_capacity
+	i915_job_capacity,
+	NULL
 };
 
 /*

@@ -527,7 +527,9 @@ nvrtx_vk_gpu_submit(
 		session->quiet_epoch++;
 	session->quiet_mark = after;
 
-	/* Counts the run and its push buffer's bytes. */
+	/* Counts the run and its push buffer's bytes, and for the session's job's outcome. */
+	if (session->vk != NULL)
+		session->vk->gpu_sends++;
 	nvrtx_node_count(node, &node->counts.runs, 1U);
 	nvrtx_node_count(node, &node->counts.push_bytes, bytes);
 
