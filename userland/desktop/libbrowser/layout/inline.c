@@ -2021,7 +2021,7 @@ inline_items_baseline(
 		/* A last baseline is stored as the end alignment with its flag. */
 		aligned = 0;
 		if (align == CSS_ALIGN_BASELINE || (item_last && align == CSS_ALIGN_END))
-			aligned = item_last == (last != 0) ? 2 : (flex ? 0 : 1);
+			aligned = item_last == (last != 0) ? 2 : 1;
 		if (flex && last && item_last && align != CSS_ALIGN_BASELINE)
 			aligned = 2;
 		better = best == NULL || (last_item ? child->item_column > best->item_column : child->item_column < best->item_column);
@@ -2033,6 +2033,15 @@ inline_items_baseline(
 	}
 	if (best == NULL)
 		return any ? -1 : 0;
+
+	/* In a vertical container's logical frame the central baseline is a distance below the content box's top. */
+	if (vertical == 2) {
+		if (!layout_logical_central_baseline(best, best_last, &inner))
+			inner = best->border[CSS_TOP] + best->padding[CSS_TOP] + best->height + best->padding[CSS_BOTTOM] +
+			    best->border[CSS_BOTTOM];
+		*baseline = best->y + inner;
+		return 1;
+	}
 
 	/* In a vertical container the central baseline is a distance right of the content box's left edge. */
 	if (vertical) {
@@ -2193,6 +2202,58 @@ layout_vertical_baseline(
 		if (!layout_vertical_baseline(child, last, &inner))
 			continue;
 		*offset = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + child->x + inner;
+		found = 1;
+		if (!last)
+			break;
+	}
+	return found;
+}
+
+/*
+ * Finds the first (or last) line's central baseline of a box laid out in its writing mode's logical frame
+ * (a vertical box's grid layout) as a distance below the top of its border box.  Reports whether it has one.
+ */
+int
+layout_logical_central_baseline(
+	const struct layout_box *box,
+	int last,
+	layout_unit *offset)
+{
+	const struct layout_box *child;
+	const struct layout_line *line;
+	layout_unit inner;
+	int found;
+
+	if (box->replaced)
+		return 0;
+
+	/* A flex or grid container's: its items'. */
+	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
+		found = inline_items_baseline(box, &inner, last, 2);
+		if (found > 0) {
+			*offset = box->border[CSS_TOP] + box->padding[CSS_TOP] + inner;
+			return 1;
+		}
+		if (found == 0)
+			return 0;
+	}
+	if (box->children_inline) {
+		if (box->line_count == 0)
+			return 0;
+		line = last ? &box->lines[box->line_count - 1] : &box->lines[0];
+		*offset = box->border[CSS_TOP] + box->padding[CSS_TOP] + line->y + line->height / 2;
+		return 1;
+	}
+	found = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE || child->replaced)
+			continue;
+		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
+			continue;
+		if (!layout_logical_central_baseline(child, last, &inner))
+			continue;
+		*offset = box->border[CSS_TOP] + box->padding[CSS_TOP] + child->y + inner;
 		found = 1;
 		if (!last)
 			break;
