@@ -250,6 +250,7 @@ disk_admin_idle(struct disk *target)
 	struct disk *other;
 	uint64_t first;
 	uint64_t other_first;
+	int overlapped;
 
 	if (disk_admin_span(target, 0, target->d_block_count, &leaf, &first) != 0)
 		return EINVAL;
@@ -260,7 +261,8 @@ disk_admin_idle(struct disk *target)
 	 * A transfer in flight on the target's blocks refuses it; a sibling's
 	 * transfers elsewhere on the device do not.
 	 */
-	if (disk_inflight_overlaps(leaf, first, target->d_block_count))
+	overlapped = disk_inflight_overlaps(leaf, first, target->d_block_count);
+	if (overlapped)
 		return EBUSY;
 
 	/*
