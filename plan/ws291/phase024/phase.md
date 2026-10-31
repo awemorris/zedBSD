@@ -123,8 +123,9 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   runtime_job_command と gpu_sends（runtime.c・vk-node.c は host で build しない）。
 - libvulkan（未 commit の時点の記録）: `vulkan_writer.job` を付けた queue の transaction は GPU_JOB_SUBMIT 1 本（context の mutex の中、fence の prepare と
   ledger の entry は前に作る）。ioctl の失敗・DEFERRED は何も走っていないので今の 3 本の道へ。ledger の reap は `GPU_CAP_JOB_RETIRE` の時 64 個ずつ
-  GPU_JOB_RETIRE。BUG-381: 今の道で command buffer を含む submit の OOM の答えは CANCEL でなく fault（libvulkan は GPU に出たかを知れないので、
-  全 driver で保守的に。transport の OOM（送る前）も device lost になる）。
+  GPU_JOB_RETIRE。BUG-381: 一度 libvulkan で全 driver の OOM を fault にする保守的な形を入れたが、Q1 の指摘（一時の OOM が全 driver で device lost）で
+  取りやめ、答えを返す driver が「GPU に出した後の失敗」を EIO（device lost）で答える形にした。nvrtx は直した（queue_submit の間に gpu_sends が
+  増えていたら EIO）。他の driver の調べと直し方は [BUG-381](../../bugs/BUG-381.md)。
 - 実機（10.0.10.3、`rtx-p024.sh`、kernel 84f786dce = js-config 1912060278、libvulkan はこの節の未 commit の版 lv1、他は main の 13 file、22:47〜）:
   - js1（TIMING=1、SHOT=1）: subs-1000 の vkQueueSubmit は reserve の数 177/97455（3 本の道に戻ったのは 0.2 %）、submit 43 µs（timing 込み、
     c2 の 65 µs・base の 75 µs）、context_hold 28 µs。still の one・each・subs は ab5 の base と 3 枚とも max 0・differ 0、one と subs も差 0。

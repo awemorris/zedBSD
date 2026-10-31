@@ -66,7 +66,6 @@ static VkResult queue_private_fence(struct VkQueue_T *queue, struct vulkan_queue
 static VkResult queue_enqueue(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, const VkBindSparseInfo *binds, VkFence fence, VkBool32 sparse, VkBool32 locked);
 static VkResult queue_attempt(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, const VkBindSparseInfo *binds, VkFence fence, VkBool32 sparse, struct vulkan_queue_transaction *transaction, struct vulkan_sync *completion, VkBool32 *accepted, uint64_t *capacity_sequence, VkBool32 *prepared);
 static VkResult queue_reset_completed(struct VkQueue_T *queue);
-static VkBool32 queue_has_commands(uint32_t count, const VkSubmitInfo *submits);
 static VkResult queue_submit_job(struct VkQueue_T *queue, struct vulkan_writer *writer, uint32_t count, const VkSubmitInfo *submits, uint64_t serial, uint32_t replies, struct vulkan_sync *completion, struct vulkan_reader *reader, VkResult *ended, VkBool32 *prepared, VkBool32 *submitted, VkBool32 *accepted);
 static void queue_write_waits(struct vulkan_writer *writer, struct vulkan_queue_transaction *transaction, uint32_t count, const VkSemaphore *semaphores, const VkPipelineStageFlags *stages, VkBool32 has_stages);
 static void queue_write_signals(struct vulkan_writer *writer, uint32_t count, const VkSemaphore *semaphores);
@@ -571,15 +570,11 @@ queue_attempt(
 	}
 
 	/*
-	 * An out-of-memory answer to a submission of command buffers is no
-	 * proof that none of their work reached the GPU (a renderer may have
-	 * run the ones before the one that failed): the job ends as a fault,
-	 * not a cancel (BUG-381).
+	 * An out-of-memory answer is a definite refusal: a renderer whose
+	 * failure may come after part of the submission reached the GPU
+	 * answers it as a lost device instead (BUG-381), which ends the job
+	 * as a fault.
 	 */
-	if ((status == VK_ERROR_OUT_OF_HOST_MEMORY || status == VK_ERROR_OUT_OF_DEVICE_MEMORY) && sparse == VK_FALSE &&
-	    queue_has_commands(count, submits))
-		status = VK_ERROR_DEVICE_LOST;
-
 	/* Committed work retains K supervision; definite native refusal releases only its unused reservation. */
 	mark = vulkan_timing_start();
 	status = vulkan_sync_job_finish(queue, completion, reservation, status, *accepted);
@@ -607,24 +602,6 @@ queue_attempt(
 
 	/* Succeeded: the kernel owns this exact native job independently of userspace progress. */
 	return VK_SUCCESS;
-}
-
-/* Tells whether any of the submits carries a command buffer. */
-static VkBool32
-queue_has_commands(
-	uint32_t count,
-	const VkSubmitInfo *submits)
-{
-	uint32_t request;
-
-	/* The first submit with one answers. */
-	for (request = 0; request < count; request++) {
-		if (submits[request].commandBufferCount != 0U)
-			return VK_TRUE;
-	}
-
-	/* Succeeded: none carries one. */
-	return VK_FALSE;
 }
 
 /*
