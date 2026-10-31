@@ -35,11 +35,6 @@
 #define TEXT_WEB_FACES		24
 #define TEXT_FACES		(TEXT_FACE_WEB + TEXT_WEB_FACES)
 
-/* The fonts the compositor image installs. */
-#define TEXT_DEFAULT_SANS	KEILAND_DATADIR "/fonts/keiland.ttf"
-#define TEXT_DEFAULT_MONO	KEILAND_DATADIR "/fonts/keiland-mono.ttf"
-#define TEXT_DEFAULT_FALLBACK	KEILAND_DATADIR "/fonts/keiland-fallback.ttf"
-
 struct truetype_face;
 struct text_glyph_entry;
 
@@ -129,6 +124,7 @@ struct text_system {
 
 /* Fonts (font.c). */
 int text_system_open(struct text_system *system, const struct text_font_paths *paths);
+const char *text_default_path(int face);
 void text_system_close(struct text_system *system);
 void text_select_font(const struct text_system *system, int monospace, float size, int weight, struct text_font *font);
 int text_add_face(struct text_system *system, const void *family, int weight_min, int weight_max, int italic, struct wb_buffer *data);

@@ -337,9 +337,9 @@ browser_view_create(
 		return ENOMEM;
 
 	/* The fonts the program names, and the system's for the ones it leaves out. */
-	made->fonts.sans = TEXT_DEFAULT_SANS;
-	made->fonts.mono = TEXT_DEFAULT_MONO;
-	made->fonts.fallback = TEXT_DEFAULT_FALLBACK;
+	made->fonts.sans = text_default_path(TEXT_FACE_SANS);
+	made->fonts.mono = text_default_path(TEXT_FACE_MONO);
+	made->fonts.fallback = text_default_path(TEXT_FACE_FALLBACK);
 	if (options->fonts != NULL) {
 		if (options->fonts->sans != NULL)
 			made->fonts.sans = options->fonts->sans;
