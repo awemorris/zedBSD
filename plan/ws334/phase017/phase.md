@@ -57,3 +57,25 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果（2026-11-01 03:24、s-ws334-p017）
+
+- 状態: 実装済み・試験 PASS（cleared は Q1）。
+- 作った物: `userland/desktop/libkeiland/win32/wide.c`、`input.c`、`plan/ws334/tests/unit/test-wide.c`、`test-input.c`。header・他の module・Makefile・試験の道具は変えていない。
+- 実行した command（worktree の root、`LC_ALL=C.UTF-8`）:
+  - `sh plan/ws334/tests/run-unit.sh wide input` → `test-wide: PASS (3001071 checks)` と `test-input: PASS (1008 checks)` が posix・win32（Wine）の両方、最後 `run-unit: PASS`。
+  - `sh plan/ws334/tests/run-unit.sh all` → 全部（input・media-os・os-zones・records・tools・wide）が posix・win32 で PASS、最後 `run-unit: PASS`。
+  - `git diff --check` → 出力なし。
+  - `BASE=d393d3267 sh plan/ws334/tests/check-skeleton.sh` → `headers: 19`・`sources: 22`・`check-skeleton: PASS`。
+- 壊して確かめた（git の外で、元に戻して `cmp` で一致を確認）: surrogate の範囲の境界、buffer の大きさの境界（`>=` → `>`、win32 でも FAIL）、E0・ED・F0・F4 の 2 byte 目の範囲、C0 を lead に許す、`needed >= capacity` の境界、surrogate の組の合成（+1）、truncated の長さ（+1）、`char_unit` の BMP の unit で待っている high を捨てない、wheel の符号、AltGr で ALT だけ残す、X1・X2 の取り違え、点の符号 bit、key flags の bit 30 と scan の幅。全部 FAIL した。
+- 自分で決めた点（header が黙っている所）:
+  - `keiui_win32_char_unit`: high surrogate を待っている時に surrogate でない unit が来たら、待っていた high は捨てて（state を 0 に）その unit を返す（1 回の呼びで返せる文字は 1 つ）。
+  - `utf8_from_utf16`: `consumed` は引数の検査より前に 0 にする（EINVAL でも 0）。buffer・size の検査は count が 0 でも行う。high surrogate の次が count の外にある時は組にしない。
+  - `utf16_from_utf8`: `count` が NULL でない限り EINVAL でも 0 を書く。ERANGE では先に全体の長さを測り、units は空の文字列（`units[0] = 0`）だけ。unit の数は byte の数以下。
+  - `wheel_pixels`: delta は 16 bit に切らず int のまま比例させる。vertical の 0 は負のゼロにしない。horizontal は 0 以外なら横。
+  - `modifiers`: AltGr がある時だけ CONTROL・ALT を落とす。AltGr 自体は修飾にならない。
+  - `button_code`: KL_BUTTON_LEFT・RIGHT・MIDDLE は `keiland_window.h` から、BTN_SIDE 0x113・BTN_EXTRA 0x114 は input.c の中の定数。
+  - 点・key flags は lparam を `uint64_t` にして bit を見る（sign 拡張された LPARAM でも 32 bit 以上は無視）。
+- 試験の作り: 期待の値は手で計算した表、Unicode §3.9 の表 3-8 の例、試験の中の独立な encoder（UTF-8 は表 3-6 の bit の並び、UTF-16 は D800+(v-10000)/400）。入力は大きさ ちょうどの block に写して ASan で範囲外の読みを見る。乱数（固定 seed）の 10 万の往復・10 万の切り・10 万の乱数 byte の不変条件（出力は well-formed、測りと一致、往復で安定）。
+- phase.md と header の食い違い: 無し。
+- 未実施: aarch64 Windows の実行（arm64 Wine が無い。check-skeleton の compile のみ）、実機の Windows。
