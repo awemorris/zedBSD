@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 22:28（Q1）
+最終更新: 2026-10-31 22:51（Q1）
 
 ## 担当（P1〜P8）
 
@@ -15,8 +15,8 @@
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | p025（q1784）: Pi 4 の desktop を 1920x1080 で 60 fps に → mview の 3D（21 体で 50 fps、今 28.9） | Pi 4（10.0.30.6）。この後に Pi 5（p021） |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | — | — | 返却（07:1x）。WS310 の設計を main に（問い Q310-1〜6 は下の 0i） | 次の割当を Q1 が決める |
-| P7 | — | — | [BUG-379](bugs/BUG-379.md)（q1786）: kernel の fork の livelock（親の別の thread が書く間 fork が終わらない）で Pi 4 の session の compositor が止まる。kernel の VM・libc・libvulkan の 3 か所を直す | QEMU、Pi 4 は P4 と調整 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 10 回目（q1727-i10）: shadow DOM → 縦書きの grid の揃え → animation | 今 3,472 のうち 2,922（84.16%）、Acid3 100/100・Acid2 100%。9 回目は +74、後退 0 |
+| P7 | — | — | [BUG-379](bugs/BUG-379.md)（q1786）: fork の livelock の直しを main に（c3291b1f9、QEMU で PASS・直す前は再現）。riscv64・i386 などの vfork の spawn を試験中 | Pi 4 の実機の session は P4 |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 11 回目（q1727-i11）: animation の補間・multicol・dynamic import() など | 今 3,472 のうち 2,975（85.69%）、Acid3 100/100・Acid2 100%。10 回目は shadow DOM・CSS の入れ子・@container・constructable stylesheet（+53、後退 0） |
 
 実装の担当（Sonnet・Opus の単発）: 今は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
 
