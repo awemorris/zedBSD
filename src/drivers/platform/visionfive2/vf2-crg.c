@@ -353,6 +353,43 @@ static const struct crg_clock sys_clocks[] = {
 	  { { SOURCE_NONE, DRV_VF2_CRG_SYS, 0, NULL } } },
 
 	/*
+	 * The second Ethernet controller's clocks: the register and bus
+	 * master interfaces, the transmit clock source (whose rate its driver
+	 * sets on a board that takes the transmit clock from it), the reduced
+	 * interface's transmit and receive clock, the time stamps, the
+	 * transmit clock with its inverter, and the gated transmit clock the
+	 * controller drives out.
+	 *
+	 * Values referenced:
+	 * Linux v6.12 include/dt-bindings/clock/starfive,jh7110-crg.h
+	 * (JH7110_SYSCLK_GMAC1_AHB 97 to JH7110_SYSCLK_GMAC1_GTXC 107);
+	 * StarFive Linux JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
+	 * drivers/clk/starfive/clk-starfive-jh7110-sys.c (gmac1_ahb gate on
+	 * ahb0, gmac1_axi gate on stg_axiahb, gmac1_gtxclk divider of at most
+	 * 15 on pll0_out, gmac1_rmii_rtx divider of at most 30 on the
+	 * gmac1_rmii_refin input, gmac1_ptp gated divider of at most 31,
+	 * gmac1_tx gated selector of gmac1_gtxclk and gmac1_rmii_rtx,
+	 * gmac1_tx_inv inverter, gmac1_gtxc gate on gmac1_gtxclk).
+	 */
+	{ 97, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 9, NULL } } },
+	{ 98, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 8, NULL } } },
+	{ 100, CLOCK_DIVIDER | CLOCK_SETTABLE, 1, 15, 1,
+	  { { SOURCE_PLL, DRV_VF2_CRG_SYS, 0, NULL } } },
+	{ 101, CLOCK_DIVIDER, 1, 30, 1,
+	  { { SOURCE_INPUT, DRV_VF2_CRG_SYS, 0, "gmac1_rmii_refin" } } },
+	{ 102, CLOCK_GATE | CLOCK_DIVIDER, 1, 31, 1,
+	  { { SOURCE_NONE, DRV_VF2_CRG_SYS, 0, NULL } } },
+	{ 105, CLOCK_GATE | CLOCK_MUX, 0, 0, 2,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 100, NULL },
+	    { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 101, NULL } } },
+	{ 106, CLOCK_PASS, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 105, NULL } } },
+	{ 107, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 100, NULL } } },
+
+	/*
 	 * The first Ethernet controller's transmit clock source, whose rate
 	 * its driver sets on a board that takes the transmit clock from it.
 	 */

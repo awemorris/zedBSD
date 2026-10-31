@@ -252,8 +252,8 @@ remain as traceable history and are not new implementation work.
 | [BUG-382](bugs/BUG-382.md) | 5330 の NVMe の p7 を discard して起動した直後に mkfs が "no registration" で失敗（約 2 分後なら通る、間欠） | closed（2026-11-01 06:53、main ecad7fc74） |
 | [BUG-383](bugs/BUG-383.md) | libbrowser が http の page からも file: の副資源を読む（local の file の読み出し、安全） | closed（2026-11-01 06:14、main 81d028d39） |
 | [BUG-384](bugs/BUG-384.md) | arm64 の kernel の Image の header の image_size が BSS を含まない（boot の約束に反する、今は症状なし） | closed（2026-11-01 06:26、main 98179a6a2） |
-| [BUG-385](bugs/BUG-385.md) | VF2 が SD card の誤りで root を ro で mount して起動した（2026-11-01 ユーザーの目視） | open |
-| [BUG-386](bugs/BUG-386.md) | VF2 の 2 つ目の Ethernet の口（en1）に LAN をつなぐと link が上がらない（認識されない） | open |
+| [BUG-385](bugs/BUG-385.md) | VF2 が SD card の誤りで root を ro で mount して起動した（2026-11-01 ユーザーの目視） | fixed（2026-11-01 P1 q1826-i01、e176325ed: 全 try に失敗した block は card clock を半分にして再試行、root の rw の mount は EIO なら 3 回まで。板の 5 起動で rw・SD の失敗 0。ro の起動の原因は log が無く未確定） |
+| [BUG-386](bugs/BUG-386.md) | VF2 の 2 つ目の Ethernet の口（en1）に LAN をつなぐと link が上がらない（認識されない） | fixed（2026-11-01 P1 q1825-i01、c490f0466: kernel が GMAC1 を扱わず、SYS の CRG に GMAC1 の clock も無かった。VF2 で en1 が attach（`en1 ready`）・en0 の SSH を確かめた。en1 の link up は線の挿し替えが要り未実施） |
 | [BUG-387](bugs/BUG-387.md) | Pi 5 で、console の login から Wayland の desktop（Keiland）を起動できない（VF2 は BUG-388 の後に確かめる） | open |
 | [BUG-388](bugs/BUG-388.md) | VF2 で USB の keyboard が認識されるのに画面の console に繋がらず login できない | open |
 | [BUG-176](bugs/BUG-176.md) | 起動の直後の約 10 秒「Network service is not …」と出る | reproduced（実機） / resolved（2026-10-08 夜 ユーザー「下記は実装の変更が多かったので、いったんすべてcloseします。」、Q1 の中継）。前: scheduled、低（q726: bar の起動の直後の表示を「Starting the network service...」に、UAT 待ち） | UAT 2026-10-04 | WS131・networkd（[ticket](bugs/BUG-176.md)） |
