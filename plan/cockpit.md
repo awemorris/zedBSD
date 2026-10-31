@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 14:39（Q1）
+最終更新: 2026-10-31 14:50（Q1）
 
 ## 担当（P1〜P8）
 
@@ -10,7 +10,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | — | — | 返却（06:4x）。WS326 p025（規約の全文の見直し、style の違反 0、全試験が前と同じ）を main に | 次の割当を Q1 が決める |
-| P2 | — | — | 返却（06:5x）。VF2: BUG-338・340・342・343 closed（SD の CRC の誤りの根を直し、10 回の起動で root が毎回 live）、339 は判断待ち（0g） | 次の割当を Q1 が決める |
+| P2 | [WS309](ws309/ws.md) | Keiland の game mode | p015（q1782）: game mode を文字通りの zero copy の direct scanout に（client が compositor と共有する image に直に描く、全 GPU） | QEMU（Venus）→ VF2 → RTX（10.0.10.3）の順に確かめる |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ | p023 の設計（q1781）: 共有の image の画素の並びを client と compositor で決める（RTX の block-linear、0j の (b)） | 設計・design-reviewer・問いまで |
 | P4 | — | — | 返却（06:5x）。WS326 の完了の片付け（試験を plan/tools/h264sw/ へ） | 午後: Pi 5 の実機 |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
@@ -104,6 +104,8 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 決めてほしい事: この片付けをしてよいか。よければ settings に許可を足すか、ユーザーが `! ` で直に走らせる。それまで担当は大きな image を /tmp（tmpfs、空き約 69G）に作る。
 
 ### 01. AMD の CPU の仕様書の取得（2026-10-31 04:5x、権限の判定で止められた）
+
+- **済み（2026-10-31 14:50）**: ユーザーが 2 つの PDF を置いた。Q1 が `/home/awe/zedBSD-specs/24594_APM_v3-r3.02.pdf`・`ACPI_Spec_6_5_Aug29.pdf` に写した（git の外）。「仕様未取得」で外した部分（WS333 p008・p010 の AMD と _PSS など、WS310 の _OSC の確かめ）は、次にその WS を進める時に入れ直す。
 
 - 2026-10-31 ユーザーから URL を問われ、Q1 が答えた（AMD 24594 の PDF、ACPI 6.5 の PDF と第 8 章の HTML。URL は Q1 の知識からで記録に無かった）。置き場所は git の外の `/home/awe/zedBSD-specs/`。ユーザーが置くのを待つ。
 

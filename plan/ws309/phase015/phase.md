@@ -3,7 +3,7 @@
 # ws309-p015 game mode の V2: display の swapchain の image を client に貸す（libvulkan の export、compositor の受け渡し）
 
 - 親: [WS309](../ws.md)、設計 [design.md](../design.md) §6（J1 の決定「V2 swapchain 共有 (推し)」）。Queue: q1662-i10（P1）。
-- 状態: planned（2026-10-30 判断 1〜4 がユーザーの回答で決まった: 1 (a)・全画面と窓の切り替えは compositor の都合で app は気づかない、2〜4 は推し。旧: uncleared、判断待ち）。
+- 状態: in-progress（2026-10-31 14:50 P2 q1782 で着手）。前: planned（2026-10-30 判断 1〜4 がユーザーの回答で決まった: 1 (a)・全画面と窓の切り替えは compositor の都合で app は気づかない、2〜4 は推し。旧: uncleared、判断待ち）。
 - 依存: p013（cleared、T4 と暫定の ioctl）。
 
 ## 今（main 868318312 の後、branch `agent/p1-ws309i`）
@@ -31,3 +31,13 @@
    commit の fence → `vkQueuePresentKHR`（queue の lock の下、J2）。
 3. client の libvulkan の Wayland WSI: game mode の event で貸された image を import して swapchain の image にする（判断 1 の (a) の時）。
 4. 暫定の `GPU_DISPLAY_PRESENT` の経路を外す（Guardrail の例外を閉じる）。QEMU（Venus）の `scanout-guest.sh` を V2 で、実機（RDNA・RTX・VF2）は Q1 の枠で。
+
+## ユーザーの決定（2026-10-31）
+
+- 2026-10-31 ユーザーから、game mode は文字通りの zero copy の direct scanout にする（client は compositor と共有する image に直に描き、WSI の present の copy をしない）、
+  VF2 だけでなく同じ形の全部の GPU で直す、今すぐ着手してよい、という趣旨の指示を受けた。
+- 2026-10-31 ユーザーから、compositor の image の形式は compositor が決める形でよいか、と問われ、Q1 が「よい（game mode で貸す image は compositor が display の都合で
+  形式・並びを決め、client は compositor が示す surface の形式から選ぶだけ）」と答えた。
+- Q1 が code で確かめた事: libvulkan の `swapchain_direct_possible`（userland/desktop/libvulkan/wsi-swapchain.c）は VK_KHR_display の primary plane の chain
+  だけを direct にし、Wayland の chain は GPU に関わらず present ごとに共有の image へ copy する（`present_copy_shared`）。よって VF2・RTX・RDNA・i915・Pi・Venus の
+  全部の Wayland の client が copy している。
