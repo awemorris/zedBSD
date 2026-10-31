@@ -48,6 +48,9 @@ static const char private_magic[15] = "openssh-key-v1";
 static int key_check_name(const uint8_t *name, size_t size);
 static void key_copy_comment(struct ssh_key *key, const char *text, size_t size);
 static int key_is_blank(char byte);
+static size_t key_skip_blank(const char *text, size_t position, size_t end);
+static size_t key_skip_field(const char *text, size_t position, size_t end);
+static size_t key_trim_end(const char *text, size_t size);
 static int key_text_is(const uint8_t *text, size_t size, const char *expected);
 static int private_join_lines(const char *text, size_t size, struct ssh_buf *joined);
 static int private_parse_decoded(const uint8_t *data, size_t size, struct ssh_key *key);
@@ -375,6 +378,7 @@ ssh_key_parse_public_line(
 	size_t position;
 	size_t type_start;
 	size_t blob_start;
+	int same;
 	int error;
 
 	/* Refuses bytes that are missing. */
@@ -388,34 +392,28 @@ ssh_key_parse_public_line(
 	}
 
 	/* Finds where the line really ends: trailing white space and a CR are not content. */
-	end = size;
-	while (end > 0 && (key_is_blank(text[end - 1]) || text[end - 1] == '\r'))
-		end--;
+	end = key_trim_end(text, size);
 
 	/* Skips the white space before the type. */
-	position = 0;
-	while (position < end && key_is_blank(text[position]))
-		position++;
+	position = key_skip_blank(text, 0, end);
 
 	/* Takes the type field: the characters up to the next white space. */
 	type_start = position;
-	while (position < end && !key_is_blank(text[position]))
-		position++;
+	position = key_skip_field(text, position, end);
 	if (position == type_start)
 		return EINVAL;
 
 	/* Another type is not this key (a host key line of another type is skipped by the caller). */
-	if (!key_text_is((const uint8_t *)text + type_start, position - type_start, SSH_KEY_NAME))
+	same = key_text_is((const uint8_t *)text + type_start, position - type_start, SSH_KEY_NAME);
+	if (!same)
 		return ENOTSUP;
 
 	/* Skips the white space between the type and the blob. */
-	while (position < end && key_is_blank(text[position]))
-		position++;
+	position = key_skip_blank(text, position, end);
 
 	/* Takes the blob field; a line without one is malformed. */
 	blob_start = position;
-	while (position < end && !key_is_blank(text[position]))
-		position++;
+	position = key_skip_field(text, position, end);
 	if (position == blob_start)
 		return EINVAL;
 	if (position - blob_start > KEY_LINE_BASE64_MAX)
@@ -432,8 +430,7 @@ ssh_key_parse_public_line(
 		return EINVAL;
 
 	/* Skips the white space before the comment. */
-	while (position < end && key_is_blank(text[position]))
-		position++;
+	position = key_skip_blank(text, position, end);
 
 	/* Builds the result apart from the caller's key. */
 	ssh_key_clear(&found);
@@ -700,12 +697,15 @@ key_check_name(
 	const uint8_t *name,
 	size_t size)
 {
+	int same;
+
 	/* An algorithm name has 1 to SSH_NAME_MAX bytes. */
 	if (size == 0 || size > SSH_NAME_MAX)
 		return EINVAL;
 
 	/* A name of another length or text is another algorithm. */
-	if (!key_text_is(name, size, SSH_KEY_NAME))
+	same = key_text_is(name, size, SSH_KEY_NAME);
+	if (!same)
 		return ENOTSUP;
 
 	/* Succeeded: the name is ssh-ed25519. */
@@ -746,6 +746,76 @@ key_is_blank(
 
 	/* Any other byte is part of a field. */
 	return 0;
+}
+
+/*
+ * Returns the position of the first byte at or after position, before end,
+ * that is not a space or a tab (end when there is none).
+ */
+static size_t
+key_skip_blank(
+	const char *text,
+	size_t position,
+	size_t end)
+{
+	int blank;
+
+	/* Moves over each space and tab. */
+	while (position < end) {
+		blank = key_is_blank(text[position]);
+		if (!blank)
+			break;
+		position++;
+	}
+
+	/* The first byte that is part of a field, or the end. */
+	return position;
+}
+
+/*
+ * Returns the position of the first space or tab at or after position,
+ * before end (end when there is none).
+ */
+static size_t
+key_skip_field(
+	const char *text,
+	size_t position,
+	size_t end)
+{
+	int blank;
+
+	/* Moves over the bytes of one field. */
+	while (position < end) {
+		blank = key_is_blank(text[position]);
+		if (blank)
+			break;
+		position++;
+	}
+
+	/* The byte that ends the field, or the end. */
+	return position;
+}
+
+/*
+ * Returns the size of the line without its trailing spaces, tabs and CRs.
+ */
+static size_t
+key_trim_end(
+	const char *text,
+	size_t size)
+{
+	int blank;
+
+	/* Moves back over each trailing space, tab and CR. */
+	while (size > 0) {
+		blank = key_is_blank(text[size - 1U]);
+		if (!blank && text[size - 1U] != '\r')
+			break;
+		size--;
+	}
+
+	/* The end of the content. */
+	return size;
 }
 
 /*
@@ -791,6 +861,9 @@ private_join_lines(
 	size_t next;
 	int found_begin;
 	int found_end;
+	int is_begin;
+	int is_end;
+	int error;
 
 	position = 0;
 	found_begin = 0;
@@ -811,11 +884,15 @@ private_join_lines(
 		if (line_size > 0 && text[line_end - 1U] == '\r')
 			line_size--;
 
+		/* Tells whether this line is one of the armour lines. */
+		is_begin = key_text_is((const uint8_t *)text + position, line_size, SSH_KEY_PRIVATE_BEGIN);
+		is_end = key_text_is((const uint8_t *)text + position, line_size, SSH_KEY_PRIVATE_END);
+
 		if (!found_begin) {
 			/* Text before the BEGIN line is ignored. */
-			if (key_text_is((const uint8_t *)text + position, line_size, SSH_KEY_PRIVATE_BEGIN))
+			if (is_begin)
 				found_begin = 1;
-		} else if (key_text_is((const uint8_t *)text + position, line_size, SSH_KEY_PRIVATE_END)) {
+		} else if (is_end) {
 			/* The END line closes the armour. */
 			found_end = 1;
 		} else {
@@ -823,8 +900,9 @@ private_join_lines(
 			if (line_size == 0)
 				return EINVAL;
 			ssh_buf_put_bytes(joined, text + position, line_size);
-			if (ssh_buf_error(joined) != 0)
-				return ssh_buf_error(joined);
+			error = ssh_buf_error(joined);
+			if (error != 0)
+				return error;
 		}
 
 		position = next;
@@ -880,6 +958,7 @@ private_parse_decoded(
 	uint32_t checkint_second;
 	uint8_t blob_public[SSH_ED25519_PUBLIC];
 	uint8_t derived_public[SSH_ED25519_PUBLIC];
+	int same;
 	int error;
 
 	/* Checks the magic and its NUL (PROTOCOL.key 1). */
@@ -899,9 +978,11 @@ private_parse_decoded(
 		return EINVAL;
 
 	/* Only an unencrypted file is supported (PROTOCOL.key 5); a passphrase-protected one is refused. */
-	if (!key_text_is(cipher, cipher_size, "none"))
+	same = key_text_is(cipher, cipher_size, "none");
+	if (!same)
 		return ENOTSUP;
-	if (!key_text_is(kdf, kdf_size, "none"))
+	same = key_text_is(kdf, kdf_size, "none");
+	if (!same)
 		return ENOTSUP;
 
 	/* The options of the KDF "none" are the empty string (PROTOCOL.key 5). */
@@ -948,7 +1029,8 @@ private_parse_decoded(
 		return EINVAL;
 
 	/* The key type in the private section must be ssh-ed25519 like the blob's. */
-	if (!key_text_is(type, type_size, SSH_KEY_NAME))
+	same = key_text_is(type, type_size, SSH_KEY_NAME);
+	if (!same)
 		return EINVAL;
 
 	/* The public key is 32 octets, and the pair is the 32-octet seed followed by the public key. */
@@ -975,16 +1057,19 @@ private_parse_decoded(
 	}
 
 	/* The public key in the blob, in the private key and in the pair must be one. */
-	if (!ssh_ct_equal(blob_public, private_public, SSH_ED25519_PUBLIC))
+	same = ssh_ct_equal(blob_public, private_public, SSH_ED25519_PUBLIC);
+	if (!same)
 		return EINVAL;
-	if (!ssh_ct_equal(private_public, pair + SSH_ED25519_SEED, SSH_ED25519_PUBLIC))
+	same = ssh_ct_equal(private_public, pair + SSH_ED25519_SEED, SSH_ED25519_PUBLIC);
+	if (!same)
 		return EINVAL;
 
 	/* It must also be the public key of the seed (RFC 8032 5.1.5). */
 	error = ssh_ed25519_public(pair, derived_public);
 	if (error != 0)
 		return EIO;
-	if (!ssh_ct_equal(derived_public, blob_public, SSH_ED25519_PUBLIC))
+	same = ssh_ct_equal(derived_public, blob_public, SSH_ED25519_PUBLIC);
+	if (!same)
 		return EINVAL;
 
 	/* A comment with a NUL inside cannot be kept as a C string. */

@@ -64,20 +64,30 @@ WS335 の待ち: p003 経由
 
 ## 結果
 
-2026-11-01 07:08（host の `date`）。**中断**: ユーザーの host の再起動のため、Q1 の指示で実装だけ commit して止めた。この Phase は未完（試験は未作成・未実行）。
+2026-11-01 08:54（host の `date`）。**実装済み・試験 PASS**（cleared は Q1 が決める）。Status は in-progress のまま Q1 に渡す。
 
-### できたこと
+### 作った物
 
-- `userland/base/ssh/ssh-key.c` を全関数書いた（骨格の置き換え。header は不変）。
-- 確かめたのは単独の compile だけ: `cc -std=c89 -Wall -Wextra -Werror -Wpedantic -D_DEFAULT_SOURCE -I. -Iuserland/base/ssh -Iplan/ws336/tests/host-crypto -c userland/base/ssh/ssh-key.c`（警告 0、出力なし）。
+- `userland/base/ssh/ssh-key.c`（骨格の置き換え。header は不変）。前の attempt の実装を引き継ぎ、coding-style §14 の見直しで「条件の中の関数呼び出し」を直した（`key_skip_blank`・`key_skip_field`・`key_trim_end` を足し、`key_text_is`・`ssh_ct_equal`・`ssh_buf_error` の結果は先に変数へ入れてから判定）。動作は変えていない。
+- `plan/ws336/tests/unit/test-key.c`（2771 checks）。期待の値は RFC 8032 7.1 の TEST 1・2（seed・公開鍵・署名）、`wire.h` で組んだ blob・鍵の file、試験の中の独立の base64（`test_base64`）、手で出した公開鍵の行の base64 と指紋だけ。OpenSSH の出力は使っていない。
 
-### 未実施（次の担当が行う）
+### 試験の内容
 
-1. `plan/ws336/tests/unit/test-key.c` を書く（上の「試験の項目」の全部。RFC 8032 TEST 1・2 の seed・公開鍵・署名を期待の値にし、`wire.h` で blob と鍵の file を組み、試験の中に独立の base64 を持つ。`check.h` を使い、最後の行は `test-key: PASS`）。
-2. `sh plan/ws336/tests/run-unit.sh key` と `all`、`BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh`、`git diff --check` を流して最後の行を読む。
-3. 実装を git の外で数通りに壊して試験が FAIL することを確かめ、`cmp` で戻す。
-4. coding-style §14 の見直し、表の値の「Values referenced:」comment（`private_magic` には付けた）の確認。
-5. この節の更新と ws.md の表のこの行を「実装済み・試験 PASS」にする。
+blob（51 bytes の一致・往復・`ssh-rsa` など別名は ENOTSUP・空と 65 bytes の名前・31/33/0 bytes の鍵・末尾の余り・壊れた string・全ての切り詰めは EINVAL）、署名（TEST 1・2 の署名 83 bytes が RFC の署名と一致・verify・bit 反転 83 bytes x 8 bit が全て失敗で署名部分は EBADMSG・名前 ENOTSUP・63/65/0 bytes・末尾の余り・切り詰め・seed の無い鍵は EINVAL・入らない out は EMSGSIZE で何も足さない）、公開鍵の行（comment あり・なし・tab・複数の空白・先頭と末尾の空白・CR・型の欄が別は ENOTSUP・blob の型が違う EINVAL・base64 の誤り・NUL と LF・comment 254〜257 bytes の境界・全ての切り詰め）、秘密鍵の file（良い形 CR LF・前後の余分な行・LF 無しの END・折り返し 1/64/70/1 行・comment 0〜20 bytes で padding 0〜7・checkint 不一致・padding の誤り 4 通り・aes256-ctr+bcrypt は ENOTSUP・鍵 2 本と 0 本は ENOTSUP・blob/秘密/pair の不一致・seed の不一致・magic・BEGIN/END の欠け・空行・空の armour・不正な base64・16385 bytes は EMSGSIZE・file の全ての切り詰め）、`ssh_key_put_private` が手で組んだ file と byte 単位で一致（comment 0〜20）、往復、行の幅、指紋（TEST 1 の期待を 2 通りで確認、capacity 0〜50 は ENOBUFS で何も書かない）、乱数の変異 10 万回（1 byte の変更・切り詰め・両方。成功は鍵が整合、失敗は key が全部 0 で EINVAL か ENOTSUP のみ）。
+
+### 実行したコマンドと最後の行（2026-11-01 08:53）
+
+- `sh plan/ws336/tests/run-unit.sh key` → `test-key: PASS (2771 checks)` / `run-unit: PASS`
+- `sh plan/ws336/tests/run-unit.sh all` → 全 11 試験 PASS、最後の行 `run-unit: PASS`
+- `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh` → `check-skeleton: PASS`
+- `git diff --check` → 出力なし（終了 0）
+
+### わざと壊す確かめ
+
+`ssh-key.c` の複製（`build/tmp/mut5/ssh-key.c.orig`）に対し 38 通りの変更を 1 つずつ入れて `run-unit.sh key` を流し、最後に `cmp` で元に戻ったことを確かめた（2 回目の全部流しは、§14 の直しの後の版で行った）。例: 31 bytes の鍵を許す・末尾の余りの確かめを外す・名前の長さの境界をずらす・空の名前を許す・署名の長さ `!=` を `>` に・verify の名前の確かめを外す・sign の private の確かめを外す・行の CR を外す・comment の改行の確かめを外す・comment の切り詰め 255 を 256 に・checkint の確かめを外す・padding `>=` を `>`・padding の値・section の 8 の倍数・seed から出す公開鍵の照合を外す・pair の公開鍵の照合を外す・型の照合を外す・鍵の数・cipher と kdf と options の確かめを外す・magic の長さ・comment の NUL・空行の許可・file の大きさの上限・put の折り返し 70 を 64・put の padding の順・put の seed と公開鍵の順・put の private の確かめ・指紋の capacity・指紋の `=`・指紋の blob の位置・sign の領域の先取り・blob の名前の長さ。
+
+- 最初の版では次の 4 つが生き残った: comment の切り詰めの境界（256 bytes 丁度）、padding が丁度 8 bytes の境界、blank 行の許可（照合の文字列の不一致で SKIP だった）、および下の 2 つ。試験を足して前の 3 つは FAIL するようになった（comment 254〜257 bytes、5 bytes の comment で section が揃っている所に 1 block 余分の padding）。
+- **生き残る 2 つは同値の変更で、試験では区別できない**: (1) 公開鍵の行の blob の欄の 72 文字の上限を外しても、decode 先の buffer が 54 bytes なので `ssh_base64_decode` が ENOBUFS を返し、結果は同じ EINVAL。(2) 秘密鍵の中で「blob の公開鍵と private の公開鍵の一致」の確かめを外しても、「private の公開鍵と pair の後半の一致」と「seed から出した公開鍵と blob の一致」が残るので、推移的に同じ事を確かめている。
 
 ### 自分で決めた点（header が黙っている所）
 
@@ -88,3 +98,13 @@ WS335 の待ち: p003 経由
 - `ssh_key_parse_private`: BEGIN と END の間の空行は EINVAL、行の幅は 70 に限らない。先に `*key` を消し、失敗の道でも消す。cipher と kdf の確かめ（ENOTSUP）を kdfoptions の空の確かめ（EINVAL）より先に行うので、暗号化された正しい形の file は ENOTSUP になる。鍵の数が 1 でないのは ENOTSUP（0 も）。private section は長さが 8 の倍数で 0 でなく、padding は 8 bytes 未満で 1,2,3...。private section の鍵の型が blob と違えば EINVAL。comment に NUL があれば EINVAL、255 bytes に切る。
 - `ssh_key_put_private`: comment が配列の中で NUL で終わらなければ EINVAL。file 全体の長さを先に out に reserve する。
 - `ssh_key_fingerprint`: capacity が 51 未満は ENOBUFS（out を書かない）。
+
+### 未実施
+
+- OpenSSH の ssh-keygen が書いた鍵を読む・逆の相互運用の確かめ（p015 の `interop-host.sh`）。
+- 規約の全文の見直しの Phase（WS の最後）。ここでは §14 の「条件の中の関数呼び出し」「標準の comment」を自分の diff で見直しただけ。
+- QEMU・実機は対象外（host の試験のみ）。
+
+### header の不備
+
+なし（header は変えていない）。
