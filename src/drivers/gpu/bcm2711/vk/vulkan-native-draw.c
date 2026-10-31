@@ -283,6 +283,10 @@ bcm2711_vulkan_native_draw_release(
 		if (owned->textures[index].snapshot != NULL)
 			bcm2711_native_snapshot_put(owned->textures[index].snapshot);
 	}
+	if (owned->index_snapshot != NULL) {
+		bcm2711_native_snapshot_put(owned->index_snapshot);
+		owned->index_snapshot = NULL;
+	}
 
 	/* Each mapped reference is consumed once; the space preserves failed unmaps without this CPU root. */
 	first = 0;
@@ -1018,7 +1022,32 @@ prepare_indices(
 	draw->index_bytes = (uint32_t)bytes;
 	draw->first = (uint32_t)first;
 
-	/* Succeeded: the hardware reads the draw's indices in place. */
+	/*
+	 * 32-bit indices that all fit 16 bits are read from a 16-bit copy kept
+	 * until the buffer changes, which halves what binning reads of them
+	 * (each instance reads its indices again).  Without one the hardware
+	 * reads the 32-bit indices in place.
+	 */
+	if (draw->index_size == 4U && bytes >= 4U && draw->index_snapshot == NULL) {
+		error = bcm2711_native_snapshot_get_indices(
+			draw->space,
+			view->buffer,
+			address - view->address,
+			(uint32_t)(bytes / 4U),
+			cpu,
+			(size_t)bytes,
+			&draw->index_snapshot);
+		if (error == 0) {
+			draw->index_size = 2U;
+			draw->index_address = draw->index_snapshot->pixels->view->address;
+			draw->index_bytes = (uint32_t)(bytes / 4U) * 2U;
+			draw->first = (uint32_t)(first / 2U);
+		} else if (error != ENOTSUP) {
+			return error;
+		}
+	}
+
+	/* Succeeded: the hardware reads the draw's indices in place or from their 16-bit copy. */
 	return 0;
 }
 
