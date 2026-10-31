@@ -98,6 +98,7 @@ enum computed_property {
 	COMPUTED_CURSOR,
 	COMPUTED_VERTICAL_ALIGN,
 	COMPUTED_LIST_STYLE_TYPE,
+	COMPUTED_LIST_STYLE_POSITION,
 	COMPUTED_BORDER_COLLAPSE,
 	COMPUTED_CAPTION_SIDE,
 	COMPUTED_FLEX_DIRECTION,
@@ -353,6 +354,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "cursor", COMPUTED_CURSOR },
 	{ "vertical-align", COMPUTED_VERTICAL_ALIGN },
 	{ "list-style-type", COMPUTED_LIST_STYLE_TYPE },
+	{ "list-style-position", COMPUTED_LIST_STYLE_POSITION },
 	{ "border-collapse", COMPUTED_BORDER_COLLAPSE },
 	{ "caption-side", COMPUTED_CAPTION_SIDE },
 	{ "flex-direction", COMPUTED_FLEX_DIRECTION },
@@ -508,8 +510,11 @@ static const char *const computed_vertical_aligns[] = {
 	"baseline", "top", "middle", "bottom", "text-top", "text-bottom", "sub", "super"
 };
 
+/* The names of list-style-position. */
+static const char *const computed_list_positions[] = { "outside", "inside" };
+
 /* The names of list-style-type, by enum css_list_style. */
-static const char *const computed_list_styles[] = { "disc", "circle", "square", "decimal", "none" };
+static const char *const computed_list_styles[] = { "disc", "circle", "square", "decimal", "none", "disclosure-closed", "disclosure-open" };
 
 /* The names of border-collapse. */
 static const char *const computed_collapses[] = { "separate", "collapse" };
@@ -1816,7 +1821,10 @@ computed_write_keyword(
 
 		break;
 	case COMPUTED_LIST_STYLE_TYPE:
-		error = computed_name(computed_list_styles, 5, style->list_style, out);
+		error = computed_name(computed_list_styles, 7, style->list_style, out);
+		break;
+	case COMPUTED_LIST_STYLE_POSITION:
+		error = computed_name(computed_list_positions, 2, style->list_style_inside, out);
 		break;
 	case COMPUTED_BORDER_COLLAPSE:
 		error = computed_name(computed_collapses, 2, style->border_collapse, out);

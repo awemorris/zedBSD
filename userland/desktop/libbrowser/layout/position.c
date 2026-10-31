@@ -543,6 +543,10 @@ layout_content_width(
 			if (line->fragment_count == 0)
 				continue;
 			last = &line->fragments[line->fragment_count - 1U];
+
+			/* A hanging marker comes after the line's pieces and ends before them. */
+			if (box->marker_length != 0 && last->text == box->marker && line->fragment_count > 1U)
+				last = &line->fragments[line->fragment_count - 2U];
 			width = last->x + last->width;
 			if (width > widest)
 				widest = width;

@@ -616,10 +616,10 @@ software_rect(
 	int y;
 
 	/* The rectangle in pixels, scrolled, and cut to the clip. */
-	left = layout_to_px(item->x);
-	top = layout_to_px(item->y - scroll_y);
-	right = layout_to_px(item->x + item->width);
-	bottom = layout_to_px(item->y - scroll_y + item->height);
+	left = floorf(layout_to_px(item->x) + 0.5f);
+	top = floorf(layout_to_px(item->y - scroll_y) + 0.5f);
+	right = floorf(layout_to_px(item->x + item->width) + 0.5f);
+	bottom = floorf(layout_to_px(item->y - scroll_y + item->height) + 0.5f);
 	if (left < clip->left)
 		left = clip->left;
 	if (top < clip->top)
@@ -692,16 +692,16 @@ software_image(
 
 	/* The image's place and its texels to a pixel. */
 	image = item->image;
-	origin_x = layout_to_px(item->x);
-	origin_y = layout_to_px(item->y - scroll_y);
-	scale_x = (float)image->width / layout_to_px(item->width);
-	scale_y = (float)image->height / layout_to_px(item->height);
+	origin_x = floorf(layout_to_px(item->x) + 0.5f);
+	origin_y = floorf(layout_to_px(item->y - scroll_y) + 0.5f);
+	right = floorf(layout_to_px(item->x + item->width) + 0.5f);
+	bottom = floorf(layout_to_px(item->y - scroll_y + item->height) + 0.5f);
+	scale_x = right > origin_x ? (float)image->width / (right - origin_x) : 0.0f;
+	scale_y = bottom > origin_y ? (float)image->height / (bottom - origin_y) : 0.0f;
 
 	/* The rectangle in pixels, scrolled, and cut to the clip. */
 	left = origin_x;
 	top = origin_y;
-	right = layout_to_px(item->x + item->width);
-	bottom = layout_to_px(item->y - scroll_y + item->height);
 	if (left < clip->left)
 		left = clip->left;
 	if (top < clip->top)

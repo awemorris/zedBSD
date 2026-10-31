@@ -1297,6 +1297,17 @@ inline_finish_line(
 		/* Its right edge is that space before the content. */
 		fragment->x = -(fragment->width + glyph.advance_units);
 
+		/* An inside marker starts the line, and the content follows it. */
+		if (box->style.list_style_inside) {
+			layout_unit inside_shift;
+
+			inside_shift = fragment->width + glyph.advance_units;
+			for (index = 0; index < piece_count; index++)
+				line.fragments[index].x += inside_shift;
+			fragment->x = 0;
+			x += inside_shift;
+		}
+
 		/* The font's ascent and descent, which the painting places the glyphs by. */
 		error = text_font_metrics(tree->text, &font, &metrics);
 		if (error != 0) {

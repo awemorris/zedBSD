@@ -2682,8 +2682,7 @@ flex_baseline_above(
 
 	/* Only a row's items on a horizontal line (not one laid out logically for a vertical mode), aligned by their baselines. */
 	if (!row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
-	    layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB ||
-	    item->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
+	    layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB)
 		return 0;
 	align = item->style.align_self;
 	last = (item->style.last_baselines & 8u) != 0;
@@ -2697,7 +2696,9 @@ flex_baseline_above(
 		return 0;
 
 	/* Its first (or last) baseline, or its border box's bottom. */
-	found = last ? layout_last_baseline(item, &baseline) : layout_first_baseline(item, &baseline);
+	found = 0;
+	if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+		found = last ? layout_last_baseline(item, &baseline) : layout_first_baseline(item, &baseline);
 	if (!found)
 		baseline = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->height + item->padding[CSS_BOTTOM] +
 		    item->border[CSS_BOTTOM];
@@ -2732,7 +2733,7 @@ flex_column_baseline(
 	if (row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
 	    layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB || item->replaced || item->out_of_flow)
 		return 0;
-	if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && !horizontal)
+	if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && !horizontal && box->style.direction != CSS_DIRECTION_RTL)
 		return 0;
 	if (item->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || item->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
 		return 0;
@@ -2753,7 +2754,9 @@ flex_column_baseline(
 		found = layout_vertical_baseline(item, last, &baseline);
 	if (!found)
 		baseline = 0;
-	if (!found && item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && last)
+	/* A horizontal item's baseline across is its border box's line-left edge (first) or line-right edge (last); an rtl column is laid out left-to-right and mirrored, so there they swap. */
+	if (!found && item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    (last != 0) != (box->style.direction == CSS_DIRECTION_RTL))
 		baseline = item->border[CSS_LEFT] + item->padding[CSS_LEFT] + item->width + item->padding[CSS_RIGHT] + item->border[CSS_RIGHT];
 	*before = item->margin[CSS_LEFT] + baseline;
 	*after = flex_cross_outer(item, 0) - *before;

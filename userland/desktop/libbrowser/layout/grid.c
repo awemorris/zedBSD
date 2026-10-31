@@ -82,6 +82,7 @@ struct grid_sizes {
 	struct css_length margin[4];
 };
 
+static int grid_normal_starts(const struct layout_box *box);
 static int grid_fixed_area_height(const struct layout_box *box, const struct grid_item *item, layout_unit gap, layout_unit *height);
 static int grid_save_used_tracks(struct layout_tree *tree, struct layout_box *box, const struct grid_state *grid);
 static int grid_copy_used_axis(struct layout_tree *tree, const layout_unit *sizes, int count, double **copy);
@@ -754,7 +755,7 @@ layout_grid(
 		if (justify == CSS_ALIGN_AUTO)
 			justify = box->style.justify_items;
 		if (justify == CSS_ALIGN_NORMAL)
-			justify = item->box->replaced ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+			justify = grid_normal_starts(item->box) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
 		if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
 		    (item->box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB &&
 		    !item->box->grid_orthogonal) ||
@@ -886,7 +887,7 @@ layout_grid(
 		if (align == CSS_ALIGN_AUTO)
 			align = box->style.align_items;
 		if (align == CSS_ALIGN_NORMAL)
-			align = child->replaced ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+			align = grid_normal_starts(child) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
 		/* Definite horizontal rows distribute block-axis auto margins after sizing. */
 		auto_top = child->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO;
 		auto_bottom = child->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO;
@@ -951,7 +952,7 @@ layout_grid(
 			if (justify == CSS_ALIGN_AUTO)
 				justify = box->style.justify_items;
 			if (justify == CSS_ALIGN_NORMAL)
-				justify = child->replaced ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+				justify = grid_normal_starts(child) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
 			if (justify == CSS_ALIGN_STRETCH)
 				justify = CSS_ALIGN_START;
 			if (justify == CSS_ALIGN_SELF_START && child->grid_orthogonal)
@@ -4207,7 +4208,7 @@ grid_relay_item(
 	if (justify == CSS_ALIGN_AUTO && item->parent != NULL)
 		justify = item->parent->style.justify_items;
 	if (justify == CSS_ALIGN_NORMAL || justify == CSS_ALIGN_AUTO)
-		justify = item->replaced ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
+		justify = grid_normal_starts(item) ? CSS_ALIGN_START : CSS_ALIGN_STRETCH;
 	if (item->replaced && saved.width.unit == CSS_UNIT_AUTO && ratio_width > 0 &&
 	    ratio_height > 0 && align == CSS_ALIGN_STRETCH && justify != CSS_ALIGN_STRETCH &&
 	    item->style.height.unit == CSS_UNIT_AUTO) {
@@ -4581,4 +4582,12 @@ grid_release(
 	free(grid->taken);
 	free(grid->column_collapsed);
 	free(grid->row_collapsed);
+}
+
+/* Tells whether a normal alignment of a grid item behaves as start: a replaced item does, a checkbox or a radio button stretches like the other controls. */
+static int
+grid_normal_starts(
+	const struct layout_box *box)
+{
+	return box->replaced && box->control != DOM_CONTROL_CHECKBOX && box->control != DOM_CONTROL_RADIO;
 }

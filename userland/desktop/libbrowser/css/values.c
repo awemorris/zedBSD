@@ -199,6 +199,7 @@ static const struct values_name values_names[] = {
 	{ "text-decoration-color", CSS_PROP_TEXT_DECORATION_COLOR },
 	{ "text-decoration-thickness", CSS_PROP_TEXT_DECORATION_THICKNESS },
 	{ "list-style-type", CSS_PROP_LIST_STYLE_TYPE },
+	{ "list-style-position", CSS_PROP_LIST_STYLE_POSITION },
 	{ "top", CSS_PROP_TOP },
 	{ "right", CSS_PROP_RIGHT },
 	{ "bottom", CSS_PROP_BOTTOM },
@@ -755,6 +756,15 @@ static const struct values_keyword values_list_style[] = {
 	{ "square", CSS_LIST_SQUARE },
 	{ "decimal", CSS_LIST_DECIMAL },
 	{ "none", CSS_LIST_NONE },
+	{ "disclosure-closed", CSS_LIST_DISCLOSURE_CLOSED },
+	{ "disclosure-open", CSS_LIST_DISCLOSURE_OPEN },
+	{ NULL, 0 }
+};
+
+/* The keywords of list-style-position. */
+static const struct values_keyword values_list_position[] = {
+	{ "outside", 0 },
+	{ "inside", 1 },
 	{ NULL, 0 }
 };
 
@@ -1217,6 +1227,7 @@ css_parse_property(
 	struct css_value value;
 	int error;
 	int first;
+	int position;
 	int wide;
 
 	/* Nothing is no value. */
@@ -1296,6 +1307,14 @@ css_parse_property(
 	case SHORT_TEXT_DECORATION:
 		return values_text_decoration(tokens, count, out, out_count);
 	case SHORT_LIST_STYLE:
+		position = 0;
+		for (first = 0; first < (int)count; first++) {
+			error = values_single(parse, CSS_PROP_LIST_STYLE_POSITION, &tokens[first], 1, &value);
+			if (error == 0) {
+				values_add(out, out_count, CSS_PROP_LIST_STYLE_POSITION, &value);
+				position = 1;
+			}
+		}
 		for (first = 0; first < (int)count; first++) {
 			error = values_single(parse, CSS_PROP_LIST_STYLE_TYPE, &tokens[first], 1, &value);
 			if (error == 0) {
@@ -1304,7 +1323,9 @@ css_parse_property(
 			}
 		}
 
-		/* A list style without a type is not used in this pass. */
+		/* A list style without a type keeps the type. */
+		if (position)
+			return 0;
 		return EINVAL;
 	case SHORT_FONT:
 		return css_parse_font(parse, tokens, count, out, out_count);
@@ -2680,6 +2701,9 @@ values_single(
 		break;
 	case CSS_PROP_LIST_STYLE_TYPE:
 		table = values_list_style;
+		break;
+	case CSS_PROP_LIST_STYLE_POSITION:
+		table = values_list_position;
 		break;
 	case CSS_PROP_BOX_SIZING:
 		table = values_box_sizing;
