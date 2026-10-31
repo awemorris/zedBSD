@@ -242,6 +242,25 @@
 #define RECORDS_CURSOR_COMPOSITION	0x000072ffU
 
 /*
+ * The scale of the cursor's colours: 255/256, where 0x1000 is one and the
+ * colours follow the scale linearly.
+ *
+ * As the head's CRCs showed on a TU106: a window's 8-bit channel c enters
+ * the composition as c/256 through the identity input LUT (disp-first.c,
+ * the DIRECT10 table whose entry i is i/1024), and this scale puts a
+ * cursor's channel c at the same value (the CRCs of a white, grey or black
+ * cursor equal those of the same square drawn into the window).  The
+ * reset value, one, puts a channel of 255 at the top of the output LUT,
+ * which shows it black: a white cursor came out black, its black stayed
+ * black, and a grey one came out lighter than the window's grey.
+ *
+ * Value referenced: NVIDIA open-gpu-doc classes/display/clc57d.h
+ * (NVC57D_HEAD_SET_CURSOR_COLOR_NORM_SCALE, 16 bits; the same method in
+ * clc67d.h and clc77d.h).
+ */
+#define RECORDS_CURSOR_NORM_SCALE	0x00000ff0U
+
+/*
  * Where a PIO channel's allocation names its instance.
  *
  * Value referenced: NVIDIA open-gpu-kernel-modules 570.144
@@ -831,8 +850,8 @@ nvrtx_disp_core_update(
 }
 
 /*
- * Writes one head's cursor on: its control and blending, the object it is
- * read through and its VRAM offset.
+ * Writes one head's cursor on: its control and blending, its colours'
+ * scale, the object it is read through and its VRAM offset.
  *
  * Procedure referenced: Linux v6.19 drivers/gpu/drm/nouveau/dispnv50/headc37d.c
  * (headc37d_curs_set).
@@ -854,6 +873,9 @@ nvrtx_disp_core_cursor_set(
 	control[0] = RECORDS_CURSOR_ON;
 	control[1] = RECORDS_CURSOR_COMPOSITION;
 	nvrtx_push_method(push, base + NVRTX_HEAD_CONTROL_CURSOR, control, 2U);
+
+	/* Its colours on the windows' scale. */
+	nvrtx_push_one(push, base + NVRTX_HEAD_CURSOR_COLOR_NORM_SCALE, RECORDS_CURSOR_NORM_SCALE);
 
 	/* Read through the object, from the offset in 256-byte units. */
 	nvrtx_push_one(push, base + NVRTX_HEAD_CONTEXT_DMA_CURSOR, handle);
