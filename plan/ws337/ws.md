@@ -1,10 +1,10 @@
 <!-- awesome-plan project=zedbsd record=ws337 -->
 
-# WS337 shanglira: RISC-V 64 で x86_64・arm64 の binary を動かす（事前の変換と cache、interpreter の予備）
+# WS337 shangrila: RISC-V 64 で x86_64・arm64 の binary を動かす（事前の変換と cache、interpreter の予備）
 
 - Master: [plan/master.md](../master.md)（2026-11-01 作成）。Primary Milestone: MG002。
 - Status: planning（2026-11-01 05:45 新設。ユーザーとの質疑の途中、設計の Phase はまだ始めていない）
-- 目標: shanglira（RISC-V という理想郷・約束の地への移住の意）を、単体の repository の OSS として作る。RISC-V 64 の上で x86_64 と arm64 の
+- 目標: shangrila（RISC-V という理想郷・約束の地への移住の意）を、単体の repository の OSS として作る。RISC-V 64 の上で x86_64 と arm64 の
   user mode の program を、実行 file と動的 library ごとの事前の変換と cache、変換しきれなかった所の interpreter で動かす。
   **project の goal は、Linux の商用 software を動かすことと、Windows の game を動かすこと**（2026-11-01 ユーザーの変更）。
   先に Linux（RISC-V の Linux）で開発して Linux で動く OSS にし、zedBSD には `userland/packages/` の package（git clone して build）として image に入れる。
@@ -30,7 +30,7 @@
 - 2026-11-01 ユーザーから、Linux の binary に link されている .so が既知の物なら、zedBSD で真似るための専用の library に link する、という趣旨の
   答えを受けた。
 
-- 2026-11-01 ユーザーから、software の名前を shanglira（RISC-V という理想郷・約束の地への移住の意）とする、単体の repository にする、zedBSD には
+- 2026-11-01 ユーザーから、software の名前を shangrila（RISC-V という理想郷・約束の地への移住の意）とする、単体の repository にする、zedBSD には
   `packages/` に入れて git clone して build することで image に入れる、先に Linux で開発して Linux で動く OSS にする、project の goal を
   Linux の商用 software の emulation と Windows の game の emulation に変える、という趣旨の指示を受けた。
 
