@@ -538,6 +538,10 @@ layout_content_width(
 	if (depth > LAYOUT_DEPTH_MAX)
 		return 0;
 
+	/* Size containment (or inline-size containment) gives the box no intrinsic width. */
+	if (!box->replaced && (layout_containment(box) & 17U) != 0)
+		return 0;
+
 	/*
 	 * A replaced box's content is as wide as it was sized; one sized by a
 	 * percentage of the width being measured is as wide as its image (a

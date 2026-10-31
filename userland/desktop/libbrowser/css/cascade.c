@@ -4717,6 +4717,9 @@ cascade_apply(
 	case CSS_PROP_WILL_CHANGE:
 		style->will_change_contains = value->kind == CSS_VALUE_KEYWORD ? value->keyword : 0;
 		break;
+	case CSS_PROP_CONTAIN:
+		style->contain = value->kind == CSS_VALUE_KEYWORD ? (unsigned)value->keyword : 0U;
+		break;
 	case CSS_PROP_BOX_SHADOW:
 		cascade_shadows(engine, style, value);
 		break;
@@ -5219,6 +5222,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_LIST_STYLE_POSITION:
 		style->list_style_inside = parent->list_style_inside;
+		break;
+	case CSS_PROP_CONTAIN:
+		style->contain = parent->contain;
 		break;
 	default:
 		break;

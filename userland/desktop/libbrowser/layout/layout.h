@@ -444,6 +444,21 @@ void layout_absolute(struct layout_box *box, layout_unit x, layout_unit y);
 int layout_is_positioned(const struct layout_box *box);
 int layout_is_layered(const struct layout_box *box);
 int layout_contains_absolute(const struct layout_box *box);
+/* The containment of a box: its contain bits and what a container type adds (size 1, layout 2, style 8, inline-size 16). */
+static inline unsigned
+layout_containment(
+	const struct layout_box *box)
+{
+	unsigned bits;
+
+	bits = box->style.contain;
+	if (box->style.container_type == CSS_CONTAINER_SIZE)
+		bits |= 1U | 2U | 8U;
+	else if (box->style.container_type == CSS_CONTAINER_INLINE_SIZE)
+		bits |= 16U | 2U | 8U;
+	return bits;
+}
+
 int layout_contains_fixed(const struct layout_box *box);
 
 /* View transitions (transition.c). */

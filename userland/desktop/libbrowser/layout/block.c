@@ -223,6 +223,10 @@ layout_block(
 	/* A fieldset's first legend sits in its top border: it replaces the border's height instead of adding to the padding box's. */
 	block_fieldset_legend(box);
 
+	/* Size containment lays the box out as if it had no content. */
+	if ((layout_containment(box) & 1U) != 0 && !height_definite && !box->replaced)
+		box->height = 0;
+
 	/* An explicit height replaces the content's. */
 	content_height = box->height;
 	if (height_definite) {
@@ -679,6 +683,10 @@ block_owns_context(
 	if (box->floating != CSS_FLOAT_NONE)
 		return 1;
 	if (box->out_of_flow)
+		return 1;
+
+	/* A box with layout or paint containment is the root of its own formatting context. */
+	if ((layout_containment(box) & 6U) != 0)
 		return 1;
 
 	/* A box that clips its overflow. */

@@ -282,6 +282,7 @@ static const struct values_name values_names[] = {
 	{ "caption-side", CSS_PROP_CAPTION_SIDE },
 	{ "backdrop-filter", CSS_PROP_BACKDROP_FILTER },
 	{ "will-change", CSS_PROP_WILL_CHANGE },
+	{ "contain", CSS_PROP_CONTAIN },
 	{ "filter", CSS_PROP_FILTER },
 	{ "-webkit-filter", CSS_PROP_FILTER },
 	{ "-webkit-backdrop-filter", CSS_PROP_BACKDROP_FILTER },
@@ -2343,6 +2344,43 @@ values_single(
 
 		/* Succeeded: the selected native scalar component was parsed. */
 		return 0;
+	}
+
+	/* contain takes none, strict, content, or any of size, layout, paint, style and inline-size. */
+	if (property == CSS_PROP_CONTAIN) {
+		size_t at;
+
+		value->kind = CSS_VALUE_KEYWORD;
+		value->keyword = 0;
+		for (at = 0; at < count; at++) {
+			if (tokens[at].type != CSS_TOKEN_IDENT)
+				return EINVAL;
+			if (css_ident_equal(&tokens[at], "none")) {
+				if (count != 1)
+					return EINVAL;
+			} else if (css_ident_equal(&tokens[at], "strict")) {
+				if (count != 1)
+					return EINVAL;
+				value->keyword = 15;
+			} else if (css_ident_equal(&tokens[at], "content")) {
+				if (count != 1)
+					return EINVAL;
+				value->keyword = 14;
+			} else if (css_ident_equal(&tokens[at], "size")) {
+				value->keyword |= 1;
+			} else if (css_ident_equal(&tokens[at], "layout")) {
+				value->keyword |= 2;
+			} else if (css_ident_equal(&tokens[at], "paint")) {
+				value->keyword |= 4;
+			} else if (css_ident_equal(&tokens[at], "style")) {
+				value->keyword |= 8;
+			} else if (css_ident_equal(&tokens[at], "inline-size")) {
+				value->keyword |= 16;
+			} else {
+				return EINVAL;
+			}
+		}
+		return count == 0 ? EINVAL : 0;
 	}
 
 	/* will-change takes auto or a comma-separated list of property names; only whether one makes a containing block is kept. */

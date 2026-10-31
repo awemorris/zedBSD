@@ -2855,6 +2855,10 @@ grid_subgrid_axis(
 	if (box->style.display != CSS_DISPLAY_GRID && box->style.display != CSS_DISPLAY_INLINE_GRID)
 		return 0;
 
+	/* A box with layout or paint containment is an independent formatting context, which is no subgrid. */
+	if ((layout_containment(box) & 6U) != 0)
+		return 0;
+
 	/* A subgrid whose writing mode is orthogonal to its parent's keeps tracks of its own. */
 	if (box->parent != NULL &&
 	    (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) !=
