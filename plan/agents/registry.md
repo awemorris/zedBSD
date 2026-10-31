@@ -10,7 +10,7 @@
 | P4 | phase-runner-high | ws291 p025 Pi 4 (q1784-i04) | `/home/awe/zedBSD-worktrees/p4-ws291pi` / `agent/p4-ws291pi` | in-progress（2026-11-01 01:44 起動し直し） | a54520ea8（merge 69109d3f2） |
 | P5 | kernel-and-driver-designer | ws336 p001 設計 (q1791-i01) | `/home/awe/zedBSD-worktrees/p5-ws336` / `agent/p5-ws336` | in-progress（2026-11-01 01:56 起動） | — |
 | P6 | kernel-and-driver-designer | ws335 p001 設計 (q1789-i01) | `/home/awe/zedBSD-worktrees/p6-ws335` / `agent/p6-ws335` | in-progress（2026-11-01 01:20 起動） | — |
-| P3 | phase-runner-high | ws291 p024 RTX 最適化 (q1785-i02) | `/home/awe/zedBSD-worktrees/p3-ws291wsi` / `agent/p3-ws291wsi` | in-progress（2026-10-31 23:41 起動し直し） | 9cbb0e590（merge 7055ea569） |
+| P3 | phase-runner-high | ws291 p024 RTX 最適化 (q1785-i02) | `/home/awe/zedBSD-worktrees/p3-ws291wsi` / `agent/p3-ws291wsi` | 返却（2026-11-01 02:19） | 6dd842057（merge 1e86f4502） |
 | P8 | phase-runner-low | ws074 p260 自走 (q1727-i12) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-11-01 00:16 起動し直し） | 5dadd7966（merge fd4449c07） |
 | P7 | phase-runner-high | ws334 実装 (q1790-i01) | `/home/awe/zedBSD-worktrees/p7-ws334` / `agent/p7-ws334` | in-progress（2026-11-01 01:26 起動） | 1deb49bff（merge b2a7e8454） |
 
