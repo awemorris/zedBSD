@@ -407,3 +407,23 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   `command` は NULL なので、Venus の context では `queue_unfenced` が常に偽で、今までどおり私用の fence の job の 3 本の道。(a) の kernel の copy の
   道は forkrace の amd64・rpi4 で確かめた。host が静かになったら `START_TIMEOUT=1200 sh plan/ws291/tests/venus-reg.sh OUT build/p024/forge3/hdd-image.img
   build/p024/forge3/dynamic/libvulkan.so` を流す（Q1 が知らせる）。
+- QEMU の Venus の回帰を 10.0.10.3 の Debian で（2026-11-01 Q1 経由のユーザーの許可: dev host の I/O の負荷は背景の Vivado で避けられない）:
+  `plan/ws291/tests/venus-reg-rtx.sh OUT IMAGE LIBVULKAN...`（lock の中、Debian で）。Debian の QEMU 10.0.13（qemu-system-modules-opengl、入っていた）、
+  main の build/ws035-sq-venus/install の strict queue の renderer を写し、Mesa の lavapipe の上。egl-headless の render node は vgem（RTX は vfio-pci の
+  まま、CPU に iGPU は無い）。run の間だけ vgem を入れ /dev/kvm・/dev/udmabuf・/dev/dri/renderD128 を 666 に（dev host では awe が kvm group に
+  居る。/dev/udmabuf が開けないと lavapipe の swapchain の memory が作れず VK_ERROR_OUT_OF_DEVICE_MEMORY になった: 06:51 の 1 回目）、後で 660 に
+  戻して vgem を外す。package は入れていない。写した物は Debian の ~/p3-venus（scripts・image の写し 2.4 GB・renderer）。
+  - 2 回目（06:55〜06:58、build/tmp/p024i3-venus-rtx2、forge3 の image 3508997510 とその libvulkan）: forge-guest・fence-guest（600 frame）・wltest・
+    mview mailbox・mview 20 submit・compositor の VULKAN_ERROR 0、`venus-reg: PASS`。戻し: /dev/kvm・/dev/udmabuf 660、/dev/dri 無し（vgem を外した）、
+    qemu 0、RTX の 4 function は vfio-pci。上の「延期」はこれで済み。
+
+### 再開点（2026-11-01 07:00 P3、q1785-i03 を返す。ユーザーの指示で wrap up）
+
+- branch agent/p3-ws291wsi の commit: b5f705dc0（(a)・(c)・NVK の profile、main b2604051a）、2567c80b0（main の取り込み）、d3f41f695（BUG-383）、
+  6769998d2（Venus の延期の記録・ws.md・venus-reg.sh の START_TIMEOUT）、b737842bd（BUG-381、main 3e59321f1）と、この記録と venus-reg-rtx.sh の commit。
+- 到達（RTX 2070、同じ window）: subs-1000 42.7 → 58.5〜58.7 fps（NVK 75.4）、subs-100 362 → 481（NVK 683）、big-100 590 → 622、big-1000 118 前後（NVK 136.2）。
+  目標は未達。
+- 次: 残りの最大の差 G1（nvrtx の decode・executor・reset 約 8 µs / submit を submit の時に呼び手の thread で行う）は (b)「記録の時に push buffer まで
+  作る」で、設計の Phase と design review が要る（ユーザーの判断、上の説明）。その他の候補: executor の draw ごとの費用（16 draw で 3.3 µs）、
+  GPU_COMMAND の残りの kernel の費用（copy 2 回・admission・stream の写し）、libvulkan の queue_attempt の user の時間。big-1000 は client の encode と
+  submit の段の decode・executor（3.3 ms 対 NVK 0.03 ms）。
