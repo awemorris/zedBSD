@@ -405,6 +405,10 @@ layout_flex(
 			value = CSS_ALIGN_START;
 		if (free_space < 0 && (value == CSS_ALIGN_SPACE_AROUND || value == CSS_ALIGN_SPACE_EVENLY))
 			value = CSS_ALIGN_START;
+
+		/* A safe align-content that would overflow falls back to the start. */
+		if (free_space < 0 && (box->style.flex_keywords & 32u) != 0 && (value == CSS_ALIGN_END || value == CSS_ALIGN_CENTER))
+			value = CSS_ALIGN_START;
 		switch (value) {
 		case CSS_ALIGN_STRETCH:
 		case CSS_ALIGN_NORMAL:
@@ -2554,6 +2558,13 @@ flex_place_line(
 		justify = start_edge ? CSS_ALIGN_LEFT : CSS_ALIGN_RIGHT;
 	}
 
+	/* A safe justify-content that would overflow falls back to the start. */
+	if ((box->style.flex_keywords & 16u) != 0 && free_space < 0 &&
+	    (justify == CSS_ALIGN_END || justify == CSS_ALIGN_CENTER || justify == CSS_ALIGN_LEFT || justify == CSS_ALIGN_RIGHT)) {
+		justify = CSS_ALIGN_NORMAL;
+		physical_edge = 0;
+	}
+
 	/* justify-content: where the first item starts and what goes between them. */
 	cursor = 0;
 	between = gap;
@@ -2715,8 +2726,10 @@ flex_place_line(
 			if (box->style.flex_wrap == CSS_FLEX_WRAP_REVERSE)
 				frame = line_cross - frame - cross_outer;
 			child->y += frame;
-		} else if (align == CSS_ALIGN_END || align == CSS_ALIGN_CENTER) {
-			/* At the end or the center, the item moves by the room the line leaves (half of it). */
+		} else if ((align == CSS_ALIGN_END || align == CSS_ALIGN_CENTER) &&
+		    !(line_cross < cross_outer &&
+		    ((child->style.align_self != CSS_ALIGN_AUTO ? child->style.flex_keywords & 128u : box->style.flex_keywords & 64u) != 0))) {
+			/* At the end or the center, the item moves by the room the line leaves (half of it); a safe alignment that would overflow stays at the start. */
 			frame = line_cross - cross_outer;
 			if (align == CSS_ALIGN_CENTER)
 				frame = frame / 2;
