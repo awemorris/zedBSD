@@ -914,3 +914,23 @@ Origin: 2026-10-27 ユーザーの指示。
 - 一時物（Q1 が消す）: 一覧は build/tmp/p8/delete-list-i14.txt（1 行 1 path、/tmp/p8out の dev141〜dev147 と、worktree p8-ws074 の build/tmp/p8/ の作業 file、build/ws074-suites/wpt/zz-debug、Acid の runner の一時 html）。/tmp/p8out には dev148・acid148 を残す。
 - 注意: 一度 `pkill -f "host-build.sh plain"` を使い、自分の shell を巻き込んで終了した（他の担当の build は止まっていないと見た）。以後は pid を指定した。
 - 道具: plan/ws074/phase260/tools/st1.sh（static の 1 ID を実行し、失敗の画像を build/tmp/p8/st1/ に残す）。
+
+### q1727-i15 の途中経過（2026-11-01、P8。host の再起動のため早く止めた）
+
+- main を取り込んだ（main が自分の HEAD 8c6b1eaef を含んでいたので fast-forward で aa9b32f77。merge commit は作られていない。git log -1 の親は 1 つ）。
+- source は変えていない。測定もしていない。基準は i14 の最終のまま: dev148（source 7c60c1b0e）= 3,107 / 3,472（89.49%）、gap 365（174 / 124 / 65 / 2）、Acid2 100.00%・Acid3 100/100 exact。
+  main の変更（WS334 の call-site の置換、BUG-383 の guard）を入れた後の再測定は未実施。
+- 調べた事:
+  - CSS_TRACKS = 24 を外す作り: `css_style` の `columns`・`rows`・`auto_columns`・`auto_rows`（css/css.h）を engine の arena への `const struct css_track *` にする。
+    `column_names` と同じく engine の arena に置き内容で重複を除く（`cascade_line_names` の `kept_names` と同じ作り）。style の大きさも約 10KB 減る。
+    parse 側の `css_track_list`（css/internal.h）の `tracks[]`・`names[]` も、成長する arena の配列にする。layout が style の track を書き換える所
+    （layout/grid.c `grid_expand_axis`、layout/grid-names.c の subgrid の track、css/cascade.c の subgrid の preset 6430 付近）は、tree の arena に複写してから書く。
+    読む所は layout/inline.c・grid.c・bind/computed.c の約 20 箇所。固定長の stack 配列（grid.c の `columns[CSS_TRACKS + 1]`、computed.c の `lines[CSS_TRACKS + 1]`）も直す。効く ID は約 6。
+  - 縦書きの inline box の decoration: paint/list.c `list_lines` が `box->vertical_inline` の line の `decorations` を飛ばしている。
+    `list_inline_decoration` は水平の座標（x0・baseline）で書かれているので、vertical（1 と 2）用に座標を入れ替えて描く関数が要る。着手していない。
+- 次の候補（効く ID の順の見込み）: (1) 縦書きの inline box の background・border（grid の self-baseline 約 16 ID）、
+  (2) Navigation API の残り（gap の中の navigation-api 約 55 ID: initial about:blank の load の timing、`window.length`・`window[n]`・名前付き access、srcdoc・javascript: の entry、sandbox）、
+  (3) CSS_TRACKS の pointer 化（約 6 ID）、(4) `<col>`・`<colgroup>` の background（4 ID）、(5) scroll・scrollend の event。
+  gap の内訳は build/tmp/p8/gap148.json（css-grid 118、css-flexbox 56、css-view-transitions 46、css-anchor-position 44、navigation-api 約 55）。
+- 一時物: 一覧は build/tmp/p8/delete-list-i15.txt（1 行 1 path）。/tmp/p8out には dev148・acid148 を残す（i15 は新しい測定なし）。
+- 途中で止めた host-build（`build/ws074-host/plain` の増分 build、main の merge 後の最初の build）は PID を指定して止めた。build/ws074-host/plain/browser は 06:49 の古い物のまま。
