@@ -1033,8 +1033,26 @@ position_place_once(
 	box->area_scrolls = position_in_scroller(box);
 
 	/* Insets and sizes with anchor functions are finished against the containing block. */
-	if (layout_anchor_wanted(box))
-		layout_anchor_resolve(tree, box, containing->x, containing->y, containing->width, containing->height);
+	if (layout_anchor_wanted(box)) {
+		/* A grid area that names the containing block is what anchor() measures from. */
+		if (box->static_grid_area && !box->cb_set) {
+			layout_anchor_resolve(tree, box, box->static_x - (box->static_x_from_right ? box->static_x_area_width : 0), box->static_y,
+			    box->static_x_area_width, box->static_y_area_height);
+		} else if (box->cb_set && !box->area_from_anchor) {
+			layout_unit cb_x;
+			layout_unit cb_y;
+			layout_unit cb_w;
+			layout_unit cb_h;
+
+			cb_x = box->cb_left_auto ? containing->x : box->cb_left;
+			cb_y = box->cb_top_auto ? containing->y : box->cb_top;
+			cb_w = (box->cb_right_auto ? containing->x + containing->width : box->cb_right) - cb_x;
+			cb_h = (box->cb_bottom_auto ? containing->y + containing->height : box->cb_bottom) - cb_y;
+			layout_anchor_resolve(tree, box, cb_x, cb_y, cb_w < 0 ? 0 : cb_w, cb_h < 0 ? 0 : cb_h);
+		} else {
+			layout_anchor_resolve(tree, box, containing->x, containing->y, containing->width, containing->height);
+		}
+	}
 
 	/* A position-area makes an area of the grid around the anchor the containing block; anchor-center centers on the anchor. */
 	if (box->style.position_area >= 0)
