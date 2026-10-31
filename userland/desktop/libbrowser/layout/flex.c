@@ -849,7 +849,14 @@ flex_content_basis(
 	} else {
 		tree->measuring++;
 		layout_context_begin(tree, &context, &floats);
-		error = layout_block(tree, child, container->width);
+
+		/* An item that does not stretch across is as wide as its content (its height depends on that width). */
+		if (child->style.width.unit == CSS_UNIT_AUTO && !child->replaced &&
+		    (flex_align_of(container, child) != CSS_ALIGN_STRETCH ||
+		    child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO))
+			error = layout_shrink_to_fit(tree, child, container->width);
+		else
+			error = layout_block(tree, child, container->width);
 		layout_context_end(tree, &context);
 		tree->measuring--;
 
@@ -1094,7 +1101,12 @@ flex_base_size(
 			child->style.min_height.unit = CSS_UNIT_AUTO;
 			child->style.min_height.value = 0.0f;
 		}
-		error = layout_block(tree, child, box->width);
+		if (child->style.width.unit == CSS_UNIT_AUTO && !child->replaced && child->style.writing_mode == box->style.writing_mode &&
+		    (flex_align_of(box, child) != CSS_ALIGN_STRETCH ||
+		    child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO))
+			error = layout_shrink_to_fit(tree, child, box->width);
+		else
+			error = layout_block(tree, child, box->width);
 		child->style.min_height = saved_min_height;
 		if (error != 0)
 			return error;
@@ -1964,7 +1976,12 @@ flex_content_height(
 	child->style.height.unit = CSS_UNIT_AUTO;
 	child->style.min_height.unit = CSS_UNIT_AUTO;
 	child->style.max_height.unit = CSS_UNIT_NONE;
-	error = layout_block(tree, child, box->width);
+	if (child->style.width.unit == CSS_UNIT_AUTO && !child->replaced && child->style.writing_mode == box->style.writing_mode &&
+	    (flex_align_of(box, child) != CSS_ALIGN_STRETCH ||
+	    child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO))
+		error = layout_shrink_to_fit(tree, child, box->width);
+	else
+		error = layout_block(tree, child, box->width);
 	*height = child->height;
 	child->style.height = saved_height;
 	child->style.min_height = saved_minimum;
