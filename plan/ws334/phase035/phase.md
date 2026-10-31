@@ -18,3 +18,4 @@
 
 - 2026-11-01 p009: `base/os-zones.h` の `struct wb_os_zone_names` の comment「名前は ASCII」を直す（CLDR 48 の Türkiye が UTF-8）。
 - 2026-11-01 p013: `plan/ws334/tests/run-unit.sh` が win32 の試験で locale を `C.UTF-8` にする（host の ja_JP.UTF-8 が無いと Wine が英字でない名前の file を作れない）。
+- 2026-11-01 p008: `base/os-time.h` の Windows の時差の comment の `SystemTimeToTzSpecificLocalTimeEx` を、実装の `GetTimeZoneInformationForYear`＋`SystemTimeToTzSpecificLocalTime` に合わせる（前者は Wine で stub）。DST の試験を harness に入れる方法（Wine の TZ）も検討する。
