@@ -28,7 +28,14 @@
 
 #include <string.h>
 
-static int anchor_value(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_expr *expr, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
+/* What an anchor sum comes to without any anchor found: its percentage and its pixels, when every anchor function fell back to a fixed value (pure). */
+struct anchor_static {
+	float percent;
+	float pixels;
+	int pure;
+};
+
+static int anchor_value(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_expr *expr, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value, struct anchor_static *fixed);
 static const struct css_style *anchor_cb_style(const struct layout_tree *tree, const struct layout_box *box);
 static int anchor_axis_reversed(const struct css_style *style, int vertical);
 static int anchor_query(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
@@ -68,6 +75,7 @@ layout_anchor_resolve(
 	struct css_length *length;
 	layout_unit start;
 	layout_unit size;
+	struct anchor_static fixed;
 	layout_unit value;
 	int positioned;
 	int valid;
@@ -122,11 +130,21 @@ layout_anchor_resolve(
 		/* The value in pixels, or the property's invalid value. */
 		valid = 0;
 		value = 0;
+		fixed.percent = 0.0f;
+		fixed.pixels = 0.0f;
+		fixed.pure = 0;
 		if (positioned && box->style.anchor[slot] != NULL)
-			valid = anchor_value(tree, box, box->style.anchor[slot], slot, start, size, &value);
+			valid = anchor_value(tree, box, box->style.anchor[slot], slot, start, size, &value, &fixed);
 		length->value = layout_to_px(value);
 		length->offset = 0;
 		length->unit = CSS_UNIT_PX;
+
+		/* With no anchor found the value is the fallback itself: a percentage stays one (the computed value shows it). */
+		if (valid && fixed.pure && fixed.percent != 0.0f) {
+			length->unit = CSS_UNIT_PERCENT;
+			length->value = fixed.percent;
+			length->offset = fixed.pixels;
+		}
 		if (!valid)
 			length->unit = slot == CSS_ANCHOR_SLOT_MAX_WIDTH || slot == CSS_ANCHOR_SLOT_MAX_HEIGHT ? CSS_UNIT_NONE : CSS_UNIT_AUTO;
 		if (!valid && slot >= CSS_ANCHOR_SLOT_MARGIN_TOP) {
@@ -162,8 +180,10 @@ anchor_value(
 	int slot,
 	layout_unit cb_start,
 	layout_unit cb_size,
-	layout_unit *value)
+	layout_unit *value,
+	struct anchor_static *fixed)
 {
+	struct anchor_static inner;
 	layout_unit total;
 	layout_unit part;
 	int index;
@@ -171,20 +191,31 @@ anchor_value(
 
 	/* The lengths. */
 	total = layout_from_px(expr->px) + (layout_unit)((float)cb_size * expr->percent / 100.0f);
+	fixed->percent = expr->percent;
+	fixed->pixels = expr->px;
+	fixed->pure = 1;
 
 	/* Each function, or its fallback. */
 	for (index = 0; index < expr->count; index++) {
 		valid = anchor_query(tree, box, &expr->terms[index], slot, cb_start, cb_size, &part);
-		if (!valid) {
+		if (valid) {
+			fixed->pure = 0;
+		} else {
 			if (!expr->terms[index].has_fallback)
 				return 0;
 			if (expr->terms[index].fallback_expr != NULL) {
-				valid = anchor_value(tree, box, expr->terms[index].fallback_expr, slot, cb_start, cb_size, &part);
+				valid = anchor_value(tree, box, expr->terms[index].fallback_expr, slot, cb_start, cb_size, &part, &inner);
 				if (!valid)
 					return 0;
+				fixed->percent += inner.percent * expr->terms[index].coef;
+				fixed->pixels += inner.pixels * expr->terms[index].coef;
+				if (!inner.pure)
+					fixed->pure = 0;
 			} else {
 				part = layout_from_px(expr->terms[index].fallback_px) +
 				    (layout_unit)((float)cb_size * expr->terms[index].fallback_percent / 100.0f);
+				fixed->percent += expr->terms[index].fallback_percent * expr->terms[index].coef;
+				fixed->pixels += expr->terms[index].fallback_px * expr->terms[index].coef;
 			}
 		}
 		total += (layout_unit)((float)part * expr->terms[index].coef);
