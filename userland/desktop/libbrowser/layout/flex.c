@@ -900,7 +900,9 @@ flex_base_size(
 
 	/* The item's box model against the container's width. */
 	child = item->box;
-	layout_box_model(child, box->width);
+
+	/* Percentages of the container's width are cyclic while its width is being measured: they count as none. */
+	layout_box_model(child, tree->measuring != 0 && box->style.width.unit != CSS_UNIT_PX ? 0 : box->width);
 
 	/* The sides the main axis starts and ends at: left and right for a row, top and bottom for a column. */
 	start_side = CSS_TOP;
