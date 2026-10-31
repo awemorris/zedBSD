@@ -35,10 +35,12 @@ struct float_rect {
 	layout_unit y;
 	layout_unit width;
 	layout_unit height;
+	/* The shape the lines beside it follow (NULL for the margin box). */
+	struct layout_shape *shape;
 };
 
 static int float_overlaps(const struct float_rect *rect, layout_unit top, layout_unit bottom);
-static void float_room(const struct layout_tree *tree, layout_unit top, layout_unit bottom, layout_unit width, layout_unit *left, layout_unit *right);
+static void float_room(const struct layout_tree *tree, layout_unit top, layout_unit bottom, layout_unit width, int shaped, layout_unit *left, layout_unit *right);
 static layout_unit float_next_bottom(const struct layout_tree *tree, layout_unit top);
 
 /*
@@ -133,7 +135,7 @@ layout_place_float(
 
 	/* Moves down past floats until the box fits between the others (or is alone on its band). */
 	for (tries = 0; tries < 1000; tries++) {
-		float_room(tree, top, top + outer_height, width, &left, &right);
+		float_room(tree, top, top + outer_height, width, 0, &left, &right);
 		if (right - left >= outer_width)
 			break;
 		next = float_next_bottom(tree, top);
@@ -144,6 +146,7 @@ layout_place_float(
 
 	/* The side it goes to. */
 	rect.side = box->floating;
+	rect.shape = NULL;
 	rect.y = tree->origin_y + top;
 	rect.width = outer_width;
 	rect.height = outer_height;
@@ -152,6 +155,11 @@ layout_place_float(
 	} else {
 		rect.x = tree->origin_x + left;
 	}
+
+	/* The shape its lines follow, in the float's own coordinates. */
+	error = layout_shape_build(tree, box, width, &rect.shape);
+	if (error != 0)
+		return error;
 
 	/* The context keeps it. */
 	if (tree->floats != NULL) {
@@ -180,8 +188,26 @@ layout_line_room(
 	layout_unit *left,
 	layout_unit *right)
 {
-	/* The same room a float would have. */
-	float_room(tree, top, bottom, width, left, right);
+	/* The room a float would have, except that a float's shape takes the place of its margin box. */
+	float_room(tree, top, bottom, width, 1, left, right);
+}
+
+/* Tells whether a float of the current context has a shape of its own. */
+int
+layout_floats_shaped(
+	const struct layout_tree *tree)
+{
+	const struct float_rect *rect;
+	size_t index;
+
+	if (tree->floats == NULL)
+		return 0;
+	for (index = 0; index < tree->floats->count; index++) {
+		rect = wb_vector_at(tree->floats, index);
+		if (rect->shape != NULL)
+			return 1;
+	}
+	return 0;
 }
 
 /*
@@ -285,11 +311,14 @@ float_room(
 	layout_unit top,
 	layout_unit bottom,
 	layout_unit width,
+	int shaped,
 	layout_unit *left,
 	layout_unit *right)
 {
 	const struct float_rect *rect;
 	layout_unit edge;
+	layout_unit shape_left;
+	layout_unit shape_right;
 	size_t index;
 	int overlaps;
 
@@ -307,6 +336,22 @@ float_room(
 		overlaps = float_overlaps(rect, tree->origin_y + top, tree->origin_y + bottom);
 		if (!overlaps)
 			continue;
+
+		/* Beside a shape, a band takes only what the shape reaches in it. */
+		if (shaped && rect->shape != NULL) {
+			if (!layout_shape_extent(rect->shape, tree->origin_y + top - rect->y, tree->origin_y + bottom - rect->y, &shape_left, &shape_right))
+				continue;
+			if (rect->side == CSS_FLOAT_LEFT) {
+				edge = rect->x + shape_right - tree->origin_x;
+				if (edge > *left)
+					*left = edge;
+			} else {
+				edge = rect->x + shape_left - tree->origin_x;
+				if (edge < *right)
+					*right = edge;
+			}
+			continue;
+		}
 
 		/* A left float pushes the left edge right; a right one the right edge left. */
 		if (rect->side == CSS_FLOAT_LEFT) {

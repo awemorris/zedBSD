@@ -108,7 +108,8 @@ static layout_unit inline_advance(struct inline_cutter *cutter, uint32_t code_po
 static int inline_build_lines(struct layout_tree *tree, struct layout_box *box, const struct inline_piece *pieces, size_t count);
 static int inline_finish_line(struct layout_tree *tree, struct layout_box *box, const struct inline_piece *pieces, size_t start, size_t end, layout_unit *cursor, struct wb_vector *lines, int first_line, layout_unit line_left, layout_unit line_width);
 static int inline_place_floats(struct layout_tree *tree, struct layout_box *content, struct layout_box *box, int depth, layout_unit *floor);
-static void inline_room(struct layout_tree *tree, struct layout_box *box, layout_unit cursor, layout_unit *left, layout_unit *width);
+static void inline_room(struct layout_tree *tree, struct layout_box *box, layout_unit cursor, layout_unit band, layout_unit *left, layout_unit *width);
+static int inline_line_settled(struct layout_tree *tree, const struct layout_box *box, const struct wb_vector *lines, layout_unit before, layout_unit line_left, layout_unit line_width);
 static int inline_wraps(const struct layout_box *box);
 static void inline_line_height(struct layout_tree *tree, const struct css_style *style, layout_unit *above, layout_unit *below);
 static void inline_font_extent(struct layout_tree *tree, const struct text_font *font, const struct css_style *style, layout_unit *above, layout_unit *below);
@@ -999,8 +1000,11 @@ inline_build_lines(
 	layout_unit line_width;
 	layout_unit below;
 	layout_unit advance;
+	layout_unit before;
+	layout_unit band;
 	size_t start;
 	size_t index;
+	int retries;
 	int wrap_lines;
 	int wraps;
 	int error;
@@ -1014,8 +1018,32 @@ inline_build_lines(
 	start = 0;
 	x = 0;
 	index = 0;
-	inline_room(tree, box, cursor, &line_left, &line_width);
-	while (index < count) {
+	band = 0;
+	retries = 0;
+	inline_room(tree, box, cursor, band, &line_left, &line_width);
+	while (index < count || start < count) {
+		/* The last line, when no piece is left. */
+		if (index >= count) {
+			before = cursor;
+			error = inline_finish_line(tree, box, pieces, start, count, &cursor, &lines, lines.count == 0, line_left, line_width);
+			if (error != 0) {
+				wb_vector_release(&lines);
+				return error;
+			}
+			if (retries < 3 && !inline_line_settled(tree, box, &lines, before, line_left, line_width)) {
+				band = ((const struct layout_line *)lines.items)[lines.count - 1U].height;
+				lines.count--;
+				cursor = before;
+				retries++;
+				index = start;
+				x = 0;
+				inline_room(tree, box, cursor, band, &line_left, &line_width);
+				continue;
+			}
+			start = count;
+			break;
+		}
+
 		/* Spaces at the start of a line are dropped. */
 		if (pieces[index].space && index == start) {
 			start++;
@@ -1028,17 +1056,32 @@ inline_build_lines(
 			below = layout_below_float(tree, cursor);
 			if (below > cursor) {
 				cursor = below;
-				inline_room(tree, box, cursor, &line_left, &line_width);
+				band = 0;
+				retries = 0;
+				inline_room(tree, box, cursor, band, &line_left, &line_width);
 				continue;
 			}
 		}
 
 		/* A forced break ends the line with what came before it. */
 		if (pieces[index].forced_break) {
+			before = cursor;
 			error = inline_finish_line(tree, box, pieces, start, index, &cursor, &lines, lines.count == 0, line_left, line_width);
 			if (error != 0) {
 				wb_vector_release(&lines);
 				return error;
+			}
+
+			/* A line whose own height narrows the room beside shaped floats is made again in the room its height has. */
+			if (retries < 3 && !inline_line_settled(tree, box, &lines, before, line_left, line_width)) {
+				band = ((const struct layout_line *)lines.items)[lines.count - 1U].height;
+				lines.count--;
+				cursor = before;
+				retries++;
+				index = start;
+				x = 0;
+				inline_room(tree, box, cursor, band, &line_left, &line_width);
+				continue;
 			}
 
 			/* A break that clears floats starts the next line below them. */
@@ -1053,7 +1096,9 @@ inline_build_lines(
 			index++;
 			start = index;
 			x = 0;
-			inline_room(tree, box, cursor, &line_left, &line_width);
+			band = 0;
+			retries = 0;
+			inline_room(tree, box, cursor, band, &line_left, &line_width);
 			continue;
 		}
 
@@ -1067,31 +1112,35 @@ inline_build_lines(
 		if (!box->vertical_inline && index > start)
 			wraps = inline_wraps(pieces[index - 1U].box);
 		if (wraps && !pieces[index].space && x + pieces[index].width > line_width) {
+			before = cursor;
 			error = inline_finish_line(tree, box, pieces, start, index, &cursor, &lines, lines.count == 0, line_left, line_width);
 			if (error != 0) {
 				wb_vector_release(&lines);
 				return error;
 			}
+			if (retries < 3 && !inline_line_settled(tree, box, &lines, before, line_left, line_width)) {
+				band = ((const struct layout_line *)lines.items)[lines.count - 1U].height;
+				lines.count--;
+				cursor = before;
+				retries++;
+				index = start;
+				x = 0;
+				inline_room(tree, box, cursor, band, &line_left, &line_width);
+				continue;
+			}
 
 			/* The next line starts with the word. */
 			start = index;
 			x = 0;
-			inline_room(tree, box, cursor, &line_left, &line_width);
+			band = 0;
+			retries = 0;
+			inline_room(tree, box, cursor, band, &line_left, &line_width);
 			continue;
 		}
 
 		/* The piece goes on the line. */
 		x += pieces[index].width;
 		index++;
-	}
-
-	/* The last line. */
-	if (start < count) {
-		error = inline_finish_line(tree, box, pieces, start, count, &cursor, &lines, lines.count == 0, line_left, line_width);
-		if (error != 0) {
-			wb_vector_release(&lines);
-			return error;
-		}
 	}
 
 	/* Moves the lines into the arena. */
@@ -1769,12 +1818,45 @@ inline_place_floats(
 	return 0;
 }
 
+/*
+ * Tells whether the line just made (at before) has the room it was made in
+ * once its own height is known: beside the shaped floats the room depends on
+ * the band the line takes, which is known only after the line is made.
+ */
+static int
+inline_line_settled(
+	struct layout_tree *tree,
+	const struct layout_box *box,
+	const struct wb_vector *lines,
+	layout_unit before,
+	layout_unit line_left,
+	layout_unit line_width)
+{
+	const struct layout_line *line;
+	layout_unit left;
+	layout_unit right;
+	layout_unit width;
+
+	/* Floats of plain boxes take the same room whatever the band. */
+	if (lines->count == 0 || !layout_floats_shaped(tree))
+		return 1;
+
+	/* The room for the line's own height. */
+	line = (const struct layout_line *)lines->items + (lines->count - 1U);
+	layout_line_room(tree, before, before + (line->height > 0 ? line->height : 1), box->width, &left, &right);
+	width = right - left;
+	if (width < 0)
+		width = 0;
+	return left == line_left && width == line_width;
+}
+
 /* Finds the room of a line starting at cursor: its left edge and width between the floats beside a line's height. */
 static void
 inline_room(
 	struct layout_tree *tree,
 	struct layout_box *box,
 	layout_unit cursor,
+	layout_unit band,
 	layout_unit *left,
 	layout_unit *width)
 {
@@ -1782,9 +1864,11 @@ inline_room(
 	layout_unit below;
 	layout_unit right;
 
-	/* The band of a line of the block's own font. */
+	/* The band of a line of the block's own font, or of the height a line was found to have. */
 	inline_line_height(tree, &box->style, &above, &below);
-	layout_line_room(tree, cursor, cursor + above + below, box->width, left, &right);
+	if (band < above + below)
+		band = above + below;
+	layout_line_room(tree, cursor, cursor + band, box->width, left, &right);
 
 	/* The width between the edges. */
 	*width = right - *left;
