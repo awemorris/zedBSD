@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 23:59（Q1）
+最終更新: 2026-11-01 00:11（Q1）
 
 ## 担当（P1〜P8）
 
@@ -324,6 +324,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 ## 決まった事
 
 - （2026-10-31）ユーザーから、libbrowser のブラウザを Windows に移植する WS を作る（libbrowser の platform 独立を移植で確かめる、libkeiland の Win32 の実装、Windows 用の .exe、名前は OmniGrammaton）、という趣旨の指示を受けた（[WS334](ws334/ws.md)、planning）。
+- （2026-11-01）ユーザーから、WS334 は計画だけ進める、既存の library（libtruetype・png・gif・jpeg の compat・libmedia）はそのまま使う、libbrowser をレンダリング・スクリプト・ストレージの 3 つのエンジンに interface で分ける、libkeiland の移植は Win32 直と Qt6 を比べる、という趣旨の指示を受けた（ws334/ws.md）。
 
 - （2026-10-31）ユーザーから、Pi 4 は desktop を 1920x1080 で 60 fps に最適化してから mview の 3D を最適化する、両者を行き来してもよい、順は担当に任せる、という趣旨の指示を受けた（ws291-p025、P4）。
 
