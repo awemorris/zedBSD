@@ -222,6 +222,7 @@ static const struct values_name values_names[] = {
 	{ "overflow-inline", CSS_PROP_OVERFLOW_INLINE },
 	{ "overflow-block", CSS_PROP_OVERFLOW_BLOCK },
 	{ "box-sizing", CSS_PROP_BOX_SIZING },
+	{ "content-visibility", CSS_PROP_CONTENT_VISIBILITY },
 	{ "-webkit-box-sizing", CSS_PROP_BOX_SIZING },
 	{ "content", CSS_PROP_CONTENT },
 	{ "flex-direction", CSS_PROP_FLEX_DIRECTION },
@@ -568,6 +569,14 @@ static const struct values_keyword values_clear[] = {
 	{ "both", CSS_CLEAR_BOTH },
 	{ "inline-start", CSS_FLOAT_LEFT },
 	{ "inline-end", CSS_FLOAT_RIGHT },
+	{ NULL, 0 }
+};
+
+/* The keywords of content-visibility. */
+static const struct values_keyword values_content_visibility[] = {
+	{ "visible", 0 },
+	{ "auto", 1 },
+	{ "hidden", 2 },
 	{ NULL, 0 }
 };
 
@@ -2671,6 +2680,9 @@ values_single(
 		break;
 	case CSS_PROP_BOX_SIZING:
 		table = values_box_sizing;
+		break;
+	case CSS_PROP_CONTENT_VISIBILITY:
+		table = values_content_visibility;
 		break;
 	case CSS_PROP_FLEX_DIRECTION:
 		table = values_flex_direction;

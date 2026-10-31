@@ -780,6 +780,8 @@ struct css_style {
 	struct css_length padding[4];
 	struct css_length offset[4];
 	int box_sizing;
+	/* content-visibility: 0 visible, 1 auto, 2 hidden (the content is skipped and the box is size-contained). */
+	int content_visibility;
 
 	/*
 	 * Anchor positioning: the sums of the insets and sizes whose unit is

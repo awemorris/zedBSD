@@ -585,6 +585,10 @@ box_build_element(
 	if (replaced || is_iframe || is_loaded_object)
 		return 0;
 
+	/* The content of a box with content-visibility hidden is skipped: the box has no children, as if it were size-contained. */
+	if (box->style.content_visibility == 2 && parent != NULL)
+		return 0;
+
 	/* The ::before box, the children, the ::after box, then the fix-ups a block needs. */
 	error = box_build_pseudo(tree, css, element, box, CSS_PSEUDO_ELEMENT_BEFORE);
 	if (error != 0)

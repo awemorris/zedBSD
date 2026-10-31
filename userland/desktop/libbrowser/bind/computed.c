@@ -47,6 +47,7 @@ enum computed_property {
 	COMPUTED_OVERFLOW_INLINE,
 	COMPUTED_OVERFLOW_BLOCK,
 	COMPUTED_BOX_SIZING,
+	COMPUTED_CONTENT_VISIBILITY,
 	COMPUTED_WIDTH,
 	COMPUTED_HEIGHT,
 	COMPUTED_MIN_WIDTH,
@@ -297,6 +298,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "overflow-inline", COMPUTED_OVERFLOW_INLINE },
 	{ "overflow-block", COMPUTED_OVERFLOW_BLOCK },
 	{ "box-sizing", COMPUTED_BOX_SIZING },
+	{ "content-visibility", COMPUTED_CONTENT_VISIBILITY },
 	{ "width", COMPUTED_WIDTH },
 	{ "height", COMPUTED_HEIGHT },
 	{ "min-width", COMPUTED_MIN_WIDTH },
@@ -431,6 +433,9 @@ static const char *const computed_overflows[] = { "visible", "hidden", "clip", "
 
 /* The names of box-sizing, by enum css_box_sizing. */
 static const char *const computed_box_sizings[] = { "content-box", "border-box" };
+
+/* The names of content-visibility. */
+static const char *const computed_content_visibilities[] = { "visible", "auto", "hidden" };
 
 /* The names of the border styles, by enum css_border_style. */
 static const char *const computed_border_styles[] = { "none", "solid", "dashed", "dotted", "double", "inset", "outset", "groove", "ridge" };
@@ -1574,6 +1579,9 @@ computed_write_keyword(
 		break;
 	case COMPUTED_BOX_SIZING:
 		error = computed_name(computed_box_sizings, 2, style->box_sizing, out);
+		break;
+	case COMPUTED_CONTENT_VISIBILITY:
+		error = computed_name(computed_content_visibilities, 3, style->content_visibility, out);
 		break;
 	case COMPUTED_CONTENT:
 		error = computed_write_content(style, out);

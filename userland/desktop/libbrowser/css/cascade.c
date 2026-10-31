@@ -4609,6 +4609,9 @@ cascade_apply(
 	case CSS_PROP_BOX_SIZING:
 		style->box_sizing = value->keyword;
 		break;
+	case CSS_PROP_CONTENT_VISIBILITY:
+		style->content_visibility = value->keyword;
+		break;
 	case CSS_PROP_FLEX_DIRECTION:
 		style->flex_direction = value->keyword;
 		break;
@@ -4779,6 +4782,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_BOX_SIZING:
 		style->box_sizing = parent->box_sizing;
+		break;
+	case CSS_PROP_CONTENT_VISIBILITY:
+		style->content_visibility = parent->content_visibility;
 		break;
 	case CSS_PROP_CONTENT:
 		style->content_kind = parent->content_kind;
