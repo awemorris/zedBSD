@@ -2,7 +2,7 @@
 
 # ws334-p001: 設計（OmniGrammaton の Windows 移植）
 
-Status: planned（2026-10-31 23:59 新設）
+Status: in-progress（2026-11-01 00:24 P7 q1787）
 Parent: [WS334](../ws.md)
 
 ## 範囲
