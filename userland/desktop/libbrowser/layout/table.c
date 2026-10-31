@@ -127,6 +127,7 @@ layout_table(
 	layout_unit containing;
 	layout_unit cursor;
 	layout_unit captions;
+	layout_unit rows_start;
 	layout_unit caption_least;
 	layout_unit least;
 	layout_unit total;
@@ -244,11 +245,16 @@ layout_table(
 		total = layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing;
 
 	/* The rows, then the row groups around them. */
+	rows_start = cursor;
 	if (error == 0)
 		error = table_lay_rows(tree, &state, used, &cursor, total);
 	table_release(&state);
 	if (error != 0)
 		return error;
+
+	/* A table with a height is that tall below its captions even when it has no rows. */
+	if (total > 0 && cursor - rows_start < total)
+		cursor = rows_start + total;
 	table_place_groups(box, state.edge_x, used, cursor);
 
 	/* The captions below the rows. */

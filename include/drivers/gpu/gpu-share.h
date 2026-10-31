@@ -29,7 +29,10 @@
  * copies instead); a backend without that limit ignores the flags.
  * The GPU core retains the registered device until all exported references end.
  *
- * A nonnull image requests the existing immutable linear scanout contract.
+ * A nonnull image requests the immutable image contract: linear rows, or a
+ * layout the backend's drv_gpu_layout_ops accepted before the export.  An
+ * allocation already exported with one description is refused (EINVAL)
+ * when exported again with another.
  * A null image requests allocation-only sharing and is used only when the
  * backend advertises GPU_CAP_ALLOCATION_SHARE. It makes no layout or scanout
  * promise. Application metadata stays in the common capability, not here.
@@ -44,6 +47,33 @@ struct drv_gpu_share_ops {
 
 	/* Optional physical view of an allocation-only export, borrowed the same way. */
 	int (*get_allocation_backing)(void *, void *, struct drv_gpu_scanout_backing *);
+};
+
+/*
+ * The image layouts a device names besides linear rows (optional, both
+ * operations together; drv_gpu_ops.layouts).  A display-only node has them
+ * as a renderer does, since it may scan out a layout another device wrote.
+ *
+ * image_layout(device, image, bytes) checks a description whose tiling is
+ * not GPU_IMAGE_LINEAR and reports the bytes from its offset that the image
+ * takes; EOPNOTSUPP for a layout or variant the device neither writes nor
+ * reads.  The core then bounds those bytes by the allocation.  It runs
+ * without the device's locks and touches no hardware.
+ *
+ * image_layouts(device, session, request) answers GPU_IMAGE_LAYOUTS: the
+ * core has checked the inputs and cleared the outputs; the backend fills
+ * count and the entries, fastest first, each with every use the request
+ * names, and the core checks the answer.  A layout listed other than
+ * linear rows must be one image_layout accepts.
+ *
+ * A display presenting a blob of a layout other than linear rows bounds
+ * and lays the image out by what its own export or import recorded; the
+ * core's check of the present request's stride and height says nothing
+ * about such an image.
+ */
+struct drv_gpu_layout_ops {
+	int (*image_layout)(void *, const struct gpu_image_descriptor *, uint64_t *);
+	int (*image_layouts)(void *, void *, struct gpu_image_layouts *);
 };
 
 /*

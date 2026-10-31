@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 14:50（Q1）
+最終更新: 2026-10-31 15:39（Q1）
 
 ## 担当（P1〜P8）
 
@@ -11,12 +11,12 @@
 | --- | --- | --- | --- | --- |
 | P1 | — | — | 返却（06:4x）。WS326 p025（規約の全文の見直し、style の違反 0、全試験が前と同じ）を main に | 次の割当を Q1 が決める |
 | P2 | [WS309](ws309/ws.md) | Keiland の game mode | p015（q1782）: game mode を文字通りの zero copy の direct scanout に（client が compositor と共有する image に直に描く、全 GPU） | QEMU（Venus）→ VF2 → RTX（10.0.10.3）の順に確かめる |
-| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ | p023 の設計（q1781）: 共有の image の画素の並びを client と compositor で決める（RTX の block-linear、0j の (b)） | 設計・design-reviewer・問いまで |
+| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ | p023 の実装（q1781-i02）: 共通の部分（並びの名前・GPU_IMAGE_LAYOUTS の ioctl・kernel の確かめ）→ RTX の block-linear の置き方と画面出し | 設計の第 2 版は main（ffd702bdb）。問い 2 つは下の 0k |
 | P4 | — | — | 返却（06:5x）。WS326 の完了の片付け（試験を plan/tools/h264sw/ へ） | 午後: Pi 5 の実機 |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | — | — | 返却（07:1x）。WS310 の設計を main に（問い Q310-1〜6 は下の 0i） | 次の割当を Q1 が決める |
 | P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 7 回目（q1727-i07）: flex の直交の baseline、描画の画素の境目への揃え、list の marker など（main 16333cd46） | 今 3,472 のうち 2,809（80.90%）。後退 1（backdrop-filter の境目の 1 画素、+17 と引き換えに P8 が許容と判断）。Acid は最後に測り直す |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 7 回目（q1727-i07）: flex の直交の baseline・描画の画素の揃え・list の marker・`contain` の property など（main 2c8207f8d） | 今 3,472 のうち 2,834（81.62%）。後退 1（backdrop-filter の境目の 1 画素）。Acid は最後に測り直す |
 
 実装の担当（Sonnet・Opus の単発）: 今は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
 
@@ -240,6 +240,14 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
   - (b) 画面に出す image を block-linear（GPU の得意な並び）にする（p013 の (B) の案、WSI の変更）。
 - 決めてほしい事: (a)・(b) のどちらかで進めるか、subs-1000 は今の値で止めるか。Q1 の推しは (b)（copy 自体が要らなくなり、desktop の他の GPU にも効く見込み）。
 
+### 0k. WS291 p023（共有の image の画素の並び、RTX の block-linear）の問い Q1・Q2（2026-10-31 15:24 新しい）
+
+- **決まった（2026-10-31 15:39）**: Q1 は (b) 目視（CRC は作らない。block-linear の画面出しはユーザーが見るまで既定で切る、確かめの手順は P3 が phase.md に書き「拾える試験」へ）。Q2 は (b) 続けて内訳を測る（[p024](ws291/phase024/phase.md) を新設）。
+
+- 問いの本文: [user-questions.md](ws291/phase023/user-questions.md)。どちらも実装を止めない。
+- Q1: RTX の display が block-linear を正しく出したかの確かめ（(a) 推し: display の CRC を読む仕組みを足す、約 3 LW／(b) 目視を拾える試験に、確かめまで既定で切る）。
+- Q2: subs-1000 を NVK の 75 fps に近づける続き（(a) 推し: 実装の結果を見てから別の Phase で決める／(b) 続けて内訳を測る Phase を足す／(c) 約 16 fps で止める）。
+
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
 - 背景: 2026-10-28 の P1 の報告（[ws299/ws.md](ws299/ws.md) の「結果（2026-10-28 21:50）」）。idle と HWP は WS333 に入れた。WS299 そのものは、5330 が空いたら担当を付ける（2026-10-31 の指示、q1744）。
@@ -302,6 +310,12 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
 
 ## 決まった事
+
+- （2026-10-31）WS291 p023: block-linear の画面出しの確かめは目視（CRC は作らない）、subs-1000 の固定の費用の内訳は p023 の後に続けて測る（p024）、という趣旨の答えをユーザーから受けた。
+
+- （2026-10-31）ユーザーから、compositor の image（合成の経路と game mode で貸す image）は、描けて scanout できて画質を大きく損なわない物の中で GPU の一番速い物を選ぶ、という趣旨の指示を受けた（Q1 の解釈: 描けて display が読める形式と並び（tiled・block-linear・圧縮）の中で一番速い並び、色の深さは下げない、driver ごとの優先の表）。[ws309-p015](ws309/phase015/phase.md)・[ws291-p023](ws291/phase023/phase.md)。
+- （2026-10-31）ユーザーから、RTX の block-linear（描画の置き方と NVC57E の scanout）は必要なので実装する、という趣旨の指示を受けた。nvrtx の部分は P3 が p023 の設計の後に実装し、共通の経路（protocol・libvulkan・compositor）は P2 が p015 で作る。
+- （2026-10-31）ユーザーから、game mode は文字通りの zero copy（client が compositor と共有する image に直に描く）で全 GPU を直す、compositor の image の形式は compositor が決める、という趣旨の指示を受けた（WS309 p015 を P2 で着手）。
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |

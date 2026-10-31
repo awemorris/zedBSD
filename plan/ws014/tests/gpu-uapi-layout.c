@@ -271,3 +271,21 @@ typedef char gpu_policy_stop_check[offsetof(struct gpu_job_policy, stop_timeout_
 
 /* Policy command thirty-eight cannot alias the capacity operation or an earlier ioctl. */
 typedef char gpu_policy_command_check[GPU_JOB_POLICY == 0xc0284726UL ? 1 : -1];
+
+/* An image's layout variant keeps the word the description reserved, so its 64-byte shape is unchanged. */
+typedef char gpu_image_descriptor_tiling_check[offsetof(struct gpu_image_descriptor, tiling) == 48 ? 1 : -1];
+typedef char gpu_image_descriptor_parameter_check[offsetof(struct gpu_image_descriptor, layout_parameter) == 52 ? 1 : -1];
+
+/* One listed layout is four words on either data model. */
+typedef char gpu_image_layout_size_check[sizeof(struct gpu_image_layout) == 16 ? 1 : -1];
+
+/* The layouts question is eight words and sixteen entries, the answer after the count. */
+typedef char gpu_image_layouts_size_check[sizeof(struct gpu_image_layouts) == 288 ? 1 : -1];
+typedef char gpu_image_layouts_count_check[offsetof(struct gpu_image_layouts, count) == 28 ? 1 : -1];
+typedef char gpu_image_layouts_entry_check[offsetof(struct gpu_image_layouts, entry) == 32 ? 1 : -1];
+
+/* Layouts command forty-six carries the complete question and answer. */
+typedef char gpu_image_layouts_command_check[GPU_IMAGE_LAYOUTS == 0xc120472eUL ? 1 : -1];
+
+/* NVIDIA's block linear is the first layout of family one. */
+typedef char gpu_image_nv_block_linear_check[GPU_IMAGE_NV_BLOCK_LINEAR == ((GPU_IMAGE_FAMILY_NVIDIA << GPU_IMAGE_FAMILY_SHIFT) | 1U) ? 1 : -1];

@@ -1892,7 +1892,7 @@ same_image(
 	/* The memory type, the use and the layout. */
 	if (first->memory_type != second->memory_type || first->usage != second->usage)
 		return 0;
-	if (first->tiling != second->tiling || first->reserved != second->reserved)
+	if (first->tiling != second->tiling || first->layout_parameter != second->layout_parameter)
 		return 0;
 
 	/* Succeeded: the same image. */

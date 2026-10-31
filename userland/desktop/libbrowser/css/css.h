@@ -860,6 +860,8 @@ struct css_style {
 	int filter_count;
 	/* will-change names a property that makes the box a containing block of fixed and absolute boxes (bit 0: transform, filter...) or a backdrop root (bit 1: those and opacity, clip-path, mask, mix-blend-mode). */
 	int will_change_contains;
+	/* contain: size 1, layout 2, paint 4, style 8, inline-size 16. */
+	unsigned contain;
 	/* One inherited sharp text shadow; blur and lists are added by a later phase. */
 	struct css_shadow text_shadow;
 	int text_shadow_set;

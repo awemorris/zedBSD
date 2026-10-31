@@ -51,7 +51,7 @@ static void box_relative_within(const struct layout_box *box, const struct layou
 static void box_inline_relative(struct layout_box *block);
 static void box_transform_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
 static void box_apply_scale(struct layout_box *box);
-static void box_static_inline(struct layout_box *box, layout_unit x, layout_unit y);
+static void box_static_inline(const struct layout_box *block, struct layout_box *box, layout_unit x, layout_unit y, size_t *breaks);
 
 /*
  * Builds and lays out the box tree of a document for a viewport of width
@@ -217,6 +217,7 @@ layout_absolute(
 	struct layout_box *child;
 	layout_unit content_x;
 	layout_unit content_y;
+	size_t breaks;
 	layout_unit dx;
 	layout_unit dy;
 
@@ -233,7 +234,8 @@ layout_absolute(
 	/* The lines are relative to the block; boxes out of the flow among them start at its content's top. */
 	if (box->children_inline && !(box->line_count == 0 && box->physical_style == NULL && box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)) {
 		box_inline_relative(box);
-		box_static_inline(box, content_x, content_y);
+		breaks = 0;
+		box_static_inline(box, box, content_x, content_y, &breaks);
 		return;
 	}
 
@@ -296,7 +298,8 @@ layout_contains_fixed(
 {
 	/* A transformed block, or one with a backdrop filter or a will-change that makes one. */
 	return box->kind == LAYOUT_BLOCK &&
-	    (box->style.transform_set || box->style.backdrop_filter_count != 0 || (box->style.will_change_contains & 1));
+	    (box->style.transform_set || box->style.backdrop_filter_count != 0 || (box->style.will_change_contains & 1) ||
+	    (layout_containment(box) & 6U) != 0);
 }
 
 /*
@@ -1989,17 +1992,28 @@ box_relative_within(
  */
 static void
 box_static_inline(
+	const struct layout_box *block,
 	struct layout_box *box,
 	layout_unit x,
-	layout_unit y)
+	layout_unit y,
+	size_t *breaks)
 {
 	struct layout_box *child;
+	const struct layout_line *line;
 
 	/* The inline boxes are searched through; a box out of the flow or a float is not entered. */
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow) {
 			child->static_x = x;
 			child->static_y = y;
+
+			/* After a forced break it is on a later line. */
+			if (*breaks != 0 && block->line_count != 0) {
+				line = &block->lines[*breaks < block->line_count ? *breaks : block->line_count - 1U];
+				child->static_y = y + line->y;
+				if (*breaks >= block->line_count)
+					child->static_y += line->height;
+			}
 			continue;
 		}
 
@@ -2009,7 +2023,11 @@ box_static_inline(
 			continue;
 		}
 
+		/* A forced break starts the next line. */
+		if (child->kind == LAYOUT_LINE_BREAK)
+			(*breaks)++;
+
 		/* An inline box's content. */
-		box_static_inline(child, x, y);
+		box_static_inline(block, child, x, y, breaks);
 	}
 }
