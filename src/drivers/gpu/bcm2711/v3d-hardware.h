@@ -43,18 +43,6 @@ struct bcm2711_v3d_perf {
 	uint32_t clear_passes;
 	uint32_t image_passes;
 	uint32_t skipped_copies;
-	/* Passes whose bin ran beside the pass before them, and passes prepared ahead but left to their own step. */
-	uint32_t ahead_passes;
-	uint32_t ahead_dropped;
-	/*
-	 * Passes whose bin was long enough to look ahead, of them the ones with
-	 * no next job known and with no render pass next (ahead_opcode: the
-	 * opcode of the last event found instead, 0 for none).
-	 */
-	uint32_t ahead_long;
-	uint32_t ahead_nojob;
-	uint32_t ahead_notpass;
-	uint32_t ahead_opcode;
 	uint32_t draws;
 	uint64_t staged_bytes;
 	uint64_t total_ticks;

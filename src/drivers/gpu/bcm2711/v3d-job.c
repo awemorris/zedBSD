@@ -36,13 +36,9 @@ static void counters_prepare(struct bcm2711_v3d *engine);
 static void counters_select(struct bcm2711_v3d *engine, const uint8_t *sources);
 static void counters_read(struct bcm2711_v3d *engine, uint32_t *values);
 static int run_cl(struct bcm2711_v3d *engine, const struct bcm2711_v3d_cl_job *job, struct bcm2711_v3d_job_result *result);
-static int run_bin(struct bcm2711_v3d *engine, const struct bcm2711_v3d_cl_job *job, struct bcm2711_v3d_job_result *result, uint32_t *kept, bool counted);
-static int render_launch(struct bcm2711_v3d *engine, const struct bcm2711_v3d_cl_job *job, struct bcm2711_v3d_job_result *result, struct bcm2711_v3d_flight *flight);
-static int render_wait(struct bcm2711_v3d *engine, struct bcm2711_v3d_flight *flight);
-static void report_failure(struct bcm2711_v3d *engine, enum bcm2711_v3d_job_kind kind, int error, const struct bcm2711_v3d_job_result *result);
 static int run_tfu(struct bcm2711_v3d *engine, const struct bcm2711_v3d_tfu_job *job, struct bcm2711_v3d_job_result *result);
 static int run_compute(struct bcm2711_v3d *engine, const struct bcm2711_v3d_compute_job *job, struct bcm2711_v3d_job_result *result);
-static int wait_queue(struct bcm2711_v3d *engine, const struct job_queue *queue, const struct bcm2711_v3d_cl_job *bin, struct bcm2711_v3d_job_result *result, uint32_t *kept);
+static int wait_queue(struct bcm2711_v3d *engine, const struct job_queue *queue, const struct bcm2711_v3d_cl_job *bin, struct bcm2711_v3d_job_result *result);
 static int feed_overflow(struct bcm2711_v3d *engine, const struct bcm2711_v3d_cl_job *job, struct bcm2711_v3d_job_result *result);
 static int launch_admit_locked(struct bcm2711_v3d *engine);
 
@@ -91,8 +87,33 @@ bcm2711_v3d_job_run(
 	bcm2711_v3d_busy_add(engine, started);
 
 	/* Record the failed native queues before masking or reset discards their fault state. */
-	if (error != 0)
-		report_failure(engine, job->kind, error, result);
+	if (error != 0) {
+		bcm2711_stage_mark(
+			BCM2711_FAMILY_V3D,
+			"job failed kind=%u error=%d retired=%u irq=%x/%x fault=%x:%x",
+			(unsigned)job->kind,
+			error,
+			(unsigned)result->retired,
+			result->core_events,
+			result->hub_events,
+			result->fault_client,
+			result->fault_address);
+		bcm2711_stage_mark(
+			BCM2711_FAMILY_V3D,
+			"job queues bin=%x/%x render=%x/%x counters=%u/%u",
+			kern_mmio_read32(engine->core.mapped + 0x110),
+			kern_mmio_read32(engine->core.mapped + 0x108),
+			kern_mmio_read32(engine->core.mapped + 0x114),
+			kern_mmio_read32(engine->core.mapped + 0x10c),
+			kern_mmio_read32(engine->core.mapped + 0x134),
+			kern_mmio_read32(engine->core.mapped + 0x138));
+		bcm2711_stage_mark(
+			BCM2711_FAMILY_V3D,
+			"job status bin=%x render=%x pipeline=%x",
+			kern_mmio_read32(engine->core.mapped + 0x100),
+			kern_mmio_read32(engine->core.mapped + 0x104),
+			kern_mmio_read32(engine->core.mapped + 0x130));
+	}
 
 	/* Only success or a refusal before the first launch proves DMA retirement. */
 	failed_dma = false;
@@ -104,203 +125,6 @@ bcm2711_v3d_job_run(
 
 	/* Succeeded: actual IRQ completion and the required GPU cache clean were observed. */
 	return 0;
-}
-
-/*
- * Runs a job, launching only the render queue of a CL job: its flight
- * runs on until bcm2711_v3d_job_land, and holds the worker slot until then.
- * binned says the CL job's bin queue already ran (bcm2711_v3d_job_prebin),
- * its tile lists still in its pool.  Any other job runs whole, with the
- * flight not active.
- */
-int
-bcm2711_v3d_job_launch(
-	struct bcm2711_v3d *engine,
-	const struct bcm2711_v3d_job *job,
-	struct bcm2711_v3d_job_result *result,
-	struct bcm2711_v3d_flight *flight,
-	bool binned)
-{
-	uint64_t started;
-	bool failed_dma;
-	int error;
-
-	/* Nothing runs on yet; a job without a render queue runs whole. */
-	kern_memset(flight, 0, sizeof(*flight));
-	if (job->kind != BCM2711_V3D_JOB_CL) {
-		error = bcm2711_v3d_job_run(engine, job, result);
-		if (error != 0)
-			return error;
-
-		/* Succeeded: the job ran whole, and nothing runs on. */
-		return 0;
-	}
-
-	/* Refusals before launch do not borrow any caller DMA allocation. */
-	kern_memset(result, 0, sizeof(*result));
-	result->retired = true;
-	error = admit_job(engine);
-	if (error != 0)
-		return error;
-
-	/* Requires every referenced native span to be mapped before the first launch. */
-	error = validate_job(engine, job);
-	if (error != 0) {
-		finish_job(engine, false);
-		return error;
-	}
-
-	/* The caller's cache clean is visible before the bin queue consumes inputs; the render queue is launched after it. */
-	kern_io_write_barrier();
-	started = bcm2711_v3d_busy_clock();
-	error = 0;
-	if (!binned)
-		error = run_bin(engine, &job->command.cl, result, NULL, true);
-	if (error == 0)
-		error = render_launch(engine, &job->command.cl, result, flight);
-
-	/* A failure ends the job here, as bcm2711_v3d_job_run would. */
-	if (error != 0) {
-		bcm2711_v3d_busy_add(engine, started);
-		report_failure(engine, job->kind, error, result);
-		failed_dma = false;
-		if (!result->retired)
-			failed_dma = true;
-		finish_job(engine, failed_dma);
-		return error;
-	}
-
-	/* Succeeded: the render queue runs on and the slot stays held. */
-	flight->started = started;
-	flight->active = true;
-	return 0;
-}
-
-/*
- * Runs the next CL job's bin queue while the flight's render queue runs.
- *
- * The bin reads only what its own lists, pool and state and the caller's
- * prepared inputs name, none of which the running render writes.  A
- * refusal before launch (result->retired true) leaves the flight as it was.
- */
-int
-bcm2711_v3d_job_prebin(
-	struct bcm2711_v3d *engine,
-	struct bcm2711_v3d_flight *flight,
-	const struct bcm2711_v3d_cl_job *next,
-	struct bcm2711_v3d_job_result *result)
-{
-	struct bcm2711_v3d_job job;
-	int error;
-
-	/* Nothing launched yet for the next job. */
-	kern_memset(result, 0, sizeof(*result));
-	result->retired = true;
-	if (!flight->active || flight->error != 0 || next->bin_start == 0)
-		return ENOTSUP;
-
-	/* The next job's spans are mapped before its bin launches. */
-	job.kind = BCM2711_V3D_JOB_CL;
-	job.command.cl = *next;
-	error = validate_job(engine, &job);
-	if (error != 0)
-		return error;
-
-	/* The bin queue alone, without its counters (the render's are counting); a failure leaves the render uncertain too. */
-	kern_io_write_barrier();
-	error = run_bin(engine, next, result, flight->kept, false);
-	if (error != 0) {
-		if (!result->retired)
-			flight->error = error;
-		return error;
-	}
-
-	/* Succeeded: the bin queue finished; its tile lists wait for the job's render. */
-	result->retired = true;
-	return 0;
-}
-
-/*
- * Waits for the flight's render queue, cleans the output when asked, and
- * ends the job, releasing the worker slot.
- */
-int
-bcm2711_v3d_job_land(
-	struct bcm2711_v3d *engine,
-	struct bcm2711_v3d_flight *flight)
-{
-	struct bcm2711_v3d_job_result *result;
-	bool failed_dma;
-	int error;
-
-	/* A flight that does not run on was ended by its launch. */
-	if (!flight->active)
-		return 0;
-	flight->active = false;
-
-	/* The render queue's completion, unless a bin launched beside it failed. */
-	result = flight->result;
-	error = flight->error;
-	if (error == 0) {
-		error = render_wait(engine, flight);
-	} else {
-		result->retired = false;
-	}
-
-	/* The job's time counts in the engine's busy time; a failure is recorded before masking. */
-	bcm2711_v3d_busy_add(engine, flight->started);
-	if (error != 0)
-		report_failure(engine, BCM2711_V3D_JOB_CL, error, result);
-
-	/* Only success proves DMA retirement. */
-	failed_dma = false;
-	if (error != 0 && !result->retired)
-		failed_dma = true;
-	finish_job(engine, failed_dma);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the render completed and its output was cleaned as asked. */
-	return 0;
-}
-
-/* Records the failed native queues before masking or reset discards their fault state. */
-static void
-report_failure(
-	struct bcm2711_v3d *engine,
-	enum bcm2711_v3d_job_kind kind,
-	int error,
-	const struct bcm2711_v3d_job_result *result)
-{
-	/* The failure, then the queues' registers and status. */
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"job failed kind=%u error=%d retired=%u irq=%x/%x fault=%x:%x",
-		(unsigned)kind,
-		error,
-		(unsigned)result->retired,
-		result->core_events,
-		result->hub_events,
-		result->fault_client,
-		result->fault_address);
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"job queues bin=%x/%x render=%x/%x counters=%u/%u",
-		kern_mmio_read32(engine->core.mapped + 0x110),
-		kern_mmio_read32(engine->core.mapped + 0x108),
-		kern_mmio_read32(engine->core.mapped + 0x114),
-		kern_mmio_read32(engine->core.mapped + 0x10c),
-		kern_mmio_read32(engine->core.mapped + 0x134),
-		kern_mmio_read32(engine->core.mapped + 0x138));
-	bcm2711_stage_mark(
-		BCM2711_FAMILY_V3D,
-		"job status bin=%x render=%x pipeline=%x",
-		kern_mmio_read32(engine->core.mapped + 0x100),
-		kern_mmio_read32(engine->core.mapped + 0x104),
-		kern_mmio_read32(engine->core.mapped + 0x130));
-
-	/* Succeeded: the failure is in the log. */
-	return;
 }
 
 /* Checks private register fields and all directly described GPU address spans. */
@@ -451,9 +275,7 @@ static int
 admit_job(
 	struct bcm2711_v3d *engine)
 {
-	static bool admit_reported;
 	struct bcm2711_v3d_hardware *hardware;
-	struct bcm2711_v3d_events events;
 	unsigned long enabled;
 
 	/* Failed boot and reset refuse native access before a guard or table is assumed. */
@@ -467,23 +289,9 @@ admit_job(
 		return EBUSY;
 	}
 
-	/* Sticky faults cannot be hidden by discarding an earlier queue's event latches; the first refusal says which fault it was. */
+	/* Sticky faults cannot be hidden by discarding an earlier queue's event latches. */
 	if (hardware->faulted || !hardware->irq_live) {
-		events = hardware->events;
 		spin_unlock_irqrestore(&hardware->guard, enabled);
-		if (!admit_reported) {
-			admit_reported = true;
-			bcm2711_stage_mark(
-				BCM2711_FAMILY_V3D,
-				"job refused faulted=%u irq_live=%u events=%x/%x fault=%x:%x error=%d",
-				(unsigned)hardware->faulted,
-				(unsigned)hardware->irq_live,
-				events.core,
-				events.hub,
-				events.fault_client,
-				events.fault_address,
-				events.error);
-		}
 		return EIO;
 	}
 
@@ -522,26 +330,6 @@ finish_job(
 	return;
 }
 
-/*
- * The counter sources of a bin run (cycles, QPU idle, coordinate shading,
- * valid instructions, waits for coordinate shading, instruction and uniform
- * cache hits and misses, VDW and VCD stalls, bin-thread cycles, L2T hits and
- * misses, primitives binned, reversed primitives discarded) and of a render
- * run (counters_prepare's).  Values referenced: Mesa
- * src/broadcom/common/v3d_performance_counters.h (the V3D 4.2 counter
- * numbers).
- */
-static const uint8_t job_bin_sources[BCM2711_V3D_COUNTERS] = {
-	32, 13, 14, 16, 33, 20, 21, 22, 23, 26, 27, 28, 30, 31, 35, 12
-};
-static const uint8_t job_render_sources[BCM2711_V3D_COUNTERS] = {
-	32, 13, 15, 16, 17, 18, 19, 34, 24, 25, 54, 29, 3, 9, 84, 82
-};
-
-/* The bin and render queues' completion events and progress registers. */
-static const struct job_queue job_bin_queue = {2, 0, 0x110, 0x118};
-static const struct job_queue job_render_queue = {1, 0, 0x114, 0x11c};
-
 /* Submits bin then render using IRQ dependency, with no hardware semaphore packets. */
 static int
 run_cl(
@@ -549,109 +337,76 @@ run_cl(
 	const struct bcm2711_v3d_cl_job *job,
 	struct bcm2711_v3d_job_result *result)
 {
-	struct bcm2711_v3d_flight flight;
-	int error;
-
-	/* The bin queue, then the render queue launched and waited for. */
-	kern_memset(&flight, 0, sizeof(flight));
-	error = run_bin(engine, job, result, NULL, true);
-	if (error != 0)
-		return error;
-	error = render_launch(engine, job, result, &flight);
-	if (error != 0)
-		return error;
-	error = render_wait(engine, &flight);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: both queues and any requested output cache clean finished. */
-	return 0;
-}
-
-/*
- * Runs a CL job's bin queue (none when it has no bin list) and waits for it.
- *
- * kept carries the completion events of another queue that runs meanwhile
- * (NULL when none does); counted selects and reads the bin counters, which
- * only a bin that runs alone may do.
- */
-static int
-run_bin(
-	struct bcm2711_v3d *engine,
-	const struct bcm2711_v3d_cl_job *job,
-	struct bcm2711_v3d_job_result *result,
-	uint32_t *kept,
-	bool counted)
-{
+	/*
+	 * The counter sources of a bin run (cycles, QPU idle, coordinate
+	 * shading, valid instructions, waits for coordinate shading,
+	 * instruction and uniform cache hits and misses, VDW and VCD stalls,
+	 * bin-thread cycles, L2T hits and misses, primitives binned, reversed
+	 * primitives discarded) and of a render run (counters_prepare's).
+	 * Values referenced: Mesa src/broadcom/common/v3d_performance_counters.h
+	 * (the V3D 4.2 counter numbers).
+	 */
+	static const uint8_t bin_sources[BCM2711_V3D_COUNTERS] = {
+		32, 13, 14, 16, 33, 20, 21, 22, 23, 26, 27, 28, 30, 31, 35, 12
+	};
+	static const uint8_t render_sources[BCM2711_V3D_COUNTERS] = {
+		32, 13, 15, 16, 17, 18, 19, 34, 24, 25, 54, 29, 3, 9, 84, 82
+	};
+	const struct job_queue bin = {2, 0, 0x110, 0x118};
+	const struct job_queue render = {1, 0, 0x114, 0x11c};
 	uint32_t before[BCM2711_V3D_COUNTERS];
 	uint32_t after[BCM2711_V3D_COUNTERS];
 	uint32_t index;
 	unsigned long enabled;
 	uint64_t step;
+	uint64_t bin_ticks;
+	uint64_t render_ticks;
+	uint64_t clean_ticks;
 	int error;
 
-	/* A job without a bin list renders alone. */
-	if (job->bin_start == 0)
-		return 0;
+	/* Measure queue completion separately from output cache drain. */
+	bin_ticks = 0;
+	clean_ticks = 0;
 
 	/* The bin queue writes tile lists into its prevalidated pool and state allocations. */
-	error = bcm2711_v3d_hardware_invalidate(engine);
-	if (error != 0)
-		return error;
-	enabled = spin_lock_irqsave(&engine->hardware.guard);
+	if (job->bin_start != 0) {
+		error = bcm2711_v3d_hardware_invalidate(engine);
+		if (error != 0)
+			return error;
+		enabled = spin_lock_irqsave(&engine->hardware.guard);
 
-	/* Fault delivery and command launch share a single admission boundary. */
-	error = launch_admit_locked(engine);
-	if (error != 0) {
-		spin_unlock_irqrestore(&engine->hardware.guard, enabled);
-		return error;
-	}
+		/* Fault delivery and command launch share a single admission boundary. */
+		error = launch_admit_locked(engine);
+		if (error != 0) {
+			spin_unlock_irqrestore(&engine->hardware.guard, enabled);
+			return error;
+		}
 
-	/* The end write starts execution; all earlier writes define this job only. */
-	kern_mmio_write32(engine->core.mapped + 0x308, 0);
-	kern_mmio_write32(engine->core.mapped + 0x30c, 0);
-	kern_mmio_write32(engine->core.mapped + 0x170, job->pool_address);
-	kern_mmio_write32(engine->core.mapped + 0x174, job->pool_bytes);
-	kern_mmio_write32(engine->core.mapped + 0x15c, job->state_address | 2U);
-	kern_mmio_write32(engine->core.mapped + 0x160, job->bin_start);
-	result->retired = false;
-	if (counted) {
+		/* The end write starts execution; all earlier writes define this job only. */
+		kern_mmio_write32(engine->core.mapped + 0x308, 0);
+		kern_mmio_write32(engine->core.mapped + 0x30c, 0);
+		kern_mmio_write32(engine->core.mapped + 0x170, job->pool_address);
+		kern_mmio_write32(engine->core.mapped + 0x174, job->pool_bytes);
+		kern_mmio_write32(engine->core.mapped + 0x15c, job->state_address | 2U);
+		kern_mmio_write32(engine->core.mapped + 0x160, job->bin_start);
+		result->retired = false;
 		counters_prepare(engine);
-		counters_select(engine, job_bin_sources);
+		counters_select(engine, bin_sources);
 		counters_read(engine, before);
-	}
-	kern_mmio_write32(engine->core.mapped + 0x168, job->bin_end);
+		kern_mmio_write32(engine->core.mapped + 0x168, job->bin_end);
 
-	spin_unlock_irqrestore(&engine->hardware.guard, enabled);
+		spin_unlock_irqrestore(&engine->hardware.guard, enabled);
 
-	/* Render remains unsubmitted while bin completion or overflow is still pending. */
-	step = clock_ticks();
-	error = wait_queue(engine, &job_bin_queue, job, result, kept);
-	result->bin_ticks = clock_ticks() - step;
-	if (error != 0)
-		return error;
-
-	/* The bin run's counters, when it ran alone. */
-	if (counted) {
+		/* Render remains unsubmitted while bin completion or overflow is still pending. */
+		step = clock_ticks();
+		error = wait_queue(engine, &bin, job, result);
+		bin_ticks = clock_ticks() - step;
+		if (error != 0)
+			return error;
 		counters_read(engine, after);
 		for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
 			result->bin_counters[index] = after[index] - before[index];
 	}
-
-	/* Succeeded: the tile lists are written. */
-	return 0;
-}
-
-/* Launches a CL job's render queue after its bin completed; the flight then waits for it. */
-static int
-render_launch(
-	struct bcm2711_v3d *engine,
-	const struct bcm2711_v3d_cl_job *job,
-	struct bcm2711_v3d_job_result *result,
-	struct bcm2711_v3d_flight *flight)
-{
-	unsigned long enabled;
-	int error;
 
 	/* The render cache sees bin-produced tile lists only after its IRQ fence. */
 	error = bcm2711_v3d_hardware_invalidate(engine);
@@ -668,8 +423,8 @@ render_launch(
 	/* The counters before the run, as the render queue alone runs from here. */
 	counters_prepare(engine);
 	if (job->bin_start != 0)
-		counters_select(engine, job_render_sources);
-	counters_read(engine, flight->before);
+		counters_select(engine, render_sources);
+	counters_read(engine, before);
 
 	/* No bin-dependent renderer is placed in a hardware FIFO before software completion. */
 	kern_mmio_write32(engine->core.mapped + 0x164, job->render_start);
@@ -678,39 +433,15 @@ render_launch(
 
 	spin_unlock_irqrestore(&engine->hardware.guard, enabled);
 
-	/* Succeeded: the render queue runs; the flight knows its job. */
-	flight->job = job;
-	flight->result = result;
-	flight->render_started = clock_ticks();
-	return 0;
-}
-
-/* Waits for a launched render queue, then cleans the output when the job asks. */
-static int
-render_wait(
-	struct bcm2711_v3d *engine,
-	struct bcm2711_v3d_flight *flight)
-{
-	const struct bcm2711_v3d_cl_job *job;
-	struct bcm2711_v3d_job_result *result;
-	uint32_t after[BCM2711_V3D_COUNTERS];
-	uint32_t index;
-	uint64_t render_ticks;
-	uint64_t clean_ticks;
-	uint64_t step;
-	int error;
-
 	/* The same caller-owned pool and overflow storage stay alive through render completion. */
-	job = flight->job;
-	result = flight->result;
-	error = wait_queue(engine, &job_render_queue, NULL, result, flight->kept);
-	render_ticks = clock_ticks() - flight->render_started;
+	step = clock_ticks();
+	error = wait_queue(engine, &render, NULL, result);
+	render_ticks = clock_ticks() - step;
 	if (error != 0)
 		return error;
 	counters_read(engine, after);
 	for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
-		result->counters[index] = after[index] - flight->before[index];
-	clean_ticks = 0;
+		result->counters[index] = after[index] - before[index];
 	if (job->clean_output) {
 		step = clock_ticks();
 		error = bcm2711_v3d_hardware_clean(engine);
@@ -725,10 +456,11 @@ render_wait(
 	result->retired = true;
 
 	/* The submission cost report totals queue waits, which include scheduler delay as well as GPU busy time. */
+	result->bin_ticks = bin_ticks;
 	result->render_ticks = render_ticks;
 	result->clean_ticks = clean_ticks;
 
-	/* Succeeded: the render queue and any requested output cache clean finished. */
+	/* Succeeded: both queues and any requested output cache clean finished. */
 	return 0;
 }
 
@@ -782,7 +514,7 @@ run_tfu(
 	spin_unlock_irqrestore(&engine->hardware.guard, enabled);
 
 	/* Output storage remains borrowed until actual TFU completion. */
-	error = wait_queue(engine, &queue, NULL, result, NULL);
+	error = wait_queue(engine, &queue, NULL, result);
 	if (error != 0)
 		return error;
 	result->retired = true;
@@ -824,7 +556,7 @@ run_compute(
 	spin_unlock_irqrestore(&engine->hardware.guard, enabled);
 
 	/* CSD IRQ alone cannot expose TMU output while a write combiner still holds it. */
-	error = wait_queue(engine, &queue, NULL, result, NULL);
+	error = wait_queue(engine, &queue, NULL, result);
 	if (error != 0)
 		return error;
 	error = bcm2711_v3d_hardware_clean(engine);
@@ -836,20 +568,13 @@ run_compute(
 	return 0;
 }
 
-/*
- * Waits for IRQ events and feeds preallocated overflow while sampling bounded progress.
- *
- * kept (core and hub, NULL when one queue runs) holds the completion events
- * this wait consumes for another queue that runs meanwhile, and gives this
- * wait the ones another wait consumed for it.
- */
+/* Waits for IRQ events and feeds preallocated overflow while sampling bounded progress. */
 static int
 wait_queue(
 	struct bcm2711_v3d *engine,
 	const struct job_queue *queue,
 	const struct bcm2711_v3d_cl_job *bin,
-	struct bcm2711_v3d_job_result *result,
-	uint32_t *kept)
+	struct bcm2711_v3d_job_result *result)
 {
 	struct bcm2711_v3d_events events;
 	uint32_t attempt;
@@ -894,24 +619,12 @@ wait_queue(
 		for (attempt = 0; attempt <= JOB_POLL_STEPS; attempt++) {
 			observed = bcm2711_v3d_hardware_event_sequence(engine);
 			bcm2711_v3d_hardware_events(engine, &events);
-			if (kept != NULL) {
-				events.core |= kept[0];
-				events.hub |= kept[1];
-				kept[0] = 0;
-				kept[1] = 0;
-			}
 			result->core_events |= events.core;
 			result->hub_events |= events.hub;
 			if (events.error != 0) {
 				result->fault_client = events.fault_client;
 				result->fault_address = events.fault_address;
 				return events.error;
-			}
-
-			/* The other queue's completions wait for its own wait (an out-of-memory warning is this bin's). */
-			if (kept != NULL) {
-				kept[0] = events.core & ~(queue->core_event | 4U);
-				kept[1] = events.hub & ~queue->hub_event;
 			}
 
 			/* Completion outranks a simultaneous early OOM warning from the retiring binner. */

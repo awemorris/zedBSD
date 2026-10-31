@@ -824,61 +824,6 @@ execution_step(
 	return 0;
 }
 
-/* The most submissions the search for the next job looks through. */
-#define QUEUE_NEXT_EXECUTIONS 6U
-
-/*
- * Finds the job the executor runs after current in its session.
- *
- * current is a command of the running execution (the session's head) or of
- * one of the few queued behind it; the waits and signals between two
- * commands only count, and no command's input depends on them.  The
- * executions behind the head are read under the guard a submit links them
- * under, and only the executor ends executions, so they stay while it looks.
- */
-struct bcm2711_vulkan_native_job *
-bcm2711_vulkan_queue_next_job(
-	struct bcm2711_render_session *render,
-	const struct bcm2711_vulkan_native_job *current)
-{
-	struct bcm2711_render_execution *base;
-	struct bcm2711_vulkan_native_job *found;
-	struct queue_execution *execution;
-	struct queue_action *action;
-	unsigned long enabled;
-	uint32_t looked;
-	uint32_t index;
-	bool passed;
-
-	/* The executions from the running one, until the command after current. */
-	found = NULL;
-	passed = false;
-	enabled = spin_lock_irqsave(&render->device->space.native->hardware.guard);
-
-	base = render->execution_head;
-	for (looked = 0; base != NULL && found == NULL && looked < QUEUE_NEXT_EXECUTIONS; looked++) {
-		/* Only submissions hold commands. */
-		if (base->step != execution_step)
-			break;
-		execution = (struct queue_execution *)base;
-		for (index = execution->cursor; index < execution->owner.action_count && found == NULL; index++) {
-			action = &execution->owner.actions[index];
-			if (action->kind != QUEUE_COMMAND)
-				continue;
-			if (passed)
-				found = action->job;
-			if (action->job == current)
-				passed = true;
-		}
-		base = base->next;
-	}
-
-	spin_unlock_irqrestore(&render->device->space.native->hardware.guard, enabled);
-
-	/* Succeeded: the next job, or none known yet. */
-	return found;
-}
-
 /* Publishes the execution's completion or loss, releases what it owns and frees it. */
 static int
 execution_end(
