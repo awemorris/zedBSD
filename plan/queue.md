@@ -524,3 +524,4 @@
 | q1803 / q1803-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p006`） | [ws334-p006](ws334/phase006/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1804 / q1804-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p008`） | [ws334-p008](ws334/phase008/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1805 / q1805-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p007`） | [ws334-p007](ws334/phase007/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
+| q1806 / q1806-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p012`） | [ws334-p012](ws334/phase012/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
