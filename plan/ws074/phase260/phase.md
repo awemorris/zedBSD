@@ -322,6 +322,53 @@ Origin: 2026-10-27 ユーザーの指示。
   iframe の onload が出ず no_output になる試験が残り、得は無かったので戻した）、table-cell を writing-mode の root にする試験（srl-057 など 4 件）、
   shape-outside（engine に無い。css-shapes の選定 16 件は全部 sideways の変種で、clip-path も要る）、bidi。
 
+### q1727-i04 の後半（2026-10-31、P8。dev51〜dev6x）
+
+- 測定（gap は build/tmp/p8/gap51〜gap6x.json、出力は /tmp/p8out/devNN。計は Chromium が通す 3,472 のうちの数）:
+
+  | 測定 | source の先頭 | 計 | 内容 |
+  | --- | --- | --- | --- |
+  | dev51 | 684f73098 | 2,613（75.26%） | 絶対配置の self-alignment（両 inset がある時の justify-self・align-self）、flip の揃えの入れ替え |
+  | dev52 | 18ba7630f | 2,617 | fixed の scroll を `page_scroll_to` で、`getComputedStyle(el, '::before')` と content、background 短縮形の image-set、LCP の生成 text |
+  | dev53 | 8f1360999 | 2,618 | -webkit-text-stroke-width |
+  | dev54 | d546261c4 より前 | 2,621 | `lh`・`rlh` の単位、非定高の percent row-gap の 2 回目の解決 |
+  | dev55 | d546261c4 | 2,628 | `<canvas>` を replaced に（自然の大きさは属性、既定 300x150）、grid の ratio 寄与 |
+  | dev56 | 82126c0a1 | 2,640 | SVG の percentage の長さ（rect の 100% など）、bare svg の stretch-fit |
+  | dev57 | a5a73f1d9 | 2,645 | zoom の inherit、table の余りの高さは auto の行に先に、canvas の flex-basis: content |
+  | dev58 | 7531d473b | 2,649 | flex・grid の空白だけの text（white-space: pre でも item にしない）、LCP の data URI の背景 |
+  | dev59 | 13d5d98b0 より前 | 2,652 | インライン replaced の getBoundingClientRect は margin を除く、grid の percent の min-width、flex-grow が 1 未満の合計、flex の最小サイズ |
+  | dev60 | （同上の続き） | 2,650 | position-area の auto inset を 0 に（scroll 等で後退 4、dev61 で直した） |
+  | dev61 | ba09c56b9 の前 | 2,656 | auto inset は size が auto の時だけ 0 |
+  | dev62 | ba09c56b9 | 2,661 | HTMLCanvasElement の width・height、チェックボックス・ラジオの zoom、content-visibility、`revert` |
+  | dev63 | 9774120ff | 2,664 | `::details-content`、border-spacing と text-indent の calc() |
+  | dev64 | 71ad40960 | 2,669（76.87%） | details-content: display contents、単一行 flex の line の cross size を min/max-height で挟む |
+
+  dev43 → dev64 の後退は static の css-writing-modes/table-column-order-slr-007 と、dev56 で scripted の grid-item-*-stretch 7 件（SVG の `cx="50%"` の円を描くようになり、
+  natural size のままの bitmap を拡大するので縁がぼやけ、Chromium の vector の拡大と一致しない。以前は円が描かれず偶然合っていた）。
+  それ以外の step の後退は 0（dev60 の 4 件は dev61 で直した）。
+- 直した物（続き。14 以降）:
+  14. 絶対配置（layout/position.c）: 両 inset がある時の self-alignment（justify-self・align-self の start・end・center）、fallback の flip で LEFT/RIGHT・FLEX_* の揃えを入れ替え、対角の flip は direction で left/right を直す。position-area の下で size が auto の box は auto inset を 0 に（area の縁まで広がる）。
+  15. 要素の `::before`・`::after` の getComputedStyle（content の computed）、background 短縮形の image-set()、`-webkit-text-stroke-width`、LCP の生成 text の幅・data URI の背景（plan/ws074/phase230/prelude.js）。
+  16. `lh`・`rlh`（css/cascade.c: engine に `line_px`・`root_line_px`）。calc() の中は未対応。
+  17. grid: percent の row-gap で高さが auto の時、行を固定部分だけで決めた高さに percent をかけて直す。items の percent の min-width は area の割合（stretch の時）。replaced（img・canvas）の ratio を固定の行から寄与として使う（`grid_ratio_width`）。
+  18. `<canvas>`（layout/box.c・replaced.c・flex.c）: replaced の box、自然の大きさは width・height 属性（無ければ 300x150）で ratio を持つ（presentational hint ではないので属性は style の寸法にしない）、flex-basis: content、column の stretch で ratio から高さ。HTMLCanvasElement の interface と width・height の reflect（getContext は無い）。
+  19. SVG の percentage の長さ（page/svg.c `svg_percent_length`: viewBox（無ければ bitmap）の幅・高さ・半径用の対角に対して）。viewBox だけの bare svg の stretch-fit は margin を引く。
+  20. zoom: `width: inherit` の px は子の zoom を掛ける、チェックボックスとラジオの自然の大きさに zoom、calc() が border-spacing・text-indent で通る。
+  21. table: 余りの高さは高さの指定が無い行に先に配る、caption の min-content が table の最小幅（anonymous table に caption も入れる）。
+  22. flex: flex-grow の合計が 1 未満の時は最初の自由な空間に合計をかけた量が上限（2 周目以降も）、flex-basis が自分の値の item は max-content の測定でも min-content で持ち上げる、percent の flex-basis が決まらない時は content と同じ（高さの指定を無視）、単一行の line の cross size を container の min/max-height で挟む。flex・grid で空白だけの text は white-space: pre でも item にしない。
+  23. getBoundingClientRect: インラインの replaced の piece は margin box なので margin を除く（layout/bounds.c。flex の radiobutton-min-size など）。
+  24. @position-try: layer を持ち、同じ名前は最も高い layer の最後の rule（layer 無しが最強）。
+  25. `content-visibility`（visible・auto・hidden。hidden は内容の box を作らない）、UA の sheet の `[hidden=until-found]`、`revert`（author の宣言を UA の宣言に戻す。css/cascade.c `cascade_reverted`）、`::details-content`（css/parser.c・layout/box.c `box_details_content`: summary の後の box を包む。display: contents なら包まない）。
+- 調べて直さなかった物（理由）:
+  - SVG を layout の大きさの vector で描く（bitmap は自然の大きさで作り、layout と paint が `image->width` を自然の大きさとして使う）。grid-item-*-stretch 7 件、css-viewport/zoom の svg 5 件、
+    さらに数件に効く。直すには bitmap に自然の大きさと密度を持たせて layout・paint の約 12 か所を直す。
+  - grid の `CSS_TRACKS`（24）を超える repeat()（grid-limits-001）、table-layout: fixed（flexbox_table-fixed-layout）、quirks mode の percent 高さ、position-area の `::first-letter`/`::first-line`（details-pseudo-elements-005）、
+    @scope の CSSOM（CSSScopeRule・CSSNestedDeclarations）と nesting、flex・grid の baseline（縦書きの item・fieldset・multicol・table の baseline の合成で約 45 件）、
+    scrollIntoView の sideways（要素の負の scrollTop と縦の inline overflow の scrollHeight）、subgrid、computed value の補間、grid の calc() の整数（sibling-index()・sign() を含む）。
+- 次の候補（効きの見込み）: (1) SVG の vector 描画（約 13）、(2) flex・grid の baseline（縦書きの合成 baseline、約 45）、(3) @scope の CSSOM と nesting（約 12）、
+  (4) subgrid の track の共有（約 60）、(5) computed value の補間エンジン（grid・flex の animation、約 25）、(6) `::first-letter`/`::first-line` の pseudo-element、
+  (7) table-layout: fixed、(8) CSS_TRACKS の動的な確保。
+
 再開点（2026-10-31、q1727-i01 の停止）:
 - 最後の全件の測定は ours-dev28（source 5b032c17b、`build/ws074-cmp/ours-dev28` の harness・scripted・crash と、static は `static-subset.py` の全件の再実行）。2,386 / 3,472 = 68.72%、
   4 runner とも dev25/26 の PASS に対する後退 0。その後に commit は無い（この記録の commit だけ）。Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）。
