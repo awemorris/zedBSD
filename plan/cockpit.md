@@ -15,7 +15,7 @@
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 5（p021、q1784-i06）: 画面が出た。bd1f58c4a を実機で確かめ（checksum 一致、c74 48.3 fps）、desktop は 1920x1080 で定常 60 fps（窓を出す瞬間に引っかかり）、画面の mview c74 49.9 fps。merge 04:40（main は下の commit） | bin と render の重ねを実装中 |
 | P5 | — | — | 返却（2026-11-01 03:03）。WS336 の設計を main に（a1d9f18fb、header の基点 d4ab182d2、実装の Phase p002〜p025）。問い Q1〜Q9 は下の 0n | 答えの後に実装（Sonnet と Opus） |
 | P6 | — | — | 返却（2026-11-01 03:04）。WS335 の設計を main に（header の基点 60760d2a0、実装の Phase p002〜p038）。問い U1〜U6 は下の 0o | 答えの後に実装 |
-| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005・p008〜p010・p005〜p020 cleared（最新 p011 files、main c590d87fa） | Sonnet が P7 が p021（統合: OS に触れる所を OS の層へ）を実行中 |
+| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005〜p020 cleared（最新 p011 files、main c590d87fa） | P7 が p021（統合: OS に触れる所を OS の層へ）を実行中 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 13 回目（q1727-i13）: golden の試験の整理 → 負の向きの scroll・直交の subgrid など | 今 3,472 のうち 3,039（87.53%）、Acid3 100/100・Acid2 100%。12 回目は subgrid・grid の絶対配置など（+34、後退 0） |
 
 実装の担当（Sonnet・Opus の単発）: 無し（WS334 の module は p005〜p020 が全部 cleared）。
