@@ -3018,14 +3018,17 @@ environment_reveal_target(
 		if (!entries[index].hidden)
 			continue;
 		if (!environment_hidden_until_found(dom_attribute_ascii(element, "hidden")))
-			break;
+			continue;
 		canceled = 0;
 		error = bind_fire_event(window, walk, "beforematch", BIND_EVENT_BUBBLES, &canceled);
 		if (error != 0)
 			break;
-		if (!dom_is_inclusive_ancestor(&window->document->node, walk) ||
-		    !environment_hidden_until_found(dom_attribute_ascii(element, "hidden")))
+
+		/* Only a removal from the document aborts; a handler that revealed the element itself leaves nothing to remove. */
+		if (!dom_is_inclusive_ancestor(&window->document->node, walk))
 			break;
+		if (!environment_hidden_until_found(dom_attribute_ascii(element, "hidden")))
+			continue;
 		name = vm_atom_from_ascii(window->realm->heap, "hidden");
 		if (name == NULL) {
 			error = ENOMEM;

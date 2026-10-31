@@ -37,6 +37,15 @@ static const char *const handler_types[] = {
 	"beforeunload", "hashchange", "message", "pagehide", "pageshow", "popstate", "storage", "unload",
 	"canplay", "durationchange", "ended", "loadeddata", "loadedmetadata", "pause", "play", "playing", "seeked",
 	"seeking", "timeupdate",
+	"auxclick", "beforeinput", "beforematch", "beforetoggle", "cancel", "canplaythrough", "close", "copy", "cut",
+	"drag", "dragend", "dragenter", "dragleave", "dragover", "dragstart", "drop", "emptied", "formdata",
+	"gotpointercapture", "invalid", "loadstart", "lostpointercapture", "paste", "pointercancel", "pointerdown",
+	"pointerenter", "pointerleave", "pointermove", "pointerout", "pointerover", "pointerrawupdate", "pointerup",
+	"progress", "ratechange", "scrollend", "securitypolicyviolation", "selectionchange", "selectstart",
+	"slotchange", "stalled", "suspend", "toggle", "touchcancel", "touchend", "touchmove", "touchstart",
+	"transitioncancel", "transitionend", "transitionrun", "transitionstart", "animationcancel", "animationend",
+	"animationiteration", "animationstart", "volumechange", "waiting", "languagechange", "offline", "online",
+	"rejectionhandled", "unhandledrejection", "afterprint", "beforeprint",
 	NULL
 };
 
