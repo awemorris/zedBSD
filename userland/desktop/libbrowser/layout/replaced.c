@@ -495,6 +495,10 @@ replaced_is_bare_svg(
 	if (element->ns != DOM_NS_SVG || element->tag != DOM_TAG_SVG)
 		return 0;
 
+	/* No ratio, no filling of the width. */
+	if (box->image != NULL && box->image->no_ratio)
+		return 0;
+
 	/* Neither attribute gives a size. */
 	if (replaced_attribute(box, "width", &ignored))
 		return 0;
