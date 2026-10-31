@@ -2,7 +2,7 @@
 
 # ws335-p002: 土台（約束・定数時間の補助・byte 順）、SHA-2、hash の選択・HMAC・HKDF
 
-Status: 実装済み・試験 PASS（2026-11-01 06:58、Sonnet。cleared は Q1）
+Status: cleared（2026-11-01 06:59 Q1、main 6ea18b1a1）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
