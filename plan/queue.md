@@ -561,3 +561,4 @@
 | q1826 / q1826-i01 | P1（同じ worktree、q1825 の後） | [BUG-385](bugs/BUG-385.md) VF2 の SD の誤りで root が ro（SD の読み書きの retry の補強） | 同上 | pending（予約） |
 | q1827 / q1827-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bug374`・branch `agent/p2-bug374`、10.0.10.3 の RTX 2070 と SwitchBot 1） | [BUG-374](bugs/BUG-374.md) RTX の cursor の色が逆 | 同上。10.0.10.3 は P2 だけ | in-progress（2026-11-01 08:24 起動） |
 | q1824 / q1824-i03 | Sonnet（worktree s-ws336-p005、e22e7431c） | [ws336-p005](ws336/phase005/phase.md) | i02 と同じ範囲（WS336 の 1 担当の次、p004 の後） | in-progress（2026-11-01 08:41 起動） |
+| q1828 / q1828-i01 | P1（同じ worktree p1-bug386、q1826 の後。VF2 と Pi 5 は P1 だけ） | [BUG-387](bugs/BUG-387.md) VF2 と Pi 5 で console から Wayland の desktop を起動できない | 2026-11-01 08:42 ユーザーの報告。Bug を先に直す割り振りの中（VF2 の Bug の担当） | pending（予約） |
