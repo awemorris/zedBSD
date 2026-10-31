@@ -62,4 +62,31 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-01 07:08 時点（host の `date`）。host の再起動のため途中で中断した。**未完（cleared にしない）**。
+
+### できた事
+
+- `userland/base/libcrypto-compat/cryc-chacha.c` を実装した（骨格の ENOSYS を置換）。ChaCha20 の block・xor（32 bit counter）・xor64（64 bit counter）、Poly1305（26 bit の 5 limb、64 bit の積、最後の還元は mask）、AEAD の seal・open。
+- 確かめたのは、`cc -std=c89 -O1 -Wall -Wextra -Werror -c userland/base/libcrypto-compat/cryc-chacha.c` が warning 0 で通った事だけ（出力は build/tmp/p006）。
+
+### 未実施（全部）
+
+- 試験を一つも流していない。RFC 8439 の vector との照合もまだ（実装が正しいかは未確認）。
+- `plan/ws335/tests/unit/test-chacha.c` と `ct-chacha.c` は未作成。
+- run-unit.sh（posix・--win32）、run-ct.sh、check-skeleton.sh、`git diff --check` は未実行。わざと壊す確かめも未実施。ws.md の行は更新していない。
+
+### 自分で決めた点（header が黙っている所）
+
+- open は tag の比較結果を分岐に使わない。`cryc_ct_equal` の 0/1 から mask を作り、復号の各 byte を `平文 & mask` で書く（不一致なら out は 0 で、平文は一度も書かれない）。返す値も mask から算術で作る（EBADMSG か 0）。run-ct.sh で open を流す時は、返り値を `CT_PUBLIC` してから分岐する必要がある。
+- seal・open の size の上限は blocks = ceil(size/64) <= 2^32 - 1。上を越えたら何も書かずに EOVERFLOW（open は tag の計算の前に判定）。
+- xor64 の上限は ceil(size/64) - 1 <= 2^64 - 1 - counter。size 0 は常に 0。
+- struct cryc_poly1305 の `used` が 16 以上の壊れた構造は防御していない（呼び出し側の不変条件）。
+- Poly1305 の最後の還元は、limb 1 だけが 2^26 を越えうる前提で 1 周の carry（h4 から 5 倍して h0 へ）の後に g = h + 5 - 2^130 を作り、mask で選ぶ（導出は実装の comment）。
+
+### 次の手順（正確に）
+
+1. `plan/ws335/tests/unit/test-chacha.c` を書く。期待値は RFC 8439 の 2.1.1・2.2.1・2.3.2・2.4.2・2.5.2・2.6.2・2.8.2 と付録 A.1〜A.5、Wycheproof（`$WS335_VECTORS/rec/wycheproof-chacha20_poly1305_test.vec`、325 件。`group.ivSize` が 96 でない件は iv が 12 byte でないので除く）。境界（長さ 0・1・63・64・65、counter が 2^32 の手前）、EOVERFLOW（32 bit と 64 bit、何も書かれない事）、EBADMSG（key・nonce・aad・ct・tag の 1 bit 反転、out が 0、in==out）、streaming の分割（全分割点・1 byte ずつ）、xor64 と block の関係（nonce12 = counter 上位 32 bit の LE 4 byte || nonce8、2^32 を跨ぐ所は 2 回の block）。vector の file は `fopen "rb"` を使う vecfile.h を使う。
+2. `ct-chacha.c` を書く（key・nonce・平文・aad を `CT_SECRET`、open の返り値は `CT_PUBLIC` してから見る）。
+3. `sh plan/ws335/tests/run-unit.sh chacha`、`--win32 chacha`（prefix は p002 の `build/tmp/ws335-wine` を複写し `.ws335-ready` を touch）、`sh plan/ws335/tests/run-ct.sh chacha`、`BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh`、`git diff --check`。
+4. 実装を git の外で数通り壊して試験が FAIL する事を確かめ、`cmp` で戻す。
+5. ここに結果（件数・command の最後の行）を書き、ws.md の行を「実装済み・試験 PASS」にして commit。
