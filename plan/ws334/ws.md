@@ -3,7 +3,7 @@
 # WS334 libbrowser の Web ブラウザ OmniGrammaton を Windows に移植する（libkeiland の Win32 の実装、Windows 用の .exe）
 
 - Master: [plan/master.md](../master.md)（2026-10-31 作成）。Primary Milestone: MG006。
-- Status: incomplete（2026-11-01 01:26 p001 cleared。02:42 P7 が q1790 で設計の Phase p002〜p004 を済ませた（基点 d393d3267）。実装の Phase は Q1 の確認の後）
+- Status: incomplete（2026-11-01 02:43 設計の段 p002〜p004 cleared、基点 d393d3267。実装の第 1 群 p005・p009・p010・p013（Sonnet）と p020（Opus）を起動）
 - 目標: libbrowser を使う Web ブラウザを Windows（Win32）で動く .exe にする。その移植を通して、libbrowser が platform に依らない事を結果として確かめる。
   そのために libkeiland の Win32 の実装（window・入力・描画・thread・socket ほか）を作る。ブラウザの名前は OmniGrammaton。
 - 関係: [WS074](../ws074/ws.md)（libbrowser と browser の shell、zedBSD の上の Web ブラウザ）、[WS327](../ws327/ws.md)（libkeiland の thread・socket の
@@ -50,25 +50,25 @@
 | ID | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計: libbrowser の 3 つのエンジン（レンダリング・スクリプト・ストレージ）への分割と interface（DOM の access、スクリプトの core と binding の分離）、libkeiland の Windows の backend（Win32 直か Qt6 か、window・入力・描画・IME・clipboard・file・thread・socket）、libmedia と Vulkan・Vulkan Video の Windows での使い方、既存の library（libtruetype・png・gif・jpeg の compat）の build、cross compile の toolchain、.exe・DLL・resource、名前 OmniGrammaton、試験の方法、Phase の分け方、ユーザーへの問い | cleared（2026-11-01 01:25、設計 main b2a7e8454、問い U1〜U15 は全部答えが出た） | — |
-| [p002](phase002/phase.md) | 設計 A（libbrowser・libmedia・build）: module の分け、header（`base/os.h`・`os-win32.h`・`os-system.h`・`os-file.h`・`os-net.h`・`os-time.h`・`os-zones.h`、`storage/records.h`・`files.h`・`queue.h`、公開の `include/browser/storage.h`、`libmedia/media-os.h`）、.c の骨格、build の骨格（`apps/browser-win32/Makefile`・一番上の `browser-win64`・`browser-winarm64`、骨格の .c を compile）、試験の道具（`plan/ws334/tests/`: run-unit.sh・check-skeleton.sh・check.h。Windows の側は llvm-mingw で cross compile して Wine で流す）、実装の phase.md（p005〜p013・p020〜p027・p030） | in-progress（2026-11-01 P7 q1790 完了を報告、Q1 の cleared 待ち） | p001 |
-| [p003](phase003/phase.md) | 設計 B（libkeiland の Win32・apps）: module の分け、header（`libkeiland/win32/keys-table.h`・`frame.h`・`wide.h`・`input.h`・`cf-html.h`、`platform/platform.h` の OS ごとの形、`apps/browser-win32/tools/ico.h`）、.c の骨格、試験の道具の追加、実装の phase.md（p014〜p019・p028・p029・p031〜p035） | in-progress（2026-11-01 P7 q1790 完了を報告、Q1 の cleared 待ち） | p002 |
-| [p004](phase004/phase.md) | 設計の確定: design-reviewer の 1 本と指摘の反映（design.md に表）、header の確定の commit（= 基点の SHA、全 phase.md に記録）、骨格の照合の PASS | in-progress（2026-11-01 P7 q1790 完了を報告、基点 d393d3267、design-reviewer 34 件を全部反映） | p003 |
-| [p005](phase005/phase.md) | module（Sonnet）: `base/os-win32.h/.c`（Win32 の誤り → errno、UTF-8 ↔ UTF-16）と `base/os-system.h` → `os-system-posix.c`・`os-system-win32.c`（揃えた確保・乱数・thread の名前・library の読み込み・名乗り・data の directory・根の証明書の列挙） | planned | p004 |
+| [p002](phase002/phase.md) | 設計 A（libbrowser・libmedia・build）: module の分け、header（`base/os.h`・`os-win32.h`・`os-system.h`・`os-file.h`・`os-net.h`・`os-time.h`・`os-zones.h`、`storage/records.h`・`files.h`・`queue.h`、公開の `include/browser/storage.h`、`libmedia/media-os.h`）、.c の骨格、build の骨格（`apps/browser-win32/Makefile`・一番上の `browser-win64`・`browser-winarm64`、骨格の .c を compile）、試験の道具（`plan/ws334/tests/`: run-unit.sh・check-skeleton.sh・check.h。Windows の側は llvm-mingw で cross compile して Wine で流す）、実装の phase.md（p005〜p013・p020〜p027・p030） | cleared（2026-11-01 02:43 Q1 の判定、基点 d393d3267、main 5ea437eb7） | p001 |
+| [p003](phase003/phase.md) | 設計 B（libkeiland の Win32・apps）: module の分け、header（`libkeiland/win32/keys-table.h`・`frame.h`・`wide.h`・`input.h`・`cf-html.h`、`platform/platform.h` の OS ごとの形、`apps/browser-win32/tools/ico.h`）、.c の骨格、試験の道具の追加、実装の phase.md（p014〜p019・p028・p029・p031〜p035） | cleared（2026-11-01 02:43 Q1 の判定、基点 d393d3267、main 5ea437eb7） | p002 |
+| [p004](phase004/phase.md) | 設計の確定: design-reviewer の 1 本と指摘の反映（design.md に表）、header の確定の commit（= 基点の SHA、全 phase.md に記録）、骨格の照合の PASS | cleared（2026-11-01 02:43 Q1 の判定、基点 d393d3267、main 5ea437eb7） | p003 |
+| [p005](phase005/phase.md) | module（Sonnet）: `base/os-win32.h/.c`（Win32 の誤り → errno、UTF-8 ↔ UTF-16）と `base/os-system.h` → `os-system-posix.c`・`os-system-win32.c`（揃えた確保・乱数・thread の名前・library の読み込み・名乗り・data の directory・根の証明書の列挙） | in-progress（2026-11-01 02:43 第 1 群で起動） | p004 |
 | [p006](phase006/phase.md) | module（Sonnet）: `base/os-file.h` → `os-file-posix.c`・`os-file-win32.c`（file の読み書き・置き換え・full path・作業の directory・directory の作りと一覧・file: の path ↔ URL・file の lock） | planned | p005 |
 | [p007](phase007/phase.md) | module（Sonnet）: `base/os-net.h` → `os-net-posix.c`・`os-net-win32.c`（socket・待ち・起こし） | planned | p005 |
 | [p008](phase008/phase.md) | module（Sonnet）: `base/os-time.h` → `os-time-posix.c`・`os-time-win32.c`（単調の時計・壁の時計・地域の時差・時刻帯の名前） | planned | p005・p009 |
-| [p009](phase009/phase.md) | module（Sonnet、表の data）: `base/os-zones.h/.c`（Windows の時刻帯の key → 英語の長い名前、CLDR の data） | planned | p004 |
-| [p010](phase010/phase.md) | module（Sonnet）: `storage/records.h/.c`（key の作り・FNV-1a 64・衝突の番号、cookie・cache・LOCAL v1/v2 の記録の encode と decode） | planned | p004 |
+| [p009](phase009/phase.md) | module（Sonnet、表の data）: `base/os-zones.h/.c`（Windows の時刻帯の key → 英語の長い名前、CLDR の data） | in-progress（2026-11-01 02:43 第 1 群で起動） | p004 |
+| [p010](phase010/phase.md) | module（Sonnet）: `storage/records.h/.c`（key の作り・FNV-1a 64・衝突の番号、cookie・cache・LOCAL v1/v2 の記録の encode と decode） | in-progress（2026-11-01 02:43 第 1 群で起動） | p004 |
 | [p011](phase011/phase.md) | module（Sonnet）: `storage/files.h/.c`（files の backend、公開の `browser_storage_calls` の実装） | planned | p006・p010 |
 | [p012](phase012/phase.md) | module（Sonnet）: `storage/queue.h/.c`（instance の storage の thread と queue、write-behind と読みの頼み） | planned | p005・p010 |
-| [p013](phase013/phase.md) | module（Sonnet）: `libmedia/media-os.h` → `media-os-posix.c`・`media-os-win32.c`（Vulkan の loader の読み込み、file の開き・大きさ・位置の読み） | planned | p004 |
+| [p013](phase013/phase.md) | module（Sonnet）: `libmedia/media-os.h` → `media-os-posix.c`・`media-os-win32.c`（Vulkan の loader の読み込み、file の開き・大きさ・位置の読み） | in-progress（2026-11-01 02:43 第 1 群で起動） | p004 |
 | [p014](phase014/phase.md) | module（Sonnet、表の data、旧 T1）: `libkeiland/win32/keys-table.h/.c`（scan code → evdev の番号） | planned | p004 |
 | [p015](phase015/phase.md) | module（Sonnet）: `libkeiland/win32/frame.h/.c`（custom frame の幾何: hit test・題の帯の button の配置・DPI の倍率） | planned | p004 |
 | [p016](phase016/phase.md) | module（Sonnet）: `libkeiland/platform/platform-win32.c`（`platform.h` の起こし・lock・thread を Win32 で） | planned | p004 |
 | [p017](phase017/phase.md) | module（Sonnet）: `libkeiland/win32/wide.h/.c` と `input.h/.c`（UTF-16 ↔ UTF-8・surrogate の組、wheel の積み・pointer・修飾の鍵の写し） | planned | p004 |
 | [p018](phase018/phase.md) | module（Sonnet、旧 T2）: `libkeiland/win32/cf-html.h/.c`（CF_HTML の encode と decode） | planned | p004 |
 | [p019](phase019/phase.md) | module（Sonnet、旧 T3）: `apps/browser-win32/tools/ico.h/.c`（ICO の writer、PNG と BMP の entry） | planned | p004 |
-| [p020](phase020/phase.md) | glue（Opus、旧 p002）: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の本体（library・DLL・.def・Vulkan の header の取得と遅延の import）、libtruetype `companion.c` の 1 関数と gif の `O_BINARY`、`cross-build.sh` | planned | p004 |
+| [p020](phase020/phase.md) | glue（Opus、旧 p002）: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の本体（library・DLL・.def・Vulkan の header の取得と遅延の import）、libtruetype `companion.c` の 1 関数と gif の `O_BINARY`、`cross-build.sh` | in-progress（2026-11-01 02:43 第 1 群で起動） | p004 |
 | [p021](phase021/phase.md) | 統合（Opus、旧 p003）: libbrowser の OS に触れる所（O13〜O24・O28〜O31・O34）を OS の層へ、`wb_memmem`、Makefile の posix・win32 の選び | planned | p005・p006・p008・p020 |
 | [p022](phase022/phase.md) | 統合（Opus、旧 p004）: network の Windows（O1〜O10・O32・O33 を os-net へ）、libmedia の wake の callback と `net_loader_ring` | planned | p007・p021 |
 | [p023](phase023/phase.md) | 統合（Opus、旧 p005）: instance と API v4、cookie の jar・Web Storage を instance へ、storage の module をつなぐ、利用側の v4 | planned | p010・p011・p012・p022 |

@@ -113,7 +113,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-383 · q1792 · WS337 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-384 · q1797 · WS337 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -160,7 +160,7 @@ BUG-383 · q1792 · WS337 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS299](ws299/ws.md) | MG004 | 5330 の NVMe の読み書きを速くする（512 MiB の崖、転送・queue・readahead）（2026-10-27 ユーザー） | incomplete | p001〜p003・p009 cleared（raw の読み 583 MB/s ≒ Debian の 50%）。受け入れは Debian の 95% 以上、HMB はやる（ユーザー）。q1634（P1）で p004 raw の先読み → p005〜p008 2026-10-30 ユーザー「WS299はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の後 |
 | [WS300](ws300/ws.md) | MG003 | NVMe と VMD の低電力（S0 idle の VMD の suspend・NVMe の状態、APST・ASPM・LTR）（2026-10-27 ユーザー） | incomplete（p001 cleared、p002〜p005 実装済み・試験未実施、branch agent/p6-ws300 は 5330 の試験の後に merge） | p006（5330、WS052 p014 と一緒）。Q300-6（_OSC 無しの ASPM）はユーザーの判断待ち |
 | [WS333](ws333/ws.md) | MG004 | /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）。WS301・WS303 を統合（2026-10-31 ユーザー） | incomplete（p001 設計済み・問い Q333-1〜7 は推しで進める、p002・p003 は main、p006 は回帰の確かめ中） | p001 統一の設計（P5）、p002 amd64 の idle の MWAIT（P1） |
-| [WS334](ws334/ws.md) | MG006 | libbrowser の Web ブラウザ OmniGrammaton を Windows に移植（libkeiland の Win32 の実装、.exe）（2026-10-31 ユーザー） | incomplete | p001 cleared、p002 から実装（P7 q1790） |
+| [WS334](ws334/ws.md) | MG006 | libbrowser の Web ブラウザ OmniGrammaton を Windows に移植（libkeiland の Win32 の実装、.exe）（2026-10-31 ユーザー） | incomplete | 設計 p002〜p004 cleared、実装の第 1 群（p005・p009・p010・p013・p020） |
 | [WS335](ws335/ws.md) | MG002 | libssl-compat・libcrypto-compat: OpenSSL の libssl・libcrypto と互換の自前の TLS と暗号の library（libbrowser と自前の ssh が使う部分、標準廉価実装手順）（2026-11-01 ユーザー） | planning | p001 設計（P6 q1789） |
 | [WS336](ws336/ws.md) | MG005 | 自前の sshd・ssh（OpenSSH と互換の protocol、ed25519 と鍵の交換 1 つ、WS335 の暗号の口を使う、標準廉価実装手順）（2026-11-01 ユーザー） | planning | p001 設計（P5 q1791） |
 | [WS302](ws302/ws.md) | MG006 | デスクトップスレッドバランサ DTB（CONFIG_DTB、sched への hint）（2026-10-27 ユーザー） | planning | p001 設計済み（main 896d3e3db、問い Q302-1〜7 待ち）。実装は約 22 LW、WS333 p011・p013 に依る |
