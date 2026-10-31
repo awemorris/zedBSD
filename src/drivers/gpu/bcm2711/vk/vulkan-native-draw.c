@@ -50,6 +50,8 @@ struct native_texture_source {
 	uint32_t texel_bytes;
 	uint32_t type;
 	uint32_t swap;
+	/* The mip levels sampled from level 0: one, or the view's levels of a mip-mapped image. */
+	uint32_t levels;
 };
 
 /* One upload chunk's size, and the largest upload carved from a chunk; larger ones get storage of their own. */
@@ -76,14 +78,16 @@ struct bcm2711_vulkan_native_draw_chunk {
 static int allocate_storage(struct bcm2711_vulkan_native_draw *draw, uint64_t bytes, uint64_t available, const struct bcm2711_shader_binary *program, unsigned fill, struct bcm2711_native_storage **storage);
 static struct bcm2711_vulkan_native_draw *pool_take(struct bcm2711_vulkan_native_draw_pool *pool);
 static int upload_take(struct bcm2711_vulkan_native_draw *draw, uint64_t bytes, uint64_t available, uint8_t **cpu, uint32_t *gpu);
-static struct bcm2711_native_storage *find_texture(const struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_resource *image, uint64_t offset);
+static struct bcm2711_native_storage *find_texture(const struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_resource *image, uint64_t offset, uint32_t levels);
+static uint32_t mip_levels(const struct native_texture_source *source, uint32_t address, bool unit, struct bcm2711_native_miptree *tree);
 static int prepare_textures(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_prepared_event *event, uint64_t available);
 static int prepare_texture(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_descriptor *descriptor, uint64_t available, struct bcm2711_vulkan_native_binding *binding);
 static int texture_source(struct bcm2711_vulkan_resource *image, uint32_t plane, uint32_t swap, struct native_texture_source *source);
 static bool conversion_supported(const struct native_texture_source *source, uint32_t address);
 static uint64_t texture_area(uint32_t size);
 static int prepare_texture_image(struct bcm2711_vulkan_native_draw *draw, const struct native_texture_source *texture_source, const struct bcm2711_vulkan_sampler *source, uint64_t available, struct bcm2711_vulkan_native_binding *binding);
-static int prepare_conversion(const struct native_texture_source *source, uint32_t address, const struct bcm2711_native_storage *pixels, uint32_t bytes, struct bcm2711_v3d_tfu_job *tfu);
+static int prepare_conversion(const struct native_texture_source *source, uint32_t address, const struct bcm2711_native_storage *pixels, uint32_t bytes, uint32_t levels, const struct bcm2711_native_miptree *tree, struct bcm2711_v3d_tfu_job *tfu);
+static uint32_t level_padding(const struct bcm2711_native_mip_level *level);
 static int prepare_meta_texture(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_meta_draw *meta, uint64_t available);
 static int prepare_sampler(const struct bcm2711_vulkan_sampler *source, struct bcm2711_native_sampler *sampler);
 static struct bcm2711_native_storage *find_program(const struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_shader_binary *program, uint32_t stage);
@@ -420,6 +424,13 @@ prepare_texture(
 	error = texture_source(image, image_view->plane, swap, &source);
 	if (error != 0)
 		return error;
+
+	/* A view of a mip-mapped image samples its levels from level 0. */
+	if (image_view->plane == 0 && image_view->levels > 1U && image->levels > 1U) {
+		source.levels = image_view->levels;
+		if (source.levels > image->levels)
+			source.levels = image->levels;
+	}
 	error = prepare_texture_image(draw, &source, descriptor->sampler->payload, available, binding);
 	if (error != 0)
 		return error;
@@ -443,6 +454,7 @@ prepare_texture_image(
 	uint32_t records_address;
 	struct bcm2711_native_texture texture;
 	struct bcm2711_native_sampler sampler;
+	struct bcm2711_native_miptree tree;
 	struct bcm2711_v3d_view *source_view;
 	void *cpu;
 	uint8_t *destination;
@@ -451,6 +463,8 @@ prepare_texture_image(
 	uint64_t started;
 	uint64_t fills;
 	uint64_t updates;
+	uint32_t levels;
+	uint32_t lod;
 	bool unit;
 	char kind;
 	int error;
@@ -464,9 +478,18 @@ prepare_texture_image(
 	if (error != 0)
 		return error;
 
+	/*
+	 * A mip tree when the unit converts each level and the tree can be laid
+	 * out (it then takes the whole tree's bytes); otherwise level 0 alone.
+	 */
+	unit = draw->space->native->hardware.tfu_uif_ready && conversion_supported(texture_source, address);
+	levels = mip_levels(texture_source, address, unit && !source_view->buffer->host_mapped, &tree);
+	if (levels > 1U)
+		bytes = tree.bytes;
+
 	/* Reuse only a snapshot within this pass, which contains no intervening image writes. */
 	entry = NULL;
-	pixels = find_texture(draw, image, texture_source->offset);
+	pixels = find_texture(draw, image, texture_source->offset, levels);
 	if (pixels == NULL) {
 		/* A new image consumes the same bounded owner slot and staging budget as before. */
 		if (draw->texture_count == BCM2711_VULKAN_PIPELINE_SETS * BCM2711_VULKAN_LAYOUT_BINDINGS)
@@ -477,8 +500,8 @@ prepare_texture_image(
 		started = clock_ticks();
 		fills = draw->space->snapshot_fills;
 		updates = draw->space->snapshot_updates;
-		unit = draw->space->native->hardware.tfu_uif_ready && conversion_supported(texture_source, address);
-		error = bcm2711_native_snapshot_get_texel(
+		entry->levels = levels;
+		error = bcm2711_native_snapshot_get_levels(
 			draw->space,
 			source_view->buffer,
 			address - source_view->address,
@@ -489,6 +512,8 @@ prepare_texture_image(
 			cpu,
 			(size_t)texture_source->bytes,
 			unit,
+			levels,
+			bytes,
 			&entry->snapshot);
 		draw->copy_ticks += clock_ticks() - started;
 		if (error != 0 && error != ENOTSUP)
@@ -498,7 +523,7 @@ prepare_texture_image(
 
 		/* A snapshot left to the unit is filled when the pass runs, before its draws. */
 		if (error == 0 && unit && draw->space->snapshot_fills != fills) {
-			error = prepare_conversion(texture_source, address, pixels, bytes, &entry->tfu);
+			error = prepare_conversion(texture_source, address, pixels, bytes, levels, &tree, &entry->tfu);
 			if (error == 0)
 				error = bcm2711_native_storage_clean(pixels);
 			if (error != 0) {
@@ -548,7 +573,7 @@ prepare_texture_image(
 		started = clock_ticks();
 		error = ENOTSUP;
 		if (draw->space->native->hardware.tfu_uif_ready)
-			error = prepare_conversion(texture_source, address, pixels, bytes, &entry->tfu);
+			error = prepare_conversion(texture_source, address, pixels, bytes, levels, &tree, &entry->tfu);
 		if (error == 0) {
 			entry->convert = true;
 		} else if (error == ENOTSUP) {
@@ -591,12 +616,28 @@ prepare_texture_image(
 	texture.bytes = bytes;
 	texture.swap_red_blue = texture_source->swap;
 	texture.texel = texture_source->texel;
+	if (levels > 1U) {
+		/* A mip tree is sampled from its level 0, which follows the smaller levels. */
+		texture.address = pixels->view->address + tree.level[0].offset;
+		texture.levels = levels;
+		texture.level0_tiling = tree.level[0].tiling;
+		texture.level0_ub_pad = tree.level[0].ub_pad;
+	}
 	error = bcm2711_native_texture_encode(&texture, destination, 32);
 	if (error != 0)
 		return error;
 	error = prepare_sampler(source, &sampler);
 	if (error != 0)
 		return error;
+
+	/* The sampler's levels: up to its max LOD within the tree's, blended as it asks. */
+	if (levels > 1U) {
+		lod = (levels - 1U) << 8;
+		if (source->max_lod < lod)
+			lod = source->max_lod;
+		sampler.max_lod = lod;
+		sampler.mip_linear = source->mip_linear;
+	}
 	error = bcm2711_native_sampler_encode(&sampler, destination + 32, 32);
 	if (error != 0)
 		return error;
@@ -1320,9 +1361,10 @@ texture_source(
 #endif
 	int error;
 
-	/* A whole RGBA8 or BGRA8 image. */
+	/* A whole RGBA8 or BGRA8 image, at its level 0 alone. */
 	kern_memset(source, 0, sizeof(*source));
 	source->image = image;
+	source->levels = 1;
 	if (plane == 0) {
 		if (image->format != VK_FORMAT_R8G8B8A8_UNORM && image->format != VK_FORMAT_B8G8R8A8_UNORM)
 			return ENOTSUP;
@@ -1416,6 +1458,8 @@ prepare_conversion(
 	uint32_t address,
 	const struct bcm2711_native_storage *pixels,
 	uint32_t bytes,
+	uint32_t levels,
+	const struct bcm2711_native_miptree *tree,
 	struct bcm2711_v3d_tfu_job *tfu)
 {
 	uint64_t input_bytes;
@@ -1450,7 +1494,117 @@ prepare_conversion(
 	tfu->size = (source->height << 16) | source->width;
 	tfu->configuration = source->type << 9;
 
+	/* A mip tree's level 0 goes to its place in the tree, in its own tiling and UB pad (the smaller levels follow, convert_textures). */
+	if (levels > 1U) {
+		tfu->output = pixels->view->address + tree->level[0].offset;
+		tfu->output_bytes = tree->level[0].bytes;
+		tfu->output_format = tree->level[0].tiling;
+		tfu->configuration |= level_padding(&tree->level[0]) << 22;
+	}
+
 	/* Succeeded: the pass runs this conversion before any draw samples the pixels. */
+	return 0;
+}
+
+/*
+ * The UIF block rows a UIF level has beyond those its height needs, which
+ * the texture formatting unit's output padding field gives when it writes
+ * the level as a level 0 (Mesa's v3dx_tfu.c); none for other tilings.
+ */
+static uint32_t
+level_padding(
+	const struct bcm2711_native_mip_level *level)
+{
+	uint32_t needed;
+
+	/* Only UIF levels are padded. */
+	if (level->tiling != BCM2711_NATIVE_TILING_UIF && level->tiling != BCM2711_NATIVE_TILING_UIF_XOR)
+		return 0;
+
+	/* Succeeded: the rows of eight-texel blocks beyond the height. */
+	needed = (level->height + 7U) & ~7U;
+	return (level->padded_height - needed) / 8U;
+}
+
+/*
+ * Tells how many mip levels a texture is sampled with: the source's when the
+ * texture formatting unit converts each of them (unit) from four-byte
+ * texels and their tree can be laid out (tree), otherwise one.
+ */
+static uint32_t
+mip_levels(
+	const struct native_texture_source *source,
+	uint32_t address,
+	bool unit,
+	struct bcm2711_native_miptree *tree)
+{
+	struct bcm2711_vulkan_image_level level;
+	uint32_t index;
+	int error;
+
+	/* Level 0 alone without the unit, or for another texel. */
+	if (source->levels <= 1U || !unit || source->texel_bytes != 4U || source->offset != 0)
+		return 1;
+
+	/* The tree the hardware reads (none on a unit with no layout here). */
+	error = bcm2711_native_miptree_layout(source->width, source->height, source->levels, tree);
+	if (error != 0)
+		return 1;
+
+	/* Every smaller level's raster is one the unit reads. */
+	for (index = 1; index < source->levels; index++) {
+		error = bcm2711_vulkan_image_level(source->image, index, &level);
+		if (error != 0)
+			return 1;
+		if (((address + (uint32_t)level.offset) & 63U) != 0 || (level.pitch & 3U) != 0)
+			return 1;
+	}
+
+	/* Succeeded: the tree's levels. */
+	return source->levels;
+}
+
+/*
+ * Describes the conversion of one smaller level (1 or more) of a converted
+ * mip tree: the level's raster after level 0's in the image, into its place
+ * and tiling in the tree, after the job of level 0 (entry->tfu).
+ */
+int
+bcm2711_vulkan_native_mip_job(
+	const struct bcm2711_vulkan_native_texture_copy *entry,
+	uint32_t index,
+	struct bcm2711_v3d_tfu_job *tfu)
+{
+	struct bcm2711_vulkan_image_level level;
+	struct bcm2711_native_miptree tree;
+	uint64_t input_bytes;
+	int error;
+
+	/* Only a tree's smaller levels. */
+	if (entry->levels <= 1U || index == 0 || index >= entry->levels)
+		return EINVAL;
+	error = bcm2711_native_miptree_layout(entry->image->width, entry->image->height, entry->levels, &tree);
+	if (error != 0)
+		return error;
+	error = bcm2711_vulkan_image_level(entry->image, index, &level);
+	if (error != 0)
+		return error;
+
+	/* The level's rows, from level 0's input moved by the level's place in the image. */
+	input_bytes = (uint64_t)(level.height - 1U) * level.pitch + (uint64_t)level.width * 4U;
+	if (input_bytes > 0xffffffffU)
+		return EINVAL;
+	kern_memset(tfu, 0, sizeof(*tfu));
+	tfu->input = entry->tfu.input + (uint32_t)level.offset;
+	tfu->input_bytes = (uint32_t)input_bytes;
+	tfu->output = entry->pixels->view->address + tree.level[index].offset;
+	tfu->output_bytes = tree.level[index].bytes;
+	tfu->output_format = tree.level[index].tiling;
+	tfu->stride = level.pitch / 4U;
+	tfu->size = (level.height << 16) | level.width;
+	tfu->configuration = (entry->tfu.configuration & (0x7fU << 9)) | (level_padding(&tree.level[index]) << 22);
+
+	/* Succeeded: the pass runs it after level 0's. */
 	return 0;
 }
 
@@ -1497,14 +1651,15 @@ static struct bcm2711_native_storage *
 find_texture(
 	const struct bcm2711_vulkan_native_draw *draw,
 	const struct bcm2711_vulkan_resource *image,
-	uint64_t offset)
+	uint64_t offset,
+	uint32_t levels)
 {
 	const struct bcm2711_vulkan_native_draw *owner;
 	uint32_t index;
 
 	/* Multiple descriptors in this draw may use the same raster with different sampler records. */
 	for (index = 0; index < draw->texture_count; index++) {
-		if (draw->textures[index].image == image && draw->textures[index].offset == offset)
+		if (draw->textures[index].image == image && draw->textures[index].offset == offset && draw->textures[index].levels == levels)
 			return draw->textures[index].pixels;
 	}
 
@@ -1512,7 +1667,7 @@ find_texture(
 	owner = draw->earlier;
 	while (owner != NULL) {
 		for (index = 0; index < owner->texture_count; index++) {
-			if (owner->textures[index].image == image && owner->textures[index].offset == offset)
+			if (owner->textures[index].image == image && owner->textures[index].offset == offset && owner->textures[index].levels == levels)
 				return owner->textures[index].pixels;
 		}
 

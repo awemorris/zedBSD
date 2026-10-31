@@ -51,6 +51,8 @@ struct bcm2711_native_snapshot {
 	uint32_t height;
 	uint32_t pitch;
 	uint32_t texel_bytes;
+	/* One, or the levels of a mip tree (which the texture formatting unit converts whole). */
+	uint32_t levels;
 	uint64_t generation;
 	/* Pixels converted at generation; false while the texture formatting unit has yet to fill them. */
 	bool valid;
@@ -99,6 +101,7 @@ int bcm2711_native_storage_drain(struct bcm2711_v3d_space *space);
  */
 int bcm2711_native_snapshot_get(struct bcm2711_v3d_space *space, struct bcm2711_buffer *buffer, uint64_t offset, uint32_t width, uint32_t height, uint32_t pitch, const void *raster, size_t raster_bytes, bool unit, struct bcm2711_native_snapshot **result);
 int bcm2711_native_snapshot_get_texel(struct bcm2711_v3d_space *space, struct bcm2711_buffer *buffer, uint64_t offset, uint32_t width, uint32_t height, uint32_t pitch, uint32_t texel_bytes, const void *raster, size_t raster_bytes, bool unit, struct bcm2711_native_snapshot **result);
+int bcm2711_native_snapshot_get_levels(struct bcm2711_v3d_space *space, struct bcm2711_buffer *buffer, uint64_t offset, uint32_t width, uint32_t height, uint32_t pitch, uint32_t texel_bytes, const void *raster, size_t raster_bytes, bool unit, uint32_t levels, uint32_t tree_bytes, struct bcm2711_native_snapshot **result);
 void bcm2711_native_snapshot_put(struct bcm2711_native_snapshot *snapshot);
 void bcm2711_native_snapshot_filled(struct bcm2711_native_snapshot *snapshot);
 

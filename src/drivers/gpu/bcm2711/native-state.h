@@ -60,8 +60,43 @@ enum bcm2711_native_texel {
 	BCM2711_NATIVE_TEXEL_RG8
 };
 
+/* The most mip levels a native texture has: a 4096-texel side halves twelve times. */
+#define BCM2711_NATIVE_TEXTURE_LEVELS 13U
+
 /*
- * One single-level texture describes a strict UIF, non-XOR scratch image owned by its native job.
+ * The texture formatting unit's output formats, which are also the tilings
+ * of a mip tree's levels: linear tiles, one or two columns of UIF blocks in
+ * rows, and UIF without or with XOR.
+ */
+#define BCM2711_NATIVE_TILING_LINEARTILE 3U
+#define BCM2711_NATIVE_TILING_UBLINEAR_1 4U
+#define BCM2711_NATIVE_TILING_UBLINEAR_2 5U
+#define BCM2711_NATIVE_TILING_UIF 6U
+#define BCM2711_NATIVE_TILING_UIF_XOR 7U
+
+/* One level of a mip tree: its place in the tree, tiling, size in texels and the rows and bytes it takes. */
+struct bcm2711_native_mip_level {
+	uint32_t offset;
+	uint32_t tiling;
+	uint32_t width;
+	uint32_t height;
+	uint32_t padded_height;
+	uint32_t ub_pad;
+	uint32_t bytes;
+};
+
+/* A mip tree of four-byte texels in the hardware's layout: the smallest level first, level 0 last. */
+struct bcm2711_native_miptree {
+	uint32_t levels;
+	uint32_t bytes;
+	struct bcm2711_native_mip_level level[BCM2711_NATIVE_TEXTURE_LEVELS];
+};
+
+/*
+ * One texture: a single-level strict UIF, non-XOR scratch image owned by
+ * its native job (levels 0 or 1), or a mip tree's level 0 (address) with
+ * its smaller levels before it, bytes the whole tree, and level 0's tiling
+ * and UB pad.
  *
  * swap_red_blue applies only to RGBA8 (a BGRA source).
  */
@@ -72,14 +107,23 @@ struct bcm2711_native_texture {
 	uint32_t bytes;
 	uint32_t swap_red_blue;
 	enum bcm2711_native_texel texel;
+	uint32_t levels;
+	uint32_t level0_tiling;
+	uint32_t level0_ub_pad;
 };
 
-/* One native sampler uses hardware wrap codes: repeat 0, clamp-to-edge 1, mirrored-repeat 2. */
+/*
+ * One native sampler uses hardware wrap codes: repeat 0, clamp-to-edge 1,
+ * mirrored-repeat 2.  max_lod is the largest level of detail in 4.8 fixed
+ * point (zero: level 0 only), and mip_linear blends two levels.
+ */
 struct bcm2711_native_sampler {
 	uint32_t nearest_mag;
 	uint32_t nearest_min;
 	uint32_t wrap_u;
 	uint32_t wrap_v;
+	uint32_t mip_linear;
+	uint32_t max_lod;
 };
 
 uint32_t bcm2711_native_shader_bytes(void);
@@ -91,6 +135,7 @@ int bcm2711_native_texture_size(uint32_t width, uint32_t height, uint32_t *bytes
 int bcm2711_native_texture_size_texel(uint32_t width, uint32_t height, uint32_t texel_bytes, uint32_t *bytes);
 int bcm2711_native_texture_offset(uint32_t x, uint32_t y, uint32_t height, uint32_t texel_bytes, uint32_t *offset);
 int bcm2711_native_texel_layout(enum bcm2711_native_texel texel, uint32_t *texel_bytes, uint32_t *type);
+int bcm2711_native_miptree_layout(uint32_t width, uint32_t height, uint32_t levels, struct bcm2711_native_miptree *tree);
 int bcm2711_native_texture_copy_texel(uint32_t width, uint32_t height, uint32_t texel_bytes, const void *raster, uint32_t pitch, size_t raster_bytes, void *tiled, size_t tiled_bytes);
 int bcm2711_native_texture_copy(uint32_t width, uint32_t height, const void *raster, uint32_t pitch, size_t raster_bytes, void *tiled, size_t tiled_bytes);
 int bcm2711_native_texture_copy_box(uint32_t width, uint32_t height, const void *raster, uint32_t pitch, size_t raster_bytes, void *tiled, size_t tiled_bytes, const uint32_t *box);

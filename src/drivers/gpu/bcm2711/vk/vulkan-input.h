@@ -29,6 +29,8 @@ struct bcm2711_vulkan_image_view {
 	VkFormat format;
 	VkComponentMapping components;
 	uint32_t plane;
+	/* The levels the view spans from level 0 (one at least). */
+	uint32_t levels;
 };
 
 /* One normalized single-level sampler supplies exact nearest/linear filtering and native wrap modes at draw preparation. */
@@ -38,6 +40,9 @@ struct bcm2711_vulkan_sampler {
 	VkFilter min;
 	VkSamplerAddressMode u;
 	VkSamplerAddressMode v;
+	/* VK_SAMPLER_MIPMAP_MODE_LINEAR, and maxLod in 4.8 fixed point (no more than 15.996). */
+	uint32_t mip_linear;
+	uint32_t max_lod;
 };
 
 /* One copied SPIR-V module remains independent of the per-command arena until its last compiled-pipeline owner retires. */

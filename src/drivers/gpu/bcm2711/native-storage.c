@@ -444,6 +444,39 @@ bcm2711_native_snapshot_get_texel(
 	bool unit,
 	struct bcm2711_native_snapshot **result)
 {
+	int error;
+
+	/* Level 0 alone, in its strict UIF size. */
+	error = bcm2711_native_snapshot_get_levels(space, buffer, offset, width, height, pitch, texel_bytes, raster, raster_bytes, unit, 1, 0, result);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller samples the snapshot's pixels until its draw retires. */
+	return 0;
+}
+
+/*
+ * As bcm2711_native_snapshot_get_texel, for a mip tree of levels levels
+ * (more than one) of tree_bytes, which only the texture formatting unit
+ * fills (unit), whole, each time its source changed; levels is part of the
+ * key.  One level is bcm2711_native_snapshot_get_texel.
+ */
+int
+bcm2711_native_snapshot_get_levels(
+	struct bcm2711_v3d_space *space,
+	struct bcm2711_buffer *buffer,
+	uint64_t offset,
+	uint32_t width,
+	uint32_t height,
+	uint32_t pitch,
+	uint32_t texel_bytes,
+	const void *raster,
+	size_t raster_bytes,
+	bool unit,
+	uint32_t levels,
+	uint32_t tree_bytes,
+	struct bcm2711_native_snapshot **result)
+{
 	struct bcm2711_native_snapshot *snapshot;
 	const void *whole;
 	uint32_t bytes;
@@ -458,6 +491,15 @@ bcm2711_native_snapshot_get_texel(
 	error = bcm2711_native_texture_size_texel(width, height, texel_bytes, &bytes);
 	if (error != 0)
 		return error;
+
+	/* A mip tree is the unit's alone, and as large as its levels. */
+	if (levels == 0)
+		levels = 1;
+	if (levels > 1U) {
+		if (!unit || tree_bytes < bytes)
+			return ENOTSUP;
+		bytes = tree_bytes;
+	}
 	space->snapshot_serial++;
 
 	/* A whole conversion left to the unit reads no raster on the CPU. */
@@ -473,7 +515,8 @@ bcm2711_native_snapshot_get_texel(
 		    snapshot->width == width &&
 		    snapshot->height == height &&
 		    snapshot->pitch == pitch &&
-		    snapshot->texel_bytes == texel_bytes)
+		    snapshot->texel_bytes == texel_bytes &&
+		    snapshot->levels == levels)
 			break;
 	}
 
@@ -496,7 +539,7 @@ bcm2711_native_snapshot_get_texel(
 
 			/* Converted four-byte pixels with a known small change are brought up to date in place. */
 			updated = false;
-			if (snapshot->valid && texel_bytes == 4U) {
+			if (snapshot->valid && texel_bytes == 4U && levels == 1U) {
 				error = snapshot_update(space, snapshot, raster, raster_bytes, unit, &updated);
 				if (error != 0)
 					return error;
@@ -542,6 +585,7 @@ bcm2711_native_snapshot_get_texel(
 	snapshot->height = height;
 	snapshot->pitch = pitch;
 	snapshot->texel_bytes = texel_bytes;
+	snapshot->levels = levels;
 
 	/* The first conversion defines the generation the snapshot is valid for. */
 	snapshot->buffer = buffer;
