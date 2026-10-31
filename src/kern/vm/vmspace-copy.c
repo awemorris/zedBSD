@@ -667,6 +667,8 @@ copy_backing(
 	size_t position;
 	int error;
 	struct vmspace_pinned_page *page;
+	struct vm_region *region;
+	struct vm_page *entry;
 	size_t offset;
 	size_t chunk;
 	void *mapped;
@@ -686,6 +688,62 @@ copy_backing(
 	first = user_address & ~(uintptr_t)(PAGE_SIZE - 1U);
 	last = (user_address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
 	page_count = (size_t)((last - first) / PAGE_SIZE) + 1U;
+
+	/*
+	 * A range within one page of one region, on a resident private page
+	 * past any copy-on-write (most system call arguments), is checked and
+	 * pinned under one hold of the locks with one walk of the regions: the
+	 * same checks as the pin below, which takes every other range and a
+	 * page that is not ready.
+	 */
+	if (page_count == 1U) {
+		kern_memset(&stack_pages[0], 0, sizeof(stack_pages[0]));
+		vm_metadata_enter();
+		mutex_lock(&vm->lock);
+
+		/* The region that holds the address: the regions are sorted and do not overlap. */
+		for (region = vm->regions; region != NULL; region = region->next) {
+			if (user_address < region->start) {
+				region = NULL;
+				break;
+			}
+			if (user_address - region->start < region->size)
+				break;
+		}
+
+		/* The whole range in it with the access, and its page ready, then pinned. */
+		entry = NULL;
+		if (region != NULL && region->device == NULL && (region->prot & required) == required &&
+		    user_address - region->start + size <= region->size)
+			entry = vmspace_find_page(region, user_address);
+		if (entry != NULL && entry->private_page != NULL && entry->object_page == NULL &&
+		    (entry->flags & (VM_MAPPING_BUSY | VM_MAPPING_MAPPED)) == VM_MAPPING_MAPPED &&
+		    vm_private_page_is_resident(entry) &&
+		    ((required & HAL_SPACE_WRITE) == 0U || (entry->flags & VM_MAPPING_COW) == 0U) &&
+		    vm_private_page_pin(entry->private_page, &stack_pages[0].memory) == 0) {
+			stack_pages[0].kind = VMSPACE_PINNED_PRIVATE;
+			stack_pages[0].owner.private_page = entry->private_page;
+			if (vmspace_pin_page_checkpoint != NULL)
+				vmspace_pin_page_checkpoint(vm, 0U, 1U);
+		}
+
+		mutex_unlock(&vm->lock);
+		vm_metadata_leave();
+
+		/* The bytes through the pinned page, then the pin let go. */
+		if (stack_pages[0].kind == VMSPACE_PINNED_PRIVATE) {
+			mapped = (uint8_t *)hal_pmem_to_kernel(stack_pages[0].memory.paddr) +
+			    (user_address & (PAGE_SIZE - 1U));
+			if (to_user) {
+				kern_memcpy(mapped, bytes, size);
+				vm_private_page_mark_dirty(stack_pages[0].owner.private_page);
+			} else {
+				kern_memcpy(bytes, mapped, size);
+			}
+			vmspace_unpin_user_pages(stack_pages, 1U);
+			return 0;
+		}
+	}
 
 	/*
 	 * A short range pins into an array on the stack, and the pin checks

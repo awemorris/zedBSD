@@ -64,7 +64,8 @@ static void queue_write_pending(struct vulkan_writer *writer, uint32_t count, co
 static VkResult queue_execute_pending(struct VkDevice_T *device, const struct vulkan_writer *writer, uint32_t count, const VkSubmitInfo *submits, uint64_t serial, uint32_t replies, struct vulkan_reader *reader, VkResult *ended);
 static VkResult queue_private_fence(struct VkQueue_T *queue, struct vulkan_queue_fence **result);
 static VkResult queue_enqueue(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, const VkBindSparseInfo *binds, VkFence fence, VkBool32 sparse, VkBool32 locked);
-static VkResult queue_attempt(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, const VkBindSparseInfo *binds, VkFence fence, VkBool32 sparse, struct vulkan_queue_transaction *transaction, struct vulkan_sync *completion, VkBool32 *accepted, uint64_t *capacity_sequence, VkBool32 *prepared);
+static VkBool32 queue_unfenced(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, VkFence fence, VkBool32 sparse, VkBool32 locked);
+static VkResult queue_attempt(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, const VkBindSparseInfo *binds, VkFence fence, VkBool32 sparse, VkBool32 unfenced, struct vulkan_queue_transaction *transaction, struct vulkan_sync *completion, VkBool32 *accepted, uint64_t *capacity_sequence, VkBool32 *prepared);
 static VkResult queue_reset_completed(struct VkQueue_T *queue);
 static VkResult queue_submit_job(struct VkQueue_T *queue, struct vulkan_writer *writer, uint32_t count, const VkSubmitInfo *submits, uint64_t serial, uint32_t replies, struct vulkan_sync *completion, struct vulkan_reader *reader, VkResult *ended, VkBool32 *prepared, VkBool32 *submitted, VkBool32 *accepted);
 static void queue_write_waits(struct vulkan_writer *writer, struct vulkan_queue_transaction *transaction, uint32_t count, const VkSemaphore *semaphores, const VkPipelineStageFlags *stages, VkBool32 has_stages);
@@ -300,6 +301,7 @@ queue_enqueue(
 	VkResult status;
 	VkBool32 accepted;
 	VkBool32 prepared;
+	VkBool32 unfenced;
 	size_t capacity;
 	uint64_t capacity_sequence;
 	uint32_t request;
@@ -360,8 +362,13 @@ queue_enqueue(
 		vulkan_timing_add(VULKAN_TIMING_QUEUE_LOCK, mark, 0);
 	}
 
-	/* A preparing private slot stays exclusive even while capacity waiting drops the queue lock. */
-	if (fence == VK_NULL_HANDLE) {
+	/*
+	 * A preparing private slot stays exclusive even while capacity waiting
+	 * drops the queue lock.  A submission with nothing to signal or wait
+	 * for, on a kernel that runs a stream at once, goes without one.
+	 */
+	unfenced = queue_unfenced(queue, count, submits, fence, sparse, locked);
+	if (fence == VK_NULL_HANDLE && unfenced == VK_FALSE) {
 		mark = vulkan_timing_start();
 		status = queue_private_fence(queue, &private_fence);
 		vulkan_timing_add(VULKAN_TIMING_PRIVATE_FENCE, mark, 0);
@@ -375,7 +382,7 @@ queue_enqueue(
 	while (status == VK_SUCCESS) {
 		/* Native acceptance is the only operation allowed to consume proposed waits. */
 		transaction.count = 0;
-		status = queue_attempt(queue, count, submits, binds, fence, sparse, &transaction, completion, &accepted, &capacity_sequence, &prepared);
+		status = queue_attempt(queue, count, submits, binds, fence, sparse, unfenced, &transaction, completion, &accepted, &capacity_sequence, &prepared);
 		if (status != VK_NOT_READY)
 			break;
 
@@ -422,6 +429,47 @@ queue_enqueue(
 	return VK_SUCCESS;
 }
 
+/*
+ * Whether a submission may go without a job of its own: a public one (not
+ * a presentation's, whose caller holds the queue) with no fence, no
+ * semaphore to wait for or signal and no extension structure, on a kernel
+ * that runs a native stream at once in the caller (GPU_CAP_JOB_SUBMIT, a
+ * backend with its own job command) with synchronous commands.  Its work
+ * runs in the queue's order ahead of the next job's marker, so that job
+ * supervises and retires it as well (an idle wait submits such a job).
+ */
+static VkBool32
+queue_unfenced(
+	struct VkQueue_T *queue,
+	uint32_t count,
+	const VkSubmitInfo *submits,
+	VkFence fence,
+	VkBool32 sparse,
+	VkBool32 locked)
+{
+	struct vulkan_context *context;
+	uint32_t request;
+
+	/* Only an ordinary public submission with no fence. */
+	if (fence != VK_NULL_HANDLE || sparse != VK_FALSE || locked != VK_FALSE || count == 0U || submits == NULL)
+		return VK_FALSE;
+
+	/* Only on a kernel that runs the stream at once. */
+	context = queue->device->object.context;
+	if ((context->capabilities & GPU_CAP_JOB_SUBMIT) == 0U || context->sync_command == VK_FALSE)
+		return VK_FALSE;
+
+	/* Nothing to wait for or signal in any of its submits. */
+	for (request = 0; request < count; request++) {
+		if (submits[request].pNext != NULL || submits[request].waitSemaphoreCount != 0U ||
+		    submits[request].signalSemaphoreCount != 0U)
+			return VK_FALSE;
+	}
+
+	/* The submission goes without a job. */
+	return VK_TRUE;
+}
+
 /* Tries one admission and native transaction while its caller owns queue serialization. */
 static VkResult
 queue_attempt(
@@ -431,6 +479,7 @@ queue_attempt(
 	const VkBindSparseInfo *binds,
 	VkFence fence,
 	VkBool32 sparse,
+	VkBool32 unfenced,
 	struct vulkan_queue_transaction *transaction,
 	struct vulkan_sync *completion,
 	VkBool32 *accepted,
@@ -509,7 +558,7 @@ queue_attempt(
 	 * take that way ran nothing, and the three calls follow.
 	 */
 	submitted = VK_FALSE;
-	if (status == VK_SUCCESS && sparse == VK_FALSE &&
+	if (status == VK_SUCCESS && sparse == VK_FALSE && unfenced == VK_FALSE &&
 	    (device->object.context->capabilities & GPU_CAP_JOB_SUBMIT) != 0U &&
 	    device->object.context->sync_command != VK_FALSE) {
 		status = queue_submit_job(queue, &writer, count, submits, serial, replies, completion, &reader, &ended, prepared,
@@ -535,7 +584,7 @@ queue_attempt(
 		vulkan_writer_finish(&writer);
 		return status;
 	}
-	if (status == VK_SUCCESS)
+	if (status == VK_SUCCESS && unfenced == VK_FALSE)
 		status = vulkan_sync_job_reserve(queue, completion, &reservation, capacity_sequence, prepared);
 
 	/* Backpressure leaves this attempt inert, preserving every caller payload and native fence. */
@@ -562,7 +611,8 @@ queue_attempt(
 		}
 
 		/* The new native job replaces any synchronous acquisition completion on this fence. */
-		completion->software_signaled = VK_FALSE;
+		if (completion != NULL)
+			completion->software_signaled = VK_FALSE;
 
 		/* Swapchain images the accepted command buffers write stop matching their earlier copies. */
 		if (sparse == VK_FALSE)
@@ -577,7 +627,12 @@ queue_attempt(
 	 */
 	/* Committed work retains K supervision; definite native refusal releases only its unused reservation. */
 	mark = vulkan_timing_start();
-	status = vulkan_sync_job_finish(queue, completion, reservation, status, *accepted);
+	if (unfenced == VK_FALSE) {
+		status = vulkan_sync_job_finish(queue, completion, reservation, status, *accepted);
+	} else if (status != VK_SUCCESS && status != VK_ERROR_OUT_OF_HOST_MEMORY && status != VK_ERROR_OUT_OF_DEVICE_MEMORY) {
+		/* With no job to cancel, any failure but a definite refusal is a lost device, as a canceled job's. */
+		status = VK_ERROR_DEVICE_LOST;
+	}
 	vulkan_timing_add(VULKAN_TIMING_FINISH, mark, 0);
 
 	/*
