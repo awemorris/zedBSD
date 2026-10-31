@@ -948,7 +948,7 @@ flex_base_size(
 
 	/* An explicit content basis ignores the non-replaced preferred main size. */
 	if (item->base < 0 &&
-	    basis->unit == CSS_UNIT_CONTENT &&
+	    (basis->unit == CSS_UNIT_CONTENT || (basis == &child->style.flex_basis && basis->unit == CSS_UNIT_PERCENT)) &&
 	    (!child->replaced || layout_replaced_is_canvas(child))) {
 		error = flex_content_basis(tree, box, child, row, &item->base);
 		if (error != 0)
