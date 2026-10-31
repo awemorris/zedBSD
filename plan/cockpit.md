@@ -9,7 +9,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [BUG-384](bugs/BUG-384.md) | arm64 の kernel の header の image_size に BSS が入っていない | 直す（q1810、優先） | QEMU の arm64 で起動の確かめ。Pi 5 の板の確かめは後で |
+| P1 | — | — | 返却。BUG-384 を直した（main 98179a6a2、Pi 5 の実機で起動）。空き | — |
 | P2 | [BUG-382](bugs/BUG-382.md) | 5330 で discard の直後に mkfs が no registration | 原因を調べて直す（q1811、優先、5330 の実機） | 5 回以上の繰り返しで確かめ |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（RTX） | p024: NVK と段ごとに比べ、差 G1〜G4 を詰める（q1785-i03） | RTX の区切りの後に BUG-383（http の page から file: を読む）→ BUG-381 の残りの driver → RTX に戻る |
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 5（p021、q1784-i06）: 画面が出た。bd1f58c4a を実機で確かめ（checksum 一致、c74 48.3 fps）、desktop は 1920x1080 で定常 60 fps（窓を出す瞬間に引っかかり）、画面の mview c74 49.9 fps。merge 04:40（main は下の commit） | bin と render の重ねを実装中 |
@@ -280,6 +280,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
+- ODROID-C5 の実機で、BUG-384 の直しの後の kernel が U-Boot の booti で起動するか（image_size が BSS を含む大きさになった、main 98179a6a2）。
 - VF2: 今の main の kernel で HDMI に console の画面が出るか（WS331 p005 の目視の残り、BUG-372 は直った）。
 - installer（BUG-360）: 大きさの欄を全部消して打ち直せるか（QEMU は disk の空きの都合で未実施）。Settings（BUG-306）: 回転を 2 回目に 90° にしても窓が残るか。
 - **5330 の電源の入れ直し（済み、2026-11-01 上がっているのを確かめた。P1 が q1788 で試験中）**: 入れ直した後、担当が WS299 の image で NVMe の速さを測り、WS333 p012 の前後の暇な時の電力・p011 の HWP・RAPL・p018 の Dell の mode と fan を実機で確かめる（p014）。 2026-10-31 02:2x、P1 が main の kernel で起動した後に応答しない（遠隔の電源が無い）。入れ直すと Debian に戻る。古い userland と新しい kernel の組み合わせで network が上がらないだけの見込み（BUG-373・371）。P1 はそれまで QEMU で WS299 を進める。
