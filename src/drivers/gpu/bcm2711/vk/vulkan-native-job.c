@@ -30,6 +30,10 @@
 /* The room of one window's cost report, formatted under the controller mutex and logged after it. */
 #define NATIVE_PERF_TEXT_BYTES 2048U
 
+/* A pass this slow (prepared and run, in milliseconds) gets its own line, a few a window. */
+#define NATIVE_SLOW_MS 20U
+#define NATIVE_SLOW_LINES 4U
+
 /* Whether the boot asked for the cost report (v3d.perf=1): not read yet, on, or off. */
 #define NATIVE_PERF_UNREAD 0
 #define NATIVE_PERF_ON 1
@@ -43,6 +47,15 @@
 static char native_perf_text[NATIVE_PERF_TEXT_BYTES];
 static size_t native_perf_used;
 static int native_perf_state;
+
+/*
+ * Whether the text holds a window's report (the board's line follows it),
+ * and how many slow-pass lines the window has given (at most
+ * NATIVE_SLOW_LINES, so that a scene slow in every frame does not flood
+ * the log).
+ */
+static bool native_perf_window;
+static uint32_t native_slow_lines;
 
 static int release_job(struct bcm2711_vulkan_native_job *job);
 static int retire_closed_sessions(struct bcm2711_render_device *controller);
@@ -920,6 +933,8 @@ report_perf(
 	in_use = perf->memory_bytes;
 	kern_memset(perf, 0, sizeof(*perf));
 	perf->window_start = now;
+	native_perf_window = true;
+	native_slow_lines = 0;
 	perf->memory_bytes = in_use;
 	perf->memory_max = in_use;
 }
@@ -941,7 +956,7 @@ perf_enabled(
 }
 
 /*
- * Reports a pass that took 10 ms or more to prepare and run (v3d.perf=1):
+ * Reports a pass that took NATIVE_SLOW_MS or more to prepare and run (v3d.perf=1):
  * its preparation and execution, the texture work, program builds and
  * allocations of its draws, and its unit, bin and render times, in
  * microseconds.  A frame that misses the display's refresh is found by it.
@@ -961,9 +976,13 @@ slow_pass(
 	uint64_t allocation;
 	uint32_t index;
 
-	/* Only a slow pass, and only with the report. */
-	if (pass == NULL || kern_ticks_to_ms(prepare + execute) < 10U || !perf_enabled())
+	/* Only a slow pass, a few a window, and only with the report. */
+	if (pass == NULL ||
+	    kern_ticks_to_ms(prepare + execute) < NATIVE_SLOW_MS ||
+	    native_slow_lines >= NATIVE_SLOW_LINES ||
+	    !perf_enabled())
 		return;
+	native_slow_lines++;
 
 	/* The draws' own costs. */
 	texture = 0;
@@ -1075,8 +1094,12 @@ bcm2711_vulkan_native_perf_flush(
 	/*
 	 * The board's clocks, temperature and throttling with each report, so
 	 * that runs measured at different CPU speeds can be told apart.  Asked
-	 * here, outside the controller's mutex, once a window.
+	 * here, outside the controller's mutex, once a window (a slow-pass line
+	 * alone does not ask: the firmware's answer is slow).
 	 */
+	if (!native_perf_window)
+		return;
+	native_perf_window = false;
 	bcm2711_board_state_read(&board);
 	kern_logf("v3d: board arm=%u/%u core=%u v3d=%u MHz temp=%u.%u throttled=0x%05x\n",
 		  (unsigned)(board.arm_hz / 1000000U),
