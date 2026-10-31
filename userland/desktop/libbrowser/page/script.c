@@ -1558,6 +1558,7 @@ script_url_set(
 	struct net_url next;
 	struct wb_buffer serialized;
 	char *copy;
+	int local;
 	int error;
 
 	/* The new URL, resolved against the page's. */
@@ -1566,9 +1567,18 @@ script_url_set(
 	if (error != 0)
 		return error;
 	error = net_url_parse(href, length, &current, &next);
-	net_url_release(&current);
-	if (error != 0)
+	if (error != 0) {
+		net_url_release(&current);
 		return error;
+	}
+
+	/* A page that is not a local file does not become one (its location decides what local files it reads). */
+	local = strcmp(current.scheme, "file") == 0;
+	net_url_release(&current);
+	if (!local && strcmp(next.scheme, "file") == 0) {
+		net_url_release(&next);
+		return EACCES;
+	}
 
 	/* Its text. */
 	wb_buffer_init(&serialized);

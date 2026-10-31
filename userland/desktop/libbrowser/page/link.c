@@ -26,6 +26,7 @@
 
 static int link_resolve(const char *base, const char *href, struct net_url *target);
 static int link_named(const char *scheme, const char *name);
+static int link_base_local(const char *base);
 static const char *link_file_mime(const char *path);
 static const struct layout_box *link_image_box(const struct layout_tree *tree, const struct layout_box *box, layout_unit x, layout_unit y, int depth);
 
@@ -181,7 +182,9 @@ page_resolve_location(
  * script, a stylesheet or an image would: a data: URL's body, a file:
  * URL's file, or an http: URL's response body.  The final URL (after
  * redirects) goes to final_url when it is not NULL.  Returns
- * EPROTONOSUPPORT for a URL of another scheme.
+ * EPROTONOSUPPORT for a URL of another scheme, and EACCES for a file: URL
+ * from a page that is not itself a local file (a web, data: or about:
+ * page reads no local file, as in other browsers).
  */
 int
 page_fetch(
@@ -203,6 +206,12 @@ page_fetch(
 	error = link_resolve(base, href, &target);
 	if (error != 0)
 		return error;
+
+	/* Only a local page reads a local file. */
+	if (link_named(target.scheme, "file") && !link_base_local(base)) {
+		net_url_release(&target);
+		return EACCES;
+	}
 
 	/* Publishes the initially resolved URL when the caller requested it. */
 	if (final_url != NULL) {
@@ -491,6 +500,33 @@ link_resolve(
 
 	/* Succeeded: the target is parsed. */
 	return 0;
+}
+
+/*
+ * Tells whether a page's location is a local file: an absolute path (as
+ * link_resolve takes it) or a file: URL.
+ */
+static int
+link_base_local(
+	const char *base)
+{
+	struct net_url url;
+	int local;
+
+	/* A path is a local file; a location that does not parse is not. */
+	if (base == NULL)
+		return 0;
+	if (base[0] == '/')
+		return 1;
+	if (net_url_parse(base, strlen(base), NULL, &url) != 0)
+		return 0;
+
+	/* A file: URL. */
+	local = link_named(url.scheme, "file");
+	net_url_release(&url);
+
+	/* Succeeded: whether the location is local. */
+	return local;
 }
 
 /* Tells whether a scheme is a name. */
