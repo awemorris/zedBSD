@@ -225,6 +225,28 @@ sys_recv(
 	return (long)recv(handle, (char *)bytes, (int)length, 0);
 }
 
+/* Receives from a system socket, giving up with -1 after PATIENCE_MS when nothing arrives. */
+static long
+sys_recv_wait(
+	sys_socket handle,
+	void *bytes,
+	size_t length)
+{
+	fd_set waiting;
+	struct timeval limit;
+	int status;
+
+	FD_ZERO(&waiting);
+	FD_SET(handle, &waiting);
+	limit.tv_sec = PATIENCE_MS / 1000;
+	limit.tv_usec = 0;
+	status = select((int)handle + 1, &waiting, NULL, NULL, &limit);
+	if (status != 1)
+		return -1;
+
+	return sys_recv(handle, bytes, length);
+}
+
 /* Sends on a system socket without raising a signal. */
 static long
 sys_send(
@@ -531,7 +553,7 @@ echo_thread(
 	}
 
 	for (;;) {
-		got = sys_recv(connection, buffer, sizeof(buffer));
+		got = sys_recv_wait(connection, buffer, sizeof(buffer));
 		if (got <= 0)
 			break;
 
@@ -997,7 +1019,7 @@ test_send_receive(
 	total = 0;
 	memset(back, 0, sizeof(back));
 	for (tries = 0; tries < 200 && total < 40U; tries++) {
-		got = sys_recv(pair.peer, back + total, 40U - total);
+		got = sys_recv_wait(pair.peer, back + total, 40U - total);
 		if (got > 0)
 			total += (size_t)got;
 		else
@@ -1097,7 +1119,7 @@ test_send_full(
 	/* The peer reads the whole stream: every byte arrives in order, so the counts of sent were exact. */
 	taken = 0;
 	while (taken < total) {
-		got = sys_recv(pair.peer, incoming, CHUNK_SIZE);
+		got = sys_recv_wait(pair.peer, incoming, CHUNK_SIZE);
 		CHECK(got > 0);
 		if (got <= 0)
 			break;
@@ -1218,6 +1240,27 @@ test_closed_socket(
 
 	/* Closing NONE does nothing. */
 	wb_os_socket_close(WB_OS_SOCKET_NONE);
+
+#ifndef _WIN32
+	/* A closed descriptor in a wait is reported as failed, and ready for whatever was asked. */
+	{
+		struct wb_os_poll_item item;
+		size_t ready;
+
+		item.socket = gone;
+		item.wants = WB_OS_POLL_READABLE;
+		item.found = 0;
+		ready = 0;
+		error = wb_os_poll(&item, 1U, 0, &ready);
+		CHECK_EQ(error, 0);
+		CHECK_EQ(ready, 1);
+		CHECK_EQ(item.found, WB_OS_POLL_READABLE | WB_OS_POLL_FAILED);
+		item.wants = WB_OS_POLL_WRITABLE;
+		error = wb_os_poll(&item, 1U, 0, &ready);
+		CHECK_EQ(error, 0);
+		CHECK_EQ(item.found, WB_OS_POLL_WRITABLE | WB_OS_POLL_FAILED);
+	}
+#endif
 
 	pair_close(&pair);
 }

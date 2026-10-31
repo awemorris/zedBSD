@@ -3,7 +3,7 @@
 # ws334-p007 network: os-net
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: 実装済み・試験 PASS（2026-11-01 担当 Sonnet 5.5。cleared は Q1）。
 - 依存: p005（依存の Phase の実装が main に merge され cleared になってから始める）。
 - 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順、ws.md の決定 22）。header は p002 の設計で、p004 で確定した物を変えない。
 
@@ -64,3 +64,38 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+日付: 2026-11-01（host の `date`）。担当 Sonnet 5.5。実行は `LC_ALL=C.UTF-8`。
+
+作った物: `os-net-posix.c`・`os-net-win32.c`（骨格を実装）、`plan/ws334/tests/unit/test-os-net.c`。header・他の module・Makefile・試験の道具は変えていない。
+
+実行した command と最後の行（最終の値は Q1 への報告にも載せた）:
+
+- `sh plan/ws334/tests/run-unit.sh os-net`: `test-os-net: PASS (1289 checks) (posix)`、`test-os-net: PASS (1280 checks) (win32)`、`run-unit: PASS`（win32 の件数が少ないのは Windows で飛ばす posix 専用の確かめがあるため。逆もある）。
+- `sh plan/ws334/tests/run-unit.sh all`: 全 test が PASS。ただし `test-os-zones (win32)` が 1 回 "wine server seems to be running, but I cannot connect" で FAIL（他の担当の Wine との衝突）。`run-unit.sh os-zones` の再実行で両方 PASS（1293 checks）。
+- `BASE=d393d3267 sh plan/ws334/tests/check-skeleton.sh`: `check-skeleton: PASS`（headers 19、sources 22）。
+- `git diff --check`: 出力なし。
+
+わざと壊した確認（git の外で変えて元に戻し、`cmp` と `git diff --quiet` で一致を確認）: posix 17 通り、win32 10 通り。
+posix: `MSG_NOSIGNAL` を 0 に、`connect_result` の ENOTCONN を 0 に、index の `>=` を `>` に、drain を 1 回で止める、poll の最大数を 1 ずらす、`*sent` を要求の長さにする、receive の ECONNRESET の写しを消す、poll の READABLE から HUP・ERR・NVAL を外す、FAILED を落とす、`SOCK_CLOEXEC` を外す、waker の pipe を blocking にする、`ERANGE` を外す、NONE の item の found を 0 に直さない、`EAI_NONAME` を EIO に、no-item の sleep を 0 にする、ring の write を 0 byte にする。
+win32: `WSAEWOULDBLOCK` を EINPROGRESS にしない、except の set で FAILED を付けない、fd_set に 64 個までしか入れない、`SO_ERROR` の写しを EIO に、ring の send を 0 byte に、no-item の Sleep を外す、`WSA_FLAG_NO_HANDLE_INHERIT` を外す、`WSAHOST_NOT_FOUND` を ENOENT にしない、write の set の印を READABLE にする、receive の ECONNRESET の写しを消す。
+全部 FAIL（exit 1 か、waker の壊しは 600 秒の timeout の 124）で検出。最初に見逃した 1 つ（poll の READABLE から HUP・ERR・NVAL を外す）は、閉じた descriptor を poll に入れて READABLE | FAILED を確かめる試験（posix のみ）を足して検出するようにした。
+見逃しが残る物: waker の Windows 側の accept の確かめ（相手の address と port が自分の物かの比較）と TCP_NODELAY（試験から他の process を割り込ませられない・値を外から読んでいない）。
+
+自分で決めた点（header が黙っている所）:
+
+- resolve: port が空文字も EINVAL。host・port が UTF-8 でない（Windows で変換できない）時は EINVAL。`EAI_NODATA` は定義がある system だけ ENOENT。port が数字でない・範囲外などは header の通り EIO（EAI_SERVICE を EINVAL にはしない）。
+- connect: socket 引数の NULL でも、それ以外の失敗でも、`*socket` は NONE にして返す。blocking の connect が signal で切れた時は、POSIX は poll で終わりまで待って `connect_result` で結果を返す。ENFILE は EMFILE に、ENOBUFS（socket の作成）は ENOMEM に写す。`blocking` は 0 か 0 以外。
+- send の errno の写し: EAGAIN/EWOULDBLOCK→EAGAIN、EPIPE・ENOTCONN→EPIPE、ECONNRESET・ECONNABORTED はそのまま、ENOBUFS・ENOMEM→ENOBUFS、EBADF・ENOTSOCK・EFAULT・EINVAL→EINVAL、他は EIO。receive は EAGAIN、ECONNRESET・ECONNABORTED・ETIMEDOUT、EINVAL 系、他は EIO（ENOTCONN は EIO）。
+- 1 回の send・receive は POSIX で SSIZE_MAX、Windows で INT_MAX byte に切る。失敗時に `*sent`・`*received` を 0 にする。
+- connect_result の Windows: header の getpeername の確かめだけでは Wine が接続の途中でも getpeername を成功させるため、`SO_ERROR` が 0 の時に待ち時間 0 の select で書き込み可能かも見て、書き込み可能でなければ EINPROGRESS にした（実機の Windows でも書き込み可能になるのは接続が終わった時なので矛盾しない）。
+- `wb_os_poll`: `ready` が NULL なら EINVAL。検査は全 item を先に見てから `found` を 0 にする（EINVAL の時は items に触れない）。`wants` の R・W 以外の bit は無視。NONE 以外で負の socket（POSIX で INT_MAX 超も）は EINVAL。POSIX は NONE を除いた item だけを poll に渡す（poll の nfds が RLIMIT_NOFILE を超えて EINVAL になるのを避ける）。found は、HUP・ERR・NVAL が来たら FAILED と、求めた R・W を両方付ける。Windows は write を求めた socket を except の set にも入れ、except に残った物に WRITABLE | FAILED を付ける。select の失敗は WSAEINTR→ready 0 で成功、WSA_NOT_ENOUGH_MEMORY・WSAENOBUFS→ENOMEM、他は EIO。item 数が 0（または全部 NONE）で timeout 0 は即 0、正は sleep。
+- waker の Windows: 外側の socket は blocking の connect（backlog 1 の loopback）。accept の前に select で最長 5 秒待ち（待ちが切れたら EIO）、他人の接続は最大 8 回まで閉じて繰り返す。ring 側（connect した側）に TCP_NODELAY、wait 側（accept した側）に `SetHandleInformation` で継承を外す。drain は EAGAIN か 0 か失敗まで読み続ける。
+- Windows Sockets の開始は `InitOnceExecuteOnce`、失敗は `os_net_start_status` に EIO を覚える。resolve・connect・connect_result・send・receive・poll（item が有る時）・waker_open が呼ぶ。`wb_os_socket_close`・`descriptor`・`last_error` は呼ばない。
+- 試験の時間: 40 ms 以上待つ試験は 50 ms の poll、no-item の sleep は 20 ms の poll で 15 ms 以上。waker の別 thread の wake は、8 秒後に別の waker を鳴らす見張りを付けて、壊れていても hang しない（ただし ring 自体が壊れると見張りも鳴らないので 600 秒の timeout で FAIL になる）。
+
+header の不備の指摘: なし。
+
+未実施: aarch64 Windows の実行（compile だけ）、実機の Windows、他の process が割り込んだ時の waker の accept（外から割り込ませる試験を作っていない）、IPv6 のない host での `::1`（この host には有るので実行は有る側のみ）。Wine での connect の途中で getpeername が成功する動作は、実機の Windows と違う（上記の select の確かめで吸収）。
