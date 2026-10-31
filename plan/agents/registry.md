@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner-high | BUG-384 (q1810-i01) | `/home/awe/zedBSD-worktrees/p1-bug384` / `agent/p1-bug384` | in-progress（2026-11-01 05:06 起動） | 644eb3d98（merge dbf2059a7） |
+| P1 | phase-runner-high | BUG-384 (q1810-i01) | `/home/awe/zedBSD-worktrees/p1-bug384` / `agent/p1-bug384` | 返却（2026-11-01 06:13、BUG-384 の直し。Pi 5 の板の確かめ待ち） | 644eb3d98（merge dbf2059a7） |
 | P2 | phase-runner-high | BUG-382 (q1811-i01) | `/home/awe/zedBSD-worktrees/p2-bug382` / `agent/p2-bug382` | in-progress（2026-11-01 05:06 起動） | 7da994932（merge d8e39d789） |
 | P4 | phase-runner-high | ws291 p021 Pi 5 (q1784-i06) | `/home/awe/zedBSD-worktrees/p4-ws291pi` / `agent/p4-ws291pi` | in-progress（2026-11-01 04:09 起動し直し、Pi 5） | a54520ea8（merge 69109d3f2） |
 | P5 | kernel-and-driver-designer | ws336 p001 設計の仕上げ (q1791-i02) | `/home/awe/zedBSD-worktrees/p5-ws336` / `agent/p5-ws336` | 返却（2026-11-01 04:53、cleared。実装は Sonnet） | 6848137f6（merge a1d9f18fb） |
