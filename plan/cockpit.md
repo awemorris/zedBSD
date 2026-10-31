@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 03:03（Q1）
+最終更新: 2026-11-01 03:04（Q1）
 
 ## 担当（P1〜P8）
 
@@ -14,7 +14,7 @@
 | P3 | — | — | 返却（2026-11-01 02:19）。WS291 p024: subs-1000 35 → 43 fps、big-1000 114 → 119 fps（main 1e86f4502）。目標（75.4・136.2）は未達 | 続きは判断の後（下の 0m） |
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 4（p025）は熱の throttle の見込みで止め、Pi 5（p021）へ: V3D 7.1 への移し・1920x1080 の SD の image を作る | ユーザーが板を Pi 5 に替え、Q1 が SD を書く |
 | P5 | — | — | 返却（2026-11-01 03:03）。WS336 の設計を main に（a1d9f18fb、header の基点 d4ab182d2、実装の Phase p002〜p025）。問い Q1〜Q9 は下の 0n | 答えの後に実装（Sonnet と Opus） |
-| P6 | [WS335](ws335/ws.md) | libssl-compat（OpenSSL 互換の自前の TLS） | p001 の設計（q1789、標準廉価実装手順）: 範囲・module・header・試験の道具 | 設計・design-reviewer・問いまで |
+| P6 | — | — | 返却（2026-11-01 03:04）。WS335 の設計を main に（header の基点 60760d2a0、実装の Phase p002〜p038）。問い U1〜U6 は下の 0o | 答えの後に実装 |
 | P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計の段 p002〜p004 cleared（基点 d393d3267、main 5ea437eb7）。p020 の glue（q1796） | 並べて Sonnet が p005・p009・p010・p013 を実装 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 13 回目（q1727-i13）: golden の試験の整理 → 負の向きの scroll・直交の subgrid など | 今 3,472 のうち 3,039（87.53%）、Acid3 100/100・Acid2 100%。12 回目は subgrid・grid の絶対配置など（+34、後退 0） |
 
@@ -278,6 +278,10 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 ### 0n. WS336（自前の sshd・ssh）の設計の問い Q1〜Q9（2026-11-01 03:03 新しい）
 
 - 問いの本文: [ws336/user-questions.md](ws336/user-questions.md)（前置き・用語つき）。推し: Q1 password の login を入れる、Q2 port の転送は入れない、Q3 sftp-server だけ（scp -O を使う道具 4 本は -O を外す）、Q4 agent は入れない、Q5 OpenSSH と同じ深さの権限の分離、Q6 QEMU の相互運用の試験が通ったら既定を替える（OpenSSH の package は残す）、Q7 鍵の交換は mlkem768x25519-sha256 だけ、Q8 chacha20-poly1305 だけ、Q9 passphrase の無い鍵だけ。
+
+### 0o. WS335（libssl-compat・libcrypto-compat）の設計の問い U1〜U6（2026-11-01 03:04 新しい）
+
+- 問いの本文: [ws335/user-questions.md](ws335/user-questions.md)。推し（どれも A）: U1 範囲の外の一覧、U2 net/tls.c の切り替えは -DWB_TLS_COMPAT（dlopen の名前だけ、p036 の案）、U3 ssh の鍵の交換 mlkem768x25519-sha256、U4 名前と置き場所、U5 Windows の ROOT の store から Disallowed を除き、DLL の横の cert.pem を足す、U6 証明書の CN への fallback をしない。推しでない答えは header の変更（新しい基点）になる。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
