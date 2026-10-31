@@ -1156,6 +1156,7 @@ inline_finish_line(
 	struct text_metrics metrics;
 	struct text_font font;
 	struct text_glyph glyph;
+	struct css_length saved_line_height;
 	layout_unit above;
 	layout_unit below;
 	layout_unit x;
@@ -1262,8 +1263,6 @@ inline_finish_line(
 		if (first_line && box->first_line_style != NULL &&
 		    pieces[index].box->style.line_height.unit == box->style.line_height.unit &&
 		    pieces[index].box->style.line_height.value == box->style.line_height.value) {
-			struct css_length saved_line_height;
-
 			saved_line_height = pieces[index].box->style.line_height;
 			pieces[index].box->style.line_height = box->first_line_style->line_height;
 			inline_piece_extent(tree, &pieces[index], &reach[line.fragment_count - 1U].above, &reach[line.fragment_count - 1U].below);

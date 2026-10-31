@@ -5589,6 +5589,15 @@ cascade_animation(
 	int found_from;
 	int found_to;
 	int count;
+	const struct css_track *from_tracks;
+	const struct css_track *to_tracks;
+	struct css_track *own_tracks;
+	struct css_track from_copy[CSS_TRACKS];
+	struct css_track to_copy[CSS_TRACKS];
+	int own_count;
+	int from_tracks_count;
+	int to_tracks_count;
+	int track;
 
 	/* Only an animation with a name and a length that has begun. */
 	if (style->animation_name == NULL || style->animation_duration <= 0.0f || style->animation_delay > 0.0f)
@@ -5665,16 +5674,6 @@ cascade_animation(
 	}
 	/* grid-template-columns and -rows: tracks of the same kind blend, the others change at the halfway point. */
 	for (pass = 0; pass < 2; pass++) {
-		const struct css_track *from_tracks;
-		const struct css_track *to_tracks;
-		struct css_track *own_tracks;
-		struct css_track from_copy[CSS_TRACKS];
-		struct css_track to_copy[CSS_TRACKS];
-		int own_count;
-		int from_tracks_count;
-		int to_tracks_count;
-		int track;
-
 		property = pass == 0 ? CSS_PROP_GRID_TEMPLATE_COLUMNS : CSS_PROP_GRID_TEMPLATE_ROWS;
 		own_tracks = pass == 0 ? style->columns : style->rows;
 		own_count = pass == 0 ? style->column_count : style->row_count;

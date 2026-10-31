@@ -724,6 +724,7 @@ box_first_letter_in(
 {
 	struct layout_box *child;
 	struct layout_box *letter;
+	struct layout_box *before;
 	size_t start;
 	size_t end;
 	size_t length;
@@ -788,8 +789,6 @@ box_first_letter_in(
 		if (parent->first_child == child) {
 			parent->first_child = letter;
 		} else {
-			struct layout_box *before;
-
 			for (before = parent->first_child; before != NULL && before->next != child; before = before->next)
 				;
 			if (before != NULL)

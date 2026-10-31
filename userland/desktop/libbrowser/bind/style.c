@@ -312,6 +312,7 @@ style_css_supports(
 	struct vm_string *condition;
 	struct vm_cell *name_root;
 	struct wb_units units;
+	struct css_query *query;
 	size_t start;
 	size_t end;
 	int valid;
@@ -358,8 +359,6 @@ style_css_supports(
 			status = css_declaration_valid(realm->heap, units.data + start + 1U, end - start - 2U, &valid);
 		} else if (end > start + 10U && units.data[end - 1U] == ')' && style_has_selector_prefix(units.data + start, end - start)) {
 			/* selector(...) is true for a selector list the engine parses. */
-			struct css_query *query;
-
 			query = NULL;
 			status = css_query_parse(realm->heap, units.data + start + 9U, end - start - 10U, &query);
 			if (status == 0) {

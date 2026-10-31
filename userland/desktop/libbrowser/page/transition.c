@@ -250,6 +250,11 @@ page_vt_pseudo_style(
 	struct page *page;
 	struct css_style *chain;
 	const struct layout_transition_name *entry;
+	static const char prefix[] = "-ua-view-transition-group-anim-";
+	const char *given;
+	uint16_t units[160];
+	size_t used;
+	size_t at;
 	const struct vm_string *classes;
 	size_t first;
 	size_t last;
@@ -319,12 +324,6 @@ page_vt_pseudo_style(
 	if (error == 0 && page->transition_on && style->animation_name != NULL && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW) {
 		entry = layout_transition_find(&page->transition, name);
 		if (entry != NULL) {
-			static const char prefix[] = "-ua-view-transition-group-anim-";
-			const char *given;
-			uint16_t units[160];
-			size_t used;
-			size_t at;
-
 			given = NULL;
 			used = 0;
 			if (pseudo == CSS_PSEUDO_ELEMENT_VT_GROUP) {
