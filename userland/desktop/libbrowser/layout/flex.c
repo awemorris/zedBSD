@@ -1046,7 +1046,16 @@ flex_base_size(
 				return error;
 		}
 	} else if (item->base < 0) {
+		struct css_length saved_min_height;
+
+		/* The content's height is measured without the item's own minimum height, which only clamps the result. */
+		saved_min_height = child->style.min_height;
+		if (!child->replaced && child->style.min_height.unit == CSS_UNIT_PX) {
+			child->style.min_height.unit = CSS_UNIT_AUTO;
+			child->style.min_height.value = 0.0f;
+		}
 		error = layout_block(tree, child, box->width);
+		child->style.min_height = saved_min_height;
 		if (error != 0)
 			return error;
 
@@ -1136,6 +1145,29 @@ flex_base_size(
 	    child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
 	    item->minimum < item->base)
 		item->minimum = item->base;
+
+	/* A table of a column is no shorter than its rows, whatever minimum it is given. */
+	if (!row && (child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE) &&
+	    child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    !child->replaced) {
+		struct layout_context table_context;
+		struct wb_vector table_floats;
+		struct css_length table_height;
+
+		/* Laid out with its height auto, its height is what its rows and captions need. */
+		table_height = child->style.height;
+		child->style.height.unit = CSS_UNIT_AUTO;
+		tree->measuring++;
+		layout_context_begin(tree, &table_context, &table_floats);
+		error = layout_block(tree, child, box->width);
+		layout_context_end(tree, &table_context);
+		tree->measuring--;
+		child->style.height = table_height;
+		if (error != 0)
+			return error;
+		if (item->minimum < child->height)
+			item->minimum = child->height;
+	}
 
 	/* The base stays unconstrained; the hypothetical size is limited for line breaking. */
 	item->size = item->base;
