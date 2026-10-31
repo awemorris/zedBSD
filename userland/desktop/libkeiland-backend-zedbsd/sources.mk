@@ -33,5 +33,4 @@ KL_BACKEND_ZEDBSD_SOURCES := userland/desktop/libkeiland-backend/backend.c userl
 	userland/desktop/libkeiland-backend/peer/peer-getpeereid.c \
 	userland/desktop/libkeiland-backend-zedbsd/peer-zedbsd.c \
 	userland/desktop/libkeiland-backend-zedbsd/gpu-zedbsd.c \
-	userland/desktop/libkeiland-backend-zedbsd/gpu-buffer-zedbsd.c \
-	userland/desktop/libkeiland-backend-zedbsd/scanout-zedbsd.c
+	userland/desktop/libkeiland-backend-zedbsd/gpu-buffer-zedbsd.c

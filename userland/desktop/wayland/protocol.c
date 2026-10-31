@@ -82,6 +82,7 @@ static const struct kwl_global globals[] = {
 	{ 27, "kl_theme_v1", 2, KWL_THEME },
 	{ 28, "wp_content_type_manager_v1", 1, KWL_CONTENT_TYPE_MANAGER },
 	{ 29, KL_AUDIO_NAME, KL_AUDIO_VERSION, KWL_AUDIO },
+	{ 30, "kl_game_v1", 1, KWL_GAME_MANAGER },
 };
 
 static void global_identity(const struct kwl_global *global, const char **interface, uint32_t *version);
@@ -289,6 +290,11 @@ kwl_dispatch(
 	case KWL_CONTENT_TYPE:
 		/* content-type (content-type.c). */
 		error = kwl_content_type_request(object, opcode, bytes, size);
+		break;
+	case KWL_GAME_MANAGER:
+	case KWL_GAME_SURFACE:
+		/* The game mode's lent images (game.c). */
+		error = kwl_game_request(object, opcode, bytes, size);
 		break;
 	case KWL_GLASS_MANAGER:
 	case KWL_GLASS:

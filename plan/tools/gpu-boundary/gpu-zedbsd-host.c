@@ -24,6 +24,7 @@
 #include <string.h>
 
 static void decode_base(struct gpu_image_descriptor *image);
+static void decode_tiled(struct gpu_image_descriptor *image);
 static int decode_run(const char *name, int accept, const struct gpu_image_descriptor *image, size_t size);
 
 /*
@@ -128,6 +129,25 @@ main(
 	image.memory_type = 40U;
 	failures += decode_run("memory-type-shift", 0, &image, sizeof(image));
 
+	/* A block-linear image that may be sampled. */
+	decode_tiled(&image);
+	failures += decode_run("tiled-exact", 1, &image, sizeof(image));
+
+	/* A block-linear image that may not be sampled. */
+	decode_tiled(&image);
+	image.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	failures += decode_run("tiled-unsampled", 0, &image, sizeof(image));
+
+	/* A block-linear image that starts past its allocation. */
+	decode_tiled(&image);
+	image.offset = image.allocation_bytes;
+	failures += decode_run("tiled-offset", 0, &image, sizeof(image));
+
+	/* A block-linear image of a part of a pixel per row. */
+	decode_tiled(&image);
+	image.stride = 3202U;
+	failures += decode_run("tiled-unaligned-row", 0, &image, sizeof(image));
+
 	/* Reports the verdict. */
 	if (failures != 0) {
 		printf("gpu-zedbsd-host: FAIL failures=%d\n", failures);
@@ -158,6 +178,25 @@ decode_base(
 	image->allocation_bytes = 3200U * 600U;
 	image->memory_type = 1U;
 	image->tiling = GPU_IMAGE_LINEAR;
+
+	/* Succeeded: the description is one Vulkan can take. */
+	return;
+}
+
+/* Fills a description of an 800x600 BGRA NVIDIA block-linear image (block height 16 GOBs) that may be sampled. */
+static void
+decode_tiled(
+	struct gpu_image_descriptor *image)
+{
+	/* The linear image's size and memory. */
+	decode_base(image);
+
+	/* Rows of blocks 3264 bytes wide, 640 rows (600 rounded up to 128). */
+	image->tiling = GPU_IMAGE_NV_BLOCK_LINEAR;
+	image->layout_parameter = 4U;
+	image->stride = 3264U;
+	image->allocation_bytes = 3264U * 640U;
+	image->usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
 	/* Succeeded: the description is one Vulkan can take. */
 	return;
@@ -200,7 +239,11 @@ decode_run(
 	    (layout.width != image->width ||
 	     layout.height != image->height ||
 	     layout.stride != image->stride ||
-	     layout.offset != image->offset)) {
+	     layout.offset != image->offset ||
+	     layout.tiling != image->tiling ||
+	     layout.parameter != image->layout_parameter ||
+	     layout.usage != image->usage ||
+	     layout.linear != (image->tiling == GPU_IMAGE_LINEAR ? 1U : 0U))) {
 		printf("case %s: FAIL (layout differs)\n", name);
 		return 1;
 	}

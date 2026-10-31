@@ -28,8 +28,27 @@
 #define VULKAN_WSI_FORMAT_RGBA		1U
 #define VULKAN_WSI_FORMAT_BGRA		2U
 
+/* The most images a window system lends one chain (a compositor's game mode). */
+#define VULKAN_WSI_LEND_MAX		8U
+
 struct vulkan_wsi_platform_ops;
 struct vulkan_swapchain;
+
+/*
+ * A window-system chain's creation as a lend of the compositor's images is
+ * checked against (the platform's lend and lend_changed): the format the
+ * application draws in, the chain's extent and uses, the image count it
+ * asked for, and whether the device can draw it into images it imports
+ * (one layer, uses an imported image has, opaque, a format a linear image
+ * renders to).
+ */
+struct vulkan_wsi_lend_fit {
+	VkFormat format;
+	VkExtent2D extent;
+	VkImageUsageFlags usage;
+	uint32_t count;
+	VkBool32 drawable;
+};
 
 /* What one cursor-plane present did on the output (ws141-p016 (B)). */
 enum vulkan_wsi_cursor_outcome {
@@ -274,6 +293,38 @@ struct vulkan_wsi_platform_ops {
 	 * backend has none (wait_descriptor is the display's, POLLPRI).
 	 */
 	int (*wait_input)(void *);
+	/*
+	 * Tells the window system the chain a creation makes (the fit), and
+	 * takes the images it lends the chain to draw into when the lend it
+	 * offers now fits: at most the capacity's count, each one's fd (the
+	 * caller's to close), and the lend's serial.
+	 * VK_ERROR_FEATURE_NOT_PRESENT when no lend fits (one offered that does
+	 * not fit is declined).  NULL when the backend lends no images.
+	 */
+	VkResult (*lend)(void *, const struct vulkan_wsi_lend_fit *, uint32_t, uint32_t *, int *, uint64_t *);
+	/*
+	 * Makes the native image of lent image index of the lend serial from
+	 * its fd (which stays the caller's) and the description its import
+	 * took from the kernel; it is busy until the window system gives it to
+	 * the chain to draw into.
+	 */
+	VkResult (*lend_import)(void *, int, const struct gpu_image_descriptor *, uint64_t, uint32_t, void **);
+	/*
+	 * Tells whether a chain is better made again: a lend that fits it is
+	 * offered to a chain of its own images (serial zero), or the lend
+	 * serial a lent chain draws into has ended or been replaced.  NULL when
+	 * the backend lends no images.
+	 */
+	VkBool32 (*lend_changed)(void *, const struct vulkan_wsi_lend_fit *, uint64_t);
+	/* Refuses the lend serial: the chain made for it could not import its images.  NULL when none is lent. */
+	void (*lend_decline)(void *, uint64_t);
+	/*
+	 * Asks the lease's display which layouts of an image (the request's
+	 * format, width and height) it shows (GPU_IMAGE_LAYOUTS, SCANOUT);
+	 * VK_SUCCESS with the answer, or an error when it does not answer.
+	 * NULL when the backend has no display of its own.
+	 */
+	VkResult (*layouts)(void *, struct gpu_image_layouts *);
 };
 
 VkResult vulkan_wsi_display_node_query(struct VkPhysicalDevice_T *physical, uint32_t index, uint32_t *count, struct gpu_display_info *request, uint64_t *device_id, char *path);
@@ -314,6 +365,25 @@ VkResult vulkan_wsi_shared_image_create(struct VkDevice_T *device, VkFormat form
  */
 extern VkResult vulkan_wsi_shared_image_create_usage(struct VkDevice_T *device, VkFormat format, VkExtent2D extent, VkImageUsageFlags usage, const VkAllocationCallbacks *allocator, const struct gpu_placement *placement, VkImage *image, VkDeviceMemory *memory, int *fd, struct gpu_image_descriptor *descriptor) __attribute__((weak));
 
+/*
+ * The shared image in a layout, and the choice of a display's image layout
+ * (wsi-image.c), weak for the same host tests; without them a direct chain
+ * keeps linear rows.
+ */
+extern VkResult vulkan_wsi_shared_image_create_layout(struct VkDevice_T *device, VkFormat format, VkExtent2D extent, VkImageUsageFlags usage, uint32_t tiling, uint32_t parameter, const VkAllocationCallbacks *allocator, const struct gpu_placement *placement, VkImage *image, VkDeviceMemory *memory, int *fd, struct gpu_image_descriptor *descriptor) __attribute__((weak));
+extern void vulkan_wsi_layout_choose(struct VkDevice_T *device, VkFormat format, VkExtent2D extent, const struct gpu_image_layouts *scanout, uint32_t *tiling, uint32_t *parameter, VkBool32 *fastest) __attribute__((weak));
+
 VkResult vulkan_wsi_shared_image_import(struct VkDevice_T *device, int fd, const VkAllocationCallbacks *allocator, VkImage *image, VkDeviceMemory *memory, struct gpu_image_descriptor *descriptor);
+
+/*
+ * The import of a shared image as an image of a given format of the same
+ * channel order (wsi-image.c), and the memory and description of an
+ * exportable chain's image (wsi-swapchain.c).  They are weak because the
+ * host tests of the swapchain link stubs of wsi-image.c without the first,
+ * and the second's callers are linked without the swapchain in host tests;
+ * a null one leaves the chain on its own images, or refuses the export.
+ */
+extern VkResult vulkan_wsi_shared_image_import_format(struct VkDevice_T *device, int fd, VkFormat format, const VkAllocationCallbacks *allocator, VkImage *image, VkDeviceMemory *memory, struct gpu_image_descriptor *descriptor) __attribute__((weak));
+extern VkResult vulkan_wsi_swapchain_image_memory(struct VkDevice_T *device, VkImage image, VkDeviceMemory *memory, struct gpu_image_descriptor *descriptor) __attribute__((weak));
 
 #endif

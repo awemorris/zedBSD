@@ -6,46 +6,58 @@
  */
 
 /*
- * The game mode (ws122-p005b, BUG-223, the 2026-10-06 user decision B): a
- * fullscreen window that says it shows a video or a game
- * (wp_content_type_v1, content-type.c), alone on the output, is shown
- * without composing -- its image goes straight to the display through the
- * backend's direct scanout (kl_backend_scanout_*, zedBSD's alone).  Every
- * other window, a fullscreen one that does not ask too, is composed with
- * libvulkan as before (display.c).
+ * The game mode: a fullscreen window that says it shows a video or a game
+ * (wp_content_type_v1, content-type.c), alone on the output, draws straight
+ * into the images the display shows -- nothing is composed or copied.
+ * Every other window, a fullscreen one that does not ask too, is composed
+ * with libvulkan as before (display.c).
+ *
+ * The images are lent (game.c): the compositor makes a display swapchain
+ * of its own (VK_KHR_display, at the display's mode, its images allowed to
+ * go out), sends the client's Vulkan WSI each image's fd and the lend, and
+ * the WSI's chain draws into them.  Only libvulkan is used: the images go
+ * out with vkGetMemoryFdKHR, and they are shown with vkQueuePresentKHR.
  *
  * Each pass the rules (scanout-rules.c) decide from the facts gathered
- * here.  To enter, the display thread asks the backend whether the
- * display can show the window, then the swapchain is closed in a change of
- * the display (display-thread.c: the frame in flight completes first,
- * libvulkan gives the display back) and the display thread has the backend
- * claim the display, while window mode's passes go on.
+ * here; the window also needs a game object whose chain the display can
+ * lend images to (its format's channel order, the display's mode, uses an
+ * image the display shows has).  To enter, window mode's swapchain is
+ * closed in a change of the display (display-thread.c: the frame in flight
+ * completes first), the display thread makes the game chain, and the lend
+ * is sent; window mode's passes go on meanwhile.
  *
- * Each new image of the window is then readied by the backend here (its
- * import) and presented by the present thread, one resident thread of a
- * lane named "present" that waits for the display's refresh while the
- * compositor takes the clients' commits (so a mailbox client's replaced
- * images go back at once).  When its present has returned, the result is
- * taken after the threads' wake pipe: the frame callbacks are done and the
- * image it replaces let go.  One present is in flight at a time; the
- * newest image goes next.
+ * The present thread, one resident thread of a lane named "present",
+ * acquires the chain's images and waits until the display has let go of
+ * each (the acquire's fence): such an image is the client's, and its
+ * buffer goes back to it (wl_buffer.release) when nothing else holds it.
+ * A new commit of a lent buffer (its rendering done: the commit's acquire
+ * fence) is presented by the present thread, which then waits for the
+ * display to give back the image it showed before -- the same image
+ * acquired again is how the compositor knows it left the screen.  One
+ * present is in flight at a time; the newest image goes next.  Until the
+ * client draws into a lent image its own images are not shown (their frame
+ * callbacks are done, so it goes on); a client that does not take the
+ * lend within SCANOUT_ADOPT_MS, or declines it, is composed.
  *
  * As soon as the facts change -- something to draw over it (an edge's
  * gesture, App Home, a menu, the keyboard), the pointer moving over a
  * video, a screenshot asked, another size -- the game mode is left: the
- * display thread releases the display once the present in flight has
- * returned, and window mode opens the swapchain again after it
- * (display.c), so the gesture's feedback and the pointer are drawn.  The
- * images the display held are let go when it has been released, or when
- * their client goes.  The input goes to the compositor all along.
+ * lend is withdrawn (its buffers are the client's ordinary buffers from
+ * then, composed as any other), the display thread destroys the game
+ * chain once the job in flight has returned, and window mode opens the
+ * swapchain again after it (display.c).  The buffers the game chain held
+ * are let go when it is destroyed, or when their client goes.  The input
+ * goes to the compositor all along.
  *
  * A game that fills the output shows no cursor on any platform, whether
  * it is shown straight or composed (kwl_scanout_cursor_hidden), so its
  * pointer moving does not leave the game mode.
  *
- * Log: "KWL SCANOUT direct=1 surface=N client=C switch_ms=M" and
- * "KWL SCANOUT direct=0 reason=R surface=N frames=F" (also once for a
- * window that asks but is not shown straight, for each new reason).
+ * Log: "KWL SCANOUT direct=1 surface=N client=C switch_ms=M images=I
+ * format=F", "KWL SCANOUT direct=0 reason=R surface=N frames=F" (also
+ * once for a window that asks but is not shown straight, for each new
+ * reason), "KWL SCANOUT lend refused why=W surface=N" (once for each new
+ * reason of a window).
  */
 
 #include "desktop.h"
@@ -54,8 +66,6 @@
 #include "menu.h"
 #include "scanout-rules.h"
 
-#include "userland/desktop/libkeiland-backend/keiland-backend-display.h"
-
 #include "lane.h"
 
 #include <errno.h>
@@ -63,43 +73,61 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* How long the present thread waits for the display to give an image back after a present, in nanoseconds. */
+#define SCANOUT_ACQUIRE_NS	100000000ULL
+
+/* How long an acquired image's fence is waited for (the display stops reading it), in nanoseconds. */
+#define SCANOUT_FENCE_NS	1000000000ULL
+
 /*
- * One present for the present thread: the scanout it shows on (its buffer
- * readied by the backend), the number of the claim (server->scanout_claim
- * then), and the present's result.
+ * How long the client has after the lend to draw into a lent image, in
+ * milliseconds: its chain is made again and the images imported first
+ * (about half a second on QEMU's Venus, up to 2.7 s for a first lend).
+ */
+#define SCANOUT_ADOPT_MS	5000U
+
+/* The uses a client's chain may have to draw into lent images. */
+#define SCANOUT_USAGE		(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | \
+				 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+
+/*
+ * One job of the present thread: whether it presents an image (index) of
+ * the game chain first, and whether it then waits for the image shown
+ * before to come back (none is shown before the first present), the
+ * compositor and the chain, the number of the claim (server->scanout_claim
+ * then), and its results -- the present's, and the images the display gave
+ * back (one bit each).
  */
 struct scanout_present {
 	struct kwl_lane_job lane;
-	struct kl_backend_scanout *scanout;
+	unsigned present;
+	unsigned wait;
+	struct kwl_compose *compose;
+	struct kwl_game_chain *chain;
 	uint64_t claim;
-	int result;
-};
-
-/*
- * A release of the display given to the display thread after the game mode
- * was left: the images the display held (the one shown and the one in
- * flight, each with a hold, NULL once let go) until the release is done.
- */
-struct scanout_closing {
-	struct scanout_closing *next;
-	struct kwl_object *front;
-	struct kwl_object *flight;
+	uint32_t index;
+	VkResult result;
+	uint32_t acquired;
 };
 
 static void scanout_present_run(struct kwl_lane_job *lane);
 static void scanout_present_done(void *context, struct kwl_lane_job *lane);
 static void scanout_present_drop(struct kwl_lane_job *lane);
-static void scanout_release(struct kwl_server *server, struct kl_backend_scanout *scanout, struct kwl_object *front, struct kwl_object *flight);
+static VkResult scanout_acquire(struct kwl_compose *compose, struct kwl_game_chain *chain, uint64_t timeout, uint32_t *index);
+static void scanout_submit(struct kwl_server *server, unsigned present, uint32_t index);
+static void scanout_release(struct kwl_server *server, struct kwl_game_chain *chain);
 static void scanout_released(struct kwl_server *server, int error, void *context);
 static void scanout_claimed(struct kwl_server *server, int error, void *context);
 static void scanout_facts(struct kwl_server *server, struct kwl_object *top, struct kwl_scanout_facts *facts);
+static VkFormat scanout_lendable(struct kwl_server *server, struct kwl_object *top);
 static int scanout_overlay(struct kwl_server *server, struct kwl_object *top);
 static void scanout_enter(struct kwl_server *server, struct kwl_object *top);
-static void scanout_answered(struct kwl_server *server, int error, void *context);
 static void scanout_parked(struct kwl_server *server, int error, void *context);
 static void scanout_closed(struct kwl_server *server, int error, void *context);
+static void scanout_lend(struct kwl_game_chain *chain, struct kwl_object *top);
 static void scanout_frame(struct kwl_server *server, struct kwl_object *top);
 static void scanout_refuse(struct kwl_server *server, struct kwl_object *top, int error);
+static void scanout_let_go(struct kwl_game_chain *chain, struct kwl_client *client);
 static void scanout_callbacks(struct kwl_server *server, struct kwl_object *shown);
 static void scanout_note(struct kwl_server *server, struct kwl_object *top, unsigned reason);
 
@@ -118,14 +146,25 @@ static const struct kwl_lane_ops scanout_present_ops = {
 static struct kwl_lane scanout_lane;
 static unsigned scanout_started;
 
-/* The releases given to the display thread and not done yet, the event loop's thread's own. */
-static struct scanout_closing *scanout_closings;
+/* The game chains whose release the display thread has not done yet (linked by next_closing), the event loop's thread's own. */
+static struct kwl_game_chain *scanout_closings;
+
+/* The serial of the last lend; each lend takes the next one (never zero), on the event loop's thread. */
+static uint32_t scanout_serial;
+
+/*
+ * The window whose lend refusal was logged last and its reason, so that
+ * each is logged once; compared, never followed (cleared as the surface
+ * goes), on the event loop's thread.
+ */
+static const struct kwl_object *scanout_lend_noted;
+static const char *scanout_lend_why;
 
 /*
  * Runs the game mode's part of a pass, after the commits were taken.
- * Returns 1 when the pass is the game mode's (the display shows the window
- * straight, nothing is composed), 0 when window mode draws it (the game
- * mode was left, or not entered).
+ * Returns 1 when the pass is the game mode's (the client draws into the
+ * display's images, nothing is composed), 0 when window mode draws it (the
+ * game mode was left, or not entered).
  */
 int
 kwl_scanout_pass(
@@ -134,6 +173,7 @@ kwl_scanout_pass(
 {
 	struct kwl_scanout_facts facts;
 	unsigned reason;
+	VkFormat format;
 	int busy;
 
 	/* The pass's facts and the rules' answer. */
@@ -165,45 +205,54 @@ kwl_scanout_pass(
 	if (busy)
 		return 0;
 
+	/* Only a window whose chain can draw into the display's images. */
+	format = scanout_lendable(server, top);
+	if (format == VK_FORMAT_UNDEFINED)
+		return 0;
+
 	/*
-	 * Enters, while window mode draws on: the display thread asks whether
-	 * the display can show it, then the swapchain is closed and the display
-	 * claimed (scanout_answered); a later pass shows the first image
-	 * straight.  A refusal stays window mode for this window.
+	 * Enters, while window mode draws on: the swapchain is closed and the
+	 * game chain made (scanout_closed), the lend sent (scanout_claimed); a
+	 * later pass shows the client's first lent image.  A failure stays
+	 * window mode for this window.
 	 */
 	scanout_enter(server, top);
 	return 0;
 }
 
 /*
- * Leaves the game mode for a reason (KWL_SCANOUT_*): the display thread
- * releases the display once the present in flight has returned, the
- * images shown are let go after, and window mode opens the swapchain again
- * from the next pass (server->windowed is 0; its open runs on the display
- * thread after the release).
+ * Leaves the game mode for a reason (KWL_SCANOUT_*): the lend is
+ * withdrawn (the client's lent buffers are ordinary buffers from now,
+ * composed as any other), the display thread destroys the game chain once
+ * the job in flight has returned, the buffers it held are let go after,
+ * and window mode opens the swapchain again from the next pass
+ * (server->windowed is 0; its open runs on the display thread after the
+ * release).
  */
 void
 kwl_scanout_leave(
 	struct kwl_server *server,
 	unsigned reason)
 {
-	struct kl_backend_scanout *scanout;
-	struct kwl_object *front;
-	struct kwl_object *flight;
+	struct kwl_game_chain *chain;
+	struct kwl_object *game;
 	uint32_t surface_id;
 
 	/* Not in it. */
-	if (server->scanout == NULL)
+	chain = server->scanout;
+	if (chain == NULL)
 		return;
 
-	/* The display goes back on the display thread, the images it showed with it (a present's result from now is not this one's). */
-	scanout = server->scanout;
-	front = server->scanout_front;
-	flight = server->scanout_flight;
+	/* The client hears that the lend is over. */
+	game = NULL;
+	if (server->scanout_surface != NULL)
+		game = server->scanout_surface->game_object;
+	if (game != NULL)
+		(void)kwl_game_send_withdraw(game, chain->serial);
+
+	/* The chain goes on the display thread (a job's result from now is not this one's). */
 	server->scanout = NULL;
-	server->scanout_front = NULL;
-	server->scanout_flight = NULL;
-	scanout_release(server, scanout, front, flight);
+	scanout_release(server, chain);
 
 	/* The log, and window mode's frame from the next pass. */
 	surface_id = 0U;
@@ -229,7 +278,7 @@ kwl_scanout_start(
 	if (scanout_started || !server->threads_prepared)
 		return;
 
-	/* The thread, which waits for the first present. */
+	/* The thread, which waits for the first job. */
 	error = kwl_lane_start(&scanout_lane, "present", 1U, server->wake[1]);
 	if (error != 0) {
 		printf("KWL SCANOUT thread=present errno=%d the game mode is not entered\n", error);
@@ -243,13 +292,13 @@ kwl_scanout_start(
 /*
  * Stops the present thread at the end, after the display thread: a game
  * mode still shown is left first (its release runs here), then the
- * thread's present returns and the thread ends.
+ * thread's job returns and the thread ends.
  */
 void
 kwl_scanout_stop(
 	struct kwl_server *server)
 {
-	/* The game mode left; its release waits for the present running. */
+	/* The game mode left; its release waits for the job running. */
 	if (server->scanout != NULL)
 		kwl_scanout_leave(server, KWL_SCANOUT_NO_WINDOW);
 
@@ -274,47 +323,39 @@ kwl_scanout_take(
 	if (!scanout_started)
 		return;
 
-	/* Each present that has returned. */
+	/* Each job that has returned. */
 	(void)kwl_lane_take(&scanout_lane, server);
 }
 
 /*
- * Waits until the present thread has no present given or running: the
- * display thread, before it releases the display (whose buffer the
- * present shows until it returns).
+ * Waits until the present thread has no job given or running: the display
+ * thread, before it destroys the game chain (whose images the present
+ * thread's job uses until it returns).
  */
 void
 kwl_scanout_present_wait(void)
 {
-	/* Every present given has returned. */
+	/* Every job given has returned. */
 	kwl_lane_wait(&scanout_lane);
 }
 
 /*
- * Lets go of a client's images still held by a release of the display
- * that is not done yet, as the client goes (its buffers are freed after).
+ * Lets go of a client's buffers still held by the game chain or by one
+ * whose release is not done yet, as the client goes (its buffers are freed
+ * after).
  */
 void
 kwl_scanout_client_gone(
 	struct kwl_server *server,
 	struct kwl_client *client)
 {
-	struct scanout_closing *closing;
+	struct kwl_game_chain *chain;
 
-	/* Each release waiting, the client's images in it. */
-	(void)server;
-	for (closing = scanout_closings; closing != NULL; closing = closing->next) {
-		if (closing->front != NULL && closing->front->client == client) {
-			kwl_buffer_put(closing->front);
-			closing->front = NULL;
-		}
-
-		/* Lets go of the flight image of the client likewise. */
-		if (closing->flight != NULL && closing->flight->client == client) {
-			kwl_buffer_put(closing->flight);
-			closing->flight = NULL;
-		}
-	}
+	/* The chain lent now, and each one being released. */
+	if (server->scanout != NULL)
+		scanout_let_go(server->scanout, client);
+	for (chain = scanout_closings; chain != NULL; chain = chain->next_closing)
+		scanout_let_go(chain, client);
 }
 
 /*
@@ -330,22 +371,132 @@ kwl_scanout_surface_gone(
 	if (server->scanout != NULL && server->scanout_surface == surface)
 		kwl_scanout_leave(server, KWL_SCANOUT_NO_WINDOW);
 
-	/* A window being entered, a window the display refused, and the last one logged. */
+	/* A window being entered, a window the display refused, and the last ones logged. */
 	if (server->scanout_entering == surface)
 		server->scanout_entering = NULL;
 	if (server->scanout_refused == surface)
 		server->scanout_refused = NULL;
 	if (server->scanout_noted == surface)
 		server->scanout_noted = NULL;
+	if (scanout_lend_noted == surface)
+		scanout_lend_noted = NULL;
+}
+
+/*
+ * Takes a client's tag: a buffer it made holds lent image index of the
+ * lend serial (game.c checked that it is a live GPU buffer of the client).
+ * The buffer is the image's from now: when the present thread has the
+ * image (the client's to draw into) the buffer goes back to the client at
+ * once; otherwise the game mode holds it until the display gives the image
+ * back.  A tag of another lend, of an image tagged already, or of a buffer
+ * of another size is passed over.
+ */
+void
+kwl_scanout_tag(
+	struct kwl_server *server,
+	struct kwl_object *game,
+	struct kwl_object *buffer,
+	uint32_t serial,
+	uint32_t index)
+{
+	struct kwl_game_chain *chain;
+	uint32_t width;
+	uint32_t height;
+
+	/* The lend now, of the window shown, and an image of it not tagged before. */
+	chain = server->scanout;
+	if (chain == NULL || serial != chain->serial || game->surface != server->scanout_surface)
+		return;
+	if (index >= chain->output.image_count || chain->buffers[index] != NULL || buffer->lend_chain != NULL)
+		return;
+
+	/* A buffer of the image's size. */
+	kwl_buffer_size(buffer, &width, &height);
+	if (width != chain->output.width || height != chain->output.height) {
+		printf("KWL SCANOUT tag refused buffer=%ux%u image=%ux%u\n", width, height, chain->output.width, chain->output.height);
+		return;
+	}
+
+	/* The buffer holds the image; a release of it reaches the client (it counts as committed). */
+	chain->buffers[index] = buffer;
+	buffer->lend_chain = chain;
+	buffer->lend_index = index;
+	buffer->busy = 1;
+	kwl_buffer_get(buffer);
+
+	/* Logged for the lend's first frame only. */
+	if (chain->shown == 0U)
+		printf("KWL SCANOUT tag index=%u state=%u buffer=%u\n", index, (unsigned)chain->state[index], buffer->id);
+
+	/* The client's image now goes back to it; one the swapchain has stays held until it comes back. */
+	if (chain->state[index] == KWL_GAME_FREE) {
+		kwl_buffer_put(buffer);
+		return;
+	}
+
+	/* Succeeded: held for the swapchain. */
+	chain->held[index] = 1U;
+}
+
+/*
+ * Takes a client's refusal of the lend serial: the window is composed
+ * until it goes or asks again.
+ */
+void
+kwl_scanout_decline(
+	struct kwl_server *server,
+	struct kwl_object *game,
+	uint32_t serial)
+{
+	struct kwl_game_chain *chain;
+	struct kwl_object *top;
+
+	/* The lend now, of the window shown. */
+	chain = server->scanout;
+	if (chain == NULL || serial != chain->serial || game->surface != server->scanout_surface)
+		return;
+
+	/* Logged, then window mode. */
+	top = server->scanout_surface;
+	printf("KWL SCANOUT lend refused why=declined surface=%u\n", top->id);
+	server->scanout_refused = top;
+	kwl_scanout_leave(server, KWL_SCANOUT_REFUSED);
+}
+
+/*
+ * Forgets a buffer that is freed: the game chain that lent its image no
+ * longer names it (the game mode held it no longer, or it would not be
+ * freed).
+ */
+void
+kwl_scanout_buffer_gone(
+	struct kwl_object *buffer)
+{
+	struct kwl_game_chain *chain;
+	uint32_t index;
+
+	/* A buffer of no lent image. */
+	chain = buffer->lend_chain;
+	if (chain == NULL)
+		return;
+
+	/* The chain's image no longer has a buffer. */
+	index = buffer->lend_index;
+	if (index < KWL_GAME_IMAGES && chain->buffers[index] == buffer) {
+		chain->buffers[index] = NULL;
+		chain->held[index] = 0U;
+	}
+
+	/* Succeeded: forgotten. */
+	buffer->lend_chain = NULL;
 }
 
 /*
  * Tells whether the cursor is left out because a game fills the output:
  * the top window is a fullscreen one that says it shows a game, and
  * nothing is drawn over it.  Neither the cursor plane nor the composed
- * frame shows the cursor then, whether the display shows the game
- * straight or the compositor composes it, on every backend.  Returns 1
- * or 0.
+ * frame shows the cursor then, whether the client draws into the display's
+ * images or the compositor composes it, on every backend.  Returns 1 or 0.
  */
 int
 kwl_scanout_cursor_hidden(
@@ -419,6 +570,65 @@ scanout_facts(
 }
 
 /*
+ * Tells the format the game chain is made in for a window whose chain can
+ * draw into the display's images, or VK_FORMAT_UNDEFINED: the window has a
+ * game object, its chain (as the client last told) has the display's mode,
+ * uses an image the display shows has, an image count the game chain can
+ * add the display's two to, and a four-byte format whose channel order the
+ * display shows in UNORM (the client's format reads the same bytes); the
+ * display's chain has not shown that it cannot lend.  A refusal is logged
+ * once for each new reason of the window.
+ */
+static VkFormat
+scanout_lendable(
+	struct kwl_server *server,
+	struct kwl_object *top)
+{
+	struct kwl_object *game;
+	const char *why;
+	VkFormat format;
+
+	/* The window's game object, and the display's chain able to lend at all. */
+	game = top->game_object;
+	format = VK_FORMAT_UNDEFINED;
+	why = NULL;
+	if (game == NULL) {
+		why = "no-game-object";
+	} else if (!server->compose->lendable || server->scanout_unlendable) {
+		why = "display";
+	} else if (game->game_count == 0U || game->game_count + 2U > KWL_GAME_IMAGES) {
+		why = "count";
+	} else if (game->game_width != server->compose->mode_width || game->game_height != server->compose->mode_height) {
+		why = "size";
+	} else if ((game->game_usage & ~(uint32_t)SCANOUT_USAGE) != 0U) {
+		why = "usage";
+	} else if (game->game_format == (uint32_t)VK_FORMAT_B8G8R8A8_UNORM ||
+		   game->game_format == (uint32_t)VK_FORMAT_B8G8R8A8_SRGB) {
+		/* The display shows BGRA bytes as they are. */
+		format = VK_FORMAT_B8G8R8A8_UNORM;
+	} else if (game->game_format == (uint32_t)VK_FORMAT_R8G8B8A8_UNORM ||
+		   game->game_format == (uint32_t)VK_FORMAT_R8G8B8A8_SRGB) {
+		/* The display shows RGBA bytes as they are. */
+		format = VK_FORMAT_R8G8B8A8_UNORM;
+	} else {
+		why = "format";
+	}
+
+	/* A refusal, logged once for each new reason of the window. */
+	if (format == VK_FORMAT_UNDEFINED) {
+		if (scanout_lend_noted != top || scanout_lend_why != why) {
+			scanout_lend_noted = top;
+			scanout_lend_why = why;
+			printf("KWL SCANOUT lend refused why=%s surface=%u\n", why, top->id);
+		}
+		return VK_FORMAT_UNDEFINED;
+	}
+
+	/* Succeeded: the game chain's format. */
+	return format;
+}
+
+/*
  * Tells whether anything is drawn over a fullscreen window: the edges'
  * gestures and what they show (App Home, Wiseview, the keyboard, the
  * corner's hint), the switcher, a menu, the network's and the volume's
@@ -488,71 +698,19 @@ scanout_overlay(
 }
 
 /*
- * Enters the game mode for a window: the display thread asks
- * the backend first, without claiming, whether the display can show it
- * straight; scanout_answered goes on with the answer.
+ * Enters the game mode for a window: window mode's swapchain closes in a
+ * change of the display (scanout_parked), then the game chain is made.
  */
 static void
 scanout_enter(
 	struct kwl_server *server,
 	struct kwl_object *top)
 {
-	/* The question, for the display's mode (the physical size). */
+	int error;
+
+	/* The change; one running already is waited for by a later pass. */
 	server->scanout_entering = top;
 	server->scanout_entering_ms = kwl_milliseconds();
-	(void)kwl_display_scanout_query(server, server->compose->mode_width, server->compose->mode_height, scanout_answered, NULL);
-}
-
-/*
- * Goes on entering the game mode with the backend's answer: a display that
- * cannot show the window straight (the Raspberry Pi 4's, Linux, FreeBSD)
- * keeps the output open, as closing and opening it again for nothing
- * stopped the Pi 4's firmware video decoder (ws236-p011).  One that can
- * closes the swapchain in a change of the display (libvulkan gives the
- * display back), if the window is still to be shown straight.
- */
-static void
-scanout_answered(
-	struct kwl_server *server,
-	int error,
-	void *context)
-{
-	struct kwl_scanout_facts facts;
-	struct kwl_object *current;
-	struct kwl_object *top;
-	unsigned reason;
-
-	/* The window went meanwhile. */
-	(void)context;
-	top = server->scanout_entering;
-	if (top == NULL)
-		return;
-
-	/* Refused: the window stays composed until it goes or asks again. */
-	if (error != 0) {
-		server->scanout_entering = NULL;
-		server->scanout_refused = top;
-		server->dirty = 1;
-		printf("KWL SCANOUT direct=0 reason=backend errno=%d surface=%u client=%llu output=kept\n", error, top->id, (unsigned long long)top->client->number);
-		return;
-	}
-
-	/* The facts as they are now: a window no longer to be shown straight stays composed. */
-	scanout_facts(server, top, &facts);
-	reason = kwl_scanout_decide(&facts);
-	if (reason != KWL_SCANOUT_DIRECT) {
-		server->scanout_entering = NULL;
-		return;
-	}
-
-	/* A window that is no longer the top one stays composed too. */
-	current = kwl_top_window(server);
-	if (top != current) {
-		server->scanout_entering = NULL;
-		return;
-	}
-
-	/* The swapchain goes in a change of the display; one running already is waited for by a later pass. */
 	error = kwl_display_begin(server, scanout_parked, NULL);
 	if (error != 0)
 		server->scanout_entering = NULL;
@@ -571,10 +729,10 @@ scanout_parked(
 }
 
 /*
- * Entering the game mode, the swapchain closed: the display thread has the
- * backend claim the display for its mode (the physical size).  A
- * window gone meanwhile leaves window mode to open the swapchain again at
- * the next pass.
+ * Entering the game mode, the swapchain closed: the display thread makes
+ * the game chain for the window's chain (scanout_claimed).  A window gone
+ * meanwhile, or one whose chain no longer fits, leaves window mode to open
+ * the swapchain again at the next pass.
  */
 static void
 scanout_closed(
@@ -582,24 +740,48 @@ scanout_closed(
 	int error,
 	void *context)
 {
-	/* Window mode opens again from the next pass unless the claim holds. */
+	struct kwl_game_chain *chain;
+	struct kwl_object *top;
+	VkFormat format;
+	uint32_t index;
+
+	/* Window mode opens again from the next pass unless the game chain holds. */
 	(void)error;
 	(void)context;
 	server->windowed = 0;
-	if (server->scanout_entering == NULL) {
+	top = server->scanout_entering;
+	format = VK_FORMAT_UNDEFINED;
+	if (top != NULL)
+		format = scanout_lendable(server, top);
+	if (format == VK_FORMAT_UNDEFINED) {
+		server->scanout_entering = NULL;
 		kwl_display_end(server);
 		return;
 	}
 
-	/* The claim, taken in by scanout_claimed. */
-	kwl_display_scanout_open(server, server->compose->mode_width, server->compose->mode_height, &server->scanout, scanout_claimed, NULL);
+	/* The record, which the display thread fills. */
+	chain = calloc(1, sizeof(*chain));
+	if (chain == NULL) {
+		server->scanout_entering = NULL;
+		kwl_display_end(server);
+		return;
+	}
+	chain->output.format = format;
+	chain->wanted = top->game_object->game_count;
+	chain->flight = -1;
+	for (index = 0U; index < KWL_GAME_IMAGES; index++)
+		chain->fds[index] = -1;
+
+	/* The game chain, taken in by scanout_claimed. */
+	kwl_display_scanout_open(server, chain, scanout_claimed, chain);
 }
 
 /*
- * Entering the game mode, the display claimed (or not): the window is
- * shown straight from the next pass, and the change ends.  A claim's
- * failure leaves the window composed; a window gone meanwhile gives the
- * claim back.
+ * Entering the game mode, the game chain made (or not): the lend is sent
+ * and the present thread acquires the images the client may draw into
+ * first; the change ends.  A failure leaves the window composed (a display
+ * whose chain cannot lend its images is not tried again); a window gone
+ * meanwhile gives the chain back.
  */
 static void
 scanout_claimed(
@@ -607,27 +789,31 @@ scanout_claimed(
 	int error,
 	void *context)
 {
-	struct kl_backend_scanout *scanout;
+	struct kwl_game_chain *chain;
 	struct kwl_object *top;
 
-	/* The window being entered, if it is still there. */
-	(void)context;
+	/* The window being entered, if it is still there with its game object. */
+	chain = context;
 	top = server->scanout_entering;
 	server->scanout_entering = NULL;
+	if (top != NULL && top->game_object == NULL)
+		top = NULL;
 
-	/* Gone meanwhile: the claim goes back on the display thread, before window mode's open. */
+	/* Gone meanwhile: the chain goes back on the display thread, before window mode's open. */
 	if (top == NULL) {
-		scanout = server->scanout;
-		server->scanout = NULL;
-		if (scanout != NULL)
-			scanout_release(server, scanout, NULL, NULL);
+		if (error == 0)
+			scanout_release(server, chain);
+		else
+			free(chain);
 		kwl_display_end(server);
 		return;
 	}
 
-	/* Refused. */
+	/* Refused: the window stays composed until it goes or asks again. */
 	if (error != 0) {
-		server->scanout = NULL;
+		free(chain);
+		if (error == ENOTSUP)
+			server->scanout_unlendable = 1U;
 		server->scanout_refused = top;
 		server->dirty = 1;
 		printf("KWL SCANOUT direct=0 reason=backend errno=%d surface=%u client=%llu\n", error, top->id, (unsigned long long)top->client->number);
@@ -635,128 +821,330 @@ scanout_claimed(
 		return;
 	}
 
-	/* Succeeded: the window is shown straight from the next pass. */
+	/* The client draws into the chain's images from the next pass. */
+	server->scanout = chain;
 	server->scanout_claim++;
 	server->scanout_surface = top;
 	server->scanout_frames = 0U;
 	server->scanout_noted = NULL;
-	printf("KWL SCANOUT direct=1 surface=%u client=%llu switch_ms=%llu\n", top->id, (unsigned long long)top->client->number, (unsigned long long)(kwl_milliseconds() - server->scanout_entering_ms));
+	printf(
+	    "KWL SCANOUT direct=1 surface=%u client=%llu switch_ms=%llu images=%u format=%d\n",
+	    top->id,
+	    (unsigned long long)top->client->number,
+	    (unsigned long long)(kwl_milliseconds() - server->scanout_entering_ms),
+	    chain->output.image_count,
+	    (int)chain->output.format);
+
+	/* The lend, and the images the client may draw into first. */
+	scanout_lend(chain, top);
+	scanout_submit(server, 0U, 0U);
+
+	/* Succeeded: the change ends. */
 	kwl_display_end(server);
 }
 
+/* Sends the window's game object the chain's images and the lend. */
+static void
+scanout_lend(
+	struct kwl_game_chain *chain,
+	struct kwl_object *top)
+{
+	struct kwl_object *game;
+	uint32_t index;
+	int fd;
+	int error;
+
+	/* The lend's serial, never zero. */
+	scanout_serial++;
+	if (scanout_serial == 0U)
+		scanout_serial = 1U;
+	chain->serial = scanout_serial;
+	chain->lent_ms = kwl_milliseconds();
+
+	/* Each image's fd goes to the client (a send that fails retires the client, whose window then goes). */
+	game = top->game_object;
+	for (index = 0U; index < chain->output.image_count; index++) {
+		fd = chain->fds[index];
+		chain->fds[index] = -1;
+		error = kwl_game_send_image(game, chain->serial, index, fd);
+		if (error != 0)
+			return;
+	}
+
+	/* The lend: the count, the display's mode, the format, the uses; the layout is in each image's own description. */
+	(void)kwl_game_send_lend(
+		game,
+		chain->serial,
+		chain->output.image_count,
+		chain->output.width,
+		chain->output.height,
+		(uint32_t)chain->output.format,
+		(uint32_t)chain->usage,
+		0U);
+}
+
 /*
- * Shows a window's new image straight: its present begun, unless one is in
- * flight (its end shows the newest image next).  A present that cannot
- * begin leaves the game mode.
+ * Shows a window's new image: a lent buffer's image is presented, unless
+ * one is in flight (its end presents the newest image next).  The client's
+ * own image before it draws into the lent ones is not shown; its frame
+ * callbacks are done so that it draws on.  A client that has not drawn into
+ * a lent image within SCANOUT_ADOPT_MS is composed.
  */
 static void
 scanout_frame(
 	struct kwl_server *server,
 	struct kwl_object *top)
 {
-	struct scanout_present *present;
+	struct kwl_game_chain *chain;
 	struct kwl_object *buffer;
-	int error;
+	uint32_t index;
+	uint64_t now;
 
 	/* Input goes to the window shown. */
 	server->front_surface = kwl_desktop_front(server, top);
 	kwl_seat_focus(server);
 
-	/* One present at a time. */
-	if (server->scanout_flight != NULL)
+	/* A client that has not taken the lend in time is composed. */
+	chain = server->scanout;
+	now = kwl_milliseconds();
+	if (chain->shown == 0U && chain->flight < 0 && now - chain->lent_ms > SCANOUT_ADOPT_MS) {
+		printf("KWL SCANOUT lend refused why=not-taken surface=%u ms=%llu\n", top->id, (unsigned long long)(now - chain->lent_ms));
+		server->scanout_refused = top;
+		kwl_scanout_leave(server, KWL_SCANOUT_REFUSED);
 		return;
+	}
 
-	/* Only a new image is presented. */
+	/* Only a new image. */
 	buffer = top->current;
-	if (buffer == NULL || (buffer == server->scanout_front && !top->fresh))
+	if (buffer == NULL || !top->fresh)
 		return;
 
-	/* The image readied by the backend; a failure is the backend's refusal from now. */
-	error = kl_backend_scanout_begin(server->scanout, kwl_gpu_host(), kwl_gpu_resource(buffer));
-	if (error != 0) {
-		scanout_refuse(server, top, error);
-		return;
-	}
-
-	/* The present, for the present thread. */
-	present = calloc(1, sizeof(*present));
-	if (present == NULL) {
-		scanout_refuse(server, top, ENOMEM);
+	/* The client's own image: not shown, and its frame callbacks done so that it goes on. */
+	if (buffer->lend_chain != chain) {
+		top->fresh = 0;
+		server->dirty = 0;
+		server->damaged = 0;
+		scanout_callbacks(server, top);
 		return;
 	}
 
-	/* The present carries the scanout and the claim it began on, and is handed to the thread. */
-	present->scanout = server->scanout;
-	present->claim = server->scanout_claim;
-	kwl_lane_submit(&scanout_lane, &present->lane, &scanout_present_ops, 0U);
+	/* One present at a time: the newest image goes when the present in flight has returned. */
+	if (chain->flight >= 0)
+		return;
 
-	/* The present holds the image until it has ended. */
+	/* A lent image the client was given; any other commit of it shows nothing new. */
+	index = buffer->lend_index;
+	if (chain->state[index] != KWL_GAME_FREE) {
+		top->fresh = 0;
+		return;
+	}
+
+	/* The present holds the image (for the swapchain) until the display gives it back. */
+	chain->state[index] = KWL_GAME_PRESENTING;
 	kwl_buffer_get(buffer);
-	server->scanout_flight = buffer;
+	chain->held[index] = 1U;
+	chain->flight = (int)index;
+	scanout_submit(server, 1U, index);
 	top->fresh = 0;
 	server->dirty = 0;
 	server->damaged = 0;
 }
 
-/* Makes a present on the present thread: it returns once the display reads the image. */
+/*
+ * Gives the present thread a job of the game chain shown: an image to
+ * present first (present, index), then the images the display gives back.
+ * Without memory for the job the game mode is left.
+ */
+static void
+scanout_submit(
+	struct kwl_server *server,
+	unsigned present,
+	uint32_t index)
+{
+	struct scanout_present *job;
+
+	/* The job. */
+	job = calloc(1, sizeof(*job));
+	if (job == NULL) {
+		scanout_refuse(server, server->scanout_surface, ENOMEM);
+		return;
+	}
+
+	/* The job carries the chain and the claim it began on, and is handed to the thread. */
+	job->present = present;
+	if (present && server->scanout->shown != 0U)
+		job->wait = 1U;
+	job->compose = server->compose;
+	job->chain = server->scanout;
+	job->claim = server->scanout_claim;
+	job->index = index;
+	job->result = VK_SUCCESS;
+	kwl_lane_submit(&scanout_lane, &job->lane, &scanout_present_ops, 0U);
+}
+
+/*
+ * Runs a job on the present thread: the present of an image (under the
+ * queue's lock), then the images the display gives back -- after a
+ * present, the first is waited for (the image shown before leaves the
+ * screen), then any others that are back already.
+ */
 static void
 scanout_present_run(
 	struct kwl_lane_job *lane)
 {
-	struct scanout_present *present;
+	struct scanout_present *job;
+	struct kwl_game_chain *chain;
+	VkPresentInfoKHR info;
+	VkResult result;
+	uint64_t timeout;
+	uint32_t taken;
+	uint32_t index;
 
-	/* The backend's present of the image readied. */
-	present = (struct scanout_present *)lane;
-	present->result = kl_backend_scanout_present(present->scanout);
+	/* The present, when the job has one. */
+	job = (struct scanout_present *)lane;
+	chain = job->chain;
+	timeout = 0U;
+	if (job->present) {
+		memset(&info, 0, sizeof(info));
+		info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		info.swapchainCount = 1U;
+		info.pSwapchains = &chain->output.swapchain;
+		info.pImageIndices = &job->index;
+		kwl_queue_lock(job->compose);
+
+		result = vkQueuePresentKHR(job->compose->queue, &info);
+
+		kwl_queue_unlock(job->compose);
+
+		/* A failed present acquires nothing more. */
+		job->result = result;
+		if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+			return;
+	}
+
+	/* The image shown before comes back once the display shows this one. */
+	if (job->wait)
+		timeout = SCANOUT_ACQUIRE_NS;
+
+	/* The images the display gives back: the first waited for after a present, then the ones back already. */
+	result = VK_SUCCESS;
+	for (taken = 0U; taken < chain->output.image_count; taken++) {
+		result = scanout_acquire(job->compose, chain, timeout, &index);
+		if (result != VK_SUCCESS)
+			break;
+		job->acquired |= 1U << index;
+		timeout = 0U;
+	}
+
+	/* None back is no failure; an error is. */
+	if (result < VK_SUCCESS)
+		job->result = result;
 }
 
 /*
- * Takes a present that has returned, on the event loop's thread: the
- * display holds its image, the one it replaces is let go and the frame
- * callbacks are done (the next pass shows a newer image).  A present that
- * failed leaves the game mode; one of a game mode left meanwhile is only
- * freed (its images went with the release).
+ * Acquires an image of the game chain within a timeout and waits until the
+ * display has let go of it (the acquire's fence).  Returns VK_SUCCESS with
+ * its index, VK_NOT_READY or VK_TIMEOUT when none came back, or an error
+ * (an image acquired whose fence did not come is VK_ERROR_DEVICE_LOST).
+ */
+static VkResult
+scanout_acquire(
+	struct kwl_compose *compose,
+	struct kwl_game_chain *chain,
+	uint64_t timeout,
+	uint32_t *index)
+{
+	VkResult result;
+
+	/* The fence, unsignaled, for this acquire. */
+	result = vkResetFences(compose->device, 1U, &chain->acquired);
+	if (result != VK_SUCCESS)
+		return result;
+
+	/* An image the swapchain gives back, if one comes in time. */
+	result = vkAcquireNextImageKHR(compose->device, chain->output.swapchain, timeout, VK_NULL_HANDLE, chain->acquired, index);
+	if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+		return result;
+
+	/* The display has let go of it once the fence is signaled. */
+	result = vkWaitForFences(compose->device, 1U, &chain->acquired, VK_TRUE, SCANOUT_FENCE_NS);
+	if (result != VK_SUCCESS)
+		return VK_ERROR_DEVICE_LOST;
+
+	/* Succeeded: the image is the client's to draw into. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Takes a job that has returned, on the event loop's thread: the image
+ * presented is the swapchain's (held until it comes back), each image the
+ * display gave back is the client's (its buffer released when nothing else
+ * holds it), and a present's frame callbacks are done (the next pass shows
+ * a newer image).  A failure leaves the game mode; a job of a game mode
+ * left meanwhile is only freed (its buffers went with the release).
  */
 static void
 scanout_present_done(
 	void *context,
 	struct kwl_lane_job *lane)
 {
-	struct scanout_present *present;
+	struct scanout_present *job;
+	struct kwl_game_chain *chain;
+	struct kwl_object *buffer;
 	struct kwl_server *server;
-	struct kwl_object *previous;
-	int result;
+	uint32_t index;
 
-	/* Its result, and the job freed. */
+	/* A job of the game chain shown now, else only freed. */
 	server = context;
-	present = (struct scanout_present *)lane;
-	result = present->result;
-	if (server->scanout == NULL || present->claim != server->scanout_claim || server->scanout_flight == NULL) {
-		free(present);
+	job = (struct scanout_present *)lane;
+	chain = server->scanout;
+	if (chain == NULL || job->chain != chain || job->claim != server->scanout_claim) {
+		free(job);
 		return;
 	}
 
-	/* The result is read, so the job is freed. */
-	free(present);
+	/* The image presented is the swapchain's again (still held). */
+	if (job->present) {
+		chain->state[job->index] = KWL_GAME_CHAIN;
+		chain->flight = -1;
+	}
 
-	/* A failure is the backend's refusal from now. */
-	if (result != 0) {
-		scanout_refuse(server, server->scanout_surface, result);
+	/* The lend's first images, logged once. */
+	if (!job->present)
+		printf("KWL SCANOUT lend images=0x%x result=%d serial=%u\n", job->acquired, (int)job->result, chain->serial);
+
+	/* A failure is the display's refusal from now. */
+	if (job->result != VK_SUCCESS && job->result != VK_SUBOPTIMAL_KHR) {
+		printf("KWL SCANOUT game chain step=%s result=%d\n", job->present ? "present" : "acquire", (int)job->result);
+		free(job);
+		scanout_refuse(server, server->scanout_surface, EIO);
 		return;
 	}
 
-	/* The display holds the image; the one it replaces is let go. */
-	previous = server->scanout_front;
-	server->scanout_front = server->scanout_flight;
-	server->scanout_flight = NULL;
-	kwl_buffer_put(previous);
-	server->scanout_frames++;
+	/* Each image given back is the client's; its buffer goes back unless the surface still holds it. */
+	for (index = 0U; index < chain->output.image_count; index++) {
+		if ((job->acquired & (1U << index)) == 0U)
+			continue;
+		chain->state[index] = KWL_GAME_FREE;
+		buffer = chain->buffers[index];
+		if (chain->held[index] && buffer != NULL) {
+			chain->held[index] = 0U;
+			kwl_buffer_put(buffer);
+		}
+	}
 
-	/* The window draws its next frame; the hidden windows are not kept waiting. */
-	scanout_callbacks(server, server->scanout_surface);
+	/* A present's frame: counted, and the windows draw their next one (the hidden ones are not kept waiting). */
+	if (job->present) {
+		chain->shown++;
+		server->scanout_frames++;
+		scanout_callbacks(server, server->scanout_surface);
+	}
+
+	/* Succeeded: the job is done. */
+	free(job);
 }
 
-/* Frees a present not taken (the thread stopped, at the end). */
+/* Frees a job not taken (the thread stopped, at the end). */
 static void
 scanout_present_drop(
 	struct kwl_lane_job *lane)
@@ -766,63 +1154,80 @@ scanout_present_drop(
 }
 
 /*
- * Gives the display thread the release of a scanout, with the images the
- * display held (their holds are kept until it is done; without memory for
- * that they are let go at once).
+ * Gives the display thread the release of a game chain; the buffers it
+ * holds are let go when it is done.
  */
 static void
 scanout_release(
 	struct kwl_server *server,
-	struct kl_backend_scanout *scanout,
-	struct kwl_object *front,
-	struct kwl_object *flight)
+	struct kwl_game_chain *chain)
 {
-	struct scanout_closing *closing;
+	/* Among the releases waiting. */
+	chain->next_closing = scanout_closings;
+	scanout_closings = chain;
 
-	/* The images' record, among the releases waiting. */
-	closing = calloc(1, sizeof(*closing));
-	if (closing == NULL) {
-		kwl_buffer_put(front);
-		kwl_buffer_put(flight);
-	} else {
-		closing->front = front;
-		closing->flight = flight;
-		closing->next = scanout_closings;
-		scanout_closings = closing;
-	}
-
-	/* The release, on the display thread after the present running. */
-	kwl_display_scanout_close(server, scanout, scanout_released, closing);
+	/* The release, on the display thread after the job running. */
+	kwl_display_scanout_close(server, chain, scanout_released, chain);
 }
 
-/* Lets go of the images a release held, once the display is released. */
+/*
+ * Lets go of the buffers a game chain held, once the display thread has
+ * destroyed it: each goes back to its client unless something else holds
+ * it, and no buffer names the chain any more.
+ */
 static void
 scanout_released(
 	struct kwl_server *server,
 	int error,
 	void *context)
 {
-	struct scanout_closing *closing;
-	struct scanout_closing **link;
-
-	/* Nothing held (no memory for the record). */
-	(void)server;
-	(void)error;
-	closing = context;
-	if (closing == NULL)
-		return;
+	struct kwl_game_chain *chain;
+	struct kwl_game_chain **link;
 
 	/* Out of the releases waiting. */
+	(void)server;
+	(void)error;
+	chain = context;
 	link = &scanout_closings;
-	while (*link != NULL && *link != closing)
-		link = &(*link)->next;
-	if (*link == closing)
-		*link = closing->next;
+	while (*link != NULL && *link != chain)
+		link = &(*link)->next_closing;
+	if (*link == chain)
+		*link = chain->next_closing;
 
-	/* Succeeded: the images go back to their clients. */
-	kwl_buffer_put(closing->front);
-	kwl_buffer_put(closing->flight);
-	free(closing);
+	/* Succeeded: the buffers go back to their clients, and the record goes. */
+	scanout_let_go(chain, NULL);
+	free(chain);
+}
+
+/*
+ * Lets go of a game chain's buffers of one client (every client's for
+ * NULL): none names the chain any more, and those it held go back.
+ */
+static void
+scanout_let_go(
+	struct kwl_game_chain *chain,
+	struct kwl_client *client)
+{
+	struct kwl_object *buffer;
+	unsigned held;
+	uint32_t index;
+
+	/* Each image's buffer, if it is the client's. */
+	for (index = 0U; index < KWL_GAME_IMAGES; index++) {
+		buffer = chain->buffers[index];
+		if (buffer == NULL)
+			continue;
+		if (client != NULL && buffer->client != client)
+			continue;
+
+		/* Untied before its hold goes (which may free it). */
+		held = chain->held[index];
+		chain->buffers[index] = NULL;
+		chain->held[index] = 0U;
+		buffer->lend_chain = NULL;
+		if (held)
+			kwl_buffer_put(buffer);
+	}
 }
 
 /* Leaves the game mode because the display refused a window's image: the window stays composed until it goes or asks again. */

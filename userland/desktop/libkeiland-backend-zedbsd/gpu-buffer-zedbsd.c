@@ -27,7 +27,6 @@ static int factory_alpha(const struct kl_backend_protocol_host *host, struct kl_
 static int buffer_import(const struct kl_backend_protocol_host *host, struct kl_backend_resource *buffer, const struct kwl_buffer_layout *layout, int descriptor);
 static VkResult buffer_image(const struct kl_backend_gpu_device *device, const struct kwl_buffer_layout *image, int descriptor, VkImage *created, VkDeviceMemory *memory);
 static void buffer_image_release(const struct kl_backend_gpu_device *device, VkImage *image, VkDeviceMemory *memory);
-static void buffer_keep(const struct kl_backend_protocol_host *host, struct kl_backend_resource *buffer, const struct kwl_buffer_layout *layout, const unsigned char *description, size_t size, int descriptor);
 
 /*
  * Names the zedBSD GPU buffer global.
@@ -148,10 +147,6 @@ kl_backend_gpu_request(
 	if (error == 0)
 		error = buffer_import(host, buffer, &layout, descriptor);
 
-	/* The direct scanout's copy of the fd and the description (ws122-p005b); without it the buffer is only composed. */
-	if (error == 0)
-		buffer_keep(host, buffer, &layout, bytes + 8U, length, descriptor);
-
 	/* Closes the request-owned descriptor before reporting an import failure. */
 	close(descriptor);
 	if (error != 0) {
@@ -247,33 +242,17 @@ kl_backend_gpu_bind(
 }
 
 /*
- * Retires a buffer's record (the direct scanout's copy of its fd and its
- * scanout handle); the image itself is the compositor's.
+ * Retires a buffer's backend state: zedBSD keeps none beside the
+ * compositor's image.
  */
 void
 kl_backend_gpu_resource_free(
 	const struct kl_backend_protocol_host *host,
 	struct kl_backend_resource *resource)
 {
-	struct kwl_gpu_buffer_record *record;
-	unsigned role;
-	void **owned;
-
-	/* Only a buffer has a record. */
-	role = host->resource_role(resource);
-	if (role != KL_BACKEND_ROLE_BUFFER)
-		return;
-	owned = host->resource_private(resource);
-	if (owned == NULL || *owned == NULL)
-		return;
-
-	/* The scanout's handle, the fd and the record go. */
-	record = *owned;
-	*owned = NULL;
-	kwl_scanout_forget(record);
-	if (record->descriptor >= 0)
-		close(record->descriptor);
-	free(record);
+	/* Nothing of the buffer is the backend's. */
+	(void)host;
+	(void)resource;
 }
 
 /* Takes a surface's next acquire fence and its nonzero generation. */
@@ -421,46 +400,6 @@ buffer_import(
 	return 0;
 }
 
-/*
- * Keeps a buffer's record for the direct scanout: a duplicate of the
- * capability's fd and the description as sent.  A failure only leaves the
- * buffer without it (composed, never scanned out).
- */
-static void
-buffer_keep(
-	const struct kl_backend_protocol_host *host,
-	struct kl_backend_resource *buffer,
-	const struct kwl_buffer_layout *layout,
-	const unsigned char *description,
-	size_t size,
-	int descriptor)
-{
-	struct kwl_gpu_buffer_record *record;
-	void **owned;
-
-	/* The resource's place for the record, and a description that fits. */
-	owned = host->resource_private(buffer);
-	if (owned == NULL || *owned != NULL || size > KWL_GPU_DESCRIPTION_MAX)
-		return;
-
-	/* The record, with its own copy of the fd. */
-	record = calloc(1, sizeof(*record));
-	if (record == NULL)
-		return;
-	record->descriptor = dup(descriptor);
-	if (record->descriptor < 0) {
-		free(record);
-		return;
-	}
-
-	/* The description and the size, no handle yet. */
-	memcpy(record->description, description, size);
-	record->description_size = size;
-	record->width = layout->width;
-	record->height = layout->height;
-	*owned = record;
-}
-
 /* Creates a linear image and binds the imported fd as dedicated memory. */
 static VkResult
 buffer_image(
@@ -471,6 +410,7 @@ buffer_image(
 	VkDeviceMemory *memory)
 {
 	VkExternalMemoryImageCreateInfo external;
+	VkImageLayoutZEDBSD placed;
 	VkImageCreateInfo create;
 	VkMemoryRequirements requirements;
 	VkImageSubresource subresource;
@@ -493,7 +433,15 @@ buffer_image(
 	external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
 	external.handleTypes = kwl_gpu_buffer_handle_type();
 
-	/* Describe the linear image whose dedicated allocation is imported. */
+	/* An image of another layout than linear rows is placed as its maker placed it (libvulkan's record). */
+	memset(&placed, 0, sizeof(placed));
+	placed.sType = VK_STRUCTURE_TYPE_IMAGE_LAYOUT_ZEDBSD;
+	placed.tiling = image->tiling;
+	placed.parameter = image->parameter;
+	if (!image->linear)
+		external.pNext = &placed;
+
+	/* Describe the image whose dedicated allocation is imported. */
 	memset(&create, 0, sizeof(create));
 	create.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	create.pNext = &external;
@@ -507,6 +455,10 @@ buffer_image(
 	create.samples = VK_SAMPLE_COUNT_1_BIT;
 	create.tiling = VK_IMAGE_TILING_LINEAR;
 	create.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+	if (!image->linear) {
+		create.tiling = VK_IMAGE_TILING_OPTIMAL;
+		create.usage = image->usage;
+	}
 	create.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	create.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -525,12 +477,15 @@ buffer_image(
 	memset(&subresource, 0, sizeof(subresource));
 	subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-	/* Queries the image layout and refuses a mismatched client allocation. */
-	vkGetImageSubresourceLayout(device->device, *created, &subresource, &layout);
+	/* Queries a linear image's rows (an optimal image has none to ask) and refuses a mismatched client allocation. */
+	memset(&layout, 0, sizeof(layout));
+	if (image->linear)
+		vkGetImageSubresourceLayout(device->device, *created, &subresource, &layout);
 	if ((requirements.memoryTypeBits & (1U << image->memory_type)) == 0U ||
 	    requirements.size > image->allocation_bytes ||
-	    layout.offset != image->offset ||
-	    layout.rowPitch != image->stride) {
+	    (image->linear &&
+	     (layout.offset != image->offset ||
+	      layout.rowPitch != image->stride))) {
 		printf("KWL VULKAN_IMPORT_LAYOUT types=0x%x type=%u size=%llu bytes=%llu offset=%llu/%llu pitch=%llu/%u\n",
 		       requirements.memoryTypeBits,
 		       image->memory_type,

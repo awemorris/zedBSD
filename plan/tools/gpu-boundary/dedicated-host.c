@@ -12,7 +12,9 @@
  * the kernel's description exactly, and refuse a description that differs in
  * any one field a client could claim: size, pixel format, stride, offset,
  * allocation size, tiling, usage; and an image or memory request that differs
- * from the description.
+ * from the description.  An image of another layout than linear rows (NVIDIA
+ * block linear here) is read by an optimal image placed by its layout record
+ * in exactly that layout and with exactly the described uses.
  */
 
 #include "internal.h"
@@ -32,6 +34,7 @@ struct dedicated_case {
 };
 
 static void dedicated_base(struct dedicated_case *item, const char *name, int accept);
+static void dedicated_tiled(struct dedicated_case *item, const char *name, int accept);
 static int dedicated_run(const struct dedicated_case *item);
 
 /*
@@ -136,6 +139,52 @@ main(
 	item.layout.rowPitch = 2560U;
 	failures += dedicated_run(&item);
 
+	/* A linear capability read by an image that names another layout. */
+	dedicated_base(&item, "linear-with-record", 0);
+	item.image.layout_tiling = GPU_IMAGE_NV_BLOCK_LINEAR;
+	failures += dedicated_run(&item);
+
+	/* A block-linear capability read by an optimal image placed in that layout with its uses (no rows to ask). */
+	dedicated_tiled(&item, "tiled-exact", 1);
+	failures += dedicated_run(&item);
+
+	/* The same, read as sRGB. */
+	dedicated_tiled(&item, "tiled-srgb-reading", 1);
+	item.image.format = VK_FORMAT_B8G8R8A8_SRGB;
+	failures += dedicated_run(&item);
+
+	/* An optimal image that names no layout. */
+	dedicated_tiled(&item, "tiled-no-record", 0);
+	item.image.layout_tiling = 0U;
+	item.image.layout_parameter = 0U;
+	failures += dedicated_run(&item);
+
+	/* Another block height. */
+	dedicated_tiled(&item, "tiled-parameter", 0);
+	item.image.layout_parameter = 3U;
+	failures += dedicated_run(&item);
+
+	/* Fewer uses than described (the placement depends on them). */
+	dedicated_tiled(&item, "tiled-usage", 0);
+	item.image.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+	failures += dedicated_run(&item);
+
+	/* A linear image of a block-linear capability. */
+	dedicated_tiled(&item, "tiled-linear-image", 0);
+	item.image.tiling = VK_IMAGE_TILING_LINEAR;
+	failures += dedicated_run(&item);
+
+	/* A block-linear capability that may not be sampled. */
+	dedicated_tiled(&item, "tiled-unsampled", 0);
+	item.described.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	item.image.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	failures += dedicated_run(&item);
+
+	/* An allocation smaller than the image's memory. */
+	dedicated_tiled(&item, "tiled-allocation-bytes", 0);
+	item.described.allocation_bytes = 4096U;
+	failures += dedicated_run(&item);
+
 	/* Reports the verdict. */
 	if (failures != 0) {
 		printf("dedicated-host: FAIL failures=%d\n", failures);
@@ -196,6 +245,36 @@ dedicated_base(
 	item->described.memory_type = 1U;
 	item->described.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 	item->described.tiling = GPU_IMAGE_LINEAR;
+
+	/* Succeeded: the case is an exact import. */
+	return;
+}
+
+/* Fills a case of an NVIDIA block-linear capability (block height 16 GOBs) and an optimal image placed in it. */
+static void
+dedicated_tiled(
+	struct dedicated_case *item,
+	const char *name,
+	int accept)
+{
+	/* The linear case's sizes and memory. */
+	dedicated_base(item, name, accept);
+
+	/* The kernel's description: 832-byte-aligned rows of blocks, 640 rows (600 rounded up to 128). */
+	item->described.tiling = GPU_IMAGE_NV_BLOCK_LINEAR;
+	item->described.layout_parameter = 4U;
+	item->described.stride = 3264U;
+	item->described.allocation_bytes = 3264U * 640U;
+	item->described.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+	/* The importer's optimal image with the layout record and the described uses; it has no rows. */
+	item->image.tiling = VK_IMAGE_TILING_OPTIMAL;
+	item->image.layout_tiling = GPU_IMAGE_NV_BLOCK_LINEAR;
+	item->image.layout_parameter = 4U;
+	item->image.usage = item->described.usage;
+	item->requirements.size = 3264U * 640U;
+	item->info.allocationSize = item->requirements.size;
+	memset(&item->layout, 0, sizeof(item->layout));
 
 	/* Succeeded: the case is an exact import. */
 	return;

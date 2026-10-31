@@ -40,9 +40,10 @@ kwl_gpu_buffer_wire_bytes(
  *
  * Nothing of the description reaches Vulkan before it is known to be an
  * image Vulkan can make: a nonzero size within the device's largest image,
- * one of the two four-channel formats in linear rows, rows of at least the
- * width that start inside and end inside the allocation, and a memory type
- * the device has.  Returns EINVAL for anything else.
+ * one of the two four-channel formats, rows of at least the width, an
+ * image that starts inside the allocation (and, in linear rows, ends inside
+ * it; another layout is sampled with exactly its described uses), and a
+ * memory type the device has.  Returns EINVAL for anything else.
  */
 int
 kwl_gpu_buffer_decode(
@@ -80,8 +81,8 @@ kwl_gpu_buffer_decode(
 	if (image.height == 0U || image.height > limits->max_dimension)
 		return EINVAL;
 
-	/* Only linear rows are shared. */
-	if (image.tiling != GPU_IMAGE_LINEAR)
+	/* A named layout (the kernel's description always names one). */
+	if (image.tiling == 0U)
 		return EINVAL;
 
 	/* One of the two four-channel formats, in its byte order. */
@@ -107,9 +108,19 @@ kwl_gpu_buffer_decode(
 	if (image.offset > UINT64_MAX - rows_bytes)
 		return EINVAL;
 
-	/* Refuses an image whose last pixel extends past the shared allocation. */
+	/*
+	 * A linear image's last pixel ends inside the allocation.  Another
+	 * layout's placement is its device's (the kernel checked it against the
+	 * allocation when the image went out); its start is inside here.
+	 */
 	end = image.offset + rows_bytes;
-	if (end > image.allocation_bytes)
+	if (image.tiling == GPU_IMAGE_LINEAR && end > image.allocation_bytes)
+		return EINVAL;
+	if (image.tiling != GPU_IMAGE_LINEAR && image.offset >= image.allocation_bytes)
+		return EINVAL;
+
+	/* An image of another layout is read with exactly its uses, sampling among them. */
+	if (image.tiling != GPU_IMAGE_LINEAR && (image.usage & VK_IMAGE_USAGE_SAMPLED_BIT) == 0U)
 		return EINVAL;
 
 	/* A memory type the device has. */
@@ -124,6 +135,12 @@ kwl_gpu_buffer_decode(
 	layout->offset = image.offset;
 	layout->allocation_bytes = image.allocation_bytes;
 	layout->memory_type = image.memory_type;
+	layout->linear = 0U;
+	if (image.tiling == GPU_IMAGE_LINEAR)
+		layout->linear = 1U;
+	layout->tiling = image.tiling;
+	layout->parameter = image.layout_parameter;
+	layout->usage = image.usage;
 
 	/* Succeeded: every value is one Vulkan can take. */
 	return 0;

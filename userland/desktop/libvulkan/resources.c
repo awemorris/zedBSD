@@ -11,6 +11,7 @@
 
 #include <string.h>
 #include "internal.h"
+#include <uapi/gpu.h>
 
 /* Retains only metadata needed to interpret active graphics and clear parameters. */
 struct vulkan_render_pass {
