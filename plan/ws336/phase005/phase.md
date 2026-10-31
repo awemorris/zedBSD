@@ -64,4 +64,27 @@ WS335 の待ち: p003 経由
 
 ## 結果
 
-（未着手）
+2026-11-01 07:08（host の `date`）。**中断**: ユーザーの host の再起動のため、Q1 の指示で実装だけ commit して止めた。この Phase は未完（試験は未作成・未実行）。
+
+### できたこと
+
+- `userland/base/ssh/ssh-key.c` を全関数書いた（骨格の置き換え。header は不変）。
+- 確かめたのは単独の compile だけ: `cc -std=c89 -Wall -Wextra -Werror -Wpedantic -D_DEFAULT_SOURCE -I. -Iuserland/base/ssh -Iplan/ws336/tests/host-crypto -c userland/base/ssh/ssh-key.c`（警告 0、出力なし）。
+
+### 未実施（次の担当が行う）
+
+1. `plan/ws336/tests/unit/test-key.c` を書く（上の「試験の項目」の全部。RFC 8032 TEST 1・2 の seed・公開鍵・署名を期待の値にし、`wire.h` で blob と鍵の file を組み、試験の中に独立の base64 を持つ。`check.h` を使い、最後の行は `test-key: PASS`）。
+2. `sh plan/ws336/tests/run-unit.sh key` と `all`、`BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh`、`git diff --check` を流して最後の行を読む。
+3. 実装を git の外で数通りに壊して試験が FAIL することを確かめ、`cmp` で戻す。
+4. coding-style §14 の見直し、表の値の「Values referenced:」comment（`private_magic` には付けた）の確認。
+5. この節の更新と ws.md の表のこの行を「実装済み・試験 PASS」にする。
+
+### 自分で決めた点（header が黙っている所）
+
+- blob の名前が空または 64 bytes 超は EINVAL（RFC 4251 6 の名前の長さ）、それ以外の別名は ENOTSUP。名前の後ろが壊れていても別名なら ENOTSUP。
+- `ssh_key_sign` で out に入らない時は、out に記録された error（EMSGSIZE・ENOMEM）をそのまま返し、何も足さない（先に 83 bytes を reserve）。header の列挙（0・EINVAL・EIO）に無い値を返す。
+- `ssh_key_put_public_line` の comment に CR・LF があれば out に EINVAL を記録して何も足さない（行の注入の防止）。
+- `ssh_key_parse_public_line`: 行頭の空白は読み飛ばす。末尾の空白・tab・CR は comment に含めない。NUL と LF が行の中にあれば EINVAL。blob の欄が 72 文字超は EINVAL。blob の中の型が別なら EINVAL（ENOTSUP を EINVAL に直す）。成功した時だけ `*key` を書く。
+- `ssh_key_parse_private`: BEGIN と END の間の空行は EINVAL、行の幅は 70 に限らない。先に `*key` を消し、失敗の道でも消す。cipher と kdf の確かめ（ENOTSUP）を kdfoptions の空の確かめ（EINVAL）より先に行うので、暗号化された正しい形の file は ENOTSUP になる。鍵の数が 1 でないのは ENOTSUP（0 も）。private section は長さが 8 の倍数で 0 でなく、padding は 8 bytes 未満で 1,2,3...。private section の鍵の型が blob と違えば EINVAL。comment に NUL があれば EINVAL、255 bytes に切る。
+- `ssh_key_put_private`: comment が配列の中で NUL で終わらなければ EINVAL。file 全体の長さを先に out に reserve する。
+- `ssh_key_fingerprint`: capacity が 51 未満は ENOBUFS（out を書かない）。
