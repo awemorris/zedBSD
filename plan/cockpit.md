@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 12:17（Q1）
+最終更新: 2026-10-31 12:59（Q1）
 
 ## 担当（P1〜P8）
 
@@ -16,7 +16,7 @@
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | — | — | 返却（07:1x）。WS310 の設計を main に（問い Q310-1〜6 は下の 0i） | 次の割当を Q1 が決める |
 | P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 6 回目（q1727-i06）: grid の列を仕様どおりの大きさの決め方に置き換えた（host 試験つき、main 008c701c9）。次は行を同じ関数に → subgrid → 残りの baseline | 今 3,472 のうち 2,728（78.57%）、後退 0（5 回目の後退 1 件も消えた）。Acid は最後に測り直す |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 6 回目（q1727-i06）: grid の列と行の大きさを仕様どおりに書き直し、subgrid を実装した（main c4e068c91）。次は残りの baseline など | 今 3,472 のうち 2,774（79.90%）、後退 0、Acid3 100/100、Acid2 99.27%。subgrid の残り: 線の名前・repeat(auto-fill)、subgrid の baseline、縦書きの subgrid |
 
 実装の担当（Sonnet・Opus の単発）: 今は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
 
