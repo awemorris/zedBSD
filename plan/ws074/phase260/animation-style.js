@@ -191,12 +191,19 @@
     // The UA's CSS animations of a view transition's pseudo-elements, as document.getAnimations() lists them: one per animation name the
     // pseudo-element's computed style has.  Their time is the transition's (a script setting it moves them all).
     var vtTime = 0, vtMade = new Map();
+    // The i-th of a comma list of times ("3s, 300ms") in milliseconds (the list repeats), or a keyword as it is.
+    function vtTimeAt(list, i) {
+      var parts = String(list === undefined ? '' : list).split(','), t = parts[i % parts.length].trim(), m = /^(-?[0-9.e+-]+)(m?s)$/.exec(t);
+      return m ? (m[2] === 's' ? parseFloat(m[1]) * 1000 : parseFloat(m[1])) : (t === '' ? 0 : t);
+    }
     class ViewTransitionAnimation extends EventTarget {
       constructor(key, pseudo, name, style) {
         if (key !== ANIM) throw new TypeError('Illegal constructor');
         super();
         hidden(this, '_pseudo', pseudo);
         hidden(this, '_style', style);
+        hidden(this, '_index', 0);
+        hidden(this, '_time', undefined);
         this.animationName = name;
         this.id = '';
         this.onfinish = null;
@@ -208,13 +215,19 @@
         var a = this, style = this._style;
         return {
           target: document.documentElement, pseudoElement: this._pseudo,
-          getTiming: function () { return { delay: 0, endDelay: 0, fill: 'both', iterations: 1, duration: style.animationDuration, direction: 'normal', easing: style.animationTimingFunction }; },
+          getTiming: function () { return { delay: vtTimeAt(style.animationDelay, a._index), endDelay: 0, fill: 'both', iterations: 1, duration: vtTimeAt(style.animationDuration, a._index), direction: 'normal', easing: style.animationTimingFunction }; },
           getComputedTiming: function () { return { progress: 0, currentIteration: 0 }; },
           getKeyframes: function () { return []; }
         };
       }
-      get currentTime() { return vtTime; }
-      set currentTime(v) { vtTime = +v; native.viewTransitionTime(vtTime); }
+      // Each pseudo-element's animations have a time of their own once a script sets it (the others stay at the transition's).
+      get currentTime() { return this._time === undefined ? vtTime : this._time; }
+      set currentTime(v) {
+        var m = /^::view-transition-(group|image-pair|old|new)\((.*)\)$/.exec(this._pseudo);
+        this._time = +v;
+        if (m) native.viewTransitionTime(this._time, VT_KINDS[m[1]], m[2]);
+        else { vtTime = +v; native.viewTransitionTime(vtTime); }
+      }
       get playState() { return this._paused === true || (this._paused === undefined && this._style.animationPlayState === 'paused') ? 'paused' : 'running'; }
       get pending() { return false; }
       get replaceState() { return 'active'; }
@@ -246,7 +259,7 @@
           if (!names || names === 'none') return;
           names.split(',').forEach(function (n, i) {
             var key = pseudo + '#' + i + n.trim(), made = vtMade.get(key);
-            if (!made) { made = new ViewTransitionAnimation(ANIM, pseudo, n.trim(), cs); vtMade.set(key, made); }
+            if (!made) { made = new ViewTransitionAnimation(ANIM, pseudo, n.trim(), cs); made._index = i; vtMade.set(key, made); }
             keys.add(key);
             out.push(made);
           });

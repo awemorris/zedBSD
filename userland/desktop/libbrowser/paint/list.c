@@ -173,6 +173,8 @@ static int list_point_borders(struct list_walk *walk, const struct layout_box *b
 static void list_inline_floats(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth);
 static void list_lines(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth);
 static void list_inline_decoration(struct list_walk *walk, const struct layout_decoration *decoration, layout_unit left, layout_unit baseline);
+static void list_inline_decoration_vertical(struct list_walk *walk, const struct layout_decoration *decoration, const struct layout_line *line,
+    layout_unit left, layout_unit top, layout_unit height, int mode);
 static void list_fragment(struct list_walk *walk, const struct layout_fragment *fragment, layout_unit x, layout_unit baseline, int vertical);
 static void list_rect(struct list_walk *walk, layout_unit x, layout_unit y, layout_unit width, layout_unit height, uint32_t color);
 static void list_replaced(struct list_walk *walk, const struct layout_box *box, layout_unit x, layout_unit y);
@@ -1301,8 +1303,10 @@ list_lines(
 		line = &box->lines[index];
 
 		/* The inline boxes' backgrounds and borders go under the line's text. */
-		if (!box->vertical_inline) {
-			for (item = 0; item < line->decoration_count; item++)
+		for (item = 0; item < line->decoration_count; item++) {
+			if (box->vertical_inline)
+				list_inline_decoration_vertical(walk, &line->decorations[item], line, left, top, box->height, box->vertical_inline);
+			else
 				list_inline_decoration(walk, &line->decorations[item], left + line->left, top + line->y + line->baseline);
 		}
 		for (item = 0; item < line->fragment_count; item++) {
@@ -1376,6 +1380,93 @@ list_inline_decoration(
 	side = x1 - x0 - placed.border[CSS_LEFT] - placed.padding[CSS_LEFT] - placed.padding[CSS_RIGHT] - placed.border[CSS_RIGHT];
 	placed.width = side < 0 ? 0 : side;
 	placed.height = decoration->ascent + decoration->descent;
+	placed.margin[CSS_LEFT] = 0;
+	placed.margin[CSS_RIGHT] = 0;
+
+	/* The background color, the image over it, then the borders. */
+	if ((placed.style.background_color >> 24) != 0)
+		list_rect(walk, placed.x, placed.y,
+		    placed.border[CSS_LEFT] + placed.padding[CSS_LEFT] + placed.width + placed.padding[CSS_RIGHT] + placed.border[CSS_RIGHT],
+		    placed.border[CSS_TOP] + placed.padding[CSS_TOP] + placed.height + placed.padding[CSS_BOTTOM] + placed.border[CSS_BOTTOM],
+		    placed.style.background_color);
+	list_box_background(walk, &placed);
+	list_borders(walk, &placed);
+}
+
+/*
+ * Paints an inline box's background and borders over the span it covers on one vertical line
+ * (mode 1: the glyphs turn clockwise and the line runs down from the content box's top; mode 2: sideways-lr).
+ * The box's sides are physical: the inline axis runs along the top and bottom sides, the block axis across the left and right.
+ */
+static void
+list_inline_decoration_vertical(
+	struct list_walk *walk,
+	const struct layout_decoration *decoration,
+	const struct layout_line *line,
+	layout_unit left,
+	layout_unit top,
+	layout_unit height,
+	int mode)
+{
+	struct layout_box placed;
+	layout_unit baseline;
+	layout_unit y0;
+	layout_unit y1;
+	layout_unit side;
+	int start_side;
+	int end_side;
+
+	/* A hidden box paints nothing of its own. */
+	if (decoration->box->style.visibility == LIST_VISIBILITY_HIDDEN)
+		return;
+
+	/* The span along the line, from the content box's top (or up from its bottom), and the physical sides of its start and end. */
+	placed = *decoration->box;
+	if (mode == 2) {
+		y1 = top + height - line->left - decoration->x;
+		y0 = y1 - decoration->width;
+		start_side = CSS_BOTTOM;
+		end_side = CSS_TOP;
+		baseline = left + line->y + line->baseline + decoration->shift;
+	} else {
+		y0 = top + line->left + decoration->x;
+		y1 = y0 + decoration->width;
+		start_side = CSS_TOP;
+		end_side = CSS_BOTTOM;
+		baseline = left + line->y + line->height - line->baseline - decoration->shift;
+	}
+
+	/* The border box over the span: the margins are outside it, the ends the line lacks have no edge. */
+	if (mode == 2) {
+		if (decoration->has_left)
+			y1 -= placed.margin[start_side];
+		if (decoration->has_right)
+			y0 += placed.margin[end_side];
+	} else {
+		if (decoration->has_left)
+			y0 += placed.margin[start_side];
+		if (decoration->has_right)
+			y1 -= placed.margin[end_side];
+	}
+	if (y1 <= y0)
+		return;
+	if (!decoration->has_left) {
+		placed.border[start_side] = 0;
+		placed.padding[start_side] = 0;
+	}
+	if (!decoration->has_right) {
+		placed.border[end_side] = 0;
+		placed.padding[end_side] = 0;
+	}
+
+	/* The block extent: the ascent on the side the glyph tops face, the descent on the other. */
+	placed.x = baseline - (mode == 2 ? decoration->ascent : decoration->descent) - placed.padding[CSS_LEFT] - placed.border[CSS_LEFT];
+	placed.y = y0;
+	placed.width = decoration->ascent + decoration->descent;
+	side = y1 - y0 - placed.border[CSS_TOP] - placed.padding[CSS_TOP] - placed.padding[CSS_BOTTOM] - placed.border[CSS_BOTTOM];
+	placed.height = side < 0 ? 0 : side;
+	placed.margin[CSS_TOP] = 0;
+	placed.margin[CSS_BOTTOM] = 0;
 	placed.margin[CSS_LEFT] = 0;
 	placed.margin[CSS_RIGHT] = 0;
 

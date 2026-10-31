@@ -588,6 +588,25 @@ prelude_view_transition_time(
 	status = vm_to_number(realm, args[0], &milliseconds);
 	if (status != 0)
 		return status;
+
+	/* With a pseudo-element's kind and name, only that one's animations. */
+	if (count >= 3U) {
+		struct vm_string *name;
+		uint32_t pseudo;
+
+		status = vm_to_uint32(realm, args[1], &pseudo);
+		if (status != 0)
+			return status;
+		status = vm_to_string(realm, args[2], &name);
+		if (status != 0)
+			return status;
+		name = vm_atom(realm->heap, name);
+		if (name == NULL)
+			return ENOMEM;
+		if (window->host.view_transition_time_of != NULL)
+			window->host.view_transition_time_of(window->host.context, milliseconds, (int)pseudo, name);
+		return 0;
+	}
 	if (window->host.view_transition_time != NULL)
 		window->host.view_transition_time(window->host.context, milliseconds);
 	return 0;
@@ -1258,7 +1277,7 @@ bind_install_prelude(
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "animationOff", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
-		status = js_builtin_function(realm, "viewTransitionTime", 1, prelude_view_transition_time, NULL, &function);
+		status = js_builtin_function(realm, "viewTransitionTime", 3, prelude_view_transition_time, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "viewTransitionTime", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)

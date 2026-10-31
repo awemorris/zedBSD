@@ -394,6 +394,18 @@ transition_ease(
 	return progress;
 }
 
+/* The seconds the animations of a name's pseudo-element (0 group, 1 pair, 2 old, 3 new) have run. */
+float
+layout_transition_elapsed(
+	const struct layout_transition *transition,
+	const struct layout_transition_name *name,
+	int kind)
+{
+	if (name != NULL && kind >= 0 && kind < 4 && name->elapsed_set[kind] != 0)
+		return name->elapsed[kind];
+	return transition->elapsed;
+}
+
 /*
  * How far an animation of a pseudo-element has run, 0 to 1 and eased, once the transition has run for elapsed
  * seconds: it fills both ways, so before its start it is at 0 and after its end at 1.  A script sets the time (every animation of

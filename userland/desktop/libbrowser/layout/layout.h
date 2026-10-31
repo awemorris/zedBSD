@@ -386,6 +386,9 @@ struct layout_transition_name {
 	struct paint_snapshot *old_image;
 	/* Declarations a script's animation of a pseudo-element gives now, by the group, pair, old and new pseudo-elements. */
 	char animated[4][192];
+	/* The seconds a script gave one pseudo-element's animations (the group, pair, old and new ones); the others are at the transition's time. */
+	float elapsed[4];
+	unsigned char elapsed_set[4];
 };
 
 /*
@@ -495,6 +498,7 @@ const struct layout_box *layout_transition_box(const struct layout_transition *t
 struct vm_string *layout_transition_name_of(const struct layout_transition *transition, const struct layout_box *box);
 void layout_transition_release(struct layout_transition *transition);
 float layout_transition_progress(const struct css_style *style, float elapsed);
+float layout_transition_elapsed(const struct layout_transition *transition, const struct layout_transition_name *name, int kind);
 int layout_transition_group_rect(const struct layout_transition_name *name, const struct css_style *style, float elapsed, struct layout_rect *rect);
 
 /* Anchor positioning (anchor.c). */
