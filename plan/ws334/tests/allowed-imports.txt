@@ -1,0 +1,44 @@
+# The symbols the Windows build's libraries may leave undefined, one a line (cross-build.sh compares the
+# output of nm -u with it, a __imp_ prefix taken off).  Each is a function of the Windows C runtime (UCRT,
+# under the names mingw-w64's import libraries give it), of the toolchain's runtime, or of kernel32,
+# ws2_32, bcrypt or crypt32.  A new name goes here with the library it comes from.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+# The toolchain's runtime (compiler-rt): the stack probe of a large frame (___chkstk_ms on x86_64).
+__chkstk
+___chkstk_ms
+
+# UCRT: the heap.
+calloc
+free
+malloc
+realloc
+
+# UCRT: memory and strings.
+memcpy
+memset
+snprintf
+strstr
+
+# UCRT: the C streams (stdin, stdout and stderr through __acrt_iob_func) and the end of the program.
+__acrt_iob_func
+exit
+fclose
+fopen
+fprintf
+fread
+fseek
+ftell
+rewind
+
+# UCRT: the low-level files (fstat64i32 is mingw-w64's name of _fstat64i32, which fstat means) and errno.
+_errno
+close
+fstat64i32
+open
+read
+
+# UCRT: the maths.
+ceilf
+floorf
+lroundf
