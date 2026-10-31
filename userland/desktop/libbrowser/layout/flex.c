@@ -302,6 +302,19 @@ layout_flex(
 			line_cross = layout_from_px(box->style.height.value) - sizing;
 		}
 
+		/* A single line of a row in a container with a minimum or maximum height is held within it. */
+		if (!wrap && row && box->style.height.unit != CSS_UNIT_PX) {
+			sizing = 0;
+			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+			if (box->style.max_height.unit == CSS_UNIT_PX && line_cross > layout_from_px(box->style.max_height.value) - sizing)
+				line_cross = layout_from_px(box->style.max_height.value) - sizing;
+			if (box->style.min_height.unit == CSS_UNIT_PX && line_cross < layout_from_px(box->style.min_height.value) - sizing)
+				line_cross = layout_from_px(box->style.min_height.value) - sizing;
+			if (line_cross < 0)
+				line_cross = 0;
+		}
+
 		/* A column's single line is as wide as the container. */
 		if (!wrap && !row)
 			line_cross = box->width;
