@@ -269,17 +269,17 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 問いの本文: [ws334/user-questions.md](ws334/user-questions.md)（前置き・用語の表つき）。設計は [ws334/design.md](ws334/design.md)。どれも推しの案があり、推しのままなら「推しで」。
 - U3（toolchain の llvm-mingw と Debian の gcc-mingw-w64-ucrt64 の導入）は Q1 の許可も要る（ユーザーが推しでよければ Q1 が許可する）。
 
-### 0m. WS291 p024（RTX の描画の速さ）の続きの進め方（2026-11-01 02:19 新しい）
+### 0m. WS291 p024（RTX の描画の速さ）の続きの進め方（2026-11-01 02:19、2026-11-01 04:45 答え: profile で NVK より遅い所を直し目標まで、(a) は本筋なら、(c) は他の driver に副作用が無ければ、(b) は説明を求められた）
 
 - 背景: RTX の subs-1000 は 43 fps（目標 NVK 75.4）、big-1000 は 119 fps（目標 136.2）。submit 1 回 15.8 µs の中に 3.5 µs を越える項目が無く、小さな削りでは半分にならない。big-1000 は app の側の命令の書き出し 3.5 ms（GPU は空く）が残り。
 - 残る道（P3 の案）: (a) kernel の VM の小さな copyin・copyout の速い道（WS291 の外、kernel の VM）、(b) 命令の記録の時に push buffer を組み、submit では ring に載せるだけにする（大きな作り変え、設計の Phase が要る）、(c) fence の無い submit に job を作らない（製品の判断、前から問い中）。
 - 決めてほしい事: 続けるか、どの道か。
 
-### 0n. WS336（自前の sshd・ssh）の設計の問い Q1〜Q9（2026-11-01 03:03 新しい）
+### 0n. WS336（自前の sshd・ssh）の設計の問い Q1〜Q9（2026-11-01 03:03、2026-11-01 04:45 答え: 推し、TODO の一覧を WS に）
 
 - 問いの本文: [ws336/user-questions.md](ws336/user-questions.md)（前置き・用語つき）。推し: Q1 password の login を入れる、Q2 port の転送は入れない、Q3 sftp-server だけ（scp -O を使う道具 4 本は -O を外す）、Q4 agent は入れない、Q5 OpenSSH と同じ深さの権限の分離、Q6 QEMU の相互運用の試験が通ったら既定を替える（OpenSSH の package は残す）、Q7 鍵の交換は mlkem768x25519-sha256 だけ、Q8 chacha20-poly1305 だけ、Q9 passphrase の無い鍵だけ。
 
-### 0o. WS335（libssl-compat・libcrypto-compat）の設計の問い U1〜U6（2026-11-01 03:04 新しい）
+### 0o. WS335（libssl-compat・libcrypto-compat）の設計の問い U1〜U6（2026-11-01 03:04、2026-11-01 04:45 答え: 推し、Windows は static link）
 
 - 問いの本文: [ws335/user-questions.md](ws335/user-questions.md)。推し（どれも A）: U1 範囲の外の一覧、U2 net/tls.c の切り替えは -DWB_TLS_COMPAT（dlopen の名前だけ、p036 の案）、U3 ssh の鍵の交換 mlkem768x25519-sha256、U4 名前と置き場所、U5 Windows の ROOT の store から Disallowed を除き、DLL の横の cert.pem を足す、U6 証明書の CN への fallback をしない。推しでない答えは header の変更（新しい基点）になる。
 
