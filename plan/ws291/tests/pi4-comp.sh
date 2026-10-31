@@ -43,6 +43,13 @@ b 'c=/root/.config/keiland/desktop.conf; test -e $c.p025old || cp $c $c.p025old;
 env=""
 [ "${TIMING:-0}" = 1 ] && env="VULKAN_ZEDBSD_SUBMIT_TIMING=1"
 
+# A graphical login's compositor (the greeter's or a session's) would take the display back: the board must have booted
+# with the console login (pi4-desk.sh leaves login=console for the next boot, so reboot after it).
+if b 'ps -A -o user,comm' | awk '$2 ~ /wayland$/ && $1 != "root"' | grep -q .; then
+	say "FAIL a graphical login runs a compositor; reboot the board with login=console first"
+	exit 1
+fi
+
 i=1
 while [ $i -le "${RUNS:-1}" ]; do
 	d=$out/run$i

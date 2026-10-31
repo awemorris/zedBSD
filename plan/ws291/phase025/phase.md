@@ -2,7 +2,7 @@
 
 # ws291-p025: Raspberry Pi 4（V3D 4.2）で mview を動かし、qs40 の model をスペックの比で決めた copies・1920x1080 で 50 fps に
 
-Status: in-progress（2026-10-31 20:20 新設、P4 q1784）
+Status: in-progress（2026-10-31 20:20 新設、P4 q1784。i02 23:35 返却: mip で c21 40.5 fps、desktop は session で 51〜57 fps、どちらも目標の手前）
 Parent: [WS291](../ws.md)
 Queue: q1784（P4）
 
@@ -160,7 +160,28 @@ mview の vkCreateGraphicsPipelines が FEATURE_NOT_PRESENT。足りない機能
 - 既定の inflight=1 の 1 frame（24.6 ms）= GPU 約 19.1 ms（bin 8.7 ＋ render 10）＋ CPU 約 5.5 ms（acquire 0.65・record 0.68・submit 1.39・present 1.73・other 1.06）。
   CPU を 0 にしても GPU だけで約 18.2 ms（55 fps）、今の CPU の段では約 41 fps が上限に近い。
 
-### 再開点（2026-10-31 22:17 P4）
+### mip の後の session と試し（23:14〜23:32）
+
+- session の frame-ops（`pi4-desk.sh`、kernel 3091423017、build/tmp/p025-g2）: launch 56・type 52・output 43・drag 51・home 57・wiseview 55（RENDER stalled 0、
+  Terminal map）。g1（mip の前）と揺れの内で同じ。
+- 試し（採らず）: compositor の render thread の acquire を飛ぶ frame が無い時も 1 ms で見直す（解放を寝過ごす見立て）。pi4-comp.sh で 2 回: drag 55・53、home 57・57、
+  wiseview 58・58、launch 52・50、type 26・25（前の 1 回 c3: 55・57・58・51・28）。効かないので戻した（見立ては外れ）。
+- 注意: graphical login の session の後に pi4-comp.sh を流すと greeter の compositor と画面を取り合う。pi4-desk.sh の後は再起動してから（script に確かめを足した）。
+  23:17〜23:29 の 2 つの A/B（p025-pa）は前の run と重なって無効。
+
+### 再開点（2026-10-31 23:35 P4、q1784-i02）
+
+- branch agent/p4-ws291pi の先頭（この commit）。main c3291b1f9 の上に 86ab82eec（mip）・6ff4e210a ほか。Q1 の merge 待ち。
+- 板（10.0.30.6）: kernel build/p025-4f/vmunix（cksum 3091423017、mip 入り、input inject）、cmdline `login=console v3d.perf=1`、/lib/libc.so・/lib/libvulkan.so は main
+  c3291b1f9 の build（元は /lib/*.p025old）、/bin/aat-input、root の desktop.conf は元のまま（pi4-comp.sh を流すと welcome.done=1 を足す、元は desktop.conf.p025old）。
+  元の kernel と設定は /boot/boot0/*.p025old と host の build/tmp/p025-board/*.orig。
+- 達していない: desktop の 60 fps（session で drag 51〜52・home 54〜57・wiseview 55〜57・launch 55〜56、type 52・output 19〜43 は Terminal の client の速さ）、
+  mview c21 の 50 fps（40.5、上の限界の証拠）。
+- 次の候補: (1) Terminal の atlas を optimal ＋ staging の更新に（範囲の外、Q1 の判断）。(2) kernel の worker で次の job の bin を今の job の render と重ねる
+  （inflight=2 と desktop の client と compositor の重なりに効く、inflight=1 の c21 には効かない）。(3) compositor の frame の始めから GPU の完了まで約 21 ms
+  （drag）を縮める: vkQueueSubmit・vkQueuePresentKHR の kernel の prep（1 submit 約 1〜2 ms）。(4) VCM の 4 batch を shader の VPM の大きさで選ぶ（bin −5%）。
+
+### 前の再開点（2026-10-31 22:17 P4、i01、上の i02 で置き換え）
 
 - branch agent/p4-ws291pi の先頭（この commit）。main への merge は Q1（BUG-380 の直し・desktop の後退なしは確かめ済み）。
 - 板（10.0.30.6）: 1920x1080 の config.txt、cmdline `login=console v3d.perf=1`、kernel は build/p025-4d/vmunix（input inject 入り、c936bdb2d 相当）、/bin/aat-input、
