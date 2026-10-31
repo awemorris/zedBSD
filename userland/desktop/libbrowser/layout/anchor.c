@@ -400,7 +400,11 @@ anchor_find_state(
 	anchor_search(tree, tree->root, box, containing, name, containing == NULL, &passed, candidates, 0);
 
 	found = candidates[0];
-	if (found == NULL || found->node == NULL)
+	if (found == NULL)
+		return 0;
+
+	/* A generated box (a pseudo-element's) has no node: only the geometry of a block or a replaced box says where it is. */
+	if (found->node == NULL && found->kind != LAYOUT_BLOCK && found->kind != LAYOUT_REPLACED && !found->atomic)
 		return 0;
 
 	/* An anchor out of the flow that is not placed yet is placed first. */

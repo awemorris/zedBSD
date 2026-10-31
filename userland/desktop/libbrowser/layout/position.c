@@ -66,6 +66,7 @@ static int position_aligned(int alignment);
 static int position_physical(int alignment, int rtl);
 static layout_unit position_align(int alignment, layout_unit start, layout_unit end, layout_unit margin_start, layout_unit margin_end, layout_unit size);
 static uint32_t position_try_key(const struct css_try_list *list);
+static uint32_t position_style_key(const struct css_style *style);
 static int position_in_scroller(const struct layout_box *box);
 static void position_padding_box(const struct layout_box *box, struct position_block *block);
 static int position_offset(const struct css_length *length, layout_unit size, layout_unit *value);
@@ -771,6 +772,16 @@ position_place_fallbacks(
 	box->anchor_flip = 0;
 	if (box->style.position_try == NULL)
 		return position_place_once(tree, box, containing);
+
+	/* Each pass starts from the style the box had before a fallback changed it. */
+	if (box->try_base == NULL) {
+		box->try_base = wb_arena_alloc(&tree->arena, sizeof(*box->try_base));
+		if (box->try_base == NULL)
+			return ENOMEM;
+		*box->try_base = box->style;
+	} else {
+		box->style = *box->try_base;
+	}
 	saved = wb_arena_alloc(&tree->arena, sizeof(*saved));
 	if (saved == NULL)
 		return ENOMEM;
@@ -780,7 +791,7 @@ position_place_fallbacks(
 	element = NULL;
 	if (box->node != NULL && box->node->type == DOM_ELEMENT)
 		element = (struct dom_element *)box->node;
-	key = position_try_key(saved->style.position_try);
+	key = position_try_key(saved->style.position_try) ^ position_style_key(&saved->style);
 	if (element != NULL && element->anchor_last > 0 && element->anchor_last_key == key &&
 	    element->anchor_last <= saved->style.position_try->count && layout_anchor_try(tree, box, element->anchor_last - 1)) {
 		error = position_place_once(tree, box, containing);
@@ -878,6 +889,50 @@ position_in_scroller(
 			return 1;
 	}
 	return 0;
+}
+
+/* Mixes a length into a hash. */
+static uint32_t
+position_hash_length(
+	uint32_t key,
+	const struct css_length *length)
+{
+	union {
+		float number;
+		uint32_t bits;
+	} value;
+
+	value.number = length->value;
+	key = key * 16777619u ^ value.bits;
+	key = key * 16777619u ^ (uint32_t)length->unit;
+	value.number = length->offset;
+	return key * 16777619u ^ value.bits;
+}
+
+/* A number that stays the same while the style that the base position and a fallback list depend on does. */
+static uint32_t
+position_style_key(
+	const struct css_style *style)
+{
+	uint32_t key;
+	int side;
+
+	key = 2166136261u;
+	for (side = 0; side < 4; side++) {
+		key = position_hash_length(key, &style->offset[side]);
+		key = position_hash_length(key, &style->margin[side]);
+	}
+	key = position_hash_length(key, &style->width);
+	key = position_hash_length(key, &style->height);
+	key = position_hash_length(key, &style->min_width);
+	key = position_hash_length(key, &style->min_height);
+	key = position_hash_length(key, &style->max_width);
+	key = position_hash_length(key, &style->max_height);
+	key = key * 16777619u ^ (uint32_t)style->position_area;
+	key = key * 16777619u ^ (uint32_t)style->position_try_order;
+	key = key * 16777619u ^ (uint32_t)style->justify_self;
+	key = key * 16777619u ^ (uint32_t)style->align_self;
+	return key;
 }
 
 /* A number that stays the same while a position-try-fallbacks list does. */
