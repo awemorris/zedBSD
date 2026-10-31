@@ -557,6 +557,20 @@ Origin: 2026-10-27 ユーザーの指示。
   10. grid: checkbox・radio の `normal` は stretch、固定の行の percent 高さ・stretch した画像の比で幅、replaced の stretch で反対側を比で、直交 item の inline room（固定でなくても高さを持つ grid の単独の auto 行）、
       automatic minimum は percent の min-width・min-height を auto と見なす、subgrid のみ・ratio 幅が min・max の px を守る。
   11. replaced（layout/replaced.c）: min-width・min-height が反対側を比で運ぶ（CSS 2 の表）。
+- 追加（dev101〜dev104、同じ q1727-i07）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev101 | flex の item の percent padding は container の幅の測定中は 0、画像の min-height が幅へ（min-width: auto の ratio）、grid の auto 最小は percent の min を auto と見なす試み（grid-minimum-contribution-with-percentages が後退して dev102 の前に戻した） | 2,844 | 332 / 195 / 95 / 6 |
+  | dev102（486cd8e09） | 上の戻し、percent の row-gap は min-height が支える高さに対して | 2,846 | 331 / 194 / 95 / 6 |
+  | dev103（4810b6120） | auto の cross margin の item は stretch しない、flex の safe な justify-content・align-items・align-content | 2,848（82.03%） | 331 / 192 / 95 / 6 |
+  | dev104（4810b6120） | background-clip（padding-box・content-box、rounded の box と inline の box は未対応）。件数は変わらず、後退 0 | 2,848（82.03%、gap 624） | 331 / 192 / 95 / 6 |
+
+  dev89 から後退は引き続き 1 件（backdrop-filter-boundary、scripted）。Acid は最終の source で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%（以前は 99.27%。画素揃えで残っていた差が消えた）。host build は warning 0。
+  Acid の runner が残した一時 file（Q1 が消す）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-_jbcgx1_.html、acid3/zedbsd-acid3-diagnostic-_nrk70vo.html、acid3/zedbsd-acid3-reference-t2a6q8d1.html（worktree p8-ws074）。
+  測定の出力は /tmp/p8out の dev89・dev91〜dev104（最後の 2 つ以外は Q1 が消してよい）。
+  追加の直した物: flex の auto margin の stretch（flexbox_align-items-stretch-4）、safe な位置（flexbox-safe-overflow-position-001）、min-height が運ぶ画像の min-width（flexbox-min-width-auto-002b）、
+  percent の row-gap（grid-gutters-016）、background-clip（css/ ・paint/list.c の box の背景と画像の painting area）。
 - 調べて直さなかった物（次の候補）:
   - rule object の model（CSSStyleRule・CSSScopeRule・CSSPositionTryRule・CSSNestedDeclarations）が無い（cssRules は length だけ）。ID としては css-view-transitions/parsing/pseudo-elements-valid・-with-classes（selectorText だけで通る）、
     css-cascade の @scope 11 件、at-position-try 3 件。bind/cssom.c の CSSOM_RULES に rule の wrapper を足し、css/rule-model.c の source から selectorText・cssText を答える設計が要る。
