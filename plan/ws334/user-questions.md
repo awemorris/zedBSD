@@ -7,9 +7,9 @@
 - **どの WS か**: [WS334](ws.md)「libbrowser の Web ブラウザ OmniGrammaton を Windows に移植する」。
 - **どんな WS か**: zedBSD の Web ブラウザの engine（libbrowser）を使い、Windows で動く .exe（名前は OmniGrammaton）を作る。移植を通して、libbrowser が
   OS に依らない事を確かめる。libbrowser を 3 つの engine（描画・JavaScript・保存）に分け、保存の部分（cookie・cache・localStorage）を差し替えられる形にする。
-  Windows 版は tree の一番上の `apps/browser-win32/` に置き、`make browser-win64` で作る（決定 12・13）。
+  Windows 版は tree の一番上の `apps/browser-win32/` に置き、`make browser-win64`（arm64 は `make browser-winarm64`）で作る（決定 12・13）。
 - **今の状態**: planning。p001（設計）を P7 が書いた（[design.md](design.md)）。実装の担当の割当はまだ（ユーザーの決定で、今は計画だけ）。
-- **決まっていない事**: 下の Q1〜Q15。どれも推しの案を書いた。推しのままでよければ「推しで」で足りる。
+- **決まっていない事**: 下の Q1〜Q15。Q1 が一番大事（Windows 版の見た目と、libkeiland の移植をこの WS でするか）。どれも推しの案を書いた。推しのままでよければ「推しで」で足りる。
 
 ## 用語
 
@@ -30,23 +30,27 @@
 
 ## 問い
 
-### Q1 Windows に最初に出す frontend（決定 8・13）
+### Q1（一番大事な問い）Windows 版の窓の部分を、Keiland の見た目で作るか、Windows の見た目で作るか
 
-- 問い: Windows 版の最初の frontend を、Win32 を直に使う `apps/browser-win32` にしてよいか。
+- 用語: **chrome** = page の外側の部品（toolbar・URL の欄・tab・menu・設定の画面）。**L&F**（look and feel）= 部品の見た目と触り心地。
+  **native** = Windows の標準の部品（Windows の button・入力の欄・menu）。**libkeiland** は zedBSD の desktop の部品の library で、部品を自分で描くので Keiland の見た目になる。
+- 背景: 決定 14（libkeiland は browser に要る部分だけを先に移す）と、決定 13（toolkit ごとの frontend: browser-win32・browser-qt・browser-gtk4）の読み方で 2 つの案がある。
+  どちらの案でも、日本語の入力の候補の窓・file の dialog・DPI・窓の枠は Windows の物になる。違うのは chrome の見た目と、zedBSD のブラウザと共有する code の量。
 - 案:
-  - A（推し）: `apps/browser-win32`（Win32 直）を先に。Qt の `apps/browser-qt` は Linux・macOS にも出したくなった時に。
-  - B: `apps/browser-qt`（Qt6）を先に作り、Windows もそれで出す。
-- 推しの理由: 追加の DLL（約 20 MB）と Qt の license（LGPL）の約束が無く zip 1 つで配れる。toolbar に Windows の普通の部品を使えば日本語の入力・読み上げ・
-  clipboard が最初から働く。arm64 の Windows も同じ C の build で出せる。Qt は「Windows でも動くが、主に他の OS のため」と位置付ける（design.md §4.2）。
+  - A: zedBSD のブラウザの窓の code（Keiland の層）をそのまま Windows でも使い、その下の libkeiland を Windows に「browser に要る部分だけ」移す。chrome は Keiland の見た目。
+    zedBSD と共有する code が最も多い。作業は約 115 LW。
+  - B（統括 Q1 と P7 の推し）: `apps/browser-win32/` に Windows の標準の部品で chrome を作る（URL の欄は Windows の入力の欄で、日本語入力・読み上げ・clipboard が最初から働く）。
+    zedBSD と共有するのは「共通の shell」（引数・戻る・進む・題・鍵の名前・描画の手順）と libbrowser。libkeiland の Windows への移植は WS334 から外し、WS234 の目標にする
+    （決定 14 の「部分的な移植」は、shell がなお libkeiland の部品を要る時だけその部品に当てる）。後の browser-qt・browser-gtk4 と同じ「各 toolkit の見た目」の考え。作業は約 101 LW。
+- 推しの理由（B）: Windows の利用者に自然な見た目、作業が少なく .exe に早く届く、toolkit ごとの frontend の計画と揃う、libkeiland の移植は WS234 で落ち着いて行える。
+- どちらでも設計の残り（libbrowser の分け、保存の部品、build、試験）は同じ（design.md §4.2）。
 
-### Q2 libkeiland の Windows の実装（決定 3）をどこでやるか
+### Q2 libkeiland を Windows に移す時の作り方と置き場（決定 3・8・14）
 
-- 背景: 決定 13 で、Windows のブラウザは libkeiland を使わない形になった。決定 3（libkeiland の Win32 の実装を作る）はブラウザの道から外れる。
-  WS327 で thread と network の部分の Win32 版は既に書いてある。残りは窓・入力・titlebar の部分（約 28 LW）。
-- 案:
-  - A（推し）: 窓の部分は保留中の [WS234](../ws234/ws.md)（libkeiland の DLL 版、Windows 用を含む）へ移し、WS334 では作らない。WS334 は OmniGrammaton の .exe に集中する。
-  - B: WS334 に残し、OmniGrammaton の .exe の後に p016・p017 として作る。
-- どちらでも、libkeiland を Windows に移す時は Qt6 でなく Win32 直を推す（design.md §4.6）。
+- (a) 作り方: Win32 を直に使う（推し）か、Qt6 を libkeiland の下に入れるか。推しの理由: libkeiland は部品を自分で描くので Qt の部品を生かせず、DLL と license の約束だけが増える。
+  Qt6 は `apps/browser-qt`（Qt の部品で作る別の frontend）として使う方が生きる（design.md §4.3）。
+- (b) 全体の移植（menu・設定・file の選び・drag・他の Keiland の app が Windows で動く事）の置き場: 保留中の [WS234](../ws234/ws.md)（libkeiland の DLL 版、同じ .exe が zedBSD と
+  Windows で動く）を推す。WS334 は OmniGrammaton の .exe という 1 つの目標に保つ。WS234 を再開する時期はユーザーが決める。
 
 ### Q3 共通の shell の置き場と、zedBSD の今のブラウザの場所
 
@@ -57,7 +61,7 @@
   - B: zedBSD のブラウザも `apps/browser-keiland/` に移す（apps/ に frontend が全部並ぶ。zedBSD の package の規則の直しが要る）。
   - C: 共通の部分を `userland/desktop/browser/` の下に置き、apps/ から参照する。
 
-### Q4 cross compile の toolchain（決定 11、Q1 の許可も要る）
+### Q4 cross compile の toolchain（決定 11。統括の Q1 の許可も要る）
 
 - 問い: llvm-mingw（版を固定した release を取得・照合）を host と Windows の host に入れてよいか。
 - 推し: 入れる。arm64 の Windows（`make browser-winarm64`）に要る。入るまでは、今の host にある Debian の mingw-w64 gcc で x86_64 だけを先に作る。
@@ -121,7 +125,7 @@
 
 ### Q15 Windows の窓の題の帯
 
-- 案:
+- 案（Q1 の A・B のどちらでも）:
   - A（推し）: 第 1 段は Windows の普通の枠（暗い mode・Mica）と、その下の toolbar（戻る・進む・再読み込み・URL の欄）。第 2 段で Chrome・Edge のように題の帯に
     部品を入れる形にするかを、第 1 段を見てから決める。
   - B: 最初から Chrome・Edge の形（題の帯に部品、自前で描く）。
