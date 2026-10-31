@@ -146,3 +146,45 @@
      注: build/p015vf2t は 0b48946c0 の時点（SAMPLED の直し a3e740841 と adoption 5 秒の前）なので、作り直す:
      `make -j8 ZEDBSD_CONFIG=plan/ws291/tests/config-vf2.mk BUILD=build/p015vf2t ZEDBSD_TEST_CPPFLAGS=-DPOWERVR_SUBMIT_TIMING=1 build/p015vf2t/vmunix build/p015vf2t/bin/wayland build/p015vf2t/bin/mview build/p015vf2t/dynamic/libvulkan.so build/p015vf2t/dynamic/libwayland-client.so`。
 - 保存: QEMU の log は build/p015save/（cycle5）と build/review/ws309/。消してよい物（Q1 へ）: build/tmp/p015base（基準の tree、VF2 の後）、build/p015img・build/p015run。
+
+## q1782-i02（2026-10-31 16:58〜、P2、同じ worktree、main ea4317337 を 1405718fc で merge）
+
+- 2026-10-31 ユーザーから、RTX と VF2 で zero copy を今入れる、VF2 の後に板を Pi 4・Pi 5 に替えて確かめる、という趣旨の指示を受けた（Q1 経由）。
+  受け入れの 4 つ: RTX で動き確かめる、VF2 で動き確かめる、Pi 4・Pi 5 の build を用意する、VF2 の合格で main に merge。
+
+### 段 1・2（build・host・QEMU）
+
+- 2af4234dd: LINEAR でない取り込みの build を通した（`resources.c` に `<uapi/gpu.h>`）。`gpu-zedbsd.c` は tiling 0 を断る。host の試験に block-linear の case を足した
+  （`run-dedicated-host.sh` 9 case・`-I$repo`、`run-gpu-zedbsd-host.sh` 4 case。後者は 10-13 から Vulkan の header の `//` で `-std=c89` が通らず壊れていたので c99 にした）。
+  確かめ: amd64 の libvulkan・libwayland-client・wayland warning 0、v1-check・vulkan-overlay-host・host-scanout-rules・dedicated-host・gpu-zedbsd-host PASS、nvrtx-vk 94/0、vk-d3 225/0。
+- f95abf380: `game-mode-cycle.sh` の待ち 40 秒 → 120 秒（1 回目の mview の model の読み込み）。libvulkan の診断 `VULKAN_ZEDBSD_WSI_LOG=1`（窓・display の chain ごとに
+  `VULKAN WSI chain=N lent= direct= images= tiling= parameter=`、終わりに `presents= copies=`）。
+- QEMU（Venus、`build/p015menu`、`game-mode-cycle.sh … 6`）: **PASS**。6 回とも direct=1・lend images=0x3f・貸した image への present 94〜106・window へ戻る、FAILED/MODE_ERROR 0。
+  log: build/review/ws309/p015-cycle-i02*。
+
+### 段 3（RTX 2070、10.0.10.3、`plan/ws309/tests/rtx-p015.sh`、17:15〜17:37）
+
+- kernel 2917063051（main ea4317337 と branch で同じ）。腕: base = main の 14 file、new = branch（`nvrtx.disp.bl` 無し）、bl = branch と `nvrtx.disp.bl=1`。証拠 build/review/ws309/rtx-p015-i02/。
+
+| fps | big-100 | big-1000 | subs-100 | subs-1000 | scene-1500 | scene-5000 |
+| --- | --- | --- | --- | --- | --- | --- |
+| base（main） | 746.0 | 110.6 | 198.5 | 21.08 | 156.3 | 50.06 |
+| new（LINEAR を貸す） | 508.9 | 112.0 | 68.4 | 7.42 | 154.2 | 49.24 |
+| bl（block-linear を貸す） | 526.5 | 110.9 | 192.3 | 19.61 | 153.9 | 49.87 |
+
+- bl の腕: game chain `lent=1 direct=1 tiling=0x10001`（NV block-linear）、WSI の copy 0（subs-100 1919 present、big-1000 1223 present）、kernel `block-linear scanout on`・
+  `first flip 1920x1080`、nvrtx の quads（5 秒ごと）の定常は 0（base は約 1000・600、new は 61000〜69000）。game ↔ window の往復は 3 腕とも 3/3（direct=3 left=3 window=3、failed 0、refused 0）。
+- new の腕の低下は、LINEAR の貸した image に nvrtx が pass ごとに block-linear の影から copy するため。よって lend の規則を足した（下）。
+- big-100 は貸す 2 腕で約 30% 低い（60 Hz を大きく超える mailbox の run、frame ごとの release の往復が見込み、未分析）。
+- 戻し: 14 file を kept の cksum に、NVMe の vmunix 1463007375、cfg の nvrtx.disp.bl 0 行、Debian（RTX 4 function vfio-pci）。script の expected の行の誤りを d90bf2d15 で直した。
+- lend の規則（d90bf2d15 の次）: display の chain の image は、renderer の最も速い並び（一覧の先頭）の時だけ外に出す（`vulkan_wsi_layout_choose` の fastest、
+  `vulkan_wsi_swapchain_image_memory` が遅い chain を断る → 能力の確かめが lendable=0）。nvrtx の bl=0 は全画面を window mode の合成にする。VF2・Pi・Venus は LINEAR が先頭なので貸す。
+  host 試験 PASS、amd64・RTX の build warning 0。その RTX の再計測（new・bl の 2 腕）は Q1 の指示（ユーザーの目視を先に）で new の腕の再起動の途中で止めた（未計測）。
+- 目視の準備（17:4x）: branch の 14 file と kernel、`nvrtx.disp.bl=1`、desktop で `block-linear scanout on`・`first flip`（window mode の chain も block-linear）、lendable=1。
+
+### Pi 4・Pi 5 の用意
+
+- `plan/ws309/tests/config-rpi4-p015.mk`（CI の Pi 4 に mview・Ethernet の DHCP・root の SSH の鍵）、Pi 5 は `plan/ws291/tests/config-rpi5.mk`。image: build/p015rpi4/hdd-image.img、
+  build/p015rpi5/hdd-image.img（sha256 f99893937f0e…、7b50dcc17）。mview は arm64 の package の一覧に無いので target を名指して build（qs40 の model は script が送る）。
+- 試験の script `plan/ws309/tests/pi-p015.sh`（PI=address PROGRAMS=build、compositor を自分の socket で、mview の game を CYCLES 回、WSI の log、VIDEO で videoplayer の全画面 15 秒と
+  firmware の decoder の kernel の行）。動画は build/p015video/high-{1080,720}p30.mp4（ffmpeg の testsrc2、H.264 High）。
