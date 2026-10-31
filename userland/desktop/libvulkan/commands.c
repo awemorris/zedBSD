@@ -15,6 +15,9 @@
 
 #define VULKAN_RECORDING_BATCH_BYTES (1024U * 1024U)
 
+/* The room a submission's transaction keeps after the recordings written ahead of it (its own command, waits and signals). */
+#define COMMAND_PENDING_SLACK 512U
+
 /*
  * The recording thread: it sends a long recording's batches, in the order
  * they were handed to it, while the application records the next one, so
@@ -701,7 +704,11 @@ vulkan_command_pending_write(
 		return VK_SUCCESS;
 	}
 
-	/* The recording, End included, and the replies of its head and End. */
+	/*
+	 * The recording, End included, and the replies of its head and End;
+	 * the writer grown once, with room for the submission after it.
+	 */
+	vulkan_writer_reserve(writer, command->recording.bytes + COMMAND_PENDING_SLACK);
 	vulkan_write_bytes(writer, command->recording.data, command->recording.bytes);
 	command->end_serial = serial;
 	*replies += command->head_replies + 1U;

@@ -284,6 +284,43 @@ struct execute_held {
 };
 
 /*
+ * What a command buffer's records have bound so far, and the pass they
+ * are in; push_bytes are the command buffer's push constant bytes, push
+ * the ones bound, none from push_end on (still zero).  A
+ * pass drawn in the shadow: backing is its target's memory's (NULL
+ * without one), and known says the shadow holds the target's
+ * pixels in the region known_x0, known_y0 to known_x1, known_y1 at its start.
+ */
+struct execute_state {
+	const uint8_t *push_bytes;
+	const struct nvrtx_vk_pipeline *pipeline;
+	uint32_t viewport[6];
+	bool viewport_set;
+	VkRect2D scissor;
+	bool scissor_set;
+	const struct nvrtx_vk_descriptor_set *sets[NVRTX_VK_SETS_MAX];
+	const struct nvrtx_vk_buffer *buffers[NVRTX_VK_VERTEX_BINDINGS_MAX];
+	uint64_t offsets[NVRTX_VK_VERTEX_BINDINGS_MAX];
+	const struct nvrtx_vk_buffer *index_buffer;
+	uint64_t index_offset;
+	uint32_t index_type;
+	uint32_t push[NVRTX_VK_PUSH_BYTES / 4U];
+	uint32_t push_end;
+	bool in_pass;
+	struct nvrtx_exec_target target;
+	bool target_written;
+	VkRect2D area;
+	struct nvrtx_exec_target resolve;
+	bool shadowed;
+	void *backing;
+	bool known;
+	int32_t known_x0;
+	int32_t known_y0;
+	int32_t known_x1;
+	int32_t known_y1;
+};
+
+/*
  * The executor's own programs (a textured quad placed by push constants,
  * the draw-test draw's) and the session's slots.
  *
@@ -292,7 +329,8 @@ struct execute_held {
  * class_ready that a run on the session's channel set the 3D class's
  * initial state and the channel keeps it; kept is what the shadow holds,
  * reuse what one draw leaves the next, held what the GPU holds after
- * the last application draw.  segment is where the push buffer begun
+ * the last application draw, state the command buffer's being run (its
+ * own here, so a submission allocates nothing for it).  segment is where the push buffer begun
  * last starts in the slot's push part and at where it goes on;
  * constants, headers and samplers how much of their parts the slot's push
  * buffers use (from the slot's first, at segment 0), draws and quads how many
@@ -330,46 +368,10 @@ struct nvrtx_vk_execute {
 	struct execute_kept kept;
 	struct execute_reuse reuse;
 	struct execute_held held;
+	struct execute_state state;
 	/* The owner's generation: the shader model of the programs and the 3D class of the push buffers. */
 	uint32_t shader_model;
 	uint32_t threed_class;
-};
-
-/*
- * What a command buffer's records have bound so far, and the pass they
- * are in; push_bytes are the command buffer's push constant bytes, push
- * the ones bound, none from push_end on (still zero).  A
- * pass drawn in the shadow: backing is its target's memory's (NULL
- * without one), and known says the shadow holds the target's
- * pixels in the region known_x0, known_y0 to known_x1, known_y1 at its start.
- */
-struct execute_state {
-	const uint8_t *push_bytes;
-	const struct nvrtx_vk_pipeline *pipeline;
-	uint32_t viewport[6];
-	bool viewport_set;
-	VkRect2D scissor;
-	bool scissor_set;
-	const struct nvrtx_vk_descriptor_set *sets[NVRTX_VK_SETS_MAX];
-	const struct nvrtx_vk_buffer *buffers[NVRTX_VK_VERTEX_BINDINGS_MAX];
-	uint64_t offsets[NVRTX_VK_VERTEX_BINDINGS_MAX];
-	const struct nvrtx_vk_buffer *index_buffer;
-	uint64_t index_offset;
-	uint32_t index_type;
-	uint32_t push[NVRTX_VK_PUSH_BYTES / 4U];
-	uint32_t push_end;
-	bool in_pass;
-	struct nvrtx_exec_target target;
-	bool target_written;
-	VkRect2D area;
-	struct nvrtx_exec_target resolve;
-	bool shadowed;
-	void *backing;
-	bool known;
-	int32_t known_x0;
-	int32_t known_y0;
-	int32_t known_x1;
-	int32_t known_y1;
 };
 
 /* One quad an internal draw makes: the destination, the source texture (pitch linear or tiled) and its region in pixels. */
@@ -468,9 +470,8 @@ nvrtx_vk_execute(
 		return error;
 
 	/* The state starts empty. */
-	state = kern_calloc(1U, sizeof(*state));
-	if (state == NULL)
-		return ENOMEM;
+	state = &execute->state;
+	kern_memset(state, 0, sizeof(*state));
 	state->push_bytes = command->push_bytes;
 
 	/*
@@ -501,7 +502,6 @@ nvrtx_vk_execute(
 	/* The rest of the push buffer. */
 	if (error == 0)
 		error = execute_submit(session, execute);
-	kern_free(state);
 
 	/* Reports a run that failed. */
 	if (error != 0)

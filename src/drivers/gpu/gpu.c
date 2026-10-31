@@ -121,6 +121,14 @@ struct drv_gpu_device {
 	struct mutex monitor_lock;
 	struct thread *monitor;
 	unsigned monitor_stopping;
+
+	/*
+	 * Whether the supervisor sleeps after a whole scan (0 while it scans or
+	 * acts) and the deadline it sleeps until (0: none); the registry lock
+	 * protects them.
+	 */
+	unsigned monitor_asleep;
+	uint64_t monitor_until;
 };
 
 /* The display commit ABI's sizes are the same for every userspace word size. */
@@ -225,6 +233,15 @@ struct gpu_fence_binding {
 struct gpu_session {
 	struct drv_gpu_device *device;
 	void *backend;
+
+	/*
+	 * The kernel copy of a command stream (GPU_COMMAND, GPU_JOB_SUBMIT) up
+	 * to GPU_STREAM_KEPT_BYTES, kept from one stream to the next (stream_bytes
+	 * its size, 0 before the first); admission lets one stream use it at a
+	 * time, and no backend keeps it after its callback.
+	 */
+	uint8_t *stream;
+	uint32_t stream_bytes;
 	struct gpu_resource *resources;
 	uint32_t resource_count;
 	uint64_t next_mapping_offset;
@@ -321,6 +338,9 @@ static struct spinlock gpu_registry_lock = {
 #ifndef GPU_IOCTL_TIMING
 #define GPU_IOCTL_TIMING 0
 #endif
+
+/* The longest command stream whose kernel copy an open keeps for the next one. */
+#define GPU_STREAM_KEPT_BYTES	16384U
 
 /* The threads and the pairs of requests the timing keeps apart. */
 #define GPU_TIMING_THREADS	32U
@@ -435,6 +455,9 @@ static int gpu_capacity_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_policy_ioctl(struct gpu_session *session, uintptr_t argument);
 static void gpu_capacity_changed_locked(struct drv_gpu_device *device);
 static bool gpu_device_stop_waiting_locked(const struct drv_gpu_device *device);
+static void gpu_monitor_notify_locked(struct drv_gpu_device *device, const struct drv_gpu_completion *completion);
+static int gpu_stream_take(struct gpu_session *session, uint32_t bytes, void **buffer);
+static void gpu_stream_give(struct gpu_session *session, void *buffer);
 static void gpu_retirement_changed_locked(struct gpu_session *session);
 static bool gpu_stop_waiting_locked(const struct gpu_session *session);
 static int gpu_session_error_locked(struct gpu_session *session);
@@ -1739,6 +1762,7 @@ gpu_session_drop(
 	spin_unlock_irqrestore(&gpu_registry_lock, irq);
 
 	/* Frees per-open memory while its device still has a withdrawal barrier. */
+	kern_free(session->stream);
 	kern_free(session);
 
 	/* Zero tells the owner that every backend close callback has finished. */
@@ -3501,6 +3525,59 @@ gpu_transfer_ioctl(
 	return 0;
 }
 
+/*
+ * Gives the kernel copy of a stream of bytes: the open's kept buffer when
+ * the stream fits GPU_STREAM_KEPT_BYTES (made, or grown, at its first such
+ * stream), else one of its own.  The caller is inside the open's
+ * admission.  Returns 0 or ENOMEM.
+ */
+static int
+gpu_stream_take(
+	struct gpu_session *session,
+	uint32_t bytes,
+	void **buffer)
+{
+	uint8_t *grown;
+	uint32_t size;
+
+	/* A long stream gets storage of its own. */
+	if (bytes > GPU_STREAM_KEPT_BYTES) {
+		*buffer = kern_malloc(bytes);
+		if (*buffer == NULL)
+			return ENOMEM;
+		return 0;
+	}
+
+	/* The kept buffer, grown in whole kibibytes when the stream does not fit it. */
+	if (session->stream == NULL || session->stream_bytes < bytes) {
+		size = (bytes + 1023U) & ~1023U;
+		grown = kern_malloc(size);
+		if (grown == NULL)
+			return ENOMEM;
+		kern_free(session->stream);
+		session->stream = grown;
+		session->stream_bytes = size;
+	}
+
+	/* Succeeded: the stream goes into the kept buffer. */
+	*buffer = session->stream;
+	return 0;
+}
+
+/* Gives back a stream's kernel copy: the open's kept buffer stays, any other is freed. */
+static void
+gpu_stream_give(
+	struct gpu_session *session,
+	void *buffer)
+{
+	/* The kept buffer stays for the next stream. */
+	if (buffer == session->stream)
+		return;
+
+	/* Succeeded: storage of its own is freed. */
+	kern_free(buffer);
+}
+
 /* Submits one copied command stream while leaving completion to its protocol. */
 static int
 gpu_command_ioctl(
@@ -3550,14 +3627,14 @@ gpu_command_ioctl(
 		return error;
 
 	/* Allocates one bounded kernel snapshot of the command payload. */
-	buffer = kern_malloc(request.bytes);
-	if (buffer == NULL)
-		return ENOMEM;
+	error = gpu_stream_take(session, request.bytes, &buffer);
+	if (error != 0)
+		return error;
 
 	/* A failed input copy never reaches a backend callback. */
 	error = copyin(pointer, buffer, request.bytes);
 	if (error != 0) {
-		kern_free(buffer);
+		gpu_stream_give(session, buffer);
 		return error;
 	}
 
@@ -3575,12 +3652,12 @@ gpu_command_ioctl(
 		buffer,
 		request.bytes);
 	if (error != 0) {
-		kern_free(buffer);
+		gpu_stream_give(session, buffer);
 		return error;
 	}
 
 	/* Releases the copied stream after synchronous backend receipt finishes. */
-	kern_free(buffer);
+	gpu_stream_give(session, buffer);
 
 	/* Succeeded: the backend received the stream, not necessarily its execution result. */
 	return 0;
@@ -6031,7 +6108,7 @@ gpu_job_reserve_ioctl(
 	completion->job_state = GPU_JOB_RESERVED;
 	completion->job_deadline = gpu_monitor_deadline(CONFIG_GPU_JOB_RESERVATION_MS);
 	completion->backend_owned = 1U;
-	waitq_wake_all(&device->monitor_waitq);
+	gpu_monitor_notify_locked(device, completion);
 
 	spin_unlock_irqrestore(&gpu_registry_lock, irq);
 
@@ -6067,7 +6144,7 @@ gpu_job_reserve_ioctl(
 	irq = spin_lock_irqsave(&gpu_registry_lock);
 
 	completion->job_action = 0U;
-	waitq_wake_all(&session->device->monitor_waitq);
+	gpu_monitor_notify_locked(session->device, completion);
 
 	spin_unlock_irqrestore(&gpu_registry_lock, irq);
 
@@ -6189,7 +6266,7 @@ gpu_job_action_ioctl(
 	irq = spin_lock_irqsave(&gpu_registry_lock);
 
 	completion->job_action = 0U;
-	waitq_wake_all(&session->device->monitor_waitq);
+	gpu_monitor_notify_locked(session->device, completion);
 
 	spin_unlock_irqrestore(&gpu_registry_lock, irq);
 
@@ -6359,7 +6436,7 @@ gpu_job_admit(
 		completion->reservation_pending = 0U;
 		completion->job_deadline = gpu_monitor_deadline(CONFIG_GPU_JOB_EXECUTION_MS);
 		session->native_submitted = 1U;
-		waitq_wake_all(&session->device->monitor_waitq);
+		gpu_monitor_notify_locked(session->device, completion);
 	}
 
 	spin_unlock_irqrestore(&gpu_registry_lock, irq);
@@ -6693,6 +6770,7 @@ gpu_job_submit_ioctl(
 	uintptr_t pointer;
 	void *reservation;
 	uint8_t *buffer;
+	void *stream;
 	uint64_t sequence;
 	uint32_t outcome;
 	unsigned long irq;
@@ -6728,26 +6806,27 @@ gpu_job_submit_ioctl(
 		return error;
 
 	/* The stream's kernel copy, before anything is reserved. */
-	buffer = kern_malloc(request.bytes);
-	if (buffer == NULL)
-		return ENOMEM;
+	error = gpu_stream_take(session, request.bytes, &stream);
+	if (error != 0)
+		return error;
+	buffer = stream;
 	error = copyin(pointer, buffer, request.bytes);
 	if (error != 0) {
-		kern_free(buffer);
+		gpu_stream_give(session, buffer);
 		return error;
 	}
 
 	/* Supervision exists before native submission becomes possible; the payload's reference covers a close. */
 	error = gpu_monitor_start(device);
 	if (error != 0) {
-		kern_free(buffer);
+		gpu_stream_give(session, buffer);
 		return error;
 	}
 	handle = NULL;
 	if (request.fd != -1) {
 		error = gpu_fence_get(session, request.fd, 0U, &handle);
 		if (error != 0) {
-			kern_free(buffer);
+			gpu_stream_give(session, buffer);
 			return error;
 		}
 	}
@@ -6758,7 +6837,7 @@ gpu_job_submit_ioctl(
 		error = gpu_completion_reserve(session, request.sequence, &completion);
 	if (error != 0) {
 		handle_put(handle);
-		kern_free(buffer);
+		gpu_stream_give(session, buffer);
 		return error;
 	}
 	sequence = request.sequence;
@@ -6814,17 +6893,17 @@ gpu_job_submit_ioctl(
 		error = 0;
 	}
 
-	/* The action's pin goes; the supervisor looks once at what changed. */
+	/* The action's pin goes; the supervisor looks at what changed when it matters to it. */
 	irq = spin_lock_irqsave(&gpu_registry_lock);
 
 	completion->job_action = 0U;
-	waitq_wake_all(&device->monitor_waitq);
+	gpu_monitor_notify_locked(device, completion);
 
 	spin_unlock_irqrestore(&gpu_registry_lock, irq);
 
 	gpu_completion_observer_leave(completion, 0U, 0U);
 	handle_put(handle);
-	kern_free(buffer);
+	gpu_stream_give(session, buffer);
 	if (error != 0)
 		return error;
 
@@ -8013,6 +8092,35 @@ gpu_retirement_changed_locked(
 }
 
 /*
+ * Wakes the supervisor for a record whose state or deadline changed, when
+ * that can matter to it: it is not asleep after a whole scan (the scan
+ * under way may have looked at the record before the change), an open's
+ * stop or close waits, or the record's deadline comes before the one it
+ * sleeps until (it computes every deadline from a scan, so a later one is
+ * seen when it wakes); the caller holds the registry lock.
+ */
+static void
+gpu_monitor_notify_locked(
+	struct drv_gpu_device *device,
+	const struct drv_gpu_completion *completion)
+{
+	uint64_t deadline;
+
+	/* The record's deadline while it is not terminal. */
+	deadline = 0U;
+	if (completion->completed == 0U)
+		deadline = completion->job_deadline;
+
+	/* Asleep, no stop waiting, and nothing due before its wake: nothing changes for it. */
+	if (device->monitor_asleep != 0U && !gpu_device_stop_waiting_locked(device) &&
+	    (deadline == 0U || (device->monitor_until != 0U && deadline >= device->monitor_until)))
+		return;
+
+	/* Succeeded: it scans again. */
+	waitq_wake_all(&device->monitor_waitq);
+}
+
+/*
  * Whether the open's stop waits for its records' retirements and ended
  * submissions (the supervisor's scan, gpu_monitor_step, looks at them only
  * then); the caller holds the registry lock.
@@ -8296,12 +8404,15 @@ gpu_monitor(
 		irq = spin_lock_irqsave(&gpu_registry_lock);
 
 		if (device->monitor_stopping == 0U) {
+			device->monitor_asleep = 1U;
+			device->monitor_until = deadline;
 			(void)waitq_sleep(
 				&device->monitor_waitq,
 				&gpu_registry_lock,
 				observed,
 				deadline,
 				0U);
+			device->monitor_asleep = 0U;
 		}
 
 		spin_unlock_irqrestore(&gpu_registry_lock, irq);
