@@ -228,3 +228,9 @@ struct gpu_job_retire {
    `plan/ws291/tests/run-gpu-job-host.sh` で、plain と ASan/UBSan。nvrtx の数え（queue_ran・queue_accepted）は vk-d3 の host 試験。
    nvrtx の runtime_job_command 自体と gpu_sends は host 試験に入らない（runtime.c・vk-node.c は host で build しない）: 実機の RTX で
    成功の道、失敗の道は未試験（fault の注入の knob は後の課題）。Venus は SUBMIT の bit を出さず、今の道と RETIRE だけを通る。
+
+### 実装と実機の結果（2026-10-31 P3、[ws291-p024](phase024/phase.md) に詳細）
+
+- kernel 84f786dce・5a03a0e95、libvulkan は phase024 の記録の commit。RTX 2070 の subs-1000（timing 無し）: c8（3 本の道）28.7 → 案 A・B 32.6 fps、
+  subs-100 258.5 → 299.5 fps、big は揺れの内、100 copies の still は画素差 0。効果の基準（上）は 1 round ずつの比べで、boot ごとの揺れ（base で
+  17.0〜20.0）より大きいが、同じ window の 3 round 交互の比べは未実施。

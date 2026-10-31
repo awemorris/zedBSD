@@ -166,7 +166,31 @@ struct VkQueue_T {
 	pthread_mutex_t mutex;
 };
 
-/* Keeps one encoded command independent of other recording threads. */
+struct vulkan_sync;
+struct vulkan_notification;
+
+/*
+ * A queue submission sent as one supervised job (GPU_JOB_SUBMIT): the
+ * payload's descriptor and generation and the queue's timeline (in), the
+ * job's sequence, outcome and the stream's error the kernel reported (out,
+ * outcome 0 when the call failed before native work).  notification is
+ * the ledger entry made for it, and sync the fence it completes.
+ */
+struct vulkan_queue_job {
+	int fd;
+	uint64_t generation;
+	uint32_t timeline;
+	uint64_t sequence;
+	uint32_t outcome;
+	int error;
+	struct vulkan_notification *notification;
+	struct vulkan_sync *sync;
+};
+
+/*
+ * Keeps one encoded command independent of other recording threads; a
+ * queue submission's transaction goes as job when it is set.
+ */
 struct vulkan_writer {
 	struct vulkan_allocator allocator;
 	VkSystemAllocationScope scope;
@@ -176,6 +200,7 @@ struct vulkan_writer {
 	size_t bytes;
 	size_t capacity;
 	VkResult error;
+	struct vulkan_queue_job *job;
 };
 
 /*
@@ -422,6 +447,8 @@ void vulkan_wake_destroy(struct vulkan_wake *wake);
 void vulkan_wake_notify(struct VkDevice_T *device, struct vulkan_context *context);
 void vulkan_wake_drain(struct vulkan_wake *wake);
 void vulkan_context_error(struct vulkan_context *context, VkResult error);
+void vulkan_sync_reap_locked(struct vulkan_context *context);
+void vulkan_sync_job_submitted_locked(struct vulkan_context *context, struct vulkan_queue_job *job);
 void vulkan_device_error(struct VkDevice_T *device, VkResult error);
 
 /* Serializes a single GPU session without serializing GPU completion waits. */

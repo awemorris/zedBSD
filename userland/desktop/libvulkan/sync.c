@@ -62,6 +62,7 @@ static VkResult sync_event_operation(VkDevice device, VkEvent event, uint32_t op
 static struct vulkan_notification *sync_notification_find(struct vulkan_context *context, uint64_t sequence);
 static VkResult sync_notifications_reap(struct vulkan_context *context, unsigned *retired);
 static VkResult sync_notifications_reap_if(struct vulkan_context *context, unsigned *retired, int force);
+static VkResult sync_notifications_retire(struct vulkan_context *context, unsigned *retired);
 static VkResult sync_notification_wait(struct vulkan_context *context, uint64_t sequence, uint64_t timeout_ns);
 static VkResult sync_notification_poll(struct vulkan_context *context, uint64_t timeout_ns, struct pollfd *descriptors, uint32_t count);
 static void sync_release_storage(struct vulkan_object *object);
@@ -1716,6 +1717,55 @@ sync_notification_find(
  */
 #define VULKAN_REAP_THRESHOLD	8U
 
+/*
+ * Reaps the ledger's ended records before a job is submitted in one call,
+ * as a reservation does (the caller holds the context's mutex); a lost
+ * device is latched on the context.
+ */
+void
+vulkan_sync_reap_locked(
+	struct vulkan_context *context)
+{
+	unsigned retired;
+
+	/* The result is the context's error, which the submission reads next. */
+	(void)sync_notifications_reap_if(context, &retired, 0);
+}
+
+/*
+ * Records a job the kernel took in one call (the caller holds the context's
+ * mutex): a committed or faulted job's record goes on the ledger, with no
+ * waiter (a fault also loses the context, as a fault cancel does); a
+ * canceled job left no record, and its entry is freed.
+ */
+void
+vulkan_sync_job_submitted_locked(
+	struct vulkan_context *context,
+	struct vulkan_queue_job *job)
+{
+	struct vulkan_notification *notification;
+
+	/* A canceled job's payload stays as it was, unbound. */
+	notification = job->notification;
+	if (job->outcome == GPU_JOB_SUBMIT_CANCELED) {
+		free(notification);
+		job->notification = NULL;
+		return;
+	}
+
+	/* The kernel's record, observed and consumed later by a wait or a reap. */
+	notification->sequence = job->sequence;
+	notification->waiters = 0;
+	notification->next = context->notifications;
+	context->notifications = notification;
+	job->sync->notification = job->sequence;
+	job->notification = NULL;
+
+	/* Uncertain native work loses the context. */
+	if (job->outcome != GPU_JOB_SUBMIT_COMMITTED)
+		vulkan_context_error(context, VK_ERROR_DEVICE_LOST);
+}
+
 /* Reaps when the ledger has grown past the threshold, or always when forced. */
 static VkResult
 sync_notifications_reap_if(
@@ -1745,6 +1795,80 @@ sync_notifications_reap_if(
 	return status;
 }
 
+/*
+ * Consumes the ledger's ended records without a waiter by GPU_JOB_RETIRE,
+ * up to GPU_JOB_RETIRE_MAX a call, until every unpinned record was asked
+ * once: a retired one leaves the ledger (its error loses the context), a
+ * pending one stays, a missing one loses the context (as a failed
+ * consuming wait does).  The caller holds the context's mutex.
+ */
+static VkResult
+sync_notifications_retire(
+	struct vulkan_context *context,
+	unsigned *retired)
+{
+	struct gpu_job_retire_entry entries[GPU_JOB_RETIRE_MAX];
+	struct gpu_job_retire request;
+	struct vulkan_notification **link;
+	struct vulkan_notification *notification;
+	struct vulkan_notification *resume;
+	uint32_t count;
+	uint32_t index;
+	int error;
+
+	/* Batches from the ledger's head; resume is the first record the next batch looks at. */
+	resume = context->notifications;
+	while (resume != NULL) {
+		count = 0;
+		memset(entries, 0, sizeof(entries));
+		for (notification = resume; notification != NULL && count < GPU_JOB_RETIRE_MAX; notification = notification->next) {
+			if (notification->waiters == 0)
+				entries[count++].sequence = notification->sequence;
+		}
+		resume = notification;
+		if (count == 0)
+			break;
+
+		/* One call for the batch. */
+		memset(&request, 0, sizeof(request));
+		request.version = GPU_ABI_VERSION;
+		request.size = sizeof(request);
+		request.count = count;
+		request.address = (uint64_t)(uintptr_t)entries;
+		error = ioctl(context->fd, GPU_JOB_RETIRE, &request);
+		if (error != 0) {
+			if (errno == EINTR)
+				return VK_SUCCESS;
+			vulkan_context_error(context, VK_ERROR_DEVICE_LOST);
+			return VK_ERROR_DEVICE_LOST;
+		}
+
+		/* Each answer: retired records leave the ledger, pending ones stay. */
+		for (index = 0; index < count; index++) {
+			if (entries[index].state == GPU_JOB_RETIRE_PENDING)
+				continue;
+			if (entries[index].state != GPU_JOB_RETIRE_RETIRED || entries[index].status != 0U) {
+				vulkan_context_error(context, VK_ERROR_DEVICE_LOST);
+				return VK_ERROR_DEVICE_LOST;
+			}
+			for (link = &context->notifications; *link != NULL; link = &(*link)->next) {
+				if ((*link)->sequence == entries[index].sequence && (*link)->waiters == 0) {
+					notification = *link;
+					*link = notification->next;
+					if (resume == notification)
+						resume = notification->next;
+					free(notification);
+					(*retired)++;
+					break;
+				}
+			}
+		}
+	}
+
+	/* Succeeded: only still-pending or pinned records remain on the ledger. */
+	return VK_SUCCESS;
+}
+
 /* Reclaims strict records and publishes terminal failure before releasing the ledger lock. */
 static VkResult
 sync_notifications_reap(
@@ -1758,6 +1882,11 @@ sync_notifications_reap(
 
 	/* The context mutex keeps each pending sequence on exactly one local ledger. */
 	*retired = 0;
+
+	/* A kernel that retires records in batches takes the ledger's unpinned ones 64 at a time. */
+	if ((context->capabilities & GPU_CAP_JOB_RETIRE) != 0U)
+		return sync_notifications_retire(context, retired);
+
 	link = &context->notifications;
 	while (*link != NULL) {
 		notification = *link;

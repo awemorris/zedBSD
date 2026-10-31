@@ -11,6 +11,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <uapi/gpu-job.h>
 #include "sync-internal.h"
 
 #define QUEUE_FENCE_RESET_BATCH 64U
@@ -65,6 +66,8 @@ static VkResult queue_private_fence(struct VkQueue_T *queue, struct vulkan_queue
 static VkResult queue_enqueue(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, const VkBindSparseInfo *binds, VkFence fence, VkBool32 sparse, VkBool32 locked);
 static VkResult queue_attempt(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, const VkBindSparseInfo *binds, VkFence fence, VkBool32 sparse, struct vulkan_queue_transaction *transaction, struct vulkan_sync *completion, VkBool32 *accepted, uint64_t *capacity_sequence, VkBool32 *prepared);
 static VkResult queue_reset_completed(struct VkQueue_T *queue);
+static VkBool32 queue_has_commands(uint32_t count, const VkSubmitInfo *submits);
+static VkResult queue_submit_job(struct VkQueue_T *queue, struct vulkan_writer *writer, uint32_t count, const VkSubmitInfo *submits, uint64_t serial, uint32_t replies, struct vulkan_sync *completion, struct vulkan_reader *reader, VkResult *ended, VkBool32 *prepared, VkBool32 *submitted, VkBool32 *accepted);
 static void queue_write_waits(struct vulkan_writer *writer, struct vulkan_queue_transaction *transaction, uint32_t count, const VkSemaphore *semaphores, const VkPipelineStageFlags *stages, VkBool32 has_stages);
 static void queue_write_signals(struct vulkan_writer *writer, uint32_t count, const VkSemaphore *semaphores);
 static void queue_write_submit(struct vulkan_writer *writer, struct vulkan_queue_transaction *transaction, const VkSubmitInfo *submit);
@@ -441,6 +444,7 @@ queue_attempt(
 	struct vulkan_reader reader;
 	VkResult status;
 	VkResult ended;
+	VkBool32 submitted;
 	size_t index;
 	uint32_t request;
 	uint32_t replies;
@@ -499,6 +503,39 @@ queue_attempt(
 	/* The exact proof and all marker ownership must exist before native acceptance. */
 	queue_write_handle(&writer, (uint64_t)(uintptr_t)fence);
 	status = writer.error;
+
+	/*
+	 * A kernel that takes the job, its stream and its commit in one call
+	 * gets it so (one system call instead of three); a call it could not
+	 * take that way ran nothing, and the three calls follow.
+	 */
+	submitted = VK_FALSE;
+	if (status == VK_SUCCESS && sparse == VK_FALSE &&
+	    (device->object.context->capabilities & GPU_CAP_JOB_SUBMIT) != 0U &&
+	    device->object.context->sync_command != VK_FALSE) {
+		status = queue_submit_job(queue, &writer, count, submits, serial, replies, completion, &reader, &ended, prepared,
+					  &submitted, accepted);
+	}
+	if (submitted != VK_FALSE) {
+		if (*accepted != VK_FALSE) {
+			for (index = 0; index < transaction->count; index++) {
+				if (transaction->waits[index].software != VK_FALSE)
+					transaction->waits[index].sync->software_signaled = VK_FALSE;
+			}
+			completion->software_signaled = VK_FALSE;
+			vulkan_content_commit(device, count, submits);
+		}
+		if (ended != VK_SUCCESS) {
+			status = VK_ERROR_DEVICE_LOST;
+			if (ended == VK_ERROR_OUT_OF_HOST_MEMORY || ended == VK_ERROR_OUT_OF_DEVICE_MEMORY)
+				status = ended;
+		}
+		vulkan_sync_device_error(device, status);
+		pthread_mutex_unlock(&device->mutex);
+		vulkan_reader_finish(&reader);
+		vulkan_writer_finish(&writer);
+		return status;
+	}
 	if (status == VK_SUCCESS)
 		status = vulkan_sync_job_reserve(queue, completion, &reservation, capacity_sequence, prepared);
 
@@ -533,6 +570,16 @@ queue_attempt(
 			vulkan_content_commit(device, count, submits);
 	}
 
+	/*
+	 * An out-of-memory answer to a submission of command buffers is no
+	 * proof that none of their work reached the GPU (a renderer may have
+	 * run the ones before the one that failed): the job ends as a fault,
+	 * not a cancel (BUG-381).
+	 */
+	if ((status == VK_ERROR_OUT_OF_HOST_MEMORY || status == VK_ERROR_OUT_OF_DEVICE_MEMORY) && sparse == VK_FALSE &&
+	    queue_has_commands(count, submits))
+		status = VK_ERROR_DEVICE_LOST;
+
 	/* Committed work retains K supervision; definite native refusal releases only its unused reservation. */
 	mark = vulkan_timing_start();
 	status = vulkan_sync_job_finish(queue, completion, reservation, status, *accepted);
@@ -560,6 +607,107 @@ queue_attempt(
 
 	/* Succeeded: the kernel owns this exact native job independently of userspace progress. */
 	return VK_SUCCESS;
+}
+
+/* Tells whether any of the submits carries a command buffer. */
+static VkBool32
+queue_has_commands(
+	uint32_t count,
+	const VkSubmitInfo *submits)
+{
+	uint32_t request;
+
+	/* The first submit with one answers. */
+	for (request = 0; request < count; request++) {
+		if (submits[request].commandBufferCount != 0U)
+			return VK_TRUE;
+	}
+
+	/* Succeeded: none carries one. */
+	return VK_FALSE;
+}
+
+/*
+ * Sends a submission's transaction as one supervised job (GPU_JOB_SUBMIT):
+ * the completion's payload prepared, a ledger entry made, then the
+ * transaction with the job; the kernel reserves, runs and commits or
+ * cancels it.  submitted says the kernel took it (accepted that it was
+ * committed); a job it did not take (no room, deferred) ran nothing and
+ * leaves the reader empty for the three-call way.  Returns the
+ * submission's result when submitted.
+ */
+static VkResult
+queue_submit_job(
+	struct VkQueue_T *queue,
+	struct vulkan_writer *writer,
+	uint32_t count,
+	const VkSubmitInfo *submits,
+	uint64_t serial,
+	uint32_t replies,
+	struct vulkan_sync *completion,
+	struct vulkan_reader *reader,
+	VkResult *ended,
+	VkBool32 *prepared,
+	VkBool32 *submitted,
+	VkBool32 *accepted)
+{
+	struct VkDevice_T *device;
+	struct vulkan_queue_job job;
+	VkResult status;
+
+	/* The payload's generation, prepared once for this submission. */
+	device = queue->device;
+	*submitted = VK_FALSE;
+	*accepted = VK_FALSE;
+	*ended = VK_SUCCESS;
+	memset(&job, 0, sizeof(job));
+	status = vulkan_external_fence_prepare_locked(device, completion, &job.fd, &job.generation, *prepared == VK_FALSE ? VK_TRUE : VK_FALSE);
+	if (status != VK_SUCCESS) {
+		*submitted = VK_TRUE;
+		return status;
+	}
+	*prepared = VK_TRUE;
+
+	/* The ledger entry the kernel's record will need. */
+	job.notification = calloc(1, sizeof(*job.notification));
+	if (job.notification == NULL) {
+		*submitted = VK_TRUE;
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+	job.timeline = queue->timeline_index;
+	job.sync = completion;
+
+	/* The transaction as the job. */
+	writer->job = &job;
+	if (replies == 0U) {
+		status = vulkan_command_execute(device->object.context, writer, 8, reader, VK_TRUE);
+	} else {
+		status = queue_execute_pending(device, writer, count, submits, serial, replies, reader, ended);
+	}
+	writer->job = NULL;
+
+	/* Not taken: nothing ran, the three calls follow. */
+	if (job.outcome == 0U || job.outcome == GPU_JOB_SUBMIT_DEFERRED) {
+		free(job.notification);
+		vulkan_reader_finish(reader);
+		vulkan_reader_init(reader, NULL, 0);
+		*ended = VK_SUCCESS;
+		return VK_SUCCESS;
+	}
+
+	/* Taken: committed work is accepted; a fault lost the context. */
+	*submitted = VK_TRUE;
+	if (job.outcome == GPU_JOB_SUBMIT_COMMITTED) {
+		*accepted = VK_TRUE;
+		return status;
+	}
+	if (job.outcome == GPU_JOB_SUBMIT_FAULTED)
+		return VK_ERROR_DEVICE_LOST;
+
+	/* Canceled: the submission's own result (a refusal), never success. */
+	if (status == VK_SUCCESS)
+		status = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+	return status;
 }
 
 /*
