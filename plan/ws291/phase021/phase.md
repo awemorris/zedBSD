@@ -2,9 +2,9 @@
 
 # ws291-p021: Raspberry Pi 5（V3D 7.1）で重い 3D の model を、スペックの比で決めた目標の fps に
 
-Status: in-progress（2026-11-01 05:45 P4 q1784-i06: 画面が出て、画面の mview c74 49.2〜49.9 fps（目標 50 の境）、desktop は定常 60・launch 57・drag 58。再開点は末尾）
+Status: in-progress（2026-11-01 05:45 P4 q1784-i06: 画面が出て、画面の mview c74 49.2〜49.9 fps（目標 50 の境）、desktop は定常 60・launch 57・drag 58。再開点は末尾。06:49 P4 q1817-i01: main b2392803f は Pi 5 で final2 と同じ（回帰なし、checksum 同じ）、VF2 の game mode は c1 136→168・c13 51.6→56.0 fps）
 Parent: [WS291](../ws.md)
-Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）、q1784-i05・i06（P4、2026-11-01）
+Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）、q1784-i05・i06（P4、2026-11-01）、q1817-i01（P4、2026-11-01、main の計測だけ）
 
 ## 目的
 
@@ -293,6 +293,68 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
 - a94ea9cfb・2dd4c7e20: 20 ms 以上かかった pass ごとに `v3d: slow pass op= draws= size= us prep= exec= tex= copy= prog= alloc= tfu=時間/数 bin= render=` と
   `v3d: slow pass output=… tfu=run:WxH:g世代…`（2 秒の window に 4 行まで）。board の行（firmware に問う）は window の report の時だけにした（slow pass の行ごとに問うと c62 が 135 ms になった）。
 - 確かめ: Pi 5（config-rpi5-shot.mk）・Pi 4（config/ci/config-rpi4.mk）の vmunix が warning 0、bin-draw-host-test PASS、Pi 5 の offscreen の checksum が同じ（c1・c21・c62・c74）。
+
+### main b2392803f の計測（2026-11-01 05:46〜06:19、P4 q1817-i01、10.0.30.7）
+
+- 2026-11-01 ユーザーから、WS291 の最新（Pi 5 の p021、RTX の copyin・copyout の 1 page の近道と fence の無い submit の私用の fence の省き）を main に入れた後に、Pi 5 と VF2 で性能を測る、という趣旨の指示を受けた（Q1 経由、source は変えない）。
+- build: `make -j16 ZEDBSD_CONFIG=plan/ws291/tests/config-rpi5-shot.mk BUILD=build/q1817-pi build/q1817-pi/{vmunix,bin/mview,bin/wayland,bin/aat-input}`（b2392803f、warning 0、vmunix cksum 3102800023）。
+- 前 = 板の final2（524920034、2dd4c7e20）と前回の program（offscreen は build/p021-u5e の mview、画面は build/p021-s5）。後 = build/q1817-pi の kernel と program。
+  命令は前回と同じ（offscreen `TFU=1 COPIES='1 21 62 74' FRAMES=301`、画面 `COPIES='1 21 62 74' SPIN=12 MVIEW_ARGS=--model=/root/p021/qs40`、desktop `CONSOLE=0`、`RUNS=2`）。
+  offscreen は image の library（libvulkan も image の物）、画面の mview は PROGRAMS の library。証拠は build/tmp/q1817/（driver.txt・ab.txt・各 summary.txt）。
+- 最初の前の run（板は 05:35 の起動のまま）は速かった（offscreen c21 125.8・c74 52.05、画面 c74 53.7〜53.9）が、再起動の後は前も後も同じ所に戻る。
+  よって比べは再起動ごとに前・後を交互に 2 回ずつ（ab1・ab2、各起動で画面の mview → offscreen）で見る。起動ごとの揺れ（c21 で 104〜125）が kernel の差より大きい。
+
+| fps | 前回の記録（04:16・04:30） | 前（final2、2 つの起動で 2 run） | 後（b2392803f、3 つの起動で 4 run） |
+| --- | --- | --- | --- |
+| offscreen c1 | 365（2.74 ms） | 337.8・337.8 | 340.5・339.8・338.6・337.8 |
+| offscreen c21 | 107.6 | 113.6・113.3 | 113.7・113.6・113.8・113.5 |
+| offscreen c62 | 56.3 | 59.43・59.36 | 59.68・59.41・58.20・58.22 |
+| offscreen c74 | 48.3（20.69 ms） | 50.94・52.20 | 51.12・50.97・52.26・50.83 |
+| 画面 c1 | 321.6 | 323.4・305.2 | 299.5・296.8・311.5・298.0 |
+| 画面 c21 | 111.6〜114.6 | 111.8・104.5 | 106.5・108.1・106.7・107.1 |
+| 画面 c62 | 56.2 | 57.55・57.35 | 57.74・58.02・56.53・56.65 |
+| 画面 c74 | 49.18〜49.94 | 49.83・49.68 | 49.32・49.76・50.41・50.67 |
+
+- checksum: offscreen の 8 run の全部で c1 0c6e08c7・c21 dd5f82af・c62 90ab3e0f・c74 224da3e7（前回と同じ）。画面の mview は 8 run とも `KWL SCANOUT direct=1`。
+- desktop（graphical login、frame-ops、fps、run 1・2）:
+
+| 段 | 前回（s5、04:26） | 前（final2） | 後（b2392803f） |
+| --- | --- | --- | --- |
+| launch | 57 | 60・59 | 60・60 |
+| type | 61 | 61・61 | 61・61 |
+| output | 64 | 66・63 | 63・67 |
+| drag | 58 | 59・60 | 59・59 |
+| home | 61 | 59・61 | 60・60 |
+| wiseview | 61 | 61・61 | 64・62 |
+| keys・scroll・hover | 111・19・20 | 125・19・20、111・19・20 | 143・19・21、125・19・21 |
+
+  kernel の行の数え（fault・hang・job failed）は各 run 3 で、全部が起動の self-test の V9（self-branch の hang と reset）。
+- 結論: Pi 5 では b2392803f は final2 と同じ（差は起動ごとの揺れの中）。回帰は無い。RTX の (a) の copyin の近道は Pi 5 の mview・desktop の fps に見える差を作らない。(c) は nvrtx だけで V3D は変わらない。
+- 未実施: 起動ごとの揺れ（c21 104〜125、c74 49.7〜53.9）の原因（長く動いた起動が速い。memory の配置か clock か、未調査）。
+
+### VF2 の main b2392803f の計測（2026-11-01 06:31〜06:49、P4 q1817-i01、kei@10.0.30.2、電源はプラグ 3 AC276E432AE6）
+
+- build（b2392803f、warning 0）: timing の build/q1817-vf2t（`ZEDBSD_CONFIG=plan/ws291/tests/config-vf2.mk ZEDBSD_TEST_CPPFLAGS=-DPOWERVR_SUBMIT_TIMING=1`、vmunix 3220583395、wayland・mview・libvulkan・libwayland-client）と
+  回帰の build/q1817-vf2s（`config-vf2-shot.mk`、vmunix 3758577736）。password は環境変数だけで渡した（file・log に無し）。
+- 前 = ws309-p015 の段 4 の new と同じ build（P2 の worktree の build/p015vf2t、vmunix 1381433670、6f9cbfef8）。`plan/ws309/tests/vf2-p015.sh`（`OLD=q1817old COPIES='1 13' SPIN=12`）で同じ日に 2 回（2 回目は arm の順を逆、`CYCLES=2`）。
+  game mode（direct scanout、mailbox 4 枚、1920x1080、qs40）。証拠は build/tmp/q1817/vf2-p015・vf2-p015b。
+
+| fps | ws309-p015 の記録（2026-10-31） | 前（p015 の build、今日 2 回） | 後（b2392803f、今日 2 回） |
+| --- | --- | --- | --- |
+| c1 | 141.25 | 136.44・136.05 | **167.97・169.04** |
+| c13 | 52.50 | 51.51・51.75 | **56.04・55.99** |
+
+- 後は前より c1 で約 +23 %、c13 で約 +8 %（frame 平均 19.3 → 17.8 ms）。両方とも lent=1・direct=1・tiling 0x1、game の chain の copies 0。game ↔ window の往復は前・後とも全部 `MVIEW DONE`（8/8・2/2、refused 0・failed 0）。
+  差は 6f9cbfef8 から b2392803f までの全部（copyin・copyout の 1 page の近道を含む）で、どの commit の効果かは分けていない。
+- 回帰（`plan/ws291/tests/vf2-regress.sh build/tmp/q1817/vf2-regress build/q1817-vf2s`、`KEEP=1 OLD=q1817old`）: vkmatrix 109/109、`-p 3` PASS、`-r 3` 327/327、vkcoherency PASS、vkcompute 4096/4096、
+  desktop の compositor の error 0・desktop の起動 1、keiland-shot の PNG の cksum 518389155（ws291-p020 の s3 と同じ）。`sudo gpu-selftest` → `13 ok, 0 fail, 0 skip`。root は ufs（rw）。
+- 板の起動（[BUG-385](../../bugs/BUG-385.md) に記録）: 計測の 7 回の起動は全部 SSH が戻り、SD の読みの失敗は新しい kernel で 0〜1 回、板の元の kernel（2825517684）で 11・20 回（retry で通った）。
+- 板（06:49）: /boot/boot0/vmunix 3758577736（build/q1817-vf2s、b2392803f、回帰に通った）。元の 2825517684 は vmunix.q1817old（vmunix.p2old・vmunix.q1772orig も同じ）。zedbsd.cfg は触っていない。
+
+### 板の状態（2026-11-01 06:25、10.0.30.7）
+
+- /boot/boot0/vmunix: build/q1817-pi/vmunix（3102800023、b2392803f、config-rpi5-shot.mk）。vmunix.old: BUG-384 の確かめの kernel（4274819290）。vmunix.final2: 524920034。vmunix.k5c も残る。
+  cmdline.txt `login=console v3d.perf=1`。/boot/boot0 は 100 % 使っている（FAT）。
 
 ### 板の状態（2026-11-01 05:45、10.0.30.7）
 
