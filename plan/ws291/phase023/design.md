@@ -105,6 +105,7 @@
 - hardware は block-linear を読む: NVIDIA open-gpu-doc `classes/display/clc57e.h`（MIT）の `NVC57E_SET_STORAGE` は BLOCK_HEIGHT（bit 3:0、ONE_GOB = 0）と MEMORY_LAYOUT
   （bit 4、BLOCKLINEAR = 0、PITCH = 1）。Linux v6.19 の nouveau（`dispnv50/wndwc57e.c` `wndwc57e_image_set`、`wndw.c` の atomic の確かめ）は block-linear の時 pitch の field に
   「行の bytes / 64」を入れ、ctxdma に memory の kind を与える（`nv50_wndw_ctxdma_new`）。**nvrtx の VRAM の ctxdma と kind 0 の page で window が block-linear を読むかは未確認**（R3）。
+  → 2026-10-31（q1781-i03）: pitch の kind の ctxdma では window は GOB の中を並べ替え無しに読み画面が崩れた。block-linear の kind（bit 20）の ctxdma を足して直した（[phase.md](phase.md) の q1781-i03）。
 
 ### 1.6 他の GPU
 
