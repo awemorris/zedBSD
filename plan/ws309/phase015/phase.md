@@ -231,11 +231,27 @@
 - 試験の script `plan/ws309/tests/pi-p015.sh`（PI=address PROGRAMS=build、compositor を自分の socket で、mview の game を CYCLES 回、WSI の log、VIDEO で videoplayer の全画面 15 秒と
   firmware の decoder の kernel の行）。動画は build/p015video/high-{1080,720}p30.mp4（ffmpeg の testsrc2、H.264 High）。
 
+### Pi 4（10.0.30.6、P4 の BUG-378 の kernel eff578caf と config-rpi4-p015.mk の card、19:41〜20:0x）
+
+- BUG-378 の板の確かめ: 起動し userland・sshd・graphical login まで、dmesg（220 行）・kernel.log・messages に fatal/abort/panic 0。`ARM64 PAGING PASS`・`W^X PASS` は hal_puts（early
+  console）に出るので dmesg に無い（W^X の失敗は HAL_FATAL なので、起動した事が通った印）。Q1 へ報告済み。
+- mview は V3D 4.2 で `vkCreateGraphicsPipelines` -8（pixel・vertex とも）。p015 と無関係（ws291-p021 の記録: V3D の Vulkan の実行器は compositor の quad の形だけを受ける）。Pi 4 の 3D の game は確かめられない。
+- 動画（1080p30、`pi4-video.sh`、自分の socket の compositor、login=console に変えて）: base（main ea4317337）も branch も窓 358/360・全画面 352〜354/360。
+  branch の全画面は game mode に入るが videoplayer が lend を取らず 5 秒後に `not-taken` で合成へ（その 5 秒は画面が止まる）。原因は videoplayer の `vp_present_frame` が present の
+  `VK_SUBOPTIMAL_KHR` を `VK_SUCCESS` にしていた事（全 GPU の全画面の動画に効く）→ Q1 の OK で直した（db2371212、present の結果を返す、main.c が chain を作り直す）。
+  直した後: 全画面の chain `lent=1 copies=0`（349 present）、compositor の no-window frames 349・350、shown 352・late 8、window へ戻る（2 回とも）、
+  firmware の decoder の失敗の行（came back unread・not answered・no firmware decoder・execution failed）0、`v3d: video` の decode は続く → Pi 4 で動画を game mode から外す必要は無い。
+- session（login=graphical）の中では videoplayer が約 1 fps（acquire 約 970 ms/frame、窓・全画面とも）。base の compositor と client を session に入れても同じ（窓 shown 17、全画面 18）
+  → p015 の後退ではない（既存、Q1 が BUG にする）。
+- 板は元に戻した: cmdline login=graphical、/bin/wayland・libvulkan・libwayland-client・libkeiland を元の cksum に、再起動して session が上がる。板に残した物（Q1 へ）:
+  `*.p015old` の 4 file、/boot/boot0/cmdline.txt.p015、/root/p015swap。
+- Pi 5: main a090d4e6f（BUG-378 の直しを含む）を 6b8a08f57 で merge、image build/p015rpi5/hdd-image.img（322961408 byte、sha256 d8b3f891…）、1080p・login=console の card
+  build/p015rpi5/card-1080p.img（sha256 71b6b26b…）。
+
 ### 再開点（2026-10-31 18:3x、P2 q1782-i02）
 
 - 済み: QEMU PASS、VF2 PASS（c13 52.5 fps、copy 0、往復 8/8、板を戻した）、RTX は貸し出しの側（block-linear の lend、copy 0、quads 0、往復 3/3）まで。branch の先頭 e0a6a4f40 を Q1 の merge へ。
-- 未達: big-100 の貸す時の約 20% の低下（fence の待ちと段の外、原因は未特定）、Pi 4・Pi 5（板の入れ替え待ち）、
-  Pi 4 の全画面の動画で firmware の decoder が止まらないかの確かめ。
+- 未達: big-100 の貸す時の約 20% の低下（fence の待ちと段の外、原因は未特定）、Pi 5（板の入れ替え待ち）。
 - Pi の手順: 板が guest の鍵の root で zedBSD を動かしていれば、
   `PI=<addr> PROGRAMS=build/p015rpi4 VIDEO=build/p015video/high-1080p30.mp4 sh plan/ws309/tests/pi-p015.sh OUT`（Pi 5 は `PROGRAMS=build/p015rpi5`、VIDEO 無しでよい）。
   そうでなければ上の image を card（Pi 5 は NVMe）に書く（Pi 5 の 1080p は `plan/ws291/tests/rpi5-image-boot.sh`）。合否: probe の lendable=1、game の 3 回とも `lent=1 … copies=0`、
