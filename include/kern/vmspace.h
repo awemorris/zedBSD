@@ -229,6 +229,15 @@ struct vmspace {
 
 	struct wait_queue fault_waitq;
 	uint64_t generation;
+
+	/*
+	 * Nonzero while a fork copies this address space.  The fork lets
+	 * the VM locks go between its batches of pages; a fault waits on
+	 * fault_waitq until the copy ends rather than add or change a page
+	 * under it, and so does another fork of the same space.
+	 */
+	int forking;
+
 	struct vm_region *regions;
 	uintptr_t entry;
 	uintptr_t brk_start;

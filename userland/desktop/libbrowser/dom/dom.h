@@ -366,6 +366,10 @@ struct dom_element {
 	size_t attribute_count;
 	size_t attribute_capacity;
 	struct dom_node *content;
+	/* The element's shadow root (a dom_shadow_root), or NULL. */
+	struct dom_node *shadow_root;
+	/* A style element made by new CSSStyleSheet() (it has a sheet while detached). */
+	int constructed_sheet;
 	struct dom_control *control;
 	/* Inline declaration precision survives canonical attribute serialization until an external style mutation. */
 	struct vm_string *inline_style_source;
@@ -418,6 +422,23 @@ struct dom_element {
 	/* The last position-try fallback that fit (1-based, 0 for the base position) and the list it was found in. */
 	int anchor_last;
 	uint32_t anchor_last_key;
+};
+
+/*
+ * A shadow root: a document fragment that is the root of an element's
+ * shadow tree.  It has no parent; host is the element it belongs to and
+ * mode says whether script may reach it from the host (open) or not
+ * (closed).
+ */
+struct dom_shadow_root {
+	struct dom_node node;
+	struct dom_element *host;
+	int closed;
+	int slot_manual;
+	/* The binding's SameObject styleSheets list. */
+	struct vm_object *style_sheets;
+	/* A fragment whose children are the style elements of the constructed sheets adopted by the root. */
+	struct dom_node *adopted;
 };
 
 /*
@@ -474,6 +495,8 @@ struct dom_document {
 	struct vm_object *images_collection;
 	/* The current native inline stylesheet query retains its SameObject wrapper. */
 	struct vm_object *style_sheets;
+	/* A fragment of the style elements of the constructed sheets the document adopted. */
+	struct dom_node *adopted;
 	/* Initial FontFaceSet.ready and its SameObject wrapper survive GC with this Document. */
 	struct vm_object *font_set;
 	struct vm_cell *font_ready;
@@ -527,6 +550,21 @@ int dom_is_character_data(const struct dom_node *node);
 int dom_is_text(const struct dom_node *node);
 struct dom_node *dom_doctype_create(struct dom_document *document, struct vm_string *name, struct vm_string *public_id, struct vm_string *system_id);
 struct dom_node *dom_fragment_create(struct dom_document *document);
+
+/* Shadow trees (shadow.c). */
+struct dom_shadow_root *dom_shadow_attach(struct dom_element *host, int closed);
+struct dom_shadow_root *dom_shadow_of(const struct dom_node *node);
+struct dom_element *dom_shadow_host(const struct dom_node *node);
+struct dom_node *dom_tree_root(const struct dom_node *node);
+int dom_can_attach_shadow(const struct dom_element *element);
+struct dom_element *dom_slot_first(const struct dom_node *shadow, const struct vm_string *name, const struct dom_node *skip);
+struct dom_element *dom_slot_of(const struct dom_node *node);
+const struct vm_string *dom_slot_name(const struct dom_node *node);
+struct dom_node *dom_flat_parent(const struct dom_node *node);
+int dom_is_connected(const struct dom_node *node);
+struct dom_node *dom_adopted_sheets(struct dom_node *root, int create);
+void dom_adopted_set(struct dom_node *root, struct dom_node **nodes, size_t count);
+int dom_assigned_to(const struct dom_element *slot, const struct dom_node *node);
 int dom_adopt(struct dom_document *document, struct dom_node *node);
 void dom_append_child(struct dom_node *parent, struct dom_node *child);
 void dom_insert_before(struct dom_node *parent, struct dom_node *child, struct dom_node *reference);

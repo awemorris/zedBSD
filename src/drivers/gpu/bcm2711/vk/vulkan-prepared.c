@@ -212,7 +212,7 @@ prepare_event(
 	event->opcode = record->opcode;
 	event->record = record;
 	event->pass = state->pass;
-	if (record->opcode == GPU_OP_CMD_DRAW) {
+	if (record->opcode == GPU_OP_CMD_DRAW || record->opcode == GPU_OP_CMD_DRAW_INDEXED) {
 		framebuffer = state->pass->objects[1]->payload;
 		event->width = framebuffer->width;
 		event->height = framebuffer->height;
@@ -224,6 +224,12 @@ prepare_event(
 		kern_memcpy(event->viewport, state->viewport->words, sizeof(event->viewport));
 		event->scissor = state->scissor->area;
 		kern_memcpy(event->draw, record->words, sizeof(event->draw));
+		if (record->opcode == GPU_OP_CMD_DRAW_INDEXED) {
+			event->indices = state->indices;
+			event->index_offset = state->index_offset;
+			event->index_type = state->index_type;
+		}
+
 		error = snapshot_descriptors(event, state);
 		if (error != 0) {
 			released = release_event(event);

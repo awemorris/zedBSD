@@ -68,14 +68,27 @@ bcm2711_vulkan_pipeline_release(
 	int error;
 	int retired;
 
-	/* Program ownership is entirely CPU-side until native draw preparation copies the code into independently retained GPU storage. */
+	/*
+	 * The programs, and their code in GPU storage: the pipeline is released
+	 * only after every job of a command buffer naming it has retired, so no
+	 * job reads the code any more.
+	 */
 	(void)session;
 	pipeline = payload;
-	for (stage = 0; stage < 3; stage++)
+	error = 0;
+	for (stage = 0; stage < 3; stage++) {
 		bcm2711_shader_binary_free(pipeline->programs[stage]);
+		if (pipeline->code[stage] != NULL) {
+			retired = bcm2711_native_storage_release(pipeline->code[stage]->space, &pipeline->code[stage], true);
+			if (retired != 0 && error == 0)
+				error = retired;
+		}
+	}
 
 	/* Every independent graph edge retires even if another edge reports a native storage uncertainty. */
-	error = bcm2711_vulkan_object_release(pipeline->owner.parent);
+	retired = bcm2711_vulkan_object_release(pipeline->owner.parent);
+	if (retired != 0 && error == 0)
+		error = retired;
 	retired = bcm2711_vulkan_object_release(pipeline->pass);
 	if (retired != 0 && error == 0)
 		error = retired;

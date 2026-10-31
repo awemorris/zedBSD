@@ -14,7 +14,7 @@
 #include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
 
 static int decode_transfer(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_transfer *transfer);
-static void decode_subresource(struct i915_wire_reader *reader, struct bcm2711_vulkan_transfer *transfer);
+static void decode_subresource(struct i915_wire_reader *reader, struct bcm2711_vulkan_transfer *transfer, const struct bcm2711_vulkan_transfer_region *region, uint32_t side);
 static void decode_copy(struct i915_wire_reader *reader, struct bcm2711_vulkan_transfer *transfer, struct bcm2711_vulkan_transfer_region *region);
 static void decode_blit(struct i915_wire_reader *reader, struct bcm2711_vulkan_transfer *transfer, struct bcm2711_vulkan_transfer_region *region);
 static int validate_rectangle(const int32_t rectangle[4], const struct bcm2711_vulkan_resource *image, bool destination);
@@ -125,6 +125,7 @@ bcm2711_vulkan_transfer_validate(
 	struct bcm2711_vulkan_object *device)
 {
 	struct bcm2711_vulkan_resource *images[2];
+	struct bcm2711_vulkan_resource levels[2];
 	const struct bcm2711_vulkan_transfer_region *region;
 	uint32_t index;
 	int error;
@@ -150,6 +151,11 @@ bcm2711_vulkan_transfer_validate(
 			return EINVAL;
 		if (images[index]->format != VK_FORMAT_R8G8B8A8_UNORM && images[index]->format != VK_FORMAT_B8G8R8A8_UNORM)
 			return ENOTSUP;
+
+		/* The selected mip level, as an image of its own, bounds the rectangles. */
+		error = bcm2711_vulkan_image_level_view(images[index], transfer->levels[index], &levels[index]);
+		if (error != 0)
+			return error;
 	}
 
 	/* Source and destination permissions remain the application's actual transfer usages, independent of internal texture sampling. */
@@ -160,6 +166,7 @@ bcm2711_vulkan_transfer_validate(
 	if (transfer->destination_layout != VK_IMAGE_LAYOUT_GENERAL && transfer->destination_layout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
 		return EINVAL;
 	if (images[0] == images[1] &&
+	    transfer->levels[0] == transfer->levels[1] &&
 	    (transfer->source_layout != VK_IMAGE_LAYOUT_GENERAL ||
 	    transfer->destination_layout != VK_IMAGE_LAYOUT_GENERAL))
 		return EINVAL;
@@ -169,10 +176,10 @@ bcm2711_vulkan_transfer_validate(
 		return ENOTSUP;
 	for (index = 0; index < transfer->record.count; index++) {
 		/* The actual complete image bounds validate both signed boxes before any alias calculation. */
-		error = validate_rectangle(transfer->regions[index].source, images[0], false);
+		error = validate_rectangle(transfer->regions[index].source, &levels[0], false);
 		if (error != 0)
 			return error;
-		error = validate_rectangle(transfer->regions[index].destination, images[1], true);
+		error = validate_rectangle(transfer->regions[index].destination, &levels[1], true);
 		if (error != 0)
 			return error;
 
@@ -190,7 +197,7 @@ bcm2711_vulkan_transfer_validate(
 	}
 
 	/* Aliased physical image bindings obey all source/destination exclusions and copy destination/destination exclusion. */
-	error = validate_overlaps(transfer, images[0], images[1]);
+	error = validate_overlaps(transfer, &levels[0], &levels[1]);
 	if (error != 0)
 		return error;
 
@@ -240,11 +247,17 @@ decode_transfer(
 	return 0;
 }
 
-/* Consumes one complete standard single-colour, single-mip, single-layer subresource selection. */
+/*
+ * Consumes one complete standard single-colour, single-layer subresource
+ * selection; side 0 is the source, 1 the destination, whose mip level the
+ * first region chooses for every region.
+ */
 static void
 decode_subresource(
 	struct i915_wire_reader *reader,
-	struct bcm2711_vulkan_transfer *transfer)
+	struct bcm2711_vulkan_transfer *transfer,
+	const struct bcm2711_vulkan_transfer_region *region,
+	uint32_t side)
 {
 	uint32_t aspect;
 	uint32_t mip;
@@ -257,10 +270,16 @@ decode_subresource(
 	layer = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u32(reader);
 	if (aspect != VK_IMAGE_ASPECT_COLOR_BIT ||
-	    mip != 0 ||
 	    layer != 0 ||
 	    count != 1)
 		transfer->record.semantic_error = EINVAL;
+
+	/* Later regions keep the first region's level. */
+	if (region == &transfer->regions[0]) {
+		transfer->levels[side] = mip;
+	} else if (mip != transfer->levels[side]) {
+		transfer->record.semantic_error = ENOTSUP;
+	}
 
 	/* Succeeded: the entire selection was consumed even when its semantics were refused. */
 	return;
@@ -284,11 +303,11 @@ decode_copy(
 	int64_t destination_y;
 
 	/* Actual source subresource and signed offsets precede the distinct destination selection. */
-	decode_subresource(reader, transfer);
+	decode_subresource(reader, transfer, region, 0);
 	region->source[0] = (int32_t)drv_i915_wire_read_u32(reader);
 	region->source[1] = (int32_t)drv_i915_wire_read_u32(reader);
 	source_z = (int32_t)drv_i915_wire_read_u32(reader);
-	decode_subresource(reader, transfer);
+	decode_subresource(reader, transfer, region, 1);
 	region->destination[0] = (int32_t)drv_i915_wire_read_u32(reader);
 	region->destination[1] = (int32_t)drv_i915_wire_read_u32(reader);
 	destination_z = (int32_t)drv_i915_wire_read_u32(reader);
@@ -337,7 +356,7 @@ decode_blit(
 	uint64_t array;
 
 	/* Each actual two-dimensional colour subresource has two signed three-coordinate corners. */
-	decode_subresource(reader, transfer);
+	decode_subresource(reader, transfer, region, 0);
 	array = drv_i915_wire_read_u64(reader);
 	if (array != 2) {
 		reader->error = EINVAL;
@@ -352,7 +371,7 @@ decode_blit(
 	}
 
 	/* The destination retains its own directed endpoints, rather than inheriting source orientation. */
-	decode_subresource(reader, transfer);
+	decode_subresource(reader, transfer, region, 1);
 	array = drv_i915_wire_read_u64(reader);
 	if (array != 2) {
 		reader->error = EINVAL;

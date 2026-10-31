@@ -2,6 +2,9 @@
 
 # WS306 設計: GPU の「ゲーム最適化」の UAPI と driver の識別（p001、第 3 版）
 
+> 番号の変更（2026-10-31 22:12、Q1）: WS291 p023 が 'G' 46（`GPU_IMAGE_LAYOUTS`）と `GPU_CAP_IMAGE_LAYOUTS` 131072 を main で使った（Q1 の割当の誤り、WS306 の予約を見落とした）。
+> WS306 は 'G' 51〜53 と `GPU_CAP_GAME` 1048576 に移す（job-submit-design の 49・50 と 262144・524288 の後）。下の表の「46 から空き」「131072 は空き」は書いた時の事実。
+
 Parent: [WS306](ws.md)。第 1 版 2026-10-29 P5（q1666）、第 2 版 2026-10-29 P5（[design-review.md](design-review.md) の第 1 回の反映）、
 **第 3 版 2026-10-31 P5（q1746-i01）**: 照合した tree を main 9946e22c0 に更新し、第 2 版の改訂の表（X1〜X10）を本文に溶かし込み、
 Q306-6 の回答・WS291 の今の状態・8 つの driver・docs/ の UAPI の文書・WS291 の job の案の番号の予約を反映した。
@@ -12,7 +15,7 @@ source は変えない（設計だけ）。ユーザーの決定は ws.md（要�
 
 - `/dev/gpuN` の open（open file description。dup・fork で共有。以下 session）ごとに、ゲーム最適化の ON/OFF と option の組を持つ。
   option の表は driver が持ち、文字列の解読・検査は共通の層（`src/drivers/gpu/gpu-game.c`、新しい純粋な module）が一様に行う。
-- 新しい ioctl 3 つ（'G' 46〜48: `GPU_GAME_INFO`・`GPU_GAME_OPTION`・`GPU_GAME_SET`）と capability の bit 1 つ（`GPU_CAP_GAME` 131072）。
+- 新しい ioctl 3 つ（'G' 51〜53: `GPU_GAME_INFO`・`GPU_GAME_OPTION`・`GPU_GAME_SET`）と capability の bit 1 つ（`GPU_CAP_GAME` 1048576）。
   `GPU_ABI_VERSION`（1）と既存の struct・ioctl は変えない（追加だけ）。'G' 49・50 と 262144・524288 は WS291 の job の案が予約済み（§2）。
 - 値は session の最初の「凍らせる request」（許可の表に無い ioctl）の入口で、多くても 1 回だけ driver に渡して凍らせる（専用の latch。`native_submitted` を借りない）。凍った後の SET は EBUSY。
 - libvulkan が環境変数 `VULKAN_ZEDBSD_GAME`（`1` で ON）と `VULKAN_ZEDBSD_GAME_OPTIONS`（「,」区切りの `+name`／`-name`）を読み、
@@ -94,7 +97,7 @@ source は変えない（設計だけ）。ユーザーの決定は ws.md（要�
 #include <stdint.h>
 #include <uapi/ioctl.h>
 
-#define GPU_CAP_GAME			131072U
+#define GPU_CAP_GAME			1048576U
 
 #define GPU_GAME_NAME_MAX		32U	/* NUL を含む */
 #define GPU_GAME_DESCRIPTION_MAX	128U	/* NUL を含む */
@@ -108,9 +111,9 @@ source は変えない（設計だけ）。ユーザーの決定は ws.md（要�
 /* gpu_game_option.flags（出力） */
 #define GPU_GAME_OPTION_DEFAULT		1U	/* ON の session で文字列が触れなければ有効 */
 
-#define GPU_GAME_INFO			_IOWR('G', 46, struct gpu_game_info)
-#define GPU_GAME_OPTION			_IOWR('G', 47, struct gpu_game_option)
-#define GPU_GAME_SET			_IOWR('G', 48, struct gpu_game_set)
+#define GPU_GAME_INFO			_IOWR('G', 51, struct gpu_game_info)
+#define GPU_GAME_OPTION			_IOWR('G', 52, struct gpu_game_option)
+#define GPU_GAME_SET			_IOWR('G', 53, struct gpu_game_set)
 
 struct gpu_game_info {			/* 160 byte。入力は version と size だけ */
 	uint32_t version;		/* GPU_ABI_VERSION */
@@ -158,7 +161,7 @@ struct gpu_game_set {			/* 40 byte。入力は version・size・enable・bytes�
 
 | ioctl | 条件 | 結果 |
 | --- | --- | --- |
-| 3 つとも | node に `GPU_CAP_GAME` が無い | EOPNOTSUPP（知らない request と同じ。今の kernel でも 'G' 46〜48 は EOPNOTSUPP） |
+| 3 つとも | node に `GPU_CAP_GAME` が無い | EOPNOTSUPP（知らない request と同じ。今の kernel でも 'G' 51〜53 は EOPNOTSUPP） |
 | 3 つとも | copyin の失敗 | EFAULT |
 | 3 つとも | version・size の不一致 | EINVAL |
 | INFO | — | read だけの open でも可。凍る前も後も今の値（凍る前は SET した値、SET が無ければ OFF）。`ops->game->identity` を呼ぶ |

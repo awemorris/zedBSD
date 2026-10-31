@@ -31,6 +31,7 @@ static void modes_close_section(struct html_parser *p, const struct tb_token *to
 static void modes_close_row(struct html_parser *p, const struct tb_token *token);
 static int modes_current_tag(const struct html_parser *p);
 static int modes_text_kind(uint16_t unit);
+static void modes_declarative_shadow(struct html_parser *p, struct dom_element *template);
 
 /*
  * The public identifiers whose prefixes put a document in quirks mode
@@ -256,6 +257,7 @@ tb_mode_in_head(
 	struct html_parser *p,
 	const struct tb_token *token)
 {
+	struct dom_element *template_element;
 	int template_open;
 	int whitespace;
 	int is_template;
@@ -354,10 +356,13 @@ tb_mode_in_head(
 			is_template = tb_current_is(p, DOM_TAG_TEMPLATE);
 			if (!is_template)
 				tb_error(p);
+			template_element = is_template ? tb_current(p) : NULL;
 			tb_pop_until_tag(p, DOM_TAG_TEMPLATE);
 			tb_clear_formatting_to_marker(p);
 			tb_pop_template_mode(p);
 			tb_reset_insertion_mode(p);
+			if (template_element != NULL)
+				modes_declarative_shadow(p, template_element);
 			return;
 		default:
 			tb_error(p);
@@ -369,6 +374,58 @@ tb_mode_in_head(
 	tb_pop(p);
 	p->mode = TB_AFTER_HEAD;
 	tb_process(p, token);
+}
+
+/*
+ * A closed template with a shadowrootmode of open or closed, directly in an
+ * element that can host a shadow tree and has none, is that element's
+ * shadow root: its content moves there and the template goes.
+ * https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inhead
+ */
+static void
+modes_declarative_shadow(
+	struct html_parser *p,
+	struct dom_element *template)
+{
+	struct dom_attribute *attribute;
+	struct dom_shadow_root *root;
+	struct dom_element *host;
+	struct dom_node *child;
+	struct vm_string *name;
+	int closed;
+
+	/* Only a whole document's parse makes declarative shadow roots, and only from a template with contents. */
+	if (p->context != NULL || template->content == NULL || template->node.parent == NULL || template->node.parent->type != DOM_ELEMENT)
+		return;
+	name = vm_atom_from_ascii(p->heap, "shadowrootmode");
+	if (name == NULL)
+		return;
+	attribute = dom_element_find_attribute(template, DOM_NS_NONE, name);
+	if (attribute == NULL)
+		return;
+	if (vm_string_equal_ascii(attribute->value, "open"))
+		closed = 0;
+	else if (vm_string_equal_ascii(attribute->value, "closed"))
+		closed = 1;
+	else
+		return;
+
+	/* The host must be able to have a shadow tree. */
+	host = (struct dom_element *)template->node.parent;
+	if (!dom_can_attach_shadow(host))
+		return;
+	root = dom_shadow_attach(host, closed);
+	if (root == NULL) {
+		p->failed = 1;
+		return;
+	}
+
+	/* The template's content is the shadow tree. */
+	while (template->content->first_child != NULL) {
+		child = template->content->first_child;
+		dom_append_child(&root->node, child);
+	}
+	dom_remove(&template->node);
 }
 
 /*

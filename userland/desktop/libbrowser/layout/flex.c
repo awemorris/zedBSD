@@ -849,7 +849,14 @@ flex_content_basis(
 	} else {
 		tree->measuring++;
 		layout_context_begin(tree, &context, &floats);
-		error = layout_block(tree, child, container->width);
+
+		/* An item that does not stretch across is as wide as its content (its height depends on that width). */
+		if (child->style.width.unit == CSS_UNIT_AUTO && !child->replaced &&
+		    (flex_align_of(container, child) != CSS_ALIGN_STRETCH ||
+		    child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO))
+			error = layout_shrink_to_fit(tree, child, container->width);
+		else
+			error = layout_block(tree, child, container->width);
 		layout_context_end(tree, &context);
 		tree->measuring--;
 
@@ -1094,7 +1101,12 @@ flex_base_size(
 			child->style.min_height.unit = CSS_UNIT_AUTO;
 			child->style.min_height.value = 0.0f;
 		}
-		error = layout_block(tree, child, box->width);
+		if (child->style.width.unit == CSS_UNIT_AUTO && !child->replaced && child->style.writing_mode == box->style.writing_mode &&
+		    (flex_align_of(box, child) != CSS_ALIGN_STRETCH ||
+		    child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO))
+			error = layout_shrink_to_fit(tree, child, box->width);
+		else
+			error = layout_block(tree, child, box->width);
 		child->style.min_height = saved_min_height;
 		if (error != 0)
 			return error;
@@ -1964,7 +1976,12 @@ flex_content_height(
 	child->style.height.unit = CSS_UNIT_AUTO;
 	child->style.min_height.unit = CSS_UNIT_AUTO;
 	child->style.max_height.unit = CSS_UNIT_NONE;
-	error = layout_block(tree, child, box->width);
+	if (child->style.width.unit == CSS_UNIT_AUTO && !child->replaced && child->style.writing_mode == box->style.writing_mode &&
+	    (flex_align_of(box, child) != CSS_ALIGN_STRETCH ||
+	    child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO))
+		error = layout_shrink_to_fit(tree, child, box->width);
+	else
+		error = layout_block(tree, child, box->width);
 	*height = child->height;
 	child->style.height = saved_height;
 	child->style.min_height = saved_minimum;
@@ -2209,7 +2226,9 @@ flex_lay_sized(
 		child->style.width.value = layout_to_px(room);
 		child->style.width.offset = 0;
 	}
-	if ((align == CSS_ALIGN_STRETCH && box->style.flex_wrap == CSS_FLEX_NOWRAP) ||
+	/* An auto margin across takes the free room instead of a stretch: the item is as wide as its content (and placed by its margins). */
+	if ((align == CSS_ALIGN_STRETCH && box->style.flex_wrap == CSS_FLEX_NOWRAP &&
+	    child->style.margin[CSS_LEFT].unit != CSS_UNIT_AUTO && child->style.margin[CSS_RIGHT].unit != CSS_UNIT_AUTO) ||
 	    child->style.width.unit != CSS_UNIT_AUTO) {
 		/* A table stretched across is as wide as the room (an auto-width table would be as wide as its content). */
 		if (align == CSS_ALIGN_STRETCH && child->style.width.unit == CSS_UNIT_AUTO &&
@@ -2228,6 +2247,12 @@ flex_lay_sized(
 			child->style.width.offset = 0;
 		}
 		error = layout_block(tree, child, box->width);
+
+		/* Its auto margins across are shared out when the line places it, not by the width it was laid out in. */
+		if (error == 0 && child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO)
+			child->margin[CSS_LEFT] = 0;
+		if (error == 0 && child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+			child->margin[CSS_RIGHT] = 0;
 		return error;
 	}
 
@@ -2235,6 +2260,12 @@ flex_lay_sized(
 	error = layout_shrink_to_fit(tree, child, box->width);
 	if (error != 0)
 		return error;
+
+	/* Its auto margins across are shared out when the line places it, not by the width it was laid out in. */
+	if (child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO)
+		child->margin[CSS_LEFT] = 0;
+	if (child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
+		child->margin[CSS_RIGHT] = 0;
 
 	/* Succeeded: the item is laid out. */
 	return 0;
@@ -2259,6 +2290,10 @@ flex_relay_column(
 	for (index = 0; index < count; index++) {
 		child = items[index].box;
 		if (flex_align_of(box, child) != CSS_ALIGN_STRETCH || child->style.width.unit != CSS_UNIT_AUTO)
+			continue;
+
+		/* An auto margin across takes the free room: the item is not stretched. */
+		if (child->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO || child->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
 			continue;
 		frame = child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
 		width = line_cross - child->margin[CSS_LEFT] - child->margin[CSS_RIGHT] - frame;
@@ -2833,10 +2868,13 @@ flex_baseline_above(
 	int align;
 	int last;
 	int found;
+	int vertical;
 
-	/* Only a row's items on a horizontal line (not one laid out logically for a vertical mode), aligned by their baselines. */
-	if (!row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
-	    layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB)
+	/* Only a row's items on a horizontal line (in a vertical mode's logical frame the items of its own flow), aligned by their baselines. */
+	vertical = layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB;
+	if (!row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
+		return 0;
+	if (vertical && (layout_physical_mode(item) != layout_physical_mode(box) || item->style.text_orientation == CSS_TEXT_ORIENTATION_SIDEWAYS))
 		return 0;
 	align = item->style.align_self;
 	last = (item->style.last_baselines & 8u) != 0;
@@ -2849,13 +2887,20 @@ flex_baseline_above(
 	if (item->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO || item->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
 		return 0;
 
-	/* Its first (or last) baseline, or its border box's bottom. */
+	/* Its first (or last) baseline (a vertical mode's, the central one), or its border box's bottom. */
 	found = 0;
-	if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+	if (vertical && item->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS)
+		found = layout_logical_central_baseline(item, last, &baseline);
+	else if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
 		found = last ? layout_last_baseline(item, &baseline) : layout_first_baseline(item, &baseline);
-	if (!found)
+	if (!found) {
 		baseline = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->height + item->padding[CSS_BOTTOM] +
 		    item->border[CSS_BOTTOM];
+
+		/* The central baseline of a vertical item is synthesized in the middle of its border box. */
+		if (vertical && item->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS)
+			baseline /= 2;
+	}
 	*above = item->margin[CSS_TOP] + baseline;
 	return last ? 2 : 1;
 }

@@ -25,6 +25,10 @@ struct bcm2711_vulkan_draw_state {
 	struct bcm2711_vulkan_pipeline *pipeline;
 	struct bcm2711_vulkan_resource *vertices[BCM2711_VULKAN_VERTEX_BINDINGS];
 	uint64_t offsets[BCM2711_VULKAN_VERTEX_BINDINGS];
+	/* The bound index buffer, its offset and its VkIndexType; NULL before any bind. */
+	struct bcm2711_vulkan_resource *indices;
+	uint64_t index_offset;
+	uint32_t index_type;
 	struct bcm2711_vulkan_draw_set sets[BCM2711_VULKAN_PIPELINE_SETS];
 	const struct bcm2711_vulkan_record *viewport;
 	const struct bcm2711_vulkan_record *scissor;

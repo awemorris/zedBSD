@@ -797,6 +797,10 @@ classify_node(
 		node->peripheral = 1;
 		node->sensitive = 1;
 		break;
+	case BCM2711_QPU_SAMPLE_MASK:
+		/* The coverage it clears must be set before the tile writes that it masks, which keep the order of transactions. */
+		node->ordered = 1;
+		break;
 	default:
 		break;
 	}

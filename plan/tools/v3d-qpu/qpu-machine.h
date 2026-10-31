@@ -51,6 +51,8 @@ struct qpu_machine_result {
 	uint32_t tile_writes;
 	uint32_t vpm[68];
 	uint32_t lookups;
+	/* Set when a SETMSF cleared the lane's coverage, so its tile writes are dropped. */
+	uint32_t discarded;
 	/* Counts of words that paired both ALUs and that did nothing. */
 	uint32_t paired;
 	uint32_t idle;

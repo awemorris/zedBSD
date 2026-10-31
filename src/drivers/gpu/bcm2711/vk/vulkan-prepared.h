@@ -34,7 +34,16 @@ struct bcm2711_vulkan_prepared_event {
 	VkRect2D area;
 	/* Only the private meta builder supplies this temporary description; native upload retains no pointer to it. */
 	const struct bcm2711_vulkan_meta_draw *meta;
-	uint32_t draw[4];
+	/* An indexed draw's index buffer, offset and VkIndexType, retained by the BIND record. */
+	struct bcm2711_vulkan_resource *indices;
+	uint64_t index_offset;
+	uint32_t index_type;
+	/*
+	 * The draw's words: vertices, instances, first vertex, first instance;
+	 * or for GPU_OP_CMD_DRAW_INDEXED indices, instances, first index,
+	 * vertex offset, first instance.
+	 */
+	uint32_t draw[5];
 };
 
 /* One distinct recorded ordinary set is kept immutable by a pending charge, including bindings a shader does not consume. */

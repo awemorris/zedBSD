@@ -25,6 +25,7 @@ const char css_user_agent_sheet[] =
 	" nav, section, dir, dd, dl, dt, menu, ol, ul, details, summary, fieldset, optgroup { display: block; }\n"
 	"area, base, basefont, datalist, head, link, meta, noembed, noframes, param, rp, script, style,"
 	" template, title { display: none; }\n"
+	" slot { display: contents; }\n"
 	"[hidden]:not([hidden=until-found i]) { display: none; }\n"
 	"[hidden=until-found i] { content-visibility: hidden; }\n"
 	"dialog:not([open]) { display: none; }\n"

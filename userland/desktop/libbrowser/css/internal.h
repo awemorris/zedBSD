@@ -84,6 +84,10 @@ enum css_simple_kind {
 	CSS_SIMPLE_ATTRIBUTE,
 	CSS_SIMPLE_PSEUDO_CLASS,
 	CSS_SIMPLE_PSEUDO_ELEMENT,
+	/* ::part(): the words of its argument are the simple's value (one atom, space separated). */
+	CSS_SIMPLE_PART,
+	/* ::slotted(): the selector list of its argument. */
+	CSS_SIMPLE_SLOTTED,
 	CSS_SIMPLE_NEVER
 };
 
@@ -136,7 +140,10 @@ enum css_pseudo_class {
 	CSS_PSEUDO_SCOPE,
 	CSS_PSEUDO_SCOPE_NEST,
 	CSS_PSEUDO_TARGET,
-	CSS_PSEUDO_POPOVER_OPEN
+	CSS_PSEUDO_POPOVER_OPEN,
+	CSS_PSEUDO_HOST,
+	CSS_PSEUDO_HOST_FN,
+	CSS_PSEUDO_HOST_CONTEXT
 };
 
 /*
@@ -691,6 +698,8 @@ struct css_rule {
 	struct css_declaration *declarations;
 	size_t declaration_count;
 	const struct css_media *media;
+	/* The @container conditions the rule is in (NULL for none): the size of its element's nearest query container is what they test. */
+	const struct css_media *container;
 	/* The @scope the rule is in (NULL for none). */
 	const struct css_scope *scope;
 	/* The cascade layer the rule is in: 1 for the first the sheet names, and so on (0 for none: unlayered rules win). */

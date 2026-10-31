@@ -190,7 +190,8 @@ static const struct bind_interface *const window_interfaces[BIND_INTERFACES] = {
 	&bind_performance_observer_entry_list_interface,
 	&bind_html_dialog_element_interface,
 	&bind_html_canvas_element_interface,
-	&bind_error_event_interface
+	&bind_error_event_interface,
+	&bind_shadow_root_interface
 };
 
 static int window_run_source(struct bind_window *window, const uint16_t *source, size_t length, int known_inline, vm_value *completion, struct js_syntax_error *syntax);

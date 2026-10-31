@@ -300,6 +300,15 @@ run_alus(
 		delay = 2;
 	if (add_write)
 		write_destination(machine, instruction->alu.add.waddr, instruction->alu.add.magic_write, add_bits, delay);
+
+	/* A SETMSF of zero discards the lane; the tile writes it masks must come in later words. */
+	if (add_write && instruction->alu.add.op == V3D_QPU_A_SETMSF) {
+		if (machine->result->tile_writes != 0 || v3d_qpu_uses_tlb(instruction))
+			fail(machine, "multisample flags set at or after a tile write");
+		if (machine->setup->binary->stage != BCM2711_SHADER_FRAGMENT)
+			fail(machine, "multisample flags set outside a fragment program");
+		machine->result->discarded = add_bits == 0 ? 1U : 0U;
+	}
 	if (mul_write)
 		write_destination(machine, instruction->alu.mul.waddr, instruction->alu.mul.magic_write, mul_bits, 0);
 
@@ -645,6 +654,34 @@ condition_holds(
 	return true;
 }
 
+/*
+ * The minimum and maximum of two floats with -0 below +0, whichever order
+ * they come in: SPIR-V's FMin and FMax may return either zero for two
+ * zeros, and the native compiler may exchange the operands, so the reference
+ * and the lane model both take the one order-independent answer.
+ */
+static float
+ordered_minimum(
+	float a,
+	float b)
+{
+	/* Two zeros give -0 when either is -0. */
+	if (a == 0.0f && b == 0.0f)
+		return signbit(a) || signbit(b) ? -0.0f : 0.0f;
+	return fminf(a, b);
+}
+
+static float
+ordered_maximum(
+	float a,
+	float b)
+{
+	/* Two zeros give +0 when either is +0. */
+	if (a == 0.0f && b == 0.0f)
+		return signbit(a) && signbit(b) ? -0.0f : 0.0f;
+	return fmaxf(a, b);
+}
+
 /* Computes one add ALU operation and, when it pushes flags, the new flag A. */
 static uint32_t
 add_result(
@@ -676,10 +713,10 @@ add_result(
 		bits = float_bits(a - b);
 		break;
 	case V3D_QPU_A_FMIN:
-		bits = float_bits(fminf(a, b));
+		bits = float_bits(ordered_minimum(a, b));
 		break;
 	case V3D_QPU_A_FMAX:
-		bits = float_bits(fmaxf(a, b));
+		bits = float_bits(ordered_maximum(a, b));
 		break;
 	case V3D_QPU_A_ADD:
 		bits = left + right;
@@ -794,6 +831,10 @@ add_result(
 		machine->result->vpm[left] = right;
 		break;
 	case V3D_QPU_A_VPMWT:
+		break;
+	case V3D_QPU_A_SETMSF:
+		/* The new multisample flags; run_alus applies them when the predicate holds. */
+		bits = left;
 		break;
 	default:
 		fprintf(stderr, "unmodeled add operation %s\n", v3d_qpu_add_op_name(instruction->alu.add.op));

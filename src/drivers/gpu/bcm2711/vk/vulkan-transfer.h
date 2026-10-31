@@ -25,6 +25,8 @@ struct bcm2711_vulkan_transfer {
 	struct bcm2711_vulkan_transfer_region regions[BCM2711_VULKAN_TRANSFER_REGIONS];
 	VkImageLayout source_layout;
 	VkImageLayout destination_layout;
+	/* The source's and the destination's mip level, the same for every region. */
+	uint32_t levels[2];
 	VkFilter filter;
 	bool retained[2];
 };

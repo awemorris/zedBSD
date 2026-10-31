@@ -124,7 +124,7 @@ bcm2711_native_shader_bytes(void)
 }
 
 /*
- * Encodes one complete per-vertex float fetch record after logical interval validation by its owner.
+ * Encodes one complete per-vertex or per-instance float fetch record after logical interval validation by its owner.
  */
 int
 bcm2711_native_attribute_encode(
@@ -160,15 +160,21 @@ bcm2711_native_attribute_encode(
 	if (attribute->coordinate_values == 0 && attribute->vertex_values == 0)
 		return EINVAL;
 
+	/* The instance divisor field has sixteen bits. */
+	if (attribute->divisor > 0xffffU)
+		return EINVAL;
+
 	/* A four-component vector is encoded as zero; type two selects float without integer conversion. */
 	kern_memset(bytes, 0, BCM2711_NATIVE_ATTRIBUTE_BYTES);
 	write_word(bytes, attribute->address);
 	bytes[4] = (uint8_t)((attribute->components & 3U) | 8U);
 	bytes[5] = (uint8_t)(attribute->coordinate_values | (attribute->vertex_values << 4));
+	bytes[6] = (uint8_t)attribute->divisor;
+	bytes[7] = (uint8_t)(attribute->divisor >> 8);
 	write_word(bytes + 8, attribute->stride);
 	write_word(bytes + 12, attribute->maximum_index);
 
-	/* Succeeded: no instance divisor or implicit integer interpretation was introduced. */
+	/* Succeeded: the record fetches floats per vertex or per divisor instances, with no integer interpretation. */
 	return 0;
 }
 

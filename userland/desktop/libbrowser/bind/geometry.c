@@ -1628,7 +1628,7 @@ geometry_offset_parent(
 		return error;
 	if (position == CSS_POSITION_FIXED) {
 		/* Unless a transformed ancestor is the containing block of what is fixed inside it. */
-		for (walk = element->node.parent; walk != NULL && walk->type == DOM_ELEMENT; walk = walk->parent) {
+		for (walk = dom_flat_parent(&element->node); walk != NULL && walk->type == DOM_ELEMENT; walk = dom_flat_parent(walk)) {
 			ancestor = (struct dom_element *)walk;
 			error = geometry_fixed_container(window, ancestor, &stops);
 			if (error != 0)
@@ -1642,7 +1642,7 @@ geometry_offset_parent(
 	}
 
 	/* The nearest ancestor that is one. */
-	for (walk = element->node.parent; walk != NULL && walk->type == DOM_ELEMENT; walk = walk->parent) {
+	for (walk = dom_flat_parent(&element->node); walk != NULL && walk->type == DOM_ELEMENT; walk = dom_flat_parent(walk)) {
 		ancestor = (struct dom_element *)walk;
 		error = geometry_position(window, ancestor, &position);
 		if (error != 0)

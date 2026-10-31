@@ -10,6 +10,7 @@
 
 #include "drivers/gpu/bcm2711/vk/vulkan-draw.h"
 
+static int validate_indices(const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *draw);
 static int validate_vertices(const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *draw);
 static int validate_attribute(const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *draw, const VkVertexInputAttributeDescription *attribute);
 static int validate_uniforms(const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_shader_binary *program);
@@ -78,6 +79,11 @@ bcm2711_vulkan_draw_validate(
 
 	/* Coordinate and render shaders share an exact fetch interface; a zero-count draw performs no vertex memory reads. */
 	if (draw->words[0] != 0 && draw->words[1] != 0) {
+		if (draw->opcode == GPU_OP_CMD_DRAW_INDEXED) {
+			error = validate_indices(state, draw);
+			if (error != 0)
+				return error;
+		}
 		error = validate_vertices(state, draw);
 		if (error != 0)
 			return error;
@@ -143,6 +149,44 @@ bcm2711_vulkan_draw_descriptor(
 	return 0;
 }
 
+/* Checks that an indexed draw's indices lie inside the bound index buffer's current storage. */
+static int
+validate_indices(
+	const struct bcm2711_vulkan_draw_state *state,
+	const struct bcm2711_vulkan_record *draw)
+{
+	struct bcm2711_v3d_view *view;
+	void *cpu;
+	uint64_t begin;
+	uint64_t bytes;
+	uint32_t address;
+	uint32_t size;
+	int error;
+
+	/* No index buffer is invented for an indexed draw recorded before any bind. */
+	if (state->indices == NULL)
+		return EINVAL;
+
+	/* Recording admitted only the 16- and 32-bit index types. */
+	size = 2U;
+	if (state->index_type == VK_INDEX_TYPE_UINT32)
+		size = 4U;
+
+	/* The first index and the count are bounded in 64-bit arithmetic against the buffer's logical bytes. */
+	begin = state->index_offset + (uint64_t)draw->words[2] * size;
+	bytes = (uint64_t)draw->words[0] * size;
+	if (begin > state->indices->bytes || bytes > state->indices->bytes - begin)
+		return EINVAL;
+
+	/* The whole interval lies in current coherent, nonquarantined storage. */
+	error = bcm2711_vulkan_resource_backing(state->indices, begin, bytes, &view, &address, &cpu);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the hardware reads only indices of this buffer. */
+	return 0;
+}
+
 /* Checks each shader-consumed declared attribute once against its entire nonindexed vertex range. */
 static int
 validate_vertices(
@@ -194,6 +238,8 @@ validate_attribute(
 	uint32_t address;
 	uint32_t index;
 	uint32_t components;
+	uint32_t first;
+	uint32_t count;
 	int error;
 
 	/* Pipeline creation bounds native binding numbers and admitted float formats. */
@@ -231,16 +277,35 @@ validate_attribute(
 		return ENOTSUP;
 	}
 
-	/* The first vertex plus stride and complete attribute bytes are bounded in 64-bit arithmetic. */
+	/*
+	 * The elements the draw fetches: its vertices, or for a per-instance
+	 * binding its instances.  An indexed draw's vertices are whatever its
+	 * indices name, which the fetch's maximum index keeps inside the
+	 * buffer, so only the first element is checked here.
+	 */
+	if (binding->inputRate == VK_VERTEX_INPUT_RATE_INSTANCE) {
+		first = draw->words[3];
+		if (draw->opcode == GPU_OP_CMD_DRAW_INDEXED)
+			first = draw->words[4];
+		count = draw->words[1];
+	} else if (draw->opcode == GPU_OP_CMD_DRAW_INDEXED) {
+		first = 0;
+		count = 1;
+	} else {
+		first = draw->words[2];
+		count = draw->words[0];
+	}
+
+	/* The first element plus stride and complete attribute bytes are bounded in 64-bit arithmetic. */
 	begin = state->offsets[attribute->binding];
 	if (begin > resource->bytes || attribute->offset > resource->bytes - begin)
 		return EINVAL;
 	begin += attribute->offset;
-	bytes = (uint64_t)draw->words[2] * binding->stride;
+	bytes = (uint64_t)first * binding->stride;
 	if (bytes > resource->bytes - begin)
 		return EINVAL;
 	begin += bytes;
-	bytes = (uint64_t)(draw->words[0] - 1U) * binding->stride + components * 4U;
+	bytes = (uint64_t)(count - 1U) * binding->stride + components * 4U;
 	error = bcm2711_vulkan_resource_backing(resource, begin, bytes, &view, &address, &cpu);
 	if (error != 0)
 		return error;

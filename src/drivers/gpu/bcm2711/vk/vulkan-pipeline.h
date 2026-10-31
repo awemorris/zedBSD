@@ -10,6 +10,7 @@
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_PIPELINE_H
 
 #include "drivers/gpu/bcm2711/compiler/shader.h"
+#include "drivers/gpu/bcm2711/native-storage.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-layout.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-target.h"
 
@@ -21,6 +22,13 @@ struct bcm2711_vulkan_pipeline {
 	struct bcm2711_vulkan_input_owner owner;
 	struct bcm2711_vulkan_object *pass;
 	struct bcm2711_shader_binary *programs[3];
+	/*
+	 * Each program's code in GPU storage, uploaded by the first draw that
+	 * uses it and kept for every later pass until the pipeline is released
+	 * (which happens only after every job of a command buffer naming it has
+	 * retired); null until then, and always null in an internal draw's copy.
+	 */
+	struct bcm2711_native_storage *code[3];
 	VkVertexInputBindingDescription bindings[BCM2711_VULKAN_VERTEX_BINDINGS];
 	VkVertexInputAttributeDescription attributes[BCM2711_VULKAN_VERTEX_ATTRIBUTES];
 	uint32_t binding_count;
@@ -28,6 +36,12 @@ struct bcm2711_vulkan_pipeline {
 	VkCullModeFlags cull;
 	VkFrontFace front;
 	bool blend;
+	/*
+	 * The tile buffer's blend equation (the native Blend Cfg's factor and
+	 * mode fields, bits 0 to 23); premultiplied source-over when the
+	 * pipeline does not blend.
+	 */
+	uint32_t blend_factors;
 	/* The colour channels the pipeline leaves unwritten: bit 0 red through bit 3 alpha, the native mask's order. */
 	uint32_t colour_skip;
 	/*

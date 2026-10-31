@@ -86,7 +86,17 @@ struct bcm2711_vulkan_native_draw {
 	uint32_t count;
 	uint32_t shader;
 	uint32_t attributes;
+	/* The draw's vertices or indices, instances and bases, in bcm2711_native_bin's meanings. */
 	uint32_t vertices;
+	uint32_t instances;
+	uint32_t first;
+	uint32_t base_vertex;
+	uint32_t base_instance;
+	/* One: an indexed draw reading index_bytes of index_size indices at the GPU's index_address. */
+	uint32_t indexed;
+	uint32_t index_address;
+	uint32_t index_bytes;
+	uint32_t index_size;
 	/*
 	 * The draw's clip window in the framebuffer's pixels (x, y, width,
 	 * height): the drawable, render area, viewport and scissor together.
@@ -104,6 +114,8 @@ struct bcm2711_vulkan_meta_draw {
 	struct bcm2711_vulkan_pipeline pipeline;
 	struct bcm2711_shader_key key;
 	struct bcm2711_vulkan_resource *image;
+	/* The source's mip level as an image of its own, which image points to; the primary retains the real image. */
+	struct bcm2711_vulkan_resource level;
 	uint32_t vertices[36];
 	uint32_t viewport[6];
 	uint32_t width;

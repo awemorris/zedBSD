@@ -244,7 +244,7 @@ bcm2711_vulkan_native_pass_finish(
 	kern_io_read_barrier();
 
 	/* The completed implicit render-pass transition becomes FIFO-visible only after successful native output retirement. */
-	pass->target->layout = pass->final_layout;
+	bcm2711_vulkan_image_set_level_layout(pass->target, pass->target_level, pass->final_layout);
 
 	/* The depth/stencil attachment's transition is committed with it. */
 	if (pass->depth_target != NULL)
@@ -262,6 +262,7 @@ validate_pass(
 	struct bcm2711_vulkan_native_draw *draw;
 	struct bcm2711_native_storage *storage;
 	struct bcm2711_buffer *buffer;
+	VkImageLayout current;
 	uint32_t index;
 	uint64_t offset;
 	uint64_t bytes;
@@ -286,7 +287,8 @@ validate_pass(
 	/* A pass's explicit initial layout must match current FIFO state unless the application intentionally discards its earlier contents. */
 	if (pass->target == NULL)
 		return EINVAL;
-	if (pass->initial_layout != VK_IMAGE_LAYOUT_UNDEFINED && pass->initial_layout != pass->target->layout)
+	current = bcm2711_vulkan_image_level_layout(pass->target, pass->target_level);
+	if (pass->initial_layout != VK_IMAGE_LAYOUT_UNDEFINED && pass->initial_layout != current)
 		return EINVAL;
 
 	/* A loaded or stored depth/stencil image starts in the layout the pass names, unless the pass discards it. */

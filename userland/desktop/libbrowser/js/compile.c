@@ -1323,7 +1323,7 @@ compile_flags(
 	/* A generator function, or an async function (ws074-p086). */
 	if (!info->program && (info->node->flags & JS_FLAG_GENERATOR) != 0U)
 		flags |= VM_CODE_GENERATOR;
-	if (!info->program && (info->node->flags & JS_FLAG_ASYNC) != 0U)
+	if ((info->node->flags & JS_FLAG_ASYNC) != 0U)
 		flags |= VM_CODE_ASYNC;
 
 	/* Reports the flags. */

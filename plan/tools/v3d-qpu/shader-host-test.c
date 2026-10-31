@@ -60,6 +60,8 @@ struct shader_inputs {
 	uint32_t lookups;
 	/* Varies the uniform block words between trials. */
 	uint32_t block_seed;
+	/* Set when the source program discarded the fragment. */
+	uint32_t discarded;
 };
 
 /* One vertex and fragment module pair of the tree; a module the compiler refuses is named so. */
@@ -80,7 +82,7 @@ static const struct shader_pair shader_pairs[] = {
 	{"kwl panel", kwl_panel_vert, sizeof(kwl_panel_vert), kwl_panel_frag, sizeof(kwl_panel_frag), 0, 0},
 	{"kwl batch", kwl_batch_vert, sizeof(kwl_batch_vert), kwl_batch_frag, sizeof(kwl_batch_frag), 0, 0},
 	{"mview", mview_vertex_shader, sizeof(mview_vertex_shader), mview_fragment_shader, sizeof(mview_fragment_shader), 0, 0},
-	{"mview cutout", mview_vertex_shader, sizeof(mview_vertex_shader), mview_cutout_shader, sizeof(mview_cutout_shader), 1, 0},
+	{"mview cutout", mview_vertex_shader, sizeof(mview_vertex_shader), mview_cutout_shader, sizeof(mview_cutout_shader), 0, 0},
 	{"mview pixel", mview_pixel_vertex_shader, sizeof(mview_pixel_vertex_shader), mview_pixel_fragment_shader, sizeof(mview_pixel_fragment_shader), 1, 0},
 	{"mview pixel cutout", mview_pixel_vertex_shader, sizeof(mview_pixel_vertex_shader), mview_pixel_cutout_shader, sizeof(mview_pixel_cutout_shader), 1, 0},
 	{"vkdemo", vkdemo_vertex_shader, sizeof(vkdemo_vertex_shader), vkdemo_fragment_shader, sizeof(vkdemo_fragment_shader), 0, 1},
@@ -92,11 +94,11 @@ static const struct shader_pair shader_pairs[] = {
 	{"notes fill", notes_draw_vert, sizeof(notes_draw_vert), notes_fill_frag, sizeof(notes_fill_frag), 0, 0},
 	{"notes texture", notes_draw_vert, sizeof(notes_draw_vert), notes_texture_frag, sizeof(notes_texture_frag), 0, 0},
 	{"keiland ui", keiui_canvas_vert, sizeof(keiui_canvas_vert), keiui_canvas_frag, sizeof(keiui_canvas_frag), 0, 0},
-	{"libGL 1", fixed_vert_1, sizeof(fixed_vert_1), fixed_frag, sizeof(fixed_frag), 1, 0},
-	{"libGL 2", fixed_vert_2, sizeof(fixed_vert_2), fixed_frag, sizeof(fixed_frag), 1, 0},
-	{"libGL 4", fixed_vert_4, sizeof(fixed_vert_4), fixed_frag, sizeof(fixed_frag), 1, 0},
-	{"libGL 8", fixed_vert_8, sizeof(fixed_vert_8), fixed_frag, sizeof(fixed_frag), 1, 0},
-	{"libGL flat", fixed_flat_vert, sizeof(fixed_flat_vert), fixed_flat_frag, sizeof(fixed_flat_frag), 1, 0},
+	{"libGL 1", fixed_vert_1, sizeof(fixed_vert_1), fixed_frag, sizeof(fixed_frag), 0, 0},
+	{"libGL 2", fixed_vert_2, sizeof(fixed_vert_2), fixed_frag, sizeof(fixed_frag), 0, 0},
+	{"libGL 4", fixed_vert_4, sizeof(fixed_vert_4), fixed_frag, sizeof(fixed_frag), 0, 0},
+	{"libGL 8", fixed_vert_8, sizeof(fixed_vert_8), fixed_frag, sizeof(fixed_frag), 0, 0},
+	{"libGL flat", fixed_flat_vert, sizeof(fixed_flat_vert), fixed_flat_frag, sizeof(fixed_flat_frag), 0, 0},
 	{"terminal", terminal_cell_vert, sizeof(terminal_cell_vert), terminal_cell_frag, sizeof(terminal_cell_frag), 0, 0},
 	{"imageview", imageview_canvas_vert, sizeof(imageview_canvas_vert), imageview_canvas_frag, sizeof(imageview_canvas_frag), 0, 0},
 };
@@ -124,6 +126,9 @@ static uint32_t optimizer_values;
 /* The program and trial under test, named by a failure. */
 static const char *current_program;
 static uint32_t current_trial;
+
+/* The trials whose fragment the source program discarded, counted for each program. */
+static uint32_t discards;
 
 static uint32_t float_bits(float number);
 static float bits_float(uint32_t bits);
@@ -520,6 +525,34 @@ float_to_unsigned(
 	return (uint32_t)number;
 }
 
+/*
+ * The minimum and maximum of two floats with -0 below +0, whichever order
+ * they come in: SPIR-V's FMin and FMax may return either zero for two
+ * zeros, and the native compiler may exchange the operands, so the reference
+ * and the lane model both take the one order-independent answer.
+ */
+static float
+ordered_minimum(
+	float a,
+	float b)
+{
+	/* Two zeros give -0 when either is -0. */
+	if (a == 0.0f && b == 0.0f)
+		return signbit(a) || signbit(b) ? -0.0f : 0.0f;
+	return fminf(a, b);
+}
+
+static float
+ordered_maximum(
+	float a,
+	float b)
+{
+	/* Two zeros give +0 when either is +0. */
+	if (a == 0.0f && b == 0.0f)
+		return signbit(a) && signbit(b) ? -0.0f : 0.0f;
+	return fmaxf(a, b);
+}
+
 /* Independently interprets the shared parser's source scalar semantics before native register allocation. */
 static void
 source_program(
@@ -628,10 +661,10 @@ source_program(
 			bits = float_bits(rintf(a));
 			break;
 		case DRV_GPU_IR_FMIN:
-			bits = float_bits(fminf(a, b));
+			bits = float_bits(ordered_minimum(a, b));
 			break;
 		case DRV_GPU_IR_FMAX:
-			bits = float_bits(fmaxf(a, b));
+			bits = float_bits(ordered_maximum(a, b));
 			break;
 		case DRV_GPU_IR_FLT:
 			bits = truth(a < b);
@@ -698,6 +731,11 @@ source_program(
 			if (left != 0)
 				bits = right;
 			break;
+		case DRV_GPU_IR_KILL:
+			/* A discard of a fragment with a true Boolean. */
+			if (left != 0)
+				inputs->discarded = 1;
+			continue;
 		default:
 			fprintf(stderr, "source interpreter: unmodeled operation %u\n", (unsigned)instruction->op);
 			assert(0);
@@ -1065,6 +1103,7 @@ verify_program(
 	struct bcm2711_shader_binary *binary;
 	struct bcm2711_shader_diagnostic diagnostic;
 	struct shader_inputs inputs;
+	uint32_t discarding;
 	uint32_t trial;
 	int error;
 
@@ -1082,8 +1121,17 @@ verify_program(
 		assert(binary->threads == 2 && binary->registers_used == 64);
 	}
 
-	/* Every program of the tree is lowered from the optimizer's rewritten source, never from the fallback. */
-	assert(binary->optimized == 1);
+	/*
+	 * Every program of the tree is lowered from the optimizer's rewritten
+	 * source, never from the fallback, except a discarding one: the shared
+	 * optimizer leaves a program with a discard unchanged.
+	 */
+	discarding = 0;
+	for (trial = 0; trial < ir->instruction_count; trial++) {
+		if (ir->instructions[trial].op == DRV_GPU_IR_KILL)
+			discarding = 1;
+	}
+	assert(binary->optimized == 1 || discarding != 0);
 
 	/* Fragment programs are scheduled; vertex programs keep their source order. */
 	if (stage == BCM2711_SHADER_FRAGMENT)
@@ -1105,11 +1153,17 @@ verify_program(
 	}
 
 	/* Random inputs reach every source path. */
+	discards = 0;
 	for (trial = 0; trial < RANDOM_TRIALS; trial++) {
 		random_inputs(&inputs, trial * 7919U + (uint32_t)word_count * 31U + stage);
 		current_trial = 1000 + trial;
 		run_trial(device, binary, ir, key, &inputs, 0);
 	}
+
+	/* A discarding program must meet both kept and discarded fragments. */
+	if (discards != 0 && key->swap_red_blue == 0)
+		printf("%-24s %-6s discarded %u of %u random trials\n", name, "frag", discards, RANDOM_TRIALS);
+	assert(discards < RANDOM_TRIALS);
 
 	/* The caller exercises ordinary program ownership after every completed native variant. */
 	bcm2711_shader_binary_free(binary);
@@ -1169,6 +1223,16 @@ run_trial(
 	/* Fragment colour: each physical channel carries its source colour, rounded to a half float, exactly. */
 	if (binary->stage == BCM2711_SHADER_FRAGMENT) {
 		assert(result.tile_writes == 2);
+
+		/* A discarded fragment's tile writes are masked, so only the discard itself is compared. */
+		if (result.discarded != source.discarded) {
+			fprintf(stderr, "%s stage %u trial %u: native discard %u differs from source discard %u\n", current_program, binary->stage, current_trial, result.discarded, source.discarded);
+			assert(0);
+		}
+		if (source.discarded != 0) {
+			discards++;
+			return;
+		}
 		for (index = 0; index < 4; index++) {
 			component = index;
 			if (key->swap_red_blue != 0 && (index == 0 || index == 2))

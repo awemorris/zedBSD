@@ -168,6 +168,21 @@ retry:
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
 
+	/*
+	 * Waits out a fork that is copying this address space.  Every
+	 * fault advances the generation, which the fork checks after each
+	 * batch of pages, and a new page would be linked where the fork
+	 * has already passed; a thread that kept writing to the pages the
+	 * fork made copy-on-write would make it start over without end.
+	 */
+	if (vm->forking) {
+		sequence = waitq_sequence(&vm->fault_waitq);
+		mutex_unlock(&vm->lock);
+		vm_metadata_leave();
+		vmspace_wait_fault_event(vm, sequence);
+		goto retry;
+	}
+
 	/* Rejects an address no region covers with the access asked for. */
 	region = vmspace_find_region_locked(vm, address, 1);
 	if (region == NULL || (region->prot & required) == 0) {

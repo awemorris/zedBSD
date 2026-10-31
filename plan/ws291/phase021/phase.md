@@ -2,9 +2,9 @@
 
 # ws291-p021: Raspberry Pi 5（V3D 7.1）で重い 3D の model を、スペックの比で決めた目標の fps に
 
-Status: in-progress（2026-10-30 23:50 P4: 試験の image を作った、実機は未起動。Q1 の判断で実機を待つ間に mview の要る欠けを host で実装）
+Status: in-progress（2026-10-31 00:06 P4 q1730-i01: mview の要る欠け 1〜4（index の draw・instance・直の fetch・mip の image（sample は level 0））を実装、Pi 4・Pi 5 の build と host 試験まで。実機は未起動、mview は未実行）
 Parent: [WS291](../ws.md)
-Queue: q1729（P4）
+Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）
 
 ## 目的
 
@@ -62,29 +62,62 @@ V3D の Vulkan の実行器（`src/drivers/gpu/bcm2711/vk/`、Pi 4 と共有）�
 
 PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測れない（mview の失敗の記録になる）。
 
-### 再開点（2026-10-31 P4 のラップアップ、q1729-i01）
+### 照合の file と基準の host 試験（2026-10-30 P4、q1730-i01）
 
-- Q1 の判断（2026-10-30）: 実機を待つ間に上の 1〜4（index の draw、instance の数と instance rate、mip の image、直の attribute の address）を host で実装してよい。
-  条件: driver と Vulkan の backend の中だけ・HAL を変えない・hal_* を使わない、Pi 4 と共有の code なので Pi 4 を壊さない（Pi 4 の build と既存の host 試験）、改善ごとに commit と報告、実機は Q1 の連絡の後。
-- 実装の進み: source は未変更（読んだだけ）。commit は e00f72140（道具）・ad8da825c（記録）。
-- host 試験: `plan/tools/v3d-qpu/shader-host-test.sh`・`qpu-format-host-test.sh`・`glass-shader-host-test.sh` は `plan/ws141/temp/mesa/src/broadcom/` の Mesa の file
-  （git に入らない oracle）が要り、どの checkout にも無い。Mesa 25.3.6 から取得した物（読むだけ、未実行）: `build/tmp/mesa-dl/`（この worktree）の
-  qpu_instr.c f61745f35e5b34c74aad56b01afb9e068860ecb067361b8f9610dc1b673c8d4e、qpu_instr.h 4b1b90e3bb8ea614dea36484e24d83049392c55cf19b01125627fa5ff4c9d07f、
-  qpu_pack.c abf436006dd3bed52cf1e77245d7267105a9100f02d8b3d643ddc6641fd6d551（3 つとも script の固定の値と一致）、v3d_packet.xml b13f995b1a4b606a1adcb2c048ff9bca067106be14e22ce1ee86e01055094e1b（packet の配置の参照）。
-  `src/broadcom/common/v3d_device_info.h` も要る（未取得）。置いて試験を compile・実行する命令は auto mode の判定で拒否され、Q1 経由でユーザーの許可待ちだった（2026-10-30 Q1 から「許可が出た」）。
-- 実装の設計（読んで決めた所）:
-  - record: `vulkan-record.c` の dispatch・`vulkan-record-decode.c` に `GPU_OP_CMD_BIND_INDEX_BUFFER`（[buffer][u64 offset][u32 type]、objects[0]・offsets[0]・first=type）と
-    `GPU_OP_CMD_DRAW_INDEXED`（5 word: indices・instances・first index・vertex offset・first instance）。`vulkan-record-validate.c` で INDEX_BUFFER の usage・offset の整列・
-    UINT16/UINT32、DRAW の instance の数の制限（`words[1] > 1`・`words[3] != 0` の ENOTSUP）を外す。
-  - 状態: `vulkan-draw.h` の draw_state に index の resource・offset・type、`vulkan-draw.c` の walk と `vulkan-draw-validate.c`（index の範囲・instance rate の attribute の範囲）、
-    `vulkan-prepared.h` の event に index と `draw[5]`、`vulkan-prepared.c`、`vulkan-uniform.c:50`・`vulkan-native-pass.c:656`・`vulkan-native-draw.c:132` の `GPU_OP_CMD_DRAW` の判定を両方の draw に。
-  - fetch: `vulkan-native-draw.c` の `prepare_fetch` を、user の buffer の GPU の address（`bcm2711_vulkan_resource_backing`、texture の TFU と同じく GPU が直に読む）・binding の stride・
-    instance rate なら divisor 1（attribute の record の byte 6〜7）・maximum_index は buffer の範囲から計算（GPU が resource の外を読まない）にする。index の draw は直の形だけ
-    （packed の形は index の範囲を CPU で読む必要がある）。shader の読む成分が format の成分より多い時は今の packed の形に残す。
-  - BCL: draw の packet は 4.2・7.1 で同じ（36 Vertex Array Prims、38 Vertex Array Instanced Prims、34 Indexed Instanced Prim List、32 Indexed Prim List、44 Index Buffer Setup、
-    43 Base Vertex Base Instance、1 NOP、0 は HALT）。`native-bin.h` の BCM2711_NATIVE_BIN_BYTES（133、末尾 10 byte が 36）を、状態 123 byte＋draw の 32 byte（44・43・34 の最大）に広げ、
-    余りは NOP で埋める（0 で埋めると HALT）。pass の measure（`native-pass.c`・`native71-pass.c`）は draw ごとの固定の長さのまま使える。indexed・instanced では 43 を値付きで必ず出す。
-  - mip: `vulkan-resource.c:278` の `mipLevels != 1` の拒否、copy・blit・sample の level の扱い（未調査）。RGBA8 に BLIT を報告しているので mview は mip を作る。
-- 次の安全な地点: 上の record〜BCL を入れ、Pi 4（`config/ci/config-rpi4.mk` の build/arm64/vmunix）と Pi 5（`plan/ws291/tests/config-rpi5.mk`）の vmunix が warning 0、host 試験 PASS で commit。
+- 2026-10-30 ユーザーから、P4 に plan/ws141/temp/ の利用（Mesa（MIT）の照合用の file を置き、V3D の host 試験を compile・実行する）を許可する、という趣旨の指示を受けた（ws.md・guardrail.md の記録）。
+- 置いた物（この worktree の `plan/ws141/temp/mesa/src/broadcom/`、git に入らない）: qpu/qpu_instr.c（f61745f3…）・qpu_instr.h（4b1b90e3…）・qpu_pack.c（abf43600…）（Mesa 25.3.6、前の P4 が `build/tmp/mesa-dl/` に取得、script の固定の sha256 と一致）、
+  common/v3d_device_info.h（Mesa 25.3.6、`https://gitlab.freedesktop.org/mesa/mesa/-/raw/mesa-25.3.6/src/broadcom/common/v3d_device_info.h` をパラメータ無しの GET、
+  sha256 27f8e9adbd7710eb3927ddd8d9789926503497b383fb728b3cf71b1ca39c6c68）、cle/v3d_packet.xml（b13f995b…）。
+- 基準（main 48a27d158）: `qpu-format-host-test.sh` PASS、`shader-host-test.sh` PASS、`glass-shader-host-test.sh` は FAIL（assert `largest < 1e-5`、差 0.998）。
+  10-28 の ab12d4f70 の tree でも同じ FAIL。原因: 試験の参照（ws211-p011 の前の glass を C で評価した物）が、10-22 に意図して見た目を変えた panel.frag に追従していない。
+- 直し（321042a29、Q1 の指示「試験の古さは見つけた担当が直す」）: 正とする物は、native の program（語は Mesa の decoder で読む）と SPIR-V の source の解釈の bit 一致。
+  pre-p011 との差は情報として表示するだけにした。結果: 3856896 fragment で bit 一致、PASS。
+
+### driver の欠けの実装（2026-10-31 P4、q1730-i01）
+
+変えた所は `src/drivers/gpu/bcm2711/`（Pi 4 と共有）と `include/uapi/gpu-op.h` の comment だけ。HAL は変えていない、hal_* は使っていない。
+
+- 6334ae147（欠け 1・2・4）:
+  - record: `GPU_OP_CMD_BIND_INDEX_BUFFER`（INDEX_BUFFER の usage、UINT16・UINT32、offset の整列）・`GPU_OP_CMD_DRAW_INDEXED` を受ける。DRAW の instance の数・first instance の制限を外した。
+    draw の状態に index の buffer、prepared event に index と `draw[5]`。index の範囲は record の walk で buffer の中か確かめる。
+  - pipeline: `VK_VERTEX_INPUT_RATE_INSTANCE` を受ける。attribute の record に instance divisor（instance rate は 1）。
+  - fetch: user の draw は各 location を user の vertex buffer から GPU が直に読む（address・stride・divisor、maximum index は buffer の中の最後の要素、24 bit で止める）。
+    copy しない。shader の読む成分が format より多い・address か stride が 4 の倍数でない location と meta の quad は今の packed の copy（1 instance の vertex array だけ）。
+  - BCL: draw ごとに 155 byte = 状態 123 byte＋draw（43 Base Vertex Base Instance、index なら 44 Index Buffer Setup と 32/34、無ければ 36/38、1 instance は Mesa と同じく instance 無しの packet）、余りは NOP（1）。
+    4.2（native-bin.c）と 7.1（native71-bin.c）で同じ。
+  - host 試験 `plan/ws291/tests/bin-draw-host-test.sh`（新）: 両 encoder の列を Mesa の v3d_packet.xml で packet ごとに decode し、状態 23 packet・draw の field・NOP・拒否・attribute の divisor を確かめる。PASS（4.2・7.1）。
+- 2a4dc413a（欠け 3、第 1 段）: mip の image。
+  - 作り: OPTIMAL の RGBA8・BGRA8 だけ mipLevels を受ける（最大 13）。level 0 は今の raster のまま、小さい level はその後に raster で並ぶ（pitch は 64 byte の倍数）。必要な byte は全 level。
+    image の format の問い合わせは OPTIMAL の RGBA8・BGRA8 で maxMipLevels 13。
+  - layout は level ごと（level 0 は今の `layout`）。barrier・buffer↔image の copy（CPU の行の copy）・blit・copy image が level を受ける。
+    blit は level を 1 level の image として扱う（`bcm2711_vulkan_image_level_view`）。同じ image の別の level の間の blit も受ける（mview の mip の作り方）。
+  - view は level 0 から複数の level を持てる。sample は level 0 だけ（hardware の mip の sample は未実装）。
+- 確かめ: Pi 5（`plan/ws291/tests/config-rpi5.mk`、`build/p021-k5/vmunix`）と Pi 4（`config/ci/config-rpi4.mk`、`build/p021-k4/vmunix`）の vmunix が exit 0・warning 0（両 commit の後）。
+  host 試験: bin-draw-host-test PASS。compiler の host 試験（qpu-format・shader・glass）は compiler を変えていないので基準のまま。
+- 未実施: 実機（Pi 4・Pi 5）、mview の実行、Keiland の desktop の回帰。
+- 注意（Q1 へ報告済み）: Pi 4 の compositor の draw も直の fetch に変わった（前は FIFO の準備の時に vertex を写していた。今は GPU が実行の時に user の buffer を読む）。
+  Q1 は Pi 4・Pi 5 の実機で desktop の回帰を確かめるまで main への merge を保留（2026-10-30）。
+
+### 再開点（2026-10-31 00:06 P4、q1730-i01）
+
+- 次の段（未着手）:
+  1. 実機（Q1 の連絡の後）: image を今の tree で作り直す（`sh plan/ws291/tests/rpi5-image.sh BUILD`、`rpi5-image-boot.sh`）。desktop の回帰（Pi 5、可能なら Pi 4）、clock・QPU を確かめて copies を確定、
+     `plan/ws291/tests/rpi5-mview.sh` で mview の fps。mview が失敗したら kernel の行（`v3d:`）と mview の stderr で欠けを特定する。
+  2. mip の第 2 段（hardware の mip の sample）: 縮小した texture を level 0 で sample すると TMU の cache を浪費する。TFU で各 level の raster を miptree（Mesa の v3d_setup_slices の配置、
+     level ごとの tiling）へ変換し、texture の record に level の数と base の level を入れる。sampler の mipmap mode・LOD を texture の record に。
+  3. 欠け 5（sample する image を pass ごとに CPU で tile へ写す件）は perf の行の `tex` を実機で見てから。
+- 既知の制限: index の draw は直の fetch でしか動かない（packed の copy は index を CPU で読まないため）。primitive restart は off。
 
 - 2026-10-31 ユーザーから、Pi 5 の試験は今日の午後に行い、その時の main で最新の image を作り直して実施する、Q1 が声をかける、という趣旨の指示を受けた。
+
+### 実機の前の準備（2026-10-31 02:00〜02:45 P4、Q1 の指示「main の最新＋agent/p4-ws291pi の image を build だけ、main への merge はしない」）
+
+- main d26c657c7 を agent/p4-ws291pi に取り込んだ（merge e2feb0871、親 e4f77b9e5 d26c657c7）。競合は plan/ws291/ws.md の p021・p022 の行と、この phase.md だけ（source の競合なし）。
+- vmunix: Pi 5（`plan/ws291/tests/config-rpi5.mk`、`build/p021c-k5`、cksum 2551665408）と Pi 4（`config/ci/config-rpi4.mk`、`build/p021c-k4`、cksum 1523912276）が exit 0・warning 0。
+  host 試験 `plan/ws291/tests/bin-draw-host-test.sh` PASS（4.2・7.1）。
+- 試験の image: host の / が満杯で worktree の build は失敗（clang の No space left on device）、Q1 の指示で BUILD を /tmp（tmpfs）に置いた。
+  `sh plan/ws291/tests/rpi5-image.sh /tmp/p4-p021c` exit 0（`Raspberry Pi 4 image check: PASS`・`ufs-root.img: canonical zedBSD UFS OK`、zedBSD の source の warning 0、
+  外部 package の openssl・openssh の warning は除く）、`FALLBACK=build/tmp/k627/build/rpi5/vmunix sh plan/ws291/tests/rpi5-image-boot.sh /tmp/p4-p021c /tmp/p4-p021c/rpi5-p021.img` exit 0。
+  **`/tmp/p4-p021c/rpi5-p021.img`、321912832 byte、sha256 dcadd719d98e94b4972a55adcf467678daa284e328882954b2c8f9342a3bbcc9**（tree e2feb0871、vmunix-fallback cksum 2365958026、
+  config.txt `kernel=vmunix`・1920x1080、cmdline `login=console v3d.perf=1`）。tmpfs なので host の再起動で消える。git と worktree には写していない。SD への書き込みは Q1。
+- 未実施: 実機（Pi 5・Pi 4）の起動・desktop の回帰・mview。
