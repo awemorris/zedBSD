@@ -29,7 +29,21 @@ static uint64_t system_user_l0[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
 static uint64_t system_kernel_l0[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
 static uint64_t system_kernel_l1[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
 static uint64_t system_kernel_l2_low[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
-static uint64_t system_kernel_l3_low[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
+
+/*
+ * The most 2 MiB blocks of RAM the kernel image (text through bss) may
+ * touch.  Each block gets one level-3 table so that W^X holds page by page
+ * over the whole image; arm64_space_init() stops the boot if the image
+ * outgrows it.
+ */
+#define ARM64_KERNEL_L3_TABLES 16U
+
+/*
+ * The level-3 tables of the blocks the kernel image touches, in block
+ * order from the block that holds the image's first byte.
+ */
+static uint64_t system_kernel_l3_image[ARM64_KERNEL_L3_TABLES][512] __attribute__((aligned(ARM64_PAGE_SIZE)));
+
 static uint64_t system_kernel_l2_high[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
 static uintptr_t system_ttbr0;
 
@@ -151,6 +165,8 @@ static bool range_is_ram(uint64_t physical, uint64_t size);
 static int device_block_table(unsigned l1_index, uint64_t **table);
 static void map_one_device_block(uint64_t *table, unsigned l2_index, uint64_t physical);
 static bool space_active_anywhere(hal_space_t handle);
+static uint64_t kernel_image_page_flags(uint64_t physical);
+static bool kernel_image_wx_valid(uint64_t first_block, uint64_t last_block);
 
 /* Allocates one zero-owner physical page for page-table use. */
 static int alloc_page(hal_physaddr_t *memory)
@@ -192,8 +208,8 @@ arm64_space_map_device_block(
 /*
  * Builds the kernel's final tables and switches the boot CPU to them.
  *
- * TTBR1 maps all RAM through the direct map, the first 2 MiB of RAM page
- * by page with W^X for the kernel's sections there, and the firmware's
+ * TTBR1 maps all RAM through the direct map, every 2 MiB block the kernel
+ * image touches page by page with W^X for its sections, and the firmware's
  * peripheral blocks as device memory; TTBR0 gets an empty user table.  The secondary CPUs load
  * the same TTBR1 when they come up (smp.c).
  */
@@ -203,25 +219,26 @@ arm64_space_init(
 {
 	uint64_t total;
 	uint64_t physical;
-	uint64_t flags;
-	uintptr_t text_start;
-	uintptr_t text_end;
-	uintptr_t rodata_start;
-	uintptr_t rodata_end;
-	uintptr_t data_start;
+	uint64_t first_block;
+	uint64_t last_block;
+	uint64_t block;
+	uint64_t *table;
+	uintptr_t image_start;
+	uintptr_t image_end;
 	unsigned index;
-	int text_executable;
-	int rodata_protected;
-	int data_protected;
+	bool wx_valid;
 	int no_map;
 
-	/* Locates the kernel image's sections physically. */
+	/* Locates the 2 MiB blocks the kernel image touches, from text through bss. */
 	total = hal_pmem_get_total_size();
-	text_start = arm64_direct_to_phys(__kernel_text_start);
-	text_end = arm64_direct_to_phys(__kernel_text_end);
-	rodata_start = arm64_direct_to_phys(__kernel_rodata_start);
-	rodata_end = arm64_direct_to_phys(__kernel_rodata_end);
-	data_start = arm64_direct_to_phys(__kernel_data_start);
+	image_start = arm64_direct_to_phys(__kernel_text_start);
+	image_end = arm64_direct_to_phys(__kernel_data_end);
+	first_block = image_start / ARM64_DEVICE_BLOCK_SIZE;
+	last_block = (image_end - 1U) / ARM64_DEVICE_BLOCK_SIZE;
+
+	/* Stops the boot when the image touches more blocks than there are level-3 tables. */
+	if (last_block - first_block >= ARM64_KERNEL_L3_TABLES)
+		HAL_FATAL("arm64 kernel image exceeds its level-3 tables");
 
 	/* Starts from no user space and empty tables. */
 	space_registry = NULL;
@@ -229,7 +246,7 @@ arm64_space_init(
 	hal_memset(system_kernel_l0, 0, sizeof(system_kernel_l0));
 	hal_memset(system_kernel_l1, 0, sizeof(system_kernel_l1));
 	hal_memset(system_kernel_l2_low, 0, sizeof(system_kernel_l2_low));
-	hal_memset(system_kernel_l3_low, 0, sizeof(system_kernel_l3_low));
+	hal_memset(system_kernel_l3_image, 0, sizeof(system_kernel_l3_image));
 	hal_memset(system_kernel_l2_high, 0, sizeof(system_kernel_l2_high));
 
 	/* Maps RAM in 1 GiB blocks, never executable. */
@@ -280,19 +297,20 @@ arm64_space_init(
 		system_kernel_l2_low[index] = physical | BLOCK_FLAGS | PTE_PXN | PTE_UXN;
 	}
 
-	/* Maps the first 2 MiB of RAM page by page: text read-only and executable, rodata read-only. */
-	system_kernel_l2_low[0] = table_desc(system_kernel_l3_low);
-	for (index = 0; index < 512U; index++) {
-		physical = (uint64_t)index * ARM64_PAGE_SIZE;
-		flags = PAGE_FLAGS | PTE_PXN | PTE_UXN;
-		if (physical >= text_start && physical < text_end) {
-			flags = (flags | PTE_RO) & ~PTE_PXN;
-		} else if (physical >= rodata_start && physical < rodata_end) {
-			flags |= PTE_RO;
-		}
+	/*
+	 * Maps every block the kernel image touches page by page: text
+	 * read-only and executable, rodata read-only, the rest writable and
+	 * never executable.  The linker keeps the image in the first GiB.
+	 */
+	for (block = first_block; block <= last_block; block++) {
+		table = system_kernel_l3_image[block - first_block];
+		system_kernel_l2_low[block] = table_desc(table);
 
-		/* Installs the page with the permissions chosen for it. */
-		system_kernel_l3_low[index] = physical | flags;
+		/* Installs each page of the block with the permissions chosen for it. */
+		for (index = 0; index < 512U; index++) {
+			physical = block * ARM64_DEVICE_BLOCK_SIZE + (uint64_t)index * ARM64_PAGE_SIZE;
+			table[index] = physical | kernel_image_page_flags(physical);
+		}
 	}
 
 	/* Gives the early console its own window of the framebuffer, which the kernel's console can remove. */
@@ -309,13 +327,137 @@ arm64_space_init(
 	if (fb_window.state == ARM64_FB_WINDOW_HELD)
 		arm64_framebuffer_move((volatile uint8_t *)fb_window.address, fb_window.cached);
 
-	/* Checks W^X on the three sections the kernel runs from. */
-	text_executable = (system_kernel_l3_low[(text_start >> 12) & 511U] & PTE_PXN) == 0;
-	rodata_protected = (system_kernel_l3_low[(rodata_start >> 12) & 511U] & PTE_PXN) != 0;
-	data_protected = (system_kernel_l3_low[(data_start >> 12) & 511U] & PTE_PXN) != 0;
-	if (!text_executable || !rodata_protected || !data_protected)
+	/* Checks W^X on every page of the kernel image, through the tables now in use. */
+	wx_valid = kernel_image_wx_valid(first_block, last_block);
+	if (!wx_valid)
 		HAL_FATAL("arm64 kernel W^X table validation failed");
 	hal_puts("ARM64 PAGING PASS\nARM64 W^X PASS\n");
+}
+
+/*
+ * Chooses the level-3 permissions of one page in a block the kernel image
+ * touches: text read-only and executable, rodata read-only and never
+ * executable, any other page (data, bss, and RAM around the image)
+ * writable and never executable.
+ */
+static uint64_t
+kernel_image_page_flags(
+	uint64_t physical)
+{
+	uint64_t text_start;
+	uint64_t text_end;
+	uint64_t rodata_start;
+	uint64_t rodata_end;
+
+	/* Locates text and rodata physically. */
+	text_start = arm64_direct_to_phys(__kernel_text_start);
+	text_end = arm64_direct_to_phys(__kernel_text_end);
+	rodata_start = arm64_direct_to_phys(__kernel_rodata_start);
+	rodata_end = arm64_direct_to_phys(__kernel_rodata_end);
+
+	/* A text page is read-only and executable by the kernel alone. */
+	if (physical >= text_start && physical < text_end)
+		return PAGE_FLAGS | PTE_RO | PTE_UXN;
+
+	/* A rodata page is read-only and never executable. */
+	if (physical >= rodata_start && physical < rodata_end)
+		return PAGE_FLAGS | PTE_RO | PTE_PXN | PTE_UXN;
+
+	/* Any other page is writable and never executable. */
+	return PAGE_FLAGS | PTE_PXN | PTE_UXN;
+}
+
+/*
+ * Checks W^X on every page of the kernel image by walking the kernel's
+ * tables from the level-1 entry down: each page must be a page entry of
+ * its own physical address, text executable and read-only, every other
+ * page never executable, rodata read-only and data and bss writable.
+ */
+static bool
+kernel_image_wx_valid(
+	uint64_t first_block,
+	uint64_t last_block)
+{
+	uint64_t *level2;
+	uint64_t *level3;
+	uint64_t entry;
+	uint64_t physical;
+	uint64_t page_start;
+	uint64_t image_end;
+	uint64_t text_start;
+	uint64_t text_end;
+	uint64_t rodata_start;
+	uint64_t rodata_end;
+	uint64_t data_start;
+	uint64_t block;
+	bool in_text;
+	bool in_rodata;
+	bool in_data;
+	bool executable;
+	bool read_only;
+
+	/* Locates the sections physically. */
+	text_start = arm64_direct_to_phys(__kernel_text_start);
+	text_end = arm64_direct_to_phys(__kernel_text_end);
+	rodata_start = arm64_direct_to_phys(__kernel_rodata_start);
+	rodata_end = arm64_direct_to_phys(__kernel_rodata_end);
+	data_start = arm64_direct_to_phys(__kernel_data_start);
+	image_end = arm64_direct_to_phys(__kernel_data_end);
+
+	/* The first GiB must be split into a level-2 table. */
+	entry = system_kernel_l1[0];
+	if ((entry & (PTE_VALID | PTE_TABLE)) != (PTE_VALID | PTE_TABLE))
+		return false;
+	level2 = arm64_phys_to_direct((uintptr_t)(entry & PTE_ADDR));
+
+	/* Each block the image touches must be split into its own level-3 table. */
+	for (block = first_block; block <= last_block; block++) {
+		entry = level2[block];
+		if ((entry & (PTE_VALID | PTE_TABLE)) != (PTE_VALID | PTE_TABLE))
+			return false;
+		if ((entry & PTE_ADDR) != arm64_direct_to_phys(system_kernel_l3_image[block - first_block]))
+			return false;
+	}
+
+	/* Checks each page from the first page of text to the end of bss. */
+	page_start = text_start & ~(uint64_t)(ARM64_PAGE_SIZE - 1U);
+	for (physical = page_start; physical < image_end; physical += ARM64_PAGE_SIZE) {
+		/* Reads the page's entry through its block's table. */
+		level3 = arm64_phys_to_direct((uintptr_t)(level2[physical / ARM64_DEVICE_BLOCK_SIZE] & PTE_ADDR));
+		entry = level3[(physical / ARM64_PAGE_SIZE) & 511U];
+
+		/* The entry must be a valid page entry of the page itself. */
+		if ((entry & (PTE_VALID | PTE_TABLE)) != (PTE_VALID | PTE_TABLE))
+			return false;
+		if ((entry & PTE_ADDR) != physical)
+			return false;
+
+		/* Locates the page among the sections. */
+		in_text = physical >= text_start && physical < text_end;
+		in_rodata = physical >= rodata_start && physical < rodata_end;
+		in_data = physical >= data_start;
+		executable = (entry & PTE_PXN) == 0;
+		read_only = (entry & PTE_RO) != 0;
+
+		/* Text is executable and read-only; no other page is executable. */
+		if (executable != in_text)
+			return false;
+		if (in_text && !read_only)
+			return false;
+
+		/* Rodata is read-only, and data and bss stay writable. */
+		if (in_rodata && !read_only)
+			return false;
+		if (in_data && read_only)
+			return false;
+
+		/* User code may execute no page of the kernel. */
+		if ((entry & PTE_UXN) == 0)
+			return false;
+	}
+
+	/* Every page of the image keeps W^X. */
+	return true;
 }
 
 /*

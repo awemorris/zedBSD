@@ -281,6 +281,8 @@ static void display_overlay_request(struct gpu_display_commit *request, const st
 static uint64_t display_overlay_now(void);
 static void display_overlay_log(uint32_t plane, uint64_t serial, uint64_t ticket, uint64_t min_primary, const char *path, const char *why, int result, uint64_t sequence, uint64_t adopted, uint64_t call_ns);
 
+static VkResult display_layouts(void *private_lease, struct gpu_image_layouts *request);
+
 /* Future window-system adapters implement this same private presentation boundary. */
 const struct vulkan_wsi_platform_ops vulkan_wsi_display_platform = {
 	display_capabilities, display_formats, display_present_modes,
@@ -291,7 +293,9 @@ const struct vulkan_wsi_platform_ops vulkan_wsi_display_platform = {
 	display_primary_ticket, display_present_primary, display_primary_skip,
 	display_overlay_decide, display_overlay_commit, display_overlay_ready,
 	display_overlay_status, display_overlay_forget, display_overlay_reclaim,
-	NULL
+	NULL,
+	NULL, NULL, NULL,
+	NULL, display_layouts
 };
 
 /*
@@ -593,6 +597,14 @@ display_capabilities(
 	capabilities->supportedCompositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 	capabilities->supportedUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
 	    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+	/*
+	 * A primary plane's images may be sampled too: a compositor lends them
+	 * to a client and composes them after the lend.  A direct chain's
+	 * linear image and a copied chain's own image both allow it.
+	 */
+	if (surface->cursor == VK_FALSE && surface->overlay == VK_FALSE)
+		capabilities->supportedUsageFlags |= VK_IMAGE_USAGE_SAMPLED_BIT;
 
 	/*
 	 * An overlay chain of two images may have both acquired at once, so a
@@ -1962,6 +1974,43 @@ display_placement(
 	placement->alignment = 0U;
 
 	/* Succeeded: WSI will submit these requirements to K before exposing a shared display image. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Asks the lease's display node which layouts of an image it shows (the
+ * request's format, width and height filled in by the caller): the
+ * display's identity and the scanout use are added here.  Returns
+ * VK_SUCCESS with the answer, or the error of a node that does not answer
+ * (an older kernel's).
+ */
+static VkResult
+display_layouts(
+	void *private_lease,
+	struct gpu_image_layouts *request)
+{
+	struct wsi_display_lease *lease;
+	struct vulkan_wsi_output output;
+	VkResult error;
+	int status;
+
+	/* The output the lease shows, as its surface's display is now. */
+	lease = private_lease;
+	error = vulkan_wsi_display_snapshot(lease->surface->display_mode->display, &output);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The question, for this display and its scanout. */
+	request->version = GPU_ABI_VERSION;
+	request->size = sizeof(*request);
+	request->uses = GPU_LAYOUT_SCANOUT;
+	request->display_id = (uint32_t)output.identifier;
+	request->count = 0U;
+	status = vulkan_wsi_display_node_ioctl(lease->device->physical, &output, GPU_IMAGE_LAYOUTS, request);
+	if (status != 0)
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+
+	/* Succeeded: the display's layouts of the image. */
 	return VK_SUCCESS;
 }
 

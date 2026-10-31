@@ -1570,6 +1570,7 @@
     }
     def(g, 'PromiseRejectionEvent', PromiseRejectionEvent);
   }
+// @include plan/ws074/phase260/cssom-rules.js
   // The CSSOM rule interfaces scripts test with instanceof (a rule is told by what it has, as the engine's rules have no class of their own).
   [['CSSRule', function (x) { return !!x && typeof x === 'object' && typeof x.cssText === 'string'; }],
    ['CSSStyleRule', function (x) { return !!x && typeof x.selectorText === 'string'; }],
@@ -1734,7 +1735,15 @@
         return;
       }
       t._ready.resolve(undefined);
-      requestAnimationFrame(function () { setTimeout(function () { finish(t); }, native.viewTransitionDuration()); });
+      requestAnimationFrame(function () {
+        // The transition ends when its animations have; one a script paused does not end.
+        var tick = function () {
+          if (t._phase === 'done') return;
+          if (typeof g.__vtPaused === 'function' && g.__vtPaused()) { setTimeout(tick, 100); return; }
+          finish(t);
+        };
+        setTimeout(tick, Math.max(native.viewTransitionDuration(), typeof g.__vtAnimations === 'function' ? g.__vtAnimations() : 0));
+      });
     }
     g.Document.prototype.startViewTransition = function startViewTransition(callbackOptions) {
       var t = new ViewTransition(VT), cb = callbackOptions, i, list;
@@ -1767,8 +1776,15 @@
         }
         setTimeout(function () {
           if (t._phase === 'done') return;
+          // The new state is made before the page's own frame callbacks (the update callback's) run: this one is asked for first.
+          var fired = false, waiting = false;
+          requestAnimationFrame(function () {
+            fired = true;
+            if (t._phase === 'done') return;
+            if (t._updateDone === 1) activate(t); else waiting = true;
+          });
           callUpdate(t);
-          then.call(t._done.promise, function () { requestAnimationFrame(function () { activate(t); }); }, function (e) { skip(t, e); });
+          then.call(t._done.promise, function () { if (fired && waiting) requestAnimationFrame(function () { activate(t); }); }, function (e) { skip(t, e); });
         }, 0);
       });
       return t;
@@ -1880,6 +1896,7 @@
     });
     def(g.Document.prototype, 'getAnimations', function getAnimations() { return Array.from(all).filter(function (a) { return a._state === 'running' || a._state === 'paused'; }); });
     def(g, 'Animation', Animation);
+// @include plan/ws074/phase260/animation-style.js
   })();
   // ---- document.fonts: load() and check() (the faces the page names are loaded or not by its stylesheets alone)
   (function () {

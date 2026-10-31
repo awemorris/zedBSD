@@ -156,6 +156,9 @@ enum computed_property {
 	COMPUTED_ANIMATION_DURATION,
 	COMPUTED_ANIMATION_DELAY,
 	COMPUTED_ANIMATION_PLAY_STATE,
+	COMPUTED_ANIMATION_ITERATION_COUNT,
+	COMPUTED_ANIMATION_DIRECTION,
+	COMPUTED_ISOLATION,
 	COMPUTED_ANIMATION_TIMING_FUNCTION,
 	COMPUTED_MIX_BLEND_MODE,
 	COMPUTED_ZOOM,
@@ -406,6 +409,9 @@ static const struct computed_entry computed_entries[] = {
 	{ "animation-duration", COMPUTED_ANIMATION_DURATION },
 	{ "animation-delay", COMPUTED_ANIMATION_DELAY },
 	{ "animation-play-state", COMPUTED_ANIMATION_PLAY_STATE },
+	{ "animation-iteration-count", COMPUTED_ANIMATION_ITERATION_COUNT },
+	{ "animation-direction", COMPUTED_ANIMATION_DIRECTION },
+	{ "isolation", COMPUTED_ISOLATION },
 	{ "animation-timing-function", COMPUTED_ANIMATION_TIMING_FUNCTION },
 	{ "mix-blend-mode", COMPUTED_MIX_BLEND_MODE },
 	{ "zoom", COMPUTED_ZOOM },
@@ -1925,6 +1931,19 @@ computed_write_keyword(
 	case COMPUTED_ANIMATION_PLAY_STATE:
 		error = computed_ascii(style->animation_paused ? "paused" : "running", out);
 		break;
+	case COMPUTED_ANIMATION_ITERATION_COUNT:
+		if (style->animation_iterations < 0.0f)
+			error = computed_ascii("infinite", out);
+		else
+			error = computed_number(style->animation_iterations, out);
+		break;
+	case COMPUTED_ANIMATION_DIRECTION:
+		error = computed_ascii(style->animation_direction == 1 ? "reverse" : style->animation_direction == 2 ? "alternate" :
+		    style->animation_direction == 3 ? "alternate-reverse" : "normal", out);
+		break;
+	case COMPUTED_ISOLATION:
+		error = computed_ascii(style->isolation == 1 ? "isolate" : "auto", out);
+		break;
 	case COMPUTED_ANIMATION_TIMING_FUNCTION:
 		if (style->animation_timing == NULL)
 			error = computed_ascii("ease", out);
@@ -1932,7 +1951,7 @@ computed_write_keyword(
 			error = vm_string_append_units(style->animation_timing, out);
 		break;
 	case COMPUTED_MIX_BLEND_MODE:
-		error = computed_ascii(style->mix_blend_mode == 1 ? "plus-lighter" : "normal", out);
+		error = computed_ascii(style->mix_blend_mode == 1 ? "plus-lighter" : style->mix_blend_mode >= 2 ? css_blend_names[style->mix_blend_mode - 2] : "normal", out);
 		break;
 	case COMPUTED_FLEX_FLOW:
 		error = computed_name(computed_flex_directions, 4, style->flex_direction, out);

@@ -108,9 +108,10 @@ const char css_user_agent_sheet[] =
 	":root::view-transition-group(*) { display: block; position: absolute; top: 0; left: 0;"
 	" animation-name: -ua-view-transition-group; animation-duration: 0.25s; }\n"
 	":root::view-transition-image-pair(*) { display: block; position: absolute; top: 0; right: 0; bottom: 0; left: 0;"
-	" animation-duration: inherit; animation-delay: inherit; animation-play-state: inherit; animation-timing-function: inherit; }\n"
+	" isolation: isolate; animation-duration: inherit; animation-delay: inherit; animation-play-state: inherit; animation-timing-function: inherit;"
+	" animation-iteration-count: inherit; animation-direction: inherit; }\n"
 	":root::view-transition-old(*), :root::view-transition-new(*) { display: block; position: absolute; top: 0; left: 0;"
-	" inline-size: 100%; block-size: auto; mix-blend-mode: plus-lighter; animation-duration: inherit; animation-delay: inherit;"
-	" animation-play-state: inherit; animation-timing-function: inherit; }\n"
+	" inline-size: 100%; block-size: auto; animation-duration: inherit; animation-delay: inherit;"
+	" animation-play-state: inherit; animation-timing-function: inherit; animation-iteration-count: inherit; animation-direction: inherit; }\n"
 	":root::view-transition-old(*) { animation-name: -ua-view-transition-fade-out; }\n"
 	":root::view-transition-new(*) { animation-name: -ua-view-transition-fade-in; }\n";

@@ -1962,6 +1962,14 @@ parser_selector(
 			return error;
 		}
 
+		/* A view transition pseudo-element is last in its selector. */
+		if (compounds.count != 0 &&
+		    ((struct css_compound *)wb_vector_at(&compounds, compounds.count - 1U))->pseudo_element >= CSS_PSEUDO_ELEMENT_VT_ROOT &&
+		    ((struct css_compound *)wb_vector_at(&compounds, compounds.count - 1U))->pseudo_element <= CSS_PSEUDO_ELEMENT_VT_NEW) {
+			wb_vector_release(&compounds);
+			return EINVAL;
+		}
+
 		/* The combinator joins it to the compound before. */
 		compound.combinator = combinator;
 		error = wb_vector_push(&compounds, &compound);
@@ -2044,6 +2052,7 @@ parser_compound(
 	size_t made;
 	size_t end;
 	int error;
+	int after;
 
 	/* Reads simple selectors until whitespace, a combinator or the end. */
 	made = 0;
@@ -2054,6 +2063,9 @@ parser_compound(
 		token = &tokens[*index];
 		simple = &simples[made];
 		memset(simple, 0, sizeof(*simple));
+
+		/* What follows a view transition pseudo-element in its compound: only :only-child (not of ::view-transition itself). */
+		after = compound->pseudo_element >= CSS_PSEUDO_ELEMENT_VT_ROOT && compound->pseudo_element <= CSS_PSEUDO_ELEMENT_VT_NEW;
 
 		/* A type selector (lower case: HTML element names are), or the universal selector. */
 		if (token->type == CSS_TOKEN_IDENT && made == 0) {
@@ -2132,7 +2144,10 @@ parser_compound(
 			break;
 		}
 
-		/* The simple selector is complete. */
+		/* The simple selector is complete (after a view transition pseudo-element it must be :only-child). */
+		if (after && (simple->kind != CSS_SIMPLE_PSEUDO_CLASS || simple->pseudo != CSS_PSEUDO_ONLY_CHILD ||
+		    compound->pseudo_element == CSS_PSEUDO_ELEMENT_VT_ROOT))
+			return EINVAL;
 		made++;
 		(*index)++;
 	}
@@ -2354,11 +2369,9 @@ parser_pseudo(
 	case CSS_PSEUDO_HAS:
 		/* Relative selectors. */
 		error = parser_pseudo_arguments(heap, arena, arguments, 1, simple, specificity);
-		if (error == ENOMEM)
-			return error;
-		if (error != 0)
-			simple->pseudo = CSS_PSEUDO_NEVER;
-		return 0;
+
+		/* :has() is not forgiving: an argument it cannot read makes the selector invalid. */
+		return error;
 	case CSS_PSEUDO_LANG:
 		/* A functional language selector must actually close its argument list. */
 		if (tokens[end - 1U].type != CSS_TOKEN_CLOSE_PAREN)
@@ -2487,7 +2500,15 @@ parser_pseudo_element(
 	if (css_ident_equal(token, "details-content"))
 		return;
 
-	/* Any other (::placeholder, ::-webkit-scrollbar, ::first-line ...) is not drawn. */
+	/* The first letter and the first line of a block container. */
+	simple->pseudo = CSS_PSEUDO_ELEMENT_FIRST_LETTER;
+	if (css_ident_equal(token, "first-letter"))
+		return;
+	simple->pseudo = CSS_PSEUDO_ELEMENT_FIRST_LINE;
+	if (css_ident_equal(token, "first-line"))
+		return;
+
+	/* Any other (::placeholder, ::-webkit-scrollbar ...) is not drawn. */
 	simple->pseudo = CSS_PSEUDO_ELEMENT_OTHER;
 }
 
@@ -2506,6 +2527,7 @@ parser_view_transition_argument(
 {
 	size_t end;
 	size_t position;
+	int named;
 
 	compound->pseudo_name = NULL;
 	compound->pseudo_class_count = 0;
@@ -2521,13 +2543,21 @@ parser_view_transition_argument(
 	position = *index + 1U;
 	while (position < end - 1U && tokens[position].type == CSS_TOKEN_WHITESPACE)
 		position++;
+	named = 0;
 	if (position < end - 1U && tokens[position].type == CSS_TOKEN_IDENT) {
+		/* The words a <custom-ident> cannot be. */
+		if (css_ident_equal(&tokens[position], "default") || css_ident_equal(&tokens[position], "unset") ||
+		    css_ident_equal(&tokens[position], "initial") || css_ident_equal(&tokens[position], "inherit") ||
+		    css_ident_equal(&tokens[position], "revert") || css_ident_equal(&tokens[position], "revert-layer"))
+			return EINVAL;
 		compound->pseudo_name = parser_atom(heap, &tokens[position], 0);
 		if (compound->pseudo_name == NULL)
 			return ENOMEM;
 		position++;
+		named = 1;
 	} else if (position < end - 1U && tokens[position].type == CSS_TOKEN_DELIM && tokens[position].delim == '*') {
 		position++;
+		named = 1;
 	}
 	while (position + 1U < end - 1U && tokens[position].type == CSS_TOKEN_DELIM && tokens[position].delim == '.' &&
 	    tokens[position + 1U].type == CSS_TOKEN_IDENT) {
@@ -2542,6 +2572,10 @@ parser_view_transition_argument(
 	while (position < end - 1U && tokens[position].type == CSS_TOKEN_WHITESPACE)
 		position++;
 	if (position != end - 1U)
+		return EINVAL;
+
+	/* An empty argument is not one. */
+	if (!named && compound->pseudo_class_count == 0)
 		return EINVAL;
 	*index = end - 1U;
 	return 0;
@@ -2640,6 +2674,15 @@ parser_pseudo_arguments(
 				return error;
 			list[made].compounds[0].combinator = combinator;
 			made++;
+		}
+	}
+
+	/* A view transition pseudo-element cannot be inside :not() or :has(). */
+	for (index = 0; index < made; index++) {
+		for (start = 0; start < list[index].count; start++) {
+			if (list[index].compounds[start].pseudo_element >= CSS_PSEUDO_ELEMENT_VT_ROOT &&
+			    list[index].compounds[start].pseudo_element <= CSS_PSEUDO_ELEMENT_VT_NEW)
+				return EINVAL;
 		}
 	}
 

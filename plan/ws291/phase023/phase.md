@@ -2,7 +2,7 @@
 
 # ws291-p023: 共有の image の画素の並びを client と compositor で決める（WSI の block-linear、まず設計）
 
-Status: in-progress（2026-10-31 新設。設計は済み、同日 Q1 の指示で実装に入った: I1 済み、nvrtx は進行中）
+Status: cleared（2026-10-31 21:04 Q1 の判定。共通の部分 I1・nvrtx の block-linear の置き方・NVC57E の block-linear の scanout（BL の kind の context DMA の直し effb3d149）・既定で有効（P2 16cd986f0）が main に。RTX で subs-1000 10.9 → 約 20 fps、画素の差 0、desktop の後退なし、ユーザーの目視 PASS（2 回目））
 Parent: [WS291](../ws.md)
 Queue: q1781（P3）
 

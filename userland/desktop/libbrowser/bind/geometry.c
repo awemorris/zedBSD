@@ -99,6 +99,7 @@ static void geometry_scroll(const struct bind_window *window, double *x, double 
 static double geometry_round(double value);
 static int geometry_position(struct bind_window *window, struct dom_element *element, int *position);
 static int geometry_offset_parent(struct bind_window *window, struct dom_element *element, struct dom_element **parent);
+static int geometry_fixed_container(struct bind_window *window, struct dom_element *element, int *contains);
 static int geometry_offset(struct vm_realm *realm, vm_value this_value, int top, vm_value *result);
 static int geometry_scroll_arguments(struct vm_realm *realm, const vm_value *args, unsigned count, double *x, double *y, int *given_x, int *given_y);
 static void geometry_scroll_move(struct bind_window *window, double x, double y);
@@ -1560,6 +1561,31 @@ geometry_position(
 	return 0;
 }
 
+/* Tells whether an element is the containing block of the fixed boxes inside it (a transform, a backdrop filter, will-change). */
+static int
+geometry_fixed_container(
+	struct bind_window *window,
+	struct dom_element *element,
+	int *contains)
+{
+	struct css_style *style;
+	int error;
+
+	*contains = 0;
+	if (window->host.computed_style == NULL)
+		return 0;
+	style = malloc(sizeof(*style));
+	if (style == NULL)
+		return ENOMEM;
+	error = window->host.computed_style(window->host.context, element, style);
+	if (error == 0)
+		*contains = style->transform_set || style->backdrop_filter_count != 0 || (style->will_change_contains & 1) != 0;
+	free(style);
+	if (error == ENOENT)
+		return 0;
+	return error;
+}
+
 /*
  * Finds an element's offset parent (CSSOM View): none for the root, the
  * body, an element without a box or a fixed one; otherwise its nearest
@@ -1600,8 +1626,20 @@ geometry_offset_parent(
 	error = geometry_position(window, element, &position);
 	if (error != 0)
 		return error;
-	if (position == CSS_POSITION_FIXED)
+	if (position == CSS_POSITION_FIXED) {
+		/* Unless a transformed ancestor is the containing block of what is fixed inside it. */
+		for (walk = element->node.parent; walk != NULL && walk->type == DOM_ELEMENT; walk = walk->parent) {
+			ancestor = (struct dom_element *)walk;
+			error = geometry_fixed_container(window, ancestor, &stops);
+			if (error != 0)
+				return error;
+			if (stops) {
+				*parent = ancestor;
+				return 0;
+			}
+		}
 		return 0;
+	}
 
 	/* The nearest ancestor that is one. */
 	for (walk = element->node.parent; walk != NULL && walk->type == DOM_ELEMENT; walk = walk->parent) {

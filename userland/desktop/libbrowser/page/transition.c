@@ -14,6 +14,7 @@
 #include "page/page.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -145,6 +146,82 @@ transition_longest(
 	return longest;
 }
 
+/* Sets what a script's animation of a pseudo-element of a name gives now (empty text: nothing), and has the page laid out again. */
+void
+page_view_transition_style(
+	void *context,
+	int pseudo,
+	const struct vm_string *name,
+	const char *text)
+{
+	struct page *page;
+	struct layout_transition_name *entry;
+	char *slot;
+
+	page = context;
+	if (!page->transition_on || pseudo < CSS_PSEUDO_ELEMENT_VT_GROUP || pseudo > CSS_PSEUDO_ELEMENT_VT_NEW)
+		return;
+	entry = layout_transition_find(&page->transition, name);
+	if (entry == NULL)
+		return;
+	slot = entry->animated[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP];
+	if (strncmp(slot, text, sizeof(entry->animated[0])) == 0)
+		return;
+	strncpy(slot, text, sizeof(entry->animated[0]) - 1U);
+	slot[sizeof(entry->animated[0]) - 1U] = '\0';
+	page->transition_generation++;
+}
+
+/* Sets how long the animations of the shown tree have run (a script setting the time of an animation), and has the page laid out again. */
+void
+page_view_transition_time(
+	void *context,
+	double milliseconds)
+{
+	struct page *page;
+
+	page = context;
+	if (!page->transition_on)
+		return;
+	page->transition.elapsed = (float)(milliseconds / 1000.0);
+	page->transition_generation++;
+}
+
+/* Lists the names of the shown transition, one "name flags" line each (1: an old snapshot, 2: a new one). */
+int
+page_view_transition_names(
+	void *context,
+	struct wb_units *units)
+{
+	struct page *page;
+	const struct layout_transition_name *entry;
+	size_t index;
+	size_t at;
+	int error;
+
+	page = context;
+	if (!page->transition_on)
+		return 0;
+	for (index = 0; index < page->transition.count; index++) {
+		entry = &page->transition.names[index];
+		if (!entry->has_old && !entry->has_new)
+			continue;
+		for (at = 0; entry->name != NULL && at < entry->name->length; at++) {
+			error = wb_units_append_code_point(units, vm_string_at(entry->name, at));
+			if (error != 0)
+				return error;
+		}
+		error = wb_units_append_code_point(units, ' ');
+		if (error == 0)
+			error = wb_units_append_code_point(units, (uint32_t)('0' + (entry->has_old ? 1 : 0) + (entry->has_new ? 2 : 0)));
+		if (error == 0)
+			error = wb_units_append_code_point(units, '\n');
+		if (error != 0)
+			return error;
+	}
+	return 0;
+}
+
 /* The milliseconds until the animations of the shown tree have all ended. */
 double
 page_view_transition_duration(
@@ -173,6 +250,11 @@ page_vt_pseudo_style(
 	struct page *page;
 	struct css_style *chain;
 	const struct layout_transition_name *entry;
+	static const char prefix[] = "-ua-view-transition-group-anim-";
+	const char *given;
+	uint16_t units[160];
+	size_t used;
+	size_t at;
 	const struct vm_string *classes;
 	size_t first;
 	size_t last;
@@ -237,6 +319,45 @@ page_vt_pseudo_style(
 	}
 	if (error == 0)
 		*style = chain[count];
+
+	/* The UA's isolation is for a name with both snapshots, and its images blend as plus-lighter while their animation runs. */
+	if (error == 0 && page->transition_on && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW) {
+		entry = layout_transition_find(&page->transition, name);
+		if (entry != NULL && !(entry->has_old && entry->has_new) && pseudo == CSS_PSEUDO_ELEMENT_VT_PAIR)
+			style->isolation = 0;
+		if (entry != NULL && entry->has_old && entry->has_new && style->animation_name != NULL && style->mix_blend_mode == 0 &&
+		    (pseudo == CSS_PSEUDO_ELEMENT_VT_OLD || pseudo == CSS_PSEUDO_ELEMENT_VT_NEW))
+			style->mix_blend_mode = 1;
+	}
+
+	/* The UA's animations by the snapshots a name has: the group moves only between two, an image fades by its state, and a group's mix-blend-mode needs both. */
+	if (error == 0 && page->transition_on && style->animation_name != NULL && pseudo >= CSS_PSEUDO_ELEMENT_VT_GROUP && pseudo <= CSS_PSEUDO_ELEMENT_VT_NEW) {
+		entry = layout_transition_find(&page->transition, name);
+		if (entry != NULL) {
+			given = NULL;
+			used = 0;
+			if (pseudo == CSS_PSEUDO_ELEMENT_VT_GROUP) {
+				if (entry->has_old && entry->has_new) {
+					for (at = 0; prefix[at] != '\0'; at++)
+						units[used++] = (uint16_t)(unsigned char)prefix[at];
+					for (at = 0; entry->name != NULL && at < entry->name->length && used < 160U; at++)
+						units[used++] = vm_string_at(entry->name, at);
+				}
+			} else if (pseudo == CSS_PSEUDO_ELEMENT_VT_OLD) {
+				if (entry->has_old)
+					given = entry->has_new ? "-ua-view-transition-fade-out, -ua-mix-blend-mode-plus-lighter" : "-ua-view-transition-fade-out";
+			} else if (pseudo == CSS_PSEUDO_ELEMENT_VT_NEW) {
+				if (entry->has_new)
+					given = entry->has_old ? "-ua-view-transition-fade-in, -ua-mix-blend-mode-plus-lighter" : "-ua-view-transition-fade-in";
+			}
+			for (at = 0; given != NULL && given[at] != '\0' && used < 160U; at++)
+				units[used++] = (uint16_t)(unsigned char)given[at];
+			if (used == 0)
+				style->animation_name = NULL;
+			else if (pseudo != CSS_PSEUDO_ELEMENT_VT_PAIR)
+				style->animation_name = vm_atom_from_units(page->heap, units, used);
+		}
+	}
 	free(chain);
 	return error;
 }

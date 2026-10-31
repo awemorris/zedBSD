@@ -330,6 +330,9 @@ static const struct values_name values_names[] = {
 	{ "animation-play-state", CSS_PROP_ANIMATION_PLAY_STATE },
 	{ "animation-timing-function", CSS_PROP_ANIMATION_TIMING_FUNCTION },
 	{ "mix-blend-mode", CSS_PROP_MIX_BLEND_MODE },
+	{ "animation-iteration-count", CSS_PROP_ANIMATION_ITERATION_COUNT },
+	{ "animation-direction", CSS_PROP_ANIMATION_DIRECTION },
+	{ "isolation", CSS_PROP_ISOLATION },
 	{ "animation", SHORT_ANIMATION },
 	{ "container", SHORT_CONTAINER },
 	{ "border-spacing", SHORT_BORDER_SPACING },
@@ -2201,7 +2204,9 @@ values_single(
 	/* animation-name: none or a name (the one animation of the cascade); the times and play state alongside. */
 	if (property == CSS_PROP_ANIMATION_NAME || property == CSS_PROP_ANIMATION_DURATION ||
 	    property == CSS_PROP_ANIMATION_DELAY || property == CSS_PROP_ANIMATION_PLAY_STATE ||
-	    property == CSS_PROP_ANIMATION_TIMING_FUNCTION || property == CSS_PROP_MIX_BLEND_MODE)
+	    property == CSS_PROP_ANIMATION_TIMING_FUNCTION || property == CSS_PROP_MIX_BLEND_MODE ||
+	    property == CSS_PROP_ANIMATION_ITERATION_COUNT || property == CSS_PROP_ANIMATION_DIRECTION ||
+	    property == CSS_PROP_ISOLATION)
 		return values_animation_single(parse, property, tokens, count, value);
 
 	/* view-transition-class: none, or custom identifiers. */
@@ -3705,6 +3710,8 @@ values_wide_keyword(
 		values_add(out, made, CSS_PROP_ANIMATION_DELAY, value);
 		values_add(out, made, CSS_PROP_ANIMATION_PLAY_STATE, value);
 		values_add(out, made, CSS_PROP_ANIMATION_TIMING_FUNCTION, value);
+		values_add(out, made, CSS_PROP_ANIMATION_ITERATION_COUNT, value);
+		values_add(out, made, CSS_PROP_ANIMATION_DIRECTION, value);
 		return;
 	case SHORT_OUTLINE:
 		/* The outline's width, style and color. */
@@ -4083,6 +4090,7 @@ values_animation_single(
 	struct css_value *value)
 {
 	float seconds;
+	size_t index;
 
 	if (count != 1 && property != CSS_PROP_ANIMATION_TIMING_FUNCTION)
 		return EINVAL;
@@ -4130,17 +4138,75 @@ values_animation_single(
 		return value->ident == NULL ? ENOMEM : 0;
 	}
 
-	/* mix-blend-mode: a blend keyword; only plus-lighter is told from normal. */
+	/* animation-iteration-count: a number of times (not negative), or infinite (kept as -1). */
+	if (property == CSS_PROP_ANIMATION_ITERATION_COUNT) {
+		value->kind = CSS_VALUE_NUMBER;
+		if (tokens[0].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[0], "infinite")) {
+			value->number = -1.0f;
+			return 0;
+		}
+		if (tokens[0].type != CSS_TOKEN_NUMBER || tokens[0].number < 0)
+			return EINVAL;
+		value->number = (float)tokens[0].number;
+		return 0;
+	}
+
+	/* animation-direction and isolation: a keyword of the property. */
+	if (property == CSS_PROP_ANIMATION_DIRECTION) {
+		value->kind = CSS_VALUE_KEYWORD;
+		if (tokens[0].type != CSS_TOKEN_IDENT)
+			return EINVAL;
+		if (css_ident_equal(&tokens[0], "normal"))
+			value->keyword = 0;
+		else if (css_ident_equal(&tokens[0], "reverse"))
+			value->keyword = 1;
+		else if (css_ident_equal(&tokens[0], "alternate"))
+			value->keyword = 2;
+		else if (css_ident_equal(&tokens[0], "alternate-reverse"))
+			value->keyword = 3;
+		else
+			return EINVAL;
+		return 0;
+	}
+	if (property == CSS_PROP_ISOLATION) {
+		value->kind = CSS_VALUE_KEYWORD;
+		if (tokens[0].type != CSS_TOKEN_IDENT)
+			return EINVAL;
+		if (css_ident_equal(&tokens[0], "auto"))
+			value->keyword = 0;
+		else if (css_ident_equal(&tokens[0], "isolate"))
+			value->keyword = 1;
+		else
+			return EINVAL;
+		return 0;
+	}
+
+	/* mix-blend-mode: a blend keyword (0 normal, 1 plus-lighter, 2 and up the others). */
 	if (tokens[0].type != CSS_TOKEN_IDENT)
 		return EINVAL;
 	value->kind = CSS_VALUE_KEYWORD;
-	value->keyword = 2;
-	if (css_ident_equal(&tokens[0], "normal"))
+	if (css_ident_equal(&tokens[0], "normal")) {
 		value->keyword = 0;
-	else if (css_ident_equal(&tokens[0], "plus-lighter"))
+		return 0;
+	}
+	if (css_ident_equal(&tokens[0], "plus-lighter")) {
 		value->keyword = 1;
-	return 0;
+		return 0;
+	}
+	for (index = 0; css_blend_names[index] != NULL; index++) {
+		if (css_ident_equal(&tokens[0], css_blend_names[index])) {
+			value->keyword = 2 + (int)index;
+			return 0;
+		}
+	}
+	return EINVAL;
 }
+
+/* The blend modes besides normal and plus-lighter; a style's mix_blend_mode is 2 plus the index. */
+const char *const css_blend_names[] = {
+	"multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light",
+	"difference", "exclusion", "hue", "saturation", "color", "luminosity", NULL
+};
 
 /*
  * Parses the animation shorthand of one animation: a duration, then a delay, a play state and a name in any order
@@ -4167,8 +4233,12 @@ values_animation(
 	char timing[64];
 	size_t used;
 	int have_timing;
+	float iterations;
+	int direction;
 
 	have_timing = 0;
+	iterations = 1.0f;
+	direction = 0;
 	times = 0;
 	have_name = 0;
 	have_state = 0;
@@ -4198,8 +4268,21 @@ values_animation(
 			index += used - 1U;
 			continue;
 		}
+		if (tokens[index].type == CSS_TOKEN_NUMBER && tokens[index].number >= 0) {
+			iterations = (float)tokens[index].number;
+			continue;
+		}
 		if (tokens[index].type != CSS_TOKEN_IDENT)
 			continue;
+		if (css_ident_equal(&tokens[index], "infinite")) {
+			iterations = -1.0f;
+			continue;
+		}
+		if (css_ident_equal(&tokens[index], "reverse") || css_ident_equal(&tokens[index], "alternate") ||
+		    css_ident_equal(&tokens[index], "alternate-reverse")) {
+			direction = css_ident_equal(&tokens[index], "reverse") ? 1 : css_ident_equal(&tokens[index], "alternate") ? 2 : 3;
+			continue;
+		}
 		if (css_ident_equal(&tokens[index], "paused") || css_ident_equal(&tokens[index], "running")) {
 			state = css_ident_equal(&tokens[index], "paused");
 			have_state = 1;
@@ -4252,6 +4335,12 @@ values_animation(
 	value.kind = CSS_VALUE_KEYWORD;
 	value.keyword = have_state ? state : 0;
 	values_add(out, made, CSS_PROP_ANIMATION_PLAY_STATE, &value);
+	value.keyword = direction;
+	values_add(out, made, CSS_PROP_ANIMATION_DIRECTION, &value);
+	memset(&value, 0, sizeof(value));
+	value.kind = CSS_VALUE_NUMBER;
+	value.number = iterations;
+	values_add(out, made, CSS_PROP_ANIMATION_ITERATION_COUNT, &value);
 	return 0;
 }
 

@@ -276,6 +276,28 @@ bind_style_set(
 	return 0;
 }
 
+/* Whether the text starts with "selector(" in any case. */
+static int
+style_has_selector_prefix(
+	const uint16_t *units,
+	size_t length)
+{
+	static const char prefix[] = "selector(";
+	size_t index;
+	uint16_t unit;
+
+	if (length < sizeof(prefix) - 1U)
+		return 0;
+	for (index = 0; index < sizeof(prefix) - 1U; index++) {
+		unit = units[index];
+		if (unit >= 'A' && unit <= 'Z')
+			unit = (uint16_t)(unit + ('a' - 'A'));
+		if (unit != (uint16_t)prefix[index])
+			return 0;
+	}
+	return 1;
+}
+
 /* Answers CSS.supports for a property/value or a simple parenthesized declaration. */
 static int
 style_css_supports(
@@ -290,6 +312,7 @@ style_css_supports(
 	struct vm_string *condition;
 	struct vm_cell *name_root;
 	struct wb_units units;
+	struct css_query *query;
 	size_t start;
 	size_t end;
 	int valid;
@@ -332,8 +355,19 @@ style_css_supports(
 			start++;
 		while (end > start && style_is_space(units.data[end - 1U]))
 			end--;
-		if (end > start + 2U && units.data[start] == '(' && units.data[end - 1U] == ')')
+		if (end > start + 2U && units.data[start] == '(' && units.data[end - 1U] == ')') {
 			status = css_declaration_valid(realm->heap, units.data + start + 1U, end - start - 2U, &valid);
+		} else if (end > start + 10U && units.data[end - 1U] == ')' && style_has_selector_prefix(units.data + start, end - start)) {
+			/* selector(...) is true for a selector list the engine parses. */
+			query = NULL;
+			status = css_query_parse(realm->heap, units.data + start + 9U, end - start - 10U, &query);
+			if (status == 0) {
+				valid = 1;
+				css_query_destroy(query);
+			} else if (status == EINVAL) {
+				status = 0;
+			}
+		}
 		wb_units_release(&units);
 		if (status != 0)
 			return status;

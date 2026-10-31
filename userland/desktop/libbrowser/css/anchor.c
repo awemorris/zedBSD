@@ -413,6 +413,7 @@ anchor_fallback(
 	struct css_anchor_query *query)
 {
 	struct anchor_sum fallback;
+	struct css_anchor_expr *made;
 	int error;
 
 	/* A sum. */
@@ -425,8 +426,17 @@ anchor_fallback(
 	/* A zero number is a zero length; another number is not a length. */
 	if (fallback.is_number && fallback.number != 0.0f)
 		return EINVAL;
-	if (fallback.expr.count != 0)
-		return EINVAL;
+
+	/* A fallback with anchor functions is kept as a sum of its own. */
+	if (fallback.expr.count != 0) {
+		made = wb_arena_alloc(reader->parse->arena, sizeof(*made));
+		if (made == NULL)
+			return ENOMEM;
+		*made = fallback.expr;
+		query->has_fallback = 1;
+		query->fallback_expr = made;
+		return 0;
+	}
 
 	/* Succeeded: the fallback is kept. */
 	query->has_fallback = 1;

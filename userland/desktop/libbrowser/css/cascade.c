@@ -335,6 +335,7 @@ static void cascade_align(struct css_style *style, unsigned bit, int *field, int
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
 static const struct css_line_names *cascade_line_names(struct css_engine *engine, const struct css_value *value);
 static const void *cascade_keep(struct css_engine *engine, const void *data, size_t size);
+static const struct css_anchor_expr *cascade_anchor_resolve(struct css_engine *engine, const struct css_style *style, const struct css_anchor_expr *expr);
 static const struct css_gradient *cascade_gradient(struct css_engine *engine, const struct css_gradient *gradient, float font_size);
 static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 static void cascade_animation(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
@@ -772,6 +773,43 @@ css_engine_compute_pseudo(
 
 	/* Succeeded: the pseudo-element's style is computed. */
 	return 0;
+}
+
+/*
+ * Applies the declarations of a text (a script animation's values for a pseudo-element) to a computed style, as
+ * the last word of the cascade; the text's own parse errors drop the declaration they are in.
+ */
+int
+css_engine_apply_text(
+	struct css_engine *engine,
+	struct css_style *style,
+	const struct css_style *parent,
+	const char *text)
+{
+	struct css_declaration *declarations;
+	struct wb_arena arena;
+	struct wb_units units;
+	size_t count;
+	size_t index;
+	int error;
+
+	wb_units_init(&units);
+	error = wb_utf8_to_units((const unsigned char *)text, strlen(text), &units);
+	if (error != 0) {
+		wb_units_release(&units);
+		return error;
+	}
+	wb_arena_init(&arena, 0);
+	declarations = NULL;
+	count = 0;
+	error = css_parse_declarations(engine->heap, &arena, units.data, units.length, &declarations, &count);
+	if (error == 0) {
+		for (index = 0; index < count; index++)
+			cascade_apply(engine, style, parent, &declarations[index]);
+	}
+	wb_arena_release(&arena);
+	wb_units_release(&units);
+	return error == ENOMEM ? error : 0;
 }
 
 /* Tells whether a space-separated list of types has one the active view transition has. */
@@ -1273,6 +1311,7 @@ css_initial_style(
 	style->position_area = -1;
 	style->position_visibility = 2;
 	style->zoom = 1.0f;
+	style->animation_iterations = 1.0f;
 	style->zoom_eff = 1.0f;
 	style->transform_origin[0].unit = CSS_UNIT_PERCENT;
 	style->transform_origin[0].value = 50.0f;
@@ -4305,6 +4344,15 @@ cascade_apply(
 	case CSS_PROP_MIX_BLEND_MODE:
 		style->mix_blend_mode = value->keyword;
 		break;
+	case CSS_PROP_ANIMATION_ITERATION_COUNT:
+		style->animation_iterations = value->number;
+		break;
+	case CSS_PROP_ANIMATION_DIRECTION:
+		style->animation_direction = value->keyword;
+		break;
+	case CSS_PROP_ISOLATION:
+		style->isolation = value->keyword;
+		break;
 	case CSS_PROP_DISPLAY:
 		style->display = value->keyword;
 		break;
@@ -5030,6 +5078,15 @@ cascade_inherit(
 	case CSS_PROP_MIX_BLEND_MODE:
 		style->mix_blend_mode = parent->mix_blend_mode;
 		break;
+	case CSS_PROP_ANIMATION_ITERATION_COUNT:
+		style->animation_iterations = parent->animation_iterations;
+		break;
+	case CSS_PROP_ANIMATION_DIRECTION:
+		style->animation_direction = parent->animation_direction;
+		break;
+	case CSS_PROP_ISOLATION:
+		style->isolation = parent->isolation;
+		break;
 	case CSS_PROP_Z_INDEX:
 		style->z_index = parent->z_index;
 		style->z_index_auto = parent->z_index_auto;
@@ -5552,6 +5609,15 @@ cascade_animation(
 	int found_from;
 	int found_to;
 	int count;
+	const struct css_track *from_tracks;
+	const struct css_track *to_tracks;
+	struct css_track *own_tracks;
+	struct css_track from_copy[CSS_TRACKS];
+	struct css_track to_copy[CSS_TRACKS];
+	int own_count;
+	int from_tracks_count;
+	int to_tracks_count;
+	int track;
 
 	/* Only an animation with a name and a length that has begun. */
 	if (style->animation_name == NULL || style->animation_duration <= 0.0f || style->animation_delay > 0.0f)
@@ -5626,6 +5692,81 @@ cascade_animation(
 		else
 			style->filter_count = count;
 	}
+	/* grid-template-columns and -rows: tracks of the same kind blend, the others change at the halfway point. */
+	for (pass = 0; pass < 2; pass++) {
+		property = pass == 0 ? CSS_PROP_GRID_TEMPLATE_COLUMNS : CSS_PROP_GRID_TEMPLATE_ROWS;
+		own_tracks = pass == 0 ? style->columns : style->rows;
+		own_count = pass == 0 ? style->column_count : style->row_count;
+		from_offset = 0.0f;
+		to_offset = 1.0f;
+		found_from = 0;
+		found_to = 0;
+		from_tracks_count = own_count;
+		to_tracks_count = own_count;
+		memcpy(from_copy, own_tracks, sizeof(from_copy));
+		memcpy(to_copy, own_tracks, sizeof(to_copy));
+		for (index = 0; index < rule->frame_count; index++) {
+			frame = &rule->frames[index];
+			for (declaration = 0; declaration < frame->declaration_count; declaration++) {
+				if (frame->declarations[declaration].property != property)
+					continue;
+				*scratch = *style;
+				cascade_apply(engine, scratch, parent, &frame->declarations[declaration]);
+				from_tracks = pass == 0 ? scratch->columns : scratch->rows;
+				to_tracks = from_tracks;
+				if (frame->offset <= progress && (!found_from || frame->offset >= from_offset)) {
+					from_offset = frame->offset;
+					found_from = 1;
+					from_tracks_count = pass == 0 ? scratch->column_count : scratch->row_count;
+					memcpy(from_copy, from_tracks, sizeof(from_copy));
+				}
+				if (frame->offset >= progress && (!found_to || frame->offset < to_offset)) {
+					to_offset = frame->offset;
+					found_to = 1;
+					to_tracks_count = pass == 0 ? scratch->column_count : scratch->row_count;
+					memcpy(to_copy, to_tracks, sizeof(to_copy));
+				}
+			}
+		}
+		if (!found_from && !found_to)
+			continue;
+		share = to_offset > from_offset ? (progress - from_offset) / (to_offset - from_offset) : 0.0f;
+		if (share < 0.0f)
+			share = 0.0f;
+		if (share > 1.0f)
+			share = 1.0f;
+
+		/* Lists of different lengths do not blend: the value changes at the halfway point. */
+		if (from_tracks_count != to_tracks_count) {
+			memcpy(own_tracks, share < 0.5f ? from_copy : to_copy, sizeof(from_copy));
+			if (pass == 0)
+				style->column_count = share < 0.5f ? from_tracks_count : to_tracks_count;
+			else
+				style->row_count = share < 0.5f ? from_tracks_count : to_tracks_count;
+			continue;
+		}
+		memcpy(own_tracks, from_copy, sizeof(from_copy));
+		if (pass == 0)
+			style->column_count = from_tracks_count;
+		else
+			style->row_count = from_tracks_count;
+		for (track = 0; track < from_tracks_count && track < CSS_TRACKS; track++) {
+			if (from_copy[track].kind == to_copy[track].kind && from_copy[track].kind == CSS_TRACK_LENGTH &&
+			    from_copy[track].size.unit == CSS_UNIT_PX && to_copy[track].size.unit == CSS_UNIT_PX &&
+			    from_copy[track].minimum_rule == to_copy[track].minimum_rule &&
+			    from_copy[track].maximum_rule == to_copy[track].maximum_rule) {
+				own_tracks[track].size.value = from_copy[track].size.value +
+				    (to_copy[track].size.value - from_copy[track].size.value) * share;
+				if (from_copy[track].minimum.unit == CSS_UNIT_PX && to_copy[track].minimum.unit == CSS_UNIT_PX)
+					own_tracks[track].minimum.value = from_copy[track].minimum.value +
+					    (to_copy[track].minimum.value - from_copy[track].minimum.value) * share;
+			} else if (from_copy[track].kind == to_copy[track].kind && from_copy[track].kind == CSS_TRACK_FR) {
+				own_tracks[track].fr = from_copy[track].fr + (to_copy[track].fr - from_copy[track].fr) * share;
+			} else if (share >= 0.5f) {
+				own_tracks[track] = to_copy[track];
+			}
+		}
+	}
 	free(scratch);
 }
 
@@ -5640,6 +5781,8 @@ cascade_try_rule(
 	size_t found_sheet;
 	size_t index;
 	size_t rule;
+	size_t media;
+	int holds;
 	int rank;
 	int best;
 
@@ -5649,6 +5792,13 @@ cascade_try_rule(
 	sheets = engine->sheets.items;
 	for (index = 0; index < engine->sheets.count; index++) {
 		if (sheets[index].sheet == NULL)
+			continue;
+
+		/* A sheet whose media do not hold gives no rules. */
+		holds = 1;
+		for (media = 0; media < sheets[index].media_count && holds; media++)
+			holds = css_media_matches(sheets[index].media[media], engine->viewport_width, engine->viewport_height);
+		if (!holds)
 			continue;
 		for (rule = 0; rule < sheets[index].sheet->try_rule_count; rule++) {
 			if (!vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
@@ -5802,6 +5952,37 @@ cascade_keep(
 	return copy;
 }
 
+/* Keeps a sum with anchor functions with its ems and rems in pixels, its fallbacks with anchor functions of their own too (NULL when memory runs out). */
+static const struct css_anchor_expr *
+cascade_anchor_resolve(
+	struct css_engine *engine,
+	const struct css_style *style,
+	const struct css_anchor_expr *expr)
+{
+	struct css_anchor_expr resolved;
+	struct css_anchor_query *query;
+	int index;
+
+	memset(&resolved, 0, sizeof(resolved));
+	resolved.px = expr->px + expr->em * style->font_size + expr->rem * engine->root_font_size;
+	resolved.percent = expr->percent;
+	resolved.has_percent = expr->has_percent;
+	resolved.count = expr->count;
+	for (index = 0; index < expr->count; index++) {
+		query = &resolved.terms[index];
+		*query = expr->terms[index];
+		query->fallback_px += query->fallback_em * style->font_size + query->fallback_rem * engine->root_font_size;
+		query->fallback_em = 0;
+		query->fallback_rem = 0;
+		if (query->fallback_expr != NULL) {
+			query->fallback_expr = cascade_anchor_resolve(engine, style, query->fallback_expr);
+			if (query->fallback_expr == NULL)
+				return NULL;
+		}
+	}
+	return cascade_keep(engine, &resolved, sizeof(resolved));
+}
+
 /*
  * Puts a sum with anchor functions in an inset's or a size's anchor slot
  * (ems and rems in pixels) and marks the property's length as anchored.
@@ -5813,11 +5994,8 @@ cascade_anchor(
 	int property,
 	const struct css_anchor_expr *expr)
 {
-	struct css_anchor_expr resolved;
-	struct css_anchor_query *query;
 	struct css_length *length;
 	int slot;
-	int index;
 
 	/* The slot and the length of the property. */
 	switch (property) {
@@ -5863,22 +6041,8 @@ cascade_anchor(
 		return;
 	}
 
-	/* The sum in pixels. */
-	memset(&resolved, 0, sizeof(resolved));
-	resolved.px = expr->px + expr->em * style->font_size + expr->rem * engine->root_font_size;
-	resolved.percent = expr->percent;
-	resolved.has_percent = expr->has_percent;
-	resolved.count = expr->count;
-	for (index = 0; index < expr->count; index++) {
-		query = &resolved.terms[index];
-		*query = expr->terms[index];
-		query->fallback_px += query->fallback_em * style->font_size + query->fallback_rem * engine->root_font_size;
-		query->fallback_em = 0;
-		query->fallback_rem = 0;
-	}
-
-	/* Kept, and the length marked. */
-	style->anchor[slot] = cascade_keep(engine, &resolved, sizeof(resolved));
+	/* The sum in pixels, kept (its fallbacks with anchor functions too), and the length marked. */
+	style->anchor[slot] = cascade_anchor_resolve(engine, style, expr);
 	length->unit = CSS_UNIT_ANCHOR;
 	length->value = 0;
 	length->offset = 0;

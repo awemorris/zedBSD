@@ -47,6 +47,7 @@ static const struct bind_attribute cssom_css_attributes[] = {
 	{ "cssRules", bind_cssom_rules, NULL },
 	/* The legacy name of the same list. */
 	{ "rules", bind_cssom_rules, NULL },
+	{ "disabled", bind_cssom_disabled_get, bind_cssom_disabled_set },
 	{ NULL, NULL, NULL }
 };
 
@@ -562,6 +563,164 @@ bind_cssom_delete(
 
 	/* Succeeded: saved and current rule counts observe the actual native deletion. */
 	*result = VM_VALUE_UNDEFINED;
+	return 0;
+}
+
+/*
+ * Reads CSSStyleSheet.disabled.
+ */
+int
+bind_cssom_disabled_get(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct cssom_state *state;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	status = cssom_this(realm, receiver, CSSOM_SHEET, &state);
+	if (status != 0)
+		return status;
+	*result = vm_value_boolean(state->source->disabled != 0);
+	return 0;
+}
+
+/*
+ * Sets CSSStyleSheet.disabled: a disabled sheet gives the page no rules.
+ */
+int
+bind_cssom_disabled_set(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct cssom_state *state;
+	int status;
+
+	*result = VM_VALUE_UNDEFINED;
+	status = cssom_this(realm, receiver, CSSOM_SHEET, &state);
+	if (status != 0)
+		return status;
+	state->source->disabled = count > 0 && vm_to_boolean(args[0]) ? 1 : 0;
+	bind_style_sheet_changed(state->source);
+	return 0;
+}
+
+/*
+ * Reports one rule of a sheet as the text "id type source" for the script-side rule objects.
+ */
+int
+bind_cssom_rule_info(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct cssom_state *state;
+	struct vm_string *string;
+	struct wb_units units;
+	const uint16_t *source;
+	size_t length;
+	uint32_t index;
+	uint32_t id;
+	unsigned closing;
+	char head[48];
+	int type;
+	int present;
+	int status;
+	int used;
+	int offset;
+
+	*result = VM_VALUE_UNDEFINED;
+	status = cssom_this(realm, receiver, CSSOM_SHEET, &state);
+	if (status != 0)
+		return status;
+	if (count == 0)
+		return 0;
+	status = vm_to_uint32(realm, args[0], &index);
+	if (status != 0)
+		return status;
+	if (index >= css_rule_model_count(state->source->model))
+		return 0;
+	id = css_rule_model_id(state->source->model, index);
+	status = css_rule_model_source(state->source->model, id, &source, &length, &type, &present);
+	if (status != 0)
+		return status;
+
+	/* The head, the source, and the closings the source omitted at its end. */
+	used = snprintf(head, sizeof(head), "%u %d ", (unsigned)id, type);
+	wb_units_init(&units);
+	status = 0;
+	for (offset = 0; offset < used && status == 0; offset++)
+		status = wb_units_append_code_point(&units, (uint32_t)head[offset]);
+	if (status == 0)
+		status = wb_units_append(&units, source, length);
+	closing = css_rule_model_closing(state->source->model, id);
+	while (status == 0 && closing > 0) {
+		status = wb_units_append_code_point(&units, '}');
+		closing--;
+	}
+	if (status == 0) {
+		string = vm_string_from_units(state->document->heap, units.data, units.length);
+		if (string == NULL)
+			status = ENOMEM;
+		else
+			*result = vm_value_cell(&string->cell);
+	}
+	wb_units_release(&units);
+	return status;
+}
+
+/*
+ * Replaces one rule of a sheet with new source text; the result is the rule's new identity or throws.
+ */
+int
+bind_cssom_rule_replace(
+	struct vm_realm *realm,
+	vm_value receiver,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct cssom_state *state;
+	struct vm_string *string;
+	struct wb_units units;
+	uint32_t index;
+	size_t offset;
+	int status;
+
+	status = cssom_this(realm, receiver, CSSOM_SHEET, &state);
+	if (status != 0)
+		return status;
+	if (count < 2U)
+		return vm_throw_type_error(realm, "ruleReplace requires an index and a rule.");
+	status = vm_to_uint32(realm, args[0], &index);
+	if (status != 0)
+		return status;
+	status = vm_to_string(realm, args[1], &string);
+	if (status != 0)
+		return status;
+	wb_units_init(&units);
+	status = wb_units_reserve(&units, string->length);
+	if (status == 0) {
+		for (offset = 0; offset < string->length; offset++)
+			units.data[offset] = vm_string_at(string, offset);
+		units.length = string->length;
+		status = css_rule_model_replace(state->source->model, units.data, units.length, index);
+		if (status == 0)
+			bind_style_sheet_changed(state->source);
+	}
+	wb_units_release(&units);
+	if (status != 0)
+		return cssom_mutation_error(realm, status);
+	*result = vm_value_double((double)css_rule_model_id(state->source->model, index));
 	return 0;
 }
 

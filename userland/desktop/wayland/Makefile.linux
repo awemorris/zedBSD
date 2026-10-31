@@ -46,6 +46,7 @@ WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/cursor-thread.c \
 	userland/desktop/wayland/viewport.c \
 	userland/desktop/wayland/content-type.c \
+	userland/desktop/wayland/game.c \
 	userland/desktop/wayland/scanout.c \
 	userland/desktop/wayland/scanout-rules.c \
 	userland/desktop/wayland/activation.c \

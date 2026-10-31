@@ -1156,6 +1156,7 @@ inline_finish_line(
 	struct text_metrics metrics;
 	struct text_font font;
 	struct text_glyph glyph;
+	struct css_length saved_line_height;
 	layout_unit above;
 	layout_unit below;
 	layout_unit x;
@@ -1170,8 +1171,8 @@ inline_finish_line(
 	while (end > start && pieces[end - 1U].space)
 		end--;
 
-	/* The strut: the block's own font and line height. */
-	inline_line_height(tree, &box->style, &above, &below);
+	/* The strut: the block's own font and line height (the first line's are the ::first-line's). */
+	inline_line_height(tree, first_line && box->first_line_style != NULL ? box->first_line_style : &box->style, &above, &below);
 
 	/* Counts the fragments: every piece but the forced breaks. */
 	memset(&line, 0, sizeof(line));
@@ -1213,6 +1214,8 @@ inline_finish_line(
 		fragment->length = pieces[index].length;
 		fragment->font = pieces[index].font;
 		fragment->color = pieces[index].box->style.paint_color;
+		if (first_line && box->first_line_style != NULL && pieces[index].box->style.paint_color == box->style.paint_color)
+			fragment->color = box->first_line_style->paint_color;
 		fragment->underline = pieces[index].box->style.underline && pieces[index].edge == 0;
 		fragment->edge = pieces[index].edge;
 		fragment->x = x;
@@ -1256,8 +1259,17 @@ inline_finish_line(
 		fragment->ascent = (layout_unit)metrics.ascent * LAYOUT_UNIT;
 		fragment->descent = (layout_unit)metrics.descent * LAYOUT_UNIT;
 
-		/* The piece's line reaches above and below its baseline. */
-		inline_piece_extent(tree, &pieces[index], &reach[line.fragment_count - 1U].above, &reach[line.fragment_count - 1U].below);
+		/* The piece's line reaches above and below its baseline (the first line's inherited line height is the ::first-line's). */
+		if (first_line && box->first_line_style != NULL &&
+		    pieces[index].box->style.line_height.unit == box->style.line_height.unit &&
+		    pieces[index].box->style.line_height.value == box->style.line_height.value) {
+			saved_line_height = pieces[index].box->style.line_height;
+			pieces[index].box->style.line_height = box->first_line_style->line_height;
+			inline_piece_extent(tree, &pieces[index], &reach[line.fragment_count - 1U].above, &reach[line.fragment_count - 1U].below);
+			pieces[index].box->style.line_height = saved_line_height;
+		} else {
+			inline_piece_extent(tree, &pieces[index], &reach[line.fragment_count - 1U].above, &reach[line.fragment_count - 1U].below);
+		}
 
 		/* The next piece starts where this one ends. */
 		x += pieces[index].width;

@@ -124,8 +124,11 @@ layout_logical_wanted(
 	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB &&
 	    (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID ||
 	    display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)) {
+		/* A grid places its absolute children by its logical lines, so only its items count. */
 		for (child = box->first_child; child != NULL; child = child->next) {
-			if (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+			if (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+			    !(child->style.position == CSS_POSITION_ABSOLUTE &&
+			    (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)))
 				return 0;
 		}
 	}
@@ -722,6 +725,8 @@ logical_static_to_physical(
 		align = CSS_ALIGN_END;
 	else if (align == CSS_ALIGN_LEFT)
 		align = CSS_ALIGN_START;
+	else if (align == CSS_ALIGN_SELF_START || align == CSS_ALIGN_SELF_END)
+		align = child->static_x_align_from_right ? CSS_ALIGN_END : CSS_ALIGN_START;
 	child->static_x_align = child->static_y_align;
 	child->static_y_align = align;
 	child->static_x_align_from_right = 0;

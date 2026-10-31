@@ -21,6 +21,8 @@
 		kl_edit_v1_*;
 		kl_theme_v1_*;
 		wp_content_type_*;
+		kl_game_v1_*;
+		kl_game_surface_v1_*;
 	local:
 		*;
 };

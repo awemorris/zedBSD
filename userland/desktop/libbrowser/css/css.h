@@ -93,6 +93,9 @@ struct css_filter {
 #define CSS_PSEUDO_ELEMENT_VT_NEW 8
 /* The box around a details element's content (everything but its first summary). */
 #define CSS_PSEUDO_ELEMENT_DETAILS_CONTENT 9
+/* The first letter and the first formatted line of a block container. */
+#define CSS_PSEUDO_ELEMENT_FIRST_LETTER 10
+#define CSS_PSEUDO_ELEMENT_FIRST_LINE 11
 /* The translation a view transition group's style starts with until its rectangle is known (an author's transform replaces it). */
 /* The places a view transition pseudo-element can have among its siblings (for :first-child, :last-child and :only-child). */
 #define CSS_VT_FIRST 1
@@ -155,6 +158,7 @@ enum css_anchor_side {
  * box's default anchor), what it asks for, the factor the sum gives it,
  * and its fallback (a length and a percentage) when it has one.
  */
+struct css_anchor_expr;
 struct css_anchor_query {
 	struct vm_string *name;
 	int side;
@@ -166,6 +170,8 @@ struct css_anchor_query {
 	float fallback_rem;
 	float fallback_percent;
 	int fallback_has_percent;
+	/* A fallback with anchor functions of its own (kept in the arena; the length fields above are then unused). */
+	const struct css_anchor_expr *fallback_expr;
 };
 
 /* A value with anchor functions: pixels (ems and rems before the cascade), a percentage, and the functions times their factors. */
@@ -826,7 +832,11 @@ struct css_style {
 	int animation_paused;
 	/* The timing function as text: a keyword, "steps N position" or "bezier a b c d" (NULL for ease). */
 	struct vm_string *animation_timing;
-	/* mix-blend-mode: 0 normal, 1 plus-lighter, 2 any other blend. */
+	/* animation-iteration-count (a negative number is infinite), animation-direction (normal, reverse, alternate, alternate-reverse) and isolation (1 isolate). */
+	float animation_iterations;
+	int animation_direction;
+	int isolation;
+	/* mix-blend-mode: 0 normal, 1 plus-lighter, 2 and up the other blend modes (css_blend_names). */
 	int mix_blend_mode;
 	/* zoom: the factor the element's own declaration gives (1 for normal), and the product of it and its ancestors' that scales its lengths. */
 	float zoom;
@@ -1099,6 +1109,8 @@ int css_rule_model_source(const struct css_rule_model *model, uint32_t id, const
 int css_rule_model_text(const struct css_rule_model *model, struct wb_units *units);
 int css_rule_model_insert(struct css_rule_model *model, const uint16_t *units, size_t length, size_t index);
 int css_rule_model_delete(struct css_rule_model *model, size_t index);
+unsigned css_rule_model_closing(const struct css_rule_model *model, uint32_t id);
+int css_rule_model_replace(struct css_rule_model *model, const uint16_t *units, size_t length, size_t index);
 
 /* Sheets (parser.c). */
 int css_sheet_create(struct css_sheet **sheet, struct vm_heap *heap, const uint16_t *units, size_t length);
@@ -1162,6 +1174,9 @@ void css_engine_forget_styles(struct css_engine *engine);
 void css_engine_set_view_transition(struct css_engine *engine, int active, const struct vm_string *const *types, int count);
 int css_engine_compute(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style);
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);
+/* The mix-blend-mode keywords after normal and plus-lighter, in the order of the style's mix_blend_mode numbers from 2. */
+extern const char *const css_blend_names[];
+int css_engine_apply_text(struct css_engine *engine, struct css_style *style, const struct css_style *parent, const char *text);
 int css_engine_compute_vt_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct vm_string *name, const struct vm_string *classes, int siblings, const struct css_style *parent, struct css_style *style);
 void css_initial_style(struct css_style *style);
 void css_engine_query_begin(struct css_engine *engine);

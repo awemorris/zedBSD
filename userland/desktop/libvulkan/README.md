@@ -156,6 +156,27 @@ log: `VULKAN_ZEDBSD_OVERLAY_LOG=1` で overlay の present・commit ごとに 1 
 を標準エラーに書きます（`why` は cursor の log と同じ語に nospace・invalid・expired・flush・destroy・busy を足した物）。
 host の試験は `plan/ws214/tests/vulkan-overlay-host.sh`。
 
+## Compositor が貸す image（game mode）
+
+compositor の game mode では、client はその display の swapchain の image に直に描きます（present の copy をしません）。
+
+- **出せる display の chain**: `VkSwapchainCreateInfoKHR` の pNext に `VkExternalMemoryImageCreateInfo`（`handleTypes` は
+  `VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT` だけ）を繋ぐと、direct の chain（display がそのまま見せる linear の image に app が描く chain）の
+  image を外へ出せます。`vkGetMemoryFdKHR` に `memory = VK_NULL_HANDLE` と、pNext の `VkMemoryDedicatedAllocateInfo`（`image` に swapchain の image、
+  `buffer` は null）を渡すと、その image の fd（image の記述を持つ kernel の capability）を返します。direct でない chain の image は
+  `VK_ERROR_INVALID_EXTERNAL_HANDLE` です。
+- **非適合点（N5）**: Vulkan には swapchain の image の export がありません。上の組み合わせ（swapchain の作成の external memory の record、memory の無い
+  `vkGetMemoryFdKHR` と dedicated の record で image を名指す事）は標準の型だけを使う、この実装の決まりです。返る fd はこの実装の import
+  （`VkImportMemoryFdInfoKHR` と dedicated の image の `vkAllocateMemory`）と Wayland の WSI が受けます。
+- **Wayland の WSI**: compositor が `kl_game_v1` を出していれば、surface ごとに `kl_game_surface_v1` を作り、swapchain を作るたびにその chain
+  （format・usage・extent・枚数、貸された image に描けない chain は枚数 0）を知らせます。compositor が image を貸し（`image`・`lend`）、それが今の chain に
+  合えば（同じ channel の並びの format、同じ extent、usage を含む、枚数が足りる、linear）、present は `VK_SUBOPTIMAL_KHR` を返します。作り直した chain の
+  image は貸された image（app の format のまま。UNORM の image を SRGB で読む場合も同じ byte）で、present は copy せず、描画の完了の fence とともに
+  その buffer を commit します。合わない chain は貸し出しを断ります（`decline`）。compositor が貸し出しを終えると（`withdraw`）、貸された chain は普通の
+  buffer として合成され、`VK_SUBOPTIMAL_KHR` で自分の image の chain へ戻ります。
+- display の chain の direct の image の作成が `VK_ERROR_FEATURE_NOT_PRESENT`・`VK_ERROR_FORMAT_NOT_SUPPORTED` で失敗した時は、自分の image を持ち present で
+  copy する経路へ戻ります。export の ioctl の `EOPNOTSUPP`・`ENOTSUP`・`EINVAL` は `VK_ERROR_FEATURE_NOT_PRESENT` です。
+
 ## 宣言とprotocolの来歴
 
 [API-PROVENANCE.md](../../../include/libc/vulkan/API-PROVENANCE.md) に
