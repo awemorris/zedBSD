@@ -229,6 +229,23 @@ layout_flex(
 			available = used;
 	}
 
+	/* An auto-height, unwrapped column taller than its maximum height is flexed in the maximum. */
+	if (!row && !wrap && box->style.height.unit == CSS_UNIT_AUTO && box->style.max_height.unit == CSS_UNIT_PX) {
+		sizing = 0;
+		if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		used = 0;
+		for (index = 0; index < count; index++)
+			used += items[index].size + items[index].frame + items[index].margin_start + items[index].margin_end;
+		if (count > 1)
+			used += gap_main * (layout_unit)(count - 1U);
+		if (used > layout_from_px(box->style.max_height.value) - sizing) {
+			available = layout_from_px(box->style.max_height.value) - sizing;
+			if (available < 0)
+				available = 0;
+		}
+	}
+
 	/* Line by line: the items that fit, flexed and laid out; their cross sizes decide the lines'. */
 	lines = NULL;
 	line_count = 0;
