@@ -79,6 +79,15 @@ struct nvrtx_vk_session;
  * cpu_written is set once the CPU may have written it (an application's
  * view, a write of the core, an executor's copy by the CPU), exported once
  * it was exported to another open; both stay.
+ *
+ * described is set by the first export of the blob as an image, with the
+ * image's description: every later export must describe it the same way,
+ * and a display shows the blob as described (its layout and rows).  bound
+ * is set by the first image of the Vulkan executor bound to the blob's
+ * storage, with that image's shape (bound_tiled for block linear, its row
+ * pitch, size and offset): an export must describe that shape, and an
+ * image bound later to an exported blob must have the described one.
+ * All of them under the node's lock; they stay.
  */
 struct nvrtx_backing {
 	struct nvrtx_bo bo;
@@ -87,6 +96,14 @@ struct nvrtx_backing {
 	int kept;
 	int cpu_written;
 	int exported;
+	int described;
+	struct gpu_image_descriptor image;
+	int bound;
+	int bound_tiled;
+	uint32_t bound_pitch;
+	uint32_t bound_width;
+	uint32_t bound_height;
+	uint64_t bound_offset;
 };
 
 /*
@@ -386,6 +403,14 @@ struct nvrtx_node {
 	int reaper_busy;
 	volatile int drain_running;
 	volatile int drain_stop;
+	/*
+	 * The display scans out block-linear blobs (nvrtx.disp.bl=1 on a window
+	 * with a layout field); otherwise it shows linear rows only.
+	 * disp_bl_shown is set once the first block-linear frame was flipped
+	 * to (said once in the log); under the node's lock.
+	 */
+	int disp_bl;
+	int disp_bl_shown;
 	int perf;
 	struct nvrtx_node_perf counts;
 	uint64_t perf_since_us;
@@ -438,6 +463,7 @@ nvrtx_node_count_max(
 extern const struct drv_gpu_display_ops nvrtx_display_ops;
 extern const struct drv_gpu_share_ops nvrtx_share_ops;
 extern const struct drv_gpu_scanout_ops nvrtx_scanout_ops;
+extern const struct drv_gpu_layout_ops nvrtx_layout_ops;
 
 int nvrtx_present_start(struct nvrtx_node *node);
 void nvrtx_present_session_close(struct nvrtx_node *node, void *session);

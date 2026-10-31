@@ -4420,6 +4420,9 @@ cascade_apply(
 	case CSS_PROP_BACKGROUND_REPEAT:
 		style->background_repeat = value->keyword;
 		break;
+	case CSS_PROP_BACKGROUND_CLIP:
+		style->background_clip = value->keyword;
+		break;
 	case CSS_PROP_BACKGROUND_ATTACHMENT:
 		style->background_attachment = value->keyword;
 		break;
@@ -5062,6 +5065,9 @@ cascade_inherit(
 		break;
 	case CSS_PROP_BACKGROUND_REPEAT:
 		style->background_repeat = parent->background_repeat;
+		break;
+	case CSS_PROP_BACKGROUND_CLIP:
+		style->background_clip = parent->background_clip;
 		break;
 	case CSS_PROP_BACKGROUND_ATTACHMENT:
 		style->background_attachment = parent->background_attachment;

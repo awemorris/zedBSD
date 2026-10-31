@@ -405,6 +405,10 @@ layout_flex(
 			value = CSS_ALIGN_START;
 		if (free_space < 0 && (value == CSS_ALIGN_SPACE_AROUND || value == CSS_ALIGN_SPACE_EVENLY))
 			value = CSS_ALIGN_START;
+
+		/* A safe align-content that would overflow falls back to the start. */
+		if (free_space < 0 && (box->style.flex_keywords & 32u) != 0 && (value == CSS_ALIGN_END || value == CSS_ALIGN_CENTER))
+			value = CSS_ALIGN_START;
 		switch (value) {
 		case CSS_ALIGN_STRETCH:
 		case CSS_ALIGN_NORMAL:
@@ -900,7 +904,9 @@ flex_base_size(
 
 	/* The item's box model against the container's width. */
 	child = item->box;
-	layout_box_model(child, box->width);
+
+	/* Percentages of the container's width are cyclic while its width is being measured: they count as none. */
+	layout_box_model(child, tree->measuring != 0 && box->style.width.unit != CSS_UNIT_PX ? 0 : box->width);
 
 	/* The sides the main axis starts and ends at: left and right for a row, top and bottom for a column. */
 	start_side = CSS_TOP;
@@ -1881,9 +1887,21 @@ flex_auto_minimums(
 				else
 					least = (layout_unit)((double)cross * child->image->height / child->image->width);
 			} else if (row && child->style.width.unit == CSS_UNIT_PX && child->style.height.unit == CSS_UNIT_AUTO &&
-			    child->style.max_height.unit == CSS_UNIT_NONE) {
+			    child->style.max_height.unit == CSS_UNIT_NONE && child->style.min_height.unit != CSS_UNIT_PX) {
 				/* Without a definite cross size the picture's own width is its content size. */
 				least = (layout_unit)child->image->width * LAYOUT_UNIT;
+			} else if (row && child->style.min_height.unit == CSS_UNIT_PX && child->style.height.unit == CSS_UNIT_AUTO &&
+			    child->style.max_height.unit == CSS_UNIT_NONE) {
+				layout_unit minimum_height;
+
+				/* A minimum height carries over to the width through the ratio. */
+				minimum_height = layout_from_px(child->style.min_height.value);
+				if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					minimum_height -= child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] +
+					    child->border[CSS_BOTTOM];
+				if (minimum_height < 0)
+					minimum_height = 0;
+				least = (layout_unit)((double)minimum_height * child->image->width / child->image->height);
 			}
 		}
 
@@ -2336,6 +2354,10 @@ flex_relay_cross(
 			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
 				height -= frame;
 		} else if (child->style.height.unit == CSS_UNIT_AUTO && align == CSS_ALIGN_STRETCH) {
+			/* An auto margin across takes the free space instead: the item is not stretched. */
+			if (child->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO || child->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
+				continue;
+
 			/* Ratio items with auto cross margins keep their intrinsic height. */
 			if (!child->replaced) {
 				if (child->style.aspect_ratio > 0.0f) {
@@ -2536,6 +2558,13 @@ flex_place_line(
 		justify = start_edge ? CSS_ALIGN_LEFT : CSS_ALIGN_RIGHT;
 	}
 
+	/* A safe justify-content that would overflow falls back to the start. */
+	if ((box->style.flex_keywords & 16u) != 0 && free_space < 0 &&
+	    (justify == CSS_ALIGN_END || justify == CSS_ALIGN_CENTER || justify == CSS_ALIGN_LEFT || justify == CSS_ALIGN_RIGHT)) {
+		justify = CSS_ALIGN_NORMAL;
+		physical_edge = 0;
+	}
+
 	/* justify-content: where the first item starts and what goes between them. */
 	cursor = 0;
 	between = gap;
@@ -2697,8 +2726,10 @@ flex_place_line(
 			if (box->style.flex_wrap == CSS_FLEX_WRAP_REVERSE)
 				frame = line_cross - frame - cross_outer;
 			child->y += frame;
-		} else if (align == CSS_ALIGN_END || align == CSS_ALIGN_CENTER) {
-			/* At the end or the center, the item moves by the room the line leaves (half of it). */
+		} else if ((align == CSS_ALIGN_END || align == CSS_ALIGN_CENTER) &&
+		    !(line_cross < cross_outer &&
+		    ((child->style.align_self != CSS_ALIGN_AUTO ? child->style.flex_keywords & 128u : box->style.flex_keywords & 64u) != 0))) {
+			/* At the end or the center, the item moves by the room the line leaves (half of it); a safe alignment that would overflow stays at the start. */
 			frame = line_cross - cross_outer;
 			if (align == CSS_ALIGN_CENTER)
 				frame = frame / 2;

@@ -1,22 +1,22 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 15:39（Q1）
+最終更新: 2026-10-31 16:42（Q1）
 
 ## 担当（P1〜P8）
 
-2026-10-31 01:50 から昼頃までユーザーは不在（自走を続ける趣旨の指示を受けた）。判断が要る物は uncleared にして下の「判断を待つ事」に置き、先へ進む。
+**2026-10-31 16:42 host の再起動の前に全担当をラップアップした。** 再開の手順は [master.md](master.md) の「動いている担当と Queue」。
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | — | — | 返却（06:4x）。WS326 p025（規約の全文の見直し、style の違反 0、全試験が前と同じ）を main に | 次の割当を Q1 が決める |
-| P2 | [WS309](ws309/ws.md) | Keiland の game mode | p015（q1782）: game mode を文字通りの zero copy の direct scanout に（client が compositor と共有する image に直に描く、全 GPU） | QEMU（Venus）→ VF2 → RTX（10.0.10.3）の順に確かめる |
-| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ | p023 の実装（q1781-i02）: 共通の部分（並びの名前・GPU_IMAGE_LAYOUTS の ioctl・kernel の確かめ）→ RTX の block-linear の置き方と画面出し | 設計の第 2 版は main（ffd702bdb）。問い 2 つは下の 0k |
+| P2 | — | — | 返却（2026-10-31 16:42、host の再起動）。WS309 p015 game mode の zero copy: QEMU で client が貸された image に直に描く 6 往復を確かめた（main に未 merge、89d86ef95） | 再起動の後: build → QEMU → VF2（ユーザーの VF2 の password 待ち）→ RTX → main |
+| P3 | — | — | 返却（2026-10-31 16:42、host の再起動）。WS291 p023: RTX の block-linear を main に（b30707d0a）。subs-1000 10.9 → 21 fps、画素の差 0 | 再起動の後: p023 の残りの scenes → p024 |
 | P4 | — | — | 返却（06:5x）。WS326 の完了の片付け（試験を plan/tools/h264sw/ へ） | 午後: Pi 5 の実機 |
 | P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | — | — | 返却（07:1x）。WS310 の設計を main に（問い Q310-1〜6 は下の 0i） | 次の割当を Q1 が決める |
 | P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 7 回目（q1727-i07）: flex の直交の baseline・描画の画素の揃え・list の marker・`contain` の property など（main 2c8207f8d） | 今 3,472 のうち 2,834（81.62%）。後退 1（backdrop-filter の境目の 1 画素）。Acid は最後に測り直す |
+| P8 | — | — | 返却（2026-10-31 16:42、host の再起動）。WS074: 2,848 / 3,472（82.03%）、Acid3 100/100・Acid2 100% | 再起動の後: q1727-i09 で自走を続ける |
 
 実装の担当（Sonnet・Opus の単発）: 今は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
 
@@ -28,6 +28,7 @@
 | --- | --- | --- | --- | --- |
 | p001〜p006 | AMD RDNA | Linux（RADV）と同等 | 同等 | cleared（p006・p008・p009 は RX 5600 XT が抜かれて止め） |
 | p010〜p012 | NVIDIA RTX 2070 | desktop 60 fps、scene-5000 で NVK（50.1 fps） | desktop 60〜68 fps、scene-5000 49.9 fps（hardware の限界で NVK と同等） | p010・p011 cleared、p012 uncleared（限界） |
+| p023 | NVIDIA RTX 2070 | 共有の image の画素の並び（block-linear）で pass ごとの copy を無くす | subs-1000 10.9 → 21 fps、subs-100 103 → 203、画素の差 0（main b30707d0a） | in-progress（残り: scenes、block-linear の画面出しの目視） |
 | p013・p014 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
 | p020 | PowerVR（VF2） | qs40 × 13・1920x1080・direct scanout で 50 fps（RTX のカタログの FP32 の比） | 45.8 fps（direct、main に merge 62eeb340e） | in-progress（P2） |
 | p021 | Raspberry Pi 5（V3D 7.1） | スペックの比の copies で 50 fps（clock を実機で確定） | 未計測（mview に要る driver の機能を host で実装済み） | in-progress（P4、実機待ち） |

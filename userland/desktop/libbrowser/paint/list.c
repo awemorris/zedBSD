@@ -945,8 +945,27 @@ list_box_own(
 	if (part != LIST_BOX_INLINE && visible && box != walk->canvas_box && (box->style.background_color >> 24) != 0) {
 		if (rounded) {
 			list_round_fill(walk, &shape, box->style.background_color);
-		} else {
+		} else if (box->style.background_clip == 0) {
 			list_rect(walk, box->x, box->y, width, height, box->style.background_color);
+		} else {
+			layout_unit inset_x;
+			layout_unit inset_y;
+
+			/* background-clip: the padding box inside the borders, the content box inside the padding too. */
+			inset_x = box->border[CSS_LEFT];
+			inset_y = box->border[CSS_TOP];
+			width -= box->border[CSS_LEFT] + box->border[CSS_RIGHT];
+			height -= box->border[CSS_TOP] + box->border[CSS_BOTTOM];
+			if (box->style.background_clip == 2) {
+				inset_x += box->padding[CSS_LEFT];
+				inset_y += box->padding[CSS_TOP];
+				width -= box->padding[CSS_LEFT] + box->padding[CSS_RIGHT];
+				height -= box->padding[CSS_TOP] + box->padding[CSS_BOTTOM];
+			}
+			if (width > 0 && height > 0)
+				list_rect(walk, box->x + inset_x, box->y + inset_y, width, height, box->style.background_color);
+			width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+			height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 		}
 	}
 
@@ -2503,11 +2522,23 @@ list_box_background(
 	if (box->background == NULL && box->style.background_gradient == NULL)
 		return;
 
-	/* The border box paints it; the padding box places it. */
+	/* The border box paints it (background-clip narrows that); the padding box places it. */
 	painting.x = box->x;
 	painting.y = box->y;
 	painting.width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
 	painting.height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+	if (box->style.background_clip != 0) {
+		painting.x += box->border[CSS_LEFT];
+		painting.y += box->border[CSS_TOP];
+		painting.width -= box->border[CSS_LEFT] + box->border[CSS_RIGHT];
+		painting.height -= box->border[CSS_TOP] + box->border[CSS_BOTTOM];
+		if (box->style.background_clip == 2) {
+			painting.x += box->padding[CSS_LEFT];
+			painting.y += box->padding[CSS_TOP];
+			painting.width -= box->padding[CSS_LEFT] + box->padding[CSS_RIGHT];
+			painting.height -= box->padding[CSS_TOP] + box->padding[CSS_BOTTOM];
+		}
+	}
 	area.x = box->x + box->border[CSS_LEFT];
 	area.y = box->y + box->border[CSS_TOP];
 	area.width = box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT];

@@ -72,3 +72,35 @@ p014 の結果: RTX は pitch-linear の色の target と block-linear の深度
      ちらつく、一部だけが正しい。どれか 1 つでもあれば誤り。可能なら写真を撮って Q1 へ。
 6. 確かめの後、`/boot/boot0/zedbsd.cfg` から `nvrtx.disp.bl=1` の行を消して再起動する（`sed -i '/^nvrtx.disp.bl=/d' /boot/boot0/zedbsd.cfg && sync && reboot`）。
    正しかった時は Q1 が既定を 1 にする判断をユーザーに聞く。
+
+### nvrtx の実装（I3・I4・I5、commit 499f18262）と実機（2026-10-31 16:0x〜16:4x、10.0.10.3 RTX 2070）
+
+- 実装: OPTIMAL・1 level・色・COLOR_ATTACHMENT を block-linear（影なし）、私用の record（`GPU_OP_RECORD_IMAGE_LAYOUT` 0x7a650001、`include/uapi/gpu-op.h`）の nvrtx の decoder、
+  1 level の tiled の subresource layout、tiled の CPU の copy を 16 B ずつ、`drv_gpu_layout_ops`（NV block-linear parameter 0 と LINEAR）、export の記述の記録と再 export・bind の形の確かめ、
+  SCANOUT の import と present の規則、`nvrtx.disp.bl=1`（既定 0、Turing だけ）と window の SET_STORAGE の block-linear、log の 2 行。host: nvrtx-vk 94/0、vk-d3 225/0、gpu-layouts-host PASS、
+  amd64 系と rpi5・visionfive2 の vmunix warning 0。試験の script `plan/ws291/tests/rtx-p023.sh`（80b18f875）。
+- 実機 A/B（`rtx-p013.sh` SHOT=1 ROUNDS=2 PROF=1、base = c8b142e18 の tree の RTX kernel cksum 948202092、new = 499f18262 の kernel 2917063051、userland は両腕とも
+  この worktree の 13 file、証拠 `build/tmp/rtx-p023.NFTlYm/`（worktree の build、git の外））。fps（round 1・2）:
+
+| | big-100 | big-1000 | subs-100 | subs-1000 | scene-1500 | scene-5000 |
+| --- | --- | --- | --- | --- | --- | --- |
+| base | 590.5・618.6 | 108.9・109.9 | 102.8・105.9 | 10.92・10.85 | 156.9・157.4 | 49.68・49.64 |
+| new | 691.6・637.1 | 110.4・114.0 | **203.7・202.0** | **21.31・20.41** | 158.6・158.3 | 50.30・50.41 |
+
+  - 影の数（PROF の perf の行、subs-100 の 5 s ごと）: base は executor の quad 32695・53119、new は 640・583（残りは present の copy など）。
+  - 画素: one・each・subs の still は各腕の中で差 0、base の one と new の one も差 0（max 0）。見込み（約 16 fps）より上だった（copy の分に加え LOAD の pass の扱いも減った見込み、未分析）。
+- desktop（`rtx-desk-main.sh` RUNS=1、new）: launch 64・type 61・output 66・drag 61・home 62・wiseview 65 fps（scroll・hover・keys は入力の間隔）。p014 の幅と同じ。
+- scenes: base の腕だけ流れた（desktop・Notes・browser の keiland-shot と game mode の mview: `MVIEW DONE frames=597`、`KWL SCANOUT direct=1`）。new と new+`nvrtx.disp.bl=1` の腕は、
+  Q1 のラップアップの指示（host の再起動）で new の kernel の deploy の後に止めた（未実施）。
+- 機械の状態（16:4x）: 13 file と NVMe の kernel を戻して cksum 一致（vmunix 1463007375、expected の列と全一致）、cfg の `nvrtx.disp.bl=` の行 0、Debian（Linux 6.12.111+deb13-amd64、
+  RTX 4 function vfio-pci）。lock /tmp/zedbsd-rdna.lock は返した。
+
+### 再開点（2026-10-31 P3）
+
+- 済み: 設計（第 2 版）・レビュー・問いと答え、I1（7b0a6644e）、nvrtx の I3〜I5（499f18262）、compositor の非 LINEAR の取り込みの設計（design.md §9 の 8、80b18f875）、実機の A/B と desktop。
+- 未実施: scenes の new と bl の腕（Notes・browser・glass の base との画素の比べ、`nvrtx.disp.bl=1` で起動して desktop と game mode が壊れない事）、I2 の probe（block-linear の画面を
+  実際に出す経路は P2 の貸し出しと compositor の非 LINEAR の取り込みが main に入るまで無い）、ユーザーの目視（phase.md の手順、p015 の後）。
+- 次の command（10.0.10.3 の割当の後、worktree の top で）: 13 file を build（`b=build/p023/rtx-new` に上の FILES の target、rtx-cursor-view.sh の build の形に libvulkan・mview・keiland-shot を足す）、
+  `FILES='…' USB_MVIEW=$b/bin/mview RESTORE_CKSUM=1463007375 PARTS=scenes timeout 10800 flock -n /tmp/zedbsd-rdna.lock sh plan/ws291/tests/rtx-p023.sh OUT BASE_VMUNIX NEW_VMUNIX`
+  （BASE は c8b142e18 か main の RTX kernel、NEW は main に入った 499f18262 の kernel。base の腕の shot は前回の OUT から使えない: scenes は base の腕から流し直す）。
+- Phase の判定は Q1（subs-1000 は 10.9 → 20.4〜21.3 fps、影の quad は 1/50 以下、画素差 0、desktop 後退なし。scenes の残りと block-linear の scanout は未確かめ）。

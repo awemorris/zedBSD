@@ -148,6 +148,13 @@
 #define EXECUTE_BUFFER_PITCH_ALIGN	128U
 
 /*
+ * The bytes a GOB keeps together, four pixels of a row (the 16-byte
+ * pieces of execute_gob_offset()).
+ */
+#define EXECUTE_GOB_PIECE_BYTES		16U
+#define EXECUTE_GOB_PIECE_PIXELS	(EXECUTE_GOB_PIECE_BYTES / NVRTX_VK_PIXEL_BYTES)
+
+/*
  * A buffer read as a texture: the texture header holds the address from
  * bit 5 and the pitch from bit 5, so the texture starts on the 32-byte
  * boundary at or before the region and the region begins that many pixels
@@ -2581,11 +2588,14 @@ execute_cpu_copy(
 	uint32_t level_pitch;
 	uint32_t row_pixels;
 	uint32_t bytes;
+	uint32_t column;
+	uint32_t run;
 	uint32_t x;
 	uint32_t y;
 	int error;
 
 	/* The two views. */
+	run = 1U;
 	error = nvrtx_vk_buffer_cpu(session, buffer, &buffer_cpu);
 	if (error == 0)
 		error = nvrtx_vk_image_cpu(session, image, &image_cpu);
@@ -2601,16 +2611,22 @@ execute_cpu_copy(
 	for (y = 0U; y < region->imageExtent.height; y++) {
 		buffer_row = buffer_cpu + region->bufferOffset + (uint64_t)y * row_pixels * NVRTX_VK_PIXEL_BYTES;
 
-		/* A tiled image's pixels each where its GOB keeps it. */
+		/*
+		 * A tiled image's pixels where its GOB keeps them: the four pixels
+		 * of a 16-byte piece lie together, so a whole piece goes at once
+		 * and only the row's ragged ends a pixel at a time.
+		 */
 		if (image->tiled) {
-			for (x = 0U; x < region->imageExtent.width; x++) {
-				image_row = image_cpu + level_offset +
-				    execute_gob_offset(level_pitch, ((uint32_t)region->imageOffset.x + x) * NVRTX_VK_PIXEL_BYTES,
-						       (uint32_t)region->imageOffset.y + y);
+			for (x = 0U; x < region->imageExtent.width; x += run) {
+				column = ((uint32_t)region->imageOffset.x + x) * NVRTX_VK_PIXEL_BYTES;
+				run = 1U;
+				if ((column % EXECUTE_GOB_PIECE_BYTES) == 0U && region->imageExtent.width - x >= EXECUTE_GOB_PIECE_PIXELS)
+					run = EXECUTE_GOB_PIECE_PIXELS;
+				image_row = image_cpu + level_offset + execute_gob_offset(level_pitch, column, (uint32_t)region->imageOffset.y + y);
 				if (to_image) {
-					kern_memcpy(image_row, buffer_row + x * NVRTX_VK_PIXEL_BYTES, NVRTX_VK_PIXEL_BYTES);
+					kern_memcpy(image_row, buffer_row + x * NVRTX_VK_PIXEL_BYTES, run * NVRTX_VK_PIXEL_BYTES);
 				} else {
-					kern_memcpy(buffer_row + x * NVRTX_VK_PIXEL_BYTES, image_row, NVRTX_VK_PIXEL_BYTES);
+					kern_memcpy(buffer_row + x * NVRTX_VK_PIXEL_BYTES, image_row, run * NVRTX_VK_PIXEL_BYTES);
 				}
 			}
 			continue;

@@ -517,3 +517,78 @@ Origin: 2026-10-27 ユーザーの指示。
   試して戻した物（dev90 = 2,773、後退 16 harness + 3 static、修正 5 static）: layout/logical.c `layout_logical_wanted` の「縦書きの grid の container で子が全て横書きなら物理の座標で置く」の例外を grid から外すと、container の大きさと
   列の向きは Chromium と合う（grid-self-baseline-003 の縦書きの grid が 125×375）が、grid-self-alignment-stretch-vertical-lr/rl-005〜008・013〜016 と subgrid の orthogonal-writing-mode-005・006、repeat-auto-fill-007 が後退する。
   直交の item を logical の座標で見る baseline の group（`grid_row_baseline` が `child->style.writing_mode` を物理の style で見る）と stretch の直し込みが要る。縦書きの container を logical にするなら、その 2 つを先に。
+
+### q1727-i07 の途中経過（2026-10-31、P8。dev91〜dev100）
+
+- 方針: 件数あたりの効きで、grid・flex の static の差を Chromium の絵と見比べ、原因が共通の物（描画の画素揃え、intrinsic size、float の置き方、list marker、`contain`）を engine の側で直した。
+  基準 dev89 = 2,787。測定は `measure-snapshot.sh`（出力は /tmp/p8out/devNN、gap は build/tmp/p8/gapNN.json）。
+- 測定（計は Chromium が通す 3,472 のうちの数。harness / static / scripted / crash の gap）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev89 | 基準（i06 の最後） | 2,787（80.27%） | 337 / 244 / 98 / 6 |
+  | dev91（99e10b333） | 横の row の flex の baseline に直交 item、rtl の column の baseline、描画の矩形・画像を画素に揃える（software と GPU） | 2,805 | 335 / 227 / 99 / 6（後退 1、下記） |
+  | dev92（4bbc50ae4） | list-style-position（inside）、disclosure の marker（details の UA style） | 2,806 | 335 / 226 / 99 / 6 |
+  | dev93 | max-content が hanging marker を数えない、U+00A0 は face の space | 2,809 | 335 / 223 / 99 / 6 |
+  | dev94（50b6dc129） | table の flex item（高さ・column の min・caption のみの table）、`<br>` の後の abspos の static 位置、nowrap の row の intrinsic、単独の flex の percent 最小、grid の checkbox・radio の stretch | 2,822 | 335 / 212 / 97 / 6 |
+  | dev95 | flex の min-content（`width: min-content` の flex container は item の min-content の和） | 2,823 | 335 / 211 / 97 / 6 |
+  | dev96 | column の min-height keyword・wrap の column の自動の最小・画像の内容サイズ・stretch した item の definite な高さ・compressible な control | 2,829 | 335 / 205 / 97 / 6 |
+  | dev97（808e09047） | `contain`（size・layout・paint・style・inline-size、container-type が含意）、layout・paint containment の subgrid 無効 | 2,834 | 333 / 203 / 96 / 6 |
+  | dev98（ed35b3b28） | float の top は先に置いた float より上へ行かない、固定の行での percent 高さ・stretch した画像の比 | 2,839 | 333 / 198 / 96 / 6 |
+  | dev99 | 直交 item の inline room（高さを持つ grid の単独の auto 行） | 2,842 | 332 / 197 / 95 / 6 |
+  | dev100（610e4f744） | replaced の min-width・min-height が反対側を比で運ぶ、grid の ratio 幅が min・max を守る | 2,843（81.88%、gap 629） | 331 / 197 / 95 / 6 |
+
+  dev89 から後退は 1 件: css/filter-effects/backdrop-filter-boundary.html（scripted。画素揃えの後、reference の側に 1 画素の列が出る。fuzzy の maxDifference 67 を越える）。
+  それ以外の測定間の後退は 0。host build は warning 0。Acid は最後に測る（下記）。
+- 直した物（要点、すべて userland/desktop/libbrowser/）:
+  1. 描画（paint/software.c・paint/vulkan.c）: 矩形と画像の端を最も近い画素へ揃える（Chromium の snapping）。以前は端の面積で混ぜていたので、同じ位置へ別の道で着く test と reference が 1/64 px の差で食い違った（flex の画像・video・canvas・mbp・paint など static +17）。
+     GPU の instance の rect も同じに揃えた（実機の GPU は未確認）。
+  2. flex baseline（layout/flex.c）: 横の row で直交（縦書き）の item も border box の端を baseline にして加わる。rtl の column は左右反転して layout するので、横の item の baseline の端と group の寄せ側を入れ替える（flexbox-align-self-vert-rtl-001〜005）。
+  3. list（css/・layout/box.c・inline.c・position.c）: list-style-position（inside は marker を行頭に置き内容を送る）、list-style の shorthand、disclosure-closed・disclosure-open（details の summary は inside）、
+     max-content の幅が行の最後の fragment（hanging marker）を数えて 0 になる不具合。
+  4. text/font.c: U+00A0 が face に無い時は space の glyph（fallback の face の ascent で行が高くなっていた）。
+  5. table（layout/table.c・flex.c）: 行が無く caption だけの table も height を持つ、flex の column の table item は最小の高さが行の高さ、flex base size は min-height を数えない。
+  6. flex: nowrap の row の min-content は item の min-content の和（block.c の `width: min-content` は `layout_min_content` を使う）、`min-height: min-content` の keyword、wrap の column は自動の最小を行分割の前に、
+     percent の `width` の specified size suggestion（definite な container）、定義された高さを持つ row の画像・stretch した item の intrinsic、button と compressible な control の percent の最小。
+  7. abspos の static 位置（layout/box.c）: inline の内容の中の abspos が `<br>` の後ろなら後の行の位置。
+  8. `contain`（css/values.c・cascade.c、layout/layout.h `layout_containment`、block.c・box.c・position.c・grid.c）: size・inline-size は intrinsic な幅 0 と auto の高さ 0、layout・paint は新しい formatting context と abspos・fixed の containing block、subgrid を外す。
+     paint の clip と contain-intrinsic-size は未実装。
+  9. float（layout/float.c）: float の top は先に置いた float の top より上へ行かない（grid-floats-no-intrude-002）。
+  10. grid: checkbox・radio の `normal` は stretch、固定の行の percent 高さ・stretch した画像の比で幅、replaced の stretch で反対側を比で、直交 item の inline room（固定でなくても高さを持つ grid の単独の auto 行）、
+      automatic minimum は percent の min-width・min-height を auto と見なす、subgrid のみ・ratio 幅が min・max の px を守る。
+  11. replaced（layout/replaced.c）: min-width・min-height が反対側を比で運ぶ（CSS 2 の表）。
+- 追加（dev101〜dev104、同じ q1727-i07）:
+
+  | 測定 | 内容 | 計 | gap（h/s/sc/c） |
+  | --- | --- | --- | --- |
+  | dev101 | flex の item の percent padding は container の幅の測定中は 0、画像の min-height が幅へ（min-width: auto の ratio）、grid の auto 最小は percent の min を auto と見なす試み（grid-minimum-contribution-with-percentages が後退して dev102 の前に戻した） | 2,844 | 332 / 195 / 95 / 6 |
+  | dev102（486cd8e09） | 上の戻し、percent の row-gap は min-height が支える高さに対して | 2,846 | 331 / 194 / 95 / 6 |
+  | dev103（4810b6120） | auto の cross margin の item は stretch しない、flex の safe な justify-content・align-items・align-content | 2,848（82.03%） | 331 / 192 / 95 / 6 |
+  | dev104（4810b6120） | background-clip（padding-box・content-box、rounded の box と inline の box は未対応）。件数は変わらず、後退 0 | 2,848（82.03%、gap 624） | 331 / 192 / 95 / 6 |
+
+  dev89 から後退は引き続き 1 件（backdrop-filter-boundary、scripted）。Acid は最終の source で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%（以前は 99.27%。画素揃えで残っていた差が消えた）。host build は warning 0。
+  Acid の runner が残した一時 file（Q1 が消す）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-_jbcgx1_.html、acid3/zedbsd-acid3-diagnostic-_nrk70vo.html、acid3/zedbsd-acid3-reference-t2a6q8d1.html（worktree p8-ws074）。
+  測定の出力は /tmp/p8out の dev89・dev91〜dev104（最後の 2 つ以外は Q1 が消してよい）。
+  追加の直した物: flex の auto margin の stretch（flexbox_align-items-stretch-4）、safe な位置（flexbox-safe-overflow-position-001）、min-height が運ぶ画像の min-width（flexbox-min-width-auto-002b）、
+  percent の row-gap（grid-gutters-016）、background-clip（css/ ・paint/list.c の box の背景と画像の painting area）。
+- 調べて直さなかった物（次の候補）:
+  - rule object の model（CSSStyleRule・CSSScopeRule・CSSPositionTryRule・CSSNestedDeclarations）が無い（cssRules は length だけ）。ID としては css-view-transitions/parsing/pseudo-elements-valid・-with-classes（selectorText だけで通る）、
+    css-cascade の @scope 11 件、at-position-try 3 件。bind/cssom.c の CSSOM_RULES に rule の wrapper を足し、css/rule-model.c の source から selectorText・cssText を答える設計が要る。
+  - anchor()・anchor-size() の入れ子の fallback と min()・max()（anchor-parse-valid・anchor-size-parse-valid。入れ子は css_anchor_query が構造を持たないので fallback を expr への pointer にし、layout/anchor.c と cascade.c を再帰にする）、canonical の順（name が先）。
+  - animation（grid-template の interpolation・composition、flex の order・flex-grow・flex-shrink・flex-basis）は page の native な timing が無い（CSS animation は filter の最初の時点だけ）。flex・grid の harness 19 件。
+  - 縦書き: grid・flex の container が縦書きの baseline・abspos・synthesized baseline（約 40）、table の sideways（table-progression ほか 6）、sideways の shape-outside（約 8）、grid の percent size（writing mode 付き 3）。
+    layout/logical.c の「縦書きの grid の container で子が全て横書きなら物理の座標で置く」の例外を flex から外す試験（flexbox-writing-mode-009 の row wrap は直らず -008 が後退）は戻した。
+  - grid の列の再解決（2 度目、行の大きさが分かった後の min-content、grid-item-inline-contribution-002・003）、subgrid の暗黙の track・名前の細部、baseline の shim（baseline-alignment-affects-intrinsic-size-001〜006）、::first-letter・::first-line（6 ID）。
+  - navigation-api の cross-document・multi frame（約 60）は frame の model が要る。
+
+### q1727-i08 の中断（2026-10-31、P8。host の再起動のため Q1 の指示で早く止めた）
+
+- 基準: dev104 = 2,848 / 3,472（82.03%）。この attempt では全件の測定をしていない。gap は build/tmp/p8/gap104.json（worktree の中）に残っている。
+- 済み（1 件、回帰は未測定）: layout/inline.c `inline_add_atomic` で、横書きの文脈の inline-block が縦書き（直交）なら baseline を持たない扱い（bottom margin edge を line の baseline に載せる）にした。
+  grid-self-baseline-horiz-002 は ref との差が 82,794 画素から 0 になった（ref-one.py）。host build は warning 0（grep で確認）。
+- 未済: 上の変更の回帰の確認（`static-subset.py --gap build/tmp/p8/gap104.json /css/css-grid/alignment/ /css/css-flexbox/` を流している途中で止めた。結果なし）。
+  同じ原因の見込み: self-baseline の horiz-003〜007・-b、grid-item-self-baseline-001 など（static 約 20）。vertical-lr/rl の self-baseline は縦書きの grid の container の話で別（logical.c の例外、i07 の記録）。
+- 調べた物: css-view-transitions の scripted 50 件の分類（inline 要素の capture 約 11 は multi-line inline の snapshot、shadow ::part 6 は `::part()` セレクタが engine に無い、
+  pseudo-element-overflow-hidden は group の overflow）。いずれも着手していない。
+- 次: (1) 上の回帰を static-subset で確認し、通れば grid・flex の self-baseline 群を数える、(2) ::part() セレクタ（shadow tree をまたぐ rule）、(3) CSSOM rule object の model。
+- Acid は今回は未測定（inline.c の変更の後は未実施）。測定の一時 file: /tmp/p8out（tmpfs、host 再起動で消える）。Acid の runner の一時 file はこの attempt では作っていない。

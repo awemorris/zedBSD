@@ -914,6 +914,8 @@ struct css_style {
 	/* The background image when it is a gradient (in the engine's arena; NULL for none). */
 	const struct css_gradient *background_gradient;
 	int background_repeat;
+	/* background-clip: 0 border-box, 1 padding-box, 2 content-box (text paints as the border box). */
+	int background_clip;
 	int background_attachment;
 	struct css_length background_position[2];
 

@@ -479,6 +479,18 @@ nvrtx_disp_first_window_flip(
 
 	size = (surface->height << 16) | (surface->width & 0xffffU);
 
+	/*
+	 * A block-linear surface's storage word: the layout field block linear
+	 * (0) and its block height; the pitch word counts its rows of GOBs in
+	 * the same 64-byte units.
+	 *
+	 * Procedure referenced: Linux v6.19
+	 * drivers/gpu/drm/nouveau/dispnv50/wndwc57e.c (wndwc57e_image_set) and
+	 * wndw.c (the block-linear pitch in GOBs of 64 bytes).
+	 */
+	if (surface->block_linear != 0)
+		storage = surface->block_height & NVRTX_DISP_STORAGE_BLOCK_HEIGHT_MASK;
+
 	/* The window's notifier, through the sync object at its offset. */
 	words[0] = NVRTX_DISP_HANDLE_SYNC;
 	words[1] = notifier_offset;
@@ -487,7 +499,7 @@ nvrtx_disp_first_window_flip(
 	/* The present control. */
 	nvrtx_push_one(push, NVRTX_WINDOW_SET_PRESENT_CONTROL, FIRST_PRESENT_CONTROL);
 
-	/* The surface: its size, the generation's pitch-linear storage word, format and pitch in 64-byte units. */
+	/* The surface: its size, the storage word, format and pitch in 64-byte units. */
 	words[0] = size;
 	words[1] = storage;
 	words[2] = surface->format;
