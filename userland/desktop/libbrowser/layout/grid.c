@@ -3784,10 +3784,24 @@ grid_ratio_width(
 	layout_box_model(child, 0);
 	frame_x = child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
 	frame_y = child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
+
+	/* The height keeps within its pixel limits first, and the width within its own after. */
+	if (child->replaced && child->style.max_height.unit == CSS_UNIT_PX &&
+	    height > layout_from_px(child->style.max_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0))
+		height = layout_from_px(child->style.max_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0);
+	if (child->replaced && child->style.min_height.unit == CSS_UNIT_PX &&
+	    height < layout_from_px(child->style.min_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0))
+		height = layout_from_px(child->style.min_height.value) - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame_y : 0);
 	if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
 		*width = (layout_unit)((float)height * ratio);
 	else
 		*width = (layout_unit)((float)height * ratio) + frame_x;
+	if (child->replaced && child->style.max_width.unit == CSS_UNIT_PX &&
+	    *width > layout_from_px(child->style.max_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x))
+		*width = layout_from_px(child->style.max_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x);
+	if (child->replaced && child->style.min_width.unit == CSS_UNIT_PX &&
+	    *width < layout_from_px(child->style.min_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x))
+		*width = layout_from_px(child->style.min_width.value) + (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? 0 : frame_x);
 	(void)frame_y;
 	*width += child->margin[CSS_LEFT] + child->margin[CSS_RIGHT];
 

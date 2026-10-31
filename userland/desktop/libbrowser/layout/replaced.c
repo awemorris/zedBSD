@@ -260,11 +260,17 @@ layout_replaced_size(
 			height = max_height;
 		}
 
-		/* The minimums hold each side. */
-		if (width < min_width)
+		/* The minimums hold each side, and carry the side that was not given along through the ratio. */
+		if (width < min_width) {
+			if (!height_given && width > 0 && has_ratio && !ratio_override)
+				height = (layout_unit)((int64_t)height * min_width / width);
 			width = min_width;
-		if (height < min_height)
+		}
+		if (height < min_height) {
+			if (!width_given && height > 0 && has_ratio && !ratio_override)
+				width = (layout_unit)((int64_t)width * min_height / height);
 			height = min_height;
+		}
 	}
 
 	/* No side is negative. */
