@@ -525,3 +525,5 @@
 | q1804 / q1804-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p008`） | [ws334-p008](ws334/phase008/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | cleared（2026-11-01 03:40、06cdfd932、main ff026d05a） |
 | q1805 / q1805-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p007`） | [ws334-p007](ws334/phase007/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1806 / q1806-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p012`） | [ws334-p012](ws334/phase012/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | cleared（2026-11-01 03:57、36ec07ad8、main 63d1d3c1b） |
+| q1807 / q1807-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p011`） | [ws334-p011](ws334/phase011/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
+| q1784 / q1784-i06 | P4（phase-runner-high、同じ worktree p4-ws291pi、Pi 5 の実機 10.0.30.7・SwitchBot 14C19FA80F86） | [ws291-p021](ws291/phase021/phase.md) Pi 5 の続き | 2026-11-01 04:08 ユーザーが Pi 5 のディスプレイを替えて画面が出た（前の黒い画面はファームウェアが前のディスプレイの EDID を読めなかった物）。main を取り込み → bd1f58c4a の実機の確かめ → 画面の mview と desktop の 60 fps（1920x1080）。HAL は変えない | in-progress |
