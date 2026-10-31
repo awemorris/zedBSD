@@ -2,18 +2,21 @@
 # The fork race regression in QEMU: builds the text login image with
 # forkrace (userland/tests/forkrace), boots it, runs forkrace as root and
 # prints one summary line, "forkrace-qemu: PASS" or "forkrace-qemu: FAIL".
-#   sh plan/tools/process/forkrace-qemu.sh amd64|rpi4 BUILD OUT [ARGS]
+#   sh plan/tools/process/forkrace-qemu.sh amd64|rpi4|pcat|riscv64|zybo BUILD OUT [ARGS]
 # BUILD is the image's build directory, OUT a new directory for the
-# build's and the run's output (the screens in OUT/boot on amd64).  ARGS
-# go to forkrace (MEGABYTES ROUNDS LIMIT_MS; the default is "64 5 5000"
-# on amd64 and "32 3 30000" on the raspi4b, which runs on TCG).  amd64
-# boots the image through plan/tools/boot-test.sh, types on the emulated
-# keyboard and reads the screen; rpi4 boots QEMU raspi4b, logs in with
-# plan/tools/guest/serial.py and reads forkrace's answer over the
-# interactive serial console.
+# build's and the run's output (the screens in OUT/boot where the screen
+# is read).  ARGS go to forkrace (MEGABYTES ROUNDS LIMIT_MS; the defaults
+# are "64 5 5000" on amd64 (KVM), "32 3 30000" on rpi4 and riscv64, "16 3
+# 30000" on pcat and "8 3 60000" on zybo, which run on TCG).  amd64 and
+# pcat boot the disk through plan/tools/boot-test.sh, type on the emulated
+# keyboard and read the screen; riscv64 boots QEMU virt with the root as a
+# ramdisk the same way, typing on the serial line; rpi4 boots QEMU raspi4b
+# and zybo QEMU xilinx-zynq-a9, and both read forkrace's answer over the
+# interactive serial console (plan/tools/guest/serial.py and
+# plan/tools/zybo/qemu-zynq.sh).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
-port=${1:?amd64 or rpi4}
+port=${1:?amd64, rpi4, pcat, riscv64 or zybo}
 build=${2:?build directory}
 out=${3:?output directory}
 shift 3
@@ -29,14 +32,29 @@ rpi4)
 	config=plan/tools/process/config-rpi4-forkrace.mk
 	test -n "$args" || args='32 3 30000'
 	;;
+pcat)
+	config=plan/tools/process/config-pcat-forkrace.mk
+	test -n "$args" || args='16 3 30000'
+	;;
+riscv64)
+	config=plan/tools/process/config-riscv64-forkrace.mk
+	test -n "$args" || args='32 3 30000'
+	;;
+zybo)
+	config=plan/tools/process/config-zybo-forkrace.mk
+	test -n "$args" || args='8 3 60000'
+	;;
 *)
 	echo "forkrace-qemu: unknown port $port" >&2
 	exit 2
 	;;
 esac
 
-# Builds the image.
-if ! timeout 3600 make -j16 ZEDBSD_CONFIG="$config" BUILD="$build" disk-image \
+# Builds the image; riscv64 boots its kernel with the root as a ramdisk.
+targets=disk-image
+test "$port" = riscv64 && targets="$build/vmunix $build/root.img"
+test "$port" = zybo && targets="$build/vmunix $build/root.img"
+if ! timeout 3600 make -j16 ZEDBSD_CONFIG="$config" BUILD="$build" $targets \
     >"$out/build.log" 2>&1; then
 	echo "forkrace-qemu: FAIL build (see $out/build.log)"
 	exit 1
@@ -44,6 +62,53 @@ fi
 
 # Boots it and runs the test.
 status=0
+if [ "$port" = zybo ]; then
+	# The ZYBO's kernel and ramdisk in QEMU xilinx-zynq-a9, judged on the
+	# live serial line (plan/tools/zybo/qemu-zynq.sh); its socket goes in
+	# a new directory under /tmp, where the agent's sandbox lets it be made.
+	ZYBO_QEMU_OUT=$(mktemp -d) timeout 1300 sh plan/tools/zybo/qemu-zynq.sh \
+	    "$build/vmunix" --initrd "$build/root.img" --timeout 1200 \
+	    --expect 'login: ' --then 'type:root' --then 'expect:[Pp]assword' \
+	    --then 'type:root' --then 'expect:root@' --then "type:forkrace $args" \
+	    --then 'expect:FORKRACE PASS' >"$out/forkrace.txt" 2>&1 || status=$?
+	if [ "$status" -eq 0 ]; then
+		echo "forkrace-qemu: PASS zybo ($out/forkrace.txt)"
+		exit 0
+	fi
+	echo "forkrace-qemu: FAIL zybo status=$status ($out/forkrace.txt)"
+	exit 1
+fi
+if [ "$port" = pcat ] || [ "$port" = riscv64 ]; then
+	# pcat boots the disk from the BIOS and takes keys on its PS/2
+	# keyboard; riscv64 boots the kernel and its ramdisk and takes typing
+	# on its serial line.  Both read the screen.
+	if [ "$port" = pcat ]; then
+		mode=bios-ide
+		image=$build/hdd-image.img
+		initrd=
+		input=keys
+	else
+		mode=riscv64-virt
+		image=$build/vmunix
+		initrd=$build/root.img
+		input=type
+	fi
+	OUTPUT="$out/boot" BOOT_MODE=$mode BOOT_TIMEOUT=600 INITRD="$initrd" \
+	BOOT_THEN="$input:root
+expect:[Pp]assword
+$input:root
+expect:root@
+$input:forkrace $args
+expect:FORKRACE PASS" \
+	    timeout 1500 plan/tools/boot-test.sh "$image" \
+	    >"$out/boot-test.log" 2>&1 || status=$?
+	if [ "$status" -eq 0 ]; then
+		echo "forkrace-qemu: PASS $port ($out/boot/login-after.png)"
+		exit 0
+	fi
+	echo "forkrace-qemu: FAIL $port status=$status ($out/boot/login-after.png, $out/boot-test.log)"
+	exit 1
+fi
 if [ "$port" = amd64 ]; then
 	OUTPUT="$out/boot" BOOT_MODE=uefi-usb BOOT_TIMEOUT=240 \
 	BOOT_THEN="keys:root

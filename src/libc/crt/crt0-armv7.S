@@ -81,6 +81,48 @@ __syscall6:
 	.size __syscall6, .-__syscall6
 
 /*
+ * long __vfork_spawn(void (*entry)(void *), void *argument, void *stack_top);
+ *
+ * Starts a child that shares this address space until it execs or ends
+ * (the vfork system call, 169), and runs entry(argument) in the child on
+ * the stack below stack_top, so that the child never writes this
+ * thread's stack.  The caller resumes when the child has execed or
+ * ended, with the child's pid, or a negative errno.  entry must not
+ * return; if it does, the child exits with status 127.
+ */
+	.balign 4
+	.global __vfork_spawn
+	.hidden __vfork_spawn
+	.type __vfork_spawn, %function
+__vfork_spawn:
+	/* The child reads its entry, argument and stack from r4 to r6; r7 is the call number. */
+	push	{r4, r5, r6, r7, r8, lr}
+	mov	r4, r0
+	mov	r5, r1
+	mov	r6, r2
+	mov	r7, #169
+	svc	#0
+	cmp	r0, #0
+	bne	1f
+
+	/* The child: its own stack before anything is written to one. */
+	bic	r6, r6, #15
+	mov	sp, r6
+	mov	fp, #0
+	mov	r0, r5
+	blx	r4
+
+	/* entry returned: the child ends with 127 (exit is system call 1). */
+	mov	r0, #127
+	mov	r7, #1
+	svc	#0
+	udf	#0
+
+	/* The parent, once the child execed or ended. */
+1:	pop	{r4, r5, r6, r7, r8, pc}
+	.size __vfork_spawn, .-__vfork_spawn
+
+/*
  * A signal handler returns here.  The stack pointer is back at the frame
  * the kernel built, whose token and context the return request names.
  * System call 80 is the signal return; it does not come back.

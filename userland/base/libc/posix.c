@@ -182,7 +182,8 @@ static int posix_spawn_fork(pid_t *result, const char *path, const posix_spawn_f
  * address space with fork.  A fork waits out every thread that faults
  * meanwhile and holds the library's locks around the copy.
  */
-#if defined(__x86_64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__) || defined(__i386__) || \
+    defined(__arm__) || (defined(__riscv) && __riscv_xlen == 64)
 #define SPAWN_VFORK 1
 #endif
 
