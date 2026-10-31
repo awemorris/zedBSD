@@ -1891,8 +1891,14 @@ flex_auto_minimums(
 		size = row ? &child->style.width : &child->style.height;
 		if (size->unit == CSS_UNIT_PX || (size->unit == CSS_UNIT_PERCENT && available >= 0)) {
 			given = layout_from_px(size->value);
-			if (size->unit == CSS_UNIT_PERCENT)
+			if (size->unit == CSS_UNIT_PERCENT) {
 				given = (layout_unit)((float)available * size->value / 100.0f) + layout_from_px(size->offset);
+
+				/* A compressible control (not a button) counts the percentage of its width as zero. */
+				if (row && child->replaced && child->control != DOM_CONTROL_NONE && child->control != DOM_CONTROL_BUTTON &&
+				    child->control != DOM_CONTROL_SUBMIT && child->control != DOM_CONTROL_RESET)
+					given = layout_from_px(size->offset);
+			}
 			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
 				given -= items[index].frame;
 			if (given < least)
@@ -1963,12 +1969,11 @@ flex_min_content(
 	struct css_length given;
 	int error;
 
-	/* A replaced box's content is its image, as wide as it is (a button sized by a percentage, as wide as it naturally is). */
+	/* A replaced box's content is its image, as wide as it is (a control sized by a percentage, as wide as it naturally is). */
 	*width = 0;
 	if (box->replaced) {
 		*width = box->width;
-		if ((box->control == DOM_CONTROL_BUTTON || box->control == DOM_CONTROL_SUBMIT || box->control == DOM_CONTROL_RESET) &&
-		    box->style.width.unit == CSS_UNIT_PERCENT && box->natural_width > 0)
+		if (box->control != DOM_CONTROL_NONE && box->style.width.unit == CSS_UNIT_PERCENT && box->natural_width > 0)
 			*width = box->natural_width;
 		return 0;
 	}
