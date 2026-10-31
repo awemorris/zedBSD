@@ -2154,8 +2154,32 @@ layout_first_baseline(
  * Finds the first (or last) line's central baseline of a vertical box as a
  * distance right of its border box's left edge.  Reports whether it has one.
  */
+static int inline_vertical_baseline(const struct layout_box *box, int last, layout_unit *offset);
+static int inline_logical_central(const struct layout_box *box, int last, layout_unit *offset);
+
+/* The central baseline of a vertical box as a distance right of its border box's left edge, no further than a box that scrolls reaches. */
 int
 layout_vertical_baseline(
+	const struct layout_box *box,
+	int last,
+	layout_unit *offset)
+{
+	layout_unit extent;
+
+	if (!inline_vertical_baseline(box, last, offset))
+		return 0;
+	if (layout_clips(box)) {
+		extent = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+		if (*offset < 0)
+			*offset = 0;
+		if (*offset > extent)
+			*offset = extent;
+	}
+	return 1;
+}
+
+static int
+inline_vertical_baseline(
 	const struct layout_box *box,
 	int last,
 	layout_unit *offset)
@@ -2199,6 +2223,8 @@ layout_vertical_baseline(
 			continue;
 		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
 			continue;
+		if (inline_is_legend(box, child))
+			continue;
 		if (!layout_vertical_baseline(child, last, &inner))
 			continue;
 		*offset = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + child->x + inner;
@@ -2215,6 +2241,26 @@ layout_vertical_baseline(
  */
 int
 layout_logical_central_baseline(
+	const struct layout_box *box,
+	int last,
+	layout_unit *offset)
+{
+	layout_unit extent;
+
+	if (!inline_logical_central(box, last, offset))
+		return 0;
+	if (layout_clips(box)) {
+		extent = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		if (*offset < 0)
+			*offset = 0;
+		if (*offset > extent)
+			*offset = extent;
+	}
+	return 1;
+}
+
+static int
+inline_logical_central(
 	const struct layout_box *box,
 	int last,
 	layout_unit *offset)
@@ -2250,6 +2296,8 @@ layout_logical_central_baseline(
 		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE || child->replaced)
 			continue;
 		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
+			continue;
+		if (inline_is_legend(box, child))
 			continue;
 		if (!layout_logical_central_baseline(child, last, &inner))
 			continue;
