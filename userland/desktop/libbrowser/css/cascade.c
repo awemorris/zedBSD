@@ -328,6 +328,7 @@ static struct css_length cascade_length(struct css_engine *engine, const struct 
 static void cascade_shadows(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_filters(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_filter *out, int *count);
 static const char *cascade_subgrid(struct css_engine *engine, const struct css_value *value);
+static const struct css_subgrid_names *cascade_subgrid_names(struct css_engine *engine, const struct css_value *value);
 static const char *cascade_declared(struct css_engine *engine, const struct css_style *style, const struct css_value *value);
 static void cascade_text_shadow(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
@@ -4541,12 +4542,14 @@ cascade_apply(
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
 		style->column_names = cascade_line_names(engine, value);
 		style->column_subgrid = cascade_subgrid(engine, value);
+		style->column_subgrid_names = cascade_subgrid_names(engine, value);
 		style->column_declared = cascade_declared(engine, style, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		cascade_tracks(engine, style, value, style->rows, &style->row_count, &style->row_repeat);
 		style->row_names = cascade_line_names(engine, value);
 		style->row_subgrid = cascade_subgrid(engine, value);
+		style->row_subgrid_names = cascade_subgrid_names(engine, value);
 		style->row_declared = cascade_declared(engine, style, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
@@ -5144,6 +5147,7 @@ cascade_inherit(
 		style->column_repeat = parent->column_repeat;
 		style->column_names = parent->column_names;
 		style->column_subgrid = parent->column_subgrid;
+		style->column_subgrid_names = parent->column_subgrid_names;
 		style->column_declared = parent->column_declared;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
@@ -5152,6 +5156,7 @@ cascade_inherit(
 		style->row_repeat = parent->row_repeat;
 		style->row_names = parent->row_names;
 		style->row_subgrid = parent->row_subgrid;
+		style->row_subgrid_names = parent->row_subgrid_names;
 		style->row_declared = parent->row_declared;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
@@ -5693,6 +5698,18 @@ cascade_declared(
 	kept = cascade_keep(engine, wb_buffer_string(&text), text.length + 1U);
 	wb_buffer_release(&text);
 	return kept;
+}
+
+/* Keeps a subgrid template's line names in the engine's arena (NULL for another template). */
+static const struct css_subgrid_names *
+cascade_subgrid_names(
+	struct css_engine *engine,
+	const struct css_value *value)
+{
+	/* Only a parsed subgrid list has them. */
+	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL || value->tracks->subgrid_names == NULL)
+		return NULL;
+	return cascade_keep(engine, value->tracks->subgrid_names, sizeof(*value->tracks->subgrid_names));
 }
 
 /* Keeps a subgrid template's serialization in the engine's arena (NULL for another template). */

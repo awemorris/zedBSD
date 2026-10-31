@@ -6590,6 +6590,7 @@ values_subgrid_names(
 	size_t count,
 	size_t index,
 	struct wb_buffer *out,
+	struct css_line_names *group,
 	size_t *end)
 {
 	struct vm_string *name;
@@ -6603,6 +6604,10 @@ values_subgrid_names(
 		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
 			continue;
 		error = values_custom_ident(parse, &tokens[index], &name);
+		if (error == 0 && group != NULL && group->count < CSS_LINE_NAMES) {
+			group->names[group->count] = name;
+			group->count++;
+		}
 		if (error == 0 && !first)
 			error = wb_buffer_append_byte(out, ' ');
 		if (error == 0)
@@ -6633,14 +6638,22 @@ values_subgrid(
 	struct css_track_list *list)
 {
 	struct wb_buffer text;
+	struct css_subgrid_names *parts;
+	struct css_subgrid_part *part;
 	char *kept;
 	size_t index;
 	size_t end;
 	size_t inner;
 	size_t comma;
+	struct css_line_names *group;
 	int automatic;
 	int groups;
 	int error;
+
+	/* The names as parts too, for the layout. */
+	parts = wb_arena_zalloc(parse->arena, sizeof(*parts));
+	if (parts == NULL)
+		return ENOMEM;
 
 	/* subgrid, then each component after a space. */
 	wb_buffer_init(&text);
@@ -6658,7 +6671,14 @@ values_subgrid(
 
 		/* A group of names. */
 		if (tokens[index].type == CSS_TOKEN_OPEN_SQUARE) {
-			error = values_subgrid_names(parse, tokens, count, index, &text, &index);
+			part = NULL;
+			if (parts->count < CSS_SUBGRID_PARTS) {
+				part = &parts->parts[parts->count];
+				parts->count++;
+				part->repeat = 0;
+				part->groups = 1;
+			}
+			error = values_subgrid_names(parse, tokens, count, index, &text, part != NULL ? &part->names[0] : NULL, &index);
 			continue;
 		}
 
@@ -6670,14 +6690,24 @@ values_subgrid(
 		end = index + values_function_length(tokens + index, count - index);
 		inner = values_skip_space(tokens, end, index + 1U);
 		error = wb_buffer_append_string(&text, "repeat(");
+		part = NULL;
+		if (parts->count < CSS_SUBGRID_PARTS) {
+			part = &parts->parts[parts->count];
+			parts->count++;
+			part->groups = 0;
+		}
 		if (error == 0 && inner < end && tokens[inner].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[inner], "auto-fill")) {
 			if (automatic)
 				error = EINVAL;
 			automatic = 1;
+			if (part != NULL)
+				part->repeat = -1;
 			if (error == 0)
 				error = wb_buffer_append_string(&text, "auto-fill");
 		} else if (error == 0 && inner < end && tokens[inner].type == CSS_TOKEN_NUMBER && tokens[inner].integer &&
 		    tokens[inner].number >= 1 && tokens[inner].number <= 10000) {
+			if (part != NULL)
+				part->repeat = (int)tokens[inner].number;
 			error = wb_buffer_printf(&text, "%d", (int)tokens[inner].number);
 		} else if (error == 0) {
 			error = EINVAL;
@@ -6698,8 +6728,14 @@ values_subgrid(
 				break;
 			}
 			error = wb_buffer_append_byte(&text, ' ');
-			if (error == 0)
-				error = values_subgrid_names(parse, tokens, end - 1U, inner, &text, &inner);
+			if (error == 0) {
+				group = NULL;
+				if (part != NULL && part->groups < CSS_SUBGRID_GROUPS) {
+					group = &part->names[part->groups];
+					part->groups++;
+				}
+				error = values_subgrid_names(parse, tokens, end - 1U, inner, &text, group, &inner);
+			}
 			groups++;
 		}
 		if (error == 0 && groups == 0)
@@ -6718,6 +6754,7 @@ values_subgrid(
 			memcpy(kept, text.data, text.length);
 			kept[text.length] = '\0';
 			list->subgrid = kept;
+			list->subgrid_names = parts;
 		}
 	}
 	wb_buffer_release(&text);

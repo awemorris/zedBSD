@@ -730,6 +730,25 @@ struct css_line_names {
 };
 
 /*
+ * One component of a subgrid's list of line names: a bracketed group, or a
+ * repeat() of groups (repeat is 0 for a plain group, the count, or -1 for
+ * auto-fill).
+ */
+#define CSS_SUBGRID_GROUPS	4
+#define CSS_SUBGRID_PARTS	16
+struct css_subgrid_part {
+	int repeat;
+	int groups;
+	struct css_line_names names[CSS_SUBGRID_GROUPS];
+};
+
+/* A subgrid's line names, in the order written (in the engine's arena). */
+struct css_subgrid_names {
+	int count;
+	struct css_subgrid_part parts[CSS_SUBGRID_PARTS];
+};
+
+/*
  * A grid-template-areas value: its rows and columns, and the name of each
  * cell, row after row (atoms; NULL for a null cell token).  The named
  * areas are the rectangles the cells of one name make.
@@ -993,6 +1012,9 @@ struct css_style {
 	/* A subgrid axis's value as it serializes (in the engine's arena), or NULL. */
 	const char *column_subgrid;
 	const char *row_subgrid;
+	/* The line names a subgrid axis lists, structured (NULL when it lists none or is no subgrid). */
+	const struct css_subgrid_names *column_subgrid_names;
+	const struct css_subgrid_names *row_subgrid_names;
 	/* A template with a repeat() as written, ems in pixels (what an element that is not a grid container reports), or NULL. */
 	const char *column_declared;
 	const char *row_declared;

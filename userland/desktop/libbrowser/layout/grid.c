@@ -106,7 +106,7 @@ static int grid_size_columns(struct layout_tree *tree, struct layout_box *box, s
 static int grid_lay_item(struct layout_tree *tree, struct layout_box *item, layout_unit width, int justify);
 static void grid_size_rows(struct layout_tree *tree, struct layout_box *box, struct grid_state *grid, layout_unit gap);
 static int grid_subgrid_axis(const struct layout_box *box, int columns);
-static int grid_subgrid_prepare(struct layout_box *sub);
+static int grid_subgrid_prepare(struct layout_tree *tree, struct layout_box *sub, const struct layout_box *parent, int column_first, int row_first);
 static int grid_subgrid_preset(struct layout_tree *tree, struct layout_box *sub, int columns, const layout_unit *sizes, int first, int tracks, layout_unit gap);
 static int grid_relay_item(struct layout_tree *tree, struct layout_box *item, layout_unit width, layout_unit height, int align);
 static layout_unit grid_clamp_height(const struct layout_box *item, layout_unit content, layout_unit area, layout_unit frame);
@@ -649,7 +649,7 @@ layout_grid(
 		if (grid_subgrid_axis(child, 0))
 			child->subgrid_row_span = grid.items[index].row_span;
 		if (child->subgrid_column_span > 0 || child->subgrid_row_span > 0) {
-			error = grid_subgrid_prepare(child);
+			error = grid_subgrid_prepare(tree, child, box, grid.items[index].column, grid.items[index].row);
 			if (error != 0) {
 				grid_release(&grid);
 				return error;
@@ -3071,6 +3071,115 @@ grid_flat_build(
 	return 0;
 }
 
+/* Adds a line's names (atoms) to another's, once each and no more than a line keeps. */
+static void
+grid_names_merge(
+	struct css_line_names *line,
+	const struct css_line_names *names)
+{
+	int index;
+	int have;
+
+	/* Each name not there yet. */
+	for (index = 0; index < names->count; index++) {
+		for (have = 0; have < line->count; have++) {
+			if (line->names[have] == names->names[index])
+				break;
+		}
+		if (have == line->count && line->count < CSS_LINE_NAMES) {
+			line->names[line->count] = names->names[index];
+			line->count++;
+		}
+	}
+}
+
+/*
+ * Gives a subgrid's axis the names of its lines: the list it declares
+ * (laid out over the lines it spans, a repeat(auto-fill) taking what the
+ * others leave) and the names of the parent's lines that are the same
+ * lines.
+ */
+static int
+grid_subgrid_line_names(
+	struct layout_tree *tree,
+	struct layout_box *sub,
+	int columns,
+	const struct layout_box *parent,
+	int first)
+{
+	const struct css_subgrid_names *declared;
+	const struct css_subgrid_part *part;
+	const struct css_line_names *outer;
+	struct css_line_names *lines;
+	int fixed;
+	int fill_groups;
+	int repeats;
+	int line;
+	int index;
+	int round;
+	int group;
+	int count;
+
+	/* The array of the lines it spans plus the last. */
+	count = columns ? sub->subgrid_column_span : sub->subgrid_row_span;
+	if (count > CSS_TRACKS)
+		count = CSS_TRACKS;
+	count++;
+	lines = wb_arena_zalloc(&tree->arena, ((size_t)CSS_TRACKS + 1U) * sizeof(*lines));
+	if (lines == NULL)
+		return ENOMEM;
+
+	/* How many lines the names that are not an auto-fill repeat take, and how many names the auto-fill one repeats. */
+	declared = columns ? sub->style.column_subgrid_names : sub->style.row_subgrid_names;
+	fixed = 0;
+	fill_groups = 0;
+	for (index = 0; declared != NULL && index < declared->count; index++) {
+		part = &declared->parts[index];
+		if (part->repeat < 0)
+			fill_groups = part->groups;
+		else if (part->repeat == 0)
+			fixed++;
+		else
+			fixed += part->repeat * part->groups;
+	}
+
+	/* An auto-fill repeat is as many times as fills the lines (none when they are full). */
+	repeats = 0;
+	if (fill_groups > 0 && count > fixed)
+		repeats = (count - fixed) / fill_groups;
+
+	/* The declared names, line after line. */
+	line = 0;
+	for (index = 0; declared != NULL && index < declared->count; index++) {
+		part = &declared->parts[index];
+		if (part->repeat == 0) {
+			if (line < count)
+				grid_names_merge(&lines[line], &part->names[0]);
+			line++;
+			continue;
+		}
+		round = part->repeat < 0 ? repeats : part->repeat;
+		for (; round > 0 && line < count; round--) {
+			for (group = 0; group < part->groups && line < count; group++) {
+				grid_names_merge(&lines[line], &part->names[group]);
+				line++;
+			}
+		}
+	}
+
+	/* The parent's names of the same lines. */
+	outer = columns ? parent->style.column_names : parent->style.row_names;
+	for (line = 0; outer != NULL && line < count && first + line <= CSS_TRACKS; line++)
+		grid_names_merge(&lines[line], &outer[first + line]);
+
+	/* Kept for the placement of its items. */
+	if (columns)
+		sub->style.column_names = lines;
+	else
+		sub->style.row_names = lines;
+	return 0;
+}
+
 /*
  * Places the items of a subgrid against the tracks it spans (its explicit
  * grid is those tracks), recording where each went and which of them are
@@ -3078,7 +3187,11 @@ grid_flat_build(
  */
 static int
 grid_subgrid_prepare(
-	struct layout_box *sub)
+	struct layout_tree *tree,
+	struct layout_box *sub,
+	const struct layout_box *parent,
+	int column_first,
+	int row_first)
 {
 	struct grid_state grid;
 	struct grid_item *item;
@@ -3114,6 +3227,18 @@ grid_subgrid_prepare(
 		}
 	}
 
+	/* The line names of the axes it shares: its own list, and the parent's lines it spans. */
+	if (sub->subgrid_column_span > 0) {
+		error = grid_subgrid_line_names(tree, sub, 1, parent, column_first);
+		if (error != 0)
+			return error;
+	}
+	if (sub->subgrid_row_span > 0) {
+		error = grid_subgrid_line_names(tree, sub, 0, parent, row_first);
+		if (error != 0)
+			return error;
+	}
+
 	/* The items placed. */
 	layout_grid_names(sub);
 	memset(&grid, 0, sizeof(grid));
@@ -3142,7 +3267,7 @@ grid_subgrid_prepare(
 		if (grid_subgrid_axis(child, 0))
 			child->subgrid_row_span = item->row_span;
 		if (child->subgrid_column_span > 0 || child->subgrid_row_span > 0) {
-			error = grid_subgrid_prepare(child);
+			error = grid_subgrid_prepare(tree, child, sub, item->column, item->row);
 			if (error != 0)
 				break;
 		}
