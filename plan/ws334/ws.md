@@ -71,7 +71,7 @@
 | [p018](phase018/phase.md) | module（Sonnet、旧 T2）: `libkeiland/win32/cf-html.h/.c`（CF_HTML の encode と decode） | cleared（2026-11-01 03:30 Q1、main 4d3237d17。test-cf-html 155072 checks posix・win32、変異 約 40（残り 2 は到達不能・未規定）） | p004 |
 | [p019](phase019/phase.md) | module（Sonnet、旧 T3）: `apps/browser-win32/tools/ico.h/.c`（ICO の writer、PNG と BMP の entry） | cleared（2026-11-01 03:26 Q1、main 875c16efb。test-ico 39722 checks posix・win32、変異 26/27（残り 1 は同値）） | p004 |
 | [p020](phase020/phase.md) | glue（Opus、旧 p002）: `sources.mk` への source の一覧の分け（libbrowser・libmedia・libtruetype・compat・libkeiland・browser の UI）、`apps/browser-win32/Makefile` の本体（library・DLL・.def・Vulkan の header の取得と遅延の import）、libtruetype `companion.c` の 1 関数と gif の `O_BINARY`、`cross-build.sh` | cleared（2026-11-01 03:15 Q1、main 29c250f65。sources-same PASS、zedBSD amd64・arm64 の 9 target と keiland-linux warning 0、cross-build PASS（Wine で遅延の import）、check-skeleton PASS） | p004 |
-| [p021](phase021/phase.md) | 統合（Opus、旧 p003）: libbrowser の OS に触れる所（O13〜O24・O28〜O31・O34）を OS の層へ、`wb_memmem`、Makefile の posix・win32 の選び | in-progress（実装済み・試験 PASS。2026-11-01 08:26 q1808-i02、P7: 前後の件数は一致、run-unit.sh all PASS（34 本）、cross-build PASS、Wine の Date の 3 zone。commit は全部 main に。cleared の判定は Q1） | p005・p006・p008・p020 |
+| [p021](phase021/phase.md) | 統合（Opus、旧 p003）: libbrowser の OS に触れる所（O13〜O24・O28〜O31・O34）を OS の層へ、`wb_memmem`、Makefile の posix・win32 の選び | cleared（2026-11-01 Q1、main 2c7e666e2。q1808、P7: 前後の件数は一致、run-unit.sh all PASS（34 本）、cross-build PASS、Wine の Date の 3 zone） | p005・p006・p008・p020 |
 | [p022](phase022/phase.md) | 統合（Opus、旧 p004）: network の Windows（O1〜O10・O32・O33 を os-net へ）、libmedia の wake の callback と `net_loader_ring` | planned | p007・p021 |
 | [p023](phase023/phase.md) | 統合（Opus、旧 p005）: instance と API v4、cookie の jar・Web Storage を instance へ、storage の module をつなぐ、利用側の v4 | planned | p010・p011・p012・p022 |
 | [p024](phase024/phase.md) | 統合（Opus、旧 p006）: 永続の HTTP の cache（U5 で第 2 段、後へ） | planned | p023 |
@@ -85,4 +85,5 @@
 | [p032](phase032/phase.md) | 試験（Opus、旧 p015）: Wine＋llvmpipe での確かめの第 1 回（決定 20） | planned | p031 |
 | [p033](phase033/phase.md) | 統合（Opus、旧 p016）: 後半の Windows の口（TSF・drag と drop・touchpad・accent・Mica・DPAPI、arm64） | planned | p032 |
 | [p034](phase034/phase.md) | 試験（Opus、旧 p017）: libbrowser の試験を Windows（Wine）で | planned | p032 |
-| [p035](phase035/phase.md) | 規約の全文の見直し（旧 p018）と header の持ち越しの直し | planned | p033・p034 |
+| [p036](phase036/phase.md) | build（Opus）: 1 つの .exe（DLL を作らない static link。libbrowser・libmedia・libkeiland・compat・winpthreads・当面の OpenSSL、vulkan-1.dll は遅延の import）の形と design §6 の直し、libkeiland の Windows の pthread 無し（SRWLOCK・CreateThread） | in-progress（2026-11-01 q1808-i02、P7） | p016・p020・p021 |
+| [p035](phase035/phase.md) | 規約の全文の見直し（旧 p018）と header の持ち越しの直し | planned | p033・p034・p036 |
