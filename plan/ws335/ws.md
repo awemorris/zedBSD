@@ -23,7 +23,8 @@
 
 - p001（設計）を P6 が q1789 で進めている。
 - 2026-11-01 P6: 設計を [design.md](design.md)、問い U1〜U6 を [user-questions.md](user-questions.md) に書いた。header（libcrypto-compat 24＋公開 6、libssl-compat 8＋公開 1）・.c の骨格（29＋10）・試験の道具（[tests/](tests/)）を置いた。
-  実装の Phase p002〜p035（と提案の p036）の phase.md を置いた。header の凍結（基点の SHA）は design-reviewer の反映の後。仕様と試験の data は P6 の worktree の `build/ws335-specs/`・`build/ws335-vectors/`（Q1 が共有の場所へ写す、user-questions.md の Q1 への確認 3）。
+  実装の Phase p002〜p038（提案の p036 を含む）の phase.md を置いた。design-reviewer の 27 件を全部反映した（[design-review.md](design-review.md)）。
+  **header と試験の道具の凍結: 基点 60760d2a0**（`BASE=60760d2a0 sh plan/ws335/tests/check-skeleton.sh`）。起動の順は design.md §9。仕様と試験の data は P6 の worktree の `build/ws335-specs/`・`build/ws335-vectors/`（Q1 が共有の場所へ写す、user-questions.md の Q1 への確認 3）。
 
 ## Phase
 

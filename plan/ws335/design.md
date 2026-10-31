@@ -5,7 +5,7 @@
 - 作成: 2026-11-01（P6、q1789-i01）。親: [ws.md](ws.md)。手順: [標準廉価実装手順](../../docs/agent/spec-module-delegation.md)。
 - 範囲は 2026-11-01 のユーザーの決定（[ws.md](ws.md) の「ユーザーの決定」）による: **libbrowser の `net/tls.c` が使う物と、自前の ssh・sshd（[WS336](../ws336/ws.md)）が使う物の和**だけを、
   OpenSSL 3.5 と互換の API で作る。libcrypto-compat（暗号・証明書・誤りの queue）と、その上の libssl-compat（TLS の client）の 2 つの library。
-- 状態: header・.c の骨格・試験の道具を置いた。header は WS336 の要る物の一覧（Q1 の中継、2026-11-01）を入れた形。**凍結（基点の SHA）は design-reviewer の指摘の反映の後**（§12）。
+- 状態: header・.c の骨格・試験の道具を置き、design-reviewer の指摘を反映して凍結した。**基点 60760d2a0**（header と試験の道具。WS336 の要る物の一覧を入れた形）。
 
 ## 1. 出典（仕様と試験の data）
 

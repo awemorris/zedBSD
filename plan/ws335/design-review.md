@@ -39,4 +39,6 @@
 
 ## 反映の後の確かめ（2026-11-01 P6）
 
-結果は下の commit の記録（ws.md の Resume point）にも書く。
+- check-skeleton.sh PASS（cc・clang、zedBSD の clang の x86_64・aarch64、llvm-mingw の x86_64・aarch64）、run-unit.sh all PASS（test-tools 18 checks）、`git diff --check` 空。
+- WS336 の crypto-contract.c（P5）が compat の header と骨格で -Werror の build と link を通る（実行は骨格なので FAIL、実装の後に p023・p024 の受け入れ）。
+- 凍結の基点: 60760d2a0。

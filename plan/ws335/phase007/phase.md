@@ -49,7 +49,7 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 sh plan/ws335/tests/run-unit.sh bn     # この module
 sh plan/ws335/tests/run-unit.sh all
 sh plan/ws335/tests/run-ct.sh bn
-BASE=@BASE@ sh plan/ws335/tests/check-skeleton.sh
+BASE=60760d2a0 sh plan/ws335/tests/check-skeleton.sh
 git diff --check
 ```
 
