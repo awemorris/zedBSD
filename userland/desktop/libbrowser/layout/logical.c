@@ -36,7 +36,7 @@
  * other way (its line starts at the bottom): a mode of its own here, next to
  * the three writing modes of the style.
  */
-#define LOGICAL_SIDEWAYS_LR	3
+#define LOGICAL_SIDEWAYS_LR	LAYOUT_SIDEWAYS_LR
 
 static int logical_mode_of(const struct css_style *style);
 
@@ -594,6 +594,18 @@ logical_units_to_physical(
 		sides[CSS_RIGHT] = logical[CSS_TOP];
 		sides[CSS_LEFT] = logical[CSS_BOTTOM];
 	}
+}
+
+/* Reorders four sides of a box laid out in a mode's coordinates (the horizontal ones are already physical) into physical ones. */
+void
+layout_sides_physical(
+	const layout_unit logical[4],
+	int mode,
+	layout_unit physical[4])
+{
+	memcpy(physical, logical, 4U * sizeof(layout_unit));
+	if (mode != CSS_WRITING_HORIZONTAL_TB)
+		logical_units_to_physical(physical, mode);
 }
 
 /* Reorders four laid out physical sides into logical ones. */

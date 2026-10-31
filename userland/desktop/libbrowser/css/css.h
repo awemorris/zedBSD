@@ -624,6 +624,55 @@ struct css_length {
 };
 
 /*
+ * The shape of a float's shape-outside: a basic shape or a gradient, with
+ * the reference box its coordinates are in.  Lengths are computed (pixels or
+ * percentages, with the pixels a calculation adds in offset).
+ * https://drafts.csswg.org/css-shapes-1/#shape-outside-property
+ */
+#define CSS_SHAPE_POINTS	24
+
+enum css_shape_kind {
+	CSS_SHAPE_BOX = 1,
+	CSS_SHAPE_CIRCLE,
+	CSS_SHAPE_ELLIPSE,
+	CSS_SHAPE_INSET,
+	CSS_SHAPE_POLYGON,
+	CSS_SHAPE_GRADIENT
+};
+
+/* The reference box of a shape; a basic shape without one is in the margin box. */
+enum css_shape_box {
+	CSS_SHAPE_MARGIN_BOX,
+	CSS_SHAPE_BORDER_BOX,
+	CSS_SHAPE_PADDING_BOX,
+	CSS_SHAPE_CONTENT_BOX
+};
+
+/* The sizes closest-side and farthest-side name for a radius. */
+#define CSS_SHAPE_CLOSEST	1
+#define CSS_SHAPE_FARTHEST	2
+
+struct css_shape {
+	int kind;
+	int box;
+	/* circle() and ellipse(): the radii (circle uses the first), or the keyword in radius_keyword. */
+	struct css_length radius[2];
+	int radius_keyword[2];
+	/* The center (x then y): the offset from the start side, or from the end side when at_end. */
+	struct css_length at[2];
+	int at_end[2];
+	/* inset(): top, right, bottom, left; and the rounded corners' radii (top left, top right, bottom right, bottom left; horizontal then vertical). */
+	struct css_length inset[4];
+	int rounded;
+	struct css_length round[4][2];
+	/* polygon(): the vertices. */
+	struct css_length points[CSS_SHAPE_POINTS][2];
+	unsigned point_count;
+	/* A gradient (image): its transparency decides the shape. */
+	const struct css_gradient *gradient;
+};
+
+/*
  * The properties a @position-try rule can set, as an element's style has
  * them with the rule applied (the fallback the rule's name is in).
  */
@@ -922,6 +971,10 @@ struct css_style {
 	 */
 	int clip_rect;
 	struct css_length clip_edges[4];
+	/* shape-outside (NULL for none), shape-margin and shape-image-threshold of a float. */
+	const struct css_shape *shape_outside;
+	struct css_length shape_margin;
+	float shape_threshold;
 	int vertical_align;
 	struct css_length vertical_offset;
 	int z_index;

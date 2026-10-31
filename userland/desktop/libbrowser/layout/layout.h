@@ -36,6 +36,9 @@
 /* How many layout units make a pixel. */
 #define LAYOUT_UNIT		64
 
+/* The writing mode of sideways-lr in a tree's logical_mode (the three of the style are 0 to 2). */
+#define LAYOUT_SIDEWAYS_LR	3
+
 /* The deepest box nesting laid out (deeper boxes are dropped). */
 #define LAYOUT_DEPTH_MAX	256
 
@@ -518,6 +521,11 @@ layout_unit layout_content_width(const struct layout_box *box, int depth);
 void layout_context_begin(struct layout_tree *tree, struct layout_context *context, struct wb_vector *floats);
 void layout_context_end(struct layout_tree *tree, const struct layout_context *context);
 int layout_place_float(struct layout_tree *tree, struct layout_box *box, layout_unit y_min, layout_unit width);
+int layout_floats_shaped(const struct layout_tree *tree);
+/* shape-outside (shape.c): the shape of a float in the coordinates of the tree's writing mode, and the extent it takes in a band. */
+struct layout_shape;
+int layout_shape_build(struct layout_tree *tree, const struct layout_box *box, layout_unit container_width, struct layout_shape **shape);
+int layout_shape_extent(const struct layout_shape *shape, layout_unit top, layout_unit bottom, layout_unit *left, layout_unit *right);
 void layout_line_room(const struct layout_tree *tree, layout_unit top, layout_unit bottom, layout_unit width, layout_unit *left, layout_unit *right);
 layout_unit layout_below_float(const struct layout_tree *tree, layout_unit top);
 layout_unit layout_clearance(const struct layout_tree *tree, int clear);
@@ -537,6 +545,8 @@ int layout_flex(struct layout_tree *tree, struct layout_box *box);
 int layout_grid(struct layout_tree *tree, struct layout_box *box);
 void layout_grid_names(struct layout_box *box);
 int layout_physical_mode(const struct layout_box *box);
+/* Reorders four sides (top, right, bottom, left) of a box laid out in a writing mode's coordinates into physical ones. */
+void layout_sides_physical(const layout_unit logical[4], int mode, layout_unit physical[4]);
 /* A style's writing mode as position-area reads it (sideways-lr is the mode 3). */
 int position_area_mode(const struct css_style *style);
 int layout_logical_wanted(const struct layout_tree *tree, const struct layout_box *box);

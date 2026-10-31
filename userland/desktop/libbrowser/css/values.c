@@ -266,6 +266,9 @@ static const struct values_name values_names[] = {
 	{ "outline-offset", CSS_PROP_OUTLINE_OFFSET },
 	{ "clip-path", CSS_PROP_CLIP_PATH },
 	{ "clip", CSS_PROP_CLIP },
+	{ "shape-outside", CSS_PROP_SHAPE_OUTSIDE },
+	{ "shape-margin", CSS_PROP_SHAPE_MARGIN },
+	{ "shape-image-threshold", CSS_PROP_SHAPE_IMAGE_THRESHOLD },
 	{ "direction", CSS_PROP_DIRECTION },
 	{ "writing-mode", CSS_PROP_WRITING_MODE },
 	{ "text-orientation", CSS_PROP_TEXT_ORIENTATION },
@@ -1126,6 +1129,7 @@ static int values_text_shadow(struct css_parse *parse, const struct css_token *t
 static int values_one_shadow(const struct css_token *tokens, size_t count, struct css_declared_shadow *shadow);
 static int values_outline(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_clip_path(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_shape_outside(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_clip(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_tracks(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_auto_tracks(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
@@ -2685,6 +2689,31 @@ values_single(
 			return error;
 
 		/* Succeeded: the selected native scalar component was parsed. */
+		return 0;
+	}
+
+	/* shape-outside takes a shape, a box or an image. */
+	if (property == CSS_PROP_SHAPE_OUTSIDE)
+		return values_shape_outside(parse, tokens, count, value);
+
+	/* shape-margin: a length or percentage that is not negative. */
+	if (property == CSS_PROP_SHAPE_MARGIN) {
+		error = values_length(&tokens[0], 0, value);
+		if (error != 0 || value->number < 0)
+			return EINVAL;
+		return 0;
+	}
+
+	/* shape-image-threshold: a number, held in range. */
+	if (property == CSS_PROP_SHAPE_IMAGE_THRESHOLD) {
+		if (tokens[0].type != CSS_TOKEN_NUMBER && tokens[0].type != CSS_TOKEN_PERCENTAGE)
+			return EINVAL;
+		value->kind = CSS_VALUE_NUMBER;
+		value->number = (float)(tokens[0].type == CSS_TOKEN_PERCENTAGE ? tokens[0].number / 100.0 : tokens[0].number);
+		if (value->number < 0)
+			value->number = 0;
+		if (value->number > 1)
+			value->number = 1;
 		return 0;
 	}
 
@@ -6921,6 +6950,437 @@ values_clip_path(
 	/* Succeeded: the inset is parsed. */
 	value->kind = CSS_VALUE_INSET;
 	value->inset = inset;
+	return 0;
+}
+
+/* Collects the tokens between commas or the end as items without whitespace; returns how many (up to max). */
+static size_t
+values_shape_items(
+	const struct css_token *tokens,
+	size_t count,
+	const struct css_token **items,
+	size_t max)
+{
+	size_t index;
+	size_t made;
+
+	/* Each token that is not whitespace is an item. */
+	made = 0;
+	for (index = 0; index < count && made < max; index++) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		items[made] = &tokens[index];
+		made++;
+	}
+
+	/* Reports how many. */
+	return made;
+}
+
+/* Parses a length or percentage that is not negative; a non-negative number of zero is allowed. */
+static int
+values_shape_length(
+	const struct css_token *token,
+	int allow_negative,
+	struct css_value *value)
+{
+	int error;
+
+	/* A length or a percentage. */
+	error = values_length(token, 0, value);
+	if (error != 0)
+		return error;
+	if (!allow_negative && value->number < 0)
+		return EINVAL;
+	return 0;
+}
+
+/* Sets a value to a percentage. */
+static void
+values_shape_percent(
+	struct css_value *value,
+	float percent)
+{
+	memset(value, 0, sizeof(*value));
+	value->kind = CSS_VALUE_LENGTH;
+	value->number = percent;
+	value->unit = CSS_DUNIT_PERCENT;
+}
+
+/* Parses the position after "at" in circle() and ellipse() into the shape's center. */
+static int
+values_shape_position(
+	const struct css_token **items,
+	size_t count,
+	struct css_declared_shape *shape)
+{
+	struct css_value offset;
+	size_t index;
+	int axis;
+	int set[2];
+	int is_length;
+	int end;
+	int error;
+
+	/* The center unless said otherwise. */
+	values_shape_percent(&shape->at[0], 50.0f);
+	values_shape_percent(&shape->at[1], 50.0f);
+	set[0] = 0;
+	set[1] = 0;
+	if (count == 0 || count > 4U)
+		return EINVAL;
+	for (index = 0; index < count; index++) {
+		is_length = items[index]->type != CSS_TOKEN_IDENT;
+
+		/* A length or a percentage alone is the x, then the y. */
+		if (is_length) {
+			axis = set[0] ? 1 : 0;
+			if (set[axis])
+				return EINVAL;
+			error = values_length(items[index], 0, &shape->at[axis]);
+			if (error != 0)
+				return error;
+			set[axis] = 1;
+			continue;
+		}
+
+		/* A keyword names a side, or the center of the axis not yet set. */
+		end = 0;
+		axis = -1;
+		if (css_ident_equal(items[index], "left")) {
+			axis = 0;
+		} else if (css_ident_equal(items[index], "right")) {
+			axis = 0;
+			end = 1;
+		} else if (css_ident_equal(items[index], "top")) {
+			axis = 1;
+		} else if (css_ident_equal(items[index], "bottom")) {
+			axis = 1;
+			end = 1;
+		} else if (css_ident_equal(items[index], "center")) {
+			axis = set[0] ? 1 : 0;
+			if (!set[0] && index + 1U < count && items[index + 1U]->type == CSS_TOKEN_IDENT &&
+			    (css_ident_equal(items[index + 1U], "left") || css_ident_equal(items[index + 1U], "right")))
+				axis = 1;
+		} else {
+			return EINVAL;
+		}
+		if (set[axis])
+			return EINVAL;
+		set[axis] = 1;
+		if (css_ident_equal(items[index], "center")) {
+			values_shape_percent(&shape->at[axis], 50.0f);
+			continue;
+		}
+
+		/* The offset from that side. */
+		memset(&offset, 0, sizeof(offset));
+		offset.kind = CSS_VALUE_LENGTH;
+		offset.unit = CSS_DUNIT_PX;
+		if (index + 1U < count && items[index + 1U]->type != CSS_TOKEN_IDENT) {
+			error = values_length(items[index + 1U], 0, &offset);
+			if (error != 0)
+				return error;
+			index++;
+		}
+		shape->at[axis] = offset;
+		shape->at_end[axis] = end;
+	}
+
+	/* Succeeded: the center is read. */
+	return 0;
+}
+
+/* Parses a radius of circle() or ellipse(): a length, a percentage, or closest-side or farthest-side. */
+static int
+values_shape_radius(
+	const struct css_token *token,
+	struct css_declared_shape *shape,
+	size_t axis)
+{
+	if (token->type == CSS_TOKEN_IDENT) {
+		if (css_ident_equal(token, "closest-side")) {
+			shape->radius_keyword[axis] = CSS_SHAPE_CLOSEST;
+			return 0;
+		}
+		if (css_ident_equal(token, "farthest-side")) {
+			shape->radius_keyword[axis] = CSS_SHAPE_FARTHEST;
+			return 0;
+		}
+		return EINVAL;
+	}
+	return values_shape_length(token, 0, &shape->radius[axis]);
+}
+
+/* Reads border-radius style lists (one to four values) into the four corners of one axis. */
+static int
+values_shape_corners(
+	const struct css_token **items,
+	size_t count,
+	struct css_declared_shape *shape,
+	size_t axis)
+{
+	struct css_value list[4];
+	size_t index;
+	int error;
+
+	/* One to four non-negative lengths. */
+	if (count == 0 || count > 4U)
+		return EINVAL;
+	for (index = 0; index < count; index++) {
+		error = values_shape_length(items[index], 0, &list[index]);
+		if (error != 0)
+			return error;
+	}
+
+	/* The corners as border-radius gives them: top left, top right, bottom right, bottom left. */
+	shape->round[0][axis] = list[0];
+	shape->round[1][axis] = count > 1U ? list[1] : list[0];
+	shape->round[2][axis] = count > 2U ? list[2] : list[0];
+	shape->round[3][axis] = count > 3U ? list[3] : (count > 1U ? list[1] : list[0]);
+	return 0;
+}
+
+/* Parses a basic shape function (circle, ellipse, inset, polygon) into a declared shape. */
+static int
+values_shape_basic(
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declared_shape *shape)
+{
+	const struct css_token *items[64];
+	const struct css_token *args;
+	size_t arg_count;
+	size_t found;
+	size_t at;
+	size_t slash;
+	size_t index;
+	size_t point;
+	size_t part;
+	int error;
+
+	/* The arguments between the parentheses. */
+	if (count < 2U || tokens[count - 1U].type != CSS_TOKEN_CLOSE_PAREN)
+		return EINVAL;
+	args = tokens + 1;
+	arg_count = count - 2U;
+
+	/* circle() and ellipse(): radii, then "at" and a position. */
+	if (css_ident_equal(&tokens[0], "circle") || css_ident_equal(&tokens[0], "ellipse")) {
+		found = values_shape_items(args, arg_count, items, 64);
+		at = found;
+		for (index = 0; index < found; index++) {
+			if (items[index]->type == CSS_TOKEN_IDENT && css_ident_equal(items[index], "at")) {
+				at = index;
+				break;
+			}
+		}
+		if (css_ident_equal(&tokens[0], "circle")) {
+			shape->kind = CSS_SHAPE_CIRCLE;
+			if (at > 1U)
+				return EINVAL;
+			shape->radius_keyword[0] = CSS_SHAPE_CLOSEST;
+			if (at == 1U) {
+				shape->radius_keyword[0] = 0;
+				error = values_shape_radius(items[0], shape, 0);
+				if (error != 0)
+					return error;
+			}
+		} else {
+			shape->kind = CSS_SHAPE_ELLIPSE;
+			if (at != 0 && at != 2U)
+				return EINVAL;
+			shape->radius_keyword[0] = CSS_SHAPE_CLOSEST;
+			shape->radius_keyword[1] = CSS_SHAPE_CLOSEST;
+			for (index = 0; index < at; index++) {
+				shape->radius_keyword[index] = 0;
+				error = values_shape_radius(items[index], shape, index);
+				if (error != 0)
+					return error;
+			}
+		}
+		if (at < found)
+			return values_shape_position(items + at + 1U, found - at - 1U, shape);
+		values_shape_percent(&shape->at[0], 50.0f);
+		values_shape_percent(&shape->at[1], 50.0f);
+		return 0;
+	}
+
+	/* inset(): up to four lengths, then "round" and the corner radii. */
+	if (css_ident_equal(&tokens[0], "inset")) {
+		shape->kind = CSS_SHAPE_INSET;
+		found = values_shape_items(args, arg_count, items, 64);
+		at = found;
+		for (index = 0; index < found; index++) {
+			if (items[index]->type == CSS_TOKEN_IDENT && css_ident_equal(items[index], "round")) {
+				at = index;
+				break;
+			}
+		}
+		if (at == 0 || at > 4U)
+			return EINVAL;
+		for (index = 0; index < at; index++) {
+			error = values_length(items[index], 0, &shape->inset[index]);
+			if (error != 0)
+				return error;
+		}
+		if (at < 2U)
+			shape->inset[1] = shape->inset[0];
+		if (at < 3U)
+			shape->inset[2] = shape->inset[0];
+		if (at < 4U)
+			shape->inset[3] = shape->inset[1];
+		if (at == found)
+			return 0;
+
+		/* The radii: the horizontal list, then "/" and the vertical list. */
+		slash = found;
+		for (index = at + 1U; index < found; index++) {
+			if (items[index]->type == CSS_TOKEN_DELIM && items[index]->delim == '/') {
+				slash = index;
+				break;
+			}
+		}
+		shape->rounded = 1;
+		error = values_shape_corners(items + at + 1U, slash - at - 1U, shape, 0);
+		if (error != 0)
+			return error;
+		if (slash < found)
+			return values_shape_corners(items + slash + 1U, found - slash - 1U, shape, 1);
+		for (index = 0; index < 4U; index++)
+			shape->round[index][1] = shape->round[index][0];
+		return 0;
+	}
+
+	/* polygon(): an optional fill rule, then comma-separated pairs of lengths. */
+	if (css_ident_equal(&tokens[0], "polygon")) {
+		shape->kind = CSS_SHAPE_POLYGON;
+		index = 0;
+		point = 0;
+
+		/* The fill rule and its comma. */
+		while (index < arg_count && args[index].type == CSS_TOKEN_WHITESPACE)
+			index++;
+		if (index < arg_count && args[index].type == CSS_TOKEN_IDENT &&
+		    (css_ident_equal(&args[index], "nonzero") || css_ident_equal(&args[index], "evenodd"))) {
+			index++;
+			while (index < arg_count && args[index].type == CSS_TOKEN_WHITESPACE)
+				index++;
+			if (index >= arg_count || args[index].type != CSS_TOKEN_COMMA)
+				return EINVAL;
+			index++;
+		}
+
+		/* Each vertex: two lengths up to the next comma. */
+		while (index < arg_count) {
+			part = 0;
+			while (index < arg_count && args[index].type != CSS_TOKEN_COMMA) {
+				if (args[index].type != CSS_TOKEN_WHITESPACE) {
+					if (part >= 2U || point >= CSS_SHAPE_POINTS)
+						return EINVAL;
+					error = values_length(&args[index], 0, &shape->points[point][part]);
+					if (error != 0)
+						return error;
+					part++;
+				}
+				index++;
+			}
+			if (part != 2U)
+				return EINVAL;
+			point++;
+			if (index < arg_count)
+				index++;
+		}
+		if (point == 0)
+			return EINVAL;
+		shape->point_count = (unsigned)point;
+		return 0;
+	}
+
+	/* Anything else is not a basic shape. */
+	return EINVAL;
+}
+
+/*
+ * Parses shape-outside: none, a shape box, a basic shape (with a shape box),
+ * or a gradient; any other image is an error here.
+ */
+static int
+values_shape_outside(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	struct css_declared_shape *shape;
+	size_t starts[4];
+	size_t lengths[4];
+	size_t components;
+	size_t index;
+	int have_box;
+	int error;
+
+	/* None is the keyword 0. */
+	value->kind = CSS_VALUE_KEYWORD;
+	value->keyword = 0;
+	components = values_components(tokens, count, starts, lengths, 4);
+	if (components == 0)
+		return EINVAL;
+	if (components == 1U && tokens[starts[0]].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[starts[0]], "none"))
+		return 0;
+
+	/* The shape, in the parse's arena. */
+	shape = wb_arena_zalloc(parse->arena, sizeof(*shape));
+	if (shape == NULL)
+		return ENOMEM;
+	have_box = 0;
+	for (index = 0; index < components; index++) {
+		const struct css_token *token = &tokens[starts[index]];
+
+		/* A reference box. */
+		if (token->type == CSS_TOKEN_IDENT) {
+			if (have_box)
+				return EINVAL;
+			have_box = 1;
+			if (css_ident_equal(token, "margin-box")) {
+				shape->box = CSS_SHAPE_MARGIN_BOX;
+			} else if (css_ident_equal(token, "border-box")) {
+				shape->box = CSS_SHAPE_BORDER_BOX;
+			} else if (css_ident_equal(token, "padding-box")) {
+				shape->box = CSS_SHAPE_PADDING_BOX;
+			} else if (css_ident_equal(token, "content-box")) {
+				shape->box = CSS_SHAPE_CONTENT_BOX;
+			} else {
+				return EINVAL;
+			}
+			continue;
+		}
+
+		/* A gradient, or a basic shape. */
+		if (token->type != CSS_TOKEN_FUNCTION || shape->kind != 0)
+			return EINVAL;
+		if (css_ident_equal(token, "linear-gradient") || css_ident_equal(token, "repeating-linear-gradient")) {
+			shape->kind = CSS_SHAPE_GRADIENT;
+			error = css_gradient_parse(parse, token, lengths[index], &shape->gradient);
+		} else {
+			error = values_shape_basic(token, lengths[index], shape);
+		}
+		if (error != 0)
+			return error;
+	}
+
+	/* A shape box alone is the box itself; a gradient has no box. */
+	if (shape->kind == 0) {
+		if (!have_box)
+			return EINVAL;
+		shape->kind = CSS_SHAPE_BOX;
+	} else if (shape->kind == CSS_SHAPE_GRADIENT && have_box) {
+		return EINVAL;
+	}
+
+	/* Succeeded: the shape is parsed. */
+	value->kind = CSS_VALUE_SHAPE;
+	value->shape = shape;
 	return 0;
 }
 

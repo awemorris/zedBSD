@@ -190,6 +190,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_DIR)/html/input.c \
 	$(LIBBROWSER_DIR)/layout/table.c \
 	$(LIBBROWSER_DIR)/layout/inline.c \
 	$(LIBBROWSER_DIR)/layout/float.c \
+	$(LIBBROWSER_DIR)/layout/shape.c \
 	$(LIBBROWSER_DIR)/layout/position.c \
 	$(LIBBROWSER_DIR)/layout/scroll.c \
 	$(LIBBROWSER_DIR)/layout/sticky.c \
