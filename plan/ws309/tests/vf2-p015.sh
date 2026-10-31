@@ -110,7 +110,8 @@ for spec in "$@"; do
 		grep -E 'MVIEW (DONE|FAILED)' "$dir/cy$i.txt" | tail -1 | sed "s/^/$arm cycle $i /" >> "$summary"
 		sleep 3
 	done
-	alive=$(b "ps -A -o args | grep -c '^$H/bin/wayland'" 2>&1)
+	# The compositor runs as root, which the user's ps does not list.
+	alive=$(printf '%s\n' "$VF2_PASSWORD" | b "sudo -S sh -c 'kill -0 \$(cat $H/wayland.pid) && echo 1 || echo 0'" 2> /dev/null | tail -1)
 	compositor_stop cycle
 	say "$arm cycle compositor alive $alive direct=$(grep -c 'KWL SCANOUT direct=1' "$dir/cycle.log") left=$(grep -c 'KWL SCANOUT direct=0 reason=no-window' "$dir/cycle.log") window=$(grep -c 'KWL MODE window' "$dir/cycle.log") refused=$(grep -c 'lend refused' "$dir/cycle.log") failed=$(grep -cE 'KWL (FAILED|MODE_ERROR|VULKAN_ERROR)' "$dir/cycle.log") done=$(grep -c "^$arm cycle [0-9]* MVIEW DONE" "$summary")"
 	b "dmesg | grep -iE 'powervr|fault|lost|hang|EBUSY' | grep -v timing: | tail -4" 2>&1 | sed "s/^/$arm kernel /" | tee -a "$summary"
