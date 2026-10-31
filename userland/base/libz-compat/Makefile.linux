@@ -1,5 +1,5 @@
+include $(dir $(lastword $(MAKEFILE_LIST)))sources.mk
 # The Linux build of libz-compat.so; the zedBSD build remains in Makefile.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KEILAND_LINUX_Z_COMPAT_SOURCES := userland/base/libz-compat/inflate.c userland/base/libz-compat/deflate.c \
-	userland/base/libz-compat/checksum.c
+KEILAND_LINUX_Z_COMPAT_SOURCES := $(LIBZ_COMPAT_SOURCES)
 $(eval $(call KEILAND_LINUX_LIBRARY,z-compat,libz-compat.so,$(KEILAND_LINUX_Z_COMPAT_SOURCES),,,userland/base/libz-compat/exports.map))
