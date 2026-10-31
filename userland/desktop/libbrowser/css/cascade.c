@@ -364,6 +364,9 @@ static const struct css_anchor_expr *cascade_anchor_resolve(struct css_engine *e
 static const struct css_gradient *cascade_gradient(struct css_engine *engine, const struct css_gradient *gradient, float font_size);
 static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 static void cascade_animation(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
+
+/* Whether a script reads a style without the animation filters and tracks (the styles the engine kept are not used or kept then). */
+static int cascade_animation_suppressed;
 static const struct css_try_rule *cascade_try_rule(const struct css_engine *engine, const struct vm_string *name, const void *tree);
 static void cascade_anchor(struct css_engine *engine, struct css_style *style, int property, const struct css_anchor_expr *expr);
 static const struct css_grid_areas *cascade_keep_areas(struct css_engine *engine, const struct css_grid_areas *areas);
@@ -785,7 +788,7 @@ css_engine_compute(
 	int error;
 
 	/* A style the engine computed before for the element. */
-	if (engine->style_capacity != 0) {
+	if (engine->style_capacity != 0 && !cascade_animation_suppressed) {
 		cached = cascade_style_slot(engine, element);
 		if (cached->element != NULL) {
 			*style = *cached->style;
@@ -804,7 +807,8 @@ css_engine_compute(
 		return error;
 
 	/* The engine keeps it (a copy it cannot keep is only computed again). */
-	cascade_style_keep(engine, element, style);
+	if (!cascade_animation_suppressed)
+		cascade_style_keep(engine, element, style);
 
 	/* Succeeded: the style is computed. */
 	return 0;
@@ -1266,6 +1270,16 @@ cascade_compute(
 		style->outline_color = style->color;
 	if (style->outline_style == CSS_BORDER_NONE)
 		style->outline_width = 0;
+
+	/* And in the drop shadows of the filters. */
+	for (side = 0; side < style->filter_count; side++) {
+		if (style->filters[side].kind == CSS_FILTER_DROP_SHADOW && style->filters[side].color == CSS_CURRENT_COLOR)
+			style->filters[side].color = style->color;
+	}
+	for (side = 0; side < style->backdrop_filter_count; side++) {
+		if (style->backdrop_filters[side].kind == CSS_FILTER_DROP_SHADOW && style->backdrop_filters[side].color == CSS_CURRENT_COLOR)
+			style->backdrop_filters[side].color = style->color;
+	}
 
 	/* And in the shadows' colors. */
 	for (side = 0; side < style->shadow_count; side++) {
@@ -4795,6 +4809,27 @@ cascade_apply(
 	case CSS_PROP_ISOLATION:
 		style->isolation = value->keyword;
 		break;
+	case CSS_PROP_TRANSITION_PROPERTY:
+		style->transition_property = value->keyword == 2 ? value->ident : NULL;
+		break;
+	case CSS_PROP_TRANSITION_DURATION:
+		style->transition_duration = value->keyword == 2 ? value->ident : NULL;
+		break;
+	case CSS_PROP_TRANSITION_DELAY:
+		style->transition_delay = value->keyword == 2 ? value->ident : NULL;
+		break;
+	case CSS_PROP_TRANSITION_TIMING_FUNCTION:
+		style->transition_timing = value->keyword == 2 ? value->ident : NULL;
+		break;
+	case CSS_PROP_TRANSITION_BEHAVIOR:
+		style->transition_behavior = value->keyword == 2 ? value->ident : NULL;
+		break;
+	case CSS_PROP_ANIMATION_FILL_MODE:
+		style->animation_fill_mode = value->keyword == 2 ? value->ident : NULL;
+		break;
+	case CSS_PROP_ANIMATION_COMPOSITION:
+		style->animation_composition = value->keyword == 2 ? value->ident : NULL;
+		break;
 	case CSS_PROP_DISPLAY:
 		style->display = value->keyword;
 		break;
@@ -5529,6 +5564,35 @@ cascade_inherit(
 	case CSS_PROP_ISOLATION:
 		style->isolation = parent->isolation;
 		break;
+	case CSS_PROP_BACKDROP_FILTER:
+		memcpy(style->backdrop_filters, parent->backdrop_filters, sizeof(style->backdrop_filters));
+		style->backdrop_filter_count = parent->backdrop_filter_count;
+		break;
+	case CSS_PROP_FILTER:
+		memcpy(style->filters, parent->filters, sizeof(style->filters));
+		style->filter_count = parent->filter_count;
+		break;
+	case CSS_PROP_TRANSITION_PROPERTY:
+		style->transition_property = parent->transition_property;
+		break;
+	case CSS_PROP_TRANSITION_DURATION:
+		style->transition_duration = parent->transition_duration;
+		break;
+	case CSS_PROP_TRANSITION_DELAY:
+		style->transition_delay = parent->transition_delay;
+		break;
+	case CSS_PROP_TRANSITION_TIMING_FUNCTION:
+		style->transition_timing = parent->transition_timing;
+		break;
+	case CSS_PROP_TRANSITION_BEHAVIOR:
+		style->transition_behavior = parent->transition_behavior;
+		break;
+	case CSS_PROP_ANIMATION_FILL_MODE:
+		style->animation_fill_mode = parent->animation_fill_mode;
+		break;
+	case CSS_PROP_ANIMATION_COMPOSITION:
+		style->animation_composition = parent->animation_composition;
+		break;
 	case CSS_PROP_Z_INDEX:
 		style->z_index = parent->z_index;
 		style->z_index_auto = parent->z_index_auto;
@@ -6013,9 +6077,22 @@ cascade_filter_mix(
 		}
 		start = from_count != 0 ? from[index].amount : cascade_filter_identity(shape[index].kind);
 		end = to_count != 0 ? to[index].amount : cascade_filter_identity(shape[index].kind);
-		out[index].kind = shape[index].kind;
+		out[index] = shape[index];
 		out[index].amount = start + (end - start) * share;
 	}
+}
+
+void
+css_animation_off(
+	int off)
+{
+	cascade_animation_suppressed = off;
+}
+
+int
+css_animation_is_off(void)
+{
+	return cascade_animation_suppressed;
 }
 
 /*
@@ -6062,7 +6139,7 @@ cascade_animation(
 	int track;
 
 	/* Only an animation with a name and a length that has begun. */
-	if (style->animation_name == NULL || style->animation_duration <= 0.0f || style->animation_delay > 0.0f)
+	if (cascade_animation_suppressed || style->animation_name == NULL || style->animation_duration <= 0.0f || style->animation_delay > 0.0f)
 		return;
 	progress = -style->animation_delay / style->animation_duration;
 	if (progress > 1.0f)
@@ -6609,6 +6686,20 @@ cascade_filters(
 		declared = &value->filters->filters[index];
 		out[index].kind = declared->kind;
 		out[index].amount = declared->amount.number;
+		out[index].dx = 0.0f;
+		out[index].dy = 0.0f;
+		out[index].blur = 0.0f;
+		out[index].color = 0;
+		out[index].url = declared->url;
+		if (declared->kind == CSS_FILTER_DROP_SHADOW) {
+			length = cascade_length(engine, &declared->shadow.lengths[0], style->font_size);
+			out[index].dx = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+			length = cascade_length(engine, &declared->shadow.lengths[1], style->font_size);
+			out[index].dy = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+			length = cascade_length(engine, &declared->shadow.lengths[2], style->font_size);
+			out[index].blur = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+			out[index].color = declared->shadow.color;
+		}
 		if (declared->kind == CSS_FILTER_BLUR) {
 			length = cascade_length(engine, &declared->amount, style->font_size);
 			out[index].amount = length.unit == CSS_UNIT_PX ? length.value : 0.0f;

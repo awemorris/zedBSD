@@ -160,6 +160,13 @@ enum computed_property {
 	COMPUTED_ANIMATION_DIRECTION,
 	COMPUTED_ISOLATION,
 	COMPUTED_ANIMATION_TIMING_FUNCTION,
+	COMPUTED_TRANSITION_PROPERTY,
+	COMPUTED_TRANSITION_DURATION,
+	COMPUTED_TRANSITION_DELAY,
+	COMPUTED_TRANSITION_TIMING_FUNCTION,
+	COMPUTED_TRANSITION_BEHAVIOR,
+	COMPUTED_ANIMATION_FILL_MODE,
+	COMPUTED_ANIMATION_COMPOSITION,
 	COMPUTED_MIX_BLEND_MODE,
 	COMPUTED_ZOOM,
 	COMPUTED_CONTENT,
@@ -413,6 +420,13 @@ static const struct computed_entry computed_entries[] = {
 	{ "animation-direction", COMPUTED_ANIMATION_DIRECTION },
 	{ "isolation", COMPUTED_ISOLATION },
 	{ "animation-timing-function", COMPUTED_ANIMATION_TIMING_FUNCTION },
+	{ "transition-property", COMPUTED_TRANSITION_PROPERTY },
+	{ "transition-duration", COMPUTED_TRANSITION_DURATION },
+	{ "transition-delay", COMPUTED_TRANSITION_DELAY },
+	{ "transition-timing-function", COMPUTED_TRANSITION_TIMING_FUNCTION },
+	{ "transition-behavior", COMPUTED_TRANSITION_BEHAVIOR },
+	{ "animation-fill-mode", COMPUTED_ANIMATION_FILL_MODE },
+	{ "animation-composition", COMPUTED_ANIMATION_COMPOSITION },
 	{ "mix-blend-mode", COMPUTED_MIX_BLEND_MODE },
 	{ "zoom", COMPUTED_ZOOM },
 	{ "text-decoration-line", COMPUTED_TEXT_DECORATION_LINE },
@@ -1950,6 +1964,48 @@ computed_write_keyword(
 		else
 			error = vm_string_append_units(style->animation_timing, out);
 		break;
+	case COMPUTED_TRANSITION_PROPERTY:
+		if (style->transition_property == NULL)
+			error = computed_ascii("all", out);
+		else
+			error = vm_string_append_units(style->transition_property, out);
+		break;
+	case COMPUTED_TRANSITION_DURATION:
+		if (style->transition_duration == NULL)
+			error = computed_ascii("0s", out);
+		else
+			error = vm_string_append_units(style->transition_duration, out);
+		break;
+	case COMPUTED_TRANSITION_DELAY:
+		if (style->transition_delay == NULL)
+			error = computed_ascii("0s", out);
+		else
+			error = vm_string_append_units(style->transition_delay, out);
+		break;
+	case COMPUTED_TRANSITION_TIMING_FUNCTION:
+		if (style->transition_timing == NULL)
+			error = computed_ascii("ease", out);
+		else
+			error = vm_string_append_units(style->transition_timing, out);
+		break;
+	case COMPUTED_TRANSITION_BEHAVIOR:
+		if (style->transition_behavior == NULL)
+			error = computed_ascii("normal", out);
+		else
+			error = vm_string_append_units(style->transition_behavior, out);
+		break;
+	case COMPUTED_ANIMATION_FILL_MODE:
+		if (style->animation_fill_mode == NULL)
+			error = computed_ascii("none", out);
+		else
+			error = vm_string_append_units(style->animation_fill_mode, out);
+		break;
+	case COMPUTED_ANIMATION_COMPOSITION:
+		if (style->animation_composition == NULL)
+			error = computed_ascii("replace", out);
+		else
+			error = vm_string_append_units(style->animation_composition, out);
+		break;
 	case COMPUTED_MIX_BLEND_MODE:
 		error = computed_ascii(style->mix_blend_mode == 1 ? "plus-lighter" : style->mix_blend_mode >= 2 ? css_blend_names[style->mix_blend_mode - 2] : "normal", out);
 		break;
@@ -2783,7 +2839,7 @@ computed_filter_list(
 	struct wb_units *out)
 {
 	static const char *const names[] = {
-		"blur", "brightness", "contrast", "grayscale", "hue-rotate", "invert", "opacity", "saturate", "sepia"
+		"blur", "brightness", "contrast", "grayscale", "hue-rotate", "invert", "opacity", "saturate", "sepia", "drop-shadow", "url"
 	};
 	const struct css_filter *filter;
 	int index;
@@ -2797,11 +2853,29 @@ computed_filter_list(
 		filter = &filters[index];
 		if (index != 0)
 			error = computed_ascii(" ", out);
+		if (error == 0 && filter->kind == CSS_FILTER_URL) {
+			error = computed_write_url(filter->url, out);
+			continue;
+		}
 		if (error == 0)
 			error = computed_ascii(names[filter->kind], out);
 		if (error == 0)
 			error = computed_ascii("(", out);
-		if (error == 0 && filter->kind == CSS_FILTER_BLUR)
+		if (error == 0 && filter->kind == CSS_FILTER_DROP_SHADOW) {
+			error = computed_color(filter->color, out);
+			if (error == 0)
+				error = computed_ascii(" ", out);
+			if (error == 0)
+				error = computed_pixels(filter->dx, out);
+			if (error == 0)
+				error = computed_ascii(" ", out);
+			if (error == 0)
+				error = computed_pixels(filter->dy, out);
+			if (error == 0)
+				error = computed_ascii(" ", out);
+			if (error == 0)
+				error = computed_pixels(filter->blur, out);
+		} else if (error == 0 && filter->kind == CSS_FILTER_BLUR)
 			error = computed_pixels(filter->amount, out);
 		else if (error == 0 && filter->kind == CSS_FILTER_HUE_ROTATE) {
 			error = computed_number(filter->amount, out);

@@ -419,6 +419,13 @@ enum css_property {
 	CSS_PROP_ANIMATION_DIRECTION,
 	CSS_PROP_ISOLATION,
 	CSS_PROP_CONTENT_VISIBILITY,
+	CSS_PROP_TRANSITION_PROPERTY,
+	CSS_PROP_TRANSITION_DURATION,
+	CSS_PROP_TRANSITION_DELAY,
+	CSS_PROP_TRANSITION_TIMING_FUNCTION,
+	CSS_PROP_TRANSITION_BEHAVIOR,
+	CSS_PROP_ANIMATION_FILL_MODE,
+	CSS_PROP_ANIMATION_COMPOSITION,
 	CSS_PROP_COUNT
 };
 
@@ -609,6 +616,8 @@ struct css_declared_shadow {
 struct css_declared_filter {
 	int kind;
 	struct css_value amount;
+	struct css_declared_shadow shadow;
+	const struct vm_string *url;
 };
 
 /* A declared filter list, kept in the parse's arena (none is an empty list). */

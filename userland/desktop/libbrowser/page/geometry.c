@@ -324,10 +324,10 @@ page_computed_style(
 	if (walk != &page->document->node)
 		return ENOENT;
 
-	/* The box's style, when the element has a box. */
+	/* The box's style, when the element has a box (a script reading the style without an animation's value takes the cascade's). */
 	laid_out = geometry_layout(page);
 	box = NULL;
-	if (laid_out)
+	if (laid_out && !css_animation_is_off())
 		box = geometry_first_box(page, &element->node);
 	if (box != NULL) {
 		*style = box->style;
