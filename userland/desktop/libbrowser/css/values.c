@@ -2829,8 +2829,9 @@ values_single(
 	    property == CSS_PROP_COLUMN_GAP) {
 		is_auto = css_ident_equal(&tokens[0], "normal");
 		if (is_auto) {
+			/* A negative length, which no gap can be, stands for normal. */
 			value->kind = CSS_VALUE_LENGTH;
-			value->number = 0;
+			value->number = -1;
 			value->unit = CSS_DUNIT_PX;
 			return 0;
 		}
