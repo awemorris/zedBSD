@@ -54,6 +54,7 @@ static VkResult memory_import_fd(struct VkDevice_T *device, const VkMemoryAlloca
 static VkResult memory_import_image_fd(struct VkDevice_T *device, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *allocator, int fd, VkDeviceMemory *memory);
 static VkResult memory_dedicated_check(struct VkDevice_T *device, const VkMemoryAllocateInfo *info, VkImage image, const struct gpu_image_descriptor *described);
 static VkImage memory_dedicated_image(const VkMemoryAllocateInfo *info);
+static VkResult memory_swapchain_fd(struct VkDevice_T *device, const VkMemoryGetFdInfoKHR *info, int *fd);
 static VkResult memory_mapping_token(struct VkDevice_T *device, struct memory_allocation *allocation);
 
 /*
@@ -174,6 +175,16 @@ vkGetMemoryFdKHR(
 	/* Descriptor export requires the extension enabled on this logical device. */
 	if (!(owner->enabled_extensions & VULKAN_DEVICE_EXTERNAL_MEMORY_FD))
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
+
+	/* A swapchain's image, which the application has no memory handle of, is named instead. */
+	if (pGetFdInfo->memory == VK_NULL_HANDLE) {
+		status = memory_swapchain_fd(owner, pGetFdInfo, pFd);
+		if (status != VK_SUCCESS)
+			return status;
+
+		/* Succeeded: the caller owns an fd of the swapchain image. */
+		return VK_SUCCESS;
+	}
 
 	/* Only this device's explicitly exportable memory can grant an external reference. */
 	memory = vulkan_memory(pGetFdInfo->memory);
@@ -1510,4 +1521,53 @@ memory_dedicated_image(
 
 	/* Succeeded: the named image, if any. */
 	return image;
+}
+
+/*
+ * Exports a swapchain image as an fd for vkGetMemoryFdKHR: a request
+ * without memory names the image with a dedicated-allocation record in its
+ * chain (image set, no buffer).  The image is one of an exportable direct
+ * swapchain (made with VkExternalMemoryImageCreateInfo); the fd is an image
+ * capability, which this library's import (vkAllocateMemory with the fd and
+ * a dedicated image) and its WSI take.  Vulkan has no export of swapchain
+ * images: this pairing of standard records is the library's own.
+ */
+static VkResult
+memory_swapchain_fd(
+	struct VkDevice_T *device,
+	const VkMemoryGetFdInfoKHR *info,
+	int *fd)
+{
+	const VkBaseInStructure *next;
+	const VkMemoryDedicatedAllocateInfo *dedicated;
+	VkImage image;
+	VkResult status;
+
+	/* The image the chain's dedicated record names. */
+	image = VK_NULL_HANDLE;
+	for (next = info->pNext;
+	     next != NULL;
+	     next = next->pNext) {
+		/* Other entries do not name the image. */
+		if (next->sType != VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO)
+			continue;
+
+		/* A record naming a buffer names no image. */
+		dedicated = (const VkMemoryDedicatedAllocateInfo *)next;
+		if (dedicated->buffer != VK_NULL_HANDLE)
+			return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+		image = dedicated->image;
+	}
+
+	/* An image, and the library's WSI to export it. */
+	if (image == VK_NULL_HANDLE || vulkan_wsi_swapchain_image_fd == NULL)
+		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+
+	/* The fd of the swapchain image. */
+	status = vulkan_wsi_swapchain_image_fd(device, image, fd);
+	if (status != VK_SUCCESS)
+		return status;
+
+	/* Succeeded: the caller owns the image's fd. */
+	return VK_SUCCESS;
 }

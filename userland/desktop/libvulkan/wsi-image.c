@@ -242,6 +242,71 @@ vulkan_wsi_shared_image_import(
 	VkDeviceMemory *memory,
 	struct gpu_image_descriptor *descriptor)
 {
+	VkResult error;
+
+	/* The image in the format of the allocation's own channel order. */
+	error = vulkan_wsi_shared_image_import_format(device, fd, VK_FORMAT_UNDEFINED, allocator, image, memory, descriptor);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: the caller owns the image and the imported memory. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Exports the memory of an exportable direct swapchain's image (one made
+ * with VkExternalMemoryImageCreateInfo) as a new image fd with the
+ * description the image was made with: vkGetMemoryFdKHR's answer for a
+ * swapchain image.  A compositor lends it to a client, whose WSI imports
+ * it.  Returns VK_SUCCESS or VK_ERROR_INVALID_EXTERNAL_HANDLE.
+ */
+VkResult
+vulkan_wsi_swapchain_image_fd(
+	struct VkDevice_T *device,
+	VkImage image,
+	int *fd)
+{
+	struct gpu_image_descriptor descriptor;
+	VkDeviceMemory memory;
+	VkResult error;
+
+	/* No fd until the export gives one. */
+	*fd = -1;
+	if (vulkan_wsi_swapchain_image_memory == NULL)
+		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+
+	/* The image's memory and description, found among the exportable chains. */
+	error = vulkan_wsi_swapchain_image_memory(device, image, &memory, &descriptor);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The kernel stamps the device itself, and a repeated export carries the first one's description. */
+	descriptor.device_id = 0U;
+	error = vulkan_memory_image_fd(device, memory, &descriptor, fd);
+	if (error != VK_SUCCESS)
+		return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+
+	/* Succeeded: the caller owns an fd of the image. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Imports a shared allocation as an image of a format: VK_FORMAT_UNDEFINED
+ * takes the allocation's own channel order in UNORM, and another format
+ * must keep that channel order (its UNORM or SRGB form, the same bytes).
+ * The fd remains caller-owned; successful memory creation owns the
+ * imported kernel alias.
+ */
+VkResult
+vulkan_wsi_shared_image_import_format(
+	struct VkDevice_T *device,
+	int fd,
+	VkFormat format,
+	const VkAllocationCallbacks *allocator,
+	VkImage *image,
+	VkDeviceMemory *memory,
+	struct gpu_image_descriptor *descriptor)
+{
 	struct gpu_resource_import request;
 	struct vulkan_external_image_info external;
 	VkImageCreateInfo create;
@@ -302,6 +367,20 @@ vulkan_wsi_shared_image_import(
 	/* Channel ordering must agree with the original image rather than the receiving process. */
 	if (request.image.format == GPU_PIXEL_BGRA8888)
 		create.format = VK_FORMAT_B8G8R8A8_UNORM;
+
+	/* A format asked for keeps the channel order: the same bytes, read as UNORM or SRGB. */
+	if (format != VK_FORMAT_UNDEFINED) {
+		error = VK_ERROR_FORMAT_NOT_SUPPORTED;
+		if (create.format == VK_FORMAT_R8G8B8A8_UNORM &&
+		    format != VK_FORMAT_R8G8B8A8_UNORM &&
+		    format != VK_FORMAT_R8G8B8A8_SRGB)
+			goto cleanup;
+		if (create.format == VK_FORMAT_B8G8R8A8_UNORM &&
+		    format != VK_FORMAT_B8G8R8A8_UNORM &&
+		    format != VK_FORMAT_B8G8R8A8_SRGB)
+			goto cleanup;
+		create.format = format;
+	}
 
 	/* This independent image object will be bound to the imported allocation below. */
 	create.extent.width = request.image.width;

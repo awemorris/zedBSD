@@ -328,6 +328,13 @@ VkResult vulkan_resource_blob_flags(struct vulkan_context *context, uint64_t byt
 VkResult vulkan_memory_allocate(VkDevice device, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *allocator, VkBool32 shared, VkDeviceMemory *memory);
 VkResult vulkan_memory_allocate_placed(VkDevice device, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *allocator, const struct gpu_placement *placement, VkDeviceMemory *memory);
 VkResult vulkan_memory_image_fd(struct VkDevice_T *device, VkDeviceMemory memory, struct gpu_image_descriptor *image, int *fd);
+
+/*
+ * The fd of an exportable swapchain's image (wsi-image.c), which
+ * vkGetMemoryFdKHR gives for a swapchain image.  It is weak because the
+ * host tests of the memory family link no WSI; a null one exports nothing.
+ */
+extern VkResult vulkan_wsi_swapchain_image_fd(struct VkDevice_T *device, VkImage image, int *fd) __attribute__((weak));
 VkResult vulkan_memory_allocation_fd(struct VkDevice_T *device, VkDeviceMemory memory, struct gpu_allocation_descriptor *allocation, int *fd);
 VkResult vulkan_memory_import(struct VkDevice_T *device, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *allocator, uint32_t resource, uint64_t alias, VkDeviceMemory *memory);
 void vulkan_encode_image_external(struct vulkan_writer *writer, const void *chain);

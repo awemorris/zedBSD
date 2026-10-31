@@ -291,7 +291,8 @@ const struct vulkan_wsi_platform_ops vulkan_wsi_display_platform = {
 	display_primary_ticket, display_present_primary, display_primary_skip,
 	display_overlay_decide, display_overlay_commit, display_overlay_ready,
 	display_overlay_status, display_overlay_forget, display_overlay_reclaim,
-	NULL
+	NULL,
+	NULL, NULL, NULL
 };
 
 /*
