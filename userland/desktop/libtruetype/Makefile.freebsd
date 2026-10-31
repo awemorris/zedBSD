@@ -1,12 +1,5 @@
+include $(dir $(lastword $(MAKEFILE_LIST)))sources.mk
 # The native FreeBSD build of libtruetype.so; the zedBSD build remains in Makefile.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KEILAND_FREEBSD_TRUETYPE_SOURCES := userland/desktop/libtruetype/face.c \
-	userland/desktop/libtruetype/cmap.c \
-	userland/desktop/libtruetype/outline.c \
-	userland/desktop/libtruetype/render.c \
-	userland/desktop/libtruetype/glyph.c \
-	userland/desktop/libtruetype/design.c \
-	userland/desktop/libtruetype/contour.c \
-	userland/desktop/libtruetype/color.c \
-	userland/desktop/libtruetype/companion.c
+KEILAND_FREEBSD_TRUETYPE_SOURCES := $(LIBTRUETYPE_SOURCES)
 $(eval $(call KEILAND_FREEBSD_LIBRARY,truetype,libtruetype.so,$(KEILAND_FREEBSD_TRUETYPE_SOURCES),,-lm,userland/desktop/libtruetype/exports.map))

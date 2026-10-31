@@ -1,5 +1,5 @@
+include $(dir $(lastword $(MAKEFILE_LIST)))sources.mk
 # The native FreeBSD build of libgif-compat.so; the zedBSD build remains in Makefile.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KEILAND_FREEBSD_GIF_COMPAT_SOURCES := userland/desktop/libgif-compat/decode.c \
-	userland/desktop/libgif-compat/lzw.c
+KEILAND_FREEBSD_GIF_COMPAT_SOURCES := $(LIBGIF_COMPAT_SOURCES)
 $(eval $(call KEILAND_FREEBSD_LIBRARY,gif-compat,libgif-compat.so,$(KEILAND_FREEBSD_GIF_COMPAT_SOURCES),,-lm,userland/desktop/libgif-compat/exports.map))
