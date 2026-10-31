@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 22:08（Q1）
+最終更新: 2026-10-31 22:28（Q1）
 
 ## 担当（P1〜P8）
 
@@ -28,7 +28,7 @@
 | --- | --- | --- | --- | --- |
 | p001〜p006 | AMD RDNA | Linux（RADV）と同等 | 同等 | cleared（p006・p008・p009 は RX 5600 XT が抜かれて止め） |
 | p010〜p012 | NVIDIA RTX 2070 | desktop 60 fps、scene-5000 で NVK（50.1 fps） | desktop 60〜68 fps、scene-5000 49.9 fps（hardware の限界で NVK と同等） | p010・p011 cleared、p012 uncleared（限界） |
-| p024 | NVIDIA RTX 2070 | NVK 並み（big-1000 136.2、subs-1000 75.4） | big-1000 108〜112、subs-1000 約 20（zero copy の後） | in-progress（P3） |
+| p024 | NVIDIA RTX 2070 | NVK 並み（big-1000 136.2、subs-1000 75.4） | big-1000 113、subs-1000 28.7〜29.4（main fd71209de、submit の MMIO を減らす・その場の受け付け・texture の語の cache）。次は submit の ioctl をまとめる（job-submit A・B） | in-progress（P3） |
 | p023 | NVIDIA RTX 2070 | 共有の image の画素の並び（block-linear）で pass ごとの copy を無くす | subs-1000 10.9 → 21 fps、subs-100 103 → 203、画素の差 0（main b30707d0a） | in-progress（残り: scenes、block-linear の画面出しの目視） |
 | p013・p014 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
 | p020 | PowerVR（VF2） | qs40 × 13・1920x1080・direct scanout で 50 fps（RTX のカタログの FP32 の比） | 45.8 fps（direct、main に merge 62eeb340e） | in-progress（P2） |
