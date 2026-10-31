@@ -685,9 +685,9 @@ Origin: 2026-10-27 ユーザーの指示。
   | --- | --- | --- | --- |
   | dev119 | 基準（i09） | 2,922（84.16%） | 283 / 177 / 84 / 6 |
   | dev120（7926433cb） | shadow DOM 段階 1・CSS nesting | 2,936 | 277 / 177 / 76 / 6 |
-  | dev121（358c0a770） | position-try の tree scope・ShadowRoot.styleSheets・constructable stylesheet・grid/flex の baseline の grid container | 2,950 | 262 / 179 / 75 / 6 |
-  | dev122（f3f5d6a の後、@container・縦書き central baseline の修正を含む） | 後退 4（baseline-synthesis・grid-baseline-004）を直した後 | 2,956 | 259 / 176 / 75 / 6 |
-  | dev123（46ba00f44 の前の source） | table の row baseline、fieldset・overflow の縦書き baseline、module の top-level await | 2,971（85.57%） | 249 / 176 / 74 / 2 |
+  | dev121（77be12b84） | position-try の tree scope・ShadowRoot.styleSheets・constructable stylesheet・grid/flex の baseline の grid container | 2,950 | 262 / 179 / 75 / 6 |
+  | dev122（099b799c8） | @container、縦書き central baseline（後退 4 を直した後） | 2,956 | 259 / 176 / 75 / 6 |
+  | dev123（5f54b8c82） | table の row baseline、fieldset・overflow の縦書き baseline、module の top-level await | 2,971（85.57%） | 249 / 176 / 74 / 2 |
   | dev124（46ba00f44） | link・@import の implicit @scope の owner（件数は変わらず） | 2,971（85.57%、gap 501） | 249 / 176 / 74 / 2 |
 
   dev119 から +49、後退 0（毎回 dev119 と直前の測定の両方と比べた）。host build は `-Wall -Wextra -Werror` で warning 0。
