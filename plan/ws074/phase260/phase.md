@@ -881,6 +881,8 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev144（993c5515a） | `<style>` の @import の load event、window.open の `_self` | 3,101 | 174 / 129 / 66 / 2（後退 0） |
   | dev145（c3ccd9174） | flex item の cross の auto margin（stretch しない・used の値を報告） | 3,103（89.37%） | 174 / 127 / 65 / 2（後退 0） |
   | dev146（e6c916a1a） | @scope の中の ::before・::after | 3,104 | 174 / 127 / 65 / 2（後退 0） |
+  | dev147（f8abba444） | table の row group・row・column の writing-mode、縦書きの table の横書きの cell | 3,105 | 174 / 125 / 65 / 2（後退 1: block-flow-direction-slr-058、次で直した） |
+  | dev148（7c60c1b0e、最終） | 上の後退の修正（cell の向きの強制を横書きの cell の縦書きの table だけに）、text-shadow の calc() | 3,107（89.49%、gap 365） | 174 / 124 / 65 / 2（後退 0） |
 
 - 直した物（source は userland/desktop/libbrowser/）:
   1. `shape-outside`・`shape-margin`・`shape-image-threshold`（css/values.c の parse、css/cascade.c、新しい layout/shape.c、layout/float.c、layout/inline.c）。css-shapes の 16 ID（全て縦書き）が通った。
@@ -898,4 +900,17 @@ Origin: 2026-10-27 ユーザーの指示。
   5. table の row group・row・column の writing-mode は table のもの（縦書きの table では direction も）。向きが違う cell は table の向きにそろえる（css/cascade.c）。
      table-progression-slr-001・srl-001。cell の向きが違う場合の本来の layout（orthogonal な cell）は未実装。
   6. `getComputedStyle` の margin: flex item の cross の auto margin の used 値（layout/flex.c）。auto margin のある item は stretch しない（`flex_align_of`）。flexbox/auto-margins-001・flexbox-align-self-horiz-005。
+  7. text-shadow・box-shadow の長さに calc()・min()・max()・clamp()（css/values.c `values_one_shadow`）。css-viewport/zoom/text-shadow（ref が `calc(5px * var(--scale))`）。
+- 結果（最終）: 3,107 / 3,472（89.49%）、dev140 から +39、後退 0。host build は `-Wall -Wextra -Werror` で warning 0。
+  Acid は最終の source（7c60c1b0e）で Acid2 100.00%、Acid3 100/100・pixel 差 0（exact match）（/tmp/p8out/acid148）。
+- 調べて直さなかった物（次の候補）:
+  - grid の track の上限 CSS_TRACKS = 24: `repeat(100, ...)`・`repeat(973, 1fr)` が使えない（flex-tracks-with-fractional-size、subgrid/parent-repeat-auto-fit-001・002、repeat-auto-fill-006、grid-limits-001 に効く）。
+    css_style が 24 本の配列を 4 つ持つので、track を arena の配列への pointer にする作りの変更が要る。
+  - `<col>`・`<colgroup>` の background（box が無く、table の列に描いていない。table-progression-slr-002・srl-002、table-column-order-slr-007・srl-006 の 4 ID）。
+  - 縦書きの inline box（span）の background・border が描かれない（paint/list.c は `vertical_inline` の line の decoration を飛ばす）。grid-self-baseline-vertical-* と horiz-004〜007 の ref が頼っている（約 16 ID）。
+  - 向きの違う table cell（横書きの table の中の縦書きの cell は動くが、縦書きの table の中の横書きの cell は table の向きにそろえた近似）。line-box-direction-slr-056 などの `display: table-cell; writing-mode: sideways-lr`（height が行の長さ）。
+  - Navigation API の残り（約 46 ID）: iframe の initial about:blank の load event が非同期（navigate-from-initial-about-blank*）、`window.length`・`window[n]`・名前付きの access が無い、srcdoc・javascript: URL・about:blank への移動の entry。
+  - HTMLAnchorElement の relList、window.open が開く別の window、scroll・scrollend の event。
+- 一時物（Q1 が消す）: 一覧は build/tmp/p8/delete-list-i14.txt（1 行 1 path、/tmp/p8out の dev141〜dev147 と、worktree p8-ws074 の build/tmp/p8/ の作業 file、build/ws074-suites/wpt/zz-debug、Acid の runner の一時 html）。/tmp/p8out には dev148・acid148 を残す。
+- 注意: 一度 `pkill -f "host-build.sh plain"` を使い、自分の shell を巻き込んで終了した（他の担当の build は止まっていないと見た）。以後は pid を指定した。
 - 道具: plan/ws074/phase260/tools/st1.sh（static の 1 ID を実行し、失敗の画像を build/tmp/p8/st1/ に残す）。
