@@ -2,7 +2,7 @@
 
 # ws336-p010: ssh-ttymodes・ssh-channel（端末の mode と connection protocol）
 
-Status: in-progress（2026-11-01 05:10 q1814、Sonnet）
+Status: in-progress（2026-11-01 05:10 q1814、Sonnet）。実装済み・試験 PASS（2026-11-01 06:1x、cleared は Q1 が決める）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p002
@@ -63,4 +63,62 @@ WS335 の待ち: 無し
 
 ## 結果
 
-（未着手）
+実施: 2026-11-01（host の `date`）。worktree `s-ws336-p010`、基点 main（p002 の merge 後を `git merge main` で取り込み）。実装済み・試験 PASS（cleared は Q1 が決める）。
+
+### 作った物
+
+- `userland/base/ssh/ssh-ttymodes.c`（opcode の表と速度の表は data。block ごとに「Values referenced:」）
+- `userland/base/ssh/ssh-channel.c`（channel の表、window、open・data・EOF・CLOSE、channel request、global request。request 名の表も data）
+- `plan/ws336/tests/unit/test-ttymodes.c`（20682 checks）、`plan/ws336/tests/unit/test-channel.c`（1603651 checks。うち約 160 万は乱数の payload）
+
+### 実行した command と最後の行
+
+- `sh plan/ws336/tests/run-unit.sh ttymodes channel`: `test-channel: PASS (1603651 checks)`、`test-ttymodes: PASS (20682 checks)`、`run-unit: PASS`
+- `sh plan/ws336/tests/run-unit.sh all`: `test-buf: PASS (323 checks)`、`test-channel: PASS (1603651 checks)`、`test-common: PASS (2316 checks)`、`test-tools: PASS (13 checks)`、`test-ttymodes: PASS (20682 checks)`、`run-unit: PASS`
+- `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh`: `check-skeleton: PASS`
+- `git diff --check`: 出力なし（成功）
+- run-unit.sh の設定（`-std=c89 -O1 -Wall -Wextra -Werror`、ASan・UBSan、leak 検出あり）。cc と clang の警告 0 は check-skeleton の中で確認。
+
+### 試験の期待値の出所
+
+opcode の番号は RFC 4254 §8 の表と RFC 8160 §3（IUTF8 = 42）。message の bytes は RFC 4254 §4・§5・§6・§9 と OpenSSH の PROTOCOL §2.1・§2.2 から `wire.h` で組み、module の出力と比べた。window の値は注釈の手計算（2097152 - 6 など、半分 1048576 の境界、2^32 - 1 の境界）。ttymodes は読み返しに試験の中の別の解析器を使い、flag と文字の値は host の `<termios.h>` の名前。他の実装の出力は使っていない。
+
+### 壊して確かめた物（git の外、元に戻して `cmp` で一致を確認）
+
+31 通り（channel 21、ttymodes 10）: window の比較（`>` を `>=`）、2^32 - 1 の比較、半分の境界、EOF 後の data の確認を外す、confirmation の欄の入れ替え、packet 0 の確認を外す、closed の close_received の確認を外す、send_room の min を max、名前の切り詰め、文字列の上限 +1、CLOSE の二重の確認を外す、no-more-sessions の印、window-change の列と行の入れ替え、exec の上限、data の packet の上限、open failure で slot を戻さない、send と receive の window の引き算を外す、extended の type 0、no_more_sessions の判定、recipient の範囲の確認を外す（`% SSH_CHANNEL_MAX`）、opcode 160 の境界、引数の切れを無視、1024 の境界、IUTF8 の番号、255 の判定、速度の表の値、apply の結果を書き戻さない、flag の反転、表の先頭の行を飛ばす。
+見逃し 2 件: (1) recipient の範囲の確認を外す変異（`recipient % SSH_CHANNEL_MAX`）は、待ち状態の slot に折り返す入力が無く通った。試験を足し（待ち状態の slot 2 に対し recipient 12）、FAIL することを確かめた。(2) 速度で `cfsetispeed` と `cfsetospeed` を入れ替える変異は host で通る。host の glibc は入力速度と出力速度を同じ `c_cflag` の欄に持つので、2 つを別の値にできず区別できない（試験では入力と出力を個別に設定して確認しているが、この host では差が出ない）。別の速度を持てる系（zedBSD の libc）では効く。
+最終の実装は変異の script が `cmp` で元と一致することを確認済み。
+
+### 計画（phase.md の「試験の項目」）と header の食い違い
+
+- 試験の項目の「長さの上限 +1 で EINVAL」は、header の説明（上限を超える文字列を持つ既知の request は SSH_CREQ_OTHER で 0 を返し、EINVAL は枠の切れだけ）と食い違う。header に従い、上限 +1 は SSH_CREQ_OTHER で試験した（同じ項目の後ろの「上限 +1 の env の値 ... SSH_CREQ_OTHER」とは整合する）。
+- `ssh_channel_global_request` の header は先頭で「no-more-sessions は honour する」と言い、関数の注釈は「every global request is refused」で want_reply なら REQUEST_FAILURE と言う。honour した要求に FAILURE を返すと矛盾するので、**want_reply が TRUE の no-more-sessions だけ REQUEST_SUCCESS を返し、他は REQUEST_FAILURE** にした（OpenSSH は want_reply FALSE で送るので通常は返事が要らない）。Q1 の判断が要る点。
+
+### header が黙っていて自分で決めた点
+
+ttymodes:
+1. 表に無い（local の `<termios.h>` に名前が無い）opcode は `#ifdef` で表から外れ、`put` は書かず、`apply` は未知として引数ごと飛ばす。
+2. `put` の文字: c_cc の値が `_POSIX_VDISABLE`（無ければ 255）なら 255 を送る。`apply`: 引数の下位 8 bit が 255 なら `_POSIX_VDISABLE`、それ以外はその値。
+3. CS7（90）・CS8（91）は CSIZE の欄の値。`put` は欄がちょうどその値なら 1。`apply` は 0 以外でその欄を設定し、0 は何もしない（もう片方の opcode か既定が決める）。
+4. 速度: 表は B50 から B4000000 の標準の速度（B0 は含めない、B134 は 134.5 baud で bps に直せないので除く）。`put` は表に無い速度と B0 を書かない。`apply` は bps が表に無い値と 0 を無視する。`cfset*speed` の失敗も無視する（速度は変えない）。
+5. `apply` は terminal の複写の上で作業し、最後まで読めた時だけ書き戻す。size が 1024 を超える・NULL で size > 0・引数が途中で切れる場合は EINVAL で terminal は不変。opcode 0 と 160 以上はそこで読みを止める（残りは読まない）。
+6. `put` が使う buffer の limit に達した時は buffer の誤り（EMSGSIZE）に任せる。
+
+channel:
+7. payload は message 番号を含む（他の module の約束に合わせる）。番号が違えば EINVAL。枠の確認（EINVAL）を先に行い、状態の確認（EPROTO）はその後。誤りの時は何も変えない。
+8. `ssh_channel_find` は OPEN と CLOSING を返す。`recipient` が表の外なら NULL。
+9. 相手が告げた最大の packet を 32768（SSH_CHANNEL_PACKET）に切り詰めて `remote_packet` に保存する（accept_open と open_reply の両方）。window はそのまま。confirmation の packet が 0 は EPROTO。
+10. open の枠の後ろの型固有の data は読まない（session でも）。OPEN_FAILURE の説明は理由ごとの固定の文（"administratively prohibited"、"resource shortage"）で、language tag は空。理由は session 以外の型・no_more_sessions が 1、slot 無しが 4。session の packet 0 は型が session の時に EPROTO（no_more_sessions より先）。
+11. 受信の data: 拡張 data の type 0 は EPROTO（呼び出し側が 0 を「普通の data」の印にするため）。EOF 受信後・CLOSE 受信後の data は EPROTO。window を引くのは全部の確認の後。
+12. `ssh_channel_consumed`: size 0、状態が OPEN でない、window が半分（1048576）以上、output が既に誤りの時は何もしない。window が半分未満なら `SSH_CHANNEL_WINDOW - local_window` を送って window を満杯に戻す。output に書けなければ window を変えない。
+13. `ssh_channel_put_data`: EPIPE は EOF か CLOSE を送った後。OPEN でない channel は EINVAL。size 0 は room 内なら空の message を書く。output が書けなければ remote_window を引かない。data が NULL で size > 0 は EINVAL。
+14. `put_eof`・`put_close` は OPEN と CLOSING の channel だけに書く（OPENING・FREE は何もしない）。CLOSE の後の EOF も書かない。書けなかった時は印を立てない。`parse_end` で CLOSE を受けると状態は CLOSING になる。`ssh_channel_closed` は表の外の address と FREE を 0 で返し、`user` に触れない。slot を取る時に `user` を NULL にする。
+15. request: 既知の型の枠の後ろの余りの bytes は読まない。文字列が上限を超える、または NUL を含む（term・env の名前と値・subsystem・signal・exit-signal の名前）場合は SSH_CREQ_OTHER とし、name に request 名を入れる。request 名・global request の名前は 64 文字に切り、0x21〜0x7e でない byte を `?` に置き換える（log に出せる一行にするため）。比較は相手が送った名前の全体で行う（NUL で切れた名前は一致しない）。pty の modes は長さを制限しない（ttymodes の apply が 1024 で EINVAL にする）。
+16. `put_*` の request は OPEN か CLOSING の channel にだけ書ける。OPENING・FREE の channel では out に EINVAL を記録する（呼び出し側の誤り）。`put_reply` も同じ。長さの上限は put 側で確かめない（相手が OTHER として拒否する）。
+17. `ssh_channel_global_request`: 名前の切り詰めは上記。keepalive の want_reply TRUE は REQUEST_FAILURE、hostkeys-00@openssh.com は後ろの key blob を読まず、want_reply FALSE なら何も返さない。output が既に誤りなら、その誤りを返す。
+
+### 未実施
+
+- 実機・QEMU・host の OpenSSH との相互運用（この Phase の範囲外。p015 以降）。
+- clang での sanitizer 付きの単体試験（run-unit.sh は cc のみ。clang は check-skeleton の警告 0 だけ）。
+- zedBSD の libc の `<termios.h>` に対する ttymodes の表の確認（zedBSD の build は check-skeleton の 7 番目の確認で compile のみ。結果は上の `check-skeleton: PASS`）。
