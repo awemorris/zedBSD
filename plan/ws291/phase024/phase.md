@@ -389,3 +389,21 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   push buffer を組む。(b) の形か、executor の draw ごとの費用の削り: 16 draw で 3.3 µs、texture の handle と constants）、(2) GPU_COMMAND の残りの
   kernel の費用（要求と stream の copy 2 回、admission、GPU core の stream の写し）、(3) libvulkan の queue_attempt の user の時間（writer の組み立て、
   device の mutex）。big-1000 は client の encode（3.6 ms 対 NVK 3.2〜3.4）と submit の段の decode・executor（3.3 ms 対 NVK 0.03）。
+
+### 再開点の後の結果（2026-11-01 05:35〜06:45）
+
+- game mode の往復・画面・desktop（`plan/ws309/tests/rtx-p015.sh` PARTS='cycle scenes desk'、main = k-main ＋ lv6（build/p024/u-m3）と ac = i3a ＋ lv9
+  （build/p024/u-i3）、05:35〜05:51、build/tmp/p024i3-v1）: 往復は両腕とも direct=3 left=3 window=3、failed 0、refused 0。画面（keiland-shot、ac 対
+  main）: desktop・Notes・browser とも差は右上の時計の箱（x=1880..1894、y=17..27）だけ。desktop（frame-ops）: main launch 63・type 61・output 65・
+  drag 60・home 64・wiseview 60、ac 62・61・67・60・64・64 fps（後退なし）。起動の dmesg の `vram-window bar1 before the tables` の行は前から。戻し:
+  14 file と NVMe の kernel の cksum 一致、bl 行 0、Debian（4 function vfio-pci）。
+- QEMU の Venus の回帰: 延期（host の I/O、前に PASS した image も同じに落ちる）。forge の image は build/p024/forge3 にこの tree から作った（OK）。
+  1 回目と 3 回目は venus-reg の start の `timeout 300` が image の写し（2.4 GB）の途中で切った。2 回目は起動したが host の renderer の link
+  （build/ws035-sq-venus）が worktree に無く、compositor が device を作れなかった（link を作り直した）。`venus-reg.sh` に START_TIMEOUT（既定 300）を足し、
+  4 回目（1200）は guest が起動しても SSH が 240 s 答えない。手で起動した forge3（この tree）と forge2（i2 の tree、i02 で venus-reg PASS の image）の
+  両方が 800 s 答えず、QMP の `info registers -a` で 4 vCPU とも sched_idle で HLT、qemu.log は Slirp の送りの失敗と host の renderer の
+  「Unable to get a valid memory fd」。host は約 8 つの担当の build と image の写しで load 15〜18、I/O 待ちの task が多い（Q1 の確かめ）。
+  libvulkan の (c) は Venus の道を通らない: `GPU_CAP_JOB_SUBMIT` は gpu.c が backend の job の表に `command` がある時だけ立て、venus.c の表の
+  `command` は NULL なので、Venus の context では `queue_unfenced` が常に偽で、今までどおり私用の fence の job の 3 本の道。(a) の kernel の copy の
+  道は forkrace の amd64・rpi4 で確かめた。host が静かになったら `START_TIMEOUT=1200 sh plan/ws291/tests/venus-reg.sh OUT build/p024/forge3/hdd-image.img
+  build/p024/forge3/dynamic/libvulkan.so` を流す（Q1 が知らせる）。
