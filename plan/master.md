@@ -113,7 +113,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-385 · q1809 · WS337 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-385 · q1810 · WS337 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -162,7 +162,7 @@ BUG-385 · q1809 · WS337 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS333](ws333/ws.md) | MG004 | /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）。WS301・WS303 を統合（2026-10-31 ユーザー） | incomplete（p001 設計済み・問い Q333-1〜7 は推しで進める、p002・p003 は main、p006 は回帰の確かめ中） | p001 統一の設計（P5）、p002 amd64 の idle の MWAIT（P1） |
 | [WS334](ws334/ws.md) | MG006 | libbrowser の Web ブラウザ OmniGrammaton を Windows に移植（libkeiland の Win32 の実装、.exe）（2026-10-31 ユーザー） | incomplete | 設計 p002〜p004 cleared、実装の第 1 群（p005・p009・p010・p013・p020） |
 | [WS335](ws335/ws.md) | MG002 | libssl-compat・libcrypto-compat: OpenSSL の libssl・libcrypto と互換の自前の TLS と暗号の library（libbrowser と自前の ssh が使う部分、標準廉価実装手順）（2026-11-01 ユーザー） | planning | p001 設計（P6 q1789） |
-| [WS336](ws336/ws.md) | MG005 | 自前の sshd・ssh（OpenSSH と互換の protocol、ed25519 と鍵の交換 1 つ、WS335 の暗号の口を使う、標準廉価実装手順）（2026-11-01 ユーザー） | planning | p001 設計（P5 q1791） |
+| [WS336](ws336/ws.md) | MG005 | 自前の sshd・ssh（OpenSSH と互換の protocol、ed25519 と鍵の交換 1 つ、WS335 の暗号の口を使う、標準廉価実装手順）（2026-11-01 ユーザー） | planning | incomplete（p001 設計 cleared、p002 から実装） |
 | [WS302](ws302/ws.md) | MG006 | デスクトップスレッドバランサ DTB（CONFIG_DTB、sched への hint）（2026-10-27 ユーザー） | planning | p001 設計済み（main 896d3e3db、問い Q302-1〜7 待ち）。実装は約 22 LW、WS333 p011・p013 に依る |
 | [WS304](ws304/ws.md) | MG003 | Raspberry Pi 5 の外の PCIe（pcie1、M.2）と NVMe（2026-10-27 ユーザー、実機の試験はまだ） | incomplete | p001・p002 cleared（e616b4128、host 試験・build のみ）、p003 の実機は新しい SwitchBot の後、HAT の型番をユーザーに確認 |
 | [WS305](ws305/ws.md) | MG006 | デスクトップの GPU の passthrough の試験環境（Linux＋VFIO＋QEMU、素の起動と使い分け）（2026-10-27 ユーザー） | incomplete（再開待ち） | P4 はラップアップ（2026-10-27）。script と guest の image は用意済み、host（10.0.10.3）では未着手。再開は ws.md の「状態と再開点」 |

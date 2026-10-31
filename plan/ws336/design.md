@@ -31,7 +31,7 @@
 | draft-ietf-sshm-chacha20-poly1305-04 | draft-ietf-sshm-chacha20-poly1305-04.txt | a8aa91696db885d2 | §3〜7 の cipher、Appendix A の完全な例（p004 の既知の答えの試験） |
 | draft-ietf-sshm-strict-kex-02（と -miller-…-01） | draft-ietf-sshm-strict-kex-02.txt | c08126dcaaf63958 | §3 strict KEX |
 | draft-ietf-sshm-ssh-agent-16 | draft-ietf-sshm-ssh-agent-16.txt | 2b83bc2029cce5d6 | §3.2.3 Ed25519 の秘密鍵の符号（鍵の file が使う） |
-| draft-ietf-secsh-filexfer-02（SFTP v3） | draft-ietf-secsh-filexfer-02.txt | 3f69664d8050a28a | sftp-server（Q3 次第） |
+| draft-ietf-secsh-filexfer-02（SFTP v3） | draft-ietf-secsh-filexfer-02.txt | 3f69664d8050a28a | sftp-server（Q3 の A） |
 | FIPS 203 ML-KEM | fips203.pdf（56 頁） | fe1f12f32a7e44ec | §7.2 の ek の検査（実装は WS335） |
 | OpenSSH 10.5p1 PROTOCOL・PROTOCOL.key・PROTOCOL.agent・PROTOCOL.mux | openssh-10.5p1-PROTOCOL* | （SHA256SUMS） | 拡張の一覧、鍵の file の形 |
 | OpenSSH 10.5p1 sshd.8・ssh.1・sshd_config.5・ssh_config.5・ssh-keygen.1・scp.1 | openssh-10.5p1-*.{1,5,8} | （SHA256SUMS） | authorized_keys・known_hosts の形、設定の keyword |
@@ -113,7 +113,7 @@ host の道具: `ssh -V` = OpenSSH_10.0p2 Debian（OpenSSL 3.5.6）。host の O
 ### 4.1 protocol
 
 - transport（RFC 4253）: 識別の行 §4.2（自分は `SSH-2.0-zedBSD_1.0`、相手は `SSH-2.0-` か `SSH-1.99-`、client は前置きの行を 64 行・16 KiB まで飛ばす）、packet §6（受ける上限 256 KiB）、KEX §7（D1・D3・D4）、re-key §9（1 GiB・2^28 packet・1 時間。相手からの re-key にいつでも応じる）、汎用の message §11（DISCONNECT・IGNORE・UNIMPLEMENTED・DEBUG）。
-- 認証（RFC 4252）: `none`（方法を知るため。server は常に失敗）、`publickey`（ssh-ed25519、query と署名付き）、`password`（Q1 次第。変更の要求は断る）。`keyboard-interactive`・`hostbased`・GSSAPI は無し。
+- 認証（RFC 4252）: `none`（方法を知るため。server は常に失敗）、`publickey`（ssh-ed25519、query と署名付き）、`password`（Q1 の A。変更の要求は断る）。`keyboard-interactive`・`hostbased`・GSSAPI は無し。
 - connection（RFC 4254）: `session` の channel（1 接続に最大 10、ControlMaster のため）、`pty-req`・`env`（server は `LANG`・`LC_*`・`TERM` だけを受ける）・`shell`・`exec`・`subsystem`（`sftp` だけ）・`window-change`・`signal`（受けて子に送る）・`exit-status`・`exit-signal`・EOF・CLOSE・window の調整、`eow@openssh.com`（受けて無視）、`no-more-sessions@openssh.com`（守る）、`keepalive@openssh.com`（global request はすべて失敗で返す。OpenSSH の ServerAlive・ClientAlive はこれで動く）。
 - 範囲の外: port の転送（`direct-tcpip`・`tcpip-forward`、Q2）、X11、agent と agent の転送（Q4）、`tun@openssh.com`、streamlocal、証明書の鍵、`hostkeys-00@openssh.com`（受けたら want_reply が無いので捨てる）、圧縮、GSSAPI、`ssh -J`・ProxyCommand。
 
@@ -124,8 +124,8 @@ host の道具: `ssh -V` = OpenSSH_10.0p2 Debian（OpenSSL 3.5.6）。host の O
 | sshd | `/usr/sbin/sshd` | `-D`（前で動く、service が使う）・`-f config`・`-p port`・`-t`（設定の確かめ）・`-d`（1 接続だけ、log を stderr）。root で privsep、root でなければ自分の user だけ（試験用、§6.4）。syslog `LOG_AUTH` に OpenSSH と同じ形の行（`Accepted publickey for user from A port N ssh2: ED25519 SHA256:…`、`Failed password for …`） |
 | ssh | `/usr/bin/ssh` | `[user@]host [command]`・`-p`・`-l`・`-i`・`-o`・`-F`・`-t`/`-tt`/`-T`・`-n`・`-q`・`-v`・`-N`（command 無し）・`~.`（切る）。known_hosts（`~/.ssh/known_hosts`・`/etc/ssh/ssh_known_hosts`）、StrictHostKeyChecking（ask・yes・no・accept-new）、BatchMode、ConnectTimeout、ServerAliveInterval。終了の値は相手の exit-status（signal で終われば 255、接続の失敗も 255、OpenSSH と同じ） |
 | ssh-keygen | `/usr/bin/ssh-keygen` | `-t ed25519`（他は断る）・`-f`・`-N ''`（空だけ、D11）・`-C`・`-q`・`-l`（指紋）・`-y`（秘密鍵から公開鍵）・`-A`（host key が無ければ ed25519 を作る）・`-R host`（known_hosts から消す、旧 file を `.old` に残す） |
-| sftp-server | `/usr/libexec/sftp-server` | SFTP v3（Q3 次第）。stdin・stdout で話す、user の権限 |
-| scp（旧の受け手） | `/usr/bin/scp` | Q3 で「入れる」の時だけ。`scp -t`（受ける）・`scp -f`（送る）・`-r`・`-p` の受け手 |
+| sftp-server | `/usr/libexec/sftp-server` | SFTP v3（Q3 の A）。stdin・stdout で話す、user の権限 |
+| scp（旧の受け手） | `/usr/bin/scp` | 作らない（Q3 は A、2026-11-01）。後で作る時は ws.md の未実装の表の T5 |
 
 zedBSD の側の scp・sftp の client（zedBSD から外へ送る）は範囲の外（Q3 の補い）。
 
@@ -213,6 +213,7 @@ monitor の守り（ssh-privsep.h の冒頭に全部）:
 - Ed25519 は全部実装（署名・確かめ・raw の鍵）。`aes256-gcm@openssh.com` 用の AES-GCM の EVP は、ユーザーが選ばない限り足さない。
 - ssh-crypto.c が使う関数の一覧は ssh-crypto.h の冒頭（RAND_bytes、OPENSSL_cleanse、CRYPTO_memcmp、EVP_MD_CTX_new/free、EVP_DigestInit_ex/Update/Final_ex、EVP_sha256、EVP_PKEY_new_raw_private_key、EVP_PKEY_new_raw_public_key、EVP_PKEY_new_raw_public_key_ex、EVP_PKEY_get_raw_public_key、EVP_PKEY_free、EVP_DigestSignInit、EVP_DigestSign、EVP_DigestVerifyInit、EVP_DigestVerify、EVP_PKEY_CTX_new、EVP_PKEY_CTX_new_from_name、EVP_PKEY_CTX_new_from_pkey、EVP_PKEY_CTX_free、EVP_PKEY_keygen_init、EVP_PKEY_keygen、EVP_PKEY_derive_init、EVP_PKEY_derive_set_peer、EVP_PKEY_derive、EVP_PKEY_encapsulate_init、EVP_PKEY_encapsulate、EVP_PKEY_decapsulate_init、EVP_PKEY_decapsulate、EVP_CIPHER_CTX_new/free、EVP_CipherInit_ex、EVP_CipherUpdate、EVP_chacha20、EVP_MAC_fetch、EVP_MAC_free、EVP_MAC_CTX_new/free、EVP_MAC_init、EVP_MAC_update、EVP_MAC_final）。`crypto-contract.c` は加えて `EVP_Digest`（1 回で）を確かめる。
   **確かめ済み（2026-11-01、P6 の答えを Q1 が中継）**: 上の一覧は全部 WS335 の `compat/crypto/evp.h`・`crypto.h` に OpenSSL 3.5 の signature で宣言され、意味（POLY1305 の鍵の入れ直し、X25519 の全 0 の拒否、Ed25519 の DigestSign・DigestVerify、1 回の EVP_Digest）は evp.h の comment に書かれている。`crypto-contract.c` は P6 の compat の header と骨格に対して `-std=c89 -Wall -Wextra -Werror` で警告 0 で compile・link できた（実行は骨格が ENOSYS を返すので未だ FAIL、想定どおり）。P6 は `crypto-contract.sh`（`SSH_CRYPTO_INCLUDE`・`SSH_CRYPTO_LIB`）を WS335 の実装の Phase p023・p024 の受け入れに入れる。
+- **WS335 の Windows の決定（2026-11-01、Windows では libcrypto-compat を static に link する）の影響**: 無い。WS336 は zedBSD の program だけで、zedBSD では `libcrypto-compat.so` を link する（上の 1 つ目、WS335 D1 の zedBSD の形は変わっていない）。Windows の static の `.a` は WS336 の build に入らない。関係が出るのは未実装の T30（pre-auth の `sandbox_spawn`）で、そこで要るのは zedBSD 向けの static の library で、Windows 向けの物とは別（ws.md の未実装の表）。
 - 照合の方法: WS335 の header が main に入ったら `check-skeleton.sh` の 4 番目（ssh-crypto.c を libcrypto-compat の header だけで compile）が自動で働く。libcrypto-compat の実装が入ったら `SSH_CRYPTO_INCLUDE=… SSH_CRYPTO_LIB=… sh plan/ws336/tests/crypto-contract.sh` が libcrypto-compat の受け入れ（ssh が呼ぶ分）になる。
 
 ## 8. 安全
@@ -246,10 +247,10 @@ monitor の守り（ssh-privsep.h の冒頭に全部）:
 ## 10. 置き場所・build・OpenSSH との入れ替え
 
 - source: `userland/base/ssh/`（header 16 本・.c 23 本）。試験の道具: `plan/ws336/tests/`。
-- package（p021 で置く）: `userland/base/ssh/Makefile` に 4 つ（ssh・sshd・ssh-keygen・sftp-server、Q3 で scp を足すなら 5 つ）。**移行の間は menu を `tests`**（installer の image に入らない、既定 n）にして OpenSSH と並べない。link の規則は `platform/common/userland-dynamic.mk` に passkey-fido2（:569〜588）と同じ形で `libcrypto-compat.so` と `libc.so`（sshd は加えて login/verify.c の source と crypt）。base の program は arch で有無を分けない（Guardrail の 2026-10-19）ので、libcrypto-compat が全 arch で build できることが前提（WS335 の担当）。
+- package（p021 で置く）: `userland/base/ssh/Makefile` に 4 つ（ssh・sshd・ssh-keygen・sftp-server。Q3 は A なので scp は無し）。**移行の間は menu を `tests`**（installer の image に入らない、既定 n）にして OpenSSH と並べない。link の規則は `platform/common/userland-dynamic.mk` に passkey-fido2（:569〜588）と同じ形で `libcrypto-compat.so` と `libc.so`（sshd は加えて login/verify.c の source と crypt）。base の program は arch で有無を分けない（Guardrail の 2026-10-19）ので、libcrypto-compat が全 arch で build できることが前提（WS335 の担当）。
 - 同じ path を OpenSSH と取り合う（`/usr/bin/ssh`・`/usr/sbin/sshd`・`/etc/service.d/sshd`・`/usr/libexec/sftp-server`）ので、1 つの image にはどちらか一方。p022 の試験の config（`plan/ws336/tests/config-amd64-ssh.mk`）は openssh を外して自前を入れる。
 - 自前の package の file: `files/sshd_config`（HostKey は ed25519 だけ、`PermitRootLogin yes`・`PasswordAuthentication yes` は今の image と同じ、`Subsystem sftp /usr/libexec/sftp-server`）、`files/sshd-start`（ed25519 だけ `ssh-keygen -A`、`sshd -t` で確かめてから exec）、`files/sshd.service`（今と同じ）、`ssh_config`（今と同じ 1 行。`VerifyHostKeyDNS` は「受けて無視」の一覧に入れる）。
-- 入れ替え（p024、時期は Q6）: 既定の config（amd64・rpi4・rpi5・odroid-c5・zybo・visionfive2-keiland。amd64-server はユーザーの物なので Q1 が扱う）の `openssh` を自前の 4 つに替え、`openssl` が他に要らなければ外す。自前の package を menu `base`・既定 y に移す。OpenSSH の package は tree に残し選べるままにする（消すのは別の判断）。guest.py の `HOST_KEY_KINDS` は ed25519 だけで足りる（rsa・ecdsa を入れても害は無い）。`scp -O` の 4 本は Q3 の答えで直す。
+- 入れ替え（p024、時期は Q6 の A: p022 が通ったら）: 既定の config（amd64・rpi4・rpi5・odroid-c5・zybo・visionfive2-keiland。amd64-server はユーザーの物なので Q1 が扱う）の `openssh` を自前の 4 つに替え、`openssl` が他に要らなければ外す。自前の package を menu `base`・既定 y に移す。OpenSSH の package は tree に残し選べるままにする（消すのは別の判断）。guest.py の `HOST_KEY_KINDS` は ed25519 だけで足りる（rsa・ecdsa を入れても害は無い）。`scp -O` の 4 本は Q3 の A で `-O` を外す。
 
 ## 11. 試験の計画
 
@@ -286,7 +287,7 @@ host の OpenSSL 3.5.6 で 108 checks PASS（2026-11-01）。libcrypto-compat �
 
 ## 12. 実装の Phase の表
 
-「WS335 header」= WS335 の libcrypto-compat の header の凍結（main に merge）を待つ。「WS335 実装」= libcrypto-compat の該当の部分（ML-KEM・SHA-3・Ed25519・X25519・ChaCha20・Poly1305・SHA-256・RAND）が実装され、zedBSD の build に入ってから。他の Phase は module の依存だけを待つ（host の OpenSSL で試すので WS335 の実装は待たない）。
+「WS335 header」= WS335 の libcrypto-compat の header の凍結（main に merge）を待つ。「WS335 実装」= libcrypto-compat の該当の部分（ML-KEM・SHA-3・Ed25519・X25519・ChaCha20・Poly1305・SHA-256・RAND）が実装され、zedBSD の build に入ってから。（2026-11-01 の確かめ: zedBSD の build の規則と登録は WS335 の p033（TLS の全部の後）にある。分けるかは ws.md の Resume point の案 A・B、Q1・P6 が決める）他の Phase は module の依存だけを待つ（host の OpenSSL で試すので WS335 の実装は待たない）。
 
 | Phase | module・内容 | 担当（推し） | 依存 | WS335 の待ち |
 | --- | --- | --- | --- | --- |
@@ -301,21 +302,21 @@ host の OpenSSL 3.5.6 で 108 checks PASS（2026-11-01）。libcrypto-compat �
 | [p010](phase010/phase.md) | ssh-ttymodes・ssh-channel | Sonnet | p002 | — |
 | [p011](phase011/phase.md) | ssh-config | Sonnet | p006 | （p003 経由） |
 | [p012](phase012/phase.md) | ssh-privsep（frame） | Sonnet | p002 | — |
-| [p013](phase013/phase.md) | ssh-sftp（Q3 で sftp を入れる時だけ） | Sonnet | p002 | — |
+| [p013](phase013/phase.md) | ssh-sftp（Q3 の A） | Sonnet | p002 | — |
 | [p014](phase014/phase.md) | ssh-keygen の program | Sonnet | p006 | （p003 経由） |
 | [p015](phase015/phase.md) | ssh の program、`build-host.sh`、`interop-host.sh`（相手 A） | Opus | p006・p008・p009・p010・p011 | （p003 経由） |
 | [p016](phase016/phase.md) | sshd の monitor と login の確かめ、`test-monitor.c` | Opus | p009・p011・p012・p014 | （p003 経由） |
 | [p017](phase017/phase.md) | sshd の pre-auth と session の process、`sshd-pair-host.sh` | Opus | p008・p010・p016 | （p003 経由） |
 | [p018](phase018/phase.md) | sshd の listener（MaxStartups）、`interop-host.sh`（相手 B と自前どうし） | Opus | p015・p017 | （p003 経由） |
-| [p019](phase019/phase.md) | sftp-server の program（と Q3 次第で旧の scp の受け手） | Sonnet | p013・p018 | — |
-| [p020](phase020/phase.md) | 敵対的な入力と privsep の見直し（fuzz の harness、時間の差、descriptor の漏れ） | Opus | p018・p019（Q3 が C なら p018） | — |
+| [p019](phase019/phase.md) | sftp-server の program（Q3 の A、旧の scp の受け手は作らない） | Sonnet | p013・p018 | — |
+| [p020](phase020/phase.md) | 敵対的な入力と privsep の見直し（fuzz の harness、時間の差、descriptor の漏れ） | Opus | p018・p019 | — |
 | [p021](phase021/phase.md) | package と amd64 の build、libcrypto-compat での crypto-contract・単体・相互運用 | Opus | p020 | **WS335 実装** |
 | [p022](phase022/phase.md) | QEMU の相互運用（root の sshd と privsep） | Opus | p021 | **WS335 実装** |
 | [p023](phase023/phase.md) | 他の arch の build | Sonnet | p021 | **WS335 実装** |
-| [p024](phase024/phase.md) | OpenSSH からの入れ替え（既定の config・道具の `scp -O`）、実機の試験の一覧 | Opus | p022・p023、Q6 の答え | **WS335 実装** |
+| [p024](phase024/phase.md) | OpenSSH からの入れ替え（既定の config・道具の `scp -O` を外す）、実機の試験の一覧 | Opus | p022・p023（Q6 の A） | **WS335 実装** |
 | [p025](phase025/phase.md) | 規約の全文の見直し（header の持ち越しの直しも） | conformance-reviewer | p024 | — |
 
-並べて起動できる組（p001 の merge の後）: p002 → {p003（WS335 header の後）、p010、p012、p013} → {p004、p005} → {p006、p007、p009} → {p008、p011、p014} → {p015、p016} → p017 → p018 → p019 → p020 → p021 → {p022、p023} → p024 → p025。
+並べて起動できる組（p001 の merge の後）: p002 → {p003（WS335 header の後。2026-11-01 に基点 60760d2a0 が main に入り、待ちは解けた）、p010、p012、p013} → {p004、p005} → {p006、p007、p009} → {p008、p011、p014} → {p015、p016} → p017 → p018 → p019 → p020 → p021 → {p022、p023} → p024 → p025。
 
 ## 13. 標準廉価実装手順 §4 の照合
 
@@ -337,6 +338,8 @@ HAL・kernel・driver の変更は無い。sshd が使う kernel の口（chroot
 ## 15. ユーザーへの問い
 
 [user-questions.md](user-questions.md)（Q1〜Q9。password 認証、port の転送、scp・sftp、agent、権限の分離の深さ、OpenSSH からの入れ替えの時期、鍵の交換の 1 つの確かめ、cipher、鍵の passphrase）。
+
+**2026-11-01 全部が推しの案に決まった**（ws.md のユーザーの決定）。この文書の推しの案（D1〜D16、§4・§6・§10・§12）はそのままで、header・試験の道具は変えない（基点 d4ab182d2 のまま。WS335 の header が main に入った後の `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh` は 4 番目の照合（ssh-crypto.c を libcrypto-compat の header だけで compile）を含めて PASS、2026-11-01 04:4x）。範囲の外とした物は ws.md の「未実装（後で実装する物）」の T1〜T31。
 
 ## 16. design-reviewer（2026-11-01）
 
