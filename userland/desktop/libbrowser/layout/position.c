@@ -897,6 +897,12 @@ position_place_once(
 	layout_unit area_height;
 	layout_unit saved_height;
 	struct css_length saved_style_height;
+	struct css_length saved_box_width;
+	struct css_length saved_box_min_width;
+	struct css_length saved_box_min_height;
+	layout_unit frame_width;
+	layout_unit frame_height;
+	int width_converted;
 	int saved_sizing;
 	int saved_width_sizing;
 	struct css_length saved_width;
@@ -1017,6 +1023,7 @@ position_place_once(
 	/* A flex or grid container of an auto height between a top and a bottom lays its items out in that definite height. */
 	saved_style_height = box->style.height;
 	saved_sizing = box->style.box_sizing;
+	width_converted = 0;
 	if (box->style.height.unit == CSS_UNIT_AUTO && has_top && has_bottom &&
 	    (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
 	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID)) {
@@ -1028,11 +1035,29 @@ position_place_once(
 		box->style.height.unit = CSS_UNIT_PX;
 		box->style.height.value = layout_to_px(height);
 		box->style.height.offset = 0;
+
+		/* The box now sizes its content: a border-box width is the content width less the frame. */
+		if (saved_sizing == CSS_BOX_SIZING_BORDER) {
+			frame_width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+			frame_height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+			saved_box_width = box->style.width;
+			saved_box_min_width = box->style.min_width;
+			saved_box_min_height = box->style.min_height;
+			width_converted = 1;
+			if (box->style.width.unit == CSS_UNIT_PX)
+				box->style.width.value -= layout_to_px(frame_width);
+			if (box->style.width.unit == CSS_UNIT_PX && box->style.width.value < 0)
+				box->style.width.value = 0;
+			if (box->style.min_width.unit == CSS_UNIT_PX)
+				box->style.min_width.value -= layout_to_px(frame_width);
+			if (box->style.min_height.unit == CSS_UNIT_PX)
+				box->style.min_height.value -= layout_to_px(frame_height);
+		}
 		box->style.box_sizing = CSS_BOX_SIZING_CONTENT;
 	}
 
 	/* An orthogonal box between a left and a right (or a top and a bottom) fills the room with its block (inline) size. */
-	saved_width = box->style.width;
+	saved_width = width_converted ? saved_box_width : box->style.width;
 	saved_orthogonal_height = box->style.height;
 	saved_width_sizing = -1;
 	if (!box->replaced && (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) != (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB) &&
@@ -1073,6 +1098,10 @@ position_place_once(
 	box->style.height = saved_style_height;
 	box->style.box_sizing = saved_sizing;
 	box->style.width = saved_width;
+	if (width_converted) {
+		box->style.min_width = saved_box_min_width;
+		box->style.min_height = saved_box_min_height;
+	}
 	box->style.height = saved_orthogonal_height;
 	if (saved_width_sizing >= 0)
 		box->style.box_sizing = saved_width_sizing;
