@@ -2,7 +2,7 @@
 
 # ws335-p001: 設計（libssl-compat、標準廉価実装手順 §4）
 
-Status: in-progress（2026-11-01 01:20 P6 q1789）
+Status: cleared（2026-11-01 05:45 Q1、main 8e44fa17e）
 Parent: [WS335](../ws.md)
 
 ## 範囲

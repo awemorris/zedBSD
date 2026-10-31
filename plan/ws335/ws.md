@@ -3,7 +3,7 @@
 # WS335 libssl-compat と libcrypto-compat: OpenSSL の libssl・libcrypto と互換の口を持つ、zedBSD の自前の TLS と暗号の library
 
 - Master: [plan/master.md](../master.md)（2026-11-01 作成）。Primary Milestone: MG002。
-- Status: planning（2026-11-01 01:20 新設、P6 が p001 の設計を q1789 で始めた）
+- Status: incomplete（2026-11-01 01:20 新設。2026-11-01 05:45 p001 の設計が cleared、header の基点 b7dfd3952、実装の段へ）
 - 目標: OpenSSL の libssl の API（と、それが要る libcrypto の部分）と source の互換を持つ library を、外部の library を取り込まずに自前で実装する。
   zedBSD の program（libbrowser の `net/tls.c` など）と、Windows の OmniGrammaton（[WS334](../ws334/ws.md) の決定 16）が、OpenSSL から link を替えるだけで切り替えられる形にする。
 - 進め方: 標準廉価実装手順（[docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)）。p001 は設計の担当（Opus）が仕様と module・header・試験の道具を作り、
@@ -36,7 +36,7 @@
 
 | ID | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計（標準廉価実装手順 §4）: 範囲（TLS の版・暗号の組・証明書の確かめ・OpenSSL の API の部分集合）、仕様の入手、module・header・.c の骨格・試験の道具、実装の Phase の表、design-reviewer、ユーザーへの問い | in-progress | — |
+| [p001](phase001/phase.md) | 設計（標準廉価実装手順 §4）: 範囲（TLS の版・暗号の組・証明書の確かめ・OpenSSL の API の部分集合）、仕様の入手、module・header・.c の骨格・試験の道具、実装の Phase の表、design-reviewer、ユーザーへの問い | cleared（2026-11-01 05:45 Q1、main 8e44fa17e。基点 b7dfd3952、Windows は 1 つの .exe に static link、p039 を足した） | — |
 | [p002](phase002/phase.md) | 土台（約束・定数時間の補助・byte 順）、SHA-2、hash の選択・HMAC・HKDF（test-util、test-sha2、test-hash） | planned | p001 |
 | [p003](phase003/phase.md) | SHA-3・SHAKE（Keccak）（test-sha3） | planned | p002 |
 | [p004](phase004/phase.md) | AES（bitsliced、定数時間）と counter mode（test-aes） | planned | p002 |
