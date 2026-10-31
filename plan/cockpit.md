@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 01:27（Q1）
+最終更新: 2026-11-01 01:44（Q1）
 
 ## 担当（P1〜P8）
 
@@ -32,7 +32,7 @@
 | p023 | NVIDIA RTX 2070 | 共有の image の画素の並び（block-linear）で pass ごとの copy を無くす | subs-1000 10.9 → 21 fps、subs-100 103 → 203、画素の差 0（main b30707d0a） | in-progress（残り: scenes、block-linear の画面出しの目視） |
 | p013・p014 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
 | p020 | PowerVR（VF2） | qs40 × 13・1920x1080・direct scanout で 50 fps（RTX のカタログの FP32 の比） | 45.8 fps（direct、main に merge 62eeb340e） | in-progress（P2） |
-| p025 | Raspberry Pi 4（V3D 4.2） | スペックの比の copies で 50 fps（1920x1080） | c21 40.5 fps（mip の hardware の sample、uniform の直書き、main d9846754e）。desktop（session）launch 56・type 53・output 22・drag 55・home 56・wiseview 58 | in-progress（P4 i03: Terminal の atlas、bin と render の重ね） |
+| p025 | Raspberry Pi 4（V3D 4.2） | スペックの比の copies で 50 fps（1920x1080） | c21 49.7（CPU の速い run）／42.4（遅い run）fps、inflight=2 で 52.8。desktop（session）drag 53〜56・home 54〜56・wiseview 55〜59・type 59〜61（main 69109d3f2、Terminal の atlas・VCM） | in-progress（P4 i04: CPU の速さの揺れ・16 bit の index・compositor の pace） |
 | p021 | Raspberry Pi 5（V3D 7.1） | スペックの比の copies で 50 fps（clock を実機で確定） | 未計測（mview に要る driver の機能を host で実装済み） | in-progress（P4、実機待ち） |
 | p022 | Intel i915（5330） | 5330 の Linux（ANV）で 50.6 fps の qs40 × 600 で Linux 以上 | 32.6 fps（頂点の shader 134 → 67 命令。CPU の idle を MWAIT にして GPU が 800 → 850〜900 MHz、まだ電力の上限 13 W に張り付く） | in-progress（P1） |
 
