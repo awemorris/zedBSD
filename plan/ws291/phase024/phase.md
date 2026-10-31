@@ -136,3 +136,27 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   `build-forge-image.sh build/p024/forge` から作り、libvulkan は lv2）: 起動、forge-guest・fence-guest（600 frame）・wltest（mailbox、100 frame で
   swapchain を作り直し）・mview mailbox・mview の draw ごと・20 submit、compositor の VULKAN_ERROR 0、`venus-reg: PASS`。Venus は jobs->command を
   持たないので SUBMIT は通らず（今の 3 本の道）、RETIRE は通る（GPU_CAP_JOB を報告する backend）。
+- game mode の往復・画面・desktop（`rtx-p015.sh` PARTS='cycle scenes desk'、c8 と案 A・B（js = kernel 84f786dce と libvulkan lv2）、22:59〜23:14、
+  build/tmp/p024-v2）: js の往復 3/3（direct=3 left=3 window=3、failed 0、refused 0）、desktop・Notes・browser は c8 との差が右上の時計の箱だけ、
+  frame-ops は c8 63・61・67・60・63・60、js 64・61・65・61・64・63 fps（launch・type・output・drag・home・wiseview、後退なし）。戻し cksum 一致、bl 行 0、Debian。
+
+### 再開点（2026-10-31 23:15 P3、q1785-i01 を返す）
+
+- branch agent/p3-ws291wsi の commit: 613c725f1・692209073（nvrtx の submit の道と texture header）、ab2ddbf7c・9246cf6ea（WS014 の fixture）、
+  91bb3b25c（記録）、84f786dce・5a03a0e95（案 A・B の kernel と uapi の layout）、e29e8a7d4（libvulkan）、8c2e9ddee（main cc74c9075 の取り込み）、
+  a99e1411e（BUG-381 の driver の答えの形）と、この記録の commit。
+- 到達（RTX 2070、同じ window の比べ）: subs-1000 19.9 → 32.6 fps（NVK 75.4）、subs-100 184 → 300 fps、big-100 536 → 568〜586 fps、big-1000 は
+  108〜116 の揺れの内（NVK 136.2）。目標（NVK 並み）は未達。
+- 残りの見立て: subs-1000 の 1 submit は約 24 µs（NVK 約 5 µs）: kernel の GPU_JOB_SUBMIT 約 20 µs（nvrtx の frame の decode・executor・ring と GPU core）
+  と libvulkan の user の時間。次の候補: (1) 1 submit の kernel の frame の残り（executor 約 7 µs の見込み、未計測。最初の draw の全 state、pool の
+  entry の書き直し）、(2) GPU core の monitor の起床の残り（runtime_retire の capacity の起床など 3 回）、(3) libvulkan の queue_enqueue の私用の
+  fence と ledger（private_fence・reap）、(4) fence の無い submit の job（製品の判断）。big-1000 は record（client の encode と kernel の decode、
+  約 3.8〜4.0 ms、NVK 3.15）と GPU の 1 draw（0.27 µs 対 NVK 約 0.256 µs）。big-100 の lend の遅れ（item 3）は未着手。
+- 未実施: amdrdna・i915・powervr の BUG-381 の直し、Venus の host の側の部分の失敗の調べ、案 A・B の効果の 3 round 交互の比べ、
+  nvrtx の runtime_job_command の失敗の道の実機の試し（fault の注入の knob が無い）。
+- 追記（23:15〜23:28）: GPU core の capacity の変化の時の monitor の起床を、その device の open に停止か close が待っている時だけに
+  （`gpu_capacity_changed_locked`、retirement の起床と同じ規則、`gpu_device_stop_waiting_locked`）。host: `run-gpu-job-host.sh` PASS（WS014 の
+  supervision・job・fence の fixture を含む）、RTX・config-amd64・rpi5 の vmunix warning 0。実機（`rtx-p024.sh` ROUNDS=2、libvulkan lv2、js = a99e1411e の
+  kernel、js3 = この変更、build/tmp/p024-js3）: subs-1000 js 32.16・28.56 → js3 34.67・34.31、subs-100 296.1・301.6 → 301.1・297.5、big は揺れの内。
+  戻し cksum 一致、Debian。QEMU の Venus（この変更の kernel で forge の image を作り直し、23:30〜23:39）: `venus-reg: PASS`（forge・fence 600・wltest・
+  mview mailbox・mview 20 submit・compositor の VULKAN_ERROR 0）。

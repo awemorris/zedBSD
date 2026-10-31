@@ -434,6 +434,7 @@ static int gpu_job_reserve_ioctl(struct gpu_session *session, uintptr_t argument
 static int gpu_capacity_ioctl(struct gpu_session *session, uintptr_t argument);
 static int gpu_policy_ioctl(struct gpu_session *session, uintptr_t argument);
 static void gpu_capacity_changed_locked(struct drv_gpu_device *device);
+static bool gpu_device_stop_waiting_locked(const struct drv_gpu_device *device);
 static void gpu_retirement_changed_locked(struct gpu_session *session);
 static bool gpu_stop_waiting_locked(const struct gpu_session *session);
 static int gpu_session_error_locked(struct gpu_session *session);
@@ -7948,12 +7949,35 @@ gpu_capacity_changed_locked(
 		device->capacity_sequence++;
 	}
 
-	/* Capacity and graceful stop both depend on actual callback retirement. */
+	/* Capacity depends on every retirement; the supervisor only while an open's stop or close waits for them. */
 	waitq_wake_all(&device->capacity_waitq);
-	waitq_wake_all(&device->monitor_waitq);
+	if (gpu_device_stop_waiting_locked(device))
+		waitq_wake_all(&device->monitor_waitq);
 
 	/* Succeeded: no observer can mistake this transition for its old condition. */
 	return;
+}
+
+/*
+ * Tells whether an open of the device has a stop or a close that waits for
+ * callback retirement (the supervisor computes every other deadline from a
+ * scan, so a retirement while none waits changes nothing it waits for);
+ * the caller holds the registry lock.
+ */
+static bool
+gpu_device_stop_waiting_locked(
+	const struct drv_gpu_device *device)
+{
+	const struct gpu_session *session;
+
+	/* Each open: a stop requested or pending, or a close in progress. */
+	for (session = device->open_sessions; session != NULL; session = session->next_open) {
+		if (session->closing != 0U || gpu_stop_waiting_locked(session))
+			return true;
+	}
+
+	/* Succeeded: no stop or close waits. */
+	return false;
 }
 
 /*
