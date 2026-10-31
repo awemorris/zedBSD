@@ -4044,7 +4044,7 @@ grid_size_rows(
 	percentages = 0;
 	for (row = 0; row < grid->row_count && error == 0; row++) {
 		track = grid_row_track(&box->style, row);
-		if (track->size.unit == CSS_UNIT_PERCENT || track->minimum.unit == CSS_UNIT_PERCENT)
+		if (track->size.unit == CSS_UNIT_PERCENT || track->minimum.unit == CSS_UNIT_PERCENT || track->kind == CSS_TRACK_FR)
 			percentages = 1;
 		grid_row_baselines(box, grid, row, &first_above, &first_below, &last_above, &last_below);
 		group_floor = first_above + first_below;

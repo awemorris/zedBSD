@@ -1040,6 +1040,7 @@ gt_expand(
 	double fraction;
 	double other;
 	double total;
+	double carry;
 	size_t item;
 	int64_t sum;
 	int64_t size;
@@ -1098,12 +1099,17 @@ gt_expand(
 			fraction = gt_find_fr(state, 0, input->count - 1, input->container_maximum);
 	}
 
-	/* Each flexible track takes its share when that is more than it has. */
+	/* Each flexible track takes its share when that is more than it has; the part of a share below a layout unit carries on to the next track so that the shares add up to the space. */
+	carry = 0.0;
 	for (index = 0; index < input->count; index++) {
 		track = &input->tracks[index];
 		if (track->collapsed || track->maximum != GRID_TRACK_FLEX)
 			continue;
-		size = (int64_t)(fraction * (double)track->flex);
+		other = fraction * (double)track->flex;
+		if (other <= (double)state->base[index])
+			continue;
+		size = (int64_t)(other + carry);
+		carry = other + carry - (double)size;
 		if (size > state->base[index])
 			state->base[index] = size;
 	}
