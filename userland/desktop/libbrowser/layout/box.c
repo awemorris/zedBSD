@@ -32,6 +32,7 @@ static struct layout_box *box_new(struct layout_tree *tree, int kind, struct dom
 static void box_append(struct layout_box *parent, struct layout_box *child);
 static int box_is_inline_level(const struct layout_box *box);
 static int box_is_whitespace(const struct layout_box *box);
+static int box_is_blank(const struct layout_box *box);
 static int box_fix_children(struct layout_tree *tree, struct layout_box *box);
 static int box_table_fix(struct layout_tree *tree, struct layout_box *box);
 static int box_table_children(struct layout_tree *tree, struct layout_box *box);
@@ -1087,8 +1088,8 @@ box_flex_items(
 			continue;
 		}
 
-		/* Whitespace alone between items is dropped. */
-		whitespace = box_is_whitespace(child);
+		/* Whitespace alone between items is dropped (preserved or not). */
+		whitespace = box_is_blank(child);
 		if (anonymous == NULL && whitespace) {
 			child = next;
 			continue;
@@ -1127,6 +1128,22 @@ box_is_inline_level(
 
 	/* Blocks are block-level. */
 	return 0;
+}
+
+/* Tells whether a box is text of nothing but spaces, tabs and line feeds, whether or not they collapse. */
+static int
+box_is_blank(
+	const struct layout_box *box)
+{
+	size_t index;
+
+	if (box->kind != LAYOUT_TEXT)
+		return 0;
+	for (index = 0; index < box->text_length; index++) {
+		if (!text_is_space(box->text[index]))
+			return 0;
+	}
+	return 1;
 }
 
 /* Tells whether a box is text of nothing but collapsible whitespace. */
