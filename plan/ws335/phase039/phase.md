@@ -35,7 +35,7 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。共�
 - `make BUILD=build/p039 build/p039/dynamic/libcrypto-compat.so`（x86_64 と aarch64 の zedBSD の config で）が warning 0、`check-dynamic-elf.py` が通る。
 - `sh plan/ws335/tests/check-exports.sh build/p039/dynamic/libcrypto-compat.so` が PASS。
 - QEMU（Q1 の割当の名前・port。`plan/tools/boot-test.sh` で起動の確かめ、guest の操作は SSH）: `plan/ws335/tests/config.mk` の image で `/lib/libcrypto-compat.so` と `crypto-smoke` が入り、SSH で `crypto-smoke` を走らせて最後の行が `crypto-smoke: PASS`。console の log で判定しない。
-- `sh plan/ws335/tests/run-unit.sh all`・`BASE=NEWBASE sh plan/ws335/tests/check-skeleton.sh`・`git diff --check` が PASS。
+- `sh plan/ws335/tests/run-unit.sh all`・`BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh`・`git diff --check` が PASS。
 
 ## 4. 注意
 
@@ -49,7 +49,7 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。共�
 make BUILD=build/p039 build/p039/dynamic/libcrypto-compat.so
 sh plan/ws335/tests/check-exports.sh build/p039/dynamic/libcrypto-compat.so
 sh plan/ws335/tests/run-unit.sh all
-BASE=NEWBASE sh plan/ws335/tests/check-skeleton.sh
+BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh
 git diff --check
 ```
 

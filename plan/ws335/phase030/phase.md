@@ -51,7 +51,7 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 sh plan/ws335/tests/run-unit.sh hs12     # この module
 sh plan/ws335/tests/run-unit.sh --win32 hs12     # 同じ試験を Windows（x86_64、static link、Wine）で
 sh plan/ws335/tests/run-unit.sh all
-BASE=NEWBASE sh plan/ws335/tests/check-skeleton.sh
+BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh
 git diff --check
 ```
 

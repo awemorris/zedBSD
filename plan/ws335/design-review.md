@@ -71,4 +71,6 @@
 
 ## 2 回目の反映の後の確かめ（2026-11-01 P6）
 
-- 下の基点の commit の前に流した結果は ws.md の Resume point と p001 の結果の節に書く。
+- 基点の commit b7dfd3952 の tree で: check-skeleton.sh PASS（cc・clang、zedBSD の clang の x86_64・aarch64、llvm-mingw の x86_64・aarch64 の compile・static link・名前の範囲、x86_64 の gnu11）、`BASE=b7dfd3952` でも PASS、
+  run-unit.sh all PASS（test-tools 18 checks）、run-unit.sh --win32 all PASS（test-tools 18 checks、Wine）、`git diff --check` 空。WS335_VECTORS は共有の `/home/awe/zedBSD-claude1/build/sources/tls-vectors`。
+- 壊す確かめ: 失敗する nm を PATH の先に置くと check-skeleton の 7 が `FAILED cc: nm failed on …` で FAIL。名前の範囲の外の名前（`helper`・crypto の object の `SSL_x`）を filter が拾う事を別の object で確かめた。

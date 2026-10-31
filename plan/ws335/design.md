@@ -6,7 +6,7 @@
 - 範囲は 2026-11-01 のユーザーの決定（[ws.md](ws.md) の「ユーザーの決定」）による: **libbrowser の `net/tls.c` が使う物と、自前の ssh・sshd（[WS336](../ws336/ws.md)）が使う物の和**だけを、
   OpenSSL 3.5 と互換の API で作る。libcrypto-compat（暗号・証明書・誤りの queue）と、その上の libssl-compat（TLS の client）の 2 つの library。
 - 状態: header・.c の骨格・試験の道具を置き、design-reviewer の指摘を反映して凍結した（最初の基点 60760d2a0）。2026-11-01 q1789-i02 で U1〜U6 の答え（全部 A、Windows は DLL を作らず 1 つの .exe への static link）を入れ、
-  header と試験の道具を直して凍結し直した: **基点 NEWBASE**。変えた所は §3 の D23〜D27、§4.2〜§4.4、§8、§9、§13。
+  header と試験の道具を直して凍結し直した: **基点 b7dfd3952**。変えた所は §3 の D23〜D27、§4.2〜§4.4、§8、§9、§13。
 
 ## 1. 出典（仕様と試験の data）
 

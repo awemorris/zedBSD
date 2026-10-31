@@ -30,7 +30,7 @@
 - 2026-11-01 P6（q1789-i02）: U1〜U6 の答え（全部 A、Windows は DLL を作らず 1 つの .exe への static link）を入れた。Windows は `libcrypto-compat.a`・`libssl-compat.a` を使う側の build が `sources.mk` から作り .exe に link（design.md D23・D26、§4.3・§4.4）、
   `cert.pem` は .exe の隣、Disallowed は鎖の全部で拒む（D24）、名前の約束（D25）。header 5 個・骨格 4 個・試験の道具 2 個（`run-unit.sh --win32`、check-skeleton の 6・7）を直した。WS336 のために libcrypto-compat.so だけを先に作る p039（p023・p024 の後、D27）を足し、p033 から外した。
   design-reviewer の 2 回目を反映した（[design-review.md](design-review.md)）。
-  **header と試験の道具の凍結: 基点 NEWBASE**（`BASE=NEWBASE sh plan/ws335/tests/check-skeleton.sh`）。起動の順は design.md §9。仕様と試験の data は共有の `/home/awe/zedBSD-claude1/build/sources/specs/tls/`・`/home/awe/zedBSD-claude1/build/sources/tls-vectors/`（`WS335_VECTORS` に渡す）。
+  **header と試験の道具の凍結: 基点 b7dfd3952**（`BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh`）。起動の順は design.md §9。仕様と試験の data は共有の `/home/awe/zedBSD-claude1/build/sources/specs/tls/`・`/home/awe/zedBSD-claude1/build/sources/tls-vectors/`（`WS335_VECTORS` に渡す）。
 
 ## Phase
 

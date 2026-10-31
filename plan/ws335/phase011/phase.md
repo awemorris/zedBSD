@@ -50,7 +50,7 @@ sh plan/ws335/tests/run-unit.sh ecc     # この module
 sh plan/ws335/tests/run-unit.sh --win32 ecc     # 同じ試験を Windows（x86_64、static link、Wine）で
 sh plan/ws335/tests/run-unit.sh all
 sh plan/ws335/tests/run-ct.sh ecc
-BASE=NEWBASE sh plan/ws335/tests/check-skeleton.sh
+BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh
 git diff --check
 ```
 
