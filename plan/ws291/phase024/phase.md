@@ -262,7 +262,13 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   subs-1000 41.66・40.34。b128（lv7 729938090）617.5・619.1、117.9・118.7、347.6・360.1、38.16・40.96。128 KiB は big-100 で少し上だが
   揺れの内で、transaction が倍になるので 256 KiB を採った（commit 8a3a95131、libvulkan 1775217122 = lv6 と同じ）。画素は差 0（13 比べ）。
 
-### 再開点（2026-11-01 02:0x P3、q1785-i02 を返す）
+- game mode の往復・画面・desktop（rtx-p015.sh PARTS='cycle scenes desk'、main と fin = kernel i2a ＋ libvulkan 1775217122、01:48〜02:03、
+  build/tmp/p024i2-v2）: 往復は両腕 direct=3 left=3 window=3、failed 0、refused 0。画面は desktop・Notes・browser とも差が右上の時計の箱
+  （x=1888..1894、y=17..26）だけ。desktop: main launch 63・type 61・output 65・drag 60・home 63・wiseview 65、fin 64・61・66・60・64・59 fps。
+  wiseview の 59 を確かめに desk だけ i2a（1 MiB）と fin を同じ window で（02:05〜02:16、build/tmp/p024i2-v3）: i2a 62・61・68・60・64・64、
+  fin 62・61・66・61・64・64 fps（wiseview 64 対 64、v2 の 59 は揺れ）。どの window も戻し cksum 一致、bl 行 0、Debian。
+
+### 再開点（2026-11-01 02:20 P3、q1785-i02 を返す）
 
 - branch agent/p3-ws291wsi の commit（main 71f8b7d8b の上）: 1e75e4de4（GPU core の stream の buffer と monitor の起床、executor の state、
   libvulkan の writer、rtx-p024.sh、診断の patch）、09d54c61b（記録）、8a3a95131（recording の batch 256 KiB と記録）と、この記録の commit。
