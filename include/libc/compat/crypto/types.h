@@ -79,8 +79,8 @@ typedef struct ossl_lib_ctx_st OSSL_LIB_CTX;
  * parameters (every OSSL_PARAM array argument must be NULL), but the
  * structure is complete, as in OpenSSL, so that "const OSSL_PARAM
  * params[]" is a valid parameter type.
- * Layout referenced: OpenSSL 3.5.8 include/openssl/core.h
- * (struct ossl_param_st).
+ * Values referenced: OpenSSL 3.5.8 include/openssl/core.h (the members
+ * of struct ossl_param_st, in order).
  */
 typedef struct ossl_param_st {
 	const char *key;

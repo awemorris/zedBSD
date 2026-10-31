@@ -18,10 +18,9 @@
  *
  * Montgomery form: with R = 2^(32 * limbs) for the modulus m's width,
  * the Montgomery form of a is a * R mod m.  cryc_bn_mont_mul(a, b) gives
- * a * b * R^-1 mod m (the REDC algorithm: Montgomery, "Modular
- * multiplication without trial division", Math. Comp. 44 (1985); the
- * word-by-word form whose per-word factor is -m^-1 mod 2^32), so the
- * product of two Montgomery forms is the Montgomery form of the product.
+ * a * b * R^-1 mod m (REDC, in its word-by-word form whose per-word
+ * factor is -m^-1 mod 2^32), so the product of two Montgomery forms is
+ * the Montgomery form of the product.
  *
  * Constant time.  The moduli are public.  Values (scalars, coordinates,
  * an RSA message representative) may be secret: every function below
@@ -113,7 +112,7 @@ void cryc_bn_mod_sub(uint32_t *out, const uint32_t *a, const uint32_t *b, const 
 /*
  * out = a mod m for a less than 2m (one conditional subtraction, by
  * mask): reduces a hash taken as an integer of the order's bit length
- * (FIPS 186-5 6.4.2 step 4's e) into the range.
+ * (FIPS 186-5 6.4.2 step 3's E) into the range.
  *
  * out may alias a.  Constant time.
  */
@@ -122,6 +121,9 @@ void cryc_bn_reduce_once(uint32_t *out, const uint32_t *a, const struct cryc_bn_
 /*
  * out = a * b * R^-1 mod m (Montgomery multiplication), for a and b less
  * than m.
+ *
+ * Procedure referenced: P. L. Montgomery, "Modular multiplication
+ * without trial division", Mathematics of Computation 44 (1985) (REDC).
  *
  * out may alias a or b (the product is formed in a local buffer).
  * Constant time.

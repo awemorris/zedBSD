@@ -55,13 +55,15 @@
 | [p024](phase024/phase.md) | 公開の EVP_PKEY（Ed25519・X25519・ML-KEM-768）（test-api-pkey） | planned | p021、p009、p008、p014 |
 | [p025](phase025/phase.md) | TLS の定数・suite の表・presentation language の reader/writer（test-tls、test-buf） | planned | p002 |
 | [p026](phase026/phase.md) | record の保護（test-record） | planned | p025、p005、p006 |
-| [p027](phase027/phase.md) | transcript と鍵の schedule（1.3 と 1.2）（test-keysched） | planned | p026 |
-| [p028](phase028/phase.md) | handshake の message の encode と syntax の確かめ（test-msg） | planned | p025、p020 |
-| [p029](phase029/phase.md) | handshake の共通と TLS 1.3（test-hs13） | planned | p027、p028、p020、p011、p008 |
-| [p030](phase030/phase.md) | TLS 1.2 の handshake（test-hs12） | planned | p029 |
-| [p031](phase031/phase.md) | 接続（record の I/O・再組み立て・alert・close）（test-conn） | planned | p030、p015 |
+| [p027](phase027/phase.md) | transcript と鍵の schedule（1.3 と 1.2）（test-keysched） | planned | p025、p002 |
+| [p028](phase028/phase.md) | handshake の message の encode と syntax の確かめ（test-msg） | planned | p025 |
+| [p029](phase029/phase.md) | handshake の共通と TLS 1.3（test-hs13） | planned | p027、p028、p020、p011、p008、p037 |
+| [p030](phase030/phase.md) | TLS 1.2 の handshake（test-hs12） | planned | p029、p037 |
+| [p031](phase031/phase.md) | 接続（record の I/O・再組み立て・alert・close）（test-conn） | planned | p030、p015、p037 |
 | [p032](phase032/phase.md) | 公開の SSL・SSL_CTX（test-api-ssl） | planned | p031、p022 |
 | [p033](phase033/phase.md) | 統合: zedBSD の .so と exports、Windows の DLL、相互接続（OpenSSL s_server）・x509-limbo・RFC 8448・net/tls.c の host 試験（Opus） | planned | p032、p023、p024 |
 | [p034](phase034/phase.md) | 安全の review と hardening: 定数時間・fuzz・checklist（Opus） | planned | p033 |
 | [p035](phase035/phase.md) | 規約の全文の見直しと header の持ち越しの直し | planned | p034 |
 | [p036](phase036/phase.md) | 提案（要承認 U2）: net/tls.c の libssl-compat への切り替え | planning | p033 |
+| [p037](phase037/phase.md) | 試験の道具: scripted な TLS server（tlspeer.h）と試験の側の ECDSA の署名器（Opus。p029〜p032 が使う） | planned | p025、p026、p027、p011、p008 |
+| [p038](phase038/phase.md) | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類（Opus） | planned | p020 |

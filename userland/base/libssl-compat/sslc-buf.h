@@ -24,8 +24,13 @@
 
 #include "../libcrypto-compat/cryc.h"
 
-/* The deepest nesting of open vectors a writer keeps (an extension in a ClientHello in a handshake message is 3). */
-#define SSLC_WRITER_DEPTH	4U
+/*
+ * The deepest nesting of open vectors a writer keeps: a handshake
+ * message, its extensions block, one extension's data, a list inside it
+ * (server_name_list, client_shares), an entry of the list (HostName,
+ * key_exchange) is 5.
+ */
+#define SSLC_WRITER_DEPTH	6U
 
 /*
  * A position in borrowed bytes.  data and size are the bytes; position

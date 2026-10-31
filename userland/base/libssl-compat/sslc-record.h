@@ -112,8 +112,16 @@ void sslc_record_clear(struct sslc_record_dir *dir);
  * SSLC_RECORD13_CIPHERTEXT_MAX for a protected TLS 1.3 direction,
  * SSLC_RECORD12_CIPHERTEXT_MAX for TLS 1.2, SSLC_RECORD_PLAINTEXT_MAX for
  * a plaintext direction (more: EMSGSIZE, the caller's record_overflow
- * alert); a zero-length record is allowed only for application data in
- * TLS 1.2 (RFC 5246 6.2.1) and is EPROTO otherwise.
+ * alert); at least the protected minimum of the direction (TLS 1.3: 17,
+ * the tag and the inner type; TLS 1.2 AES-GCM: 24, the explicit nonce
+ * and the tag; TLS 1.2 ChaCha20-Poly1305: 16, the tag; shorter is
+ * EBADMSG, the caller's bad_record_mac) and, on a plaintext direction, at
+ * least 1 (a zero-length plaintext record is EPROTO, the caller's
+ * decode_error; RFC 8446 5.1 and RFC 5246 6.2.1
+ * forbid zero-length handshake and alert fragments, and a plaintext
+ * direction carries only those).  The zero-length rule of TLS 1.2
+ * application data is checked on the decrypted plaintext by
+ * sslc_record_open's caller, not here.
  *
  * Returns 0, EPROTO or EMSGSIZE.
  */
@@ -161,8 +169,9 @@ int sslc_record_seal(struct sslc_record_dir *dir, unsigned type, int first_hello
  * caller to check and drop, 5 and D.4) and an alert record before keys
  * are set; then the AEAD is opened, the zeros at the end of the inner
  * plaintext are removed, and the last non-zero byte is the inner type (an
- * inner plaintext of only zeros is EPROTO, 5.4; an inner plaintext over
- * 2^14 bytes is EMSGSIZE, 5.4).  TLS 1.2: the explicit nonce for AES-GCM,
+ * inner plaintext of only zeros is EPROTO, 5.4; a TLSInnerPlaintext
+ * (content, type and padding together) over 2^14 + 1 bytes is EMSGSIZE,
+ * 5.4).  TLS 1.2: the explicit nonce for AES-GCM,
  * then AEAD open with the additional data of the plaintext length; a
  * plaintext over 2^14 bytes is EMSGSIZE.
  *

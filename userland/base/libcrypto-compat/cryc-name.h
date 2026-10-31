@@ -28,6 +28,9 @@
 /* The longest host name accepted (RFC 1035 2.3.4: 253 characters without the root's dot). */
 #define CRYC_NAME_HOST_MAX	253U
 
+/* The most name-against-subtree comparisons of one name constraints check (cryc_name_constraints_check). */
+#define CRYC_NAME_MAX_CHECKS	4096U
+
 /*
  * Compares two Name encodings (whole SEQUENCEs) as RFC 5280 7.1 asks for
  * path validation.
@@ -104,7 +107,12 @@ int cryc_name_match_ip(const struct cryc_x509 *cert, const uint8_t *address, siz
  * otherName, ...) fails the check when subject has a name of that form,
  * and is ignored otherwise.  is_leaf is 1 for the end-entity certificate
  * (only it carries the names the check matters most for, but the check
- * is the same for intermediates, which are not self-issued, 6.1.4 (g)).
+ * is the same for intermediates; a self-issued intermediate is not
+ * checked, 6.1.3 (b) and (c), which the caller decides).
+ *
+ * Work: at most CRYC_NAME_MAX_CHECKS comparisons of one name against one
+ * subtree per call; more is ENOTSUP (a hostile certificate with many
+ * names and many subtrees must not cost unbounded time).
  *
  * Returns 0 when the names are allowed; EACCES when a name is outside a
  * permitted subtree or inside an excluded one; ENOTSUP for a constrained

@@ -10,8 +10,6 @@
  * function on 32-bit words), SHA-384 and SHA-512 (the one on 64-bit
  * words).  SHA-224 and SHA-512/t are not needed and not provided.
  *
- * The section numbers below are those of FIPS 180-4 (August 2015).
- *
  * A hash absorbs secrets (HMAC keys, key-schedule secrets), so its state
  * is wiped by the _final functions; the compression functions are
  * constant time by construction (no data-dependent branch or index), and
@@ -27,6 +25,11 @@
 #define LIBCRYPTO_COMPAT_CRYC_SHA2_H
 
 #include "cryc.h"
+
+/*
+ * The section numbers in the comments of this file are those of FIPS
+ * 180-4 (August 2015).
+ */
 
 /* The digest and block sizes in bytes (FIPS 180-4 1, Figure 1). */
 #define CRYC_SHA256_SIZE	32U

@@ -9,9 +9,6 @@
  * RSA signature verification: RSASSA-PKCS1-v1_5 and RSASSA-PSS with
  * MGF1, the RSA signatures of certificates and of TLS handshakes.
  *
- * The section numbers below are those of RFC 8017 (PKCS #1 v2.2,
- * November 2016).
- *
  * Only the public-key operation is here: libssl-compat never holds an RSA
  * private key (no client certificates, no RSA key exchange), so every
  * value is public and the code may branch on it.  Still, padding is
@@ -26,6 +23,11 @@
 
 #include "cryc-bn.h"
 #include "cryc-hash.h"
+
+/*
+ * The section numbers in the comments of this file are those of RFC 8017
+ * (PKCS #1 v2.2, November 2016).
+ */
 
 /*
  * The smallest modulus accepted, in bits.  RFC 9325 4.5 (and the CA/B

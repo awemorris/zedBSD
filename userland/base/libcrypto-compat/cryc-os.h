@@ -6,7 +6,7 @@
  */
 
 /*
- * The operating system's services libssl-compat uses: random bytes, the
+ * The operating system's services the two libraries use: random bytes, the
  * time, a mutex, a value per thread, file reading, socket I/O, and the
  * system's trusted root certificates.
  *
@@ -37,7 +37,8 @@
 
 /*
  * The name of the CA bundle a Windows build reads from the directory of
- * the libssl-compat DLL (or of the executable that links it statically).
+ * the libcrypto-compat DLL (or of the executable that links it
+ * statically): the module that holds cryc_os_system_roots.
  */
 #define CRYC_OS_WIN32_CA_FILE	"cert.pem"
 
@@ -136,12 +137,13 @@ int cryc_os_read_file(const char *path, size_t max, uint8_t **data, size_t *size
 int cryc_os_socket_read(intptr_t descriptor, uint8_t *buffer, size_t size, size_t *done, int *os_error);
 
 /*
- * Writes up to size bytes (write() on POSIX, send() on Windows); a partial
- * write sets *done below size and returns 0.  Results as
- * cryc_os_socket_read (EAGAIN when nothing could be written now; EPIPE,
- * ECONNRESET and the like are EIO with *os_error).  SIGPIPE is not
- * blocked on POSIX: as with OpenSSL, a program that writes to sockets
- * ignores SIGPIPE itself.
+ * Writes up to size bytes; a partial write sets *done below size and
+ * returns 0.  On POSIX: send(..., MSG_NOSIGNAL) where the system defines
+ * MSG_NOSIGNAL, falling back to write() when the descriptor is not a
+ * socket (ENOTSOCK); write() where it does not (zedBSD today: a program
+ * there that writes to sockets handles SIGPIPE itself).  On Windows:
+ * send().  Results as cryc_os_socket_read (EAGAIN when nothing could be
+ * written now; EPIPE, ECONNRESET and the like are EIO with *os_error).
  */
 int cryc_os_socket_write(intptr_t descriptor, const uint8_t *buffer, size_t size, size_t *done, int *os_error);
 

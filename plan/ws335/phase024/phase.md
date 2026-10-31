@@ -36,7 +36,7 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 - EVP_PKEY_derive の全零は失敗。
 - ML-KEM の私鍵は export しない。
 - 他の実装（OpenSSL・BoringSSL・LibreSSL・mbedTLS・wolfSSL・libsodium・BearSSL・Go の crypto・Rust の crypto ほか）の code・comment・構造・内部の名前を写さない。表・定数は data として block ごとに直前の複数行の comment で「Values referenced: <仕様の名前と版> <節・表>」。file の先頭に出典を書かない。source に開発の管理情報（WS・Phase の番号、plan/ への参照、日付）を書かない。
-- header が黙っている所は自分で決め、結果の節に列挙する。phase.md が仕様と食い違えば仕様に従い、報告する。
+- header が黙っている内部の事（static の補助の分け方、内部の表の形、loop の順など、interface に出ない事）は自分で決め、結果の節に列挙する。interface の不備（足りない引数、矛盾する comment、header だけでは決められない約束）は §5 のとおり止めて返す。phase.md が仕様と食い違えば仕様に従い、報告する。
 
 ## 5. 変えてはいけない物
 
@@ -51,6 +51,10 @@ sh plan/ws335/tests/run-unit.sh all
 BASE=@BASE@ sh plan/ws335/tests/check-skeleton.sh
 git diff --check
 ```
+
+- WS336 の契約の試験（ssh が呼ぶ分の受け入れ）: `/home/awe/zedBSD-worktrees/p5-ws336/plan/ws336/tests/crypto-contract.c`（main に入っていれば `plan/ws336/tests/crypto-contract.c`）を、
+  自分の worktree の `build/tmp/` に libcrypto-compat の .c（win32 を除く）から作った静的な archive と `-I<dir の compat/ が include/libc/compat を指す物>` で build して流す
+  （`SSH_CRYPTO_INCLUDE=… SSH_CRYPTO_LIB=… sh plan/ws336/tests/crypto-contract.sh` と同じ形。WS336 の worktree には書かない）。p024 の後に全件 PASS（p023 の時点では digest・cipher・MAC の分）。
 
 ## 7. 終わりの条件
 

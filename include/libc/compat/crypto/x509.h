@@ -10,9 +10,9 @@
  * interface: the X509 object, the trust store, the verification
  * parameters, and the verification result codes (X509_V_*).
  *
- * Only what libbrowser's TLS needs is here: making a certificate from DER
- * and adding it to a store (the Windows roots), the host and address a
- * connection must match, and the text of a verification result.
+ * The subset: making a certificate from DER and adding it to a store,
+ * the host and address a connection must match, and the text of a
+ * verification result.
  */
 
 #ifndef KERN_COMPAT_CRYPTO_X509_H
@@ -57,12 +57,15 @@ extern "C" {
 #define X509_V_ERR_UNSUPPORTED_SIGNATURE_ALGORITHM	76
 
 /*
- * Makes a certificate from DER (OpenSSL's d2i convention): reads
- * *in for at most length bytes; on success advances *in past the
- * certificate and returns a new X509 with one reference (stored also in
- * *out when out is not NULL; an existing *out is freed first).  Returns
- * NULL for malformed DER or a certificate libcrypto-compat cannot parse
- * (an error is queued), and when length is not positive.
+ * Makes a certificate from DER (OpenSSL's d2i convention): reads one
+ * Certificate from the first bytes of *in (at most length bytes; bytes
+ * after the Certificate's own DER length are left unread, not an error),
+ * advances *in past it and returns a new X509 with one reference, stored
+ * also in *out when out is not NULL (an existing *out is freed first).
+ * On an error returns NULL with an error queued, leaves *in unchanged,
+ * and when out is not NULL frees *out and sets it to NULL (d2i_X509.pod
+ * of OpenSSL 3): malformed DER, a certificate libcrypto-compat cannot
+ * parse, or a length that is not positive.
  */
 X509 *d2i_X509(X509 **out, const unsigned char **in, long length);
 

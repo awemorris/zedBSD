@@ -10,12 +10,6 @@
  * the encoding of points, and scalar multiplication.  ECDH, key
  * generation and ECDSA verification are built on this in cryc-ecc.h.
  *
- * The curves are those of NIST SP 800-186 (February 2023) 3.2.1.3 (P-256)
- * and 3.2.1.4 (P-384): y^2 = x^3 - 3x + b over GF(p), prime order n,
- * cofactor 1.  The group law is that of SP 800-186 Appendix A.1.1; the
- * point encodings are those of SEC 1 version 2.0 (May 2009) 2.3.3 and
- * 2.3.4.
- *
  * Representation.  A point is held in Jacobian coordinates (X, Y, Z),
  * standing for the affine point (X / Z^2, Y / Z^3), with the point at
  * infinity being any triple with Z = 0; the coordinates are in Montgomery
@@ -44,6 +38,14 @@
 #define LIBCRYPTO_COMPAT_CRYC_ECP_H
 
 #include "cryc-bn.h"
+
+/*
+ * The curves are those of NIST SP 800-186 (February 2023) 3.2.1.3
+ * (P-256) and 3.2.1.4 (P-384): y^2 = x^3 - 3x + b over GF(p), prime
+ * order n, cofactor 1.  The group law is that of SP 800-186 Appendix
+ * A.1.1; the point encodings are those of SEC 1 version 2.0 (May 2009)
+ * 2.3.3 and 2.3.4.
+ */
 
 /* The curves.  The values are libssl-compat's own, not TLS's group numbers. */
 enum cryc_curve_id {
@@ -109,12 +111,13 @@ int cryc_ecp_init(struct cryc_ecp *ec, enum cryc_curve_id id);
  * n * Q = infinity, holds for every point on these curves because the
  * cofactor is 1).
  *
- * size must be 1 + 2 * ec->size.  Returns 0; EINVAL for a wrong size, a
- * first byte other than 0x02, 0x03 or 0x04, a coordinate not less than p,
- * or a point not on the curve, and for the single byte 0x00 (infinity is
- * not a public key); ENOTSUP for a compressed encoding (first byte 0x02
- * or 0x03: TLS 1.3 and RFC 8422 use only the uncompressed form).  On an
- * error *point is zeroed.  Variable time (public input).
+ * The checks, in this order: size 0 is EINVAL; a first byte of 0x02 or
+ * 0x03 (compressed, whatever the size) is ENOTSUP (TLS 1.3 and RFC 8422
+ * use only the uncompressed form); a first byte other than 0x04 (0x00,
+ * infinity, included: it is not a public key) is EINVAL; a size other
+ * than 1 + 2 * ec->size is EINVAL; a coordinate not less than p is
+ * EINVAL; a point not on the curve is EINVAL.  On an error *point is
+ * zeroed.  Variable time (public input).  Returns 0, EINVAL or ENOTSUP.
  */
 int cryc_ecp_decode(const struct cryc_ecp *ec, struct cryc_ecp_point *point, const uint8_t *in, size_t size);
 
@@ -151,7 +154,7 @@ void cryc_ecp_mul(const struct cryc_ecp *ec, struct cryc_ecp_point *out, const s
 void cryc_ecp_mul_base(const struct cryc_ecp *ec, struct cryc_ecp_point *out, const uint32_t *scalar);
 
 /*
- * out = u1 * G + u2 * q, for ECDSA verification (FIPS 186-5 6.4.2 step 5).
+ * out = u1 * G + u2 * q, for ECDSA verification (FIPS 186-5 6.4.2 step 6).
  *
  * u1 and u2 are ec->limbs limbs, less than n; q is a validated public
  * point.  The result may be infinity.  All inputs are public; the time may

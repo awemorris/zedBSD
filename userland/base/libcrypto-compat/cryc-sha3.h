@@ -9,9 +9,6 @@
  * The SHA-3 functions ML-KEM uses (FIPS 203 4.1): SHA3-256, SHA3-512,
  * SHAKE128 and SHAKE256, on the permutation Keccak-p[1600, 24].
  *
- * The section and algorithm numbers below are those of FIPS 202 (August
- * 2015).
- *
  * The sponge (4, Algorithm 8) is kept as a state that absorbs any number
  * of times and, for the SHAKEs, squeezes any number of times, as FIPS
  * 203's XOF (4.1, Algorithm 2's absorb and squeeze) requires.  Bit
@@ -30,6 +27,11 @@
 #define LIBCRYPTO_COMPAT_CRYC_SHA3_H
 
 #include "cryc.h"
+
+/*
+ * The section and algorithm numbers in the comments of this file are
+ * those of FIPS 202 (August 2015).
+ */
 
 /* The rates in bytes (r / 8, 6.1 and 6.2: c = 2d for SHA-3, c = 256 and 512 for the SHAKEs). */
 #define CRYC_SHA3_256_RATE	136U

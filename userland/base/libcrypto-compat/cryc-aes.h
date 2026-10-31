@@ -10,9 +10,6 @@
  * direction, and the counter mode GCM uses.  The inverse cipher is not
  * needed (GCM only encrypts blocks) and is not provided.
  *
- * The section numbers below are those of FIPS 197 (May 2023 update,
- * "FIPS 197-upd1").
- *
  * Constant time.  The key, the round keys and every state byte are
  * secret.  The implementation has no table indexed by a secret: SubBytes
  * and InvSubBytes are computed, not looked up.  The intended form is
@@ -37,6 +34,11 @@
 #define LIBCRYPTO_COMPAT_CRYC_AES_H
 
 #include "cryc.h"
+
+/*
+ * The section numbers in the comments of this file are those of FIPS 197
+ * (May 2023 update, "FIPS 197-upd1").
+ */
 
 /* The block size in bytes (5, Figure 1). */
 #define CRYC_AES_BLOCK		16U

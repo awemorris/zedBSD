@@ -10,8 +10,6 @@
  * ChaCha20-Poly1305 suites (RFC 7905 for TLS 1.2, RFC 8446 5.2 for TLS
  * 1.3).
  *
- * The section numbers below are those of RFC 8439 (June 2018).
- *
  * Constant time.  Keys, the Poly1305 accumulator and the plaintext are
  * secret.  ChaCha20 is additions, XORs and rotations of 32-bit words.
  * Poly1305 is computed in radix 2^26 limbs with 64-bit products (no
@@ -23,6 +21,11 @@
 #define LIBCRYPTO_COMPAT_CRYC_CHACHA_H
 
 #include "cryc.h"
+
+/*
+ * The section numbers in the comments of this file are those of RFC 8439
+ * (June 2018).
+ */
 
 /* The sizes in bytes (2.3, 2.5, 2.8). */
 #define CRYC_CHACHA20_KEY	32U
@@ -74,9 +77,8 @@ int cryc_chacha20_xor(const uint8_t *key, uint32_t counter, const uint8_t *nonce
  * the same block function with a 32-bit counter and a 96-bit nonce in
  * those words).  The block function is the same as cryc_chacha20_block's.
  *
- * TLS does not use this form; it is part of the crypto surface for a
- * later in-house ssh (the chacha20-poly1305@openssh.com cipher keys one
- * ChaCha20 instance per packet this way).  in and out may be the same
+ * TLS does not use this form; SSH's chacha20-poly1305@openssh.com cipher
+ * and EVP_chacha20's IV layout do.  in and out may be the same
  * buffer; the counter is not allowed to wrap past 2^64 - 1 (EOVERFLOW,
  * nothing written).  Returns 0 or EOVERFLOW.
  */

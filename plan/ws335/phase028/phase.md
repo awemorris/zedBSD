@@ -2,7 +2,7 @@
 
 # ws335-p028: handshake の message の encode と syntax の確かめ
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p025、p020）
+Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p025）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -38,7 +38,7 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 - RFC 8448 の ServerHello・EncryptedExtensions・Certificate・CertificateVerify・Finished を parse。ClientHello の writer は RFC 8448 の ClientHello と同じ内容を与えれば同じ bytes になるかを、扱う拡張の部分で確かめる（RFC 8448 の ClientHello は libssl-compat の送らない拡張を含むので全体一致は求めない。違いの拡張の一覧を結果に）。
 - 壊した拡張の alert（decode_error・unsupported_extension・illegal_parameter）。
 - 他の実装（OpenSSL・BoringSSL・LibreSSL・mbedTLS・wolfSSL・libsodium・BearSSL・Go の crypto・Rust の crypto ほか）の code・comment・構造・内部の名前を写さない。表・定数は data として block ごとに直前の複数行の comment で「Values referenced: <仕様の名前と版> <節・表>」。file の先頭に出典を書かない。source に開発の管理情報（WS・Phase の番号、plan/ への参照、日付）を書かない。
-- header が黙っている所は自分で決め、結果の節に列挙する。phase.md が仕様と食い違えば仕様に従い、報告する。
+- header が黙っている内部の事（static の補助の分け方、内部の表の形、loop の順など、interface に出ない事）は自分で決め、結果の節に列挙する。interface の不備（足りない引数、矛盾する comment、header だけでは決められない約束）は §5 のとおり止めて返す。phase.md が仕様と食い違えば仕様に従い、報告する。
 
 ## 5. 変えてはいけない物
 

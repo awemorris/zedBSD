@@ -13,6 +13,13 @@
  * An SSL_CTX is set up by one thread and then may be read by several
  * (SSL_new copies its settings under lock); an SSL belongs to one thread
  * at a time.  Reference counts change only with cryc_os_atomic_add.
+ *
+ * Locks: an SSL_CTX's lock may be held while its store's lock is taken,
+ * never the reverse; no file is read and no user callback is called while
+ * either is held (SSL_CTX_load_verify_locations reads the file first).
+ *
+ * An SSL never connected (started 0) is freed without touching conn;
+ * SSL_shutdown on it returns -1 (SSL_R_SHUTDOWN_WHILE_IN_INIT).
  */
 
 #ifndef LIBSSL_COMPAT_SSLC_API_H

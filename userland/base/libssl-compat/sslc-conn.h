@@ -18,30 +18,45 @@
  * a record already sealed is kept whole until it is sent, so a record is
  * never sent twice or in part followed by another).
  *
+ * Reading never runs ahead: the connection asks the transport for at most
+ * the rest of the current record (first the 5-byte header, then exactly
+ * the length the header gives), so no byte of a later record is ever held
+ * inside the connection.  A program that polls the socket whenever
+ * SSL_pending() is 0 (libbrowser does) then never waits for bytes that
+ * were already read (OpenSSL's default, read_ahead off).
+ *
  * Checks besides those of the record and handshake modules:
  *   - handshake messages are reassembled across records up to
  *     SSLC_HANDSHAKE_MAX bytes (a longer one is EMSGSIZE with the alert
- *     decode_error), and a key change (an SSLC_HS_SET_READ_KEYS action)
- *     while part of a message is buffered is unexpected_message (RFC 8446
- *     5.1);
+ *     decode_error);
+ *   - a key change must fall on a record boundary (RFC 8446 5.1): when the
+ *     handshake gives SSLC_HS_SET_READ_KEYS, any byte left unread in the
+ *     current record or in the reassembly buffer is unexpected_message;
+ *     the same for a TLS 1.2 ChangeCipherSpec that arrives while a
+ *     handshake message is incomplete;
  *   - TLS 1.3 forbids zero-length handshake and alert fragments and
  *     interleaving (5.1); a record of another type while a handshake
  *     message is incomplete is unexpected_message;
+ *   - a TLS 1.2 application data record whose decrypted plaintext is empty
+ *     is accepted and counted as a record without progress;
  *   - application data before the handshake ends is unexpected_message;
  *   - alerts: a received close_notify ends the reading side (read returns
- *     EPIPE); in TLS 1.3 any other alert is fatal (6); in TLS 1.2 a
- *     warning alert other than close_notify is ignored, a fatal one ends
- *     the connection; an alert record that is not exactly 2 bytes is
- *     decode_error;
+ *     EPIPE); in TLS 1.3 user_canceled is a closure alert, ignored and
+ *     counted as a record without progress (6.1), and any other alert is
+ *     fatal (6.2); in TLS 1.2 a warning alert other than close_notify is
+ *     ignored and counted, a fatal one ends the connection; an alert record
+ *     that is not exactly 2 bytes is decode_error;
  *   - at most SSLC_CONN_MAX_EMPTY consecutive records that carry no
- *     application data and no handshake progress (warnings, change cipher
- *     spec, empty TLS 1.2 data records, post-handshake tickets) are
+ *     application data and no handshake progress (warnings,
+ *     user_canceled, change cipher spec, empty TLS 1.2 data records,
+ *     post-handshake NewSessionTicket and KeyUpdate messages) are
  *     accepted; more is unexpected_message (a peer cannot make the client
- *     loop forever).
+ *     loop or rekey forever).
  *
  * On a failure the connection sends the fatal alert the failing module
  * named (internal_error when none; nothing after an alert was received or
- * the transport failed), marks itself failed, and every later operation
+ * the transport failed; never a close_notify after a fatal alert), marks
+ * itself failed, and every later operation
  * returns EPROTO.  The reason for the public error queue is in
  * conn->reason (an SSL_R_ value of <compat/ssl/ssl.h>, or 1000 plus a
  * received alert's description).

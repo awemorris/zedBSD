@@ -28,23 +28,21 @@ cryc_ed25519_public(
 }
 
 /*
- * Signs message (message_size bytes, may be 0) with the private key seed
- * and its public key (5.1.6), writing 64 bytes to signature.
+ * Signs message with the private key seed (the public key is derived
+ * inside).
  */
 int
 cryc_ed25519_sign(
 	uint8_t *signature,
 	const uint8_t *message,
 	size_t message_size,
-	const uint8_t *seed,
-	const uint8_t *public_key)
+	const uint8_t *seed)
 {
 	/* The parameters are used once the function is written. */
 	UNUSED_PARAMETER(signature);
 	UNUSED_PARAMETER(message);
 	UNUSED_PARAMETER(message_size);
 	UNUSED_PARAMETER(seed);
-	UNUSED_PARAMETER(public_key);
 
 	/* Not implemented: ENOSYS. */
 	return ENOSYS;

@@ -9,13 +9,6 @@
  * The constants of the TLS protocol libssl-compat speaks, and its table of
  * cipher suites.
  *
- * The section numbers below are those of RFC 8446 (TLS 1.3, August 2018)
- * unless another RFC is named; TLS 1.2 is RFC 5246 (August 2008) with the
- * ECDHE suites of RFC 8422, the AES-GCM suites of RFC 5289, the
- * ChaCha20-Poly1305 suites of RFC 7905, the extended master secret of RFC
- * 7627 and the renegotiation indication of RFC 5746.  The numbers are
- * IANA's registry values that those RFCs assign, used as data.
- *
  * Range.  A client of TLS 1.3 and TLS 1.2 (RFC 8996 removed 1.0 and
  * 1.1).  TLS 1.3 suites: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
  * TLS_CHACHA20_POLY1305_SHA256.  TLS 1.2 suites: ECDHE with ECDSA or RSA
@@ -25,17 +18,27 @@
  * P-384, RSA-PSS with an rsaEncryption key (rsae), RSA PKCS #1 v1.5 (for
  * TLS 1.2 and for certificates only, 4.2.3).  Extensions: server_name,
  * supported_groups, ec_point_formats (1.2), signature_algorithms,
- * application_layer_protocol_negotiation, extended_master_secret (1.2),
+ * extended_master_secret (1.2),
  * supported_versions, cookie, key_share, renegotiation_info (1.2).  No
  * session resumption, no 0-RTT, no PSK, no client certificates (an empty
  * Certificate answers a CertificateRequest), no renegotiation, no
- * post-handshake authentication.
+ * post-handshake authentication, no ALPN.
  */
 
 #ifndef LIBSSL_COMPAT_SSLC_TLS_H
 #define LIBSSL_COMPAT_SSLC_TLS_H
 
 #include "../libcrypto-compat/cryc-hash.h"
+
+/*
+ * The section numbers in the comments of this file are those of RFC 8446
+ * (TLS 1.3, August 2018) unless another RFC is named; TLS 1.2 is RFC
+ * 5246 (August 2008) with the ECDHE suites of RFC 8422, the AES-GCM
+ * suites of RFC 5289, the ChaCha20-Poly1305 suites of RFC 7905, the
+ * extended master secret of RFC 7627 and the renegotiation indication of
+ * RFC 5746.  The numbers are IANA's registry values that those RFCs
+ * assign, used as data.
+ */
 
 /*
  * The protocol versions (ProtocolVersion: 4.1.2, 4.2.1; RFC 5246 6.2.1).
@@ -240,8 +243,7 @@ struct sslc_suite {
 /*
  * Returns the suite numbered id when libssl-compat supports it, else
  * NULL.  The table (cited as data in sslc-tls.c) is constant.  name is
- * the IANA name (TLS_AES_128_GCM_SHA256, ...), returned by the public
- * SSL_CIPHER_get_name.
+ * the IANA name (TLS_AES_128_GCM_SHA256, ...).
  */
 const struct sslc_suite *sslc_tls_suite(uint16_t id);
 

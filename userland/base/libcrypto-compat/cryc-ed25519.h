@@ -43,15 +43,15 @@ int cryc_ed25519_public(uint8_t *public_key, const uint8_t *seed);
 
 /*
  * Signs message (message_size bytes, may be 0) with the private key seed
- * and its public key (5.1.6), writing 64 bytes to signature.
+ * (5.1.6), writing 64 bytes to signature.
  *
- * public_key must be the seed's public key (the caller keeps them
- * together; a mismatched pair gives a signature that does not verify,
- * and leaks nothing more).  Deterministic (the nonce is derived from the
- * seed's hash and the message, 5.1.6 step 2); needs no random source.
- * Returns 0.
+ * The public key A is derived from the seed inside the call (5.1.5), never
+ * taken from the caller: k = H(R || A || M) with a wrong A, for the same r,
+ * would let two signatures reveal the private scalar.  Deterministic (the
+ * nonce comes from the seed's hash and the message, 5.1.6 step 2); needs
+ * no random source.  Constant time in the seed.  Returns 0.
  */
-int cryc_ed25519_sign(uint8_t *signature, const uint8_t *message, size_t message_size, const uint8_t *seed, const uint8_t *public_key);
+int cryc_ed25519_sign(uint8_t *signature, const uint8_t *message, size_t message_size, const uint8_t *seed);
 
 /*
  * Verifies a signature (5.1.7) with the cofactorless equation [S]B = R +

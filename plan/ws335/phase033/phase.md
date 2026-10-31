@@ -25,7 +25,6 @@ Parent: [WS335](../ws.md)。担当: Opus（phase-runner-high を推す。推論�
 ## 3. 試験と受け入れ
 
 - `run-unit.sh all`・`run-ct.sh all`・`check-skeleton.sh` が PASS。
-- RFC 8448 の trace の一致（p029 の試験が all に入っている）。
 - run-interop.sh: TLS 1.3 × 3 suite × {x25519, P-256（HRR）} × {ECDSA P-256, ECDSA P-384, RSA 2048, RSA 4096} と TLS 1.2 × 6 suite × 同じ鍵、record の断片化（`-max_send_frag`）、非 blocking、server の close_notify の有無。全件 PASS。
 - run-limbo.sh: 期待との不一致の全部に理由（design の決定に基づく）。理由の無い不一致は 0。
 - net/tls.c の host の試験が compat で本家と同じ件数で PASS。

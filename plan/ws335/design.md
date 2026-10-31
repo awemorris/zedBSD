@@ -95,6 +95,8 @@
 | D18 | **OS の差**: socket は zedBSD で `read`/`write`、Windows で `recv`/`send`（`SSL_set_fd` の int を SOCKET として、OpenSSL の流儀）、`WSAGetLastError` を errno に写す（WS334 O32）。thread ごとの値は pthread の key と Windows の FLS | WS334 の O8・O32 と合わせる | — |
 | D19 | **WS336 の鍵の交換**: mlkem768x25519-sha256 を支持（P5 の案）。ML-KEM-768（FIPS 203）と SHA-3/SHAKE（FIPS 202）を libcrypto-compat に入れる（実装の Phase 3 つ） | in-tree の OpenSSH 10.5p1 の既定、OpenSSH 10.1 以降は PQ でない kex に警告。X25519 は TLS で作るので hybrid の残りは ML-KEM だけ。ML-KEM は後の TLS の X25519MLKEM768 にも使える | curve25519-sha256 だけ（RFC 8731、費用は 0 だが OpenSSH が警告を出す）。決めるのはユーザー（U3） |
 | D20 | **WS336 の cipher**: chacha20-poly1305@openssh.com（`EVP_chacha20` の 64 bit の counter と nonce、`EVP_MAC` の Poly1305）。ML-KEM の ek の取り出しは `EVP_PKEY_get_raw_public_key`（OpenSSL 3.5 の `doc/man3/EVP_PKEY_new.pod:194-200` が ML-KEM-768 に効くと書く）、`OSSL_PARAM`・`core_names.h` は作らない | 要る関数を最小に。`OSSL_PARAM` の struct は型として完全に置くが、配列の引数は NULL だけ | aes256-gcm@openssh（AES-GCM は内部に有るので後で安く足せる） |
+| D21 | **read ahead をしない**: 接続は今の record の残りだけを transport に求める（OpenSSL の既定の read_ahead off と同じ） | libbrowser は `SSL_pending()==0` の時に socket を poll する（`net/http.c:768-783`、`net/tls.c:541-553`、`net/loader.c:1838`・`:1861`）。先読みすると待ちが timeout まで止まる | 先読み（system call が減るが、SSL_pending と poll の約束が崩れる） |
+| D22 | **handshake の単体試験の相手は試験の道具の scripted な server**（p037 の `tlspeer.h`）。RFC 8448 の値は record・鍵の schedule・message の parse（p026〜p028）だけに使う | RFC 8448 の ClientHello は libssl-compat の送らない拡張を含み、server の鍵は RSA-1024（CRYC_RSA_MIN_BITS 未満）なので、全体の trace は一致しえない（design-review 1） | 試験のための hook を handshake の config に足す（本番の code に試験の道を残す） |
 
 ## 4. 構成
 
@@ -180,7 +182,7 @@ zedBSD の base の build は compat、Linux の host の試験（WS074 の host
 | 単体（各 Phase） | [run-unit.sh](tests/run-unit.sh)（ASan・UBSan、`-std=c89`）。期待の値は仕様の表・付録と公式の vector（CAVP・Wycheproof・RFC の付録・RFC 8448・x509-limbo）と手の計算だけ。他の実装の出力は使わない。逆向きの独立の道具: [derwriter.h](tests/unit/derwriter.h)（DER の組み立て）、record・handshake の相手の bytes は RFC 8448 の値 | host |
 | 定数時間 | [run-ct.sh](tests/run-ct.sh)（`ct-<名前>.c`） | host |
 | 骨格 | [check-skeleton.sh](tests/check-skeleton.sh)（header の単独の compile、cc・clang・zedBSD の clang・llvm-mingw の 2 arch、層の照合、`BASE=`） | host |
-| 統合（p033） | (1) RFC 8448 の trace を handshake に流し bytes 一致、(2) x509-limbo の SERVER 9,792 件（期待と一致の数、違いは理由の表）、(3) host の OpenSSL `s_server` との相互（1.2・1.3 × suite × x25519/P-256（HRR）× ECDSA/RSA × 断片化・非 blocking）、(4) net/tls.c の host の試験（`plan/ws074/tests/host-loader.c` の系）を `-DWB_TLS_COMPAT` 相当（試験用の名前の symlink）で compat に通す、(5) 実の site の一覧（Let's Encrypt の RSA と ECDSA、P-384 の中間、Google・Cloudflare・GitHub ほか 20、host から） | host |
+| 統合（p033） | (1) RFC 8448 の値（record・鍵・message）は p026〜p028 で照合済み、(2) x509-limbo の全件は p038、(3) host の OpenSSL `s_server` との相互（1.2・1.3 × suite × x25519/P-256（HRR）× ECDSA/RSA × 断片化・非 blocking）、(4) net/tls.c の host の試験（`plan/ws074/tests/host-loader.c` の系）を `-DWB_TLS_COMPAT` 相当（試験用の名前の symlink）で compat に通す、(5) 実の site の一覧（Let's Encrypt の RSA と ECDSA、P-384 の中間、Google・Cloudflare・GitHub ほか 20、host から） | host |
 | 統合（p033） | zedBSD の image で `fetch`…は無いので試験の program（`plan/ws335/tests/tls-client.c`）を QEMU の guest で走らせ、host の `s_server` に繋ぐ（SSH で操作、log で判定しない） | QEMU（Q1 の割当） |
 | 統合（p033） | Windows の build（llvm-mingw x86_64・aarch64）で `.dll` と試験の `.exe` を作る。実行は WS334 の Windows の試験の機械が揃ってから（未実施として残す） | cross |
 | 安全（p034） | 定数時間の全部、fuzz（各 1 時間、夜はユーザーに確かめてから）、review の checklist | host |
@@ -209,25 +211,35 @@ zedBSD の base の build は compat、Linux の host の試験（WS074 の host
 | p017 | X.509 の parse（cryc-x509.h） | test-x509（ca-certificates の全部、x509-limbo の証明書の parse、derwriter の壊れた拡張） | p016 | Sonnet |
 | p018 | 署名の確かめ（cryc-sigver.h） | test-sigver（ca-certificates の自己署名の確かめ、Wycheproof の DER の ECDSA） | p017・p011・p012 | Sonnet |
 | p019 | 名前（cryc-name.h） | test-name（RFC 9525 の例、name constraints の表、x509-limbo の名前の件） | p017 | Sonnet |
-| p020 | store と path validation（cryc-chain.h） | test-chain（x509-limbo の SERVER 件の期待との一致の数を記録、OpenSSL で作った試験の CA） | p018・p019・p015 | Sonnet |
+| p020 | store と path validation（cryc-chain.h） | test-chain（x509-limbo の rfc5280・pathlen・webpki・pathological の約 190 件、試験の CA） | p018・p019・p015 | Sonnet |
 | p021 | 誤りの queue と ERR・RAND・cleanse・memcmp（cryc-err.h、api-err.c） | test-err（thread ごと、満杯、文字列の形） | p015 | Sonnet |
 | p022 | 公開の X509（api-x509.c） | test-api-x509 | p020・p021 | Sonnet |
 | p023 | 公開の EVP の digest・cipher・MAC（api-evp.c） | test-api-evp（OpenSSL の man の約束、ssh の chacha20-poly1305@openssh の packet の例は PROTOCOL.chacha20poly1305 から手で） | p021・p006・p002 | Sonnet |
 | p024 | 公開の EVP_PKEY（api-pkey.c） | test-api-pkey（RFC 8032・7748 の値、Wycheproof mlkem を EVP 経由で） | p021・p009・p008・p014 | Sonnet |
 | p025 | TLS の定数・suite の表・buf（sslc-tls.h・sslc-buf.h） | test-tls・test-buf | p002 | Sonnet |
 | p026 | record（sslc-record.h） | test-record（RFC 8448 の暗号化された record を開く・同じ bytes に閉じる、壊した tag・長さ） | p025・p005・p006 | Sonnet |
-| p027 | 鍵の schedule と transcript（sslc-keysched.h） | test-keysched（RFC 8448 の全部の secret・key・iv、HRR の section 5、1.2 の PRF は HMAC の合成を式どおりに） | p026 | Sonnet |
-| p028 | handshake の message（sslc-msg.h） | test-msg（RFC 8448 の ClientHello・ServerHello・EE・Certificate・CV・Finished の bytes、壊した拡張の alert） | p025・p020 | Sonnet |
-| p029 | handshake の共通と TLS 1.3（sslc-hs.c・sslc-hs13.c） | test-hs13（RFC 8448 section 3 を固定の乱数で流し、送る bytes と鍵が一致、HRR は section 5） | p027・p028・p020・p011・p008 | Sonnet（重い。Q1 が Opus に替えてもよい） |
-| p030 | TLS 1.2（sslc-hs12.c） | test-hs12（RFC 5246・8422 の式から試験の側で作った server の message、EMS・RI・downgrade の印） | p029 | Sonnet |
-| p031 | 接続（sslc-conn.h） | test-conn（memory の pipe の transport で 1 byte ずつ・EAGAIN・alert・close_notify・EOF） | p030・p015 | Sonnet |
+| p027 | 鍵の schedule と transcript（sslc-keysched.h） | test-keysched（RFC 8448 の全部の secret・key・iv、HRR の section 5、1.2 の PRF は HMAC の合成を式どおりに） | p025・p002 | Sonnet |
+| p028 | handshake の message（sslc-msg.h） | test-msg（RFC 8448 の ServerHello・EE・Certificate・CV・Finished の parse、壊した拡張の alert） | p025 | Sonnet |
+| p029 | handshake の共通と TLS 1.3（sslc-hs.c・sslc-hs13.c） | test-hs13（tlspeer で 1-RTT・HRR・壊した message） | p027・p028・p020・p011・p008・p037 | Sonnet（重い。Q1 が Opus に替えてもよい） |
+| p030 | TLS 1.2（sslc-hs12.c） | test-hs12（tlspeer の 1.2 の flight、EMS・RI・downgrade の印） | p029・p037 | Sonnet |
+| p031 | 接続（sslc-conn.h） | test-conn（memory の pipe と tlspeer、1 byte ずつ・EAGAIN・alert・close_notify・EOF・先読みしない事・key change の境） | p030・p015・p037 | Sonnet |
 | p032 | 公開の SSL（api-ssl.c、sslc-api.h） | test-api-ssl（SSL_get_error の表、ctrl、非 blocking の繰り返し） | p031・p022 | Sonnet |
 | p033 | 統合: zedBSD の .so と exports、Windows の DLL、§8 の統合の試験 | §8 | p032・p023・p024 | Opus |
 | p034 | 安全の review と hardening | §6・§8 | p033 | Opus |
 | p035 | 規約の全文の見直しと header の持ち越しの直し | style-check、全試験が前と同じ | p034 | conformance-reviewer |
+| p037 | 試験の道具: tlspeer.h（scripted な TLS 1.3/1.2 server、試験の側の ECDSA の署名器、ClientHello の parser） | test-tlspeer | p025・p026・p027・p011・p008 | Opus |
+| p038 | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類 | test-limbo | p020 | Opus |
 | p036（提案、要承認） | net/tls.c の切り替え（§4.2）と Windows の名前、WS074・WS334 と調整 | WS074 の host 試験、QEMU の browser の https | p033 | 未定 |
 
-- 並べられる組（依存が満ちた順）: p002 の後に p003・p004・p006・p007・p008・p015・p016・p025 を並べて（Q1 の目安の 3〜5 ずつ）。
+- 起動の順（依存が満ちた物から、Q1 の目安の 3〜5 ずつ並べる）:
+  1. p002
+  2. p003・p004・p006・p007・p008・p015・p016・p025（p002 の後）
+  3. p005（p004）・p009（p008）・p010・p012（p007）・p013（p003）・p017（p016）・p021（p015）・p027・p028（p025）
+  4. p011（p010）・p014（p013）・p019（p017）・p023（p021・p006）・p026（p025・p005・p006）
+  5. p018（p017・p011・p012）・p024（p021・p009・p008・p014）・p037（p026・p027・p011・p008）
+  6. p020（p018・p019・p015）
+  7. p022・p038（p020）・p029（p027・p028・p020・p011・p008・p037）
+  8. p030 → p031 → p032 → p033 → p034 → p035、提案の p036 は承認の後
 - 規模の目安: 各 Phase は Sonnet の 1 回の起動（header 1〜3 個、仕様の 1〜2 節）。p029・p030・p033・p034 は重い。
 
 ## 10. 範囲の外の入力の扱い
@@ -242,4 +254,4 @@ zedBSD の base の build は compat、Linux の host の試験（WS074 の host
 
 ## 12. design-reviewer
 
-[design-review.md](design-review.md)（指摘の全部と、反映か見送りの理由）。header の凍結（基点の SHA）は反映の後の commit。
+[design-review.md](design-review.md)（27 件の指摘の全部と、反映か見送りの理由）。header と試験の道具の凍結（基点の SHA）は反映の後の commit で、ws.md と各 phase.md の `BASE=` に書く。

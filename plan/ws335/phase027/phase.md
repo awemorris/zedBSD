@@ -2,7 +2,7 @@
 
 # ws335-p027: transcript と鍵の schedule（1.3 と 1.2）
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p026）
+Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p025・p002）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -37,7 +37,7 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 - RFC 8448 の全部の secret・key・iv・finished を一致させる。HRR は section 5。
 - 1.2 の PRF の期待の値: 公式の vector が無いので、試験の側で HMAC（p002 で確かめ済み）を RFC 5246 5 の式どおりに組んで作り、sslc_tls12_prf と比べる（同じ式の 2 つ目の実装、他の library の出力は使わない）。
 - 他の実装（OpenSSL・BoringSSL・LibreSSL・mbedTLS・wolfSSL・libsodium・BearSSL・Go の crypto・Rust の crypto ほか）の code・comment・構造・内部の名前を写さない。表・定数は data として block ごとに直前の複数行の comment で「Values referenced: <仕様の名前と版> <節・表>」。file の先頭に出典を書かない。source に開発の管理情報（WS・Phase の番号、plan/ への参照、日付）を書かない。
-- header が黙っている所は自分で決め、結果の節に列挙する。phase.md が仕様と食い違えば仕様に従い、報告する。
+- header が黙っている内部の事（static の補助の分け方、内部の表の形、loop の順など、interface に出ない事）は自分で決め、結果の節に列挙する。interface の不備（足りない引数、矛盾する comment、header だけでは決められない約束）は §5 のとおり止めて返す。phase.md が仕様と食い違えば仕様に従い、報告する。
 
 ## 5. 変えてはいけない物
 

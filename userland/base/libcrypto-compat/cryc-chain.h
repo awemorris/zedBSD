@@ -174,8 +174,9 @@ int cryc_store_add_pem(struct cryc_store *store, const char *text, size_t size, 
  * Adds the CERTIFICATE blocks of a PEM file (read with
  * cryc_os_read_file, at most CRYC_OS_FILE_MAX bytes).
  *
- * Returns what cryc_os_read_file or cryc_store_add_pem returns (ENOENT
- * for a missing file).
+ * The file is read before the store's lock is taken.  Returns what
+ * cryc_os_read_file or cryc_store_add_pem returns (ENOENT for a missing
+ * file).
  */
 int cryc_store_add_file(struct cryc_store *store, const char *path);
 
@@ -218,7 +219,7 @@ int cryc_store_add_system(struct cryc_store *store);
  *     also checked for the trust anchor);
  *   - the name constraints of every certificate above it on the path,
  *     the trust anchor included, unless it is a self-issued
- *     intermediate (6.1.4 (g); cryc_name_constraints_check: EACCES gives
+ *     intermediate (6.1.3 (b) and (c); cryc_name_constraints_check: EACCES gives
  *     NAME_CONSTRAINT_VIOLATION, ENOTSUP UNSUPPORTED_NAME_CONSTRAINT);
  *   - no unknown critical extension (UNHANDLED_CRITICAL_EXTENSION);
  *   - for an intermediate: version 3 with basicConstraints cA TRUE
@@ -241,8 +242,11 @@ int cryc_store_add_system(struct cryc_store *store);
  * is self-issued, SELF_SIGNED_IN_CHAIN if the search ended at a
  * self-issued peer certificate, and UNABLE_TO_GET_ISSUER otherwise.
  *
- * The store's lock is held for the whole call.  Returns 0 (the outcome is
- * in *result, whatever it is) or ENOMEM; *result is always written.
+ * The store's lock is held for the whole call and nothing else is taken
+ * under it (no file is read and no callback is called with it held).
+ * Lock order of the libraries: an SSL_CTX's lock before its store's lock,
+ * never the reverse.  Returns 0 (the outcome is in *result, whatever it
+ * is) or ENOMEM; *result is always written.
  */
 int cryc_chain_verify(struct cryc_store *store, const struct cryc_x509 *peer, size_t peer_count, const struct cryc_verify_params *params, struct cryc_verify_result *result);
 

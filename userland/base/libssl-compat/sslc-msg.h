@@ -239,8 +239,8 @@ int sslc_msg_parse_certificate_request(const uint8_t *body, size_t size, int tls
 /*
  * Checks a TLS 1.3 NewSessionTicket body (4.6.1) for syntax: lifetime,
  * age_add, nonce<0..255>, ticket<1..2^16-1>, extensions<0..2^16-2>.  The
- * ticket is not kept (no resumption).  A lifetime over 604800 is
- * illegal_parameter (4.6.1).  Returns 0, EINVAL or EPROTO with *alert.
+ * ticket is not kept (no resumption), so its lifetime is not checked.
+ * Returns 0 or EINVAL with *alert.
  */
 int sslc_msg_parse_new_session_ticket(const uint8_t *body, size_t size, unsigned *alert);
 

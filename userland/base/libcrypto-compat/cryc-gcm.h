@@ -9,9 +9,6 @@
  * AES-GCM, the authenticated encryption of TLS's AES-GCM cipher suites
  * (RFC 5288 for TLS 1.2, RFC 8446 5.2 for TLS 1.3).
  *
- * The section and algorithm numbers below are those of NIST SP 800-38D
- * (November 2007).
- *
  * Constant time.  The key, the hash subkey H, the plaintext and the GHASH
  * state are secret.  The GHASH multiplication (6.3, Algorithm 1) is done
  * without a table indexed by H or by the data: the intended form is
@@ -26,6 +23,11 @@
 #define LIBCRYPTO_COMPAT_CRYC_GCM_H
 
 #include "cryc-aes.h"
+
+/*
+ * The section and algorithm numbers in the comments of this file are
+ * those of NIST SP 800-38D (November 2007).
+ */
 
 /* The tag size in bytes (5.2.1.2, t = 128). */
 #define CRYC_GCM_TAG		16U

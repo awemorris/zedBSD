@@ -32,9 +32,10 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 ## 4. 注意
 
 - 仕事の上限（CRYC_CHAIN_MAX_WORK）と深さ。
-- x509-limbo の SERVER の全件を流し、期待（SUCCESS・FAILURE）と一致した件数、違った件の id と理由（policy の処理をしない、CN を見ない等の決めた違い）を結果の節に表で。一致しない件の全部に理由が要る。
+- x509-limbo は id が `rfc5280::`・`pathlen::`・`webpki::`・`pathological::` の件（約 190 件）だけを流し、期待と一致した件数と、違った件の id と理由（policy の処理をしない、CN を見ない、trust anchor の制約を見ない等の決めた違い）を結果の節に表で。全件（9,792）の照合は p038。
+- 自分の試験の chain は試験の側で作る: 鍵と証明書は derwriter.h と cryc の検証済みの部品（p011 の ECDSA の確かめに通る署名は p037 の署名器を待たず、固定の自己署名の root と中間を host の `openssl req`・`openssl x509` で作って試験の data として置く。期待の判定は RFC 5280 6.1 から手で決める）。
 - 他の実装（OpenSSL・BoringSSL・LibreSSL・mbedTLS・wolfSSL・libsodium・BearSSL・Go の crypto・Rust の crypto ほか）の code・comment・構造・内部の名前を写さない。表・定数は data として block ごとに直前の複数行の comment で「Values referenced: <仕様の名前と版> <節・表>」。file の先頭に出典を書かない。source に開発の管理情報（WS・Phase の番号、plan/ への参照、日付）を書かない。
-- header が黙っている所は自分で決め、結果の節に列挙する。phase.md が仕様と食い違えば仕様に従い、報告する。
+- header が黙っている内部の事（static の補助の分け方、内部の表の形、loop の順など、interface に出ない事）は自分で決め、結果の節に列挙する。interface の不備（足りない引数、矛盾する comment、header だけでは決められない約束）は §5 のとおり止めて返す。phase.md が仕様と食い違えば仕様に従い、報告する。
 
 ## 5. 変えてはいけない物
 

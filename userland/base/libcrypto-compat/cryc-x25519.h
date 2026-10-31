@@ -10,8 +10,6 @@
  * exchange TLS names x25519 (RFC 8446 4.2.7 and 7.4.2; RFC 8422 for TLS
  * 1.2).
  *
- * The section numbers below are those of RFC 7748 (January 2016).
- *
  * Constant time.  The scalar and the result are secret.  The ladder of
  * section 5 is run for all 255 bits with conditional swaps done by masks
  * (cswap, section 5); the field arithmetic is cryc-f25519.h's (shared
@@ -25,6 +23,11 @@
 #define LIBCRYPTO_COMPAT_CRYC_X25519_H
 
 #include "cryc-f25519.h"
+
+/*
+ * The section numbers in the comments of this file are those of RFC 7748
+ * (January 2016).
+ */
 
 /* The size in bytes of a scalar, a u-coordinate and a shared secret (5). */
 #define CRYC_X25519_SIZE	32U

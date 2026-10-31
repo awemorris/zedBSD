@@ -10,8 +10,8 @@
 #     LLVM_MINGW (default ~/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64) exists;
 #  4. layering: no libcrypto-compat file names an sslc header or an sslc_ symbol; no file outside *-win32.c
 #     and *-posix.c tests _WIN32 or includes an operating-system header other than the C library's;
-#  5. with BASE=<commit>, the headers are unchanged since that commit (an implementation Phase must not change
-#     them; a header fault goes back to Q1).
+#  5. with BASE=<commit>, the headers and the test tools are unchanged since that commit, none added or removed
+#     (an implementation Phase must not change them; a fault goes back to Q1).
 #   sh plan/ws335/tests/check-skeleton.sh
 #   BASE=<sha> sh plan/ws335/tests/check-skeleton.sh
 # Last line: check-skeleton: PASS or check-skeleton: FAIL.  Output under build/tmp/ws335-skeleton (a fresh run).
@@ -111,11 +111,18 @@ for file in $crypto/*.c $crypto/*.h $ssl/*.c $ssl/*.h; do
 done
 
 if [ -n "${BASE:-}" ]; then
-	if ! git diff --quiet "$BASE" -- $headers; then
-		echo "FAILED headers changed since $BASE:"
-		git diff --stat "$BASE" -- $headers
+	frozen="userland/base/libcrypto-compat/*.h userland/base/libssl-compat/*.h include/libc/compat/crypto
+include/libc/compat/ssl plan/ws335/tests/check-skeleton.sh plan/ws335/tests/run-unit.sh plan/ws335/tests/run-ct.sh
+plan/ws335/tests/fetch.sh plan/ws335/tests/vectors.py plan/ws335/tests/unit/check.h
+plan/ws335/tests/unit/vecfile.h plan/ws335/tests/unit/derwriter.h plan/ws335/tests/unit/ct.h"
+	# Quoted pathspecs: git expands them, so a deleted or added file is seen as well as a changed one.
+	set -f
+	if ! git diff --quiet "$BASE" -- $frozen; then
+		echo "FAILED headers or test tools changed since $BASE:"
+		git diff --stat "$BASE" -- $frozen
 		status=1
 	fi
+	set +f
 fi
 
 if [ "$status" = 0 ]; then echo "check-skeleton: PASS"; else echo "check-skeleton: FAIL"; fi

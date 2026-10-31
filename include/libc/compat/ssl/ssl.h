@@ -6,8 +6,8 @@
  */
 
 /*
- * libssl-compat: zedBSD's own TLS client (TLS 1.3 and TLS 1.2), with the
- * subset of OpenSSL's libssl interface that libbrowser's net/tls.c uses.
+ * libssl-compat: zedBSD's own TLS client (TLS 1.3 and TLS 1.2), with a
+ * subset of OpenSSL's libssl interface.
  * It holds no OpenSSL code; the names, the signatures and the numeric
  * values are OpenSSL 3.5's, so that the same program works with either
  * library.  It is built on libcrypto-compat (<compat/crypto/...>), which
@@ -92,6 +92,7 @@ typedef int (*SSL_verify_cb)(int preverify_ok, X509_STORE_CTX *store);
 #define SSL_R_BAD_KEY_SHARE				108
 #define SSL_R_BAD_LENGTH				271
 #define SSL_R_BAD_SIGNATURE				123
+#define SSL_R_BAD_WRITE_RETRY				127
 #define SSL_R_CERTIFICATE_VERIFY_FAILED			134
 #define SSL_R_DECRYPTION_FAILED_OR_BAD_RECORD_MAC	281
 #define SSL_R_DIGEST_CHECK_FAILED			149
@@ -104,7 +105,9 @@ typedef int (*SSL_verify_cb)(int preverify_ok, X509_STORE_CTX *store);
 #define SSL_R_PACKET_LENGTH_TOO_LONG			198
 #define SSL_R_PROTOCOL_IS_SHUTDOWN			207
 #define SSL_R_RECORD_LENGTH_MISMATCH			213
+#define SSL_R_SHUTDOWN_WHILE_IN_INIT			407
 #define SSL_R_SSL_HANDSHAKE_FAILURE			229
+#define SSL_R_UNINITIALIZED				276
 #define SSL_R_UNEXPECTED_EOF_WHILE_READING		294
 #define SSL_R_UNEXPECTED_MESSAGE			244
 #define SSL_R_UNSUPPORTED_PROTOCOL			258
@@ -173,7 +176,7 @@ X509_STORE *SSL_CTX_get_cert_store(const SSL_CTX *ctx);
 /* Makes a connection object from a context (taking a reference to it); NULL on failure. */
 SSL *SSL_new(SSL_CTX *ctx);
 
-/* Frees a connection (without sending anything; SSL_shutdown first for a clean close); NULL is ignored. */
+/* Frees a connection (without sending anything; SSL_shutdown first for a clean close), also one never connected; NULL is ignored. */
 void SSL_free(SSL *ssl);
 
 /*
@@ -190,7 +193,14 @@ int SSL_set_fd(SSL *ssl, int descriptor);
  */
 long SSL_ctrl(SSL *ssl, int command, long number, void *pointer);
 
-/* Sets the host name the certificate must match (X509_VERIFY_PARAM_set1_host on the SSL's parameters). */
+/*
+ * Sets the name the certificate must match, as OpenSSL 3.5's
+ * SSL_set1_host: clears the host and the address set before, then an IP
+ * address literal (X509_VERIFY_PARAM_set1_ip_asc's forms) sets the
+ * address and any other text sets the host name
+ * (X509_VERIFY_PARAM_set1_host).  NULL clears both.  Returns 1, or 0 for
+ * a text that is neither.
+ */
 int SSL_set1_host(SSL *ssl, const char *host);
 
 /* Returns the SSL's verification parameters (owned by the SSL). */
@@ -205,7 +215,9 @@ int SSL_connect(SSL *ssl);
 
 /*
  * Reads up to length bytes of application data (running the handshake
- * first when it is not done).  Returns the count (> 0), or 0 or -1
+ * first when it is not done).  A length of 0 or less returns -1 with
+ * SSL_R_BAD_LENGTH queued (SSL_ERROR_SSL).  Returns the count (> 0), or
+ * 0 or -1
  * (SSL_get_error: WANT_READ, WANT_WRITE, ZERO_RETURN after the peer's
  * close_notify or, with SSL_OP_IGNORE_UNEXPECTED_EOF, after an EOF
  * without it; SYSCALL with errno; SSL otherwise).
@@ -216,14 +228,20 @@ int SSL_read(SSL *ssl, void *buffer, int length);
  * Writes length bytes (all of them, in records of at most 16 KiB) and
  * returns length, or 0 or -1 as SSL_read.  After WANT_WRITE or WANT_READ
  * the call must be repeated with the same buffer and length (OpenSSL's
- * rule); the bytes already taken are not taken again.
+ * rule); the bytes already taken are not taken again.  A repeated call
+ * with a length smaller than the bytes already taken returns -1 with
+ * SSL_R_BAD_WRITE_RETRY (SSL_ERROR_SSL); a length of 0 or less returns -1
+ * with SSL_R_BAD_LENGTH.
  */
 int SSL_write(SSL *ssl, const void *buffer, int length);
 
 /*
  * Classifies the result of the last SSL_connect, SSL_read, SSL_write or
- * SSL_shutdown on ssl (result is its return value): SSL_ERROR_NONE for a
- * positive result; WANT_READ or WANT_WRITE when the socket would block;
+ * SSL_shutdown on ssl (result is its return value).  The classification
+ * is the one that call stored (it does not look at the error queue again);
+ * for SSL_ERROR_SYSCALL it also sets errno back to the value the failing
+ * socket call left, so a program may read errno after it.
+ * SSL_ERROR_NONE for a positive result; WANT_READ or WANT_WRITE when the socket would block;
  * ZERO_RETURN for a clean close; SYSCALL for a socket failure (errno set;
  * an EOF without close_notify, without SSL_OP_IGNORE_UNEXPECTED_EOF, is
  * SSL_ERROR_SSL with SSL_R_UNEXPECTED_EOF_WHILE_READING queued, as in
@@ -237,7 +255,11 @@ int SSL_pending(const SSL *ssl);
 /*
  * Sends close_notify (once).  Returns 0 after sending it when the peer's
  * has not been received, 1 when both have, -1 on failure or blocking
- * (SSL_get_error).
+ * (SSL_get_error).  Before the handshake is complete (never started, or
+ * in progress) nothing is sent and -1 is returned with
+ * SSL_R_SHUTDOWN_WHILE_IN_INIT (SSL_ERROR_SSL); after a fatal alert was
+ * sent or received nothing is sent and -1 is returned with
+ * SSL_R_PROTOCOL_IS_SHUTDOWN.
  */
 int SSL_shutdown(SSL *ssl);
 

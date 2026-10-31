@@ -20,26 +20,44 @@
  * 1.2 states.
  *
  * Checks, besides the syntax sslc-msg.h checks:
- *   - ServerHello: legacy_version 0x0303; the version is
- *     supported_versions' when present (it must be SSLC_TLS13 and allowed;
- *     else illegal_parameter), else legacy_version's (SSLC_TLS12, allowed;
- *     else protocol_version); a TLS 1.2 ServerHello whose random ends with
+ *   - ServerHello: legacy_version must be 0x0303 (another value:
+ *     protocol_version); the version is supported_versions' when present
+ *     (it must be SSLC_TLS13 and allowed; else illegal_parameter), else
+ *     legacy_version's (SSLC_TLS12, which must be allowed; else
+ *     protocol_version); a TLS 1.2 ServerHello whose random ends with
  *     sslc_tls_downgrade12 or sslc_tls_downgrade11 while TLS 1.3 was
  *     offered is illegal_parameter (4.1.3); the suite was offered and
  *     belongs to the version (illegal_parameter); compression 0
- *     (illegal_parameter); TLS 1.3: legacy_session_id_echo equals the
- *     session id sent (illegal_parameter), key_share present with a group
- *     a share was sent for (illegal_parameter; missing: missing_extension);
- *     TLS 1.2: renegotiation_info present and empty (RFC 5746 3.4; absent
- *     is handshake_failure, as OpenSSL 3 refuses servers without it),
- *     extended master secret used when echoed.
+ *     (illegal_parameter);
+ *   - TLS 1.3 ServerHello: legacy_session_id_echo equals the session id
+ *     sent (illegal_parameter); key_share present (missing:
+ *     missing_extension) with a group a share was sent for
+ *     (illegal_parameter); only supported_versions and key_share may
+ *     appear (extended_master_secret, renegotiation_info,
+ *     ec_point_formats, server_name, cookie: illegal_parameter, 4.2's
+ *     table of where each extension may appear);
+ *   - TLS 1.2 ServerHello: renegotiation_info present and empty (RFC 5746
+ *     3.4; absent is handshake_failure, as OpenSSL 3 refuses servers
+ *     without it); extended master secret used when echoed; a session id
+ *     equal to the one sent while it is not empty means resumption, which
+ *     the client never asked for: illegal_parameter (the client sends an
+ *     empty session id unless TLS 1.3 is also offered, and its 32 random
+ *     bytes then must not be echoed by a TLS 1.2 server); supported_versions,
+ *     key_share and cookie are illegal_parameter;
  *   - HelloRetryRequest (4.1.4): at most one (a second is
  *     unexpected_message); its suite is TLS 1.3's and offered; its group,
  *     when present, is in supported_groups and has no share sent yet
  *     (illegal_parameter); it must change something (a cookie or a group;
  *     else illegal_parameter).  The second ClientHello has the new share
- *     and the cookie; the ServerHello after it must name the same suite.
- *   - Certificate: each DER parses (cryc_x509_parse; else bad_certificate),
+ *     and the cookie; the ServerHello after it must name the same suite,
+ *     the same selected version (4.1.4) and, when the HelloRetryRequest
+ *     named a group, a key_share of that group (4.2.8); else
+ *     illegal_parameter.
+ *   - EncryptedExtensions: a server_name acknowledgement when no SNI was
+ *     sent is unsupported_extension (4.2).
+ *   - Certificate: in TLS 1.3 the certificate_request_context is empty
+ *     (4.4.2; else illegal_parameter); each DER parses (cryc_x509_parse;
+ *     else bad_certificate),
  *     the chain is validated (cryc_chain_verify) with the configuration's
  *     parameters; the leaf's key is supported (else
  *     unsupported_certificate).
@@ -48,11 +66,16 @@
  *     scheme names the key's curve; RSA-PSS rsae needs an rsaEncryption
  *     key; else illegal_parameter); the signature over 64 spaces, "TLS
  *     1.3, server CertificateVerify", a zero byte and the transcript hash
- *     verifies (else decrypt_error).
+ *     verifies (else decrypt_error); RSA-PSS uses a salt of the hash's
+ *     length (4.2.3: cryc_sig_params.salt_size = the hash size).
  *   - ServerKeyExchange (TLS 1.2, RFC 8422 5.4): the group was offered
  *     (illegal_parameter); the point decodes (illegal_parameter); the
- *     scheme was offered and suits the suite's authentication and the key
- *     (illegal_parameter); the signature over client_random,
+ *     scheme was offered and suits the suite's authentication and the
+ *     key's type (an ECDSA scheme needs an EC key of either curve: in TLS
+ *     1.2 the scheme names only the hash, RFC 8422 5.1.3, so 0x0403 with a
+ *     P-384 key is valid; RSA-PSS rsae and RSA PKCS #1 need an
+ *     rsaEncryption key; else illegal_parameter; RSA-PSS uses the hash's
+ *     length as the salt); the signature over client_random,
  *     server_random and the params verifies (decrypt_error).
  *   - Finished: verify_data equals the expected value, compared in
  *     constant time (decrypt_error).
@@ -80,7 +103,21 @@
  *
  * A CertificateRequest during the handshake is answered with an empty
  * Certificate (no client certificate; TLS 1.3 sends no CertificateVerify
- * then, 4.4.2.4).
+ * then, 4.4.2.4).  A TLS 1.2 HelloRequest during the handshake is ignored
+ * and not added to the transcript (RFC 5246 7.4.1.1).
+ *
+ * Middlebox compatibility (D.4): when TLS 1.3 is offered the ClientHello
+ * carries a 32-byte random session id, and the client sends one
+ * change_cipher_spec record (SSLC_HS_SEND_CCS) exactly once: before its
+ * second ClientHello after a HelloRetryRequest, or else before its first
+ * encrypted flight (the Finished, or the empty Certificate), whichever
+ * comes first.
+ *
+ * Random draws (config->random), in this order, so that a test with a
+ * fixed source is deterministic: the client random (32 bytes), the session
+ * id (32 bytes, only when TLS 1.3 is offered), the x25519 private key (32
+ * bytes); later, when needed, the secp256r1 key generation's draws
+ * (cryc_ecc_keygen).
  *
  * Secrets (private keys, shared secrets, schedules) are wiped as soon as
  * they are no longer needed and by sslc_hs_free.

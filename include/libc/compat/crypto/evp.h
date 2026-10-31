@@ -202,9 +202,9 @@ void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx);
  * key 32 bytes (or NULL to keep it), iv 16 bytes (or NULL to keep it),
  * enc 1, 0 or -1 (keep; ChaCha20 is the same both ways).  The IV is
  * OpenSSL's layout: bytes 0 to 15 are the block function's state words
- * 12 to 15, little-endian; libcrypto-compat counts blocks in words 12 and
- * 13 as one 64-bit counter (OpenSSL carries only within word 12; the two
- * differ only after 2^32 blocks).  Setting an IV restarts the keystream.
+ * 12 to 15, little-endian, and the block counter is words 12 and 13 taken
+ * as one 64-bit little-endian counter.  Setting an IV restarts the
+ * keystream.
  */
 int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *impl, const unsigned char *key, const unsigned char *iv, int enc);
 
@@ -214,7 +214,11 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
  */
 int EVP_CipherUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *out_length, const unsigned char *in, int in_length);
 
-/* As EVP_CipherUpdate without the length output; returns 1 or 0 (OpenSSL's convention for stream ciphers). */
+/*
+ * As EVP_CipherUpdate without the length output.  Returns length (as
+ * int) on success, and -1 on failure (a context not set up, length over
+ * INT_MAX), as OpenSSL 3.5 does for provider ciphers.
+ */
 int EVP_Cipher(EVP_CIPHER_CTX *ctx, unsigned char *out, const unsigned char *in, unsigned int length);
 
 /* Returns the MAC algorithm named "POLY1305" (libctx and properties NULL), or NULL for another name. */

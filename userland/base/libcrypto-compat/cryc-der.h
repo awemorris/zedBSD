@@ -9,8 +9,6 @@
  * A reader of DER, the Distinguished Encoding Rules of ASN.1, for
  * certificates, public keys, algorithm identifiers and signatures.
  *
- * The clause numbers below are those of ITU-T X.690 (02/2021).
- *
  * Strict DER only (clause 10 and 11 on top of the BER of clause 8):
  * definite lengths in the minimum number of octets (10.1, 8.1.3.5 note:
  * the short form for lengths below 128), no indefinite length (8.1.3.6
@@ -30,6 +28,11 @@
 #define LIBCRYPTO_COMPAT_CRYC_DER_H
 
 #include "cryc.h"
+
+/*
+ * The clause numbers in the comments of this file are those of ITU-T
+ * X.690 (02/2021).
+ */
 
 /*
  * The tags (identifier octets, 8.1.2) of the universal types read, as the

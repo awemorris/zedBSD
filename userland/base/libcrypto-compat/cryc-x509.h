@@ -135,9 +135,11 @@ struct cryc_pubkey {
  *                            (unused bits must be 0).
  *   version                  1, 2 or 3.
  *   serial, serial_size      The serialNumber INTEGER's contents (sign
- *                            octet included; a negative or zero serial is
- *                            accepted, as 4.1.2.2 asks receivers to be
- *                            tolerant).
+ *                            octet included), read with cryc_der_expect
+ *                            (tag INTEGER, 1 to CRYC_X509_SERIAL_MAX
+ *                            bytes) and not with cryc_der_integer: a
+ *                            negative or zero serial is accepted, as
+ *                            4.1.2.2 asks receivers to be tolerant.
  *   issuer, subject          The whole Name encodings (SEQUENCE).
  *   not_before, not_after    The validity, seconds since 1970.
  *   spki, spki_size          The whole SubjectPublicKeyInfo encoding.

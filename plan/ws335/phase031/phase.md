@@ -2,7 +2,7 @@
 
 # ws335-p031: 接続（record の I/O・再組み立て・alert・close）
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p030、p015）
+Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p030、p015、p037）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -31,14 +31,16 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 
 ## 4. 注意
 
-- 試験の transport は memory の pipe（1 byte ずつ、EAGAIN を混ぜる）。相手の bytes は RFC 8448 の record。
+- 試験の transport は memory の pipe（1 byte ずつ、EAGAIN を混ぜる）。相手は p037 の tlspeer.h。
+- read ahead をしない事の試験: transport が求められた大きさを記録し、どの read も今の record の残り（header の 5 byte、次に length byte）を越えないこと。
+- key change の境の試験: ServerHello と EncryptedExtensions を 1 つの record に入れる、KeyUpdate の後に同じ record で data を続ける（どちらも unexpected_message）。
 - close_notify・EOF・alert・進まない record の上限。
 - 他の実装（OpenSSL・BoringSSL・LibreSSL・mbedTLS・wolfSSL・libsodium・BearSSL・Go の crypto・Rust の crypto ほか）の code・comment・構造・内部の名前を写さない。表・定数は data として block ごとに直前の複数行の comment で「Values referenced: <仕様の名前と版> <節・表>」。file の先頭に出典を書かない。source に開発の管理情報（WS・Phase の番号、plan/ への参照、日付）を書かない。
-- header が黙っている所は自分で決め、結果の節に列挙する。phase.md が仕様と食い違えば仕様に従い、報告する。
+- header が黙っている内部の事（static の補助の分け方、内部の表の形、loop の順など、interface に出ない事）は自分で決め、結果の節に列挙する。interface の不備（足りない引数、矛盾する comment、header だけでは決められない約束）は §5 のとおり止めて返す。phase.md が仕様と食い違えば仕様に従い、報告する。
 
 ## 5. 変えてはいけない物
 
-- 全ての header（`userland/base/libcrypto-compat/*.h`・`userland/base/libssl-compat/*.h`・`include/libc/compat/crypto/*.h`・`include/libc/compat/ssl/*.h`）、他の module の .c、Makefile と build の規則、試験の道具（§1 の一覧）、HAL・toolchain・共有の `build/`。
+- p037 の `plan/ws335/tests/unit/tlspeer.h`。全ての header（`userland/base/libcrypto-compat/*.h`・`userland/base/libssl-compat/*.h`・`include/libc/compat/crypto/*.h`・`include/libc/compat/ssl/*.h`）、他の module の .c、Makefile と build の規則、試験の道具（§1 の一覧）、HAL・toolchain・共有の `build/`。
 - header の不備（足りない引数、誤った comment、決められない約束）を見つけたら直さずに止め、どの header のどの関数で何が足りないかを Q1 に返す。
 
 ## 6. 確かめの command

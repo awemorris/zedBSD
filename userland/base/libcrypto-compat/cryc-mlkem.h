@@ -10,11 +10,6 @@
  * (August 2024), for the hybrid key exchange of the in-house ssh
  * (mlkem768x25519-sha256) through the public EVP_PKEY interface.
  *
- * The section and algorithm numbers below are those of FIPS 203.  The
- * parameter set is ML-KEM-768 (Table 2: k = 3, eta1 = 2, eta2 = 2,
- * du = 10, dv = 4); q = 3329, n = 256.  The NTT's zeta values (4.3,
- * Appendix A) are data cited at their table in the .c file.
- *
  * Module split inside the .c files: cryc-mlkem-poly.c holds the
  * arithmetic of R_q and T_q (reductions, NTT, NTT^-1, MultiplyNTTs,
  * BaseCaseMultiply, Algorithms 9 to 12), ByteEncode and ByteDecode
@@ -45,6 +40,14 @@
 #define LIBCRYPTO_COMPAT_CRYC_MLKEM_H
 
 #include "cryc-sha3.h"
+
+/*
+ * The section and algorithm numbers in the comments of this file are
+ * those of FIPS 203.  The parameter set is ML-KEM-768 (Table 2: k = 3,
+ * eta1 = 2, eta2 = 2, du = 10, dv = 4); q = 3329, n = 256.  The NTT's
+ * zeta values (4.3, Appendix A) are data cited at their table in the .c
+ * file.
+ */
 
 /* The sizes in bytes of ML-KEM-768 (Table 3). */
 #define CRYC_MLKEM768_EK	1184U

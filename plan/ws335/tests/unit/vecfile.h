@@ -99,8 +99,14 @@ vec_line(
 		}
 		file->text[file->used++] = (char)character;
 	}
-	if (file->text == NULL)
-		return 0;
+	if (file->used + 1U > file->size) {
+		file->size = file->size == 0U ? 4096U : file->size * 2U;
+		file->text = realloc(file->text, file->size);
+		if (file->text == NULL) {
+			printf("FAIL out of memory reading vectors\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 	file->text[file->used++] = '\0';
 	return (long)(file->used - start - 1U);
 }

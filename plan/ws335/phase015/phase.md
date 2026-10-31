@@ -30,7 +30,7 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標�
 - Windows: BCryptGenRandom、SRWLOCK、InitOnceExecuteOnce、FlsAlloc、recv/send/WSAGetLastError、CertOpenSystemStoreW・CertEnumCertificatesInStore・CertFindCertificateInStore、GetModuleHandleExW・GetModuleFileNameW、MultiByteToWideChar・_wfopen。winsock2.h を windows.h の前に。Windows の挙動は MSDN の文書（Microsoft Learn）を参照し、試験は compile と link まで（実行は p033 以降の Windows の機械）。
 - EINTR の retry、部分の read/write。
 - 他の実装（OpenSSL・BoringSSL・LibreSSL・mbedTLS・wolfSSL・libsodium・BearSSL・Go の crypto・Rust の crypto ほか）の code・comment・構造・内部の名前を写さない。表・定数は data として block ごとに直前の複数行の comment で「Values referenced: <仕様の名前と版> <節・表>」。file の先頭に出典を書かない。source に開発の管理情報（WS・Phase の番号、plan/ への参照、日付）を書かない。
-- header が黙っている所は自分で決め、結果の節に列挙する。phase.md が仕様と食い違えば仕様に従い、報告する。
+- header が黙っている内部の事（static の補助の分け方、内部の表の形、loop の順など、interface に出ない事）は自分で決め、結果の節に列挙する。interface の不備（足りない引数、矛盾する comment、header だけでは決められない約束）は §5 のとおり止めて返す。phase.md が仕様と食い違えば仕様に従い、報告する。
 
 ## 5. 変えてはいけない物
 
