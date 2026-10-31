@@ -86,5 +86,5 @@
 | [p032](phase032/phase.md) | 試験（Opus、旧 p015）: Wine＋llvmpipe での確かめの第 1 回（決定 20） | planned | p031 |
 | [p033](phase033/phase.md) | 統合（Opus、旧 p016）: 後半の Windows の口（TSF・drag と drop・touchpad・accent・Mica・DPAPI、arm64） | planned | p032 |
 | [p034](phase034/phase.md) | 試験（Opus、旧 p017）: libbrowser の試験を Windows（Wine）で | planned | p032 |
-| [p036](phase036/phase.md) | build（Opus）: 1 つの .exe（DLL を作らない static link。libbrowser・libmedia・libkeiland・compat・winpthreads・当面の OpenSSL、vulkan-1.dll は遅延の import）の形と design §6 の直し、libkeiland の Windows の pthread 無し（SRWLOCK・CreateThread） | in-progress（2026-11-01 q1808-i02、P7） | p016・p020・p021 |
+| [p036](phase036/phase.md) | build（Opus）: 1 つの .exe（DLL を作らない static link。libbrowser・libmedia・libkeiland・compat・winpthreads・当面の OpenSSL、vulkan-1.dll は遅延の import）の形と design §6 の直し、libkeiland の Windows の pthread 無し（SRWLOCK・CreateThread） | in-progress（実装済み・試験 PASS。2026-11-01 q1808-i02、P7: run-unit.sh all PASS（34 本）、cross-build PASS（libkeiland.a に pthread の名前なし、script-tool.exe の import は system の DLL と UCRT だけ）、zedBSD amd64 libkeiland.so と Linux の Keiland warning 0。cleared の判定は Q1） | p016・p020・p021 |
 | [p035](phase035/phase.md) | 規約の全文の見直し（旧 p018）と header の持ち越しの直し | planned | p033・p034・p036 |

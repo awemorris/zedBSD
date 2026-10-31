@@ -3,7 +3,7 @@
 # ws334-p036 build: 1 つの .exe（DLL を作らない static link）と libkeiland の Windows の pthread 無し
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §6.1・§6.2・§6.6・§6.10。ws.md のユーザーの決定（2026-11-01: Windows では DLL を作らず 1 つの .exe、libkeiland の Windows の port は pthread を使わない）。
-- 状態: in-progress（2026-11-01 q1808-i02、P7。p021 の後の同じ Queue の追い、Q1 の 2026-11-01 の指示）。
+- 状態: in-progress（実装済み・試験 PASS。2026-11-01 q1808-i02、P7。p021 の後の同じ Queue の追い、Q1 の 2026-11-01 の指示。cleared の判定は Q1）。
 - 依存: p016（platform-win32.c）・p020（`apps/browser-win32/Makefile` と cross-build.sh）・p021（libbrowser-core）。
 - 担当の想定: Opus（phase-runner）を 1 回。後の Phase（p022・p023・p026・p028・p030・p031）が同じ形に library と .exe を足す。
 
@@ -32,3 +32,37 @@
 ## 終わりの条件
 
 - 上が全部 PASS。commit（`git commit -m WIP -- <path>`、design と Makefile と libkeiland を分けて）。SHA・command と最後の行・未実施を Q1 に。ws.md の行を「実装済み・試験 PASS」に。
+
+## 結果（2026-11-01、P7、q1808-i02、基点 main 2c7e666e2）
+
+commit（`git commit -m WIP -- <path>`）:
+
+| SHA | 中身 |
+| --- | --- |
+| d808c0a90 | design.md §6（§6.1・§6.2・§6.6・§6.8・§6.9、新しい §6.10）、後の Phase の読み替えの注、この phase.md、ws.md の行（と p021 の cleared の記録） |
+| b96208510 | ユーザーの答え（console 用の `omnigrammaton-cli.exe` は要らない、配るのは `OmniGrammaton.exe` だけ）: ws.md の決定、design §6.2・O29・main.c の表、p028・p032・p034 の注 |
+| 2ceb0d091 | `libkeiland/platform/platform.h`（Windows の形: `struct keiui_lock` の room、`struct keiui_thread` の number と handle、`<pthread.h>` を include しない）、`platform-win32.c`（SRWLOCK・GetCurrentThreadId・CreateThread）、`plan/ws334/tests/unit/test-platform-win32.c`（thread の identity を number で比べる） |
+| 7bc42df7f | `apps/browser-win32/Makefile`（`libbrowser.a`・`libmedia.a`・`libkeiland.a`、`WIN32_PROGRAM` と `test-program`、`runtime` と `libwinpthread-1.dll` を外した、archive は q で作る、header の写しを compat に限る）、`plan/ws334/tests/cross-build.sh`（5・6） |
+
+確かめ:
+
+- `LC_ALL=C.UTF-8 timeout 3700 flock /tmp/zedbsd-wine.lock timeout 3600 sh plan/ws334/tests/run-unit.sh all` → `run-unit: PASS`（34 本、FAIL 0。test-platform-win32 は 315 checks。log `build/tmp/p036/run-unit.log`）。
+- 新しい platform-win32.c の変異 4 つ（take の Acquire を外す・give の Release を外す・`keiui_thread_is` の比較を逆に・join の Wait を外す）は全部 test-platform-win32 が見つけた（Release を外した物は試験が止まり、300 s の時間切れ）。元の file に戻した事を `cmp` で確かめた。
+- `timeout 3700 flock /tmp/zedbsd-wine.lock timeout 3600 sh plan/ws334/tests/cross-build.sh` → `cross-build: PASS`。win64・winarm64 とも: compat の warning 0、`libkeiland.a refers to no pthread_ name`、`one .exe, imports only the system's DLLs (13)`（KERNEL32・bcrypt・CRYPT32 と UCRT の api-ms-win-crt-* 10 個。`libwinpthread-1.dll` は無い）。win64 は Wine で `script-tool.exe random` が 16 byte、`Date.now()` の script が `number 13`。log `build/tmp/p036/cross-build.log`。
+- 手で: `build/tmp/p036/w64b/tests/script-tool.exe`（`make -f apps/browser-win32/Makefile ... test-program TEST_PROGRAM=script-tool TEST_PROGRAM_SOURCES=plan/ws334/tests/script-tool-main.c`）を Wine の `TZ=America/New_York` で p021 の `date.js` → `GMT-0500 (Eastern Standard Time)`・`GMT-0400 (Eastern Daylight Time)`・300。`make -B` で作り直しても同じ header（下の 3）。
+- zedBSD amd64 `make ZEDBSD_CONFIG=config/ci/config-amd64.mk ... -j16 build/amd64/dynamic/libkeiland.so`（sysroot は p021 の写し）→ exit 0、warning 0（platform.h を include する file が compile し直された）。
+- Linux の Keiland `timeout 2400 make -j16 -f userland/desktop/keiland-linux.mk all KEILAND_LINUX_BUILD=build/tmp/p036/keiland-linux` → exit 0、warning 0。
+- `git diff --check` → 出力なし。
+
+自分で決めた点・見つけた事:
+
+1. 「1 つの .exe」の今の形: browser の UI の program（`OmniGrammaton.exe`）は p028 で、その時に `WIN32_PROGRAM` の 1 行で足す。今この形を使うのは試験の program（`test-program`、design §6.2 の `tests/`）だけ。`make browser-win64` は全部の static library を作る。
+2. archive の member は file の名前で入るので、`ar rcs` は libbrowser の同じ名前の file（`page/input.c` と `html/input.c` など 18 組）の片方を落とす。新しい archive を毎回作り `qcs`（足すだけ）にした。libbrowser.a は 199 member（core 190 と Windows の層・storage の 9）。
+3. p020 の潜在の不具合: `obj/include/%.h` を `include/libc/%.h` から写す pattern の規則が、`make -B` や tree の header の更新の時に、Khronos の `vulkan/vulkan_core.h` を zedBSD の `include/libc/vulkan/` の古い物で上書きしていた（`make -B` で `vulkan_external.h` が無いと compile が止まって分かった）。規則を `include/compat/` に限った。壊れた出力の dir `build/tmp/p036/w64` は使わない（新しい `w64b` で作り直した）。
+4. `keiui_thread_id` は Windows で number と handle の組（struct）。join の handle を持つため。比べる時は number（`keiui_thread_is` と試験）。CreateThread は phase.md の通り（同じ library の `thread-win32.c` は `_beginthreadex`。UCRT は CreateThread の thread の CRT の状態も FLS で片付けるので、どちらでも可）。
+5. `WIN32_PROGRAM_LDFLAGS` は `-static -lpthread` と system の import library（今は ws2_32・bcrypt・crypt32・shell32・ole32）。後の Phase が使う system の library を足す。
+
+未実施:
+
+- aarch64 の .exe の実行（arm64 の Wine が無い。link と import の表だけ）。実機の Windows。FreeBSD の Keiland の build（platform.h の POSIX の形は変えていない）。
+- `OmniGrammaton.exe` 自体（p028）、libmedia・libkeiland の共通の file の static library への追加（p026・p028）、OpenSSL の static library（p030）。
