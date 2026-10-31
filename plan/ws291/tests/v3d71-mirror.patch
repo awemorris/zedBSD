@@ -1,0 +1,516 @@
+diff --git a/src/drivers/gpu/bcm2711/native-pass.c b/src/drivers/gpu/bcm2711/native-pass.c
+index d54547be9..e2e97136d 100644
+--- a/src/drivers/gpu/bcm2711/native-pass.c
++++ b/src/drivers/gpu/bcm2711/native-pass.c
+@@ -81,6 +81,10 @@ bcm2711_native_pass_measure(
+ 	if (state->load > 1 || state->store > 1)
+ 		return EINVAL;
+ 
++	/* The UIF mirror store is V3D 7.1's alone. */
++	if (state->mirror != 0)
++		return ENOTSUP;
++
+ 	/* A copy source is loaded with its own pitch, which obeys the same raster limits as the target's. */
+ 	if (state->source != 0) {
+ 		if (state->load == 0 ||
+diff --git a/src/drivers/gpu/bcm2711/native-pass.h b/src/drivers/gpu/bcm2711/native-pass.h
+index 4f17d0bb6..6251ddbd0 100644
+--- a/src/drivers/gpu/bcm2711/native-pass.h
++++ b/src/drivers/gpu/bcm2711/native-pass.h
+@@ -40,6 +40,14 @@ struct bcm2711_native_pass {
+ 	uint32_t source;
+ 	uint32_t source_pitch;
+ 	uint32_t source_bytes;
++	/*
++	 * A nonzero mirror makes every stored tile also go, in the strict UIF
++	 * (non-XOR) layout of 32-bit texels, to the image at mirror,
++	 * mirror_height UIF blocks tall: the sampled copy of the output, which
++	 * then needs no conversion.  The V3D 7.1 encoder only; 4.2 refuses it.
++	 */
++	uint32_t mirror;
++	uint32_t mirror_height;
+ 	/*
+ 	 * The depth/stencil attachment: depth 0 has none (the tile buffer's
+ 	 * depth is unused, cleared to 1.0 and stencil 0); 1 a D24S8 image, 2 an
+diff --git a/src/drivers/gpu/bcm2711/native-storage.c b/src/drivers/gpu/bcm2711/native-storage.c
+index bc0ee4c91..3a486c4c2 100644
+--- a/src/drivers/gpu/bcm2711/native-storage.c
++++ b/src/drivers/gpu/bcm2711/native-storage.c
+@@ -741,6 +741,110 @@ bcm2711_native_snapshot_put(
+ 	snapshot->users--;
+ }
+ 
++/* Takes an image's snapshot for a render pass to store its tiles in as well. */
++int
++bcm2711_native_snapshot_mirror(
++	struct bcm2711_v3d_space *space,
++	struct bcm2711_buffer *buffer,
++	uint64_t offset,
++	uint32_t width,
++	uint32_t height,
++	uint32_t pitch,
++	bool whole,
++	bool create,
++	struct bcm2711_native_snapshot **result)
++{
++	struct bcm2711_native_snapshot *snapshot;
++	uint32_t bytes;
++	int error;
++
++	/* A source a process can write through a CPU mapping keeps no snapshot. */
++	*result = NULL;
++	if (space->snapshot_limit == 0 || buffer->host_mapped)
++		return ENOTSUP;
++
++	/* The one-level snapshot of exactly this image, four-byte texels. */
++	for (snapshot = space->snapshots; snapshot != NULL; snapshot = snapshot->next) {
++		if (snapshot->buffer == buffer &&
++		    snapshot->offset == offset &&
++		    snapshot->width == width &&
++		    snapshot->height == height &&
++		    snapshot->pitch == pitch &&
++		    snapshot->texel_bytes == 4U &&
++		    snapshot->levels == 1U)
++			break;
++	}
++	if (snapshot == NULL && (!create || !whole))
++		return ENOENT;
++
++	/*
++	 * A new snapshot for an image that will be sampled, made as a lookup
++	 * makes one (pixels the building session left are given unzeroed and
++	 * remembered), invalid until the pass completes.
++	 */
++	if (snapshot == NULL) {
++		error = bcm2711_native_texture_size_texel(width, height, 4U, &bytes);
++		if (error != 0)
++			return error;
++		error = snapshot_evict(space, bytes, false);
++		if (error != 0)
++			return error;
++		snapshot = kern_calloc(1, sizeof(*snapshot));
++		if (snapshot == NULL)
++			return ENOMEM;
++		error = bcm2711_native_storage_create_as(space, bytes, BCM2711_NATIVE_STORAGE_OWNED, &snapshot->pixels);
++		if (error != 0) {
++			kern_free(snapshot);
++			return error;
++		}
++		if (snapshot->pixels->stale)
++			snapshot->owner = snapshot->pixels->owner;
++		snapshot->offset = offset;
++		snapshot->width = width;
++		snapshot->height = height;
++		snapshot->pitch = pitch;
++		snapshot->texel_bytes = 4U;
++		snapshot->levels = 1U;
++		snapshot->buffer = buffer;
++		snapshot->generation = buffer->generation;
++		bcm2711_buffer_retain(buffer);
++		snapshot->next = space->snapshots;
++		space->snapshots = snapshot;
++		space->snapshot_bytes += snapshot->pixels->view->bytes;
++	}
++
++	/* A snapshot a draw still samples cannot change. */
++	if (snapshot->users != 0)
++		return EBUSY;
++
++	/* Pixels that may hold another session's bytes are converted whole, as before; a partial pass needs current pixels. */
++	if (snapshot->owner != 0 && snapshot->owner != space->builder)
++		return ENOTSUP;
++	if (!whole && (!snapshot->valid || snapshot->generation != buffer->generation))
++		return ENOTSUP;
++
++	/* Invalid from now until the pass that writes it completed. */
++	snapshot->valid = false;
++	snapshot->users++;
++	space->snapshot_serial++;
++	snapshot->used = space->snapshot_serial;
++	*result = snapshot;
++
++	/* Succeeded: the pass stores its tiles in the snapshot's pixels. */
++	return 0;
++}
++
++/* Marks a mirrored snapshot current at the generation its completed pass left the image. */
++void
++bcm2711_native_snapshot_mirrored(
++	struct bcm2711_native_snapshot *snapshot,
++	uint64_t generation)
++{
++	/* The pixels match the image the pass stored. */
++	snapshot->generation = generation;
++	snapshot->valid = true;
++}
++
+ /*
+  * Marks a snapshot's pixels as converted once the unit job that writes them completed.
+  *
+diff --git a/src/drivers/gpu/bcm2711/native-storage.h b/src/drivers/gpu/bcm2711/native-storage.h
+index d6d63c172..4bee609ae 100644
+--- a/src/drivers/gpu/bcm2711/native-storage.h
++++ b/src/drivers/gpu/bcm2711/native-storage.h
+@@ -118,4 +118,17 @@ int bcm2711_native_snapshot_get_indices(struct bcm2711_v3d_space *space, struct
+ void bcm2711_native_snapshot_put(struct bcm2711_native_snapshot *snapshot);
+ void bcm2711_native_snapshot_filled(struct bcm2711_native_snapshot *snapshot);
+ 
++/*
++ * A render pass about to write a whole image of four-byte texels takes
++ * the image's one-level snapshot, when one exists and no draw samples it,
++ * to store its tiles there as well (a mirror): the snapshot is invalid
++ * until _mirrored gives the generation the pass left.  whole says the
++ * pass stores every tile; otherwise the snapshot must be current, so that
++ * the tiles it does not store still match.  With create, a whole pass
++ * makes the snapshot when there is none (an image that will be sampled).
++ * ENOENT, EBUSY and ENOTSUP leave the pass without a mirror.
++ */
++int bcm2711_native_snapshot_mirror(struct bcm2711_v3d_space *space, struct bcm2711_buffer *buffer, uint64_t offset, uint32_t width, uint32_t height, uint32_t pitch, bool whole, bool create, struct bcm2711_native_snapshot **result);
++void bcm2711_native_snapshot_mirrored(struct bcm2711_native_snapshot *snapshot, uint64_t generation);
++
+ #endif
+diff --git a/src/drivers/gpu/bcm2711/native71-pass.c b/src/drivers/gpu/bcm2711/native71-pass.c
+index a02a9280c..f8f7d7c05 100644
+--- a/src/drivers/gpu/bcm2711/native71-pass.c
++++ b/src/drivers/gpu/bcm2711/native71-pass.c
+@@ -41,6 +41,7 @@ static int validate_images(const struct bcm2711_native_pass *state, const struct
+ static void write_word(uint8_t *bytes, uint32_t word);
+ static void write_half(uint8_t *bytes, uint32_t half);
+ static void write_raster(uint8_t *bytes, uint8_t opcode, uint32_t pitch, uint32_t address);
++static void write_uif(uint8_t *bytes, uint32_t height, uint32_t address);
+ static void write_depth(uint8_t *bytes, uint8_t opcode, const struct bcm2711_native_pass *state);
+ static int validate_depth(const struct bcm2711_native_pass *state);
+ static void encode_render(const struct bcm2711_native_pass *state, const struct bcm2711_native_pass_image *tile, const struct bcm2711_native_pass_sizes *sizes, uint8_t *bytes);
+@@ -95,6 +96,13 @@ bcm2711_native_pass_measure(
+ 	if (state->load > 1 || state->store > 1)
+ 		return EINVAL;
+ 
++	/* A mirror copies a stored colour target, as tall as the target in whole UIF blocks of eight rows. */
++	if (state->mirror != 0 &&
++	    (state->store == 0 ||
++	     (state->mirror & 63U) != 0 ||
++	     state->mirror_height != (state->height + 7U) / 8U))
++		return EINVAL;
++
+ 	/* A copy source is loaded with its own pitch, which obeys the same raster limits as the target's. */
+ 	if (state->source != 0) {
+ 		if (state->load == 0 ||
+@@ -139,6 +147,8 @@ bcm2711_native_pass_measure(
+ 	measured.tile = 27U;
+ 	if (state->load != 0)
+ 		measured.tile += 13U;
++	if (state->mirror != 0)
++		measured.tile += 13U;
+ 
+ 	/* A depth/stencil load adds its packet; a depth/stencil store adds one unless it takes the place of the NONE store. */
+ 	if (state->depth_load != 0)
+@@ -460,6 +470,31 @@ write_raster(
+ 	return;
+ }
+ 
++/*
++ * Encodes one store of render target 0 in the strict UIF layout without
++ * XOR (memory format 4), RGBA8, height UIF blocks tall.
++ *
++ * Values referenced: Mesa 25.3.6 src/broadcom/cle/v3d_packet.xml (Store
++ * Tile Buffer General: Memory Format UIF (No XOR) 4, Height in UB or
++ * Stride at bit 28) and vulkan/v3dvx_cmd_buffer.c (the UIF store's padded
++ * height in UIF blocks).
++ */
++static void
++write_uif(
++	uint8_t *bytes,
++	uint32_t height,
++	uint32_t address)
++{
++	/* Render target 0, UIF without XOR, RGBA8, then the block height from bit twenty-eight. */
++	bytes[0] = 29;
++	write_word(bytes + 1, (4U << 4) | (27U << 12) | (height << 28));
++	write_word(bytes + 5, height >> 4);
++	write_word(bytes + 9, address);
++
++	/* Succeeded: the packet references only the mirror image. */
++	return;
++}
++
+ /*
+  * Encodes one raster load or store of the depth/stencil tile buffer: Z and
+  * stencil for a D24S8 image, Z alone for an X8_D24 one, both in the d24s8
+@@ -636,7 +671,14 @@ encode_tile(
+ 	if (state->store != 0) {
+ 		write_raster(bytes + cursor, 29, state->pitch, state->output);
+ 		cursor += 13U;
+-	} else if (state->depth_store == 0) {
++	}
++
++	/* The mirror stores the same tile again, in the UIF layout its texture samples. */
++	if (state->mirror != 0) {
++		write_uif(bytes + cursor, state->mirror_height, state->mirror);
++		cursor += 13U;
++	}
++	if (state->store == 0 && state->depth_store == 0) {
+ 		bytes[cursor] = 29;
+ 		bytes[cursor + 1U] = 8;
+ 		cursor += 13U;
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-native-execute.c b/src/drivers/gpu/bcm2711/vk/vulkan-native-execute.c
+index 00f7a6827..5b6c0be40 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-native-execute.c
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-native-execute.c
+@@ -243,6 +243,10 @@ bcm2711_vulkan_native_pass_finish(
+ 	/* Completion and GPU output clean precede a following FIFO CPU read or independently staged sampled texture. */
+ 	kern_io_read_barrier();
+ 
++	/* The mirrored snapshot holds the image as the pass left it. */
++	if (pass->mirror != NULL)
++		bcm2711_native_snapshot_mirrored(pass->mirror, output->generation);
++
+ 	/* The completed implicit render-pass transition becomes FIFO-visible only after successful native output retirement. */
+ 	bcm2711_vulkan_image_set_level_layout(pass->target, pass->target_level, pass->final_layout);
+ 
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-native-job.c b/src/drivers/gpu/bcm2711/vk/vulkan-native-job.c
+index 6036f48f7..2cb14c86b 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-native-job.c
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-native-job.c
+@@ -47,6 +47,7 @@ static int native_perf_state;
+ static int release_job(struct bcm2711_vulkan_native_job *job);
+ static int retire_closed_sessions(struct bcm2711_render_device *controller);
+ static void report_perf(struct bcm2711_v3d_perf *perf);
++static void slow_pass(const struct bcm2711_vulkan_native_pass *pass, uint32_t opcode, uint64_t prepare, uint64_t execute, const struct bcm2711_v3d_job_result *completion);
+ static bool perf_enabled(void);
+ static void perf_append(const char *format, ...) __attribute__((format(printf, 1, 2)));
+ static uint64_t average_us(uint64_t ticks, uint64_t count);
+@@ -131,6 +132,7 @@ bcm2711_vulkan_native_job_step(
+ 	uint64_t release_ticks;
+ 	uint64_t copy_ticks;
+ 	uint64_t elapsed;
++	uint64_t pass_prepare;
+ 	struct bcm2711_v3d_perf *perf;
+ 	uint32_t region;
+ 	uint32_t index;
+@@ -354,7 +356,8 @@ bcm2711_vulkan_native_job_step(
+ 			job->prepare_failed = true;
+ 
+ 		/* Accumulate preparation separately from device execution and retirement. */
+-		prepare_ticks += clock_ticks() - step;
++		pass_prepare = clock_ticks() - step;
++		prepare_ticks += pass_prepare;
+ 
+ 		/* A copy whose destination already holds its source's bytes prepared no pass. */
+ 		if (error == 0 && job->pass == NULL) {
+@@ -408,6 +411,7 @@ bcm2711_vulkan_native_job_step(
+ 				error = closed;
+ 		}
+ 		execute_ticks += clock_ticks() - step;
++		slow_pass(job->pass, event->opcode, pass_prepare, clock_ticks() - step, &completion);
+ 		perf->tfu_ticks += completion.tfu_ticks;
+ 		perf->tfu_jobs += completion.tfu_jobs;
+ 		if (completion.tfu_max_ticks > perf->tfu_max_ticks)
+@@ -936,6 +940,85 @@ perf_enabled(
+ 	return native_perf_state == NATIVE_PERF_ON;
+ }
+ 
++/*
++ * Reports a pass that took 10 ms or more to prepare and run (v3d.perf=1):
++ * its preparation and execution, the texture work, program builds and
++ * allocations of its draws, and its unit, bin and render times, in
++ * microseconds.  A frame that misses the display's refresh is found by it.
++ */
++static void
++slow_pass(
++	const struct bcm2711_vulkan_native_pass *pass,
++	uint32_t opcode,
++	uint64_t prepare,
++	uint64_t execute,
++	const struct bcm2711_v3d_job_result *completion)
++{
++	const struct bcm2711_vulkan_native_draw *draw;
++	uint64_t texture;
++	uint64_t copy;
++	uint64_t program;
++	uint64_t allocation;
++	uint32_t index;
++
++	/* Only a slow pass, and only with the report. */
++	if (pass == NULL || kern_ticks_to_ms(prepare + execute) < 10U || !perf_enabled())
++		return;
++
++	/* The draws' own costs. */
++	texture = 0;
++	copy = 0;
++	program = 0;
++	allocation = 0;
++	for (draw = pass->first; draw != NULL; draw = draw->next) {
++		texture += draw->texture_ticks;
++		copy += draw->copy_ticks;
++		program += draw->program_ticks;
++		for (index = 0; index < draw->count; index++)
++			allocation += draw->storage[index]->allocation_ticks;
++	}
++	for (index = 0; index < pass->count; index++)
++		allocation += pass->storage[index]->allocation_ticks;
++
++	/* One line for the pass. */
++	perf_append(
++		"v3d: slow pass op=%u draws=%u size=%ux%u us prep=%llu exec=%llu tex=%llu copy=%llu prog=%llu alloc=%llu tfu=%llu/%u bin=%llu render=%llu\n",
++		opcode,
++		pass->draws,
++		pass->state.width,
++		pass->state.height,
++		(unsigned long long)average_us(prepare, 1),
++		(unsigned long long)average_us(execute, 1),
++		(unsigned long long)average_us(texture, 1),
++		(unsigned long long)average_us(copy, 1),
++		(unsigned long long)average_us(program, 1),
++		(unsigned long long)average_us(allocation, 1),
++		(unsigned long long)average_us(completion->tfu_ticks, 1),
++		completion->tfu_jobs,
++		(unsigned long long)average_us(completion->bin_ticks, 1),
++		(unsigned long long)average_us(completion->render_ticks, 1));
++
++	/* The pass's output and the textures the unit converted for it: their image, size, and the image's generation. */
++	perf_append(
++		"v3d: slow pass output=%llx mirror=%u why=%u",
++		(unsigned long long)(uintptr_t)(pass->output != NULL ? pass->output->buffer : NULL) & 0xffffffULL,
++		pass->mirror != NULL ? 1U : 0U,
++		pass->mirror_why);
++	for (draw = pass->first; draw != NULL; draw = draw->next) {
++		for (index = 0; index < draw->texture_count; index++) {
++			if (!draw->textures[index].convert || draw->textures[index].snapshot == NULL)
++				continue;
++			perf_append(
++				" tfu=%llx:%ux%u:g%llu",
++				(unsigned long long)(uintptr_t)draw->textures[index].snapshot->buffer & 0xffffffULL,
++				draw->textures[index].snapshot->width,
++				draw->textures[index].snapshot->height,
++				(unsigned long long)draw->textures[index].snapshot->generation);
++		}
++	}
++	perf_append("\n");
++}
++
+ /*
+  * Formats one line of the cost report into the text the executor logs once
+  * it has given up the controller mutex; nothing without v3d.perf=1, and a
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.c b/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.c
+index 49475d459..6c313977e 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.c
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.c
+@@ -31,6 +31,7 @@ static int allocate_storage(struct bcm2711_vulkan_native_pass *pass, uint64_t by
+ static int prepare_lists(struct bcm2711_vulkan_native_pass *pass, uint64_t *remaining);
+ static uint32_t overflow_bytes(const struct bcm2711_vulkan_native_pass *pass);
+ static void select_boxes(struct bcm2711_vulkan_native_pass *pass);
++static void prepare_mirror(struct bcm2711_vulkan_native_pass *pass);
+ static bool box_add(struct bcm2711_native_pass *state, const uint32_t *box);
+ static void prepare_image(struct bcm2711_native_storage *storage, struct bcm2711_native_pass_image *image);
+ 
+@@ -101,6 +102,10 @@ bcm2711_vulkan_native_pass_create(
+ 	if (error == 0)
+ 		select_boxes(created);
+ 
++	/* A sampled output also gets its tiles in the UIF layout its texture snapshot holds. */
++	if (error == 0)
++		prepare_mirror(created);
++
+ 	/* Native command storage follows the complete independent draw prefix. */
+ 	if (error == 0) {
+ 		stage = "lists";
+@@ -293,6 +298,10 @@ bcm2711_vulkan_native_pass_release(
+ 	}
+ 
+ 	/* The independent framebuffer hold remains through all referenced native-input retirement. */
++	if (owned->mirror != NULL) {
++		bcm2711_native_snapshot_put(owned->mirror);
++		owned->mirror = NULL;
++	}
+ 	if (owned->output != NULL) {
+ 		error = bcm2711_v3d_memory_release(owned->space, owned->output);
+ 		if (first == 0 && error != 0)
+@@ -374,6 +383,73 @@ bcm2711_vulkan_native_pass_costs(
+ 	perf->staged_bytes += pass->bytes;
+ }
+ 
++/*
++ * Gives a pass that stores a whole RGBA8 or BGRA8 image the image's texture
++ * snapshot as a mirror, when one exists (the image was sampled before) or
++ * the image may be sampled (one is made): the tiles are stored there too,
++ * in the UIF layout the texture reads, so the next pass that samples the
++ * image converts nothing.  On V3D 4.2 nothing changes.
++ */
++static void
++prepare_mirror(
++	struct bcm2711_vulkan_native_pass *pass)
++{
++#if CONFIG_DRIVER_BCM2712_GPU
++	struct bcm2711_vulkan_resource *image;
++	struct bcm2711_native_snapshot *snapshot;
++	bool whole;
++	int error;
++
++	/* A stored colour image of four-byte texels, rendered at its own size and pitch from its first byte. */
++	image = pass->target;
++	pass->mirror_why = 1;
++	if (image == NULL ||
++	    pass->state.store == 0 ||
++	    pass->state.source != 0 ||
++	    pass->target_level != 0)
++		return;
++	pass->mirror_why = 2;
++	if (image->format != VK_FORMAT_R8G8B8A8_UNORM && image->format != VK_FORMAT_B8G8R8A8_UNORM)
++		return;
++	pass->mirror_why = 3;
++	if (pass->state.width != image->width ||
++	    pass->state.height != image->height ||
++	    pass->state.pitch != image->pitch)
++		return;
++	pass->mirror_why = 4 + ((image->usage & VK_IMAGE_USAGE_SAMPLED_BIT) != 0 ? 1U : 0U) * 2U;
++
++	/* Every tile of the image, or only some of them. */
++	whole = pass->state.box_count == 0 &&
++	    pass->state.first_x == 0 &&
++	    pass->state.first_y == 0 &&
++	    pass->state.last_x == (pass->state.width + 63U) / 64U - 1U &&
++	    pass->state.last_y == (pass->state.height + 63U) / 64U - 1U;
++
++	/* The snapshot, when there is one to take. */
++	error = bcm2711_native_snapshot_mirror(
++		pass->space,
++		pass->output->buffer,
++		(uint64_t)pass->state.output - pass->output->address,
++		pass->state.width,
++		pass->state.height,
++		pass->state.pitch,
++		whole,
++		(image->usage & VK_IMAGE_USAGE_SAMPLED_BIT) != 0,
++		&snapshot);
++	if (error != 0) {
++		pass->mirror_why += (uint32_t)error * 16U + (whole ? 1U : 0U);
++		return;
++	}
++	pass->mirror_why = 0;
++	pass->mirror = snapshot;
++	pass->state.mirror = snapshot->pixels->view->address;
++	pass->state.mirror_height = (pass->state.height + 7U) / 8U;
++#else
++	/* The UIF mirror store is V3D 7.1's alone. */
++	(void)pass;
++#endif
++}
++
+ /* Retains the actual coherent output view and copies immutable numerical area/lifecycle state without modifying any target sample. */
+ static int
+ prepare_target(
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.h b/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.h
+index e2e2036d9..75278558e 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.h
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.h
+@@ -21,6 +21,10 @@ struct bcm2711_v3d_perf;
+ struct bcm2711_vulkan_native_pass {
+ 	struct bcm2711_v3d_space *space;
+ 	struct bcm2711_v3d_view *output;
++	/* The output's texture snapshot the tiles are also stored in (state.mirror), held until release. */
++	struct bcm2711_native_snapshot *mirror;
++	/* Diagnostic: why the pass has no mirror (zero: it has one or never asked). */
++	uint32_t mirror_why;
+ 	/* A TLB copy's source view is retained like the output through native retirement. */
+ 	struct bcm2711_v3d_view *source;
+ 	/*

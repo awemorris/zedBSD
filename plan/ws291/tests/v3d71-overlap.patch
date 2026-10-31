@@ -1,0 +1,1306 @@
+diff --git a/src/drivers/gpu/bcm2711/bcm2711-private.h b/src/drivers/gpu/bcm2711/bcm2711-private.h
+index f93872f52..06338658d 100644
+--- a/src/drivers/gpu/bcm2711/bcm2711-private.h
++++ b/src/drivers/gpu/bcm2711/bcm2711-private.h
+@@ -303,6 +303,7 @@ bool bcm2711_stage_driver_off(void);
+ bool bcm2711_stage_allowed(const char *family, const char *stage);
+ bool bcm2711_stage_tfu_off(void);
+ bool bcm2711_stage_perf_on(void);
++bool bcm2711_stage_overlap_off(void);
+ bool bcm2711_stage_tfu_probe(void);
+ void bcm2711_stage_mark(const char *family, const char *format, ...) __attribute__((format(printf, 2, 3)));
+ void bcm2711_stage_pause(const char *family, const char *stage);
+diff --git a/src/drivers/gpu/bcm2711/stage.c b/src/drivers/gpu/bcm2711/stage.c
+index 008aca93b..92280fec5 100644
+--- a/src/drivers/gpu/bcm2711/stage.c
++++ b/src/drivers/gpu/bcm2711/stage.c
+@@ -25,6 +25,8 @@
+  *                         passed
+  *   v3d.perf=1            the engine logs its cost report every two seconds
+  *                         of work (none by default)
++ *   v3d.overlap=0         a V3D 7.1 render is waited for before its job
++ *                         returns, never left running beside the next bin
+  *   v3d.tfu_probe=1       the boot diagnostic also tries the texture
+  *                         formatting unit's one- and two-byte texels and
+  *                         its YUV inputs, and logs what each wrote
+@@ -54,6 +56,9 @@
+ /* The whole token that turns the engine's periodic cost report on. */
+ #define STAGE_PERF_ON_TOKEN		"v3d.perf=1"
+ 
++/* The whole token that keeps every render waited for before its job returns. */
++#define STAGE_OVERLAP_OFF_TOKEN		"v3d.overlap=0"
++
+ /* The whole token that runs the texture formatting unit's probe at boot. */
+ #define STAGE_TFU_PROBE_TOKEN		"v3d.tfu_probe=1"
+ 
+@@ -105,6 +110,26 @@ bcm2711_stage_tfu_off(
+ 	return false;
+ }
+ 
++/*
++ * Reports whether the boot asked that no render be left running beside the next bin.
++ */
++bool
++bcm2711_stage_overlap_off(
++	void)
++{
++	const char *line;
++	int present;
++
++	/* Looks for v3d.overlap=0 among the boot parameters. */
++	line = stage_command_line();
++	present = kern_boot_parameters_token_present(line, STAGE_OVERLAP_OFF_TOKEN);
++	if (present)
++		return true;
++
++	/* Renders overlap by default. */
++	return false;
++}
++
+ /*
+  * Reports whether the boot asked for the engine's periodic cost report.
+  */
+diff --git a/src/drivers/gpu/bcm2711/v3d-hardware.h b/src/drivers/gpu/bcm2711/v3d-hardware.h
+index ed97fa71b..499823074 100644
+--- a/src/drivers/gpu/bcm2711/v3d-hardware.h
++++ b/src/drivers/gpu/bcm2711/v3d-hardware.h
+@@ -163,6 +163,33 @@ struct bcm2711_v3d_tfu_probe_area {
+ 	uint32_t output_bytes;
+ };
+ 
++/*
++ * The render a command-list job left running when it returned (its tail),
++ * so that the next job's bin can run beside it.  Only the job runner,
++ * on the executor's thread, reads and writes it.
++ *
++ * Tickets name the tails in launch order: next is the last one given,
++ * finished the last one whose render completed and whose output was
++ * cleaned, lost the last one a fault or a reset took.  A tail is pending
++ * while active.  seen says its completion was already taken while another
++ * queue was waited for.  overlap is whether tails are allowed: unread (0),
++ * on (1) or off (2, v3d.overlap=0).
++ */
++struct bcm2711_v3d_tail {
++	uint64_t next;
++	uint64_t finished;
++	uint64_t lost;
++	uint64_t ticket;
++	uint64_t launched;
++	uint64_t busy_started;
++	uint64_t render_ticks;
++	uint64_t clean_ticks;
++	bool active;
++	bool seen;
++	bool clean_output;
++	uint8_t overlap;
++};
++
+ /*
+  * The engine retains both allocations once the MMU can fetch them.
+  * The single worker owns cache/MMU commands and ready/reset counters.  guard
+@@ -214,6 +241,8 @@ struct bcm2711_v3d_hardware {
+ 	 * Only the executor, holding the mutex, opens it.
+ 	 */
+ 	bool window;
++	/* The render left running by the last command-list job, if any (V3D 7.1 only). */
++	struct bcm2711_v3d_tail tail;
+ };
+ 
+ int bcm2711_v3d_hardware_start(struct bcm2711_v3d *engine);
+diff --git a/src/drivers/gpu/bcm2711/v3d-job.c b/src/drivers/gpu/bcm2711/v3d-job.c
+index 561ba2ebf..6800f6c7e 100644
+--- a/src/drivers/gpu/bcm2711/v3d-job.c
++++ b/src/drivers/gpu/bcm2711/v3d-job.c
+@@ -127,6 +127,44 @@ bcm2711_v3d_job_run(
+ 	return 0;
+ }
+ 
++/* The 4.2 runner waits for every render (defer_render is not taken), so no tail is ever pending. */
++bool
++bcm2711_v3d_job_pending(
++	struct bcm2711_v3d *engine,
++	uint64_t ticket)
++{
++	/* No ticket is ever given. */
++	(void)engine;
++	(void)ticket;
++	return false;
++}
++
++/* No ticket is ever given on 4.2, so none can be settled. */
++int
++bcm2711_v3d_job_settle(
++	struct bcm2711_v3d *engine,
++	uint64_t ticket,
++	bool wait,
++	struct bcm2711_v3d_job_result *result)
++{
++	/* Nothing retired by this call. */
++	(void)engine;
++	(void)ticket;
++	(void)wait;
++	kern_memset(result, 0, sizeof(*result));
++	return EINVAL;
++}
++
++/* No render is ever left running on 4.2. */
++int
++bcm2711_v3d_job_quiesce(
++	struct bcm2711_v3d *engine)
++{
++	/* Succeeded: nothing runs. */
++	(void)engine;
++	return 0;
++}
++
+ /* Checks private register fields and all directly described GPU address spans. */
+ static int
+ validate_job(
+diff --git a/src/drivers/gpu/bcm2711/v3d-job.h b/src/drivers/gpu/bcm2711/v3d-job.h
+index 106a75e9d..58e9e407a 100644
+--- a/src/drivers/gpu/bcm2711/v3d-job.h
++++ b/src/drivers/gpu/bcm2711/v3d-job.h
+@@ -47,6 +47,11 @@ struct bcm2711_v3d_cl_job {
+ 	struct bcm2711_v3d_overflow overflow[4];
+ 	uint32_t overflow_count;
+ 	bool clean_output;
++	/*
++	 * The job may return once its render is launched, leaving the render
++	 * as the engine's tail (V3D 7.1; the 4.2 runner waits as before).
++	 */
++	bool defer_render;
+ };
+ 
+ /*
+@@ -132,8 +137,31 @@ struct bcm2711_v3d_job_result {
+ 	uint32_t bin_counters[BCM2711_V3D_COUNTERS];
+ 	/* Whether the counters are V3D 7.1's sources (v3d71-job.c) instead of 4.2's. */
+ 	bool counters_71;
++	/*
++	 * The render was left running as the engine's tail under ticket:
++	 * retired stays false until bcm2711_v3d_job_settle reports it done.
++	 */
++	bool deferred;
++	uint64_t ticket;
+ };
+ 
+ int bcm2711_v3d_job_run(struct bcm2711_v3d *engine, const struct bcm2711_v3d_job *job, struct bcm2711_v3d_job_result *result);
+ 
++/*
++ * The tail: a command-list job with defer_render returns once its render is
++ * launched, and the next job's bin runs beside that render; the next
++ * render, texture or compute job waits for it first.  All three run on the
++ * executor's thread, as bcm2711_v3d_job_run does.
++ *
++ * bcm2711_v3d_job_pending tells whether the tail of ticket is still
++ * running.  bcm2711_v3d_job_settle reports 0 once it completed and its
++ * output was cleaned (result's retired, render and clean times set),
++ * EINPROGRESS while it runs (with wait, after sleeping until the next
++ * interrupt or tick), or the error that lost it (retired false).
++ * bcm2711_v3d_job_quiesce waits for whatever tail runs.
++ */
++bool bcm2711_v3d_job_pending(struct bcm2711_v3d *engine, uint64_t ticket);
++int bcm2711_v3d_job_settle(struct bcm2711_v3d *engine, uint64_t ticket, bool wait, struct bcm2711_v3d_job_result *result);
++int bcm2711_v3d_job_quiesce(struct bcm2711_v3d *engine);
++
+ #endif
+diff --git a/src/drivers/gpu/bcm2711/v3d-memory.h b/src/drivers/gpu/bcm2711/v3d-memory.h
+index c3c42f03b..cb1fbf75d 100644
+--- a/src/drivers/gpu/bcm2711/v3d-memory.h
++++ b/src/drivers/gpu/bcm2711/v3d-memory.h
+@@ -66,6 +66,14 @@ struct bcm2711_v3d_space {
+ 	 * Only the executor builds draws, so no other storage user sees it.
+ 	 */
+ 	uint64_t builder;
++	/*
++	 * The output run of the pass whose render the engine left running
++	 * (its tail) and the tail's ticket, set by the executor when it leaves
++	 * one.  A later pass that writes that run on the CPU, or reads it to
++	 * convert a texture, waits for the tail first while it is pending.
++	 */
++	struct bcm2711_buffer *tail_output;
++	uint64_t tail_ticket;
+ };
+ 
+ /* No DMA or overlapping edits may occur between begin and checked end. */
+diff --git a/src/drivers/gpu/bcm2711/v3d71-hardware.c b/src/drivers/gpu/bcm2711/v3d71-hardware.c
+index dd6c31bed..a11a799b7 100644
+--- a/src/drivers/gpu/bcm2711/v3d71-hardware.c
++++ b/src/drivers/gpu/bcm2711/v3d71-hardware.c
+@@ -312,6 +312,13 @@ bcm2711_v3d_hardware_reset(
+ 	if (busy)
+ 		return EBUSY;
+ 
++	/* A render left running does not survive the reset: its ticket is lost. */
++	if (hardware->tail.active) {
++		hardware->tail.lost = hardware->tail.ticket;
++		hardware->tail.active = false;
++		hardware->tail.seen = false;
++	}
++
+ 	/* Records the engine's error status before the reset clears it. */
+ 	error_status = 0;
+ 	if (engine->power.ready)
+diff --git a/src/drivers/gpu/bcm2711/v3d71-job.c b/src/drivers/gpu/bcm2711/v3d71-job.c
+index 638fa88ca..51b0693b6 100644
+--- a/src/drivers/gpu/bcm2711/v3d71-job.c
++++ b/src/drivers/gpu/bcm2711/v3d71-job.c
+@@ -126,6 +126,10 @@ static void counters_prepare(struct bcm2711_v3d *engine);
+ static void counters_select(struct bcm2711_v3d *engine, const uint8_t *sources);
+ static void counters_read(struct bcm2711_v3d *engine, uint32_t *values);
+ static int launch_admit_locked(struct bcm2711_v3d *engine);
++static bool overlap_on(struct bcm2711_v3d *engine);
++static int tail_finish(struct bcm2711_v3d *engine);
++static int tail_complete(struct bcm2711_v3d *engine);
++static void tail_lost(struct bcm2711_v3d *engine, int error);
+ static void report_failure(struct bcm2711_v3d *engine, const struct bcm2711_v3d_job *job, const struct bcm2711_v3d_job_result *result, int error);
+ 
+ /*
+@@ -148,6 +152,13 @@ bcm2711_v3d_job_run(
+ 	/* Refusals before launch do not borrow any caller DMA allocation. */
+ 	kern_memset(result, 0, sizeof(*result));
+ 	result->retired = true;
++
++	/* A compute job may write what the running tail reads: the tail ends first. */
++	if (job->kind == BCM2711_V3D_JOB_COMPUTE) {
++		error = bcm2711_v3d_job_quiesce(engine);
++		if (error != 0)
++			return error;
++	}
+ 	error = admit_job(engine);
+ 	if (error != 0)
+ 		return error;
+@@ -189,6 +200,229 @@ bcm2711_v3d_job_run(
+ 	return 0;
+ }
+ 
++/* Tells whether the tail of ticket is still running. */
++bool
++bcm2711_v3d_job_pending(
++	struct bcm2711_v3d *engine,
++	uint64_t ticket)
++{
++	/* Only the running tail is pending; every other ticket ended one way or the other. */
++	if (ticket == 0 || !engine->hardware.tail.active)
++		return false;
++
++	/* Succeeded: whether ticket names the running tail. */
++	return engine->hardware.tail.ticket == ticket;
++}
++
++/*
++ * Reports whether the tail of ticket completed: 0 with result retired,
++ * EINPROGRESS while it runs, or the error that lost it.
++ *
++ * With wait, a running tail is given until the next interrupt or tick.  One
++ * that has run past the progress windows of an ordinary wait is waited for
++ * with them, so a hung render is found as it would be without a tail.
++ */
++int
++bcm2711_v3d_job_settle(
++	struct bcm2711_v3d *engine,
++	uint64_t ticket,
++	bool wait,
++	struct bcm2711_v3d_job_result *result)
++{
++	struct bcm2711_v3d_tail *tail;
++	struct bcm2711_v3d_events events;
++	uint64_t observed;
++	int error;
++
++	/* Nothing is retired until the completion is proved. */
++	kern_memset(result, 0, sizeof(*result));
++	tail = &engine->hardware.tail;
++	if (ticket == 0 || ticket > tail->next)
++		return EINVAL;
++
++	/* The running tail: its completion taken now, after a short sleep when asked, or after its full wait. */
++	if (tail->active && tail->ticket == ticket) {
++		if (engine->hardware.faulted) {
++			tail_lost(engine, EIO);
++			return EIO;
++		}
++		observed = bcm2711_v3d_hardware_event_sequence(engine);
++		bcm2711_v3d_hardware_events(engine, &events);
++		if (events.error != 0) {
++			tail_lost(engine, events.error);
++			return events.error;
++		}
++		if ((events.core & BCM2712_V3D_CORE_RENDER_DONE) != 0)
++			tail->seen = true;
++		if (!tail->seen && wait) {
++			bcm2711_v3d_hardware_event_wait(engine, observed);
++			bcm2711_v3d_hardware_events(engine, &events);
++			if (events.error != 0) {
++				tail_lost(engine, events.error);
++				return events.error;
++			}
++			if ((events.core & BCM2712_V3D_CORE_RENDER_DONE) != 0)
++				tail->seen = true;
++		}
++
++		/* Still running: within the windows it is only in progress, past them it is waited for. */
++		if (!tail->seen) {
++			if (kern_ticks_to_ms(clock_ticks() - tail->launched) < 500U * JOB_PROGRESS_WINDOWS)
++				return EINPROGRESS;
++			error = tail_finish(engine);
++		} else {
++			error = tail_complete(engine);
++		}
++		if (error != 0)
++			return error;
++	}
++
++	/* A ticket a fault or a reset took is lost. */
++	if (ticket == tail->lost)
++		return EIO;
++
++	/* Succeeded: the render completed and its output was cleaned; the last one's times are reported. */
++	result->retired = true;
++	result->deferred = true;
++	result->ticket = ticket;
++	if (ticket == tail->finished) {
++		result->render_ticks = tail->render_ticks;
++		result->clean_ticks = tail->clean_ticks;
++	}
++	return 0;
++}
++
++/* Waits for whatever tail runs, so that nothing it reads or writes is touched before it completes. */
++int
++bcm2711_v3d_job_quiesce(
++	struct bcm2711_v3d *engine)
++{
++	int error;
++
++	/* No tail runs. */
++	if (!engine->hardware.tail.active)
++		return 0;
++
++	/* The tail's full wait, with its progress windows. */
++	error = tail_finish(engine);
++	if (error != 0)
++		return error;
++
++	/* Succeeded: no render runs. */
++	return 0;
++}
++
++/* Tells whether renders may be left running (once read, unless the boot said v3d.overlap=0). */
++static bool
++overlap_on(
++	struct bcm2711_v3d *engine)
++{
++	/* The boot line is read at the first job that asks. */
++	if (engine->hardware.tail.overlap == 0) {
++		engine->hardware.tail.overlap = 1;
++		if (bcm2711_stage_overlap_off())
++			engine->hardware.tail.overlap = 2;
++	}
++
++	/* On unless turned off. */
++	return engine->hardware.tail.overlap == 1;
++}
++
++/* Waits for the running tail's render with the ordinary progress windows, then completes it. */
++static int
++tail_finish(
++	struct bcm2711_v3d *engine)
++{
++	const struct job_queue render = {BCM2712_V3D_CORE_RENDER_DONE, 0, CLE_CT1CA, CLE_CT1RA};
++	struct bcm2711_v3d_job_result scratch;
++	int error;
++
++	/* A completion already taken needs no wait. */
++	if (!engine->hardware.tail.seen) {
++		kern_memset(&scratch, 0, sizeof(scratch));
++		error = wait_queue(engine, &render, NULL, &scratch);
++		if (error != 0) {
++			kern_logf(
++				"v3d: tail ticket=%llu error=%d fault=%x:%x\n",
++				(unsigned long long)engine->hardware.tail.ticket,
++				error,
++				scratch.fault_client,
++				scratch.fault_address);
++			tail_lost(engine, error);
++			return error;
++		}
++		engine->hardware.tail.seen = true;
++	}
++
++	/* The completion, and the clean of the output. */
++	error = tail_complete(engine);
++	if (error != 0)
++		return error;
++
++	/* Succeeded: no render runs. */
++	return 0;
++}
++
++/* Completes the tail whose render completion was taken: its time, then its output's clean when asked. */
++static int
++tail_complete(
++	struct bcm2711_v3d *engine)
++{
++	struct bcm2711_v3d_tail *tail;
++	uint64_t step;
++	int error;
++
++	/* The render ran from its launch until now (or until its completion was taken, a little earlier). */
++	tail = &engine->hardware.tail;
++	step = clock_ticks();
++	tail->render_ticks = step - tail->launched;
++	tail->clean_ticks = 0;
++
++	/* The output leaves the GPU caches before anyone may read it. */
++	if (tail->clean_output) {
++		error = bcm2711_v3d_hardware_clean(engine);
++		tail->clean_ticks = clock_ticks() - step;
++		if (error != 0) {
++			tail_lost(engine, error);
++			return error;
++		}
++	}
++
++	/* The render is busy time like any job's. */
++	bcm2711_v3d_busy_add(engine, tail->busy_started);
++
++	/* Succeeded: the tail retired. */
++	tail->finished = tail->ticket;
++	tail->active = false;
++	tail->seen = false;
++	return 0;
++}
++
++/*
++ * Gives up the running tail after a failure: no completion proves its
++ * render stopped, so the engine stops admitting work, as after a failed
++ * job, and its owners stay until a checked reset.
++ */
++static void
++tail_lost(
++	struct bcm2711_v3d *engine,
++	int error)
++{
++	unsigned long enabled;
++
++	/* The ticket is lost; the queues are quiet before the fault is published. */
++	(void)error;
++	engine->hardware.tail.lost = engine->hardware.tail.ticket;
++	engine->hardware.tail.active = false;
++	engine->hardware.tail.seen = false;
++	bcm2711_v3d_hardware_mask(engine);
++	enabled = spin_lock_irqsave(&engine->hardware.guard);
++
++	engine->hardware.faulted = true;
++
++	spin_unlock_irqrestore(&engine->hardware.guard, enabled);
++}
++
+ /* Checks the register fields and all directly described GPU address spans. */
+ static int
+ validate_job(
+@@ -350,6 +584,8 @@ admit_job(
+ {
+ 	struct bcm2711_v3d_hardware *hardware;
+ 	unsigned long enabled;
++	uint32_t cleared;
++	uint32_t kept;
+ 
+ 	/* Failed starts and resets refuse access before a guard or table is assumed. */
+ 	hardware = &engine->hardware;
+@@ -368,10 +604,21 @@ admit_job(
+ 		return EIO;
+ 	}
+ 
+-	/* Only old completions are discarded: the core's are all completions, the hub's is TFU's. */
+-	kern_mmio_write32(engine->core.mapped + CORE_INT_CLR, BCM2712_V3D_CORE_EVENTS);
++	/*
++	 * Only old completions are discarded: the core's are all completions,
++	 * the hub's is TFU's.  A running tail's render completion is not old,
++	 * and stays latched or pending for its settle.
++	 */
++	kept = 0;
++	cleared = BCM2712_V3D_CORE_EVENTS;
++	if (hardware->tail.active) {
++		kept = hardware->events.core & BCM2712_V3D_CORE_RENDER_DONE;
++		cleared &= ~BCM2712_V3D_CORE_RENDER_DONE;
++	}
++	kern_mmio_write32(engine->core.mapped + CORE_INT_CLR, cleared);
+ 	kern_mmio_write32(engine->hub.mapped + HUB_INT_CLR, BCM2712_V3D_HUB_TFU_DONE);
+ 	kern_memset(&hardware->events, 0, sizeof(hardware->events));
++	hardware->events.core = kept;
+ 	hardware->job_busy = true;
+ 
+ 	spin_unlock_irqrestore(&hardware->guard, enabled);
+@@ -431,12 +678,18 @@ run_cl(
+ 	uint64_t bin_ticks;
+ 	uint64_t render_ticks;
+ 	uint64_t clean_ticks;
++	bool counted;
++	bool defer;
+ 	int error;
+ 
+ 	/* Measures queue completion separately from the output cache drain. */
+ 	bin_ticks = 0;
+ 	clean_ticks = 0;
+ 
++	/* The counters measure one queue alone: not beside a running tail, nor a render that becomes one. */
++	defer = job->defer_render && overlap_on(engine);
++	counted = !engine->hardware.tail.active && !defer;
++
+ 	/* The bin queue writes tile lists into its validated pool and state allocations. */
+ 	if (job->bin_start != 0) {
+ 		error = bcm2711_v3d_hardware_invalidate(engine);
+@@ -459,9 +712,11 @@ run_cl(
+ 		kern_mmio_write32(engine->core.mapped + CLE_CT0QTS, job->state_address | CLE_TILE_STATE_ENABLE);
+ 		kern_mmio_write32(engine->core.mapped + CLE_CT0QBA, job->bin_start);
+ 		result->retired = false;
+-		counters_prepare(engine);
+-		counters_select(engine, bin_sources);
+-		counters_read(engine, before);
++		if (counted) {
++			counters_prepare(engine);
++			counters_select(engine, bin_sources);
++			counters_read(engine, before);
++		}
+ 		kern_mmio_write32(engine->core.mapped + CLE_CT0QEA, job->bin_end);
+ 
+ 		spin_unlock_irqrestore(&engine->hardware.guard, enabled);
+@@ -472,12 +727,19 @@ run_cl(
+ 		bin_ticks = clock_ticks() - step;
+ 		if (error != 0)
+ 			return error;
+-		counters_read(engine, after);
+-		for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
+-			result->bin_counters[index] = after[index] - before[index];
+-		result->counters_71 = true;
++		if (counted) {
++			counters_read(engine, after);
++			for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
++				result->bin_counters[index] = after[index] - before[index];
++			result->counters_71 = true;
++		}
+ 	}
+ 
++	/* The render queue takes one list at a time: a running tail ends first. */
++	error = bcm2711_v3d_job_quiesce(engine);
++	if (error != 0)
++		return error;
++
+ 	/* The render caches see bin-produced tile lists only after its IRQ. */
+ 	error = bcm2711_v3d_hardware_invalidate(engine);
+ 	if (error != 0)
+@@ -491,10 +753,12 @@ run_cl(
+ 	}
+ 
+ 	/* The counters before the run, as the render queue alone runs from here. */
+-	counters_prepare(engine);
+-	if (job->bin_start != 0)
+-		counters_select(engine, render_sources);
+-	counters_read(engine, before);
++	if (counted) {
++		counters_prepare(engine);
++		if (job->bin_start != 0)
++			counters_select(engine, render_sources);
++		counters_read(engine, before);
++	}
+ 
+ 	/* Starts the render queue; its end write launches it. */
+ 	kern_mmio_write32(engine->core.mapped + CLE_CT1QBA, job->render_start);
+@@ -503,16 +767,37 @@ run_cl(
+ 
+ 	spin_unlock_irqrestore(&engine->hardware.guard, enabled);
+ 
++	/*
++	 * A render left running becomes the tail: the job returns unretired,
++	 * and its settle reports the completion and the output's clean.  The
++	 * caller's pool and overflow storage stay alive until then.
++	 */
++	if (defer) {
++		engine->hardware.tail.next++;
++		engine->hardware.tail.ticket = engine->hardware.tail.next;
++		engine->hardware.tail.launched = clock_ticks();
++		engine->hardware.tail.busy_started = bcm2711_v3d_busy_clock();
++		engine->hardware.tail.clean_output = job->clean_output;
++		engine->hardware.tail.seen = false;
++		engine->hardware.tail.active = true;
++		result->deferred = true;
++		result->ticket = engine->hardware.tail.ticket;
++		result->bin_ticks = bin_ticks;
++		return 0;
++	}
++
+ 	/* The caller's pool and overflow storage stay alive through render completion. */
+ 	step = clock_ticks();
+ 	error = wait_queue(engine, &render, NULL, result);
+ 	render_ticks = clock_ticks() - step;
+ 	if (error != 0)
+ 		return error;
+-	counters_read(engine, after);
+-	for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
+-		result->counters[index] = after[index] - before[index];
+-	result->counters_71 = true;
++	if (counted) {
++		counters_read(engine, after);
++		for (index = 0; index < BCM2711_V3D_COUNTERS; index++)
++			result->counters[index] = after[index] - before[index];
++		result->counters_71 = true;
++	}
+ 
+ 	/* Cleans the output out of the GPU caches when the caller asked for it. */
+ 	if (job->clean_output) {
+@@ -694,6 +979,12 @@ wait_queue(
+ 				return events.error;
+ 			}
+ 
++			/* A running tail's render completion taken while another queue is waited for is kept for its settle. */
++			if (engine->hardware.tail.active &&
++			    queue->core_event != BCM2712_V3D_CORE_RENDER_DONE &&
++			    (events.core & BCM2712_V3D_CORE_RENDER_DONE) != 0)
++				engine->hardware.tail.seen = true;
++
+ 			/* Completion outranks a simultaneous out-of-memory warning from the retiring binner. */
+ 			if ((events.core & queue->core_event) != 0 || (events.hub & queue->hub_event) != 0)
+ 				return 0;
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-native-draw.c b/src/drivers/gpu/bcm2711/vk/vulkan-native-draw.c
+index 169ab938b..d79a2fc7c 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-native-draw.c
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-native-draw.c
+@@ -15,6 +15,7 @@
+ #include "drivers/gpu/bcm2711/bcm2711-private.h"
+ #include "drivers/gpu/bcm2711/native-state.h"
+ #include "drivers/gpu/bcm2711/vk/vulkan-native-draw.h"
++#include "drivers/gpu/bcm2711/vk/vulkan-native-pass.h"
+ #if CONFIG_DRIVER_BCM2711_VIDEO
+ #include "drivers/gpu/bcm2711/vk/vulkan-video.h"
+ #endif
+@@ -475,6 +476,11 @@ prepare_texture_image(
+ 	/* Complete coherent logical raster storage is read only at execution, after previous GPU writes become visible. */
+ 	image = texture_source->image;
+ 	error = bcm2711_vulkan_resource_backing(image, texture_source->offset, texture_source->bytes, &source_view, &address, &cpu);
++	if (error != 0)
++		return error;
++
++	/* A source a render left running still writes is read once that render completed. */
++	error = bcm2711_vulkan_native_tail_wait(draw->space, source_view->buffer);
+ 	if (error != 0)
+ 		return error;
+ 	error = bcm2711_native_texture_size_texel(texture_source->width, texture_source->height, texture_source->texel_bytes, &bytes);
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-native-execute.c b/src/drivers/gpu/bcm2711/vk/vulkan-native-execute.c
+index 00f7a6827..e6a1d318b 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-native-execute.c
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-native-execute.c
+@@ -236,8 +236,13 @@ bcm2711_vulkan_native_pass_finish(
+ 		output->synced_generation = output->generation;
+ 	}
+ 
+-	/* A successful callback without actual retired DMA cannot permit source reuse or native owner release. */
+-	if (!result->retired)
++	/*
++	 * A successful callback without actual retired DMA cannot permit source
++	 * reuse or native owner release.  A render left running as the tail
++	 * keeps every owner until its settle proves the completion; its layout
++	 * is FIFO state, committed now for the passes and barriers after it.
++	 */
++	if (!result->retired && !result->deferred)
+ 		return EIO;
+ 
+ 	/* Completion and GPU output clean precede a following FIFO CPU read or independently staged sampled texture. */
+@@ -254,6 +259,33 @@ bcm2711_vulkan_native_pass_finish(
+ 	return 0;
+ }
+ 
++/*
++ * Waits for the render the engine left running when it writes buffer, so
++ * that the CPU or the texture formatting unit touches the buffer only after
++ * that render completed.  Any other buffer, or no tail, waits for nothing.
++ */
++int
++bcm2711_vulkan_native_tail_wait(
++	struct bcm2711_v3d_space *space,
++	const struct bcm2711_buffer *buffer)
++{
++	int error;
++
++	/* Only the running tail's own output. */
++	if (buffer == NULL || space->tail_output != buffer)
++		return 0;
++	if (!bcm2711_v3d_job_pending(space->native, space->tail_ticket))
++		return 0;
++
++	/* The full wait, as the job itself would have waited. */
++	error = bcm2711_v3d_job_quiesce(space->native);
++	if (error != 0)
++		return error;
++
++	/* Succeeded: the buffer holds the render's whole output. */
++	return 0;
++}
++
+ /* Verifies all complete independently owned intervals and exact CPU target bounds before clear or launch. */
+ static int
+ validate_pass(
+@@ -437,6 +469,11 @@ clear_target(
+ 	if (pass->state.load == 0)
+ 		return 0;
+ 
++	/* The CPU writes the target only after a render still writing it completed. */
++	error = bcm2711_vulkan_native_tail_wait(pass->space, pass->output->buffer);
++	if (error != 0)
++		return error;
++
+ 	/* Only the implemented numerical colour storage formats supply an exact clamped packed clear. */
+ 	swap = 0;
+ 	if (pass->format == VK_FORMAT_B8G8R8A8_UNORM)
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-native-job.c b/src/drivers/gpu/bcm2711/vk/vulkan-native-job.c
+index 6036f48f7..194fe2ea9 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-native-job.c
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-native-job.c
+@@ -196,6 +196,18 @@ bcm2711_vulkan_native_job_step(
+ 	region = job->region;
+ 	event = job->cursor;
+ 	while (event != NULL) {
++		/*
++		 * Beside a render the engine left running, only a render pass's
++		 * preparation (which waits where it touches that render's output)
++		 * and a barrier's layout state may go on; any other command waits
++		 * for the render first.
++		 */
++		if (event->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS && event->opcode != GPU_OP_CMD_PIPELINE_BARRIER) {
++			error = bcm2711_v3d_job_quiesce(controller->space.native);
++			if (error != 0)
++				return error;
++		}
++
+ #if CONFIG_DRIVER_BCM2711_VIDEO
+ 		/*
+ 		 * A copy, blit or upload that names an image whose decode is in
+@@ -388,6 +400,16 @@ bcm2711_vulkan_native_job_step(
+ 			return error;
+ 		}
+ 
++		/*
++		 * The job's last render pass may leave its render running when the
++		 * queue allows it: the next job's bin then runs beside that render.
++		 */
++		if (job->may_defer &&
++		    event->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS &&
++		    next == NULL &&
++		    job->pass->job.kind == BCM2711_V3D_JOB_CL)
++			job->pass->job.command.cl.defer_render = true;
++
+ 		/*
+ 		 * Exact clear, supervised bin/render and GPU cache visibility execute
+ 		 * while every independent owner is held.  The native jobs run inside
+@@ -450,26 +472,38 @@ bcm2711_vulkan_native_job_step(
+ 			return error;
+ 		}
+ 
+-		/* Confirmed DMA retirement permits this resident pass budget and its mappings to be reused by the next FIFO pass. */
+-		bytes = job->pass->bytes;
+-		step = clock_ticks();
+-		error = bcm2711_v3d_memory_begin(&controller->space);
+-		if (error != 0)
+-			return error;
++		/*
++		 * A render left running keeps its pass, with every owner, until the
++		 * settle proves it completed; the job ends with this step, unretired.
++		 */
++		if (completion.deferred) {
++			job->tail = job->pass;
++			job->pass = NULL;
++			job->ticket = completion.ticket;
++			controller->space.tail_output = job->tail->output->buffer;
++			controller->space.tail_ticket = completion.ticket;
++		} else {
++			/* Confirmed DMA retirement permits this resident pass budget and its mappings to be reused by the next FIFO pass. */
++			bytes = job->pass->bytes;
++			step = clock_ticks();
++			error = bcm2711_v3d_memory_begin(&controller->space);
++			if (error != 0)
++				return error;
+ 
+-		/* Consumes all stopped pass roots while their physical allocations remain batch-owned. */
+-		error = bcm2711_vulkan_native_pass_release(&job->pass, true);
++			/* Consumes all stopped pass roots while their physical allocations remain batch-owned. */
++			error = bcm2711_vulkan_native_pass_release(&job->pass, true);
+ 
+-		/* Physical backing stays owned until the complete batch of PTE withdrawals is flushed. */
+-		end_step = clock_ticks();
+-		synchronized = bcm2711_v3d_memory_end(&controller->space);
+-		perf->release_end_ticks += clock_ticks() - end_step;
+-		if (synchronized != 0)
+-			error = synchronized;
+-		release_ticks += clock_ticks() - step;
+-		if (error != 0)
+-			return error;
+-		remaining += bytes;
++			/* Physical backing stays owned until the complete batch of PTE withdrawals is flushed. */
++			end_step = clock_ticks();
++			synchronized = bcm2711_v3d_memory_end(&controller->space);
++			perf->release_end_ticks += clock_ticks() - end_step;
++			if (synchronized != 0)
++				error = synchronized;
++			release_ticks += clock_ticks() - step;
++			if (error != 0)
++				return error;
++			remaining += bytes;
++		}
+ 
+ 		/* One pass ends the step; the next step starts at the following event. */
+ 		job->cursor = next;
+@@ -527,6 +561,98 @@ bcm2711_vulkan_native_job_count_step(
+ 	return;
+ }
+ 
++/*
++ * Settles a job whose last render the engine left running.
++ *
++ * Once the render completed and its output was cleaned, the pass and its
++ * owners are released as a retired step would have released them, and the
++ * job is retired.  A lost render leaves the job unretired, for quarantine.
++ */
++int
++bcm2711_vulkan_native_job_settle(
++	struct bcm2711_render_device *controller,
++	struct bcm2711_vulkan_native_job *job,
++	bool wait)
++{
++	struct bcm2711_v3d_job_result result;
++	struct bcm2711_v3d_perf *perf;
++	uint64_t step;
++	int synchronized;
++	int error;
++
++	/* Only a job with a tail settles. */
++	if (controller == NULL || controller->space.native == NULL || job == NULL || job->tail == NULL)
++		return EINVAL;
++
++	/* The render's completion and clean, or still running, or lost. */
++	error = bcm2711_v3d_job_settle(controller->space.native, job->ticket, wait, &result);
++	if (error != 0)
++		return error;
++
++	/* The render's own time joins the cost report. */
++	perf = &controller->space.native->hardware.perf;
++	perf->render_ticks += result.render_ticks;
++	perf->output_clean_ticks += result.clean_ticks;
++
++	/* The retired pass is released in one batch of translation withdrawals. */
++	step = clock_ticks();
++	error = bcm2711_v3d_memory_begin(&controller->space);
++	if (error != 0)
++		return error;
++	error = bcm2711_vulkan_native_pass_release(&job->tail, true);
++	synchronized = bcm2711_v3d_memory_end(&controller->space);
++	if (error == 0 && synchronized != 0)
++		error = synchronized;
++	perf->release_ticks += clock_ticks() - step;
++	if (error != 0)
++		return error;
++
++	/* Succeeded: the job's native work retired. */
++	job->retired = true;
++	return 0;
++}
++
++/* Gives the ticket of the render the engine still runs, or zero. */
++uint64_t
++bcm2711_vulkan_native_tail(
++	struct bcm2711_render_device *controller)
++{
++	uint64_t ticket;
++
++	/* The ticket the executor last left, while the engine still runs it. */
++	if (controller->space.native == NULL)
++		return 0;
++	ticket = controller->space.tail_ticket;
++	if (!bcm2711_v3d_job_pending(controller->space.native, ticket))
++		return 0;
++
++	/* Succeeded: that render still runs. */
++	return ticket;
++}
++
++/* Tells whether the render of ticket still runs. */
++bool
++bcm2711_vulkan_native_tail_pending(
++	struct bcm2711_render_device *controller,
++	uint64_t ticket)
++{
++	/* The engine knows its tail. */
++	if (controller->space.native == NULL)
++		return false;
++	return bcm2711_v3d_job_pending(controller->space.native, ticket);
++}
++
++/* Waits for the render the engine still runs. */
++int
++bcm2711_vulkan_native_tail_quiesce(
++	struct bcm2711_render_device *controller)
++{
++	/* The engine's full wait. */
++	if (controller->space.native == NULL)
++		return 0;
++	return bcm2711_v3d_job_quiesce(controller->space.native);
++}
++
+ /*
+  * Disposes a completed payload or transfers a whole uncertain payload to persistent controller ownership.
+  *
+@@ -632,8 +758,11 @@ release_job(
+ 	int first;
+ 	int error;
+ 
+-	/* Checked DMA retirement consumes all mapped inputs, including incomplete allocation prefixes. */
++	/* Checked DMA retirement consumes all mapped inputs, including incomplete allocation prefixes and a settled tail's pass. */
+ 	first = bcm2711_vulkan_native_pass_release(&job->pass, true);
++	error = bcm2711_vulkan_native_pass_release(&job->tail, true);
++	if (first == 0 && error != 0)
++		first = error;
+ 
+ 	/* Pending counts and cloned descriptors remain valid through the last native pass destructor. */
+ 	error = bcm2711_vulkan_prepared_release(job->prepared, true);
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-native-job.h b/src/drivers/gpu/bcm2711/vk/vulkan-native-job.h
+index 2c5754cb5..61287563c 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-native-job.h
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-native-job.h
+@@ -37,6 +37,16 @@ struct bcm2711_vulkan_native_job {
+ 	uint64_t copy_ticks;
+ 	/* The last step failed while preparing, before it launched anything or left a translation unpublished. */
+ 	bool prepare_failed;
++	/*
++	 * may_defer lets the job's last pass, when it is a render pass, leave
++	 * its render running (the engine's tail); the queue sets it when
++	 * nothing after the job needs the render done first.  tail is that
++	 * pass, kept with every owner until bcm2711_vulkan_native_job_settle
++	 * proves ticket's render completed.
++	 */
++	bool may_defer;
++	struct bcm2711_vulkan_native_pass *tail;
++	uint64_t ticket;
+ };
+ 
+ /* The renderer must own the same Vulkan session before a primary can become independently pending native work. */
+@@ -45,6 +55,26 @@ int bcm2711_vulkan_native_job_create(struct bcm2711_vulkan_object *command, stru
+ /* Runs the job's next step (at most one native pass); done tells that the job has finished. */
+ int bcm2711_vulkan_native_job_step(struct bcm2711_render_device *controller, struct bcm2711_render_session *session, void *payload, bool *done, bool *retired);
+ void bcm2711_vulkan_native_job_count_step(struct bcm2711_render_device *controller, uint64_t ticks);
++
++/*
++ * Settles a job whose last render the engine left running: 0 once it
++ * completed (the job is retired and its pass released), EINPROGRESS while
++ * it runs, or the error that lost it (the job stays unretired).  With
++ * wait, a running render is given until the next interrupt or tick.
++ */
++int bcm2711_vulkan_native_job_settle(struct bcm2711_render_device *controller, struct bcm2711_vulkan_native_job *job, bool wait);
++
++/*
++ * The ticket of the render the engine still runs (zero when none), which a
++ * submission's signals and completion wait for.
++ */
++uint64_t bcm2711_vulkan_native_tail(struct bcm2711_render_device *controller);
++
++/* Whether the render of ticket still runs. */
++bool bcm2711_vulkan_native_tail_pending(struct bcm2711_render_device *controller, uint64_t ticket);
++
++/* Waits for the render the engine still runs, if any. */
++int bcm2711_vulkan_native_tail_quiesce(struct bcm2711_render_device *controller);
+ int bcm2711_vulkan_native_job_dispose(struct bcm2711_render_device *controller, void *payload, bool retired);
+ 
+ /* Only checked global native reset and zero external sessions authorize whole quarantine/closed-session retirement. */
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.h b/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.h
+index e2e2036d9..ca6a630af 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.h
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-native-pass.h
+@@ -90,6 +90,9 @@ int bcm2711_vulkan_native_pass_start(struct bcm2711_vulkan_native_pass *pass, st
+ int bcm2711_vulkan_native_pass_launch(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result);
+ int bcm2711_vulkan_native_pass_finish(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result, int error);
+ 
++/* Waits for the render the engine left running when buffer is its output (the CPU or the unit is about to touch it). */
++int bcm2711_vulkan_native_tail_wait(struct bcm2711_v3d_space *space, const struct bcm2711_buffer *buffer);
++
+ /* Adds the draws' and lists' diagnostic preparation times, draw count and staged bytes to a report under the controller mutex. */
+ void bcm2711_vulkan_native_pass_costs(const struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_perf *perf);
+ 
+diff --git a/src/drivers/gpu/bcm2711/vk/vulkan-queue.c b/src/drivers/gpu/bcm2711/vk/vulkan-queue.c
+index a22dae78b..fc1055b50 100644
+--- a/src/drivers/gpu/bcm2711/vk/vulkan-queue.c
++++ b/src/drivers/gpu/bcm2711/vk/vulkan-queue.c
+@@ -98,6 +98,12 @@ struct queue_execution {
+ 	struct bcm2711_vulkan_session *session;
+ 	struct queue_owner owner;
+ 	uint32_t cursor;
++	/*
++	 * The render the engine left running that the actions from cursor and
++	 * the completion wait for (zero when none): the execution leaves the
++	 * queue and settles until that render completed.
++	 */
++	uint64_t ticket;
+ #if CONFIG_DRIVER_BCM2711_VIDEO
+ 	struct bcm2711_vulkan_video_mark mark;
+ #endif
+@@ -116,6 +122,10 @@ static bool owner_displayed(const struct queue_owner *owner);
+ static bool object_displayed(const struct bcm2711_vulkan_object *object);
+ static int execution_step(struct bcm2711_render_device *controller, struct bcm2711_render_execution *base, bool *done);
+ static int execution_end(struct bcm2711_render_device *controller, struct bcm2711_render_execution *base, int error);
++static int execution_tail_settle(struct bcm2711_render_device *controller, struct bcm2711_render_execution *base, bool wait);
++static int execution_rest(struct bcm2711_render_device *controller, struct queue_execution *execution);
++static bool later_commands(const struct queue_execution *execution);
++static void run_sync(struct queue_action *action);
+ #if CONFIG_DRIVER_BCM2711_VIDEO
+ static void execution_mark(struct queue_execution *execution);
+ static int execution_settle(struct bcm2711_render_device *controller, struct bcm2711_render_execution *base, bool wait);
+@@ -739,9 +749,9 @@ execution_step(
+ {
+ 	struct queue_execution *execution;
+ 	struct bcm2711_vulkan_command_buffer *command;
+-	struct bcm2711_vulkan_sync *sync;
+ 	struct queue_action *action;
+ 	uint64_t entered;
++	uint64_t ticket;
+ 	bool finished;
+ 	bool retired;
+ 	bool ran;
+@@ -755,16 +765,29 @@ execution_step(
+ 	while (execution->cursor < execution->owner.action_count) {
+ 		action = &execution->owner.actions[execution->cursor];
+ 
++		/*
++		 * A signal says the work before it completed.  Beside a render the
++		 * engine left running, the rest of the submission waits for that
++		 * render in the settle, or here when a later command follows.
++		 */
++		if (action->kind == QUEUE_SIGNAL) {
++			ticket = bcm2711_vulkan_native_tail(controller);
++			if (ticket != 0 && !later_commands(execution)) {
++				execution->ticket = ticket;
++				base->settle = execution_tail_settle;
++				*done = true;
++				return 0;
++			}
++			if (ticket != 0) {
++				error = bcm2711_vulkan_native_tail_quiesce(controller);
++				if (error != 0)
++					return error;
++			}
++		}
++
+ 		/* Binary counters advance at their ordered point; earlier executions of the session already ran. */
+ 		if (action->kind != QUEUE_COMMAND) {
+-			sync = action->object->payload;
+-			if (action->kind == QUEUE_WAIT) {
+-				sync->waits_completed++;
+-				sync->signaled = false;
+-			} else {
+-				sync->signals_completed++;
+-				sync->signaled = true;
+-			}
++			run_sync(action);
+ 			execution->cursor++;
+ 			continue;
+ 		}
+@@ -774,7 +797,8 @@ execution_step(
+ 			return 0;
+ 		ran = true;
+ 
+-		/* Runs the job's next pass; the step's own time is the worker's share in the cost report. */
++		/* Runs the job's next pass; its last render may be left running when no command follows it. */
++		action->job->may_defer = !later_commands(execution);
+ 		entered = clock_ticks();
+ 		error = bcm2711_vulkan_native_job_step(controller, execution->session->render, action->job, &finished, &retired);
+ 		bcm2711_vulkan_native_job_count_step(controller, clock_ticks() - entered);
+@@ -789,6 +813,14 @@ execution_step(
+ 			return error;
+ 		}
+ 
++		/* A render left running: the job and the rest of the submission end in the settle, once it completed. */
++		if (!retired && finished && action->job->tail != NULL) {
++			execution->ticket = action->job->ticket;
++			base->settle = execution_tail_settle;
++			*done = true;
++			return 0;
++		}
++
+ 		/* A nominal runner success without actual DMA retirement can never signal this submission's fence; the refusal says why. */
+ 		if (!retired) {
+ 			bcm2711_render_refusal_line("queue execution", "a job step ended without proof its native work retired");
+@@ -808,6 +840,15 @@ execution_step(
+ 		execution->cursor++;
+ 	}
+ 
++	/* The completion says the work before it completed: beside a running render it waits in the settle. */
++	ticket = bcm2711_vulkan_native_tail(controller);
++	if (ticket != 0) {
++		execution->ticket = ticket;
++		base->settle = execution_tail_settle;
++		*done = true;
++		return 0;
++	}
++
+ #if CONFIG_DRIVER_BCM2711_VIDEO
+ 	/*
+ 	 * An execution with a fence ends only when the frames of its decodes are
+@@ -824,6 +865,131 @@ execution_step(
+ 	return 0;
+ }
+ 
++/*
++ * Settles an execution that waits for a render the engine left running:
++ * its own last job's, or an earlier one's that its signals and completion
++ * wait for.  Once the render completed, the job (if its own) retires and
++ * the rest of the actions, waits and signals only, run.
++ */
++static int
++execution_tail_settle(
++	struct bcm2711_render_device *controller,
++	struct bcm2711_render_execution *base,
++	bool wait)
++{
++	struct queue_execution *execution;
++	struct queue_action *action;
++	struct bcm2711_v3d_job_result result;
++	int disposed;
++	int error;
++
++	/* The execution's own job whose render was left running settles with it. */
++	execution = (struct queue_execution *)base;
++	action = NULL;
++	if (execution->cursor < execution->owner.action_count) {
++		action = &execution->owner.actions[execution->cursor];
++		if (action->kind != QUEUE_COMMAND || action->job == NULL || action->job->tail == NULL)
++			action = NULL;
++	}
++	if (action != NULL) {
++		error = bcm2711_vulkan_native_job_settle(controller, action->job, wait);
++		if (error != 0)
++			return error;
++#if CONFIG_DRIVER_BCM2711_VIDEO
++		if (execution->owner.fence != NULL)
++			bcm2711_vulkan_video_mark_commands(&execution->mark, action->object->payload);
++#endif
++		disposed = bcm2711_vulkan_native_job_dispose(controller, action->job, true);
++		action->job = NULL;
++		if (disposed != 0)
++			return disposed;
++		execution->cursor++;
++	} else if (execution->ticket != 0) {
++		/* An earlier execution's render: the engine reports its completion. */
++		error = bcm2711_v3d_job_settle(controller->space.native, execution->ticket, wait, &result);
++		if (error != 0)
++			return error;
++	}
++	execution->ticket = 0;
++
++	/* The rest of the actions, then the video frames the fence may wait for. */
++	error = execution_rest(controller, execution);
++	if (error != 0)
++		return error;
++
++	/* Succeeded: the execution may end and signal its fence. */
++	return 0;
++}
++
++/*
++ * Runs the waits and signals after a settled render, in order.  The step
++ * left the execution only when no command follows, so none is found here.
++ */
++static int
++execution_rest(
++	struct bcm2711_render_device *controller,
++	struct queue_execution *execution)
++{
++	struct queue_action *action;
++
++	/* Waits and signals only. */
++	(void)controller;
++	while (execution->cursor < execution->owner.action_count) {
++		action = &execution->owner.actions[execution->cursor];
++		if (action->kind == QUEUE_COMMAND)
++			return EIO;
++		run_sync(action);
++		execution->cursor++;
++	}
++
++#if CONFIG_DRIVER_BCM2711_VIDEO
++	/* As at the end of a step: a fence waits for the decodes still in flight, through the video settle from now on. */
++	if (execution->owner.fence != NULL) {
++		execution_mark(execution);
++		if (execution->base.settle == execution_settle)
++			return execution_settle(controller, &execution->base, false);
++	}
++#endif
++
++	/* Succeeded: every action ran. */
++	return 0;
++}
++
++/* Tells whether a command follows the action at the cursor. */
++static bool
++later_commands(
++	const struct queue_execution *execution)
++{
++	uint32_t index;
++
++	/* The actions after the cursor. */
++	for (index = execution->cursor + 1U; index < execution->owner.action_count; index++) {
++		if (execution->owner.actions[index].kind == QUEUE_COMMAND)
++			return true;
++	}
++
++	/* Succeeded: waits and signals only. */
++	return false;
++}
++
++/* Advances one binary payload's counters at its ordered point. */
++static void
++run_sync(
++	struct queue_action *action)
++{
++	struct bcm2711_vulkan_sync *sync;
++
++	/* A wait consumes the payload; a signal sets it. */
++	sync = action->object->payload;
++	if (action->kind == QUEUE_WAIT) {
++		sync->waits_completed++;
++		sync->signaled = false;
++	} else {
++		sync->signals_completed++;
++		sync->signaled = true;
++	}
++}
++
+ /* Publishes the execution's completion or loss, releases what it owns and frees it. */
+ static int
+ execution_end(
+@@ -832,11 +998,27 @@ execution_end(
+ 	int error)
+ {
+ 	struct queue_execution *execution;
++	struct queue_action *action;
++	int settled;
+ 	int released;
+ 
+-	/* The payloads see the outcome before the session's later markers complete. */
+-	(void)controller;
++	/*
++	 * A job whose render the engine still runs, ended without its settle
++	 * (a stopped session), waits for that render, so its owners retire
++	 * instead of waiting for a reset.  A fault ends the wait at once and
++	 * the job stays unretired.
++	 */
+ 	execution = (struct queue_execution *)base;
++	if (execution->cursor < execution->owner.action_count) {
++		action = &execution->owner.actions[execution->cursor];
++		if (action->kind == QUEUE_COMMAND && action->job != NULL && action->job->tail != NULL) {
++			settled = EINPROGRESS;
++			while (settled == EINPROGRESS)
++				settled = bcm2711_vulkan_native_job_settle(controller, action->job, true);
++		}
++	}
++
++	/* The payloads see the outcome before the session's later markers complete. */
+ 	if (error == 0) {
+ 		publish_completion(&execution->owner);
+ 	} else {
