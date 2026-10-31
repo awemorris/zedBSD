@@ -7,7 +7,7 @@
 | --- | --- | --- | --- | --- | --- |
 | P1 | conformance-reviewer | 返却（q1778 WS326 p025） | `/home/awe/zedBSD-worktrees/p1-ws326p025` / `agent/p1-ws326p025` | 返却（2026-10-31 06:4x） | 181a071ac（merge 1b37841bf） |
 | P2 | phase-runner-high | ws309 p015 (q1782-i02) | `/home/awe/zedBSD-worktrees/p2-ws309v2` / `agent/p2-ws309v2` | in-progress（2026-10-31 16:58 起動し直し） | 未 merge（VF2 の後） |
-| P4 | phase-runner | 返却（q1780 WS326 の完了の片付け） | `/home/awe/zedBSD-worktrees/p4-ws326close` / `agent/p4-ws326close` | 返却（2026-10-31 06:5x） | 684d0512b（merge 8bf8f0280） |
+| P4 | phase-runner-high | BUG-378 (q1783-i01) | `/home/awe/zedBSD-worktrees/p4-bug378` / `agent/p4-bug378` | in-progress（2026-10-31 18:51 起動） | — |
 | P5 | kernel-and-driver-designer | 返却（q1775 WS302 p001） | `/home/awe/zedBSD-worktrees/p5-ws302` / `agent/p5-ws302` | 返却（2026-10-31 06:4x） | e6d67143f（merge 896d3e3db） |
 | P6 | kernel-and-driver-designer | 返却（q1779 WS310 p001） | `/home/awe/zedBSD-worktrees/p6-ws310` / `agent/p6-ws310` | 返却（2026-10-31 07:1x） | 38f8c85eb（merge a2aa89c4f） |
 | P3 | phase-runner-high | ws291 p023 BL scanout の直し (q1781-i03) | `/home/awe/zedBSD-worktrees/p3-ws291wsi` / `agent/p3-ws291wsi` | in-progress（2026-10-31 18:14 起動） | 0f1cce8fd（merge b30707d0a） |
