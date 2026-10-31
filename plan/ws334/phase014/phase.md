@@ -64,3 +64,25 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果
+
+- 日付: 2026-11-01（host の `date`）。状態: 実装済み・試験 PASS（cleared は Q1 の判定）。
+- 変えた file: `userland/desktop/libkeiland/win32/keys-table.c`（実装）、`plan/ws334/tests/unit/test-keys-table.c`（単体試験）、この phase.md、ws.md の表の行。header・他の module・Makefile・試験の道具は変えていない。
+- 実装: 1 つの定数の表 `key_rows[]`（152 行、scan・拡張の有無・evdev の番号の 3 つ組）を線形に引く。0 と 255 を超える scan は 0。scan 0x45 だけ virtual key で決める（VK_PAUSE なら KEY_PAUSE、他は KEY_NUMLOCK、拡張の bit は見ない）。表は HID の page ごとに 3 つの block（Keyboard/Keypad、Generic Desktop の system control 3 件、Consumer の 18 件）で、block ごとに「Values referenced:」、行ごとに HID の usage・名前・KEY_ の名前の comment。
+- 照合の 2 つの方法: (1) html の表を `python3 -I` の script（git の外）で読み、Scan 1 Make の列と HID の usage を取り出し、usage → evdev は hid-input.c の `hid_keyboard[]`（値だけ）と Consumer の switch から取って実装の表の行を作った。(2) 試験の期待は別の手順: html の行（usage・scan・拡張）を試験に写し、usage → evdev は HUT の usage の名前から手で KEY_ の名前にし（`usage_keys[]`）、番号は input-event-codes.h の KEY_ の名前の値。実装は hid-input.c の番号、試験は名前の意味からで、150 の名前すべてが一致した。scancode.doc の Scan Code Table（key location → scan 1 make）と html の表を位置ごとに突き合わせ（101 の位置、食い違い 0。Note 付きの位置 42・45・56・107 も doc の本文で一致）、HUT の PDF の第 10 節の頁（90・91 頁の画）と pdftotext で usage の ID と名前を確かめた。
+- 照合の弱い所（Note の付いた cell、または出典が 1 つだけ）: 0x7D（International3、Yen）・0x79・0x7B（Note 5、doc は 0x79 を CONVERT、0x7B を NONCONVERT と書く）・0x70（doc は DBE_KATAKANA）・0x73（Note 4、5）の Far East の鍵、0x72 と 0xF2・0x71 と 0xF1（Note 3、6: key release だけ、拡張の有無が keyboard で違う）、0x78 と 0x77（LANG3・4、html の表だけで doc に名前が無い）、0x7E（Note 4）、0x54・0x37・0x45・0x46（Note 1〜3）。これらの値の根拠は html の表 1 つで、実機の Windows での確認は未実施。
+- header が黙っていて自分で決めた点:
+  1. 0x54 は拡張の有無のどちらでも KEY_SYSRQ（header は「拡張なし」とだけ。Hangul・Hanja と同じく keyboard の差を許す側にした）。
+  2. 0x78 は KEY_KATAKANA、0x77 は KEY_HIRAGANA（LANG3・4、hid-input.c の値）。0x5C 拡張なしは KEY_KPJPCOMMA（International6）、0x7E は KEY_KPCOMMA、0x59 は KEY_KPEQUAL、F13〜F23 は 0x64〜0x6E、Application は KEY_COMPOSE、Keyboard Power と System Power Down（どちらも E0 5E）は KEY_POWER、Sleep E0 5F は KEY_SLEEP、Wake E0 63 は KEY_WAKEUP。
+  3. 表に無い (scan, 拡張) は 0: 拡張つきの 0x2A・0x36（Windows が挟む偽の Shift）、拡張なしの 0x5B・0x5D、0x5A〜0x5F の空き、0x60・0x61、0xFF など。
+  4. 0x45 は拡張の bit を見ない（Pause と Num Lock の両方が両方の bit で来うるため、header の通り virtual key だけで決める）。
+  5. `extended` が負でも 0 でなければ 1 と同じ（header の「他の値は 1」）。
+- 試験: `plan/ws334/tests/unit/test-keys-table.c`。html の全 158 行（0x00FF と E1 の Pause を除く）を usage 経由の 2 段で引いた期待と比べ、さらに 256 の scan × 拡張 2 × virtual key 4 の全部を期待の表と比べる（表に無い物は 0）。header の特別な場合、拡張の有無で違う組、scan 0・256 以上（0x145 で VK_PAUSE の時も 0）・0xFF・拡張 2 や INT_MIN。5010 の check。
+- command と最後の行（worktree の root、`LC_ALL=C.UTF-8` は Q1 の指示、run-unit.sh は変えていない）:
+  - `timeout 1800 sh plan/ws334/tests/run-unit.sh keys-table` → `test-keys-table: PASS (5010 checks) (posix)`、`... (win32)`、`run-unit: PASS`（初回の Wine の prefix 作りを含む。LC_ALL=C.UTF-8 でもう一度流して同じ）。
+  - `timeout 3000 sh plan/ws334/tests/run-unit.sh all` → keys-table（5010、posix・win32）、os-zones（1293）、tools（8）がすべて PASS、`run-unit: PASS`。
+  - `BASE=d393d3267 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - `git diff --check` → 出力なし。
+- わざと壊した確認（git の外の複写 15 通り、posix の ASan・UBSan）: 1 つの値を 1 違える、scan を 1 つ入れ替える、scan を `& 0xFF` で切る、拡張の判定を `== 1` にする、VK_PAUSE の比較を逆にする、最後の行を消す、Hangul の行を EITHER から PLAIN にする、loop の境界を 1 つずらす、0x76 を別の鍵にする、scan 0 の境界を変える、0x37 の拡張を外す、拡張の比較を壊す、KEYS_EVDEV_NUMLOCK を変える、0x72 を EXT にする、0x54 を PLAIN にする。すべて試験が FAIL（3〜520 の check の失敗）。worktree の file は壊していない（複写は scratchpad）。
+- 未実施: 実機の Windows での確認（Wine は scan code を作らない。試験は表の関数を直に呼ぶ）、aarch64 の Windows の実行（コンパイルだけ check-skeleton で PASS）、Note 付きの cell の第 2 の出典。
