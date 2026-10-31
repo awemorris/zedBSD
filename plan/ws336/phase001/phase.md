@@ -18,3 +18,12 @@ Parent: [WS336](../ws.md)
 5. 置き場所・名前（`userland/base/ssh` など）、OpenSSH の package との入れ替えの手順、zedBSD と Linux の host で試す道具（相手を OpenSSH にした相互の試験）。
 6. 標準廉価実装手順の §4 と、WS335 との待ち合わせ（WS335 の暗号の header が凍結するまで、それを使う実装の Phase を始めない）。design-reviewer、ユーザーへの問い（AGENTS.md §3 の形）。
 7. code は header・骨格・試験の道具の他は書かない。
+
+## 結果（2026-11-01 03:0x P5、q1791-i01）
+
+- 成果: [design.md](../design.md)、header 16 本と骨格 23 本（`userland/base/ssh/`）、試験の道具（`plan/ws336/tests/`: run-unit.sh・check-skeleton.sh・crypto-contract.c/.sh・unit/check.h・unit/wire.h・unit/test-tools.c・host-crypto/）、実装の Phase p002〜p025 の phase.md、[design-review.md](../design-review.md)（32 件を全部反映）、[user-questions.md](../user-questions.md)（Q1〜Q9）。
+- 仕様: `/home/awe/zedBSD-claude1/build/sources/specs/ssh/`（31 file と SHA256SUMS）。
+- 確かめ（2026-11-01 03:0x、host）: `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh` → `check-skeleton: PASS`（cc・clang の C89 pedantic、zedBSD の clang と sysroot。libcrypto-compat の header の照合は header が無いので skip）、`sh plan/ws336/tests/run-unit.sh all` → `run-unit: PASS`（test-tools 13 checks）、`sh plan/ws336/tests/crypto-contract.sh` → `crypto-contract: PASS`（108 checks、host の OpenSSL 3.5.6）、`git diff --check` → 差なし。
+- WS335 との合意: design.md §7（P6 が compat の header と骨格で crypto-contract.c の compile と link を確かめ済み、WS335 の p023・p024 の受け入れに入れる）。
+- header の基点: d4ab182d2。
+- 未実施: QEMU・実機（設計の Phase なので無し）。Status の cleared は Q1 が決める。
