@@ -404,8 +404,8 @@ struct nvrtx_node {
 	volatile int drain_running;
 	volatile int drain_stop;
 	/*
-	 * The display scans out block-linear blobs (nvrtx.disp.bl=1 on a window
-	 * with a layout field); otherwise it shows linear rows only.
+	 * The display scans out block-linear blobs (on a window with a layout
+	 * field, unless nvrtx.disp.bl=0); otherwise it shows linear rows only.
 	 * disp_bl_shown is set once the first block-linear frame was flipped
 	 * to (said once in the log); under the node's lock.
 	 */

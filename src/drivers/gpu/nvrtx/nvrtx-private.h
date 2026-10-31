@@ -444,7 +444,8 @@ bool
 nvrtx_stage_disp_test_wanted(void);
 
 /*
- * Reports whether the display scans out block-linear images (nvrtx.disp.bl=1).
+ * Reports whether the display scans out block-linear images (the default;
+ * nvrtx.disp.bl=0 keeps it to linear rows).
  */
 bool
 nvrtx_stage_disp_bl_wanted(void);
