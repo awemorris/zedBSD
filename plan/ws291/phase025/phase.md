@@ -199,6 +199,8 @@ mview の vkCreateGraphicsPipelines が FEATURE_NOT_PRESENT。足りない機能
 - 板（10.0.30.6）: i03 の再開点と同じ状態のまま（kernel build/p025-4z/vmunix cksum 736120021、cmdline `login=console v3d.perf=1`、/bin/wayland・terminal・
   files と /lib/libvulkan.so・libc.so は p025-4u、元は *.p025old、/root/p025・p025d・p025desk、元の kernel と設定は /boot/boot0/*.p025old と
   host の build/tmp/p025-board/*.orig）。ユーザーが電源を落とし、板を取り替える。
+  2026-11-01 02:08 追記: この Pi 4 の SD カードは Q1 が Pi 5 の image（rpi5-p021.img）で上書きした（ユーザーの許可）。上の板の状態
+  （p025-4z の kernel・/bin・/lib の差し替え・*.p025old）はもう無い。再開する時は Pi 4 の image を作り直す（host の build/tmp/p025-board/*.orig は残る）。
 - 再開するなら: (1) 2a53a5a6d の kernel で mview と desktop を流し、`v3d: board` の行で ARM の実測の clock・温度・throttled の bit を run ごとに比べる。
   throttled の bit 1・2（今）か 17・18（履歴）が立てば熱、bit 0・16 なら電源（under-voltage）で、heatsink か電源の交換（ユーザーの判断）。
   ARM が 600 MHz のまま throttled が 0 なら、firmware に ARM の clock の最大を頼む（SET_CLOCK_RATE、Linux の cpufreq の代わり）。
