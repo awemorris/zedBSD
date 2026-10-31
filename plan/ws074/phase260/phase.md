@@ -512,3 +512,8 @@ Origin: 2026-10-27 ユーザーの指示。
   - baseline の shim（baseline-alignment-affects-intrinsic-size-001〜006）と grid-self-baseline-*: Chromium の値と比べる道具として plan/ws074/tests/chrome-boxes.py（`export NODE_PATH=$PWD/build/ws074-chrome/node/node_modules PATH=$PWD/build/ws074-chrome/bin:$PATH`）が使える。
     ページの link が /css/... を指す時は sed で WPT の tree の絶対 path に直した複写を作る（`sed "s#href=\"/#href=\"$PWD/build/ws074-suites/wpt/#g"`）。Chromium では parallel の item の baseline が 1・3 番目で揃わない（item の位置から見て 21 離れる）など、group の定義がこの engine の想定と違う所が見えた。
   - fit-content() の行の直交の item（grid-change-fit-content-argument-001: 幅は fit の上限を room にすると合うが、行が item の max-content の高さになり高さが合わない）。
+- 追加2（dev89・dev90）: dev89（76c1d7e77）は 2,787（80.27%、static 1,308、後退 0）。列の baseline の group を列の track の寄与に足し（`grid_size_columns`: 縦の item が行に沿う baseline を共有する時、group の before と after の和を列が持つ）、
+  暗黙の行（grid-auto-rows）の固定の高さも直交の item の room にした（`grid_room`）。grid-self-baseline-changes-grid-area-size-007・008・010・011・012 が通る。
+  試して戻した物（dev90 = 2,773、後退 16 harness + 3 static、修正 5 static）: layout/logical.c `layout_logical_wanted` の「縦書きの grid の container で子が全て横書きなら物理の座標で置く」の例外を grid から外すと、container の大きさと
+  列の向きは Chromium と合う（grid-self-baseline-003 の縦書きの grid が 125×375）が、grid-self-alignment-stretch-vertical-lr/rl-005〜008・013〜016 と subgrid の orthogonal-writing-mode-005・006、repeat-auto-fill-007 が後退する。
+  直交の item を logical の座標で見る baseline の group（`grid_row_baseline` が `child->style.writing_mode` を物理の style で見る）と stretch の直し込みが要る。縦書きの container を logical にするなら、その 2 つを先に。
