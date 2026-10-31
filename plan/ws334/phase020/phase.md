@@ -50,7 +50,7 @@
 - Linux の Keiland: `timeout 2400 make keiland-linux KEILAND_ASK=n`（入れる確かめで止まらない形。止まるなら `make -f userland/desktop/keiland-linux.mk all`）→ exit 0。
 - WS074 の host の build: `timeout 2400 sh plan/ws074/tests/host-build.sh plain` → 前と同じ結果（P8 の物。件数を前後で数える）。
 - `timeout 1800 sh plan/ws334/tests/cross-build.sh` → `cross-build: PASS`。
-- `BASE=<p004 の基点の SHA> timeout 1800 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+- `BASE=d393d3267 timeout 1800 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`。
 - `git diff --check`。
 
 ## 終わりの条件

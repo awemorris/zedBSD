@@ -120,6 +120,17 @@ wb_os_current_directory(
 
 /* Not implemented yet. */
 int
+wb_os_path_is_absolute(
+	const char *path)
+{
+	UNUSED_PARAMETER(path);
+
+	/* A skeleton: the function is not written yet. */
+	return 0;
+}
+
+/* Not implemented yet. */
+int
 wb_os_path_from_url(
 	const char *host,
 	const char *path,
