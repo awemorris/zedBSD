@@ -20,6 +20,9 @@
 
 #include "drivers/gpu/nvrtx/nvrtx-gsp.h"
 
+/* A word that may alias the bytes it is stored over. */
+typedef uint32_t __attribute__((may_alias)) wire_word;
+
 /*
  * Reads a little-endian 32-bit field.
  */
@@ -73,7 +76,8 @@ nvrtx_put8(
 }
 
 /*
- * Writes a little-endian 32-bit field.
+ * Writes a little-endian 32-bit field: one store on a little-endian CPU
+ * when the field is on a word boundary, else byte by byte.
  */
 void
 nvrtx_put32(
@@ -81,6 +85,14 @@ nvrtx_put32(
 	size_t at,
 	uint32_t value)
 {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+	/* The CPU's own order is the field's. */
+	if (((uintptr_t)(bytes + at) & 3U) == 0U) {
+		*(wire_word *)(void *)(bytes + at) = value;
+		return;
+	}
+#endif
+
 	/* Stores the four bytes, lowest first. */
 	bytes[at] = (uint8_t)(value & 0xffU);
 	bytes[at + 1U] = (uint8_t)((value >> 8) & 0xffU);

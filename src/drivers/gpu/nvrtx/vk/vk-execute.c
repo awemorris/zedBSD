@@ -420,7 +420,7 @@ static int execute_draw_constants(struct nvrtx_vk_execute *execute, const struct
 static void execute_draw_load(struct nvrtx_vk_execute *execute, uint32_t offset, const uint32_t *words, uint32_t *held_words, uint32_t count);
 static int execute_textures(struct nvrtx_vk_execute *execute, const struct execute_state *state, uint32_t *handles);
 static bool execute_texture_kept(const struct execute_reuse *reuse, uint32_t place, const void *view, const void *sampler);
-static int execute_texture(struct nvrtx_vk_execute *execute, const struct nvrtx_vk_view *view, const struct nvrtx_vk_sampler *sampler, uint32_t *handle);
+static int execute_texture(struct nvrtx_vk_execute *execute, struct nvrtx_vk_view *view, struct nvrtx_vk_sampler *sampler, uint32_t *handle);
 static int execute_pool_entry(struct nvrtx_vk_execute *execute, const uint32_t *header, const uint32_t *sampler, uint32_t *handle);
 static int execute_constants(struct nvrtx_vk_execute *execute, uint8_t **cpu, uint64_t *va);
 static void execute_vertex_input(const struct nvrtx_vk_pipeline *pipeline, const struct execute_state *state, struct nvrtx_exec_vertex *vertex);
@@ -1940,8 +1940,8 @@ execute_textures(
 	const struct nvrtx_vk_program *program;
 	const struct nvrtx_vk_descriptor_set *set;
 	const struct nvrtx_vk_descriptor_slot *slot;
-	const struct nvrtx_vk_view *view;
-	const struct nvrtx_vk_sampler *sampler;
+	struct nvrtx_vk_view *view;
+	struct nvrtx_vk_sampler *sampler;
 	struct execute_reuse *reuse;
 	uint64_t mixed;
 	uint32_t handle;
@@ -2016,14 +2016,12 @@ execute_texture_kept(
 static int
 execute_texture(
 	struct nvrtx_vk_execute *execute,
-	const struct nvrtx_vk_view *view,
-	const struct nvrtx_vk_sampler *sampler,
+	struct nvrtx_vk_view *view,
+	struct nvrtx_vk_sampler *sampler,
 	uint32_t *handle)
 {
 	const struct nvrtx_vk_image *image;
 	struct nvrtx_exec_sampler words;
-	uint32_t header[8];
-	uint32_t sampled[8];
 	uint64_t va;
 	uint64_t offset;
 	uint32_t width;
@@ -2041,39 +2039,49 @@ execute_texture(
 		return error;
 
 	/*
-	 * The header: a video plane's (the luma plane full size, the chroma
+	 * The header, made once for the view while its image's storage stays
+	 * where it is: a video plane's (the luma plane full size, the chroma
 	 * plane's pairs half each way), a tiled image's with the view's levels,
-	 * a pitch-linear image's of its one level; the sampler.
+	 * a pitch-linear image's of its one level.
 	 */
-	if (image->video) {
-		if (view->plane == 1U) {
-			nvrtx_exec_texture_header_plane(header, va + image->plane_offset[0], image->width, image->height, 1U,
-							view->swizzle);
+	if (view->header_va != va || va == 0U) {
+		kern_memset(view->header, 0, sizeof(view->header));
+		if (image->video) {
+			if (view->plane == 1U) {
+				nvrtx_exec_texture_header_plane(view->header, va + image->plane_offset[0], image->width, image->height,
+								1U, view->swizzle);
+			} else {
+				nvrtx_exec_texture_header_plane(view->header, va + image->plane_offset[1], image->width / 2U,
+								image->height / 2U, 2U, view->swizzle);
+			}
+		} else if (image->tiled) {
+			nvrtx_exec_texture_header_tiled(view->header, va, image->width, image->height, image->levels, view->base_level,
+							view->level_count, view->format, view->swizzle);
 		} else {
-			nvrtx_exec_texture_header_plane(header, va + image->plane_offset[1], image->width / 2U,
-							image->height / 2U, 2U, view->swizzle);
+			nvrtx_vk_image_level(image, 0U, &offset, &width, &height, &pitch);
+			nvrtx_exec_texture_header(view->header, va + offset, width, height, pitch, view->format, view->swizzle);
 		}
-	} else if (image->tiled) {
-		nvrtx_exec_texture_header_tiled(header, va, image->width, image->height, image->levels, view->base_level,
-						view->level_count, view->format, view->swizzle);
-	} else {
-		nvrtx_vk_image_level(image, 0U, &offset, &width, &height, &pitch);
-		nvrtx_exec_texture_header(header, va + offset, width, height, pitch, view->format, view->swizzle);
+		view->header_va = va;
 	}
-	kern_memset(&words, 0, sizeof(words));
-	words.mag_filter = sampler->mag_filter;
-	words.min_filter = sampler->min_filter;
-	words.mipmap_mode = sampler->mipmap_mode;
-	words.min_lod = sampler->min_lod;
-	words.max_lod = sampler->max_lod;
-	words.address_u = sampler->address_u;
-	words.address_v = sampler->address_v;
-	words.address_w = sampler->address_w;
-	words.unnormalized = sampler->unnormalized;
-	nvrtx_exec_sampler_words(sampled, &words);
+
+	/* The sampler's words, made once. */
+	if (!sampler->words_made) {
+		kern_memset(&words, 0, sizeof(words));
+		words.mag_filter = sampler->mag_filter;
+		words.min_filter = sampler->min_filter;
+		words.mipmap_mode = sampler->mipmap_mode;
+		words.min_lod = sampler->min_lod;
+		words.max_lod = sampler->max_lod;
+		words.address_u = sampler->address_u;
+		words.address_v = sampler->address_v;
+		words.address_w = sampler->address_w;
+		words.unnormalized = sampler->unnormalized;
+		nvrtx_exec_sampler_words(sampler->words, &words);
+		sampler->words_made = true;
+	}
 
 	/* Into the pools. */
-	error = execute_pool_entry(execute, header, sampled, handle);
+	error = execute_pool_entry(execute, view->header, sampler->words, handle);
 	if (error != 0)
 		return error;
 

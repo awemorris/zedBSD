@@ -145,7 +145,10 @@ struct nvrtx_vk_image {
  * as, the first level it sees and how many, where each of red, green,
  * blue and alpha comes from (VkComponentSwizzle, identity resolved), and
  * for a view of one plane of a video image the plane (1 the luma plane as
- * R8, 2 the chroma plane as R8G8; 0 any other view).
+ * R8, 2 the chroma plane as R8G8; 0 any other view).  The executor keeps
+ * the texture header it made last for the view (header, valid once
+ * header_va is not 0): it holds while the image's storage is at
+ * header_va.
  */
 struct nvrtx_vk_view {
 	struct nvrtx_vk_object *image;
@@ -154,12 +157,15 @@ struct nvrtx_vk_view {
 	uint32_t level_count;
 	uint32_t swizzle[4];
 	uint32_t plane;
+	uint64_t header_va;
+	uint32_t header[8];
 };
 
 /*
  * A VkSampler: the filters, the levels' range (minLod and maxLod as float
  * bits) and the address modes a texture read uses, and whether coordinates
- * are in pixels.
+ * are in pixels.  The executor keeps the sampler's words it made (words,
+ * valid once words_made is set).
  */
 struct nvrtx_vk_sampler {
 	uint32_t mag_filter;
@@ -172,6 +178,8 @@ struct nvrtx_vk_sampler {
 	uint32_t address_w;
 	uint32_t border_color;
 	uint32_t unnormalized;
+	bool words_made;
+	uint32_t words[8];
 };
 
 /* The binding numbers a descriptor set layout may use, and the sets a pipeline layout holds. */

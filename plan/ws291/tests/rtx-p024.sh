@@ -3,11 +3,13 @@
 # with TIMING=1 libvulkan's submission timing (VULKAN_ZEDBSD_SUBMIT_TIMING=1, about 2 us a part: subs-N is slower
 # with it), run from the top of the tree in the machine's lock:
 #   FILES='DEST=SRC ...' [RESTORE_CKSUM=N] [ROUNDS=1] [SPIN=8] [LIST=plan/ws291/tests/rtx-ab.list] [PERF=0|1]
-#       [TIMING=0|1] [DMESG=REGEX] sh plan/ws291/tests/rtx-p024.sh OUT NAME:KERNEL ...
+#       [TIMING=0|1] [DMESG=REGEX] [SHOT=1] sh plan/ws291/tests/rtx-p024.sh OUT NAME:KERNEL ...
 # The NVMe kernel is read back (checked against RESTORE_CKSUM), FILES put in (rtx-files.sh); then ROUNDS times, for
 # each arm, its KERNEL put in (zedBSD restarted; with PERF=1 the driver's counts are on, nvrtx.vk.perf=1) and each
 # LIST line (LABEL|OPTIONS) run as a game-mode mview of SPIN seconds: "NAME LABEL fps= stages", the VULKAN TIMING
-# parts with TIMING=1, and the driver's perf lines when on (and the kernel lines DMESG matches, in OUT/NAME-ROUND/).  At the end the counts are
+# parts with TIMING=1, and the driver's perf lines when on (and the kernel lines DMESG matches, in OUT/NAME-ROUND/);
+# with SHOT=1 then the three still views of 100 copies (one draw, a draw each, a submit each) captured by keiland-shot
+# and compared with the first arm's first round (shot-diff.py).  At the end the counts are
 # turned off, the files and the NVMe kernel put back, checked by cksum, and Debian again.
 # OUT/summary.txt holds what is printed.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -33,6 +35,27 @@ z() {
 
 . plan/ws291/tests/rtx-files.sh
 
+# shots DIR ARM FIRST: the three still views of 100 copies, each compared with FIRST's.
+shots() {
+	for v in "one|--copies=100" "each|--copies=100 --draws=each" "subs|--copies=100 --draws=each --submits=100"; do
+		view=${v%%|*}; opts=${v#*|}
+		ZT=90 z "[ -S /run/aat-input.sock ] || { aat-input start --width 1920 --height 1080 > /dev/null 2>&1; sleep 3; }
+rm -f /tmp/shot.png
+U=\$(awk -F: '\$3 == 1000 { print \$1; exit }' /etc/passwd)
+su \$U -c 'env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 /bin/mview --token=shot --frames=900 --content=none --present=fifo $opts' > /tmp/mview-shot.log 2>&1 < /dev/null &
+sleep 6
+env XDG_RUNTIME_DIR=/run/user/1000 keiland-shot /tmp/shot.png > /dev/null 2>&1 < /dev/null
+wait
+grep -E 'MVIEW (DONE|FAILED)' /tmp/mview-shot.log" 2>&1 | sed "s/^/$2 $view /" | tee -a "$summary"
+		timeout 60 scp -O -i "$KEY" $SSHOPT "root@$ip:/tmp/shot.png" "$1/$view.png" > /dev/null 2>&1 || say "$2 FAIL $view shot"
+		if [ "$1" != "$3" ] && [ -s "$3/$view.png" ] && [ -s "$1/$view.png" ]; then
+			python3 -I plan/tools/frame-ops/shot-diff.py "$3/$view.png" "$1/$view.png" 2>&1 | sed "s/^/$2 $view vs first /" | tee -a "$summary"
+		fi
+	done
+	[ -s "$1/one.png" ] && [ -s "$1/subs.png" ] &&
+	    python3 -I plan/tools/frame-ops/shot-diff.py "$1/one.png" "$1/subs.png" 2>&1 | sed "s/^/$2 one-vs-subs /" | tee -a "$summary"
+}
+
 say "start $(date +%H:%M)"
 ip=$(timeout 700 $M zedbsd 2> "$out/zedbsd.txt" | tail -1)
 [ -n "$ip" ] || { say "FAIL zedBSD did not come up"; exit 1; }
@@ -41,6 +64,7 @@ failed=0
 files_put "$out" || failed=1
 perf_on=0
 round=0
+first=
 while [ $failed = 0 ] && [ $round -lt "${ROUNDS:-1}" ]; do
 	round=$((round + 1))
 	for arm in "$@"; do
@@ -77,6 +101,8 @@ dmesg | tail -n +$n | grep -E "'"${DMESG:-^$}"'" | tail -40 > /tmp/p024-dmesg.tx
 			[ -n "$timing" ] && say "$name $label timing $timing"
 			grep -E 'perf' "$dir/$label.txt" | sed "s/^/$name $label /" | tee -a "$summary"
 		done < "$list"
+		[ -n "$first" ] || first=$dir
+		[ "${SHOT:-0}" = 1 ] && shots "$dir" "$name $round" "$first"
 	done
 done
 if [ $perf_on = 1 ]; then

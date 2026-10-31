@@ -47,3 +47,42 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   private_fence 2・reap（8677 回、1 回 16 µs）。
 - c2（下の USERD の put を 1 submit に 1 回）で GPU_COMMAND の ioctl 41 → 31 µs。register window（PRAMIN）の書き 1 回は rd32 2 回と wr32 3 回で約 5 µs、
   1 submit に 3 回書いていた。register の読みが 1 回 約 2 µs かかる。
+
+### 直したこと（nvrtx だけ、HAL・uapi・libvulkan・GPU core は変えない）
+
+- commit 613c725f1（c5 の形）:
+  - `work.c`: ring の 1 submit の entry（start stamp・segment・fence）を書いた後、USERD の put を 1 回だけ書く（今まで entry ごとに 3 回、register window で
+    1 回に rd32 2 回と wr32 3 回）。session の channel の USERD の page を BAR1 の window に写し、put は 1 回の store（写せない時は今の register window）。
+    手本は NVIDIA open-gpu-kernel-modules 570.144 `uvm_channel.c`（mapped USERD に put、write barrier、doorbell）。`vram.c` に `nvrtx_bo_unmap`
+    （window からだけ外す）、channel の free で外す。
+  - `vk-node.c`: run の後の GR の trap の register 3 つの読みを 1 ms に 1 回までに（trap は残るので見落とさない）。
+  - `runtime.c`: session に worker の待ちが無い時、commit した marker をその thread で worker と同じに扱う（park か完了）。次の GPU_COMMAND が
+    queued を見ずに同期で走る。
+  - `vk-execute.c`: 1 つの slot の中で、前の submit の続きに次の push buffer を書く（slot に余裕のある間、slot の ticket は最新の run）。
+- 未 commit（c8 の形、下の試験の後に commit）:
+  - `exec-push.c`: texture header・sampler の bit field を 1 bit ずつでなく word で書く。
+  - `vk-execute.c`・`nvrtx-vk-objects.h`: view の texture header と sampler の words を object に覚え、image の storage の VA が同じ間は作り直さない
+    （subs の 1 submit に約 16 の texture があり、header を毎 submit 作っていた）。
+  - `wire.c`: `nvrtx_put32` を little-endian の CPU で word の境界なら 1 回の store に。
+- host: nvrtx-vk 94/0、vk-d3 225/0、gsp 393・qmd 733・identify PASS、bench（1000×1・100×100）の draw ごとの state の hash が base と一致、bench の executor
+  1000×1 4.07 → 2.97 ms、100×100 1.00 → 0.59 ms。RTX の組と config-amd64・rpi5・ppc32-mac99・m68k-virt の vmunix warning 0。
+
+### 1 submit の残り（診断 kernel diag3 = c5 ＋ 段の時間、`GPU_IOCTL_TIMING`、21:45〜21:50、build/tmp/p024-ab3）
+
+- subs-1000 で 1 submit: GPU_COMMAND の kernel 21 µs（うち runtime_command 16、stream の decode と executor 15.6、executor 11.5、ring の submit 0.8）、
+  GPU_JOB_RESERVE 4 µs、GPU_JOB_COMMIT 2 µs、ledger の reap の GPU_COMMAND_WAIT が平均 1 本 2 µs、ioctl の間の libvulkan の user の時間 計 約 11 µs。
+- 診断 diag2（c5 ＋ GPU core の reserve・admit・action の monitor の起床を外す、正しさは保たない）: subs-1000 25.5 → 27.8 fps、subs-100 238 → 257。
+  1 submit に monitor の thread を 4 回起こしていて約 3 µs。GPU core（gpu.c）の変更なので入れていない（下の提案）。
+
+### subs-1000 の残りの差（NVK 75.4 fps = 1 submit 約 5 µs）と提案（未実装、判断が要る）
+
+- c7 の 1 submit は約 27.6 µs。nvrtx の kernel の frame（decode・executor・ring）は c5 で約 16 µs、c7 で約 11 µs の見込み（未計測）。残りは nvrtx の
+  外: 1 submit に GPU の ioctl が 4 本前後（GPU_JOB_RESERVE・GPU_COMMAND・GPU_JOB_COMMIT・ledger の reap の GPU_COMMAND_WAIT、fence の無い submit
+  にも libvulkan が私用の fence の job を付けるため）と、その間の libvulkan の user の時間 約 11 µs、GPU core の monitor の起床 約 3 µs。
+- 提案 1（GPU core、gpu.c）: reserve・admit・action の後の monitor の起床を、新しい期限が monitor の眠る期限より早い時と、その open の停止が待つ時
+  （`gpu_stop_waiting_locked`、retirement の起床と同じ規則）だけに。diag2 で subs-1000 +9 %。plan/ws014/tests の GPU core の fixture は今の tree で
+  build できない（gpu-framework.c が HAL_SPACE_* を知らない）ので、直すならその fixture の修復から。
+- 提案 2（libvulkan と GPU core、WS291 の job-submit-design.md の案 A・B、2026-10-29 にユーザーが採った）: reserve・command・commit を 1 本、reap を
+  1 本に。今は amdrdna が先の予定で nvrtx は対象外。
+- 提案 3（libvulkan、製品の判断）: fence も signal の semaphore も無い submit に私用の fence の job を付けない（queue の後の job が順に監督する）。
+  NVK と同じ 1 submit 1 ioctl に近づく唯一の道だが、WS014 の「native の submission は全部 job の監督の下」の決定を変える。
