@@ -1215,7 +1215,55 @@ box_build_transition(
 	return error;
 }
 
-/* Builds the boxes of a node's children into a box. */
+/* Builds the boxes of one child of a node (an element's boxes, or a text box) into a box. */
+static int
+box_build_child(
+	struct layout_tree *tree,
+	struct css_engine *css,
+	struct dom_node *child,
+	const struct css_style *style,
+	struct layout_box *box,
+	int depth,
+	int *ordinal)
+{
+	const struct dom_character_data *text;
+	struct layout_box *text_box;
+	int error;
+
+	/* Elements build their own boxes; list items number themselves. */
+	if (child->type == DOM_ELEMENT) {
+		error = box_build_element(tree, css, (struct dom_element *)child, style, box, depth);
+		if (error != 0)
+			return error;
+		if (box->last_child != NULL && box->last_child->node == child && box->last_child->style.display == CSS_DISPLAY_LIST_ITEM) {
+			(*ordinal)++;
+			box_marker(box->last_child, *ordinal);
+		}
+		return 0;
+	}
+
+	/* Only text nodes are rendered among the others. */
+	if (child->type != DOM_TEXT && child->type != DOM_CDATA_SECTION)
+		return 0;
+	text = (const struct dom_character_data *)child;
+	if (text->data.length == 0)
+		return 0;
+
+	/* A text box takes its element's style. */
+	text_box = box_new(tree, LAYOUT_TEXT, child, style);
+	if (text_box == NULL)
+		return ENOMEM;
+	text_box->text = text->data.data;
+	text_box->text_length = text->data.length;
+	box_append(box, text_box);
+	return 0;
+}
+
+/*
+ * Builds the boxes of a node's children into a box.  An element with a shadow tree is drawn with
+ * the shadow tree's children, and a slot with the nodes assigned to it (its own children when none are).
+ * https://drafts.csswg.org/css-scoping/#flat-tree
+ */
 static int
 box_build_children(
 	struct layout_tree *tree,
@@ -1225,42 +1273,46 @@ box_build_children(
 	struct layout_box *box,
 	int depth)
 {
-	const struct dom_character_data *text;
+	struct dom_element *host;
 	struct dom_node *child;
-	struct layout_box *text_box;
+	int assigned;
 	int ordinal;
 	int error;
 
-	/* Each child: an element's boxes, or a text box. */
+	/* An element with a shadow tree stands for the shadow tree's children. */
 	ordinal = 0;
-	for (child = node->first_child; child != NULL; child = child->next) {
-		/* Elements build their own boxes; list items number themselves. */
-		if (child->type == DOM_ELEMENT) {
-			error = box_build_element(tree, css, (struct dom_element *)child, style, box, depth);
+	if (node->type == DOM_ELEMENT && ((struct dom_element *)node)->shadow_root != NULL) {
+		for (child = ((struct dom_element *)node)->shadow_root->first_child; child != NULL; child = child->next) {
+			error = box_build_child(tree, css, child, style, box, depth, &ordinal);
 			if (error != 0)
 				return error;
-			if (box->last_child != NULL && box->last_child->node == child && box->last_child->style.display == CSS_DISPLAY_LIST_ITEM) {
-				ordinal++;
-				box_marker(box->last_child, ordinal);
-			}
-
-			continue;
 		}
+		return 0;
+	}
 
-		/* Only text nodes are rendered among the others. */
-		if (child->type != DOM_TEXT && child->type != DOM_CDATA_SECTION)
-			continue;
-		text = (const struct dom_character_data *)child;
-		if (text->data.length == 0)
-			continue;
+	/* A slot of a shadow tree stands for the nodes its host gave it. */
+	if (dom_element_is(node, DOM_NS_HTML, DOM_TAG_SLOT)) {
+		host = dom_shadow_host(dom_tree_root(node));
+		if (host != NULL) {
+			assigned = 0;
+			for (child = host->node.first_child; child != NULL; child = child->next) {
+				if (dom_slot_of(child) != (struct dom_element *)node)
+					continue;
+				assigned = 1;
+				error = box_build_child(tree, css, child, style, box, depth, &ordinal);
+				if (error != 0)
+					return error;
+			}
+			if (assigned)
+				return 0;
+		}
+	}
 
-		/* A text box takes its element's style. */
-		text_box = box_new(tree, LAYOUT_TEXT, child, style);
-		if (text_box == NULL)
-			return ENOMEM;
-		text_box->text = text->data.data;
-		text_box->text_length = text->data.length;
-		box_append(box, text_box);
+	/* Each child: an element's boxes, or a text box. */
+	for (child = node->first_child; child != NULL; child = child->next) {
+		error = box_build_child(tree, css, child, style, box, depth, &ordinal);
+		if (error != 0)
+			return error;
 	}
 
 	/* Succeeded: the children are built. */

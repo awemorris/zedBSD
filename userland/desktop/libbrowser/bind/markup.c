@@ -102,10 +102,18 @@ bind_inner_html_get(
 	vm_value *result)
 {
 	struct dom_element *element;
+	struct dom_shadow_root *shadow;
 	int status;
 
 	UNUSED_PARAMETER(args);
 	UNUSED_PARAMETER(count);
+
+	/* A shadow root's children, or the element's. */
+	shadow = dom_shadow_of(bind_node_of(this_value));
+	if (shadow != NULL) {
+		status = markup_serialize(realm, &shadow->node, 0, result);
+		return status;
+	}
 
 	/* The element. */
 	status = markup_element_this(realm, this_value, &element);
@@ -136,21 +144,31 @@ bind_inner_html_set(
 	struct dom_node *target;
 	struct dom_node *fragment;
 	struct dom_node *removed;
+	struct dom_shadow_root *shadow;
 	int status;
 
-	/* The element, and the fragment parsed in its context. */
+	/* The element (a shadow root's host), and the fragment parsed in its context. */
 	*result = VM_VALUE_UNDEFINED;
-	status = markup_element_this(realm, this_value, &element);
-	if (status != 0)
-		return status;
+	shadow = dom_shadow_of(bind_node_of(this_value));
+	if (shadow != NULL) {
+		element = shadow->host;
+	} else {
+		status = markup_element_this(realm, this_value, &element);
+		if (status != 0)
+			return status;
+	}
 	status = markup_parse(realm, element, js_argument(args, count, 0), &fragment);
 	if (status != 0)
 		return status;
 
-	/* A template's contents take the nodes, and any other element's children. */
-	status = bind_template_contents(element, &target);
-	if (status != 0)
-		return status;
+	/* A shadow root takes the nodes, a template's contents, and any other element's children. */
+	if (shadow != NULL) {
+		target = &shadow->node;
+	} else {
+		status = bind_template_contents(element, &target);
+		if (status != 0)
+			return status;
+	}
 	window = bind_window_of(realm);
 
 	/* The old children go. */

@@ -513,6 +513,7 @@ void layout_release(struct layout_tree *tree);
 int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_inline(struct layout_tree *tree, struct layout_box *box);
 int layout_vertical_baseline(const struct layout_box *box, int last, layout_unit *offset);
+int layout_logical_central_baseline(const struct layout_box *box, int last, layout_unit *offset);
 int layout_first_baseline(const struct layout_box *box, layout_unit *baseline);
 int layout_last_baseline(const struct layout_box *box, layout_unit *baseline);
 int layout_flex(struct layout_tree *tree, struct layout_box *box);

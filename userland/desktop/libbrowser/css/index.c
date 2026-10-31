@@ -229,6 +229,12 @@ index_kind_of(
 	if (compound->pseudo_element == CSS_PSEUDO_ELEMENT_OTHER)
 		return INDEX_KIND_NONE;
 
+	/* The subject of ::part() and ::slotted() is not the element the other simple selectors name. */
+	for (position = 0; position < compound->count; position++) {
+		if (compound->simples[position].kind == CSS_SIMPLE_PART || compound->simples[position].kind == CSS_SIMPLE_SLOTTED)
+			return INDEX_KIND_UNIVERSAL;
+	}
+
 	/* Looks at every simple selector of the rightmost compound. */
 	class_name = NULL;
 	type_name = NULL;
@@ -248,6 +254,10 @@ index_kind_of(
 		case CSS_SIMPLE_NEVER:
 			/* A pseudo-element's compound never matches an element. */
 			return INDEX_KIND_NONE;
+		case CSS_SIMPLE_PART:
+		case CSS_SIMPLE_SLOTTED:
+			/* The subject is not the element the other simple selectors name. */
+			return INDEX_KIND_UNIVERSAL;
 		default:
 			break;
 		}

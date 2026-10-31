@@ -4556,10 +4556,21 @@ grid_row_baseline(
 
 	/* Its first (or last) line's baseline, or its lower border edge (always, for an orthogonal item). */
 	found = 0;
-	if (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+	if (layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB && layout_physical_mode(child) == layout_physical_mode(box) &&
+	    child->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS) {
+		/* A parallel item of a vertical grid, laid out in the grid's logical frame, stands on its central baseline. */
+		found = layout_logical_central_baseline(child, last, &baseline);
+	} else if (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
 		found = last ? layout_last_baseline(child, &baseline) : layout_first_baseline(child, &baseline);
-	if (!found)
+	}
+	if (!found) {
 		baseline = grid_outer_height(child) - child->margin[CSS_TOP] - child->margin[CSS_BOTTOM];
+
+		/* The central baseline of a vertical item is synthesized in the middle of its border box. */
+		if (layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB && layout_physical_mode(child) == layout_physical_mode(box) &&
+		    child->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS)
+			baseline /= 2;
+	}
 	*above = child->margin[CSS_TOP] + baseline;
 
 	/* Succeeded: the item's group. */

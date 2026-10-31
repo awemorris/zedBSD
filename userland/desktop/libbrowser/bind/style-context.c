@@ -174,7 +174,7 @@ bind_style_context_compute(
 		}
 
 		/* Continues toward the connected Document root. */
-		walk = walk->parent;
+		walk = dom_flat_parent(walk);
 	}
 
 	/* Disconnected subtrees have no CSSOM resolved values. */

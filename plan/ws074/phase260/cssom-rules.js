@@ -706,3 +706,90 @@
       configurable: true, enumerable: true
     });
   });
+
+  // Constructed style sheets: new CSSStyleSheet() makes a detached style element's sheet, replaceSync() and replace() give it rules,
+  // and a document's or shadow root's adoptedStyleSheets hands the sheets' holders to the engine (native.sheetAdopt).
+  (function () {
+    var NativeSheet = g.CSSStyleSheet, proto, holders = new WeakMap(), C;
+    if (typeof NativeSheet !== 'function' || !NativeSheet.prototype || !native.sheetMark) return;
+    proto = NativeSheet.prototype;
+    C = function CSSStyleSheet(options) {
+      var el, sheet;
+      if (!new.target) throw new TypeError("Failed to construct 'CSSStyleSheet': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
+      el = document.createElement('style');
+      native.sheetMark(el);
+      if (options && typeof options === 'object' && options.media !== undefined) el.setAttribute('media', String(options.media));
+      sheet = el.sheet;
+      holders.set(sheet, el);
+      if (options && typeof options === 'object' && options.disabled) sheet.disabled = true;
+      return sheet;
+    };
+    Object.defineProperty(C, 'prototype', { value: proto, writable: false, enumerable: false, configurable: false });
+    Object.defineProperty(proto, 'constructor', { value: C, writable: true, configurable: true, enumerable: false });
+    def(g, 'CSSStyleSheet', C);
+    function replaceSync(text) {
+      var tmp, ts, n, i, info, a, b;
+      if (!holders.has(this)) throw new DOMException('Can only call replaceSync on constructed stylesheets', 'NotAllowedError');
+      while (this.cssRules.length > 0) this.deleteRule(0);
+      tmp = document.createElement('style');
+      native.sheetMark(tmp);
+      tmp.textContent = String(text).replace(/@import\s[^;]*;?/g, '');
+      ts = tmp.sheet;
+      n = ts.cssRules.length;
+      for (i = 0; i < n; i++) {
+        info = native.ruleInfo(ts, i);
+        if (info === undefined) continue;
+        a = info.indexOf(' ');
+        b = info.indexOf(' ', a + 1);
+        try { this.insertRule(info.slice(b + 1), this.cssRules.length); } catch (e) { /* a rule the engine cannot keep */ }
+      }
+    }
+    def(proto, 'replaceSync', replaceSync);
+    def(proto, 'replace', function replace(text) {
+      var self = this;
+      return new Promise(function (resolve, reject) {
+        try { replaceSync.call(self, text); resolve(self); } catch (e) { reject(e); }
+      });
+    });
+    function adopt(root, list) {
+      var els = [], i;
+      for (i = 0; i < list.length; i++) els.push(holders.get(list[i]));
+      native.sheetAdopt.apply(null, [root].concat(els));
+    }
+    function adoptedAccessor(P) {
+      var store = new WeakMap(), views = new WeakMap();
+      if (!P || Object.getOwnPropertyDescriptor(P, 'adoptedStyleSheets')) return;
+      Object.defineProperty(P, 'adoptedStyleSheets', {
+        get: function () {
+          var root = this, view = views.get(root), list;
+          if (view) return view;
+          list = [];
+          store.set(root, list);
+          view = new Proxy(list, {
+            set: function (t, k, v) {
+              if (k !== 'length' && typeof k === 'string' && /^\d+$/.test(k) && !holders.has(v)) throw new TypeError("Failed to set an indexed property on 'ObservableArray': The provided value is not of type 'CSSStyleSheet'.");
+              t[k] = v;
+              adopt(root, t);
+              return true;
+            },
+            deleteProperty: function (t, k) { delete t[k]; adopt(root, t); return true; }
+          });
+          views.set(root, view);
+          return view;
+        },
+        set: function (v) {
+          var root = this, list = [], i, view = this.adoptedStyleSheets;
+          for (i = 0; i < v.length; i++) {
+            if (!holders.has(v[i])) throw new TypeError("Failed to set the 'adoptedStyleSheets' property: Failed to convert value to 'CSSStyleSheet'.");
+            list.push(v[i]);
+          }
+          store.get(root).length = 0;
+          for (i = 0; i < list.length; i++) store.get(root).push(list[i]);
+          adopt(root, store.get(root));
+        },
+        configurable: true, enumerable: true
+      });
+    }
+    adoptedAccessor(g.Document && g.Document.prototype);
+    adoptedAccessor(g.ShadowRoot && g.ShadowRoot.prototype);
+  })();

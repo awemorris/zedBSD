@@ -2833,10 +2833,13 @@ flex_baseline_above(
 	int align;
 	int last;
 	int found;
+	int vertical;
 
-	/* Only a row's items on a horizontal line (not one laid out logically for a vertical mode), aligned by their baselines. */
-	if (!row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
-	    layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB)
+	/* Only a row's items on a horizontal line (in a vertical mode's logical frame the items of its own flow), aligned by their baselines. */
+	vertical = layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB;
+	if (!row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
+		return 0;
+	if (vertical && (layout_physical_mode(item) != layout_physical_mode(box) || item->style.text_orientation == CSS_TEXT_ORIENTATION_SIDEWAYS))
 		return 0;
 	align = item->style.align_self;
 	last = (item->style.last_baselines & 8u) != 0;
@@ -2849,13 +2852,20 @@ flex_baseline_above(
 	if (item->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO || item->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
 		return 0;
 
-	/* Its first (or last) baseline, or its border box's bottom. */
+	/* Its first (or last) baseline (a vertical mode's, the central one), or its border box's bottom. */
 	found = 0;
-	if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+	if (vertical && item->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS)
+		found = layout_logical_central_baseline(item, last, &baseline);
+	else if (item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
 		found = last ? layout_last_baseline(item, &baseline) : layout_first_baseline(item, &baseline);
-	if (!found)
+	if (!found) {
 		baseline = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->height + item->padding[CSS_BOTTOM] +
 		    item->border[CSS_BOTTOM];
+
+		/* The central baseline of a vertical item is synthesized in the middle of its border box. */
+		if (vertical && item->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS)
+			baseline /= 2;
+	}
 	*above = item->margin[CSS_TOP] + baseline;
 	return last ? 2 : 1;
 }

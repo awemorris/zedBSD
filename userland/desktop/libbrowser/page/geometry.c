@@ -319,7 +319,7 @@ page_computed_style(
 
 	/* An element outside the document has no style. */
 	page = context;
-	for (walk = &element->node; walk->parent != NULL; walk = walk->parent)
+	for (walk = &element->node; dom_flat_parent(walk) != NULL; walk = dom_flat_parent(walk))
 		continue;
 	if (walk != &page->document->node)
 		return ENOENT;
@@ -731,7 +731,7 @@ geometry_child_box(
 	window = document->view;
 	if (window == NULL || document->context == NULL)
 		return 0;
-	connected = dom_is_inclusive_ancestor(&node->document->node, node);
+	connected = dom_is_connected(node);
 	if (!connected)
 		return 0;
 
@@ -1048,7 +1048,7 @@ geometry_cascade(
 	     walk != NULL &&
 	     walk->type == DOM_ELEMENT &&
 	     count < GEOMETRY_STYLE_DEPTH;
-	     walk = walk->parent) {
+	     walk = dom_flat_parent(walk)) {
 		chain[count] = (struct dom_element *)walk;
 		count++;
 	}

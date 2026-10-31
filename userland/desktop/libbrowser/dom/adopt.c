@@ -86,6 +86,11 @@ adopt_prepare(
 			if (status != 0)
 				return status;
 		}
+		if (element->shadow_root != NULL) {
+			status = adopt_prepare(document, element->shadow_root);
+			if (status != 0)
+				return status;
+		}
 	}
 
 	/* Succeeded: committing this graph needs no later registry allocation. */
@@ -128,6 +133,11 @@ adopt_tree(
 		/* Transfer template storage even though ordinary child traversal cannot reach it. */
 		if (element->content != NULL) {
 			status = adopt_tree(document, element->content);
+			if (status != 0)
+				return status;
+		}
+		if (element->shadow_root != NULL) {
+			status = adopt_tree(document, element->shadow_root);
 			if (status != 0)
 				return status;
 		}
