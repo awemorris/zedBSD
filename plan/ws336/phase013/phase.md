@@ -2,7 +2,7 @@
 
 # ws336-p013: ssh-sftp（SFTP v3 の request と reply）
 
-Status: 実装済み・試験 PASS（2026-11-01 06:06、cleared は Q1 が決める）
+Status: cleared（2026-11-01 06:09 Q1、main 8872d89fe）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p002

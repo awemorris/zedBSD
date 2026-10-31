@@ -540,5 +540,5 @@
 | q1817 / q1817-i01 | P4（phase-runner-high、同じ worktree p4-ws291pi、Pi 5 10.0.30.7・VF2 10.0.30.2） | [ws291](ws291/ws.md) main の性能の計測（Pi 5・VF2） | 2026-11-01 05:40 ユーザーから、WS291 の成果を main に入れたら VF2 と Pi 5 で性能を測る、という趣旨の指示を受けた（main b2604051a: RTX の (a) kernel の 1 page の写し・(c) fence の無い submit、Pi 5 の p021）。計測だけ、source は変えない | in-progress |
 | q1814 / q1814-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p010`） | [ws336-p010](ws336/phase010/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1815 / q1815-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p012`） | [ws336-p012](ws336/phase012/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
-| q1816 / q1816-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p013`） | [ws336-p013](ws336/phase013/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
+| q1816 / q1816-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p013`） | [ws336-p013](ws336/phase013/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | cleared（2026-11-01 06:09、d194e8b3a、main 8872d89fe） |
 | q1818 / q1818-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws335-p002`） | [ws335-p002](ws335/phase002/phase.md) | 標準廉価実装手順の実装（土台・SHA-2・HMAC・HKDF）。header・試験の道具は変えない | in-progress |
