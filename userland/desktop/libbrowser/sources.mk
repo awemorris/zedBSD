@@ -158,6 +158,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_DIR)/html/input.c \
 	$(LIBBROWSER_DIR)/page/resource.c \
 	$(LIBBROWSER_DIR)/page/frame-load.c \
 	$(LIBBROWSER_DIR)/page/script.c \
+	$(LIBBROWSER_DIR)/page/integrity.c \
 	$(LIBBROWSER_DIR)/page/module.c \
 	$(LIBBROWSER_DIR)/page/geometry.c \
 	$(LIBBROWSER_DIR)/page/storage.c \
