@@ -61,8 +61,10 @@ static VkResult render_pass(struct terminal_renderer *renderer);
 static VkResult render_targets(struct terminal_renderer *renderer);
 static void render_targets_free(struct terminal_renderer *renderer);
 static VkResult render_commands(struct terminal_renderer *renderer);
-static VkResult render_memory(struct terminal_renderer *renderer, VkMemoryRequirements *requirements, VkDeviceMemory *memory);
+static VkResult render_memory(struct terminal_renderer *renderer, VkMemoryRequirements *requirements, VkMemoryPropertyFlags wanted, VkDeviceMemory *memory);
 static VkResult render_atlas(struct terminal_renderer *renderer, struct terminal_font *font);
+static VkResult render_atlas_staging(struct terminal_renderer *renderer, struct terminal_font *font);
+static VkResult render_atlas_upload(struct terminal_renderer *renderer, struct terminal_font *font, int *recorded);
 static VkResult render_vertices(struct terminal_renderer *renderer);
 static VkResult render_pipeline(struct terminal_renderer *renderer);
 static VkResult render_module(struct terminal_renderer *renderer, const uint32_t *code, size_t size, VkShaderModule *module);
@@ -83,12 +85,6 @@ static uint64_t render_now_us(void);
 static void render_perf_add(unsigned part, uint64_t started);
 static void render_perf_report(void);
 static float *render_search_bar(struct terminal_renderer *renderer, const struct terminal_screen *screen, struct terminal_font *font, const struct terminal_window *window, const struct terminal_theme *theme, float *vertex);
-
-/*
- * The atlas image is PREINITIALIZED until the first frame moves it to
- * GENERAL (with the host's writes kept); nonzero once that is done.
- */
-static int render_atlas_ready;
 
 /*
  * The ZTERM PERF line's sums since it was last written: the frames drawn,
@@ -138,9 +134,6 @@ terminal_renderer_open(
 	render_perf_on = 0;
 	if (perf != NULL && strcmp(perf, "1") == 0)
 		render_perf_on = 1;
-
-	/* The atlas is moved to its layout by the first frame. */
-	render_atlas_ready = 0;
 
 	/* The instance, with the surface extensions a Wayland window needs. */
 	extensions[0] = VK_KHR_SURFACE_EXTENSION_NAME;
@@ -263,13 +256,14 @@ terminal_renderer_draw(
 	VkSubmitInfo submit;
 	VkPresentInfoKHR present;
 	VkCommandBufferAllocateInfo allocate;
+	VkCommandBuffer commands[2];
 	VkPipelineStageFlags stage;
 	struct terminal_target *target;
 	uint32_t vertex_count;
 	uint32_t ground;
 	uint32_t image;
 	uint64_t mark;
-	int kept;
+	int uploading;
 	VkResult error;
 
 	/* The frame before is finished before the host touches the vertices or the atlas again. */
@@ -315,12 +309,10 @@ terminal_renderer_draw(
 	 * Records the frame and closes the recording, unless the image's
 	 * recording draws the same: the vertices are rewritten in place, so a
 	 * recording of the same count and background is submitted again as it
-	 * is (each Begin and End is a round trip to the GPU's driver).  The
-	 * first frame's recording moves the atlas too, and is not kept.
+	 * is (each Begin and End is a round trip to the GPU's driver).
 	 */
 	ground = render_theme(window)->background;
 	if (!target->recorded || target->vertex_count != vertex_count || target->ground != ground) {
-		kept = render_atlas_ready;
 		render_record(renderer, target->command, image, vertex_count, ground);
 		renderer->operation = "vkEndCommandBuffer";
 		error = vkEndCommandBuffer(target->command);
@@ -328,8 +320,13 @@ terminal_renderer_draw(
 			return error;
 		target->vertex_count = vertex_count;
 		target->ground = ground;
-		target->recorded = kept;
+		target->recorded = 1;
 	}
+
+	/* The glyphs drawn since the last frame are copied into the atlas before the frame samples them. */
+	error = render_atlas_upload(renderer, font, &uploading);
+	if (error != VK_SUCCESS)
+		return error;
 
 	/* The frame's fence starts unsignalled. */
 	renderer->operation = "vkResetFences";
@@ -338,15 +335,21 @@ terminal_renderer_draw(
 		return error;
 	render_perf_add(RENDER_PERF_RECORD, mark);
 
-	/* Submits the frame after the acquire, signalling the image's present semaphore. */
+	/* Submits the atlas's copy, if any, and the frame after the acquire, signalling the image's present semaphore. */
 	stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	commands[0] = renderer->upload;
+	commands[1] = target->command;
 	memset(&submit, 0, sizeof(submit));
 	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	submit.waitSemaphoreCount = 1U;
 	submit.pWaitSemaphores = &renderer->acquired;
 	submit.pWaitDstStageMask = &stage;
 	submit.commandBufferCount = 1U;
-	submit.pCommandBuffers = &target->command;
+	submit.pCommandBuffers = &commands[1];
+	if (uploading) {
+		submit.commandBufferCount = 2U;
+		submit.pCommandBuffers = commands;
+	}
 	submit.signalSemaphoreCount = 1U;
 	submit.pSignalSemaphores = &renderer->targets[image].rendered;
 	mark = render_now_us();
@@ -432,13 +435,17 @@ terminal_renderer_close(
 		if (renderer->sampler != VK_NULL_HANDLE)
 			vkDestroySampler(renderer->device, renderer->sampler, NULL);
 
-		/* The atlas and the vertices, with their memory. */
+		/* The atlas, its staging buffer and the vertices, with their memory. */
 		if (renderer->atlas_view != VK_NULL_HANDLE)
 			vkDestroyImageView(renderer->device, renderer->atlas_view, NULL);
 		if (renderer->atlas != VK_NULL_HANDLE)
 			vkDestroyImage(renderer->device, renderer->atlas, NULL);
 		if (renderer->atlas_memory != VK_NULL_HANDLE)
 			vkFreeMemory(renderer->device, renderer->atlas_memory, NULL);
+		if (renderer->staging != VK_NULL_HANDLE)
+			vkDestroyBuffer(renderer->device, renderer->staging, NULL);
+		if (renderer->staging_memory != VK_NULL_HANDLE)
+			vkFreeMemory(renderer->device, renderer->staging_memory, NULL);
 		if (renderer->vertices != VK_NULL_HANDLE)
 			vkDestroyBuffer(renderer->device, renderer->vertices, NULL);
 		if (renderer->vertex_memory != VK_NULL_HANDLE)
@@ -810,25 +817,37 @@ render_commands(
 	return VK_SUCCESS;
 }
 
-/* Allocates host-visible, coherent memory that meets the requirements. */
+/*
+ * Allocates memory that meets the requirements, of the first allowed type
+ * with the wanted properties: host-visible and coherent for what the host
+ * writes, device-local for the atlas (which takes any allowed type when
+ * the device has no such type for it).
+ */
 static VkResult
 render_memory(
 	struct terminal_renderer *renderer,
 	VkMemoryRequirements *requirements,
+	VkMemoryPropertyFlags wanted,
 	VkDeviceMemory *memory)
 {
 	VkPhysicalDeviceMemoryProperties properties;
 	VkMemoryAllocateInfo allocate;
-	VkMemoryPropertyFlags wanted;
 	uint32_t index;
 	VkResult error;
 
-	/* The first allowed type that the host sees and keeps coherent. */
+	/* The first allowed type with the wanted properties. */
 	vkGetPhysicalDeviceMemoryProperties(renderer->physical, &properties);
-	wanted = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 	for (index = 0U; index < properties.memoryTypeCount; index++) {
 		if ((requirements->memoryTypeBits & (1U << index)) != 0U && (properties.memoryTypes[index].propertyFlags & wanted) == wanted)
 			break;
+	}
+
+	/* Memory only the device reads may be of any allowed type. */
+	if (index == properties.memoryTypeCount && (wanted & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0U) {
+		for (index = 0U; index < properties.memoryTypeCount; index++) {
+			if ((requirements->memoryTypeBits & (1U << index)) != 0U)
+				break;
+		}
 	}
 
 	/* Without one the host cannot write the atlas or the vertices. */
@@ -845,11 +864,15 @@ render_memory(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* Succeeded: host-visible memory. */
+	/* Succeeded: memory of the type wanted. */
 	return VK_SUCCESS;
 }
 
-/* Makes the glyph atlas (a linear, host-written image), its sampler and descriptor set, and gives its pixels to the font. */
+/*
+ * Makes the glyph atlas (an optimal image the copies of the font's rows
+ * fill), its staging buffer (given to the font), its sampler and
+ * descriptor set.
+ */
 static VkResult
 render_atlas(
 	struct terminal_renderer *renderer,
@@ -857,8 +880,6 @@ render_atlas(
 {
 	VkImageCreateInfo image;
 	VkMemoryRequirements requirements;
-	VkImageSubresource subresource;
-	VkSubresourceLayout layout;
 	VkImageViewCreateInfo view;
 	VkSamplerCreateInfo sampler;
 	VkDescriptorSetLayoutBinding binding;
@@ -868,11 +889,9 @@ render_atlas(
 	VkDescriptorSetAllocateInfo allocate;
 	VkDescriptorImageInfo image_info;
 	VkWriteDescriptorSet write;
-	void *map;
 	VkResult error;
-	int attached;
 
-	/* The image: linear so that the host writes its rows, sampled by the fragment shader. */
+	/* The image: optimal, filled by copies, sampled by the fragment shader. */
 	memset(&image, 0, sizeof(image));
 	image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	image.imageType = VK_IMAGE_TYPE_2D;
@@ -883,18 +902,18 @@ render_atlas(
 	image.mipLevels = 1U;
 	image.arrayLayers = 1U;
 	image.samples = VK_SAMPLE_COUNT_1_BIT;
-	image.tiling = VK_IMAGE_TILING_LINEAR;
-	image.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+	image.tiling = VK_IMAGE_TILING_OPTIMAL;
+	image.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 	image.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	image.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+	image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	renderer->operation = "vkCreateImage";
 	error = vkCreateImage(renderer->device, &image, NULL, &renderer->atlas);
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* Its memory, bound and mapped for good. */
+	/* Its memory, the device's own. */
 	vkGetImageMemoryRequirements(renderer->device, renderer->atlas, &requirements);
-	error = render_memory(renderer, &requirements, &renderer->atlas_memory);
+	error = render_memory(renderer, &requirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &renderer->atlas_memory);
 	if (error != VK_SUCCESS)
 		return error;
 
@@ -904,19 +923,10 @@ render_atlas(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* Maps it for the host's writes, for good. */
-	renderer->operation = "vkMapMemory";
-	error = vkMapMemory(renderer->device, renderer->atlas_memory, 0U, VK_WHOLE_SIZE, 0U, &map);
+	/* The buffer the font draws into, and the command buffer that copies from it. */
+	error = render_atlas_staging(renderer, font);
 	if (error != VK_SUCCESS)
 		return error;
-
-	/* Where the rows start, which the font needs to draw into it. */
-	memset(&subresource, 0, sizeof(subresource));
-	subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	vkGetImageSubresourceLayout(renderer->device, renderer->atlas, &subresource, &layout);
-	attached = terminal_font_attach(font, (unsigned char *)map + layout.offset, (size_t)layout.rowPitch, RENDER_ATLAS_WIDTH, RENDER_ATLAS_HEIGHT);
-	if (attached != 0)
-		return VK_ERROR_OUT_OF_HOST_MEMORY;
 
 	/* The view the shader samples. */
 	memset(&view, 0, sizeof(view));
@@ -986,11 +996,11 @@ render_atlas(
 	if (error != VK_SUCCESS)
 		return error;
 
-	/* The set names the atlas in the general layout it is kept in. */
+	/* The set names the atlas in the layout the copies leave it in. */
 	memset(&image_info, 0, sizeof(image_info));
 	image_info.sampler = renderer->sampler;
 	image_info.imageView = renderer->atlas_view;
-	image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	memset(&write, 0, sizeof(write));
 	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	write.dstSet = renderer->set;
@@ -1001,6 +1011,157 @@ render_atlas(
 	vkUpdateDescriptorSets(renderer->device, 1U, &write, 0U, NULL);
 
 	/* Succeeded: the font draws into the atlas and the shader samples it. */
+	return VK_SUCCESS;
+}
+
+/*
+ * Makes the atlas's staging buffer (host-written, mapped for good, rows
+ * packed at the atlas's width), gives its pixels to the font, and
+ * allocates the command buffer that copies the rows the font wrote.
+ */
+static VkResult
+render_atlas_staging(
+	struct terminal_renderer *renderer,
+	struct terminal_font *font)
+{
+	VkBufferCreateInfo buffer;
+	VkMemoryRequirements requirements;
+	VkCommandBufferAllocateInfo allocate;
+	int attached;
+	VkResult error;
+
+	/* The buffer: four bytes a pixel, the copies' source. */
+	memset(&buffer, 0, sizeof(buffer));
+	buffer.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	buffer.size = (VkDeviceSize)RENDER_ATLAS_WIDTH * RENDER_ATLAS_HEIGHT * 4U;
+	buffer.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	renderer->operation = "vkCreateBuffer";
+	error = vkCreateBuffer(renderer->device, &buffer, NULL, &renderer->staging);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Its memory, which the host sees. */
+	vkGetBufferMemoryRequirements(renderer->device, renderer->staging, &requirements);
+	error = render_memory(renderer, &requirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &renderer->staging_memory);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Binds the memory to the buffer. */
+	renderer->operation = "vkBindBufferMemory";
+	error = vkBindBufferMemory(renderer->device, renderer->staging, renderer->staging_memory, 0U);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Maps it for the host's writes, for good. */
+	renderer->operation = "vkMapMemory";
+	error = vkMapMemory(renderer->device, renderer->staging_memory, 0U, VK_WHOLE_SIZE, 0U, &renderer->staging_map);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The font draws into it, starting with its first slots. */
+	attached = terminal_font_attach(font, renderer->staging_map, (size_t)RENDER_ATLAS_WIDTH * 4U, RENDER_ATLAS_WIDTH, RENDER_ATLAS_HEIGHT);
+	if (attached != 0)
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+	/* The command buffer that copies the rows the font wrote, recorded again each time. */
+	memset(&allocate, 0, sizeof(allocate));
+	allocate.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocate.commandPool = renderer->pool;
+	allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocate.commandBufferCount = 1U;
+	renderer->operation = "vkAllocateCommandBuffers";
+	error = vkAllocateCommandBuffers(renderer->device, &allocate, &renderer->upload);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: the image has no copy yet. */
+	renderer->atlas_defined = 0;
+	return VK_SUCCESS;
+}
+
+/*
+ * Records the copy of the box of the atlas the font wrote since the last
+ * copy, from the staging buffer into the image, and empties the box.  The
+ * caller has waited for the frame before, so neither the command buffer
+ * nor the rows are in use.  *recorded is nonzero when there is a copy to
+ * submit before the frame.
+ */
+static VkResult
+render_atlas_upload(
+	struct terminal_renderer *renderer,
+	struct terminal_font *font,
+	int *recorded)
+{
+	VkCommandBufferBeginInfo begin;
+	VkImageMemoryBarrier barrier;
+	VkBufferImageCopy region;
+	VkResult error;
+
+	/* Nothing new to copy. */
+	*recorded = 0;
+	if (font->dirty_right == 0U)
+		return VK_SUCCESS;
+
+	/* A recording submitted once. */
+	memset(&begin, 0, sizeof(begin));
+	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	renderer->operation = "vkBeginCommandBuffer";
+	error = vkBeginCommandBuffer(renderer->upload, &begin);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* The image takes copies after the frames before have sampled it (its first copy keeps nothing). */
+	memset(&barrier, 0, sizeof(barrier));
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	if (!renderer->atlas_defined) {
+		barrier.srcAccessMask = 0U;
+		barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	}
+	barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = renderer->atlas;
+	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.levelCount = 1U;
+	barrier.subresourceRange.layerCount = 1U;
+	vkCmdPipelineBarrier(renderer->upload, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
+
+	/* The box's rows, read at the buffer's row length (the atlas's width). */
+	memset(&region, 0, sizeof(region));
+	region.bufferOffset = (VkDeviceSize)font->dirty_top * font->row_pitch + (VkDeviceSize)font->dirty_left * 4U;
+	region.bufferRowLength = font->atlas_width;
+	region.bufferImageHeight = 0U;
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.layerCount = 1U;
+	region.imageOffset.x = (int32_t)font->dirty_left;
+	region.imageOffset.y = (int32_t)font->dirty_top;
+	region.imageExtent.width = font->dirty_right - font->dirty_left;
+	region.imageExtent.height = font->dirty_bottom - font->dirty_top;
+	region.imageExtent.depth = 1U;
+	vkCmdCopyBufferToImage(renderer->upload, renderer->staging, renderer->atlas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1U, &region);
+
+	/* The frame samples the image after the copy. */
+	barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	vkCmdPipelineBarrier(renderer->upload, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
+
+	/* Closes the recording. */
+	renderer->operation = "vkEndCommandBuffer";
+	error = vkEndCommandBuffer(renderer->upload);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: the box is on its way to the image. */
+	font->dirty_right = 0U;
+	renderer->atlas_defined = 1;
+	*recorded = 1;
 	return VK_SUCCESS;
 }
 
@@ -1027,7 +1188,7 @@ render_vertices(
 
 	/* Its memory, bound and mapped. */
 	vkGetBufferMemoryRequirements(renderer->device, renderer->vertices, &requirements);
-	error = render_memory(renderer, &requirements, &renderer->vertex_memory);
+	error = render_memory(renderer, &requirements, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &renderer->vertex_memory);
 	if (error != VK_SUCCESS)
 		return error;
 
@@ -2056,7 +2217,7 @@ render_quad(
 	return vertex;
 }
 
-/* Records the frame: the atlas's first layout change, the cleared pass and the draw of every cell. */
+/* Records the frame: the cleared pass and the draw of every cell. */
 static void
 render_record(
 	struct terminal_renderer *renderer,
@@ -2066,7 +2227,6 @@ render_record(
 	uint32_t ground)
 {
 	VkCommandBufferBeginInfo begin;
-	VkImageMemoryBarrier barrier;
 	VkRenderPassBeginInfo pass;
 	VkClearValue clear;
 	VkViewport viewport;
@@ -2079,24 +2239,6 @@ render_record(
 	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	begin.flags = 0U;
 	(void)vkBeginCommandBuffer(command, &begin);
-
-	/* The first frame moves the atlas from preinitialized (the host's writes kept) to general. */
-	if (render_atlas_ready == 0) {
-		memset(&barrier, 0, sizeof(barrier));
-		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		barrier.oldLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
-		barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.image = renderer->atlas;
-		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		barrier.subresourceRange.levelCount = 1U;
-		barrier.subresourceRange.layerCount = 1U;
-		vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0U, 0U, NULL, 0U, NULL, 1U, &barrier);
-		render_atlas_ready = 1;
-	}
 
 	/* The pass, cleared to the theme's background (the padding around the grid). */
 	memset(&clear, 0, sizeof(clear));

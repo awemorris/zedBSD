@@ -386,6 +386,16 @@ struct terminal_font {
 	unsigned char *pixels;
 	size_t row_pitch;
 
+	/*
+	 * The box of the pixels written since the renderer last took them to
+	 * the GPU's image, in pixels (left and top inclusive, right and bottom
+	 * exclusive); empty when right is 0.  The renderer empties it.
+	 */
+	unsigned dirty_left;
+	unsigned dirty_top;
+	unsigned dirty_right;
+	unsigned dirty_bottom;
+
 	/* How many slots there are and how many are used. */
 	unsigned slots;
 	unsigned used;
@@ -511,10 +521,22 @@ struct terminal_renderer {
 	VkDescriptorSet set;
 	VkSampler sampler;
 
-	/* The glyph atlas: a host-written linear image and its view. */
+	/*
+	 * The glyph atlas: an optimal image in the device's own memory and its
+	 * view, and the host-written buffer the font draws into (staging,
+	 * mapped for good at staging_map).  The rows the font wrote are copied
+	 * from the buffer into the image by the upload command buffer, which
+	 * runs before the frame that needs them; atlas_defined is nonzero once
+	 * the image has had its first copy (its layout is then the shader's).
+	 */
 	VkImage atlas;
 	VkDeviceMemory atlas_memory;
 	VkImageView atlas_view;
+	VkBuffer staging;
+	VkDeviceMemory staging_memory;
+	void *staging_map;
+	VkCommandBuffer upload;
+	int atlas_defined;
 
 	/* The vertices of one frame, in host-visible memory mapped for good. */
 	VkBuffer vertices;
