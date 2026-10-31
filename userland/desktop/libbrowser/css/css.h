@@ -1174,6 +1174,7 @@ int css_try_fallbacks_serialize(const struct css_try_list *list, struct wb_units
 int css_try_order_serialize(int order, struct wb_units *out);
 const char *const *css_anchor_shorthand_longhands(const struct vm_string *name);
 int css_anchor_shorthand_part(struct vm_heap *heap, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
+int css_filter_canonical(const struct vm_string *name, const struct vm_string *value, struct wb_units *out, int *handled);
 int css_anchor_canonical(struct vm_heap *heap, const struct vm_string *name, const struct vm_string *value, struct wb_units *out, int *handled);
 int css_position_visibility_serialize(int bits, struct wb_units *out);
 int css_position_area_regions(int packed, int cb_mode, int cb_direction, int self_mode, int self_direction, int *x0, int *x1, int *y0, int *y1);
