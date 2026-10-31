@@ -1,12 +1,12 @@
 <!-- awesome-plan project=zedbsd record=ws336-p019 -->
 
-# ws336-p019: sftp-server の program（と Q3 次第で旧の scp の受け手）
+# ws336-p019: sftp-server の program
 
 Status: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p013・p018
-WS335 の待ち: 無し。**Q3 の答え次第**（sftp を入れない時は canceled、その時 p020 の依存は p018 になる）
+WS335 の待ち: 無し。Q3 は A（sftp-server だけ、旧の scp の受け手は作らない、2026-11-01）
 
 ## 1. 読む物
 
@@ -25,7 +25,6 @@ WS335 の待ち: 無し。**Q3 の答え次第**（sftp を入れない時は ca
 ## 2. 作る物
 
 - `userland/base/ssh/sftp-server-main.c`
-- （Q3 で旧の scp を入れる時）`userland/base/ssh/scp-main.c`（protocol の扱いは Q1 の判断で design に足す）
 - `plan/ws336/tests/interop-host.sh` に scp・sftp を足す
 - この phase.md の「結果」の節、[ws.md](../ws.md) の表のこの行
 
