@@ -614,7 +614,9 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev114 | paused な UA animation で transition が終わらない、column の flex の justify-content: left・right（縦書き） | 2,916（83.99%） | 289 / 177 / 84 / 6 |
   | dev115 | 変更なしの確認（新しい block 内の宣言を関数の先頭へ移した後） | 2,916 | 289 / 177 / 84 / 6 |
   | dev116（e04c80d48） | view transition の疑似要素の selector の検証（pseudo-elements-invalid）、`:has()` を forgiving にしない、CSSOM の宣言の element を遅延 | 2,917 | 288 / 177 / 84 / 6 |
-  | dev117（1d348223b、最終） | animation-iteration-count・animation-direction・isolation の計算値と mix-blend-mode の全 keyword、view transition の image が plus-lighter になるのは animation の間かつ両方の snapshot がある時 | 2,919（84.07%、gap 553） | 286 / 177 / 84 / 6 |
+  | dev117（1d348223b） | animation-iteration-count・animation-direction・isolation の計算値と mix-blend-mode の全 keyword、view transition の image が plus-lighter になるのは animation の間かつ両方の snapshot がある時 | 2,919（84.07%、gap 553） | 286 / 177 / 84 / 6 |
+  | dev118（3e76a760d） | HTMLStyleElement・HTMLLinkElement の media の反映、CSSStyleSheet.disabled、@position-try が media の合わない sheet から効かない | 2,920 | 285 / 177 / 84 / 6 |
+  | dev119（5335dc98b、最終） | anchor() の fallback が anchor 関数を持つ入れ子、fallback が % だけなら計算値も % | 2,922（84.16%、gap 550） | 283 / 177 / 84 / 6 |
 
 - 直した物（要点。source は userland/desktop/libbrowser/、JS は plan/ws074/phase260/*.js を make-prelude.py が prelude に取り込む（`// @include`））:
   1. CSSOM の rule object（plan/ws074/phase260/cssom-rules.js）: `cssRules`・`rules` は Proxy の CSSRuleList、CSSStyleRule・CSSGroupingRule・CSSConditionRule・CSSMediaRule・CSSSupportsRule・CSSContainerRule・CSSScopeRule・
@@ -644,7 +646,7 @@ Origin: 2026-10-27 ユーザーの指示。
      animation が走る間 plus-lighter（computed.c・box.c・page/transition.c）。style-inheritance・mix-blend-mode-only-on-transition。animation shorthand は iteration・direction を読む（animation の進みでの使用は未実装）。
   9. 未対応で調べた物: constructable stylesheet（new CSSStyleSheet・replaceSync。css-cascade の scope-declarations・scope-shadow）、@container・@starting-style の rule（parser が捨てる。scope-container・scope-starting-style）、
      CSS_TRACKS = 24 の固定長（grid-limits-001）、直交 item の stretch の一般化（縦書き grid の中の横書き item は logical 座標の grid の「直交 item」にならない。grid-self-baseline-vertical-lr/rl の 12 件など）、
-     anchor() の入れ子の fallback と min()・max()（anchor-parse-valid・anchor-size-parse-valid は 2,000 件超の subtest 全部が要る）。
+     anchor() の min()・max() と canonical な直列化（anchor-parse-valid・anchor-size-parse-valid は 2,000 件超の subtest 全部が要る。入れ子の fallback は項目 10 で対応済み）。
 - shadow DOM の設計メモ（::part()・:host・scope-shadow・anchor の tree-scoped が要る。engine に shadow DOM が全く無い。18 ID が触れる: css-anchor-position の anchor-name-in-shadow・anchor-scope-shadow-*・position-try-tree-scoped・
   at-position-try-invalidation-shadow-dom、css-cascade の scope-shadow・scope-part・scope-shadow-sharing、css-view-transitions の shadow-part-* 5 件と names-are-tree-scoped）:
   - DOM: element に shadow_root（DocumentFragment の一種、host・mode・slot assignment mode）。node ごとの tree scope（root の node）を持つ。getRootNode・parentNode（root の親は null、host は `host`）。
@@ -656,11 +658,16 @@ Origin: 2026-10-27 ユーザーの指示。
   - 手順の案: (1) declarative shadow root + tree scope の style + flat tree の layout + ::part()（shadow-part 5 件と scope-part、約 7 ID）、(2) attachShadow・ShadowRoot の interface（scope-shadow、anchor の shadow の試験）、
     (3) slot・::slotted、(4) event の retarget・composed path。全体で数日の規模。
 
-- 最終（2026-10-31 20:25、dev117）: 2,919 / 3,472（84.07%）。dev104 から +71、後退 0（毎回の測定で直前と dev104 の両方と比べた）。host build は `-Wall -Wextra -Werror` で warning 0。
-  Acid は最終の source で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%。
-  Acid の runner が残した一時 file（Q1 が消す）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-djctoxx2.html、acid3/zedbsd-acid3-reference-y2za7kja.html、acid3/zedbsd-acid3-diagnostic-97ea2019.html（worktree p8-ws074）。
-  この attempt の道具が残した一時物（Q1 が消す）: build/ws074-suites/wpt/zz_dbg/（dbg.sh が作る試験の複写。worktree の中）、/tmp/p8out の下の full.*・sub-*・sone・phase-i09.md・dbg-server.pid と、dev89〜dev111 の測定の出力
-    （最後の 2 つ dev116・dev117 は残す）。
+
+  10. anchor（css/anchor.c・cascade.c・layout/anchor.c）: anchor()・anchor-size() の fallback に anchor 関数（calc の中も）を入れ子で持てる（css_anchor_query.fallback_expr、cascade_anchor_resolve が em を px にして kept、
+      layout が fallback を再帰で解く）。anchor が見つからず fallback が固定値だけの時は % を % のまま length に残す（max-width: anchor-size(width, 28%) の計算値が 28%）。anchor-query-fallback・anchor-invalid-fallback。
+  11. CSSStyleSheet.disabled（bind/cssom.c・style-sheet.c）と HTMLStyleElement.media の反映（cssom-rules.js）、@position-try の rule も sheet の media で選ぶ（cascade_try_rule）。at-position-try-invalidation。
+- 最終（2026-10-31 20:38、dev119）: 2,922 / 3,472（84.16%）。dev104 から +74、後退 0（毎回の測定で直前と dev104 の両方と比べた）。host build は `-Wall -Wextra -Werror` で warning 0。
+  Acid は最終の source（5335dc98b）で Acid3 100/100・pixel 差 0（exact match）、Acid2 100.00%。
+  Acid の runner が残した一時 file（Q1 が消す。worktree p8-ws074）: build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-6zr2z31_.html、acid3/zedbsd-acid3-reference-b787trkq.html、acid3/zedbsd-acid3-diagnostic-0p3wlzgy.html、
+  前の 2 回分は acid2/zedbsd-acid2-djctoxx2.html、acid3/zedbsd-acid3-reference-y2za7kja.html、acid3/zedbsd-acid3-diagnostic-97ea2019.html と、build/ws074-suites/wpt/acid/ の他の zedbsd-acid*-*.html。
+  この attempt の道具が残した一時物（Q1 が消す）: build/ws074-suites/wpt/zz_dbg/（dbg.sh が作る試験の複写。worktree の中）、/tmp/p8out の下の full.*・sub-*・sone・phase-i09.md・dbg-server.pid と、dev89〜dev117 の測定の出力
+    （最後の 2 つ dev118・dev119 は残す。acid117・acid119 も）。
 - 次の候補（件数の見込み順）:
   - grid・flex の baseline の群（約 65 ID。vertical-lr/rl の self-baseline、flex・grid の baseline の試験の縦書き、synthesized baseline）。縦書きの grid の中の横書き item を直交の item として扱う一般化（logical.c の例外の除去）が要る。
     試した所、例外を全部外すと grid-self-alignment-stretch-vertical-* 16 件が後退した（直交の stretch の軸）。
