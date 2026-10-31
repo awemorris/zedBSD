@@ -9,16 +9,16 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | — | 返却（2026-11-01 03:01）。5330: WS299 の file write 90%（目標 95%）、WS333 p011（HWP・RAPL・HFI）・p012（tick を揃えて暇な時 −3.64 W）・p018（Dell の 4 つの mode・fan）を実機で確かめた（main dbf2059a7） | 次の割当を Q1 が決める |
-| P2 | — | — | 返却（2026-10-31 20:23）。WS309 p015 zero copy: RTX（block-linear 既定で有効）・VF2（c13 52.5 fps）・Pi 4 の全画面の動画で確かめ、main d8e39d789 | 残り: Pi 4 の 3D（P4 の p025 の後）・Pi 5 |
-| P3 | — | — | 返却（2026-11-01 02:19）。WS291 p024: subs-1000 35 → 43 fps、big-1000 114 → 119 fps（main 1e86f4502）。目標（75.4・136.2）は未達 | 続きは判断の後（下の 0m） |
+| P1 | [BUG-384](bugs/BUG-384.md) | arm64 の kernel の header の image_size に BSS が入っていない | 直す（q1810、優先） | QEMU の arm64 で起動の確かめ。Pi 5 の板の確かめは後で |
+| P2 | [BUG-382](bugs/BUG-382.md) | 5330 で discard の直後に mkfs が no registration | 原因を調べて直す（q1811、優先、5330 の実機） | 5 回以上の繰り返しで確かめ |
+| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（RTX） | p024: NVK と段ごとに比べ、差 G1〜G4 を詰める（q1785-i03） | RTX の区切りの後に BUG-383（http の page から file: を読む）→ BUG-381 の残りの driver → RTX に戻る |
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 5（p021、q1784-i06）: 画面が出た。bd1f58c4a を実機で確かめ（checksum 一致、c74 48.3 fps）、desktop は 1920x1080 で定常 60 fps（窓を出す瞬間に引っかかり）、画面の mview c74 49.9 fps。merge 04:40（main は下の commit） | bin と render の重ねを実装中 |
-| P5 | — | — | 返却（2026-11-01 03:03）。WS336 の設計を main に（a1d9f18fb、header の基点 d4ab182d2、実装の Phase p002〜p025）。問い Q1〜Q9 は下の 0n | 答えの後に実装（Sonnet と Opus） |
-| P6 | — | — | 返却（2026-11-01 03:04）。WS335 の設計を main に（header の基点 60760d2a0、実装の Phase p002〜p038）。問い U1〜U6 は下の 0o | 答えの後に実装 |
+| P5 | — | — | 返却（2026-11-01 04:53）。WS336 の設計を仕上げた（推しの答え、TODO の一覧 T1〜T31、基点 d4ab182d2 のまま）。実装は Sonnet が p002 から | — |
+| P6 | [WS335](ws335/ws.md) | 自前の libssl-compat・libcrypto-compat | 設計の仕上げ（q1789-i02）: 推しの答え、Windows は 1 つの .exe に static link、新しい基点 | 終われば Sonnet が p002 から実装 |
 | P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計 p002〜p004 cleared（基点 d393d3267）。module の p005〜p020 cleared（最新 p011 files、main c590d87fa） | P7 が p021（統合: OS に触れる所を OS の層へ）を実行中 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 13 回目（q1727-i13）: golden の試験の整理 → 負の向きの scroll・直交の subgrid など | 今 3,472 のうち 3,039（87.53%）、Acid3 100/100・Acid2 100%。12 回目は subgrid・grid の絶対配置など（+34、後退 0） |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 14 回目（q1727-i14）: dev141 = 3,084（88.82%）、shape-outside の 16 件、main cee9d88c2 | 直交の flex の項目 → grid の baseline |
 
-実装の担当（Sonnet・Opus の単発）: 無し（WS334 の module は p005〜p020 が全部 cleared）。
+実装の担当（Sonnet・Opus の単発）: WS336 の p002（Sonnet、worktree s-ws336-p002）。
 
 ## WS ごとの進捗
 
