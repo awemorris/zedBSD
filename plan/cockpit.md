@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 02:28（Q1）
+最終更新: 2026-11-01 02:44（Q1）
 
 ## 担当（P1〜P8）
 
@@ -15,10 +15,10 @@
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 4（p025）は熱の throttle の見込みで止め、Pi 5（p021）へ: V3D 7.1 への移し・1920x1080 の SD の image を作る | ユーザーが板を Pi 5 に替え、Q1 が SD を書く |
 | P5 | [WS336](ws336/ws.md) | 自前の sshd・ssh（OpenSSH 互換、ed25519・鍵の交換 1 つ） | p001 の設計（q1791、標準廉価実装手順）。WS335 の暗号の口と揃える | 設計・design-reviewer・問いまで |
 | P6 | [WS335](ws335/ws.md) | libssl-compat（OpenSSL 互換の自前の TLS） | p001 の設計（q1789、標準廉価実装手順）: 範囲・module・header・試験の道具 | 設計・design-reviewer・問いまで |
-| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | q1790: 標準廉価実装手順（決定 22）の設計の段: module・header・骨格・試験の道具・実装の phase.md、build の土台 | その後 Sonnet の実装の担当を Q1 が起動 |
+| P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | 設計の段 p002〜p004 cleared（基点 d393d3267、main 5ea437eb7）。p020 の glue（q1796） | 並べて Sonnet が p005・p009・p010・p013 を実装 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 13 回目（q1727-i13）: golden の試験の整理 → 負の向きの scroll・直交の subgrid など | 今 3,472 のうち 3,039（87.53%）、Acid3 100/100・Acid2 100%。12 回目は subgrid・grid の絶対配置など（+34、後退 0） |
 
-実装の担当（Sonnet・Opus の単発）: 今は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
+実装の担当（Sonnet・Opus の単発）: WS334 の第 1 群 p005・p009・p010・p013（Sonnet、worktree s-ws334-pNNN）。前は無し（WS326 は完了、WS333 の x86 の module は cleared）。p015・p017・p019・p021・p023 は cleared。
 
 ## WS ごとの進捗
 
@@ -89,6 +89,8 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 | [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking を飛ばす | closed（VF2 の実機で確かめた） |
 | [BUG-372](bugs/BUG-372.md) | VF2 の serial の console が入力を受けない（元から未実装） | closed（VF2 の実機で確かめた） |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が EBUSY で終わる（VF2） | closed（P7: 原因は GPU の kernel の命令の buffer が満杯の時に待たずに失敗する事。待つ形に直し、VF2 で 8 回とも落ちず。main 2c5897f26） |
+| [BUG-383](bugs/BUG-383.md) | libbrowser が http の page からも file: の副資源を読む（local の file の読み出し、安全） | open（WS074 の領域） |
+| [BUG-382](bugs/BUG-382.md) | 5330 の NVMe の p7 を discard して起動した直後に mkfs が失敗（間欠） | open |
 | [BUG-379](bugs/BUG-379.md) | Pi 4 の session の中で compositor が描かない。原因は kernel の fork の livelock | closed（Pi 4 の session で描く） |
 | [BUG-380](bugs/BUG-380.md) | Pi 4 で mview（3D）の pipeline が作れない（V3D の executor） | open |
 | [BUG-378](bugs/BUG-378.md) | arm64 の kernel の text が 2 MiB を越えると起動の途中で止まる（Pi 4、全 arm64 の board に効く） | closed（実機の Pi 4 で起動） |
