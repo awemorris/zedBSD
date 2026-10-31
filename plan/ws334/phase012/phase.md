@@ -64,3 +64,40 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。
 - 新しい file を `git add` してから `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と最後の行・自分で決めた点・未実施を Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、command、PASS の件数、自分で決めた点、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1）。
+
+## 結果（2026-11-01 03:56 実装・試験、担当 Sonnet 5.5）
+
+- 作った物: `userland/desktop/libbrowser/storage/queue.c`（全部の関数）、`plan/ws334/tests/unit/test-queue.c`。header・試験の道具・他の module は変えていない。
+- 試験（`LC_ALL=C.UTF-8`、出力を読んだ最後の行）:
+  - `sh plan/ws334/tests/run-unit.sh queue` → `test-queue: PASS (13174 checks) (posix)`・`(win32)`、`run-unit: PASS`。
+  - `sh plan/ws334/tests/run-unit.sh all` → 全部 PASS（queue は posix・win32 とも 13174 checks）、`run-unit: PASS`。
+  - `BASE=d393d3267 sh plan/ws334/tests/check-skeleton.sh` → `check-skeleton: PASS`。`git diff --check` は出力なし。
+  - 追加で（run-unit.sh の外、scratch）同じ試験を `-fsanitize=thread` で build して流した: `test-queue: PASS (13174 checks)`、データ競争の報告なし。
+- 試験の内容: phase.md の項目に加え、全ての関数の NULL・不正な key の EINVAL（backend に届かない事）、200 文字の key、長さ 0 の record、space ごとの分離と clear、
+  merge は remove・clear・別 space・別 key をまたぐ場合（またげる場合とまたげない場合）、read をまたがない事（別 thread の read を使い 5 回まで試す）、
+  byte の上限ちょうど・+1・置換での再利用・flush 後の回復、件数の上限（65535 件の remove の後で ENOSPC）、first error の保持と take_error の消費、
+  不明な errno 値の素通し、read の失敗で buffer が元に戻る事（1 byte 書いた後の失敗、backend が sink の失敗を無視して 0 を返す場合）、
+  list の失敗で keys と count が元のままの事、backend の呼び出しが 1 つの別 thread・重ならない・thread 名 `browser-storage`（posix）、
+  close が積んだ物を流し切り backend の close を 1 回・最後に呼ぶ事（gate で止めた間に積んだ 5 件）、書いた物が flush や別の呼び出し無しで backend に届く事（起こし忘れの検出）、
+  4 thread×1000 回の write・read・remove・list の混在（各 thread が自分の書きを自分の読みで確かめる）。
+  期待値は header の約束と手の計算から作った（fake の backend は試験の中、他の実装は使わない）。
+- 壊しての確認（git の外、`cmp` と `git diff` 空で戻りを確認、21 通り）: remove をまたぐ merge、read をまたぐ merge、clear をまたぐ merge、space を無視した merge、byte 上限の `>`→`>=`、
+  件数上限の `>=`→`>`、take_error が消さない、後の error が勝つ、list が不正な key を残す、close が積んだ物を流さない、backend の close が 2 回・0 回、
+  read の失敗で buffer を戻さない、list の失敗で keys を戻さない、flush が待たない、済んだ byte を引かない、sink の error を無視、新しい要求を先頭へ積む、
+  write の起こし忘れ、EFBIG の検査の削除。19 通りが初めから FAIL。初めに見逃した 2 つ（sink の error の無視・write の起こし忘れ）は試験を足して FAIL するようにした。
+  残る 1 つ（read の `found` を失敗時に 0 にしない）は同値: 失敗時は `*found` が 0 のまま返るので公開の結果が変わらない。
+  lock を持ったまま backend を呼ぶ変異は deadlock になるだけなので走らせていない。
+- 自分で決めた点（header が黙っている所）:
+  - 要求の件数の上限 65536（write・remove・clear が待っている数、実行中の 1 件を含む）。超えると ENOSPC。header の byte の上限は remove・clear を数えないので、止まった backend に対する memory の上限として足した
+    （read・list・flush は呼び手が待つので数えない）。同じ key の write が置換できる時は件数が増えないので超えても置換できる。
+  - byte の数え方は write の bytes の長さだけ。実行中の write も backend が終わるまで数える。長さ ちょうど `WB_STORAGE_QUEUE_LIMIT` の write は空の queue で通る。置換は古い bytes を引いてから上限を見る。
+  - merge は後ろから最大 256 件だけ見る（長い queue での走査を抑える）。flush の印は壁として merge を止める。別 space の要求は無関係として通り過ぎる。
+    置換は古い write の位置に新しい write が入る（順番は変わらない）。
+  - `take_error` は backend の値をそのまま返す（EIO に直さない）。read・list の誤りは呼び手へ返し take_error には入れない。NULL の queue の take_error は 0、flush(NULL)・close(NULL) は何もしない。
+  - list の `count` は成功した時だけ書く（失敗では触れない）。成功の時は今回足した数で、元の値に足さない。read の失敗・未発見では、sink が足した bytes を取り除き buffer を元の長さと NUL に戻す。
+  - backend の無い queue でも引数の検査（EINVAL・EFBIG）はする。その後 write・remove・clear は 0、read は found 0 で 0、list は count 0 で 0。
+  - open の引数の誤りは queue NULL → EINVAL を最初に見る。mutex・cond の初期化の失敗は ENOMEM、`pthread_create` の失敗は種類によらず EAGAIN。
+  - 長さ 0 の write の bytes は backend に NULL でない pointer（record の後ろ）で渡す。
+  - 試験の `struct fake` は大きい（約 1.2 MiB）ので static に置く（Windows の stack は 1 MiB で、初めに stack overflow した）。
+- 未実施: ENOMEM の経路（確保の失敗の注入）、`pthread_create`・mutex の初期化の失敗の経路、aarch64 の Windows の実行（arm64 の Wine が無い、compile は check-skeleton で通る）、
+  実際の `files` backend との結合（p011 と統合の phase）、起こし忘れのような競合は TSan と繰り返しで見たが形式的な証明ではない。
