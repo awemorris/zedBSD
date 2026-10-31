@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <float.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 #include <string.h>
 
@@ -1686,6 +1687,216 @@ css_parse_color(
 	return EINVAL;
 }
 
+
+/* Appends ASCII text to a unit buffer. */
+static int
+filter_append(
+	struct wb_units *out,
+	const char *text,
+	size_t length)
+{
+	uint16_t unit;
+	size_t index;
+	int error;
+
+	for (index = 0; index < length; index++) {
+		unit = (uint16_t)(unsigned char)text[index];
+		error = wb_units_append(out, &unit, 1U);
+		if (error != 0)
+			return error;
+	}
+	return 0;
+}
+
+/* Whether a filter argument token is a length or a number (not a color). */
+static int
+filter_number_like(
+	const char *text,
+	size_t length)
+{
+	char first;
+
+	if (length == 0)
+		return 0;
+	first = text[0];
+	return (first >= '0' && first <= '9') || first == '.' || first == '+' || first == '-';
+}
+
+/*
+ * Writes a filter list in the canonical form the specified value serializes to: a bare zero gets its unit (blur's
+ * length, hue-rotate's angle, a drop-shadow's lengths), a drop-shadow's color comes first, and the amount of grayscale(),
+ * invert(), opacity() and sepia() is limited to one (100%).  The other functions and anything that is not a function are
+ * kept as written.
+ */
+int
+css_filter_canonical(
+	const struct vm_string *name,
+	const struct vm_string *value,
+	struct wb_units *out,
+	int *handled)
+{
+	char text[2048];
+	char piece[256];
+	struct wb_units units;
+	size_t length;
+	size_t index;
+	size_t start;
+	size_t end;
+	size_t inner;
+	size_t depth;
+	size_t at;
+	size_t token_start;
+	size_t used;
+	size_t colors;
+	char color[128];
+	char lengths[128];
+	int first;
+	int error;
+	double amount;
+	char *stop;
+
+	*handled = 0;
+	if (!vm_string_equal_ascii(name, "backdrop-filter") && !vm_string_equal_ascii(name, "-webkit-backdrop-filter") &&
+	    !vm_string_equal_ascii(name, "filter") && !vm_string_equal_ascii(name, "-webkit-filter"))
+		return 0;
+
+	/* The value as ASCII. */
+	wb_units_init(&units);
+	error = vm_string_append_units(value, &units);
+	if (error != 0) {
+		wb_units_release(&units);
+		return error;
+	}
+	if (units.length == 0 || units.length >= sizeof(text)) {
+		wb_units_release(&units);
+		return 0;
+	}
+	for (index = 0; index < units.length; index++) {
+		if (units.data[index] >= 0x80U) {
+			wb_units_release(&units);
+			return 0;
+		}
+		text[index] = (char)units.data[index];
+	}
+	length = units.length;
+	text[length] = '\0';
+	wb_units_release(&units);
+
+	/* Each function, or other piece, in order. */
+	first = 1;
+	index = 0;
+	error = 0;
+	while (index < length && error == 0) {
+		while (index < length && (text[index] == ' ' || text[index] == '\t' || text[index] == '\n'))
+			index++;
+		if (index >= length)
+			break;
+		start = index;
+		depth = 0;
+		inner = 0;
+		while (index < length && (depth > 0 || (text[index] != ' ' && text[index] != '\t' && text[index] != '\n'))) {
+			if (text[index] == '(') {
+				if (depth == 0)
+					inner = index;
+				depth++;
+			} else if (text[index] == ')' && depth > 0) {
+				depth--;
+			}
+			index++;
+		}
+		end = index;
+		if (!first)
+			error = filter_append(out, " ", 1U);
+		first = 0;
+
+		/* A piece that is not a function with an argument list. */
+		if (error != 0)
+			break;
+		if (inner == 0 || text[end - 1U] != ')' || end - start >= sizeof(piece)) {
+			error = filter_append(out, text + start, end - start);
+			continue;
+		}
+
+		/* The function's name and its argument text. */
+		memcpy(piece, text + inner + 1U, end - 1U - (inner + 1U));
+		piece[end - 1U - (inner + 1U)] = '\0';
+		at = 0;
+		while (piece[at] == ' ')
+			at++;
+		used = strlen(piece);
+		while (used > at && piece[used - 1U] == ' ')
+			used--;
+		piece[used] = '\0';
+		error = filter_append(out, text + start, inner - start + 1U);
+		if (error != 0)
+			break;
+		if (inner - start == 4U && strncmp(text + start, "blur", 4) == 0 && strcmp(piece + at, "0") == 0) {
+			error = filter_append(out, "0px", 3U);
+		} else if (inner - start == 10U && strncmp(text + start, "hue-rotate", 10) == 0 && strcmp(piece + at, "0") == 0) {
+			error = filter_append(out, "0deg", 4U);
+		} else if ((inner - start == 9U && strncmp(text + start, "grayscale", 9) == 0) ||
+		    (inner - start == 6U && strncmp(text + start, "invert", 6) == 0) ||
+		    (inner - start == 7U && strncmp(text + start, "opacity", 7) == 0) ||
+		    (inner - start == 5U && strncmp(text + start, "sepia", 5) == 0)) {
+			amount = strtod(piece + at, &stop);
+			if (stop != piece + at && strcmp(stop, "%") == 0 && amount > 100.0)
+				error = filter_append(out, "100%", 4U);
+			else if (stop != piece + at && *stop == '\0' && amount > 1.0)
+				error = filter_append(out, "1", 1U);
+			else
+				error = filter_append(out, piece + at, strlen(piece + at));
+		} else if (inner - start == 11U && strncmp(text + start, "drop-shadow", 11) == 0) {
+			/* The color first, then the lengths (a bare zero with its unit). */
+			color[0] = '\0';
+			lengths[0] = '\0';
+			colors = 0;
+			token_start = at;
+			depth = 0;
+			for (used = at; ; used++) {
+				if (piece[used] == '(')
+					depth++;
+				else if (piece[used] == ')' && depth > 0)
+					depth--;
+				if (piece[used] != '\0' && (depth > 0 || piece[used] != ' '))
+					continue;
+				if (used > token_start) {
+					if (filter_number_like(piece + token_start, used - token_start)) {
+						if (strlen(lengths) + used - token_start + 5U < sizeof(lengths)) {
+							if (lengths[0] != '\0')
+								strcat(lengths, " ");
+							if (used - token_start == 1U && piece[token_start] == '0')
+								strcat(lengths, "0px");
+							else
+								strncat(lengths, piece + token_start, used - token_start);
+						}
+					} else if (colors == 0 && used - token_start < sizeof(color)) {
+						memcpy(color, piece + token_start, used - token_start);
+						color[used - token_start] = '\0';
+						colors = 1;
+					}
+				}
+				if (piece[used] == '\0')
+					break;
+				token_start = used + 1U;
+			}
+			if (colors != 0) {
+				error = filter_append(out, color, strlen(color));
+				if (error == 0 && lengths[0] != '\0')
+					error = filter_append(out, " ", 1U);
+			}
+			if (error == 0)
+				error = filter_append(out, lengths, strlen(lengths));
+		} else {
+			error = filter_append(out, piece + at, strlen(piece + at));
+		}
+		if (error == 0)
+			error = filter_append(out, ")", 1U);
+	}
+	if (error == 0)
+		*handled = 1;
+	return error;
+}
+
 /*
  * Serializes one declared numeric component using the native legacy scalar representation.
  * Nonnumeric components remain unhandled, and the caller retains their original grammar and spelling.
@@ -2236,6 +2447,11 @@ values_single(
 		if (css_ident_equal(&tokens[0], "auto")) {
 			value->kind = CSS_VALUE_KEYWORD;
 			value->keyword = 0;
+			return 0;
+		}
+		if (css_ident_equal(&tokens[0], "normal") || css_ident_equal(&tokens[0], "none")) {
+			value->kind = CSS_VALUE_KEYWORD;
+			value->keyword = css_ident_equal(&tokens[0], "normal") ? 2 : 3;
 			return 0;
 		}
 		if (tokens[0].type != CSS_TOKEN_IDENT || tokens[0].length < 3 || tokens[0].text[0] != '-' || tokens[0].text[1] != '-')

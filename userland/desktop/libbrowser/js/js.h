@@ -135,6 +135,7 @@ enum js_node_kind {
 #define JS_FLAG_METHOD		0x10000U
 #define JS_FLAG_BLOCK_FUNCTION	0x20000U	/* set by the compiler: a function declaration made when its block is entered */
 #define JS_FLAG_STATIC_INIT	0x40000U	/* made by the compiler: the function that runs a class's static fields and blocks */
+#define JS_FLAG_IMPORT_CALL	0x80000U	/* made by the parser: the call that stands for import() */
 
 /* The kinds of property and method (op of JS_NODE_PROPERTY and JS_NODE_METHOD). */
 enum js_property_kind {
@@ -224,6 +225,7 @@ int js_run_script(struct vm_realm *realm, const uint16_t *source, size_t length,
 int js_module_create(struct vm_realm *realm, const uint16_t *source, size_t length, struct js_module **module, struct js_syntax_error *error);
 int js_module_evaluate(struct js_module *module);
 int js_module_export(struct js_module *module, const uint16_t *name, size_t length, vm_value *value);
+int js_module_namespace(struct js_module *module, vm_value *object);
 size_t js_module_import_count(const struct js_module *module);
 int js_module_import_at(const struct js_module *module, size_t index, struct js_module_import_info *info);
 int js_module_link_import(struct js_module *module, const uint16_t *specifier, size_t specifier_length, const uint16_t *local, size_t local_length, struct js_module *target, const uint16_t *exported, size_t exported_length);
@@ -239,6 +241,7 @@ int js_module_graph_create(struct vm_realm *realm, js_module_resolve resolve,
 	js_module_fetch fetch, void *context, struct js_module_graph **graph);
 int js_module_graph_run(struct js_module_graph *graph, const char *url,
 	struct js_syntax_error *error);
+int js_module_graph_import(struct js_module_graph *graph, const char *url, int json, struct js_syntax_error *error, vm_value *namespace_object);
 void js_module_graph_release(struct js_module_graph *graph);
 
 /* The built-in objects (builtin.c). */

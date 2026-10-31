@@ -1793,6 +1793,36 @@
     def(g, 'ViewTransition', ViewTransition);
     def(g, 'ViewTransitionTypeSet', ViewTransitionTypeSet);
   })();
+  // ---- import(): the parser turns a dynamic import into a call of this loader (the specifier, the options).
+  def(g, '__zedImport', function __zedImport(specifier, options) {
+    return new Promise(function (resolve, reject) {
+      var text, type = null, w, keys, i, url, base;
+      try {
+        text = String(specifier);
+        if (options !== undefined) {
+          if (options === null || (typeof options !== 'object' && typeof options !== 'function')) throw new TypeError('The second argument of import() must be an object');
+          w = options.with;
+          if (w !== undefined) {
+            if (w === null || (typeof w !== 'object' && typeof w !== 'function')) throw new TypeError('The with option of import() must be an object');
+            keys = Object.keys(w);
+            for (i = 0; i < keys.length; i++) {
+              if (typeof w[keys[i]] !== 'string') throw new TypeError('Import attribute values must be strings');
+              if (keys[i] === 'type') type = w[keys[i]]; else throw new TypeError('Unsupported import attribute: ' + keys[i]);
+            }
+          }
+        }
+        if (type !== null && type !== 'json') throw new TypeError('Unsupported module type: ' + type);
+        base = (typeof document !== 'undefined' && document.baseURI) || (typeof location !== 'undefined' ? location.href : 'about:blank');
+        try { url = new URL(text, base).href; } catch (e) { throw new TypeError('Failed to resolve the module specifier ' + text); }
+        if (!/^(\.\/|\.\.\/|\/)/.test(text)) {
+          try { new URL(text); } catch (e) { throw new TypeError('The module specifier ' + text + ' is not a relative or absolute URL'); }
+        }
+        resolve(native.importModule(url, type === 'json'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
   // ---- Element.animate (https://drafts.csswg.org/web-animations-1/)
   // The timeline of an animation: its promises, play state and time, without any effect on the page's style.
   if (typeof document !== 'undefined' && typeof g.Element === 'function' && !g.Element.prototype.animate) (function () {

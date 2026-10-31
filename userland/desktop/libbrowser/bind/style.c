@@ -105,6 +105,7 @@ static int style_list_remove_at(struct vm_realm *realm, struct style_list *list,
 static int style_remove_from_list(struct vm_realm *realm, struct style_list *list, const struct vm_string *name);
 static int style_valid(struct vm_realm *realm, const struct vm_string *name, const struct vm_string *value, int *valid);
 static int style_canonical_decoration_line(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
+static int style_canonical_filter(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_canonical_grid_empty_lines(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_canonical_grid_auto_flow(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_canonical_grid_placement(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
@@ -196,12 +197,24 @@ bind_style_install(
 		return status;
 
 	/* The CSS namespace consults the same declaration parser as inline style. */
-	css = vm_object_create(window->realm->heap, window->realm->object_prototype);
-	if (css == NULL)
-		return ENOMEM;
-	status = js_builtin_value(window->realm, window->realm->global, "CSS", vm_value_cell(css), JS_BUILTIN_METHOD);
-	if (status != 0)
-		return status;
+	css = NULL;
+	{
+		/* The prelude may have made the namespace already (it adds methods written in the page's own language). */
+		vm_value existing;
+		vm_value key;
+
+		key = vm_key_from_ascii(window->realm->heap, "CSS");
+		if (key != VM_VALUE_EMPTY && vm_object_get(window->realm->global, key, &existing) == 0 && vm_value_is_object(existing))
+			css = (struct vm_object *)vm_value_as_cell(existing);
+	}
+	if (css == NULL) {
+		css = vm_object_create(window->realm->heap, window->realm->object_prototype);
+		if (css == NULL)
+			return ENOMEM;
+		status = js_builtin_value(window->realm, window->realm->global, "CSS", vm_value_cell(css), JS_BUILTIN_METHOD);
+		if (status != 0)
+			return status;
+	}
 	status = js_builtin_method(window->realm, css, "supports", 2, style_css_supports);
 	if (status != 0)
 		return status;
@@ -937,6 +950,10 @@ style_set(
 		goto roots_cleanup;
 	roots[1] = &value->cell;
 	status = style_canonical_anchor(realm, name, value, &value);
+	if (status != 0)
+		goto roots_cleanup;
+	roots[1] = &value->cell;
+	status = style_canonical_filter(realm, name, value, &value);
 	if (status != 0)
 		goto roots_cleanup;
 	roots[1] = &value->cell;
@@ -2067,6 +2084,32 @@ style_canonical_anchor(
 	/* The canonical text. */
 	wb_units_init(&canonical);
 	status = css_anchor_canonical(realm->heap, name, value, &canonical, &handled);
+	if (status == 0 && handled) {
+		*out = vm_string_from_units(realm->heap, canonical.data, canonical.length);
+		if (*out == NULL)
+			status = ENOMEM;
+	}
+	wb_units_release(&canonical);
+	return status;
+}
+
+/* Puts a filter list in its canonical form (another property's value as it is). */
+static int
+style_canonical_filter(
+	struct vm_realm *realm,
+	const struct vm_string *name,
+	struct vm_string *value,
+	struct vm_string **out)
+{
+	struct wb_units canonical;
+	int handled;
+	int status;
+
+	*out = value;
+	if (style_wide_keyword(value))
+		return 0;
+	wb_units_init(&canonical);
+	status = css_filter_canonical(name, value, &canonical, &handled);
 	if (status == 0 && handled) {
 		*out = vm_string_from_units(realm->heap, canonical.data, canonical.length);
 		if (*out == NULL)

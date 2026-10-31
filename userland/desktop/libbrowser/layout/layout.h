@@ -274,6 +274,8 @@ struct layout_box {
 	int used_inset_known;
 	/* The pass of layout_position that placed the box out of the flow. */
 	int placed_pass;
+	/* The style the box had before any position-try fallback changed it (kept in the tree's arena on the first placement; NULL until then). */
+	struct css_style *try_base;
 
 	/* anchor-center keeps a box inside its containing block (the range across, then down, when anchor_clamp_x or _y). */
 	int anchor_clamp_x;

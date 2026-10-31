@@ -514,6 +514,36 @@ prelude_view_transition_duration(
 	return 0;
 }
 
+/* importModule(url, json): the namespace of the module at the URL, loaded for import(); a failure is thrown. */
+static int
+prelude_import_module(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct wb_buffer href;
+	int present;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	window = bind_window_of(realm);
+	if (window->host.import_module == NULL)
+		return vm_throw_error(realm, VM_ERROR_TYPE, "Failed to fetch dynamically imported module");
+	wb_buffer_init(&href);
+	status = prelude_utf8_argument(args, count, 0, &href, &present);
+	if (status != 0 || !present) {
+		wb_buffer_release(&href);
+		return status;
+	}
+	status = window->host.import_module(window->host.context, wb_buffer_string(&href), js_argument(args, count, 1) == vm_value_boolean(1), result);
+	wb_buffer_release(&href);
+	return status;
+}
+
 /* animationOff(flag): a computed style is read without the value an @keyframes animation gives its filters and grid tracks. */
 static int
 prelude_animation_off(
@@ -1219,6 +1249,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "setPopover", 2, prelude_set_popover, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "setPopover", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "importModule", 2, prelude_import_module, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "importModule", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "animationOff", 1, prelude_animation_off, NULL, &function);
 	if (status == 0)

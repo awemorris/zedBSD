@@ -4771,6 +4771,7 @@ cascade_apply(
 		break;
 	case CSS_PROP_POSITION_ANCHOR:
 		style->position_anchor = value->keyword == 1 ? value->ident : NULL;
+		style->position_anchor_kind = value->keyword == 0 ? 2 : value->keyword == 3 ? 1 : 0;
 		style->anchor_tree = engine->apply_tree;
 		break;
 	case CSS_PROP_VIEW_TRANSITION_NAME:
@@ -5527,6 +5528,7 @@ cascade_inherit(
 		break;
 	case CSS_PROP_POSITION_ANCHOR:
 		style->position_anchor = parent->position_anchor;
+		style->position_anchor_kind = parent->position_anchor_kind;
 		break;
 	case CSS_PROP_VIEW_TRANSITION_NAME:
 		style->view_transition_name = parent->view_transition_name;

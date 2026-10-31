@@ -1156,7 +1156,7 @@ expr_new(
 		callee = expr_super(parser);
 	} else if (parser->lexer.token.keyword == JS_W_IMPORT) {
 		callee = expr_import(parser);
-		if (callee->kind == JS_NODE_IMPORT_CALL)
+		if ((callee->flags & JS_FLAG_IMPORT_CALL) != 0U)
 			js_fail(parser, "import() cannot be a constructor");
 	} else {
 		callee = expr_primary(parser);
@@ -1394,6 +1394,31 @@ expr_import(
 	/* in is as before, then the closing parenthesis. */
 	parser->no_in = no_in;
 	js_expect(parser, JS_P_RPAREN);
+
+	/* The expression is a call of the loader the page's prelude defines, with the specifier and the options. */
+	{
+		static const char loader[] = "__zedImport";
+		struct js_node *callee;
+		uint16_t *name;
+		size_t at;
+
+		callee = js_node_new(parser, JS_NODE_IDENTIFIER);
+		name = wb_arena_alloc(parser->arena, sizeof(loader) * sizeof(uint16_t));
+		if (name == NULL)
+			js_fail(parser, "out of memory");
+		for (at = 0; at + 1U < sizeof(loader); at++)
+			name[at] = (uint16_t)loader[at];
+		callee->text = name;
+		callee->text_length = sizeof(loader) - 1U;
+		callee->word = 0;
+		callee->first = NULL;
+		callee->second = NULL;
+		node->first->next = node->second;
+		node->second = node->first;
+		node->first = callee;
+		node->kind = JS_NODE_CALL;
+		node->flags |= JS_FLAG_IMPORT_CALL;
+	}
 
 	/* Succeeded: the dynamic import. */
 	return node;

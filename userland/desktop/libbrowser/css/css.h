@@ -832,6 +832,8 @@ struct css_style {
 	const struct css_anchor_expr *anchor[CSS_ANCHOR_SLOTS];
 	const struct css_anchor_names *anchor_names;
 	struct vm_string *position_anchor;
+	/* The keyword of a position-anchor that names no anchor: 0 normal, 1 none, 2 auto. */
+	int position_anchor_kind;
 	/* The shadow trees (their root nodes; NULL for the document's) the anchor names and the anchor references were declared in. */
 	const void *anchor_names_tree;
 	const void *anchor_tree;
@@ -1172,6 +1174,7 @@ int css_try_fallbacks_serialize(const struct css_try_list *list, struct wb_units
 int css_try_order_serialize(int order, struct wb_units *out);
 const char *const *css_anchor_shorthand_longhands(const struct vm_string *name);
 int css_anchor_shorthand_part(struct vm_heap *heap, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
+int css_filter_canonical(const struct vm_string *name, const struct vm_string *value, struct wb_units *out, int *handled);
 int css_anchor_canonical(struct vm_heap *heap, const struct vm_string *name, const struct vm_string *value, struct wb_units *out, int *handled);
 int css_position_visibility_serialize(int bits, struct wb_units *out);
 int css_position_area_regions(int packed, int cb_mode, int cb_direction, int self_mode, int self_direction, int *x0, int *x1, int *y0, int *y1);
