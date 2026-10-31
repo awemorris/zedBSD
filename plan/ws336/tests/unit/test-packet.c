@@ -875,9 +875,19 @@ test_counters(void)
 	CHECK_EQ(b.receive.bytes, frame_size);
 	CHECK_EQ(b.receive.packets, 1);
 
+	/* A length read under the null cipher is forgotten when the receiving key is set. */
+	build_frame(&frame_wire, 28, 11, payload, 16, 11);
+	error = ssh_packet_feed(&b, frame_wire.data, 4);
+	CHECK_EQ(error, 0);
+	error = take_payload(&b, out, &size);
+	CHECK_EQ(error, EAGAIN);
+	CHECK_EQ(b.length, 28);
+
 	/* A new key restarts the counters and keys the direction. */
 	ssh_packet_set_send_key(&a, key);
 	ssh_packet_set_receive_key(&b, key);
+	CHECK_EQ(b.length, 0);
+	ssh_buf_reset(&b.input);
 	CHECK_EQ(a.send.keyed, 1);
 	CHECK_EQ(b.receive.keyed, 1);
 	CHECK_EQ(a.send.bytes, 0);

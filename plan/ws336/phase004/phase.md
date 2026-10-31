@@ -2,7 +2,7 @@
 
 # ws336-p004: ssh-cipher・ssh-packet（chacha20-poly1305@openssh.com と binary packet）
 
-Status: in-progress（2026-11-01 06:59 q1823、Sonnet）
+Status: in-progress（2026-11-01 08:34 実装済み・試験 PASS、Q1 の受け入れ待ち）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p003
@@ -65,18 +65,28 @@ WS335 の待ち: p003 経由（header の凍結の後）
 
 ## 結果
 
-2026-11-01 07:07 時点（host の `date`）。Q1 の指示で途中終了。**未完・uncleared 相当**（試験を書いていない）。
+2026-11-01 08:34 時点（host の `date`）。**実装済み・試験 PASS**（cleared は Q1 が決める）。
 
-### 済んだ事
+### 作った物
 
-- `userland/base/ssh/ssh-cipher.c` を実装（init・clear・length・seal・open）。
-- `userland/base/ssh/ssh-packet.c` を実装（init・free・feed・next・send・set_send_key・set_receive_key・reset_seq・send_raw・take_line・pending・written）。
-- 確かめ: `cc -std=c89 -O1 -Wall -Wextra -Werror -D_DEFAULT_SOURCE -I. -Iuserland/base/ssh -Iplan/ws336/tests/host-crypto -c userland/base/ssh/ssh-{cipher,packet}.c` が 2 本とも警告 0 で compile（rc=0）。
+- `userland/base/ssh/ssh-cipher.c`（init・clear・length・seal・open）、`userland/base/ssh/ssh-packet.c`（init・free・feed・next・send・set_send_key・set_receive_key・reset_seq・send_raw・take_line・pending・written）。header は変えていない。
+- `plan/ws336/tests/unit/test-cipher.c`（1064 checks）、`plan/ws336/tests/unit/test-packet.c`（369168 checks。うち 10 万回は乱数の feed）。
 
-### 未実施
+### 実行した command と最後の行
 
-- `plan/ws336/tests/unit/test-cipher.c`・`test-packet.c` は未作成。したがって `run-unit.sh cipher packet`・`run-unit.sh all`・`check-skeleton.sh`・`git diff --check`・わざと壊す確認・規約 §14 の見直しは全て未実施。実装は一度も実行していない（ASan・UBSan も未）。
-- ws.md の表のこの行は更新していない（試験 PASS ではないため）。
+- `sh plan/ws336/tests/run-unit.sh cipher packet` → `test-cipher: PASS (1064 checks)`・`test-packet: PASS (369168 checks)`・`run-unit: PASS`（ASan・UBSan・leak 検出つき、`-std=c89 -Wall -Wextra -Werror`）。
+- `sh plan/ws336/tests/run-unit.sh all` → buf 323・channel 1603651・cipher 1064・common 2316・crypto 1656・packet 369168・privsep 947・sftp 1836・tools 13・ttymodes 20682 の全部 PASS、最後の行 `run-unit: PASS`。
+- `BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+- `git diff --check` → 出力なし（rc 0）。
+
+### 試験の中身
+
+- cipher: draft-ietf-sshm-chacha20-poly1305-04 Appendix A の完全な例（Figure 5 の鍵・seq 7・Figure 4 の平文・Figure 12 の暗号・Figure 17 の tag）で seal の暗号と tag が byte ごとに一致し、length と open が元に戻す。別の seq では EBADMSG。`ssh_chacha20_xor`・`ssh_poly1305` を直に呼んで組んだ期待（K_1 = 前半、K_2 = 後半、nonce は seq の 64 bit big-endian、length は K_2 の counter 0、本体は K_1 の counter 1 から、Poly1305 の鍵は K_1 の block 0 の先頭 32 bytes）と seq 0・1・0xffffffff、size 5・12・64・300 で一致。tag の 128 bit・暗号の全 bit の反転、1 byte 短い長さの全部で EBADMSG かつ packet 不変。size < 5・size - 4 > SSH_PACKET_LIMIT で EINVAL。init の鍵の分割と clear の wipe。
+- packet: 上の 3「試験の項目」の全部（鍵なしの送り 1〜40 bytes と最大 261888 bytes、padding 4 以上・整列、1 byte ずつ・2 packet 一度の feed、鍵ありの往復と seq・整列・1 bit の変更、packet_length 4・LIMIT+1 の EMSGSIZE、padding_length 3・packet_length 以上の EINVAL、tag の途中の EAGAIN、seq の wrap と reset_seq、take_line の各場合、send_raw と pending・written、入力と出力の上限の境界、乱数 10 万回）。鍵なしの受けの枠は `wire.h` で組んだ（モジュールとは別）。
+
+### わざと壊す確かめ（git の外ではなく worktree の file を書き換え、`cmp` で戻した事を確認）
+
+`build/tmp/p004m-1/mut.py`・`build/tmp/p004m-2/mut.py` で 23 通り（cipher: counter の取り違え、K_1 と K_2 の取り違え、tag の確かめを外す、tag の範囲を 1 byte 減らす、size の下限を 1 ずらす、nonce の位置をずらす。packet: packet_length の上限・下限、padding_length の下限・room の比較、wrap の閾値、take_line の上限・探索範囲・NUL 検査の範囲、整列の keyed の反転、reset_seq で wrapped を戻さない、feed・出力の上限の `>` を `>=`、tag 分の byte を数えない、bytes の勘定、set_send_key の packets 未リセット、set_receive_key の length 未リセット・keyed 未設定）を入れ、全部 FAIL を確認。最初に見逃した 1 つ（set_receive_key が `packet->length` を戻さない）は test-packet に確認を足して FAIL するようにした。全 mutation の後に両 .c が元と一致（`cmp`、`git status` は test-packet.c の追加分のみ）。
 
 ### 自分で決めた点（header が黙っている所）
 
@@ -84,15 +94,15 @@ WS335 の待ち: p003 経由（header の凍結の後）
 - seal・open が EIO の時は packet 全体（seal は tag も）を wipe する。open は tag 不一致の時 packet を変えない。
 - `ssh_packet` の input・output の buffer は両方 secret（wipe あり）。
 - feed の EMSGSIZE・ENOMEM と send・send_raw の ENOBUFS・ENOMEM は buffer の sticky error を残さない（`error` を 0 に戻す）。nothing appended。
-- feed は data が NULL で size > 0 のとき EINVAL。send は payload が NULL・size 0・size > SSH_PACKET_LIMIT - 255 - 1 のとき EINVAL。
+- feed は data が NULL で size > 0 のとき EINVAL。send_raw も同じ。send は payload が NULL・size 0・size > SSH_PACKET_LIMIT - 255 - 1 のとき EINVAL。
 - `bytes` は wire 上の全 bytes（長さ・padding・tag を含む）を数える。`wrapped` は seq が 0xffffffff から 0 へ進む時点（その 1 回目の送受）で立つ。
-- `set_receive_key` は `packet->length` を 0 に戻す（旧 cipher で読んだ長さを持ち越さない）。
-- take_line: capacity 0 は EINVAL。LF の探索は先頭 capacity+1 bytes まで。LF が無い時は、末尾が CR なら CR を除いた長さで EMSGSIZE を判断（CR LF の途中を誤って拒まない）。NUL は LF が見つかってから EINVAL。
+- `set_receive_key` は `packet->length` を 0 に戻す（旧 cipher で読んだ長さを持ち越さない）。ただし input に残る bytes は触らない（呼び出し側は NEWKEYS の直後に鍵ありの bytes を feed する）。
+- take_line: capacity 0 は EINVAL。LF の探索は先頭 capacity+1 bytes まで。LF が無い時は、末尾が CR なら CR を除いた長さで EMSGSIZE を判断（CR LF の途中を誤って拒まない）。NUL は LF が見つかってから EINVAL。CR は LF の直前の 1 つだけ除く（`a\rb\r\r\n` は内容 `a\rb\r`）。
 - 受けでは MAC の確認後に padding_length を検査（EINVAL）。payload の追加が失敗した後は layer は使えない（header の約束どおり）。
+- 鍵ありの受けの packet_length の 1 bit 変更は、長さが大きくなれば EAGAIN（残りを待つ）、小さくなれば EBADMSG、範囲外なら EMSGSIZE のどれか（試験はそれらだけを許し、payload が出ない事と seq が進まない事を確かめる）。
 
-### 次の正確な手順
+### 未実施・限界
 
-1. `test-cipher.c`: Appendix A（鍵 Figure 5・seq 7・Figure 4 の平文・Figure 18 の暗号+tag）の既知の答え、`ssh_chacha20_xor`・`ssh_poly1305` で組んだ K_1/K_2 の期待（seq 0・1・0xffffffff）、bit 反転で EBADMSG かつ packet 不変、size < 5 の EINVAL。
-2. `test-packet.c`: phase.md の §3 の各項目（鍵なし・鍵あり・seq wrap・take_line・send_raw の境界・乱数 10 万回 feed）。
-3. `sh plan/ws336/tests/run-unit.sh cipher packet`、`all`、`BASE=d4ab182d2 sh plan/ws336/tests/check-skeleton.sh`、`git diff --check`。
-4. 実装をわざと壊して試験が FAIL する事を確かめ、`cmp` で戻す。規約 §14 の見直し。ws.md の表を更新。
+- coding-style §14 の checklist の全文の見直しは、ここでは `-std=c89 -Wall -Wextra -Werror` の compile と自分の読みまで。WS の最後の「規約の全文の見直し」の Phase に任せる。
+- ssh-crypto.c は host の OpenSSL 3.5 の compat shim で流した（libcrypto-compat との試験は p021）。zedBSD の build（Makefile）は WS の方針でまだ無い。QEMU・実機・host の OpenSSH との相互運用は未実施（p015 以降）。
+- clang での unit test の build は未実施（`check-skeleton.sh` は header と骨格の compile）。
