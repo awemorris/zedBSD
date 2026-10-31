@@ -58,3 +58,4 @@ HAL・toolchain・共有の `build/`、他の WS の file。動作を変える�
 ## 持ち越し（Q1）
 
 - 2026-11-01 p010: `ssh-channel.h` の comment の食い違い 2 件を直す（長さの上限を越えた既知の要求は EINVAL でなく SSH_CREQ_OTHER と読む事を phase.md と揃える。ssh_channel_global_request の「no-more-sessions を守る」と「全部の global request を REQUEST_FAILURE で断る」の矛盾: 実装は want_reply の no-more-sessions に REQUEST_SUCCESS）。
+- 2026-11-01 p012: phase.md §3 の put_frame の上限越え（EINVAL）を header（EMSGSIZE）に揃える。mon_call を呼ぶ process が SIGPIPE を無視する前提を header の comment に書く（p016・p017 も守る）。
