@@ -517,3 +517,5 @@
 | q1796 / q1796-i01 | P7 Opus（worktree `/home/awe/zedBSD-worktrees/p7-ws334`） | [ws334-p020](ws334/phase020/phase.md) | 標準廉価実装手順の実装（第 1 群）。header・試験の道具は変えない | in-progress |
 | q1797 / q1797-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p014`） | [ws334-p014](ws334/phase014/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
 | q1798 / q1798-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p015`） | [ws334-p015](ws334/phase015/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
+| q1799 / q1799-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p016`） | [ws334-p016](ws334/phase016/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
+| q1800 / q1800-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws334-p017`） | [ws334-p017](ws334/phase017/phase.md) | 標準廉価実装手順の実装。header・試験の道具は変えない | in-progress |
