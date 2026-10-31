@@ -122,6 +122,7 @@ struct display_job {
 	uint32_t plane_index;
 	int readback;
 	unsigned scene_supported;
+	unsigned lendable;
 	struct kwl_head_rest *rests;
 	unsigned rest_count;
 	struct kwl_head_opening *opens;
@@ -151,6 +152,7 @@ static void display_light_submit(struct kwl_server *server, struct display_job *
 static void display_open_run(struct display_job *job);
 static void display_game_open_run(struct display_job *job);
 static void display_game_close(struct kwl_server *server, struct kwl_game_chain *chain);
+static unsigned display_lendable(struct kwl_compose *compose, const struct vkdemo_display *output);
 static struct display_change *display_change_new(kwl_display_fn *then, void *context);
 static void display_change_end(struct kwl_server *server, struct display_change *change, int error);
 static void display_open_parked(struct kwl_server *server, int error, void *context);
@@ -1012,7 +1014,9 @@ display_done_step(
 
 		/* The swapchain is the output's, and the main thread's part takes it in. */
 		compose->output = job->output;
+		compose->output.next = NULL;
 		compose->readback = (unsigned)job->readback;
+		compose->lendable = job->lendable;
 		scene_supported = job->scene_supported;
 		cursor = job->cursor;
 		plane_extent = job->plane_extent;
@@ -1186,6 +1190,7 @@ static void
 display_open_run(
 	struct display_job *job)
 {
+	VkExternalMemoryImageCreateInfo external;
 	struct kwl_compose *compose;
 	uint64_t started;
 	VkResult result;
@@ -1199,6 +1204,16 @@ display_open_run(
 		job->error = EIO;
 		return;
 	}
+
+	/*
+	 * The images may go out (the swapchain is made so), which tells whether
+	 * the display can lend its images to a game (display_lendable); nothing
+	 * else of window mode changes.
+	 */
+	memset(&external, 0, sizeof(external));
+	external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+	external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+	job->output.next = &external;
 
 	/* Both transfer directions first, for the scene's copies. */
 	started = kwl_milliseconds();
@@ -1236,8 +1251,10 @@ display_open_run(
 		return;
 	}
 
-	/* Reports how long the swapchain took. */
-	printf("KWL STARTUP step=output-swapchain ms=%llu\n", (unsigned long long)(kwl_milliseconds() - started));
+	/* Reports how long the swapchain took, and whether its images can go out (the game mode's lend). */
+	job->output.next = NULL;
+	job->lendable = display_lendable(compose, &job->output);
+	printf("KWL STARTUP step=output-swapchain ms=%llu lendable=%u\n", (unsigned long long)(kwl_milliseconds() - started), job->lendable);
 
 	/* The cursor plane's objects, when the output has such a plane (it borrows the output's claim). */
 	if (job->plane)
@@ -1458,6 +1475,48 @@ display_game_close(
 	vkdemo_display_close(compose->instance, compose->device, &chain->output);
 	if (taken)
 		kwl_os_display_release(server, compose->physical, compose->display);
+}
+
+/*
+ * Tells whether a swapchain's images can go out: the first one's fd is
+ * exported (vkGetMemoryFdKHR naming the image) and closed again.  A display
+ * whose chain cannot is never closed for the game mode.  Returns 1 or 0.
+ */
+static unsigned
+display_lendable(
+	struct kwl_compose *compose,
+	const struct vkdemo_display *output)
+{
+	VkMemoryDedicatedAllocateInfo dedicated;
+	VkMemoryGetFdInfoKHR get;
+	PFN_vkGetMemoryFdKHR get_memory_fd;
+	VkResult result;
+	int fd;
+
+	/* An image to ask about, and the export's entry point. */
+	if (output->image_count == 0U || output->images == NULL)
+		return 0U;
+	get_memory_fd = (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(compose->device, "vkGetMemoryFdKHR");
+	if (get_memory_fd == NULL)
+		return 0U;
+
+	/* The first image's fd, the request naming the image. */
+	memset(&dedicated, 0, sizeof(dedicated));
+	dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+	dedicated.image = output->images[0];
+	memset(&get, 0, sizeof(get));
+	get.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+	get.pNext = &dedicated;
+	get.memory = VK_NULL_HANDLE;
+	get.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+	fd = -1;
+	result = get_memory_fd(compose->device, &get, &fd);
+	if (result != VK_SUCCESS)
+		return 0U;
+
+	/* Succeeded: the images can go out; the fd was only a question. */
+	close(fd);
+	return 1U;
 }
 
 /* A change made of steps, for then and context; NULL without memory. */

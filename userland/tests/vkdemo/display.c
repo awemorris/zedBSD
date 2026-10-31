@@ -310,6 +310,7 @@ vkdemo_display_create_swapchain_exact(
 	/* FIFO is the mandatory Vulkan surface mode, with one color layer. */
 	memset(&create, 0, sizeof(create));
 	create.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	create.pNext = display->next;
 	create.surface = display->surface;
 	create.minImageCount = count;
 	create.imageFormat = display->format;

@@ -718,6 +718,12 @@ struct kwl_compose {
 	int rotate_saved;
 	/* The swapchain images can be a copy's source (a test image's capture, ws173-p002). */
 	unsigned readback;
+	/*
+	 * The output's swapchain images can go out (an image's fd was exported
+	 * when the swapchain was made): the display can lend its images to a
+	 * game (scanout.c).  Read by the game mode before it closes the output.
+	 */
+	unsigned lendable;
 	/* Cursor-free scene is optional and never replaces redraws after scene changes. */
 	struct kwl_scene scene;
 	/* The cursor plane, when the output has one (cursor-plane.c). */

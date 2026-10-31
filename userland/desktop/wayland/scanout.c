@@ -586,7 +586,7 @@ scanout_lendable(
 	why = NULL;
 	if (game == NULL) {
 		why = "no-game-object";
-	} else if (server->scanout_unlendable) {
+	} else if (!server->compose->lendable || server->scanout_unlendable) {
 		why = "display";
 	} else if (game->game_count == 0U || game->game_count + 2U > KWL_GAME_IMAGES) {
 		why = "count";
