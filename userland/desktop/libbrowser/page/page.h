@@ -173,6 +173,8 @@ struct page {
 	double scroll_x;
 	double scroll_y;
 	int scroll_requested;
+	/* Set while the page is laid out for a rendering update (the position options that last fit are remembered then). */
+	int rendering;
 	uint32_t layout_serial;
 	struct page_box_slot *box_index;
 	size_t box_index_capacity;
@@ -346,6 +348,7 @@ void page_scroll(void *context, double *x, double *y);
 int page_computed_style(void *context, struct dom_element *element, struct css_style *style);
 void page_box_index_release(struct page *page);
 void page_scroll_to(void *context, double x, double y);
+void page_rendering(void *context);
 struct dom_node *page_element_at(void *context, double x, double y);
 
 /* Web Storage (storage.c, ws074-p080). */

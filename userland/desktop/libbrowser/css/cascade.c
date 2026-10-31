@@ -119,6 +119,8 @@ struct css_engine {
 	/* The root element's zoom, which rem units are unscaled by. */
 	float root_zoom;
 	float viewport_width;
+	/* Whether the root element's writing mode is vertical (vi and vb follow it). */
+	int root_vertical;
 	float viewport_height;
 	struct wb_vector class_keys;
 	struct wb_vector candidates;
@@ -1303,6 +1305,7 @@ cascade_compute(
 		engine->root_font_size = style->font_size;
 		engine->root_zoom = style->zoom_eff;
 		engine->root_line_px = cascade_line_pixels(style);
+		engine->root_vertical = style->writing_mode != CSS_WRITING_HORIZONTAL_TB;
 	}
 
 	/* Succeeded: the style is computed. */
@@ -6886,6 +6889,12 @@ cascade_length(
 		break;
 	case CSS_DUNIT_VH:
 		length.value = value->number * engine->viewport_height / 100.0f * engine->zoom_eff;
+		break;
+	case CSS_DUNIT_VI:
+		length.value = value->number * (engine->root_vertical ? engine->viewport_height : engine->viewport_width) / 100.0f * engine->zoom_eff;
+		break;
+	case CSS_DUNIT_VB:
+		length.value = value->number * (engine->root_vertical ? engine->viewport_width : engine->viewport_height) / 100.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_VMIN:
 		length.value = value->number * engine->viewport_width / 100.0f;

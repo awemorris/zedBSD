@@ -65,7 +65,7 @@ static int position_fits(const struct layout_box *box, const struct position_blo
 static int position_aligned(int alignment);
 static int position_physical(int alignment, int rtl);
 static layout_unit position_align(int alignment, layout_unit start, layout_unit end, layout_unit margin_start, layout_unit margin_end, layout_unit size);
-static uint32_t position_try_key(const struct css_try_list *list);
+static uint32_t position_try_key(const struct css_style *style);
 static uint32_t position_style_key(const struct css_style *style);
 static int position_in_scroller(const struct layout_box *box);
 static void position_padding_box(const struct layout_box *box, struct position_block *block);
@@ -85,6 +85,7 @@ layout_position(
 	struct layout_tree *tree)
 {
 	struct position_block viewport;
+	struct position_block port;
 	int error;
 
 	/* The initial containing block is the viewport's rectangle at the document's top left. */
@@ -97,9 +98,14 @@ layout_position(
 	viewport.mode = CSS_WRITING_HORIZONTAL_TB;
 	viewport.direction = CSS_DIRECTION_LTR;
 
+	/* A fixed box's containing block is the viewport where the page is scrolled to. */
+	port = viewport;
+	port.x = tree->scroll_x;
+	port.y = tree->scroll_y;
+
 	/* Walks from the root, whose own containing block is the viewport (a new pass: no box is placed yet). */
 	tree->position_pass++;
-	error = position_walk(tree, tree->root, &viewport, &viewport, 0);
+	error = position_walk(tree, tree->root, &viewport, &port, 0);
 	if (error != 0)
 		return error;
 
@@ -125,8 +131,8 @@ layout_position_box(
 		return 0;
 
 	/* The nearest ancestor that contains it, else the viewport's rectangle. */
-	containing.x = 0;
-	containing.y = 0;
+	containing.x = box->style.position == CSS_POSITION_FIXED ? tree->scroll_x : 0;
+	containing.y = box->style.position == CSS_POSITION_FIXED ? tree->scroll_y : 0;
 	containing.width = tree->viewport_width;
 	containing.height = tree->viewport_height;
 	containing.mode = CSS_WRITING_HORIZONTAL_TB;
@@ -747,6 +753,17 @@ position_place(
 	return 0;
 }
 
+/* Whether a layout updates the position option that last fit (a rendering update does; a layout a script forces does not). */
+static int position_remember = 1;
+
+/* Tells the layouts that follow whether they update the last successful position options. */
+void
+layout_try_remember(
+	int remember)
+{
+	position_remember = remember;
+}
+
 /* Lays out and places one box, trying its position-try-fallbacks when it overflows. */
 static int
 position_place_fallbacks(
@@ -786,12 +803,14 @@ position_place_fallbacks(
 	if (saved == NULL)
 		return ENOMEM;
 	*saved = *box;
+	if (!position_remember)
+		tree->try_pending = 1;
 
 	/* The position option that last fit is kept while it still fits (even when the base position fits again). */
 	element = NULL;
 	if (box->node != NULL && box->node->type == DOM_ELEMENT)
 		element = (struct dom_element *)box->node;
-	key = position_try_key(saved->style.position_try) ^ position_style_key(&saved->style);
+	key = position_try_key(&saved->style) ^ position_style_key(&saved->style);
 	if (element != NULL && element->anchor_last > 0 && element->anchor_last_key == key &&
 	    element->anchor_last <= saved->style.position_try->count && layout_anchor_try(tree, box, element->anchor_last - 1)) {
 		error = position_place_once(tree, box, containing);
@@ -802,7 +821,7 @@ position_place_fallbacks(
 	error = position_place_once(tree, box, containing);
 	if (error != 0 || position_fits(box, containing)) {
 		/* The base position fits: nothing is remembered. */
-		if (error == 0 && box->node != NULL && box->node->type == DOM_ELEMENT)
+		if (error == 0 && position_remember && box->node != NULL && box->node->type == DOM_ELEMENT)
 			((struct dom_element *)box->node)->anchor_last = 0;
 		return error;
 	}
@@ -857,7 +876,7 @@ position_place_fallbacks(
 		error = position_place_once(tree, box, containing);
 		if (error != 0 || position_fits(box, containing)) {
 			/* The first that fits is remembered. */
-			if (element != NULL) {
+			if (element != NULL && position_remember) {
 				element->anchor_last = entry + 1;
 				element->anchor_last_key = key;
 			}
@@ -935,16 +954,34 @@ position_style_key(
 	return key;
 }
 
-/* A number that stays the same while a position-try-fallbacks list does. */
+/* Mixes a length into a key. */
+static uint32_t
+position_length_key(
+	uint32_t key,
+	const struct css_length *length)
+{
+	uint32_t bits;
+
+	memcpy(&bits, &length->value, sizeof(bits));
+	key = key * 16777619u ^ bits;
+	key = key * 16777619u ^ (uint32_t)length->unit;
+	return key;
+}
+
+/* A number that stays the same while a position-try-fallbacks list and the @position-try rules it names do. */
 static uint32_t
 position_try_key(
-	const struct css_try_list *list)
+	const struct css_style *style)
 {
+	const struct css_try_list *list;
+	const struct css_try_style *rule;
 	uint32_t key;
 	int entry;
 	int tactic;
+	int side;
 
 	/* Each entry's name, tactics and area. */
+	list = style->position_try;
 	key = 2166136261u ^ (uint32_t)list->count;
 	for (entry = 0; entry < list->count; entry++) {
 		if (list->entries[entry].name != NULL)
@@ -952,6 +989,20 @@ position_try_key(
 		for (tactic = 0; tactic < list->entries[entry].tactic_count; tactic++)
 			key = key * 16777619u ^ (uint32_t)list->entries[entry].tactics[tactic];
 		key = key * 16777619u ^ (uint32_t)list->entries[entry].area;
+
+		/* What the rule of a name gives. */
+		rule = style->try_styles[entry];
+		if (rule == NULL)
+			continue;
+		key = key * 16777619u ^ (uint32_t)rule->position_area;
+		key = key * 16777619u ^ (uint32_t)rule->justify_self;
+		key = key * 16777619u ^ (uint32_t)rule->align_self;
+		for (side = 0; side < 4; side++) {
+			key = position_length_key(key, &rule->offset[side]);
+			key = position_length_key(key, &rule->margin[side]);
+		}
+		key = position_length_key(key, &rule->width);
+		key = position_length_key(key, &rule->height);
 	}
 	return key;
 }

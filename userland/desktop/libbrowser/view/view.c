@@ -2738,7 +2738,7 @@ view_clamp_scroll(
 		view->scroll_y = 0;
 
 	/* The page's scripts see where the view is. */
-	page_set_scroll(view->page, 0.0, layout_to_px(view->scroll_y));
+	page_set_scroll(view->page, view->page->scroll_x, layout_to_px(view->scroll_y));
 }
 
 /* Takes the page's title again, and tells the caller when it changed. */

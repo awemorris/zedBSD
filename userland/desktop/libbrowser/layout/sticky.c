@@ -39,8 +39,7 @@ static void sticky_axis(layout_unit start, layout_unit end, layout_unit port_sta
  */
 int
 layout_sticky_build(
-	struct layout_tree *tree,
-	layout_unit scroll_y)
+	struct layout_tree *tree)
 {
 	struct wb_vector found;
 	size_t index;
@@ -50,6 +49,7 @@ layout_sticky_build(
 	tree->sticky = NULL;
 	tree->sticky_count = 0;
 	tree->sticky_scroll = -1;
+	tree->sticky_scroll_x = -1;
 	if (tree->root == NULL)
 		return 0;
 	wb_vector_init(&found, sizeof(struct layout_box *));
@@ -75,7 +75,7 @@ layout_sticky_build(
 	wb_vector_release(&found);
 
 	/* Placed for the scroll. */
-	layout_sticky_apply(tree, scroll_y);
+	layout_sticky_apply(tree, tree->scroll_x, tree->scroll_y);
 	return 0;
 }
 
@@ -86,6 +86,7 @@ layout_sticky_build(
 int
 layout_sticky_apply(
 	struct layout_tree *tree,
+	layout_unit scroll_x,
 	layout_unit scroll_y)
 {
 	struct layout_box *box;
@@ -108,18 +109,21 @@ layout_sticky_apply(
 
 	/* The same scroll leaves the boxes where they are. */
 	moved = 0;
-	if (tree->sticky_count == 0 || tree->sticky_scroll == scroll_y)
+	if (tree->sticky_count == 0 || (tree->sticky_scroll == scroll_y && tree->sticky_scroll_x == scroll_x))
 		return 0;
 	tree->sticky_scroll = scroll_y;
+	tree->sticky_scroll_x = scroll_x;
 	for (index = 0; index < tree->sticky_count; index++) {
 		box = tree->sticky[index];
 
-		/* A fixed box is moved down by the scroll so that it stays in the viewport (one an anchor places scrolls with the anchor). */
+		/* A fixed box was placed in the viewport at the scroll the tree was built for; it moves with any further scroll so that it stays there (one an anchor places scrolls with the anchor). */
 		if (box->style.position == CSS_POSITION_FIXED) {
-			dy = box->anchored ? 0 : scroll_y;
-			if (dy == box->sticky_dy)
+			dx = box->anchored ? 0 : scroll_x - tree->scroll_x;
+			dy = box->anchored ? 0 : scroll_y - tree->scroll_y;
+			if (dx == box->sticky_dx && dy == box->sticky_dy)
 				continue;
-			sticky_shift(box, 0, dy - box->sticky_dy, 0);
+			sticky_shift(box, dx - box->sticky_dx, dy - box->sticky_dy, 0);
+			box->sticky_dx = dx;
 			box->sticky_dy = dy;
 			moved = 1;
 			continue;
@@ -140,8 +144,8 @@ layout_sticky_apply(
 			port_top = clip->y + clip->border[CSS_TOP];
 			port_bottom = port_top + clip->padding[CSS_TOP] + clip->height + clip->padding[CSS_BOTTOM];
 		} else {
-			port_left = 0;
-			port_right = tree->viewport_width;
+			port_left = scroll_x;
+			port_right = scroll_x + tree->viewport_width;
 			port_top = scroll_y;
 			port_bottom = scroll_y + tree->viewport_height;
 		}

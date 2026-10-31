@@ -569,7 +569,7 @@ page_layout(
 	/* Builds and lays out the box tree, the images found by their elements (the ones there are now). */
 	page->laid_out_images = page->images_generation;
 	css_engine_set_container_lookup(page->css, page_container_size, page);
-	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, page->transition_on ? &page->transition : NULL);
+	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 	page->laid_out = 1;
 	if (error != 0)
 		goto cleanup;
@@ -593,7 +593,7 @@ page_layout(
 		page->previous_laid_out = 1;
 		memset(&page->layout, 0, sizeof(page->layout));
 		css_engine_forget_styles(page->css);
-		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, page->transition_on ? &page->transition : NULL);
+		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 		if (error != 0)
 			goto cleanup;
 	}
@@ -652,7 +652,7 @@ page_sticky_sync(
 	/* Only a laid out page with sticky boxes has any. */
 	if (!page->laid_out)
 		return 0;
-	return layout_sticky_apply(&page->layout, scroll_y);
+	return layout_sticky_apply(&page->layout, layout_from_px((float)page->scroll_x), scroll_y);
 }
 
 /*

@@ -864,12 +864,78 @@ bind_element_scroll_by(
 	return status;
 }
 
+/* The alignments scrollIntoView names. */
+enum {
+	ALIGN_START,
+	ALIGN_END,
+	ALIGN_CENTER,
+	ALIGN_NEAREST
+};
+
+/* Reads a scrollIntoView alignment option ("start", "end", "center" or "nearest"); the default stays when it is absent. */
+static int
+geometry_align_option(
+	struct vm_realm *realm,
+	vm_value options,
+	const char *name,
+	int *align)
+{
+	struct vm_string *text;
+	vm_value value;
+	int present;
+	int status;
+
+	status = bind_get_option(realm, options, name, &present, &value);
+	if (status != 0)
+		return status;
+	if (!present)
+		return 0;
+	status = bind_to_string(realm, value, &text);
+	if (status != 0)
+		return status;
+	if (vm_string_equal_ascii(text, "start"))
+		*align = ALIGN_START;
+	else if (vm_string_equal_ascii(text, "end"))
+		*align = ALIGN_END;
+	else if (vm_string_equal_ascii(text, "center"))
+		*align = ALIGN_CENTER;
+	else if (vm_string_equal_ascii(text, "nearest"))
+		*align = ALIGN_NEAREST;
+	return 0;
+}
+
 /*
- * Scrolls the document so an element is in view (scrollIntoView): its top
- * at the view's top (true, or block "start"), its bottom at the view's
- * bottom (false, or "end"), its middle at the view's ("center"), or the
- * least move that shows it ("nearest").  An element without a box does
- * not move the document.
+ * Finds how far a scroll container moves to put a target's span [t0, t1] where an alignment says in its scrollport [s0, s1]
+ * (flip: the axis starts at the larger side).  The container's position grows by the result.
+ */
+static double
+geometry_align_distance(
+	int align,
+	int flip,
+	double t0,
+	double t1,
+	double s0,
+	double s1)
+{
+	if (align == ALIGN_NEAREST) {
+		/* Already filling or inside the port stays; otherwise the nearer edge. */
+		if ((t0 < s0 && t1 > s1) || (t0 >= s0 && t1 <= s1))
+			return 0.0;
+		if ((t0 < s0 && t1 - t0 < s1 - s0) || (t1 > s1 && t1 - t0 > s1 - s0))
+			return t0 - s0;
+		return t1 - s1;
+	}
+	if (align == ALIGN_CENTER)
+		return (t0 + t1) / 2.0 - (s0 + s1) / 2.0;
+	if ((align == ALIGN_START) != (flip != 0))
+		return t0 - s0;
+	return t1 - s1;
+}
+
+/*
+ * Scrolls the scroll containers around an element, then the document, so the element is in view (scrollIntoView):
+ * the block edge named at "start" (the default; true), "end" (false), "center" or "nearest", and the inline edge likewise
+ * (nearest by default).  An element without a box does not move anything.
  */
 int
 bind_scroll_into_view(
@@ -881,43 +947,38 @@ bind_scroll_into_view(
 {
 	struct bind_window *window;
 	struct dom_element *element;
-	struct vm_string *block;
+	struct dom_element *scroller;
+	const struct dom_node *walk;
 	struct bind_box box;
+	struct bind_box port;
 	vm_value argument;
-	vm_value value;
 	double scroll_x;
 	double scroll_y;
 	double y;
-	int present;
+	double dx;
+	double dy;
+	int block_align;
+	int inline_align;
 	int found;
-	int is_object;
-	int end;
-	int center;
-	int nearest;
 	int status;
 
-	/* The element and where its block edge goes (start unless the argument says). */
+	/* The element and where its edges go. */
 	*result = VM_VALUE_UNDEFINED;
 	window = bind_window_of(realm);
 	status = geometry_element_this(realm, this_value, &element);
 	if (status != 0)
 		return status;
 	argument = js_argument(args, count, 0);
-	block = NULL;
-	is_object = vm_value_is_object(argument);
-	if (is_object) {
-		status = bind_get_option(realm, argument, "block", &present, &value);
+	block_align = ALIGN_START;
+	inline_align = ALIGN_NEAREST;
+	if (vm_value_is_object(argument)) {
+		status = geometry_align_option(realm, argument, "block", &block_align);
+		if (status == 0)
+			status = geometry_align_option(realm, argument, "inline", &inline_align);
 		if (status != 0)
 			return status;
-		if (present) {
-			status = bind_to_string(realm, value, &block);
-			if (status != 0)
-				return status;
-		}
 	} else if (argument == VM_VALUE_FALSE) {
-		block = vm_atom_from_ascii(realm->heap, "end");
-		if (block == NULL)
-			return ENOMEM;
+		block_align = ALIGN_END;
 	}
 
 	/* Nothing moves for an element without a box. */
@@ -925,32 +986,33 @@ bind_scroll_into_view(
 	if (!found)
 		return 0;
 
-	/* Which edge the argument names. */
-	end = 0;
-	center = 0;
-	nearest = 0;
-	if (block != NULL) {
-		end = vm_string_equal_ascii(block, "end");
-		center = vm_string_equal_ascii(block, "center");
-		nearest = vm_string_equal_ascii(block, "nearest");
+	/* The scroll containers around it, nearest first (the root and the body scroll with the document). */
+	for (walk = dom_flat_parent(&element->node); walk != NULL; walk = dom_flat_parent(walk)) {
+		if (walk->type != DOM_ELEMENT)
+			continue;
+		scroller = (struct dom_element *)walk;
+		if (walk->parent == &window->document->node || (walk->parent != NULL && walk->parent->parent == &window->document->node))
+			continue;
+		if (!geometry_box(window, scroller, &port) || !port.block || !port.scrolls)
+			continue;
+		found = geometry_box(window, element, &box);
+		if (!found)
+			return 0;
+
+		/* The block axis is the vertical one in a horizontal writing mode. */
+		dx = geometry_align_distance(port.scroll_vertical ? block_align : inline_align, port.scroll_flip_x, box.x, box.x + box.width,
+		    port.x + port.border_left, port.x + port.width - port.border_right);
+		dy = geometry_align_distance(port.scroll_vertical ? inline_align : block_align, port.scroll_flip_y, box.y, box.y + box.height,
+		    port.y + port.border_top, port.y + port.height - port.border_bottom);
+		geometry_element_scroll(window, scroller, scroller->scroll_x + dx, 1, scroller->scroll_y + dy, 1);
 	}
 
-	/* The place the document scrolls down to, by the block edge. */
+	/* The document scrolls down to the block edge. */
+	found = geometry_box(window, element, &box);
+	if (!found)
+		return 0;
 	geometry_scroll(window, &scroll_x, &scroll_y);
-	y = box.y;
-	if (end) {
-		y = box.y + box.height - window->viewport_height;
-	} else if (center) {
-		y = box.y + (box.height - window->viewport_height) / 2.0;
-	} else if (nearest) {
-		/* Already in view stays; otherwise the nearer edge. */
-		y = scroll_y;
-		if (box.y < scroll_y) {
-			y = box.y;
-		} else if (box.y + box.height > scroll_y + window->viewport_height) {
-			y = box.y + box.height - window->viewport_height;
-		}
-	}
+	y = scroll_y + geometry_align_distance(block_align, 0, box.y, box.y + box.height, scroll_y, scroll_y + window->viewport_height);
 
 	/* Succeeded: the document scrolls there. */
 	geometry_scroll_move(window, scroll_x, y);
@@ -1185,6 +1247,19 @@ geometry_is_root(
 	return 1;
 }
 
+/* Puts a number inside a range. */
+static void
+geometry_clamp(
+	double *value,
+	double low,
+	double high)
+{
+	if (*value < low)
+		*value = low;
+	if (*value > high)
+		*value = high;
+}
+
 /*
  * Scrolls an element's content to a place on the axes given (its scroll container's range: from zero to its scroll size
  * less its client size; a box that does not scroll stays), and has the page laid out again when it moved.
@@ -1219,14 +1294,9 @@ geometry_element_scroll(
 		next_x = geometry_finite(x);
 	if (given_y)
 		next_y = geometry_finite(y);
-	if (next_x < 0.0)
-		next_x = 0.0;
-	if (next_y < 0.0)
-		next_y = 0.0;
-	if (next_x > range_x)
-		next_x = range_x;
-	if (next_y > range_y)
-		next_y = range_y;
+	/* The range runs from the scroll origin: nonpositive when the origin is at the right or bottom edge. */
+	geometry_clamp(&next_x, box.scroll_flip_x ? -range_x : 0.0, box.scroll_flip_x ? 0.0 : range_x);
+	geometry_clamp(&next_y, box.scroll_flip_y ? -range_y : 0.0, box.scroll_flip_y ? 0.0 : range_y);
 	if (next_x == element->scroll_x && next_y == element->scroll_y)
 		return;
 	element->scroll_x = next_x;

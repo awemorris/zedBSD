@@ -864,6 +864,14 @@ static const struct values_keyword values_units[] = {
 	{ "vh", CSS_DUNIT_VH },
 	{ "vmin", CSS_DUNIT_VMIN },
 	{ "vmax", CSS_DUNIT_VMAX },
+	{ "vi", CSS_DUNIT_VI },
+	{ "svi", CSS_DUNIT_VI },
+	{ "lvi", CSS_DUNIT_VI },
+	{ "dvi", CSS_DUNIT_VI },
+	{ "vb", CSS_DUNIT_VB },
+	{ "svb", CSS_DUNIT_VB },
+	{ "lvb", CSS_DUNIT_VB },
+	{ "dvb", CSS_DUNIT_VB },
 	{ "svw", CSS_DUNIT_VW },
 	{ "lvw", CSS_DUNIT_VW },
 	{ "dvw", CSS_DUNIT_VW },
@@ -5714,9 +5722,11 @@ values_calc_unit(
 		sum->rem += number;
 		break;
 	case CSS_DUNIT_VW:
+	case CSS_DUNIT_VI:
 		sum->vw += number;
 		break;
 	case CSS_DUNIT_VH:
+	case CSS_DUNIT_VB:
 		sum->vh += number;
 		break;
 	case CSS_DUNIT_VMIN:

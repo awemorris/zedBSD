@@ -72,6 +72,8 @@ layout_build(
 	void *image_context,
 	int width,
 	int height,
+	layout_unit scroll_x,
+	layout_unit scroll_y,
 	const struct layout_transition *transition)
 {
 	struct dom_node *node;
@@ -89,6 +91,8 @@ layout_build(
 	tree->transition = transition;
 	tree->viewport_width = (layout_unit)width * LAYOUT_UNIT;
 	tree->viewport_height = (layout_unit)height * LAYOUT_UNIT;
+	tree->scroll_x = scroll_x;
+	tree->scroll_y = scroll_y;
 	tree->containing_height = tree->viewport_height;
 	tree->containing_height_definite = 1;
 	css_engine_set_viewport(css, (float)width, (float)height);
@@ -144,8 +148,8 @@ layout_build(
 	/* A box with nothing inside it that transform scales (a hairline border drawn at twice the size and halved) shrinks about its origin. */
 	box_apply_scale(root);
 
-	/* Sticky boxes sit where the page's scroll (zero until the view says) puts them. */
-	error = layout_sticky_build(tree, 0);
+	/* Sticky boxes sit where the page's scroll (as the page knows it) puts them. */
+	error = layout_sticky_build(tree);
 	if (error != 0)
 		return error;
 

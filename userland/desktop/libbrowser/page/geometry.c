@@ -242,6 +242,24 @@ page_document_size(
 }
 
 /*
+ * The rendering update before an animation frame's callbacks: the page is laid out as it is (again, when a layout a script
+ * forced chose among position-try-fallbacks) so that the position options that last fit are remembered (bind_host.rendering).
+ */
+void
+page_rendering(
+	void *context)
+{
+	struct page *page;
+
+	page = context;
+	page->rendering = 1;
+	if (page->laid_out && page->layout.try_pending)
+		page->document->generation++;
+	geometry_layout(page);
+	page->rendering = 0;
+}
+
+/*
  * Finds the view's scroll offset in CSS pixels for bind_host.scroll.
  */
 void
@@ -345,7 +363,8 @@ page_computed_style(
 
 /*
  * Moves the page's scroll within document bounds for bind_host.scroll_to.
- * Does not scroll sideways or past the last viewport of the document.
+ * The range of each axis runs from the scroll origin: zero up to the overflow, or down to minus the overflow when the
+ * root's writing mode and direction start that axis at the far edge.
  */
 void
 page_scroll_to(
@@ -354,34 +373,82 @@ page_scroll_to(
 	double y)
 {
 	struct page *page;
-	double limit;
+	struct bind_box extent;
+	double low_x;
+	double high_x;
+	double low_y;
+	double high_y;
+	size_t index;
 	int laid_out;
+	int moved;
 
-	UNUSED_PARAMETER(x);
-
-	/* The document's height less the view's is the furthest down. */
+	/* The document's size less the view's is the furthest to go on each axis. */
 	page = context;
-	limit = 0.0;
+	low_x = 0.0;
+	high_x = 0.0;
+	low_y = 0.0;
+	high_y = 0.0;
+	memset(&extent, 0, sizeof(extent));
 	laid_out = geometry_layout(page);
-	if (laid_out)
-		limit = layout_to_px(page->layout.document_height) - page->viewport_height;
-	if (limit < 0.0)
-		limit = 0.0;
+	if (laid_out) {
+		high_y = layout_to_px(page->layout.document_height) - page->viewport_height;
+		if (page->layout.root != NULL) {
+			geometry_scroll_size(page->layout.root, &extent);
+			high_x = extent.scroll_width - page->viewport_width;
+			if (extent.scroll_flip_y || extent.scroll_height - page->viewport_height > high_y)
+				high_y = extent.scroll_height - page->viewport_height;
+		}
+		if (extent.scroll_flip_x) {
+			low_x = -high_x;
+			high_x = 0.0;
+		}
+		if (extent.scroll_flip_y) {
+			low_y = -high_y;
+			high_y = 0.0;
+		}
+	}
+	if (high_x < 0.0)
+		high_x = 0.0;
+	if (high_y < 0.0)
+		high_y = 0.0;
+	if (low_x > 0.0)
+		low_x = 0.0;
+	if (low_y > 0.0)
+		low_y = 0.0;
 
-	/* The place, within the limits (a number that is not one is the top). */
-	if (!(y >= 0.0))
+	/* The place, within the limits (a number that is not one is the origin). */
+	if (x != x)
+		x = 0.0;
+	if (y != y)
 		y = 0.0;
-	if (y > limit)
-		y = limit;
+	if (x < low_x)
+		x = low_x;
+	if (x > high_x)
+		x = high_x;
+	if (y < low_y)
+		y = low_y;
+	if (y > high_y)
+		y = high_y;
 
 	/* The boxes that stay with the viewport (fixed ones) move with the scroll now, and the display list is built again. */
-	if (laid_out && layout_sticky_apply(&page->layout, layout_from_px((float)y)))
+	moved = x != page->scroll_x || y != page->scroll_y;
+	if (laid_out && layout_sticky_apply(&page->layout, layout_from_px((float)x), layout_from_px((float)y)))
 		page->painted = 0;
 
 	/* Succeeded: the view takes it. */
-	page->scroll_x = 0.0;
+	page->scroll_x = x;
 	page->scroll_y = y;
 	page->scroll_requested = 1;
+
+	/* A box an anchor places in the viewport chooses its position by what the viewport shows: the page is laid out again. */
+	if (moved && laid_out) {
+		for (index = 0; index < page->layout.sticky_count; index++) {
+			if (page->layout.sticky[index]->style.position == CSS_POSITION_FIXED && page->layout.sticky[index]->anchored) {
+				page->document->generation++;
+				break;
+			}
+		}
+	}
 
 	/* Succeeded: the view will consume the bounded scroll request. */
 	return;
@@ -538,6 +605,29 @@ geometry_lines_overflow(
 }
 
 /*
+ * Tells which ends of the axes a style's scrolling starts at (flow runs from the right or the bottom): a horizontal rtl
+ * block from the right, vertical-rl from the right, a vertical block's lines upward when rtl differs from sideways-lr.
+ */
+static void
+geometry_flows(
+	const struct css_style *style,
+	int *flip_x,
+	int *flip_y)
+{
+	int rtl;
+
+	rtl = style->direction == CSS_DIRECTION_RTL;
+	*flip_x = 0;
+	*flip_y = 0;
+	if (style->writing_mode == CSS_WRITING_HORIZONTAL_TB) {
+		*flip_x = rtl;
+		return;
+	}
+	*flip_x = style->writing_mode == CSS_WRITING_VERTICAL_RL;
+	*flip_y = rtl != (style->writing_sideways == 1);
+}
+
+/*
  * Adds the border boxes of a box's children in the flow and its absolutely
  * positioned ones when it is positioned (and their descendants that do not
  * clip) to a rectangle; a flex or grid item's margins count too.
@@ -551,6 +641,8 @@ geometry_overflow(
 	layout_unit *right,
 	layout_unit *bottom)
 {
+	int flip_x;
+	int flip_y;
 	const struct layout_box *child;
 	layout_unit x0;
 	layout_unit y0;
@@ -589,8 +681,15 @@ geometry_overflow(
 			y1 += child->margin[CSS_BOTTOM] > 0 ? child->margin[CSS_BOTTOM] : 0;
 		} else if (!child->out_of_flow && child->kind == LAYOUT_BLOCK) {
 			/* A block child's margin at the end sides is scrollable too. */
-			x1 += child->margin[CSS_RIGHT] > 0 ? child->margin[CSS_RIGHT] : 0;
-			y1 += child->margin[CSS_BOTTOM] > 0 ? child->margin[CSS_BOTTOM] : 0;
+			geometry_flows(&box->style, &flip_x, &flip_y);
+			if (flip_x)
+				x0 -= child->margin[CSS_LEFT] > 0 ? child->margin[CSS_LEFT] : 0;
+			else
+				x1 += child->margin[CSS_RIGHT] > 0 ? child->margin[CSS_RIGHT] : 0;
+			if (flip_y)
+				y0 -= child->margin[CSS_TOP] > 0 ? child->margin[CSS_TOP] : 0;
+			else
+				y1 += child->margin[CSS_BOTTOM] > 0 ? child->margin[CSS_BOTTOM] : 0;
 		}
 		if (x0 < *left)
 			*left = x0;
@@ -666,12 +765,20 @@ geometry_scroll_size(
 	 * instead); a vertical flex container's overflow all counts.
 	 */
 	flex = first->style.display == CSS_DISPLAY_FLEX || first->style.display == CSS_DISPLAY_INLINE_FLEX;
+	box->scroll_flip_x = 0;
+	box->scroll_flip_y = 0;
+	box->scroll_vertical = first->style.writing_mode != CSS_WRITING_HORIZONTAL_TB;
 	if (!flex) {
-		if (first->style.direction == CSS_DIRECTION_RTL || first->style.writing_mode == CSS_WRITING_VERTICAL_RL)
+		/* The inline axis runs backward for rtl (and for sideways-lr, which is vertical-lr with its lines flowing upward). */
+		geometry_flows(&first->style, &box->scroll_flip_x, &box->scroll_flip_y);
+		if (box->scroll_flip_x)
 			right = pad_right;
 		else
 			left = pad_left;
-		top = pad_top;
+		if (box->scroll_flip_y)
+			bottom = pad_bottom;
+		else
+			top = pad_top;
 	} else if (flex && first->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
 		rtl = first->style.direction == CSS_DIRECTION_RTL;
 		wrap_reverse = first->style.flex_wrap == CSS_FLEX_WRAP_REVERSE;
@@ -682,6 +789,8 @@ geometry_scroll_size(
 			reversed_x = rtl != wrap_reverse;
 			reversed_y = first->style.flex_direction == CSS_FLEX_COLUMN_REVERSE;
 		}
+		box->scroll_flip_x = reversed_x;
+		box->scroll_flip_y = reversed_y;
 		if (reversed_x)
 			right = pad_right;
 		else
@@ -775,7 +884,7 @@ geometry_child_box(
 	    height >= 0 &&
 	    width <= INT_MAX / LAYOUT_UNIT &&
 	    height <= INT_MAX / LAYOUT_UNIT) {
-		status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height, NULL);
+		status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), NULL);
 		if (status != 0) {
 			layout_release(&tree);
 			goto release_roots;
@@ -830,8 +939,10 @@ geometry_layout(
 	if (error != 0)
 		return 0;
 
-	/* The layout; one that fails leaves the page without boxes. */
+	/* The layout, which a script forced: the position options that last fit stay as the last rendering left them. One that fails leaves the page without boxes. */
+	layout_try_remember(page->rendering);
 	error = page_layout(page, page->viewport_width, page->viewport_height);
+	layout_try_remember(1);
 	if (error != 0)
 		return 0;
 
