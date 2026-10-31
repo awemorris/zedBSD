@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-01 01:27（Q1）
+最終更新: 2026-11-01 02:19（Q1）
 
 ## 担当（P1〜P8）
 
@@ -11,9 +11,9 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS299](ws299/ws.md)・[WS333](ws333/ws.md) | 5330 の NVMe の速さ・電力と熱の枠組み | q1788: 5330 が上がったので WS299 の NVMe の計測（q1744 の続き）→ WS333 p011（HWP・RAPL）・p012（tick の位相、暇な時の電力）・p018（Dell の熱の mode・fan）の実機の確かめ | 5330（10.0.30.3） |
 | P2 | — | — | 返却（2026-10-31 20:23）。WS309 p015 zero copy: RTX（block-linear 既定で有効）・VF2（c13 52.5 fps）・Pi 4 の全画面の動画で確かめ、main d8e39d789 | 残り: Pi 4 の 3D（P4 の p025 の後）・Pi 5 |
-| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ | p024（q1785）: RTX の描画の最適化を目標（NVK 並み: big-1000 136・subs-1000 75 fps）まで。まず subs の 1 run の固定の費用 | 10.0.10.3 |
-| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | p025（q1784）: Pi 4 の desktop を 1920x1080 で 60 fps に → mview の 3D（21 体で 50 fps、今 28.9） | Pi 4（10.0.30.6）。この後に Pi 5（p021） |
-| P5 | — | — | 返却（06:4x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
+| P3 | — | — | 返却（2026-11-01 02:19）。WS291 p024: subs-1000 35 → 43 fps、big-1000 114 → 119 fps（main 1e86f4502）。目標（75.4・136.2）は未達 | 続きは判断の後（下の 0m） |
+| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ | Pi 4（p025）は熱の throttle の見込みで止め、Pi 5（p021）へ: V3D 7.1 への移し・1920x1080 の SD の image を作る | ユーザーが板を Pi 5 に替え、Q1 が SD を書く |
+| P5 | [WS336](ws336/ws.md) | 自前の sshd・ssh（OpenSSH 互換、ed25519・鍵の交換 1 つ） | p001 の設計（q1791、標準廉価実装手順）。WS335 の暗号の口と揃える | 設計・design-reviewer・問いまで |
 | P6 | [WS335](ws335/ws.md) | libssl-compat（OpenSSL 互換の自前の TLS） | p001 の設計（q1789、標準廉価実装手順）: 範囲・module・header・試験の道具 | 設計・design-reviewer・問いまで |
 | P7 | [WS334](ws334/ws.md) | OmniGrammaton（libbrowser のブラウザ）の Windows 移植 | q1790: 標準廉価実装手順（決定 22）の設計の段: module・header・骨格・試験の道具・実装の phase.md、build の土台 | その後 Sonnet の実装の担当を Q1 が起動 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 12 回目（q1727-i12）: subgrid の残り・multicol・grid の baseline など | 今 3,472 のうち 3,005（86.55%）、Acid3 100/100・Acid2 100%。11 回目は animation の補間・dynamic import()・@property など（+30、後退 0） |
@@ -28,11 +28,11 @@
 | --- | --- | --- | --- | --- |
 | p001〜p006 | AMD RDNA | Linux（RADV）と同等 | 同等 | cleared（p006・p008・p009 は RX 5600 XT が抜かれて止め） |
 | p010〜p012 | NVIDIA RTX 2070 | desktop 60 fps、scene-5000 で NVK（50.1 fps） | desktop 60〜68 fps、scene-5000 49.9 fps（hardware の限界で NVK と同等） | p010・p011 cleared、p012 uncleared（限界） |
-| p024 | NVIDIA RTX 2070 | NVK 並み（big-1000 136.2、subs-1000 75.4） | big-1000 108〜116、subs-1000 34.5（main 7055ea569、submit をまとめる命令 GPU_JOB_SUBMIT・RETIRE を含む） | in-progress（P3 i02） |
+| p024 | NVIDIA RTX 2070 | NVK 並み（big-1000 136.2、subs-1000 75.4） | big-1000 119、subs-1000 43（main 1e86f4502） | in-progress（判断待ち 0m） |
 | p023 | NVIDIA RTX 2070 | 共有の image の画素の並び（block-linear）で pass ごとの copy を無くす | subs-1000 10.9 → 21 fps、subs-100 103 → 203、画素の差 0（main b30707d0a） | in-progress（残り: scenes、block-linear の画面出しの目視） |
 | p013・p014 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
 | p020 | PowerVR（VF2） | qs40 × 13・1920x1080・direct scanout で 50 fps（RTX のカタログの FP32 の比） | 45.8 fps（direct、main に merge 62eeb340e） | in-progress（P2） |
-| p025 | Raspberry Pi 4（V3D 4.2） | スペックの比の copies で 50 fps（1920x1080） | c21 40.5 fps（mip の hardware の sample、uniform の直書き、main d9846754e）。desktop（session）launch 56・type 53・output 22・drag 55・home 56・wiseview 58 | in-progress（P4 i03: Terminal の atlas、bin と render の重ね） |
+| p025 | Raspberry Pi 4（V3D 4.2） | スペックの比の copies で 50 fps（1920x1080） | c21 49.7（CPU の速い run）／42.4（遅い run）fps、inflight=2 で 52.8。desktop（session）drag 53〜56・home 54〜56・wiseview 55〜59・type 59〜61（main 69109d3f2、Terminal の atlas・VCM） | in-progress（P4 i04: CPU の速さの揺れ・16 bit の index・compositor の pace） |
 | p021 | Raspberry Pi 5（V3D 7.1） | スペックの比の copies で 50 fps（clock を実機で確定） | 未計測（mview に要る driver の機能を host で実装済み） | in-progress（P4、実機待ち） |
 | p022 | Intel i915（5330） | 5330 の Linux（ANV）で 50.6 fps の qs40 × 600 で Linux 以上 | 32.6 fps（頂点の shader 134 → 67 命令。CPU の idle を MWAIT にして GPU が 800 → 850〜900 MHz、まだ電力の上限 13 W に張り付く） | in-progress（P1） |
 
@@ -267,6 +267,12 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 問いの本文: [ws334/user-questions.md](ws334/user-questions.md)（前置き・用語の表つき）。設計は [ws334/design.md](ws334/design.md)。どれも推しの案があり、推しのままなら「推しで」。
 - U3（toolchain の llvm-mingw と Debian の gcc-mingw-w64-ucrt64 の導入）は Q1 の許可も要る（ユーザーが推しでよければ Q1 が許可する）。
 
+### 0m. WS291 p024（RTX の描画の速さ）の続きの進め方（2026-11-01 02:19 新しい）
+
+- 背景: RTX の subs-1000 は 43 fps（目標 NVK 75.4）、big-1000 は 119 fps（目標 136.2）。submit 1 回 15.8 µs の中に 3.5 µs を越える項目が無く、小さな削りでは半分にならない。big-1000 は app の側の命令の書き出し 3.5 ms（GPU は空く）が残り。
+- 残る道（P3 の案）: (a) kernel の VM の小さな copyin・copyout の速い道（WS291 の外、kernel の VM）、(b) 命令の記録の時に push buffer を組み、submit では ring に載せるだけにする（大きな作り変え、設計の Phase が要る）、(c) fence の無い submit に job を作らない（製品の判断、前から問い中）。
+- 決めてほしい事: 続けるか、どの道か。
+
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
 - 背景: 2026-10-28 の P1 の報告（[ws299/ws.md](ws299/ws.md) の「結果（2026-10-28 21:50）」）。idle と HWP は WS333 に入れた。WS299 そのものは、5330 が空いたら担当を付ける（2026-10-31 の指示、q1744）。
@@ -329,6 +335,10 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
 
 ## 決まった事
+
+- （2026-11-01）ユーザーから、自前の sshd・ssh の WS を立てる（ed25519 の鍵と最新の鍵の交換 1 つ、WS335 の決定を反映、WS335 と並べて依存は待ち合わせ、標準廉価実装手順、P5 で開始）、という趣旨の指示を受けた（[WS336](ws336/ws.md)）。
+
+- （2026-11-01）ユーザーから、Pi 4 は熱で throttle されているように見えるので、いったんここでやめて冷却の良い Pi 5 で進める（GPU は同じ系統）、という趣旨の指示を受けた（ws291-p025 を止めて p021 へ、P4 q1784 の中で）。
 
 - （2026-11-01）ユーザーから、WS を立てて libssl-compat を実装する、標準廉価実装手順を使う、今 P6 で始める、という趣旨の指示を受けた（[WS335](ws335/ws.md)）。
 

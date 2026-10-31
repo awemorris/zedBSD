@@ -3786,6 +3786,18 @@ values_wide_keyword(
 	/* The four-sided shorthands give it to their four longhands. */
 	first = -1;
 	switch (property) {
+	case SHORT_PLACE_ITEMS:
+		values_add(out, made, CSS_PROP_ALIGN_ITEMS, value);
+		values_add(out, made, CSS_PROP_JUSTIFY_ITEMS, value);
+		return;
+	case SHORT_PLACE_SELF:
+		values_add(out, made, CSS_PROP_ALIGN_SELF, value);
+		values_add(out, made, CSS_PROP_JUSTIFY_SELF, value);
+		return;
+	case SHORT_PLACE_CONTENT:
+		values_add(out, made, CSS_PROP_ALIGN_CONTENT, value);
+		values_add(out, made, CSS_PROP_JUSTIFY_CONTENT, value);
+		return;
 	case SHORT_MARGIN:
 		first = CSS_PROP_MARGIN_TOP;
 		break;

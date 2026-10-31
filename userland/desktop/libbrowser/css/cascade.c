@@ -322,7 +322,7 @@ static int cascade_any_matches(struct css_engine *engine, struct dom_element *el
 static int cascade_has(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple);
 static int cascade_has_below(struct css_engine *engine, struct dom_node *node, const struct css_simple *simple, struct dom_element *anchor, int depth);
 static int cascade_any_relative(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple, struct dom_element *anchor);
-static int cascade_nth(struct dom_element *element, const struct css_simple *simple);
+static int cascade_nth(struct css_engine *engine, struct dom_element *element, const struct css_simple *simple);
 static int cascade_is_form_element(const struct dom_element *element);
 static int cascade_compute(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style, int pseudo);
 static int cascade_paint_color(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style, int pseudo);
@@ -3523,10 +3523,10 @@ cascade_pseudo_class(
 	case CSS_PSEUDO_NTH_LAST_OF_TYPE:
 	case CSS_PSEUDO_FIRST_OF_TYPE:
 	case CSS_PSEUDO_LAST_OF_TYPE:
-		matches = cascade_nth(element, simple);
+		matches = cascade_nth(engine, element, simple);
 		return matches;
 	case CSS_PSEUDO_ONLY_OF_TYPE:
-		matches = cascade_nth(element, simple);
+		matches = cascade_nth(engine, element, simple);
 		return matches;
 	case CSS_PSEUDO_DISABLED:
 	case CSS_PSEUDO_ENABLED:
@@ -3724,12 +3724,14 @@ cascade_any_relative(
  */
 static int
 cascade_nth(
+	struct css_engine *engine,
 	struct dom_element *element,
 	const struct css_simple *simple)
 {
 	struct dom_node *node;
 	struct dom_element *other;
 	int of_type;
+	int of_selector;
 	int from_end;
 	int place;
 	int after;
@@ -3754,12 +3756,20 @@ cascade_nth(
 	if (other == NULL)
 		return 0;
 
+	/* An "of" selector list counts only the elements it matches, and the element must be one of them. */
+	of_selector = simple->arguments != NULL && simple->argument_count > 0 &&
+	    (simple->pseudo == CSS_PSEUDO_NTH_CHILD || simple->pseudo == CSS_PSEUDO_NTH_LAST_CHILD);
+	if (of_selector && !cascade_any_matches(engine, element, simple))
+		return 0;
+
 	/* The places before and after the element (1 for the first). */
 	place = 1;
 	for (node = element->node.previous; node != NULL; node = node->previous) {
 		if (node->type != DOM_ELEMENT)
 			continue;
 		other = (struct dom_element *)node;
+		if (of_selector && !cascade_any_matches(engine, other, simple))
+			continue;
 		if (!of_type || other->local_name == element->local_name)
 			place++;
 	}
@@ -3770,6 +3780,8 @@ cascade_nth(
 		if (node->type != DOM_ELEMENT)
 			continue;
 		other = (struct dom_element *)node;
+		if (of_selector && !cascade_any_matches(engine, other, simple))
+			continue;
 		if (!of_type || other->local_name == element->local_name)
 			after++;
 	}

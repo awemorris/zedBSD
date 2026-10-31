@@ -3,7 +3,7 @@
 # ws299-p005 UFS の file の連続の読み書き（先読みの窓・大きな request・書きの合流）
 
 - 親: [WS299](../ws.md)。Queue: q1634 / q1634-i01（調べ）→ q1640 / q1640-i01（設計・実装、担当 P1）。前提: p002・p004（raw の先読み）。
-- Status: in-progress（2026-10-31 P1 q1744: 書き手の CPU の直し 3a4e64353（LRU の回し・束の書き・1 MiB の run・memcpy）、QEMU で確かめ、5330 の測りは電源の戻り待ち。2026-10-28: raw の読み書き・file の読みは Debian 超え、file の書きは 55%）
+- Status: in-progress（2026-11-01 P1 q1788: 5330 で file の書き p7 90%（52% から）、root の UFS の上書き 108%・新しく 96%、file の冷えた読み 112%。file の書き p7 は 95% に未達。2026-10-31 P1 q1744: 書き手の CPU の直し 3a4e64353（LRU の回し・束の書き・1 MiB の run・memcpy）、QEMU で確かめ）
 - Disposition: normal
 
 ## 調べた事実（2026-10-28、読みだけの調べ、tree は agent/p1-ws299 36d0d7b5d）
@@ -150,3 +150,9 @@
 ## 再開点（2026-10-28、P1）
 
 - p004 の後に P1 の context が少なくなったので、p005 はこの調べと案で止めた。次: 1（測る）→ 案の design-reviewer → 実装。
+
+## 2026-11-01（q1788、P1）: 5330 の測り
+
+- main 82c6ef325 の image（config-5330.mk）で Debian と zedBSD を同じ夜に測った。表と条件・道具の直しは [ws.md](../ws.md) の「2026-11-01」。
+- この Phase の項目: file の書き p7（4 GiB、fsync まで）Debian 1925 MB/s・zedBSD 1724（sync の前 1918）= 90%、file の冷えた読み 1250・1399 = 112%、root の UFS の 1 GiB 上書き 1760・新しく 1556（ext4 1628 MB/s に 108%・96%）。
+- 受け入れ（Debian の 95% 以上）: file の書き p7 が 90% で未達。cleared にしない。

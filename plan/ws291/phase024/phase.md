@@ -210,3 +210,82 @@ p014 の nc の診断で、copy を除いた GPU の 1 run は約 60 µs（描�
   往復は両腕とも direct=3 left=3 window=3、failed 0、refused 0。画面（keiland-shot、i2a 対 main）: desktop・Notes・browser とも差は右上の時計の箱
   （x=1881..1894、y=17..27）だけ。desktop（frame-ops）: main launch 64・type 61・output 69・drag 60・home 63・wiseview 64、i2a 63・62・67・61・64・64 fps
   （後退なし）。起動の dmesg の `vram-window` の行は両腕に出る（前から）。戻し cksum 一致、bl 行 0、Debian。
+
+### i2a の後の 1 submit の内訳（診断 d3 = i2a ＋ 診断、libvulkan lv3 の TIMING も、00:41〜00:48、build/tmp/p024i2-d3）
+
+- subs-1000 の GPU_JOB_SUBMIT 1 本 15.8 µs（d2 の 23.4 から）: 要求の copyin と確かめ 1.0、stream の buffer 0.04（d2 の kern_malloc を含む 3.8 から）、
+  stream の copyin 0.7、reserve 1.4（要求の copyout を含む）、driver 10.5、finish 0.9、後始末 1.2（outcome の copyout を含む）。
+  driver の中: executor 6.0（d2 の 10.0 から。begin 0.1（d2 1.65）、draw 16 本 3.3、ring の submit 1.0）、record の decode 約 1.7、
+  RESET_COMMAND_BUFFER 0.8、BEGIN 0.1。user の側は TIMING の水増しが大きく、reap が 7 submit に 1 回（1 回 約 7 µs）、private_fence 約 1 µs。
+- big-1000: 段は record（client の encode）4.0・submit 4.0・fence 0.9 ms（timing と診断込み）。
+
+### 試して採らなかった物: libvulkan の reap の閾値 8 → 24（i2b、00:48〜01:03、build/tmp/p024i2-ab2、kernel i2a、libvulkan lv4 3919355289）
+
+| 腕 r1・r2 | big-100 | big-1000 | subs-100 | subs-1000 |
+| --- | --- | --- | --- | --- |
+| i2a（lv3） | 567.6・571.3 | 115.6・113.9 | 369.5・357.0 | 41.45・39.93 |
+| i2b（lv4、閾値 24） | 552.5・549.9 | 115.6・115.7 | 374.6・367.6 | 43.85・44.33 |
+
+- subs-1000 は同じ window で +6〜11 %（i2a の 2 round の揺れ 1.5 fps を越える）が、big-100 が −3 %（揺れ 3.7 を越える）。台帳に消費されない
+  record が長く残ると fence・WSI の image の「終わったか」の問いが system call に回る。big-100（game mode の主の場面）を下げるので採らない
+  （sync.c は戻した）。画素は両腕とも差 0。QEMU の Venus は lv4 で PASS（build/tmp/p024i2-venus3）。
+
+### 試して採らなかった物: blob の stream の写しを session に持つ（i2c、01:04〜01:12、build/tmp/p024i2-ab3、kernel 1921706631、libvulkan lv3）
+
+- big-1000 の長い recording は約 1 MiB の blob ごとに recording の thread が送る（d3: 1 本の transaction 約 0.7〜0.8 ms、client の 1 MiB の encode
+  約 0.75 ms とほぼ同じ）。kernel の 1 MiB の kern_malloc を省けば送る側が速くなる見込みで、`vk-stream.c` の top level の写しを session に
+  持つ形を試した（host: nvrtx vk の stream の試験の「写しを free」の数え方を直して 94/0）。
+
+| 腕 r1・r2 | big-100 | big-1000 | subs-100 | subs-1000 |
+| --- | --- | --- | --- | --- |
+| i2a | 559.6・541.8 | 113.4・114.9 | 360.8・361.5 | 42.89・43.10 |
+| i2c | 552.4・533.4 | 113.5・112.7 | 354.5・360.0 | 43.67・39.09 |
+
+- 効果なし（big-1000 は揺れの内）。採らない（4 file を戻した）。画素は差 0。窓をまたぐ i2a の揺れ（big-100 541〜571、subs-1000 39.9〜43.7）が
+  大きいので、上の i2b の big-100 の −3 % も確かではない（i2b は採らないまま、記録だけ）。
+
+### 長い recording の batch を小さく（libvulkan `commands.c` の VULKAN_RECORDING_BATCH_BYTES、01:16〜01:33、build/tmp/p024i2-ab4、kernel i2a）
+
+- 長い recording は recording の thread が batch ごとに送り、renderer がそれを decode する間に client は次を encode する。vkEndCommandBuffer は
+  送り終わるのを待つので、最後の batch の送り（1 MiB で約 0.7 ms）がそのまま record の段に乗る。big-100（2000 draw、約 0.5 MiB）は 1 MiB に
+  満たず、まったく重ならない。batch を小さくすれば最後の待ちが短くなり、big-100 も重なる。
+
+| 腕 r1・r2 | big-100 | big-1000 | subs-100 | subs-1000 |
+| --- | --- | --- | --- | --- |
+| i2a（1 MiB、lv3） | 553.6・563.6 | 113.2・115.8 | 347.8・359.0 | 42.22・43.39 |
+| b512（512 KiB、lv5 416424967） | 560.9・569.3 | 117.2・116.7 | 351.3・363.0 | 42.39・41.47 |
+| b256（256 KiB、lv6 1775217122） | 610.3・596.3 | 119.0・118.3 | 362.4・354.3 | 41.38・43.24 |
+
+- b256: big-100 +8 %（record の段 0.65 → 0.53 ms）、big-1000 +3〜4 %（record 3.9 → 3.55 ms）、subs は揺れの内。画素は 3 腕とも差 0。
+  QEMU の Venus は lv6・lv5 とも PASS（build/tmp/p024i2-venus4）。
+- 256 KiB と 128 KiB（01:35〜01:48、build/tmp/p024i2-ab5）: b256 big-100 608.5・587.5、big-1000 118.7・119.3、subs-100 359.7・361.2、
+  subs-1000 41.66・40.34。b128（lv7 729938090）617.5・619.1、117.9・118.7、347.6・360.1、38.16・40.96。128 KiB は big-100 で少し上だが
+  揺れの内で、transaction が倍になるので 256 KiB を採った（commit 8a3a95131、libvulkan 1775217122 = lv6 と同じ）。画素は差 0（13 比べ）。
+
+- game mode の往復・画面・desktop（rtx-p015.sh PARTS='cycle scenes desk'、main と fin = kernel i2a ＋ libvulkan 1775217122、01:48〜02:03、
+  build/tmp/p024i2-v2）: 往復は両腕 direct=3 left=3 window=3、failed 0、refused 0。画面は desktop・Notes・browser とも差が右上の時計の箱
+  （x=1888..1894、y=17..26）だけ。desktop: main launch 63・type 61・output 65・drag 60・home 63・wiseview 65、fin 64・61・66・60・64・59 fps。
+  wiseview の 59 を確かめに desk だけ i2a（1 MiB）と fin を同じ window で（02:05〜02:16、build/tmp/p024i2-v3）: i2a 62・61・68・60・64・64、
+  fin 62・61・66・61・64・64 fps（wiseview 64 対 64、v2 の 59 は揺れ）。どの window も戻し cksum 一致、bl 行 0、Debian。
+
+### 再開点（2026-11-01 02:20 P3、q1785-i02 を返す）
+
+- branch agent/p3-ws291wsi の commit（main 71f8b7d8b の上）: 1e75e4de4（GPU core の stream の buffer と monitor の起床、executor の state、
+  libvulkan の writer、rtx-p024.sh、診断の patch）、09d54c61b（記録）、8a3a95131（recording の batch 256 KiB と記録）と、この記録の commit。
+- 到達（RTX 2070、同じ window の main の腕との比べ、main = 案 A・B と js3 の後）: subs-1000 35.0 → 43 fps 前後（i2a・b256、窓ごとの揺れ 39〜44）、
+  subs-100 304 → 355〜365、big-1000 114 → 118〜119、big-100 555 → 590〜610。目標（NVK subs-1000 75.4、big-1000 136.2）は未達。
+- 残りの見立て（d3 の内訳から）:
+  - subs-1000 の 1 submit は約 23 µs（vkQueueSubmit 約 17 µs、record 約 5.6 µs）。kernel の GPU_JOB_SUBMIT 約 15 µs は、executor 6（draw 16 本 3.3、
+    ring 1.0）、decode 1.7、RESET 0.8、user の copy 4 回 約 3（要求の copyin 1.0、stream 0.7、copyout 2 回）、GPU core の記録の出し入れ約 3.5 と散らばり、
+    1 つで 3.5 µs を越える物は無い。NVK（1 submit 約 13 µs、record 込み）に届くには形を変える要がある:
+    (a) 小さな copyin・copyout の速い道（kernel の VM、`vmspace_copy_*` が page を pin する: WS291 の外、Q1 の判断）、
+    (b) 記録の時に push buffer まで作る（kernel の decode と executor を recording の thread の側に寄せ、submit は ring だけ: 設計の Phase が要る）、
+    (c) fence の無い submit の job（製品の判断、Q1 がユーザーに聞いている）。
+  - big-1000（frame 約 8.4 ms）: client の encode 約 3.5 ms（GPU は待つ）＋ GPU 約 4.4 ms（submit の始めから、1 draw 約 0.22 µs で NVK の 0.256 より
+    速い）＋ 0.3。136.2 fps（7.35 ms）には encode を約 2.6 ms に縮めるか、GPU を encode の間に走らせる（(b) と Vulkan の submit の意味の外）要がある。
+    vkCmd* 1 本 約 45 ns（push 128 byte の draw で 4 本）。target 上に user の profiler が無く、encode の内訳は未計測。
+  - 一覧の 5（game mode の lend の時の big-100 の遅れ）は未着手（b256 で big-100 は 555 → 600 前後に上がったが、lend との関係は調べていない）。
+- 未実施: amdrdna・i915・powervr の BUG-381 の直し（前から）、i2a・b256 の 3 round 交互の比べ（2 round まで）。
+- 消す物（Q1 へ）: build/tmp/p024i2-*（診断と A/B の出力、tree の写し p024i2-diag・p024i2-d3t・p024i2-main・p024i2-cfg）、build/p024/{bench0,bench0fp,
+  bench1fp,cfg-i2a,i2c,lv4,lv5,lv7,u-i2a,u-main}（使い終わり）、build/p024/u-i2a/bin/'*' と u-main/bin/'*'（誤って作った壊れた symlink、u-main は v2 の後）。残す: build/p024/{base,js3,lv2,i2a,lv3,lv6,
+  lv8,u-fin,forge2}。

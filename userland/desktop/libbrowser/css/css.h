@@ -1062,6 +1062,10 @@ struct css_style {
 	const char *column_declared;
 	const char *row_declared;
 	const struct css_grid_areas *areas;
+	/* A subgrid: the areas of the grid it sits in (named lines it inherits), and how many lines each axis's first is below theirs. */
+	const struct css_grid_areas *outer_areas;
+	int outer_area_columns;
+	int outer_area_rows;
 	struct css_track auto_columns[CSS_TRACKS];
 	int auto_column_count;
 	struct css_track auto_rows[CSS_TRACKS];

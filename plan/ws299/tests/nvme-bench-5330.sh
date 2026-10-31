@@ -132,6 +132,8 @@ for mode in $MODES; do
 		sleep 5
 	done
 	say "zedBSD up after $(($(date +%s) - start + 20)) s ($mode)"
+	# The account, chosen here: the wait above ran zb in a pipeline, whose choice does not come back to this shell.
+	[ -n "$ZBU" ] || zb_account || { say "FAIL: no account answers on zedBSD"; exit 1; }
 	sleep "${SETTLE:-30}"
 	TO=60 timeout 60 sshpass -p "$ZBU" scp $SO $T/bench-zedbsd.sh "$RANDREAD_DIR/randread-zedbsd" "$RANDREAD_DIR/patwrite-zedbsd" "$RANDREAD_DIR/directio-zedbsd" \
 	    "$RANDREAD_DIR/cpuloop-zedbsd" "$ZBU@$ZB:/tmp/" ||
@@ -139,7 +141,7 @@ for mode in $MODES; do
 	TO=1500 zb "echo $ZBU | sudo -S env $envrun sh /tmp/bench-zedbsd.sh $run" > "$LOGS/$NAME-$mode.txt" 2>&1
 	say "zedbsd $mode rc=$? ($(tail -1 "$LOGS/$NAME-$mode.txt"))"
 	zb 'dmesg' > "$LOGS/$NAME-$mode-dmesg.txt" 2>&1
-	zb 'echo $ZBU | sudo -S reboot' > /dev/null 2>&1
+	zb "echo $ZBU | sudo -S reboot" > /dev/null 2>&1
 	debian_up
 	[ "$mode" = write ] && p6fresh
 done

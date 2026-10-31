@@ -2819,11 +2819,45 @@ parser_pseudo(
 	case CSS_PSEUDO_NTH_LAST_CHILD:
 	case CSS_PSEUDO_NTH_OF_TYPE:
 	case CSS_PSEUDO_NTH_LAST_OF_TYPE:
-		/* an+b, counted as a class. */
-		error = parser_nth(arguments, &simple->nth_a, &simple->nth_b);
-		if (error != 0)
-			return error;
-		*specificity += 1U << 8;
+		/* an+b, counted as a class; :nth-child() and :nth-last-child() may go on with "of" and a selector list. */
+		{
+			struct token_range nth;
+			size_t of;
+			int nesting;
+
+			nth = arguments;
+			of = arguments.count;
+			nesting = 0;
+			if (simple->pseudo == CSS_PSEUDO_NTH_CHILD || simple->pseudo == CSS_PSEUDO_NTH_LAST_CHILD) {
+				for (position = 0; position < arguments.count; position++) {
+					if (arguments.tokens[position].type == CSS_TOKEN_FUNCTION || arguments.tokens[position].type == CSS_TOKEN_OPEN_PAREN)
+						nesting++;
+					if (arguments.tokens[position].type == CSS_TOKEN_CLOSE_PAREN)
+						nesting--;
+					if (nesting == 0 && arguments.tokens[position].type == CSS_TOKEN_IDENT &&
+					    css_ident_equal(&arguments.tokens[position], "of")) {
+						of = position;
+						break;
+					}
+				}
+			}
+			nth.count = of;
+			nth = parser_trim(nth);
+			error = parser_nth(nth, &simple->nth_a, &simple->nth_b);
+			if (error != 0)
+				return error;
+			*specificity += 1U << 8;
+			if (of < arguments.count) {
+				struct token_range list;
+
+				list.tokens = arguments.tokens + of + 1U;
+				list.count = arguments.count - of - 1U;
+				list = parser_trim(list);
+				error = parser_pseudo_arguments(heap, arena, list, 0, simple, specificity);
+				if (error != 0)
+					return error;
+			}
+		}
 		return 0;
 	default:
 		/* Any other function never matches, and counts as a class. */
