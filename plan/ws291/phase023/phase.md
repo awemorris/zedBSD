@@ -95,6 +95,35 @@ p014 の結果: RTX は pitch-linear の色の target と block-linear の深度
 - 機械の状態（16:4x）: 13 file と NVMe の kernel を戻して cksum 一致（vmunix 1463007375、expected の列と全一致）、cfg の `nvrtx.disp.bl=` の行 0、Debian（Linux 6.12.111+deb13-amd64、
   RTX 4 function vfio-pci）。lock /tmp/zedbsd-rdna.lock は返した。
 
+### q1781-i03（2026-10-31 18:15〜18:30 P3、worktree p3-ws291wsi、main 76f123314 を 13417cc3f で取り込み）: block-linear の scanout の画面の崩れ
+
+- 症状（ユーザーの目視、2026-10-31、`nvrtx.disp.bl=1`、写真 `build/review/ws291/p023-bl-visual-1.jpg`（main の checkout））: desktop は出るが、文字と icon が小さな四角に刻まれてずれて重なる。
+- 原因: window は block-linear の surface を、nvrtx の唯一の VRAM の context DMA（先頭の語 0x45: VRAM・読み書き・大きな page・kind は pitch）を通して読んでいた。
+  nouveau は memory の kind ごとに window の context DMA を作り、block-linear の framebuffer には kind の bit（bit 20）を立てた物を使う
+  （Linux v6.12 `dispnv50/wndw.c` `nv50_wndw_ctxdma_new`、`nvkm/engine/dma/usergv100.c` `gv100_dmaobj_new`、handle は `dispnv50/handles.h` の
+  `NV50_DISP_HANDLE_WNDW_CTX(kind)`、Turing の kind 0x06 は `wndwc57e.c` の `wndwc57e_modifiers`）。pitch の kind の object を通すと window は GOB の中を
+  sector の並べ替え無しの 64 B × 8 行として読む。SET_STORAGE（一 GOB の block、BLOCKLINEAR）と pitch の語（行の bytes / 64）は nouveau の `wndwc37e_image_set`・`wndw.c` と同じで誤りでなかった。
+- 確かめ（実機 10.0.10.3、QEMU は無し）:
+  1. 崩れた kernel（2917063051、bl=1）で keiland-shot（compositor の chain の image を CPU が Turing の color 2D の GOB の並びで読み戻す）は崩れの無い desktop
+     （`build/tmp/p023-i03/bad-kernel-bl1-shot.png`、worktree の build、git の外）。image の中身は正しく、display の読み方が違う。
+     書き手の並びは Mesa 26.2.6 `src/nouveau/nil/tiling.rs`（`GOBType::choose`: Turing の色は `TuringColor2D`）と `copy.rs`（`CopyGOBTuring2D`）で、nvrtx の `execute_gob_offset` と同じ。
+  2. その shot から「display がこう読んだら」の画を作って写真と比べた（scratchpad の script、記録は画だけ）: block の高さの食い違い（h=1・4）は window ごと横にずれ、
+     Fermi・Tegra の sector の並びは細かい市松になり、どれも写真と違う。「GOB を sector の並べ替え無しの 8 行 × 64 B として読む」は写真とほぼ同じ（縞の logo の左の柱・
+     濃い帯・右にずれた淡い四角・3 段に刻まれた Welcome の行）: `build/tmp/p023-i03/sim-pitchkind-linear-gob.png`。
+- 直し（commit effb3d149、`src/drivers/gpu/nvrtx/display/nvrtx-disp.h`・`scanout.c`・`present.c`）: 最初の commit で、出す window の channel に
+  block-linear の kind の context DMA（handle 0xfb000006、先頭の語 0x00100045、VRAM 全体）を足して bind し、`present_admit` は block-linear の surface をそれで読ませる。
+  pitch の surface は今の object のまま。RAMHT の使用は 19 → 20（上限 24）。HAL・`nvrtx.disp.bl` の既定（0）は変えない。
+- build: `make ZEDBSD_CONFIG=plan/ws291/tests/config.mk BUILD=build/p023/rtx-ctx build/p023/rtx-ctx/vmunix` warning 0（cksum 3845779468）。他の config の vmunix は未 build。
+- 実機（直した kernel、P2 の 14 file、bl=1）: 起動して `block-linear scanout on`・`first flip 1920x1080`、display の失敗の行なし。game mode の mview
+  （`measure.sh mview … --content=game --copies=100 --spin=10`、`VULKAN_ZEDBSD_WSI_LOG=1`）: 貸した chain が `tiling=0x10001`、`frames=599 fps=59.78`、`presents=594 copies=0`、
+  `KWL SCANOUT direct=1`、lease は返った。keiland-shot は崩れの無い desktop（`build/tmp/p023-i03/fix-kernel-bl1-shot.png`）。
+- **未実施**: display が読んだ画素の確かめ（CRC は作らない、ユーザーの決定。撮影は display の読みを見ない）。block-linear の kind の context DMA が Turing の color 2D の並びで読むことは
+  nouveau と NVIDIA の driver の作り方（block-linear の scanout に block-linear の kind の object）からの推定で、画面はユーザーの目視の再確認が要る（下の手順）。
+- 機械の戻し（18:27〜18:29）: 14 file を `.p7old` から戻し P2 の記した cksum と全一致、NVMe の vmunix 1463007375、cfg の `nvrtx.disp.bl=` の行 0、Debian（6.12.111+deb13-amd64、
+  RTX の 4 function は vfio-pci）、lock を返した。`/boot/boot0/vmunix.old` は 2917063051（deploy が写した物）のまま。`.p7old` の 14 file は機械に残した。
+- 再確認の目視（Q1 がユーザーの拾える試験の一覧に）: 上の「ユーザーの目視の確かめ」の手順で、kernel は effb3d149 を含む RTX の kernel（例 `build/p023/rtx-ctx/vmunix`）、
+  userland は P2 の WS309 p015 の 14 file（compositor の chain も block-linear になるので mview 無しでも desktop で分かる）。正しければ文字・icon が bl=0 と同じに見える。
+
 ### 再開点（2026-10-31 P3）
 
 - 済み: 設計（第 2 版）・レビュー・問いと答え、I1（7b0a6644e）、nvrtx の I3〜I5（499f18262）、compositor の非 LINEAR の取り込みの設計（design.md §9 の 8、80b18f875）、実機の A/B と desktop。

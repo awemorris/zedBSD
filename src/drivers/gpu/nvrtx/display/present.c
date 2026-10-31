@@ -879,10 +879,12 @@ present_admit(
 		*surface = node->frames[node->next];
 	}
 
-	/* The frame's size and format. */
+	/* The frame's size, the object it is read through (by its layout) and its format. */
 	surface->width = request->width;
 	surface->height = request->height;
 	surface->handle = NVRTX_DISP_HANDLE_VRAM;
+	if (surface->block_linear != 0)
+		surface->handle = NVRTX_DISP_HANDLE_FB_BLOCK_LINEAR;
 	surface->format = present_format(request->format);
 
 	/* Succeeded: the frame may be shown. */
