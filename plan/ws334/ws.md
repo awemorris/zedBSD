@@ -58,7 +58,7 @@
 | [p007](phase007/phase.md) | module（Sonnet）: `base/os-net.h` → `os-net-posix.c`・`os-net-win32.c`（socket・待ち・起こし） | planned | p005 |
 | [p008](phase008/phase.md) | module（Sonnet）: `base/os-time.h` → `os-time-posix.c`・`os-time-win32.c`（単調の時計・壁の時計・地域の時差・時刻帯の名前） | planned | p005・p009 |
 | [p009](phase009/phase.md) | module（Sonnet、表の data）: `base/os-zones.h/.c`（Windows の時刻帯の key → 英語の長い名前、CLDR の data） | cleared（2026-11-01 02:53 Q1、main 70f0a3bf1。test-os-zones 1293 checks posix・win32、127 行の表、CLDR 48） | p004 |
-| [p010](phase010/phase.md) | module（Sonnet）: `storage/records.h/.c`（key の作り・FNV-1a 64・衝突の番号、cookie・cache・LOCAL v1/v2 の記録の encode と decode） | 実装済み・試験 PASS（2026-11-01 03:01、cleared は Q1） | p004 |
+| [p010](phase010/phase.md) | module（Sonnet）: `storage/records.h/.c`（key の作り・FNV-1a 64・衝突の番号、cookie・cache・LOCAL v1/v2 の記録の encode と decode） | cleared（2026-11-01 03:06 Q1、main 90b60dfc1。test-records 60948 checks posix・win32、変異 24/24） | p004 |
 | [p011](phase011/phase.md) | module（Sonnet）: `storage/files.h/.c`（files の backend、公開の `browser_storage_calls` の実装） | planned | p006・p010 |
 | [p012](phase012/phase.md) | module（Sonnet）: `storage/queue.h/.c`（instance の storage の thread と queue、write-behind と読みの頼み） | planned | p005・p010 |
 | [p013](phase013/phase.md) | module（Sonnet）: `libmedia/media-os.h` → `media-os-posix.c`・`media-os-win32.c`（Vulkan の loader の読み込み、file の開き・大きさ・位置の読み） | cleared（2026-11-01 03:05 Q1、main 82365a39b。test-media-os posix 159・win32 158（LC_ALL=C.UTF-8）、変異 15/18） | p004 |
