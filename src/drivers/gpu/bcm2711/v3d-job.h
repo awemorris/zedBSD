@@ -27,6 +27,13 @@ struct bcm2711_v3d_overflow {
 	uint32_t bytes;
 };
 
+/*
+ * An overflow pool's size: a whole number of 256 KiB units, at most 16 MiB
+ * (a pass of many primitives is given larger pools, not more of them).
+ */
+#define BCM2711_V3D_OVERFLOW_UNIT	0x40000U
+#define BCM2711_V3D_OVERFLOW_MAX	0x1000000U
+
 /* Bin must finish before render launches; both lists borrow their caller's mappings. */
 struct bcm2711_v3d_cl_job {
 	uint32_t bin_start;
