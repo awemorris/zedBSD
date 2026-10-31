@@ -181,6 +181,7 @@ static const struct values_name values_names[] = {
 	{ "background-image", CSS_PROP_BACKGROUND_IMAGE },
 	{ "background-repeat", CSS_PROP_BACKGROUND_REPEAT },
 	{ "background-attachment", CSS_PROP_BACKGROUND_ATTACHMENT },
+	{ "background-clip", CSS_PROP_BACKGROUND_CLIP },
 	{ "background-position-x", CSS_PROP_BACKGROUND_POSITION_X },
 	{ "background-position-y", CSS_PROP_BACKGROUND_POSITION_Y },
 	{ "font-size", CSS_PROP_FONT_SIZE },
@@ -759,6 +760,15 @@ static const struct values_keyword values_list_style[] = {
 	{ "none", CSS_LIST_NONE },
 	{ "disclosure-closed", CSS_LIST_DISCLOSURE_CLOSED },
 	{ "disclosure-open", CSS_LIST_DISCLOSURE_OPEN },
+	{ NULL, 0 }
+};
+
+/* The keywords of background-clip. */
+static const struct values_keyword values_background_clip[] = {
+	{ "border-box", 0 },
+	{ "padding-box", 1 },
+	{ "content-box", 2 },
+	{ "text", 0 },
 	{ NULL, 0 }
 };
 
@@ -2742,6 +2752,9 @@ values_single(
 		break;
 	case CSS_PROP_LIST_STYLE_POSITION:
 		table = values_list_position;
+		break;
+	case CSS_PROP_BACKGROUND_CLIP:
+		table = values_background_clip;
 		break;
 	case CSS_PROP_BOX_SIZING:
 		table = values_box_sizing;
