@@ -1068,6 +1068,14 @@ struct css_style {
 	float border_spacing[2];
 	int border_collapse;
 	int caption_side;
+	/* Multiple columns: column-count (0 for auto), column-width in pixels (0 for auto), column-fill, column-span, and the breaks (css_break_*). */
+	int multicol_count;
+	float multicol_width;
+	int multicol_fill;
+	int multicol_span;
+	int break_before;
+	int break_after;
+	int break_inside;
 	int white_space;
 	int text_transform;
 	int cursor;

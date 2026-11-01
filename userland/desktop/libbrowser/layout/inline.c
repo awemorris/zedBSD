@@ -838,12 +838,20 @@ inline_last_baseline(
 		return inline_row_synthesized(box, baseline);
 	}
 
-	/* A block of lines: its last line's baseline. */
+	/* A block of lines: its last line's baseline (a box with columns: the lowest one, which ends a column). */
 	if (box->children_inline) {
 		if (box->line_count == 0)
 			return 0;
 		line = &box->lines[box->line_count - 1U];
 		*baseline = line->y + line->baseline;
+		if (layout_multicol_wanted(box)) {
+			size_t at;
+
+			for (at = 0; at < box->line_count; at++) {
+				if (box->lines[at].y + box->lines[at].baseline > *baseline)
+					*baseline = box->lines[at].y + box->lines[at].baseline;
+			}
+		}
 		return 1;
 	}
 
@@ -860,7 +868,9 @@ inline_last_baseline(
 		/* The child's own last baseline, moved into this box's content box. */
 		found = inline_last_baseline(child, &inner, depth + 1);
 		if (found) {
-			*baseline = child->y + child->border[CSS_TOP] + child->padding[CSS_TOP] + inner;
+			inner += child->y + child->border[CSS_TOP] + child->padding[CSS_TOP];
+			if (!any || !layout_multicol_wanted(box) || inner > *baseline)
+				*baseline = inner;
 			any = 1;
 		}
 	}
@@ -2415,6 +2425,14 @@ inline_logical_central(
 			return 0;
 		line = last ? &box->lines[box->line_count - 1] : &box->lines[0];
 		*offset = box->border[CSS_TOP] + box->padding[CSS_TOP] + line->y + line->height / 2;
+		if (last && layout_multicol_wanted(box)) {
+			size_t at;
+
+			for (at = 0; at < box->line_count; at++) {
+				if (box->border[CSS_TOP] + box->padding[CSS_TOP] + box->lines[at].y + box->lines[at].height / 2 > *offset)
+					*offset = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->lines[at].y + box->lines[at].height / 2;
+			}
+		}
 		return 1;
 	}
 	found = 0;
@@ -2427,7 +2445,9 @@ inline_logical_central(
 			continue;
 		if (!layout_logical_central_baseline(child, last, &inner))
 			continue;
-		*offset = box->border[CSS_TOP] + box->padding[CSS_TOP] + child->y + inner;
+		inner += box->border[CSS_TOP] + box->padding[CSS_TOP] + child->y;
+		if (!found || !last || !layout_multicol_wanted(box) || inner > *offset)
+			*offset = inner;
 		found = 1;
 		if (!last)
 			break;

@@ -1216,3 +1216,17 @@ Origin: 2026-10-27 ユーザーの指示。
 - Acid: dev170 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
 - 未実施: asan、host-NAME の全件、target の確認。
 - 消す候補（Q1 が消す）: build/ws074-cmp/dev168（dev170 と dev169 を残すため）、build/tmp/ の acid170・p8・p9・host-build2.log、build/ws074-suites/wpt/acid/ の Acid の一時 html。
+
+### multicol の設計（続き 7、2026-11-01。依頼者の決定で multicol を作る）
+
+- 範囲: `columns`・`column-count`・`column-width`・`column-fill`・`column-span`・`break-before`・`break-after`・`break-inside`（`page-break-*` は別名）を parse し、computed に出す（段階 1）。
+  `column-gap` は既存（normal は 1em）。`column-rule-*` は paint に関わるので段階の後。
+- layout（段階 2、layout/multicol.c）: 横書きの block container（display が block・inline-block・list-item）で column-count か column-width がある物。
+  1. column の幅（count・width・gap から）で通常の flow として内容を layout する（`box->width` を一時的に column の幅にして `block_children` か `layout_inline`）。
+  2. その flow を leaf（行、または分割しない block: replaced・break-inside: avoid・table・flex・grid・空の block）に分け、column に詰める。
+     入りきらない leaf は次の column へ。`break-before/after: always・all・column` は強制の break。column の先頭の margin は強制でない break で切る。
+  3. column の高さは、高さが定まっていれば（column-fill: auto は）その高さ、auto で balance は、column 数に収まる最小の高さ（二分探索）、auto で fill: auto は無制限（強制の break だけで切る）。
+  4. leaf は column の分だけ x（rtl は右から）と y をずらす。leaf の周りの block は最初の leaf と一緒に動き、高さは最初の column の分にする（分割した block の 2 つ目以降の背景は描かない）。
+  5. `column-span: all` の直接の子は、flow を segment に分け、各 segment を別々に balance して、spanner は全幅で layout し直して挟む。
+- 縦書き: logical domain の中で同じ code が動く（座標は論理の横書き）。baseline: first は最初の column の最初の行、last は最も下の行の baseline（Chromium の測定）。
+- anchor・hit test・getBoundingClientRect: box の座標をそのまま使うので追加の作りは要らない（分割した block の 2 つ目以降の fragment は持たない。getClientRects の fragment、anchor の fragment 化は後の段階）。
