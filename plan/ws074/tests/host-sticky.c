@@ -86,6 +86,7 @@ main(
 		fprintf(stderr, "usage: host-sticky PAGES SANS MONO FALLBACK\n");
 		return 2;
 	}
+	memset(&paths, 0, sizeof(paths));
 	paths.sans = argv[2];
 	paths.mono = argv[3];
 	paths.fallback = argv[4];

@@ -83,7 +83,7 @@ main(
 	}
 
 	/* A top-level load of a local file (its own location as the base) still reads it. */
-	error = page_fetch_response(file_url, file_url, &response);
+	error = page_fetch_response(NULL, file_url, file_url, &response);
 	file_check(error == 0 && response.body.length > 0, "top-level file load reads the file");
 	net_response_release(&response);
 
@@ -119,7 +119,7 @@ file_case_run(
 	int error;
 
 	wb_buffer_init(&bytes);
-	error = page_fetch(base, href, &bytes, NULL);
+	error = page_fetch(NULL, base, href, &bytes, NULL);
 	snprintf(name, sizeof(name), "%.200s from %.200s: error %d (want %d), %zu bytes", href, base, error, expected,
 		 bytes.length);
 	if (expected == 0)

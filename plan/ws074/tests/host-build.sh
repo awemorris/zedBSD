@@ -51,6 +51,7 @@ ln -sf "$(pwd)/userland/desktop/include/truetype/truetype.h" $base/include/truet
 # The engine's own public header (libbrowser, ws074-p057), which the host's C library lacks too.
 mkdir -p $base/include/browser
 ln -sf "$(pwd)/userland/desktop/include/browser/browser.h" $base/include/browser/browser.h
+ln -sf "$(pwd)/userland/desktop/include/browser/storage.h" $base/include/browser/storage.h
 for file in userland/desktop/libtruetype/face.c userland/desktop/libtruetype/cmap.c userland/desktop/libtruetype/outline.c \
     userland/desktop/libtruetype/render.c userland/desktop/libtruetype/glyph.c userland/desktop/libtruetype/design.c userland/desktop/libtruetype/companion.c; do
 	object=$out/obj/truetype-$(basename "$file" .c).o

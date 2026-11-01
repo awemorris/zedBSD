@@ -267,7 +267,7 @@ main_dump(
 	}
 
 	/* Releases the owned dump and view on either write outcome. */
-	free(text);
+	browser_free(text);
 	browser_view_destroy(page.view);
 	if (error != 0) {
 		fprintf(stderr, "browser: cannot dump %s: %s\n", options->shell.start, strerror(error));

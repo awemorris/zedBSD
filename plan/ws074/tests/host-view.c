@@ -90,6 +90,7 @@ main(
 		state.verbose = 1;
 
 	/* The view on keys.html at 800 by 600, every page read at once. */
+	memset(&paths, 0, sizeof(paths));
 	paths.sans = argv[2];
 	paths.mono = argv[3];
 	paths.fallback = argv[4];
@@ -315,7 +316,7 @@ ring_drawn(
 	if (error != 0)
 		return 0;
 	found = strstr(text, TEST_RING_COLOR) != NULL;
-	free(text);
+	browser_free(text);
 	return found;
 }
 
