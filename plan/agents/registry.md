@@ -11,8 +11,8 @@
 | P5 | kernel-and-driver-designer | ws336 p001 設計の仕上げ (q1791-i02) | `/home/awe/zedBSD-worktrees/p5-ws336` / `agent/p5-ws336` | 返却（2026-11-01 04:53、cleared。実装は Sonnet） | 6848137f6（merge a1d9f18fb） |
 | P6 | kernel-and-driver-designer | ws335 p001 設計の仕上げ (q1789-i02) | `/home/awe/zedBSD-worktrees/p6-ws335` / `agent/p6-ws335` | in-progress（2026-11-01 04:51 起動し直し） | f4d4662d3（main） |
 | P3 | phase-runner-high | ws291 p024 RTX 最適化 (q1785-i03) | `/home/awe/zedBSD-worktrees/p3-ws291wsi` / `agent/p3-ws291wsi` | ラップアップ（2026-11-01 07:00、ユーザーの指示） | 6dd842057（merge 1e86f4502） |
-| P8 | phase-runner-low | ws074 p260 自走 (q1727-i16) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-11-01 08:21 起動し直し） | 4e24c4121（merge cca3023fa） |
-| P7 | phase-runner-high | ws334 p021 統合 (q1808-i02) | `/home/awe/zedBSD-worktrees/p7-ws334` / `agent/p7-ws334` | in-progress（2026-11-01 08:21 起動し直し） | 9d598a1a9（merge 5ea437eb7） |
+| P8 | phase-runner-low | ws074 p260 自走 (q1727-i17) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-11-01 09:06 起動し直し） | 26d1732d3（merge 00d5365c8） |
+| P7 | phase-runner-high | ws334 p022 network (q1830-i01) | `/home/awe/zedBSD-worktrees/p7-ws334` / `agent/p7-ws334` | in-progress（2026-11-01 09:06 起動） | 37593500d（merge 8970a6e96） |
 
 - 2026-11-01 08:2x の割り振り（ユーザーの指示）: Bug の修正を先に。VF2 の Bug に P1、RTX の Bug に P2、WS335・WS336・WS334（P7）・WS074（P8）に 1 人ずつ。実機は VF2 が P1、10.0.10.3 が P2。
 - 同時に動かす数は 6（2026-10-29 ユーザーの P1〜P6 の指示）。VF2（主）と 5330（従）は P3、10.0.10.3 は空き（2026-10-30 09:13 P5 返却）。
