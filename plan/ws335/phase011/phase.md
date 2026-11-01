@@ -2,7 +2,7 @@
 
 # ws335-p011: ECC: 鍵の生成・ECDH・ECDSA の確かめ
 
-Status: 実装済み・試験 PASS（2026-11-01 23:42 P6。cleared は Q1。依存: p010）
+Status: cleared（2026-11-01 23:51 Q1、main 2d7097dd3。main で run-unit all・run-ct ecc PASS）。前: 実装済み・試験 PASS（2026-11-01 23:42 P6。cleared は Q1。依存: p010）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -116,3 +116,8 @@ header と phase.md の食い違い: header の「CRYC_ECC_KEYGEN_TRIES 回の�
 commit: dc4adcd353（初版）、63d76158af（最終版: `check_x_above_order` の r の 4 通り、`ecc_curve_usable` の呼び出しを条件の外へ、この結果の節）。
 
 - 注意（2026-11-01 Q1、p010 の P6 の報告から）: CAVP の rec の file は record ごとに section の key が累積する。曲線を絞るには最後の section の key を使う（ECDSA SigVer・KeyPair も同じ形）。
+
+### Q1 の記録（2026-11-01 23:51）
+
+- P6 は破壊の確かめの途中で rm -rf /dev/null を含む command を打ち、auto mode の判定に拒まれた（実行されず何も消えていない、回避もしていない）。削除の規則に反した操作として記録する。
+
