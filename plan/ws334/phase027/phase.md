@@ -115,3 +115,37 @@ commit（`git commit -m WIP -- <path>`、file の群ごと）:
 - `plan/ws334/tests/check-skeleton.sh` は 100 秒で打ち切り（p023 の記録のとおり基点でも FAIL する物。この Phase と無関係）。
 
 消してよい物（Q1 へ）: `build/tmp/p027`（sysroot の写し・build の log・Linux Keiland の出力 `build/tmp/p027/keiland-linux`）、`build/ws074-host`、`build/amd64`、`build/tmp/ws327-host-test.run.*`。どれも使い捨て。
+
+## guest の確かめ（P7 q1858-i01、2026-11-01、基点 main 71aef8e0a）
+
+zedBSD amd64 の Venus の QEMU の guest（`plan/ws035/tests/zdesktop-guest.sh`、GUEST_RUNTIME は `build/p027g/runtime`、renderer は main の `build/ws035-sq-venus/install` を読むだけ）。判定は guest の中の app の行（SSH で読む）・compositor の `--log-frames` の行・`keiland-shot` の PNG。QEMU の console・serial の log は読んでいない。
+
+新しい試験（`plan/ws334/tests/`）:
+
+- `config-amd64-p027-guest.mk`: WS074 の browser の image の config（`plan/ws074/tests/config-amd64-browser.mk`）＋ `ZEDBSD_TEST_SCREEN_CAPTURE`・`keiland-shot`。
+- `p027-storage.html`: localStorage の `p027-value` を初回に書き（"kept-27"）、以後は読んで出し、`p027-loads` を 1 ずつ増やす。題は "p027 <見つけた値か none> loads=N"（browser の NAVIGATE の行に出る）。
+- `p027-guest.sh [OUTDIR]`: 1 本の script（起動 → compositor（`--testing --log-frames`、1280x800）→ browser を 3 回 → files・terminal・settings → guest の `poweroff` → 書いた disk で再び起動 → browser → 要約 `OUTDIR/summary.txt`、最後の行 `p027-guest: PASS`）。
+
+image: `sh plan/tools/guest/test-image.sh plan/ws334/tests/config-amd64-p027-guest.mk build/p027g/img --file /usr/share/keiland/wallpaper.png=userland/desktop/wallpapers/Birch-Lake.png --file /usr/share/p027-tests/storage.html=plan/ws334/tests/p027-storage.html` → exit 0。browser・libkeiland・files・terminal・settings の compile に warning なし（-Werror）。log の warning は外部の package（openssh・openssl・perl）の物だけ。sysroot は main の `build/amd64/sysroot`（20:51、keiland・browser の header が p027 より前）を自分の `build/amd64/sysroot` に写し、`include/libc`・`userland/desktop/include` を重ねた（Sonnet の build と同じやり方。toolchain の rule は流していない）。host で `sudo modprobe vgem`・`chmod 0666 /dev/dri/renderD128`（tools.md の「host の起動ごと」）。
+
+`timeout 1500 sh plan/ws334/tests/p027-guest.sh build/p027g/run2` → exit 0、`p027-guest: PASS`（同じ script の 1 回目 `build/p027g/run` も PASS。1 回目は storage の directory の一覧だけ `find -ls` が guest に無く取れず、`ls -laR` に直して 2 回目）。観測（2 回目）:
+
+| 確かめる事 | 観測 |
+| --- | --- |
+| (1) Vulkan の道で窓に頁 | gpu-1: `ZBROWSER READY`、NAVIGATE の題 `p027 none loads=1`、stderr に "cannot draw with the GPU" の行なし、compositor の SHM_COPY がその client に 0 行（共有 memory でなく GPU の buffer で出している）。PNG に頁（"value: none, wrote kept-27"、"loads: 1"） |
+| (2) `--no-gpu` の CPU の道 | cpu-1: 題 `p027 kept-27 loads=3`、SHM_COPY がその client の surface 24 に `rows=0-600` で 1 回（窓の高さ全体の CPU の絵）。PNG に頁（"value: kept-27"、"loads: 3"） |
+| (3) localStorage が残る | browser の再起動の後 gpu-2 は `p027 kept-27 loads=2`。guest の `poweroff` の後、書かれた disk（`build/p027g/disk-after.img`）からの再起動で gpu-3 は `p027 kept-27 loads=4`。置き場所は `/root/.local/share/keiland/browser/`（`lock` と `local-storage/66696c653a2f2f.ls`（"file://" の hex）107 byte）＝ `kl_app_storage_directory` の `$HOME/.local/share/keiland/browser`（XDG_DATA_HOME は未設定） |
+| (4) files・terminal・settings | どれも新しい client が surface を map し、6 秒後も動いている。PNG: files は Today の頁、terminal は prompt、settings は Settings の頁。app の行（ZFILES・ZTERM・ZSETTINGS）に ERROR なし |
+
+PNG（worktree の `build/review/p027-guest/`）: `gpu-1.png`・`gpu-2.png`・`cpu-1.png`・`gpu-3.png`・`files.png`・`terminal.png`・`settings.png`（元は `build/p027g/run2/`）。
+
+直した物: なし（product の code は変えていない）。
+
+未実施・注意:
+
+- Vulkan が窓の後に失敗して SHM の窓に作り直す道（手順 3 の後半）は guest で起こせなかった（`/dev/gpu0` は root:video 0660 で、試験の user も video の組に入っており、su も無い）。build と読みだけのまま。
+- files・terminal・settings の「前と同じ」は、p027 の前の image との並べた比較はしていない。起動・窓・6 秒の生存と画面を見ただけ。
+- compositor は `--testing` なので titlebar・壁紙は画面に出ていない（試験の形の事で、p027 と関係しない）。US の鍵の text（手順 4）は Wayland の backend が空の text のままなので guest では観測していない。
+- 実機は使っていない。
+
+消してよい物（Q1 へ）: `build/p027g`（image・runtime・disk-after.img・run・run2・dry run の出力）、`build/amd64`（sysroot の写し）、`build/packages`。どれも使い捨て。
