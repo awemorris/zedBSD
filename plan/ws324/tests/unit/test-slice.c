@@ -57,6 +57,9 @@ static struct h265sw_slice_header kept;
 static struct h265sw_slice_header expect;
 static struct h265sw_slice_header kept_expect;
 
+/* The byte parse() puts after the header as slice data. */
+static uint8_t filler = 0x5AU;
+
 /* The length of the last written header in bits and bytes. */
 static size_t header_bits;
 static size_t header_bytes;
@@ -270,7 +273,7 @@ parse_bytes(
 
 /*
  * Writes the fixture's slice header with the context and reads it.  extra
- * bytes of slice data (0x5A) follow the header; cut keeps only that many
+ * bytes of slice data (filler, 0x5A unless a test sets it) follow the header; cut keeps only that many
  * bytes of the RBSP.
  */
 static int
@@ -291,7 +294,7 @@ parse(
 	header_bits = swriter.bits;
 	header_bytes = bitwriter_bytes(&swriter);
 	for (index = 0U; index < extra; index++)
-		swriter.data[header_bytes + index] = 0x5AU;
+		swriter.data[header_bytes + index] = filler;
 	size = header_bytes + extra;
 	if (cut < size)
 		size = cut;
@@ -975,18 +978,19 @@ check_dependent(void)
 	wslice.extension_length = 0U;
 	wslice.alignment_one = 1U;
 	wslice.alignment_zero = 0U;
-	error = parse(H265SW_NAL_TRAIL_R, 2U, 3U, NO_CUT, &kept);
+	error = parse(H265SW_NAL_TRAIL_N, 2U, 3U, NO_CUT, &kept);
 	CHECK(error == 0);
 	CHECK(hdr.dependent == 1);
 	CHECK(hdr.address == 9U);
 	CHECK(hdr.slice_addr_rs == 3U);
 	CHECK(hdr.first_in_pic == 0);
 	CHECK(hdr.temporal_id == 2U);
-	CHECK(hdr.nal_type == H265SW_NAL_TRAIL_R);
+	CHECK(hdr.nal_type == H265SW_NAL_TRAIL_N);
 	CHECK(hdr.data_offset == header_bytes);
 	CHECK(hdr.num_entry_points == 0U);
 	CHECK(hdr.offset_len == 0U);
 	chain = hdr;
+	hdr.nal_type = kept.nal_type;
 	hdr.dependent = kept.dependent;
 	hdr.address = kept.address;
 	hdr.temporal_id = kept.temporal_id;
@@ -2866,6 +2870,20 @@ check_extension(void)
 		for (entry = 0U; entry < H265W_MAX_EXTENSION; entry++)
 			wslice.extension_data[entry] = (uint8_t)(entry * 13U + 1U);
 		error = parse(H265SW_NAL_IDR_W_RADL, 0U, 6U, NO_CUT, NULL);
+		if (length > 256U) {
+			/*
+			 * A length one over the limit, with data that would still
+			 * read as a header if the length were taken: zero extension
+			 * bytes, so the last header byte is the alignment bits at
+			 * their phase, and that byte repeated after the header
+			 * lets a reader that skipped one byte too many find them.
+			 */
+			memset(wslice.extension_data, 0, sizeof(wslice.extension_data));
+			parse(H265SW_NAL_IDR_W_RADL, 0U, 0U, NO_CUT, NULL);
+			filler = swriter.data[header_bytes - 1U];
+			error = parse(H265SW_NAL_IDR_W_RADL, 0U, 6U, NO_CUT, NULL);
+			filler = 0x5AU;
+		}
 		if (length <= 256U) {
 			CHECK(error == 0);
 			CHECK(hdr.data_offset == header_bytes);
