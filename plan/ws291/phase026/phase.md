@@ -2,7 +2,7 @@
 
 # ws291-p026: NVIDIA（nvrtx）: 記録の時に push buffer まで組み、submit は ring に載せるだけにする設計
 
-Status: in-progress（2026-11-01 P1 q1838-i01: design.md 第 3 版と敵対的レビュー 2 回は済み。ユーザーへの問い Q1・Q2（Q3 は Q2 の答え次第）の答え待ち）
+Status: cleared（2026-11-01 21:07 Q1、main 7c5168620。design.md 第 3 版と敵対的レビュー 2 回。問いは下の「Q1 の判断」で決めた）
 Parent: [WS291](../ws.md)
 依存: [p024](../phase024/phase.md)（G1 の名指しと (b) の説明、NVK との段ごとの比べ）
 Queue: q1832（P2、i01）、q1838（P1、i01）
@@ -137,3 +137,12 @@ vkQueueSubmit）を Linux の NVK（75.4 fps）並みにするための設計の
 - 設計の Phase の成果（design.md 第 3 版、design-review.md の 2 回分と反映の表、この phase.md）は commit 済み。残りはユーザーの Q1・Q2（・Q3）の答え。
 - 答えの後: Q1 が A なら P-A の Queue（libvulkan、phase-runner-high、10.0.10.3 の割当と Venus の回帰の window が要る）。cleared か uncleared かは Q1 の判定
   （設計の範囲は済んでいる。問いの答えを design.md に反映するのは小さな直しで、次の Queue の頭でよい）。
+
+## Q1 の判断（2026-11-01 21:07）
+
+AGENTS.md §3 の振り分けで、問いは範囲の中の技術の判断として Q1 が決めた。
+- Q1（fence の無い vkQueueSubmit を返事を待たずに返すか）: A（認める）。Vulkan は submit が実行の前に返る事を許し、Mesa の driver も submit の thread で同じ形を取る。nvrtx だけに限り、環境変数で切れるので後戻りできる。後の memory の不足が DEVICE_LOST になる点は、受け入れの試験で見る。
+- Q2（Phase の順）: A（P-A → P-B、P-C は Future Work）。ユーザーが決めた (b)（kernel の組み置き）を P-B で作り、範囲を縮めない。P-C は任意の上乗せで uapi の文書も変えるので後に回す。P-A を p027、P-B を p028 にした。
+- Q3: Q2 が A なので要らない。
+- 第 1 版の Q4（mview の bench の mode を 2 つ足す）: 足す。
+

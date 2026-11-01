@@ -26,7 +26,7 @@
 
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
-| P1 | q1838 `p1-ws291p026` | [WS291](ws291/ws.md) p026: RTX の push buffer を記録の時に組む設計（10.0.10.3） |
+| P1 | q1849 `p1-ws291p026` | [WS291](ws291/ws.md) p027: RTX の libvulkan の submit の hand-off（B-U）の実装と計測（p026 の設計は 21:07 に cleared、次は p028 の kernel の組み置き） |
 | P2 | q1845 `p2-ws322` | [WS322](ws322/ws.md) p001: VF2 の VPU（Wave511 の H.264・H.265 decode、Wave420L の H.265 encode）を Vulkan Video にする調べと設計（ユーザーの指示で WS318 を待たない）。前の q1839（WS291 p020）は cleared |
 | P3 | q1840-i02 `p3-ws291p021`（20:45 再開。i01 は 20:42 に返却） | [WS291](ws291/ws.md) p021: Pi 5 の V3D の model の 50 fps（c74 49.2〜49.9 の境から） |
 | P4 | — | 返却。[BUG-387](bugs/BUG-387.md) は 21:05 に fixed（main 1692b16f5）。残り: CI の Pi 5 の image の graphical login の起動の確かめ（Pi 5 が空いた時）。次の Bug の割当を待つ |
@@ -109,7 +109,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1849 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1850 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
