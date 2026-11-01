@@ -29,6 +29,8 @@
 
 #include "layout/layout.h"
 
+#include <stdlib.h>
+
 #include <errno.h>
 #include <string.h>
 
@@ -1582,6 +1584,9 @@ position_collect(
 {
 	struct position_entry entry;
 	const struct layout_box *child;
+	const struct layout_box **ordered;
+	size_t count;
+	size_t slot_index;
 	int child_constrained;
 	int child_outer_z;
 	int child_z;
@@ -1592,8 +1597,39 @@ position_collect(
 	if (depth > LAYOUT_DEPTH_MAX)
 		return 0;
 
+	/* The items of a flex or grid container stack in their order-modified document order. */
+	ordered = NULL;
+	count = 0;
+	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (child->style.order != 0)
+				break;
+		}
+		if (child != NULL) {
+			for (child = box->first_child; child != NULL; child = child->next)
+				count++;
+			ordered = malloc(count * sizeof(*ordered));
+			if (ordered != NULL) {
+				size_t place;
+
+				count = 0;
+				for (child = box->first_child; child != NULL; child = child->next) {
+					for (place = count; place > 0 && ordered[place - 1U]->style.order > child->style.order; place--)
+						ordered[place] = ordered[place - 1U];
+					ordered[place] = child;
+					count++;
+				}
+			}
+		}
+	}
+
 	/* Each child: a positioned one is listed at its outer stacking level, then searched. */
-	for (child = box->first_child; child != NULL; child = child->next) {
+	slot_index = 0;
+	for (child = box->first_child; ordered != NULL ? slot_index < count : child != NULL;
+	    slot_index++, child = ordered != NULL ? NULL : child->next) {
+		if (ordered != NULL)
+			child = ordered[slot_index];
 		/* What position-visibility hides stacks nowhere. */
 		if (child->anchor_hidden)
 			continue;
@@ -1609,8 +1645,10 @@ position_collect(
 			if (constrained)
 				entry.z = outer_z;
 			error = wb_vector_push(entries, &entry);
-			if (error != 0)
+			if (error != 0) {
+				free(ordered);
 				return error;
+			}
 
 			/* The first explicit z-index contains all the levels below it. */
 			if (!constrained && !child->style.z_index_auto) {
@@ -1621,9 +1659,12 @@ position_collect(
 
 		/* Its descendants. */
 		error = position_collect(child, entries, depth + 1, child_constrained, child_outer_z);
-		if (error != 0)
+		if (error != 0) {
+			free(ordered);
 			return error;
+		}
 	}
+	free(ordered);
 
 	/* Succeeded: the boxes are listed. */
 	return 0;
