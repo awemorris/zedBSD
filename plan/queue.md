@@ -651,3 +651,6 @@
 | q1911 / q1911-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws322` を main に揃えて） | ws322-p005 libvulkan の H.265 decode の転送（Q322-4: WS322 が先に着手） | 2026-11-02 06:10 Q1 | in-progress |
 | q1912 / q1912-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws335-p020`） | [ws335 p020](ws335/phase020/phase.md) | 2026-11-02 06:10 Q1（標準廉価実装手順） | in-progress |
 | q1913 / q1913-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws335-p024`） | [ws335 p024](ws335/phase024/phase.md) | 2026-11-02 06:10 Q1（標準廉価実装手順） | in-progress |
+| q1914 / q1914-i01 | P8（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p8-bug395`・branch `agent/p8-bug395`） | [BUG-395](bugs/BUG-395.md)・[BUG-396](bugs/BUG-396.md) Windows 版ブラウザの題の帯の drag と double click、Reload の icon | 2026-11-02 06:16 ユーザーの Windows の UAT | in-progress |
+| q1915 / q1915-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-bug397`・branch `agent/p4-bug397`） | [BUG-397](bugs/BUG-397.md)・[BUG-399](bugs/BUG-399.md) Google の link で固まる、検索の欄の幅 | 2026-11-02 06:16 ユーザーの Windows の UAT | in-progress |
+| q1916 / q1916-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-bug398`・branch `agent/p7-bug398`） | [BUG-398](bugs/BUG-398.md) Google の app の一覧の button | 2026-11-02 06:16 ユーザーの Windows の UAT | in-progress |

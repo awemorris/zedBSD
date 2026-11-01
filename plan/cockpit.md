@@ -10,11 +10,11 @@
 | P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の関門: I・P の絵の encode（q1884、上限なし）。p009a: NVENC の channel が開き、追加の firmware 不要 | p010 encode の共通の executor |
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（06:09）。p007b cleared: JVT 100/101 一致（1 本は Extended profile で理由付きで断る）。原因は試験の probe と libmedia の 3 か所 | p005〜p006 H.265 decode |
 | P3 | — | Pi 5 の作業 | 返却（03:03）。Pi 5 の desktop の動画 8 本（build/review/pi5-video/）。板は元に戻した | 次を待つ |
-| P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
+| P4 | [BUG-397](bugs/BUG-397.md)・[BUG-399](bugs/BUG-399.md) | Windows 版ブラウザの UAT | Google の「サイト」の link で固まる、検索の欄が右へ伸びる（q1915） | — |
 | P5 | — | Web ブラウザ OmniGrammaton の Windows 版 | 返却（02:44）。p033 cleared（頁の暗い mode・accent・Mica・DPAPI・touch と pen・drag out）。残りは本物の Windows が要るので p037 に分けた | p034 の後の Windows の file: の直し |
 | P6 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | 返却（03:59）。p037（試験の TLS server tlspeer）cleared | p024・p029（handshake）の候補 |
-| P7 | — | — | 返却（02:46）。BUG-394 fixed。Pi 5 で kernel の起動 6.3 s → 0.5 s、greeter は init の開始から 2 ms。desktop が出ない時に network を 30 s 待つ件も sessiond で直した。画面までの時間は HDMI が見えず未計測 | 次の割当を待つ |
-| P8 | — | Bug の修正 | 返却（02:09）。BUG-391・392 fixed（QEMU で確認、Pi 5 は未実施） | 次を待つ |
+| P7 | [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザの UAT | Google の app の一覧の button（q1916） | — |
+| P8 | [BUG-395](bugs/BUG-395.md)・[BUG-396](bugs/BUG-396.md) | Windows 版ブラウザの UAT | 題の帯の drag・double click、Reload の icon（q1914） | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
@@ -61,6 +61,7 @@
 
 | Bug | 中身 | 状態 |
 | --- | --- | --- |
+| [BUG-395](bugs/BUG-395.md)〜[BUG-399](bugs/BUG-399.md) | Windows 版ブラウザの UAT の 5 件（題の帯の drag、Reload の icon、link で固まる、app の一覧、検索の欄の幅） | open（P8・P4・P7） |
 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の起動時の自己試験の描画 | fixed（02:20。既定で off、`rpi4gpu.selftest=1` で on。storage まで 6.3 s → 0.9〜1.2 s） |
 | [BUG-394](bugs/BUG-394.md) | 起動が長い、init が desktop を優先して順番を組めるように | fixed（02:23。init の 2 段の起動を既定に。Pi 5 の大きな待ちは GPU の自己試験 5.9 s で BUG-393 で解消。Pi 5 での変更後の計測は未実施） |
 | [BUG-390](bugs/BUG-390.md) | App Home の icon が出ない（全機械） | fixed（01:42、画面: build/review/q1889-pi5-home-after.png） |
