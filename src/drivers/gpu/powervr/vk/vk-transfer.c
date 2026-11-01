@@ -76,6 +76,7 @@ static int first_subresource(uint32_t level, uint32_t layer, uint32_t count);
 static int first_layer(uint32_t layer, uint32_t count);
 static int planar_regions(uint32_t opcode, const struct powervr_vk_record *entry, const struct transfer_data *data);
 static int plane_source(const struct powervr_vk_image *image, uint32_t aspect, struct powervr_view_shape *view);
+static int plane_words(struct powervr_view_shape *view, struct powervr_image_layout *layout, uint32_t *per_word);
 static int image_surface(const struct powervr_vk_image *image, uint32_t level, struct powervr_render_surface *surface);
 static int level_edges(const struct powervr_vk_image *image, uint32_t level, uint32_t *width, uint32_t *height, uint32_t *padded_width);
 static int image_view(const struct powervr_vk_image *image, uint32_t level, struct powervr_view_shape *view, struct powervr_image_layout *level_layout);
@@ -272,6 +273,7 @@ powervr_vk_transfer_run(
 	const VkBufferImageCopy *copy;
 	const struct powervr_format *texels;
 	uint64_t address;
+	uint32_t per_word;
 	uint32_t row;
 	uint32_t height;
 	uint32_t index;
@@ -337,6 +339,7 @@ powervr_vk_transfer_run(
 			}
 			row = copy->bufferRowLength != 0 ? copy->bufferRowLength : copy->imageExtent.width;
 			height = copy->bufferImageHeight != 0 ? copy->bufferImageHeight : copy->imageExtent.height;
+			per_word = 1;
 			error = powervr_vk_buffer_address(buffer, &address);
 			address += copy->bufferOffset;
 			work->request.kind = POWERVR_TRANSFER_COPY;
@@ -369,22 +372,24 @@ powervr_vk_transfer_run(
 				if (image->plane_count != 0) {
 					error = plane_source(image, copy->imageSubresource.aspectMask, &work->view);
 					if (error == 0)
+						error = plane_words(&work->view, &work->level_layout, &per_word);
+					if (error == 0)
 						texels = work->view.format;
 				} else {
 					error = image_view(image, copy->imageSubresource.mipLevel, &work->view, &work->level_layout);
 				}
 				work->request.destination.format = texels;
 				work->request.destination.address = address;
-				work->request.destination.width = row;
+				work->request.destination.width = row / per_word;
 				work->request.destination.height = height;
 				work->request.destination.linear = 1;
-				work->request.destination.row_pitch = row * texels->texel_bytes;
-				work->request.destination.padded_width = row;
-				work->request.source_x = (uint32_t)copy->imageOffset.x;
+				work->request.destination.row_pitch = row / per_word * texels->texel_bytes;
+				work->request.destination.padded_width = row / per_word;
+				work->request.source_x = (uint32_t)copy->imageOffset.x / per_word;
 				work->request.source_y = (uint32_t)copy->imageOffset.y;
 				work->request.source = &work->view;
 			}
-			work->request.area.width = copy->imageExtent.width;
+			work->request.area.width = copy->imageExtent.width / per_word;
 			work->request.area.height = copy->imageExtent.height;
 		}
 
@@ -477,7 +482,10 @@ planar_regions(
 {
 	const struct powervr_vk_image *source;
 	const struct powervr_vk_image *destination;
+	const VkBufferImageCopy *region;
+	uint32_t texel_bytes;
 	uint32_t aspect;
+	uint32_t row;
 	uint32_t index;
 
 	/* The images of the copy: the source unless it is a buffer, the destination unless it is one. */
@@ -500,12 +508,28 @@ planar_regions(
 	if (opcode != GPU_OP_CMD_COPY_IMAGE_TO_BUFFER)
 		return ENOTSUP;
 
-	/* Each region one plane of level 0. */
+	/*
+	 * Each region one plane of level 0, in whole 32-bit words of the
+	 * plane's texels (plane_words): its start and width in the plane, its
+	 * row and offset in the buffer.
+	 */
 	for (index = 0; index < data->count; index++) {
-		aspect = data->regions.buffers[index].imageSubresource.aspectMask;
-		if (aspect != VK_IMAGE_ASPECT_PLANE_0_BIT && aspect != VK_IMAGE_ASPECT_PLANE_1_BIT)
+		region = &data->regions.buffers[index];
+		aspect = region->imageSubresource.aspectMask;
+		if (aspect == VK_IMAGE_ASPECT_PLANE_0_BIT && source->plane_count > 0) {
+			texel_bytes = source->planes[0].format->texel_bytes;
+		} else if (aspect == VK_IMAGE_ASPECT_PLANE_1_BIT && source->plane_count > 1) {
+			texel_bytes = source->planes[1].format->texel_bytes;
+		} else {
 			return ENOTSUP;
-		if (data->regions.buffers[index].imageSubresource.mipLevel != 0)
+		}
+		if (region->imageSubresource.mipLevel != 0)
+			return ENOTSUP;
+		row = region->bufferRowLength != 0 ? region->bufferRowLength : region->imageExtent.width;
+		if (((uint32_t)region->imageOffset.x * texel_bytes) % 4U != 0 ||
+		    (region->imageExtent.width * texel_bytes) % 4U != 0 ||
+		    (row * texel_bytes) % 4U != 0 ||
+		    (region->bufferOffset % 4U) != 0)
 			return ENOTSUP;
 	}
 
@@ -556,6 +580,44 @@ plane_source(
 	view->linear = true;
 
 	/* Succeeded: the plane's view. */
+	return 0;
+}
+
+/*
+ * Turns a plane's source view into one of 32-bit words, the texel size
+ * the transfer copies raw (transfer-program.c, powervr_transfer_raw_format,
+ * has no one- or two-byte form): the plane's rows read as words of
+ * per_word texels each, the same bytes in the same place.  layout gets
+ * the words' layout.  ENOTSUP for a plane whose row is not whole words;
+ * the region's own word alignment was checked when it was recorded
+ * (planar_regions).
+ */
+static int
+plane_words(
+	struct powervr_view_shape *view,
+	struct powervr_image_layout *layout,
+	uint32_t *per_word)
+{
+	const struct powervr_format *words;
+	uint32_t texel_bytes;
+
+	/* A word format, and how many of the plane's texels fill one word. */
+	words = powervr_format_find(VK_FORMAT_R8G8B8A8_UNORM);
+	texel_bytes = view->format->texel_bytes;
+	if (words == NULL || texel_bytes == 0 || 4U % texel_bytes != 0)
+		return ENOTSUP;
+	if ((view->width * texel_bytes) % 4U != 0 || (view->layout->row_pitch % 4U) != 0)
+		return ENOTSUP;
+	*per_word = 4U / texel_bytes;
+
+	/* The same rows as words. */
+	*layout = *view->layout;
+	layout->padded_width = layout->row_pitch / 4U;
+	view->layout = layout;
+	view->format = words;
+	view->width /= *per_word;
+
+	/* Succeeded: the plane's view of words. */
 	return 0;
 }
 

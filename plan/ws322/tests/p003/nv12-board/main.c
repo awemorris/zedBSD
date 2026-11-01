@@ -296,6 +296,7 @@ open_side(
 	const char *name)
 {
 	static const char *const extensions[] = { "VK_KHR_external_memory", "VK_KHR_external_memory_fd" };
+	static const char *const instance_extensions[] = { "VK_KHR_get_physical_device_properties2", "VK_KHR_external_memory_capabilities" };
 	VkApplicationInfo application;
 	VkInstanceCreateInfo instance_info;
 	VkQueueFamilyProperties families[8];
@@ -313,10 +314,12 @@ open_side(
 	memset(&application, 0, sizeof(application));
 	application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	application.pApplicationName = "nv12-board";
-	application.apiVersion = VK_MAKE_VERSION(1, 1, 0);
+	application.apiVersion = VK_API_VERSION_1_0;
 	memset(&instance_info, 0, sizeof(instance_info));
 	instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	instance_info.pApplicationInfo = &application;
+	instance_info.enabledExtensionCount = 2;
+	instance_info.ppEnabledExtensionNames = instance_extensions;
 	status = vkCreateInstance(&instance_info, NULL, &side->instance);
 	if (status != VK_SUCCESS)
 		return fail("vkCreateInstance", status);

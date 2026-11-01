@@ -217,17 +217,20 @@ check_images(
 	kick_recording = 0;
 	nv12_replies_commands((uint8_t *)reply->buffer->view);
 
-	/* The two copies: each plane as a linear source of its own format and rows, into the buffer's tight rows. */
+	/* The two copies: each plane's rows read as 32-bit words (the transfer copies no smaller raw texel), into the buffer's tight rows. */
 	check(nv12_transfer_count == 2, "nv12: one transfer a plane");
 	if (nv12_transfer_count != 2)
 		return;
-	check(nv12_sources[0].format->vk_format == VK_FORMAT_R8_UNORM && nv12_sources[0].address == address && nv12_sources[0].linear, "nv12: the luma plane's copy reads the luma plane");
-	check(nv12_source_layouts[0].row_pitch == NV12_WIDTH && nv12_sources[0].width == NV12_WIDTH && nv12_sources[0].height == NV12_HEIGHT, "nv12: the luma plane's rows");
-	check(nv12_transfers[0].destination.format->vk_format == VK_FORMAT_R8_UNORM && nv12_transfers[0].destination.row_pitch == NV12_WIDTH, "nv12: the luma plane's buffer rows");
-	check(nv12_sources[1].format->vk_format == VK_FORMAT_R8G8_UNORM && nv12_sources[1].address == address + image->planes[1].offset, "nv12: the chroma plane's copy reads the chroma plane");
-	check(nv12_transfers[1].destination.format->vk_format == VK_FORMAT_R8G8_UNORM && nv12_transfers[1].destination.row_pitch == NV12_WIDTH, "nv12: the chroma plane's buffer rows");
+	check(nv12_sources[0].format->texel_bytes == 4U && nv12_sources[0].address == address && nv12_sources[0].linear, "nv12: the luma plane's copy reads the luma plane as words");
+	check(nv12_source_layouts[0].row_pitch == NV12_WIDTH && nv12_source_layouts[0].padded_width == NV12_WIDTH / 4U, "nv12: the luma plane's rows as words");
+	check(nv12_sources[0].width == NV12_WIDTH / 4U && nv12_sources[0].height == NV12_HEIGHT, "nv12: the luma plane's words");
+	check(nv12_transfers[0].destination.format->texel_bytes == 4U && nv12_transfers[0].destination.row_pitch == NV12_WIDTH, "nv12: the luma plane's buffer rows");
+	check(nv12_transfers[0].area.width == NV12_WIDTH / 4U && nv12_transfers[0].area.height == NV12_HEIGHT, "nv12: the luma plane's area in words");
+	check(nv12_sources[1].format->texel_bytes == 4U && nv12_sources[1].address == address + image->planes[1].offset, "nv12: the chroma plane's copy reads the chroma plane");
+	check(nv12_sources[1].width == NV12_WIDTH / 4U && nv12_source_layouts[1].row_pitch == NV12_WIDTH, "nv12: the chroma plane's pairs as words");
+	check(nv12_transfers[1].destination.row_pitch == NV12_WIDTH, "nv12: the chroma plane's buffer rows");
 	check(nv12_transfers[1].destination.address == nv12_transfers[0].destination.address + (uint64_t)NV12_WIDTH * NV12_HEIGHT, "nv12: the chroma plane after the luma plane in the buffer");
-	check(nv12_transfers[1].area.width == NV12_WIDTH / 2U && nv12_transfers[1].area.height == NV12_HEIGHT / 2U, "nv12: the chroma plane's area");
+	check(nv12_transfers[1].area.width == NV12_WIDTH / 4U && nv12_transfers[1].area.height == NV12_HEIGHT / 2U, "nv12: the chroma plane's area in words");
 	check(session.vk->query_pool == NULL, "nv12: no query is open after the end");
 
 	/* Query 0: ended with no decode, available and not ready (status 0) with its availability. */

@@ -7,6 +7,7 @@
 # /tmp/p3r, the check from /tmp/p3c; both are removed at the end.  OLD names the board's kept copy of its own
 # kernel; the default, q1825orig, is already there, so nothing new is written to /boot but the kernels put in.
 #   VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=... VF2_PLUG=AC276E432AE6 sh plan/ws322/tests/p003/run-vf2.sh OUT BUILD
+# SKIP_REGRESS=1 leaves the regression out and only puts BUILD's kernel in for the check.
 # BUILD is the tree's build of plan/ws291/tests/config-vf2-shot.mk with bin/nv12-board (build-board.sh BUILD).
 # OUT/summary.txt holds what is printed.  The password comes from the environment, never from this file.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -33,9 +34,17 @@ say "board before $(b "cksum /boot/boot0/vmunix /boot/boot0/vmunix.$old /etc/gro
 sed -e 's#^H=$(b .echo $HOME.)/p7$#H=/tmp/p3r#' -e 's#p7/#/tmp/p3r/#g' \
 	-e "s#'mkdir -p p7/bin p7/lib p7/run && chmod 700 p7/run'#'mkdir -p /tmp/p3r/bin /tmp/p3r/lib /tmp/p3r/run \&\& chmod 700 /tmp/p3r/run'#" \
 	plan/ws291/tests/vf2-regress.sh > "$out/vf2-regress-tmp.sh"
-KEEP=1 OLD=$old timeout 7000 sh "$out/vf2-regress-tmp.sh" "$out/regress" "$build" > "$out/regress.txt" 2>&1
-say "regress exit=$?"
-sed 's/^/regress: /' "$out/regress/summary.txt" >> "$summary"
+if [ "${SKIP_REGRESS:-0}" = 1 ]; then
+	# Only BUILD's kernel in (the regression ran before): the kept copy is read back as the own kernel.
+	mkdir -p "$out/regress"
+	bcp "$VF2_HOST:/boot/boot0/vmunix.$old" "$out/regress/board-vmunix" || { say "FAIL the board's kernel was not read back"; exit 1; }
+	timeout 900 sh plan/tools/vf2/run.sh "$build/vmunix" "$out/boot" > "$out/boot.txt" 2>&1
+	say "boot $(tail -3 "$out/boot.txt" | tr '\n' ' ')"
+else
+	KEEP=1 OLD=$old timeout 7000 sh "$out/vf2-regress-tmp.sh" "$out/regress" "$build" > "$out/regress.txt" 2>&1
+	say "regress exit=$?"
+	sed 's/^/regress: /' "$out/regress/summary.txt" >> "$summary"
+fi
 
 # 2. The NV12 check and vkimage on the same boot.
 H=/tmp/p3c
