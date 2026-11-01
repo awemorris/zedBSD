@@ -567,4 +567,4 @@
 | q1727 / q1727-i17 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 17 回目 | 100% までの自走。i16 は 3,118（89.80%）、次の候補は縦書きの grid の auto-flow・baseline の共有 | in-progress（2026-11-01 09:05 起動） |
 | q1821 / q1821-i03 | Sonnet（worktree s-ws335-p006、c27c65007） | [ws335-p006](ws335/phase006/phase.md) | WS335 は 1 担当。phase.md の結果の「次の手」から | in-progress（2026-11-01 09:05 起動） |
 | q1831 / q1831-i01 | Sonnet（worktree `/home/awe/zedBSD-worktrees/s-ws336-p006`・branch `agent/s-ws336-p006`） | [ws336-p006](ws336/phase006/phase.md) ssh-hostfile | 標準廉価実装手順の実装。WS336 は 1 担当。header・試験の道具は変えない | in-progress（2026-11-01 09:05 起動） |
-| q1832 / q1832-i01 | P2（RTX、BUG-374 の後） | [ws291](ws291/ws.md) p024 の G1: (b) push buffer を記録の時に組む形の設計の Phase（新しい Phase、設計と敵対的レビュー） | 2026-11-01 09:05 ユーザーの答え（(b) を設計から） | pending（予約） |
+| q1832 / q1832-i01 | P2（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p2-ws291g1`・branch `agent/p2-ws291g1`） | [ws291](ws291/ws.md) p024 の G1: (b) push buffer を記録の時に組む形の設計の Phase（新しい Phase、設計と敵対的レビュー） | 2026-11-01 09:05 ユーザーの答え（(b) を設計から） | in-progress（2026-11-01 09:09 起動、新しい Phase p026） |
