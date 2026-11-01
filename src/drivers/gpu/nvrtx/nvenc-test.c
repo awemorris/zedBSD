@@ -238,6 +238,9 @@ struct test_state {
 
 /* A choice that encodes a 640x480 picture instead (its chroma after 640 x 480 bytes of luma). */
 #define TEST_BIG			(1U << 20)
+
+/* A choice run on an admin channel (the channel is made again as one when it is not). */
+#define TEST_ADMIN			(1U << 21)
 #define TEST_BIG_CHROMA_AT		(640U * 480U)
 
 /* The 640x480 picture's surfaces (sizes less one, pitches 640) and slice (1200 macroblocks at QP 26). */
@@ -402,33 +405,77 @@ static const struct test_poke test_h265_setup[] = {
 
 
 /*
- * The sequence word with another chroma format (bits 17:16): monochrome,
- * 4:2:2 and 4:4:4, the rest as built (Main, level 3.0, frames only).
+ * The motion search control filled in where the builder leaves zeroes:
+ * quarter-pel refinement with refinement of the search candidates, the
+ * sub-pel and compensation filters 1, the spatial and zero-vector sources
+ * searched and refined over every point of the first pattern, the
+ * macroblock cache 16 wide, one full-search winner a partition for each
+ * size and list, one merge candidate, the hint order, the left hint delay
+ * 8.  Made from the 2024 layout of the interface's description compiled
+ * on the host with these fields set.
  */
-#define TEST_SPS_BASE			(77U | (30U << 8) | (1U << 28))
-
-static const struct test_poke test_mono[] = {
-	{ 100U, TEST_SPS_BASE },
-};
-
-static const struct test_poke test_422[] = {
-	{ 100U, TEST_SPS_BASE | (2U << 16) },
-};
-
-static const struct test_poke test_444[] = {
-	{ 100U, TEST_SPS_BASE | (3U << 16) },
+static const struct test_poke test_me_filled[] = {
+	{ 768U + 0U, 0x00904002U },
+	{ 768U + 12U, 0x38000000U },
+	{ 768U + 20U, 0xe0000000U },
+	{ 768U + 44U, 0xffffffffU },
+	{ 768U + 48U, 0xffffffffU },
+	{ 768U + 144U, 0x20000010U },
+	{ 768U + 148U, 0x00001249U },
+	{ 768U + 152U, 0x46880000U },
+	{ 768U + 156U, 0x00021208U },
 };
 
 /*
- * The choices tried, in order: monochrome, 4:2:2, 4:4:4 in the sequence
- * word.  A choice whose encode does not finish stops the channel, which is
- * made again for the next.
+ * The mode decision control filled in likewise: the builder's modes and
+ * partitions, the motion vector cost on, the bias multipliers 1, one SSD
+ * evaluation for each intra size, one transform search, the SSD lambda
+ * step 8, skip evaluated by SSD.
+ */
+static const struct test_poke test_md_filled[] = {
+	{ 1024U + 4U, 0x03fc01ffU },
+	{ 1024U + 8U, 0x0800000fU },
+	{ 1024U + 36U, 0x00010001U },
+	{ 1024U + 52U, 0x141a0000U },
+	{ 1024U + 56U, 0x88880000U },
+	{ 1024U + 60U, 0x00000808U },
+};
+
+/* Both filled. */
+static const struct test_poke test_me_md_filled[] = {
+	{ 768U + 0U, 0x00904002U },
+	{ 768U + 12U, 0x38000000U },
+	{ 768U + 20U, 0xe0000000U },
+	{ 768U + 44U, 0xffffffffU },
+	{ 768U + 48U, 0xffffffffU },
+	{ 768U + 144U, 0x20000010U },
+	{ 768U + 148U, 0x00001249U },
+	{ 768U + 152U, 0x46880000U },
+	{ 768U + 156U, 0x00021208U },
+	{ 1024U + 4U, 0x03fc01ffU },
+	{ 1024U + 8U, 0x0800000fU },
+	{ 1024U + 36U, 0x00010001U },
+	{ 1024U + 52U, 0x141a0000U },
+	{ 1024U + 56U, 0x88880000U },
+	{ 1024U + 60U, 0x00000808U },
+};
+
+/*
+ * The choices tried, in order: the setup as built on the user channel;
+ * then on an admin channel the setup as built, the motion search and mode
+ * decision filled in, H.265, the 640x480 picture, the motion search alone
+ * filled in, the mode decision alone filled in.  A choice whose
+ * encode does not finish stops the channel, which is made again for the
+ * next.
  */
 static const struct test_attempt test_attempts[] = {
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_mono, TEST_POKES(test_mono) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_422, TEST_POKES(test_422) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_444, TEST_POKES(test_444) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_BIG, 0U, test_big, TEST_POKES(test_big) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_ADMIN, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_ADMIN, 0U, test_me_md_filled, TEST_POKES(test_me_md_filled) },
+	{ 0U, 0U, 0U, TEST_CONTROL_HEVC, ~TEST_CONTROL_CODEC_MASK, TEST_ADMIN | TEST_H265, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_ADMIN | TEST_BIG, 0U, test_big, TEST_POKES(test_big) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_ADMIN, 0U, test_me_filled, TEST_POKES(test_me_filled) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_ADMIN, 0U, test_md_filled, TEST_POKES(test_md_filled) },
 };
 
 static const uint32_t test_buffer_bytes[TEST_BUFFERS] = {
@@ -474,6 +521,8 @@ nvrtx_nvenc_test(
 	bool clean;
 	bool stopped;
 	bool ready;
+	int admin;
+	int current;
 	int error;
 
 	/* Marks the start of the test in the stage log. */
@@ -518,6 +567,18 @@ nvrtx_nvenc_test(
 	for (number = 0U;
 	     error == 0 && number < sizeof(test_attempts) / sizeof(test_attempts[0]);
 	     number++) {
+		/* The channel of the privilege the choice asks for. */
+		admin = 0;
+		if ((test_attempts[number].flags & TEST_ADMIN) != 0U)
+			admin = 1;
+		current = nvrtx_nvenc_privileged(gpu);
+		if (admin != current) {
+			before = nvrtx_nvenc_notices(gpu);
+			error = nvrtx_nvenc_restart(gpu, admin);
+			if (error != 0)
+				break;
+		}
+
 		error = test_attempt(gpu, state, number + 1U, &test_attempts[number], &clean);
 		if (clean)
 			break;
@@ -527,7 +588,7 @@ nvrtx_nvenc_test(
 			stopped = true;
 			nvrtx_nvenc_report_notices(gpu, before, "nvenc-test");
 			before = nvrtx_nvenc_notices(gpu);
-			error = nvrtx_nvenc_restart(gpu);
+			error = nvrtx_nvenc_restart(gpu, nvrtx_nvenc_privileged(gpu));
 		}
 	}
 
