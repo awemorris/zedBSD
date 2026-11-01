@@ -18,10 +18,13 @@
 
 #include "layout/layout.h"
 
+#include <string.h>
+
 static void bounds_walk(const struct layout_box *box, const struct dom_node *node, struct layout_rect *rect, int *found, int depth);
 static void bounds_lines(const struct layout_box *box, const struct dom_node *node, struct layout_rect *rect, int *found);
 static void bounds_add(struct layout_rect *rect, int *found, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 static const struct layout_box *bounds_find(const struct layout_box *box, const struct dom_node *node, int depth);
+static void bounds_line_walk(const struct layout_box *box, const struct dom_node *node, struct layout_rect *rects, size_t max, size_t *count, int depth);
 
 /*
  * Finds a node's rectangle in layout units from the document's top left.
@@ -291,4 +294,91 @@ bounds_add(
 
 	/* Succeeded: the positive union includes this native rectangle. */
 	return;
+}
+
+/*
+ * Lists the rectangles an inline node takes: one for each line, the union of the fragments of the node and of
+ * its descendants on that line (what getClientRects reports for an inline element).  Returns how many were
+ * written to rects (at most max).
+ */
+size_t
+layout_node_line_rects(
+	const struct layout_tree *tree,
+	const struct dom_node *node,
+	struct layout_rect *rects,
+	size_t max)
+{
+	size_t count;
+
+	/* The whole box tree, in order. */
+	count = 0;
+	if (tree->root != NULL)
+		bounds_line_walk(tree->root, node, rects, max, &count, 0);
+
+	/* Succeeded: the rectangles of the lines. */
+	return count;
+}
+
+/* Adds the per-line rectangles of a block's lines, and of the blocks below it. */
+static void
+bounds_line_walk(
+	const struct layout_box *box,
+	const struct dom_node *node,
+	struct layout_rect *rects,
+	size_t max,
+	size_t *count,
+	int depth)
+{
+	const struct layout_box *child;
+	const struct layout_line *line;
+	const struct layout_fragment *fragment;
+	struct layout_rect rect;
+	layout_unit left;
+	layout_unit top;
+	layout_unit x;
+	layout_unit y;
+	size_t index;
+	size_t item;
+	int found;
+	int inside;
+
+	/* Stops at the depth the layout stops at. */
+	if (depth > LAYOUT_DEPTH_MAX)
+		return;
+
+	/* Each line of a block of lines gives the union of its fragments of the node. */
+	if (box->children_inline) {
+		left = box->x + box->border[CSS_LEFT] + box->padding[CSS_LEFT];
+		top = box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
+		for (index = 0; index < box->line_count; index++) {
+			line = &box->lines[index];
+			found = 0;
+			memset(&rect, 0, sizeof(rect));
+			for (item = 0; item < line->fragment_count; item++) {
+				fragment = &line->fragments[item];
+				inside = 0;
+				if (fragment->box != NULL && fragment->box->node != NULL)
+					inside = dom_is_inclusive_ancestor(node, fragment->box->node);
+				if (!inside)
+					continue;
+				if (box->vertical_inline) {
+					x = left + line->y;
+					y = top + line->left + fragment->x;
+					bounds_add(&rect, &found, x, y, line->height, fragment->width);
+					continue;
+				}
+				x = left + line->left + fragment->x;
+				y = top + line->y + line->baseline + fragment->shift - fragment->ascent;
+				bounds_add(&rect, &found, x, y, fragment->width, fragment->ascent + fragment->descent);
+			}
+			if (found != 0 && *count < max) {
+				rects[*count] = rect;
+				(*count)++;
+			}
+		}
+	}
+
+	/* The blocks below, which may hold more lines of the node. */
+	for (child = box->first_child; child != NULL; child = child->next)
+		bounds_line_walk(child, node, rects, max, count, depth + 1);
 }

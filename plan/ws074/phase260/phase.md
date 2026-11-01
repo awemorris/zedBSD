@@ -954,3 +954,9 @@ Origin: 2026-10-27 ユーザーの指示。
   - navigate-from-initial-about-blank 系は iframe の initial about:blank の load event が同期でない事（page/frame-load.c の task）が原因。
 - 道具: `plan/ws074/tests/harness-delta.sh GAP.json NAME`（harness だけ 1 分で測って gap の差を出す）、`measure-snapshot.sh` に `HOSTOUT`・`OUTROOT`、`st1.sh` に `BROWSER`。
 - 一時物: build/tmp/p8out/（dev149・dev150・t1・t2・acid150）、build/tmp/p8/ref149*・sone149*・ss-vt・dbg、build/ws074-host2、/tmp/wpt-one.*、/tmp/vtdbg2.log、Acid の runner の一時 html 3 個（上の出力の path）。一覧は build/tmp/p8/delete-list-i16.txt。
+
+### q1727-i17 の結果（2026-11-01、P8）
+
+- 基点 main 7b32ed291 を取り込み、dev151 = 3,118（基準どおり）。最終 dev152 = 3,125 / 3,472（90.01%、gap 347: harness 165 / static 124 / scripted 56 / crash 2）、後退 0。出力は build/tmp/p8out/dev152。直した物: 初期 about:blank の base URL・push の NotSupportedError・currententrychange 抑止・先に移動した frame の blank load 省略（navigation-api +5）、PerformancePaintTiming（+1）、view transition の :only-child（+1）、inline 要素の getClientRects を行ごと（単独では ID 増なし）。
+- 再開点（次の候補）: (1) 親からの iframe src 変更を子の Navigation に渡す（entries-after-blank 系、traverseTo 複数 frame）、(2) 縦書き grid の orthogonal item を logical domain で扱う（layout/logical.c の物理座標の規則を外す実験は static 後退 4・増 0、baseline の共有が別に要る）、(3) multicol は layout に実装が無い（getclientrects-001 に要る）、(4) SVG は属性のみで CSS（stylesheet）の fill・width が効かない、(5) 調べて直さなかった: storage-access idlharness（runner だけ失敗、mini 試験では通る）。
+- 一時物: build/tmp/p8out/（dev151・dev152・t1〜t4・hb*.log）、build/tmp/p8/（t151・mini・h1out・st1・bin・prelude.*.js）、build/ws074-host2。

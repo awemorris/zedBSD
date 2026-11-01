@@ -139,6 +139,51 @@ page_node_box(
 }
 
 /*
+ * Lists the rectangles of an inline node's lines for bind_host.node_rects.
+ * Reports 0 for a node whose one box is its rectangle, or in a child Document.
+ */
+int
+page_node_rects(
+	void *context,
+	struct dom_node *node,
+	struct bind_rect *rects,
+	size_t max,
+	size_t *count)
+{
+	struct page *page;
+	struct layout_rect lines[64];
+	const struct layout_box *first;
+	size_t found;
+	size_t index;
+
+	/* Only the primary document's inline content is listed by line. */
+	page = context;
+	*count = 0;
+	if (node->document != page->document || !geometry_layout(page))
+		return 0;
+	first = geometry_first_box(page, node);
+	if (first == NULL || geometry_own_place(first))
+		return 0;
+	if (max > sizeof(lines) / sizeof(lines[0]))
+		max = sizeof(lines) / sizeof(lines[0]);
+	found = layout_node_line_rects(&page->layout, node, lines, max);
+	if (found == 0)
+		return 0;
+
+	/* The rectangles in pixels. */
+	for (index = 0; index < found; index++) {
+		rects[index].x = layout_to_px(lines[index].x);
+		rects[index].y = layout_to_px(lines[index].y);
+		rects[index].width = layout_to_px(lines[index].width);
+		rects[index].height = layout_to_px(lines[index].height);
+	}
+	*count = found;
+
+	/* Succeeded: one rectangle for each line. */
+	return 1;
+}
+
+/*
  * Copies a primary Grid's final used tracks into caller-owned native storage.
  * No borrowed arena pointer escapes the query or a later layout generation.
  */

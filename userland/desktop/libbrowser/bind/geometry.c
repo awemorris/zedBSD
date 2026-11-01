@@ -257,8 +257,11 @@ bind_get_client_rects(
 	struct vm_object *array;
 	struct bind_box box;
 	vm_value rect;
+	struct bind_rect parts[64];
 	double scroll_x;
 	double scroll_y;
+	size_t lines;
+	size_t index;
 	int found;
 	int status;
 
@@ -281,8 +284,25 @@ bind_get_client_rects(
 		return 0;
 	}
 
-	/* The rectangle in the viewport. */
+	/* An inline element lists one rectangle for each line it is on. */
 	geometry_scroll(window, &scroll_x, &scroll_y);
+	lines = 0;
+	if (window->host.node_rects != NULL &&
+	    window->host.node_rects(window->host.context, &element->node, parts, sizeof(parts) / sizeof(parts[0]), &lines) &&
+	    lines > 1U) {
+		for (index = 0; index < lines; index++) {
+			status = geometry_rect_create(window, parts[index].x - scroll_x, parts[index].y - scroll_y, parts[index].width, parts[index].height, &rect);
+			if (status != 0)
+				return status;
+			status = vm_object_define(realm->heap, array, vm_value_int32((int32_t)index), rect, VM_PROPERTY_DEFAULT);
+			if (status != 0)
+				return status;
+		}
+		*result = vm_value_cell(array);
+		return 0;
+	}
+
+	/* The rectangle in the viewport. */
 	status = geometry_rect_create(window, box.x - scroll_x, box.y - scroll_y, box.width, box.height, &rect);
 	if (status != 0)
 		return status;
