@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の関門: I・P の絵の encode（q1884、上限なし）。p009a: NVENC の channel が開き、追加の firmware 不要 | p010 encode の共通の executor |
 | P2 | [WS322](ws322/ws.md) p007 | VF2 の VPU を Vulkan Video に | 速さと頑丈さ（timeout の立て直し・seek・1080p60、q1896）。p004: H.264 decode が VF2 で ffmpeg と一致、Video Player の GPU の道で 1080p30（画面: build/review/ws322-p004-vf2-play.png） | p005〜p006 H.265 decode（WS324 の解析の後） |
-| P3 | — | Pi 5 の作業 | 返却（02:20）。BUG-393 fixed（Pi 5 の実機で確認） | 次を待つ |
+| P3 | （q1898） | Pi 5 の desktop の動画 | host の UVC capture で Pi 5 の desktop の操作を 5〜10 秒の動画に撮る。準備の build 中、Pi 5 は P7 の計測の後 | — |
 | P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
 | P5 | [WS334](ws334/ws.md) p033 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 後半の Windows の口（TSF・drag と drop・touchpad など、頁に暗い mode、q1886）。p032: Wine で 15 項 PASS（https・cookie・localStorage・clipboard・dpi） | p035 規約の見直し |
 | P6 | [WS335](ws335/ws.md) p015 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | OS の層（POSIX と Windows、q1897）。p014 ML-KEM-768 は cleared | p021 誤りの queue と RAND_bytes |

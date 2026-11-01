@@ -30,3 +30,4 @@
 | Sonnet | phase-runner-low | ws335 p028 (q1893-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p028` / `agent/s-ws335-p028` | in-progress（2026-11-02 01:41 起動） | — |
 
 | Sonnet | phase-runner-low | ws335 p017 (q1895-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p017` / `agent/s-ws335-p017` | in-progress（2026-11-02 01:47 起動） | — |
+| P3 | phase-runner-high | Pi 5 の desktop の動画 (q1898-i01) | `/home/awe/zedBSD-worktrees/p3-pi5rec` / `agent/p3-pi5rec` | in-progress（2026-11-02 02:33、Pi 5 は P7 の計測の後） | — |
