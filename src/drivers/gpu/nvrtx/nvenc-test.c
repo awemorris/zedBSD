@@ -273,24 +273,135 @@ struct test_state {
 #define TEST_UNMAP_COLOC		(1U << 17)
 #define TEST_UNMAP_RC			(1U << 18)
 
+/* A choice that encodes H.265 instead (the setup below, application 3, no co-located output). */
+#define TEST_H265			(1U << 19)
+
+/*
+ * The application number of H.265, and the control parameters' codec
+ * numbers a choice tries for it (the decoder's HEVC number 7, the
+ * application's 3).
+ *
+ * Values referenced: NVIDIA open-gpu-doc classes/video/clc5b7.h
+ * (NVC5B7_SET_APPLICATION_ID_ID_NVENC_H265) and clc5b0.h (the decoder's
+ * codec type HEVC, which SetControlParams' description says the encoder
+ * shares).
+ */
+#define TEST_APPLICATION_H265		3U
+#define TEST_CONTROL_HEVC		7U
+#define TEST_CONTROL_CODEC_MASK		0xfU
+
+/* The H.265 setup's bytes: 2048 cleared before its words are written. */
+#define TEST_H265_SETUP_BYTES		0x800U
+
+/*
+ * The H.265 IDR picture's setup, word by word (byte offset, value), the
+ * words that are not zero: the magic word; the three surfaces as in H.264
+ * (256x128, pitch 256, 16x16 tiles); the sequence (4:2:0, CU 8 to 32, TU
+ * 4 to 32, transform depth 1 for inter and intra); the rate control (QP 26
+ * for every type, maximum 51, no intra period); the picture control (both
+ * lists empty, the residual cap and the buffers' sizes 64 KiB, the
+ * controls at 1024, 1280, 1536 and 1792, IDR, a reference, static slices,
+ * ceil(log2(32 CTBs)) 5, NAL type 19 (IDR_W_RADL) with temporal id 0); the
+ * slice (32 CTBs at QP 26, an I slice, QP up to 51, all intra); the motion
+ * search as in H.264; the mode decision (every intra mode of 4x4 to 32x32,
+ * the 2Nx2N, 2NxN and Nx2N partitions of 16x16 and 32x32 CUs, intra 4x4 to
+ * 32x32, every chroma mode, TU 4x4 to 32x32, skip, every intra size
+ * searched before the decision).  The words were made from the 2024
+ * layout of the interface's description compiled on the host with these
+ * fields set.
+ *
+ * Values referenced: NVIDIA open-gpu-doc classes/video/nvenc_drv.h, commit
+ * 9fdf5c4 (nvenc_h265_drv_pic_setup_s, nvenc_h265_sps_data_s,
+ * nvenc_h265_rc_s, nvenc_h265_pic_control_s, nvenc_h265_slice_control_s,
+ * nvenc_h265_md_control_s, nvenc_h264_me_control_s).
+ */
+static const struct test_poke test_h265_setup[] = {
+	{    0U, 0xc4b70006U },
+	{    4U, 0x007f00ffU },
+	{    8U, 0x01000100U },
+	{   32U, 0x00000080U },
+	{   36U, 0x007f00ffU },
+	{   40U, 0x01000100U },
+	{   64U, 0x00000080U },
+	{   68U, 0x007f00ffU },
+	{   72U, 0x01000100U },
+	{   96U, 0x00000080U },
+	{  100U, 0x00056401U },
+	{  116U, 0x1a1a1a00U },
+	{  120U, 0x33000000U },
+	{  124U, 0x00003333U },
+	{  164U, 0xffffffffU },
+	{  212U, 0xffffffffU },
+	{  216U, 0xffffffffU },
+	{  220U, 0xffffffffU },
+	{  224U, 0xffffffffU },
+	{  384U, 0x00010000U },
+	{  396U, 0x00000400U },
+	{  400U, 0x00000500U },
+	{  404U, 0x00000600U },
+	{  408U, 0x00000700U },
+	{  412U, 0x00010000U },
+	{  416U, 0x00010000U },
+	{  424U, 0x0000050fU },
+	{  444U, 0x00101300U },
+	{ 1024U, 0x00d00020U },
+	{ 1028U, 0x04cc0004U },
+	{ 1280U, 0x00000002U },
+	{ 1292U, 0x38000000U },
+	{ 1300U, 0xe0000000U },
+	{ 1324U, 0xffffffffU },
+	{ 1328U, 0xffffffffU },
+	{ 1432U, 0x46880000U },
+	{ 1540U, 0xffffffffU },
+	{ 1544U, 0xffffffffU },
+	{ 1548U, 0xffffffffU },
+	{ 1552U, 0xffffffffU },
+	{ 1560U, 0x3fffffffU },
+	{ 1564U, 0x0f000707U },
+	{ 1568U, 0x0001781fU },
+	{ 1612U, 0x00780000U },
+};
+
+
 /* The number of words in a list of pokes. */
 #define TEST_POKES(list)		((uint32_t)(sizeof(list) / sizeof((list)[0])))
 
 /*
- * The choices tried, in order, each with one buffer at an unmapped
- * address: the input's chroma, the reconstruction's luma and chroma, the
- * history, the bitstream, the co-located output, the rate control's
- * state.  A choice whose encode does not finish stops the channel, which
- * is made again for the next.
+ * The picture control's buffer sizes (the history's at 412 of the setup,
+ * the bitstream's at 416, the cap on the bytes before the residuals are
+ * dropped at 372): the history as the description's formula for 256
+ * pixels with 224-byte blocks ((256 / 16 + 16) * 224 = 7168); the
+ * bitstream's 32 KiB; no cap; all three.
+ */
+static const struct test_poke test_history_size[] = {
+	{ 412U, 7168U },
+};
+
+static const struct test_poke test_bitstream_size[] = {
+	{ 416U, 0x8000U },
+};
+
+static const struct test_poke test_no_cap[] = {
+	{ 372U, 0U },
+};
+
+static const struct test_poke test_sizes[] = {
+	{ 412U, 7168U },
+	{ 416U, 0x8000U },
+	{ 372U, 0U },
+};
+
+/*
+ * The choices tried, in order: the history's size by the formula; a
+ * smaller bitstream size; no residual cap; all three.  A choice whose
+ * encode does not finish stops the channel, which is made again for the
+ * next.
  */
 static const struct test_attempt test_attempts[] = {
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_INPUT_CHROMA, 0U, NULL, 0U },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_OUTPUT_LUMA, 0U, NULL, 0U },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_OUTPUT_CHROMA, 0U, NULL, 0U },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_HISTORY, 0U, NULL, 0U },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_BITSTREAM, 0U, NULL, 0U },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_COLOC, 0U, NULL, 0U },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_RC, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_history_size, TEST_POKES(test_history_size) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_bitstream_size, TEST_POKES(test_bitstream_size) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_no_cap, TEST_POKES(test_no_cap) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_sizes, TEST_POKES(test_sizes) },
 };
 
 static const uint32_t test_buffer_bytes[TEST_BUFFERS] = {
@@ -730,6 +841,13 @@ test_encode(
 	work = test_cpu(state, TEST_WORK);
 	nvrtx_nvenc_h264_setup(work + TEST_SETUP_AT + index * TEST_SETUP_STRIDE, magic, &picture);
 
+	/* An H.265 choice's setup instead: cleared, then its words. */
+	if ((attempt->flags & TEST_H265) != 0U) {
+		kern_memset(work + TEST_SETUP_AT + index * TEST_SETUP_STRIDE, 0, TEST_H265_SETUP_BYTES);
+		for (poke = 0U; poke < TEST_POKES(test_h265_setup); poke++)
+			nvrtx_put32(work + TEST_SETUP_AT + index * TEST_SETUP_STRIDE, test_h265_setup[poke].at, test_h265_setup[poke].value);
+	}
+
 	/* The choice's own words over the builder's. */
 	for (poke = 0U; poke < attempt->poke_count; poke++)
 		nvrtx_put32(work + TEST_SETUP_AT + index * TEST_SETUP_STRIDE, attempt->pokes[poke].at, attempt->pokes[poke].value);
@@ -757,7 +875,7 @@ test_encode(
 		frame.reference_chroma = test_va(state, TEST_OUTPUT_I) + TEST_CHROMA_AT;
 	}
 	frame.serial = (number - 1U) * TEST_PICTURES + index;
-	frame.control = (NVRTX_NVENC_CONTROL_H264 | NVRTX_NVENC_CONTROL_OUT_PIC | attempt->control_extra) & attempt->control_mask;
+	frame.control = ((NVRTX_NVENC_CONTROL_H264 | NVRTX_NVENC_CONTROL_OUT_PIC) & attempt->control_mask) | attempt->control_extra;
 
 	/* The choice's way of giving the buffers. */
 	if ((attempt->flags & TEST_NO_OPTIONAL) != 0U) {
@@ -765,6 +883,10 @@ test_encode(
 		frame.coloc_out = 0U;
 	}
 	frame.watchdog = attempt->watchdog;
+	if ((attempt->flags & TEST_H265) != 0U) {
+		frame.application = TEST_APPLICATION_H265;
+		frame.coloc_out = 0U;
+	}
 
 	if ((attempt->flags & TEST_NO_BITSTREAM) != 0U)
 		frame.bitstream = 0U;

@@ -175,9 +175,11 @@ struct nvrtx_nvenc_h264_picture {
  * word and watchdog the engine's watchdog timer (0: the method is not
  * sent).  extra_count further methods (extra_method, with its one word
  * extra_data) go just before the start, for a diagnostic to try methods
- * the encode does not otherwise send.
+ * the encode does not otherwise send.  application is the codec's
+ * application number (0 for H.264).
  */
 struct nvrtx_nvenc_frame {
+	uint32_t application;
 	uint64_t rc_data;
 	uint64_t setup;
 	uint64_t status;

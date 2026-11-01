@@ -459,9 +459,13 @@ nvrtx_nvenc_push_encode(
 	uint32_t index;
 	size_t at;
 
-	/* The codec. */
+	/* The codec: H.264 unless the frame names another. */
 	at = records_method(push, 0U, RECORDS_APPLICATION_ID, 1U);
-	nvrtx_put32(push, at, RECORDS_APPLICATION_H264);
+	if (frame->application != 0U) {
+		nvrtx_put32(push, at, frame->application);
+	} else {
+		nvrtx_put32(push, at, RECORDS_APPLICATION_H264);
+	}
 	at += 4U;
 
 	/* The engine's watchdog, when the frame sets one. */
