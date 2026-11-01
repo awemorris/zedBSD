@@ -10,7 +10,7 @@
 | P3 | phase-runner-high | ws291 p021 Pi 5 の model の 50 fps (q1840-i02) | `/home/awe/zedBSD-worktrees/p3-ws291p021` / `agent/p3-ws291p021` | 返却（2026-11-01 21:17、cleared） | d32bcb9f5（merge 9b865b038） |
 | P5 | phase-runner-high | ws334 p023 instance と API v4 (q1847-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 20:57 起動） | 5f1b29046（merge e1334ddfc） |
 | P6 | phase-runner-low | ws335 p007 整数と Montgomery (q1851-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 21:33 起動） | 556988325（merge 72bb7908a） |
-| P7 | phase-runner-high | VF2 の desktop の計測 (q1848-i01) | `/home/awe/zedBSD-worktrees/p7-vf2desk` / `agent/p7-vf2desk` | in-progress（2026-11-01 21:03 起動、VF2） | — |
+| P7 | phase-runner-high | VF2 の desktop の計測 (q1848-i01) | `/home/awe/zedBSD-worktrees/p7-vf2desk` / `agent/p7-vf2desk` | 返却（2026-11-01 21:35） | — |
 | P4 | phase-runner-high | BUG-387 の残り (q1850-i01) | `/home/awe/zedBSD-worktrees/p4-bug387` / `agent/p4-bug387` | 返却（2026-11-01 21:28） | 42ae7d081（merge b29f3a5ae） |
 
 - 2026-11-01 20:20 の割り振り（ユーザーの指示）: P1 は RTX、P2 は VF2、P3 は Pi 5 の作業（どれも WS291 の描画の速さ、Q1 が選んだ）。Bug の修正は P4。

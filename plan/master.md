@@ -32,7 +32,7 @@
 | P4 | — | 返却。[BUG-387](bugs/BUG-387.md) は fixed、CI の Pi 5 の graphical login も 21:28 に確かめた（main b29f3a5ae）。次の Bug の割当を待つ |
 | P5 | q1847 `p5-ws334b` | [WS334](ws334/ws.md) p023: Windows 版のブラウザ、instance と API v4（p025 は 20:57 に cleared、次は p026） |
 | P6 | q1851 `p6-ws335b` | [WS335](ws335/ws.md) p007: 固定幅の整数と Montgomery の算術（p004 AES・p005 AES-GCM は cleared） |
-| P7 | q1848 `p7-vf2desk` | VF2 の desktop の描画の計測だけ（VF2 が P4 から戻った後） |
+| P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
 - 起動しない pending: q1836（WS336 p009 ssh-auth）。q1837（WS334 p025）は P5 の q1843 へ、q1835（WS335 p004）は P6 の q1844 へ。
