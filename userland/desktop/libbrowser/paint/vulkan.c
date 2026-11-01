@@ -21,6 +21,8 @@
 #include "paint/gpu.h"
 #include "paint/shaders.h"
 
+#include "base/os-system.h"
+
 #include <errno.h>
 #include <math.h>
 #include <stdlib.h>
@@ -1854,11 +1856,21 @@ gpu_submit_commands(
 	return VK_SUCCESS;
 }
 
+#ifdef _WIN32
+
+/* The system's Vulkan loader, which a program imports late: the first Vulkan call ends the process when it is missing. */
+static const char *const offscreen_loader_names[] = { "vulkan-1.dll", NULL };
+
+#endif
+
 /* Makes an instance without surfaces, and a device with one queue of the first family of any device that draws. */
 static VkResult
 offscreen_device(
 	struct paint_offscreen *offscreen)
 {
+#ifdef _WIN32
+	struct wb_os_library *loader;
+#endif
 	VkApplicationInfo application;
 	VkInstanceCreateInfo instance_info;
 	VkPhysicalDevice devices[8];
@@ -1871,6 +1883,16 @@ offscreen_device(
 	uint32_t family;
 	float priority;
 	VkResult error;
+
+#ifdef _WIN32
+	/* A system without the loader has no Vulkan: it fails here, before the first Vulkan call. */
+	offscreen->operation = "loading vulkan-1.dll";
+	if (wb_os_library_open(offscreen_loader_names, &loader) != 0)
+		return VK_ERROR_INITIALIZATION_FAILED;
+
+	/* Only the check: the late import loads the loader again. */
+	wb_os_library_close(loader);
+#endif
 
 	/* The instance, without any surface extension. */
 	memset(&application, 0, sizeof(application));
