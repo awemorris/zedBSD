@@ -14,6 +14,7 @@
 
 #include "bind/internal.h"
 #include "html/html.h"
+#include "base/os-error.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -490,7 +491,7 @@ bind_run_script_source(
 	/* Any other failure (the engine reached a limit it cannot report as an exception) ends the script; say so. */
 	if (status != 0) {
 		wb_buffer_init(&line);
-		reason = strerror(status);
+		reason = wb_os_error_text(status);
 		format_error = wb_buffer_printf(&line, "Uncaught InternalError: the script stopped (%s) (%s)", reason, name);
 		if (format_error == 0)
 			bind_console(window, BIND_CONSOLE_ERROR, wb_buffer_string(&line));
@@ -515,7 +516,7 @@ window_report_stop(
 	struct wb_buffer line;
 
 	wb_buffer_init(&line);
-	if (wb_buffer_printf(&line, "Uncaught InternalError: a microtask stopped (%s)", strerror(status)) == 0)
+	if (wb_buffer_printf(&line, "Uncaught InternalError: a microtask stopped (%s)", wb_os_error_text(status)) == 0)
 		bind_console(window, BIND_CONSOLE_ERROR, wb_buffer_string(&line));
 	wb_buffer_release(&line);
 }

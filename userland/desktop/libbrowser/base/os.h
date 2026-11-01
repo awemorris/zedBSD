@@ -10,10 +10,11 @@
  * asks of the system beyond ISO C and the threads of <pthread.h>.
  *
  * The layer is private to libbrowser.  Its groups each have a header of
- * their own (os-system.h, os-file.h, os-net.h, os-time.h) and two
- * implementations, one for the POSIX systems (zedBSD, Linux, FreeBSD:
- * os-*-posix.c) and one for Windows (os-*-win32.c).  The build compiles
- * exactly one of each pair, chosen by the target, never both; no other
+ * their own (os-system.h, os-file.h, os-net.h, os-time.h; os-error.h gives
+ * the text of an errno value and has one ISO C implementation for every
+ * system) and two implementations, one for the POSIX systems (zedBSD,
+ * Linux, FreeBSD: os-*-posix.c) and one for Windows (os-*-win32.c).  The
+ * build compiles exactly one of each pair, chosen by the target, never both; no other
  * file of the engine tests the system with #ifdef or includes a system
  * header the layer covers.
  *

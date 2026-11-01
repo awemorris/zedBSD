@@ -15,6 +15,7 @@ LIBBROWSER_OS_SOURCES := $(LIBBROWSER_DIR)/base/os-system-posix.c \
 # Its network (sockets, the waits and the wakers), which only the engine uses.
 LIBBROWSER_OS_NET_SOURCES := $(LIBBROWSER_DIR)/base/os-net-posix.c
 LIBBROWSER_SCRIPT_SOURCES := $(LIBBROWSER_OS_SOURCES) \
+	$(LIBBROWSER_DIR)/base/os-error.c \
 	$(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/base/buffer.c \
 	$(LIBBROWSER_DIR)/base/vector.c \
