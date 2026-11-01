@@ -38,7 +38,7 @@ Status: in-progress（2026-11-02 P1、q1864-i01。段 1 の設計と design-revi
 - **Q-A**（推し A）: 解析の header を WS330（H.265 の software の decoder の WS）の proposed から採って足す（design D1）。A: 採る（Q330-2 の A「解析は 1 つ」に沿い、WS330 の Sonnet の 7 Phase が確かめだけになる）。B: Vulkan 用に別の解析を作る（同じ仕様の節を 2 回実装し 2 回照合）。
 - **Q-B**（推し A）: Phase を design §9 の形にする（Sonnet 6 つ p006b〜g、適合 p006h、probe p006i）。ws.md の案の p006b〜d・p006e の名前を置き換え、p007 の依存を p006i にする。A: 6 つ（1 起動に header 1〜2 の手順の規則に合う。std と stream は review で 1 回に大きすぎると指摘され分けた）。B: 3 つに詰める（1 起動に 4 header 以上、WS326 の教訓に反する）。
 - **Q-C**（推し A）: 段 2（header を source に置き骨格と道具を作り基点を決める）を P1 が p006a の 2 回目の起動で行う。A: そうする。B: 別の番号の Phase にする。
-- **Q-D**（推し A）: WS330 の適合の一覧と取得の script（`plan/ws330/tests/conformance/`）を共有の `plan/tools/h265/conformance/` へ移し plan/tools.md に登録、cache `/home/awe/zedBSD-claude1/build/sources/h265-conformance/` を作る（Q1 の作業）。A: 移す。B: WS330 の path をそのまま使う（WS330 の完了で消える）。
+- **Q-D**（推し A）: WS330 の適合の一覧と取得の script（`plan/tools/h265/conformance/`）を共有の `plan/tools/h265/conformance/` へ移し plan/tools.md に登録、cache `/home/awe/zedBSD-claude1/build/sources/h265-conformance/` を作る（Q1 の作業）。A: 移す。B: WS330 の path をそのまま使う（WS330 の完了で消える）。
 - **Q-E**（推し A）: Vulkan の `NumDeltaPocsOfRefRpsIdx` の値の約束（design D8: slice header が予測の set を持つ時の NumDeltaPocs[RefRpsIdx]、他は 0）。Vulkan の本文は「`short_term_ref_pic_set_sps_flag` が 1 の時」と書くが、その時 RefRpsIdx は定まらず、値の用途（hardware が slice header の予測の set を読む）とも合わない。使い手は zedBSD の driver（nvrtx・Wave511）だけ。A: 約束を採る。B: 本文の字句どおり。
 
 ## 他の WS の記録（Q1 へ、design §10）

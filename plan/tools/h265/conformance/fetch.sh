@@ -1,9 +1,9 @@
 #!/bin/sh
-# Fetches the HEVC conformance bitstreams of plan/ws330/tests/conformance/list.txt (ITU-T H.265.1) with
+# Fetches the HEVC conformance bitstreams of plan/tools/h265/conformance/list.txt (ITU-T H.265.1) with
 # parameter-free GETs from the ITU's public FTP mirror, and checks each zip against the SHA-256 recorded
-# in plan/ws330/tests/conformance/sha256.txt (a zip with no line there is recorded on its first fetch;
+# in plan/tools/h265/conformance/sha256.txt (a zip with no line there is recorded on its first fetch;
 # the caller commits the new lines).  A zip already in the cache with the recorded hash is not fetched again.
-#   sh plan/ws330/tests/conformance/fetch.sh [<name>...]     (default: every line of list.txt)
+#   sh plan/tools/h265/conformance/fetch.sh [<name>...]     (default: every line of list.txt)
 # The cache is $H265SW_CONFORMANCE_DIR (default build/tmp/ws330-conformance; the shared place is
 # /home/awe/zedBSD-claude1/build/sources/h265-conformance, which Q1 makes).  The zips are not unpacked:
 # the tools read the bitstream and the MD5 file with `unzip -p`, so the disk holds only the zips (129 MB).
@@ -13,8 +13,8 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../../.."
-list=plan/ws330/tests/conformance/list.txt
-hashes=plan/ws330/tests/conformance/sha256.txt
+list=plan/tools/h265/conformance/list.txt
+hashes=plan/tools/h265/conformance/sha256.txt
 cache=${H265SW_CONFORMANCE_DIR:-build/tmp/ws330-conformance}
 base=https://www.itu.int/wftp3/av-arch/jctvc-site/bitstream_exchange/draft_conformance/HEVC_v1
 mkdir -p "$cache"

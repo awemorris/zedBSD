@@ -63,6 +63,10 @@
 
 - libvulkan の H.265・encode の転送、capset の bit、命令の番号は WS324 が持つ（Q324-3）。p005・p010 の libvulkan の部分は WS324 の物を使い、capset の bit は 2 = H.265 decode、3 = H.264 encode、4 = H.265 encode に揃える。
 
+## WS324 の H.265 の解析（2026-11-02 00:10 Q1）
+
+- p006（H.265 decode）は WS324 の h265-std.h の約束（StdVideoH265 の埋め方）を入力にする。
+
 ## Resume point
 
 - 2026-11-01 23:42 P2（q1863-i01）: p003 を実装し VF2 で確かめた（[phase003](phase003/phase.md)）。次: Q1 の受け入れ、p004（engine の口を広げ VF2 の glue から登録、COINCIDE で H.264 decode、pool から GPU の transfer）。

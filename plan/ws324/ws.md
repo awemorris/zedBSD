@@ -54,6 +54,10 @@
 - （2026-11-01 23:11）Q324-6: ユーザーから、libmedia の道を RTX で確かめる Phase（p016）を WS324 の完了の条件から外す、という趣旨の答えを受けた。WS324 は driver と Vulkan の口で完了とし、libmedia での確かめは WS318 の受け入れに任せる。
 - ws.md の「ユーザーの決定（2026-10-30、原文）」の節の扱いは、既にある原文の扱いがユーザーの未決（master.md）なので、今は変えない。
 
+## Q1 の判断（2026-11-02 00:10、p006a の問い）
+
+- Q-A〜Q-E は全部 A。Q-A: WS330 の proposed の解析の header を採って足す。Q-B: Phase は h265-parse-design.md §9 の形（p006a〜p006i、p007 の依存は p006i）。Q-C: 段 2 は P1 が p006a の 2 回目の起動で行う。Q-D: WS330 の適合の道具を plan/tools/h265/conformance/ に移し tools.md に登録、cache は build/sources/h265-conformance（Q1 が済ませた）。Q-E: NumDeltaPocsOfRefRpsIdx の約束は設計の案。
+
 ## Resume point
 
 - 2026-11-01 P1（q1864-i01）: p006a 段 1。[h265-parse-design.md](h265-parse-design.md)、[proposed/h265/](proposed/h265/) の header 11 個、phase006b〜h の phase.md、design-review.md の review 2（20 件を全部反映）。次は Q1 の受け入れと Q-A〜Q-E（[phase006a](phase006a/phase.md)）、その後に段 2。

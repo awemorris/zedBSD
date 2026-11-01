@@ -64,7 +64,7 @@
 ### 2.3 適合の試験の data
 
 - ITU-T H.265.1 の HEVC_v1 の bitstream（JCT-VC、ITU の公開の mirror `https://www.itu.int/wftp3/av-arch/jctvc-site/bitstream_exchange/draft_conformance/HEVC_v1/`）。2026-11-01 に一覧を GET で読み 147 本（WS330 の 2026-10-31 の一覧と同じ名前の組）。zip の中は `.bit`/`.bin`、復号の出力全体の `.md5`（`MD5 (dec.yuv) = …` や `… *NAME_dec.yuv` の形）、説明の `.txt`、一部に macOS の `.DS_Store` などの余り物。
-- 一覧と取得の script は WS330 が作った物 [plan/ws330/tests/conformance/](../ws330/tests/conformance/)（`list.txt` 147 行、名前から in 136・out:main10 11 の推定、`fetch.sh` はパラメータの無い GET・SHA-256 の記録と照合・zip でない答えで即止める、展開しない）。WS324 はこれを使い、二重に作らない（Q1 への問い Q-D: plan/tools/ へ移す）。
+- 一覧と取得の script は WS330 が作った物 [plan/tools/h265/conformance/](../tools/h265/conformance/)（`list.txt` 147 行、名前から in 136・out:main10 11 の推定、`fetch.sh` はパラメータの無い GET・SHA-256 の記録と照合・zip でない答えで即止める、展開しない）。WS324 はこれを使い、二重に作らない（Q1 への問い Q-D: plan/tools/ へ移す）。
 - cache: main の `/home/awe/zedBSD-claude1/build/sources/h265-conformance/`（WS318 §13.3・WS330 §10.3 と同じ場所。まだ無い。Q1 が作る、zip で 129 MB、disk は 2026-11-01 に 275 GB 空き）。
 - 2026-11-01 に P1 が 3 本（`ipcm_A_NEC_3`・`POC_A_Bossen_3`・`RPS_A_docomo_5`）を scratchpad に取り、中身の形と host の ffmpeg 7.1.5 の 2 つの副の oracle（§8.4）が使えることを確かめた（`RPS_A` は 44 frame、`-threads 1 -loglevel debug` の `Output frame with POC 0/N.` が 44 行）。
 
@@ -279,7 +279,7 @@ end: h265_dpb_flush
 - Q-A（推し: A）: 解析の header は WS330 の proposed を採って足す（D1）。A: 採る。B: WS318 D19 のとおり Vulkan 用に別の解析を作る。→ A は Q330-2 の A と WS330 design §11 に沿う。
 - Q-B（推し: A）: Phase を §9 の 6 つの Sonnet（p006b〜g）・適合（p006h）・probe（p006i）にし、ws.md の案の p006b〜e の名前を置き換える。B: 3 つに詰める。
 - Q-C（推し: A）: 段 2（header を source に置き、骨格と道具と基点）を P1 が p006a の 2 回目の起動で行う。B: 別の Phase の番号にする。
-- Q-D（推し: A）: WS330 の `plan/ws330/tests/conformance/`（list・fetch・sha256）を `plan/tools/h265/conformance/` に移して plan/tools.md に登録し、cache の `/home/awe/zedBSD-claude1/build/sources/h265-conformance/` を作る（Q1 の作業）。B: WS324 が WS330 の path をそのまま使う（WS330 の完了で消える恐れ）。
+- Q-D（推し: A）: WS330 の `plan/tools/h265/conformance/`（list・fetch・sha256）を `plan/tools/h265/conformance/` に移して plan/tools.md に登録し、cache の `/home/awe/zedBSD-claude1/build/sources/h265-conformance/` を作る（Q1 の作業）。B: WS324 が WS330 の path をそのまま使う（WS330 の完了で消える恐れ）。
 - Q-E（推し: A）: D8（NumDeltaPocsOfRefRpsIdx）の約束を採る。B: Vulkan の本文の字句どおり。
 
 ## 14. review
