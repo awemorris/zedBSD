@@ -41,15 +41,14 @@
 /* The record of when this boot started, readied and ended each service, for reading how long the boot took. */
 #define TIMELINE_PATH "/var/log/init.log"
 
-/* The boot parameters that choose the order of the services, as the kernel reports them. */
-#define BOOT_LOGIN_SYSCTL "kern.boot.login"
+/* The boot parameter that chooses the order of the services, as the kernel reports it. */
 #define BOOT_KMSG_SYSCTL "kern.boot.kmsg"
 
 /* The room for one boot parameter's value, which is one short word. */
 #define BOOT_PARAMETER_MAX 32
 
 /*
- * How long a boot that shows the desktop first holds the late services back
+ * How long a boot that puts the login first holds the late services back
  * for the desktop to take the display, and how often it looks.  A desktop
  * that is slower than this, or that never comes, has them start anyway.
  */
@@ -142,16 +141,16 @@ struct service {
 	 */
 	char replaces[64];
 	/*
-	 * Set by late=yes for a service the desktop does not need at once (the
-	 * network, sound, sshd, cron).  A boot that shows the desktop first
+	 * Set by late=yes for a service the login does not need at once (the
+	 * network, sound, sshd, cron).  A boot that puts the login first
 	 * starts it only after the other services have been started, and does
 	 * not hold them for it; a debug boot starts it in its usual place.
 	 */
 	int late;
 	/*
 	 * Set by desktop=yes for the service that shows the desktop (the
-	 * graphical login).  While it runs, a boot that shows the desktop
-	 * first starts the late services only once the desktop has taken the
+	 * graphical login).  While it runs, a boot that puts the login first
+	 * starts the late services only once the desktop has taken the
 	 * display (KERN_INIT_DESKTOP_SHOWN) or the wait is over.
 	 */
 	int desktop;
@@ -207,23 +206,24 @@ enum dependency_result {
 };
 
 /*
- * Which services one round of starting takes.  A boot that shows the desktop
- * first starts the services that are not late, then all that are left; any
- * other boot starts all of them in one round.
+ * Which services one round of starting takes.  A boot that puts the login
+ * first starts the services that are not late, then all that are left; a
+ * debug boot starts all of them in one round.
  */
 enum start_round {
-	START_ROUND_DESKTOP,
+	START_ROUND_LOGIN,
 	START_ROUND_ALL
 };
 
 /*
- * Nonzero when this boot shows the desktop first: the boot parameters ask for
- * the graphical login (login=graphical) and keep the kernel's messages off the
- * screen (kmsg=quiet).  Set once before the services start.  A debug boot (the
- * messages on the console, or the console's login) leaves it 0 and starts the
- * services in the order their dependencies alone give.
+ * Nonzero when this boot puts the login first: the graphical login or the
+ * console's getty, whichever the boot shows, starts before the late services
+ * and does not wait for them.  Set once before the services start.  The debug
+ * boot (kmsg=console, Ctrl at the loader) leaves it 0 and starts the services
+ * in the order their dependencies alone give, so the network is up before the
+ * login.
  */
-static int desktop_first;
+static int login_first;
 
 /*
  * The descriptor of the boot's timeline (TIMELINE_PATH), or -1 before the
@@ -251,7 +251,7 @@ static void start_round(enum start_round round);
 static enum dependency_result dependencies_state(const struct service *service, enum start_round round);
 static enum dependency_result order_state(const struct service *service, enum start_round round);
 static enum dependency_result requirements_state(const struct service *service);
-static int boot_shows_desktop_first(void);
+static int boot_puts_login_first(void);
 static int boot_parameter_is(const char *name, const char *expected);
 static void wait_for_desktop(void);
 static int desktop_running(void);
@@ -350,8 +350,8 @@ main(
 	if (control_listener < 0)
 		fprintf(stderr, "init: control socket: %s\n", strerror(errno));
 
-	/* The boot parameters choose whether the desktop's services come first. */
-	desktop_first = boot_shows_desktop_first();
+	/* The boot parameters choose whether the login comes first. */
+	login_first = boot_puts_login_first();
 
 	start_enabled_services();
 
@@ -647,11 +647,11 @@ load_one_service(
 	if (assignment_get(path, "required", value, sizeof(value)) == 0)
 		service->required = yes(value);
 
-	/* A service the desktop does not need at once, which a desktop boot starts last. */
+	/* A service the login does not need at once, which a boot that puts the login first starts last. */
 	if (assignment_get(path, "late", value, sizeof(value)) == 0)
 		service->late = yes(value);
 
-	/* The service that shows the desktop, which the late ones wait for in a desktop boot. */
+	/* The service that shows the desktop, which the late ones wait for in a boot that puts the login first. */
 	if (assignment_get(path, "desktop", value, sizeof(value)) == 0)
 		service->desktop = yes(value);
 
@@ -796,7 +796,7 @@ open_control_socket(
 /*
  * Starts the enabled services in the order their dependencies give.
  *
- * A boot that shows the desktop first starts the services that are not late
+ * A boot that puts the login first starts the services that are not late
  * in a first round, so the graphical login does not wait for the network,
  * sound or sshd, and the late ones in a second round after it.
  */
@@ -806,11 +806,11 @@ start_enabled_services(
 {
 	size_t index;
 
-	/* The desktop's round: every service but the late ones. */
-	if (desktop_first) {
-		timeline_record("order", "desktop-first");
-		start_round(START_ROUND_DESKTOP);
-		timeline_record("round", "desktop-started");
+	/* The login's round: every service but the late ones. */
+	if (login_first) {
+		timeline_record("order", "login-first");
+		start_round(START_ROUND_LOGIN);
+		timeline_record("round", "login-started");
 
 		/* The late services wait for the desktop to take the display, so that they do not slow its start. */
 		wait_for_desktop();
@@ -876,8 +876,8 @@ start_round(
 			if (service->started_once)
 				continue;
 
-			/* The desktop's round leaves the late services for the next. */
-			if (round == START_ROUND_DESKTOP && service->late)
+			/* The login's round leaves the late services for the next. */
+			if (round == START_ROUND_LOGIN && service->late)
 				continue;
 
 			/* A service another enabled one stands in for waits until that one gives up (replaces=). */
@@ -930,7 +930,7 @@ dependencies_state(
 
 /*
  * Reports whether the services a service is ordered after (after=) have
- * settled.  While the desktop's services start, a late service in the list
+ * settled.  While the login's services start, a late service in the list
  * is not waited for: it starts in the next round, after this one.
  */
 static enum dependency_result
@@ -957,8 +957,8 @@ order_state(
 		if (dependency == NULL)
 			return DEPENDENCIES_SKIP;
 
-		/* A late service is not waited for in the desktop's round. */
-		if (round == START_ROUND_DESKTOP && dependency->late)
+		/* A late service is not waited for in the login's round. */
+		if (round == START_ROUND_LOGIN && dependency->late)
 			continue;
 
 		/* A disabled service never starts, so nothing waits for it. */
@@ -977,7 +977,7 @@ order_state(
 
 /*
  * Reports whether the services a service requires (requires=) are up.  A
- * requirement that is late is not up in the desktop's round, so the service
+ * requirement that is late is not up in the login's round, so the service
  * waits for the next round with it.
  */
 static enum dependency_result
@@ -1130,30 +1130,28 @@ serve_one_request(
 }
 
 /*
- * Reports whether this boot shows the desktop first: the boot parameters ask
- * for the graphical login and keep the kernel's messages off the screen.
+ * Reports whether this boot puts the login first: the graphical login, or the
+ * console's getty when the boot shows that one, before the late services.
  *
- * kmsg=console (Ctrl at the loader) and login=console (Shift) are the debug
- * boots, which start the network and the others in their usual place.
+ * Only the debug boot does not: the one that asks for the kernel's messages on
+ * the console (kmsg=console, which the loader hands over when Ctrl is held).
+ * It starts the network and the others in their usual place, so the network is
+ * up by the time the login is.  A boot that names no kmsg= at all, as the
+ * Raspberry Pi's command line does, is not a debug boot; nor is the console's
+ * login alone (login=console, Shift at the loader).
  */
 static int
-boot_shows_desktop_first(
+boot_puts_login_first(
 	void)
 {
-	int graphical;
-	int quiet;
+	int debug;
 
-	/* The graphical login is asked for. */
-	graphical = boot_parameter_is(BOOT_LOGIN_SYSCTL, "graphical");
-	if (!graphical)
+	/* The kernel's messages on the console are the debug boot's. */
+	debug = boot_parameter_is(BOOT_KMSG_SYSCTL, "console");
+	if (debug)
 		return 0;
 
-	/* The kernel's messages stay off the screen. */
-	quiet = boot_parameter_is(BOOT_KMSG_SYSCTL, "quiet");
-	if (!quiet)
-		return 0;
-
-	/* Succeeded: the desktop comes first. */
+	/* Succeeded: the login comes first. */
 	return 1;
 }
 

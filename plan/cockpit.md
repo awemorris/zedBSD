@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-02 02:20（Q1。BUG-393・WS334 の誤りの文を merge）
+最終更新: 2026-11-02 02:23（Q1。BUG-394 を merge）
 
 ## 担当（P1〜P8）
 
@@ -13,7 +13,7 @@
 | P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
 | P5 | [WS334](ws334/ws.md) p033 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 後半の Windows の口（TSF・drag と drop・touchpad など、頁に暗い mode、q1886）。p032: Wine で 15 項 PASS（https・cookie・localStorage・clipboard・dpi） | p035 規約の見直し |
 | P6 | [WS335](ws335/ws.md) p015 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | OS の層（POSIX と Windows、q1897）。p014 ML-KEM-768 は cleared | p021 誤りの queue と RAND_bytes |
-| P7 | [BUG-394](bugs/BUG-394.md) | 起動の時間 | network の待ちの調べ、init が desktop を優先（q1892） | 次は WS340（Pi の graphical boot） |
+| P7 | — | — | 返却（02:23）。BUG-394 fixed（init は既定で login・desktop を先、network は後） | 次は WS340 の候補 |
 | P8 | — | Bug の修正 | 返却（02:09）。BUG-391・392 fixed（QEMU で確認、Pi 5 は未実施） | 次を待つ |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
@@ -52,7 +52,7 @@
 | Bug | 中身 | 状態 |
 | --- | --- | --- |
 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の起動時の自己試験の描画 | fixed（02:20。既定で off、`rpi4gpu.selftest=1` で on。storage まで 6.3 s → 0.9〜1.2 s） |
-| [BUG-394](bugs/BUG-394.md) | 起動が長い、init が desktop を優先して順番を組めるように | open（P7） |
+| [BUG-394](bugs/BUG-394.md) | 起動が長い、init が desktop を優先して順番を組めるように | fixed（02:23。init の 2 段の起動を既定に。Pi 5 の大きな待ちは GPU の自己試験 5.9 s で BUG-393 で解消。Pi 5 での変更後の計測は未実施） |
 | [BUG-390](bugs/BUG-390.md) | App Home の icon が出ない（全機械） | fixed（01:42、画面: build/review/q1889-pi5-home-after.png） |
 | [BUG-391](bugs/BUG-391.md) | compositor が落ちると login の画面から出直す（tablet で login できない） | fixed（02:09、QEMU の amd64 Venus。crash の後は同じ利用者の desktop か lock 画面、2 分に 3 回目で login 画面） |
 | [BUG-392](bugs/BUG-392.md) | 初期の PIN 0000、login・lock の画面で PIN を既定に | fixed（02:09。PIN 4〜6 桁、起動直後から PIN、誤りの回数は root の file に残り再起動で戻らない。PIN 0000 は弱くなる点を security.md に記した） |

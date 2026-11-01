@@ -319,12 +319,14 @@ kmsg=quiet       messages go to the log buffer (dmesg, sysctl kern.msgbuf)
   on it again.
 - The UEFI loader also reads `kmsg=quiet`: it draws no progress blocks.
 - The kernel reports the value as `sysctl kern.boot.kmsg` (empty when the
-  boot did not give one).  init reads it with `kern.boot.login`: a boot with
-  `login=graphical` and `kmsg=quiet` starts the desktop's services first and
-  the network, sound, sshd and cron after them; any other boot starts the
-  services in the order their dependencies give
+  boot did not give one).  init reads it for the order of the services: a
+  boot that writes `kmsg=console` is the debug boot, which starts the
+  services in the order their dependencies give, so the network is up
+  before the login; any other boot, one without `kmsg=` included, starts the
+  login (the graphical one or the console's getty) first and the network,
+  sound, sshd and cron after it
   ([init and services](init-services.md#boot-order)).
-- For kernel development leave `kmsg=` out or write `kmsg=console`, and use
+- For kernel development write `kmsg=console` (or hold Ctrl, below), and use
   `login=console` (Section 7b).
 - On amd64 UEFI, holding Ctrl while the loader runs gives the kernel
   `kmsg=console` and no `logo=` for that one boot, whatever `zedbsd.cfg` says

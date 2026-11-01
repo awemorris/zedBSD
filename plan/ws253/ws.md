@@ -30,6 +30,7 @@ Resume point: なし（新しい要求は新しい WS として立てる。こ�
 
 ## 制限・移管
 
+- 2026-11-02（BUG-394、Q1 の判断）: debug の起動は `kmsg=console` が明示された時だけになり、`login=console` だけの起動と kmsg= の無い起動（Pi）も login を先に・late を後にする 2 段の起動に置き換わった。
 - 2 段目（networkd の notify は最大 10 秒、networking の oneshot）の間、init は子の回収と control socket の応答をしない。
 - 5330 の 1 回目の起動の VFS の初期化（13 s）と USB の読み込みの遅さは BUG-327 の側。
 - 規約の全文の見直し（p002）は WS の外の一括の見直しへ（2026-10-08 ユーザー「規約の整形（各 WS の全文規約の Phase）はベータ3」、q1608 の扱い）。
