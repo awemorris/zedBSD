@@ -82,6 +82,17 @@ static uint32_t rng_state = 0x2545f491U;
 static struct bytes pool[POOL_MAX];
 static unsigned pool_next;
 
+/* The exact-size copies of the views of the certificates under test: a read past the end of a view is then an error of the address sanitizer. */
+#define EXACT_MAX	8192U
+static unsigned char *exact_pointer[EXACT_MAX];
+static unsigned exact_count;
+
+/* What a test function takes back at its end: the pool of byte strings and the exact-size copies. */
+struct mark {
+	unsigned pool;
+	unsigned exact;
+};
+
 /* The big lists of the budget test. */
 static unsigned char big_permitted[BIG_MAX];
 static unsigned char big_san[BIG_MAX];
@@ -126,6 +137,50 @@ b_new(void)
 	item = &pool[pool_next++];
 	item->size = 0;
 	return item;
+}
+
+/* Takes a mark of the pool and of the exact-size copies. */
+static struct mark
+mark_take(void)
+{
+	struct mark taken;
+
+	taken.pool = pool_next;
+	taken.exact = exact_count;
+	return taken;
+}
+
+/* Gives back everything taken since the mark. */
+static void
+mark_release(
+	struct mark taken)
+{
+	while (exact_count > taken.exact)
+		free(exact_pointer[--exact_count]);
+	pool_next = taken.pool;
+}
+
+/* Copies bytes into a block of exactly their size (a block of one byte for none), kept until the mark is released. */
+static unsigned char *
+exact_copy(
+	const unsigned char *data,
+	size_t size)
+{
+	unsigned char *copy;
+
+	if (exact_count >= EXACT_MAX) {
+		printf("FAIL too many exact copies\n");
+		exit(EXIT_FAILURE);
+	}
+	copy = malloc(size > 0U ? size : 1U);
+	if (copy == NULL) {
+		printf("FAIL out of memory\n");
+		exit(EXIT_FAILURE);
+	}
+	if (size > 0U)
+		memcpy(copy, data, size);
+	exact_pointer[exact_count++] = copy;
+	return copy;
 }
 
 /* Builds a byte string from raw bytes. */
@@ -415,12 +470,12 @@ make_cert(
 {
 	memset(cert, 0, sizeof(*cert));
 	if (subject != NULL) {
-		cert->subject = subject->data;
+		cert->subject = exact_copy(subject->data, subject->size);
 		cert->subject_size = subject->size;
 	}
 	if (san != NULL) {
 		cert->flags |= CRYC_X509_HAS_SAN;
-		cert->san = san->data;
+		cert->san = exact_copy(san->data, san->size);
 		cert->san_size = san->size;
 	}
 }
@@ -435,11 +490,11 @@ make_ca(
 	memset(ca, 0, sizeof(*ca));
 	ca->flags |= CRYC_X509_HAS_NAME_CONSTRAINTS;
 	if (permitted != NULL) {
-		ca->permitted = permitted->data;
+		ca->permitted = exact_copy(permitted->data, permitted->size);
 		ca->permitted_size = permitted->size;
 	}
 	if (excluded != NULL) {
-		ca->excluded = excluded->data;
+		ca->excluded = exact_copy(excluded->data, excluded->size);
 		ca->excluded_size = excluded->size;
 	}
 }
@@ -486,13 +541,34 @@ nc_dns(
 	return nc(p, e, n_empty(), g_dns(name));
 }
 
+/* Compares two Names given as raw bytes, each in a block of exactly its size (NULL is passed as NULL). */
+static int
+raw_eq(
+	const unsigned char *left,
+	size_t left_size,
+	const unsigned char *right,
+	size_t right_size)
+{
+	struct mark taken;
+	const unsigned char *left_copy;
+	const unsigned char *right_copy;
+	int result;
+
+	taken = mark_take();
+	left_copy = left == NULL ? NULL : exact_copy(left, left_size);
+	right_copy = right == NULL ? NULL : exact_copy(right, right_size);
+	result = cryc_name_equal(left_copy, left_size, right_copy, right_size);
+	mark_release(taken);
+	return result;
+}
+
 /* Compares two Names given as byte strings. */
 static int
 name_eq(
 	const struct bytes *left,
 	const struct bytes *right)
 {
-	return cryc_name_equal(left->data, left->size, right->data, right->size);
+	return raw_eq(left->data, left->size, right->data, right->size);
 }
 
 /* ------------------------------------------------------------------ */
@@ -675,7 +751,7 @@ model_perturb(
 static void
 test_equal_cases(void)
 {
-	unsigned mark;
+	struct mark mark;
 	struct bytes *left;
 	struct bytes *right;
 	struct bytes *both;
@@ -684,7 +760,7 @@ test_equal_cases(void)
 	size_t index;
 	unsigned char changed[256];
 
-	mark = pool_next;
+	mark = mark_take();
 
 	/* A Name equals itself byte for byte, and two empty Names are equal. */
 	left = n_spec("C=US,O=Org,CN=host");
@@ -723,6 +799,24 @@ test_equal_cases(void)
 	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "   "), n_one(OID_CN, TAG_UTF8, "")) == 1);
 	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, " "), n_one(OID_CN, TAG_UTF8, "a")) == 0);
 	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "\t"), n_one(OID_CN, TAG_UTF8, "")) == 0);
+
+	/* A NUL is a character like any other, and the bytes 0x7f and 0x80 are the last ASCII byte and the first other one. */
+	left = b_name(b_rdn(b_tlv(0x30U, b_cat(b_oid(OID_CN), b_tlv(TAG_UTF8, b_raw("a\0b", 3))))));
+	right = b_name(b_rdn(b_tlv(0x30U, b_cat(b_oid(OID_CN), b_tlv(TAG_UTF8, b_raw("a\0c", 3))))));
+	CHECK(name_eq(left, left) == 1);
+	CHECK(name_eq(left, right) == 0);
+	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "A\x7f"), n_one(OID_CN, TAG_UTF8, "a\x7f")) == 1);
+	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "A\x80"), n_one(OID_CN, TAG_UTF8, "a\x80")) == 0);
+	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "\x80  a"), n_one(OID_CN, TAG_UTF8, "\x80 a")) == 0);
+	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "\xe9  a"), n_one(OID_CN, TAG_UTF8, "\xe9 a")) == 0);
+	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "a  \xe9"), n_one(OID_CN, TAG_UTF8, "a \xe9")) == 0);
+	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "\xe9 "), n_one(OID_CN, TAG_UTF8, "\xe9")) == 0);
+	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "a"), n_one(OID_CN, TAG_UTF8, "a\x01")) == 0);
+
+	/* A type that is a prefix of another is another type. */
+	CHECK(name_eq(n_one("2.5.4.3", TAG_UTF8, "a"), n_one("2.5.4.3.1", TAG_UTF8, "a")) == 0);
+	CHECK(name_eq(n_one("2.5.4.3.1", TAG_UTF8, "a"), n_one("2.5.4.3", TAG_UTF8, "a")) == 0);
+	CHECK(name_eq(n_one("2.5.4.3.1", TAG_UTF8, "a"), n_one("2.5.4.3.1", TAG_UTF8, "a")) == 1);
 
 	/* A non-ASCII value compares byte for byte: neither case nor spaces are folded. */
 	CHECK(name_eq(n_one(OID_CN, TAG_UTF8, "\xc3\xa9"), n_one(OID_CN, TAG_UTF8, "\xc3\xa9")) == 1);
@@ -764,47 +858,47 @@ test_equal_cases(void)
 	/* Malformed encodings are never equal, not even to themselves. */
 	left = n_spec("C=US,O=Org");
 	CHECK(name_eq(left, left) == 1);
-	CHECK(cryc_name_equal(NULL, 0, NULL, 0) == 0);
-	CHECK(cryc_name_equal(left->data, left->size, NULL, 0) == 0);
-	CHECK(cryc_name_equal(NULL, 0, left->data, left->size) == 0);
-	CHECK(cryc_name_equal(left->data, 0, left->data, left->size) == 0);
-	CHECK(cryc_name_equal(NULL, 10, left->data, left->size) == 0);
-	CHECK(cryc_name_equal(left->data, left->size, NULL, 10) == 0);
-	CHECK(cryc_name_equal(left->data, left->size, left->data, left->size - 1U) == 0);
-	CHECK(cryc_name_equal(left->data, left->size - 1U, left->data, left->size - 1U) == 0);
+	CHECK(raw_eq(NULL, 0, NULL, 0) == 0);
+	CHECK(raw_eq(left->data, left->size, NULL, 0) == 0);
+	CHECK(raw_eq(NULL, 0, left->data, left->size) == 0);
+	CHECK(raw_eq(left->data, 0, left->data, left->size) == 0);
+	CHECK(raw_eq(NULL, 10, left->data, left->size) == 0);
+	CHECK(raw_eq(left->data, left->size, NULL, 10) == 0);
+	CHECK(raw_eq(left->data, left->size, left->data, left->size - 1U) == 0);
+	CHECK(raw_eq(left->data, left->size - 1U, left->data, left->size - 1U) == 0);
 	both = b_cat(left, b_hex("00"));
-	CHECK(cryc_name_equal(both->data, both->size, both->data, both->size) == 0);
-	CHECK(cryc_name_equal(left->data, left->size, both->data, both->size) == 0);
-	CHECK(cryc_name_equal(both->data, both->size, left->data, left->size) == 0);
+	CHECK(raw_eq(both->data, both->size, both->data, both->size) == 0);
+	CHECK(raw_eq(left->data, left->size, both->data, both->size) == 0);
+	CHECK(raw_eq(both->data, both->size, left->data, left->size) == 0);
 
 	/* An RDN with no attribute, an attribute with three parts or one part, an OID that is not one, a SET where a SEQUENCE belongs. */
 	item = b_name(b_tlv(0x31U, b_new()));
-	CHECK(cryc_name_equal(item->data, item->size, item->data, item->size) == 0);
+	CHECK(raw_eq(item->data, item->size, item->data, item->size) == 0);
 	item = b_name(b_rdn(b_tlv(0x30U, b_cat3(b_oid(OID_CN), b_str(TAG_UTF8, "a"), b_str(TAG_UTF8, "b")))));
-	CHECK(cryc_name_equal(item->data, item->size, item->data, item->size) == 0);
+	CHECK(raw_eq(item->data, item->size, item->data, item->size) == 0);
 	item = b_name(b_rdn(b_tlv(0x30U, b_oid(OID_CN))));
-	CHECK(cryc_name_equal(item->data, item->size, item->data, item->size) == 0);
+	CHECK(raw_eq(item->data, item->size, item->data, item->size) == 0);
 	item = b_name(b_rdn(b_tlv(0x30U, b_cat(b_str(TAG_UTF8, "a"), b_str(TAG_UTF8, "b")))));
-	CHECK(cryc_name_equal(item->data, item->size, item->data, item->size) == 0);
+	CHECK(raw_eq(item->data, item->size, item->data, item->size) == 0);
 	item = b_name(b_rdn(b_tlv(0x30U, b_cat(b_hex("060180"), b_str(TAG_UTF8, "a")))));
-	CHECK(cryc_name_equal(item->data, item->size, item->data, item->size) == 0);
+	CHECK(raw_eq(item->data, item->size, item->data, item->size) == 0);
 	item = b_name(b_tlv(0x30U, b_attr(OID_CN, TAG_UTF8, "a")));
-	CHECK(cryc_name_equal(item->data, item->size, item->data, item->size) == 0);
+	CHECK(raw_eq(item->data, item->size, item->data, item->size) == 0);
 	item = b_name(b_tlv(0x31U, b_rdn(b_attr(OID_CN, TAG_UTF8, "a"))));
-	CHECK(cryc_name_equal(item->data, item->size, item->data, item->size) == 0);
+	CHECK(raw_eq(item->data, item->size, item->data, item->size) == 0);
 
 	/* The outer element must be a SEQUENCE. */
 	item = b_tlv(0x31U, b_rdn(b_attr(OID_CN, TAG_UTF8, "a")));
-	CHECK(cryc_name_equal(item->data, item->size, item->data, item->size) == 0);
+	CHECK(raw_eq(item->data, item->size, item->data, item->size) == 0);
 	item = b_tlv(0x04U, b_new());
-	CHECK(cryc_name_equal(item->data, item->size, item->data, item->size) == 0);
+	CHECK(raw_eq(item->data, item->size, item->data, item->size) == 0);
 
 	/* Every proper prefix of a Name is malformed, and a Name changed at any byte is either malformed or not equal when the value changed. */
 	left = n_spec("C=US,O=Org,CN=host name");
 	for (index = 0; index < left->size; index++) {
-		CHECK(cryc_name_equal(left->data, index, left->data, left->size) == 0);
-		CHECK(cryc_name_equal(left->data, left->size, left->data, index) == 0);
-		CHECK(cryc_name_equal(left->data, index, left->data, index) == 0);
+		CHECK(raw_eq(left->data, index, left->data, left->size) == 0);
+		CHECK(raw_eq(left->data, left->size, left->data, index) == 0);
+		CHECK(raw_eq(left->data, index, left->data, index) == 0);
 	}
 
 	/* A change of one byte of a value that is not a letter or space (the digit 1 to 2) makes the Names different, the same change in a header makes one malformed or different. */
@@ -812,11 +906,11 @@ test_equal_cases(void)
 	for (index = 0; index < left->size; index++) {
 		memcpy(changed, left->data, left->size);
 		changed[index] = (unsigned char)(changed[index] + 1U);
-		CHECK(cryc_name_equal(left->data, left->size, changed, left->size) == 0);
-		CHECK(cryc_name_equal(changed, left->size, left->data, left->size) == 0);
+		CHECK(raw_eq(left->data, left->size, changed, left->size) == 0);
+		CHECK(raw_eq(changed, left->size, left->data, left->size) == 0);
 	}
 
-	pool_next = mark;
+	mark_release(mark);
 }
 
 /* Random Names against a model, and reflexivity and symmetry. */
@@ -824,7 +918,7 @@ static void
 test_equal_random(void)
 {
 	unsigned run;
-	unsigned mark;
+	struct mark mark;
 	struct model_name left;
 	struct model_name right;
 	struct bytes *left_bytes;
@@ -836,7 +930,7 @@ test_equal_random(void)
 
 	equal_count = 0;
 	for (run = 0; run < 30000U; run++) {
-		mark = pool_next;
+		mark = mark_take();
 		model_random(&left);
 		right = left;
 		if (rng_below(4) != 0U) {
@@ -857,7 +951,7 @@ test_equal_random(void)
 		CHECK(name_eq(left_bytes, left_bytes) == 1);
 		if (got)
 			equal_count++;
-		pool_next = mark;
+		mark_release(mark);
 	}
 
 	/* Both outcomes were common in the run. */
@@ -870,7 +964,7 @@ static void
 test_equal_mutations(void)
 {
 	unsigned run;
-	unsigned mark;
+	struct mark mark;
 	struct bytes *base;
 	unsigned char copy[BYTES_MAX];
 	size_t index;
@@ -879,14 +973,14 @@ test_equal_mutations(void)
 
 	base = n_spec("C=US,O=Example Org,CN=www.example.com");
 	for (run = 0; run < 20000U; run++) {
-		mark = pool_next;
+		mark = mark_take();
 		memcpy(copy, base->data, base->size);
 		index = rng_below((unsigned)base->size);
 		value = rng_below(256);
 		copy[index] = (unsigned char)value;
 		if (rng_below(3) == 0U)
 			copy[rng_below((unsigned)base->size)] = (unsigned char)rng_below(256);
-		equal = cryc_name_equal(copy, base->size, base->data, base->size);
+		equal = raw_eq(copy, base->size, base->data, base->size);
 
 		/* A changed encoding that is still equal differs only in the case of letters (the same size, so no space run changed). */
 		if (equal == 1) {
@@ -904,7 +998,7 @@ test_equal_mutations(void)
 			}
 		}
 		CHECK(equal == 0 || equal == 1);
-		pool_next = mark;
+		mark_release(mark);
 	}
 
 	/* Fully random bytes. */
@@ -918,7 +1012,7 @@ test_equal_mutations(void)
 			copy[0] = 0x30;
 			copy[1] = (unsigned char)(length - 2U);
 		}
-		equal = cryc_name_equal(copy, length, copy, length);
+		equal = raw_eq(copy, length, copy, length);
 		CHECK(equal == 0 || equal == 1);
 	}
 }
@@ -1040,6 +1134,10 @@ test_normalize(void)
 	normalize_case("-a.b-", "-a.b-");
 	normalize_case("1.2.3.4", "1.2.3.4");
 	normalize_case("0", "0");
+	normalize_case("9", "9");
+	normalize_case("a9z.A9Z", "a9z.a9z");
+	normalize_case("0123456789abcdefghijklmnopqrstuvwxyz-_", "0123456789abcdefghijklmnopqrstuvwxyz-_");
+	normalize_case("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz");
 	normalize_case("a.b.c.d.e.f", "a.b.c.d.e.f");
 
 	/* Empty names and empty labels. */
@@ -1259,7 +1357,7 @@ model_match(
 static void
 test_match_host(void)
 {
-	unsigned mark;
+	struct mark mark;
 	struct bytes *san;
 	struct cryc_x509 cert;
 	char longname[512];
@@ -1274,7 +1372,7 @@ test_match_host(void)
 	static const char reference_alphabet[] = { 'a', 'b', 'c', '.', 'A', '1' };
 	unsigned long matches;
 
-	mark = pool_next;
+	mark = mark_take();
 
 	/* Exact names, case ignored on both sides, a trailing dot on the reference. */
 	CHECK(dns_vs("example.com", "example.com") == 1);
@@ -1310,6 +1408,13 @@ test_match_host(void)
 	CHECK(dns_vs("*.b.c", "b.c") == 0);
 	CHECK(dns_vs("*.b.c", "x.y.b.c") == 0);
 	CHECK(dns_vs("*.co.uk", "example.co.uk") == 1);
+	CHECK(dns_vs("*.b.c", "a.b.cc") == 0);
+	CHECK(dns_vs("*.b.c", "a.b.c.") == 1);
+	CHECK(dns_vs("*.example.com", "foo.example.comm") == 0);
+	CHECK(dns_vs("*.example.com", "foo.example.co") == 0);
+	CHECK(dns_vs("*.example.com", "foo.exampleXcom") == 0);
+	CHECK(dns_vs("*.b.c", "a.b.x") == 0);
+	CHECK(dns_vs("*.bb.cc", "a.bb.c") == 0);
 
 	/* Fewer than three labels with a wildcard never match. */
 	CHECK(dns_vs("*.com", "example.com") == 0);
@@ -1431,7 +1536,7 @@ test_match_host(void)
 	/* Random identifiers and references against the model. */
 	matches = 0;
 	for (run = 0; run < 60000U; run++) {
-		pool_next = mark;
+		mark_release(mark);
 		length = rng_below(9);
 		for (index = 0; index < length; index++)
 			presented[index] = presented_alphabet[rng_below(sizeof(presented_alphabet))];
@@ -1466,14 +1571,14 @@ test_match_host(void)
 	}
 	CHECK(matches > 200UL);
 
-	pool_next = mark;
+	mark_release(mark);
 }
 
 /* The cases of IP address matching. */
 static void
 test_match_ip(void)
 {
-	unsigned mark;
+	struct mark mark;
 	struct cryc_x509 cert;
 	struct bytes *san;
 	unsigned char v4[4];
@@ -1481,7 +1586,7 @@ test_match_ip(void)
 	unsigned char v6_other[16];
 	size_t index;
 
-	mark = pool_next;
+	mark = mark_take();
 	v4[0] = 192;
 	v4[1] = 0;
 	v4[2] = 2;
@@ -1526,6 +1631,34 @@ test_match_ip(void)
 	CHECK(cryc_name_match_ip(&cert, v6, 8) == 0);
 	CHECK(cryc_name_match_ip(&cert, v6, 15) == 0);
 	CHECK(cryc_name_match_ip(&cert, v6, 0) == 0);
+
+	/* Only 4 and 16 octets are addresses: the same octets given as another size match nothing. */
+	make_cert(&cert, n_empty(), g_ip_hex("c0000200ffffff00"));
+	v6[0] = 0xc0;
+	v6[1] = 0;
+	v6[2] = 2;
+	v6[3] = 0;
+	v6[4] = 0xff;
+	v6[5] = 0xff;
+	v6[6] = 0xff;
+	v6[7] = 0;
+	CHECK(cryc_name_match_ip(&cert, v6, 8) == 0);
+	make_cert(&cert, n_empty(), g_ip_hex(""));
+	CHECK(cryc_name_match_ip(&cert, v6, 0) == 0);
+	make_cert(&cert, n_empty(), g_ip_hex("0a"));
+	CHECK(cryc_name_match_ip(&cert, v6, 1) == 0);
+	make_cert(&cert, n_empty(), g_ip_hex("0a0000000000000000000000000000000000"));
+	CHECK(cryc_name_match_ip(&cert, v6, 18) == 0);
+	CHECK(cryc_name_match_ip(&cert, v6, 17) == 0);
+	v6[0] = 0;
+	v6[1] = 0;
+	v6[2] = 0;
+	v6[3] = 0;
+	v6[4] = 0;
+	v6[5] = 0;
+	v6[6] = 0;
+	v6[7] = 0;
+	v6[15] = 1;
 
 	/* An entry of 8 or 32 octets (a constraint's form) is not an address. */
 	make_cert(&cert, n_empty(), g_ip_hex("c0000200ffffff00"));
@@ -1576,7 +1709,7 @@ test_match_ip(void)
 	make_cert(&cert, n_empty(), san);
 	CHECK(cryc_name_match_ip(&cert, v4, 4) == 0);
 
-	pool_next = mark;
+	mark_release(mark);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1591,11 +1724,11 @@ test_match_ip(void)
 static void
 test_nc_dns(void)
 {
-	unsigned mark;
+	struct mark mark;
 	struct bytes *san;
 	char longname[512];
 
-	mark = pool_next;
+	mark = mark_take();
 
 	/* A constraint "example.com" permits the name and every name with labels added on the left, ignoring case. */
 	CHECK(nc_dns("example.com", NULL, "example.com") == ALLOW);
@@ -1702,6 +1835,40 @@ test_nc_dns(void)
 	CHECK(nc_dns("b", "c.b", "*.b") == DENY);
 	CHECK(nc_dns("b", "c.d", "*.b") == ALLOW);
 
+	/* A wildcard against single-label and shorter or longer constraints. */
+	CHECK(nc_dns(NULL, "c", "*") == DENY);
+	CHECK(nc_dns(NULL, "c.d", "*") == ALLOW);
+	CHECK(nc_dns(NULL, "com", "*.example.com") == DENY);
+	CHECK(nc_dns(NULL, "net", "*.example.com") == ALLOW);
+	CHECK(nc_dns(NULL, "example", "*.example.com") == ALLOW);
+	CHECK(nc_dns(NULL, "bar.example", "*.example.com") == ALLOW);
+	CHECK(nc_dns(NULL, "bar.example.co", "*.example.com") == ALLOW);
+	CHECK(nc_dns(NULL, "bar.example.comm", "*.example.com") == ALLOW);
+	CHECK(nc_dns(NULL, "bar.example.com", "*.example.com") == DENY);
+
+	/* Printable ASCII is the range of the octets of a name: its two ends are in, the octets around it are out, at any position. */
+	CHECK(nc_dns("example.com", NULL, "!.example.com") == ALLOW);
+	CHECK(nc_dns("example.com", NULL, "~.example.com") == ALLOW);
+	CHECK(nc_dns("example.com", NULL, "a!~.example.com") == ALLOW);
+	CHECK(nc_dns("example.com", NULL, " a.example.com") == EINVAL);
+	CHECK(nc_dns("example.com", NULL, "\x01" "a.example.com") == EINVAL);
+	CHECK(nc_dns("example.com", NULL, "\x7f" "a.example.com") == EINVAL);
+	CHECK(nc_dns("example.com", NULL, "\x80" "a.example.com") == EINVAL);
+	CHECK(nc_dns("example.com", NULL, "a.example.com ") == EINVAL);
+	CHECK(nc_dns("example.com", NULL, "a.example.com\x7f") == EINVAL);
+	CHECK(nc_dns(" example.com", NULL, "a.example.com") == EINVAL);
+	CHECK(nc_dns("!", NULL, "a.!") == ALLOW);
+	CHECK(nc_dns("~", NULL, "a.~") == ALLOW);
+
+	/* A wildcard only as the whole first label: a star in a later label is malformed whatever follows the first octets. */
+	CHECK(nc_dns("example.com", NULL, "a.*.example.com") == EINVAL);
+	CHECK(nc_dns("example.com", NULL, "a.*") == EINVAL);
+	CHECK(nc_dns("example.com", NULL, "*x") == EINVAL);
+	CHECK(nc_dns("example.com", NULL, "*.") == EINVAL);
+	CHECK(nc_dns("example.com", NULL, "*") == DENY);
+	CHECK(nc_dns("example.com", NULL, "*.com") == DENY);
+	CHECK(nc_dns("", NULL, "*") == ALLOW);
+
 	/* Names that are malformed make a constrained check fail. */
 	CHECK(nc_dns("example.com", NULL, "") == EINVAL);
 	CHECK(nc_dns("example.com", NULL, ".example.com") == EINVAL);
@@ -1760,7 +1927,7 @@ test_nc_dns(void)
 	strcat(longname, "b");
 	CHECK(nc(s_sub(g_dns(longname)), NULL, n_empty(), NULL) == EINVAL);
 
-	pool_next = mark;
+	mark_release(mark);
 }
 
 /* Runs a check with one iPAddress constraint (hex of address and mask) and one name of the given hex. */
@@ -1786,11 +1953,11 @@ nc_ip(
 static void
 test_nc_ip(void)
 {
-	unsigned mark;
+	struct mark mark;
 	char hex[128];
 	size_t index;
 
-	mark = pool_next;
+	mark = mark_take();
 
 	/* 192.0.2.0/24 (RFC 5280 4.2.1.10's example). */
 	CHECK(nc_ip("c0000200ffffff00", NULL, "c0000201") == ALLOW);
@@ -1889,7 +2056,7 @@ test_nc_ip(void)
 	CHECK(nc_ip("00000000000000000000000000000001", NULL, "00000000000000000000000000000001") == EINVAL);
 	CHECK(nc_ip("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", NULL, "00000000000000000000000000000001") == DENY);
 
-	pool_next = mark;
+	mark_release(mark);
 }
 
 /* Runs a check with one rfc822Name constraint and one mailbox name. */
@@ -1915,12 +2082,12 @@ nc_mail(
 static void
 test_nc_mail(void)
 {
-	unsigned mark;
+	struct mark mark;
 	struct bytes *subject;
 	struct bytes *san;
 	char longname[600];
 
-	mark = pool_next;
+	mark = mark_take();
 
 	/* A host: the mailboxes on that host only. */
 	CHECK(nc_mail("example.com", NULL, "a@example.com") == ALLOW);
@@ -1963,6 +2130,24 @@ test_nc_mail(void)
 	CHECK(nc_mail(NULL, ".example.com", "a@example.com") == ALLOW);
 	CHECK(nc_mail(NULL, "root@example.com", "root@example.com") == DENY);
 	CHECK(nc_mail(NULL, "root@example.com", "other@example.com") == ALLOW);
+
+	/* A host constraint is the whole host: a longer host with the same start is another host. */
+	CHECK(nc_mail("example.com", NULL, "a@example.com.evil.org") == DENY);
+	CHECK(nc_mail("example.com", NULL, "a@example.comx") == DENY);
+	CHECK(nc_mail("example.com", NULL, "a@example.com.") == DENY);
+	CHECK(nc_mail("root@example.com", NULL, "root@example.com.evil.org") == DENY);
+	CHECK(nc_mail("root@example.com", NULL, "root@example.comx") == DENY);
+
+	/* The octets of a mailbox are printable ASCII, the first and the last too. */
+	CHECK(nc_mail("example.com", NULL, "a!b~c@example.com") == ALLOW);
+	CHECK(nc_mail("example.com", NULL, "!@example.com") == ALLOW);
+	CHECK(nc_mail("example.com", NULL, "~@example.com") == ALLOW);
+	CHECK(nc_mail("example.com", NULL, " a@example.com") == EINVAL);
+	CHECK(nc_mail("example.com", NULL, "a@example.com ") == EINVAL);
+	CHECK(nc_mail("example.com", NULL, "\x7f" "a@example.com") == EINVAL);
+	CHECK(nc_mail("example.com", NULL, "a@example.com\x80") == EINVAL);
+	CHECK(nc_mail(" example.com", NULL, "a@example.com") == EINVAL);
+	CHECK(nc_mail("example.com ", NULL, "a@example.com") == EINVAL);
 
 	/* Names that are not mailboxes, and constraints that are not host, domain or mailbox, are malformed. */
 	CHECK(nc_mail("example.com", NULL, "noat") == EINVAL);
@@ -2042,20 +2227,20 @@ test_nc_mail(void)
 	subject = n_one(OID_EMAIL, TAG_BMP, "x");
 	CHECK(nc(s_sub(g_dns("example.com")), NULL, subject, NULL) == ALLOW);
 
-	pool_next = mark;
+	mark_release(mark);
 }
 
 /* The cases of directoryName constraints. */
 static void
 test_nc_directory(void)
 {
-	unsigned mark;
+	struct mark mark;
 	struct bytes *constraint;
 	struct bytes *san;
 	struct bytes *subject;
 	struct bytes *bad;
 
-	mark = pool_next;
+	mark = mark_take();
 
 	/* The subject must begin with the constraint's RDNs. */
 	constraint = s_sub(g_dir(n_spec("C=US,O=Org")));
@@ -2169,14 +2354,14 @@ test_nc_directory(void)
 	CHECK(nc(NULL, s_sub(g_dir(bad)), n_empty(), NULL) == EINVAL);
 	CHECK(nc(s_sub(b_tlv(0x84U, n_spec("C=US"))), NULL, n_empty(), NULL) == EINVAL);
 
-	pool_next = mark;
+	mark_release(mark);
 }
 
 /* The forms this module does not evaluate, malformed tags, and the preconditions. */
 static void
 test_nc_other(void)
 {
-	unsigned mark;
+	struct mark mark;
 	struct bytes *other;
 	struct bytes *san;
 	struct bytes *subtrees;
@@ -2185,7 +2370,7 @@ test_nc_other(void)
 	size_t index;
 	unsigned char flipped[256];
 
-	mark = pool_next;
+	mark = mark_take();
 
 	/* A constraint of a form not evaluated fails the check when the subject has a name of that form, and is ignored otherwise. */
 	other = b_tlv(TAG_OTHER, b_cat(b_oid("1.2.3.4"), b_tlv(0xa0U, b_str(TAG_UTF8, "x"))));
@@ -2279,6 +2464,22 @@ test_nc_other(void)
 	make_cert(&leaf, NULL, NULL);
 	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == 0);
 
+	/* A subject with no bytes and a pointer has no name. */
+	make_cert(&leaf, n_spec("C=US"), NULL);
+	leaf.subject_size = 0;
+	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == 0);
+	make_ca(&ca, s_sub(g_dir(n_spec("C=FR"))), NULL);
+	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == 0);
+	make_ca(&ca, s_sub(g_dns("example.com")), NULL);
+
+	/* Names of the forms that are not evaluated do not count when no constraint of the form is there. */
+	subtrees = b_cat(g_dns("a.example.com"), b_cat(other, b_cat(b_tlv(TAG_X400, b_hex("3000")), b_cat(b_tlv(TAG_EDI, b_hex("3000")), b_cat(g_uri("https://a/"), b_str(TAG_RID, "\x2a\x03"))))));
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, n_empty(), subtrees) == ALLOW);
+	CHECK(nc(NULL, s_sub(g_dns("example.com")), n_empty(), b_cat(other, g_dns("a.example.org"))) == ALLOW);
+	CHECK(nc(s_sub(g_ip_hex("0a000000ff000000")), NULL, n_empty(), subtrees) == ALLOW);
+	CHECK(nc(s_sub(g_dir(n_spec("C=US"))), NULL, n_empty(), subtrees) == ALLOW);
+	CHECK(nc(s_sub(g_mail("example.com")), NULL, n_empty(), subtrees) == ALLOW);
+
 	/* Names in the SAN bytes are not read when the SAN flag is off. */
 	make_cert(&leaf, NULL, b_cat(g_dns("a..b"), g_dns("other.org")));
 	leaf.flags = 0;
@@ -2289,7 +2490,7 @@ test_nc_other(void)
 	leaf.flags |= CRYC_X509_HAS_SAN;
 	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == 0);
 
-	pool_next = mark;
+	mark_release(mark);
 }
 
 /* Writes count subtrees "<format with %u>" into dest, then the subtree last when it is not NULL; returns the size. */
@@ -2326,7 +2527,7 @@ big_subtrees(
 static void
 test_nc_budget(void)
 {
-	unsigned mark;
+	struct mark mark;
 	struct bytes *permitted;
 	struct bytes *san;
 	struct cryc_x509 ca;
@@ -2338,7 +2539,7 @@ test_nc_budget(void)
 	size_t excluded_size;
 	struct der_writer writer;
 
-	mark = pool_next;
+	mark = mark_take();
 
 	/* 64 subtrees that do not match, then one that does: a name costs 65 comparisons, so 63 names cost 4095. */
 	permitted = b_new();
@@ -2390,6 +2591,33 @@ test_nc_budget(void)
 	ca.excluded_size = excluded_size;
 	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == DENY);
 
+	/* Subtrees of other forms in the list cost nothing: 64 dNSName subtrees that do not match, 100 iPAddress subtrees, then the dNSName that matches. */
+	permitted = b_new();
+	for (count = 0; count < 64U; count++) {
+		sprintf(name, "n%u.example", count);
+		permitted = b_cat(permitted, s_sub(g_dns(name)));
+	}
+	for (count = 0; count < 100U; count++)
+		permitted = b_cat(permitted, s_sub(g_ip_hex("0a000000ff000000")));
+	permitted = b_cat(permitted, s_sub(g_dns("match.example")));
+	san = b_new();
+	for (names = 0; names < 63U; names++)
+		san = b_cat(san, g_dns("a.match.example"));
+	CHECK(nc(permitted, NULL, n_empty(), san) == ALLOW);
+	CHECK(nc(permitted, NULL, n_empty(), b_cat(san, g_dns("a.n1.example"))) == ENOTSUP);
+
+	/* An excluded list that runs out of budget is an error on its own, with no permitted list to hide it. */
+	used = big_subtrees(big_permitted, 4096, "e%u.excl", NULL);
+	memset(&ca, 0, sizeof(ca));
+	ca.flags = CRYC_X509_HAS_NAME_CONSTRAINTS;
+	ca.excluded = big_permitted;
+	ca.excluded_size = used;
+	make_cert(&leaf, n_empty(), g_dns("a.match.example"));
+	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == ALLOW);
+	used = big_subtrees(big_permitted, 4097, "e%u.excl", NULL);
+	ca.excluded_size = used;
+	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == ENOTSUP);
+
 	/* The pathological chain: 2049 permitted subtrees and 2049 names that all match the last subtree cost more than the budget, and 2049 names that match none are refused at the first. */
 	used = big_subtrees(big_permitted, 2048, "t%u.test", "tlast.test");
 	ca.permitted = big_permitted;
@@ -2414,7 +2642,7 @@ test_nc_budget(void)
 	leaf.san_size = writer.used;
 	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == DENY);
 
-	pool_next = mark;
+	mark_release(mark);
 }
 
 /* ------------------------------------------------------------------ */
