@@ -6,13 +6,15 @@
  */
 
 /*
- * The executor's Vulkan Video H.264 decode on the video decoder (NVDEC).
+ * The executor's Vulkan Video H.264 and H.265 decode on the video decoder
+ * (NVDEC).
  *
  * The wire is libvulkan's (userland/desktop/libvulkan/video.c), the same
  * the i915 and bcm2711 executors read: a structure is its type, its chain
  * (a presence word and the next structure, nested), then its fields; a
  * pointer is a presence word and what it points to; an array is a 64-bit
- * count and its elements; the H.264 flags are one word packed by name.
+ * count and its elements; the one-bit flags of a StdVideo structure are
+ * one word packed by name, a wider field a word of its own.
  *
  * The queries, sessions, parameters and result status query pools run at
  * once.  The four video commands and the three query commands are kept
@@ -77,9 +79,16 @@
 #define VIDEO_TYPE_H264_PARAMETERS_CREATE	1000040004U
 #define VIDEO_TYPE_H264_PARAMETERS_ADD		1000040005U
 #define VIDEO_TYPE_H264_DPB_SLOT		1000040006U
+#define VIDEO_TYPE_H265_CAPABILITIES		1000187000U
+#define VIDEO_TYPE_H265_PARAMETERS_CREATE	1000187001U
+#define VIDEO_TYPE_H265_PARAMETERS_ADD		1000187002U
+#define VIDEO_TYPE_H265_PROFILE			1000187003U
+#define VIDEO_TYPE_H265_PICTURE			1000187004U
+#define VIDEO_TYPE_H265_DPB_SLOT		1000187005U
 
 /* The flags and enumerants of the video API answered or checked. */
 #define VIDEO_OP_DECODE_H264			0x1U
+#define VIDEO_OP_DECODE_H265			0x2U
 #define VIDEO_CHROMA_420			0x2U
 #define VIDEO_DEPTH_8				0x1U
 #define VIDEO_LAYOUT_PROGRESSIVE		0U
@@ -91,6 +100,13 @@
 #define VIDEO_PROFILE_BASELINE			66U
 #define VIDEO_PROFILE_MAIN			77U
 #define VIDEO_PROFILE_HIGH			100U
+
+/* The H.265 profile taken: Main. */
+#define VIDEO_PROFILE_H265_MAIN			1U
+
+/* The codec of a session: H.264 or H.265 decode. */
+#define VIDEO_CODEC_H264			1U
+#define VIDEO_CODEC_H265			2U
 
 /* The video results the executor replies (the pinned header's values). */
 #define VIDEO_ERROR_IMAGE_USAGE			(-1000023000)
@@ -129,33 +145,85 @@
 #define VIDEO_STD_NAME				"VK_STD_vulkan_video_codec_h264_decode"
 #define VIDEO_STD_VERSION			((1U << 22) | (0U << 12) | 0U)
 
+/*
+ * The H.265 decode's limits: the CTB's largest size as the access
+ * granularity, the smallest picture, level 5.1 (the pinned header's
+ * STD_VIDEO_H265_LEVEL_IDC_5_1), and the header it was written against:
+ * VK_STD_vulkan_video_codec_h265_decode 1.0.0.
+ */
+#define VIDEO_H265_GRANULARITY			64U
+#define VIDEO_H265_MIN_SIDE			64U
+#define VIDEO_H265_LEVEL_5_1			8U
+#define VIDEO_H265_STD_NAME			"VK_STD_vulkan_video_codec_h265_decode"
+#define VIDEO_H265_STD_VERSION			((1U << 22) | (0U << 12) | 0U)
+
 /* The parameter set id ranges, and the deepest chain a structure may carry. */
 #define VIDEO_SPS_IDS				32U
 #define VIDEO_PPS_IDS				256U
 #define VIDEO_MAX_CHAIN				8U
 
+/* The H.265 parameter set id ranges. */
+#define VIDEO_H265_VPS_IDS			16U
+#define VIDEO_H265_SPS_IDS			16U
+#define VIDEO_H265_PPS_IDS			64U
+
+/*
+ * The sizes of the H.265 structures' fixed arrays as the wire sends them:
+ * the sub-layers, the coded picture buffers of a sub-layer's HRD, the
+ * short-term reference picture sets of a sequence, its long-term
+ * pictures, a short-term set's pictures, the palette's entries, the
+ * chroma offset lists and a picture's reference sets.
+ *
+ * Values referenced: Khronos Vulkan-Headers 1.4.309
+ * vk_video/vulkan_video_codec_h265std.h (STD_VIDEO_H265_SUBLAYERS_LIST_SIZE,
+ * STD_VIDEO_H265_CPB_CNT_LIST_SIZE, STD_VIDEO_H265_MAX_SHORT_TERM_REF_PIC_SETS,
+ * STD_VIDEO_H265_MAX_LONG_TERM_REF_PICS_SPS, STD_VIDEO_H265_MAX_DPB_SIZE,
+ * STD_VIDEO_H265_PREDICTOR_PALETTE_COMPONENTS_LIST_SIZE times
+ * STD_VIDEO_H265_PREDICTOR_PALETTE_COMP_ENTRIES_LIST_SIZE,
+ * STD_VIDEO_H265_CHROMA_QP_OFFSET_LIST_SIZE).
+ */
+#define VIDEO_H265_SUB_LAYERS			7U
+#define VIDEO_H265_CPB_COUNT			32U
+#define VIDEO_H265_SHORT_TERM_SETS		64U
+#define VIDEO_H265_LONG_TERM_PICS		32U
+#define VIDEO_H265_SET_PICTURES			16U
+#define VIDEO_H265_PALETTE_ENTRIES		384U
+#define VIDEO_H265_CHROMA_OFFSETS		6U
+
 /* The slots a begin record lists at most (each slot and one picture without a slot). */
 #define VIDEO_BEGIN_SLOTS			(NVRTX_VIDEO_SLOTS + 1U)
 
-/* The session's three memory bindings: the co-located data, the macroblock history, the history. */
+/*
+ * A session's memory bindings at most: an H.264 session's three (the
+ * co-located data, the macroblock history, the history), an H.265
+ * session's two (the co-located data, the filter buffer).
+ */
 #define VIDEO_BINDINGS				3U
+#define VIDEO_H264_BINDINGS			3U
+#define VIDEO_H265_BINDINGS			2U
 #define VIDEO_BIND_ALIGN			256U
 
 /*
  * The session's run of the executor's memory, and where its parts are:
- * the picture structure, the slice table, the decoder's status and the
- * push buffer of one decode (the decodes run one at a time).
+ * the picture structure, the slice table, the decoder's status, the
+ * H.265 scaling lists and tile sizes, and the push buffer of one decode
+ * (the decodes run one at a time).
  *
  * Value referenced: Mesa main 921d028a5fff2beb4ec90451913b5fcc05fb1e6a
  * src/nouveau/vulkan/rust/video/decode/h264.rs (the 4096 bytes of the
  * status).
  */
-#define VIDEO_RUN_BYTES				8192U
+#define VIDEO_RUN_BYTES				16384U
 #define VIDEO_RUN_PIC_AT			0U
-#define VIDEO_RUN_SLICES_AT			1024U
-#define VIDEO_RUN_STATUS_AT			2048U
+#define VIDEO_RUN_SLICES_AT			2048U
+#define VIDEO_RUN_STATUS_AT			3072U
 #define VIDEO_RUN_STATUS_BYTES			4096U
-#define VIDEO_RUN_PUSH_AT			6144U
+#define VIDEO_RUN_SCALING_AT			7168U
+#define VIDEO_RUN_TILES_AT			8192U
+#define VIDEO_RUN_PUSH_AT			12288U
+
+/* The bytes of a slice segment the header's skip is counted in at most. */
+#define VIDEO_H265_HEADER_BYTES			640U
 
 /* How long the executor waits for one picture's decode. */
 #define VIDEO_DECODE_US				2000000U
@@ -169,18 +237,37 @@ struct video_pps_node {
 	struct nvrtx_video_pps pps;
 };
 
+/* One H.265 sequence parameter set a parameters object holds; the object's sets are a list. */
+struct video_h265_sps_node {
+	struct video_h265_sps_node *next;
+	struct nvrtx_video_h265_sps sps;
+};
+
+/* One H.265 picture parameter set a parameters object holds; the object's sets are a list. */
+struct video_h265_pps_node {
+	struct video_h265_pps_node *next;
+	struct nvrtx_video_h265_pps pps;
+};
+
 /*
- * One VkVideoSessionParametersKHR: the H.264 sets of one session.
+ * One VkVideoSessionParametersKHR: the H.264 or H.265 sets of one
+ * session (its codec's).  The H.265 video parameter sets are kept only
+ * as the ids held (h265_vps, one bit each).
  *
  * It holds its session's object; the recorded decodes that use it hold it.
  */
 struct video_parameters {
 	struct nvrtx_vk_object *session;
+	uint32_t codec;
+	uint32_t max_vps;
 	uint32_t max_sps;
 	uint32_t max_pps;
 	uint32_t update_sequence;
 	struct nvrtx_video_sps *sps[VIDEO_SPS_IDS];
 	struct video_pps_node *pps;
+	uint32_t h265_vps;
+	struct video_h265_sps_node *h265_sps;
+	struct video_h265_pps_node *h265_pps;
 };
 
 /* One memory binding of a session: the memory it holds, where in it, and how many bytes. */
@@ -193,23 +280,31 @@ struct video_binding {
 /*
  * One VkVideoSessionKHR.
  *
- * It keeps the limits it was made with, the sizes and bindings of its
- * work buffers, the decoder's reference entries of its DPB slots and the
- * number of the next picture, and its run of the executor's memory.  The
+ * It keeps its codec and the limits it was made with, the sizes and
+ * bindings of its work buffers (and an H.265 session where its filter
+ * buffer's parts are), the decoder's reference entries of its DPB slots
+ * (H.264) and the number of the next picture, its run of the executor's
+ * memory, and the scratch an H.265 decode resolves its scaling lists and
+ * copies its slice header into.  The
  * entries and the number change only when the executor runs the
  * session's commands, under the node's lock.
  */
 struct video_session {
 	void *owner;
+	uint32_t codec;
 	uint32_t profile_idc;
 	uint32_t width;
 	uint32_t height;
 	uint32_t slots;
 	uint32_t references;
+	uint32_t binding_count;
+	struct nvrtx_nvdec_hevc_buffers hevc;
 	uint32_t sizes[VIDEO_BINDINGS];
 	struct video_binding bindings[VIDEO_BINDINGS];
 	struct nvrtx_video_dpb dpb;
 	uint32_t serial;
+	struct nvrtx_nvdec_hevc_scaling scaling;
+	uint8_t header[VIDEO_H265_HEADER_BYTES];
 	void *run_token;
 	uint8_t *run_cpu;
 	uint64_t run_va;
@@ -239,7 +334,7 @@ struct video_resource {
 /*
  * One reference slot as recorded: its index (-1 for none), whether it
  * names a picture, the picture's view (held while the record lives) and
- * the slot's H.264 reference information.
+ * the slot's H.264 or H.265 reference information.
  */
 struct video_slot {
 	int32_t index;
@@ -248,6 +343,8 @@ struct video_slot {
 	struct nvrtx_vk_object *view;
 	bool has_reference;
 	struct nvrtx_video_reference reference;
+	bool has_h265_reference;
+	struct nvrtx_video_h265_reference h265_reference;
 };
 
 /*
@@ -276,6 +373,8 @@ struct video_record {
 	struct video_slot slots[VIDEO_BEGIN_SLOTS];
 	bool has_picture;
 	struct nvrtx_video_picture picture;
+	bool has_h265_picture;
+	struct nvrtx_video_h265_picture h265_picture;
 	uint32_t slice_count;
 	uint32_t slices[NVRTX_NVDEC_SLICES_MAX];
 	uint32_t query;
@@ -290,6 +389,7 @@ struct video_record {
  */
 struct video_chain {
 	bool has_h264_profile;
+	bool has_h265_profile;
 	uint32_t profile_idc;
 	uint32_t picture_layout;
 	bool has_profile_list;
@@ -310,6 +410,15 @@ struct video_chain {
 	bool slices_overflow;
 	bool has_reference;
 	struct nvrtx_video_reference reference;
+	bool has_h265_create;
+	uint32_t max_vps;
+	uint32_t new_h265_vps;
+	struct video_h265_sps_node *new_h265_sps;
+	struct video_h265_pps_node *new_h265_pps;
+	bool has_h265_picture;
+	struct nvrtx_video_h265_picture h265_picture;
+	bool has_h265_reference;
+	struct nvrtx_video_h265_reference h265_reference;
 };
 
 /*
@@ -326,8 +435,16 @@ static uint32_t video_open_query;
 /* The skipped pictures logged so far (guarded by the node's lock). */
 static uint32_t video_skip_lines;
 
+/*
+ * The objects held for the boot after the decoder did not finish a
+ * picture, and the bytes of memory they keep (guarded by the node's
+ * lock): the decoder may still write them, so they are never freed.
+ */
+static uint32_t video_isolated_objects;
+static uint64_t video_isolated_bytes;
+
 static int video_capabilities(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
-static void video_reply_capabilities(struct i915_wire_writer *reply, const uint32_t *types, uint32_t count);
+static void video_reply_capabilities(struct i915_wire_writer *reply, const uint32_t *types, uint32_t count, uint32_t codec);
 static int video_format_properties(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int video_family_properties(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int video_session_create(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -341,7 +458,7 @@ static int video_session_destroy(struct nvrtx_vk_session *session, void *payload
 static int video_parameters_destroy(struct nvrtx_vk_session *session, void *payload);
 static void video_read_chain(struct i915_wire_reader *reader, struct video_chain *chain, uint32_t depth);
 static void video_read_fields(struct i915_wire_reader *reader, uint32_t type, struct video_chain *chain, uint32_t depth);
-static int32_t video_read_profile(struct i915_wire_reader *reader, uint32_t *profile_idc);
+static int32_t video_read_profile(struct i915_wire_reader *reader, uint32_t *codec, uint32_t *profile_idc);
 static int32_t video_profile_result(uint32_t operation, uint32_t chroma, uint32_t luma, uint32_t chroma_depth, const struct video_chain *chain);
 static void video_read_resource(struct i915_wire_reader *reader, struct video_resource *resource);
 static void video_read_slot(struct i915_wire_reader *reader, struct video_slot *slot);
@@ -349,8 +466,30 @@ static void video_read_slots(struct i915_wire_reader *reader, struct video_recor
 static void video_read_add(struct i915_wire_reader *reader, struct video_chain *chain);
 static void video_read_scaling(struct i915_wire_reader *reader, struct nvrtx_video_scaling *scaling);
 static void video_read_extension(struct i915_wire_reader *reader, char *name, uint32_t *version);
+static void video_read_offsets(struct i915_wire_reader *reader, struct video_chain *chain);
+static void video_read_h265_picture(struct i915_wire_reader *reader, struct nvrtx_video_h265_picture *picture);
+static void video_read_h265_add(struct i915_wire_reader *reader, struct video_chain *chain);
+static uint32_t video_read_h265_vps(struct i915_wire_reader *reader);
+static void video_read_h265_sps(struct i915_wire_reader *reader, struct nvrtx_video_h265_sps *sps);
+static void video_read_h265_pps(struct i915_wire_reader *reader, struct nvrtx_video_h265_pps *pps);
+static void video_read_h265_ptl(struct i915_wire_reader *reader);
+static void video_read_h265_dpb(struct i915_wire_reader *reader);
+static void video_read_h265_hrd(struct i915_wire_reader *reader, uint32_t sub_layers);
+static void video_read_h265_sub_layers(struct i915_wire_reader *reader, uint32_t sub_layers);
+static void video_read_h265_scaling(struct i915_wire_reader *reader, struct nvrtx_video_h265_scaling *scaling);
+static void video_read_h265_vui(struct i915_wire_reader *reader, uint32_t sub_layers);
+static void video_read_h265_short_term(struct i915_wire_reader *reader);
+static void video_read_h265_long_term(struct i915_wire_reader *reader);
+static void video_read_words(struct i915_wire_reader *reader, uint32_t *words, uint32_t expected);
+static void video_read_fixed(struct i915_wire_reader *reader, void *bytes, uint32_t expected);
+static void video_skip_words(struct i915_wire_reader *reader, uint32_t count);
 static void video_chain_free(struct video_chain *chain);
 static int video_parameters_take(struct video_parameters *parameters, struct video_chain *chain, bool replace);
+static int video_h265_take(struct video_parameters *parameters, struct video_chain *chain, bool replace);
+static int video_h265_copy(struct video_parameters *destination, const struct video_parameters *source);
+static void video_h265_free(struct video_parameters *parameters);
+static const struct nvrtx_video_h265_sps *video_find_h265_sps(const struct video_parameters *parameters, uint32_t vps_id, uint32_t sps_id);
+static const struct nvrtx_video_h265_pps *video_find_h265_pps(const struct video_parameters *parameters, uint32_t vps_id, uint32_t sps_id, uint32_t pps_id);
 static int video_parameters_copy(struct video_parameters *destination, const struct video_parameters *source);
 static void video_parameters_free(struct video_parameters *parameters);
 static const struct nvrtx_video_pps *video_find_pps(const struct video_parameters *parameters, uint32_t sps_id, uint32_t pps_id);
@@ -362,6 +501,12 @@ static void video_release(struct video_record *video);
 static void video_run_begin(const struct video_record *video);
 static void video_run_control(const struct video_record *video);
 static int video_run_decode(struct nvrtx_vk_session *session, const struct video_record *video);
+static int video_run_decode_h265(struct nvrtx_vk_session *session, const struct video_record *video);
+static const char *video_check_h265(const struct video_record *video, const struct video_session *state, const struct video_parameters *parameters, const struct nvrtx_video_h265_sps **sps_out, const struct nvrtx_video_h265_pps **pps_out);
+static const char *video_check_resources(const struct video_record *video, const struct video_session *state, uint32_t width, uint32_t height, uint32_t granularity, uint32_t slots);
+static int video_decoded(struct nvrtx_vk_session *session, const struct video_record *video, uint64_t push_va, size_t length);
+static void video_isolate(const struct video_record *video);
+static void video_hold_for_boot(struct nvrtx_vk_object *object, uint64_t bytes);
 static const char *video_check(const struct video_record *video, const struct video_session *state, const struct video_parameters *parameters, const struct nvrtx_video_sps **sps_out, const struct nvrtx_video_pps **pps_out);
 static const char *video_check_picture(const struct nvrtx_vk_object *view_object, const struct video_session *state, const struct nvrtx_vk_image **image_out);
 static int video_plane_addresses(const struct nvrtx_vk_image *image, uint64_t *luma, uint64_t *chroma);
@@ -639,16 +784,18 @@ video_capabilities(
 	uint32_t types[VIDEO_MAX_CHAIN];
 	uint32_t count;
 	uint32_t idc;
+	uint32_t codec;
 	uint64_t present;
 	int32_t result;
 	bool available;
 
-	/* Skips the physical device and reads the profile, which decides the result. */
+	/* Skips the physical device and reads the profile, which decides the result and the codec. */
 	(void)drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	result = VIDEO_ERROR_OPERATION;
+	codec = 0U;
 	if (present != 0U)
-		result = video_read_profile(reader, &idc);
+		result = video_read_profile(reader, &codec, &idc);
 
 	/* Reads the shape of the output: the capabilities record and what is chained to it. */
 	count = 0U;
@@ -685,18 +832,22 @@ video_capabilities(
 	/* Replies the result and the records in the shape's order. */
 	drv_i915_wire_reply_u32(reply, 0U);
 	drv_i915_wire_reply_u64(reply, 1U);
-	video_reply_capabilities(reply, types, count);
+	video_reply_capabilities(reply, types, count, codec);
 
 	/* Succeeded: the capabilities are reported. */
 	return 0;
 }
 
-/* Replies one output record of the capabilities' shape and, nested before its fields, the rest. */
+/*
+ * Replies one output record of the capabilities' shape and, nested before
+ * its fields, the rest; codec is the profile's.
+ */
 static void
 video_reply_capabilities(
 	struct i915_wire_writer *reply,
 	const uint32_t *types,
-	uint32_t count)
+	uint32_t count,
+	uint32_t codec)
 {
 	char name[VK_MAX_EXTENSION_NAME_SIZE];
 
@@ -704,7 +855,7 @@ video_reply_capabilities(
 	drv_i915_wire_reply_u32(reply, types[0]);
 	if (count > 1U) {
 		drv_i915_wire_reply_u64(reply, 1U);
-		video_reply_capabilities(reply, types + 1, count - 1U);
+		video_reply_capabilities(reply, types + 1, count - 1U, codec);
 	} else {
 		drv_i915_wire_reply_u64(reply, 0U);
 	}
@@ -712,10 +863,30 @@ video_reply_capabilities(
 	/* The record's fields. */
 	switch (types[0]) {
 	case VIDEO_TYPE_CAPABILITIES:
-		/* Separate reference images; 256-byte bitstream offsets and sizes; 16x16; the sizes and slot limits. */
+		/* Separate reference images, 256-byte bitstream offsets and sizes. */
 		drv_i915_wire_reply_u32(reply, VIDEO_SEPARATE_REFERENCE_IMAGES);
 		drv_i915_wire_reply_u64(reply, VIDEO_BITSTREAM_ALIGN);
 		drv_i915_wire_reply_u64(reply, VIDEO_BITSTREAM_ALIGN);
+
+		/* H.265: the CTB granularity, its sizes and slot limits, and its header's name. */
+		kern_memset(name, 0, sizeof(name));
+		if (codec == VIDEO_CODEC_H265) {
+			drv_i915_wire_reply_u32(reply, VIDEO_H265_GRANULARITY);
+			drv_i915_wire_reply_u32(reply, VIDEO_H265_GRANULARITY);
+			drv_i915_wire_reply_u32(reply, VIDEO_H265_MIN_SIDE);
+			drv_i915_wire_reply_u32(reply, VIDEO_H265_MIN_SIDE);
+			drv_i915_wire_reply_u32(reply, VIDEO_MAX_SIDE);
+			drv_i915_wire_reply_u32(reply, VIDEO_MAX_SIDE);
+			drv_i915_wire_reply_u32(reply, NVRTX_VIDEO_H265_SLOTS);
+			drv_i915_wire_reply_u32(reply, NVRTX_VIDEO_H265_REFERENCES);
+			kern_memcpy(name, VIDEO_H265_STD_NAME, sizeof(VIDEO_H265_STD_NAME));
+			drv_i915_wire_reply_u64(reply, VK_MAX_EXTENSION_NAME_SIZE);
+			drv_i915_wire_reply_bytes(reply, name, sizeof(name));
+			drv_i915_wire_reply_u32(reply, VIDEO_H265_STD_VERSION);
+			break;
+		}
+
+		/* H.264: 16x16, its sizes and slot limits, and its header's name. */
 		drv_i915_wire_reply_u32(reply, VIDEO_GRANULARITY);
 		drv_i915_wire_reply_u32(reply, VIDEO_GRANULARITY);
 		drv_i915_wire_reply_u32(reply, VIDEO_MIN_WIDTH);
@@ -724,9 +895,6 @@ video_reply_capabilities(
 		drv_i915_wire_reply_u32(reply, VIDEO_MAX_SIDE);
 		drv_i915_wire_reply_u32(reply, NVRTX_VIDEO_SLOTS);
 		drv_i915_wire_reply_u32(reply, NVRTX_VIDEO_REFERENCES);
-
-		/* The H.264 header name, padded to its array, and version. */
-		kern_memset(name, 0, sizeof(name));
 		kern_memcpy(name, VIDEO_STD_NAME, sizeof(VIDEO_STD_NAME));
 		drv_i915_wire_reply_u64(reply, VK_MAX_EXTENSION_NAME_SIZE);
 		drv_i915_wire_reply_bytes(reply, name, sizeof(name));
@@ -741,6 +909,10 @@ video_reply_capabilities(
 		drv_i915_wire_reply_u32(reply, VIDEO_LEVEL_5_2);
 		drv_i915_wire_reply_u32(reply, 0U);
 		drv_i915_wire_reply_u32(reply, 0U);
+		break;
+	case VIDEO_TYPE_H265_CAPABILITIES:
+		/* Level 5.1. */
+		drv_i915_wire_reply_u32(reply, VIDEO_H265_LEVEL_5_1);
 		break;
 	default:
 		/* A record the executor does not know cannot be answered. */
@@ -784,7 +956,7 @@ video_format_properties(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* The profiles must all be H.264 decode; usages are the decode's output, reference and readback. */
+	/* The profiles must all be ones the decoder takes; usages are the decode's output, reference and readback. */
 	result = 0;
 	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
 	    VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -832,8 +1004,8 @@ video_format_properties(
 
 /*
  * The codec operations of each queue family: [physical][count] ->
- * [present][count]{operations}.  The one family decodes H.264 when the
- * device has the decoder.
+ * [present][count]{operations}.  The one family decodes H.264 and H.265
+ * when the device has the decoder.
  */
 static int
 video_family_properties(
@@ -851,11 +1023,11 @@ video_family_properties(
 	if (reader->error != 0 || count != 1U)
 		return EINVAL;
 
-	/* H.264 decode for family 0 with the decoder, nothing without it. */
+	/* H.264 and H.265 decode for family 0 with the decoder, nothing without it. */
 	operations = 0U;
 	available = nvrtx_vk_video_available(session->owner);
 	if (available)
-		operations = VIDEO_OP_DECODE_H264;
+		operations = VIDEO_OP_DECODE_H264 | VIDEO_OP_DECODE_H265;
 	drv_i915_wire_reply_u64(reply, 1U);
 	drv_i915_wire_reply_u32(reply, 1U);
 	drv_i915_wire_reply_u32(reply, operations);
@@ -898,6 +1070,13 @@ video_session_create(
 	uint32_t height_mbs;
 	uint32_t version;
 	uint32_t profile_idc;
+	uint32_t codec;
+	uint32_t min_width;
+	uint32_t min_height;
+	uint32_t max_slots;
+	uint32_t max_references;
+	uint32_t std_version;
+	const char *std_name;
 	int32_t result;
 	int different;
 	int error;
@@ -915,9 +1094,10 @@ video_session_create(
 	flags = drv_i915_wire_read_u32(reader);
 	result = VIDEO_ERROR_OPERATION;
 	profile_idc = 0U;
+	codec = 0U;
 	present = drv_i915_wire_read_u64(reader);
 	if (present != 0U)
-		result = video_read_profile(reader, &profile_idc);
+		result = video_read_profile(reader, &codec, &profile_idc);
 	picture_format = drv_i915_wire_read_u32(reader);
 	width = drv_i915_wire_read_u32(reader);
 	height = drv_i915_wire_read_u32(reader);
@@ -933,8 +1113,24 @@ video_session_create(
 	if (reader->error != 0 || identity == 0U)
 		return EINVAL;
 
+	/* The codec's limits and header. */
+	min_width = VIDEO_MIN_WIDTH;
+	min_height = VIDEO_MIN_HEIGHT;
+	max_slots = NVRTX_VIDEO_SLOTS;
+	max_references = NVRTX_VIDEO_REFERENCES;
+	std_name = VIDEO_STD_NAME;
+	std_version = VIDEO_STD_VERSION;
+	if (codec == VIDEO_CODEC_H265) {
+		min_width = VIDEO_H265_MIN_SIDE;
+		min_height = VIDEO_H265_MIN_SIDE;
+		max_slots = NVRTX_VIDEO_H265_SLOTS;
+		max_references = NVRTX_VIDEO_H265_REFERENCES;
+		std_name = VIDEO_H265_STD_NAME;
+		std_version = VIDEO_H265_STD_VERSION;
+	}
+
 	/* Checks the session against what the decoder takes; the first reason is the result. */
-	different = kern_strcmp(name, VIDEO_STD_NAME);
+	different = kern_strcmp(name, std_name);
 	if (result != 0) {
 		/* The profile's own reason. */
 	} else if (family != 0U) {
@@ -943,14 +1139,14 @@ video_session_create(
 		result = VK_ERROR_FEATURE_NOT_PRESENT;
 	} else if (picture_format != NVRTX_VK_FORMAT_NV12 || reference_format != NVRTX_VK_FORMAT_NV12) {
 		result = VIDEO_ERROR_FORMAT;
-	} else if (width < VIDEO_MIN_WIDTH ||
-	    height < VIDEO_MIN_HEIGHT ||
+	} else if (width < min_width ||
+	    height < min_height ||
 	    width > VIDEO_MAX_SIDE ||
 	    height > VIDEO_MAX_SIDE) {
 		result = VK_ERROR_INITIALIZATION_FAILED;
-	} else if (slots > NVRTX_VIDEO_SLOTS || references > NVRTX_VIDEO_REFERENCES) {
+	} else if (slots > max_slots || references > max_references) {
 		result = VK_ERROR_INITIALIZATION_FAILED;
-	} else if (different != 0 || version > VIDEO_STD_VERSION) {
+	} else if (different != 0 || version > std_version) {
 		result = VIDEO_ERROR_STD_VERSION;
 	}
 
@@ -969,6 +1165,7 @@ video_session_create(
 
 	/* Fills in the session from the create call's fields. */
 	state->owner = session->owner;
+	state->codec = codec;
 	state->profile_idc = profile_idc;
 	state->width = width;
 	state->height = height;
@@ -987,9 +1184,23 @@ video_session_create(
 	width_mbs = video_mbs(width);
 	height_mbs = video_mbs(height);
 	nvrtx_nvdec_buffer_sizes(width_mbs, height_mbs, surfaces - 1U, &buffers);
+	state->binding_count = VIDEO_H264_BINDINGS;
 	state->sizes[0] = buffers.coloc;
 	state->sizes[1] = buffers.mbhist;
 	state->sizes[2] = buffers.history;
+
+	/*
+	 * An H.265 session's: co-located data for each of the sixteen
+	 * surfaces and one more, and the filter buffer for its largest
+	 * picture.
+	 */
+	if (codec == VIDEO_CODEC_H265) {
+		nvrtx_nvdec_hevc_buffer_sizes(width, height, NVRTX_NVDEC_HEVC_SURFACES + 1U, &state->hevc);
+		state->binding_count = VIDEO_H265_BINDINGS;
+		state->sizes[0] = state->hevc.coloc;
+		state->sizes[1] = state->hevc.filter;
+		state->sizes[2] = 0U;
+	}
 
 	/* The run the decodes' structures and push buffers are written into. */
 	error = nvrtx_vk_gpu_alloc_system(session->owner, VIDEO_RUN_BYTES, &state->run_token, &state->run_cpu, &state->run_va);
@@ -1009,8 +1220,9 @@ video_session_create(
 
 /*
  * vkGetVideoSessionMemoryRequirementsKHR: [device][session][present][capacity]
- * [array] -> [result][present][count][array]{binding}.  The three work
- * buffers, each on 256 bytes, of the one memory type.
+ * [array] -> [result][present][count][array]{binding}.  The session's
+ * work buffers (three for H.264, two for H.265), each on 256 bytes, of
+ * the one memory type.
  */
 static int
 video_requirements(
@@ -1035,7 +1247,7 @@ video_requirements(
 
 	/* An unknown session, or no room for the bindings, is refused. */
 	state = nvrtx_vk_payload(session, I915_VK_OBJ_VIDEO_SESSION, identity);
-	if (state == NULL || capacity < VIDEO_BINDINGS) {
+	if (state == NULL || capacity < state->binding_count) {
 		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 		return 0;
 	}
@@ -1043,9 +1255,9 @@ video_requirements(
 	/* The bindings: each its type, no chain, its index, its size on the boundary, the boundary, memory type 0. */
 	drv_i915_wire_reply_u32(reply, 0U);
 	drv_i915_wire_reply_u64(reply, 1U);
-	drv_i915_wire_reply_u32(reply, VIDEO_BINDINGS);
-	drv_i915_wire_reply_u64(reply, VIDEO_BINDINGS);
-	for (index = 0U; index < VIDEO_BINDINGS; index++) {
+	drv_i915_wire_reply_u32(reply, state->binding_count);
+	drv_i915_wire_reply_u64(reply, state->binding_count);
+	for (index = 0U; index < state->binding_count; index++) {
 		bytes = ((uint64_t)state->sizes[index] + VIDEO_BIND_ALIGN - 1U) & ~((uint64_t)VIDEO_BIND_ALIGN - 1U);
 		drv_i915_wire_reply_u32(reply, VIDEO_TYPE_MEMORY_REQUIREMENTS);
 		drv_i915_wire_reply_u64(reply, 0U);
@@ -1117,7 +1329,7 @@ video_bind(
 			storage = memory->payload;
 		if (state == NULL || result != 0) {
 			continue;
-		} else if (index >= VIDEO_BINDINGS ||
+		} else if (index >= state->binding_count ||
 		    storage == NULL ||
 		    state->bindings[index].memory != NULL) {
 			result = VK_ERROR_INITIALIZATION_FAILED;
@@ -1156,8 +1368,9 @@ video_bind(
 
 /*
  * vkCreateVideoSessionParametersKHR: [device][present]{create info: chain
- * (H.264 create and add), flags, template, session}[allocator][present]
- * [identity] -> [result][present][identity].
+ * (the H.264 or H.265 create and add), flags, template, session}
+ * [allocator][present][identity] -> [result][present][identity].  The
+ * create record must be of the session's codec.
  */
 static int
 video_parameters_create(
@@ -1169,12 +1382,15 @@ video_parameters_create(
 	const struct video_parameters *source;
 	struct nvrtx_vk_object *owner;
 	struct nvrtx_vk_object *template_object;
+	const struct video_session *state;
 	struct video_chain chain;
 	uint64_t present;
 	uint64_t identity;
 	uint64_t template_identity;
 	uint64_t session_identity;
 	uint32_t type;
+	uint32_t codec;
+	bool created;
 	int error;
 
 	/* Reads the create info: [type][chain][flags][template][session], then the identity. */
@@ -1194,10 +1410,18 @@ video_parameters_create(
 		return EINVAL;
 	}
 
-	/* The session must exist and the H.264 create record be given; a template must be of the same session. */
+	/* The session must exist and its codec's create record be given; a template must be of the same session. */
 	error = 0;
 	source = NULL;
+	codec = 0U;
 	owner = nvrtx_vk_object_find(session, I915_VK_OBJ_VIDEO_SESSION, session_identity);
+	if (owner != NULL) {
+		state = owner->payload;
+		codec = state->codec;
+	}
+	created = chain.has_h264_create;
+	if (codec == VIDEO_CODEC_H265)
+		created = chain.has_h265_create;
 	template_object = NULL;
 	if (template_identity != 0U)
 		template_object = nvrtx_vk_object_find(session, I915_VK_OBJ_VIDEO_SESSION_PARAMETERS, template_identity);
@@ -1205,7 +1429,7 @@ video_parameters_create(
 		source = template_object->payload;
 	if (owner == NULL) {
 		error = EINVAL;
-	} else if (!chain.has_h264_create || chain.add_error != 0) {
+	} else if (!created || chain.add_error != 0) {
 		error = EINVAL;
 	} else if (template_identity != 0U && (source == NULL || source->session != owner)) {
 		error = EINVAL;
@@ -1223,17 +1447,23 @@ video_parameters_create(
 	if (error == 0)
 		error = nvrtx_vk_object_retain(owner);
 
-	/* Records the session and the parameters' capacity once the session is held. */
+	/* Records the session, its codec and the parameters' capacity once the session is held. */
 	if (error == 0) {
 		parameters->session = owner;
+		parameters->codec = codec;
+		parameters->max_vps = chain.max_vps;
 		parameters->max_sps = chain.max_sps;
 		parameters->max_pps = chain.max_pps;
 	}
 
-	/* Copies the template's sets, then adds the new ones. */
-	if (error == 0 && source != NULL)
+	/* Copies the template's sets, then adds the new ones, of the session's codec. */
+	if (error == 0 && source != NULL && codec == VIDEO_CODEC_H265)
+		error = video_h265_copy(parameters, source);
+	if (error == 0 && source != NULL && codec != VIDEO_CODEC_H265)
 		error = video_parameters_copy(parameters, source);
-	if (error == 0)
+	if (error == 0 && codec == VIDEO_CODEC_H265)
+		error = video_h265_take(parameters, &chain, true);
+	if (error == 0 && codec != VIDEO_CODEC_H265)
 		error = video_parameters_take(parameters, &chain, true);
 	video_chain_free(&chain);
 
@@ -1293,9 +1523,13 @@ video_parameters_update(
 	    chain.add_error != 0)
 		result = VK_ERROR_INITIALIZATION_FAILED;
 
-	/* Adds the sets; a key already held refuses the whole update. */
+	/* Adds the sets of the object's codec; a key already held refuses the whole update. */
 	if (result == 0) {
-		error = video_parameters_take(parameters, &chain, false);
+		if (parameters->codec == VIDEO_CODEC_H265) {
+			error = video_h265_take(parameters, &chain, false);
+		} else {
+			error = video_parameters_take(parameters, &chain, false);
+		}
 		if (error == ENOMEM) {
 			result = VK_ERROR_OUT_OF_HOST_MEMORY;
 		} else if (error != 0) {
@@ -1541,6 +1775,7 @@ video_parameters_destroy(
 
 	/* The sets, then the session it held. */
 	video_parameters_free(parameters);
+	video_h265_free(parameters);
 	error = 0;
 	if (parameters->session != NULL)
 		error = nvrtx_vk_object_release(parameters->session);
@@ -1594,6 +1829,7 @@ video_read_fields(
 	uint64_t count;
 	uint64_t item;
 	uint32_t value;
+	uint32_t codec;
 	int32_t result;
 
 	/* Reads each chained type the library writes; any other fails the stream. */
@@ -1608,15 +1844,20 @@ video_read_fields(
 		/* Usage hints, which the decoder does not use. */
 		(void)drv_i915_wire_read_u32(reader);
 		break;
+	case VIDEO_TYPE_H265_PROFILE:
+		/* The H.265 profile. */
+		chain->has_h265_profile = true;
+		chain->profile_idc = drv_i915_wire_read_u32(reader);
+		break;
 	case VIDEO_TYPE_PROFILE_LIST:
-		/* [count][array]{profile}: every profile must be H.264 decode; the first refusal is kept. */
+		/* [count][array]{profile}: every profile must be one the decoder takes; the first refusal is kept. */
 		chain->has_profile_list = true;
 		(void)drv_i915_wire_read_u32(reader);
 		count = drv_i915_wire_read_u64(reader);
 		chain->profile_count = (uint32_t)count;
 		chain->profiles_supported = true;
 		for (item = 0U; item < count && reader->error == 0; item++) {
-			result = video_read_profile(reader, &value);
+			result = video_read_profile(reader, &codec, &value);
 			if (result != 0 && chain->profiles_supported) {
 				chain->profiles_supported = false;
 				chain->profile_error = result;
@@ -1683,22 +1924,51 @@ video_read_fields(
 			chain->picture.poc[1] = (int32_t)drv_i915_wire_read_u32(reader);
 		}
 
-		/* The slices' offsets, kept up to the decoder's table (more marks the picture). */
-		(void)drv_i915_wire_read_u32(reader);
-		count = drv_i915_wire_read_u64(reader);
-		if (count > (uint64_t)(reader->size - reader->offset))
-			reader->error = 1;
-		chain->slice_count = 0U;
-		for (item = 0U; item < count && reader->error == 0; item++) {
+		/* The slices' offsets. */
+		video_read_offsets(reader, chain);
+		break;
+	case VIDEO_TYPE_H265_PARAMETERS_CREATE:
+		/* The capacity of each kind of set, then the add record the create carries, if any. */
+		chain->has_h265_create = true;
+		chain->max_vps = drv_i915_wire_read_u32(reader);
+		chain->max_sps = drv_i915_wire_read_u32(reader);
+		chain->max_pps = drv_i915_wire_read_u32(reader);
+		present = drv_i915_wire_read_u64(reader);
+		if (present != 0U) {
 			value = drv_i915_wire_read_u32(reader);
-			if (chain->slices != NULL && item < NVRTX_NVDEC_SLICES_MAX) {
-				chain->slices[item] = value;
-				chain->slice_count++;
-			} else {
-				chain->slices_overflow = true;
-			}
+			if (value != VIDEO_TYPE_H265_PARAMETERS_ADD)
+				reader->error = 1;
+			kern_memset(&nested, 0, sizeof(nested));
+			video_read_chain(reader, &nested, depth + 1U);
+			video_chain_free(&nested);
+			video_read_h265_add(reader, chain);
 		}
 
+		break;
+	case VIDEO_TYPE_H265_PARAMETERS_ADD:
+		/* The sets added. */
+		video_read_h265_add(reader, chain);
+		break;
+	case VIDEO_TYPE_H265_DPB_SLOT:
+		/* [present]{flags, PicOrderCntVal}: the reference's H.265 information. */
+		present = drv_i915_wire_read_u64(reader);
+		if (present != 0U) {
+			chain->has_h265_reference = true;
+			chain->h265_reference.flags = drv_i915_wire_read_u32(reader);
+			chain->h265_reference.poc = (int32_t)drv_i915_wire_read_u32(reader);
+		}
+
+		break;
+	case VIDEO_TYPE_H265_PICTURE:
+		/* [present]{picture}[slice segment count][array]{offset}. */
+		present = drv_i915_wire_read_u64(reader);
+		if (present != 0U) {
+			chain->has_h265_picture = true;
+			video_read_h265_picture(reader, &chain->h265_picture);
+		}
+
+		/* The slice segments' offsets. */
+		video_read_offsets(reader, chain);
 		break;
 	default:
 		/* A structure the library does not write here. */
@@ -1710,11 +1980,13 @@ video_read_fields(
 /*
  * Reads a profile structure: its type, its chain and its four fields.
  * Returns 0 for a profile the decoder takes, or the standard reason another
- * is refused; the H.264 profile it names goes to profile_idc.
+ * is refused; its codec (0 for none taken) goes to codec, the H.264 or
+ * H.265 profile it names to profile_idc.
  */
 static int32_t
 video_read_profile(
 	struct i915_wire_reader *reader,
+	uint32_t *codec,
 	uint32_t *profile_idc)
 {
 	struct video_chain chain;
@@ -1741,6 +2013,13 @@ video_read_profile(
 	result = video_profile_result(operation, chroma, luma, chroma_depth, &chain);
 	*profile_idc = chain.profile_idc;
 
+	/* The codec of a profile taken. */
+	*codec = 0U;
+	if (result == 0 && operation == VIDEO_OP_DECODE_H264)
+		*codec = VIDEO_CODEC_H264;
+	if (result == 0 && operation == VIDEO_OP_DECODE_H265)
+		*codec = VIDEO_CODEC_H265;
+
 	/* Succeeded: reports the profile's result. */
 	return result;
 }
@@ -1754,8 +2033,8 @@ video_profile_result(
 	uint32_t chroma_depth,
 	const struct video_chain *chain)
 {
-	/* H.264 decode is the one operation. */
-	if (operation != VIDEO_OP_DECODE_H264)
+	/* H.264 and H.265 decode are the operations. */
+	if (operation != VIDEO_OP_DECODE_H264 && operation != VIDEO_OP_DECODE_H265)
 		return VIDEO_ERROR_OPERATION;
 
 	/* 8-bit 4:2:0 is the one format. */
@@ -1763,6 +2042,15 @@ video_profile_result(
 	    luma != VIDEO_DEPTH_8 ||
 	    chroma_depth != VIDEO_DEPTH_8)
 		return VIDEO_ERROR_FORMAT;
+
+	/* The H.265 record must be there and name Main. */
+	if (operation == VIDEO_OP_DECODE_H265) {
+		if (!chain->has_h265_profile)
+			return VIDEO_ERROR_CODEC;
+		if (chain->profile_idc != VIDEO_PROFILE_H265_MAIN)
+			return VIDEO_ERROR_CODEC;
+		return 0;
+	}
 
 	/* The H.264 record must be there and progressive. */
 	if (!chain->has_h264_profile)
@@ -1816,7 +2104,7 @@ video_read_slot(
 	uint64_t present;
 	uint32_t type;
 
-	/* The type and the chain, which carries the H.264 reference information. */
+	/* The type and the chain, which carries the H.264 or H.265 reference information. */
 	kern_memset(&chain, 0, sizeof(chain));
 	kern_memset(slot, 0, sizeof(*slot));
 	type = drv_i915_wire_read_u32(reader);
@@ -1826,6 +2114,8 @@ video_read_slot(
 	video_chain_free(&chain);
 	slot->has_reference = chain.has_reference;
 	slot->reference = chain.reference;
+	slot->has_h265_reference = chain.has_h265_reference;
+	slot->h265_reference = chain.h265_reference;
 
 	/* The index and the picture. */
 	slot->index = (int32_t)drv_i915_wire_read_u32(reader);
@@ -2033,6 +2323,8 @@ video_chain_free(
 	struct video_chain *chain)
 {
 	struct video_pps_node *pps;
+	struct video_h265_sps_node *h265_sps;
+	struct video_h265_pps_node *h265_pps;
 	uint32_t index;
 
 	/* The sequence sets. */
@@ -2047,6 +2339,20 @@ video_chain_free(
 		pps = chain->new_pps;
 		chain->new_pps = pps->next;
 		kern_free(pps);
+	}
+
+	/* The H.265 sequence sets. */
+	while (chain->new_h265_sps != NULL) {
+		h265_sps = chain->new_h265_sps;
+		chain->new_h265_sps = h265_sps->next;
+		kern_free(h265_sps);
+	}
+
+	/* The H.265 picture sets. */
+	while (chain->new_h265_pps != NULL) {
+		h265_pps = chain->new_h265_pps;
+		chain->new_h265_pps = h265_pps->next;
+		kern_free(h265_pps);
 	}
 }
 
@@ -2304,10 +2610,16 @@ video_record_coding(
 		video_read_slots(reader, video, NVRTX_VIDEO_REFERENCES);
 		video->has_picture = chain.has_picture;
 		video->picture = chain.picture;
+		video->has_h265_picture = chain.has_h265_picture;
+		video->h265_picture = chain.h265_picture;
 		video->slice_count = chain.slice_count;
 
-		/* A decode with more slices than the table holds is skipped. */
-		if (chain.slices_overflow)
+		/*
+		 * An H.264 decode with more slices than the table holds is
+		 * skipped; an H.265 decode keeps the first ones (the decoder
+		 * finds the segments by their start codes).
+		 */
+		if (chain.slices_overflow && !chain.has_h265_picture)
 			video->skip = "more slices than the decoder's table";
 		break;
 	}
@@ -2614,8 +2926,10 @@ video_run_decode(
 	size_t length;
 	int error;
 
-	/* Takes the session's state. */
+	/* Takes the session's state; an H.265 session's decodes are the H.265 run's. */
 	state = video->session->payload;
+	if (state->codec == VIDEO_CODEC_H265)
+		return video_run_decode_h265(session, video);
 	parameters = NULL;
 	if (video->parameters != NULL)
 		parameters = video->parameters->payload;
@@ -2733,13 +3047,9 @@ video_run_decode(
 
 	/* The push buffer, run on the decoder and waited for. */
 	length = nvrtx_nvdec_push_decode(state->run_cpu + VIDEO_RUN_PUSH_AT, &frame);
-	error = nvrtx_vk_video_decode(session->owner, state->run_va + VIDEO_RUN_PUSH_AT, (uint32_t)length);
-	state->serial++;
-	if (error != 0) {
-		video_status(VIDEO_STATUS_ERROR);
-		kern_logf("nvrtx: vk: video: the decoder did not finish a picture (%d)\n", error);
-		return EIO;
-	}
+	error = video_decoded(session, video, state->run_va + VIDEO_RUN_PUSH_AT, length);
+	if (error != 0)
+		return error;
 
 	/* The decoder's status: macroblocks in error make the picture's result an error. */
 	errors = nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_ERRORS_AT);
@@ -2767,10 +3077,7 @@ video_check(
 {
 	const struct nvrtx_video_sps *sps;
 	const struct nvrtx_video_pps *pps;
-	const struct nvrtx_vk_buffer *buffer;
-	const struct nvrtx_vk_image *image;
 	const char *reason;
-	uint32_t index;
 	uint32_t width;
 	uint32_t height;
 	uint32_t limit_width;
@@ -2804,7 +3111,42 @@ video_check(
 	if (width > limit_width || height > limit_height)
 		return "a picture larger than the session's";
 
-	/* One to the table's slices, rising, inside the range; the range inside the buffer, on the boundary. */
+	/* The slices, the bitstream, the output and the references. */
+	reason = video_check_resources(video, state, width, height, 1U, NVRTX_VIDEO_SLOTS);
+	if (reason != NULL)
+		return reason;
+
+	/* Succeeded: the decode can run with these sets. */
+	*sps_out = sps;
+	*pps_out = pps;
+	return NULL;
+}
+
+/*
+ * Checks what every decode names: one to the table's slices, rising,
+ * inside the range; the range inside its buffer, on its boundary; an
+ * output video image of at least width by height once its sides are on
+ * granularity (a power of two: the planes' rows are laid out on it);
+ * references and a setup slot within slots, of video images.  Returns
+ * NULL when they can be decoded, else why the picture is skipped.
+ */
+static const char *
+video_check_resources(
+	const struct video_record *video,
+	const struct video_session *state,
+	uint32_t width,
+	uint32_t height,
+	uint32_t granularity,
+	uint32_t slots)
+{
+	const struct nvrtx_vk_buffer *buffer;
+	const struct nvrtx_vk_image *image;
+	const char *reason;
+	uint32_t index;
+	uint32_t image_width;
+	uint32_t image_height;
+
+	/* One to the table's slices, rising, inside the range. */
 	if (video->slice_count == 0U || video->slice_count > NVRTX_NVDEC_SLICES_MAX)
 		return "no slices, or more than the decoder's table";
 	for (index = 0U; index < video->slice_count; index++) {
@@ -2827,10 +3169,12 @@ video_check(
 	reason = video_check_picture(video->view, state, &image);
 	if (reason != NULL)
 		return reason;
-	if (image->width < width || image->height < height)
+	image_width = (image->width + granularity - 1U) & ~(granularity - 1U);
+	image_height = (image->height + granularity - 1U) & ~(granularity - 1U);
+	if (image_width < width || image_height < height)
 		return "an output smaller than the picture";
 	for (index = 0U; index < video->slot_count; index++) {
-		if (video->slots[index].index < 0 || video->slots[index].index >= (int32_t)NVRTX_VIDEO_SLOTS)
+		if (video->slots[index].index < 0 || video->slots[index].index >= (int32_t)slots)
 			return "a reference outside the slots";
 		reason = video_check_picture(video->slots[index].view, state, &image);
 		if (reason != NULL)
@@ -2838,12 +3182,10 @@ video_check(
 	}
 
 	/* Refuses a setup slot outside the slots. */
-	if (video->has_setup && video->setup.index >= (int32_t)NVRTX_VIDEO_SLOTS)
+	if (video->has_setup && video->setup.index >= (int32_t)slots)
 		return "a setup slot outside the slots";
 
-	/* Succeeded: the decode can run with these sets. */
-	*sps_out = sps;
-	*pps_out = pps;
+	/* Succeeded: the resources can be decoded with. */
 	return NULL;
 }
 
@@ -2949,4 +3291,1175 @@ video_mbs(
 {
 	/* Succeeded: whole macroblocks. */
 	return (pixels + VIDEO_MB - 1U) / VIDEO_MB;
+}
+
+/* Reads a picture's slice offsets: [count][array]{offset}, kept up to the decoder's table (more marks the chain). */
+static void
+video_read_offsets(
+	struct i915_wire_reader *reader,
+	struct video_chain *chain)
+{
+	uint64_t count;
+	uint64_t item;
+	uint32_t value;
+
+	/* The count, which the bytes left must hold. */
+	(void)drv_i915_wire_read_u32(reader);
+	count = drv_i915_wire_read_u64(reader);
+	if (count > (uint64_t)(reader->size - reader->offset))
+		reader->error = 1;
+
+	/* Each offset, the ones past the table only counted as too many. */
+	chain->slice_count = 0U;
+	for (item = 0U; item < count && reader->error == 0; item++) {
+		value = drv_i915_wire_read_u32(reader);
+		if (chain->slices != NULL && item < NVRTX_NVDEC_SLICES_MAX) {
+			chain->slices[item] = value;
+			chain->slice_count++;
+		} else {
+			chain->slices_overflow = true;
+		}
+	}
+}
+
+/*
+ * Reads the H.265 information of the picture a decode writes: [flags]
+ * [vps][sps][pps][NumDeltaPocsOfRefRpsIdx][PicOrderCntVal]
+ * [NumBitsForSTRefPicSetInSlice][reserved] and the three sets of eight
+ * slots (libvulkan's video_encode_h265_std_picture).
+ */
+static void
+video_read_h265_picture(
+	struct i915_wire_reader *reader,
+	struct nvrtx_video_h265_picture *picture)
+{
+	/* The flags and the sets the picture names. */
+	picture->flags = drv_i915_wire_read_u32(reader);
+	picture->vps_id = drv_i915_wire_read_u32(reader);
+	picture->sps_id = drv_i915_wire_read_u32(reader);
+	picture->pps_id = drv_i915_wire_read_u32(reader);
+
+	/* The header's own short-term set's size, and the order count. */
+	picture->delta_pocs = drv_i915_wire_read_u32(reader);
+	picture->poc = (int32_t)drv_i915_wire_read_u32(reader);
+	picture->short_term_bits = drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u32(reader);
+
+	/* The slots of the three current sets. */
+	video_read_fixed(reader, picture->before, NVRTX_VIDEO_H265_SET_ENTRIES);
+	video_read_fixed(reader, picture->after, NVRTX_VIDEO_H265_SET_ENTRIES);
+	video_read_fixed(reader, picture->long_term, NVRTX_VIDEO_H265_SET_ENTRIES);
+}
+
+/*
+ * Reads an H.265 add record's fields: [count][array]{VPS}[count][array]
+ * {SPS}[count][array]{PPS} (libvulkan's video_encode_h265_parameters_add).
+ * The video sets are kept as their ids, the others as new allocations on
+ * the chain; a set the executor cannot keep marks add_error.
+ */
+static void
+video_read_h265_add(
+	struct i915_wire_reader *reader,
+	struct video_chain *chain)
+{
+	struct video_h265_sps_node scratch_sps;
+	struct video_h265_pps_node scratch_pps;
+	struct video_h265_sps_node *sps;
+	struct video_h265_pps_node *pps;
+	uint64_t count;
+	uint64_t item;
+	uint32_t id;
+
+	/* The video parameter sets: only their ids are kept. */
+	(void)drv_i915_wire_read_u32(reader);
+	count = drv_i915_wire_read_u64(reader);
+	if (count > (uint64_t)(reader->size - reader->offset))
+		reader->error = 1;
+	for (item = 0U; item < count && reader->error == 0; item++) {
+		id = video_read_h265_vps(reader);
+		if (id >= VIDEO_H265_VPS_IDS) {
+			chain->add_error = EINVAL;
+			continue;
+		}
+		chain->new_h265_vps |= 1U << id;
+	}
+
+	/* The sequence parameter sets. */
+	(void)drv_i915_wire_read_u32(reader);
+	count = drv_i915_wire_read_u64(reader);
+	if (count > (uint64_t)(reader->size - reader->offset))
+		reader->error = 1;
+	for (item = 0U; item < count && reader->error == 0; item++) {
+		/* A set that cannot be allocated is read into scratch. */
+		sps = kern_calloc(1U, sizeof(*sps));
+		if (sps == NULL) {
+			kern_memset(&scratch_sps, 0, sizeof(scratch_sps));
+			sps = &scratch_sps;
+			chain->add_error = ENOMEM;
+		}
+
+		/* The set; ids outside H.265 mark the add malformed. */
+		video_read_h265_sps(reader, &sps->sps);
+		if (sps->sps.vps_id >= VIDEO_H265_VPS_IDS || sps->sps.id >= VIDEO_H265_SPS_IDS)
+			chain->add_error = EINVAL;
+		if (sps != &scratch_sps) {
+			sps->next = chain->new_h265_sps;
+			chain->new_h265_sps = sps;
+		}
+	}
+
+	/* The picture parameter sets. */
+	(void)drv_i915_wire_read_u32(reader);
+	count = drv_i915_wire_read_u64(reader);
+	if (count > (uint64_t)(reader->size - reader->offset))
+		reader->error = 1;
+	for (item = 0U; item < count && reader->error == 0; item++) {
+		/* A set that cannot be allocated is read into scratch. */
+		pps = kern_calloc(1U, sizeof(*pps));
+		if (pps == NULL) {
+			kern_memset(&scratch_pps, 0, sizeof(scratch_pps));
+			pps = &scratch_pps;
+			chain->add_error = ENOMEM;
+		}
+
+		/* The set; ids outside H.265 mark the add malformed. */
+		video_read_h265_pps(reader, &pps->pps);
+		if (pps->pps.vps_id >= VIDEO_H265_VPS_IDS ||
+		    pps->pps.sps_id >= VIDEO_H265_SPS_IDS ||
+		    pps->pps.id >= VIDEO_H265_PPS_IDS)
+			chain->add_error = EINVAL;
+		if (pps != &scratch_pps) {
+			pps->next = chain->new_h265_pps;
+			chain->new_h265_pps = pps;
+		}
+	}
+}
+
+/*
+ * Reads one H.265 video parameter set (libvulkan's video_encode_h265_vps):
+ * [flags][id][max sub-layers minus 1][reserved x2][timing x3][reserved]
+ * [present]{DPB}[present]{HRD}[present]{PTL}.  Reports its id; the decode
+ * needs nothing else of it.
+ */
+static uint32_t
+video_read_h265_vps(
+	struct i915_wire_reader *reader)
+{
+	uint64_t present;
+	uint32_t id;
+	uint32_t sub_layers;
+
+	/* The flags, the id and the sub-layers. */
+	(void)drv_i915_wire_read_u32(reader);
+	id = drv_i915_wire_read_u32(reader);
+	sub_layers = drv_i915_wire_read_u32(reader) + 1U;
+	if (sub_layers > VIDEO_H265_SUB_LAYERS)
+		reader->error = 1;
+
+	/* The reserved words and the timing. */
+	video_skip_words(reader, 6U);
+
+	/* The buffering limits, the HRD and the profile, tier and level. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_dpb(reader);
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_hrd(reader, sub_layers);
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_ptl(reader);
+
+	/* Succeeded: the set's id. */
+	return id;
+}
+
+/*
+ * Reads one H.265 sequence parameter set (libvulkan's
+ * video_encode_h265_sps): its fields in declared order, then the
+ * structures it points to.  The decode keeps its sizes, tools, reference
+ * set counts and own scaling lists.
+ */
+static void
+video_read_h265_sps(
+	struct i915_wire_reader *reader,
+	struct nvrtx_video_h265_sps *sps)
+{
+	uint64_t present;
+	uint64_t count;
+	uint64_t item;
+	uint32_t sub_layers;
+
+	/* The flags, the sampling and the size. */
+	sps->flags = drv_i915_wire_read_u32(reader);
+	sps->chroma_format_idc = drv_i915_wire_read_u32(reader);
+	sps->width = drv_i915_wire_read_u32(reader);
+	sps->height = drv_i915_wire_read_u32(reader);
+
+	/* The key, the sub-layers and the depths. */
+	sps->vps_id = drv_i915_wire_read_u32(reader);
+	sub_layers = drv_i915_wire_read_u32(reader) + 1U;
+	if (sub_layers > VIDEO_H265_SUB_LAYERS)
+		reader->error = 1;
+	sps->id = drv_i915_wire_read_u32(reader);
+	sps->bit_depth_luma_minus8 = drv_i915_wire_read_u32(reader);
+	sps->bit_depth_chroma_minus8 = drv_i915_wire_read_u32(reader);
+
+	/* The order count's size and the block sizes. */
+	sps->log2_max_poc_lsb_minus4 = drv_i915_wire_read_u32(reader);
+	sps->log2_min_cb_minus3 = drv_i915_wire_read_u32(reader);
+	sps->log2_diff_cb = drv_i915_wire_read_u32(reader);
+	sps->log2_min_tb_minus2 = drv_i915_wire_read_u32(reader);
+	sps->log2_diff_tb = drv_i915_wire_read_u32(reader);
+	sps->depth_inter = drv_i915_wire_read_u32(reader);
+	sps->depth_intra = drv_i915_wire_read_u32(reader);
+
+	/* The reference picture sets the sequence signals. */
+	sps->short_term_sets = drv_i915_wire_read_u32(reader);
+	sps->long_term_sps = drv_i915_wire_read_u32(reader);
+
+	/* The PCM depths and sizes, two reserved words. */
+	sps->pcm_depth_luma_minus1 = drv_i915_wire_read_u32(reader);
+	sps->pcm_depth_chroma_minus1 = drv_i915_wire_read_u32(reader);
+	sps->log2_min_pcm_minus3 = drv_i915_wire_read_u32(reader);
+	sps->log2_diff_pcm = drv_i915_wire_read_u32(reader);
+	video_skip_words(reader, 2U);
+
+	/* The screen content sizes and the conformance window, which the decode does not use. */
+	video_skip_words(reader, 8U);
+
+	/* The profile, tier and level, and the buffering limits. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_ptl(reader);
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_dpb(reader);
+
+	/* The sequence's own scaling lists. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U) {
+		sps->has_scaling = true;
+		video_read_h265_scaling(reader, &sps->scaling);
+	}
+
+	/* The short-term sets: as many as the sequence counts. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U) {
+		count = drv_i915_wire_read_u64(reader);
+		if (count != sps->short_term_sets || count > VIDEO_H265_SHORT_TERM_SETS)
+			reader->error = 1;
+		for (item = 0U; item < count && reader->error == 0; item++)
+			video_read_h265_short_term(reader);
+	}
+
+	/* The long-term pictures, the VUI and the palette's initializers. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_long_term(reader);
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_vui(reader, sub_layers);
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_words(reader, NULL, VIDEO_H265_PALETTE_ENTRIES);
+}
+
+/*
+ * Reads one H.265 picture parameter set (libvulkan's
+ * video_encode_h265_pps): its fields in declared order, then the
+ * structures it points to.  The decode keeps its flags, keys, offsets,
+ * tiles and own scaling lists.
+ */
+static void
+video_read_h265_pps(
+	struct i915_wire_reader *reader,
+	struct nvrtx_video_h265_pps *pps)
+{
+	uint8_t offsets[VIDEO_H265_CHROMA_OFFSETS];
+	uint64_t present;
+
+	/* The flags and the key. */
+	pps->flags = drv_i915_wire_read_u32(reader);
+	pps->id = drv_i915_wire_read_u32(reader);
+	pps->sps_id = drv_i915_wire_read_u32(reader);
+	pps->vps_id = drv_i915_wire_read_u32(reader);
+
+	/* The slice header's extra bits and the default reference counts. */
+	pps->extra_bits = drv_i915_wire_read_u32(reader);
+	pps->l0_minus1 = drv_i915_wire_read_u32(reader);
+	pps->l1_minus1 = drv_i915_wire_read_u32(reader);
+
+	/* The quantizer, the deblocking offsets and the merge level, the signed ones widened with their sign. */
+	pps->init_qp_minus26 = (int32_t)drv_i915_wire_read_u32(reader);
+	pps->cu_qp_delta_depth = drv_i915_wire_read_u32(reader);
+	pps->cb_qp_offset = (int32_t)drv_i915_wire_read_u32(reader);
+	pps->cr_qp_offset = (int32_t)drv_i915_wire_read_u32(reader);
+	pps->beta_div2 = (int32_t)drv_i915_wire_read_u32(reader);
+	pps->tc_div2 = (int32_t)drv_i915_wire_read_u32(reader);
+	pps->log2_merge_minus2 = drv_i915_wire_read_u32(reader);
+
+	/* The range extension's fields and chroma offset lists, which Main does not use. */
+	video_skip_words(reader, 3U);
+	video_read_fixed(reader, offsets, VIDEO_H265_CHROMA_OFFSETS);
+	video_read_fixed(reader, offsets, VIDEO_H265_CHROMA_OFFSETS);
+	video_skip_words(reader, 2U);
+
+	/* The screen content fields, which Main does not use. */
+	video_skip_words(reader, 6U);
+
+	/* The tiles: their counts, two reserved words, each column's width and row's height minus 1, a reserved word. */
+	pps->tile_columns_minus1 = drv_i915_wire_read_u32(reader);
+	pps->tile_rows_minus1 = drv_i915_wire_read_u32(reader);
+	video_skip_words(reader, 2U);
+	video_read_words(reader, pps->column_width_minus1, NVRTX_VIDEO_H265_COLUMN_WIDTHS);
+	video_read_words(reader, pps->row_height_minus1, NVRTX_VIDEO_H265_ROW_HEIGHTS);
+	video_skip_words(reader, 1U);
+
+	/* The picture's own scaling lists. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U) {
+		pps->has_scaling = true;
+		video_read_h265_scaling(reader, &pps->scaling);
+	}
+
+	/* The palette's initializers, which Main does not use. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_words(reader, NULL, VIDEO_H265_PALETTE_ENTRIES);
+}
+
+/* Reads an H.265 profile, tier and level: [flags][profile][level]. */
+static void
+video_read_h265_ptl(
+	struct i915_wire_reader *reader)
+{
+	/* The three words, which the decode does not use (the session's profile is checked). */
+	video_skip_words(reader, 3U);
+}
+
+/* Reads H.265 buffering limits: [7]{latency}[7 bytes]{buffering}[7 bytes]{reordering}. */
+static void
+video_read_h265_dpb(
+	struct i915_wire_reader *reader)
+{
+	uint8_t bytes[VIDEO_H265_SUB_LAYERS];
+
+	/* The latency words, then the two byte arrays. */
+	video_read_words(reader, NULL, VIDEO_H265_SUB_LAYERS);
+	video_read_fixed(reader, bytes, VIDEO_H265_SUB_LAYERS);
+	video_read_fixed(reader, bytes, VIDEO_H265_SUB_LAYERS);
+}
+
+/*
+ * Reads H.265 HRD parameters (libvulkan's video_encode_h265_hrd): the
+ * one-bit flags' word and the three per-sub-layer masks, nine lengths and
+ * scales, the buffer counts, the durations, three reserved words, then
+ * the NAL and VCL sub-layer arrays of sub_layers entries.
+ */
+static void
+video_read_h265_hrd(
+	struct i915_wire_reader *reader,
+	uint32_t sub_layers)
+{
+	uint8_t counts[VIDEO_H265_SUB_LAYERS];
+	uint64_t present;
+
+	/* The flags and the masks, the lengths and the scales. */
+	video_skip_words(reader, 13U);
+
+	/* The buffer counts, the durations and the reserved words. */
+	video_read_fixed(reader, counts, VIDEO_H265_SUB_LAYERS);
+	video_read_words(reader, NULL, VIDEO_H265_SUB_LAYERS);
+	video_read_words(reader, NULL, 3U);
+
+	/* The NAL and the VCL sub-layers. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_sub_layers(reader, sub_layers);
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_sub_layers(reader, sub_layers);
+}
+
+/* Reads an array of H.265 sub-layer HRD parameters: [count]{four arrays of 32 words and the CBR mask}. */
+static void
+video_read_h265_sub_layers(
+	struct i915_wire_reader *reader,
+	uint32_t sub_layers)
+{
+	uint64_t count;
+	uint64_t item;
+
+	/* One entry for each sub-layer. */
+	count = drv_i915_wire_read_u64(reader);
+	if (count != sub_layers)
+		reader->error = 1;
+
+	/* Each entry's rates and sizes, then its CBR mask. */
+	for (item = 0U; item < count && reader->error == 0; item++) {
+		video_read_words(reader, NULL, VIDEO_H265_CPB_COUNT);
+		video_read_words(reader, NULL, VIDEO_H265_CPB_COUNT);
+		video_read_words(reader, NULL, VIDEO_H265_CPB_COUNT);
+		video_read_words(reader, NULL, VIDEO_H265_CPB_COUNT);
+		video_skip_words(reader, 1U);
+	}
+}
+
+/*
+ * Reads H.265 scaling lists (libvulkan's video_encode_h265_scaling): the
+ * 4x4, 8x8, 16x16 and 32x32 lists and the 16x16 and 32x32 DC values, each
+ * a byte array.
+ */
+static void
+video_read_h265_scaling(
+	struct i915_wire_reader *reader,
+	struct nvrtx_video_h265_scaling *scaling)
+{
+	/* The lists, list after list, then the DC values. */
+	video_read_fixed(reader, scaling->list4, sizeof(scaling->list4));
+	video_read_fixed(reader, scaling->list8, sizeof(scaling->list8));
+	video_read_fixed(reader, scaling->list16, sizeof(scaling->list16));
+	video_read_fixed(reader, scaling->list32, sizeof(scaling->list32));
+	video_read_fixed(reader, scaling->dc16, sizeof(scaling->dc16));
+	video_read_fixed(reader, scaling->dc32, sizeof(scaling->dc32));
+}
+
+/* Reads an H.265 VUI (libvulkan's video_encode_h265_vui): 25 words, then its HRD of sub_layers. */
+static void
+video_read_h265_vui(
+	struct i915_wire_reader *reader,
+	uint32_t sub_layers)
+{
+	uint64_t present;
+
+	/* The flags, the aspect, the signal, the window, the timing and the restrictions. */
+	video_skip_words(reader, 25U);
+
+	/* The HRD. */
+	present = drv_i915_wire_read_u64(reader);
+	if (present != 0U)
+		video_read_h265_hrd(reader, sub_layers);
+}
+
+/* Reads one H.265 short-term set of a sequence: twelve words, then the two arrays of sixteen. */
+static void
+video_read_h265_short_term(
+	struct i915_wire_reader *reader)
+{
+	/* The flags, the prediction, the used masks, the reserved words and the counts. */
+	video_skip_words(reader, 12U);
+
+	/* The order count differences before and after. */
+	video_read_words(reader, NULL, VIDEO_H265_SET_PICTURES);
+	video_read_words(reader, NULL, VIDEO_H265_SET_PICTURES);
+}
+
+/* Reads a sequence's H.265 long-term pictures: the used mask, then the 32 order counts. */
+static void
+video_read_h265_long_term(
+	struct i915_wire_reader *reader)
+{
+	/* The mask, then the array. */
+	video_skip_words(reader, 1U);
+	video_read_words(reader, NULL, VIDEO_H265_LONG_TERM_PICS);
+}
+
+/*
+ * Reads an array of words that must have expected elements:
+ * [count][words]; into words when it is not NULL.
+ */
+static void
+video_read_words(
+	struct i915_wire_reader *reader,
+	uint32_t *words,
+	uint32_t expected)
+{
+	uint64_t count;
+	uint32_t index;
+	uint32_t value;
+
+	/* The count must be the array's. */
+	count = drv_i915_wire_read_u64(reader);
+	if (count != expected) {
+		reader->error = 1;
+		return;
+	}
+
+	/* Each word. */
+	for (index = 0U; index < expected; index++) {
+		value = drv_i915_wire_read_u32(reader);
+		if (words != NULL)
+			words[index] = value;
+	}
+}
+
+/* Reads a byte array that must have expected bytes: [count][bytes]. */
+static void
+video_read_fixed(
+	struct i915_wire_reader *reader,
+	void *bytes,
+	uint32_t expected)
+{
+	uint64_t count;
+
+	/* The count must be the array's. */
+	count = drv_i915_wire_read_u64(reader);
+	if (count != expected) {
+		reader->error = 1;
+		return;
+	}
+
+	/* The bytes. */
+	i915_vkc_read_bytes(reader, bytes, expected);
+}
+
+/* Reads and drops count words the decode does not use. */
+static void
+video_skip_words(
+	struct i915_wire_reader *reader,
+	uint32_t count)
+{
+	uint32_t index;
+
+	/* Each word. */
+	for (index = 0U; index < count; index++)
+		(void)drv_i915_wire_read_u32(reader);
+}
+
+/*
+ * Moves a chain's new H.265 sets into a parameters object.
+ *
+ * With replace, a set replaces the object's of the same key (a create);
+ * without, a key already held refuses the whole add (an update) and
+ * nothing is taken.  The object's capacity bounds the sets.
+ */
+static int
+video_h265_take(
+	struct video_parameters *parameters,
+	struct video_chain *chain,
+	bool replace)
+{
+	struct video_h265_sps_node *sps;
+	struct video_h265_sps_node **sps_link;
+	struct video_h265_sps_node *old_sps;
+	struct video_h265_pps_node *pps;
+	struct video_h265_pps_node **pps_link;
+	struct video_h265_pps_node *old_pps;
+	uint32_t vps;
+	uint32_t vps_count;
+	uint32_t sps_count;
+	uint32_t pps_count;
+	uint32_t index;
+
+	/* An update must not repeat a key the object holds. */
+	if (!replace) {
+		/* Nor a video set id. */
+		if ((chain->new_h265_vps & parameters->h265_vps) != 0U)
+			return EINVAL;
+
+		/* Nor a sequence set key. */
+		for (sps = chain->new_h265_sps; sps != NULL; sps = sps->next) {
+			if (video_find_h265_sps(parameters, sps->sps.vps_id, sps->sps.id) != NULL)
+				return EINVAL;
+		}
+
+		/* Nor a picture set key. */
+		for (pps = chain->new_h265_pps; pps != NULL; pps = pps->next) {
+			if (video_find_h265_pps(parameters, pps->pps.vps_id, pps->pps.sps_id, pps->pps.id) != NULL)
+				return EINVAL;
+		}
+	}
+
+	/* The video sets held after the add. */
+	vps = parameters->h265_vps | chain->new_h265_vps;
+	vps_count = 0U;
+	for (index = 0U; index < VIDEO_H265_VPS_IDS; index++) {
+		if ((vps & (1U << index)) != 0U)
+			vps_count++;
+	}
+
+	/* The sequence sets held, and the new ones of new keys. */
+	sps_count = 0U;
+	for (sps = parameters->h265_sps; sps != NULL; sps = sps->next)
+		sps_count++;
+	for (sps = chain->new_h265_sps; sps != NULL; sps = sps->next) {
+		if (video_find_h265_sps(parameters, sps->sps.vps_id, sps->sps.id) == NULL)
+			sps_count++;
+	}
+
+	/* The picture sets held, and the new ones of new keys. */
+	pps_count = 0U;
+	for (pps = parameters->h265_pps; pps != NULL; pps = pps->next)
+		pps_count++;
+	for (pps = chain->new_h265_pps; pps != NULL; pps = pps->next) {
+		if (video_find_h265_pps(parameters, pps->pps.vps_id, pps->pps.sps_id, pps->pps.id) == NULL)
+			pps_count++;
+	}
+
+	/* Refuses sets beyond the object's capacity. */
+	if (vps_count > parameters->max_vps ||
+	    sps_count > parameters->max_sps ||
+	    pps_count > parameters->max_pps)
+		return EINVAL;
+
+	/* The video sets' ids. */
+	parameters->h265_vps = vps;
+	chain->new_h265_vps = 0U;
+
+	/* The sequence sets, each replacing any of its key. */
+	while (chain->new_h265_sps != NULL) {
+		sps = chain->new_h265_sps;
+		chain->new_h265_sps = sps->next;
+
+		/* Drops the set of the same key the object holds. */
+		sps_link = &parameters->h265_sps;
+		while (*sps_link != NULL) {
+			if ((*sps_link)->sps.vps_id == sps->sps.vps_id && (*sps_link)->sps.id == sps->sps.id) {
+				old_sps = *sps_link;
+				*sps_link = old_sps->next;
+				kern_free(old_sps);
+				continue;
+			}
+
+			/* Moves on to the next set. */
+			sps_link = &(*sps_link)->next;
+		}
+
+		/* The set joins the object's list. */
+		sps->next = parameters->h265_sps;
+		parameters->h265_sps = sps;
+	}
+
+	/* The picture sets, each replacing any of its key. */
+	while (chain->new_h265_pps != NULL) {
+		pps = chain->new_h265_pps;
+		chain->new_h265_pps = pps->next;
+
+		/* Drops the set of the same key the object holds. */
+		pps_link = &parameters->h265_pps;
+		while (*pps_link != NULL) {
+			if ((*pps_link)->pps.vps_id == pps->pps.vps_id &&
+			    (*pps_link)->pps.sps_id == pps->pps.sps_id &&
+			    (*pps_link)->pps.id == pps->pps.id) {
+				old_pps = *pps_link;
+				*pps_link = old_pps->next;
+				kern_free(old_pps);
+				continue;
+			}
+
+			/* Moves on to the next set. */
+			pps_link = &(*pps_link)->next;
+		}
+
+		/* The set joins the object's list. */
+		pps->next = parameters->h265_pps;
+		parameters->h265_pps = pps;
+	}
+
+	/* Succeeded: the sets are the object's. */
+	return 0;
+}
+
+/* Copies a template's H.265 sets into a new parameters object. */
+static int
+video_h265_copy(
+	struct video_parameters *destination,
+	const struct video_parameters *source)
+{
+	const struct video_h265_sps_node *sps;
+	const struct video_h265_pps_node *pps;
+	struct video_h265_sps_node *sps_copy;
+	struct video_h265_pps_node *pps_copy;
+
+	/* The video sets' ids. */
+	destination->h265_vps = source->h265_vps;
+
+	/* The sequence sets. */
+	for (sps = source->h265_sps; sps != NULL; sps = sps->next) {
+		sps_copy = kern_calloc(1U, sizeof(*sps_copy));
+		if (sps_copy == NULL)
+			return ENOMEM;
+		sps_copy->sps = sps->sps;
+		sps_copy->next = destination->h265_sps;
+		destination->h265_sps = sps_copy;
+	}
+
+	/* The picture sets. */
+	for (pps = source->h265_pps; pps != NULL; pps = pps->next) {
+		pps_copy = kern_calloc(1U, sizeof(*pps_copy));
+		if (pps_copy == NULL)
+			return ENOMEM;
+		pps_copy->pps = pps->pps;
+		pps_copy->next = destination->h265_pps;
+		destination->h265_pps = pps_copy;
+	}
+
+	/* Succeeded: the template's sets are copied. */
+	return 0;
+}
+
+/* Frees a parameters object's H.265 sets. */
+static void
+video_h265_free(
+	struct video_parameters *parameters)
+{
+	struct video_h265_sps_node *sps;
+	struct video_h265_pps_node *pps;
+
+	/* The sequence sets. */
+	while (parameters->h265_sps != NULL) {
+		sps = parameters->h265_sps;
+		parameters->h265_sps = sps->next;
+		kern_free(sps);
+	}
+
+	/* The picture sets, and the video sets' ids. */
+	while (parameters->h265_pps != NULL) {
+		pps = parameters->h265_pps;
+		parameters->h265_pps = pps->next;
+		kern_free(pps);
+	}
+	parameters->h265_vps = 0U;
+}
+
+/* Finds the H.265 sequence set of a key in a parameters object. */
+static const struct nvrtx_video_h265_sps *
+video_find_h265_sps(
+	const struct video_parameters *parameters,
+	uint32_t vps_id,
+	uint32_t sps_id)
+{
+	const struct video_h265_sps_node *sps;
+
+	/* Walks the list for the key. */
+	for (sps = parameters->h265_sps; sps != NULL; sps = sps->next) {
+		if (sps->sps.vps_id == vps_id && sps->sps.id == sps_id)
+			return &sps->sps;
+	}
+
+	/* No set of the key. */
+	return NULL;
+}
+
+/* Finds the H.265 picture set of a key in a parameters object. */
+static const struct nvrtx_video_h265_pps *
+video_find_h265_pps(
+	const struct video_parameters *parameters,
+	uint32_t vps_id,
+	uint32_t sps_id,
+	uint32_t pps_id)
+{
+	const struct video_h265_pps_node *pps;
+
+	/* Walks the list for the key. */
+	for (pps = parameters->h265_pps; pps != NULL; pps = pps->next) {
+		if (pps->pps.vps_id == vps_id && pps->pps.sps_id == sps_id && pps->pps.id == pps_id)
+			return &pps->pps;
+	}
+
+	/* No set of the key. */
+	return NULL;
+}
+
+/*
+ * Runs an H.265 decode: checks it, resolves its surfaces (the DPB slot is
+ * the surface) and references, counts its slice header's skip, fills the
+ * picture structure, the scaling lists, the tile sizes and the push
+ * buffer in the session's run, and has the decoder run it; the decoder's
+ * status gives the open query its result.  A picture the decoder cannot
+ * take is skipped with the ERROR status.  Returns EIO when the decoder
+ * did not finish.
+ *
+ * Procedure referenced: averne's FFmpeg nvtegra libavcodec/nvtegra_hevc.c
+ * (nvtegra_hevc_prepare_frame_setup and nvtegra_hevc_prepare_cmdbuf: a
+ * surface without a reference takes the planes of the first current
+ * reference, or of the picture itself).
+ */
+static int
+video_run_decode_h265(
+	struct nvrtx_vk_session *session,
+	const struct video_record *video)
+{
+	struct video_session *state;
+	const struct video_parameters *parameters;
+	const struct nvrtx_video_h265_sps *sps;
+	const struct nvrtx_video_h265_pps *pps;
+	const struct nvrtx_vk_image *image;
+	const struct nvrtx_vk_buffer *buffer;
+	const struct video_slot *slot;
+	struct nvrtx_nvdec_hevc_picture description;
+	struct nvrtx_nvdec_hevc_tiles tiles;
+	struct nvrtx_nvdec_frame frame;
+	struct nvrtx_nvdec_hevc_frame hevc;
+	struct nvrtx_video_h265_reference references[NVRTX_VIDEO_H265_REFERENCES];
+	bool named[NVRTX_NVDEC_HEVC_SURFACES];
+	uint32_t count;
+	uint32_t index;
+	uint32_t substitute;
+	uint32_t bits;
+	uint32_t errors;
+	uint64_t bitstream;
+	uint64_t header_bytes;
+	uint8_t *buffer_cpu;
+	const char *reason;
+	size_t length;
+	bool dxva;
+	int error;
+
+	/* Takes the session's state and the scope's parameters. */
+	state = video->session->payload;
+	parameters = NULL;
+	if (video->parameters != NULL)
+		parameters = video->parameters->payload;
+
+	/* Checks what the decoder needs; a picture it cannot take is skipped. */
+	reason = video->skip;
+	if (reason == NULL)
+		reason = video_check_h265(video, state, parameters, &sps, &pps);
+	if (reason != NULL) {
+		video_skip(reason);
+		video_status(VIDEO_STATUS_ERROR);
+		return 0;
+	}
+
+	/* The picture's own description from its sets. */
+	kern_memset(&description, 0, sizeof(description));
+	kern_memset(&frame, 0, sizeof(frame));
+	kern_memset(&hevc, 0, sizeof(hevc));
+	nvrtx_video_h265_describe(sps, pps, &video->h265_picture, &description);
+
+	/* The references: each one's slot, flags and order count. */
+	count = 0U;
+	for (index = 0U; index < video->slot_count; index++) {
+		slot = &video->slots[index];
+		if (!slot->has_h265_reference || count >= NVRTX_VIDEO_H265_REFERENCES) {
+			video_skip("a reference without its H.265 information, or too many");
+			video_status(VIDEO_STATUS_ERROR);
+			return 0;
+		}
+		references[count].slot = (uint32_t)slot->index;
+		references[count].flags = slot->h265_reference.flags;
+		references[count].poc = slot->h265_reference.poc;
+		count++;
+	}
+
+	/* The picture's surface: its slot's, or one no reference holds. */
+	if (video->has_setup && video->setup.index >= 0) {
+		description.surface = (uint32_t)video->setup.index;
+	} else {
+		description.surface = nvrtx_video_h265_free_surface(references, count);
+	}
+
+	/* The references by surface, the lists and the substitute for the surfaces without one. */
+	error = nvrtx_video_h265_references(&video->h265_picture, references, count, &description, &substitute);
+	if (error != 0) {
+		video_skip("a reference picture set names a slot the decode does not reference");
+		video_status(VIDEO_STATUS_ERROR);
+		return 0;
+	}
+
+	/* Each reference's planes in its surface. */
+	for (index = 0U; index < NVRTX_NVDEC_HEVC_SURFACES; index++)
+		named[index] = false;
+	for (index = 0U; index < video->slot_count; index++) {
+		slot = &video->slots[index];
+		image = ((const struct nvrtx_vk_view *)slot->view->payload)->image->payload;
+		error = video_plane_addresses(image, &frame.luma[slot->index], &frame.chroma[slot->index]);
+		if (error != 0) {
+			video_skip("a reference has no memory");
+			video_status(VIDEO_STATUS_ERROR);
+			return 0;
+		}
+		named[slot->index] = true;
+	}
+
+	/* The output's planes in the picture's surface. */
+	image = ((const struct nvrtx_vk_view *)video->view->payload)->image->payload;
+	error = video_plane_addresses(image, &frame.luma[description.surface], &frame.chroma[description.surface]);
+	if (error != 0) {
+		video_skip("the output has no memory");
+		video_status(VIDEO_STATUS_ERROR);
+		return 0;
+	}
+	named[description.surface] = true;
+
+	/* Every other surface: the substitute's planes. */
+	for (index = 0U; index < NVRTX_NVDEC_HEVC_SURFACES; index++) {
+		if (named[index])
+			continue;
+		frame.luma[index] = frame.luma[substitute];
+		frame.chroma[index] = frame.chroma[substitute];
+	}
+
+	/* The bitstream. */
+	buffer = video->buffer->payload;
+	error = nvrtx_vk_buffer_address(buffer, &bitstream, &buffer_cpu);
+	if (error != 0) {
+		video_skip("the bitstream has no memory");
+		video_status(VIDEO_STATUS_ERROR);
+		return 0;
+	}
+
+	/*
+	 * How the decoder gets past the slice header's reference sets: told
+	 * the counts to parse them with, or (by default) told how many bits
+	 * to skip, counted here from the first slice segment's header.
+	 */
+	dxva = nvrtx_vk_video_hevc_dxva(session->owner);
+	description.dxva = 0U;
+	if (dxva)
+		description.dxva = 1U;
+	if (!dxva) {
+		/* The header's first bytes, copied out of the bitstream. */
+		if (buffer_cpu == NULL) {
+			video_skip("the bitstream is out of the CPU's view");
+			video_status(VIDEO_STATUS_ERROR);
+			return 0;
+		}
+		header_bytes = video->range - video->slices[0];
+		if (header_bytes > VIDEO_H265_HEADER_BYTES)
+			header_bytes = VIDEO_H265_HEADER_BYTES;
+		kern_memcpy(state->header, buffer_cpu + video->offset + video->slices[0], (size_t)header_bytes);
+
+		/* The bits to skip. */
+		error = nvrtx_video_h265_skip_bits(state->header, (size_t)header_bytes, sps, pps, &video->h265_picture, &bits);
+		if (error != 0) {
+			video_skip("a slice segment header the driver cannot read");
+			video_status(VIDEO_STATUS_ERROR);
+			return 0;
+		}
+		description.skip_bits = bits;
+	}
+
+	/* The stream, the planes' rows and the session's buffers' parts in 256-byte units. */
+	description.stream_bytes = (uint32_t)video->range;
+	description.pitch = image->pitch;
+	description.coloc_units = state->hevc.coloc_picture >> 8;
+	description.sao_units = state->hevc.sao_at >> 8;
+	description.bsd_units = state->hevc.bsd_at >> 8;
+	description.filter_above_units = state->hevc.filter_above_at >> 8;
+	description.sao_above_units = state->hevc.sao_above_at >> 8;
+
+	/* The picture structure, the scaling lists (when the sequence uses them) and the tile sizes in the session's run. */
+	nvrtx_nvdec_hevc_pic(state->run_cpu + VIDEO_RUN_PIC_AT, &description);
+	if (description.scaling_enabled != 0U) {
+		nvrtx_video_h265_scaling(sps, pps, &state->scaling);
+		nvrtx_nvdec_hevc_scaling(state->run_cpu + VIDEO_RUN_SCALING_AT, &state->scaling);
+	}
+	nvrtx_video_h265_tiles(sps, pps, &tiles);
+	nvrtx_nvdec_hevc_tiles(state->run_cpu + VIDEO_RUN_TILES_AT, &tiles, description.tiles != 0U);
+	kern_memset(state->run_cpu + VIDEO_RUN_STATUS_AT, 0, VIDEO_RUN_STATUS_BYTES);
+
+	/* The frame's addresses: the structures, the bitstream, the session's buffers. */
+	frame.pic = state->run_va + VIDEO_RUN_PIC_AT;
+	frame.status = state->run_va + VIDEO_RUN_STATUS_AT;
+	frame.bitstream = bitstream + video->offset;
+	hevc.scaling = state->run_va + VIDEO_RUN_SCALING_AT;
+	hevc.tiles = state->run_va + VIDEO_RUN_TILES_AT;
+	error = video_binding_address(state, 0U, &frame.coloc);
+	if (error == 0)
+		error = video_binding_address(state, 1U, &hevc.filter);
+	if (error != 0) {
+		video_skip("the session's memory is not bound");
+		video_status(VIDEO_STATUS_ERROR);
+		return 0;
+	}
+
+	/* The picture's number, then the push buffer, run on the decoder and waited for. */
+	frame.serial = state->serial;
+	length = nvrtx_nvdec_push_hevc(state->run_cpu + VIDEO_RUN_PUSH_AT, &frame, &hevc);
+	error = video_decoded(session, video, state->run_va + VIDEO_RUN_PUSH_AT, length);
+	if (error != 0)
+		return error;
+
+	/* The decoder's status: CTBs in error, a decode error or a slice header error make the result an error. */
+	errors = nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_ERRORS_AT);
+	errors |= nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_ERROR_AT);
+	errors |= nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_HEADER_AT);
+	if (errors != 0U) {
+		video_status(VIDEO_STATUS_ERROR);
+		return 0;
+	}
+
+	/* Succeeded: the picture is in its image. */
+	video_status(VIDEO_STATUS_COMPLETE);
+	return 0;
+}
+
+/*
+ * Checks an H.265 decode against what the decoder takes, and finds its
+ * sets.  Returns NULL when it can run, else why the picture is skipped.
+ */
+static const char *
+video_check_h265(
+	const struct video_record *video,
+	const struct video_session *state,
+	const struct video_parameters *parameters,
+	const struct nvrtx_video_h265_sps **sps_out,
+	const struct nvrtx_video_h265_pps **pps_out)
+{
+	const struct nvrtx_video_h265_picture *picture;
+	const struct nvrtx_video_h265_sps *sps;
+	const struct nvrtx_video_h265_pps *pps;
+	const char *reason;
+	uint32_t log2_ctb;
+	uint32_t limit_width;
+	uint32_t limit_height;
+
+	/* The picture's information and its sets, the video set among them. */
+	if (!video->has_h265_picture)
+		return "no H.265 picture information";
+	if (parameters == NULL || parameters->codec != VIDEO_CODEC_H265)
+		return "no parameter sets";
+	picture = &video->h265_picture;
+	if (picture->vps_id >= VIDEO_H265_VPS_IDS || (parameters->h265_vps & (1U << picture->vps_id)) == 0U)
+		return "a parameter set the session does not hold";
+	sps = video_find_h265_sps(parameters, picture->vps_id, picture->sps_id);
+	pps = video_find_h265_pps(parameters, picture->vps_id, picture->sps_id, picture->pps_id);
+	if (sps == NULL || pps == NULL)
+		return "a parameter set the session does not hold";
+
+	/* An 8-bit 4:2:0 picture of CTBs of 16 to 64. */
+	if (sps->chroma_format_idc != 1U ||
+	    sps->bit_depth_luma_minus8 != 0U ||
+	    sps->bit_depth_chroma_minus8 != 0U)
+		return "not 8-bit 4:2:0";
+	log2_ctb = sps->log2_min_cb_minus3 + 3U + sps->log2_diff_cb;
+	if (log2_ctb < 4U || log2_ctb > 6U)
+		return "a CTB size the decoder does not take";
+
+	/* Tiles within the decoder's. */
+	if ((pps->flags & NVRTX_VIDEO_H265_PPS_TILES) != 0U &&
+	    (pps->tile_columns_minus1 + 1U > NVRTX_NVDEC_HEVC_TILE_COLUMNS ||
+	     pps->tile_rows_minus1 + 1U > NVRTX_NVDEC_HEVC_TILE_ROWS))
+		return "more tiles than the decoder takes";
+
+	/* Within the session's largest picture, on whole CTBs (its buffers' size). */
+	limit_width = (state->width + VIDEO_H265_GRANULARITY - 1U) & ~(VIDEO_H265_GRANULARITY - 1U);
+	limit_height = (state->height + VIDEO_H265_GRANULARITY - 1U) & ~(VIDEO_H265_GRANULARITY - 1U);
+	if (sps->width == 0U || sps->height == 0U || sps->width > limit_width || sps->height > limit_height)
+		return "a picture larger than the session's";
+
+	/* The slices, the bitstream, the output and the references. */
+	reason = video_check_resources(video, state, sps->width, sps->height, VIDEO_H265_GRANULARITY, NVRTX_VIDEO_H265_SLOTS);
+	if (reason != NULL)
+		return reason;
+
+	/* Succeeded: the decode can run with these sets. */
+	*sps_out = sps;
+	*pps_out = pps;
+	return NULL;
+}
+
+/*
+ * Has the decoder run a push buffer and waits for it, numbering the
+ * session's pictures.  When the decoder did not finish, what the decode
+ * names is held for the boot (the decoder may still write it), the open
+ * query is given ERROR, and EIO is returned.
+ */
+static int
+video_decoded(
+	struct nvrtx_vk_session *session,
+	const struct video_record *video,
+	uint64_t push_va,
+	size_t length)
+{
+	struct video_session *state;
+	int error;
+
+	/* Runs the push buffer and numbers the next picture. */
+	state = video->session->payload;
+	error = nvrtx_vk_video_decode(session->owner, push_va, (uint32_t)length);
+	state->serial++;
+
+	/* A decoder that did not finish may still write what the decode names. */
+	if (error == ETIMEDOUT)
+		video_isolate(video);
+
+	/* Reports a picture the decoder did not finish. */
+	if (error != 0) {
+		video_status(VIDEO_STATUS_ERROR);
+		kern_logf("nvrtx: vk: video: the decoder did not finish a picture (%d)\n", error);
+		return EIO;
+	}
+
+	/* Succeeded: the decoder has finished. */
+	return 0;
+}
+
+/*
+ * Holds for the boot every object a decode the decoder did not finish
+ * names: its session (with its bound work buffers and its run), its
+ * parameters, its bitstream's buffer, and its output's and references'
+ * views (each with its image and the image's memory).  Nothing lets them
+ * go, so their memory is not used again while the decoder may write it.
+ */
+static void
+video_isolate(
+	const struct video_record *video)
+{
+	const struct video_session *state;
+	const struct nvrtx_vk_buffer *buffer;
+	const struct nvrtx_vk_view *view;
+	const struct nvrtx_vk_image *image;
+	uint64_t bytes;
+	uint32_t index;
+
+	/* The session, with the bytes of its bound work buffers. */
+	state = video->session->payload;
+	bytes = 0U;
+	for (index = 0U; index < state->binding_count; index++)
+		bytes += state->bindings[index].size;
+	video_hold_for_boot(video->session, bytes + VIDEO_RUN_BYTES);
+
+	/* The parameters and the bitstream's buffer. */
+	video_hold_for_boot(video->parameters, 0U);
+	if (video->buffer != NULL) {
+		buffer = video->buffer->payload;
+		video_hold_for_boot(video->buffer, buffer->size);
+	}
+
+	/* The output's view, with its image's bytes. */
+	if (video->view != NULL) {
+		view = video->view->payload;
+		image = view->image->payload;
+		video_hold_for_boot(video->view, image->bytes);
+	}
+
+	/* The references' views, with their images' bytes. */
+	for (index = 0U; index < video->slot_count; index++) {
+		if (video->slots[index].view == NULL)
+			continue;
+		view = video->slots[index].view->payload;
+		image = view->image->payload;
+		video_hold_for_boot(video->slots[index].view, image->bytes);
+	}
+
+	/* Tells how much the boot keeps. */
+	kern_logf("nvrtx: vk: video: %u objects (%llu bytes) are held for the boot: the decoder may still write them\n",
+		  (unsigned)video_isolated_objects,
+		  (unsigned long long)video_isolated_bytes);
+}
+
+/* Holds one object for the boot (one more reference nothing lets go), counting it and its bytes. */
+static void
+video_hold_for_boot(
+	struct nvrtx_vk_object *object,
+	uint64_t bytes)
+{
+	int error;
+
+	/* Nothing to hold. */
+	if (object == NULL)
+		return;
+
+	/* One more reference, which is never let go. */
+	error = nvrtx_vk_object_retain(object);
+	if (error != 0)
+		return;
+
+	/* Counts it. */
+	video_isolated_objects++;
+	video_isolated_bytes += bytes;
 }

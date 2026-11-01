@@ -126,6 +126,12 @@
 /* The whole token that asks for the video encoder's self-test. */
 #define STAGE_NVENC_TEST_TOKEN		"nvrtx.nvenc.test=1"
 
+/*
+ * The whole token that has the video decoder parse an H.265 slice header's
+ * reference picture sets itself.
+ */
+#define STAGE_HEVC_DXVA_TOKEN		"nvrtx.hevc.dxva=1"
+
 /* The whole token that breaks the first copy-engine clear of the VRAM on purpose. */
 #define STAGE_CLEAR_FAULT_TOKEN		"nvrtx.clear.fault=1"
 
@@ -413,6 +419,24 @@ nvrtx_stage_nvenc_test_wanted(void)
 		return true;
 
 	/* Without it the encoder encodes nothing at boot. */
+	return false;
+}
+
+/*
+ * Reports whether the boot asked the video decoder to parse an H.265
+ * slice header's reference picture sets itself (nvrtx.hevc.dxva=1).
+ */
+bool
+nvrtx_stage_hevc_dxva_wanted(void)
+{
+	bool present;
+
+	/* Looks for nvrtx.hevc.dxva=1 among the boot parameters. */
+	present = stage_token_present(STAGE_HEVC_DXVA_TOKEN);
+	if (present)
+		return true;
+
+	/* Without it the driver counts the bits the decoder skips. */
 	return false;
 }
 

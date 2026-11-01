@@ -9,7 +9,7 @@
  * The executor's H.264 arithmetic, which touches no hardware (a host test
  * runs it): the scaling matrices a picture decodes with, the decoder's
  * reference entries of the DPB slots, the picture description of a decode
- * and the NV12 layout of a video image.
+ * and the NV12 layout of a video image (H.264 and H.265 alike).
  */
 
 #include <stdbool.h>
@@ -29,15 +29,20 @@
 #define H264_FLAT			16U
 
 /*
- * The video image's planes: rows of whole GOBs (64 bytes) and heights of
- * whole blocks of two GOBs (16 rows), the planes one after the other.
+ * The video image's planes: rows of whole GOBs (64 bytes), the planes one
+ * after the other, in blocks two GOBs (16 rows) high.  The luma plane's
+ * height is whole 64-row CTBs and the chroma plane's half of that, so a
+ * decoder that writes an H.265 picture's last CTB row whole stays in its
+ * plane.
  *
  * Values referenced: Mesa main 921d028a5fff2beb4ec90451913b5fcc05fb1e6a
  * src/nouveau/nil/tiling.rs (the GOB of 64 bytes by 8 rows) and
- * src/nouveau/nil/image.rs (video images in blocks two GOBs high).
+ * src/nouveau/nil/image.rs (video images in blocks two GOBs high), and
+ * Recommendation ITU-T H.265 (7.4.3.2.1, CtbLog2SizeY at most 6).
  */
 #define H264_GOB_BYTES			64U
-#define H264_BLOCK_ROWS			16U
+#define H264_LUMA_ROWS			64U
+#define H264_CHROMA_ROWS		32U
 
 static void h264_list4(const struct nvrtx_video_scaling *scaling, uint32_t list, const uint8_t *fallback, uint8_t *scan);
 static void h264_list8(const struct nvrtx_video_scaling *scaling, uint32_t list, const uint8_t *fallback, uint8_t *scan);
@@ -454,9 +459,9 @@ nvrtx_video_layout(
 	/* The rows: the width's luma bytes, which are also the half width's chroma pairs. */
 	layout->pitch = h264_align(width, H264_GOB_BYTES);
 
-	/* The planes' rows in whole blocks. */
-	layout->plane_rows[0] = h264_align(height, H264_BLOCK_ROWS);
-	layout->plane_rows[1] = h264_align((height + 1U) / 2U, H264_BLOCK_ROWS);
+	/* The planes' rows in whole CTB rows (whole blocks too). */
+	layout->plane_rows[0] = h264_align(height, H264_LUMA_ROWS);
+	layout->plane_rows[1] = h264_align((height + 1U) / 2U, H264_CHROMA_ROWS);
 
 	/* The luma plane first, the chroma plane after it. */
 	luma_bytes = (uint64_t)layout->pitch * layout->plane_rows[0];

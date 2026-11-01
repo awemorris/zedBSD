@@ -1238,7 +1238,8 @@ nvrtx_vk_video_available(
  * for the waits of nvrtx_vk_gpu_wait(), so other sessions' frames go on.
  * A session whose runs are lost decodes nothing; a decoder that does not
  * finish loses the session's runs (and is taken out of use by the
- * decoder's channel).  Returns EIO for both.
+ * decoder's channel).  Returns EIO for the first, ETIMEDOUT for the
+ * second (the decoder may still write what the push buffer names).
  */
 int
 nvrtx_vk_video_decode(
@@ -1277,10 +1278,34 @@ nvrtx_vk_video_decode(
 	if (error == ETIMEDOUT)
 		__atomic_store_n(&session->run_lost, 1, __ATOMIC_RELEASE);
 
-	/* Refuses a picture the decoder did not finish. */
+	/* Reports a decoder that did not finish, which may still write. */
+	if (error == ETIMEDOUT)
+		return ETIMEDOUT;
+
+	/* Refuses a picture the decoder did not take. */
 	if (error != 0)
 		return EIO;
 
 	/* Succeeded: the decoder has finished the picture. */
 	return 0;
+}
+
+/*
+ * Reports whether the boot asked the video decoder to parse an H.265
+ * slice header's reference picture sets itself (nvrtx.hevc.dxva=1)
+ * instead of being told how many of its bits to skip.
+ */
+bool
+nvrtx_vk_video_hevc_dxva(
+	void *owner)
+{
+	bool wanted;
+
+	UNUSED_PARAMETER(owner);
+
+	/* The boot's choice. */
+	wanted = nvrtx_stage_hevc_dxva_wanted();
+
+	/* Succeeded: reports it. */
+	return wanted;
 }

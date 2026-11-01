@@ -303,11 +303,11 @@ test_sizes(void)
 
 	/* Lays out the 1080p NV12 surface. */
 	nvrtx_video_layout(1920U, 1080U, &layout);
-	check(layout.pitch == 1920U && layout.plane_rows[0] == 1088U && layout.plane_rows[1] == 544U, "layout: 1080p rows in blocks");
+	check(layout.pitch == 1920U && layout.plane_rows[0] == 1088U && layout.plane_rows[1] == 544U, "layout: 1080p rows in 64-row CTBs");
 	check(layout.plane_offset[1] == 1920U * 1088U && layout.bytes == 1920U * 1632U, "layout: 1080p planes");
 	check((layout.plane_offset[1] & 255U) == 0U, "layout: chroma on 256 bytes");
 	nvrtx_video_layout(1000U, 720U, &layout);
-	check(layout.pitch == 1024U && layout.plane_rows[0] == 720U && layout.plane_rows[1] == 368U, "layout: width rounded to GOBs, 360 to 368");
+	check(layout.pitch == 1024U && layout.plane_rows[0] == 768U && layout.plane_rows[1] == 384U, "layout: width rounded to GOBs, 720 rows to 768, 360 to 384");
 }
 
 /* The scaling matrices: flat, the sets' own in raster order, the defaults and the fall-backs. */
