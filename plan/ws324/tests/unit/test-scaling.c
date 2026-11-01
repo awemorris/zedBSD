@@ -516,6 +516,22 @@ check_ranges(void)
 			syntax.dc_coef_minus8[size_id - 2U][matrix_id] = -2147483647;
 			error = read_syntax(&syntax, (size_t)-1);
 			CHECK(error == EINVAL);
+
+			/*
+			 * A first delta of +1 would turn a DC just outside the range into a non-zero
+			 * entry (-8 + 8 + 1 = 1, 248 + 8 + 1 = 257 % 256 = 1), so only the range check refuses it.
+			 */
+			syntax.delta_coef[size_id][matrix_id][0] = 1;
+			syntax.dc_coef_minus8[size_id - 2U][matrix_id] = -8;
+			error = read_syntax(&syntax, (size_t)-1);
+			CHECK(error == EINVAL);
+			syntax.dc_coef_minus8[size_id - 2U][matrix_id] = 248;
+			error = read_syntax(&syntax, (size_t)-1);
+			CHECK(error == EINVAL);
+			syntax.dc_coef_minus8[size_id - 2U][matrix_id] = -7;
+			error = read_syntax(&syntax, (size_t)-1);
+			CHECK(error == 0);
+			CHECK(result.list[size_id][matrix_id][0] == 2U);
 		}
 	}
 
