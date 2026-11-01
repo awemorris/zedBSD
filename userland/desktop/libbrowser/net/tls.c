@@ -6,20 +6,30 @@
  */
 
 /*
- * TLS for https (plan/ws074/design.md §9, §17 D2): the OpenSSL package's
- * libssl and libcrypto, loaded through the operating-system layer the
- * first time a page asks for https, so that the base build does not depend on the package.  Without
+ * TLS for https (plan/ws074/design.md §9, §17 D2): OpenSSL's libssl and
+ * libcrypto.  A build that links OpenSSL into the program (WB_TLS_STATIC,
+ * the Windows build, whose tls-static.c fills the table of functions)
+ * uses it as linked.  Any other build loads the OpenSSL package's
+ * libraries through the operating-system layer the first time a page asks
+ * for https, so that the base build does not depend on the package; without
  * the package every https fetch fails with EPROTONOSUPPORT.
  *
- * Only the functions below are used; their types are opaque here and they
- * are called through pointers, so no OpenSSL header is needed.  The
- * values of the few constants are OpenSSL's (stable across 1.1 and 3).
+ * Only the functions of struct tls_library are used; their types are
+ * opaque here and they are called through pointers, so no OpenSSL header
+ * is needed.  The values of the few constants are OpenSSL's (stable across
+ * 1.1 and 3).  The members of the table marked "OpenSSL only" are not
+ * needed for TLS to work: without them the program reads no configuration
+ * file and does not refuse the certificates the system distrusts.
  *
  * A connection is TLS 1.2 or later, verifies the server's chain against
- * the default roots (the ca-certificates package's /etc/ssl/cert.pem) and
- * any file added with net_tls_add_ca_file (the tests' own CA), and checks
- * the certificate's name or address against the URL's host.  A failure is
- * EPROTO, with its reason kept for net_tls_error.
+ * the system's trusted roots (the operating-system layer hands them over
+ * where the system keeps them itself; elsewhere the library's default
+ * paths, the ca-certificates package's /etc/ssl/cert.pem), the bundle of
+ * roots shipped with the program, and any file added with
+ * net_tls_add_ca_file (the tests' own CA), refuses a certificate the
+ * system distrusts anywhere in the chain, and checks the certificate's name
+ * or address against the URL's host.  A failure is EPROTO, with its reason
+ * kept for net_tls_error.
  *
  * Two threads use TLS: the page's (the blocking fetches) and the loader's
  * network thread.  The libraries are loaded and the context made once,
@@ -28,6 +38,7 @@
  */
 
 #include "net/net.h"
+#include "net/tls-library.h"
 #include "base/os-system.h"
 
 #include <errno.h>
@@ -54,6 +65,8 @@
 #define TLS_ERROR_SYSCALL		5
 #define TLS_ERROR_ZERO_RETURN		6
 #define TLS_VERIFY_OK			0
+#define TLS_INIT_NO_LOAD_CONFIG		((uint64_t)0x80)
+#define TLS_CERT_REJECTED		28
 
 /* The longest reason kept for net_tls_error. */
 #define TLS_ERROR_MAX		256U
@@ -61,75 +74,70 @@
 /* The most extra CA files the tests may add. */
 #define TLS_CA_FILES_MAX	4U
 
-/*
- * The library's functions, looked up in the loaded libraries.  The pointers are set once,
- * when the libraries are loaded, and never change after.
- */
-struct tls_library {
-	const void *(*client_method)(void);
-	void *(*ctx_new)(const void *method);
-	int (*ctx_set_default_verify_paths)(void *ctx);
-	int (*ctx_load_verify_locations)(void *ctx, const char *file, const char *path);
-	void (*ctx_set_verify)(void *ctx, int mode, void *callback);
-	long (*ctx_ctrl)(void *ctx, int command, long number, void *pointer);
-	uint64_t (*ctx_set_options)(void *ctx, uint64_t options);
-	void *(*ssl_new)(void *ctx);
-	void (*ssl_free)(void *ssl);
-	int (*set_fd)(void *ssl, int descriptor);
-	long (*ssl_ctrl)(void *ssl, int command, long number, void *pointer);
-	int (*set1_host)(void *ssl, const char *host);
-	void *(*get0_param)(void *ssl);
-	int (*connect)(void *ssl);
-	int (*read)(void *ssl, void *bytes, int length);
-	int (*write)(void *ssl, const void *bytes, int length);
-	int (*get_error)(const void *ssl, int result);
-	int (*pending)(const void *ssl);
-	int (*shutdown)(void *ssl);
-	long (*get_verify_result)(const void *ssl);
-	int (*param_set1_ip_asc)(void *param, const char *address);
-	const char *(*verify_error_string)(long result);
-	unsigned long (*err_get_error)(void);
-	void (*err_error_string_n)(unsigned long error, char *text, size_t length);
-	void (*err_clear_error)(void);
-};
+/* The size of a SHA-256 fingerprint of a certificate. */
+#define TLS_FINGERPRINT_SIZE	32U
+
+/* The most certificates the system may distrust that are remembered (more fails the context, never lets one through). */
+#define TLS_DISTRUSTED_MAX	1024U
+
+/* The longest path of the bundle of roots shipped with the program. */
+#define TLS_BUNDLE_PATH_MAX	1024U
+
+/* The bundle's path below the program's data directory. */
+#define TLS_BUNDLE_NAME		"/certs/ca-certificates.pem"
+
+#ifndef WB_TLS_STATIC
 
 /*
- * One function tls_find_all finds: in libcrypto or libssl, its name, and
+ * One function tls_find_all finds: in libcrypto or libssl, its name, whether
+ * the table may do without it ("OpenSSL only", see struct tls_library), and
  * its member of struct tls_library.
  */
 struct tls_symbol {
 	int crypto;
+	int optional;
 	const char *name;
 	size_t offset;
 };
 
 /* The functions of struct tls_library, in its order.  The table is constant for the life of the program. */
 static const struct tls_symbol tls_symbols[] = {
-	{ 0, "TLS_client_method", offsetof(struct tls_library, client_method) },
-	{ 0, "SSL_CTX_new", offsetof(struct tls_library, ctx_new) },
-	{ 0, "SSL_CTX_set_default_verify_paths", offsetof(struct tls_library, ctx_set_default_verify_paths) },
-	{ 0, "SSL_CTX_load_verify_locations", offsetof(struct tls_library, ctx_load_verify_locations) },
-	{ 0, "SSL_CTX_set_verify", offsetof(struct tls_library, ctx_set_verify) },
-	{ 0, "SSL_CTX_ctrl", offsetof(struct tls_library, ctx_ctrl) },
-	{ 0, "SSL_CTX_set_options", offsetof(struct tls_library, ctx_set_options) },
-	{ 0, "SSL_new", offsetof(struct tls_library, ssl_new) },
-	{ 0, "SSL_free", offsetof(struct tls_library, ssl_free) },
-	{ 0, "SSL_set_fd", offsetof(struct tls_library, set_fd) },
-	{ 0, "SSL_ctrl", offsetof(struct tls_library, ssl_ctrl) },
-	{ 0, "SSL_set1_host", offsetof(struct tls_library, set1_host) },
-	{ 0, "SSL_get0_param", offsetof(struct tls_library, get0_param) },
-	{ 0, "SSL_connect", offsetof(struct tls_library, connect) },
-	{ 0, "SSL_read", offsetof(struct tls_library, read) },
-	{ 0, "SSL_write", offsetof(struct tls_library, write) },
-	{ 0, "SSL_get_error", offsetof(struct tls_library, get_error) },
-	{ 0, "SSL_pending", offsetof(struct tls_library, pending) },
-	{ 0, "SSL_shutdown", offsetof(struct tls_library, shutdown) },
-	{ 0, "SSL_get_verify_result", offsetof(struct tls_library, get_verify_result) },
-	{ 1, "X509_VERIFY_PARAM_set1_ip_asc", offsetof(struct tls_library, param_set1_ip_asc) },
-	{ 1, "X509_verify_cert_error_string", offsetof(struct tls_library, verify_error_string) },
-	{ 1, "ERR_get_error", offsetof(struct tls_library, err_get_error) },
-	{ 1, "ERR_error_string_n", offsetof(struct tls_library, err_error_string_n) },
-	{ 1, "ERR_clear_error", offsetof(struct tls_library, err_clear_error) }
+	{ 0, 0, "TLS_client_method", offsetof(struct tls_library, client_method) },
+	{ 0, 0, "SSL_CTX_new", offsetof(struct tls_library, ctx_new) },
+	{ 0, 0, "SSL_CTX_set_default_verify_paths", offsetof(struct tls_library, ctx_set_default_verify_paths) },
+	{ 0, 0, "SSL_CTX_load_verify_locations", offsetof(struct tls_library, ctx_load_verify_locations) },
+	{ 0, 0, "SSL_CTX_set_verify", offsetof(struct tls_library, ctx_set_verify) },
+	{ 0, 0, "SSL_CTX_ctrl", offsetof(struct tls_library, ctx_ctrl) },
+	{ 0, 0, "SSL_CTX_set_options", offsetof(struct tls_library, ctx_set_options) },
+	{ 0, 0, "SSL_CTX_get_cert_store", offsetof(struct tls_library, ctx_get_cert_store) },
+	{ 0, 0, "SSL_new", offsetof(struct tls_library, ssl_new) },
+	{ 0, 0, "SSL_free", offsetof(struct tls_library, ssl_free) },
+	{ 0, 0, "SSL_set_fd", offsetof(struct tls_library, set_fd) },
+	{ 0, 0, "SSL_ctrl", offsetof(struct tls_library, ssl_ctrl) },
+	{ 0, 0, "SSL_set1_host", offsetof(struct tls_library, set1_host) },
+	{ 0, 0, "SSL_get0_param", offsetof(struct tls_library, get0_param) },
+	{ 0, 0, "SSL_connect", offsetof(struct tls_library, connect) },
+	{ 0, 0, "SSL_read", offsetof(struct tls_library, read) },
+	{ 0, 0, "SSL_write", offsetof(struct tls_library, write) },
+	{ 0, 0, "SSL_get_error", offsetof(struct tls_library, get_error) },
+	{ 0, 0, "SSL_pending", offsetof(struct tls_library, pending) },
+	{ 0, 0, "SSL_shutdown", offsetof(struct tls_library, shutdown) },
+	{ 0, 0, "SSL_get_verify_result", offsetof(struct tls_library, get_verify_result) },
+	{ 1, 0, "X509_VERIFY_PARAM_set1_ip_asc", offsetof(struct tls_library, param_set1_ip_asc) },
+	{ 1, 0, "X509_verify_cert_error_string", offsetof(struct tls_library, verify_error_string) },
+	{ 1, 0, "ERR_get_error", offsetof(struct tls_library, err_get_error) },
+	{ 1, 0, "ERR_error_string_n", offsetof(struct tls_library, err_error_string_n) },
+	{ 1, 0, "ERR_clear_error", offsetof(struct tls_library, err_clear_error) },
+	{ 1, 0, "d2i_X509", offsetof(struct tls_library, d2i_x509) },
+	{ 1, 0, "X509_STORE_add_cert", offsetof(struct tls_library, x509_store_add_cert) },
+	{ 1, 0, "X509_free", offsetof(struct tls_library, x509_free) },
+
+	/* OpenSSL only. */
+	{ 0, 1, "OPENSSL_init_ssl", offsetof(struct tls_library, init_ssl) },
+	{ 1, 1, "X509_digest", offsetof(struct tls_library, x509_digest) },
+	{ 1, 1, "EVP_sha256", offsetof(struct tls_library, evp_sha256) },
+	{ 1, 1, "X509_STORE_CTX_get_current_cert", offsetof(struct tls_library, store_ctx_get_current_cert) },
+	{ 1, 1, "X509_STORE_CTX_set_error", offsetof(struct tls_library, store_ctx_set_error) }
 };
 
 /* The names libcrypto is looked for under, in order (the package's, then a host's versioned one). */
@@ -138,11 +146,22 @@ static const char *const tls_crypto_names[] = { "libcrypto.so", "libcrypto.so.3"
 /* The names libssl is looked for under, in the same order. */
 static const char *const tls_ssl_names[] = { "libssl.so", "libssl.so.3", NULL };
 
+#endif
+
 /*
  * One TLS connection over a connected socket.
  */
 struct net_tls {
 	void *ssl;
+};
+
+/*
+ * The state of one enumeration of the system's trusted roots: where the
+ * roots go and how many went there.
+ */
+struct tls_roots {
+	void *store;
+	size_t added;
 };
 
 /* The loaded library, once tls_loaded is set (set under tls_load_lock, then only read). */
@@ -156,6 +175,21 @@ static void *tls_context;
 
 /* The lock of the loading: the first thread to need TLS loads it, the others wait and find it loaded. */
 static pthread_mutex_t tls_load_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/*
+ * The SHA-256 fingerprints of the certificates the system says never to
+ * trust, kept for the verification callback: tls_distrusted_count
+ * fingerprints of TLS_FINGERPRINT_SIZE bytes each.  Filled once while the
+ * context is made (under tls_load_lock), then only read; empty when the
+ * system distrusts nothing or the library cannot take a fingerprint.
+ */
+static unsigned char (*tls_distrusted)[TLS_FINGERPRINT_SIZE];
+
+/* How many fingerprints tls_distrusted holds. */
+static size_t tls_distrusted_count;
+
+/* How many fingerprints the memory of tls_distrusted has room for. */
+static size_t tls_distrusted_capacity;
 
 /* The CA files added for the tests, loaded into the context when it is made (set before the first fetch). */
 static const char *tls_ca_files[TLS_CA_FILES_MAX];
@@ -175,11 +209,19 @@ static pthread_once_t tls_reason_once = PTHREAD_ONCE_INIT;
 
 static int tls_load(void);
 static int tls_load_once(void);
+static int tls_bind_library(void);
+static int tls_add_roots(void);
+static int tls_add_roots_each(void *context, const unsigned char *der, size_t length, int distrusted);
+static int tls_remember_distrusted(const unsigned char *der, size_t length);
+static void tls_add_bundle(void);
+static int tls_verify(int preverified, void *store_context);
 static void tls_make_reason_key(void);
 static char *tls_reason_buffer(void);
 static void tls_set_reason(const char *format, ...) __attribute__((format(printf, 1, 2)));
+#ifndef WB_TLS_STATIC
 static int tls_find(struct wb_os_library *library, const char *name, void *pointer);
 static int tls_find_all(struct wb_os_library *ssl, struct wb_os_library *crypto);
+#endif
 static int tls_attach(void *ssl, wb_os_socket socket);
 static int tls_make_context(void);
 static int tls_set_host(void *ssl, const char *host);
@@ -641,7 +683,7 @@ tls_load(void)
 }
 
 /*
- * Loads the libraries and makes the context unless that was tried already
+ * Binds the library and makes the context unless that was tried already
  * (under tls_load_lock).  A library that loaded stays loaded, even when
  * TLS cannot be used after all (libcrypto may have registered its own
  * clean-up at the program's exit).
@@ -649,8 +691,6 @@ tls_load(void)
 static int
 tls_load_once(void)
 {
-	struct wb_os_library *ssl;
-	struct wb_os_library *crypto;
 	int error;
 
 	/* Already done, or already known to be impossible. */
@@ -661,8 +701,49 @@ tls_load_once(void)
 		return EPROTONOSUPPORT;
 	}
 
-	/* libcrypto first (libssl needs it), then libssl. */
+	/* The functions, then the context. */
 	tls_loaded = -1;
+	error = tls_bind_library();
+	if (error == 0)
+		error = tls_make_context();
+	if (error != 0)
+		return EPROTONOSUPPORT;
+
+	/* Succeeded: https works from now on (the libraries stay loaded). */
+	tls_loaded = 1;
+	return 0;
+}
+
+#ifdef WB_TLS_STATIC
+
+/* Fills the table from the library linked into the program; returns 0 or an errno value. */
+static int
+tls_bind_library(void)
+{
+	int error;
+
+	/* Nothing to open: the functions are in the program. */
+	error = tls_static_library(&tls_library);
+	if (error != 0) {
+		tls_set_reason("cannot bind the OpenSSL library");
+		return error;
+	}
+
+	/* Succeeded: every function is there. */
+	return 0;
+}
+
+#else
+
+/* Loads libcrypto, then libssl (which needs it), and finds the functions; returns 0 or an errno value. */
+static int
+tls_bind_library(void)
+{
+	struct wb_os_library *ssl;
+	struct wb_os_library *crypto;
+	int error;
+
+	/* libcrypto first (libssl needs it), then libssl. */
 	ssl = NULL;
 	error = wb_os_library_open(tls_crypto_names, &crypto);
 	if (error == 0)
@@ -672,15 +753,12 @@ tls_load_once(void)
 		return EPROTONOSUPPORT;
 	}
 
-	/* The functions, then the context. */
+	/* The functions. */
 	error = tls_find_all(ssl, crypto);
-	if (error == 0)
-		error = tls_make_context();
 	if (error != 0)
-		return EPROTONOSUPPORT;
+		return error;
 
-	/* Succeeded: https works from now on (the libraries stay loaded). */
-	tls_loaded = 1;
+	/* Succeeded: the functions are found. */
 	return 0;
 }
 
@@ -705,7 +783,7 @@ tls_find(
 	return 0;
 }
 
-/* Finds every function the connections use (tls_symbols). */
+/* Finds every function the connections use (tls_symbols); one marked optional that is missing stays NULL. */
 static int
 tls_find_all(
 	struct wb_os_library *ssl,
@@ -721,13 +799,19 @@ tls_find_all(
 		if (tls_symbols[index].crypto)
 			library = crypto;
 		error = tls_find(library, tls_symbols[index].name, (char *)&tls_library + tls_symbols[index].offset);
+
+		/* An OpenSSL-only function the library lacks: its feature is not used. */
+		if (error != 0 && tls_symbols[index].optional)
+			continue;
 		if (error != 0)
 			return error;
 	}
 
-	/* Succeeded: every function is there. */
+	/* Succeeded: every function that is needed is there. */
 	return 0;
 }
+
+#endif
 
 /*
  * Gives a connection its socket, as the int SSL_set_fd takes.  Returns 0,
@@ -760,13 +844,28 @@ tls_attach(
 	return 0;
 }
 
-/* Makes the context: TLS 1.2 or later, the peer verified against the default roots and the added CA files. */
+/*
+ * Makes the context: TLS 1.2 or later, the peer verified against the
+ * system's roots, the program's bundle and the added CA files, and a
+ * certificate the system distrusts refused wherever it is in the chain.
+ */
 static int
 tls_make_context(void)
 {
+	tls_verify_callback callback;
 	size_t index;
 	long set;
 	int result;
+	int error;
+
+	/* A library that can says to read no configuration file (a user's openssl.cnf would run for this program). */
+	if (tls_library.init_ssl != NULL) {
+		result = tls_library.init_ssl(TLS_INIT_NO_LOAD_CONFIG, NULL);
+		if (result != 1) {
+			tls_set_reason("cannot start OpenSSL without a configuration file");
+			return EPROTO;
+		}
+	}
 
 	/* The client context. */
 	tls_context = tls_library.ctx_new(tls_library.client_method());
@@ -782,12 +881,20 @@ tls_make_context(void)
 		return EPROTO;
 	}
 
-	/* The peer must verify; a close without close_notify reads as the end. */
-	tls_library.ctx_set_verify(tls_context, TLS_VERIFY_PEER, NULL);
+	/* The roots the system keeps for itself, and the certificates it distrusts. */
+	error = tls_add_roots();
+	if (error != 0)
+		return error;
+
+	/* The peer must verify, and a distrusted certificate in its chain fails it. */
+	callback = NULL;
+	if (tls_distrusted_count != 0)
+		callback = tls_verify;
+	tls_library.ctx_set_verify(tls_context, TLS_VERIFY_PEER, callback);
 	tls_library.ctx_set_options(tls_context, TLS_OP_IGNORE_UNEXPECTED_EOF);
 
-	/* The roots: the default ones (a missing file only leaves them empty), then the added files. */
-	tls_library.ctx_set_default_verify_paths(tls_context);
+	/* The roots shipped with the program, then the added files. */
+	tls_add_bundle();
 	for (index = 0; index < tls_ca_file_count; index++) {
 		result = tls_library.ctx_load_verify_locations(tls_context, tls_ca_files[index], NULL);
 		if (result != 1) {
@@ -798,6 +905,225 @@ tls_make_context(void)
 
 	/* Succeeded: connections can be made. */
 	return 0;
+}
+
+/*
+ * Gives the context the roots the system hands over (tls_add_roots_each)
+ * and remembers the certificates it distrusts.  A system that keeps its
+ * roots where the library reads them itself hands over none, and then the
+ * library's default paths are used (a missing file only leaves them empty).
+ */
+static int
+tls_add_roots(void)
+{
+	struct tls_roots roots;
+	int error;
+
+	/* Each certificate the system trusts goes into the context's store. */
+	roots.store = tls_library.ctx_get_cert_store(tls_context);
+	roots.added = 0;
+	error = wb_os_trust_roots(tls_add_roots_each, &roots);
+	if (error != 0) {
+		tls_set_reason("cannot read the system's trusted certificates (error %d)", error);
+		return EPROTO;
+	}
+
+	/* Nothing handed over: the system's own file (or none) through the library's default paths. */
+	if (roots.added == 0)
+		tls_library.ctx_set_default_verify_paths(tls_context);
+
+	/* Succeeded: the system's roots are in. */
+	return 0;
+}
+
+/*
+ * One certificate of the system's stores: a trusted one goes into the
+ * context's store, a distrusted one's fingerprint is remembered.  A trusted
+ * certificate that does not parse is skipped.  Returns 0 to go on or an errno
+ * value to stop the enumeration.
+ */
+static int
+tls_add_roots_each(
+	void *context,
+	const unsigned char *der,
+	size_t length,
+	int distrusted)
+{
+	struct tls_roots *roots;
+	const unsigned char *cursor;
+	void *certificate;
+	int added;
+
+	/* A certificate the system distrusts: its fingerprint is kept for the verification. */
+	roots = context;
+	if (distrusted)
+		return tls_remember_distrusted(der, length);
+
+	/* A certificate longer than the library's length can describe is not a certificate. */
+	if (length > (size_t)LONG_MAX)
+		return 0;
+
+	/* The certificate, parsed. */
+	cursor = der;
+	certificate = tls_library.d2i_x509(NULL, &cursor, (long)length);
+	if (certificate == NULL) {
+		tls_library.err_clear_error();
+		return 0;
+	}
+
+	/* Trusted as a root; the store keeps its own reference. */
+	added = tls_library.x509_store_add_cert(roots->store, certificate);
+	tls_library.x509_free(certificate);
+	if (added != 1) {
+		tls_library.err_clear_error();
+		return 0;
+	}
+
+	/* One more root. */
+	roots->added++;
+	return 0;
+}
+
+/*
+ * Remembers the SHA-256 fingerprint of a certificate the system distrusts.
+ * Without a library that can take a fingerprint nothing is remembered (the
+ * other implementation of the interface does its own refusing).  Returns 0,
+ * or an errno value, which ends the enumeration and fails the context: a
+ * list that cannot hold every distrusted certificate is not used.
+ */
+static int
+tls_remember_distrusted(
+	const unsigned char *der,
+	size_t length)
+{
+	unsigned char (*grown)[TLS_FINGERPRINT_SIZE];
+	unsigned char fingerprint[TLS_FINGERPRINT_SIZE];
+	const unsigned char *cursor;
+	unsigned int printed;
+	size_t capacity;
+	void *certificate;
+	int done;
+
+	/* The functions of a fingerprint are OpenSSL's; without them there is nothing to do. */
+	if (tls_library.x509_digest == NULL || tls_library.evp_sha256 == NULL)
+		return 0;
+	if (tls_library.store_ctx_get_current_cert == NULL || tls_library.store_ctx_set_error == NULL)
+		return 0;
+	if (length > (size_t)LONG_MAX)
+		return 0;
+
+	/* The certificate, parsed; one that does not parse cannot be in a chain. */
+	cursor = der;
+	certificate = tls_library.d2i_x509(NULL, &cursor, (long)length);
+	if (certificate == NULL) {
+		tls_library.err_clear_error();
+		return 0;
+	}
+
+	/* Its fingerprint. */
+	printed = 0;
+	done = tls_library.x509_digest(certificate, tls_library.evp_sha256(), fingerprint, &printed);
+	tls_library.x509_free(certificate);
+	if (done != 1 || printed != TLS_FINGERPRINT_SIZE) {
+		tls_library.err_clear_error();
+		tls_set_reason("cannot take the fingerprint of a distrusted certificate");
+		return EIO;
+	}
+
+	/* Room for one more. */
+	if (tls_distrusted_count == TLS_DISTRUSTED_MAX) {
+		tls_set_reason("the system distrusts more than %u certificates", TLS_DISTRUSTED_MAX);
+		return ENOSPC;
+	}
+	if (tls_distrusted_count == tls_distrusted_capacity) {
+		capacity = tls_distrusted_capacity * 2U;
+		if (capacity == 0)
+			capacity = 16U;
+		grown = realloc(tls_distrusted, capacity * sizeof(*tls_distrusted));
+		if (grown == NULL)
+			return ENOMEM;
+		tls_distrusted = grown;
+		tls_distrusted_capacity = capacity;
+	}
+
+	/* Kept. */
+	memcpy(tls_distrusted[tls_distrusted_count], fingerprint, TLS_FINGERPRINT_SIZE);
+	tls_distrusted_count++;
+	return 0;
+}
+
+/*
+ * Adds the bundle of roots shipped with the program (the ca-certificates
+ * package's PEM file, in the program's data directory) to the context.  A
+ * program without the file simply has the roots it already has.
+ */
+static void
+tls_add_bundle(void)
+{
+	char directory[TLS_BUNDLE_PATH_MAX];
+	char path[TLS_BUNDLE_PATH_MAX];
+	int length;
+	int error;
+
+	/* The data directory. */
+	error = wb_os_data_directory(directory, sizeof(directory));
+	if (error != 0)
+		return;
+
+	/* The bundle's path in it. */
+	length = snprintf(path, sizeof(path), "%s%s", directory, TLS_BUNDLE_NAME);
+	if (length < 0 || (size_t)length >= sizeof(path))
+		return;
+
+	/* Read when it is there; a file that is missing or unreadable leaves the roots as they are. */
+	tls_library.ctx_load_verify_locations(tls_context, path, NULL);
+	tls_library.err_clear_error();
+}
+
+/*
+ * The verification callback, called for each certificate of a chain: a
+ * certificate whose fingerprint the system distrusts fails the verification
+ * (reason: certificate rejected), wherever it is in the chain and even when
+ * it was also found as a root.  Returns 1 to go on, 0 to fail.
+ */
+static int
+tls_verify(
+	int preverified,
+	void *store_context)
+{
+	unsigned char fingerprint[TLS_FINGERPRINT_SIZE];
+	unsigned int printed;
+	void *certificate;
+	size_t index;
+	int done;
+
+	/* A certificate the library already refused stays refused. */
+	if (!preverified)
+		return 0;
+
+	/* The certificate being looked at. */
+	certificate = tls_library.store_ctx_get_current_cert(store_context);
+	if (certificate == NULL)
+		return 1;
+
+	/* Its fingerprint; one that cannot be taken cannot be shown not to be distrusted. */
+	printed = 0;
+	done = tls_library.x509_digest(certificate, tls_library.evp_sha256(), fingerprint, &printed);
+	if (done != 1 || printed != TLS_FINGERPRINT_SIZE) {
+		tls_library.store_ctx_set_error(store_context, TLS_CERT_REJECTED);
+		return 0;
+	}
+
+	/* A distrusted fingerprint fails the chain. */
+	for (index = 0; index < tls_distrusted_count; index++) {
+		if (memcmp(tls_distrusted[index], fingerprint, TLS_FINGERPRINT_SIZE) == 0) {
+			tls_library.store_ctx_set_error(store_context, TLS_CERT_REJECTED);
+			return 0;
+		}
+	}
+
+	/* Not distrusted. */
+	return 1;
 }
 
 /* Sets the name sent and checked: a name goes in SNI and is matched; an address is matched only. */
