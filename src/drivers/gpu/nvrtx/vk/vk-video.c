@@ -4098,7 +4098,9 @@ video_run_decode_h265(
 	uint32_t index;
 	uint32_t substitute;
 	uint32_t bits;
+	uint32_t ctbs;
 	uint32_t errors;
+	uint32_t header;
 	uint64_t bitstream;
 	uint64_t header_bytes;
 	uint8_t *buffer_cpu;
@@ -4211,12 +4213,17 @@ video_run_decode_h265(
 	if (dxva)
 		description.dxva = 1U;
 	if (!dxva) {
-		/* The header's first bytes, copied out of the bitstream. */
+		/* The bitstream in the CPU's window, put there when it has no place yet. */
 		if (buffer_cpu == NULL) {
-			video_skip("the bitstream is out of the CPU's view");
-			video_status(VIDEO_STATUS_ERROR);
-			return 0;
+			error = nvrtx_vk_buffer_cpu(session, buffer, &buffer_cpu);
+			if (error != 0) {
+				video_skip("the bitstream cannot be put in the CPU's view");
+				video_status(VIDEO_STATUS_ERROR);
+				return 0;
+			}
 		}
+
+		/* The header's first bytes, copied out of the bitstream. */
 		header_bytes = video->range - video->slices[0];
 		if (header_bytes > VIDEO_H265_HEADER_BYTES)
 			header_bytes = VIDEO_H265_HEADER_BYTES;
@@ -4274,10 +4281,20 @@ video_run_decode_h265(
 		return error;
 
 	/* The decoder's status: CTBs in error, a decode error or a slice header error make the result an error. */
-	errors = nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_ERRORS_AT);
-	errors |= nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_ERROR_AT);
-	errors |= nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_HEADER_AT);
-	if (errors != 0U) {
+	ctbs = nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_ERRORS_AT);
+	errors = nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_ERROR_AT);
+	header = nvrtx_get32(state->run_cpu + VIDEO_RUN_STATUS_AT, NVRTX_NVDEC_STATUS_HEADER_AT);
+	if (ctbs != 0U || errors != 0U || header != 0U) {
+		/* The first few of them are logged with what the decoder reported and what it was told. */
+		if (video_skip_lines < VIDEO_SKIP_LINES) {
+			video_skip_lines++;
+			kern_logf("nvrtx: vk: video: an H.265 picture in error: %u CTBs, error %08x, slice header %08x (skip %u bits, %u references)\n",
+				  (unsigned)ctbs,
+				  (unsigned)errors,
+				  (unsigned)header,
+				  (unsigned)description.skip_bits,
+				  (unsigned)description.reference_count);
+		}
 		video_status(VIDEO_STATUS_ERROR);
 		return 0;
 	}

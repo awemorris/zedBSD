@@ -37,7 +37,7 @@
 | p002 | Vulkan の header の段 1（H.265 decode の選び） | Q324-2（Q1 の toolchain の許可） |
 | p003 | Vulkan の header の段 2（`vulkan_core.h` を 1.4.309 で作り直し、KHR の encode） | p002、Q324-2 |
 | p004 | libvulkan の H.265 decode の転送、capset の bit 2、video の門を bit ごとに | p002、Q324-3 |
-| p005 | nvrtx の H.265 decode（NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離） | p004（libvulkan の転送は P2 が ws322-p005 で作る、並行） — in-progress（P1 q1917） |
+| [p005](phase005/phase.md) | nvrtx の H.265 decode（NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離） | p004（libvulkan の転送は P2 が ws322-p005 で作った） — in-progress（P1 q1917、2026-11-02 08:20: 実装・host 試験・build、実機の H.264 の非退行 MATCH。H.265 は DXVA の形で NVDEC が走るが絵は誤り、p007 へ。判定は Q1） |
 | p006a | H.265 の解析の設計（標準廉価実装手順）と header の配置（段 2） | Q324-1（p002 は要らない: host の Vulkan の header で試験） |
 | p006b〜h | （上の Phase の表へ移した、2026-11-02 p006a 段 2。Q-B の A） | — |
 | p006i | vkvideo-probe の H.265（前の案の p006e）— P2 が ws322-p006 で作る（2026-11-02 07:22 Q1、WS322 と共有の probe） | p006h、p002 |
@@ -69,6 +69,7 @@
 
 ## Resume point
 
+- 2026-11-02 P1（q1917-i01）: p005。nvrtx の H.265 decode を実装（[phase005](phase005/phase.md) §6）。host 試験 157・54 checks PASS、vmunix warning 0。実機（10.0.10.3）で H.264 1080p30 600/600 MATCH、H.265 は DXVA の形で NVDEC が全部の絵を実行（hang 無し）、状態 ERROR・一致 0、skip の形は bitstream の窓の問題（直した、実機は未実施）。次は Q1 の判定と p007（`plan/ws324/tests/rtx-video324.sh`、`H265_DIR=build/ws324-p005/h265`）。
 - 2026-11-02 P1（q1884-i01）: p009b。nvenc-test の段（`nvrtx.nvenc.test=1`）で H.264 の IDR を encode。firmware は setup を受けて（magic・offset の検査は通る、誤りの番号は 2024 版の enum）、rc_process と入力の luma・chroma を読んだ後、出力に触る前に HW の誤り（error_status 1、約 20 µs、GSP の RC 47）。H.265・ME only・IPCM・640x480・monochrome でも同じ。channel は RC の後に作り直せるので 1 起動で 5〜7 通り試せる。GSP の LOGRM に falcon の dump らしい 24 値があるが書式が無い（Q-p009b-1）。次は Q1 の判断（[phase009b](phase009b/phase.md) §4〜§5）。
 - 2026-11-02 P1（q1880-i01）: p009a。NVENC の channel を実機（10.0.10.3）で開いた: chid 49・runlist 2・class c4b7、NOP と NVENC 自身の semaphore の release が通り、RC の通知 0。R5 は「GSP-RM が ucode を持つ、別の firmware は要らない」。機械は Debian に戻し cksum 一致。次は Q1 の受け入れと p009b（関門）。
 - 2026-11-02 P1（q1864-i02）: p006a 段 2。header 11 個を `userland/desktop/libmedia/` に置き、骨格 .c 10 個、`plan/ws324/tests/`（run-unit.sh・check-skeleton.sh・unit/h265write.h・unit/test-h265write.c）、基点 BASE `1f16db0e6`。p006b〜h の phase.md に BASE と道具の注意（design §8.1.1）。次は Q1 の受け入れと p006b・p006e・p006f の起動。
