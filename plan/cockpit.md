@@ -76,48 +76,6 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 06:5x にも、担当が消してよいと挙げた /tmp の試験の出力（/tmp/ws326-speed.run.*・/tmp/p1-speed-*.run.*・/tmp/p1-stage・/tmp/p1-video-check、scratchpad の interp）を wildcard で消そうとして、同じ判定で止められた。
 - 決めてほしい事: 00 の worktree の片付けと合わせて、許可を足すか、ユーザーが `! sh plan/tools/q1-clean.sh --tmp` を走らせるか。
 
-### 0c. WS318（libmedia の作り直し）の設計の問い Q318-1〜14（2026-10-31 新しい）
-
-- 背景: WS318 は、libmedia を Keiland の app の唯一の動画・音声・camera の入り口にする WS。app の Vulkan の device を共有し、codec を問い合わせて選び、encoder と camera を足し、libavcodec は libmedia の中の最後の予備にする。P5 が設計（public の header 2 つの案、Phase p001〜p028）を書き、敵対的レビュー（blocker 3・major 20）を反映した（main 85fbeb091）。HAL は変えない。全文・用語・推しは [ws318/user-questions.md](ws318/user-questions.md)。
-- 用語: Vulkan Video は GPU の動画の decode・encode の標準の口。vkfake は試験用の偽の Vulkan の device。MJPEG は camera がよく出す JPEG の連続の形式。B-frame は前後の frame を参照する frame。
-- 問いの要点（どれも推しが付いている）:
-  - Q318-1 hardware の encode と H.265 の decode は、WS318 では vkfake で確かめ、実機の確かめは GPU ごとの driver の WS（WS319〜）の受け入れにする（推し）。
-  - Q318-2 zedBSD の libavcodec の package は encoder を無効のまま。libavcodec の encode の予備は、encoder 付きの libavcodec の機械でだけ働く（推し）。
-  - **Q318-3 Vulkan の header の更新**: 今は 1.3.269 で、KHR の encode が無い。1.3.274 以降の tag に固定して更新したい。共有の sysroot の作り直し（toolchain の扱い）が要る。
-  - Q318-4 MJPEG の camera は Huffman を CPU、IDCT と色の変換を GPU の描画で（推し）。
-  - Q318-5 AAC-LC の encoder に、短い窓の切り替えと TNS を足す（推し）。
-  - Q318-6 camera の実機の Phase（p027）だけが WS282（UVC）を待つ（推し）。
-  - Q318-7 MP4 の書き出し（録画の file）は範囲の外（推し）。
-  - Q318-8 H.265 は Main profile だけ（推し）。
-  - Q318-9 hardware の encode は IDR と P から、B-frame 無し（推し）。
-  - Q318-10 i915 の driver の小さな変更（decode の出力を sample できる形に）は WS319 で（推し）。
-  - Q318-11 browser の `<video>` は libavcodec を使わない（network から来た信頼できない入力を同じ process で decode するため）（推し）。
-  - **Q318-12** 2026-10-12 の決定（毎 frame の CPU の複写をしない）の例外として、software の decoder の出力を GPU の memory へ、import の無い機械の camera の frame の、2 つの複写を認めるか（推し: 認める）。
-  - Q318-13 player の文言で「libavcodec が無い」を先に出す（推し）。
-  - **Q318-14** WS326 の完了を待たずに、WS326 に触れない Phase（p002・p003a・p003b・p011a・p011b・p016〜p019）を先に始めるか（推し: 始める）。
-- 止めている物: WS318 の実装（設計の受け入れと Q318-14 の答えまで始めない）。
-
-### 0d. WS329（libmedia の H.264 の software の encoder）の設計の問い Q329-1〜5（2026-10-31 新しい）
-
-- 背景: WS329 は、libmedia に既存の library を使わない H.264 の encoder を作る WS（標準廉価実装手順）。P5 が設計（header の案 26、Phase p002〜p026）を書き、敵対的レビュー（major 10）を反映した（main 455a7d5b4）。encoder は decoder（WS326）の部品と再構成をそのまま使うので、encoder と decoder の画がずれない。実装は WS326 の完了の後。全文は [ws329/user-questions.md](ws329/user-questions.md)。
-- 用語: BD-rate は同じ画質に要る bit の量の差（+40% は x264 より 4 割多く要る）。preset は速さと画質の釣り合いの段。x264 veryfast は広く使われる速い設定。
-- Q329-1 画質の目標: **推し A** 釣り合いの preset で x264 veryfast に対し BD-rate +40% 以内、速い preset で +80% 以内。
-- Q329-2 速さの目標: **推し A** 5330 で速い preset の 720p30 を実時間に（slice の 2〜4 thread）。1080p30 は目標にしない（SIMD を使わないため）。
-- Q329-3 B-frame: **推し A** 入れる（Main・High、参照にしない B を最大 3 枚、既定は 0）。
-- Q329-4 WS318 と並べて進める: **推し A** WS326 の完了の後に p002〜p023 を WS318 と並べ、p024 は WS318 p012a、p025 は WS318 p008 を待つ。
-- Q329-5 libmedia の encoder の設定に速さの欄を足す: **推し A** WS318 の media_encoder_config に `speed` を 1 つ足す。
-- 止めている物: 無し（実装は WS326 の完了待ち）。
-
-### 0f. WS330（libmedia の H.265 の software の decoder と encoder）の設計の問い Q330-1〜4（2026-10-31 新しい）
-
-- 背景: WS330 は、H.265 の decoder と encoder を既存の library を使わずに作る WS（実装は WS329 の後、ユーザーの決定）。P5 が設計（header の案 38、Phase p002〜p049）を書き、敵対的レビュー（blocker 1・major 11）を反映した（main 299a2f4b3）。H.264 と共通の部品（bit の読み・NAL・CABAC・frame・DPB）は `vcodec-` の名前で共有する。全文は [ws330/user-questions.md](ws330/user-questions.md)。
-- 用語: Main は 8 bit 4:2:0 の基本の profile、Main 10 は 10 bit（HDR など）。WPP・tile は 1 枚の画を並列に decode できる分け方。
-- Q330-1 範囲: **推し A** Main（8 bit）だけ。10 bit は libavcodec に回し、WS318 が 10 bit の出力を持った後に別の WS で。
-- Q330-2 H.265 の解析を WS318（GPU の Vulkan Video の道）と共有するか: **推し A** 1 つにする（WS318 p016 がこの設計の header を採る）。
-- Q330-3 速さと画質の目標: **推し A** decoder は 5330 で 1080p30（並列にできない stream は 720p30）、Pi 5 は 720p30。encoder は 5330 で速い preset。SIMD は範囲の外。
-- Q330-4 decoder の部分を早く始めるか: **推し A** 決定どおり WS329 の完了の後（共通化を 1 回で済ませる）。
-- 止めている物: 無し（実装は WS329 の後）。
-
 ### 0h. WS302（デスクトップのスレッドバランサ DTB）の設計の問い Q302-1〜7（2026-10-31 新しい）
 
 - 背景: WS302 は、kernel が thread の振る舞い（GPU を使う・入力に応える・長く計算する）と nice から、速い P-core と省電力の E-core への割り付けを scheduler に提案する仕組み（CONFIG_DTB、既定 off、ユーザーの決定）。WS333 の CPU の口が入ったので、P5 が設計（約 22 LW、Phase p002〜p007）を書き、敵対的レビュー（blocker 2・major 11）を反映した（main 896d3e3db）。HAL は変えない。全文は [ws302/user-questions.md](ws302/user-questions.md)。
@@ -130,19 +88,6 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - Q302-6 観察の口（読みだけの sysctl `kern.dtb`）: **推し A**。
 - Q302-7 受け入れの数: **推し** design.md §6.4 の表（A1〜A7）。
 - 止めている物: WS302 の実装（p002 は Q302-5、p003 は Q302-2・3、p004 は Q302-1・6 の答えの後）。
-
-### 0i. WS310（ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる）の設計の問い Q310-1〜6（2026-10-31 新しい）
-
-- 背景: _OSC は OS が firmware に「この機能は OS が扱う」と伝える ACPI の method。WS310 は、ユーザーの決定（最終的には呼ぶが、別の WS で厳重に確かめる）の WS。P6 が設計（Phase p002〜p009）を書き、敵対的レビュー（major 12）を反映した（main a2aa89c4f）。HAL は変えない。全文は [ws310/user-questions.md](ws310/user-questions.md)。
-- 5330 の表で分かった危ない所: PCIe の _OSC は「問い合わせ」だけでも firmware が設定を書き、root port の hot-plug・PME の割り込みが止まり得る（試験の道具で再現）。platform の _OSC の確定は Thunderbolt の制御の切り替えと、電源を切っても残る CMOS への書きの道がある。
-- 用語: CMOS は電源を切っても残る小さな設定の記憶。PME は device が電源の復帰を知らせる仕組み。CPPC は OS が CPU の性能を指示する仕組み。
-- Q310-1 確かめが通った後、既定で呼ぶか: **推し A** 受け入れが通れば既定 on（`acpi.osc=off` で戻せる）。
-- Q310-2 5330 で platform の _OSC が Thunderbolt の制御と CMOS に触れる時: **推し A** 先に値を読み、切り替えも CMOS の書きも無い時だけ呼ぶ（起きると分かったら改めて聞く）。
-- Q310-3 processor の _OSC で申告する物: **推し A** 0（何も求めない）。
-- Q310-4 PCIe で OS が得る制御の範囲: **推し A** 今は 0。WS300 の省電力の code と一緒に PCIe Capability と LTR だけ。
-- Q310-5 一晩の耐久試験: **推し A** 5330 の比べの後に 1 晩。
-- Q310-6 ACPI 6.5 の仕様の入手: 上の 01 と同じ件（Linux の定数で実装は止まらない）。
-- 止めている物: WS310 の実装（p002 以降、答えと 5330 の割当の後）。
 
 ### 0j. WS291 p014（RTX の描画の速さ）の subs-1000 をどう進めるか（2026-10-31 新しい）
 
@@ -233,6 +178,13 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（[BUG-374](bugs/BUG-374.md)、RTX の cursor の色、2026-11-01 09:08 に更新）**: 直した（cursor の色の倍率の register、display の CRC で全色一致を確かめた）。目視の確かめ: 10.0.10.3 の lock の中で `sh plan/ws291/tests/rtx-cursor-view.sh build build/b374/u` → `RESTORE_CKSUM=1463007375 sh plan/ws291/tests/rtx-cursor-view.sh up OUT build/b374/u` で入れ（Q1・担当が行う）、desktop の矢印が内側 白・外枠 黒なら直った。戻しは `rtx-cursor-view.sh back OUT build/b374/u`。
 
 ## 決まった事
+
+- 2026-11-01 09:31 WS310（ACPI の _OSC）: ACPI compliant のために必ず通す、system を壊すつもりで進める、最初の試験はデスクトップ（10.0.10.3）、受け入れが通れば既定 on（[ws310/ws.md](ws310/ws.md)）。担当の割当は未。
+
+- 2026-11-01 09:30 WS329（H.264 の encoder）: 画質より速さ、SIMD は自動の vector 化の Phase と short vector 型の intrinsics。残りは Q1 が推しで（[ws329/ws.md](ws329/ws.md)）。WS338 の SIMD も同じ形。
+- 2026-11-01 09:30 WS330（H.265）: Main（8 bit）だけ、10 bit は後の WS（[ws330/ws.md](ws330/ws.md)）。
+
+- 2026-11-01 09:24 WS318（libmedia）: hardware が無い所は独自の software に fallback、独自の software が揃えば libavcodec を使わず依存を切る、header は 2 段で更新、MJPEG は扱わない。残りの問いは Q1 が方針に沿って決めた。設計の改訂が要る（[ws318/ws.md](ws318/ws.md)）。
 
 - 2026-11-01 09:16 BUG-339（VF2 の U-Boot の DTB）: 案 (4) 今のまま、案内の log を出して止める（[BUG-339](bugs/BUG-339.md)）。
 - 2026-11-01 09:16 x86 の PC の UEFI の起動の画面は monitor（EDID）に合わせ、video=640x480 を外す: [WS339](ws339/ws.md)（planning）。

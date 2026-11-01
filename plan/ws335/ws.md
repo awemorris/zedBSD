@@ -41,7 +41,7 @@
 | [p003](phase003/phase.md) | SHA-3・SHAKE（Keccak）（test-sha3） | cleared（2026-11-01 09:04 Q1、main b4c57515e。08:55 Sonnet、test-sha3 629616 checks、posix・win32・ct PASS、13 通りの破壊で FAIL） | p002 |
 | [p004](phase004/phase.md) | AES（bitsliced、定数時間）と counter mode（test-aes） | planned | p002 |
 | [p005](phase005/phase.md) | AES-GCM（test-gcm） | planned | p004 |
-| [p006](phase006/phase.md) | ChaCha20・Poly1305・AEAD（と 64 bit の counter の ChaCha20）（test-chacha） | in-progress（2026-11-01 06:59 q1821、Sonnet） | p002 |
+| [p006](phase006/phase.md) | ChaCha20・Poly1305・AEAD（と 64 bit の counter の ChaCha20）（test-chacha） | cleared（2026-11-01 09:23 Q1、main d0e048532。Sonnet、chacha 52156 checks、posix・win32・ct PASS） | p002 |
 | [p007](phase007/phase.md) | 固定幅の整数と Montgomery の算術（test-bn） | planned | p002 |
 | [p008](phase008/phase.md) | GF(2^255-19) と X25519（test-f25519、test-x25519） | in-progress（2026-11-01 06:59 q1822、Sonnet） | p002 |
 | [p009](phase009/phase.md) | Ed25519（test-ed25519） | planned | p008 |
