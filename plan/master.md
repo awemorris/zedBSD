@@ -31,7 +31,7 @@
 | P3 | q1840-i02 `p3-ws291p021`（20:45 再開。i01 は 20:42 に返却） | [WS291](ws291/ws.md) p021: Pi 5 の V3D の model の 50 fps（c74 49.2〜49.9 の境から） |
 | P4 | q1842 `p4-bug387`（q1841 は 9616367f5 で返却、build だけ） | [BUG-387](bugs/BUG-387.md): VF2・Pi 5 で console から Wayland の desktop を起動できない（実機の窓は Q1 が P2・P3 から取る） |
 | P5 | q1843 `p5-ws334b` | [WS334](ws334/ws.md) p025: Windows 版のブラウザ、script の core の archive と link（次は p023・p026） |
-| P6 | q1844 `p6-ws335b` | [WS335](ws335/ws.md) p004: libssl-compat・libcrypto-compat の AES と counter mode |
+| P6 | q1846 `p6-ws335b` | [WS335](ws335/ws.md) p005: libssl-compat・libcrypto-compat の AES-GCM（p004 AES は 20:55 に cleared） |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
 - 起動しない pending: q1836（WS336 p009 ssh-auth）。q1837（WS334 p025）は P5 の q1843 へ、q1835（WS335 p004）は P6 の q1844 へ。
@@ -108,7 +108,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1846 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1847 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

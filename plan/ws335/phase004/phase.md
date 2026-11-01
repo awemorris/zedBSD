@@ -2,7 +2,7 @@
 
 # ws335-p004: AES（bitsliced、定数時間）と counter mode
 
-Status: 実装済み・試験 PASS（2026-11-01 20:55 P6。cleared は Q1。依存: p002）
+Status: cleared（2026-11-01 20:55 Q1、main adf13ed5c。main で test-aes 28516 checks・ct-aes PASS を流し直した。P6 が決めた 5 点（schedule の配置、S-box の回路、NULL key の EINVAL、size 0、counter は公開の値）は妥当と判断。壊す確かめは 24 通りが FAIL、試験の失敗と build の誤りの区別は 5 通りだけ）。前: 実装済み・試験 PASS（2026-11-01 20:55 P6。依存: p002）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
