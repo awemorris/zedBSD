@@ -21,20 +21,18 @@
 **判断が解決した時（2026-10-30 ユーザー「判断事項が解決されたらcockpit.mdをアップデートするようにmaster.mdに記録してください。」）**: ユーザーが答えたら、同じ turn のうちに cockpit.md を直して commit する。その項目を「ユーザーの判断を待つ事」から外し、「決まった事」の節へ一行（日付・WS・決定の要約・記録した ws.md か ticket の link）で移す。決定で変わった担当の予定・WS の進捗の表も同じ時に直す。「決まった事」の節もセッションをまたいで残し、消すのはユーザーの指示か確認の後。
 
 <!-- master:agents:start -->
-**引き継ぎ（2026-11-01 09:49、Q1、週の使用量の残りが少ないためユーザーの指示で全担当をラップアップ）**: 次のセッションの Q1 は [cockpit.md](cockpit.md)・この表・[queue.md](queue.md) の最後の行から再開する。
-**今の割り振り（2026-11-01、ユーザーの指示）**: Bug の修正を先に。Bug の担当は VF2・Pi 5（P1）と RTX（P2）に 1 人ずつ。他は WS335（Sonnet）・WS336（Sonnet）・WS334（P7）・WS074（P8）に 1 人ずつ。
+**今の割り振り（2026-11-01 20:20、ユーザーの指示）**: P1 は RTX、P2 は VF2、P3 は Pi 5 の作業（Q1 が WS291 の Phase を選んだ）。Bug の修正は P4（まず BUG-387）。WS074 は Claude のクラウドのセッションが担当し、成果の origin/browser を Q1 が main に merge する（P8 は立てない）。
 **注意**: `~/.local/bin/python3` と `~/.local/bin/vivado` は 07:22 の再起動で空の file（何もせず 0 で終わる）。python は `/usr/bin/python3`。shell の `grep` は binary を飛ばす wrapper（NUL の検査は `/usr/bin/grep`）。大きな I/O の後は `sync`（AGENTS.md §4）。壊れた object・worktree の退避は /home/awe/zedBSD-recovery/（要らなければ消してよい）。
 
-| 担当 | 次の Queue（pending、同じ worktree で起動し直す） | 中身 |
+| 担当 | Queue | 中身 |
 | --- | --- | --- |
-| P1 | q1834 `p1-bug387` | [BUG-387](bugs/BUG-387.md): GPU の open の規則に `video` group の member を足す（ユーザーの答え）、Pi 5 の既定を rpi5gpu.start=boot（Q1 の判断）、既定の利用者を group に。Pi 5 は 10.0.30.7・SSH の利用者 user |
-| P2 | q1832 `p2-ws291g1`（返却の内容を見て） | [WS291](ws291/ws.md) p026: RTX の (b) push buffer を記録の時に組む設計（design-review を含む） |
-| P7 | q1837 `p7-ws334` | [WS334](ws334/ws.md) p025（script の core の archive と link） |
-| P8 | q1727-i18 `p8-ws074` | [WS074](ws074/ws.md) phase260 の自走（i17 の返却の再開点から） |
-| Sonnet | q1835 `s-ws335-p004` | [WS335](ws335/ws.md) p004 AES |
-| Sonnet | q1836 `s-ws336-p009` | [WS336](ws336/ws.md) p009 ssh-auth |
+| P1 | q1838 `p1-ws291p026` | [WS291](ws291/ws.md) p026: RTX の push buffer を記録の時に組む設計（10.0.10.3） |
+| P2 | q1839 `p2-ws291p020` | [WS291](ws291/ws.md) p020: VF2 の PowerVR の model の 50 fps、まず受け入れの測り直し |
+| P3 | q1840 `p3-ws291p021` | [WS291](ws291/ws.md) p021: Pi 5 の V3D の model の 50 fps（c74 49.2〜49.9 の境から） |
+| P4 | q1841 `p4-bug387` | [BUG-387](bugs/BUG-387.md): VF2・Pi 5 で console から Wayland の desktop を起動できない（実機の窓は Q1 が P2・P3 から取る） |
+| WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
-- 今日 cleared: WS334 p021・p022・p036、WS335 p003・p006・p008、WS336 p004〜p007。fixed: BUG-374・385・386（拾える試験あり）。BUG-388 は WS287 へ移管。
+- 起動しない pending: q1835（WS335 p004 AES）・q1836（WS336 p009 ssh-auth）・q1837（WS334 p025）。
 - ユーザーの答えで設計の改訂が要る: WS318（libavcodec を使わない、MJPEG 無し、hardware が無ければ独自の software）、WS329（速さ優先、vector 化の Phase と intrinsics）。WS310（_OSC、デスクトップで壊すつもりで）・WS339（起動の画面を EDID に）・WS338（H.264 の速さ）は担当の割当待ち。
 - **止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd、[WS287](ws287/ws.md) EHCI の full・low speed（保留）。HAL の差分の承認は無い。
 <!-- master:agents:end -->
@@ -108,7 +106,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1838 · WS340 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1842 · WS340 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -165,7 +163,7 @@ BUG-389 · q1838 · WS340 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS306](ws306/ws.md) | MG006 | GPU の driver の枠組みの「ゲーム最適化」の UAPI（ON/OFF と option の文字列、GPU の名前と driver の版の取得）（2026-10-27 ユーザー） | incomplete | p001 cleared（2026-11-01）、実装は担当の割当の後（Q306-7・9 は推しで決定） |
 | [WS052](ws052/ws.md) | MG003 | 電源管理（S0ix を 5330 で初めて動かす、modern standby、/dev/system） | incomplete | 再開点 p014（WS300 p002 の後）、並べて p015・p016、約 31 LW |
 | [WS068](ws068/ws.md) | MG006 | EGL と OpenGL ES（と desktop GL 3.0〜4.6）を Vulkan と display 拡張の上に実装する（Wayland とディスプレイ直接の両方）（2026-09-26・27 ユーザー指示） | incomplete・継続（空き時間だけ。受け入れは Venus のみ、2026-10-29 ユーザー） | 次は p045（sample shading、Venus の試験だけ）→ p047〜p068（GL 4.x を分けた物）→ p007 規約 |
-| [WS074](ws074/ws.md) | MG006 | zedBSD の Web ブラウザ `userland/base/zdesktop-browser`（HTML5 の layout engine → 最適化にこだわらない JavaScript engine の接続 → CSS の準拠と Chrome との比較で目標値を段階的に上げる。JS と Wasm の実行 engine を共通化。画像は libpng-compat・新しい libjpeg-compat、TLS は当面 OpenSSL）（2026-09-27 ユーザー指示） | incomplete・継続（Codex のセッション） | WPT Interop 2025 の 100%（ws074-q20261019-55 active） |
+| [WS074](ws074/ws.md) | MG006 | zedBSD の Web ブラウザ `userland/base/zdesktop-browser`（HTML5 の layout engine → 最適化にこだわらない JavaScript engine の接続 → CSS の準拠と Chrome との比較で目標値を段階的に上げる。JS と Wasm の実行 engine を共通化。画像は libpng-compat・新しい libjpeg-compat、TLS は当面 OpenSSL）（2026-09-27 ユーザー指示） | incomplete・継続（Claude のクラウドのセッション、2026-11-01〜、成果は origin/browser を Q1 が merge） | phase260 の自走（WPT の固定の corpus で 3,125 / 3,472 前後、100% まで） |
 | [WS217](ws217/ws.md) | MG006 | 画面の回転（Settings の Display、縦長で Notes を使う）（2026-10-13 ユーザーの UAT） | incomplete（2026-10-28 ユーザー「WS217 を開き直す」） | p009-1（Intel の PRM）・p009〜p011（scanout の 180°）・p005（複数 head）・p006（pen・touch と display の結び付け）・p012（game の session）→ p007 確かめ・p008 規約。p002a・p002b・p003・p004 は済み |
 | [WS221](ws221/ws.md) | MG005 | Jumbo frame（Ethernet の L2 の大きな MTU、device ごとの上限、IP・TCP の MSS）（2026-10-13 ユーザー） | incomplete（すぐ取り組む物、2026-10-27 ユーザー「Jumbo Frameはすぐやるものの一つにします。」） | p001 の判断から（p008・p009 は WS220 の旧 p006 tcp_device_mss・p007 を移した物、2026-10-28 ユーザー「WS221 へ移す (推し)」） 2026-10-30 ユーザー「WS221はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の後 |
 | [WS223](ws223/ws.md) | MG006 | 全画面は compositor の合成、game mode は Wayland の拡張で求められた時だけ（Video Player は game mode をやめる）（2026-10-13 ユーザー） | planning（すぐ進める、2026-10-27 ユーザーの回答「推しで決めて実装」、D1〜D6 は推し） | p001 の D1〜D6 を推しで確定 → p002 |
