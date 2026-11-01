@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-02 02:23（Q1。BUG-394 を merge）
+最終更新: 2026-11-02 06:50（Q1。origin/main を merge・push、wave511 の firmware を push）。前の更新: 2026-11-02 02:23（Q1。BUG-394 を merge）
 
 ## 担当（P1〜P8）
 
@@ -53,6 +53,8 @@
 - 2026-11-02 03:45: p007 cleared。VPU の 1 枚は 1080p で 7 ms・2160p で 20 ms。止まった時の立て直し、再生中の RESET、2 本同時、kill を VF2 で確かめた。Video Player は 1080p30・1080p60 とも再生（1080p60 は始めの数秒だけ遅れ）。JVT は 101 本のうち 75 本が全部の絵で一致、残り 26 本は p007b。VPU の driver の既定の on は p007b の後。
 
 ### WS074 Web ブラウザ
+
+- 2026-11-02 06:50: クラウドのセッションが終了（ユーザー）。その最後の origin/main を main に merge し、main を push した（5725993599）。host build warning 0、Windows の cross-build PASS。WS074 は Q1 の管理に戻る。
 
 - 2026-11-01 20:1x: origin/browser（クラウド、dev153 = 3,113 / 3,473）を main に merge（272e6c226、push 済み）。同じ基点から P8（local）も i17 で 3,125 / 3,472 まで進めていたので、縦書きの inline の装飾は P8 の版を採って衝突を解いた。host build は warning 0。merge の後の WPT の測り直しは未実施（クラウドのセッションの次の測定で分かる）。
 - 2026-11-01 20:4x: origin/main（クラウドが push した 4 commit、iframe の box・画像・SVG ほか）を main に merge（502eb644a、衝突なし、host build warning 0、push はまだ）。
