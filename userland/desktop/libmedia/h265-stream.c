@@ -201,6 +201,7 @@ h265_stream_parameters(
 	int error;
 	int failed;
 	int done;
+	int damaged;
 
 	/* Refuses a missing reader. */
 	if (stream == NULL)
@@ -223,7 +224,8 @@ h265_stream_parameters(
 		/* Skips a NAL unit whose header does not read; a parameter set that does not is counted and fails the call. */
 		error = stream_nal_header(nal, nal_size, &type, &layer);
 		if (error != 0) {
-			if (stream_damaged_set(nal, nal_size) != 0) {
+			damaged = stream_damaged_set(nal, nal_size);
+			if (damaged != 0) {
 				stream->counts.refused_sets++;
 				stream->reason = "parameter set NAL unit header does not read";
 				failed = 1;
@@ -244,7 +246,9 @@ h265_stream_parameters(
 		}
 
 		/* Stores a parameter set; a refused one makes the call fail. */
-		if (type == H265SW_NAL_VPS || type == H265SW_NAL_SPS || type == H265SW_NAL_PPS) {
+		if (type == H265SW_NAL_VPS ||
+		    type == H265SW_NAL_SPS ||
+		    type == H265SW_NAL_PPS) {
 			error = stream_store_set(stream, type, nal, nal_size);
 			if (error != 0)
 				failed = 1;
@@ -1203,7 +1207,9 @@ stream_step(
 			stream->counts.refused_sets++;
 
 		/* A damaged slice segment spoils the picture being gathered. */
-		if (gather->open != 0 && gather->dead == 0 && nal_size >= 1U) {
+		if (gather->open != 0 &&
+		    gather->dead == 0 &&
+		    nal_size >= 1U) {
 			raw_type = ((unsigned)nal[0] >> 1) & 0x3FU;
 			decodable = h265sw_nal_is_decodable(raw_type);
 			if (decodable != 0)
@@ -1263,8 +1269,11 @@ stream_step(
 	}
 
 	/* Stores a parameter set as it is read; a refused one is counted by the store. */
-	if (type == H265SW_NAL_VPS || type == H265SW_NAL_SPS || type == H265SW_NAL_PPS)
+	if (type == H265SW_NAL_VPS ||
+	    type == H265SW_NAL_SPS ||
+	    type == H265SW_NAL_PPS) {
 		error = stream_store_set(stream, type, nal, nal_size);
+	}
 
 	/* The unit belongs to the access unit of the picture being gathered. */
 	if (gather->open != 0)

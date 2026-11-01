@@ -2948,6 +2948,28 @@ check_failure_reasons(void)
 	expect_reason("parameter set was refused");
 }
 
+/* A PPS sent again between two segments of a picture with another SPS id: the second segment names an SPS other than the first's. */
+static void
+check_sps_in_picture(void)
+{
+	/* SPS 1 of the same content as SPS 0; PPS 0 is sent again, now naming SPS 1, between the two segments of a trailing picture. */
+	begin();
+	wsps.sps_id = 1U;
+	put_sps();
+	wsps.sps_id = 0U;
+	put_picture(T_IDR_W_RADL, 0U);
+	put_picture(T_TRAIL_R, 1U);
+	wpps.sps_id = 1U;
+	put_pps();
+	wpps.sps_id = 0U;
+	put_segment(T_TRAIL_R, 8U);
+	put_picture(T_TRAIL_R, 2U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 2U);
+	expect_reason("slice names another SPS than the one in use");
+}
+
 /* Weights under high_precision_offsets_enabled_flag are outside the range: the picture is left behind, not broken. */
 static void
 check_high_precision_weights(void)
@@ -3204,6 +3226,7 @@ main(void)
 	check_damaged_units();
 	check_between_segments();
 	check_failure_reasons();
+	check_sps_in_picture();
 	check_high_precision_weights();
 	check_poc_range();
 	check_long_header_errors();
