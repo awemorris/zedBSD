@@ -934,3 +934,23 @@ Origin: 2026-10-27 ユーザーの指示。
   gap の内訳は build/tmp/p8/gap148.json（css-grid 118、css-flexbox 56、css-view-transitions 46、css-anchor-position 44、navigation-api 約 55）。
 - 一時物: 一覧は build/tmp/p8/delete-list-i15.txt（1 行 1 path）。/tmp/p8out には dev148・acid148 を残す（i15 は新しい測定なし）。
 - 途中で止めた host-build（`build/ws074-host/plain` の増分 build、main の merge 後の最初の build）は PID を指定して止めた。build/ws074-host/plain/browser は 06:49 の古い物のまま。
+
+### q1727-i16 の結果（2026-11-01、P8）
+
+- 基点: agent/p8-ws074 に main 143245b82 を取り込み（git log -1 の親は 2 つ）。測り直し dev149（source = 取り込み直後）は 3,107 / 3,472（89.49%、174 / 124 / 65 / 2）で i14 と同じ。host build は新しい出力先 `build/ws074-host2/plain`（`BROWSER=` `HOSTOUT=` `OUTROOT=` で選ぶ）。
+- 最終 dev150（source 1d6e2df9e）: 3,118 / 3,472（89.80%）、gap 354（harness 172 / static 124 / scripted 56 / crash 2）、dev149 から +11、後退 0（`gap-diff.py`）。host build は `-Wall -Wextra -Werror` で warning 0。
+  Acid は Acid2 100.00%、Acid3 100/100・pixel 差 0（exact match）（build/tmp/p8out/acid150）。
+- 直した物:
+  1. 縦書きの inline box（span）の background・border（paint/list.c `list_inline_decoration_vertical`。sideways-lr も）。単独では ID は増えない（grid の self-baseline の ref は grid の縦書きの流れ・baseline の共有が別に要る）。
+  2. view transition の pseudo の animation: `getTiming()` の duration・delay を ms の数に、`currentTime` を pseudo（group・old・new）ごとに持つ（native.viewTransitionTime(ms, kind, name)、layout_transition_elapsed）。scripted +5。
+  3. view-transition-name を持つ inline 要素（layout/transition.c `transition_inline_rect`・paint/list.c `list_vt_inline_left_out`・group の重ね順は属する layer の後）。scripted +4（new-content-is-inline・old-content-is-inline・inline-element-size・new-content-captures-spans・span-with-overflowing-text 系・clipped 系ほか、計 9 のうち上の 5 と合わせて scripted +9）。
+  4. NavigationHistoryEntry の url: referrer policy が no-referrer の文書の entry は、その文書を離れた後 null（`censorEntries`）。harness +2。
+  5. window 生成中の `initialBlank()`（frame の window は parent_global が後で入る）を直し、handover の from が null でも落ちないようにした（activation-initial-about-blank は null になるが、同じ test は iframe の初期 load が非同期のため別の理由でまだ通らない）。
+- 調べて直さなかった物:
+  - anchor-parse-valid・anchor-size-parse-valid（各 2 ID）: 名前を先にする canonical 化（`anchor(--foo inside)`）、margin-block・margin-inline の longhand が anchor-size を受けない（760 件）、`anchor(min(50%, 100%))` の percentage の math 関数、calc の簡約形（`calc(0.5 * (...))`）、`min()` に anchor を入れる等が全部要る。1 つでも落ちると ID が通らない。
+  - grid の self-baseline（約 40 ID）は、縦書きの grid の auto-flow: column（項目が横に並ぶ）と baseline の共有の両方が原因。
+  - wasm/jsapi（6 ID）は WebAssembly が Memory の stub のみ。urlpattern（2 ID）は URLPattern が無い。
+  - 残る view transition: iframe 内（8）、dialog の top layer（2）、transform を持つ inline（inline-with-offset-from-containing-block）、view-transition-class の `*.cls`。
+  - navigate-from-initial-about-blank 系は iframe の initial about:blank の load event が同期でない事（page/frame-load.c の task）が原因。
+- 道具: `plan/ws074/tests/harness-delta.sh GAP.json NAME`（harness だけ 1 分で測って gap の差を出す）、`measure-snapshot.sh` に `HOSTOUT`・`OUTROOT`、`st1.sh` に `BROWSER`。
+- 一時物: build/tmp/p8out/（dev149・dev150・t1・t2・acid150）、build/tmp/p8/ref149*・sone149*・ss-vt・dbg、build/ws074-host2、/tmp/wpt-one.*、/tmp/vtdbg2.log、Acid の runner の一時 html 3 個（上の出力の path）。一覧は build/tmp/p8/delete-list-i16.txt。
