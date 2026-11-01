@@ -31,7 +31,7 @@
         get: d.get,
         set: function (v) {
           var w, url;
-          if (this.isConnected && this.ownerDocument === g.document) {
+          if (this.__zedLoaded && this.isConnected && this.ownerDocument === g.document) {
             try {
               w = this.contentWindow;
               if (w && w.navigation && w.navigation._attr) {

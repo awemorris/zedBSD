@@ -1448,6 +1448,11 @@
       if (h) { delete frame.__zedNav; handover = h; }
     })();
     var navigation = new Navigation(KEY);
+    // A frame whose document was loaded from a resource says so, so that its element can ask it before another source is set.
+    (function () {
+      var frame = native.frameElement();
+      if (frame && !initialBlank()) Object.defineProperty(frame, '__zedLoaded', { value: true, writable: true, configurable: true, enumerable: false });
+    })();
     (function () {
       var frame = native.frameElement(), kept, type, same = false;
       if (!frame) return;
