@@ -63,13 +63,8 @@ static VkBool32 sender_forked;
 /* Whether hand-off is allowed by the environment and the processors: 0 not yet read, 1 no, 2 yes; read atomically. */
 static int sender_handoff_state;
 
-/*
- * The recording thread's identity, set by the thread before it takes a
- * piece (sender_self_known then says so; both read atomically): its own
- * transactions never wait for the pieces it is sending.
- */
-static pthread_t sender_self;
-static VkBool32 sender_self_known;
+/* Set on the recording thread itself, whose own transactions never wait for the pieces it is sending. */
+static __thread VkBool32 sender_self;
 
 static void sender_start(void);
 static void *sender_main(void *argument);
@@ -372,8 +367,6 @@ vulkan_sender_drain(
 	uint64_t queued;
 	uint64_t sent;
 	uint64_t mark;
-	pthread_t self;
-	VkBool32 known;
 	VkBool32 forked;
 
 	/* Nothing handed off is still unsent: the common case, two loads. */
@@ -383,12 +376,8 @@ vulkan_sender_drain(
 		return;
 
 	/* The thread's own transactions are the ones being waited for. */
-	known = __atomic_load_n(&sender_self_known, __ATOMIC_ACQUIRE);
-	if (known != VK_FALSE) {
-		self = __atomic_load_n(&sender_self, __ATOMIC_RELAXED);
-		if (pthread_equal(self, pthread_self()))
-			return;
-	}
+	if (sender_self != VK_FALSE)
+		return;
 
 	/* A forked child has no thread to send what its parent handed off. */
 	forked = __atomic_load_n(&sender_forked, __ATOMIC_ACQUIRE);
@@ -460,8 +449,7 @@ sender_main(
 	(void)argument;
 
 	/* Its own transactions must not wait for the pieces it sends. */
-	__atomic_store_n(&sender_self, pthread_self(), __ATOMIC_RELAXED);
-	__atomic_store_n(&sender_self_known, VK_TRUE, __ATOMIC_RELEASE);
+	sender_self = VK_TRUE;
 
 	/* One piece after another, sleeping when there is none. */
 	for (;;) {
