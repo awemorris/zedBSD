@@ -6,14 +6,18 @@
  */
 
 /*
- * OmniGrammaton.exe's resources: its manifest and its version.  The
- * version's numbers come from the build (OMNIGRAMMATON_VERSION_MAJOR,
- * _MINOR, _PATCH and OMNIGRAMMATON_VERSION_TEXT).
+ * OmniGrammaton.exe's resources: its manifest, its icon (id 1, the first
+ * icon, which the system shows for the program; the build draws it) and
+ * its version.  The version's numbers come from the build
+ * (OMNIGRAMMATON_VERSION_MAJOR, _MINOR, _PATCH and
+ * OMNIGRAMMATON_VERSION_TEXT).
  */
 
 #include <winver.h>
 
 1 24 "OmniGrammaton.manifest"
+
+1 ICON "OmniGrammaton.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION OMNIGRAMMATON_VERSION_MAJOR, OMNIGRAMMATON_VERSION_MINOR, OMNIGRAMMATON_VERSION_PATCH, 0

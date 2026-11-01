@@ -48,6 +48,9 @@
 #define WINDOW_MIN_WIDTH	320U
 #define WINDOW_MIN_HEIGHT	160U
 
+/* The program's icon: its first icon resource (none: the system's default). */
+#define WINDOW_ICON		1
+
 /* No caption button under the pointer or pressed. */
 #define WINDOW_NO_BUTTON	3U
 
@@ -385,6 +388,7 @@ keiui_win32_classes(
 	frame.lpfnWndProc = keiui_win32_window_procedure;
 	frame.hInstance = app->module;
 	frame.hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
+	frame.hIcon = LoadIconW(app->module, MAKEINTRESOURCEW(WINDOW_ICON));
 	frame.lpszClassName = WINDOW_FRAME_CLASS;
 	registered = RegisterClassExW(&frame);
 	if (registered == 0) {
