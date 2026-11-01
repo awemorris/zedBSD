@@ -60,7 +60,7 @@
 | [p022](phase022/phase.md) | 公開の X509（d2i_X509 ほか）と内部の store の生成（test-api-x509） | planned | p020、p021 |
 | [p023](phase023/phase.md) | 公開の EVP の digest・ChaCha20・Poly1305（test-api-evp） | planned | p021、p006、p002 |
 | [p024](phase024/phase.md) | 公開の EVP_PKEY（Ed25519・X25519・ML-KEM-768）（test-api-pkey） | planned | p021、p009、p008、p014 |
-| [p025](phase025/phase.md) | TLS の定数・suite の表・presentation language の reader/writer（test-tls、test-buf） | planned（Sonnet q1878） | p002 |
+| [p025](phase025/phase.md) | TLS の定数・suite の表・presentation language の reader/writer（test-tls、test-buf） | 実装済み・試験 PASS（2026-11-02 Sonnet q1878-i01。test-tls 2230・test-buf 1559755 checks、posix・win32・check-skeleton・run-unit all PASS。cleared は Q1） | p002 |
 | [p026](phase026/phase.md) | record の保護（test-record） | planned | p025、p005、p006 |
 | [p027](phase027/phase.md) | transcript と鍵の schedule（1.3 と 1.2）（test-keysched） | planned | p025、p002 |
 | [p028](phase028/phase.md) | handshake の message の encode と syntax の確かめ（test-msg） | planned | p025 |

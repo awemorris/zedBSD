@@ -321,6 +321,7 @@ test_reader_vector(void)
 	size_t length;
 	size_t index;
 	int good;
+	int status;
 	static const size_t lengths[] = { 0, 1, 2, 254, 255, 256, 299, 300, 301, 399, 400, 401, 799, 800, 801 };
 	static const uint8_t nested[] = { 0x00, 0x05, 0x02, 0xaa, 0xbb, 0x01, 0xcc, 0x7f };
 
@@ -399,14 +400,15 @@ test_reader_vector(void)
 	}
 	free(block);
 
-	/* A prefix size other than 1, 2 or 3 is refused. */
-	block = make_vector(1, 2, 0, 0x60, &total);
-	sslc_reader_init(&reader, block, total);
-	CHECK(sslc_reader_vector(&reader, 0, 0, 10, &inner) == EINVAL);
-	CHECK(reader.error != 0);
-	sslc_reader_init(&reader, block, total);
-	CHECK(sslc_reader_vector(&reader, 4, 0, 10, &inner) == EINVAL);
-	CHECK(reader.error != 0);
+	/* A prefix size other than 1, 2 or 3 is refused, even over bytes that would be a valid empty vector (all zeros). */
+	block = exact_copy((const uint8_t *)"\x00\x00\x00\x00\x00\x00\x00\x00", 8);
+	for (width = 0; width <= 6U; width++) {
+		sslc_reader_init(&reader, block, 8);
+		status = sslc_reader_vector(&reader, (unsigned)width, 0, 10, &inner);
+		CHECK((status == 0) == (width >= 1U && width <= 3U));
+		CHECK((reader.error == 0) == (width >= 1U && width <= 3U));
+		CHECK((inner.error == 0) == (width >= 1U && width <= 3U));
+	}
 	free(block);
 
 	/* A reader that has failed refuses a vector, and the inner reader is empty and failed. */
