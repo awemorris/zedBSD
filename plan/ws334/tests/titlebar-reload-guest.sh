@@ -21,6 +21,7 @@ pointer() { python3 plan/ws035/tests/qmp-pointer.py "$GUEST_RUNTIME/qmp.sock" "$
 status=0
 
 timeout 600 plan/ws035/tests/zdesktop-guest.sh start "$image" || { echo "titlebar-reload: FAIL (guest)"; exit 1; }
+timeout 300 python3 plan/tools/guest/guest.py wait >/dev/null 2>&1 || { echo "titlebar-reload: FAIL (no SSH)"; exit 1; }
 
 # zdesktop, then the browser on its start page at 1000x700.
 guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0
