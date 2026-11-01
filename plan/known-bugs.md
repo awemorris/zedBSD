@@ -435,6 +435,6 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-395](bugs/BUG-395.md) | Windows 版ブラウザ: 題の帯の address の欄の部分を drag して窓を動かせず、double click で最大化もできない | fixed（2026-11-02 P8 q1914-i01、ad14a7ab44: address の欄を低く・最大 800 px にし、右に 96 px 以上の何も無い帯を残した（そこが HTCAPTION）。Wine で hit test・drag・double click を確認、本物の Windows は未実施） |
 | [BUG-396](bugs/BUG-396.md) | Windows 版ブラウザ: Reload の button が文字で、icon でない | fixed（2026-11-02 P8 q1914-i01、ad14a7ab44: KL_CONTROL_RELOAD を足し、Windows は ↻ の icon を Back・Forward の次に。zedBSD などの compositor は protocol に役割が無く文字のまま（ticket の「残り」）。本物の Windows は未実施） |
 | [BUG-397](bugs/BUG-397.md) | Windows 版ブラウザ: Google の頁の「サイト」の link を click すると app が固まって応答しなくなる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
-| [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザ: Google の app の一覧の button（右上の四角の並び）を押しても一覧が正しく出ない | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P7） |
+| [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザ: Google の app の一覧の button（右上の四角の並び）を押しても一覧が正しく出ない | fixed（2026-11-02 07:42 P7 q1916-i01、4e20d10c7b: script.src の brand、別の origin の iframe の読み込みと制限した見え方、MessagePort の transfer と queue、iframe の反映と frameborder。host と Wine で一覧が描かれる。実機の Windows は未確認） |
 | [BUG-399](bugs/BUG-399.md) | Windows 版ブラウザ: Google の検索の入力欄を click すると、入力できる範囲が右へ窓の幅いっぱいに伸びる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
 | [BUG-400](bugs/BUG-400.md) | storage-test の Max-Age の cookie が期限の前に送られない事がある（時々 FAIL） | open（2026-11-02 06:58 Q1 が起票、P5） |
