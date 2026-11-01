@@ -68,6 +68,7 @@ static int view_build(struct powervr_vk_session *session, const VkImageViewCreat
 static int plain_view(const VkImageViewCreateInfo *info, const struct powervr_vk_image *image, struct powervr_view_shape *shape);
 static int plane_view(const VkImageViewCreateInfo *info, const struct powervr_vk_image *image, struct powervr_view_shape *shape);
 static int plane_of_aspect(const struct powervr_vk_image *image, uint32_t aspect, const struct powervr_image_plane **plane);
+static bool video_view(const VkImageViewCreateInfo *info, const struct powervr_vk_image *image);
 static int create_sampler(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int image_destroy(struct powervr_vk_session *session, void *payload);
 static int view_destroy(struct powervr_vk_session *session, void *payload);
@@ -614,6 +615,7 @@ view_build(
 	struct powervr_vk_object *object;
 	const struct powervr_vk_image *image;
 	uint32_t aspect;
+	bool video;
 	int error;
 
 	/* A bound image of the session. */
@@ -625,6 +627,25 @@ view_build(
 	error = powervr_vk_image_address(image, &shape.address);
 	if (error != 0)
 		return EINVAL;
+
+	/*
+	 * A view of the whole of a multi-planar image a video decode writes or
+	 * references: a picture resource, never sampled, so it has no texture
+	 * words.
+	 */
+	video = video_view(info, image);
+	if (video) {
+		error = powervr_vk_object_retain(object);
+		if (error != 0)
+			return error;
+		view->image = object;
+		view->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		view->format = image->format;
+		view->layer_bytes = image->layout.layer_bytes;
+		view->base_level = 0;
+		view->base_layer = 0;
+		return 0;
+	}
 
 	/* A multi-planar image's view of one plane, or a plain view of any other. */
 	if (image->plane_count != 0) {
@@ -722,13 +743,54 @@ plain_view(
 }
 
 /*
+ * Reports whether a view is one of the whole of a multi-planar image a
+ * video decode writes or references (a picture resource of Vulkan Video):
+ * in the image's own format, of its colour aspect, two-dimensional, of
+ * level 0 and layer 0.
+ */
+static bool
+video_view(
+	const VkImageViewCreateInfo *info,
+	const struct powervr_vk_image *image)
+{
+	/* An image of planes made to be decoded into or referenced. */
+	if (image->plane_count == 0)
+		return false;
+	if ((image->usage & (VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR)) == 0)
+		return false;
+
+	/* The image's own format and its colour aspect, flat. */
+	if (info->flags != 0 || info->format != image->format->vk_format)
+		return false;
+	if (info->viewType != VK_IMAGE_VIEW_TYPE_2D && info->viewType != VK_IMAGE_VIEW_TYPE_2D_ARRAY)
+		return false;
+	if (info->subresourceRange.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT)
+		return false;
+
+	/* Level 0 and layer 0, the only ones (or the remaining ones from them). */
+	if (info->subresourceRange.baseMipLevel != 0 ||
+	    (info->subresourceRange.levelCount != 1 &&
+	     info->subresourceRange.levelCount != VK_REMAINING_MIP_LEVELS))
+		return false;
+	if (info->subresourceRange.baseArrayLayer != 0 ||
+	    (info->subresourceRange.layerCount != 1 &&
+	     info->subresourceRange.layerCount != VK_REMAINING_ARRAY_LAYERS))
+		return false;
+
+	/* A picture resource's view. */
+	return true;
+}
+
+/*
  * Checks a view of one plane of a multi-planar image and fills its shape
  * (the shape's address is the image's, moved here to the plane's): a
  * two-dimensional view of level 0 and layer 0 in the plane's own format,
  * of the plane's aspect, read as a linear image of the plane's edges.
  * The image is made to be viewed so (its create flags), and only its
- * planes can be: a view of the whole image or of its colour aspect is
- * refused, as there is no conversion of its colours.
+ * planes can be sampled: a view of the whole image or of its colour
+ * aspect is refused here, as there is no conversion of its colours (an
+ * image a video decode writes has such a view as its picture resource,
+ * video_view).
  */
 static int
 plane_view(

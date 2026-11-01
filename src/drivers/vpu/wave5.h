@@ -218,10 +218,22 @@ struct drv_wave5_piece {
 int drv_wave5_append_pieces(struct drv_wave5_stream *stream, const struct drv_wave5_piece *pieces, unsigned count);
 
 /*
+ * Tells the core where the ring's bytes end after an append, before the
+ * command that reads them.  EIO means the firmware refused it.
+ */
+int drv_wave5_update_stream(struct drv_wave5_stream *stream);
+
+/*
  * Takes back the bytes the last append put in the ring, for a picture the
  * core refused without reading it: the next append puts its bytes there.
  */
 void drv_wave5_unread(struct drv_wave5_stream *stream);
+
+/*
+ * Reports the bus addresses the last append put the picture's bytes
+ * between (where the next command reads from and to).
+ */
+void drv_wave5_positions(const struct drv_wave5_stream *stream, uint32_t *read, uint32_t *write);
 
 /* Reports how many pictures' bytes went past the ring's end so far. */
 uint32_t drv_wave5_wraps(const struct drv_wave5_stream *stream);

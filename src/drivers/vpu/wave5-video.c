@@ -19,12 +19,14 @@
  * render node then makes that many pool pictures plus one, and they are
  * registered as the frame buffers' linear halves, once.
  *
- * The firmware keeps its references in its frame buffers and refuses a
- * picture whose frame buffer it still references (vpu-codec.h's slots:
- * a frame buffer no live DPB slot holds is picked).  The display flags of
- * all the other frame buffers are set, so the firmware decodes into the
- * picked one; it gives each picture out as soon as it is decoded.  The
- * render node copies the pool picture into the application's image.
+ * The firmware keeps its references in its frame buffers and must not
+ * decode into one the application's DPB slots still hold (vpu-codec.h's
+ * slots tie them).  The display flags of the live slots' frame buffers
+ * are set and the others cleared, so the firmware decodes into one of
+ * those it does not reference itself (it may keep one more than the
+ * slots, and waits for, rather than refuses, a frame buffer it holds);
+ * it gives each picture out as soon as it is decoded.  The render node
+ * copies the pool picture into the application's image.
  *
  * A picture that cannot be decoded is an error and the stream goes on: a
  * refused one is taken back out of the ring; after a refused sequence or
@@ -65,11 +67,15 @@
 /* The bit depth of the luma and chroma the pool pictures hold. */
 #define VIDEO_DEPTH			8U
 
+/* The decodes a stream remembers for the log of one that went wrong: frame buffers flagged, decoded, flags after, order count. */
+#define VIDEO_HISTORY			16U
+
 /* The pixels across a macroblock. */
 #define VIDEO_MB			16U
 
-/* The log lines of pictures in error the engine writes at most. */
+/* The log lines of pictures in error the engine writes at most, and of read positions. */
 #define VIDEO_LOG_LINES			32U
+#define VIDEO_PLACE_LINES		4U
 
 /*
  * The engine: its core, its lock (every stream's calls, see the file's
@@ -109,6 +115,7 @@ struct video_stream {
 	int broken;
 	uint32_t pictures;
 	uint32_t errors;
+	uint32_t history[VIDEO_HISTORY][4];
 };
 
 /* The one engine, made by drv_wave5_video_register() and kept for the system's life. */
@@ -116,6 +123,9 @@ static struct video_engine *video_engine;
 
 /* The log lines written so far (a count only, a race costs a line at most). */
 static uint32_t video_log_lines;
+
+/* The lines of read positions the core reported elsewhere than the bytes' end (a count only). */
+static uint32_t video_place_lines;
 
 static uint32_t engine_operations(void *engine);
 static int engine_open(void *engine, uint32_t operation, const struct drv_powervr_video_open *open, void **stream);
@@ -129,6 +139,7 @@ static int start_sequence(struct video_stream *video);
 static int set_differs(const uint8_t *unit, size_t bytes, const uint8_t *sent, size_t sent_bytes);
 static void close_instance(struct video_stream *video);
 static void note(const struct video_stream *video, const char *what, int value);
+static void describe(const struct video_stream *video, const struct drv_wave5_result *decoded, uint32_t index, int32_t setup);
 
 /* The engine's operations, as the render node calls them. */
 static const struct drv_powervr_video_ops video_ops = {
@@ -351,6 +362,9 @@ decode_locked(
 	uint32_t coded_height;
 	uint32_t index;
 	uint32_t mask;
+	uint32_t taken;
+	uint32_t read;
+	uint32_t write;
 	int intra;
 	int error;
 
@@ -407,7 +421,7 @@ decode_locked(
 		}
 	}
 
-	/* The frame buffer no live slot holds; none means the picture goes back out of the ring. */
+	/* A frame buffer no live slot holds must be there; none means the picture goes back out of the ring. */
 	error = vpu_slots_pick(&video->slots, job->references, job->active, job->setup, &index);
 	if (error != 0) {
 		drv_wave5_unread(video->instance);
@@ -415,22 +429,33 @@ decode_locked(
 		return 0;
 	}
 
-	/* Every other frame buffer is flagged, so the firmware decodes into the picked one. */
+	/*
+	 * The live slots' frame buffers are flagged and the others not: the
+	 * firmware decodes into one of those it does not reference itself
+	 * (it may keep one the slots no longer hold, and waits for a picked
+	 * one it still holds rather than refusing it).
+	 */
 	mask = (uint32_t)((1ULL << video->count) - 1U);
-	error = drv_wave5_display_flags(video->instance, mask & ~(1U << index), 1U << index, NULL);
+	taken = vpu_slots_taken(&video->slots, job->references, job->active, job->setup);
+	error = drv_wave5_display_flags(video->instance, taken, mask & ~taken, NULL);
 	if (error != 0) {
 		drv_wave5_unread(video->instance);
 		note(video, "display flags refused", error);
 		return 0;
 	}
 
-	/* The decode. */
+	/* The decode, remembered for the log. */
 	error = drv_wave5_decode(video->instance, &decoded);
 	result->ticks = decoded.ticks;
 	result->wall = decoded.wall;
+	video->history[video->pictures % VIDEO_HISTORY][0] = taken;
+	video->history[video->pictures % VIDEO_HISTORY][1] = (uint32_t)decoded.decoded;
+	video->history[video->pictures % VIDEO_HISTORY][2] = decoded.display_flags;
+	video->history[video->pictures % VIDEO_HISTORY][3] = (uint32_t)decoded.order | (job->references << 16) | (job->active << 24);
 	if (error == ETIMEDOUT) {
 		video->broken = 1;
 		note(video, "the core did not answer", error);
+		describe(video, &decoded, index, job->setup);
 		return EIO;
 	}
 
@@ -454,10 +479,22 @@ decode_locked(
 		return 0;
 	}
 
-	/* A failed decode, or one into another frame buffer. */
-	if (decoded.success == 0 || decoded.decoded != (int32_t)index) {
+	/* A failed decode, or one into a frame buffer a live slot holds. */
+	if (decoded.success == 0 || decoded.decoded < 0 || decoded.decoded >= (int32_t)video->count ||
+	    (taken & (1U << (uint32_t)decoded.decoded)) != 0) {
 		note(video, "decode failed", decoded.decoded);
+		describe(video, &decoded, index, job->setup);
 		return 0;
+	}
+
+	/* The core should have read the picture's bytes to their end. */
+	drv_wave5_positions(video->instance, &read, &write);
+	if (decoded.read_position != write && video_place_lines < VIDEO_PLACE_LINES) {
+		video_place_lines++;
+		kern_logf("wave5: video: picture %u: the core read to %08x, the bytes end at %08x\n",
+			  (unsigned)video->pictures,
+			  (unsigned)decoded.read_position,
+			  (unsigned)write);
 	}
 
 	/* The firmware's and the application's order counts should agree. */
@@ -465,6 +502,7 @@ decode_locked(
 		note(video, "order count differs", decoded.order);
 
 	/* The setup slot holds the frame buffer from now on. */
+	index = (uint32_t)decoded.decoded;
 	vpu_slots_bind(&video->slots, job->setup, index);
 
 	/* Succeeded: the picture is in the pool's picture. */
@@ -494,7 +532,7 @@ put_picture(
 	int error;
 
 	/* The sets as NAL units. */
-	error = vpu_h264_write_sps(job->sps, 0, video->sps_unit, sizeof(video->sps_unit), &sps_bytes);
+	error = vpu_h264_write_sps(job->sps, 1, video->sps_unit, sizeof(video->sps_unit), &sps_bytes);
 	if (error != 0)
 		return error;
 	error = vpu_h264_write_pps(job->pps, job->sps, video->pps_unit, sizeof(video->pps_unit), &pps_bytes);
@@ -524,10 +562,15 @@ put_picture(
 	pieces[count].length = job->length;
 	count++;
 
-	/* Into the ring after the last picture. */
+	/* Into the ring after the last picture, and the core told where the bytes end. */
 	error = drv_wave5_append_pieces(video->instance, pieces, count);
 	if (error != 0)
 		return error;
+	error = drv_wave5_update_stream(video->instance);
+	if (error != 0) {
+		drv_wave5_unread(video->instance);
+		return error;
+	}
 
 	/* The sets sent last. */
 	kern_memcpy(video->sent_sps, video->sps_unit, sps_bytes);
@@ -653,4 +696,70 @@ note(
 
 	/* The reason, the value and the picture's number. */
 	kern_logf("wave5: video: picture %u: %s (%d)\n", (unsigned)video->pictures, what, value);
+}
+
+/* Logs what the firmware answered for a picture that went wrong, the first few times. */
+static void
+describe(
+	const struct video_stream *video,
+	const struct drv_wave5_result *decoded,
+	uint32_t index,
+	int32_t setup)
+{
+	const uint32_t *entry;
+	uint32_t flags;
+	uint32_t back;
+	unsigned taken;
+	unsigned polled;
+	uint32_t reasons;
+	uint32_t read;
+	uint32_t write;
+
+	/* Only the first lines. */
+	if (video_log_lines >= VIDEO_LOG_LINES)
+		return;
+	video_log_lines++;
+
+	/* The firmware's answer, the interrupts, and where the picture's bytes are. */
+	drv_wave5_interrupts(video->engine->core, &taken, &polled, &reasons);
+	drv_wave5_positions(video->instance, &read, &write);
+	kern_logf("wave5: video: picture %u: pick %u ok %u fail %08x warn %08x dec %d disp %d order %d flags %08x queue %08x,%08x"
+		  " irq %u polled %u reasons %08x bytes %08x-%08x read %08x wraps %u reason %08x\n",
+		  (unsigned)video->pictures,
+		  (unsigned)index,
+		  (unsigned)decoded->success,
+		  (unsigned)decoded->error,
+		  (unsigned)decoded->warning,
+		  (int)decoded->decoded,
+		  (int)decoded->display,
+		  (int)decoded->order,
+		  (unsigned)decoded->display_flags,
+		  (unsigned)decoded->queue[0],
+		  (unsigned)decoded->queue[1],
+		  taken,
+		  polled,
+		  (unsigned)reasons,
+		  (unsigned)read,
+		  (unsigned)write,
+		  (unsigned)decoded->read_position,
+		  (unsigned)drv_wave5_wraps(video->instance),
+		  (unsigned)drv_wave5_last_reason(video->engine->core));
+
+	/* The flags the firmware holds now, and the decodes before. */
+	flags = 0;
+	(void)drv_wave5_display_flags(video->instance, 0, 0, &flags);
+	kern_logf("wave5: video: picture %u: flags now %08x, setup %d\n", (unsigned)video->pictures, (unsigned)flags, (int)setup);
+	for (back = VIDEO_HISTORY; back > 0; back--) {
+		if (video->pictures < back)
+			continue;
+		entry = video->history[(video->pictures - back) % VIDEO_HISTORY];
+		kern_logf("wave5: video:  picture %u: taken %02x dec %d flags %02x order %d refs %02x active %02x\n",
+			  (unsigned)(video->pictures - back),
+			  (unsigned)entry[0],
+			  (int)entry[1],
+			  (unsigned)entry[2],
+			  (int)(int16_t)(entry[3] & 0xffffU),
+			  (unsigned)((entry[3] >> 16) & 0xffU),
+			  (unsigned)(entry[3] >> 24));
+	}
 }

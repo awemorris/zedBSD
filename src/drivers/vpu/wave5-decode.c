@@ -24,6 +24,7 @@
 #include <kern/clock.h>
 #include <kern/device-io.h>
 #include <kern/kcrt.h>
+#include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/sched.h>
 #include <uapi/errno.h>
@@ -250,6 +251,16 @@
  */
 #define DISPLAY_SET		0x0118U
 #define DISPLAY_CLEAR		0x011cU
+
+/*
+ * The task buffer is made twice the size the vendor's driver gives it
+ * (two VLC buffers and a parameter buffer per queued command): with that
+ * size the Wave511's firmware stopped answering a picture command once
+ * about 2 MB of a 1080p stream had been decoded, whatever the ring's size
+ * (as seen on the VisionFive 2), and with twice it every
+ * stream ran to its end.
+ */
+#define TASK_FACTOR		2U
 
 /* How many times a destruction the firmware is not ready for is retried. */
 #define DESTROY_TRIES		10U
@@ -556,6 +567,44 @@ drv_wave5_append_pieces(
 }
 
 /*
+ * Tells the core where the ring's bytes now end.
+ *
+ * Procedure referenced:
+ * StarFive Linux JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
+ * drivers/media/platform/chips-media/wave5/wave5-vpuapi.c
+ * (wave5_vpu_dec_update_bitstream_buffer, after write_to_ringbuffer) and
+ * wave5-hw.c (wave5_vpu_dec_set_bitstream_flag: the options, the write
+ * position, then the bitstream update command, W5_UPDATE_BS 0x8000 in
+ * wave5-regdefine.h).
+ */
+int
+drv_wave5_update_stream(
+	struct drv_wave5_stream *stream)
+{
+	struct drv_wave5 *core;
+	uint32_t reason;
+	int error;
+
+	/* The explicit end at the write position, then the command. */
+	core = stream->core;
+	mutex_lock(&core->command_lock);
+
+	drv_wave5_core_write(core, STREAM_OPTIONS, STREAM_EXPLICIT_END);
+	drv_wave5_core_write(core, STREAM_WRITE, stream->write);
+	reason = 0;
+	error = drv_wave5_core_command(core, stream, VPU_RUN_UPDATE_STREAM, 1, &reason);
+
+	mutex_unlock(&core->command_lock);
+
+	/* Reports an update the firmware refused. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the core knows the bytes' end. */
+	return 0;
+}
+
+/*
  * Takes back the bytes the last append put in the ring, which the core
  * did not read.
  */
@@ -565,6 +614,20 @@ drv_wave5_unread(
 {
 	/* The next bytes go where the last ones did. */
 	stream->write = stream->read;
+}
+
+/*
+ * Reports where the last append put the picture's bytes.
+ */
+void
+drv_wave5_positions(
+	const struct drv_wave5_stream *stream,
+	uint32_t *read,
+	uint32_t *write)
+{
+	/* The bytes the next command reads. */
+	*read = stream->read;
+	*write = stream->write;
 }
 
 /*
@@ -1019,7 +1082,7 @@ take_compressed(
 	luma_table = align_up(align_up(luma_table, 16U), 4096U) + 4096U;
 	chroma_table = align_up(height, 64U) * align_up(width / 2U, 256U) / 32U;
 	chroma_table = align_up(align_up(chroma_table, 16U), 4096U) + 4096U;
-	task = stream->vlc_size * 2U + stream->parameter_size * QUEUE_DEPTH;
+	task = (stream->vlc_size * 2U + stream->parameter_size * QUEUE_DEPTH) * TASK_FACTOR;
 
 	/* Takes the task buffer the firmware works through the queued commands in. */
 	error = drv_wave5_core_take(stream->core, task, &stream->task);
@@ -1041,6 +1104,18 @@ take_compressed(
 			return error;
 		}
 	}
+
+	/* The sizes, for the log. */
+	kern_logf("wave5: instance %u: vlc %u parameter %u task %u, luma %u chroma %u motion %u tables %u %u\n",
+		  stream->id,
+		  (unsigned)stream->vlc_size,
+		  (unsigned)stream->parameter_size,
+		  (unsigned)task,
+		  (unsigned)stream->compressed_luma,
+		  (unsigned)chroma,
+		  (unsigned)motion,
+		  (unsigned)luma_table,
+		  (unsigned)chroma_table);
 
 	/* Succeeded: every pair has its compressed side. */
 	return 0;

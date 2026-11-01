@@ -51,22 +51,18 @@ vpu_slots_reset(
 }
 
 /*
- * Picks the frame buffer a picture is decoded into.
+ * Reports the frame buffers the live slots hold, a bit each.
  */
-int
-vpu_slots_pick(
+uint32_t
+vpu_slots_taken(
 	const struct vpu_slots *slots,
 	uint32_t references,
 	uint32_t active,
-	int32_t setup,
-	uint32_t *index)
+	int32_t setup)
 {
 	uint32_t live;
 	uint32_t taken;
 	uint32_t slot;
-	uint32_t candidate;
-	uint32_t oldest;
-	int found;
 
 	/* The live slots: the references, and the active ones but the setup slot. */
 	live = active;
@@ -82,6 +78,29 @@ vpu_slots_pick(
 		if (slots->buffer[slot] >= 0)
 			taken |= 1U << (uint32_t)slots->buffer[slot];
 	}
+
+	/* Succeeded: the frame buffers no picture may be decoded into. */
+	return taken;
+}
+
+/*
+ * Picks the frame buffer a picture is decoded into.
+ */
+int
+vpu_slots_pick(
+	const struct vpu_slots *slots,
+	uint32_t references,
+	uint32_t active,
+	int32_t setup,
+	uint32_t *index)
+{
+	uint32_t taken;
+	uint32_t candidate;
+	uint32_t oldest;
+	int found;
+
+	/* The frame buffers the live slots hold. */
+	taken = vpu_slots_taken(slots, references, active, setup);
 
 	/* The free frame buffer decoded into longest ago. */
 	found = 0;

@@ -160,6 +160,13 @@ void vpu_slots_reset(struct vpu_slots *slots, uint32_t count);
 int vpu_slots_pick(const struct vpu_slots *slots, uint32_t references, uint32_t active, int32_t setup, uint32_t *index);
 
 /*
+ * Reports the frame buffers (a bit each) the live slots of a picture hold,
+ * the live slots as vpu_slots_pick() takes them: a picture may go into
+ * any other.
+ */
+uint32_t vpu_slots_taken(const struct vpu_slots *slots, uint32_t references, uint32_t active, int32_t setup);
+
+/*
  * Binds a decoded picture: the setup slot (VPU_NONE for none) now holds
  * frame buffer index, which no other slot holds any more, and the slot's
  * old frame buffer holds no slot.

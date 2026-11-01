@@ -136,6 +136,8 @@ drv_wave5_append_pieces(
 	return 0;
 }
 
+int drv_wave5_update_stream(struct drv_wave5_stream *stream) { (void)stream; return 0; }
+
 void
 drv_wave5_unread(
 	struct drv_wave5_stream *stream)
@@ -203,6 +205,11 @@ drv_wave5_decode(
 	result->ticks = 1234;
 	return core.decode_error;
 }
+
+void drv_wave5_positions(const struct drv_wave5_stream *stream, uint32_t *read, uint32_t *write) { (void)stream; *read = 0; *write = 0; }
+void drv_wave5_interrupts(struct drv_wave5 *owner, unsigned *taken, unsigned *polled, uint32_t *reasons) { (void)owner; *taken = 0; *polled = 0; *reasons = 0; }
+uint32_t drv_wave5_wraps(const struct drv_wave5_stream *stream) { (void)stream; return 0; }
+uint32_t drv_wave5_last_reason(struct drv_wave5 *owner) { (void)owner; return 0; }
 
 /* The render node's pool: count pictures 16 MiB apart, chroma 2 MiB in, pitch 2048. */
 static int
@@ -301,14 +308,14 @@ main(void)
 	check(error == 0 && result.status == DRV_POWERVR_VIDEO_COMPLETE && result.index == 0, "IDR decoded into 0");
 	check(core.opens == 1 && core.sequences == 1 && core.pools == 1 && core.pool_count == 5 && core.registered == 5, "sequence and a pool of five");
 	check(core.pieces == 3 && core.first[0] == 0x67 && core.first[1] == 0x68 && core.lengths[2] == sizeof(slices), "SPS, PPS, slices");
-	check(core.set == 0x1e && core.clear == 0x1, "the others flagged");
+	check(core.set == 0 && core.clear == 0x1f, "no live slot: nothing flagged");
 	check(result.width == 1920 && result.height == 1088 && result.ticks == 1234, "size and time");
 
 	/* A P picture referencing slot 0, into slot 1: the sets are not sent again, frame buffer 1. */
 	core.decoded = 1;
 	error = decode(stream, 0, 1, 0x1, 0x3, &result);
 	check(error == 0 && result.status == DRV_POWERVR_VIDEO_COMPLETE && result.index == 1, "P into 1");
-	check(core.pieces == 1 && core.set == 0x1d && core.clear == 0x2, "only the slices, 1 picked");
+	check(core.pieces == 1 && core.set == 0x1 && core.clear == 0x1e, "only the slices, the reference flagged");
 
 	/* A refused frame buffer: the bytes go back, an error. */
 	core.decoded = DRV_WAVE5_INDEX_NONE;
@@ -320,10 +327,15 @@ main(void)
 	error = decode(stream, 0, -1, 0x3, 0x3, &result);
 	check(error == 0 && result.status == DRV_POWERVR_VIDEO_COMPLETE && result.index == -1, "skipped");
 
-	/* Another frame buffer than picked: an error. */
+	/* The firmware's choice of a free frame buffer is taken. */
 	core.decoded = 4;
 	error = decode(stream, 0, 2, 0x3, 0x7, &result);
-	check(error == 0 && result.status == DRV_POWERVR_VIDEO_ERROR, "another frame buffer is an error");
+	check(error == 0 && result.status == DRV_POWERVR_VIDEO_COMPLETE && result.index == 4, "the firmware's free choice is taken");
+
+	/* A frame buffer a live slot holds is an error. */
+	core.decoded = 1;
+	error = decode(stream, 0, 3, 0x3, 0xf, &result);
+	check(error == 0 && result.status == DRV_POWERVR_VIDEO_ERROR, "a live slot's frame buffer is an error");
 
 	/* An IDR picture sends the sets again. */
 	core.decoded = 2;
