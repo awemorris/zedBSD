@@ -510,6 +510,15 @@ shell_input(
 	case SHELL_EVENT_TEXT_DELETE:
 		error = shell_text(state, event);
 		break;
+	case SHELL_EVENT_OPEN:
+		/* A later start's first URL opens here, as if typed (the window has one page); the list is freed. */
+		if (event->data != NULL && event->data[0] != '\0') {
+			printf("ZBROWSER OPEN handed=%s\n", event->data);
+			fflush(stdout);
+			shell_follow_typed(state, event->data);
+		}
+		free(event->data);
+		break;
 	default:
 		break;
 	}

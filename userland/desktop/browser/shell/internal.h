@@ -26,6 +26,14 @@
 /* The code of the event the view's wake posts to the application (KL_APP_POST): the view has work. */
 #define SHELL_POST_VIEW		1U
 
+/*
+ * The code of the window's input (KL_WINDOW_POST) that brings the URLs a
+ * later start of the program hands over (Windows' single start): its data
+ * is the URLs in UTF-8, each ended by a NUL, the list by an empty one,
+ * for the program to free.
+ */
+#define SHELL_POST_OPEN		0x4F474D31U
+
 /* How many inputs wait for the main loop at most. */
 #define SHELL_WINDOW_EVENTS	256U
 
@@ -42,7 +50,8 @@ enum shell_event_type {
 	SHELL_EVENT_FOCUS,
 	SHELL_EVENT_TEXT_COMMIT,
 	SHELL_EVENT_TEXT_PREEDIT,
-	SHELL_EVENT_TEXT_DELETE
+	SHELL_EVENT_TEXT_DELETE,
+	SHELL_EVENT_OPEN
 };
 
 /* The modifier bits of an input. */
@@ -68,7 +77,9 @@ enum shell_event_type {
  * when the window's backend knows it (empty otherwise).  An input method's
  * text (ws090-p025) is the text it commits, the
  * text it composes with its cursor's byte offsets (begin and end, -1 when
- * hidden), or the bytes it deletes before and after the caret.
+ * hidden), or the bytes it deletes before and after the caret.  An open
+ * (SHELL_EVENT_OPEN) carries the URLs a later start handed over in data
+ * (SHELL_POST_OPEN's list, which the one who takes the event frees).
  */
 struct shell_event {
 	int type;
@@ -86,6 +97,7 @@ struct shell_event {
 	int32_t end;
 	uint32_t before;
 	uint32_t after;
+	char *data;
 };
 
 /*

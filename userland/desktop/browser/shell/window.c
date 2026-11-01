@@ -27,6 +27,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -44,6 +45,7 @@ static void window_key(struct shell_window *window, const struct kl_window_event
 static void window_focus(struct shell_window *window, const struct kl_window_event *input);
 static void window_text(struct shell_window *window, int type, const struct kl_window_event *input);
 static struct shell_event *window_push(struct shell_window *window, int type);
+static void window_open(struct shell_window *window, const struct kl_window_event *input);
 static void window_push_motion(struct shell_window *window);
 static void window_pad_push(struct shell_window *window, unsigned type, const struct kl_window_event *input);
 static void window_touch_push(struct shell_window *window, unsigned type, const struct kl_window_event *input);
@@ -315,6 +317,11 @@ window_event(
 		/* The main loop ends the program. */
 		window->closed = 1;
 		break;
+	case KL_WINDOW_POST:
+		/* The URLs a later start of the program handed over, for the main loop (a full queue drops them). */
+		if (input->code == SHELL_POST_OPEN)
+			window_open(window, input);
+		break;
 	case KL_WINDOW_ACTION:
 	case KL_WINDOW_CONTROL_DONE:
 		/* A titlebar's control, for the main loop (titlebar.c). */
@@ -484,6 +491,25 @@ window_push(
 
 	/* Reports the queued input for its details. */
 	return event;
+}
+
+/* Queues the URLs a later start handed over; a full queue drops them with their list. */
+static void
+window_open(
+	struct shell_window *window,
+	const struct kl_window_event *input)
+{
+	struct shell_event *event;
+
+	/* The input; a full queue drops it. */
+	event = window_push(window, SHELL_EVENT_OPEN);
+	if (event == NULL) {
+		free(input->data);
+		return;
+	}
+
+	/* The list, now the event's. */
+	event->data = input->data;
 }
 
 /*
