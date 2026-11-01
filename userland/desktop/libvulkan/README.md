@@ -60,13 +60,18 @@ ELF checkerは155 exports、SONAME、依存ライブラリとinterpreterを照�
 返します。native返信の有限watchdogもあり、非常に長いcompile等では
 contextをdevice-lostとして終了する場合があります。
 
-## Vulkan Video（H.264 decode）と synchronization2（ws083）
+## Vulkan Video（H.264・H.265 decode）と synchronization2（ws083）
 
 `VK_KHR_video_queue`・`VK_KHR_video_decode_queue`・`VK_KHR_video_decode_h264` と
 `VK_KHR_synchronization2` は、capset の native の語（176 byte の record の
 byte 168 の tag と byte 172 の bit 0）で H.264 decode を約束した backend
-（native の i915）の時だけ列挙します。Venus（fork・stock）では出さず、
+（native の renderer）の時だけ列挙します。`VK_KHR_video_decode_h265` は同じ語の
+bit 2 で H.265 decode を約束した backend の時だけ列挙します。family の codec の操作は
+renderer の答えと約束の bit の積で、約束の無い codec は答えても隠します。
+Venus（fork・stock）では出さず、
 backend の queue family の video の flag と format の video の feature も隠します。
+H.265 の profile は Main（8 bit 4:2:0）だけを通し、VPS・SPS・PPS は VUI・HRD・
+sub-layer を含めて全部の field を送ります（H.264 の SPS は VUI を送りません）。
 `video.c` は profile と parameter set の key を手元で検べ、session・parameters・
 記録を zedBSD 独自の opcode（`uapi/gpu-op.h` の `0x10000`〜`0x1000d`）で送ります。
 `sync2.c` は synchronization2 の 6 command を 1.0 の command に翻訳します
@@ -83,7 +88,8 @@ backend の queue family の video の flag と format の video の feature も
   de-tile に使います（decode の絵の SAMPLED・TRANSFER_SRC が入れば不要）。
 - N4: slice が 256 を超える picture は decode せずに飛ばします（出力は未定義）。
 
-parameter set の key の重複と H.264 の範囲の外の id は `VK_ERROR_INITIALIZATION_FAILED`
+parameter set の key の重複と codec の範囲の外の id（H.264 は SPS 0〜31、H.265 は VPS・SPS 0〜15、
+PPS 0〜63）は `VK_ERROR_INITIALIZATION_FAILED`
 で拒みます（固定した 1.3.269 の header では `VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR`
 が beta の encode の値のため）。result status query・inline query は持ちません。
 

@@ -371,6 +371,11 @@ device_validate(
 			bits |= VULKAN_DEVICE_VIDEO_DECODE_H264;
 			continue;
 		}
+		match = strcmp(info->ppEnabledExtensionNames[index], VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME);
+		if (match == 0) {
+			bits |= VULKAN_DEVICE_VIDEO_DECODE_H265;
+			continue;
+		}
 
 		/* Selects the changed rectangles a present may name (the Wayland commit's damage, BUG-221). */
 		match = strcmp(info->ppEnabledExtensionNames[index], VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
@@ -431,7 +436,7 @@ device_validate(
 	/*
 	 * Synchronization2 on a Vulkan 1.0 device depends on the instance's
 	 * extensible physical-device queries, and each video extension on the
-	 * one below it: decode H.264, decode queue, video queue, then
+	 * one below it: decode H.264 or H.265, decode queue, video queue, then
 	 * synchronization2.
 	 */
 	if ((bits & VULKAN_DEVICE_SYNCHRONIZATION2) && !(physical->instance->enabled_extensions & VULKAN_INSTANCE_PROPERTIES2))
@@ -441,6 +446,8 @@ device_validate(
 	if ((bits & VULKAN_DEVICE_VIDEO_DECODE_QUEUE) && !(bits & VULKAN_DEVICE_VIDEO_QUEUE))
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
 	if ((bits & VULKAN_DEVICE_VIDEO_DECODE_H264) && !(bits & VULKAN_DEVICE_VIDEO_DECODE_QUEUE))
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	if ((bits & VULKAN_DEVICE_VIDEO_DECODE_H265) && !(bits & VULKAN_DEVICE_VIDEO_DECODE_QUEUE))
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
 
 	/* Counts actual requested queues without imposing a library object-array ceiling. */

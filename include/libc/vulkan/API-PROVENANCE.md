@@ -170,8 +170,8 @@ it, and libvulkan no longer carries `opcodes.h` or `LICENSE-PROTOCOL`.
 ## Vulkan Video and synchronization2 declarations
 
 `vulkan_video.h` selects declaration data for `VK_KHR_video_queue` (revision 8),
-`VK_KHR_video_decode_queue` (8), `VK_KHR_video_decode_h264` (9) and
-`VK_KHR_synchronization2` (1), with the Vulkan 1.3 types synchronization2's names
+`VK_KHR_video_decode_queue` (8), `VK_KHR_video_decode_h264` (9),
+`VK_KHR_video_decode_h265` (8) and `VK_KHR_synchronization2` (1), with the Vulkan 1.3 types synchronization2's names
 alias (`VkFlags64`, the stage and access flags and constants, `VkSubmitFlagBits`,
 the barrier, dependency, submit and feature structures). The input is a different
 revision from the core selection above, because the pinned 1.3.269 input is not
@@ -186,6 +186,11 @@ changed since their final revisions:
   `vulkan_video_codecs_common.h` `7afc98e84d3bea72e40a65161463abbd4be2ff1e1853eca3f8c331afb7329a8b`,
   `vulkan_video_codec_h264std.h` `05859b58e094a8dcc88cb3766a1fcbfd62bcaab20c93d2c3e5cec853628f277c`,
   `vulkan_video_codec_h264std_decode.h` `d2be01f84f773644a24b7634f49e63ff8c6f0e807119b1bf609176585031f93a`.
+- The H.265 standard headers are copied unchanged from the same package into
+  `vk_video/` (std header `VK_STD_vulkan_video_codec_h265_decode` 1.0.0; the
+  `VK_KHR_video_decode_h265` block includes them):
+  `vulkan_video_codec_h265std.h` `a5d0b2e7b47843db610d2769c7b0202c90cd7db82108b60fb2631d1c7976a395`,
+  `vulkan_video_codec_h265std_decode.h` `944646ced5bf9f49b79144c18369f0b932900c375fd81c262a3c30e9c60de8c6`.
 - Declaration license: Apache-2.0, copyright 2015–2025 The Khronos Group Inc.
   (`LICENSE-API`). The independent selection tool `tools/maintain-video.noct` is Zlib.
 
@@ -197,14 +202,14 @@ timeout 90 build/NoctLang/build-static/noct \
 
 `vulkan.h` includes `vulkan_video.h`. The declarations do not advertise support:
 libvulkan offers these extensions only on a backend whose capset declares video
-(the native i915), and it names Vulkan 1.0 there, which the registry's
+decode of the codec (a native renderer), and it names Vulkan 1.0 there, which the registry's
 dependencies of these extensions do not allow. The libvulkan README lists every
 such point.
 
 The Khronos files keep their line comments, so a translation unit that includes
 `vulkan.h` needs C99 or GNU89.  `tools/maintain-dispatch.noct` reads this header
 too: the 13 video and 6 synchronization2 commands bring the dispatch table from
-173 to 192 records.  The video structures are encoded by hand in
+173 to 192 records (`VK_KHR_video_decode_h265` has no command).  The video structures are encoded by hand in
 `userland/desktop/libvulkan/video.c` (not by `tools/maintain-codec.noct`, whose
 input stays the core selection), because their chains, their bit-field flags and
 the H.264 two-dimensional scaling lists need rules of their own.
