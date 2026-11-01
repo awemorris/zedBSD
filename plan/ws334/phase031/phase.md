@@ -3,7 +3,7 @@
 # ws334-p031 統合: 配る形（zip・license・icon・版の情報）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §6.2・§6.4・§6.7・§6.8、決定 21（U9: 名前 OmniGrammaton・icon は今の物・発行者 Awe Morris、U11: zip）。
-- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-02 q1871-i01、P5）。前: planned（2026-11-01 p003 で作成）。
+- 状態: cleared（2026-11-02 00:19 Q1、main f9c278fa5。zip に 23 file・DLL なし、同じ入力で同じ bytes、icon 8 枚、版の情報、Wine で展開した .exe が start.html を描いた）。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-02 q1871-i01、P5）。前: planned（2026-11-01 p003 で作成）。
 - **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: zip に DLL は入らない（`OmniGrammaton.exe`・`cert.pem`・`share/`、design §6.2）。依存の確かめは .exe の import が Windows の system の DLL・UCRT の `api-ms-win-crt-*`・遅延の `vulkan-1.dll` だけ（同梱の DLL の欄は無い）。OpenSSL と winpthreads の許諾の文は .exe に静的に入る分として同梱する。
 - 依存: p019（ico）・p029・p030。
 - 担当の想定: Opus（phase-runner）を 1 回（約 5 LW）。使う module の約束は `apps/browser-win32/tools/ico.h`。
@@ -70,3 +70,8 @@ zip の中身（`OmniGrammaton-0.1.0-win64.zip`、23 file、時刻は全部 1980
 - Wine の上の https で `share/certs/ca-certificates.pem` が使われる事の確かめ（p030 の試験の範囲）。
 
 消してよい物（Q1 へ）: `build/tmp/p031`・`build/tmp/p031-*`（Windows の試しの build・log・icon の写し）、`build/tmp/ws334-zip-build`・`build/tmp/ws334-zip-wine*`（zip-wine.sh の出力）。
+
+### Q1 の判断（2026-11-02 00:19）
+
+- 配る OmniGrammaton.exe（今 20.8 MB、-g の debug の情報を含む）は debug の情報を外し、debug の情報は別の file（.pdb など）に分けて build の出力に残す。zip には入れない。q1875 の Sonnet で直す。
+

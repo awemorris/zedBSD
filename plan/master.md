@@ -28,7 +28,8 @@
 | --- | --- | --- |
 | P1 | q1864-i02 `p1-ws324` | [WS324](ws324/ws.md) p006a の段 2: H.265 の解析の header を source に置き、骨格と試験の道具を作る（段 1 の設計は済み） |
 | P2 | q1869 `p2-ws322` | [WS322](ws322/ws.md) p004: VF2 の H.264 decode の道（p001〜p003 は cleared） |
-| P5 | q1871 `p5-ws334b` | [WS334](ws334/ws.md) p031: 配る形（zip・license・icon・版）。p029 で題の帯・IME・clipboard・DPI |
+| P5 | q1874 `p5-ws334b` | [WS334](ws334/ws.md) p032: Wine での確かめの第 1 回（p031 配る形は cleared） |
+| Sonnet | q1875 `s-ws334-strip` | [WS334](ws334/ws.md): 配る .exe の debug の情報を分ける |
 | Sonnet | q1872 `s-ws334-ui` | [WS334](ws334/ws.md): location の欄の file: の URL と省略記号の豆腐 |
 | P6 | q1870 `p6-ws335b` | [WS335](ws335/ws.md) p012: RSA の署名の確かめ（p004・p005・p007・p010・p011 は cleared） |
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
@@ -111,7 +112,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-390 · q1874 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-390 · q1876 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

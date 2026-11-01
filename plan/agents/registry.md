@@ -8,7 +8,8 @@
 | P1 | kernel-and-driver-designer | ws324 p006a H.265 の解析の設計 (q1864-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | in-progress（2026-11-01 23:08 起動） | 210049ccf（merge a0fd88ee8） |
 | P2 | phase-runner-high | ws322 p004 H.264 decode の道 (q1869-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 23:51 起動、VF2） | d1af4687c（merge 361044f95） |
 | P3 | phase-runner-high | ws291 p027 の回帰 amd64・Venus (q1859-i01) | `/home/awe/zedBSD-worktrees/p3-ws291reg` / `agent/p3-ws291reg` | 返却（2026-11-01 23:19、PASS） | 73669b953（merge 6f49769e7） |
-| P5 | phase-runner-high | ws334 p031 配る形 (q1871-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 23:54） | 2e2b18daf（merge cc3f46e9b） |
+| P5 | phase-runner-high | ws334 p032 Wine の確かめ (q1874-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-02 00:19 起動） | 22e46046c（merge f9c278fa5） |
+| Sonnet | phase-runner-low | ws334 の .exe の debug の分け (q1875-i01) | `/home/awe/zedBSD-worktrees/s-ws334-strip` / `agent/s-ws334-strip` | in-progress（2026-11-02 00:19 起動） | — |
 | Sonnet | phase-runner-low | ws334 の UI の 2 つの直し (q1872-i01) | `/home/awe/zedBSD-worktrees/s-ws334-ui` / `agent/s-ws334-ui` | in-progress（2026-11-01 23:54 起動） | — |
 | P6 | phase-runner-low | ws335 p012 RSA (q1870-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 23:51 起動） | f14b5b34a（merge 2d7097dd3） |
 | P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |

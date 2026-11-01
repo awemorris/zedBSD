@@ -11,7 +11,7 @@
 | P2 | [WS322](ws322/ws.md) p004 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | H.264 decode の道（q1869）。p003: PowerVR の NV12・plane の view・export を VF2 で確かめた | p005〜p007 |
 | P3 | — | — | 返却（23:19）。WS291 p027 の amd64・Venus の回帰 PASS | 未割当 |
 | P4 | — | Bug の修正の担当 | 返却（22:48）。WS291 p027 の Pi 5・VF2 の回帰 PASS | 次の Bug の割当を待つ |
-| P5 | [WS334](ws334/ws.md) p031 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 配る形（zip・license・icon・版、q1871）。p029: 題の帯・location の欄・IME・clipboard・DPI（build/review/ws334-p029/） | p032 Wine での確かめ |
+| P5 | [WS334](ws334/ws.md) p032 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | Wine での確かめの第 1 回（q1874）。p031: zip（23 file、DLL なし、icon・版の情報） | p033・p034（並べられる） |
 | P6 | [WS335](ws335/ws.md) p012 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | RSA の署名の確かめ（q1870）。p011 ECC は cleared | p009 Ed25519 |
 | P7 | — | — | 返却（22:26）。WS334 p027 の QEMU の guest の確かめ PASS（画面: build/review/p027-guest/） | 未割当 |
 | P8 | — | menuconfig の host 試験 | MAC-T001 で止まる件の直し（q1873） | 全項目 PASS |
