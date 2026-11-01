@@ -25,9 +25,9 @@
  *
  * fdt_phys is the physical address of the device tree the firmware handed
  * over.  At boot the driver only reads the tree, maps the windows and asks
- * the firmware about the engine's clock; powering the engine and its
- * self-test wait until root writes hw.gpu.start=1, so a failure there never
- * stops the boot.  Returns 0 when the engine was found, ENODEV otherwise;
+ * the firmware about the engine's clock; powering the engine (and its
+ * self-test, which runs only under rpi4gpu.selftest=1) waits until root
+ * writes hw.gpu.start=1, so a failure there never stops the boot.  Returns 0 when the engine was found, ENODEV otherwise;
  * the boot goes on either way.
  */
 int drv_bcm2712_gpu_attach(uint64_t fdt_phys);

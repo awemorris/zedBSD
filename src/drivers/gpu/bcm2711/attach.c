@@ -137,7 +137,7 @@ drv_bcm2711_gpu_attach(
 			bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V3/V6 not ready (%d)", v3d_error);
 	}
 
-	/* Runs trusted native diagnostics before publishing any render-device client. */
+	/* Runs trusted native diagnostics, when the boot asked for the self-test, before publishing any render-device client. */
 	if (v3d_error == 0) {
 		v3d_error = bcm2711_v3d_diagnostic(&attach_v3d);
 		if (v3d_error != 0)

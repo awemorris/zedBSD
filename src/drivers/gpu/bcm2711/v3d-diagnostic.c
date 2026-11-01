@@ -44,6 +44,11 @@ static uint32_t pattern_pixel(uint32_t x, uint32_t y);
  * Executes the real shader-free bin/render diagnostic before render registration.
  * A failure leaves uncertain storage in the persistent engine; reset is allowed
  * here because no other clients, resource owners or submitted jobs exist yet.
+ *
+ * The jobs run only when the boot asked for the self-test
+ * (rpi4gpu.selftest=1).  Otherwise nothing is submitted, and the texture
+ * formatting unit converts textures unless v3d.tfu=0 keeps the CPU's
+ * conversion.
  */
 int
 bcm2711_v3d_diagnostic(
@@ -55,6 +60,8 @@ bcm2711_v3d_diagnostic(
 	int retired;
 	int converted;
 	bool probe;
+	bool selftest;
+	bool tfu_off;
 
 	/* Honors the ordinary native stop before any diagnostic memory publication. */
 	allowed = bcm2711_stage_allowed(BCM2711_FAMILY_V3D, "V7");
@@ -62,6 +69,16 @@ bcm2711_v3d_diagnostic(
 		return ECANCELED;
 	if (!engine->hardware.ready || engine->hardware.diagnostic != NULL)
 		return EBUSY;
+
+	/* Submits nothing unless the boot asked for the self-test. */
+	selftest = bcm2711_stage_selftest();
+	if (!selftest) {
+		/* The unit converts textures unless the boot kept the CPU's conversion. */
+		tfu_off = bcm2711_stage_tfu_off();
+		if (!tfu_off)
+			engine->hardware.tfu_uif_ready = true;
+		return 0;
+	}
 	error = prepare_storage(engine);
 	if (error != 0)
 		return error;

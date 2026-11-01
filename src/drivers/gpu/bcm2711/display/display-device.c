@@ -158,6 +158,10 @@ static void bind_operations(struct display_device *controller);
 /*
  * Registers a confirmed boot output with owned copy storage and complete leases.
  * Registration failures unwind only after the console has no borrowed DMA holds.
+ *
+ * The test pictures of P2 and P3 (two striped frames and a translucent
+ * checker) are shown only when the boot asked for the self-test
+ * (rpi4gpu.selftest=1); otherwise the screen keeps the console.
  */
 int
 bcm2711_display_register(
@@ -165,6 +169,7 @@ bcm2711_display_register(
 {
 	struct display_device *controller;
 	bool allowed;
+	bool selftest;
 	uint32_t slot;
 	int error;
 	int detached;
@@ -232,8 +237,11 @@ bcm2711_display_register(
 		return error;
 	}
 
-	/* Exercises actual native flip and composition before offering the output to userspace. */
-	error = exercise_display(controller);
+	/* Exercises the flips and the composition on the screen only when the boot asked for the self-test. */
+	error = 0;
+	selftest = bcm2711_stage_selftest();
+	if (selftest)
+		error = exercise_display(controller);
 	if (error == 0) {
 		/* A P5 stop preserves the observed P1/P2/P3 result without registering a node. */
 		allowed = bcm2711_stage_allowed(BCM2711_FAMILY_DISPLAY, "P5");
@@ -268,7 +276,11 @@ bcm2711_display_register(
 	return 0;
 }
 
-/* Counts selected-PV frames over one bounded second without holding the IRQ guard. */
+/*
+ * Waits, at most one bounded second, for a selected-PV frame without holding
+ * the IRQ guard.  The self-test (rpi4gpu.selftest=1) counts the frames of the
+ * whole second instead.
+ */
 static int
 observe_frames(
 	struct bcm2711_display *display)
@@ -276,19 +288,28 @@ observe_frames(
 	struct bcm2711_flip_status before;
 	struct bcm2711_flip_status after;
 	uint32_t step;
+	uint32_t waited_ms;
+	bool selftest;
 
-	/* Leaves the native console visible while measuring actual serviced frame sources. */
+	/* Leaves the native console visible while observing actual serviced frame sources. */
 	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P1 begin vblank observation");
+	selftest = bcm2711_stage_selftest();
 	bcm2711_display_flip_snapshot(display, &before);
+	after = before;
+	waited_ms = 0;
 	for (step = 0; step < 1000U; step++) {
 		/* Millisecond waits allow the selected PV IRQ to update its persistent counter. */
 		kern_usleep_range(1000, 1000);
+		waited_ms++;
+		bcm2711_display_flip_snapshot(display, &after);
+		if (!selftest && after.frame_sequence != before.frame_sequence)
+			break;
 	}
 
 	/* The captured cadence is evidence for the physical test, never an assumed 60 Hz. */
-	bcm2711_display_flip_snapshot(display, &after);
-	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P1 frames %llu in 1s expected %u mHz",
+	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P1 frames %llu in %u ms expected %u mHz",
 			   (unsigned long long)(after.frame_sequence - before.frame_sequence),
+			   waited_ms,
 			   display->refresh_millihz);
 	if (after.frame_sequence == before.frame_sequence)
 		return ETIMEDOUT;

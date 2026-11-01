@@ -34,6 +34,9 @@
 #define BCM2712_HVS_CHANNELS		3U
 #define BCM2712_HVS_VALVES		2U
 
+/* The vertical blanks the display's stage R1 times (an odd count, an even number of frames between them). */
+#define BCM2712_VBLANK_TIMED		7U
+
 /* The most planes of one display list the readout keeps. */
 #define BCM2712_HVS_LIST_PLANES		8U
 
@@ -72,7 +75,8 @@ struct bcm2712_hvs_plane {
  * window is the HVS6's, its timing windows and lines the pixel valves', its
  * port and channel the channel the firmware shows.  Discovery fills the
  * windows and the interrupt lines; the readout fills the rest from the
- * hardware.  guard protects vblank_count against the R1 test's handler.
+ * hardware.  guard protects the vertical-blank count and times against
+ * R1's handler.
  */
 struct bcm2712_display {
 	struct bcm2711_display base;
@@ -106,9 +110,16 @@ struct bcm2712_display {
 	/* The shown channel's control word when the device attached, which the flip code checks stays the same. */
 	uint32_t attach_control0;
 
-	/* Vertical blanks counted by the pixel valve's handler. */
+	/*
+	 * Vertical blanks counted by the pixel valve's handler, how many of
+	 * them it timed, the monotonic counter at each timed one, and the
+	 * counter's frequency.
+	 */
 	struct spinlock guard;
 	volatile uint64_t vblank_count;
+	volatile uint64_t vblank_timed;
+	volatile uint64_t vblank_counters[BCM2712_VBLANK_TIMED];
+	volatile uint64_t vblank_counter_hz;
 };
 
 /* The channel registers the flip code reads and writes. */

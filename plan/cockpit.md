@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-02 02:09（Q1。BUG-391・392 を merge）
+最終更新: 2026-11-02 02:20（Q1。BUG-393・WS334 の誤りの文を merge）
 
 ## 担当（P1〜P8）
 
@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の関門: I・P の絵の encode（q1884、上限なし）。p009a: NVENC の channel が開き、追加の firmware 不要 | p010 encode の共通の executor |
 | P2 | [WS322](ws322/ws.md) p007 | VF2 の VPU を Vulkan Video に | 速さと頑丈さ（timeout の立て直し・seek・1080p60、q1896）。p004: H.264 decode が VF2 で ffmpeg と一致、Video Player の GPU の道で 1080p30（画面: build/review/ws322-p004-vf2-play.png） | p005〜p006 H.265 decode（WS324 の解析の後） |
-| P3 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU | 起動時の自己試験を既定で off（q1891） | — |
+| P3 | — | Pi 5 の作業 | 返却（02:20）。BUG-393 fixed（Pi 5 の実機で確認） | 次を待つ |
 | P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
 | P5 | [WS334](ws334/ws.md) p033 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 後半の Windows の口（TSF・drag と drop・touchpad など、頁に暗い mode、q1886）。p032: Wine で 15 項 PASS（https・cookie・localStorage・clipboard・dpi） | p035 規約の見直し |
 | P6 | [WS335](ws335/ws.md) p015 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | OS の層（POSIX と Windows、q1897）。p014 ML-KEM-768 は cleared | p021 誤りの queue と RAND_bytes |
@@ -47,7 +47,7 @@
 
 | Bug | 中身 | 状態 |
 | --- | --- | --- |
-| [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の起動時の自己試験の描画 | open（P3） |
+| [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の起動時の自己試験の描画 | fixed（02:20。既定で off、`rpi4gpu.selftest=1` で on。storage まで 6.3 s → 0.9〜1.2 s） |
 | [BUG-394](bugs/BUG-394.md) | 起動が長い、init が desktop を優先して順番を組めるように | open（P7） |
 | [BUG-390](bugs/BUG-390.md) | App Home の icon が出ない（全機械） | fixed（01:42、画面: build/review/q1889-pi5-home-after.png） |
 | [BUG-391](bugs/BUG-391.md) | compositor が落ちると login の画面から出直す（tablet で login できない） | fixed（02:09、QEMU の amd64 Venus。crash の後は同じ利用者の desktop か lock 画面、2 分に 3 回目で login 画面） |
