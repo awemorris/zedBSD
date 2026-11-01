@@ -302,6 +302,7 @@ static int cascade_add_bucket(struct css_engine *engine, const struct css_rule_i
 static int cascade_collect_sheet(struct css_engine *engine, struct dom_element *element, const struct css_sheet *sheet, uint64_t sheet_number, struct vm_string *id, struct wb_vector *matches);
 static int cascade_entry_compare(const void *left, const void *right);
 static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, int layer, uint64_t order, const struct dom_node *tree);
+static struct dom_element *cascade_scope_parent(const struct css_engine *engine, struct dom_element *element);
 static int cascade_scoped_matches(struct css_engine *engine, struct dom_element *element, const struct css_scope *scope, const struct css_selector *selector, uint32_t *proximity);
 static int cascade_scope_root(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
 static int cascade_scope_root_compute(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
@@ -2208,6 +2209,24 @@ cascade_collect_sheet(
 	return 0;
 }
 
+/* Finds the parent a scope's root is looked for through: the element's, or the host of the shadow tree the element is at the top of (::part() is about a host). */
+static struct dom_element *
+cascade_scope_parent(
+	const struct css_engine *engine,
+	struct dom_element *element)
+{
+	struct dom_element *parent;
+	struct dom_node *node;
+
+	parent = cascade_selector_parent(engine, element);
+	if (parent != NULL)
+		return parent;
+	node = element->node.parent;
+	if (node == NULL || node->type == DOM_ELEMENT)
+		return NULL;
+	return dom_shadow_host(node);
+}
+
 /*
  * Tells whether an element matches a selector of an @scope rule from some
  * root of the scope it is in, and how many generations it is below the
@@ -2231,7 +2250,7 @@ cascade_scoped_matches(
 	/* Each ancestor (and the element itself), nearest first, as a possible root. */
 	saved = engine->scope_root;
 	generations = 0;
-	for (root = element; root != NULL; root = cascade_selector_parent(engine, root)) {
+	for (root = element; root != NULL; root = cascade_scope_parent(engine, root)) {
 		is_root = cascade_scope_root(engine, root, scope);
 		if (is_root) {
 			inside = cascade_in_scope(engine, element, root, scope);
