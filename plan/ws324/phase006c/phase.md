@@ -103,7 +103,7 @@ p006b の §7 と同じ（全 PASS を自分で読む、規約の checklist、co
 
 ### わざと壊す確かめ（git の外で、戻して `cmp` と `git diff --quiet` で確認）
 
-- 142 か所（rps 29、ps 113）。script は `build/tmp/p/mutate.py`・`mutate2.py`。各回を file に書き、RLIMIT_FSIZE 64 MB・RLIMIT_CPU 400 秒・RSS 6 GB 超か 600 秒で kill の上限を付けた（Q1 の指示。ASan のため RLIMIT_AS は使えず RSS 監視で代えた）。
+- 142 か所（rps 25、ps 117）。script は `build/tmp/p/mutate.py`・`mutate2.py`。各回を file に書き、RLIMIT_FSIZE 64 MB・RLIMIT_CPU 400 秒・RSS 6 GB 超か 600 秒で kill の上限を付けた（Q1 の指示。ASan のため RLIMIT_AS は使えず RSS 監視で代えた）。
 - 7-61・7-62 の各条件（符号・等号）、deltaRps の符号、flag の index、max_pictures の比較（S0 と S1 の別）、delta_idx_minus1 の境と読む条件、delta の上限、予測の flag を読む条件、use_delta の既定、bits、cumulative の符号、PTL の compatibility の順・reserved・44 bit・88 bit・8 bit、VPS の 16 bit・写し下げ・HRD の previous・scratch の交互・layer set の bit 数と上限・hrd_layer_set_idx の範囲と重複・timing の 0、SPS の各 log2 の守りと上限・サイズの各比較・SubHeightC・window・ctb の切り上げ・PCM の各境・set 数・long-term の bit 数・VUI の誤りの規則の profile・extension の各 flag と skip・refused と generation の記録、PPS の各範囲・tile の数と大きさ・range extension の各 ENOTSUP・既定の写し、check_pair の各条件、sps_supported の各条件など。
 - 結果: 140 か所が試験の失敗で落ちた（build の誤りでなく `FAIL`。build の誤りになった 9 か所は、未使用変数や紛らわしい字下げを避ける形に作り直して再実施し全部試験の失敗で落ちた）。生き残ったのは 2 か所で、どちらも観測できる振る舞いが変わらない壊し（等価）:
   - VPS の `num_hrd_parameters` の上限を 1 緩める壊し: 件数が増えた分は hrd_layer_set_idx の範囲と重複の検べで必ず EINVAL になるので結果が同じ。
