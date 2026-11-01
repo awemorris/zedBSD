@@ -173,6 +173,7 @@ static int list_point_borders(struct list_walk *walk, const struct layout_box *b
 static void list_inline_floats(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth);
 static void list_lines(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth);
 static void list_inline_decoration(struct list_walk *walk, const struct layout_decoration *decoration, layout_unit left, layout_unit baseline);
+static void list_inline_decoration_vertical(struct list_walk *walk, const struct layout_decoration *decoration, layout_unit top, layout_unit line_edge, const struct layout_line *line, layout_unit block_height, int sideways);
 static void list_fragment(struct list_walk *walk, const struct layout_fragment *fragment, layout_unit x, layout_unit baseline, int vertical);
 static void list_rect(struct list_walk *walk, layout_unit x, layout_unit y, layout_unit width, layout_unit height, uint32_t color);
 static void list_replaced(struct list_walk *walk, const struct layout_box *box, layout_unit x, layout_unit y);
@@ -1301,9 +1302,12 @@ list_lines(
 		line = &box->lines[index];
 
 		/* The inline boxes' backgrounds and borders go under the line's text. */
-		if (!box->vertical_inline) {
-			for (item = 0; item < line->decoration_count; item++)
+		for (item = 0; item < line->decoration_count; item++) {
+			if (!box->vertical_inline)
 				list_inline_decoration(walk, &line->decorations[item], left + line->left, top + line->y + line->baseline);
+			else
+				list_inline_decoration_vertical(walk, &line->decorations[item], top, left + line->y, line,
+				    box->height, box->vertical_inline == 2);
 		}
 		for (item = 0; item < line->fragment_count; item++) {
 			fragment = &line->fragments[item];
@@ -1378,6 +1382,98 @@ list_inline_decoration(
 	placed.height = decoration->ascent + decoration->descent;
 	placed.margin[CSS_LEFT] = 0;
 	placed.margin[CSS_RIGHT] = 0;
+
+	/* The background color, the image over it, then the borders. */
+	if ((placed.style.background_color >> 24) != 0)
+		list_rect(walk, placed.x, placed.y,
+		    placed.border[CSS_LEFT] + placed.padding[CSS_LEFT] + placed.width + placed.padding[CSS_RIGHT] + placed.border[CSS_RIGHT],
+		    placed.border[CSS_TOP] + placed.padding[CSS_TOP] + placed.height + placed.padding[CSS_BOTTOM] + placed.border[CSS_BOTTOM],
+		    placed.style.background_color);
+	list_box_background(walk, &placed);
+	list_borders(walk, &placed);
+}
+
+/*
+ * Paints an inline box's background and borders on a line drawn down the page.
+ * line_edge is the line box's left edge; the box's physical sides were turned
+ * back from the domain's, so its margins, borders and padding are physical.
+ * The line runs down from the content box's top, or (sideways) up from its
+ * bottom; the over side of the line is the right (the left when sideways).
+ */
+static void
+list_inline_decoration_vertical(
+	struct list_walk *walk,
+	const struct layout_decoration *decoration,
+	layout_unit top,
+	layout_unit line_edge,
+	const struct layout_line *line,
+	layout_unit block_height,
+	int sideways)
+{
+	struct layout_box placed;
+	layout_unit y0;
+	layout_unit y1;
+	layout_unit base;
+	layout_unit x0;
+	layout_unit side;
+
+	/* A hidden box paints nothing of its own. */
+	if (decoration->box->style.visibility == LIST_VISIBILITY_HIDDEN)
+		return;
+
+	/* The span along the line, without the margins, then the sides the line lacks. */
+	placed = *decoration->box;
+	if (sideways) {
+		y1 = top + block_height - line->left - decoration->x;
+		y0 = y1 - decoration->width;
+		if (decoration->has_left)
+			y1 -= placed.margin[CSS_BOTTOM];
+		if (decoration->has_right)
+			y0 += placed.margin[CSS_TOP];
+		if (!decoration->has_left) {
+			placed.border[CSS_BOTTOM] = 0;
+			placed.padding[CSS_BOTTOM] = 0;
+		}
+		if (!decoration->has_right) {
+			placed.border[CSS_TOP] = 0;
+			placed.padding[CSS_TOP] = 0;
+		}
+	} else {
+		y0 = top + line->left + decoration->x;
+		y1 = y0 + decoration->width;
+		if (decoration->has_left)
+			y0 += placed.margin[CSS_TOP];
+		if (decoration->has_right)
+			y1 -= placed.margin[CSS_BOTTOM];
+		if (!decoration->has_left) {
+			placed.border[CSS_TOP] = 0;
+			placed.padding[CSS_TOP] = 0;
+		}
+		if (!decoration->has_right) {
+			placed.border[CSS_BOTTOM] = 0;
+			placed.padding[CSS_BOTTOM] = 0;
+		}
+	}
+	if (y1 <= y0)
+		return;
+
+	/* The extent across the line: the content area around the baseline, the padding and the borders outside it. */
+	if (sideways) {
+		base = line_edge + line->baseline + decoration->shift;
+		x0 = base - decoration->ascent - placed.padding[CSS_LEFT] - placed.border[CSS_LEFT];
+	} else {
+		base = line_edge + line->height - line->baseline - decoration->shift;
+		x0 = base - decoration->descent - placed.padding[CSS_LEFT] - placed.border[CSS_LEFT];
+	}
+	side = y1 - y0 - placed.border[CSS_TOP] - placed.padding[CSS_TOP] - placed.padding[CSS_BOTTOM] - placed.border[CSS_BOTTOM];
+	placed.x = x0;
+	placed.y = y0;
+	placed.width = decoration->ascent + decoration->descent;
+	placed.height = side < 0 ? 0 : side;
+	placed.margin[CSS_LEFT] = 0;
+	placed.margin[CSS_RIGHT] = 0;
+	placed.margin[CSS_TOP] = 0;
+	placed.margin[CSS_BOTTOM] = 0;
 
 	/* The background color, the image over it, then the borders. */
 	if ((placed.style.background_color >> 24) != 0)
