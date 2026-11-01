@@ -1323,7 +1323,9 @@ computed_write(
 	/* Its box, for the used values. */
 	memset(&box, 0, sizeof(box));
 	found = 0;
-	if (window->host.node_box != NULL)
+	if ((computed_pseudo == CSS_PSEUDO_ELEMENT_BEFORE || computed_pseudo == CSS_PSEUDO_ELEMENT_AFTER) && window->host.pseudo_box != NULL)
+		found = window->host.pseudo_box(window->host.context, &element->node, computed_pseudo, &box);
+	else if (window->host.node_box != NULL)
 		found = window->host.node_box(window->host.context, &element->node, &box);
 
 	/* Serialize the ordinary resolved value before releasing its style copy. */
