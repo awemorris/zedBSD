@@ -33,7 +33,8 @@
 | P5 | q1853 `p5-ws334b` | [WS334](ws334/ws.md) p026: Windows 版のブラウザ、libmedia の Windows（p025・p023 は cleared） |
 | P6 | q1851 `p6-ws335b` | [WS335](ws335/ws.md) p007: 固定幅の整数と Montgomery の算術（p004 AES・p005 AES-GCM は cleared） |
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
-| Sonnet ×3 | q1855・q1856・q1857 | [WS334](ws334/ws.md) p024（HTTP の cache）・p027（UI の準備）・p030（OpenSSL の Windows）を並べて（2026-11-01 ユーザー） |
+| P7 | q1858 `p7-ws334g` | [WS334](ws334/ws.md) p027 の zedBSD の guest（QEMU）の確かめ |
+| Sonnet ×2 | q1855・q1857（q1856 p027 は返却） | [WS334](ws334/ws.md) p024（HTTP の cache）・p027（UI の準備）・p030（OpenSSL の Windows）を並べて（2026-11-01 ユーザー） |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
 - 起動しない pending: q1836（WS336 p009 ssh-auth）。q1837（WS334 p025）は P5 の q1843 へ、q1835（WS335 p004）は P6 の q1844 へ。
@@ -110,7 +111,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1858 · WS341 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1859 · WS341 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

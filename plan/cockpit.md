@@ -13,10 +13,10 @@
 | P4 | — | Bug の修正の担当 | 返却（21:28）。BUG-387 は fixed、CI の Pi 5 の image で graphical login の desktop まで起動（画面: build/review/q1850-pi5-ci-desk1.png） | 次の Bug の割当を待つ |
 | P5 | [WS334](ws334/ws.md) p026 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | libmedia の Windows（q1853）。p023（instance と API v4、cookie・Web Storage の永続）は cleared | p027（browser の UI の準備）へ |
 | P6 | [WS335](ws335/ws.md) p007 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | 固定幅の整数と Montgomery の算術（q1851）。p004 AES・p005 AES-GCM は cleared | p009 Ed25519・p010 P-256 へ |
-| P7 | — | VF2 の desktop の描画の速さ | 返却（21:35）。type 60・61 fps（10/22 は 41〜44）、output 43〜47（32〜41）、打鍵から表示 17 ms（30）、launch・drag・home・wiseview は 60 前後 | 未割当 |
+| P7 | [WS334](ws334/ws.md) p027 | Web ブラウザの Windows 版（UI の準備） | zedBSD の guest（QEMU）で browser の Vulkan と CPU の道、localStorage の永続を確かめる（q1858） | 結果で p027 の cleared を判定 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |
 
-- Sonnet ×3（WS334、2026-11-01 21:48〜）: p024 永続の HTTP の cache（q1855）、p027 browser の UI の準備（q1856）、p030 OpenSSL の Windows の build（q1857）。
+- Sonnet ×3（WS334、2026-11-01 21:48〜）: p024 永続の HTTP の cache（q1855）、p027 browser の UI の準備（q1856、22:07 返却、host・build PASS、guest は P7）、p030 OpenSSL の Windows の build（q1857）。
 
 ## WS ごとの進捗
 
