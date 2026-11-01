@@ -666,32 +666,11 @@
     }
     // The events the browser fires are trusted.  A browser error is the document's; a script error's script is not
     // known, so the document as it was loaded stands for it, at line 1 column 1 (the engine keeps no position for an Error).
-    var errorFilename = null;
     function fire(target, event) { return native.fire(target, event); }
     function fireError(e) {
-      var filename = errorFilename !== null ? errorFilename : browserErrors.has(e) || loadedURL === null ? docURL() : loadedURL;
+      var filename = browserErrors.has(e) || loadedURL === null ? docURL() : loadedURL;
       fire(navigation, new ErrorEvent('navigateerror', { error: e, message: errorMessage(e), filename: filename, lineno: 1, colno: 1 }));
     }
-
-    // A window that is retired aborts the navigations it had asked for or had under way (their promises reject).
-    var retired = false;
-    native.setDetachHook(function () {
-      var e = abortError(), pending = [];
-      retired = true;
-      if (ongoingEvent) {
-        // The window is removed by a script of the page around it: that script's document is where the error is from.
-        try { if (g.parent && g.parent !== g) errorFilename = String(g.parent.location.href); } catch (x) { errorFilename = null; }
-        try { abortOngoing(e); } catch (x) { /* the window is gone */ }
-        errorFilename = null;
-      }
-      if (upcomingTracker) pending.push(upcomingTracker);
-      upcomingTraverse.forEach(function (t) { pending.push(t); });
-      if (ongoingTracker) pending.push(ongoingTracker);
-      pending.forEach(function (t) { rejectFinished(t, e); });
-      upcomingTracker = null;
-      upcomingTraverse.clear();
-      ongoingTracker = null;
-    });
 
     // Aborts the navigate event under way (a new navigation, window.stop(), a canceled event).
     function abortOngoing(e) {
@@ -1018,7 +997,7 @@
       }
       if (!promises.length) promises.push(Promise.resolve());
       waitForAll(promises, function () {
-        if (controller.signal.aborted || !native.fullyActive()) return;
+        if (controller.signal.aborted) return;
         if (ongoingEvent === event) ongoingEvent = null;
         finish(event, true);
         fire(navigation, new Event('navigatesuccess'));
@@ -1145,7 +1124,7 @@
         return EventTarget.prototype.removeEventListener.apply(this, arguments);
       }
       entries() { return native.fullyActive() && !native.isOpaque() ? entries.map(nhe) : []; }
-      get currentEntry() { return (native.fullyActive() || retired) && !native.isOpaque() ? nhe(entries[current]) : null; }
+      get currentEntry() { return native.fullyActive() && !native.isOpaque() ? nhe(entries[current]) : null; }
       updateCurrentEntry(options) {
         var state;
         if (native.isOpaque()) throw domError('InvalidStateError', "Failed to execute 'updateCurrentEntry' on 'Navigation': The document has an opaque origin.");

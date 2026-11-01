@@ -1358,6 +1358,8 @@ Origin: 2026-10-27 ユーザーの指示。
 
 ### 引き継ぎ（2026-11-01 ラップアップ）
 
+- Q1 の判断（2026-11-01、ラップアップの時、main のエージェント）: 最新の code の commit 89a23c271（retire の時に未完の navigation を abort する hook と、retire 後の currentEntry）は dev189 で +3 −3 だった。後退 0 の方針に従い revert し、code を 449325eef（dev188、3,208 / 3,473、後退 0）と同じに戻した。revert の後の全件の測定は未実施（code が dev188 と同じなので数も同じ見込み）。再び試す時は 89a23c271 を当て直し、hook を「frame の element が document から外された retire」だけに限り、currentEntry の変更が navigation-history-entry/after-detach と両立する形にしてから、通った 3 件（traverseTo-detach-*）と後退した 3 件（after-detach・navigate-history-push-same-url-cross-document・transition-cross-document）を見ながら全件を測る。
+
 - 最後に全件を測った物: **dev188**（commit 449325eef）= 3,208 / 3,473（92.37%）、gap 265（harness 135 / static 105 / scripted 32 / crash 0）、後退 0。Acid2 100% / Acid3 100/100 exact（dev189 の source でも確認）、host build は warning 0。dev175 の 3,191 から続き 12 で +17 して dev188 に至った（iframe の内容の描画 +10、style の load・animation の event +2、custom elements +1、opaque origin の frame +4 ほか）。
 - **測定した最後の commit だが後退がある物**: 最新の commit（このラップアップの直前。SHA は返答）は dev189 = 3,208 / 3,473、**後退 3**（修正 +3 と相殺で total は dev188 と同じ）。
   - 修正 3: navigation-methods/return-value/traverseTo-detach-cross-document-before-navigate-event、同 traverseTo-detach-same-document-before-navigate-event、navigation-methods/traverseTo-detach-between-navigate-and-navigatesuccess。

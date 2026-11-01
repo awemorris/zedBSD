@@ -339,16 +339,6 @@ bind_window_detach(
 	window->realm->rejections.count = 0;
 	bind_environment_disconnect(window);
 
-	/* The prelude settles what its navigations had pending (their promises reject with an abort). */
-	if (window->detach_hook != NULL) {
-		vm_value returned;
-		int status;
-
-		status = vm_call(window->realm, vm_value_cell(window->detach_hook), VM_VALUE_UNDEFINED, NULL, 0, &returned);
-		if (status == VM_THROWN)
-			window->realm->exception = VM_VALUE_UNDEFINED;
-	}
-
 	/* Succeeded: saved Window/Document/function references retain quiet state. */
 	return;
 }
@@ -2250,8 +2240,6 @@ window_trace(
 		vm_heap_mark(heap, window->animation_hook);
 	if (window->window_wrapper != NULL)
 		vm_heap_mark(heap, window->window_wrapper);
-	if (window->detach_hook != NULL)
-		vm_heap_mark(heap, window->detach_hook);
 	if (window->frame_proxy_maker != NULL)
 		vm_heap_mark(heap, window->frame_proxy_maker);
 	if (window->listeners != NULL)
