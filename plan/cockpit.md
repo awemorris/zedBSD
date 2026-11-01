@@ -18,6 +18,8 @@
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
+- Sonnet ×3（WS335、2026-11-02 00:24〜）: p009 Ed25519（q1876）、p016 DER と PEM（q1877）、p025 TLS の定数と読み書き（q1878）。
+
 ## WS ごとの進捗
 
 （2026-11-01 10:29 クリア。これより後の進捗をここに書く。各 WS の状態は [master.md](master.md) と各 ws.md）
