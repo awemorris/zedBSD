@@ -437,3 +437,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-397](bugs/BUG-397.md) | Windows 版ブラウザ: Google の頁の「サイト」の link を click すると app が固まって応答しなくなる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
 | [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザ: Google の app の一覧の button（右上の四角の並び）を押しても一覧が正しく出ない | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P7） |
 | [BUG-399](bugs/BUG-399.md) | Windows 版ブラウザ: Google の検索の入力欄を click すると、入力できる範囲が右へ窓の幅いっぱいに伸びる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
+| [BUG-400](bugs/BUG-400.md) | storage-test の Max-Age の cookie が期限の前に送られない事がある（時々 FAIL） | open（2026-11-02 06:58 Q1 が起票、P5） |
