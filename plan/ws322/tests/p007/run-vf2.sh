@@ -9,9 +9,9 @@
 #       240 frames against the reference, then the whole stream
 #   F2  two sessions at once: 120 frames of the 1080p30 and 1080p60 streams by two vkvideo-probes
 #   F3  a picture completion gone unseen ("lose 1") while two sessions decode 180 and 240 frames: the core recovered, both go on
-#   F4  the vendor's task buffer ("task 1000"), whose stall is a real timeout, then shares of 1250, 1500 and 1750 and
-#       the vendor's size at a 16 MiB alignment, each on the whole 1080p30 stream: the recoveries each took
-#   F6  a session killed while it decodes, then another session
+#   F4  the vendor's task buffer ("task 1000"), whose stall is a real timeout, then shares of 1050 to 1250 thousandths
+#       of it, each on the whole 1080p30 stream: the recoveries each took (the driver's own share is 1500)
+#   F6  a session killed (SIGKILL) while it decodes 1080p60 and 2160p30, then another session
 #   V   media-probe --video-hash on the 1080p30 MP4; Video Player on the 1080p30 and 1080p60 MP4s in a compositor of
 #       its own for 16 s (FRAMES, top, the 1080p60 screen's PNG)
 #   J   vkvideo-probe --expect on each JVT stream of JVT (make-jvt.sh)
@@ -135,8 +135,8 @@ line F3-a $ea $H/o-F3a.txt
 line F3-b $eb $H/o-F3b.txt
 T F3; seen F3 10
 probe F3-after --frames=60 --expect=$H/c7/h264-1080p30.sha256 $H/c7/h264-1080p30.h264
-for share in "1000" "1250" "1500" "1750" "1000 16384"; do
-	tag=F4-$(echo $share | tr ' ' '-')
+for share in 1000 1050 1100 1150 1200 1250; do
+	tag=F4-$share
 	mark
 	W "task $share"
 	timeout 900 $P --time --no-hash $H/c7/h264-1080p30.h264 > $H/o-$tag.txt 2>&1
@@ -146,7 +146,7 @@ done
 W "task 0"
 probe F4-after --frames=60 --expect=$H/c7/h264-1080p30.sha256 $H/c7/h264-1080p30.h264
 mark
-timeout 900 $P --no-hash $H/c7/h264-1080p60.h264 > $H/o-F6.txt 2>&1 &
+$P --no-hash $H/c7/h264-1080p60.h264 > $H/o-F6.txt 2>&1 &
 pa=$!
 sleep 4
 kill -9 $pa
@@ -154,6 +154,15 @@ wait $pa
 echo "F6 killed exit=$? $(grep -c . $H/o-F6.txt) lines"
 sleep 2
 T F6; seen F6
+mark
+$P --no-hash $H/c7/h264-2160p30.h264 > $H/o-F6b.txt 2>&1 &
+pa=$!
+sleep 3
+kill -9 $pa
+wait $pa
+echo "F6b killed exit=$? $(grep -c . $H/o-F6b.txt) lines"
+sleep 2
+T F6b; seen F6b
 probe F6-after --expect=$H/c4/pb-main-352.sha256 $H/c4/pb-main-352.h264
 for clip in c4/h264-1080p30; do
 	n=$(basename $clip)
@@ -209,7 +218,7 @@ printf '%s\n' "$VF2_PASSWORD" | BT=5400 b "sudo -S sh $H/check.sh" > "$out/board
 sed 's/^\[sudo\][^:]*: //' "$out/board.txt" | tee -a "$summary"
 bcp "$VF2_HOST:$H/h264-1080p30.hash" "$VF2_HOST:$H/v-h264-1080p60.png" \
 	"$VF2_HOST:$H/p-h264-1080p30.log" "$VF2_HOST:$H/p-h264-1080p60.log" "$VF2_HOST:$H/dmesg-end.txt" "$out/" > /dev/null 2>&1
-for f in o-S1-1080p30 o-S1-1080p60 o-S1-2160p30 o-F1-reset o-F1-reset-all o-F3a o-F3b o-F4-1000 o-F4-1250 o-F4-1500 o-F4-1750 o-F5; do bcp "$VF2_HOST:$H/$f.txt" "$out/" > /dev/null 2>&1; done
+for f in o-S1-1080p30 o-S1-1080p60 o-S1-2160p30 o-F1-reset o-F1-reset-all o-F3a o-F3b o-F4-1000 o-F4-1050 o-F4-1100 o-F4-1150 o-F4-1200 o-F4-1250 o-F5; do bcp "$VF2_HOST:$H/$f.txt" "$out/" > /dev/null 2>&1; done
 compare() {
 	/usr/bin/python3 -I - "$1" "$2" <<'PY'
 import sys
@@ -232,7 +241,7 @@ PY
 }
 say "V-h264-1080p30 hashes $(compare "$out/h264-1080p30.hash" "$c4/h264-1080p30.ref")"
 [ -f "$out/v-h264-1080p60.png" ] && say "VP png $(cksum < "$out/v-h264-1080p60.png")"
-say "J $(grep -c '^J .* exit=0 ' "$out/board.txt") of $(grep -c '^J ' "$out/board.txt") streams match every frame"
+say "J $(grep -c '^J .* exit=0 ' "$out/board.txt") of $(grep -c '^J .* exit=' "$out/board.txt") streams match every frame"
 
 # 3. The board as it was: the files removed, its own kernel back, checked by cksum.
 bsudo "rm -rf $H; sync"

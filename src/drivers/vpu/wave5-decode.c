@@ -253,14 +253,15 @@
 #define DISPLAY_CLEAR		0x011cU
 
 /*
- * The task buffer is made twice the size the vendor's driver gives it
- * (two VLC buffers and a parameter buffer per queued command): with that
- * size the Wave511's firmware stopped answering a picture command once
- * about 2 MB of a 1080p stream had been decoded, whatever the ring's size
- * (as seen on the VisionFive 2), and with twice it every
- * stream ran to its end.
+ * The task buffer is made one and a half times the size the vendor's
+ * driver gives it (two VLC buffers and a parameter buffer per queued
+ * command), in thousandths.  With the vendor's size the Wave511's
+ * firmware stopped answering a picture command once about 2 MB of a 1080p
+ * stream had been decoded, whatever the ring's size and the buffer's
+ * alignment; with a quarter more every stream ran to its end (as seen on
+ * the VisionFive 2), and half more leaves a margin.
  */
-#define TASK_FACTOR		2U
+#define TASK_PERMILLE		1500U
 
 /* How many times a destruction the firmware is not ready for is retried. */
 #define DESTROY_TRIES		10U
@@ -1200,11 +1201,9 @@ take_compressed(
 
 	mutex_unlock(&stream->core->command_lock);
 	task = stream->vlc_size * 2U + stream->parameter_size * QUEUE_DEPTH;
-	if (share == 0) {
-		task *= TASK_FACTOR;
-	} else {
-		task = (uint32_t)((uint64_t)task * share / 1000U);
-	}
+	if (share == 0)
+		share = TASK_PERMILLE;
+	task = (uint32_t)((uint64_t)task * share / 1000U);
 
 	/* Takes the task buffer the firmware works through the queued commands in. */
 	error = drv_wave5_core_take_aligned(stream->core, task, alignment, &stream->task);
