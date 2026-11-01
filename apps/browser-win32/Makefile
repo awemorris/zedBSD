@@ -114,13 +114,11 @@ BROWSER_WIN32_LAYER_SOURCES := \
 
 BROWSER_WIN32_LAYER_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_WIN32_LAYER_SOURCES))
 
-# libbrowser without the network and the storage (they come with their Windows layers later): the
-# zedBSD build's list less its POSIX operating-system layer, which the Windows layer above replaces.
+# libbrowser without the cookies and the storage (they come with the instance later): the zedBSD
+# build's list less its POSIX operating-system layer, which the Windows layer above replaces.
 include userland/desktop/libbrowser/sources.mk
 LIBBROWSER_CORE_EXCLUDED := $(LIBBROWSER_OS_SOURCES) \
-	$(LIBBROWSER_DIR)/net/loader.c \
-	$(LIBBROWSER_DIR)/net/http.c \
-	$(LIBBROWSER_DIR)/net/tls.c \
+	$(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/net/cookie.c \
 	$(LIBBROWSER_DIR)/page/storage.c
 LIBBROWSER_CORE_SOURCES := $(filter-out $(LIBBROWSER_CORE_EXCLUDED),$(LIBBROWSER_SOURCES))

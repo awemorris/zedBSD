@@ -15,13 +15,13 @@
  *
  * The threads, each loader's own:
  *
- *   browser-net       one: polls the connections, the resolver's pipe, a
- *                     control pipe the caller wakes it through, and the
- *                     descriptors watched for the caller (a media engine's
- *                     wake, read empty when it rings); runs every request's
- *                     states, the pool and the cache, and the time outs.
- *   browser-resolve   one: getaddrinfo, which blocks; the answer comes back
- *                     through its pipe.
+ *   browser-net       one: waits on the connections, the resolver's
+ *                     waker and a control waker the caller rings (as does
+ *                     net_loader_ring, from any thread, for a media
+ *                     engine's news); runs every request's states, the
+ *                     pool and the cache, and the time outs.
+ *   browser-resolve   one: the system's resolver, which blocks; the answer
+ *                     comes back through its waker.
  *
  * A request's states: its host's addresses looked up on the resolver's
  * thread, a non-blocking connect
@@ -56,29 +56,16 @@
  */
 
 #include "net/net.h"
+#include "base/os-net.h"
+#include "base/os-system.h"
+#include "base/os-time.h"
 
 #include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <time.h>
-#include <unistd.h>
-
-#if defined(__FreeBSD__)
-#include <pthread_np.h>
-#endif
-
-/* Whether the system keeps a thread's name (pthread_setname_np). */
-#if defined(__linux__) || defined(__FreeBSD__)
-#define LOADER_THREAD_NAMES	1
-#else
-#define LOADER_THREAD_NAMES	0
-#endif
 
 /* How long a request may make no progress, in milliseconds. */
 #define LOADER_TIMEOUT		30000U
@@ -103,9 +90,6 @@
 
 /* The longest place (scheme://host:port) a connection is kept for. */
 #define LOADER_KEY_MAX		320U
-
-/* The most descriptors watched for the caller at a time. */
-#define LOADER_WATCH_MAX	64U
 
 /* How long the network thread waits at most when it could not poll every connection, in milliseconds. */
 #define LOADER_CUT_WAIT		10
@@ -136,7 +120,7 @@ struct loader_job {
 	uint64_t number;
 	char host[256];
 	char port[16];
-	struct addrinfo *addresses;
+	struct wb_os_addresses *addresses;
 	int status;
 };
 
@@ -147,7 +131,7 @@ struct loader_job {
 struct loader_connection {
 	struct loader_connection *next;
 	char key[LOADER_KEY_MAX];
-	int descriptor;
+	wb_os_socket socket;
 	struct net_tls *tls;
 	uint64_t idle_since;
 };
@@ -171,7 +155,8 @@ struct loader_entry {
 
 /*
  * One request: its number, the URL it asks for now (after the redirects so
- * far), its state and connection (the addresses left to try, the socket,
+ * far), its state and connection (the addresses and the index of the one
+ * tried now, the socket,
  * TLS, and what the socket must become ready for; the place it goes to,
  * whether the connection came from the pool and whether a kept connection
  * was replaced already), the request's text and how much of it went, the
@@ -202,11 +187,12 @@ struct net_request {
 	int dropped;
 	struct net_url url;
 	int redirects;
-	struct addrinfo *addresses;
-	struct addrinfo *address;
-	int descriptor;
+	struct wb_os_addresses *addresses;
+	size_t address_index;
+	size_t address_count;
+	wb_os_socket socket;
 	struct net_tls *tls;
-	short wants;
+	unsigned wants;
 	char key[LOADER_KEY_MAX];
 	int reused;
 	int retried;
@@ -237,24 +223,22 @@ struct net_request {
  * that ended since it last handed them over (ended to ended_last, in the
  * order they ended), the pool of idle connections, the memory cache (most
  * recently used first) with the bytes of its bodies, the next request's
- * number, the descriptors of its poll (fds, room for fds_capacity; the
- * watched descriptors from watch_first on), and whether a watched
- * descriptor rang since the caller was last told (rang).
+ * number, the items of its wait (items, room for items_capacity), and
+ * whether net_loader_ring rang since the caller was last told (rang).
  *
  * The resolver's thread has its queue of jobs, its list of answers and
  * resolver_stopping under resolver_lock (resolver_wake tells it a job is
- * there), and writes a byte to its pipe for each answer.
+ * there), and rings the answers waker for each answer.
  *
  * Under lock, the caller's thread and the network thread meet: the
  * requests started and not yet taken by the network thread (incoming),
  * whether a cancel was asked of a running request (cancel_asked), the
  * requests ended and not yet taken by the caller (completed), whether the
- * caller was told of news it has not taken (notified), the descriptors
- * watched for the caller, the generation of that set and the one the
- * network thread polls now, and whether the network thread is to stop.
- * changed is signalled when notified becomes set and when the polled
- * generation moves.  A byte in the control pipe wakes the network thread
- * from its poll.
+ * caller was told of news it has not taken (notified), whether
+ * net_loader_ring was called since the network thread last looked (rung),
+ * and whether the network thread is to stop.  changed is signalled when
+ * notified becomes set.  Ringing the control waker wakes the network
+ * thread from its wait.
  *
  * The caller's own: its notify function and context (set when the loader
  * is made), and how many requests it started that have neither ended to it
@@ -268,9 +252,8 @@ struct net_loader {
 	struct loader_entry *cache;
 	size_t cache_bytes;
 	uint64_t next_number;
-	struct pollfd *fds;
-	size_t fds_capacity;
-	size_t watch_first;
+	struct wb_os_poll_item *items;
+	size_t items_capacity;
 	int rang;
 	pthread_t resolver;
 	int resolver_started;
@@ -279,8 +262,7 @@ struct net_loader {
 	struct loader_job *jobs;
 	struct loader_job *answers;
 	int resolver_stopping;
-	int pipe_read;
-	int pipe_write;
+	struct wb_os_waker *answers_waker;
 	pthread_t thread;
 	int thread_started;
 	pthread_mutex_t lock;
@@ -291,13 +273,9 @@ struct net_loader {
 	struct net_request *completed_last;
 	int cancel_asked;
 	int notified;
-	int watches[LOADER_WATCH_MAX];
-	size_t watch_count;
-	uint64_t watch_generation;
-	uint64_t polled_generation;
+	int rung;
 	int stopping;
-	int control_read;
-	int control_write;
+	struct wb_os_waker *control;
 	net_loader_notify notify;
 	void *notify_context;
 	size_t pending;
@@ -316,7 +294,6 @@ static void loader_tick(struct net_loader *loader);
 static void loader_publish(struct net_loader *loader);
 static size_t loader_gather(struct net_loader *loader, int *timeout);
 static int loader_timeout(const struct net_loader *loader);
-static void loader_drain(int descriptor);
 static int loader_begin(struct net_request *request);
 static void loader_answers(struct net_loader *loader);
 static void loader_step(struct net_request *request);
@@ -334,6 +311,7 @@ static void loader_free(struct net_request *request);
 static int loader_prepare(struct net_request *request);
 static int loader_retry(struct net_request *request);
 static int loader_active(const struct net_loader *loader, const char *key);
+static size_t loader_connections(const struct net_loader *loader, const struct net_request *except);
 static void loader_release_place(struct net_loader *loader, const char *key);
 static void loader_keep(struct net_request *request);
 static void loader_expire_idle(struct net_loader *loader, uint64_t now);
@@ -356,63 +334,44 @@ net_loader_create(
 	struct net_loader **loader)
 {
 	struct net_loader *made;
-	pthread_condattr_t attributes;
-	int descriptors[2];
 	int status;
 
-	/* The loader, with no pipe yet. */
+	/* The loader, with no waker yet. */
 	*loader = NULL;
 	made = calloc(1, sizeof(*made));
 	if (made == NULL)
 		return ENOMEM;
 	made->next_number = 1;
-	made->pipe_read = -1;
-	made->pipe_write = -1;
-	made->control_read = -1;
-	made->control_write = -1;
 	made->notify = notify;
 	made->notify_context = context;
 
-	/* Its locks and conditions; the caller's waits run on the monotonic clock. */
+	/* Its locks and conditions (the caller's timed waits measure the time on the monotonic clock themselves). */
 	pthread_mutex_init(&made->resolver_lock, NULL);
 	pthread_cond_init(&made->resolver_wake, NULL);
 	pthread_mutex_init(&made->lock, NULL);
-	pthread_condattr_init(&attributes);
-	(void)pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC);
-	pthread_cond_init(&made->changed, &attributes);
-	pthread_condattr_destroy(&attributes);
+	pthread_cond_init(&made->changed, NULL);
 
-	/* The descriptors of the network thread's poll, with room for some connections. */
-	made->fds_capacity = 2U + LOADER_WATCH_MAX + LOADER_PER_HOST * 4U;
-	made->fds = calloc(made->fds_capacity, sizeof(*made->fds));
-	if (made->fds == NULL) {
+	/* The items of the network thread's wait, with room for some connections. */
+	made->items_capacity = 2U + LOADER_PER_HOST * 4U;
+	made->items = calloc(made->items_capacity, sizeof(*made->items));
+	if (made->items == NULL) {
 		loader_release(made);
 		return ENOMEM;
 	}
 
-	/* The pipe the resolver's answers are signalled through; neither end blocks. */
-	status = pipe2(descriptors, O_CLOEXEC | O_NONBLOCK);
+	/* The waker the resolver's answers are signalled through. */
+	status = wb_os_waker_open(&made->answers_waker);
 	if (status != 0) {
-		status = errno;
 		loader_release(made);
 		return status;
 	}
 
-	/* Its two ends. */
-	made->pipe_read = descriptors[0];
-	made->pipe_write = descriptors[1];
-
-	/* The control pipe that wakes the network thread; neither end blocks. */
-	status = pipe2(descriptors, O_CLOEXEC | O_NONBLOCK);
+	/* The control waker that wakes the network thread. */
+	status = wb_os_waker_open(&made->control);
 	if (status != 0) {
-		status = errno;
 		loader_release(made);
 		return status;
 	}
-
-	/* Its two ends. */
-	made->control_read = descriptors[0];
-	made->control_write = descriptors[1];
 
 	/* The resolver's thread. */
 	status = pthread_create(&made->resolver, NULL, loader_resolver, made);
@@ -508,7 +467,7 @@ net_loader_send(
 	if (made == NULL)
 		return ENOMEM;
 	made->loader = loader;
-	made->descriptor = -1;
+	made->socket = WB_OS_SOCKET_NONE;
 	made->kind = kind;
 	made->done = done;
 	made->context = context;
@@ -655,31 +614,40 @@ net_loader_wait(
 	int timeout)
 {
 	struct timespec deadline;
-	int status;
+	uint64_t end;
+	uint64_t now;
+	uint64_t left;
 
-	/* The deadline on the monotonic clock. */
-	clock_gettime(CLOCK_MONOTONIC, &deadline);
-	if (timeout > 0) {
-		deadline.tv_sec += timeout / 1000;
-		deadline.tv_nsec += (long)(timeout % 1000) * 1000000L;
-	}
+	/* The end of the wait on the monotonic clock. */
+	end = 0;
+	if (timeout > 0)
+		end = wb_os_monotonic_ns() + (uint64_t)timeout * 1000000U;
 
-	/* A carry of the nanoseconds into the seconds. */
-	if (deadline.tv_nsec >= 1000000000L) {
-		deadline.tv_sec++;
-		deadline.tv_nsec -= 1000000000L;
-	}
-
-	/* Until the network thread tells of news, or the deadline passes. */
+	/* Until the network thread tells of news, or the time is up. */
 	pthread_mutex_lock(&loader->lock);
 
 	/* Each wake of the condition, until there is news or the time is up. */
-	status = 0;
-	while (!loader->notified && status != ETIMEDOUT) {
-		if (timeout < 0)
+	while (!loader->notified) {
+		if (timeout < 0) {
 			pthread_cond_wait(&loader->changed, &loader->lock);
-		else
-			status = pthread_cond_timedwait(&loader->changed, &loader->lock, &deadline);
+			continue;
+		}
+
+		/* The time left, measured again on the monotonic clock after each wake. */
+		now = wb_os_monotonic_ns();
+		if (timeout == 0 || now >= end)
+			break;
+		left = end - now;
+
+		/* The condition's deadline: the wall clock now and the time left (a move of the wall clock is caught by measuring again). */
+		(void)timespec_get(&deadline, TIME_UTC);
+		deadline.tv_sec += (time_t)(left / 1000000000U);
+		deadline.tv_nsec += (long)(left % 1000000000U);
+		if (deadline.tv_nsec >= 1000000000L) {
+			deadline.tv_sec++;
+			deadline.tv_nsec -= 1000000000L;
+		}
+		(void)pthread_cond_timedwait(&loader->changed, &loader->lock, &deadline);
 	}
 
 	pthread_mutex_unlock(&loader->lock);
@@ -728,88 +696,24 @@ net_loader_dispatch(
 }
 
 /*
- * Watches a descriptor for the caller: when it becomes readable, the
- * network thread reads it empty and tells the caller as it tells of an
- * ended request.  Returns 0, or ENOSPC when LOADER_WATCH_MAX are watched.
- */
-int
-net_loader_watch(
-	struct net_loader *loader,
-	int descriptor)
-{
-	int full;
-
-	/* The descriptor joins the set, which the next poll uses. */
-	full = 0;
-	pthread_mutex_lock(&loader->lock);
-
-	/* A full set takes no more; the generation moves with each change. */
-	if (loader->watch_count == LOADER_WATCH_MAX) {
-		full = 1;
-	} else {
-		loader->watches[loader->watch_count] = descriptor;
-		loader->watch_count++;
-		loader->watch_generation++;
-	}
-
-	pthread_mutex_unlock(&loader->lock);
-
-	/* No room. */
-	if (full)
-		return ENOSPC;
-
-	/* Succeeded: the network thread wakes to poll it. */
-	loader_poke(loader);
-	return 0;
-}
-
-/*
- * Stops watching a descriptor, and waits until the network thread no
- * longer polls or reads it: the caller may close it then.
+ * Tells the caller of news of its own (a media engine's state changed or
+ * a picture came): the network thread wakes and tells the caller as it
+ * tells of an ended request (notify, or a wake of net_loader_wait).  Any
+ * thread may call it; it takes only the loader's lock.
  */
 void
-net_loader_unwatch(
-	struct net_loader *loader,
-	int descriptor)
+net_loader_ring(
+	struct net_loader *loader)
 {
-	uint64_t generation;
-	size_t index;
-	int found;
-
-	/* The descriptor leaves the set (the last one takes its place). */
-	found = 0;
-	generation = 0;
+	/* The mark the network thread takes at its next round. */
 	pthread_mutex_lock(&loader->lock);
 
-	/* The descriptor's entry, when it is watched. */
-	for (index = 0; index < loader->watch_count; index++) {
-		if (loader->watches[index] != descriptor)
-			continue;
-		loader->watch_count--;
-		loader->watches[index] = loader->watches[loader->watch_count];
-		loader->watch_generation++;
-		generation = loader->watch_generation;
-		found = 1;
-		break;
-	}
+	loader->rung = 1;
 
 	pthread_mutex_unlock(&loader->lock);
 
-	/* One not watched needs no wait. */
-	if (!found)
-		return;
-
-	/* The network thread wakes and polls the new set. */
+	/* The network thread wakes to take it. */
 	loader_poke(loader);
-
-	/* Until its poll no longer has the descriptor. */
-	pthread_mutex_lock(&loader->lock);
-
-	/* Each wake of the condition, until the generation polled is the new set's. */
-	while (loader->polled_generation < generation)
-		pthread_cond_wait(&loader->changed, &loader->lock);
-
-	pthread_mutex_unlock(&loader->lock);
 }
 
 /*
@@ -838,24 +742,17 @@ net_loader_takes(
 static uint64_t
 loader_clock(void)
 {
-	struct timespec now;
-	uint64_t milliseconds;
-
 	/* The monotonic clock. */
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	milliseconds = (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
-	return milliseconds;
+	return wb_os_monotonic_ns() / 1000000U;
 }
 
-/* The resolver's thread: each job's lookup, answered through the list and the pipe, until the loader stops. */
+/* The resolver's thread: each job's lookup, answered through the list and the waker, until the loader stops. */
 static void *
 loader_resolver(
 	void *argument)
 {
 	struct net_loader *loader;
 	struct loader_job *job;
-	struct addrinfo hints;
-	unsigned char signal;
 
 	/* The thread's name. */
 	loader = argument;
@@ -880,13 +777,10 @@ loader_resolver(
 			break;
 
 		/* The lookup, which may take long. */
-		memset(&hints, 0, sizeof(hints));
-		hints.ai_family = AF_UNSPEC;
-		hints.ai_socktype = SOCK_STREAM;
 		job->addresses = NULL;
-		job->status = getaddrinfo(job->host, job->port, &hints, &job->addresses);
+		job->status = wb_os_resolve(job->host, job->port, &job->addresses);
 
-		/* The answer, then a byte through the pipe to wake the network thread. */
+		/* The answer, then the waker rung to wake the network thread. */
 		pthread_mutex_lock(&loader->resolver_lock);
 
 		job->next = loader->answers;
@@ -894,9 +788,8 @@ loader_resolver(
 
 		pthread_mutex_unlock(&loader->resolver_lock);
 
-		/* The byte. */
-		signal = 1;
-		(void)write(loader->pipe_write, &signal, 1);
+		/* The ring. */
+		wb_os_waker_ring(loader->answers_waker);
 	}
 
 	/* The loader stopped. */
@@ -909,31 +802,22 @@ loader_name_thread(
 	const char *name)
 {
 	/* The name, or nothing on a system without names. */
-#if LOADER_THREAD_NAMES
-	(void)pthread_setname_np(pthread_self(), name);
-#else
-	(void)name;
-#endif
+	wb_os_thread_name(name);
 }
 
-/* Wakes the network thread from its poll (a full control pipe is readable already). */
+/* Wakes the network thread from its wait (a ring before the last is drained adds nothing). */
 static void
 loader_poke(
 	struct net_loader *loader)
 {
-	unsigned char byte;
-	ssize_t wrote;
-
-	/* One byte. */
-	byte = 1;
-	wrote = write(loader->control_write, &byte, 1U);
-	(void)wrote;
+	/* The control waker. */
+	wb_os_waker_ring(loader->control);
 }
 
 /*
  * Stops the loader's threads (those that started) and frees everything it
  * holds: the requests in every list, the jobs and answers, the idle
- * connections, the cache, the pipes and the loader.
+ * connections, the cache, the wakers and the loader.
  */
 static void
 loader_release(
@@ -949,7 +833,7 @@ loader_release(
 
 	pthread_mutex_unlock(&loader->lock);
 
-	/* Woken from its poll, then waited for. */
+	/* Woken from its wait, then waited for. */
 	if (loader->thread_started) {
 		loader_poke(loader);
 		pthread_join(loader->thread, NULL);
@@ -990,8 +874,7 @@ loader_release(
 	while (loader->answers != NULL) {
 		job = loader->answers;
 		loader->answers = job->next;
-		if (job->addresses != NULL)
-			freeaddrinfo(job->addresses);
+		wb_os_addresses_free(job->addresses);
 		free(job);
 	}
 
@@ -1002,22 +885,16 @@ loader_release(
 	while (loader->cache != NULL)
 		loader_cache_free(loader, loader->cache);
 
-	/* The pipes that were made. */
-	if (loader->pipe_read >= 0)
-		close(loader->pipe_read);
-	if (loader->pipe_write >= 0)
-		close(loader->pipe_write);
-	if (loader->control_read >= 0)
-		close(loader->control_read);
-	if (loader->control_write >= 0)
-		close(loader->control_write);
+	/* The wakers that were made. */
+	wb_os_waker_close(loader->answers_waker);
+	wb_os_waker_close(loader->control);
 
-	/* The locks, the poll's descriptors, then the loader. */
+	/* The locks, the wait's items, then the loader. */
 	pthread_mutex_destroy(&loader->resolver_lock);
 	pthread_cond_destroy(&loader->resolver_wake);
 	pthread_mutex_destroy(&loader->lock);
 	pthread_cond_destroy(&loader->changed);
-	free(loader->fds);
+	free(loader->items);
 	free(loader);
 }
 
@@ -1039,8 +916,7 @@ loader_free_queue(
 /*
  * The network thread: rounds of what became ready, what the caller asked,
  * the cache's answers and the time outs, the ended requests handed over,
- * and a poll of the pipes, the connections and the watched descriptors,
- * until the loader stops.
+ * and a wait on the wakers and the connections, until the loader stops.
  */
 static void *
 loader_run(
@@ -1048,18 +924,19 @@ loader_run(
 {
 	struct net_loader *loader;
 	size_t count;
+	size_t ready;
 	int timeout;
-	int ready;
+	int status;
 	int stop;
 
-	/* The thread's name, and nothing polled yet. */
+	/* The thread's name, and nothing waited on yet. */
 	loader = argument;
 	loader_name_thread("browser-net");
 	count = 0;
 
 	/* Each round, until the loader stops. */
 	for (;;) {
-		/* What the last poll found ready: the resolver's answers, the connections, the watched descriptors. */
+		/* What the last wait found ready: the resolver's answers, the connections. */
 		loader_ready(loader, count);
 
 		/* What the caller asked meanwhile: new requests, cancels, or the end. */
@@ -1075,8 +952,8 @@ loader_run(
 
 		/* The wait for the next thing to happen. */
 		count = loader_gather(loader, &timeout);
-		ready = poll(loader->fds, (nfds_t)count, timeout);
-		if (ready < 0)
+		status = wb_os_poll(loader->items, count, timeout, &ready);
+		if (status != 0)
 			count = 0;
 	}
 
@@ -1086,10 +963,9 @@ loader_run(
 }
 
 /*
- * Takes what the last poll found ready (the first count descriptors of
- * fds): the control pipe emptied, the resolver's answers, the next steps
- * of each ready connection, and each watched descriptor that rang read
- * empty (the caller is told).
+ * Takes what the last wait found ready (the first count items): the
+ * control waker drained, the resolver's answers, and the next steps of
+ * each ready connection.
  */
 static void
 loader_ready(
@@ -1099,32 +975,24 @@ loader_ready(
 	struct net_request *request;
 	size_t index;
 
-	/* The control pipe's bytes; what the caller asked is read under the lock. */
-	loader_drain(loader->control_read);
+	/* The control waker's bytes; what the caller asked is read under the lock. */
+	wb_os_waker_drain(loader->control);
 
 	/* The resolver's answers. */
 	loader_answers(loader);
 
 	/* Each ready connection takes its next steps. */
-	for (index = 2U; index < count && index < loader->watch_first; index++) {
-		if (loader->fds[index].revents == 0)
+	for (index = 2U; index < count; index++) {
+		if (loader->items[index].found == 0)
 			continue;
 
 		/* The request whose connection it is. */
 		for (request = loader->requests; request != NULL; request = request->next) {
-			if (request->cancelled || request->descriptor != loader->fds[index].fd)
+			if (request->cancelled || request->socket != loader->items[index].socket)
 				continue;
 			loader_step(request);
 			break;
 		}
-	}
-
-	/* Each watched descriptor that rang is read empty, and the caller hears of it. */
-	for (index = loader->watch_first; index < count; index++) {
-		if (loader->fds[index].revents == 0)
-			continue;
-		loader_drain(loader->fds[index].fd);
-		loader->rang = 1;
 	}
 }
 
@@ -1162,6 +1030,12 @@ loader_intake(
 
 		/* Marks the asks as seen. */
 		loader->cancel_asked = 0;
+	}
+
+	/* Whether net_loader_ring rang: the caller is told at this round. */
+	if (loader->rung) {
+		loader->rang = 1;
+		loader->rung = 0;
 	}
 
 	/* Whether the caller ends the loader. */
@@ -1240,7 +1114,7 @@ loader_tick(
 
 /*
  * Hands the requests that ended (in the order they ended) to the caller,
- * and tells the caller of them or of a watched descriptor that rang: its
+ * and tells the caller of them or of a ring of net_loader_ring: its
  * notify is called once until it runs net_loader_dispatch, and a caller
  * waiting in net_loader_wait wakes.
  */
@@ -1289,11 +1163,9 @@ loader_publish(
 }
 
 /*
- * Lists the descriptors of the next poll in fds: the control pipe, the
- * resolver's pipe, each connection for what it waits for, then the
- * watched descriptors (from watch_first on); the set of watched
- * descriptors polled is marked as the caller's latest.  *timeout is how
- * long the poll may wait.  Returns how many descriptors were listed.
+ * Lists the items of the next wait: the control waker, the resolver's
+ * waker, then each connection for what it waits for.  *timeout is how long
+ * the wait may last.  Returns how many items were listed.
  */
 static size_t
 loader_gather(
@@ -1301,71 +1173,52 @@ loader_gather(
 	int *timeout)
 {
 	struct net_request *request;
-	struct pollfd *grown;
+	struct wb_os_poll_item *grown;
 	size_t needed;
 	size_t count;
-	size_t index;
 	int cut;
 
-	/* Room for the two pipes, every request's connection and every watched descriptor. */
-	needed = 2U + LOADER_WATCH_MAX;
+	/* Room for the two wakers and every request's connection, within the most one wait takes. */
+	needed = 2U;
 	for (request = loader->requests; request != NULL; request = request->next)
 		needed++;
+	if (needed > WB_OS_POLL_MAX)
+		needed = WB_OS_POLL_MAX;
 
-	/* More room when there is not enough (without memory, the connections left out are polled soon after). */
-	if (needed > loader->fds_capacity) {
-		grown = realloc(loader->fds, needed * sizeof(*grown));
+	/* More room when there is not enough (without memory, the connections left out are waited on soon after). */
+	if (needed > loader->items_capacity) {
+		grown = realloc(loader->items, needed * sizeof(*grown));
 		if (grown != NULL) {
-			loader->fds = grown;
-			loader->fds_capacity = needed;
+			loader->items = grown;
+			loader->items_capacity = needed;
 		}
 	}
 
-	/* The control pipe, then the resolver's. */
-	loader->fds[0].fd = loader->control_read;
-	loader->fds[0].events = POLLIN;
-	loader->fds[0].revents = 0;
-	loader->fds[1].fd = loader->pipe_read;
-	loader->fds[1].events = POLLIN;
-	loader->fds[1].revents = 0;
+	/* The control waker, then the resolver's. */
+	loader->items[0].socket = wb_os_waker_socket(loader->control);
+	loader->items[0].wants = WB_OS_POLL_READABLE;
+	loader->items[0].found = 0;
+	loader->items[1].socket = wb_os_waker_socket(loader->answers_waker);
+	loader->items[1].wants = WB_OS_POLL_READABLE;
+	loader->items[1].found = 0;
 	count = 2U;
 
-	/* Each connection that waits for its socket, while the watched descriptors keep their room. */
+	/* Each connection that waits for its socket, as many as there is room for. */
 	cut = 0;
 	for (request = loader->requests; request != NULL; request = request->next) {
-		if (request->cancelled || request->descriptor < 0 || request->wants == 0)
+		if (request->cancelled || request->socket == WB_OS_SOCKET_NONE || request->wants == 0)
 			continue;
-		if (count + LOADER_WATCH_MAX == loader->fds_capacity) {
+		if (count == loader->items_capacity) {
 			cut = 1;
 			break;
 		}
 
-		/* Watches this connection's socket. */
-		loader->fds[count].fd = request->descriptor;
-		loader->fds[count].events = request->wants;
-		loader->fds[count].revents = 0;
+		/* Waits on this connection's socket. */
+		loader->items[count].socket = request->socket;
+		loader->items[count].wants = request->wants;
+		loader->items[count].found = 0;
 		count++;
 	}
-
-	/* The watched descriptors as the caller leaves them now; a caller waiting to close one learns it is no longer polled. */
-	loader->watch_first = count;
-	pthread_mutex_lock(&loader->lock);
-
-	/* Each watched descriptor, for reading. */
-	for (index = 0; index < loader->watch_count; index++) {
-		loader->fds[count].fd = loader->watches[index];
-		loader->fds[count].events = POLLIN;
-		loader->fds[count].revents = 0;
-		count++;
-	}
-
-	/* A new set polled: a caller waiting in net_loader_unwatch may go on. */
-	if (loader->polled_generation != loader->watch_generation) {
-		loader->polled_generation = loader->watch_generation;
-		pthread_cond_broadcast(&loader->changed);
-	}
-
-	pthread_mutex_unlock(&loader->lock);
 
 	/* The earliest time out, sooner when connections were left out. */
 	*timeout = loader_timeout(loader);
@@ -1414,20 +1267,6 @@ loader_timeout(
 	return (int)(earliest - now);
 }
 
-/* Reads a descriptor that does not block until it has nothing more. */
-static void
-loader_drain(
-	int descriptor)
-{
-	unsigned char drained[64];
-	ssize_t got;
-
-	/* Its bytes, all of them. */
-	do {
-		got = read(descriptor, drained, sizeof(drained));
-	} while (got > 0);
-}
-
 /*
  * Starts a request at its URL: answered by the cache when it holds the URL
  * fresh; else over a kept connection to the place, or, when fewer than
@@ -1445,6 +1284,7 @@ loader_begin(
 	struct loader_job *job;
 	struct wb_buffer url;
 	size_t length;
+	size_t running;
 	uint64_t now;
 	int fresh;
 	int active;
@@ -1487,6 +1327,11 @@ loader_begin(
 	if (entry != NULL && entry->etag.length != 0)
 		request->validating = entry;
 
+	/* No more connections than one wait takes, its two wakers aside: the request fails. */
+	running = loader_connections(loader, request);
+	if (running >= WB_OS_POLL_MAX - 2U)
+		return EMFILE;
+
 	/* A kept connection to the place, when there is one (not after a kept one failed). */
 	for (link = &loader->idle; *link != NULL && !request->retried; link = &(*link)->next) {
 		error = strcmp((*link)->key, request->key);
@@ -1499,7 +1344,7 @@ loader_begin(
 		/* Taken out of the pool. */
 		kept = *link;
 		*link = kept->next;
-		request->descriptor = kept->descriptor;
+		request->socket = kept->socket;
 		request->tls = kept->tls;
 		request->reused = 1;
 		free(kept);
@@ -1509,7 +1354,7 @@ loader_begin(
 		if (error != 0)
 			return error;
 		request->state = LOADER_SENDING;
-		request->wants = POLLOUT;
+		request->wants = WB_OS_POLL_WRITABLE;
 		return 0;
 	}
 
@@ -1572,8 +1417,8 @@ loader_answers(
 	struct net_request *request;
 	int error;
 
-	/* The pipe's bytes, all of them. */
-	loader_drain(loader->pipe_read);
+	/* The waker's bytes, all of them. */
+	wb_os_waker_drain(loader->answers_waker);
 
 	/* The answers, taken at once. */
 	pthread_mutex_lock(&loader->resolver_lock);
@@ -1594,16 +1439,14 @@ loader_answers(
 
 		/* An answer nobody waits for any more. */
 		if (request == NULL || request->cancelled || request->state != LOADER_RESOLVING) {
-			if (job->addresses != NULL)
-				freeaddrinfo(job->addresses);
+			wb_os_addresses_free(job->addresses);
 			free(job);
 			continue;
 		}
 
 		/* A host that has no address fails the request. */
 		if (job->status != 0 || job->addresses == NULL) {
-			if (job->addresses != NULL)
-				freeaddrinfo(job->addresses);
+			wb_os_addresses_free(job->addresses);
 			free(job);
 			loader_end(request, EHOSTUNREACH);
 			continue;
@@ -1611,7 +1454,8 @@ loader_answers(
 
 		/* The addresses, tried in turn from the first. */
 		request->addresses = job->addresses;
-		request->address = job->addresses;
+		request->address_index = 0;
+		request->address_count = wb_os_addresses_count(job->addresses);
 		free(job);
 		request->state = LOADER_CONNECTING;
 		error = loader_connect(request);
@@ -1665,33 +1509,22 @@ static int
 loader_connect(
 	struct net_request *request)
 {
-	struct addrinfo *address;
 	int status;
 	int error;
 
 	/* The addresses from the current one. */
 	error = ECONNREFUSED;
-	for (address = request->address; address != NULL; address = address->ai_next) {
-		request->address = address;
-		request->descriptor = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
-		if (request->descriptor < 0) {
-			error = errno;
-			continue;
-		}
-
-		/* The socket does not block, and its connection starts. */
-		(void)fcntl(request->descriptor, F_SETFL, O_NONBLOCK);
-		status = connect(request->descriptor, address->ai_addr, address->ai_addrlen);
-		if (status == 0 || errno == EINPROGRESS) {
-			request->wants = POLLOUT;
+	for (; request->address_index < request->address_count; request->address_index++) {
+		status = wb_os_socket_connect(request->addresses, request->address_index, 0, &request->socket);
+		if (status == 0 || status == EINPROGRESS) {
+			request->wants = WB_OS_POLL_WRITABLE;
 			request->deadline = loader_clock() + LOADER_TIMEOUT;
 			return 0;
 		}
 
-		/* An address that refuses at once gives way to the next. */
-		error = errno;
-		close(request->descriptor);
-		request->descriptor = -1;
+		/* An address that refuses at once gives way to the next (its socket is closed already). */
+		error = status;
+		request->socket = WB_OS_SOCKET_NONE;
 	}
 
 	/* No address could be tried. */
@@ -1706,36 +1539,21 @@ static int
 loader_connected(
 	struct net_request *request)
 {
-	struct sockaddr_storage peer;
-	socklen_t size;
 	int failure;
-	int status;
 	int is_https;
 	int error;
 
-	/* The connection's outcome. */
-	failure = 0;
-	size = sizeof(failure);
-	status = getsockopt(request->descriptor, SOL_SOCKET, SO_ERROR, &failure, &size);
-	if (status != 0)
-		failure = errno;
-	if (failure == EINPROGRESS || failure == EALREADY)
+	/* The connection's outcome; one not finished yet (a connection has a peer) waits again. */
+	failure = wb_os_socket_connect_result(request->socket);
+	if (failure == EINPROGRESS)
 		return EAGAIN;
-
-	/* No error yet is not a connection yet: a connection has a peer. */
-	if (failure == 0) {
-		size = sizeof(peer);
-		status = getpeername(request->descriptor, (struct sockaddr *)&peer, &size);
-		if (status != 0 && errno == ENOTCONN)
-			return EAGAIN;
-	}
 
 	/* A refused or failed connection moves to the next address. */
 	if (failure != 0) {
-		close(request->descriptor);
-		request->descriptor = -1;
-		request->address = request->address->ai_next;
-		if (request->address == NULL)
+		wb_os_socket_close(request->socket);
+		request->socket = WB_OS_SOCKET_NONE;
+		request->address_index++;
+		if (request->address_index >= request->address_count)
 			return failure;
 		error = loader_connect(request);
 		if (error != 0)
@@ -1744,9 +1562,10 @@ loader_connected(
 	}
 
 	/* The addresses are no longer needed. */
-	freeaddrinfo(request->addresses);
+	wb_os_addresses_free(request->addresses);
 	request->addresses = NULL;
-	request->address = NULL;
+	request->address_index = 0;
+	request->address_count = 0;
 
 	/* The request's text. */
 	error = loader_prepare(request);
@@ -1757,7 +1576,7 @@ loader_connected(
 	is_https = !strcmp(request->url.scheme, "https");
 	if (is_https) {
 		net_tls_clear_error();
-		error = net_tls_start(request->descriptor, request->url.host, &request->tls);
+		error = net_tls_start(request->socket, request->url.host, &request->tls);
 		if (error != 0)
 			return error;
 		request->state = LOADER_HANDSHAKE;
@@ -1795,7 +1614,6 @@ loader_send(
 	const unsigned char *bytes;
 	size_t length;
 	size_t sent;
-	ssize_t count;
 	int error;
 
 	/* What is left to send. */
@@ -1809,22 +1627,21 @@ loader_send(
 		if (error != 0)
 			return error;
 	} else {
-		count = send(request->descriptor, bytes, length, MSG_NOSIGNAL);
-		if (count < 0 && (errno == EAGAIN || errno == EINTR)) {
-			request->wants = POLLOUT;
+		error = wb_os_socket_send(request->socket, bytes, length, &sent);
+		if (error == EAGAIN) {
+			request->wants = WB_OS_POLL_WRITABLE;
 			return EAGAIN;
 		}
 
 		/* A kept connection the server closed is replaced once. */
-		if (count < 0 && request->reused) {
+		if (error != 0 && request->reused) {
 			error = loader_retry(request);
 			return error;
 		}
 
 		/* Any other failure ends the request. */
-		if (count < 0)
-			return errno;
-		sent = (size_t)count;
+		if (error != 0)
+			return error;
 	}
 
 	/* The bytes went; all of them means the response comes next. */
@@ -1835,7 +1652,7 @@ loader_send(
 
 	/* Succeeded: the request is sent, and the response is read. */
 	request->state = LOADER_RECEIVING;
-	request->wants = POLLIN;
+	request->wants = WB_OS_POLL_READABLE;
 	return 0;
 }
 
@@ -1846,7 +1663,6 @@ loader_receive(
 {
 	unsigned char chunk[LOADER_CHUNK];
 	size_t received;
-	ssize_t count;
 	int error;
 
 	/* Over TLS, or the socket. */
@@ -1856,16 +1672,15 @@ loader_receive(
 		if (error != 0)
 			return error;
 	} else {
-		count = recv(request->descriptor, chunk, sizeof(chunk), 0);
-		if (count < 0 && (errno == EAGAIN || errno == EINTR)) {
-			request->wants = POLLIN;
+		error = wb_os_socket_receive(request->socket, chunk, sizeof(chunk), &received);
+		if (error == EAGAIN) {
+			request->wants = WB_OS_POLL_READABLE;
 			return EAGAIN;
 		}
 
 		/* Any other failure ends the request. */
-		if (count < 0)
-			return errno;
-		received = (size_t)count;
+		if (error != 0)
+			return error;
 	}
 
 	/* A kept connection closed before anything of the response came is replaced once. */
@@ -2008,16 +1823,15 @@ loader_close(
 	if (request->tls != NULL)
 		net_tls_close(request->tls);
 	request->tls = NULL;
-	if (request->descriptor >= 0)
-		close(request->descriptor);
-	request->descriptor = -1;
+	wb_os_socket_close(request->socket);
+	request->socket = WB_OS_SOCKET_NONE;
 	request->wants = 0;
 
 	/* The addresses of the lookup. */
-	if (request->addresses != NULL)
-		freeaddrinfo(request->addresses);
+	wb_os_addresses_free(request->addresses);
 	request->addresses = NULL;
-	request->address = NULL;
+	request->address_index = 0;
+	request->address_count = 0;
 }
 
 /*
@@ -2214,6 +2028,32 @@ loader_active(
 	return count;
 }
 
+/*
+ * Counts the requests but one that are past waiting and not over (each
+ * holds or will hold a connection the network thread waits on).
+ */
+static size_t
+loader_connections(
+	const struct net_loader *loader,
+	const struct net_request *except)
+{
+	const struct net_request *request;
+	size_t count;
+
+	/* Each request that is past waiting and not over, but the one asking. */
+	count = 0;
+	for (request = loader->requests; request != NULL; request = request->next) {
+		if (request == except || request->cancelled || request->state == LOADER_ENDED)
+			continue;
+		if (request->state == LOADER_READY || request->state == LOADER_WAITING)
+			continue;
+		count++;
+	}
+
+	/* The count. */
+	return count;
+}
+
 /* Starts the first request that waits for a place, when the place has room again. */
 static void
 loader_release_place(
@@ -2256,12 +2096,12 @@ loader_keep(
 	if (kept == NULL)
 		return;
 	memcpy(kept->key, request->key, sizeof(kept->key));
-	kept->descriptor = request->descriptor;
+	kept->socket = request->socket;
 	kept->tls = request->tls;
 	kept->idle_since = loader_clock();
 
 	/* The connection is the pool's now. */
-	request->descriptor = -1;
+	request->socket = WB_OS_SOCKET_NONE;
 	request->tls = NULL;
 	request->wants = 0;
 	kept->next = loader->idle;
@@ -2290,7 +2130,7 @@ loader_expire_idle(
 		*link = kept->next;
 		if (kept->tls != NULL)
 			net_tls_close(kept->tls);
-		close(kept->descriptor);
+		wb_os_socket_close(kept->socket);
 		free(kept);
 	}
 }

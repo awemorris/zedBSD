@@ -4,7 +4,7 @@
 #  1. the files written for the Windows build (the operating-system layers) compile with warning 0;
 #  2. the warnings of libtruetype and the compat libraries (compiled without -Werror) are counted;
 #  3. what those libraries leave undefined (nm -u less what they define) is in allowed-imports.txt, and
-#     so is what libbrowser-core (libbrowser without its network and storage) with its Windows layer does;
+#     so is what libbrowser-core (libbrowser without its cookies and storage) with its Windows layer does;
 #  4. the Vulkan loader's delayed import: plan/ws334/tests/delay-load.c, linked as the build links a
 #     program that calls Vulkan, has vulkan-1.dll in its delay-import table and not in its import table;
 #     on x86_64 under Wine it prints the loader's version with vulkan-1.dll, and with the DLL disabled
@@ -97,12 +97,12 @@ for name in win64 winarm64; do
 		echo "$name: $(wc -l < "$out/imports-$name.txt") imports, all in the table"
 	fi
 
-	# 3b. libbrowser without its network and storage (libbrowser-core) with its Windows layer: what it
+	# 3b. libbrowser without its cookies and storage (libbrowser-core) with its Windows layer: what it
 	# leaves undefined, less what it, the static libraries and the Vulkan loader's import library define,
-	# against the table.  The names of the modules the Windows build adds later (the network's net_*, the
-	# storage's page_storage_*, libmedia's media_*) are left out of the comparison.
+	# against the table.  The names of the modules the Windows build adds later (the cookies'
+	# net_cookie_*, the storage's page_storage_*, libmedia's media_*) are left out of the comparison.
 	core="$LIBBROWSER_CORE_OBJECTS"
-	for layer in os-win32 os-system-win32 os-file-win32 os-time-win32 os-zones; do
+	for layer in os-win32 os-system-win32 os-file-win32 os-net-win32 os-time-win32 os-zones; do
 		core="$core $build/obj/userland/desktop/libbrowser/base/$layer.o"
 	done
 	"${WIN32_TOOL_PREFIX}nm" -u $core 2> /dev/null |
@@ -111,7 +111,7 @@ for name in win64 winarm64; do
 	"${WIN32_TOOL_PREFIX}nm" --defined-only $core $archives "$build/obj/libvulkan-1.a" 2> /dev/null |
 	    awk 'NF == 3 { print $3 }' | sed 's/^__imp_//' | sort -u > "$out/core-defined-$name.txt"
 	comm -23 "$out/core-undefined-$name.txt" "$out/core-defined-$name.txt" |
-	    grep -v '^net_' | grep -v '^page_storage_' | grep -v '^media_' > "$out/core-imports-$name.txt"
+	    grep -v '^net_cookie_' | grep -v '^page_storage_' | grep -v '^media_' > "$out/core-imports-$name.txt"
 	if [ ! -s "$out/core-imports-$name.txt" ]; then
 		echo "FAILED $name: nm found no undefined symbol in libbrowser-core (no objects?)"
 		status=1

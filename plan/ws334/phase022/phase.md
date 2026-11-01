@@ -3,7 +3,7 @@
 # ws334-p022 統合: network を OS の層へ（loader・http・tls）と libmedia の起こしの callback
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §2.2 の O1〜O12・O25・O32・O33、§3.4、§5 の M1、§9.1。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1830-i01、P7。p002 で作成）。
 - **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: 名前の表に Windows の DLL の名前（`libssl-3-x64.dll`・`libcrypto-3-x64.dll` ほか）を足さない。Windows の build は p030 の前は OpenSSL を開けずに今の EPROTONOSUPPORT、p030 で `net/tls-static.c` が表を埋める。下の本文の DLL の名前はこの通りに読み替える。
 - 依存: p007（os-net）・p021。
 - 担当の想定: Opus（phase-runner）を 1 回。module の約束は `base/os-net.h`・`base/os-system.h` の comment。挙動を変えない（zedBSD・Linux の host の network の試験の件数が前と同じ）。
@@ -71,3 +71,58 @@
 ## 終わりの条件
 
 - 上が全部 PASS（件数の前後の表を結果の節に）。file の群ごとの commit。SHA・command と最後の行・未実施を Q1 に。ws.md の行を「実装済み・試験 PASS」に。
+
+## 結果（2026-11-01、P7、q1830-i01、基点 7b32ed291）
+
+commit（`git commit -m WIP -- <path>`）:
+
+| SHA | 中身 |
+| --- | --- |
+| 3f8f2f205 | net/loader.c・net.h・http.c・tls.c、page/media.c、libbrowser/sources.mk（`LIBBROWSER_OS_NET_SOURCES`）、libmedia/media.h・engine.c |
+| 1cda6e03f | apps/browser-win32/Makefile（net の 3 つを libbrowser-core に）、plan/ws334/tests の cross-build.sh・allowed-imports.txt と新しい試験（net-ring-test・media-wake-test・fetch-main.c と fetch-wine.sh） |
+| 6602db9bc | net/http.c の 1 か所（条件の中の関数呼び出しを外に。動作は同じ） |
+
+前後の件数（基点は `git archive 7b32ed291` を `build/tmp/p022-base` に展開して流した。後は worktree の tree）:
+
+| 確かめ | 前（7b32ed291） | 後 |
+| --- | --- | --- |
+| `host-build.sh plain` / `asan` | exit 0、warning 0 | 同じ |
+| `run-loader-tests.py`（plain / asan） | 11/11 / 11/11 | 11/11 / 11/11（6602db9bc の後も plain 11/11） |
+| `run-http-tests.py`（plain / asan） | 15/15 / 15/15 | 15/15 / 15/15（6602db9bc の後も plain 15/15） |
+| `run-http-tests.py --async`（plain / asan） | 19/20 / 19/20（FAIL は async-sheets） | 19/20 / 19/20（同じ async-sheets、case ごとに同じ） |
+| `run-fetch-tests.py`（plain / asan） | blocking 38/38・--async 38/38 | 同じ |
+| `plan/tools/browser-component/run.sh plain` / `asan` | 83 checks PASS / 83 checks PASS | 同じ |
+| `plan/tools/h264sw/run-unit.sh all` | — | run-unit: PASS（24 本、tools.md の数と同じ） |
+
+他の確かめ:
+
+- 新しい試験: `sh plan/ws334/tests/net-ring-test.sh plain`・`tsan` → `net-ring-test: PASS`（WS314 の loader-test を写して watch の項を `net_loader_ring` に替えた: 別の thread からの ring で notify が 1 回、dispatch まで重ねて鳴らしても 1 回、4 thread × 200 回の ring と 24 本の request が同時でも全部 200 で終わる、`net_loader_wait(300)` が 290〜3000 ms、`wait(0)` が待たない）。`sh plan/ws334/tests/media-wake-test.sh plain`・`asan` → `media-wake-test: PASS`（sample.mp4 で wake が engine の thread から context 付きで呼ばれる、play の中で呼び手の thread から、close の後は呼ばれない、wake NULL でも開いて閉じる）。
+- `LC_ALL=C.UTF-8 timeout 3600 flock /tmp/zedbsd-wine.lock sh plan/ws334/tests/run-unit.sh all` → `run-unit: PASS`（34 本: posix 16・win32 18、FAIL 0。test-os-net posix 1278・win32 1276 checks）。log `build/tmp/p022/run-unit.log`。
+- `timeout 3600 flock /tmp/zedbsd-wine.lock sh plan/ws334/tests/cross-build.sh` → `cross-build: PASS`（libbrowser-core に net/loader・http・tls が入り、x86_64・aarch64 とも warning 0。libbrowser-core の import は win64 164・winarm64 160 で全部が表の中。表に ws2_32 の 20 の関数、kernel32 の InitOnceExecuteOnce・SetHandleInformation、winpthreads の lock・cond・thread・key、UCRT の `_timespec64_get` を足した。3b の照合に os-net-win32.o を加え、除く名前を `net_` から `net_cookie_` に狭めた）。
+- Wine: `sh plan/ws334/tests/fetch-wine.sh` → `fetch-wine: PASS`（test-program の `fetch-tool.exe` = fetch-main.c と net/cookie.c を全部の static library と link。host の `python3 -m http.server` の 127.0.0.1:18334 の 104535 byte の頁を、blocking の `net_http_fetch` と loader の `net_loader_fetch` の両方で 200・104535 byte。Wine の起動は script の中で `flock /tmp/zedbsd-wine.lock`）。
+- zedBSD amd64（`make ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-claude1/build/llvm/bin ZEDBSD_SYSROOT_AMD64=<写し> -o <写し>/.zedbsd-sysroot-complete -j16 build/amd64/dynamic/libbrowser.so build/amd64/dynamic/libmedia.so build/amd64/bin/browser`、写しは main の `build/amd64/sysroot` を `build/tmp/p022/sysroot-amd64` に写して tree の `include/libc`・`userland/desktop/include` を重ねた物）→ exit 0、warning 0。build の中の `python3 tools/build/check-dynamic-elf.py` は PATH の python3 で走ったので、3 つとも `/usr/bin/python3` で流し直して exit 0。libbrowser.so は `-z defs` で link（`timespec_get`・`getaddrinfo`・`poll` は libc から）。
+- `git diff --check 7b32ed291` → 出力なし。
+
+自分で決めた点・phase.md と code の食い違い:
+
+- 手順 2: resolver の起こしの field は `answers` が既に答えの list（`struct loader_job *answers`）の名前なので `answers_waker` にした。制御は `control`。
+- 手順 8: `loader->rang` は network の thread だけが触る field なので、`net_loader_ring` は lock の中で新しい `loader->rung` を立て、network の thread が `loader_intake`（lock の中）でそれを `rang` に写す（rang を他の thread から書くと data race になるため）。結果は phase.md の「watch が鳴った時と同じ」（次の round の `loader_publish` で notify 1 回・wait が起きる）。TSan の net-ring-test で race 無し。
+- 手順 8b: 今の上限（LOADER_PER_HOST は場所ごとの 6 だけ、全体の上限は無い）では 4096 に届きうるので、`loader_begin` の最初（cache の答えの後、kept の接続と場所ごとの判定の前）で、自分以外の動いている request（READY・WAITING・ENDED・cancel の外）が `WB_OS_POLL_MAX - 2`（4094）以上なら EMFILE で終える（新しい `loader_connections`）。items の capacity も `WB_OS_POLL_MAX` で止める。4094 本の試験はしていない（host の fd の上限 1024 の方が先に効く）。
+- 手順 7: `net_loader_wait` は phase.md の通り属性なしの cond、毎回 `wb_os_monotonic_ns` で残りを求め、`timespec_get(TIME_UTC)` + 残りで `pthread_cond_timedwait`。timeout 0 は待たない（前と同じ）。
+- 手順 9 の sources.mk: phase.md は `LIBBROWSER_OS_SOURCES` に足すと書くが、p021 の記録（script の core は network を使わない）に従い、新しい `LIBBROWSER_OS_NET_SOURCES`（os-net-posix.c の 1 行）を `LIBBROWSER_ENGINE_SOURCES` の頭に入れた。`apps/browser-win32/Makefile` は `LIBBROWSER_OS_SOURCES` と `LIBBROWSER_OS_NET_SOURCES` を除き、os-net-win32.c は前から layer にある。cookie.c と page/storage.c は除いたまま（p023）。`list-sources.sh` は 1 行に 1 file なので拾う（host-build.sh は変更なし）。
+- tls.c: 名前の表は p036 の読み替えの通り `libcrypto.so`・`libcrypto.so.3`、`libssl.so`・`libssl.so.3` だけ（Windows の DLL の名前は足さない）。失敗の理由は 2 回目以降も含めて「cannot load the OpenSSL libraries」（前は 1 回目が dlerror の文、2 回目以降が「the OpenSSL package is not installed」。この文を見る試験は無い）。読めた library は失敗しても閉じない（前と同じ。libcrypto が exit の後片付けを登録している場合があるため）。`SSL_set_fd` の前の `wb_os_socket_descriptor` の失敗は「setup: the socket does not fit OpenSSL's descriptor」を残して EPROTO（新しい static の `tls_attach`）。RTLD_LOCAL: host（Debian の libssl.so.3）の https の試験（run-http-tests の https の case、run-loader-tests の https-reuse）が PASS。zedBSD の OpenSSL の package の libssl.so は DT_NEEDED に libcrypto.so を持つ（readelf で確かめた）が、zedBSD の上の https は未実施。
+- http.c: `strncasecmp` は static の `http_case_differs`（ASCII だけ大小を同じに、NUL で止まる）に、`http_memmem` は `wb_memmem` に（呼ぶのは needle 4 byte だけなので約束の差は出ない）。`http_receive_all` の待ちは、前は poll の EINTR で待ち直したが `wb_os_poll` は signal で ready 0 を返すので、単調の時計で NET_HTTP_TIMEOUT に届いていなければ待ち直す。
+- libmedia: `media_wake_function` の typedef を media.h に足した。wake は engine の thread に加えて `media_engine_play`・`media_engine_pause` の中で呼び手の thread からも呼ばれる（今の code の通り）ので media.h の comment にそう書いた。exports.map は `media_engine_*` の wildcard なので変更なし。engine.c の `<fcntl.h>`・`<unistd.h>` は使わなくなったので外した。
+- page/media.c: static の関数は file の他の static と同じ `media_` の名前（`media_waker`・`media_wake`）。loader の無い page には wake を渡さない（NULL）。
+- `media_engine_open` の他の利用者は無い（`grep -rn` で libbrowser の page/media.c の 2 か所だけ）。
+
+未実施:
+
+- zedBSD（QEMU・実機）の上の https と `<video>`（RTLD_LOCAL の確かめ、wake の道の画面での確かめ）。headless の `--render` は media の engine を追わないので、host の browser でも `<video>` の wake の道（page/media.c → net_loader_ring → view）は通していない（libmedia の wake と loader の ring はそれぞれ単体の試験で）。
+- Linux の Keiland・FreeBSD の build、zedBSD arm64 の build、Windows の実機、aarch64 の Windows の実行。
+- 4094 本を超える接続の EMFILE の試験。
+
+他の WS への影響（Q1 へ）:
+
+- `plan/ws314/tests/loader-test.sh`（WS314 completed）は基点の時点で既に build できない（`base/*.c` に `*-win32.c` が入り `<winsock2.h>` が無い）うえ、`net_loader_watch` を使う。tools.md・未完の Phase から参照されていないので削除の候補（watch の項を ring に替えた写しが `plan/ws334/tests/net-ring-test.c`）。
+- WS318（planning）の design.md の libmedia の notify の案は「libbrowser は notify の中で pipe に書き `net_loader_watch` を向ける」としているが、watch は無くなったので `net_loader_ring` を呼ぶ形になる。
