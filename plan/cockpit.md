@@ -63,7 +63,7 @@
 
 | Bug | 中身 | 状態 |
 | --- | --- | --- |
-| [BUG-402](bugs/BUG-402.md)〜[BUG-406](bugs/BUG-406.md) | Windows 版ブラウザの UAT の 2 回目（app の icon、遷移中の応答、取得中の表示と URL、about.google の画像、戻るの cache） | open（P8 の待ち、BUG-401 の後） |
+| [BUG-402](bugs/BUG-402.md)〜[BUG-407](bugs/BUG-407.md) | Windows 版ブラウザの UAT の 2 回目（検索の button が反応しない、app の icon、遷移中の応答、取得中の表示と URL、about.google の画像、戻るの cache） | open（P8 の待ち、BUG-401 の後） |
 | [BUG-395](bugs/BUG-395.md)〜[BUG-399](bugs/BUG-399.md) | Windows 版ブラウザの UAT の 5 件（題の帯の drag、Reload の icon、link で固まる、app の一覧、検索の欄の幅） | open（P8・P4・P7） |
 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の起動時の自己試験の描画 | fixed（02:20。既定で off、`rpi4gpu.selftest=1` で on。storage まで 6.3 s → 0.9〜1.2 s） |
 | [BUG-394](bugs/BUG-394.md) | 起動が長い、init が desktop を優先して順番を組めるように | fixed（02:23。init の 2 段の起動を既定に。Pi 5 の大きな待ちは GPU の自己試験 5.9 s で BUG-393 で解消。Pi 5 での変更後の計測は未実施） |
