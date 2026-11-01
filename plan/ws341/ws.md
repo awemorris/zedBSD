@@ -16,14 +16,15 @@
 - GPU の枠組みと compositor: `/dev/gpu` の UAPI（docs/reference/gpu.md）、Keiland の compositor（WS309 の thread の構成、game mode の VK_KHR_display）、[WS306](../ws306/ws.md)（GPU の driver の枠組みの UAPI）。
 - 画像の共有: WS243 の NVDEC の export・import（GPU_CAP_ALLOCATION_SHARE）と同じ道で、他の GPU の描画の先にできるか。
 
+- （2026-11-01 22:44）ユーザーから、次の趣旨の決定を受けた: (1) 仮想 GPU は /dev/vgpu の driver への ioctl で作り・消す。(2) 画面の大きさは /dev/gpuN を作る ioctl で指定する。(3) compositor からは普通の display に見え、仮想である flag は見える。(4) scanout の image は system の GPU の driver で作る（仮想 GPU は自分の memory を持たない）。(5) 遠隔の mouse・keyboard は含めない。(6) 転送の protocol はこの WS では扱わず、encode した結果を file に保存できればよい。
+- （2026-11-01 22:44）frame の同期は、ユーザーの案（compositor が frame の描画の終わりを明示する）を Q1 が次の形に具体化して提案した（p001 の設計の出発点、決定は設計の受け入れで）: compositor の flip に描画の完了の fence を付けて渡すのを終わりの明示とする。encoder の program は /dev/vgpu の「次の frame を待つ」ioctl を専用の thread で待ち（fd の event の多重化は使わない）、encode し終えたら image を返す（返すまで compositor は再利用しない）。実の vblank の代わりに、作る時の refresh で仮想 GPU が vblank を出す。
+
 ## p001 で決める事（問いの候補）
 
-- 仮想 GPU の作り方・消し方の口（UAPI、権限、video group との関係）と、HAL を変えずに済むか（変えるなら理由）。
-- 仮想 display の mode（解像度・refresh・台数）を誰が決めるか、EDID 相当の情報、hot-plug の見せ方（compositor から見て普通の display か）。
-- scanout の image の持ち主（program の Vulkan の device か仮想 GPU か）と、描く GPU との共有（同じ GPU・別の GPU、cross-device の import、copy が要る場合）。
-- 1 frame ごとの同期（vblank の代わりの時計、flip の完了、program が encode を始める合図）。
-- 入力（keyboard・mouse・touch）を遠隔から戻すか、この WS の範囲か。
-- 転送の protocol（USB の何の class か、network は RDP・独自か）がこの WS の範囲か、別の WS か。
+- /dev/vgpu の ioctl の形（作る・消す・mode・次の frame を待つ・返す）、作った program の fd を閉じた時の扱い、権限（video group との関係）、HAL を変えずに済むか（変えるなら理由）。
+- 仮想の flag の UAPI と compositor の扱い（普通の display として出すか、どこまで違えるか）、EDID 相当の情報、hot-plug の見せ方。
+- system の GPU の driver で作る scanout の image を、仮想 GPU と encoder の Vulkan の device とでどう共有するか（同じ GPU・別の GPU、WS243 の export・import の道）。
+- encode の結果を file に保存する形（H.264・H.265 の elementary stream か、mediafile の MP4 か）と、試験の道（QEMU・実機、encoder の有る GPU と software の encoder）。
 
 ## Phase
 
