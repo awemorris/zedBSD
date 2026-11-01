@@ -14,7 +14,9 @@
 # the static libraries: libbrowser.a (all of libbrowser, with its Windows layer), libmedia.a and
 # libkeiland.a (their Windows files so far), libtruetype and the png, jpeg, gif and z compat libraries
 # (from the same source lists as the zedBSD build); the Vulkan headers and the import library of the
-# Vulkan loader.  A test's program links with them all (test-program); the
+# Vulkan loader, and OpenSSL (libssl.a and libcrypto.a, cross-built by plan/ws334/tests/openssl-windows.sh
+# from the release the zedBSD package uses; libbrowser's net/tls.c uses it through net/tls-static.c).
+# A test's program links with them all (test-program); the
 # browser's program and its resources join later, linked the same way (WIN32_PROGRAM).  Apart from those:
 # libbrowser-script.a, the script core alone with its Windows layer, and script-core.exe over it.
 #
@@ -89,7 +91,7 @@ WIN32_COMPAT_CFLAGS := $(WIN32_COMMON_CFLAGS)
 # each file that calls another adds its library here.
 WIN32_THREAD_LDFLAGS := -lpthread
 WIN32_VULKAN_LDFLAGS := -L$(BROWSER_WIN32_OBJ) -lvulkan-1 -Wl,--delayload=vulkan-1.dll
-WIN32_SYSTEM_LDFLAGS := -lws2_32 -lbcrypt -lcrypt32 -lshell32 -lole32
+WIN32_SYSTEM_LDFLAGS := -lws2_32 -lbcrypt -lcrypt32 -lshell32 -lole32 -lgdi32 -luser32 -ladvapi32
 WIN32_PROGRAM_LDFLAGS := -static $(WIN32_VULKAN_LDFLAGS) $(WIN32_THREAD_LDFLAGS) $(WIN32_SYSTEM_LDFLAGS)
 
 # The operating-system layers: the Windows files and the files every system shares.
@@ -121,6 +123,9 @@ include userland/desktop/libbrowser/sources.mk
 LIBBROWSER_CORE_EXCLUDED := $(LIBBROWSER_OS_SOURCES) \
 	$(LIBBROWSER_OS_NET_SOURCES)
 LIBBROWSER_CORE_SOURCES := $(filter-out $(LIBBROWSER_CORE_EXCLUDED),$(LIBBROWSER_SOURCES))
+# TLS: tls.c uses the OpenSSL linked into the program (WB_TLS_STATIC) through tls-static.c, which only
+# this build compiles (it is not in sources.mk: the zedBSD build opens the package's shared libraries).
+LIBBROWSER_CORE_SOURCES += $(LIBBROWSER_DIR)/net/tls-static.c
 LIBBROWSER_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBBROWSER_CORE_SOURCES))
 
 # libbrowser's script core alone (the base library, the virtual machine and JavaScript), with the Windows
@@ -167,9 +172,17 @@ WIN32_COMPAT_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(WIN32_COMPAT_S
 WIN32_COMPAT_ARCHIVES := $(foreach library,$(WIN32_COMPAT_LIBRARIES),$(BROWSER_WIN32_OBJ)/lib$(library).a)
 WIN32_TREE_ARCHIVES := $(foreach library,$(WIN32_TREE_LIBRARIES),$(BROWSER_WIN32_OBJ)/lib$(library).a)
 
+# OpenSSL for Windows (static, cross-built by plan/ws334/tests/openssl-windows.sh): the libraries and
+# the headers tls-static.c includes.  The script runs once per output directory; its build tree is kept
+# beside the output, so a second run only copies.
+BROWSER_WIN32_OPENSSL := $(BROWSER_WIN32_BUILD)/openssl
+WIN32_OPENSSL_LIBSSL := $(BROWSER_WIN32_OPENSSL)/lib/libssl.a
+WIN32_OPENSSL_LIBCRYPTO := $(BROWSER_WIN32_OPENSSL)/lib/libcrypto.a
+WIN32_OPENSSL_ARCHIVES := $(WIN32_OPENSSL_LIBSSL) $(WIN32_OPENSSL_LIBCRYPTO)
+
 # Every static library a program links, a user's before what it uses (lld also finds a name in an
-# archive given earlier, but the order states the layers).
-WIN32_PROGRAM_ARCHIVES := $(WIN32_TREE_ARCHIVES) $(WIN32_COMPAT_ARCHIVES)
+# archive given earlier, but the order states the layers).  libssl uses libcrypto.
+WIN32_PROGRAM_ARCHIVES := $(WIN32_TREE_ARCHIVES) $(WIN32_COMPAT_ARCHIVES) $(WIN32_OPENSSL_ARCHIVES)
 
 # A test's program (test-program): TEST_PROGRAM=<name> TEST_PROGRAM_SOURCES="<file>.c ...", linked
 # with every static library into $(BROWSER_WIN32_BUILD)/tests/<name>.exe.
@@ -192,13 +205,14 @@ VULKAN_LOADER_SHA256 := ddfeca84a868899fbb2c7f28b7c8fd1006e34b2b13ce653a63bddfb6
 WIN32_VULKAN_HEADERS := $(BROWSER_WIN32_OBJ)/include/vulkan/vulkan.h
 WIN32_VULKAN_LIBRARY := $(BROWSER_WIN32_OBJ)/libvulkan-1.a
 
-.PHONY: all layers libbrowser-core libbrowser-script script-core libraries vulkan fetch flags clean test-program
+.PHONY: all layers libbrowser-core libbrowser-script script-core libraries vulkan openssl fetch flags clean test-program
 all: layers libbrowser-core libraries vulkan $(BROWSER_WIN32_OBJ)/toolchain.txt
 
 layers: $(BROWSER_WIN32_LAYER_OBJECTS)
 libbrowser-core: $(LIBBROWSER_CORE_OBJECTS)
 libraries: $(WIN32_PROGRAM_ARCHIVES)
 vulkan: $(WIN32_VULKAN_HEADERS) $(WIN32_VULKAN_LIBRARY)
+openssl: $(WIN32_OPENSSL_ARCHIVES)
 libbrowser-script: $(LIBBROWSER_SCRIPT_ARCHIVE)
 script-core: $(SCRIPT_CORE_PROGRAM)
 fetch: $(VULKAN_HEADERS_TARBALL) $(VULKAN_LOADER_TARBALL)
@@ -215,6 +229,19 @@ $(BROWSER_WIN32_OBJ)/%.o: %.c
 # <browser/browser.h>, which names Vulkan's types).  Of the script core only js/tool.c includes
 # <browser/browser.h>, and so does script-core.exe's main.
 $(LIBBROWSER_CORE_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
+
+# tls.c calls the OpenSSL linked into the program, which tls-static.c includes the headers of.
+$(BROWSER_WIN32_OBJ)/$(LIBBROWSER_DIR)/net/tls.o: WIN32_CFLAGS += -DWB_TLS_STATIC
+$(BROWSER_WIN32_OBJ)/$(LIBBROWSER_DIR)/net/tls-static.o: WIN32_CFLAGS += -I$(BROWSER_WIN32_OPENSSL)/include
+$(BROWSER_WIN32_OBJ)/$(LIBBROWSER_DIR)/net/tls-static.o: | $(WIN32_OPENSSL_LIBSSL)
+
+# OpenSSL, one run of the script for both libraries and the headers.  The toolchain is llvm-mingw
+# (LLVM_MINGW=, else the script's default).
+$(WIN32_OPENSSL_LIBSSL): plan/ws334/tests/openssl-windows.sh plan/ws334/tests/openssl-conf/10-mingw-arm64.conf
+	@mkdir -p $(BROWSER_WIN32_OPENSSL)
+	$(if $(strip $(LLVM_MINGW)),LLVM_MINGW='$(LLVM_MINGW)') sh plan/ws334/tests/openssl-windows.sh $(WIN32_ARCH) $(BROWSER_WIN32_OPENSSL)
+$(WIN32_OPENSSL_LIBCRYPTO): $(WIN32_OPENSSL_LIBSSL)
+	@test -f $@
 $(SCRIPT_CORE_OBJECTS): | $(WIN32_VULKAN_HEADERS)
 
 # A compat object keeps what the compiler said in <object>.log, and shows it only when the compile fails.
