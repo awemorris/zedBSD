@@ -382,6 +382,7 @@ static int cascade_font_size_keyword(const struct css_value *value, int parent_k
 static void cascade_families(struct css_style *style, const struct css_value *value);
 static int cascade_monospace_only(const struct css_style *style);
 static void cascade_monospace_size(struct css_style *style, const struct css_style *parent, const struct css_declaration *font_size);
+static int cascade_name_same(const struct css_token *token, const struct vm_string *name);
 
 /*
  * Makes an engine with the user agent's style sheet.
@@ -606,6 +607,38 @@ css_engine_sheet_count(
 	const struct css_engine *engine)
 {
 	return engine->sheets.count;
+}
+
+/*
+ * Tells whether a sheet of the engine may name an attribute: one of its
+ * identifiers that may name a data-* attribute has the name's text (ASCII
+ * letters in any case).  Only data-* names are kept, so it answers 0 for
+ * another name; the caller asks only about data-* attributes.
+ */
+int
+css_engine_names_attribute(
+	const struct css_engine *engine,
+	const struct vm_string *name)
+{
+	const struct cascade_sheet *entry;
+	const struct css_token *token;
+	size_t sheet;
+	size_t index;
+	int same;
+
+	/* Each identifier of each sheet. */
+	for (sheet = 0; sheet < engine->sheets.count; sheet++) {
+		entry = wb_vector_at(&engine->sheets, sheet);
+		for (index = 0; index < entry->sheet->data_name_count; index++) {
+			token = entry->sheet->data_names[index];
+			same = cascade_name_same(token, name);
+			if (same)
+				return 1;
+		}
+	}
+
+	/* No sheet names it. */
+	return 0;
 }
 
 /*
@@ -7433,4 +7466,32 @@ cascade_monospace_size(
 	} else {
 		style->font_size = style->font_size * CASCADE_DEFAULT_FONT_SIZE / CASCADE_MONOSPACE_FONT_SIZE;
 	}
+}
+
+/* Tells whether an identifier token has an attribute name's text, ASCII letters folded to lower case. */
+static int
+cascade_name_same(
+	const struct css_token *token,
+	const struct vm_string *name)
+{
+	size_t index;
+	uint16_t left;
+	uint16_t right;
+
+	/* The same length. */
+	if (token->length != name->length)
+		return 0;
+
+	/* Each character. */
+	for (index = 0; index < token->length; index++) {
+		left = token->text[index];
+		right = vm_string_at(name, index);
+		if (left >= 'A' && left <= 'Z')
+			left = (uint16_t)(left - 'A' + 'a');
+		if (right >= 'A' && right <= 'Z')
+			right = (uint16_t)(right - 'A' + 'a');
+		if (left != right)
+			return 0;
+	}
+	return 1;
 }

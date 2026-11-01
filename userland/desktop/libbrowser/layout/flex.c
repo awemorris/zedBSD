@@ -1061,7 +1061,18 @@ flex_base_size(
 	if (item->base < 0 && row) {
 		/* Replaced items obtain their width from ordinary replaced layout. */
 		if (child->replaced) {
+			struct css_length given;
+
+			/*
+			 * A percentage of a container being measured counts as auto (as for
+			 * the box model above): the container's width is only the measuring
+			 * width, and the item is as wide as it naturally is.
+			 */
+			given = child->style.width;
+			if (tree->measuring != 0 && box->style.width.unit != CSS_UNIT_PX && given.unit == CSS_UNIT_PERCENT)
+				child->style.width.unit = CSS_UNIT_AUTO;
 			error = layout_block(tree, child, box->width);
+			child->style.width = given;
 			if (error != 0)
 				return error;
 
@@ -2022,9 +2033,6 @@ flex_min_content(
 	struct layout_box *box,
 	layout_unit *width)
 {
-	struct layout_context context;
-	struct wb_vector floats;
-	struct css_length given;
 	int error;
 
 	/* A replaced box's content is its image, as wide as it is (a control sized by a percentage, as wide as it naturally is). */
@@ -2036,20 +2044,12 @@ flex_min_content(
 		return 0;
 	}
 
-	/* The content at no width, with an auto width, while the tree measures. */
-	given = box->style.width;
-	box->style.width.unit = CSS_UNIT_AUTO;
-	tree->measuring++;
-	layout_context_begin(tree, &context, &floats);
-	error = layout_block(tree, box, 0);
-	layout_context_end(tree, &context);
-	tree->measuring--;
-	box->style.width = given;
+	/* The content at no width, with an auto width, while the tree measures (kept in the box once measured). */
+	error = layout_narrowest(tree, box, width);
 	if (error != 0)
 		return error;
 
 	/* Succeeded: the widest thing that could not be broken. */
-	*width = layout_content_width(box, 0);
 	return 0;
 }
 

@@ -48,6 +48,7 @@ static int page_dump_style_line(const struct dom_element *element, const struct 
 static int page_indent(struct wb_buffer *out, int depth);
 static int page_append_string(struct wb_buffer *out, const struct vm_string *string);
 static int page_append_length(struct wb_buffer *out, const struct css_length *length);
+static int page_attribute_styled(void *context, const struct vm_string *name);
 
 /*
  * Makes an empty page: a heap whose C stack ends at stack_base, and an
@@ -89,6 +90,10 @@ page_create(
 		free(created);
 		return ENOMEM;
 	}
+
+	/* The document asks the page whether a style sheet names a data-* attribute it changes. */
+	created->document->attribute_styled = page_attribute_styled;
+	created->document->attribute_styled_context = created;
 
 	/* Keeps the document alive as a root. */
 	error = vm_heap_add_root(created->heap, (struct vm_cell **)&created->document);
@@ -676,7 +681,7 @@ page_layout(
 	}
 
 	/* Only a complete layout advances observable generation and geometry caches. */
-	page->laid_out_generation = page->document->generation;
+	page->laid_out_generation = page_generation(page);
 	page->laid_out_frames = page_frames_generation(page);
 	page_animations_sync(page);
 	page->laid_out_transition = page->transition_generation;
@@ -974,6 +979,41 @@ page_container_size(
 }
 
 /*
+ * Reports the document's generation without the changes no style can see
+ * (data-* attributes that no style sheet names), which tells whether the
+ * page's style and layout are out of date.
+ */
+uint32_t
+page_generation(
+	const struct page *page)
+{
+	/* The difference wraps with the two counts. */
+	return page->document->generation - page->document->quiet_generation;
+}
+
+/*
+ * Tells the document whether one of the page's style sheets may name an
+ * attribute (a page not styled yet counts every attribute as named).
+ */
+static int
+page_attribute_styled(
+	void *context,
+	const struct vm_string *name)
+{
+	struct page *page;
+	int named;
+
+	/* A page without its styles cannot tell. */
+	page = context;
+	if (page->css == NULL)
+		return 1;
+
+	/* The sheets of its engine. */
+	named = css_engine_names_attribute(page->css, name);
+	return named;
+}
+
+/*
  * Gathers the style sheets again when a script changed the document, or
  * a fetched sheet arrived, since they were last gathered.
  */
@@ -986,7 +1026,7 @@ page_update_styles(
 
 	/* Styles that are up to date stay. */
 	if (page->css != NULL &&
-	    page->styled_generation == page->document->generation &&
+	    page->styled_generation == page_generation(page) &&
 	    page->styled_visits == page->visits_generation &&
 	    page->styled_sheets == page->sheets_generation)
 		return 0;
@@ -996,7 +1036,7 @@ page_update_styles(
 	 * the page is styled again once they are all here.
 	 */
 	pending = page_sheets_pending(page);
-	if (page->css != NULL && page->styled_generation == page->document->generation &&
+	if (page->css != NULL && page->styled_generation == page_generation(page) &&
 	    page->styled_visits == page->visits_generation && pending)
 		return 0;
 
@@ -1372,7 +1412,7 @@ page_gather_styles(
 		return error;
 
 	/* Succeeded: the sheets match the document of this generation. */
-	page->styled_generation = page->document->generation;
+	page->styled_generation = page_generation(page);
 	page->styled_visits = page->visits_generation;
 
 	/* The links whose sheets have arrived tell their scripts (a handler may change the document). */

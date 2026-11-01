@@ -466,7 +466,11 @@ struct dom_doctype {
  *
  * generation grows with every change to a tree of the document (a node
  * inserted or removed, text or an attribute changed), so the page can tell
- * that its style and layout are out of date.
+ * that its style and layout are out of date.  quiet_generation grows with
+ * it for each change to a data-* attribute that attribute_styled (the
+ * page's, called with attribute_styled_context; NULL when there is no
+ * page) says no style sheet names: such a change cannot change a style,
+ * and the page leaves it out.
  *
  * compose_session grows each time the focus moves to another element and
  * each time the page itself ends what an input method was composing (a
@@ -509,6 +513,9 @@ struct dom_document {
 	enum dom_document_content content;
 	enum dom_quirks quirks;
 	uint32_t generation;
+	uint32_t quiet_generation;
+	int (*attribute_styled)(void *context, const struct vm_string *name);
+	void *attribute_styled_context;
 	uint32_t compose_session;
 	/* Ordinary attribute commits lend snapshots until this hook roots them before allocating. */
 	int (*attribute_changed)(struct dom_document *document, struct dom_element *element, struct vm_string *name, struct vm_string *old_value);

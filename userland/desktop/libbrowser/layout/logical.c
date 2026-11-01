@@ -385,9 +385,10 @@ logical_convert(
 	memcpy(kept, &box->style, sizeof(*kept));
 	box->physical_style = kept;
 
-	/* The logical one in its place (a max-content width measured in physical coordinates no longer holds). */
+	/* The logical one in its place (a max-content or min-content width measured in physical coordinates no longer holds). */
 	logical_style(&box->style, mode);
 	box->max_content_known = 0;
+	box->min_content_known = 0;
 
 	/*
 	 * A box of the other vertical mode has its own block start at its
@@ -863,6 +864,7 @@ logical_restore(
 	memcpy(&box->style, box->physical_style, sizeof(box->style));
 	box->physical_style = NULL;
 	box->max_content_known = 0;
+	box->min_content_known = 0;
 
 	/* The children of the domain. */
 	for (child = box->first_child; child != NULL; child = child->next)

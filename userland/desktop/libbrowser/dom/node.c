@@ -49,6 +49,7 @@ static struct dom_node *node_alloc(struct dom_document *document, const struct v
 static struct dom_node *character_data_create(struct dom_document *document, int node_type, const uint16_t *units, size_t length);
 static int node_set_attribute(struct dom_element *element, struct vm_string *name, struct vm_string *value, int *committed);
 static int node_attribute_notify(struct dom_element *element, struct vm_string *name, struct vm_string *old_value);
+static void node_attribute_changed(struct dom_element *element, int ns, const struct vm_string *name);
 
 /*
  * Makes an empty document in a heap, in no-quirks mode.
@@ -443,8 +444,8 @@ dom_element_add_attribute(
 	if (ns == DOM_NS_NONE)
 		dom_select_attribute_changed(element, name, 0, 1);
 
-	/* The attributes changed: the document's style is out of date. */
-	element->node.document->generation++;
+	/* The attributes changed: the document's style is out of date (unless no style can see the attribute). */
+	node_attribute_changed(element, ns, name);
 
 	/* Succeeded: the attribute is the element's last. */
 	return 0;
@@ -651,7 +652,7 @@ dom_element_remove_attribute(
 	memmove(&element->attributes[index], &element->attributes[index + 1U], after * sizeof(*attribute));
 	element->attribute_count--;
 	dom_select_attribute_changed(element, old_name, 1, 0);
-	element->node.document->generation++;
+	node_attribute_changed(element, DOM_NS_NONE, old_name);
 
 	/* The retired strings are borrowed only until the hook establishes its temporary roots. */
 	error = node_attribute_notify(element, old_name, old_value);
@@ -1364,7 +1365,7 @@ node_set_attribute(
 		name = attribute->name;
 		attribute->value = value;
 		dom_select_attribute_changed(element, name, 1, 1);
-		element->node.document->generation++;
+		node_attribute_changed(element, DOM_NS_NONE, name);
 	} else {
 		/* Append publishes all native attribute edges before any notification can allocate. */
 		error = dom_element_add_attribute(element, DOM_NS_NONE, NULL, name, value);
@@ -1413,4 +1414,47 @@ node_attribute_notify(
 
 	/* Succeeded: all interested owner registrations accepted this change. */
 	return 0;
+}
+
+/*
+ * Counts a change to an element's attribute in its document's generation,
+ * and in the quiet part of it when the attribute is a data-* one of no
+ * namespace that the page says no style sheet names.
+ */
+static void
+node_attribute_changed(
+	struct dom_element *element,
+	int ns,
+	const struct vm_string *name)
+{
+	static const char prefix[] = "data-";
+	struct dom_document *document;
+	size_t index;
+	uint16_t unit;
+	int styled;
+
+	/* Every change makes the document's generation grow. */
+	document = element->node.document;
+	document->generation++;
+
+	/* Only a data-* attribute of no namespace on a page that can tell can be quiet. */
+	if (document->attribute_styled == NULL || ns != DOM_NS_NONE)
+		return;
+	if (name->length <= sizeof(prefix) - 1U)
+		return;
+
+	/* The prefix, as HTML's attribute names have it. */
+	for (index = 0; index < sizeof(prefix) - 1U; index++) {
+		unit = vm_string_at(name, index);
+		if (unit != (uint16_t)prefix[index])
+			return;
+	}
+
+	/* One that a style sheet names may change a style. */
+	styled = document->attribute_styled(document->attribute_styled_context, name);
+	if (styled)
+		return;
+
+	/* The change is one no style can see. */
+	document->quiet_generation++;
 }
