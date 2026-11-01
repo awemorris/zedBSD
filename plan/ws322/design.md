@@ -173,6 +173,7 @@ Parent: [WS322](ws.md)。Phase: [ws322-p001](phase001/phase.md)（この文書�
 - SET_FB: linear の組、続いて FBC の組を 8 枚ずつ登録（Procedure referenced: wave5-vpuapi.c `wave5_vpu_dec_register_frame_buffer_ex`、wave5-hw.c `wave5_vpu_dec_register_framebuffer`）。NV12 は CbCr の interleave。登録の後に全 index の display の flag を立て、使ってよい index だけを下ろす（§7.5）。
 - 並べ替えを止める: 毎回の DEC_PIC で「frame buffer の遅れを強いる」register に 1（Values referenced: wave5-regdefine.h `W5_CMD_DEC_FORCE_FB_LATENCY_PLUS1`、wave5-hw.c:999 の reorder の扱い）。これで decoded と display の index は毎回同じになる見込み（p002 で確かめる、R1）。
 - RESET（seek）: SPS が同じなら FLUSH_INSTANCE だけで、FBC と linear の組を保つ（大きな連続の memory を取り直さない、R8）。SPS が変われば次の decode で sequence を作り直す。
+  - p007 の観測: flush の後は firmware の read の位置（flush の後の問い）から ring に続けて書き、parameter set を送り直すと、IDR ごとの RESET（600 枚に 10 回）で全 frame が参照と一致した。flush を断られたら instance を閉じる（p004 の形）。
 
 ### 7.5 出力（driver の pool と GPU の transfer）
 
@@ -330,7 +331,7 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 | session の作成の失敗（work buffer・ring・CREATE_INSTANCE） | `VK_ERROR_INITIALIZATION_FAILED`、libmedia は software に落ちる（WS318 Q318-1） |
 | INIT_SEQ の失敗・8 bit でない・大きすぎる | その絵は ERROR、sequence 無しのまま次の I slice の絵を待つ |
 | DEC_PIC の誤り（成功の印 0・decoded の index の不一致・firmware が index を断った・空きの FB 無し） | その絵は ERROR、宛先は変えない（写さない）、出し直さない。submission は失わない（i915・Pi と同じ） |
-| DEC_PIC の timeout（500 ms） | `decode` が返る前に、vpu_lock の下で core の reset の line を assert して VPU を止め、全 instance を「壊れた」に、reset を解いて firmware を boot し直す（Procedure referenced: wave5-hw.c `wave5_vpu_reset`・`wave5_vpu_re_init`）。他の session の instance も firmware と一緒に消えるので、壊れた instance は次の decode の時に CREATE_INSTANCE から作り直し、次の I slice の絵まで ERROR。続けて 3 回 reset なら reset の line を assert したまま domain を off にし、engine を止める（以後の session の作成は失敗、boot まで video 無し。`operations()` はそのままなので capset は video を出したまま、session の作成で断る） |
+| DEC_PIC の timeout（500 ms）（p007 で実装。命令と sequence の timeout も同じ。止め方は software reset の後に line の保持） | `decode` が返る前に、vpu_lock の下で core の reset の line を assert して VPU を止め、全 instance を「壊れた」に、reset を解いて firmware を boot し直す（Procedure referenced: wave5-hw.c `wave5_vpu_reset`・`wave5_vpu_re_init`）。他の session の instance も firmware と一緒に消えるので、壊れた instance は次の decode の時に CREATE_INSTANCE から作り直し、次の I slice の絵まで ERROR。続けて 3 回 reset なら reset の line を assert したまま domain を off にし、engine を止める（以後の session の作成は失敗、boot まで video 無し。`operations()` はそのままなので capset は video を出したまま、session の作成で断る） |
 | 4 MiB を超える絵・parameter set が無い | その絵は ERROR |
 | pool からの transfer の失敗 | その絵は ERROR |
 | SLC の flush の失敗 | submission は EIO（GPU の仕事が残っているかもしれないので、今の executor の規則どおり lost） |
@@ -422,11 +423,11 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 | R5 | （p002 で否）read pointer の戻し（SET_BS_RD_PTR は firmware が知らない、DEC_PIC の前の register の書き込みは効かない） | ring を続けて使う（§7.3）。wrap の扱いは p004 で確かめる |
 | R6 | 割り込みの番号・形（level・edge）が違う | poll の 1 ms に落とす（Linux の driver の fallback と同じ） |
 | R7 | NOC の制御（`vdec_noc_ctrl`）が要る | vendor の GPL の module の値を引用の規則で読む |
-| R8 | FBC の pool の連続の大きな allocation（4K で 1 枚 約 14 MB × 18）が取れない | 解像度の上限を下げて報告し直す（1080p の pool は 約 56 MB）。p007 で測る |
-| R9 | SLC の flush の費用・global な flush が他の session を遅らせる | 費用を測る。重ければ video の image の memory を SLC の迂回で map する（§17 D6 の代わり） |
+| R8 | FBC の pool の連続の大きな allocation（4K で 1 枚 約 14 MB × 18）が取れない | 解像度の上限を下げて報告し直す（1080p の pool は 約 56 MB）。p007 で測る（p007: 2160p30 の session が取れて decode した。task buffer は vendor の式で firmware が約 2 MB で止まり、×1.05 で止まらず、×1.5 にした。1080p 23.3 MB、2160p 79.2 MB） |
+| R9 | SLC の flush の費用・global な flush が他の session を遅らせる | 費用を測る。重ければ video の image の memory を SLC の迂回で map する（§17 D6 の代わり）（p004 から pool を SLC の迂回で map しているので decode の側の flush は無い） |
 | R10 | Wave420L の参照の license（Q322-2） | 答えが C なら encode は WS330 の software だけ（p008〜p011 を取り下げ） |
 | R11 | （p002 で済）chagall.bin（949120 B、版 0x2d46a）と wave511_dec_fw.bin（952768 B、版 0x38582）は別の byte。両方 boot し、probe の全 frame で同じ hash | 配るのは license の file がそろった chagall.bin（Q322-1）。driver は `/lib/firmware/wave511/chagall.bin` を読む |
-| R12 | 1 つの queue で decode を同期に待つので app の描画の submit が遅れる | p007 の非同期 |
+| R12 | 1 つの queue で decode を同期に待つので app の描画の submit が遅れる | p007 の非同期（p007 では入れず測った: VPU の 1 枚は 1080p 7 ms・2160p 20 ms、vkvideo-probe の記録→fence 1080p 12〜13 ms・2160p 約 36 ms、Video Player 1080p60 は約 57 fps で late あり） |
 | R13 | （第 3 版で訂正）libmedia の readback（uncached の memory を CPU で読む、PowerVR に host cached の type は無い）は 1080p60 に届かない見込み | readback は再生の道ではない（hash の照合の機能の試験の段だけ）。再生は Video Player の GPU の道（§9.3）。第 2 版の「1080p60 は WS318 の GPU の道の後」は誤りで、その道は WS243 で Video Player に既にある |
 | R14 | （p002 で観測）VPU は CPU の cache と一貫しない（tree の `dma-coherent` に反する） | uncached の view だけで触る今の形が正しい（§9.2）。追加の cache の保守は要らない |
 
