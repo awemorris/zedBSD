@@ -3,7 +3,7 @@
 # ws334-p022 統合: network を OS の層へ（loader・http・tls）と libmedia の起こしの callback
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §2.2 の O1〜O12・O25・O32・O33、§3.4、§5 の M1、§9.1。
-- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1830-i01、P7。p002 で作成）。
+- 状態: cleared（2026-11-01 09:45 Q1 の判定、main 20f6a10fc。P7 実装済み・試験 PASS: run-unit all 34 本・cross-build・fetch-wine・host の loader・http・fetch）
 - **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: 名前の表に Windows の DLL の名前（`libssl-3-x64.dll`・`libcrypto-3-x64.dll` ほか）を足さない。Windows の build は p030 の前は OpenSSL を開けずに今の EPROTONOSUPPORT、p030 で `net/tls-static.c` が表を埋める。下の本文の DLL の名前はこの通りに読み替える。
 - 依存: p007（os-net）・p021。
 - 担当の想定: Opus（phase-runner）を 1 回。module の約束は `base/os-net.h`・`base/os-system.h` の comment。挙動を変えない（zedBSD・Linux の host の network の試験の件数が前と同じ）。

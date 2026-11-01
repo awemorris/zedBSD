@@ -2,7 +2,7 @@
 
 # ws335-p008: GF(2^255-19) と X25519
 
-Status: in-progress（実装済み・試験 PASS、2026-11-01 09:50 担当。cleared は Q1）
+Status: cleared（2026-11-01 09:45 Q1 の判定、main 7ebb5367e。Q1 も run-unit f25519 x25519 を流して PASS）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
