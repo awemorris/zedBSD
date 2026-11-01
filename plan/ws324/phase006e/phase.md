@@ -5,7 +5,7 @@
 Status: planned（2026-11-01 P1 が p006a で作成。p006a 段 2 の基点の後に起動。p006b〜d と並べてよい）
 
 - WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md)（§1・§4 D2・D10・D11・D13・§5.3・§6・§7・§8）。
-- 基点 BASE: `<p006a 段 2 の SHA>`。この module は他の module の実装を呼ばない（型だけを使う）。試験の入力は手で組む。
+- 基点 BASE: `1f16db0e6`（2026-11-02 p006a 段 2 の commit 1f16db0e619a9cd23c74f7f36a8729efdba4ecb3）。この module は他の module の実装を呼ばない（型だけを使う）。試験の入力は手で組む。
 
 ## 1. 読む物
 
@@ -40,6 +40,10 @@ Status: planned（2026-11-01 P1 が p006a で作成。p006a 段 2 の基点の�
 
 ## 4. 注意
 
+- 試験の道具の口は設計の §8.1.1（p006a 段 2 の結果）。試験は `plan/ws324/tests/unit/test-<name>.c` に置き、include は `"check.h"`・`"h265write.h"`・`"userland/desktop/libmedia/<module>.h"`（include の道は tree の root）、`main` の最後は `check_finish("<name>")` の値を返す。大きな構造体（`h265sw_ps_store`・`h265_stream`・`h265_picture`・`h265w_sps` など）は static か calloc に置く。
+- 骨格の関数は本体ごと置き換え、「Not implemented yet」の comment も実装の comment に書き換える。module の中の補助は static 関数（一行の前方宣言を付ける）。外へ見える名前は `h265sw_`・`h265_` で始まる物だけ（check-skeleton の nm の照合）。
+- libmedia の .c は check-skeleton で `-std=c89 -Wpedantic` と zedBSD の clang（x86_64・aarch64・riscv64、tree の libc の header だけ）にも通す: `LL`・`ULL` の接尾辞（`-Wlong-long`）、`//` の comment、文の後の宣言、host にしか無い関数を使わない。64 bit の定数は `(uint64_t)1U << n` か乗算で作る。
+- `run-unit.sh` の `H265_UNIT_DIR` は道具の自己確かめ用。使わない。
 - 8.3.2 の照合の順: long-term（step 1・2）を先に、short-term（step 3）は short-term の参照の中から。1 つの絵は 2 つの set に入らない（NOTE 5）ので、選んだ絵を印して再び選ばない。
 - `PicOrderCntVal & ( MaxPicOrderCntLsb − 1 )` は負の POC で floor の算術（`h265sw.h` の約束）。
 - C.5.2.2 の IRAP の枝は picture 0（started 0）では何もしない。
@@ -56,7 +60,7 @@ Status: planned（2026-11-01 P1 が p006a で作成。p006a 段 2 の基点の�
 ```
 sh plan/ws324/tests/run-unit.sh dpb
 sh plan/ws324/tests/run-unit.sh all
-BASE=<p006a 段 2 の SHA> sh plan/ws324/tests/check-skeleton.sh
+BASE=1f16db0e6 sh plan/ws324/tests/check-skeleton.sh
 git diff --check
 ```
 

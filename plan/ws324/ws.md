@@ -17,7 +17,14 @@
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [ws324-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | cleared（2026-11-01 23:08 Q1、main a0fd88ee8。design.md 第 2 版、review 31 件の反映） | （WS318 を待たない、2026-11-01 ユーザー） |
-| [ws324-p006a](phase006a/phase.md) | H.265 の解析の設計（標準廉価実装手順 §4、[h265-parse-design.md](h265-parse-design.md)、header は [proposed/h265/](proposed/h265/)）と、header を source に置く段 2 | in-progress（2026-11-02 P1 q1864-i01。段 1 の設計と review 2 の 20 件の反映済み、Q1 の受け入れと Q-A〜Q-E 待ち） | Q324-1 |
+| [ws324-p006a](phase006a/phase.md) | H.265 の解析の設計（標準廉価実装手順 §4、[h265-parse-design.md](h265-parse-design.md)、header は [proposed/h265/](proposed/h265/)）と、header を source に置く段 2 | in-progress（2026-11-02 P1 q1864-i02。段 1 は Q1 の受け入れ済み（Q-A〜Q-E は A）。段 2 済み: 基点 BASE `1f16db0e6`、check-skeleton・run-unit all PASS。Q1 の受け入れ待ち） | Q324-1 |
+| [ws324-p006b](phase006b/phase.md) | h265sw-nal・h265sw-scaling・h265sw-vui の実装（Sonnet、BASE `1f16db0e6`） | planned | p006a 段 2 |
+| [ws324-p006c](phase006c/phase.md) | h265sw-rps・h265sw-ps の実装（Sonnet） | planned | p006b |
+| [ws324-p006d](phase006d/phase.md) | h265sw-slice・h265sw-poc の実装（Sonnet） | planned | p006c |
+| [ws324-p006e](phase006e/phase.md) | h265-dpb の実装（Sonnet） | planned | p006a 段 2 |
+| [ws324-p006f](phase006f/phase.md) | h265-std の実装（Sonnet） | planned | p006a 段 2 |
+| [ws324-p006g](phase006g/phase.md) | h265-stream の実装（Sonnet） | planned | p006d |
+| [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | planned | p006e〜g |
 
 ### 実装の Phase の案（2026-11-01 P1、[design.md](design.md) 第 2 版 §15。Q1 の受け入れの後に表へ）
 
@@ -28,8 +35,7 @@
 | p004 | libvulkan の H.265 decode の転送、capset の bit 2、video の門を bit ごとに | p002、Q324-3 |
 | p005 | nvrtx の H.265 decode（NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離） | p004 |
 | p006a | H.265 の解析の設計（標準廉価実装手順）と header の配置（段 2） | Q324-1（p002 は要らない: host の Vulkan の header で試験） |
-| p006b〜g | H.265 の解析の実装、Sonnet（nal・scaling・vui ／ rps・ps ／ slice・poc ／ dpb ／ std ／ stream）（p006a の案、[h265-parse-design.md](h265-parse-design.md) §9、Q-B） | p006a 段 2（b→c→d→g、e・f は並べて） |
-| p006h | H.265 の解析の適合の試験（HEVC_v1、host） | p006e〜g |
+| p006b〜h | （上の Phase の表へ移した、2026-11-02 p006a 段 2。Q-B の A） | — |
 | p006i | vkvideo-probe の H.265（前の案の p006e） | p006h、p002 |
 | p007 | H.265 decode の実機の debug | p005、p006i、実機 |
 | p008a | libvulkan の encode の転送（queue と H.264、命令の番号、video の query pool、capset の bit 3） | p003、Q324-3 |
@@ -60,6 +66,7 @@
 
 ## Resume point
 
+- 2026-11-02 P1（q1864-i02）: p006a 段 2。header 11 個を `userland/desktop/libmedia/` に置き、骨格 .c 10 個、`plan/ws324/tests/`（run-unit.sh・check-skeleton.sh・unit/h265write.h・unit/test-h265write.c）、基点 BASE `1f16db0e6`。p006b〜h の phase.md に BASE と道具の注意（design §8.1.1）。次は Q1 の受け入れと p006b・p006e・p006f の起動。
 - 2026-11-01 P1（q1864-i01）: p006a 段 1。[h265-parse-design.md](h265-parse-design.md)、[proposed/h265/](proposed/h265/) の header 11 個、phase006b〜h の phase.md、design-review.md の review 2（20 件を全部反映）。次は Q1 の受け入れと Q-A〜Q-E（[phase006a](phase006a/phase.md)）、その後に段 2。
 - 2026-11-01 P1（q1854）: p001 の design.md 第 2 版（review 1 の 31 件を反映、design-review.md）・proposed/・問い Q324-1〜6（phase.md）。次は Q1 の受け入れと問いの答え。
 

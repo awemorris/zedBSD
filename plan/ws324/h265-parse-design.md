@@ -187,9 +187,21 @@ end: h265_dpb_flush
 | 道具 | 中身 |
 | --- | --- |
 | `plan/ws324/tests/run-unit.sh NAME...｜all` | `plan/ws324/tests/unit/test-<name>.c` を、`userland/desktop/libmedia/` の `h265sw-*.c`・`h265-*.c`・`vcodec-bitreader.c`・`vcodec-nal.c`・`bits.c` と一緒に、host の cc で `-std=c89 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined` で build し流す（`-I. -Iplan/tools/h264sw/unit -Iplan/ws324/tests/unit`、Vulkan は host の `/usr/include`）。出力は `plan/tools/fresh-out.sh` の新しい directory。最後の行 `run-unit: PASS`／`FAIL`。各試験の最後の行 `test-<name>: PASS (<n> checks)` |
-| `plan/ws324/tests/check-skeleton.sh`（`BASE=<sha>`） | 1. 11 個の header が単独で 2 回 include して cc と clang の `-std=c89 -Wall -Wextra -Werror -Wpedantic` で通る、2. 全 .c が両方で警告無しに compile できる、3. `h265sw-*` の file が `h265-*`・`vulkan` を名指さない（一方向）、`h265-dpb`・`h265-stream` が `vulkan` を名指さない、4. `BASE` からの header の不変、5. `vcodec*.h` が WS326 の基点 77ed48ac4 から不変（D4）。最後の行 `check-skeleton: PASS`／`FAIL` |
+| `plan/ws324/tests/check-skeleton.sh`（`BASE=<sha>`） | 1. 11 個の header が単独で 2 回 include して cc と clang の `-std=c89 -Wall -Wextra -Werror -Wpedantic` で通る、2. 全 .c が両方で警告無しに compile でき、`build/llvm` があれば zedBSD の clang（x86_64・aarch64・riscv64、tree の libc の header、syntax だけ）でも通る（`h265-std` は tree に Vulkan の H.265 の header が入る p002 まで飛ばす）、3. include の行で `h265sw*` が `h265-*`・Vulkan を、`h265-dpb`・`h265-stream` が Vulkan と `h265-std.h` を名指さない（一方向）、4. header が宣言する関数が全部 .c に定義され、cc の object の外部の名前が `h265sw_`・`h265_` だけ（nm）、5. `sources.mk`・`Makefile` が h265 を名指さない（D3）、6. `BASE` からの header と道具（run-unit.sh・check-skeleton.sh・h265write.h・test-h265write.c・h264sw の check.h・bitwriter.h）の不変（足し・消しも）、7. `vcodec*.h` が WS326 の基点 77ed48ac4 から不変（D4）。最後の行 `check-skeleton: PASS`／`FAIL` |
 | `plan/ws324/tests/unit/h265write.h` | 試験の入力を作る書き手（parser の code を使わず、7.3 の syntax の表から書く）: 2 byte の NAL の header と emulation prevention（7.4.2 の規則）と start code、PTL・VPS・SPS（scaling list・st_ref_pic_set の両方の形・long-term・VUI・HRD・range extension の flag）・PPS（tile・deblocking・scaling・range extension）・slice segment header（全分岐、st_ref_pic_set の予測、long-term、重み、entry point、extension、byte_alignment）を値の構造体から書く。`plan/tools/h264sw/unit/bitwriter.h` の上に置き、自己試験 `test-h265write.c`（書いた物を手で並べた bit 列と比べる）を持つ |
 | 再利用 | `plan/tools/h264sw/unit/check.h`（`CHECK`、最後の行）、`bitwriter.h` |
+
+### 8.1.1 道具の口（p006a 段 2 の結果、基点 BASE `1f16db0e6`）
+
+- 基点 BASE: **`1f16db0e6`**（2026-11-02 P1、commit 1f16db0e619a9cd23c74f7f36a8729efdba4ecb3）。header 11 個（proposed と同じ byte）、骨格 .c 10 個（50 関数）、上の 4 つの道具。実装の Phase の確かめは `BASE=1f16db0e6 sh plan/ws324/tests/check-skeleton.sh`。
+- 骨格: int の関数は `return ENOSYS;`、void の関数は何もしない（`h265sw_nal_is_*` などの判定の関数も ENOSYS を返すので、骨格では「真」に見える。試験は必ず値で確かめる）。
+- `run-unit.sh`: 試験ごとに全 module と `vcodec-bitreader.c`・`vcodec-nal.c`・`bits.c` を link する（未実装の module は骨格のまま link される）。試験の file が無い名前は FAIL、PASS の行で終わらない試験も FAIL。`H265_UNIT_DIR` は道具の自己確かめ用（段 2 で scratchpad の probe を流すのに使った）。
+- `h265write.h`（接頭辞 `h265w_`）:
+  - 値の構造体は syntax element の名前の field を持ち、全部 `uint32_t`／`int32_t`（範囲の外の値も書ける）。無い element の field は読まれない。無い element に依る条件は semantics の推定の値を使う（例: B 以外の collocated_from_l0 は 1）。
+  - 書き手は導出をしない。予測の st_ref_pic_set の組の数は `ref_num_delta_pocs`（NumDeltaPocs[ RefRpsIdx ]）に試験が入れる。slice header が SPS・PPS から読む値は `struct h265w_slice_context`（`h265w_slice_context_from` が writer の SPS・PPS から埋める。NumPicTotalCurr は試験が入れる）。
+  - 数が配列を超える時は数を書き、entry は配列の分まで書く（範囲の外の数の試験は parse がその数で止まる事を見る）。
+  - 口: `h265w_ptl`・`h265w_scaling`（`h265w_scaling_from_lists` は欲しい list から delta を作る）・`h265w_hrd`・`h265w_vui`・`h265w_st_rps`・`h265w_vps`・`h265w_sps`・`h265w_pps`（各 RBSP は rbsp_trailing_bits まで）・`h265w_slice`（byte_alignment まで。`alignment_one`・`alignment_zero` で壊した alignment も書ける）・`h265w_nal`（2 byte の header と emulation prevention）・`h265w_stream_init`／`_bytes`／`_rbsp`（Annex B、start code は既定 4 byte、`start_code_bytes` 3 も可）。有効な既定値: `h265w_vps_default`・`h265w_sps_default`（64x64、4:2:0 8 bit、CTB 16、POC の lsb 8 bit）・`h265w_pps_default`・`h265w_slice_default`（I の最初の segment）・`h265w_profile_main`。
+  - 自己試験 `test-h265write.c`（51 checks）: NAL の header と escape、Annex B、PTL（sub-layer あり）、st_ref_pic_set の 4 形、scaling list と delta の作り、HRD 2 形、VUI、VPS 2 形、SPS 2 形、PPS 2 形、slice header の I・P・B・dependent を、syntax の表から手で並べた bit 列と比べる。書き手を 8 通りに壊して FAIL を確かめた（escape の 1 通りの見逃しは試験を足して塞いだ）。
 
 ### 8.2 単体試験の方針（全 Phase）
 
@@ -248,6 +260,7 @@ end: h265_dpb_flush
 3. §8.1 の道具（`run-unit.sh`・`check-skeleton.sh`・`unit/h265write.h` と自己試験）。
 4. 確かめ: `check-skeleton.sh` PASS（1〜3・5）、`run-unit.sh h265write` PASS、`BASE=77ed48ac4 sh plan/tools/h264sw/check-skeleton.sh` と `sh plan/tools/h264sw/run-unit.sh all` が前と同じ（H.264 の非退行）、`git diff --check`。
 5. commit の SHA を **基点 BASE** として ws.md・design・各 phase.md の「確かめの command」に書く（同じ commit か直後の plan の commit）。
+6. 結果（2026-11-02 P1）: BASE は `1f16db0e6`（§8.1.1）。確かめの結果は [phase006a](phase006a/phase.md) の「結果（段 2）」。
 
 ## 10. 他の WS への影響（Q1 が記録する物）
 

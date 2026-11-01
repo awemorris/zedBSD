@@ -5,7 +5,7 @@
 Status: planned（2026-11-01 P1 が p006a で作成。p006d の cleared の後に起動）
 
 - WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md)（§1・§4 D3・D10〜D12・D14・§5.3・§6・§7・§8）。
-- 基点 BASE: `<p006a 段 2 の SHA>`。前提: p006b〜d が main にある（h265-dpb・h265-std は使わない）。
+- 基点 BASE: `1f16db0e6`（2026-11-02 p006a 段 2 の commit 1f16db0e619a9cd23c74f7f36a8729efdba4ecb3）。前提: p006b〜d が main にある（h265-dpb・h265-std は使わない）。
 
 ## 1. 読む物
 
@@ -38,6 +38,10 @@ Status: planned（2026-11-01 P1 が p006a で作成。p006d の cleared の後�
 
 ## 4. 注意
 
+- 試験の道具の口は設計の §8.1.1（p006a 段 2 の結果）。試験は `plan/ws324/tests/unit/test-<name>.c` に置き、include は `"check.h"`・`"h265write.h"`・`"userland/desktop/libmedia/<module>.h"`（include の道は tree の root）、`main` の最後は `check_finish("<name>")` の値を返す。大きな構造体（`h265sw_ps_store`・`h265_stream`・`h265_picture`・`h265w_sps` など）は static か calloc に置く。
+- 骨格の関数は本体ごと置き換え、「Not implemented yet」の comment も実装の comment に書き換える。module の中の補助は static 関数（一行の前方宣言を付ける）。外へ見える名前は `h265sw_`・`h265_` で始まる物だけ（check-skeleton の nm の照合）。
+- libmedia の .c は check-skeleton で `-std=c89 -Wpedantic` と zedBSD の clang（x86_64・aarch64・riscv64、tree の libc の header だけ）にも通す: `LL`・`ULL` の接尾辞（`-Wlong-long`）、`//` の comment、文の後の宣言、host にしか無い関数を使わない。64 bit の定数は `(uint64_t)1U << n` か乗算で作る。
+- `run-unit.sh` の `H265_UNIT_DIR` は道具の自己確かめ用。使わない。
 - 絵の終わりは、AU を始め得る NAL の後に来る次の base layer の VCL の first_slice_segment_in_pic_flag で決まる（header の comment）。その NAL だけで絵を切らない。
 - EOS・EOB は今集めている絵の AU に属する。その絵ではなく次の絵に after_eos と NoRaslOutputFlag 1 が付く。
 - 捨てる絵は POC の状態を変えない。返す絵だけ `h265sw_poc_finish`。
@@ -53,7 +57,7 @@ Status: planned（2026-11-01 P1 が p006a で作成。p006d の cleared の後�
 ```
 sh plan/ws324/tests/run-unit.sh stream
 sh plan/ws324/tests/run-unit.sh all
-BASE=<p006a 段 2 の SHA> sh plan/ws324/tests/check-skeleton.sh
+BASE=1f16db0e6 sh plan/ws324/tests/check-skeleton.sh
 git diff --check
 ```
 
