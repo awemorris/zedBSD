@@ -336,6 +336,7 @@ keiui_win32_paint_caption(
 		ground.width = (int)width;
 		ground.height = (int)height;
 		kl_canvas_fill(&canvas, &ground, theme->ground_top);
+		keiui_win32_titlebar_draw(window, &canvas, width, height);
 		memset(&frame, 0, sizeof(frame));
 		frame.width = width;
 		frame.height = (uint32_t)(client.bottom - client.top);

@@ -44,6 +44,15 @@
 /* The largest font file read, in bytes. */
 #define TEXT_FONT_MAX		(64U * 1024U * 1024U)
 
+/*
+ * A C runtime that tells text files from binary ones (Windows') opens a
+ * font with O_BINARY, so that its bytes are read as they are; elsewhere
+ * there is no such flag.
+ */
+#ifndef O_BINARY
+#define O_BINARY		0
+#endif
+
 /* The ellipsis put where a string is cut, in UTF-8. */
 #define TEXT_ELLIPSIS		"\xe2\x80\xa6"
 
@@ -564,7 +573,7 @@ text_face_open(
 	int error;
 
 	/* The file. */
-	descriptor = open(path, O_RDONLY);
+	descriptor = open(path, O_RDONLY | O_BINARY);
 	if (descriptor < 0)
 		return errno;
 
