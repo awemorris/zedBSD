@@ -18,11 +18,13 @@
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| ws321-p001 | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | in-progress（P3 q1923） | — |
-| ws321-p002 | 実装: bcm2712 の HEVC の block の driver と Vulkan Video の executor（libvulkan の H.265 の転送・capset の bit 2 は main に有る） | planned | p001 |
+| [ws321-p001](phase001/phase.md) | 調べと設計: HEVC の block（register・clock・割り込み・2 段の pipeline・SAND の出力・制限）、出典と license、Vulkan Video への写し、試験の道 | in-progress（P3 q1923、設計を書いた） | — |
+| ws321-p002 | 実装: slice header と命令の FIFO（host 試験）、HEVC の block の driver、bcm2711 の executor の H.265 の reader と run（SAND の pool、TFU で NV12 へ）、`CONFIG_DRIVER_BCM2712_VIDEO` | planned | p001 |
 | ws321-p003 | 実機の受け入れ: vkvideo-probe の H.265 の適合の stream を ffmpeg と照合、Video Player の GPU の道で H.265 を再生 | planned | p002 |
 
 ## Resume point
+
+- 2026-11-02 08:45 P3（q1923）: p001 の設計を [phase001](phase001/phase.md) に書いた（出典は Raspberry Pi の Linux rpi-6.12.y の hevc_dec、GPL-2.0、値と手順だけ。firmware は無い）。次: p002。
 
 - 2026-10-30 Q1: 作成。
 - 2026-11-02 08:32 Q1: ユーザーの指示で P3（q1923）が p001〜p003 を続けて行う。
