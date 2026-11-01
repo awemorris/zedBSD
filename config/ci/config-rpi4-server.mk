@@ -48,6 +48,8 @@ CONFIG_DRIVER_BCM2711_GENET := y
 CONFIG_DRIVER_BCM2711_AUDIO := y
 CONFIG_DRIVER_BCM2711_WIFI := y
 CONFIG_DRIVER_BCM2711_BT := n
+CONFIG_DRIVER_BCM2711_VCHIQ := n
+CONFIG_DRIVER_BCM2711_VIDEO := n
 CONFIG_DRIVER_LGY98 := n
 
 ZEDBSD_USER_PROGRAMS := account-admin admin ar at audiod awk base64 basename batch bc blkid bluetoothd bootlog bt cal cat cflow chgrp chmod chown cksum cmp comm compress cp crontab csplit curses cut cxref date dd delta df dhcpc diff dirname diskpart dmesg du echo ed egrep emacs env expand expr false fetch fgrep fidoctl file find fmt fold fuser gencat get getconf gettext grep halt head host hostname iconv id ifconfig infocmp install ipcrm ipcs join kill less libz-compat link ln locale localedef logger login logname lp lpr ls lspci lsusb m4 mailx make mesg mkdir mkfifo mkfs mkswap mktemp more msgfmt mv newgrp ngettext nice nl nm noct nohup nslookup ntpdate od passkey-fido2 passkey passwd paste patch pathchk pax ping poweroff pr printf prs ps pwd readlink realpath reboot renice rm rmdel rmdir route sact sccs sed seq service shutdown sleep sort split stat strings stty su sudo swapoff swapon sync tabs tac tail talk tee terminfo-extra terminfo test tic time timeout top touch tput tr true truncate tsort tty uname uncompress unexpand unget uniq unlink useradd userdel usermod uudecode uuencode val vi volumed wc what which who whoami wifi write xargs zcat files imageview libgl libegl libgif-compat libglesv2 libjpeg-compat libkeiland libpdf libpng-compat libtruetype libvulkan libwayland-egl libwayland-client monitor notes pdfviewer sessiond settings terminal textedit wayland xserver bcm43455-firmware brcmbt-firmware rtl8822b-firmware hand-hershey noto-color-emoji zlib libavcodec curl openssh ca-certificates openssl

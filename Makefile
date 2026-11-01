@@ -392,6 +392,22 @@ CONFIG_DRIVER_BCM2711_VIDEO ?= n
 # A test kernel's boot-time probe of the decoder's output order.
 CONFIG_DRIVER_BCM2711_VIDEO_PROBE ?= n
 
+# The Pi 4's own drivers build for its board alone.  A config.mk the menu
+# wrote after switching from the Pi 4 to another board still names them as
+# they were (the menu keeps another board's choices), and the Pi 5 shares
+# the BCM2711 GPU's Vulkan sources, which read these switches, so on any
+# other board they are off.
+ifneq ($(ZEDBSD_BOARD),rpi4)
+override CONFIG_DRIVER_BCM2711_GENET := n
+override CONFIG_DRIVER_BCM2711_GPU := n
+override CONFIG_DRIVER_BCM2711_AUDIO := n
+override CONFIG_DRIVER_BCM2711_WIFI := n
+override CONFIG_DRIVER_BCM2711_BT := n
+override CONFIG_DRIVER_BCM2711_VCHIQ := n
+override CONFIG_DRIVER_BCM2711_VIDEO := n
+override CONFIG_DRIVER_BCM2711_VIDEO_PROBE := n
+endif
+
 # The ACPI driver builds on amd64; it stays off at run time when
 # the platform gives no RSDP (hal_get_arch_handoff("acpi.rsdp")).
 CONFIG_DRIVER_ACPI ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
@@ -441,11 +457,12 @@ CONFIG_DRIVER_RPI5_BT ?= n
 # by default, since the fan protects the board.
 CONFIG_DRIVER_RPI5_FAN ?= y
 
-# The Raspberry Pi 5's V3D 7.1 render engine (ws279): off by default.  With
-# it the kernel finds the engine at boot and holds it; root powers it and
-# runs its self-test with sysctl hw.gpu.start=1, and the result is in the
-# kernel log (dmesg | grep v3d).
-CONFIG_DRIVER_BCM2712_GPU ?= n
+# The Raspberry Pi 5's V3D 7.1 render engine and display: on by default on
+# that board, as the menu has it.  The kernel finds the engine at boot and
+# holds it; cmdline.txt's rpi5gpu.start=boot (or root's sysctl
+# hw.gpu.start=1) powers it and runs its self-test, and the result is in
+# the kernel log (dmesg | grep v3d).
+CONFIG_DRIVER_BCM2712_GPU ?= $(if $(filter rpi5,$(ZEDBSD_PLATFORM)),y,n)
 
 CONFIG_INPUT_TEST_INJECT ?= n
 CONFIG_SECURITY_KEY_TEST_LOOPBACK ?= n
