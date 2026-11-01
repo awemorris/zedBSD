@@ -1461,7 +1461,7 @@ page_needs_layout(
 		return 1;
 
 	/* A change since the layout. */
-	if (page->laid_out_generation != page->document->generation)
+	if (page->laid_out_generation != page_generation(page))
 		return 1;
 	if (page->laid_out_visits != page->visits_generation)
 		return 1;

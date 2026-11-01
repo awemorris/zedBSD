@@ -846,6 +846,14 @@ struct css_sheet {
 	size_t keyframe_count;
 	struct css_rule_index index;
 	int origin;
+	/*
+	 * The identifiers of the sheet that may name a data-* attribute (in an
+	 * attribute selector or attr()), as the tokens have them (in the
+	 * arena): a change to a data-* attribute that none of the page's sheets
+	 * names cannot change a style.
+	 */
+	const struct css_token **data_names;
+	size_t data_name_count;
 };
 
 /*

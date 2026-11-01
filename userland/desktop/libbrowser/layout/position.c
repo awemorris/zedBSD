@@ -76,6 +76,9 @@ static layout_unit position_frame(const struct layout_box *box);
 static layout_unit position_outer_height(const struct layout_box *box);
 static int position_collect(const struct layout_box *box, struct wb_vector *entries, int depth, int constrained, int outer_z);
 static layout_unit position_inline_floats(const struct layout_box *box, int depth);
+static void position_min_content_sizes(const struct layout_box *box, struct css_length *sizes);
+static int position_min_content_kept(const struct layout_tree *tree, const struct layout_box *box);
+static int position_length_same(const struct css_length *first, const struct css_length *second);
 
 /*
  * Places every box out of the flow of a laid out tree (whose normal flow
@@ -451,9 +454,6 @@ layout_min_content(
 	struct layout_box *box,
 	layout_unit *width)
 {
-	struct layout_context context;
-	struct wb_vector floats;
-	struct css_length given;
 	int error;
 
 	/* A replaced item cannot break inside its own width. */
@@ -467,20 +467,10 @@ layout_min_content(
 	    layout_logical_wanted(tree, box))
 		return position_orthogonal_width(tree, box, width);
 
-	/* Lay it out in zero room to take every allowed line break. */
-	given = box->style.width;
-	box->style.width.unit = CSS_UNIT_AUTO;
-	tree->measuring++;
-	layout_context_begin(tree, &context, &floats);
-	error = layout_block(tree, box, 0);
-	layout_context_end(tree, &context);
-	tree->measuring--;
-	box->style.width = given;
+	/* The content laid out in no room. */
+	error = layout_narrowest(tree, box, width);
 	if (error != 0)
 		return error;
-
-	/* The widest remaining line or child is the min-content width. */
-	*width = layout_content_width(box, 0);
 
 	/* A single-line row of flex items is as narrow as its items' min-content contributions side by side, whatever they would shrink to. */
 	if ((box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX) &&
@@ -520,6 +510,142 @@ layout_min_content(
 			*width = sum;
 	}
 	return 0;
+}
+
+/*
+ * Measures the width of a box's content laid out in no room, with an auto
+ * width and every permitted line break taken (a min-content width before a
+ * flex row's sum of its items).  The width is kept in the box with what it
+ * was measured under, and a later measurement under the same sizes takes
+ * it again, leaving the box's frame as the measurement would.
+ */
+int
+layout_narrowest(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	layout_unit *width)
+{
+	struct layout_context context;
+	struct wb_vector floats;
+	struct css_length given;
+	int kept;
+	int error;
+
+	/* A box measured before under the same sizes has its width already. */
+	kept = position_min_content_kept(tree, box);
+	if (kept) {
+		layout_box_model(box, 0);
+		*width = box->min_content;
+		return 0;
+	}
+
+	/* What the measurement is made under, kept with its width. */
+	position_min_content_sizes(box, box->min_content_sizes);
+	box->min_content_sizing = box->style.box_sizing;
+	box->min_content_ratio = box->style.aspect_ratio;
+	box->min_content_containing = tree->containing_height;
+	box->min_content_definite = tree->containing_height_definite;
+	box->min_content_indefinite = box->height_indefinite;
+
+	/* Lay it out in zero room to take every allowed line break. */
+	box->min_content_known = 0;
+	given = box->style.width;
+	box->style.width.unit = CSS_UNIT_AUTO;
+	tree->measuring++;
+	layout_context_begin(tree, &context, &floats);
+	error = layout_block(tree, box, 0);
+	layout_context_end(tree, &context);
+	tree->measuring--;
+	box->style.width = given;
+	if (error != 0)
+		return error;
+
+	/* The widest remaining line or child, kept. */
+	box->min_content = layout_content_width(box, 0);
+	box->min_content_known = 1;
+
+	/* Succeeded: the width is measured. */
+	*width = box->min_content;
+	return 0;
+}
+
+/*
+ * Copies the sizes of a box that its min-content measurement keeps (the
+ * width is made auto for it): the minimum and maximum width, and the
+ * height with its minimum and maximum.
+ */
+static void
+position_min_content_sizes(
+	const struct layout_box *box,
+	struct css_length *sizes)
+{
+	/* The five lengths, in a fixed order. */
+	sizes[0] = box->style.min_width;
+	sizes[1] = box->style.max_width;
+	sizes[2] = box->style.height;
+	sizes[3] = box->style.min_height;
+	sizes[4] = box->style.max_height;
+}
+
+/*
+ * Tells whether a box's kept min-content width still holds: it was
+ * measured, and its sizes, its box-sizing, its aspect-ratio and its
+ * containing block's height are those it was measured under.
+ */
+static int
+position_min_content_kept(
+	const struct layout_tree *tree,
+	const struct layout_box *box)
+{
+	struct css_length sizes[5];
+	int same;
+	int index;
+
+	/* A box never measured has nothing kept. */
+	if (!box->min_content_known)
+		return 0;
+
+	/* The containing block's height (its value only matters when it is definite). */
+	if (box->min_content_definite != tree->containing_height_definite)
+		return 0;
+	if (tree->containing_height_definite && box->min_content_containing != tree->containing_height)
+		return 0;
+
+	/* Whether the box's own height is indefinite, which matters only to a height it is given (by a length or a ratio). */
+	if (box->min_content_indefinite != box->height_indefinite &&
+	    (box->style.height.unit != CSS_UNIT_AUTO || box->style.aspect_ratio > 0.0f))
+		return 0;
+	if (box->min_content_sizing != box->style.box_sizing)
+		return 0;
+	if (box->min_content_ratio != box->style.aspect_ratio)
+		return 0;
+
+	/* Each of the sizes the measurement keeps. */
+	position_min_content_sizes(box, sizes);
+	for (index = 0; index < 5; index++) {
+		same = position_length_same(&sizes[index], &box->min_content_sizes[index]);
+		if (!same)
+			return 0;
+	}
+
+	/* Succeeded: the kept width holds. */
+	return 1;
+}
+
+/* Tells whether two lengths are the same: their unit, value and calculated offset. */
+static int
+position_length_same(
+	const struct css_length *first,
+	const struct css_length *second)
+{
+	/* The unit and both numbers. */
+	if (first->unit != second->unit)
+		return 0;
+	if (first->value != second->value)
+		return 0;
+	if (first->offset != second->offset)
+		return 0;
+	return 1;
 }
 
 /*

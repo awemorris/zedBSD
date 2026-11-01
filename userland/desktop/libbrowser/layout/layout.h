@@ -336,6 +336,25 @@ struct layout_box {
 	layout_unit max_content;
 	int max_content_known;
 
+	/*
+	 * The width of the box's content laid out in no room (its min-content
+	 * width before a flex row's sum of its items), once it has been
+	 * measured, with what it was measured under: the box's own sizes that
+	 * the measurement keeps, its aspect-ratio and the containing block's
+	 * height.  Nested
+	 * shrink-to-fit boxes each measure their content again while their
+	 * ancestors are measured; without the kept width that is exponential in
+	 * their depth.
+	 */
+	layout_unit min_content;
+	int min_content_known;
+	struct css_length min_content_sizes[5];
+	int min_content_sizing;
+	float min_content_ratio;
+	layout_unit min_content_containing;
+	int min_content_definite;
+	int min_content_indefinite;
+
 	/* A box of the view transition tree (transition.c): in the tree; the old or new image of a name. */
 	int vt_tree;
 	const struct layout_transition_name *vt_old;
@@ -553,6 +572,7 @@ layout_unit layout_floats_bottom(const struct layout_tree *tree);
 int layout_shrink_to_fit(struct layout_tree *tree, struct layout_box *box, layout_unit room);
 int layout_max_content(struct layout_tree *tree, struct layout_box *box, layout_unit *width);
 int layout_min_content(struct layout_tree *tree, struct layout_box *box, layout_unit *width);
+int layout_narrowest(struct layout_tree *tree, struct layout_box *box, layout_unit *width);
 int layout_stacking_order(const struct layout_tree *tree, struct wb_vector *boxes, size_t *flow_index);
 void layout_release(struct layout_tree *tree);
 int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);

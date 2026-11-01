@@ -1272,6 +1272,7 @@ void css_engine_set_owner(struct css_engine *engine, struct dom_element *owner);
 /* Tells the engine that a page has shadow trees, so its selectors stay in their own tree. */
 void css_engine_set_shadow_scopes(struct css_engine *engine);
 size_t css_engine_sheet_count(const struct css_engine *engine);
+int css_engine_names_attribute(const struct css_engine *engine, const struct vm_string *name);
 void css_engine_set_owner_from(struct css_engine *engine, size_t first, struct dom_element *owner);
 
 /* Turns off (1) or on (0) the value an @keyframes animation gives to the filters and the grid tracks of a computed style (a script reading the unanimated value). */

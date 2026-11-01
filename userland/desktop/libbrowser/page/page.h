@@ -65,8 +65,9 @@ struct page_prefetched {
  * runs the page's scripts.  base is the page's location: the absolute path
  * of its file, or its URL (what relative URLs resolve against); now the
  * page's clock in milliseconds, and the two
- * generations the document's generation when the style sheets were
- * gathered and when the page was last laid out.  images is the table of
+ * generations the document's generation (page_generation: without the
+ * changes no style can see) when the style sheets were gathered and when
+ * the page was last laid out.  images is the table of
  * the page's decoded images (page/images.c), by location; loader (the
  * embedder's, or NULL) fetches http and https images without blocking,
  * and images_generation counts the images that arrived, which
@@ -228,6 +229,7 @@ int page_dump_style(struct page *page, struct wb_buffer *out);
 int page_open_fonts(struct page *page, const struct text_font_paths *paths);
 int page_layout(struct page *page, int width, int height);
 int page_update_styles(struct page *page);
+uint32_t page_generation(const struct page *page);
 int page_load_resources(struct page *page);
 int page_wait_sheets(struct page *page);
 int page_load_waiting(const struct page *page);

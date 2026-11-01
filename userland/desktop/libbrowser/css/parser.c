@@ -175,6 +175,8 @@ static int parser_declarations(struct vm_heap *heap, struct wb_arena *arena, str
 static int parser_special(struct vm_heap *heap, const struct css_token *name, struct token_range value, struct css_declaration *out, size_t *made);
 static struct vm_string *parser_atom(struct vm_heap *heap, const struct css_token *token, int lower);
 static struct token_range parser_trim(struct token_range range);
+static int parser_keep_data_names(struct css_sheet *sheet, const struct css_token *tokens, size_t count);
+static int parser_data_name(const struct css_token *token);
 
 /*
  * Parses a style sheet into its rules.
@@ -197,6 +199,11 @@ css_parse_sheet(
 	wb_arena_init(&sheet->arena, 0);
 	sheet->origin = origin;
 	error = css_tokenize(&sheet->arena, units, length, &tokens, &count);
+	if (error != 0)
+		return error;
+
+	/* The identifiers that may name a data-* attribute, wherever they are. */
+	error = parser_keep_data_names(sheet, tokens, count);
 	if (error != 0)
 		return error;
 
@@ -3985,4 +3992,75 @@ parser_keep_font_faces(
 	/* Succeeded: the sheet has its faces. */
 	sheet->font_face_count = count;
 	return 0;
+}
+
+/*
+ * Keeps in the sheet the identifier tokens that may name a data-*
+ * attribute.  Every such name of a selector or of attr() is one of them;
+ * an identifier with the same text elsewhere only makes the list longer.
+ */
+static int
+parser_keep_data_names(
+	struct css_sheet *sheet,
+	const struct css_token *tokens,
+	size_t count)
+{
+	size_t index;
+	size_t found;
+	int named;
+
+	/* How many there are. */
+	found = 0;
+	for (index = 0; index < count; index++) {
+		named = parser_data_name(&tokens[index]);
+		if (named)
+			found++;
+	}
+
+	/* A sheet that names none keeps nothing. */
+	if (found == 0)
+		return 0;
+
+	/* The room for them in the sheet's arena. */
+	sheet->data_names = wb_arena_alloc(&sheet->arena, found * sizeof(*sheet->data_names));
+	if (sheet->data_names == NULL)
+		return ENOMEM;
+
+	/* Each of them, in the order of the text. */
+	for (index = 0; index < count; index++) {
+		named = parser_data_name(&tokens[index]);
+		if (named) {
+			sheet->data_names[sheet->data_name_count] = &tokens[index];
+			sheet->data_name_count++;
+		}
+	}
+
+	/* Succeeded: the names are kept. */
+	return 0;
+}
+
+/* Tells whether a token is an identifier that begins as a data-* attribute's name (ASCII, any case). */
+static int
+parser_data_name(
+	const struct css_token *token)
+{
+	static const char prefix[] = "data-";
+	size_t index;
+	uint16_t unit;
+
+	/* An identifier longer than the prefix. */
+	if (token->type != CSS_TOKEN_IDENT)
+		return 0;
+	if (token->length <= sizeof(prefix) - 1U)
+		return 0;
+
+	/* Each character of the prefix, folded to lower case. */
+	for (index = 0; index < sizeof(prefix) - 1U; index++) {
+		unit = token->text[index];
+		if (unit >= 'A' && unit <= 'Z')
+			unit = (uint16_t)(unit - 'A' + 'a');
+		if (unit != (uint16_t)prefix[index])
+			return 0;
+	}
+	return 1;
 }
