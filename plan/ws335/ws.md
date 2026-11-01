@@ -47,7 +47,7 @@
 | [p009](phase009/phase.md) | Ed25519（test-ed25519） | planned（Sonnet q1876） | p008 |
 | [p010](phase010/phase.md) | P-256・P-384 の群（test-ecp） | cleared（2026-11-01 23:19 Q1、main 47700ab9c。main で run-unit all・run-ct ecp PASS を流し直した） | p007 |
 | [p011](phase011/phase.md) | ECC: 鍵の生成・ECDH・ECDSA の確かめ（test-ecc） | cleared（2026-11-01 23:51 Q1、main 2d7097dd3。main で run-unit all・run-ct ecc PASS） | p010 |
-| [p012](phase012/phase.md) | RSA の署名の確かめ（PKCS#1 v1.5・PSS）（test-rsa） | planned（P6 q1870） | p007、p002 |
+| [p012](phase012/phase.md) | RSA の署名の確かめ（PKCS#1 v1.5・PSS）（test-rsa） | 実装済み・試験 PASS（2026-11-02 00:50 P6。test-rsa 31057 checks、posix・win32 PASS、97 通りの破壊のうち 84 通りが試験の失敗・6 通りが crash、見逃し 7 通りは等価か ASan でだけ見える。cleared は Q1） | p007、p002 |
 | [p013](phase013/phase.md) | ML-KEM の多項式・符号化・sampling（test-mlkem-poly） | planned | p003 |
 | [p014](phase014/phase.md) | K-PKE と ML-KEM-768（test-mlkem） | planned | p013 |
 | [p015](phase015/phase.md) | OS の層（POSIX と Windows）（test-os） | planned | p002 |
