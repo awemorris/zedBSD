@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS291](ws291/ws.md) p026 | GPU の driver の描画の速さ（RTX 2070） | push buffer を記録の時に組む設計（q1838） | 設計 → 敵対的レビュー → 実装は別の Queue |
 | P2 | — | — | 返却（20:38）。WS291 p020（VF2 の model の 50 fps）は cleared: c13 55.8〜56.3 fps、回帰 PASS | 次の VF2 の作業は未割当（VF2 は今 P4 の BUG-387 の試験） |
-| P3 | [WS291](ws291/ws.md) p021 | GPU の driver の描画の速さ（Pi 5 の V3D） | model の 50 fps（49.2〜49.9 の境）（q1840） | coordinate shader の attribute を絞るなど |
+| P3 | [WS291](ws291/ws.md) p021 | GPU の driver の描画の速さ（Pi 5 の V3D） | 返却（20:42）。dcache clean を省く直し（約 0.75 ms/frame の見込み）を build、板では未計測 | Pi 5 が P4 から戻ったら i02 で計測（基準は起動により 44.7〜50.8 fps） |
 | P4 | [BUG-387](bugs/BUG-387.md) | VF2・Pi 5 で console から Wayland の desktop を起動できない | 直しは 9616367f5（build だけ）。Pi 5・VF2 の板の窓を待つ（q1842） | 板の試験 → merge。以後の Bug の修正も P4 |
 | P5 | [WS334](ws334/ws.md) p025 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | script の core の archive と link の確かめ（q1843） | p023（instance と API v4）・p026（libmedia の Windows）へ |
 | P6 | [WS335](ws335/ws.md) p004 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | AES と counter mode（q1844） | p005 AES-GCM・p007 整数の算術・p009 Ed25519 へ |
@@ -23,6 +23,8 @@
 ### WS291 GPU の描画の速さ
 
 - 2026-11-01 20:38: p020（VF2 の PowerVR の model の 50 fps）cleared。c13 55.84・56.33・56.22 fps、c1 167 fps、GPU の ta 8.7 ms・3d 6.9 ms、回帰 PASS（main d5aded6bd）。
+
+- 2026-11-01 20:42: p021（Pi 5）の基準の計測（main b2392803f、offscreen c74）は起動により 44.74 fps と 50.75 fps に割れる。GPU は front-end の詰まり。P3 が CPU の直列の分（pass ごとの約 16 MiB の dcache clean 2 回、約 0.75 ms）を省く直しを build（6d4ef0df9、未計測）。
 
 ### WS074 Web ブラウザ
 

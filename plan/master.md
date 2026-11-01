@@ -28,7 +28,7 @@
 | --- | --- | --- |
 | P1 | q1838 `p1-ws291p026` | [WS291](ws291/ws.md) p026: RTX の push buffer を記録の時に組む設計（10.0.10.3） |
 | P2 | — | 返却。q1839（[WS291](ws291/ws.md) p020 VF2 の model の 50 fps）は 20:38 に cleared（c13 56 fps）。次の VF2 の作業は未割当 |
-| P3 | q1840 `p3-ws291p021` | [WS291](ws291/ws.md) p021: Pi 5 の V3D の model の 50 fps（c74 49.2〜49.9 の境から） |
+| P3 | q1840-i02 `p3-ws291p021`（i01 は 20:42 に返却、Pi 5 の返却待ち） | [WS291](ws291/ws.md) p021: Pi 5 の V3D の model の 50 fps（c74 49.2〜49.9 の境から） |
 | P4 | q1842 `p4-bug387`（q1841 は 9616367f5 で返却、build だけ） | [BUG-387](bugs/BUG-387.md): VF2・Pi 5 で console から Wayland の desktop を起動できない（実機の窓は Q1 が P2・P3 から取る） |
 | P5 | q1843 `p5-ws334b` | [WS334](ws334/ws.md) p025: Windows 版のブラウザ、script の core の archive と link（次は p023・p026） |
 | P6 | q1844 `p6-ws335b` | [WS335](ws335/ws.md) p004: libssl-compat・libcrypto-compat の AES と counter mode |
