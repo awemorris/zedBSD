@@ -528,6 +528,8 @@ grid_in_flow_align(int align)
 		return CSS_ALIGN_START;
 	if (align == CSS_ALIGN_SELF_END)
 		return CSS_ALIGN_END;
+	if (align == CSS_ALIGN_ANCHOR_CENTER)
+		return CSS_ALIGN_CENTER;
 	return align;
 }
 
