@@ -1230,3 +1230,25 @@ Origin: 2026-10-27 ユーザーの指示。
   5. `column-span: all` の直接の子は、flow を segment に分け、各 segment を別々に balance して、spanner は全幅で layout し直して挟む。
 - 縦書き: logical domain の中で同じ code が動く（座標は論理の横書き）。baseline: first は最初の column の最初の行、last は最も下の行の baseline（Chromium の測定）。
 - anchor・hit test・getBoundingClientRect: box の座標をそのまま使うので追加の作りは要らない（分割した block の 2 つ目以降の fragment は持たない。getClientRects の fragment、anchor の fragment 化は後の段階）。
+
+### クラウドのセッションの途中経過（続き 7、2026-11-01。dev171〜dev173。multicol の段階 1〜3）
+
+- 段階 1（parse と computed）: `columns`（shorthand、column-width と column-count を任意の順、auto 可）・`column-count`・`column-width`・`column-fill`・`column-span`・`break-before`・`break-after`・`break-inside`（`page-break-*` は別名）。
+  css/values.c・css/cascade.c・css/css.h・css/internal.h・bind/computed.c。style の fields は `multicol_count`・`multicol_width`・`multicol_fill`・`multicol_span`・`break_before`・`break_after`・`break_inside`。
+- 段階 2（横書きの block を column に割る。layout/multicol.c、block.c の `block_columns`、`block_owns_context` に multicol を足した）: 設計の節の通り。
+  leaf（行、分割しない block）に分け、column の高さに詰める。強制の break（always・all・column）、column の先頭の margin の切り捨て、rtl は右から。
+  balance は column 数に収まる最小の高さを二分探索で求め、`column-fill: auto` と定まった高さはその高さで切る。column 数を超える物は column の外へ続く（Chromium と同じ）。
+  中身の無い高さだけの block は column の終わりで 2 つ以上に割り、後の部分は continuation の box（`box->continuation`、中身無し）を後ろに挿す。割った block には `box->fragmented`（view transition の対象から外す）。
+  anchor の矩形は fragmented な box では node の bounds（部分の union）。
+- 段階 3（column-span: all）: 直接の子の spanner で flow を segment に分け、各 segment を別々に balance し、spanner は全幅で layout し直して挟む。
+- 縦書き: logical domain の中でそのまま動く。baseline: first は最初の column の最初の行、last は最も下の行（Chromium の測定）。`inline_last_baseline`・`inline_logical_central` に multicol を足した。
+- 測定: dev171（multicol 段階 2〜3）= 3,184 / 3,473（harness +6: flex・grid の baseline-multicol 001〜003 各 3 件、static +1: anchor-position-multicol-011、後退 1: view-transitions/fragmented-at-start-ignored）。
+  後退は割る block を fragmented にして直した（dev172）。dev172 = 3,188（91.79%、gap 285）: +4（anchor-position-multicol-001・002、anchor-name-multicol-004、fragmented-at-start-ignored）、後退 0。dev173（空の block の leaf の判定を直した source）= 3,188、後退 0。
+  dev170（3,178）からは +10。
+- Acid: dev173 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- multicol で残る ID（約 13）と原因:
+  - 絶対配置 box の fragment（OOF fragmentation）: anchor-position-multicol-003・004・006・007・008・fixed-001・colspan-001・002、anchor-name-multicol-003、anchor-scroll-003。
+    containing block が column に割れる時、abspos は割れる前の（積み重ねた）座標で置いてから column に割る。abspos 自身も column の終わりで割れ、anchor 関数の矩形はその fragment の union になる。
+    今の layout は abspos を layout_position の pass（root の layout の後）で置くので、column の情報（どの column が何処か）を box に持たせて、その pass で割る作りが要る。
+  - css-multicol/getclientrects-001（sideways-lr・sideways-rl の writing-mode）、multicol-span-all-rule-002（column-rule の描画）。
+- 直していない物（fidelity のみ、gap の ID には効かない）: orphans・widows（既定 2）の行の扱い、column-rule、割れた block の 2 つ目以降の背景・border（中身のある block の分）、floats、`display: inline-block` の multicol の shrink-to-fit の幅。

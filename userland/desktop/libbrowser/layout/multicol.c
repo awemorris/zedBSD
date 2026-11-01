@@ -76,7 +76,7 @@ static int multicol_collect_child(struct layout_box *child, layout_unit origin, 
 static int multicol_collect(struct layout_box *box, layout_unit origin, int segment, struct wb_vector *leaves, int depth);
 static int multicol_pack(struct multicol_leaf *leaves, size_t count, size_t first_index, layout_unit limit, layout_unit start_gap, struct wb_vector *pieces, int *columns, layout_unit *extent);
 static layout_unit multicol_limit(struct multicol_leaf *leaves, size_t count, layout_unit start_gap, int wanted, layout_unit definite, int balance);
-static void multicol_apply(struct layout_tree *tree, struct layout_box *box, const struct multicol_leaf *leaves, const struct multicol_piece *pieces, size_t *next, layout_unit parent_dx, layout_unit parent_dy, layout_unit origin, int container, int depth);
+static void multicol_apply(struct layout_tree *tree, struct layout_box *box, const struct multicol_leaf *leaves, const struct multicol_piece *pieces, size_t count, size_t *next, layout_unit parent_dx, layout_unit parent_dy, layout_unit origin, int container, int depth);
 static void multicol_cut_block(struct layout_tree *tree, struct layout_box *box, const struct multicol_leaf *leaf, const struct multicol_piece *pieces, layout_unit parent_dx, layout_unit parent_dy);
 static void multicol_move_line(struct layout_line *line, layout_unit dx, layout_unit dy);
 
@@ -145,6 +145,8 @@ static int
 multicol_leaf_block(
 	const struct layout_box *box)
 {
+	const struct layout_box *child;
+
 	if (box->kind != LAYOUT_BLOCK && box->kind != LAYOUT_ANONYMOUS_BLOCK)
 		return 1;
 	if (box->replaced || box->atomic || multicol_avoids(box->style.break_inside))
@@ -165,7 +167,11 @@ multicol_leaf_block(
 		return 1;
 	if (box->children_inline)
 		return box->line_count == 0;
-	return box->first_child == NULL;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (multicol_in_flow(child))
+			return 0;
+	}
+	return 1;
 }
 
 /* Tells whether a leaf block is one a real fragmentation cuts (an empty block with a height), whole as it is here. */
@@ -565,6 +571,7 @@ multicol_apply(
 	struct layout_box *box,
 	const struct multicol_leaf *leaves,
 	const struct multicol_piece *pieces,
+	size_t count,
 	size_t *next,
 	layout_unit parent_dx,
 	layout_unit parent_dy,
@@ -584,7 +591,7 @@ multicol_apply(
 	if (depth > MULTICOL_DEPTH)
 		return;
 	if (box->children_inline) {
-		for (index = 0; index < box->line_count; index++) {
+		for (index = 0; index < box->line_count && *next < count; index++) {
 			leaf = &leaves[*next];
 			(*next)++;
 			multicol_move_line(&box->lines[index], leaf->dx - parent_dx, leaf->dy - parent_dy);
@@ -597,6 +604,8 @@ multicol_apply(
 		if (container && child->style.multicol_span == 1)
 			continue;
 		first = *next;
+		if (first >= count)
+			return;
 		leaf = &leaves[first];
 		content = origin + child->y + child->border[CSS_TOP] + child->padding[CSS_TOP];
 		if (multicol_leaf_block(child)) {
@@ -615,7 +624,7 @@ multicol_apply(
 		/* The block moves with its first piece; what is inside it follows, its own pieces by what they need. */
 		child->x += leaf->dx - parent_dx;
 		child->y += leaf->dy - parent_dy;
-		multicol_apply(tree, child, leaves, pieces, next, leaf->dx, leaf->dy, content, 0, depth + 1);
+		multicol_apply(tree, child, leaves, pieces, count, next, leaf->dx, leaf->dy, content, 0, depth + 1);
 		if (*next == first)
 			continue;
 		last = *next - 1U;
@@ -795,7 +804,7 @@ layout_multicol_cut(
 
 	/* The boxes go where the cut put them. */
 	next = 0;
-	multicol_apply(tree, box, list, (const struct multicol_piece *)(pieces.count > 0 ? wb_vector_at(&pieces, 0) : NULL), &next, 0, 0, 0, 1, 0);
+	multicol_apply(tree, box, list, (const struct multicol_piece *)(pieces.count > 0 ? wb_vector_at(&pieces, 0) : NULL), leaves.count, &next, 0, 0, 0, 1, 0);
 	if (definite < 0)
 		box->height = cursor;
 
