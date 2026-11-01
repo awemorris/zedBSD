@@ -934,3 +934,55 @@ Origin: 2026-10-27 ユーザーの指示。
   gap の内訳は build/tmp/p8/gap148.json（css-grid 118、css-flexbox 56、css-view-transitions 46、css-anchor-position 44、navigation-api 約 55）。
 - 一時物: 一覧は build/tmp/p8/delete-list-i15.txt（1 行 1 path）。/tmp/p8out には dev148・acid148 を残す（i15 は新しい測定なし）。
 - 途中で止めた host-build（`build/ws074-host/plain` の増分 build、main の merge 後の最初の build）は PID を指定して止めた。build/ws074-host/plain/browser は 06:49 の古い物のまま。
+
+### クラウドのセッションの途中経過（2026-11-01〜）
+
+- 環境: Claude Code on the web の新しい container（4 core、`build/` なし）。`cloud-setup.sh` → `CC=clang host-build.sh plain`（約 1.5 分、warning 0）→ `fetch-suites.sh wpt`（2d66b9b7998b）→ wpt-ready-render の build →
+  Chromium の測定（一度）→ ours の測定 → compare。Chromium は `/opt/pw-browsers/chromium_headless_shell-1243` の Chrome for Testing 153.0.8010.12（以前の記録の 153 と同じ版）。
+- Chromium の PASS: harness 1,477・static 1,552・scripted 397・crash 47、計 3,473。前回の記録（3,472）より scripted が 1 件多い（scripted の runner の揺れと見る。どの ID かは未調査）。
+  分母はこの 3,473 で数える（前回の 3,472 との差は 1）。測定の所要: Chromium は harness 約 10 分・static 2,124 秒・scripted 573 秒・crash 32 秒（static は直列）、ours は 4 runner で約 10 分（jobs 3）。
+- 基準 dev149（HEAD e3301181 の source を build/ws074-base に別 build。測定中に source を触れるように別の出力先にした）= 3,107 / 3,473（89.46%）、gap 366（174 / 124 / 66 / 2）。
+  前回の最終 dev148 の 3,107 と同数。main の変更（WS334 ほか）で後退はなかった。Acid は dev153 の source で確認（下）。
+- 測定（gap は h / s / sc / c。出力は build/ws074-cmp/devNNN、gap の JSON は build/ws074-cmp/gapNNN.json。container の中だけ）:
+
+  | 測定 | SHA | 内容 | 計 | gap（h/s/sc/c） | 後退 |
+  | --- | --- | --- | --- | --- | --- |
+  | dev149 | e3301181 | 基準 | 3,107（89.46%） | 174 / 124 / 66 / 2 | — |
+  | dev150 | 58068d8e | 縦書きの inline box の background・border、別の writing mode の inline を inline-block に | 3,107 | 174 / 124 / 66 / 2 | 0（増減なし） |
+  | dev151 | 1dda4123 | flex・grid の baseline に別の縦書きの mode の item を加える | 3,111 | 170 / 124 / 66 / 2 | 0 |
+  | dev152 | 336e8795 | anchor() と anchor-size() の名前を先に直列化、logical margin の anchor-size、caretPositionFromPoint、setHTMLUnsafe・parseHTMLUnsafe、createHTMLDocument、iframe の srcdoc | 3,112 | 169 / 124 / 66 / 2 | 0 |
+  | dev153 | 013b3479 | backdrop-filter を opacity で元の画素と混ぜる | 3,113（89.63%） | 169 / 123 / 66 / 2 | 0 |
+
+- 直した物（source は userland/desktop/libbrowser/）:
+  1. 縦書きの行の inline box の background・border（paint/list.c `list_inline_decoration_vertical`）。vertical-lr・vertical-rl・sideways-lr の 3 つで、span の border・padding・margin・background が Chromium と一致した
+     （render-compare で 99.47%。差は字形の antialias）。ただし固定の ID は増えなかった（前回の記録の「約 16 ID が頼る」は外れ。grid-self-baseline-horiz-004 などの ref は span でなく display:inline の horizontal-tb の item で、下の 2 が原因）。
+  2. writing-mode が親と違う `display: inline` の要素は inline-block にする（css/cascade.c。Chromium の StyleAdjuster と同じ）。grid-self-baseline-horiz-004〜007 の ref はまだ合わない
+     （縦書きの行で vertical-align: bottom の inline-block が Chromium では左、こちらでは右。vertical-lr の論理の座標で atomic な box の over・under が text と逆）。
+  3. flex の row・grid で、縦書きの container の中の別の縦書きの mode の item（lr の中の rl）が baseline の群に加わる（layout/flex.c `flex_baseline_above`、layout/grid.c `grid_row_baseline`）。
+     その item の baseline は自分の block start から測るので、container の block end 側の群になる（first は後ろの群、last は前の群）。通った ID: flex-align-baseline-002・003、grid-align-baseline-001・002。
+  4. anchor()・anchor-size() の直列化で、名前（`--foo`）を先にする（css/anchor.c `anchor_functions_canonical`）。margin-inline・margin-block 系の logical margin が anchor-size() を受ける（css/values.c）。
+     ただし anchor-parse-valid・anchor-size-parse-valid は ID としては未通過（下）。
+  5. `document.caretPositionFromPoint()` と `CaretPosition`（plan/ws074/phase260/caret.js、prelude に取り込み）。text node の幅を文字数で等分して offset を決める近似。
+     `Element.setHTMLUnsafe()`・`ShadowRoot.setHTMLUnsafe()`・`Document.parseHTMLUnsafe()`（html-unsafe.js。parseHTMLUnsafe は DOMParser が無いので定義されない）。
+     `DOMImplementation.createHTMLDocument()`（bind/implementation.c、native）。
+  6. `<iframe srcdoc>`（page/frame-load.c、bind/frame-resource.c、html-unsafe.js の IDL）。srcdoc があれば src より優先し、文書の URL は about:srcdoc、base は親の物、origin の検査は飛ばす。
+     通った ID: navigation-history-entry/entries-in-new-srcdoc-iframe。
+  7. backdrop-filter と opacity（paint/list.c・paint/software.c）。filter した画素を opacity だけ元の画素と混ぜる（backdrop item の color の alpha を opacity にした）。通った ID: backdrop-filter-basic-opacity-2。
+- 調べて直さなかった物と理由（次の候補）:
+  - **iframe は layout の box を作らない**（layout/box.c）。iframe の getBoundingClientRect は 0×0、子文書の viewport も 0 で、子文書の geometry（clientWidth・elementFromPoint）が使えない。
+    caretPositionFromPoint-with-transformation はこれで通らない。iframe を box として layout・描画するのは大きな作業（flexbox-basic-iframe-*、ほか iframe を含む ID にも効く）。
+  - caretPositionFromPoint は SVG の circle で offsetNode が circle になる subtest だけ残る（inline SVG の図形の hit test・geometry が無い）。
+  - anchor-parse-valid・anchor-size-parse-valid: min()・max()・clamp() が anchor 関数を含む値（169＋約 760 subtest 中の 3 件など）は anchor の和として保持できない設計のため受けられない。
+    ほかに `calc(A / 2)` を `calc(0.5 * (A))` に、`calc(a + b%)` の項の順を直す serialization、`anchor-size(--foo width, 0)` を `0px` に、`anchor-size(10px)`。
+  - flex-align-baseline-006・007・grid-justify-baseline-003 ほか（縦書きの container の column の flex・grid の行軸の baseline）、grid-align-baseline-vertical（Ahem と画像の baseline）。
+  - flexbox-writing-mode-009・011〜015・slr-row-mix（static 9 件）: 縦書きの flex container に horizontal-tb の item を入れる所は物理座標の処理（layout/logical.c `layout_logical_wanted`）で、
+    row wrap の縦書きの main axis を扱えていない。論理の domain に直交の item を入れる作りが要る。
+  - backdrop-filter の rounded clip・transform・backdrop root（static 7 件）: backdrop item が矩形だけで、角丸と変換の情報を持たない。
+  - Navigation API の残り（47 ID）: 失敗の理由は ID ごとに違う（iframe の src・srcdoc・about:blank 属性による遷移を Navigation の entry に引き継ぐ、sandbox の frame、opaque origin の frame、
+    meta refresh、javascript: URL ほか）。iframe 属性による遷移の引き継ぎ（親が src を変えた時に新しい文書へ entry を渡す）が複数の ID に効く見込み。
+  - URLPattern（2 ID）は未実装。大きい（pattern の parser と RegExp への変換、urlpatterntestdata の全件）。
+- Acid: dev153 の source（013b3479）で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。
+- 未実施: asan の build と試験、host の個別の試験（host-NAME）の全件、target の確認。
+- 一時物（Q1 が消す。この container の中だけ）: build/tmp/（sub1〜sub3、vt、r、t*.html、nav.*、cmpgap.sh、p8/st1・h1out）、build/ws074-base/、
+  build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-*.html と acid3 の zedbsd-acid3-*.html（Acid の runner の一時 html）。
+

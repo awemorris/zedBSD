@@ -134,7 +134,7 @@ Event ws074-p217-q1188-partial-clear-20261014: [p217](phase217/phase.md) q1188-i
 Event ws074-p217-q1187-partial-clear-20261014: [p217](phase217/phase.md) q1187-i01で固定縦rl Grid直接横RTL absolute子row2/col1 top insetにstatic areaを適用。[証拠](phase217/evidence/20261014-q1187/README.md)。独立矩形Chromium一致、固定non-static007縦rl callback whole PASS、水平2 callback PASS、縦lrは4番目子でfile whole FAIL継続。旧WPT/host/Acid3差0維持。次は縦lr4番目子、p217/p189/p173 whole未達、共有投影/GitHub publication保留。
 
 Event ws074-p217-q1186-partial-clear-20261014: [p217](phase217/phase.md) q1186-i01で固定縦lr/rl Grid直接横LTR absolute子へrow1/col2 static areaとjustify-center Yを適用。[証拠](phase217/evidence/20261014-q1186/README.md)。独立2矩形Chromium一致、固定non-static007縦2 callback先頭2子全PASS、lrは4番目子・rlは3番目子でfile whole FAIL継続。旧WPT/host/Acid3差0維持。次は縦rl Gridの3番目RTL横子、p217/p189/p173 whole未達、共有投影/GitHub publication保留。
-Resume point: q54 partial finished。次はfixed-corpus residualからCSS構文/数値serialize/CSSOM・URLPattern等の既存owner/依存/一次仕様を確認してfinite scopeを選定。IDL missing real APIsも保持、Reflectを根拠無しに次fixと仮定しない。全3530 current pair・未attempt275/whole/p100/full target/100%保持。
+Resume point: p260 の最新（2026-11-01、クラウドの container、dev153 = 3,113 / 3,473、89.63%、gap 360、後退 0、Acid2・Acid3 は 100%）。次の候補は phase260 の「クラウドのセッションの途中経過（2026-11-01〜）」の末尾（iframe を layout の box にする、flex の縦書きの直交 item、backdrop の角丸、Navigation の iframe 属性遷移の引き継ぎ）。q54 までの Codex の記録は上の Event を参照。
 <!-- awesome-plan-current:end -->
 
 Event ws074-p217-q1185-partial-clear-20261014: [p217](phase217/phase.md) q1185-i01で固定縦lr/rl Grid直接横LTR absolute子へrow1/col1 static areaとjustify-right Yを適用。[証拠](phase217/evidence/20261014-q1185/README.md)。独立2矩形Chromium一致、固定non-static007縦2 callback先頭子全PASS、2番目子でfile whole FAIL継続。旧WPT/host/Acid3差0維持。次は縦Grid2番目横子、p217/p189/p173 whole未達、共有投影/GitHub publication保留。
