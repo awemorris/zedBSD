@@ -13,7 +13,7 @@
 | P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
 | P5 | [WS334](ws334/ws.md) p033 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 後半の Windows の口（TSF・drag と drop・touchpad など、頁に暗い mode、q1886）。p032: Wine で 15 項 PASS（https・cookie・localStorage・clipboard・dpi） | p035 規約の見直し |
 | P6 | [WS335](ws335/ws.md) p015 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | OS の層（POSIX と Windows、q1897）。p014 ML-KEM-768 は cleared | p021 誤りの queue と RAND_bytes |
-| P7 | — | — | 返却（02:23）。BUG-394 fixed（init は既定で login・desktop を先、network は後） | 次は WS340 の候補 |
+| P7 | [BUG-394](bugs/BUG-394.md) | 起動の時間 | BUG-394 fixed を merge。Pi 5 で変更後の起動の時間を計測中 | 次は WS340 の候補 |
 | P8 | — | Bug の修正 | 返却（02:09）。BUG-391・392 fixed（QEMU で確認、Pi 5 は未実施） | 次を待つ |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
