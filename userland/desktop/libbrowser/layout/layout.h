@@ -352,6 +352,8 @@ struct layout_box {
 	const struct layout_box *anchor_box;
 	/* A multicol container's flow cut the box between columns (it has more than one fragment). */
 	int fragmented;
+	/* A copy of a box that stands for a later part of it (in the next column), with nothing inside it. */
+	int continuation;
 	/* A flex container gave a table its whole height (captions included), not its grid box's (set while it is laid out). */
 	int table_wrapper_height;
 
