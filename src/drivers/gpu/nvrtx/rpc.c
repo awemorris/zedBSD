@@ -119,6 +119,9 @@
 #define RPC_ERROR_JOURNAL_SHOWN		8192U
 #define RPC_ERROR_LINE_BYTES		32U
 
+/* The most bytes of an otherwise dropped event a diagnostic sees. */
+#define RPC_EVENT_SHOWN			512U
+
 /*
  * A graphics class error (a method the 3D engine refused): its kind, and the
  * engine's registers that keep the refused method, its data and the error's
@@ -140,6 +143,7 @@ static int rpc_sequencer(struct nvrtx_gpu *gpu, uint8_t *payload, size_t length)
 static void rpc_error_log(const uint8_t *payload, size_t length);
 static void rpc_gr_class_error(struct nvrtx_gpu *gpu);
 static void rpc_error_journal(const uint8_t *payload, size_t length);
+static void rpc_show_event(uint32_t function, const uint8_t *payload, size_t length);
 
 /*
  * How many channel errors' journals were shown this boot (rpc_error_journal()
@@ -329,12 +333,15 @@ nvrtx_rpc_wait(
 
 		/*
 		 * The firmware's prints, bridge updates and crash records are
-		 * dropped unseen.
+		 * dropped unseen, unless a diagnostic asked to see them.
 		 */
 		if (got_function == NVRTX_EVENT_LIBOS_PRINT ||
 		    got_function == NVRTX_EVENT_BRIDGELESS ||
-		    got_function == NVRTX_EVENT_POST_NOCAT)
+		    got_function == NVRTX_EVENT_POST_NOCAT) {
+			if (gpu->rpc_show_events != 0)
+				rpc_show_event(got_function, gpu->reply, *length);
 			continue;
+		}
 
 		/* Other events are reported and dropped. */
 		nvrtx_stage_mark("rpc: message %x (%zu bytes) while waiting for %x", (unsigned)got_function, *length, (unsigned)function);
@@ -933,6 +940,53 @@ rpc_error_journal(
 		hex[(end - at) * 2U] = '\0';
 
 		kern_logf("nvrtx: channel-stop journal %04zx %s\n", at, hex);
+	}
+}
+
+/*
+ * Shows an event the wait otherwise drops: its number, its length, and up
+ * to RPC_EVENT_SHOWN bytes in lines of 32, in hexadecimal and as text.
+ */
+static void
+rpc_show_event(
+	uint32_t function,
+	const uint8_t *payload,
+	size_t length)
+{
+	static const char digits[] = "0123456789abcdef";
+	char hex[RPC_ERROR_LINE_BYTES * 2U + 1U];
+	char text[RPC_ERROR_LINE_BYTES + 1U];
+	size_t shown;
+	size_t at;
+	size_t end;
+	size_t index;
+	char c;
+
+	/* The event's number and length, and how much of it is shown. */
+	kern_logf("nvrtx: rpc event %x of %zu bytes\n", (unsigned)function, length);
+	shown = length;
+	if (shown > RPC_EVENT_SHOWN)
+		shown = RPC_EVENT_SHOWN;
+
+	/* Each line of the event. */
+	for (at = 0U; at < shown; at += RPC_ERROR_LINE_BYTES) {
+		end = at + RPC_ERROR_LINE_BYTES;
+		if (end > shown)
+			end = shown;
+
+		/* The line in hexadecimal and its printable characters. */
+		for (index = at; index < end; index++) {
+			hex[(index - at) * 2U] = digits[payload[index] >> 4];
+			hex[(index - at) * 2U + 1U] = digits[payload[index] & 0xfU];
+			c = (char)payload[index];
+			if (c < ' ' || c > '~')
+				c = '.';
+			text[index - at] = c;
+		}
+		hex[(end - at) * 2U] = '\0';
+		text[end - at] = '\0';
+
+		kern_logf("nvrtx: rpc event %04zx %s %s\n", at, hex, text);
 	}
 }
 

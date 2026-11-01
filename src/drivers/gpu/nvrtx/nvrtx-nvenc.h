@@ -105,10 +105,10 @@ struct nvrtx_gpu;
 #define NVRTX_NVENC_STATUS_START_AT	32U
 
 /* The most extra methods an encode's push buffer takes. */
-#define NVRTX_NVENC_EXTRA_METHODS	4U
+#define NVRTX_NVENC_EXTRA_METHODS	16U
 
 /* The most bytes the push buffer of nvrtx_nvenc_push_encode() takes. */
-#define NVRTX_NVENC_ENCODE_PUSH_BYTES	256U
+#define NVRTX_NVENC_ENCODE_PUSH_BYTES	320U
 
 /*
  * The control parameters word: H.264, the reconstructed picture written
@@ -217,6 +217,7 @@ int nvrtx_nvenc_restart(struct nvrtx_gpu *gpu);
 bool nvrtx_nvenc_ready(const struct nvrtx_gpu *gpu);
 uint32_t nvrtx_nvenc_class_of(const struct nvrtx_gpu *gpu);
 int nvrtx_nvenc_run(struct nvrtx_gpu *gpu, uint64_t push_va, size_t length, uint32_t timeout_us);
+int nvrtx_nvenc_run_watched(struct nvrtx_gpu *gpu, uint64_t push_va, size_t length, uint32_t timeout_us, const volatile uint32_t *watch, uint32_t sentinel, uint64_t *changed_us);
 uint32_t nvrtx_nvenc_notices(struct nvrtx_gpu *gpu);
 void nvrtx_nvenc_report_notices(struct nvrtx_gpu *gpu, uint32_t before, const char *stage);
 

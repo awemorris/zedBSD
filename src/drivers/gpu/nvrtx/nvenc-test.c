@@ -70,6 +70,13 @@
 #define TEST_CB				100U
 #define TEST_CR				150U
 
+/*
+ * The scratch buffer: one zeroed run of 16 KiB for each of the encoder's
+ * address methods the encode does not otherwise send.
+ */
+#define TEST_SCRATCH_STRIDE		0x4000U
+#define TEST_SCRATCH_BYTES		(TEST_SCRATCH_STRIDE * 16U)
+
 /* The bitstream buffers' and the history's bytes. */
 #define TEST_BITSTREAM_BYTES		0x10000U
 #define TEST_HISTORY_BYTES		0x10000U
@@ -93,6 +100,7 @@
 
 /* The byte a status is filled with before the encode, so one the encoder did not write shows. */
 #define TEST_STATUS_UNWRITTEN		0xa5U
+#define TEST_STATUS_SENTINEL		0xa5a5a5a5U
 
 /* How long one encode may take. */
 #define TEST_ENCODE_US			2000000U
@@ -128,6 +136,7 @@ enum test_buffer {
 	TEST_BITS_P,
 	TEST_WORK,
 	TEST_HISTORY,
+	TEST_SCRATCH,
 	TEST_BUFFERS
 };
 
@@ -168,10 +177,10 @@ struct test_poke {
  * picture control's codec field, the control parameters' extra bits (or
  * none at all when control_mask clears them), the buffers' flags, the
  * engine's watchdog (0 for none), the setup's words written over, and
- * one further method with its word (method 0 for none).
+ * which of the scratch methods it sends (extra_data unused).
  */
 struct test_attempt {
-	uint32_t extra_method;
+	uint32_t scratch;
 	uint32_t extra_data;
 	uint32_t codec_field;
 	uint32_t control_extra;
@@ -208,53 +217,56 @@ struct test_state {
 	uint32_t vram;
 };
 
+/* The mode decision's word at 52 as built: no early intra decision (3 at 20:19), 4x4 and 16x16 searched (5 at 28:26). */
+#define TEST_MD_DECISION		((3U << 19) | (5U << 26))
+
+/* Every macroblock as IPCM (force_ipcm, bit 30 of the mode decision's word at 52). */
+static const struct test_poke test_ipcm[] = {
+	{ 1024U + 52U, TEST_MD_DECISION | (1U << 30) },
+};
+
+/* Both reference lists all 0 instead of -1 (the picture control's first 16 bytes). */
+static const struct test_poke test_lists_zero[] = {
+	{ 200U, 0U },
+	{ 204U, 0U },
+	{ 208U, 0U },
+	{ 212U, 0U },
+};
+
+/* List 1 all 0, list 0 left at -1. */
+static const struct test_poke test_l1_zero[] = {
+	{ 208U, 0U },
+	{ 212U, 0U },
+};
+
+/* List 0 all 0, list 1 left at -1. */
+static const struct test_poke test_l0_zero[] = {
+	{ 200U, 0U },
+	{ 204U, 0U },
+};
+
+/* Both lists all 0 and every macroblock IPCM. */
+static const struct test_poke test_lists_zero_ipcm[] = {
+	{ 200U, 0U },
+	{ 204U, 0U },
+	{ 208U, 0U },
+	{ 212U, 0U },
+	{ 1024U + 52U, TEST_MD_DECISION | (1U << 30) },
+};
+
+/* A watchdog of 0x1000, to see whether the time to the error follows it. */
+#define TEST_WATCHDOG_SHORT		0x1000U
+
 /*
- * The picture control's split encoding: one strip in the frame (byte 251
- * of the picture control, after the strip's number), and the macroblock
- * rows the slice encoding covers (from row 0, the picture's eight rows; the
- * 16-bit row count at 254).
+ * The control parameters' motion-search-only bit (10), and the method of
+ * the motion search's output buffer (SET_OUT_MEPRED_DATA), which the
+ * choice points at the co-located page of the work buffer.
+ *
+ * Values referenced: NVIDIA open-gpu-doc classes/video/clc5b7.h
+ * (NVC5B7_SET_CONTROL_PARAMS_MEONLY, NVC5B7_SET_OUT_MEPRED_DATA).
  */
-#define TEST_STRIPS_AT			(200U + 248U)
-#define TEST_STRIPS_ONE			(1U << 24)
-#define TEST_ROWS_AT			(200U + 252U)
-#define TEST_ROWS_ALL			((TEST_HEIGHT / TEST_TILE) << 16)
-
-/* The picture control's macroblock count before the encoder's statistics: one row. */
-#define TEST_MPEC_AT			(200U + 232U)
-#define TEST_MPEC_ROW			(TEST_WIDTH / TEST_TILE)
-
-/* One strip and every row. */
-static const struct test_poke test_strip_rows[] = {
-	{ TEST_STRIPS_AT, TEST_STRIPS_ONE },
-	{ TEST_ROWS_AT, TEST_ROWS_ALL },
-};
-
-/* One strip, every row, and the statistics' threshold of one row. */
-static const struct test_poke test_strip_rows_mpec[] = {
-	{ TEST_STRIPS_AT, TEST_STRIPS_ONE },
-	{ TEST_ROWS_AT, TEST_ROWS_ALL },
-	{ TEST_MPEC_AT, TEST_MPEC_ROW },
-};
-
-/* One strip, every row, the application timer and the motion search's cache. */
-static const struct test_poke test_strip_rows_more[] = {
-	{ TEST_STRIPS_AT, TEST_STRIPS_ONE },
-	{ TEST_ROWS_AT, TEST_ROWS_ALL },
-	{ 504U, 81000000U },
-	{ 508U, 81000000U },
-	{ 768U + 144U, 16U },
-	{ 768U + 148U, 1U },
-};
-
-/* Every row alone. */
-static const struct test_poke test_rows[] = {
-	{ TEST_ROWS_AT, TEST_ROWS_ALL },
-};
-
-/* One strip alone. */
-static const struct test_poke test_strip[] = {
-	{ TEST_STRIPS_AT, TEST_STRIPS_ONE },
-};
+#define TEST_CONTROL_ME_ONLY		(1U << 10)
+#define TEST_OUT_MEPRED			0x073cU
 
 /*
  * Which buffers a choice leaves out of the encode (its method is not
@@ -263,23 +275,24 @@ static const struct test_poke test_strip[] = {
 #define TEST_NO_BITSTREAM		(1U << 5)
 #define TEST_NO_HISTORY			(1U << 6)
 #define TEST_NO_INPUT			(1U << 7)
+#define TEST_NO_OUTPUT			(1U << 8)
+#define TEST_NO_SETUP			(1U << 9)
 
 /* The number of words in a list of pokes. */
 #define TEST_POKES(list)		((uint32_t)(sizeof(list) / sizeof((list)[0])))
 
 /*
- * The choices tried, in order: the split encoding filled in (one strip,
- * every row); with the statistics' threshold; with the application timer
- * and the motion search's cache; every row alone; one strip alone.  A
- * choice whose encode does not finish stops the channel, which is made
- * again for the next.
+ * The choices tried, in order: both reference lists 0 instead of -1; list
+ * 1 alone 0; list 0 alone 0; both 0 with every macroblock IPCM; every
+ * macroblock IPCM alone.  A choice whose encode does not finish stops the
+ * channel, which is made again for the next.
  */
 static const struct test_attempt test_attempts[] = {
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_strip_rows, TEST_POKES(test_strip_rows) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_strip_rows_mpec, TEST_POKES(test_strip_rows_mpec) },
-	{ 0U, 0U, 0U, NVRTX_NVENC_CONTROL_GPTIMER, 0xffffffffU, 0U, 0U, test_strip_rows_more, TEST_POKES(test_strip_rows_more) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_rows, TEST_POKES(test_rows) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_strip, TEST_POKES(test_strip) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_lists_zero, TEST_POKES(test_lists_zero) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_l1_zero, TEST_POKES(test_l1_zero) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_l0_zero, TEST_POKES(test_l0_zero) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_lists_zero_ipcm, TEST_POKES(test_lists_zero_ipcm) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_ipcm, TEST_POKES(test_ipcm) },
 };
 
 static const uint32_t test_buffer_bytes[TEST_BUFFERS] = {
@@ -291,6 +304,7 @@ static const uint32_t test_buffer_bytes[TEST_BUFFERS] = {
 	TEST_BITSTREAM_BYTES,
 	TEST_WORK_BYTES,
 	TEST_HISTORY_BYTES,
+	TEST_SCRATCH_BYTES,
 };
 
 static int test_memory_make(struct nvrtx_gpu *gpu, struct test_state *state);
@@ -339,8 +353,9 @@ nvrtx_nvenc_test(
 	if (state == NULL)
 		return ENOMEM;
 
-	/* The channel errors reported before the test are not its own. */
+	/* The channel errors reported before the test are not its own; the GSP's prints and crash records are shown from now on. */
 	before = nvrtx_nvenc_notices(gpu);
+	gpu->rpc_show_events = 1;
 
 	/* Makes and maps the buffers. */
 	error = test_memory_make(gpu, state);
@@ -378,8 +393,9 @@ nvrtx_nvenc_test(
 		}
 	}
 
-	/* Reads what the GSP sent meanwhile and counts the channel errors. */
+	/* Reads what the GSP sent meanwhile and counts the channel errors; its prints are dropped again afterwards. */
 	nvrtx_nvenc_report_notices(gpu, before, "nvenc-test");
+	gpu->rpc_show_events = 0;
 
 	/* Leaves the memory to an engine that may still write it. */
 	if (stopped) {
@@ -661,9 +677,11 @@ test_encode(
 	uint8_t *bitstream;
 	uint8_t *reconstruction;
 	uint8_t *work;
+	const volatile uint32_t *watched;
 	uint32_t nvenc_class;
 	uint32_t magic;
 	uint32_t poke;
+	uint64_t changed_us;
 	char tag[24];
 	char kind;
 	uint32_t error_word;
@@ -721,6 +739,7 @@ test_encode(
 	kern_memset(work + TEST_STATUS_AT + index * TEST_STATUS_STRIDE, TEST_STATUS_UNWRITTEN, NVRTX_NVENC_STATUS_BYTES);
 	bitstream = test_cpu(state, bits);
 	kern_memset(bitstream, 0, TEST_BITSTREAM_BYTES);
+	kern_memset(test_cpu(state, TEST_SCRATCH), 0, TEST_SCRATCH_BYTES);
 
 	/* The encode's addresses: the input, the reconstruction and, for the P picture, the IDR picture's. */
 	kern_memset(&frame, 0, sizeof(frame));
@@ -747,6 +766,7 @@ test_encode(
 		frame.coloc_out = 0U;
 	}
 	frame.watchdog = attempt->watchdog;
+
 	if ((attempt->flags & TEST_NO_BITSTREAM) != 0U)
 		frame.bitstream = 0U;
 	if ((attempt->flags & TEST_NO_HISTORY) != 0U)
@@ -755,6 +775,18 @@ test_encode(
 		frame.input_luma = 0U;
 		frame.input_chroma = 0U;
 	}
+	if ((attempt->flags & TEST_NO_OUTPUT) != 0U) {
+		frame.output_luma = 0U;
+		frame.output_chroma = 0U;
+	}
+	if ((attempt->flags & TEST_NO_SETUP) != 0U)
+		frame.setup = 0U;
+
+	/* Where the encode's buffers are in the work space. */
+	nvrtx_stage_mark("nvenc-test va: setup %llx status %llx bits %llx hist %llx", (unsigned long long)frame.setup,
+	    (unsigned long long)frame.status, (unsigned long long)frame.bitstream, (unsigned long long)frame.history);
+	nvrtx_stage_mark("nvenc-test va: input %llx output %llx ref %llx", (unsigned long long)frame.input_luma,
+	    (unsigned long long)frame.output_luma, (unsigned long long)frame.reference_luma);
 	if ((attempt->flags & TEST_RC_DATA) != 0U)
 		frame.rc_data = test_va(state, TEST_WORK) + TEST_RC_DATA_AT;
 	if ((attempt->flags & TEST_CHROMA_OFFSET) != 0U) {
@@ -765,8 +797,11 @@ test_encode(
 
 	/* The push buffer, then the encode and the wait for it. */
 	length = (uint32_t)nvrtx_nvenc_push_encode(work + TEST_PUSH_AT + index * TEST_PUSH_STRIDE, &frame);
-	error = nvrtx_nvenc_run(gpu, test_va(state, TEST_WORK) + TEST_PUSH_AT + index * TEST_PUSH_STRIDE, length, TEST_ENCODE_US);
+	watched = (const volatile uint32_t *)(const void *)(work + TEST_STATUS_AT + index * TEST_STATUS_STRIDE + NVRTX_NVENC_STATUS_ERROR_AT);
+	error = nvrtx_nvenc_run_watched(gpu, test_va(state, TEST_WORK) + TEST_PUSH_AT + index * TEST_PUSH_STRIDE, length, TEST_ENCODE_US, watched,
+	    TEST_STATUS_SENTINEL, &changed_us);
 	__atomic_thread_fence(__ATOMIC_ACQUIRE);
+	nvrtx_stage_mark("nvenc-test %u %c: the status changed %lld us after the doorbell", (unsigned)number, kind, (long long)changed_us);
 
 	/* The status's words. */
 	status = work + TEST_STATUS_AT + index * TEST_STATUS_STRIDE;

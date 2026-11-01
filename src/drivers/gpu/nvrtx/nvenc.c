@@ -155,7 +155,7 @@ static int nvenc_first(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc);
 static int nvenc_once(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc, uint32_t push_at, size_t length, const char *what);
 static int nvenc_submit(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc, uint64_t push_va, size_t length, uint32_t *fence);
 static int nvenc_ring_put(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc, uint64_t va, size_t length);
-static int nvenc_wait(struct nvrtx_nvenc_state *nvenc, uint32_t fence, uint32_t timeout_us);
+static int nvenc_wait(struct nvrtx_nvenc_state *nvenc, uint32_t fence, uint32_t timeout_us, const volatile uint32_t *watch, uint32_t sentinel, uint64_t *changed_us);
 static uint32_t nvenc_word(const struct nvrtx_nvenc_state *nvenc, uint32_t at);
 static uint64_t nvenc_round(uint64_t value, uint64_t boundary);
 
@@ -433,6 +433,34 @@ nvrtx_nvenc_run(
 	size_t length,
 	uint32_t timeout_us)
 {
+	int error;
+
+	/* The run with no word watched. */
+	error = nvrtx_nvenc_run_watched(gpu, push_va, length, timeout_us, NULL, 0U, NULL);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the encoder has finished the segment. */
+	return 0;
+}
+
+/*
+ * Runs one push buffer segment as nvrtx_nvenc_run() does, and while it
+ * waits watches a word the encoder writes: changed_us gets the time from
+ * the doorbell to the first look that saw the word differ from sentinel
+ * (UINT64_MAX when it never did).  watch may be NULL (then nothing is
+ * watched).  For the encoder's self-test.
+ */
+int
+nvrtx_nvenc_run_watched(
+	struct nvrtx_gpu *gpu,
+	uint64_t push_va,
+	size_t length,
+	uint32_t timeout_us,
+	const volatile uint32_t *watch,
+	uint32_t sentinel,
+	uint64_t *changed_us)
+{
 	struct nvrtx_nvenc_state *nvenc;
 	uint32_t fence;
 	uint32_t seen;
@@ -463,7 +491,7 @@ nvrtx_nvenc_run(
 
 	/* Waits for the segment's fence. */
 	if (error == 0)
-		error = nvenc_wait(nvenc, fence, timeout_us);
+		error = nvenc_wait(nvenc, fence, timeout_us, watch, sentinel, changed_us);
 
 	/* An encoder that did not finish is taken out of use, so no later work queues behind it. */
 	if (error == ETIMEDOUT)
@@ -910,7 +938,7 @@ nvenc_once(
 
 	/* Waits for the fence once the submission took. */
 	if (error == 0)
-		error = nvenc_wait(nvenc, fence, NVENC_FIRST_FENCE_US);
+		error = nvenc_wait(nvenc, fence, NVENC_FIRST_FENCE_US, NULL, 0U, NULL);
 
 	mutex_unlock(&nvenc->lock);
 
@@ -1005,22 +1033,38 @@ nvenc_ring_put(
 
 /*
  * Waits until the semaphore has reached a fence, up to a time measured in
- * microseconds: the first 2 ms without a pause, then between sleeps.
+ * microseconds: the first 2 ms without a pause, then between sleeps.  A
+ * watched word's first change is timed into changed_us (see
+ * nvrtx_nvenc_run_watched()).
  */
 static int
 nvenc_wait(
 	struct nvrtx_nvenc_state *nvenc,
 	uint32_t fence,
-	uint32_t timeout_us)
+	uint32_t timeout_us,
+	const volatile uint32_t *watch,
+	uint32_t sentinel,
+	uint64_t *changed_us)
 {
 	uint64_t start;
 	uint64_t spent;
 	uint32_t seen;
 	bool passed;
 
+	/* The watched word has not changed yet. */
+	if (changed_us != NULL)
+		*changed_us = UINT64_MAX;
+
 	/* Looks until the fence has passed or the time, measured, is spent. */
 	start = nvrtx_now_us();
 	for (;;) {
+		/* Notes when the watched word first differs from its sentinel. */
+		if (watch != NULL &&
+		    changed_us != NULL &&
+		    *changed_us == UINT64_MAX &&
+		    *watch != sentinel)
+			*changed_us = nvrtx_now_us() - start;
+
 		seen = nvenc_word(nvenc, NVENC_SEMAPHORE_AT);
 		passed = nvrtx_work_fence_passed(seen, fence);
 		if (passed)
