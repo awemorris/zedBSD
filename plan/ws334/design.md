@@ -738,7 +738,7 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
   `X509_STORE_CTX_set_error` と、p030 が足す証明書ごとの検証の callback が使う関数）が無くても TLS が動く形にする（無い時は設定の読みの切り・Disallowed の指紋の照合・callback を使わない）。
   libssl-compat への切り替え（§6.10）の時の net/tls.c の変更を `#ifdef` の 2 つ（WS335 の D28 の 2・3）に抑えるため。p030 の手順に入れる。
 - OpenSSL の build は外部 package の規則（tarball を取得・照合・patch、`userland/packages/` の境界、license は Apache-2.0）。置き場は
-  `userland/packages/security/openssl/Makefile.windows`（新）か WS334 の build の script（p013 で決める）。
+  WS334 の build の script `plan/ws334/tests/openssl-windows.sh`（p030 で決めた。`apps/browser-win32/Makefile` の `openssl` の target が呼ぶ。OpenSSL 3.5.8 に `mingw-arm64` の target が無いので aarch64 は `plan/ws334/tests/openssl-conf/` の自前の target）。
 
 ### 6.7 配布
 
