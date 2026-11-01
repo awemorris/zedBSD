@@ -12,7 +12,7 @@
 | P3 | — | — | 返却（21:17）。WS291 p021（Pi 5 の model の 50 fps）は cleared: c74 画面 51.6〜52.9 fps（前 49.2〜50.7） | 次の Pi 5 の作業は未割当 |
 | P4 | — | Bug の修正の担当 | 返却（21:28）。BUG-387 は fixed、CI の Pi 5 の image で graphical login の desktop まで起動（画面: build/review/q1850-pi5-ci-desk1.png） | 次の Bug の割当を待つ |
 | P5 | [WS334](ws334/ws.md) p023 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | instance と API v4（q1847）。p025 は cleared（script の core が単体の archive で link でき、Wine で host と bytes 一致） | p026（libmedia の Windows）へ |
-| P6 | [WS335](ws335/ws.md) p005 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | AES-GCM（q1846）。p004 AES は cleared（28516 checks） | p007 整数の算術・p009 Ed25519 へ |
+| P6 | [WS335](ws335/ws.md) p007 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | 固定幅の整数と Montgomery の算術（q1851）。p004 AES・p005 AES-GCM は cleared | p009 Ed25519・p010 P-256 へ |
 | P7 | — | VF2 の desktop の描画の速さ | 計測だけ（q1848、21:03 起動、VF2） | 計測の要約を返して終了 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |
 

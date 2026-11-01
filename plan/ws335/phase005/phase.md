@@ -2,7 +2,7 @@
 
 # ws335-p005: AES-GCM
 
-Status: 実装済み・試験 PASS（2026-11-01 21:29 P6。cleared は Q1）。前: planned（2026-11-01 p001 が作成。依存: p004）
+Status: cleared（2026-11-01 21:33 Q1、main 72bb7908a。main で run-unit all 17 本・run-ct gcm PASS を流し直した）。前: 実装済み・試験 PASS（2026-11-01 21:29 P6）。前: planned（2026-11-01 p001 が作成。依存: p004）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -115,3 +115,9 @@ header・phase.md と仕様の食い違い: 見つからなかった。
 未実施: 性能の測定（GHASH は 1 block あたり 128 回の loop で、表引きの形より遅い見込み）、32 bit の size_t の機械での実行（`(size_t)-1 - 16` の検査）、上限ちょうどの 64 GiB の呼び出し、aarch64 Windows の実行（build のみ、check-skeleton）、実機・QEMU（範囲外）。
 
 commit: 下の ws.md の表と同じ commit。
+
+### Q1 の判断（2026-11-01 21:33）
+
+- counter mode を cryc-gcm.c の中に持つ（cryc_aes_ctr32_xor を使わない）: 認める。12 byte でない IV の J0 は秘密の H に依るので、counter を固定の回数で作る形が要る。TLS の record の保護（p026）は 12 byte の nonce で、gcm の seal・open を通すので同じ問題に当たらない。二つの counter の実装を一つにまとめるかは、規約の全文の見直し（p035）で扱う。
+- IV・AAD の 2^61 byte 以上と size の上限の EINVAL を header の comment に足すか: 足す。p035 の header の持ち越しの直しに入れる。
+

@@ -31,7 +31,7 @@
 | P3 | — | 返却。q1840（[WS291](ws291/ws.md) p021 Pi 5 の model の 50 fps）は 21:17 に cleared（c74 画面 51.6〜52.9 fps）。次の Pi 5 の作業は未割当 |
 | P4 | — | 返却。[BUG-387](bugs/BUG-387.md) は fixed、CI の Pi 5 の graphical login も 21:28 に確かめた（main b29f3a5ae）。次の Bug の割当を待つ |
 | P5 | q1847 `p5-ws334b` | [WS334](ws334/ws.md) p023: Windows 版のブラウザ、instance と API v4（p025 は 20:57 に cleared、次は p026） |
-| P6 | q1846 `p6-ws335b` | [WS335](ws335/ws.md) p005: libssl-compat・libcrypto-compat の AES-GCM（p004 AES は 20:55 に cleared） |
+| P6 | q1851 `p6-ws335b` | [WS335](ws335/ws.md) p007: 固定幅の整数と Montgomery の算術（p004 AES・p005 AES-GCM は cleared） |
 | P7 | q1848 `p7-vf2desk` | VF2 の desktop の描画の計測だけ（VF2 が P4 から戻った後） |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
@@ -109,7 +109,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1851 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1852 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
