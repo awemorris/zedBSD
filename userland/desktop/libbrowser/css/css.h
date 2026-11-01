@@ -133,6 +133,15 @@ enum css_unit {
 
 /* The most anchor functions in one value, and names in one anchor-name or anchor-scope. */
 #define CSS_ANCHOR_TERMS	4
+#define CSS_ANCHOR_MATH_ARGS	8
+
+/* The functions a term of math is. */
+enum css_anchor_math {
+	CSS_ANCHOR_MATH_NONE,
+	CSS_ANCHOR_MATH_MIN,
+	CSS_ANCHOR_MATH_MAX,
+	CSS_ANCHOR_MATH_CLAMP
+};
 #define CSS_ANCHOR_NAMES	8
 
 /*
@@ -182,6 +191,10 @@ struct css_anchor_query {
 	int fallback_has_percent;
 	/* A fallback with anchor functions of its own (kept in the arena; the length fields above are then unused). */
 	const struct css_anchor_expr *fallback_expr;
+	/* A min(), max() or clamp() of sums (side is then -1): the arguments, kept in the arena; its value is the term's. */
+	int math;
+	int math_count;
+	const struct css_anchor_expr *math_args;
 };
 
 /* A value with anchor functions: pixels (ems and rems before the cascade), a percentage, and the functions times their factors. */
