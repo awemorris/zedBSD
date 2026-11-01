@@ -438,3 +438,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザ: Google の app の一覧の button（右上の四角の並び）を押しても一覧が正しく出ない | fixed（2026-11-02 07:42 P7 q1916-i01、4e20d10c7b: script.src の brand、別の origin の iframe の読み込みと制限した見え方、MessagePort の transfer と queue、iframe の反映と frameborder。host と Wine で一覧が描かれる。実機の Windows は未確認） |
 | [BUG-399](bugs/BUG-399.md) | Windows 版ブラウザ: Google の検索の入力欄を click すると、入力できる範囲が右へ窓の幅いっぱいに伸びる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
 | [BUG-400](bugs/BUG-400.md) | storage-test の Max-Age の cookie が期限の前に送られない事がある（時々 FAIL） | open（2026-11-02 06:58 Q1 が起票、P5） |
+| [BUG-401](bugs/BUG-401.md) | libbrowser の host の試験 10 本が退行（子の Document・realm が回収されない、frame-lifetime は segfault） | open（2026-11-02 07:50 Q1 が起票、P8） |

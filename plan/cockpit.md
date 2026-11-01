@@ -13,7 +13,7 @@
 | P4 | [BUG-397](bugs/BUG-397.md)・[BUG-399](bugs/BUG-399.md) | Windows 版ブラウザの UAT | Google の「サイト」の link で固まる、検索の欄が右へ伸びる（q1915） | — |
 | P5 | — | Windows 版ブラウザ | 返却（06:57）。p038（Windows の file: の頁の画像）cleared | p037 は本物の Windows が要る |
 | P6 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | 返却（03:59）。p037（試験の TLS server tlspeer）cleared | p024・p029（handshake）の候補 |
-| P7 | [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザの UAT | Google の app の一覧の button（q1916） | — |
+| P7 | — | — | 返却（07:50）。BUG-398 fixed（Google の app の一覧が 15 個の icon で描ける、host と Wine）。以後ブラウザは P8 | 次を待つ |
 | P8 | [BUG-395](bugs/BUG-395.md)・[BUG-396](bugs/BUG-396.md) | Windows 版ブラウザの UAT | 題の帯の drag・double click、Reload の icon（q1914） | — |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
