@@ -269,7 +269,6 @@ frame_load_scan(
 	struct dom_node *walk;
 	struct dom_element *element;
 	struct vm_string *source;
-	struct vm_string *sandbox;
 	struct vm_realm *child;
 	struct bind_window *nested;
 	int same;
@@ -288,8 +287,7 @@ frame_load_scan(
 			if (element->ns == DOM_NS_HTML &&
 			    (element->tag == DOM_TAG_IFRAME || element->tag == DOM_TAG_OBJECT)) {
 				/* Unsupported sandbox contexts never publish a new accessible resource owner. */
-				sandbox = dom_attribute_ascii(element, "sandbox");
-				if (sandbox == NULL) {
+				if (!bind_frame_sandboxed(element)) {
 					/* Object data and iframe src are ordinary live native attributes. */
 					if (element->tag == DOM_TAG_IFRAME) {
 						source = dom_attribute_ascii(element, "srcdoc");
@@ -600,7 +598,6 @@ frame_load_current(
 	struct dom_element *element;
 	struct bind_window *window;
 	struct vm_string *source;
-	struct vm_string *sandbox;
 	int connected;
 	int same;
 
@@ -614,8 +611,7 @@ frame_load_current(
 	connected = dom_is_inclusive_ancestor(&window->document->node, &element->node);
 	if (!connected)
 		return 0;
-	sandbox = dom_attribute_ascii(element, "sandbox");
-	if (sandbox != NULL)
+	if (bind_frame_sandboxed(element))
 		return 0;
 
 	/* Attribute edits during completion events invalidate the remaining work immediately. */

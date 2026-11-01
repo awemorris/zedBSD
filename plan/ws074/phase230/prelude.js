@@ -733,9 +733,29 @@
 
     // Changing the current entry: a pushed entry drops those after the current one, a replacing entry keeps
     // its key; either way the entries that left are disposed of after currententrychange.
+    // The joint session history of the top-level page: the pushes its frames make, so that its history.back() and length see them.
+    function joint() {
+      var t;
+      try {
+        t = g.top;
+        if (!t || t === g) return null;
+        if (!t.__zedJoint) Object.defineProperty(t, '__zedJoint', { value: { steps: [], pos: 0 }, configurable: true });
+        return t.__zedJoint;
+      } catch (e) { return null; }
+    }
+    function jointRecord(prev, key) {
+      var j = joint(), frame;
+      if (!j || initialBlank()) return;
+      frame = native.frameElement();
+      if (!frame) return;
+      j.steps.length = j.pos;
+      j.steps.push({ frame: frame, prev: prev, key: key });
+      j.pos++;
+    }
     function putEntry(entry, handling) {
       var disposed = [], removed, i;
       if (handling === 'push') {
+        jointRecord(entries[current].key, entry.key);
         removed = entries.splice(current + 1);
         for (i = 0; i < removed.length; i++) if (removed[i].nhe) disposed.push(removed[i].nhe);
         entries.push(entry);
@@ -824,6 +844,7 @@
       if (o.type === 'push') {
         target = makeEntry(o.url, o.navState, null, old);
         target.docId = uuid();
+        jointRecord(old.key, target.key);
         list.splice(current + 1);
         list.push(target);
         index = list.length - 1;
@@ -868,6 +889,7 @@
       list = entries.slice();
       target = makeEntry(url, null, null, old);
       target.docId = uuid();
+      jointRecord(old.key, target.key);
       list.splice(current + 1);
       list.push(target);
       index = list.length - 1;
@@ -1157,15 +1179,38 @@
     ['navigate', 'navigatesuccess', 'navigateerror', 'currententrychange'].forEach(function (type) { handlerAttribute(Navigation.prototype, type); });
     tag(Navigation, 'Navigation');
 
+    // history.go() of the top-level page when its frames pushed entries: the latest step is undone (or redone) in its frame.
+    function jointGo(delta) {
+      var j = g.__zedJoint, step, win;
+      if (delta < 0 && j.pos > 0) step = j.steps[--j.pos];
+      else if (delta > 0 && j.pos < j.steps.length) step = j.steps[j.pos++];
+      else return false;
+      win = step.frame.isConnected ? step.frame.contentWindow : null;
+      if (!win || !win.navigation) return true;
+      setTimeout(function () {
+        try { win.navigation.traverseTo(delta < 0 ? step.prev : step.key); } catch (e) { }
+      }, 0);
+      return true;
+    }
     class History {
       constructor(key) { if (key !== KEY) throw new TypeError('Illegal constructor'); }
-      get length() { return entries.length; }
+      get length() {
+        var t, j;
+        try {
+          t = g.top;
+          j = t && t.__zedJoint;
+          if (t && t !== g) return t.history.length;
+          if (j) return entries.length + j.pos;
+        } catch (e) { }
+        return entries.length;
+      }
       get state() { return classicState; }
       get scrollRestoration() { return entries[current].scrollMode; }
       set scrollRestoration(v) { v = String(v); if (v === 'auto' || v === 'manual') entries[current].scrollMode = v; }
       go(delta) {
         delta = delta === undefined ? 0 : Number(delta) | 0;
         if (delta === 0) { locationReload(); return; }
+        if (g.top === g && g.__zedJoint && jointGo(delta)) return;
         traverse(function () { return entries[current + delta] || null; });
       }
       back() { this.go(-1); }
@@ -2310,6 +2355,7 @@
   })();
 // @include plan/ws074/phase260/caret.js
 // @include plan/ws074/phase260/html-unsafe.js
+// @include plan/ws074/phase260/frames.js
   // ---- Popover: the popover attribute and showPopover(), hidePopover(), togglePopover() (the top layer is a high z-index)
   if (typeof g.Element === 'function' && !g.Element.prototype.showPopover) (function () {
     function kind(element) {
