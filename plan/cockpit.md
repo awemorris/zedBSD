@@ -38,6 +38,10 @@
 
 - 2026-11-01 23:19: p027（RTX の submit の hand-off）を全 architecture の回帰の後に main に merge（70b8b4521）。amd64 RTX: subs-1000 52.9 → 81.2〜83.8 fps、subs-100 466 → 622 fps、他は main と同じ、画の比較 29 一致。Venus・Pi 5・VF2 も main と同じ。
 
+### WS335 libssl-compat・libcrypto-compat
+
+- 2026-11-02 02:2x: p026（TLS の record の保護）cleared。RFC 8448 の record 41 件が一致、9 suite、定数時間の試験 PASS。
+
 ### WS074 Web ブラウザ
 
 - 2026-11-01 20:1x: origin/browser（クラウド、dev153 = 3,113 / 3,473）を main に merge（272e6c226、push 済み）。同じ基点から P8（local）も i17 で 3,125 / 3,472 まで進めていたので、縦書きの inline の装飾は P8 の版を採って衝突を解いた。host build は warning 0。merge の後の WPT の測り直しは未実施（クラウドのセッションの次の測定で分かる）。
