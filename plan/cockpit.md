@@ -12,7 +12,7 @@
 | P3 | [WS291](ws291/ws.md) p021 | GPU の driver の描画の速さ（Pi 5 の V3D） | model の 50 fps（49.2〜49.9 の境）（q1840） | coordinate shader の attribute を絞るなど |
 | P4 | [BUG-387](bugs/BUG-387.md) | VF2・Pi 5 で console から Wayland の desktop を起動できない | 直しは 9616367f5（build だけ）。Pi 5・VF2 の板の窓を待つ（q1842） | 板の試験 → merge。以後の Bug の修正も P4 |
 | P5 | [WS334](ws334/ws.md) p025 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | script の core の archive と link の確かめ（q1843） | p023（instance と API v4）・p026（libmedia の Windows）へ |
-| P6 | — | — | — | — |
+| P6 | [WS335](ws335/ws.md) p004 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | AES と counter mode（q1844） | p005 AES-GCM・p007 整数の算術・p009 Ed25519 へ |
 | P7 | — | — | — | — |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |
 

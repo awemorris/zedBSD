@@ -9,6 +9,7 @@
 | P2 | phase-runner-high | ws291 p020 VF2 の model の 50 fps (q1839-i01) | `/home/awe/zedBSD-worktrees/p2-ws291p020` / `agent/p2-ws291p020` | in-progress（2026-11-01 20:2x 起動、VF2） | — |
 | P3 | phase-runner-high | ws291 p021 Pi 5 の model の 50 fps (q1840-i01) | `/home/awe/zedBSD-worktrees/p3-ws291p021` / `agent/p3-ws291p021` | in-progress（2026-11-01 20:2x 起動、Pi 5） | — |
 | P5 | phase-runner-high | ws334 p025 Windows のブラウザ (q1843-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 20:35 起動） | — |
+| P6 | phase-runner-low | ws335 p004 AES (q1844-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 20:37 起動） | — |
 | P4 | phase-runner-high | BUG-387 (q1841-i01 返却 9616367f5、次は q1842 板の試験) | `/home/awe/zedBSD-worktrees/p4-bug387` / `agent/p4-bug387` | 板の窓を待つ | — |
 
 - 2026-11-01 20:20 の割り振り（ユーザーの指示）: P1 は RTX、P2 は VF2、P3 は Pi 5 の作業（どれも WS291 の描画の速さ、Q1 が選んだ）。Bug の修正は P4。
