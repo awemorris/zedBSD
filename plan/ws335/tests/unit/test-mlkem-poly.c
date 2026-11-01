@@ -1126,7 +1126,10 @@ static void
 test_compress_examples(void)
 {
 	struct cryc_mlkem_poly f;
+	struct cryc_mlkem_poly saved;
 	unsigned index;
+	unsigned round;
+	unsigned d;
 	int same;
 
 	/*
@@ -1194,10 +1197,32 @@ test_compress_examples(void)
 	cryc_mlkem_decompress(&f, 4U);
 	CHECK((uint32_t)f.c[0] == reference_decompress(15U, 4U));
 
+	/* Random 16-bit patterns for every width: Compress reduces mod q first, Decompress takes the low d bits. */
+	for (round = 0; round < 12U; round++) {
+		for (d = 1U; d <= 11U; d++) {
+			random_wild_poly(&f);
+			saved = f;
+			cryc_mlkem_compress(&f, d);
+			same = 1;
+			for (index = 0; index < CRYC_MLKEM_N; index++) {
+				if ((uint32_t)f.c[index] != reference_compress((uint32_t)(uint16_t)saved.c[index] % Q, d))
+					same = 0;
+			}
+			CHECK(same);
+			f = saved;
+			cryc_mlkem_decompress(&f, d);
+			same = 1;
+			for (index = 0; index < CRYC_MLKEM_N; index++) {
+				if ((uint32_t)f.c[index] != reference_decompress((uint32_t)(uint16_t)saved.c[index] & ((1U << d) - 1U), d))
+					same = 0;
+			}
+			CHECK(same);
+		}
+	}
+
 	/* The undefined widths leave the polynomial unchanged. */
 	for (index = 0; index < 4U; index++) {
 		static const unsigned widths[] = { 0U, 12U, 13U, 0xffffffffU };
-		struct cryc_mlkem_poly saved;
 
 		random_poly(&f);
 		saved = f;
