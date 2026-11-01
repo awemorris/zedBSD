@@ -11,7 +11,7 @@
 | P2 | [WS322](ws322/ws.md) p001 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | 調べと設計（q1845） | 設計 → レビュー → 実装の Phase の案。板は P4 の後 |
 | P3 | [WS291](ws291/ws.md) p021 | GPU の driver の描画の速さ（Pi 5 の V3D） | dcache clean を省く直し（6d4ef0df9）を Pi 5 で計測（q1840-i02、20:45 再開） | 50 fps を安定して超えたら判定の材料 |
 | P4 | [BUG-387](bugs/BUG-387.md) | VF2・Pi 5 で console から Wayland の desktop を起動できない | Pi 5 は PASS（video の member は wayland が 1920x1080 で起動、member でない人は新しい message で拒否）。account-admin・Settings の直しと VF2 の試験 | VF2 の試験 → merge |
-| P5 | [WS334](ws334/ws.md) p025 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | script の core の archive と link の確かめ（q1843） | p023（instance と API v4）・p026（libmedia の Windows）へ |
+| P5 | [WS334](ws334/ws.md) p023 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | instance と API v4（q1847）。p025 は cleared（script の core が単体の archive で link でき、Wine で host と bytes 一致） | p026（libmedia の Windows）へ |
 | P6 | [WS335](ws335/ws.md) p005 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | AES-GCM（q1846）。p004 AES は cleared（28516 checks） | p007 整数の算術・p009 Ed25519 へ |
 | P7 | — | — | — | — |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |

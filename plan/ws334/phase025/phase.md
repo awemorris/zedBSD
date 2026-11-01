@@ -3,7 +3,7 @@
 # ws334-p025 統合: script の core の archive と link の確かめ
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §3.2・§3.3（決定 9 の「core だけで build して library にできる」）。
-- 状態: in-progress（2026-11-01 20:55 P5、q1843-i01。実装・試験 PASS、cleared の判定は Q1）。
+- 状態: cleared（2026-11-01 20:57 Q1、main e1334ddfc。main で script-core-link.sh PASS を流し直した）。前: in-progress（2026-11-01 20:55 P5、q1843-i01。実装・試験 PASS、cleared の判定は Q1）。
 - 依存: p021。
 - 担当の想定: Opus（phase-runner）を 1 回（約 2 LW）。
 
@@ -63,3 +63,9 @@
 ### 消してよい物（Q1 へ）
 
 - `build/p025/`（試しの build と出力: try-win64・js・mut・run*.txt・c*.out ほか）と `build/tmp/ws334-script-core.run.*` の古い run。どれも使い捨て。
+
+### Q1 の判断（2026-11-01 20:57）
+
+- P5 の問い 1（core の js/tool.c が公開の browser.h を通して vulkan/vulkan.h を include する、compile だけの依存）: 今は直さない。link では core だけで library になり、決定 9 の目的は満たす。公開の header を分けるのは header の持ち越しの直し（p035）で U13 と合わせて扱う。
+- P5 の問い 2（Math.cbrt が glibc と UCRT で末尾の bit が違う）: Bug にしない。engine は platform の libm の値を返す設計で、この WS の受け入れ（host と Wine の bytes の一致）は試験の側で避けた。engine の数学関数を platform に依らせない件は WS074（browser）の判断に回す（WS074 の ws.md の残りに一行）。
+
