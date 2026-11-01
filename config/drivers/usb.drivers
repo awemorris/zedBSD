@@ -1,11 +1,11 @@
 # key|kind|label|platforms|default|choices
-CONFIG_DRIVER_USB_STORAGE|bool|USB Mass Storage|i386,amd64,rpi4|y|
-CONFIG_DRIVER_USB_CDC_NCM|bool|USB CDC NCM Ethernet|i386,amd64,rpi4|y|
-CONFIG_DRIVER_USB_CDC_ECM|bool|USB CDC ECM Ethernet|i386,amd64,rpi4|y|
+CONFIG_DRIVER_USB_STORAGE|bool|USB Mass Storage|i386,amd64,rpi4,rpi5,odroid-c5|y|
+CONFIG_DRIVER_USB_CDC_NCM|bool|USB CDC NCM Ethernet|i386,amd64,rpi4,rpi5,odroid-c5|y|
+CONFIG_DRIVER_USB_CDC_ECM|bool|USB CDC ECM Ethernet|i386,amd64,rpi4,rpi5,odroid-c5|y|
 CONFIG_DRIVER_USB_RTL815X|bool|USB Realtek RTL8156 and RTL8157 2.5G/5G Ethernet in vendor mode|amd64|y|
-CONFIG_DRIVER_USB_HID|bool|USB HID input|i386,amd64,rpi4|y|
-CONFIG_DRIVER_USB_HUB|bool|USB 2.0 hubs|i386,amd64,rpi4|y|
-CONFIG_DRIVER_USB_CCID|bool|USB smart card readers (CCID, NFC readers)|i386,amd64,rpi4|y|
-CONFIG_DRIVER_USB_BT|bool|USB Bluetooth: Intel AX211 and other USB HCI controllers (/dev/btN)|i386,amd64,rpi4|y|
-CONFIG_DRIVER_USB_UVC|bool|USB Video Class cameras and capture devices (/dev/camN)|i386,amd64,rpi4|y|
-CONFIG_DRIVER_USB_RTL8822BU|bool|Realtek RTL8822BU WLAN|i386,amd64,rpi4|n|
+CONFIG_DRIVER_USB_HID|bool|USB HID input|i386,amd64,rpi4,rpi5,odroid-c5,riscv64-virt,visionfive2|y|
+CONFIG_DRIVER_USB_HUB|bool|USB 2.0 hubs|i386,amd64,rpi4,rpi5,odroid-c5,riscv64-virt,visionfive2|y|
+CONFIG_DRIVER_USB_CCID|bool|USB smart card readers (CCID, NFC readers)|i386,amd64,rpi4,rpi5,odroid-c5|y|
+CONFIG_DRIVER_USB_BT|bool|USB Bluetooth: Intel AX211 and other USB HCI controllers (/dev/btN)|i386,amd64,rpi4,rpi5,odroid-c5|y|
+CONFIG_DRIVER_USB_UVC|bool|USB Video Class cameras and capture devices (/dev/camN)|i386,amd64,rpi4,rpi5,odroid-c5,riscv64-virt,visionfive2|y|
+CONFIG_DRIVER_USB_RTL8822BU|bool|Realtek RTL8822BU WLAN|i386,amd64,rpi4,rpi5,odroid-c5|n|

@@ -136,15 +136,27 @@ FIRMWARE_GROUPS = ("firmware",)
 # command's name.
 RETRO_PROGRAMS = ("Xzed", "zwm", "zshell", "zterm")
 
-# The CPUs the Desktop (Keiland, Vulkan, Wayland) is not built for
+# The boards the Desktop (Keiland, Vulkan, Wayland) is not built for
 # (2026-10-14 user, WS232: "i386 では Desktop を自動で外す"): on them the
 # menu offers no Desktop and writes none of its programs, nor a program that
 # needs one of them, as config/ci/config-pc98.mk has only Retro and Base.
 # As with any selection that does not build for the target, the menu keeps
-# the Desktop's selection while i386 is chosen, so switching back to x86_64
-# or arm64 in the same session writes it again.  RISC-V 64 is treated the
-# same way: its port builds the base system only.
-NO_DESKTOP_ARCHITECTURES = ("i386", "riscv64", "riscv32", "mips32", "mips64", "armv7")
+# the Desktop's selection while such a board is chosen, so switching back
+# to x86_64 or arm64 in the same session writes it again.  The board
+# decides, not the CPU: the RISC-V 64 emulator's virt builds the base
+# system only, while the VisionFive 2 builds the Desktop on its PowerVR GPU
+# (config/ci/config-visionfive2-keiland.mk).
+NO_DESKTOP_PLATFORMS = ("i386", "pc98", "riscv64-virt", "riscv32-virt", "armv7-virt", "zybo",
+                        "mips32-malta", "mips64-malta", "mips32-rg350")
+
+# The settings an older menu wrote that nothing reads any more: loading a
+# config.mk drops them.  Any other setting the menu does not offer is
+# written back as the config.mk has it.
+OBSOLETE_KEYS = ("ZEDBSD_IMAGE_SIZE_GIB",)
+
+# The settings save() writes at the head of a config.mk itself.
+HEADER_KEYS = ("ZEDBSD_MENU_VERSION", "ZEDBSD_PLATFORM", "ZEDBSD_ARCHITECTURE",
+               "ZEDBSD_BOARD", "ZEDBSD_VARIANT", "ZEDBSD_USER_PROGRAMS")
 
 
 def package_categories(rows: list[list[str]]) -> list[tuple[str, str]]:
@@ -175,7 +187,7 @@ def applies(specification: str, platform: str) -> bool:
 
 def desktop_builds(platform: str) -> bool:
     """Whether the Desktop is built for this platform."""
-    return platform_record(platform)[1] not in NO_DESKTOP_ARCHITECTURES
+    return platform_record(platform)[0] not in NO_DESKTOP_PLATFORMS
 
 
 def builds_for(platform: str) -> set[str]:
@@ -366,6 +378,8 @@ def load(path: Path) -> dict[str, object]:
         if not match:
             continue
         key, value = match.groups()
+        if key in OBSOLETE_KEYS:
+            continue
         configured.add(key)
         if key == "ZEDBSD_USER_PROGRAMS":
             values[key] = set(value.split())
@@ -401,9 +415,10 @@ def normalize(values: dict[str, object]) -> None:
     # Driver choices survive saving and CPU changes, including foreign drivers.
     if platform != "amd64":
         values["CONFIG_KERNEL_TEST_CHECKPOINTS"] = "n"
-    available_programs = {row[0] for row in user_program_rows()}
+    # A program the menu does not offer (one Make always builds, such as
+    # sh, or one only a config.mk names, such as networkd on the ZYBO)
+    # stays as the config.mk has it.
     selected_programs = values.setdefault("ZEDBSD_USER_PROGRAMS", set())
-    selected_programs.intersection_update(available_programs)
     # Noct built with its accelerator (an amd64 option) links libEGL and
     # libGLESv2, so the image that carries noct carries them too.
     architecture = platform_record(platform)[1]
@@ -435,12 +450,20 @@ def save(path: Path, values: dict[str, object]) -> None:
                 continue
             lines.append(f"{key} := {values.get(key, 'n')}")
             emitted.add(key)
+    # A setting the menu does not offer is written back as it was read.
+    for key, value in values.items():
+        if key not in emitted and key not in HEADER_KEYS and key not in OBSOLETE_KEYS and \
+                re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
+            lines.append(f"{key} := {value}")
     # A selection that does not build for this platform stays in the menu's
-    # state, so switching the target back keeps it, but is not written.
+    # state, so switching the target back keeps it, but is not written.  A
+    # program the menu does not offer is written back after the others.
     programs = values.get("ZEDBSD_USER_PROGRAMS", set())
     building = builds_for(platform)
+    offered = {row[0] for row in user_program_rows()}
     ordered = [row[0] for row in user_program_rows()
                if row[0] in programs and row[0] in building]
+    ordered.extend(sorted(set(programs) - offered))
     lines.extend(["", "ZEDBSD_USER_PROGRAMS := " + " ".join(ordered)])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

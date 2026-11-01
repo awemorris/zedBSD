@@ -267,7 +267,8 @@ def check_i386_and_retro() -> None:
     zwm, zshell and zterm on every CPU.  On i386 the Desktop is left out by itself (2026-10-14
     user: "i386 では Desktop を自動で外す"): its entry is not shown and its
     programs are not written, and switching back to x86_64 writes them
-    again.  The configurations the menu writes for i386 PC/AT and PC-9800,
+    again.  The board decides, not the CPU: the VisionFive 2 shows the
+    Desktop and the RISC-V 64 emulator does not.  The configurations the menu writes for i386 PC/AT and PC-9800,
     the defaults as they are and with Retro, are then resolved by make -n."""
     values = menu.defaults()
     shown = walk(menu.select_cpu_board, ["CPU: x86_64", "i386", "Back"], values)
@@ -332,6 +333,8 @@ def check_i386_and_retro() -> None:
     needing_desktop = {row[0] for row in USER_PROGRAM_ROWS
                        if desktop_packages.intersection(row[6].split())}
     for platform, cpu, shows in (("amd64", "x86_64", True), ("rpi4", "arm64", True),
+                                 ("rpi5", "arm64", True), ("visionfive2", "RISC-V 64", True),
+                                 ("riscv64-virt", "RISC-V 64", False),
                                  ("i386", "i386", False), ("pc98", "i386", False)):
         values = menu.defaults()
         values["ZEDBSD_PLATFORM"] = platform
@@ -495,6 +498,39 @@ def check_platform_drivers() -> None:
         if ci.get(key) != value or f"{key} := {value}" not in text:
             fail(f"config/ci/config-rpi4.mk does not set {key} := {value}")
 
+    # The Raspberry Pi 5, offered under arm64's Board beside the Pi 4 and the
+    # ODROID-C5, chosen from the Pi 4: its Platform drivers take their
+    # catalog defaults (the GPU and the fan on, the Bluetooth off), and its
+    # CI image's file names each of them.
+    values = menu.defaults()
+    shown = walk(menu.select_cpu_board, ["CPU: x86_64", "arm64", "Board: Raspberry Pi 4",
+                                         "Raspberry Pi 5", "Back"], values)
+    if ("Board", ["Raspberry Pi 4", "Raspberry Pi 5", "ODROID-C5"]) not in shown:
+        fail(f"the arm64 Board menu is {[item for item in shown if item[0] == 'Board']}")
+    if values["ZEDBSD_PLATFORM"] != "rpi5" or values["ZEDBSD_VARIANT"] != "default":
+        fail(f"choosing the Raspberry Pi 5 made {values['ZEDBSD_PLATFORM']}/"
+             f"{values['ZEDBSD_VARIANT']}")
+    pi5 = {"CONFIG_DRIVER_BCM2712_GPU": "y", "CONFIG_DRIVER_RPI5_FAN": "y",
+           "CONFIG_DRIVER_RPI5_BT": "n"}
+    for key, value in pi5.items():
+        if values.get(key) != value:
+            fail(f"the Raspberry Pi 5 chosen from the Pi 4 has {key}={values.get(key)}")
+    labels = [row[2] for row in dict(menu.driver_groups("rpi5"))["Platform"]]
+    for label in ("RP1 south bridge: USB, onboard Ethernet and PCIe",
+                  "BCM2712 GPU: Raspberry Pi 5 display and V3D 7.1 Vulkan (experimental)",
+                  "Raspberry Pi 5 onboard Bluetooth (experimental)"):
+        if label not in labels:
+            fail(f"the Raspberry Pi 5's Platform has no {label}: {labels}")
+    if any("BCM2711" in label for label in labels):
+        fail(f"the Raspberry Pi 5's Platform shows the Pi 4's drivers: {labels}")
+    text = (menu.REPO / "config" / "ci" / "config-rpi5.mk").read_text(encoding="utf-8")
+    ci = menu.load(menu.REPO / "config" / "ci" / "config-rpi5.mk")
+    if ci["ZEDBSD_PLATFORM"] != "rpi5":
+        fail(f"config/ci/config-rpi5.mk loads as {ci['ZEDBSD_PLATFORM']}")
+    for key in pi5:
+        if f"{key} := {ci.get(key)}" not in text:
+            fail(f"config/ci/config-rpi5.mk does not set {key}")
+
 
 def check_driver_firmware() -> None:
     """WS232 p004 (2026-10-14 user: "menuconfig で Pi を選んだ時、WiFi と
@@ -503,8 +539,13 @@ def check_driver_firmware() -> None:
     お願いします。そのほかのドライバも、ファームウェアを選択してください。"):
     a driver turned on selects its firmware, in Drivers and as a board's
     default; turned off, its firmware goes unless another driver needs it;
-    a package chosen by hand stays; and every CI image but the user's
-    server one selects the firmware of its drivers."""
+    a package chosen by hand stays; a board brings the firmware of the
+    drivers always built into it (the Raspberry Pi 5's Wi-Fi); and every CI
+    image but the user's server one selects the firmware of its drivers.
+    (2026-11-02) On the user's remark that the default carries the GPU
+    drivers and their firmware by an earlier decision, the check that pinned
+    the x86_64 default's exact firmware set was taken out; what is checked is
+    the firmware coming and going with each driver and board."""
     table = menu.driver_firmware_table()
     drivers = {row[0] for row in menu.driver_rows()}
     boards = {item[0] for item in menu.PLATFORMS}
@@ -522,44 +563,72 @@ def check_driver_firmware() -> None:
     def selected(values: dict[str, object]) -> set[str]:
         return set(values["ZEDBSD_USER_PROGRAMS"]) & firmware
 
-    # The x86_64 default: the i915, nvrtx (on by default since 2026-10-15)
-    # and USB Bluetooth drivers are on.
+    def set_driver(values: dict[str, object], group: str, key: str, on: bool) -> None:
+        """Turns one driver on or off in Drivers, as a user would."""
+        if (values.get(key) == "y") == on:
+            return
+        labels = {row[0]: row[2] for row in
+                  dict(menu.driver_groups(str(values["ZEDBSD_PLATFORM"])))[group]}
+        mark = "[*]" if values.get(key) == "y" else "[ ]"
+        walk(menu.drivers_menu, [group, f"{mark} {labels[key]}", "Back", "Back"], values)
+
+    # Drivers > GPU on x86_64: each GPU driver brings its firmware when it is
+    # turned on and takes it away when it is turned off, and a firmware
+    # package chosen by hand stays.  Which drivers the default turns on is the
+    # product's choice and not fixed here: the default takes their firmware
+    # with them, as the CI images below do.
     values = menu.defaults()
-    if selected(values) != {"i915-firmware", "intelbt-firmware", "nvidia-gsp-firmware"}:
-        fail(f"the x86_64 default selects {sorted(selected(values))}")
-
-    # Drivers > GPU: the NVIDIA driver brings its firmware and takes it away; so does i915.
-    gpu = {row[0]: row[2] for row in dict(menu.driver_groups("amd64"))["GPU"]}
-    nvrtx = gpu["CONFIG_DRIVER_PCI_NVRTX"]
-    i915 = gpu["CONFIG_DRIVER_PCI_I915"]
     values["ZEDBSD_USER_PROGRAMS"].add("rtl8822b-firmware")
-    # Both start on (nvrtx by default since 2026-10-15).
-    walk(menu.drivers_menu, ["GPU", f"[*] {nvrtx}", f"[*] {i915}", "Back", "Back"], values)
-    if selected(values) != {"intelbt-firmware", "rtl8822b-firmware"}:
-        fail(f"turning the GPU drivers off left {sorted(selected(values))}")
-    walk(menu.drivers_menu, ["GPU", f"[ ] {nvrtx}", "Back", "Back"], values)
-    if "nvidia-gsp-firmware" not in values["ZEDBSD_USER_PROGRAMS"]:
-        fail("turning the NVIDIA driver on did not select nvidia-gsp-firmware")
-    walk(menu.drivers_menu, ["GPU", f"[*] {nvrtx}", "Back", "Back"], values)
-    if "nvidia-gsp-firmware" in values["ZEDBSD_USER_PROGRAMS"]:
-        fail("turning the NVIDIA driver off left nvidia-gsp-firmware")
-    walk(menu.drivers_menu, ["GPU", f"[ ] {i915}", "Back", "Back"], values)
-    if "i915-firmware" not in values["ZEDBSD_USER_PROGRAMS"]:
-        fail("turning the i915 driver on did not select i915-firmware")
+    for key, package in (("CONFIG_DRIVER_PCI_NVRTX", "nvidia-gsp-firmware"),
+                         ("CONFIG_DRIVER_PCI_I915", "i915-firmware"),
+                         ("CONFIG_DRIVER_PCI_AMDRDNA", "amd-navi-firmware")):
+        set_driver(values, "GPU", key, False)
+        if package in values["ZEDBSD_USER_PROGRAMS"]:
+            fail(f"turning {key} off left {package}")
+        set_driver(values, "GPU", key, True)
+        if package not in values["ZEDBSD_USER_PROGRAMS"]:
+            fail(f"turning {key} on did not select {package}")
+        if "rtl8822b-firmware" not in values["ZEDBSD_USER_PROGRAMS"]:
+            fail(f"turning {key} on and off took out rtl8822b-firmware, chosen by hand")
+    set_driver(values, "GPU", "CONFIG_DRIVER_PCI_NVRTX", False)
+    pc = selected(values)
+    pc_gpu = {"i915-firmware", "amd-navi-firmware", "nvidia-gsp-firmware"}
 
-    # The Raspberry Pi 4 from x86_64: its WiFi and Bluetooth firmware come, i915's goes.
+    # The Raspberry Pi 4 from x86_64: its WiFi and Bluetooth firmware come, the
+    # firmware of the PC's GPU drivers goes, the one chosen by hand stays.
     walk(menu.select_cpu_board, ["CPU: x86_64", "arm64", "Back"], values)
-    if selected(values) != {"bcm43455-firmware", "brcmbt-firmware", "intelbt-firmware",
-                            "rtl8822b-firmware"}:
-        fail(f"the Raspberry Pi 4 chosen from x86_64 selects {sorted(selected(values))}")
-    pi = {row[0]: row[2] for row in dict(menu.driver_groups("rpi4"))["Platform"]}
-    walk(menu.drivers_menu, ["Platform", f"[*] {pi['CONFIG_DRIVER_BCM2711_BT']}", "Back", "Back"],
-         values)
+    pi4 = selected(values)
+    if not {"bcm43455-firmware", "brcmbt-firmware", "rtl8822b-firmware"} <= pi4 or pi4 & pc_gpu \
+            or pi4 - pc - {"bcm43455-firmware", "brcmbt-firmware"}:
+        fail(f"the Raspberry Pi 4 chosen from x86_64 selects {sorted(pi4)}")
+    set_driver(values, "Platform", "CONFIG_DRIVER_BCM2711_BT", False)
     if "brcmbt-firmware" in values["ZEDBSD_USER_PROGRAMS"]:
         fail("turning the Pi's Bluetooth off kept brcmbt-firmware")
     walk(menu.select_cpu_board, ["CPU: arm64", "x86_64", "Back"], values)
-    if selected(values) != {"i915-firmware", "intelbt-firmware", "rtl8822b-firmware"}:
-        fail(f"x86_64 chosen back from the Pi selects {sorted(selected(values))}")
+    if selected(values) != pc:
+        fail(f"x86_64 chosen back from the Pi selects {sorted(selected(values))}, "
+             f"not {sorted(pc)}")
+
+    # The Raspberry Pi 5 from the Pi 4: its Wi-Fi is always built into its
+    # kernel, so the board brings bcm43455-firmware whatever its drivers are;
+    # its Bluetooth is off by default and brings brcmbt-firmware when turned on.
+    walk(menu.select_cpu_board, ["CPU: x86_64", "arm64", "Board: Raspberry Pi 4",
+                                 "Raspberry Pi 5", "Back"], values)
+    if values["ZEDBSD_PLATFORM"] != "rpi5":
+        fail(f"choosing the Raspberry Pi 5 made {values['ZEDBSD_PLATFORM']}")
+    pi5 = selected(values)
+    if "bcm43455-firmware" not in pi5 or pi5 & (pc_gpu | {"brcmbt-firmware"}):
+        fail(f"the Raspberry Pi 5 chosen from the Pi 4 selects {sorted(pi5)}")
+    set_driver(values, "Platform", "CONFIG_DRIVER_RPI5_BT", True)
+    if "brcmbt-firmware" not in values["ZEDBSD_USER_PROGRAMS"]:
+        fail("turning the Pi 5's Bluetooth on did not select brcmbt-firmware")
+    set_driver(values, "Platform", "CONFIG_DRIVER_RPI5_BT", False)
+    if "brcmbt-firmware" in values["ZEDBSD_USER_PROGRAMS"]:
+        fail("turning the Pi 5's Bluetooth off kept brcmbt-firmware")
+    walk(menu.select_cpu_board, ["CPU: arm64", "x86_64", "Back"], values)
+    if selected(values) != pc:
+        fail(f"x86_64 chosen back from the Pi 5 selects {sorted(selected(values))}, "
+             f"not {sorted(pc)}")
 
     # The ODROID-C5 (2026-10-30 user: "ODROID-C5のBSPを選ぶと、Amlogicのこのチップの
     # ファームウェアが自動で依存関係で有効になるようにしてください。"): the board
@@ -597,6 +666,40 @@ def check_driver_firmware() -> None:
         missing = menu.driver_firmware(ci, str(ci["ZEDBSD_PLATFORM"])) - set(ci["ZEDBSD_USER_PROGRAMS"])
         if missing:
             fail(f"{path.name} builds drivers without {sorted(missing)}")
+
+
+def check_ci_round_trip() -> None:
+    """Every CI image's config.mk, loaded and saved by the menu and loaded
+    again, keeps every value and program it had and every one its file
+    names, settings and programs the menu does not offer too (such as an
+    ODROID-C5's serial console, sh, or the ZYBO's networkd); a second save
+    writes the same file."""
+    directory = scratch_directory("ci")
+    for path in sorted((menu.REPO / "config" / "ci").glob("config-*.mk")):
+        first = menu.load(path)
+        written = directory / path.name
+        menu.save(written, dict(first, ZEDBSD_USER_PROGRAMS=set(first["ZEDBSD_USER_PROGRAMS"])))
+        again = menu.load(written)
+        changed = sorted(key for key in set(first) | set(again)
+                         if first.get(key) != again.get(key))
+        if changed:
+            fail(f"{path.name} saved and loaded again changes {changed}")
+        pattern = menu.re.compile(r"^([A-Z][A-Z0-9_]*)\s*(?::=|=)\s*(.*?)\s*$")
+        for line in path.read_text(encoding="utf-8").splitlines():
+            match = pattern.match(line)
+            if not match or match.group(1) == "ZEDBSD_MENU_VERSION":
+                continue
+            key, value = match.groups()
+            if key == "ZEDBSD_USER_PROGRAMS":
+                if set(value.split()) != set(again[key]):
+                    fail(f"{path.name} saved and loaded again changes its programs: "
+                         f"{sorted(set(value.split()) ^ set(again[key]))}")
+            elif str(again.get(key)) != value:
+                fail(f"{path.name} saved and loaded again has {key}={again.get(key)}, not {value}")
+        twice = directory / f"again-{path.name}"
+        menu.save(twice, dict(again, ZEDBSD_USER_PROGRAMS=set(again["ZEDBSD_USER_PROGRAMS"])))
+        if twice.read_text(encoding="utf-8") != written.read_text(encoding="utf-8"):
+            fail(f"{path.name} is written differently the second time")
 
 
 def check_build_progress() -> None:
@@ -853,6 +956,7 @@ def main() -> None:
     check_i386_and_retro()
     check_platform_drivers()
     check_driver_firmware()
+    check_ci_round_trip()
     check_build_progress()
     check_firmware_licenses()
 
@@ -983,11 +1087,12 @@ def main() -> None:
             expect_make_rejection(directory, *case)
 
     print("MAC-T001 menuconfig round-trip: PASS "
-          "(6 targets, 3 amd64 Variants, obsolete capacity removed, "
+          "(every target, 3 amd64 Variants, obsolete capacity removed, "
           "package requirements resolved, the WS193 menu, "
           "i386 PC/AT and PC-9800 with Retro after Base and without the Desktop, "
           "the board drivers under Platform alone, Bluetooth after WiFi, "
-          "the drivers' firmware selected with them)")
+          "the drivers' firmware selected with them, the Raspberry Pi 5, "
+          "every CI config.mk kept through a load and a save)")
 
 
 if __name__ == "__main__":
