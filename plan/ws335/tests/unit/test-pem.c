@@ -476,6 +476,22 @@ test_room(void)
 	}
 	CHECK(bad == 0);
 
+	/* Every room too small for 12 bytes of data: ENOBUFS, and no byte at or after the room is touched. */
+	bad = 0;
+	length = encode(data, 12, text, 0, "");
+	for (size = 0; size < 12U; size++) {
+		memset(out, SENTINEL_BYTE, sizeof(out));
+		written = 99;
+		error = cryc_base64_decode(text, length, out, size, &written);
+		if (error != ENOBUFS || written != 0U)
+			bad++;
+		for (index = size; index < sizeof(out); index++) {
+			if (out[index] != SENTINEL_BYTE)
+				bad++;
+		}
+	}
+	CHECK(bad == 0);
+
 	/* Room zero, with and without a buffer, for empty and non-empty text. */
 	written = 99;
 	CHECK(cryc_base64_decode("", 0, NULL, 0, &written) == 0);
@@ -701,6 +717,10 @@ test_pem_forms(void)
 	check_next(BEGIN_LINE "\r" FOOBAR "\r" END_LINE "\r", 0, 0, strlen(BEGIN_LINE "\r" FOOBAR "\r" END_LINE "\r"), "foobar");
 	check_next(BEGIN_LINE "\n" FOOBAR "\n" END_LINE, 0, 0, strlen(BEGIN_LINE "\n" FOOBAR "\n" END_LINE), "foobar");
 
+	/* A lone CR ends a line too, before the BEGIN line as well as after it. */
+	check_next("intro\r" BEGIN_LINE "\r" FOOBAR "\r" END_LINE "\r", 0, 0,
+	    strlen("intro\r" BEGIN_LINE "\r" FOOBAR "\r" END_LINE "\r"), "foobar");
+
 	/* Spaces and tabs after the BEGIN line and after the END line (lax: RFC 7468 section 3). */
 	check_next(BEGIN_LINE " \t \n" FOOBAR "\n" END_LINE "  \t\n", 0, 0,
 	    strlen(BEGIN_LINE " \t \n" FOOBAR "\n" END_LINE "  \t\n"), "foobar");
@@ -821,6 +841,7 @@ test_pem_sequences(void)
 	uint8_t *der;
 	int error;
 	unsigned count;
+	unsigned guard;
 
 	/* The first position is past the first block's END line. */
 	check_next(first_text, 0, 0, strlen(first_text), "foo");
@@ -874,7 +895,7 @@ test_pem_sequences(void)
 	copy = dup_exact(broken_text, size);
 	position = 0;
 	count = 0;
-	for (;;) {
+	for (guard = 0; guard < 32U; guard++) {
 		previous = position;
 		error = cryc_pem_next_certificate(copy, size, &position, &der, &der_size);
 		if (error == ENOENT)
@@ -896,6 +917,7 @@ test_pem_sequences(void)
 		}
 	}
 	free(copy);
+	CHECK(guard < 32U);
 	CHECK(count == 3U);
 }
 

@@ -66,6 +66,7 @@ cryc_base64_decode(
 	uint8_t character;
 	int overflow;
 	int finished;
+	int space;
 
 	/* The caller sees nothing written until the decoding succeeds. */
 	*written = 0;
@@ -83,7 +84,8 @@ cryc_base64_decode(
 		character = (uint8_t)text[index];
 
 		/* Skips the whitespace RFC 7468 section 3 allows inside the base64. */
-		if (base64_is_space(character))
+		space = base64_is_space(character);
+		if (space)
 			continue;
 
 		/* Refuses any character after the group that carried padding. */

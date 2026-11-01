@@ -100,6 +100,7 @@ cryc_der_next(
 	size_t header_size;
 	size_t length;
 	unsigned tag;
+	int valid;
 	int error;
 
 	/* The caller sees nothing of a failed read. */
@@ -111,7 +112,8 @@ cryc_der_next(
 
 	/* Refuses a tag this reader does not read. */
 	tag = der->data[0];
-	if (!der_tag_is_valid(tag))
+	valid = der_tag_is_valid(tag);
+	if (!valid)
 		return EINVAL;
 
 	/* Reads the length octets, which must be minimal and fit what is left. */
@@ -335,18 +337,16 @@ cryc_der_boolean(
 	if (element->length != 1)
 		return EINVAL;
 
-	/* FALSE is 0x00 (8.2.2). */
-	if (element->contents[0] == 0x00U)
-		return 0;
+	/* Refuses any value but 0x00 (FALSE, 8.2.2) and 0xff (TRUE in DER, 11.1): BER allows others, DER does not. */
+	if (element->contents[0] != 0x00U && element->contents[0] != 0xffU)
+		return EINVAL;
 
-	/* TRUE is 0xff in DER (11.1). */
-	if (element->contents[0] == 0xffU) {
+	/* TRUE is 0xff; FALSE leaves the value at zero. */
+	if (element->contents[0] == 0xffU)
 		*value = 1;
-		return 0;
-	}
 
-	/* Refuses any other value: BER allows it, DER does not. */
-	return EINVAL;
+	/* Succeeded: the BOOLEAN is well formed. */
+	return 0;
 }
 
 /*
@@ -454,6 +454,7 @@ cryc_der_time(
 	unsigned second;
 	unsigned century_digits;
 	unsigned index;
+	unsigned month_days;
 	int64_t days;
 	int error;
 
@@ -516,7 +517,8 @@ cryc_der_time(
 		return EINVAL;
 
 	/* Refuses a day that the month does not have (leap years included). */
-	if (day < 1U || day > der_days_in_month(year, month))
+	month_days = der_days_in_month(year, month);
+	if (day < 1U || day > month_days)
 		return EINVAL;
 
 	/* Refuses an hour, minute or second out of range; a leap second (60) is refused. */
@@ -680,9 +682,11 @@ der_days_in_month(
 	static const unsigned char days[12] = {
 		31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 	};
+	int leap;
 
 	/* February gains a day in a leap year. */
-	if (month == 2U && der_is_leap_year(year))
+	leap = der_is_leap_year(year);
+	if (month == 2U && leap)
 		return 29U;
 
 	/* The other months have a fixed length. */

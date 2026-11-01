@@ -88,6 +88,25 @@ element_is_zero(
 	return 1;
 }
 
+/* Returns a copy of size bytes in an allocation of exactly that size, so that a read past either end is seen by the sanitizer. */
+static unsigned char *
+exact_copy(
+	const unsigned char *bytes,
+	size_t size)
+{
+	unsigned char *copy;
+
+	/* One byte at least, so that an empty input has an address. */
+	copy = malloc(size == 0U ? 1U : size);
+	if (copy == NULL) {
+		printf("FAIL out of memory\n");
+		exit(EXIT_FAILURE);
+	}
+	if (size > 0U)
+		memcpy(copy, bytes, size);
+	return copy;
+}
+
 /* Reads one element from bytes as a whole reader; returns the error and the reader's remaining size. */
 static int
 read_one(
@@ -97,13 +116,16 @@ read_one(
 	size_t *left)
 {
 	struct cryc_der der;
+	unsigned char *copy;
 	int error;
 
-	/* One read on a fresh reader. */
-	cryc_der_init(&der, bytes, size);
+	/* One read on a fresh reader over an exact-size copy (the element's views are not used after this call). */
+	copy = exact_copy(bytes, size);
+	cryc_der_init(&der, copy, size);
 	element_fill(element);
 	error = cryc_der_next(&der, element);
 	*left = der.size;
+	free(copy);
 	return error;
 }
 
@@ -262,6 +284,43 @@ test_lengths(void)
 	buffer[1] = 0xfe;
 	CHECK(read_one(buffer, 64, &element, &left) == EINVAL);
 	free(buffer);
+
+	/* The same lengths with one extra leading zero octet, and five- and eight-octet forms, with the contents present. */
+	memset(small, 0x44, sizeof(small));
+	for (index = 0; index < 9U; index++) {
+		static const size_t padded[] = { 128, 129, 255, 256, 300, 400, 500, 511, 130 };
+		unsigned char with_zero[520];
+
+		length = padded[index];
+		memset(with_zero, 0x44, sizeof(with_zero));
+		with_zero[0] = 0x04;
+		if (length < 256U) {
+			with_zero[1] = 0x82;
+			with_zero[2] = 0x00;
+			with_zero[3] = (unsigned char)length;
+			CHECK(read_one(with_zero, 4U + length, &element, &left) == EINVAL);
+		} else {
+			with_zero[1] = 0x83;
+			with_zero[2] = 0x00;
+			with_zero[3] = (unsigned char)(length >> 8);
+			with_zero[4] = (unsigned char)length;
+			CHECK(read_one(with_zero, 5U + length, &element, &left) == EINVAL);
+		}
+		CHECK(element_is_zero(&element));
+		with_zero[1] = 0x85;
+		with_zero[2] = 0x01;
+		with_zero[3] = 0x00;
+		with_zero[4] = 0x00;
+		with_zero[5] = 0x00;
+		with_zero[6] = 0x80;
+		CHECK(read_one(with_zero, 7U + 128U, &element, &left) == EINVAL);
+		with_zero[1] = 0x88;
+		with_zero[2] = 0x01;
+		memset(with_zero + 3, 0x00, 5);
+		with_zero[8] = 0x80;
+		with_zero[9] = 0x80;
+		CHECK(read_one(with_zero, 10U + 128U, &element, &left) == EINVAL);
+	}
 
 	/* Truncation at every point, for a short, a long-by-one-octet and a long-by-two-octets length. */
 	memset(small, 0x33, sizeof(small));
@@ -531,6 +590,7 @@ check_integer(
 {
 	unsigned char bytes[64];
 	unsigned char want[64];
+	unsigned char *exact;
 	struct cryc_der_element element;
 	const uint8_t *magnitude;
 	size_t size;
@@ -542,8 +602,9 @@ check_integer(
 	length = hex_decode(hex, bytes, sizeof(bytes));
 	CHECK(length != (size_t)-1);
 	memset(&element, 0, sizeof(element));
+	exact = exact_copy(bytes, length);
 	element.tag = CRYC_DER_INTEGER;
-	element.contents = bytes;
+	element.contents = exact;
 	element.length = length;
 	magnitude = (const uint8_t *)bytes;
 	size = 77;
@@ -552,11 +613,13 @@ check_integer(
 	if (expected_error != 0) {
 		CHECK(magnitude == NULL);
 		CHECK(size == 0U);
+		free(exact);
 		return;
 	}
 	want_size = hex_decode(expected_magnitude, want, sizeof(want));
 	CHECK(size == want_size);
 	CHECK_BYTES(magnitude, want, want_size);
+	free(exact);
 }
 
 /* INTEGER contents (8.3): minimality, sign, leading zero for the top bit. */
@@ -655,6 +718,7 @@ check_small(
 	uint32_t expected_value)
 {
 	unsigned char bytes[16];
+	unsigned char *exact;
 	struct cryc_der_element element;
 	size_t length;
 	uint32_t value;
@@ -663,9 +727,10 @@ check_small(
 	/* The element. */
 	length = hex_decode(hex, bytes, sizeof(bytes));
 	CHECK(length != (size_t)-1);
+	exact = exact_copy(bytes, length);
 	memset(&element, 0, sizeof(element));
 	element.tag = CRYC_DER_INTEGER;
-	element.contents = bytes;
+	element.contents = exact;
 	element.length = length;
 	value = 0x77777777U;
 	error = cryc_der_small_integer(&element, max, &value);
@@ -674,6 +739,7 @@ check_small(
 		CHECK(value == 0U);
 	else
 		CHECK(value == expected_value);
+	free(exact);
 }
 
 /* Small INTEGERs: the range checks and every error of cryc_der_integer. */
@@ -724,6 +790,7 @@ check_boolean(
 	int expected_value)
 {
 	unsigned char bytes[8];
+	unsigned char *exact;
 	struct cryc_der_element element;
 	size_t length;
 	int value;
@@ -732,9 +799,10 @@ check_boolean(
 	/* The element. */
 	length = hex_decode(hex, bytes, sizeof(bytes));
 	CHECK(length != (size_t)-1);
+	exact = exact_copy(bytes, length);
 	memset(&element, 0, sizeof(element));
 	element.tag = CRYC_DER_BOOLEAN;
-	element.contents = bytes;
+	element.contents = exact;
 	element.length = length;
 	value = 55;
 	error = cryc_der_boolean(&element, &value);
@@ -743,6 +811,7 @@ check_boolean(
 		CHECK(value == 0);
 	else
 		CHECK(value == expected_value);
+	free(exact);
 }
 
 /* BOOLEAN (8.2, 11.1): every value of the one octet, and the wrong lengths. */
@@ -777,6 +846,7 @@ check_bit_string(
 {
 	unsigned char bytes[32];
 	unsigned char want[32];
+	unsigned char *exact;
 	struct cryc_der_element element;
 	const uint8_t *got;
 	size_t length;
@@ -788,9 +858,10 @@ check_bit_string(
 	/* The element. */
 	length = hex_decode(hex, bytes, sizeof(bytes));
 	CHECK(length != (size_t)-1);
+	exact = exact_copy(bytes, length);
 	memset(&element, 0, sizeof(element));
 	element.tag = CRYC_DER_BIT_STRING;
-	element.contents = bytes;
+	element.contents = exact;
 	element.length = length;
 	got = bytes;
 	got_size = 77;
@@ -801,13 +872,15 @@ check_bit_string(
 		CHECK(got == NULL);
 		CHECK(got_size == 0U);
 		CHECK(unused == 0U);
+		free(exact);
 		return;
 	}
 	want_size = hex_decode(expected_bytes, want, sizeof(want));
 	CHECK(got_size == want_size);
-	CHECK(got == bytes + 1);
+	CHECK(got == exact + 1);
 	CHECK_BYTES(got, want, want_size);
 	CHECK(unused == expected_unused);
+	free(exact);
 }
 
 /* BIT STRING (8.6, 11.2): the unused-bit rules, exhaustively for one byte of data. */
@@ -920,6 +993,7 @@ test_oid(void)
 	};
 	unsigned char bytes[16];
 	unsigned char state[16];
+	unsigned char *exact;
 	struct cryc_der_element element;
 	size_t index;
 	size_t size;
@@ -931,21 +1005,25 @@ test_oid(void)
 	/* Well-formed OIDs: sha256WithRSAEncryption, commonName, id-ecPublicKey, id-Ed25519 and others. */
 	for (index = 0; index < sizeof(good) / sizeof(good[0]); index++) {
 		size = hex_decode(good[index], bytes, sizeof(bytes));
+		exact = exact_copy(bytes, size);
 		memset(&element, 0, sizeof(element));
 		element.tag = CRYC_DER_OID;
-		element.contents = bytes;
+		element.contents = exact;
 		element.length = size;
 		CHECK(cryc_der_oid(&element) == 0);
+		free(exact);
 	}
 
 	/* Malformed ones. */
 	for (index = 0; index < sizeof(bad_hex) / sizeof(bad_hex[0]); index++) {
 		size = hex_decode(bad_hex[index], bytes, sizeof(bytes));
+		exact = exact_copy(bytes, size);
 		memset(&element, 0, sizeof(element));
 		element.tag = CRYC_DER_OID;
-		element.contents = bytes;
+		element.contents = exact;
 		element.length = size;
 		CHECK(cryc_der_oid(&element) == EINVAL);
+		free(exact);
 	}
 
 	/* Every one-, two- and three-octet contents against the rules. */
@@ -995,16 +1073,19 @@ check_time(
 	int64_t expected_seconds)
 {
 	struct cryc_der_element element;
+	unsigned char *exact;
 	int64_t seconds;
 	int error;
 
-	/* The element. */
+	/* The element, over an exact-size copy of the text. */
+	exact = exact_copy((const unsigned char *)text, strlen(text));
 	memset(&element, 0, sizeof(element));
 	element.tag = tag;
-	element.contents = (const uint8_t *)text;
+	element.contents = exact;
 	element.length = strlen(text);
 	seconds = 12345;
 	error = cryc_der_time(&element, &seconds);
+	free(exact);
 	CHECK(error == expected_error);
 	if (expected_error != 0)
 		CHECK(seconds == 0);
