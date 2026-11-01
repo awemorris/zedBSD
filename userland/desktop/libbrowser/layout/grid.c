@@ -4652,6 +4652,7 @@ grid_row_baseline(
 	int align;
 	int last;
 	int found;
+	int opposite;
 
 	child = item->box;
 	/* A subgrid in rows is no member itself: its own items are. */
@@ -4685,7 +4686,11 @@ grid_row_baseline(
 
 	/* Its first (or last) line's baseline, or its lower border edge (always, for an orthogonal item). */
 	found = 0;
-	if (layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB && layout_physical_mode(child) == layout_physical_mode(box) &&
+	opposite = layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB &&
+	    layout_physical_mode(child) != CSS_WRITING_HORIZONTAL_TB && layout_physical_mode(child) != layout_physical_mode(box) &&
+	    child->physical_style != NULL && child->physical_style->writing_sideways == 0 && box->style.writing_sideways == 0 &&
+	    child->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS;
+	if (layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB && (layout_physical_mode(child) == layout_physical_mode(box) || opposite) &&
 	    child->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS) {
 		/* A parallel item of a vertical grid, laid out in the grid's logical frame, stands on its central baseline. */
 		found = layout_logical_central_baseline(child, last, &baseline);
@@ -4696,9 +4701,19 @@ grid_row_baseline(
 		baseline = grid_outer_height(child) - child->margin[CSS_TOP] - child->margin[CSS_BOTTOM];
 
 		/* The central baseline of a vertical item is synthesized in the middle of its border box. */
-		if (layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB && layout_physical_mode(child) == layout_physical_mode(box) &&
+		if (layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB && (layout_physical_mode(child) == layout_physical_mode(box) || opposite) &&
 		    child->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS)
 			baseline /= 2;
+	}
+
+	/* An item of the other vertical mode measures from its own block start, which is this grid's block end. */
+	if (opposite && found) {
+		baseline += child->border[CSS_BOTTOM] + child->padding[CSS_BOTTOM] - child->border[CSS_TOP] - child->padding[CSS_TOP];
+		baseline = child->border[CSS_TOP] + child->padding[CSS_TOP] + child->height + child->padding[CSS_BOTTOM] +
+		    child->border[CSS_BOTTOM] - baseline;
+		last = !last;
+	} else if (opposite) {
+		last = !last;
 	}
 	*above = child->margin[CSS_TOP] + baseline;
 

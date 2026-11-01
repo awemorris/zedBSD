@@ -1310,6 +1310,119 @@ css_position_visibility_serialize(
 	return 0;
 }
 
+/* Tells whether units hold the ASCII text at an index, ignoring case. */
+static int
+anchor_units_match(
+	const struct wb_units *units,
+	size_t at,
+	const char *text)
+{
+	size_t index;
+	uint16_t unit;
+
+	for (index = 0; text[index] != '\0'; index++) {
+		if (at + index >= units->length)
+			return 0;
+		unit = units->data[at + index];
+		if (unit >= 'A' && unit <= 'Z')
+			unit = (uint16_t)(unit + ('a' - 'A'));
+		if (unit != (uint16_t)text[index])
+			return 0;
+	}
+	return 1;
+}
+
+/* Tells whether a unit can be part of an identifier. */
+static int
+anchor_units_ident(
+	uint16_t unit)
+{
+	return (unit >= 'a' && unit <= 'z') || (unit >= 'A' && unit <= 'Z') || (unit >= '0' && unit <= '9') ||
+	    unit == '-' || unit == '_' || unit >= 0x80U;
+}
+
+/*
+ * Writes a value that holds anchor() or anchor-size() with each function's
+ * anchor name first (anchor(--a inside), anchor-size(--a width)), the other
+ * text as it is.  handled is 0 when the value holds neither.
+ */
+static int
+anchor_functions_canonical(
+	const struct wb_units *source,
+	struct wb_units *out,
+	int *handled)
+{
+	size_t index;
+	size_t open;
+	size_t end;
+	size_t first_start;
+	size_t first_end;
+	size_t second_start;
+	size_t second_end;
+	size_t width;
+	int error;
+
+	*handled = 0;
+	index = 0;
+	while (index < source->length) {
+		width = 0;
+		if ((index == 0 || !anchor_units_ident(source->data[index - 1U])) && anchor_units_match(source, index, "anchor-size("))
+			width = 12;
+		else if ((index == 0 || !anchor_units_ident(source->data[index - 1U])) && anchor_units_match(source, index, "anchor("))
+			width = 7;
+		if (width == 0) {
+			error = wb_units_append(out, source->data + index, 1U);
+			if (error != 0)
+				return error;
+			index++;
+			continue;
+		}
+
+		/* The function's name and parenthesis, then its first argument up to a comma or the close at depth 0. */
+		open = index + width;
+		error = wb_units_append(out, source->data + index, width);
+		if (error != 0)
+			return error;
+		end = open;
+		while (end < source->length && source->data[end] != ',' && source->data[end] != ')' && source->data[end] != '(')
+			end++;
+		if (end >= source->length || source->data[end] == '(') {
+			index = open;
+			continue;
+		}
+
+		/* Two words, the second a dashed name: the name goes first. */
+		first_start = open;
+		while (first_start < end && source->data[first_start] == ' ')
+			first_start++;
+		first_end = first_start;
+		while (first_end < end && source->data[first_end] != ' ')
+			first_end++;
+		second_start = first_end;
+		while (second_start < end && source->data[second_start] == ' ')
+			second_start++;
+		second_end = second_start;
+		while (second_end < end && source->data[second_end] != ' ')
+			second_end++;
+		if (first_end > first_start && second_end > second_start + 2U && second_end == end &&
+		    second_start > first_end && source->data[second_start] == '-' && source->data[second_start + 1U] == '-' &&
+		    !(first_end > first_start + 1U && source->data[first_start] == '-' && source->data[first_start + 1U] == '-')) {
+			error = wb_units_append(out, source->data + second_start, second_end - second_start);
+			if (error == 0)
+				error = wb_units_append_code_point(out, ' ');
+			if (error == 0)
+				error = wb_units_append(out, source->data + first_start, first_end - first_start);
+			if (error != 0)
+				return error;
+			index = end;
+			*handled = 1;
+			continue;
+		}
+		index = open;
+	}
+	return 0;
+}
+
 /*
  * Writes a declared value of position-try, position-try-fallbacks or
  * position-visibility in its canonical form (handled is 0 for another
@@ -1343,8 +1456,23 @@ css_anchor_canonical(
 	fallbacks = vm_string_equal_ascii(name, "position-try-fallbacks");
 	visibility = vm_string_equal_ascii(name, "position-visibility");
 	area = vm_string_equal_ascii(name, "position-area");
-	if (!shorthand && !fallbacks && !visibility && !area)
-		return 0;
+	if (!shorthand && !fallbacks && !visibility && !area) {
+		struct wb_units reordered;
+
+		/* The other properties: only an anchor function's argument order is made canonical. */
+		wb_units_init(&text);
+		wb_units_init(&reordered);
+		error = vm_string_append_units(value, &text);
+		if (error == 0)
+			error = anchor_functions_canonical(&text, &reordered, handled);
+		if (error == 0 && *handled)
+			error = wb_units_append(out, reordered.data, reordered.length);
+		if (error != 0)
+			*handled = 0;
+		wb_units_release(&reordered);
+		wb_units_release(&text);
+		return error;
+	}
 
 	/* The value's tokens. */
 	wb_units_init(&text);

@@ -2914,12 +2914,24 @@ flex_baseline_above(
 	int last;
 	int found;
 	int vertical;
+	int opposite;
 
-	/* Only a row's items on a horizontal line (in a vertical mode's logical frame the items of its own flow), aligned by their baselines. */
+	/*
+	 * Only a row's items on a horizontal line (in a vertical mode's logical
+	 * frame the items of its own flow, and of the other vertical mode, whose
+	 * block start is this one's block end), aligned by their baselines.
+	 */
 	vertical = layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB;
+	opposite = 0;
 	if (!row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
 		return 0;
-	if (vertical && (layout_physical_mode(item) != layout_physical_mode(box) || item->style.text_orientation == CSS_TEXT_ORIENTATION_SIDEWAYS))
+	if (vertical && layout_physical_mode(item) != layout_physical_mode(box)) {
+		if (layout_physical_mode(item) == CSS_WRITING_HORIZONTAL_TB || item->style.writing_sideways != box->style.writing_sideways ||
+		    item->physical_style == NULL || item->physical_style->writing_sideways != 0)
+			return 0;
+		opposite = 1;
+	}
+	if (vertical && item->style.text_orientation == CSS_TEXT_ORIENTATION_SIDEWAYS)
 		return 0;
 	align = item->style.align_self;
 	last = (item->style.last_baselines & 8u) != 0;
@@ -2945,6 +2957,15 @@ flex_baseline_above(
 		/* The central baseline of a vertical item is synthesized in the middle of its border box. */
 		if (vertical && item->style.text_orientation != CSS_TEXT_ORIENTATION_SIDEWAYS)
 			baseline /= 2;
+	}
+
+	/* An item of the other vertical mode measures from its own block start, which is this container's block end. */
+	if (opposite) {
+		if (found)
+			baseline += item->border[CSS_BOTTOM] + item->padding[CSS_BOTTOM] - item->border[CSS_TOP] - item->padding[CSS_TOP];
+		baseline = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->height + item->padding[CSS_BOTTOM] +
+		    item->border[CSS_BOTTOM] - baseline;
+		last = !last;
 	}
 	*above = item->margin[CSS_TOP] + baseline;
 	return last ? 2 : 1;
