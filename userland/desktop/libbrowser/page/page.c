@@ -330,7 +330,15 @@ page_load_location(
 	struct net_url url;
 	struct net_response response;
 	struct wb_buffer where;
+	int local;
 	int error;
+
+	/* An absolute path of the system's is a file's (a drive's path, C:\x, would parse as a URL). */
+	local = wb_os_path_is_absolute(location);
+	if (local) {
+		error = page_load_file(page, location);
+		return error;
+	}
 
 	/* What is not a URL is a file's path. */
 	error = net_url_parse(location, strlen(location), NULL, &url);

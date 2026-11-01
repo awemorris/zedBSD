@@ -242,3 +242,114 @@ lrint
 # winpthreads (linked statically): the clock and the sleep of <pthread_time.h> (the engine's clock and waits).
 clock_gettime64
 nanosleep64
+
+# What libkeiland (libkeiland.a: its common files, its Windows backend, its threads and sockets and the
+# stubs) and the browser's user interface (libbrowser-ui.a) leave undefined beyond the above
+# (cross-build.sh, the libkeiland.a check).
+# kernel32: the threads, the locks, the conditions, the events, the fiber-local keys and the processors.
+AcquireSRWLockExclusive
+CreateEventW
+CreateThread
+FlsAlloc
+FlsFree
+FlsGetValue
+FlsSetValue
+GetActiveProcessorCount
+GetCurrentProcess
+GetCurrentProcessorNumberEx
+GetCurrentThreadId
+GetProcessAffinityMask
+InitializeConditionVariable
+InitializeSRWLock
+ReleaseSRWLockExclusive
+ResetEvent
+ResumeThread
+SetEvent
+SetThreadPriority
+SleepConditionVariableSRW
+SwitchToThread
+TerminateThread
+TryAcquireSRWLockExclusive
+WaitForSingleObject
+WakeAllConditionVariable
+WakeConditionVariable
+
+# user32: the windows, their classes and properties, the message loop, the painting, the keys' states,
+# the pointer's capture and tracking, the monitors and the dpi.
+BeginPaint
+CreateWindowExW
+DefWindowProcW
+DestroyWindow
+DispatchMessageW
+EndPaint
+GetClientRect
+GetDC
+GetDpiForWindow
+GetKeyState
+GetMonitorInfoW
+GetWindowLongPtrW
+InvalidateRect
+IsZoomed
+LoadCursorW
+MonitorFromRect
+MoveWindow
+MsgWaitForMultipleObjectsEx
+PeekMessageW
+PostMessageW
+RegisterClassExW
+ReleaseCapture
+ReleaseDC
+RemovePropW
+ScreenToClient
+SetCapture
+SetFocus
+SetPropW
+SetWindowLongPtrW
+SetWindowPos
+SetWindowTextW
+ShowWindow
+TrackMouseEvent
+TranslateMessage
+UnregisterClassW
+UpdateWindow
+
+# gdi32: the DIB sections the CPU's frames and the title bar are put on the screen with.
+BitBlt
+CreateCompatibleDC
+CreateDIBSection
+DeleteDC
+DeleteObject
+GdiFlush
+SelectObject
+
+# dwmapi: the frame's shadow and its dark title bar.
+DwmExtendFrameIntoClientArea
+DwmSetWindowAttribute
+
+# advapi32: the apps' light or dark mode in the registry.
+RegGetValueW
+
+# shell32, ole32 and uuid: the local application data's folder.
+CoTaskMemFree
+FOLDERID_LocalAppData
+SHGetKnownFolderPath
+
+# ws2_32 and iphlpapi: libkeiland's sockets.
+WSAIoctl
+htons
+if_nametoindex
+inet_ntop
+inet_pton
+ntohs
+recvfrom
+sendto
+shutdown
+
+# UCRT: libkeiland's threads (_beginthreadex), the local time, the maths, the streams and the characters.
+_beginthreadex
+_localtime64
+atan2f
+ferror
+hypot
+isalpha
+puts

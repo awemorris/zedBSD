@@ -3,7 +3,7 @@
 # ws334-p028 統合: libkeiland の Win32 その 1 と OmniGrammaton.exe（窓・loop・入力・枠・描画・入口）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §4.1〜§4.7、§6.2・§6.4・§6.5、決定 14・15・20。
-- 状態: planned（2026-11-01 p003 で作成）。
+- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1862-i01、P5）。前: planned（2026-11-01 p003 で作成）。
 - **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: `libkeiland.dll` を作らず static library `libkeiland.a`。export の照合（`nm -D` と `objdump -p`）の代わりに、`libkeiland/exports.map` の全部の関数が `libkeiland.a` の定義の名前（`llvm-nm --defined-only`、stub を含む）にある事を照合する。`omnigrammaton-cli.exe` は作らない（2026-11-01 ユーザーの答え: 配るのは `OmniGrammaton.exe` だけ）。`main.c` は `wWinMain` の 1 つで、console の出力（`AttachConsole` など）を作り込まない。Wine の (1)（`--js`・`--dump=layout` の bytes の比較）は試験の program（`plan/ws334/tests` の配らない .exe、p036 の `test-program` で同じ static library を link）で行う。.exe の link は p036 の `WIN32_PROGRAM` の形、libkeiland の Windows の object は pthread を参照しない（p036 の確かめを続ける）。下の本文はこの通りに読み替える。
 - 依存: p014（keys-table）・p015（frame）・p016（platform-win32）・p017（wide・input）・p025・p026・p027。
 - 担当の想定: Opus（phase-runner）を 1 回（約 14 LW。UI なので標準廉価実装手順の module にしない。使う module の約束は各 header）。
@@ -45,3 +45,61 @@
 
 - module の header と .c、試験の道具（modules.sh・run-unit.sh・check-skeleton.sh・unit/）。Wayland の libkeiland の file（`ui/` ほか）。compositor・libkeiland-backend。HAL・toolchain・共有の build/。rm をしない。push しない。
 - file の群ごとの commit、SHA・PNG の path・制限（modal の loop）を Q1 に、結果の節と ws.md の行。
+
+## 結果（2026-11-01 23:18、P5、q1862-i01、基点 10fa79a93）
+
+commit（`git commit -m WIP -- <path>`）:
+
+| SHA | 中身 |
+| --- | --- |
+| 8e025e7fd | `libkeiland/win32/`: `window-win32.h`（Windows の `struct kl_app`・`struct kl_window`）、`app.c`（kl_app・loop・post・take・`kl_clock_us`）、`window.c`（親と子の HWND・window procedure・入力の queue）、`present.c`（CPU の表示の DIB・Vulkan の surface と拡張・題の帯の描画）、`places.c`（storage と data の directory）、`theme.c`（暗い mode・`kl_appearance_get`・`kl_accent_get`）、生成の `unsupported.c`（stub 343 個） |
+| fa361064e | browser の UI（`shell/internal.h`・`window.c`・`shell.c`: `SHELL_POST_OPEN` の受け取りと `SHELL_EVENT_OPEN`）と libbrowser `page/page.c`（下の 1 か所） |
+| ae95d3572 | `apps/browser-win32/`（`main.c`・`single.c`・`single.h`・`version.mk`・`resources/OmniGrammaton.rc`・`.manifest`・Makefile）、`plan/ws334/keiland-common.txt`、`plan/ws334/tests/` の `keiland-common.sh`・`keiland-stubs.py`・`wine-run.sh`・`browser-cli-main.c`・`cross-build.sh`（3e・6a）・`allowed-imports.txt` |
+
+確かめ:
+
+| 確かめ | 結果 |
+| --- | --- |
+| `timeout 3500 sh plan/ws334/tests/wine-run.sh` | `wine-run: PASS`。(1) `--js`（closures・builtins・class）と start.html の `--dump=layout`（tree の font）が host の `build/ws074-host/plain/browser` と同じ bytes（283・996・269・18160）。(2) Vulkan（lavapipe）で start.html（1210 色）、(3) `--no-gpu` で同じ（1192 色）、(4) 2 つ目の起動（about.html）が exit 0 で終わり、1 つ目が `ZBROWSER OPEN handed=...about.html` と出して about.html を描いた |
+| Wine の PNG（worktree の中） | `build/review/ws334-p028/gpu.png`・`nogpu.png`・`second.png`（題の帯の 3 つの button、頁の日本語の文字が読める）。Wine の結果は参考で、実機の Windows の判定ではない |
+| `timeout 3600 flock /tmp/zedbsd-wine.lock sh plan/ws334/tests/cross-build.sh` | `cross-build: PASS`。win64・winarm64 とも `make browser-win64`・`browser-winarm64` が OmniGrammaton.exe まで warning 0。新しい 3e: libkeiland.a と libbrowser-ui.a の import が win64 167・winarm64 163 で全部が表の中、libkeiland.a が `exports.py --list` の 573 の公開の関数を全部定義（自前・共通の file・stub）。新しい 6a: OmniGrammaton.exe の import は system の DLL と UCRT の 23 個、vulkan-1.dll は遅延の import だけ。libkeiland.a は `pthread_` を参照しない（5） |
+| `sh plan/ws334/tests/keiland-common.sh`・`python3 -I plan/ws334/tests/keiland-stubs.py --check` | 共通 33・除外 40、Makefile の一覧と同じで PASS。stub 343（公開 318、内部 25: chooser・picker・launch の keiui_*）、生成物と同じで PASS |
+| 段 1（`stage1.sh plain`）と libkeiland の host の試験（`plan/tools/keiland-layers/host-test.sh`・`plan/tools/keiui/run-host-present-damage.sh`）の前後（前は `git archive 10fa79a93` を `build/tmp/p028-base` に展開） | 前後とも host-build exit 0・warning 0・built 94、host-* 75 exit 0・17 other（host-exits.txt が一致）、js 17/17、loader 11/11、http 15/15、http-async 19/20（同じ async-sheets）、fetch 38/38、component 83、layers pass=8 fail=0、present-damage 25 checks 0 failures。page.c の直しで POSIX の挙動が変わらないことはこれで見た |
+| Linux の Keiland（`make -f userland/desktop/keiland-linux.mk all KEILAND_LINUX_BUILD=build/tmp/p028/keiland-linux`） | exit 0、warning 0（browser はこの build に入らない） |
+| zedBSD amd64（`build/amd64/dynamic/libbrowser.so`・`libkeiland.so`・`build/amd64/bin/browser`、sysroot は main の写しに tree の header を重ねた物） | exit 0、warning 0 |
+| `plan/tools/keiland-os-boundary/check.sh` | FAIL 62（T1・N1 は PASS）。WS334 の file（`libkeiland/win32/`・`apps/browser-win32/`・browser の shell）の失敗は 0。失敗は installer（A1〜A5）と `plan/tools/powervr/p009/vk-host-test.c`（B5）で、この Phase の外（`git archive` の展開では git に頼る検査が流れず、前の数は取れなかった） |
+| `LC_ALL=C.UTF-8 sh plan/ws334/tests/run-unit.sh all` | `run-unit: PASS` |
+| `BASE=d393d3267 sh plan/ws334/tests/check-skeleton.sh` | FAIL（`libkeiland/platform/platform.h` だけ。基点でも同じで p035 で扱う、p023 の Q1 の判断） |
+| `git diff --check` | 出力なし |
+
+自分で決めた点・phase.md と code の食い違い:
+
+- **共通の file の規則**: 不完全な型の名前だけ（`struct wl_surface *` の宣言・pointer、`ui/internal.h` の前方宣言）は Wayland を使うことにならないので数えない（`keiland-common.sh` の頭に書いた）。数えると `ui/internal.h` を include する theme.c・widgets.c ほか 17 の file が全部外れ、theme が使えない。最後の判定は mingw の compile（warning 0）。
+- **`ui/text.c` は共通にできない**（`<sys/stat.h>`・`<unistd.h>`。mingw で compile は通るが `open` に `O_BINARY` が無く Windows で font を text の mode で読み、`KEILAND_DATADIR` の固定の path も Windows に無い）。直しは file を直さない約束なので一覧に（Q1 の判断の通り p029 で扱う）。このため **題の帯の題の文字は描けない**（`kl_text_*` は stub。3 つの button だけ）。
+- **入力の queue**: 窓ごとに 512 の環と、app の post の 512 の環。全部に app の通し番号を付け、`kl_app_take` が一番古い物を返す（窓の入力と post の順を保つ）。満ちた窓の環は最も古い MOTION を抜き、無ければ新しい入力を捨てて `dropped` を数える。
+- **Vulkan の描き直し**: Wine（X11）では窓が画面に出る前に present した最初の絵が消え、browser は描き直さない（黒いまま）。子の HWND の `WM_PAINT` で、CPU の絵が無く `KL_PRESENT_NONE` で modal の loop の外なら `KL_WINDOW_RESIZE`（同じ大きさ）を queue に入れて描き直させる。本物の Windows は DWM が絵を保つので稀にしか来ない見込み。RESIZE を「描き直し」に使うのは公開の約束の外の使い方なので、専用の event を足すかは Q1 へ（問い 1）。
+- **単一の起動**: libkeiland は窓（親の HWND）に application の名前（`kl_app_options.application`、OmniGrammaton）の property（値 1）を付ける。`single.c` は class "KeilandWindow" の窓を `FindWindowExW` で順に見て property のある物に `WM_COPYDATA`（`SendMessageTimeoutW`、5 秒）。URL の列は UTF-8 の文字列ごとに NUL、存在する file の path は `GetFullPathNameW` で絶対に。受け手（`window.c`）は malloc の写しに NUL を足し `KL_WINDOW_POST`（code 0x4F474D31）に。browser の UI は最初の URL を location に打った物として開き（`shell_follow_typed`）、写しを free する。
+- **libbrowser の 1 か所（Q1 が範囲に入れた）**: `page/page.c` の `page_load_location` が Windows の drive の path（`Z:\...`）を scheme "z" の URL と読み EPROTONOSUPPORT を返していた（start.html が開けない）。`wb_os_path_is_absolute` が真なら file として読む（POSIX の絶対の path は前も URL でなく file だったので同じ）。
+- **console の試験の program** `plan/ws334/tests/browser-cli-main.c`（`wmain`、stdout・stderr を binary、`browser_main`）。配らない。`test-program` に `TEST_PROGRAM_LDFLAGS=-municode` を足した。
+- **Makefile**: browser の UI を `libbrowser-ui.a`（`main-posix.c` を除く、`-Iuserland/desktop/browser -DSHELL_APPLICATION_ID="OmniGrammaton"`）、`OmniGrammaton.exe` は `-mwindows -municode`、resource は windres（版の文字列の引用は `\"`）、`dist` が `OmniGrammaton/` に .exe と `share/fonts`（5 つ、zedBSD の名前 keiland*.ttf）・`share/browser`（3 つの html）を並べる。system の library に `-liphlpapi -ldwmapi -lshcore -limm32 -luuid -lgdi32 -luser32 -ladvapi32` を足した。libkeiland の file は `windows.h` より前に libkeiland の header を include する（`windows.h` の `interface`・`near` の macro が field の名前を変えるため）。
+- `kl_app_language` は "en"、`kl_app_system` は NULL、`kl_accent_get` は青。暗い mode は起動の時に 1 回だけ読む。
+
+制限（p029・p033 で扱うか Q1）:
+
+- 大きさの変更の modal の loop（`WM_ENTERSIZEMOVE`〜`WM_EXITSIZEMOVE`）の間は描かない（最後の RESIZE は loop の終わり）。
+- 題の帯の題の文字が無い（ui/text.c、上）。titlebar の controls（`kl_window_set_controls` ほか）は stub の ENOTSUP で、browser は「ZBROWSER ERROR titlebar error=129」を出して続く（p029）。
+- 全画面（`kl_window_set_fullscreen`）、key の repeat の時刻（Windows の自動の repeat の `WM_KEYDOWN` をそのまま渡す）、`KL_APP_THEME`、DPI の倍率の中身への反映（題の帯と枠だけ dpi で描く）、IME・clipboard（p029）。
+- Wine の dwmapi は stub（`DwmExtendFrameIntoClientArea`・`DwmSetWindowAttribute` の fixme）なので、影と暗い題の帯は Wine で確かめられない。
+
+未実施:
+
+- 本物の Windows（x86_64・arm64）での起動、snap の配置、DPI の変更、最大化・最小化・閉じるの button の click、大きさの変更、キー入力と日本語（Wine の上でも手で操作していない）。
+- aarch64 の Windows の実行（link と表だけ）。
+- 変異の確かめ（統合の Phase なので受け入れに無い）。
+
+Q1 への問い:
+
+1. Vulkan の窓の描き直しに `KL_WINDOW_RESIZE`（同じ大きさ）を使ってよいか。代わりに公開の header に描き直しの event（例 `KL_WINDOW_EXPOSE`）を足すなら KL_VERSION と Wayland の側（来ない）の約束が要る。
+2. `ui/text.c` の `O_BINARY`・data の directory の直しは p029 でよいか（Q1 の判断の通りと理解）。
+
+消してよい物（Q1 へ）: `build/tmp/p028-base`（基点の展開と試験の出力）、`build/tmp/p028`・`build/tmp/p028-*`（Windows の試しの build・log）、`build/tmp/p028-gui`・`build/tmp/p028-dbg`（手での試しと path の調べの program）、`build/tmp/ws334-wine-build`・`build/tmp/ws334-wine-run*`・`build/tmp/ws334-keiland-*`（script の出力）、`build/tmp/ws334-wine-gui`（Wine の GUI の prefix、次の試験でも使える）、`build/tmp/x.res.o`・`build/tmp/common-list.txt`。
