@@ -121,7 +121,9 @@ Init starts the enabled services in two rounds:
    order.  This round waits first for the desktop to take the display, so
    that the late services do not compete with its start for the disk and
    the processors: sessiond leaves the mark `/run/desktop-shown` when the
-   session or the login screen has the display, and init (which removes the
+   session or the login screen has the display, or when its first start
+   failed (no display, a GPU still starting: the desktop may take many tries
+   or never come, and the network need not wait for them), and init (which removes the
    mark at each boot) starts the round when the mark is there, when no
    `desktop` service runs any more (the login gave the screen to the
    console), or after 30 seconds.  Meanwhile init collects the services that

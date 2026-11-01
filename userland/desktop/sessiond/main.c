@@ -121,6 +121,7 @@ static void main_open_log(void);
 static int main_autologin(struct sessiond_account *account);
 static int main_autologin_allowed(const char *name);
 static void main_console_back(const char *reason);
+static void main_desktop_mark(const char *why);
 static int main_session(struct sessiond *daemon, struct sessiond_account *account);
 
 /*
@@ -224,6 +225,9 @@ main(
 			sessiond_log("SESSIOND AUTOLOGIN failed errno=%d", error);
 			failures = 1;
 			streak_ms = autologin_ms;
+
+			/* The desktop is not coming soon: what init holds back for it need not wait any longer. */
+			main_desktop_mark("failed");
 		}
 	}
 	while (!sessiond_stopping) {
@@ -241,6 +245,9 @@ main(
 			failures++;
 			if (failures == 1U)
 				streak_ms = attempt_ms;
+
+			/* The desktop is not coming soon (no display, a GPU still starting): init need not hold the rest for it. */
+			main_desktop_mark("failed");
 
 			/* Enough of them, by count or by time, gives the screen back to the console. */
 			elapsed_ms = sessiond_milliseconds() - streak_ms;
@@ -361,9 +368,25 @@ void
 sessiond_desktop_shown(
 	void)
 {
+	/* The mark, with the word the log has always had for it. */
+	main_desktop_mark("shown");
+}
+
+/*
+ * Leaves the mark init waits for, once a boot: when a desktop has taken the
+ * display (why is "shown"), or when the first start of the login or of the
+ * automatic login's session failed ("failed").  A desktop that failed to
+ * start may take many tries or never come (no display, a GPU still starting),
+ * and init would otherwise hold the network, sshd and the others back for
+ * its whole bound; it waits for the desktop, not for its failures.
+ */
+static void
+main_desktop_mark(
+	const char *why)
+{
 	int descriptor;
 
-	/* Only the first desktop of the boot is waited for. */
+	/* Only the first of the boot counts. */
 	if (main_desktop_marked)
 		return;
 	main_desktop_marked = 1;
@@ -376,7 +399,7 @@ sessiond_desktop_shown(
 	}
 
 	(void)close(descriptor);
-	sessiond_log("SESSIOND DESKTOP shown at_ms=%lld", sessiond_milliseconds());
+	sessiond_log("SESSIOND DESKTOP %s at_ms=%lld", why, sessiond_milliseconds());
 }
 
 /*
