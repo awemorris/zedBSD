@@ -435,7 +435,7 @@ images_fetch(
 		/* The bytes, then the decoding; either failing marks the image failed. */
 		wb_buffer_init(&bytes);
 		net_http_set_kind(NET_FETCH_IMAGE);
-		error = page_fetch(page->base, image->location, &bytes, NULL);
+		error = page_fetch(page_cookies(page), page->base, image->location, &bytes, NULL);
 		net_http_set_kind(NET_FETCH_DOCUMENT);
 		if (error == 0)
 			error = images_decode(page, image, bytes.data, bytes.length);

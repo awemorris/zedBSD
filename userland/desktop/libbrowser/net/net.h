@@ -126,6 +126,10 @@ struct net_http_framing {
 struct net_loader;
 struct net_request;
 
+/* An instance's cookie jar (cookie.c) and the storage queue it keeps its persistent cookies in (storage/queue.h). */
+struct net_cookie_jar;
+struct wb_storage_queue;
+
 /* A request's callback: called once when it ends (net_request_error tells how), from net_loader_dispatch. */
 typedef void (*net_request_done)(void *context, struct net_request *request);
 
@@ -154,12 +158,13 @@ int net_percent_decode(const char *text, size_t length, struct wb_buffer *out);
 int net_host_parse(const char *input, size_t length, int opaque, struct wb_buffer *out);
 
 /* HTTP (http.c). */
-int net_http_fetch(const char *url, struct net_response *response);
-int net_http_fetch_send(const char *url, const struct net_send *send, struct net_response *response);
+/* The cookies of a request go to and come from a jar (NULL for none). */
+int net_http_fetch(struct net_cookie_jar *jar, const char *url, struct net_response *response);
+int net_http_fetch_send(struct net_cookie_jar *jar, const char *url, const struct net_send *send, struct net_response *response);
 void net_http_set_kind(int kind);
-int net_http_request_text(const struct net_url *url, struct wb_buffer *request, int keep_alive, const char *extra);
-int net_http_request_text_kind(const struct net_url *url, struct wb_buffer *request, int keep_alive, const char *extra, int kind);
-int net_http_request_text_send(const struct net_url *url, struct wb_buffer *request, int keep_alive, const char *extra, int kind, const struct net_send *send);
+int net_http_request_text(struct net_cookie_jar *jar, const struct net_url *url, struct wb_buffer *request, int keep_alive, const char *extra);
+int net_http_request_text_kind(struct net_cookie_jar *jar, const struct net_url *url, struct wb_buffer *request, int keep_alive, const char *extra, int kind);
+int net_http_request_text_send(struct net_cookie_jar *jar, const struct net_url *url, struct wb_buffer *request, int keep_alive, const char *extra, int kind, const struct net_send *send);
 
 /* What a request is for: the Accept header follows it (ws074-p230). */
 #define NET_FETCH_DOCUMENT	0
@@ -168,7 +173,7 @@ int net_http_request_text_send(const struct net_url *url, struct wb_buffer *requ
 void net_response_init(struct net_response *response);
 void net_http_framing_init(struct net_http_framing *framing);
 void net_http_framing_update(struct net_http_framing *framing, const unsigned char *raw, size_t length);
-int net_http_parse_response(const struct net_url *url, const struct wb_buffer *raw, struct net_response *response, struct wb_buffer *location);
+int net_http_parse_response(struct net_cookie_jar *jar, const struct net_url *url, const struct wb_buffer *raw, struct net_response *response, struct wb_buffer *location);
 int net_http_is_redirect(int status);
 int net_http_is_web(const char *scheme);
 void net_response_release(struct net_response *response);
@@ -192,6 +197,8 @@ const char *net_tls_error(void);
 /* The asynchronous loader (loader.c). */
 int net_loader_create(net_loader_notify notify, void *context, struct net_loader **loader);
 void net_loader_destroy(struct net_loader *loader);
+/* The jar of the loader's requests (NULL, the start, for none); set before the first request. */
+void net_loader_set_cookies(struct net_loader *loader, struct net_cookie_jar *jar);
 int net_loader_fetch(struct net_loader *loader, const char *url, net_request_done done, void *context, struct net_request **request);
 int net_loader_fetch_kind(struct net_loader *loader, const char *url, int kind, net_request_done done, void *context, struct net_request **request);
 int net_loader_send(struct net_loader *loader, const char *url, int kind, const struct net_send *send, net_request_done done, void *context, struct net_request **request);
@@ -205,11 +212,13 @@ void net_loader_dispatch(struct net_loader *loader);
 void net_loader_ring(struct net_loader *loader);
 int net_loader_takes(const char *location);
 
-/* Cookies (cookie.c). */
-int net_cookie_store(const struct net_url *url, const char *header, size_t length);
-int net_cookie_header(const struct net_url *url, struct wb_buffer *out);
-int net_cookie_store_script(const struct net_url *url, const char *text, size_t length);
-int net_cookie_string(const struct net_url *url, struct wb_buffer *out);
+/* Cookies (cookie.c): an instance's jar over its storage queue; a NULL jar keeps and sends nothing. */
+int net_cookie_jar_open(struct wb_storage_queue *queue, struct net_cookie_jar **jar);
+void net_cookie_jar_close(struct net_cookie_jar *jar);
+int net_cookie_store(struct net_cookie_jar *jar, const struct net_url *url, const char *header, size_t length);
+int net_cookie_header(struct net_cookie_jar *jar, const struct net_url *url, struct wb_buffer *out);
+int net_cookie_store_script(struct net_cookie_jar *jar, const struct net_url *url, const char *text, size_t length);
+int net_cookie_string(struct net_cookie_jar *jar, const struct net_url *url, struct wb_buffer *out);
 
 /* data: URLs (data.c). */
 int net_data_parse(const struct net_url *url, struct net_data *data);

@@ -38,6 +38,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Where the engine keeps what it remembers, under the user's data directory (the localStorage files of earlier versions are there). */
+#define SHELL_STORAGE_DIRECTORY	"keiland/browser"
+
 /* The longest location typed into the URL's field that is opened (a longer one is cut). */
 #define SHELL_LOCATION_MAX	4096U
 
@@ -96,12 +99,17 @@
  * while the page is shown the titlebar shows that location, and reload
  * tries it again.
  *
+ * instance is the engine's instance the view belongs to, which keeps the
+ * cookies and localStorage in the user's data directory (shell_instance;
+ * nothing is kept when the directory cannot be used); it outlives the view.
+ *
  * The view's wake runs on the library's network thread: wake_app is the
  * application it posts to (NULL until the window is up; written and read
  * with atomic operations), and wake_missed is set when a wake could not
  * be posted (the main loop then runs the view without waiting).
  */
 struct shell_state {
+	struct browser_instance *instance;
 	struct browser_view *view;
 	struct shell_window window;
 	struct shell_titlebar titlebar;
@@ -147,6 +155,7 @@ static void shell_go(struct shell_state *state, int steps);
 static void shell_reload(struct shell_state *state);
 static void shell_follow(struct shell_state *state, const char *target);
 static void shell_follow_typed(struct shell_state *state, const char *typed);
+static int shell_instance(struct browser_instance **instance);
 static int shell_frame(struct shell_state *state);
 static void shell_release(struct shell_state *state);
 static int shell_resize_view(struct shell_state *state);
@@ -198,6 +207,13 @@ shell_run(
 		return 2;
 	}
 
+	/* The engine's instance, which remembers the cookies and localStorage. */
+	error = shell_instance(&state.instance);
+	if (error != 0) {
+		fprintf(stderr, "browser: cannot make the engine's instance: %s\n", strerror(error));
+		return 1;
+	}
+
 	/* The view, which tells the shell what happens to it. */
 	memset(&callbacks, 0, sizeof(callbacks));
 	callbacks.redraw = shell_redraw;
@@ -217,9 +233,11 @@ shell_run(
 	view_options.height = options->height;
 	view_options.wake = shell_wake;
 	view_options.wake_context = &state;
+	view_options.instance = state.instance;
 	error = browser_view_create(&view_options, &state.view);
 	if (error != 0) {
 		fprintf(stderr, "browser: cannot start the network: %s\n", strerror(error));
+		(void)browser_instance_destroy(state.instance);
 		return 1;
 	}
 
@@ -834,7 +852,83 @@ shell_frame(
 	return 0;
 }
 
-/* Releases the presenter, the titlebar, the view and the window, in that order. */
+/*
+ * Makes the engine's instance over the files backend in the user's data
+ * directory: $XDG_DATA_HOME/keiland/browser, or ~/.local/share/keiland/browser
+ * when XDG_DATA_HOME is not set (where the localStorage of earlier versions
+ * is).  When the directory cannot be used (no home, or another browser
+ * holds it), the instance keeps nothing and one line says why.  Returns 0
+ * or the instance's error.
+ */
+static int
+shell_instance(
+	struct browser_instance **instance)
+{
+	struct browser_instance_options options;
+	const struct browser_storage_calls *calls;
+	const char *data;
+	const char *home;
+	char *directory;
+	size_t size;
+	void *context;
+	int written;
+	int error;
+
+	/* The data directory: XDG_DATA_HOME, or ~/.local/share. */
+	directory = NULL;
+	data = getenv("XDG_DATA_HOME");
+	home = getenv("HOME");
+	if (data != NULL && data[0] != '\0') {
+		size = strlen(data) + sizeof("/" SHELL_STORAGE_DIRECTORY);
+		directory = malloc(size);
+		if (directory != NULL) {
+			written = snprintf(directory, size, "%s/%s", data, SHELL_STORAGE_DIRECTORY);
+			if (written < 0) {
+				free(directory);
+				directory = NULL;
+			}
+		}
+	} else if (home != NULL && home[0] != '\0') {
+		size = strlen(home) + sizeof("/.local/share/" SHELL_STORAGE_DIRECTORY);
+		directory = malloc(size);
+		if (directory != NULL) {
+			written = snprintf(directory, size, "%s/.local/share/%s", home, SHELL_STORAGE_DIRECTORY);
+			if (written < 0) {
+				free(directory);
+				directory = NULL;
+			}
+		}
+	}
+
+	/* The files backend over it; without it the instance remembers nothing. */
+	calls = NULL;
+	context = NULL;
+	if (directory == NULL) {
+		fprintf(stderr, "browser: no data directory: cookies and localStorage are not kept\n");
+	} else {
+		error = browser_storage_files_open(directory, &calls, &context);
+		if (error != 0) {
+			fprintf(stderr, "browser: cannot use %s: %s: cookies and localStorage are not kept\n", directory, strerror(error));
+			calls = NULL;
+			context = NULL;
+		}
+	}
+	free(directory);
+
+	/* The instance, which owns the backend from now on. */
+	memset(&options, 0, sizeof(options));
+	options.version = BROWSER_API_VERSION;
+	options.storage = calls;
+	options.storage_context = context;
+	error = browser_instance_create(&options, instance);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the views may be made with it. */
+	return 0;
+}
+
+/* Releases the presenter, the titlebar, the view and its instance, and the window, in that order. */
 static void
 shell_release(
 	struct shell_state *state)
@@ -853,6 +947,11 @@ shell_release(
 	browser_view_destroy(state->view);
 	state->view = NULL;
 	shell_touch_close(&state->touch);
+
+	/* The instance once its view is gone, which writes what is left to save. */
+	if (state->instance != NULL)
+		(void)browser_instance_destroy(state->instance);
+	state->instance = NULL;
 
 	/* The window, once nothing posts to its application. */
 	if (state->window.app != NULL)

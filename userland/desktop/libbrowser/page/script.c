@@ -495,7 +495,7 @@ script_fetch_sync(
 	page = context;
 	if (page->base == NULL)
 		return EINVAL;
-	return page_fetch(page->base, href, bytes, final_url);
+	return page_fetch(page_cookies(page), page->base, href, bytes, final_url);
 }
 
 /* Starts a script's request, resolved against this page; a web resource goes through the page's loader. */
@@ -574,7 +574,7 @@ script_request(
 		send.headers = request->headers;
 		send.body = request->body;
 		send.body_length = request->body_length;
-		error = net_http_fetch_send(wb_buffer_string(&location), &send, &response);
+		error = net_http_fetch_send(page_cookies(page), wb_buffer_string(&location), &send, &response);
 		if (error == 0)
 			done(done_context, 0, response.status, wb_buffer_string(&response.url), wb_buffer_string(&response.headers),
 			    response.body.data, response.body.length);
@@ -592,7 +592,7 @@ script_request(
 	if (error == 0 && !plain)
 		error = ENOTSUP;
 	if (error == 0)
-		error = page_fetch(page->base, request->href, &bytes, &final_url);
+		error = page_fetch(page_cookies(page), page->base, request->href, &bytes, &final_url);
 	response_status = 0;
 	response_url = NULL;
 	if (error == 0) {
@@ -1044,7 +1044,7 @@ script_prepare_external(
 	if (page->loader != NULL && remote) {
 		error = net_loader_fetch(page->loader, entry->location, script_arrived, entry, &entry->request);
 	} else {
-		error = page_fetch(page->base, entry->location, &bytes, NULL);
+		error = page_fetch(page_cookies(page), page->base, entry->location, &bytes, NULL);
 		if (error == 0)
 			error = script_decode(entry, bytes.data, bytes.length);
 		entry->ready = 1;
@@ -1621,7 +1621,7 @@ script_cookie_get(
 		return 0;
 
 	/* The jar's pairs for the URL. */
-	error = net_cookie_string(&url, out);
+	error = net_cookie_string(page_cookies(context), &url, out);
 	net_url_release(&url);
 	if (error != 0)
 		return error;
@@ -1648,7 +1648,7 @@ script_cookie_set(
 		return 0;
 
 	/* The jar keeps it, unless it would touch an HttpOnly cookie. */
-	error = net_cookie_store_script(&url, text, length);
+	error = net_cookie_store_script(page_cookies(context), &url, text, length);
 	net_url_release(&url);
 	if (error != 0)
 		return error;
@@ -1870,7 +1870,7 @@ script_fetch_file(
 	}
 
 	/* Any other (a local file, or one the scan did not find) is read at once. */
-	error = page_fetch(page->base, href, bytes, NULL);
+	error = page_fetch(page_cookies(page), page->base, href, bytes, NULL);
 	if (error != 0)
 		return error;
 

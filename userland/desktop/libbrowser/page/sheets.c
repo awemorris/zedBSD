@@ -739,7 +739,7 @@ sheets_external(
 	} else {
 		/* The bytes, then the parse; either failing marks the sheet failed. */
 		wb_buffer_init(&bytes);
-		error = page_fetch(page->base, entry->location, &bytes, NULL);
+		error = page_fetch(page_cookies(page), page->base, entry->location, &bytes, NULL);
 		if (error == 0)
 			error = sheets_parse(page, entry, bytes.data, bytes.length);
 		wb_buffer_release(&bytes);

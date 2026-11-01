@@ -153,7 +153,8 @@ main(
 	/* Keeps the second view's callback state independent of the first. */
 	memset(&b, 0, sizeof(b));
 
-	/* Keeps borrowed font paths alive for both views. */
+	/* Keeps borrowed font paths alive for both views (the companions of the sans font are the defaults). */
+	memset(&fonts, 0, sizeof(fonts));
 	fonts.sans = "userland/desktop/fonts/Mahora-Regular.ttf";
 	fonts.mono = "userland/desktop/fonts/JetBrainsMono-Regular.ttf";
 	fonts.fallback = "userland/desktop/fonts/DroidSansFallbackFull.ttf";

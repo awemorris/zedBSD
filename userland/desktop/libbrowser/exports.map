@@ -10,6 +10,9 @@
 	global:
 		browser_view_*;
 		browser_offscreen_*;
+		browser_instance_*;
+		browser_storage_*;
+		browser_free;
 		browser_add_ca_file;
 		browser_script_tool;
 	local:

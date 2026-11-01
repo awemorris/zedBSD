@@ -82,6 +82,23 @@
  *
  * Every call that can fail
  * reports 0 or an errno value.
+ *
+ * Instances (version 4): a view belongs to an instance of the engine
+ * (browser_instance), which holds what its views share and what it
+ * remembers: the cookies, the HTTP cache and Web Storage.  The program
+ * makes an instance with a storage backend (<browser/storage.h>; the
+ * engine's files backend, or its own) to keep them across runs, or
+ * without one to keep nothing; a view made without an instance uses its
+ * thread's default instance, which keeps nothing beyond the process.  An
+ * instance and its views are used from the thread that made the instance.
+ * Two instances share nothing.  Memory the engine hands to the program
+ * (a dump's text) is freed with browser_free, so a program built with
+ * another C runtime than the engine's frees it in the engine's.
+ *
+ * A program that uses the engine keeps the LC_NUMERIC category of its
+ * locale "C" (as a program starts): the engine reads and writes numbers
+ * (CSS, JavaScript, the dumps) with the C library's functions, which
+ * follow it.
  */
 
 #ifndef _BROWSER_H_
@@ -92,6 +109,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include <browser/storage.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -101,10 +120,27 @@ extern "C" {
  * each view it makes; a library of another version refuses the view
  * (ENOTSUP) rather than read options laid out differently.
  */
-#define BROWSER_API_VERSION		3
+#define BROWSER_API_VERSION		4
 
 /* A view, opaque to the program. */
 struct browser_view;
+
+/* An instance of the engine: what its views share and what it remembers (cookies, the HTTP cache, Web Storage). */
+struct browser_instance;
+
+/*
+ * What an instance is made with: the interface's version
+ * (BROWSER_API_VERSION), its storage backend (its table and context, or
+ * NULL to remember nothing; the context is the instance's from the
+ * creation on, and the table's close frees it), and the bytes its
+ * persistent HTTP cache may take (0 for 256 MiB).
+ */
+struct browser_instance_options {
+	int version;
+	const struct browser_storage_calls *storage;
+	void *storage_context;
+	size_t cache_limit;
+};
 
 /*
  * The program's wake (version 3): called from one of the library's threads
@@ -168,13 +204,17 @@ enum browser_dump {
 
 /*
  * The fonts a view draws with: paths of TrueType files for the sans-serif
- * text, the monospace text and the characters the two lack (NULL for the
- * system's defaults).  The strings must outlive the view.
+ * text, the monospace text and the characters the two lack, and the
+ * companions of the sans-serif font: its bold face and the monospaced
+ * font of the signs it lacks (NULL for the system's defaults, the files
+ * of the engine's data directory).  The strings must outlive the view.
  */
 struct browser_fonts {
 	const char *sans;
 	const char *mono;
 	const char *fallback;
+	const char *bold;
+	const char *fallback_mono;
 };
 
 /*
@@ -246,9 +286,10 @@ struct browser_gpu_failure {
  * scan the stack up to it; the program's calls into the view are made from
  * frames inside it), its size in pixels, how it fetches (zero is
  * BROWSER_FETCH_DEFAULT), the GPU it draws with (NULL for none yet;
- * browser_view_set_gpu gives it one later), and the program's wake with
+ * browser_view_set_gpu gives it one later), the program's wake with
  * the context it is called with (NULL for none: a program without a
- * window settles the view instead).
+ * window settles the view instead), and the instance it belongs to (NULL
+ * for its thread's default instance; it must outlive the view).
  */
 struct browser_view_options {
 	int version;
@@ -261,7 +302,33 @@ struct browser_view_options {
 	const struct browser_gpu *gpu;
 	browser_wake wake;
 	void *wake_context;
+	struct browser_instance *instance;
 };
+
+/*
+ * Makes an instance of the engine over its options' storage backend; the
+ * thread that calls this uses the instance and its views.  Opening it
+ * reads the backend's persistent cookies (expired ones are dropped; a
+ * record that cannot be read is left out, and only a lack of memory
+ * fails).  Whether it succeeds or not, the backend's close is called
+ * exactly once (here on failure, by browser_instance_destroy otherwise).
+ * Returns 0, EINVAL (options or instance NULL), ENOTSUP (options or the
+ * backend's table of another version, or a table missing a call),
+ * ENOMEM, EAGAIN (its storage thread could not start).  *instance is NULL
+ * on failure.
+ */
+int browser_instance_create(const struct browser_instance_options *options, struct browser_instance **instance);
+
+/*
+ * Destroys an instance once its views are destroyed: writes what its
+ * backend has not written yet, closes the backend and frees the rest.
+ * Returns 0, EBUSY (a view of it remains: nothing is done) or EINVAL
+ * (NULL).
+ */
+int browser_instance_destroy(struct browser_instance *instance);
+
+/* Frees memory the engine handed to the program (browser_view_dump's text); NULL does nothing. */
+void browser_free(void *memory);
 
 /* Making and ending a view. */
 int browser_view_create(const struct browser_view_options *options, struct browser_view **view);
@@ -389,7 +456,7 @@ uint64_t browser_view_text_session(const struct browser_view *view);
  * milliseconds, and with BROWSER_SETTLE_LAYOUT it is laid out with the
  * images its layout asked for), drawn with the CPU into 0xAARRGGBB pixels
  * whose rows are stride bytes apart, or dumped as text (*text is the
- * program's to free).
+ * program's to free with browser_free).
  */
 int browser_view_settle(struct browser_view *view, double budget, unsigned flags);
 int browser_view_draw_pixels(struct browser_view *view, uint32_t *pixels, unsigned width, unsigned height, size_t stride);

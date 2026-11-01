@@ -117,14 +117,14 @@ struct http_connection {
 	struct net_tls *tls;
 };
 
-static int http_request(const struct net_url *url, const struct net_send *send, struct net_response *response, struct wb_buffer *location);
+static int http_request(struct net_cookie_jar *jar, const struct net_url *url, const struct net_send *send, struct net_response *response, struct wb_buffer *location);
 static int http_decode_body(int encoding, struct net_response *response);
 static int http_connect(const struct net_url *url, wb_os_socket *socket);
 static int http_send_all(const struct http_connection *connection, const unsigned char *bytes, size_t length);
 static int http_receive_all(const struct http_connection *connection, struct wb_buffer *raw);
 static int http_receive(const struct http_connection *connection, unsigned char *bytes, size_t length, size_t *received);
 static int http_is_web(const char *scheme);
-static int http_header(const struct net_url *url, const char *line, size_t length, struct net_response *response, struct wb_buffer *location, struct http_headers *headers);
+static int http_header(struct net_cookie_jar *jar, const struct net_url *url, const char *line, size_t length, struct net_response *response, struct wb_buffer *location, struct http_headers *headers);
 static int http_header_value(const char *line, size_t length, const char *name, const char **value, size_t *value_length);
 static int http_dechunk(const unsigned char *body, size_t length, struct wb_buffer *out);
 static void http_cache_control(const char *value, size_t length, struct net_response *response);
@@ -137,14 +137,17 @@ static int http_case_differs(const char *text, const char *name, size_t length);
  * (EPROTONOSUPPORT for a scheme other than http and https, or https
  * without the OpenSSL package; EPROTO for a TLS failure, whose reason
  * net_tls_error gives; EINVAL for a response
- * that is not HTTP, ELOOP for too many redirects).
+ * that is not HTTP, ELOOP for too many redirects).  The cookies of the
+ * jar (NULL for none) go with each request, and the responses' cookies
+ * go into it.
  */
 int
 net_http_fetch(
+	struct net_cookie_jar *jar,
 	const char *url_text,
 	struct net_response *response)
 {
-	return net_http_fetch_send(url_text, NULL, response);
+	return net_http_fetch_send(jar, url_text, NULL, response);
 }
 
 /*
@@ -154,6 +157,7 @@ net_http_fetch(
  */
 int
 net_http_fetch_send(
+	struct net_cookie_jar *jar,
 	const char *url_text,
 	const struct net_send *send,
 	struct net_response *response)
@@ -188,7 +192,7 @@ net_http_fetch_send(
 
 		/* The request and its response. */
 		wb_buffer_clear(&location);
-		error = http_request(&url, current, response, &location);
+		error = http_request(jar, &url, current, response, &location);
 		if (error != 0)
 			break;
 
@@ -273,16 +277,17 @@ net_response_init(
  * Writes the text of a GET request for a URL: the request line, Host,
  * User-Agent, the fixed headers, Connection: close unless the connection
  * is to be kept, the extra header lines (NULL for none; each ends in CR LF)
- * and the URL's cookies.
+ * and the cookies of the jar (NULL for none) for the URL.
  */
 int
 net_http_request_text(
+	struct net_cookie_jar *jar,
 	const struct net_url *url,
 	struct wb_buffer *request,
 	int keep_alive,
 	const char *extra)
 {
-	return net_http_request_text_kind(url, request, keep_alive, extra, NET_FETCH_DOCUMENT);
+	return net_http_request_text_kind(jar, url, request, keep_alive, extra, NET_FETCH_DOCUMENT);
 }
 
 /*
@@ -292,13 +297,14 @@ net_http_request_text(
  */
 int
 net_http_request_text_kind(
+	struct net_cookie_jar *jar,
 	const struct net_url *url,
 	struct wb_buffer *request,
 	int keep_alive,
 	const char *extra,
 	int kind)
 {
-	return net_http_request_text_send(url, request, keep_alive, extra, kind, NULL);
+	return net_http_request_text_send(jar, url, request, keep_alive, extra, kind, NULL);
 }
 
 /* Tells whether a header block (lines each ending in CR LF) has a header of the name. */
@@ -366,6 +372,7 @@ http_append_script_headers(
  */
 int
 net_http_request_text_send(
+	struct net_cookie_jar *jar,
 	const struct net_url *url,
 	struct wb_buffer *request,
 	int keep_alive,
@@ -420,7 +427,7 @@ net_http_request_text_send(
 
 	/* The cookies for the URL, and the end of the headers. */
 	if (error == 0)
-		error = net_cookie_header(url, request);
+		error = net_cookie_header(jar, url, request);
 	if (error == 0)
 		error = wb_buffer_append_string(request, "\r\n");
 	if (error == 0 && send != NULL && send->body != NULL)
@@ -588,6 +595,7 @@ net_http_framing_update(
 /* Sends one GET and reads its response; a redirect's Location goes to location. */
 static int
 http_request(
+	struct net_cookie_jar *jar,
 	const struct net_url *url,
 	const struct net_send *send,
 	struct net_response *response,
@@ -602,7 +610,7 @@ http_request(
 	/* The request's text. */
 	wb_buffer_init(&request);
 	wb_buffer_init(&raw);
-	error = net_http_request_text_send(url, &request, 0, NULL, send != NULL ? NET_FETCH_SCRIPT_API : http_fetch_kind, send);
+	error = net_http_request_text_send(jar, url, &request, 0, NULL, send != NULL ? NET_FETCH_SCRIPT_API : http_fetch_kind, send);
 	if (error != 0) {
 		wb_buffer_release(&request);
 		return error;
@@ -629,7 +637,7 @@ http_request(
 
 	/* The response. */
 	if (error == 0)
-		error = net_http_parse_response(url, &raw, response, location);
+		error = net_http_parse_response(jar, url, &raw, response, location);
 	wb_buffer_release(&raw);
 	if (error != 0)
 		return error;
@@ -832,12 +840,13 @@ http_is_web(
 }
 
 /*
- * Parses a whole response: the status line, the headers (cookies kept, a
- * redirect's Location into location), and the body (cut by its length or
- * decoded from chunks).
+ * Parses a whole response: the status line, the headers (cookies kept in
+ * the jar, NULL for none; a redirect's Location into location), and the
+ * body (cut by its length or decoded from chunks).
  */
 int
 net_http_parse_response(
+	struct net_cookie_jar *jar,
 	const struct net_url *url,
 	const struct wb_buffer *raw,
 	struct net_response *response,
@@ -886,7 +895,7 @@ net_http_parse_response(
 		}
 
 		/* The header, then the next line. */
-		error = http_header(url, line, line_length, response, location, &headers);
+		error = http_header(jar, url, line, line_length, response, location, &headers);
 		line = newline + 1;
 	}
 
@@ -922,6 +931,7 @@ net_http_parse_response(
 /* Reads one header line: Content-Type, Content-Length, Transfer-Encoding, Location and Set-Cookie. */
 static int
 http_header(
+	struct net_cookie_jar *jar,
 	const struct net_url *url,
 	const char *line,
 	size_t length,
@@ -985,7 +995,7 @@ http_header(
 	/* A cookie to keep. */
 	found = http_header_value(line, length, "set-cookie", &value, &value_length);
 	if (found && error == 0)
-		error = net_cookie_store(url, value, value_length);
+		error = net_cookie_store(jar, url, value, value_length);
 
 	/* What caching the response may do. */
 	found = http_header_value(line, length, "cache-control", &value, &value_length);

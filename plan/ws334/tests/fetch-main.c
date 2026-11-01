@@ -68,7 +68,7 @@ fetch_blocking(
 
 	/* The response, or the failure. */
 	net_response_init(&response);
-	error = net_http_fetch(url, &response);
+	error = net_http_fetch(NULL, url, &response);
 	if (error != 0) {
 		printf("fetch-tool: blocking error %d\n", error);
 		net_response_release(&response);

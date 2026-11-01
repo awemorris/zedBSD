@@ -182,13 +182,15 @@ page_resolve_location(
  * Reads what a URL (resolved against a page's location) names, as a
  * script, a stylesheet or an image would: a data: URL's body, a file:
  * URL's file, or an http: URL's response body.  The final URL (after
- * redirects) goes to final_url when it is not NULL.  Returns
+ * redirects) goes to final_url when it is not NULL; an http: URL's cookies
+ * go to and come from jar (NULL for none).  Returns
  * EPROTONOSUPPORT for a URL of another scheme, and EACCES for a file: URL
  * from a page that is not itself a local file (a web, data: or about:
  * page reads no local file, as in other browsers).
  */
 int
 page_fetch(
+	struct net_cookie_jar *jar,
 	const char *base,
 	const char *href,
 	struct wb_buffer *bytes,
@@ -267,7 +269,7 @@ page_fetch(
 
 		/* Fetches the serialized target after its C URL storage is no longer needed. */
 		net_url_release(&target);
-		error = net_http_fetch(wb_buffer_string(&text), &response);
+		error = net_http_fetch(jar, wb_buffer_string(&text), &response);
 		if (error != 0) {
 			wb_buffer_release(&text);
 			return error;
@@ -330,6 +332,7 @@ page_fetch(
  */
 int
 page_fetch_response(
+	struct net_cookie_jar *jar,
 	const char *base,
 	const char *href,
 	struct net_response *response)
@@ -377,7 +380,7 @@ page_fetch_response(
 			goto cleanup;
 
 		/* The network response owns its redirect URL, declared MIME and body. */
-		status = net_http_fetch(wb_buffer_string(&location), response);
+		status = net_http_fetch(jar, wb_buffer_string(&location), response);
 		if (status != 0)
 			goto cleanup;
 	} else if (is_data) {

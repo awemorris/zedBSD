@@ -224,7 +224,7 @@ data_consumers(
 	int observed;
 
 	/* New metadata ownership cannot publish an invented status200 for a genuine decoding failure. */
-	error = page_fetch_response("https://example.invalid/base", "data:application/xml;base64,!", &response);
+	error = page_fetch_response(NULL, "https://example.invalid/base", "data:application/xml;base64,!", &response);
 
 	/* Metadata consumer preserves body EINVAL. */
 	observed = 0;
@@ -247,7 +247,7 @@ data_consumers(
 
 	/* Existing consumers receive the same real decoder failure without a synthetic successful empty body. */
 	wb_buffer_init(&bytes);
-	error = page_fetch("https://example.invalid/base", "data:application/xml;base64,!", &bytes, NULL);
+	error = page_fetch(NULL, "https://example.invalid/base", "data:application/xml;base64,!", &bytes, NULL);
 
 	/* Legacy byte-only consumer preserves body EINVAL. */
 	observed = 0;

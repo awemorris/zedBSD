@@ -6,41 +6,45 @@
  */
 
 /*
- * The storage areas of Web Storage (ws074-p080): the window's host
- * callbacks behind sessionStorage and localStorage.
+ * The storage areas of Web Storage: the window's host callbacks behind
+ * sessionStorage and localStorage.
  *
  * An area belongs to an origin: an http or https page's origin, one for
  * every file: page, and one for the pages without either (about:blank),
- * which is never saved.  The areas live in the process, as the cookie jar
- * does (browser runs its pages on one thread); a session area lasts as
- * long as the process, and a local area is read from its file the first
- * time it is used and written back after each change.  The file is
- * $XDG_DATA_HOME/keiland/browser/local-storage/ORIGIN.ls (with
- * ~/.local/share when XDG_DATA_HOME is not set), ORIGIN the origin's bytes
- * in hexadecimal; a file that cannot be written leaves the area in
- * memory.  The items are kept in the order of their keys' code units,
- * which key(n) reports.  An origin's area holds at most
- * STORAGE_QUOTA_BYTES of keys and values counted as UTF-16.
+ * which is never saved.  The areas belong to the page's instance
+ * (storage/instance.h), whose pages run on one thread: a session area
+ * lasts as long as the instance, and a local area is read from the
+ * instance's storage backend the first time it is used and written back
+ * (behind, through the instance's storage queue) after each change.  Its
+ * record (BROWSER_STORAGE_LOCAL, storage/records.h) is kept under the key
+ * of the origin's bytes; the record holds the origin, so that a record of
+ * another origin under the same key (a hash collision of a long origin)
+ * is passed over for the next collision number.  A record of the earlier
+ * format, which does not hold its origin, is read under the key of a short
+ * origin (its old file name) and written again in the new format at the
+ * next change.  An instance without a backend keeps its local areas in
+ * memory only, as does an area whose record could not be written.  The
+ * items are kept in the order of their keys' code units, which key(n)
+ * reports.  An origin's area holds at most STORAGE_QUOTA_BYTES of keys
+ * and values counted as UTF-16.
  */
 
 #include "page/page.h"
 #include "net/net.h"
+#include "storage/instance.h"
+#include "storage/queue.h"
+#include "storage/records.h"
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 /* The most an origin's area holds: its keys' and values' UTF-16, in bytes (5 MiB, as other browsers). */
 #define STORAGE_QUOTA_BYTES	(5UL * 1024UL * 1024UL)
 
-/* The first line of a local area's file. */
-#define STORAGE_MAGIC		"KEILAND LOCAL STORAGE 1\n"
-
-/* The directory under the data directory the local areas' files are in. */
-#define STORAGE_DIRECTORY	"keiland/browser/local-storage"
+/* The most collision numbers tried for the key of a local area's record. */
+#define STORAGE_COLLISIONS	16U
 
 /*
  * What a page's scheme means for its storage (storage_scheme_kind).
@@ -62,27 +66,22 @@ struct storage_item {
 };
 
 /*
- * One origin's storage area: the origin, which area it is
- * (BIND_STORAGE_*), whether it is saved to a file, its items in the order
- * of their keys, and the bytes they take.
+ * One origin's storage area of an instance: the origin, which area it is
+ * (BIND_STORAGE_*), whether it is saved (a local area of a web or file:
+ * page whose record has a key), the instance's queue it is saved through
+ * and the key of its record, its items in the order of their keys, and
+ * the bytes they take.  It lives as long as its instance
+ * (page_storage_release).
  */
 struct storage_area {
 	char *origin;
 	int area;
 	int saved;
+	struct wb_storage_queue *queue;
+	char key[BROWSER_STORAGE_KEY_MAX + 1];
 	struct wb_vector items;
 	size_t bytes;
 };
-
-/*
- * The process's storage areas (pointers to struct storage_area), made as
- * pages ask for them and kept until the process ends.  storage_ready is 0
- * until the vector is initialized.
- */
-static struct wb_vector storage_areas;
-
-/* Whether storage_areas has been initialized. */
-static int storage_ready;
 
 static int storage_length(void *context, int area, size_t *count);
 static int storage_key(void *context, int area, size_t index, struct wb_units *key, int *found);
@@ -97,14 +96,11 @@ static int storage_find(const struct storage_area *area, const uint16_t *key, si
 static int storage_compare(const uint16_t *left, size_t left_length, const uint16_t *right, size_t right_length);
 static int storage_insert(struct storage_area *area, size_t index, const uint16_t *key, size_t key_length, const uint16_t *value, size_t value_length);
 static void storage_remove_at(struct storage_area *area, size_t index);
+static void storage_empty(struct storage_area *area);
 static uint16_t *storage_copy_units(const uint16_t *units, size_t length);
-static int storage_path(const char *origin, struct wb_buffer *path);
-static int storage_make_directories(const char *path);
-static int storage_load(struct storage_area *area);
-static int storage_save(const struct storage_area *area);
-static int storage_read_length(const unsigned char *bytes, size_t length, size_t *at, uint32_t *value);
-static int storage_append_length(struct wb_buffer *out, uint32_t value);
-static int storage_append_units(struct wb_buffer *out, const uint16_t *units, size_t length);
+static void storage_load(struct storage_area *area);
+static int storage_load_item(void *context, const uint16_t *key, size_t key_length, const uint16_t *value, size_t value_length);
+static void storage_save(const struct storage_area *area);
 
 /*
  * The callbacks of the window's host for Web Storage.  The table is
@@ -128,6 +124,31 @@ page_storage_calls(void)
 {
 	/* The table. */
 	return &storage_calls;
+}
+
+/*
+ * Frees the Web Storage areas of an instance (a vector of
+ * struct storage_area pointers), leaving the vector empty.  Their records
+ * stay in the storage.
+ */
+void
+page_storage_release(
+	struct wb_vector *areas)
+{
+	struct storage_area **list;
+	size_t index;
+
+	/* Each area's items, origin and memory. */
+	list = areas->items;
+	for (index = 0; index < areas->count; index++) {
+		storage_empty(list[index]);
+		wb_vector_release(&list[index]->items);
+		free(list[index]->origin);
+		free(list[index]);
+	}
+
+	/* The vector holds none. */
+	wb_vector_clear(areas);
 }
 
 /* Reports how many items an area of the page's origin has. */
@@ -277,7 +298,7 @@ storage_set(
 
 	/* Succeeded: the item is set, and a local area saved. */
 	if (storage->saved)
-		(void)storage_save(storage);
+		storage_save(storage);
 	return 0;
 }
 
@@ -307,7 +328,7 @@ storage_remove(
 	/* Succeeded: the item goes, and a local area is saved. */
 	storage_remove_at(storage, index);
 	if (storage->saved)
-		(void)storage_save(storage);
+		storage_save(storage);
 	return 0;
 }
 
@@ -329,19 +350,18 @@ storage_clear(
 	if (storage->items.count == 0)
 		return 0;
 
-	/* Each item, from the last. */
-	while (storage->items.count > 0)
-		storage_remove_at(storage, storage->items.count - 1U);
+	/* Each item. */
+	storage_empty(storage);
 
 	/* Succeeded: the area is empty, and a local area saved. */
 	if (storage->saved)
-		(void)storage_save(storage);
+		storage_save(storage);
 	return 0;
 }
 
 /*
- * Finds the area of a kind for the page's origin, made (and a local
- * area read from its file) the first time.
+ * Finds the area of a kind for the page's origin in the page's instance,
+ * made (and a local area read from the instance's storage) the first time.
  */
 static int
 storage_area_of(
@@ -349,6 +369,7 @@ storage_area_of(
 	int area,
 	struct storage_area **found)
 {
+	struct browser_instance *instance;
 	struct storage_area **areas;
 	struct storage_area *made;
 	char *origin;
@@ -357,11 +378,10 @@ storage_area_of(
 	int same;
 	int error;
 
-	/* The table, the first time. */
-	if (!storage_ready) {
-		wb_vector_init(&storage_areas, sizeof(struct storage_area *));
-		storage_ready = 1;
-	}
+	/* The instance whose areas the page sees. */
+	instance = page_instance(page);
+	if (instance == NULL)
+		return ENOMEM;
 
 	/* The page's origin. */
 	error = storage_origin(page, &origin, &saved);
@@ -369,8 +389,8 @@ storage_area_of(
 		return error;
 
 	/* An area of the origin made before. */
-	areas = storage_areas.items;
-	for (index = 0; index < storage_areas.count; index++) {
+	areas = instance->storage_areas.items;
+	for (index = 0; index < instance->storage_areas.count; index++) {
 		if (areas[index]->area != area)
 			continue;
 		same = strcmp(areas[index]->origin, origin);
@@ -394,19 +414,20 @@ storage_area_of(
 	made->saved = 0;
 	if (area == BIND_STORAGE_LOCAL)
 		made->saved = saved;
+	made->queue = instance->queue;
 	wb_vector_init(&made->items, sizeof(struct storage_item));
 
-	/* In the table. */
-	error = wb_vector_push(&storage_areas, &made);
+	/* In the instance's table. */
+	error = wb_vector_push(&instance->storage_areas, &made);
 	if (error != 0) {
 		free(made->origin);
 		free(made);
 		return ENOMEM;
 	}
 
-	/* A local area has what its file kept; a file that cannot be read is an empty area. */
+	/* A local area has what the storage kept; a record that cannot be read is an empty area. */
 	if (made->saved)
-		(void)storage_load(made);
+		storage_load(made);
 
 	/* Succeeded: the area. */
 	*found = made;
@@ -648,313 +669,181 @@ storage_copy_units(
 	return copy;
 }
 
-/* Writes the path of an origin's local area's file. */
-static int
-storage_path(
-	const char *origin,
-	struct wb_buffer *path)
+/* Removes every item of an area and the bytes they took. */
+static void
+storage_empty(
+	struct storage_area *area)
 {
-	const char *data;
-	const char *home;
-	size_t index;
-	int error;
-
-	/* The data directory: XDG_DATA_HOME, or ~/.local/share. */
-	data = getenv("XDG_DATA_HOME");
-	if (data != NULL && data[0] != '\0') {
-		error = wb_buffer_printf(path, "%s/%s/", data, STORAGE_DIRECTORY);
-	} else {
-		home = getenv("HOME");
-		if (home == NULL || home[0] == '\0')
-			return ENOENT;
-		error = wb_buffer_printf(path, "%s/.local/share/%s/", home, STORAGE_DIRECTORY);
-	}
-
-	/* A path that could not be written. */
-	if (error != 0)
-		return error;
-
-	/* The origin's bytes in hexadecimal, and the ending. */
-	for (index = 0; origin[index] != '\0' && error == 0; index++)
-		error = wb_buffer_printf(path, "%02x", (unsigned)(unsigned char)origin[index]);
-	if (error == 0)
-		error = wb_buffer_append_string(path, ".ls");
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the path. */
-	return 0;
+	/* Each item, from the last. */
+	while (area->items.count > 0)
+		storage_remove_at(area, area->items.count - 1U);
 }
 
-/* Makes each directory of a file's path that is not there (mode 0700). */
-static int
-storage_make_directories(
-	const char *path)
+/*
+ * Reads a local area's items from the instance's storage, and finds the
+ * key its record is kept under: the first collision number whose record
+ * is missing, or is this origin's.  A record that cannot be read or does
+ * not decode is taken as this origin's lost one: the area starts empty
+ * and the record is removed (the next change writes it again).  An area
+ * for which no key is left, or that cannot be read for lack of memory,
+ * is not saved.
+ */
+static void
+storage_load(
+	struct storage_area *area)
 {
-	char *copy;
-	size_t index;
-	int made;
+	struct wb_buffer bytes;
+	const unsigned char *origin;
+	size_t origin_length;
+	size_t length;
+	unsigned collision;
+	int found;
+	int differs;
 	int error;
 
-	/* A copy the separators can be cut in. */
-	copy = strdup(path);
-	if (copy == NULL)
-		return ENOMEM;
-
-	/* Each directory above the file, from the top. */
-	error = 0;
-	for (index = 1; copy[index] != '\0'; index++) {
-		if (copy[index] != '/')
-			continue;
-
-		/* The directory up to this separator. */
-		copy[index] = '\0';
-		made = mkdir(copy, 0700);
-		if (made != 0 && errno != EEXIST)
-			error = errno;
-		copy[index] = '/';
+	/* Each collision number until a key is this origin's. */
+	length = strlen(area->origin);
+	wb_buffer_init(&bytes);
+	for (collision = 0; collision < STORAGE_COLLISIONS; collision++) {
+		/* The key of this try. */
+		error = wb_storage_key_text(area->origin, length, collision, area->key);
 		if (error != 0)
 			break;
+
+		/* The record under it. */
+		wb_buffer_clear(&bytes);
+		found = 0;
+		error = wb_storage_queue_read(area->queue, BROWSER_STORAGE_LOCAL, area->key, &bytes, &found);
+		if (error == ENOMEM)
+			break;
+
+		/* A record that could not be read is removed, and its key taken. */
+		if (error != 0) {
+			(void)wb_storage_queue_remove(area->queue, BROWSER_STORAGE_LOCAL, area->key);
+			wb_buffer_release(&bytes);
+			return;
+		}
+
+		/* No record: the key is free, and the area empty. */
+		if (!found) {
+			wb_buffer_release(&bytes);
+			return;
+		}
+
+		/* The record's items into the area. */
+		origin = NULL;
+		origin_length = 0;
+		error = wb_storage_local_decode(bytes.data, bytes.length, &origin, &origin_length, storage_load_item, area);
+		if (error == ENOMEM) {
+			storage_empty(area);
+			break;
+		}
+
+		/* A record that does not decode is removed, and its key taken. */
+		if (error != 0) {
+			storage_empty(area);
+			(void)wb_storage_queue_remove(area->queue, BROWSER_STORAGE_LOCAL, area->key);
+			wb_buffer_release(&bytes);
+			return;
+		}
+
+		/* A record of this origin. */
+		differs = 1;
+		if (origin != NULL && origin_length == length)
+			differs = memcmp(origin, area->origin, length);
+		if (differs == 0) {
+			wb_buffer_release(&bytes);
+			return;
+		}
+
+		/*
+		 * A record of the earlier format holds no origin: it is this
+		 * origin's under the key its old file was named by (a short
+		 * origin's bytes in hexadecimal).
+		 */
+		if (origin == NULL && collision == 0 && strlen(area->key) == length * 2U) {
+			wb_buffer_release(&bytes);
+			return;
+		}
+
+		/* Another origin's record: its items go, and the next key is tried. */
+		storage_empty(area);
 	}
 
-	/* The copy is done with. */
-	free(copy);
+	/* No key: the area lives in memory only. */
+	wb_buffer_release(&bytes);
+	area->saved = 0;
+	area->key[0] = '\0';
+}
 
-	/* A directory that could not be made. */
+/* Puts an item read from a record into an area (a key given twice keeps the first); wb_storage_local_each. */
+static int
+storage_load_item(
+	void *context,
+	const uint16_t *key,
+	size_t key_length,
+	const uint16_t *value,
+	size_t value_length)
+{
+	struct storage_area *area;
+	size_t place;
+	int present;
+	int error;
+
+	/* A key already read. */
+	area = context;
+	present = storage_find(area, key, key_length, &place);
+	if (present)
+		return 0;
+
+	/* The item in its place, and the bytes it takes. */
+	error = storage_insert(area, place, key, key_length, value, value_length);
 	if (error != 0)
 		return error;
+	area->bytes += (key_length + value_length) * 2U;
 
-	/* Succeeded: the directories are there. */
+	/* Succeeded: the item is in the area. */
 	return 0;
 }
 
 /*
- * Reads a local area's items from its file (none when it has no file):
- * the magic line, then for each item the lengths of its key and value
- * (32-bit little-endian, in UTF-16 units) and their units (little-endian).
+ * Queues the write of a local area's record (the origin and the items).
+ * A record that cannot be made or queued leaves the area in memory; it is
+ * written again at its next change, and the queue keeps a backend's error
+ * for the view to tell.
  */
-static int
-storage_load(
-	struct storage_area *area)
-{
-	struct wb_buffer path;
-	struct wb_buffer file;
-	struct wb_units key;
-	struct wb_units value;
-	const unsigned char *bytes;
-	size_t magic;
-	size_t at;
-	size_t index;
-	size_t place;
-	uint32_t key_length;
-	uint32_t value_length;
-	uint16_t unit;
-	int differs;
-	int present;
-	int error;
-
-	/* The file's bytes. */
-	wb_buffer_init(&path);
-	wb_buffer_init(&file);
-	error = storage_path(area->origin, &path);
-	if (error == 0)
-		error = wb_file_read(wb_buffer_string(&path), &file);
-	wb_buffer_release(&path);
-	if (error != 0) {
-		wb_buffer_release(&file);
-		return error;
-	}
-
-	/* A file that does not start with the magic line is not read. */
-	bytes = (const unsigned char *)file.data;
-	magic = strlen(STORAGE_MAGIC);
-	differs = 1;
-	if (file.length >= magic)
-		differs = memcmp(bytes, STORAGE_MAGIC, magic);
-	if (differs != 0) {
-		wb_buffer_release(&file);
-		return EINVAL;
-	}
-
-	/* Each item, until the bytes end or one is cut short. */
-	wb_units_init(&key);
-	wb_units_init(&value);
-	at = magic;
-	error = 0;
-	while (at < file.length && error == 0) {
-		error = storage_read_length(bytes, file.length, &at, &key_length);
-		if (error == 0)
-			error = storage_read_length(bytes, file.length, &at, &value_length);
-		if (error != 0)
-			break;
-		if (((size_t)key_length + value_length) * 2U > file.length - at) {
-			error = EINVAL;
-			break;
-		}
-
-		/* The key's units, each little-endian. */
-		key.length = 0;
-		value.length = 0;
-		for (index = 0; index < key_length && error == 0; index++) {
-			unit = (uint16_t)(bytes[at] | (bytes[at + 1U] << 8));
-			error = wb_units_append(&key, &unit, 1);
-			at += 2U;
-		}
-
-		/* The value's. */
-		for (index = 0; index < value_length && error == 0; index++) {
-			unit = (uint16_t)(bytes[at] | (bytes[at + 1U] << 8));
-			error = wb_units_append(&value, &unit, 1);
-			at += 2U;
-		}
-
-		/* An item that could not be read ends the reading. */
-		if (error != 0)
-			break;
-
-		/* The item in its place (a key given twice keeps the first). */
-		present = storage_find(area, key.data, key.length, &place);
-		if (present)
-			continue;
-		error = storage_insert(area, place, key.data, key.length, value.data, value.length);
-		if (error == 0)
-			area->bytes += (key.length + value.length) * 2U;
-	}
-
-	/* The buffers are done with. */
-	wb_units_release(&key);
-	wb_units_release(&value);
-	wb_buffer_release(&file);
-
-	/* A file cut short keeps what was read before the cut. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the items are in the area. */
-	return 0;
-}
-
-/* Writes a local area's items to its file, through a temporary file renamed over it. */
-static int
+static void
 storage_save(
 	const struct storage_area *area)
 {
 	const struct storage_item *items;
-	struct wb_buffer path;
-	struct wb_buffer temporary;
+	struct wb_storage_local_item *record;
 	struct wb_buffer out;
 	size_t index;
-	int renamed;
 	int error;
 
-	/* The file's bytes. */
-	wb_buffer_init(&out);
+	/* The items as the record takes them. */
+	record = NULL;
+	if (area->items.count > 0) {
+		record = calloc(area->items.count, sizeof(*record));
+		if (record == NULL)
+			return;
+	}
 	items = area->items.items;
-	error = wb_buffer_append_string(&out, STORAGE_MAGIC);
-	for (index = 0; index < area->items.count && error == 0; index++) {
-		error = storage_append_length(&out, (uint32_t)items[index].key_length);
-		if (error == 0)
-			error = storage_append_length(&out, (uint32_t)items[index].value_length);
-		if (error == 0)
-			error = storage_append_units(&out, items[index].key, items[index].key_length);
-		if (error == 0)
-			error = storage_append_units(&out, items[index].value, items[index].value_length);
+	for (index = 0; index < area->items.count; index++) {
+		record[index].key = items[index].key;
+		record[index].key_length = items[index].key_length;
+		record[index].value = items[index].value;
+		record[index].value_length = items[index].value_length;
 	}
 
-	/* The file's path, its directories and the temporary file's path. */
-	wb_buffer_init(&path);
-	wb_buffer_init(&temporary);
-	if (error == 0)
-		error = storage_path(area->origin, &path);
-	if (error == 0)
-		error = storage_make_directories(wb_buffer_string(&path));
-	if (error == 0)
-		error = wb_buffer_printf(&temporary, "%s.%ld", wb_buffer_string(&path), (long)getpid());
+	/* The record's bytes. */
+	wb_buffer_init(&out);
+	error = wb_storage_local_encode(area->origin, strlen(area->origin), record, area->items.count, &out);
+	free(record);
 
-	/* The bytes to the temporary file, which then takes the file's place. */
+	/* Queued for the storage thread, which writes it behind. */
 	if (error == 0)
-		error = wb_file_write(wb_buffer_string(&temporary), out.data, out.length);
-	if (error == 0) {
-		renamed = rename(wb_buffer_string(&temporary), wb_buffer_string(&path));
-		if (renamed != 0) {
-			error = errno;
-			(void)unlink(wb_buffer_string(&temporary));
-		}
-	}
-
-	/* The buffers are done with. */
+		(void)wb_storage_queue_write(area->queue, BROWSER_STORAGE_LOCAL, area->key, out.data, out.length);
 	wb_buffer_release(&out);
-	wb_buffer_release(&path);
-	wb_buffer_release(&temporary);
-
-	/* A file that could not be written. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the file holds the area. */
-	return 0;
-}
-
-/* Reads a 32-bit little-endian length at a place of a file's bytes, moving past it. */
-static int
-storage_read_length(
-	const unsigned char *bytes,
-	size_t length,
-	size_t *at,
-	uint32_t *value)
-{
-	/* Four bytes must be left. */
-	if (length - *at < 4U)
-		return EINVAL;
-
-	/* Succeeded: the length. */
-	*value = (uint32_t)bytes[*at] | ((uint32_t)bytes[*at + 1U] << 8) | ((uint32_t)bytes[*at + 2U] << 16) | ((uint32_t)bytes[*at + 3U] << 24);
-	*at += 4U;
-	return 0;
-}
-
-/* Appends a 32-bit little-endian length. */
-static int
-storage_append_length(
-	struct wb_buffer *out,
-	uint32_t value)
-{
-	unsigned char bytes[4];
-	int error;
-
-	/* The four bytes, the lowest first. */
-	bytes[0] = (unsigned char)(value & 0xffU);
-	bytes[1] = (unsigned char)((value >> 8) & 0xffU);
-	bytes[2] = (unsigned char)((value >> 16) & 0xffU);
-	bytes[3] = (unsigned char)((value >> 24) & 0xffU);
-	error = wb_buffer_append(out, bytes, sizeof(bytes));
-	if (error != 0)
-		return error;
-
-	/* Succeeded: the length is written. */
-	return 0;
-}
-
-/* Appends UTF-16 units, each little-endian. */
-static int
-storage_append_units(
-	struct wb_buffer *out,
-	const uint16_t *units,
-	size_t length)
-{
-	unsigned char bytes[2];
-	size_t index;
-	int error;
-
-	/* Each unit, its low byte first. */
-	for (index = 0; index < length; index++) {
-		bytes[0] = (unsigned char)(units[index] & 0xffU);
-		bytes[1] = (unsigned char)(units[index] >> 8);
-		error = wb_buffer_append(out, bytes, sizeof(bytes));
-		if (error != 0)
-			return error;
-	}
-
-	/* Succeeded: the units are written. */
-	return 0;
 }

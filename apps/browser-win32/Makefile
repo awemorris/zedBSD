@@ -11,10 +11,10 @@
 #
 # What it builds so far: the files of the operating-system layers (libbrowser's base/os-*, its storage,
 # libmedia's media-os, libkeiland's Windows files), compiled with the Windows compiler and its warnings;
-# the static libraries: libbrowser.a (libbrowser without its network and storage, with its Windows
-# layer), libmedia.a and libkeiland.a (their Windows files so far), libtruetype and the png, jpeg, gif
-# and z compat libraries (from the same source lists as the zedBSD build); the Vulkan headers and the
-# import library of the Vulkan loader.  A test's program links with them all (test-program); the
+# the static libraries: libbrowser.a (all of libbrowser, with its Windows layer), libmedia.a and
+# libkeiland.a (their Windows files so far), libtruetype and the png, jpeg, gif and z compat libraries
+# (from the same source lists as the zedBSD build); the Vulkan headers and the import library of the
+# Vulkan loader.  A test's program links with them all (test-program); the
 # browser's program and its resources join later, linked the same way (WIN32_PROGRAM).  Apart from those:
 # libbrowser-script.a, the script core alone with its Windows layer, and script-core.exe over it.
 #
@@ -115,13 +115,11 @@ BROWSER_WIN32_LAYER_SOURCES := \
 
 BROWSER_WIN32_LAYER_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_WIN32_LAYER_SOURCES))
 
-# libbrowser without the cookies and the storage (they come with the instance later): the zedBSD
-# build's list less its POSIX operating-system layer, which the Windows layer above replaces.
+# libbrowser: the zedBSD build's list less its POSIX operating-system layer, which the Windows layer
+# above replaces.
 include userland/desktop/libbrowser/sources.mk
 LIBBROWSER_CORE_EXCLUDED := $(LIBBROWSER_OS_SOURCES) \
-	$(LIBBROWSER_OS_NET_SOURCES) \
-	$(LIBBROWSER_DIR)/net/cookie.c \
-	$(LIBBROWSER_DIR)/page/storage.c
+	$(LIBBROWSER_OS_NET_SOURCES)
 LIBBROWSER_CORE_SOURCES := $(filter-out $(LIBBROWSER_CORE_EXCLUDED),$(LIBBROWSER_SOURCES))
 LIBBROWSER_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBBROWSER_CORE_SOURCES))
 
@@ -143,9 +141,10 @@ SCRIPT_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(SCRIPT_CORE_SOU
 SCRIPT_CORE_PROGRAM := $(BROWSER_WIN32_BUILD)/tests/script-core.exe
 
 # The static libraries of the tree's libraries, each from its files of the Windows build so far:
-# libbrowser's core with its Windows layer and its storage modules, libmedia's and libkeiland's Windows
-# files (their shared files join with their Windows ports).
-WIN32_SOURCES_browser := $(LIBBROWSER_CORE_SOURCES) $(filter userland/desktop/libbrowser/%,$(BROWSER_WIN32_LAYER_SOURCES))
+# libbrowser (its storage modules, which the layers above list too, once) with its Windows layer,
+# libmedia's and libkeiland's Windows files (their shared files join with their Windows ports).
+WIN32_SOURCES_browser := $(LIBBROWSER_CORE_SOURCES) \
+	$(filter-out $(LIBBROWSER_CORE_SOURCES),$(filter userland/desktop/libbrowser/%,$(BROWSER_WIN32_LAYER_SOURCES)))
 WIN32_SOURCES_media := $(filter userland/desktop/libmedia/%,$(BROWSER_WIN32_LAYER_SOURCES))
 WIN32_SOURCES_keiland := $(filter userland/desktop/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES))
 WIN32_TREE_LIBRARIES := browser media keiland

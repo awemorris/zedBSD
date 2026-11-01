@@ -189,7 +189,7 @@ resource_data(
 	int same;
 
 	/* A canonical data resource supplies all bytes and metadata, with its fragment excluded from the body. */
-	status = page_fetch_response("https://example.invalid/base", "data:IMAGE/SVG+XML,%3Cr/%3E#mark", &response);
+	status = page_fetch_response(NULL, "https://example.invalid/base", "data:IMAGE/SVG+XML,%3Cr/%3E#mark", &response);
 	resource_check(status == 0 && response.status == 200, "real data response successful status");
 	same = resource_buffer(&response.body, "<r/>");
 	resource_check(same, "data body percent decoded without URL fragment");
@@ -202,7 +202,7 @@ resource_data(
 	net_response_release(&response);
 
 	/* Existing forgiving base64 decoding still supplies ordinary owned resource bytes. */
-	status = page_fetch_response("https://example.invalid/base", "data:application/xml;base64,PHIvPg==", &response);
+	status = page_fetch_response(NULL, "https://example.invalid/base", "data:application/xml;base64,PHIvPg==", &response);
 	if (status != 0) {
 		resource_check(0, "real base64 data response");
 		net_response_release(&response);
@@ -217,7 +217,7 @@ resource_data(
 	net_response_release(&response);
 
 	/* Default data MIME remains plain text, rather than being promoted from apparent markup. */
-	status = page_fetch_response("https://example.invalid/base", "data:,%3Cr/%3E", &response);
+	status = page_fetch_response(NULL, "https://example.invalid/base", "data:,%3Cr/%3E", &response);
 	if (status != 0) {
 		resource_check(0, "default data MIME preserved");
 		net_response_release(&response);
@@ -232,7 +232,7 @@ resource_data(
 	net_response_release(&response);
 
 	/* Failed real decoding and unsupported schemes publish no partial fields or successful status. */
-	status = page_fetch_response("https://example.invalid/base", "data:application/xml;base64,!", &response);
+	status = page_fetch_response(NULL, "https://example.invalid/base", "data:application/xml;base64,!", &response);
 	resource_check(status != 0 && response.status == 0, "invalid data decoding rejects successful response status");
 	resource_check(response.body.length == 0 &&
 			   response.url.length == 0 &&
@@ -241,7 +241,7 @@ resource_data(
 	net_response_release(&response);
 
 	/* An unsupported real scheme leaves the same empty response contract. */
-	status = page_fetch_response("https://example.invalid/base", "mailto:reader@example.invalid", &response);
+	status = page_fetch_response(NULL, "https://example.invalid/base", "mailto:reader@example.invalid", &response);
 	resource_check(status == EPROTONOSUPPORT &&
 			   response.body.length == 0 &&
 			   response.url.length == 0,
@@ -249,17 +249,17 @@ resource_data(
 	net_response_release(&response);
 
 	/* An absent base is refused before any location parser can consume it. */
-	status = page_fetch_response(NULL, "data:,x", &response);
+	status = page_fetch_response(NULL, NULL, "data:,x", &response);
 	resource_check(status == EINVAL && response.status == 0, "invalid base leaves initialized empty response");
 	net_response_release(&response);
 
 	/* An absent target preserves initialized empty response storage. */
-	status = page_fetch_response("https://example.invalid/base", NULL, &response);
+	status = page_fetch_response(NULL, "https://example.invalid/base", NULL, &response);
 	resource_check(status == EINVAL && response.body.length == 0, "missing href leaves empty response");
 	net_response_release(&response);
 
 	/* A caller without response storage cannot receive ownership. */
-	status = page_fetch_response("https://example.invalid/base", "data:,x", NULL);
+	status = page_fetch_response(NULL, "https://example.invalid/base", "data:,x", NULL);
 	resource_check(status == EINVAL, "missing response output rejected");
 
 	/* A representational overflow rejects copying after genuine data decoding has allocated its fields. */
@@ -267,7 +267,7 @@ resource_data(
 		/* The real append guard must refuse this extra byte without touching nonexistent storage. */
 		wb_buffer_init(&bytes);
 		bytes.length = (size_t)-2;
-		status = page_fetch("https://example.invalid/base", "data:text/plain,cleanup-probe", &bytes, NULL);
+		status = page_fetch(NULL, "https://example.invalid/base", "data:text/plain,cleanup-probe", &bytes, NULL);
 		resource_check(status == ENOMEM && bytes.data == NULL, "legacy data copy overflow returns its native allocation error");
 
 		/* Restores the synthetic length before ordinary caller-buffer teardown. */
@@ -323,7 +323,7 @@ resource_files(
 	}
 
 	/* A real absent file cannot publish partially initialized response fields. */
-	status = page_fetch_response(wb_buffer_string(&base), "absent.xml", &response);
+	status = page_fetch_response(NULL, wb_buffer_string(&base), "absent.xml", &response);
 	resource_check(status != 0 && response.status == 0, "missing real local file rejects response");
 	resource_check(response.body.length == 0 &&
 			   response.url.length == 0 &&
@@ -354,7 +354,7 @@ resource_file(
 	int same;
 
 	/* Actual local bytes remain unchanged by document type selection. */
-	status = page_fetch_response(base, href, &response);
+	status = page_fetch_response(NULL, base, href, &response);
 	resource_check(status == 0 && response.status == 200, href);
 	same = resource_buffer(&response.body, "<r/>");
 	resource_check(same, "real local body copied exactly");
@@ -422,7 +422,7 @@ resource_remote(
 	int same;
 
 	/* Real HTTP status and headers remain data, including successful transport of a 404 response. */
-	status = page_fetch_response(base, href, &response);
+	status = page_fetch_response(NULL, base, href, &response);
 	resource_check(status == 0 && response.status == response_status, "actual HTTP response status preserved");
 	same = resource_buffer(&response.content_type, mime);
 	resource_check(same, "actual HTTP Content-Type retained exactly");
@@ -449,7 +449,7 @@ resource_remote(
 	/* Existing byte-only consumers keep the same native body and final URL behavior. */
 	wb_buffer_init(&bytes);
 	wb_buffer_init(&legacy_url);
-	status = page_fetch(base, href, &bytes, &legacy_url);
+	status = page_fetch(NULL, base, href, &bytes, &legacy_url);
 	same = resource_buffer(&bytes, body);
 	resource_check(status == 0 && same, "unchanged legacy page_fetch body");
 	same = resource_buffer(&legacy_url, wb_buffer_string(&final_url));

@@ -42,12 +42,15 @@
 #include "net/net.h"
 #include "page/page.h"
 #include "paint/gpu.h"
+#include "storage/instance.h"
+#include "storage/queue.h"
 
 #include <browser/browser.h>
 
 #include <errno.h>
 #include <math.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -155,11 +158,14 @@ struct view_prefetch_script {
  * how far the caller shifts the content past an end (overscroll_y, layout
  * units, positive down; the drawing's alone, zero on a new page),
  * the view's size and whether the page was laid out at another size
- * (resized), the fonts, the stack frame the pages' heaps scan up to, the
- * clock's time when the page shown (page_epoch) and the page being made
+ * (resized), the fonts and the sans font's companions, the stack frame
+ * the pages' heaps scan up to, the clock's time when the page shown (page_epoch) and the page being made
  * (open_epoch) began, how pages are fetched, the loader (NULL when every
  * page is read at once), the page being fetched (its location and how it
  * joins the history; NULL when none), the title shown, and the callbacks.
+ * instance is the instance the view belongs to (the program's, or its
+ * thread's default), which counts it among its views; storage_told says
+ * the view has told its console that the storage could not save.
  *
  * On the GPU: the caller's device (has_device says the caller lent one),
  * the renderer on it (opened at the first drawing, for the target's format
@@ -186,6 +192,7 @@ struct browser_view {
 	unsigned height;
 	int resized;
 	struct text_font_paths fonts;
+	struct text_font_companions companions;
 	const void *stack_base;
 	uint64_t page_epoch;
 	uint64_t open_epoch;
@@ -226,6 +233,8 @@ struct browser_view {
 	float press_y;
 	int has_focus;
 	uint32_t page_serial;
+	struct browser_instance *instance;
+	int storage_told;
 };
 
 /*
@@ -280,6 +289,7 @@ static void view_scroll(struct browser_view *view, layout_unit distance);
 static void view_redraw(struct browser_view *view);
 static void view_failed(struct browser_view *view, const char *url, int error, const char *reason);
 static void view_console(void *context, int level, const char *text, size_t length);
+static void view_storage_failed(struct browser_view *view, int error);
 static int view_gpu_ready(struct browser_view *view, const struct browser_target *target);
 static void view_gpu_close(struct browser_view *view);
 static int view_framebuffer(struct browser_view *view, const struct browser_target *target, VkFramebuffer *framebuffer);
@@ -299,13 +309,14 @@ static void view_scroll_to(struct browser_view *view, int place);
 static layout_unit view_drawn_scroll(const struct browser_view *view);
 
 /*
- * Makes a view with its loader and no page.
+ * Makes a view of an instance with its loader and no page.
  */
 int
 browser_view_create(
 	const struct browser_view_options *options,
 	struct browser_view **view)
 {
+	struct browser_instance *instance;
 	struct browser_view *made;
 	int error;
 
@@ -331,15 +342,26 @@ browser_view_create(
 	if (options->fetch < BROWSER_FETCH_DEFAULT || options->fetch > BROWSER_FETCH_BACKGROUND)
 		return EINVAL;
 
+	/* The instance: the program's, or this thread's default one. */
+	instance = options->instance;
+	if (instance == NULL) {
+		error = wb_instance_default(&instance);
+		if (error != 0)
+			return error;
+	}
+
 	/* The view, empty. */
 	made = calloc(1, sizeof(*made));
 	if (made == NULL)
 		return ENOMEM;
+	made->instance = instance;
 
 	/* The fonts the program names, and the system's for the ones it leaves out. */
 	made->fonts.sans = text_default_path(TEXT_FACE_SANS);
 	made->fonts.mono = text_default_path(TEXT_FACE_MONO);
 	made->fonts.fallback = text_default_path(TEXT_FACE_FALLBACK);
+	made->companions.bold = text_default_path(TEXT_PATH_BOLD);
+	made->companions.fallback_mono = text_default_path(TEXT_PATH_FALLBACK_MONO);
 	if (options->fonts != NULL) {
 		if (options->fonts->sans != NULL)
 			made->fonts.sans = options->fonts->sans;
@@ -347,6 +369,10 @@ browser_view_create(
 			made->fonts.mono = options->fonts->mono;
 		if (options->fonts->fallback != NULL)
 			made->fonts.fallback = options->fonts->fallback;
+		if (options->fonts->bold != NULL)
+			made->companions.bold = options->fonts->bold;
+		if (options->fonts->fallback_mono != NULL)
+			made->companions.fallback_mono = options->fonts->fallback_mono;
 	}
 
 	/* The rest of the options. */
@@ -368,20 +394,22 @@ browser_view_create(
 		made->has_device = 1;
 	}
 
-	/* A view that reads every page at once needs no loader. */
+	/* A view that reads every page at once needs no loader; the instance counts it among its views. */
 	if (made->fetch == BROWSER_FETCH_AT_ONCE) {
+		instance->view_count++;
 		*view = made;
 		return 0;
 	}
 
-	/* The loader of the http and https pages and images, which wakes the program when it has news. */
-	error = page_net_create(options->wake, options->wake_context, &made->loader);
+	/* The loader of the http and https pages and images, with the instance's cookies, which wakes the program when it has news. */
+	error = page_net_create(instance->cookies, options->wake, options->wake_context, &made->loader);
 	if (error != 0) {
 		free(made);
 		return error;
 	}
 
-	/* Succeeded: the view has no page yet. */
+	/* Succeeded: the view has no page yet, and its instance cannot be destroyed while it lives. */
+	instance->view_count++;
 	*view = made;
 	return 0;
 }
@@ -415,6 +443,9 @@ browser_view_destroy(
 	wb_buffer_release(&view->title);
 	wb_buffer_release(&view->arrived);
 	view_prefetch_free(&view->prefetches);
+
+	/* The instance has one view less: at none it may be destroyed. */
+	view->instance->view_count--;
 	free(view);
 }
 
@@ -702,6 +733,13 @@ browser_view_process(
 {
 	int changed;
 	int error;
+
+	/* The storage's failure to save, told on the view's console once. */
+	error = wb_storage_queue_take_error(view->instance->queue);
+	if (error != 0 && !view->storage_told) {
+		view_storage_failed(view, error);
+		view->storage_told = 1;
+	}
 
 	/* The loader's news: the callbacks of the requests that ended. */
 	if (view->loader != NULL)
@@ -1567,7 +1605,8 @@ browser_view_draw_pixels(
 
 /*
  * Writes one of the page shown's text dumps (its DOM, its computed style,
- * its layout or its display list) into memory the caller frees.
+ * its layout or its display list) into memory the caller frees with
+ * browser_free.
  */
 int
 browser_view_dump(
@@ -2021,6 +2060,18 @@ browser_offscreen_destroy(
 	free(offscreen);
 }
 
+/*
+ * Frees memory the engine handed to the program (a dump's text) with the
+ * engine's own allocator.
+ */
+void
+browser_free(
+	void *memory)
+{
+	/* The C library of the engine's own. */
+	free(memory);
+}
+
 /* Trusts the CA certificates of a PEM file for https, besides the system's roots, in every view. */
 int
 browser_add_ca_file(
@@ -2124,11 +2175,13 @@ view_make_page(
 	/* Its scripts see the view's size and its fonts, write their console through the view, and count time from now. */
 	page_set_viewport(made, (int)view->width, (int)view->height);
 	page_set_fonts(made, &view->fonts);
+	page_set_font_companions(made, &view->companions);
 	page_set_console(made, view_console, view);
 	view->open_epoch = view_clock();
 
-	/* Its http and https images come through the loader (without one, they are read at once). */
+	/* Its http and https images come through the loader (without one, they are read at once), with the instance's cookies and storage. */
 	page_set_loader(made, view->loader);
+	page_set_instance(made, view->instance);
 
 	/* Succeeded: the page is empty. */
 	*page = made;
@@ -2851,6 +2904,27 @@ view_console(
 	view = context;
 	if (view->callbacks.console != NULL)
 		view->callbacks.console(view->callbacks.context, view, level, text, length);
+}
+
+/* Tells the view's console, as a warning, that the instance's storage could not save. */
+static void
+view_storage_failed(
+	struct browser_view *view,
+	int error)
+{
+	char line[128];
+	int length;
+
+	/* The line, with the backend's reason. */
+	length = snprintf(line, sizeof(line), "storage: could not save (%s)", strerror(error));
+	if (length < 0)
+		return;
+	if ((size_t)length >= sizeof(line))
+		length = (int)sizeof(line) - 1;
+
+	/* The program's console, when it has one. */
+	if (view->callbacks.console != NULL)
+		view->callbacks.console(view->callbacks.context, view, 1, line, (size_t)length);
 }
 
 /*

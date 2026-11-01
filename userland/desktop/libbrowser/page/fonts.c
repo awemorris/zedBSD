@@ -243,7 +243,7 @@ fonts_add_face(
 
 	/* Any other location is read now. */
 	wb_buffer_init(&bytes);
-	error = page_fetch(page->base, font->location, &bytes, NULL);
+	error = page_fetch(page_cookies(page), page->base, font->location, &bytes, NULL);
 	if (error == 0) {
 		fonts_read(font, (const unsigned char *)bytes.data, bytes.length);
 	} else {

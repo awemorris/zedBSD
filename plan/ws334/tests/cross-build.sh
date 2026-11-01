@@ -4,7 +4,9 @@
 #  1. the files written for the Windows build (the operating-system layers) compile with warning 0;
 #  2. the warnings of libtruetype and the compat libraries (compiled without -Werror) are counted;
 #  3. what those libraries leave undefined (nm -u less what they define) is in allowed-imports.txt, and
-#     so is what libbrowser-core (libbrowser without its cookies and storage) with its Windows layer does;
+#     so is what libbrowser.a (all of libbrowser with its Windows layer) does; every function
+#     <browser/browser.h> and <browser/storage.h> declare is defined in libbrowser.a, and every name of
+#     libbrowser's exports.map matches a defined function (the API of the one .exe);
 #  4. the Vulkan loader's delayed import: plan/ws334/tests/delay-load.c, linked as the build links a
 #     program that calls Vulkan, has vulkan-1.dll in its delay-import table and not in its import table;
 #     on x86_64 under Wine it prints the loader's version with vulkan-1.dll, and with the DLL disabled
@@ -97,29 +99,53 @@ for name in win64 winarm64; do
 		echo "$name: $(wc -l < "$out/imports-$name.txt") imports, all in the table"
 	fi
 
-	# 3b. libbrowser without its cookies and storage (libbrowser-core) with its Windows layer: what it
-	# leaves undefined, less what it, the static libraries and the Vulkan loader's import library define,
-	# against the table.  The names of the modules the Windows build adds later (the cookies'
-	# net_cookie_*, the storage's page_storage_*, libmedia's media_*) are left out of the comparison.
-	core="$LIBBROWSER_CORE_OBJECTS"
-	for layer in os-win32 os-system-win32 os-file-win32 os-net-win32 os-time-win32 os-zones; do
-		core="$core $build/obj/userland/desktop/libbrowser/base/$layer.o"
-	done
+	# 3b. libbrowser.a (all of libbrowser, with its Windows layer and its storage): what it leaves
+	# undefined, less what it, the static libraries and the Vulkan loader's import library define, against
+	# the table.  The names of libmedia (media_*), whose shared files the Windows build adds later, are
+	# left out of the comparison.
+	core="$build/obj/libbrowser.a"
 	"${WIN32_TOOL_PREFIX}nm" -u $core 2> /dev/null |
 	    awk 'NF == 2 { print $2 } NF == 1 && $1 !~ /:$/ { print $1 }' | sed 's/^__imp_//' |
 	    sort -u > "$out/core-undefined-$name.txt"
 	"${WIN32_TOOL_PREFIX}nm" --defined-only $core $archives "$build/obj/libvulkan-1.a" 2> /dev/null |
 	    awk 'NF == 3 { print $3 }' | sed 's/^__imp_//' | sort -u > "$out/core-defined-$name.txt"
 	comm -23 "$out/core-undefined-$name.txt" "$out/core-defined-$name.txt" |
-	    grep -v '^net_cookie_' | grep -v '^page_storage_' | grep -v '^media_' > "$out/core-imports-$name.txt"
+	    grep -v '^media_' > "$out/core-imports-$name.txt"
 	if [ ! -s "$out/core-imports-$name.txt" ]; then
-		echo "FAILED $name: nm found no undefined symbol in libbrowser-core (no objects?)"
+		echo "FAILED $name: nm found no undefined symbol in libbrowser.a (no archive?)"
 		status=1
 	elif comm -23 "$out/core-imports-$name.txt" "$out/allowed.txt" | grep .; then
-		echo "FAILED $name: the libbrowser-core symbols above are not in $allowed"
+		echo "FAILED $name: the libbrowser.a symbols above are not in $allowed"
 		status=1
 	else
-		echo "$name: libbrowser-core $(wc -l < "$out/core-imports-$name.txt") imports, all in the table"
+		echo "$name: libbrowser.a $(wc -l < "$out/core-imports-$name.txt") imports, all in the table"
+	fi
+
+	# 3c. The public API: the functions the public headers declare are defined in libbrowser.a (as
+	# global text), and each name or glob of exports.map's global list matches one of them.
+	"${WIN32_TOOL_PREFIX}nm" --defined-only -g $core 2> /dev/null | awk 'NF == 3 && $2 == "T" { print $3 }' |
+	    sort -u > "$out/api-defined-$name.txt"
+	sed -n 's/^[a-z].*[ *]\(browser_[a-z_]*\)(.*/\1/p' userland/desktop/include/browser/browser.h \
+	    userland/desktop/include/browser/storage.h | sort -u > "$out/api-declared-$name.txt"
+	sed -n '/global:/,/local:/s/^[[:space:]]*\(browser_[a-z_*]*\);.*/\1/p' userland/desktop/libbrowser/exports.map \
+	    > "$out/api-exports-$name.txt"
+	missing=$(comm -23 "$out/api-declared-$name.txt" "$out/api-defined-$name.txt")
+	unmatched=
+	while read -r pattern; do
+		case "$pattern" in
+		*'*') matched=$(grep -c "^${pattern%\*}" "$out/api-defined-$name.txt") ;;
+		*) matched=$(grep -c -x "$pattern" "$out/api-defined-$name.txt") ;;
+		esac
+		[ "$matched" -gt 0 ] || unmatched="$unmatched $pattern"
+	done < "$out/api-exports-$name.txt"
+	if [ ! -s "$out/api-declared-$name.txt" ] || [ ! -s "$out/api-exports-$name.txt" ]; then
+		echo "FAILED $name: no function found in the public headers or exports.map"
+		status=1
+	elif [ -n "$missing" ] || [ -n "$unmatched" ]; then
+		echo "FAILED $name: libbrowser.a does not define:" $missing "; exports.map names matching nothing:$unmatched"
+		status=1
+	else
+		echo "$name: libbrowser.a defines the $(wc -l < "$out/api-declared-$name.txt") functions of the public headers, exports.map's $(wc -l < "$out/api-exports-$name.txt") names all match"
 	fi
 
 	# 4. The delayed import of the Vulkan loader.

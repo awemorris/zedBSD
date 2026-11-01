@@ -161,6 +161,10 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/net/tls.c \
 	$(LIBBROWSER_DIR)/net/cookie.c \
 	$(LIBBROWSER_DIR)/net/loader.c \
+	$(LIBBROWSER_DIR)/storage/records.c \
+	$(LIBBROWSER_DIR)/storage/files.c \
+	$(LIBBROWSER_DIR)/storage/queue.c \
+	$(LIBBROWSER_DIR)/storage/instance.c \
 	$(LIBBROWSER_DIR)/page/page.c \
 	$(LIBBROWSER_DIR)/page/transition.c \
 	$(LIBBROWSER_DIR)/page/link.c \

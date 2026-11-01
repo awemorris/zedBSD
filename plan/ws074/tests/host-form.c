@@ -81,6 +81,7 @@ main(
 		state.verbose = 1;
 
 	/* The view on form.html at 800 by 600. */
+	memset(&paths, 0, sizeof(paths));
 	paths.sans = argv[2];
 	paths.mono = argv[3];
 	paths.fallback = argv[4];
@@ -332,7 +333,7 @@ paint_has(
 	found = strstr(dump, text) != NULL;
 	if (state.verbose && !found)
 		printf("-- paint has no %s\n", text);
-	free(dump);
+	browser_free(dump);
 	return found;
 }
 
