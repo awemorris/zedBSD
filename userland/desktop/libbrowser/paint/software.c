@@ -435,6 +435,7 @@ software_backdrop(
 	const struct paint_clip *clip)
 {
 	float *pixels;
+	float cover;
 	uint32_t pixel;
 	int first_x;
 	int first_y;
@@ -461,14 +462,40 @@ software_backdrop(
 	}
 	software_filter_colors(pixels, NULL, count, item->filters, item->filter_count);
 
-	/* Back into the bitmap, opaque. */
+	/* Back into the bitmap, opaque: the filtered pixels over the unfiltered ones by the item's opacity. */
+	cover = (float)(item->color >> 24) / 255.0f;
 	for (y = 0; y < height; y++) {
 		for (x = 0; x < width; x++) {
+			float red;
+			float green;
+			float blue;
+
 			index = y * width + x;
+			red = pixels[3 * index];
+			green = pixels[3 * index + 1];
+			blue = pixels[3 * index + 2];
+			if (red < 0.0f)
+				red = 0.0f;
+			if (green < 0.0f)
+				green = 0.0f;
+			if (blue < 0.0f)
+				blue = 0.0f;
+			if (red > 1.0f)
+				red = 1.0f;
+			if (green > 1.0f)
+				green = 1.0f;
+			if (blue > 1.0f)
+				blue = 1.0f;
+			pixel = bitmap->pixels[(size_t)(first_y + y) * (size_t)bitmap->width + (size_t)(first_x + x)];
+			if (cover < 1.0f) {
+				red = red * cover + (float)((pixel >> 16) & 0xffU) / 255.0f * (1.0f - cover);
+				green = green * cover + (float)((pixel >> 8) & 0xffU) / 255.0f * (1.0f - cover);
+				blue = blue * cover + (float)(pixel & 0xffU) / 255.0f * (1.0f - cover);
+			}
 			pixel = 0xff000000U |
-			    ((uint32_t)(pixels[3 * index] * 255.0f + 0.5f) << 16) |
-			    ((uint32_t)(pixels[3 * index + 1] * 255.0f + 0.5f) << 8) |
-			    (uint32_t)(pixels[3 * index + 2] * 255.0f + 0.5f);
+			    ((uint32_t)(red * 255.0f + 0.5f) << 16) |
+			    ((uint32_t)(green * 255.0f + 0.5f) << 8) |
+			    (uint32_t)(blue * 255.0f + 0.5f);
 			bitmap->pixels[(size_t)(first_y + y) * (size_t)bitmap->width + (size_t)(first_x + x)] = pixel;
 		}
 	}

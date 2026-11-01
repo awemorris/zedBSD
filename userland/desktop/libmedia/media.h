@@ -19,11 +19,14 @@
  * get a sound output of their own later): a file plays by the monotonic
  * clock, and one without pictures (a song) plays silent.
  *
- * The engine never calls back: it makes a descriptor readable when its
- * state changed or a picture came (media_engine_wake_fd), for the caller's
- * poll; the caller then reads the state (media_engine_status), which also
- * empties the descriptor.  Everything but the reading of the bytes runs
- * on the caller's thread or the engine's own.
+ * The engine calls the caller's wake function (media_engine_open) when its
+ * state changed or a picture came, from the engine's thread (or from the
+ * caller's own, within media_engine_play and media_engine_pause); the
+ * caller then reads the state
+ * (media_engine_status).  The wake function returns soon and calls no
+ * engine function; it may be called again and again before the caller
+ * next reads the state.  Everything but the reading of the bytes runs on
+ * the caller's thread or the engine's own.
  *
  * The library's internal API, for the desktop's programs; not a part of
  * any SDK.
@@ -71,12 +74,14 @@ struct media_status {
 
 struct media_engine;
 
+/* The caller's wake: the engine's state changed or a picture came (see above). */
+typedef void (*media_wake_function)(void *context);
+
 /* The log: a line of the library's (without its end) goes to the caller's function, or nowhere. */
 void media_set_log(void (*log)(void *context, const char *line), void *context);
 
 /* The engine (engine.c). */
-int media_engine_open(const char *path, const struct media_source *source, unsigned flags, struct media_engine **engine);
-int media_engine_wake_fd(const struct media_engine *engine);
+int media_engine_open(const char *path, const struct media_source *source, unsigned flags, media_wake_function wake, void *wake_context, struct media_engine **engine);
 void media_engine_status(struct media_engine *engine, struct media_status *status);
 void media_engine_play(struct media_engine *engine);
 void media_engine_pause(struct media_engine *engine);

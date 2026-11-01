@@ -68,6 +68,15 @@
 /* kern_logf() reaches both the console and the ring buffer. */
 #define VFS_LOG(...) kern_logf(__VA_ARGS__)
 
+/*
+ * How many times the root volume is mounted read-write while the mount
+ * fails with an I/O error, before it is mounted read-only.  The disk's
+ * driver has already tried each transfer several times, so a mount that
+ * still meets an error may have met a fault that passes (an SD card's
+ * data errors come and go); mounting again costs a few reads.
+ */
+#define VFS_ROOT_READ_WRITE_TRIES 3U
+
 #if !defined(HAL_ARCH_I386) && !defined(HAL_ARCH_AMD64)
 #define VFS_LEGACY_NULL_AUTOROOT 1
 #endif
@@ -2199,7 +2208,9 @@ vfs_resolve_native_root(
 /*
  * Mounts the root volume read-write, or, when the volume refuses that but
  * can still be read, read-only (BUG-312): the boot goes on, the console
- * says why, and init checks the volume with fsck and reboots.  A disk that
+ * says why, and init checks the volume with fsck and reboots.  A
+ * read-write mount that fails with an I/O error is tried again, up to
+ * VFS_ROOT_READ_WRITE_TRIES times, before the read-only one.  A disk that
  * is missing or holds no file system, and a lack of memory, are not
  * retried.
  */
@@ -2208,11 +2219,26 @@ vfs_mount_root_volume(
 	struct fat_mount_args *args,
 	struct mount **root_out)
 {
+	unsigned attempt;
 	int error;
 	int retry_error;
 
-	/* Read-write, as a root normally is. */
-	error = mount_root_create("auto", 0, args, root_out);
+	/* Read-write, as a root normally is; only an I/O error is worth another mount. */
+	error = EIO;
+	for (attempt = 0; attempt < VFS_ROOT_READ_WRITE_TRIES; attempt++) {
+		/* Mounts it; a success or a refusal other than an I/O error ends the tries. */
+		error = mount_root_create("auto", 0, args, root_out);
+		if (error != EIO)
+			break;
+
+		/* The console says the mount met an I/O error and which try it was. */
+		VFS_LOG("vfs: the root on %s met an I/O error mounting read-write, try %u of %u\n",
+		    args->fspec,
+		    attempt + 1U,
+		    VFS_ROOT_READ_WRITE_TRIES);
+	}
+
+	/* Mounted read-write. */
 	if (error == 0)
 		return 0;
 

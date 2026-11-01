@@ -2,7 +2,7 @@
 
 # ws335-p006: ChaCha20・Poly1305・AEAD（と 64 bit の counter の ChaCha20）
 
-Status: in-progress（2026-11-01 06:59 q1821、Sonnet）
+Status: cleared（2026-11-01 09:23 Q1 の判定、main d0e048532。Sonnet 実装済み・試験 PASS、Q1 も run-unit chacha を流して PASS）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -62,4 +62,62 @@ git diff --check
 
 ## 結果
 
-（未着手）
+実装済み・試験 PASS（2026-11-01 09:30 担当、Sonnet。cleared は Q1）。host の再起動で一度中断し、cryc-chacha.c は前の attempt の物をそのまま使い（変更なし）、試験を書いて流した。
+
+### 実行した command と最後の行
+
+WS335_VECTORS=/home/awe/zedBSD-claude1/build/sources/tls-vectors で:
+
+- `sh plan/ws335/tests/run-unit.sh chacha`: `test-chacha: PASS (52156 checks)` / `run-unit: PASS`（ASan・UBSan）。
+- `sh plan/ws335/tests/run-unit.sh --win32 chacha`（flock /tmp/zedbsd-wine.lock 内）: `test-chacha: PASS (52156 checks) (win32)` / `run-unit: PASS`。
+- `sh plan/ws335/tests/run-unit.sh all`: test-chacha 52156、test-hash 12965、test-sha2 14092、test-sha3 629616、test-tools 18、test-util 169160、ct-chacha 6、ct-hash 37、ct-sha3 1、ct-util 33、最後 `run-unit: PASS`。
+- `sh plan/ws335/tests/run-ct.sh chacha`: `ct-chacha: PASS (6 checks)` / `run-ct: PASS`。
+- `BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh`（flock 内）: `check-skeleton: PASS`。
+- `git diff --check`: 出力なし、終了 0。
+
+### 試験の内容（plan/ws335/tests/unit/test-chacha.c、ct-chacha.c）
+
+- RFC 8439 の値: 2.3.2（block）、2.4.2（cipher、32 bit と 64 bit の両方の形。64 bit の形は nonce12 の先頭 4 byte を counter の上位 32 bit に、後ろ 8 byte を nonce8 に写して同じ keystream になる事で照合）、
+  2.5.2（Poly1305）、2.6.2（key 生成）、2.8.2（AEAD。nonce は 07 00 00 00 と IV。one-time key は block 0 の先頭 32 byte）、A.1（5 件）、A.2（3 件）、A.3（11 件）、A.4（3 件）、A.5（復号）。
+  A.3 は全ての分割点の 2 分割、短い message は全ての 2 点の 3 分割、1 byte ずつ。2.3.2 の block を xor64 でも照合（counter = 0x0900000000000001、nonce8 = 00 00 00 4a 00 00 00 00）。
+- Wycheproof chacha20_poly1305_test: file の 325 件のうち ivSize 96・tagSize 128・keySize 256 の 316 件を検査（件数を CHECK で完全一致）、他の nonce 長の 9 件は header の interface に無いので skip。
+  valid（256 件）は seal が ct と tag に一致、open が msg に一致（out of place と in place）。invalid（60 件）は open が EBADMSG、out が全て 0、in は不変（in place は 0 で置換）。
+- 参照 1（RFC 8439 2.5 の式そのもの）: 40 byte の big integer（加算・乗算・減算・P = 2^130 - 5 の還元）で acc = ((acc + block + 0x01) * r) % P、clamp、s の 2^128 での加算。
+  RFC の vector で参照自身も一致する事を確認した上で、乱数の key と message（長さ 0〜299、全 0xff の message、全 0xff の r、1500 回）と 0xff の message の長さ 0〜130 を、一括・乱数の分割（0 byte の piece は NULL）で実装と照合。
+- 参照 2（2.8 の message の構成）: block 0 から one-time key、block 1 から keystream、aad・padding・ct・padding・長さ 2 つを組んで参照 Poly1305 に通した tag と ct を、実装の seal と照合（boundary の長さ 23 通りと乱数の長さ、aad 長 13 通りと乱数、800 回）。
+- keystream: 長さ 24 通り × 32 bit counter 7 通り（0・1・0x7fffffff・0xfffffff0 から 0xffffffff）と、64 bit counter 12 通り（2^32 の手前と向こう、2^64 - 1 の手前）で、block 関数を 1 block ずつ呼んだ参照と照合。
+  counter が上限を越える組は EOVERFLOW と out が不変（sentinel）、in place は buffer が不変。size 0 は最後の counter でも 0。size_t が 64 bit の時、上限 +1 byte の巨大な size（counter 0・1・0x80000000）が EOVERFLOW。
+- 誤りの入力: 全ての key（256 bit）・nonce（96 bit）・aad・ct・tag の 1 bit 反転が EBADMSG（out は size byte が 0、out の後ろの guard byte は不変、in は不変、in place は 0 で置換）、ct を 1 byte 切る・aad を 1 byte 切る・aad を空に・ct を空に。
+  乱数の key・nonce・aad・ct の 1 bit 反転（800 回）。seal・open の size が (2^32 - 1) * 64 byte を 1 byte 越えると EOVERFLOW で何も書かれない（out・tag が不変）、size_t の最大でも同じ。
+- 往復: seal の in place と out of place、open の in place と out of place、tag・out の後ろの guard byte。Poly1305 final の後に構造体が全 0。init が key を変えない。
+- 定数時間（ct-chacha.c）: key・nonce・nonce8・plaintext・aad・Poly1305 の key を CT_SECRET（block、xor（32 bit と 64 bit の counter が 2^32 を跨ぐ）、Poly1305 を block の境で分割、seal、open の良い tag と悪い tag。open の戻り値は呼び出しの後に CT_PUBLIC して分岐）。
+
+### わざと壊す確かめ（実装を git の外で壊し、FAIL を確かめ、cmp で戻した）
+
+run-unit.sh chacha が FAIL した 25 通り: 定数語 1 つ、回転 7→8、対角の index、xor の境 `>`→`>=`、xor の上限を 1 block 少なく、xor64 の境 `>`→`>=`、xor64 の上位 counter の繰り上がりを外す、xor64 の nonce の位置、
+clamp の byte 3 の mask（15→31）、clamp の byte 12 の mask（252→253）、Poly1305 の full block の bit（2^24→2^25）、最後の還元の mask の反転、h[4] からの繰り上がりの 5 倍を 4 倍、s の加算の繰り上がりを外す、
+update の block 満杯の判定 `<`→`<=`、block の乗算後の繰り上がりの 5 倍を 4 倍、aad の padding を常に付ける、長さ 2 つの入れ替え、seal の counter を 1→0、
+open の mask の反転、open の戻り値の反転、open が悪い tag でも平文を書く、tag の比較を 15 byte に、seal の size の上限 +1 block、open の size の上限 +1 block。
+定数時間は run-ct.sh chacha が FAIL した 3 通り（open で computed[0] による分岐、block で key[0] による分岐、Poly1305 final の word[0] による分岐。memcheck が条件分岐を報告）。
+全て戻した後 `cmp` で元（build/tmp/p006-mut/orig.c）と一致。
+
+**見逃し 1 件（試験で検出できない）**: AEAD の size の上限 `AEAD_MAX_BLOCKS` を 0xffffffff から 0xfffffffe に変えても PASS。差が出るのは size がちょうど (2^32 - 1) * 64 byte（約 256 GiB）の時で、
+そのような message を実際に seal・open する試験は現実的でない（上限 +1 byte が EOVERFLOW になる側だけを試験で確かめている）。試験の追加では解消できないので、そのまま残す。
+
+### 自分で決めた点（header が黙っている所）
+
+実装は前の attempt の物のままで、試験で確かめた内容の一覧（実装の comment にも書いてある）:
+
+- open は tag の比較結果を分岐に使わず、`cryc_ct_equal` の 0/1 から mask を作り、復号の各 byte を `平文 & mask` で書く（不一致なら out は 0。平文は一度も書かれない）。返す値も mask から算術で作る（EBADMSG か 0）。
+- seal・open の size の上限は blocks = ceil(size/64) <= 2^32 - 1。上を越えたら何も書かずに EOVERFLOW（open は tag の計算の前に判定）。
+- xor64 の上限は ceil(size/64) - 1 <= 2^64 - 1 - counter。size 0 は常に 0。xor の上限は size <= (2^32 - counter) * 64。
+- struct cryc_poly1305 の `used` が 16 以上の壊れた構造は防御していない（呼び出し側の不変条件）。
+- Poly1305 の最後の還元は、limb 1 だけが 2^26 を越えうる前提で 1 周の carry の後に g = h + 5 - 2^130 を作り、mask で選ぶ。
+- 試験側: Wycheproof の件数（316 と 9）を CHECK で固定した。壊す確かめの mutation script は build/tmp/p006-mut/mutate.py（git の外）。
+
+### 未実施
+
+- aarch64 Windows は check-skeleton の compile・link のみ（実行なし）。
+- AEAD の size の上限ちょうど（約 256 GiB）の message の seal・open は現実的でなく未実施（上記の見逃し 1 件）。
+- 実機・QEMU は本 Phase の範囲外。
+- coding-style §14 の見直しは自分の diff の目視まで（規約の全文の見直しの Phase で改めて）。

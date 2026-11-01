@@ -90,6 +90,14 @@ struct css_style;
  * of its own), and that box's border widths, together with that
  * box's used margins and paddings (getComputedStyle's resolved values).
  */
+/* One rectangle of an inline element's lines, in CSS pixels from the document's top left. */
+struct bind_rect {
+	double x;
+	double y;
+	double width;
+	double height;
+};
+
 struct bind_box {
 	double x;
 	double y;
@@ -225,6 +233,7 @@ typedef void (*bind_request_done)(void *context, int error, int status, const ch
  * are internal engine collaborators; the public view callback contract is in
  * browser.h and does not expose these private records.
  */
+struct bind_window;
 struct bind_host {
 	void *context;
 	void (*console)(void *context, int level, const char *text, size_t length);
@@ -237,6 +246,11 @@ struct bind_host {
 	struct css_engine *(*selector_engine)(void *context);
 	/* May copy no_generated_box proof even when the ordinary bounds query returns zero. */
 	int (*node_box)(void *context, struct dom_node *node, struct bind_box *box);
+	/*
+	 * Lists the rectangles of an inline node's lines (one for each line it takes part in): returns 1 and the count
+	 * (at most max) when the node is laid out as inline content, 0 when its one box is its rectangle.
+	 */
+	int (*node_rects)(void *context, struct dom_node *node, struct bind_rect *rects, size_t max, size_t *count);
 	/*
 	 * Appends used CSS-pixel Grid tracks to a caller-owned double vector and
 	 * reports how many implicit ones come before the explicit grid and how
@@ -258,6 +272,8 @@ struct bind_host {
 	void (*request_cancel)(void *context, void *handle);
 	int (*fetch_sync)(void *context, const char *href, struct wb_buffer *bytes, struct wb_buffer *final_url);
 	struct dom_node *(*element_at)(void *context, double x, double y);
+	/* The same for a frame's document: the top element of that window's own layout (NULL when it has none). */
+	struct dom_node *(*child_element_at)(void *context, struct bind_window *window, double x, double y);
 	/* Inserts into the active parser; ENOTSUP when no insertion point exists. */
 	int (*document_write)(void *context, const uint16_t *units, size_t length);
 	/* A media element's state, play, pause or seek to a time (BIND_MEDIA_*, ws121-p005); fills state. */
@@ -275,6 +291,7 @@ struct bind_host {
 	/* What a script's animation of a view transition pseudo-element (CSS_PSEUDO_ELEMENT_VT_*) of a name gives now, as declarations (empty: nothing). */
 	/* Sets how long the shown transition's animations have run. */
 	void (*view_transition_time)(void *context, double milliseconds);
+	void (*view_transition_time_of)(void *context, double milliseconds, int pseudo, const struct vm_string *name);
 	/* Loads, links and evaluates a module (a JSON module when json) at a URL for import(); gives its namespace, or throws. */
 	int (*import_module)(void *context, const char *url, int json, vm_value *namespace_object);
 	/* Appends the shown transition's names, "name flags" per line (1: old snapshot, 2: new snapshot). */
@@ -331,6 +348,7 @@ void bind_window_set_unloading(struct bind_window *window);
 void bind_window_set_current_script(struct bind_window *window, struct dom_node *script);
 /* Borrows active child cascade/viewport until its next DOM mutation; caller roots its Document. */
 int bind_window_child_styles(struct bind_window *window, struct css_engine **engine, int *width, int *height);
+struct dom_document *bind_window_child_document(struct bind_window *window);
 /* Appends actual inline source for primary or managed-child rendering without DOM mutation. */
 int bind_style_sheet_source(struct dom_element *element, struct wb_units *units);
 int bind_run_script(struct bind_window *window, const uint16_t *source, size_t length, const char *name);

@@ -34,7 +34,8 @@
  * ramdisk, and is the boot device when there is no ramdisk.  Once
  * interrupts are on, the boot log lists the card's partitions.
  *
- * The first Ethernet port is published as the network interface en0.
+ * The two Ethernet ports are published as the network interfaces en0
+ * (the first, GMAC0) and en1 (the second, GMAC1).
  *
  * The GPU core is brought up as far as reading its identity, from the
  * board's own description of it unless the device tree enables a node.
@@ -386,7 +387,7 @@ kern_platform_init(
 	/* Publishes the SD card beside it. */
 	attach_sd_card();
 
-	/* Publishes the Ethernet port. */
+	/* Publishes the Ethernet ports. */
 	attach_ethernet();
 
 	/* Without the ramdisk the SD card is the boot device, if there is one. */
@@ -933,32 +934,37 @@ attach_sd_card(
 }
 
 /*
- * Brings up the first Ethernet port and publishes it as en0.
+ * Brings up the two Ethernet ports and publishes them as en0 and en1.
  *
- * A board whose SoC blocks did not come up, or a port that fails, leaves
- * the board without the interface; the boot goes on.
+ * A board whose SoC blocks did not come up leaves the board without
+ * either interface; a port that fails leaves it without that one.  The
+ * boot goes on either way.
  */
 static void
 attach_ethernet(
 	void)
 {
+	unsigned port;
 	int error;
 
-	/* Needs the clocks, resets and pins the port's glue switches. */
+	/* Needs the clocks, resets and pins the ports' glue switches. */
 	if (!soc_ready) {
 		kern_logf("visionfive2: Ethernet not brought up: SoC blocks unavailable\n");
 		return;
 	}
 
-	/* Brings the port and its PHY up. */
-	error = drv_vf2_ethernet_attach(&soc_tree, VF2_DMA_DEFAULT_COHERENT);
-	if (error != 0) {
-		kern_logf("visionfive2: no Ethernet (%d)\n", error);
-		return;
-	}
+	/* Brings each port and its PHY up, the second whatever became of the first. */
+	for (port = 0; port < DRV_VF2_ETHERNET_PORTS; port++) {
+		/* Brings the port up; a failure is logged and the next port is tried. */
+		error = drv_vf2_ethernet_attach(&soc_tree, port, VF2_DMA_DEFAULT_COHERENT);
+		if (error != 0) {
+			kern_logf("visionfive2: no Ethernet en%u (%d)\n", port, error);
+			continue;
+		}
 
-	/* Succeeded: the port is a network interface. */
-	kern_logf("visionfive2: Ethernet is en0\n");
+		/* The port is a network interface. */
+		kern_logf("visionfive2: Ethernet is en%u\n", port);
+	}
 }
 
 /*

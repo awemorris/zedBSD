@@ -43,6 +43,7 @@
 static volatile sig_atomic_t stop_requested;
 
 static void stop_service(int signal_number);
+static void compose_unavailable_reason(void);
 static void log_append(int descriptor);
 static int parse_options(struct kwl_server *server, int count, char **arguments);
 static int unsigned_option(const char *text, uint64_t maximum, uint64_t *number);
@@ -294,8 +295,10 @@ main(
 	 */
 	if (error == 0) {
 		error = kwl_compose_open(&server);
-		if (error != 0)
+		if (error != 0) {
 			printf("KWL COMPOSE unavailable errno=%d\n", error);
+			compose_unavailable_reason();
+		}
 
 		/* How long the device, the wallpaper and the glyphs took (KWL STARTUP). */
 		step_start = startup_step("compose", step_start);
@@ -1966,4 +1969,26 @@ perf_value_order(
 	if (first > second)
 		return 1;
 	return 0;
+}
+
+/*
+ * Tells the person who started the compositor why it has no GPU, when the
+ * system knows: a GPU the kernel holds for root's start, or a GPU node
+ * that belongs to the graphical login's user.
+ */
+static void
+compose_unavailable_reason(
+	void)
+{
+	char reason[256];
+	int error;
+
+	/* Asks the system; one that knows no reason has nothing more to say. */
+	error = kl_backend_gpu_unavailable_reason(reason, sizeof(reason));
+	if (error != 0)
+		return;
+
+	/* The log's line, and the sentence on the terminal the desktop was started from. */
+	printf("KWL COMPOSE reason=\"%s\"\n", reason);
+	fprintf(stderr, "wayland: the desktop cannot start: %s\n", reason);
 }

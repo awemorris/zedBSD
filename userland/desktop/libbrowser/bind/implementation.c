@@ -24,6 +24,7 @@ struct implementation_state {
 
 static void implementation_trace(struct vm_heap *heap, struct vm_cell *cell);
 static int implementation_document(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int implementation_html_document(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int implementation_doctype(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 
 /* Implementation cells trace their associated graph until the last wrapper is dropped. */
@@ -33,6 +34,7 @@ static const struct vm_cell_type implementation_type = {
 /* The immutable operation table describes only the implemented creation foundation. */
 static const struct bind_operation implementation_operations[] = {
     {"createDocument", 2, implementation_document},
+    {"createHTMLDocument", 0, implementation_html_document},
     {"createDocumentType", 3, implementation_doctype},
     {NULL, 0, NULL}};
 
@@ -415,6 +417,147 @@ cleanup:
 
 	/* Succeeded: the detached XML Document is fully assembled. */
 	return 0;
+}
+
+/* Appends a new HTML element of a name to a parent node, reporting it (NULL when the heap is exhausted). */
+static struct dom_element *
+implementation_html_child(
+	struct dom_document *document,
+	struct dom_node *parent,
+	const char *name)
+{
+	struct vm_string *local;
+	struct dom_element *element;
+
+	local = vm_atom_from_ascii(document->heap, name);
+	if (local == NULL)
+		return NULL;
+	element = dom_element_create(document, DOM_NS_HTML, local, NULL);
+	if (element == NULL)
+		return NULL;
+	dom_append_child(parent, &element->node);
+	return element;
+}
+
+/* Creates a detached HTML Document: a doctype, html, head, the title when one is given, and body. */
+static int
+implementation_html_document(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct implementation_state *state;
+	struct dom_document *document;
+	struct dom_element *root;
+	struct dom_element *head;
+	struct dom_element *title;
+	struct dom_node *doctype;
+	struct dom_node *text;
+	struct vm_string *name;
+	struct vm_string *empty;
+	struct vm_string *given;
+	struct vm_cell *roots[3];
+	struct wb_units units;
+	unsigned index;
+	unsigned registered;
+	int status;
+
+	/* The receiver's native brand determines factory prototype identity. */
+	status = implementation_this(realm, this_value, &state);
+	if (status != 0)
+		return status;
+
+	/* The unpublished Document and the converted title stay live across later allocations. */
+	roots[0] = NULL;
+	roots[1] = NULL;
+	roots[2] = NULL;
+	registered = 0;
+	for (index = 0; index < 3U; index++) {
+		status = vm_heap_add_root(realm->heap, &roots[index]);
+		if (status != 0)
+			goto cleanup;
+		registered++;
+	}
+
+	/* The title is converted first, when there is one (undefined means none). */
+	given = NULL;
+	if (count > 0 && args[0] != VM_VALUE_UNDEFINED) {
+		status = bind_to_string(realm, args[0], &given);
+		if (status != 0)
+			goto cleanup;
+		roots[0] = &given->cell;
+	}
+
+	/* A detached HTML Document has no view, but its prototypes retain its relevant realm. */
+	document = dom_document_create(state->document->heap);
+	if (document == NULL) {
+		status = ENOMEM;
+		goto cleanup;
+	}
+	roots[1] = &document->node.cell;
+	document->binding_prototypes = state->prototypes;
+	document->context = state->document->context;
+
+	/* The doctype, then the root with its head (and title) and body. */
+	name = vm_atom_from_ascii(document->heap, "html");
+	empty = vm_atom_from_ascii(document->heap, "");
+	if (name == NULL || empty == NULL) {
+		status = ENOMEM;
+		goto cleanup;
+	}
+	doctype = dom_doctype_create(document, name, empty, empty);
+	if (doctype == NULL) {
+		status = ENOMEM;
+		goto cleanup;
+	}
+	dom_append_child(&document->node, doctype);
+	root = implementation_html_child(document, &document->node, "html");
+	if (root == NULL) {
+		status = ENOMEM;
+		goto cleanup;
+	}
+	head = implementation_html_child(document, &root->node, "head");
+	if (head == NULL) {
+		status = ENOMEM;
+		goto cleanup;
+	}
+	if (given != NULL) {
+		title = implementation_html_child(document, &head->node, "title");
+		if (title == NULL) {
+			status = ENOMEM;
+			goto cleanup;
+		}
+		wb_units_init(&units);
+		status = vm_string_append_units(given, &units);
+		if (status != 0) {
+			wb_units_release(&units);
+			goto cleanup;
+		}
+		text = dom_text_create(document, units.data, units.length);
+		wb_units_release(&units);
+		if (text == NULL) {
+			status = ENOMEM;
+			goto cleanup;
+		}
+		dom_append_child(&title->node, text);
+	}
+	if (implementation_html_child(document, &root->node, "body") == NULL) {
+		status = ENOMEM;
+		goto cleanup;
+	}
+
+	/* Publishes the Document's wrapper. */
+	status = bind_wrap(bind_window_of(realm), &document->node, result);
+
+cleanup:
+	/* The published wrapper or DOM tree now owns each completed cell. */
+	while (registered != 0) {
+		registered--;
+		vm_heap_remove_root(realm->heap, &roots[registered]);
+	}
+	return status;
 }
 
 /* Creates a branded DocumentType with once-only ordered DOMString conversions. */

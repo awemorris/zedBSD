@@ -395,7 +395,12 @@
     }
     function markHandled(p) { then.call(p, undefined, function () {}); return p; }
     function baseURL() {
-      var b = document.querySelector('base[href]');
+      var b = document.querySelector('base[href]'), p;
+      // The initial about:blank document of a frame takes the base URL of its creator, the frame's parent.
+      if (!b && docURL() === 'about:blank' && native.frameElement() && g.parent && g.parent !== g) {
+        try { p = g.parent.document.baseURI; } catch (e) { p = null; }
+        if (p) return p;
+      }
       if (b) { try { return new URL(b.getAttribute('href'), docURL()).href; } catch (e) { /* the document's URL */ } }
       return docURL();
     }
@@ -455,7 +460,7 @@
     var handover = null;
     function makeEntry(url, navState, classic, from) {
       return { url: url, key: uuid(), id: uuid(), navState: navState, classic: classic, scroll: null,
-        scrollMode: from ? from.scrollMode : 'auto', nhe: null, docId: docId };
+        scrollMode: from ? from.scrollMode : 'auto', nhe: null, docId: docId, noRef: false };
     }
     // The first entry follows the document's URL until it is left (the URL is set after this runs).
     var loadedURL = null;
@@ -463,6 +468,20 @@
     function leave(entry) {
       if (entry.url === null) { entry.url = docURL(); loadedURL = entry.url; }
       saveScroll(entry);
+    }
+    // The referrer policy the document has now: the last valid <meta name=referrer>.
+    function censorEntries() {
+      var metas, i, policy = '', value;
+      try {
+        metas = g.document.querySelectorAll('meta[name]');
+        for (i = 0; i < metas.length; i++) {
+          if (String(metas[i].getAttribute('name')).toLowerCase() !== 'referrer') continue;
+          value = String(metas[i].getAttribute('content') || '').trim().toLowerCase();
+          if (['no-referrer', 'no-referrer-when-downgrade', 'same-origin', 'origin', 'strict-origin', 'origin-when-cross-origin',
+            'strict-origin-when-cross-origin', 'unsafe-url'].indexOf(value) >= 0) policy = value;
+        }
+      } catch (e) { policy = ''; }
+      for (i = 0; i < entries.length; i++) if (entries[i].docId === docId) entries[i].noRef = policy === 'no-referrer';
     }
     function findEntry(key) {
       for (var i = 0; i < entries.length; i++) if (entries[i].key === key) return entries[i];
@@ -475,7 +494,8 @@
         super();
         hidden(this, '_e', entry);
       }
-      get url() { return active() ? urlOf(this._e) : ''; }
+      // The url of an entry of a document that was left under a no-referrer policy is hidden from the documents after it.
+      get url() { return !active() ? '' : this._e.noRef && this._e.docId !== docId ? null : urlOf(this._e); }
       get key() { return active() ? this._e.key : ''; }
       get id() { return active() ? this._e.id : ''; }
       get index() { return active() ? entries.indexOf(this._e) : -1; }
@@ -731,7 +751,8 @@
       var i;
       if (ongoingTracker) notifyCommitted(ongoingTracker, nhe(entries[current]));
       if (transition) transition._c.resolve();
-      fire(navigation, new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: type, from: from }));
+      // A frame still on its initial about:blank has entries and events disabled.
+      if (!initialBlank()) fire(navigation, new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: type, from: from }));
       for (i = 0; i < disposed.length; i++) fire(disposed[i], new Event('dispose'));
     }
     function queueHashChange(oldURL, newURL) {
@@ -788,7 +809,7 @@
     function initialBlank() { return native.initialBlank(); }
     // A navigation to another document in this frame: the entries as they will be, handed to the document that loads.
     function packEntry(e) {
-      return { url: urlOf(e), key: e.key, id: e.id, navState: e.navState, classic: e.classic, scrollMode: e.scrollMode, docId: e.docId };
+      return { url: urlOf(e), key: e.key, id: e.id, navState: e.navState, classic: e.classic, scrollMode: e.scrollMode, docId: e.docId, noRef: e.noRef };
     }
     function leaveForDocument(o) {
       var frame = null, list, target, index, old, h;
@@ -796,6 +817,7 @@
       if (!frame || o.formData || (o.downloadRequest !== undefined && o.downloadRequest !== null)) return false;
       old = entries[current];
       leave(old);
+      censorEntries();
       list = entries.slice();
       index = current;
       if (initialBlank()) o = { type: 'replace', url: o.url, navState: null };
@@ -829,7 +851,7 @@
     // The document that was loaded after another of its frame: the entries are the ones that were handed over.
     function unpackEntry(r) {
       return { url: r.url, key: r.key, id: r.id, navState: r.navState ? { v: structuredClone(r.navState.v) } : null,
-        classic: r.classic ? { v: structuredClone(r.classic.v) } : null, scroll: null, scrollMode: r.scrollMode, nhe: null, docId: r.docId };
+        classic: r.classic ? { v: structuredClone(r.classic.v) } : null, scroll: null, scrollMode: r.scrollMode, nhe: null, docId: r.docId, noRef: !!r.noRef };
     }
     function adoptHandover() {
       var h = handover, i, fromEntry = null;
@@ -838,7 +860,7 @@
       docId = entries[current].docId;
       entries[current].url = null;
       classicState = entries[current].classic ? deserialize(entries[current].classic) : null;
-      for (i = 0; i < entries.length; i++) if (entries[i].key === h.from.key && entries[i].id === h.from.id) fromEntry = entries[i];
+      for (i = 0; h.from && i < entries.length; i++) if (entries[i].key === h.from.key && entries[i].id === h.from.id) fromEntry = entries[i];
       if (!fromEntry && h.from) fromEntry = unpackEntry(h.from);
       return new NavigationActivation(KEY, fromEntry ? nhe(fromEntry) : null, nhe(entries[current]), h.type);
     }
@@ -1054,6 +1076,8 @@
           try { state = serialize(options.state); } catch (e) { return earlyError(e); }
         }
         if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'navigate' on 'Navigation': The document is not fully active."));
+        // The initial about:blank document cannot get a new entry.
+        if (handling === 'push' && initialBlank()) return earlyError(domError('NotSupportedError', "Failed to execute 'navigate' on 'Navigation': A push navigation is not possible from the initial about:blank document."));
         t = makeTracker(options.info, state, null);
         upcomingTracker = t;
         if (handling === 'auto' && !native.loadEnded()) handling = 'replace';
@@ -1531,6 +1555,18 @@
     }
     if (Entry) Object.setPrototypeOf(LargestContentfulPaint.prototype, Entry.prototype);
     tag(LargestContentfulPaint, 'LargestContentfulPaint');
+    // Paint Timing: first-paint and first-contentful-paint, both at the frame that first shows content (the first candidate of the LCP).
+    class PerformancePaintTiming {
+      constructor(key) { if (key !== KEY) throw new TypeError('Illegal constructor'); }
+      get name() { return this._n; }
+      get entryType() { return 'paint'; }
+      get startTime() { return this._t; }
+      get duration() { return 0; }
+      toJSON() { return { name: this.name, entryType: this.entryType, startTime: this.startTime, duration: this.duration }; }
+    }
+    if (Entry) Object.setPrototypeOf(PerformancePaintTiming.prototype, Entry.prototype);
+    tag(PerformancePaintTiming, 'PerformancePaintTiming');
+    var paints = [];
     function list(entries) {
       var l = Object.create(g.PerformanceObserverEntryList ? g.PerformanceObserverEntryList.prototype : Object.prototype);
       hidden(l, 'getEntries', function getEntries() { return entries.slice(); });
@@ -1649,6 +1685,14 @@
         reported.set(c.element, done);
         if (c.size > largest && (!best || c.size > best.size)) best = c;
       });
+      if (best && !paints.length) {
+        ['first-paint', 'first-contentful-paint'].forEach(function (n) {
+          var pe = new PerformancePaintTiming(KEY);
+          hidden(pe, '_n', n); hidden(pe, '_t', now);
+          paints.push(pe);
+          observers.forEach(function (o) { if (o._paintWanted) { o._lcpPending.push(pe); deliver(o); } });
+        });
+      }
       if (best) {
         largest = best.size;
         var e = new LargestContentfulPaint(KEY);
@@ -1656,7 +1700,7 @@
         hidden(e, '_u', best.url); hidden(e, '_e', best.element);
         hidden(e, '_l', best.url ? Math.min(loads.get(best.element) || now, now) : 0);
         if (buffer.length < 150) buffer.push(e);
-        observers.forEach(function (o) { o._lcpPending.push(e); deliver(o); });
+        observers.forEach(function (o) { if (o._lcpWanted) { o._lcpPending.push(e); deliver(o); } });
       }
     }
     // An SVG <image> has no box of its own: its place is its x, y, width and height (its natural size by default)
@@ -1705,38 +1749,47 @@
       }, true);
       schedule();
     }
-    function wanted(options) {
-      if (!options) return false;
-      if (options.type !== undefined) return String(options.type) === TYPE;
-      return Array.isArray(options.entryTypes) && options.entryTypes.indexOf(TYPE) >= 0;
+    function typesOf(options) {
+      if (!options) return [];
+      if (options.type !== undefined) return [String(options.type)];
+      return Array.isArray(options.entryTypes) ? options.entryTypes.map(String) : [];
     }
+    function wanted(options) { var t = typesOf(options); return t.indexOf(TYPE) >= 0 || t.indexOf('paint') >= 0; }
     class PerformanceObserver extends Native {
       constructor(callback) {
         super(callback);
         hidden(this, '_lcpCallback', callback);
         hidden(this, '_lcpPending', []);
         hidden(this, '_lcpQueued', false);
+        hidden(this, '_lcpWanted', false);
+        hidden(this, '_paintWanted', false);
       }
       observe(options) {
         if (!wanted(options)) return super.observe(options);
+        var types = typesOf(options), mine = this;
         if (options.type === undefined) {
-          var rest = options.entryTypes.filter(function (t) { return t !== TYPE; });
+          var rest = options.entryTypes.filter(function (t) { return t !== TYPE && t !== 'paint'; });
           if (rest.length) super.observe(Object.assign({}, options, { entryTypes: rest }));
         }
         var fresh = !observers.has(this);
         observers.add(this);
-        if (fresh && options.buffered && buffer.length) {
-          this._lcpPending.push.apply(this._lcpPending, buffer);
-          deliver(this);
+        if (types.indexOf(TYPE) >= 0) {
+          this._lcpWanted = true;
+          if (fresh && options.buffered && buffer.length) { this._lcpPending.push.apply(this._lcpPending, buffer); deliver(this); }
+        }
+        if (types.indexOf('paint') >= 0) {
+          this._paintWanted = true;
+          if (options.buffered && paints.length) { paints.forEach(function (pe) { if (mine._lcpPending.indexOf(pe) < 0) mine._lcpPending.unshift(pe); }); deliver(this); }
         }
         start();
       }
-      disconnect() { observers.delete(this); this._lcpPending = []; return super.disconnect(); }
+      disconnect() { observers.delete(this); this._lcpPending = []; this._lcpWanted = false; this._paintWanted = false; return super.disconnect(); }
       takeRecords() { var mine = this._lcpPending; this._lcpPending = []; return super.takeRecords().concat(mine); }
-      static get supportedEntryTypes() { return Object.freeze(Native.supportedEntryTypes.concat([TYPE]).sort()); }
+      static get supportedEntryTypes() { return Object.freeze(Native.supportedEntryTypes.concat([TYPE, 'paint']).filter(function (t, i, a) { return a.indexOf(t) === i; }).sort()); }
     }
     def(g, 'PerformanceObserver', PerformanceObserver);
     def(g, 'LargestContentfulPaint', LargestContentfulPaint);
+    def(g, 'PerformancePaintTiming', PerformancePaintTiming);
   })();
   // ---- Event Timing: the interface and the entry types (no entry is produced; the engine measures no event latency).
   (function () {
@@ -2221,6 +2274,8 @@
       return new g.DOMRect(x0, y0, x1 - x0, y1 - y0);
     });
   })();
+// @include plan/ws074/phase260/caret.js
+// @include plan/ws074/phase260/html-unsafe.js
   // ---- Popover: the popover attribute and showPopover(), hidePopover(), togglePopover() (the top layer is a high z-index)
   if (typeof g.Element === 'function' && !g.Element.prototype.showPopover) (function () {
     function kind(element) {

@@ -25,14 +25,12 @@
 #include "media-private.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 
 /* How many decoded pictures wait at most. */
 #define ENGINE_PICTURES		4U
@@ -47,8 +45,7 @@
  * An engine.
  *
  * Set at the open and then read only: the path or the source, the flags,
- * and the descriptor pair of the wake (the thread writes, the caller
- * polls the other end).
+ * and the caller's wake function and its context (NULL: no wake).
  *
  * The thread's own: the file, the decoders and their tracks (no sound's
  * is opened), and the time before which what decodes is passed over
@@ -68,7 +65,8 @@ struct media_engine {
 	char *path;
 	struct media_source source;
 	unsigned flags;
-	int wake[2];
+	media_wake_function wake_function;
+	void *wake_context;
 
 	struct media_file *file;
 	struct media_decoder *video;
@@ -164,17 +162,19 @@ media_log(
  * Starts playing a file, paused at its start: from its path, or (path
  * NULL) from the caller's source, whose reader the engine's thread calls.
  * Returns 0 with the engine, which is opening (MEDIA_OPENING) until the
- * wake says otherwise, or an errno value.  flags: MEDIA_SOUND.
+ * wake says otherwise, or an errno value.  flags: MEDIA_SOUND.  wake
+ * (which may be NULL) is called with wake_context as media.h says.
  */
 int
 media_engine_open(
 	const char *path,
 	const struct media_source *source,
 	unsigned flags,
+	media_wake_function wake,
+	void *wake_context,
 	struct media_engine **engine)
 {
 	struct media_engine *made;
-	int status;
 	int error;
 
 	/* The engine, nothing open yet. */
@@ -184,8 +184,8 @@ media_engine_open(
 	made = calloc(1, sizeof(*made));
 	if (made == NULL)
 		return ENOMEM;
-	made->wake[0] = -1;
-	made->wake[1] = -1;
+	made->wake_function = wake;
+	made->wake_context = wake_context;
 	made->flags = flags;
 	made->state = MEDIA_OPENING;
 	(void)pthread_mutex_init(&made->lock, NULL);
@@ -202,22 +202,6 @@ media_engine_open(
 		made->source = *source;
 	}
 
-	/* The wake: a pipe whose ends do not block. */
-	status = pipe(made->wake);
-	if (status != 0) {
-		error = errno;
-		made->wake[0] = -1;
-		made->wake[1] = -1;
-		media_engine_close(made);
-		return error;
-	}
-
-	/* Neither end blocks, nor goes to a program the caller starts. */
-	(void)fcntl(made->wake[0], F_SETFL, O_NONBLOCK);
-	(void)fcntl(made->wake[1], F_SETFL, O_NONBLOCK);
-	(void)fcntl(made->wake[0], F_SETFD, FD_CLOEXEC);
-	(void)fcntl(made->wake[1], F_SETFD, FD_CLOEXEC);
-
 	/* The thread, which opens the file. */
 	error = pthread_create(&made->thread, NULL, engine_run, made);
 	if (error != 0) {
@@ -232,35 +216,13 @@ media_engine_open(
 }
 
 /*
- * Reports the descriptor that is readable when the engine's state changed
- * or a picture came (it is emptied by media_engine_status).
- */
-int
-media_engine_wake_fd(
-	const struct media_engine *engine)
-{
-	/* The pipe's reading end. */
-	return engine->wake[0];
-}
-
-/*
- * Reads the engine's state, and empties its wake.
+ * Reads the engine's state.
  */
 void
 media_engine_status(
 	struct media_engine *engine,
 	struct media_status *status)
 {
-	char bytes[64];
-	ssize_t got;
-
-	/* The wake emptied. */
-	for (;;) {
-		got = read(engine->wake[0], bytes, sizeof(bytes));
-		if (got <= 0)
-			break;
-	}
-
 	/* The state, under the lock. */
 	memset(status, 0, sizeof(*status));
 	(void)pthread_mutex_lock(&engine->lock);
@@ -487,11 +449,7 @@ media_engine_close(
 	media_scaler_free(engine->scaler);
 	engine_drop_pictures(engine);
 
-	/* The wake, the lock, the path, the engine. */
-	if (engine->wake[0] >= 0)
-		(void)close(engine->wake[0]);
-	if (engine->wake[1] >= 0)
-		(void)close(engine->wake[1]);
+	/* The lock, the path, the engine. */
 	(void)pthread_cond_destroy(&engine->ready);
 	(void)pthread_mutex_destroy(&engine->lock);
 	free(engine->path);
@@ -1005,18 +963,14 @@ engine_stopping(
 	return quit;
 }
 
-/* Makes the wake readable (a full pipe is readable already). */
+/* Tells the caller that the state changed or a picture came (its wake function, when it gave one). */
 static void
 engine_wake(
 	struct media_engine *engine)
 {
-	ssize_t wrote;
-	char byte;
-
-	/* One byte. */
-	byte = 1;
-	wrote = write(engine->wake[1], &byte, 1U);
-	(void)wrote;
+	/* The caller's function. */
+	if (engine->wake_function != NULL)
+		engine->wake_function(engine->wake_context);
 }
 
 /* The monotonic clock in microseconds. */

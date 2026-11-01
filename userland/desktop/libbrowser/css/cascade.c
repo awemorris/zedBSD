@@ -1307,6 +1307,11 @@ cascade_compute(
 			style->direction = parent->direction;
 	}
 
+	/* An inline box whose writing mode differs from its parent's is an inline block. */
+	if (parent != NULL && pseudo == CSS_PSEUDO_ELEMENT_NONE && style->display == CSS_DISPLAY_INLINE &&
+	    (style->writing_mode != parent->writing_mode || style->writing_sideways != parent->writing_sideways))
+		style->display = CSS_DISPLAY_INLINE_BLOCK;
+
 	/* A horizontal cell of a vertical table is not laid out in a flow of its own (the table lays its cells out in its own). */
 	if (parent != NULL && style->display == CSS_DISPLAY_TABLE_CELL && style->writing_mode == CSS_WRITING_HORIZONTAL_TB &&
 	    parent->writing_mode != CSS_WRITING_HORIZONTAL_TB) {

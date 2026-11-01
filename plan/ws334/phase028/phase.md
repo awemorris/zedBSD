@@ -4,6 +4,7 @@
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §4.1〜§4.7、§6.2・§6.4・§6.5、決定 14・15・20。
 - 状態: planned（2026-11-01 p003 で作成）。
+- **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: `libkeiland.dll` を作らず static library `libkeiland.a`。export の照合（`nm -D` と `objdump -p`）の代わりに、`libkeiland/exports.map` の全部の関数が `libkeiland.a` の定義の名前（`llvm-nm --defined-only`、stub を含む）にある事を照合する。`omnigrammaton-cli.exe` は作らない（2026-11-01 ユーザーの答え: 配るのは `OmniGrammaton.exe` だけ）。`main.c` は `wWinMain` の 1 つで、console の出力（`AttachConsole` など）を作り込まない。Wine の (1)（`--js`・`--dump=layout` の bytes の比較）は試験の program（`plan/ws334/tests` の配らない .exe、p036 の `test-program` で同じ static library を link）で行う。.exe の link は p036 の `WIN32_PROGRAM` の形、libkeiland の Windows の object は pthread を参照しない（p036 の確かめを続ける）。下の本文はこの通りに読み替える。
 - 依存: p014（keys-table）・p015（frame）・p016（platform-win32）・p017（wide・input）・p025・p026・p027。
 - 担当の想定: Opus（phase-runner）を 1 回（約 14 LW。UI なので標準廉価実装手順の module にしない。使う module の約束は各 header）。
 

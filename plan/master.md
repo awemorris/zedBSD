@@ -21,25 +21,22 @@
 **判断が解決した時（2026-10-30 ユーザー「判断事項が解決されたらcockpit.mdをアップデートするようにmaster.mdに記録してください。」）**: ユーザーが答えたら、同じ turn のうちに cockpit.md を直して commit する。その項目を「ユーザーの判断を待つ事」から外し、「決まった事」の節へ一行（日付・WS・決定の要約・記録した ws.md か ticket の link）で移す。決定で変わった担当の予定・WS の進捗の表も同じ時に直す。「決まった事」の節もセッションをまたいで残し、消すのはユーザーの指示か確認の後。
 
 <!-- master:agents:start -->
-**引き継ぎ（2026-11-01 07:07、Q1、host の再起動の前）**: ユーザーが host を再起動する（Vivado などで負荷が高い）。全担当をラップアップした。次のセッションの Q1 は [cockpit.md](cockpit.md)・この表・[queue.md](queue.md) の最後の行から再開する。
-再開の手順: (1) `git log -1` と registry の SHA を確かめる。(2) 担当は同じ名前・同じ worktree で起動し、phase.md の「再開点」・「結果」から続けさせる。worktree の build/ の toolchain は main の build/ への symlink（無ければ作ってから起動）。
-(3) /tmp は tmpfs で消える（P8 の /tmp/p8out の dev148・acid148 も消える。次の自走は測り直しから）。(4) 新しい worktree の作成は 10 分ほどかかる事がある（disk の負荷）。(5) Wine の新しい prefix は `wineboot -i` で作れない（WS335 の担当は s-ws335-p002 の build/tmp/ws335-wine を写す）。
+**引き継ぎ（2026-11-01 09:49、Q1、週の使用量の残りが少ないためユーザーの指示で全担当をラップアップ）**: 次のセッションの Q1 は [cockpit.md](cockpit.md)・この表・[queue.md](queue.md) の最後の行から再開する。
+**今の割り振り（2026-11-01、ユーザーの指示）**: Bug の修正を先に。Bug の担当は VF2・Pi 5（P1）と RTX（P2）に 1 人ずつ。他は WS335（Sonnet）・WS336（Sonnet）・WS334（P7）・WS074（P8）に 1 人ずつ。
+**注意**: `~/.local/bin/python3` と `~/.local/bin/vivado` は 07:22 の再起動で空の file（何もせず 0 で終わる）。python は `/usr/bin/python3`。shell の `grep` は binary を飛ばす wrapper（NUL の検査は `/usr/bin/grep`）。大きな I/O の後は `sync`（AGENTS.md §4）。壊れた object・worktree の退避は /home/awe/zedBSD-recovery/（要らなければ消してよい）。
 
-| 担当 | 最後の Queue | WS と次の 1 手（記録の場所） | 実機 |
-| --- | --- | --- | --- |
-| P7 | q1808-i01 ラップアップ | [WS334 p021](ws334/phase021/phase.md) 統合: p021 の commit は全部 main（8a27af470）、残りは run-unit all の単独の実行（phase.md の再開点のコマンド）→ 1 つの .exe の build と libkeiland の pthread 抜き（ws.md の 2026-11-01 の決定） | — |
-| P8 | q1727-i15 ラップアップ | [WS074](ws074/ws.md) phase260 の自走（100% まで、返却のたびに同じ目標で起動し直す）。i14 の終わりで 3,107（89.49%）、Acid2・3 100% | — |
-| Sonnet | q1820〜q1824 ラップアップ（全部 uncleared、source だけ commit、試験は未作成・未実行） | WS335 p003（s-ws335-p003 の 8e06b344e、cryc-sha3.c）・p006（s-ws335-p006 の e95bacc79、cryc-chacha.c）・p008（s-ws335-p008 の 1e11aeaca、cryc-f25519.c、x25519 は未）、WS336 p004（s-ws336-p004 の 8a9d00e6d、ssh-cipher・ssh-packet）・p005（s-ws336-p005 の 4b01c55e5、ssh-key）。同じ worktree で起動し直し、各 phase.md の結果の節の「次の手」（試験を書く → 流す → 壊す確かめ）から続ける。main には未 merge | — |
-| P1〜P6 | 返却・ラップアップ | 割当なし（P3 の RTX は uncleared: G1 は (b) の設計とユーザーの判断が要る） | — |
+| 担当 | 次の Queue（pending、同じ worktree で起動し直す） | 中身 |
+| --- | --- | --- |
+| P1 | q1834 `p1-bug387` | [BUG-387](bugs/BUG-387.md): GPU の open の規則に `video` group の member を足す（ユーザーの答え）、Pi 5 の既定を rpi5gpu.start=boot（Q1 の判断）、既定の利用者を group に。Pi 5 は 10.0.30.7・SSH の利用者 user |
+| P2 | q1832 `p2-ws291g1`（返却の内容を見て） | [WS291](ws291/ws.md) p026: RTX の (b) push buffer を記録の時に組む設計（design-review を含む） |
+| P7 | q1837 `p7-ws334` | [WS334](ws334/ws.md) p025（script の core の archive と link） |
+| P8 | q1727-i18 `p8-ws074` | [WS074](ws074/ws.md) phase260 の自走（i17 の返却の再開点から） |
+| Sonnet | q1835 `s-ws335-p004` | [WS335](ws335/ws.md) p004 AES |
+| Sonnet | q1836 `s-ws336-p009` | [WS336](ws336/ws.md) p009 ssh-auth |
 
-**次のセッションの始めにする事**:
-1. P7 を同じ worktree で起動し直し、run-unit all の単独の実行から。Sonnet 5 人は同じ worktree で続きから（試験が通ってから受け入れて merge）。
-2. P8 を q1727-i16 で起動し直す。WS335・WS336 の Sonnet を各 phase の続きで起動し直す（WS335 の次の群: p004・p007・p015・p016・p025、WS336: p006・p007・p009）。
-3. WS337 shangrila: ユーザーとの質疑の続き（ws.md の「まだ決まっていない事」）。
-4. 未割当の Bug: [BUG-385](bugs/BUG-385.md)（VF2 の SD の retry を補強して ro にしない、ユーザーの指示で後で）・[BUG-386](bugs/BUG-386.md)（VF2 の en1）。
-5. 実機の今: Pi 5（10.0.30.7、SwitchBot 14C19FA80F86）と VF2（10.0.30.2、LAN は en0、SwitchBot 3 AC276E432AE6）は main b2392803f の kernel、5330 は BUG-382 を直した kernel、10.0.10.3 は Debian（RTX は vfio）。
-
-**止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd。HAL の差分の承認は無い。
+- 今日 cleared: WS334 p021・p022・p036、WS335 p003・p006・p008、WS336 p004〜p007。fixed: BUG-374・385・386（拾える試験あり）。BUG-388 は WS287 へ移管。
+- ユーザーの答えで設計の改訂が要る: WS318（libavcodec を使わない、MJPEG 無し、hardware が無ければ独自の software）、WS329（速さ優先、vector 化の Phase と intrinsics）。WS310（_OSC、デスクトップで壊すつもりで）・WS339（起動の画面を EDID に）・WS338（H.264 の速さ）は担当の割当待ち。
+- **止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd、[WS287](ws287/ws.md) EHCI の full・low speed（保留）。HAL の差分の承認は無い。
 <!-- master:agents:end -->
 
 **ユーザー不在の間の自律実行（2026-10-29 12:4x ユーザー「夜まで寝ます。しばらく質問に回答できないので、疑問で止まったphaseがあれば、質問はメッセージ表示だけしてクリック回答にはせず、別なphaseに移って作業を進めてください。」）**: 判断が要る Phase は uncleared・止めにして理由と要る判断を記録し、Q1 は問いをメッセージで書くだけ（クリックの問いにしない）。担当は別の Phase に移る。
@@ -111,7 +108,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-387 · q1825 · WS338 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1838 · WS340 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -165,7 +162,7 @@ BUG-387 · q1825 · WS338 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS302](ws302/ws.md) | MG006 | デスクトップスレッドバランサ DTB（CONFIG_DTB、sched への hint）（2026-10-27 ユーザー） | planning | p001 設計済み（main 896d3e3db、問い Q302-1〜7 待ち）。実装は約 22 LW、WS333 p011・p013 に依る |
 | [WS304](ws304/ws.md) | MG003 | Raspberry Pi 5 の外の PCIe（pcie1、M.2）と NVMe（2026-10-27 ユーザー、実機の試験はまだ） | incomplete | p001・p002 cleared（e616b4128、host 試験・build のみ）、p003 の実機は新しい SwitchBot の後、HAT の型番をユーザーに確認 |
 | [WS305](ws305/ws.md) | MG006 | デスクトップの GPU の passthrough の試験環境（Linux＋VFIO＋QEMU、素の起動と使い分け）（2026-10-27 ユーザー） | incomplete（再開待ち） | P4 はラップアップ（2026-10-27）。script と guest の image は用意済み、host（10.0.10.3）では未着手。再開は ws.md の「状態と再開点」 |
-| [WS306](ws306/ws.md) | MG006 | GPU の driver の枠組みの「ゲーム最適化」の UAPI（ON/OFF と option の文字列、GPU の名前と driver の版の取得）（2026-10-27 ユーザー） | planning | p001 の設計（使用量が戻ってから） |
+| [WS306](ws306/ws.md) | MG006 | GPU の driver の枠組みの「ゲーム最適化」の UAPI（ON/OFF と option の文字列、GPU の名前と driver の版の取得）（2026-10-27 ユーザー） | incomplete | p001 cleared（2026-11-01）、実装は担当の割当の後（Q306-7・9 は推しで決定） |
 | [WS052](ws052/ws.md) | MG003 | 電源管理（S0ix を 5330 で初めて動かす、modern standby、/dev/system） | incomplete | 再開点 p014（WS300 p002 の後）、並べて p015・p016、約 31 LW |
 | [WS068](ws068/ws.md) | MG006 | EGL と OpenGL ES（と desktop GL 3.0〜4.6）を Vulkan と display 拡張の上に実装する（Wayland とディスプレイ直接の両方）（2026-09-26・27 ユーザー指示） | incomplete・継続（空き時間だけ。受け入れは Venus のみ、2026-10-29 ユーザー） | 次は p045（sample shading、Venus の試験だけ）→ p047〜p068（GL 4.x を分けた物）→ p007 規約 |
 | [WS074](ws074/ws.md) | MG006 | zedBSD の Web ブラウザ `userland/base/zdesktop-browser`（HTML5 の layout engine → 最適化にこだわらない JavaScript engine の接続 → CSS の準拠と Chrome との比較で目標値を段階的に上げる。JS と Wasm の実行 engine を共通化。画像は libpng-compat・新しい libjpeg-compat、TLS は当面 OpenSSL）（2026-09-27 ユーザー指示） | incomplete・継続（Codex のセッション） | WPT Interop 2025 の 100%（ws074-q20261019-55 active） |
@@ -191,6 +188,8 @@ BUG-387 · q1825 · WS338 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | planning | WS318 の completed の後 |
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
 | [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
+| [WS339](ws339/ws.md) | MG004 | x86 の PC の UEFI の起動の画面の解像度を monitor（EDID）に合わせる、標準の設定の video=640x480 を外す（2026-11-01 ユーザー） | planning | p001（担当の割当はユーザーの指示で） |
+| [WS338](ws338/ws.md) | MG006 | libmedia の H.264 の software の decoder の速さの続き（WS326 から分けた、2026-11-01 ユーザー） | planning | p001 設計（担当の割当はユーザーの指示で） |
 | [WS329](ws329/ws.md) | MG006 | libmedia の H.264 の software の encoder（標準廉価実装手順、decoder と共通化）（2026-10-30 ユーザー） | planning | WS326 の completed の後に p001 設計（Opus） |
 | [WS330](ws330/ws.md) | MG006 | libmedia の H.265 の software の decoder と encoder（標準廉価実装手順、H.264 と共通化）（2026-10-30 ユーザー） | planning | WS329 の completed の後に p001 設計（Opus） |
 | [WS292](ws292/ws.md) | MG006 | GHCI の session の保護（PROT）を zedBSD の driver に（WS290 の後） | planning | p001 設計（WS290 と G29 の回答の後） |

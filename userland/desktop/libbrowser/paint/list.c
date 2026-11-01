@@ -109,6 +109,7 @@ struct list_walk {
 	int error;
 	/* While a view transition is painted: the tree, its transition, whether the named boxes are left out, and the box captured. */
 	const struct layout_tree *tree;
+	const struct layout_tree *source;
 	const struct layout_transition *transition;
 	int vt_hide;
 	int vt_capturing;
@@ -173,6 +174,8 @@ static int list_point_borders(struct list_walk *walk, const struct layout_box *b
 static void list_inline_floats(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth);
 static void list_lines(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth);
 static void list_inline_decoration(struct list_walk *walk, const struct layout_decoration *decoration, layout_unit left, layout_unit baseline);
+static void list_inline_decoration_vertical(struct list_walk *walk, const struct layout_decoration *decoration, const struct layout_line *line,
+    layout_unit left, layout_unit top, layout_unit height, int mode);
 static void list_fragment(struct list_walk *walk, const struct layout_fragment *fragment, layout_unit x, layout_unit baseline, int vertical);
 static void list_rect(struct list_walk *walk, layout_unit x, layout_unit y, layout_unit width, layout_unit height, uint32_t color);
 static void list_replaced(struct list_walk *walk, const struct layout_box *box, layout_unit x, layout_unit y);
@@ -196,6 +199,7 @@ static void list_image_item(struct list_walk *walk, const struct img_bitmap *ima
 static void list_box_background(struct list_walk *walk, const struct layout_box *box);
 static void list_canvas_background(struct list_walk *walk, const struct layout_tree *tree);
 static int list_vt_left_out(const struct list_walk *walk, const struct layout_box *box);
+static int list_vt_inline_left_out(const struct list_walk *walk, const struct layout_box *node, const struct layout_box *block);
 static void list_vt_image(struct list_walk *walk, const struct layout_box *box);
 static int list_vt_paint(struct list_walk *walk, const struct layout_box *capture);
 static void list_background_image(struct list_walk *walk, const struct layout_box *box, const struct list_area *area, const struct list_area *painting);
@@ -242,6 +246,7 @@ paint_build(
 	memset(&walk, 0, sizeof(walk));
 	walk.list = list;
 	walk.text = tree->text;
+	walk.source = tree;
 	walk.canvas_box = list_canvas(tree, &list->canvas_color);
 	walk.viewport_width = tree->viewport_width;
 	walk.viewport_height = tree->viewport_height;
@@ -1301,12 +1306,18 @@ list_lines(
 		line = &box->lines[index];
 
 		/* The inline boxes' backgrounds and borders go under the line's text. */
-		if (!box->vertical_inline) {
-			for (item = 0; item < line->decoration_count; item++)
+		for (item = 0; item < line->decoration_count; item++) {
+			if (list_vt_inline_left_out(walk, line->decorations[item].box, box))
+				continue;
+			if (box->vertical_inline)
+				list_inline_decoration_vertical(walk, &line->decorations[item], line, left, top, box->height, box->vertical_inline);
+			else
 				list_inline_decoration(walk, &line->decorations[item], left + line->left, top + line->y + line->baseline);
 		}
 		for (item = 0; item < line->fragment_count; item++) {
 			fragment = &line->fragments[item];
+			if (list_vt_inline_left_out(walk, fragment->box, box))
+				continue;
 
 			/* An inline block paints itself where the line put it. */
 			if (fragment->box->atomic) {
@@ -1376,6 +1387,93 @@ list_inline_decoration(
 	side = x1 - x0 - placed.border[CSS_LEFT] - placed.padding[CSS_LEFT] - placed.padding[CSS_RIGHT] - placed.border[CSS_RIGHT];
 	placed.width = side < 0 ? 0 : side;
 	placed.height = decoration->ascent + decoration->descent;
+	placed.margin[CSS_LEFT] = 0;
+	placed.margin[CSS_RIGHT] = 0;
+
+	/* The background color, the image over it, then the borders. */
+	if ((placed.style.background_color >> 24) != 0)
+		list_rect(walk, placed.x, placed.y,
+		    placed.border[CSS_LEFT] + placed.padding[CSS_LEFT] + placed.width + placed.padding[CSS_RIGHT] + placed.border[CSS_RIGHT],
+		    placed.border[CSS_TOP] + placed.padding[CSS_TOP] + placed.height + placed.padding[CSS_BOTTOM] + placed.border[CSS_BOTTOM],
+		    placed.style.background_color);
+	list_box_background(walk, &placed);
+	list_borders(walk, &placed);
+}
+
+/*
+ * Paints an inline box's background and borders over the span it covers on one vertical line
+ * (mode 1: the glyphs turn clockwise and the line runs down from the content box's top; mode 2: sideways-lr).
+ * The box's sides are physical: the inline axis runs along the top and bottom sides, the block axis across the left and right.
+ */
+static void
+list_inline_decoration_vertical(
+	struct list_walk *walk,
+	const struct layout_decoration *decoration,
+	const struct layout_line *line,
+	layout_unit left,
+	layout_unit top,
+	layout_unit height,
+	int mode)
+{
+	struct layout_box placed;
+	layout_unit baseline;
+	layout_unit y0;
+	layout_unit y1;
+	layout_unit side;
+	int start_side;
+	int end_side;
+
+	/* A hidden box paints nothing of its own. */
+	if (decoration->box->style.visibility == LIST_VISIBILITY_HIDDEN)
+		return;
+
+	/* The span along the line, from the content box's top (or up from its bottom), and the physical sides of its start and end. */
+	placed = *decoration->box;
+	if (mode == 2) {
+		y1 = top + height - line->left - decoration->x;
+		y0 = y1 - decoration->width;
+		start_side = CSS_BOTTOM;
+		end_side = CSS_TOP;
+		baseline = left + line->y + line->baseline + decoration->shift;
+	} else {
+		y0 = top + line->left + decoration->x;
+		y1 = y0 + decoration->width;
+		start_side = CSS_TOP;
+		end_side = CSS_BOTTOM;
+		baseline = left + line->y + line->height - line->baseline - decoration->shift;
+	}
+
+	/* The border box over the span: the margins are outside it, the ends the line lacks have no edge. */
+	if (mode == 2) {
+		if (decoration->has_left)
+			y1 -= placed.margin[start_side];
+		if (decoration->has_right)
+			y0 += placed.margin[end_side];
+	} else {
+		if (decoration->has_left)
+			y0 += placed.margin[start_side];
+		if (decoration->has_right)
+			y1 -= placed.margin[end_side];
+	}
+	if (y1 <= y0)
+		return;
+	if (!decoration->has_left) {
+		placed.border[start_side] = 0;
+		placed.padding[start_side] = 0;
+	}
+	if (!decoration->has_right) {
+		placed.border[end_side] = 0;
+		placed.padding[end_side] = 0;
+	}
+
+	/* The block extent: the ascent on the side the glyph tops face, the descent on the other. */
+	placed.x = baseline - (mode == 2 ? decoration->ascent : decoration->descent) - placed.padding[CSS_LEFT] - placed.border[CSS_LEFT];
+	placed.y = y0;
+	placed.width = decoration->ascent + decoration->descent;
+	side = y1 - y0 - placed.border[CSS_TOP] - placed.padding[CSS_TOP] - placed.padding[CSS_BOTTOM] - placed.border[CSS_BOTTOM];
+	placed.height = side < 0 ? 0 : side;
+	placed.margin[CSS_TOP] = 0;
+	placed.margin[CSS_BOTTOM] = 0;
 	placed.margin[CSS_LEFT] = 0;
 	placed.margin[CSS_RIGHT] = 0;
 
@@ -2496,6 +2594,11 @@ list_image_item(
 	if (width <= 0 || height <= 0)
 		return;
 
+	/* A vector picture is drawn at the size it is shown at. */
+	if (image->vector && walk->source != NULL && walk->source->image_variant != NULL)
+		image = walk->source->image_variant(walk->source->image_context, image, (int)(layout_to_px(width) + 0.5f),
+		    (int)(layout_to_px(height) + 0.5f));
+
 	/* The item. */
 	memset(&item, 0, sizeof(item));
 	item.kind = PAINT_IMAGE;
@@ -2943,6 +3046,10 @@ list_filter_items(
 		return;
 	item.filters = filters;
 	item.filter_count = filter_count;
+
+	/* A backdrop's color is its opacity (a fade scales it): how much of the filtered pixels cover the unfiltered ones. */
+	if (kind == PAINT_BACKDROP)
+		item.color = 0xff000000U;
 	error = wb_vector_push(&walk->list->items, &item);
 	if (error != 0)
 		walk->error = error;
@@ -2962,7 +3069,7 @@ list_fade(
 	/* Each rectangle's and text item's alpha (clips and images keep theirs). */
 	for (index = first; index < walk->list->items.count; index++) {
 		item = wb_vector_at(&walk->list->items, index);
-		if (item->kind != PAINT_RECT && item->kind != PAINT_TEXT)
+		if (item->kind != PAINT_RECT && item->kind != PAINT_TEXT && item->kind != PAINT_BACKDROP)
 			continue;
 		alpha = (uint32_t)((float)(item->color >> 24) * opacity + 0.5f);
 		item->color = (item->color & 0x00ffffffU) | (alpha << 24);
@@ -3631,7 +3738,7 @@ list_vt_named(
 {
 	if (walk->transition == NULL || box->node == NULL || box->parent == NULL)
 		return 0;
-	if (box->kind != LAYOUT_BLOCK && box->kind != LAYOUT_REPLACED)
+	if (box->kind != LAYOUT_BLOCK && box->kind != LAYOUT_REPLACED && box->kind != LAYOUT_INLINE)
 		return 0;
 	if (box->style.view_transition_name == NULL)
 		return 0;
@@ -3649,6 +3756,29 @@ list_vt_left_out(
 	if (box == walk->vt_capture)
 		return 0;
 	return list_vt_named(walk, box);
+}
+
+/*
+ * Tells whether the paint of a node of a block's lines is left out of what is painted: it is inside a named
+ * inline box that is not the one captured, or the capture is an inline box and the node is not inside it.
+ */
+static int
+list_vt_inline_left_out(
+	const struct list_walk *walk,
+	const struct layout_box *node,
+	const struct layout_box *block)
+{
+	const struct layout_box *up;
+
+	if (!walk->vt_hide)
+		return 0;
+	for (up = node; up != NULL && up != block; up = up->parent) {
+		if (up == walk->vt_capture)
+			return 0;
+		if (up->kind == LAYOUT_INLINE && list_vt_named(walk, up))
+			return 1;
+	}
+	return walk->vt_capture != NULL && walk->vt_capture->kind == LAYOUT_INLINE;
 }
 
 /* Tells whether a box or an ancestor of it up to stop is left out. */
@@ -3715,6 +3845,15 @@ list_vt_paint(
 		}
 		if (flow_index == order.count)
 			list_box(&sub, walk->tree->root, NULL, 0);
+	} else if (capture->kind == LAYOUT_INLINE) {
+		/* A named inline box: the lines of its block, with only what is inside it. */
+		const struct layout_box *block;
+
+		sub.canvas_box = NULL;
+		for (block = capture->parent; block != NULL && block->kind == LAYOUT_INLINE; block = block->parent)
+			;
+		if (block != NULL)
+			list_lines(&sub, block, block, 0);
 	} else {
 		sub.canvas_box = NULL;
 		list_box(&sub, capture, capture, 0);
@@ -3874,10 +4013,8 @@ list_vt_image(
 		live = layout_transition_box(walk->transition, walk->tree->root, entry->name, 0);
 		if (live == NULL)
 			return;
-		from.x = live->x;
-		from.y = live->y;
-		from.width = live->border[CSS_LEFT] + live->padding[CSS_LEFT] + live->width + live->padding[CSS_RIGHT] + live->border[CSS_RIGHT];
-		from.height = live->border[CSS_TOP] + live->padding[CSS_TOP] + live->height + live->padding[CSS_BOTTOM] + live->border[CSS_BOTTOM];
+		if (!layout_transition_box_rect(live, &from))
+			return;
 	}
 	list_vt_fit(box, &from, &left, &top, &width, &height);
 
@@ -3983,10 +4120,14 @@ paint_transition_capture(
 		snapshot->width = tree->viewport_width;
 		snapshot->height = tree->viewport_height;
 	} else {
-		snapshot->x = box->x;
-		snapshot->y = box->y;
-		snapshot->width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
-		snapshot->height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		struct layout_rect rect;
+
+		memset(&rect, 0, sizeof(rect));
+		layout_transition_box_rect(box, &rect);
+		snapshot->x = rect.x;
+		snapshot->y = rect.y;
+		snapshot->width = rect.width;
+		snapshot->height = rect.height;
 	}
 	paint_release(&list);
 	*out = snapshot;

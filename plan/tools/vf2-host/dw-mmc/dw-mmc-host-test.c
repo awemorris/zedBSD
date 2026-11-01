@@ -947,9 +947,24 @@ check_driver(
 	error = submit(disk, BIO_READ, 50, 4, data);
 	check(error == 0 && card.crc_errors == 0 && memcmp(data, card.memory + 50U * 512U, 2048) == 0,
 	      "seven CRC errors: the run a block at a time after its five tries, data matches");
+	card.crc_errors = 12;
+	error = submit(disk, BIO_READ, 50, 4, data);
+	drv_dw_mmc_card_info(0, &info);
+	check(error == 0 && card.crc_errors == 0 && memcmp(data, card.memory + 50U * 512U, 2048) == 0 &&
+	      info.card_clock == 12375000ULL && info.slowed && get32(card.registers, R_CLKDIV) == 2U,
+	      "twelve CRC errors: a block that failed every try moves at half the clock, 12.375 MHz, data matches");
+	fill(data, 512U, 7U);
+	card.crc_errors = 8;
+	error = submit(disk, BIO_WRITE, 70, 1, data);
+	drv_dw_mmc_card_info(0, &info);
+	check(error == 0 && card.crc_errors == 0 && memcmp(card.memory + 70U * 512U, data, 512U) == 0 &&
+	      info.card_clock == 6187500ULL && get32(card.registers, R_CLKDIV) == 4U,
+	      "eight CRC errors on a one-block write: its tries, then half the clock again, 6.19 MHz, card holds the data");
 	card.crc_errors = 1000;
 	error = submit(disk, BIO_READ, 50, 4, data);
-	check(error == EIO && completed_bytes == 0, "CRC errors on every try: EIO");
+	drv_dw_mmc_card_info(0, &info);
+	check(error == EIO && completed_bytes == 0 && info.card_clock == 6187500ULL,
+	      "CRC errors on every try: EIO, the clock no slower than 6.19 MHz");
 	card.crc_errors = 0;
 	error = submit(disk, BIO_READ, 60, 2, data);
 	check(error == 0 && memcmp(data, card.memory + 60U * 512U, 1024) == 0, "the card serves the next request");

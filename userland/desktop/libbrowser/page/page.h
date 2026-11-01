@@ -227,6 +227,7 @@ int page_title(const struct page *page, struct wb_buffer *out);
 void page_frames_init(struct page *page);
 void page_frames_release(struct page *page);
 int page_frames_checkpoint(struct page *page);
+void page_frames_size(struct page *page);
 
 /* Dynamic scripts (script.c). */
 void page_scripts_init(struct page *page);
@@ -337,10 +338,12 @@ void page_set_scroll(struct page *page, double x, double y);
 struct css_engine *page_selector_engine(void *context);
 int page_grid_tracks(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *leading, int *repeats, int *found);
 int page_node_box(void *context, struct dom_node *node, struct bind_box *box);
+int page_node_rects(void *context, struct dom_node *node, struct bind_rect *rects, size_t max, size_t *count);
 int page_view_transition(void *context, int step);
 int page_vt_pseudo_style(void *context, struct dom_element *element, int pseudo, const struct vm_string *name, struct css_style *style);
 double page_view_transition_duration(void *context);
 void page_view_transition_time(void *context, double milliseconds);
+void page_view_transition_time_of(void *context, double milliseconds, int pseudo, const struct vm_string *name);
 int page_view_transition_names(void *context, struct wb_units *units);
 void page_view_transition_style(void *context, int pseudo, const struct vm_string *name, const char *text);
 void page_view_transition_active(void *context, int active, struct vm_string **types, size_t count);
@@ -351,14 +354,16 @@ void page_box_index_release(struct page *page);
 void page_scroll_to(void *context, double x, double y);
 void page_rendering(void *context);
 struct dom_node *page_element_at(void *context, double x, double y);
+struct dom_node *page_child_element_at(void *context, struct bind_window *window, double x, double y);
 
 /* Web Storage (storage.c, ws074-p080). */
 const struct bind_storage_calls *page_storage_calls(void);
 void page_set_console(struct page *page, page_console console, void *context);
 const char *page_failure_reason(void);
 const struct img_bitmap *page_image_of(void *context, const struct dom_element *element);
-int page_svg_render(const struct dom_element *svg, struct img_bitmap *bitmap);
-int page_svg_decode(struct page *page, const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
+int page_svg_render(const struct dom_element *svg, struct img_bitmap *bitmap, int width, int height);
+int page_svg_decode(struct page *page, const unsigned char *bytes, size_t length, struct img_bitmap *bitmap, int width, int height);
+const struct img_bitmap *page_image_variant(void *context, const struct img_bitmap *image, int width, int height);
 const struct img_bitmap *page_image_by_url(void *context, const struct vm_string *url);
 void page_images_release(struct page *page);
 int page_image_host(void *context, struct dom_element *element, int restart, struct bind_image *state);

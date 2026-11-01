@@ -3,7 +3,7 @@
 # ws306-p001 設計: ゲーム最適化の UAPI と driver の識別
 
 - Parent: [WS306](../ws.md)
-- Status: in-progress（2026-10-31 P5 q1746-i01: 設計の第 3 版と design-reviewer の第 2 回の反映を commit。cleared か uncleared かは Q1 の判定）
+- Status: cleared（2026-11-01 09:50 Q1 の判定: 第 3 版と review の反映済み、ユーザーが Q306-7・Q306-9 に答えた。2026-10-31 P5 q1746-i01: 設計の第 3 版と design-reviewer の第 2 回の反映を commit。）
 - 担当: P5（kernel-and-driver-designer の役、worktree `/home/awe/zedBSD-worktrees/p5-ws306`、branch `agent/p5-ws306`、基点 main 9946e22c0）
 - 範囲: `plan/ws306/` だけ。source は変えない。
 

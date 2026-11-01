@@ -202,8 +202,10 @@ bind_frame_install(
 		host.context = parent->host.context;
 		host.console = parent->host.console;
 		host.node_box = parent->host.node_box;
+		host.node_rects = parent->host.node_rects;
 		host.user_agent = parent->host.user_agent;
 		host.checkpoint = parent->host.checkpoint;
+		host.child_element_at = parent->host.child_element_at;
 		host.frame = element;
 
 		/* Construct the independently retained owner with this complete abstract host adapter. */
@@ -211,7 +213,7 @@ bind_frame_install(
 	}
 
 	/* Blank contexts need a copied inherited fallback before publication. */
-	if (error == 0 && document->resource_url == NULL) {
+	if (error == 0 && (document->resource_url == NULL || vm_string_equal_ascii(document->resource_url, "about:srcdoc"))) {
 		error = bind_document_url(parent->document, 1, &base);
 		if (error == 0) {
 			made->base_url = vm_string_from_utf8(heap, wb_buffer_string(&base), base.length);

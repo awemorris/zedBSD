@@ -27,6 +27,7 @@ struct frame_load {
 	int ready;
 	int error;
 	int blank;
+	int srcdoc;
 };
 
 static void frame_load_release(struct frame_load *load);
@@ -291,7 +292,9 @@ frame_load_scan(
 				if (sandbox == NULL) {
 					/* Object data and iframe src are ordinary live native attributes. */
 					if (element->tag == DOM_TAG_IFRAME) {
-						source = dom_attribute_ascii(element, "src");
+						source = dom_attribute_ascii(element, "srcdoc");
+						if (source == NULL)
+							source = dom_attribute_ascii(element, "src");
 					} else {
 						source = dom_attribute_ascii(element, "data");
 					}
@@ -304,8 +307,14 @@ frame_load_scan(
 						same = vm_string_equal(source, element->child_attribute);
 					}
 
-					/* A changed attribute replaces where a script in the child navigated it. */
-					if (!element->child_load_seen || !same) {
+					/* A frame a script navigated before its first load starts at that location: its initial about:blank never loads. */
+					if (!element->child_load_seen && element->child_navigation != NULL) {
+						element->child_attribute = source;
+						error = frame_load_start(page, element, element->child_navigation);
+						if (error != 0)
+							return error;
+					} else if (!element->child_load_seen || !same) {
+						/* A changed attribute replaces where a script in the child navigated it. */
 						element->child_attribute = source;
 						element->child_navigation = NULL;
 						error = frame_load_start(page, element, source);
@@ -353,6 +362,7 @@ frame_load_start(
 	struct wb_buffer raw;
 	struct wb_buffer location;
 	int blank;
+	int srcdoc;
 	int allowed;
 	int remote;
 	int error;
@@ -362,7 +372,11 @@ frame_load_start(
 	element->child_load_seen = 1;
 	element->child_epoch++;
 	blank = 0;
-	if (element->tag == DOM_TAG_IFRAME) {
+	srcdoc = element->tag == DOM_TAG_IFRAME && dom_attribute_ascii(element, "srcdoc") != NULL;
+	if (srcdoc) {
+		/* The document is the attribute's text, given as the frame's own resource. */
+		blank = 0;
+	} else if (element->tag == DOM_TAG_IFRAME) {
 		/* Absence, empty source and about:blank use the genuine initial blank owner. */
 		if (source == NULL) {
 			blank = 1;
@@ -383,8 +397,8 @@ frame_load_start(
 	memset(&base, 0, sizeof(base));
 	memset(&parsed, 0, sizeof(parsed));
 	error = 0;
-	allowed = blank;
-	if (!blank) {
+	allowed = blank || srcdoc;
+	if (!blank && !srcdoc) {
 		error = vm_string_to_utf8(source, &raw);
 		if (error != 0)
 			goto release_urls;
@@ -435,6 +449,7 @@ release_urls:
 	load->element = element;
 	load->epoch = element->child_epoch;
 	load->blank = blank;
+	load->srcdoc = srcdoc;
 	net_response_init(&load->response);
 	error = vm_heap_add_root(page->heap, (struct vm_cell **)&load->element);
 	if (error != 0) {
@@ -448,6 +463,20 @@ release_urls:
 	remote = page_net_is_remote(wb_buffer_string(&location));
 	if (blank) {
 		load->ready = 1;
+	} else if (srcdoc) {
+		/* The srcdoc text is the response: HTML at about:srcdoc. */
+		load->ready = 1;
+		error = vm_string_to_utf8(source, &load->response.body);
+		if (error == 0)
+			error = wb_buffer_append_string(&load->response.url, "about:srcdoc");
+		if (error == 0)
+			error = wb_buffer_append_string(&load->response.content_type, "text/html");
+		if (error != 0) {
+			wb_buffer_release(&location);
+			frame_load_release(load);
+			return error;
+		}
+		load->response.status = 200;
 	} else if (remote && page->loader != NULL) {
 		error = net_loader_fetch(page->loader, wb_buffer_string(&location), frame_load_done, load, &load->request);
 		if (error != 0) {
@@ -591,7 +620,9 @@ frame_load_current(
 
 	/* Attribute edits during completion events invalidate the remaining work immediately. */
 	if (element->tag == DOM_TAG_IFRAME) {
-		source = dom_attribute_ascii(element, "src");
+		source = dom_attribute_ascii(element, "srcdoc");
+		if (source == NULL)
+			source = dom_attribute_ascii(element, "src");
 	} else {
 		source = dom_attribute_ascii(element, "data");
 	}
@@ -638,7 +669,7 @@ frame_load_activate(
 		return 0;
 
 	/* Redirects must retain the verified actual origin before any parsed DOM is exposed. */
-	if (!load->blank) {
+	if (!load->blank && !load->srcdoc) {
 		error = frame_load_allowed(load->element->node.document, &load->response.url, &allowed);
 		if (error != 0)
 			return error;
@@ -736,7 +767,7 @@ frame_load_activate(
 	current = frame_load_current(load);
 	if (window != NULL && current) {
 		/* The parent can observe this verified child navigation before its load event. */
-		if (!load->blank) {
+		if (!load->blank && !load->srcdoc) {
 			error = page_record_visited(load->page, &load->response.url);
 			if (error != 0)
 				goto release_roots;
@@ -1164,4 +1195,35 @@ frame_load_events(
 
 	/* Succeeded: the real current resource completed exactly one native load task. */
 	return 0;
+}
+
+/* Gives each loaded child its iframe's content size for its viewport, from the page's last layout. */
+static void
+frame_size_walk(
+	const struct layout_box *box)
+{
+	const struct dom_element *element;
+	const struct vm_realm *child;
+	struct bind_window *window;
+
+	for (; box != NULL; box = box->next) {
+		if (box->node != NULL && box->node->type == DOM_ELEMENT) {
+			element = (const struct dom_element *)box->node;
+			if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_IFRAME && element->child_context != NULL) {
+				child = (const struct vm_realm *)element->child_context;
+				window = child->host;
+				if (window != NULL && !window->detached)
+					bind_window_set_viewport(window, (int)layout_to_px(box->width), (int)layout_to_px(box->height));
+			}
+		}
+		frame_size_walk(box->first_child);
+	}
+}
+
+void
+page_frames_size(
+	struct page *page)
+{
+	if (page->laid_out && page->layout.root != NULL)
+		frame_size_walk(page->layout.root);
 }

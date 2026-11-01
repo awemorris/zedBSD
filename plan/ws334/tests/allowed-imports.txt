@@ -90,6 +90,32 @@ GetCurrentThread
 GetLastError
 SetLastError
 
+# kernel32: the once of the sockets' start, and the handles not inherited.
+InitOnceExecuteOnce
+SetHandleInformation
+
+# ws2_32: the start, the names, the sockets and the waits (the network's operating-system layer).
+FreeAddrInfoW
+GetAddrInfoW
+WSACleanup
+WSAGetLastError
+WSASocketW
+WSAStartup
+accept
+bind
+closesocket
+connect
+getpeername
+getsockname
+getsockopt
+htonl
+ioctlsocket
+listen
+recv
+select
+send
+setsockopt
+
 # bcrypt: the system's random generator.
 BCryptGenRandom
 
@@ -178,5 +204,24 @@ _time64
 _wassert
 longjmp
 
-# winpthreads (linked statically): the once.
+# winpthreads (linked statically): the once, and the network's and TLS's locks, conditions, threads and
+# thread keys (the loader's threads; each thread's reason of its last TLS failure).
 pthread_once
+pthread_cond_broadcast
+pthread_cond_destroy
+pthread_cond_init
+pthread_cond_signal
+pthread_cond_timedwait64
+pthread_cond_wait
+pthread_create
+pthread_getspecific
+pthread_join
+pthread_key_create
+pthread_mutex_destroy
+pthread_mutex_init
+pthread_mutex_lock
+pthread_mutex_unlock
+pthread_setspecific
+
+# UCRT: the wall clock of the loader's timed waits (timespec_get).
+_timespec64_get

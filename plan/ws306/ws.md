@@ -2,7 +2,7 @@
 
 # WS306 GPU の driver の枠組みの「ゲーム最適化」の UAPI と driver の識別
 
-- Status: planning（2026-10-27 新設。p001 の設計は第 3 版（2026-10-31）。WS291 の RDNA の最適化に依存するのは p007 だけで、他の Phase を先に進めるかは Q306-9）
+- Status: incomplete（2026-11-01 09:50 p001 cleared、実装は担当の割当の後。2026-10-27 新設。p001 の設計は第 3 版（2026-10-31）。WS291 の RDNA の最適化に依存するのは p007 だけで、他の Phase を先に進めるかは Q306-9）
 - Master: [plan/master.md](../master.md)。Primary Milestone: MG006。関係: [WS291](../ws291/ws.md)（RDNA の NGG の culling を、この flag の時だけ入れる）、[WS226](../ws226/ws.md)（Vulkan 1.3 相当と拡張の capability。VK_EXT_mesh_shader の task・mesh の feature はそちら）。
 
 ## 目標
@@ -35,7 +35,7 @@
 
 | Phase | 内容 | 依存 | 状態 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計: UAPI・latch・driver の口・識別・libvulkan の変数と関数・vulkaninfo の移植と license の監査の手順・Phase の分け方、design-reviewer 2 回 | — | in-progress（2026-10-31 P5 q1746-i01: 第 3 版と第 2 回のレビューの反映を commit、Q1 の判定待ち） |
+| [p001](phase001/phase.md) | 設計: UAPI・latch・driver の口・識別・libvulkan の変数と関数・vulkaninfo の移植と license の監査の手順・Phase の分け方、design-reviewer 2 回 | — | cleared（2026-11-01 09:50 Q1）
 | p002 | `include/uapi/gpu-game.h`・`include/drivers/gpu/gpu-game.h`・`gpu-game.c`（解読と表の検査）と host の単体試験 | p001 | planning |
 | p003 | 核: gpu.c の 3 つの ioctl・latch・登録の検査・interface の版 10・venus の識別、host の模型、guest の試験、QEMU | p002 | planning |
 | p004 | 全 driver の識別（gpu_name・版、COMMAND と同じ所で GAME の bit） | p003 | planning |
@@ -48,6 +48,8 @@
 | p011 | 規約の全文の見直し | 全部 | planning |
 
 ## Resume point
+
+- 2026-11-01 09:05 ユーザーから、Q306-9 と Q306-7 を推しの案で決める、という趣旨の答えを受けた: Q306-9 は (a) 枠組みの Phase を WS291 の RDNA の段の完了を待たずに進める（NGG を option に移す p007 と文書の p010 だけ RDNA の完了を待つ）、Q306-7 は (a) `amdrdna.vk.ngg` を診断用に残す（既定 0）。WS306 の実装は担当の割当の後に始める。
 
 - 2026-10-27: 新設。使用量が戻ったら p001 の設計から。
 - 2026-10-31 P5（q1746-i01）: design.md を main 9946e22c0 に照らして第 3 版に書き直し、design-reviewer の第 2 回（Blocker 0・Major 7・Minor 13）を全部反映した。次は Q1 の p001 の判定と Q306-7・Q306-9 の回答。推しのままなら p002 から（p007 だけ WS291 の後）。

@@ -139,6 +139,51 @@ page_node_box(
 }
 
 /*
+ * Lists the rectangles of an inline node's lines for bind_host.node_rects.
+ * Reports 0 for a node whose one box is its rectangle, or in a child Document.
+ */
+int
+page_node_rects(
+	void *context,
+	struct dom_node *node,
+	struct bind_rect *rects,
+	size_t max,
+	size_t *count)
+{
+	struct page *page;
+	struct layout_rect lines[64];
+	const struct layout_box *first;
+	size_t found;
+	size_t index;
+
+	/* Only the primary document's inline content is listed by line. */
+	page = context;
+	*count = 0;
+	if (node->document != page->document || !geometry_layout(page))
+		return 0;
+	first = geometry_first_box(page, node);
+	if (first == NULL || geometry_own_place(first))
+		return 0;
+	if (max > sizeof(lines) / sizeof(lines[0]))
+		max = sizeof(lines) / sizeof(lines[0]);
+	found = layout_node_line_rects(&page->layout, node, lines, max);
+	if (found == 0)
+		return 0;
+
+	/* The rectangles in pixels. */
+	for (index = 0; index < found; index++) {
+		rects[index].x = layout_to_px(lines[index].x);
+		rects[index].y = layout_to_px(lines[index].y);
+		rects[index].width = layout_to_px(lines[index].width);
+		rects[index].height = layout_to_px(lines[index].height);
+	}
+	*count = found;
+
+	/* Succeeded: one rectangle for each line. */
+	return 1;
+}
+
+/*
  * Copies a primary Grid's final used tracks into caller-owned native storage.
  * No borrowed arena pointer escapes the query or a later layout generation.
  */
@@ -315,6 +360,58 @@ page_element_at(
 		return NULL;
 
 	/* Succeeded: the hit resolves to an actual DOM element. */
+	return node;
+}
+
+/*
+ * Finds the top element of a frame's document at a point in that frame's viewport,
+ * in a transient layout of the document made at the frame's viewport size.
+ */
+struct dom_node *
+page_child_element_at(
+	void *context,
+	struct bind_window *window,
+	double x,
+	double y)
+{
+	struct page *page;
+	struct dom_document *document;
+	struct dom_node *node;
+	struct css_engine *engine;
+	struct layout_tree tree;
+	struct vm_cell *root;
+	int width;
+	int height;
+	int status;
+
+	page = context;
+	node = NULL;
+	document = bind_window_child_document(window);
+	if (document == NULL)
+		return NULL;
+	if (!geometry_layout(page))
+		return NULL;
+	status = bind_window_child_styles(window, &engine, &width, &height);
+	if (status != 0 || engine == NULL)
+		return NULL;
+	if (!(x >= 0.0) || !(y >= 0.0) || x >= width || y >= height)
+		return NULL;
+	if (width <= 0 || height <= 0 || width > INT_MAX / LAYOUT_UNIT || height > INT_MAX / LAYOUT_UNIT)
+		return NULL;
+
+	/* The document stays alive while its layout is made. */
+	root = &document->node.cell;
+	if (vm_heap_add_root(page->heap, &root) != 0)
+		return NULL;
+	memset(&tree, 0, sizeof(tree));
+	status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height, 0, 0, NULL);
+	if (status == 0 && bind_window_child_document(window) == document) {
+		node = layout_hit_node(&tree, (layout_unit)(x * LAYOUT_UNIT), (layout_unit)(y * LAYOUT_UNIT));
+		while (node != NULL && node->type != DOM_ELEMENT)
+			node = node->parent;
+	}
+	layout_release(&tree);
+	vm_heap_remove_root(page->heap, &root);
 	return node;
 }
 
