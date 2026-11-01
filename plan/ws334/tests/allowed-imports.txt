@@ -44,8 +44,8 @@ ceilf
 floorf
 lroundf
 
-# What libbrowser without its network and storage, with its Windows operating-system layer, leaves
-# undefined (cross-build.sh, the libbrowser-core check).
+# What libbrowser (all of it, libbrowser.a), with its Windows operating-system layer, leaves undefined
+# (cross-build.sh, the libbrowser.a check).
 
 # kernel32: files, directories and locks.
 CloseHandle
@@ -172,6 +172,7 @@ memmove
 qsort
 strchr
 strcmp
+strcpy
 strcspn
 strdup
 strerror

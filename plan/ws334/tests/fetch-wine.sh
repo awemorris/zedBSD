@@ -1,7 +1,6 @@
 #!/bin/sh
 # The network of libbrowser on Windows under Wine (x86_64): plan/ws334/tests/fetch-main.c, linked by the
-# Windows build's test-program with every static library (and net/cookie.c, which libbrowser's Windows
-# list leaves out until the instance holds the cookies), fetches a page from a server on 127.0.0.1 (the
+# Windows build's test-program with every static library, fetches a page from a server on 127.0.0.1 (the
 # host's python3 -m http.server over a directory of the test's own) with the blocking fetch and with
 # the loader, and each must give 200 and the page's size.  Wine runs under flock /tmp/zedbsd-wine.lock.
 #   sh plan/ws334/tests/fetch-wine.sh
@@ -27,7 +26,7 @@ status=0
 if ! timeout 1800 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 \
     LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" -j8 \
     test-program TEST_PROGRAM=fetch-tool \
-    TEST_PROGRAM_SOURCES="plan/ws334/tests/fetch-main.c userland/desktop/libbrowser/net/cookie.c" \
+    TEST_PROGRAM_SOURCES="plan/ws334/tests/fetch-main.c" \
     > "$out/make.log" 2>&1 || grep -q 'warning:' "$out/make.log"; then
 	echo "fetch-wine: the program did not build cleanly (log $out/make.log)"
 	tail -10 "$out/make.log"
