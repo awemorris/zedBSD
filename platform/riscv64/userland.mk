@@ -91,6 +91,9 @@ DYNAMIC_SYSROOT := $(RISCV64_SYSROOT)
 DYNAMIC_LINK_CFLAGS := $(RISCV64_USER_ARCH_FLAGS)
 DYNAMIC_LINK_LDFLAGS := $(RISCV64_USER_LDFLAGS)
 DYNAMIC_ELF_MACHINE := riscv64
+# libvulkan's thread-local variables go through the loader's __tls_get_addr (no TLS descriptors here).
+DYNAMIC_VULKAN_DEFS := -z undefs
+DYNAMIC_VULKAN_PROVIDERS = --provider $(DYNAMIC_DIR)/libwayland-client.so --provider $(DYNAMIC_DIR)/libc.so
 include platform/common/userland-dynamic.mk
 
 # The runtime's test objects the root carries on every LP64 processor: a

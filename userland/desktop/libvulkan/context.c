@@ -40,6 +40,14 @@
 #define VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H264 1U
 #define VULKAN_NATIVE_CAPSET_SYNC_COMMAND 2U
 
+/*
+ * How many context mutexes the calling thread holds through
+ * vulkan_context_lock(): a transaction begun while one is held could wait
+ * for the recording thread while that thread waits for the mutex, so the
+ * drain refuses to wait then.
+ */
+static __thread uint32_t vulkan_context_depth;
+
 /* Retains mapped transport backing through growth, rollback and descriptor close. */
 struct vulkan_transport_storage {
 	struct vulkan_transport_storage *next;
@@ -252,6 +260,9 @@ vulkan_context_close(
 	int descriptor;
 	int status;
 	VkResult error;
+
+	/* What was handed off to the recording thread is sent while the session still exists. */
+	vulkan_sender_drain(context);
 
 	/* Retains the first release failure while still returning all local ownership. */
 	error = VK_SUCCESS;
@@ -511,6 +522,9 @@ vulkan_context_execute(
 	if (writer->bytes < 8 || (writer->bytes & 3) != 0)
 		return VK_ERROR_INITIALIZATION_FAILED;
 
+	/* No submission handed off to the recording thread before this call may come after it. */
+	vulkan_sender_drain(context);
+
 	/* Serializes reply-resource reuse, not GPU fence or presentation completion. */
 	waited = vulkan_timing_start();
 	status = pthread_mutex_lock(&context->mutex);
@@ -553,6 +567,9 @@ vulkan_context_lock(
 	if (status != 0)
 		abort();
 
+	/* Counted, so a transaction begun while it is held is caught. */
+	vulkan_context_depth++;
+
 	/* Succeeded: the caller exclusively owns this session's resource transaction. */
 	return;
 }
@@ -566,6 +583,9 @@ vulkan_context_unlock(
 {
 	int status;
 
+	/* No longer counted as held by this thread. */
+	vulkan_context_depth--;
+
 	/* An unlock failure would invalidate every later assumption about session ownership. */
 	status = pthread_mutex_unlock(&context->mutex);
 	if (status != 0)
@@ -573,6 +593,17 @@ vulkan_context_unlock(
 
 	/* Succeeded: the next independent transaction may use this GPU session. */
 	return;
+}
+
+/*
+ * Reports how many context mutexes the calling thread holds through vulkan_context_lock().
+ */
+uint32_t
+vulkan_context_held(
+	void)
+{
+	/* The calling thread's own count. */
+	return vulkan_context_depth;
 }
 
 /* Maps kernel allocation pressure separately from a lost renderer session. */

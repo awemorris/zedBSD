@@ -156,15 +156,30 @@ DYNAMIC_VULKAN_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libvulk
 DYNAMIC_VKDEMO_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,vkdemo)
 DYNAMIC_VULKAN_CHECK := tools/build/check-dynamic-elf.py
 
+# libvulkan has thread-local variables (the recording thread's own mark,
+# the context locks a thread holds).  Where the compiler reaches them
+# through TLS descriptors (amd64 with DYNAMIC_VULKAN_TLS_CFLAGS, arm64 by
+# default) the library refers to nothing only the loader defines and links
+# with -z defs.  A processor whose loader has no descriptors (riscv64)
+# reaches them through __tls_get_addr, which the loader alone defines and
+# resolves for every object, and which no library the link names: there the
+# platform sets DYNAMIC_VULKAN_DEFS to -z undefs and DYNAMIC_VULKAN_PROVIDERS
+# to the libraries, and the check then requires every undefined symbol to be
+# one of theirs or one of the loader's own entry points.
+DYNAMIC_VULKAN_TLS_CFLAGS ?=
+DYNAMIC_VULKAN_DEFS ?= -z defs
+DYNAMIC_VULKAN_PROVIDERS ?=
+$(DYNAMIC_VULKAN_OBJS): DYNAMIC_CFLAGS += $(DYNAMIC_VULKAN_TLS_CFLAGS)
+
 $(DYNAMIC_DIR)/libvulkan.so: $(DYNAMIC_VULKAN_OBJS) $(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/libwayland-client.so \
 	userland/desktop/libvulkan/exports.map userland/desktop/libvulkan/api-commands.tsv \
 	$(DYNAMIC_VULKAN_CHECK)
 	$(LD) $(DYNAMIC_LINK_LDFLAGS) -shared -soname libvulkan.so --hash-style=both -Bsymbolic-functions \
- -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
+ $(DYNAMIC_VULKAN_DEFS) -z now -z relro -z separate-code -z stack-size=0x100000 \
  --version-script=userland/desktop/libvulkan/exports.map \
  $(DYNAMIC_VULKAN_OBJS) -L$(DYNAMIC_DIR) -l:libwayland-client.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine $(DYNAMIC_ELF_MACHINE) --role shared-library \
- --needed libwayland-client.so --needed libc.so --soname libvulkan.so \
+ --needed libwayland-client.so --needed libc.so --soname libvulkan.so $(DYNAMIC_VULKAN_PROVIDERS) \
  --exports-tsv userland/desktop/libvulkan/api-commands.tsv $@
 
 $(BUILD)/bin/vkdemo: $(DYNAMIC_SYSROOT)/usr/lib/crt1.o \

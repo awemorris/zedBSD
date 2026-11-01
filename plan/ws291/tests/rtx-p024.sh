@@ -3,7 +3,8 @@
 # with TIMING=1 libvulkan's submission timing (VULKAN_ZEDBSD_SUBMIT_TIMING=1, about 2 us a part: subs-N is slower
 # with it), run from the top of the tree in the machine's lock:
 #   FILES='DEST=SRC ...' [RESTORE_CKSUM=N] [ROUNDS=1] [SPIN=8] [LIST=plan/ws291/tests/rtx-ab.list] [PERF=0|1]
-#       [TIMING=0|1] [DMESG=REGEX] [SHOT=1] sh plan/ws291/tests/rtx-p024.sh OUT NAME:KERNEL[:LIBVULKAN] ...
+#       [TIMING=0|1] [DMESG=REGEX] [SHOT=1] sh plan/ws291/tests/rtx-p024.sh OUT NAME:KERNEL[:LIBVULKAN[:ENV]] ...
+# (ENV: VAR=VALUE words joined by commas, put in mview's environment for that arm, e.g. VULKAN_ZEDBSD_SUBMIT_HANDOFF=0)
 # The NVMe kernel is read back (checked against RESTORE_CKSUM), FILES put in (rtx-files.sh); then ROUNDS times, for
 # each arm, its KERNEL (and its LIBVULKAN as /lib/libvulkan.so, else FILES' one) put in (zedBSD restarted; with PERF=1 the driver's counts are on, nvrtx.vk.perf=1) and each
 # LIST line (LABEL|OPTIONS) run as a game-mode mview of SPIN seconds: "NAME LABEL fps= stages", the VULKAN TIMING
@@ -72,7 +73,9 @@ while [ $failed = 0 ] && [ $round -lt "${ROUNDS:-1}" ]; do
 		name=${arm%%:*}
 		kernel=${arm#*:}
 		lib=
+		armenv=
 		case $kernel in *:*) lib=${kernel#*:}; kernel=${kernel%%:*} ;; esac
+		case $lib in *:*) armenv=$(echo "${lib#*:}" | tr ',' ' '); lib=${lib%%:*} ;; esac
 		[ -z "$lib" ] && lib=$(printf '%s\n' ${FILES:-} | sed -n 's|^/lib/libvulkan.so=||p')
 		dir=$out/$name-$round
 		mkdir -p "$dir"
@@ -88,6 +91,8 @@ while [ $failed = 0 ] && [ $round -lt "${ROUNDS:-1}" ]; do
 		say "$name round $round kernel $(cksum < "$kernel" | cut -d' ' -f1) on zedBSD $(z 'cksum /boot/boot0/vmunix' 2>&1 | cut -d' ' -f1)${lib:+ libvulkan $(cksum < "$lib" | cut -d' ' -f1) on zedBSD $(z 'cksum /lib/libvulkan.so' 2>&1 | cut -d' ' -f1)}"
 		envtiming=
 		[ "${TIMING:-0}" = 1 ] && envtiming=VULKAN_ZEDBSD_SUBMIT_TIMING=1
+		envtiming="$envtiming $armenv"
+		[ -n "$armenv" ] && say "$name environment $armenv"
 		while IFS='|' read -r label opts; do
 			case $label in ''|'#'*) continue ;; esac
 			ZT=$((${SPIN:-8} + 60)) z 'U=$(awk -F: "\$3 == 1000 { print \$1; exit }" /etc/passwd)
@@ -99,7 +104,7 @@ dmesg | tail -n +$n | grep -E "'"${DMESG:-^$}"'" | tail -40 > /tmp/p024-dmesg.tx
 			[ -n "${DMESG:-}" ] && timeout 60 scp -O -i "$KEY" $SSHOPT "root@$ip:/tmp/p024-dmesg.txt" "$dir/$label-dmesg.txt" > /dev/null 2>&1
 			fps=$(grep -o 'fps=[0-9.]*' "$dir/$label.txt" | head -1)
 			stages=$(grep 'MVIEW STAGES' "$dir/$label.txt" | sed 's/.*frame=/frame=/' | head -1)
-			timing=$(grep 'VULKAN TIMING' "$dir/$label.txt" | tail -1 | grep -oE ' (submit|execute|context_hold|private_fence|prepare|reserve|finish|reap|command_ran|command_deferred)=[0-9/]*' | tr '\n' ' ')
+			timing=$(grep 'VULKAN TIMING' "$dir/$label.txt" | tail -1 | grep -oE ' (submit|execute|context_hold|private_fence|prepare|reserve|finish|reap|command_ran|command_deferred|handoff|handoff_room|sender_sleep|sender_wake|drain)=[0-9/]*' | tr '\n' ' ')
 			say "$name $label $fps $stages"
 			[ -n "$timing" ] && say "$name $label timing $timing"
 			grep -E 'perf' "$dir/$label.txt" | sed "s/^/$name $label /" | tee -a "$summary"

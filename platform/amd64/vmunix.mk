@@ -1180,6 +1180,8 @@ DYNAMIC_SYSROOT := $(ZEDBSD_SYSROOT_AMD64)
 DYNAMIC_LINK_CFLAGS := -m64
 DYNAMIC_LINK_LDFLAGS := -m elf_x86_64
 DYNAMIC_ELF_MACHINE := amd64
+# libvulkan's thread-local variables through TLS descriptors, which ld.so resolves (src/rtld/tlsdesc-amd64.S).
+DYNAMIC_VULKAN_TLS_CFLAGS := -mtls-dialect=gnu2
 include platform/common/userland-dynamic.mk
 
 $(DYNAMIC_DIR)/alt/rpathdep.so: \
