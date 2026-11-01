@@ -56,7 +56,7 @@
 | [p018](phase018/phase.md) | 署名の確かめ（algorithm ごと）（test-sigver） | in-progress（Sonnet） | p017、p011、p012 |
 | [p019](phase019/phase.md) | 名前（Name の比較・host と address の照合・name constraints）（test-name） | in-progress（Sonnet） | p017 |
 | [p020](phase020/phase.md) | trust store と path の検証（test-chain） | planned | p018、p019、p015 |
-| [p021](phase021/phase.md) | 誤りの queue と ERR_・RAND_bytes・OPENSSL_cleanse・CRYPTO_memcmp（test-err） | planned | p015 |
+| [p021](phase021/phase.md) | 誤りの queue と ERR_・RAND_bytes・OPENSSL_cleanse・CRYPTO_memcmp（test-err） | 実装済み・試験 PASS（2026-11-02 Sonnet 5.5。test-err posix 4590・win32 4587・ct-err 5 checks、わざと壊す 158 通りのうち 149 が check の FAIL・10 が sanitizer の中断・見逃し 3 は実行できない経路。cleared は Q1） | p015 |
 | [p022](phase022/phase.md) | 公開の X509（d2i_X509 ほか）と内部の store の生成（test-api-x509） | planned | p020、p021 |
 | [p023](phase023/phase.md) | 公開の EVP の digest・ChaCha20・Poly1305（test-api-evp） | planned | p021、p006、p002 |
 | [p024](phase024/phase.md) | 公開の EVP_PKEY（Ed25519・X25519・ML-KEM-768）（test-api-pkey） | planned | p021、p009、p008、p014 |
