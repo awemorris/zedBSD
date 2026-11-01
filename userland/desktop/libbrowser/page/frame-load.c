@@ -1470,3 +1470,65 @@ page_frames_generation(
 		return 0;
 	return frame_generation_walk(&page->document->node, 0);
 }
+
+/*
+ * Finds the node under a point of the page (document coordinates in pixels), going into the documents of the iframes
+ * it is in: the node (text too) and how far the point's document is from the page's top left (a frame's content box).
+ * NULL when the page has no box there.
+ */
+struct dom_node *
+page_hit_node(
+	struct page *page,
+	int x,
+	int y,
+	int *offset_x,
+	int *offset_y)
+{
+	const struct layout_tree *tree;
+	const struct layout_box *box;
+	const struct dom_element *element;
+	struct frame_cache_entry *entry;
+	struct dom_node *node;
+	struct dom_node *inner;
+	layout_unit px;
+	layout_unit py;
+	layout_unit left;
+	layout_unit top;
+	int depth;
+
+	*offset_x = 0;
+	*offset_y = 0;
+	if (!page->laid_out)
+		return NULL;
+	tree = &page->layout;
+	px = (layout_unit)x * LAYOUT_UNIT;
+	py = (layout_unit)y * LAYOUT_UNIT;
+	node = layout_hit_node(tree, px, py);
+	left = 0;
+	top = 0;
+	for (depth = 0; node != NULL && depth < 16; depth++) {
+		element = (const struct dom_element *)node;
+		if (node->type != DOM_ELEMENT || element->ns != DOM_NS_HTML || element->tag != DOM_TAG_IFRAME)
+			break;
+		entry = frame_cache_find(page, element);
+		box = layout_box_of(tree, node);
+		if (entry == NULL || entry->frame == NULL || entry->frame->tree == NULL || box == NULL)
+			break;
+
+		/* The point in the frame's own document: from its content box. */
+		px -= box->x + box->border[CSS_LEFT] + box->padding[CSS_LEFT];
+		py -= box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
+		if (px < 0 || py < 0 || px >= box->width || py >= box->height)
+			break;
+		tree = entry->frame->tree;
+		inner = layout_hit_node(tree, px, py);
+		if (inner == NULL)
+			break;
+		left += box->x + box->border[CSS_LEFT] + box->padding[CSS_LEFT];
+		top += box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
+		node = inner;
+	}
+	*offset_x = (int)layout_to_px(left);
+	*offset_y = (int)layout_to_px(top);
+	return node;
+}

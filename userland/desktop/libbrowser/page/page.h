@@ -356,6 +356,7 @@ struct css_engine *page_selector_engine(void *context);
 int page_grid_tracks(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *leading, int *repeats, int *found);
 int page_node_box(void *context, struct dom_node *node, struct bind_box *box);
 int page_pseudo_box(void *context, struct dom_node *node, int pseudo, struct bind_box *box);
+struct dom_node *page_hit_node(struct page *page, int x, int y, int *offset_x, int *offset_y);
 int page_frame_capture(void *context, struct dom_element *element);
 uint64_t page_frames_generation(const struct page *page);
 int page_frame_paint(void *context, const struct dom_element *element, layout_unit width, layout_unit height, float zoom, struct paint_frame **out);
