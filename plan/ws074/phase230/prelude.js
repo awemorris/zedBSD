@@ -848,6 +848,32 @@
       delete frame.__zedNav;
       return false;
     }
+    // The frame's element sets another source (the src or srcdoc attribute): the document that loads there gets this one's
+    // entries and one more, as for a navigation of its own (the old document learns of it when it is paged out).
+    g.addEventListener('pagehide', function () {
+      var frame, url, base, old, list, target, index;
+      if (unloading) return;
+      frame = native.frameElement();
+      if (!frame || frame.__zedNav || initialBlank()) return;
+      if (frame.getAttribute('srcdoc') !== null) {
+        url = 'about:srcdoc';
+      } else if (frame.getAttribute('src') !== null) {
+        try { url = new URL(frame.getAttribute('src'), frame.ownerDocument.baseURI).href; } catch (e) { return; }
+      } else {
+        url = 'about:blank';
+      }
+      old = entries[current];
+      leave(old);
+      censorEntries();
+      list = entries.slice();
+      target = makeEntry(url, null, null, old);
+      target.docId = uuid();
+      list.splice(current + 1);
+      list.push(target);
+      index = list.length - 1;
+      Object.defineProperty(frame, '__zedNav', { value: { url: url, type: 'push', current: index, from: packEntry(old), entries: list.map(packEntry) },
+        writable: true, configurable: true, enumerable: false });
+    });
     // The document that was loaded after another of its frame: the entries are the ones that were handed over.
     function unpackEntry(r) {
       return { url: r.url, key: r.key, id: r.id, navState: r.navState ? { v: structuredClone(r.navState.v) } : null,
