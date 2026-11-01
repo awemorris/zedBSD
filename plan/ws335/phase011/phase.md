@@ -64,3 +64,5 @@ git diff --check
 ## 結果
 
 （未着手）
+
+- 注意（2026-11-01 Q1、p010 の P6 の報告から）: CAVP の rec の file は record ごとに section の key が累積する。曲線を絞るには最後の section の key を使う（ECDSA SigVer・KeyPair も同じ形）。

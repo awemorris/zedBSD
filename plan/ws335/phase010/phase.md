@@ -2,7 +2,7 @@
 
 # ws335-p010: P-256・P-384 の群
 
-Status: 実装済み・試験 PASS（2026-11-01 23:12 P6。cleared は Q1。依存: p007）
+Status: cleared（2026-11-01 23:19 Q1、main 47700ab9c。main で run-unit all・run-ct ecp PASS を流し直した）。前: 実装済み・試験 PASS（2026-11-01 23:12 P6。cleared は Q1。依存: p007）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -121,3 +121,9 @@ header と phase.md の食い違い: 見つからなかった。header の `cryc
 未実施: 性能の測定、P-384 の ECDH の公開 vector（rec には無い。ecdsa の secp384r1 は p011）、P-384 の「y が小さい点」（y + p が桁あふれしない点）での y の範囲確認（P-256 の Wycheproof の y = 1 の点では確認、同じコード）、32 bit の size_t の機械での実行、aarch64 Windows の実行（build のみ、check-skeleton）、限られた stack での実行、実機・QEMU（範囲外）。
 
 commit: 下の ws.md の表と同じ commit。
+
+### Q1 の判断（2026-11-01 23:19）
+
+- 骨格の comment（FIPS 186-5 6.4.2 step 5）と header の mul_add_public の comment（step 6）の食い違いは p035 で仕様と照らして直す。
+- CAVP の rec の section の key が累積する件は p011 の phase.md に注意として書く。
+

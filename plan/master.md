@@ -29,14 +29,12 @@
 | P1 | q1864 `p1-ws324` | [WS324](ws324/ws.md) p006a: H.265 の解析の設計（標準廉価実装手順）。p001 の設計は cleared |
 | P2 | q1863 `p2-ws322` | [WS322](ws322/ws.md) p003: PowerVR の executor の NV12・plane の view・export（Video Player の GPU の道）。p002 実機の probe は cleared |
 | P5 | q1862 `p5-ws334b` | [WS334](ws334/ws.md) p028: libkeiland の Win32 その 1（.exe の窓。p023〜p027 は cleared） |
-| P6 | q1861 `p6-ws335b` | [WS335](ws335/ws.md) p010: P-256・P-384 の群（p004・p005・p007 は cleared） |
+| P6 | q1866 `p6-ws335b` | [WS335](ws335/ws.md) p011: ECC の鍵の生成・ECDH・ECDSA（p004・p005・p007・p010 は cleared） |
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
 | P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
-| P3 | q1859 `p3-ws291reg` | [WS291](ws291/ws.md) p027 の回帰（RTX と QEMU の Venus）、候補 60cf76c13 |
 | P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
-- 未 merge の branch: agent/p1-ws291p026（WS291 p027 の B-U、subs-1000 86 fps。libvulkan の芯と全 architecture の TLS の link を変えるので、RTX の desktop・Venus・arm64・riscv64 の回帰の後に merge）。
 - 起動しない pending: q1836（WS336 p009 ssh-auth）。q1837（WS334 p025）は P5 の q1843 へ、q1835（WS335 p004）は P6 の q1844 へ。
 - ユーザーの答えで設計の改訂が要る: WS318（libavcodec を使わない、MJPEG 無し、hardware が無ければ独自の software）、WS329（速さ優先、vector 化の Phase と intrinsics）。WS310（_OSC、デスクトップで壊すつもりで）・WS339（起動の画面を EDID に）・WS338（H.264 の速さ）は担当の割当待ち。
 - **止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd、[WS287](ws287/ws.md) EHCI の full・low speed（保留）。HAL の差分の承認は無い。
@@ -111,7 +109,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1865 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-390 · q1867 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -176,7 +174,7 @@ BUG-389 · q1865 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。
 | [WS242](ws242/ws.md) | MG006 | nvrtx の RTX 20/30/40 の全モデル（2026-10-15 ユーザー） | incomplete（すぐ取り組む物、2026-10-27 ユーザー「すぐ取り組むものの一つです。」） | p001 の再開点 1〜4、GTX 16・RTX 30・40 の既定の有効（ユーザーの決定、未実装） |
 | [WS250](ws250/ws.md) | MG006 | nvrtx の終わらない GPU の仕事の取り消しと復帰、system は動き続ける（2026-10-15 ユーザー） | incomplete（すぐ取り組む物、2026-10-27 ユーザー「すぐ取り組むものの一つです。」） | p001 の設計（草稿は main 64f05b2c7） |
 | [WS290](ws290/ws.md) | MG006 | zedBSD の GHCI の driver を GHCI 1.0（amaterrace-gpu の docs/ghci.md 89529de）だけに書き直す。試験は host だけ | incomplete・保留（2026-10-28 ユーザー: FPGA 側の設計が終わるまで P3 終了、再開は明示の指示。p017 は実機待ち） | q1636（P3）で p001 の design 版 4 → p002〜（host 試験、実機は VF2＋KC705 の用意の後） |
-| [WS291](ws291/ws.md) | MG006 | GPU の driver の描画の速さ（desktop 60 fps・重い 3D の model 50 fps）: AMD RDNA（P2）→ NVIDIA（P2、GPU を入れ替え）→ PowerVR（VF2、P3） | incomplete・ラップアップ（2026-11-01 ユーザーの指示、RTX の video の WS324 へ移る。再開はユーザーの指示で） | q1635（P2）で p006 の続き → p008〜p009、Linux 以上の後に WS306 |
+| [WS291](ws291/ws.md) | MG006 | GPU の driver の描画の速さ（desktop 60 fps・重い 3D の model 50 fps）: AMD RDNA（P2）→ NVIDIA（P2、GPU を入れ替え）→ PowerVR（VF2、P3） | incomplete・ラップアップ（2026-11-01 ユーザーの指示。p027 B-U は回帰の後に main に merge 済み。再開はユーザーの指示で） | q1635（P2）で p006 の続き → p008〜p009、Linux 以上の後に WS306 |
 | [WS309](ws309/ws.md) | MG006 | Keiland の compositor の thread の構成を整理し main loop が待たないようにする。ゲームモードは Vulkan display の仕様の中で | incomplete（p001〜p007・p019 cleared、P1 q1662-i05） | p008 の残り（fence 付きの task）から |
 | [WS310](ws310/ws.md) | MG004 | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる（WS301 の Q301-3、2026-10-29 ユーザー「最終的には呼ぶが、別なWSにして…今は呼ばない。」） | incomplete（p001 設計済み、問い Q310-1〜6 待ち） | p001（WS301 の後） |
 | [WS313](ws313/ws.md) | MG008 | ODROID-C5（Amlogic S905X5M）の BSP（bsp-s905x5m）と Mali の GPU で、起動して desktop を表示する（2026-10-29 ユーザー） | incomplete（全 block の code を揃えた、実装済み・実機未試験。2026-10-29 夜にユーザーが実機で試験） | 夜の試験（plan/ws313/tests/README.md）→ 直し、Mali の desktop（render pass の LOAD など） |

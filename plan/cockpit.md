@@ -9,10 +9,10 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) p001 | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | 調べと設計（q1854） | 設計 → レビュー → 実装の Phase |
 | P2 | [WS322](ws322/ws.md) p003 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | PowerVR の executor の NV12・plane の view・export（q1863）。p002: VF2 で Wave511 が起動し 6 本 68 frame が ffmpeg と一致 | p004 H.264 decode の道 |
-| P3 | [WS291](ws291/ws.md) p027 | GPU の描画の速さ（RTX の submit の hand-off） | 回帰: RTX の desktop・game mode・bench と QEMU の Venus（q1859） | PASS なら merge |
+| P3 | — | — | 返却（23:19）。WS291 p027 の amd64・Venus の回帰 PASS | 未割当 |
 | P4 | — | Bug の修正の担当 | 返却（22:48）。WS291 p027 の Pi 5・VF2 の回帰 PASS | 次の Bug の割当を待つ |
 | P5 | [WS334](ws334/ws.md) p028 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | libkeiland の Win32 その 1（窓・loop・入力・Vulkan の surface、q1862）。p026 libmedia の Windows は cleared | p029（題の帯・IME・clipboard・DPI） |
-| P6 | [WS335](ws335/ws.md) p010 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | P-256・P-384 の群（q1861）。p004 AES・p005 GCM・p007 整数は cleared | p011 ECC の鍵・ECDH・ECDSA へ |
+| P6 | [WS335](ws335/ws.md) p011 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | ECC の鍵の生成・ECDH・ECDSA（q1866）。p010 P-256・P-384 は cleared | p009 Ed25519・p012 RSA へ |
 | P7 | — | — | 返却（22:26）。WS334 p027 の QEMU の guest の確かめ PASS（画面: build/review/p027-guest/） | 未割当 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |
 
@@ -34,6 +34,8 @@
 
 - 2026-11-01 22:10: WS291 をラップアップ（ユーザーの指示）。p027（B-U）は実装と実機の段 A まで: 小さな submit 1000 回で 55.5/59.0 → 86.4/82.9 fps（NVK 75.4 を超えた）、100 回で +32 %、画は一致。回帰は未実施なので branch は未 merge。
 
+- 2026-11-01 23:19: p027（RTX の submit の hand-off）を全 architecture の回帰の後に main に merge（70b8b4521）。amd64 RTX: subs-1000 52.9 → 81.2〜83.8 fps、subs-100 466 → 622 fps、他は main と同じ、画の比較 29 一致。Venus・Pi 5・VF2 も main と同じ。
+
 ### WS074 Web ブラウザ
 
 - 2026-11-01 20:1x: origin/browser（クラウド、dev153 = 3,113 / 3,473）を main に merge（272e6c226、push 済み）。同じ基点から P8（local）も i17 で 3,125 / 3,472 まで進めていたので、縦書きの inline の装飾は P8 の版を採って衝突を解いた。host build は warning 0。merge の後の WPT の測り直しは未実施（クラウドのセッションの次の測定で分かる）。
@@ -43,6 +45,7 @@
 
 | Bug | 中身 | 状態 |
 | --- | --- | --- |
+| [BUG-389](bugs/BUG-389.md) | RTX の desktop で App Home から browser を開いても窓が出ない（main でも同じ） | open（23:19、WS291 の回帰で発見） |
 | [BUG-387](bugs/BUG-387.md) | VF2・Pi 5 で console から Wayland の desktop を起動できない | fixed（21:05）。GPU の node を root:video 0660 に、既定の利用者と Settings で作る人を video に、CI の Pi 5 は GPU on・graphical login |
 
 ## ユーザーの判断を待つ事
