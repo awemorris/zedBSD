@@ -128,6 +128,10 @@ powervr_vk_command_route(
 	case GPU_OP_CMD_RESET_QUERY_POOL:
 	case GPU_OP_CMD_BEGIN_QUERY:
 	case GPU_OP_CMD_END_QUERY:
+	case GPU_OP_CMD_BEGIN_VIDEO_CODING:
+	case GPU_OP_CMD_END_VIDEO_CODING:
+	case GPU_OP_CMD_CONTROL_VIDEO_CODING:
+	case GPU_OP_CMD_DECODE_VIDEO:
 		error = record(session, opcode, reader);
 		break;
 	default:
@@ -576,6 +580,12 @@ record(
 		refused = powervr_vk_record_transfer(session, opcode, reader, &entry);
 	} else if (powervr_vk_query_recorded(opcode)) {
 		refused = powervr_vk_record_query(session, opcode, reader, &entry);
+	} else if (powervr_vk_video_recorded(opcode)) {
+		/* A video command takes its coding scope from the command buffer's records so far. */
+		command = powervr_vk_payload(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
+		if (command != NULL && command->state != POWERVR_VK_COMMAND_RECORDING)
+			command = NULL;
+		refused = powervr_vk_record_video(session, command, opcode, reader, &entry);
 	} else if (opcode != GPU_OP_CMD_PIPELINE_BARRIER) {
 		refused = powervr_vk_record_draw(session, opcode, reader, &entry);
 	} else {
@@ -877,6 +887,10 @@ record_drop(
 		entry->objects[index] = NULL;
 	}
 	entry->object_count = 0;
+
+	/* A video command's data holds objects of its own. */
+	if (powervr_vk_video_recorded(entry->opcode))
+		powervr_vk_video_drop(entry);
 
 	/* The record's own data. */
 	kern_free(entry->data);

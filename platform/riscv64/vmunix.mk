@@ -156,6 +156,7 @@ RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/platform/visionfive2/vf2-pmu
 	src/drivers/gpu/powervr/vk/vk-pass.c \
 	src/drivers/gpu/powervr/vk/vk-transfer.c \
 	src/drivers/gpu/powervr/vk/vk-query.c \
+	src/drivers/gpu/powervr/vk/vk-video.c \
 	src/drivers/gpu/powervr/video-state.c \
 	src/drivers/gpu/powervr/render-pass.c \
 	src/drivers/gpu/powervr/render-draw.c \
@@ -163,7 +164,9 @@ RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/platform/visionfive2/vf2-pmu
 	src/drivers/gpu/powervr/vk/vk-draw.c \
 	src/drivers/gpu/i915/vk/vk-codec.c
 # The Wave511 video decoder: its glue, the Wave5 core and its instances,
-# and the test kernel's probe of it.
+# the render node's video engine on it (Vulkan Video's H.264 decode, with
+# the parameter sets written back and the slots' ties to the frame
+# buffers), and the test kernel's probe of it.
 ifneq ($(filter y,$(CONFIG_DRIVER_VF2_VPU) $(CONFIG_DRIVER_VF2_VPU_PROBE)),)
 ifneq ($(CONFIG_DRIVER_POWERVR),y)
 $(error CONFIG_DRIVER_VF2_VPU and CONFIG_DRIVER_VF2_VPU_PROBE need CONFIG_DRIVER_POWERVR=y)
@@ -171,6 +174,11 @@ endif
 RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/platform/visionfive2/vf2-vpu.c \
 	src/drivers/vpu/wave5-core.c \
 	src/drivers/vpu/wave5-decode.c
+endif
+ifeq ($(CONFIG_DRIVER_VF2_VPU),y)
+RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/vpu/wave5-video.c \
+	src/drivers/vpu/vpu-h264-ps.c \
+	src/drivers/vpu/vpu-slots.c
 endif
 ifeq ($(CONFIG_DRIVER_VF2_VPU_PROBE),y)
 RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/platform/visionfive2/vf2-vpu-probe.c

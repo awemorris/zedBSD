@@ -154,7 +154,8 @@ struct wave5_compressed {
  * One decoding instance of the firmware.
  *
  * Read and write are the bus addresses the next command reads the ring
- * between.  The compressed buffers and the task buffer exist from
+ * between, and wraps counts the pictures whose bytes went past the ring's
+ * end.  The compressed buffers and the task buffer exist from
  * drv_wave5_register() on.  An instance the firmware would not destroy
  * waits on the core's orphan list for drv_wave5_detach().
  */
@@ -168,6 +169,7 @@ struct drv_wave5_stream {
 	size_t ring_size;
 	uint32_t read;
 	uint32_t write;
+	uint32_t wraps;
 	int sequenced;
 	struct drv_wave5_sequence sequence;
 	uint32_t vlc_size;

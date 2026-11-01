@@ -28,6 +28,7 @@
 #include "drivers/platform/visionfive2/vf2-crg.h"
 #include "drivers/platform/visionfive2/vf2-pmu.h"
 #include "drivers/gpu/powervr/firmware-file.h"
+#include "drivers/vpu/wave5-video.h"
 #include "drivers/vpu/wave5.h"
 #if CONFIG_DRIVER_VF2_VPU_PROBE
 #include "drivers/platform/visionfive2/vf2-vpu-probe.h"
@@ -585,12 +586,25 @@ attach_thread(
 	void *argument)
 {
 	struct drv_wave5 *core;
+	int error;
 
 	/* Boots the decoder; the board goes on without video when it fails. */
 	(void)argument;
 	core = drv_vf2_vpu_bring_up(NULL, 0, NULL);
-	if (core == NULL)
+	if (core == NULL) {
 		kern_logf("vf2-vpu: video decoder unavailable\n");
+		return;
+	}
+
+	/* The render node's sessions opened from now on decode on it. */
+	error = drv_wave5_video_register(core);
+	if (error != 0) {
+		kern_logf("vf2-vpu: the video decoder is not the render node's engine (%d)\n", error);
+		return;
+	}
+
+	/* Succeeded: the decoder is the render node's video engine. */
+	kern_logf("vf2-vpu: video decoder is the render node's engine\n");
 }
 #endif
 

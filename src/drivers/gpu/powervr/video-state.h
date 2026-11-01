@@ -31,6 +31,7 @@
 #define POWERVR_VIDEO_QUERY_RECORD_MAX		16U
 
 uint32_t powervr_video_operations(void);
+const struct drv_powervr_video_ops *powervr_video_engine(void **engine);
 uint32_t powervr_video_capset_flags(uint32_t operations);
 uint32_t powervr_video_queue_flags(uint32_t operations);
 uint32_t powervr_video_codec_operations(uint32_t operations);

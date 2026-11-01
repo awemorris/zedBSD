@@ -32,7 +32,7 @@ for file in "$p009/frame-host.c" "$here/nv12-frames.c"; do
 		-I"$root/userland/desktop/libvulkan" -I"$p009" -c "$file" -o "$out/vk/$name.o"
 done
 objects=""
-for file in vk/vk-object vk/vk-stream vk/vk-device vk/vk-memory vk/vk-image vk/vk-query video-state image-state descriptor-set data-program vk/vk-layout vk/vk-command vk/vk-queue vk/vk-pass vk/vk-transfer vk/vk-draw render-draw render-pass render-program transfer-program compiler/shader-spirv compiler/shader-spirv-interface compiler/shader-spirv-control compiler/shader-spirv-instruction compiler/shader-backend compute-program render-sr-program compiler/usc-encode compiler/pds-encode; do
+for file in vk/vk-object vk/vk-stream vk/vk-device vk/vk-memory vk/vk-image vk/vk-query vk/vk-video video-state image-state descriptor-set data-program vk/vk-layout vk/vk-command vk/vk-queue vk/vk-pass vk/vk-transfer vk/vk-draw render-draw render-pass render-program transfer-program compiler/shader-spirv compiler/shader-spirv-interface compiler/shader-spirv-control compiler/shader-spirv-instruction compiler/shader-backend compute-program render-sr-program compiler/usc-encode compiler/pds-encode; do
 	name=${file##*/}
 	cc -std=c11 -O1 -Wall -Wextra -Werror -DPOWERVR_FORMAT_LINEAR_SAMPLED=0 -I"$root/include" -I"$root/src" \
 		-c "$p/$file.c" -o "$out/vk/$name.o"

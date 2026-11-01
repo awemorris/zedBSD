@@ -881,6 +881,24 @@ build_command_buffer(
 		} else if (powervr_vk_query_recorded(entry->opcode)) {
 			/* A query's reset, begin or end, at once: the decodes it brackets run when they are reached. */
 			powervr_vk_query_run(build->session, entry);
+		} else if (entry->opcode == GPU_OP_CMD_DECODE_VIDEO) {
+			/*
+			 * A decode: the dispatches before it run first and the
+			 * session's work finishes (a copy out of the pool may still
+			 * read the picture the engine is about to write), then the
+			 * engine decodes and the copy into the output is left
+			 * running, the session's last work.
+			 */
+			error = run_flush(build);
+			if (error == 0)
+				error = order_after(build, POWERVR_POINT_NONE);
+			if (error == 0) {
+				build->sent++;
+				error = powervr_vk_video_run(build->session, entry);
+			}
+		} else if (powervr_vk_video_recorded(entry->opcode)) {
+			/* A coding scope's begin, end or control, at once. */
+			error = powervr_vk_video_run(build->session, entry);
 		} else if (entry->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
 			/* The dispatches before it run first, then the instance's jobs in order. */
 			error = run_flush(build);

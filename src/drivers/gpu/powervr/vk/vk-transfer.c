@@ -407,6 +407,82 @@ powervr_vk_transfer_run(
 	return 0;
 }
 
+/*
+ * Copies rows of 32-bit words between two linear places of the session's
+ * memory, each with its own pitch: rows rows of row_bytes bytes (a
+ * multiple of four).  The transfer is left running, the session's last
+ * work, after the session's earlier work.
+ */
+int
+powervr_vk_transfer_rows(
+	struct powervr_vk_session *session,
+	uint64_t source,
+	uint32_t source_pitch,
+	uint64_t destination,
+	uint32_t destination_pitch,
+	uint32_t row_bytes,
+	uint32_t rows)
+{
+	struct transfer_work *work;
+	const struct powervr_format *format;
+	uint32_t width;
+	int error;
+
+	/* Whole words, in rows no wider than their pitches. */
+	if (row_bytes == 0 || rows == 0 || (row_bytes % 4U) != 0 || (source_pitch % 4U) != 0 || (destination_pitch % 4U) != 0)
+		return EINVAL;
+	if (row_bytes > source_pitch || row_bytes > destination_pitch || rows > BUFFER_ROWS_MAX)
+		return EINVAL;
+
+	/* The working state. */
+	work = kern_calloc(1, sizeof(*work));
+	if (work == NULL)
+		return ENOMEM;
+
+	/* The raw 32-bit texels on both sides, as many as a row holds. */
+	format = powervr_transfer_raw_format(4);
+	width = row_bytes / 4U;
+
+	/* The source: a linear view of its rows at their pitch. */
+	work->layout.row_pitch = source_pitch;
+	work->layout.padded_width = source_pitch / 4U;
+	work->layout.padded_height = rows;
+	work->layout.padded_depth = 1;
+	work->layout.layer_bytes = (uint64_t)source_pitch * rows;
+	work->layout.bytes = work->layout.layer_bytes;
+	work->view.format = format;
+	work->view.layout = &work->layout;
+	work->view.address = source;
+	work->view.width = width;
+	work->view.height = rows;
+	work->view.image_levels = 1;
+	work->view.level_count = 1;
+	work->view.layer_count = 1;
+	work->view.linear = 1;
+
+	/* The destination: the same rows at its own pitch, copied from the source's corner. */
+	work->request.kind = POWERVR_TRANSFER_COPY;
+	work->request.destination.format = format;
+	work->request.destination.address = destination;
+	work->request.destination.width = width;
+	work->request.destination.height = rows;
+	work->request.destination.linear = 1;
+	work->request.destination.row_pitch = destination_pitch;
+	work->request.destination.padded_width = destination_pitch / 4U;
+	work->request.area.width = width;
+	work->request.area.height = rows;
+	work->request.source = &work->view;
+
+	/* The transfer, into an image's memory rather than a buffer the host reads. */
+	error = run_one(session, &work->request, false);
+	kern_free(work);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the rows are copied once the transfer has run. */
+	return 0;
+}
+
 /* Holds an object of a kind for a record, refusing an unknown one. */
 static int
 hold(
