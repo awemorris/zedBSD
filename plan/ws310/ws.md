@@ -2,7 +2,7 @@
 
 # WS310: ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる
 
-Status: incomplete（2026-10-31: p001 設計済み、問い Q310-1〜6 待ち）
+Status: incomplete（2026-10-31: p001 設計済み。2026-11-01 09:31 問いの答えを受けた、実装は担当の割当の後、最初の試験はデスクトップ）
 Primary Milestone: MG004
 Resume point: p001 の設計を終えた（[design.md](design.md)、review は [design-review.md](design-review.md)）。次は Q1 の確かめと [user-questions.md](user-questions.md) の Q310-1〜6 の答え、その後 p002（aml-host の option）と p004（codec）を並べて。
 
@@ -14,6 +14,9 @@ WS301 の Q301-3（ACPI の _OSC を呼ぶか）への回答:「最終的には�
 
 - 2026-10-31 Q1 から、ユーザーが不在の間（昼頃まで）設計だけ進められる WS は設計を進める、という趣旨の指示を受けた。WS301 は WS333 に統合され、WS333 の CPU の枠組みと熱が main に入ったので、この WS の設計の時期になった。
 - 2026-10-31 Q1 から、ACPI 6.5 の仕様を手で置く件は cockpit の 01（WS333 の同じ件）にまとめてユーザーに聞く、Q310 の問いには「01 と同じ件」と書く、という趣旨の指示を受けた（Q310-6）。
+
+- 2026-11-01 09:31 ユーザーから次の趣旨の答えを受けた（Q310 の答え）: _OSC は確かに挙動を変えるが、ここを通らないと ACPI compliant にできない。一度 system を壊すつもりで取り組む。最初の試験は 5330 でなくデスクトップ（10.0.10.3、電源の入れ直しを Q1・担当が SwitchBot で制御できる）で行う。Q310-1 は A（受け入れが通れば既定 on、`acpi.osc=off` で戻せる）。
+- Q1 の判断（上に沿う）: Q310-2 A（先に値を読み、Thunderbolt の制御の切り替え・CMOS の書きが起きると分かったら改めて聞く）、Q310-3 A（processor の _OSC は 0）、Q310-4 A（PCIe は今は 0、WS300 と一緒に PCIe Capability と LTR）、Q310-5 A（5330 の比べの後に 1 晩）、Q310-6 は ACPI 6.5 の PDF を入手済み（/home/awe/zedBSD-specs/）。試験の順はデスクトップ（壊れてもよい前提で）→ 5330。
 
 ## 目標
 

@@ -89,19 +89,6 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - Q302-7 受け入れの数: **推し** design.md §6.4 の表（A1〜A7）。
 - 止めている物: WS302 の実装（p002 は Q302-5、p003 は Q302-2・3、p004 は Q302-1・6 の答えの後）。
 
-### 0i. WS310（ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる）の設計の問い Q310-1〜6（2026-10-31 新しい）
-
-- 背景: _OSC は OS が firmware に「この機能は OS が扱う」と伝える ACPI の method。WS310 は、ユーザーの決定（最終的には呼ぶが、別の WS で厳重に確かめる）の WS。P6 が設計（Phase p002〜p009）を書き、敵対的レビュー（major 12）を反映した（main a2aa89c4f）。HAL は変えない。全文は [ws310/user-questions.md](ws310/user-questions.md)。
-- 5330 の表で分かった危ない所: PCIe の _OSC は「問い合わせ」だけでも firmware が設定を書き、root port の hot-plug・PME の割り込みが止まり得る（試験の道具で再現）。platform の _OSC の確定は Thunderbolt の制御の切り替えと、電源を切っても残る CMOS への書きの道がある。
-- 用語: CMOS は電源を切っても残る小さな設定の記憶。PME は device が電源の復帰を知らせる仕組み。CPPC は OS が CPU の性能を指示する仕組み。
-- Q310-1 確かめが通った後、既定で呼ぶか: **推し A** 受け入れが通れば既定 on（`acpi.osc=off` で戻せる）。
-- Q310-2 5330 で platform の _OSC が Thunderbolt の制御と CMOS に触れる時: **推し A** 先に値を読み、切り替えも CMOS の書きも無い時だけ呼ぶ（起きると分かったら改めて聞く）。
-- Q310-3 processor の _OSC で申告する物: **推し A** 0（何も求めない）。
-- Q310-4 PCIe で OS が得る制御の範囲: **推し A** 今は 0。WS300 の省電力の code と一緒に PCIe Capability と LTR だけ。
-- Q310-5 一晩の耐久試験: **推し A** 5330 の比べの後に 1 晩。
-- Q310-6 ACPI 6.5 の仕様の入手: 上の 01 と同じ件（Linux の定数で実装は止まらない）。
-- 止めている物: WS310 の実装（p002 以降、答えと 5330 の割当の後）。
-
 ### 0j. WS291 p014（RTX の描画の速さ）の subs-1000 をどう進めるか（2026-10-31 新しい）
 
 - **決まった（2026-10-31 14:39）**: ユーザーから、(b) で進める、という趣旨の指示を受けた。あわせて、image の並びは普通は client が求めるが、そこをどう扱うかを問われた（Q1 の答え: swapchain の image の並びは WSI と driver が決め、読む相手の都合で compositor が読める並びを知らせる形にする。設計で確かめる）。[ws291-p023](ws291/phase023/phase.md) を新設し、P3 が設計（q1781）。
@@ -191,6 +178,8 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（[BUG-374](bugs/BUG-374.md)、RTX の cursor の色、2026-11-01 09:08 に更新）**: 直した（cursor の色の倍率の register、display の CRC で全色一致を確かめた）。目視の確かめ: 10.0.10.3 の lock の中で `sh plan/ws291/tests/rtx-cursor-view.sh build build/b374/u` → `RESTORE_CKSUM=1463007375 sh plan/ws291/tests/rtx-cursor-view.sh up OUT build/b374/u` で入れ（Q1・担当が行う）、desktop の矢印が内側 白・外枠 黒なら直った。戻しは `rtx-cursor-view.sh back OUT build/b374/u`。
 
 ## 決まった事
+
+- 2026-11-01 09:31 WS310（ACPI の _OSC）: ACPI compliant のために必ず通す、system を壊すつもりで進める、最初の試験はデスクトップ（10.0.10.3）、受け入れが通れば既定 on（[ws310/ws.md](ws310/ws.md)）。担当の割当は未。
 
 - 2026-11-01 09:30 WS329（H.264 の encoder）: 画質より速さ、SIMD は自動の vector 化の Phase と short vector 型の intrinsics。残りは Q1 が推しで（[ws329/ws.md](ws329/ws.md)）。WS338 の SIMD も同じ形。
 - 2026-11-01 09:30 WS330（H.265）: Main（8 bit）だけ、10 bit は後の WS（[ws330/ws.md](ws330/ws.md)）。
