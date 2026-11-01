@@ -52,7 +52,7 @@
 | [p014](phase014/phase.md) | K-PKE と ML-KEM-768（test-mlkem） | cleared（2026-11-02 02:04 Q1、main f533fd4cd。main で test-mlkem 8135・ct-mlkem PASS。Wycheproof 4 file 全部、暗黙の拒否も一致） | p013 |
 | [p015](phase015/phase.md) | OS の層（POSIX と Windows）（test-os） | planned（P6 q1897） | p002 |
 | [p016](phase016/phase.md) | DER の reader と PEM・base64（test-der、test-pem） | cleared（2026-11-02 01:47 Q1、main 03a1ab446。main で test-der 1967・test-pem 666 PASS。bundle 121 枚・limbo 19,587/19,589 枚が読める） | p002 |
-| [p017](phase017/phase.md) | X.509 の parse（証明書・公開鍵・署名の algorithm）（test-x509） | 実装済み・試験 PASS（2026-11-02 02:36 Sonnet。test-x509 159986 checks、posix・win32 PASS、254 通りの破壊のうち 241 通りが試験の失敗、3 通りが sanitizer、10 通りは等価。limbo 39,936 枚のうち 16 枚を拒否（1 枚は expected SUCCESS: header の nameConstraints critical 必須との食い違い）。cleared は Q1） | p016 |
+| [p017](phase017/phase.md) | X.509 の parse（証明書・公開鍵・署名の algorithm）（test-x509） | cleared（2026-11-02 02:46 Q1、main で test-x509 159986 PASS。Q1 の判断: critical でない nameConstraints も受けて処理する（RFC 5280 4.2.1.10 は CA に critical を求めるが、読む側が拒むと制約の付いた root を読めず、制約は処理すれば守れる）。header・試験は p020 の前に直す。ECDSA の parameters の header の comment は p035）。実装（2026-11-02 02:36 Sonnet。test-x509 159986 checks、posix・win32 PASS、254 通りの破壊のうち 241 通りが試験の失敗、3 通りが sanitizer、10 通りは等価。limbo 39,936 枚のうち 16 枚を拒否（1 枚は expected SUCCESS: header の nameConstraints critical 必須との食い違い）。cleared は Q1） | p016 |
 | [p018](phase018/phase.md) | 署名の確かめ（algorithm ごと）（test-sigver） | planned | p017、p011、p012 |
 | [p019](phase019/phase.md) | 名前（Name の比較・host と address の照合・name constraints）（test-name） | planned | p017 |
 | [p020](phase020/phase.md) | trust store と path の検証（test-chain） | planned | p018、p019、p015 |

@@ -2,7 +2,7 @@
 
 # ws335-p017: X.509 の parse（証明書・公開鍵・署名の algorithm）
 
-Status: 実装済み・試験 PASS（2026-11-02 02:36 Sonnet。cleared は Q1。依存: p016）
+Status: cleared（2026-11-02 02:46 Q1、main で test-x509 PASS。nameConstraints の critical の緩めは p020 の前）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

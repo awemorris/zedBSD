@@ -2,7 +2,7 @@
 
 # ws324-p006c H.265: h265sw-rps・h265sw-ps の実装（標準廉価実装手順、Sonnet 5.5 high）
 
-Status: in-progress（2026-11-02 Sonnet q1883-i01 が実装済み・試験 PASS。cleared は Q1 の受け入れ後）。前: planned（2026-11-01 P1 が p006a で作成。p006b の cleared の後に起動）
+Status: cleared（2026-11-02 02:46 Q1、main で test-rps・test-ps PASS）
 
 - WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md)（§1・§4 D1・D6・D7・D14・§5・§7・§8）。
 - 基点 BASE: `1f16db0e6`（2026-11-02 p006a 段 2 の commit 1f16db0e619a9cd23c74f7f36a8729efdba4ecb3）。前提: p006b（nal・scaling・vui）が main にある。
