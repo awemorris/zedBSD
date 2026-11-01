@@ -7,8 +7,8 @@
 
 /*
  * TLS for https (plan/ws074/design.md §9, §17 D2): the OpenSSL package's
- * libssl and libcrypto, loaded with dlopen the first time a page asks for
- * https, so that the base build does not depend on the package.  Without
+ * libssl and libcrypto, loaded through the operating-system layer the
+ * first time a page asks for https, so that the base build does not depend on the package.  Without
  * the package every https fetch fails with EPROTONOSUPPORT.
  *
  * Only the functions below are used; their types are opaque here and they
@@ -28,12 +28,11 @@
  */
 
 #include "net/net.h"
+#include "base/os-system.h"
 
-#include <dlfcn.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <limits.h>
-#include <poll.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -41,11 +40,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The names the libraries are looked for under, in order (the package's, then a host's versioned one). */
-#define TLS_LIBSSL		"libssl.so"
-#define TLS_LIBSSL_VERSIONED	"libssl.so.3"
-#define TLS_LIBCRYPTO		"libcrypto.so"
-#define TLS_LIBCRYPTO_VERSIONED	"libcrypto.so.3"
 
 /* OpenSSL's constants that are used (ssl.h, tls1.h, x509_vfy.h). */
 #define TLS_VERIFY_PEER			1
@@ -68,7 +62,7 @@
 #define TLS_CA_FILES_MAX	4U
 
 /*
- * The library's functions, found with dlsym.  The pointers are set once,
+ * The library's functions, looked up in the loaded libraries.  The pointers are set once,
  * when the libraries are loaded, and never change after.
  */
 struct tls_library {
@@ -138,6 +132,12 @@ static const struct tls_symbol tls_symbols[] = {
 	{ 1, "ERR_clear_error", offsetof(struct tls_library, err_clear_error) }
 };
 
+/* The names libcrypto is looked for under, in order (the package's, then a host's versioned one). */
+static const char *const tls_crypto_names[] = { "libcrypto.so", "libcrypto.so.3", NULL };
+
+/* The names libssl is looked for under, in the same order. */
+static const char *const tls_ssl_names[] = { "libssl.so", "libssl.so.3", NULL };
+
 /*
  * One TLS connection over a connected socket.
  */
@@ -178,9 +178,9 @@ static int tls_load_once(void);
 static void tls_make_reason_key(void);
 static char *tls_reason_buffer(void);
 static void tls_set_reason(const char *format, ...) __attribute__((format(printf, 1, 2)));
-static void *tls_open_library(const char *name, const char *versioned, int flags);
-static int tls_find(void *library, const char *name, void *pointer);
-static int tls_find_all(void *ssl, void *crypto);
+static int tls_find(struct wb_os_library *library, const char *name, void *pointer);
+static int tls_find_all(struct wb_os_library *ssl, struct wb_os_library *crypto);
+static int tls_attach(void *ssl, wb_os_socket socket);
 static int tls_make_context(void);
 static int tls_set_host(void *ssl, const char *host);
 static int tls_is_address(const char *host);
@@ -210,7 +210,7 @@ net_tls_add_ca_file(
  */
 int
 net_tls_open(
-	int descriptor,
+	wb_os_socket socket,
 	const char *host,
 	struct net_tls **tls)
 {
@@ -236,13 +236,13 @@ net_tls_open(
 		return ENOMEM;
 	}
 
-	/* The socket, the name sent (SNI) and the name checked. */
-	result = tls_library.set_fd(made->ssl, descriptor);
-	error = 0;
-	if (result != 1)
-		error = EPROTO;
-	if (error == 0)
-		error = tls_set_host(made->ssl, host);
+	/* The socket, then the name sent (SNI) and the name checked. */
+	error = tls_attach(made->ssl, socket);
+	if (error != 0) {
+		net_tls_close(made);
+		return error;
+	}
+	error = tls_set_host(made->ssl, host);
 	if (error != 0) {
 		tls_fail("setup", made->ssl, 0);
 		net_tls_close(made);
@@ -276,6 +276,7 @@ net_tls_read(
 	int count;
 	int result;
 	int reason;
+	int error;
 
 	/* One read (OpenSSL takes an int). */
 	*received = 0;
@@ -299,8 +300,11 @@ net_tls_read(
 	/* The server's close (or a close without close_notify, which the context allows). */
 	if (reason == TLS_ERROR_ZERO_RETURN)
 		return 0;
-	if (reason == TLS_ERROR_SYSCALL && errno != 0)
-		return errno;
+	if (reason == TLS_ERROR_SYSCALL) {
+		error = wb_os_socket_last_error();
+		if (error != 0)
+			return error;
+	}
 
 	/* Anything else is a broken connection. */
 	tls_fail("read", tls->ssl, result);
@@ -353,12 +357,11 @@ net_tls_write(
  */
 int
 net_tls_start(
-	int descriptor,
+	wb_os_socket socket,
 	const char *host,
 	struct net_tls **tls)
 {
 	struct net_tls *made;
-	int result;
 	int error;
 
 	/* The library and the shared context. */
@@ -379,13 +382,13 @@ net_tls_start(
 		return ENOMEM;
 	}
 
-	/* The socket, the name sent (SNI) and the name checked. */
-	result = tls_library.set_fd(made->ssl, descriptor);
-	error = 0;
-	if (result != 1)
-		error = EPROTO;
-	if (error == 0)
-		error = tls_set_host(made->ssl, host);
+	/* The socket, then the name sent (SNI) and the name checked. */
+	error = tls_attach(made->ssl, socket);
+	if (error != 0) {
+		net_tls_close(made);
+		return error;
+	}
+	error = tls_set_host(made->ssl, host);
 	if (error != 0) {
 		tls_fail("setup", made->ssl, 0);
 		net_tls_close(made);
@@ -399,13 +402,14 @@ net_tls_start(
 
 /*
  * Takes the handshake as far as the socket allows: 0 when it is done,
- * EAGAIN when it waits for the socket (*wants says for reading, POLLIN, or
- * writing, POLLOUT), EPROTO when it failed (net_tls_error says why).
+ * EAGAIN when it waits for the socket (*wants says for reading,
+ * WB_OS_POLL_READABLE, or writing, WB_OS_POLL_WRITABLE), EPROTO when it
+ * failed (net_tls_error says why).
  */
 int
 net_tls_handshake(
 	struct net_tls *tls,
-	short *wants)
+	unsigned *wants)
 {
 	int result;
 	int reason;
@@ -419,13 +423,13 @@ net_tls_handshake(
 	/* A handshake that waits for the socket. */
 	reason = tls_library.get_error(tls->ssl, result);
 	if (reason == TLS_ERROR_WANT_READ) {
-		*wants = POLLIN;
+		*wants = WB_OS_POLL_READABLE;
 		return EAGAIN;
 	}
 
 	/* Or for the socket to take more. */
 	if (reason == TLS_ERROR_WANT_WRITE) {
-		*wants = POLLOUT;
+		*wants = WB_OS_POLL_WRITABLE;
 		return EAGAIN;
 	}
 
@@ -445,11 +449,12 @@ net_tls_read_some(
 	unsigned char *bytes,
 	size_t length,
 	size_t *received,
-	short *wants)
+	unsigned *wants)
 {
 	int count;
 	int result;
 	int reason;
+	int error;
 
 	/* One read (OpenSSL takes an int). */
 	*received = 0;
@@ -466,21 +471,24 @@ net_tls_read_some(
 	/* A record that is not complete yet waits for the socket. */
 	reason = tls_library.get_error(tls->ssl, result);
 	if (reason == TLS_ERROR_WANT_READ) {
-		*wants = POLLIN;
+		*wants = WB_OS_POLL_READABLE;
 		return EAGAIN;
 	}
 
 	/* Or for the socket to take more. */
 	if (reason == TLS_ERROR_WANT_WRITE) {
-		*wants = POLLOUT;
+		*wants = WB_OS_POLL_WRITABLE;
 		return EAGAIN;
 	}
 
 	/* The server's close (or a close without close_notify, which the context allows). */
 	if (reason == TLS_ERROR_ZERO_RETURN)
 		return 0;
-	if (reason == TLS_ERROR_SYSCALL && errno != 0)
-		return errno;
+	if (reason == TLS_ERROR_SYSCALL) {
+		error = wb_os_socket_last_error();
+		if (error != 0)
+			return error;
+	}
 
 	/* Anything else is a broken connection. */
 	tls_fail("read", tls->ssl, result);
@@ -497,7 +505,7 @@ net_tls_write_some(
 	const unsigned char *bytes,
 	size_t length,
 	size_t *sent,
-	short *wants)
+	unsigned *wants)
 {
 	int count;
 	int result;
@@ -518,13 +526,13 @@ net_tls_write_some(
 	/* A write that waits for the socket. */
 	reason = tls_library.get_error(tls->ssl, result);
 	if (reason == TLS_ERROR_WANT_READ) {
-		*wants = POLLIN;
+		*wants = WB_OS_POLL_READABLE;
 		return EAGAIN;
 	}
 
 	/* Or for the socket to take more. */
 	if (reason == TLS_ERROR_WANT_WRITE) {
-		*wants = POLLOUT;
+		*wants = WB_OS_POLL_WRITABLE;
 		return EAGAIN;
 	}
 
@@ -632,30 +640,37 @@ tls_load(void)
 	return 0;
 }
 
-/* Loads the libraries and makes the context unless that was tried already (under tls_load_lock). */
+/*
+ * Loads the libraries and makes the context unless that was tried already
+ * (under tls_load_lock).  A library that loaded stays loaded, even when
+ * TLS cannot be used after all (libcrypto may have registered its own
+ * clean-up at the program's exit).
+ */
 static int
 tls_load_once(void)
 {
-	void *ssl;
-	void *crypto;
+	struct wb_os_library *ssl;
+	struct wb_os_library *crypto;
 	int error;
 
 	/* Already done, or already known to be impossible. */
 	if (tls_loaded > 0)
 		return 0;
 	if (tls_loaded < 0) {
-		tls_set_reason("the OpenSSL package is not installed");
+		tls_set_reason("cannot load the OpenSSL libraries");
 		return EPROTONOSUPPORT;
 	}
 
 	/* libcrypto first (libssl needs it), then libssl. */
 	tls_loaded = -1;
-	crypto = tls_open_library(TLS_LIBCRYPTO, TLS_LIBCRYPTO_VERSIONED, RTLD_NOW | RTLD_GLOBAL);
 	ssl = NULL;
-	if (crypto != NULL)
-		ssl = tls_open_library(TLS_LIBSSL, TLS_LIBSSL_VERSIONED, RTLD_NOW);
-	if (ssl == NULL)
+	error = wb_os_library_open(tls_crypto_names, &crypto);
+	if (error == 0)
+		error = wb_os_library_open(tls_ssl_names, &ssl);
+	if (error != 0) {
+		tls_set_reason("cannot load the OpenSSL libraries");
 		return EPROTONOSUPPORT;
+	}
 
 	/* The functions, then the context. */
 	error = tls_find_all(ssl, crypto);
@@ -669,58 +684,23 @@ tls_load_once(void)
 	return 0;
 }
 
-/*
- * Opens a library by its name, or else by its versioned name; when neither
- * opens, keeps the loader's reason for the first and returns NULL.
- */
-static void *
-tls_open_library(
-	const char *name,
-	const char *versioned,
-	int flags)
-{
-	const char *reason;
-	char first[TLS_ERROR_MAX / 2U];
-	void *library;
-
-	/* The package's name. */
-	library = dlopen(name, flags);
-	if (library != NULL)
-		return library;
-
-	/* The loader's reason, kept before the second attempt replaces it. */
-	reason = dlerror();
-	if (reason == NULL)
-		reason = "not found";
-	snprintf(first, sizeof(first), "%s", reason);
-
-	/* A host's versioned name. */
-	library = dlopen(versioned, flags);
-	if (library != NULL)
-		return library;
-
-	/* Neither: the package is missing or cannot load. */
-	tls_set_reason("cannot load the OpenSSL package's %s: %s", name, first);
-	return NULL;
-}
-
 /* Finds one function; returns 0 or ENOENT (with the reason kept). */
 static int
 tls_find(
-	void *library,
+	struct wb_os_library *library,
 	const char *name,
 	void *pointer)
 {
-	void *found;
+	wb_os_function found;
 
-	/* The symbol, stored through the pointer's address. */
-	found = dlsym(library, name);
+	/* The function. */
+	found = wb_os_library_symbol(library, name);
 	if (found == NULL) {
 		tls_set_reason("OpenSSL has no %s", name);
 		return ENOENT;
 	}
 
-	/* Stored through the member's address (a data pointer copied into a function pointer). */
+	/* Stored through the member's address (every member is a function pointer of the same size). */
 	memcpy(pointer, &found, sizeof(found));
 	return 0;
 }
@@ -728,10 +708,10 @@ tls_find(
 /* Finds every function the connections use (tls_symbols). */
 static int
 tls_find_all(
-	void *ssl,
-	void *crypto)
+	struct wb_os_library *ssl,
+	struct wb_os_library *crypto)
 {
-	void *library;
+	struct wb_os_library *library;
 	size_t index;
 	int error;
 
@@ -746,6 +726,37 @@ tls_find_all(
 	}
 
 	/* Succeeded: every function is there. */
+	return 0;
+}
+
+/*
+ * Gives a connection its socket, as the int SSL_set_fd takes.  Returns 0,
+ * or EPROTO with the reason kept.
+ */
+static int
+tls_attach(
+	void *ssl,
+	wb_os_socket socket)
+{
+	int descriptor;
+	int result;
+	int error;
+
+	/* The socket's int. */
+	error = wb_os_socket_descriptor(socket, &descriptor);
+	if (error != 0) {
+		tls_set_reason("setup: the socket does not fit OpenSSL's descriptor (error %d)", error);
+		return EPROTO;
+	}
+
+	/* The connection reads and writes it. */
+	result = tls_library.set_fd(ssl, descriptor);
+	if (result != 1) {
+		tls_fail("setup", ssl, 0);
+		return EPROTO;
+	}
+
+	/* Succeeded: the connection has its socket. */
 	return 0;
 }
 

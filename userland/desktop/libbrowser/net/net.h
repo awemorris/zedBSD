@@ -21,6 +21,7 @@
 #define KEILAND_BROWSER_NET_H
 
 #include "base/base.h"
+#include "base/os-net.h"
 
 /*
  * A parsed URL.
@@ -175,11 +176,11 @@ void net_response_release(struct net_response *response);
 /* TLS for https (tls.c): the OpenSSL package's library, loaded when first needed. */
 struct net_tls;
 int net_tls_add_ca_file(const char *path);
-int net_tls_open(int descriptor, const char *host, struct net_tls **tls);
-int net_tls_start(int descriptor, const char *host, struct net_tls **tls);
-int net_tls_handshake(struct net_tls *tls, short *wants);
-int net_tls_read_some(struct net_tls *tls, unsigned char *bytes, size_t length, size_t *received, short *wants);
-int net_tls_write_some(struct net_tls *tls, const unsigned char *bytes, size_t length, size_t *sent, short *wants);
+int net_tls_open(wb_os_socket socket, const char *host, struct net_tls **tls);
+int net_tls_start(wb_os_socket socket, const char *host, struct net_tls **tls);
+int net_tls_handshake(struct net_tls *tls, unsigned *wants);
+int net_tls_read_some(struct net_tls *tls, unsigned char *bytes, size_t length, size_t *received, unsigned *wants);
+int net_tls_write_some(struct net_tls *tls, const unsigned char *bytes, size_t length, size_t *sent, unsigned *wants);
 int net_tls_read(struct net_tls *tls, unsigned char *bytes, size_t length, size_t *received);
 int net_tls_write(struct net_tls *tls, const unsigned char *bytes, size_t length);
 int net_tls_pending(const struct net_tls *tls);
@@ -200,8 +201,8 @@ const struct net_response *net_request_response(const struct net_request *reques
 size_t net_loader_pending(const struct net_loader *loader);
 void net_loader_wait(struct net_loader *loader, int timeout);
 void net_loader_dispatch(struct net_loader *loader);
-int net_loader_watch(struct net_loader *loader, int descriptor);
-void net_loader_unwatch(struct net_loader *loader, int descriptor);
+/* Called from a media engine's thread too: sets a mark and wakes the network thread, nothing more. */
+void net_loader_ring(struct net_loader *loader);
 int net_loader_takes(const char *location);
 
 /* Cookies (cookie.c). */

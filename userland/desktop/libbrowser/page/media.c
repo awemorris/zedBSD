@@ -11,9 +11,9 @@
  * (userland/desktop/libmedia/media.h), which reads and decodes on a thread
  * of its own.  A local file is read by its path; an http or https source is
  * fetched whole with the page's loader (without one, at once) and a data:
- * URL decoded, and the engine reads those bytes from memory.  The
- * loader's network thread watches each engine's wake and tells the view,
- * which then follows the engines: when an engine
+ * URL decoded, and the engine reads those bytes from memory.  Each
+ * engine's wake rings the page's loader (net_loader_ring), whose network
+ * thread tells the view, which then follows the engines: when an engine
  * opened, the video's size lays the page out again; when a picture came,
  * it is scaled into the element's bitmap (the video's own size, which the
  * layout and the painting take as an <img>'s) and the page is painted
@@ -61,7 +61,7 @@
  * One media element of the page: the element (a root of the page's heap
  * while the page lives), its location, the request while it is fetched,
  * the bytes it was fetched into (the engine's source reads them), the
- * engine (and whether the loader watches its wake), the state last read
+ * engine, the state last read
  * from it, the element's picture, whether it failed, whether it is muted
  * and asked to play, and the page.
  */
@@ -72,7 +72,6 @@ struct page_media {
 	unsigned char *bytes;
 	size_t length;
 	struct media_engine *engine;
-	int watched;
 	struct media_status status;
 	struct img_bitmap bitmap;
 	int failed;
@@ -91,7 +90,8 @@ static int media_add(struct page *page, struct dom_element *element);
 static int media_source(struct page *page, const struct dom_element *element, struct wb_buffer *location, int *found);
 static int media_attribute(struct page *page, const struct dom_element *element, const char *name, struct wb_buffer *value);
 static void media_start(struct page_media *media, const unsigned char *bytes, size_t length);
-static void media_watch(struct page_media *media);
+static media_wake_function media_waker(const struct page_media *media);
+static void media_wake(void *context);
 static void media_arrived(void *context, struct net_request *request);
 static int media_read_at(void *context, uint64_t offset, void *data, size_t size);
 static struct page_media *media_find(const struct page *page, const struct dom_element *element);
@@ -126,11 +126,9 @@ page_media_release(
 	struct page_media *media;
 	size_t index;
 
-	/* Each media: its wake no longer watched, its engine (its thread reads the bytes), then the rest. */
+	/* Each media: its engine (its thread reads the bytes and rings the loader; it stops before the loader goes), then the rest. */
 	for (index = 0; index < page->media.count; index++) {
 		media = *(struct page_media **)wb_vector_at(&page->media, index);
-		if (media->watched)
-			net_loader_unwatch(page->loader, media_engine_wake_fd(media->engine));
 		media_engine_close(media->engine);
 		net_request_cancel(media->request);
 		vm_heap_remove_root(page->heap, (struct vm_cell **)&media->element);
@@ -640,14 +638,9 @@ media_start(
 
 	/* A local file by its path. */
 	if (bytes == NULL) {
-		error = media_engine_open(media->location, NULL, flags, &media->engine);
-		if (error != 0) {
+		error = media_engine_open(media->location, NULL, flags, media_waker(media), media, &media->engine);
+		if (error != 0)
 			media->failed = 1;
-			return;
-		}
-
-		/* Its wake, watched. */
-		media_watch(media);
 		return;
 	}
 
@@ -670,41 +663,39 @@ media_start(
 	source.read_at = media_read_at;
 	source.size = length;
 	source.context = media;
-	error = media_engine_open(NULL, &source, flags, &media->engine);
-	if (error != 0) {
+	error = media_engine_open(NULL, &source, flags, media_waker(media), media, &media->engine);
+	if (error != 0)
 		media->failed = 1;
-		return;
-	}
-
-	/* Its wake, watched. */
-	media_watch(media);
 }
 
 /*
- * Has the page's loader watch an engine's wake, so that the view hears
- * when the engine's state changed or a picture came (without a loader, or
- * without room, the engine is followed when the view runs for other
- * reasons, a playing one at its pictures' times).
+ * Gives the wake an engine of a media calls: one that rings the page's
+ * loader, so that the view hears when the engine's state changed or a
+ * picture came (without a loader, none: the engine is followed when the
+ * view runs for other reasons, a playing one at its pictures' times).
  */
-static void
-media_watch(
-	struct page_media *media)
+static media_wake_function
+media_waker(
+	const struct page_media *media)
 {
-	int descriptor;
-	int error;
-
-	/* A page without a loader has nobody to watch. */
+	/* A page without a loader has nobody to ring. */
 	if (media->page->loader == NULL)
-		return;
+		return NULL;
 
-	/* The engine's wake. */
-	descriptor = media_engine_wake_fd(media->engine);
-	error = net_loader_watch(media->page->loader, descriptor);
-	if (error != 0)
-		return;
+	/* The loader's ring. */
+	return media_wake;
+}
 
-	/* Succeeded: it is unwatched before the engine closes. */
-	media->watched = 1;
+/* An engine's wake, on the engine's thread or the page's: the page's loader is rung. */
+static void
+media_wake(
+	void *context)
+{
+	struct page_media *media;
+
+	/* The loader tells the view. */
+	media = context;
+	net_loader_ring(media->page->loader);
 }
 
 /* The loader's callback for a media: its body played when it came (a failure, or a status other than 2xx, marks it failed). */

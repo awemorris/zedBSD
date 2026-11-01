@@ -12,6 +12,8 @@ LIBBROWSER_DIR := userland/desktop/libbrowser
 LIBBROWSER_OS_SOURCES := $(LIBBROWSER_DIR)/base/os-system-posix.c \
 	$(LIBBROWSER_DIR)/base/os-file-posix.c \
 	$(LIBBROWSER_DIR)/base/os-time-posix.c
+# Its network (sockets, the waits and the wakers), which only the engine uses.
+LIBBROWSER_OS_NET_SOURCES := $(LIBBROWSER_DIR)/base/os-net-posix.c
 LIBBROWSER_SCRIPT_SOURCES := $(LIBBROWSER_OS_SOURCES) \
 	$(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/base/buffer.c \
@@ -73,7 +75,8 @@ LIBBROWSER_SCRIPT_SOURCES := $(LIBBROWSER_OS_SOURCES) \
 	$(LIBBROWSER_DIR)/js/builtin_uri.c \
 	$(LIBBROWSER_DIR)/js/tool.c
 
-LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_DIR)/html/input.c \
+LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
+	$(LIBBROWSER_DIR)/html/input.c \
 	$(LIBBROWSER_DIR)/html/entities-table.c \
 	$(LIBBROWSER_DIR)/html/tokenizer.c \
 	$(LIBBROWSER_DIR)/html/parser.c \
