@@ -286,7 +286,7 @@ transition_collect(
 	if (box->vt_tree)
 		return 0;
 	if ((box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED || box->kind == LAYOUT_INLINE) && box->node != NULL &&
-	    box->style.view_transition_name != NULL && box->style.display != CSS_DISPLAY_NONE &&
+	    box->style.view_transition_name != NULL && box->style.display != CSS_DISPLAY_NONE && !box->fragmented &&
 	    layout_transition_box_rect(box, &rect)) {
 		name = layout_transition_name_of(transition, box);
 		entry = layout_transition_find(transition, name);

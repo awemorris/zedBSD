@@ -246,6 +246,8 @@ struct bind_host {
 	struct css_engine *(*selector_engine)(void *context);
 	/* May copy no_generated_box proof even when the ordinary bounds query returns zero. */
 	int (*node_box)(void *context, struct dom_node *node, struct bind_box *box);
+	/* The same for the box of an element's ::before or ::after pseudo-element (CSS_PSEUDO_ELEMENT_BEFORE or _AFTER). */
+	int (*pseudo_box)(void *context, struct dom_node *node, int pseudo, struct bind_box *box);
 	/*
 	 * Lists the rectangles of an inline node's lines (one for each line it takes part in): returns 1 and the count
 	 * (at most max) when the node is laid out as inline content, 0 when its one box is its rectangle.

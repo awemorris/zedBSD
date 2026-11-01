@@ -24,6 +24,8 @@
 #include "css/internal.h"
 
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* A part of a calculation while it is parsed: a sum of lengths and anchor functions, or a plain number. */
@@ -46,6 +48,9 @@ static int anchor_sum(struct anchor_reader *reader, struct anchor_sum *sum);
 static int anchor_product(struct anchor_reader *reader, struct anchor_sum *sum);
 static int anchor_atom(struct anchor_reader *reader, struct anchor_sum *sum);
 static int anchor_function(struct anchor_reader *reader, int size_function, struct anchor_sum *sum);
+static int anchor_math(struct anchor_reader *reader, int kind, struct anchor_sum *sum);
+static int anchor_math_kind(const struct css_token *token);
+static int anchor_percent_of(const struct css_anchor_expr *expr, float *percent);
 static int anchor_fallback(struct anchor_reader *reader, struct css_anchor_query *query);
 static int anchor_side(const struct css_token *token, int size_function, int *side);
 static void anchor_skip_space(struct anchor_reader *reader);
@@ -53,6 +58,11 @@ static int anchor_at_close(struct anchor_reader *reader);
 static void anchor_scale(struct anchor_sum *sum, float factor);
 static int anchor_add(struct anchor_sum *sum, const struct anchor_sum *other, float sign);
 static int anchor_is_dashed(const struct css_token *token);
+static size_t anchor_units_close(const struct wb_units *source, size_t open);
+static int anchor_units_call(const struct wb_units *source, size_t start, size_t end);
+static int anchor_calc_canonical(const struct wb_units *source, struct wb_units *out, int *handled);
+static int anchor_zero_fallback(const struct wb_units *source, struct wb_units *out, int *handled);
+static size_t anchor_units_word(const struct wb_units *source, size_t at, size_t limit);
 
 /* Tells whether a value's tokens hold an anchor() or anchor-size() function (at any depth). */
 int
@@ -304,6 +314,10 @@ anchor_atom(
 		return 0;
 	}
 
+	/* min(), max() and clamp() of sums. */
+	if (anchor_math_kind(token) != CSS_ANCHOR_MATH_NONE)
+		return anchor_math(reader, anchor_math_kind(token), sum);
+
 	/* The anchor functions. */
 	if (token->type == CSS_TOKEN_FUNCTION && css_ident_equal(token, "anchor"))
 		return anchor_function(reader, 0, sum);
@@ -312,6 +326,129 @@ anchor_atom(
 
 	/* Anything else. */
 	return EINVAL;
+}
+
+/* Tells which of min(), max() and clamp() a token opens. */
+static int
+anchor_math_kind(
+	const struct css_token *token)
+{
+	if (token->type != CSS_TOKEN_FUNCTION)
+		return CSS_ANCHOR_MATH_NONE;
+	if (css_ident_equal(token, "min"))
+		return CSS_ANCHOR_MATH_MIN;
+	if (css_ident_equal(token, "max"))
+		return CSS_ANCHOR_MATH_MAX;
+	if (css_ident_equal(token, "clamp"))
+		return CSS_ANCHOR_MATH_CLAMP;
+	return CSS_ANCHOR_MATH_NONE;
+}
+
+/* Parses min(), max() or clamp() of sums into one term (a sum of lengths and anchor functions is each argument). */
+static int
+anchor_math(
+	struct anchor_reader *reader,
+	int kind,
+	struct anchor_sum *sum)
+{
+	struct css_anchor_expr args[CSS_ANCHOR_MATH_ARGS];
+	struct css_anchor_expr *made;
+	struct css_anchor_query *query;
+	struct anchor_sum part;
+	size_t count;
+	int error;
+
+	/* The arguments, separated by commas. */
+	reader->at++;
+	count = 0;
+	for (;;) {
+		anchor_skip_space(reader);
+		error = anchor_sum(reader, &part);
+		if (error != 0)
+			return error;
+		if (part.is_number || count == CSS_ANCHOR_MATH_ARGS)
+			return EINVAL;
+		args[count++] = part.expr;
+		anchor_skip_space(reader);
+		if (reader->at < reader->count && reader->tokens[reader->at].type == CSS_TOKEN_COMMA) {
+			reader->at++;
+			continue;
+		}
+		break;
+	}
+	if (!anchor_at_close(reader))
+		return EINVAL;
+	reader->at++;
+	if (kind == CSS_ANCHOR_MATH_CLAMP ? count != 3U : count < 1U)
+		return EINVAL;
+	made = wb_arena_alloc(reader->parse->arena, count * sizeof(*made));
+	if (made == NULL)
+		return ENOMEM;
+	memcpy(made, args, count * sizeof(*made));
+
+	/* One term whose value is the function's. */
+	memset(sum, 0, sizeof(*sum));
+	query = &sum->expr.terms[0];
+	sum->expr.count = 1;
+	query->coef = 1.0f;
+	query->side = -1;
+	query->math = kind;
+	query->math_count = (int)count;
+	query->math_args = made;
+	return 0;
+}
+
+/* Works out the percentage a sum comes to when it holds nothing but percentages (min(), max() and clamp() of them included); EINVAL when it holds more. */
+static int
+anchor_percent_of(
+	const struct css_anchor_expr *expr,
+	float *percent)
+{
+	const struct css_anchor_query *query;
+	float value;
+	float other;
+	int index;
+	int at;
+
+	if (expr->px != 0.0f || expr->em != 0.0f || expr->rem != 0.0f)
+		return EINVAL;
+	value = expr->percent;
+	for (index = 0; index < expr->count; index++) {
+		query = &expr->terms[index];
+		if (query->math == CSS_ANCHOR_MATH_NONE)
+			return EINVAL;
+		if (anchor_percent_of(&query->math_args[0], &other) != 0)
+			return EINVAL;
+		for (at = 1; at < query->math_count; at++) {
+			float next;
+
+			if (anchor_percent_of(&query->math_args[at], &next) != 0)
+				return EINVAL;
+			if (query->math == CSS_ANCHOR_MATH_MIN)
+				other = next < other ? next : other;
+			else if (query->math == CSS_ANCHOR_MATH_MAX)
+				other = next > other ? next : other;
+			else if (at == 1)
+				other = next;
+			else
+				other = other > next ? next : other;
+		}
+		if (query->math == CSS_ANCHOR_MATH_CLAMP) {
+			float low;
+			float mid;
+			float high;
+
+			if (anchor_percent_of(&query->math_args[0], &low) != 0 || anchor_percent_of(&query->math_args[1], &mid) != 0 ||
+			    anchor_percent_of(&query->math_args[2], &high) != 0)
+				return EINVAL;
+			other = mid > high ? high : mid;
+			if (other < low)
+				other = low;
+		}
+		value += other * query->coef;
+	}
+	*percent = value;
+	return 0;
 }
 
 /* Parses anchor(name? side, fallback?) or anchor-size(name? size?, fallback?). */
@@ -364,16 +501,14 @@ anchor_function(
 		}
 
 		/* A calculation of percentages is a percentage too. */
-		if (token->type == CSS_TOKEN_FUNCTION && css_ident_equal(token, "calc") && !size_function &&
-		    query->side == -1) {
+		if (token->type == CSS_TOKEN_FUNCTION && (css_ident_equal(token, "calc") || anchor_math_kind(token) != CSS_ANCHOR_MATH_NONE) &&
+		    !size_function && query->side == -1) {
 			error = anchor_atom(reader, &percent);
 			if (error != 0)
 				return error;
-			if (percent.is_number || percent.expr.count != 0 || percent.expr.px != 0.0f ||
-			    percent.expr.em != 0.0f || percent.expr.rem != 0.0f)
+			if (percent.is_number || anchor_percent_of(&percent.expr, &query->percent) != 0)
 				return EINVAL;
 			query->side = CSS_ANCHOR_PERCENT;
-			query->percent = percent.expr.percent;
 			continue;
 		}
 		found = anchor_side(token, size_function, &query->side);
@@ -1341,6 +1476,199 @@ anchor_units_ident(
 	    unit == '-' || unit == '_' || unit >= 0x80U;
 }
 
+/* Finds the end of the word at a place in units (a space at parenthesis depth 0 ends it, or the limit). */
+static size_t
+anchor_units_word(
+	const struct wb_units *source,
+	size_t at,
+	size_t limit)
+{
+	int depth;
+
+	depth = 0;
+	while (at < limit) {
+		if (source->data[at] == '(')
+			depth++;
+		else if (source->data[at] == ')')
+			depth--;
+		else if (source->data[at] == ' ' && depth == 0)
+			break;
+		at++;
+	}
+	return at;
+}
+
+/* Finds the parenthesis that closes the one at a place (SIZE_MAX when there is none). */
+static size_t
+anchor_units_close(
+	const struct wb_units *source,
+	size_t open)
+{
+	size_t at;
+	int depth;
+
+	depth = 0;
+	for (at = open; at < source->length; at++) {
+		if (source->data[at] == '(')
+			depth++;
+		else if (source->data[at] == ')' && --depth == 0)
+			return at;
+	}
+	return (size_t)-1;
+}
+
+/* Tells whether a range is one anchor() or anchor-size() call. */
+static int
+anchor_units_call(
+	const struct wb_units *source,
+	size_t start,
+	size_t end)
+{
+	size_t open;
+
+	if (anchor_units_match(source, start, "anchor-size("))
+		open = start + 11U;
+	else if (anchor_units_match(source, start, "anchor("))
+		open = start + 6U;
+	else
+		return 0;
+	return anchor_units_close(source, open) == end - 1U;
+}
+
+/*
+ * Writes the simplified form of a calculation that holds anchor functions
+ * when the whole value has one of a few shapes: calc() of one function is
+ * the function, a percentage comes before the function it is added to, and
+ * a quotient is a product (calc((a + b) / 2) is calc(0.5 * (a + b))).
+ * A bare zero fallback is a length.  handled is 0 when the value is as it was.
+ */
+static int
+anchor_calc_canonical(
+	const struct wb_units *source,
+	struct wb_units *out,
+	int *handled)
+{
+	size_t length;
+	size_t inner;
+	size_t close;
+	size_t at;
+	size_t end;
+	size_t digits;
+	char text[32];
+	double divisor;
+	int error;
+
+	*handled = 0;
+	length = source->length;
+	if (!anchor_units_match(source, 0, "calc(") || length < 7U || source->data[length - 1U] != ')' ||
+	    anchor_units_close(source, 4U) != length - 1U)
+		return 0;
+	inner = 5U;
+	end = length - 1U;
+
+	/* calc() of one function. */
+	if (anchor_units_call(source, inner, end)) {
+		*handled = 1;
+		return wb_units_append(out, source->data + inner, end - inner);
+	}
+
+	/* A function plus a percentage: the percentage first. */
+	if (anchor_units_match(source, inner, "anchor")) {
+		close = anchor_units_close(source, source->data[inner + 6U] == '-' ? inner + 11U : inner + 6U);
+		if (close != (size_t)-1 && anchor_units_call(source, inner, close + 1U) && close + 4U < end &&
+		    anchor_units_match(source, close + 1U, " + ")) {
+			at = close + 4U;
+			if (source->data[end - 1U] == '%' && end - 1U > at) {
+				for (digits = at; digits < end - 1U; digits++) {
+					if (!((source->data[digits] >= '0' && source->data[digits] <= '9') || source->data[digits] == '.'))
+						return 0;
+				}
+				error = wb_units_append(out, source->data, inner);
+				if (error == 0)
+					error = wb_units_append(out, source->data + at, end - at);
+				if (error == 0)
+					error = wb_units_append(out, (const uint16_t *)u" + ", 3U);
+				if (error == 0)
+					error = wb_units_append(out, source->data + inner, close + 1U - inner);
+				if (error == 0)
+					error = wb_units_append(out, source->data + end, 1U);
+				*handled = error == 0;
+				return error;
+			}
+		}
+	}
+
+	/* A parenthesized sum divided by a number. */
+	if (source->data[inner] == '(') {
+		close = anchor_units_close(source, inner);
+		if (close != (size_t)-1 && anchor_units_match(source, close + 1U, " / ") && close + 4U < end) {
+			memset(text, 0, sizeof(text));
+			for (digits = 0, at = close + 4U; at < end && digits < sizeof(text) - 1U; at++, digits++) {
+				if (!((source->data[at] >= '0' && source->data[at] <= '9') || source->data[at] == '.'))
+					return 0;
+				text[digits] = (char)source->data[at];
+			}
+			divisor = atof(text);
+			if (at != end || divisor == 0.0)
+				return 0;
+			snprintf(text, sizeof(text), "%.6g", 1.0 / divisor);
+			error = wb_units_append(out, source->data, inner);
+			for (digits = 0; error == 0 && text[digits] != '\0'; digits++)
+				error = wb_units_append_code_point(out, (uint32_t)(unsigned char)text[digits]);
+			if (error == 0)
+				error = wb_units_append(out, (const uint16_t *)u" * ", 3U);
+			if (error == 0)
+				error = wb_units_append(out, source->data + inner, close + 1U - inner);
+			if (error == 0)
+				error = wb_units_append(out, source->data + end, 1U);
+			*handled = error == 0;
+			return error;
+		}
+	}
+	return 0;
+}
+
+/* Writes a value with the bare zero that ends an anchor function's fallback as a length (anchor(--a left, 0) is anchor(--a left, 0px)). */
+static int
+anchor_zero_fallback(
+	const struct wb_units *source,
+	struct wb_units *out,
+	int *handled)
+{
+	size_t index;
+	size_t open;
+	size_t close;
+	int error;
+
+	*handled = 0;
+	for (index = 0; index < source->length; index++) {
+		open = (size_t)-1;
+		if ((index == 0 || !anchor_units_ident(source->data[index - 1U])) && anchor_units_match(source, index, "anchor-size("))
+			open = index + 11U;
+		else if ((index == 0 || !anchor_units_ident(source->data[index - 1U])) && anchor_units_match(source, index, "anchor("))
+			open = index + 6U;
+		error = wb_units_append(out, source->data + index, 1U);
+		if (error != 0)
+			return error;
+		if (open == (size_t)-1)
+			continue;
+		close = anchor_units_close(source, open);
+
+		/* A zero right before the close, after a comma at depth 0 of this call. */
+		if (close != (size_t)-1 && close >= open + 3U && source->data[close - 1U] == '0' && source->data[close - 2U] == ' ' &&
+		    source->data[close - 3U] == ',') {
+			error = wb_units_append(out, source->data + index + 1U, close - index - 1U);
+			if (error == 0)
+				error = wb_units_append(out, (const uint16_t *)u"px", 2U);
+			if (error != 0)
+				return error;
+			index = close - 1U;
+			*handled = 1;
+		}
+	}
+	return 0;
+}
+
 /*
  * Writes a value that holds anchor() or anchor-size() with each function's
  * anchor name first (anchor(--a inside), anchor-size(--a width)), the other
@@ -1360,6 +1688,7 @@ anchor_functions_canonical(
 	size_t second_start;
 	size_t second_end;
 	size_t width;
+	int depth;
 	int error;
 
 	*handled = 0;
@@ -1383,10 +1712,19 @@ anchor_functions_canonical(
 		error = wb_units_append(out, source->data + index, width);
 		if (error != 0)
 			return error;
+		/* Up to the comma or the close at depth 0; the words are separated by spaces at depth 0. */
 		end = open;
-		while (end < source->length && source->data[end] != ',' && source->data[end] != ')' && source->data[end] != '(')
+		depth = 0;
+		while (end < source->length) {
+			if (source->data[end] == '(')
+				depth++;
+			else if (source->data[end] == ')' && depth > 0)
+				depth--;
+			else if ((source->data[end] == ',' || source->data[end] == ')') && depth == 0)
+				break;
 			end++;
-		if (end >= source->length || source->data[end] == '(') {
+		}
+		if (end >= source->length) {
 			index = open;
 			continue;
 		}
@@ -1395,15 +1733,11 @@ anchor_functions_canonical(
 		first_start = open;
 		while (first_start < end && source->data[first_start] == ' ')
 			first_start++;
-		first_end = first_start;
-		while (first_end < end && source->data[first_end] != ' ')
-			first_end++;
+		first_end = anchor_units_word(source, first_start, end);
 		second_start = first_end;
 		while (second_start < end && source->data[second_start] == ' ')
 			second_start++;
-		second_end = second_start;
-		while (second_end < end && source->data[second_end] != ' ')
-			second_end++;
+		second_end = anchor_units_word(source, second_start, end);
 		if (first_end > first_start && second_end > second_start + 2U && second_end == end &&
 		    second_start > first_end && source->data[second_start] == '-' && source->data[second_start + 1U] == '-' &&
 		    !(first_end > first_start + 1U && source->data[first_start] == '-' && source->data[first_start + 1U] == '-')) {
@@ -1458,17 +1792,44 @@ css_anchor_canonical(
 	area = vm_string_equal_ascii(name, "position-area");
 	if (!shorthand && !fallbacks && !visibility && !area) {
 		struct wb_units reordered;
+		struct wb_units simplified;
+		int changed;
 
 		/* The other properties: only an anchor function's argument order is made canonical. */
 		wb_units_init(&text);
 		wb_units_init(&reordered);
+		wb_units_init(&simplified);
+		changed = 0;
 		error = vm_string_append_units(value, &text);
 		if (error == 0)
+			error = anchor_calc_canonical(&text, &simplified, &changed);
+		if (error == 0 && changed) {
+			wb_units_release(&text);
+			text = simplified;
+			wb_units_init(&simplified);
+		}
+		if (error == 0)
 			error = anchor_functions_canonical(&text, &reordered, handled);
+		if (error == 0 && *handled) {
+			wb_units_release(&text);
+			text = reordered;
+			wb_units_init(&reordered);
+		}
+		*handled |= changed;
+		wb_units_release(&reordered);
+		if (error == 0)
+			error = anchor_zero_fallback(&text, &reordered, &changed);
+		if (error == 0 && changed) {
+			wb_units_release(&text);
+			text = reordered;
+			wb_units_init(&reordered);
+			*handled = 1;
+		}
 		if (error == 0 && *handled)
-			error = wb_units_append(out, reordered.data, reordered.length);
+			error = wb_units_append(out, text.data, text.length);
 		if (error != 0)
 			*handled = 0;
+		wb_units_release(&simplified);
 		wb_units_release(&reordered);
 		wb_units_release(&text);
 		return error;

@@ -36,6 +36,7 @@ struct anchor_static {
 };
 
 static int anchor_value(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_expr *expr, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value, struct anchor_static *fixed);
+static int anchor_math(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
 static const struct css_style *anchor_cb_style(const struct layout_tree *tree, const struct layout_box *box);
 static int anchor_axis_reversed(const struct css_style *style, int vertical);
 static int anchor_query(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
@@ -44,6 +45,8 @@ static int anchor_find_state(const struct layout_tree *tree, const struct layout
 static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
 static int anchor_chain_before(const struct layout_box *candidate, const struct layout_box *box, const struct layout_box *containing);
 static const struct layout_box *anchor_scope_root(const struct layout_box *box, const struct vm_string *name, const void *tree);
+static int anchor_sticks(const struct layout_box *box, const struct layout_box *scroller);
+static int anchor_sticks(const struct layout_box *box, const struct layout_box *scroller);
 static int anchor_fixed(const struct layout_box *box);
 static int anchor_top_layer(const struct layout_box *box);
 static const struct layout_box *anchor_up(const struct layout_box *box);
@@ -195,6 +198,14 @@ anchor_value(
 
 	/* Each function, or its fallback. */
 	for (index = 0; index < expr->count; index++) {
+		/* A min(), max() or clamp(): any argument that has no value leaves the whole sum without one. */
+		if (expr->terms[index].math != CSS_ANCHOR_MATH_NONE) {
+			if (!anchor_math(tree, box, &expr->terms[index], slot, cb_start, cb_size, &part))
+				return 0;
+			fixed->pure = 0;
+			total += (layout_unit)((float)part * expr->terms[index].coef);
+			continue;
+		}
 		valid = anchor_query(tree, box, &expr->terms[index], slot, cb_start, cb_size, &part);
 		if (valid) {
 			fixed->pure = 0;
@@ -221,6 +232,45 @@ anchor_value(
 
 	/* Succeeded: the value is known. */
 	*value = total;
+	return 1;
+}
+
+/* Works out a min(), max() or clamp() term: the arguments are sums of their own. */
+static int
+anchor_math(
+	const struct layout_tree *tree,
+	const struct layout_box *box,
+	const struct css_anchor_query *query,
+	int slot,
+	layout_unit cb_start,
+	layout_unit cb_size,
+	layout_unit *value)
+{
+	struct anchor_static unused;
+	layout_unit part[CSS_ANCHOR_MATH_ARGS];
+	layout_unit result;
+	int index;
+
+	if (query->math_count > CSS_ANCHOR_MATH_ARGS)
+		return 0;
+	for (index = 0; index < query->math_count; index++) {
+		if (!anchor_value(tree, box, &query->math_args[index], slot, cb_start, cb_size, &part[index], &unused))
+			return 0;
+	}
+	if (query->math == CSS_ANCHOR_MATH_CLAMP) {
+		if (query->math_count != 3)
+			return 0;
+		result = part[1] > part[2] ? part[2] : part[1];
+		if (result < part[0])
+			result = part[0];
+	} else {
+		result = part[0];
+		for (index = 1; index < query->math_count; index++) {
+			if (query->math == CSS_ANCHOR_MATH_MIN ? part[index] < result : part[index] > result)
+				result = part[index];
+		}
+	}
+	*value = result;
 	return 1;
 }
 
@@ -415,7 +465,7 @@ anchor_find_state(
 		return 0;
 
 	/* Its rectangle: a block's border box, an inline box's lines. */
-	if (found->kind == LAYOUT_BLOCK || found->kind == LAYOUT_REPLACED || found->atomic) {
+	if ((found->kind == LAYOUT_BLOCK || found->kind == LAYOUT_REPLACED || found->atomic) && !(found->fragmented && found->node != NULL)) {
 		rect->x = found->x;
 		rect->y = found->y;
 		rect->width = found->border[CSS_LEFT] + found->padding[CSS_LEFT] + found->width +
@@ -440,8 +490,10 @@ anchor_find_state(
 	}
 
 	/* The box is placed by an anchor that scrolls with the page: it follows it (an anchor that is fixed itself stays with the viewport). */
-	if (!anchor_fixed(found))
+	if (!anchor_fixed(found)) {
 		((struct layout_box *)box)->anchored = 1;
+		((struct layout_box *)box)->anchor_box = found;
+	}
 
 	/* Whether a scroll container in between shows none of it. */
 	if (anchor != NULL)
@@ -459,11 +511,26 @@ anchor_find_state(
 				original.x -= layout_from_px((float)scroll_x);
 				original.y -= layout_from_px((float)scroll_y);
 			}
+			if (anchor_sticks(found, up))
+				continue;
 			if (anchor_outside(up, &original))
 				*clipped = 1;
 		}
 	}
 	return 1;
+}
+
+/* Tells whether a box, or a box it is in below a scroll container, is sticky (it stays in the scrollport the scroll container shows). */
+static int
+anchor_sticks(
+	const struct layout_box *box,
+	const struct layout_box *scroller)
+{
+	for (; box != NULL && box != scroller; box = box->parent) {
+		if (box->style.position == CSS_POSITION_STICKY)
+			return 1;
+	}
+	return 0;
 }
 
 /* Tells whether a box is fixed or inside a fixed box (it stays where the viewport is). */
@@ -540,6 +607,8 @@ layout_anchor_hides(
 	clipped = 0;
 	if (!anchor_find_state(tree, box, box->style.position_anchor, &rect, &anchor, &clipped) || anchor == NULL)
 		return 0;
+	if (anchor->style.visibility != 0)
+		return 1;
 	for (up = anchor; up != NULL; up = up->parent) {
 		if (up->anchor_hidden)
 			return 1;
@@ -583,7 +652,7 @@ anchor_search(
 		    anchor_scope_root(child, name, box->style.anchor_tree) == anchor_scope_root(box, name, box->style.anchor_tree) &&
 		    (anchor_top_layer(child) == 0 || (anchor_top_layer(box) != 0 && anchor_top_layer(child) < anchor_top_layer(box))) &&
 		    anchor_chain_before(child, box, containing) &&
-		    (!child->out_of_flow || !*passed || (layout_containing_box(child) != containing && !anchor_scrolls(layout_containing_box(child)))))
+		    (!child->out_of_flow || !*passed || layout_containing_box(child) != containing))
 			found[0] = child;
 		anchor_search(tree, child, box, containing, name, child_inside, passed, found, depth + 1);
 	}
@@ -1222,6 +1291,21 @@ anchor_turn(
 	/* Each function's side (a percentage from the other end when the axis turns round). */
 	map = how == 0 ? down : how == 1 ? across : diagonal;
 	for (index = 0; index < turned->count; index++) {
+		if (turned->terms[index].math != CSS_ANCHOR_MATH_NONE && turned->terms[index].math_count <= CSS_ANCHOR_MATH_ARGS) {
+			struct css_anchor_expr *args;
+			int at;
+
+			args = wb_arena_alloc(&tree->arena, (size_t)turned->terms[index].math_count * sizeof(*args));
+			if (args != NULL) {
+				for (at = 0; at < turned->terms[index].math_count; at++) {
+					const struct css_anchor_expr *one = anchor_turn(tree, &turned->terms[index].math_args[at], how);
+
+					args[at] = *one;
+				}
+				turned->terms[index].math_args = args;
+			}
+			continue;
+		}
 		if (turned->terms[index].side < 0 || turned->terms[index].side > CSS_ANCHOR_SIZE_DEFAULT)
 			continue;
 		if (turned->terms[index].side == CSS_ANCHOR_PERCENT && how != 2)

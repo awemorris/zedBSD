@@ -348,6 +348,14 @@ struct layout_box {
 	int static_scrolled;
 	/* A box placed by an anchor follows it when the page scrolls, even a fixed one (set by the anchor functions). */
 	int anchored;
+	/* The box its anchor function found (set when anchored): where a sticky anchor's move is followed. */
+	const struct layout_box *anchor_box;
+	/* A multicol container's flow cut the box between columns (it has more than one fragment). */
+	int fragmented;
+	/* The box of a ::before or ::after pseudo-element (CSS_PSEUDO_ELEMENT_BEFORE or _AFTER), in the element's box. */
+	int pseudo;
+	/* A copy of a box that stands for a later part of it (in the next column), with nothing inside it. */
+	int continuation;
 	/* A flex container gave a table its whole height (captions included), not its grid box's (set while it is laid out). */
 	int table_wrapper_height;
 
@@ -548,6 +556,9 @@ int layout_min_content(struct layout_tree *tree, struct layout_box *box, layout_
 int layout_stacking_order(const struct layout_tree *tree, struct wb_vector *boxes, size_t *flow_index);
 void layout_release(struct layout_tree *tree);
 int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
+int layout_multicol_wanted(const struct layout_box *box);
+void layout_multicol_geometry(const struct layout_box *box, layout_unit width, int *count, layout_unit *column, layout_unit *gap);
+int layout_multicol_cut(struct layout_tree *tree, struct layout_box *box, layout_unit width, int columns, layout_unit column, layout_unit gap);
 int layout_inline(struct layout_tree *tree, struct layout_box *box);
 int layout_vertical_baseline(const struct layout_box *box, int last, layout_unit *offset);
 int layout_logical_central_baseline(const struct layout_box *box, int last, layout_unit *offset);

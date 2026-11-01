@@ -354,6 +354,7 @@ void page_set_scroll(struct page *page, double x, double y);
 struct css_engine *page_selector_engine(void *context);
 int page_grid_tracks(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *leading, int *repeats, int *found);
 int page_node_box(void *context, struct dom_node *node, struct bind_box *box);
+int page_pseudo_box(void *context, struct dom_node *node, int pseudo, struct bind_box *box);
 int page_node_rects(void *context, struct dom_node *node, struct bind_rect *rects, size_t max, size_t *count);
 int page_view_transition(void *context, int step);
 int page_vt_pseudo_style(void *context, struct dom_element *element, int pseudo, const struct vm_string *name, struct css_style *style);

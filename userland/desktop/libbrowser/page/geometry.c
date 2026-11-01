@@ -90,6 +90,35 @@ page_selector_engine(
 }
 
 /*
+ * Finds the geometry of an element's ::before or ::after box for
+ * bind_host.pseudo_box (0 when the element has no such box).
+ */
+int
+page_pseudo_box(
+	void *context,
+	struct dom_node *node,
+	int pseudo,
+	struct bind_box *box)
+{
+	struct page *page;
+	const struct layout_box *first;
+	const struct layout_box *child;
+
+	page = context;
+	memset(box, 0, sizeof(*box));
+	if (node->document != page->document || !geometry_layout(page))
+		return 0;
+	first = geometry_first_box(page, node);
+	if (first == NULL)
+		return 0;
+	for (child = first->first_child; child != NULL; child = child->next) {
+		if (child->pseudo == pseudo && child->kind == LAYOUT_BLOCK)
+			return geometry_tree_box(&page->layout, child, node, box);
+	}
+	return 0;
+}
+
+/*
  * Finds a node's current geometry for bind_host.node_box.
  * Refreshes changed layout and reports whether the node has a box.
  */

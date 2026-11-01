@@ -1139,3 +1139,142 @@ Origin: 2026-10-27 ユーザーの指示。
 - 一時物（Q1 が消す。この container の中だけ）: 前の節の物に加え、build/ws074-suites/wpt/zz-*.html・zz-*.js（直接の試験の一時 page。wpt の tree の中、git の外）、build/tmp/ の sub11〜sub13・nav*.・cmpurl.sh・*-side.png・*-ours.ppm・*-chrome.ppm。
 - 記録: 途中で自分の command に `rm -f /dev/null` を誤って書き（削除の規則違反）、auto mode の分類器が拒否した。回避せず、その command から rm を外して続けた。
 
+### クラウドのセッションの途中経過（続き 4、2026-11-01。dev166・dev167。(b) の調査）
+
+- 依頼は (b)「縦書き grid・flex の domain の中の horizontal-tb の直交 item」。調べた結果、効く見込みが小さいので実装せず、記録して他へ移った。
+  - **flex（flexbox-writing-mode-009・011〜015・slr/srl-row-mix）**: `layout_logical_wanted` の早期 return を外す（縦書き flex を domain にする）と、009 の row wrap の 2 行目が左へ外れる。
+    原因は flex の主軸の大きさの計算が domain の中の直交 item（unconverted で style が horizontal のまま）を swap しない事（item の base size・`flex_lay_item` の `orthogonal` が「container が horizontal」を前提）。
+    011〜015 は Ahem の混在 writing-mode の長い試験で、水平 container の 013・014（すでに物理の経路）でも Chromium と文字の置き方で数千画素違う（vertical item の glyph の置き方）ため、layout を直しても ID は通らない見込み。
+  - **grid（grid-self-baseline 約 25）**: 同じ早期 return を grid だけ外すと、grid-self-baseline-vertical-lr-002 は Chromium と同じ形（column flow、直交 item）になる。
+    ただし item の baseline の整列・track の大きさが domain の中で違い（`grid_row_baseline` などは `box->style.writing_mode == HORIZONTAL_TB`・`child->grid_orthogonal` が前提）、static は通る物が無く 3 件後退した（subgrid の orthogonal-writing-mode-005・006、repeat-auto-fill-007）。
+  - 必要な作り: 直交 item を domain の frame で「向きの違う item」として扱う（unconverted の horizontal item の style を logical_style で swap して、grid・flex の orthogonal の分岐に渡す）。
+    flex・grid の両方の大きさ・baseline・auto margin の全ての orthogonal の分岐を書き直す大きさで、数 session 分。
+- 測定: dev165 = 3,163（前の節）。dev166（9f3166a8、storage-access の idlharness の戻り値を brand の拒否に）= 3,164（harness +1 : storage-access-api/idlharness.window、後退 0）。
+  dev167（9f29d01a、LCP の entry.element は fully active でなければ null）= 3,165 / 3,473（91.13%、gap 308）、harness +1（largest-contentful-paint/element-only-when-fully-active）、後退 0。
+- Acid: dev167 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 調べて見送った物: scroll・scrollend の event（element・viewport とも発火しない。scrollend の 2 件は input の scrollLeft も要る）、::details-content の ::first-letter（details-pseudo-elements-005）、
+  LCP の残り（slow-style-change.py の server、PerformanceResourceTiming）、URLPattern・WebAssembly、javascript: URL の frame（2 件）。
+- 注意: `storage-access-api/idlharness` は h1.sh の単発では未通過と出るが全件の測定（runner の経由）では通る（h1.sh の出力は無視してよい。原因は未調査）。
+
+
+### クラウドのセッションの途中経過（続き 5、2026-11-01。dev168・dev169。anchor と scroll、table の baseline）
+
+- 測定:
+  | dev | SHA | 内容 | total | gap（harness / static / scripted / crash） | 後退 |
+  | --- | --- | --- | --- | --- | --- |
+  | dev167 | 9f29d01a | LCP の fully active | 3,165 / 3,473 | 308（145 / 112 / 49 / 2） | 0 |
+  | dev168 | 2b88f599 | Q1 の merge（libbrowser 75 file）を build し直した物 | 3,165 | 308（145 / 112 / 49 / 2） | 0（dev167 と同一） |
+  | dev169 | d7751df9 | table の baseline・scroll の clamp・sticky の anchor | 3,173（91.36%） | 300（143 / 112 / 43 / 2） | 0 |
+- 修正した ID（dev168 → dev169、8 件）:
+  - table の baseline（layout/inline.c）: table row は先頭の cell の baseline を持ち、cell に行が無ければ最初の cell の padding box の下端を baseline とする（Chromium で測った形）。
+    通った ID: flex-align-baseline-table-001、grid-align-baseline-table-001。
+  - scroller の resize 後の scroll offset（layout/scroll.c `layout_scroll_offset`）: 内容より大きくなった scroller の offset を、anchor の scroll 補正が読む所で clamp する。通った ID: anchor-scroll-update-005・006。
+  - sticky な anchor に従う（layout/anchor.c・sticky.c・layout.h）: anchor で置いた box は anchor の box を覚え（`anchor_box`）、sticky の移動を `sticky_follow` で同じだけ動かす。
+    sticky の anchor は scroller に隠れた物として扱わない（`anchor_sticks`）。通った ID: anchor-scroll-to-sticky-001〜004。
+- 残りの gap（308 件、dev168）を原因の群で数えた表（「見込み」は 1 群を選ぶ時の ID 数 ÷ 作業量の目安）:
+  | 群 | 件数 | 作業量 | 見込み |
+  | --- | --- | --- | --- |
+  | 縦書き・baseline・直交 item（flex・grid の orthogonal の全分岐） | 113 | 数 session | 低（ID が glyph の置き方で通らない物が多い） |
+  | view-transitions | 37 | 大（snapshot の合成が要る） | 低 |
+  | grid の他 | 27 | 中（個別） | 中 |
+  | Navigation API の残り | 27 | 中（popup・data: URL・sandbox の frame） | 中 |
+  | anchor の他 | 26（うち 6 件を今回直した） | 小〜中 | 高 |
+  | flexbox の他 | 22 | 個別 | 中 |
+  | anchor と multicol | 13 | 大（強制 column break が layout で分割されない） | 低 |
+  | その他 | 10 | 個別 | 中 |
+  | subgrid | 10 | 大（orthogonal と同根） | 低 |
+  | wasm・URLPattern | 8 | 大（新しい engine） | 低 |
+  | backdrop-filter | 7 | 中 | 中 |
+  | css-zoom の svg | 5 | 中 | 中 |
+  | LCP | 3 | server 側が要る | 低 |
+  今回は 1 群「anchor（anchor positioning と scroll）」に集中した。次も anchor の残り（chained・min()/max() の anchor 和、anchor-scroll-003）を狙う。
+- 調べて直さなかった物: multicol の `break-before: column` が column に分割されない（強制 break の layout が無い。anchor と multicol 13 件と table-003 の vertical 版の原因）、
+  CSS animation の event（animationstart・animationend が出ない）、scroll・scrollend の event、iframe の内容の描画。
+- Acid: dev169 の source（d7751df9）で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 未実施: asan、host-NAME の全件、target の確認。
+- 消す候補（Q1 が消す。この container の中だけ）: build/ws074-cmp/dev149〜dev165 は Q1 が消した。今の dev166・dev167（dev168 と dev169 を残すため）とその log（dev166.log・dev167.log・gap166.json・gap167.json は残してよい）、
+  build/tmp/ の中身（acid169・p8・host-build2.log 等）、build/ws074-suites/wpt/zz-*.html・zz-*.js、build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-*.html、acid3/zedbsd-acid3-reference-*.html・zedbsd-acid3-diagnostic-*.html。
+
+### クラウドのセッションの途中経過（続き 6、2026-11-01。dev170。anchor の残りと flex の percentage 上限）
+
+- 測定: dev170（539fd37c）= 3,178 / 3,473（91.51%）、gap 295（harness 141 / static 110 / scripted 42 / crash 2）。dev169（3,173）に対し +5、後退 0。
+- 直した ID（5 件）:
+  - anchor() と anchor-size() の中の min()・max()・clamp()（css/anchor.c・css/css.h・css/cascade.c・layout/anchor.c）: 引数を sum として持つ項（`css_anchor_query.math`）にし、layout で各引数を解いて最小・最大・clamp を取る
+    （em・rem の解決、論理の反転 `anchor_turn` も引数へ）。anchor() の percentage の位置に置く min(50%, 100%) のような物は percentage だけなら畳む。通った ID: anchor-in-css-min-max-function。
+  - anchor の serialization の正規形（css/anchor.c）: 入れ子の括弧の中でも名前を先にする（`anchor(calc(50%) --foo)` は `anchor(--foo calc(50%))`）、calc() が anchor 関数 1 つだけなら関数にする、
+    anchor + percentage は percentage を先にする、`calc((a + b) / 2)` は `calc(0.5 * (a + b))`、fallback の bare `0` は `0px`。通った ID: anchor-parse-valid。
+  - position-visibility: anchors-visible は anchor が visibility: hidden でも隠す（layout/anchor.c）。通った ID: position-visibility-anchors-visible-css-visibility。
+  - abspos の anchor が scroller の中にあって tree 順で後ろでも、containing block が違えば anchor にできる（`anchor_search` の `anchor_scrolls` の条件を外した）。通った ID: anchor-scroll-chained-003。
+  - flex の item の max-height・min-height の percentage を、container の高さが長さの時に stretch へ効かせた（layout/flex.c の配置と `flex_relay_cross`）。通った ID: css-flexbox/percentage-heights-012。
+- 調べて直さなかった物:
+  - multicol は engine に無い（`columns`・`column-count`・`column-width` を parse もしない）。anchor と multicol の 13 件、flex・grid の baseline-multicol 6 件、css-multicol 2 件の共通の原因。
+    baseline の試験は column-span: all と vertical の writing-mode を含み、blocks を columns に割る作りだけでは ID が通らない見込み（数 session）。
+  - inline の SVG は stylesheet の fill・stroke・width・height を読まない（page/svg.c が属性と style 属性だけを読む）。css-zoom の svg 5 件と backdrop-filter-invalid の原因。CSS の engine に fill・stroke の property が無く、zoom と em の解決も要る。
+  - anchor-size-parse-valid は 4306 の subtest を 18 秒で流し、runner の既定 20 秒に近い（JS の engine の速さ。`anchor-size(10px)` の parse も別に残る）。
+  - getComputedStyle の ::before・::after は element と区別せず、position-try の fallback の used 値を返せない（position-try-pseudo-element）。
+  - position-area の inline containing block が block を含む span（position-area-inline-container 2 件）、calc の正規形（flex-valid・grid-area-valid・grid-columns-rows-get-set-multiple、いずれも一般の calc 簡約が要る）。
+- Acid: dev170 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 未実施: asan、host-NAME の全件、target の確認。
+- 消す候補（Q1 が消す）: build/ws074-cmp/dev168（dev170 と dev169 を残すため）、build/tmp/ の acid170・p8・p9・host-build2.log、build/ws074-suites/wpt/acid/ の Acid の一時 html。
+
+### multicol の設計（続き 7、2026-11-01。依頼者の決定で multicol を作る）
+
+- 範囲: `columns`・`column-count`・`column-width`・`column-fill`・`column-span`・`break-before`・`break-after`・`break-inside`（`page-break-*` は別名）を parse し、computed に出す（段階 1）。
+  `column-gap` は既存（normal は 1em）。`column-rule-*` は paint に関わるので段階の後。
+- layout（段階 2、layout/multicol.c）: 横書きの block container（display が block・inline-block・list-item）で column-count か column-width がある物。
+  1. column の幅（count・width・gap から）で通常の flow として内容を layout する（`box->width` を一時的に column の幅にして `block_children` か `layout_inline`）。
+  2. その flow を leaf（行、または分割しない block: replaced・break-inside: avoid・table・flex・grid・空の block）に分け、column に詰める。
+     入りきらない leaf は次の column へ。`break-before/after: always・all・column` は強制の break。column の先頭の margin は強制でない break で切る。
+  3. column の高さは、高さが定まっていれば（column-fill: auto は）その高さ、auto で balance は、column 数に収まる最小の高さ（二分探索）、auto で fill: auto は無制限（強制の break だけで切る）。
+  4. leaf は column の分だけ x（rtl は右から）と y をずらす。leaf の周りの block は最初の leaf と一緒に動き、高さは最初の column の分にする（分割した block の 2 つ目以降の背景は描かない）。
+  5. `column-span: all` の直接の子は、flow を segment に分け、各 segment を別々に balance して、spanner は全幅で layout し直して挟む。
+- 縦書き: logical domain の中で同じ code が動く（座標は論理の横書き）。baseline: first は最初の column の最初の行、last は最も下の行の baseline（Chromium の測定）。
+- anchor・hit test・getBoundingClientRect: box の座標をそのまま使うので追加の作りは要らない（分割した block の 2 つ目以降の fragment は持たない。getClientRects の fragment、anchor の fragment 化は後の段階）。
+
+### クラウドのセッションの途中経過（続き 7、2026-11-01。dev171〜dev173。multicol の段階 1〜3）
+
+- 段階 1（parse と computed）: `columns`（shorthand、column-width と column-count を任意の順、auto 可）・`column-count`・`column-width`・`column-fill`・`column-span`・`break-before`・`break-after`・`break-inside`（`page-break-*` は別名）。
+  css/values.c・css/cascade.c・css/css.h・css/internal.h・bind/computed.c。style の fields は `multicol_count`・`multicol_width`・`multicol_fill`・`multicol_span`・`break_before`・`break_after`・`break_inside`。
+- 段階 2（横書きの block を column に割る。layout/multicol.c、block.c の `block_columns`、`block_owns_context` に multicol を足した）: 設計の節の通り。
+  leaf（行、分割しない block）に分け、column の高さに詰める。強制の break（always・all・column）、column の先頭の margin の切り捨て、rtl は右から。
+  balance は column 数に収まる最小の高さを二分探索で求め、`column-fill: auto` と定まった高さはその高さで切る。column 数を超える物は column の外へ続く（Chromium と同じ）。
+  中身の無い高さだけの block は column の終わりで 2 つ以上に割り、後の部分は continuation の box（`box->continuation`、中身無し）を後ろに挿す。割った block には `box->fragmented`（view transition の対象から外す）。
+  anchor の矩形は fragmented な box では node の bounds（部分の union）。
+- 段階 3（column-span: all）: 直接の子の spanner で flow を segment に分け、各 segment を別々に balance し、spanner は全幅で layout し直して挟む。
+- 縦書き: logical domain の中でそのまま動く。baseline: first は最初の column の最初の行、last は最も下の行（Chromium の測定）。`inline_last_baseline`・`inline_logical_central` に multicol を足した。
+- 測定: dev171（multicol 段階 2〜3）= 3,184 / 3,473（harness +6: flex・grid の baseline-multicol 001〜003 各 3 件、static +1: anchor-position-multicol-011、後退 1: view-transitions/fragmented-at-start-ignored）。
+  後退は割る block を fragmented にして直した（dev172）。dev172 = 3,188（91.79%、gap 285）: +4（anchor-position-multicol-001・002、anchor-name-multicol-004、fragmented-at-start-ignored）、後退 0。dev173（空の block の leaf の判定を直した source）= 3,188、後退 0。
+  dev170（3,178）からは +10。
+- Acid: dev173 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- multicol で残る ID（約 13）と原因:
+  - 絶対配置 box の fragment（OOF fragmentation）: anchor-position-multicol-003・004・006・007・008・fixed-001・colspan-001・002、anchor-name-multicol-003、anchor-scroll-003。
+    containing block が column に割れる時、abspos は割れる前の（積み重ねた）座標で置いてから column に割る。abspos 自身も column の終わりで割れ、anchor 関数の矩形はその fragment の union になる。
+    今の layout は abspos を layout_position の pass（root の layout の後）で置くので、column の情報（どの column が何処か）を box に持たせて、その pass で割る作りが要る。
+  - css-multicol/getclientrects-001（sideways-lr・sideways-rl の writing-mode）、multicol-span-all-rule-002（column-rule の描画）。
+- 直していない物（fidelity のみ、gap の ID には効かない）: orphans・widows（既定 2）の行の扱い、column-rule、割れた block の 2 つ目以降の背景・border（中身のある block の分）、floats、`display: inline-block` の multicol の shrink-to-fit の幅。
+
+### クラウドのセッションの途中経過（続き 8、2026-11-01。dev174・dev175。OOF fragmentation の調査と個別の ID）
+
+- 依頼者の判断で abspos の OOF fragmentation（約 10 件）を調べた。結論: 今回は作らなかった。理由と、作るときの設計を残す。
+  - 試験（anchor-position-multicol-003・004・006・007・008・fixed-001・colspan-001・002、anchor-name-multicol-003、anchor-scroll-003）は、
+    column に割れる containing block（fragmentainer をまたぐ relpos の block）、abspos 自身の fragment、spanner の containing block の連鎖（spanner の containing block は multicol container）、
+    縦書き・position-area・fixed を、それぞれ別の規則で試す。1 件ずつ Chromium の挙動を合わせる必要があり、見込みが立たない。
+  - 作るときの設計（stitched coordinates）: containing block が column に割れている box は、各 fragment の（x、y、高さ）を box に持つ（最初の fragment の origin からの相対。layout_absolute で動かされても崩れない）。
+    abspos は containing block を「fragment を積み重ねた 1 つの block」（幅 = column の幅、高さ = fragment の高さの和）として置く。anchor の矩形は、anchor の各 fragment（物理座標）を containing block の fragment の積み重ねの座標に写した union。
+    置いた abspos の矩形は、containing block の fragment の区間で切って、2 つ目以降は continuation の box（既に multicol で使っている `continuation`）にする。abspos の子（::before など）は同じ手順を繰り返す。
+    abspos box 自身の中身（in-flow の子）は最初の fragment にだけ置く（試験の target は中身が空）。
+  - 必要な変更: layout_box に fragment の配列、layout/position.c の containing block の矩形と置く pass、layout/anchor.c の矩形（`anchor_find_state`）、paint の continuation。数 session。
+- 直した ID（dev173 から +3）:
+  - flex の `align-self: self-start/self-end` を column の cross 軸（inline 軸）で item の direction に従わせた（layout/flex.c `flex_align_of`）。通った ID: flexbox-align-self-vert-002。
+  - 右から左（rtl）の block の行で、atomic な piece（inline-block など）と中立の piece を bidi の順（右から）に並べ直した（layout/inline.c `inline_reorder`、UBA の L1〜L2 を piece 単位で、右から左の文字を含む行は触らない）。
+    通った ID: flexbox-justify-content-horiz-006。
+  - getComputedStyle(el, "::before"・"::after") の used 値（top・left など）を pseudo-element の box から返す（layout_box の `pseudo`、bind_host の `pseudo_box`）。通った ID: position-try-pseudo-element。
+- 測定: dev174（flex の self-start、bidi の並べ直し）= 3,190、後退 0。dev175（pseudo の box）= 3,191 / 3,473（91.88%、gap 282）、後退 0。dev173 からは +3。
+- Acid: dev175 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 調べて直さなかった物（個別の原因）:
+  - 引き続き残る grid・flex: flexbox-sizing-vert-001（float の縦 flex の min/max-height）、align-items-007（viewBox だけの SVG は固有の幅が無く、flex の cross の fit-content で 0 から縮む。今は 200x100 を固有の大きさにしている）、
+    grid-limits-001（repeat(9999) の track の保持）、grid-gutters-as-percentage-001（auto-fill と百分率の gap）。
+  - @scope の入れ子（scope-nesting 約 12 の subtest、& と近さ）、@scope の中の @starting-style（@starting-style 自体が未実装）。
+  - position-try-cascade（!important・animation・transition に @position-try が勝たない）、position-try-backdrop（::backdrop の fallback）。
+  - 右から左の文字を含む行の bidi（文字の順の反転と piece の並べ直し、paint の glyph の向きまで要る）。
+- 未実施: asan、host-NAME の全件、target の確認。

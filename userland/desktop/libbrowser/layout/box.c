@@ -990,6 +990,7 @@ box_build_pseudo(
 	}
 
 	/* The box goes into the element's. */
+	generated->pseudo = pseudo;
 	box_append(box, generated);
 
 	/* The text as a text box, its characters copied into the tree's arena. */

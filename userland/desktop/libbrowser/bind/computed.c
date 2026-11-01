@@ -101,6 +101,13 @@ enum computed_property {
 	COMPUTED_LIST_STYLE_POSITION,
 	COMPUTED_BORDER_COLLAPSE,
 	COMPUTED_CAPTION_SIDE,
+	COMPUTED_COLUMN_COUNT,
+	COMPUTED_COLUMN_WIDTH,
+	COMPUTED_COLUMN_FILL,
+	COMPUTED_COLUMN_SPAN,
+	COMPUTED_BREAK_BEFORE,
+	COMPUTED_BREAK_AFTER,
+	COMPUTED_BREAK_INSIDE,
 	COMPUTED_FLEX_DIRECTION,
 	COMPUTED_FLEX_WRAP,
 	COMPUTED_FLEX_GROW,
@@ -369,6 +376,13 @@ static const struct computed_entry computed_entries[] = {
 	{ "list-style-position", COMPUTED_LIST_STYLE_POSITION },
 	{ "border-collapse", COMPUTED_BORDER_COLLAPSE },
 	{ "caption-side", COMPUTED_CAPTION_SIDE },
+	{ "column-count", COMPUTED_COLUMN_COUNT },
+	{ "column-width", COMPUTED_COLUMN_WIDTH },
+	{ "column-fill", COMPUTED_COLUMN_FILL },
+	{ "column-span", COMPUTED_COLUMN_SPAN },
+	{ "break-before", COMPUTED_BREAK_BEFORE },
+	{ "break-after", COMPUTED_BREAK_AFTER },
+	{ "break-inside", COMPUTED_BREAK_INSIDE },
 	{ "flex-direction", COMPUTED_FLEX_DIRECTION },
 	{ "flex-wrap", COMPUTED_FLEX_WRAP },
 	{ "flex-grow", COMPUTED_FLEX_GROW },
@@ -542,6 +556,11 @@ static const char *const computed_list_styles[] = { "disc", "circle", "square", 
 /* The names of border-collapse. */
 static const char *const computed_collapses[] = { "separate", "collapse" };
 static const char *const computed_caption_sides[] = { "top", "bottom" };
+static const char *const computed_column_fills[] = { "balance", "auto", "balance-all" };
+static const char *const computed_column_spans[] = { "none", "all" };
+static const char *const computed_breaks[] = {
+	"auto", "avoid", "always", "all", "avoid-page", "page", "left", "right", "recto", "verso", "column", "avoid-column", "region", "avoid-region"
+};
 
 /* The names of flex-direction, by enum css_flex_direction. */
 static const char *const computed_flex_directions[] = { "row", "row-reverse", "column", "column-reverse" };
@@ -1304,7 +1323,9 @@ computed_write(
 	/* Its box, for the used values. */
 	memset(&box, 0, sizeof(box));
 	found = 0;
-	if (window->host.node_box != NULL)
+	if ((computed_pseudo == CSS_PSEUDO_ELEMENT_BEFORE || computed_pseudo == CSS_PSEUDO_ELEMENT_AFTER) && window->host.pseudo_box != NULL)
+		found = window->host.pseudo_box(window->host.context, &element->node, computed_pseudo, &box);
+	else if (window->host.node_box != NULL)
 		found = window->host.node_box(window->host.context, &element->node, &box);
 
 	/* Serialize the ordinary resolved value before releasing its style copy. */
@@ -1961,6 +1982,33 @@ computed_write_keyword(
 		break;
 	case COMPUTED_BORDER_COLLAPSE:
 		error = computed_name(computed_collapses, 2, style->border_collapse, out);
+		break;
+	case COMPUTED_COLUMN_COUNT:
+		if (style->multicol_count <= 0)
+			error = computed_ascii("auto", out);
+		else
+			error = computed_number((float)style->multicol_count, out);
+		break;
+	case COMPUTED_COLUMN_WIDTH:
+		if (style->multicol_width <= 0.0f)
+			error = computed_ascii("auto", out);
+		else
+			error = computed_pixels(style->multicol_width, out);
+		break;
+	case COMPUTED_COLUMN_FILL:
+		error = computed_name(computed_column_fills, 3, style->multicol_fill, out);
+		break;
+	case COMPUTED_COLUMN_SPAN:
+		error = computed_name(computed_column_spans, 2, style->multicol_span, out);
+		break;
+	case COMPUTED_BREAK_BEFORE:
+		error = computed_name(computed_breaks, 14, style->break_before, out);
+		break;
+	case COMPUTED_BREAK_AFTER:
+		error = computed_name(computed_breaks, 14, style->break_after, out);
+		break;
+	case COMPUTED_BREAK_INSIDE:
+		error = computed_name(computed_breaks, 14, style->break_inside, out);
 		break;
 	case COMPUTED_CAPTION_SIDE:
 		error = computed_name(computed_caption_sides, 2, style->caption_side, out);
