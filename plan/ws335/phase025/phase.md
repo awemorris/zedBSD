@@ -73,7 +73,7 @@ git diff --check
 | `sh plan/ws335/tests/run-unit.sh tls buf` | `test-tls: PASS (2230 checks)` / `test-buf: PASS (1559755 checks)` / `run-unit: PASS`（ASan・UBSan） |
 | `sh plan/ws335/tests/run-unit.sh --win32 tls buf`（x86_64、Wine、static link） | `test-tls: PASS (2230 checks) (win32)` / `test-buf: PASS (1559755 checks) (win32)` / `run-unit: PASS` |
 | `BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: PASS`（warning 0、cc・clang・zedBSD の clang・llvm-mingw の 2 arch、名前の範囲） |
-| `sh plan/ws335/tests/run-unit.sh all` | test-* 12 と ct-* 12 を含む 25 本（他の module の既存の試験）が全部 PASS、FAIL 0 / `run-unit: PASS` |
+| `sh plan/ws335/tests/run-unit.sh all` | test-* 15 本（この Phase の 2 本を含む）と ct-* 10 本の計 25 本が全部 PASS、FAIL 0 / `run-unit: PASS` |
 | `git diff --check` | 出力なし |
 
 （test-buf の件数は 1559738 から、prefix 4 の見逃しを直した後の 1559755 になった。win32 も直した後に流し直し、表の件数のとおり。）
@@ -116,4 +116,3 @@ header と phase.md の食い違い: 見つからなかった。header の `sslc
 未実施: `run-ct.sh`（対象無し）、32 bit の size_t の機械・aarch64 Windows の実行（build のみ、check-skeleton）、実機・QEMU（範囲外）、RFC 5077 の session_ticket の値の照合、コードの規約の第三者のレビュー（自分の diff を §14 の checklist で見直した）。
 
 commit: bb6b23d212（実装と試験の初版）、最終版は Q1 への報告に書く。
-
