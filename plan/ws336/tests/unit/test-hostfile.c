@@ -516,6 +516,9 @@ test_lists(void)
 		{ "!!a,*", "!a", 0, -1 },
 		{ "!!a,*", "a", 0, 1 },
 		{ "a,!", "a", 0, 1 },
+		{ "!", "", 0, 0 },
+		{ "a,!", "", 0, 0 },
+		{ "!,*", "", 0, 1 },
 
 		/* Port-bearing names. */
 		{ "[host]:2222", "[host]:2222", 1, 1 },
@@ -625,6 +628,13 @@ test_authorized(void)
 	text_add_key(key1);
 	text_add("\n");
 	EXPECT_FIND(key1, 0, 1);
+
+	/* Lines of a CR alone, or of blanks and a CR, are blank lines: ignored and not counted. */
+	text_reset();
+	text_add("\r\n \t\r\n\r\n");
+	text_add_key(key1);
+	text_add("\r\n\r");
+	EXPECT_FIND(key1, 1, 0);
 
 	/* A line with options before the type is passed over and counted, with every option form. */
 	text_reset();
@@ -742,7 +752,6 @@ test_authorized(void)
 static void
 test_authorized_edges(void)
 {
-	size_t base;
 	size_t pad;
 	int found;
 	unsigned skipped;
@@ -752,8 +761,7 @@ test_authorized_edges(void)
 	text_reset();
 	text_add_key(key1);
 	text_add(" ");
-	base = file_size;
-	for (pad = base; pad < SSH_HOSTFILE_LINE_MAX; pad++)
+	for (pad = file_size; pad < SSH_HOSTFILE_LINE_MAX; pad++)
 		text_add("x");
 	CHECK_EQ(file_size, SSH_HOSTFILE_LINE_MAX);
 	text_add("\n");
@@ -867,6 +875,11 @@ test_known_basic(void)
 	EXPECT_KNOWN("beta", 22, key2, SSH_KNOWN_MATCH, 0);
 	EXPECT_KNOWN("beta", 22, key1, SSH_KNOWN_CHANGED, 0);
 	EXPECT_KNOWN("gamma", 22, key1, SSH_KNOWN_ABSENT, 0);
+
+	/* Lines of a CR alone are blank lines: ignored and not counted. */
+	text_reset();
+	text_add("\r\n \t\r\n\r");
+	EXPECT_KNOWN("host", 22, key1, SSH_KNOWN_ABSENT, 0);
 
 	/* A commented-out line names nothing. */
 	text_reset();
@@ -1077,7 +1090,10 @@ test_known_priority(void)
 static void
 test_known_lines(void)
 {
+	enum ssh_known_result result;
+	unsigned skipped;
 	size_t pad;
+	int error;
 
 	/* A @cert-authority line is passed over and never matches, whatever its host and key. */
 	text_reset();
@@ -1157,27 +1173,21 @@ test_known_lines(void)
 	EXPECT_KNOWN("host", 22, key1, SSH_KNOWN_ABSENT, 1);
 
 	/* Size is taken from the argument: a text cut in the middle of a line reads only the part. */
-	{
-		enum ssh_known_result result;
-		unsigned skipped;
-		int error;
-
-		text_reset();
-		text_add("host ");
-		text_add_key(key1);
-		text_add("\nother ");
-		text_add_key(key2);
-		text_add("\n");
-		result = SSH_KNOWN_MATCH;
-		skipped = 5;
-		error = ssh_known_hosts_check(file_text, 5U + 11U + 1U + 68U + 1U, "other", 22, key2, &result, &skipped);
-		CHECK_EQ(error, 0);
-		CHECK_EQ(result, SSH_KNOWN_ABSENT);
-		CHECK_EQ(skipped, 0);
-		error = ssh_known_hosts_check(NULL, 0, "other", 22, key2, &result, NULL);
-		CHECK_EQ(error, 0);
-		CHECK_EQ(result, SSH_KNOWN_ABSENT);
-	}
+	text_reset();
+	text_add("host ");
+	text_add_key(key1);
+	text_add("\nother ");
+	text_add_key(key2);
+	text_add("\n");
+	result = SSH_KNOWN_MATCH;
+	skipped = 5;
+	error = ssh_known_hosts_check(file_text, 5U + 11U + 1U + 68U + 1U, "other", 22, key2, &result, &skipped);
+	CHECK_EQ(error, 0);
+	CHECK_EQ(result, SSH_KNOWN_ABSENT);
+	CHECK_EQ(skipped, 0);
+	error = ssh_known_hosts_check(NULL, 0, "other", 22, key2, &result, NULL);
+	CHECK_EQ(error, 0);
+	CHECK_EQ(result, SSH_KNOWN_ABSENT);
 }
 
 /* Checks the arguments of the known_hosts functions: host name errors, sizes, missing arguments. */
@@ -1585,6 +1595,19 @@ test_remove(void)
 	CHECK(buf_contains(&out, "\nhost\nhost ssh-ed25519\n"));
 	CHECK(!buf_contains(&out, "ssh-rsa"));
 	CHECK(!buf_contains(&out, "!!!!"));
+	ssh_buf_free(&out);
+
+	/* A hashed line is kept even when the name asked for is the text of its hashed field. */
+	text_reset();
+	text_add(hashed_hosts);
+	text_add(" ");
+	text_add_key(key1);
+	text_add("\n");
+	ssh_buf_init(&out, SSH_HOSTFILE_MAX, 0);
+	error = ssh_known_hosts_remove(file_text, file_size, hashed_hosts, 22, &out, &removed);
+	CHECK_EQ(error, 0);
+	CHECK_EQ(removed, 0);
+	CHECK_EQ(out.size, file_size);
 	ssh_buf_free(&out);
 
 	/* A line over the limit is kept even when its first field names the host. */
