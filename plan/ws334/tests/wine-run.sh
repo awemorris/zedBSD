@@ -131,6 +131,15 @@ if [ "$mode" = controls ]; then
 	xdotool mousemove $((X + 25)) $((Y + 16)) click 1
 	sleep 8
 	import -window root "$out/back.png"
+	# The URL the box showed, typed back (a file: URL of a drive's path opens).
+	xdotool mousemove $((X + 400)) $((Y + 16)) click 1
+	sleep 2
+	xdotool key ctrl+a
+	xdotool type --delay 60 "$(tr -d '\r\n' < "$out/clipboard.txt")"
+	sleep 2
+	xdotool key Return
+	sleep 8
+	import -window root "$out/retyped.png"
 fi
 wineserver -k 2> /dev/null
 wait
@@ -192,18 +201,20 @@ cp "$out/controls/back.png" "$review29/back.png" 2> /dev/null
 navigations=$(grep '^ZBROWSER NAVIGATE path=' "$out/controls/first.txt" | sed 's/ title=.*//; s/.*[\\/]//')
 typed=$(echo "$navigations" | sed -n 2p)
 back=$(echo "$navigations" | sed -n 3p)
-if [ "$typed" = about.html ] && [ "$back" = start.html ]; then
-	echo "wine-run: title bar: the typed about.html opened, Back returned to start.html ($review29/titlebar.png, typed.png, back.png)"
+retyped=$(echo "$navigations" | sed -n 4p)
+cp "$out/controls/retyped.png" "$review29/retyped.png" 2> /dev/null
+if [ "$typed" = about.html ] && [ "$back" = start.html ] && [ "$retyped" = about.html ]; then
+	echo "wine-run: title bar: the typed about.html opened, Back returned to start.html, the shown file: URL typed back opened about.html ($review29/titlebar.png, typed.png, back.png, retyped.png)"
 else
 	echo "wine-run: title bar: the pages opened were: $(echo $navigations) ($out/controls/first.txt)"
 	status=1
 fi
 
 # 6. The clipboard.
-if grep -q 'about\.html' "$out/controls/clipboard.txt" 2> /dev/null; then
-	printf "wine-run: clipboard: the box's text copied: %s\n" "$(head -c 200 "$out/controls/clipboard.txt" | tr -d '\r')"
+if grep -q '^file:///[A-Za-z]:/.*about\.html' "$out/controls/clipboard.txt" 2> /dev/null; then
+	printf "wine-run: clipboard: the box's text (a file: URL, with / as the separators) copied: %s\n" "$(head -c 200 "$out/controls/clipboard.txt" | tr -d '\r')"
 else
-	echo "wine-run: clipboard: the box's text did not reach the clipboard ($out/controls/clipboard.txt)"
+	echo "wine-run: clipboard: the box's text is not a file: URL of the drive's path on the clipboard ($out/controls/clipboard.txt)"
 	status=1
 fi
 

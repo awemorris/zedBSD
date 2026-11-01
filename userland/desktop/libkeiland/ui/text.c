@@ -53,8 +53,9 @@
 #define O_BINARY		0
 #endif
 
-/* The ellipsis put where a string is cut, in UTF-8. */
+/* The ellipsis put where a string is cut, in UTF-8, and the three dots used when no font has it. */
 #define TEXT_ELLIPSIS		"\xe2\x80\xa6"
+#define TEXT_ELLIPSIS_PLAIN	"..."
 
 /* The code point drawn for bytes that are not UTF-8. */
 #define TEXT_REPLACEMENT	0xfffdU
@@ -64,6 +65,7 @@ static const struct kl_glyph *text_glyph(struct kl_text *text, uint32_t codepoin
 static struct kl_glyph *text_slot(struct kl_text *text, uint32_t key);
 static int text_render(struct kl_text *text, int face_index, unsigned glyph_index, unsigned pixels, int bold, struct kl_glyph *glyph);
 static int text_set_size(struct kl_text_face *face, unsigned pixels);
+static const char *text_ellipsis(struct kl_text *text);
 static void text_clear(struct kl_text *text);
 static int text_render_color(struct kl_text *text, unsigned glyph_index, unsigned pixels, struct kl_glyph *glyph);
 
@@ -372,6 +374,8 @@ kl_text_fit(
 	size_t length;
 	size_t index;
 	size_t kept;
+	size_t mark_length;
+	const char *mark;
 	int ellipsis;
 	int used;
 	int total;
@@ -387,8 +391,10 @@ kl_text_fit(
 		return length;
 	}
 
-	/* The characters that fit together with the ellipsis. */
-	ellipsis = kl_text_width(text, TEXT_ELLIPSIS, sizeof(TEXT_ELLIPSIS) - 1U, pixels, bold);
+	/* The ellipsis a font has (three dots when none does), and the characters that fit together with it. */
+	mark = text_ellipsis(text);
+	mark_length = strlen(mark);
+	ellipsis = kl_text_width(text, mark, mark_length, pixels, bold);
 	used = 0;
 	kept = 0;
 	index = 0;
@@ -403,17 +409,45 @@ kl_text_fit(
 			break;
 
 		/* A character that does not fit the buffer with the ellipsis also ends it. */
-		if (index + sizeof(TEXT_ELLIPSIS) > size)
+		if (index + mark_length + 1U > size)
 			break;
 		kept = index;
 	}
 
 	/* The kept characters and the ellipsis. */
 	memcpy(out, string, kept);
-	memcpy(out + kept, TEXT_ELLIPSIS, sizeof(TEXT_ELLIPSIS));
+	memcpy(out + kept, mark, mark_length + 1U);
 
 	/* Reports the length of the cut string. */
-	return kept + sizeof(TEXT_ELLIPSIS) - 1U;
+	return kept + mark_length;
+}
+
+/*
+ * Chooses the mark a cut string ends with: the ellipsis when a font has
+ * it (the main one, its companion or the emoji one), three dots when none
+ * does (the main font's missing-glyph box is never drawn for it).
+ */
+static const char *
+text_ellipsis(
+	struct kl_text *text)
+{
+	unsigned glyph_index;
+
+	/* The main face and its companion. */
+	glyph_index = truetype_glyph_index(text->faces[0].face, 0x2026U);
+	if (glyph_index == 0U && text->face_count > 1)
+		glyph_index = truetype_glyph_index(text->faces[1].face, 0x2026U);
+
+	/* The emoji font, when it is open (it is not opened for this). */
+	if (glyph_index == 0U && text->faces[2].face != NULL)
+		glyph_index = truetype_glyph_index(text->faces[2].face, 0x2026U);
+
+	/* The ellipsis when a font has it. */
+	if (glyph_index != 0U)
+		return TEXT_ELLIPSIS;
+
+	/* Three dots otherwise. */
+	return TEXT_ELLIPSIS_PLAIN;
 }
 
 /*

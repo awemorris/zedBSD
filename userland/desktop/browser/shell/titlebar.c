@@ -52,6 +52,7 @@ static const struct kl_control_entry titlebar_controls[] = {
 static void titlebar_queue(struct shell_titlebar *titlebar, int kind, uint32_t id, uint32_t detail, const char *text);
 static int titlebar_state(struct shell_titlebar *titlebar, int can_back, int can_forward, const char *path);
 static size_t titlebar_scheme_length(const char *location);
+static int titlebar_is_system_path(const char *location, int *share);
 
 /*
  * Declares the window's titlebar controls; the window gives the titlebar
@@ -277,6 +278,8 @@ titlebar_state(
 	char url[SHELL_TITLEBAR_TEXT + 8U];
 	size_t scheme_length;
 	size_t count;
+	size_t index;
+	int share;
 	unsigned back;
 	unsigned forward;
 	char *part;
@@ -286,17 +289,33 @@ titlebar_state(
 	/*
 	 * A location with a scheme (https:, about:, file:) is a URL, edited as
 	 * it is; any other is a file's path, edited as a file: URL (BUG-206: an
-	 * https: page's URL got file:// before it).
+	 * https: page's URL got file:// before it).  A Windows path (a drive's,
+	 * "Z:\x", or a network share's) is also a file's path, shown as the
+	 * URL it opens as: file:///Z:/x, with the separators turned
+	 * (file://host/x for a share).
 	 */
-	scheme_length = titlebar_scheme_length(path);
-	if (scheme_length != 0U) {
-		snprintf(url, sizeof(url), "%s", path);
+	snprintf(copy, sizeof(copy), "%s", path);
+	if (titlebar_is_system_path(path, &share)) {
+		scheme_length = 0;
+		for (index = 0; copy[index] != '\0'; index++) {
+			if (copy[index] == '\\')
+				copy[index] = '/';
+		}
+		if (share)
+			snprintf(url, sizeof(url), "file:%s", copy);
+		else
+			snprintf(url, sizeof(url), "%s/%s", TITLEBAR_FILE_SCHEME, copy);
 	} else {
-		snprintf(url, sizeof(url), "%s%s", TITLEBAR_FILE_SCHEME, path);
+		scheme_length = titlebar_scheme_length(path);
+		if (scheme_length != 0U) {
+			snprintf(url, sizeof(url), "%s", path);
+		} else {
+			snprintf(url, sizeof(url), "%s%s", TITLEBAR_FILE_SCHEME, path);
+		}
 	}
 
 	/* The parts after the scheme, between the slashes (the first ones give way when there are too many): a URL's host, then its path's. */
-	snprintf(copy, sizeof(copy), "%s", path + scheme_length);
+	memmove(copy, copy + scheme_length, strlen(copy + scheme_length) + 1U);
 	count = 0;
 	part = copy;
 	while (part != NULL && *part != '\0') {
@@ -352,6 +371,38 @@ titlebar_state(
 
 	/* Succeeded: the titlebar shows the state. */
 	return 0;
+}
+
+/*
+ * Tells whether a location is a Windows file path: a drive's ("Z:\x" or
+ * "Z:/x", a letter, a colon and a separator, which a URL's scheme is never
+ * followed by) or a network share's ("\\host\x"); *share says which.
+ */
+static int
+titlebar_is_system_path(
+	const char *location,
+	int *share)
+{
+	char c;
+
+	/* A network share: two backslashes. */
+	*share = 0;
+	if (location[0] == '\\' && location[1] == '\\') {
+		*share = 1;
+		return 1;
+	}
+
+	/* A drive: a letter, a colon and a separator. */
+	c = location[0];
+	if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')))
+		return 0;
+	if (location[1] != ':')
+		return 0;
+	if (location[2] != '\\' && location[2] != '/')
+		return 0;
+
+	/* Succeeded: a drive's path. */
+	return 1;
 }
 
 /*
