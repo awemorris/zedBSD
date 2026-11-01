@@ -245,6 +245,17 @@ static const struct icon_part icon_parts[GLASS_ICON_COUNT][ICON_PARTS] = {
 		{ ICON_DOT, 18.0f, 12.0f, 1.9f, 0.0f, 0.0f, 0.0f },
 		{ ICON_END, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }
 	},
+	/*
+	 * Reload: most of a circle, open at the top, and an arrowhead at its
+	 * upper left end pointing the way it turns (clockwise), as libkeiland's
+	 * own refresh icon draws it.
+	 */
+	{
+		{ ICON_ARC, 12.0f, 12.0f, 7.0f, 306.0f, 270.0f, 0.0f },
+		{ ICON_SEGMENT, 6.34f, 7.88f, 2.63f, 8.90f, 0.0f, 0.0f },
+		{ ICON_SEGMENT, 6.34f, 7.88f, 6.52f, 11.72f, 0.0f, 0.0f },
+		{ ICON_END, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f }
+	},
 	/* Volume 0: a speaker (ws100-p004). */
 	{
 		{ ICON_SEGMENT, 3.5f, 9.5f, 3.5f, 14.5f, 0.0f, 0.0f },

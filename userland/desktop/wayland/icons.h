@@ -40,6 +40,8 @@ enum glass_icon {
 	GLASS_ICON_PLUS,
 	GLASS_ICON_CLOSE,
 	GLASS_ICON_OVERFLOW,
+	/* A page's reload: a turning arrow. */
+	GLASS_ICON_RELOAD,
 	/* The system bar's volume (ws100-p004): a speaker with no, one, two or three waves, and muted. */
 	GLASS_ICON_VOLUME_0,
 	GLASS_ICON_VOLUME_1,

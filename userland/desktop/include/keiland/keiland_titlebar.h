@@ -71,9 +71,10 @@ struct kl_titlebar;
 
 /*
  * A page's reload (KL_VERSION 106): a square with the reload icon, beside
- * the navigation, where libkeiland draws the titlebar itself (Windows).
- * The compositor's titlebar has no such role yet and shows it as a
- * generic control with its label.
+ * the navigation.  The compositor's titlebar protocol has the role from
+ * its version 6 (role 17); to an older compositor libkeiland sends a
+ * generic control instead, shown with its label.  Where libkeiland draws
+ * the titlebar itself (Windows) the icon is its own.
  */
 #define KL_CONTROL_RELOAD		17U
 

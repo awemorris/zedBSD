@@ -63,7 +63,7 @@ request（変更は `begin_update`〜`commit` の間だけ。menu と同じ tran
 | 1 | `begin_update` | `uint serial` | |
 | 2 | `commit` | `uint serial` | 変更をまとめて表示（途中を見せない、仕様案 §22） |
 | 3 | `set_mode` | `uint mode` | `menu = 0`（既定）、`controls = 1`、`tabs = 2` |
-| 4 | `add_control` | `uint id`、`uint role`、`uint priority`、`uint group`、`string label` | 末尾に control を足す |
+| 4 | `add_control` | `uint id`、`uint role`、`uint priority`、`uint group`、`string label` | 末尾に control を足す。**version 6**（2026-11-02、[BUG-396](../bugs/BUG-396.md)）: role `reload = 17` を受ける。version 6 未満の client の role 17 は `invalid_value` |
 | 5 | `remove_control` | `uint id` | |
 | 6 | `set_control_label` | `uint id`、`string label` | 表示と tooltip・overflow の行の名前 |
 | 7 | `set_control_state` | `uint id`、`uint enabled`、`uint checked` | |
@@ -90,8 +90,11 @@ event:
 | 6 | `overflow_menu_opened` | — | overflow の popup が開いた（client が menu を最新にする機会、menu の `opened` と同じ役） |
 
 - **role**（仕様案 §8）: `back = 1`、`forward = 2`、`home = 3`、`up = 4`、`breadcrumb = 5`、`search = 6`、`view_grid = 7`、`view_list = 8`、
-  `view_columns = 9`、`sort = 10`、`filter = 11`、`sidebar = 12`、`preview = 13`、`progress = 14`、`primary_action = 15`、`generic = 16`。
+  `view_columns = 9`、`sort = 10`、`filter = 11`、`sidebar = 12`、`preview = 13`、`progress = 14`、`primary_action = 15`、`generic = 16`、
+  `reload = 17`（version 6 から）。
   zdesktop は role で icon・大きさ・形（丸い button、欄、segment、輪）を決める。`generic` は label の text の pill。
+  `reload` は page の再読み込みの四角い button（回る矢印の icon、`icons.c` の `GLASS_ICON_RELOAD`）で、back・forward・up・home と同じ左に並ぶ。
+  libkeiland の `KL_CONTROL_RELOAD`（17、KL_VERSION 106）は、version 6 の compositor には 17 を、それより古い compositor には `generic` を label 付きで送る。
 - **priority**（縮退の順、仕様案 §12）: `primary = 0`（戻る・進む等、最後まで残る）、`normal = 1`、`secondary = 2`（先に overflow へ）。
 - **group**: 0 以外の同じ値の続く control は 1 つの segment の pill に並べる（`view_grid`・`view_list` の切替、checked が選ばれた面）。
 - **overflow**（仕様案 §6 の common element の overflow button）: control ではなく zdesktop が CONTROLS・TABS の Presentation の右端に

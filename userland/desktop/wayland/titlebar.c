@@ -26,8 +26,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The highest role, priority, mode, tab flags, tab strip options and focus mode. */
+/*
+ * The highest role before version 6 and since, priority, mode, tab flags,
+ * tab strip options and focus mode.
+ */
 #define TITLEBAR_ROLE_LAST		16U
+#define TITLEBAR_ROLE_LAST_RELOAD	KWL_CONTROL_RELOAD
 #define TITLEBAR_PRIORITY_LAST		2U
 #define TITLEBAR_MODE_LAST		3U
 #define TITLEBAR_FLAGS_ALL		7U
@@ -90,6 +94,9 @@
 
 /* The version whose breadcrumb takes a value: KWL_BREADCRUMB_BOXED (ws074-p229, the browser's address). */
 #define TITLEBAR_BOXED_VERSION		5U
+
+/* The version that has the reload role (KWL_CONTROL_RELOAD). */
+#define TITLEBAR_RELOAD_VERSION		6U
 
 static uint32_t titlebar_word(const unsigned char *bytes, size_t offset);
 static int titlebar_string(const unsigned char *bytes, size_t size, size_t offset, const char **text, size_t *next);
@@ -971,6 +978,7 @@ titlebar_add_control(
 	uint32_t id;
 	uint32_t role;
 	uint32_t priority;
+	uint32_t last;
 	int error;
 
 	/* The arguments. */
@@ -991,8 +999,11 @@ titlebar_add_control(
 		return error;
 	}
 
-	/* A known role and priority. */
-	if (role == 0U || role > TITLEBAR_ROLE_LAST || priority > TITLEBAR_PRIORITY_LAST) {
+	/* A role the client's version knows, and a known priority. */
+	last = TITLEBAR_ROLE_LAST;
+	if (titlebar->version >= TITLEBAR_RELOAD_VERSION)
+		last = TITLEBAR_ROLE_LAST_RELOAD;
+	if (role == 0U || role > last || priority > TITLEBAR_PRIORITY_LAST) {
 		error = titlebar_fail(titlebar, ERROR_INVALID_VALUE, "an unknown role or priority");
 		return error;
 	}

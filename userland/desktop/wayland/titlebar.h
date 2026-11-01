@@ -41,6 +41,9 @@
 #define KWL_CONTROL_PRIMARY_ACTION	15U
 #define KWL_CONTROL_GENERIC		16U
 
+/* A page's reload (since version 6): a square with the reload icon, beside the navigation. */
+#define KWL_CONTROL_RELOAD		17U
+
 /* The controls' priorities: the order they give way in when the room runs short. */
 #define KWL_PRIORITY_PRIMARY		0U
 #define KWL_PRIORITY_NORMAL		1U

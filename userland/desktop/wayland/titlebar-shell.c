@@ -1591,12 +1591,13 @@ static unsigned
 shell_side(
 	const struct kwl_titlebar_control *control)
 {
-	/* The navigation on the left, the breadcrumb between, the rest on the right. */
+	/* The navigation (with a page's reload) on the left, the breadcrumb between, the rest on the right. */
 	switch (control->role) {
 	case KWL_CONTROL_BACK:
 	case KWL_CONTROL_FORWARD:
 	case KWL_CONTROL_UP:
 	case KWL_CONTROL_HOME:
+	case KWL_CONTROL_RELOAD:
 		return SIDE_LEFT;
 	case KWL_CONTROL_BREADCRUMB:
 		return SIDE_CRUMB;
@@ -3037,6 +3038,8 @@ shell_icon(
 		return GLASS_ICON_PREVIEW;
 	case KWL_CONTROL_PRIMARY_ACTION:
 		return GLASS_ICON_PLUS;
+	case KWL_CONTROL_RELOAD:
+		return GLASS_ICON_RELOAD;
 	default:
 		break;
 	}
