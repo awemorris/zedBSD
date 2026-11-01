@@ -278,6 +278,8 @@ struct bind_window {
 	struct vm_cell *animation_hook;
 	/* The prelude's function that gives a restricted view of another window (postMessage only), for an opaque origin (NULL until the prelude sets it). */
 	struct vm_cell *window_wrapper;
+	/* The prelude's function called when the window is retired (NULL until the prelude sets it). */
+	struct vm_cell *detach_hook;
 	/* The prelude's function that gives the one window proxy an <iframe> element has (it follows the element's current document) (NULL until the prelude sets it). */
 	struct vm_cell *frame_proxy_maker;
 };

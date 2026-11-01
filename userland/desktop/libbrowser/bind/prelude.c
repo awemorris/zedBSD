@@ -44,6 +44,7 @@ static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_va
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_detach_hook(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_frame_proxy_maker(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_frame_global(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_frame_opaque(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -507,6 +508,28 @@ prelude_view_transition(
 		return 0;
 	if (window->host.view_transition(window->host.context, (int)step) != 0)
 		*result = VM_VALUE_TRUE;
+	return 0;
+}
+
+/* setDetachHook(function): the function called when this window is retired. */
+static int
+prelude_set_detach_hook(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value hook;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	hook = js_argument(args, count, 0);
+	if (!vm_value_is_callable(hook))
+		return vm_throw_type_error(realm, "setDetachHook: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->detach_hook = vm_value_as_cell(hook);
 	return 0;
 }
 
@@ -1603,6 +1626,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "viewTransition", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setDetachHook", 1, prelude_set_detach_hook, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setDetachHook", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "setFrameProxyMaker", 1, prelude_set_frame_proxy_maker, NULL, &function);
 	if (status == 0)
