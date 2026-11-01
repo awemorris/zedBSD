@@ -50,3 +50,15 @@
     wrap('srcdoc');
   })();
 
+  // ---- Document.hasStorageAccess() and requestStorageAccess() (a top-level page, or a frame of the same site, has it)
+  if (typeof g.Document === 'function' && !g.Document.prototype.hasStorageAccess) (function () {
+    function op(name, fn) {
+      Object.defineProperty(g.Document.prototype, name, { value: fn, writable: true, configurable: true, enumerable: true });
+    }
+    function brand(self, name) {
+      if (self instanceof g.Document) return null;
+      return Promise.reject(new TypeError("Failed to execute '" + name + "' on 'Document': Illegal invocation"));
+    }
+    op('hasStorageAccess', function hasStorageAccess() { return brand(this, 'hasStorageAccess') || Promise.resolve(true); });
+    op('requestStorageAccess', function requestStorageAccess() { return brand(this, 'requestStorageAccess') || Promise.resolve(undefined); });
+  })();

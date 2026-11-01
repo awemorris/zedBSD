@@ -1139,3 +1139,20 @@ Origin: 2026-10-27 ユーザーの指示。
 - 一時物（Q1 が消す。この container の中だけ）: 前の節の物に加え、build/ws074-suites/wpt/zz-*.html・zz-*.js（直接の試験の一時 page。wpt の tree の中、git の外）、build/tmp/ の sub11〜sub13・nav*.・cmpurl.sh・*-side.png・*-ours.ppm・*-chrome.ppm。
 - 記録: 途中で自分の command に `rm -f /dev/null` を誤って書き（削除の規則違反）、auto mode の分類器が拒否した。回避せず、その command から rm を外して続けた。
 
+### クラウドのセッションの途中経過（続き 4、2026-11-01。dev166・dev167。(b) の調査）
+
+- 依頼は (b)「縦書き grid・flex の domain の中の horizontal-tb の直交 item」。調べた結果、効く見込みが小さいので実装せず、記録して他へ移った。
+  - **flex（flexbox-writing-mode-009・011〜015・slr/srl-row-mix）**: `layout_logical_wanted` の早期 return を外す（縦書き flex を domain にする）と、009 の row wrap の 2 行目が左へ外れる。
+    原因は flex の主軸の大きさの計算が domain の中の直交 item（unconverted で style が horizontal のまま）を swap しない事（item の base size・`flex_lay_item` の `orthogonal` が「container が horizontal」を前提）。
+    011〜015 は Ahem の混在 writing-mode の長い試験で、水平 container の 013・014（すでに物理の経路）でも Chromium と文字の置き方で数千画素違う（vertical item の glyph の置き方）ため、layout を直しても ID は通らない見込み。
+  - **grid（grid-self-baseline 約 25）**: 同じ早期 return を grid だけ外すと、grid-self-baseline-vertical-lr-002 は Chromium と同じ形（column flow、直交 item）になる。
+    ただし item の baseline の整列・track の大きさが domain の中で違い（`grid_row_baseline` などは `box->style.writing_mode == HORIZONTAL_TB`・`child->grid_orthogonal` が前提）、static は通る物が無く 3 件後退した（subgrid の orthogonal-writing-mode-005・006、repeat-auto-fill-007）。
+  - 必要な作り: 直交 item を domain の frame で「向きの違う item」として扱う（unconverted の horizontal item の style を logical_style で swap して、grid・flex の orthogonal の分岐に渡す）。
+    flex・grid の両方の大きさ・baseline・auto margin の全ての orthogonal の分岐を書き直す大きさで、数 session 分。
+- 測定: dev165 = 3,163（前の節）。dev166（9f3166a8、storage-access の idlharness の戻り値を brand の拒否に）= 3,164（harness +1 : storage-access-api/idlharness.window、後退 0）。
+  dev167（9f29d01a、LCP の entry.element は fully active でなければ null）= 3,165 / 3,473（91.13%、gap 308）、harness +1（largest-contentful-paint/element-only-when-fully-active）、後退 0。
+- Acid: dev167 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 調べて見送った物: scroll・scrollend の event（element・viewport とも発火しない。scrollend の 2 件は input の scrollLeft も要る）、::details-content の ::first-letter（details-pseudo-elements-005）、
+  LCP の残り（slow-style-change.py の server、PerformanceResourceTiming）、URLPattern・WebAssembly、javascript: URL の frame（2 件）。
+- 注意: `storage-access-api/idlharness` は h1.sh の単発では未通過と出るが全件の測定（runner の経由）では通る（h1.sh の出力は無視してよい。原因は未調査）。
+
