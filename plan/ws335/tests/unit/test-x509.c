@@ -71,6 +71,9 @@
 #define HX_CODE		"06082b06010505070303"
 #define HX_ANY		"0604551d2500"
 
+/* Records one check that a view of a parsed structure holds the expected bytes; an absent view is a failed check, not a crash. */
+#define CHECK_VIEW(view, expected, size) check_view((view), (const unsigned char *)(expected), (size), __FILE__, __LINE__, #view)
+
 /*
  * A structure being built: the bytes and the writer over them.  The
  * writer's error flag is set when the room ran out or a part was bad.
@@ -87,6 +90,7 @@ struct blob {
  */
 struct cert_spec {
 	int version;
+	const char *version_raw;
 	const char *serial;
 	const struct blob *tbs_alg;
 	const struct blob *outer_alg;
@@ -97,6 +101,7 @@ struct cert_spec {
 	int uid1;
 	int uid2;
 	int uid_swapped;
+	const char *uid1_raw;
 	const struct blob *extensions;
 	const char *extensions_raw;
 	const char *signature;
@@ -145,6 +150,35 @@ static unsigned long limbo_certs;
 static unsigned long limbo_parsed;
 static unsigned long limbo_success_certs;
 static unsigned long limbo_success_failed;
+
+/* Compares a view with expected bytes; a NULL view fails the check without being read. */
+static int
+check_view(
+	const unsigned char *view,
+	const unsigned char *expected,
+	size_t size,
+	const char *file,
+	int line,
+	const char *text)
+{
+	/* An absent view cannot hold the bytes. */
+	if (view == NULL)
+		return check_one(0, file, line, text);
+	return check_bytes(view, expected, size, file, line, text);
+}
+
+/* Returns the byte at index of a view, or -1 when the view is absent or too short. */
+static int
+view_byte(
+	const unsigned char *view,
+	size_t size,
+	size_t index)
+{
+	/* Nothing to read in an absent or short view. */
+	if (view == NULL || index >= size)
+		return -1;
+	return view[index];
+}
 
 /* Returns the next pseudo-random 32-bit value. */
 static uint32_t
@@ -610,8 +644,9 @@ parse_blob(
  * Builds a certificate from a spec: Certificate { tbsCertificate,
  * signatureAlgorithm, signatureValue }.  The tbs offset and size are given
  * when the pointers are not NULL.  A part is left out when its pointer is
- * NULL: the validity, the extensions; the version when version < 0; the
- * unique identifiers when uid1 and uid2 are zero.
+ * NULL: the validity, the extensions; the version when version < 0 and
+ * version_raw is NULL (version_raw, hex, is the contents of the [0] when
+ * given); the unique identifiers when uid1 and uid2 are zero.
  */
 static void
 build_cert(
@@ -630,7 +665,9 @@ build_cert(
 
 	/* The tbsCertificate contents, field by field. */
 	blob_init(&tbs_body);
-	if (spec->version >= 0) {
+	if (spec->version_raw != NULL)
+		blob_tlv(&tbs_body, 0xa0U, spec->version_raw);
+	else if (spec->version >= 0) {
 		blob_init(&inner);
 		version_value = (unsigned char)spec->version;
 		der_put(&inner.writer, CRYC_DER_INTEGER, &version_value, 1);
@@ -649,7 +686,9 @@ build_cert(
 		blob_tlv(&tbs_body, 0x82U, "00aa");
 		blob_tlv(&tbs_body, 0x81U, "00bb");
 	} else {
-		if (spec->uid1)
+		if (spec->uid1_raw != NULL)
+			blob_tlv(&tbs_body, 0x81U, spec->uid1_raw);
+		else if (spec->uid1)
 			blob_tlv(&tbs_body, 0x81U, "00bb");
 		if (spec->uid2)
 			blob_tlv(&tbs_body, 0x82U, "00aa");
@@ -1076,6 +1115,18 @@ test_signature_algorithms(void)
 	make_pss(&alg, "0500", HEX_MGF256, "020120", NULL);
 	check_algorithm(&alg, EINVAL, CRYC_SIG_NONE, 0);
 
+	/* A SET where a SEQUENCE belongs, in the parameters, the hash field, the mask field or MGF1's parameters: malformed. */
+	blob_init(&parameters);
+	blob_tlv(&parameters, CRYC_DER_SET, "");
+	make_alg(&alg, "1.2.840.113549.1.1.10", &parameters);
+	check_algorithm(&alg, EINVAL, CRYC_SIG_NONE, 0);
+	make_pss(&alg, "310b0609608648016503040201", HEX_MGF256, "020120", NULL);
+	check_algorithm(&alg, EINVAL, CRYC_SIG_NONE, 0);
+	make_pss(&alg, HEX_SHA256, "311a06092a864886f70d010108300d06096086480165030402010500", "020120", NULL);
+	check_algorithm(&alg, EINVAL, CRYC_SIG_NONE, 0);
+	make_pss(&alg, HEX_SHA256, "301a06092a864886f70d010108310d06096086480165030402010500", "020120", NULL);
+	check_algorithm(&alg, EINVAL, CRYC_SIG_NONE, 0);
+
 	/* The parameters absent: outside the range; an empty SEQUENCE is all defaults: outside the range; NULL: malformed. */
 	make_alg(&alg, "1.2.840.113549.1.1.10", NULL);
 	check_algorithm(&alg, 0, CRYC_SIG_UNSUPPORTED, 0);
@@ -1239,9 +1290,9 @@ test_rsa_keys(void)
 	error = cryc_x509_public_key(held_copy(spki.data, blob_size(&spki)), blob_size(&spki), &key);
 	CHECK(error == 0);
 	CHECK(key.rsa.n_size == 256U);
-	CHECK_BYTES(key.rsa.n, modulus, 256U);
+	CHECK_VIEW(key.rsa.n, modulus, 256U);
 	CHECK(key.rsa.e_size == 3U);
-	CHECK_BYTES(key.rsa.e, exponent, 3U);
+	CHECK_VIEW(key.rsa.e, exponent, 3U);
 	CHECK(key.curve == CRYC_CURVE_NONE && key.point == NULL && key.point_size == 0U);
 
 	/* A 4096-bit modulus with a one-byte exponent, and a one-byte modulus with exponent 3: no size limit is applied here. */
@@ -1249,12 +1300,12 @@ test_rsa_keys(void)
 	make_rsa_public_key(&key_bytes, modulus, 512, exponent, 1);
 	make_spki(&spki, &alg, &key_bytes, 0);
 	error = cryc_x509_public_key(held_copy(spki.data, blob_size(&spki)), blob_size(&spki), &key);
-	CHECK(error == 0 && key.type == CRYC_KEY_RSA && key.rsa.n_size == 512U && key.rsa.e_size == 1U && key.rsa.e[0] == 3);
+	CHECK(error == 0 && key.type == CRYC_KEY_RSA && key.rsa.n_size == 512U && key.rsa.e_size == 1U && view_byte(key.rsa.e, key.rsa.e_size, 0) == 3);
 	modulus[0] = 0x0f;
 	make_rsa_public_key(&key_bytes, modulus, 1, exponent, 1);
 	make_spki(&spki, &alg, &key_bytes, 0);
 	error = cryc_x509_public_key(held_copy(spki.data, blob_size(&spki)), blob_size(&spki), &key);
-	CHECK(error == 0 && key.type == CRYC_KEY_RSA && key.rsa.n_size == 1U && key.rsa.n[0] == 0x0f && key.rsa.e[0] == 0x03);
+	CHECK(error == 0 && key.type == CRYC_KEY_RSA && key.rsa.n_size == 1U && view_byte(key.rsa.n, key.rsa.n_size, 0) == 0x0f && view_byte(key.rsa.e, key.rsa.e_size, 0) == 0x03);
 
 	/* Refusals: a zero modulus or exponent, a negative or non-minimal INTEGER, an extra INTEGER, a missing exponent, bytes after the key, a key that is not a SEQUENCE. */
 	blob_init(&key_bytes);
@@ -1301,8 +1352,14 @@ test_rsa_keys(void)
 	make_spki(&spki, &alg, &key_bytes, 0);
 	check_key(&spki, EINVAL, CRYC_KEY_NONE);
 	make_alg(&alg, "1.2.840.113549.1.1.1", &part_null);
+	make_spki(&spki, &alg, &key_bytes, 0);
+	check_key(&spki, 0, CRYC_KEY_RSA);
+	exponent[0] = 0x10;
+	make_rsa_public_key(&key_bytes, modulus, 256, exponent, 1);
 	make_spki(&spki, &alg, &key_bytes, 1);
 	check_key(&spki, EINVAL, CRYC_KEY_NONE);
+	make_spki(&spki, &alg, &key_bytes, 0);
+	check_key(&spki, 0, CRYC_KEY_RSA);
 }
 
 /* Checks the EC keys. */
@@ -1323,14 +1380,14 @@ test_ec_keys(void)
 	check_key(&spki, 0, CRYC_KEY_EC);
 	error = cryc_x509_public_key(held_copy(spki.data, blob_size(&spki)), blob_size(&spki), &key);
 	CHECK(error == 0 && key.curve == CRYC_CURVE_P256 && key.point_size == 65U);
-	CHECK_BYTES(key.point, point.data, 65U);
+	CHECK_VIEW(key.point, point.data, 65U);
 	CHECK(key.rsa.n == NULL && key.rsa.n_size == 0U && key.rsa.e == NULL && key.rsa.e_size == 0U);
 	blob_init(&point);
 	append_point(&point, 0x04, 96, 11);
 	make_spki_ec(&spki, "1.3.132.0.34", &point, 0);
 	error = cryc_x509_public_key(held_copy(spki.data, blob_size(&spki)), blob_size(&spki), &key);
 	CHECK(error == 0 && key.type == CRYC_KEY_EC && key.curve == CRYC_CURVE_P384 && key.point_size == 97U);
-	CHECK_BYTES(key.point, point.data, 97U);
+	CHECK_VIEW(key.point, point.data, 97U);
 
 	/* A compressed point (02 or 03 and one coordinate) is well formed but not used. */
 	blob_init(&point);
@@ -1520,31 +1577,33 @@ test_default_certificate(void)
 	CHECK(!built.writer.error);
 	error = parse_blob(&cert, &built);
 	CHECK(error == 0);
+	if (error != 0)
+		return;
 
 	/* The whole certificate and the signed part (the whole tbsCertificate encoding). */
 	CHECK(cert.der == held);
 	CHECK(cert.der_size == blob_size(&built));
 	CHECK(cert.tbs == held + tbs_offset);
 	CHECK(cert.tbs_size == tbs_size);
-	CHECK(cert.tbs[0] == 0x30);
+	CHECK(view_byte(cert.tbs, cert.tbs_size, 0) == 0x30);
 
 	/* The algorithm and the signature bytes (the BIT STRING is the unused-bits octet 00 then 15 bytes). */
 	CHECK(cert.signature_alg.alg == CRYC_SIG_RSA_PKCS1_SHA256);
 	CHECK(cert.signature_alg.salt_size == 0U);
 	CHECK(cert.signature_size == sizeof(signature));
-	CHECK_BYTES(cert.signature, signature, sizeof(signature));
+	CHECK_VIEW(cert.signature, signature, sizeof(signature));
 	CHECK(cert.signature + cert.signature_size == held + held_size);
 
 	/* Version, serial. */
 	CHECK(cert.version == 3U);
 	CHECK(cert.serial_size == sizeof(serial));
-	CHECK_BYTES(cert.serial, serial, sizeof(serial));
+	CHECK_VIEW(cert.serial, serial, sizeof(serial));
 
 	/* The Names are the whole encodings, and they differ so the certificate is not self-issued. */
 	CHECK(cert.issuer_size == blob_size(&name_root));
-	CHECK_BYTES(cert.issuer, name_root.data, blob_size(&name_root));
+	CHECK_VIEW(cert.issuer, name_root.data, blob_size(&name_root));
 	CHECK(cert.subject_size == blob_size(&name_leaf));
-	CHECK_BYTES(cert.subject, name_leaf.data, blob_size(&name_leaf));
+	CHECK_VIEW(cert.subject, name_leaf.data, blob_size(&name_leaf));
 	CHECK((cert.flags & CRYC_X509_SELF_ISSUED) == 0U);
 
 	/* The validity. */
@@ -1553,7 +1612,7 @@ test_default_certificate(void)
 
 	/* The key: the whole SubjectPublicKeyInfo, a P-256 point. */
 	CHECK(cert.spki_size == blob_size(&spki_ec256));
-	CHECK_BYTES(cert.spki, spki_ec256.data, blob_size(&spki_ec256));
+	CHECK_VIEW(cert.spki, spki_ec256.data, blob_size(&spki_ec256));
 	CHECK(cert.key.type == CRYC_KEY_EC);
 	CHECK(cert.key.curve == CRYC_CURVE_P256);
 	CHECK(cert.key.point_size == 65U);
@@ -1571,14 +1630,14 @@ test_default_certificate(void)
 	CHECK((cert.flags & CRYC_X509_HAS_SAN) != 0U);
 	CHECK((cert.flags & CRYC_X509_SAN_CRITICAL) == 0U);
 	CHECK(cert.san_size == 13U);
-	CHECK_BYTES(cert.san, "\x82\x0b" "example.com", 13U);
+	CHECK_VIEW(cert.san, "\x82\x0b" "example.com", 13U);
 	CHECK((cert.flags & CRYC_X509_HAS_NAME_CONSTRAINTS) == 0U);
 	CHECK((cert.flags & CRYC_X509_UNKNOWN_CRITICAL) == 0U);
 	CHECK(cert.permitted == NULL && cert.permitted_size == 0U && cert.excluded == NULL && cert.excluded_size == 0U);
 	CHECK(cert.ski_size == 4U);
-	CHECK_BYTES(cert.ski, "\xa1\xa2\xa3\xa4", 4U);
+	CHECK_VIEW(cert.ski, "\xa1\xa2\xa3\xa4", 4U);
 	CHECK(cert.aki_size == 4U);
-	CHECK_BYTES(cert.aki, "\xb1\xb2\xb3\xb4", 4U);
+	CHECK_VIEW(cert.aki, "\xb1\xb2\xb3\xb4", 4U);
 	CHECK(cert.key.rsa.n == NULL && cert.key.rsa.e == NULL);
 	CHECK(cert_views_inside(&cert, held, held_size));
 }
@@ -1623,6 +1682,26 @@ test_version_and_serial(void)
 	spec.version = 0x7f;
 	expect_refused(&spec);
 
+	/* The [0] holds exactly one INTEGER: another element, two elements, an empty INTEGER, nothing: refused. */
+	spec_default(&spec);
+	spec.version_raw = "020102";
+	expect_accepted(&spec, &cert);
+	CHECK(cert.version == 3U);
+	spec.version_raw = "0201020500";
+	expect_refused(&spec);
+	spec.version_raw = "020102020102";
+	expect_refused(&spec);
+	spec.version_raw = "0200";
+	expect_refused(&spec);
+	spec.version_raw = "";
+	expect_refused(&spec);
+	spec.version_raw = "0500";
+	expect_refused(&spec);
+	spec.version_raw = "02020002";
+	expect_refused(&spec);
+	spec.version_raw = "0201ff";
+	expect_refused(&spec);
+
 	/* Extensions are for v3 only. */
 	spec_default(&spec);
 	spec.version = -1;
@@ -1661,6 +1740,19 @@ test_version_and_serial(void)
 	spec.uid2 = 1;
 	expect_refused(&spec);
 
+	/* A unique identifier is a BIT STRING: unused bits at most 7 and zero, at least the count octet. */
+	spec_default(&spec);
+	spec.uid1_raw = "01aa";
+	expect_accepted(&spec, &cert);
+	spec.uid1_raw = "00";
+	expect_accepted(&spec, &cert);
+	spec.uid1_raw = "08aa";
+	expect_refused(&spec);
+	spec.uid1_raw = "01ab";
+	expect_refused(&spec);
+	spec.uid1_raw = "";
+	expect_refused(&spec);
+
 	/* Serial numbers: 1 to 21 octets in the minimal form are accepted, negative and zero too. */
 	for (index = 0; good_serials[index] != NULL; index++) {
 		spec_default(&spec);
@@ -1668,7 +1760,7 @@ test_version_and_serial(void)
 		expect_accepted(&spec, &cert);
 		count = hex_decode(good_serials[index], expected, sizeof(expected));
 		CHECK(cert.serial_size == count);
-		CHECK_BYTES(cert.serial, expected, count);
+		CHECK_VIEW(cert.serial, expected, count);
 	}
 	for (index = 0; bad_serials[index] != NULL; index++) {
 		spec_default(&spec);
@@ -1683,14 +1775,14 @@ test_version_and_serial(void)
 	spec_default(&spec);
 	spec.serial = serial;
 	expect_accepted(&spec, &cert);
-	CHECK(cert.serial_size == 21U && cert.serial[0] == 0x00 && cert.serial[1] == 0xff);
+	CHECK(cert.serial_size == 21U && view_byte(cert.serial, cert.serial_size, 0) == 0x00 && view_byte(cert.serial, cert.serial_size, 1) == 0xff);
 	strcat(serial, "ff");
 	expect_refused(&spec);
 	strcpy(serial, "7f");
 	for (index = 0; index < 20U; index++)
 		strcat(serial, "ff");
 	expect_accepted(&spec, &cert);
-	CHECK(cert.serial_size == 21U && cert.serial[0] == 0x7f);
+	CHECK(cert.serial_size == 21U && view_byte(cert.serial, cert.serial_size, 0) == 0x7f);
 	strcat(serial, "ff");
 	expect_refused(&spec);
 }
@@ -1772,7 +1864,7 @@ test_signature_fields(void)
 	expect_refused(&spec);
 	spec.signature = "00ff";
 	expect_accepted(&spec, &cert);
-	CHECK(cert.signature_size == 1U && cert.signature[0] == 0xff);
+	CHECK(cert.signature_size == 1U && view_byte(cert.signature, cert.signature_size, 0) == 0xff);
 
 	/* Bytes after the Certificate, inside it after the signature, and inside the tbsCertificate after the extensions are refused. */
 	spec_default(&spec);
@@ -1837,7 +1929,7 @@ test_names_and_validity(void)
 	spec.issuer = &name;
 	expect_accepted(&spec, &cert);
 	CHECK(cert.issuer_size == blob_size(&name));
-	CHECK_BYTES(cert.issuer, name.data, blob_size(&name));
+	CHECK_VIEW(cert.issuer, name.data, blob_size(&name));
 
 	/* Malformed Names: an RDN that is not a SET, an empty RDN, a non-SEQUENCE attribute, no value, two values, a type that is not an OID, a bad OID, a truncated value, trailing bytes, not a SEQUENCE. */
 	atv_c = hx_cat(HX_CN, hx_tlv(0x0c, "61"));
@@ -2063,7 +2155,7 @@ test_names_extensions(void)
 	dns = hx_tlv(0x82, hx_text("a.bc"));
 	address = hx_tlv(0x87, "0a000001");
 	error = parse_ext(&cert, "2.5.29.17", 0, hx_tlv(0x30, dns));
-	CHECK(error == 0 && cert.san_size == 6U && cert.san[0] == 0x82 && (cert.flags & CRYC_X509_HAS_SAN) != 0U && (cert.flags & CRYC_X509_SAN_CRITICAL) == 0U);
+	CHECK(error == 0 && cert.san_size == 6U && view_byte(cert.san, cert.san_size, 0) == 0x82 && (cert.flags & CRYC_X509_HAS_SAN) != 0U && (cert.flags & CRYC_X509_SAN_CRITICAL) == 0U);
 	error = parse_ext(&cert, "2.5.29.17", 1, hx_tlv(0x30, hx_cat(dns, address)));
 	CHECK(error == 0 && cert.san_size == 12U && (cert.flags & CRYC_X509_SAN_CRITICAL) != 0U);
 	error = parse_ext(&cert, "2.5.29.17", 0, hx_tlv(0x30, ""));
@@ -2083,7 +2175,7 @@ test_names_extensions(void)
 	CHECK(error == EINVAL);
 	error = parse_ext(&cert, "2.5.29.30", 1, hx_tlv(0x30, permitted));
 	CHECK(error == 0 && (cert.flags & CRYC_X509_HAS_NAME_CONSTRAINTS) != 0U);
-	CHECK(cert.permitted_size == 8U && cert.permitted[0] == 0x30 && cert.excluded == NULL && cert.excluded_size == 0U);
+	CHECK(cert.permitted_size == 8U && view_byte(cert.permitted, cert.permitted_size, 0) == 0x30 && cert.excluded == NULL && cert.excluded_size == 0U);
 
 	/* Permitted only, excluded only, both; a minimum of 0 is accepted. */
 	error = parse_ext(&cert, "2.5.29.30", 1, hx_tlv(0x30, excluded));
@@ -2107,6 +2199,12 @@ test_names_extensions(void)
 	CHECK(error == EINVAL);
 	error = parse_ext(&cert, "2.5.29.30", 1, hx_tlv(0x30, hx_tlv(0xa0, hx_tlv(0x30, hx_tlv(0x0c, hx_text("a.bc"))))));
 	CHECK(error == EINVAL);
+	error = parse_ext(&cert, "2.5.29.30", 1, hx_tlv(0x30, hx_tlv(0xa0, hx_tlv(0x30, hx_tlv(0xc2, hx_text("a.bc"))))));
+	CHECK(error == EINVAL);
+	error = parse_ext(&cert, "2.5.29.30", 1, hx_tlv(0x30, hx_tlv(0xa0, hx_tlv(0x30, hx_tlv(0x42, hx_text("a.bc"))))));
+	CHECK(error == EINVAL);
+	error = parse_ext(&cert, "2.5.29.30", 1, hx_tlv(0x30, hx_tlv(0xa0, hx_tlv(0x30, hx_tlv(0xa2, hx_text("a.bc"))))));
+	CHECK(error == 0);
 	error = parse_ext(&cert, "2.5.29.30", 1, hx_tlv(0x30, hx_tlv(0xa0, hx_tlv(0x30, hx_cat(dns, "0500")))));
 	CHECK(error == EINVAL);
 	error = parse_ext(&cert, "2.5.29.30", 1, hx_tlv(0x30, hx_cat(excluded, permitted)));
@@ -2124,7 +2222,7 @@ test_names_extensions(void)
 
 	/* subjectKeyIdentifier. */
 	error = parse_ext(&cert, "2.5.29.14", 0, hx_tlv(0x04, "010203"));
-	CHECK(error == 0 && cert.ski_size == 3U && cert.ski[0] == 0x01 && cert.aki == NULL);
+	CHECK(error == 0 && cert.ski_size == 3U && view_byte(cert.ski, cert.ski_size, 0) == 0x01 && cert.aki == NULL);
 	error = parse_ext(&cert, "2.5.29.14", 0, hx_tlv(0x04, ""));
 	CHECK(error == 0 && cert.ski_size == 0U);
 	error = parse_ext(&cert, "2.5.29.14", 0, hx_tlv(0x01, "00"));
@@ -2136,9 +2234,9 @@ test_names_extensions(void)
 	error = parse_ext(&cert, "2.5.29.35", 0, hx_tlv(0x30, ""));
 	CHECK(error == 0 && cert.aki == NULL && cert.aki_size == 0U);
 	error = parse_ext(&cert, "2.5.29.35", 0, hx_tlv(0x30, hx_tlv(0x80, "010203")));
-	CHECK(error == 0 && cert.aki_size == 3U && cert.aki[2] == 0x03);
+	CHECK(error == 0 && cert.aki_size == 3U && view_byte(cert.aki, cert.aki_size, 2) == 0x03);
 	error = parse_ext(&cert, "2.5.29.35", 0, hx_tlv(0x30, hx_cat3(hx_tlv(0x80, "09"), hx_tlv(0xa1, dns), hx_tlv(0x82, "07"))));
-	CHECK(error == 0 && cert.aki_size == 1U && cert.aki[0] == 0x09);
+	CHECK(error == 0 && cert.aki_size == 1U && view_byte(cert.aki, cert.aki_size, 0) == 0x09);
 	error = parse_ext(&cert, "2.5.29.35", 0, hx_tlv(0x30, hx_tlv(0xa1, dns)));
 	CHECK(error == 0 && cert.aki == NULL);
 	error = parse_ext(&cert, "2.5.29.35", 0, hx_tlv(0x30, hx_tlv(0xa1, "820561")));
@@ -2305,7 +2403,7 @@ test_certificate_keys(void)
 	spec.spki = &spki_rsa;
 	expect_accepted(&spec, &cert);
 	CHECK(cert.key.type == CRYC_KEY_RSA && cert.key.rsa.n_size == 256U && cert.key.rsa.e_size == 3U);
-	CHECK(cert.key.rsa.n[0] == 0x81 && cert.key.rsa.e[0] == 0x01 && cert.key.rsa.e[2] == 0x01);
+	CHECK(view_byte(cert.key.rsa.n, cert.key.rsa.n_size, 0) == 0x81 && view_byte(cert.key.rsa.e, cert.key.rsa.e_size, 0) == 0x01 && view_byte(cert.key.rsa.e, cert.key.rsa.e_size, 2) == 0x01);
 	CHECK(cert.spki_size == blob_size(&spki_rsa));
 	CHECK(cert_views_inside(&cert, held, held_size));
 
@@ -2538,14 +2636,14 @@ check_bundle_certificate(
 	/* The key kind agrees with a plain search of the encoded key. */
 	if (contains_bytes(cert->spki, cert->spki_size, rsa_oid, sizeof(rsa_oid))) {
 		CHECK(cert->key.type == CRYC_KEY_RSA);
-		CHECK(cert->key.rsa.n_size >= 128U && cert->key.rsa.n[0] >= 0x80U);
+		CHECK(cert->key.rsa.n_size >= 128U && view_byte(cert->key.rsa.n, cert->key.rsa.n_size, 0) >= 0x80);
 	} else if (contains_bytes(cert->spki, cert->spki_size, ec_oid, sizeof(ec_oid))) {
 		if (contains_bytes(cert->spki, cert->spki_size, p256_oid, sizeof(p256_oid))) {
 			CHECK(cert->key.type == CRYC_KEY_EC && cert->key.curve == CRYC_CURVE_P256);
-			CHECK(cert->key.point_size == 65U && cert->key.point[0] == 0x04);
+			CHECK(cert->key.point_size == 65U && view_byte(cert->key.point, cert->key.point_size, 0) == 0x04);
 		} else if (contains_bytes(cert->spki, cert->spki_size, p384_oid, sizeof(p384_oid))) {
 			CHECK(cert->key.type == CRYC_KEY_EC && cert->key.curve == CRYC_CURVE_P384);
-			CHECK(cert->key.point_size == 97U && cert->key.point[0] == 0x04);
+			CHECK(cert->key.point_size == 97U && view_byte(cert->key.point, cert->key.point_size, 0) == 0x04);
 		} else {
 			CHECK(cert->key.type == CRYC_KEY_UNSUPPORTED);
 			if (contains_bytes(cert->spki, cert->spki_size, p521_oid, sizeof(p521_oid)))
@@ -2823,7 +2921,7 @@ test_wycheproof_keys(
 			CHECK(key.curve == expected_curve);
 			CHECK(point_size != (size_t)-1 && key.point_size == point_size);
 			if (point_size != (size_t)-1 && key.point_size == point_size)
-				CHECK_BYTES(key.point, point, point_size);
+				CHECK_VIEW(key.point, point, point_size);
 		}
 		if (expected_type == CRYC_KEY_RSA) {
 			/* The RSAPublicKey the file gives, rebuilt from the parsed n and e. */

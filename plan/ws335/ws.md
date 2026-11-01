@@ -52,7 +52,7 @@
 | [p014](phase014/phase.md) | K-PKE と ML-KEM-768（test-mlkem） | planned（P6 q1894） | p013 |
 | [p015](phase015/phase.md) | OS の層（POSIX と Windows）（test-os） | planned | p002 |
 | [p016](phase016/phase.md) | DER の reader と PEM・base64（test-der、test-pem） | cleared（2026-11-02 01:47 Q1、main 03a1ab446。main で test-der 1967・test-pem 666 PASS。bundle 121 枚・limbo 19,587/19,589 枚が読める） | p002 |
-| [p017](phase017/phase.md) | X.509 の parse（証明書・公開鍵・署名の algorithm）（test-x509） | planned（Sonnet q1895） | p016 |
+| [p017](phase017/phase.md) | X.509 の parse（証明書・公開鍵・署名の algorithm）（test-x509） | 実装済み・試験 PASS（2026-11-02 02:36 Sonnet。test-x509 159986 checks、posix・win32 PASS、254 通りの破壊のうち 241 通りが試験の失敗、3 通りが sanitizer、10 通りは等価。limbo 39,936 枚のうち 16 枚を拒否（1 枚は expected SUCCESS: header の nameConstraints critical 必須との食い違い）。cleared は Q1） | p016 |
 | [p018](phase018/phase.md) | 署名の確かめ（algorithm ごと）（test-sigver） | planned | p017、p011、p012 |
 | [p019](phase019/phase.md) | 名前（Name の比較・host と address の照合・name constraints）（test-name） | planned | p017 |
 | [p020](phase020/phase.md) | trust store と path の検証（test-chain） | planned | p018、p019、p015 |

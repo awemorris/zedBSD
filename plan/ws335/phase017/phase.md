@@ -2,7 +2,7 @@
 
 # ws335-p017: X.509 の parse（証明書・公開鍵・署名の algorithm）
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p016）
+Status: 実装済み・試験 PASS（2026-11-02 02:36 Sonnet。cleared は Q1。依存: p016）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -65,4 +65,59 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02（host の `date` は 02:36 JST）Sonnet 5.5 high（q1895-i01）。worktree s-ws335-p017（main b238dfeb1）。
+
+作った物: `userland/base/libcrypto-compat/cryc-x509.c`、`plan/ws335/tests/unit/test-x509.c`。header・試験の道具・他の module は変えていない（`git status` で確認）。ct の試験は無い（証明書は公開の data）。
+
+実行した command と最後の行（`WS335_VECTORS=/home/awe/zedBSD-claude1/build/sources/tls-vectors`、各 command に `timeout` と `ulimit -f` を付けた）:
+
+| command | 最後の行 |
+| --- | --- |
+| `sh plan/ws335/tests/run-unit.sh x509` | `test-x509: PASS (159986 checks)` / `run-unit: PASS`（ASan・UBSan） |
+| `sh plan/ws335/tests/run-unit.sh --win32 x509`（x86_64、Wine） | `test-x509: PASS (159986 checks) (win32)` / `run-unit: PASS` |
+| `BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: PASS`（warning 0、cc・clang・zedBSD の clang・llvm-mingw の 2 arch、名前の範囲） |
+| `git diff --check` | 出力なし |
+| `sh plan/ws335/tests/run-unit.sh all` | `run-unit: PASS`（posix。test 本と ct- 13 本が全部 PASS、test-x509 は 159986 checks） |
+
+試験の中身:
+
+- 署名 algorithm: sha256/384/512WithRSAEncryption（NULL・parameters なし）、ecdsa-with-SHA256/384/512（parameters なし）、RSASSA-PSS（SHA-256/384/512 と同じ hash の MGF1、salt 0・20（既定）・32・48・64、trailer 1）、範囲外（SHA-1・MD5・SHA-224 の RSA、ECDSA の SHA-1・SHA-224、Ed25519、未知の OID、PSS の hash 欠落（SHA-1）・別の hash の MGF1・MGF1 でない mask・salt 65 以上・trailer 1 以外・parameters なし）は UNSUPPORTED、壊れた物（PKCS#1 に NULL 以外、ECDSA に parameters、PSS の parameters の型・順序・重複・余り・負の salt、MGF1 の parameters 欠落・SET、hash に NULL 以外、OID が壊れ、余りの byte、2 個目の parameters）は EINVAL。全 prefix と 20000 本の乱数。
+- 公開鍵: RSA（2048・4096・1 byte の n、e の 1〜3 byte、n と e の 0・負・非 minimal・余り、NULL parameters の欠落・誤り、unused bits）、EC（P-256・P-384 の点、圧縮点は UNSUPPORTED、長さ・先頭 byte・曲線と長さの食い違い・unused bits は EINVAL、P-521・secp256k1・brainpool・parameters なし・NULL・明示 parameters は UNSUPPORTED、曲線 OID が壊れ）、他の algorithm（Ed25519・X25519・RSASSA-PSS 鍵・未知）は UNSUPPORTED、SPKI の構造の誤り、全 prefix。
+- 証明書: derwriter と hex で組んだ証明書の全 field（version の 5 通りと [0] の中身、serial の 1〜21 byte・負・0・非 minimal・22 byte、tbs と外の algorithm の食い違い、issuer の空・subject の空、Name の構造の誤り 10 通り、validity の UTCTime・GeneralizedTime・1950 と 2049 の端・不正な field、unique ID の順序・version・BIT STRING、署名値の unused bits・空、余りの byte 3 か所）、extension の全種（basicConstraints・keyUsage の各 bit と 9 bit まで・extKeyUsage・SAN・nameConstraints（critical 必須・minimum 0・maximum 拒否・順序・空）・SKI・AKI）、重複・criticality・未知の critical・policy 系（critical でも通す）・64 個まで・65 個目は EINVAL・DEFAULT FALSE の明示は EINVAL・Extension の構造の誤り 8 通り・[3] の枠、全 prefix（EINVAL で cert が全部 0）、全 byte を 4 通りに置き換え、乱数の変異 30000 本（受理した物は全 view が入力の内側）。
+- 外の corpus: ca-certificates の bundle（cacert-2026-08-13.pem）の 121 枚は全部 parse でき（version 3 が 121）、全部が自己発行。**鍵の種類: RSA 80、P-256 3、P-384 37、P-521 1（e-Szigno TLS Root CA 2023、CRYC_KEY_UNSUPPORTED）**。各証明書で tbs・署名の位置と、鍵の種類（SPKI の byte を OID で単純に探した結果）との一致を照合。x509-limbo の 9,792 件の peer・trusted・untrusted の全 39,936 枚のうち 39,920 枚が parse でき、**16 枚が EINVAL**。理由の分類（下の表。id 一覧は試験の `limbo_refused_ids` に固定、各 id がちょうど 1 枚拒否されることを照合）。Wycheproof の ECDSA 4 file と RSA 5 file と Ed25519 の group の key（3588 件）: EC は曲線と点が file の `uncompressed` と一致、RSA は parse した n・e から組んだ RSAPublicKey が file の `publicKeyAsn` と一致、Ed25519 は UNSUPPORTED。
+
+limbo の拒否 16 枚の理由（該当 .c の行は拒否した所の確認用の一時の build で確かめた。実装は変更していない）:
+
+| 理由 | case の id | expected |
+| --- | --- | --- |
+| RSAPublicKey が SEQUENCE でない | invalid::invalid-issuer-key | FAILURE |
+| extKeyUsage が空 | rfc5280::eku::ee-eku-empty | FAILURE |
+| nameConstraints が critical でない | rfc5280::nc::permitted-dns-match-noncritical、rfc5280::nc::not-allowed-in-ee-noncritical、**webpki::nc::permitted-dns-match-noncritical** | FAILURE、FAILURE、**SUCCESS** |
+| nameConstraints の subtree の列が空 | rfc5280::nc::permitted-empty-sequence-excluded-nonempty、rfc5280::nc::permitted-nonempty-excluded-empty-sequence、webpki::nc::intermediate-permitted-excluded-subtrees-both-empty-sequences | FAILURE |
+| nameConstraints に permitted も excluded も無い | webpki::nc::intermediate-permitted-excluded-subtrees-both-null | FAILURE |
+| subjectAltName の値が SEQUENCE でない | rfc5280::san::malformed | FAILURE |
+| serial が 21 byte を越える | rfc5280::serial::too-long | FAILURE |
+| issuer が空（CA の空の subject が issuer になった） | rfc5280::ee-empty-issuer、rfc5280::ca-empty-subject | FAILURE |
+| keyUsage が空の BIT STRING | rfc5280::root-inconsistent-ca-extensions | FAILURE |
+| extension の重複 | rfc5280::duplicate-extensions | FAILURE |
+| tbsCertificate と外の signatureAlgorithm の食い違い | rfc5280::mismatching-signature-algorithm | FAILURE |
+
+**header と limbo の食い違い（Q1 へ）**: `webpki::nc::permitted-dns-match-noncritical` は expected SUCCESS（信頼する root の nameConstraints が critical でない）だが、header の cryc_x509_parse は「nameConstraints は critical 必須、でなければ EINVAL」と書くので、header に従い EINVAL（trusted の root が読み込めない）。RFC 5280 4.2.1.10 は CA に critical を MUST とするが、verifier が critical でない nameConstraints を処理することは禁じない。header を変える提案: 「critical でなくても受理し、処理する」にすれば、この SUCCESS の case が通り、rfc5280::nc::*-noncritical の 2 件（expected FAILURE）は p020 の path の確かめで別の理由があるかを見る要がある。header の変更は Q1 の判断（p019・p020 の前が良い）。試験は現状の header の動作を固定している（`limbo_refused_ids` と `LIMBO_SUCCESS_REFUSED`）。
+
+わざと壊す確かめ（git の外。`build/tmp/p017/brk/brk.py`、`.c` を `build/tmp/p017/brk/mNNN/` に複写して書き換え、その module だけを build し、試験を `ulimit -f` と `timeout 600` と出力 file で流す。実装 file は触らず、`git status` で変化が無いことを確認）。最終の試験で 254 通り: **試験の失敗（`test-x509: FAIL` の行）241、sanitizer の異常終了 3（実装の読み・index の範囲外を ASan・UBSan が検出）、見逃し 10、build の誤り 0**。区別は BUILD-ERROR（compiler の誤り）・FAIL・CRASH・SURVIVED の 4 つで、build の誤りの mutation（未使用の変数）は `(void)` 付きに直して流し直した。
+
+- 変えた物: 定数（拡張の上限、pathLen・salt の上限、version・keyUsage の bit 数、各 tag、点の先頭 byte、座標の size）、全 OID の 1 byte、対応表（algorithm・hash・曲線・拡張の種類・purpose の bit）、`oid_equal`・`is_null` の比較、AlgorithmIdentifier・PSS の各 field の検査、公開鍵の各検査（n・e の 0、unused bits、圧縮点、先頭 byte、長さ）、Name・serial（境界の `>`→`>=`、非 minimal の 2 通り）、Certificate・tbs の各検査（version の +1、既定の version、algorithm の比較、validity の取り違え、自己発行の比較、unique ID）、extension の列（上限の `>=`→`>`、重複、critical の扱い）と各 extension の検査（bit の順、byte の shift、path 長、SAN・NC・SKI・AKI の view と flag）。
+- 見逃し 10 通りは等価か冗長で、観測できる違いが無い: (1) MGF1 の parameters の有無の検査を消しても、続く parameters の tag の検査が欠落（tag 0）を拒む、(2) trailer が 5 byte 以上のとき `trailer_unsupported = 0` にしても、`cryc_der_small_integer` が値を 0 にするので 1 との比較で同じ結果、(3) `!mask_is_mgf1` の早期 return を消しても、MGF1 でなければ mask_hash が NONE で hash と一致せず同じ結果、(4) mask 欠落の既定 `mask_is_mgf1 = 1` を 0 にしても、MGF1 と SHA-1 は SHA-2 の hash と一致しないので同じ結果、(5) RSA の NULL parameters の「有り」の検査を消しても、欠落は tag 0 で NULL と判定されず同じ結果、(6) tbs と外の algorithm の size の比較を消しても、同じ長さの header でない限り memcmp が違いを見る（DER の長さの octet が先頭近くにある）、(7) tbs の algorithm の parse を消しても、外と同じ byte なら外の parse が既に成功、(8) 自己発行の `==` を `<=` にしても、DER の header が違うので memcmp が違いを見る、(9) keyUsage の size 3 以上の検査を消しても、続く 9 bit の検査が拒む、(10) keyUsage の size 0 の検査を消しても、続く「bit が 1 つ以上」の検査が拒む。
+- 最初の実行で見逃した 11 通りは試験を足して塞いだ: 圧縮でも context でもない private class の GeneralSubtree の base、PSS の parameters・hash の field・mask の field・MGF1 の parameters が SEQUENCE でなく SET の場合、version の [0] に INTEGER 以外が入る場合（`version_raw`）、unique ID の BIT STRING の誤り（`uid1_raw`）、RSA の unused bits（最終 byte が偶数の exponent で、bit string の検査でなく RSA の検査で拒むこと）。試験の側の null 参照で試験が異常終了する場合を FAIL の行になるよう、view の比較を `CHECK_VIEW`・`view_byte` に直した。
+
+自分で決めた点（header が黙っていた所）:
+
+1. 署名 algorithm: PKCS #1 の OID に NULL 以外の parameters は EINVAL（RFC 4055 5 は NULL か欠落）、ECDSA の OID は parameters が何であれあれば EINVAL（RFC 5758 3.2 は「省く」）。header は NULL の ECDSA だけを例に挙げていた。RSASSA-PSS の hash・MGF1 の hash に付く parameters は NULL か欠落（RFC 4055 2.1）、それ以外は EINVAL。PSS の既定の salt は 20、`trailerField` 1 の明示は受理（RFC 4055 3.1）、その他の値と 5 byte 以上の整数は UNSUPPORTED、salt の負は EINVAL・65 以上は UNSUPPORTED。MGF1 の parameters 欠落は EINVAL（RFC 4055 2.2 の MUST）。
+2. 公開鍵: rsaEncryption の parameters が NULL でないか欠落は EINVAL。n・e の 0 は EINVAL。EC の parameters が OID でない（欠落・NULL・SEQUENCE）は UNSUPPORTED（well-formed だが範囲外）、OID の contents が壊れていれば EINVAL。EC の点が圧縮形（02 または 03 と座標 1 つ）は UNSUPPORTED、それ以外の長さ・先頭 byte の誤りは EINVAL。BIT STRING の unused bits は RSA・EC では 0 必須（EINVAL）、未対応の algorithm は BIT STRING の形だけ確かめる。
+3. 証明書: Name の構造（SEQUENCE OF SET（空でない）OF SEQUENCE { OID, 値 }）を確かめ、issuer の空は EINVAL、subject の空は受理（header 通りの「whole encodings」を view にする）。serial は 1〜21 byte に加えて DER の minimal（先頭 00 の後が 7f 以下、先頭 ff の後が 80 以上は EINVAL）を確かめる。validity は UTCTime と GeneralizedTime のどちらでも受理（RFC 5280 4.1.2.5 の「2049 までは UTCTime」は強制しない）、not_before が not_after より後でも受理。署名値が空（unused の octet だけ）の BIT STRING は受理（署名の確かめが落とす）。
+4. extension: Extension の critical に DEFAULT の FALSE を明示した物は EINVAL（DER は DEFAULT を省く）。basicConstraints の cA の FALSE の明示も EINVAL（同じ理由）。拡張の数は 64 までで 65 個目は EINVAL（重複の確かめの O(n²) を限るため。実の証明書は 20 個未満、limbo の 39,936 枚と bundle の 121 枚に超える物は無かった）。subjectAltName の各 GeneralName は element として壊れていないことだけを確かめる（意味は cryc-name）。nameConstraints の base は context class の tag（GeneralName の CHOICE は全部 context）を要求し、minimum は 0（明示された 0 を受理）、maximum は EINVAL。authorityKeyIdentifier は構造を確かめ、keyIdentifier だけ保つ（authorityCertIssuer と serial の組の規則は確かめない）。subjectKeyIdentifier が空（長さ 0）でも受理し、ski_size 0 で ski は NULL でない view になる。
+5. 内部: static の補助（`x509_oid_lookup`・OID の表の形・`x509_read_algorithm`・`x509_read_pss_field`・`x509_open_value`・各 extension の関数）の分け方、拡張の OID の重複を `seen[]` の配列で確かめること、parse を内部の関数で行い公開の関数が失敗時に cert を 0 にすること。
+
+header と phase.md の食い違い: 上の nameConstraints の critical（header 対 limbo）。phase.md の §3 の試験の項目と矛盾する点は無かった。header の comment で気づいた細かい点: `cryc_x509_signature_algorithm` の comment は NULL の ECDSA だけ EINVAL と読めるが、parameters が何であれ ECDSA は欠落が正（RFC 5758 3.2）なので、上の決定 1 を採った。直すかは規約の見直しの Phase（p035）。
+
+未実施: run-ct（秘密を扱わない）、32 bit の size_t の機械、aarch64 Windows の実行（build のみ、check-skeleton）、性能の測定、実機・QEMU（範囲外）、nameConstraints の critical を緩めた時の limbo の再確認（header の判断待ち）。

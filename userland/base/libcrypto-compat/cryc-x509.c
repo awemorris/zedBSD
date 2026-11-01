@@ -398,6 +398,8 @@ cryc_x509_public_key(
 			return EINVAL;
 		}
 		key->type = CRYC_KEY_RSA;
+
+		/* Succeeded: an RSA key with n and e as views. */
 		return 0;
 	}
 
@@ -408,6 +410,8 @@ cryc_x509_public_key(
 			memset(key, 0, sizeof(*key));
 			return EINVAL;
 		}
+
+		/* Succeeded: an EC key, or one recorded as unsupported. */
 		return 0;
 	}
 
@@ -844,6 +848,8 @@ x509_signature_from_algorithm(
 				return EINVAL;
 		}
 		params->alg = (enum cryc_sig_alg)value;
+
+		/* Succeeded: a PKCS #1 signature algorithm. */
 		return 0;
 	}
 
@@ -853,6 +859,8 @@ x509_signature_from_algorithm(
 		if (algorithm->has_parameters)
 			return EINVAL;
 		params->alg = (enum cryc_sig_alg)value;
+
+		/* Succeeded: an ECDSA signature algorithm. */
 		return 0;
 	}
 
@@ -862,6 +870,8 @@ x509_signature_from_algorithm(
 		error = x509_pss_parameters(algorithm, params);
 		if (error != 0)
 			return error;
+
+		/* Succeeded: a PSS algorithm, or one recorded as unsupported. */
 		return 0;
 	}
 
