@@ -239,12 +239,12 @@ session の memory の binding（256 byte 整列、memory type bit 0）は profi
 | profile | binding | 大きさ |
 | --- | --- | --- |
 | H.264 decode | coloc・mbhist・history（今のまま） | WS243 の式 |
-| H.265 decode | 0: coloc（`colMvBuffersize` × maxDpbSlots。1 絵の大きさは CTB 16 ごとの MV の量で、p005 で文書の注記から決め、余裕を 2 倍取る） | 同左 |
-| | 1: filter（deblock の上・左、SAO の左、縦の filter と縦の SAO（tile の境 19 本 × 高さ × 16 byte ずつ）、BSD の制御、slice edge を順に並べ、各 offset の field をその位置にする。`HEVC_SET_FILTER_BUFFER_OFFSET` は先頭、`HEVC_SET_SAO_BUFFER_OFFSET` は SAO の区画を指す案。並びが違えば R4） | §3.2 の式の和 |
+| H.265 decode | 0: coloc（`colMvBuffersize` × 17。p005: 1 絵は CTB 64 に揃えた面積の 1/16 byte（Tegra の手順、averne の FFmpeg nvtegra）。2 倍の余裕は取らず、p007 の印の pattern で確かめる） | 同左 |
+| | 1: filter（p005: 高さ（CTB 64 に揃えた）の行ごとに 縦の filter 480・SAO 3840・BSD 60 byte を順に（Tegra の手順の値）、その後に上の deblock（`HEVC_DBLK_TOP_*` の形、16 画素の列ごと 640 byte）と上の SAO（同 768 byte）。`HevcSaoBufferOffset`・`HevcBsdCtrlOffset`・v1 の `HevcFltAboveOffset`・`HevcSaoAboveOffset` をそれぞれの位置に。`HEVC_SET_SAO_BUFFER_OFFSET` と slice edge は使わない。並びが違えば R4、p007） | 左の和 |
 | H.264 encode | 0: history（**1 macroblock 列あたり 224 byte**（`H264_HIST_BLOCK_SIZE`）× (幅の MB + 16)、文書の地の文の 128 より大きい方）、1: coloc（slot ごとに macroblock 数 × 64 byte × maxDpbSlots）、2: rate control の持続の状態（256 byte、p013 から） | 同左 |
 | H.265 encode | 0: history（224 byte × (幅の 16 単位 + 16)）、1: rate control（p013 から） | 同左 |
 
-- executor の system memory の run（session ごとに作成の時に取る、CPU が絵ごとに書く物）を 16 KiB にし、区画を: picture の構造 0（1 KiB、H.265 の 276 byte と NVENC の 1024 byte + 制御の配列が入る大きさ、NVENC は 2 KiB）、slice の offset 2048（1 KiB）、状態 3072（4 KiB）、scaling list 7168（1 KiB）、tile の大きさ 8192（2 KiB、1776 byte）、push 10240（512 byte）にする。H.264 decode の今の配置（8 KiB）も同じ表に移す（WS243 の host 試験を追従）。
+- executor の system memory の run（session ごとに作成の時に取る、CPU が絵ごとに書く物）を 16 KiB にし、区画を: picture の構造 0（2 KiB、H.265 の 276 byte と NVENC の 1024 byte + 制御の配列が入る大きさ）、slice の offset 2048（1 KiB）、状態 3072（4 KiB）、scaling list 7168（1 KiB）、tile の大きさ 8192（4 KiB。p005 で Tegra の手順に合わせて 0x900 byte を使う: tile ごとの幅・高さと、byte 0x700 からの境）、push 12288 にする（p005 で実装）。H.264 decode の今の配置（8 KiB）も同じ表に移した。
 - p005・p009b・p011 に、binding の後ろに印の pattern を置いて書き越しを確かめる試験を入れる。
 
 ### 8.5 image
@@ -256,8 +256,8 @@ session の memory の binding（256 byte 整列、memory type bit 0）は profi
 ### 8.6 記録と実行
 
 - H.265 decode の記録: 今の `DecodeVideo` の記録に H.265 の picture info（`StdVideoDecodeH265PictureInfo`、slice segment の offset の列）と参照の slot の H.265 の値（PicOrderCntVal、long-term）を足す。
-- **H.265 の slot と picture の番号**: NVDEC の picture の番号（picidx）0〜15 を Vulkan の DPB の slot の番号に一致させる（maxDpbSlots 16）。surface の番号も同じ（LUMA/CHROMA_OFFSETn、n = picidx）。`curr_pic_idx` = setup の slot。setup の slot が無い decode は、active な参照に使われていない番号を使う（H.264 の `nvrtx_video_free_surface` と同じ考え、参照は最大 15 なので必ず空きがある）。`RefDiffPicOrderCnts[i]` = 今の絵の PicOrderCntVal − slot i の絵の PicOrderCntVal（[-128, 127] に収まらなければ絵を飛ばす）、`longtermflag` の bit (15 − i) = slot i が long-term、`num_ref_frames` = 参照の数。
-- **初期の参照の list**（`initreflistidxl0/l1`）: H.265 8.3.4 の規則で、`RefPicSetStCurrBefore`・`StCurrAfter`・`LtCurr`（Vulkan が slot の番号で渡す）を L0 は Before → After → Lt、L1 は After → Before → Lt の順に、`NumPicTotalCurr` で繰り返して 16 まで埋める（list の modification は hardware が slice header から読む前提。`sw_hdr_skip_length` は 0（slice header を hardware が全部読む）にして p007 で確かめる、R4）。
+- **H.265 の slot と picture の番号**: NVDEC の picture の番号（picidx）0〜15 を Vulkan の DPB の slot の番号に一致させる（maxDpbSlots 16）。surface の番号も同じ（LUMA/CHROMA_OFFSETn、n = picidx）。`curr_pic_idx` = setup の slot。setup の slot が無い decode は、active な参照に使われていない番号を使う（H.264 の `nvrtx_video_free_surface` と同じ考え、参照は最大 15 なので必ず空きがある）。`RefDiffPicOrderCnts[i]` = 今の絵の PicOrderCntVal − slot i の絵の PicOrderCntVal（[-128, 127] に切り詰める、p005）、`longtermflag` の bit (15 − i) = slot i が long-term、`num_ref_frames` = 参照の数。
+- **初期の参照の list**（`initreflistidxl0/l1`）: H.265 8.3.4 の規則で、`RefPicSetStCurrBefore`・`StCurrAfter`・`LtCurr`（Vulkan が slot の番号で渡す）を L0 は Before → After → Lt、L1 は After → Before → Lt の順に、`NumPicTotalCurr` で繰り返して 16 まで埋める（list の modification は hardware が slice header から読む前提）。slice header の参照の集合: p005 の既定は Tegra の手順と同じく driver が最初の slice segment の header を CPU で読み、slice_type の後から long-term の終わりまでの bit 数を `sw_hdr_skip_length` に入れる（slice header の short-term の集合は Vulkan の `NumBitsForSTRefPicSetInSlice` で飛ばす）。boot の引数 `nvrtx.hevc.dxva=1` で skip 0 と DXVA の欄（`num_bits_short_term_ref_pics_in_slice` ほか）の形に替える。どちらが Turing で正しいかは p007（R4）。参照に無い picidx の面と `RefDiffPicOrderCnts` は今の絵の最初の参照（無ければ今の絵）で埋め、差は int8 に切り詰める（Tegra の手順）。
 - encode の記録: `CmdEncodeVideoKHR`（bitstream の buffer・offset・range、入力の view、setup の slot、参照の slot、H.264・H.265 の picture info と slice の情報、quality level）。
 - 実行は decode・encode とも同期（drain → engine → 待つ）、待ちの上限 2 s、timeout で engine を使わなくし、§9 の隔離をする。
 - **rate control の状態は実行の時に扱う**: `ControlVideoCoding`（reset・rate control・quality level）は実行の順で session の状態（rate control の mode と層、quality level、通し番号）を変える。BeginVideoCoding の chain の rate control と session の状態の比べも実行の時に行い、食い違い（API の違反）はその coding scope の encode を ERROR にする（記録の時には比べない。記録と実行の順は違ってよいため）。reset の後の mode は DEFAULT（§7.4）。

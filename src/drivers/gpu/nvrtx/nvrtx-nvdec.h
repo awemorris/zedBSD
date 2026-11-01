@@ -16,10 +16,11 @@
  *
  * The decoder is stateless.  Each picture is one push buffer that names the
  * picture's parameters (a structure in memory, filled by
- * nvrtx_nvdec_h264_pic()), the bitstream and its slice offsets, the
- * session's three work buffers, and the luma and chroma planes of up to
- * seventeen surfaces: the picture being decoded and the pictures it
- * refers to.  The parts here touch no hardware (a host test runs them).
+ * nvrtx_nvdec_h264_pic() or nvrtx_nvdec_hevc_pic()), the bitstream (and
+ * for H.264 its slice offsets), the session's work buffers, and the luma
+ * and chroma planes of up to seventeen surfaces (sixteen for H.265): the
+ * picture being decoded and the pictures it refers to.  The parts here
+ * touch no hardware (a host test runs them).
  */
 
 #ifndef DRIVERS_GPU_NVRTX_NVDEC_H
@@ -211,12 +212,195 @@ struct nvrtx_nvdec_buffers {
 	uint32_t history;
 };
 
+/*
+ * The bytes of the H.265 picture structure, the surfaces one H.265
+ * picture names (the picture and its references share the sixteen), the
+ * bytes of the scaling list buffer and of the tile buffer.
+ *
+ * Values referenced: NVIDIA open-gpu-doc classes/video/nvdec_drv.h
+ * (nvdec_hevc_pic_s, 276 bytes laid out by a host compiler;
+ * GIP_ASIC_SCALING_LIST_SIZE, 1024 bytes) and averne's FFmpeg nvtegra
+ * libavcodec/nvtegra_hevc.c (nvtegra_hevc_decode_init: 0x900 bytes of
+ * tile sizes; the sixteen pictures of ctx->refs).
+ */
+#define NVRTX_NVDEC_HEVC_PIC_BYTES	276U
+#define NVRTX_NVDEC_HEVC_SURFACES	16U
+#define NVRTX_NVDEC_HEVC_SCALING_BYTES	1024U
+#define NVRTX_NVDEC_HEVC_TILE_BYTES	0x900U
+
+/* The most tile columns and rows an H.265 picture has. */
+#define NVRTX_NVDEC_HEVC_TILE_COLUMNS	20U
+#define NVRTX_NVDEC_HEVC_TILE_ROWS	22U
+
+/*
+ * The status words an H.265 decode reports errors in, after the CTBs in
+ * error (NVRTX_NVDEC_STATUS_ERRORS_AT): the decode's error and its slice
+ * header's error.
+ *
+ * Values referenced: NVIDIA open-gpu-doc classes/video/nvdec_drv.h
+ * (nvdec_status_s: error_status 12, slice_header_error_code 52).
+ */
+#define NVRTX_NVDEC_STATUS_ERROR_AT	12U
+#define NVRTX_NVDEC_STATUS_HEADER_AT	52U
+
+/*
+ * The addresses one H.265 picture adds to a frame's: the scaling lists,
+ * the tile sizes and the filter buffer (each on 256 bytes).
+ */
+struct nvrtx_nvdec_hevc_frame {
+	uint64_t scaling;
+	uint64_t tiles;
+	uint64_t filter;
+};
+
+/*
+ * One progressive 8-bit 4:2:0 H.265 picture as the decoder takes it: the
+ * fields of its sequence and picture parameter sets (sizes as the
+ * picture structure counts them, not as the syntax codes them), of the
+ * picture and its references (indexed by surface), the bits of its slice
+ * header the decoder skips (or, with dxva, the counts it parses the
+ * header with), and the session's buffers' units.
+ */
+struct nvrtx_nvdec_hevc_picture {
+	/* From the sequence parameter set. */
+	uint32_t width;
+	uint32_t height;
+	uint32_t chroma_format_idc;
+	uint32_t bit_depth_luma;
+	uint32_t bit_depth_chroma;
+	uint32_t log2_min_cb;
+	uint32_t log2_max_cb;
+	uint32_t log2_min_tb;
+	uint32_t log2_max_tb;
+	uint32_t depth_inter;
+	uint32_t depth_intra;
+	uint32_t scaling_enabled;
+	uint32_t amp;
+	uint32_t sao;
+	uint32_t pcm;
+	uint32_t pcm_depth_luma;
+	uint32_t pcm_depth_chroma;
+	uint32_t log2_min_pcm;
+	uint32_t log2_max_pcm;
+	uint32_t pcm_loop_filter_disabled;
+	uint32_t temporal_mvp;
+	uint32_t strong_intra_smoothing;
+	/* From the picture parameter set. */
+	uint32_t dependent_slices;
+	uint32_t output_flag_present;
+	uint32_t extra_header_bits;
+	uint32_t sign_data_hiding;
+	uint32_t cabac_init_present;
+	uint32_t ref_l0_default;
+	uint32_t ref_l1_default;
+	uint32_t init_qp;
+	uint32_t constrained_intra;
+	uint32_t transform_skip;
+	uint32_t cu_qp_delta;
+	uint32_t cu_qp_delta_depth;
+	int32_t cb_qp_offset;
+	int32_t cr_qp_offset;
+	int32_t beta_offset;
+	int32_t tc_offset;
+	uint32_t slice_chroma_qp_offsets;
+	uint32_t weighted_pred;
+	uint32_t weighted_bipred;
+	uint32_t transquant_bypass;
+	uint32_t tiles;
+	uint32_t entropy_sync;
+	uint32_t tile_columns;
+	uint32_t tile_rows;
+	uint32_t filter_across_tiles;
+	uint32_t filter_across_slices;
+	uint32_t deblocking_control;
+	uint32_t deblocking_override;
+	uint32_t deblocking_disabled;
+	uint32_t lists_modification;
+	uint32_t log2_parallel_merge;
+	uint32_t header_extension;
+	/* From the picture and its references, each reference by its surface. */
+	uint32_t idr;
+	uint32_t irap;
+	uint32_t surface;
+	uint32_t reference_count;
+	uint32_t long_term_mask;
+	uint8_t list0[16];
+	uint8_t list1[16];
+	int32_t order_difference[NVRTX_NVDEC_HEVC_SURFACES];
+	/* How the decoder gets past the slice header's reference picture sets. */
+	uint32_t skip_bits;
+	uint32_t dxva;
+	uint32_t separate_planes;
+	uint32_t log2_max_poc_lsb_minus4;
+	uint32_t short_term_sets;
+	uint32_t long_term_sps;
+	uint32_t long_term_present;
+	uint32_t delta_pocs;
+	uint32_t short_term_bits;
+	/* The bitstream's bytes, the planes' row bytes, the session's buffers in 256-byte units. */
+	uint32_t stream_bytes;
+	uint32_t pitch;
+	uint32_t coloc_units;
+	uint32_t sao_units;
+	uint32_t bsd_units;
+	uint32_t filter_above_units;
+	uint32_t sao_above_units;
+};
+
+/*
+ * An H.265 picture's scaling lists in the raster order the decoder reads
+ * them: the six 4x4, six 8x8, six 16x16 and two 32x32 lists (the larger
+ * two as their 8x8 coded matrices), and the DC values of the 16x16 and
+ * 32x32 lists.
+ */
+struct nvrtx_nvdec_hevc_scaling {
+	uint8_t dc16[6];
+	uint8_t dc32[2];
+	uint8_t list4[6][16];
+	uint8_t list8[6][64];
+	uint8_t list16[6][64];
+	uint8_t list32[2][64];
+};
+
+/*
+ * An H.265 picture's tiles: how many columns and rows, each column's
+ * width and each row's height in CTBs, and the CTB's size (log2).
+ */
+struct nvrtx_nvdec_hevc_tiles {
+	uint32_t columns;
+	uint32_t rows;
+	uint32_t width[NVRTX_NVDEC_HEVC_TILE_COLUMNS];
+	uint32_t height[NVRTX_NVDEC_HEVC_TILE_ROWS];
+	uint32_t log2_ctb;
+};
+
+/*
+ * The sizes of an H.265 session's two work buffers and where the filter
+ * buffer's parts lie: one picture's co-located motion data and all of
+ * it, the filter buffer, and the offsets in it of the SAO, the BSD
+ * control, the deblocking above and the SAO above.
+ */
+struct nvrtx_nvdec_hevc_buffers {
+	uint32_t coloc_picture;
+	uint32_t coloc;
+	uint32_t filter;
+	uint32_t sao_at;
+	uint32_t bsd_at;
+	uint32_t filter_above_at;
+	uint32_t sao_above_at;
+};
+
 uint32_t nvrtx_nvdec_class(enum nvrtx_family family);
 size_t nvrtx_nvdec_push_object(uint8_t *push, uint32_t nvdec_class);
 size_t nvrtx_nvdec_push_decode(uint8_t *push, const struct nvrtx_nvdec_frame *frame);
 void nvrtx_nvdec_h264_pic(uint8_t *pic, const struct nvrtx_nvdec_h264_picture *picture);
 void nvrtx_nvdec_slices(uint32_t *table, const uint32_t *offsets, uint32_t count, uint32_t stream_bytes);
 void nvrtx_nvdec_buffer_sizes(uint32_t width_mbs, uint32_t height_map_units, uint32_t reference_frames, struct nvrtx_nvdec_buffers *buffers);
+size_t nvrtx_nvdec_push_hevc(uint8_t *push, const struct nvrtx_nvdec_frame *frame, const struct nvrtx_nvdec_hevc_frame *hevc);
+void nvrtx_nvdec_hevc_pic(uint8_t *pic, const struct nvrtx_nvdec_hevc_picture *picture);
+void nvrtx_nvdec_hevc_scaling(uint8_t *buffer, const struct nvrtx_nvdec_hevc_scaling *scaling);
+void nvrtx_nvdec_hevc_tiles(uint8_t *buffer, const struct nvrtx_nvdec_hevc_tiles *tiles, bool enabled);
+void nvrtx_nvdec_hevc_buffer_sizes(uint32_t width, uint32_t height, uint32_t surfaces, struct nvrtx_nvdec_hevc_buffers *buffers);
 void nvrtx_nvdec_alloc_params(uint8_t *params);
 void nvrtx_nvdec_promote_params(uint8_t *params, uint32_t client, uint32_t chid, uint32_t channel, uint64_t va, uint64_t size);
 int nvrtx_nvdec_context_bytes(const uint8_t *reply, size_t length, uint32_t engine_descriptor, uint32_t *bytes);

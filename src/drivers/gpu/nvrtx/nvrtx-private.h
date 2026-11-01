@@ -484,6 +484,13 @@ bool
 nvrtx_stage_nvenc_test_wanted(void);
 
 /*
+ * Reports whether the boot asked the video decoder to parse an H.265
+ * slice header's reference picture sets itself (nvrtx.hevc.dxva=1).
+ */
+bool
+nvrtx_stage_hevc_dxva_wanted(void);
+
+/*
  * Reports whether the boot asked for the first copy-engine clear of the
  * VRAM to be broken on purpose (nvrtx.clear.fault=1).
  */

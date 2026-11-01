@@ -263,11 +263,15 @@ void nvrtx_vk_gpu_drawn(void *owner, uint32_t draws, uint32_t quads);
  * node's lock).  nvrtx_vk_video_available() tells whether the device has
  * a decoder that takes pictures and the copy engine its pictures are read
  * out with; nvrtx_vk_video_decode() runs a decoder push buffer of bytes
- * at va (in the executor's memory) and waits for it, returning EIO when
- * the decoder is not there or did not finish.
+ * at va (in the executor's memory) and waits for it, returning ETIMEDOUT
+ * when the decoder did not finish (it may still write what the push buffer
+ * names) and EIO when it is not there or the session's runs are lost.
+ * nvrtx_vk_video_hevc_dxva() tells whether the boot asked the decoder to
+ * parse an H.265 slice header's reference sets itself.
  */
 bool nvrtx_vk_video_available(void *owner);
 int nvrtx_vk_video_decode(void *owner, uint64_t va, uint32_t bytes);
+bool nvrtx_vk_video_hevc_dxva(void *owner);
 
 /*
  * Copies a command stream of length bytes out of a blob's bytes in the

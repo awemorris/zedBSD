@@ -80,13 +80,15 @@
 /*
  * The native record after the vendor suffix, sent when the reply holds it:
  * the capset's bytes with it, its tag and its flags (bit 0: an H.264
- * decode family, when the device decodes video), as libvulkan reads them.
+ * decode family, bit 2: an H.265 decode family, when the device decodes
+ * video), as libvulkan reads them.
  */
 #define RUNTIME_NATIVE_CAPSET_BYTES	176U
 #define RUNTIME_NATIVE_MAGIC_AT		168U
 #define RUNTIME_NATIVE_FLAGS_AT		172U
 #define RUNTIME_NATIVE_MAGIC		0x5a4e4154U
 #define RUNTIME_NATIVE_VIDEO_H264	0x1U
+#define RUNTIME_NATIVE_VIDEO_H265	0x4U
 
 /*
  * The native flag of a command run at once on the caller's thread
@@ -442,13 +444,16 @@ runtime_capset(
 
 	/*
 	 * The native record, when the reply holds it: commands run at once on
-	 * the caller's thread, and the video decode family when there is one.
+	 * the caller's thread, and the H.264 and H.265 video decode family when
+	 * there is one.
 	 */
 	if (capset->capacity >= RUNTIME_NATIVE_CAPSET_BYTES) {
 		flags = RUNTIME_NATIVE_SYNC_COMMAND;
 		video = nvrtx_node_video_available(node);
-		if (video)
+		if (video) {
 			flags |= RUNTIME_NATIVE_VIDEO_H264;
+			flags |= RUNTIME_NATIVE_VIDEO_H265;
+		}
 		nvrtx_put32(capset->data, RUNTIME_NATIVE_MAGIC_AT, RUNTIME_NATIVE_MAGIC);
 		nvrtx_put32(capset->data, RUNTIME_NATIVE_FLAGS_AT, flags);
 		capset->bytes = RUNTIME_NATIVE_CAPSET_BYTES;

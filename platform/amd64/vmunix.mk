@@ -215,7 +215,8 @@ AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/vk/vk-object.c src/drivers/gpu/nvrt
 	src/drivers/gpu/nvrtx/vk-node.c src/drivers/gpu/nvrtx/vk/vk-layout.c src/drivers/gpu/nvrtx/vk/vk-target.c src/drivers/gpu/nvrtx/vk/vk-pipeline.c \
 	src/drivers/gpu/nvrtx/vk/vk-command.c src/drivers/gpu/nvrtx/vk/vk-record.c src/drivers/gpu/nvrtx/vk/vk-execute.c src/drivers/gpu/nvrtx/vk/vk-queue.c \
 	src/drivers/gpu/nvrtx/vk/exec-push.c src/drivers/gpu/nvrtx/vk/exec-copy.c src/drivers/gpu/nvrtx/vk/vk-video.c \
-	src/drivers/gpu/nvrtx/vk/vk-video-h264.c
+	src/drivers/gpu/nvrtx/vk/vk-video-h264.c \
+	src/drivers/gpu/nvrtx/vk/vk-video-h265.c
 ifneq ($(CONFIG_DRIVER_PCI_I915),y)
 AMD64_NVRTX_SOURCES += src/drivers/gpu/i915/vk/vk-codec.c
 endif
