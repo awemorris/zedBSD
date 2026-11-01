@@ -2,7 +2,7 @@
 
 # ws335-p025: TLS の定数・suite の表・presentation language の reader/writer
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p002）
+Status: 実装済み・試験 PASS（2026-11-02 Sonnet q1878-i01。cleared の判定は Q1）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -62,4 +62,57 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02（host の `date` は 00:39 JST）Sonnet 5.5（q1878-i01）。worktree s-ws335-p025（main 400efaaee0）。
+
+作った物: `userland/base/libssl-compat/sslc-tls.c`、`userland/base/libssl-compat/sslc-buf.c`、`plan/ws335/tests/unit/test-tls.c`、`plan/ws335/tests/unit/test-buf.c`。header・試験の道具・他の module・Makefile は変えていない。
+
+実行した command と最後の行（`WS335_VECTORS=/home/awe/zedBSD-claude1/build/sources/tls-vectors`）:
+
+| command | 最後の行 |
+| --- | --- |
+| `sh plan/ws335/tests/run-unit.sh tls buf` | `test-tls: PASS (2230 checks)` / `test-buf: PASS (1559755 checks)` / `run-unit: PASS`（ASan・UBSan） |
+| `sh plan/ws335/tests/run-unit.sh --win32 tls buf`（x86_64、Wine、static link） | `test-tls: PASS (2230 checks) (win32)` / `test-buf: PASS (1559755 checks) (win32)` / `run-unit: PASS` |
+| `BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: PASS`（warning 0、cc・clang・zedBSD の clang・llvm-mingw の 2 arch、名前の範囲） |
+| `sh plan/ws335/tests/run-unit.sh all` | test-* 15 本（この Phase の 2 本を含む）と ct-* 10 本の計 25 本が全部 PASS、FAIL 0 / `run-unit: PASS` |
+| `git diff --check` | 出力なし |
+
+（test-buf の件数は 1559738 から、prefix 4 の見逃しを直した後の 1559755 になった。win32 も直した後に流し直し、表の件数のとおり。）
+
+`run-ct.sh` は未実施（この Phase に秘密を扱う関数は無く、定数時間の対象は無い）。
+
+実装の中身:
+
+- `sslc-tls.c`: 表の値は block ごとに出典（RFC 8446 4.1.3 の HRR の random と downgrade の 2 つ、B.4・5.3・RFC 5289 3・RFC 7905 2・RFC 5288 3 の suite の表）。suite は 9 行の const 配列の線形探索。`sslc_tls_offered_suites` は優先順の別の配列（1.3: 1301・1303・1302、1.2: ECDSA の 3 つ（c02b・cca9・c02c）、RSA の 3 つ（c02f・cca8・c030））を順に引き、`sslc_tls_suite` の version が [min, max] に入る物だけを room まで書く。
+- `sslc-buf.c`: reader と writer を header の comment どおりに。内部の補助は static の `sslc_reader_integer`・`sslc_writer_integer`・`sslc_writer_fail`。
+
+試験の中身:
+
+- test-tls（2230 checks）: 全 macro の値を RFC の表の 2 byte 表記（`{0xC0,0x2B}` など）から別に書いた値と照合（content type・handshake type・alert 全部・group・scheme・extension・SCSV・record の上限）。hrr の random は RFC 8446 4.1.3 の 32 byte と、libcrypto-compat の SHA-256 で出した "HelloRetryRequest" の digest の両方と一致。downgrade の 2 つは "DOWNGRD" + 01/00。suite の表は 9 行の全 field（id・version・aead・hash・auth・key_size・fixed_iv_size・name）を RFC から書いた値と照合、65536 個の番号の全部を引いてちょうど 9 つだけが suite であること、CBC・CCM・RSA 鍵輸送・DHE・SCSV などの番号は NULL。offered は版の組 13 通り（min > max や範囲外の空を含む）× room 0〜件数+2 の切り詰め、out NULL、順序（1.3 の後に 1.2、ECDSA の後に RSA、AEAD の順）、重複無し、SCSV 無し、exact-size の heap block への書き込み。RFC 8448 の ClientHello の suite の並び（13 01 13 03 13 02）と 1.3 の順が一致。
+- test-buf（1559755 checks）: RFC 8446 3.3 の例（01 02 03 04 = 16909060）、各 width × 境界の値（0・1・0x7f・0x80・0xff・… 0xffffffff）を手で作った byte で、連続 read の left、短い入力（width 1〜4 × 長さ 0〜width-1）の 0 とエラーと sticky（残りの byte も読まない）、`bytes`（size 0・ちょうど・1 超過・`(size_t)-1`・NULL の空 reader）、vector（RFC 8446 3.4 の `mandatory<300..400>`・`longer<0..800>` の長さ 15 通り、prefix 1・2・3 × 範囲の両端、length が残りを越える・最大の length field・prefix の途中切れ・prefix 0〜6・失敗後の vector・min > max、入れ子と、inner が outer の byte を読めないこと）、finish。writer は低 bit の切り詰め、room の境（0〜）で ENOBUFS と「失敗した書き込みは何も書かない」、guard byte で範囲外の書き込み無し、`(size_t)-1` で wrap しない、vector の 1・2 byte prefix の 255/256・65535/65536 と 3 byte prefix の 2^24-1/2^24（16 MiB の block を 1 回作る）、深さ 6 と 7、begin の prefix 0・4・room 不足、end の空の stack、開いたままの finish、最初のエラーが残ること（ENOBUFS の後・EINVAL の後）、server_name の入れ子を手で書いた形（RFC 8448 の `00 00 00 0b 00 09 00 00 06 'server'`）。
+  RFC 8448 の ClientHello（196 octets）・ServerHello（90）・HelloRetryRequest（176）を RFC の text から取り、reader で読み（各 field を RFC の text から読んだ値と照合、拡張の type と長さの一覧）、writer で書き直して元と byte 単位で一致、全ての短い prefix の入力（outer の length を合わせた物も）が拒否されること、小さい room で ENOBUFS。
+  乱数: reader（6000 入力 × 8 操作、深さ 3 の vector、モデルと全ての値・エラー・left・finish が一致）、writer（8000 run × 24 操作、guard 付き、モデルと byte・used・error・depth が一致）、往復（3000 の木）。モデルは header の comment から試験の中に別に書いた。
+
+わざと壊す確かめ（git の外。`build/tmp/p025/brk.py`、2 つの directory を `build/tmp/p025/run-<名前>/m<番号>/` に複写して 1 つだけ書き換え、非 sanitizer の -O1 で test-tls・test-buf を build して流す。実装 file は触らず、前後の sha256 が変わっていない事を script が確認し、`git diff` も空）。98 通り（buf 63、tls 35）: 94 通りが試験の失敗（`FAIL` 78、SIGSEGV で落ちた 16。build の誤りは 0、BAD-MUTATION は 0）。見逃し 4 通りは全部等価:
+- reader の `finish` の `position != size` を `position < size` に: position が size を越えない（等価）。
+- writer の整数の書き込みで `& 0xff` を外す: `(uint8_t)` の cast が同じ事をする（等価）。
+- `sslc_writer_fail` が最後のエラーを残す: 全ての書き込みが先に error で return するので呼ばれない（冗長な検査）。
+- offered の優先順の配列に SCSV を足す: `sslc_tls_suite` が NULL を返して飛ばす（二重の防御）。
+最初の実行（99 行）では `vector: prefix > 4`（prefix 4 を受け入れる）が見逃しだったので、test-buf に「全部 0 の 8 byte に prefix 0〜6」を足し、2 回目の全部の実行で 94 通りが検出になった。
+
+自分で決めた点（header が黙っていた所）:
+
+1. reader・writer のエラーの値: reader の error は EINVAL を入れる（`error` を非 0 の印と使う）。writer の error は errno の値で、room 不足は ENOBUFS、それ以外（長すぎる vector・深さ超過・begin の prefix が 1〜3 でない・対の無い end・NULL data で size > 0）は EINVAL。最初のエラーだけが残る（writer）。
+2. `sslc_reader_init` と `sslc_writer_init` は NULL data で size（room）> 0 を、size 0（room 0）にして error を EINVAL にする。
+3. `sslc_reader_vector` の prefix が 1〜3 以外は、outer の error を立てて EINVAL、inner は空で失敗。min > max は何も受けない。失敗の時も outer の position は進んでよい（後は sticky で何も読めない）。
+4. `sslc_reader_bytes` で size 0・data が NULL の reader は NULL を返しエラー無し。data があれば、末尾でも非 NULL（position の指す所）。
+5. writer: 失敗した書き込み（room 不足）は部分的にも書かない。`sslc_writer_end` は長すぎても depth を 1 減らす（error が残るので finish は error を返す）。begin は prefix の幅 → depth → room の順で調べる。
+6. `sslc_tls_offered_suites` の out が NULL なら room に関わらず 0（数えるだけの呼び出しは無い）。優先順は、1.2 の中で ECDSA の 3 つの後に RSA の 3 つ（header の「ECDSA before RSA」を「全部の ECDSA の後に全部の RSA」と読んだ）。min > max は 0。
+7. 試験で参照した RFC 8448（`rfc8448.txt`、SHA-256 `6564d1376d1ec744fc7a9993da15ebc1b9be361908b166091f47ef605c537fba`、共有の置き場所 `/home/awe/zedBSD-claude1/build/sources/specs/tls/`）は phase.md の「読む物」に無いが、design.md の資料の表にあり、公式の vector として使った。
+
+header と phase.md の食い違い: 見つからなかった。header の `sslc_writer_end` の comment は「2^8, 2^16 or 2^24 bytes or more sets error」で、実装と試験はそのとおり（255・65535・16777215 が最大）。
+
+別の確認: header の macro の値は RFC 8446・5246・7627・5746・8422 の text に対して python で照合した（content type・handshake type・alert 全 27 件と 5246 の no_renegotiation・extension・group・scheme・cipher suite の表。session_ticket の 35 は RFC 5077 でこの資料に無く、未照合。header の値をそのまま試験に写さず、RFC の表記から別に書いた）。
+
+未実施: `run-ct.sh`（対象無し）、32 bit の size_t の機械・aarch64 Windows の実行（build のみ、check-skeleton）、実機・QEMU（範囲外）、RFC 5077 の session_ticket の値の照合、コードの規約の第三者のレビュー（自分の diff を §14 の checklist で見直した）。
+
+commit: bb6b23d212（実装と試験の初版）、最終版は Q1 への報告に書く。
