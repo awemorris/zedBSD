@@ -63,4 +63,3 @@
 ### 消してよい物（Q1 へ）
 
 - `build/p025/`（試しの build と出力: try-win64・js・mut・run*.txt・c*.out ほか）と `build/tmp/ws334-script-core.run.*` の古い run。どれも使い捨て。
-
