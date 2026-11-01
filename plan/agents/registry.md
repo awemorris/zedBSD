@@ -13,6 +13,7 @@
 | P6 | phase-runner-low | ws335 p012 RSA (q1870-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 23:51 起動） | f14b5b34a（merge 2d7097dd3） |
 | P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |
 | P4 | phase-runner-high | ws291 p027 の回帰 arm64・riscv64 (q1860-i01) | `/home/awe/zedBSD-worktrees/p4-ws291reg` / `agent/p4-ws291reg` | 返却（2026-11-01 22:48、PASS） | 42ae7d081（merge b29f3a5ae） |
+| P8 | phase-runner-high | menuconfig の host 試験の直し (q1873-i01) | `/home/awe/zedBSD-worktrees/p8-menutest` / `agent/p8-menutest` | in-progress（2026-11-02 00:18 起動） | — |
 
 - 2026-11-01 20:20 の割り振り（ユーザーの指示）: P1 は RTX、P2 は VF2、P3 は Pi 5 の作業（どれも WS291 の描画の速さ、Q1 が選んだ）。Bug の修正は P4。
 - 実機: 10.0.10.3（RTX 2070、SwitchBot 1 AC276E42B252）は P1、VF2（10.0.30.2、SwitchBot 3 AC276E432AE6）は P2、Pi 5（10.0.30.7、SwitchBot 2 14C19FA80F86）は P3。P4 の BUG-387 の実機の試験は、Q1 が P2・P3 から窓を取って渡す。

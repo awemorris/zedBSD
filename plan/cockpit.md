@@ -14,7 +14,7 @@
 | P5 | [WS334](ws334/ws.md) p031 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 配る形（zip・license・icon・版、q1871）。p029: 題の帯・location の欄・IME・clipboard・DPI（build/review/ws334-p029/） | p032 Wine での確かめ |
 | P6 | [WS335](ws335/ws.md) p012 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | RSA の署名の確かめ（q1870）。p011 ECC は cleared | p009 Ed25519 |
 | P7 | — | — | 返却（22:26）。WS334 p027 の QEMU の guest の確かめ PASS（画面: build/review/p027-guest/） | 未割当 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |
+| P8 | — | menuconfig の host 試験 | MAC-T001 で止まる件の直し（q1873） | 全項目 PASS |
 
 - Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
