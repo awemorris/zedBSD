@@ -54,7 +54,7 @@ cryc_bn_mont_init(
 	while (start < size && modulus[start] == 0)
 		start++;
 
-	/* Refuses a modulus of zero. */
+	/* Refuses a modulus of zero (every byte was zero, or size is 0). */
 	if (start == size)
 		return EINVAL;
 
@@ -87,6 +87,8 @@ cryc_bn_mont_init(
 	/* Reads the modulus into limbs, which cannot fail since it fits. */
 	limbs = (bits + 31U) / 32U;
 	error = cryc_bn_decode(mont->modulus, limbs, modulus + start, significant);
+
+	/* Undoes the partial result if the read failed, which the size checks above rule out. */
 	if (error != 0) {
 		cryc_wipe(mont, sizeof(*mont));
 		return EINVAL;
@@ -97,12 +99,13 @@ cryc_bn_mont_init(
 	/*
 	 * Finds the inverse of the lowest limb modulo 2^32 by Newton's
 	 * iteration: an odd number is its own inverse modulo 8 (three correct
-	 * bits), and each step doubles the correct bits, so five steps give
-	 * 32.  The per-word factor is its negative.
+	 * bits), and each step doubles the correct bits (6, 12, 24, 48), so
+	 * four steps give the 32 that are needed.  The per-word factor is its
+	 * negative.
 	 */
 	m_low = mont->modulus[0];
 	inverse = m_low;
-	for (step = 0; step < 5; step++)
+	for (step = 0; step < 4; step++)
 		inverse = inverse * (2U - m_low * inverse);
 	mont->m0inv = 0U - inverse;
 
@@ -151,6 +154,8 @@ cryc_bn_decode(
 	excess = 0;
 	for (position = 0; position < size; position++) {
 		value = in[size - 1U - position];
+
+		/* Places a byte inside the width in its limb, and gathers one beyond it. */
 		if (position / 4U < limbs)
 			out[position / 4U] |= value << (8U * (position % 4U));
 		else
@@ -193,6 +198,8 @@ cryc_bn_encode(
 	 */
 	for (position = 0; position < size; position++) {
 		value = 0;
+
+		/* Reads the byte from its limb when inside the width, and writes zero beyond it. */
 		if (position / 4U < limbs)
 			value = in[position / 4U] >> (8U * (position % 4U));
 		out[size - 1U - position] = (uint8_t)(value & 0xffU);
@@ -314,8 +321,11 @@ cryc_bn_mod_sub(
 	for (index = 0; index < limbs; index++)
 		addend[index] = mont->modulus[index] & mask;
 
-	/* Adds m back to a negative difference, which wraps it into the range. */
+	/* Adds m back to a negative difference, which wraps it into the range (the carry out is that wrap). */
 	bn_add(out, out, addend, limbs);
+
+	/* Wipes the copy of a value that may be secret (m, or zero). */
+	cryc_wipe(addend, limbs * sizeof(addend[0]));
 }
 
 /*
@@ -513,8 +523,11 @@ cryc_bn_mont_exp(
 	started = 0;
 	for (index = 0; index < size; index++) {
 		for (bit = 7; bit >= 0; bit--) {
+			/* Squares the power once the first set bit has been seen. */
 			if (started != 0)
 				cryc_bn_mont_mul(power, power, power, mont);
+
+			/* Multiplies in the base for a set bit of the (public) exponent. */
 			if (((exponent[index] >> bit) & 1U) != 0U) {
 				cryc_bn_mont_mul(power, power, factor, mont);
 				started = 1;
