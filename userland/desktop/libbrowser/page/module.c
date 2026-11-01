@@ -295,7 +295,7 @@ module_fetch(
 	status = module_same_origin(page->base, url);
 	if (status != 0)
 		return status;
-	status = page_fetch_response(url, url, &response);
+	status = page_fetch_response(page_cookies(page), url, url, &response);
 	if (status != 0)
 		return status;
 	if (response.status < 200 || response.status > 299 ||
@@ -343,7 +343,7 @@ module_fetch_json(
 		return status;
 
 	/* A successful response of a JSON type. */
-	status = page_fetch_response(url, url, &response);
+	status = page_fetch_response(page_cookies(page), url, url, &response);
 	if (status != 0)
 		return status;
 	if (response.status < 200 || response.status > 299 || !module_json_mime(&response.content_type)) {

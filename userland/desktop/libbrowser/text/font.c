@@ -46,14 +46,17 @@ struct text_glyph_entry {
 };
 
 /*
- * The file names of the default sans, monospace and fallback fonts, under
- * the directory of the system's bundled data.  The table is constant for
- * the life of the program.
+ * The file names of the default sans, monospace and fallback fonts and of
+ * the sans font's companions (by TEXT_FACE_* and TEXT_PATH_*), under the
+ * directory of the system's bundled data.  The table is constant for the
+ * life of the program.
  */
-static const char *const font_default_names[TEXT_FACE_WEB] = {
+static const char *const font_default_names[TEXT_PATHS] = {
 	"/fonts/keiland.ttf",
 	"/fonts/keiland-mono.ttf",
-	"/fonts/keiland-fallback.ttf"
+	"/fonts/keiland-fallback.ttf",
+	"/fonts/keiland-bold.ttf",
+	"/fonts/keiland-fallback-mono.ttf"
 };
 
 /*
@@ -61,7 +64,7 @@ static const char *const font_default_names[TEXT_FACE_WEB] = {
  * for the life of the program (an empty path when it could not be made).
  */
 static pthread_once_t font_defaults_once = PTHREAD_ONCE_INIT;
-static struct wb_buffer font_defaults[TEXT_FACE_WEB];
+static struct wb_buffer font_defaults[TEXT_PATHS];
 
 static void font_defaults_make(void);
 static uint64_t font_key(const struct text_font *font, uint32_t code_point);
@@ -74,14 +77,41 @@ static const unsigned char *font_table(const struct wb_buffer *data, const char 
 static int font_weight_distance(const struct text_family *family, int weight);
 
 /*
- * Opens the fonts of a text system.  The sans font is required; the
- * monospace and the fallback fonts are used when they open.
+ * Opens the fonts of a text system with the default companions of the
+ * sans font (the files of the data directory, text_default_path).
  */
 int
 text_system_open(
 	struct text_system *system,
 	const struct text_font_paths *paths)
 {
+	struct text_font_companions companions;
+	int error;
+
+	/* The default bold font and monospaced fallback. */
+	companions.bold = text_default_path(TEXT_PATH_BOLD);
+	companions.fallback_mono = text_default_path(TEXT_PATH_FALLBACK_MONO);
+	error = text_system_open_with(system, paths, &companions);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the fonts are open. */
+	return 0;
+}
+
+/*
+ * Opens the fonts of a text system with the sans font's companions.  The
+ * sans font is required; the monospace and the fallback fonts and the
+ * companions are used when they open.
+ */
+int
+text_system_open_with(
+	struct text_system *system,
+	const struct text_font_paths *paths,
+	const struct text_font_companions *companions)
+{
+	const char *bold;
+	const char *fallback_mono;
 	int error;
 
 	/* Starts with no faces and an empty cache. */
@@ -92,14 +122,20 @@ text_system_open(
 	if (error != 0)
 		return error;
 
-	/* Its companions: Mahora Bold for its bold glyphs, the monospaced fallback for the signs it lacks. */
-	(void)truetype_open_companions(system->faces[TEXT_FACE_SANS].face, KEILAND_FONT_BOLD, KEILAND_FONT_FALLBACK_MONO);
+	/* Its companions: the bold font for its bold glyphs, the monospaced fallback for the signs it lacks (an empty path is none). */
+	bold = companions->bold;
+	if (bold != NULL && bold[0] == '\0')
+		bold = NULL;
+	fallback_mono = companions->fallback_mono;
+	if (fallback_mono != NULL && fallback_mono[0] == '\0')
+		fallback_mono = NULL;
+	(void)truetype_open_companions(system->faces[TEXT_FACE_SANS].face, bold, fallback_mono);
 
 	/* The others are optional; the monospace font has the same fallback. */
 	if (paths->mono != NULL) {
 		error = font_open_face(&system->faces[TEXT_FACE_MONO], paths->mono);
 		if (error == 0)
-			(void)truetype_open_companions(system->faces[TEXT_FACE_MONO].face, NULL, KEILAND_FONT_FALLBACK_MONO);
+			(void)truetype_open_companions(system->faces[TEXT_FACE_MONO].face, NULL, fallback_mono);
 	}
 	if (paths->fallback != NULL)
 		font_open_face(&system->faces[TEXT_FACE_FALLBACK], paths->fallback);
@@ -109,17 +145,18 @@ text_system_open(
 }
 
 /*
- * Reports the path of a default font (TEXT_FACE_SANS, TEXT_FACE_MONO or
- * TEXT_FACE_FALLBACK) in the directory of the system's bundled data, or
- * NULL for another face.  The string lives as long as the program; any
+ * Reports the path of a default font (TEXT_FACE_SANS, TEXT_FACE_MONO,
+ * TEXT_FACE_FALLBACK, or a companion: TEXT_PATH_BOLD,
+ * TEXT_PATH_FALLBACK_MONO) in the directory of the system's bundled data,
+ * or NULL for another face.  The string lives as long as the program; any
  * thread may call this.
  */
 const char *
 text_default_path(
 	int face)
 {
-	/* Only the three default faces have a path. */
-	if (face < TEXT_FACE_SANS || face > TEXT_FACE_FALLBACK)
+	/* Only the default faces and companions have a path. */
+	if (face < TEXT_FACE_SANS || face >= TEXT_PATHS)
 		return NULL;
 
 	/* The paths, made on the first call. */
@@ -857,7 +894,7 @@ font_defaults_make(void)
 	int error;
 
 	/* Every path starts empty. */
-	for (face = TEXT_FACE_SANS; face <= TEXT_FACE_FALLBACK; face++)
+	for (face = TEXT_FACE_SANS; face < TEXT_PATHS; face++)
 		wb_buffer_init(&font_defaults[face]);
 
 	/* The directory, which may be as long as any path. */
@@ -871,7 +908,7 @@ font_defaults_make(void)
 	}
 
 	/* Each font's file under it; a path that could not be made stays empty. */
-	for (face = TEXT_FACE_SANS; face <= TEXT_FACE_FALLBACK; face++) {
+	for (face = TEXT_FACE_SANS; face < TEXT_PATHS; face++) {
 		error = wb_buffer_append_string(&font_defaults[face], directory);
 		if (error == 0)
 			error = wb_buffer_append_string(&font_defaults[face], font_default_names[face]);

@@ -35,6 +35,11 @@
 #define TEXT_WEB_FACES		24
 #define TEXT_FACES		(TEXT_FACE_WEB + TEXT_WEB_FACES)
 
+/* The default companions of the sans face (text_default_path): its bold face and the monospaced fallback of its signs. */
+#define TEXT_PATH_BOLD		TEXT_FACE_WEB
+#define TEXT_PATH_FALLBACK_MONO	(TEXT_FACE_WEB + 1)
+#define TEXT_PATHS		(TEXT_FACE_WEB + 2)
+
 struct truetype_face;
 struct text_glyph_entry;
 
@@ -46,6 +51,16 @@ struct text_font_paths {
 	const char *sans;
 	const char *mono;
 	const char *fallback;
+};
+
+/*
+ * The paths of the sans face's companions: the font of its bold glyphs
+ * and the monospaced fallback of the signs the sans and monospace faces
+ * lack (NULL or empty for none).
+ */
+struct text_font_companions {
+	const char *bold;
+	const char *fallback_mono;
 };
 
 /*
@@ -124,6 +139,7 @@ struct text_system {
 
 /* Fonts (font.c). */
 int text_system_open(struct text_system *system, const struct text_font_paths *paths);
+int text_system_open_with(struct text_system *system, const struct text_font_paths *paths, const struct text_font_companions *companions);
 const char *text_default_path(int face);
 void text_system_close(struct text_system *system);
 void text_select_font(const struct text_system *system, int monospace, float size, int weight, struct text_font *font);

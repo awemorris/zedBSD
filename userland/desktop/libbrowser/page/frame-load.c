@@ -485,7 +485,7 @@ release_urls:
 			return error;
 		}
 	} else if (!remote) {
-		error = page_fetch_response("about:blank", wb_buffer_string(&location), &load->response);
+		error = page_fetch_response(page_cookies(load->page), "about:blank", wb_buffer_string(&location), &load->response);
 		if (error != 0) {
 			/* A local resource refusal is the task outcome, not a setup failure. */
 			load->error = error;

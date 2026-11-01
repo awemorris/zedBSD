@@ -35,6 +35,8 @@ typedef void (*page_console)(void *context, int level, const char *text, size_t 
 /* The network's loader and its requests (net/net.h), which the embedder runs through page_net_*. */
 struct net_loader;
 struct net_request;
+struct net_cookie_jar;
+struct browser_instance;
 struct net_response;
 struct page_box_slot;
 struct net_url;
@@ -67,7 +69,10 @@ struct page_prefetched {
  * the page's decoded images (page/images.c), by location; loader (the
  * embedder's, or NULL) fetches http and https images without blocking,
  * and images_generation counts the images that arrived, which
- * laid_out_images is compared with to lay the page out again.
+ * laid_out_images is compared with to lay the page out again.  instance
+ * (the view's, borrowed; NULL until the view gives it, when the thread's
+ * default instance is used, page_instance) holds the cookies and the Web
+ * Storage areas the page sees.
  *
  * The style sheets (sheets.c): sheets is the table of the page's parsed
  * sheets (<style> texts and fetched sheets, by location);
@@ -84,7 +89,8 @@ struct page_prefetched {
  * The geometry scripts ask for (geometry.c, ws074-p031): query_css is the
  * style engine their selectors are matched with (made when first needed,
  * apart from the styling's engine, which is made anew at each change);
- * font_paths are the fonts the view gives (NULL until it does), and
+ * font_paths are the fonts the view gives (NULL until it does), with the
+ * sans font's companions (font_companions; NULL for the defaults), and
  * viewport_width and viewport_height its size, with which a script's
  * question lays the page out when it changed; scroll_x and scroll_y are
  * how far the view is scrolled, in CSS pixels.  scroll_requested says a
@@ -129,6 +135,7 @@ struct page {
 	/* The <img> elements (heap roots) whose load or error event is still to be fired (struct page_image_watch *). */
 	struct wb_vector image_watches;
 	struct net_loader *loader;
+	struct browser_instance *instance;
 	uint32_t images_generation;
 	uint32_t laid_out_images;
 	struct wb_vector sheets;
@@ -168,6 +175,7 @@ struct page {
 	uint32_t painted_media;
 	struct css_engine *query_css;
 	const struct text_font_paths *font_paths;
+	const struct text_font_companions *font_companions;
 	int viewport_width;
 	int viewport_height;
 	double scroll_x;
@@ -318,8 +326,11 @@ int page_resolve_location(const char *base, const char *href, struct wb_buffer *
 int page_record_visited(struct page *page, const struct wb_buffer *url);
 void page_images_init(struct page *page);
 void page_set_loader(struct page *page, struct net_loader *loader);
+void page_set_instance(struct page *page, struct browser_instance *instance);
+struct browser_instance *page_instance(struct page *page);
+struct net_cookie_jar *page_cookies(struct page *page);
 int page_load_bytes(struct page *page, const unsigned char *bytes, size_t length, const char *location, const char *mime, size_t mime_length);
-int page_net_create(void (*notify)(void *context), void *context, struct net_loader **loader);
+int page_net_create(struct net_cookie_jar *jar, void (*notify)(void *context), void *context, struct net_loader **loader);
 void page_net_destroy(struct net_loader *loader);
 size_t page_net_pending(const struct net_loader *loader);
 void page_net_wait(struct net_loader *loader, int timeout);
@@ -331,6 +342,7 @@ int page_net_result(const struct net_request *request, const unsigned char **byt
 int page_load_images(struct page *page);
 void page_set_viewport(struct page *page, int width, int height);
 void page_set_fonts(struct page *page, const struct text_font_paths *paths);
+void page_set_font_companions(struct page *page, const struct text_font_companions *companions);
 int page_sticky_sync(struct page *page, layout_unit scroll_y);
 void page_set_scroll(struct page *page, double x, double y);
 
@@ -356,8 +368,9 @@ void page_rendering(void *context);
 struct dom_node *page_element_at(void *context, double x, double y);
 struct dom_node *page_child_element_at(void *context, struct bind_window *window, double x, double y);
 
-/* Web Storage (storage.c, ws074-p080). */
+/* Web Storage (storage.c): the window's calls, and the release of an instance's areas. */
 const struct bind_storage_calls *page_storage_calls(void);
+void page_storage_release(struct wb_vector *areas);
 void page_set_console(struct page *page, page_console console, void *context);
 const char *page_failure_reason(void);
 const struct img_bitmap *page_image_of(void *context, const struct dom_element *element);
@@ -385,9 +398,10 @@ int page_media_status(const struct page *page, const struct dom_element *element
 void page_media_seek(struct page *page, const struct dom_element *element, double seconds);
 int page_media_host(void *context, struct dom_element *element, int request, double value, struct bind_media *state);
 int page_media_click(struct page *page, struct dom_element *element, int x, int y);
-int page_fetch(const char *base, const char *href, struct wb_buffer *bytes, struct wb_buffer *final_url);
+/* The cookies of an http or https fetch go to and come from a jar (page_cookies; NULL for none). */
+int page_fetch(struct net_cookie_jar *jar, const char *base, const char *href, struct wb_buffer *bytes, struct wb_buffer *final_url);
 /* Fresh response storage receives owned metadata/body, or an empty response on failure. */
-int page_fetch_response(const char *base, const char *href, struct net_response *response);
+int page_fetch_response(struct net_cookie_jar *jar, const char *base, const char *href, struct net_response *response);
 /* Declared MIME essence selects a supported native document kind; failures preserve content. */
 int page_document_content(const char *mime, size_t length, enum dom_document_content *content);
 

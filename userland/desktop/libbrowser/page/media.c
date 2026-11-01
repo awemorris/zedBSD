@@ -532,7 +532,7 @@ media_add(
 
 	/* Otherwise its bytes at once (a data: URL, or no loader). */
 	wb_buffer_init(&value);
-	error = page_fetch(page->base, media->location, &value, NULL);
+	error = page_fetch(page_cookies(page), page->base, media->location, &value, NULL);
 	if (error == 0)
 		media_start(media, value.data, value.length);
 	else

@@ -241,8 +241,10 @@ struct net_request {
  * thread from its wait.
  *
  * The caller's own: its notify function and context (set when the loader
- * is made), and how many requests it started that have neither ended to it
- * nor been cancelled (pending).
+ * is made), how many requests it started that have neither ended to it
+ * nor been cancelled (pending), and the cookie jar of the requests
+ * (cookies, set before the first request and read by the network thread;
+ * the jar has its own lock).
  */
 struct net_loader {
 	struct net_request *requests;
@@ -279,6 +281,7 @@ struct net_loader {
 	net_loader_notify notify;
 	void *notify_context;
 	size_t pending;
+	struct net_cookie_jar *cookies;
 };
 
 static uint64_t loader_clock(void);
@@ -408,6 +411,21 @@ net_loader_destroy(
 
 	/* The threads, then everything they held. */
 	loader_release(loader);
+}
+
+/*
+ * Gives a loader the cookie jar its requests send and keep the cookies
+ * of (NULL, as a new loader has, for none).  Called before the loader's
+ * first request: the network thread reads it once the request has
+ * reached it under the loader's lock.  The jar outlives the loader.
+ */
+void
+net_loader_set_cookies(
+	struct net_loader *loader,
+	struct net_cookie_jar *jar)
+{
+	/* The jar of every request from now on. */
+	loader->cookies = jar;
 }
 
 /*
@@ -1742,7 +1760,7 @@ loader_finish(
 	request->response.no_store = 0;
 	request->response.no_cache = 0;
 	wb_buffer_init(&location);
-	error = net_http_parse_response(&request->url, &request->raw, &request->response, &location);
+	error = net_http_parse_response(request->loader->cookies, &request->url, &request->raw, &request->response, &location);
 	wb_buffer_clear(&request->raw);
 	if (error != 0) {
 		wb_buffer_release(&location);
@@ -1961,7 +1979,7 @@ loader_prepare(
 	send.headers = request->headers;
 	send.body = request->has_body ? (request->body != NULL ? request->body : (const unsigned char *)"") : NULL;
 	send.body_length = request->body_length;
-	error = net_http_request_text_send(&request->url, &request->request, 1, lines, request->kind, &send);
+	error = net_http_request_text_send(request->loader->cookies, &request->url, &request->request, 1, lines, request->kind, &send);
 	wb_buffer_release(&extra);
 	if (error != 0)
 		return error;

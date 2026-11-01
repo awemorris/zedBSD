@@ -346,7 +346,7 @@ page_load_location(
 
 	/* The document's bytes and its final URL. */
 	wb_buffer_init(&where);
-	error = page_fetch_response(location, location, &response);
+	error = page_fetch_response(page_cookies(page), location, location, &response);
 
 	/* The page's location: a file's path, or the final URL. */
 	if (error == 0)
@@ -400,6 +400,19 @@ page_set_fonts(
 {
 	/* The view's paths. */
 	page->font_paths = paths;
+}
+
+/*
+ * Gives the page the companions of its sans font (the view's, which
+ * outlive the page; NULL for the defaults of the data directory).
+ */
+void
+page_set_font_companions(
+	struct page *page,
+	const struct text_font_companions *companions)
+{
+	/* The view's companions. */
+	page->font_companions = companions;
 }
 
 /*
@@ -503,10 +516,14 @@ page_open_fonts(
 {
 	int error;
 
-	/* Opens them once. */
+	/* Opens them once, with the view's companions of the sans font (or the defaults). */
 	if (page->text_open)
 		return 0;
-	error = text_system_open(&page->text, paths);
+	if (page->font_companions != NULL) {
+		error = text_system_open_with(&page->text, paths, page->font_companions);
+	} else {
+		error = text_system_open(&page->text, paths);
+	}
 	if (error != 0)
 		return error;
 

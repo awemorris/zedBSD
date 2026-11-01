@@ -15,6 +15,7 @@
 
 #include "page/page.h"
 #include "net/net.h"
+#include "storage/instance.h"
 
 #include <errno.h>
 
@@ -32,12 +33,72 @@ page_set_loader(
 }
 
 /*
- * Makes a loader (with its network and resolver threads); notify (which
- * may be NULL) is called with context from the loader's thread when there
- * is news for page_net_process.
+ * Gives a page the instance whose cookies and Web Storage it uses (the
+ * view's; it outlives the page).
+ */
+void
+page_set_instance(
+	struct page *page,
+	struct browser_instance *instance)
+{
+	/* The instance the page's scripts and fetches use from now on. */
+	page->instance = instance;
+}
+
+/*
+ * Reports the instance a page uses: the one its view gave, or, for a page
+ * made without a view, the default instance of the calling thread (made
+ * now when it is the thread's first; NULL without memory).
+ */
+struct browser_instance *
+page_instance(
+	struct page *page)
+{
+	struct browser_instance *instance;
+	int error;
+
+	/* The view's instance. */
+	if (page->instance != NULL)
+		return page->instance;
+
+	/* Otherwise the thread's default one, which the page keeps from now on. */
+	error = wb_instance_default(&instance);
+	if (error != 0)
+		return NULL;
+
+	/* Succeeded: the page's instance. */
+	page->instance = instance;
+	return instance;
+}
+
+/*
+ * Reports the cookie jar of a page's instance (NULL when the page has no
+ * instance for lack of memory: its fetches then send and keep no cookie).
+ */
+struct net_cookie_jar *
+page_cookies(
+	struct page *page)
+{
+	struct browser_instance *instance;
+
+	/* The page's instance. */
+	instance = page_instance(page);
+	if (instance == NULL)
+		return NULL;
+
+	/* Succeeded: its jar. */
+	return instance->cookies;
+}
+
+/*
+ * Makes a loader (with its network and resolver threads) whose requests
+ * use a cookie jar (NULL for none); notify (which may be NULL) is called
+ * with context from the loader's thread when there is news for
+ * page_net_process.
  */
 int
 page_net_create(
+	struct net_cookie_jar *jar,
 	void (*notify)(void *context),
 	void *context,
 	struct net_loader **loader)
@@ -48,6 +109,9 @@ page_net_create(
 	error = net_loader_create(notify, context, loader);
 	if (error != 0)
 		return error;
+
+	/* Its requests' cookies, before the first request. */
+	net_loader_set_cookies(*loader, jar);
 
 	/* Succeeded: the loader takes requests. */
 	return 0;
