@@ -109,7 +109,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1854 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1855 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -174,7 +174,7 @@ BUG-389 · q1854 · WS341 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS242](ws242/ws.md) | MG006 | nvrtx の RTX 20/30/40 の全モデル（2026-10-15 ユーザー） | incomplete（すぐ取り組む物、2026-10-27 ユーザー「すぐ取り組むものの一つです。」） | p001 の再開点 1〜4、GTX 16・RTX 30・40 の既定の有効（ユーザーの決定、未実装） |
 | [WS250](ws250/ws.md) | MG006 | nvrtx の終わらない GPU の仕事の取り消しと復帰、system は動き続ける（2026-10-15 ユーザー） | incomplete（すぐ取り組む物、2026-10-27 ユーザー「すぐ取り組むものの一つです。」） | p001 の設計（草稿は main 64f05b2c7） |
 | [WS290](ws290/ws.md) | MG006 | zedBSD の GHCI の driver を GHCI 1.0（amaterrace-gpu の docs/ghci.md 89529de）だけに書き直す。試験は host だけ | incomplete・保留（2026-10-28 ユーザー: FPGA 側の設計が終わるまで P3 終了、再開は明示の指示。p017 は実機待ち） | q1636（P3）で p001 の design 版 4 → p002〜（host 試験、実機は VF2＋KC705 の用意の後） |
-| [WS291](ws291/ws.md) | MG006 | GPU の driver の描画の速さ（desktop 60 fps・重い 3D の model 50 fps）: AMD RDNA（P2）→ NVIDIA（P2、GPU を入れ替え）→ PowerVR（VF2、P3） | incomplete（p001〜p005 cleared、p006 in-progress） | q1635（P2）で p006 の続き → p008〜p009、Linux 以上の後に WS306 |
+| [WS291](ws291/ws.md) | MG006 | GPU の driver の描画の速さ（desktop 60 fps・重い 3D の model 50 fps）: AMD RDNA（P2）→ NVIDIA（P2、GPU を入れ替え）→ PowerVR（VF2、P3） | incomplete・ラップアップ（2026-11-01 ユーザーの指示、RTX の video の WS324 へ移る。再開はユーザーの指示で） | q1635（P2）で p006 の続き → p008〜p009、Linux 以上の後に WS306 |
 | [WS309](ws309/ws.md) | MG006 | Keiland の compositor の thread の構成を整理し main loop が待たないようにする。ゲームモードは Vulkan display の仕様の中で | incomplete（p001〜p007・p019 cleared、P1 q1662-i05） | p008 の残り（fence 付きの task）から |
 | [WS310](ws310/ws.md) | MG004 | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる（WS301 の Q301-3、2026-10-29 ユーザー「最終的には呼ぶが、別なWSにして…今は呼ばない。」） | incomplete（p001 設計済み、問い Q310-1〜6 待ち） | p001（WS301 の後） |
 | [WS313](ws313/ws.md) | MG008 | ODROID-C5（Amlogic S905X5M）の BSP（bsp-s905x5m）と Mali の GPU で、起動して desktop を表示する（2026-10-29 ユーザー） | incomplete（全 block の code を揃えた、実装済み・実機未試験。2026-10-29 夜にユーザーが実機で試験） | 夜の試験（plan/ws313/tests/README.md）→ 直し、Mali の desktop（render pass の LOAD など） |
@@ -186,7 +186,7 @@ BUG-389 · q1854 · WS341 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS321](ws321/ws.md) | MG006 | Pi 5（BCM2712） の Vulkan Video: H.265 decode（HEVC の block を Vulkan Video として）。H.264 は hardware に無く libavcodec | planning | WS318 の completed の後 |
 | [WS322](ws322/ws.md) | MG006 | VisionFive 2（JH7110） の Vulkan Video: H.264・H.265 decode（Wave511）、H.265 encode（Wave420L）を PowerVR の Vulkan の executor の Vulkan Video として。H.264 encode は hardware に無く独自の software（WS329） | incomplete | p001 cleared（設計）、p002 実機の probe（P2 q1852）。Q322-2・Q322-3 はユーザーの判断待ち |
 | [WS323](ws323/ws.md) | MG006 | ODROID-C5（Amlogic S905X5M） の Vulkan Video: H.264・H.265 の decode と encode（Amlogic の VPU、encode は hardware の有無の確認から）を Mali の Vulkan の executor の Vulkan Video として | planning | WS318 の completed の後 |
-| [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | planning | WS318 の completed の後 |
+| [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | incomplete | p001 調べと設計（P1 q1854、2026-11-01 ユーザーの指示で WS318 を待たない） |
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
 | [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
 | [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |

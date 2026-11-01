@@ -3,7 +3,7 @@
 # WS324 RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC）
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: planning（2026-10-30 Q1 が作成。[WS318](../ws318/ws.md)（libmedia）の completed の後に始める）
+- Status: incomplete（2026-10-30 Q1 が作成。2026-11-01 ユーザーから、WS291 をラップアップして RTX の H.264 encode・H.265 decode・H.265 encode の実装に移る、という趣旨の指示を受け、WS318 の completed を待たずに p001 を始める）
 - 目標: RTX 2070（nvrtx） の video の hardware のうち zedBSD で未実装の物を、kernel の Vulkan の executor（`src/drivers/gpu/nvrtx/`）の Vulkan Video（`VK_KHR_video_decode_*`・`VK_KHR_video_encode_*`）として実装し、libmedia から使えるようにする。
 
 ## ユーザーの決定（2026-10-30、原文）
@@ -16,8 +16,9 @@
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| ws324-p001 | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | planning | WS318 completed |
+| [ws324-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | planned（P1 q1854） | （WS318 を待たない、2026-11-01 ユーザー） |
 
 ## Resume point
 
+- 2026-11-01 21:46 Q1: ユーザーの指示で前倒し、p001 を P1（q1854）に。WS291 の P1 の返却の後に起動。
 - 2026-10-30 Q1: 作成。WS318 の completed の後。
