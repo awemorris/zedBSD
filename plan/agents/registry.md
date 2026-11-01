@@ -10,7 +10,6 @@
 | P3 | phase-runner-high | ws291 p027 の回帰 amd64・Venus (q1859-i01) | `/home/awe/zedBSD-worktrees/p3-ws291reg` / `agent/p3-ws291reg` | 返却（2026-11-01 23:19、PASS） | 73669b953（merge 6f49769e7） |
 | P5 | phase-runner-high | ws334 p032 Wine の確かめ (q1874-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-02 00:19 起動） | 22e46046c（merge f9c278fa5） |
 | Sonnet | phase-runner-low | ws334 の .exe の debug の分け (q1875-i01) | `/home/awe/zedBSD-worktrees/s-ws334-strip` / `agent/s-ws334-strip` | in-progress（2026-11-02 00:19 起動） | — |
-| Sonnet | phase-runner-low | ws334 の UI の 2 つの直し (q1872-i01) | `/home/awe/zedBSD-worktrees/s-ws334-ui` / `agent/s-ws334-ui` | in-progress（2026-11-01 23:54 起動） | — |
 | P6 | phase-runner-low | ws335 p012 RSA (q1870-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 23:51 起動） | f14b5b34a（merge 2d7097dd3） |
 | P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |
 | P4 | phase-runner-high | ws291 p027 の回帰 arm64・riscv64 (q1860-i01) | `/home/awe/zedBSD-worktrees/p4-ws291reg` / `agent/p4-ws291reg` | 返却（2026-11-01 22:48、PASS） | 42ae7d081（merge b29f3a5ae） |
