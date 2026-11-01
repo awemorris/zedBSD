@@ -76,27 +76,6 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 06:5x にも、担当が消してよいと挙げた /tmp の試験の出力（/tmp/ws326-speed.run.*・/tmp/p1-speed-*.run.*・/tmp/p1-stage・/tmp/p1-video-check、scratchpad の interp）を wildcard で消そうとして、同じ判定で止められた。
 - 決めてほしい事: 00 の worktree の片付けと合わせて、許可を足すか、ユーザーが `! sh plan/tools/q1-clean.sh --tmp` を走らせるか。
 
-### 0c. WS318（libmedia の作り直し）の設計の問い Q318-1〜14（2026-10-31 新しい）
-
-- 背景: WS318 は、libmedia を Keiland の app の唯一の動画・音声・camera の入り口にする WS。app の Vulkan の device を共有し、codec を問い合わせて選び、encoder と camera を足し、libavcodec は libmedia の中の最後の予備にする。P5 が設計（public の header 2 つの案、Phase p001〜p028）を書き、敵対的レビュー（blocker 3・major 20）を反映した（main 85fbeb091）。HAL は変えない。全文・用語・推しは [ws318/user-questions.md](ws318/user-questions.md)。
-- 用語: Vulkan Video は GPU の動画の decode・encode の標準の口。vkfake は試験用の偽の Vulkan の device。MJPEG は camera がよく出す JPEG の連続の形式。B-frame は前後の frame を参照する frame。
-- 問いの要点（どれも推しが付いている）:
-  - Q318-1 hardware の encode と H.265 の decode は、WS318 では vkfake で確かめ、実機の確かめは GPU ごとの driver の WS（WS319〜）の受け入れにする（推し）。
-  - Q318-2 zedBSD の libavcodec の package は encoder を無効のまま。libavcodec の encode の予備は、encoder 付きの libavcodec の機械でだけ働く（推し）。
-  - **Q318-3 Vulkan の header の更新**: 今は 1.3.269 で、KHR の encode が無い。1.3.274 以降の tag に固定して更新したい。共有の sysroot の作り直し（toolchain の扱い）が要る。
-  - Q318-4 MJPEG の camera は Huffman を CPU、IDCT と色の変換を GPU の描画で（推し）。
-  - Q318-5 AAC-LC の encoder に、短い窓の切り替えと TNS を足す（推し）。
-  - Q318-6 camera の実機の Phase（p027）だけが WS282（UVC）を待つ（推し）。
-  - Q318-7 MP4 の書き出し（録画の file）は範囲の外（推し）。
-  - Q318-8 H.265 は Main profile だけ（推し）。
-  - Q318-9 hardware の encode は IDR と P から、B-frame 無し（推し）。
-  - Q318-10 i915 の driver の小さな変更（decode の出力を sample できる形に）は WS319 で（推し）。
-  - Q318-11 browser の `<video>` は libavcodec を使わない（network から来た信頼できない入力を同じ process で decode するため）（推し）。
-  - **Q318-12** 2026-10-12 の決定（毎 frame の CPU の複写をしない）の例外として、software の decoder の出力を GPU の memory へ、import の無い機械の camera の frame の、2 つの複写を認めるか（推し: 認める）。
-  - Q318-13 player の文言で「libavcodec が無い」を先に出す（推し）。
-  - **Q318-14** WS326 の完了を待たずに、WS326 に触れない Phase（p002・p003a・p003b・p011a・p011b・p016〜p019）を先に始めるか（推し: 始める）。
-- 止めている物: WS318 の実装（設計の受け入れと Q318-14 の答えまで始めない）。
-
 ### 0d. WS329（libmedia の H.264 の software の encoder）の設計の問い Q329-1〜5（2026-10-31 新しい）
 
 - 背景: WS329 は、libmedia に既存の library を使わない H.264 の encoder を作る WS（標準廉価実装手順）。P5 が設計（header の案 26、Phase p002〜p026）を書き、敵対的レビュー（major 10）を反映した（main 455a7d5b4）。encoder は decoder（WS326）の部品と再構成をそのまま使うので、encoder と decoder の画がずれない。実装は WS326 の完了の後。全文は [ws329/user-questions.md](ws329/user-questions.md)。
@@ -233,6 +212,8 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（[BUG-374](bugs/BUG-374.md)、RTX の cursor の色、2026-11-01 09:08 に更新）**: 直した（cursor の色の倍率の register、display の CRC で全色一致を確かめた）。目視の確かめ: 10.0.10.3 の lock の中で `sh plan/ws291/tests/rtx-cursor-view.sh build build/b374/u` → `RESTORE_CKSUM=1463007375 sh plan/ws291/tests/rtx-cursor-view.sh up OUT build/b374/u` で入れ（Q1・担当が行う）、desktop の矢印が内側 白・外枠 黒なら直った。戻しは `rtx-cursor-view.sh back OUT build/b374/u`。
 
 ## 決まった事
+
+- 2026-11-01 09:24 WS318（libmedia）: hardware が無い所は独自の software に fallback、独自の software が揃えば libavcodec を使わず依存を切る、header は 2 段で更新、MJPEG は扱わない。残りの問いは Q1 が方針に沿って決めた。設計の改訂が要る（[ws318/ws.md](ws318/ws.md)）。
 
 - 2026-11-01 09:16 BUG-339（VF2 の U-Boot の DTB）: 案 (4) 今のまま、案内の log を出して止める（[BUG-339](bugs/BUG-339.md)）。
 - 2026-11-01 09:16 x86 の PC の UEFI の起動の画面は monitor（EDID）に合わせ、video=640x480 を外す: [WS339](ws339/ws.md)（planning）。

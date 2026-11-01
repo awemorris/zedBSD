@@ -2,7 +2,7 @@
 
 # ws335-p006: ChaCha20・Poly1305・AEAD（と 64 bit の counter の ChaCha20）
 
-Status: in-progress（2026-11-01 06:59 q1821、Sonnet。09:30 実装済み・試験 PASS、cleared は Q1）
+Status: cleared（2026-11-01 09:23 Q1 の判定、main d0e048532。Sonnet 実装済み・試験 PASS、Q1 も run-unit chacha を流して PASS）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
