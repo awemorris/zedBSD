@@ -2,7 +2,7 @@
 
 # ws335-p037: 試験の相手（scripted な TLS server）と試験の側の署名器（試験の道具）
 
-Status: planned（2026-11-01 p001 が design-review の指摘 1・12 を受けて足した。依存: p025・p026・p027・p011・p008）
+Status: in-progress（2026-11-02 03:02）（2026-11-01 p001 が design-review の指摘 1・12 を受けて足した。依存: p025・p026・p027・p011・p008）
 Parent: [WS335](../ws.md)。担当: Opus（試験の道具の設計を含む。phase-runner を推す）。p029・p030・p031・p032 の試験が使う。
 
 ## 1. 読む物

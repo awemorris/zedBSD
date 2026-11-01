@@ -641,3 +641,5 @@
 | q1901 / q1901-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws324-p006f`・branch `agent/s-ws324-p006f`） | [ws324 p006f](ws324/phase006f/phase.md) | 2026-11-02 02:46 Q1（標準廉価実装手順） | in-progress |
 | q1902 / q1902-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws335-p018`・branch `agent/s-ws335-p018`） | [ws335 p018](ws335/phase018/phase.md) | 2026-11-02 02:46 Q1（標準廉価実装手順） | in-progress |
 | q1903 / q1903-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws335-p019`・branch `agent/s-ws335-p019`） | [ws335 p019](ws335/phase019/phase.md) | 2026-11-02 02:46 Q1（標準廉価実装手順） | in-progress |
+| q1904 / q1904-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws335c`・branch `agent/p6-ws335c`） | [ws335 p037](ws335/phase037/phase.md) 試験の道具: scripted な TLS server と ECDSA の署名器 | 2026-11-02 03:02 Q1 | in-progress |
+| q1905 / q1905-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws335-p021`・branch `agent/s-ws335-p021`） | [ws335 p021](ws335/phase021/phase.md) | 2026-11-02 03:02 Q1（標準廉価実装手順） | in-progress |
