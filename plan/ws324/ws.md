@@ -40,7 +40,7 @@
 | p005 | nvrtx の H.265 decode（NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離） | p004（libvulkan の転送は P2 が ws322-p005 で作る、並行） — in-progress（P1 q1917） |
 | p006a | H.265 の解析の設計（標準廉価実装手順）と header の配置（段 2） | Q324-1（p002 は要らない: host の Vulkan の header で試験） |
 | p006b〜h | （上の Phase の表へ移した、2026-11-02 p006a 段 2。Q-B の A） | — |
-| p006i | vkvideo-probe の H.265（前の案の p006e） | p006h、p002 |
+| p006i | vkvideo-probe の H.265（前の案の p006e）— P2 が ws322-p006 で作る（2026-11-02 07:22 Q1、WS322 と共有の probe） | p006h、p002 |
 | p007 | H.265 decode の実機の debug | p005、p006i、実機 |
 | p008a | libvulkan の encode の転送（queue と H.264、命令の番号、video の query pool、capset の bit 3） | p003、Q324-3 |
 | p008b | libvulkan の encode の転送（H.265、capset の bit 4） | p008a |
