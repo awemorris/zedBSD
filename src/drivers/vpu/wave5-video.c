@@ -9,12 +9,14 @@
  * The Wave5 decoder as the PowerVR render node's video engine (see
  * wave5-video.h and drv_powervr_video_ops in powervr.h).
  *
- * One engine stream is one Vulkan video session and, once its first I
- * picture comes, one instance of the firmware.  Each picture goes into
- * the instance's bitstream ring after the one before (the firmware reads
- * the ring on from where it stopped and cannot be moved back), behind
- * the picture's parameter sets whenever they differ from the ones sent
- * last or the picture is an IDR picture.  The first picture sets the
+ * One engine stream is one Vulkan video session of one codec (H.264 or
+ * H.265) and, once its first I picture (H.265: IRAP picture) comes, one
+ * instance of the firmware.  Each picture goes into the instance's
+ * bitstream ring after the one before (the firmware reads the ring on
+ * from where it stopped and cannot be moved back), behind the picture's
+ * parameter sets (H.264: SPS and PPS; H.265: VPS, SPS and PPS) whenever
+ * they differ from the ones sent last or the picture is an IDR (H.265:
+ * IRAP) picture.  The first picture sets the
  * sequence up, which says how many frame buffers the firmware needs; the
  * render node then makes that many pool pictures plus one, and they are
  * registered as the frame buffers' linear halves, once.
@@ -82,6 +84,13 @@
 /* The pixels across a macroblock. */
 #define VIDEO_MB			16U
 
+/* The parameter sets a picture names (H.264 uses the last two), and the bytes of each written one. */
+#define VIDEO_SET_VPS			0U
+#define VIDEO_SET_SPS			1U
+#define VIDEO_SET_PPS			2U
+#define VIDEO_SETS			3U
+#define VIDEO_SET_BYTES			VPU_H265_SET_MAX
+
 /* The log lines of pictures in error the engine writes at most, and of read positions. */
 #define VIDEO_LOG_LINES			32U
 #define VIDEO_PLACE_LINES		4U
@@ -131,32 +140,34 @@ struct video_engine {
 };
 
 /*
- * One stream: its engine and what it was opened with; its instance (NULL
- * until an I picture opens one, and after a reset); whether the
- * instance's sequence is set up, its coded size and the pool registered
- * for it; the slots' ties to the frame buffers; the parameter sets sent
- * last; the scratch a set is written in; whether a flushed instance
- * waits for an I picture; whether the core could not be stopped (broken);
- * and the counts of pictures and errors.
+ * One stream: its engine, its codec (DRV_WAVE5_H264 or _H265) and what it
+ * was opened with; its instance (NULL until an I picture opens one, and
+ * after a reset); whether the instance's sequence is set up, the coded
+ * size the firmware reports and the one the sequence's SPS gives, and
+ * the pool registered for it; the slots' ties to the frame buffers; the
+ * parameter sets sent last (by VIDEO_SET_*); the scratch a set is
+ * written in; whether a flushed instance waits for an I picture; whether
+ * the core could not be stopped (broken); and the counts of pictures and
+ * errors.
  */
 struct video_stream {
 	struct video_engine *engine;
+	unsigned codec;
 	struct drv_powervr_video_open open;
 	struct drv_wave5_stream *instance;
 	int sequenced;
 	int flushed;
 	uint32_t width;
 	uint32_t height;
+	uint32_t coded_width;
+	uint32_t coded_height;
 	uint32_t count;
 	uint32_t pitch;
 	struct drv_powervr_video_picture pool[DRV_WAVE5_MAX_BUFFERS];
 	struct vpu_slots slots;
-	uint8_t sent_sps[VPU_H264_SET_MAX];
-	size_t sent_sps_bytes;
-	uint8_t sent_pps[VPU_H264_SET_MAX];
-	size_t sent_pps_bytes;
-	uint8_t sps_unit[VPU_H264_SET_MAX];
-	uint8_t pps_unit[VPU_H264_SET_MAX];
+	uint8_t sent[VIDEO_SETS][VIDEO_SET_BYTES];
+	size_t sent_bytes[VIDEO_SETS];
+	uint8_t unit[VIDEO_SETS][VIDEO_SET_BYTES];
 	int broken;
 	uint32_t pictures;
 	uint32_t errors;
@@ -179,7 +190,9 @@ static void engine_keep(void *stream, uint32_t active);
 static void engine_reset(void *stream);
 static int engine_close(void *stream);
 static int decode_locked(struct video_stream *video, const struct drv_powervr_video_decode *job, struct drv_powervr_video_result *result);
-static int put_picture(struct video_stream *video, const struct drv_powervr_video_decode *job);
+static int put_picture(struct video_stream *video, const struct drv_powervr_video_decode *job, int intra);
+static int write_sets(struct video_stream *video, const struct drv_powervr_video_decode *job, size_t *bytes);
+static void forget_sets(struct video_stream *video);
 static int start_sequence(struct video_stream *video);
 static int set_differs(const uint8_t *unit, size_t bytes, const uint8_t *sent, size_t sent_bytes);
 static void close_instance(struct video_stream *video);
@@ -232,7 +245,7 @@ drv_wave5_video_register(
 		return error;
 	}
 
-	/* The render node's sessions opened from now on offer H.264 decode. */
+	/* The render node's sessions opened from now on offer H.264 and H.265 decode. */
 	error = drv_powervr_video_register(&video_ops, engine);
 	if (error != 0) {
 		kern_free(engine);
@@ -249,17 +262,17 @@ drv_wave5_video_register(
 	return 0;
 }
 
-/* Reports the operations of the engine: H.264 decode. */
+/* Reports the operations of the engine: H.264 and H.265 decode. */
 static uint32_t
 engine_operations(
 	void *engine)
 {
-	/* Succeeded: the one operation. */
+	/* Succeeded: the two decodes. */
 	(void)engine;
-	return DRV_POWERVR_VIDEO_DECODE_H264;
+	return DRV_POWERVR_VIDEO_DECODE_H264 | DRV_POWERVR_VIDEO_DECODE_H265;
 }
 
-/* Opens a stream of H.264 decode; its instance comes with its first I picture. */
+/* Opens a stream of H.264 or H.265 decode; its instance comes with its first I picture. */
 static int
 engine_open(
 	void *engine,
@@ -271,9 +284,9 @@ engine_open(
 	struct video_stream *video;
 	int refused;
 
-	/* Only H.264 decode, with a pool to decode into. */
+	/* Only a decode, with a pool to decode into. */
 	owner = engine;
-	if (operation != DRV_POWERVR_VIDEO_DECODE_H264 || open->pool == NULL)
+	if ((operation != DRV_POWERVR_VIDEO_DECODE_H264 && operation != DRV_POWERVR_VIDEO_DECODE_H265) || open->pool == NULL)
 		return EINVAL;
 
 	/* The stream's state. */
@@ -281,6 +294,9 @@ engine_open(
 	if (video == NULL)
 		return ENOMEM;
 	video->engine = owner;
+	video->codec = DRV_WAVE5_H264;
+	if (operation == DRV_POWERVR_VIDEO_DECODE_H265)
+		video->codec = DRV_WAVE5_H265;
 	video->open = *open;
 	vpu_slots_reset(&video->slots, 0);
 
@@ -390,8 +406,7 @@ engine_reset(
 		error = drv_wave5_flush(video->instance);
 		if (error == 0) {
 			video->flushed = 1;
-			video->sent_sps_bytes = 0;
-			video->sent_pps_bytes = 0;
+			forget_sets(video);
 			vpu_slots_reset(&video->slots, video->count);
 			video->engine->counts.flushed++;
 		} else if (error == ETIMEDOUT) {
@@ -471,17 +486,28 @@ decode_locked(
 	if (video->instance != NULL && drv_wave5_lost(video->instance))
 		close_instance(video);
 
-	/* Whether the picture has only I slices: an instance starts at one. */
+	/* The picture's sets must be its codec's. */
+	if (video->codec == DRV_WAVE5_H265 && (job->vps == NULL || job->h265_sps == NULL || job->h265_pps == NULL))
+		return 0;
+	if (video->codec == DRV_WAVE5_H264 && (job->sps == NULL || job->pps == NULL))
+		return 0;
+
+	/* Whether the picture has only I slices (H.265: is an IRAP picture): an instance starts at one. */
 	intra = 0;
 	if ((job->flags & DRV_POWERVR_VIDEO_PICTURE_INTRA) != 0)
 		intra = 1;
 
 	/* A new coded size at an I picture starts another instance; before one it is an error. */
-	coded_width = (job->sps->pic_width_in_mbs_minus1 + 1U) * VIDEO_MB;
-	coded_height = (job->sps->pic_height_in_map_units_minus1 + 1U) * VIDEO_MB;
-	if ((job->sps->flags & VPU_H264_SPS_FRAME_MBS_ONLY) == 0)
-		coded_height *= 2U;
-	if (video->sequenced && (coded_width != video->width || coded_height != video->height)) {
+	if (video->codec == DRV_WAVE5_H265) {
+		coded_width = job->h265_sps->width;
+		coded_height = job->h265_sps->height;
+	} else {
+		coded_width = (job->sps->pic_width_in_mbs_minus1 + 1U) * VIDEO_MB;
+		coded_height = (job->sps->pic_height_in_map_units_minus1 + 1U) * VIDEO_MB;
+		if ((job->sps->flags & VPU_H264_SPS_FRAME_MBS_ONLY) == 0)
+			coded_height *= 2U;
+	}
+	if (video->sequenced && (coded_width != video->coded_width || coded_height != video->coded_height)) {
 		if (!intra)
 			return 0;
 		close_instance(video);
@@ -496,19 +522,18 @@ decode_locked(
 
 	/* An instance for the stream. */
 	if (video->instance == NULL) {
-		error = drv_wave5_open(video->engine->core, DRV_WAVE5_H264, WAVE5_VIDEO_RING_BYTES, &video->instance);
+		error = drv_wave5_open(video->engine->core, video->codec, WAVE5_VIDEO_RING_BYTES, &video->instance);
 		if (error != 0) {
 			note(video, "no instance", error);
 			return 0;
 		}
 		video->sequenced = 0;
-		video->sent_sps_bytes = 0;
-		video->sent_pps_bytes = 0;
+		forget_sets(video);
 		video->engine->counts.opened++;
 	}
 
 	/* The picture's parameter sets and slices in the ring. */
-	error = put_picture(video, job);
+	error = put_picture(video, job, intra);
 	if (error == ETIMEDOUT)
 		return recover(video, error);
 	if (error != 0) {
@@ -526,6 +551,8 @@ decode_locked(
 			close_instance(video);
 			return 0;
 		}
+		video->coded_width = coded_width;
+		video->coded_height = coded_height;
 	}
 
 	/* A frame buffer no live slot holds must be there; none means the picture goes back out of the ring. */
@@ -622,48 +649,49 @@ decode_locked(
 }
 
 /*
- * Puts a picture in the ring: its SPS and PPS when they differ from the
- * ones sent last or the picture is an IDR picture, then its slices.
+ * Puts a picture in the ring: its parameter sets (H.264: SPS and PPS;
+ * H.265: VPS, SPS and PPS) when one differs from the one sent last or the
+ * picture is an IDR picture (H.265: an IRAP picture), each set after a
+ * changed one going in too, then its slices.
  */
 static int
 put_picture(
 	struct video_stream *video,
-	const struct drv_powervr_video_decode *job)
+	const struct drv_powervr_video_decode *job,
+	int intra)
 {
-	struct drv_wave5_piece pieces[3];
-	size_t sps_bytes;
-	size_t pps_bytes;
+	struct drv_wave5_piece pieces[VIDEO_SETS + 1U];
+	size_t bytes[VIDEO_SETS];
+	unsigned first;
+	unsigned set;
 	unsigned count;
-	int idr;
-	int sps_new;
-	int pps_new;
+	int again;
 	int error;
 
 	/* The sets as NAL units. */
-	error = vpu_h264_write_sps(job->sps, 1, video->sps_unit, sizeof(video->sps_unit), &sps_bytes);
-	if (error != 0)
-		return error;
-	error = vpu_h264_write_pps(job->pps, job->sps, video->pps_unit, sizeof(video->pps_unit), &pps_bytes);
+	error = write_sets(video, job, bytes);
 	if (error != 0)
 		return error;
 
-	/* Each set goes in when it is new or the picture is an IDR picture. */
-	idr = 0;
+	/* All sets go in at an IDR picture (H.265: IRAP); otherwise from the first one that changed. */
+	again = 0;
 	if ((job->flags & DRV_POWERVR_VIDEO_PICTURE_IDR) != 0)
-		idr = 1;
-	sps_new = set_differs(video->sps_unit, sps_bytes, video->sent_sps, video->sent_sps_bytes);
-	pps_new = set_differs(video->pps_unit, pps_bytes, video->sent_pps, video->sent_pps_bytes);
+		again = 1;
+	if (video->codec == DRV_WAVE5_H265 && intra)
+		again = 1;
+	first = VIDEO_SET_VPS;
+	if (video->codec == DRV_WAVE5_H264)
+		first = VIDEO_SET_SPS;
 
 	/* The pieces: the sets, then the slices. */
 	count = 0;
-	if (sps_new || idr) {
-		pieces[count].bytes = video->sps_unit;
-		pieces[count].length = sps_bytes;
-		count++;
-	}
-	if (pps_new || sps_new || idr) {
-		pieces[count].bytes = video->pps_unit;
-		pieces[count].length = pps_bytes;
+	for (set = first; set < VIDEO_SETS; set++) {
+		if (!again && set_differs(video->unit[set], bytes[set], video->sent[set], video->sent_bytes[set]))
+			again = 1;
+		if (!again)
+			continue;
+		pieces[count].bytes = video->unit[set];
+		pieces[count].length = bytes[set];
 		count++;
 	}
 	pieces[count].bytes = job->bitstream;
@@ -681,13 +709,52 @@ put_picture(
 	}
 
 	/* The sets sent last. */
-	kern_memcpy(video->sent_sps, video->sps_unit, sps_bytes);
-	video->sent_sps_bytes = sps_bytes;
-	kern_memcpy(video->sent_pps, video->pps_unit, pps_bytes);
-	video->sent_pps_bytes = pps_bytes;
+	for (set = first; set < VIDEO_SETS; set++) {
+		kern_memcpy(video->sent[set], video->unit[set], bytes[set]);
+		video->sent_bytes[set] = bytes[set];
+	}
 
 	/* Succeeded: the picture is in the ring. */
 	return 0;
+}
+
+/* Writes the picture's parameter sets as NAL units into the stream's scratch, and their lengths. */
+static int
+write_sets(
+	struct video_stream *video,
+	const struct drv_powervr_video_decode *job,
+	size_t *bytes)
+{
+	int error;
+
+	/* H.265: the VPS, the SPS and the PPS. */
+	if (video->codec == DRV_WAVE5_H265) {
+		error = vpu_h265_write_vps(job->vps, video->unit[VIDEO_SET_VPS], VIDEO_SET_BYTES, &bytes[VIDEO_SET_VPS]);
+		if (error == 0)
+			error = vpu_h265_write_sps(job->h265_sps, video->unit[VIDEO_SET_SPS], VIDEO_SET_BYTES, &bytes[VIDEO_SET_SPS]);
+		if (error == 0)
+			error = vpu_h265_write_pps(job->h265_pps, video->unit[VIDEO_SET_PPS], VIDEO_SET_BYTES, &bytes[VIDEO_SET_PPS]);
+		return error;
+	}
+
+	/* H.264: the SPS (asking for no reordering) and the PPS. */
+	bytes[VIDEO_SET_VPS] = 0;
+	error = vpu_h264_write_sps(job->sps, 1, video->unit[VIDEO_SET_SPS], VIDEO_SET_BYTES, &bytes[VIDEO_SET_SPS]);
+	if (error == 0)
+		error = vpu_h264_write_pps(job->pps, job->sps, video->unit[VIDEO_SET_PPS], VIDEO_SET_BYTES, &bytes[VIDEO_SET_PPS]);
+	return error;
+}
+
+/* Forgets the sets sent: the next picture's go in again. */
+static void
+forget_sets(
+	struct video_stream *video)
+{
+	unsigned set;
+
+	/* None sent. */
+	for (set = 0; set < VIDEO_SETS; set++)
+		video->sent_bytes[set] = 0;
 }
 
 /*
