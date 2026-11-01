@@ -233,6 +233,7 @@ typedef void (*bind_request_done)(void *context, int error, int status, const ch
  * are internal engine collaborators; the public view callback contract is in
  * browser.h and does not expose these private records.
  */
+struct bind_window;
 struct bind_host {
 	void *context;
 	void (*console)(void *context, int level, const char *text, size_t length);
@@ -271,6 +272,8 @@ struct bind_host {
 	void (*request_cancel)(void *context, void *handle);
 	int (*fetch_sync)(void *context, const char *href, struct wb_buffer *bytes, struct wb_buffer *final_url);
 	struct dom_node *(*element_at)(void *context, double x, double y);
+	/* The same for a frame's document: the top element of that window's own layout (NULL when it has none). */
+	struct dom_node *(*child_element_at)(void *context, struct bind_window *window, double x, double y);
 	/* Inserts into the active parser; ENOTSUP when no insertion point exists. */
 	int (*document_write)(void *context, const uint16_t *units, size_t length);
 	/* A media element's state, play, pause or seek to a time (BIND_MEDIA_*, ws121-p005); fills state. */
@@ -345,6 +348,7 @@ void bind_window_set_unloading(struct bind_window *window);
 void bind_window_set_current_script(struct bind_window *window, struct dom_node *script);
 /* Borrows active child cascade/viewport until its next DOM mutation; caller roots its Document. */
 int bind_window_child_styles(struct bind_window *window, struct css_engine **engine, int *width, int *height);
+struct dom_document *bind_window_child_document(struct bind_window *window);
 /* Appends actual inline source for primary or managed-child rendering without DOM mutation. */
 int bind_style_sheet_source(struct dom_element *element, struct wb_units *units);
 int bind_run_script(struct bind_window *window, const uint16_t *source, size_t length, const char *name);

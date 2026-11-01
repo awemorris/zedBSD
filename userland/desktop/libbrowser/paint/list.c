@@ -109,6 +109,7 @@ struct list_walk {
 	int error;
 	/* While a view transition is painted: the tree, its transition, whether the named boxes are left out, and the box captured. */
 	const struct layout_tree *tree;
+	const struct layout_tree *source;
 	const struct layout_transition *transition;
 	int vt_hide;
 	int vt_capturing;
@@ -245,6 +246,7 @@ paint_build(
 	memset(&walk, 0, sizeof(walk));
 	walk.list = list;
 	walk.text = tree->text;
+	walk.source = tree;
 	walk.canvas_box = list_canvas(tree, &list->canvas_color);
 	walk.viewport_width = tree->viewport_width;
 	walk.viewport_height = tree->viewport_height;
@@ -2591,6 +2593,11 @@ list_image_item(
 		return;
 	if (width <= 0 || height <= 0)
 		return;
+
+	/* A vector picture is drawn at the size it is shown at. */
+	if (image->vector && walk->source != NULL && walk->source->image_variant != NULL)
+		image = walk->source->image_variant(walk->source->image_context, image, (int)(layout_to_px(width) + 0.5f),
+		    (int)(layout_to_px(height) + 0.5f));
 
 	/* The item. */
 	memset(&item, 0, sizeof(item));

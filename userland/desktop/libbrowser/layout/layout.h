@@ -66,6 +66,12 @@ enum layout_box_kind {
 typedef const struct img_bitmap *(*layout_image_lookup)(void *context, const struct dom_element *element);
 
 /*
+ * Finds a vector picture drawn at the pixel size it is shown at (the picture
+ * itself when it cannot be); the page supplies it for the painting.
+ */
+typedef const struct img_bitmap *(*layout_image_variant)(void *context, const struct img_bitmap *image, int width, int height);
+
+/*
  * Finds the decoded image a style's URL names (a background image; NULL
  * when it cannot be had), for the page to supply likewise.
  */
@@ -431,6 +437,7 @@ struct layout_tree {
 	layout_image_lookup image_lookup;
 	layout_url_lookup url_lookup;
 	void *image_context;
+	layout_image_variant image_variant;
 	int measuring;
 	/* The content height of the current containing block, when it is definite. */
 	layout_unit containing_height;

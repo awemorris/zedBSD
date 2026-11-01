@@ -420,6 +420,7 @@ page_start_scripts(
 	host.request_cancel = script_request_cancel;
 	host.fetch_sync = script_fetch_sync;
 	host.element_at = page_element_at;
+	host.child_element_at = page_child_element_at;
 	host.document_write = script_document_write;
 	host.media = page_media_host;
 	host.image = page_image_host;

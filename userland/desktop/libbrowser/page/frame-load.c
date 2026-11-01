@@ -1196,3 +1196,34 @@ frame_load_events(
 	/* Succeeded: the real current resource completed exactly one native load task. */
 	return 0;
 }
+
+/* Gives each loaded child its iframe's content size for its viewport, from the page's last layout. */
+static void
+frame_size_walk(
+	const struct layout_box *box)
+{
+	const struct dom_element *element;
+	const struct vm_realm *child;
+	struct bind_window *window;
+
+	for (; box != NULL; box = box->next) {
+		if (box->node != NULL && box->node->type == DOM_ELEMENT) {
+			element = (const struct dom_element *)box->node;
+			if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_IFRAME && element->child_context != NULL) {
+				child = (const struct vm_realm *)element->child_context;
+				window = child->host;
+				if (window != NULL && !window->detached)
+					bind_window_set_viewport(window, (int)layout_to_px(box->width), (int)layout_to_px(box->height));
+			}
+		}
+		frame_size_walk(box->first_child);
+	}
+}
+
+void
+page_frames_size(
+	struct page *page)
+{
+	if (page->laid_out && page->layout.root != NULL)
+		frame_size_walk(page->layout.root);
+}

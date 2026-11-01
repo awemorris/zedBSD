@@ -409,3 +409,13 @@ style_context_media(
 	/* Succeeded: the list is available until the context is released. */
 	return 0;
 }
+
+/* Reports a frame's actual Document, or NULL for a retired window. */
+struct dom_document *
+bind_window_child_document(
+	struct bind_window *window)
+{
+	if (window == NULL || window->detached)
+		return NULL;
+	return window->document;
+}

@@ -167,7 +167,9 @@ static float svg_percent_length(const char *text, const char *name, float fallba
 int
 page_svg_render(
 	const struct dom_element *svg,
-	struct img_bitmap *bitmap)
+	struct img_bitmap *bitmap,
+	int out_width,
+	int out_height)
 {
 	struct wb_buffer buffer;
 	struct svg_canvas canvas;
@@ -260,6 +262,11 @@ page_svg_render(
 		natural_set = 1;
 		natural_width = (int)SVG_DEFAULT_WIDTH;
 		natural_height = (int)SVG_DEFAULT_HEIGHT;
+	} else if ((has_width && width <= 0.0f) || (has_height && height <= 0.0f)) {
+		/* A viewBox with a width or height of zero: that side is zero and the other is the attribute's, or follows the viewBox's ratio. */
+		natural_set = 1;
+		natural_width = has_width ? (int)(width + 0.5f) : (int)(height * view_width / view_height + 0.5f);
+		natural_height = has_height ? (int)(height + 0.5f) : (int)(width * view_height / view_width + 0.5f);
 	}
 	if (width <= 0.0f && height <= 0.0f) {
 		if (have_view) {
@@ -277,11 +284,17 @@ page_svg_render(
 		no_size = !have_view;
 	}
 
+	/* Drawn at the size it is shown at: that is the viewport the picture is laid out in (its viewBox meets it). */
+	if (out_width > 0 && out_height > 0) {
+		width = (float)out_width;
+		height = (float)out_height;
+	}
+
 	/* A size larger than a bitmap's bound is scaled down, keeping the ratio. */
 	shrink = 1.0f;
-	if (width > (float)SVG_SIDE_MAX)
+	if (out_width <= 0 && width > (float)SVG_SIDE_MAX)
 		shrink = (float)SVG_SIDE_MAX / width;
-	if (height * shrink > (float)SVG_SIDE_MAX)
+	if (out_width <= 0 && height * shrink > (float)SVG_SIDE_MAX)
 		shrink = (float)SVG_SIDE_MAX / height;
 	width *= shrink;
 	height *= shrink;
@@ -358,6 +371,7 @@ page_svg_render(
 		return error;
 	}
 	bitmap->no_ratio = no_size;
+	bitmap->vector = 1;
 	bitmap->has_natural = natural_set;
 	bitmap->natural_width = natural_width;
 	bitmap->natural_height = natural_height;
@@ -1979,7 +1993,9 @@ page_svg_decode(
 	struct page *page,
 	const unsigned char *bytes,
 	size_t length,
-	struct img_bitmap *bitmap)
+	struct img_bitmap *bitmap,
+	int width,
+	int height)
 {
 	struct dom_document *document;
 	struct html_parser *parser;
@@ -2030,7 +2046,7 @@ page_svg_decode(
 	if (error == 0 && svg == NULL)
 		error = ENOTSUP;
 	if (error == 0)
-		error = page_svg_render(svg, bitmap);
+		error = page_svg_render(svg, bitmap, width, height);
 	vm_heap_remove_root(page->heap, &root);
 	return error;
 }

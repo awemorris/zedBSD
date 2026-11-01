@@ -364,6 +364,58 @@ page_element_at(
 }
 
 /*
+ * Finds the top element of a frame's document at a point in that frame's viewport,
+ * in a transient layout of the document made at the frame's viewport size.
+ */
+struct dom_node *
+page_child_element_at(
+	void *context,
+	struct bind_window *window,
+	double x,
+	double y)
+{
+	struct page *page;
+	struct dom_document *document;
+	struct dom_node *node;
+	struct css_engine *engine;
+	struct layout_tree tree;
+	struct vm_cell *root;
+	int width;
+	int height;
+	int status;
+
+	page = context;
+	node = NULL;
+	document = bind_window_child_document(window);
+	if (document == NULL)
+		return NULL;
+	if (!geometry_layout(page))
+		return NULL;
+	status = bind_window_child_styles(window, &engine, &width, &height);
+	if (status != 0 || engine == NULL)
+		return NULL;
+	if (!(x >= 0.0) || !(y >= 0.0) || x >= width || y >= height)
+		return NULL;
+	if (width <= 0 || height <= 0 || width > INT_MAX / LAYOUT_UNIT || height > INT_MAX / LAYOUT_UNIT)
+		return NULL;
+
+	/* The document stays alive while its layout is made. */
+	root = &document->node.cell;
+	if (vm_heap_add_root(page->heap, &root) != 0)
+		return NULL;
+	memset(&tree, 0, sizeof(tree));
+	status = layout_build(&tree, engine, &page->text, document, page_image_of, page_image_by_url, page, width, height, 0, 0, NULL);
+	if (status == 0 && bind_window_child_document(window) == document) {
+		node = layout_hit_node(&tree, (layout_unit)(x * LAYOUT_UNIT), (layout_unit)(y * LAYOUT_UNIT));
+		while (node != NULL && node->type != DOM_ELEMENT)
+			node = node->parent;
+	}
+	layout_release(&tree);
+	vm_heap_remove_root(page->heap, &root);
+	return node;
+}
+
+/*
  * Computes an element's style for bind_host.computed_style.
  * Uses its box when available and otherwise the cascade; reports ENOENT
  * for an element outside the document.

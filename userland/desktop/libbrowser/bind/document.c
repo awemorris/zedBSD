@@ -583,7 +583,6 @@ document_element_from_point(
 	status = document_this(realm, this_value, &document);
 	if (status != 0)
 		return status;
-	UNUSED_PARAMETER(document);
 	status = vm_to_number(realm, js_argument(args, count, 0), &x);
 	if (status == 0)
 		status = vm_to_number(realm, js_argument(args, count, 1), &y);
@@ -593,7 +592,11 @@ document_element_from_point(
 	/* The host owns the current layout and hit testing. */
 	window = bind_window_of(realm);
 	node = NULL;
-	if (window->host.element_at != NULL)
+	if (document->view != NULL && ((struct bind_window *)document->view)->frame != NULL && window->host.child_element_at != NULL)
+		node = window->host.child_element_at(window->host.context, (struct bind_window *)document->view, x, y);
+	else if (window->frame != NULL && window->host.child_element_at != NULL)
+		node = window->host.child_element_at(window->host.context, window, x, y);
+	else if (window->host.element_at != NULL)
 		node = window->host.element_at(window->host.context, x, y);
 	return bind_wrap_or_null(window, node, result);
 }

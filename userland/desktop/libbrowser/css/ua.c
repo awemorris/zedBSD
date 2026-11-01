@@ -86,6 +86,7 @@ const char css_user_agent_sheet[] =
 	"mark { background-color: yellow; color: black; }\n"
 	"fieldset { margin-inline-start: 2px; margin-inline-end: 2px; border: 2px groove gray;"
 	" padding: 0.35em 0.75em 0.625em; }\n"
+	"iframe { border: 2px inset; }\n"
 	"noscript { display: none; }\n"
 	"marquee { display: inline-block; text-align: initial; overflow: hidden !important; }\n"
 	"input, textarea, select, button { margin: 0; font-size: 13.333333px; font-family: sans-serif;"
