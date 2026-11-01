@@ -528,6 +528,8 @@ grid_in_flow_align(int align)
 		return CSS_ALIGN_START;
 	if (align == CSS_ALIGN_SELF_END)
 		return CSS_ALIGN_END;
+	if (align == CSS_ALIGN_ANCHOR_CENTER)
+		return CSS_ALIGN_CENTER;
 	return align;
 }
 
@@ -3654,6 +3656,13 @@ grid_column_item_contribution(
 	if (kind != GRID_CONTRIBUTION_MINIMUM &&
 	    grid_ratio_width(item->parent, grid_item, grid_fixed_row_gap(item->parent), &ratio_width)) {
 		*outer = ratio_width;
+		return 0;
+	}
+
+	/* A replaced item with a percentage width or maximum width is compressible: its minimum contribution is nothing. */
+	if (kind == GRID_CONTRIBUTION_MINIMUM && item->replaced && item->style.min_width.unit == CSS_UNIT_AUTO &&
+	    (item->style.width.unit == CSS_UNIT_PERCENT || item->style.max_width.unit == CSS_UNIT_PERCENT)) {
+		*outer = frame + margins;
 		return 0;
 	}
 

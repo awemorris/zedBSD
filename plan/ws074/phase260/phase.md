@@ -1011,3 +1011,131 @@ Origin: 2026-10-27 ユーザーの指示。
 - 未実施: asan の build と試験、host の個別の試験（host-NAME）の全件、target の確認。
 - 一時物（Q1 が消す。この container の中だけ）: build/tmp/（sub1〜sub3、vt、r、t*.html、nav.*、cmpgap.sh、p8/st1・h1out）、build/ws074-base/、
   build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-*.html と acid3 の zedbsd-acid3-*.html（Acid の runner の一時 html）。
+
+### クラウドのセッションの途中経過（続き、2026-11-01。dev154〜dev158）
+
+- 依頼者が止めた時の状態: iframe の box（a70bfabe）と SVG の描き直し（7719e1fb）が測定前の commit で、origin/main の 106 commit を merge した f83c18b5 が基準。
+  この container の測定名は、a70bfabe の測定を dev154、f83c18b5 の測定を dev155（依頼文の「dev154」に当たる）とした。
+- 測定（計は Chromium が通す 3,473 のうち。gap は h / s / sc / c）:
+
+  | 測定 | SHA | 内容 | 計 | gap（h/s/sc/c） | 後退 |
+  | --- | --- | --- | --- | --- | --- |
+  | dev153 | 013b3479 | 前節の最終 | 3,113 | 169 / 123 / 66 / 2 | — |
+  | dev154 | a70bfabe | iframe を 300×150 の replaced box に、frame の viewport、frame の elementFromPoint | 3,116（89.72%） | 168 / 121 / 66 / 2 | 0 |
+  | dev155 | f83c18b5 | 7719e1fb（SVG の描き直し）と main の merge の後 | 3,138（90.35%） | 159 / 121 / 53 / 2 | 1（grid-item-aspect-ratio-stretch-4、SVG の width=0 の扱いが原因。dev156 で直した） |
+  | dev156 | f7a4a8bb | 上の後退の修正、flex・grid の order で positioned な子孫の重なり順、table の中の float を匿名 cell に | 3,142 | 159 / 118 / 52 / 2 | 0 |
+  | dev157 | 447ff66a | 幅を持つ BFC の box が float の横に収まらなければ下へ | 3,143 | 159 / 117 / 52 / 2 | 0 |
+  | dev158（最終） | 5414a02c | `display: flow`、sticky の anchor() は fallback、flex・grid の anchor-center は center、abspos の縦の auto margin | 3,148（90.64%、gap 325） | 159 / 115 / 49 / 2 | 0 |
+
+  dev154 → dev155 の +22 のうち main の変更由来（Navigation API の initial about:blank 9 件、LCP 1 件、View Transitions の inline 要素 9 件ほか）と
+  7719e1fb 由来（grid-item の SVG 5 件）の内訳は、gap の差分から: harness の増えた 9 件は main、scripted の VT inline 9 件は main の変更（縦書き以外の paint の変更）、SVG の 5 件はこの branch。
+- 直した物（source は userland/desktop/libbrowser/）:
+  1. **iframe の box**（layout/box.c、layout/replaced.c、css/ua.c）。iframe は replaced box で、既定は 300×150（width・height 属性と CSS が優先）、UA の border は `2px inset`。baseline は下の margin edge。
+     その幅・高さを frame の window の viewport にする（page/frame-load.c `page_frames_size`。layout の後に呼ぶ）。通った ID: flexbox-basic-iframe-horiz-001・vert-001。
+     子文書は描かない（iframe の中身は空白のまま）。
+  2. **frame の document の `elementFromPoint`**（page/geometry.c `page_child_element_at`、bind/document.c、bind/frame-resource.c、bind/style-context.c）。frame の viewport の大きさで子文書だけの layout を作って hit test する。
+     通った ID: caretPositionFromPoint-with-transformation。
+  3. **SVG の画像を表示する大きさで描き直す**（7719e1fb と本 session の仕上げ。page/images.c `page_image_variant`、page/svg.c、paint/list.c）。`<img>` の SVG は markup を持ち、表示する画素の大きさ
+     （最大 4096 辺・200 万画素、8 種まで）で描き直した bitmap を display list に使う。viewBox は meet で中央、viewBox が無ければその大きさの viewport。
+     viewBox があり width="0" の時の natural size は幅 0（高さは属性）、height="0" の時は viewBox の比（Chromium と同じ非対称）。通った ID: grid-item-aspect-ratio-stretch-1〜4、grid-item-no-aspect-ratio-stretch-4・5。
+     inline の `<svg>`（zoom の svg 5 件）は markup を持たないので描き直さない（zoom を図形に掛ける作りも未実装）。
+  4. **flex・grid の order による重なり順**（layout/position.c `position_collect`）: flex・grid の container の子は order で並べた順に positioned な子孫を積む（abspos な子の order は数えない）。
+     通った ID: flexbox-paint-ordering-002、order-abs-children-painting-order。
+  5. **table の中の float** は匿名 cell に入れる（layout/box.c `box_table_children`。abspos は今まで通り直下）。通った ID: table-with-float-paint。
+  6. **float の横に収まらない BFC の box**（幅が px・% の block、flex、grid ほか）は float の下へ（layout/block.c）。通った ID: flexbox_fbfc。
+  7. `display: flow` を block として受ける（css/values.c）。position-anchor-004・position-anchor-target-with-children（`display = 'flow'` で戻す試験）が通った。
+  8. **abspos でない box の anchor() は fallback を使う**（layout/anchor.c: anchor_query は absolute・fixed の box だけ有効。fallback が無ければ auto）。sticky-anchor-position-invalid が通った。
+  9. flex・grid の item の `anchor-center` は center（layout/flex.c、layout/grid.c）。anchor-center-002 が通った。
+  10. 上下の inset が両方あり height が決まっている abspos の縦の auto margin は余りを取る（layout/position.c）。auto-margins-position-area が通った。
+- Acid: dev158 の source（5414a02c）で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は `-Wall -Wextra -Werror` で warning 0。
+- 調べて直さなかった物（次の候補）:
+  - 縦書きの行の atomic な box（inline-block）の over・under: vertical-lr の論理座標は block start が左だが、行の中の text は over が右。
+    grid-self-baseline-horiz-004〜007・vertical-lr/rl-002〜007・grid-item-self-baseline-001 など static 約 25 件の ref が `vertical-align: bottom` の inline-block に頼る。
+    atomic box の logical top/bottom の margin・位置を行の中で鏡像にする作りが要る（logical_unflip と margin の側の写像）。
+  - 向きの違う item の flex の `%` の padding（flexbox_align-items-stretch-3）: 直交 item の flex base size を測る時、stretch される cross の大きさを grid_room に入れても
+    子の `padding: 70%` が 0 のまま（position_orthogonal_width の `tree->measuring` で % が不定になるため）。
+  - 縦書きの flex container に horizontal-tb の item（flexbox-writing-mode-009・011〜015・slr-row-mix、static 9 件）は物理座標の処理のまま。
+  - iframe の中身を描かない（子文書の layout は都度の transient で、paint には出ない）。iframe の属性による遷移の Navigation への引き継ぎ（Navigation の残り約 40 件）。
+  - 負の margin と float の flex container（flexbox_flex-formatting-interop）、flex の `flex-basis: 0%` と auto の混在（flexbox_flex-natural-mixed-basis-auto）。
+  - CSS animation の animationstart・animationend・animationcancel が発火しない（inline-grid-try-fallbacks-crash が `animationend` を待って readiness_missing）。
+  - anchor-parse-valid・anchor-size-parse-valid は min()・max()・clamp() を anchor の和に持てない作りのまま。
+  - backdrop-filter の角丸・transform（static 7 件）、URLPattern（2 ID）、WebAssembly の js-string（6 件）。
+- 一時物（Q1 が消す。この container の中だけ）: build/tmp/（sub1〜sub6、vt、r、t*.html、nav.*、s*.html、fs*.html、mont.png、s1cmp.png、p8/ の st1・s1out・h1out）、build/ws074-base/、
+  Acid の runner の一時 html（build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-*.html、acid3 の zedbsd-acid3-*.html）。
+- 道具: plan/ws074/phase260/tools/cmpgap.sh（`sh cmpgap.sh 新 旧` で、dev 番号の gap を比べて fixed・REGRESS を出す。出力は build/ws074-cmp/gapNNN.json）。
+  main の merge で st1.sh は `BROWSER=build/ws074-host/plain/browser` を渡さないと別の program を使う。
+
+### クラウドのセッションの途中経過（続き 2、2026-11-01。dev159〜dev161）
+
+- 基準 dev159（cd2e943e の build）= dev158 と同じ 3,148 / 3,473、gap 325、後退 0（merge の後の再測定。差はなかった）。
+- 測定:
+
+  | 測定 | SHA | 内容 | 計 | gap（h/s/sc/c） | 後退 |
+  | --- | --- | --- | --- | --- | --- |
+  | dev159 | cd2e943e | 基準 | 3,148 | 159 / 115 / 49 / 2 | — |
+  | dev160 | 7af426e0 | 圧縮できる replaced item の minimum contribution を 0、backdrop-filter を border box の角丸に | 3,151（90.73%、gap 322） | 159 / 112 / 49 / 2 | 0 |
+  | dev161（最終） | dad58b84 | 定義済みの height に min-height・max-height を掛けてから子の % を解く、縦 column の flex の主軸の大きさ | 3,151 | 159 / 112 / 49 / 2 | 0（増減なし） |
+
+- 直した物（source は userland/desktop/libbrowser/）:
+  1. 幅か max-width が % の replaced item（compressible replaced element）の grid の minimum contribution は 0（layout/grid.c `grid_column_item_contribution`）。
+     通った ID: grid-items/replaced-element-014（auto の track が container の幅に収まり、画像は 100%）。
+  2. backdrop-filter の領域を border box の角丸にする（paint/paint.h の paint_item に radius、paint/list.c `list_filter_items`、paint/software.c `software_round_span`。
+     行の中央の span と左右の端の部分被覆で、角丸の box の行の描き方と同じ）。通った ID: backdrop-filter-clip-radius-zoom、backdrop-filter-transform。
+  3. 定義済みの height に min-height・max-height（px と、定義済みの親の高さに対する %）を掛けてから子の % の基準にする（layout/block.c）。
+     column の flex container の主軸は、その基準（`tree->containing_height`）以上（layout/flex.c）。percentage-heights-003 の最初の 5 件ほどが通ったが ID は他の subtest（縦書きの item）で未通過。
+- 試して戻した物:
+  - 縦書きの行の atomic box を vertical-lr で鏡像にする（layout/logical.c で margin の上下を右・左に入れ替え、行の中で位置を `2·line.y + line.height − y − size`）。
+    grid-self-baseline-horiz-004 が通ったが、同じ ref を使う 4 件（grid-self-baseline-001・horiz-002・horiz-003・vertical-lr-001）と flexbox-basic-block-vert-001v が後退した。
+    ref の inline-block が Chromium に近づく一方、grid 側の item の baseline・orthogonal の整列が旧い並びに揃っていたため。grid 側（`grid_row_baseline` の orthogonal item を vertical-lr で under = 0 にする）も試したが後退は消えず、全体を戻した。
+    やり直すなら grid・flex の orthogonal item の baseline の整列を同時に直し、後退 5 件を見ながら進める。central baseline で atomic を中央に置く（Chromium の vertical の既定）仕様も確かめる。
+- 調べて直さなかった物:
+  - 直交 item の % padding（flexbox_align-items-stretch-3）: 計測 pass が `tree->measuring` で % を不定にする。
+  - 圧縮できる replaced の flex の最小値、ペア（float と負の margin の flex container、flexbox_flex-formatting-interop）、table の `width:100%` の cell を持つ flex item（table-with-infinite-max-intrinsic-width、table は 100 でなく 105）。
+  - grid-gap-003・item-percentage-height-001（subgrid の % gap）、grid-item-percentage-sizes-001・002（多数の writing-mode の組）、Ahem の幅に頼る試験（grid-intrinsic-maximums、writing-modes の table 系）。
+  - 8 件の VT 試験: transform-origin-view-transition-group は 496 画素の差（回転した group の clip-path の縁）、残りは iframe の中の transition や scrollbar。
+  - wasm/jsapi のうち Memory の toFixedLengthBuffer・toResizableBuffer は、JS engine の ArrayBuffer に resizable・maxByteLength・resize・transfer が無いので不可。js-string は WebAssembly.Module の実装が要る。
+  - CSS animation の animationstart・animationend は未実装（inline-grid-try-fallbacks-crash が待つ）。
+- Acid: 最終の source（dad58b84）で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 一時物（Q1 が消す。この container の中だけ）: 前の節の物に加え、build/tmp/ の sub7〜sub10・pf.html・m1.html・v001*.xhtml・ab.js・a1.*、build/ws074-suites/wpt/css/css-grid/grid-items/zz-r14.html。
+
+### クラウドのセッションの途中経過（続き 3、2026-11-01。dev162〜dev165。Navigation API と frame）
+
+- 基準 dev161（bae62524 の前の build）= 3,151 / 3,473、gap 322。bae62524 の再測定はしていない（source は同じ）。
+- 先に調べた事: 縦書き grid・flex に horizontal-tb の item を入れた時の物理座標の処理（layout/logical.c `layout_logical_wanted` の早期 return）を外すと、
+  grid-self-baseline-vertical-lr-002 は Chromium と同じ形（column 方向の flow、直交 item）になる。しかし flex・grid の側が domain の中の直交 item を扱えず
+  （flex は item の主軸の大きさを swap しない、grid の baseline の整列の側）、static で 4 件後退し（flexbox-writing-mode-008、subgrid の orthogonal-writing-mode-005・006、repeat-auto-fill-007）、
+  通る物は無かったので戻した。これが grid-self-baseline 約 25 件と flexbox-writing-mode 9 件の共通の原因（直交 item の domain 化）。
+- 測定:
+
+  | 測定 | SHA | 内容 | 計 | gap（h/s/sc/c） | 後退 |
+  | --- | --- | --- | --- | --- | --- |
+  | dev161 | dad58b84 | 前の節の最終 | 3,151 | 159 / 112 / 49 / 2 | — |
+  | dev162 | f10d84f5 | frame の document の外部 script、iframe の src・srcdoc 属性の遷移の entry、cross-document の traverse の beforeunload | 3,155 | 155 / 112 / 49 / 2 | 0 |
+  | dev163 | be5cf927 | 共有の session history、frame の URL、sandbox の frame、window.frames・length | 3,161 | 149 / 112 / 49 / 2 | 0 |
+  | dev164 | f0a574dd | currentEntry を unload の最中も、src・srcdoc の属性の navigate event | 3,162 | 148 / 112 / 49 / 2 | 1（caretPositionFromPoint-with-transformation） |
+  | dev165（最終） | 136f5b19 | 上の後退の修正（`__zedLoaded`） | 3,163（91.07%、gap 310） | 147 / 112 / 49 / 2 | 0 |
+
+- 直した物（source は userland/desktop/libbrowser/ と plan/ws074/phase230/prelude.js、phase260/ の frames.js・html-unsafe.js）:
+  1. **frame の document の外部 script**（page/frame-load.c `frame_load_inline`）: `<script src>` を parser の位置で同期に取って実行する（以前は無視。
+     testharness.js を読む子の helper page が全て動かなかった）。通った ID: key-id-back-cross-document ほか、下の helper を使う物。
+  2. **iframe の src・srcdoc を親が変えた時の Navigation**（prelude）: 古い document が pagehide で entry を引き継ぎ（`__zedNav`、push）、
+     新しい document が +1 の entry を持つ。さらに属性の setter が、先に frame の navigate event を発火し（`navigation._attr`、cancel できる）、cancel なら属性を変えない。
+     `__zedLoaded`（読み込まれた frame の目印）で、blank の frame の contentWindow を先に作らない。通った ID: entries-after-blank-navigation、entries-after-srcdoc-navigation、navigate-to-srcdoc、navigate-from-initial-about-blank-src ほか。
+  3. **cross-document の traverse**: beforeunload を navigate event の前に（`unloadAsked`）。navigation.currentEntry・entries()・canGoBack・canGoForward は unload の最中も（fullyActive だけが条件）。
+     通った ID: navigate-navigation-back-cross-document、traverseTo-beforeunload。
+  4. **top の共有の session history**（prelude `joint`・`jointRecord`・`jointGo`）: frame の push（Navigation API・属性・fragment）を top が記録し、top の `history.back()`・`forward()` が frame の entry を traverse、
+     `history.length` が数える（top の entries ＋ frame の push）。frame を外した後の back は何もしない。通った ID: navigate-history-back-noop、cross-document-away-and-back の 2 つ。
+  5. **frame の URL**（bind/prelude.c `prelude_set_url`）: 読み込まれた frame の document の `resource_url` を fragment・pushState で更新する（以前は frame では何もしなかった）。
+     通った ID: activation-same-document-then-cross-document。
+  6. **sandbox の frame**（bind/frame.c `bind_frame_sandboxed`、page/frame-load.c）: `allow-same-origin` を持つ sandbox の frame は読み込む（持たない物は今まで通り子 window を出さない）。
+     `window.length` と `window.frames[n]`（plan/ws074/phase260/frames.js。frames は window を包む Proxy）。通った ID: sandboxing-navigate-parent・sandboxing-navigate-sibling。
+- Acid: dev165 の source（136f5b19）で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 調べて直さなかった物（Navigation の残り 約 28 ID）:
+  - popup（`window.open`）を使う 4 件、server 側の python（slow-no-store.py）、data:・blob:・javascript: URL の frame（opaque origin を含む 7 件）、form の POST・meta refresh の 3 件。
+  - dispose-for-navigation-in-child（top の entries が frame の push で切り詰められ、dispose が発火する共有の history の本格版）、sandboxing-back-parent・back-sibling（back の拒否、no_output）。
+  - signal-abort-window-stop-after-intercept（navigateerror の filename が、intercept で commit した後の URL でなく読み込んだ URL）、reload-navigation-timing（performance の navigation timing の type）。
+  - autofocus の 2 件は `multiple_completions`（通常の試験の結果が二重に出る）。
+- 未実施: asan、host-NAME の全件、target の確認。
+- 一時物（Q1 が消す。この container の中だけ）: 前の節の物に加え、build/ws074-suites/wpt/zz-*.html・zz-*.js（直接の試験の一時 page。wpt の tree の中、git の外）、build/tmp/ の sub11〜sub13・nav*.・cmpurl.sh・*-side.png・*-ours.ppm・*-chrome.ppm。
+- 記録: 途中で自分の command に `rm -f /dev/null` を誤って書き（削除の規則違反）、auto mode の分類器が拒否した。回避せず、その command から rm を外して続けた。
+

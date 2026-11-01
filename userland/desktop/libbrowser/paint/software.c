@@ -424,6 +424,57 @@ software_filter_colors(
 	}
 }
 
+/* How far a row of a rounded backdrop reaches: its left and right ends in layout units (y in layout units). */
+static void
+software_round_span(
+	const struct paint_item *item,
+	float y,
+	float *left,
+	float *right)
+{
+	static const int corners[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+	float x0;
+	float x1;
+	float y0;
+	float y1;
+	float radius_x;
+	float radius_y;
+	float down;
+	float inset;
+	int corner;
+
+	x0 = (float)item->x;
+	x1 = (float)(item->x + item->width);
+	y0 = (float)item->y;
+	y1 = (float)(item->y + item->height);
+	*left = x0;
+	*right = x1;
+	for (corner = 0; corner < 4; corner++) {
+		radius_x = (float)item->radius[corner][0];
+		radius_y = (float)item->radius[corner][1];
+		if (radius_x <= 0.0f || radius_y <= 0.0f)
+			continue;
+		if (corners[corner][1] == 0) {
+			if (y >= y0 + radius_y)
+				continue;
+			down = (y0 + radius_y - y) / radius_y;
+		} else {
+			if (y <= y1 - radius_y)
+				continue;
+			down = (y - (y1 - radius_y)) / radius_y;
+		}
+		if (down > 1.0f)
+			down = 1.0f;
+		inset = radius_x * (1.0f - sqrtf(1.0f - down * down));
+		if (corners[corner][0] == 0) {
+			if (x0 + inset > *left)
+				*left = x0 + inset;
+		} else if (x1 - inset < *right) {
+			*right = x1 - inset;
+		}
+	}
+}
+
 /*
  * Applies a backdrop item's filter functions to the pixels drawn so far inside its rectangle (cut to the clip).
  */
@@ -436,6 +487,7 @@ software_backdrop(
 {
 	float *pixels;
 	float cover;
+	float pixel_cover;
 	uint32_t pixel;
 	int first_x;
 	int first_y;
@@ -487,10 +539,30 @@ software_backdrop(
 			if (blue > 1.0f)
 				blue = 1.0f;
 			pixel = bitmap->pixels[(size_t)(first_y + y) * (size_t)bitmap->width + (size_t)(first_x + x)];
-			if (cover < 1.0f) {
-				red = red * cover + (float)((pixel >> 16) & 0xffU) / 255.0f * (1.0f - cover);
-				green = green * cover + (float)((pixel >> 8) & 0xffU) / 255.0f * (1.0f - cover);
-				blue = blue * cover + (float)(pixel & 0xffU) / 255.0f * (1.0f - cover);
+			pixel_cover = cover;
+			if (item->rounded) {
+				float row_left;
+				float row_right;
+				float inside;
+				float edge;
+
+				/* The share of the pixel inside the shape: the span at its row's middle, as a rounded box's rows are drawn. */
+				inside = 0.0f;
+				software_round_span(item, (float)layout_from_px((float)(first_y + y) + 0.5f) + (float)scroll_y, &row_left, &row_right);
+				edge = ((float)layout_from_px((float)(first_x + x) + 1.0f) - row_left) / (float)LAYOUT_UNIT;
+				inside = (row_right - (float)layout_from_px((float)(first_x + x))) / (float)LAYOUT_UNIT;
+				if (edge < inside)
+					inside = edge;
+				if (inside > 1.0f)
+					inside = 1.0f;
+				if (inside < 0.0f)
+					inside = 0.0f;
+				pixel_cover *= inside;
+			}
+			if (pixel_cover < 1.0f) {
+				red = red * pixel_cover + (float)((pixel >> 16) & 0xffU) / 255.0f * (1.0f - pixel_cover);
+				green = green * pixel_cover + (float)((pixel >> 8) & 0xffU) / 255.0f * (1.0f - pixel_cover);
+				blue = blue * pixel_cover + (float)(pixel & 0xffU) / 255.0f * (1.0f - pixel_cover);
 			}
 			pixel = 0xff000000U |
 			    ((uint32_t)(red * 255.0f + 0.5f) << 16) |

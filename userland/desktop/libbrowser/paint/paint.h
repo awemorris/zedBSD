@@ -82,6 +82,9 @@ struct paint_item {
 	/* A backdrop item's filter functions (the box's style, kept by the page). */
 	const struct css_filter *filters;
 	int filter_count;
+	/* A backdrop item's rounded corners (horizontal and vertical radius of each, clockwise from the top left), when it has any. */
+	int rounded;
+	layout_unit radius[4][2];
 };
 
 /*

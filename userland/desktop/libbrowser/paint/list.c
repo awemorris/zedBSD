@@ -3048,8 +3048,18 @@ list_filter_items(
 	item.filter_count = filter_count;
 
 	/* A backdrop's color is its opacity (a fade scales it): how much of the filtered pixels cover the unfiltered ones. */
-	if (kind == PAINT_BACKDROP)
+	if (kind == PAINT_BACKDROP) {
+		struct list_shape shape;
+
 		item.color = 0xff000000U;
+
+		/* It covers the border box's rounded shape. */
+		memset(&shape, 0, sizeof(shape));
+		if (list_border_shape(box, &shape)) {
+			item.rounded = 1;
+			memcpy(item.radius, shape.radius, sizeof(item.radius));
+		}
+	}
 	error = wb_vector_push(&walk->list->items, &item);
 	if (error != 0)
 		walk->error = error;

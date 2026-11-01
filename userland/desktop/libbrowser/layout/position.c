@@ -29,6 +29,8 @@
 
 #include "layout/layout.h"
 
+#include <stdlib.h>
+
 #include <errno.h>
 #include <string.h>
 
@@ -1394,6 +1396,29 @@ placed_x:
 			x = box->anchor_clamp[0] + box->margin[CSS_LEFT];
 	}
 
+	/* Auto margins down take the room between both insets for a box of a height (centering it when both are auto). */
+	if (has_top && has_bottom && box->style.height.unit != CSS_UNIT_AUTO && !position_aligned(box->style.align_self) &&
+	    (box->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO || box->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)) {
+		layout_unit free_room;
+		int auto_top;
+		int auto_bottom;
+
+		auto_top = box->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO;
+		auto_bottom = box->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO;
+		free_room = area_height - top - bottom - position_outer_height(box) - (auto_top ? 0 : box->margin[CSS_TOP]) -
+		    (auto_bottom ? 0 : box->margin[CSS_BOTTOM]);
+		if (free_room < 0)
+			free_room = 0;
+		if (auto_top && auto_bottom) {
+			box->margin[CSS_TOP] = free_room / 2;
+			box->margin[CSS_BOTTOM] = free_room - free_room / 2;
+		} else if (auto_top) {
+			box->margin[CSS_TOP] = free_room;
+		} else {
+			box->margin[CSS_BOTTOM] = free_room;
+		}
+	}
+
 	/* Vertically: from the top, from the bottom, or where it would have been. */
 	if (has_top && has_bottom && box->style.height.unit != CSS_UNIT_AUTO && position_aligned(box->style.align_self)) {
 		y = position_align(box->style.align_self, area_top + top, area_top + area_height - bottom,
@@ -1582,6 +1607,9 @@ position_collect(
 {
 	struct position_entry entry;
 	const struct layout_box *child;
+	const struct layout_box **ordered;
+	size_t count;
+	size_t slot_index;
 	int child_constrained;
 	int child_outer_z;
 	int child_z;
@@ -1592,8 +1620,41 @@ position_collect(
 	if (depth > LAYOUT_DEPTH_MAX)
 		return 0;
 
+	/* The items of a flex or grid container stack in their order-modified document order. */
+	ordered = NULL;
+	count = 0;
+	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (child->style.order != 0 && !child->out_of_flow)
+				break;
+		}
+		if (child != NULL) {
+			for (child = box->first_child; child != NULL; child = child->next)
+				count++;
+			ordered = malloc(count * sizeof(*ordered));
+			if (ordered != NULL) {
+				size_t place;
+
+				count = 0;
+				for (child = box->first_child; child != NULL; child = child->next) {
+					/* A box out of the flow is no item: its order does not count. */
+					for (place = count; place > 0 &&
+					    (ordered[place - 1U]->out_of_flow ? 0 : ordered[place - 1U]->style.order) > (child->out_of_flow ? 0 : child->style.order); place--)
+						ordered[place] = ordered[place - 1U];
+					ordered[place] = child;
+					count++;
+				}
+			}
+		}
+	}
+
 	/* Each child: a positioned one is listed at its outer stacking level, then searched. */
-	for (child = box->first_child; child != NULL; child = child->next) {
+	slot_index = 0;
+	for (child = box->first_child; ordered != NULL ? slot_index < count : child != NULL;
+	    slot_index++, child = ordered != NULL ? NULL : child->next) {
+		if (ordered != NULL)
+			child = ordered[slot_index];
 		/* What position-visibility hides stacks nowhere. */
 		if (child->anchor_hidden)
 			continue;
@@ -1609,8 +1670,10 @@ position_collect(
 			if (constrained)
 				entry.z = outer_z;
 			error = wb_vector_push(entries, &entry);
-			if (error != 0)
+			if (error != 0) {
+				free(ordered);
 				return error;
+			}
 
 			/* The first explicit z-index contains all the levels below it. */
 			if (!constrained && !child->style.z_index_auto) {
@@ -1621,9 +1684,12 @@ position_collect(
 
 		/* Its descendants. */
 		error = position_collect(child, entries, depth + 1, child_constrained, child_outer_z);
-		if (error != 0)
+		if (error != 0) {
+			free(ordered);
 			return error;
+		}
 	}
+	free(ordered);
 
 	/* Succeeded: the boxes are listed. */
 	return 0;

@@ -486,6 +486,7 @@ int bind_document_links(struct vm_realm *realm, vm_value receiver, const vm_valu
 /* URL resolution and frame helpers retain actual parent/child document ownership. */
 int bind_document_url(struct dom_document *document, int use_base, struct wb_buffer *out);
 int bind_frame_location(struct bind_window *window, int part, struct wb_buffer *out);
+int bind_frame_sandboxed(struct dom_element *element);
 int bind_frame_install(struct bind_window *parent, struct dom_element *element, struct dom_document *document, struct bind_window **window);
 int bind_run_inline_script(struct bind_window *window, struct dom_element *script);
 int bind_reflection_base(struct dom_document *document, struct net_url *base);

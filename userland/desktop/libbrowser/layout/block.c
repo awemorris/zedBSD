@@ -146,8 +146,23 @@ layout_block(
 		}
 	}
 
-	/* A definite specified size becomes the nonnegative content height. */
+	/* A definite specified size becomes the nonnegative content height, held within a definite minimum and maximum. */
 	if (height_definite) {
+		layout_unit bound;
+
+		if (box->style.max_height.unit == CSS_UNIT_PX) {
+			bound = layout_from_px(box->style.max_height.value);
+			if (specified_height > bound)
+				specified_height = bound;
+		}
+		bound = -1;
+		if (box->style.min_height.unit == CSS_UNIT_PX)
+			bound = layout_from_px(box->style.min_height.value);
+		else if (box->style.min_height.unit == CSS_UNIT_PERCENT && tree->containing_height_definite)
+			bound = (layout_unit)((float)tree->containing_height * box->style.min_height.value / 100.0f) +
+			    layout_from_px(box->style.min_height.offset);
+		if (bound >= 0 && specified_height < bound)
+			specified_height = bound;
 		height = specified_height - sizing;
 		if (height < 0)
 			height = 0;
@@ -894,6 +909,28 @@ block_children(
 			room_width = room_right - room_left;
 			if (room_width < 0)
 				room_width = 0;
+
+			/* A box with a width of its own that does not fit beside the floats goes below them. */
+			if (room_width < box->width && child->style.width.unit != CSS_UNIT_AUTO && child->style.width.unit != CSS_UNIT_MAX_CONTENT &&
+			    child->style.width.unit != CSS_UNIT_MIN_CONTENT && child->style.width.unit != CSS_UNIT_FIT_CONTENT &&
+			    child->style.margin[CSS_LEFT].unit != CSS_UNIT_AUTO && child->style.margin[CSS_RIGHT].unit != CSS_UNIT_AUTO) {
+				layout_unit needed;
+
+				layout_box_model(child, box->width);
+				needed = block_resolve(&child->style.width, box->width);
+				if (child->style.box_sizing != CSS_BOX_SIZING_BORDER)
+					needed += child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
+				needed += child->margin[CSS_LEFT] + child->margin[CSS_RIGHT];
+				if (needed > room_width) {
+					clearance = layout_clearance(tree, CSS_CLEAR_BOTH);
+					if (estimate < clearance)
+						estimate = clearance;
+					layout_line_room(tree, estimate, estimate + 1, box->width, &room_left, &room_right);
+					room_width = room_right - room_left;
+					if (room_width < 0)
+						room_width = 0;
+				}
+			}
 		}
 
 		/* Lays the child out in that width, where the floats beside it are. */
