@@ -32,7 +32,6 @@
 | P6 | q1861 `p6-ws335b` | [WS335](ws335/ws.md) p010: P-256・P-384 の群（p004・p005・p007 は cleared） |
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
 | P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
-| Sonnet ×2 | q1855・q1857（q1856 p027 は cleared） | [WS334](ws334/ws.md) p024（HTTP の cache）・p027（UI の準備）・p030（OpenSSL の Windows）を並べて（2026-11-01 ユーザー） |
 | P3 | q1859 `p3-ws291reg` | [WS291](ws291/ws.md) p027 の回帰（RTX と QEMU の Venus）、候補 60cf76c13 |
 | P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |

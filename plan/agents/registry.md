@@ -11,7 +11,6 @@
 | P5 | phase-runner-high | ws334 p028 libkeiland の Win32 その 1 (q1862-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 22:29、同じ P5 に続けて頼んだ） | 84efc4b2d（merge b72145b7a） |
 | P6 | phase-runner-low | ws335 p010 P-256・P-384 (q1861-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 22:26 起動） | 34e9c77f1（merge 3666e69f0） |
 | P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |
-| Sonnet | phase-runner-low | ws334 p030 (q1857-i01) | `/home/awe/zedBSD-worktrees/s-ws334-p030` / `agent/s-ws334-p030` | in-progress（2026-11-01 21:48 起動） | — |
 | P4 | phase-runner-high | ws291 p027 の回帰 arm64・riscv64 (q1860-i01) | `/home/awe/zedBSD-worktrees/p4-ws291reg` / `agent/p4-ws291reg` | 返却（2026-11-01 22:48、PASS） | 42ae7d081（merge b29f3a5ae） |
 
 - 2026-11-01 20:20 の割り振り（ユーザーの指示）: P1 は RTX、P2 は VF2、P3 は Pi 5 の作業（どれも WS291 の描画の速さ、Q1 が選んだ）。Bug の修正は P4。

@@ -3,7 +3,7 @@
 # ws334-p030 統合: OpenSSL の Windows の build と信頼する根（packages の ca-certificates ＋ Windows の store）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §6.6（S-A）、決定 16・18。
-- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1857-i01、Sonnet）。
+- 状態: cleared（2026-11-01 22:58 Q1、main で merge。Makefile と cross-build.sh の衝突を p026 と両方残して解き、合わせた tree で cross-build PASS（warning 0、1 つの .exe の import は system の DLL 13））。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1857-i01、Sonnet）。
 - **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: OpenSSL は `no-shared` の static library（`libssl.a`・`libcrypto.a`）にして .exe に link する。DLL の名前の確かめは要らない。net/tls.c の表は Windows では `net/tls-static.c`（Windows の build だけが compile、sources.mk に書かない）が `<openssl/ssl.h>` の関数の 1 行の wrapper で埋め、開かない。始める前に、表の各行に「OpenSSL だけ」の印を足し、その行が無くても TLS が動く形にする（design §6.6、WS335 の D28 の 1）。手順 3 の「DLL が無い時」の EPROTONOSUPPORT は zedBSD・Linux だけ。受け入れの「DLL を作り」は「static library を作り」に読み替える。
 - 依存: p005（`wb_os_trust_roots`）・p022（tls.c の library の読み込み）。
 - 担当の想定: Opus（phase-runner）を 1 回。使う約束は `base/os-system.h` の `wb_os_trust_roots`。
@@ -75,3 +75,10 @@ commit（`git commit -m WIP -- <path>`）:
 - aarch64 の実行（build・link・`tls-tool.exe` の machine の確認だけ）、実機の Windows の確認（Windows の ROOT・Disallowed の実際の中身、`CertEnumCertificatesInStore` の順、Windows の store が空の時の `SSL_CERT_*` の挙動）、asan の stage1、外の network の https（実在の site）。
 - 共有の `build/distfiles` への写しは不要（tarball は既にあった）。Q1 に頼む消す物（rm 不要）: `build/tmp/p030/`（o64・o64b・o64c・oa64・w64・base・sysroot-amd64・diag ほか）、`build/tmp/ws334-tls-wine.run.*`・`ws334-tls-build`・`ws334-tls-wine-prefix`・`ws334-cross.run.*`・`ws334-stage1-plain` など（使い捨て。`o64`・`o64b` は make の失敗の跡で使わない）。
 - p031（配る形）が束を `share/certs/ca-certificates.pem` に置くか `cert.pem` に揃えるかの 1 点（上の 3）。
+
+### Q1 の判断（2026-11-01 22:58）
+
+- 同梱の束の名前は phase.md の share/certs/ca-certificates.pem に揃える。design の cert.pem は p031（配る形）で直す。
+- 根が 0 個の時に Windows でも SSL_CTX_set_default_verify_paths を呼ぶ件は、このままにする（普通は ROOT の store が空でなく通らない。環境変数は利用者自身が設定する物）。
+- no-autoload-config は付けない（試験 f が意味を持つため）。
+

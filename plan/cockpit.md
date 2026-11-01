@@ -16,7 +16,7 @@
 | P7 | — | — | 返却（22:26）。WS334 p027 の QEMU の guest の確かめ PASS（画面: build/review/p027-guest/） | 未割当 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |
 
-- Sonnet ×3（WS334、2026-11-01 21:48〜）: p024 永続の HTTP の cache（q1855）、p027 browser の UI の準備（q1856、22:07 返却、host・build PASS、guest は P7）、p030 OpenSSL の Windows の build（q1857）。
+- Sonnet ×3（WS334、2026-11-01）: p024 HTTP の cache・p027 UI の準備・p030 OpenSSL の Windows は全部 cleared。
 
 ## WS ごとの進捗
 
