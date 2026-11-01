@@ -291,6 +291,7 @@ GetWindowLongPtrW
 InvalidateRect
 IsZoomed
 LoadCursorW
+LoadIconW
 MonitorFromRect
 MoveWindow
 MsgWaitForMultipleObjectsEx

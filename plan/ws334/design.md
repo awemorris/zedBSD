@@ -669,9 +669,9 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
   obj/ ...                           中間の物（object・static library（lib*.a）・Vulkan の import library・resource の .o・toolchain.txt）
   OmniGrammaton/                     配る形（zip の中身、§6.7）
     OmniGrammaton.exe                ただ 1 つの program（GUI の subsystem、-mwindows）。browser の UI・apps/browser-win32 の入口・下の全部の library
-    cert.pem                         packages の ca-certificates の束（§6.6、.exe の隣）
+    share/certs/ca-certificates.pem  packages の ca-certificates の束（§6.6。2026-11-01 p030 の Q1 の判断で .exe の隣の cert.pem から改めた）
     share/fonts/*.ttf  share/browser/{start,about,text}.html
-    share/licenses/...               (§6.8)
+    share/licenses/...               (§6.8。一覧は share/licenses/README.txt)
   OmniGrammaton-<版>-win64.zip       (browser-win64-zip)
   tests/                             試験の .exe（host-*.exe・os-test.exe・storage-test.exe、§7。同じ static library を link）
 ```
@@ -797,8 +797,8 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
      `LIBCRYPTO_COMPAT_WIN32_SOURCES`）と `libssl-compat.a`（`LIBSSL_COMPAT_SOURCES`）を作り、.exe の link に `libssl-compat.a libcrypto-compat.a -lbcrypt -lcrypt32 -lws2_32` を足す。include は `<compat/...>` の
      header の写し（`$(BROWSER_WIN32_OBJ)/include/compat/`、§6.9）。compat の内部の header は相対の名前なので source の tree の形のまま compile する。
   2. OpenSSL の static library・`openssl` の target・Apache-2.0 の許諾の文を外す。`net/tls-static.c` の include を `<compat/ssl/ssl.h>` に替える（表を満たす形は同じ）。
-  3. 根: compat の `SSL_CTX_set_default_verify_paths` が Windows の ROOT（Disallowed を除く）と、.exe の隣の `cert.pem` を読む（WS335 の D14・D24）。packages の ca-certificates の束を `cert.pem` の名前で
-     .exe の隣に置く（§6.2 の一覧。今の `share/certs/` の読み込みを残してもよい）。OpenSSL の時の `OPENSSL_init_ssl`・`X509_digest`・`X509_STORE_CTX_get_current_cert`・`X509_STORE_CTX_set_error` と
+  3. 根: compat の `SSL_CTX_set_default_verify_paths` が Windows の ROOT（Disallowed を除く）と、同梱の束を読む（WS335 の D14・D24 は .exe の隣の `cert.pem`）。今の束は
+     `share/certs/ca-certificates.pem`（§6.2、2026-11-01 p030 の Q1 の判断）なので、切り替えの時に compat の読む path をこれに合わせるか、`cert.pem` の写しを足すかを決める。OpenSSL の時の `OPENSSL_init_ssl`・`X509_digest`・`X509_STORE_CTX_get_current_cert`・`X509_STORE_CTX_set_error` と
      検証の callback での Disallowed の照合は使わない（§6.6 の「OpenSSL だけ」の印の行）。
   4. net/tls.c の変更は WS335 の §4.2 の 1〜4（切り替えは WS335 の p036、WS074・WS334 と調整の後）。
   5. `SSL_set_fd` の前に `WSAStartup`（compat も OpenSSL と同じ約束）。今の os-net の層（`os-net-win32.c`）が呼んでいる事を切り替えの時に確かめる。

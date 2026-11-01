@@ -214,9 +214,9 @@ BROWSER_UI_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_UI_SOURC
 WIN32_SOURCES_browser-ui := $(BROWSER_UI_SOURCES)
 $(BROWSER_UI_OBJECTS): WIN32_CFLAGS += -I$(KEILAND_BROWSER_DIR) -DSHELL_APPLICATION_ID=\"OmniGrammaton\"
 
-# OmniGrammaton.exe: the entry, the single start and the resources (the manifest and the version) over
-# every static library, a program of the Windows subsystem; and the directory a user runs it from, with
-# the fonts and the browser's pages under share.
+# OmniGrammaton.exe: the entry, the single start and the resources (the manifest, the version and the
+# icon) over every static library, a program of the Windows subsystem; and the directory a user runs it
+# from, with the fonts, the browser's pages, the trusted roots and the licences under share, and its zip.
 include apps/browser-win32/version.mk
 OMNIGRAMMATON_SOURCES := apps/browser-win32/main.c apps/browser-win32/single.c
 OMNIGRAMMATON_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(OMNIGRAMMATON_SOURCES)) \
@@ -234,6 +234,48 @@ OMNIGRAMMATON_SHARE := \
 	browser/about.html=$(KEILAND_BROWSER_DIR)/data/about.html \
 	browser/text.html=$(KEILAND_BROWSER_DIR)/data/text.html
 OMNIGRAMMATON_SHARE_COPIES := $(foreach pair,$(OMNIGRAMMATON_SHARE),$(BROWSER_WIN32_DIST)/share/$(word 1,$(subst =, ,$(pair))))
+
+# The icon: a host tool (make-ico, built with the host's compiler) draws the browser's picture as the
+# Keiland desktop does (its icons.c) and writes OmniGrammaton.ico, which the resources take.
+HOST_CC ?= cc
+OMNIGRAMMATON_ICON := $(BROWSER_WIN32_OBJ)/OmniGrammaton.ico
+MAKE_ICO := $(BROWSER_WIN32_OBJ)/host/make-ico
+MAKE_ICO_SOURCES = apps/browser-win32/tools/make-ico.c apps/browser-win32/tools/ico.c \
+	userland/desktop/wayland/icons.c userland/desktop/picture/png-write.c $(LIBZ_COMPAT_SOURCES)
+
+# The trusted roots: the ca-certificates package's file (its release, size and SHA-256 read from the
+# package), from the shared downloads when they have it, else fetched; as share/certs/ca-certificates.pem.
+CA_CERTIFICATES_PACKAGE := userland/packages/security/ca-certificates/Makefile
+CA_CERTIFICATES_ARCHIVE := $(shell sed -n 's/^ZEDBSD_EXT_ca-certificates_ARCHIVE := //p' $(CA_CERTIFICATES_PACKAGE))
+CA_CERTIFICATES_URL := $(shell sed -n 's/^ZEDBSD_EXT_ca-certificates_URL := //p' $(CA_CERTIFICATES_PACKAGE))
+CA_CERTIFICATES_SHA256 := $(shell sed -n 's/^ZEDBSD_EXT_ca-certificates_SHA256 := //p' $(CA_CERTIFICATES_PACKAGE))
+CA_CERTIFICATES_FILE := $(BROWSER_WIN32_SOURCES)/$(CA_CERTIFICATES_ARCHIVE)
+
+# The licences of what the program is made of (share/licenses, with a README.txt that lists them): the
+# tree's, the fonts', the engine's tables', OpenSSL's (from its release, which the OpenSSL build
+# extracted), the toolchain's parts linked in (llvm-mingw's MinGW-w64 runtime and winpthreads, and LLVM's
+# compiler runtime) and the trusted roots'.
+OPENSSL_RELEASE := $(shell sed -n 's/^ZEDBSD_EXT_openssl_VERSION := //p' userland/packages/security/openssl/Makefile)
+WIN32_TOOLCHAIN_ROOT := $(abspath $(dir $(shell command -v $(WIN32_CC) 2>/dev/null || echo $(WIN32_CC)))..)
+WIN32_MINGW_LICENSES := $(WIN32_TOOLCHAIN_ROOT)/$(WIN32_TRIPLE)/share/mingw32
+OMNIGRAMMATON_LICENSES = \
+	README.txt=apps/browser-win32/resources/licenses-README.txt \
+	zedBSD-LICENSE.txt=LICENSE \
+	Mahora-LICENSE.txt=userland/desktop/fonts/Mahora-LICENSE.txt \
+	JetBrainsMono-OFL.txt=userland/desktop/fonts/JetBrainsMono-OFL.txt \
+	DroidSansFallback-LICENSE.txt=userland/desktop/fonts/DroidSansFallback-LICENSE.txt \
+	Apache-2.0.txt=userland/desktop/fonts/Apache-2.0.txt \
+	WHATWG-entities.txt=userland/base/licenses/browser/WHATWG-entities \
+	Unicode-License-V3.txt=userland/base/licenses/browser/Unicode-License-V3 \
+	OpenSSL-LICENSE.txt=$(BROWSER_WIN32_OPENSSL)/work/src/openssl-$(OPENSSL_RELEASE)/LICENSE.txt \
+	MinGW-w64-runtime.txt=$(WIN32_MINGW_LICENSES)/COPYING.MinGW-w64-runtime.txt \
+	winpthreads.txt=$(WIN32_MINGW_LICENSES)/COPYING.winpthreads.txt \
+	LLVM-LICENSE.txt=$(WIN32_TOOLCHAIN_ROOT)/LICENSE.TXT \
+	ca-certificates-MPL-2.0.txt=userland/packages/security/ca-certificates/MPL-2.0.txt
+OMNIGRAMMATON_LICENSE_COPIES := $(foreach pair,$(OMNIGRAMMATON_LICENSES),$(BROWSER_WIN32_DIST)/share/licenses/$(word 1,$(subst =, ,$(pair))))
+
+# The zip: OmniGrammaton-<version>-<win64|winarm64>.zip of the directory, the same bytes from the same files.
+OMNIGRAMMATON_ZIP := $(BROWSER_WIN32_BUILD)/OmniGrammaton-$(OMNIGRAMMATON_VERSION)-$(WIN32_NAME).zip
 
 # The static libraries of the tree's libraries, each from its files of the Windows build so far:
 # libbrowser (its storage modules, which the layers above list too, once) with its Windows layer,
@@ -296,10 +338,13 @@ VULKAN_LOADER_SHA256 := ddfeca84a868899fbb2c7f28b7c8fd1006e34b2b13ce653a63bddfb6
 WIN32_VULKAN_HEADERS := $(BROWSER_WIN32_OBJ)/include/vulkan/vulkan.h
 WIN32_VULKAN_LIBRARY := $(BROWSER_WIN32_OBJ)/libvulkan-1.a
 
-.PHONY: program dist keiland-objects all layers libbrowser-core libbrowser-script script-core libraries vulkan headers openssl fetch flags clean test-program
+.PHONY: zip icon program dist keiland-objects all layers libbrowser-core libbrowser-script script-core libraries vulkan headers openssl fetch flags clean test-program
 all: layers libbrowser-core libraries vulkan $(BROWSER_WIN32_OBJ)/toolchain.txt program dist
 program: $(OMNIGRAMMATON_PROGRAM)
-dist: $(BROWSER_WIN32_DIST)/OmniGrammaton.exe $(OMNIGRAMMATON_SHARE_COPIES)
+dist: $(BROWSER_WIN32_DIST)/OmniGrammaton.exe $(OMNIGRAMMATON_SHARE_COPIES) $(OMNIGRAMMATON_LICENSE_COPIES) \
+	$(BROWSER_WIN32_DIST)/share/certs/ca-certificates.pem
+zip: $(OMNIGRAMMATON_ZIP)
+icon: $(OMNIGRAMMATON_ICON)
 
 layers: $(BROWSER_WIN32_LAYER_OBJECTS)
 libbrowser-core: $(LIBBROWSER_CORE_OBJECTS)
@@ -385,11 +430,11 @@ endif
 # OmniGrammaton.exe (wWinMain: -municode).
 $(eval $(call WIN32_PROGRAM,$(OMNIGRAMMATON_PROGRAM),$(OMNIGRAMMATON_OBJECTS),-mwindows -municode))
 
-# The resources, compiled with the version's numbers.
+# The resources, compiled with the version's numbers and the icon.
 $(BROWSER_WIN32_OBJ)/apps/browser-win32/resources/OmniGrammaton.res.o: apps/browser-win32/resources/OmniGrammaton.rc \
-	apps/browser-win32/resources/OmniGrammaton.manifest apps/browser-win32/version.mk
+	apps/browser-win32/resources/OmniGrammaton.manifest apps/browser-win32/version.mk $(OMNIGRAMMATON_ICON)
 	@mkdir -p $(dir $@)
-	$(WIN32_WINDRES) -I apps/browser-win32/resources \
+	$(WIN32_WINDRES) -I apps/browser-win32/resources -I $(BROWSER_WIN32_OBJ) \
 		-DOMNIGRAMMATON_VERSION_MAJOR=$(word 1,$(OMNIGRAMMATON_VERSION_WORDS)) \
 		-DOMNIGRAMMATON_VERSION_MINOR=$(word 2,$(OMNIGRAMMATON_VERSION_WORDS)) \
 		-DOMNIGRAMMATON_VERSION_PATCH=$(word 3,$(OMNIGRAMMATON_VERSION_WORDS)) \
@@ -405,6 +450,40 @@ $(BROWSER_WIN32_DIST)/share/$(word 1,$(subst =, ,$(1))): $(word 2,$(subst =, ,$(
 	cp $$< $$@
 endef
 $(foreach pair,$(OMNIGRAMMATON_SHARE),$(eval $(call WIN32_SHARE_COPY,$(pair))))
+define WIN32_LICENSE_COPY
+$(BROWSER_WIN32_DIST)/share/licenses/$(word 1,$(subst =, ,$(1))): $(word 2,$(subst =, ,$(1)))
+	@mkdir -p $$(dir $$@)
+	cp $$< $$@
+endef
+$(foreach pair,$(OMNIGRAMMATON_LICENSES),$(eval $(call WIN32_LICENSE_COPY,$(pair))))
+# OpenSSL's licence comes with its release, which its build extracts.
+$(BROWSER_WIN32_OPENSSL)/work/src/openssl-$(OPENSSL_RELEASE)/LICENSE.txt: $(WIN32_OPENSSL_LIBSSL)
+	@test -f $@ || { echo '$@: not in the OpenSSL release'; exit 1; }
+$(BROWSER_WIN32_DIST)/share/certs/ca-certificates.pem: $(CA_CERTIFICATES_FILE)
+	@mkdir -p $(dir $@)
+	cp $< $@
+
+# The roots' file: the shared downloads' copy when it is there (read only), else fetched; checked either way.
+$(CA_CERTIFICATES_FILE):
+	@mkdir -p $(dir $@)
+	@if [ -f build/distfiles/$(CA_CERTIFICATES_ARCHIVE) ]; then cp build/distfiles/$(CA_CERTIFICATES_ARCHIVE) $@.part; \
+	else curl -fsSL --retry 3 -o $@.part '$(CA_CERTIFICATES_URL)'; fi
+	@echo '$(CA_CERTIFICATES_SHA256)  $@.part' | sha256sum -c --quiet - || { echo '$@: the SHA-256 is not $(CA_CERTIFICATES_SHA256)'; exit 1; }
+	mv -f $@.part $@
+
+# The icon's host tool and the icon.  The host tool includes the compat zlib header (the Windows build's copy).
+$(MAKE_ICO): $(MAKE_ICO_SOURCES) | $(WIN32_COMPAT_HEADER_COPIES)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -I. -I$(BROWSER_WIN32_OBJ)/include -Iuserland/base/libz-compat \
+		-o $@ $(MAKE_ICO_SOURCES) -lm
+$(OMNIGRAMMATON_ICON): $(MAKE_ICO)
+	@mkdir -p $(dir $@)
+	$(MAKE_ICO) $@.new
+	mv -f $@.new $@
+
+# The zip of the directory (made afresh whenever a file of it is newer).
+$(OMNIGRAMMATON_ZIP): dist apps/browser-win32/tools/make-zip.py
+	python3 -I apps/browser-win32/tools/make-zip.py $(BROWSER_WIN32_DIST) $@
 
 # script-core.exe: the script core's library alone, with the system's libraries, no thread library (the
 # core's Windows layer starts no thread) and no Vulkan.
