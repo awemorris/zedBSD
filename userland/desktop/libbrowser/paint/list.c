@@ -3039,6 +3039,10 @@ list_filter_items(
 		return;
 	item.filters = filters;
 	item.filter_count = filter_count;
+
+	/* A backdrop's color is its opacity (a fade scales it): how much of the filtered pixels cover the unfiltered ones. */
+	if (kind == PAINT_BACKDROP)
+		item.color = 0xff000000U;
 	error = wb_vector_push(&walk->list->items, &item);
 	if (error != 0)
 		walk->error = error;
@@ -3058,7 +3062,7 @@ list_fade(
 	/* Each rectangle's and text item's alpha (clips and images keep theirs). */
 	for (index = first; index < walk->list->items.count; index++) {
 		item = wb_vector_at(&walk->list->items, index);
-		if (item->kind != PAINT_RECT && item->kind != PAINT_TEXT)
+		if (item->kind != PAINT_RECT && item->kind != PAINT_TEXT && item->kind != PAINT_BACKDROP)
 			continue;
 		alpha = (uint32_t)((float)(item->color >> 24) * opacity + 0.5f);
 		item->color = (item->color & 0x00ffffffU) | (alpha << 24);
