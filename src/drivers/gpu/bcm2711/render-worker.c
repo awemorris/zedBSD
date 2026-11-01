@@ -953,6 +953,7 @@ queue_marker(
 	request->state = REQUEST_QUEUED;
 	request->next = NULL;
 	request->queued_ticks = clock_ticks();
+	request->queued_ns = bcm2711_v3d_busy_clock();
 	if (controller->worker.tail == NULL) {
 		controller->worker.head = request;
 	} else {
