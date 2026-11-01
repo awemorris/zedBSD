@@ -80,3 +80,28 @@ commit（`git commit -m WIP -- <path>`）:
 - location の欄の drive の path（Z:\...）は、Windows でも file: の URL（file:///Z:/...）で見せる。q1872 の Sonnet で直す。
 - 文字を詰めた時の省略記号が font に無く豆腐の箱になる件は、libkeiland の文字の側で直す（同じ q1872）。
 
+
+## 追補（q1872、2026-11-02、q1872-i01、Sonnet）
+
+p029 の「気づいた事」の 2 件を直した（Q1 の判断の通り）。
+
+変えた file:
+
+- `userland/desktop/browser/shell/titlebar.c`: location の欄に出す文字を作る所で、Windows の path（drive の `Z:\x`・`Z:/x`、network share の `\\host\x`）を新しい `titlebar_is_system_path` で見分け、`file:///Z:/x`（share は `file://host/x`）の形で出す。区切りの `\` は `/` にする。drive の判定は文字・`:`・区切りで、URL の scheme の後ろにはまず付かない形（`shell_path_is_absolute` と同じ規則）。scheme の判定（`titlebar_scheme_length`）と POSIX の path・URL の出し方は変えていない（`/x` は `file:///x` のまま、`https:` などは そのまま）。
+- `userland/desktop/libkeiland/ui/text.c`: `kl_text_fit`（`kl_text_draw_fit` が使う）が末尾に付ける U+2026 を、main の face・companion・（開いていれば）emoji の face のどれかが持つ時だけ使い、どれも持たない時は `...` にする（新しい `text_ellipsis`）。font が持つ時の出力は前と同じ。公開の header は変えていない。font を調べると Mahora-Regular・Mahora-Bold・Mahora-Mono・DroidSansFallbackFull は U+2026 を持たない（JetBrainsMono は持つ）ので、zedBSD の Keiland の他の app でも詰めた時の箱は `...` になる。
+- `plan/ws334/tests/wine-run.sh`: clipboard の項を「箱の文字が `file:///<drive>:/...about.html`」の確認に、title bar の項に「その URL を打ち直して Enter で about.html が開く」を足した（`retyped.png`）。
+
+確かめ（`/home/awe/zedBSD-worktrees/s-ws334-ui`）:
+
+| 確かめ | 結果 |
+| --- | --- |
+| `sh plan/ws334/tests/wine-run.sh`（2 回目。1 回目は新しい worktree の Wine の prefix 作成の 1 行が `js-closures` の出力に混ざって FAIL、他の項は PASS。prefix ができた後の 2 回目） | `wine-run: PASS`。title bar: about.html を打つと開き、Back で start.html、欄の file: URL を打ち直すと about.html が開く。clipboard: `file:///Z:/home/awe/zedBSD-worktrees/s-ws334-ui/build/tmp/ws334-wine-build/browser-win64/OmniGrammaton/share/browser/about.html`。144 dpi の帯 48 px。その中で `plan/ws074/tests/host-build.sh plain`（host の browser）も build 済み |
+| PNG | `build/review/ws334-p029/typed.png`（96 dpi、欄は `file:///Z:/home/...` で詰めた末尾は `...`）、`titlebar-144dpi.png`（詰めた末尾が `...`、箱無し）、`retyped.png`・`titlebar.png`・`typing.png`・`back.png`・`dpi144.png` |
+| `timeout 3600 flock /tmp/zedbsd-wine.lock sh plan/ws334/tests/cross-build.sh` | `cross-build: PASS`（両 arch） |
+| Linux の Keiland（`make -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-linux all`） | exit 0、warning 0 |
+| `sh plan/tools/keiland-layers/host-test.sh` | `SUMMARY pass=12 fail=0`（thread・socket の gcc・clang の lib・tsan・asan。p029 の時の 8 は数え方が違う、今回は既定の全部） |
+| zedBSD amd64（`make ZEDBSD_CONFIG=plan/ws334/tests/config-amd64-p027-guest.mk BUILD=build/q1872 build/q1872/dynamic/libkeiland.so build/q1872/bin/browser`） | exit 0、warning 0 |
+
+未実施: zedBSD の guest（QEMU）での実際の画面（zedBSD の Keiland は Mahora に U+2026 が無いため `...` になる、の画面の確認）、`run-host-present-damage.sh`・`keiland-os-boundary/check.sh`・`run-unit.sh`（今回は text.c の省略記号の選び方と browser の shell の文字作りだけの変更で、host の関数の試験は足していない）。
+
+消してよい物（Q1 へ）: `build/q1872`（zedBSD amd64 の試しの build）、`build/tmp/q1872-*.log`。
