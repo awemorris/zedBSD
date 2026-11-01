@@ -217,6 +217,7 @@ struct net_request {
 	struct wb_buffer raw;
 	struct net_http_framing framing;
 	struct loader_entry *validating;
+	int revalidated;
 	uint64_t deadline;
 	net_request_done done;
 	void *context;
@@ -1382,6 +1383,7 @@ loader_begin(
 
 	/* A stale entry with an ETag is revalidated. */
 	request->validating = NULL;
+	request->revalidated = 0;
 	if (entry != NULL && entry->etag.length != 0)
 		request->validating = entry;
 
@@ -1812,6 +1814,7 @@ loader_finish(
 		request->validating->stored_at = loader_clock();
 		request->validating->stored_wall = loader_wall();
 		request->validating->wall_clock = 0;
+		request->revalidated = 1;
 		if (request->response.max_age >= 0)
 			request->validating->max_age = request->response.max_age;
 		error = loader_cache_answer(request, request->validating);
@@ -2313,15 +2316,16 @@ loader_cache_store(
 		return;
 	}
 
-	/* An older entry of the URL is replaced (a revalidated one stays). */
+	/* An entry the 304 revalidated was refreshed already, and stays. */
 	entry = loader_cache_find(loader, wb_buffer_string(&url));
-	if (entry != NULL && entry != request->validating)
-		loader_cache_free(loader, entry);
-	if (entry != NULL && entry == request->validating) {
-		/* A revalidated entry was refreshed already. */
+	if (entry != NULL && entry == request->validating && request->revalidated) {
 		wb_buffer_release(&url);
 		return;
 	}
+
+	/* An older entry of the URL is replaced (by a 200 to its revalidation too, whose body changed). */
+	if (entry != NULL)
+		loader_cache_free(loader, entry);
 
 	/* The response as a record: what the memory entry keeps, stamped with the wall clock. */
 	memset(&record, 0, sizeof(record));

@@ -154,6 +154,7 @@ static void test_fake_backend(void);
 static void test_no_instance(void);
 static void test_cache(void);
 static void test_cache_limit(void);
+static void test_cache_changed(void);
 static void test_cache_offline(void);
 
 /*
@@ -199,6 +200,7 @@ main(
 	test_no_instance();
 	test_cache();
 	test_cache_limit();
+	test_cache_changed();
 	test_cache_offline();
 
 	/* Succeeded or not: the summary line. */
@@ -1415,6 +1417,78 @@ test_cache_limit(void)
 	CHECK(test_cache_has(instance, "/blob/4"));
 	CHECK_EQ(test_count_files("d", "cache"), 2);
 
+	CHECK_EQ(browser_instance_destroy(instance), 0);
+	sync();
+}
+
+/*
+ * A stale response revalidated by If-None-Match that comes back as a 200
+ * with a new body (not a 304) replaces the kept one, in memory and in
+ * its record, so the next request is answered from the cache with the new
+ * body, in the same instance and in a later one.
+ */
+static void
+test_cache_changed(void)
+{
+	struct browser_instance *instance;
+	struct net_loader *loader;
+	struct test_fetch result;
+	int hits;
+	int conditional;
+	int error;
+
+	/* The first body, kept with a 1 s max-age. */
+	error = test_files_instance("e", &instance);
+	CHECK_EQ(error, 0);
+	if (error != 0)
+		return;
+	error = net_loader_create(NULL, NULL, &loader);
+	CHECK_EQ(error, 0);
+	if (error != 0) {
+		browser_instance_destroy(instance);
+		return;
+	}
+	net_loader_set_cookies(loader, instance->cookies);
+	net_loader_set_cache(loader, instance->cache);
+	CHECK_EQ(test_fetch(loader, "/etag-change", NULL, &result), 0);
+	CHECK(strcmp(result.body, "change-v1") == 0);
+
+	/* Stale: revalidated, and the server answers 200 with the new body. */
+	test_pause(1300);
+	CHECK_EQ(test_fetch(loader, "/etag-change", NULL, &result), 0);
+	CHECK_EQ(result.status, 200);
+	CHECK(strcmp(result.body, "change-v2") == 0);
+	CHECK_EQ(test_server_count("/etag-change", &hits, &conditional), 0);
+	CHECK_EQ(hits, 2);
+	CHECK_EQ(conditional, 1);
+
+	/* The new body is fresh (3600 s): the next request is answered from the cache. */
+	CHECK_EQ(test_fetch(loader, "/etag-change", NULL, &result), 0);
+	CHECK(strcmp(result.body, "change-v2") == 0);
+	CHECK_EQ(test_server_count("/etag-change", &hits, &conditional), 0);
+	CHECK_EQ(hits, 2);
+	net_loader_destroy(loader);
+	CHECK_EQ(browser_instance_destroy(instance), 0);
+	sync();
+
+	/* A later instance has the new body in its record, fresh: the server is not asked. */
+	error = test_files_instance("e", &instance);
+	CHECK_EQ(error, 0);
+	if (error != 0)
+		return;
+	error = net_loader_create(NULL, NULL, &loader);
+	CHECK_EQ(error, 0);
+	if (error != 0) {
+		browser_instance_destroy(instance);
+		return;
+	}
+	net_loader_set_cookies(loader, instance->cookies);
+	net_loader_set_cache(loader, instance->cache);
+	CHECK_EQ(test_fetch(loader, "/etag-change", NULL, &result), 0);
+	CHECK(strcmp(result.body, "change-v2") == 0);
+	CHECK_EQ(test_server_count("/etag-change", &hits, &conditional), 0);
+	CHECK_EQ(hits, 2);
+	net_loader_destroy(loader);
 	CHECK_EQ(browser_instance_destroy(instance), 0);
 	sync();
 }

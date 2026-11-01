@@ -5,6 +5,9 @@
 #   /max-age      200, "max-age-body", Cache-Control: max-age=3600
 #   /etag         200, "etag-body", ETag "v1", Cache-Control: max-age=1; a request with
 #                 If-None-Match: "v1" gets 304 with Cache-Control: max-age=3600
+#   /etag-change  200, "change-v1", ETag "w1", Cache-Control: max-age=1; a request with If-None-Match: "w1" gets
+#                 200 with a new body, "change-v2", ETag "w2", max-age=3600 (the page changed, not a 304);
+#                 one with If-None-Match: "w2" gets 304 with max-age=3600
 #   /no-store     200, "no-store-body", Cache-Control: no-store, max-age=3600
 #   /plain        200, "plain-body", nothing about caching
 #   /post         200, "post-body", Cache-Control: max-age=3600 (for a POST)
@@ -65,6 +68,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(304, b"", [("ETag", '"v1"'), ("Cache-Control", "max-age=3600")])
             else:
                 self.reply(200, b"etag-body", [("ETag", '"v1"'), ("Cache-Control", "max-age=1")])
+        elif path == "/etag-change":
+            tag = self.headers.get("If-None-Match")
+            if tag == '"w1"':
+                self.reply(200, b"change-v2", [("ETag", '"w2"'), ("Cache-Control", "max-age=3600")])
+            elif tag == '"w2"':
+                self.reply(304, b"", [("ETag", '"w2"'), ("Cache-Control", "max-age=3600")])
+            else:
+                self.reply(200, b"change-v1", [("ETag", '"w1"'), ("Cache-Control", "max-age=1")])
         elif path == "/no-store":
             self.reply(200, b"no-store-body", [("Cache-Control", "no-store, max-age=3600")])
         elif path == "/plain":
