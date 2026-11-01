@@ -3,7 +3,7 @@
 # ws334-p029 統合: libkeiland の Win32 その 2（題の帯の controls と location の欄、IMM32、clipboard、DPI）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §4.4 の N1〜N3・N6、§4.5 の titlebar の controls・text input・clipboard の行。
-- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1867-i01、P5）。前: planned（2026-11-01 p003 で作成）。
+- 状態: cleared（2026-11-01 23:54 Q1、main cc3f46e9b。wine-run の 7 項 PASS（題の帯の controls、location の欄の入力と Back、clipboard、144 dpi）、cross-build PASS、Linux の Keiland・zedBSD の build warning 0）。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1867-i01、P5）。前: planned（2026-11-01 p003 で作成）。
 - 依存: p018（cf-html）・p028。
 - 担当の想定: Opus（phase-runner）を 1 回（約 12 LW、UI）。使う module の約束: `win32/frame.h`・`wide.h`・`input.h`・`cf-html.h`。
 
@@ -74,3 +74,9 @@ commit（`git commit -m WIP -- <path>`）:
 - aarch64 の Windows の実行。
 
 消してよい物（Q1 へ）: `build/tmp/p029`・`build/tmp/p029-*`（Windows の試しの build・log・text.c の比較）、`build/tmp/ws334-wine-gui144`（144 dpi の Wine の prefix、次の試験でも使える）。p028 の一覧（`build/tmp/ws334-wine-build`・`ws334-wine-run*` ほか）は今回も上書きして使った。
+
+### Q1 の判断（2026-11-01 23:54）
+
+- location の欄の drive の path（Z:\...）は、Windows でも file: の URL（file:///Z:/...）で見せる。q1872 の Sonnet で直す。
+- 文字を詰めた時の省略記号が font に無く豆腐の箱になる件は、libkeiland の文字の側で直す（同じ q1872）。
+
