@@ -21,7 +21,7 @@
 | [ws324-p006b](phase006b/phase.md) | h265sw-nal・h265sw-scaling・h265sw-vui の実装（Sonnet、BASE `1f16db0e6`） | cleared（2026-11-02 01:03 Q1、main で merge。test-nal 816099・scaling 5499・vui 2432070 checks、壊す確かめ 37 か所が全部試験の失敗で落ちた） | p006a 段 2 |
 | [ws324-p006c](phase006c/phase.md) | h265sw-rps・h265sw-ps の実装（Sonnet） | cleared（2026-11-02 02:46 Q1、main で test-rps 1891521・test-ps 1447981 PASS）。実装（2026-11-02 Sonnet q1883-i01、test-rps 1891521・ps 1447981 checks、壊す確かめ 142 か所中 140 が試験の失敗で落ち 2 は等価、適合 147 本の VPS・SPS・PPS の読みは失敗 0）。cleared は Q1 | p006b |
 | [ws324-p006d](phase006d/phase.md) | h265sw-slice・h265sw-poc の実装（Sonnet） | cleared（2026-11-02 03:26 Q1、main で test-slice 3904937・test-poc 1788280 PASS）。実装（2026-11-02 Sonnet q1899-i01、test-slice 3904937・poc 1788280 checks、壊す確かめ 252 か所中 243 が試験の失敗で落ち 9 は等価）。cleared は Q1 | p006c |
-| [ws324-p006e](phase006e/phase.md) | h265-dpb の実装（Sonnet） | in-progress（Sonnet） | p006a 段 2 |
+| [ws324-p006e](phase006e/phase.md) | h265-dpb の実装（Sonnet） | cleared（2026-11-02 03:43 Q1、main で test-dpb 40617273 PASS）。実装（2026-11-02、cleared は Q1） | p006a 段 2 |
 | [ws324-p006f](phase006f/phase.md) | h265-std の実装（Sonnet） | cleared（2026-11-02 03:15 Q1、main で test-std 1680 PASS。zedBSD の clang は H.265 の Vulkan header が入る p002 の後）。実装（2026-11-02 Sonnet q1901-i01、test-std 1680 checks、壊す確かめ 220 通りが全部試験の失敗で落ちた）。cleared は Q1 | p006a 段 2 |
 | [ws324-p006g](phase006g/phase.md) | h265-stream の実装（Sonnet） | in-progress（Sonnet） | p006d |
 | [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | planned | p006e〜g |
