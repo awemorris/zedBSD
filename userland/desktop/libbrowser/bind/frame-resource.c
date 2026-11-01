@@ -202,6 +202,7 @@ bind_frame_install(
 		host.context = parent->host.context;
 		host.console = parent->host.console;
 		host.node_box = parent->host.node_box;
+		host.node_rects = parent->host.node_rects;
 		host.user_agent = parent->host.user_agent;
 		host.checkpoint = parent->host.checkpoint;
 		host.child_element_at = parent->host.child_element_at;

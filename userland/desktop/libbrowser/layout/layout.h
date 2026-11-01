@@ -392,6 +392,9 @@ struct layout_transition_name {
 	struct paint_snapshot *old_image;
 	/* Declarations a script's animation of a pseudo-element gives now, by the group, pair, old and new pseudo-elements. */
 	char animated[4][192];
+	/* The seconds a script gave one pseudo-element's animations (the group, pair, old and new ones); the others are at the transition's time. */
+	float elapsed[4];
+	unsigned char elapsed_set[4];
 };
 
 /*
@@ -502,6 +505,8 @@ const struct layout_box *layout_transition_box(const struct layout_transition *t
 struct vm_string *layout_transition_name_of(const struct layout_transition *transition, const struct layout_box *box);
 void layout_transition_release(struct layout_transition *transition);
 float layout_transition_progress(const struct css_style *style, float elapsed);
+float layout_transition_elapsed(const struct layout_transition *transition, const struct layout_transition_name *name, int kind);
+int layout_transition_box_rect(const struct layout_box *box, struct layout_rect *rect);
 int layout_transition_group_rect(const struct layout_transition_name *name, const struct css_style *style, float elapsed, struct layout_rect *rect);
 
 /* Anchor positioning (anchor.c). */
@@ -565,6 +570,7 @@ int layout_dump(const struct layout_tree *tree, struct wb_buffer *out);
 const struct layout_box *layout_hit(const struct layout_tree *tree, layout_unit x, layout_unit y);
 struct dom_node *layout_hit_node(const struct layout_tree *tree, layout_unit x, layout_unit y);
 int layout_node_bounds(const struct layout_tree *tree, const struct dom_node *node, struct layout_rect *rect);
+size_t layout_node_line_rects(const struct layout_tree *tree, const struct dom_node *node, struct layout_rect *rects, size_t max);
 const struct layout_box *layout_box_of(const struct layout_tree *tree, const struct dom_node *node);
 layout_unit layout_from_px(float px);
 float layout_to_px(layout_unit value);

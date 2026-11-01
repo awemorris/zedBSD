@@ -321,6 +321,24 @@ kl_backend_gpu_commit(
 }
 
 /*
+ * Knows no reason of the system's for a missing GPU: the DRM node's own
+ * errors are the seat's and Vulkan's.
+ */
+int
+kl_backend_gpu_unavailable_reason(
+	char *text,
+	size_t size)
+{
+	/* Refuses a buffer that cannot hold a sentence. */
+	if (text == NULL || size == 0U)
+		return EINVAL;
+
+	/* Leaves the buffer empty: the system tells nothing more. */
+	text[0] = '\0';
+	return ENOENT;
+}
+
+/*
  * Supplies the standard DRM display-acquisition instance extensions.
  */
 uint32_t

@@ -22,18 +22,15 @@
  */
 
 #include "net/net.h"
+#include "base/os-net.h"
+#include "base/os-time.h"
 
 #include <compat/zlib/zlib.h>
 
 #include <errno.h>
-#include <netdb.h>
-#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 /* How long a connection may stay silent, in milliseconds. */
 #define NET_HTTP_TIMEOUT	30000
@@ -116,13 +113,13 @@ struct http_headers {
  * http).
  */
 struct http_connection {
-	int descriptor;
+	wb_os_socket socket;
 	struct net_tls *tls;
 };
 
 static int http_request(const struct net_url *url, const struct net_send *send, struct net_response *response, struct wb_buffer *location);
 static int http_decode_body(int encoding, struct net_response *response);
-static int http_connect(const struct net_url *url, int *descriptor);
+static int http_connect(const struct net_url *url, wb_os_socket *socket);
 static int http_send_all(const struct http_connection *connection, const unsigned char *bytes, size_t length);
 static int http_receive_all(const struct http_connection *connection, struct wb_buffer *raw);
 static int http_receive(const struct http_connection *connection, unsigned char *bytes, size_t length, size_t *received);
@@ -132,7 +129,7 @@ static int http_header_value(const char *line, size_t length, const char *name, 
 static int http_dechunk(const unsigned char *body, size_t length, struct wb_buffer *out);
 static void http_cache_control(const char *value, size_t length, struct net_response *response);
 static int http_find_header(const unsigned char *raw, size_t end, const char *name, const char **value, size_t *value_length);
-static const void *http_memmem(const void *haystack, size_t length, const void *needle, size_t needle_length);
+static int http_case_differs(const char *text, const char *name, size_t length);
 
 /*
  * Fetches a URL with GET, following redirects: fills the response (its
@@ -316,7 +313,7 @@ http_has_header(
 	/* Each line's start against the name and a colon. */
 	length = strlen(name);
 	while (lines != NULL && *lines != '\0') {
-		if (strncasecmp(lines, name, length) == 0 && lines[length] == ':')
+		if (http_case_differs(lines, name, length) == 0 && lines[length] == ':')
 			return 1;
 		end = strchr(lines, '\n');
 		if (end == NULL)
@@ -349,7 +346,7 @@ http_append_script_headers(
 		colon = memchr(lines, ':', length);
 		skip = colon == NULL || colon == lines;
 		for (index = 0; !skip && forbidden[index] != NULL; index++) {
-			if ((size_t)(colon - lines) == strlen(forbidden[index]) && strncasecmp(lines, forbidden[index], (size_t)(colon - lines)) == 0)
+			if ((size_t)(colon - lines) == strlen(forbidden[index]) && http_case_differs(lines, forbidden[index], (size_t)(colon - lines)) == 0)
 				skip = 1;
 		}
 		if (!skip) {
@@ -488,7 +485,7 @@ net_http_framing_update(
 	if (!framing->headers_done) {
 		end = NULL;
 		if (length >= 4U)
-			end = (const unsigned char *)http_memmem(raw, length, "\r\n\r\n", 4U);
+			end = (const unsigned char *)wb_memmem(raw, length, "\r\n\r\n", 4U);
 		if (end == NULL)
 			return;
 		header_end = (size_t)(end - raw);
@@ -505,7 +502,7 @@ net_http_framing_update(
 		found = http_find_header(raw, header_end, "connection", &value, &value_length);
 		differs = 1;
 		if (found && value_length == 5U)
-			differs = strncasecmp(value, "close", 5U);
+			differs = http_case_differs(value, "close", 5U);
 		if (differs == 0)
 			framing->keep_alive = 0;
 
@@ -520,7 +517,7 @@ net_http_framing_update(
 		found = http_find_header(raw, header_end, "transfer-encoding", &value, &value_length);
 		differs = 1;
 		if (found && value_length >= 7U)
-			differs = strncasecmp(value + value_length - 7U, "chunked", 7U);
+			differs = http_case_differs(value + value_length - 7U, "chunked", 7U);
 		if (differs == 0) {
 			framing->chunked = 1;
 			framing->position = framing->body_start;
@@ -573,7 +570,7 @@ net_http_framing_update(
 
 		/* The last chunk with trailers: their empty line ends it. */
 		if (size == 0) {
-			end = (const unsigned char *)http_memmem(raw + line_end + 1U, length - line_end - 1U, "\r\n\r\n", 4U);
+			end = (const unsigned char *)wb_memmem(raw + line_end + 1U, length - line_end - 1U, "\r\n\r\n", 4U);
 			if (end == NULL)
 				return;
 			framing->body_end = (size_t)(end - raw) + 4U;
@@ -613,11 +610,11 @@ http_request(
 
 	/* The connection, and TLS over it for https. */
 	connection.tls = NULL;
-	connection.descriptor = -1;
-	error = http_connect(url, &connection.descriptor);
+	connection.socket = WB_OS_SOCKET_NONE;
+	error = http_connect(url, &connection.socket);
 	is_https = !strcmp(url->scheme, "https");
 	if (error == 0 && is_https)
-		error = net_tls_open(connection.descriptor, url->host, &connection.tls);
+		error = net_tls_open(connection.socket, url->host, &connection.tls);
 
 	/* The request and everything the server sends until it closes. */
 	if (error == 0)
@@ -625,8 +622,7 @@ http_request(
 	if (error == 0)
 		error = http_receive_all(&connection, &raw);
 	net_tls_close(connection.tls);
-	if (connection.descriptor >= 0)
-		close(connection.descriptor);
+	wb_os_socket_close(connection.socket);
 
 	/* The request was sent. */
 	wb_buffer_release(&request);
@@ -646,19 +642,20 @@ http_request(
 static int
 http_connect(
 	const struct net_url *url,
-	int *descriptor)
+	wb_os_socket *socket)
 {
-	struct addrinfo hints;
-	struct addrinfo *found;
-	struct addrinfo *address;
+	struct wb_os_addresses *found;
 	char host[256];
 	char port[16];
 	size_t length;
+	size_t count;
+	size_t index;
 	int number;
 	int status;
 	int error;
 
 	/* The host without an IPv6 address's brackets. */
+	*socket = WB_OS_SOCKET_NONE;
 	length = strlen(url->host);
 	if (length >= sizeof(host))
 		return ENAMETOOLONG;
@@ -675,38 +672,22 @@ http_connect(
 	snprintf(port, sizeof(port), "%d", number);
 
 	/* The addresses of the host. */
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	status = getaddrinfo(host, port, &hints, &found);
+	status = wb_os_resolve(host, port, &found);
 	if (status != 0)
 		return EHOSTUNREACH;
 
-	/* The first that accepts a connection. */
+	/* The first that accepts a connection (a blocking one; a failed one closes its socket). */
 	error = ECONNREFUSED;
-	*descriptor = -1;
-	for (address = found; address != NULL; address = address->ai_next) {
-		*descriptor = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
-		if (*descriptor < 0) {
-			error = errno;
-			continue;
-		}
-
-		/* A connection that works ends the search. */
-		status = connect(*descriptor, address->ai_addr, address->ai_addrlen);
-		if (status == 0) {
-			error = 0;
+	count = wb_os_addresses_count(found);
+	for (index = 0; index < count; index++) {
+		error = wb_os_socket_connect(found, index, 1, socket);
+		if (error == 0)
 			break;
-		}
-
-		/* Otherwise the next address. */
-		error = errno;
-		close(*descriptor);
-		*descriptor = -1;
+		*socket = WB_OS_SOCKET_NONE;
 	}
 
 	/* The addresses are no longer needed. */
-	freeaddrinfo(found);
+	wb_os_addresses_free(found);
 	if (error != 0)
 		return error;
 
@@ -721,7 +702,7 @@ http_send_all(
 	const unsigned char *bytes,
 	size_t length)
 {
-	ssize_t sent;
+	size_t sent;
 	size_t done;
 	int error;
 
@@ -735,17 +716,11 @@ http_send_all(
 		return 0;
 	}
 
-	/* Until everything is sent. */
-	for (done = 0; done < length; done += (size_t)sent) {
-		sent = send(connection->descriptor, bytes + done, length - done, MSG_NOSIGNAL);
-		if (sent < 0 && errno == EINTR) {
-			sent = 0;
-			continue;
-		}
-
-		/* Any other failure ends the request. */
-		if (sent < 0)
-			return errno;
+	/* Until everything is sent (a send cut by a signal is tried again by the layer). */
+	for (done = 0; done < length; done += sent) {
+		error = wb_os_socket_send(connection->socket, bytes + done, length - done, &sent);
+		if (error != 0)
+			return error;
 	}
 
 	/* Succeeded: the request is sent. */
@@ -758,11 +733,13 @@ http_receive_all(
 	const struct http_connection *connection,
 	struct wb_buffer *raw)
 {
-	struct pollfd waiting;
+	struct wb_os_poll_item waiting;
 	unsigned char chunk[16384];
+	uint64_t started;
+	uint64_t waited;
 	size_t received;
+	size_t ready;
 	int pending;
-	int ready;
 	int error;
 
 	/* Each read, after waiting for the connection to be readable (unless TLS already holds bytes). */
@@ -771,16 +748,20 @@ http_receive_all(
 		if (connection->tls != NULL)
 			pending = net_tls_pending(connection->tls);
 		if (!pending) {
-			waiting.fd = connection->descriptor;
-			waiting.events = POLLIN;
-			waiting.revents = 0;
-			ready = poll(&waiting, 1, NET_HTTP_TIMEOUT);
-			if (ready < 0 && errno == EINTR)
-				continue;
-			if (ready < 0)
-				return errno;
-			if (ready == 0)
+			waiting.socket = connection->socket;
+			waiting.wants = WB_OS_POLL_READABLE;
+			waiting.found = 0;
+			started = wb_os_monotonic_ns();
+			error = wb_os_poll(&waiting, 1U, NET_HTTP_TIMEOUT, &ready);
+			if (error != 0)
+				return error;
+
+			/* Nothing in time is the end; a wait a signal cut short is begun again. */
+			waited = wb_os_monotonic_ns() - started;
+			if (ready == 0 && waited >= (uint64_t)NET_HTTP_TIMEOUT * 1000000U)
 				return ETIMEDOUT;
+			if (ready == 0)
+				continue;
 		}
 
 		/* The bytes, or the end of the response. */
@@ -810,7 +791,6 @@ http_receive(
 	size_t length,
 	size_t *received)
 {
-	ssize_t count;
 	int error;
 
 	/* TLS decrypts. */
@@ -824,13 +804,11 @@ http_receive(
 	}
 
 	/* The socket's bytes. */
-	*received = 0;
-	count = recv(connection->descriptor, bytes, length, 0);
-	if (count < 0)
-		return errno;
+	error = wb_os_socket_receive(connection->socket, bytes, length, received);
+	if (error != 0)
+		return error;
 
 	/* Succeeded: *received bytes (0 at the end). */
-	*received = (size_t)count;
 	return 0;
 }
 
@@ -990,11 +968,11 @@ http_header(
 
 	/* The content coding of the body. */
 	found = http_header_value(line, length, "content-encoding", &value, &value_length);
-	if (found && value_length == 4U && strncasecmp(value, "gzip", 4) == 0)
+	if (found && value_length == 4U && http_case_differs(value, "gzip", 4) == 0)
 		headers->encoding = HTTP_ENCODING_GZIP;
-	if (found && value_length == 6U && strncasecmp(value, "x-gzip", 6) == 0)
+	if (found && value_length == 6U && http_case_differs(value, "x-gzip", 6) == 0)
 		headers->encoding = HTTP_ENCODING_GZIP;
-	if (found && value_length == 7U && strncasecmp(value, "deflate", 7) == 0)
+	if (found && value_length == 7U && http_case_differs(value, "deflate", 7) == 0)
 		headers->encoding = HTTP_ENCODING_DEFLATE;
 
 	/* Where a redirect goes. */
@@ -1279,21 +1257,21 @@ http_cache_control(
 		/* max-age=N. */
 		differs = 1;
 		if (word > 8U)
-			differs = strncasecmp(value + start, "max-age=", 8U);
+			differs = http_case_differs(value + start, "max-age=", 8U);
 		if (differs == 0)
 			response->max_age = strtol(value + start + 8U, NULL, 10);
 
 		/* no-store. */
 		differs = 1;
 		if (word >= 8U)
-			differs = strncasecmp(value + start, "no-store", 8U);
+			differs = http_case_differs(value + start, "no-store", 8U);
 		if (differs == 0)
 			response->no_store = 1;
 
 		/* no-cache. */
 		differs = 1;
 		if (word >= 8U)
-			differs = strncasecmp(value + start, "no-cache", 8U);
+			differs = http_case_differs(value + start, "no-cache", 8U);
 		if (differs == 0)
 			response->no_cache = 1;
 
@@ -1343,28 +1321,35 @@ http_find_header(
 	return 0;
 }
 
-/* Finds the first place a run of bytes appears in others (NULL when it does not). */
-static const void *
-http_memmem(
-	const void *haystack,
-	size_t length,
-	const void *needle,
-	size_t needle_length)
+/*
+ * Compares at most length characters of a text with a name, ASCII letters
+ * in either case alike (strncasecmp in the C locale): 0 when they are the
+ * same, nonzero when not (a text that ends sooner differs).
+ */
+static int
+http_case_differs(
+	const char *text,
+	const char *name,
+	size_t length)
 {
-	const unsigned char *bytes;
 	size_t index;
-	int differs;
+	int left;
+	int right;
 
-	/* Each place the run could start. */
-	bytes = haystack;
-	if (needle_length == 0 || length < needle_length)
-		return NULL;
-	for (index = 0; index + needle_length <= length; index++) {
-		differs = memcmp(bytes + index, needle, needle_length);
-		if (differs == 0)
-			return bytes + index;
+	/* Each character, folded to lower case. */
+	for (index = 0; index < length; index++) {
+		left = (unsigned char)text[index];
+		right = (unsigned char)name[index];
+		if (left >= 'A' && left <= 'Z')
+			left += 'a' - 'A';
+		if (right >= 'A' && right <= 'Z')
+			right += 'a' - 'A';
+		if (left != right)
+			return left - right;
+		if (left == '\0')
+			return 0;
 	}
 
-	/* Not there. */
-	return NULL;
+	/* The same. */
+	return 0;
 }

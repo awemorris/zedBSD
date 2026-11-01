@@ -81,7 +81,8 @@ layout_transition_box(
 	if (depth > LAYOUT_DEPTH_MAX || box->vt_tree)
 		return NULL;
 	if (box->node != NULL && box->parent != NULL && box->style.view_transition_name != NULL &&
-	    (box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED) && vm_string_equal(layout_transition_name_of(transition, box), name))
+	    (box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED || box->kind == LAYOUT_INLINE) &&
+	    vm_string_equal(layout_transition_name_of(transition, box), name))
 		return box;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		found = layout_transition_box(transition, child, name, depth + 1);
@@ -141,6 +142,127 @@ transition_rect(
 }
 
 /*
+ * The rectangle of a named inline box: the union of the border boxes it has on its lines (its decoration's
+ * where it has one, else the text it holds).  Returns 0 when it has none, or its block's lines run vertically.
+ */
+static int
+transition_inline_rect(
+	const struct layout_box *inline_box,
+	struct layout_rect *rect)
+{
+	const struct layout_box *block;
+	const struct layout_box *up;
+	const struct layout_line *line;
+	const struct layout_fragment *fragment;
+	const struct layout_decoration *decoration;
+	layout_unit left;
+	layout_unit top;
+	layout_unit x0;
+	layout_unit x1;
+	layout_unit y0;
+	layout_unit y1;
+	layout_unit baseline;
+	layout_unit minimum_x;
+	layout_unit minimum_y;
+	layout_unit maximum_x;
+	layout_unit maximum_y;
+	size_t index;
+	size_t item;
+	int found;
+	int own;
+
+	block = inline_box->parent;
+	while (block != NULL && block->kind == LAYOUT_INLINE)
+		block = block->parent;
+	if (block == NULL || block->vertical_inline || block->lines == NULL)
+		return 0;
+	left = block->x + block->border[CSS_LEFT] + block->padding[CSS_LEFT];
+	top = block->y + block->border[CSS_TOP] + block->padding[CSS_TOP];
+	minimum_x = 0;
+	minimum_y = 0;
+	maximum_x = 0;
+	maximum_y = 0;
+	found = 0;
+	for (index = 0; index < block->line_count; index++) {
+		line = &block->lines[index];
+		baseline = top + line->y + line->baseline;
+
+		/* The box's own decoration on this line: its border box. */
+		own = 0;
+		for (item = 0; item < line->decoration_count; item++) {
+			decoration = &line->decorations[item];
+			if (decoration->box != inline_box)
+				continue;
+			x0 = left + line->left + decoration->x;
+			x1 = x0 + decoration->width;
+			if (decoration->has_left)
+				x0 += inline_box->margin[CSS_LEFT];
+			if (decoration->has_right)
+				x1 -= inline_box->margin[CSS_RIGHT];
+			y0 = baseline + decoration->shift - decoration->ascent - inline_box->padding[CSS_TOP] - inline_box->border[CSS_TOP];
+			y1 = baseline + decoration->shift + decoration->descent + inline_box->padding[CSS_BOTTOM] + inline_box->border[CSS_BOTTOM];
+			if (x1 <= x0)
+				continue;
+			own = 1;
+			if (!found || x0 < minimum_x)
+				minimum_x = x0;
+			if (!found || y0 < minimum_y)
+				minimum_y = y0;
+			if (!found || x1 > maximum_x)
+				maximum_x = x1;
+			if (!found || y1 > maximum_y)
+				maximum_y = y1;
+			found = 1;
+		}
+		if (own)
+			continue;
+
+		/* No decoration: the text of the box on this line. */
+		for (item = 0; item < line->fragment_count; item++) {
+			fragment = &line->fragments[item];
+			if (fragment->edge != 0 || fragment->width <= 0)
+				continue;
+			for (up = fragment->box; up != NULL && up != block && up != inline_box; up = up->parent)
+				;
+			if (up != inline_box)
+				continue;
+			x0 = left + line->left + fragment->x;
+			x1 = x0 + fragment->width;
+			y0 = baseline + fragment->shift - fragment->ascent;
+			y1 = baseline + fragment->shift + fragment->descent;
+			if (!found || x0 < minimum_x)
+				minimum_x = x0;
+			if (!found || y0 < minimum_y)
+				minimum_y = y0;
+			if (!found || x1 > maximum_x)
+				maximum_x = x1;
+			if (!found || y1 > maximum_y)
+				maximum_y = y1;
+			found = 1;
+		}
+	}
+	if (!found)
+		return 0;
+	rect->x = minimum_x;
+	rect->y = minimum_y;
+	rect->width = maximum_x - minimum_x;
+	rect->height = maximum_y - minimum_y;
+	return 1;
+}
+
+/* A named box's border box in the document (an inline box's is the union of what it covers on its lines); 0 when it has none. */
+int
+layout_transition_box_rect(
+	const struct layout_box *box,
+	struct layout_rect *rect)
+{
+	if (box->kind == LAYOUT_INLINE)
+		return transition_inline_rect(box, rect);
+	transition_rect(box, rect);
+	return 1;
+}
+
+/*
  * Finds the boxes with a view-transition-name below a box, in tree order, and records each in the transition:
  * the old state makes entries, the new one marks them.  A name two boxes share makes the transition fail.
  */
@@ -163,11 +285,11 @@ transition_collect(
 		return 0;
 	if (box->vt_tree)
 		return 0;
-	if ((box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED) && box->node != NULL &&
-	    box->style.view_transition_name != NULL && box->style.display != CSS_DISPLAY_NONE) {
+	if ((box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED || box->kind == LAYOUT_INLINE) && box->node != NULL &&
+	    box->style.view_transition_name != NULL && box->style.display != CSS_DISPLAY_NONE &&
+	    layout_transition_box_rect(box, &rect)) {
 		name = layout_transition_name_of(transition, box);
 		entry = layout_transition_find(transition, name);
-		transition_rect(box, &rect);
 		if (box->parent == NULL) {
 			/* The root is the whole viewport. */
 			rect.x = 0;
@@ -246,6 +368,7 @@ transition_sort(
 	struct wb_vector order;
 	struct layout_transition_name held;
 	const struct layout_box *box;
+	const struct layout_box *named;
 	const struct layout_box *layer;
 	size_t flow_index;
 	size_t first;
@@ -270,15 +393,23 @@ transition_sort(
 	}
 	for (index = first; index < transition->count; index++) {
 		keys[index] = (double)flow_index - 0.5 + (double)index / 100000.0;
-		box = layout_transition_box(transition, tree->root, transition->names[index].name, 0);
-		if (box == NULL)
+		named = layout_transition_box(transition, tree->root, transition->names[index].name, 0);
+		if (named == NULL)
 			continue;
-		for (slot = 0; slot < order.count; slot++) {
-			layer = *(const struct layout_box **)wb_vector_at(&order, slot);
-			if (layer == box) {
-				keys[index] = (double)slot;
+
+		/* An inline box paints in the flow of its block: after the layer it is in. */
+		for (box = named; box != NULL; box = box->parent) {
+			for (slot = 0; slot < order.count; slot++) {
+				layer = *(const struct layout_box **)wb_vector_at(&order, slot);
+				if (layer == box)
+					break;
+			}
+			if (slot < order.count) {
+				keys[index] = (double)slot + (box == named ? 0.0 : 0.5);
 				break;
 			}
+			if (named->kind != LAYOUT_INLINE)
+				break;
 		}
 	}
 
@@ -392,6 +523,18 @@ transition_ease(
 		return step / (float)steps;
 	}
 	return progress;
+}
+
+/* The seconds the animations of a name's pseudo-element (0 group, 1 pair, 2 old, 3 new) have run. */
+float
+layout_transition_elapsed(
+	const struct layout_transition *transition,
+	const struct layout_transition_name *name,
+	int kind)
+{
+	if (name != NULL && kind >= 0 && kind < 4 && name->elapsed_set[kind] != 0)
+		return name->elapsed[kind];
+	return transition->elapsed;
 }
 
 /*

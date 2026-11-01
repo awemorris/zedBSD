@@ -187,6 +187,28 @@ page_view_transition_time(
 	page->transition_generation++;
 }
 
+/* Sets how long the animations of one pseudo-element of a name have run, and has the page laid out again. */
+void
+page_view_transition_time_of(
+	void *context,
+	double milliseconds,
+	int pseudo,
+	const struct vm_string *name)
+{
+	struct page *page;
+	struct layout_transition_name *entry;
+
+	page = context;
+	if (!page->transition_on || pseudo < CSS_PSEUDO_ELEMENT_VT_GROUP || pseudo > CSS_PSEUDO_ELEMENT_VT_NEW)
+		return;
+	entry = layout_transition_find(&page->transition, name);
+	if (entry == NULL)
+		return;
+	entry->elapsed[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP] = (float)(milliseconds / 1000.0);
+	entry->elapsed_set[pseudo - CSS_PSEUDO_ELEMENT_VT_GROUP] = 1;
+	page->transition_generation++;
+}
+
 /* Lists the names of the shown transition, one "name flags" line each (1: an old snapshot, 2: a new one). */
 int
 page_view_transition_names(
@@ -306,9 +328,10 @@ page_vt_pseudo_style(
 		entry = layout_transition_find(&page->transition, name);
 		if (entry != NULL && pseudo == CSS_PSEUDO_ELEMENT_VT_GROUP)
 			siblings = (entry == &page->transition.names[first] ? CSS_VT_FIRST : 0) | (entry == &page->transition.names[last] ? CSS_VT_LAST : 0);
-		if (entry != NULL && entry->has_old && entry->has_new && pseudo == CSS_PSEUDO_ELEMENT_VT_OLD)
+		/* An image the name does not have yet is still told by its other: the new one follows an old one, the old one precedes a new one. */
+		if (entry != NULL && entry->has_new && pseudo == CSS_PSEUDO_ELEMENT_VT_OLD)
 			siblings = CSS_VT_FIRST;
-		if (entry != NULL && entry->has_old && entry->has_new && pseudo == CSS_PSEUDO_ELEMENT_VT_NEW)
+		if (entry != NULL && entry->has_old && pseudo == CSS_PSEUDO_ELEMENT_VT_NEW)
 			siblings = CSS_VT_LAST;
 	}
 	for (level = 0; error == 0 && level < count; level++) {

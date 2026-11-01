@@ -4,11 +4,17 @@
 #  1. the files written for the Windows build (the operating-system layers) compile with warning 0;
 #  2. the warnings of libtruetype and the compat libraries (compiled without -Werror) are counted;
 #  3. what those libraries leave undefined (nm -u less what they define) is in allowed-imports.txt, and
-#     so is what libbrowser-core (libbrowser without its network and storage) with its Windows layer does;
+#     so is what libbrowser-core (libbrowser without its cookies and storage) with its Windows layer does;
 #  4. the Vulkan loader's delayed import: plan/ws334/tests/delay-load.c, linked as the build links a
 #     program that calls Vulkan, has vulkan-1.dll in its delay-import table and not in its import table;
 #     on x86_64 under Wine it prints the loader's version with vulkan-1.dll, and with the DLL disabled
-#     (WINEDLLOVERRIDES=vulkan-1=d) it starts, finds no loader and calls no vk* (arm64: linked only).
+#     (WINEDLLOVERRIDES=vulkan-1=d) it starts, finds no loader and calls no vk* (arm64: linked only);
+#  5. libkeiland's Windows files (libkeiland.a) refer to no POSIX thread name (pthread_*): the Windows
+#     port uses the system's threads and locks;
+#  6. one .exe of static libraries: plan/ws334/tests/script-tool-main.c linked by the build's
+#     test-program with every static library imports only Windows' own DLLs and the UCRT's (no DLL of
+#     this tree, no libwinpthread-1.dll; vulkan-1.dll only as a delayed import); on x86_64 under Wine
+#     it prints 16 random bytes and runs a script that reads the clock (arm64: linked only).
 #   sh plan/ws334/tests/cross-build.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
 # WINEPREFIX=<dir> the Wine prefix (default build/tmp/ws334-wine).  The fetched tarballs are kept in
@@ -91,12 +97,12 @@ for name in win64 winarm64; do
 		echo "$name: $(wc -l < "$out/imports-$name.txt") imports, all in the table"
 	fi
 
-	# 3b. libbrowser without its network and storage (libbrowser-core) with its Windows layer: what it
+	# 3b. libbrowser without its cookies and storage (libbrowser-core) with its Windows layer: what it
 	# leaves undefined, less what it, the static libraries and the Vulkan loader's import library define,
-	# against the table.  The names of the modules the Windows build adds later (the network's net_*, the
-	# storage's page_storage_*, libmedia's media_*) are left out of the comparison.
+	# against the table.  The names of the modules the Windows build adds later (the cookies'
+	# net_cookie_*, the storage's page_storage_*, libmedia's media_*) are left out of the comparison.
 	core="$LIBBROWSER_CORE_OBJECTS"
-	for layer in os-win32 os-system-win32 os-file-win32 os-time-win32 os-zones; do
+	for layer in os-win32 os-system-win32 os-file-win32 os-net-win32 os-time-win32 os-zones; do
 		core="$core $build/obj/userland/desktop/libbrowser/base/$layer.o"
 	done
 	"${WIN32_TOOL_PREFIX}nm" -u $core 2> /dev/null |
@@ -105,7 +111,7 @@ for name in win64 winarm64; do
 	"${WIN32_TOOL_PREFIX}nm" --defined-only $core $archives "$build/obj/libvulkan-1.a" 2> /dev/null |
 	    awk 'NF == 3 { print $3 }' | sed 's/^__imp_//' | sort -u > "$out/core-defined-$name.txt"
 	comm -23 "$out/core-undefined-$name.txt" "$out/core-defined-$name.txt" |
-	    grep -v '^net_' | grep -v '^page_storage_' | grep -v '^media_' > "$out/core-imports-$name.txt"
+	    grep -v '^net_cookie_' | grep -v '^page_storage_' | grep -v '^media_' > "$out/core-imports-$name.txt"
 	if [ ! -s "$out/core-imports-$name.txt" ]; then
 		echo "FAILED $name: nm found no undefined symbol in libbrowser-core (no objects?)"
 		status=1
@@ -135,6 +141,47 @@ for name in win64 winarm64; do
 	else
 		echo "$name: vulkan-1.dll is a delayed import"
 	fi
+
+	# 5. No POSIX thread name in libkeiland's Windows files.
+	"${WIN32_TOOL_PREFIX}nm" -u "$build/obj/libkeiland.a" 2> /dev/null |
+	    awk 'NF == 2 { print $2 } NF == 1 && $1 !~ /:$/ { print $1 }' | sed 's/^__imp_//' |
+	    sort -u > "$out/keiland-undefined-$name.txt"
+	if [ ! -s "$out/keiland-undefined-$name.txt" ]; then
+		echo "FAILED $name: nm found no undefined symbol in libkeiland.a (no archive?)"
+		status=1
+	elif grep -n '^_*pthread_' "$out/keiland-undefined-$name.txt"; then
+		echo "FAILED $name: libkeiland.a refers to the POSIX thread names above"
+		status=1
+	else
+		echo "$name: libkeiland.a refers to no pthread_ name"
+	fi
+
+	# 6. One .exe of the static libraries, and what it imports.
+	program=$build/tests/script-tool.exe
+	if ! timeout 900 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=$arch \
+	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" \
+	    test-program TEST_PROGRAM=script-tool TEST_PROGRAM_SOURCES=plan/ws334/tests/script-tool-main.c \
+	    > "$out/program-$name.log" 2>&1 || grep -q 'warning:' "$out/program-$name.log"; then
+		echo "FAILED $name: the test program did not link cleanly (log $out/program-$name.log)"
+		tail -10 "$out/program-$name.log"
+		status=1
+		continue
+	fi
+	"$LLVM_MINGW/bin/llvm-readobj" --coff-imports "$program" > "$out/program-$name.imports"
+	sed -n '/^Import {/,/^}/s/^ *Name: //p' "$out/program-$name.imports" | sort -u > "$out/program-dlls-$name.txt"
+	sed -n '/^DelayImport {/,/^}/s/^ *Name: //p' "$out/program-$name.imports" | sort -u > "$out/program-delayed-$name.txt"
+	foreign=$(grep -v -i -x -E 'api-ms-win-crt-[a-z0-9-]+\.dll|(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|crypt32|bcrypt|ws2_32|iphlpapi|imm32|dwmapi|shcore|uiautomationcore|uxtheme)\.dll' \
+	    "$out/program-dlls-$name.txt")
+	delayed=$(grep -v -i -x 'vulkan-1\.dll' "$out/program-delayed-$name.txt")
+	if [ ! -s "$out/program-dlls-$name.txt" ]; then
+		echo "FAILED $name: llvm-readobj found no import in $program"
+		status=1
+	elif [ -n "$foreign" ] || [ -n "$delayed" ]; then
+		echo "FAILED $name: $program imports DLLs that are not Windows' own: $foreign $delayed"
+		status=1
+	else
+		echo "$name: one .exe, imports only the system's DLLs ($(wc -l < "$out/program-dlls-$name.txt"))"
+	fi
 	[ "$arch" = x86_64 ] || continue
 	if ! command -v wine > /dev/null 2>&1; then
 		echo "FAILED wine is not installed (the delayed import is not run)"
@@ -159,6 +206,28 @@ for name in win64 winarm64; do
 		status=1
 	else
 		echo "$name under Wine without vulkan-1.dll: $without"
+	fi
+
+	# 6 under Wine: the random bytes, and a script that reads the clock.
+	WINEDEBUG=-all timeout 120 wine "$program" random > "$out/program-random.out" 2> "$out/program-random.log"
+	code=$?
+	random=$(tr -d '\r' < "$out/program-random.out")
+	if [ "$code" != 0 ] || ! echo "$random" | grep -q -x '[0-9a-f]\{32\}'; then
+		echo "FAILED $name: the test program under Wine: exit $code, '$random'"
+		status=1
+	else
+		echo "$name: the test program under Wine: 16 random bytes"
+	fi
+	printf 'print(typeof Date.now(), String(Date.now()).length);\n' > "$out/program-clock.js"
+	WINEDEBUG=-all timeout 120 wine "$program" "$out/program-clock.js" > "$out/program-clock.out" \
+	    2> "$out/program-clock.log"
+	code=$?
+	clock=$(tr -d '\r' < "$out/program-clock.out")
+	if [ "$code" != 0 ] || [ "$clock" != 'number 13' ]; then
+		echo "FAILED $name: the test program's script under Wine: exit $code, '$clock'"
+		status=1
+	else
+		echo "$name: the test program's script under Wine: $clock"
 	fi
 done
 

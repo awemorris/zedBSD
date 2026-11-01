@@ -15,6 +15,13 @@
 
 - 2026-10-31: ユーザーから、不在の間（昼頃まで）は設計だけ進められる WS の設計を進め、libmedia の WS の優先度を上げる、という趣旨の指示を受けた（Q1 経由）。これにより p001（設計）を WS326 の completed の前に、WS326 の凍結済みの header を入力にして行った。実装の Phase は WS326 の completed の後のまま。
 
+## ユーザーの決定（2026-11-01、Q329 の答え。要点）
+
+- 2026-11-01 09:30 ユーザーから次の趣旨の答えを受けた（原文は載せない）。Q329-1・Q329-2 の推し（画質の BD-rate の目標、SIMD を範囲の外）を置き換える。
+  - 画質より速さを優先する。
+  - SIMD は 2 段で入れる: (1) gcc・clang の自動の loop の vector 化が効くように、vectorizer の report（`-fopt-info-vec`・`-Rpass=loop-vectorize` など）を見ながら C の書き方を整える Phase を作る。(2) それで表せない SIMD は、short vector 型の intrinsics（`__attribute__((vector_size))` の類の C の拡張か、architecture ごとの intrinsics）で C で実装する。
+- Q1 の判断（上に沿う）: Q329-3 A（B-frame は入れる、既定 0）、Q329-4 A（WS318 と並べる）、Q329-5 A（encoder の設定に speed の欄）。速さの目標の数と、vector 化の Phase の位置は設計の改訂で決める（p001 の改訂）。
+
 ## 進め方（上の原文の解釈、Q1）
 
 - p001（設計、Opus 5.5）:

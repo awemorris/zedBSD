@@ -15,11 +15,22 @@
 
 #include "userland/desktop/libkeiland-backend-zedbsd/gpu-zedbsd.h"
 
+#include <sys/stat.h>
+#include <sys/sysctl.h>
+
 #include <errno.h>
+#include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/* The first GPU node, which a usable GPU always has. */
+#define GPU_FIRST_NODE		"/dev/gpu0"
+
+/* The count of GPU devices the kernel holds until root starts them (a 64-bit word). */
+#define GPU_START_SYSCTL	"hw.gpu.start"
 
 static uint32_t word_at(const unsigned char *bytes, size_t offset);
 static int factory_fence(const struct kl_backend_protocol_host *host, struct kl_backend_resource *factory, const unsigned char *bytes, size_t size);
@@ -223,6 +234,63 @@ kl_backend_gpu_frame_fence_type(
 {
 	/* Succeeded: an OPAQUE_FD fence can be polled without resetting it. */
 	return VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT;
+}
+
+/*
+ * Explains why the compositor has no usable GPU: the kernel holds the GPU
+ * until root starts it (no node yet), or the node belongs to the graphical
+ * login's user and this user is neither that user nor root.
+ */
+int
+kl_backend_gpu_unavailable_reason(
+	char *text,
+	size_t size)
+{
+	struct stat node;
+	uint64_t held;
+	size_t held_size;
+	int descriptor;
+	int saved_errno;
+	int error;
+
+	/* Refuses a buffer that cannot hold a sentence. */
+	if (text == NULL || size == 0U)
+		return EINVAL;
+
+	/* Looks for the first node; a system without it may hold its GPU. */
+	error = stat(GPU_FIRST_NODE, &node);
+	if (error != 0) {
+		/* Asks the kernel how many GPU devices wait for root's start. */
+		held = 0U;
+		held_size = sizeof(held);
+		error = sysctlbyname(GPU_START_SYSCTL, &held, &held_size, NULL, 0);
+		if (error != 0 || held_size != sizeof(held) || held == 0U)
+			return ENOENT;
+
+		/* Says how to start it. */
+		(void)snprintf(text, size, "the GPU is held until root starts it: run 'sysctl hw.gpu.start=1' as root, then start the desktop again");
+
+		/* Succeeded: the reason is the held GPU. */
+		return 0;
+	}
+
+	/* Opens the node as the compositor's Vulkan would; one that opens leaves no reason to tell. */
+	descriptor = open(GPU_FIRST_NODE, O_RDWR | O_CLOEXEC);
+	if (descriptor >= 0) {
+		(void)close(descriptor);
+		return ENOENT;
+	}
+	saved_errno = errno;
+
+	/* Only a refused open has a reason of the system's. */
+	if (saved_errno != EACCES)
+		return ENOENT;
+
+	/* Says whose the node is and who may open it. */
+	(void)snprintf(text, size, "%s belongs to the graphical login's user; outside the graphical login only root may open it", GPU_FIRST_NODE);
+
+	/* Succeeded: the reason is the node's owner. */
+	return 0;
 }
 
 /*

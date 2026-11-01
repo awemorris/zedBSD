@@ -16,6 +16,16 @@
 5. 「Pi 4は、たしかVulkan VideoとしてH.264 デコーダをがんばって実装したように記憶していますが…VPUが独立だとしても、我々はVulkan Video driverとして見せる必要があります。それがOSのAPIなので。」
 6. 「ありがとうございます。では、ここまでで合意したlibmediaの設計を実装して、H.264とH.265のデコーダとエンコーダの表の中で未の部分を埋めるようにVulkan Video driverを実装して、Appsをlibmedia使用に書き換える、というのを、WSとして立ててください。ドライバは個別のWSに分けて依存関係にしてもかまいません。先にlibmediaの方を作りきってcompleteにしてから、個別のドライバを実装する流れにします。また、libmediaのエンコーダには、codecの対応を調べたり、codecを指定したりする機能を入れます。AACのデコードはlibmediaにすでに入っていると思いますが、追加で、AACのエンコードも実装します。既存のライブラリは使用せず、独自に実装します。プロファイルはデコーダと同様でOKです。」（2026-10-30）
 
+## ユーザーの決定（2026-11-01、Q318 の答え。要点）
+
+- 2026-11-01 09:24 ユーザーから次の趣旨の答えを受けた（原文は載せない）。上の決定 4 の libavcodec の部分を置き換える。
+  - Q318-1: hardware（Vulkan Video）が対応していない codec・機能は、素直に独自の software に fallback する。hardware の encoder・decoder の試験は、その hardware の driver ができた時に行えばよい（WS318 で実機を待たない）。Q1 が判断できる事を問いにしたことへの指摘も受けた。
+  - Q318-2: 前提が違う。libmedia は独自の software の encoder・decoder を実装したら libavcodec を使わない。libavcodec への依存を切る。
+  - Q318-3: A（Vulkan の header を 2 段で更新: 1.3.269 のまま H.265 の decode を選び直し、次に正式の encode のある 1.3.274 以降の固定の版で作り直す。toolchain の扱いなので Q1 が許可して行う）。
+  - Q318-4: C（MJPEG の camera は扱わない。YUYV・NV12 などの mode だけ）。
+- 残りの問いの Q1 の判断（上の方針に沿う。違えばユーザーが改める）: Q318-5 A（AAC-LC の encoder に短い窓と TNS）、Q318-6 A（camera の実機の Phase だけ WS282 を待つ）、Q318-7 A（録画の file の書き出しは範囲の外）、Q318-8 A（H.265 は Main だけ）、Q318-9 A（hardware の encode は IDR と P、B-frame 無し）、Q318-10 A（i915 の driver の変更は WS319）、Q318-12 A（独自の software の decoder は GPU の memory に直に書き追加の複写 0、直に書けない機械の camera の 1 回の複写は認める）。Q318-11・Q318-13・Q318-14 は不要になった（libavcodec を使わない、WS326 は完了）。
+- これで設計（design.md）の libavcodec の backend・MJPEG の段・vkfake で完了にする受け入れを直す必要がある（p001 の改訂、設計の担当に頼む）。
+
 ## 設計の合意（Q1 のまとめ、2026-10-30。上の原文が正）
 
 - 入り口は libmedia だけ。今の `userland/desktop/media-app/`（app の中の libavcodec の fallback）は libmedia の中へ移し、Video Player・Music・Browser の `<video>` などは libmedia だけを呼ぶ。
@@ -72,6 +82,7 @@
 ## Resume point
 
 - 2026-10-30 Q1: 作成。担当は未割当。
+- 2026-11-01 09:24 Q1: ユーザーの Q318 の答えで設計の改訂が要る（上の「ユーザーの決定（2026-11-01）」）。次は p001 の改訂（libavcodec の backend を外し独自の software へ fallback、MJPEG を外す、hardware の試験は driver の WS へ）。
 - 2026-10-31 P5（q1752-i01）: p001 の設計を書き（design.md・proposed/・user-questions.md）、design-reviewer の 37 件（blocker 3）を反映した（design-review.md）。次: Q1 が受け入れ、ユーザーが Q318-1〜14 に答えた後に p002 から。WS326 に触れない Phase を先に始めるかは Q318-14。
 
 ## 日程（2026-10-30 ユーザー、原文）

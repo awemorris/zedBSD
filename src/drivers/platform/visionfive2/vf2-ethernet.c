@@ -6,13 +6,14 @@
  */
 
 /*
- * The JH7110's glue for the VisionFive 2's first Ethernet port.
+ * The JH7110's glue for the VisionFive 2's two Ethernet ports.
  *
- * The port is GMAC0, a DesignWare Ethernet QoS controller wired to an
- * RGMII PHY.  Its node in the device tree names the controller's clocks
- * (register and bus interfaces, time stamps, the transmit clock and its
- * source), its two resets, the field of the AON system control block that
- * selects the PHY interface, and the PHY on its MDIO bus with the delays
+ * Each port is a DesignWare Ethernet QoS controller (GMAC0 for the first,
+ * GMAC1 for the second) wired to an RGMII PHY on its own MDIO bus.  Its
+ * node in the device tree names the controller's clocks (register and bus
+ * interfaces, time stamps, the transmit clock and its source), its two
+ * resets, the field of a system control block (AON for the first, SYS for
+ * the second) that selects the PHY interface, and the PHY with the delays
  * and drive strengths the board needs.  The glue switches the clocks on,
  * selects RGMII while the controller is held in reset, releases it, and
  * describes everything to the DesignWare driver.
@@ -40,12 +41,11 @@
 #include <stdbool.h>
 
 /*
- * Where the first Ethernet controller is.
+ * The bytes of one Ethernet controller's register block.
  *
  * Value referenced: Linux v6.12 arch/riscv/boot/dts/starfive/jh7110.dtsi
- * (gmac0, reg).
+ * (gmac0 and gmac1, reg).
  */
-#define VF2_ETHERNET_REGISTERS		0x16030000ULL
 #define VF2_ETHERNET_REGISTER_BYTES	0x10000U
 
 /*
@@ -59,17 +59,6 @@
 #define VF2_ETHERNET_INTERFACE_MASK	7U
 
 /*
- * The SYS clock generator's transmit clock source of the first
- * controller, whose rate follows the link on a board without
- * starfive,tx-use-rgmii-clk.
- *
- * Value referenced: Linux v6.12
- * include/dt-bindings/clock/starfive,jh7110-crg.h
- * (JH7110_SYSCLK_GMAC0_GTXCLK).
- */
-#define VF2_ETHERNET_TX_SOURCE		108U
-
-/*
  * The PHY's RGMII delay when the board names none, in picoseconds.
  *
  * Value referenced: Linux v6.12 drivers/net/phy/motorcomm.c
@@ -80,8 +69,30 @@
 /* How long the controller stays in reset and settles after it, in microseconds. */
 #define VF2_ETHERNET_RESET_PAUSE_US	5000U
 
-/* The interface the port is published as. */
-#define VF2_ETHERNET_NAME		"en0"
+/*
+ * One port of the board: where its controller's registers are, the
+ * interface it is published as, and the SYS clock generator's transmit
+ * clock source whose rate follows the link on a board without
+ * starfive,tx-use-rgmii-clk.
+ */
+struct vf2_ethernet_port {
+	uint64_t registers;
+	const char *name;
+	uint32_t tx_source;
+};
+
+/*
+ * The board's ports, in drv_vf2_ethernet_attach() order.
+ *
+ * Values referenced: Linux v6.12 arch/riscv/boot/dts/starfive/jh7110.dtsi
+ * (gmac0 and gmac1, reg); Linux v6.12
+ * include/dt-bindings/clock/starfive,jh7110-crg.h
+ * (JH7110_SYSCLK_GMAC0_GTXCLK 108, JH7110_SYSCLK_GMAC1_GTXCLK 100).
+ */
+static const struct vf2_ethernet_port vf2_ethernet_ports[DRV_VF2_ETHERNET_PORTS] = {
+	{ 0x16030000ULL, "en0", 108U },
+	{ 0x16040000ULL, "en1", 100U }
+};
 
 /* One RGMII variant of phy-mode and the directions in which the PHY adds the delay. */
 struct vf2_ethernet_mode {
@@ -105,14 +116,15 @@ static const struct vf2_ethernet_mode vf2_ethernet_modes[] = {
 };
 
 /*
- * The transmit clock source, the context of set_tx_rate().
+ * Each port's transmit clock source, the context of set_tx_rate().
  *
- * Filled by drv_vf2_ethernet_attach() before the controller is handed over
- * and kept for the life of the system.
+ * Filled by drv_vf2_ethernet_attach() before the port's controller is
+ * handed over and kept for the life of the system; the board attaches the
+ * ports one after the other on the boot CPU, so nothing else writes them.
  */
-static struct drv_vf2_clock vf2_ethernet_tx_source;
+static struct drv_vf2_clock vf2_ethernet_tx_sources[DRV_VF2_ETHERNET_PORTS];
 
-static int find_port(const struct drv_fdt *fdt, uint32_t *node, uint64_t *address, uint64_t *size);
+static int find_port(const struct drv_fdt *fdt, uint64_t registers, uint32_t *node, uint64_t *address, uint64_t *size);
 static int switch_port_on(const struct drv_fdt *fdt, uint32_t node, uint64_t *csr_rate);
 static int select_interface(const struct drv_fdt *fdt, uint32_t node);
 static int describe_phy(const struct drv_fdt *fdt, uint32_t node, struct drv_dw_eqos_config *config);
@@ -126,14 +138,16 @@ static int has_property(const struct drv_fdt *fdt, uint32_t node, const char *na
 static void pause_microseconds(uint64_t microseconds);
 
 /*
- * Brings up the first Ethernet port and publishes it as en0.
+ * Brings up one Ethernet port and publishes it as its interface.
  */
 int
 drv_vf2_ethernet_attach(
 	const struct drv_fdt *fdt,
+	unsigned port,
 	int dma_default_coherent)
 {
 	struct drv_dw_eqos_config config;
+	const struct vf2_ethernet_port *description;
 	uint64_t address;
 	uint64_t size;
 	uint64_t csr_rate;
@@ -142,8 +156,13 @@ drv_vf2_ethernet_attach(
 	int rgmii_clock;
 	int error;
 
+	/* Refuses a port the board does not have. */
+	if (port >= DRV_VF2_ETHERNET_PORTS)
+		return EINVAL;
+	description = &vf2_ethernet_ports[port];
+
 	/* Finds the port's controller. */
-	error = find_port(fdt, &node, &address, &size);
+	error = find_port(fdt, description->registers, &node, &address, &size);
 	if (error != 0)
 		return error;
 
@@ -171,7 +190,7 @@ drv_vf2_ethernet_attach(
 		return error;
 
 	/* Describes the controller to the DesignWare driver. */
-	config.name = VF2_ETHERNET_NAME;
+	config.name = description->name;
 	config.registers = mapped;
 	config.csr_clock_hz = csr_rate;
 	config.dma_coherent = drv_fdt_dma_coherent(fdt, node, dma_default_coherent);
@@ -183,10 +202,10 @@ drv_vf2_ethernet_attach(
 	config.context = NULL;
 	rgmii_clock = has_property(fdt, node, "starfive,tx-use-rgmii-clk");
 	if (!rgmii_clock) {
-		vf2_ethernet_tx_source.crg = DRV_VF2_CRG_SYS;
-		vf2_ethernet_tx_source.index = VF2_ETHERNET_TX_SOURCE;
+		vf2_ethernet_tx_sources[port].crg = DRV_VF2_CRG_SYS;
+		vf2_ethernet_tx_sources[port].index = description->tx_source;
 		config.set_speed = set_tx_rate;
-		config.context = &vf2_ethernet_tx_source;
+		config.context = &vf2_ethernet_tx_sources[port];
 	}
 
 	/* Resets the controller, brings the PHY up and publishes the interface. */
@@ -194,14 +213,15 @@ drv_vf2_ethernet_attach(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the port is en0. */
+	/* Succeeded: the port is its interface. */
 	return 0;
 }
 
-/* Finds the enabled controller of the JH7110 whose registers are the first port's. */
+/* Finds the enabled controller of the JH7110 whose registers are at the given address. */
 static int
 find_port(
 	const struct drv_fdt *fdt,
+	uint64_t registers,
 	uint32_t *node,
 	uint64_t *address,
 	uint64_t *size)
@@ -228,8 +248,8 @@ find_port(
 		if (error != 0)
 			continue;
 
-		/* Stops at the first port's controller; the second is not driven. */
-		if (*address == VF2_ETHERNET_REGISTERS)
+		/* Stops at the port's controller. */
+		if (*address == registers)
 			break;
 	}
 
@@ -365,7 +385,8 @@ switch_port_on(
  * The property's two arguments are the field's offset and shift.
  *
  * Values referenced: Linux v6.12 arch/riscv/boot/dts/starfive/jh7110.dtsi
- * (gmac0, starfive,syscon = <&aon_syscon 0xc 0x12>).
+ * (gmac0, starfive,syscon = <&aon_syscon 0xc 0x12>; gmac1,
+ * starfive,syscon = <&sys_syscon 0x90 0x2>).
  * Procedure referenced: OpenBSD sys/dev/fdt/if_dwqe_fdt.c, master
  * 859883f17cb8e20088fece5398547e4264ad30b3 (dwqe_setup_jh7110).
  */
@@ -381,7 +402,7 @@ select_interface(
 	int tx_delay;
 	int error;
 
-	/* Refuses an interface other than RGMII; the board's first port has no other. */
+	/* Refuses an interface other than RGMII, which the glue does not drive. */
 	error = read_mode(fdt, node, &rx_delay, &tx_delay);
 	if (error != 0)
 		return error;
@@ -679,7 +700,7 @@ read_mode(
 			break;
 	}
 
-	/* Refuses any other interface, such as the second port's RMII. */
+	/* Refuses any other interface, such as the RMII of the second port of an early board. */
 	if (index == sizeof(vf2_ethernet_modes) / sizeof(vf2_ethernet_modes[0])) {
 		kern_logf("vf2-ethernet: phy-mode %s unsupported\n", mode);
 		return ENOTSUP;

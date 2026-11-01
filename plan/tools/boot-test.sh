@@ -494,4 +494,5 @@ python3 "$root/plan/tools/boot-test.py" "${watch[@]}" || status=$?
 if [[ $status -eq 0 ]]; then
 	echo "boot-test: PASS $screenshot"
 fi
+sync
 exit $status

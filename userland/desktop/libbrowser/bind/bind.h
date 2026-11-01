@@ -90,6 +90,14 @@ struct css_style;
  * of its own), and that box's border widths, together with that
  * box's used margins and paddings (getComputedStyle's resolved values).
  */
+/* One rectangle of an inline element's lines, in CSS pixels from the document's top left. */
+struct bind_rect {
+	double x;
+	double y;
+	double width;
+	double height;
+};
+
 struct bind_box {
 	double x;
 	double y;
@@ -239,6 +247,11 @@ struct bind_host {
 	/* May copy no_generated_box proof even when the ordinary bounds query returns zero. */
 	int (*node_box)(void *context, struct dom_node *node, struct bind_box *box);
 	/*
+	 * Lists the rectangles of an inline node's lines (one for each line it takes part in): returns 1 and the count
+	 * (at most max) when the node is laid out as inline content, 0 when its one box is its rectangle.
+	 */
+	int (*node_rects)(void *context, struct dom_node *node, struct bind_rect *rects, size_t max, size_t *count);
+	/*
 	 * Appends used CSS-pixel Grid tracks to a caller-owned double vector and
 	 * reports how many implicit ones come before the explicit grid and how
 	 * many times an automatic repeat was put in it; found=0 requests
@@ -278,6 +291,7 @@ struct bind_host {
 	/* What a script's animation of a view transition pseudo-element (CSS_PSEUDO_ELEMENT_VT_*) of a name gives now, as declarations (empty: nothing). */
 	/* Sets how long the shown transition's animations have run. */
 	void (*view_transition_time)(void *context, double milliseconds);
+	void (*view_transition_time_of)(void *context, double milliseconds, int pseudo, const struct vm_string *name);
 	/* Loads, links and evaluates a module (a JSON module when json) at a URL for import(); gives its namespace, or throws. */
 	int (*import_module)(void *context, const char *url, int json, vm_value *namespace_object);
 	/* Appends the shown transition's names, "name flags" per line (1: old snapshot, 2: new snapshot). */

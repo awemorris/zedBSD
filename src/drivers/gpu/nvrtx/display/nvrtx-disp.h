@@ -223,6 +223,7 @@
 #define NVRTX_HEAD_OFFSET_CURSOR		0x090U
 #define NVRTX_HEAD_CONTROL_CURSOR		0x09cU
 #define NVRTX_HEAD_CONTROL_CURSOR_COMPOSITION	0x0a0U
+#define NVRTX_HEAD_CURSOR_COLOR_NORM_SCALE	0x228U
 #define NVRTX_HEAD_CONTEXT_DMA_OLUT		0x288U
 
 /* How many head methods the takeover reads from the armed state, and where each is in the copy. */

@@ -6,22 +6,23 @@
  */
 
 /*
- * A host test of libbrowser's loader with its own network thread: a small
- * HTTP server on a thread of the test answers "/fast" at once and "/slow"
- * after a while.  It checks that the callbacks run from net_loader_dispatch
- * on the test's thread, that notify is called once until the dispatch,
- * that a cancel (before the end, after the end but before the dispatch,
- * and from another request's callback) keeps the callback from running,
- * that a refused connection ends with its error, that a watched pipe
- * rings notify and is read empty, that unwatch returns once the pipe may
- * be closed, and that the loader can be destroyed with requests in flight.
+ * A host test of libbrowser's loader with its own network thread, over the
+ * operating-system layer: a small HTTP server on a thread of the test
+ * answers "/fast" at once and "/slow" after a while.  It checks that the
+ * callbacks run from net_loader_dispatch on the test's thread, that notify
+ * is called once until the dispatch, that a cancel (before the end, after
+ * the end but before the dispatch, and from another request's callback)
+ * keeps the callback from running, that a refused connection ends with its
+ * error, that net_loader_ring from another thread rings notify once until
+ * the dispatch (also when it rings many times from several threads while
+ * requests run), that net_loader_wait ends at its time without news, and
+ * that the loader can be destroyed with requests in flight.
  */
 
 #include "net/net.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -37,6 +38,10 @@
 
 /* How many requests a round of the many case starts. */
 #define MANY		24
+
+/* How many threads ring at once, and how many times each. */
+#define RINGERS		4
+#define RINGS		200
 
 /* What a test request records. */
 struct outcome {
@@ -67,6 +72,9 @@ static void done(void *context, struct net_request *request);
 static void pause_ms(long milliseconds);
 static int settle(struct net_loader *loader, int seconds);
 static void url(char *out, size_t size, const char *path);
+static void *ring_once(void *argument);
+static void *ring_many(void *argument);
+static long now_ms(void);
 
 int
 main(void)
@@ -81,9 +89,10 @@ main(void)
 	struct outcome later;
 	struct outcome refused;
 	char text[128];
-	int descriptors[2];
-	unsigned char byte;
-	ssize_t got;
+	pthread_t ringer;
+	pthread_t ringers[RINGERS];
+	long started;
+	long waited;
 	int before;
 	int index;
 	int error;
@@ -176,26 +185,47 @@ main(void)
 	check(settle(loader, 10) == 0, "refused: settled");
 	check(refused.ended == 1 && refused.error == ECONNREFUSED, "refused: ECONNREFUSED");
 
-	/* A watched pipe rings notify and is read empty; unwatch lets it close. */
-	pipe2(descriptors, O_CLOEXEC | O_NONBLOCK);
-	error = net_loader_watch(loader, descriptors[0]);
-	check(error == 0, "watch");
+	/* A ring from another thread: notify once, and a waiting caller wakes. */
 	net_loader_dispatch(loader);
-	byte = 1;
 	before = atomic_load(&notified);
-	(void)write(descriptors[1], &byte, 1U);
+	pthread_create(&ringer, NULL, ring_once, loader);
 	net_loader_wait(loader, 5000);
-	check(atomic_load(&notified) - before == 1, "watch: notify");
-	pause_ms(50);
-	got = read(descriptors[0], &byte, 1U);
-	check(got < 0 && errno == EAGAIN, "watch: read empty");
-	net_loader_dispatch(loader);
-	net_loader_unwatch(loader, descriptors[0]);
-	close(descriptors[0]);
-	close(descriptors[1]);
-	before = atomic_load(&notified);
+	pthread_join(ringer, NULL);
+	check(atomic_load(&notified) - before == 1, "ring: notify");
+	net_loader_ring(loader);
+	net_loader_ring(loader);
 	pause_ms(100);
-	check(atomic_load(&notified) == before, "unwatch: no more notify");
+	check(atomic_load(&notified) - before == 1, "ring: no second notify before the dispatch");
+	net_loader_dispatch(loader);
+	pause_ms(100);
+	check(atomic_load(&notified) - before == 1, "ring: nothing more after the dispatch");
+
+	/* Many rings from several threads while requests run: every request ends, notify comes. */
+	memset(outcomes, 0, sizeof(outcomes));
+	for (index = 0; index < MANY; index++) {
+		url(text, sizeof(text), (index % 4) == 0 ? "/slow" : "/fast");
+		net_loader_fetch(loader, text, done, &outcomes[index], &outcomes[index].request);
+	}
+	before = atomic_load(&notified);
+	for (index = 0; index < RINGERS; index++)
+		pthread_create(&ringers[index], NULL, ring_many, loader);
+	for (index = 0; index < RINGERS; index++)
+		pthread_join(ringers[index], NULL);
+	check(settle(loader, 10) == 0, "rings: settled");
+	for (index = 0; index < MANY; index++)
+		check(outcomes[index].ended == 1 && outcomes[index].status == 200, "rings: each request once with 200");
+	check(atomic_load(&notified) - before >= 1, "rings: notify");
+	net_loader_dispatch(loader);
+
+	/* A wait without news ends at its time, measured on the monotonic clock; 0 does not wait. */
+	started = now_ms();
+	net_loader_wait(loader, 300);
+	waited = now_ms() - started;
+	check(waited >= 290 && waited < 3000, "wait: ends at its time");
+	started = now_ms();
+	net_loader_wait(loader, 0);
+	waited = now_ms() - started;
+	check(waited < 100, "wait: 0 does not wait");
 
 	/* Destroyed with requests in flight: no callback. */
 	memset(outcomes, 0, sizeof(outcomes));
@@ -210,10 +240,10 @@ main(void)
 
 	/* The verdict. */
 	if (failures != 0) {
-		printf("loader-test: %d failed\n", failures);
+		printf("net-ring-test: %d failed\n", failures);
 		return 1;
 	}
-	printf("loader-test: ok\n");
+	printf("net-ring-test: PASS\n");
 	return 0;
 }
 
@@ -341,4 +371,36 @@ url(
 	const char *path)
 {
 	snprintf(out, size, "http://127.0.0.1:%d%s", server_port, path);
+}
+
+/* Rings the loader once, from a thread of its own. */
+static void *
+ring_once(
+	void *argument)
+{
+	pause_ms(50);
+	net_loader_ring(argument);
+	return NULL;
+}
+
+/* Rings the loader many times, from a thread of its own. */
+static void *
+ring_many(
+	void *argument)
+{
+	int index;
+
+	for (index = 0; index < RINGS; index++)
+		net_loader_ring(argument);
+	return NULL;
+}
+
+/* The monotonic clock in milliseconds. */
+static long
+now_ms(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (long)now.tv_sec * 1000L + now.tv_nsec / 1000000L;
 }

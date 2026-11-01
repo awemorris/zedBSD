@@ -4,6 +4,7 @@
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §2.8・§5（M2〜M9）。
 - 状態: planned（2026-11-01 p002 で作成）。
+- **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: `libmedia.dll` と `.def` を作らず static library `libmedia.a`（p036 の形）。winpthreads は .exe の link で静的に入る。cross-build.sh は libmedia の object の `nm -u` の照合（依存の DLL は .exe の側で見る）。下の本文の `libmedia.dll` はこの通りに読み替える。
 - 依存: p013（media-os）・p022（起こしの callback）。
 - 担当の想定: Opus（phase-runner）を 1 回。使う約束は `libmedia/media-os.h`。zedBSD・Linux の挙動を変えない（M7 は arm64 の zedBSD の Raspberry Pi 4 で同じ結果になる形）。
 

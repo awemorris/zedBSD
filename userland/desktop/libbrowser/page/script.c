@@ -406,6 +406,7 @@ page_start_scripts(
 	host.cookie_set = script_cookie_set;
 	host.selector_engine = page_selector_engine;
 	host.node_box = page_node_box;
+	host.node_rects = page_node_rects;
 	host.grid_tracks = page_grid_tracks;
 	host.document_size = page_document_size;
 	host.scroll = page_scroll;
@@ -429,6 +430,7 @@ page_start_scripts(
 	host.view_transition_duration = page_view_transition_duration;
 	host.view_transition_style = page_view_transition_style;
 	host.view_transition_time = page_view_transition_time;
+	host.view_transition_time_of = page_view_transition_time_of;
 	host.import_module = page_import_module;
 	host.view_transition_names = page_view_transition_names;
 	error = bind_window_create(page->realm, page->document, &host, &page->window);
