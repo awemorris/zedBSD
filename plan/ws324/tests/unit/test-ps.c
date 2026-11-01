@@ -2442,6 +2442,52 @@ check_pps_extensions(void)
 	pps_syntax.cr_qp_offset_list[5] = 12;
 	CHECK(do_pps(&pps_syntax, (size_t)-1) == ENOTSUP);
 
+	/* chroma_qp_offset_list_len_minus1 6 is not valid even when the stream holds seven pairs: a stream written by hand, since the writer holds six. */
+	{
+		struct bitwriter hand;
+		struct vcodec_bitreader bits;
+		unsigned pair;
+		unsigned length;
+
+		for (length = 5U; length <= 6U; length++) {
+			bitwriter_init(&hand);
+			bitwriter_ue(&hand, 0U);
+			bitwriter_ue(&hand, 0U);
+			bitwriter_u(&hand, 0U, 1U);
+			bitwriter_u(&hand, 0U, 1U);
+			bitwriter_u(&hand, 0U, 3U);
+			bitwriter_u(&hand, 0U, 2U);
+			bitwriter_ue(&hand, 0U);
+			bitwriter_ue(&hand, 0U);
+			bitwriter_se(&hand, 0);
+			bitwriter_u(&hand, 0U, 3U);
+			bitwriter_se(&hand, 0);
+			bitwriter_se(&hand, 0);
+			bitwriter_u(&hand, 0U, 6U);
+			bitwriter_u(&hand, 0U, 4U);
+			bitwriter_ue(&hand, 0U);
+			bitwriter_u(&hand, 0U, 1U);
+			bitwriter_u(&hand, 1U, 1U);
+			bitwriter_u(&hand, 1U, 1U);
+			bitwriter_u(&hand, 0U, 3U);
+			bitwriter_u(&hand, 0U, 4U);
+			bitwriter_u(&hand, 0U, 1U);
+			bitwriter_u(&hand, 1U, 1U);
+			bitwriter_ue(&hand, 0U);
+			bitwriter_ue(&hand, length);
+			for (pair = 0U; pair <= length; pair++) {
+				bitwriter_se(&hand, 0);
+				bitwriter_se(&hand, 0);
+			}
+			bitwriter_ue(&hand, 0U);
+			bitwriter_ue(&hand, 0U);
+			bitwriter_trailing(&hand);
+			vcodec_bitreader_init(&bits, hand.data, bitwriter_bytes(&hand));
+			error = h265sw_ps_read_pps(&store, &bits);
+			CHECK(error == ((length <= 5U) ? ENOTSUP : EINVAL));
+		}
+	}
+
 	/* The SAO offset scales: 0 is taken, 1..6 are outside the range, 7 and larger are not valid. */
 	for (value = 0U; value <= 8U; value++) {
 		for (kind = 0U; kind < 2U; kind++) {

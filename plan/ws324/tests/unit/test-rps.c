@@ -931,6 +931,49 @@ check_arguments(void)
 	error = h265sw_rps_read(&bits, 0U, 0U, NULL, 15U, &out, &result);
 	CHECK(error == 0);
 	CHECK(out.num_negative == 0U && out.num_positive == 0U && result.bits == 2U);
+
+	/* A source set the caller built out of bounds (more entries than a set can hold) is refused, not read past. */
+	{
+		struct h265sw_st_rps bad;
+		unsigned form;
+
+		for (form = 0U; form < 5U; form++) {
+			memset(&bad, 0, sizeof(bad));
+			if (form == 0U) {
+				bad.num_negative = 10U;
+				bad.num_positive = 10U;
+			} else if (form == 1U) {
+				bad.num_negative = 16U;
+			} else if (form == 2U) {
+				bad.num_positive = 16U;
+			} else if (form == 3U) {
+				bad.num_negative = 0xFFFFFFFFU;
+				bad.num_positive = 2U;
+			} else {
+				bad.num_negative = 8U;
+				bad.num_positive = 8U;
+			}
+			predicted_syntax(&syntax, 0U, 0, 0U, 0U, 0x1U, 0U);
+			error = read_set(&syntax, 1U, 2U, &bad, 15U, (size_t)-1, &out, &result);
+			CHECK(error == EINVAL);
+		}
+
+		/* A source of 16 entries whose every entry is dropped would derive an empty set; it is refused for its size all the same. */
+		memset(&bad, 0, sizeof(bad));
+		bad.num_negative = 8U;
+		bad.num_positive = 8U;
+		predicted_syntax(&syntax, 0U, 0, 0U, 16U, 0U, 0U);
+		error = read_set(&syntax, 1U, 2U, &bad, 15U, (size_t)-1, &out, &result);
+		CHECK(error == EINVAL);
+
+		/* The largest source that fits (15 entries) is read. */
+		memset(&bad, 0, sizeof(bad));
+		bad.num_negative = 8U;
+		bad.num_positive = 7U;
+		predicted_syntax(&syntax, 0U, 0, 0U, 15U, 0xFFFFU, 0U);
+		error = read_set(&syntax, 1U, 2U, &bad, 15U, (size_t)-1, &out, &result);
+		CHECK(error != EINVAL || out.num_negative + out.num_positive <= 15U);
+	}
 }
 
 /* Every cut of every form is refused unless it still holds all the syntax bits. */
