@@ -5,7 +5,7 @@
 Status: planned（2026-11-01 P1 が p006a で作成。p006c の cleared の後に起動）
 
 - WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md)（§1・§4 D1・D4・D12・§5・§7・§8）。
-- 基点 BASE: `<p006a 段 2 の SHA>`。前提: p006b・p006c が main にある。
+- 基点 BASE: `1f16db0e6`（2026-11-02 p006a 段 2 の commit 1f16db0e619a9cd23c74f7f36a8729efdba4ecb3）。前提: p006b・p006c が main にある。
 
 ## 1. 読む物
 
@@ -40,6 +40,10 @@ Status: planned（2026-11-01 P1 が p006a で作成。p006c の cleared の後�
 
 ## 4. 注意
 
+- 試験の道具の口は設計の §8.1.1（p006a 段 2 の結果）。試験は `plan/ws324/tests/unit/test-<name>.c` に置き、include は `"check.h"`・`"h265write.h"`・`"userland/desktop/libmedia/<module>.h"`（include の道は tree の root）、`main` の最後は `check_finish("<name>")` の値を返す。大きな構造体（`h265sw_ps_store`・`h265_stream`・`h265_picture`・`h265w_sps` など）は static か calloc に置く。
+- 骨格の関数は本体ごと置き換え、「Not implemented yet」の comment も実装の comment に書き換える。module の中の補助は static 関数（一行の前方宣言を付ける）。外へ見える名前は `h265sw_`・`h265_` で始まる物だけ（check-skeleton の nm の照合）。
+- libmedia の .c は check-skeleton で `-std=c89 -Wpedantic` と zedBSD の clang（x86_64・aarch64・riscv64、tree の libc の header だけ）にも通す: `LL`・`ULL` の接尾辞（`-Wlong-long`）、`//` の comment、文の後の宣言、host にしか無い関数を使わない。64 bit の定数は `(uint64_t)1U << n` か乗算で作る。
+- `run-unit.sh` の `H265_UNIT_DIR` は道具の自己確かめ用。使わない。
 - byte_alignment は `vcodec-bitreader.h` に無い。この module の中で読む（`vcodec*.h` を変えない、design D4）。
 - 負の値の右 shift（7-58 の `( 128 * ChromaWeight ) >> denom`）は floor の除算で。負の値の `&`（8-5）は `x − Floor( x / m ) * m` を int64_t で（`h265sw.h` の約束）。
 - slice header の short-term の set は `h265sw_rps_read( bits, num_st_rps, num_st_rps, sps->st_rps, max, &st_rps, &st_syntax )`。SPS の set を使う時は `st_syntax` を 0 のままに。
@@ -55,7 +59,7 @@ Status: planned（2026-11-01 P1 が p006a で作成。p006c の cleared の後�
 ```
 sh plan/ws324/tests/run-unit.sh slice poc
 sh plan/ws324/tests/run-unit.sh all
-BASE=<p006a 段 2 の SHA> sh plan/ws324/tests/check-skeleton.sh
+BASE=1f16db0e6 sh plan/ws324/tests/check-skeleton.sh
 git diff --check
 ```
 

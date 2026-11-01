@@ -2,7 +2,7 @@
 
 # ws324-p006a H.265 の解析の設計（標準廉価実装手順 §4）と、header を source に置く段 2
 
-Status: in-progress（2026-11-02 P1、q1864-i01。段 1 の設計と design-reviewer の review 2（20 件）の反映が済み、Q1 の受け入れと Q-A〜Q-E の判断を待つ。段 2 は未着手）
+Status: in-progress（2026-11-02 P1、q1864-i02。段 1 は Q1 の受け入れ済み（Q-A〜Q-E は全部 A）。段 2 済み: 基点 BASE `1f16db0e6`、確かめは下の「結果（段 2）」。cleared は Q1 の判定を待つ）
 
 - WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md)。header（正本）: [proposed/h265/](../proposed/h265/)。review: [design-review.md](../design-review.md) の review 2。
 - 背景: Q324-1（2026-11-01 Q1 の判断）で、H.265 の解析は WS318 p016〜p019 の範囲を標準廉価実装手順で先に作り、libmedia の build と runtime には繋がない。WS330 の Q330-2 の A（解析は 1 つ）により、WS330 の proposed の解析の header を土台にする。
@@ -30,6 +30,29 @@ Status: in-progress（2026-11-02 P1、q1864-i01。段 1 の設計と design-revi
 - 未実施: source への配置・骨格・試験の道具（段 2）。Sonnet の起動。適合の stream の取得（cache は Q-D の後）。
 - source は変えていない。HAL・toolchain は関係しない。
 - 消す物（Q1 へ）: 無し（一時物は scratchpad だけ）。
+
+## 結果（段 2、2026-11-02 P1、q1864-i02）
+
+- 基点 BASE: **`1f16db0e6`**（commit 1f16db0e619a9cd23c74f7f36a8729efdba4ecb3、branch agent/p1-ws324、main 8f91a0d32 から）。ws.md・design §8.1.1・p006b〜h の phase.md の「確かめの command」に書いた（この記録は直後の plan の commit）。
+- 作った物（BASE の commit）:
+  - `userland/desktop/libmedia/` に header 11 個（`h265sw.h`・`h265sw-nal.h`・`-scaling.h`・`-vui.h`・`-rps.h`・`-ps.h`・`-slice.h`・`-poc.h`・`h265-dpb.h`・`h265-stream.h`・`h265-std.h`）。`plan/ws324/proposed/h265/` の物と `cmp` で同じ byte。
+  - 骨格の .c 10 個（50 関数。int は `return ENOSYS;`、void は何もしない）。header の宣言の comment の最初の文を定義の comment にし、仕様は header の comment にあると書いた。`sources.mk`・`Makefile` には足していない（D3、Q324-1）。
+  - `plan/ws324/tests/run-unit.sh`・`check-skeleton.sh`・`unit/h265write.h`（約 1 900 行、7.3 と Annex E の syntax の表から書いた書き手、`h265w_` の接頭辞）・`unit/test-h265write.c`（自己試験）。道具の口は design §8.1.1。
+- 確かめ（command と最後の行）:
+  - `sh plan/ws324/tests/check-skeleton.sh` → `check-skeleton: PASS`（host の cc 14.2 と clang 19 で header 11 個と .c 10 個、zedBSD の clang で x86_64・aarch64・riscv64 の syntax、layering、宣言 50 の定義、nm の名前、libmedia の build に無い事、vcodec*.h の 77ed48ac4 からの不変）。`BASE=1f16db0e6 sh plan/ws324/tests/check-skeleton.sh` → `check-skeleton: PASS`。zedBSD の `h265-std` は tree に `vk_video/vulkan_video_codec_h265std_decode.h` が無いので飛ばした（p002 の後に自動で入る）。
+  - `sh plan/ws324/tests/run-unit.sh all` → `test-h265write: PASS (51 checks)`、`run-unit: PASS`。
+  - 骨格で FAIL する形: scratchpad に置いた probe（各 module の関数を 1 つずつ header の言う結果で呼ぶ 13 checks）を `H265_UNIT_DIR=<scratchpad> sh plan/ws324/tests/run-unit.sh probe h265write` で流し、全 module が host の Vulkan の header で build・link でき、`test-probe: FAIL (12 of 13)`（残りの 1 は常に真の check）、無い試験の名前は `FAIL (no ...)`、最後の行 `run-unit: FAIL` を確かめた。
+  - 書き手をわざと 8 通りに壊した（use_delta_flag の条件、fixed_pic_rate_within_cvs の推定、escape の 0x03 の境、collocated_from_l0 の推定、range extension の flag の順、slice_segment_address の bit 数、PTL の 43 bit、重みの flag）。escape の 1 通りを最初の試験が見逃したので、00 00 02 と 00 00 03 の escape の check を足して塞ぎ、全部 FAIL を確かめて `cmp` で戻した。
+  - H.264 の非退行: `BASE=77ed48ac4 sh plan/tools/h264sw/check-skeleton.sh` → `check-skeleton: PASS`。`sh plan/tools/h264sw/run-unit.sh all` → 24 試験の全部が PASS、`run-unit: PASS`（変えた file は h264sw・vcodec の glob に入らないので、前と同じ物を流した事になる）。
+  - `git diff --check` → 出力無し。
+- 適合の stream: `H265SW_CONFORMANCE_DIR=/home/awe/zedBSD-claude1/build/sources/h265-conformance sh plan/tools/h265/conformance/fetch.sh` を流している（結果は次の commit で書く）。
+- 自分で決めた点:
+  - check-skeleton に design §8.1 の 5 項目へ 3 つ足した: zedBSD の clang（3 つの arch）での syntax、宣言の全部の定義と nm の名前空間、`sources.mk`・`Makefile` が h265 を名指さない事。BASE の不変の対象に道具（run-unit.sh・check-skeleton.sh・h265write.h・test-h265write.c・h264sw の check.h・bitwriter.h）を入れた（WS335 の形。足し・消しも見る）。
+  - `run-unit.sh` に `H265_UNIT_DIR`（道具の自己確かめ用）を足した。PASS の行で終わらない試験を FAIL にした。
+  - `h265write.h` は導出をしない書き手にした（予測の set の NumDeltaPocs[ RefRpsIdx ]、slice header の文脈は試験が渡す）。値の field は全部 32 bit で範囲の外も書ける。数が配列を超える時は数だけ書き、entry は配列の分まで。
+  - 骨格の判定の関数（`h265sw_nal_is_*` など）も設計 §9.1 のとおり ENOSYS を返す（骨格では真に見える）。
+- 未実施: Sonnet の Phase の起動（Q1）。p002 の前の zedBSD での `h265-std` の確かめ。
+- 消す物（Q1 へ）: worktree の `build/tmp/h265-unit.run.*`・`build/tmp/h265-skeleton.run.*`・`build/tmp/h264sw-unit.run.*`・`build/tmp/h264sw-skeleton.run.*`（使い捨ての出力）。scratchpad の一時物は session の物。
 
 ## Q1 の判断を待つ点
 
