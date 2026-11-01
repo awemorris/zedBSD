@@ -3,17 +3,17 @@
 # WS322 設計: VisionFive 2（JH7110）の Wave511（H.264・H.265 decode）と Wave420L（H.265 encode）を PowerVR の Vulkan の executor の Vulkan Video として
 
 Parent: [WS322](ws.md)。Phase: [ws322-p001](phase001/phase.md)（この文書を書いた Phase）。
-版: 第 2 版（2026-11-01、P2、q1845）。第 1 版に design-reviewer の review 1（[design-review.md](design-review.md)）の指摘を反映した。実機・QEMU の観測は無い。値と手順は全て source と公開の文書を読んだだけの物（§5 の出典）。
+版: 第 3 版（2026-11-01、P2、q1863）。第 2 版（review 1 の反映、source と公開の文書を読んだだけの物）に、p002 の VF2 の実機の probe の観測（[phase002](phase002/phase.md)）と Video Player の GPU の道に載せる決定（ws.md の Q1 の判断、Q322-3）を反映した: §0・§2・§7.3・§7.4・§7.5・§7.6・§8.1・§8.2・§8.4・§8.5・§9・§11・§12・§14.3・§15・§16・§17 D2・D3・§18・§20。値と手順の出典は §5。
 
 ## 0. 要約
 
 - 見せ方（ユーザーの決定）: VPU は GPU と別の hardware だが、PowerVR の render node の Vulkan の executor（`src/drivers/gpu/powervr/vk/`）の queue family 0 に `VK_QUEUE_VIDEO_DECODE_BIT_KHR`（後に `_ENCODE_`）を足し、Vulkan Video として出す。新しい cdev・UAPI は作らない。
 - Wave511 は Chips&Media の Wave5 系の decoder で、仕様は Linux の wave5 driver（StarFive の 6.12 の tree、SPDX `GPL-2.0 OR BSD-3-Clause`）から読める。firmware が bitstream を解析し参照を自分で持つ stateful の decoder なので、WS236（Pi 4 の MMAL）と同じく **SPS・PPS（H.265 は VPS も）を StdVideo から作り直して slice の前に置く**。
-- Wave5 の参照の絵は圧縮（FBC）の形で、表示の絵は別の linear の buffer に同時に書かれる。よって Vulkan には **`DPB_AND_OUTPUT_DISTINCT`** で見せる: 出力（DST）は app の NV12 の linear の image に VPU が直に書き（zero copy）、DPB は driver の中の FBC の pool（DPB の image は形だけ）。今の libmedia は DISTINCT を既に扱える（`vkvideo-runtime.c:1668-1688`）。
+- Wave5 の参照の絵は圧縮（FBC）の形で、表示の絵は別の linear の buffer に同時に書かれる。VPU は driver の pool（FBC と linear の組）に decode し、GPU の transfer が linear の絵を app の NV12 の image へ写す（p002 の観測: decode が始まった後の frame buffer の差し替えは効かない）。写すので、Vulkan には **`DPB_AND_OUTPUT_COINCIDE`** で見せる（DPB の slot の image が出力を兼ね、中身は linear の写し。参照の FBC は driver が slot に結んで持つ）。libmedia の GPU の道（`vkvideo_gpu_capabilities`、`vkvideo-runtime.c:2629`）は DISTINCT を断るので、COINCIDE なら libmedia を変えずに Video Player の GPU の道に載る（第 3 版で DISTINCT から改めた、D2）。
 - 出す順: `W5_CMD_DEC_FORCE_FB_LATENCY_PLUS1`（並べ替えを止める register）で decode の順に出す。WS236 の VUI の書き換えの hack は要らない見込み（p002 の probe で確かめる）。
-- 出力の image の指定: Wave5 の frame buffer の index は FBC（参照）と linear（表示）の組。driver が Vulkan の active な DPB の slot に結ばれていない index を選び、その index の linear だけを「1 枚の frame buffer の更新」（SET_FB の option 1）で宛先の image に差し替え、表示の flag で他の index を使わせない。更新が使えない時は driver の linear の pool に受けて GPU の transfer で写す（§7.5、review 1 の 1 番で直した）。
+- 出力: driver が index を選ぶ（その decode で生きた Vulkan の DPB の slot に結ばれていない index。firmware が断ればその絵は ERROR で、出し直さない）。VPU は pool の linear[i] に書き、decode の後に GPU の transfer が宛先の image の 2 plane へ写す（§7.5）。
 - Wave420L は Wave4 系の H.265 の encoder（HEVC Main、StarFive の公表は 1080p30）で、**mainline に driver が無い**。参考になるのは StarFive の `soft_3rdpart` の vpuapi だけで、file ごとの SPDX（`LGPL-2.1 OR BSD-3-Clause`）と directory の `LICENSE.txt`（binary の再配布だけ）・header の proprietary の文が食い違う。encode の実装はユーザーの判断（Q322-2）の後。
-- H.265 と encode は Vulkan の header（WS318 p011a・p011b）と libvulkan の転送が前提。H.264 decode は今の libvulkan と libmedia の DISTINCT の道で進められるが、その道はどの実の driver でもまだ走っていない（§12、Q322-7）。実装の Phase を WS318 の completed の前に始めるかは Q322-6。
+- H.265 と encode は Vulkan の header（WS318 p011a・p011b）と libvulkan の転送が前提。H.264 decode は今の libvulkan と libmedia の COINCIDE の道（i915・nvrtx・Pi と同じ）で進められる。再生は Video Player の GPU の道（WS243 の `VP_GPU_PRESENT`、riscv64 でも既に 1）で、p003 の NV12 の SAMPLED・plane の view・export・import の上に載る（ws.md の Q1 の判断、Q322-3）。WS318 の completed は待たない（Q322-6）。
 - HAL の API は変えない（§19）。
 
 ## 1. 目的・範囲・範囲の外
@@ -26,7 +26,7 @@ Parent: [WS322](ws.md)。Phase: [ws322-p001](phase001/phase.md)（この文書�
   - libvulkan: H.265 decode と encode の転送（他の driver の WS が先に足していなければ、§12）。
 - 範囲の外: H.264 の encode（hardware に無い。fallback は WS329 の独自の software の encoder。ws.md の題の「libavcodec」は 2026-11-01 のユーザーの決定（WS318 Q318-2: libavcodec を使わない）で古い）、Main10・4:2:2、interlaced・MBAFF・field、JPEG の CODAJ12（MJPEG の camera は扱わない、Q318-4）、libmedia 自身の変更（WS318）、VPU の省電力の細かな制御（§10.4 の簡単な形だけ）。
 
-## 2. 今の姿（main eccd50a29 で読んだ事実）
+## 2. 今の姿（main eccd50a29 で読んだ事実。第 3 版で足した行は main 9ca68405f）
 
 | 物 | 事実 | 場所 |
 | --- | --- | --- |
@@ -41,7 +41,9 @@ Parent: [WS322](ws.md)。Phase: [ws322-p001](phase001/phase.md)（この文書�
 | 実行の形 | vkQueueSubmit は command buffer の record を順に歩き、dispatch は 1 本の stream、render pass と transfer は firmware に出して走らせたまま。fence は最後の点（kind・value）。core の lock は kick の周りだけで、submit の間ずっとは持たない | `vk/vk-queue.c:340-460,795-910,320,720,1387` |
 | ioctl の直列 | open ごとの busy（同じ fd の ioctl は順に）。別の fd（compositor）は待たない | `gpu.c:226-233` |
 | query pool | PowerVR の executor に無い。libvulkan は decode の family があれば `queryResultStatusSupport = VK_TRUE` を返す | `libvulkan/external-properties.c:708-713`（WS243 F1 と同じ問題） |
-| libmedia の DISTINCT | COINCIDE が無い時に DISTINCT を使い、出力の image は 1 枚（`slots + distinct`）。readback（TRANSFER_SRC）で CPU へ | `libmedia/vkvideo-runtime.c:1666-1688,1716` |
+| libmedia の video の道 | COINCIDE を使い、無ければ DISTINCT（出力の image は 1 枚、`slots + distinct`）。GPU の道（decode の image を export し app が sample）は COINCIDE で external memory と SAMPLED の NV12 と plane の flag がある時だけ。readback（TRANSFER_SRC で CPU へ）は両方 | `libmedia/vkvideo-runtime.c:1666-1688,2609-2667` |
+| Video Player | `VP_GPU_PRESENT` は全 arch で 1（WS243 p006）。import の image は NV12・OPTIMAL・usage SAMPLED だけ・create flags MUTABLE_FORMAT と EXTENDED_USAGE・external memory OPAQUE_FD、PLANE_0 を R8_UNORM・PLANE_1 を R8G8_UNORM の view | `videoplayer/videoplayer.h:57`、`videoplayer/present.c`（`present_import_make`） |
+| PowerVR の共有 | GPU_CAP_SHARE（image の export・import）はあり、GPU_CAP_ALLOCATION_SHARE は無い（`vkGetMemoryFdKHR` の allocation の export が FEATURE_NOT_PRESENT）。`render_export` は image 無しの export を扱える。`GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2`（UUID）はある。external の format の問い（`..._IMAGE_FORMAT_PROPERTIES2`・`..._EXTERNAL_BUFFER_PROPERTIES`）は無い | `render.c:184,1344-1467`、`vk/vk-device.c`（`identity`） |
 | VF2 の PMU | GPU（2）と VOUT（4）の domain だけを許す（他は EPERM） | `vf2-pmu.c:143`、`vf2-pmu.h` |
 | VF2 の CRG | 表に Wave511・Wave420L・AXIMEM の clock・reset が無い | `vf2-crg.c`（grep で 0 件） |
 | VF2 の device tree | 板の tree は GPU に node を持たないことが多く、board が自分で場所を書く（`vf2_gpu_builtin`）。VPU も同じ前提にする | `kern/platform/visionfive2.c:130-155` |
@@ -152,8 +154,9 @@ Parent: [WS322](ws.md)。Phase: [ws322-p001](phase001/phase.md)（この文書�
 
 ### 7.3 bitstream（stateful の decoder への 1 枚）
 
-- ring: instance ごとに 4 MiB の連続・uncached（4 GiB の下）。decode のたびに先頭から書く: 必要なら parameter set（下）、続いて app の bitstream の `[srcBufferOffset, srcBufferOffset + srcBufferRange)` を CPU で写す（画素ではなく bitstream の byte で、1080p で 1 枚 数十 KB）。read pointer を ring の先頭に戻し、write pointer は書いた終わり、explicit end（1 枚の終わり）の option で DEC_PIC を出す（Procedure referenced: wave5-hw.c `get_bitstream_options`、`wave5_vpu_decode`）。
-  - read pointer の戻し方: QUERY の SET_BS_RD_PTR（wave5-hw.c `wave5_dec_set_rd_ptr`）を正の道とし、DEC_PIC の前の `BS_RD_PTR` の書き込みだけで効くかも p002 で見る。どちらも効かなければ ring を続けて使い、wrap の手前で書き込みを先頭に戻す形にする（R5）。
+- ring: instance ごとに 4 MiB の連続・uncached（4 GiB の下）。decode のたびに、前の絵の終わり（firmware の読みの位置）の後ろに続けて書く: 必要なら parameter set（下）、続いて app の bitstream の `[srcBufferOffset, srcBufferOffset + srcBufferRange)` を CPU で写す（画素ではなく bitstream の byte で、1080p で 1 枚 数十 KB）。write pointer は書いた終わり、explicit end（1 枚の終わり）の option で DEC_PIC を出す（Procedure referenced: wave5-hw.c `get_bitstream_options`、`wave5_vpu_decode`）。read pointer は戻さない。
+  - p002 の観測（R5）: SET_BS_RD_PTR の query は chagall.bin も wave511_dec_fw.bin も知らない（reason `0x8000`、未知の query）。DEC_PIC の前の `BS_RD_PTR` の書き込みだけでは firmware は自分の位置から読み続け、ring の先頭に書いた次の絵は壊れた。前の絵の後ろに続けて書くと全部正しかった。
+  - wrap（書く 1 枚が ring の終わりを越える時）は p004 で決める。案: firmware は ring を環として読むので終わりで折り返して書く。折り返しの読みを p004 の実機で確かめ、駄目なら FLUSH_INSTANCE で firmware の位置を ring の先頭に戻してから書く（どちらも p002 では未観測）。
   - 4 MiB を超える 1 枚は decode せず ERROR。
 - parameter set を前に置く時: RESET の後の最初、IDR（H.265 は IRAP）の前、その絵の SPS・PPS（VPS）の中身が前に送った物と違う時。H.264 は SPS と PPS、H.265 は VPS・SPS・PPS。
 - 書き出し（`vpu-h264-ps.c`・`vpu-h265-ps.c`）: 自分の形の値（executor が StdVideo の field から写す、§8.3）から RBSP を書き、emulation prevention（0x03）、start code `00 00 01`。VUI: H.264 は libvulkan が送らないので書かない（`vui_parameters_present_flag = 0`）。H.265 は StdVideo の VUI を libvulkan が送るか p005 で決める（送らなければ書かない）。VUI が無くても絵の値は変わらない（出す順と時刻の情報だけ）。出す順は §7.4 の register で決める。
@@ -166,37 +169,38 @@ Parent: [WS322](ws.md)。Phase: [ws322-p001](phase001/phase.md)（この文書�
 - frame buffer の index: Wave5 の decoded・display の index は 1 つの空間で、index i は FBC（圧縮の参照）の i 番と linear（表示）の i 番の組を指す（wave5-vpuapi.c:513 で両方の index を直に比べ、wave5-vpu-dec.c:430-442 は両方で capture の buffer を引く、wave5-vpuapi.h:390-418 の説明）。display の flag が立った index は firmware が decode に使わない（V4L2 の driver は app が持つ capture の buffer の flag を立てたままにする、wave5-vpu-dec.c:1190-1210,1357-1366）。
 - 数: N = firmware が求める数 + 1（vendor と同じ、wave5-vpu-dec.c:365）。FBC と linear を同じ N で登録する。上限は 31（`num >= WAVE5_MAX_FBS` を断る、wave5-vpuapi.c:289）。超えれば ERROR。
 - FBC の組: 1 枚は luma（幅 × 高さを 32 に丸め）＋ chroma（幅/2 を 16 に丸め × 高さ）、加えて FBC の luma・chroma の offset の表と co-located の MV の buffer（大きさの式は Values referenced: wave5-vpuapi.h `WAVE5_FBC_LUMA_TABLE_SIZE`・`WAVE5_FBC_CHROMA_TABLE_SIZE`・`WAVE5_DEC_AVC_BUF_SIZE`・`WAVE5_DEC_HEVC_BUF_SIZE`、wave5-vpu-dec.c `wave5_prepare_fb`）と task の buffer（VLC × 2 ＋ parameter × 命令の queue の深さ）。driver が `kern_pmem_alloc_limited`（4 GiB の下）で取る（§17 D4）。
-- linear の組: 最初は driver の linear の pool（N 枚の NV12、render node の buffer として作り、session の GPU の address の空間に map しておく、§7.5 の 3.）を登録する。stride は登録全体で 1 つ（`W5_COMMON_PIC_INFO` は `fb_arr[0].stride` だけ、8 の倍数で pic_width 以上、wave5-vpuapi.c:299-301）なので、pool の pitch は session の DST の image の pitch（§8.4 の配置、幅で決まる）と同じにする。
+- linear の組: driver の linear の pool（N 枚の NV12、render node の buffer として作り、session の GPU の address の空間に map しておく、§7.5）を登録し、以後差し替えない（p002: decode が始まった後の差し替えは効かない、R3）。stride は登録全体で 1 つ（`W5_COMMON_PIC_INFO` は `fb_arr[0].stride` だけ、8 の倍数で pic_width 以上、wave5-vpuapi.c:299-301）。pool の pitch は幅を 32 byte に揃えた物（§8.4 の NV12 の配置と同じにすると GPU の transfer が同じ行の幅で写せる）。
 - SET_FB: linear の組、続いて FBC の組を 8 枚ずつ登録（Procedure referenced: wave5-vpuapi.c `wave5_vpu_dec_register_frame_buffer_ex`、wave5-hw.c `wave5_vpu_dec_register_framebuffer`）。NV12 は CbCr の interleave。登録の後に全 index の display の flag を立て、使ってよい index だけを下ろす（§7.5）。
 - 並べ替えを止める: 毎回の DEC_PIC で「frame buffer の遅れを強いる」register に 1（Values referenced: wave5-regdefine.h `W5_CMD_DEC_FORCE_FB_LATENCY_PLUS1`、wave5-hw.c:999 の reorder の扱い）。これで decoded と display の index は毎回同じになる見込み（p002 で確かめる、R1）。
 - RESET（seek）: SPS が同じなら FLUSH_INSTANCE だけで、FBC と linear の組を保つ（大きな連続の memory を取り直さない、R8）。SPS が変われば次の decode で sequence を作り直す。
 
-### 7.5 出力の宛先（zero copy と予備の pool）
+### 7.5 出力（driver の pool と GPU の transfer）
 
-- driver は index ごとに「その index を持つ Vulkan の DPB の slot」（decoded の index の結果から覚える）を持つ。
-1. 使ってよい index を選ぶ: この decode の時点で active な DPB の slot（記録の参照の一覧と、それまでの setup の slot のうち active な物）に結び付いていない index。無ければ ERROR（app の DPB が firmware の求める数を超えた、R4）。
-2. その index i の linear を宛先にする: 宛先の DST の image（plane 0・plane 1 の物理 address、pitch が登録の stride と同じ時）で、SET_FB の「1 枚の frame buffer の更新」（option 1、wave5-regdefine.h:238-240 と UPDATE_FB の register 群 :313-326）を出し、linear[i] だけを差し替える（FBC[i] と MV[i] は今の値のまま）。
-3. 更新が使えない（p002 で R3 が否）、または pitch が違う時: linear[i] は driver の pool のままにし、decode の後に GPU の transfer（`vk-transfer.c` の道、pool の buffer は session の空間に map 済み）で pool の i 番から宛先へ 2 plane を写す。CPU は画素を触らない（guardrail「画像の処理は GPU で」）。
-4. display の flag: i だけを下ろし、他の全 index を立てる（UPDATE_DISP_FLAG の query、Procedure referenced: wave5-hw.c `wave5_dec_clr_disp_flag`・`wave5_dec_set_disp_flag`）。参照の index も立てるが、flag は「decode の先に選ばない」の印で、参照として読むのは止めない（V4L2 の driver で app が持つ buffer が参照のままでいられるのと同じ見込み、p002 で確かめる、R2）。
-5. 結果の decoded の index が i でなければ ERROR（firmware の選び方が見込みと違う、R2）。setup の slot があれば、その slot と i を結ぶ。
-- 今の libmedia（DISTINCT、出力の image は 1 枚）でも、参照の絵は FBC の組に残り、linear[i] を毎回同じ image に差し替えるだけなので、参照を持つ絵も decode できる。
-- 差し替えた linear[i] の古い address（前の宛先）は、次に i を使う時にまた差し替えるので、firmware が古い宛先に書く事は無い（flag が立っている間は使わない）。それでも、宛先の image の memory は「i に入っている間」executor が retain する（§9.1）。
+- p002 の観測（R2・R3）: index i は FBC[i] と linear[i] の組。i 以外の全 index の display の flag を立てると firmware は i に decode する。参照の index に flag を立てても参照として読まれ、出力は bit 一致のまま。firmware は decode の後に出した index の flag を自分で立てる（host が下ろすまで使わない）。まだ参照される index を選ぶと firmware は断る（decoded `-1`、bitstream を読まない）。断られた後に別の index で DEC_PIC を出し直すと完了の印が来ず、結果も誤る。decode が始まった後の 1 枚の frame buffer の更新（SET_FB の option 1）では、宛先が同じ address でも次の DEC_PIC が完了しない。よって第 2 版の宛先の差し替えはやめ、pool に受けて GPU で写す形を正の道にする。
+- driver は index ごとに「その index を持つ Vulkan の DPB の slot」（setup の slot から覚える）を持つ。
+1. index を選ぶ: この decode の参照の一覧の slot と、vkCmdBeginVideoCodingKHR の参照の slot の一覧で生きた（slot の番号が 0 以上の）slot のうちこの decode の setup の slot でない物、に結ばれた index を全て除き、残りから 1 つ。setup の slot が前に結んでいた index は、この decode の参照でなければ選べる（その slot は上書きされる）。残りが無ければ ERROR（app の DPB が firmware の求める数を超えた、R4）。
+2. display の flag: i だけを下ろし、他の全 index を立てる（UPDATE_DISP_FLAG の query、Procedure referenced: wave5-hw.c `wave5_dec_clr_disp_flag`・`wave5_dec_set_disp_flag`）。firmware は decode の後に i の flag を自分で立てるので、次の decode では選んだ 1 つを下ろすだけでよい。
+3. DEC_PIC。firmware が断った（decoded の index が `-1`）か、decoded の index が i でなければ、その絵は ERROR。出し直さない（p002 で出し直しは完了しなかった）。
+4. 成功なら、GPU の transfer（`vk-transfer.c` の道。pool の buffer は session の空間に map 済み）で pool の linear[i] の 2 plane を宛先の image（COINCIDE なので setup の slot の image と同じ）へ写す。CPU は画素を触らない（guardrail「画像の処理は GPU で」）。1080p で 1 枚 約 3 MB の読みと書き。
+5. setup の slot があれば、その slot と i を結ぶ（前にその slot が結んでいた index は解く）。
+- 参照の絵は FBC の組に残るので、app の slot の image の中身（linear の写し）は firmware の参照に使われない。COINCIDE の app（libmedia、vkvideo-probe）はその image を表示・readback に使う。
+- 宛先の image の memory を VPU は書かない（書くのは GPU の transfer）。第 2 版の「linear[i] に入れた image の memory の retain」は要らない。
 
 ### 7.6 1 枚の decode の手順（まとめ）
 
 1. ring に parameter set（必要なら）と slice を書く。
 2. sequence が無ければ §7.4（INIT_SEQ の後、同じ 1 枚を続けて decode）。
-3. §7.5 で index と宛先を決める。
+3. §7.5 で index を選び、display の flag を合わせる。
 4. DEC_PIC（explicit end、遅れ 0、secondary AXI の使い方の bit、Procedure referenced: wave5-hw.c `wave5_vpu_decode`）、割り込みを待ち、GET_RESULT（成否、decoded・display の index、POC、絵の種類、sequence の変化の印、誤りの情報）。
-5. 結果の読み: decoded の index が 0 以上なら §7.5 の 5.。`-2`（skip、RASL などの捨てる絵、wave5-vpuapi.h:195-198）は COMPLETE だが宛先は変えない（app は表示しない絵）。`-1`（空きの FB が無い）は ERROR（R4）。POC が Vulkan の picture info の PicOrderCnt（H.264）・PicOrderCntVal（H.265）と違えば log に 1 行（ERROR にはしない、firmware と app の DPB のずれの印、R4）。
-6. driver の pool に受けた時は GPU の transfer で写す（§7.5 の 3.）。
+5. 結果の読み: decoded の index が i なら §7.5 の 4.・5.。`-2`（skip、RASL などの捨てる絵、wave5-vpuapi.h:195-198）は COMPLETE だが宛先は変えない（app は表示しない絵）。`-1`（firmware が選んだ index を断った、または空きの FB が無い）は ERROR（R2・R4、出し直さない）。POC が Vulkan の picture info の PicOrderCnt（H.264）・PicOrderCntVal（H.265）と違えば log に 1 行（ERROR にはしない、firmware と app の DPB のずれの印、R4）。
+6. GPU の transfer で pool の linear[i] から宛先へ写す（§7.5 の 4.）。
 7. 結果を query の status に（COMPLETE か ERROR）。
 - sequence の変化の印（解像度・DPB の大きさの変化）が立った時: FLUSH → INIT_SEQ → SET_FB（新しい大きさ）の後、ring に残る同じ絵を DEC_PIC し直す（その絵を捨てない）。
 
 ### 7.7 DPB と Vulkan の slot
 
 - firmware は bitstream（slice header の MMCO・RPS）から参照を自分で管理する。Vulkan の DPB の slot と参照の一覧は、記録の時に Vulkan の規則（i915 と同じ: setup の slot、active な参照、slot の index の範囲、同じ picture resource）で検べ、実行の時に §7.5 の index の選びに使う。firmware には渡さない。
-- DPB の image（DPB だけの usage）の中身は誰も読まないので、memory の要求は小さく（4 KiB）答える（§8.4）。
+- DPB の slot の image（COINCIDE で出力を兼ねる）の中身は pool の linear の写しで、firmware の参照には使われない（参照は FBC、§7.5）。
 - app が bitstream と違う参照を Vulkan に書けば、firmware の結果は bitstream に従い、§7.5 の index の選びが firmware の参照と重なり得る（その時は 5. の不一致で ERROR）。app が規則を守る限り結果は同じ。
 
 ## 8. PowerVR の executor の Vulkan Video
@@ -222,8 +226,8 @@ struct drv_powervr_video_ops {
 int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *engine);
 ```
 
-- 型の中身（案）: `limits` は最大・最小の大きさ・level・DPB の数。`open` は codec、maxCodedExtent、DPB の数、linear の pool を作る callback（executor が render node の buffer として作り session の空間に map した物の物理 address と GPU の address を返す）。`decode` の job は bitstream（kernel の pointer と長さ）、有効な parameter set（`struct vpu_h264_sps` などの自分の形、§8.3）、IDR・IRAP・I slice の印、active な DPB の slot の一覧と setup の slot、宛先（2 plane の物理 address・pitch・行の数と、executor が付けた不透明な鍵）、POC。`result` は status、使った index、pool に受けた時はその index（executor が transfer で写す）、linear[i] から外れた前の宛先の鍵（executor が retain を離す）、時間（tick）。
-- retain の持ち主は executor（§9.1）。engine は鍵を覚えて返すだけで、memory の object を触らない。
+- 型の中身（案）: `limits` は最大・最小の大きさ・level・DPB の数。`open` は codec、maxCodedExtent、DPB の数、linear の pool を作る callback（executor が render node の buffer として作り session の空間に map した物の物理 address と GPU の address を返す）。`decode` の job は bitstream（kernel の pointer と長さ）、有効な parameter set（`struct vpu_h264_sps` などの自分の形、§8.3）、IDR・IRAP・I slice の印、この decode の参照の slot と BEGIN の生きた slot の一覧と setup の slot、POC。宛先は持たない。`result` は status、使った index（pool の番号、executor が transfer で宛先へ写す）、時間（tick）。
+- engine は app の memory を触らない（pool の物理 address だけを持つ）。宛先の image の retain は記録の物（§8.5）。
 - `decode`・`encode` は同期（上限つきで待つ）。p007 で非同期（submit と完了の callback）を足す。
 - `operations()` は firmware の boot が済んだ後だけ 0 以外。render node の session の open の時に読み、その session の間は固定（latch、WS236 M2 と同じ）。
 - 登録は 1 つだけ（VF2 は decode と encode を 1 つの engine にまとめた glue が登録）。登録の前に開いた session は video 無し。
@@ -232,10 +236,9 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 
 - capset: `operations()` が 0 でなく、`capacity >= 176` の時だけ 176 byte。byte 168 に `0x5a4e4154`、172 に flags: bit 0 H.264 decode（今の定義）、H.265 decode と H.265 encode の bit は libvulkan と同時に決める（§12、案 bit 2・bit 3）。
 - queue family 0: GRAPHICS・COMPUTE・TRANSFER に `VIDEO_DECODE`（と encode があれば `VIDEO_ENCODE`）。queueCount 1 のまま。QUEUE_FAMILY_VIDEO_PROPERTIES は DECODE_H264 | DECODE_H265（| ENCODE_H265）。
-- capabilities（decode）: flags `DPB_AND_OUTPUT_DISTINCT`、`SEPARATE_REFERENCE_IMAGES`、minBitstreamBufferOffsetAlignment 1、minBitstreamBufferSizeAlignment 16、pictureAccessGranularity 16×16（H.265 も 16×16 で始め、p002 で Wave5 が書く行の丸めを測って直す）、§3.2 の上限、stdHeaderVersion は各 codec の std の名前と版。
+- capabilities（decode）: flags `DPB_AND_OUTPUT_COINCIDE`、`SEPARATE_REFERENCE_IMAGES`（D2、第 3 版）、minBitstreamBufferOffsetAlignment 1、minBitstreamBufferSizeAlignment 16、pictureAccessGranularity 16×16（H.265 も 16×16 で始め、p004 で Wave5 が書く行の丸めを測って直す）、§3.2 の上限、stdHeaderVersion は各 codec の std の名前と版。
 - format properties（decode）:
-  - DST: `G8_B8R8_2PLANE_420_UNORM`、tiling OPTIMAL（中は linear、§8.4）、usage `VIDEO_DECODE_DST | SAMPLED | TRANSFER_SRC`、create flags `MUTABLE_FORMAT | EXTENDED_USAGE`（SAMPLED は plane の view の R8・R8G8 の形式で満たす。NV12 の形式そのものの features に SAMPLED_IMAGE は出さない）。
-  - DPB: 同じ形式、OPTIMAL、usage `VIDEO_DECODE_DPB` だけ。
+  - DST と DPB（COINCIDE なので同じ image）: `G8_B8R8_2PLANE_420_UNORM`、tiling OPTIMAL（中は linear、§8.4）、usage `VIDEO_DECODE_DST | VIDEO_DECODE_DPB | SAMPLED | TRANSFER_SRC`、create flags `MUTABLE_FORMAT | EXTENDED_USAGE`（SAMPLED は plane の view の R8・R8G8 の形式で満たす。NV12 の形式そのものの features に SAMPLED_IMAGE は出さない。libmedia の GPU の道はこの usage と flag を求める、`vkvideo-runtime.c:2633`）。
 - `vkGetPhysicalDeviceFormatProperties(NV12)`: optimal と linear に `VIDEO_DECODE_OUTPUT | VIDEO_DECODE_DPB | TRANSFER_SRC`（encode があれば `VIDEO_ENCODE_INPUT`）。SAMPLED_IMAGE と YCbCr 変換の bit（COSITED・MIDPOINT）は出さない（libvulkan に sampler YCbCr conversion が無い、WS318 §2。YCbCr の変換の要る形式に SAMPLED_IMAGE を出すなら変換の bit が要る）。
 - query: `VK_QUERY_TYPE_RESULT_STATUS_ONLY_KHR` の pool（作成・破棄・結果）と記録（reset・begin・end）。decode は実行の時に結果が決まるので、submit の後に結果が読める。
 
@@ -247,9 +250,10 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 
 ### 8.4 NV12 の image（`vk-image.c`・`image-state.c`）
 
-- `G8_B8R8_2PLANE_420_UNORM` を video の usage の時だけ作れるようにする（他の usage の NV12 は断る）。tiling に関わらず linear の配置: plane 0 の pitch = 幅を 32 byte に揃え、行 = 高さを 32 に丸め（`POWERVR_IMAGE_LINEAR_ROWS`）、plane 1 は plane 0 の後（4 KiB 境界）、pitch は plane 0 と同じ、行 = 高さ / 2 を 32 に丸めた数（transfer は linear の image の 32 行の tile 全体を触る、`image-state.c:259-276`。plane 1 も丸めないと readback の PLANE_1 の copy が image の外を読む）。`layout.bytes` は両 plane の丸めた大きさの和。Wave5 の linear の出力は Y と CbCr の stride が共通なので、この配置にそのまま書ける。
-- DPB だけの usage の image は memory の要求を 4 KiB にし、bind の検べ（`vk-image.c:355` が `layout.bytes` を見る）も同じ大きさで通す（中身を使わない、§7.7）。
-- plane の view: aspect PLANE_0 を R8、PLANE_1 を R8G8 の view として作れる（MUTABLE_FORMAT の image）。texture の語は linear の R8・R8G8 の物（今の `powervr_view_words` が linear を扱う）を plane の address で作る。
+- `G8_B8R8_2PLANE_420_UNORM`: usage は VIDEO_DECODE_DST・VIDEO_DECODE_DPB・SAMPLED・TRANSFER_SRC の中（Video Player の import は SAMPLED だけ、§2）、create flags は 0 か MUTABLE_FORMAT | EXTENDED_USAGE、1 level・1 layer、幅と高さは偶数。video の engine が無くても作れる（中身は linear の 2 plane だけで、plane の view と export・import は engine に依らない。p003 の実機の試験もこれで行う）。他の usage（render target・TRANSFER_DST・storage）と、NV12 の image への copy・blit・clear・render pass は断る。tiling に関わらず linear の配置: plane 0 の pitch = 幅を 32 byte に揃え、行 = 高さを 32 に丸め（`POWERVR_IMAGE_LINEAR_ROWS`）、plane 1 は plane 0 の後（4 KiB 境界）、pitch は plane 0 と同じ、行 = 高さ / 2 を 32 に丸めた数（transfer は linear の image の 32 行の tile 全体を触る、`image-state.c:259-276`。plane 1 も丸めないと readback の PLANE_1 の copy が image の外を読む）。`layout.bytes` は両 plane の丸めた大きさの和。export する側と import する側（usage が違う）で同じ配置になる。
+- DPB の usage の image も同じ配置（COINCIDE で出力を兼ねる、§8.2）。第 2 版の「DPB だけの image は memory の要求を 4 KiB」はやめた。
+- plane の view: aspect PLANE_0 を R8_UNORM、PLANE_1 を R8G8_UNORM の view として作れる（MUTABLE_FORMAT の image、identity の swizzle 以外も今の view と同じに通す）。NV12 の形式そのものの view と COLOR の aspect は断る（YCbCr の変換は無い）。texture の語は linear の R8・R8G8 の物（今の `powervr_view_words` が linear を扱う）を plane の address・plane の layout で作る。descriptor の image の語の layer の大きさと pack の情報は view の形式と plane の layout から取る（`vk-layout.c` の `set_image`。今は image の形式と layout から取っている）。
+- export・import: node に `GPU_CAP_ALLOCATION_SHARE` を足す（`render_export`・`render_import` は image 無しの export を扱える）。libvulkan が OPAQUE_FD の問いを executor に送るようになるので、`GPU_OP_GET_PHYSICAL_DEVICE_IMAGE_FORMAT_PROPERTIES2` と `GPU_OP_GET_PHYSICAL_DEVICE_EXTERNAL_BUFFER_PROPERTIES` に答える（native の handle の型で EXPORTABLE と IMPORTABLE）。`GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES2`（device・driver の UUID）は既にある。WS243 p006 で nvrtx に足した組と同じ。
 - `vkGetImageSubresourceLayout`: PLANE_0・PLANE_1 の offset と pitch を答える（OPTIMAL でも。i915・bcm2711 と同じ私的な約束）。
 - copy: `vkCmdCopyImageToBuffer` の PLANE_0・PLANE_1（libmedia の readback）を transfer の道（`vk-transfer.c`）で R8・R8G8 の linear の image として写す。NV12 の image への copy・blit・clear・render target は断る。
 
@@ -258,7 +262,7 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 - 記録: `GPU_OP_CMD_BEGIN_VIDEO_CODING`・`_END_`・`_CONTROL_`・`_DECODE_VIDEO` を command buffer の record にする。記録の時に session・parameters・slot・resource を i915 と同じ規則で検べ、object を retain し、record に深い写しを置く（WS243 I6 と同じ）。API の規則違反は記録の失敗、bitstream の値の不正はその絵の ERROR。
 - 実行（`build_command_buffer` の中、record の順）:
   1. CONTROL の RESET: engine の `reset`（FLUSH_INSTANCE と sequence の破棄、送った parameter set の記録を消す）。
-  2. DECODE（`build.sent` に数える。後の失敗が refusal でなく lost になるように、`vk-queue.c:427-428`）: (a) それまでの dispatch の stream を流し（`run_flush`）、session の GPU の仕事（render・transfer の点）の終わりを待つ（VPU が書く宛先を GPU がまだ読んでいるかもしれない、と GPU が書いた物を VPU が読む、の両方のため）。(b) SLC の書き戻しと破棄（`powervr_command_slc_flush`、§9.2）。(c) engine の `decode`（同期）。(d) pool に受けた時は transfer で宛先へ写す。(e) 前の宛先の鍵の retain を離し、新しい宛先を retain する。(f) 結果を query に。
+  2. DECODE（`build.sent` に数える。後の失敗が refusal でなく lost になるように、`vk-queue.c:427-428`）: (a) それまでの dispatch の stream を流し（`run_flush`）、session の GPU の仕事（render・transfer の点）の終わりを待つ（前の絵の写しが pool の同じ index をまだ読んでいるかもしれない、と GPU が書いた物を VPU が読む（encode）、の両方のため）。(b) SLC の扱い（§9.2）。(c) engine の `decode`（同期）。(d) 成功した絵は transfer で pool の linear[i] から宛先へ写す。(e) 結果を query に。
   3. 後の GPU の record（readback の copy、sample の pass）は decode の後で kick するので、decode の結果を読む。
 - fence: 今のまま最後の GPU の点。decode は同期なので fence の時には終わっている。decode だけの submission の fence は「既に届いた点」（session の最後の点）で、待つ物が無い。
 - 速さ: 1 枚ごとに CPU が VPU を待つ（1080p で数 ms の見込み）。同じ fd の他の ioctl はその間待つが、compositor（別の fd）は待たない（§2 の ioctl の直列）。
@@ -272,8 +276,8 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 | firmware の code・temp | Wave5 の core | boot から shutdown まで（reset の時は同じ領域に写し直す） |
 | work buffer・bitstream の ring | instance（session） | session の作成から破棄まで |
 | FBC の組・MV・表・task | instance の sequence | INIT_SEQ から次の INIT_SEQ（大きさが変わった時）・session の破棄まで（SPS が同じ RESET では保つ） |
-| linear の pool | executor（render node の buffer、session の空間に map） | session の video の object の破棄まで。engine は物理 address だけを持つ |
-| linear[i] に入れた DST の image の memory | app（入っている間は executor が memory の object を retain） | result の「外した鍵」で離す。session の破棄で全部離す |
+| linear の pool | executor（render node の buffer、session の空間に map） | session の video の object の破棄まで。engine は物理 address だけを持つ。VPU が書き、GPU の transfer が読む |
+| 宛先の DST（と COINCIDE の DPB）の image の memory | app（記録が image を retain） | GPU の transfer が書くだけ。VPU は触らない |
 | app の bitstream の buffer | app（記録が retain） | 記録の破棄まで。VPU は ring の写しを読むので app の buffer を直に読まない |
 | SRAM（AXIMEM0） | core | 常に（instance が共有。命令は 1 つずつなので重ならない） |
 
@@ -281,14 +285,14 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 
 ### 9.2 cache・SLC・address
 
-- CPU の cache: 全ての buffer を uncached の view（`kern_pmem_map_uncached`、map の時に cached の行を書き戻して捨てる、`src/hal/riscv64/page.c:406-418` の説明）で触る。VPU は物理 address を使う。vendor の kernel は tree が `dma-coherent` なのに L2 を書き戻している（`wave5-vdi.c:17-23`、`wave5-vpu-dec.c:1180,1357`）。VPU の DMA が L2 を通らない（DRAM を直に読み書きする、GPU と同じ）なら、uncached の view だけを使う zedBSD では書き戻しは要らない。VPU が L2 を通る port なら、CPU の uncached の書き込み（ring）と L2 の古い行、VPU の書いた行が L2 に dirty で残り snoop しない GPU が DRAM の古い値を読む、の 2 つが起こり得る。**どちらかは未確認**なので p002 の probe で確かめる（§14.3: CPU が uncached で模様を書き VPU に読ませる、VPU が書いた物を GPU の transfer で読む、直後と、direct map で同じ page を読んで L2 を汚した後の両方）。L2 を通ると分かれば、kernel の data cache の口（`kern/dcache.h`）で該当の範囲を書き戻し・捨ててから VPU に渡す形に変える（HAL は変えない）。書いた後、命令の前に `kern_io_write_barrier`。
-- PowerVR の SLC: VPU は SLC を通らない。app の private な device local の memory は SLC を通る（§2）ので、GPU が書いて VPU が読む（encode の入力）・VPU が書いて GPU が読む（decode の出力）の時に古い行が残り得る。v1 は decode・encode の前後に SLC の書き戻しと破棄を 1 回ずつ（§8.5 の (b)、後は VPU の終わりの後）。費用は p004 で測り、重ければ video の usage の image に bind された memory の page を SLC の迂回に張り替える案（§17 D6 の代わり）を p007 で。
+- CPU の cache: 全ての buffer を uncached の view（`kern_pmem_map_uncached`、map の時に cached の行を書き戻して捨てる、`src/hal/riscv64/page.c:406-418` の説明）で触る。VPU は物理 address を使う。p002 の観測（R14）: VPU は CPU の cache と一貫しない（tree の `dma-coherent` に反する）。読み: direct map で ring の古い行を cache に載せた後に uncached の別名で書いた新しい絵を、VPU は正しく読んだ（cache を見ず DRAM を読む）。書き: 宛先を direct map で読んで行を cache に載せ、decode の後に direct map で読むと 64 byte の行の約 95% が古いまま、uncached の別名では正しかった。よって uncached の view だけで触る今の形が正しく、`kern/dcache.h` の追加の保守は要らない。VPU が書いた物を GPU の transfer で読む一貫性は p002 では見ていない（GPU も CPU の cache を snoop せず DRAM を読むので問題は無い見込み、p004 の実機の hash で確かめる）。書いた後、命令の前に `kern_io_write_barrier`。
+- PowerVR の SLC: VPU は SLC を通らない。decode の出力は VPU が pool に書き GPU が読む: pool の page を SLC の迂回で map すれば（host visible・共有の buffer と同じ、§2）decode の側の SLC の扱いは要らない（p004 で pool の map の形を決める。迂回にできなければ decode の後に SLC の破棄を 1 回）。宛先の image は GPU が書いて GPU が読むので SLC の扱いは要らない。encode の入力（GPU が書いて VPU が読む）は encode の前に SLC の書き戻し（`powervr_command_slc_flush`）。費用は p004・p009 で測る。
 - 32 bit: VPU の DMA は 32 bit。PowerVR の allocation は全部 `0xffffffff` の下（`VF2_GPU_DMA_LIMIT`）、driver の buffer も `kern_pmem_alloc_limited` の上限 `0xffffffff`。PowerVR の上限が将来広がったら、video の usage の image の memory だけは 4 GiB の下を保つ（`vk-memory.c` の allocate に条件を足す、その時の Phase で）。
 
-### 9.3 zero copy の範囲
+### 9.3 写しの範囲
 
-- decode の出力: VPU が app の DST の image の memory に直に書く（§7.5 の 2.）。1 枚の frame buffer の更新が使えない時・pitch が違う時だけ、pool から GPU の transfer で 1 回写す。
-- 表示: app（WS318 の後は libmedia の共有の device）が DST の image の plane の view を sample する。今の libmedia（PRIVATE の device）は readback（TRANSFER_SRC の copy）して CPU の frame にする（今の i915・Pi と同じ道、WS318 の後に GPU の道）。
+- decode の出力: VPU は driver の pool に書き、GPU の transfer が宛先の image へ 1 回写す（§7.5。p002 で宛先の差し替えが効かなかった）。zero copy ではない（1080p60 で毎秒 約 0.37 GB の読み書きを GPU の transfer で）。
+- 表示（再生の道）: Video Player の GPU の道（WS243 の `VP_GPU_PRESENT`、riscv64 でも 1）。libmedia が decode の image を export（OPAQUE_FD）し、Video Player が import して plane の view（R8・R8G8）を自分の shader で sample し、自分の窓へ描く。compositor がその窓を合成する。CPU は画素を触らない。libmedia の readback（TRANSFER_SRC の copy で CPU の frame）は hash の照合の機能の試験の段だけ（WS243 のユーザーの決定と同じ）。
 - encode の入力: app の ENCODE_SRC の image（NV12 linear）を VPU が直に読む（§13）。
 
 ## 10. 並行性・lock・割り込み
@@ -325,12 +329,12 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 | VPU の domain・clock・reset・product code・firmware の file が無い・boot の失敗 | engine を登録しない（video 無しの device、log 1 行）。GPU は今どおり |
 | session の作成の失敗（work buffer・ring・CREATE_INSTANCE） | `VK_ERROR_INITIALIZATION_FAILED`、libmedia は software に落ちる（WS318 Q318-1） |
 | INIT_SEQ の失敗・8 bit でない・大きすぎる | その絵は ERROR、sequence 無しのまま次の I slice の絵を待つ |
-| DEC_PIC の誤り（成功の印 0・decoded の index の不一致・空きの FB 無し） | その絵は ERROR、宛先は変えない（pool に受けた時は写さない）。submission は失わない（i915・Pi と同じ） |
+| DEC_PIC の誤り（成功の印 0・decoded の index の不一致・firmware が index を断った・空きの FB 無し） | その絵は ERROR、宛先は変えない（写さない）、出し直さない。submission は失わない（i915・Pi と同じ） |
 | DEC_PIC の timeout（500 ms） | `decode` が返る前に、vpu_lock の下で core の reset の line を assert して VPU を止め、全 instance を「壊れた」に、reset を解いて firmware を boot し直す（Procedure referenced: wave5-hw.c `wave5_vpu_reset`・`wave5_vpu_re_init`）。他の session の instance も firmware と一緒に消えるので、壊れた instance は次の decode の時に CREATE_INSTANCE から作り直し、次の I slice の絵まで ERROR。続けて 3 回 reset なら reset の line を assert したまま domain を off にし、engine を止める（以後の session の作成は失敗、boot まで video 無し。`operations()` はそのままなので capset は video を出したまま、session の作成で断る） |
 | 4 MiB を超える絵・parameter set が無い | その絵は ERROR |
 | pool からの transfer の失敗 | その絵は ERROR |
 | SLC の flush の失敗 | submission は EIO（GPU の仕事が残っているかもしれないので、今の executor の規則どおり lost） |
-| app が linear[i] に入れた image の memory を解いた | executor が retain しているので VPU の書く先は残る。i を次に使う時に差し替えて離す |
+| app が記録の後に宛先の image の memory を解いた | Vulkan の規則違反。記録が image を retain しているので transfer の先は残る |
 
 ## 12. libvulkan・libmedia・他の WS との関係
 
@@ -342,9 +346,9 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 | libvulkan の encode の転送（session・parameters の取り出し `vkGetEncodedVideoSessionParametersKHR`・`vkCmdEncodeVideoKHR`・encode の feedback の query・rate control） | 同上（WS322 p010 か WS319） | |
 | libmedia の H.265 の Vulkan の解析（StdVideoH265 を作る） | WS318 p016〜p020 | WS322 の H.265 の Video Player の確かめの前提。driver の確かめは probe の道具（§14）で先にできる |
 | libmedia の encoder の Vulkan Video（H.265） | WS318 p022 | |
-| libmedia の DISTINCT の readback の道（今の code、`vkvideo-runtime.c:1666-1688`） | 持ち主は未定（Q322-7）。i915・nvrtx・bcm2711 は全部 COINCIDE だけを報告する（`i915/vk/vk-video.c:824`、`nvrtx/vk/vk-video.c:737`、`bcm2711/vk/vulkan-video.c:1275`）ので、この道はどの実の driver でもまだ走っていない | p004 で初めて走る。bug が出たら直す持ち主が要る |
-| libmedia の DISTINCT の GPU の道（plane の view を sample） | WS318 p006b・p007a | 今は readback の道 |
-| `vkvideo-probe`（WS083 の道具） | 今は H.264 の COINCIDE だけ（DST と DPB を同じ image で decode、`userland/tests/vkvideo-probe/main.c:578,695,1272`）。Intel でない時は linear で読む（WS236 J4） | **p004 で DISTINCT に対応させる**（DPB の image と出力の image を分け、出力を readback）。WS322 が持つ（+3 LW） |
+| libmedia の COINCIDE の道（readback と GPU の道） | 今の code（`vkvideo-runtime.c`）、i915・nvrtx・Pi と同じ | 第 3 版で COINCIDE に改めたので、DISTINCT の道（どの実の driver でも未走行）は使わない。Q322-7 の前提は無くなった |
+| libmedia の GPU の道（`vkvideo_gpu_capabilities`: external memory、COINCIDE、同じ family、SAMPLED の NV12 と plane の flag） | 既にある（WS243） | PowerVR が要る物は p003 で足す（§8.4）、video の format の報告は p004 |
+| `vkvideo-probe`（WS083 の道具） | 今は H.264 の COINCIDE だけ（DST と DPB を同じ image で decode、`userland/tests/vkvideo-probe/main.c:578,695,1272`）。Intel でない時は linear で読む（WS236 J4） | COINCIDE のままで使える（第 2 版の DISTINCT の対応は要らなくなった）。PowerVR の linear の NV12 の readback が読めるかを p004 で確かめる |
 
 - 2026-11-01 のユーザーの決定（WS318 Q318-1・Q318-2）: hardware が無い codec は独自の software へ落ちる。hardware の試験はその driver の WS で行う。→ WS322 は VF2 の実機の確かめを自分の Phase に持つ（§14）。
 
@@ -364,7 +368,7 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 
 - T1 parameter set: JVT の適合の stream（`plan/tools/h264sw/conformance/fetch.sh` の 101 本のうち progressive で、StdVideo で表せない FMO・ASO の Baseline の物を除く）と ws083 の stream の SPS・PPS を libmedia の parser で StdVideo の値にし、`vpu-h264-ps.c` で書き出し、それを同じ parser で読み直して値が全部一致（scaling list の差分の符号化などは一意でないので byte では比べない）。H.265 は HEVC の適合の stream（JCT-VC の物、p006 で取得の script）で VPS・SPS・PPS を同じ形で。emulation prevention の境界の例。
 - T2 命令の組み立て: 各命令の register の値の並びを「（register、値）の表」を返す純な関数にして、固定の期待の表と比べる（CREATE_INSTANCE・INIT_SEQ・SET_FB の 8 枚ずつの分け・DEC_PIC・UPDATE_DISP_FLAG）。
-- T3 index の選び: active な DPB の slot に結ばれていない index の選び、slot と index の結び（setup の slot、slot の解放）、display の flag の mask（N = 2〜31）、空きが無い時の ERROR、pitch が違う時の pool の道、外した鍵の返し。
+- T3 index の選び: active な DPB の slot に結ばれていない index の選び、slot と index の結び（setup の slot、slot の解放）、display の flag の mask（N = 2〜31）、生きた slot と setup の slot の扱い（setup の slot が前に結んでいた index）、空きが無い時の ERROR、firmware が断った時の ERROR（出し直さない）。
 - T7 失敗の道の単体: 命令の timeout の後に reset の line を assert してから返る、DESTROY の再試行、`-1`・`-2` の index の扱い（register の読みを偽の関数に替えて）。
 - T4 大きさの式: FBC・表・MV・task・NV12 の配置（720p・1080p・4K）。
 - T5 wire の往復: libvulkan の `video.c` の encoder と PowerVR の reader を 1 本で往復（WS243 T7 と同じ形）。
@@ -379,9 +383,9 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 
 - p002 の probe（`CONFIG_DRIVER_VF2_VPU_PROBE`、既定 n、試験の config だけ）: 起動の後に kernel thread で、埋め込んだ小さな H.264 と H.265 の stream（ws083 の B の pyramid の物と、自分で x265 で作る 352×288 の B の物）を decode し、各 frame の NV12 の FNV-1a を host の ffmpeg（H.264 は WS326 の software の decoder でもよい）の参照の表（decode の順と表示の順の両方）と照らす。同じ起動で次を log に: product code・firmware の版・feature、clock の rate、NOC の reset の状態、(R1) 遅れ 0 で decoded = display、(R2) index の組の仮定（decoded の index が linear と FBC の同じ番号か）と display の flag で index が決まるか、参照の index に flag を立てても参照として読まれるか、(R3) 1 枚の frame buffer の更新（option 1）で linear[i] を差し替えて正しく書かれるか、(R5) read pointer の戻し（SET_BS_RD_PTR と register の書き込み）、(R14) 一貫性（CPU が uncached で書いた模様を VPU が読む・VPU が書いた物を GPU の transfer で読む、直後と direct map で L2 を汚した後）、CREATE_INSTANCE の完了が割り込みか busy か、1080p の 1 枚の時間。合否は「全 frame 一致」と各項目の観測の記録（項目は判定でなく事実を残す）。
 - 失敗の道（p004 の実機、試験の config の fault の注入: DEC_PIC の後の割り込みを外す、壊した bitstream、IRQ の番号を外して poll）: timeout → core の reset → 同時に動く別の session の回復（次の I の絵から COMPLETE）、3 回の reset で止まる、decode の途中と timeout の後の fd の close で memory を返す前に VPU が止まっている（返した後の memory を probe の模様で見て書かれていない）、2 つの session の同時の decode（H.264 と H.265）、linear[i] に入れた image の memory の app の解放、DST を device local（SLC を通る）と host visible（SLC を迂回）の両方の memory の type で。
-- p004（H.264 の Vulkan の道）: `vkvideo-probe --list`（VIDEO_DECODE の family と H.264 の拡張）、DISTINCT に対応させた `vkvideo-probe --expect=…`（ws083 の stream の hash 一致）、JVT の適合の progressive の物の一部（Baseline・Main・High の各数本）の hash を WS326 の software の decoder の出力と照らす、Video Player で 1080p30 の H.264 の mp4 を再生（画面の PNG、FRAMES の late と表示の数、`top` の CPU）。
+- p004（H.264 の Vulkan の道）: `vkvideo-probe --list`（VIDEO_DECODE の family と H.264 の拡張）、`vkvideo-probe --expect=…`（ws083 の stream の hash 一致）、JVT の適合の progressive の物の一部（Baseline・Main・High の各数本）の hash を WS326 の software の decoder の出力と照らす、Video Player の GPU の道（`PRESENT own=1 gpu_pictures=1`、libmedia の「pictures the GPU holds」）で 1080p30 の H.264 の mp4 を再生（画面の PNG、FRAMES の shown と late、`top` の CPU）。
 - p006（H.265）: probe の道具（`plan/ws322/tests/` の小さな Vulkan の program、または WS318 の後の vkvideo-probe の H.265）で HEVC の適合の stream の Main の物の hash を host の ffmpeg の参照と照らす。Video Player は WS318 p020 の後。
-- p007（速さ）: 1080p60・4K30 の H.264・H.265 の decode の時間（VPU の命令の tick）、SLC の flush の費用、Video Player の 1080p30 の再生。1080p60 の再生は WS318 の GPU の道（p009）の後の p012 で（今の readback は uncached の読みで 1080p60 に届かない見込み、R13）。
+- p007（速さ）: 1080p60・4K30 の H.264・H.265 の decode の時間（VPU の命令の tick）、pool からの GPU の transfer と SLC の扱いの費用、Video Player の GPU の道での 1080p60 の再生（FRAMES の shown と late）。
 - encode（p011・p012）: 試験の絵（色の帯と動く物、NV12）を encode し、出た bitstream を host の ffmpeg で decode して PSNR（CQP で 35 dB 以上を目安、p008 で決める）、bitstream の適合（host の ffmpeg が誤り無く読む）。
 - QEMU の証拠と実機の証拠は分けて書く。
 
@@ -391,8 +395,8 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 | --- | --- | --- | --- | --- | --- |
 | p001 | 調べと設計（この文書）、review | O | — | design-reviewer の反映、問いを Q1 へ | — |
 | p002 | VF2 の VPU の glue と Wave5 の core の boot、firmware の package（wave511）、probe | O（high） | p001、Q322-1、Q322-6、VF2 の板の窓 | 実機で product code `0x5110` と firmware の版の log、probe の H.264・H.265 の全 frame が参照と一致、R1・R2・R3・R5・R14 の観測の記録。riscv64 の build の warning 0、off の build の object 不変 | 20 |
-| p003 | PowerVR の executor: NV12 の image・plane の view・subresource layout・plane の copy、query pool（RESULT_STATUS_ONLY）、capset 176 と video の bit、queue family の flag | O | p001 | host の T4・T5（NV12 の部分）・T6 の一部、build。video の engine が無い時の報告は今と同じ（capset 168） | 10 |
-| p004 | H.264 decode の道: engine の口、Wave5 の decoder（instance・sequence・FB・index と宛先・decode・誤り・reset）、`vpu-h264-ps.c`、executor の session・parameters・記録・実行、vkvideo-probe の DISTINCT 対応 | O（high） | p002、p003、Q322-7（libmedia の DISTINCT の道の直しの持ち主） | host の T1〜T3・T5〜T7。実機で vkvideo-probe の ws083 の hash が一致、JVT の progressive の一部が WS326 と一致、§14.3 の失敗の道の項目、Video Player で 1080p30 の H.264 を再生（PNG と FRAMES、readback の道の時間も記録） | 24 |
+| p003 | PowerVR の executor: NV12 の image（SAMPLED・plane の view・subresource layout・plane の copy）、export・import（ALLOCATION_SHARE と external の問い）、query pool（RESULT_STATUS_ONLY）、capset 176 と video の bit、queue family の flag と video の operations の問い、engine の登録の口（operations だけ、p004 で広げる） | O | p001 | host の試験、riscv64 の build の warning 0、VF2 で NV12 の image の plane の view の sample と export・import の試験、既定の動作の非退行（vf2-regress.sh）。video の engine が無い時の報告は今と同じ（capset 168） | 10 |
+| p004 | H.264 decode の道: engine の口（p003 の口を広げる）、Wave5 の decoder（instance・sequence・FB・pool・index・decode・誤り・reset）、`vpu-h264-ps.c`、executor の session・parameters・video の capabilities と format の報告・記録・実行（pool からの transfer） | O（high） | p002、p003 | host の T1〜T3・T5〜T7。実機で vkvideo-probe の ws083 の hash が一致、JVT の progressive の一部が WS326 と一致、§14.3 の失敗の道の項目、Video Player の GPU の道で 1080p30 の H.264 を再生（PNG と FRAMES、gpu_pictures=1） | 24 |
 | p005 | libvulkan の H.265 decode の転送（構造体・codec の操作・拡張の表・capset の bit） | O | WS318 p011a。他の WS が先に足していれば取り下げ | host の wire の往復、amd64・riscv64 の libvulkan の build、i915・nvrtx・Pi の H.264 の今の道が壊れない（host の試験） | 8 |
 | p006 | H.265 decode: `vpu-h265-ps.c`、Wave5 の HEVC、executor の H.265 の parameters | O | p004、p005 | host の T1（H.265）。実機で HEVC の適合の Main の一部の hash が host の ffmpeg と一致。Video Player の H.265 は WS318 p020 の後（この Phase の受け入れに入れない） | 16 |
 | p007 | 速さ: 非同期の decode（video の点の kind、settle の列。`render-queue.c`・`render-private.h` を触る）、SLC の扱いの見直し、命令の queue 2 | O（high） | p004（H.265 は p006） | 実機で 1080p60・4K30 の decode の時間（VPU の tick）が 1 枚の時間の内（16.6 ms・33 ms）、Video Player の 1080p30 が落ちない | 12 |
@@ -412,27 +416,27 @@ int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *en
 | ID | 危険 | 見込み・代わり |
 | --- | --- | --- |
 | R1 | 遅れ 0 の register でも firmware が表示の順で（遅れて）出す | p002 で確かめる。decoded の index の絵は decode の直後に linear[i] にある見込みなので、表示の順は使わず decoded の index だけを見る形で足りる。それも違えば WS236 と同じく SPS の VUI に `max_num_reorder_frames = 0` を書く（H.265 は `sps_max_num_reorder_pics = 0`、`sps_max_latency_increase_plus1 = 0`） |
-| R2 | index の組の仮定が違う（linear と FBC の index が別）、display の flag で index が決まらない、参照の index に flag を立てると参照が読まれない | 宛先の指定をやめ、firmware が選んだ decoded の index の linear（driver の pool）から GPU の transfer で宛先へ写す（1080p で 1 枚 3 MB の読み書き） |
-| R3 | 1 枚の frame buffer の更新（option 1）が効かない・参照を壊す | linear は driver の pool のままにし、GPU の transfer で写す（§7.5 の 3.） |
+| R2 | （p002 で観測、§7.5）index の組と display の flag は見込みどおり。まだ参照される index を選ぶと firmware が断り、断られた後の出し直しは完了しない | index を生きた slot から厳密に選ぶ。断られた絵は ERROR（出し直さない） |
+| R3 | （p002 で否）decode が始まった後の 1 枚の frame buffer の更新（option 1）で次の DEC_PIC が完了しない（最初の decode の前の更新は効く） | 宛先の差し替えをやめ、pool と GPU の transfer を正の道にした（§7.5） |
 | R4 | firmware の DPB と app の DPB がずれる（app の規則違反、seek の後の RESET の抜け）、app の DPB の slot の数が firmware の求める数より少なく空きの index が無い | POC の比べで log。RESET で FLUSH_INSTANCE（SPS が同じなら組を保つ）。libmedia は seek の後に RESET を記録する。空きが無い時は ERROR（N は firmware の求める数 + 1 なので、規則を守る app では起こらない見込み） |
-| R5 | DEC_PIC ごとの read pointer が効かない | ring を続けて使う形（§7.3） |
+| R5 | （p002 で否）read pointer の戻し（SET_BS_RD_PTR は firmware が知らない、DEC_PIC の前の register の書き込みは効かない） | ring を続けて使う（§7.3）。wrap の扱いは p004 で確かめる |
 | R6 | 割り込みの番号・形（level・edge）が違う | poll の 1 ms に落とす（Linux の driver の fallback と同じ） |
 | R7 | NOC の制御（`vdec_noc_ctrl`）が要る | vendor の GPL の module の値を引用の規則で読む |
 | R8 | FBC の pool の連続の大きな allocation（4K で 1 枚 約 14 MB × 18）が取れない | 解像度の上限を下げて報告し直す（1080p の pool は 約 56 MB）。p007 で測る |
 | R9 | SLC の flush の費用・global な flush が他の session を遅らせる | 費用を測る。重ければ video の image の memory を SLC の迂回で map する（§17 D6 の代わり） |
 | R10 | Wave420L の参照の license（Q322-2） | 答えが C なら encode は WS330 の software だけ（p008〜p011 を取り下げ） |
-| R11 | firmware の file の版の違い（`chagall.bin` と `wave511_dec_fw.bin`） | SHA を比べ、vendor の kernel が使う物を選ぶ |
+| R11 | （p002 で済）chagall.bin（949120 B、版 0x2d46a）と wave511_dec_fw.bin（952768 B、版 0x38582）は別の byte。両方 boot し、probe の全 frame で同じ hash | 配るのは license の file がそろった chagall.bin（Q322-1）。driver は `/lib/firmware/wave511/chagall.bin` を読む |
 | R12 | 1 つの queue で decode を同期に待つので app の描画の submit が遅れる | p007 の非同期 |
-| R13 | 今の libmedia の readback（DISTINCT は flight 1、`vkvideo-runtime.c:1696,2582`）が uncached の memory を CPU で読む（PowerVR に host cached の type は無い、`vk-device.c:538-540`。uncached の書き込みで 8 MB に約 30 ms、`render.c:432-436`、読みはもっと遅い見込み）ので、1080p60 は届かず 30 も際どい | 1080p60 の受け入れは WS318 の GPU の道（p006b・p007a・p009）の後の p012。WS243 の I7・I9 と同じ問題 |
-| R14 | VPU の DMA が L2 を通る（tree は `dma-coherent`、vendor は L2 を書き戻す）と、uncached の view だけでは一貫しない | p002 の probe で確かめ、通るなら kernel の data cache の口で範囲を書き戻し・捨てる（§9.2） |
+| R13 | （第 3 版で訂正）libmedia の readback（uncached の memory を CPU で読む、PowerVR に host cached の type は無い）は 1080p60 に届かない見込み | readback は再生の道ではない（hash の照合の機能の試験の段だけ）。再生は Video Player の GPU の道（§9.3）。第 2 版の「1080p60 は WS318 の GPU の道の後」は誤りで、その道は WS243 で Video Player に既にある |
+| R14 | （p002 で観測）VPU は CPU の cache と一貫しない（tree の `dma-coherent` に反する） | uncached の view だけで触る今の形が正しい（§9.2）。追加の cache の保守は要らない |
 
 ## 17. 判断（根拠と、選ばなかった案）
 
 | # | 決定 | 根拠 | 選ばなかった案と理由 |
 | --- | --- | --- | --- |
 | D1 | PowerVR の device の family 0 に video を足す | ユーザーの決定（Vulkan Video として見せる、OS の API）。libmedia は decode と transfer を同じ device に求め、PowerVR の executor は memory・image・queue・fence を既に持つ（WS236 J1 と同じ理由） | 別の VkPhysicalDevice（全部の object を作り直す）、別の cdev と ioctl（ユーザーの決定に反する） |
-| D2 | DPB_AND_OUTPUT_DISTINCT、DPB は driver の FBC の pool | Wave5 の参照は FBC の形で sample できない。出力の linear は別の buffer に同時に書かれる（wave5-vpu-dec.c の linear と non-linear の登録）。今の libmedia は DISTINCT を扱える | COINCIDE（参照が linear でないので不可）、DPB の image に FBC を置く（firmware が FBC の buffer を自分で選ぶので Vulkan の slot と結べない） |
-| D3 | driver が Vulkan の slot と FB の index を結び、参照に使われていない index i を選び、1 枚の frame buffer の更新で linear[i] を宛先に差し替え、display の flag で i だけを使わせる。更新が使えない時は driver の pool と GPU の transfer | Wave5 の index は FBC と linear の組（§7.4）。参照の FBC を壊さずに zero copy にできる。今の libmedia の出力 1 枚でも参照を持つ絵が decode できる | 第 1 版の「linear を 1 枚だけ空ける」（参照を持つ絵で空きの FB が無くなる、review 1 の 1 番）、常に pool と copy（4K で毎秒 約 0.7 GB の読み書き）、DMA engine の copy（1 回ごとの poll、行ごとは遅い、GPU でない） |
+| D2 | DPB_AND_OUTPUT_COINCIDE（第 3 版で改めた）。DPB の slot の image は出力を兼ね、中身は pool の linear の写し。参照の FBC は driver が slot に結んで持つ | 出力は pool から GPU の transfer で写す（D3）ので、宛先はどの image でもよい。libmedia の GPU の道は DISTINCT を断る（`vkvideo-runtime.c:2629`）ので、COINCIDE なら libmedia を変えずに Video Player の GPU の道に載る。i915・nvrtx・Pi と同じ報告で、vkvideo-probe も今のまま | DISTINCT（第 2 版。libmedia の GPU の道に載らず、DISTINCT の道はどの実の driver でも未走行）、DPB の image に FBC を置く（firmware が FBC の buffer を自分で選ぶので Vulkan の slot と結べない） |
+| D3 | driver が Vulkan の slot と FB の index を結び、生きた slot に結ばれていない index i を選び、display の flag で i だけを使わせ、pool の linear[i] から GPU の transfer で宛先へ写す | Wave5 の index は FBC と linear の組（§7.4）。p002 で宛先の差し替え（1 枚の更新）は decode の後に効かず、断られた後の出し直しも完了しなかった（R2・R3）。写しは GPU で（guardrail「画像の処理は GPU で」） | 第 2 版の 1 枚の更新で宛先を差し替える zero copy（p002 で効かない）、第 1 版の「linear を 1 枚だけ空ける」（review 1 の 1 番）、DMA engine の copy（1 回ごとの poll、GPU でない） |
 | D4 | VPU の内部の buffer は driver が kernel の連続の memory で取り、session の memory の要求は 4 KiB の 1 つ | 大きさ（task の buffer）は INIT_SEQ の後にしか分からない。FBC は 1 枚ずつ連続が要る。WS236 と同じ | session の memory に置く（作成の時に大きさが決まらない、32 個の binding が要る） |
 | D5 | decode は同期で始める | 正しさが分かりやすい（nvrtx D2・Pi の最初と同じ）。速さは p007 | 最初から非同期（fence の点の kind を新しく作る手間を正しさの確かめの前に入れない） |
 | D6 | SLC は decode・encode の前後に flush で扱う | 既存の command で済み、memory の map を変えない | video の memory を SLC の迂回で map（bind の時の張り替えが要る、p007 の代わり）、全部の memory を迂回（GPU の描画が遅くなる） |
@@ -450,11 +454,11 @@ phase.md の「判断を待つ点」に背景・用語・選択肢・得失・�
 | --- | --- | --- | --- |
 | Q322-1 | VPU の firmware（`chagall.bin`・`monet.bin`、Chips&Media の binary だけの再配布・逆解析の禁止）を zedBSD-firmware に入れ、package で配るか | A: 入れる（PowerVR の firmware と同じ条件と形） | Q1（先例で決められる見込み） |
 | Q322-2 | Wave420L（H.265 encode）の register の参考に、StarFive の soft_3rdpart の Wave4 の source（file の SPDX は LGPL-2.1 OR BSD-3-Clause、dir の LICENSE.txt と header の文は proprietary）を値と手順の出典として使ってよいか | A: file の SPDX の BSD-3-Clause を採り、値と手順だけを block ごとに出典つきで使う（code は写さない）。食い違いは記録に残す | ユーザー（危険の受け入れ） |
-| Q322-3 | 受け入れの解像度と速さ: decode は 1080p60 と 4K30 まで出して確かめるか、1080p30 だけか | A: 4K まで報告し、受け入れは p004〜p007 で 1080p30 の再生と 4K30 の decode の正しさと時間、1080p60 の再生は WS318 の GPU の道の後の p012（R13） | ユーザー（範囲） |
+| Q322-3 | 受け入れの解像度と速さ: decode は 1080p60 と 4K30 まで出して確かめるか、1080p30 だけか | （答え 2026-11-01、ws.md の Q1 の判断）WS318 を待たず、既存の Video Player の GPU の道（VP_GPU_PRESENT）に載せ、受け入れはその道での再生で決める。第 2 版の推し（1080p60 は WS318 の GPU の道の後）の前提は誤りだった（R13） | ユーザー（済） |
 | Q322-4 | libvulkan の H.265 と encode の転送をどの WS が持つか（WS322 と WS319） | 先に着手する方。WS322 が先なら p005・p010 | Q1 |
 | Q322-5 | ws.md の題の「H.264 encode は … libavcodec」を「独自の software（WS329）」に直す | 直す（2026-11-01 の Q318-2 に合わせる） | Q1（master.md の行も） |
 | Q322-6 | 実装の Phase（p002〜p004）も WS318 の completed の前に始めてよいか（2026-11-01 の前倒しが明示したのは p001） | A: 始める（H.264 decode は今の libvulkan・libmedia で確かめられ、WS318 と file が重ならない） | Q1（ユーザーの指示の範囲の読み。違えばユーザーへ） |
-| Q322-7 | libmedia の DISTINCT の readback の道（どの実の driver でも未走行）に bug が出た時、WS322 の中で直すか、WS318 に渡すか | A: WS322 p004 の中で最小に直す（WS318 は p006 で frame の model を作り直すので、その前の今の code の直しは小さく済む）。WS318 の担当に知らせる | Q1 |
+| Q322-7 | libmedia の DISTINCT の readback の道（どの実の driver でも未走行）に bug が出た時、WS322 の中で直すか、WS318 に渡すか | （Q1 の答え A）第 3 版で COINCIDE に改めたので、この道を使わず前提が無くなった | Q1（済） |
 
 ## 19. HAL
 
@@ -468,13 +472,13 @@ phase.md の「判断を待つ点」に背景・用語・選択肢・得失・�
 | `src/drivers/platform/visionfive2/vf2-pmu.c`・`.h` | VDEC（3）・VENC（6）の domain を許す | VF2 の他の WS（BUG-387 の P4 の作業）と重ならないか Q1 が見る |
 | `src/drivers/platform/visionfive2/vf2-crg.c` | Wave511・Wave420L の clock と reset、AXIMEM0・AXIMEM1 の reset（clock は無い）、NOC の reset（31・32・52、要れば）の表の行 | 同上 |
 | `src/kern/platform/visionfive2.c` | VPU の place（builtin）と attach の呼び出し（`#if` の中） | 同上 |
-| `src/drivers/gpu/powervr/powervr.h`・`render-runtime.c`・`vk/vk-device.c`・`vk/vk-image.c`・`image-state.c`・`vk/vk-command.c`・`vk/vk-queue.c`・`vk/vk-transfer.c`・`vk/vk-object.c`・`vk/vk.h`、p007 は `render-queue.c`・`render-private.h` | §8 の hook | PowerVR の他の WS（WS291 ほか）と重ならないか Q1 が見る |
-| `userland/tests/vkvideo-probe/`（p004） | DISTINCT の対応 | WS083 の道具 |
+| `src/drivers/gpu/powervr/powervr.h`・`render.c`・`render-private.h`・`render-runtime.c`・`vk/vk-device.c`・`vk/vk-image.c`・`image-state.c`・`vk/vk-layout.c`・`vk/vk-pass.c`・`vk/vk-command.c`・`vk/vk-queue.c`・`vk/vk-transfer.c`・`vk/vk-object.c`・`vk/vk-stream.c`・`vk/vk.h`、p007 は `render-queue.c` | §8 の hook | PowerVR の他の WS（WS291 ほか）と重ならないか Q1 が見る |
+| `userland/tests/vkvideo-probe/`（p004） | 要れば PowerVR の linear の NV12 の読み（COINCIDE のまま） | WS083 の道具 |
 | `userland/desktop/libvulkan/`（p005・p010） | H.265・encode の転送 | WS319・WS318 と調整 |
 | `userland/firmware/`（README、新しい `wave511/`・`wave420l/`）、`config/drivers/firmware.list` | firmware の package | |
 | `platform/riscv64/vmunix.mk`（か VF2 の file の一覧）、`config/drivers/architecture/riscv64.drivers` | 新しい file と config（`CONFIG_DRIVER_VF2_VPU`、既定は p004 の実機の確かめまで n、`CONFIG_DRIVER_VF2_VPU_PROBE` は常に n） | |
 
-新しい file: `src/drivers/vpu/wave5-core.c`・`wave5-decode.c`・`wave5.h`、`src/drivers/vpu/wave4-core.c`・`wave4-encode.c`・`wave4.h`（encode の Phase）、`src/drivers/vpu/vpu-h264-ps.c`・`vpu-h265-ps.c`・`vpu-codec.h`、`src/drivers/platform/visionfive2/vf2-vpu.c`・`.h`、`src/drivers/gpu/powervr/vk/vk-video.c`・`vk-video-h264.c`・`vk-video-h265.c`・`vk-video-encode.c`、試験は `plan/ws322/tests/`。
+新しい file: `src/drivers/vpu/wave5-core.c`・`wave5-decode.c`・`wave5.h`、`src/drivers/vpu/wave4-core.c`・`wave4-encode.c`・`wave4.h`（encode の Phase）、`src/drivers/vpu/vpu-h264-ps.c`・`vpu-h265-ps.c`・`vpu-codec.h`、`src/drivers/platform/visionfive2/vf2-vpu.c`・`.h`、`src/drivers/gpu/powervr/video-engine.c`（p003、engine の登録）、`src/drivers/gpu/powervr/vk/vk-query.c`（p003）・`vk-video.c`・`vk-video-h264.c`・`vk-video-h265.c`・`vk-video-encode.c`、試験は `plan/ws322/tests/`。
 
 ## 21. review
 
