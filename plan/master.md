@@ -21,27 +21,22 @@
 **判断が解決した時（2026-10-30 ユーザー「判断事項が解決されたらcockpit.mdをアップデートするようにmaster.mdに記録してください。」）**: ユーザーが答えたら、同じ turn のうちに cockpit.md を直して commit する。その項目を「ユーザーの判断を待つ事」から外し、「決まった事」の節へ一行（日付・WS・決定の要約・記録した ws.md か ticket の link）で移す。決定で変わった担当の予定・WS の進捗の表も同じ時に直す。「決まった事」の節もセッションをまたいで残し、消すのはユーザーの指示か確認の後。
 
 <!-- master:agents:start -->
-**引き継ぎ（2026-11-01 07:07、Q1、host の再起動の前）**: ユーザーが host を再起動する（Vivado などで負荷が高い）。全担当をラップアップした。次のセッションの Q1 は [cockpit.md](cockpit.md)・この表・[queue.md](queue.md) の最後の行から再開する。
-**再起動の後の修理（2026-11-01 08:05、Q1）**: 07:22 の host の再起動で、06:56〜07:10 に書いた file が空になった（main の .git の object 242 個、作業ツリーの file）。GitHub の main（e33011813、07:11 に push 済み）から object を補い（空の object は /home/awe/zedBSD-recovery/empty-objects へ退避）、空の file を HEAD から戻した（main の 35 個、p8-ws074 の 49 個）。Sonnet の 5 本（s-ws335-p003・p006・p008、s-ws336-p004・p005）は push されておらず commit と checkout が消えたので、main e33011813 から worktree を作り直し、残っていた source と phase.md を commit し直した（下の表の SHA は作り直した物）。担当の worktree の build/ に、その時間の出力が空で残っている（約 850 個）。使う前にその出力を作り直す。`~/.local/bin/python3`・`~/.local/bin/vivado` も空（別のセッションの wrapper）。PATH の python3 は何もせずに 0 で終わるので、直るまで `/usr/bin/python3` を使う。
-**今の割り振り（2026-11-01 08:2x、ユーザーの指示）**: まず open の Bug を全部直す。Bug の担当は VF2（P1: BUG-386 → BUG-385）と RTX（P2: BUG-374）に 1 人ずつ。他は WS335（Sonnet p003）・WS336（Sonnet p004）・WS334（P7）・WS074（P8）に 1 人ずつ。
-再開の手順: (1) `git log -1` と registry の SHA を確かめる。(2) 担当は同じ名前・同じ worktree で起動し、phase.md の「再開点」・「結果」から続けさせる。worktree の build/ の toolchain は main の build/ への symlink（無ければ作ってから起動）。
-(3) /tmp は tmpfs で消える（P8 の /tmp/p8out の dev148・acid148 も消える。次の自走は測り直しから）。(4) 新しい worktree の作成は 10 分ほどかかる事がある（disk の負荷）。(5) Wine の新しい prefix は `wineboot -i` で作れない（WS335 の担当は s-ws335-p002 の build/tmp/ws335-wine を写す）。
+**引き継ぎ（2026-11-01 09:49、Q1、週の使用量の残りが少ないためユーザーの指示で全担当をラップアップ）**: 次のセッションの Q1 は [cockpit.md](cockpit.md)・この表・[queue.md](queue.md) の最後の行から再開する。
+**今の割り振り（2026-11-01、ユーザーの指示）**: Bug の修正を先に。Bug の担当は VF2・Pi 5（P1）と RTX（P2）に 1 人ずつ。他は WS335（Sonnet）・WS336（Sonnet）・WS334（P7）・WS074（P8）に 1 人ずつ。
+**注意**: `~/.local/bin/python3` と `~/.local/bin/vivado` は 07:22 の再起動で空の file（何もせず 0 で終わる）。python は `/usr/bin/python3`。shell の `grep` は binary を飛ばす wrapper（NUL の検査は `/usr/bin/grep`）。大きな I/O の後は `sync`（AGENTS.md §4）。壊れた object・worktree の退避は /home/awe/zedBSD-recovery/（要らなければ消してよい）。
 
-| 担当 | 最後の Queue | WS と次の 1 手（記録の場所） | 実機 |
-| --- | --- | --- | --- |
-| P7 | q1808-i01 ラップアップ | [WS334 p021](ws334/phase021/phase.md) 統合: p021 の commit は全部 main（8a27af470）、残りは run-unit all の単独の実行（phase.md の再開点のコマンド）→ 1 つの .exe の build と libkeiland の pthread 抜き（ws.md の 2026-11-01 の決定） | — |
-| P8 | q1727-i15 ラップアップ | [WS074](ws074/ws.md) phase260 の自走（100% まで、返却のたびに同じ目標で起動し直す）。i14 の終わりで 3,107（89.49%）、Acid2・3 100% | — |
-| Sonnet | q1820〜q1824 ラップアップ（全部 uncleared、source だけ commit、試験は未作成・未実行） | WS335 p003（s-ws335-p003 の 83a9cd131、cryc-sha3.c）・p006（s-ws335-p006 の c27c65007、cryc-chacha.c）・p008（s-ws335-p008 の 361aec12f、cryc-f25519.c、x25519 は未）、WS336 p004（s-ws336-p004 の 2418e1b03、ssh-cipher・ssh-packet）・p005（s-ws336-p005 の e22e7431c、ssh-key）。同じ worktree で起動し直し、各 phase.md の結果の節の「次の手」（試験を書く → 流す → 壊す確かめ）から続ける。main には未 merge | — |
-| P1〜P6 | 返却・ラップアップ | 割当なし（P3 の RTX は uncleared: G1 は (b) の設計とユーザーの判断が要る） | — |
+| 担当 | 次の Queue（pending、同じ worktree で起動し直す） | 中身 |
+| --- | --- | --- |
+| P1 | q1834 `p1-bug387` | [BUG-387](bugs/BUG-387.md): GPU の open の規則に `video` group の member を足す（ユーザーの答え）、Pi 5 の既定を rpi5gpu.start=boot（Q1 の判断）、既定の利用者を group に。Pi 5 は 10.0.30.7・SSH の利用者 user |
+| P2 | q1832 `p2-ws291g1`（返却の内容を見て） | [WS291](ws291/ws.md) p026: RTX の (b) push buffer を記録の時に組む設計（design-review を含む） |
+| P7 | q1837 `p7-ws334` | [WS334](ws334/ws.md) p025（script の core の archive と link） |
+| P8 | q1727-i18 `p8-ws074` | [WS074](ws074/ws.md) phase260 の自走（i17 の返却の再開点から） |
+| Sonnet | q1835 `s-ws335-p004` | [WS335](ws335/ws.md) p004 AES |
+| Sonnet | q1836 `s-ws336-p009` | [WS336](ws336/ws.md) p009 ssh-auth |
 
-**次のセッションの始めにする事**:
-1. P7 を同じ worktree で起動し直し、run-unit all の単独の実行から。Sonnet 5 人は同じ worktree で続きから（試験が通ってから受け入れて merge）。
-2. P8 を q1727-i16 で起動し直す。WS335・WS336 の Sonnet を各 phase の続きで起動し直す（WS335 の次の群: p004・p007・p015・p016・p025、WS336: p006・p007・p009）。
-3. WS337 shangrila: ユーザーとの質疑の続き（ws.md の「まだ決まっていない事」）。
-4. 未割当の Bug: [BUG-385](bugs/BUG-385.md)（VF2 の SD の retry を補強して ro にしない、ユーザーの指示で後で）・[BUG-386](bugs/BUG-386.md)（VF2 の en1）。
-5. 実機の今: Pi 5（10.0.30.7、SwitchBot 14C19FA80F86）と VF2（10.0.30.2、LAN は en0、SwitchBot 3 AC276E432AE6）は main b2392803f の kernel、5330 は BUG-382 を直した kernel、10.0.10.3 は Debian（RTX は vfio）。
-
-**止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd。HAL の差分の承認は無い。
+- 今日 cleared: WS334 p021・p022・p036、WS335 p003・p006・p008、WS336 p004〜p007。fixed: BUG-374・385・386（拾える試験あり）。BUG-388 は WS287 へ移管。
+- ユーザーの答えで設計の改訂が要る: WS318（libavcodec を使わない、MJPEG 無し、hardware が無ければ独自の software）、WS329（速さ優先、vector 化の Phase と intrinsics）。WS310（_OSC、デスクトップで壊すつもりで）・WS339（起動の画面を EDID に）・WS338（H.264 の速さ）は担当の割当待ち。
+- **止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd、[WS287](ws287/ws.md) EHCI の full・low speed（保留）。HAL の差分の承認は無い。
 <!-- master:agents:end -->
 
 **ユーザー不在の間の自律実行（2026-10-29 12:4x ユーザー「夜まで寝ます。しばらく質問に回答できないので、疑問で止まったphaseがあれば、質問はメッセージ表示だけしてクリック回答にはせず、別なphaseに移って作業を進めてください。」）**: 判断が要る Phase は uncleared・止めにして理由と要る判断を記録し、Q1 は問いをメッセージで書くだけ（クリックの問いにしない）。担当は別の Phase に移る。
