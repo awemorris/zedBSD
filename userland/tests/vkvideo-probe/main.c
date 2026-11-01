@@ -11,7 +11,7 @@
  * SHA-256 of each frame (ws083).
  *
  *   vkvideo-probe --list
- *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] STREAM.h264
+ *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264
  *
  * The list names each queue family with its flags and video codec
  * operations and the device's video extensions; on a device without video
@@ -41,9 +41,12 @@
  * vkCmdCopyImageToBuffer, both planes into a buffer of the image's layout,
  * in the decode's command buffer, and the hash and the dump read that
  * buffer (the decode's time then includes the copy).
- * With --reset-at-idr (ws322-p007), every IDR picture after the first is
+ * With --reset-at-idr, every IDR picture after the first is
  * decoded behind a coding reset, as a player records one after a seek;
- * the frames are the same.
+ * the frames are the same.  With --no-hash, the frames are decoded and
+ * neither read nor printed (for the decode's time over a long stream,
+ * where reading every frame would take longer than decoding it); it goes
+ * with neither --expect nor --dump.
  */
 
 #include "h264.h"
@@ -98,6 +101,7 @@ struct probe_options {
 	const char *dump;
 	int sampled;
 	int reset_at_idr;
+	int no_hash;
 };
 
 /* The decode times of a run with --time, in nanoseconds. */
@@ -222,7 +226,7 @@ main(
 	memset(&options, 0, sizeof(options));
 	status = probe_arguments(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] STREAM.h264\n");
+		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264\n");
 		return 2;
 	}
 
@@ -309,6 +313,13 @@ probe_arguments(
 			continue;
 		}
 
+		/* --no-hash: the frames are neither read nor printed. */
+		differs = strcmp(argument, "--no-hash");
+		if (differs == 0) {
+			options->no_hash = 1;
+			continue;
+		}
+
 		/* --dump=FILE: the decoded images. */
 		differs = strncmp(argument, "--dump=", 7U);
 		if (differs == 0) {
@@ -335,6 +346,8 @@ probe_arguments(
 	if (options->list && options->dump != NULL)
 		return -1;
 	if (options->list && options->sampled)
+		return -1;
+	if (options->no_hash && (options->expect != NULL || options->dump != NULL))
 		return -1;
 	if (!options->list && options->stream == NULL)
 		return -1;
@@ -1678,7 +1691,8 @@ probe_run(
 			printf("vkvideo-probe: picture %u status %d\n", frames, (int)probe->status);
 			output.failed++;
 		}
-		probe_hash(probe, (uint32_t)plan.setup, sps, text);
+		if (!options->no_hash)
+			probe_hash(probe, (uint32_t)plan.setup, sps, text);
 		if (dump != NULL) {
 			error = probe_dump(probe, (uint32_t)plan.setup, sps, dump, options->stream, frames, (int32_t)probe->status, text);
 			if (error != 0)
@@ -1698,7 +1712,8 @@ probe_run(
 			error = 3;
 			break;
 		}
-		probe_output_add(&output, picture.info.PicOrderCnt[0], text);
+		if (!options->no_hash)
+			probe_output_add(&output, picture.info.PicOrderCnt[0], text);
 		frames++;
 	}
 	probe_output_flush(&output);
