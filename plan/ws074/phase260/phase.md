@@ -1278,3 +1278,15 @@ Origin: 2026-10-27 ユーザーの指示。
   - position-try-cascade（!important・animation・transition に @position-try が勝たない）、position-try-backdrop（::backdrop の fallback）。
   - 右から左の文字を含む行の bidi（文字の順の反転と piece の並べ直し、paint の glyph の向きまで要る）。
 - 未実施: asan、host-NAME の全件、target の確認。
+
+### iframe の内容の描画の設計（続き 9、2026-11-01。依頼者の優先順位の 1 番）
+
+- 今までの状態: `<iframe>` は 300x150 の replaced box で、子文書は DOM・script・cascade（`bind_style_context_engine`）はあるが、layout tree が無く描かれない。
+  子文書の geometry の問い合わせ（`geometry_child_box`）だけは一時の layout tree を作っている。
+- 設計:
+  1. 段階 1（paint の合成）: paint が iframe の box を描く時、page が子文書の layout tree を作る（`layout_tree.frame_build` = `page_frame_build`: 子の cascade と viewport = iframe の content box の大きさで `layout_build`）。
+     その tree から子の display list を作り（`paint_build` を入れ子で呼ぶ）、items を iframe の content box の左上へずらして、content box の clip の中に追加する。
+     子の canvas の色（root か body の背景）は先に矩形で塗る（無ければ親が透ける）。子の list と tree は親の list（`paint_list.frames`）が持ち、親の list と同じ間生きる（glyph・画像・filter の指す先）。
+  2. 段階 2（更新）: 子文書が読み込み・変更されたら親を描き直す（今は親の generation が変わった時だけ）。子の scroll と、子の viewport の大きさ（iframe の大きさの変化）。
+  3. 段階 3（hit test・scroll・focus）: 親の座標から子の box を探す。子の中の click・scroll・caret。
+  4. 段階 4（view transition）: 子文書の transition と、iframe に view-transition-name を付けた時の撮影。

@@ -130,6 +130,8 @@ struct bind_box {
 	int scroll_vertical;
 	/* Whether the block scrolls its content (overflow other than visible and clip). */
 	int scrolls;
+	/* The zoom the box's lengths are under (0 when not known). */
+	double zoom;
 };
 
 /*
@@ -248,6 +250,8 @@ struct bind_host {
 	int (*node_box)(void *context, struct dom_node *node, struct bind_box *box);
 	/* The same for the box of an element's ::before or ::after pseudo-element (CSS_PSEUDO_ELEMENT_BEFORE or _AFTER). */
 	int (*pseudo_box)(void *context, struct dom_node *node, int pseudo, struct bind_box *box);
+	/* Paints the document an <iframe> shows now and keeps it, to show while the frame holds its painting. */
+	int (*frame_capture)(void *context, struct dom_element *element);
 	/*
 	 * Lists the rectangles of an inline node's lines (one for each line it takes part in): returns 1 and the count
 	 * (at most max) when the node is laid out as inline content, 0 when its one box is its rectangle.

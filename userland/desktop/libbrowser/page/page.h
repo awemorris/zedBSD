@@ -127,6 +127,8 @@ struct page {
 	double now;
 	uint32_t styled_generation;
 	uint32_t laid_out_generation;
+	/* The sum of the generations of the documents in the iframes when the page was laid out. */
+	uint64_t laid_out_frames;
 	/* Only successful same-origin child navigations observed by this page. */
 	struct wb_vector visited_urls;
 	uint32_t visits_generation;
@@ -153,6 +155,8 @@ struct page {
 	struct wb_vector prefetched;
 	/* Pending child responses own temporary native roots until task completion. */
 	struct wb_vector frame_loads;
+	/* The painted documents of the page's iframes, the last ones made (struct frame_cache_entry). */
+	struct wb_vector frame_cache;
 	/* Defer nested child-response checkpoints while the outer snapshot drains. */
 	int frames_running;
 	/* The window's load event waits for the frames the document embeds. */
@@ -352,6 +356,9 @@ struct css_engine *page_selector_engine(void *context);
 int page_grid_tracks(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *leading, int *repeats, int *found);
 int page_node_box(void *context, struct dom_node *node, struct bind_box *box);
 int page_pseudo_box(void *context, struct dom_node *node, int pseudo, struct bind_box *box);
+int page_frame_capture(void *context, struct dom_element *element);
+uint64_t page_frames_generation(const struct page *page);
+int page_frame_paint(void *context, const struct dom_element *element, layout_unit width, layout_unit height, float zoom, struct paint_frame **out);
 int page_node_rects(void *context, struct dom_node *node, struct bind_rect *rects, size_t max, size_t *count);
 int page_view_transition(void *context, int step);
 int page_vt_pseudo_style(void *context, struct dom_element *element, int pseudo, const struct vm_string *name, struct css_style *style);

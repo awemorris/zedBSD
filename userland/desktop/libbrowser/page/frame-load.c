@@ -30,6 +30,12 @@ struct frame_load {
 	int srcdoc;
 };
 
+/* The painted frame of an iframe the page keeps (the last one made), for a frame whose painting is held. */
+struct frame_cache_entry {
+	const struct dom_element *element;
+	struct paint_frame *frame;
+};
+
 static void frame_load_release(struct frame_load *load);
 static void frame_load_done(void *context, struct net_request *request);
 static int frame_load_drain(struct page *page, int error);
@@ -55,6 +61,7 @@ page_frames_init(
 {
 	/* Stable allocated records, rather than movable vector slots, own VM root addresses. */
 	wb_vector_init(&page->frame_loads, sizeof(struct frame_load *));
+	wb_vector_init(&page->frame_cache, sizeof(struct frame_cache_entry));
 	page->frames_running = 0;
 
 	/* Succeeded: no resource task or temporary root exists yet. */
@@ -80,6 +87,11 @@ page_frames_release(
 
 	/* Release task storage after every stable record is gone. */
 	wb_vector_release(&page->frame_loads);
+
+	/* The painted frames the page kept. */
+	for (index = 0; index < page->frame_cache.count; index++)
+		paint_frame_release(((struct frame_cache_entry *)wb_vector_at(&page->frame_cache, index))->frame);
+	wb_vector_release(&page->frame_cache);
 
 	/* Succeeded: loader completion cannot call this Page again. */
 	return;
@@ -1257,7 +1269,7 @@ frame_size_walk(
 				child = (const struct vm_realm *)element->child_context;
 				window = child->host;
 				if (window != NULL && !window->detached)
-					bind_window_set_viewport(window, (int)layout_to_px(box->width), (int)layout_to_px(box->height));
+					bind_window_set_viewport(window, (int)(layout_to_px(box->width) / (box->style.zoom_eff > 0.0f ? box->style.zoom_eff : 1.0f)), (int)(layout_to_px(box->height) / (box->style.zoom_eff > 0.0f ? box->style.zoom_eff : 1.0f)));
 			}
 		}
 		frame_size_walk(box->first_child);
@@ -1270,4 +1282,191 @@ page_frames_size(
 {
 	if (page->laid_out && page->layout.root != NULL)
 		frame_size_walk(page->layout.root);
+}
+
+/* Finds the entry the page keeps for an iframe (NULL when it has none). */
+static struct frame_cache_entry *
+frame_cache_find(
+	struct page *page,
+	const struct dom_element *element)
+{
+	struct frame_cache_entry *entry;
+	size_t index;
+
+	for (index = 0; index < page->frame_cache.count; index++) {
+		entry = wb_vector_at(&page->frame_cache, index);
+		if (entry->element == element)
+			return entry;
+	}
+	return NULL;
+}
+
+/*
+ * Lays out and paints the document an <iframe> element shows in a viewport of a size, and keeps the result in the
+ * page's cache (NULL out when the frame has no document or cascade yet; otherwise a reference the caller releases).
+ */
+static int
+frame_make(
+	struct page *page,
+	const struct dom_element *element,
+	layout_unit width,
+	layout_unit height,
+	float zoom,
+	struct paint_frame **out)
+{
+	struct bind_window *window;
+	struct css_engine *engine;
+	struct layout_tree *tree;
+	struct paint_frame *frame;
+	struct frame_cache_entry *entry;
+	struct frame_cache_entry made;
+	int viewport_width;
+	int viewport_height;
+	int status;
+
+	*out = NULL;
+	window = bind_frame_child(&element->node);
+	if (window == NULL || window->detached || window->document == NULL)
+		return 0;
+	status = bind_window_child_styles(window, &engine, &viewport_width, &viewport_height);
+	if (status != 0 || engine == NULL || window->detached)
+		return 0;
+	viewport_width = layout_to_px(width) > 0 ? (int)layout_to_px(width) : viewport_width;
+	viewport_height = layout_to_px(height) > 0 ? (int)layout_to_px(height) : viewport_height;
+	tree = calloc(1, sizeof(*tree));
+	frame = calloc(1, sizeof(*frame));
+	if (tree == NULL || frame == NULL) {
+		free(tree);
+		free(frame);
+		return ENOMEM;
+	}
+	css_engine_set_base_zoom(engine, zoom);
+	status = layout_build(tree, engine, &page->text, window->document, page_image_of, page_image_by_url, page,
+	    layout_from_px((float)viewport_width), layout_from_px((float)viewport_height), 0, 0, NULL);
+	if (status != 0) {
+		layout_release(tree);
+		free(tree);
+		free(frame);
+		return 0;
+	}
+	tree->image_variant = page_image_variant;
+	tree->frame_paint = page_frame_paint;
+	frame->tree = tree;
+	frame->refs = 1;
+	status = paint_build(&frame->list, tree);
+	if (status != 0) {
+		paint_frame_release(frame);
+		return status;
+	}
+
+	/* The page keeps it too, for as long as the frame's painting may be held. */
+	frame->refs++;
+	entry = frame_cache_find(page, element);
+	if (entry != NULL) {
+		paint_frame_release(entry->frame);
+		entry->frame = frame;
+	} else {
+		made.element = element;
+		made.frame = frame;
+		if (wb_vector_push(&page->frame_cache, &made) != 0)
+			frame->refs--;
+	}
+	*out = frame;
+	return 0;
+}
+
+/*
+ * Gives the painted document an <iframe> element shows, for the painting of the page (a reference the caller
+ * releases; NULL when the frame has no document or no cascade yet).  While the frame's document holds its
+ * painting (a view transition's update callback is running) the one kept is given again.
+ */
+int
+page_frame_paint(
+	void *context,
+	const struct dom_element *element,
+	layout_unit width,
+	layout_unit height,
+	float zoom,
+	struct paint_frame **out)
+{
+	struct page *page;
+	struct bind_window *window;
+	struct frame_cache_entry *entry;
+
+	page = context;
+	*out = NULL;
+	window = bind_frame_child(&element->node);
+	if (window == NULL || window->detached || window->document == NULL)
+		return 0;
+	entry = frame_cache_find(page, element);
+	if (window->frame_hold && entry != NULL) {
+		entry->frame->refs++;
+		*out = entry->frame;
+		return 0;
+	}
+	return frame_make(page, element, width, height, zoom, out);
+}
+
+/* Paints the document an <iframe> shows as it is now and keeps it (the frame is then asked to hold it). */
+int
+page_frame_capture(
+	void *context,
+	struct dom_element *element)
+{
+	struct page *page;
+	struct paint_frame *frame;
+	const struct layout_box *box;
+	int error;
+
+	page = context;
+	if (!page->laid_out)
+		return 0;
+	box = layout_box_of(&page->layout, &element->node);
+	if (box == NULL)
+		return 0;
+	error = frame_make(page, element, box->width, box->height, box->style.zoom_eff, &frame);
+	if (error == 0 && frame != NULL)
+		paint_frame_release(frame);
+	return error;
+}
+
+/* Adds up the generations of the documents the iframes below a document hold (a change in any of them changes the sum). */
+static uint64_t
+frame_generation_walk(
+	const struct dom_node *node,
+	int depth)
+{
+	const struct dom_node *child;
+	const struct dom_element *element;
+	const struct vm_realm *realm;
+	const struct bind_window *window;
+	uint64_t sum;
+
+	sum = 0;
+	if (depth > 64)
+		return 0;
+	if (node->type == DOM_ELEMENT) {
+		element = (const struct dom_element *)node;
+		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_IFRAME && element->child_context != NULL) {
+			realm = (const struct vm_realm *)element->child_context;
+			window = realm->host;
+			if (window != NULL && !window->detached && window->document != NULL) {
+				sum += window->document->generation + 1U + (window->frame_hold ? 1000003U : 0U);
+				sum += frame_generation_walk(&window->document->node, depth + 1);
+			}
+		}
+	}
+	for (child = node->first_child; child != NULL; child = child->next)
+		sum += frame_generation_walk(child, depth + 1);
+	return sum;
+}
+
+/* The sum of the generations of the documents in the page's iframes, which the page's layout notes (the frames are painted into it). */
+uint64_t
+page_frames_generation(
+	const struct page *page)
+{
+	if (page->document == NULL)
+		return 0;
+	return frame_generation_walk(&page->document->node, 0);
 }

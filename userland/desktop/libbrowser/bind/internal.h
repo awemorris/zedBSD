@@ -253,6 +253,8 @@ struct bind_window {
 	double now;
 	int viewport_width;
 	int viewport_height;
+	/* A frame's document is holding its painting (a view transition's update callback is running): the page shows the last one. */
+	int frame_hold;
 	const char *ready_state;
 	/* Set once the window's load event has finished dispatching. */
 	int load_ended;
