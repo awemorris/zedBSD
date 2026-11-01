@@ -432,8 +432,8 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-392](bugs/BUG-392.md) | 初期の PIN を 0000 にし、login・lock の画面で PIN の入力を既定に（UAT の要望） | fixed（2026-11-02 P8、q1890、bd3a783d4、main マージ済み。PIN 4〜6 桁、起動直後から PIN、誤りは root の file に、新しい account と image の user に 0000。QEMU で確認、Pi 5 は未実施） |
 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の driver が起動時にテストの描画（自己試験）を行う | fixed（2026-11-02 P3 q1891-i01、自己試験と試験の絵は既定で off・`rpi4gpu.selftest=1` で on、R1・P1 も短く、Pi 4 も同じ。Pi 5 の実機で自己試験の行 0・desktop と mview OK・storage まで 6315→1203 ms。Pi 4 の実機は未実施） |
 | [BUG-394](bugs/BUG-394.md) | 起動が長い（network の待ちが desktop の前に戻った見込み）、init が desktop を優先して順番を組めるように | fixed（2026-11-02 P7: init は kmsg=console の debug の起動の他は login を先に・network などを後に。sessiond は desktop の最初の起動に失敗しても印を置き network を待たせない。QEMU と Pi 5 で確かめた。Pi 5 の desktop までの時間は画面が検出されず未計測。GPU の self-test の待ちは BUG-393） |
-| [BUG-395](bugs/BUG-395.md) | Windows 版ブラウザ: 題の帯の address の欄の部分を drag して窓を動かせず、double click で最大化もできない | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P8） |
-| [BUG-396](bugs/BUG-396.md) | Windows 版ブラウザ: Reload の button が文字で、icon でない | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P8） |
+| [BUG-395](bugs/BUG-395.md) | Windows 版ブラウザ: 題の帯の address の欄の部分を drag して窓を動かせず、double click で最大化もできない | fixed（2026-11-02 P8 q1914-i01、ad14a7ab44: address の欄を低く・最大 800 px にし、右に 96 px 以上の何も無い帯を残した（そこが HTCAPTION）。Wine で hit test・drag・double click を確認、本物の Windows は未実施） |
+| [BUG-396](bugs/BUG-396.md) | Windows 版ブラウザ: Reload の button が文字で、icon でない | fixed（2026-11-02 P8 q1914-i01、ad14a7ab44: KL_CONTROL_RELOAD を足し、Windows は ↻ の icon を Back・Forward の次に。zedBSD などの compositor は protocol に役割が無く文字のまま（ticket の「残り」）。本物の Windows は未実施） |
 | [BUG-397](bugs/BUG-397.md) | Windows 版ブラウザ: Google の頁の「サイト」の link を click すると app が固まって応答しなくなる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
 | [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザ: Google の app の一覧の button（右上の四角の並び）を押しても一覧が正しく出ない | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P7） |
 | [BUG-399](bugs/BUG-399.md) | Windows 版ブラウザ: Google の検索の入力欄を click すると、入力できる範囲が右へ窓の幅いっぱいに伸びる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
