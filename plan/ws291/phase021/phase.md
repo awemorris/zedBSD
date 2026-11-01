@@ -2,9 +2,9 @@
 
 # ws291-p021: Raspberry Pi 5（V3D 7.1）で重い 3D の model を、スペックの比で決めた目標の fps に
 
-Status: in-progress（2026-11-01 05:45 P4 q1784-i06: 画面が出て、画面の mview c74 49.2〜49.9 fps（目標 50 の境）、desktop は定常 60・launch 57・drag 58。再開点は末尾。06:49 P4 q1817-i01: main b2392803f は Pi 5 で final2 と同じ（回帰なし、checksum 同じ）、VF2 の game mode は c1 136→168・c13 51.6→56.0 fps）
+Status: in-progress（2026-11-01 21:16 P3 q1840-i02: 6d4ef0df9（pool と overflow の dcache clean を省く）で画面の c74 は 4 つの起動で 51.58〜52.93 fps、offscreen c74 53.5〜55.5、desktop は前と同じ。cleared の判定は Q1。以下は前の記録。2026-11-01 05:45 P4 q1784-i06: 画面が出て、画面の mview c74 49.2〜49.9 fps（目標 50 の境）、desktop は定常 60・launch 57・drag 58。再開点は末尾。06:49 P4 q1817-i01: main b2392803f は Pi 5 で final2 と同じ（回帰なし、checksum 同じ）、VF2 の game mode は c1 136→168・c13 51.6→56.0 fps）
 Parent: [WS291](../ws.md)
-Queue: q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）、q1784-i05・i06（P4、2026-11-01）、q1817-i01（P4、2026-11-01、main の計測だけ）
+Queue: q1840-i01・i02（P3、2026-11-01）、q1729（P4）、q1730（P4、2026-10-30 再起動）、q1784-i04（P4、2026-11-01、p025 から移る）、q1784-i05・i06（P4、2026-11-01）、q1817-i01（P4、2026-11-01、main の計測だけ）
 
 ## 目的
 
@@ -367,3 +367,53 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
 2. c74 の GPU（bin 9.3・render 8.9 ms、どちらも front-end で詰まる、3.7〜3.9 cycle/primitive）: primitive の数を減らす手（back-face の cull の material は少ない）は scene の側。driver の側は残りが小さい。
 3. desktop の窓が出る時の hitch: 新しい image の初めての TFU（1920x1080 で 3〜5 ms、2048x2048 で 10 ms）と glass の blur の render（8〜16 ms）。image を作る時から sample できる配置（OPTIMAL の image を UIF で持つ）にするのが根の直しで、大きい。
 4. drag の 58 fps は入力の注入の間隔と vblank のうなりで、driver ではない（frame-ops の入力の間隔を 16.67 ms に合わせれば消える見込み、未確認）。
+
+## 記録（P3 q1840-i01・i02、2026-11-01 20:19〜21:16）
+
+- worktree p3-ws291p021（branch agent/p3-ws291p021、基点 272e6c226、V3D の driver は main b2392803f と同じ）。i01 の途中で板を P4（BUG-387）に 20:30〜20:44 渡した。
+
+### 直列の CPU の時間の内訳（変更の前、板の kernel は main b2392803f の 3102800023）
+
+- offscreen c74（`MVIEW=build/p3-base/bin/mview TFU=1 COPIES='21 74' FRAMES=301 sh plan/ws291/tests/rpi5-offscreen.sh build/tmp/p3-off0`、長く動いた起動）: 44.74 fps（22.35 ms、busy 80 %、遅い側）。
+  再起動の後（build/tmp/p3-off1）: 50.75 fps（19.70 ms、busy 93 %）。checksum 224da3e7。
+- どちらの起動も 1 submission は total 19.18 ms = prep 0.56（うち clean 0.387）＋ exec 18.24（bin 9.31・render 8.92）＋ rel 0.377。
+  mview は既定で inflight=1 なので、frame は decode・prep・GPU・release・thread の起こしの直列の和になる。
+- clean と rel のほぼ全部は、pass の tile-list の pool と 4 つの overflow の予備（c74 で約 16 MiB）の dcache clean だった。prep で 1 回、release の cache_put で 1 回、毎 pass に 2 回。
+  これらは GPU だけが書いて読む領域で、CPU は書かない。
+
+### 6d4ef0df9: device 専用の storage（clean を省く）
+
+- `BCM2711_NATIVE_STORAGE_DEVICE`（native-storage.h・.c）: CPU が保持の間に何も書かない storage。cache から取った view は（cache_put が clean したので）dirty な line を持たないので、zeroing も clean もしない。
+  新しく作った物は zeroing の後に 1 回だけ clean し、release では cache_put の clean を省く。pass の pool と overflow（vulkan-native-pass.c）だけがこの種類。4.2・7.1 共有。
+- 診断（6d44fdffe・5b25760f3・48f14bb02）: v3d.perf=1 の report に `v3d: chain`（細かい counter の µs の平均: request の FIFO の待ち・worker の時間、
+  execution の queue の待ち、最後の step から completion の配達まで、executor の idle（前の配達から空の queue に次が来るまで））。
+- build: Pi 5（config-rpi5-shot.mk、build/p3-c/vmunix cksum 604485635、tip 48f14bb02）と Pi 4（config/ci/config-rpi4.mk、6d44fdffe の時点）が warning 0。
+
+### 実機（Pi 5、10.0.30.7、4 つの起動、kernel は build/p3-b（166931161、5b25760f3）と build/p3-c（604485635、48f14bb02）、program は build/p3-b）
+
+- 画面: `PI5=10.0.30.7 KERNEL=… PROGRAMS=build/p3-b COPIES='… 74' SPIN=12 MVIEW_ARGS=--model=/root/p021/qs40 sh plan/ws291/tests/rpi5-mview.sh OUT`（game・mailbox・4 枚、全部 `KWL SCANOUT direct=1`）。
+- offscreen: `MVIEW=build/p3-b/bin/mview TFU=1 COPIES='… 74' FRAMES=301 sh plan/ws291/tests/rpi5-offscreen.sh OUT`。証拠は build/tmp/p3-s1・p3-o1・p3-r1・p3-r2・p3-r3。
+
+| fps | 前（P4 の記録・今日の基準） | 起動 1（p3-b） | 起動 2 | 起動 3 | 起動 4 |
+| --- | --- | --- | --- | --- | --- |
+| 画面 c74 | 49.18〜50.67 | **52.93** | **51.69** | **51.58** | **52.71** |
+| 画面 c21 | 104.5〜114.6 | 110.58 | 118.68 | 122.29 | 125.11 |
+| offscreen c74 | 44.74・50.75（今日）、48.3〜52.26 | **55.53** | **53.53** | **54.52** | **54.63** |
+| offscreen c21 | 107.6〜113.8 | 117.28 | 123.15 | 122.85 | 123.46 |
+
+- checksum は全 run で同じ（c1 0c6e08c7・c21 dd5f82af・c62 90ab3e0f・c74 224da3e7）。起動 1 の offscreen c62 は 59.44 fps。
+- c74 の kernel の 1 submission（offscreen）: total 17.6〜18.3 ms、prep 0.15〜0.18 ms、clean 0〜0.03、exec 17.4〜18.1（bin 9.1〜9.3・render 8.3〜8.8）、rel 0〜0.01、busy 97 %。
+  chain: worker 107〜110 µs、finish 215 µs、idle（mview の起床・記録・submit）約 210 µs。
+- 4 つの起動とも遅い側（busy 80 %）は出なかった。前の遅い起動の原因は未特定（executor の外の待ち。chain の行で次に出た時に分かる）。
+- 起動 3・4 の offscreen の最初の c74 で SSH が切れた（`Connection reset by peer`）。板の dmesg は `gem: en0 link down` の後に `link up 100 Mbps`（前は 1000 Mbps）。網の link の揺れで、GPU の run は最後まで走った（perf の行あり）。同じ起動で c74 だけを流し直した値を表に入れた。
+- desktop（`PI5=10.0.30.7 CONSOLE=0 RUNS=2 KERNEL=build/p3-c/vmunix AAT=build/p3-c/bin/aat-input sh plan/ws291/tests/rpi5-desk.sh build/tmp/p3-desk`）: launch 60・61、type 61・61、output 65・64、drag 60・59、home 60・60、wiseview 62・63 fps（前の main と同じ）。kernel の fault の数え 3 は起動の self-test の V9。
+- 未実施: Pi 4 の実機（共有の code の変更）、電源の入れ直しを挟む起動（今回は全部 reboot）。
+
+### 板の状態（2026-11-01 21:16、10.0.30.7）
+
+- /boot/boot0/vmunix: build/p3-c/vmunix（604485635、48f14bb02）。cmdline.txt `login=console v3d.perf=1`（rpi5-desk.sh が戻した）。/bin/aat-input は build/p3-c の物、/root/p021/bin は build/p3-b の mview・wayland と mview-off。
+
+## 判定（2026-11-01 21:16 Q1）
+
+- cleared。受け入れ（Pi 5、qs40 の c74、1920x1080 で 50 fps）を画面の direct scanout で 4 つの起動とも満たした（51.58〜52.93 fps）。checksum は全 run で同じ、desktop は前の main と同じ。
+- 残り（この Phase の外）: Pi 4 の実機の回帰（6d4ef0df9 は 4.2 と 7.1 で共有）、遅い起動の原因（今回は出ず）、起動 3・4 の en0 の link の揺れ（1000 → 100 Mbps）。

@@ -26,7 +26,7 @@
 #define NATIVE_SNAPSHOT_UPDATE_BYTES (256U * 1024U)
 
 static struct bcm2711_v3d_view *cache_take(struct bcm2711_v3d_space *space, uint64_t bytes, uint64_t owner);
-static bool cache_put(struct bcm2711_v3d_space *space, struct bcm2711_v3d_view *view);
+static bool cache_put(struct bcm2711_v3d_space *space, struct bcm2711_v3d_view *view, bool clean);
 static int storage_cleanable(const struct bcm2711_native_storage *storage);
 static int snapshot_fill(struct bcm2711_native_snapshot *snapshot, const void *raster, size_t raster_bytes);
 static int snapshot_narrow(struct bcm2711_native_snapshot *snapshot, const void *indices, size_t indices_bytes);
@@ -87,7 +87,8 @@ bcm2711_native_storage_create_as(
 		return EINVAL;
 	if (fill != BCM2711_NATIVE_STORAGE_ZEROED &&
 	    fill != BCM2711_NATIVE_STORAGE_WRITTEN &&
-	    fill != BCM2711_NATIVE_STORAGE_OWNED)
+	    fill != BCM2711_NATIVE_STORAGE_OWNED &&
+	    fill != BCM2711_NATIVE_STORAGE_DEVICE)
 		return EINVAL;
 
 	/* Placement uses actual physical addressing capacity, without a guessed bus alias or framebuffer limit. */
@@ -105,16 +106,22 @@ bcm2711_native_storage_create_as(
 	if (fill == BCM2711_NATIVE_STORAGE_OWNED)
 		created->owner = space->builder;
 
+	/* A device-only storage skips the cleans of a cache that has no dirty line of it. */
+	if (fill == BCM2711_NATIVE_STORAGE_DEVICE)
+		created->device = true;
+
 	/*
 	 * An idle cached view of the same size is reused with its mapping:
 	 * zeroed again, or as it is for a caller that writes every byte the
-	 * device may read, or for an owned use when the same session left it
-	 * (counted apart).
+	 * device may read or for a device-only use, or for an owned use when
+	 * the same session left it (counted apart).  The cache keeps no dirty
+	 * line, so a device-only view taken from it is already clean.
 	 */
 	started = clock_ticks();
 	view = cache_take(space, bytes, created->owner);
 	if (view != NULL) {
 		keep = fill == BCM2711_NATIVE_STORAGE_WRITTEN ||
+		    fill == BCM2711_NATIVE_STORAGE_DEVICE ||
 		    (fill == BCM2711_NATIVE_STORAGE_OWNED && created->owner != 0 && view->owner == created->owner);
 		if (!keep)
 			kern_memset(view->buffer->address, 0, (size_t)view->bytes);
@@ -126,6 +133,7 @@ bcm2711_native_storage_create_as(
 		else
 			bcm2711_buffer_zeroed(view->bytes, created->allocation_ticks);
 		created->stale = keep;
+		created->clean = created->device;
 		created->space = space;
 		created->view = view;
 		created->bytes = bytes;
@@ -181,10 +189,18 @@ bcm2711_native_storage_clean(
 		return error;
 	buffer = storage->view->buffer;
 
+	/* A device-only storage with no dirty line has nothing to write back. */
+	if (storage->clean)
+		return 0;
+
 	/* Cache maintenance completes CPU writes before the caller's later command publication barrier. */
 	started = clock_ticks();
 	kern_dcache_clean_range(buffer->address, (size_t)buffer->memory.size);
 	storage->clean_ticks += clock_ticks() - started;
+
+	/* A device-only storage stays clean from here: the CPU writes nothing more into it. */
+	if (storage->device)
+		storage->clean = true;
 
 	/* Succeeded: device reads can consume the immutable upload bytes without a dirty CPU cache alias. */
 	return 0;
@@ -326,7 +342,7 @@ bcm2711_native_storage_release(
 	/* An idle view of a reusable size stays mapped for the next pass, marked with the session its bytes may belong to. */
 	*storage = NULL;
 	owned->view->owner = owned->owner;
-	cached = cache_put(space, owned->view);
+	cached = cache_put(space, owned->view, owned->clean);
 	if (cached) {
 		space->native->hardware.perf.views_cached++;
 		kern_free(owned);
@@ -843,11 +859,12 @@ cache_take(
 	return view;
 }
 
-/* Keeps one retired private upload view mapped for reuse when it fits the cache. */
+/* Keeps one retired private upload view mapped for reuse when it fits the cache; clean says it has no dirty line. */
 static bool
 cache_put(
 	struct bcm2711_v3d_space *space,
-	struct bcm2711_v3d_view *view)
+	struct bcm2711_v3d_view *view,
+	bool clean)
 {
 	/* Only a sole, healthy, cached-RAM private view of bounded size is kept. */
 	if (view->references != 1 ||
@@ -866,9 +883,11 @@ cache_put(
 	/*
 	 * The cache keeps no dirty line: a view given again
 	 * without zeroing must not later write back the bytes of a user that
-	 * failed before cleaning over what the device wrote since.
+	 * failed before cleaning over what the device wrote since.  A
+	 * device-only view cleaned since its zeroing has none.
 	 */
-	kern_dcache_clean_range(view->buffer->address, (size_t)view->buffer->memory.size);
+	if (!clean)
+		kern_dcache_clean_range(view->buffer->address, (size_t)view->buffer->memory.size);
 
 	/* Pushes the view on the list of its size class. */
 	if (view->bytes == 4096U) {

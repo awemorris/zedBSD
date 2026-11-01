@@ -91,6 +91,9 @@ struct bcm2711_render_execution {
 	uint64_t bytes;
 	/* The execution uses a run the display holds (a frame, a present copy, the cursor): it runs first. */
 	bool display;
+	/* Diagnostic: the fine counter in nanoseconds when it was queued, and whether its first step began. */
+	uint64_t queued_ns;
+	bool started;
 	/*
 	 * Set by a failed step whose failure is the engine's (a launched pass,
 	 * translations that could not be published, uncertain retirement); a step
@@ -113,8 +116,9 @@ struct bcm2711_render_request {
 	uint32_t state;
 	int canceled;
 	bool supervised;
-	/* Diagnostic tick count when the request entered the FIFO. */
+	/* Diagnostic tick count, and fine counter in nanoseconds, when the request entered the FIFO. */
 	uint64_t queued_ticks;
+	uint64_t queued_ns;
 	/* A parked domain completion is released once its session has executed this many executions. */
 	uint64_t required;
 	/*

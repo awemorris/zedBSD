@@ -721,6 +721,7 @@ report_perf(
 	uint64_t released_ticks;
 	uint64_t created[9];
 	uint64_t in_use;
+	uint64_t last_end;
 
 	/* The first submission opens the window that later reports measure. */
 	now = clock_ticks();
@@ -874,6 +875,20 @@ report_perf(
 			perf->decode_objects_max);
 	}
 
+	/* The submission chain's averages on the fine counter: what a client waiting for each submission waits for besides the steps. */
+	if (perf->chain_requests != 0U && perf->chain_executions != 0U && perf->chain_finishes != 0U) {
+		perf_append(
+			"v3d: chain requests=%llu fifo_us=%llu worker_us=%llu executions=%llu queue_us=%llu finish_us=%llu idles=%llu idle_us=%llu\n",
+			(unsigned long long)perf->chain_requests,
+			(unsigned long long)(perf->chain_fifo_ns / perf->chain_requests / 1000U),
+			(unsigned long long)(perf->chain_worker_ns / perf->chain_requests / 1000U),
+			(unsigned long long)perf->chain_executions,
+			(unsigned long long)(perf->chain_queue_ns / perf->chain_executions / 1000U),
+			(unsigned long long)(perf->chain_finish_ns / perf->chain_finishes / 1000U),
+			(unsigned long long)perf->chain_idles,
+			(unsigned long long)(perf->chain_idles != 0U ? perf->chain_idle_ns / perf->chain_idles / 1000U : 0U));
+	}
+
 	/* Where the alloc time goes: the runs made (the allocator and their zeroing) and the reused runs zeroed again. */
 	bcm2711_buffer_create_stats(created);
 	if (created[0] != 0U || created[4] != 0U || created[7] != 0U) {
@@ -929,10 +944,12 @@ report_perf(
 		perf->memory_refusals,
 		(unsigned long long)(perf->memory_refused_bytes / 1024U));
 
-	/* The next window starts empty at this report; the budget in use carries over. */
+	/* The next window starts empty at this report; the budget in use and the chain's last delivery carry over. */
 	in_use = perf->memory_bytes;
+	last_end = perf->chain_last_end_ns;
 	kern_memset(perf, 0, sizeof(*perf));
 	perf->window_start = now;
+	perf->chain_last_end_ns = last_end;
 	native_perf_window = true;
 	native_slow_lines = 0;
 	perf->memory_bytes = in_use;

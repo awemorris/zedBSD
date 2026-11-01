@@ -868,8 +868,8 @@ prepare_lists(
 	if (error != 0)
 		return error;
 	prepare_image(storage, &tile);
-	/* The binner writes the tile lists it later reads into the pool; a reused pool is not zeroed. */
-	error = allocate_storage(pass, sizes.pool, BCM2711_NATIVE_STORAGE_WRITTEN, remaining, &storage);
+	/* The binner writes the tile lists it later reads into the pool, which the CPU never touches; a reused pool is neither zeroed nor cleaned. */
+	error = allocate_storage(pass, sizes.pool, BCM2711_NATIVE_STORAGE_DEVICE, remaining, &storage);
 	if (error != 0)
 		return error;
 	pass->state.pool = storage->view->address;
@@ -904,15 +904,15 @@ prepare_lists(
 	job = &pass->job.command.cl;
 	overflow = overflow_bytes(pass);
 	for (index = 0; index < 4U; index++) {
-		/* The binner reads only what it wrote into an overflow reserve; a reused one is not zeroed. */
-		error = allocate_storage(pass, overflow, BCM2711_NATIVE_STORAGE_WRITTEN, remaining, &storage);
+		/* The binner reads only what it wrote into an overflow reserve, which the CPU never touches; a reused one is neither zeroed nor cleaned. */
+		error = allocate_storage(pass, overflow, BCM2711_NATIVE_STORAGE_DEVICE, remaining, &storage);
 		if (error != 0)
 			return error;
 		job->overflow[index].address = storage->view->address;
 		job->overflow[index].bytes = (uint32_t)storage->view->bytes;
 	}
 
-	/* Every initialized command, tile/pool and overflow allocation becomes visible before its job address is published. */
+	/* Every initialized command, tile/pool and overflow allocation becomes visible before its job address is published (a clean device-only one has nothing to write back). */
 	for (index = 0; index < pass->count; index++) {
 		error = bcm2711_native_storage_clean(pass->storage[index]);
 		if (error != 0)

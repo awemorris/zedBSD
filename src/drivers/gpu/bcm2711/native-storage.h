@@ -27,6 +27,13 @@ struct bcm2711_native_storage {
 	 */
 	uint64_t owner;
 	bool stale;
+	/*
+	 * A device-only storage (BCM2711_NATIVE_STORAGE_DEVICE), and whether
+	 * the CPU cache holds no dirty line of it: taken from the cache, or
+	 * cleaned since its zeroing.  Only such a storage skips its cleans.
+	 */
+	bool device;
+	bool clean;
 	/* Diagnostic wall times belong to this owner and never control its lifetime. */
 	uint64_t allocation_ticks;
 	uint64_t mapping_ticks;
@@ -88,6 +95,15 @@ int bcm2711_native_storage_create(struct bcm2711_v3d_space *space, uint64_t byte
  * Anything else is zeroed.
  */
 #define BCM2711_NATIVE_STORAGE_OWNED	2U
+
+/*
+ * Written and read by the device alone (a binner's tile-list pool or
+ * overflow reserve): the CPU writes nothing into it while it is held.  A
+ * cached view, which keeps no dirty line, is given as it is and needs no
+ * clean; a new one is cleaned once, for its zeroing, and goes back to the
+ * cache without another clean.
+ */
+#define BCM2711_NATIVE_STORAGE_DEVICE	3U
 int bcm2711_native_storage_create_as(struct bcm2711_v3d_space *space, uint64_t bytes, unsigned fill, struct bcm2711_native_storage **storage);
 int bcm2711_native_storage_clean(struct bcm2711_native_storage *storage);
 int bcm2711_native_storage_clean_range(struct bcm2711_native_storage *storage, uint64_t offset, uint64_t bytes);
