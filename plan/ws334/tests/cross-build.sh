@@ -17,6 +17,8 @@
 #  5. libkeiland's Windows files (libkeiland.a) refer to no POSIX thread name (pthread_*): the Windows
 #     port uses the system's threads and locks;
 #  6a. OmniGrammaton.exe imports only Windows' own DLLs and the UCRT's, vulkan-1.dll delayed;
+#  7. make browser-win64-zip (-winarm64-zip): the zip holds what plan/ws334/tests/zip-contents.txt lists, is
+#     the same bytes when made again, and its icon has 8 images (ImageMagick's identify);
 #  6. one .exe of static libraries: plan/ws334/tests/script-tool-main.c linked by the build's
 #     test-program with every static library imports only Windows' own DLLs and the UCRT's (no DLL of
 #     this tree, no libwinpthread-1.dll; vulkan-1.dll only as a delayed import); on x86_64 under Wine
@@ -250,6 +252,34 @@ for name in win64 winarm64; do
 		status=1
 	else
 		echo "$name: OmniGrammaton.exe imports only the system's DLLs ($(wc -l < "$out/omnigrammaton-dlls-$name.txt")), vulkan-1.dll delayed: $(cat "$out/omnigrammaton-delayed-$name.txt")"
+	fi
+
+	# 7. The zip (make browser-<name>-zip): what it holds is plan/ws334/tests/zip-contents.txt, the same bytes
+	# when it is made again from the same directory, and the icon of 8 images (ImageMagick's identify).
+	zip=$build/OmniGrammaton-$(sed -n 's/^OMNIGRAMMATON_VERSION := //p' apps/browser-win32/version.mk)-$name.zip
+	if ! timeout 900 make --no-print-directory browser-$name-zip LLVM_MINGW="$LLVM_MINGW" \
+	    BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" > "$out/zip-$name.log" 2>&1 || [ ! -f "$zip" ]; then
+		echo "FAILED $name: make browser-$name-zip (log $out/zip-$name.log)"
+		tail -5 "$out/zip-$name.log"
+		status=1
+	else
+		unzip -Z1 "$zip" | sed 's|^OmniGrammaton/||' > "$out/zip-$name.txt"
+		sed '/^#/d' plan/ws334/tests/zip-contents.txt > "$out/zip-expected.txt"
+		/usr/bin/python3 -I apps/browser-win32/tools/make-zip.py "$build/OmniGrammaton" "$out/zip-again-$name.zip" > /dev/null
+		icons=$(identify "$build/obj/OmniGrammaton.ico" 2> /dev/null | wc -l)
+		if ! cmp -s "$out/zip-$name.txt" "$out/zip-expected.txt"; then
+			echo "FAILED $name: the zip holds other files than plan/ws334/tests/zip-contents.txt:"
+			diff "$out/zip-expected.txt" "$out/zip-$name.txt" | head -10
+			status=1
+		elif ! cmp -s "$zip" "$out/zip-again-$name.zip"; then
+			echo "FAILED $name: the zip made again differs"
+			status=1
+		elif [ "$icons" != 8 ]; then
+			echo "FAILED $name: identify reads $icons images in OmniGrammaton.ico, not 8"
+			status=1
+		else
+			echo "$name: $(basename "$zip"): $(wc -l < "$out/zip-$name.txt") files as listed, the same bytes made again ($(sha256sum "$zip" | cut -c1-16)); the icon has 8 images"
+		fi
 	fi
 
 	# 6. One .exe of the static libraries, and what it imports.
