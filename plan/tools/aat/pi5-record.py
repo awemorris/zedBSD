@@ -98,7 +98,7 @@ class Recorder:
 
 	def inputs(self, commands: list[str], timeout: float = 60.0) -> None:
 		# As a script file: a long sequence does not fit in one command line on the target.
-		local = self.out / "raw" / "input.sh"
+		local = Path(os.environ.get("CAPTURE_RAW", str(self.out / "raw"))) / "input.sh"
 		local.parent.mkdir(parents=True, exist_ok=True)
 		local.write_text(f"I={shlex.quote(INPUT)}\n" + "".join(f"$I {command} > /dev/null\n" for command in commands))
 		aat("put", str(local), "/tmp/aat-rec/input.sh")
