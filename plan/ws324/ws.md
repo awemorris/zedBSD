@@ -17,6 +17,7 @@
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [ws324-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | cleared（2026-11-01 23:08 Q1、main a0fd88ee8。design.md 第 2 版、review 31 件の反映） | （WS318 を待たない、2026-11-01 ユーザー） |
+| [ws324-p006a](phase006a/phase.md) | H.265 の解析の設計（標準廉価実装手順 §4、[h265-parse-design.md](h265-parse-design.md)、header は [proposed/h265/](proposed/h265/)）と、header を source に置く段 2 | in-progress（2026-11-02 P1 q1864-i01。段 1 の設計と review 2 の 20 件の反映済み、Q1 の受け入れと Q-A〜Q-E 待ち） | Q324-1 |
 
 ### 実装の Phase の案（2026-11-01 P1、[design.md](design.md) 第 2 版 §15。Q1 の受け入れの後に表へ）
 
@@ -26,10 +27,11 @@
 | p003 | Vulkan の header の段 2（`vulkan_core.h` を 1.4.309 で作り直し、KHR の encode） | p002、Q324-2 |
 | p004 | libvulkan の H.265 decode の転送、capset の bit 2、video の門を bit ごとに | p002、Q324-3 |
 | p005 | nvrtx の H.265 decode（NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離） | p004 |
-| p006a | H.265 の解析の設計（標準廉価実装手順） | p002、Q324-1 |
-| p006b〜d | H.265 の解析の実装（NAL・VPS・SPS ／ PPS・slice header ／ POC・RPS・DPB） | p006a |
-| p006e | vkvideo-probe の H.265 | p006d |
-| p007 | H.265 decode の実機の debug | p005、p006e、実機 |
+| p006a | H.265 の解析の設計（標準廉価実装手順）と header の配置（段 2） | Q324-1（p002 は要らない: host の Vulkan の header で試験） |
+| p006b〜g | H.265 の解析の実装、Sonnet（nal・scaling・vui ／ rps・ps ／ slice・poc ／ dpb ／ std ／ stream）（p006a の案、[h265-parse-design.md](h265-parse-design.md) §9、Q-B） | p006a 段 2（b→c→d→g、e・f は並べて） |
+| p006h | H.265 の解析の適合の試験（HEVC_v1、host） | p006e〜g |
+| p006i | vkvideo-probe の H.265（前の案の p006e） | p006h、p002 |
+| p007 | H.265 decode の実機の debug | p005、p006i、実機 |
 | p008a | libvulkan の encode の転送（queue と H.264、命令の番号、video の query pool、capset の bit 3） | p003、Q324-3 |
 | p008b | libvulkan の encode の転送（H.265、capset の bit 4） | p008a |
 | p009a | NVENC の channel（段 nvenc-channel、RC の通知の記録） | 実機 |
@@ -54,6 +56,7 @@
 
 ## Resume point
 
+- 2026-11-01 P1（q1864-i01）: p006a 段 1。[h265-parse-design.md](h265-parse-design.md)、[proposed/h265/](proposed/h265/) の header 11 個、phase006b〜h の phase.md、design-review.md の review 2（20 件を全部反映）。次は Q1 の受け入れと Q-A〜Q-E（[phase006a](phase006a/phase.md)）、その後に段 2。
 - 2026-11-01 P1（q1854）: p001 の design.md 第 2 版（review 1 の 31 件を反映、design-review.md）・proposed/・問い Q324-1〜6（phase.md）。次は Q1 の受け入れと問いの答え。
 
 - 2026-11-01 21:46 Q1: ユーザーの指示で前倒し、p001 を P1（q1854）に。WS291 の P1 の返却の後に起動。

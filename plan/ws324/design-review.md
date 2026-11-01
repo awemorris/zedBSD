@@ -46,3 +46,35 @@ Parent: [design.md](design.md)、Phase [ws324-p001](phase001/phase.md)。
 | 31 | minor | ws.md の「ユーザーの決定（原文）」の節と phase.md の鉤括弧の引用 | **一部採る**。phase.md の鉤括弧を「という趣旨」の形に直した。ws.md の節は Q1 が書いた節なので P1 は変えず、Q1 に直しを頼む（phase.md の「記録の注意」） |
 
 - 未実施: 反映の後の第 2 版への 2 回目の review（Q1 が要ると判断すれば）。Vulkan の仕様の encode の bitstream の形の照合（p008a）。
+
+## review 2（p006a、H.265 の解析の設計）（design-reviewer、2026-11-02）
+
+- 対象: [h265-parse-design.md](h265-parse-design.md)、[proposed/h265/](proposed/h265/) の header 11 個、phase006a〜g の phase.md（commit `b3735c259a`）。
+- reviewer の確かめ方: H.265 V11 の PDF（PDF 40〜160・270〜360・440〜475）を `pdftotext -layout` で、WS330 の proposed との差、`vcodec*.h`・`vcodec-nal.c`・`bits.c`（`media_rbsp_unescape`）、`vkvideo-probe/main.c`、host の Vulkan の std の header、docs.vulkan.org の refpage 1 つ。
+- 件数: 20（blocker 2・major 5・minor 13）。全件を反映した（取り下げ 0）。P1 が PDF で 7.3.3（general の 88 bit）、7.4.3.2.1（PCM の下限）、7.4.3.3.1（init_qp・scaling の規則）を確かめ直した。
+- 食い違い無しと確かめられた物: Table 7-1 と AU の始まりの型の一覧、先頭の写しの unescape の規則、scaling list（7-42・7-43、範囲、DC の推定、> 0）、VUI・HRD の syntax と推定、VPS の HRD の範囲と重複、RPS の式の番号と範囲と 16 bit の mask、slice header の順と条件と式の番号、8.3.1・8-5、8.3.2 の step 1〜4、C.5.2.2〜C.5.2.4、evict の規則、setup の slot と busy、D8 の記述、D9、Curr の 8 の上限、StdVideo の tile・DecPicBufMgr・HRD の mask の大きさ、module の依存の向き、`vcodec*.h` の不変。
+
+| # | 重さ | 指摘（要点） | 反映 |
+| --- | --- | --- | --- |
+| 1 | blocker | `h265_stream_next` が AU を始め得る NAL（prefix SEI・PPS）を見た所で絵を切る。7.4.2.4.4 は次の絵の最初の VCL を基準に AU の始まりを定め、parameter set と prefix SEI（D.3 の decoding unit information など）は 1 つの絵の segment の間にも置ける | **採る**。au_start を覚え、次の base layer の VCL の first_slice_segment_in_pic_flag（最初の payload の byte の最上位の bit）で絵の終わりを決め、1 なら cursor を au_start へ戻す。間の parameter set は読んだ時に保管。generation はその後の値（h265-stream.h、design D17）。試験に segment の間の prefix SEI・PPS（phase006g） |
+| 2 | blocker | PTL の general は 4 つの source の flag の後に 43 bit と 1 bit（inbld か reserved）の 44 bit。header は 43 と書いた | **採る**。44 bit・general は 88 bit と明記（h265sw-ps.h、phase006c の注意） |
+| 3 | major | EOS は今の AU に属するので、eos_pending の付け方では EOS の前の絵に after_eos と NoRaslOutputFlag 1 が付く | **採る**。eos_seen（集めている絵の AU の中の EOS・EOB）を足し、その絵を返した時に eos_pending へ。NoRaslOutputFlag は最初の segment を読んだ時の状態から（h265-stream.h）。試験（phase006g） |
+| 4 | major | VPS の vps_reserved_0xffff_16bits が header に無い | **採る**（h265sw-ps.h、phase006c） |
+| 5 | major | SPS の log2 の大きさの範囲が開いていて、ue(v) の和が wrap する。PCM の下限は Min( MinCbLog2SizeY, 5 ) | **採る**。各 syntax element を足す前に数値の上限で検べる形に書き直した（h265sw-ps.h）。試験に wrap させる組（phase006c） |
+| 6 | major | p006f（h265-std と h265-stream）が 1 回の起動に大きすぎる。h265-std は型だけに依る | **採る**。p006f を h265-std（段 2 の後に並べて）、p006g を h265-stream（p006d の後）に分け、適合を p006h、probe を p006i に（design §9、D16）。p006c の分割は R6 の備えのまま |
+| 7 | major | 試験に 1・3 を出す場面と、slots 16（nvrtx・Wave511 の maxDpbSlots）の DPB が無い | **採る**。phase006g に segment の間の SEI・PPS、EOS・EOB の付く絵。phase006e に slots 16 の busy・EBUSY・再試行と reference_count ≤ 15、setup_slot が reference_slot に無い不変条件。phase006h に HRD_A などの名指し |
+| 8 | minor | h265-std の「拡張の field は 0」が SPS の range extension の flag と食い違う | **採る**。sps・pps の range_extension_flag と 9 つの flag を写す。SCC などだけ 0（h265-std.h、phase006f） |
+| 9 | minor | slice header の読み直しが「NAL の全体」で、1 MiB を越える NAL で壊れる。大きさの理由も誤り（7.4.7.1 で 90 KiB 未満） | **採る**。2 つ目の写しを `h265sw_nal_parse_prefix(limit = 1 MiB)` に、理由を 7.4.7.1 の上限に（h265-stream.h、D12）。試験を「64 KiB を越える header（tile と WPP、高い絵）」に |
+| 10 | minor | end of bitstream が扱われていない | **採る**。EOS と同じに（h265-stream.h） |
+| 11 | minor | 「*picture は成功の時だけ書く」と、作業の場所が無いことの矛盾 | **採る**。*picture を作業の場所とし、0 以外の時の中身は決めない（h265-stream.h） |
+| 12 | minor | high_precision_offsets_enabled_flag 1 の重みの規則が無い。delta_chroma_weight の範囲が無い | **採る**。その重みは ENOTSUP、delta_chroma_weight −128..127 を明記（h265sw-slice.h） |
+| 13 | minor | init_qp の範囲は −48..51（init_qp_minus26 の範囲を init_qp に当てていた） | **採る**（h265sw-ps.h、phase006c の試験） |
+| 14 | minor | phase006a・ws.md が「review の反映済み」と書くが review 2 の表が無い | **採る**。この表を足し、状態の文を直した |
+| 15 | minor | h265-stream.h の「see the design」は source の comment から plan/ への参照 | **採る**。理由そのもの（参照の decoder が EOS で全部を出す）に |
+| 16 | minor | 表に無い general_level_idc で SPS・VPS の変換が止まる | **採る**。次の上の level（186 超は 6.2、0 は 1.0）に写す（h265-std.h、D15） |
+| 17 | minor | 構造体の byte の比べは padding を見得る | **採る**。memset した領域に member の代入だけで組み、比べの前に構造体の代入をしない、最悪でも余分な generation（h265sw-ps.h） |
+| 18 | minor | StdVideo の VUI の sar の出所が無い | **採る**。signalled の値と明記（h265-std.h） |
+| 19 | minor | h265sw-nal の ENOBUFS が escape の数で変わる | **採る**。unescape の前に capacity と size − 2（と limit）を比べる（h265sw-nal.h） |
+| 20 | minor | check_pair に「SPS の scaling 無効で PPS の scaling は 0」が無い。design §8.3 の 2^14 は 2^12 | **採る**（h265sw-ps.h、design §8.3） |
+
+- 未実施: 反映の後の 3 回目の review（Q1 が要ると判断すれば）。header は段 2 の前にもう一度 cc・clang で単独の compile を通した（2026-11-02、P1）。
