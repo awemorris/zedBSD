@@ -27,6 +27,12 @@
 #     localStorage are still there, and a cookie without one is not; the cookies' records on disk are
 #     protected for the user (DPAPI: each starts with the wrapping's magic), and
 #     plan/ws334/tests/protect-main.c checks the wrapping backend over a files backend of its own;
+#  caption: the bare title bar beside the location's box is the window's caption: the frame answers
+#     WM_NCHITTEST there with HTCAPTION (plan/ws334/tests/hit-test-main.c sends it), on the box and the
+#     buttons with HTCLIENT; a drag from there moves the window, a double click maximizes it and a second
+#     restores it (told to the frame as Windows does: Wine does not move a maximized frame's X window
+#     without a window manager; the snap of the drag and the system menu of a right click: a real
+#     Windows);
 #  M7 the dark mode (AppsUseLightTheme 0 in the registry) gives a dark title bar and the page its dark
 #     scheme (start.html's prefers-color-scheme: dark, a dark ground; the light one in the light mode);
 #     the mode changed while the program runs (plan/ws334/tests/theme-main.c writes the value and
@@ -103,8 +109,10 @@ if ! win32_make "$out/make-cli.log" test-program TEST_PROGRAM=browser-cli \
     ! win32_make "$out/make-theme.log" test-program TEST_PROGRAM=theme-set \
     TEST_PROGRAM_SOURCES=plan/ws334/tests/theme-main.c ||
     ! win32_make "$out/make-protect.log" test-program TEST_PROGRAM=protect-test \
-    TEST_PROGRAM_SOURCES=plan/ws334/tests/protect-main.c; then
-	echo "wine-run: a test's program did not build cleanly (logs $out/make-cli.log, $out/make-cert.log, $out/make-theme.log, $out/make-protect.log)"
+    TEST_PROGRAM_SOURCES=plan/ws334/tests/protect-main.c ||
+    ! win32_make "$out/make-hit.log" test-program TEST_PROGRAM=hit-test \
+    TEST_PROGRAM_SOURCES=plan/ws334/tests/hit-test-main.c; then
+	echo "wine-run: a test's program did not build cleanly (logs $out/make-cli.log, $out/make-cert.log, $out/make-theme.log, $out/make-protect.log, $out/make-hit.log)"
 	echo "wine-run: FAIL"
 	exit 1
 fi
@@ -117,6 +125,8 @@ cli=$build/tests/browser-cli.exe
 certs=$root/$build/tests/cert-store.exe
 THEME_SET=$root/$build/tests/theme-set.exe
 export THEME_SET
+HIT_TEST=$root/$build/tests/hit-test.exe
+export HIT_TEST
 host=build/ws074-host/plain/browser
 sync
 
@@ -192,7 +202,8 @@ fi
 # <the program's options...>.  The mode: "second" (a second start, then a change of the size),
 # "controls" (the title bar's controls), "input" (a page's text field), "close" (the close button,
 # waiting for the program to end), "theme" (the apps' mode set light, then dark, while it runs, with
-# $THEME_SET), "wait" (waits for the start page's load to end) or "plain".
+# $THEME_SET), "caption" (the bare title bar: the hit test with $HIT_TEST, a drag and double clicks),
+# "wait" (waits for the start page's load to end) or "plain".
 cat > "$out/windows.sh" << 'EOF'
 #!/bin/sh
 dist=$1
@@ -311,6 +322,36 @@ if [ "$mode" = theme ]; then
 	WINEDEBUG=-all timeout 60 wine "$THEME_SET" dark > "$out/theme-dark.out" 2>&1
 	sleep 8
 	import -window root "$out/theme-dark.png"
+fi
+if [ "$mode" = caption ]; then
+	# The frame's answers (from the left edge, or the right when negative): the bare title bar left of
+	# the caption buttons (the right 3 x 46 pixels and 10 more), below the box, the box, Back, Reload and
+	# the minimize button.
+	WINEDEBUG=-all timeout 60 wine "$HIT_TEST" -180 16 400 30 400 16 25 16 93 16 -115 16 > "$out/hit.out" 2>&1
+	# A drag from the bare title bar, 100 pixels left and 50 down.
+	echo "before $(xdotool getwindowgeometry --shell "$window" | tr '\n' ' ')" > "$out/moved.txt"
+	xdotool mousemove $((X + WIDTH - 180)) $((Y + 16))
+	sleep 1
+	xdotool mousedown 1
+	sleep 1
+	for step in 1 2 3 4 5; do
+		xdotool mousemove_relative -- -20 10
+		sleep 0.3
+	done
+	xdotool mouseup 1
+	sleep 3
+	echo "after $(xdotool getwindowgeometry --shell "$window" | tr '\n' ' ')" >> "$out/moved.txt"
+	# A double click there maximizes the frame, and one on the maximized frame's bare title bar restores
+	# it.  Wine without a window manager does not move the X window of a maximized frame, so the second
+	# double click is the one Windows tells the frame (hit-test --double: WM_NCLBUTTONDBLCLK with the
+	# frame's own answer at the point).
+	eval "$(xdotool getwindowgeometry --shell "$window")"
+	xdotool mousemove $((X + WIDTH - 180)) $((Y + 16))
+	sleep 1
+	xdotool click --repeat 2 --delay 120 1
+	sleep 5
+	WINEDEBUG=-all timeout 60 wine "$HIT_TEST" -180 16 > "$out/hit-maximized.out" 2>&1
+	WINEDEBUG=-all timeout 60 wine "$HIT_TEST" --double -180 16 > "$out/hit-restored.out" 2>&1
 fi
 if [ "$mode" = close ]; then
 	# The close button, the rightmost 46 pixels of the title bar; then up to 40 seconds for the end.
@@ -554,6 +595,35 @@ else
 fi
 unrun M5j "an input method's composition in the page's field"
 
+# The bare title bar as the caption: the hit test, the drag, the double clicks.
+start caption "$gui" caption share/browser/start.html
+convert "$out/caption/first.png" -crop 1280x32+0+0 "$review/titlebar-caption.png" 2> /dev/null
+tr -d '\r' < "$out/caption/hit.out" > "$out/caption/hit.txt" 2> /dev/null
+answers=$(sed -n 's/^hit-test: -\{0,1\}[0-9]* [0-9]* \([0-9]*\)$/\1/p' "$out/caption/hit.txt" | tr '\n' ' ')
+if [ "$answers" = "2 2 1 1 1 8 " ]; then
+	result PASS caption-hit "HTCAPTION on the bare title bar and below the box, HTCLIENT on the box, Back and Reload, HTMINBUTTON: $(echo $answers) ($review/titlebar-caption.png)"
+else
+	result FAIL caption-hit "the answers were '$answers', not '2 2 1 1 1 8' ($out/caption/hit.txt)"
+fi
+before_x=$(sed -n 's/^before .*X=\(-\{0,1\}[0-9]*\) .*/\1/p' "$out/caption/moved.txt" 2> /dev/null)
+before_y=$(sed -n 's/^before .*Y=\(-\{0,1\}[0-9]*\) .*/\1/p' "$out/caption/moved.txt" 2> /dev/null)
+after_x=$(sed -n 's/^after .*X=\(-\{0,1\}[0-9]*\) .*/\1/p' "$out/caption/moved.txt" 2> /dev/null)
+after_y=$(sed -n 's/^after .*Y=\(-\{0,1\}[0-9]*\) .*/\1/p' "$out/caption/moved.txt" 2> /dev/null)
+if [ -n "$before_x" ] && [ -n "$after_x" ] && [ $((before_x - after_x)) -ge 80 ] && [ $((after_y - before_y)) -ge 40 ]; then
+	result PASS caption-drag "a drag from the bare title bar moved the window from $before_x,$before_y to $after_x,$after_y"
+else
+	result FAIL caption-drag "the window at '$before_x,$before_y' before the drag and '$after_x,$after_y' after ($out/caption/moved.txt)"
+fi
+maximized=$(tr -d '\r' < "$out/caption/hit-maximized.out" 2> /dev/null | sed -n 's/^hit-test: frame \([0-9]*\) .*/\1/p')
+bare=$(tr -d '\r' < "$out/caption/hit-maximized.out" 2> /dev/null | sed -n 's/^hit-test: [0-9]* [0-9]* \([0-9]*\)$/\1/p')
+restored=$(tr -d '\r' < "$out/caption/hit-restored.out" 2> /dev/null | sed -n 's/^hit-test: frame \([0-9]*\) .*/\1/p' | tail -1)
+if [ "$maximized" = 1280 ] && [ "$bare" = 2 ] && [ -n "$restored" ] && [ "$restored" -lt 1280 ]; then
+	result PASS caption-double "a double click on the bare title bar maximized the frame ($maximized wide, HTCAPTION there too), a second restored it ($restored wide)"
+else
+	result FAIL caption-double "the frame was '$maximized' wide after the double click (answer '$bare' there) and '$restored' after the second ($out/caption/hit-maximized.out, hit-restored.out)"
+fi
+unrun caption-snap "Aero Snap by the drag from the bare title bar and the system menu of a right click on it"
+
 # M7. The dark mode (the title bar and the page), changed while the program runs, and 144 dpi.
 start dark "$dark" theme share/browser/start.html
 cp "$out/dark/first.png" "$review/m7-dark.png" 2> /dev/null
@@ -595,8 +665,11 @@ unrun M7m "Mica behind the frame (Windows 11 22H2), the accent of the system (Wi
 start dpi144 "$gui144" plain share/browser/start.html
 convert "$out/dpi144/first.png" -crop 1280x48+0+0 "$review/titlebar-144dpi.png" 2> /dev/null
 cp "$out/dpi144/first.png" "$review/dpi144.png" 2> /dev/null
-top=$(pixel "$out/dpi144/first.png" 700 5)
-low=$(pixel "$out/dpi144/first.png" 700 40)
+# The bare title bar left of the caption buttons (3 x 69 pixels and 15 more at 144 dpi), at y 5 and 40.
+bare=$(sed -n 's/^window .* x \(-\{0,1\}[0-9]*\) y .* width \([0-9]*\) height .*/\1 \2/p' "$out/dpi144/notes.txt" 2> /dev/null)
+bare=$(echo "$bare" | awk '{ print $1 + $2 - 240 }')
+top=$(pixel "$out/dpi144/first.png" "$bare" 5)
+low=$(pixel "$out/dpi144/first.png" "$bare" 40)
 page=$(pixel "$out/gpu/first.png" 700 40)
 if [ -n "$top" ] && [ "$top" = "$low" ] && [ "$page" != "$low" ]; then
 	result PASS dpi "at 144 dpi the title bar is 48 pixels tall ($review/titlebar-144dpi.png)"
