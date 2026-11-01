@@ -35,6 +35,7 @@
 #define TITLEBAR_VERSION_SHEET	3U
 #define TITLEBAR_VERSION_SUGGEST	4U
 #define TITLEBAR_VERSION_BOXED	5U
+#define TITLEBAR_VERSION_RELOAD	6U
 
 /* The compositor's bounds of one titlebar (plan/ws070/titlebar-design.md section 2.2). */
 #define TITLEBAR_CONTROLS_MAX	64U
@@ -257,6 +258,7 @@ kl_titlebar_add_control(
 	const char *label)
 {
 	struct titlebar_entry *entry;
+	uint32_t version;
 	unsigned shown;
 	int fits;
 
@@ -268,9 +270,13 @@ kl_titlebar_add_control(
 	if (role > TITLEBAR_ROLE_LAST && role != KL_CONTROL_RELOAD)
 		return EINVAL;
 
-	/* The protocol has no reload: the compositor shows it as a generic control with its label. */
+	/*
+	 * A compositor older than the reload role (version 6) is sent a generic
+	 * control instead, which it shows with its label.
+	 */
 	shown = role;
-	if (role == KL_CONTROL_RELOAD)
+	version = wl_proxy_get_version((struct wl_proxy *)titlebar->proxy);
+	if (role == KL_CONTROL_RELOAD && version < TITLEBAR_VERSION_RELOAD)
 		shown = KL_CONTROL_GENERIC;
 
 	/* A new ID. */
@@ -779,6 +785,8 @@ titlebar_bind(
 		version = TITLEBAR_VERSION_SUGGEST;
 	if (search.version >= TITLEBAR_VERSION_BOXED)
 		version = TITLEBAR_VERSION_BOXED;
+	if (search.version >= TITLEBAR_VERSION_RELOAD)
+		version = TITLEBAR_VERSION_RELOAD;
 
 	/* The manager, bound when announced; the search ends. */
 	manager = keiui_global_bind(&search, &kl_titlebar_manager_v1_interface, version);
