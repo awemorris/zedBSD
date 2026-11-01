@@ -2,7 +2,7 @@
 
 # ws335-p020: trust store と path の検証
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p018、p019、p015）
+Status: in-progress（2026-11-02 06:10 Sonnet）（2026-11-01 p001 が作成。起動は Q1。依存: p018、p019、p015）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

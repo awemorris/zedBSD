@@ -2,7 +2,7 @@
 
 # ws335-p024: 公開の EVP_PKEY（Ed25519・X25519・ML-KEM-768）
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p021、p009、p008、p014）
+Status: in-progress（2026-11-02 06:10 Sonnet）（2026-11-01 p001 が作成。起動は Q1。依存: p021、p009、p008、p014）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
