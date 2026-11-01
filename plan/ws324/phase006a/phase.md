@@ -45,7 +45,7 @@ Status: in-progress（2026-11-02 P1、q1864-i02。段 1 は Q1 の受け入れ�
   - 書き手をわざと 8 通りに壊した（use_delta_flag の条件、fixed_pic_rate_within_cvs の推定、escape の 0x03 の境、collocated_from_l0 の推定、range extension の flag の順、slice_segment_address の bit 数、PTL の 43 bit、重みの flag）。escape の 1 通りを最初の試験が見逃したので、00 00 02 と 00 00 03 の escape の check を足して塞ぎ、全部 FAIL を確かめて `cmp` で戻した。
   - H.264 の非退行: `BASE=77ed48ac4 sh plan/tools/h264sw/check-skeleton.sh` → `check-skeleton: PASS`。`sh plan/tools/h264sw/run-unit.sh all` → 24 試験の全部が PASS、`run-unit: PASS`（変えた file は h264sw・vcodec の glob に入らないので、前と同じ物を流した事になる）。
   - `git diff --check` → 出力無し。
-- 適合の stream: `H265SW_CONFORMANCE_DIR=/home/awe/zedBSD-claude1/build/sources/h265-conformance sh plan/tools/h265/conformance/fetch.sh` → `fetch: PASS (147 zips)`（2026-11-02、パラメータの無い GET、bot の確かめなど zip でない答えは無かった）。cache に zip 147 個・124 MB、展開していない。記録の有った 3 本は SHA-256 が一致、残り 144 本の SHA-256 を `plan/tools/h265/conformance/sha256.txt` に追記した（plan/tools は Q1 の物なので別の commit、下の SHA）。
+- 適合の stream: `H265SW_CONFORMANCE_DIR=/home/awe/zedBSD-claude1/build/sources/h265-conformance sh plan/tools/h265/conformance/fetch.sh` → `fetch: PASS (147 zips)`（2026-11-02、パラメータの無い GET、bot の確かめなど zip でない答えは無かった）。cache に zip 147 個・124 MB、展開していない。記録の有った 3 本は SHA-256 が一致、残り 144 本の SHA-256 を `plan/tools/h265/conformance/sha256.txt` に追記した（plan/tools は Q1 の物なので別の commit d42d08fac）。
 - 自分で決めた点:
   - check-skeleton に design §8.1 の 5 項目へ 3 つ足した: zedBSD の clang（3 つの arch）での syntax、宣言の全部の定義と nm の名前空間、`sources.mk`・`Makefile` が h265 を名指さない事。BASE の不変の対象に道具（run-unit.sh・check-skeleton.sh・h265write.h・test-h265write.c・h264sw の check.h・bitwriter.h）を入れた（WS335 の形。足し・消しも見る）。
   - `run-unit.sh` に `H265_UNIT_DIR`（道具の自己確かめ用）を足した。PASS の行で終わらない試験を FAIL にした。
