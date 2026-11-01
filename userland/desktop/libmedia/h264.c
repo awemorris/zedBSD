@@ -556,7 +556,8 @@ h264_reorder_depth(
 	sps = &stream->sps[sps_id];
 	if (sps->flags.vui_parameters_present_flag && stream->vui[sps_id].flags.bitstream_restriction_flag)
 		return stream->vui[sps_id].max_num_reorder_frames;
-	if (sps->profile_idc == STD_VIDEO_H264_PROFILE_IDC_BASELINE)
+	/* Order count type 2 puts the pictures out in decoding order (8.2.1.3); a Baseline stream of type 0 or 1 may reorder. */
+	if (sps->pic_order_cnt_type == STD_VIDEO_H264_POC_TYPE_2)
 		return 0U;
 	/* The supported High intra profile carries the explicit zero-reorder inference of E.2.1. */
 	if (sps->profile_idc == STD_VIDEO_H264_PROFILE_IDC_HIGH && sps->flags.constraint_set3_flag)
