@@ -1,0 +1,45 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * OmniGrammaton.exe's resources: its manifest and its version.  The
+ * version's numbers come from the build (OMNIGRAMMATON_VERSION_MAJOR,
+ * _MINOR, _PATCH and OMNIGRAMMATON_VERSION_TEXT).
+ */
+
+#include <winver.h>
+
+1 24 "OmniGrammaton.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION OMNIGRAMMATON_VERSION_MAJOR, OMNIGRAMMATON_VERSION_MINOR, OMNIGRAMMATON_VERSION_PATCH, 0
+PRODUCTVERSION OMNIGRAMMATON_VERSION_MAJOR, OMNIGRAMMATON_VERSION_MINOR, OMNIGRAMMATON_VERSION_PATCH, 0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+	BLOCK "StringFileInfo"
+	BEGIN
+		BLOCK "040904B0"
+		BEGIN
+			VALUE "CompanyName", "Awe Morris"
+			VALUE "FileDescription", "OmniGrammaton Web Browser"
+			VALUE "FileVersion", OMNIGRAMMATON_VERSION_TEXT
+			VALUE "InternalName", "OmniGrammaton"
+			VALUE "LegalCopyright", "(C) 2026 Awe Morris"
+			VALUE "OriginalFilename", "OmniGrammaton.exe"
+			VALUE "ProductName", "OmniGrammaton"
+			VALUE "ProductVersion", OMNIGRAMMATON_VERSION_TEXT
+		END
+	END
+	BLOCK "VarFileInfo"
+	BEGIN
+		VALUE "Translation", 0x0409, 1200
+	END
+END

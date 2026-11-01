@@ -7,13 +7,16 @@
 #     so is what libbrowser.a (all of libbrowser with its Windows layer) and libmedia.a (all of libmedia
 #     and its container reader, with media-os-win32.c) do; every function
 #     <browser/browser.h> and <browser/storage.h> declare is defined in libbrowser.a, and every name of
-#     libbrowser's exports.map matches a defined function (the API of the one .exe);
+#     libbrowser's exports.map matches a defined function (the API of the one .exe); libkeiland.a and the
+#     user interface's libbrowser-ui.a leave undefined only what the table has, and libkeiland.a defines
+#     every public function of libkeiland (its own, a common file's, or a stub);
 #  4. the Vulkan loader's delayed import: plan/ws334/tests/delay-load.c, linked as the build links a
 #     program that calls Vulkan, has vulkan-1.dll in its delay-import table and not in its import table;
 #     on x86_64 under Wine it prints the loader's version with vulkan-1.dll, and with the DLL disabled
 #     (WINEDLLOVERRIDES=vulkan-1=d) it starts, finds no loader and calls no vk* (arm64: linked only);
 #  5. libkeiland's Windows files (libkeiland.a) refer to no POSIX thread name (pthread_*): the Windows
 #     port uses the system's threads and locks;
+#  6a. OmniGrammaton.exe imports only Windows' own DLLs and the UCRT's, vulkan-1.dll delayed;
 #  6. one .exe of static libraries: plan/ws334/tests/script-tool-main.c linked by the build's
 #     test-program with every static library imports only Windows' own DLLs and the UCRT's (no DLL of
 #     this tree, no libwinpthread-1.dll; vulkan-1.dll only as a delayed import); on x86_64 under Wine
@@ -143,6 +146,34 @@ for name in win64 winarm64; do
 		echo "$name: libmedia.a $(wc -l < "$out/media-imports-$name.txt") imports, all in the table"
 	fi
 
+	# 3e. libkeiland.a and the user interface's libbrowser-ui.a: what they leave undefined, less what every
+	# static library defines, against the table; and every public function of libkeiland (exports.py
+	# --list) is defined in libkeiland.a (its own, a common file's or a stub).
+	keiland="$build/obj/libkeiland.a"
+	interface="$build/obj/libbrowser-ui.a"
+	"${WIN32_TOOL_PREFIX}nm" -u "$keiland" "$interface" 2> /dev/null |
+	    awk 'NF == 2 { print $2 } NF == 1 && $1 !~ /:$/ { print $1 }' | sed 's/^__imp_//' |
+	    sort -u > "$out/ui-undefined-$name.txt"
+	"${WIN32_TOOL_PREFIX}nm" --defined-only $core "$media" "$keiland" "$interface" $archives "$build/obj/libvulkan-1.a" 2> /dev/null |
+	    awk 'NF == 3 { print $3 }' | sed 's/^__imp_//' | sort -u > "$out/ui-defined-$name.txt"
+	comm -23 "$out/ui-undefined-$name.txt" "$out/ui-defined-$name.txt" > "$out/ui-imports-$name.txt"
+	"${WIN32_TOOL_PREFIX}nm" --defined-only -g "$keiland" 2> /dev/null | awk 'NF == 3 && $2 == "T" { print $3 }' |
+	    sort -u > "$out/keiland-defined-$name.txt"
+	/usr/bin/python3 -I userland/desktop/libkeiland/exports.py --list | sort -u > "$out/keiland-exports-$name.txt"
+	absent=$(comm -23 "$out/keiland-exports-$name.txt" "$out/keiland-defined-$name.txt")
+	if [ ! -s "$out/ui-imports-$name.txt" ] || [ ! -s "$out/keiland-exports-$name.txt" ]; then
+		echo "FAILED $name: nm found nothing in libkeiland.a, or exports.py listed nothing"
+		status=1
+	elif comm -23 "$out/ui-imports-$name.txt" "$out/allowed.txt" | grep .; then
+		echo "FAILED $name: the libkeiland.a and libbrowser-ui.a symbols above are not in $allowed"
+		status=1
+	elif [ -n "$absent" ]; then
+		echo "FAILED $name: libkeiland.a does not define:" $absent
+		status=1
+	else
+		echo "$name: libkeiland.a and libbrowser-ui.a $(wc -l < "$out/ui-imports-$name.txt") imports, all in the table; libkeiland.a defines the $(wc -l < "$out/keiland-exports-$name.txt") public functions"
+	fi
+
 	# 3d. The public API: the functions the public headers declare are defined in libbrowser.a (as
 	# global text), and each name or glob of exports.map's global list matches one of them.
 	"${WIN32_TOOL_PREFIX}nm" --defined-only -g $core 2> /dev/null | awk 'NF == 3 && $2 == "T" { print $3 }' |
@@ -202,6 +233,23 @@ for name in win64 winarm64; do
 		status=1
 	else
 		echo "$name: libkeiland.a refers to no pthread_ name"
+	fi
+
+	# 6a. OmniGrammaton.exe: the system's DLLs and the UCRT's only, vulkan-1.dll delayed.
+	"$LLVM_MINGW/bin/llvm-readobj" --coff-imports "$build/OmniGrammaton.exe" > "$out/omnigrammaton-$name.imports" 2>&1
+	sed -n '/^Import {/,/^}/s/^ *Name: //p' "$out/omnigrammaton-$name.imports" | sort -u > "$out/omnigrammaton-dlls-$name.txt"
+	sed -n '/^DelayImport {/,/^}/s/^ *Name: //p' "$out/omnigrammaton-$name.imports" | sort -u > "$out/omnigrammaton-delayed-$name.txt"
+	foreign=$(grep -v -i -x -E 'api-ms-win-crt-[a-z0-9-]+\.dll|(kernel32|user32|gdi32|advapi32|shell32|ole32|oleaut32|crypt32|bcrypt|ws2_32|iphlpapi|imm32|dwmapi|shcore|uiautomationcore|uxtheme)\.dll' \
+	    "$out/omnigrammaton-dlls-$name.txt")
+	delayed=$(grep -v -i -x 'vulkan-1\.dll' "$out/omnigrammaton-delayed-$name.txt")
+	if [ ! -s "$out/omnigrammaton-dlls-$name.txt" ]; then
+		echo "FAILED $name: llvm-readobj found no import in OmniGrammaton.exe"
+		status=1
+	elif [ -n "$foreign" ] || [ -n "$delayed" ]; then
+		echo "FAILED $name: OmniGrammaton.exe imports DLLs that are not Windows' own: $foreign $delayed"
+		status=1
+	else
+		echo "$name: OmniGrammaton.exe imports only the system's DLLs ($(wc -l < "$out/omnigrammaton-dlls-$name.txt")), vulkan-1.dll delayed: $(cat "$out/omnigrammaton-delayed-$name.txt")"
 	fi
 
 	# 6. One .exe of the static libraries, and what it imports.

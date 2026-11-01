@@ -89,7 +89,8 @@ WIN32_COMPAT_CFLAGS := $(WIN32_COMMON_CFLAGS)
 # each file that calls another adds its library here.
 WIN32_THREAD_LDFLAGS := -lpthread
 WIN32_VULKAN_LDFLAGS := -L$(BROWSER_WIN32_OBJ) -lvulkan-1 -Wl,--delayload=vulkan-1.dll
-WIN32_SYSTEM_LDFLAGS := -lws2_32 -lbcrypt -lcrypt32 -lshell32 -lole32
+WIN32_SYSTEM_LDFLAGS := -lws2_32 -liphlpapi -lbcrypt -lcrypt32 -ldwmapi -lshcore -limm32 -lshell32 -lole32 -luuid \
+	-lgdi32 -luser32 -ladvapi32
 WIN32_PROGRAM_LDFLAGS := -static $(WIN32_VULKAN_LDFLAGS) $(WIN32_THREAD_LDFLAGS) $(WIN32_SYSTEM_LDFLAGS)
 
 # The operating-system layers: the Windows files and the files every system shares.
@@ -146,15 +147,92 @@ include userland/desktop/libmedia/sources.mk
 LIBMEDIA_CORE_SOURCES := $(filter-out $(LIBMEDIA_OS_SOURCES),$(LIBMEDIA_SOURCES))
 LIBMEDIA_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBMEDIA_CORE_SOURCES))
 
+# libkeiland on Windows: the files of its source list that compile as they are (they include nothing of
+# Wayland or POSIX), its Windows files, and the stubs of every public function neither has (generated:
+# int ENOTSUP, a pointer NULL, nothing for void).  The rest of the list is the Wayland backend's.
+LIBKEILAND_WIN32_COMMON_SOURCES := \
+	userland/desktop/libkeiland/version.c \
+	userland/desktop/libkeiland/motion.c \
+	userland/desktop/libkeiland/scroll.c \
+	userland/desktop/libkeiland/gesture.c \
+	userland/desktop/libkeiland/settings-cache.c \
+	userland/desktop/settings-keys/settings-keys.c \
+	userland/desktop/libkeiland/translate-follow.c \
+	userland/desktop/libkeiland/system/system-monitor-rate.c \
+	userland/desktop/libkeiland/ui/canvas.c \
+	userland/desktop/libkeiland/ui/drop-look.c \
+	userland/desktop/libkeiland/ui/icons.c \
+	userland/desktop/libkeiland/ui/icons-line.c \
+	userland/desktop/libkeiland/ui/theme.c \
+	userland/desktop/libkeiland/ui/input.c \
+	userland/desktop/libkeiland/ui/scroll.c \
+	userland/desktop/libkeiland/ui/scroll-bar.c \
+	userland/desktop/libkeiland/ui/text-touch.c \
+	userland/desktop/libkeiland/ui/text-bar.c \
+	userland/desktop/libkeiland/ui/text-select.c \
+	userland/desktop/libkeiland/ui/ui.c \
+	userland/desktop/libkeiland/launch.c \
+	userland/desktop/libkeiland/ui/declare.c \
+	userland/desktop/libkeiland/ui/present-copy.c \
+	userland/desktop/libkeiland/ui/present-damage.c \
+	userland/desktop/libkeiland/ui/text-area.c \
+	userland/desktop/libkeiland/ui/widgets.c \
+	userland/desktop/libkeiland/ui/field.c \
+	userland/desktop/libkeiland/ui/list.c \
+	userland/desktop/libkeiland/ui/views.c \
+	userland/desktop/libkeiland/ui/cards.c \
+	userland/desktop/libkeiland/ui/chooser-view.c \
+	userland/desktop/libkeiland/ui/picker-view.c \
+	userland/desktop/picture/color-glyph.c
+LIBKEILAND_WIN32_OWN_SOURCES := \
+	userland/desktop/libkeiland/win32/app.c \
+	userland/desktop/libkeiland/win32/window.c \
+	userland/desktop/libkeiland/win32/present.c \
+	userland/desktop/libkeiland/win32/places.c \
+	userland/desktop/libkeiland/win32/theme.c
+LIBKEILAND_WIN32_STUB_SOURCES := userland/desktop/libkeiland/win32/unsupported.c
+LIBKEILAND_WIN32_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBKEILAND_WIN32_COMMON_SOURCES) \
+	$(LIBKEILAND_WIN32_OWN_SOURCES))
+
+# The browser's user interface (the zedBSD build's list less its POSIX entry), a static library the
+# program's entry (main.c) and a test's console program link: its files find their own headers under
+# userland/desktop/browser, and libkeiland's application is called OmniGrammaton.
+include userland/desktop/browser/sources.mk
+BROWSER_UI_SOURCES := $(filter-out $(KEILAND_BROWSER_DIR)/main-posix.c,$(KEILAND_BROWSER_SOURCES))
+BROWSER_UI_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_UI_SOURCES))
+WIN32_SOURCES_browser-ui := $(BROWSER_UI_SOURCES)
+$(BROWSER_UI_OBJECTS): WIN32_CFLAGS += -I$(KEILAND_BROWSER_DIR) -DSHELL_APPLICATION_ID=\"OmniGrammaton\"
+
+# OmniGrammaton.exe: the entry, the single start and the resources (the manifest and the version) over
+# every static library, a program of the Windows subsystem; and the directory a user runs it from, with
+# the fonts and the browser's pages under share.
+include apps/browser-win32/version.mk
+OMNIGRAMMATON_SOURCES := apps/browser-win32/main.c apps/browser-win32/single.c
+OMNIGRAMMATON_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(OMNIGRAMMATON_SOURCES)) \
+	$(BROWSER_WIN32_OBJ)/apps/browser-win32/resources/OmniGrammaton.res.o
+OMNIGRAMMATON_PROGRAM := $(BROWSER_WIN32_BUILD)/OmniGrammaton.exe
+OMNIGRAMMATON_VERSION_WORDS := $(subst ., ,$(OMNIGRAMMATON_VERSION))
+WIN32_WINDRES ?= $(WIN32_TOOL_PREFIX)windres
+OMNIGRAMMATON_SHARE := \
+	fonts/keiland.ttf=userland/desktop/fonts/Mahora-Regular.ttf \
+	fonts/keiland-bold.ttf=userland/desktop/fonts/Mahora-Bold.ttf \
+	fonts/keiland-mono.ttf=userland/desktop/fonts/Mahora-Mono.ttf \
+	fonts/keiland-fallback-mono.ttf=userland/desktop/fonts/JetBrainsMono-Regular.ttf \
+	fonts/keiland-fallback.ttf=userland/desktop/fonts/DroidSansFallbackFull.ttf \
+	browser/start.html=$(KEILAND_BROWSER_DIR)/data/start.html \
+	browser/about.html=$(KEILAND_BROWSER_DIR)/data/about.html \
+	browser/text.html=$(KEILAND_BROWSER_DIR)/data/text.html
+OMNIGRAMMATON_SHARE_COPIES := $(foreach pair,$(OMNIGRAMMATON_SHARE),$(BROWSER_WIN32_DIST)/share/$(word 1,$(subst =, ,$(pair))))
+
 # The static libraries of the tree's libraries, each from its files of the Windows build so far:
 # libbrowser (its storage modules, which the layers above list too, once) with its Windows layer,
-# libmedia with media-os-win32.c, and libkeiland's Windows files (its shared files join with its
-# Windows port).
+# libmedia with media-os-win32.c, and libkeiland (its common files, its Windows files and the stubs).
 WIN32_SOURCES_browser := $(LIBBROWSER_CORE_SOURCES) \
 	$(filter-out $(LIBBROWSER_CORE_SOURCES),$(filter userland/desktop/libbrowser/%,$(BROWSER_WIN32_LAYER_SOURCES)))
 WIN32_SOURCES_media := $(LIBMEDIA_CORE_SOURCES) $(filter userland/desktop/libmedia/%,$(BROWSER_WIN32_LAYER_SOURCES))
-WIN32_SOURCES_keiland := $(filter userland/desktop/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES))
-WIN32_TREE_LIBRARIES := browser media keiland
+WIN32_SOURCES_keiland := $(LIBKEILAND_WIN32_COMMON_SOURCES) $(filter userland/desktop/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES)) \
+	$(LIBKEILAND_WIN32_OWN_SOURCES) $(LIBKEILAND_WIN32_STUB_SOURCES)
+WIN32_TREE_LIBRARIES := browser-ui browser media keiland
 
 # libtruetype and the compat libraries: the zedBSD build's source lists, each a static library a
 # program links with libbrowser.a.
@@ -199,13 +277,18 @@ VULKAN_LOADER_SHA256 := ddfeca84a868899fbb2c7f28b7c8fd1006e34b2b13ce653a63bddfb6
 WIN32_VULKAN_HEADERS := $(BROWSER_WIN32_OBJ)/include/vulkan/vulkan.h
 WIN32_VULKAN_LIBRARY := $(BROWSER_WIN32_OBJ)/libvulkan-1.a
 
-.PHONY: all layers libbrowser-core libbrowser-script script-core libraries vulkan fetch flags clean test-program
-all: layers libbrowser-core libraries vulkan $(BROWSER_WIN32_OBJ)/toolchain.txt
+.PHONY: program dist keiland-objects all layers libbrowser-core libbrowser-script script-core libraries vulkan headers fetch flags clean test-program
+all: layers libbrowser-core libraries vulkan $(BROWSER_WIN32_OBJ)/toolchain.txt program dist
+program: $(OMNIGRAMMATON_PROGRAM)
+dist: $(BROWSER_WIN32_DIST)/OmniGrammaton.exe $(OMNIGRAMMATON_SHARE_COPIES)
 
 layers: $(BROWSER_WIN32_LAYER_OBJECTS)
 libbrowser-core: $(LIBBROWSER_CORE_OBJECTS)
 libraries: $(WIN32_PROGRAM_ARCHIVES)
 vulkan: $(WIN32_VULKAN_HEADERS) $(WIN32_VULKAN_LIBRARY)
+headers: $(WIN32_VULKAN_HEADERS) $(WIN32_COMPAT_HEADER_COPIES)
+# libkeiland's objects but the stubs (what the stubs' generator reads).
+keiland-objects: $(LIBKEILAND_WIN32_OBJECTS) $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(filter userland/desktop/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES)))
 libbrowser-script: $(LIBBROWSER_SCRIPT_ARCHIVE)
 script-core: $(SCRIPT_CORE_PROGRAM)
 fetch: $(VULKAN_HEADERS_TARBALL) $(VULKAN_LOADER_TARBALL)
@@ -221,9 +304,12 @@ $(BROWSER_WIN32_OBJ)/%.o: %.c
 # libbrowser includes the compat headers (the images) and the Vulkan headers (the GPU renderer, and
 # <browser/browser.h>, which names Vulkan's types).  Of the script core only js/tool.c includes
 # <browser/browser.h>, and so does script-core.exe's main.
-$(LIBBROWSER_CORE_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
+$(LIBBROWSER_CORE_OBJECTS) $(BROWSER_UI_OBJECTS) $(OMNIGRAMMATON_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
 # libmedia's Vulkan Video files include the Vulkan headers (and the others include nothing copied).
 $(LIBMEDIA_CORE_OBJECTS): | $(WIN32_VULKAN_HEADERS)
+# libkeiland's public headers name Vulkan's types, and its colour glyphs read PNG (the compat headers).
+$(LIBKEILAND_WIN32_OBJECTS) $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBKEILAND_WIN32_STUB_SOURCES)): | \
+	$(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
 $(SCRIPT_CORE_OBJECTS): | $(WIN32_VULKAN_HEADERS)
 
 # A compat object keeps what the compiler said in <object>.log, and shows it only when the compile fails.
@@ -259,9 +345,33 @@ $(1): $(2) $(WIN32_PROGRAM_ARCHIVES) $(WIN32_VULKAN_LIBRARY)
 	mv -f $$@.new $$@
 endef
 ifneq ($(strip $(TEST_PROGRAM)),)
-$(eval $(call WIN32_PROGRAM,$(BROWSER_WIN32_TESTS)/$(TEST_PROGRAM).exe,$(TEST_PROGRAM_OBJECTS),-mconsole))
+$(eval $(call WIN32_PROGRAM,$(BROWSER_WIN32_TESTS)/$(TEST_PROGRAM).exe,$(TEST_PROGRAM_OBJECTS),-mconsole $(TEST_PROGRAM_LDFLAGS)))
 $(TEST_PROGRAM_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
 endif
+
+# OmniGrammaton.exe (wWinMain: -municode).
+$(eval $(call WIN32_PROGRAM,$(OMNIGRAMMATON_PROGRAM),$(OMNIGRAMMATON_OBJECTS),-mwindows -municode))
+
+# The resources, compiled with the version's numbers.
+$(BROWSER_WIN32_OBJ)/apps/browser-win32/resources/OmniGrammaton.res.o: apps/browser-win32/resources/OmniGrammaton.rc \
+	apps/browser-win32/resources/OmniGrammaton.manifest apps/browser-win32/version.mk
+	@mkdir -p $(dir $@)
+	$(WIN32_WINDRES) -I apps/browser-win32/resources \
+		-DOMNIGRAMMATON_VERSION_MAJOR=$(word 1,$(OMNIGRAMMATON_VERSION_WORDS)) \
+		-DOMNIGRAMMATON_VERSION_MINOR=$(word 2,$(OMNIGRAMMATON_VERSION_WORDS)) \
+		-DOMNIGRAMMATON_VERSION_PATCH=$(word 3,$(OMNIGRAMMATON_VERSION_WORDS)) \
+		'-DOMNIGRAMMATON_VERSION_TEXT=\"$(OMNIGRAMMATON_VERSION)\"' -i $< -o $@
+
+# The directory a user runs the program from.
+$(BROWSER_WIN32_DIST)/OmniGrammaton.exe: $(OMNIGRAMMATON_PROGRAM)
+	@mkdir -p $(dir $@)
+	cp $< $@
+define WIN32_SHARE_COPY
+$(BROWSER_WIN32_DIST)/share/$(word 1,$(subst =, ,$(1))): $(word 2,$(subst =, ,$(1)))
+	@mkdir -p $$(dir $$@)
+	cp $$< $$@
+endef
+$(foreach pair,$(OMNIGRAMMATON_SHARE),$(eval $(call WIN32_SHARE_COPY,$(pair))))
 
 # script-core.exe: the script core's library alone, with the system's libraries, no thread library (the
 # core's Windows layer starts no thread) and no Vulkan.
@@ -316,6 +426,8 @@ flags:
 	@echo 'WIN32_PROGRAM_LDFLAGS=$(WIN32_PROGRAM_LDFLAGS)'
 	@echo 'WIN32_PROGRAM_ARCHIVES=$(WIN32_PROGRAM_ARCHIVES)'
 	@echo 'LIBBROWSER_CORE_OBJECTS=$(LIBBROWSER_CORE_OBJECTS)'
+	@echo 'LIBKEILAND_WIN32_COMMON_SOURCES=$(LIBKEILAND_WIN32_COMMON_SOURCES)'
+	@echo 'LIBKEILAND_WIN32_OBJECTS=$(LIBKEILAND_WIN32_OBJECTS) $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(filter userland/desktop/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES)))'
 
 # Removes this build's output only; refuses an output directory that is empty, the root or build itself.
 clean:
@@ -326,5 +438,6 @@ clean:
 FORCE:
 
 -include $(BROWSER_WIN32_LAYER_OBJECTS:.o=.d) $(LIBBROWSER_CORE_OBJECTS:.o=.d) $(LIBMEDIA_CORE_OBJECTS:.o=.d) \
+	$(LIBKEILAND_WIN32_OBJECTS:.o=.d) $(BROWSER_UI_OBJECTS:.o=.d) $(OMNIGRAMMATON_OBJECTS:.o=.d) \
 	$(WIN32_COMPAT_OBJECTS:.o=.d) \
 	$(TEST_PROGRAM_OBJECTS:.o=.d) $(SCRIPT_CORE_OBJECTS:.o=.d)
