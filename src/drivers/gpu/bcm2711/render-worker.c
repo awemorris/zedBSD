@@ -1243,6 +1243,7 @@ bcm2711_render_execution_submit(
 	struct bcm2711_render_device *controller;
 	struct bcm2711_v3d_perf *perf;
 	unsigned long enabled;
+	bool idle;
 
 	/* The execution joins the tail of its session's queue, stamped for the submission chain's diagnostic. */
 	controller = session->device;
@@ -1254,7 +1255,12 @@ bcm2711_render_execution_submit(
 	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
 
 	/* Diagnostic: an execution that finds the executor idle ends its idle time since the last delivery. */
-	if (controller->worker.executions == 0 && perf->chain_last_end_ns != 0 && execution->queued_ns > perf->chain_last_end_ns) {
+	idle = false;
+	if (controller->worker.executions == 0)
+		idle = true;
+	if (perf->chain_last_end_ns == 0 || execution->queued_ns <= perf->chain_last_end_ns)
+		idle = false;
+	if (idle) {
 		perf->chain_idles++;
 		perf->chain_idle_ns += execution->queued_ns - perf->chain_last_end_ns;
 	}
