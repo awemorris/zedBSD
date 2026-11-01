@@ -17,14 +17,17 @@
 - 画像の共有: WS243 の NVDEC の export・import（GPU_CAP_ALLOCATION_SHARE）と同じ道で、他の GPU の描画の先にできるか。
 
 - （2026-11-01 22:44）ユーザーから、次の趣旨の決定を受けた: (1) 仮想 GPU は /dev/vgpu の driver への ioctl で作り・消す。(2) 画面の大きさは /dev/gpuN を作る ioctl で指定する。(3) compositor からは普通の display に見え、仮想である flag は見える。(4) scanout の image は system の GPU の driver で作る（仮想 GPU は自分の memory を持たない）。(5) 遠隔の mouse・keyboard は含めない。(6) 転送の protocol はこの WS では扱わず、encode した結果を file に保存できればよい。
-- （2026-11-01 22:44）frame の同期は、ユーザーの案（compositor が frame の描画の終わりを明示する）を Q1 が次の形に具体化して提案した（p001 の設計の出発点、決定は設計の受け入れで）: compositor の flip に描画の完了の fence を付けて渡すのを終わりの明示とする。encoder の program は /dev/vgpu の「次の frame を待つ」ioctl を専用の thread で待ち（fd の event の多重化は使わない）、encode し終えたら image を返す（返すまで compositor は再利用しない）。実の vblank の代わりに、作る時の refresh で仮想 GPU が vblank を出す。
+- （2026-11-01 22:50）frame の同期と program の扱い: ユーザーから次の趣旨の決定を受けた。仮想 GPU の user mode の program は Vulkan Video で encode するとは限らず、VNC のような algorithm を使う事もある。そのため決めるのは「frame のたびに通知を受け、その image に access できる」事だけ。その時に Vulkan Video を使える事は要件。Q1 の前の案（compositor の flip に描画の完了の fence を付けて終わりの明示とする、program は専用の thread で次の frame を待つ ioctl、使い終えたら image を返す、作る時の refresh で仮想の vblank）は p001 の設計の出発点として残すが、encode の手段（Vulkan Video・CPU の差分の符号化など）を前提にしない。
+- （2026-11-01 22:50）/dev/vgpu の ioctl の形にはこだわらない（p001 で決める）。program が /dev/vgpu を閉じた時（終わった時・落ちた時を含む）は /dev/gpuN が正常に消え、compositor は落ちない。display の hot-plug（抜き）と同じ扱い。
+- （2026-11-01 22:50）system の GPU で作った image を program の Vulkan の device と共有する件は、Vulkan Video で読むなら特に考えなくてよい（同じ GPU の device で開く前提）。
 
 ## p001 で決める事（問いの候補）
 
-- /dev/vgpu の ioctl の形（作る・消す・mode・次の frame を待つ・返す）、作った program の fd を閉じた時の扱い、権限（video group との関係）、HAL を変えずに済むか（変えるなら理由）。
-- 仮想の flag の UAPI と compositor の扱い（普通の display として出すか、どこまで違えるか）、EDID 相当の情報、hot-plug の見せ方。
-- system の GPU の driver で作る scanout の image を、仮想 GPU と encoder の Vulkan の device とでどう共有するか（同じ GPU・別の GPU、WS243 の export・import の道）。
-- encode の結果を file に保存する形（H.264・H.265 の elementary stream か、mediafile の MP4 か）と、試験の道（QEMU・実機、encoder の有る GPU と software の encoder）。
+- /dev/vgpu の ioctl の形（作る・消す・mode・frame の通知の待ち・image への access・返す）、権限（video group との関係）、HAL を変えずに済むか（変えるなら理由）。
+- program が閉じた・落ちた時に /dev/gpuN を消す流れと、compositor が hot-plug の抜きとして落ちずに扱う流れ（今の display の hot-plug の扱いとの差）。
+- 仮想の flag の UAPI と compositor の扱い、EDID 相当の情報。
+- frame の通知と image への access を、Vulkan Video でも CPU（VNC のような差分の符号化）でも使える形にする（CPU からの読みの道、変わった領域の情報を渡すか）。
+- encode・符号化の結果を file に保存する試験の道（H.264・H.265 の elementary stream、encoder の有る GPU と software の encoder、QEMU・実機）。
 
 ## Phase
 
