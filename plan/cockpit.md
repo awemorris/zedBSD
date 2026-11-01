@@ -118,17 +118,6 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - Q330-4 decoder の部分を早く始めるか: **推し A** 決定どおり WS329 の完了の後（共通化を 1 回で済ませる）。
 - 止めている物: 無し（実装は WS329 の後）。
 
-### 0g. BUG-339（VF2 で U-Boot の control の DTB を渡すと起動が VFS で止まる）の恒久の直し（2026-10-31 新しい）
-
-- 背景: VF2 の U-Boot が持つ DTB（control の DTB）は vendor の書き方（binding）で、zedBSD の VF2 の driver は全部 Linux の mainline の書き方を読む。そのため control の DTB で起動すると SoC の部品が見つからず止まる。今は ESP に置いた mainline の vf2.dtb を渡す道で毎回起動しているので、普段の使い方には影響しない（P2 が実機で確かめ、log に「ESP の dtb を渡す」案内を 1 行足した）。
-- 用語: DTB は機械の部品の一覧を書いた表。U-Boot は VF2 の最初に動く起動の program。HAL の handoff は loader が kernel に渡す情報の約束（変えるには差分ごとのユーザーの承認が要る）。
-- 案（どれも判断が要るので P2 は着手していない）:
-  - (1) loader が ESP の DTB を別の板の表として渡す。HAL の handoff に key を足すので、ユーザーの事前承認が要る。
-  - (2) kernel に mainline の DTB を埋め込む。base system に外部の物を入れない方針に触れる。
-  - (3) loader を差し替える。OpenSBI の reserved-memory と MAC の address を失う危険がある。
-  - (4) 今のまま（ESP の vf2.dtb の道だけを支え、control の DTB は案内の log で止める）。Q1 の推し（他の案の費用と危険に見合う利点が無い）。
-- 決めてほしい事: どの案にするか。
-
 ### 0h. WS302（デスクトップのスレッドバランサ DTB）の設計の問い Q302-1〜7（2026-10-31 新しい）
 
 - 背景: WS302 は、kernel が thread の振る舞い（GPU を使う・入力に応える・長く計算する）と nice から、速い P-core と省電力の E-core への割り付けを scheduler に提案する仕組み（CONFIG_DTB、既定 off、ユーザーの決定）。WS333 の CPU の口が入ったので、P5 が設計（約 22 LW、Phase p002〜p007）を書き、敵対的レビュー（blocker 2・major 11）を反映した（main 896d3e3db）。HAL は変えない。全文は [ws302/user-questions.md](ws302/user-questions.md)。
@@ -213,20 +202,6 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - (e) `plan/ws004/tests/pci-msi-qemu.c` を残すか → QEMU の EDU という試験用の PCI の device で MSI の割り込みが届くかを見る kernel の試験の code。これを有効にする唯一の config（CONFIG_KERNEL_TEST_CHECKPOINTS）が消えたので、今は build されない。残す（config を作り直す）か、消すか。
 - (f) master-design-policy.md へ移す候補 約 25 件 → 各 WS の ws.md に書かれたユーザーの決定のうち、WS をまたいで効く物（設計の方針）を、全体の方針の文書に写すかどうか。一覧は Q1 が作り直して改めて聞く。
 
-### 3. UEFI の loader の GOP の mode（画面の解像度）の選び方
-
-- 背景: UEFI の firmware は、起動の時の画面の mode（解像度と pixel の形）を GOP（Graphics Output Protocol）という口で出す。zedBSD の UEFI の loader（`bootloader/uefi/video.c`）は、kernel に渡す前に mode を選ぶ。今の動きは次の 3 段。
-  1. 起動の設定（zedbsd.cfg）に `video=幅x高さ` があれば、その大きさの mode にする。
-  2. 無ければ、loader が持つ「好みの大きさ」（今は 1920x1080、起動の splash の大きさ）を firmware が持っていればそれにする。
-  3. 持っていない、または設定に失敗した時は、firmware が起動の時に選んでいた mode のまま。
-- 問題になりうる所: 画面の本来の解像度（monitor の EDID が示す最適な大きさ）が 1920x1080 でない時（4K の monitor、1366x768 の laptop の panel など）、2 で 1920x1080 にすると、画面がぼやける・余白が出る。逆に firmware の既定が小さい（800x600 など）こともある。amd64 の起動の設定（zedbsd.cfg）には `video=640x480` の行がある（WS009 で、BIOS の起動の時に kernel が「知らない parameter」と log に出す件が見つかった）。
-- 案:
-  - (a) 今のまま（1920x1080 を好み、無ければ firmware のまま）。
-  - (b) monitor の最適な大きさ（GOP の EDID の口、EFI_EDID_ACTIVE_PROTOCOL で読める時）を第一にし、読めなければ (a)。
-  - (c) firmware の mode の中で一番大きい物（4K の monitor でも最大になる。splash や console の文字が小さくなる）。
-  - あわせて、amd64 の zedbsd.cfg の `video=640x480` を残すか外すか。
-- 決めてほしい事: (a)〜(c) のどれにするか。推しは (b)（monitor に合う、読めない時は今と同じ）。
-
 ### 4. WS153（Settings の Apps の頁と third-party の app の repository）の U2〜U15
 
 - 背景: [WS153](ws153/ws.md) は、第三者の app を repository から入れる仕組み（package の形、配り方、署名、Settings の Apps の頁）の WS。2026-10-05 に U1（導入の範囲は system 全体の /apps/）はユーザーが決めた。残りの U2〜U15 は「ユーザーが検討中（質問しない）」として止めていて、WS153 は p001 の後で保留。設計の文書は [ws153/design.md](ws153/design.md)（各項目に Q1 の推しがある）。
@@ -258,6 +233,10 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（[BUG-374](bugs/BUG-374.md)、RTX の cursor の色、2026-11-01 09:08 に更新）**: 直した（cursor の色の倍率の register、display の CRC で全色一致を確かめた）。目視の確かめ: 10.0.10.3 の lock の中で `sh plan/ws291/tests/rtx-cursor-view.sh build build/b374/u` → `RESTORE_CKSUM=1463007375 sh plan/ws291/tests/rtx-cursor-view.sh up OUT build/b374/u` で入れ（Q1・担当が行う）、desktop の矢印が内側 白・外枠 黒なら直った。戻しは `rtx-cursor-view.sh back OUT build/b374/u`。
 
 ## 決まった事
+
+- 2026-11-01 09:16 BUG-339（VF2 の U-Boot の DTB）: 案 (4) 今のまま、案内の log を出して止める（[BUG-339](bugs/BUG-339.md)）。
+- 2026-11-01 09:16 x86 の PC の UEFI の起動の画面は monitor（EDID）に合わせ、video=640x480 を外す: [WS339](ws339/ws.md)（planning）。
+- 2026-11-01 09:16 Pi 5 の SSH の資格はユーザーから受けた（担当に伝えた）。Pi 5 と x86 の keyboard は VF2 の Bolt の受信機と違う物。
 
 - 2026-11-01 09:05 WS291 p024（RTX の速さ）: G1 は (b) push buffer を記録の時に組む形で、設計から始める（[ws291/ws.md](ws291/ws.md)）。
 - 2026-11-01 09:05 WS333: Q333-1〜7 は全部推し（[ws333/ws.md](ws333/ws.md)）。
