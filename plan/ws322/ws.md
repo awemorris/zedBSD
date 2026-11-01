@@ -23,7 +23,7 @@
 | ws322-p005 | libvulkan の H.265 decode の転送 | planned | WS318 p011a か先に着手（Q322-4） |
 | ws322-p006 | H.265 decode | planned | p004、p005 |
 | [ws322-p007](phase007/phase.md) | 速さと頑丈さ（timeout の後の立て直し、RESET の flush、task buffer の大きさ、速さの測り、JVT の照合） | cleared（2026-11-02 03:45 Q1 が受け入れ、main で p004/run.sh 全部 0 failed。2026-11-02 03:45 P2 q1896-i01。VF2 で立て直し・flush・3 回で停止・2 session・SIGKILL を確かめた、task buffer は vendor の ×1.5、1080p の VPU 7 ms・2160p 20 ms、Video Player 1080p60 は始めの数秒の後 late 0、JVT 75/101 一致。非同期・命令の queue は入れず） | p004 |
-| [ws322-p007b](phase007b/phase.md) | JVT の 26 本（probe の parser・DPB の planner で止まる 13 本、重み付き予測など絵が違う 13 本）の原因と直し | in-progress（P2 q1907） | p007 |
+| [ws322-p007b](phase007b/phase.md) | JVT の 26 本（probe の parser・DPB の planner で止まる 13 本、重み付き予測など絵が違う 13 本）の原因と直し | cleared（2026-11-02 05:39 P2 q1907-i01、Q1 の受け入れ待ち。原因は全部 vkvideo-probe（PPS の送り直し、表示順の 256 の境目、type 1、operation 5、gap）で firmware・engine は正しかった。VF2 で vkvideo-probe 100/101 が全部の絵で一致し BA3_SVA_C（Extended）は理由を出して断る。libmedia の 3 つ（gap の list の比べ、Baseline の並べ替え 0、待ちの長い絵の結果）を直し media-probe 101/101 一致。p007 の回帰と host 試験は前と同じ） | p007 |
 | ws322-p008 | encode の設計の詳細（Wave420L） | planned | Q322-2 は A（2026-11-01 ユーザー） |
 | ws322-p009 | Wave420L の bring-up と probe | planned | p008 |
 | ws322-p010 | libvulkan の encode の転送 | planned | WS318 p011b か先に着手（Q322-4） |
@@ -69,6 +69,8 @@
 - p006（H.265 decode）は WS324 の h265-std.h の約束（StdVideoH265 の埋め方）を入力にする。
 
 ## Resume point
+
+- 2026-11-02 05:39 P2（q1907-i01）: p007b を実装し VF2 で確かめた（[phase007b](phase007b/phase.md)）。vkvideo-probe と libmedia の直し、host の道具 `tests/p007b/`。次: Q1 の受け入れ、`CONFIG_DRIVER_VF2_VPU` の既定を y にする判断（Q1 の 03:45 の判断の条件の JVT は済んだ）、Video Player の読み戻しの道の速さ（小さい stream、Video Player の側）、p005・p006。
 
 - 2026-11-02 03:45 P2（q1896-i01）: p007 を実装し VF2 で確かめた（[phase007](phase007/phase.md)）。次: Q1 の受け入れ、`CONFIG_DRIVER_VF2_VPU` の既定の判断（材料は phase007 の問い）、JVT の不一致 13 本の解析（新しい Phase か p012 の前）、p005・p006。
 
