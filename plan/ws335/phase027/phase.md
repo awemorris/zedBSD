@@ -2,7 +2,7 @@
 
 # ws335-p027: transcript と鍵の schedule（1.3 と 1.2）
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p025・p002）
+Status: 実装済み・試験 PASS（2026-11-02 Sonnet q1882-i01。cleared の判定は Q1）。前: planned（2026-11-01 p001 が作成。依存: p025・p002）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -65,4 +65,51 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02（host の `date` は 01:38 JST）Sonnet 5.5（q1882-i01）。worktree s-ws335-p027（main ad65fbe3f6）。
+
+作った物: `userland/base/libssl-compat/sslc-keysched.c`（骨格の ENOSYS を置き換え）、`plan/ws335/tests/unit/test-keysched.c`、`plan/ws335/tests/unit/ct-keysched.c`。header・試験の道具・他の module・Makefile は変えていない。header と phase.md の食い違いは見つからなかった。
+
+実行した command と最後の行（`WS335_VECTORS=/home/awe/zedBSD-claude1/build/sources/tls-vectors`）:
+
+| command | 最後の行 |
+| --- | --- |
+| `sh plan/ws335/tests/run-unit.sh keysched`（ASan・UBSan） | `test-keysched: PASS (79369 checks)` / `run-unit: PASS` |
+| `sh plan/ws335/tests/run-unit.sh --win32 keysched ct-keysched`（x86_64、Wine、static link） | `test-keysched: PASS (79369 checks) (win32)` / `ct-keysched: PASS (55 checks) (win32)` / `run-unit: PASS` |
+| `sh plan/ws335/tests/run-ct.sh keysched`（valgrind memcheck、-O2） | `ct-keysched: PASS (55 checks)` / `run-ct: PASS` |
+| `BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: PASS`（warning 0、名前の範囲、Windows の static link を含む） |
+| `sh plan/ws335/tests/run-unit.sh all` | test-* 17 本と ct-* 11 本の全部 PASS / `run-unit: PASS` |
+| `git diff --check` | 出力なし |
+
+試験の中身（test-keysched、79369 checks）:
+
+- RFC 8448（`rfc8448.vec`）の全ての HKDF-Expand-Label（section 3〜7 の 100 件超。各 step の info を label・context・length に分解して実装の `sslc_tls13_expand_label` と、printed の info に対する HKDF 直接の両方で printed の expanded と一致。info の構造と、label と context から試験側で組んだ HkdfLabel が printed の info と一致することも照合）、全ての key・iv（`sslc_tls13_traffic_keys`）、section 4 の PSK binder の finished（`sslc_tls13_finished`）。
+- PSK 無しの 4 本（section 3 simple 1-RTT、5 HelloRetryRequest、6 client authentication、7 compatibility mode）は全体を通す: transcript を ClientHello から順に、SHA-256 と SHA-384 を両方持つ状態で流し、ServerHello で select、section 5 は HRR を random で見分けて select → restart_hrr（結果を 0xfe 00 00 20 || H(ClientHello1) の試験側の計算と照合）→ HRR を吸収。各点の transcript hash（c hs traffic・c ap traffic・res master の hash）、Early・Handshake・Master Secret、4 つの traffic secret、server と client の Finished（message の中身と printed の finished の両方）が一致。section 4（PSK・0-RTT）は schedule が PSK を持たないので、expand-label・key・binder だけを照合し、通し（transcript と schedule）は未実施。
+- RFC 8448 に無い値（SHA-384、32 byte の key、traffic update、TLS 1.2）は、試験側で HMAC・HKDF を式どおり（RFC 8446 7.1、RFC 5246 5）に別の形で書いて照合: expand_label（label 8 種 × 長さ 12 × context 7 × 2 hash、最長 label 249 と最長 255 block）、schedule 全体（hash 2 × shared の大きさ 7 × 10 回）、traffic keys（3 つの 1.3 suite）、finished と update の 3 世代、TLS 1.2 の PRF（secret 10 × seed 6 × 出力 16 の大きさ × 2 hash、1024 まで、短い出力が長い出力の先頭）、master（ems と通常、pre-master 4 通り）、key block（6 つの 1.2 suite、random の順と 4 つの切り出し）、finished（client と server、2 hash）。
+- transcript: 大きさ 16 通りの組 × select の前後 × 2 hash、分割と NULL・size 0、hash の読み出しで終わらない事、struct の複写の独立、select の規則（同じ hash の 2 回目は 0、別の hash は EINVAL、sha512・none・99 は EINVAL、拒否は変化無し、選ばれなかった方の state が 0 に消える）、restart_hrr（2 hash × ClientHello1 を select の前後に吸収）、clear が全部 0。
+- 誤りの入力: 各関数の全ての EINVAL の条件と、拒否の時に出力・schedule・keys が変わらない事（guard の byte）、NULL と size 0 の組。乱数の呼び出し（3000 round × 全関数、random の hash id・大きさ・NULL、ちょうどの大きさの heap block、ASan・UBSan で落ちず戻り値は 0 か EINVAL）。
+- ct-keysched（55 checks）: 共有の秘密・pre-master を CT_SECRET にして 1.3 の 3 suite と 1.2 の 3 suite（2 hash、3 つの key の大きさ、ems と通常）の全部の鎖（start → handshake → master → keys → finished → update、pre-master → master → key block → finished・PRF）を秘密のまま通し、最後に CT_PUBLIC。memcheck の指摘 0。
+
+わざと壊す確かめ（git の外。`build/tmp/p027/brk.py`: 実装を複写して 1 か所だけ書き換え、他の module は 1 度 build した object を使い、test-keysched（非 sanitizer の -O1）か ct-keysched（-O2、valgrind）を build して流す。元の file の sha256 が前後で変わっていない事を確認、`git diff` も空）。117 通り（unit 109、ct 8）の内容: label 1 文字の違い（tls13 の prefix・derived・c/s hs・c/s ap・key・iv・finished・traffic upd・key expansion・master secret・extended master secret・client/server finished）、HkdfLabel の長さの byte・context の長さ・context の欠落、上限の境（label 249・248、context 255・254・256、255 block、shared 128・127・129、PRF 1024・1023・1025）、NULL の許可、Early/Handshake/Master の ikm・salt・secret の取り違えと格納漏れ、client と server の入れ替え、keys の suite・version・hash の検査の欠落と key_size・iv_size の誤り、finished の key と hmac の長さ、update の部分複写、transcript（片方の hash だけ吸収、select の wipe の向き・省略・sha512 や none の受け入れ・別 hash の再 select の許可、hash の取り違えと size の戻り値、HRR の type 254→253・length の byte・header と digest の欠落と短縮・select 前の許可、clear の省略）、P_hash（A の更新を block から・更新の停止、block の label と seed の欠落、A(1) の label と seed の欠落、最後の block の部分利用の欠落、block 数のずれ）、master（label と size の入れ替え、flag 2 の許可、空の pre-master、47 byte）、key block（random の順、label、client と server の key と IV の入れ替え、IV の offset、総和、同じ構造体の許可、1.3 suite の許可、出力の wipe の省略、server の iv_size、client の suite）、finished（label の入れ替え、11・13 byte、hash 大きさの固定）、定数時間（finished_key・Handshake Secret・shared・update・P_hash の block・pre-master・key block・traffic key の秘密への分岐と秘密による index を入れた 8 通り）。
+結果: 初回の 117 通りのうち 108 通りが検出（`FAIL` 96、NULL の参照で SIGSEGV 4、memcheck 8。build の誤りは 0）、BAD-MUTATION（書き換えの目印が複数 hit して適用されず）4 通りは目印を絞って再実行し、全部が `FAIL` で検出。`keys version not checked`（TLS 1.2 の suite を 1.3 の関数に渡して version の検査だけを外す）は、IV の大きさの検査が先に弾いて初回は見逃し。TLS 1.2 の ChaCha20-Poly1305 の suite（hash・IV・key の大きさが 1.3 と同じ）を渡す検査を足して検出。見逃し 4 通りは全て等価:
+- 255 block の上限を 256 block に: `cryc_hkdf_expand` が同じ上限で EINVAL を返す（二重の防御）。
+- Early Secret の salt を zeros の size-1 に: HMAC が鍵を block まで 0 で埋めるので、同じ鍵になる（等価）。
+- `sslc_tls13_master` の transcript_hash の NULL を許す: 下の `sslc_tls13_expand_label` が context の NULL と size を EINVAL にする（二重の防御）。
+- `sslc_tls12_prf` の secret の NULL と size > 0 を許す: `cryc_hmac_init` が EINVAL を返す（二重の防御）。
+
+自分で決めた点（header が黙っていた所）:
+
+1. 受ける hash: 全ての関数で SHA-256 と SHA-384 だけ。SHA-512・none・その他は EINVAL（expand_label・finished・update・TLS 1.2 の関数も同じ。header の「hash 大きさ」の想定が suite の hash だけのため）。
+2. `sslc_transcript_select`: 同じ hash の 2 回目は 0、選んだ後の別の hash は EINVAL（捨てた方は戻せない）。選ばれなかった方の hash の state は cryc_wipe で 0。`sslc_transcript_restart_hrr` は選んだ hash を新しく始め直して `fe 00 00 <size>` と ClientHello1 の hash を吸収（2 度呼べば、その時の状態の hash で同じ事を繰り返す。header に規定が無く、試験していない）。`sslc_transcript_update` の size 0 は message が NULL でもよい。
+3. `sslc_tls13_start` は schedule 全体を先に wipe（以前の内容を残さない）。schedule に段階の field が無いので、`sslc_tls13_handshake`・`sslc_tls13_master` を順序どおりに呼ぶかは検出できない（呼び出す側の責任。検査するのは hash が 256/384 で size が hash の大きさと一致する事 = start 済みである事だけ）。handshake・master は途中の誤りで schedule を変えない（一時変数で作ってから複写）。
+4. `sslc_tls13_handshake` の shared の大きさ: 1 から 128（0 は EINVAL、129 以上も EINVAL。x25519・secp256r1 の 32、secp384r1 の 48、X25519MLKEM768 の 64 を越える余裕。上限は呼び出し側が際限無く hash しないための防御）。
+5. `sslc_tls13_expand_label`: label 1〜249 文字、context 0〜255、length 0〜255 × hash の大きさ（65535 の上限は超えない）、out が NULL なのは length 0 の時だけ許す。`sslc_tls13_traffic_keys`: suite の version が TLS 1.3、hash が引数と一致、key_size が 1〜32、fixed_iv_size が 12 のとき以外は EINVAL。成功時は keys を先に全部 0 にしてから書く（key の余りは 0）、失敗時も 0 にする（引数の検査で弾く時は触らない）。
+6. TLS 1.2: `sslc_tls12_prf` の secret と seed は size 0 なら NULL でもよい（secret が空でも HMAC は可能）、label は C 文字列（長さの上限は設けない。streaming で hash する）、out は 1024 以下。`sslc_tls12_master` の pre_master は 1 byte 以上、extended_master_secret は 0 か 1 だけ（他は EINVAL）、context の大きさは ems が hash の大きさ、通常が 64。`sslc_tls12_key_block` は suite の version が TLS 1.2、hash が 256/384、key_size 1〜32、fixed_iv_size 1〜12、client_keys と server_keys が同じ構造体なら EINVAL、出力は先に全部 0 にしてから書く。`sslc_tls12_finished` の from_client は 0 以外が client。
+7. 戻り値: header が EINVAL と書く所は全部 EINVAL（下の cryc_ 関数の ENOTSUP は EINVAL に直す）。
+8. 内部は `sslc_keysched_hash_size`・`sslc_tls13_derive_secret`・`sslc_tls13_next_secret`・`sslc_tls12_p_hash` の static 4 つ。
+
+phase.md の「注意」の指示との差: 1.2 の PRF の期待値は、試験側で HMAC を RFC 5246 5 の式どおりに組み（`ref_prf`: 連結した buffer に対する 1 回呼びの cryc_hmac）、実装（streaming の cryc_hmac_update で A(i)・label・seed を順に吸収）と別の形で書いた。RFC 8448 の text は参照せず、`rfc8448.vec`（p025 で使った前例と同じ cache）を使った。
+
+未実施: section 4（PSK・0-RTT）の transcript と schedule の通し（schedule が PSK 無しのため）、`sslc_tls13_update_secret` と 1.2 の関数の公式の vector（RFC 8446・5246 に値が無い。試験側の式との照合だけ）、32 bit の size_t の機械と aarch64 Windows の実行（check-skeleton の build のみ）、実機・QEMU（範囲外）、規約の第三者のレビュー（§14 の checklist で自分の diff を見直した）。
+
+commit: 下の「commit」に Q1 への報告と同じ SHA を書く。
+

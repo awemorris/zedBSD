@@ -62,7 +62,7 @@
 | [p024](phase024/phase.md) | 公開の EVP_PKEY（Ed25519・X25519・ML-KEM-768）（test-api-pkey） | planned | p021、p009、p008、p014 |
 | [p025](phase025/phase.md) | TLS の定数・suite の表・presentation language の reader/writer（test-tls、test-buf） | cleared（2026-11-02 01:07 Q1、main で test-tls 2230・test-buf 1559755 PASS） | p002 |
 | [p026](phase026/phase.md) | record の保護（test-record） | planned | p025、p005、p006 |
-| [p027](phase027/phase.md) | transcript と鍵の schedule（1.3 と 1.2）（test-keysched） | planned（Sonnet q1882） | p025、p002 |
+| [p027](phase027/phase.md) | transcript と鍵の schedule（1.3 と 1.2）（test-keysched） | 実装済み・試験 PASS（2026-11-02 Sonnet q1882-i01、test-keysched 79369 checks・ct-keysched 55 checks、cleared は Q1） | p025、p002 |
 | [p028](phase028/phase.md) | handshake の message の encode と syntax の確かめ（test-msg） | planned | p025 |
 | [p029](phase029/phase.md) | handshake の共通と TLS 1.3（test-hs13） | planned | p027、p028、p020、p011、p008、p037 |
 | [p030](phase030/phase.md) | TLS 1.2 の handshake（test-hs12） | planned | p029、p037 |
