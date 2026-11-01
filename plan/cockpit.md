@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) p007 | RTX 2070 の Vulkan Video | p005（nvrtx の H.265 decode）cleared。H.265 の絵を ffmpeg と一致させる実機の debug（q1922） | p007 の後、今日は終了（encode は次に再開） |
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（06:45）。p005（libvulkan の H.265 decode の転送）cleared。VPU は VF2 で既定 on、firmware を zedBSD-firmware で配る | p006 H.265 decode（PowerVR の reader と Wave5 の HEVC） |
-| P3 | — | Pi 5 の作業 | 返却（03:03）。Pi 5 の desktop の動画 8 本（build/review/pi5-video/）。板は元に戻した | 次を待つ |
+| P3 | [WS321](ws321/ws.md) | Pi 5 の H.265 decode（Vulkan Video） | 実装して Video Player の GPU の道で再生まで（q1923） | — |
 | P4 | — | Bug の修正 | 返却（08:12）。BUG-397（ストアで固まる）・BUG-399（検索の欄の幅）fixed。以後ブラウザは P8 | 次を待つ |
 | P5 | — | Windows 版ブラウザ | 返却（08:12）。BUG-400（storage-test の時々の FAIL、試験の側）fixed。以後ブラウザは P8 | 次を待つ |
 | P6 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | 返却（03:59）。p037（試験の TLS server tlspeer）cleared | p024・p029（handshake）の候補 |
