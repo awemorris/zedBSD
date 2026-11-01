@@ -981,14 +981,20 @@ ipv6_advertisement(
 			ipv6_prefix(name, record->rtm_ifindex, &item, &ra.prefixes[index]);
 	}
 
-	/* The router, the DNS servers, DHCPv6, and the log. */
+	/* The router, the DNS servers and DHCPv6. */
 	ipv6_router(record->rtm_ifindex, &record->rtm_source, ra.router_lifetime);
 	if (dns_dynamic)
 		ipv6_dns_advertised(record->rtm_ifindex, name, &ra);
 	ipv6_dhcp_advertised(name, &item, &ra, dns_dynamic);
-	printf("networkd: %s: router advertisement prefixes=%u router=%u dns=%u\n", name, ra.prefix_count,
-	    (unsigned)ra.router_lifetime, ra.dns_count);
-	fflush(stdout);
+
+	/*
+	 * Each advertisement is not logged: routers send them every few
+	 * seconds, and the line filled the console.
+	 *
+	 * printf("networkd: %s: router advertisement prefixes=%u router=%u dns=%u\n", name, ra.prefix_count,
+	 *     (unsigned)ra.router_lifetime, ra.dns_count);
+	 * fflush(stdout);
+	 */
 }
 
 /*
