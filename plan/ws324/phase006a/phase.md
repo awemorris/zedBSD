@@ -2,7 +2,7 @@
 
 # ws324-p006a H.265 の解析の設計（標準廉価実装手順 §4）と、header を source に置く段 2
 
-Status: in-progress（2026-11-02 P1、q1864-i02。段 1 は Q1 の受け入れ済み（Q-A〜Q-E は全部 A）。段 2 済み: 基点 BASE `1f16db0e6`、確かめは下の「結果（段 2）」。cleared は Q1 の判定を待つ）
+Status: cleared（2026-11-02 00:41 Q1、main e1eaa6761。段 1 の設計と段 2 の BASE 1f16db0e6、check-skeleton・run-unit を main で流し直して PASS、HEVC の適合の 147 本を取得）。前: in-progress（2026-11-02 P1、q1864-i02。段 1 は Q1 の受け入れ済み（Q-A〜Q-E は全部 A）。段 2 済み: 基点 BASE `1f16db0e6`、確かめは下の「結果（段 2）」。cleared は Q1 の判定を待つ）
 
 - WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md)。header（正本）: [proposed/h265/](../proposed/h265/)。review: [design-review.md](../design-review.md) の review 2。
 - 背景: Q324-1（2026-11-01 Q1 の判断）で、H.265 の解析は WS318 p016〜p019 の範囲を標準廉価実装手順で先に作り、libmedia の build と runtime には繋がない。WS330 の Q330-2 の A（解析は 1 つ）により、WS330 の proposed の解析の header を土台にする。
