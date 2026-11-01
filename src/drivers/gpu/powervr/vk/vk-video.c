@@ -230,12 +230,12 @@ struct video_pool_picture {
 /*
  * One VkVideoSessionKHR.
  *
- * It keeps its codec (operation), the limits it was made with, the engine's stream, its one
- * memory binding, the active slots of the coding scope its last begin
- * opened, and its pool: count pictures of one pitch for the coded size,
- * made by the engine's call from a decode.  kept says the pool stays
- * with the core when the session goes.  Everything changes only under
- * the session's serialized ioctls.
+ * It keeps its codec (operation), the limits it was made with, the
+ * engine's stream, its one memory binding, the active slots of the coding
+ * scope its last begin opened, and its pool: count pictures of one pitch
+ * for the coded size, made by the engine's call from a decode.  kept says
+ * the pool stays with the core when the session goes.  Everything changes
+ * only under the session's serialized ioctls.
  */
 struct video_session {
 	struct powervr_vk_session *owner;
