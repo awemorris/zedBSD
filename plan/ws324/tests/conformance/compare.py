@@ -88,6 +88,8 @@ EXCEPTIONS = {
     },
 }
 
+# The prefix ffmpeg puts on each trace line (run.sh strips it; a line read after a carriage return still has it).
+TRACE_PREFIX_RE = re.compile(r'^.*\[trace_headers @ 0x[0-9a-f]+\] ')
 FIELD_RE = re.compile(r'^(\d+)\s+(\S+)\s+[01]*\s*= (-?\d+)$')
 POC_RE = re.compile(r'(Decoded|Output) frame with POC (-?\d+)/(-?\d+)\.')
 
@@ -125,14 +127,16 @@ def open_text(path):
     return open(path, 'r', errors='replace')
 
 
-def read_trace(path):
-    """The sections of trace_headers after the extradata (the packets), in stream order."""
+def read_trace(path, unread):
+    """The sections of trace_headers after the extradata (the packets), in stream order.  A line that looks like a
+    field but does not read as one (another output joined to it) goes to unread: the trace is then not trusted.
+    ffmpeg's own statistics line (frame=..., at the end even with -nostats) is skipped."""
     sections = []
     current = None
     packets = False
     with open_text(path) as handle:
         for line in handle:
-            line = line.rstrip('\n')
+            line = TRACE_PREFIX_RE.sub('', line.rstrip('\n'))
             if line.startswith('['):
                 continue
             if line.startswith('Packet:'):
@@ -145,6 +149,11 @@ def read_trace(path):
             if match:
                 if current is not None:
                     current.add(int(match.group(1)), match.group(2), int(match.group(3)))
+                continue
+            if line.startswith('frame=') and '[' not in line:
+                continue
+            if re.match(r'^\d', line) or 'frame=' in line:
+                unread.append(line)
                 continue
             kind = TRACE_TITLES.get(line.strip())
             current = None
@@ -638,7 +647,10 @@ def main():
     units = scan_nal_units(data)
     expected = expected_pictures(units)
     conform = read_conform(args.conform)
-    sections = read_trace(args.trace)
+    unread = []
+    sections = read_trace(args.trace, unread)
+    checker.check('structure', not unread, 'trace lines that do not read: %d, first %r' % (
+        len(unread), unread[:1]))
     decoded, output = read_decode(args.decode)
 
     # The trace's pictures: each first slice segment header of the base layer, with the parameter sets then current.
@@ -803,6 +815,7 @@ def main():
     summary += ' values=%d checks=' % checker.values + ','.join('%s:%d' % (k, v) for k, v in sorted(checker.counts.items()))
     if checker.failed:
         summary += ' failed=' + ','.join('%s:%d' % (k, v) for k, v in sorted(checker.failed.items()))
+        summary += ' first=[%s]' % checker.details[0][:300] if checker.details else ''
     waived_hit = [k for k in checker.failed if k in waived]
     if waived_hit:
         summary += ' waived=' + ','.join(sorted(waived_hit))

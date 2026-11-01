@@ -1543,6 +1543,8 @@ main(
 		return 2;
 	}
 
+	data = NULL;
+	size = 0U;
 	error = read_input(argv[1], &data, &size);
 	if (error != 0) {
 		printf("@ERROR read %d\n", error);

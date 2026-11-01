@@ -86,6 +86,12 @@ ffmpeg を正としなかった場面: EOS の後の出力（下の 2）は仕�
 2. **Q1 が受け入れた直し（2026-11-02 Q1）**: `h265-stream.h` の after_eos の comment（「the caller then outputs and empties its DPB first, as the reference decoder's output does at an end of sequence」）と [h265-parse-design.md](../h265-parse-design.md) §5.3 の「picture.after_eos → h265_dpb_flush」は C.5.2.2 と食い違う。EOS の後の絵は NoRaslOutputFlag 1 の IRAP で、CRA なら NoOutputOfPriorPicsFlag は 1、IDR・BLA なら no_output_of_prior_pics_flag で、1 なら前の絵はまだ出力していない物も出力せずに空にする（HM も ffmpeg も同じ）。先に flush すると仕様が落とす絵を出力する: conform を最初その通りに書いて NoOutPrior_A（3 絵）と RAP_B（3 絵）が出力の順で FAIL、flush を外して PASS。`h265_dpb_begin` が既に正しく扱うので、flush は IDR の flag 0 では冗長、他では誤り。conform.c は after_eos で flush しない。header の comment と design §5.3 は規約の全文の見直しの Phase（p015）で直す。p006i（vkvideo-probe）と libmedia の使い手は after_eos で flush せず `h265_dpb_begin` に任せる。2026-11-02 の時点で `userland/`・`src/` に after_eos で `h265_dpb_flush` を呼ぶ所は無い（`h265-dpb.[ch]`・`h265-stream.[ch]` の定義の他に名前の出現 0）。
 3. 道具の直し（compare.py）: ffmpeg の decode の log で、stream の情報の probe の decoder が後の decoder と同じ address に置かれる場合（CAINIT_G・CAINIT_H で POC 0 が 2 回に見えた）に `Stream mapping:` の行より後だけを読む形に、debug の行が別の行の末尾に prefix 無しで付く場合（WPP_B で POC 2 を見落とした）に行の中を探す形に直した。
 
+### 2 回目の起動（2026-11-02、Q1 の main の実行で SAODBLK_B が 1 回だけ FAIL）
+
+- Q1 が main（2a1c95404）で流した全体の実行で `SAODBLK_B_MainConcept_4` が `failed=derived:1`（detail は `picture 221 SH =DataOffset: conform 6, derived 5`）、その stream だけの再実行は PASS。
+- 原因は道具（compare.py・run.sh）の側: conform の出力は Q1 の実行と P6 の実行で byte で同じで、valgrind（`--track-origins=yes`）の誤り 0、20 回の実行の出力の md5 が全部同じ（module・conform.c は決定的）。食い違ったのは ffmpeg の trace の file: ffmpeg の進み具合の行（`frame=  221 ...`、改行でなく carriage return で終わる）が stderr の trace の途中に入り、次の trace の行がその後ろに付いた。run.sh の sed は `[trace_headers @ ...]` の prefix を行の頭でしか消さず、compare.py の Python は carriage return でも行を分けるので、分かれた後半（`[trace_headers @ ...] 63 alignment_bit_equal_to_zero ...`）を他の log の行として捨てた。捨てたのがその header の最後の alignment bit だったので、trace から導いた slice data の始まりが 1 byte 短くなった。進み具合の行が出る時刻で決まるので、実行ごとに変わる。
+- 直し: run.sh の ffmpeg 3 本に `-nostats`、sed は prefix を行のどこでも消す、compare.py は行を読む時に prefix を消し（carriage return で分かれた行も読める）、field に見えて読めない行があれば `structure` の FAIL にする（`frame=` の統計の行は飛ばす）。FAIL の stream の summary の行に最初の食い違い（`first=[...]`、両方の値）を足した。Q1 の実行の壊れた trace をそのまま新しい compare.py に通して PASS（行を取り戻す）、prefix を直した写しでも PASS。conform.c は main の中の `data`・`size` の初期化だけ（ASan 無しの build の maybe-uninitialized の警告）。
+
 ### 未実施・残り
 
 - QEMU・実機は無し（host の Phase）。Vulkan の decode は p006i・p007。
