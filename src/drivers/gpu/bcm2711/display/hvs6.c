@@ -130,10 +130,9 @@
 #define ADOPT_POLLS			200U
 
 /*
- * The vertical blanks R1 times: their first and last are four frames apart,
- * about 67 ms at 60 Hz; R1 gives up after one second without them.
+ * How long R1 waits for its BCM2712_VBLANK_TIMED timed vertical blanks
+ * (six frames, 100 ms at 60 Hz) before it counts over the whole wait.
  */
-#define VBLANK_TIMED			5U
 #define VBLANK_LIMIT_MS			1000U
 
 /* The overlay of the R2 test: a 64x64 opaque square moved 30 times. */
@@ -148,6 +147,7 @@ static int decode_list(struct bcm2712_display *display, uint32_t head);
 static void show_list(const struct bcm2712_display *display, uint32_t head, uint32_t end);
 static int switch_list(struct bcm2712_display *display, uint32_t head, uint32_t *waited_us);
 static bool valve_service(void *owner);
+static uint64_t median_frame(const uint64_t *counters);
 static bool device_vblank_service(void *owner);
 static uint32_t overlay_pixel(uint32_t x, uint32_t y, uint32_t step);
 
@@ -466,9 +466,11 @@ bcm2712_display_adopt(
  * Runs stage R1: times the pixel valve's vertical blanks.
  *
  * Enables the start-of-front-porch interrupt of the valve behind the
- * channel, waits for VBLANK_TIMED of them (at most VBLANK_LIMIT_MS), puts
- * the enable back as it was, and takes the refresh from the time between
- * the first and the last.
+ * channel, waits for BCM2712_VBLANK_TIMED of them (at most
+ * VBLANK_LIMIT_MS), puts the enable back as it was, and takes the refresh
+ * from the median of the frames the monotonic counter timed between them,
+ * so one blank served late does not move it.  Without the counter the
+ * refresh is the count over the whole limit.
  */
 int
 bcm2712_display_vblank_test(
@@ -479,14 +481,17 @@ bcm2712_display_vblank_test(
 	unsigned long enabled;
 	uint32_t enable;
 	uint32_t status;
+	uint64_t counters[BCM2712_VBLANK_TIMED];
 	uint64_t count;
-	uint64_t first;
-	uint64_t last;
+	uint64_t timed;
+	uint64_t frequency;
 	uint64_t started;
 	uint64_t elapsed;
-	uint64_t span_us;
+	uint64_t frame;
+	uint64_t frame_us;
 	uint64_t millihz;
 	unsigned step;
+	unsigned index;
 	bool allowed;
 
 	/* Honors hvs6.stop=R1; channel 2 has no valve. */
@@ -511,8 +516,8 @@ bcm2712_display_vblank_test(
 	enabled = spin_lock_irqsave(&display->guard);
 
 	display->vblank_count = 0;
-	display->vblank_first_ticks = 0;
-	display->vblank_last_ticks = 0;
+	display->vblank_timed = 0;
+	display->vblank_counter_hz = 0;
 
 	spin_unlock_irqrestore(&display->guard, enabled);
 	kern_mmio_write32(valve + VALVE_INTSTAT, VALVE_VFP_START);
@@ -522,40 +527,60 @@ bcm2712_display_vblank_test(
 	/* Looks each millisecond until enough vertical blanks came or the limit passed. */
 	started = clock_ticks();
 	count = 0;
-	first = 0;
-	last = 0;
+	timed = 0;
+	frequency = 0;
 	for (step = 0; step < VBLANK_LIMIT_MS; step++) {
 		kern_usleep_range(1000, 1000);
 		enabled = spin_lock_irqsave(&display->guard);
 
 		count = display->vblank_count;
-		first = display->vblank_first_ticks;
-		last = display->vblank_last_ticks;
+		timed = display->vblank_timed;
+		frequency = display->vblank_counter_hz;
 
 		spin_unlock_irqrestore(&display->guard, enabled);
-		if (count >= VBLANK_TIMED)
+		if (timed >= BCM2712_VBLANK_TIMED)
 			break;
 	}
+
+	/* Copies the timed blanks; the handler writes no more of them. */
+	enabled = spin_lock_irqsave(&display->guard);
+
+	for (index = 0; index < BCM2712_VBLANK_TIMED; index++)
+		counters[index] = display->vblank_counters[index];
+
+	spin_unlock_irqrestore(&display->guard, enabled);
 
 	/* Puts the valve back as it was and masks the line. */
 	kern_irq_mask(line->irq);
 	kern_mmio_write32(valve + VALVE_INTEN, enable);
 	kern_mmio_write32(valve + VALVE_INTSTAT, VALVE_VFP_START);
 	elapsed = kern_ticks_to_ms(clock_ticks() - started);
-	span_us = 0;
-	if (count >= 2U)
-		span_us = kern_ticks_to_us(last - first);
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R1 %llu vblanks %llu us apart in %llu ms",
+	frame = 0;
+	if (timed >= BCM2712_VBLANK_TIMED && frequency != 0)
+		frame = median_frame(counters);
+	frame_us = 0;
+	if (frame != 0)
+		frame_us = frame * 1000000U / frequency;
+	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R1 %llu vblanks in %llu ms, median frame %llu us",
 			   (unsigned long long)count,
-			   (unsigned long long)span_us,
-			   (unsigned long long)elapsed);
+			   (unsigned long long)elapsed,
+			   (unsigned long long)frame_us);
 
-	/* Refuses a valve that gave fewer than two interrupts. */
-	if (count < 2U || span_us == 0)
+	/* Takes the refresh from the median frame, or else from the count over the time waited. */
+	millihz = 0;
+	if (frame != 0) {
+		/* One frame of the counter's time. */
+		millihz = (frequency * 1000U + frame / 2U) / frame;
+	} else if (count != 0 && elapsed != 0) {
+		/* The blanks counted over the whole wait. */
+		millihz = (count * 1000000U + elapsed / 2U) / elapsed;
+	}
+
+	/* Refuses a valve that gave no interrupt. */
+	if (millihz == 0)
 		return EIO;
 
 	/* Records the measured refresh, rounded to the whole hertz (the flip code budgets with it). */
-	millihz = ((count - 1U) * 1000000000ULL + span_us / 2U) / span_us;
 	display->base.refresh_millihz = (uint32_t)((millihz + 500U) / 1000U) * 1000U;
 
 	/* Succeeded: the valve's vertical blank reaches the driver. */
@@ -1053,7 +1078,9 @@ valve_service(
 	volatile uint8_t *valve;
 	uint32_t status;
 	uint64_t now;
+	uint64_t frequency;
 	unsigned long enabled;
+	bool counted;
 
 	/* Ignores an interrupt that is not the vertical blank. */
 	display = owner;
@@ -1064,18 +1091,51 @@ valve_service(
 
 	/* Acknowledges, counts and times it. */
 	kern_mmio_write32(valve + VALVE_INTSTAT, VALVE_VFP_START);
-	now = clock_ticks();
+	counted = kern_rtc_read_counter(&now, &frequency);
 	enabled = spin_lock_irqsave(&display->guard);
 
 	display->vblank_count++;
-	if (display->vblank_count == 1U)
-		display->vblank_first_ticks = now;
-	display->vblank_last_ticks = now;
+	if (counted && display->vblank_timed < BCM2712_VBLANK_TIMED) {
+		/* Times it on the monotonic counter. */
+		display->vblank_counters[display->vblank_timed] = now;
+		display->vblank_timed++;
+		display->vblank_counter_hz = frequency;
+	}
 
 	spin_unlock_irqrestore(&display->guard, enabled);
 
 	/* Succeeded: the vertical blank was quieted. */
 	return true;
+}
+
+/*
+ * Reports the median of the frames between consecutive timed blanks, in
+ * counts of the monotonic counter: the mean of the two middle ones, since
+ * there is an even number of them.
+ */
+static uint64_t
+median_frame(
+	const uint64_t *counters)
+{
+	uint64_t frames[BCM2712_VBLANK_TIMED - 1U];
+	uint64_t frame;
+	unsigned index;
+	unsigned place;
+
+	/* Inserts each frame in order among those before it. */
+	for (index = 0; index + 1U < BCM2712_VBLANK_TIMED; index++) {
+		frame = counters[index + 1U] - counters[index];
+		place = index;
+		while (place > 0 && frames[place - 1U] > frame) {
+			/* Moves a longer frame up one place. */
+			frames[place] = frames[place - 1U];
+			place--;
+		}
+		frames[place] = frame;
+	}
+
+	/* Reports the middle. */
+	return (frames[BCM2712_VBLANK_TIMED / 2U - 1U] + frames[BCM2712_VBLANK_TIMED / 2U]) / 2U;
 }
 
 /* Packs the square's opaque pattern: a magenta and green checker of 8-pixel cells. */
