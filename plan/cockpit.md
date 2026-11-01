@@ -92,7 +92,7 @@
 
 ## 決まった事
 
-- 2026-11-02 08:28 [WS324](ws324/ws.md)・[WS322](ws322/ws.md): 今日の作業は decode（WS324 は p007、WS322 は p006）までで終え、担当を終了する。encode は保留でなく、次の指示ですぐ再開する。両 WS は incomplete。
+- 2026-11-02 08:28 [WS324](ws324/ws.md)・[WS322](ws322/ws.md): 今日の作業は decode（WS324 は p007、WS322 は p006）と Video Player の GPU の道での再生までで終え、担当を終了する。encode は保留でなく、次の指示ですぐ再開する。両 WS は incomplete。
 
 - 2026-11-02 06:30 [WS324](ws324/ws.md): p009b（NVENC の関門）を止めて、H.265 の decode（p005〜p007）を先に。
 

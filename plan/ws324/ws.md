@@ -8,6 +8,7 @@
 
 ## ユーザーの決定（2026-10-30、原文）
 
+- （2026-11-02 08:29）ユーザーから、今日の作業は NVDEC の H.265 の decode に加え、Video Player の GPU の道（VP_GPU_PRESENT）での再生（H.264・H.265、RTX の実機）まで取り組む、という趣旨の指示を受けた。
 - （2026-11-02 08:28 に改めた）ユーザーから、今日の作業は NVDEC の対応（H.265 の decode、p007）までで終え、担当を終了する、という趣旨の指示を受けた。encode（NVENC、p008a 以降と p009b）は保留でも block でもなく、次に指示があればすぐ再開する（再開の起点は Resume point）。WS324 は incomplete のまま。
 - （2026-11-02 06:30）ユーザーから、p009b（NVENC の関門）は止めて、NVENC に依らない H.265 の decode（p005〜p007）を先に進める、という趣旨の答えを受けた。p009b は uncleared のまま、観測は phase009b/phase.md に残す。
 - （2026-11-02 06:09）ユーザーから、NVIDIA の driver の配布 package（.run）の中の GSP の firmware を、GSP の log を文に直す目的だけで host で読んでよい、という趣旨の答えを受けた（Q-p009b-1、A）。repo・記録には書式の表も firmware も入れない。
