@@ -644,3 +644,5 @@
 | q1904 / q1904-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws335c`・branch `agent/p6-ws335c`） | [ws335 p037](ws335/phase037/phase.md) 試験の道具: scripted な TLS server と ECDSA の署名器 | 2026-11-02 03:02 Q1 | in-progress |
 | q1905 / q1905-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws335-p021`・branch `agent/s-ws335-p021`） | [ws335 p021](ws335/phase021/phase.md) | 2026-11-02 03:02 Q1（標準廉価実装手順） | cleared（2026-11-02 03:44、e594bc29e を main に merge、main で test-err PASS） |
 | q1906 / q1906-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws324-p006g`・branch `agent/s-ws324-p006g`） | [ws324 p006g](ws324/phase006g/phase.md) | 2026-11-02 03:26 Q1（標準廉価実装手順） | in-progress |
+| q1907 / q1907-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws322`・branch `agent/p2-ws322` を main に揃えて、VF2） | [ws322-p007b](ws322/phase007b/phase.md) JVT の残り 26 本 | 2026-11-02 03:45 Q1 | in-progress |
+| q1908 / q1908-i01 | Sonnet（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws335-p023`・branch `agent/s-ws335-p023`） | [ws335 p023](ws335/phase023/phase.md) | 2026-11-02 03:45 Q1（標準廉価実装手順） | in-progress |
