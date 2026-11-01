@@ -28,7 +28,6 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /*
  * How the wheel's distance is scaled: libkeiland gives 4 pixels for each
@@ -51,23 +50,17 @@ static void window_touch_push(struct shell_window *window, unsigned type, const 
 static uint32_t window_modifiers(unsigned modifiers);
 
 /*
- * Connects to the compositor and makes a toplevel window of a size with a
- * title.
+ * Connects to the compositor: the application the window will be made on
+ * (it knows the program's data directory too).
  *
- * Returns 0 once the first configure is acknowledged, or -1 with errno set.
+ * Returns 0, or -1 with errno set.
  */
 int
-shell_window_open(
+shell_window_connect(
 	struct shell_window *window,
-	const char *display,
-	uint32_t width,
-	uint32_t height,
-	const char *title)
+	const char *display)
 {
 	struct kl_app_options app_options;
-	struct kl_window_options options;
-	struct kl_app_event event;
-	int taken;
 
 	/* Nothing held yet. */
 	memset(window, 0, sizeof(*window));
@@ -75,17 +68,40 @@ shell_window_open(
 	/* The application: the connection to the compositor. */
 	memset(&app_options, 0, sizeof(app_options));
 	app_options.display = display;
-	app_options.application = "browser";
+	app_options.application = SHELL_APPLICATION_ID;
 	window->app = kl_app_open(&app_options);
 	if (window->app == NULL)
 		return -1;
 
-	/* Its window, the size asked for until the compositor gives one; the presenter draws on it itself. */
+	/* Succeeded: the application is open. */
+	return 0;
+}
+
+/*
+ * Makes the toplevel window of the connected application: a size with a
+ * title, shown with a way (KL_PRESENT_NONE for the presenter's own Vulkan,
+ * KL_PRESENT_SHM for the CPU presenter).
+ *
+ * Returns 0 once the first configure is acknowledged, or -1 with errno set.
+ */
+int
+shell_window_open(
+	struct shell_window *window,
+	uint32_t width,
+	uint32_t height,
+	const char *title,
+	unsigned present)
+{
+	struct kl_window_options options;
+	struct kl_app_event event;
+	int taken;
+
+	/* Its window, the size asked for until the compositor gives one. */
 	memset(&options, 0, sizeof(options));
 	options.title = title;
 	options.width = width;
 	options.height = height;
-	options.present = KL_PRESENT_NONE;
+	options.present = present;
 	window->kui = kl_app_window_create(window->app, &options);
 	if (window->kui == NULL)
 		return -1;
@@ -183,6 +199,32 @@ shell_window_title(
 }
 
 /*
+ * Closes the window and keeps the application, which a window of another
+ * way (shell_window_open) can be made on.  What the window had queued is
+ * gone with it.
+ */
+void
+shell_window_drop(
+	struct shell_window *window)
+{
+	/* The window. */
+	if (window->kui != NULL)
+		kl_window_close(window->kui);
+	window->kui = NULL;
+
+	/* What it queued, its size and the titlebar that heard it. */
+	window->width = 0U;
+	window->height = 0U;
+	window->resized = 0;
+	window->closed = 0;
+	window->modifiers = 0U;
+	window->titlebar = NULL;
+	window->event_first = 0U;
+	window->event_count = 0U;
+	window->touch_count = 0U;
+}
+
+/*
  * Closes the window and disconnects.
  */
 void
@@ -198,21 +240,13 @@ shell_window_close(
 }
 
 /*
- * Returns a monotonic time in milliseconds (0 when the clock cannot be read).
+ * Returns a monotonic time in milliseconds.
  */
 uint64_t
 shell_clock(void)
 {
-	struct timespec now;
-	int status;
-
-	/* The monotonic clock. */
-	status = clock_gettime(CLOCK_MONOTONIC, &now);
-	if (status != 0)
-		return 0U;
-
-	/* Reports it in milliseconds. */
-	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+	/* libkeiland's clock, in milliseconds. */
+	return kl_clock_us() / 1000U;
 }
 
 /* Turns one input of the window into the shell's. */
@@ -363,8 +397,12 @@ window_key(
 	if (event == NULL)
 		return;
 
-	/* The key, whether it went down, and whether it is a held key's repeat. */
+	/* The key, the character it types when the backend says (a press only), whether it went down, and whether it is a held key's repeat. */
 	event->key = input->code;
+	if (input->pressed) {
+		memcpy(event->text, input->text, sizeof(event->text));
+		event->text[sizeof(event->text) - 1U] = '\0';
+	}
 	event->pressed = 0;
 	if (input->pressed)
 		event->pressed = 1;

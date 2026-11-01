@@ -53,24 +53,28 @@ shell_present_open(
 	VkInstanceCreateInfo instance;
 	VkSemaphoreCreateInfo semaphore;
 	struct browser_gpu gpu;
-	const char *extensions[2];
+	const char *const *extensions;
+	uint32_t extension_count;
 	VkResult error;
 	int failed;
 
 	/* Nothing is owned yet. */
 	memset(present, 0, sizeof(*present));
 
-	/* The instance, with the surface extensions a Wayland window needs. */
-	extensions[0] = VK_KHR_SURFACE_EXTENSION_NAME;
-	extensions[1] = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
+	/* The instance, with the surface extensions the window needs. */
+	failed = kl_window_vulkan_extensions(&extensions, &extension_count);
+	if (failed != 0) {
+		present->operation = "kl_window_vulkan_extensions";
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
 	memset(&application, 0, sizeof(application));
 	application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-	application.pApplicationName = "browser";
+	application.pApplicationName = SHELL_PRODUCT_NAME;
 	application.apiVersion = VK_API_VERSION_1_0;
 	memset(&instance, 0, sizeof(instance));
 	instance.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	instance.pApplicationInfo = &application;
-	instance.enabledExtensionCount = 2U;
+	instance.enabledExtensionCount = extension_count;
 	instance.ppEnabledExtensionNames = extensions;
 	present->operation = "vkCreateInstance";
 	error = vkCreateInstance(&instance, NULL, &present->instance);

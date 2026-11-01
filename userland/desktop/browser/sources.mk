@@ -3,9 +3,11 @@
 KEILAND_BROWSER_DIR := userland/desktop/browser
 
 KEILAND_BROWSER_SOURCES := $(KEILAND_BROWSER_DIR)/main.c \
+	$(KEILAND_BROWSER_DIR)/main-posix.c \
 	$(KEILAND_BROWSER_DIR)/shell/shell.c \
 	$(KEILAND_BROWSER_DIR)/shell/window.c \
 	$(KEILAND_BROWSER_DIR)/shell/present.c \
+	$(KEILAND_BROWSER_DIR)/shell/present-cpu.c \
 	$(KEILAND_BROWSER_DIR)/shell/titlebar.c \
 	$(KEILAND_BROWSER_DIR)/shell/keys.c \
 	$(KEILAND_BROWSER_DIR)/shell/touch.c \
