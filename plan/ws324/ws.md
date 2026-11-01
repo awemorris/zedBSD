@@ -8,6 +8,7 @@
 
 ## ユーザーの決定（2026-10-30、原文）
 
+- （2026-11-02 06:30）ユーザーから、p009b（NVENC の関門）は止めて、NVENC に依らない H.265 の decode（p005〜p007）を先に進める、という趣旨の答えを受けた。p009b は uncleared のまま、観測は phase009b/phase.md に残す。
 - （2026-11-02 06:09）ユーザーから、NVIDIA の driver の配布 package（.run）の中の GSP の firmware を、GSP の log を文に直す目的だけで host で読んでよい、という趣旨の答えを受けた（Q-p009b-1、A）。repo・記録には書式の表も firmware も入れない。
 - 「…H.264とH.265のデコーダとエンコーダの表の中で未の部分を埋めるようにVulkan Video driverを実装して…ドライバは個別のWSに分けて依存関係にしてもかまいません。先にlibmediaの方を作りきってcompleteにしてから、個別のドライバを実装する流れにします。…」（全文は [WS318](../ws318/ws.md)）
 - 「VPUが独立だとしても、我々はVulkan Video driverとして見せる必要があります。それがOSのAPIなので。」
@@ -27,7 +28,7 @@
 | [ws324-p006g](phase006g/phase.md) | h265-stream の実装（Sonnet） | cleared（2026-11-02 06:09 Q1、main で test-stream PASS）。実装済み・試験 PASS（2026-11-02 Sonnet q1906-i01、test-stream 1331307 checks、壊す確かめ 994 か所中 889 が試験の失敗で落ち、残り 105 は等価・観測できない物（ENOMEM の道、冗長な初期化、unreachable の守り）。cleared は Q1） | p006d |
 | [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | in-progress（P6） | p006e〜g |
 | [ws324-p009a](phase009a/phase.md) | NVENC の channel（段 nvenc-channel、class の bind、firmware の確かめ、RC の通知の記録） | cleared（2026-11-02 01:07 Q1、main a43959d8e。10.0.10.3 で NVENC の channel（class c4b7、chid 49）が開き engine 自身が semaphore を release、GSP-RM が NVENC の ucode を持つ（追加の firmware 不要）、channel error 0、NVDEC は前と同じ） | 実機 |
-| [ws324-p009b](phase009b/phase.md) | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode） | uncleared（2026-11-02 06:28 Q1、P1 q1884-i01 が 27 起動・約 90 通りで同じ HW の誤り。GSP の log の書式は NVIDIA の package にも無かった（Q-p009b-1 A の結果）、nouveau との比較（channel の特権を含む）も外れ。次の道はユーザーの判断待ち） | p009a、Q324-4 |
+| [ws324-p009b](phase009b/phase.md) | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode） | uncleared（2026-11-02 06:28 Q1、P1 q1884-i01 が 27 起動・約 90 通りで同じ HW の誤り。GSP の log の書式は NVIDIA の package にも無かった（Q-p009b-1 A の結果）、nouveau との比較（channel の特権を含む）も外れ。止める（2026-11-02 06:30 ユーザーの判断、H.265 の decode を先に）） | p009a、Q324-4 |
 
 ### 実装の Phase の案（2026-11-01 P1、[design.md](design.md) 第 2 版 §15。Q1 の受け入れの後に表へ）
 
@@ -36,7 +37,7 @@
 | p002 | Vulkan の header の段 1（H.265 decode の選び） | Q324-2（Q1 の toolchain の許可） |
 | p003 | Vulkan の header の段 2（`vulkan_core.h` を 1.4.309 で作り直し、KHR の encode） | p002、Q324-2 |
 | p004 | libvulkan の H.265 decode の転送、capset の bit 2、video の門を bit ごとに | p002、Q324-3 |
-| p005 | nvrtx の H.265 decode（NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離） | p004 |
+| p005 | nvrtx の H.265 decode（NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離） | p004（libvulkan の転送は P2 が ws322-p005 で作る、並行） — in-progress（P1 q1917） |
 | p006a | H.265 の解析の設計（標準廉価実装手順）と header の配置（段 2） | Q324-1（p002 は要らない: host の Vulkan の header で試験） |
 | p006b〜h | （上の Phase の表へ移した、2026-11-02 p006a 段 2。Q-B の A） | — |
 | p006i | vkvideo-probe の H.265（前の案の p006e） | p006h、p002 |
