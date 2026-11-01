@@ -645,7 +645,7 @@ external_video_image_properties(
 	VkImageUsageFlags video_usage;
 	VkResult status;
 
-	/* Every listed profile must be the H.264 decode profile this library implements. */
+	/* Every listed profile must be an H.264 or H.265 decode profile this library implements. */
 	status = vulkan_video_profile_list_check(physical, profiles);
 	if (status != VK_SUCCESS)
 		return status;

@@ -167,6 +167,7 @@ static int parser_type_list(struct vm_heap *heap, struct token_range arguments, 
 static int parser_view_transition_argument(struct vm_heap *heap, const struct css_token *tokens, size_t count, size_t *index, struct css_compound *compound);
 static int parser_container(struct parser_state *state, const struct css_token *prelude, size_t prelude_count, const struct css_token *body, size_t body_count, const struct css_media *media);
 static int parser_style_rule(struct parser_state *state, const struct css_selector *selectors, size_t selector_count, struct token_range block, const struct css_media *media, int depth);
+static int parser_nested_scope(struct parser_state *state, const struct css_selector *selectors, size_t selector_count, struct token_range prelude, struct token_range body, const struct css_media *media);
 static int parser_nested_selectors(struct parser_state *state, const struct css_selector *parents, size_t parent_count, struct token_range prelude, struct css_selector **selectors, size_t *count);
 static int parser_prepend_nest(struct wb_arena *arena, struct css_selector *selector, const struct parser_nest *nest, int combinator);
 static int parser_pseudo_arguments(struct vm_heap *heap, struct wb_arena *arena, struct token_range arguments, int relative, struct css_simple *simple, uint32_t *specificity);
@@ -1999,8 +2000,8 @@ parser_style_rule(
 			open = start + 1U;
 			while (open < end && block.tokens[open].type != CSS_TOKEN_OPEN_CURLY)
 				open++;
-			if (css_ident_equal(&block.tokens[start], "media") && open < end) {
-				item.group = 1;
+			if ((css_ident_equal(&block.tokens[start], "media") || css_ident_equal(&block.tokens[start], "scope")) && open < end) {
+				item.group = css_ident_equal(&block.tokens[start], "media") ? 1 : 2;
 				item.prelude.tokens = block.tokens + start + 1U;
 				item.prelude.count = open - start - 1U;
 				item.body.tokens = block.tokens + open + 1U;
@@ -2085,7 +2086,9 @@ parser_style_rule(
 	/* The nested rules, after it (the later rule wins at equal specificity). */
 	items = nested.items;
 	for (made = 0; made < nested.count; made++) {
-		if (items[made].group) {
+		if (items[made].group == 2) {
+			error = parser_nested_scope(state, selectors, selector_count, items[made].prelude, items[made].body, media);
+		} else if (items[made].group) {
 			error = css_media_parse(&state->sheet->arena, items[made].prelude.tokens, items[made].prelude.count, media, &group_media);
 			if (error == ENOMEM) {
 				wb_vector_release(&nested);
@@ -2113,6 +2116,43 @@ parser_style_rule(
 
 	/* Succeeded: the rule and the rules nested in it are the sheet's. */
 	return 0;
+}
+
+/*
+ * Reads an @scope nested in a style rule: the rule's selectors are the root of a scope the @scope's own roots (relative to
+ * it) and its rules are in; one without a prelude has the rule's element as its root.
+ */
+static int
+parser_nested_scope(
+	struct parser_state *state,
+	const struct css_selector *selectors,
+	size_t selector_count,
+	struct token_range prelude,
+	struct token_range body,
+	const struct css_media *media)
+{
+	const struct css_scope *outer;
+	struct css_scope *around;
+	size_t index;
+	int error;
+
+	around = wb_arena_zalloc(&state->sheet->arena, sizeof(*around));
+	if (around == NULL)
+		return ENOMEM;
+	around->parent = state->scope;
+	around->roots = selectors;
+	around->root_count = selector_count;
+	outer = state->scope;
+	state->scope = around;
+	index = 0;
+	while (index < prelude.count && prelude.tokens[index].type == CSS_TOKEN_WHITESPACE)
+		index++;
+	if (index == prelude.count)
+		error = parser_rules(state, body.tokens, body.count, media);
+	else
+		error = parser_scope(state, prelude.tokens, prelude.count, body.tokens, body.count, media);
+	state->scope = outer;
+	return error;
 }
 
 /*

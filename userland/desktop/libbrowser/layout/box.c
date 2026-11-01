@@ -95,7 +95,7 @@ layout_build(
 	tree->scroll_y = scroll_y;
 	tree->containing_height = tree->viewport_height;
 	tree->containing_height_definite = 1;
-	css_engine_set_viewport(css, (float)width, (float)height);
+	css_engine_set_viewport(css, (float)width / css_engine_base_zoom(css), (float)height / css_engine_base_zoom(css));
 
 	/* Builds the boxes of the root element. */
 	for (node = document->node.first_child; node != NULL; node = node->next) {

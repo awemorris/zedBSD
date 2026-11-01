@@ -257,13 +257,21 @@ kl_titlebar_add_control(
 	const char *label)
 {
 	struct titlebar_entry *entry;
+	unsigned shown;
 	int fits;
 
 	/* Inside a transaction, a known role and priority, and a label. */
 	if (titlebar->updating == 0U || id == 0U || label == NULL)
 		return EINVAL;
-	if (role == 0U || role > TITLEBAR_ROLE_LAST || priority > TITLEBAR_PRIORITY_LAST)
+	if (role == 0U || priority > TITLEBAR_PRIORITY_LAST)
 		return EINVAL;
+	if (role > TITLEBAR_ROLE_LAST && role != KL_CONTROL_RELOAD)
+		return EINVAL;
+
+	/* The protocol has no reload: the compositor shows it as a generic control with its label. */
+	shown = role;
+	if (role == KL_CONTROL_RELOAD)
+		shown = KL_CONTROL_GENERIC;
 
 	/* A new ID. */
 	entry = titlebar_control(titlebar, id);
@@ -278,12 +286,12 @@ kl_titlebar_add_control(
 	/* The mirror notes it, not yet shown. */
 	entry = &titlebar->controls[titlebar->control_count];
 	entry->id = id;
-	entry->role = role;
+	entry->role = shown;
 	entry->committed = 0;
 	titlebar->control_count++;
 
 	/* Succeeded: the request is sent. */
-	kl_titlebar_v1_add_control(titlebar->proxy, id, role, priority, group, label);
+	kl_titlebar_v1_add_control(titlebar->proxy, id, shown, priority, group, label);
 	return 0;
 }
 

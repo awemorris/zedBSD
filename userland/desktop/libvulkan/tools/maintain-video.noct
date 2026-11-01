@@ -1,7 +1,8 @@
 // zedBSD Vulkan Video declaration maintenance (ws083-p002); Copyright 2026 Awe Morris, Zlib.
 // Selects licensed declaration data from the Khronos Vulkan-Headers 1.4.309 header
 // (Debian libvulkan-dev 1.4.309.0-1): the extensions VK_KHR_video_queue,
-// VK_KHR_video_decode_queue, VK_KHR_video_decode_h264 and VK_KHR_synchronization2, and
+// VK_KHR_video_decode_queue, VK_KHR_video_decode_h264, VK_KHR_video_decode_h265 and
+// VK_KHR_synchronization2, and
 // the Vulkan 1.3 types synchronization2's names alias.  Production builds consume the
 // maintained header and never invoke this tool.
 //
@@ -29,7 +30,7 @@ func main(args) {
     var input = FileUtil.readText(args[0]);
     if (String.indexOf(input, "#define VK_HEADER_VERSION 309\n") < 0) { System.error("expected the Vulkan-Headers 1.4.309 declaration data"); }
     var source = lines(input);
-    var extensions = ["VK_KHR_video_queue", "VK_KHR_video_decode_queue", "VK_KHR_video_decode_h264", "VK_KHR_synchronization2"];
+    var extensions = ["VK_KHR_video_queue", "VK_KHR_video_decode_queue", "VK_KHR_video_decode_h264", "VK_KHR_video_decode_h265", "VK_KHR_synchronization2"];
     var structs = ["VkMemoryBarrier2", "VkBufferMemoryBarrier2", "VkImageMemoryBarrier2", "VkDependencyInfo", "VkSemaphoreSubmitInfo", "VkCommandBufferSubmitInfo", "VkSubmitInfo2", "VkPhysicalDeviceSynchronization2Features"];
     var singles = ["typedef uint64_t VkFlags64;", "typedef VkFlags64 VkPipelineStageFlags2;", "typedef VkFlags64 VkPipelineStageFlagBits2;", "typedef VkFlags64 VkAccessFlags2;", "typedef VkFlags64 VkAccessFlagBits2;", "typedef VkFlags VkSubmitFlags;"];
     var core = ""; var body = ""; var section = ""; var active = false; var selected = false;
@@ -71,10 +72,10 @@ func main(args) {
             if (starts(line, "}")) { active = false; }
         }
     }
-    if (blocks != 4 || structCount != 8 || singleCount != 6 || constants < 80 || commands != 19) {
+    if (blocks != 5 || structCount != 8 || singleCount != 6 || constants < 80 || commands != 19) {
         System.error("unexpected selected declarations: " + blocks + " extensions, " + structCount + " structures, " + singleCount + " typedefs, " + constants + " constants, " + commands + " commands");
     }
-    var preamble = "/*\n * Vulkan Video (H.264 decode) and synchronization2 declarations (ws083).\n * Copyright 2015-2025 The Khronos Group Inc.\n * SPDX-License-Identifier: Apache-2.0\n * See API-PROVENANCE.md and LICENSE-API for the declaration source.\n */\n\n#ifndef VULKAN_VIDEO_H_\n#define VULKAN_VIDEO_H_ 1\n\n#include \"vulkan_core.h\"\n#include \"vk_video/vulkan_video_codec_h264std_decode.h\"\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n/* The Vulkan 1.3 types synchronization2's names alias. */\n";
+    var preamble = "/*\n * zedBSD\n * Copyright (C) 2026 Awe Morris\n *\n * The zedBSD selection, formatting and additions in this file are Zlib.\n */\n\n/*\n * This file is a derived work of the Khronos Vulkan-Headers\n * (Vulkan Video H.264 and H.265 decode and synchronization2).\n * The Vulkan API declarations it contains are:\n * Copyright 2015-2025 The Khronos Group Inc.\n *\n * SPDX-License-Identifier: Apache-2.0\n *\n * See API-PROVENANCE.md and LICENSE-API for the pinned declaration source.\n */\n\n#ifndef VULKAN_VIDEO_H_\n#define VULKAN_VIDEO_H_ 1\n\n#include \"vulkan_core.h\"\n#include \"vk_video/vulkan_video_codec_h264std_decode.h\"\n\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n/* The Vulkan 1.3 types synchronization2's names alias. */\n";
     FileUtil.writeText(args[1], preamble + core + "\n" + body + "\n#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
     print("maintained " + commands + " video and synchronization2 commands, " + structCount + " Vulkan 1.3 structures, " + constants + " stage and access constants");
 }

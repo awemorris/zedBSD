@@ -850,6 +850,8 @@
     // still on its initial about:blank has no navigate events, activation or entry state of its own.
     var unloading = false, unloadAsked = false;
     function active() { return native.fullyActive() && !unloading; }
+    // A document with an opaque origin has no navigation API: its calls return promises that never settle and fire nothing.
+    function neverSettles() { return { committed: new Promise(function () {}), finished: new Promise(function () {}) }; }
     function initialBlank() { return native.initialBlank(); }
     // A navigation to another document in this frame: the entries as they will be, handed to the document that loads.
     function packEntry(e) {
@@ -947,6 +949,8 @@
     // commit(), which carries out a navigation of this document that no listener intercepted.
     function fireNavigate(o) {
       var t, controller, event, n, dispatched, intercepted, from, promises, i;
+      // A document with an opaque origin has no navigate events: a navigation is only carried out.
+      if (native.isOpaque()) { upcomingTracker = null; if (o.sameDocument && o.commit) o.commit(); return; }
       if (initialBlank() && !o.sameDocument) {
         // The initial about:blank document is replaced by what it navigates to: no navigate event, and nothing settles.
         upcomingTracker = null;
@@ -1142,10 +1146,11 @@
         }
         return EventTarget.prototype.removeEventListener.apply(this, arguments);
       }
-      entries() { return native.fullyActive() ? entries.map(nhe) : []; }
-      get currentEntry() { return native.fullyActive() ? nhe(entries[current]) : null; }
+      entries() { return native.fullyActive() && !native.isOpaque() ? entries.map(nhe) : []; }
+      get currentEntry() { return native.fullyActive() && !native.isOpaque() ? nhe(entries[current]) : null; }
       updateCurrentEntry(options) {
         var state;
+        if (native.isOpaque()) throw domError('InvalidStateError', "Failed to execute 'updateCurrentEntry' on 'Navigation': The document has an opaque origin.");
         if (arguments.length < 1) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': 1 argument required.");
         options = dictionary(options, 'NavigationUpdateCurrentEntryOptions');
         if (!active()) throw domError('InvalidStateError', "Failed to execute 'updateCurrentEntry' on 'Navigation': The document is not fully active.");
@@ -1157,10 +1162,11 @@
       }
       get transition() { return transition; }
       get activation() { return activation; }
-      get canGoBack() { return native.fullyActive() && current > 0; }
-      get canGoForward() { return native.fullyActive() && current < entries.length - 1; }
+      get canGoBack() { return native.fullyActive() && !native.isOpaque() && current > 0; }
+      get canGoForward() { return native.fullyActive() && !native.isOpaque() && current < entries.length - 1; }
       navigate(url, options) {
         var handling, u, state = null, t;
+        if (native.isOpaque()) return neverSettles();
         options = dictionary(options, 'NavigationNavigateOptions');
         handling = options.history === undefined ? 'auto' : enumValue(options.history, ['auto', 'push', 'replace'], 'NavigationHistoryBehavior');
         u = resolveURL(url);
@@ -1181,6 +1187,7 @@
       }
       reload(options) {
         var state, t;
+        if (native.isOpaque()) return neverSettles();
         options = dictionary(options, 'NavigationReloadOptions');
         state = entries[current].navState;
         if (options.state !== undefined) {
@@ -1194,6 +1201,7 @@
         return trackerResult(t);
       }
       traverseTo(key, options) {
+        if (native.isOpaque()) return earlyError(domError('InvalidStateError', "Failed to execute 'traverseTo' on 'Navigation': The document has an opaque origin."));
         if (arguments.length < 1) throw new TypeError("Failed to execute 'traverseTo' on 'Navigation': 1 argument required.");
         key = String(key);
         options = dictionary(options, 'NavigationOptions');
@@ -1202,12 +1210,14 @@
         return traverseToKey(key, options);
       }
       back(options) {
+        if (native.isOpaque()) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': The document has an opaque origin."));
         options = dictionary(options, 'NavigationOptions');
         if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': The document is not fully active."));
         if (current <= 0) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': Cannot go back."));
         return traverseToKey(entries[current - 1].key, options);
       }
       forward(options) {
+        if (native.isOpaque()) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': The document has an opaque origin."));
         options = dictionary(options, 'NavigationOptions');
         if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': The document is not fully active."));
         if (current >= entries.length - 1) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': Cannot go forward."));
@@ -1383,6 +1393,167 @@
       });
     })();
 
+  // CSS animation events (animationstart, animationend, animationcancel): the page tells, after each layout, which elements have an animation
+  // (a name with @keyframes) and for how long; the events come at the animation's times, on the page's timers.
+  if (!g.AnimationEvent) {
+    class AnimationEvent extends Event {
+      constructor(type, init) {
+        super(type, init);
+        init = init || {};
+        hidden(this, '_name', init.animationName === undefined ? '' : String(init.animationName));
+        hidden(this, '_elapsed', init.elapsedTime === undefined ? 0 : +init.elapsedTime);
+        hidden(this, '_pseudo', init.pseudoElement === undefined ? '' : String(init.pseudoElement));
+      }
+      get animationName() { return this._name; }
+      get elapsedTime() { return this._elapsed; }
+      get pseudoElement() { return this._pseudo; }
+    }
+    def(g, 'AnimationEvent', AnimationEvent);
+  }
+  (function () {
+    var active = new Map(), pass = 0;
+    function fire(element, type, name, seconds) {
+      element.dispatchEvent(new g.AnimationEvent(type, { bubbles: true, animationName: name, elapsedTime: seconds }));
+    }
+    function stop(element, state) {
+      var i;
+      for (i = 0; i < state.timers.length; i++) clearTimeout(state.timers[i]);
+      active.delete(element);
+      if (!state.ended && state.started) fire(element, 'animationcancel', state.name, 0);
+    }
+    function begin(element, name, delay, duration, iterations) {
+      var state = { name: name, pass: pass, timers: [], started: false, ended: false };
+      active.set(element, state);
+      state.timers.push(setTimeout(function () { state.started = true; fire(element, 'animationstart', name, 0); }, Math.max(delay, 0)));
+      if (isFinite(iterations) && iterations >= 0) {
+        state.timers.push(setTimeout(function () {
+          state.ended = true;
+          fire(element, 'animationend', name, duration * iterations / 1000);
+        }, Math.max(delay, 0) + duration * iterations));
+      }
+    }
+    native.setAnimationHook(function (op, element, name, delay, duration, iterations) {
+      var state;
+      if (op === 0) { pass++; return; }
+      if (op === 1) {
+        state = active.get(element);
+        if (state && state.name === name) { state.pass = pass; return; }
+        if (state) stop(element, state);
+        begin(element, name, delay, duration, iterations);
+        return;
+      }
+      Array.from(active.keys()).forEach(function (element) {
+        var s = active.get(element);
+        if (s && s.pass !== pass) stop(element, s);
+      });
+    });
+  })();
+    // The window an <iframe> element gives (contentWindow, and the source of the messages its document posts) is one proxy that follows
+    // the element's current document: a frame keeps its window as it goes from one document to the next.  One with an opaque origin shows postMessage and little else.
+    (function () {
+      var proxies = new WeakMap(), bound = new WeakMap();
+      function blocked() { return new DOMException('Blocked a frame from accessing a cross-origin frame.', 'SecurityError'); }
+      function method(w, v) {
+        var m, b;
+        if (typeof v !== 'function' || /^[A-Z]/.test(v.name || '')) return v;
+        m = bound.get(w);
+        if (!m) { m = new WeakMap(); bound.set(w, m); }
+        b = m.get(v);
+        if (!b) { b = function () { return Reflect.apply(v, w, arguments); }; m.set(v, b); }
+        return b;
+      }
+      native.setFrameProxyMaker(function (element) {
+        var proxy = proxies.get(element), last = null;
+        if (proxy) return proxy;
+        // The window of the element's document now; after the frame is removed, the last one it had (a window kept by a script goes on).
+        function current() { var w = native.frameGlobal(element); if (w !== null) last = w; return w !== null ? w : last; }
+        proxy = new Proxy(Object.create(null), {
+          get: function (t, k) {
+            var w = current();
+            if (w === null) return k === 'closed' ? true : (k === 'postMessage' ? function () {} : undefined);
+            if (k === 'window' || k === 'self' || k === 'frames') return proxy;
+            if (native.frameOpaque(element)) {
+              if (k === 'postMessage') return w.postMessage;
+              if (k === 'closed') return w.closed;
+              if (k === 'length') return 0;
+              if (k === 'parent' || k === 'top' || k === 'opener') return w[k];
+              if (k === Symbol.toStringTag) return 'Window';
+              if (k === 'then') return undefined;
+              throw blocked();
+            }
+            return method(w, Reflect.get(w, k));
+          },
+          set: function (t, k, v) {
+            var w = current();
+            if (w === null) return true;
+            if (native.frameOpaque(element)) throw blocked();
+            return Reflect.set(w, k, v);
+          },
+          has: function (t, k) { var w = current(); return w !== null && Reflect.has(w, k); },
+          ownKeys: function () { var w = current(); return w === null || native.frameOpaque(element) ? [] : Reflect.ownKeys(w); },
+          getOwnPropertyDescriptor: function (t, k) {
+            var w = current(), d;
+            if (w === null || native.frameOpaque(element)) return undefined;
+            d = Reflect.getOwnPropertyDescriptor(w, k);
+            if (d) d.configurable = true;
+            return d;
+          },
+          defineProperty: function (t, k, d) { var w = current(); if (w === null || native.frameOpaque(element)) throw blocked(); return Reflect.defineProperty(w, k, d); },
+          deleteProperty: function (t, k) { var w = current(); if (w === null || native.frameOpaque(element)) throw blocked(); return Reflect.deleteProperty(w, k); },
+          getPrototypeOf: function () { var w = current(); return w === null || native.frameOpaque(element) ? null : Reflect.getPrototypeOf(w); },
+          setPrototypeOf: function () { return false; },
+          preventExtensions: function () { return false; },
+          isExtensible: function () { return true; }
+        });
+        proxies.set(element, proxy);
+        return proxy;
+      });
+    })();
+    // A window with an opaque origin (a sandboxed frame without allow-same-origin) and the windows around it see each other only through
+    // a restricted view: postMessage, closed and the window's own names.  The same view is the event source of the messages one sends the other.
+    (function () {
+      var views = new WeakMap();
+      function blocked() { return new DOMException('Blocked a frame from accessing a cross-origin frame.', 'SecurityError'); }
+      function wrap(w) {
+        var view = views.get(w);
+        if (view) return view;
+        view = new Proxy(Object.create(null), {
+          get: function (t, k) {
+            if (k === 'postMessage') return w.postMessage;
+            if (k === 'closed') return w.closed;
+            if (k === 'window' || k === 'self' || k === 'frames') return view;
+            if (k === 'parent' || k === 'top') { var p = w[k]; return p === w ? view : wrap(p); }
+            if (k === 'opener') { var o = w.opener; return o ? wrap(o) : null; }
+            if (k === 'length') return 0;
+            if (k === 'focus' || k === 'blur' || k === 'close') return function () {};
+            if (k === Symbol.toStringTag) return 'Window';
+            if (k === 'then') return undefined;
+            throw blocked();
+          },
+          set: function () { throw blocked(); },
+          has: function (t, k) { return k === 'postMessage' || k === 'closed' || k === 'window' || k === 'self' || k === 'frames' || k === 'parent' || k === 'top' || k === 'opener' || k === 'length'; },
+          ownKeys: function () { return []; },
+          getPrototypeOf: function () { return null; },
+          setPrototypeOf: function () { return false; },
+          defineProperty: function () { throw blocked(); },
+          deleteProperty: function () { throw blocked(); },
+          getOwnPropertyDescriptor: function () { return undefined; },
+          preventExtensions: function () { return false; },
+          isExtensible: function () { return true; }
+        });
+        views.set(w, view);
+        return view;
+      }
+      native.setWindowWrapper(wrap);
+      if (!('origin' in g)) Object.defineProperty(g, 'origin', { get: function () { return native.isOpaque() ? 'null' : String(g.location.origin); }, configurable: true, enumerable: true });
+      if (native.isOpaque()) {
+        // No cookies and no storage for an opaque origin.
+        if (typeof document !== 'undefined') Object.defineProperty(document, 'cookie', { get: function () { return ''; }, set: function () {}, configurable: true });
+        ['localStorage', 'sessionStorage'].forEach(function (name) {
+          Object.defineProperty(g, name, { get: function () { throw new DOMException("Failed to read the '" + name + "' property from 'Window': Storage is disabled inside 'data:' URLs.", 'SecurityError'); }, configurable: true });
+        });
+      }
+    })();
     // A link a script clicks (an a or area element, or SVG's a) navigates; a download link only fires its navigate event.
     native.setHyperlinkFollower(function (link) {
       var svg = link.namespaceURI === 'http://www.w3.org/2000/svg', href, target, u, download;
@@ -1936,15 +2107,164 @@
       configurable: true, enumerable: true
     });
   })();
-  if (!g.customElements) {
-    var registry = new Map();
-    def(g, 'customElements', {
-      define: function (name, ctor) { registry.set(name, ctor); },
-      get: function (name) { return registry.get(name); },
-      whenDefined: function (name) { return Promise.resolve(registry.get(name)); },
-      upgrade: function () {}
-    });
-  }
+  // Custom elements (https://html.spec.whatwg.org/multipage/custom-elements.html): definitions, upgrades of the elements in the
+  // document and in shadow trees, creation by createElement and by `new`, and the connected, disconnected and attribute callbacks
+  // (the last three from a MutationObserver, so a little after the change).
+  if (!g.customElements && typeof g.HTMLElement === 'function' && typeof document !== 'undefined') (function () {
+    var Native = g.HTMLElement, NS = 'http://www.w3.org/1999/xhtml';
+    var byName = new Map(), byCtor = new Map(), waiting = new Map(), pending = null, observed = new WeakSet();
+    var createElement = document.createElement, createElementNS = document.createElementNS;
+    function validName(name) {
+      return /^[a-z][-.0-9_a-z]*-[-.0-9_a-z]*$/.test(name) &&
+        ['annotation-xml', 'color-profile', 'font-face', 'font-face-src', 'font-face-uri', 'font-face-format', 'font-face-name', 'missing-glyph'].indexOf(name) < 0;
+    }
+    function report(e) {
+      if (typeof g.reportError === 'function') g.reportError(e);
+      else if (typeof console !== 'undefined') console.error(e);
+    }
+    function HTMLElementCtor() {
+      var element, definition;
+      if (pending !== null) {
+        element = pending; pending = null;
+        Object.setPrototypeOf(element, new.target.prototype);
+        return element;
+      }
+      definition = new.target ? byCtor.get(new.target) : undefined;
+      if (!definition) throw new TypeError('Illegal constructor');
+      element = createElementNS.call(document, NS, definition.name);
+      Object.setPrototypeOf(element, new.target.prototype);
+      hidden(element, '_ce', definition);
+      return element;
+    }
+    HTMLElementCtor.prototype = Native.prototype;
+    Object.defineProperty(Native.prototype, 'constructor', { value: HTMLElementCtor, writable: true, configurable: true, enumerable: false });
+    Object.setPrototypeOf(HTMLElementCtor, Object.getPrototypeOf(Native));
+    Object.defineProperty(HTMLElementCtor, 'name', { value: 'HTMLElement', configurable: true });
+    def(g, 'HTMLElement', HTMLElementCtor);
+
+    function callback(element, name, args) {
+      var f = element._ce && element._ce.callbacks[name];
+      if (typeof f !== 'function') return;
+      try { f.apply(element, args); } catch (e) { report(e); }
+    }
+    function upgrade(element) {
+      var definition = byName.get(element.localName), attributes, i, a;
+      if (!definition || element._ce || element.namespaceURI !== NS) return;
+      hidden(element, '_ce', definition);
+      pending = element;
+      try {
+        var made = new definition.ctor();
+        if (made !== element) throw new TypeError('The custom element constructor did not produce the element being upgraded.');
+      } catch (e) {
+        pending = null;
+        report(e);
+        return;
+      }
+      pending = null;
+      if (definition.observedAttributes.length) {
+        attributes = element.attributes;
+        for (i = 0; i < attributes.length; i++) {
+          a = attributes[i];
+          if (definition.observedAttributes.indexOf(a.name) >= 0) callback(element, 'attributeChangedCallback', [a.name, null, a.value, null]);
+        }
+      }
+      if (element.isConnected) callback(element, 'connectedCallback', []);
+    }
+    function walk(root, visit) {
+      var list, i, e;
+      if (root.nodeType === 1) visit(root);
+      list = root.querySelectorAll ? root.querySelectorAll('*') : [];
+      for (i = 0; i < list.length; i++) {
+        e = list[i];
+        visit(e);
+      }
+      list = root.querySelectorAll ? root.querySelectorAll('*') : [];
+      for (i = 0; i < list.length; i++) {
+        e = list[i];
+        if (e.shadowRoot) { watch(e.shadowRoot); walk(e.shadowRoot, visit); }
+      }
+      if (root.nodeType === 1 && root.shadowRoot) { watch(root.shadowRoot); walk(root.shadowRoot, visit); }
+    }
+    function upgradeTree(root) { walk(root, function (e) { if (byName.has(e.localName)) upgrade(e); }); }
+    function connectedTree(root) { walk(root, function (e) { if (e._ce) callback(e, 'connectedCallback', []); else if (byName.has(e.localName)) upgrade(e); }); }
+    function disconnectedTree(root) { walk(root, function (e) { if (e._ce) callback(e, 'disconnectedCallback', []); }); }
+    function handle(records) {
+      var i, j, r, n;
+      for (i = 0; i < records.length; i++) {
+        r = records[i];
+        if (r.type === 'attributes') {
+          n = r.target;
+          if (n._ce && n._ce.observedAttributes.indexOf(r.attributeName) >= 0)
+            callback(n, 'attributeChangedCallback', [r.attributeName, r.oldValue, n.getAttribute(r.attributeName), null]);
+          continue;
+        }
+        for (j = 0; j < r.removedNodes.length; j++) if (r.removedNodes[j].nodeType === 1 && !r.removedNodes[j].isConnected) disconnectedTree(r.removedNodes[j]);
+        for (j = 0; j < r.addedNodes.length; j++) if (r.addedNodes[j].nodeType === 1 && r.addedNodes[j].isConnected) connectedTree(r.addedNodes[j]);
+      }
+    }
+    var observer = new MutationObserver(handle);
+    function watch(root) {
+      if (observed.has(root)) return;
+      observed.add(root);
+      observer.observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true });
+    }
+    watch(document);
+    function define(name, ctor) {
+      var proto, callbacks = {}, names = ['connectedCallback', 'disconnectedCallback', 'attributeChangedCallback', 'adoptedCallback'], list, i, definition;
+      name = String(name);
+      if (typeof ctor !== 'function') throw new TypeError("Failed to execute 'define' on 'CustomElementRegistry': The callback provided as parameter 2 is not a constructor.");
+      if (!validName(name)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': \"" + name + '" is not a valid custom element name', 'SyntaxError');
+      if (byName.has(name)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': the name \"" + name + '" has already been used with this registry', 'NotSupportedError');
+      if (byCtor.has(ctor)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': this constructor has already been used with this registry", 'NotSupportedError');
+      proto = ctor.prototype;
+      for (i = 0; i < names.length; i++) callbacks[names[i]] = proto ? proto[names[i]] : undefined;
+      list = ctor.observedAttributes;
+      list = list && typeof callbacks.attributeChangedCallback === 'function' ? Array.from(list).map(String) : [];
+      definition = { name: name, ctor: ctor, callbacks: callbacks, observedAttributes: list };
+      byName.set(name, definition);
+      byCtor.set(ctor, definition);
+      upgradeTree(document);
+      if (waiting.has(name)) { waiting.get(name).resolve(ctor); waiting.delete(name); }
+    }
+    var registry = {
+      define: define,
+      get: function (name) { var d = byName.get(String(name)); return d ? d.ctor : undefined; },
+      getName: function (ctor) { var d = byCtor.get(ctor); return d ? d.name : null; },
+      whenDefined: function (name) {
+        var d, entry;
+        name = String(name);
+        if (!validName(name)) return Promise.reject(new DOMException("Failed to execute 'whenDefined' on 'CustomElementRegistry': \"" + name + '" is not a valid custom element name', 'SyntaxError'));
+        d = byName.get(name);
+        if (d) return Promise.resolve(d.ctor);
+        entry = waiting.get(name);
+        if (!entry) {
+          entry = {};
+          entry.promise = new Promise(function (resolve) { entry.resolve = resolve; });
+          waiting.set(name, entry);
+        }
+        return entry.promise;
+      },
+      upgrade: function (root) { if (root && root.nodeType) upgradeTree(root); }
+    };
+    Object.defineProperty(registry, Symbol.toStringTag, { value: 'CustomElementRegistry', configurable: true });
+    def(g, 'customElements', registry);
+    document.createElement = function createElement() {
+      var element = createElementOriginal.apply(this, arguments);
+      if (this === document && element && byName.has(element.localName) && element.namespaceURI === NS) upgrade(element);
+      return element;
+    };
+    var createElementOriginal = createElement;
+    document.createElementNS = function createElementNS(ns, name) {
+      var element = createElementNSOriginal.apply(this, arguments);
+      if (this === document && element && ns === NS && byName.has(element.localName)) upgrade(element);
+      return element;
+    };
+    var createElementNSOriginal = createElementNS;
+    // The document's parsed elements are upgraded when the page has been read, and a shadow root attached later is watched.
+    var attach = g.Element && g.Element.prototype.attachShadow;
+    if (attach) def(g.Element.prototype, 'attachShadow', function attachShadow() { var root = attach.apply(this, arguments); watch(root); return root; });
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { upgradeTree(document); });
+  })();
   [['ErrorEvent', 'error'], ['ProgressEvent', 'progress'], ['HashChangeEvent', 'hashchange'], ['PopStateEvent', 'popstate'],
     ['PointerEvent', 'pointer'], ['InputEvent', 'input'], ['TouchEvent', 'touch'], ['StorageEvent', 'storage']].forEach(function (p) {
     if (g[p[0]]) return;
@@ -2192,6 +2512,9 @@
       if (current) skip(current, new DOMException('Old view transition aborted by new view transition.', 'AbortError'));
       current = t;
       native.viewTransitionActive(1, Array.from(t._types));
+      // A document in a frame keeps showing its old painting until the update callback is done.
+      native.frameHold(1);
+      then.call(t._done.promise, function () { native.frameHold(0); }, function () { native.frameHold(0); });
       // The next rendering opportunity: the old state is captured, then the callback runs and the new state is made.
       requestAnimationFrame(function () {
         if (t._phase === 'done') return;

@@ -99,6 +99,32 @@ bind_frame_location(
 		break;
 	}
 
+	/* A sandboxed frame's origin is opaque. */
+	if (part == BIND_LOCATION_ORIGIN && window->opaque)
+		return wb_buffer_append(out, "null", 4);
+
+	/* An about:blank or about:srcdoc frame has its parent's origin. */
+	if (part == BIND_LOCATION_ORIGIN && window->frame != NULL) {
+		struct bind_window *parent;
+		const char *shown;
+
+		wb_buffer_init(&text);
+		error = bind_document_url(window->document, 0, &text);
+		shown = error == 0 ? wb_buffer_string(&text) : "";
+		if (strncmp(shown, "about:srcdoc", 12) == 0 || strncmp(shown, "about:blank", 11) == 0) {
+			wb_buffer_release(&text);
+			parent = window->frame->node.document->view;
+			if (parent != NULL && !parent->detached) {
+				if (parent->owned)
+					return bind_frame_location(parent, part, out);
+				if (parent->host.location != NULL)
+					return parent->host.location(parent->host.context, part, out);
+			}
+			return 0;
+		}
+		wb_buffer_release(&text);
+	}
+
 	/* Prepare owned URL text separately from the independently released parsed record. */
 	wb_buffer_init(&text);
 
@@ -210,6 +236,8 @@ bind_frame_install(
 
 		/* Construct the independently retained owner with this complete abstract host adapter. */
 		error = bind_window_create(realm, document, &host, &made);
+		if (error == 0)
+			made->opaque = bind_frame_sandboxed(element);
 	}
 
 	/* Blank contexts need a copied inherited fallback before publication. */

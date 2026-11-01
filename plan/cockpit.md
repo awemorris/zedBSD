@@ -1,17 +1,17 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-11-02 02:23（Q1。BUG-394 を merge）
+最終更新: 2026-11-02 06:50（Q1。origin/main を merge・push、wave511 の firmware を push）。前の更新: 2026-11-02 02:23（Q1。BUG-394 を merge）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の関門: I・P の絵の encode（q1884、上限なし）。p009a: NVENC の channel が開き、追加の firmware 不要 | p010 encode の共通の executor |
-| P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（06:09）。p007b cleared: JVT 100/101 一致（1 本は Extended profile で理由付きで断る）。原因は試験の probe と libmedia の 3 か所 | p005〜p006 H.265 decode |
+| P1 | [WS324](ws324/ws.md) p005 | RTX 2070 の Vulkan Video | H.265 の decode（NVDEC の HEVC、q1917）。p009b は止めた（uncleared） | p006i・p007 |
+| P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（06:45）。p005（libvulkan の H.265 decode の転送）cleared。VPU は VF2 で既定 on、firmware を zedBSD-firmware で配る | p006 H.265 decode（PowerVR の reader と Wave5 の HEVC） |
 | P3 | — | Pi 5 の作業 | 返却（03:03）。Pi 5 の desktop の動画 8 本（build/review/pi5-video/）。板は元に戻した | 次を待つ |
 | P4 | [BUG-397](bugs/BUG-397.md)・[BUG-399](bugs/BUG-399.md) | Windows 版ブラウザの UAT | Google の「サイト」の link で固まる、検索の欄が右へ伸びる（q1915） | — |
-| P5 | — | Web ブラウザ OmniGrammaton の Windows 版 | 返却（02:44）。p033 cleared（頁の暗い mode・accent・Mica・DPAPI・touch と pen・drag out）。残りは本物の Windows が要るので p037 に分けた | p034 の後の Windows の file: の直し |
+| P5 | — | Windows 版ブラウザ | 返却（06:57）。p038（Windows の file: の頁の画像）cleared | p037 は本物の Windows が要る |
 | P6 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | 返却（03:59）。p037（試験の TLS server tlspeer）cleared | p024・p029（handshake）の候補 |
 | P7 | [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザの UAT | Google の app の一覧の button（q1916） | — |
 | P8 | [BUG-395](bugs/BUG-395.md)・[BUG-396](bugs/BUG-396.md) | Windows 版ブラウザの UAT | 題の帯の drag・double click、Reload の icon（q1914） | — |
@@ -54,6 +54,8 @@
 
 ### WS074 Web ブラウザ
 
+- 2026-11-02 06:50: クラウドのセッションが終了（ユーザー）。その最後の origin/main を main に merge し、main を push した（5725993599）。host build warning 0、Windows の cross-build PASS。WS074 は Q1 の管理に戻る。
+
 - 2026-11-01 20:1x: origin/browser（クラウド、dev153 = 3,113 / 3,473）を main に merge（272e6c226、push 済み）。同じ基点から P8（local）も i17 で 3,125 / 3,472 まで進めていたので、縦書きの inline の装飾は P8 の版を採って衝突を解いた。host build は warning 0。merge の後の WPT の測り直しは未実施（クラウドのセッションの次の測定で分かる）。
 - 2026-11-01 20:4x: origin/main（クラウドが push した 4 commit、iframe の box・画像・SVG ほか）を main に merge（502eb644a、衝突なし、host build warning 0、push はまだ）。
 
@@ -86,6 +88,8 @@
 - Pi 5 の en0 の link: P3 の計測で、起動 3・4 の途中に en0 が 1000 Mbps から 100 Mbps に落ちて SSH が切れた。cable・switch の側か driver かは未調査。
 
 ## 決まった事
+
+- 2026-11-02 06:30 [WS324](ws324/ws.md): p009b（NVENC の関門）を止めて、H.265 の decode（p005〜p007）を先に。
 
 - 2026-11-02 06:09 [WS324](ws324/ws.md) Q-p009b-1: NVIDIA の driver の package（.run）の GSP の firmware の log の書式の区画を、GSP の log を文に直す目的だけで host で読んでよい（repo には入れない）。
 

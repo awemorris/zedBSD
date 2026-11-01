@@ -660,6 +660,7 @@ geometry_tree_box(
 		box->padding_right = layout_to_px(first->padding[1]);
 		box->padding_bottom = layout_to_px(first->padding[2]);
 		box->padding_left = layout_to_px(first->padding[3]);
+		box->zoom = first->style.zoom_eff;
 		box->inset_known = first->used_inset_known;
 		box->inset[0] = layout_to_px(first->used_inset[0]);
 		box->inset[1] = layout_to_px(first->used_inset[1]);

@@ -8,8 +8,9 @@
 #  2. every plan/ws074/tests/host-*.c as a Windows .exe (the same compile flags as the Windows build, linked
 #     with every static library and plan/ws334/tests/binary-mode.c, which makes the standard streams and
 #     files binary as on the host; win32-posix.h gives setenv and realpath; host-heap is compiled from a copy
-#     whose 64-bit state is an unsigned long long, and with -fno-inline), run on the host and under Wine from the repository's root; the exit
-#     status and the output (CR removed) are compared;
+#     whose 64-bit state is an unsigned long long, and with -fno-inline; host-svg-length and host-svg-text
+#     from copies whose temporary directory is on Wine's Z: drive), run on the host and under Wine from the
+#     repository's root; the exit status and the output (CR removed) are compared;
 #  3. the runners that start a program, once with the host's program and once with the same program under
 #     Wine (a small wrapper script that puts wine before it):
 #     run-js-tests.py (--program browser-cli.exe), run-test262.py (--driver host-js.exe), run-html5lib-tree.py
@@ -142,6 +143,13 @@ extra=
 if [ "\$n" = host-heap ]; then
 	extra=-fno-inline
 	sed 's/unsigned long state/unsigned long long state/; s/\([0-9]\)UL\b/\1ULL/g' \$source > $out/exe/\$n.c
+	source=$out/exe/\$n.c
+fi
+# host-svg-length and host-svg-text make their page's directory from the template "/tmp/...", an absolute path
+# on POSIX but one relative to the current drive on Windows, which is no local page's location: a copy with
+# Wine's Z: drive before it (the same directory).
+if [ "\$n" = host-svg-length ] || [ "\$n" = host-svg-text ]; then
+	sed 's|"/tmp/ws074-|"Z:/tmp/ws074-|' \$source > $out/exe/\$n.c
 	source=$out/exe/\$n.c
 fi
 $WIN32_CC $cflags -include plan/ws334/tests/win32-posix.h \$extra -Iplan/ws074/tests -Iuserland/desktop/browser -c \$source -o $out/exe/\$n.o > $out/exe/\$n.log 2>&1 &&

@@ -60,6 +60,81 @@ static void frame_removed(struct dom_document *document, struct dom_node *node);
 static void frame_remove_subtree(struct dom_node *root);
 
 /*
+ * Tells whether a frame's sandbox lets its document run scripts: no sandbox attribute, or one with the allow-scripts token.
+ */
+int
+bind_frame_scripts_allowed(
+	struct dom_element *element)
+{
+	struct vm_string *sandbox;
+	struct wb_buffer text;
+	const char *at;
+	int allowed;
+
+	sandbox = dom_attribute_ascii(element, "sandbox");
+	if (sandbox == NULL)
+		return 1;
+	wb_buffer_init(&text);
+	allowed = 0;
+	if (vm_string_to_utf8(sandbox, &text) == 0) {
+		at = strstr(wb_buffer_string(&text), "allow-scripts");
+		if (at != NULL && (at == wb_buffer_string(&text) || at[-1] == ' ') && (at[13] == '\0' || at[13] == ' '))
+			allowed = 1;
+	}
+	wb_buffer_release(&text);
+	return allowed;
+}
+
+/*
+ * Gives how a window sees another: the other's global, or (when either has an opaque origin, and they are not the
+ * same window) the restricted view the viewer's prelude makes of it, which has postMessage and little else.
+ */
+int
+bind_window_view(
+	struct bind_window *viewer,
+	struct bind_window *target,
+	vm_value *result)
+{
+	struct bind_window *owner;
+	struct vm_realm *realm;
+	vm_value argument;
+	int status;
+
+	*result = vm_value_cell(target->realm->global);
+	if (viewer == target)
+		return 0;
+
+	/* A frame's window is seen through the one proxy its element has, which stays the same as the frame goes from one document to another. */
+	owner = target->frame != NULL ? target->frame->node.document->view : NULL;
+	if (owner != NULL && !owner->detached && owner->frame_proxy_maker != NULL && !viewer->opaque) {
+		status = bind_wrap(owner, &target->frame->node, &argument);
+		if (status != 0)
+			return status;
+		realm = owner->realm;
+		status = vm_call(realm, vm_value_cell(owner->frame_proxy_maker), VM_VALUE_UNDEFINED, &argument, 1, result);
+		if (status == VM_THROWN) {
+			realm->exception = VM_VALUE_UNDEFINED;
+			*result = vm_value_cell(target->realm->global);
+			return 0;
+		}
+		return status;
+	}
+
+	/* An opaque origin's window sees others (and is seen by them) only through a restricted view. */
+	if ((!viewer->opaque && !target->opaque) || viewer->window_wrapper == NULL)
+		return 0;
+	realm = viewer->realm;
+	argument = vm_value_cell(target->realm->global);
+	status = vm_call(realm, vm_value_cell(viewer->window_wrapper), VM_VALUE_UNDEFINED, &argument, 1, result);
+	if (status == VM_THROWN) {
+		realm->exception = VM_VALUE_UNDEFINED;
+		*result = vm_value_cell(target->realm->global);
+		return 0;
+	}
+	return status;
+}
+
+/*
  * Tells whether a frame's sandbox leaves it an opaque origin, which no child global is exposed for: it has a sandbox
  * attribute without the allow-same-origin token.
  */
@@ -211,6 +286,12 @@ bind_frame_viewport(
 		/* Borders and padding surround, rather than enlarge, the child's content viewport. */
 		width = box.width - box.border_left - box.border_right - box.padding_left - box.padding_right;
 		height = box.height - box.border_top - box.border_bottom - box.padding_top - box.padding_bottom;
+
+		/* A zoomed frame's document sees its size in its own, unzoomed, pixels. */
+		if (box.zoom > 0.0) {
+			width /= box.zoom;
+			height /= box.zoom;
+		}
 	}
 
 	/* Native negative content extents clamp to zero independently on each axis. */
@@ -378,6 +459,10 @@ bind_frame_parent(
 		global = window->realm->global;
 	*result = vm_value_cell(global);
 
+	/* An opaque origin's window sees its parent only through the restricted view. */
+	if (window->opaque && window->frame != NULL && window->frame->node.document->view != NULL)
+		return bind_window_view(window, window->frame->node.document->view, result);
+
 	/* Succeeded: the receiver's parent identity is reported. */
 	return 0;
 }
@@ -410,6 +495,18 @@ bind_frame_top(
 	if (global == NULL)
 		global = window->realm->global;
 	*result = vm_value_cell(global);
+
+	/* An opaque origin's window sees the top window only through the restricted view. */
+	if (window->opaque) {
+		struct bind_window *top;
+		int depth;
+
+		top = window;
+		for (depth = 0; depth < 64 && top->frame != NULL && top->frame->node.document->view != NULL; depth++)
+			top = top->frame->node.document->view;
+		if (top != window)
+			return bind_window_view(window, top, result);
+	}
 
 	/* Succeeded: the outermost ancestor's identity is reported. */
 	return 0;
@@ -534,6 +631,10 @@ frame_document(
 	if (window == NULL)
 		return 0;
 
+	/* An opaque origin's Document is not reachable from the parent. */
+	if (window->opaque)
+		return 0;
+
 	/* Its own realm's wrapper was installed with its global document property. */
 	status = bind_wrap(window, &window->document->node, result);
 	if (status != 0)
@@ -568,8 +669,10 @@ frame_global(
 	if (window == NULL)
 		return 0;
 
-	/* Publishes this child's own global, independently of the caller's realm. */
+	/* Publishes this child's own global, independently of the caller's realm (an opaque origin's through the parent's restricted view of it). */
 	*result = vm_value_cell(window->realm->global);
+	if (window->frame != NULL && window->frame->node.document->view != NULL)
+		return bind_window_view(window->frame->node.document->view, window, result);
 
 	/* Succeeded: a distinct initial child Window is reported. */
 	return 0;
@@ -616,10 +719,6 @@ frame_context(
 	/* Mere ownership by a Document does not connect a detached element. */
 	connected = dom_is_inclusive_ancestor(&node->document->node, node);
 	if (!connected)
-		return 0;
-
-	/* Unsupported sandbox origins must never expose an unverified child global. */
-	if (bind_frame_sandboxed(element))
 		return 0;
 
 	/* Repeated observation preserves the one published context's identity. */

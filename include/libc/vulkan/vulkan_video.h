@@ -7,7 +7,7 @@
 
 /*
  * This file is a derived work of the Khronos Vulkan-Headers
- * (Vulkan Video H.264 decode and synchronization2).
+ * (Vulkan Video H.264 and H.265 decode and synchronization2).
  * The Vulkan API declarations it contains are:
  * Copyright 2015-2025 The Khronos Group Inc.
  *
@@ -689,6 +689,59 @@ typedef struct VkVideoDecodeH264DpbSlotInfoKHR {
     const void*                               pNext;
     const StdVideoDecodeH264ReferenceInfo*    pStdReferenceInfo;
 } VkVideoDecodeH264DpbSlotInfoKHR;
+
+
+
+// VK_KHR_video_decode_h265 is a preprocessor guard. Do not pass it to API calls.
+#define VK_KHR_video_decode_h265 1
+#include "vk_video/vulkan_video_codec_h265std_decode.h"
+#define VK_KHR_VIDEO_DECODE_H265_SPEC_VERSION 8
+#define VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME "VK_KHR_video_decode_h265"
+typedef struct VkVideoDecodeH265ProfileInfoKHR {
+    VkStructureType           sType;
+    const void*               pNext;
+    StdVideoH265ProfileIdc    stdProfileIdc;
+} VkVideoDecodeH265ProfileInfoKHR;
+
+typedef struct VkVideoDecodeH265CapabilitiesKHR {
+    VkStructureType         sType;
+    void*                   pNext;
+    StdVideoH265LevelIdc    maxLevelIdc;
+} VkVideoDecodeH265CapabilitiesKHR;
+
+typedef struct VkVideoDecodeH265SessionParametersAddInfoKHR {
+    VkStructureType                            sType;
+    const void*                                pNext;
+    uint32_t                                   stdVPSCount;
+    const StdVideoH265VideoParameterSet*       pStdVPSs;
+    uint32_t                                   stdSPSCount;
+    const StdVideoH265SequenceParameterSet*    pStdSPSs;
+    uint32_t                                   stdPPSCount;
+    const StdVideoH265PictureParameterSet*     pStdPPSs;
+} VkVideoDecodeH265SessionParametersAddInfoKHR;
+
+typedef struct VkVideoDecodeH265SessionParametersCreateInfoKHR {
+    VkStructureType                                        sType;
+    const void*                                            pNext;
+    uint32_t                                               maxStdVPSCount;
+    uint32_t                                               maxStdSPSCount;
+    uint32_t                                               maxStdPPSCount;
+    const VkVideoDecodeH265SessionParametersAddInfoKHR*    pParametersAddInfo;
+} VkVideoDecodeH265SessionParametersCreateInfoKHR;
+
+typedef struct VkVideoDecodeH265PictureInfoKHR {
+    VkStructureType                         sType;
+    const void*                             pNext;
+    const StdVideoDecodeH265PictureInfo*    pStdPictureInfo;
+    uint32_t                                sliceSegmentCount;
+    const uint32_t*                         pSliceSegmentOffsets;
+} VkVideoDecodeH265PictureInfoKHR;
+
+typedef struct VkVideoDecodeH265DpbSlotInfoKHR {
+    VkStructureType                           sType;
+    const void*                               pNext;
+    const StdVideoDecodeH265ReferenceInfo*    pStdReferenceInfo;
+} VkVideoDecodeH265DpbSlotInfoKHR;
 
 
 

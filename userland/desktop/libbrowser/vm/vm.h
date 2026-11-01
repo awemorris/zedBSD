@@ -517,6 +517,8 @@ struct vm_realm {
 	uint32_t throw_column;
 	vm_value callee;
 	vm_value new_target;
+	/* While a native of this realm runs: the realm that called it (NULL when none did), for the natives that act for their caller. */
+	struct vm_realm *caller;
 	vm_value *stack;
 	uint32_t stack_capacity;
 	uint32_t stack_top;

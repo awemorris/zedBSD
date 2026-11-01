@@ -408,6 +408,9 @@ page_start_scripts(
 	host.selector_engine = page_selector_engine;
 	host.node_box = page_node_box;
 	host.pseudo_box = page_pseudo_box;
+	host.frame_capture = page_frame_capture;
+	host.frame_view_transition = page_frame_view_transition;
+	host.frame_view_transition_duration = page_frame_view_transition_duration;
 	host.node_rects = page_node_rects;
 	host.grid_tracks = page_grid_tracks;
 	host.document_size = page_document_size;
@@ -1464,6 +1467,8 @@ page_needs_layout(
 	if (page->laid_out_generation != page->document->generation)
 		return 1;
 	if (page->laid_out_visits != page->visits_generation)
+		return 1;
+	if (page->laid_out_frames != page_frames_generation(page))
 		return 1;
 
 	/* Images that arrived since the layout. */

@@ -69,6 +69,14 @@ struct kl_titlebar;
 #define KL_CONTROL_PRIMARY_ACTION	15U
 #define KL_CONTROL_GENERIC	16U
 
+/*
+ * A page's reload (KL_VERSION 106): a square with the reload icon, beside
+ * the navigation, where libkeiland draws the titlebar itself (Windows).
+ * The compositor's titlebar has no such role yet and shows it as a
+ * generic control with its label.
+ */
+#define KL_CONTROL_RELOAD		17U
+
 /* The controls' priorities: the order they give way in when the room runs short. */
 #define KL_PRIORITY_PRIMARY	0U
 #define KL_PRIORITY_NORMAL	1U

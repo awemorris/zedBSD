@@ -681,6 +681,7 @@ vm_call(
 {
 	struct vm_function *function;
 	struct vm_realm *native_realm;
+	struct vm_realm *saved_caller;
 	struct vm_object *object;
 	struct function_roots roots;
 	vm_value inputs[2];
@@ -750,6 +751,8 @@ vm_call(
 		native_realm = function->realm;
 		if (function->bound_target != VM_VALUE_UNDEFINED)
 			native_realm = realm;
+		saved_caller = native_realm->caller;
+		native_realm->caller = realm;
 		status = function_run_native(
 		    native_realm,
 		    function,
@@ -759,6 +762,7 @@ vm_call(
 		    count,
 		    VM_VALUE_UNDEFINED,
 		    result);
+		native_realm->caller = saved_caller;
 		if (status != 0) {
 			function_transfer_exception(realm, native_realm, status);
 			goto cleanup;

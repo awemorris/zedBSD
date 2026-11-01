@@ -1278,3 +1278,103 @@ Origin: 2026-10-27 ユーザーの指示。
   - position-try-cascade（!important・animation・transition に @position-try が勝たない）、position-try-backdrop（::backdrop の fallback）。
   - 右から左の文字を含む行の bidi（文字の順の反転と piece の並べ直し、paint の glyph の向きまで要る）。
 - 未実施: asan、host-NAME の全件、target の確認。
+
+### iframe の内容の描画の設計（続き 9、2026-11-01。依頼者の優先順位の 1 番）
+
+- 今までの状態: `<iframe>` は 300x150 の replaced box で、子文書は DOM・script・cascade（`bind_style_context_engine`）はあるが、layout tree が無く描かれない。
+  子文書の geometry の問い合わせ（`geometry_child_box`）だけは一時の layout tree を作っている。
+- 設計:
+  1. 段階 1（paint の合成）: paint が iframe の box を描く時、page が子文書の layout tree を作る（`layout_tree.frame_build` = `page_frame_build`: 子の cascade と viewport = iframe の content box の大きさで `layout_build`）。
+     その tree から子の display list を作り（`paint_build` を入れ子で呼ぶ）、items を iframe の content box の左上へずらして、content box の clip の中に追加する。
+     子の canvas の色（root か body の背景）は先に矩形で塗る（無ければ親が透ける）。子の list と tree は親の list（`paint_list.frames`）が持ち、親の list と同じ間生きる（glyph・画像・filter の指す先）。
+  2. 段階 2（更新）: 子文書が読み込み・変更されたら親を描き直す（今は親の generation が変わった時だけ）。子の scroll と、子の viewport の大きさ（iframe の大きさの変化）。
+  3. 段階 3（hit test・scroll・focus）: 親の座標から子の box を探す。子の中の click・scroll・caret。
+  4. 段階 4（view transition）: 子文書の transition と、iframe に view-transition-name を付けた時の撮影。
+
+- 結果（dev176〜dev181。段階 1〜4 を作った）:
+  - 段階 1（paint の合成。paint/list.c `list_frame`、page/frame-load.c `page_frame_paint`・`frame_make`・`frame_tree`）: iframe の box を描く時に子文書を layout し（`layout_tree.frame_paint`）、子の display list を content box へずらして clip の中に足す。
+    子の canvas の色（root か body の背景）は先に矩形で塗る。子の list と tree は親の list（`paint_list.frames`、参照数つき `paint_frame`）が持つ。入れ子の iframe は子の tree の中の iframe を同じ手順で描く。
+  - 段階 1b（zoom と paint holding）: iframe に `zoom` が掛かる時、子文書の root は `css_engine_set_base_zoom` からその倍率で始まり、子の viewport（CSS px）は frame の大きさ ÷ 倍率（layout/box.c、bind/frame.c の `bind_frame_viewport`）。
+    子の `startViewTransition` の間（update callback が終わるまで）は、frame を最後に描いた物のまま見せる（`native.frameHold`、`bind_window.frame_hold`、host の `frame_capture` で開始の時に描き直して取っておく）。
+  - 段階 2（更新）: 子文書の generation の和（`page_frames_generation`）と frame の transition の世代を `page_needs_layout` が見て、親を描き直す。
+  - 段階 3（hit test）: `page_hit_node` が点から子文書の box へ降りる（キャッシュした子の tree を使う）。マウス・wheel の event は子文書の window の realm で、子の座標で発火する。focus・control の操作は今まで通り親の文書の物だけ。
+  - 段階 4（view transition）: frame の文書の view transition（`page_frame_view_transition`・`page_frame_view_transition_duration`、host の `frame_view_transition`）を、page の物と同じ手順（old を撮る・new を測る・tree を見せる）で frame ごとの `struct layout_transition` に持つ。
+  - 子文書の geometry（`offsetParent` など）が子の cascade を読むようにした（bind/geometry.c `geometry_style_of`）。
+  - 測定: dev176（段階 1）= 3,190（後退 1: iframe-zoom-nested が中身を描かなかったので偶然通っていた、paint-holding-in-iframe も同じ）→ dev178（zoom と paint holding を足した）= 3,191（後退 0）→ dev179（hit test）= 3,191 → dev180（view transition）= 3,200 → dev181（geometry）= 3,201 / 3,473（92.17%、gap 272）、後退 0。
+    dev175（3,191）から +10: view-transitions の iframe 系 9 件（dialog-in-rtl-iframe・iframe-and-main-frame-transition 4 件・iframe-new-has-scrollbar・iframe-old-has-scrollbar・sibling-frames-transition・transition-in-empty-iframe）と css-anchor-position/last-successful-iframe。
+  - 見て比べた図: plan/ws074/phase260/render-compare/ の iframe-stage1-zoom-nested.png（上が試験、下が ref）と iframe-stage4-vt-in-empty-iframe.png。段階 1 の前は iframe の中が白だった。
+  - Acid: dev181 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+  - 未実施・残り: 子文書の scroll（window.scrollTo・scrollY は子では動かない。長い子文書は上から切れる）、iframe の中の focus・caret・link の操作（click の event は子へ届くが、focus と link の遷移は親の物）、子文書の image・web font が遅れて来た時の再描画、
+    iframe-transition-destroyed-document-crash（crash の runner。今も gap）、asan・host-NAME の全件・target の確認。
+
+### クラウドのセッションの途中経過（続き 10、2026-11-01。dev182〜dev184。merge の後の確認と @scope・style の load・animation event）
+
+- dev182（merge 2a8742d54 を build し直した物）= 3,201 / 3,473（dev181 と同じ、後退 0）。Acid2 100% / Acid3 100/100 exact。子文書の css engine の color scheme は、子の window が作られる時に親の `dark` を受け取り（bind/frame-resource.c）、
+  `bind_style_context_engine` が engine に渡している（bind/style-context.c）ので、子の描画にも効く。親が後から scheme を変えた時に既存の子へ伝える所は無い（未対応）。
+- 優先順位の確認（依頼者の順）:
+  1. @starting-style: CSS transitions が engine に無い（computed の値は即座に変わる）。選んだ ID の中で @starting-style を使う物は css-cascade/scope-starting-style の 1 件だけで、transition の補間（steps(2, start) の 50%）と一緒に要る。transitions を作る物は大きく、1 件のために作らず見送った。
+  2. @scope の入れ子: style rule の中の `@scope`（preludeあり・なし）を parse した（css/parser.c `parser_nested_scope`: 外側の rule の selector を root とする scope の中で読む）。scope-nesting.html の subtest は 12 → 2 に減った。
+     残る 2 つは CSSOM（CSSScopeRule.insertRule('color: green') が CSSNestedDeclarations を作る）と、`@scope (&) { --x: 1; color: red }` の中に直に置いた declaration（`:where(:scope)` の rule になる）と selectorText の書き換え。ID はまだ通らない。
+     scope-part.html は custom element の shadow の ::part() を `:scope::part()` で選ぶ事が要る（::part の支援が無い）。
+  3. position-try-cascade: 「@position-try が !important・animation・transition に勝たない」の 3 つの subtest のうち transition は transitions が無いので通らない。見送り。
+- 通した ID（dev181 から +2）:
+  - `<style>` の `load` event: imports の無い inline の style も、取り込んだ時に一度だけ queue する（page/sheets.c）。iframe-transition-destroyed-document-crash が通った（crash）。
+  - CSS animation の event（animationstart・animationend・animationcancel）: layout の後に、keyframes のある animation を持つ box を prelude へ知らせ（`bind_animation_sync`・`page_animations_sync`）、prelude が page の timer で event（`AnimationEvent`）を出す。
+    pseudo-element の animation（view transition の pseudo）と複数の animation（カンマ区切り）、animationiteration は未対応。inline-grid-try-fallbacks-crash が通った（crash）。
+- 測定: dev183（style の load）= 3,202、dev184（animation の event）= 3,203 / 3,473（92.23%、gap 270、crash は 0）、後退 0。dev181 からは +2。
+- Acid: dev184 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 未実施: asan、host-NAME の全件、target の確認、子文書の scroll（window.scrollTo・scrollY）。
+
+### クラウドのセッションの途中経過（続き 11、2026-11-01。dev185。transitions の数え直し・custom elements・opaque origin の調査）
+
+- transitions の数え直し（依頼者の指示の 1）: gap の ID のうち CSS の transition（`transition` の property・transitionrun/start/end/cancel の event・@starting-style・CSSTransition）を使う物は 2 件だけ
+  （css-cascade/scope-starting-style と css-anchor-position/position-try-cascade）。view-transitions の `getAnimations` を使う 3 件（pseudo-element-animations 系・backdrop-filter-animated）は Web Animations の物で transitions ではない。
+  position-try-cascade は transition のほか animation・revert-layer の subtest も全て通す必要があり、scope-starting-style は transition の補間と @starting-style の両方が要る。
+  依頼者の判断 3（見込みが小さければ区切ってよい）に従い、transitions の実装は見送って記録する。作る時の設計: 既存の animation の補間（css/cascade.c の filter だけ）を一般の値（数値・長さ・色・transform）へ広げ、
+  style の変化の検出（前の computed と比べる）・page の timer（今回の animation event と同じ `bind_animation_sync` の経路）・view 側の再描画の駆動が要る。実際のサイトの動きは再描画の駆動（今は時間で再 layout しない）が先に要る。
+- custom elements（JS の prelude の中。今まで `customElements.define` は名前を覚えるだけで何もしなかった）:
+  `customElements` に define・get・getName・whenDefined・upgrade を作った。`HTMLElement` を `new.target` を見る constructor に差し替え、既にある要素（document と shadow tree）の upgrade、`document.createElement(NS)` と `new` での作成、
+  connectedCallback・disconnectedCallback・attributeChangedCallback（observedAttributes）を MutationObserver から呼ぶ（変更の少し後）。attachShadow した shadow root も観る。
+  `@scope` の root を探す時、shadow tree の一番上の要素から host へも辿る（css/cascade.c `cascade_scope_parent`）ので `:scope::part()` が効く。通った ID: css-cascade/scope-part。
+- 測定: dev185 = 3,204 / 3,473（92.25%、gap 269）、後退 0。dev184 から +1。Acid2 100% / Acid3 100/100・pixel 100%（exact match）。host build は warning 0。
+- Navigation の残りの調べ直し（見送り）: opaque origin の frame（`sandbox` に allow-same-origin が無い。4 件: navigation-history-entry/opaque-origin・return-value/back-forward-opaque-origin・navigate-opaque-origin・updateCurrentEntry-method/opaque-origin）は
+  今は子の window を作らない（`bind_frame_sandboxed`）ので、`i.contentWindow` が null になって `fetch_tests_from_window(i.contentWindow)` が壊れる。作るには、sandbox の frame も読み込む（scripts は allow-scripts がある時だけ）、
+  親へは contentWindow の facade（postMessage だけ）、子の `navigation.currentEntry` は null・`entries()` は空、`postMessage` の `event.source`・`event.origin`（今は受け取り側の window・受け取り側の origin を入れている）を送り手のものにする、が要る。
+  特に `event.source` が送り手を指さないと testharness の window 間の通信（`event.source.postMessage`）が自分に返る。windows をまたぐ呼び出し元の realm を native が知る作りが無い。数 session 分で、他の Navigation の残り（popup・form・meta refresh・data:・blob:・javascript:）も同じ型の足りない物。
+- 未実施: asan、host-NAME の全件、target の確認、子文書の scroll。
+
+### window 間の postMessage と opaque origin の frame の設計（続き 12、2026-11-01）
+
+- 今まで: `postMessage` の native は、受け取り側の realm で動き、event の `source` に受け取り側の global、`origin` に受け取り側の origin を入れ、ports は常に空。
+  testharness の window 間の通信（`event.source.postMessage`）が送り手へ返らず、自分に返る。sandbox で allow-same-origin が無い frame は、子の window を作らない（空白に見える）。
+- 設計:
+  1. 段階 1（呼び出し元の realm）: `struct vm_realm.caller` を足し、`vm_call` が native を呼ぶ間、その native の realm の `caller` を呼び出し元の realm にする（戻ると元に戻す）。
+     `window_post_message` は caller の window を送り手として、`event.source` と `event.origin` を送り手のものにする。転送リスト（第 3 引数か options の transfer）を `event.ports` に入れる（port は両方の window で使えるまま。neuter はしない）。
+     about:srcdoc・about:blank の frame の origin は親の origin にする（`bind_frame_location`）。
+  2. 段階 2（opaque origin の frame）: `sandbox` に allow-same-origin が無い frame も子の window を作って読み込む。script は `allow-scripts` がある時だけ走る。子の origin は "null"（`bind_window.opaque`）。
+     親から見た `contentWindow` は facade（postMessage・closed・length・frames・parent・top・location の set だけ。他は SecurityError）、`contentDocument` は null。
+     子の `navigation.currentEntry` は null、`entries()` は空、`canGoBack/canGoForward` は false。
+  3. 段階 3（Navigation の残り）: popup（`window.open`）・form の POST・meta refresh・data:・blob:・javascript: のうち、段階 1・2 の上で ID に効く物。
+
+### 引き継ぎ（2026-11-01 ラップアップ）
+
+- Q1 の判断（2026-11-01、ラップアップの時、main のエージェント）: 最新の code の commit 89a23c271（retire の時に未完の navigation を abort する hook と、retire 後の currentEntry）は dev189 で +3 −3 だった。後退 0 の方針に従い revert し、code を 449325eef（dev188、3,208 / 3,473、後退 0）と同じに戻した。revert の後の全件の測定は未実施（code が dev188 と同じなので数も同じ見込み）。再び試す時は 89a23c271 を当て直し、hook を「frame の element が document から外された retire」だけに限り、currentEntry の変更が navigation-history-entry/after-detach と両立する形にしてから、通った 3 件（traverseTo-detach-*）と後退した 3 件（after-detach・navigate-history-push-same-url-cross-document・transition-cross-document）を見ながら全件を測る。
+
+- 最後に全件を測った物: **dev188**（commit 449325eef）= 3,208 / 3,473（92.37%）、gap 265（harness 135 / static 105 / scripted 32 / crash 0）、後退 0。Acid2 100% / Acid3 100/100 exact（dev189 の source でも確認）、host build は warning 0。dev175 の 3,191 から続き 12 で +17 して dev188 に至った（iframe の内容の描画 +10、style の load・animation の event +2、custom elements +1、opaque origin の frame +4 ほか）。
+- **測定した最後の commit だが後退がある物**: 最新の commit（このラップアップの直前。SHA は返答）は dev189 = 3,208 / 3,473、**後退 3**（修正 +3 と相殺で total は dev188 と同じ）。
+  - 修正 3: navigation-methods/return-value/traverseTo-detach-cross-document-before-navigate-event、同 traverseTo-detach-same-document-before-navigate-event、navigation-methods/traverseTo-detach-between-navigate-and-navigatesuccess。
+  - 後退 3: navigation-history-entry/after-detach、navigation-methods/navigate-history-push-same-url-cross-document、ordering-and-transition/transition-cross-document。
+  - 原因の見当（未確認）: この commit の変更は window の retire 時の hook（`bind_window_detach` が prelude の `setDetachHook` の関数を呼び、未完の navigation を AbortError で reject し、動いている navigate event を abort して navigateerror を出す）と、`currentEntry` を retire 後も entry で返す（`retired`）の 2 つ。
+    after-detach は retire 後の `currentEntry` が null である事を見ている（`retired` が原因）、残る 2 つは frame が次の文書へ移る時にも retire の経路を通る事（hook が跨る文書の navigation を abort する）が原因と見込む。
+  - 後退 0 の状態へ戻す一手: 449325eef（dev188）へ戻す（`git revert` かこの commit の prelude の `setDetachHook`・`retired`・`errorFilename` と bind/window.c の hook の呼び出しを外す）。直して進める場合は、hook を「frame の element が document から外された retire」だけに限り（文書の移り変わりでは呼ばない）、`currentEntry` の `retired` は detach の試験（traverseTo-detach-between…）だけが要るので、`after-detach` が見る条件と区別する。判断は依頼者へ。
+- 作った物（dev188 までは測定済み）: postMessage の呼び出し元の realm（`vm_realm.caller`、`vm_call` が native の間だけ入れる）と、それに基づく `event.source`・`event.origin`・transfer の ports、about:srcdoc・about:blank の origin は親の物、
+  frame ごとの window proxy（`bind_window_view`・prelude の `setFrameProxyMaker`。frame が文書を移っても同じ物、retire 後は最後の window を指す）、sandbox の frame も読み込む（scripts は allow-scripts がある時だけ）、opaque origin の窓の制限（contentDocument は null、parent・top・opener・window の見え方は postMessage だけの view、cookie は空、storage は SecurityError、`navigation.currentEntry` は null・`entries()` は空・back/forward/traverseTo は InvalidStateError・navigate/reload は決して settle しない・navigate event を出さない）、`window.origin`。
+  通った ID は opaque-origin 4 件（navigation-history-entry/opaque-origin、return-value/back-forward-opaque-origin・navigate-opaque-origin、updateCurrentEntry-method/opaque-origin）。
+- 残り（調査中の事項）:
+  - Navigation の no_output の物（navigate-form-reload・form-traverse・meta-refresh・to-javascript・back-cross-document-preventDefault・traverseTo-navigates-top-and-same-doc-child-and-cross-doc-child・entries-after-blob/javascript-url・opaque-origin-data-url・back-forward-multiple-frames・sandboxing-back-parent/sibling・currententrychange…popup）は、cross-document の navigation（form の POST・meta refresh・data:・blob:・javascript: の frame・popup の `window.open`）の足りない所。1 件ずつ原因が違い、見込みは未確認。
+  - traverseTo-after-data-url・traverseTo-navigates-multiple-iframes・dispose-for-navigation-in-child（共有 history の本格版）・reload-navigation-timing・signal-abort-window-stop-after-intercept。
+  - `window.frames[n]`・`window[n]` は frame の proxy にしていない（contentWindow と event.source だけ）。
+- 残りの候補の優先順位: (1) dev189 の後退 3 を直すか戻す（上）。(2) Navigation の cross-document の残り。(3) 子文書の scroll（window.scrollTo・scrollY）と iframe の中の focus・caret。(4) transitions（再描画の駆動から。gap への効きは 2 件）。(5) abspos の OOF fragmentation（設計は続き 8）。(6) @scope の入れ子の残り 2 subtest（CSSOM の CSSNestedDeclarations）。
+- この container でしか動かない道具や前提: `build/`（host build・WPT の tree `build/ws074-suites/wpt`・測定の出力 `build/ws074-cmp/*`・Chromium の測定 `build/ws074-cmp/chrome`・`build/tmp/`）は container と一緒に消える。環境の作り直しは ws.md の「クラウド環境での構築と Chromium との比較」の手順（`sh plan/ws074/tests/cloud-setup.sh`、`CC=clang sh plan/ws074/tests/host-build.sh plain`、`sh plan/ws074/tests/fetch-suites.sh wpt`）。
+  gap の測定は `python3 plan/ws074/tests/interop2025-chrome-gap.py measure --kind ours|chrome --out DIR` と `compare`（chrome の側は作り直しが要る）。`plan/ws074/phase260/tools/{h1,s1,st1,lay,cmp,cmpgap}.sh` が単発の確認の道具（st1 は `BROWSER=build/ws074-host/plain/browser` を付ける）。
+  prelude を直したら `python3 plan/ws074/phase230/make-prelude.py` を流して `bind/prelude-source.inc` を作り直す事。window 間の通信の調査用の一時 page は WPT の tree の `zz-*.html`・`zzdir/`・`zznav/`（git の外）。

@@ -144,8 +144,10 @@ struct nvrtx_nvenc_state {
 	int scheduled;
 	int object_made;
 	int ready;
+	int privileged;
 };
 
+static int nvenc_start(struct nvrtx_gpu *gpu, int privileged);
 static int nvenc_find(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc);
 static int nvenc_memory(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc);
 static int nvenc_channel(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc);
@@ -171,6 +173,26 @@ int
 nvrtx_nvenc_start(
 	struct nvrtx_gpu *gpu)
 {
+	int error;
+
+	/* The encoder's channel with the user's privilege. */
+	error = nvenc_start(gpu, 0);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the encoder takes work. */
+	return 0;
+}
+
+/*
+ * Runs nvenc-channel with the channel's privilege (nonzero: an admin
+ * channel, as the resource manager's own are).
+ */
+static int
+nvenc_start(
+	struct nvrtx_gpu *gpu,
+	int privileged)
+{
 	struct nvrtx_nvenc_state *nvenc;
 	uint32_t before;
 	int error;
@@ -191,6 +213,7 @@ nvrtx_nvenc_start(
 
 	/* Starts the state's lock and publishes the state, so a failed bring-up can still be released. */
 	(void)mutex_init(&nvenc->lock, LOCK_RANK_DEVICE, "nvrtx nvenc");
+	nvenc->privileged = privileged;
 	gpu->nvenc = nvenc;
 
 	/* The channel errors reported before the bring-up are not its own. */
@@ -227,8 +250,8 @@ nvrtx_nvenc_start(
 		return error;
 
 	/* Succeeded: the encoder takes work. */
-	nvrtx_stage_mark("nvenc-channel ok: class %x, channel %u on runlist %u", (unsigned)nvenc->nvenc_class, (unsigned)NVENC_CHID,
-	    (unsigned)nvenc->runlist);
+	nvrtx_stage_mark("nvenc-channel ok: class %x, channel %u on runlist %u%s", (unsigned)nvenc->nvenc_class, (unsigned)NVENC_CHID,
+	    (unsigned)nvenc->runlist, privileged != 0 ? ", admin" : "");
 	return 0;
 }
 
@@ -355,11 +378,13 @@ nvrtx_nvenc_release(
  * old channel's objects are freed as by the stop, its memory is left (the
  * engine may still name it; it is not given back before the unload), and
  * nvenc-channel runs again.  For the encoder's self-test, which tries
- * values the engine may refuse.
+ * values the engine may refuse; privileged makes the new channel an admin
+ * one.
  */
 int
 nvrtx_nvenc_restart(
-	struct nvrtx_gpu *gpu)
+	struct nvrtx_gpu *gpu,
+	int privileged)
 {
 	int error;
 
@@ -368,13 +393,26 @@ nvrtx_nvenc_restart(
 	gpu->nvenc = NULL;
 	nvrtx_stage_mark("nvenc-channel: the stopped channel is freed, its memory left; the channel is made again");
 
-	/* Makes the channel again. */
-	error = nvrtx_nvenc_start(gpu);
+	/* Makes the channel again, with the privilege asked for. */
+	error = nvenc_start(gpu, privileged);
 	if (error != 0)
 		return error;
 
 	/* Succeeded: the new channel takes work. */
 	return 0;
+}
+
+/* Reports whether the encoder's channel is an admin one (0 without an encoder). */
+int
+nvrtx_nvenc_privileged(
+	const struct nvrtx_gpu *gpu)
+{
+	/* No state, no channel. */
+	if (gpu->nvenc == NULL)
+		return 0;
+
+	/* Succeeded: the channel's privilege. */
+	return gpu->nvenc->privileged;
 }
 
 /*
@@ -761,7 +799,7 @@ nvenc_channel(
 	setup.chid = NVENC_CHID;
 	setup.space = NVRTX_HANDLE_WORK_SPACE;
 	setup.engine = NVRTX_ENGINE_NVENC0;
-	setup.privileged = 0U;
+	setup.privileged = (uint32_t)nvenc->privileged;
 	setup.instance = nvenc->block.vram + NVENC_INSTANCE_AT;
 	setup.userd = nvenc->block.vram + NVENC_USERD_AT;
 	setup.methods = nvenc->methods.dma.device_address;

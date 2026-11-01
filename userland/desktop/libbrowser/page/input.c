@@ -54,7 +54,9 @@ struct input_stop {
 	size_t position;
 };
 
-static struct dom_node *input_element_at(struct page *page, int x, int y);
+static struct dom_node *input_element_at(struct page *page, int x, int y, int deep);
+static struct bind_window *input_window_of(struct page *page, const struct dom_node *node);
+static void input_frame_point(struct page *page, const struct dom_node *target, int x, int y, struct bind_mouse *mouse);
 static struct dom_node *input_key_target(struct page *page);
 static struct dom_element *input_focused(struct page *page);
 static int input_set_focus(struct page *page, struct dom_element *element, int visible);
@@ -88,7 +90,7 @@ page_mouse_event(
 
 	/* The element under the point, or the document's root element. */
 	*canceled = 0;
-	target = input_element_at(page, pointer->x, pointer->y);
+	target = input_element_at(page, pointer->x, pointer->y, 1);
 	if (target == NULL)
 		return 0;
 
@@ -100,7 +102,8 @@ page_mouse_event(
 	mouse.page_y = (double)pointer->y;
 	mouse.button = pointer->button;
 	mouse.modifiers = pointer->modifiers;
-	error = bind_fire_mouse_event(page->window, target, type, &mouse, canceled);
+	input_frame_point(page, target, pointer->x, pointer->y, &mouse);
+	error = bind_fire_mouse_event(input_window_of(page, target), target, type, &mouse, canceled);
 	if (error != 0)
 		return error;
 
@@ -124,7 +127,7 @@ page_wheel_event(
 
 	/* The element under the point, or the document's root element. */
 	*canceled = 0;
-	target = input_element_at(page, pointer->x, pointer->y);
+	target = input_element_at(page, pointer->x, pointer->y, 1);
 	if (target == NULL)
 		return 0;
 
@@ -137,7 +140,8 @@ page_wheel_event(
 	mouse.modifiers = pointer->modifiers;
 	mouse.delta_x = pointer->delta_x;
 	mouse.delta_y = pointer->delta_y;
-	error = bind_fire_wheel_event(page->window, target, &mouse, canceled);
+	input_frame_point(page, target, pointer->x, pointer->y, &mouse);
+	error = bind_fire_wheel_event(input_window_of(page, target), target, &mouse, canceled);
 	if (error != 0)
 		return error;
 
@@ -194,7 +198,7 @@ page_focus_at(
 	int error;
 
 	/* The element under the point, then its ancestors. */
-	node = input_element_at(page, x, y);
+	node = input_element_at(page, x, y, 0);
 	for (depth = 0; node != NULL && depth < INPUT_DEPTH; depth++) {
 		/* The first element that can be focused takes the focus. */
 		if (node->type == DOM_ELEMENT) {
@@ -534,7 +538,7 @@ page_click_control(
 
 	/* The element under the point. */
 	*found = 0;
-	node = input_element_at(page, x, y);
+	node = input_element_at(page, x, y, 0);
 	if (node == NULL || node->type != DOM_ELEMENT)
 		return 0;
 
@@ -729,18 +733,58 @@ input_activate_control(
 	return 0;
 }
 
+/* Tells the window a node's events are fired in: its document's (an iframe's), or the page's. */
+static struct bind_window *
+input_window_of(
+	struct page *page,
+	const struct dom_node *node)
+{
+	if (node != NULL && node->document != page->document && node->document != NULL && node->document->view != NULL)
+		return node->document->view;
+	return page->window;
+}
+
+/* For a target in an iframe's document: the point's place in that document. */
+static void
+input_frame_point(
+	struct page *page,
+	const struct dom_node *target,
+	int x,
+	int y,
+	struct bind_mouse *mouse)
+{
+	struct dom_node *hit;
+	int offset_x;
+	int offset_y;
+
+	if (target == NULL || target->document == page->document)
+		return;
+	hit = page_hit_node(page, x, y, &offset_x, &offset_y);
+	if (hit == NULL)
+		return;
+	mouse->client_x -= (double)offset_x;
+	mouse->client_y -= (double)offset_y;
+	mouse->page_x -= (double)offset_x;
+	mouse->page_y -= (double)offset_y;
+}
+
 /* Finds the element under a point of the document, or the root element when no box is there. */
 static struct dom_node *
 input_element_at(
 	struct page *page,
 	int x,
-	int y)
+	int y,
+	int deep)
 {
 	struct dom_node *node;
+	int offset_x;
+	int offset_y;
 
-	/* The deepest box under the point, which may be text. */
+	/* The deepest box under the point, which may be text (in an iframe's document when the point is in one). */
 	node = NULL;
-	if (page->laid_out)
+	if (page->laid_out && deep)
+		node = page_hit_node(page, x, y, &offset_x, &offset_y);
+	else if (page->laid_out)
 		node = layout_hit_node(&page->layout, (layout_unit)x * LAYOUT_UNIT, (layout_unit)y * LAYOUT_UNIT);
 
 	/* Text's element is its parent. */

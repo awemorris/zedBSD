@@ -1,3 +1,3 @@
 # key|kind|label|platforms|default|choices
 CONFIG_DRIVER_POWERVR|bool|PowerVR BXE-4-32 GPU (VisionFive 2, early stage; selects its firmware)|visionfive2|y|
-CONFIG_DRIVER_VF2_VPU|bool|Wave511 H.264/H.265 video decoder (VisionFive 2, needs the PowerVR driver, experimental)|visionfive2|n|
+CONFIG_DRIVER_VF2_VPU|bool|Wave511 H.264 video decoder (VisionFive 2, needs the PowerVR driver)|visionfive2|y|

@@ -44,6 +44,13 @@ static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_va
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_frame_proxy_maker(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_global(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_opaque(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_window_wrapper(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_is_opaque(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_animation_hook(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_hold(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_duration(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -486,10 +493,233 @@ prelude_view_transition(
 	status = vm_to_number(realm, js_argument(args, count, 0), &step);
 	if (status != 0)
 		return status;
+	if (window->frame != NULL && window->host.view_transition == NULL) {
+		struct bind_window *parent;
+
+		/* A frame's document: its parent page makes the transition. */
+		parent = window->frame->node.document->view;
+		if (parent != NULL && !parent->detached && parent->host.frame_view_transition != NULL &&
+		    parent->host.frame_view_transition(parent->host.context, window->frame, (int)step) != 0)
+			*result = VM_VALUE_TRUE;
+		return 0;
+	}
 	if (window->host.view_transition == NULL)
 		return 0;
 	if (window->host.view_transition(window->host.context, (int)step) != 0)
 		*result = VM_VALUE_TRUE;
+	return 0;
+}
+
+/* setFrameProxyMaker(function): the function that makes the window proxy of an <iframe> element of this window's document. */
+static int
+prelude_set_frame_proxy_maker(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value maker;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	maker = js_argument(args, count, 0);
+	if (!vm_value_is_callable(maker))
+		return vm_throw_type_error(realm, "setFrameProxyMaker: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->frame_proxy_maker = vm_value_as_cell(maker);
+	return 0;
+}
+
+/* The window of the document an <iframe> element shows now (NULL when it shows none). */
+static struct bind_window *
+prelude_frame_window(
+	struct vm_realm *realm,
+	const vm_value *args,
+	unsigned count)
+{
+	struct dom_node *node;
+	struct bind_window *window;
+	const struct vm_realm *child;
+
+	if (!vm_value_is_object(js_argument(args, count, 0)) || bind_this_node(realm, js_argument(args, count, 0), &node) != 0)
+		return NULL;
+	window = bind_window_of(realm);
+	if (node->type != DOM_ELEMENT || node->document != window->document)
+		return NULL;
+	child = (const struct vm_realm *)((struct dom_element *)node)->child_context;
+	if (child == NULL || child->host == NULL)
+		return NULL;
+	return child->host;
+}
+
+/* frameGlobal(element): the global of the document an <iframe> element shows now, or null. */
+static int
+prelude_frame_global(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *child;
+
+	UNUSED_PARAMETER(this_value);
+	child = prelude_frame_window(realm, args, count);
+	*result = child != NULL && !child->detached ? vm_value_cell(child->realm->global) : VM_VALUE_NULL;
+	return 0;
+}
+
+/* frameOpaque(element): whether the document an <iframe> element shows has an opaque origin. */
+static int
+prelude_frame_opaque(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *child;
+
+	UNUSED_PARAMETER(this_value);
+	child = prelude_frame_window(realm, args, count);
+	*result = vm_value_boolean(child != NULL && child->opaque != 0);
+	return 0;
+}
+
+/* setWindowWrapper(function): the function that makes this window's restricted view of another window. */
+static int
+prelude_set_window_wrapper(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value wrapper;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	wrapper = js_argument(args, count, 0);
+	if (!vm_value_is_callable(wrapper))
+		return vm_throw_type_error(realm, "setWindowWrapper: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->window_wrapper = vm_value_as_cell(wrapper);
+	return 0;
+}
+
+/* isOpaque(): whether this window's document has an opaque origin (a sandboxed frame without allow-same-origin). */
+static int
+prelude_is_opaque(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	*result = vm_value_boolean(bind_window_of(realm)->opaque != 0);
+	return 0;
+}
+
+/* setAnimationHook(function): the function bind_animation_sync calls (op, element, name, delay, duration, iterations). */
+static int
+prelude_set_animation_hook(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value hook;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	hook = js_argument(args, count, 0);
+	if (!vm_value_is_callable(hook))
+		return vm_throw_type_error(realm, "setAnimationHook: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->animation_hook = vm_value_as_cell(hook);
+	return 0;
+}
+
+/*
+ * Tells the prelude about the animations of the elements after a layout: op 0 starts a round, 1 names an element that has an
+ * animation (its name, and its delay, duration and iteration count in milliseconds and times), 2 ends the round (the elements not named stop).
+ */
+int
+bind_animation_sync(
+	struct bind_window *window,
+	int op,
+	struct dom_element *element,
+	const struct vm_string *name,
+	double delay,
+	double duration,
+	double iterations)
+{
+	struct vm_realm *realm;
+	vm_value arguments[6];
+	vm_value returned;
+	int status;
+
+	realm = window->realm;
+	if (window->animation_hook == NULL || window->detached)
+		return 0;
+	arguments[0] = vm_value_int32(op);
+	arguments[1] = VM_VALUE_UNDEFINED;
+	arguments[2] = VM_VALUE_UNDEFINED;
+	if (element != NULL) {
+		status = bind_wrap(window, &element->node, &arguments[1]);
+		if (status != 0)
+			return status;
+	}
+	if (name != NULL)
+		arguments[2] = vm_value_cell((struct vm_cell *)name);
+	arguments[3] = vm_value_number(delay);
+	arguments[4] = vm_value_number(duration);
+	arguments[5] = vm_value_number(iterations);
+	status = vm_call(realm, vm_value_cell(window->animation_hook), VM_VALUE_UNDEFINED, arguments, 6, &returned);
+	if (status == VM_THROWN) {
+		bind_report_exception(window, realm->exception);
+		realm->exception = VM_VALUE_UNDEFINED;
+		return 0;
+	}
+	return status;
+}
+
+/* frameHold(on): a document in a frame holds its painting (the page keeps showing the last one) or lets it go. */
+static int
+prelude_frame_hold(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	double on;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	*result = VM_VALUE_UNDEFINED;
+	status = vm_to_number(realm, js_argument(args, count, 0), &on);
+	if (status != 0)
+		return status;
+	if (window->frame != NULL) {
+		struct bind_window *parent;
+
+		/* The painting of the frame as it is now is the one that stays. */
+		parent = window->frame->node.document->view;
+		if (on != 0.0 && !window->frame_hold && parent != NULL && !parent->detached && parent->host.frame_capture != NULL)
+			parent->host.frame_capture(parent->host.context, window->frame);
+		window->frame_hold = on != 0.0;
+	}
 	return 0;
 }
 
@@ -562,6 +792,14 @@ prelude_view_transition_duration(
 	UNUSED_PARAMETER(count);
 	window = bind_window_of(realm);
 	*result = vm_value_number(0.0);
+	if (window->frame != NULL && window->host.view_transition_duration == NULL) {
+		struct bind_window *parent;
+
+		parent = window->frame->node.document->view;
+		if (parent != NULL && !parent->detached && parent->host.frame_view_transition_duration != NULL)
+			*result = vm_value_number(parent->host.frame_view_transition_duration(parent->host.context, window->frame));
+		return 0;
+	}
 	if (window->host.view_transition_duration != NULL)
 		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
 	return 0;
@@ -1365,6 +1603,34 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "viewTransition", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setFrameProxyMaker", 1, prelude_set_frame_proxy_maker, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setFrameProxyMaker", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameGlobal", 1, prelude_frame_global, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameGlobal", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameOpaque", 1, prelude_frame_opaque, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameOpaque", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setWindowWrapper", 1, prelude_set_window_wrapper, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setWindowWrapper", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "isOpaque", 0, prelude_is_opaque, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "isOpaque", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setAnimationHook", 1, prelude_set_animation_hook, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setAnimationHook", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameHold", 1, prelude_frame_hold, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameHold", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "viewTransitionActive", 2, prelude_view_transition_active, NULL, &function);
 	if (status == 0)
