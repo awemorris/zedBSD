@@ -2,7 +2,7 @@
 
 # ws324-p006h H.265 の解析の適合の試験（HEVC_v1、host、Opus）
 
-Status: in-progress（2026-11-02 P6 q1910-i01 が道具を作り、適合 147 本と派生 1 本が全部 PASS。cleared は Q1 が決める）。前: planned（2026-11-01 P1 が p006a で作成）
+Status: cleared（2026-11-02 07:40 Q1、main で conformance PASS）。前: in-progress（2026-11-02 P6 q1910-i01 が道具を作り、適合 147 本と派生 1 本が全部 PASS。cleared は Q1 が決める）。前: planned（2026-11-01 P1 が p006a で作成）
 
 - WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md) §2.3・§8.4・§12。型 O（Opus、phase-runner）。手順 §4.6 の「統合・適合」の Phase。
 
