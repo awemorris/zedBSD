@@ -77,12 +77,10 @@ layout_anchor_resolve(
 	layout_unit size;
 	struct anchor_static fixed;
 	layout_unit value;
-	int positioned;
 	int valid;
 	int slot;
 
-	/* Only a box out of the flow uses anchor functions. */
-	positioned = box->style.position == CSS_POSITION_ABSOLUTE || box->style.position == CSS_POSITION_FIXED;
+	/* Only a box out of the flow has valid anchor queries; another box's take their fallbacks. */
 	for (slot = 0; slot < CSS_ANCHOR_SLOTS; slot++) {
 		/* The length of the slot. */
 		switch (slot) {
@@ -133,7 +131,7 @@ layout_anchor_resolve(
 		fixed.percent = 0.0f;
 		fixed.pixels = 0.0f;
 		fixed.pure = 0;
-		if (positioned && box->style.anchor[slot] != NULL)
+		if (box->style.anchor[slot] != NULL)
 			valid = anchor_value(tree, box, box->style.anchor[slot], slot, start, size, &value, &fixed);
 		length->value = layout_to_px(value);
 		length->offset = 0;
@@ -279,6 +277,10 @@ anchor_query(
 	int side;
 	int far;
 	int found;
+
+	/* A query is valid only for a box positioned absolutely or fixed. */
+	if (box->style.position != CSS_POSITION_ABSOLUTE && box->style.position != CSS_POSITION_FIXED)
+		return 0;
 
 	/* The anchor. */
 	vertical = slot == CSS_ANCHOR_SLOT_TOP || slot == CSS_ANCHOR_SLOT_BOTTOM || slot == CSS_ANCHOR_SLOT_HEIGHT ||
