@@ -2,7 +2,7 @@
 
 # ws335-p009: Ed25519
 
-Status: 実装済み・試験 PASS（2026-11-02 01:20 Sonnet q1876-i01。cleared は Q1。依存: p008）
+Status: cleared（2026-11-02 01:21 Q1、main 1331cb45b。main で test-ed25519 7289・ct-ed25519 PASS。k を L で reduce しない選択は RFC 8032 5.1.7 の文面どおりとして認めた）。前: 実装済み・試験 PASS（2026-11-02 01:20 Sonnet q1876-i01。cleared は Q1。依存: p008）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

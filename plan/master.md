@@ -33,7 +33,7 @@
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
 | P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
 | P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
-| Sonnet ×3 | q1876・q1877・q1882 | [WS335](ws335/ws.md) p009 Ed25519・p016 DER と PEM・p027 鍵の schedule（p025 は cleared） |
+| Sonnet ×3 | q1877・q1882・q1885 | [WS335](ws335/ws.md) p016 DER と PEM・p027 鍵の schedule・p026 record の保護（p009 Ed25519 は cleared） |
 | Sonnet | q1883 `s-ws324-p006c` | [WS324](ws324/ws.md) p006c: H.265 の解析の rps・ps（p006b は cleared） |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
@@ -111,7 +111,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-390 · q1885 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-390 · q1886 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
