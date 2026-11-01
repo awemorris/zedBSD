@@ -104,6 +104,8 @@ exact_copy(
 	}
 	if (size > 0U)
 		memcpy(copy, bytes, size);
+	else
+		copy[0] = 0;
 	return copy;
 }
 
