@@ -409,7 +409,7 @@ def check_platform_drivers() -> None:
     too (2026-10-15 user: the Pi 4 video code is on by default)."""
     categories = ["Disk", "Input", "GPU", "Audio", "Ethernet", "WiFi",
                   "Bluetooth", "Camera", "USB", "Platform"]
-    platforms = ("amd64", "i386", "pc98", "rpi4", "odroid-c5", "sun4u", "x68k")
+    platforms = ("amd64", "i386", "pc98", "rpi4", "rpi5", "odroid-c5", "sun4u", "x68k")
     shared = None
     for platform in platforms:
         groups = menu.driver_groups(platform)
