@@ -95,8 +95,8 @@ underscore, or hyphen characters, and `command` must be an absolute path.
 | `notify-timeout` | Readiness deadline in seconds, from 1 through 300; default 10 |
 | `required` | Parsed as current metadata; it does not yet make all boot failures fatal |
 | `replaces` | Another service this one stands in for (ws035-p098): while this one is enabled the other is not started (it shows as skipped); when this one ends and is not started again, the other starts.  Not while the system is stopping.  The graphical login's `greeter` replaces `getty_console` |
-| `desktop` | `yes` for the service that shows the desktop (the graphical login, `greeter`).  In a boot that shows the desktop first, the late services wait while it runs until it has taken the display; see [Boot order](#boot-order) |
-| `late` | `yes` for a service the desktop does not need at once (the network, sound, Bluetooth, removable media, sshd, cron, the clock, the home directories' maker `homes`).  A boot that shows the desktop first starts it after the others and does not hold them for it; see [Boot order](#boot-order) |
+| `desktop` | `yes` for the service that shows the desktop (the graphical login, `greeter`).  In a boot that puts the login first, the late services wait while it runs until it has taken the display; see [Boot order](#boot-order) |
+| `late` | `yes` for a service the login does not need at once (the network, sound, Bluetooth, removable media, sshd, cron, the clock, the home directories' maker `homes`).  A boot that puts the login first starts it after the others and does not hold them for it; see [Boot order](#boot-order) |
 
 Daemons must remain in the foreground. Init tracks their child PID directly;
 pidfiles and double-forking are not the authority. `service reload` reloads the
@@ -105,16 +105,18 @@ boot.
 
 ## Boot order
 
-A boot whose parameters ask for the graphical login and keep the kernel's
-messages off the screen (`login=graphical` and `kmsg=quiet`, which init reads
-as `sysctl kern.boot.login` and `kern.boot.kmsg`) shows the desktop first.
+Every boot but the debug boot puts the login first: the graphical login
+(`login=graphical`) or the console's getty (`login=console`, or no `login=`),
+whichever the boot shows, comes before the network and the other late
+services, so that the machine can be used as soon after power-on as it can.
 Init starts the enabled services in two rounds:
 
 1. Every service that is not `late`, in dependency order.  A late service
    named in `after=` is not waited for in this round; a service that
    `requires=` a late one waits for the second round with it.  The graphical
-   login (`greeter`, ordered after `syslogd` and `networking`) therefore
-   starts as soon as `syslogd` has, without waiting for the network.
+   login (`greeter`) and the console's getty (`getty_console`), both ordered
+   after `syslogd` and `networking`, therefore start as soon as `syslogd`
+   has, without waiting for the network.
 2. Everything still waiting, the late services included, in dependency
    order.  This round waits first for the desktop to take the display, so
    that the late services do not compete with its start for the disk and
@@ -123,12 +125,18 @@ Init starts the enabled services in two rounds:
    mark at each boot) starts the round when the mark is there, when no
    `desktop` service runs any more (the login gave the screen to the
    console), or after 30 seconds.  Meanwhile init collects the services that
-   end and answers its control socket.
+   end and answers its control socket.  A boot whose login is the console's
+   getty has no desktop to wait for and starts this round at once; what the
+   late services and init write on the console then comes after the login
+   prompt.
 
-Any other boot is a debug boot -- the kernel's messages on the console
-(`kmsg=console`, or Ctrl held at the loader) or the console's login
-(`login=console`, or Shift) -- and starts all services in one round, in the
-order their dependencies alone give, so the network is up before the login.
+The debug boot is the one that asks for the kernel's messages on the console
+(`kmsg=console`, which the loader hands over when Ctrl is held; on the
+Raspberry Pi, written into `cmdline.txt`).  It starts all services in one
+round, in the order their dependencies alone give, so the network is up
+before the login.  A boot that gives no `kmsg=` (the Raspberry Pi's command
+line) or `kmsg=quiet` is not a debug boot, and neither is the console's
+login alone (`login=console`, or Shift held at the loader).
 
 Init writes when it started each service, when a daemon was running and when
 a oneshot ended to `/var/log/init.log`, a new file each boot.  Each line is
@@ -137,10 +145,10 @@ service or step it is about:
 
 ```text
 5.413 init started
-5.425 order desktop-first
+5.425 order login-first
 5.426 start greeter
 5.427 running greeter
-5.527 round desktop-started
+5.527 round login-started
 9.044 desktop shown
 9.051 start networkd
 5.544 running networkd
