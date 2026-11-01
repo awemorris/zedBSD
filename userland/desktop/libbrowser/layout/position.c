@@ -1396,6 +1396,29 @@ placed_x:
 			x = box->anchor_clamp[0] + box->margin[CSS_LEFT];
 	}
 
+	/* Auto margins down take the room between both insets for a box of a height (centering it when both are auto). */
+	if (has_top && has_bottom && box->style.height.unit != CSS_UNIT_AUTO && !position_aligned(box->style.align_self) &&
+	    (box->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO || box->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)) {
+		layout_unit free_room;
+		int auto_top;
+		int auto_bottom;
+
+		auto_top = box->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO;
+		auto_bottom = box->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO;
+		free_room = area_height - top - bottom - position_outer_height(box) - (auto_top ? 0 : box->margin[CSS_TOP]) -
+		    (auto_bottom ? 0 : box->margin[CSS_BOTTOM]);
+		if (free_room < 0)
+			free_room = 0;
+		if (auto_top && auto_bottom) {
+			box->margin[CSS_TOP] = free_room / 2;
+			box->margin[CSS_BOTTOM] = free_room - free_room / 2;
+		} else if (auto_top) {
+			box->margin[CSS_TOP] = free_room;
+		} else {
+			box->margin[CSS_BOTTOM] = free_room;
+		}
+	}
+
 	/* Vertically: from the top, from the bottom, or where it would have been. */
 	if (has_top && has_bottom && box->style.height.unit != CSS_UNIT_AUTO && position_aligned(box->style.align_self)) {
 		y = position_align(box->style.align_self, area_top + top, area_top + area_height - bottom,
