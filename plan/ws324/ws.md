@@ -16,7 +16,7 @@
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [ws324-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | in-progress（P1 q1854。design.md 第 2 版、review 1 の反映済み、Q1 の受け入れ待ち） | （WS318 を待たない、2026-11-01 ユーザー） |
+| [ws324-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | cleared（2026-11-01 23:08 Q1、main a0fd88ee8。design.md 第 2 版、review 31 件の反映） | （WS318 を待たない、2026-11-01 ユーザー） |
 
 ### 実装の Phase の案（2026-11-01 P1、[design.md](design.md) 第 2 版 §15。Q1 の受け入れの後に表へ）
 
@@ -41,6 +41,15 @@
 | p014 | 実機の受け入れ | p007、p011〜p013 |
 | p015 | 規約の全文の見直し | p014 |
 | p016 | （Q324-6 が A の時）libmedia の道の RTX での確かめ | WS318 p020・p022、p014 |
+
+## Q1 の判断（2026-11-01 23:08、p001 の問い）
+
+- Q324-1: H.265 の解析は、WS318 p016〜p019 の範囲を標準廉価実装手順で先に作る（p006a の設計と Sonnet の実装）。libmedia の build と runtime には繋がない。WS318 の ws.md にその旨を書く。
+- Q324-2: Vulkan の header を 2 段で更新し、段 2 で vulkan_core.h を 1.4.309 で作り直す事を許可する（2026-10-30 ユーザーの Q318-3 の A の範囲。toolchain の変更として Q1 が sysroot の作り直しを行う）。
+- Q324-3: libvulkan の H.265・encode の転送、capset の bit、命令の番号は WS324 が持つ（Q322-4 の「先に着手する方」）。WS322 の p005・p010 の libvulkan の部分は WS324 の物を使う。capset の bit は WS324 の案（2 = H.265 decode、3 = H.264 encode、4 = H.265 encode）に WS322 を揃える。
+- Q324-5: encode は decode と同じ queue family 0 に置く。
+- Q324-4（NVENC の関門の時間の上限）と Q324-6（libmedia の道の確かめを完了の条件に残すか）はユーザーに聞く。
+- ws.md の「ユーザーの決定（2026-10-30、原文）」の節の扱いは、既にある原文の扱いがユーザーの未決（master.md）なので、今は変えない。
 
 ## Resume point
 

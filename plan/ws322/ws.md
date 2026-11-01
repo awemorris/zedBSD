@@ -58,6 +58,10 @@
 - （2026-11-01 21:41）Q322-3: ユーザーから、GPU で直に表示する道（WS318 の p006b・p007a・p009、decode の絵を CPU に読み出さずに表示する）を先に実装する、という趣旨の答えを受けた。WS322 の受け入れ（p012）はその道の上で決め直す。
 - （2026-11-01 21:42）上の Q322-3 の前提を直した: GPU で直に表示する道は WS243 で Video Player に既にあった（VP_GPU_PRESENT、RTX で 1080p60、arm64・amd64 で有効）。ユーザーから、WS318 を始めず、WS322 の p003・p004 で VF2 をこの既存の道に載せる（riscv64 の VP_GPU_PRESENT、PowerVR の NV12 の export・import と plane の view）、という趣旨の答えを受けた。受け入れはこの道での再生で決める。
 
+## WS324 との揃え（2026-11-01 23:08 Q1）
+
+- libvulkan の H.265・encode の転送、capset の bit、命令の番号は WS324 が持つ（Q324-3）。p005・p010 の libvulkan の部分は WS324 の物を使い、capset の bit は 2 = H.265 decode、3 = H.264 encode、4 = H.265 encode に揃える。
+
 ## Resume point
 
 - 2026-11-01 P2（q1852-i01）: p002 を実装し VF2 で probe した（[phase002](phase002/phase.md)）。次: Q1 の受け入れ、design.md の §7.3・§7.5・§9.2・R11・R13 の直し（p002 の観測を反映、後の Queue）、p003・p004。

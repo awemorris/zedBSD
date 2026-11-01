@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | kernel-and-driver-designer | ws324 p001 RTX の video の設計 (q1854-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | in-progress（2026-11-01 22:10 起動）。前の agent/p1-ws291p026 は未 merge | 7973c156f（main） |
+| P1 | kernel-and-driver-designer | ws324 p006a H.265 の解析の設計 (q1864-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | in-progress（2026-11-01 23:08 起動） | 210049ccf（merge a0fd88ee8） |
 | P2 | phase-runner-high | ws322 p003 PowerVR の NV12・export (q1863-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 22:37 起動） | da223ef78（merge 87b7bc034） |
 | P3 | phase-runner-high | ws291 p027 の回帰 amd64・Venus (q1859-i01) | `/home/awe/zedBSD-worktrees/p3-ws291reg` / `agent/p3-ws291reg`（候補 60cf76c13） | in-progress（2026-11-01 22:16 起動、10.0.10.3） | d32bcb9f5（merge 9b865b038） |
 | P5 | phase-runner-high | ws334 p028 libkeiland の Win32 その 1 (q1862-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 22:29、同じ P5 に続けて頼んだ） | 84efc4b2d（merge b72145b7a） |
