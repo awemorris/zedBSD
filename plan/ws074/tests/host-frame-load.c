@@ -357,8 +357,8 @@ load_http(
 	if (error != 0)
 		return error;
 
-	/* Observe exact supported load counts and unsupported foreign opaque content refusal. */
-	error = load_assert(page, "loads.v===1&&loads.o===1&&loads.h===1&&loads.x===1&&loads.w===1&&loads.c===1&&loads.b===1&&loads.p===0&&loads.f===0&&fs.f.getSVGDocument()===null&&fs.p.getSVGDocument()===null;", "exact supported load counts and unsupported foreign opaque content refusal");
+	/* Observe exact supported load counts, and a frame redirected to another origin loading while its Document stays out of reach. */
+	error = load_assert(page, "loads.v===1&&loads.o===1&&loads.h===1&&loads.x===1&&loads.w===1&&loads.c===1&&loads.b===1&&loads.p===0&&loads.f===1&&fs.f.getSVGDocument()===null&&fs.f.contentDocument===null&&fs.p.getSVGDocument()===null;", "exact supported load counts and foreign Document refusal");
 	if (error != 0)
 		return error;
 

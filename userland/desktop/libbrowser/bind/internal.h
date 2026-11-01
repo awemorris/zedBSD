@@ -501,6 +501,7 @@ int bind_frame_location(struct bind_window *window, int part, struct wb_buffer *
 int bind_frame_sandboxed(struct dom_element *element);
 int bind_frame_scripts_allowed(struct dom_element *element);
 int bind_window_view(struct bind_window *viewer, struct bind_window *target, vm_value *result);
+int bind_window_reachable(struct bind_window *viewer, struct bind_window *target);
 int bind_frame_install(struct bind_window *parent, struct dom_element *element, struct dom_document *document, struct bind_window **window);
 int bind_run_inline_script(struct bind_window *window, struct dom_element *script);
 int bind_reflection_base(struct dom_document *document, struct net_url *base);
