@@ -458,7 +458,7 @@ phase.md の「判断を待つ点」に背景・用語・選択肢・得失・�
 | Q322-4 | libvulkan の H.265 と encode の転送をどの WS が持つか（WS322 と WS319） | 先に着手する方。WS322 が先なら p005・p010 | Q1 |
 | Q322-5 | ws.md の題の「H.264 encode は … libavcodec」を「独自の software（WS329）」に直す | 直す（2026-11-01 の Q318-2 に合わせる） | Q1（master.md の行も） |
 | Q322-6 | 実装の Phase（p002〜p004）も WS318 の completed の前に始めてよいか（2026-11-01 の前倒しが明示したのは p001） | A: 始める（H.264 decode は今の libvulkan・libmedia で確かめられ、WS318 と file が重ならない） | Q1（ユーザーの指示の範囲の読み。違えばユーザーへ） |
-| Q322-7 | libmedia の DISTINCT の readback の道（どの実の driver でも未走行）に bug が出た時、WS322 の中で直すか、WS318 に渡すか | （Q1 の答え A）第 3 版で COINCIDE に改めたので、この道を使わず前提が無くなった | Q1（済） |
+| Q322-7 | libmedia の DISTINCT の readback の道（どの実の driver でも未走行）に bug が出た時、WS322 の中で直すか、WS318 に渡すか | （Q1 の答え A）第 3 版で COINCIDE に改めたので（2026-11-01 Q1 が認めた）、この道を使わず前提が無くなった | Q1（済） |
 
 ## 19. HAL
 

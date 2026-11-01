@@ -36,7 +36,7 @@
 | --- | --- | --- |
 | p002 | VF2 の VPU の glue と Wave5 の core の boot、firmware の package（wave511）、実機の probe | p001、Q322-1、Q322-6、VF2 の板 |
 | p003 | PowerVR の executor: NV12 の image・plane の view・query pool・capset・queue family | p001 |
-| p004 | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、vkvideo-probe の DISTINCT） | p002、p003、Q322-7 |
+| p004 | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor。第 3 版で COINCIDE にしたので vkvideo-probe の DISTINCT は不要） | p002、p003 |
 | p005 | libvulkan の H.265 decode の転送 | WS318 p011a、Q322-4 |
 | p006 | H.265 decode | p004、p005 |
 | p007 | 速さ（非同期、SLC、命令の queue） | p004 |
@@ -54,6 +54,7 @@
 - Q322-5 題の「H.264 encode は libavcodec」を「独自の software（WS329）」に直した（WS318 の Q318-2）。
 - Q322-6 実装の Phase も WS318 の completed を待たずに始める（A）。2026-11-01 のユーザーの「P2 で WS322 を実行する」は WS 全体の実行と読む。
 - Q322-7 libmedia の DISTINCT の道に bug が出たら、WS322 p004 の中で最小に直し、WS318 の担当に知らせる（A）。
+  - （2026-11-01 Q1）design.md 第 3 版で D2 を DPB_AND_OUTPUT_COINCIDE に改めるのを認めた（pool から GPU の転送で写すので宛先はどの image でもよく、libmedia を変えずに Video Player の GPU の道に載る）。DISTINCT の道を使わないので Q322-7 の前提と vkvideo-probe の DISTINCT の対応は要らなくなった。
 - （2026-11-01 21:41）Q322-2: ユーザーから、Wave420L の参考の source は file の SPDX の BSD-3-Clause を採って使う（A）、という趣旨の答えを受けた。値と手順だけを出典つきで使い、code・comment・構造・名前は写さない。食い違いは記録に残し、権利者の異議があれば encode の部分を外す。
 - （2026-11-01 21:41）Q322-3: ユーザーから、GPU で直に表示する道（WS318 の p006b・p007a・p009、decode の絵を CPU に読み出さずに表示する）を先に実装する、という趣旨の答えを受けた。WS322 の受け入れ（p012）はその道の上で決め直す。
 - （2026-11-01 21:42）上の Q322-3 の前提を直した: GPU で直に表示する道は WS243 で Video Player に既にあった（VP_GPU_PRESENT、RTX で 1080p60、arm64・amd64 で有効）。ユーザーから、WS318 を始めず、WS322 の p003・p004 で VF2 をこの既存の道に載せる（riscv64 の VP_GPU_PRESENT、PowerVR の NV12 の export・import と plane の view）、という趣旨の答えを受けた。受け入れはこの道での再生で決める。
