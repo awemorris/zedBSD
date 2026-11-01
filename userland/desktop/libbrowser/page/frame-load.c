@@ -1126,7 +1126,7 @@ frame_load_inline(
 		if (error == 0)
 			error = net_url_serialize(&parsed, 0, &location);
 		if (error == 0)
-			error = page_fetch(page->base, wb_buffer_string(&location), &bytes, NULL);
+			error = page_fetch(page_cookies(page), page->base, wb_buffer_string(&location), &bytes, NULL);
 		if (error == 0)
 			error = wb_utf8_to_units(bytes.data, bytes.length, &units);
 		if (error == 0)
