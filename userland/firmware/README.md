@@ -20,7 +20,7 @@ its drivers are when the board is chosen; the licenses are still accepted
 when the image is built.
 
 The entries are `rtl8822b/`, `intelax211/`, `intelbt/`, `i915/`, `brcmbt/`,
-`bcm43455/`, `nvidia-gsp/`, `powervr/`, `mali-csf/`, and `amlogic-s7d/`; future
+`bcm43455/`, `nvidia-gsp/`, `powervr/`, `wave511/`, `mali-csf/`, and `amlogic-s7d/`; future
 RTL8822C support owns a separate `rtl8822c/` entry. RTL8822B uses its frozen GitHub
 acquisition mirror. AX211 uses the official `linux-firmware` tag `20260410`
 dereferenced commit and installs the exact `-89.ucode`, PNVM, complete Intel
@@ -109,6 +109,19 @@ row is added (plan/ws269, p004, on by default for the VisionFive 2), its
 Until then the package is chosen in the Firmware menu. The license is accepted
 when the image is built. The kernel reads the file from the root file system, which is built from the
 same tree for every root image.
+`wave511/` (package `wave511-firmware`) installs the Chips&Media Wave511
+video decoder firmware of the VisionFive 2's StarFive JH7110 (revision
+0x0002d46a, which the decoder's identity query reports), which the Wave5
+decoder driver boots (`CONFIG_DRIVER_VF2_VPU`):
+`wave511/chagall.bin`, together with the `LICENSE.txt` beside it upstream and
+the manifest. The upstream is StarFive's `github.com/starfive-tech/soft_3rdpart`,
+branch `JH7110_VisionFive2_devel`, pinned to commit
+`b60da16be1b36453aa46599889c28310fd148fb8`, directory `wave511/firmware/`.
+`LICENSE.txt` permits redistribution and use in binary form with its notice,
+conditions and disclaimer. **It forbids reverse engineering, decompilation and
+disassembly: do not disassemble this firmware.** The driver uses only the
+firmware's command replies and register values. Selecting the driver selects
+the package (`config/drivers/firmware.list`).
 `mali-csf/` (package `mali-csf-firmware`) uses the official linux-firmware
 commit above and installs `arm/mali/arch10.8/mali_csffw.bin`, the program of the
 Command Stream Frontend of the ODROID-C5's Mali-G310, under the arch 10.8,
