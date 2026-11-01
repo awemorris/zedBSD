@@ -29,7 +29,7 @@
 | P1 | q1838 `p1-ws291p026` | [WS291](ws291/ws.md) p026: RTX の push buffer を記録の時に組む設計（10.0.10.3） |
 | P2 | q1845 `p2-ws322` | [WS322](ws322/ws.md) p001: VF2 の VPU（Wave511 の H.264・H.265 decode、Wave420L の H.265 encode）を Vulkan Video にする調べと設計（ユーザーの指示で WS318 を待たない）。前の q1839（WS291 p020）は cleared |
 | P3 | q1840-i02 `p3-ws291p021`（20:45 再開。i01 は 20:42 に返却） | [WS291](ws291/ws.md) p021: Pi 5 の V3D の model の 50 fps（c74 49.2〜49.9 の境から） |
-| P4 | q1842 `p4-bug387`（q1841 は 9616367f5 で返却、build だけ） | [BUG-387](bugs/BUG-387.md): VF2・Pi 5 で console から Wayland の desktop を起動できない（実機の窓は Q1 が P2・P3 から取る） |
+| P4 | — | 返却。[BUG-387](bugs/BUG-387.md) は 21:05 に fixed（main 1692b16f5）。残り: CI の Pi 5 の image の graphical login の起動の確かめ（Pi 5 が空いた時）。次の Bug の割当を待つ |
 | P5 | q1847 `p5-ws334b` | [WS334](ws334/ws.md) p023: Windows 版のブラウザ、instance と API v4（p025 は 20:57 に cleared、次は p026） |
 | P6 | q1846 `p6-ws335b` | [WS335](ws335/ws.md) p005: libssl-compat・libcrypto-compat の AES-GCM（p004 AES は 20:55 に cleared） |
 | P7 | q1848 `p7-vf2desk` | VF2 の desktop の描画の計測だけ（VF2 が P4 から戻った後） |

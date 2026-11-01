@@ -10,7 +10,7 @@
 | P1 | [WS291](ws291/ws.md) p026 | GPU の driver の描画の速さ（RTX 2070） | push buffer を記録の時に組む設計（q1838） | 設計 → 敵対的レビュー → 実装は別の Queue |
 | P2 | [WS322](ws322/ws.md) p001 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | 調べと設計（q1845） | 設計 → レビュー → 実装の Phase の案。板は P4 の後 |
 | P3 | [WS291](ws291/ws.md) p021 | GPU の driver の描画の速さ（Pi 5 の V3D） | dcache clean を省く直し（6d4ef0df9）を Pi 5 で計測（q1840-i02、20:45 再開） | 50 fps を安定して超えたら判定の材料 |
-| P4 | [BUG-387](bugs/BUG-387.md) | VF2・Pi 5 で console から Wayland の desktop を起動できない | Pi 5・VF2 とも PASS（video の member は wayland が 1920x1080 で起動、member でない人は新しい message で拒否）。報告を待つ | merge。CI の Pi 5 image の graphical login の確かめ（約 15 分）は Pi 5 が空いた時 |
+| P4 | — | Bug の修正の担当 | 返却（21:05）。BUG-387 は fixed（Pi 5・VF2 の実機で PASS） | 次の Bug。CI の Pi 5 の image の graphical login の確かめは Pi 5 が空いた時 |
 | P5 | [WS334](ws334/ws.md) p023 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | instance と API v4（q1847）。p025 は cleared（script の core が単体の archive で link でき、Wine で host と bytes 一致） | p026（libmedia の Windows）へ |
 | P6 | [WS335](ws335/ws.md) p005 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | AES-GCM（q1846）。p004 AES は cleared（28516 checks） | p007 整数の算術・p009 Ed25519 へ |
 | P7 | — | VF2 の desktop の描画の速さ | 計測だけ（q1848、21:03 起動、VF2） | 計測の要約を返して終了 |
@@ -35,6 +35,7 @@
 
 | Bug | 中身 | 状態 |
 | --- | --- | --- |
+| [BUG-387](bugs/BUG-387.md) | VF2・Pi 5 で console から Wayland の desktop を起動できない | fixed（21:05）。GPU の node を root:video 0660 に、既定の利用者と Settings で作る人を video に、CI の Pi 5 は GPU on・graphical login |
 
 ## ユーザーの判断を待つ事
 
