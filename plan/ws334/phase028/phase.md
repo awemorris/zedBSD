@@ -103,4 +103,3 @@ Q1 への問い:
 2. `ui/text.c` の `O_BINARY`・data の directory の直しは p029 でよいか（Q1 の判断の通りと理解）。
 
 消してよい物（Q1 へ）: `build/tmp/p028-base`（基点の展開と試験の出力）、`build/tmp/p028`・`build/tmp/p028-*`（Windows の試しの build・log）、`build/tmp/p028-gui`・`build/tmp/p028-dbg`（手での試しと path の調べの program）、`build/tmp/ws334-wine-build`・`build/tmp/ws334-wine-run*`・`build/tmp/ws334-keiland-*`（script の出力）、`build/tmp/ws334-wine-gui`（Wine の GUI の prefix、次の試験でも使える）、`build/tmp/x.res.o`・`build/tmp/common-list.txt`。
-
