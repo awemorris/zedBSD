@@ -223,7 +223,7 @@ endif
 AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/work-records.c src/drivers/gpu/nvrtx/work.c src/drivers/gpu/nvrtx/recover.c
 # The video decoder's and encoder's channels (nvrtx.video=1).
 AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/nvdec-records.c src/drivers/gpu/nvrtx/nvdec.c
-AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/nvenc-records.c src/drivers/gpu/nvrtx/nvenc.c
+AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/nvenc-records.c src/drivers/gpu/nvrtx/nvenc.c src/drivers/gpu/nvrtx/nvenc-test.c
 # P9p: the GPU's performance state, and its boost with nvrtx.boost=1 (ws241-p001).
 AMD64_NVRTX_SOURCES += src/drivers/gpu/nvrtx/perf.c
 # P8c: the GPU device, its display (events, refresh, cursor) and blob sharing (ws037-p006, nvrtx.resident=1).

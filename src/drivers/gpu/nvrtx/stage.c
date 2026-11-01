@@ -68,6 +68,9 @@
  *                         is also a renderer that takes the Vulkan
  *                         protocol's commands and runs them on the work
  *                         channel, which it implies
+ *   nvrtx.nvenc.test=1    with nvrtx.video=1, the video encoder's
+ *                         self-test after its channel (nvenc-test, a test):
+ *                         two pictures encoded and what came back logged
  */
 
 #include <stdarg.h>
@@ -119,6 +122,9 @@
 
 /* The whole token that asks for the video decoder's channel. */
 #define STAGE_VIDEO_TOKEN		"nvrtx.video=1"
+
+/* The whole token that asks for the video encoder's self-test. */
+#define STAGE_NVENC_TEST_TOKEN		"nvrtx.nvenc.test=1"
 
 /* The whole token that breaks the first copy-engine clear of the VRAM on purpose. */
 #define STAGE_CLEAR_FAULT_TOKEN		"nvrtx.clear.fault=1"
@@ -389,6 +395,24 @@ nvrtx_stage_video_wanted(void)
 		return true;
 
 	/* Without it the GPU device decodes no video. */
+	return false;
+}
+
+/*
+ * Reports whether the boot asked for the video encoder's self-test
+ * (nvrtx.nvenc.test=1).
+ */
+bool
+nvrtx_stage_nvenc_test_wanted(void)
+{
+	bool present;
+
+	/* Looks for nvrtx.nvenc.test=1 among the boot parameters. */
+	present = stage_token_present(STAGE_NVENC_TEST_TOKEN);
+	if (present)
+		return true;
+
+	/* Without it the encoder encodes nothing at boot. */
 	return false;
 }
 

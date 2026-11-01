@@ -735,6 +735,12 @@ struct nvrtx_gpu {
 	uint32_t rc_notices;
 	uint32_t rc_last_chid;
 	uint32_t rc_last_type;
+	/*
+	 * Set by a diagnostic (the encoder's self-test) so the reads of the
+	 * GSP's messages show the prints and crash records they otherwise
+	 * drop; read under rpc_lock.
+	 */
+	int rpc_show_events;
 
 	/* The first address space and channel. */
 	struct nvrtx_engine_state engine;

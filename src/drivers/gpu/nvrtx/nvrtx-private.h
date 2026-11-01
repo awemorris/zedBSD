@@ -477,6 +477,13 @@ bool
 nvrtx_stage_video_wanted(void);
 
 /*
+ * Reports whether the boot asked for the video encoder's self-test
+ * (nvrtx.nvenc.test=1).
+ */
+bool
+nvrtx_stage_nvenc_test_wanted(void);
+
+/*
  * Reports whether the boot asked for the first copy-engine clear of the
  * VRAM to be broken on purpose (nvrtx.clear.fault=1).
  */

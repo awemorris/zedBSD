@@ -153,11 +153,9 @@ static int nvenc_context(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc)
 static int nvenc_object(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc);
 static int nvenc_first(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc);
 static int nvenc_once(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc, uint32_t push_at, size_t length, const char *what);
-static uint32_t nvenc_notices(struct nvrtx_gpu *gpu);
-static void nvenc_report_notices(struct nvrtx_gpu *gpu, uint32_t before);
 static int nvenc_submit(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc, uint64_t push_va, size_t length, uint32_t *fence);
 static int nvenc_ring_put(struct nvrtx_gpu *gpu, struct nvrtx_nvenc_state *nvenc, uint64_t va, size_t length);
-static int nvenc_wait(struct nvrtx_nvenc_state *nvenc, uint32_t fence, uint32_t timeout_us);
+static int nvenc_wait(struct nvrtx_nvenc_state *nvenc, uint32_t fence, uint32_t timeout_us, const volatile uint32_t *watch, uint32_t sentinel, uint64_t *changed_us);
 static uint32_t nvenc_word(const struct nvrtx_nvenc_state *nvenc, uint32_t at);
 static uint64_t nvenc_round(uint64_t value, uint64_t boundary);
 
@@ -196,7 +194,7 @@ nvrtx_nvenc_start(
 	gpu->nvenc = nvenc;
 
 	/* The channel errors reported before the bring-up are not its own. */
-	before = nvenc_notices(gpu);
+	before = nvrtx_nvenc_notices(gpu);
 
 	/* The encoder's class, runlist and context size. */
 	error = nvenc_find(gpu, nvenc);
@@ -222,7 +220,7 @@ nvrtx_nvenc_start(
 		error = nvenc_first(gpu, nvenc);
 
 	/* Reads what the GSP sent meanwhile and counts the channel errors, whether the bring-up passed or not. */
-	nvenc_report_notices(gpu, before);
+	nvrtx_nvenc_report_notices(gpu, before, "nvenc-channel");
 
 	/* Propagates the failure of a step. */
 	if (error != 0)
@@ -353,6 +351,33 @@ nvrtx_nvenc_release(
 }
 
 /*
+ * Remakes the encoder's channel after one that stopped on an error: the
+ * old channel's objects are freed as by the stop, its memory is left (the
+ * engine may still name it; it is not given back before the unload), and
+ * nvenc-channel runs again.  For the encoder's self-test, which tries
+ * values the engine may refuse.
+ */
+int
+nvrtx_nvenc_restart(
+	struct nvrtx_gpu *gpu)
+{
+	int error;
+
+	/* Frees the stopped channel's objects and forgets its state, whose memory stays. */
+	nvrtx_nvenc_stop(gpu);
+	gpu->nvenc = NULL;
+	nvrtx_stage_mark("nvenc-channel: the stopped channel is freed, its memory left; the channel is made again");
+
+	/* Makes the channel again. */
+	error = nvrtx_nvenc_start(gpu);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the new channel takes work. */
+	return 0;
+}
+
+/*
  * Reports whether the GPU has an encoder that takes work.  Any context,
  * no lock (a stop may follow at once; nvrtx_nvenc_run() refuses then).
  */
@@ -408,6 +433,34 @@ nvrtx_nvenc_run(
 	size_t length,
 	uint32_t timeout_us)
 {
+	int error;
+
+	/* The run with no word watched. */
+	error = nvrtx_nvenc_run_watched(gpu, push_va, length, timeout_us, NULL, 0U, NULL);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the encoder has finished the segment. */
+	return 0;
+}
+
+/*
+ * Runs one push buffer segment as nvrtx_nvenc_run() does, and while it
+ * waits watches a word the encoder writes: changed_us gets the time from
+ * the doorbell to the first look that saw the word differ from sentinel
+ * (UINT64_MAX when it never did).  watch may be NULL (then nothing is
+ * watched).  For the encoder's self-test.
+ */
+int
+nvrtx_nvenc_run_watched(
+	struct nvrtx_gpu *gpu,
+	uint64_t push_va,
+	size_t length,
+	uint32_t timeout_us,
+	const volatile uint32_t *watch,
+	uint32_t sentinel,
+	uint64_t *changed_us)
+{
 	struct nvrtx_nvenc_state *nvenc;
 	uint32_t fence;
 	uint32_t seen;
@@ -438,7 +491,7 @@ nvrtx_nvenc_run(
 
 	/* Waits for the segment's fence. */
 	if (error == 0)
-		error = nvenc_wait(nvenc, fence, timeout_us);
+		error = nvenc_wait(nvenc, fence, timeout_us, watch, sentinel, changed_us);
 
 	/* An encoder that did not finish is taken out of use, so no later work queues behind it. */
 	if (error == ETIMEDOUT)
@@ -458,6 +511,71 @@ nvrtx_nvenc_run(
 
 	/* Succeeded: the encoder has finished the segment. */
 	return 0;
+}
+
+/* Reports how many channel errors the GSP has reported so far. */
+uint32_t
+nvrtx_nvenc_notices(
+	struct nvrtx_gpu *gpu)
+{
+	uint32_t count;
+	int owned;
+
+	/* The record is written under the GSP's lock (a caller may hold it already). */
+	owned = mutex_owned(&gpu->rpc_lock);
+	if (owned == 0)
+		nvrtx_rpc_lock(gpu);
+
+	count = gpu->rc_notices;
+
+	if (owned == 0)
+		nvrtx_rpc_unlock(gpu);
+
+	/* Succeeded: the count. */
+	return count;
+}
+
+/*
+ * Reads the messages the GSP sent since the last call to it for a short
+ * time (a channel error is recorded and shown by the read), then marks
+ * under the stage's name how many channel errors came since before, and
+ * the newest one's channel and kind.
+ */
+void
+nvrtx_nvenc_report_notices(
+	struct nvrtx_gpu *gpu,
+	uint32_t before,
+	const char *stage)
+{
+	uint32_t count;
+	uint32_t chid;
+	uint32_t type;
+	size_t length;
+	int owned;
+
+	/* Reads the messages under the GSP's lock (a caller may hold it already); the read ends when its time is spent. */
+	owned = mutex_owned(&gpu->rpc_lock);
+	if (owned == 0)
+		nvrtx_rpc_lock(gpu);
+
+	if (gpu->reply != NULL)
+		(void)nvrtx_rpc_wait(gpu, NVENC_NO_FUNCTION, 0U, NVENC_NOTICE_US, &length);
+
+	count = gpu->rc_notices - before;
+	chid = gpu->rc_last_chid;
+	type = gpu->rc_last_type;
+
+	if (owned == 0)
+		nvrtx_rpc_unlock(gpu);
+
+	/* No channel error came. */
+	if (count == 0U) {
+		nvrtx_stage_mark("%s: no channel error was reported", stage);
+		return;
+	}
+
+	/* Counts them, with the newest. */
+	nvrtx_stage_mark("%s: %u channel errors, newest chid %u type %u", stage, (unsigned)count, (unsigned)chid, (unsigned)type);
 }
 
 /*
@@ -820,7 +938,7 @@ nvenc_once(
 
 	/* Waits for the fence once the submission took. */
 	if (error == 0)
-		error = nvenc_wait(nvenc, fence, NVENC_FIRST_FENCE_US);
+		error = nvenc_wait(nvenc, fence, NVENC_FIRST_FENCE_US, NULL, 0U, NULL);
 
 	mutex_unlock(&nvenc->lock);
 
@@ -833,70 +951,6 @@ nvenc_once(
 
 	/* Succeeded: the push buffer ran. */
 	return 0;
-}
-
-/* Reports how many channel errors the GSP has reported so far. */
-static uint32_t
-nvenc_notices(
-	struct nvrtx_gpu *gpu)
-{
-	uint32_t count;
-	int owned;
-
-	/* The record is written under the GSP's lock (a caller may hold it already). */
-	owned = mutex_owned(&gpu->rpc_lock);
-	if (owned == 0)
-		nvrtx_rpc_lock(gpu);
-
-	count = gpu->rc_notices;
-
-	if (owned == 0)
-		nvrtx_rpc_unlock(gpu);
-
-	/* Succeeded: the count. */
-	return count;
-}
-
-/*
- * Reads the messages the GSP sent since the last call to it for a short
- * time (a channel error is recorded and shown by the read), then marks
- * how many channel errors came since before, and the newest one's
- * channel and kind.
- */
-static void
-nvenc_report_notices(
-	struct nvrtx_gpu *gpu,
-	uint32_t before)
-{
-	uint32_t count;
-	uint32_t chid;
-	uint32_t type;
-	size_t length;
-	int owned;
-
-	/* Reads the messages under the GSP's lock (a caller may hold it already); the read ends when its time is spent. */
-	owned = mutex_owned(&gpu->rpc_lock);
-	if (owned == 0)
-		nvrtx_rpc_lock(gpu);
-
-	if (gpu->reply != NULL)
-		(void)nvrtx_rpc_wait(gpu, NVENC_NO_FUNCTION, 0U, NVENC_NOTICE_US, &length);
-
-	count = gpu->rc_notices - before;
-	chid = gpu->rc_last_chid;
-	type = gpu->rc_last_type;
-
-	if (owned == 0)
-		nvrtx_rpc_unlock(gpu);
-
-	/* No channel error came. */
-	if (count == 0U) {
-		nvrtx_stage_mark("nvenc-channel: no channel error was reported");
-		return;
-	}
-
-	/* Counts them, with the newest. */
-	nvrtx_stage_mark("nvenc-channel: %u channel errors, newest chid %u type %u", (unsigned)count, (unsigned)chid, (unsigned)type);
 }
 
 /*
@@ -979,22 +1033,38 @@ nvenc_ring_put(
 
 /*
  * Waits until the semaphore has reached a fence, up to a time measured in
- * microseconds: the first 2 ms without a pause, then between sleeps.
+ * microseconds: the first 2 ms without a pause, then between sleeps.  A
+ * watched word's first change is timed into changed_us (see
+ * nvrtx_nvenc_run_watched()).
  */
 static int
 nvenc_wait(
 	struct nvrtx_nvenc_state *nvenc,
 	uint32_t fence,
-	uint32_t timeout_us)
+	uint32_t timeout_us,
+	const volatile uint32_t *watch,
+	uint32_t sentinel,
+	uint64_t *changed_us)
 {
 	uint64_t start;
 	uint64_t spent;
 	uint32_t seen;
 	bool passed;
 
+	/* The watched word has not changed yet. */
+	if (changed_us != NULL)
+		*changed_us = UINT64_MAX;
+
 	/* Looks until the fence has passed or the time, measured, is spent. */
 	start = nvrtx_now_us();
 	for (;;) {
+		/* Notes when the watched word first differs from its sentinel. */
+		if (watch != NULL &&
+		    changed_us != NULL &&
+		    *changed_us == UINT64_MAX &&
+		    *watch != sentinel)
+			*changed_us = nvrtx_now_us() - start;
+
 		seen = nvenc_word(nvenc, NVENC_SEMAPHORE_AT);
 		passed = nvrtx_work_fence_passed(seen, fence);
 		if (passed)

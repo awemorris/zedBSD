@@ -155,6 +155,8 @@ nvrtx_gsp_start(
 	bool forced;
 	bool resident;
 	bool work_wanted;
+	bool test_wanted;
+	bool encoder;
 	int error;
 
 	/* Stops before layout when the boot asks. */
@@ -388,6 +390,18 @@ nvrtx_gsp_start(
 		error = nvrtx_nvenc_start(gpu);
 		if (error != 0)
 			nvrtx_stage_mark("nvenc-channel: no video encoder (%d); the boot goes on", error);
+	}
+
+	/* Runs the encoder's self-test when the boot asks and the encoder runs; a failure is logged and the boot goes on. */
+	test_wanted = nvrtx_stage_nvenc_test_wanted();
+	allowed = nvrtx_stage_allowed("nvenc-test");
+	encoder = nvrtx_nvenc_ready(gpu);
+	if (test_wanted &&
+	    allowed &&
+	    encoder) {
+		error = nvrtx_nvenc_test(gpu);
+		if (error != 0)
+			nvrtx_stage_mark("nvenc-test: the self-test failed (%d); the boot goes on", error);
 	}
 
 	/* Stops before display when the boot asks. */
