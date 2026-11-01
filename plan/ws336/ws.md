@@ -40,7 +40,7 @@
 | [p004](phase004/phase.md) | ssh-cipher・ssh-packet | cleared（2026-11-01 08:40 Q1、main a7cb17936。08:34 q1823-i03、Sonnet。run-unit all PASS、cipher 1064・packet 369168 checks、壊す確かめ 23 通り全部 FAIL。） | p003 | p003 経由 |
 | [p005](phase005/phase.md) | ssh-key | cleared（2026-11-01 09:04 Q1、main e41eccfc3。08:54 q1824-i03、Sonnet。run-unit all PASS、key 2771 checks、壊す確かめ 38 通り中 36 が FAIL・2 は同値の変更） | p003 | p003 経由 |
 | [p006](phase006/phase.md) | ssh-hostfile | 実装済み・試験 PASS（2026-11-01 09:32、run-unit all PASS、hostfile 736314 checks、壊す確かめ 48 通り中 46 が FAIL・2 は同値の変更。cleared は Q1） | p005 | p003 経由 |
-| [p007](phase007/phase.md) | ssh-kex | planned | p004 | p003 経由 |
+| [p007](phase007/phase.md) | ssh-kex | 実装済み・試験 PASS（2026-11-01 09:44、run-unit all PASS、kex 402989 checks、壊す確かめ 25 通り全部 FAIL。cleared は Q1） | p004 | p003 経由 |
 | [p008](phase008/phase.md) | ssh-transport（Opus） | planned | p005・p007 | p003 経由 |
 | [p009](phase009/phase.md) | ssh-auth | planned | p005 | p003 経由 |
 | [p010](phase010/phase.md) | ssh-ttymodes・ssh-channel | cleared（2026-11-01 06:19 Q1、main 290b99bab。ssh-ttymodes・ssh-channel 実装、run-unit ttymodes 20682・channel 1603651 checks PASS（Q1 再実行で確認）。phase.md と header の食い違い 2 件（長さの上限を越えた要求は header の通り OTHER、no-more-sessions は want_reply なら SUCCESS）は担当の判断を採り、header の comment の直しは規約の見直しの Phase で） | p002 | — |
