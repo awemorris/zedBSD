@@ -32,8 +32,12 @@
  * when luma_weight_lX_flag, delta -128..127, else 2^denom),
  * luma_offset[X][i] luma_offset_lX (-128..127, 0 when absent: the range
  * of high_precision_offsets_enabled_flag 0, the only one this parse
- * takes for weights, 7.4.7.3), chroma_weight[X][i][j] ChromaWeightLX and
- * chroma_offset[X][i][j] ChromaOffsetLX (7-58: from
+ * takes for weights, 7.4.7.3: a slice with a pred_weight_table() under
+ * an SPS whose high_precision_offsets_enabled_flag is 1 (range_extension
+ * bit 6) is ENOTSUP), chroma_weight[X][i][j] ChromaWeightLX
+ * ( 2^ChromaLog2WeightDenom + delta_chroma_weight_lX when
+ * chroma_weight_lX_flag, delta -128..127, else 2^ChromaLog2WeightDenom)
+ * and chroma_offset[X][i][j] ChromaOffsetLX (7-58: from
  * delta_chroma_offset_lX, -512..511, clipped to -128..127; the formula's
  * ( 128 * ChromaWeightLX ) >> ChromaLog2WeightDenom on a value that can
  * be negative is a floor division, h265sw.h).  Entries of lists and
@@ -210,8 +214,9 @@ int h265sw_slice_read_start(struct h265sw_slice_header *out, struct vcodec_bitre
  * gave a short copy (struct h265sw_nal complete 0) retries with the whole
  * NAL unit before it takes that as a broken segment.
  *
- * Returns 0; EINVAL for any violation or read error.  On error out is
- * partly written.
+ * Returns 0; EINVAL for any violation or read error; ENOTSUP for weights
+ * under high_precision_offsets_enabled_flag 1 (see struct
+ * h265sw_weights).  On error out is partly written.
  */
 int h265sw_slice_read_rest(struct h265sw_slice_header *out, struct vcodec_bitreader *bits, const struct h265sw_sps *sps, const struct h265sw_pps *pps, const struct h265sw_slice_header *independent);
 

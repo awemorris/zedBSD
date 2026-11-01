@@ -12,7 +12,7 @@
 - Q324-1（Q1 の判断）: WS318 p016〜p019 の範囲（H.265 の NAL・VPS・SPS・PPS・slice segment header・POC・RPS・DPB を StdVideoH265 へ）を、手順で先に作る。libmedia の build と runtime には繋がない。使い手は WS324 の `vkvideo-probe` の H.265（nvrtx の NVDEC の確かめ、p007）と WS322 の VF2 の Wave511（p006）、後で WS318 p020 の libmedia の Vulkan Video の道。
 - **土台は WS330 の proposed の解析の header**（`h265sw-nal`・`-scaling`・`-rps`・`-vui`・`-ps`・`-slice`・`-poc`）。WS330 では Q1 が Q330-2 の A（H.265 の解析は WS318 と 1 つに）を決め、WS330 の設計が「WS318 p016 がこの header を採り、Vulkan の道が要る生の値（VPS・HRD・st_ref_pic_set の生の syntax・slice header の RPS の生の field）を足す」と書いている（WS330 design D4・§11）。その通りに採り、足した（D1）。
 - Vulkan の道だけの物は新しい 3 つ: `h265-dpb`（Vulkan の DPB の slot と、8.3.2 の marking と C.5.2 の出力の順）、`h265-stream`（Annex B から picture を組み、NoRaslOutputFlag・POC・RPS を出す）、`h265-std`（StdVideoH265 の構造体へ）。H.264 の `h264.c`・`h264-dpb.c` と同じ分け方（D2）。
-- 実装は Sonnet 5.5 high の 5 Phase（p006b〜f）、その前に header を source に置く段 2（p006a の 2 回目、Opus）、後に適合の試験（p006g、Opus、HEVC_v1 の 147 本の Main の範囲）と `vkvideo-probe` の H.265（p006h、Opus、今の ws.md の案の p006e）。§9。
+- 実装は Sonnet 5.5 high の 6 Phase（p006b〜g）、その前に header を source に置く段 2（p006a の 2 回目、Opus）、後に適合の試験（p006h、Opus、HEVC_v1 の 147 本の Main の範囲）と `vkvideo-probe` の H.265（p006i、Opus、今の ws.md の案の p006e）。§9。
 - ユーザーの判断が要る点は無い。Q1 の技術の判断が 5 つ（§13）。
 
 ## 1. 範囲と範囲の外
@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | 層 | base layer（nuh_layer_id 0） | 他の層の NAL は読み飛ばし数える（`other_layer`） |
 | 解析が保つ形式 | parameter set は有効な値を全部保つ（chroma_format_idc 0〜3、bit depth 8〜16、SPS の range extension の 9 つの flag）。WS330 D4 と同じ「解析は範囲で拒まない」 | 読まない syntax: SPS・PPS の screen content・3D・multilayer の拡張、PPS の range extension の道具 → ENOTSUP（`*_refused`）。CTB 16 未満・64 超、level 6.2 を超える大きさ・tile 数 → ENOTSUP |
-| decode する範囲 | driver が決める（nvrtx・Wave511 は Main、8 bit 4:2:0、WS318 Q318-8 の Q1 の判断）。`vkvideo-probe` が profile と形式を driver の能力で確かめる（p006h） | — |
+| decode する範囲 | driver が決める（nvrtx・Wave511 は Main、8 bit 4:2:0、WS318 Q318-8 の Q1 の判断）。`vkvideo-probe` が profile と形式を driver の能力で確かめる（p006i） | — |
 | 絵の構造 | progressive の frame。field_seq_flag は値として保つ | field の列の表示の扱いは使い手（libmedia・probe） |
 | 出力 | picture ごとの Vulkan の情報（StdVideoDecodeH265PictureInfo、参照の slot と StdVideoDecodeH265ReferenceInfo、slice segment の offset）、session の parameters（VPS・SPS・PPS の StdVideoH265）、表示の順（C.5.2 の bumping） | crop（conformance window）は値を渡すだけ |
 | 入力 | Annex B の byte stream。container の hvcC は使い手が Annex B に直して渡す（`h265_stream_parameters`） | 長さ前置の NAL の直読み |
@@ -86,7 +86,7 @@
 | --- | --- | --- | --- |
 | D1 | 解析の header は WS330 の proposed の `h265sw-nal`・`-scaling`・`-rps`・`-vui`・`-ps`・`-slice`・`-poc` を採り、Vulkan の道が要る物を足す（§5.2 の差の表）。名前も `h265sw-` のまま | Q330-2 の A（解析は 1 つ）と WS330 design §11 の段取りそのもの。WS330 の Sonnet の Phase（p004・p006〜p011）は「main にある実装を確かめるだけ」になる | WS318 D19 の「Vulkan 用に別の `h265*.c`」（同じ節を 2 回実装し 2 回照合する。Q330-2 で取り消された） |
 | D2 | Vulkan の道だけの物は `h265-dpb`・`h265-stream`・`h265-std` の 3 つ（接頭辞 `h265_`）。`h265-dpb` と `h265-stream` は Vulkan の型に依らず、Vulkan の header に依るのは `h265-std` だけ | H.264 の `h264.c`・`h264-dpb.c` と同じ分け方。WS330 の `h265sw-dpb` は frame の buffer（`vcodec-dpb`・`vcodec-frame`）の上で、それは WS330 p002（WS329 completed の後）まで無い。Vulkan の DPB は画を持たず slot の番号だけ。Vulkan の型を 1 つの module に閉じると、他の 2 つは Vulkan の header 無しで host 試験できる | `h265sw-dpb` を先に作る（WS329・WS330 の共通化を前倒しすることになり範囲の外）、StdVideo の型を DPB に直に持つ（H.264 の形。試験に Vulkan の header が要り、slot の約束と Vulkan の写しが混ざる） |
-| D3 | 置き場所は `userland/desktop/libmedia/`（WS318 D19 の場所）。`sources.mk` に足さない（libmedia の build・runtime に繋がない、Q324-1）。使い手（`vkvideo-probe`、p006h）は自分の Makefile で path を名指して compile する | WS318 p020 は `sources.mk` に足すだけで使える（移しが無い）。WS330 も同じ場所に置く予定 | 別の directory（`userland/lib/libhevc` など。WS318・WS330 が後で移し、Makefile と試験の path を直すことになる） |
+| D3 | 置き場所は `userland/desktop/libmedia/`（WS318 D19 の場所）。`sources.mk` に足さない（libmedia の build・runtime に繋がない、Q324-1）。使い手（`vkvideo-probe`、p006i）は自分の Makefile で path を名指して compile する | WS318 p020 は `sources.mk` に足すだけで使える（移しが無い）。WS330 も同じ場所に置く予定 | 別の directory（`userland/lib/libhevc` など。WS318・WS330 が後で移し、Makefile と試験の path を直すことになる） |
 | D4 | `vcodec*.h` は変えない。slice header の byte_alignment() は `h265sw-slice.c` の中で読む。負の値の shift と `&` は module の中で floor の算術にする（`h265sw.h` の約束） | `vcodec*.h` の変更は WS326 の回帰の照合（基点 77ed48ac4）を壊す。WS330 p002 が共通の補助を足した後に置き換えればよい | WS330 の proposed/common の `vcodec.h`・`vcodec-bitreader.h` を今入れる（WS330 p002 の前倒し、H.264 の回帰の基点の付け替えが要る） |
 | D5 | `h265sw-scaling.h` から量子化の行列（`h265sw_scaling_factors`・`_derive`・`_matrix`）を、`h265sw-ps.h` から `h265sw_ps_scaling` を外す | どれも software の decoder だけが使い、`h265sw-scan`（WS330 p005）に依る。実装しない関数を header に置かない（骨格の ENOSYS が残る）。WS330 p003 が足す | 骨格のまま置く（使えない関数が source に残る） |
 | D6 | VPS を読む（`h265sw_vps`、`h265sw_ps_read_vps`）。HRD は最初の 1 つだけ保つ | Vulkan の session parameters は VPS を持ち、Wave511 は VPS を作り直して bitstream に置く（WS322 §7）。StdVideoH265VideoParameterSet の HRD の pointer は 1 つ | WS330 D16 の「VPS は読まない」（Vulkan の道が成り立たない）。VPS の HRD を全部（最大 1024 個、7 KiB ずつ） |
@@ -94,12 +94,13 @@
 | D8 | NumDeltaPocsOfRefRpsIdx は「slice header が自分の set を持ち（sps の flag 0）、それが予測の時の NumDeltaPocs[RefRpsIdx]」、他は 0 | この値の用途は hardware が slice header の予測の st_ref_pic_set を読むこと（j を 0..NumDeltaPocs[RefRpsIdx] で回す、7.3.7）。sps の flag が 1 なら slice に st_ref_pic_set は無く、RefRpsIdx も定まらない。Vulkan の本文の「flag が 1」の書き方はこの用途と合わない。使い手の driver は zedBSD の nvrtx と Wave511 だけで、約束は `h265-std.h` に書いた | 本文の字句どおり（sps の flag 1 の時に値を入れる: 入れる値が定まらない） |
 | D9 | IsReference は常に 1 | 3.132 と 8.1.3 の step 4: decode した絵は全部「used for short-term reference」にされ、読まれるかは後の絵の RPS が決める。Vulkan は IsReference が 0 の絵の setup（slot への書き込み）をしない。SLNR の絵も上の sub-layer の絵から読まれ得る | SLNR を 0 に（上の sub-layer の参照が壊れる）、最上位の sub-layer の SLNR だけ 0（得は slot 1 つ、規則が増える） |
 | D10 | 8.3.3（使えない参照の生成）を行わない。CRA・BLA に付く RASL の絵（NoRaslOutputFlag 1 の時）は `h265-stream` が捨てる。壊れた stream の Curr の欠けは `missing` として報告し、使い手が決める | 8.3.3.1 の NOTE: 生成は RASL の絵の制約を書くためだけで、その RASL の絵は出力されず、出力される絵のどれも読まない。Vulkan の道で灰の絵を作るには GPU の操作が要り、作り方は使い手の物 | 生成して slot を当てる（画の無い slot は Vulkan では使えず、代わりの画の準備が DPB の module に入り込む） |
-| D11 | end of sequence の NAL の後の絵に `after_eos` を立て、使い手は DPB を出力付きで空にしてから（`h265_dpb_flush`）その絵を始める | WS330 D11 と同じ。C.5.2.2 では EOS の後の CRA は NoOutputOfPriorPicsFlag 1 で前の絵を出さずに捨てるが、HM の参照の出力（適合の MD5）は EOS で全部を出す | 規定どおり捨てる（適合の出力と frame の数が合わない流れがある） |
-| D12 | slice segment の header は NAL の先頭 64 KiB の RBSP の写しから読み、足りなければ NAL の全体を写して読み直す（1 MiB まで、malloc で 1 回取り、stream が保つ） | 大きな I の slice（数 MB）を絵ごとに全部写すのは無駄。header はほぼ数十 byte。entry point の多い header（level 6.2 で最悪 557 KiB）も壊さずに読める | 全部写す（4K60 で毎秒数百 MB の複写）、header の長さを固定の上限で切る（正しい stream を誤って拒む） |
+| D11 | end of sequence（と end of bitstream）の NAL の後の絵に `after_eos` を立て、使い手は DPB を出力付きで空にしてから（`h265_dpb_flush`）その絵を始める | WS330 D11 と同じ。C.5.2.2 では EOS の後の CRA は NoOutputOfPriorPicsFlag 1 で前の絵を出さずに捨てるが、HM の参照の出力（適合の MD5）は EOS で全部を出す | 規定どおり捨てる（適合の出力と frame の数が合わない流れがある） |
+| D12 | slice segment の header は NAL の先頭 64 KiB の RBSP の写しから読み、足りなければ先頭 1 MiB の写しで読み直す（malloc で 1 回取り、stream が保つ） | 大きな I の slice（数 MB）を絵ごとに全部写すのは無駄。header はほぼ数十 byte。7.4.7.1 の entry point の上限（tile の列 × PicHeightInCtbsY − 1、h265sw.h の範囲で 20 × 1 056 − 1）で、有効な header は 90 KiB 未満なので 1 MiB の写しで必ず読める | 全部写す（4K60 で毎秒数百 MB の複写）、header の長さを固定の上限で切る（正しい stream を誤って拒む） |
 | D13 | DPB が出力した絵の slot は、使い手が読み終えて `h265_dpb_release` を呼ぶまで busy で、新しい絵の setup に使わない | COINCIDE（出力と DPB が同じ image）では、出力した絵の image を読む前に次の decode が上書きすると壊れる。H.264 の `h264-dpb` の `busy` と同じ考え | 使い手が自分で避ける（約束が呼び手に散る） |
 | D14 | 同じ id の parameter set の再送は、構造体を 0 で埋めてから組んで byte で比べ、中身が同じなら generation を変えない | 7.4.2.4.2 は CVS の中の同じ中身の再送を許す。Vulkan の session parameters は同じ鍵の更新を許さないので、使い手は generation が変わった時だけ parameters を作り直す。WS330 の store の約束と同じ | 受け取るたびに作り直す（IDR ごとに parameters の object を作る） |
-| D15 | StdVideo の profile は general_profile_idc が 1・2・3・4・9 ならその値、他は compatibility の flag の 1・2・3 の最小、level は 30 倍の値を enum に写し、合わなければ ENOTSUP | Vulkan の enum に無い値は driver に渡せない。Main 互換の flag を持つ古い stream（profile_idc 0）を拾える | 値をそのまま cast（enum の外の値を driver に渡す） |
-| D16 | 実装の Phase は Sonnet の 5 つ（§9）。各 1〜3 header | 手順 §4.2（1 Phase = 1 回の起動、header 1〜3、仕様の 1〜2 節）と WS326・WS330 の大きさ。Q1 の「3 本程度」より 2 つ多いのは、ps（VPS・SPS・PPS・PTL）と DPB（C.5.2）がそれぞれ 1 回分の大きさだから | 3 つに詰める（1 回の起動に 4 header・4 節以上、WS326 の教訓に反する） |
+| D15 | StdVideo の profile は general_profile_idc が 1・2・3・4・9 ならその値、他は compatibility の flag の 1・2・3 の最小（無ければ ENOTSUP）。level は 30 倍の値を enum に写し、表に無い値は次の上の level（186 を越える値は 6.2、0 は 1.0） | Vulkan の enum に無い値は driver に渡せない。Main 互換の flag を持つ古い stream（profile_idc 0）を拾える。level は driver の能力の確かめに使うだけなので、表の外の値で decode を止めない | 値をそのまま cast（enum の外の値を driver に渡す）、表の外の level を ENOTSUP（その stream を全く decode できない） |
+| D16 | 実装の Phase は Sonnet の 6 つ（§9）。各 1〜3 header | 手順 §4.2（1 Phase = 1 回の起動、header 1〜3、仕様の 1〜2 節）と WS326・WS330 の大きさ。Q1 の「3 本程度」より多いのは、ps（VPS・SPS・PPS・PTL）、DPB（C.5.2）、std（StdVideo の約 250 field）、stream（AU と活性と捨ての状態）がそれぞれ 1 回分の大きさだから（review 2 の 6） | 3 つに詰める（1 回の起動に 4 header・4 節以上、WS326 の教訓に反する） |
+| D17 | 絵の終わりは、AU を始め得る NAL（AUD・VPS・SPS・PPS・prefix SEI など）を見た時でなく、その後の base layer の VCL の first_slice_segment_in_pic_flag が 1 の時に決め、cursor をその AU を始める最初の NAL へ戻す。EOS・EOB は今の AU に属し、次の絵に after_eos と NoRaslOutputFlag 1 | 7.4.2.4.4 は AU の始まりを次の絵の最初の VCL を基準に定め、parameter set と prefix SEI（decoding unit information など、D.3）は 1 つの絵の segment の間にも置ける（review 2 の 1・3） | その NAL を見た時に絵を切る（segment の間の SEI で絵が割れ、後ろの segment が壊れた絵になる） |
 
 ## 5. module
 
@@ -131,7 +132,7 @@ vcodec.h  vcodec-bitreader  vcodec-nal                 （今の共通、変え�
 | h265sw-slice | [h265sw-slice.h](proposed/h265/h265sw-slice.h) | 7.3.6.1〜7.3.6.3、7.4.7.1〜7.4.7.3、7.3.2.12 | slice segment header の全 field、dependent の写し、byte_alignment |
 | h265sw-poc | [h265sw-poc.h](proposed/h265/h265sw-poc.h) | 8.3.1、8.3.2 の 8-5 | POC、prevTid0Pic、RPS の POC の list |
 | h265-dpb | [h265-dpb.h](proposed/h265/h265-dpb.h) | 8.3.2（8-6・8-7、step 1〜4）、C.5.2.1〜C.5.2.4、8.1.3 step 4 | 絵の entry、marking、bumping と出力、slot と busy、flush・clear・abort |
-| h265-stream | [h265-stream.h](proposed/h265/h265-stream.h) | 7.4.2.4.4・7.4.2.4.5、8.1.3（NoRaslOutputFlag・HandleCraAsBlaFlag・PicOutputFlag）、7.4.3.2.1（SPS の活性） | NAL の走査、parameter set の保管、slice segment を picture に、捨てる絵の数え |
+| h265-stream | [h265-stream.h](proposed/h265/h265-stream.h) | 7.4.2.4.4・7.4.2.4.5（D17）、8.1.3（NoRaslOutputFlag・HandleCraAsBlaFlag・PicOutputFlag）、7.4.3.2.1（SPS の活性） | NAL の走査、parameter set の保管、slice segment を picture に、捨てる絵の数え |
 | h265-std | [h265-std.h](proposed/h265/h265-std.h) | Vulkan の H.265 の std（§2.2） | VPS・SPS・PPS・PTL の StdVideo、picture info、reference info、約束（D7〜D9、D15） |
 
 ### 5.2 WS330 の proposed からの差（D1、WS330 p003 が取り込む物）
@@ -139,12 +140,12 @@ vcodec.h  vcodec-bitreader  vcodec-nal                 （今の共通、変え�
 | header | 足した・変えた物 | 理由 |
 | --- | --- | --- |
 | h265sw.h | 冒頭の説明を「解析は Vulkan の道と software の decoder が共有」に。`H265SW_MAX_CPB`。負の値の `&` の約束 | HRD の配列、POC の 8-5 |
-| h265sw-nal.h | `struct h265sw_nal` に `complete`、`h265sw_nal_parse_prefix`、`H265SW_MAX_NAL_BYTES` の検べを明記 | D12 |
+| h265sw-nal.h | `struct h265sw_nal` に `complete`、`h265sw_nal_parse_prefix`、`H265SW_MAX_NAL_BYTES` の検べと、ENOBUFS を unescape の前に capacity と比べる約束を明記 | D12、review 2 の 19 |
 | h265sw-scaling.h | 行列の derive・matrix・factors を外した（D5）。entry 0 は EINVAL（7.4.5「greater than 0」）、DC の推定（予測 0 → 16、他 → 参照の DC）を明記 | D5、仕様 |
 | h265sw-vui.h | VUI の全 field（Vulkan の StdVideoH265SequenceParameterSetVui の全部）、`struct h265sw_hrd`・`h265sw_sub_layer_hrd`、`h265sw_vui_read_hrd`（VPS の共通部の引き継ぎ） | D6、Vulkan |
 | h265sw-rps.h | `struct h265sw_st_rps_syntax`、`h265sw_rps_read` の末尾の引数 `syntax`（NULL 可） | D7、D8 |
-| h265sw-ps.h | PTL の 2 flag、`h265sw_vps`・`h265sw_ps_read_vps`・`h265sw_ps_read_ptl`、SPS の vps_id・temporal_id_nesting・sub_layer_ordering_info_present・conformance_window と生の offset・scaling_list_data_present・st_syntax・extension の 2 flag、PPS の deblocking_control_present・extension の 2 flag、init_qp の範囲を bit depth に依らない形（組の確かめで SPS と）、store の VPS と `generation`。`h265sw_ps_scaling` を外した（D5） | Vulkan、「形式で拒まない」の一貫 |
-| h265sw-slice.h | reserved_flags・colour_plane_id・st_rps_sps・st_rps_idx・st_syntax・num_long_term_sps/pics・lt_idx_sps・deblocking_override、byte_alignment は module の中、entry point の上限の 3 通り、式の番号の直し（NumPicTotalCurr 7-57） | Vulkan、D4、仕様 |
+| h265sw-ps.h | PTL の 2 flag と general の 44 bit の読み飛ばし、VPS の reserved の 16 bit、SPS の log2 の上限の数値（和の前に検べ）と PCM の下限 Min( MinCbLog2SizeY, 5 )、check_pair の scaling の規則、`h265sw_vps`・`h265sw_ps_read_vps`・`h265sw_ps_read_ptl`、SPS の vps_id・temporal_id_nesting・sub_layer_ordering_info_present・conformance_window と生の offset・scaling_list_data_present・st_syntax・extension の 2 flag、PPS の deblocking_control_present・extension の 2 flag、init_qp の範囲を bit depth に依らない形（-48..51、組の確かめで SPS と）、store の VPS と `generation`。`h265sw_ps_scaling` を外した（D5） | Vulkan、「形式で拒まない」の一貫 |
+| h265sw-slice.h | high_precision_offsets_enabled_flag 1 の重みを ENOTSUP、delta_chroma_weight の範囲、reserved_flags・colour_plane_id・st_rps_sps・st_rps_idx・st_syntax・num_long_term_sps/pics・lt_idx_sps・deblocking_override、byte_alignment は module の中、entry point の上限の 3 通り、式の番号の直し（NumPicTotalCurr 7-57） | Vulkan、D4、仕様 |
 | h265sw-poc.h | 変えず（負の POC の `&` の算術を明記） | 算術 |
 
 ### 5.3 公開の口の要点（使い手の 1 picture の流れ）
@@ -203,21 +204,22 @@ end: h265_dpb_flush
 | Phase | 試験 |
 | --- | --- |
 | p006b | test-nal（header の各 field と禁止の組、TSA・IRAP の TemporalId、型の分類の全 64 値の表、unescape と先頭の写しの全ての切り口、`complete`）、test-scaling（Table 7-5・7-6 の全値を PDF から 2 つの方法で取った表と照合、予測 0・参照・DC の推定、nextCoef の巡回、entry 0 の EINVAL、範囲の端）、test-vui（E.2.1 の全分岐の往復、推定の値、Table E.1 の 16 値、HRD の共通部の有無と引き継ぎ・CpbCnt 32・7 sub-layer・sub_pic の分岐、範囲の外の EINVAL） |
-| p006c | test-rps（7-61・7-62 の手の例 6 通り以上（deltaRps の正負、use_delta の 0、元の set の空・満ち）、上限 max_pictures の境、delta_idx の範囲、syntax の bit 数と mask）、test-ps（PTL の sub-layer の組の全 2^14 の present の組の bit 数、VPS の HRD 0・1・3 個と cprms_present の 0、SPS の往復（全分岐）、sub-layer の写し下げ、VUI の誤りの規則（profile 1・2・3 で落とす、4 で EINVAL）、ENOTSUP の分類、PPS の往復、check_pair の各条件、store の generation（同じ中身の再送で不変、違えば +1）、失敗で store が変わらない） |
+| p006c | test-rps（7-61・7-62 の手の例 6 通り以上（deltaRps の正負、use_delta の 0、元の set の空・満ち）、上限 max_pictures の境、delta_idx の範囲、syntax の bit 数と mask）、test-ps（PTL の general の 88 bit と sub-layer の組の全 2^12 の present の組の bit 数、VPS の reserved の 16 bit、SPS の log2 の上限と wrap させる組、VPS の HRD 0・1・3 個と cprms_present の 0、SPS の往復（全分岐）、sub-layer の写し下げ、VUI の誤りの規則（profile 1・2・3 で落とす、4 で EINVAL）、ENOTSUP の分類、PPS の往復、check_pair の各条件、store の generation（同じ中身の再送で不変、違えば +1）、失敗で store が変わらない） |
 | p006d | test-slice（全分岐の往復、dependent の写し、PPS・SPS の組ごとの bit 長（address の Ceil(Log2)、lt_idx_sps、list_entry、poc_lsb）、重みの 7-58 の負の重みの floor、範囲の端、byte_alignment の誤り、短い写しで EINVAL）、test-poc（8-1・8-2 の折り返しの 4 通り、IRAP の Msb 0、prevTid0Pic の除外（RASL・RADL・SLNR・TemporalId > 0）、負の POC での 8-5 の LT、int32 の外で EINVAL） |
 | p006e | test-dpb（手で書いた POC と RPS の列で: IDR だけ、IPPP、階層の B（reorder 2〜4）、long-term の LSB と全 POC の照合、NoOutputOfPriorPicsFlag 0・1、latency の上限、size の満ちによる bumping、壊れた stream の evicted と EINVAL、slot の busy と release、take_slot の EBUSY と再試行、abort、flush の順、clear。各段の出力の順と marking を C.5.2 の手順から手で作った表と照合） |
-| p006f | test-std（各 field の写しを手の値で、RPS の 2 つの形（予測の set を explicit に直した値を手で計算）、D8 の 3 通り、profile・level の写しと ENOTSUP、pointer が自分の中を指す、Curr が 8 を超えて ENOTSUP）、test-stream（`h265write.h` で組んだ stream: IDR の始まり、CRA の始まり（RASL を捨て RADL を返す）、途中から（IRAP の前を捨てる）、EOS の後、reset の後の CRA、parameter set の再送（generation）、SPS の活性の違反、多い slice segment と dependent、AU の境（AUD・SEI・suffix SEI）、slice header の長い（64 KiB を超える）segment、reserved の型と他の層の読み飛ばし、全ての切り口で落ちない） |
+| p006f | test-std（各 field の写しを手の値で、range extension の 9 flag、RPS の 2 つの形（予測の set を explicit に直した値を手で計算）、D8 の 3 通り、profile・level の写し（表の外の level の写し）と ENOTSUP、pointer が自分の中を指す、Curr が 8 を超えて ENOTSUP） |
+| p006g | test-stream（`h265write.h` で組んだ stream: IDR の始まり、CRA の始まり（RASL を捨て RADL を返す）、途中から（IRAP の前を捨てる）、EOS・EOB の後（次の絵に after_eos と NoRaslOutputFlag）、reset の後の CRA、絵の segment の間の prefix SEI・PPS（絵が切れない）、parameter set の再送（generation）、SPS の活性の違反、多い slice segment と dependent、AU の境（AUD・SEI・suffix SEI）、64 KiB を超える slice header、reserved の型と他の層の読み飛ばし、全ての切り口で落ちない） |
 
-### 8.4 適合の試験（p006g、Opus）
+### 8.4 適合の試験（p006h、Opus）
 
 - 入力: §2.3 の HEVC_v1 の 147 本のうち、h265-stream が読む SPS で Main の範囲（8 bit 4:2:0）と分かった物（名前からの推定は in 136）。zip は展開せず `unzip -p` で読む（WS330 の形）。
-- host の道具（p006g が作る `plan/ws324/tests/conformance/conform.c`）: file を `h265-stream`・`h265-dpb`（slot は 17 個、出力ごとに即 release）・`h265-std` に通し、(a) VPS・SPS・PPS・各 picture の最初の slice header の値を syntax element の名前で、(b) 出力の POC の列を書く。
-- 判定（全部の in で）: 1. 壊れた絵 0・refused 0・missing 0（RAP_A・RAP_B・NoOutPrior などの意図した例外は zip の txt で確かめて記録）。2. **副の oracle 1**: host の `ffmpeg -bsf:v trace_headers` の parameter set と slice header の値が (a) と一致（比べる field の一覧は p006g が決める。ffmpeg は data を出す物差しで、code は読まない）。3. **副の oracle 2**: host の `ffmpeg -threads 1 -loglevel debug` の `Output frame with POC` の列が (b) と一致。4. StdVideo の値の自己の照合（h265-std の出力を h265write.h で SPS・PPS に書き戻し、h265sw-ps で読み直して一致: WS322 T1 の往復の形）。
+- host の道具（p006h が作る `plan/ws324/tests/conformance/conform.c`）: file を `h265-stream`・`h265-dpb`（slot は 17 個、出力ごとに即 release）・`h265-std` に通し、(a) VPS・SPS・PPS・各 picture の最初の slice header の値を syntax element の名前で、(b) 出力の POC の列を書く。
+- 判定（全部の in で）: 1. 壊れた絵 0・refused 0・missing 0（RAP_A・RAP_B・NoOutPrior などの意図した例外は zip の txt で確かめて記録）。2. **副の oracle 1**: host の `ffmpeg -bsf:v trace_headers` の parameter set と slice header の値が (a) と一致（比べる field の一覧は p006h が決める。ffmpeg は data を出す物差しで、code は読まない）。3. **副の oracle 2**: host の `ffmpeg -threads 1 -loglevel debug` の `Output frame with POC` の列が (b) と一致。4. StdVideo の値の自己の照合（h265-std の出力を h265write.h で SPS・PPS に書き戻し、h265sw-ps で読み直して一致: WS322 T1 の往復の形）。
 - 受け入れ: in の全部で 1〜4。RPS・POC・BUMPING・NoOutPrior・RAP・CRA・BLA・long-term（LTRPSPS・RPS_E など）・VPS id・SLIST・TILES・WPP・DSLICE・PPS・SLPPLP・NUT・OPFLAG・EXT・HRD の各々が 1 本以上入る（名前から全部ある）。
 
 ### 8.5 QEMU・実機
 
-- この Phase 群（p006b〜g）は host だけ。Vulkan の decode は p006h（`vkvideo-probe` の H.265、amd64 の package の build と、Venus・lavapipe の QEMU で使える物があれば）と p007（RTX 2070 の実機、Q1 の割当）、WS322 p006（VF2）。
+- この Phase 群（p006b〜h）は host だけ。Vulkan の decode は p006i（`vkvideo-probe` の H.265、amd64 の package の build と、Venus・lavapipe の QEMU で使える物があれば）と p007（RTX 2070 の実機、Q1 の割当）、WS322 p006（VF2）。
 
 ## 9. Phase の分け方と受け入れ（案、Q1 の判断 Q-B）
 
@@ -229,14 +231,15 @@ end: h265_dpb_flush
 | [p006b](phase006b/phase.md) | h265sw-nal・h265sw-scaling・h265sw-vui | S | p006a 段 2 | run-unit nal・scaling・vui・all PASS、check-skeleton（BASE）PASS |
 | [p006c](phase006c/phase.md) | h265sw-rps・h265sw-ps | S | p006b | run-unit rps・ps・all PASS、check-skeleton PASS |
 | [p006d](phase006d/phase.md) | h265sw-slice・h265sw-poc | S | p006c | run-unit slice・poc・all PASS、check-skeleton PASS |
-| [p006e](phase006e/phase.md) | h265-dpb | S | p006a 段 2（header の型だけを使い、試験は手の値。p006b〜d と並べて起動できる） | run-unit dpb・all PASS、check-skeleton PASS |
-| [p006f](phase006f/phase.md) | h265-std・h265-stream | S | p006d、p006e | run-unit std・stream・all PASS、check-skeleton PASS |
-| [p006g](phase006g/phase.md) | 適合の試験（HEVC_v1）と、見つかった食い違いの直し（header の comment の直しは記録して p015 へ） | O | p006f、cache（Q-D） | §8.4 |
-| p006h | `vkvideo-probe` の H.265（今の ws.md の案の p006e。WS324 design §14 の形） | O | p006g、p002 | WS324 design の受け入れ（amd64 の build の warning 0、host の解析の試験。Vulkan の decode は p007） |
+| [p006e](phase006e/phase.md) | h265-dpb | S | p006a 段 2（型だけを使い、試験は手の値） | run-unit dpb・all PASS、check-skeleton PASS |
+| [p006f](phase006f/phase.md) | h265-std | S | p006a 段 2（型だけを使い、試験は手の値） | run-unit std・all PASS、check-skeleton PASS |
+| [p006g](phase006g/phase.md) | h265-stream | S | p006d | run-unit stream・all PASS、check-skeleton PASS |
+| [p006h](phase006h/phase.md) | 適合の試験（HEVC_v1）と、見つかった食い違いの直し（header の comment の直しは記録して p015 へ） | O | p006e〜g、cache（Q-D） | §8.4 |
+| p006i | `vkvideo-probe` の H.265（今の ws.md の案の p006e。WS324 design §14 の形） | O | p006h、p002 | WS324 design の受け入れ（amd64 の build の warning 0、host の解析の試験。Vulkan の decode は p007） |
 
-- ws.md の案の表の名前との対応: 案の「p006b〜d（解析の実装 3 つ）」→ p006b〜f（5 つ）、案の「p006e（vkvideo-probe）」→ p006h。p007 の依存は p006e → p006h。
-- 並べ方: 段 2 の後に p006b と p006e を並べ、p006b → p006c → p006d と進み、p006d と p006e の後に p006f。最短で 4 段の直列（b・c・d・f）。
-- 見積り（LW、目安）: 段 2 4、p006b 3、p006c 4、p006d 3、p006e 3、p006f 4、p006g 6、p006h 6。
+- ws.md の案の表の名前との対応: 案の「p006b〜d（解析の実装 3 つ）」→ p006b〜g（6 つ）、案の「p006e（vkvideo-probe）」→ p006i。p007 の依存は p006e → p006i。
+- 並べ方: 段 2 の後に p006b・p006e・p006f を並べ、p006b → p006c → p006d → p006g と進む。最短で 4 段の直列（b・c・d・g）。
+- 見積り（LW、目安）: 段 2 4、p006b 3、p006c 4、p006d 3、p006e 3、p006f 3、p006g 3、p006h 6、p006i 6。
 
 ### 9.1 p006a 段 2（header を source に置く、Opus）の受け入れ
 
@@ -249,9 +252,9 @@ end: h265_dpb_flush
 ## 10. 他の WS への影響（Q1 が記録する物）
 
 - **WS330**: proposed の解析の 7 header は WS324 の source の物が正になる。WS330 p003 は source の header に、D5 で外した物（量子化の行列、`h265sw_ps_scaling`）と WS330 の残りを足す。WS330 p004（nal の部分）・p006（scaling の読みの部分）・p007〜p011 は「確かめだけ」（WS330 design §11 の予定どおり）。`h265sw_rps_read` の引数が 1 つ増えた（NULL を渡せばよい）。WS330 p002 の後、`h265sw-slice.c` の byte_alignment を共通の補助に置き換えてよい。適合の一覧と fetch.sh は Q-D。
-- **WS318**: p016〜p019 は WS324 p006a〜f で済む（WS324 design R11）。p020 は `sources.mk` に足し、`h265-stream`・`h265-dpb`・`h265-std` を `vkvideo.c` の H.265 の道に使う。
+- **WS318**: p016〜p019 は WS324 p006a〜h で済む（WS324 design R11）。p020 は `sources.mk` に足し、`h265-stream`・`h265-dpb`・`h265-std` を `vkvideo.c` の H.265 の道に使う。
 - **WS322**: p006 の T1（H.265 の parameter set の往復）と Wave511 の parameter set の作り直しは `h265-std` の StdVideo を入力にする。D7（RPS の 2 つの形）・D8・D9 を driver の約束として読む。
-- **WS324**: p007（NVDEC の H.265 の実機）は p006h の後。design.md §8 の初期の参照の list は `plan.st_before`・`st_after`・`lt_curr`（slot の番号）で作れる。
+- **WS324**: p007（NVDEC の H.265 の実機）は p006i の後。design.md §8 の初期の参照の list は `plan.st_before`・`st_after`・`lt_curr`（slot の番号）で作れる。
 
 ## 11. HAL・toolchain・出典
 
@@ -266,19 +269,19 @@ end: h265_dpb_flush
 | --- | --- | --- |
 | R1 | D8 の約束が他の Vulkan の実装の読み方と違い、zedBSD の driver の外（例えば Mesa の上の別の driver）で使う時に食い違う | 使い手は zedBSD の driver だけ。約束を `h265-std.h` に書いた。p007・WS322 p006 の実機で slice header に予測の set を持つ stream（RPS_A〜F、適合）を通して確かめる |
 | R2 | D7 の explicit の形への直しで、予測の連鎖が長い set の差が 16 bit を超える | 有効な stream では起きない（8-4 の範囲）。超えたら EINVAL で、h265-std の試験に境の例 |
-| R3 | ffmpeg の出力の順（副の oracle 2）が C.5.2 の順と違う場面（NoOutputOfPriorPics、EOS） | p006g で zip の txt と仕様で確かめ、違いの理由を記録する（例外の表）。ffmpeg を正としない |
-| R4 | WS330 p003 が source の header に足す時に、WS324 の実装の Phase の基点が動く | WS324 の実装の Phase（p006b〜f）が終わってから WS330 p003 が足す（WS330 p003 は WS329 completed の後で、時期は先）。Q1 が順を見る |
-| R5 | 古い encoder の VUI の誤り（WS330 D17）で、Main 以外の profile の SPS が EINVAL になる | WS330 の規則のまま。p006g の適合で数え、多ければ Q1 に |
+| R3 | ffmpeg の出力の順（副の oracle 2）が C.5.2 の順と違う場面（NoOutputOfPriorPics、EOS） | p006h で zip の txt と仕様で確かめ、違いの理由を記録する（例外の表）。ffmpeg を正としない |
+| R4 | WS330 p003 が source の header に足す時に、WS324 の実装の Phase の基点が動く | WS324 の実装の Phase（p006b〜g）が終わってから WS330 p003 が足す（WS330 p003 は WS329 completed の後で、時期は先）。Q1 が順を見る |
+| R5 | 古い encoder の VUI の誤り（WS330 D17）で、Main 以外の profile の SPS が EINVAL になる | WS330 の規則のまま。p006h の適合で数え、多ければ Q1 に |
 | R6 | 1 Sonnet の起動に h265sw-ps（VPS・SPS・PPS・PTL）が大きすぎる | p006c は rps と ps の 2 header。止まったら ps を VPS・PTL と SPS・PPS に分ける直しの Phase を Q1 が作る |
 
 ## 13. 問い（Q1 の技術の判断。ユーザーの判断は無い）
 
 - Q-A（推し: A）: 解析の header は WS330 の proposed を採って足す（D1）。A: 採る。B: WS318 D19 のとおり Vulkan 用に別の解析を作る。→ A は Q330-2 の A と WS330 design §11 に沿う。
-- Q-B（推し: A）: Phase を §9 の 5 つの Sonnet（p006b〜f）・適合（p006g）・probe（p006h）にし、ws.md の案の p006b〜e の名前を置き換える。B: 3 つに詰める。
+- Q-B（推し: A）: Phase を §9 の 6 つの Sonnet（p006b〜g）・適合（p006h）・probe（p006i）にし、ws.md の案の p006b〜e の名前を置き換える。B: 3 つに詰める。
 - Q-C（推し: A）: 段 2（header を source に置き、骨格と道具と基点）を P1 が p006a の 2 回目の起動で行う。B: 別の Phase の番号にする。
 - Q-D（推し: A）: WS330 の `plan/ws330/tests/conformance/`（list・fetch・sha256）を `plan/tools/h265/conformance/` に移して plan/tools.md に登録し、cache の `/home/awe/zedBSD-claude1/build/sources/h265-conformance/` を作る（Q1 の作業）。B: WS324 が WS330 の path をそのまま使う（WS330 の完了で消える恐れ）。
 - Q-E（推し: A）: D8（NumDeltaPocsOfRefRpsIdx）の約束を採る。B: Vulkan の本文の字句どおり。
 
 ## 14. review
 
-[design-review.md](design-review.md) の「review 2（p006a）」。
+[design-review.md](design-review.md) の「review 2（p006a、H.265 の解析の設計）」。20 件（blocker 2・major 5・minor 13）を全部反映した。

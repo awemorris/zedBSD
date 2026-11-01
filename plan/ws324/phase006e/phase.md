@@ -32,9 +32,10 @@ Status: planned（2026-11-01 P1 が p006a で作成。p006a 段 2 の基点の�
 - IRAP の NoRaslOutputFlag 1: 最初の絵（picture 0 で何もしない）、2 つ目以降で NoOutputOfPriorPicsFlag 0（全部を順に出す）と 1（discarded、出さない）。
 - Curr の欠け: missing の数と slot の H265_DPB_NO_SLOT。Foll の欠けは数えない。
 - 壊れた stream: 全部が参照で満ちた buffer で evicted（Curr に無い最小の POC）、全部が Curr の時の EINVAL（in_picture 0、outputs は plan にある）。
+- slots 16（nvrtx と Wave511 の maxDpbSlots と同じ）で、size 16 の SPS の列を出力が busy のまま流し、EBUSY → release → 再試行で進むこと、各段で reference_count ≤ 15。
 - slot: take_slot の最小の空き、全部 busy の EBUSY（何も変わらない、release の後に成功）、2 回目の take_slot が同じ slot、出力した slot の busy、参照のままの出力済みの slot が release の後も保たれる。
 - abort（current を入れない、slot が空く）、end の誤り（setup_slot の不一致、in_picture 0）、flush の順と started 0、clear の後の busy の保持。
-- 乱数の列（seed 固定、10 万絵、ランダムな RPS と型）で落ちず、不変条件（used の entry の slot が重ならない、busy は slots の中、出力の POC が CVS の中で増える、used の数 ≤ size）を毎段で確かめる。
+- 乱数の列（seed 固定、10 万絵、ランダムな RPS と型）で落ちず、不変条件（used の entry の slot が重ならない、setup_slot が reference_slot に無い、busy は slots の中、出力の POC が CVS の中で増える、used の数 ≤ size）を毎段で確かめる。
 - わざと壊す確かめ（例: bumping の > と >=、latency の +1 の条件、LT の照合の mask、evict の選び）。
 
 ## 4. 注意

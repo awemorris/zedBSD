@@ -39,7 +39,11 @@
  * general_progressive_source_flag, general_interlaced_source_flag,
  * general_non_packed_constraint_flag and general_frame_only_constraint_flag,
  * level_idc general_level_idc.  The 43 constraint and reserved bits
- * after them and the sub-layer fields are read and skipped.  Informative
+ * after the four source flags (whichever branch of 7.3.3 applies, 43
+ * bits) and the one bit after them (general_inbld_flag or
+ * general_reserved_zero_bit) are read and skipped: 44 bits, so the
+ * general part is 88 bits before general_level_idc's 8.  The sub-layer
+ * fields are read and skipped as well.  Informative
  * for a decoder: what it decodes is decided by the SPS's fields.
  */
 struct h265sw_ptl {
@@ -60,7 +64,9 @@ struct h265sw_ptl {
  * (vps_video_parameter_set_id 0..15), base_layer_internal,
  * base_layer_available, max_layers_minus1 (0..63: 7.4.3.1 reserves 63 but
  * has decoders accept it), max_sub_layers_minus1
- * (0..6), temporal_id_nesting, ptl, sub_layer_ordering_info_present,
+ * (0..6), temporal_id_nesting, then vps_reserved_0xffff_16bits (u(16),
+ * read and ignored: 7.4.3.1 has decoders ignore its value), ptl,
+ * sub_layer_ordering_info_present,
  * max_dec_pic_buffering_minus1[ i ] (0..H265SW_MAX_DPB - 1),
  * max_num_reorder_pics[ i ] (at most max_dec_pic_buffering_minus1[ i ])
  * and max_latency_increase_plus1[ i ] (0..2^32 - 2) for every sub-layer
@@ -141,18 +147,29 @@ struct h265sw_vps {
  * 0..H265SW_MAX_DPB - 1, max_num_reorder_pics at most it,
  * max_latency_increase_plus1 0..2^32 - 2.
  *
- * min_cb_log2 MinCbLog2SizeY (3..), ctb_log2 CtbLog2SizeY (4..6, else
- * ENOTSUP), min_tb_log2 MinTbLog2SizeY (2.., below min_cb_log2),
- * max_tb_log2 MaxTbLog2SizeY (at most Min( ctb_log2, 5 )),
- * max_th_depth_inter and max_th_depth_intra (0..ctb_log2 - min_tb_log2).
+ * The block sizes, each syntax element bounded before any sum so no sum
+ * can wrap: log2_min_luma_coding_block_size_minus3 and
+ * log2_diff_max_min_luma_coding_block_size each at most 3 (a larger value
+ * makes CtbLog2SizeY above 6: ENOTSUP), giving min_cb_log2 MinCbLog2SizeY
+ * (3..6) and ctb_log2 CtbLog2SizeY (min_cb_log2 + diff, 4..6, else
+ * ENOTSUP); log2_min_luma_transform_block_size_minus2 below
+ * min_cb_log2 - 2 (min_tb_log2 MinTbLog2SizeY 2..min_cb_log2 - 1, else
+ * EINVAL) and log2_diff_max_min_luma_transform_block_size at most
+ * Min( ctb_log2, 5 ) - min_tb_log2 (max_tb_log2 MaxTbLog2SizeY, else
+ * EINVAL); max_th_depth_inter and max_th_depth_intra (0..ctb_log2 -
+ * min_tb_log2).
  *
  * scaling_list_enabled with scaling_list_data_present
  * (sps_scaling_list_data_present_flag) and scaling (the SPS's lists:
  * signalled, or the defaults when scaling_list_enabled is 1 and
  * scaling_list_data_present is 0; zero when scaling_list_enabled is 0);
  * amp, sao; pcm with pcm_bit_depth_luma and pcm_bit_depth_chroma (1..the
- * matching bit depth), pcm_min_log2 and pcm_max_log2 (Log2MinIpcmCbSizeY
- * 3..Min( ctb_log2, 5 ), Log2MaxIpcmCbSizeY up to Min( ctb_log2, 5 )) and
+ * matching bit depth), pcm_min_log2 Log2MinIpcmCbSizeY
+ * (log2_min_pcm_luma_coding_block_size_minus3 + 3, checked before the
+ * sum to be in Min( min_cb_log2, 5 )..Min( ctb_log2, 5 )) and
+ * pcm_max_log2 Log2MaxIpcmCbSizeY (pcm_min_log2 +
+ * log2_diff_max_min_pcm_luma_coding_block_size, the diff checked first to
+ * be at most Min( ctb_log2, 5 ) - pcm_min_log2), else EINVAL, and
  * pcm_loop_filter_disabled; num_st_rps (0..64) with st_rps (derived) and
  * st_syntax (as signalled) of each; long_term_present with num_lt_sps
  * (0..32), lt_poc_lsb (lt_ref_pic_poc_lsb_sps, log2_max_poc_lsb bits) and
@@ -238,9 +255,10 @@ struct h265sw_sps {
  * reads it; 7.4.3.3.1 allows 0..2 for this version, and larger values
  * are read as the syntax says), sign_data_hiding, cabac_init_present,
  * num_ref_idx_default[2] (num_ref_idx_lX_default_active_minus1 + 1,
- * 1..15), init_qp (26 + init_qp_minus26, checked here against -( 26 +
- * 48 )..51, the widest range any bit depth allows, and by
- * h265sw_ps_check_pair against -QpBdOffsetY..51), constrained_intra,
+ * 1..15), init_qp (26 + init_qp_minus26; init_qp_minus26 is in -( 26 +
+ * QpBdOffsetY )..25, so init_qp is checked here against -48..51, the
+ * widest range any bit depth allows, and by h265sw_ps_check_pair against
+ * -QpBdOffsetY..51), constrained_intra,
  * transform_skip, cu_qp_delta with diff_cu_qp_delta_depth, cb_qp_offset
  * and cr_qp_offset (-12..12), slice_chroma_qp_offsets_present,
  * weighted_pred, weighted_bipred, transquant_bypass, tiles, entropy_sync
@@ -330,9 +348,13 @@ struct h265sw_pps {
  * content differed from the one stored before under its id (a user of
  * the sets, such as a Vulkan session's parameters, compares it to notice
  * any change).  Both counters only increase, wrapping at 2^32 (a user
- * compares for equality only).  The comparison is of the parsed
- * structures, each built in a structure cleared to 0 first, so a byte
- * comparison is exact.
+ * compares for equality only).  The comparison is a memcmp of the parsed
+ * structures, each built in memory cleared with memset first and written
+ * only by member stores (never a whole-structure assignment or copy
+ * before the comparison), so the padding bytes stay 0 on the compilers
+ * zedBSD uses; should padding ever differ, the cost is a needless
+ * generation step (a rebuilt session parameters object), never a missed
+ * change.
  *
  * About 600 KiB: callers allocate it (h265-stream.h embeds one).
  */
@@ -458,7 +480,8 @@ int h265sw_ps_read_pps(struct h265sw_ps_store *store, struct vcodec_bitreader *b
 
 /*
  * Checks a PPS against the SPS it names, for the values whose ranges
- * depend on the SPS (7.4.3.3.1): init_qp at least -QpBdOffsetY (-6 *
+ * depend on the SPS (7.4.3.3.1): scaling_list_present 0 when the SPS's
+ * scaling_list_enabled is 0; init_qp at least -QpBdOffsetY (-6 *
  * ( bit_depth_luma - 8 )); diff_cu_qp_delta_depth at most ctb_log2 -
  * min_cb_log2; log2_parallel_merge_level at most ctb_log2; tile_columns
  * at most pic_width_ctbs and tile_rows at most pic_height_ctbs; for

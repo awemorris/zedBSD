@@ -34,10 +34,10 @@ Status: planned（2026-11-01 P1 が p006a で作成。p006b の cleared の後�
   - 途中で切れた入力の全ての切り口、乱数の入力。
 - test-ps:
   - PTL: max_sub_layers_minus1 0〜6、sub_layer_profile_present・level_present の全組（6 sub-layer で 2^12 通り）で読んだ bit 数が手の計算（2 + 1 + 5 + 32 + 4 + 43 + 1 + 8 の general、reserved の 2 bit の数、各 sub-layer の 88 + 8）と一致。general の flag の写し。
-  - VPS: HRD 0・1・3 個（2 番目と 3 番目で cprms_present_flag 0 と 1）、保つのが最初の 1 つだけ、hrd_layer_set_idx の範囲と重複の EINVAL、layer_id_included の skip（num_layer_sets_minus1 1023・max_layer_id 63 の最大）、timing の 0 の EINVAL、sub-layer の写し下げ、extension data の skip。
-  - SPS: 全分岐の往復（conformance window、sub-layer の ordering の有無、scaling の無効・既定・signalled、PCM、short-term set 0・1・64 個（予測を含む）、long-term 0・32、VUI、range extension の flag）。導いた値（crop、CTB の数、min CB の数）を手の計算と照合。範囲の端（width・height の MinCbSize の倍数でない・0・H265SW_MAX_SIDE + 1、MaxLumaPs を超える積、log2_max_poc_lsb 4・16・17、max_dec_pic_buffering 15・16、reorder > dec、CTB 8・128 の ENOTSUP、TB の上限、PCM の上限）の EINVAL・ENOTSUP。multilayer・3D・SCC の flag の ENOTSUP と `sps_refused`。VUI の誤り: profile_idc 1・2・3 で VUI を落とし SPS を保つ（vui_present 0、拡張の flag を読まない）、4 で EINVAL。
-  - PPS: 全分岐の往復（tile の uniform と非 uniform、deblocking の control、scaling、extension）。init_qp の -74・51 で可・範囲外で EINVAL、tile の 20×22 で可・21 列で ENOTSUP、column_width の 1055・1056（EINVAL）、range extension の道具の各 ENOTSUP。
-  - check_pair: 各条件の可と EINVAL の境（init_qp の -QpBdOffsetY、diff_cu_qp_delta_depth、parallel merge、tile の数、非 uniform の和、sps の id の不一致）。
+  - VPS: reserved の 16 bit の後の PTL の位置、HRD 0・1・3 個（2 番目と 3 番目で cprms_present_flag 0 と 1）、保つのが最初の 1 つだけ、hrd_layer_set_idx の範囲と重複の EINVAL、layer_id_included の skip（num_layer_sets_minus1 1023・max_layer_id 63 の最大）、timing の 0 の EINVAL、sub-layer の写し下げ、extension data の skip。
+  - SPS: 全分岐の往復（conformance window、sub-layer の ordering の有無、scaling の無効・既定・signalled、PCM、short-term set 0・1・64 個（予測を含む）、long-term 0・32、VUI、range extension の flag）。導いた値（crop、CTB の数、min CB の数）を手の計算と照合。SPS の log2 の各 syntax element の上限の境と、ue(v) の大きな値（2^31 など）を足して wrap させる組の EINVAL・ENOTSUP、PCM の下限 Min( MinCbLog2SizeY, 5 ) の境、範囲の端（width・height の MinCbSize の倍数でない・0・H265SW_MAX_SIDE + 1、MaxLumaPs を超える積、log2_max_poc_lsb 4・16・17、max_dec_pic_buffering 15・16、reorder > dec、CTB 8・128 の ENOTSUP、TB の上限、PCM の上限）の EINVAL・ENOTSUP。multilayer・3D・SCC の flag の ENOTSUP と `sps_refused`。VUI の誤り: profile_idc 1・2・3 で VUI を落とし SPS を保つ（vui_present 0、拡張の flag を読まない）、4 で EINVAL。
+  - PPS: 全分岐の往復（tile の uniform と非 uniform、deblocking の control、scaling、extension）。init_qp の -48・51 で可・-49・52 で EINVAL（check_pair では 8 bit の SPS で 0 が下限、-1 で EINVAL）、tile の 20×22 で可・21 列で ENOTSUP、column_width の 1055・1056（EINVAL）、range extension の道具の各 ENOTSUP。
+  - check_pair: 各条件の可と EINVAL の境（SPS の scaling_list_enabled 0 で PPS の scaling_list_present 1、init_qp の -QpBdOffsetY、diff_cu_qp_delta_depth、parallel merge、tile の数、非 uniform の和、sps の id の不一致）。
   - store: 同じ中身の再送で generation と sps_generation が変わらない、違う中身で +1、失敗した読みで store が前のまま（byte で比べる）、refused の立ち下げ。
   - 途中で切れた入力の全ての切り口（VPS・SPS・PPS）、乱数の入力で落ちない。
 - わざと壊す確かめ（例: 7-61 の符号、sub-layer の写し下げ、PTL の reserved の bit 数、VUI の誤りの規則の profile）。
@@ -48,7 +48,9 @@ Status: planned（2026-11-01 P1 が p006a で作成。p006b の cleared の後�
 - 7-61・7-62 は新しい set の entry を一つずつ足すので、足す前に数を max_pictures と比べる（header の約束）。
 - SPS・VPS の読みは、0 で埋めた作業の構造体（malloc でその呼び出しの間だけ取る、header の約束）に組み、全部の検べが済んでから store へ写す（失敗で store を変えない、generation の byte の比べのため）。ENOMEM の道は、試験で malloc を失敗させる手段が無いので code の読みで確かめ、結果に書く。
 - VPS の HRD の 2 番目以降は作業の 2 つの `h265sw_hrd` を交互に使う（header の約束）。
-- PTL の general の 43 bit（constraint と reserved）は値を保たずに読み飛ばす。
+- PTL の general の 4 つの source の flag の後の 43 bit（constraint と reserved）と、その後の 1 bit（general_inbld_flag か general_reserved_zero_bit）の計 44 bit は値を保たずに読み飛ばす。general の部分は general_level_idc の前で 88 bit。
+- VPS の vps_temporal_id_nesting_flag の後に vps_reserved_0xffff_16bits（u(16)、値は見ない）がある。
+- SPS の log2 の大きさは、各 syntax element を足す前に上限と比べる（header の数値。ue(v) の和で wrap させない）。PCM の下限は Min( MinCbLog2SizeY, 5 )。
 - SPS の lt_ref_pic_poc_lsb_sps は log2_max_poc_lsb bit の u(v)。
 
 ## 5. 変えてはいけない物

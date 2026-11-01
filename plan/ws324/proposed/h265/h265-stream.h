@@ -47,19 +47,23 @@
 /*
  * The largest RBSP copy the reader makes of one NAL unit: a whole
  * parameter set (a larger one is refused, counted in refused_sets), or
- * the start of a slice segment NAL unit, enough for its header (a header
- * that runs past it is read again from a copy of the whole NAL unit in
- * slice_rbsp, up to H265_STREAM_SLICE_BYTES; a longer one breaks the
- * picture).  64 KiB holds any SPS within the limits of h265sw.h (64
- * short-term sets, 32 long-term pictures, the scaling lists and the HRD
- * parameters of 7 sub-layers with 32 CPBs each).
+ * the start of a slice segment NAL unit, enough for nearly every header
+ * (a header that runs past it is read again from a longer copy in
+ * slice_rbsp, see H265_STREAM_SLICE_BYTES).  64 KiB holds any SPS within
+ * the limits of h265sw.h (64 short-term sets, 32 long-term pictures, the
+ * scaling lists and the HRD parameters of 7 sub-layers with 32 CPBs
+ * each).
  */
 #define H265_STREAM_RBSP_BYTES 65536U
 
 /*
- * The longest slice segment header the reader takes: the header of a
- * picture of level 6.2 with every entry point (139 264 CTBs of 16x16 at
- * most, 32 bits each) fits in 1 MiB.
+ * The longest slice segment header copy the reader makes (the second
+ * copy, h265sw_nal_parse_prefix with this limit): 7.4.7.1 bounds
+ * num_entry_point_offsets by tile_columns * PicHeightInCtbsY - 1, at most
+ * 20 * 1 056 - 1 within the limits of h265sw.h, so with offsets of 32
+ * bits, the reference picture set, the weights and the 256 extension
+ * bytes a valid header is below 90 KiB; 1 MiB is far above any valid
+ * header, and a slice NAL unit longer than that is copied only up to it.
  */
 #define H265_STREAM_SLICE_BYTES (1024U * 1024U)
 
@@ -80,18 +84,25 @@ struct h265_stream_counts {
  * has the same nal_type, 7.4.2.4.5); vps_id, sps_id and pps_id the
  * parameter sets it uses (sps_id that of the PPS, vps_id that of the
  * SPS); generation the store's generation when it was read (struct
- * h265sw_ps_store), so a caller rebuilds its session parameters when it
+ * h265sw_ps_store) after every parameter set inside the picture's access
+ * unit was stored (those before its first segment and those between its
+ * segments), so a caller rebuilds its session parameters when it
  * changes.
  *
  * irap and idr say what the type is; no_rasl_output is NoRaslOutputFlag
  * (8.1.3: 1 for an IDR or BLA picture, the first picture of the stream
  * or after h265_stream_reset, the first picture after an end of sequence
- * NAL unit, and a CRA picture handled as BLA after a reset; 0 for other
- * IRAP pictures; 0 for non-IRAP pictures); first is 1 for the first
- * picture returned after h265_stream_init or h265_stream_reset (picture
- * 0 for C.5.2.2); after_eos is 1 when an end of sequence NAL unit came
- * after the previous picture returned (the caller flushes its DPB with
- * output first, see the design: the reference decoder's output does so);
+ * or end of bitstream NAL unit (the picture after an end of bitstream is
+ * the first of a new bitstream), and a CRA picture handled as BLA after a
+ * reset; 0 for other IRAP pictures; 0 for non-IRAP pictures); first is 1
+ * for the first picture returned after h265_stream_init or
+ * h265_stream_reset (picture 0 for C.5.2.2); after_eos is 1 when an end
+ * of sequence or end of bitstream NAL unit ended the access unit of a
+ * picture before this one and no picture was returned since (that NAL
+ * unit belongs to the earlier access unit, so the picture it ends gets 0
+ * and the next picture gets 1; the caller then outputs and empties its
+ * DPB first, as the reference decoder's output does at an end of
+ * sequence);
  * no_output_of_prior_pics is NoOutputOfPriorPicsFlag for an IRAP picture
  * with NoRaslOutputFlag 1 that is not first (C.5.2.2 step 1: 1 for a
  * CRA picture, else no_output_of_prior_pics_flag; the reader never takes
@@ -146,8 +157,12 @@ struct h265_picture {
  * sets seen.  poc: the order count state (struct h265sw_poc_state).
  * started is 0 until an IRAP picture is returned after h265_stream_init
  * or h265_stream_reset; first_pending is 1 until a picture is returned
- * after them; eos_pending is 1 from an end of sequence NAL unit to the
- * next picture returned; cra_as_bla is 1 after h265_stream_reset until
+ * after them; eos_pending is 1 from the return of the picture whose access
+ * unit ended with an end of sequence or end of bitstream NAL unit (or
+ * from such a NAL unit read when no picture was being gathered) to the
+ * return of the next picture; eos_seen is 1 while a picture is gathered
+ * after such a NAL unit was read in its access unit (it becomes
+ * eos_pending when that picture is returned); cra_as_bla is 1 after h265_stream_reset until
  * the next IRAP picture (HandleCraAsBlaFlag); rasl_skip is
  * NoRaslOutputFlag of the last IRAP picture returned (its RASL pictures
  * are dropped when 1).  active_sps and active_generation: the SPS of the
@@ -159,10 +174,10 @@ struct h265_picture {
  * NULL when none).  returned: pictures returned so far.
  *
  * rbsp is the copy of one NAL unit's RBSP (H265_STREAM_RBSP_BYTES);
- * slice_rbsp, of slice_rbsp_capacity bytes, the copy of a whole slice
+ * slice_rbsp, of slice_rbsp_capacity bytes, the longer copy of a slice
  * segment NAL unit whose header runs past rbsp: NULL until the first such
- * segment, then allocated (with malloc, up to H265_STREAM_SLICE_BYTES)
- * and kept until h265_stream_destroy.  independent is the header of the
+ * segment, then allocated with malloc (H265_STREAM_SLICE_BYTES) and kept
+ * until h265_stream_destroy.  independent is the header of the
  * last independent slice segment of the picture being read (dependent
  * segments copy it).
  *
@@ -177,6 +192,7 @@ struct h265_stream {
 	int started;
 	int first_pending;
 	int eos_pending;
+	int eos_seen;
 	int cra_as_bla;
 	int rasl_skip;
 	unsigned active_sps;
@@ -219,44 +235,65 @@ int h265_stream_parameters(struct h265_stream *stream, const uint8_t *data, size
  * Reads NAL units from the cursor: parameter sets are stored
  * (h265sw_ps_read_vps, _sps, _pps over the RBSP copy; one that does not
  * read is counted and the reader goes on), access unit delimiters, SEI
- * and filler data are skipped, an end of sequence NAL unit sets
- * eos_pending (and makes the next IRAP picture's NoRaslOutputFlag 1), and
- * the slice segments of the next picture are gathered: from a segment
- * with first_slice_segment_in_pic_flag 1 up to (not including) the next
- * NAL unit that starts an access unit (h265sw_nal_starts_access_unit, or
- * another segment with first_slice_segment_in_pic_flag 1), or the end of
- * the buffer.  The cursor stays at that NAL unit, so the parameter sets
- * of the next access unit are not stored before the picture is used.
+ * and filler data are skipped, an end of sequence or end of bitstream NAL
+ * unit is noted (eos_seen while a picture is gathered, else eos_pending),
+ * and the slice segments of the next picture are gathered.
+ *
+ * The picture's end (7.4.2.4.4: a NAL unit that may start an access unit
+ * starts one only when the next base-layer VCL NAL unit begins a new
+ * picture, so parameter sets and prefix SEI may lie between two segments
+ * of one picture): after a segment, the reader remembers au_start, the
+ * first base-layer NAL unit of a type h265sw_nal_starts_access_unit names
+ * that follows the picture's last segment.  At the next base-layer VCL
+ * NAL unit it reads first_slice_segment_in_pic_flag (the most significant
+ * bit of the first payload byte, which no emulation prevention byte can
+ * precede).  When that flag is 1, the picture ends and the cursor is set
+ * to au_start (or to that VCL NAL unit when there was none), so the
+ * parameter sets of the next access unit are not stored before the
+ * picture is used; when it is 0, the NAL units in between belong to this
+ * access unit (their parameter sets were stored as they were read:
+ * 7.4.2.4.2 does not let them change the active SPS or PPS within a
+ * picture), au_start is forgotten and the segment is gathered.  An end of
+ * sequence or end of bitstream NAL unit ends the picture (the cursor goes
+ * past it), and so does the end of the buffer.
  *
  * For the picture: the first segment's header is read with
  * h265sw_slice_read_start, the PPS and SPS found and checked
  * (h265sw_ps_check_pair; at an IRAP picture with NoRaslOutputFlag 1 the
  * SPS becomes active, else it must be the active one with the same
  * sps_generation), the rest read with h265sw_slice_read_rest, then
- * NoRaslOutputFlag, PicOrderCntVal (h265sw_poc_compute) and the RPS
- * order counts (h265sw_poc_rps).  Each later segment's header is read
- * the same way (independent ones replace independent) and must name the
- * same PPS and have the same nal_unit_type; a picture of more than
- * H265SW_MAX_SLICE_SEGMENTS segments is broken (Table A.8 allows no more
- * up to level 6.2); a missing VPS does not break a picture (the base
- * layer's decoding does not read it: a caller that needs it checks
- * store.vps_present[ vps_id ]); a segment with
- * first_slice_segment_in_pic_flag 0 before any first one is skipped with
- * the picture it belongs to (counted as broken).  A segment header is
- * read from a copy of the first H265_STREAM_RBSP_BYTES payload bytes
- * (h265sw_nal_parse_prefix) and, when that copy is too short, again from
- * a copy of the whole NAL unit.
+ * NoRaslOutputFlag (from eos_pending, first_pending and cra_as_bla as
+ * they are when the first segment is read), PicOrderCntVal
+ * (h265sw_poc_compute) and the RPS order counts (h265sw_poc_rps).  Each
+ * later segment's header is read the same way (independent ones replace
+ * independent) and must name the same PPS and have the same
+ * nal_unit_type; a picture of more than H265SW_MAX_SLICE_SEGMENTS
+ * segments is broken (Table A.8 allows no more up to level 6.2); a
+ * missing VPS does not break a picture (the base layer's decoding does
+ * not read it: a caller that needs it checks store.vps_present[ vps_id
+ * ]); a segment with first_slice_segment_in_pic_flag 0 before any first
+ * one is skipped with the picture it belongs to (counted as broken).  A
+ * segment header is read from a copy of the first H265_STREAM_RBSP_BYTES
+ * payload bytes (h265sw_nal_parse_prefix) and, when that copy is too
+ * short (complete 0 and the read failed), again from a copy of the first
+ * H265_STREAM_SLICE_BYTES payload bytes into slice_rbsp.
  *
- * When the picture is returned, h265sw_poc_finish records it, started,
- * first_pending, eos_pending, cra_as_bla and rasl_skip are updated, and
- * index is set.  A picture not returned (see above) leaves the order
- * count state as it was and is counted; the reader goes on to the next.
+ * When the picture is returned, h265sw_poc_finish records it, started and
+ * first_pending are updated, eos_pending becomes eos_seen (and eos_seen
+ * 0), cra_as_bla is cleared at an IRAP picture, rasl_skip is set at an
+ * IRAP picture, and index is set.  A picture not returned (see above)
+ * leaves the order count state as it was and is counted; an end of
+ * sequence in its access unit still sets eos_pending; the reader goes on
+ * to the next.
+ *
+ * *picture is the reader's work area while it gathers: on a non-zero
+ * return its contents are unspecified.
  *
  * Returns 0 and *picture; ENOENT when the buffer holds no further picture
  * (the parameter sets after the last picture are stored); ENOMEM when
  * slice_rbsp cannot be allocated (the picture is lost, counted as
  * broken, and the reader may go on).  A broken or dropped picture is not
- * an error of this call.  *picture is written only on success.
+ * an error of this call.
  */
 int h265_stream_next(struct h265_stream *stream, struct h265_picture *picture);
 

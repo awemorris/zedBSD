@@ -49,8 +49,17 @@
  *   7.4.3.2.1); entries above are 0.
  * - A VPS carries at most one HRD structure, the first of the VPS
  *   (struct h265sw_vps), and pHrdParameters is NULL without it.
- * - The fields of the range, screen content and other extensions are 0
- *   (the parse refuses the streams that use them, or keeps them off).
+ * - The range extension flags are copied: sps_range_extension_flag and
+ *   the nine flags of sps_range_extension() (bit n of
+ *   struct h265sw_sps range_extension, from transform_skip_rotation_enabled_flag
+ *   as bit 0, to the flag of the same name), and pps_range_extension_flag
+ *   (the PPS range extension's tools are refused by the parse, so their
+ *   fields are 0).  The screen content (palette, curr_pic_ref, ACT,
+ *   motion vector resolution) and other extension fields are 0: the parse
+ *   refuses the streams that use them.
+ * - The VUI's sar_width and sar_height are the signalled values
+ *   (struct h265sw_vui signalled_sar_width and signalled_sar_height, 0
+ *   unless aspect_ratio_idc is EXTENDED_SAR), not the derived ratio.
  *
  * Each output structure owns the arrays its pointers name and points into
  * itself: it must not be copied or moved after it is made (make it where
@@ -106,8 +115,13 @@ struct h265_std_pps {
  * another profile but is compatible with Main, Main 10 or Main Still
  * Picture, 7.4.4); otherwise ENOTSUP.  general_level_idc (30 times the
  * level) maps to the StdVideoH265LevelIdc of the same level (Table A.8's
- * levels 1 to 6.2); another value is ENOTSUP.  The flags are copied.
- * Returns 0 and *out; ENOTSUP as above (out is then not written).
+ * levels 1 to 6.2: 30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180,
+ * 183, 186); a value between them maps to the next defined level above
+ * it, and a value above 186 (for example 255, the unconstrained level
+ * 8.5) or 0 maps to 6.2 or 1.0 respectively, so an off-table value does
+ * not stop the decode (the level is only a capability check for the
+ * driver).  The flags are copied.  Returns 0 and *out; ENOTSUP as above
+ * (out is then not written).
  */
 int h265_std_ptl(const struct h265sw_ptl *ptl, StdVideoH265ProfileTierLevel *out);
 
@@ -115,7 +129,7 @@ int h265_std_ptl(const struct h265sw_ptl *ptl, StdVideoH265ProfileTierLevel *out
  * Makes the StdVideo form of a VPS (every field of struct h265sw_vps that
  * StdVideoH265VideoParameterSet names; the reserved fields 0).  out is
  * written in full and points into itself.  Returns 0; ENOTSUP from
- * h265_std_ptl.
+ * h265_std_ptl (the profile only).
  */
 int h265_std_vps(const struct h265sw_vps *vps, struct h265_std_vps *out);
 

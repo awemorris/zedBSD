@@ -84,7 +84,10 @@ struct h265sw_nal {
  * 0, TemporalId is not 0 for an IRAP type (16..23) or is 0 for a TSA type
  * (7.4.2.2), or vcodec_nal_unescape refuses the payload; ENOBUFS when
  * capacity is too small.  A NAL unit with layer_id above 0 is read like
- * any other (the caller skips it).  On an error out is not written.
+ * any other (the caller skips it).  capacity is compared with size - 2
+ * before the payload is unescaped, so ENOBUFS does not depend on how many
+ * emulation prevention bytes the payload has.  On an error out is not
+ * written.
  */
 int h265sw_nal_parse(const uint8_t *nal, size_t size, uint8_t *buffer, size_t capacity, struct h265sw_nal *out);
 
@@ -103,7 +106,7 @@ int h265sw_nal_parse(const uint8_t *nal, size_t size, uint8_t *buffer, size_t ca
  *
  * Returns and checks as h265sw_nal_parse (the checks of the escaped
  * bytes cover the first limit payload bytes only); ENOBUFS when capacity
- * is smaller than the copy.
+ * is smaller than Min( limit, size - 2 ), checked before unescaping.
  */
 int h265sw_nal_parse_prefix(const uint8_t *nal, size_t size, size_t limit, uint8_t *buffer, size_t capacity, struct h265sw_nal *out);
 

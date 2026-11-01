@@ -1,25 +1,66 @@
 <!-- awesome-plan project=zedbsd record=ws324-p006g -->
 
-# ws324-p006g H.265 の解析の適合の試験（HEVC_v1、host、Opus）
+# ws324-p006g H.265: h265-stream の実装（Annex B から decode する picture へ。標準廉価実装手順、Sonnet 5.5 high）
 
-Status: planned（2026-11-01 P1 が p006a で作成。p006f の cleared と適合の cache（Q-D）の後）
+Status: planned（2026-11-01 P1 が p006a で作成。p006d の cleared の後に起動）
 
-- WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md) §2.3・§8.4・§12。型 O（Opus、phase-runner）。手順 §4.6 の「統合・適合」の Phase。
+- WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md)（§1・§4 D3・D10〜D12・D14・§5.3・§6・§7・§8）。
+- 基点 BASE: `<p006a 段 2 の SHA>`。前提: p006b〜d が main にある（h265-dpb・h265-std は使わない）。
 
-## やる事
+## 1. 読む物
 
-1. 適合の bitstream を取る: `H265SW_CONFORMANCE_DIR=/home/awe/zedBSD-claude1/build/sources/h265-conformance sh <Q-D の後の path>/fetch.sh`（パラメータの無い GET、SHA-256 の記録と照合、zip でない答えで即止めて Q1 に）。
-2. host の道具 `plan/ws324/tests/conformance/conform.c` と `run.sh` を作る（design §8.4: h265-stream・h265-dpb（17 slot、出力ごとに release）・h265-std に通し、parameter set と最初の slice header の値を syntax element の名前で、出力の POC の列を書く。zip は `unzip -p` で読む）。比べの script（`compare.py`、`/usr/bin/python3 -I`）: host の `ffmpeg -bsf:v trace_headers` の値と、`ffmpeg -threads 1 -loglevel debug` の `Output frame with POC` の列。各 command に時間の上限。
-3. 比べる field の一覧を決めて記録する（VPS・SPS・PPS の全 syntax element のうち trace_headers が出す物、slice header の poc_lsb・RPS・long-term・pps id・型）。
-4. 全 in の stream で design §8.4 の 1〜4 を確かめる。食い違いは仕様で原因を確かめ、module の .c の誤りなら直す（header は変えない。header の comment の誤りは記録して規約の見直しの Phase へ）。ffmpeg と仕様が違う場面（NoOutputOfPriorPics、EOS、RASL）は例外の表に理由を書く（ffmpeg を正としない）。
-5. out の stream（10 bit など）が parse で落ちずに読め、範囲の判定に必要な値が正しいことも確かめる（decode はしない）。
+- AGENTS.md の §4・§7・§9・§10。`plan/coding-style.md` の全文。`plan/guardrail.md` の「出典」「開発の管理情報」。`docs/agent/spec-module-delegation.md` の §5・§7。
+- 設計の §1・§4（D3・D10〜D12・D14）・§5.3・§6・§7・§8。
+- 実装する header: `userland/desktop/libmedia/h265-stream.h`。使う物: `h265sw-nal.h`・`h265sw-ps.h`・`h265sw-slice.h`・`h265sw-poc.h`（実装済み）、`vcodec-nal.h`（`vcodec_nal_find`）。
+- 仕様: `/home/awe/zedBSD-claude1/build/sources/specs/itu-t-h265-202601.pdf`（ITU-T H.265 (V11) (01/2026)、SHA-256 `78b093480e178a2b99d8cb7499934240f359c50c6d09568f8be651bc1151d4d2`、印刷の頁 N = PDF の頁 N + 18）。
+  - 7.4.2.4.2〜7.4.2.4.5（parameter set の順、AU と順、PDF 87〜90）、7.4.3.2.1 の SPS の活性（PDF 94〜95）、8.1.3（NoRaslOutputFlag・HandleCraAsBlaFlag・PicOutputFlag、PDF 135〜137）、B.2・B.3（PDF 291〜292）、C.5.2.2 の NoOutputOfPriorPicsFlag（PDF 306）、D.3 の decoding unit information の SEI の位置（PDF 324 前後）。
 
-## 受け入れ
+## 2. 作る物
 
-- run.sh の最後の行 `conformance: PASS (<in の数> streams)`、例外の表、比べた field の一覧と件数。
-- `sh plan/ws324/tests/run-unit.sh all` と `check-skeleton.sh`（BASE）が PASS のまま。
-- 直した .c は phase.md に file・要点・SHA。
+- `userland/desktop/libmedia/h265-stream.c`。
+- `plan/ws324/tests/unit/test-stream.c`。
+- この phase.md の「結果」、ws.md の表のこの行。
+
+## 3. 試験の項目
+
+入力は `h265write.h` で組んだ Annex B の stream。
+
+- 始まりと捨て: IDR から始まる IPPP、CRA から始まり RASL を捨て RADL を返す、途中から（IRAP の前の絵を before_irap に数える）、reset の後の CRA（BLA として、RASL を捨てる、first 1）、IRAP の no_output_of_prior_pics の導出（CRA は 1、IDR は flag の値、first の絵では 0）。
+- end of sequence・end of bitstream: EOS で終わる AU の絵は after_eos 0、次の絵が after_eos 1 で、それが CRA なら no_rasl_output 1（RASL を捨てる）。EOB でも同じ。AU の外（絵を集めていない時）の EOS。
+- AU の境（7.4.2.4.4）: 1 つの絵の 2 つの segment の間の prefix SEI・PPS（別の id）・SPS（同じ中身の再送）が同じ AU に入り（絵が切れない、壊れた絵 0）、その PPS が store にあり、picture.generation がその後の値。絵と絵の間の AUD・VPS・SPS・PPS・prefix SEI では cursor がその最初の NAL で止まり、次の picture の前に store が変わらない。suffix SEI は前の AU。reserved の 41〜44 と 48〜55、他の層の NAL（other_layer）、reserved の VCL の型（reserved_type）。
+- parameter set: 再送で generation が変わらない、違う中身で変わる、`h265_stream_parameters`。
+- SPS の活性: CVS の途中で別の SPS id を名指す絵は壊れた絵、同じ id で中身が変わった SPS（IRAP 以外で）も壊れた絵、次の IRAP で立ち直る。
+- slice segment: 600 個で返り 601 個で壊れた絵、VPS の欠けで壊れない、dependent、PPS の不一致・nal_unit_type の不一致の壊れた絵、first_slice_segment_in_pic_flag 0 から始まる絵の飛ばし、offset と size が NAL の bytes（start code の後）を指す、access_unit の範囲。
+- 長い slice header: tile と WPP の両方と高い絵（CTB 16、高さ 13 000 以上）で entry point を多くし、header が 64 KiB を越える segment を 2 つ目の写しで読む。
+- `h265_stream_input` を AU ごとに分けて与えても、全体を 1 回で与えた時と同じ picture の列。
+- 全ての切り口で切った stream と乱数の byte 列で落ちない（ASan・UBSan）。
+- わざと壊す確かめ（例: RASL の捨ての条件、EOS の後の NoRaslOutputFlag の付く絵、au_start の戻し、cursor の止め位置）。
+
+## 4. 注意
+
+- 絵の終わりは、AU を始め得る NAL の後に来る次の base layer の VCL の first_slice_segment_in_pic_flag で決まる（header の comment）。その NAL だけで絵を切らない。
+- EOS・EOB は今集めている絵の AU に属する。その絵ではなく次の絵に after_eos と NoRaslOutputFlag 1 が付く。
+- 捨てる絵は POC の状態を変えない。返す絵だけ `h265sw_poc_finish`。
+- `slice_rbsp` の malloc の失敗の道（ENOMEM）は code の読みで確かめ、結果に書く。
+- `*picture` は作業の場所。0 以外を返す時の中身は決めない（header）。
+
+## 5. 変えてはいけない物
+
+全ての header、他の module の .c、Makefile・`sources.mk`、試験の道具、HAL・toolchain・共有の build。header の不備は止めて報告。黙っている所は決めて結果に書く。仕様が正。
+
+## 6. 確かめの command
+
+```
+sh plan/ws324/tests/run-unit.sh stream
+sh plan/ws324/tests/run-unit.sh all
+BASE=<p006a 段 2 の SHA> sh plan/ws324/tests/check-skeleton.sh
+git diff --check
+```
+
+## 7. 終わりの条件
+
+p006b の §7 と同じ。
 
 ## 結果
 
-（担当が書く）
+（実装の担当が書く）
