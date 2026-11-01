@@ -364,12 +364,12 @@ CONFIG_DRIVER_POWERVR ?= $(if $(filter visionfive2,$(ZEDBSD_PLATFORM)),y,n)
 # or says only the core, the firmware and what failed (n, a release image).
 CONFIG_POWERVR_DEBUG ?= y
 
-# The VisionFive 2's Wave511 video decoder: off by default until its
-# Vulkan Video path is checked on the board.  It needs the PowerVR driver,
-# whose render node carries it.  The probe is a test kernel's
+# The VisionFive 2's Wave511 video decoder: on by default with the PowerVR
+# driver, whose render node carries it (its firmware package,
+# wave511-firmware, comes with it).  The probe is a test kernel's
 # /dev/vf2-vpu-probe, whose read powers the decoder, decodes the streams
 # under /var/vpu-probe and reports what the decoder did.
-CONFIG_DRIVER_VF2_VPU ?= n
+CONFIG_DRIVER_VF2_VPU ?= $(if $(filter visionfive2,$(ZEDBSD_PLATFORM)),$(CONFIG_DRIVER_POWERVR),n)
 CONFIG_DRIVER_VF2_VPU_PROBE ?= n
 
 # The Pi 4's headphone jack (ws207-p002): PWM1 fed by a legacy DMA channel.

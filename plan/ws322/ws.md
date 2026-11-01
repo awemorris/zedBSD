@@ -92,3 +92,4 @@
 - JVT の 26 本は p012 の前に p007b で扱う。
 - 非同期の decode と 2 段の command queue は入れない（VPU の時間は 1080p で 4.3 ms、2160p で 14.5 ms で、枠に収まる）。1080p60 の始まりの遅れと 2160p の記録から fence まで約 36 ms は p012 の受け入れで見直す。
 - 2026-11-02 06:16 Q1: Q324-3 と Q322-4 の食い違いの整理: WS324 の p004 が未着手のうちに WS322 p005 が先に着手したので、libvulkan の H.265 decode の転送は P2 が ws322-p005 で WS324 の design §10（StdVideoH265 の全部、capset の bit 2）どおりに作り、WS324 の p004 はそれをそのまま使う（p004 は残りの確かめだけ）。H.265 の Vulkan の header（Khronos、Apache-2.0、Debian libvulkan-dev 1.4.309.0-1 の複写）も p005 の最初の commit で入れる（WS324 の design §11 の段 1）。encode の転送（p008a）は今までどおり WS324。
+- 2026-11-02 06:45 Q1: ユーザーの指示で zedBSD-firmware に wave511/（chagall.bin・LICENSE.txt・README.md）を足して push した（46b8eba45）。zedBSD の firmware の pin を 46b8eba45 にし、CONFIG_DRIVER_VF2_VPU を VF2 で既定 y（PowerVR と同じ）、VF2 の CI の config に wave511-firmware を足した。menuconfig の host 試験 PASS。

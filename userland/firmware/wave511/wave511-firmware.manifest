@@ -18,7 +18,7 @@ acquisition-license-sha256=8c15e1830a2e7638ca982f22db27c226df3f4b05771f8b2836954
 firmware-revision=0x0002d46a (the decoder's identity query)
 
 mirror-repository=https://github.com/awemorris/zedBSD-firmware.git
-mirror-revision=43662bd72419deb927af6d533d90fe72aa158c74
+mirror-revision=46b8eba450389875a131cb82cf6d548af5bf3682
 mirror-path=wave511/
 
 hardware=Chips&Media Wave511 video decoder (product 0x5110) of the StarFive JH7110 (VisionFive 2)
