@@ -164,6 +164,8 @@ struct VkQueue_T {
 	uint32_t timeline_index;
 	struct vulkan_queue_fence *private_fences;
 	pthread_mutex_t mutex;
+	/* The places of the queue's fence-less submissions handed to the recording thread, made at the first (sender.c). */
+	struct vulkan_handoff_ring *handoffs;
 };
 
 struct vulkan_sync;
@@ -204,18 +206,73 @@ struct vulkan_writer {
 };
 
 /*
+ * One piece of work waiting for the recording thread (sender.c): a long
+ * recording's batch or a fence-less submission handed off.  The thread
+ * takes the pieces in the order they were queued, runs send without its
+ * lock, then sent with it; waiting is set while the piece is queued or
+ * being sent, and, like next, belongs to the thread's lock.
+ */
+struct vulkan_sender_item {
+	struct vulkan_sender_item *next;
+	VkResult (*send)(struct vulkan_sender_item *item);
+	void (*sent)(struct vulkan_sender_item *item, VkResult status);
+	VkBool32 waiting;
+};
+
+/*
  * A batch of a long recording waiting for the recording thread: the
- * command buffer, its bytes (the storage stays the batch's place's), the
- * replies its head asks for, whether it waits, and the next one waiting.
+ * command buffer, its bytes (the storage stays the batch's place's) and
+ * the replies its head asks for.
  */
 #define VULKAN_RECORDING_BATCHES 2U
 struct vulkan_recording_batch {
+	struct vulkan_sender_item item;
 	struct VkCommandBuffer_T *command;
 	struct vulkan_writer part;
 	uint32_t expected[2];
 	uint32_t count;
-	VkBool32 waiting;
-	struct vulkan_recording_batch *next;
+};
+
+/*
+ * The fence-less submissions one queue may have handed to the recording
+ * thread and not yet seen sent, and the command buffers one of them may
+ * name: a submission naming more goes the synchronous way.  Each named
+ * command buffer asks for at most three replies (a reset, a Begin and an
+ * End), the submission for one more.
+ */
+#define VULKAN_HANDOFF_SLOTS 64U
+#define VULKAN_HANDOFF_COMMANDS 16U
+#define VULKAN_HANDOFF_REPLIES (VULKAN_HANDOFF_COMMANDS * 3U + 1U)
+
+struct vulkan_handoff_ring;
+
+/*
+ * A fence-less submission handed to the recording thread: its whole
+ * transaction (the recordings written ahead of it, then QUEUE_SUBMIT) and
+ * the opcode of each reply it asks for, in order.  The transaction's
+ * storage is kept for the place's next submission.
+ */
+struct vulkan_handoff {
+	struct vulkan_sender_item item;
+	struct vulkan_handoff_ring *ring;
+	struct vulkan_context *context;
+	struct vulkan_writer transaction;
+	uint32_t replies;
+	uint32_t expected[VULKAN_HANDOFF_REPLIES];
+};
+
+/*
+ * A queue's places for handed-off submissions, used in turn.  next is the
+ * queue's (its mutex); busy (the places queued or being sent) and
+ * room_waiting (a submitter sleeps on room until half of them are free
+ * again) belong to the recording thread's lock.
+ */
+struct vulkan_handoff_ring {
+	struct vulkan_handoff slots[VULKAN_HANDOFF_SLOTS];
+	uint32_t next;
+	uint32_t busy;
+	VkBool32 room_waiting;
+	pthread_cond_t room;
 };
 
 /* The swapchain images one command buffer may name as written before it counts them unknown. */
@@ -489,6 +546,14 @@ struct vulkan_context {
 	uint64_t reply_handle;
 	uint32_t reply_resource;
 	size_t reply_capacity;
+	/*
+	 * The context's fence-less submissions handed to the recording thread
+	 * (counted under that thread's lock) and those it has sent (counted by
+	 * the thread alone), both read atomically: a transaction waits until
+	 * the second reaches what the first was when it began (sender.c).
+	 */
+	uint64_t handoff_queued;
+	uint64_t handoff_sent;
 };
 
 /* Associates one composite public instance with one renderer instance. */
@@ -982,6 +1047,68 @@ vulkan_command_pending_read(
 	struct vulkan_reader *reader,
 	uint64_t serial);
 
+/*
+ * A recording written ahead of the submission attempt serial whose
+ * replies the recording thread reads: their opcodes go to expected (room
+ * for three), and the recording has travelled.  Returns how many.
+ */
+uint32_t
+vulkan_command_pending_handoff(
+	struct VkCommandBuffer_T *command,
+	uint64_t serial,
+	uint32_t *expected);
+
+/*
+ * The recording thread (sender.c), which sends long recordings' batches
+ * and handed-off submissions in the order they were given to it.
+ * vulkan_sender_running() starts it once and says whether it runs (never
+ * in a forked child), vulkan_sender_started() only whether it runs;
+ * vulkan_sender_lock() and _unlock() take its lock,
+ * under which vulkan_sender_queue_locked() hands a piece over and
+ * vulkan_sender_wait_locked() sleeps until the thread has sent one.
+ */
+VkBool32 vulkan_sender_running(void);
+VkBool32 vulkan_sender_started(void);
+void vulkan_sender_lock(void);
+void vulkan_sender_unlock(void);
+void vulkan_sender_queue_locked(struct vulkan_sender_item *item);
+void vulkan_sender_wait_locked(void);
+
+/*
+ * Whether a fence-less submission may be handed off: the environment
+ * does not turn it off (VULKAN_ZEDBSD_SUBMIT_HANDOFF=0), the machine has
+ * more than one processor, and the recording thread runs.
+ */
+VkBool32 vulkan_handoff_allowed(void);
+
+/*
+ * Makes a queue's places for handed-off submissions, and releases them
+ * once nothing handed off from the queue is left unsent.
+ */
+VkResult vulkan_handoff_ring_create(struct vulkan_handoff_ring **ring, const struct vulkan_allocator *allocator);
+void vulkan_handoff_ring_destroy(struct vulkan_handoff_ring *ring, const struct vulkan_allocator *allocator);
+
+/*
+ * The ring's next place, once the thread has sent what it held (the
+ * caller sleeps until half of the ring is free); the caller holds the
+ * queue's mutex and fills the place's transaction and replies.
+ */
+struct vulkan_handoff *vulkan_handoff_take(struct vulkan_handoff_ring *ring);
+
+/* Hands a filled place to the recording thread, after every earlier one. */
+void vulkan_handoff_publish(struct vulkan_handoff_ring *ring, struct vulkan_handoff *slot, struct vulkan_context *context);
+
+/*
+ * Waits until the recording thread has sent every submission of the
+ * context handed off before the call (not on the thread itself), so a
+ * transaction never overtakes one; the caller must hold no context's
+ * mutex.  Every transaction calls it first.
+ */
+void vulkan_sender_drain(struct vulkan_context *context);
+
+/* How many context mutexes the calling thread holds through vulkan_context_lock(). */
+uint32_t vulkan_context_held(void);
+
 /* Checks a video profile list on an image query against the one supported profile. */
 VkResult
 vulkan_video_profile_list_check(
@@ -1014,6 +1141,11 @@ enum vulkan_timing_part {
 	VULKAN_TIMING_REAP,
 	VULKAN_TIMING_COMMAND_RAN,
 	VULKAN_TIMING_COMMAND_DEFERRED,
+	VULKAN_TIMING_HANDOFF,
+	VULKAN_TIMING_HANDOFF_ROOM,
+	VULKAN_TIMING_SENDER_SLEEP,
+	VULKAN_TIMING_SENDER_WAKE,
+	VULKAN_TIMING_DRAIN,
 	VULKAN_TIMING_PARTS
 };
 

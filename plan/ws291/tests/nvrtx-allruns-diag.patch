@@ -1,0 +1,161 @@
+diff --git a/src/drivers/gpu/nvrtx/nvrtx-gpu.h b/src/drivers/gpu/nvrtx/nvrtx-gpu.h
+index b1fcb9f7c7..c543c2fde6 100644
+--- a/src/drivers/gpu/nvrtx/nvrtx-gpu.h
++++ b/src/drivers/gpu/nvrtx/nvrtx-gpu.h
+@@ -910,6 +910,7 @@ int nvrtx_work_channel_wait(struct nvrtx_work_channel *channel, uint32_t fence,
+ int nvrtx_work_channel_wait_late(struct nvrtx_work_channel *channel, uint32_t fence, uint32_t timeout_us, uint32_t quiet_us);
+ bool nvrtx_work_channel_passed(struct nvrtx_work_channel *channel, uint32_t fence);
+ int nvrtx_work_channel_run_time(struct nvrtx_work_channel *channel, uint32_t fence, uint64_t *gpu_ns);
++int nvrtx_work_channel_run_start(struct nvrtx_work_channel *channel, uint32_t fence, uint64_t *start_ns);
+ 
+ void nvrtx_perf_start(struct nvrtx_gpu *gpu);
+ 
+diff --git a/src/drivers/gpu/nvrtx/vk-node.c b/src/drivers/gpu/nvrtx/vk-node.c
+index e3f4666508..30bae7416b 100644
+--- a/src/drivers/gpu/nvrtx/vk-node.c
++++ b/src/drivers/gpu/nvrtx/vk-node.c
+@@ -88,6 +88,29 @@ static uint8_t *vk_node_backing_view(struct nvrtx_node *node, const struct nvrtx
+ static void vk_node_backing_drop(struct nvrtx_node *node, struct nvrtx_backing *backing);
+ static int vk_node_wait(struct nvrtx_session *session, uint32_t fence, uint64_t submitted_us, uint64_t *waited_us);
+ static bool vk_node_passed(struct nvrtx_session *session, uint32_t fence);
++/*
++ * DIAG (not for the tree): every run of the newest submitting session, retired at the next submit once passed, so the
++ * GPU's time a run is counted for all runs (timed: end - start), and the start-to-start gap of back-to-back runs (any
++ * timing): a gap below 60 us is a busy GPU's time per run.  One line every 5 s.
++ */
++#define DIAG_RING 512U
++static uint32_t diag_fences[DIAG_RING];
++static uint32_t diag_head;
++static uint32_t diag_tail;
++static struct nvrtx_session *diag_session;
++static uint64_t diag_runs;
++static uint64_t diag_retired;
++static uint64_t diag_timed;
++static uint64_t diag_timed_ns;
++static uint64_t diag_gaps;
++static uint64_t diag_busy;
++static uint64_t diag_busy_ns;
++static uint64_t diag_busy_min;
++static uint64_t diag_lost;
++static uint32_t diag_prev_fence;
++static uint64_t diag_prev_start;
++static uint64_t diag_reported_us;
++static void diag_submitted(struct nvrtx_session *session, uint32_t fence);
+ static bool vk_node_lost(struct nvrtx_session *session);
+ static bool vk_node_quiet(struct nvrtx_session *session);
+ static void vk_node_gr_check(struct nvrtx_node *node);
+@@ -538,9 +561,80 @@ nvrtx_vk_gpu_submit(
+ 	session->run_us = submitted;
+ 	ticket->fence = fence;
+ 	ticket->submitted_us = submitted;
++	diag_submitted(session, fence);
+ 	return 0;
+ }
+ 
++/* DIAG: retires the passed runs of the ring and adds the new one; says the counts every 5 s. */
++static void
++diag_submitted(
++	struct nvrtx_session *session,
++	uint32_t fence)
++{
++	struct nvrtx_work_channel *channel;
++	uint64_t gpu_ns;
++	uint64_t start;
++	uint64_t gap;
++	uint64_t now;
++	uint32_t old;
++
++	channel = session->channel;
++	if (session != diag_session) {
++		diag_session = session;
++		diag_head = diag_tail = 0U;
++		diag_prev_fence = 0U;
++	}
++	while (diag_tail != diag_head) {
++		old = diag_fences[diag_tail % DIAG_RING];
++		if (!nvrtx_work_channel_passed(channel, old))
++			break;
++		diag_tail++;
++		diag_retired++;
++		if (nvrtx_work_channel_run_time(channel, old, &gpu_ns) == 0) {
++			diag_timed++;
++			diag_timed_ns += gpu_ns;
++		}
++		if (nvrtx_work_channel_run_start(channel, old, &start) != 0) {
++			diag_lost++;
++			diag_prev_fence = 0U;
++			continue;
++		}
++		if (diag_prev_fence != 0U && old == diag_prev_fence + 1U && start > diag_prev_start) {
++			gap = start - diag_prev_start;
++			diag_gaps++;
++			if (gap < 60000U) {
++				diag_busy++;
++				diag_busy_ns += gap;
++				if (diag_busy_min == 0U || gap < diag_busy_min)
++					diag_busy_min = gap;
++			}
++		}
++		diag_prev_fence = old;
++		diag_prev_start = start;
++	}
++	if (diag_head - diag_tail >= DIAG_RING) {
++		diag_tail++;
++		diag_lost++;
++		diag_prev_fence = 0U;
++	}
++	diag_fences[diag_head % DIAG_RING] = fence;
++	diag_head++;
++	diag_runs++;
++	now = nvrtx_now_us();
++	if (diag_reported_us == 0U)
++		diag_reported_us = now;
++	if (now - diag_reported_us < 5000000U)
++		return;
++	diag_reported_us = now;
++	nvrtx_stage_mark("DIAG runs %llu retired %llu lost %llu timed %llu avg %lluns gaps %llu busy %llu avg %lluns min %lluns",
++	    (unsigned long long)diag_runs, (unsigned long long)diag_retired, (unsigned long long)diag_lost,
++	    (unsigned long long)diag_timed, (unsigned long long)(diag_timed != 0U ? diag_timed_ns / diag_timed : 0U),
++	    (unsigned long long)diag_gaps, (unsigned long long)diag_busy,
++	    (unsigned long long)(diag_busy != 0U ? diag_busy_ns / diag_busy : 0U), (unsigned long long)diag_busy_min);
++	diag_runs = diag_retired = diag_lost = diag_timed = diag_timed_ns = 0U;
++	diag_gaps = diag_busy = diag_busy_ns = diag_busy_min = 0U;
++}
++
+ /*
+  * Waits for a run of the session's to end (the executor, for one of its
+  * push buffers' slots), up to its time; the wait is counted.  The node's
+diff --git a/src/drivers/gpu/nvrtx/work.c b/src/drivers/gpu/nvrtx/work.c
+index 707efa8f6f..620bbb45d8 100644
+--- a/src/drivers/gpu/nvrtx/work.c
++++ b/src/drivers/gpu/nvrtx/work.c
+@@ -1150,6 +1150,29 @@ nvrtx_work_channel_submit(
+ 	return 0;
+ }
+ 
++/* DIAG: the GPU's timer at a passed run's start stamp, every run (timed or not). */
++int
++nvrtx_work_channel_run_start(
++	struct nvrtx_work_channel *channel,
++	uint32_t fence,
++	uint64_t *start_ns)
++{
++	size_t record;
++	uint32_t started;
++
++	record = work_run_record(fence);
++	started = work_semaphore_word(channel, record);
++	if (started != fence)
++		return ENOENT;
++	__atomic_thread_fence(__ATOMIC_ACQUIRE);
++	*start_ns = work_semaphore_timer(channel, record + WORK_STAMP_TIMER_AT);
++	__atomic_thread_fence(__ATOMIC_ACQUIRE);
++	started = work_semaphore_word(channel, record);
++	if (started != fence)
++		return ENOENT;
++	return 0;
++}
++
+ /*
+  * Reports how long the GPU took for a timed run whose fence has passed:
+  * the nanoseconds from its start stamp to its end stamp, by the GPU's

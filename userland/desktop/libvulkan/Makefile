@@ -9,6 +9,7 @@ LIBVULKAN_SOURCES := userland/desktop/libvulkan/objects.c \
 	userland/desktop/libvulkan/external-properties.c userland/desktop/libvulkan/external-fence.c \
 	userland/desktop/libvulkan/resources.c userland/desktop/libvulkan/pipeline.c \
 	userland/desktop/libvulkan/descriptors.c userland/desktop/libvulkan/commands.c \
+	userland/desktop/libvulkan/sender.c \
 	userland/desktop/libvulkan/content.c \
 	userland/desktop/libvulkan/memory.c userland/desktop/libvulkan/dedicated.c \
 	userland/desktop/libvulkan/sync.c userland/desktop/libvulkan/sync2.c \
