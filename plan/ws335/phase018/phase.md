@@ -2,7 +2,7 @@
 
 # ws335-p018: 署名の確かめ（algorithm ごと）
 
-Status: 実装済み・試験 PASS（2026-11-02 Sonnet q1902-i01。cleared は Q1。依存: p017、p011、p012）
+Status: cleared（2026-11-02 06:09 Q1、main で test-sigver 492861 PASS）。前: 実装済み・試験 PASS（2026-11-02 Sonnet q1902-i01。cleared は Q1。依存: p017、p011、p012）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

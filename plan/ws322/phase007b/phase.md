@@ -3,7 +3,7 @@
 # ws322-p007b JVT の残り 26 本
 
 - 親: [WS322](../ws.md)。2026-11-02 03:45 Q1 が p007 の結果から作成。
-- Status: cleared（2026-11-02 05:39 P2 q1907-i01。Q1 の受け入れ待ち）
+- Status: cleared（2026-11-02 06:09 Q1、main で p004/run.sh PASS。VF2 で JVT 100/101 一致・1 本は Extended profile を理由付きで断る、libmedia も 101 本一致）。前: cleared（2026-11-02 05:39 P2 q1907-i01。Q1 の受け入れ待ち）
 - 依存: p007。
 
 ## 目的

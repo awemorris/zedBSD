@@ -2,7 +2,7 @@
 
 # ws324-p006g H.265: h265-stream の実装（Annex B から decode する picture へ。標準廉価実装手順、Sonnet 5.5 high）
 
-Status: in-progress（2026-11-01 P1 が p006a で作成。2026-11-02 Sonnet q1906-i01 が実装・試験 PASS。cleared は Q1 が決める）
+Status: cleared（2026-11-02 06:09 Q1、main で test-stream PASS）。前: in-progress（2026-11-01 P1 が p006a で作成。2026-11-02 Sonnet q1906-i01 が実装・試験 PASS。cleared は Q1 が決める）
 
 - WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md)（§1・§4 D3・D10〜D12・D14・§5.3・§6・§7・§8）。
 - 基点 BASE: `1f16db0e6`（2026-11-02 p006a 段 2 の commit 1f16db0e619a9cd23c74f7f36a8729efdba4ecb3）。前提: p006b〜d が main にある（h265-dpb・h265-std は使わない）。

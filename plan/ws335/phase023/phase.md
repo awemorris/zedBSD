@@ -2,7 +2,7 @@
 
 # ws335-p023: 公開の EVP の digest・ChaCha20・Poly1305
 
-Status: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1908-i01。cleared は Q1）。前: planned（2026-11-01 p001 が作成。依存: p021、p006、p002）
+Status: cleared（2026-11-02 06:09 Q1、main で test-api-evp 190733・ct PASS。鍵の解放の 36 checks は p024 の後に流し直す）。前: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1908-i01。cleared は Q1）。前: planned（2026-11-01 p001 が作成。依存: p021、p006、p002）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

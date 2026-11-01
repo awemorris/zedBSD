@@ -3,7 +3,7 @@
 # ws334-p034 試験: libbrowser の試験を Windows（Wine）で
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §7.3 の「既存の libbrowser の試験のうち Windows で流す物」、O28・O29。
-- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-02 q1887-i01、Sonnet。2026-11-01 p003 で作成）。
+- 状態: cleared（2026-11-02 06:09 Q1、Wine で host-*.c 85/92 一致、残りは file: の副資源の不具合と GC の揺れ）。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-02 q1887-i01、Sonnet。2026-11-01 p003 で作成）。
 - **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: `omnigrammaton-cli.exe` は作らない（2026-11-01 ユーザーの答え: 配るのは `OmniGrammaton.exe` だけ）。本文の `omnigrammaton-cli.exe` は試験の program（`plan/ws334/tests` の配らない .exe、p036 の `test-program` で同じ static library を link）に読み替える。
 - 依存: p032。
 - 担当の想定: Opus（phase-runner）を 1 回（約 5 LW）。WS074 の試験の file と runner は WS074 の物: 変えるなら差分を Q1 に（P8 と調整）。
