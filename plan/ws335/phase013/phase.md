@@ -2,7 +2,7 @@
 
 # ws335-p013: ML-KEM の多項式・符号化・sampling
 
-Status: 実装済み・試験 PASS（2026-11-02 01:45 P6 q1881-i01。cleared は Q1）。前: planned（2026-11-01 p001 が作成。起動は Q1。依存: p003）
+Status: cleared（2026-11-02 01:44 Q1、main 3b0b0dd1e。main で test-mlkem-poly 10117・ct PASS。不正な d の扱いは p035 で header の comment に足す）。前: 実装済み・試験 PASS（2026-11-02 01:45 P6 q1881-i01。cleared は Q1）。前: planned（2026-11-01 p001 が作成。起動は Q1。依存: p003）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

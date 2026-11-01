@@ -12,7 +12,7 @@
 | P3 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU | 起動時の自己試験を既定で off（q1891） | — |
 | P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
 | P5 | [WS334](ws334/ws.md) p033 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 後半の Windows の口（TSF・drag と drop・touchpad など、頁に暗い mode、q1886）。p032: Wine で 15 項 PASS（https・cookie・localStorage・clipboard・dpi） | p035 規約の見直し |
-| P6 | [WS335](ws335/ws.md) p013 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | ML-KEM の多項式（q1881）。p012 RSA・p025 TLS の定数は cleared | p014 ML-KEM-768 |
+| P6 | [WS335](ws335/ws.md) p014 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | K-PKE と ML-KEM-768（q1894）。p013 ML-KEM の多項式は cleared | p015 OS の層 |
 | P7 | [BUG-394](bugs/BUG-394.md) | 起動の時間 | network の待ちの調べ、init が desktop を優先（q1892） | 次は WS340（Pi の graphical boot） |
 | P8 | [BUG-391](bugs/BUG-391.md)・[BUG-392](bugs/BUG-392.md) | compositor の再開と PIN | 落ちた時に desktop（lock 中なら lock の画面）から再開、初期の PIN 0000 と PIN の既定（q1890、QEMU） | — |
 
