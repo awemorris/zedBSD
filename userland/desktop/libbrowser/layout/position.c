@@ -1603,7 +1603,7 @@ position_collect(
 	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
 	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
 		for (child = box->first_child; child != NULL; child = child->next) {
-			if (child->style.order != 0)
+			if (child->style.order != 0 && !child->out_of_flow)
 				break;
 		}
 		if (child != NULL) {
@@ -1615,7 +1615,9 @@ position_collect(
 
 				count = 0;
 				for (child = box->first_child; child != NULL; child = child->next) {
-					for (place = count; place > 0 && ordered[place - 1U]->style.order > child->style.order; place--)
+					/* A box out of the flow is no item: its order does not count. */
+					for (place = count; place > 0 &&
+					    (ordered[place - 1U]->out_of_flow ? 0 : ordered[place - 1U]->style.order) > (child->out_of_flow ? 0 : child->style.order); place--)
 						ordered[place] = ordered[place - 1U];
 					ordered[place] = child;
 					count++;
