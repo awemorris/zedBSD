@@ -65,6 +65,8 @@ static VkResult queue_execute_pending(struct VkDevice_T *device, const struct vu
 static VkResult queue_private_fence(struct VkQueue_T *queue, struct vulkan_queue_fence **result);
 static VkResult queue_enqueue(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, const VkBindSparseInfo *binds, VkFence fence, VkBool32 sparse, VkBool32 locked);
 static VkBool32 queue_unfenced(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, VkFence fence, VkBool32 sparse, VkBool32 locked);
+static VkBool32 queue_handoff(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits);
+static void queue_write_queue_submit(struct VkQueue_T *queue, struct vulkan_writer *writer, struct vulkan_queue_transaction *transaction, uint32_t count, const VkSubmitInfo *submits);
 static VkResult queue_attempt(struct VkQueue_T *queue, uint32_t count, const VkSubmitInfo *submits, const VkBindSparseInfo *binds, VkFence fence, VkBool32 sparse, VkBool32 unfenced, struct vulkan_queue_transaction *transaction, struct vulkan_sync *completion, VkBool32 *accepted, uint64_t *capacity_sequence, VkBool32 *prepared);
 static VkResult queue_reset_completed(struct VkQueue_T *queue);
 static VkResult queue_submit_job(struct VkQueue_T *queue, struct vulkan_writer *writer, uint32_t count, const VkSubmitInfo *submits, uint64_t serial, uint32_t replies, struct vulkan_sync *completion, struct vulkan_reader *reader, VkResult *ended, VkBool32 *prepared, VkBool32 *submitted, VkBool32 *accepted);
@@ -265,6 +267,13 @@ vulkan_queue_finish(
 {
 	struct vulkan_queue_fence *slot;
 
+	/* The submissions handed off from the queue are sent before their places go. */
+	if (queue->handoffs != NULL) {
+		vulkan_sender_drain(queue->device->object.context);
+		vulkan_handoff_ring_destroy(queue->handoffs, &queue->device->object.allocator);
+		queue->handoffs = NULL;
+	}
+
 	/* Device destruction is externally synchronized with every queue operation. */
 	while (queue->private_fences != NULL) {
 		/* Removes cache publication before callbacks may release its final native object. */
@@ -302,6 +311,7 @@ queue_enqueue(
 	VkBool32 accepted;
 	VkBool32 prepared;
 	VkBool32 unfenced;
+	VkBool32 handed;
 	size_t capacity;
 	uint64_t capacity_sequence;
 	uint32_t request;
@@ -378,8 +388,17 @@ queue_enqueue(
 		}
 	}
 
+	/*
+	 * Such a submission goes to the recording thread when it can, and this
+	 * call returns without waiting for the kernel: a failure the thread
+	 * meets afterwards loses the context.
+	 */
+	handed = VK_FALSE;
+	if (unfenced != VK_FALSE)
+		handed = queue_handoff(queue, count, submits);
+
 	/* Every retry takes a fresh capacity snapshot and rebuilds software payload observations. */
-	while (status == VK_SUCCESS) {
+	while (status == VK_SUCCESS && handed == VK_FALSE) {
 		/* Native acceptance is the only operation allowed to consume proposed waits. */
 		transaction.count = 0;
 		status = queue_attempt(queue, count, submits, binds, fence, sparse, unfenced, &transaction, completion, &accepted, &capacity_sequence, &prepared);
@@ -468,6 +487,153 @@ queue_unfenced(
 
 	/* The submission goes without a job. */
 	return VK_TRUE;
+}
+
+/*
+ * Hands a fence-less submission to the recording thread: its transaction
+ * (the recordings whose End waits for it, then QUEUE_SUBMIT) goes into the
+ * queue's next place with the opcodes of the replies it asks for, and the
+ * submission counts as accepted now.  The caller holds the queue's mutex.
+ * Returns whether it was handed off; when not, nothing was consumed and
+ * the caller submits it synchronously.
+ */
+static VkBool32
+queue_handoff(
+	struct VkQueue_T *queue,
+	uint32_t count,
+	const VkSubmitInfo *submits)
+{
+	struct VkDevice_T *device;
+	struct vulkan_context *context;
+	struct vulkan_queue_transaction transaction;
+	struct vulkan_handoff *slot;
+	struct VkCommandBuffer_T *command;
+	struct vulkan_writer *writer;
+	uint8_t *storage;
+	size_t capacity;
+	uint32_t commands;
+	uint32_t request;
+	uint32_t index;
+	uint32_t replies;
+	uint64_t serial;
+	uint64_t mark;
+	VkResult status;
+	VkBool32 allowed;
+
+	/* A submission naming more command buffers than a place has replies for goes synchronously. */
+	device = queue->device;
+	context = device->object.context;
+	commands = 0U;
+	for (request = 0U; request < count; request++) {
+		if (submits[request].commandBufferCount > VULKAN_HANDOFF_COMMANDS - commands)
+			return VK_FALSE;
+		commands += submits[request].commandBufferCount;
+	}
+
+	/* Only with the thread running, the environment and the processors allowing it. */
+	allowed = vulkan_handoff_allowed();
+	if (allowed == VK_FALSE)
+		return VK_FALSE;
+
+	/* A lost context reports its loss the synchronous way. */
+	status = __atomic_load_n(&context->error, __ATOMIC_ACQUIRE);
+	if (status != VK_SUCCESS)
+		return VK_FALSE;
+
+	/* The queue's places, made at its first hand-off. */
+	if (queue->handoffs == NULL) {
+		status = vulkan_handoff_ring_create(&queue->handoffs, &device->object.allocator);
+		if (status != VK_SUCCESS)
+			return VK_FALSE;
+	}
+
+	/* The next place, once the thread has sent what it held. */
+	mark = vulkan_timing_start();
+	slot = vulkan_handoff_take(queue->handoffs);
+
+	/* The submission is encoded, and its shared state changed, while the logical device is serialized. */
+	pthread_mutex_lock(&device->mutex);
+
+	/* A failure observed earlier stops the submission the synchronous way. */
+	status = vulkan_sync_device_status_locked(device);
+	if (status != VK_SUCCESS) {
+		pthread_mutex_unlock(&device->mutex);
+		return VK_FALSE;
+	}
+
+	/* The place's transaction, its storage kept from an earlier submission. */
+	writer = &slot->transaction;
+	storage = writer->data;
+	capacity = writer->capacity;
+	vulkan_writer_init_for_object(writer, &queue->object);
+	writer->data = storage;
+	writer->capacity = capacity;
+
+	/* The recordings whose End waits for this submission, then the submission. */
+	serial = __atomic_add_fetch(&queue_end_serial, 1U, __ATOMIC_RELAXED);
+	replies = 0U;
+	queue_write_pending(writer, count, submits, serial, &replies);
+	memset(&transaction, 0, sizeof(transaction));
+	queue_write_queue_submit(queue, writer, &transaction, count, submits);
+
+	/* A transaction that could not be encoded leaves its recordings waiting, for the synchronous way. */
+	if (writer->error != VK_SUCCESS || replies + 1U > VULKAN_HANDOFF_REPLIES) {
+		pthread_mutex_unlock(&device->mutex);
+		return VK_FALSE;
+	}
+
+	/* The replies the thread reads, in the order the transaction asks for them; the recordings have travelled. */
+	replies = 0U;
+	for (request = 0U; request < count; request++) {
+		for (index = 0U; index < submits[request].commandBufferCount; index++) {
+			command = (struct VkCommandBuffer_T *)submits[request].pCommandBuffers[index];
+			replies += vulkan_command_pending_handoff(command, serial, &slot->expected[replies]);
+		}
+	}
+	slot->expected[replies++] = GPU_OP_QUEUE_SUBMIT;
+	slot->replies = replies;
+
+	/* Swapchain images the submitted command buffers write stop matching their earlier copies. */
+	vulkan_content_commit(device, count, submits);
+
+	pthread_mutex_unlock(&device->mutex);
+
+	/* After every submission handed off before it, in the queue's order. */
+	vulkan_handoff_publish(queue->handoffs, slot, context);
+	vulkan_timing_add(VULKAN_TIMING_HANDOFF, mark, 0);
+
+	/* Succeeded: the recording thread sends the submission. */
+	return VK_TRUE;
+}
+
+/* Encodes a QUEUE_SUBMIT of ordinary submissions, with no fence, that asks for its reply. */
+static void
+queue_write_queue_submit(
+	struct VkQueue_T *queue,
+	struct vulkan_writer *writer,
+	struct vulkan_queue_transaction *transaction,
+	uint32_t count,
+	const VkSubmitInfo *submits)
+{
+	uint32_t request;
+
+	/* The command and its reply flag. */
+	vulkan_write_u32(writer, GPU_OP_QUEUE_SUBMIT);
+	vulkan_write_u32(writer, GPU_OP_FLAG_REPLY);
+	writer->opcode = GPU_OP_QUEUE_SUBMIT;
+
+	/* The queue, then each submission in order. */
+	vulkan_write_u64(writer, queue->object.wire_id);
+	vulkan_write_u32(writer, count);
+	vulkan_write_u64(writer, count);
+	for (request = 0U; request < count; request++)
+		queue_write_submit(writer, transaction, &submits[request]);
+
+	/* No fence. */
+	queue_write_handle(writer, 0U);
+
+	/* Succeeded: the submission is encoded, or the writer holds its failure. */
+	return;
 }
 
 /* Tries one admission and native transaction while its caller owns queue serialization. */

@@ -645,11 +645,11 @@ vulkan_sync_job_reserve(
 		}
 
 		/* Reclaims only previously terminal jobs before reserving another bounded kernel slot. */
-		pthread_mutex_lock(&context->mutex);
+		vulkan_context_lock(context);
 
 		status = sync_notifications_reap_if(context, &retired, 0);
 		if (status != VK_SUCCESS) {
-			pthread_mutex_unlock(&context->mutex);
+			vulkan_context_unlock(context);
 			free(notification);
 			return status;
 		}
@@ -665,7 +665,7 @@ vulkan_sync_job_reserve(
 		saved_error = errno;
 		if (error == 0)
 			break;
-		pthread_mutex_unlock(&context->mutex);
+		vulkan_context_unlock(context);
 
 		/* A full queue tries again after the snapshot; another failure ends the reservation. */
 		if (saved_error == EAGAIN)
@@ -690,7 +690,7 @@ vulkan_sync_job_reserve(
 
 	/* A successful reservation must have an observable, nonzero lifetime identity. */
 	if (request.sequence == 0) {
-		pthread_mutex_unlock(&context->mutex);
+		vulkan_context_unlock(context);
 		free(notification);
 		vulkan_context_error(context, VK_ERROR_DEVICE_LOST);
 		return VK_ERROR_DEVICE_LOST;
@@ -704,7 +704,7 @@ vulkan_sync_job_reserve(
 	sync->notification = request.sequence;
 	*reserved = notification;
 
-	pthread_mutex_unlock(&context->mutex);
+	vulkan_context_unlock(context);
 
 	/* The reservation's time, of a successful one. */
 	vulkan_timing_add(VULKAN_TIMING_RESERVE, mark, 0);
@@ -757,14 +757,14 @@ vulkan_sync_job_finish(
 	}
 
 	/* The transaction retains its ledger entry until the exact kernel decision is known. */
-	pthread_mutex_lock(&context->mutex);
+	vulkan_context_lock(context);
 
 	error = ioctl(context->fd, operation, &action);
 	if (error != 0) {
 		/* Failure after native acceptance is terminal, never an ordinary retryable reservation. */
 		reserved->waiters--;
 		vulkan_context_error(context, VK_ERROR_DEVICE_LOST);
-		pthread_mutex_unlock(&context->mutex);
+		vulkan_context_unlock(context);
 		return VK_ERROR_DEVICE_LOST;
 	}
 
@@ -787,7 +787,7 @@ vulkan_sync_job_finish(
 		reserved->waiters--;
 	}
 
-	pthread_mutex_unlock(&context->mutex);
+	vulkan_context_unlock(context);
 
 	/* Preserves the original native failure after completing its ownership transition. */
 	if (native_status != VK_SUCCESS)
@@ -1064,7 +1064,7 @@ vulkan_sync_job_status(
 		return status;
 
 	/* A consumed ledger entry is terminal; pending entries cannot be reclaimed by a reaper. */
-	pthread_mutex_lock(&context->mutex);
+	vulkan_context_lock(context);
 
 	/* Another reaper may publish loss between the initial sample and this lock acquisition. */
 	status = __atomic_load_n(&context->error, __ATOMIC_ACQUIRE);
@@ -1082,7 +1082,7 @@ vulkan_sync_job_status(
 		notification = sync_notification_find(context, sequence);
 	}
 
-	pthread_mutex_unlock(&context->mutex);
+	vulkan_context_unlock(context);
 
 	/* Reaping preserves device failure even when it consumes the failing record. */
 	if (status != VK_SUCCESS)
@@ -1104,11 +1104,11 @@ vulkan_sync_job_status(
 		/* Another reaper may consume this now-terminal record after the local snapshot. */
 		if (saved_error == ENOENT) {
 			/* A reaper publishes terminal failure under the same lock as its consuming WAIT. */
-			pthread_mutex_lock(&context->mutex);
+			vulkan_context_lock(context);
 
 			status = __atomic_load_n(&context->error, __ATOMIC_ACQUIRE);
 
-			pthread_mutex_unlock(&context->mutex);
+			vulkan_context_unlock(context);
 
 			/* Consuming a failed marker cannot turn its final native use into success. */
 			if (status != VK_SUCCESS)
@@ -1150,11 +1150,11 @@ vulkan_sync_ledger_reap(
 	unsigned retired;
 
 	/* The reap consumes kernel records only while the context owns every ledger pointer. */
-	pthread_mutex_lock(&context->mutex);
+	vulkan_context_lock(context);
 
 	status = sync_notifications_reap_if(context, &retired, 1);
 
-	pthread_mutex_unlock(&context->mutex);
+	vulkan_context_unlock(context);
 
 	/* A consumed failed record has published the device loss. */
 	if (status != VK_SUCCESS)
@@ -1186,12 +1186,12 @@ vulkan_sync_job_retired(
 
 	/* A reaper publishes a failed record's loss under the same lock as its removal from the ledger. */
 	context = sync->object.context;
-	pthread_mutex_lock(&context->mutex);
+	vulkan_context_lock(context);
 
 	status = __atomic_load_n(&context->error, __ATOMIC_ACQUIRE);
 	notification = sync_notification_find(context, sequence);
 
-	pthread_mutex_unlock(&context->mutex);
+	vulkan_context_unlock(context);
 
 	/* Device loss stays terminal even when the failing record is already consumed. */
 	if (status != VK_SUCCESS)
@@ -1325,13 +1325,13 @@ vulkan_timing_add(
 		return;
 	spent = now - start;
 
-	/* The sums, and the largest with its transaction. */
-	timing_sums[part] += spent;
-	timing_counts[part]++;
-	if (spent > timing_most[part]) {
-		timing_most[part] = spent;
+	/* The sums, and the largest with its transaction (the recording thread adds to them too). */
+	(void)__atomic_add_fetch(&timing_sums[part], spent, __ATOMIC_RELAXED);
+	(void)__atomic_add_fetch(&timing_counts[part], 1U, __ATOMIC_RELAXED);
+	if (spent > __atomic_load_n(&timing_most[part], __ATOMIC_RELAXED)) {
+		__atomic_store_n(&timing_most[part], spent, __ATOMIC_RELAXED);
 		if (part == VULKAN_TIMING_CONTEXT_HOLD)
-			timing_hold_opcode = opcode;
+			__atomic_store_n(&timing_hold_opcode, opcode, __ATOMIC_RELAXED);
 	}
 }
 
@@ -1347,9 +1347,13 @@ vulkan_timing_report(
 	static const char *const names[VULKAN_TIMING_PARTS] = {
 		"submit", "quiesce", "queue_lock", "device_lock", "prepare", "reserve", "execute", "finish",
 		"capacity", "context_wait", "context_hold", "present_prepare", "present_record", "present_submit", "present",
-		"private_fence", "reap", "command_ran", "command_deferred",
+		"private_fence", "reap", "command_ran", "command_deferred", "handoff", "handoff_room", "sender_sleep",
+		"sender_wake", "drain",
 	};
 	uint64_t now;
+	uint64_t count;
+	uint64_t sum;
+	uint64_t most;
 	unsigned part;
 
 	/* Off, or not yet time. */
@@ -1365,18 +1369,18 @@ vulkan_timing_report(
 	/* One line: each part that ran. */
 	fprintf(stderr, "VULKAN TIMING");
 	for (part = 0; part < VULKAN_TIMING_PARTS; part++) {
-		if (timing_counts[part] == 0)
+		/* Taken and cleared at once, as the recording thread may add to them meanwhile. */
+		count = __atomic_exchange_n(&timing_counts[part], 0U, __ATOMIC_RELAXED);
+		sum = __atomic_exchange_n(&timing_sums[part], 0U, __ATOMIC_RELAXED);
+		most = __atomic_exchange_n(&timing_most[part], 0U, __ATOMIC_RELAXED);
+		if (count == 0)
 			continue;
 		fprintf(stderr, " %s=%llu/%llu/%llu", names[part],
-			(unsigned long long)timing_counts[part],
-			(unsigned long long)(timing_sums[part] / timing_counts[part] / 1000U),
-			(unsigned long long)(timing_most[part] / 1000U));
-		timing_sums[part] = 0;
-		timing_counts[part] = 0;
-		timing_most[part] = 0;
+			(unsigned long long)count,
+			(unsigned long long)(sum / count / 1000U),
+			(unsigned long long)(most / 1000U));
 	}
-	fprintf(stderr, " hold_opcode=%u (count/average us/largest us)\n", (unsigned)timing_hold_opcode);
-	timing_hold_opcode = 0;
+	fprintf(stderr, " hold_opcode=%u (count/average us/largest us)\n", (unsigned)__atomic_exchange_n(&timing_hold_opcode, 0U, __ATOMIC_RELAXED));
 }
 
 /*
@@ -1572,7 +1576,7 @@ sync_fences_wait(
 
 				sync = vulkan_sync_object((uint64_t)(uintptr_t)fences[index]);
 				sequence = sync->notification;
-				pthread_mutex_lock(&context->mutex);
+				vulkan_context_lock(context);
 
 				/* A previously consumed marker requires only the native observation below. */
 				for (notification = context->notifications; notification != NULL; notification = notification->next) {
@@ -1583,7 +1587,7 @@ sync_fences_wait(
 					}
 				}
 
-				pthread_mutex_unlock(&context->mutex);
+				vulkan_context_unlock(context);
 
 				pthread_mutex_unlock(&device->mutex);
 			}
@@ -1940,7 +1944,7 @@ sync_notifications_unpin(
 		return;
 
 	/* The ledger cannot retire an entry while a waiter owns its pointer. */
-	pthread_mutex_lock(&context->mutex);
+	vulkan_context_lock(context);
 
 	/* Retire every candidate before a later pass selects fresh active payloads. */
 	for (index = 0; index < count; index++) {
@@ -1950,7 +1954,7 @@ sync_notifications_unpin(
 		}
 	}
 
-	pthread_mutex_unlock(&context->mutex);
+	vulkan_context_unlock(context);
 
 	/* Succeeded: ordinary marker reclamation can consume these entries again. */
 	return;
@@ -1971,7 +1975,7 @@ sync_notification_wait(
 	int saved_error;
 
 	/* Another observer may have consumed this marker while retaining the native fence. */
-	pthread_mutex_lock(&context->mutex);
+	vulkan_context_lock(context);
 
 	status = sync_notifications_reap_if(context, &retired, 0);
 	notification = context->notifications;
@@ -1982,7 +1986,7 @@ sync_notification_wait(
 		notification = notification->next;
 	}
 
-	pthread_mutex_unlock(&context->mutex);
+	vulkan_context_unlock(context);
 
 	if (status != VK_SUCCESS)
 		return status;
@@ -2038,11 +2042,11 @@ sync_notification_poll(
 	int error;
 
 	/* Consume unrelated completed markers so level-triggered poll cannot spin on them. */
-	pthread_mutex_lock(&context->mutex);
+	vulkan_context_lock(context);
 
 	status = sync_notifications_reap_if(context, &retired, 0);
 
-	pthread_mutex_unlock(&context->mutex);
+	vulkan_context_unlock(context);
 
 	if (status != VK_SUCCESS)
 		return status;
@@ -2109,12 +2113,12 @@ sync_release_storage(
 
 	context = object->context;
 	sync->notification = 0;
-	pthread_mutex_lock(&context->mutex);
+	vulkan_context_lock(context);
 
 	status = sync_notifications_reap_if(context, &retired, 1);
 	(void)status;
 
-	pthread_mutex_unlock(&context->mutex);
+	vulkan_context_unlock(context);
 
 	/* Succeeded: context close can reclaim even a still-pending detached marker. */
 	return;

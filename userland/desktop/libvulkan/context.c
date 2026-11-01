@@ -40,6 +40,18 @@
 #define VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H264 1U
 #define VULKAN_NATIVE_CAPSET_SYNC_COMMAND 2U
 
+/*
+ * How many context mutexes each thread holds through vulkan_context_lock(),
+ * kept as the thread's value of this key (made once): a transaction begun
+ * while one is held could wait for the recording thread while that thread
+ * waits for the mutex, so the drain refuses to wait then.  A key, not
+ * thread-local storage, because nothing provides the dynamic TLS helper
+ * when the library is linked.
+ */
+static pthread_key_t vulkan_context_depth_key;
+static pthread_once_t vulkan_context_depth_once = PTHREAD_ONCE_INIT;
+static VkBool32 vulkan_context_depth_ready;
+
 /* Retains mapped transport backing through growth, rollback and descriptor close. */
 struct vulkan_transport_storage {
 	struct vulkan_transport_storage *next;
@@ -49,6 +61,8 @@ struct vulkan_transport_storage {
 	void *mapping;
 };
 
+static void vulkan_context_depth_start(void);
+static void vulkan_context_depth_add(int change);
 static VkResult vulkan_kernel_error(struct vulkan_context *context, int error);
 static uint32_t vulkan_load_word(const uint8_t *bytes);
 static VkResult vulkan_context_storage(struct vulkan_context *context, size_t requested, uint64_t *handle, uint32_t *resource, size_t *capacity, void **mapping);
@@ -252,6 +266,9 @@ vulkan_context_close(
 	int descriptor;
 	int status;
 	VkResult error;
+
+	/* What was handed off to the recording thread is sent while the session still exists. */
+	vulkan_sender_drain(context);
 
 	/* Retains the first release failure while still returning all local ownership. */
 	error = VK_SUCCESS;
@@ -511,6 +528,9 @@ vulkan_context_execute(
 	if (writer->bytes < 8 || (writer->bytes & 3) != 0)
 		return VK_ERROR_INITIALIZATION_FAILED;
 
+	/* No submission handed off to the recording thread before this call may come after it. */
+	vulkan_sender_drain(context);
+
 	/* Serializes reply-resource reuse, not GPU fence or presentation completion. */
 	waited = vulkan_timing_start();
 	status = pthread_mutex_lock(&context->mutex);
@@ -553,6 +573,9 @@ vulkan_context_lock(
 	if (status != 0)
 		abort();
 
+	/* Counted, so a transaction begun while it is held is caught. */
+	vulkan_context_depth_add(1);
+
 	/* Succeeded: the caller exclusively owns this session's resource transaction. */
 	return;
 }
@@ -566,6 +589,9 @@ vulkan_context_unlock(
 {
 	int status;
 
+	/* No longer counted as held by this thread. */
+	vulkan_context_depth_add(-1);
+
 	/* An unlock failure would invalidate every later assumption about session ownership. */
 	status = pthread_mutex_unlock(&context->mutex);
 	if (status != 0)
@@ -573,6 +599,59 @@ vulkan_context_unlock(
 
 	/* Succeeded: the next independent transaction may use this GPU session. */
 	return;
+}
+
+/*
+ * Reports how many context mutexes the calling thread holds through vulkan_context_lock().
+ */
+uint32_t
+vulkan_context_held(
+	void)
+{
+	uintptr_t depth;
+
+	/* No key made: no context was ever locked this way. */
+	(void)pthread_once(&vulkan_context_depth_once, vulkan_context_depth_start);
+	if (vulkan_context_depth_ready == VK_FALSE)
+		return 0U;
+
+	/* The calling thread's own count. */
+	depth = (uintptr_t)pthread_getspecific(vulkan_context_depth_key);
+	return (uint32_t)depth;
+}
+
+/* Makes the key that holds each thread's count of context mutexes held. */
+static void
+vulkan_context_depth_start(
+	void)
+{
+	int error;
+
+	/* Without the key the counts are not kept, and nothing is caught. */
+	error = pthread_key_create(&vulkan_context_depth_key, NULL);
+	if (error != 0)
+		return;
+
+	/* Succeeded: the counts are kept. */
+	vulkan_context_depth_ready = VK_TRUE;
+}
+
+/* Changes the calling thread's count of context mutexes held. */
+static void
+vulkan_context_depth_add(
+	int change)
+{
+	uintptr_t depth;
+
+	/* The key, made by the first lock. */
+	(void)pthread_once(&vulkan_context_depth_once, vulkan_context_depth_start);
+	if (vulkan_context_depth_ready == VK_FALSE)
+		return;
+
+	/* The thread's count, one more or one fewer. */
+	depth = (uintptr_t)pthread_getspecific(vulkan_context_depth_key);
+	depth = (uintptr_t)((intptr_t)depth + change);
+	(void)pthread_setspecific(vulkan_context_depth_key, (const void *)depth);
 }
 
 /* Maps kernel allocation pressure separately from a lost renderer session. */
