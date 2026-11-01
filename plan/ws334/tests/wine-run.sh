@@ -570,13 +570,13 @@ fi
 # The page's ground beside start.html's column (x 950 of the 1024 pixels wide window), and the scheme the program gave the page.
 light_page=$(brightness "$out/gpu/first.png" 950 600)
 dark_page=$(brightness "$out/dark/first.png" 950 600)
-light_scheme=$(grep -c '^ZBROWSER SCHEME dark=0' "$out/gpu/first.txt")
-dark_scheme=$(grep -c '^ZBROWSER SCHEME dark=1' "$out/dark/first.txt")
+light_scheme=$(grep -m1 '^ZBROWSER SCHEME' "$out/gpu/first.txt" | sed 's/^ZBROWSER SCHEME //')
+dark_scheme=$(grep -m1 '^ZBROWSER SCHEME' "$out/dark/first.txt" | sed 's/^ZBROWSER SCHEME //')
 if [ "$dark_page" -ge 0 ] && [ "$dark_page" -lt 100 ] && [ "$light_page" -gt 150 ] &&
-    [ "$light_scheme" = 1 ] && [ "$dark_scheme" = 1 ]; then
+    [ "$light_scheme" = dark=0 ] && [ "$dark_scheme" = dark=1 ]; then
 	result PASS M7p "the page's ground in the dark mode: brightness $dark_page dark, $light_page light (prefers-color-scheme, $review/m7-dark.png)"
 else
-	result FAIL M7p "the page's ground: brightness $dark_page dark, $light_page light, SCHEME lines light $light_scheme dark $dark_scheme ($out/dark/first.txt)"
+	result FAIL M7p "the page's ground: brightness $dark_page dark, $light_page light, the first SCHEME lines light '$light_scheme' dark '$dark_scheme' ($out/dark/first.txt)"
 fi
 # The mode changed while it runs: light, then dark again.
 to_light=$(brightness "$out/dark/theme-light.png" 950 600)
