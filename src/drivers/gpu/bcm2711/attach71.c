@@ -13,9 +13,10 @@
  * the driver honors rpi4gpu.off=1, runs discovery (stage V0), which reads
  * nothing behind the engine's power domain, and then holds the engine:
  * nothing powers it until root writes hw.gpu.start=1.  The start then runs
- * the power-up (V1), identification, MMU and interrupts (V2-V4) and the
- * self-test jobs (V5-V9) on the writer's thread, logs one line per stage
- * and returns the first error.  A board where the engine hangs the bus is
+ * the power-up (V1), identification, MMU and interrupts (V2-V4) and, when
+ * the boot asked for the self-test (rpi4gpu.selftest=1), its jobs (V5-V9)
+ * and test pictures on the writer's thread, logs one line per stage and
+ * returns the first error.  A board where the engine hangs the bus is
  * therefore recovered by a power cycle, and the next boot comes up with the
  * engine untouched.
  *
@@ -188,7 +189,7 @@ start_held(void)
 }
 
 /*
- * Powers the engine and runs its self-test, once.
+ * Powers the engine and runs its self-test when the boot asked for it, once.
  *
  * Returns ENODEV when nothing is held, and otherwise the first stage's
  * error, after logging which stage it was.
@@ -236,7 +237,7 @@ start_engine(void)
 		return error;
 	}
 
-	/* Runs the self-test jobs (V5-V9). */
+	/* Runs the self-test jobs (V5-V9) when the boot asked for them. */
 	error = bcm2711_v3d_diagnostic(engine);
 	if (error != 0) {
 		attach_v3d.stage_failed = "V5-V9";
@@ -264,13 +265,14 @@ start_engine(void)
 	if (display_error != 0)
 		return display_error;
 
-	/* Succeeded: the display and the engine are up and every self-test passed. */
+	/* Succeeded: the display and the engine are up, and every self-test asked for passed. */
 	return 0;
 }
 
 /*
  * Runs the display's stages: the readout (P1), the takeover (R0), the
- * vertical blank (R1), the overlay flips (R2) and the display device (R3).
+ * vertical blank (R1), the overlay flips (R2, a test picture shown only for
+ * the self-test) and the display device (R3).
  *
  * Returns 0 when there is no display to start, otherwise the first stage's
  * error after logging it.  The channel keeps the driver's own copy of the
@@ -279,6 +281,7 @@ start_engine(void)
 static int
 start_display(void)
 {
+	bool selftest;
 	int error;
 
 	/* Leaves a board without the display path alone. */
@@ -300,11 +303,14 @@ start_display(void)
 	if (error != 0)
 		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R1 failed (%d)", error);
 
-	/* Moves an overlay with flips. */
-	error = bcm2712_display_overlay_test(&attach_display);
-	if (error != 0) {
-		bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R2 failed (%d)", error);
-		return error;
+	/* Moves an overlay with flips, only when the boot asked for the self-test. */
+	selftest = bcm2711_stage_selftest();
+	if (selftest) {
+		error = bcm2712_display_overlay_test(&attach_display);
+		if (error != 0) {
+			bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R2 failed (%d)", error);
+			return error;
+		}
 	}
 
 	/* Publishes the display device on the console list. */
@@ -313,6 +319,6 @@ start_display(void)
 		return error;
 
 	/* Succeeded: the display stages passed. */
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "display self-test ok");
+	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "display ready");
 	return 0;
 }

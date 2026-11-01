@@ -18,16 +18,23 @@
  * the line:
  *
  *   rpi4gpu.off=1         the driver does not attach at all
+ *   rpi4gpu.selftest=1    the bring-up also runs the self-test: the
+ *                         engine's test jobs (the V9/V10 hang and reset
+ *                         among them) and the display's test pictures
+ *                         (the moving square, the stripes and the
+ *                         checker); none of it runs by default
  *   rpi4gpu.stop=<stage>  the display path stops before that stage
  *   v3d.stop=<stage>      the V3D engine stops before that stage
  *   v3d.tfu=0             textures are converted by the CPU, never the
- *                         texture formatting unit, even when its self-test
- *                         passed
+ *                         texture formatting unit; without it the unit
+ *                         converts them, or, under rpi4gpu.selftest=1,
+ *                         only once its self-test passed
  *   v3d.perf=1            the engine logs its cost report every two seconds
  *                         of work (none by default)
- *   v3d.tfu_probe=1       the boot diagnostic also tries the texture
- *                         formatting unit's one- and two-byte texels and
- *                         its YUV inputs, and logs what each wrote
+ *   v3d.tfu_probe=1       the self-test (rpi4gpu.selftest=1) also tries
+ *                         the texture formatting unit's one- and two-byte
+ *                         texels and its YUV inputs, and logs what each
+ *                         wrote
  */
 
 #include <stdarg.h>
@@ -47,6 +54,9 @@
 
 /* The whole token that keeps the driver from attaching. */
 #define STAGE_OFF_TOKEN			"rpi4gpu.off=1"
+
+/* The whole token that runs the driver's self-test during the bring-up. */
+#define STAGE_SELFTEST_TOKEN		"rpi4gpu.selftest=1"
 
 /* The whole token that keeps texture conversion off the texture formatting unit. */
 #define STAGE_TFU_OFF_TOKEN		"v3d.tfu=0"
@@ -86,6 +96,26 @@ bcm2711_stage_driver_off(
 }
 
 /*
+ * Reports whether the boot asked for the self-test during the bring-up.
+ */
+bool
+bcm2711_stage_selftest(
+	void)
+{
+	const char *line;
+	int present;
+
+	/* Looks for rpi4gpu.selftest=1 among the boot parameters. */
+	line = stage_command_line();
+	present = kern_boot_parameters_token_present(line, STAGE_SELFTEST_TOKEN);
+	if (present)
+		return true;
+
+	/* No self-test by default. */
+	return false;
+}
+
+/*
  * Reports whether the boot asked that textures never be converted by the texture formatting unit.
  */
 bool
@@ -101,7 +131,7 @@ bcm2711_stage_tfu_off(
 	if (present)
 		return true;
 
-	/* The unit converts once its self-test passed. */
+	/* The unit converts textures. */
 	return false;
 }
 

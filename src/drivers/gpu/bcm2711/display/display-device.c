@@ -158,6 +158,10 @@ static void bind_operations(struct display_device *controller);
 /*
  * Registers a confirmed boot output with owned copy storage and complete leases.
  * Registration failures unwind only after the console has no borrowed DMA holds.
+ *
+ * The test pictures of P2 and P3 (two striped frames and a translucent
+ * checker) are shown only when the boot asked for the self-test
+ * (rpi4gpu.selftest=1); otherwise the screen keeps the console.
  */
 int
 bcm2711_display_register(
@@ -165,6 +169,7 @@ bcm2711_display_register(
 {
 	struct display_device *controller;
 	bool allowed;
+	bool selftest;
 	uint32_t slot;
 	int error;
 	int detached;
@@ -232,8 +237,11 @@ bcm2711_display_register(
 		return error;
 	}
 
-	/* Exercises actual native flip and composition before offering the output to userspace. */
-	error = exercise_display(controller);
+	/* Exercises the flips and the composition on the screen only when the boot asked for the self-test. */
+	error = 0;
+	selftest = bcm2711_stage_selftest();
+	if (selftest)
+		error = exercise_display(controller);
 	if (error == 0) {
 		/* A P5 stop preserves the observed P1/P2/P3 result without registering a node. */
 		allowed = bcm2711_stage_allowed(BCM2711_FAMILY_DISPLAY, "P5");

@@ -9,7 +9,8 @@
  * The BCM2712's HVS6 display: discovery (P0), the readout of what the
  * firmware shows (P1), the takeover of the firmware's display list (R0),
  * the pixel valve's vertical blank (R1) and a moving overlay plane flipped
- * through the driver's own lists (R2).
+ * through the driver's own lists (R2).  R2 is a test picture; the
+ * attachment runs it only for the self-test (rpi4gpu.selftest=1).
  *
  * The firmware keeps the mode: the driver writes neither the compositor's
  * control, output buffers and colour conversion nor the pixel valves'
