@@ -18,8 +18,8 @@
 | --- | --- | --- | --- |
 | [ws322-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | cleared（2026-11-01 21:35 Q1、main 261624739。design.md 第 2 版と review 1 回の反映） | （WS318 の completed を待たない、2026-11-01 ユーザー） |
 | ws322-p002 | VF2 の VPU の glue と Wave5 の core の boot、firmware の package（wave511）、実機の probe | planned（P2 q1852） | p001 |
-| ws322-p003 | PowerVR の executor: NV12 の image・plane の view・query pool・capset・queue family | planned | p001 |
-| ws322-p004 | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、vkvideo-probe の DISTINCT） | planned | p002、p003 |
+| ws322-p003 | PowerVR の executor: NV12 の image・plane の view・export・import（Video Player の GPU の道）・query pool・capset・queue family | planned | p001 |
+| ws322-p004 | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、vkvideo-probe の DISTINCT、riscv64 の VP_GPU_PRESENT） | planned | p002、p003 |
 | ws322-p005 | libvulkan の H.265 decode の転送 | planned | WS318 p011a か先に着手（Q322-4） |
 | ws322-p006 | H.265 decode | planned | p004、p005 |
 | ws322-p007 | 速さ（非同期、SLC、命令の queue） | planned | p004 |
@@ -27,7 +27,7 @@
 | ws322-p009 | Wave420L の bring-up と probe | planned | p008 |
 | ws322-p010 | libvulkan の encode の転送 | planned | WS318 p011b か先に着手（Q322-4） |
 | ws322-p011 | executor の H.265 encode | planned | p009、p010 |
-| ws322-p012 | 実機の受け入れ（GPU の直の表示の道の上で） | planned | p006・p007・p011、WS318 p009（Q322-3、2026-11-01 ユーザー） |
+| ws322-p012 | 実機の受け入れ（Video Player の GPU の道での再生） | planned | p006・p007・p011 |
 | ws322-p013 | 規約の全文の見直し | planned | 全部 |
 
 ### 実装の Phase の案（2026-11-01 P2、design.md §15。Q1 の受け入れの後に表へ）
@@ -56,6 +56,7 @@
 - Q322-7 libmedia の DISTINCT の道に bug が出たら、WS322 p004 の中で最小に直し、WS318 の担当に知らせる（A）。
 - （2026-11-01 21:41）Q322-2: ユーザーから、Wave420L の参考の source は file の SPDX の BSD-3-Clause を採って使う（A）、という趣旨の答えを受けた。値と手順だけを出典つきで使い、code・comment・構造・名前は写さない。食い違いは記録に残し、権利者の異議があれば encode の部分を外す。
 - （2026-11-01 21:41）Q322-3: ユーザーから、GPU で直に表示する道（WS318 の p006b・p007a・p009、decode の絵を CPU に読み出さずに表示する）を先に実装する、という趣旨の答えを受けた。WS322 の受け入れ（p012）はその道の上で決め直す。
+- （2026-11-01 21:42）上の Q322-3 の前提を直した: GPU で直に表示する道は WS243 で Video Player に既にあった（VP_GPU_PRESENT、RTX で 1080p60、arm64・amd64 で有効）。ユーザーから、WS318 を始めず、WS322 の p003・p004 で VF2 をこの既存の道に載せる（riscv64 の VP_GPU_PRESENT、PowerVR の NV12 の export・import と plane の view）、という趣旨の答えを受けた。受け入れはこの道での再生で決める。
 
 ## Resume point
 
