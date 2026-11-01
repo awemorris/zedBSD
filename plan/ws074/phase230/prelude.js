@@ -859,6 +859,11 @@
         index = entries.indexOf(o.entry);
       }
       h = { url: o.url, type: o.type, current: index, from: initialBlank() ? null : packEntry(old), entries: list.map(packEntry) };
+      if (o.attribute) {
+        // The frame's element sets the source: the document loads from the attribute, with these entries.
+        Object.defineProperty(frame, '__zedNav', { value: h, writable: true, configurable: true, enumerable: false });
+        return true;
+      }
       if (!initialBlank()) {
         unloading = true;
         if (!unloadAsked) fire(g, new Event('beforeunload', { cancelable: true }));
@@ -1081,6 +1086,15 @@
         writable: true, configurable: true, enumerable: false });
     }
 
+    // The frame's element is about to load a source from an attribute: the navigate event fires, and false says a listener
+    // cancelled the navigation.
+    function attributeNavigate(url) {
+      var frame = native.frameElement();
+      if (!frame || !native.fullyActive() || unloading) return true;
+      delete frame.__zedNav;
+      fireNavigate({ type: 'push', url: url, navState: null, sameDocument: false, attribute: true });
+      return !!frame.__zedNav || initialBlank();
+    }
     class Navigation extends EventTarget {
       constructor(key) {
         if (key !== KEY) throw new TypeError('Illegal constructor');
@@ -1104,8 +1118,8 @@
         }
         return EventTarget.prototype.removeEventListener.apply(this, arguments);
       }
-      entries() { return active() ? entries.map(nhe) : []; }
-      get currentEntry() { return active() ? nhe(entries[current]) : null; }
+      entries() { return native.fullyActive() ? entries.map(nhe) : []; }
+      get currentEntry() { return native.fullyActive() ? nhe(entries[current]) : null; }
       updateCurrentEntry(options) {
         var state;
         if (arguments.length < 1) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': 1 argument required.");
@@ -1119,8 +1133,8 @@
       }
       get transition() { return transition; }
       get activation() { return activation; }
-      get canGoBack() { return active() && current > 0; }
-      get canGoForward() { return active() && current < entries.length - 1; }
+      get canGoBack() { return native.fullyActive() && current > 0; }
+      get canGoForward() { return native.fullyActive() && current < entries.length - 1; }
       navigate(url, options) {
         var handling, u, state = null, t;
         options = dictionary(options, 'NavigationNavigateOptions');
@@ -1455,6 +1469,7 @@
       entries.push(makeEntry(null, null, null, null));
       activation = initialBlank() ? null : new NavigationActivation(KEY, null, nhe(entries[0]), 'push');
     }
+    hidden(navigation, '_attr', attributeNavigate);
     def(g, 'navigation', navigation);
     def(g, 'history', new History(KEY));
     [['Navigation', Navigation], ['NavigationHistoryEntry', NavigationHistoryEntry], ['NavigationDestination', NavigationDestination],

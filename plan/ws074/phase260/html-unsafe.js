@@ -21,3 +21,32 @@
       configurable: true, enumerable: true
     });
   }
+  // ---- An iframe's src or srcdoc set from a script: the frame's own navigate event fires first, and may cancel the load.
+  (function () {
+    var proto = typeof g.HTMLIFrameElement === 'function' ? g.HTMLIFrameElement.prototype : null;
+    function wrap(name) {
+      var d = proto && Object.getOwnPropertyDescriptor(proto, name);
+      if (!d || !d.get || !d.set) return;
+      Object.defineProperty(proto, name, {
+        get: d.get,
+        set: function (v) {
+          var w, url;
+          if (this.isConnected && this.ownerDocument === g.document) {
+            try {
+              w = this.contentWindow;
+              if (w && w.navigation && w.navigation._attr) {
+                if (name === 'srcdoc') url = 'about:srcdoc';
+                else if (this.getAttribute('srcdoc') === null) url = new URL(String(v), g.document.baseURI).href;
+                if (url !== undefined && !w.navigation._attr(url)) return;
+              }
+            } catch (e) { }
+          }
+          d.set.call(this, v);
+        },
+        configurable: true, enumerable: true
+      });
+    }
+    wrap('src');
+    wrap('srcdoc');
+  })();
+
