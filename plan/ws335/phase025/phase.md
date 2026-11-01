@@ -2,7 +2,7 @@
 
 # ws335-p025: TLS の定数・suite の表・presentation language の reader/writer
 
-Status: 実装済み・試験 PASS（2026-11-02 Sonnet q1878-i01。cleared の判定は Q1）
+Status: cleared（2026-11-02 01:07 Q1、main で test-tls 2230・test-buf 1559755 PASS）。前: 実装済み・試験 PASS（2026-11-02 Sonnet q1878-i01。cleared の判定は Q1）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

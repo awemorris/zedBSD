@@ -2,7 +2,7 @@
 
 # ws324-p009a NVENC の channel（段 nvenc-channel）: engine の確保、class の bind、firmware の確かめ、RC の通知の記録
 
-Status: 受け入れ達成（2026-11-02 00:58 P1、q1880-i01。cleared は Q1）
+Status: cleared（2026-11-02 01:07 Q1、main a43959d8e。10.0.10.3 で NVENC の channel（class c4b7、chid 49）が開き engine 自身が semaphore を release、GSP-RM が NVENC の ucode を持つ（追加の firmware 不要）、channel error 0、NVDEC は前と同じ）。前: 受け入れ達成（2026-11-02 00:58 P1、q1880-i01。cleared は Q1）
 
 - WS: [WS324](../ws.md)。設計: [design.md](../design.md) §3.1・§3.3（firmware）・§7.1・§9・§12 R5・§14.1 T3・§14.3・§15。
 - 基点: main `0a4779015`（worktree `/home/awe/zedBSD-worktrees/p1-ws324`、branch `agent/p1-ws324`）。

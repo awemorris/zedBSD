@@ -2,7 +2,7 @@
 
 # ws335-p012: RSA の署名の確かめ（PKCS#1 v1.5・PSS）
 
-Status: 実装済み・試験 PASS（2026-11-02 00:50 P6。cleared は Q1。依存: p007、p002）
+Status: cleared（2026-11-02 01:07 Q1、main 9aa6bae4d。test-rsa 31057 PASS）。前: 実装済み・試験 PASS（2026-11-02 00:50 P6。cleared は Q1。依存: p007、p002）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

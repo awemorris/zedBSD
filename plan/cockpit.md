@@ -7,12 +7,12 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS324](ws324/ws.md) p009a | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の channel を開く（q1880、10.0.10.3） | p009b NVENC の関門（上限なし） |
+| P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の関門: I・P の絵の encode（q1884、上限なし）。p009a: NVENC の channel が開き、追加の firmware 不要 | p010 encode の共通の executor |
 | P2 | [WS322](ws322/ws.md) p004 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | H.264 decode の道（q1869）。p003: PowerVR の NV12・plane の view・export を VF2 で確かめた | p005〜p007 |
 | P3 | — | — | 返却（23:19）。WS291 p027 の amd64・Venus の回帰 PASS | 未割当 |
 | P4 | — | Bug の修正の担当 | 返却（22:48）。WS291 p027 の Pi 5・VF2 の回帰 PASS | 次の Bug の割当を待つ |
 | P5 | [WS334](ws334/ws.md) p032 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | Wine での確かめの第 1 回（q1874）。p031: zip（23 file、DLL なし、icon・版の情報） | p033・p034（並べられる） |
-| P6 | [WS335](ws335/ws.md) p012 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | RSA の署名の確かめ（q1870）。p011 ECC は cleared | p009 Ed25519 |
+| P6 | [WS335](ws335/ws.md) p013 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | ML-KEM の多項式（q1881）。p012 RSA・p025 TLS の定数は cleared | p014 ML-KEM-768 |
 | P7 | — | — | 返却（22:26）。WS334 p027 の QEMU の guest の確かめ PASS（画面: build/review/p027-guest/） | 未割当 |
 | P8 | — | — | 返却（00:41）。menuconfig の host 試験を全項目 PASS に（Pi 5 を menu に、CI の config の round trip の誤りを直した） | 未割当 |
 

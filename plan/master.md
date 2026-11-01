@@ -26,15 +26,15 @@
 
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
-| P1 | q1880 `p1-ws324` | [WS324](ws324/ws.md) p009a: RTX の NVENC の channel を開く（10.0.10.3）。p006a の H.265 の解析の設計と骨格は cleared |
+| P1 | q1884 `p1-ws324` | [WS324](ws324/ws.md) p009b: NVENC の関門（I・P の絵を encode、上限なし）。p009a の channel は cleared |
 | P2 | q1869 `p2-ws322` | [WS322](ws322/ws.md) p004: VF2 の H.264 decode の道（p001〜p003 は cleared） |
 | P5 | q1874 `p5-ws334b` | [WS334](ws334/ws.md) p032: Wine での確かめの第 1 回（p031 配る形は cleared） |
-| P6 | q1870 `p6-ws335b` | [WS335](ws335/ws.md) p012: RSA の署名の確かめ（p004・p005・p007・p010・p011 は cleared） |
+| P6 | q1881 `p6-ws335b` | [WS335](ws335/ws.md) p013: ML-KEM の多項式（p012 RSA は cleared） |
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
 | P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
 | P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
-| Sonnet ×3 | q1876・q1877・q1878 | [WS335](ws335/ws.md) p009 Ed25519・p016 DER と PEM・p025 TLS の定数と読み書き（2026-11-02 ユーザー） |
-| Sonnet | q1879 `s-ws324-p006b` | [WS324](ws324/ws.md) p006b: H.265 の解析の nal・scaling・vui |
+| Sonnet ×3 | q1876・q1877・q1882 | [WS335](ws335/ws.md) p009 Ed25519・p016 DER と PEM・p027 鍵の schedule（p025 は cleared） |
+| Sonnet | q1883 `s-ws324-p006c` | [WS324](ws324/ws.md) p006c: H.265 の解析の rps・ps（p006b は cleared） |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
 - 起動しない pending: q1836（WS336 p009 ssh-auth）。q1837（WS334 p025）は P5 の q1843 へ、q1835（WS335 p004）は P6 の q1844 へ。
@@ -111,7 +111,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-390 · q1881 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-390 · q1885 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

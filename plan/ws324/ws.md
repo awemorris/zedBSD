@@ -25,7 +25,7 @@
 | [ws324-p006f](phase006f/phase.md) | h265-std の実装（Sonnet） | planned | p006a 段 2 |
 | [ws324-p006g](phase006g/phase.md) | h265-stream の実装（Sonnet） | planned | p006d |
 | [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | planned | p006e〜g |
-| [ws324-p009a](phase009a/phase.md) | NVENC の channel（段 nvenc-channel、class の bind、firmware の確かめ、RC の通知の記録） | 受け入れ達成（2026-11-02 00:58 P1 q1880-i01。実機で `nvenc-channel ok`、NVENC 自身の release、RC 0。cleared は Q1） | 実機 |
+| [ws324-p009a](phase009a/phase.md) | NVENC の channel（段 nvenc-channel、class の bind、firmware の確かめ、RC の通知の記録） | cleared（2026-11-02 01:07 Q1、main a43959d8e。10.0.10.3 で NVENC の channel（class c4b7、chid 49）が開き engine 自身が semaphore を release、GSP-RM が NVENC の ucode を持つ（追加の firmware 不要）、channel error 0、NVDEC は前と同じ） | 実機 |
 
 ### 実装の Phase の案（2026-11-01 P1、[design.md](design.md) 第 2 版 §15。Q1 の受け入れの後に表へ）
 
@@ -41,7 +41,6 @@
 | p007 | H.265 decode の実機の debug | p005、p006i、実機 |
 | p008a | libvulkan の encode の転送（queue と H.264、命令の番号、video の query pool、capset の bit 3） | p003、Q324-3 |
 | p008b | libvulkan の encode の転送（H.265、capset の bit 4） | p008a |
-| p009a | NVENC の channel（段 nvenc-channel、RC の通知の記録） | 実機 |
 | p009b | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode、時間の上限） | p009a、Q324-4 |
 | p010 | encode の共通の executor（NV12 の入力の copy、16x16 の DPB、session、feedback、parameter set の書き出し） | p008a、p009b |
 | p011 | H.264 encode と vkencode-probe | p010 |

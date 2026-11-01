@@ -5,11 +5,11 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner-high | ws324 p009a NVENC の channel (q1880-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | in-progress（2026-11-02 00:41 起動、10.0.10.3） | 6b136a2ae（merge e1eaa6761） |
+| P1 | phase-runner-high | ws324 p009b NVENC の関門 (q1884-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | in-progress（2026-11-02 01:07、10.0.10.3） | dce8421af（merge a43959d8e） |
 | P2 | phase-runner-high | ws322 p004 H.264 decode の道 (q1869-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 23:51 起動、VF2） | d1af4687c（merge 361044f95） |
 | P3 | phase-runner-high | ws291 p027 の回帰 amd64・Venus (q1859-i01) | `/home/awe/zedBSD-worktrees/p3-ws291reg` / `agent/p3-ws291reg` | 返却（2026-11-01 23:19、PASS） | 73669b953（merge 6f49769e7） |
 | P5 | phase-runner-high | ws334 p032 Wine の確かめ (q1874-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-02 00:19 起動） | 22e46046c（merge f9c278fa5） |
-| P6 | phase-runner-low | ws335 p012 RSA (q1870-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 23:51 起動） | f14b5b34a（merge 2d7097dd3） |
+| P6 | phase-runner-low | ws335 p013 ML-KEM の多項式 (q1881-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-02 01:07） | 4e7214b51（merge 9aa6bae4d） |
 | P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |
 | P4 | phase-runner-high | ws291 p027 の回帰 arm64・riscv64 (q1860-i01) | `/home/awe/zedBSD-worktrees/p4-ws291reg` / `agent/p4-ws291reg` | 返却（2026-11-01 22:48、PASS） | 42ae7d081（merge b29f3a5ae） |
 | P8 | phase-runner-high | menuconfig の host 試験の直し (q1873-i01) | `/home/awe/zedBSD-worktrees/p8-menutest` / `agent/p8-menutest` | 返却（2026-11-02 00:41、PASS） | c2d396e24（merge cc506bb26） |
@@ -21,5 +21,6 @@
 - 試験の担当 T・ブラウザの B1 は今は立てていない。
 | Sonnet | phase-runner-low | ws335 p009 (q1876-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p009` / `agent/s-ws335-p009` | in-progress（2026-11-02 00:24 起動） | — |
 | Sonnet | phase-runner-low | ws335 p016 (q1877-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p016` / `agent/s-ws335-p016` | in-progress（2026-11-02 00:24 起動） | — |
-| Sonnet | phase-runner-low | ws335 p025 (q1878-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p025` / `agent/s-ws335-p025` | in-progress（2026-11-02 00:24 起動） | — |
-| Sonnet | phase-runner-low | ws324 p006b (q1879-i01) | `/home/awe/zedBSD-worktrees/s-ws324-p006b` / `agent/s-ws324-p006b` | in-progress（2026-11-02 00:33 起動） | — |
+
+| Sonnet | phase-runner-low | ws335 p027 (q1882-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p027` / `agent/s-ws335-p027` | in-progress（2026-11-02 01:07 起動） | — |
+| Sonnet | phase-runner-low | ws324 p006c (q1883-i01) | `/home/awe/zedBSD-worktrees/s-ws324-p006c` / `agent/s-ws324-p006c` | in-progress（2026-11-02 01:07 起動） | — |

@@ -47,8 +47,8 @@
 | [p009](phase009/phase.md) | Ed25519（test-ed25519） | planned（Sonnet q1876） | p008 |
 | [p010](phase010/phase.md) | P-256・P-384 の群（test-ecp） | cleared（2026-11-01 23:19 Q1、main 47700ab9c。main で run-unit all・run-ct ecp PASS を流し直した） | p007 |
 | [p011](phase011/phase.md) | ECC: 鍵の生成・ECDH・ECDSA の確かめ（test-ecc） | cleared（2026-11-01 23:51 Q1、main 2d7097dd3。main で run-unit all・run-ct ecc PASS） | p010 |
-| [p012](phase012/phase.md) | RSA の署名の確かめ（PKCS#1 v1.5・PSS）（test-rsa） | 実装済み・試験 PASS（2026-11-02 00:50 P6。test-rsa 31057 checks、posix・win32 PASS、97 通りの破壊のうち 84 通りが試験の失敗・6 通りが crash、見逃し 7 通りは等価か ASan でだけ見える。cleared は Q1） | p007、p002 |
-| [p013](phase013/phase.md) | ML-KEM の多項式・符号化・sampling（test-mlkem-poly） | planned | p003 |
+| [p012](phase012/phase.md) | RSA の署名の確かめ（PKCS#1 v1.5・PSS）（test-rsa） | cleared（2026-11-02 01:07 Q1、main 9aa6bae4d。test-rsa 31057 PASS） | p007、p002 |
+| [p013](phase013/phase.md) | ML-KEM の多項式・符号化・sampling（test-mlkem-poly） | planned（P6 q1881） | p003 |
 | [p014](phase014/phase.md) | K-PKE と ML-KEM-768（test-mlkem） | planned | p013 |
 | [p015](phase015/phase.md) | OS の層（POSIX と Windows）（test-os） | planned | p002 |
 | [p016](phase016/phase.md) | DER の reader と PEM・base64（test-der、test-pem） | planned（Sonnet q1877） | p002 |
@@ -60,9 +60,9 @@
 | [p022](phase022/phase.md) | 公開の X509（d2i_X509 ほか）と内部の store の生成（test-api-x509） | planned | p020、p021 |
 | [p023](phase023/phase.md) | 公開の EVP の digest・ChaCha20・Poly1305（test-api-evp） | planned | p021、p006、p002 |
 | [p024](phase024/phase.md) | 公開の EVP_PKEY（Ed25519・X25519・ML-KEM-768）（test-api-pkey） | planned | p021、p009、p008、p014 |
-| [p025](phase025/phase.md) | TLS の定数・suite の表・presentation language の reader/writer（test-tls、test-buf） | 実装済み・試験 PASS（2026-11-02 Sonnet q1878-i01。test-tls 2230・test-buf 1559755 checks、posix・win32・check-skeleton・run-unit all PASS。cleared は Q1） | p002 |
+| [p025](phase025/phase.md) | TLS の定数・suite の表・presentation language の reader/writer（test-tls、test-buf） | cleared（2026-11-02 01:07 Q1、main で test-tls 2230・test-buf 1559755 PASS） | p002 |
 | [p026](phase026/phase.md) | record の保護（test-record） | planned | p025、p005、p006 |
-| [p027](phase027/phase.md) | transcript と鍵の schedule（1.3 と 1.2）（test-keysched） | planned | p025、p002 |
+| [p027](phase027/phase.md) | transcript と鍵の schedule（1.3 と 1.2）（test-keysched） | planned（Sonnet q1882） | p025、p002 |
 | [p028](phase028/phase.md) | handshake の message の encode と syntax の確かめ（test-msg） | planned | p025 |
 | [p029](phase029/phase.md) | handshake の共通と TLS 1.3（test-hs13） | planned | p027、p028、p020、p011、p008、p037 |
 | [p030](phase030/phase.md) | TLS 1.2 の handshake（test-hs12） | planned | p029、p037 |
