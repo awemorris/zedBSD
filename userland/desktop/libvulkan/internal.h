@@ -471,7 +471,8 @@ enum vulkan_device_extension_bits {
 	VULKAN_DEVICE_VIDEO_DECODE_QUEUE = 1024,
 	VULKAN_DEVICE_VIDEO_DECODE_H264 = 2048,
 	VULKAN_DEVICE_DISPLAY_CONTROL = 4096,
-	VULKAN_DEVICE_INCREMENTAL_PRESENT = 8192
+	VULKAN_DEVICE_INCREMENTAL_PRESENT = 8192,
+	VULKAN_DEVICE_VIDEO_DECODE_H265 = 16384
 };
 
 /* Owns a completed reply after the transport transaction unlocks. */
@@ -527,11 +528,13 @@ struct vulkan_context {
 	VkBool32 native_quiescence;
 	VkBool32 copy_display;
 	/*
-	 * The native renderer's promise of an H.264 decode queue family.  Only
-	 * a session whose capability record carries the native word can set it,
-	 * and it is what lets the video extensions be named at all.
+	 * The native renderer's promises of an H.264 and of an H.265 decode
+	 * queue family.  Only a session whose capability record carries the
+	 * native word can set them, and one of them is what lets the video
+	 * extensions be named at all.
 	 */
 	VkBool32 video_h264;
+	VkBool32 video_h265;
 	/*
 	 * The native renderer's promise that GPU_COMMAND runs a transaction at
 	 * once on the caller's thread, its replies written when the call
@@ -1109,7 +1112,7 @@ void vulkan_sender_drain(struct vulkan_context *context);
 /* How many context mutexes the calling thread holds through vulkan_context_lock(). */
 uint32_t vulkan_context_held(void);
 
-/* Checks a video profile list on an image query against the one supported profile. */
+/* Checks a video profile list on an image query against the supported decode profiles. */
 VkResult
 vulkan_video_profile_list_check(
 	struct VkPhysicalDevice_T *physical,

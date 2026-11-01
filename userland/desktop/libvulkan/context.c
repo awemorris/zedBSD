@@ -39,6 +39,7 @@
 #define VULKAN_NATIVE_CAPSET_MAGIC 0x5a4e4154U
 #define VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H264 1U
 #define VULKAN_NATIVE_CAPSET_SYNC_COMMAND 2U
+#define VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H265 4U
 
 /*
  * How many context mutexes the calling thread holds through
@@ -226,9 +227,10 @@ vulkan_context_open(
 	}
 
 	/*
-	 * Only the native renderer's record carries the native word.  The video
-	 * decode bit is the renderer's promise that a video decode queue family
-	 * exists, the command bit its promise that GPU_COMMAND runs at once
+	 * Only the native renderer's record carries the native word.  Each video
+	 * decode bit (H.264, H.265) is the renderer's promise that a video
+	 * decode queue family of that codec exists and that it reads the codec's
+	 * structures on the video wire, the command bit its promise that GPU_COMMAND runs at once
 	 * (used only with the decoder's notifications); unknown bits are
 	 * ignored so a later renderer stays usable.
 	 */
@@ -238,6 +240,9 @@ vulkan_context_open(
 		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
 		    (native_flags & VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H264) != 0)
 			context->video_h264 = VK_TRUE;
+		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
+		    (native_flags & VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H265) != 0)
+			context->video_h265 = VK_TRUE;
 		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
 		    (native_flags & VULKAN_NATIVE_CAPSET_SYNC_COMMAND) != 0 &&
 		    (context->capabilities & GPU_CAP_NOTIFICATION) != 0)
