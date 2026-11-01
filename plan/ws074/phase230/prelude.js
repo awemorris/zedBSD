@@ -2221,6 +2221,8 @@
       return new g.DOMRect(x0, y0, x1 - x0, y1 - y0);
     });
   })();
+// @include plan/ws074/phase260/caret.js
+// @include plan/ws074/phase260/html-unsafe.js
   // ---- Popover: the popover attribute and showPopover(), hidePopover(), togglePopover() (the top layer is a high z-index)
   if (typeof g.Element === 'function' && !g.Element.prototype.showPopover) (function () {
     function kind(element) {

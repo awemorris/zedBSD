@@ -211,7 +211,7 @@ bind_frame_install(
 	}
 
 	/* Blank contexts need a copied inherited fallback before publication. */
-	if (error == 0 && document->resource_url == NULL) {
+	if (error == 0 && (document->resource_url == NULL || vm_string_equal_ascii(document->resource_url, "about:srcdoc"))) {
 		error = bind_document_url(parent->document, 1, &base);
 		if (error == 0) {
 			made->base_url = vm_string_from_utf8(heap, wb_buffer_string(&base), base.length);
