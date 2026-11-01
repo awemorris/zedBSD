@@ -36,6 +36,7 @@ struct kwl_role_request {
 	unsigned session;
 	unsigned greeter;
 	unsigned control_fd;
+	unsigned locked;
 	unsigned lock_idle;
 	unsigned timeout;
 	unsigned max_frames;

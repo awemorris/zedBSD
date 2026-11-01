@@ -37,6 +37,9 @@
  *   POWER poweroff|reboot   OK; FAIL others; ERROR (login screen and session, power-zedbsd.c)
  *   SERVICE sshd on|off|status  SERVICE available= ...; DENIED; ERROR (a session, sharing-zedbsd.c)
  *   LOGOUT                  QUIT: the greeter is up, the session ends
+ *   LOCKED, UNLOCKED        (none): the session's lock screen shows, or has
+ *                           gone (a session that crashes starts again with
+ *                           it then)
  *   RELEASED                (none): the display has been given back
  *
  * READY is said just before the compositor first takes the display, when
@@ -259,6 +262,28 @@ kl_backend_session_logout(
 	backend->logout_asked = 1U;
 	backend->logout_ms = 0U;
 	return 0;
+}
+
+/*
+ * Tells sessiond that the session's lock screen shows (LOCKED) or has gone
+ * (UNLOCKED); it has no answer.
+ */
+int
+kl_backend_session_lock_state(
+	struct kl_backend *backend,
+	unsigned locked)
+{
+	int error;
+
+	/* Only a session sessiond started and still listens to. */
+	if (backend == NULL)
+		return EINVAL;
+	if (backend->options.session_descriptor < 0 || backend->session_gone)
+		return ENOTSUP;
+
+	/* The word, which asks for nothing. */
+	error = session_send(backend, KL_BACKEND_SESSION_NONE, locked ? "LOCKED\n" : "UNLOCKED\n");
+	return error;
 }
 
 /*

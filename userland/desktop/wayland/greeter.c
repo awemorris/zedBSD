@@ -44,11 +44,11 @@
  *
  * The PIN (ws172-p002, docs/architecture/security.md "Login
  * authentication"): sessiond says which styles the user may use now
- * (STYLES); when the PIN is one the field takes the PIN first, and a link
- * under it switches between the PIN and the password.  Nothing is checked
- * here: /sbin/passkey checks both, and sessiond offers the PIN only after
- * the user's password since it started and turns it off after five wrong
- * ones.
+ * (STYLES); when the PIN is one the field takes the PIN first, with the
+ * keypad under it, and a link under it switches between the PIN and the
+ * password.  A PIN has four to six digits.  Nothing is checked here:
+ * /sbin/passkey checks both, and sessiond turns the PIN off after five
+ * wrong ones until the password.
  *
  * The screen is the blurred wallpaper with the time, large, and the date
  * above the middle (ws187-p001, lock-clock.c: sized by the output's
@@ -130,8 +130,9 @@
 #define GREETER_STYLE_HEIGHT	40
 #define GREETER_STYLE_MARGIN	20
 
-/* A PIN's digits. */
-#define GREETER_PIN_DIGITS	6U
+/* A PIN's fewest and most digits. */
+#define GREETER_PIN_MIN		4U
+#define GREETER_PIN_MAX		6U
 
 /* The fewest characters of a security key's own PIN (CTAP 2.1). */
 #define GREETER_KEY_PIN_MIN	4U
@@ -388,6 +389,7 @@ static void greeter_styles_take(struct kwl_server *server);
 static void greeter_style_switch(struct kwl_server *server);
 static void greeter_erase(void);
 static int greeter_keypad_wanted(void);
+static void greeter_lock_tell(struct kwl_server *server);
 static int greeter_field_wanted(void);
 static void greeter_draw_keypad(struct kwl_server *server, struct kwl_list *command, const struct greeter_layout *layout);
 static void greeter_keypad_press(struct kwl_server *server, const struct greeter_layout *layout, unsigned index);
@@ -497,10 +499,11 @@ kwl_lock(
 	/* A swap of arranged windows being dragged is given up (arrange-shell.c, ws177-p036). */
 	kwl_arrange_swap_cancel(server, "lock");
 
-	/* Succeeded: the lock screen shows. */
+	/* Succeeded: the lock screen shows, and sessiond knows (a session that crashes now starts again locked). */
 	server->locked = 1U;
 	server->dirty = 1;
 	printf("KWL LOCK locked reason=%s user=%s manual=%u\n", reason, greeter_users[0].name, greeter_lock_manual);
+	greeter_lock_tell(server);
 	return 1;
 }
 
@@ -533,6 +536,7 @@ kwl_lock_release(
 	server->lock_input_ms = kwl_milliseconds();
 	server->dirty = 1;
 	printf("KWL LOCK unlocked reason=%s\n", reason);
+	greeter_lock_tell(server);
 
 	/* The keys there may have changed while it was locked (ws199-p001). */
 	kwl_system_keys_changed(server);
@@ -1200,7 +1204,7 @@ greeter_layout(
 	layout->login[2] = GREETER_FIELD;
 	layout->login[3] = GREETER_FIELD;
 
-	/* The keypad's keys under the field (its letters, or its digits; the six digits of the PIN have the digits alone). */
+	/* The keypad's keys under the field (its letters, or its digits; the PIN has the digits alone). */
 	layout->key_count = 0U;
 	greeter_keypad.digits_only = 0U;
 	if (greeter_style == KL_BACKEND_STYLE_PIN)
@@ -1861,11 +1865,11 @@ greeter_type_character(
 	if (!wanted)
 		return;
 
-	/* The PIN takes six digits only. */
+	/* The PIN takes six digits at most. */
 	if (greeter_style == KL_BACKEND_STYLE_PIN) {
 		if (character < '0' || character > '9')
 			return;
-		if (greeter_password_length >= GREETER_PIN_DIGITS)
+		if (greeter_password_length >= GREETER_PIN_MAX)
 			return;
 	}
 
@@ -1901,9 +1905,9 @@ greeter_submit(
 	if (attempting)
 		greeter_erase();
 
-	/* A PIN is six digits; a shorter one is not sent (it would count as a wrong one). */
-	if (greeter_style == KL_BACKEND_STYLE_PIN && greeter_password_length != GREETER_PIN_DIGITS) {
-		snprintf(greeter_message, sizeof(greeter_message), "%s", kl_tr("A PIN has six digits."));
+	/* A PIN is four to six digits; a shorter one is not sent (it would count as a wrong one). */
+	if (greeter_style == KL_BACKEND_STYLE_PIN && (greeter_password_length < GREETER_PIN_MIN || greeter_password_length > GREETER_PIN_MAX)) {
+		snprintf(greeter_message, sizeof(greeter_message), "%s", kl_tr("A PIN has four to six digits."));
 		server->dirty = 1;
 		return;
 	}
@@ -2162,7 +2166,7 @@ greeter_refused(
 	const char *reason;
 	int same;
 
-	/* The PIN is off now (five wrong ones, or not offered since the start): the password. */
+	/* The PIN is off now (five wrong ones): the password. */
 	reason = kl_backend_session_reason(server->backend);
 	same = strcmp(reason, "pin-off");
 	if (same == 0) {
@@ -2236,6 +2240,20 @@ greeter_unlock(
 	server->lock_input_ms = kwl_milliseconds();
 	kwl_lid_unlocked(&server->lid);
 	kwl_system_keys_changed(server);
+	greeter_lock_tell(server);
+}
+
+/* Tells sessiond whether the lock screen shows; a session without one has nothing to tell. */
+static void
+greeter_lock_tell(
+	struct kwl_server *server)
+{
+	int error;
+
+	/* LOCKED or UNLOCKED. */
+	error = kl_backend_session_lock_state(server->backend, server->locked);
+	if (error != 0 && error != ENOTSUP)
+		printf("KWL LOCK tell locked=%u errno=%d\n", server->locked, error);
 }
 
 /* Starts the styles again for a new user or screen: the password until sessiond says more. */

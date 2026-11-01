@@ -1377,15 +1377,22 @@ else
 ZEDBSD_SHADOW := userland/base/etc/shadow
 endif
 
+#
+# The default user's first PIN, 0000, is in /etc/passkey (root's alone),
+# so that a machine without a keyboard can log in on the login screen's
+# keypad; Settings changes it.
+#
+
 ZEDBSD_ACCOUNT_INPUTS := userland/base/etc/passwd userland/base/etc/group \
-	$(ZEDBSD_SHADOW) userland/base/etc/services userland/base/etc/hosts
+	$(ZEDBSD_SHADOW) userland/base/etc/passkey userland/base/etc/services userland/base/etc/hosts
 ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
 	--file /etc/group=userland/base/etc/group \
 	--file /etc/shadow=$(ZEDBSD_SHADOW) \
+	--file /etc/passkey=userland/base/etc/passkey \
 	--file /etc/services=userland/base/etc/services \
 	--file /etc/hosts=userland/base/etc/hosts \
 	--mode /etc/passwd=0644 --mode /etc/group=0644 \
-	--mode /etc/shadow=0400 --mode /etc/services=0644 \
+	--mode /etc/shadow=0400 --mode /etc/passkey=0600 --mode /etc/services=0644 \
 	--mode /etc/hosts=0644
 ZEDBSD_BASE_DATA_INPUTS := $(ZEDBSD_USERLAND_DATA_INPUTS)
 ZEDBSD_BASE_DATA_FILES := $(ZEDBSD_USERLAND_DATA_FILES) \

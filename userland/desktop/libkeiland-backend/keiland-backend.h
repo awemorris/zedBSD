@@ -1909,6 +1909,14 @@ int kl_backend_session_ready(struct kl_backend *backend);
 int kl_backend_session_logout(struct kl_backend *backend);
 
 /*
+ * Tells the manager that the session's lock screen shows (locked 1) or has
+ * gone (0), so that a session started again after a crash starts locked
+ * when it was.  Returns 0, ENOTSUP without a session manager, or the error
+ * of telling it.
+ */
+int kl_backend_session_lock_state(struct kl_backend *backend, unsigned locked);
+
+/*
  * Asks the manager to log user in with secret in style (a
  * KL_BACKEND_STYLE_*: the password, or the PIN) on the login screen.
  * Returns 0 when asked, EBUSY while another request waits for its answer,
