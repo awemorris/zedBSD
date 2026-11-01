@@ -494,6 +494,79 @@ cursor_at(
 	return 0;
 }
 
+/* Checks the reason text of the last picture or parameter set that was not returned. */
+static void
+expect_reason(
+	const char *text)
+{
+	/* A reason must be set, and be the one the implementation gives for this failure. */
+	CHECK(rd.reason != NULL);
+	if (rd.reason != NULL)
+		CHECK(strcmp(rd.reason, text) == 0);
+}
+
+/* Appends raw bytes as a NAL unit (no header check, no escape) after a four-byte start code; returns its index. */
+static unsigned
+put_raw(
+	const uint8_t *bytes,
+	size_t size)
+{
+	unsigned index;
+
+	/* The start code, then the bytes as they are. */
+	index = nal_count;
+	nal_start[index] = ws.size;
+	sbuf[ws.size] = 0U;
+	sbuf[ws.size + 1U] = 0U;
+	sbuf[ws.size + 2U] = 0U;
+	sbuf[ws.size + 3U] = 1U;
+	memcpy(sbuf + ws.size + 4U, bytes, size);
+	ws.size += 4U + size;
+	nal_end[index] = ws.size;
+	nal_count++;
+
+	/* Succeeded: the NAL unit's index. */
+	return index;
+}
+
+/* Damages the header of NAL unit n: kind 0 sets forbidden_zero_bit, kind 1 clears nuh_temporal_id_plus1. */
+static void
+damage(
+	unsigned n,
+	unsigned kind)
+{
+	/* The header starts after the four-byte start code. */
+	if (kind == 0U) {
+		sbuf[nal_start[n] + 4U] |= 0x80U;
+	} else {
+		sbuf[nal_start[n] + 5U] &= 0xF8U;
+	}
+}
+
+/* Appends a VPS, SPS or PPS of id 1 (type 32, 33 or 34) from the writer structures; returns its index. */
+static unsigned
+put_set_id1(
+	unsigned type)
+{
+	unsigned n;
+
+	/* The set of that type with id 1, the writer structures put back after. */
+	if (type == T_VPS) {
+		wvps.vps_id = 1U;
+		n = put_vps();
+		wvps.vps_id = 0U;
+	} else if (type == T_SPS) {
+		wsps.sps_id = 1U;
+		n = put_sps();
+		wsps.sps_id = 0U;
+	} else {
+		wpps.pps_id = 1U;
+		n = put_pps();
+		wpps.pps_id = 0U;
+	}
+	return n;
+}
+
 /* IDR start: IDR then three TRAIL_R pictures. */
 static void
 check_idr_start(void)
@@ -1654,6 +1727,7 @@ check_slice_segments(void)
 			CHECK(nrecs == 2U);
 			CHECK(rd.counts.broken_pictures == 1U);
 			expect_pic(1U, T_TRAIL_R, 2, 0, 0, 0, 0);
+			expect_reason("picture has too many slice segments");
 		}
 	}
 
@@ -1710,6 +1784,7 @@ check_slice_segments(void)
 	CHECK(nrecs == 2U);
 	CHECK(rd.counts.broken_pictures == 1U);
 	expect_pic(1U, T_TRAIL_R, 2, 0, 0, 0, 0);
+	expect_reason("slice segments of one picture name different PPSs");
 
 	/* A segment with another nal_unit_type breaks the picture. */
 	begin();
@@ -1722,6 +1797,7 @@ check_slice_segments(void)
 	CHECK(rd.counts.broken_pictures == 1U);
 	expect_pic(0U, T_IDR_W_RADL, 0, 1, 1, 0, 0);
 	expect_pic(1U, T_TRAIL_R, 2, 0, 0, 0, 0);
+	expect_reason("slice segments of one picture differ in nal_unit_type");
 
 	/* Segments with first_slice_segment_in_pic_flag 0 and no picture before them are skipped as one broken picture. */
 	begin();
@@ -1734,6 +1810,7 @@ check_slice_segments(void)
 	CHECK(rd.counts.broken_pictures == 1U);
 	CHECK(rd.counts.before_irap == 0U);
 	expect_pic(0U, T_IDR_W_RADL, 0, 1, 1, 0, 0);
+	expect_reason("slice segment without its picture's first segment");
 
 	/* After an end of sequence the same skip leaves the end pending for the next picture. */
 	begin();
@@ -1790,7 +1867,7 @@ check_slice_segments(void)
 	}
 }
 
-/* The longest slice segment headers (D12): the second copy. */
+/* The longest slice segment headers (D12): the second copy, and the RBSP built by long_build (also a scratch buffer). */
 static uint8_t long_rbsp[300000];
 static size_t long_bits;
 
@@ -2284,6 +2361,717 @@ check_api(void)
 	CHECK(rd.cra_as_bla == 1);
 }
 
+/* The reader's own state and its buffer: destroy, input, reset. */
+static void
+check_reader_state(void)
+{
+	/* Destroy forgets the buffer. */
+	reader_start();
+	rd.data = sbuf;
+	rd.size = 5U;
+	rd.cursor = 3U;
+	h265_stream_destroy(&rd);
+	CHECK(rd.data == NULL);
+	CHECK(rd.size == 0U);
+	CHECK(rd.cursor == 0U);
+	h265_stream_init(&rd);
+
+	/* Input moves the cursor to the start, and a missing buffer is an empty one whatever the size says. */
+	rd.cursor = 7U;
+	h265_stream_input(&rd, sbuf, 20U);
+	CHECK(rd.data == sbuf);
+	CHECK(rd.size == 20U);
+	CHECK(rd.cursor == 0U);
+	rd.cursor = 7U;
+	h265_stream_input(&rd, NULL, 5U);
+	CHECK(rd.data == NULL);
+	CHECK(rd.size == 0U);
+	CHECK(rd.cursor == 0U);
+
+	/* After a reset, pictures before the IRAP picture are dropped even though the stream had started. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_picture(T_TRAIL_R, 1U);
+	put_picture(T_TRAIL_R, 2U);
+	put_picture(T_IDR_W_RADL, 0U);
+	reader_start();
+	h265_stream_input(&rd, sbuf, nal_start[5]);
+	nrecs = 0U;
+	collect(nal_start[5]);
+	CHECK(nrecs == 2U);
+	h265_stream_reset(&rd);
+	CHECK(rd.started == 0);
+	h265_stream_input(&rd, sbuf + nal_start[5], ws.size - nal_start[5]);
+	nrecs = 0U;
+	collect(ws.size - nal_start[5]);
+	CHECK(nrecs == 1U);
+	CHECK(rd.counts.before_irap == 1U);
+	expect_pic(0U, T_IDR_W_RADL, 0, 1, 1, 0, 0);
+
+	/* A CRA handled as a BLA picture after a reset does not make the next CRA one: its RASL pictures are returned. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_picture(T_CRA, 8U);
+	put_picture(T_TRAIL_R, 9U);
+	put_picture(T_CRA, 12U);
+	put_picture(T_RASL_N, 10U);
+	reader_start();
+	h265_stream_input(&rd, sbuf, nal_start[4]);
+	nrecs = 0U;
+	collect(nal_start[4]);
+	h265_stream_reset(&rd);
+	h265_stream_input(&rd, sbuf + nal_start[4], ws.size - nal_start[4]);
+	nrecs = 0U;
+	collect(ws.size - nal_start[4]);
+	CHECK(nrecs == 4U);
+	expect_pic(0U, T_CRA, 8, 1, 1, 0, 0);
+	expect_pic(1U, T_TRAIL_R, 9, 0, 0, 0, 0);
+	expect_pic(2U, T_CRA, 12, 0, 0, 0, 0);
+	expect_pic(3U, T_RASL_N, 10, 0, 0, 0, 0);
+	CHECK(rd.counts.rasl_skipped == 0U);
+	CHECK(rd.cra_as_bla == 0);
+}
+
+/* h265_stream_parameters with three-byte start codes, other NAL units in the buffer, and damaged ones. */
+static void
+check_parameters_buffer(void)
+{
+	int error;
+	unsigned n;
+
+	/* Three-byte start codes: the first NAL unit is at offset 0 and must be found. */
+	h265w_stream_init(&ws, sbuf, sizeof(sbuf));
+	ws.start_code_bytes = 3U;
+	nal_count = 0U;
+	sets_default();
+	put_vps();
+	put_plain(T_PREFIX_SEI);
+	put_sps();
+	put_plain(T_AUD);
+	put_pps();
+	reader_start();
+	error = h265_stream_parameters(&rd, sbuf, ws.size);
+	CHECK(error == 0);
+	CHECK(rd.store.vps_present[0] != 0);
+	CHECK(rd.store.sps_present[0] != 0);
+	CHECK(rd.store.pps_present[0] != 0);
+	CHECK(rd.counts.refused_sets == 0U);
+	CHECK(rd.store.generation == 3U);
+
+	/* A damaged NAL unit that is no parameter set is not counted and does not fail the call. */
+	begin();
+	n = put_plain(T_PREFIX_SEI);
+	damage(n, 0U);
+	n = put_plain(T_AUD);
+	damage(n, 1U);
+	reader_start();
+	error = h265_stream_parameters(&rd, sbuf, ws.size);
+	CHECK(error == 0);
+	CHECK(rd.counts.refused_sets == 0U);
+	CHECK(rd.store.sps_present[0] != 0);
+
+	/* A set longer than the copy, and one that does not unescape, fail the call too. */
+	memset(long_rbsp, 0x55, 70000U);
+	h265w_stream_init(&ws, sbuf, sizeof(sbuf));
+	nal_count = 0U;
+	put_nal(T_PPS, 0U, 1U, long_rbsp, 70000U);
+	reader_start();
+	error = h265_stream_parameters(&rd, sbuf, ws.size);
+	CHECK(error == EINVAL);
+	CHECK(rd.counts.refused_sets == 1U);
+	expect_reason("parameter set NAL unit is too long");
+	begin();
+	n = put_nal(T_PPS, 0U, 1U, (const uint8_t *)"\x11\x22\x33\x44", 4U);
+	sbuf[nal_start[n] + 6U] = 0U;
+	sbuf[nal_start[n] + 7U] = 0U;
+	sbuf[nal_start[n] + 8U] = 2U;
+	reader_start();
+	error = h265_stream_parameters(&rd, sbuf, ws.size);
+	CHECK(error == EINVAL);
+	CHECK(rd.counts.refused_sets == 1U);
+	expect_reason("parameter set NAL unit does not parse");
+
+	/* A damaged parameter set fails the call and is counted, and its reason is the header's. */
+	begin();
+	n = put_set_id1(T_SPS);
+	damage(n, 0U);
+	reader_start();
+	error = h265_stream_parameters(&rd, sbuf, ws.size);
+	CHECK(error == EINVAL);
+	CHECK(rd.counts.refused_sets == 1U);
+	CHECK(rd.store.sps_present[1] == 0);
+	expect_reason("parameter set NAL unit header does not read");
+}
+
+/* NAL units with damaged headers, and one-, two- and three-byte NAL units. */
+static void
+check_damaged_units(void)
+{
+	static const uint8_t one_vps[1] = { 0x40U };
+	static const uint8_t one_aud[1] = { 0x46U };
+	static const uint8_t one_slice[1] = { 0x02U };
+	static const uint8_t two_trail[2] = { 0x02U, 0x01U };
+	static const uint8_t three_trail[3] = { 0x02U, 0x01U, 0x40U };
+	unsigned kind;
+	unsigned type;
+	unsigned n;
+	unsigned m;
+
+	/* A valid slice NAL unit with a damaged header, outside any picture, is ignored: no picture, no count. */
+	for (kind = 0U; kind < 2U; kind++) {
+		begin();
+		put_picture(T_IDR_W_RADL, 0U);
+		put_plain(T_EOS);
+		slice_reset(1U, 0U, 3U);
+		n = put_slice(T_TRAIL_R, 0U);
+		damage(n, kind);
+		put_picture(T_CRA, 8U);
+		run_whole();
+		CHECK(nrecs == 2U);
+		expect_pic(1U, T_CRA, 8, 0, 1, 1, 1);
+		expect_counts(0U, 0U, 0U, 0U, 0U, 0U);
+		expect_reason("NAL unit header does not read");
+	}
+
+	/* A valid segment with a damaged header inside a picture spoils it (a segment is missing). */
+	for (kind = 0U; kind < 2U; kind++) {
+		begin();
+		put_picture(T_IDR_W_RADL, 0U);
+		put_picture(T_TRAIL_R, 1U);
+		slice_reset(0U, 8U, 0U);
+		n = put_slice(T_TRAIL_R, 0U);
+		damage(n, kind);
+		put_picture(T_TRAIL_R, 2U);
+		run_whole();
+		CHECK(nrecs == 2U);
+		expect_pic(1U, T_TRAIL_R, 2, 0, 0, 0, 0);
+		expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	}
+
+	/* A damaged non-VCL NAL unit of any type between two segments of one picture changes nothing. */
+	for (type = 35U; type < 64U; type++) {
+		begin();
+		put_picture(T_IDR_W_RADL, 0U);
+		n = put_plain(type);
+		damage(n, 0U);
+		m = put_segment(T_IDR_W_RADL, 8U);
+		put_picture(T_CRA, 8U);
+		run_whole();
+		CHECK(nrecs == 2U);
+		CHECK(recs[0].slice_count == 2U);
+		CHECK(recs[0].au_size == nal_end[m] - nal_start[0]);
+		expect_pic(1U, T_CRA, 8, 0, 0, 0, 0);
+		expect_counts(0U, 0U, 0U, 0U, 0U, 0U);
+	}
+
+	/* The same damaged NAL units between two pictures: none is a parameter set, so nothing is counted, and an end of sequence is not seen. */
+	for (type = 35U; type < 64U; type++) {
+		begin();
+		put_picture(T_IDR_W_RADL, 0U);
+		n = put_plain(type);
+		damage(n, 1U);
+		put_picture(T_CRA, 8U);
+		run_whole();
+		CHECK(nrecs == 2U);
+		CHECK(recs[0].au_size == nal_end[3] - nal_start[0]);
+		expect_pic(1U, T_CRA, 8, 0, 0, 0, 0);
+		expect_counts(0U, 0U, 0U, 0U, 0U, 0U);
+	}
+
+	/* A damaged VPS, SPS or PPS is counted as refused and not stored, in both kinds of damage. */
+	for (type = T_VPS; type <= T_PPS; type++) {
+		for (kind = 0U; kind < 2U; kind++) {
+			begin();
+			n = put_set_id1(type);
+			damage(n, kind);
+			put_picture(T_IDR_W_RADL, 0U);
+			run_whole();
+			CHECK(nrecs == 1U);
+			expect_counts(0U, 0U, 0U, 0U, 1U, 0U);
+			CHECK(rd.store.vps_present[1] == 0);
+			CHECK(rd.store.sps_present[1] == 0);
+			CHECK(rd.store.pps_present[1] == 0);
+			expect_reason("NAL unit header does not read");
+		}
+	}
+
+	/* One-byte NAL units: a lone VPS header byte is a damaged set (counted); an AUD or a slice byte is not. */
+	begin();
+	put_raw(one_vps, sizeof(one_vps));
+	put_picture(T_IDR_W_RADL, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 1U, 0U);
+	begin();
+	put_raw(one_aud, sizeof(one_aud));
+	put_raw(one_slice, sizeof(one_slice));
+	put_picture(T_IDR_W_RADL, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 0U);
+
+	/* A two-byte VCL NAL unit has no first_slice_segment_in_pic_flag: it starts a picture (broken), after a picture's segment. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_picture(T_TRAIL_R, 1U);
+	put_raw(two_trail, sizeof(two_trail));
+	put_picture(T_TRAIL_R, 2U);
+	run_whole();
+	CHECK(nrecs == 3U);
+	expect_pic(1U, T_TRAIL_R, 1, 0, 0, 0, 0);
+	expect_pic(2U, T_TRAIL_R, 2, 0, 0, 0, 0);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+
+	/* A three-byte VCL NAL unit with a zero flag joins the picture before it, which it breaks. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_picture(T_TRAIL_R, 1U);
+	put_raw(three_trail, sizeof(three_trail));
+	put_picture(T_TRAIL_R, 2U);
+	run_whole();
+	CHECK(nrecs == 2U);
+	expect_pic(1U, T_TRAIL_R, 2, 0, 0, 0, 0);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+
+	/*
+	 * The same two NAL units after a NAL unit that starts an access unit (a
+	 * PPS of id 1, which the look ahead must not store before it decides):
+	 * after the two-byte unit (a new picture) the picture is returned with
+	 * the PPS not yet stored; after the three-byte unit (a segment of the
+	 * same picture, which breaks it) the PPS is stored when the next
+	 * picture is returned.
+	 */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_picture(T_TRAIL_R, 1U);
+	put_set_id1(T_PPS);
+	put_raw(two_trail, sizeof(two_trail));
+	put_picture(T_TRAIL_R, 2U);
+	reader_start();
+	h265_stream_input(&rd, sbuf, ws.size);
+	CHECK(h265_stream_next(&rd, &pic) == 0);
+	CHECK(h265_stream_next(&rd, &pic) == 0);
+	CHECK(pic.poc == 1);
+	CHECK(rd.store.pps_present[1] == 0);
+	CHECK(h265_stream_next(&rd, &pic) == 0);
+	CHECK(pic.poc == 2);
+	CHECK(rd.store.pps_present[1] != 0);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_picture(T_TRAIL_R, 1U);
+	put_set_id1(T_PPS);
+	put_raw(three_trail, sizeof(three_trail));
+	put_picture(T_TRAIL_R, 2U);
+	reader_start();
+	h265_stream_input(&rd, sbuf, ws.size);
+	CHECK(h265_stream_next(&rd, &pic) == 0);
+	CHECK(h265_stream_next(&rd, &pic) == 0);
+	CHECK(pic.poc == 2);
+	CHECK(rd.store.pps_present[1] != 0);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+
+	/* A one-byte slice NAL unit inside a picture spoils it, as a damaged segment does. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_picture(T_TRAIL_R, 1U);
+	put_raw(one_slice, sizeof(one_slice));
+	put_picture(T_TRAIL_R, 2U);
+	run_whole();
+	CHECK(nrecs == 2U);
+	expect_pic(1U, T_TRAIL_R, 2, 0, 0, 0, 0);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+
+	/* An end of sequence outside an access unit (before any picture) is an access unit of its own: the picture's starts after it. */
+	begin();
+	put_plain(T_EOS);
+	put_picture(T_IDR_W_RADL, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_pic(0U, T_IDR_W_RADL, 0, 1, 1, 1, 0);
+	CHECK(recs[0].au == nal_start[4]);
+	CHECK(recs[0].au_size == nal_end[4] - nal_start[4]);
+}
+
+/* Layers, reserved types and damaged units between the segments of one picture. */
+static void
+check_between_segments(void)
+{
+	static const uint8_t payload[2] = { 0x11U, 0x80U };
+	unsigned seg2;
+
+	/* A NAL unit of layer 1 between two segments does not end the picture. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_nal(T_TRAIL_R, 1U, 1U, payload, sizeof(payload));
+	seg2 = put_segment(T_IDR_W_RADL, 8U);
+	put_picture(T_TRAIL_R, 1U);
+	run_whole();
+	CHECK(nrecs == 2U);
+	CHECK(recs[0].slice_count == 2U);
+	CHECK(recs[0].au_size == nal_end[seg2] - nal_start[0]);
+	expect_counts(0U, 0U, 0U, 1U, 0U, 0U);
+
+	/* A reserved VCL NAL unit after a picture's last segment belongs to its access unit. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_nal(10U, 0U, 1U, payload, sizeof(payload));
+	put_picture(T_TRAIL_R, 1U);
+	run_whole();
+	CHECK(nrecs == 2U);
+	CHECK(recs[0].au_size == nal_end[4] - nal_start[0]);
+	CHECK(recs[1].au == nal_start[5]);
+	expect_reason("reserved VCL NAL unit type");
+
+	/* A picture of three segments that is dropped (before the first IRAP picture) is one picture, not three. */
+	begin();
+	put_picture(T_TRAIL_R, 5U);
+	put_segment(T_TRAIL_R, 4U);
+	put_segment(T_TRAIL_R, 8U);
+	put_picture(T_IDR_W_RADL, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(1U, 0U, 0U, 0U, 0U, 0U);
+	expect_reason("picture before the first IRAP picture");
+
+	/* A dropped RASL picture whose access unit ends with an end of sequence, then a returned CRA and a picture after it. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_picture(T_RASL_N, 3U);
+	put_plain(T_EOS);
+	put_picture(T_CRA, 8U);
+	put_picture(T_TRAIL_R, 9U);
+	put_picture(T_TRAIL_R, 10U);
+	run_whole();
+	CHECK(nrecs == 4U);
+	expect_pic(1U, T_CRA, 8, 0, 1, 1, 1);
+	expect_pic(2U, T_TRAIL_R, 9, 0, 0, 0, 0);
+	expect_pic(3U, T_TRAIL_R, 10, 0, 0, 0, 0);
+	expect_reason("RASL picture of an IRAP picture that starts the decoding");
+
+	/* Dependent segments: the stored independent header is the last independent one, not a dependent one. */
+	begin();
+	wpps.dependent_slices = 1U;
+	put_pps();
+	slice_reset(1U, 0U, 0U);
+	wslice.slice_qp_delta = 3;
+	put_slice(T_IDR_W_RADL, 0U);
+	slice_reset(0U, 4U, 0U);
+	wslice.dependent = 1U;
+	put_slice(T_IDR_W_RADL, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	CHECK(recs[0].slice_count == 2U);
+	CHECK(rd.independent.qp == 26 + 3);
+	CHECK(rd.independent.dependent == 0);
+	CHECK(rd.independent.address == 0U);
+
+	/* An end of sequence after a parameter set that starts the next access unit: the sets are stored after the picture. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	wpps.pps_id = 1U;
+	put_pps();
+	wpps.pps_id = 0U;
+	put_plain(T_EOS);
+	put_segment(T_IDR_W_RADL, 4U);
+	reader_start();
+	h265_stream_input(&rd, sbuf, ws.size);
+	CHECK(h265_stream_next(&rd, &pic) == 0);
+	CHECK(rd.store.pps_present[1] == 0);
+	CHECK(pic.after_eos == 0);
+}
+
+/* The reasons and counts of every way a picture or parameter set is left behind. */
+static void
+check_failure_reasons(void)
+{
+	static const uint8_t bad_pps_id[5] = { 0x02U, 0x01U, 0x81U, 0x1CU, 0x80U };
+	static const uint8_t cut_header[2] = { 0xC0U, 0x80U };
+	static const uint8_t payload[4] = { 0x11U, 0x22U, 0x33U, 0x44U };
+	static uint8_t big[70000];
+	unsigned n;
+
+	/* A slice naming a PPS that is missing. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	slice_reset(1U, 0U, 1U);
+	wslice.pps_id = 7U;
+	put_slice(T_TRAIL_R, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	expect_reason("slice names a PPS that is missing");
+
+	/* A slice naming a PPS the parse refused. */
+	begin();
+	wpps.pps_id = 1U;
+	wpps.extension_present = 1U;
+	wpps.scc_extension_flag = 1U;
+	put_pps();
+	wpps.pps_id = 0U;
+	wpps.extension_present = 0U;
+	wpps.scc_extension_flag = 0U;
+	put_picture(T_IDR_W_RADL, 0U);
+	slice_reset(1U, 0U, 1U);
+	wslice.pps_id = 1U;
+	put_slice(T_TRAIL_R, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 2U, 0U);
+	expect_reason("slice names a PPS outside the range");
+
+	/* A PPS that names an SPS that was never stored. */
+	begin();
+	wpps.pps_id = 1U;
+	wpps.sps_id = 3U;
+	put_pps();
+	wpps.pps_id = 0U;
+	wpps.sps_id = 0U;
+	put_picture(T_IDR_W_RADL, 0U);
+	slice_reset(1U, 0U, 1U);
+	wslice.pps_id = 1U;
+	put_slice(T_TRAIL_R, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	expect_reason("slice names an SPS that is missing");
+
+	/* A PPS that names an SPS the parse refused (a coding tree block of 128 samples). */
+	begin();
+	wsps.sps_id = 1U;
+	wsps.log2_diff_max_min_cb = 4U;
+	put_sps();
+	wsps.sps_id = 0U;
+	wsps.log2_diff_max_min_cb = 1U;
+	wpps.pps_id = 1U;
+	wpps.sps_id = 1U;
+	put_pps();
+	wpps.pps_id = 0U;
+	wpps.sps_id = 0U;
+	put_picture(T_IDR_W_RADL, 0U);
+	slice_reset(1U, 0U, 1U);
+	wslice.pps_id = 1U;
+	put_slice(T_TRAIL_R, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	CHECK(rd.store.sps_refused[1] != 0);
+	expect_counts(0U, 0U, 0U, 0U, 2U, 0U);
+	expect_reason("slice names an SPS outside the range");
+
+	/* A PPS that does not agree with its SPS (20 tile columns in a picture 4 CTBs wide). */
+	begin();
+	wpps.pps_id = 1U;
+	wpps.tiles = 1U;
+	wpps.num_tile_columns_minus1 = 19U;
+	wpps.uniform_spacing = 1U;
+	put_pps();
+	wpps.pps_id = 0U;
+	wpps.tiles = 0U;
+	put_picture(T_IDR_W_RADL, 0U);
+	slice_reset(1U, 0U, 1U);
+	wslice.pps_id = 1U;
+	put_slice(T_TRAIL_R, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	expect_reason("PPS does not agree with its SPS");
+
+	/* A picture that names another SPS than the one in use. */
+	begin();
+	wsps.sps_id = 1U;
+	put_sps();
+	wsps.sps_id = 0U;
+	wpps.pps_id = 1U;
+	wpps.sps_id = 1U;
+	put_pps();
+	wpps.pps_id = 0U;
+	wpps.sps_id = 0U;
+	put_picture(T_IDR_W_RADL, 0U);
+	slice_reset(1U, 0U, 1U);
+	wslice.pps_id = 1U;
+	put_slice(T_TRAIL_R, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	expect_reason("slice names another SPS than the one in use");
+
+	/* A slice segment NAL unit that does not unescape (an IRAP type with a TemporalId above 0). */
+	begin();
+	slice_reset(1U, 0U, 0U);
+	put_slice(T_IDR_W_RADL, 1U);
+	put_picture(T_IDR_W_RADL, 0U);
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	expect_reason("slice segment NAL unit does not parse");
+
+	/* A first segment whose PPS id is out of range, and one whose header ends too soon: broken, and no long copy is made. */
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_raw(bad_pps_id, sizeof(bad_pps_id));
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	expect_reason("slice segment header does not read");
+	CHECK(rd.slice_rbsp == NULL);
+	begin();
+	put_picture(T_IDR_W_RADL, 0U);
+	put_nal(T_TRAIL_R, 0U, 1U, cut_header, sizeof(cut_header));
+	run_whole();
+	CHECK(nrecs == 1U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	expect_reason("slice segment header does not read");
+	CHECK(rd.slice_rbsp == NULL);
+
+	/* A parameter set longer than the copy, one that does not unescape, and one the parse refuses. */
+	begin();
+	memset(big, 0x55, sizeof(big));
+	put_nal(T_PPS, 0U, 1U, big, sizeof(big));
+	put_picture(T_IDR_W_RADL, 0U);
+	run_whole();
+	expect_counts(0U, 0U, 0U, 0U, 1U, 0U);
+	expect_reason("parameter set NAL unit is too long");
+	begin();
+	n = put_nal(T_PPS, 0U, 1U, payload, sizeof(payload));
+	sbuf[nal_start[n] + 6U] = 0U;
+	sbuf[nal_start[n] + 7U] = 0U;
+	sbuf[nal_start[n] + 8U] = 2U;
+	put_picture(T_IDR_W_RADL, 0U);
+	run_whole();
+	expect_counts(0U, 0U, 0U, 0U, 1U, 0U);
+	expect_reason("parameter set NAL unit does not parse");
+	begin();
+	put_nal(T_SPS, 0U, 1U, big, 3U);
+	put_picture(T_IDR_W_RADL, 0U);
+	run_whole();
+	expect_counts(0U, 0U, 0U, 0U, 1U, 0U);
+	expect_reason("parameter set was refused");
+}
+
+/* Weights under high_precision_offsets_enabled_flag are outside the range: the picture is left behind, not broken. */
+static void
+check_high_precision_weights(void)
+{
+	/* An SPS with the range extension flag high_precision_offsets_enabled_flag (the seventh flag), weighted prediction in the PPS. */
+	begin();
+	wsps.extension_present = 1U;
+	wsps.range_extension_flag = 1U;
+	wsps.range_extension = 1U << 6;
+	put_sps();
+	wpps.weighted_pred = 1U;
+	put_pps();
+	put_picture(T_IDR_W_RADL, 0U);
+	slice_reset(1U, 0U, 1U);
+	wslice.slice_type = H265W_SLICE_P;
+	put_slice(T_TRAIL_R, 0U);
+	slice_reset(1U, 0U, 2U);
+	put_slice(T_TRAIL_R, 0U);
+	run_whole();
+
+	/* The P picture (with a weight table) is refused; the I picture after it reads. */
+	CHECK(nrecs == 2U);
+	expect_pic(1U, T_TRAIL_R, 2, 0, 0, 0, 0);
+	expect_counts(0U, 0U, 0U, 0U, 1U, 0U);
+	expect_reason("slice segment header uses a tool outside the range");
+}
+
+/* Order counts at the end of the int32_t range. */
+static void
+check_poc_range(void)
+{
+	size_t split;
+	unsigned variant;
+
+	/* Pictures after an IDR picture whose order count state is set to 250 with Msb 2^31 - 256. */
+	for (variant = 0U; variant < 3U; variant++) {
+		begin();
+		put_picture(T_IDR_W_RADL, 0U);
+		split = ws.size;
+		if (variant == 0U) {
+			put_picture(T_TRAIL_R, 255U);
+		} else if (variant == 1U) {
+			put_picture(T_TRAIL_R, 2U);
+		} else {
+			slice_reset(1U, 0U, 255U);
+			wslice.st_rps.num_positive_pics = 1U;
+			wslice.st_rps.delta_poc_s1_minus1[0] = 0U;
+			wslice.st_rps.used_by_curr_pic_s1_flag[0] = 1U;
+			put_slice(T_TRAIL_R, 0U);
+		}
+		reader_start();
+		h265_stream_input(&rd, sbuf, split);
+		nrecs = 0U;
+		collect(split);
+		CHECK(nrecs == 1U);
+		rd.poc.prev_lsb = 250U;
+		rd.poc.prev_msb = 2147483392;
+		h265_stream_input(&rd, sbuf + split, ws.size - split);
+		nrecs = 0U;
+		collect(ws.size - split);
+		if (variant == 0U) {
+			/* 255 is 5 above 250: Msb stays 2^31 - 256 and the order count is 2^31 - 1. */
+			CHECK(nrecs == 1U);
+			CHECK(recs[0].poc == 2147483647);
+			expect_counts(0U, 0U, 0U, 0U, 0U, 0U);
+		} else if (variant == 1U) {
+			/* 2 is 248 below 250: Msb becomes 2^31 and the order count 2^31 + 2 does not fit. */
+			CHECK(nrecs == 0U);
+			expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+			expect_reason("picture order count is out of range");
+		} else {
+			/* The set entry +1 of the order count 2^31 - 1 does not fit. */
+			CHECK(nrecs == 0U);
+			expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+			expect_reason("reference picture set order count is out of range");
+		}
+	}
+}
+
+/* The second slice copy: an invalid byte after the first 64 KiB, and a header in error after it. */
+static void
+check_long_header_errors(void)
+{
+	size_t rbsp_size;
+	unsigned n;
+
+	/* The picture of check_long_headers. */
+	h265w_stream_init(&ws, sbuf, sizeof(sbuf));
+	nal_count = 0U;
+	sets_default();
+	wsps.width = 320U;
+	wsps.height = 13600U;
+	wpps.tiles = 1U;
+	wpps.entropy_sync = 1U;
+	wpps.num_tile_columns_minus1 = 19U;
+	wpps.num_tile_rows_minus1 = 0U;
+	wpps.uniform_spacing = 1U;
+	put_vps();
+	put_sps();
+	put_pps();
+
+	/* A long header whose slice data ends in 00 00 02 (not a valid byte sequence): the second copy does not unescape. */
+	rbsp_size = long_build(16999U, 0x01020304U, 40U);
+	n = put_nal(T_IDR_W_RADL, 0U, 1U, long_rbsp, rbsp_size);
+	sbuf[nal_end[n] - 4U] = 0U;
+	sbuf[nal_end[n] - 3U] = 0U;
+	sbuf[nal_end[n] - 2U] = 2U;
+	run_whole();
+	CHECK(nrecs == 0U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	expect_reason("slice segment NAL unit does not parse");
+	CHECK(rd.slice_rbsp != NULL);
+
+	/* A long header with too many entry points: it still does not read from the second copy. */
+	ws.size = nal_end[2];
+	nal_count = 3U;
+	rbsp_size = long_build(17000U, 0x01020304U, 40U);
+	put_nal(T_IDR_W_RADL, 0U, 1U, long_rbsp, rbsp_size);
+	run_whole();
+	CHECK(nrecs == 0U);
+	expect_counts(0U, 0U, 0U, 0U, 0U, 1U);
+	expect_reason("slice segment header does not read");
+}
+
 /* Checks what every returned picture must satisfy, for the fuzz runs; returns the pictures counted. */
 static unsigned
 drain(
@@ -2411,6 +3199,14 @@ main(void)
 	check_long_headers();
 	check_split_input();
 	check_api();
+	check_reader_state();
+	check_parameters_buffer();
+	check_damaged_units();
+	check_between_segments();
+	check_failure_reasons();
+	check_high_precision_weights();
+	check_poc_range();
+	check_long_header_errors();
 	check_garbage();
 
 	/* Frees the long copy a test may have left and reports. */
