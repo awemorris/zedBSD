@@ -43,7 +43,7 @@
 | [p005](phase005/phase.md) | AES-GCM（test-gcm） | planned | p004 |
 | [p006](phase006/phase.md) | ChaCha20・Poly1305・AEAD（と 64 bit の counter の ChaCha20）（test-chacha） | cleared（2026-11-01 09:23 Q1、main d0e048532。Sonnet、chacha 52156 checks、posix・win32・ct PASS） | p002 |
 | [p007](phase007/phase.md) | 固定幅の整数と Montgomery の算術（test-bn） | planned | p002 |
-| [p008](phase008/phase.md) | GF(2^255-19) と X25519（test-f25519、test-x25519） | in-progress（2026-11-01 06:59 q1822、Sonnet） | p002 |
+| [p008](phase008/phase.md) | GF(2^255-19) と X25519（test-f25519、test-x25519） | 実装済み・試験 PASS（2026-11-01 09:50 Sonnet。f25519 22903 checks、x25519 4538 checks、posix・win32・ct PASS、21 通りの破壊で FAIL。cleared は Q1） | p002 |
 | [p009](phase009/phase.md) | Ed25519（test-ed25519） | planned | p008 |
 | [p010](phase010/phase.md) | P-256・P-384 の群（test-ecp） | planned | p007 |
 | [p011](phase011/phase.md) | ECC: 鍵の生成・ECDH・ECDSA の確かめ（test-ecc） | planned | p010 |
