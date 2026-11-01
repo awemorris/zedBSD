@@ -251,7 +251,7 @@ anchor_math(
 	layout_unit result;
 	int index;
 
-	if (query->math_count > CSS_ANCHOR_MATH_ARGS)
+	if (query->math_count < 1 || query->math_count > CSS_ANCHOR_MATH_ARGS)
 		return 0;
 	for (index = 0; index < query->math_count; index++) {
 		if (!anchor_value(tree, box, &query->math_args[index], slot, cb_start, cb_size, &part[index], &unused))

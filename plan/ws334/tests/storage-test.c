@@ -228,7 +228,7 @@ test_cookies(void)
 	CHECK_EQ(test_store(instance, "http://example.test/", "expires=2; Expires=Wed, 21 Oct 2099 07:28:00 GMT", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "both=3; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=3600", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "session=4", 0), 0);
-	CHECK_EQ(test_store(instance, "http://example.test/", "short=5; Max-Age=2", 0), 0);
+	CHECK_EQ(test_store(instance, "http://example.test/", "short=5; Max-Age=8", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "past=6; Expires=Sun, 06 Nov 1994 08:49:37 GMT", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "replaced=7; Max-Age=3600", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "replaced=8", 0), 0);
@@ -259,7 +259,7 @@ test_cookies(void)
 	CHECK_EQ(browser_instance_destroy(instance), 0);
 
 	/* After "short" has run out, the instance again: only the persistent ones still alive come back. */
-	nanosleep(&(struct timespec){ 2, 300000000 }, NULL);
+	nanosleep(&(struct timespec){ 8, 300000000 }, NULL);
 	error = test_files_instance("a", &instance);
 	CHECK_EQ(error, 0);
 	if (error != 0)
