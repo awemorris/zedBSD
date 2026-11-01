@@ -28,7 +28,8 @@
 | --- | --- | --- |
 | P1 | q1864 `p1-ws324` | [WS324](ws324/ws.md) p006a: H.265 の解析の設計（標準廉価実装手順）。p001 の設計は cleared |
 | P2 | q1863 `p2-ws322` | [WS322](ws322/ws.md) p003: PowerVR の executor の NV12・plane の view・export（Video Player の GPU の道）。p002 実機の probe は cleared |
-| P5 | q1862 `p5-ws334b` | [WS334](ws334/ws.md) p028: libkeiland の Win32 その 1（.exe の窓。p023〜p027 は cleared） |
+| P5 | q1867 `p5-ws334b` | [WS334](ws334/ws.md) p029: libkeiland の Win32 その 2（題の帯・IME・clipboard・DPI）。p028 で Wine に .exe の窓が出た |
+| Sonnet | q1868 `s-ws334-cache` | [WS334](ws334/ws.md) の残り: HTTP の cache の再検証で 200 の時の保存 |
 | P6 | q1866 `p6-ws335b` | [WS335](ws335/ws.md) p011: ECC の鍵の生成・ECDH・ECDSA（p004・p005・p007・p010 は cleared） |
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
 | P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
@@ -109,7 +110,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-390 · q1867 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-390 · q1869 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

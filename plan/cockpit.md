@@ -11,7 +11,7 @@
 | P2 | [WS322](ws322/ws.md) p003 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | PowerVR の executor の NV12・plane の view・export（q1863）。p002: VF2 で Wave511 が起動し 6 本 68 frame が ffmpeg と一致 | p004 H.264 decode の道 |
 | P3 | — | — | 返却（23:19）。WS291 p027 の amd64・Venus の回帰 PASS | 未割当 |
 | P4 | — | Bug の修正の担当 | 返却（22:48）。WS291 p027 の Pi 5・VF2 の回帰 PASS | 次の Bug の割当を待つ |
-| P5 | [WS334](ws334/ws.md) p028 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | libkeiland の Win32 その 1（窓・loop・入力・Vulkan の surface、q1862）。p026 libmedia の Windows は cleared | p029（題の帯・IME・clipboard・DPI） |
+| P5 | [WS334](ws334/ws.md) p029 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | libkeiland の Win32 その 2（題の帯・IME・clipboard・DPI、q1867）。p028: Wine で .exe が頁を描いた（build/review/ws334-p028/gpu.png） | p031 配る形 |
 | P6 | [WS335](ws335/ws.md) p011 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | ECC の鍵の生成・ECDH・ECDSA（q1866）。p010 P-256・P-384 は cleared | p009 Ed25519・p012 RSA へ |
 | P7 | — | — | 返却（22:26）。WS334 p027 の QEMU の guest の確かめ PASS（画面: build/review/p027-guest/） | 未割当 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |

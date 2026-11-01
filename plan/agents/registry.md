@@ -8,7 +8,8 @@
 | P1 | kernel-and-driver-designer | ws324 p006a H.265 の解析の設計 (q1864-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | in-progress（2026-11-01 23:08 起動） | 210049ccf（merge a0fd88ee8） |
 | P2 | phase-runner-high | ws322 p003 PowerVR の NV12・export (q1863-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 22:37 起動） | da223ef78（merge 87b7bc034） |
 | P3 | phase-runner-high | ws291 p027 の回帰 amd64・Venus (q1859-i01) | `/home/awe/zedBSD-worktrees/p3-ws291reg` / `agent/p3-ws291reg` | 返却（2026-11-01 23:19、PASS） | 73669b953（merge 6f49769e7） |
-| P5 | phase-runner-high | ws334 p028 libkeiland の Win32 その 1 (q1862-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 22:29、同じ P5 に続けて頼んだ） | 84efc4b2d（merge b72145b7a） |
+| P5 | phase-runner-high | ws334 p029 libkeiland の Win32 その 2 (q1867-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 23:23） | 3df6ec8d2（merge 82105ebff） |
+| Sonnet | phase-runner-low | ws334 の cache の残り (q1868-i01) | `/home/awe/zedBSD-worktrees/s-ws334-cache` / `agent/s-ws334-cache` | in-progress（2026-11-01 23:23 起動） | — |
 | P6 | phase-runner-low | ws335 p011 ECC (q1866-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 23:19 起動） | a3639cfa4（merge 47700ab9c） |
 | P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |
 | P4 | phase-runner-high | ws291 p027 の回帰 arm64・riscv64 (q1860-i01) | `/home/awe/zedBSD-worktrees/p4-ws291reg` / `agent/p4-ws291reg` | 返却（2026-11-01 22:48、PASS） | 42ae7d081（merge b29f3a5ae） |
