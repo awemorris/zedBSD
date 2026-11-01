@@ -47,6 +47,7 @@
 
 #include "drivers/gpu/nvrtx/nvrtx-gpu.h"
 #include "drivers/gpu/nvrtx/nvrtx-nvdec.h"
+#include "drivers/gpu/nvrtx/nvrtx-nvenc.h"
 
 /* The largest small file read whole. */
 #define GSP_SMALL_FILE_MAX		0x40000U
@@ -375,6 +376,20 @@ nvrtx_gsp_start(
 			nvrtx_stage_mark("nvdec-channel: no video decoder (%d); the boot goes on", error);
 	}
 
+	/* Says so when the boot stops before the encoder's channel. */
+	allowed = nvrtx_stage_allowed("nvenc-channel");
+	if (wanted && !allowed)
+		nvrtx_stage_mark("nvenc-channel skipped (nvrtx.stop=nvenc-channel)");
+
+	/* Makes the encoder's channel once the work channel is ready, with or without the decoder; a failure leaves the boot going without encoding. */
+	if (wanted &&
+	    allowed &&
+	    gpu->work.ready != 0) {
+		error = nvrtx_nvenc_start(gpu);
+		if (error != 0)
+			nvrtx_stage_mark("nvenc-channel: no video encoder (%d); the boot goes on", error);
+	}
+
 	/* Stops before display when the boot asks. */
 	allowed = nvrtx_stage_allowed("display");
 	if (!allowed) {
@@ -505,6 +520,7 @@ nvrtx_gsp_release(
 	nvrtx_channel_release(gpu);
 	nvrtx_gr_release(gpu);
 	nvrtx_compute_release(gpu);
+	nvrtx_nvenc_release(gpu);
 	nvrtx_nvdec_release(gpu);
 	nvrtx_work_release(gpu);
 	nvrtx_scanout_release(gpu);
@@ -1167,6 +1183,7 @@ gsp_teardown(
 	 * a scheduled channel left.
 	 */
 	if (gpu->state == NVRTX_GSP_RUNNING) {
+		nvrtx_nvenc_stop(gpu);
 		nvrtx_nvdec_stop(gpu);
 		nvrtx_work_stop(gpu);
 		nvrtx_compute_stop(gpu);

@@ -853,6 +853,10 @@ struct nvrtx_engine_pick {
 	uint32_t nvdec_found;
 	uint32_t nvdec_runlist;
 	uint32_t nvdec_descriptor;
+	/* Whether the first video encoder is in the table, its runlist and its engine descriptor. */
+	uint32_t nvenc_found;
+	uint32_t nvenc_runlist;
+	uint32_t nvenc_descriptor;
 };
 
 /* Where a channel's pieces are, for its allocation. */

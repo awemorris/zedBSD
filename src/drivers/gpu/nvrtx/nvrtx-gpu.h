@@ -28,6 +28,7 @@
 #include "drivers/gpu/nvrtx/nvrtx-work.h"
 
 struct nvrtx_nvdec_state;
+struct nvrtx_nvenc_state;
 
 struct nvrtx_node;
 
@@ -726,6 +727,14 @@ struct nvrtx_gpu {
 	 */
 	void (*channel_error)(void *argument, uint32_t chid, uint32_t type);
 	void *channel_error_argument;
+	/*
+	 * The record of the channel errors the GSP reported (written under
+	 * rpc_lock by the thread that read the message): how many came, and the
+	 * channel number and kind of the newest.
+	 */
+	uint32_t rc_notices;
+	uint32_t rc_last_chid;
+	uint32_t rc_last_type;
 
 	/* The first address space and channel. */
 	struct nvrtx_engine_state engine;
@@ -745,6 +754,9 @@ struct nvrtx_gpu {
 
 	/* The video decoder's channel (nvdec-channel, nvdec.c), NULL until it is begun. */
 	struct nvrtx_nvdec_state *nvdec;
+
+	/* The video encoder's channel (nvenc-channel, nvenc.c), NULL until it is begun. */
+	struct nvrtx_nvenc_state *nvenc;
 
 	/* The VRAM allocator and the BAR1 window. */
 	struct nvrtx_memory_state memory_state;
