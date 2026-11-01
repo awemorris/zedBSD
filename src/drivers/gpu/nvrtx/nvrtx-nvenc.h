@@ -104,22 +104,27 @@ struct nvrtx_gpu;
 #define NVRTX_NVENC_STATUS_BITS_AT	8U
 #define NVRTX_NVENC_STATUS_START_AT	32U
 
+/* The most extra methods an encode's push buffer takes. */
+#define NVRTX_NVENC_EXTRA_METHODS	4U
+
 /* The most bytes the push buffer of nvrtx_nvenc_push_encode() takes. */
 #define NVRTX_NVENC_ENCODE_PUSH_BYTES	256U
 
 /*
  * The control parameters word: H.264, the reconstructed picture written
- * even when the picture is not a reference, the firmware's errors
+ * even when the picture is not a reference, the application's timer, the
+ * firmware's errors
  * returned to the channel instead of a reset of the engine, and the
  * constant-QP rate control (0 in bits 31:24).
  *
  * Values referenced: NVIDIA open-gpu-doc classes/video/clc5b7.h
- * (NVC5B7_SET_CONTROL_PARAMS_CODEC_TYPE_H264, _FORCE_OUT_PIC,
+ * (NVC5B7_SET_CONTROL_PARAMS_CODEC_TYPE_H264, _FORCE_OUT_PIC, _GPTIMER_ON,
  * _RCMODE_CONSTQP) and classes/video/nvenc_drv.h (SetControlParams'
  * DEBUG_MODE, bit 16).
  */
 #define NVRTX_NVENC_CONTROL_H264	0x3U
 #define NVRTX_NVENC_CONTROL_OUT_PIC	(1U << 8)
+#define NVRTX_NVENC_CONTROL_GPTIMER	(1U << 12)
 #define NVRTX_NVENC_CONTROL_DEBUG	(1U << 16)
 
 /*
@@ -165,10 +170,15 @@ struct nvrtx_nvenc_h264_picture {
  * control's persistent state (0 for none), the co-located data the
  * picture writes (0 for none), the input picture's planes, the
  * reconstructed picture's planes, and the reference's planes (0 for none:
- * an IDR picture).  serial is the picture's number in the session and
- * control the control parameters word.
+ * an IDR picture), and the rate control's data (0 for none).  serial is
+ * the picture's number in the session, control the control parameters
+ * word and watchdog the engine's watchdog timer (0: the method is not
+ * sent).  extra_count further methods (extra_method, with its one word
+ * extra_data) go just before the start, for a diagnostic to try methods
+ * the encode does not otherwise send.
  */
 struct nvrtx_nvenc_frame {
+	uint64_t rc_data;
 	uint64_t setup;
 	uint64_t status;
 	uint64_t bitstream;
@@ -183,6 +193,10 @@ struct nvrtx_nvenc_frame {
 	uint64_t reference_chroma;
 	uint32_t serial;
 	uint32_t control;
+	uint32_t watchdog;
+	uint32_t extra_count;
+	uint32_t extra_method[NVRTX_NVENC_EXTRA_METHODS];
+	uint32_t extra_data[NVRTX_NVENC_EXTRA_METHODS];
 };
 
 uint32_t nvrtx_nvenc_class(enum nvrtx_family family);
@@ -199,6 +213,7 @@ int nvrtx_nvenc_test(struct nvrtx_gpu *gpu);
 int nvrtx_nvenc_start(struct nvrtx_gpu *gpu);
 void nvrtx_nvenc_stop(struct nvrtx_gpu *gpu);
 void nvrtx_nvenc_release(struct nvrtx_gpu *gpu);
+int nvrtx_nvenc_restart(struct nvrtx_gpu *gpu);
 bool nvrtx_nvenc_ready(const struct nvrtx_gpu *gpu);
 uint32_t nvrtx_nvenc_class_of(const struct nvrtx_gpu *gpu);
 int nvrtx_nvenc_run(struct nvrtx_gpu *gpu, uint64_t push_va, size_t length, uint32_t timeout_us);

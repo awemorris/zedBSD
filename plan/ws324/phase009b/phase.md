@@ -29,4 +29,27 @@ NVENC が driver の組んだ 1 絵の設定（`nvenc_h264_drv_pic_setup_s` と 
 
 ## 4. 結果
 
-（実施中）
+（実施中。RTX 2070 の実機だけ、QEMU は使っていない）
+
+### 4.1 設定の byte の確かめ（host）
+
+- `nvrtx_nvenc_h264_setup` の 1536 byte を、open-gpu-doc の 2 版（97c510e・9fdf5c4）の header を host で gcc で compile して bit field で同じ値を入れた物と比べ、IDR・P・chroma の offset・codec field の 4 通りで全 byte が一致（scratchpad の照合、repo に header は入れない）。`nvenc-host-test.sh` は 61 checks・0 failed（NVDEC の 88 checks も）。
+
+### 4.2 実機の観測（2026-11-02 01:40〜02:23、7 起動、各回 lock の中、終わりに NVMe の kernel 1463007375・cfg 38198411 を戻して MATCH、Debian に戻る）
+
+- 状態の語（status の 4 byte 目）は `error_status`（2 bit）| `ucode_error_status` << 2。firmware が status の頭 32 byte（picture_index・error 語・pic_type）を書く。
+- 誤りを判ける試し（run6）: magic を壊す → code 2（E_MAGIC_NUMBER_MISMATCH）、bitstream の method 無し → code 5（E_OUTPUT_BITSTREAM_OFFSET）、history 無し → 14（E_INPUT_HISTORY_OFFSET）、入力の絵無し → 13（E_INPUT_BITSTREAM_OFFSET）。番号は 2024 版の enum（E_RDO_ERROR が入った後）に合う → **Turing の firmware は 2024 版の interface**（R1 の答えの候補）。これらは error_status 2 で、fence が通り channel も生きる（bad magic だけは fence が来ず RC も無い）。
+- 正しい設定では、毎回 error_status 1・code 0 を書いた後に GSP の RC 47（ROBUST_CHANNEL_NVENC0_ERROR、570.144 `nverror.h`）で channel が止まる（fence は 2 s で来ない）。error_status 1 は hardware の側の誤りと見る。
+- channel は RC の後に free して作り直せる（`nvrtx_nvenc_restart`、chid 49 のまま、bring-up の NOP と自前の release が毎回通る）。1 起動で 5〜7 通り試せる。
+- 診断の道: falcon の register（0x1c2000〜）は CPU から全部 `badf1201`（読めない）。RC_TRIGGERED の rcJournal（6544 byte）は GR・FIFO の register の写しだけで NVENC の値は無い。
+
+### 4.3 外れた仮説（同じ HW の誤り、status も同じ）
+
+| 起動 | 試した事 |
+| --- | --- |
+| run1〜3 | 既定の設定（system memory）、rc_process・coloc の method 無し、chroma を luma の address ＋ setup の offset（128）で、codec field 0・1・3、FORCE_OUT_PIC を外す、DEBUG_MODE の bit 16 |
+| run4 | 絵だけ VRAM、全 buffer を VRAM（BAR1 で CPU が書く）、VRAM で optional 無し・chroma offset・codec 3 |
+| run5 | GPTIMER_ON と 504・508 の両方に 81000000、rate control の値（rhopbi・30 fps・2 Mbit/s・gop 30・Np・Ravg・R）、SET_WATCHDOG_TIMER 0xffffffff、SET_IN_RCDATA（0 の page）、入力を block linear（tiled 0）、ME の mbc_mb_size 16・FBM の winner 1、その全部 |
+| run7 | strips_in_frame 1・slice_encoding_row_num 8、＋mpec_threshold 16、＋GPTIMER・ME cache、行数だけ、strip だけ |
+
+- 次: pipeline の切り分け（ME only、deblock off、CABAC、intra 16x16 だけ、64x64 の絵、非 IDR の I）。

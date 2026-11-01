@@ -89,7 +89,8 @@
  * pictures' planes, and the start.
  *
  * Values referenced: NVIDIA open-gpu-doc classes/video/clc5b7.h
- * (NVC5B7_SET_APPLICATION_ID and its _ID_NVENC_H264, NVC5B7_EXECUTE,
+ * (NVC5B7_SET_APPLICATION_ID and its _ID_NVENC_H264,
+ * NVC5B7_SET_WATCHDOG_TIMER, NVC5B7_SET_IN_RCDATA, NVC5B7_EXECUTE,
  * NVC5B7_SET_IN_REF_PIC0_LUMA, NVC5B7_SET_IN_REF_PIC0_CHROMA,
  * NVC5B7_SET_CONTROL_PARAMS, NVC5B7_SET_PICTURE_INDEX,
  * NVC5B7_SET_IN_DRV_PIC_SETUP, NVC5B7_SET_OUT_ENC_STATUS,
@@ -102,6 +103,8 @@
  */
 #define RECORDS_APPLICATION_ID		0x0200U
 #define RECORDS_APPLICATION_H264	1U
+#define RECORDS_WATCHDOG		0x0204U
+#define RECORDS_RC_DATA			0x070cU
 #define RECORDS_EXECUTE			0x0300U
 #define RECORDS_IN_REF_LUMA		0x0400U
 #define RECORDS_IN_REF_CHROMA		0x0440U
@@ -437,7 +440,8 @@ nvrtx_nvenc_push_release(
  * control parameters, the picture's number, the setup, the status, the
  * bitstream, the history, the rate control's state, the input picture,
  * the reconstructed picture and its co-located data, the reference, then
- * the start.  Buffers the frame leaves at 0 get no method.
+ * the start.  Buffers the frame leaves at 0 get no method (the optional
+ * ones; the others only when a test leaves one out on purpose).
  *
  * Returns the length in bytes (at most NVRTX_NVENC_ENCODE_PUSH_BYTES).
  *
@@ -452,12 +456,20 @@ nvrtx_nvenc_push_encode(
 	uint8_t *push,
 	const struct nvrtx_nvenc_frame *frame)
 {
+	uint32_t index;
 	size_t at;
 
 	/* The codec. */
 	at = records_method(push, 0U, RECORDS_APPLICATION_ID, 1U);
 	nvrtx_put32(push, at, RECORDS_APPLICATION_H264);
 	at += 4U;
+
+	/* The engine's watchdog, when the frame sets one. */
+	if (frame->watchdog != 0U) {
+		at = records_method(push, at, RECORDS_WATCHDOG, 1U);
+		nvrtx_put32(push, at, frame->watchdog);
+		at += 4U;
+	}
 
 	/* The control parameters. */
 	at = records_method(push, at, RECORDS_CONTROL, 1U);
@@ -474,6 +486,10 @@ nvrtx_nvenc_push_encode(
 	at = records_address(push, at, RECORDS_OUT_STATUS, frame->status);
 	at = records_address(push, at, RECORDS_OUT_BITSTREAM, frame->bitstream);
 	at = records_address(push, at, RECORDS_HISTORY, frame->history);
+
+	/* The rate control's data, when the frame gives some. */
+	if (frame->rc_data != 0U)
+		at = records_address(push, at, RECORDS_RC_DATA, frame->rc_data);
 
 	/* The rate control's persistent state, when the session keeps one. */
 	if (frame->rc_process != 0U)
@@ -495,6 +511,13 @@ nvrtx_nvenc_push_encode(
 	if (frame->reference_luma != 0U) {
 		at = records_address(push, at, RECORDS_IN_REF_LUMA, frame->reference_luma);
 		at = records_address(push, at, RECORDS_IN_REF_CHROMA, frame->reference_chroma);
+	}
+
+	/* The frame's further methods, each with its one word. */
+	for (index = 0U; index < frame->extra_count && index < NVRTX_NVENC_EXTRA_METHODS; index++) {
+		at = records_method(push, at, frame->extra_method[index], 1U);
+		nvrtx_put32(push, at, frame->extra_data[index]);
+		at += 4U;
 	}
 
 	/* Starts the encode, without a notification. */
@@ -673,7 +696,11 @@ records_method(
 	return at + 4U;
 }
 
-/* Writes one of the encoder's address methods (the address's upper 32 of 40 bits) and returns where the next method goes. */
+/*
+ * Writes one of the encoder's address methods (the address's upper 32 of
+ * 40 bits) and returns where the next method goes; an address of 0 (a
+ * buffer the encode does not give) writes nothing.
+ */
 static size_t
 records_address(
 	uint8_t *push,
@@ -681,6 +708,10 @@ records_address(
 	uint32_t method,
 	uint64_t address)
 {
+	/* No buffer, no method. */
+	if (address == 0U)
+		return at;
+
 	/* The method and the address in 256-byte units. */
 	at = records_method(push, at, method, 1U);
 	nvrtx_put32(push, at, (uint32_t)(address >> RECORDS_ADDRESS_SHIFT));

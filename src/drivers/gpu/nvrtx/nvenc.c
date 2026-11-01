@@ -351,6 +351,33 @@ nvrtx_nvenc_release(
 }
 
 /*
+ * Remakes the encoder's channel after one that stopped on an error: the
+ * old channel's objects are freed as by the stop, its memory is left (the
+ * engine may still name it; it is not given back before the unload), and
+ * nvenc-channel runs again.  For the encoder's self-test, which tries
+ * values the engine may refuse.
+ */
+int
+nvrtx_nvenc_restart(
+	struct nvrtx_gpu *gpu)
+{
+	int error;
+
+	/* Frees the stopped channel's objects and forgets its state, whose memory stays. */
+	nvrtx_nvenc_stop(gpu);
+	gpu->nvenc = NULL;
+	nvrtx_stage_mark("nvenc-channel: the stopped channel is freed, its memory left; the channel is made again");
+
+	/* Makes the channel again. */
+	error = nvrtx_nvenc_start(gpu);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the new channel takes work. */
+	return 0;
+}
+
+/*
  * Reports whether the GPU has an encoder that takes work.  Any context,
  * no lock (a stop may follow at once; nvrtx_nvenc_run() refuses then).
  */
