@@ -15,7 +15,10 @@
  * Each region names layer 0 of its image, and level 0 but for a blit and
  * a copy between a buffer and an image, which may name any level; other
  * subresources are refused (ENOTSUP) when recorded.  A buffer copy moves whole 32-bit
- * words at 4-byte aligned offsets; others are refused (ENOTSUP).
+ * words at 4-byte aligned offsets; others are refused (ENOTSUP).  A
+ * multi-planar (NV12) image is only copied out to a buffer, a plane a
+ * region (PLANE_0 as R8 texels, PLANE_1 as R8G8), from level 0; any
+ * other transfer of one is refused (ENOTSUP).
  */
 
 #include <stdbool.h>
@@ -71,6 +74,8 @@ struct transfer_work {
 static int hold(struct powervr_vk_session *session, struct powervr_vk_record *entry, enum i915_vk_object_kind kind, uint64_t identity);
 static int first_subresource(uint32_t level, uint32_t layer, uint32_t count);
 static int first_layer(uint32_t layer, uint32_t count);
+static int planar_regions(uint32_t opcode, const struct powervr_vk_record *entry, const struct transfer_data *data);
+static int plane_source(const struct powervr_vk_image *image, uint32_t aspect, struct powervr_view_shape *view);
 static int image_surface(const struct powervr_vk_image *image, uint32_t level, struct powervr_render_surface *surface);
 static int level_edges(const struct powervr_vk_image *image, uint32_t level, uint32_t *width, uint32_t *height, uint32_t *padded_width);
 static int image_view(const struct powervr_vk_image *image, uint32_t level, struct powervr_view_shape *view, struct powervr_image_layout *level_layout);
@@ -131,6 +136,10 @@ powervr_vk_record_transfer(
 		error = hold(session, entry, I915_VK_OBJ_IMAGE, destination);
 		if (error != 0)
 			return error;
+
+		/* A multi-planar image is not cleared. */
+		if (((const struct powervr_vk_image *)entry->objects[0]->payload)->plane_count != 0)
+			return ENOTSUP;
 
 		/* Each range: level 0, layer 0 only. */
 		for (index = 0; index < count; index++) {
@@ -237,6 +246,11 @@ powervr_vk_record_transfer(
 	if (refused != 0)
 		return refused;
 
+	/* A multi-planar image only as a copy's source of its planes to a buffer. */
+	refused = planar_regions(opcode, entry, data);
+	if (refused != 0)
+		return refused;
+
 	/* Succeeded: the transfer is recorded. */
 	return 0;
 }
@@ -256,6 +270,7 @@ powervr_vk_transfer_run(
 	const struct powervr_vk_image *other;
 	const struct powervr_vk_buffer *buffer;
 	const VkBufferImageCopy *copy;
+	const struct powervr_format *texels;
 	uint64_t address;
 	uint32_t row;
 	uint32_t height;
@@ -349,14 +364,21 @@ powervr_vk_transfer_run(
 				work->request.area.y = (uint32_t)copy->imageOffset.y;
 				work->request.source = &work->view;
 			} else if (error == 0) {
-				/* The buffer as a linear destination, written from its first texel. */
-				error = image_view(image, copy->imageSubresource.mipLevel, &work->view, &work->level_layout);
-				work->request.destination.format = image->format;
+				/* The buffer as a linear destination, written from its first texel, of the image's (or the plane's) texels. */
+				texels = image->format;
+				if (image->plane_count != 0) {
+					error = plane_source(image, copy->imageSubresource.aspectMask, &work->view);
+					if (error == 0)
+						texels = work->view.format;
+				} else {
+					error = image_view(image, copy->imageSubresource.mipLevel, &work->view, &work->level_layout);
+				}
+				work->request.destination.format = texels;
 				work->request.destination.address = address;
 				work->request.destination.width = row;
 				work->request.destination.height = height;
 				work->request.destination.linear = 1;
-				work->request.destination.row_pitch = row * image->format->texel_bytes;
+				work->request.destination.row_pitch = row * texels->texel_bytes;
 				work->request.destination.padded_width = row;
 				work->request.source_x = (uint32_t)copy->imageOffset.x;
 				work->request.source_y = (uint32_t)copy->imageOffset.y;
@@ -438,6 +460,102 @@ first_layer(
 		return ENOTSUP;
 
 	/* Succeeded: the first layer. */
+	return 0;
+}
+
+/*
+ * Refuses a transfer that touches a multi-planar image (ENOTSUP) but a
+ * copy from one to a buffer whose every region names one plane's aspect
+ * at level 0.  Object 0 is the source and object 1 the destination; a
+ * clear was checked when its image was held.
+ */
+static int
+planar_regions(
+	uint32_t opcode,
+	const struct powervr_vk_record *entry,
+	const struct transfer_data *data)
+{
+	const struct powervr_vk_image *source;
+	const struct powervr_vk_image *destination;
+	uint32_t aspect;
+	uint32_t index;
+
+	/* The images of the copy: the source unless it is a buffer, the destination unless it is one. */
+	source = NULL;
+	destination = NULL;
+	if (opcode != GPU_OP_CMD_COPY_BUFFER && opcode != GPU_OP_CMD_COPY_BUFFER_TO_IMAGE)
+		source = entry->objects[0]->payload;
+	if (opcode != GPU_OP_CMD_COPY_BUFFER && opcode != GPU_OP_CMD_COPY_IMAGE_TO_BUFFER)
+		destination = entry->objects[1]->payload;
+
+	/* Nothing is written into a multi-planar image. */
+	if (destination != NULL && destination->plane_count != 0)
+		return ENOTSUP;
+
+	/* A copy of none needs nothing more. */
+	if (source == NULL || source->plane_count == 0)
+		return 0;
+
+	/* Only to a buffer. */
+	if (opcode != GPU_OP_CMD_COPY_IMAGE_TO_BUFFER)
+		return ENOTSUP;
+
+	/* Each region one plane of level 0. */
+	for (index = 0; index < data->count; index++) {
+		aspect = data->regions.buffers[index].imageSubresource.aspectMask;
+		if (aspect != VK_IMAGE_ASPECT_PLANE_0_BIT && aspect != VK_IMAGE_ASPECT_PLANE_1_BIT)
+			return ENOTSUP;
+		if (data->regions.buffers[index].imageSubresource.mipLevel != 0)
+			return ENOTSUP;
+	}
+
+	/* Succeeded: a copy of planes to a buffer. */
+	return 0;
+}
+
+/*
+ * Describes the plane of a multi-planar image an aspect names as a source
+ * view: a linear image of the plane's own format and edges at the plane's
+ * offset.  EINVAL for an aspect that names no plane of the image, EIO for
+ * an image not bound.
+ */
+static int
+plane_source(
+	const struct powervr_vk_image *image,
+	uint32_t aspect,
+	struct powervr_view_shape *view)
+{
+	const struct powervr_image_plane *plane;
+	uint64_t address;
+	int error;
+
+	/* The plane the aspect names. */
+	if (aspect == VK_IMAGE_ASPECT_PLANE_0_BIT && image->plane_count > 0) {
+		plane = &image->planes[0];
+	} else if (aspect == VK_IMAGE_ASPECT_PLANE_1_BIT && image->plane_count > 1) {
+		plane = &image->planes[1];
+	} else {
+		return EINVAL;
+	}
+
+	/* The image's memory. */
+	error = powervr_vk_image_address(image, &address);
+	if (error != 0)
+		return error;
+
+	/* All of the plane, the identity mapping. */
+	kern_memset(view, 0, sizeof(*view));
+	view->format = plane->format;
+	view->layout = &plane->layout;
+	view->address = address + plane->offset;
+	view->width = plane->width;
+	view->height = plane->height;
+	view->image_levels = 1;
+	view->level_count = 1;
+	view->layer_count = 1;
+	view->linear = true;
+
+	/* Succeeded: the plane's view. */
 	return 0;
 }
 

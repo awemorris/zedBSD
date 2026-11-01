@@ -10,7 +10,9 @@
  * record.
  *
  * A command buffer keeps the commands a submission runs: the compute
- * pipeline bound, the sets bound, and each dispatch.  A barrier is read
+ * pipeline bound, the sets bound, and each dispatch, the render passes,
+ * draws and transfers, and the result status queries' resets, begins
+ * and ends (vk-query.c).  A barrier is read
  * and not kept: a submission runs its dispatches in order with a fence
  * between each (vk-queue.c).  Any other recorded command fails the
  * recording, which its End reports.
@@ -123,6 +125,9 @@ powervr_vk_command_route(
 	case GPU_OP_CMD_PUSH_CONSTANTS:
 	case GPU_OP_CMD_DRAW:
 	case GPU_OP_CMD_DRAW_INDEXED:
+	case GPU_OP_CMD_RESET_QUERY_POOL:
+	case GPU_OP_CMD_BEGIN_QUERY:
+	case GPU_OP_CMD_END_QUERY:
 		error = record(session, opcode, reader);
 		break;
 	default:
@@ -569,6 +574,8 @@ record(
 	} else if (opcode == GPU_OP_CMD_COPY_BUFFER || opcode == GPU_OP_CMD_COPY_BUFFER_TO_IMAGE || opcode == GPU_OP_CMD_COPY_IMAGE_TO_BUFFER || opcode == GPU_OP_CMD_COPY_IMAGE ||
 		   opcode == GPU_OP_CMD_BLIT_IMAGE || opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
 		refused = powervr_vk_record_transfer(session, opcode, reader, &entry);
+	} else if (powervr_vk_query_recorded(opcode)) {
+		refused = powervr_vk_record_query(session, opcode, reader, &entry);
 	} else if (opcode != GPU_OP_CMD_PIPELINE_BARRIER) {
 		refused = powervr_vk_record_draw(session, opcode, reader, &entry);
 	} else {

@@ -404,6 +404,15 @@ struct powervr_session {
 	unsigned reserved;
 	struct powervr_vk_session *vk;
 	struct powervr_targets *targets;
+
+	/*
+	 * The codec operations of the board's video engine
+	 * (DRV_POWERVR_VIDEO_*) as they were when the session opened, 0
+	 * without an engine.  Read once and kept, so the capset, the queue
+	 * family and the formats the session reports agree for its lifetime.
+	 */
+	uint32_t video_operations;
+
 	struct powervr_render_context *render_context;
 	struct powervr_transfer_context *transfer_context;
 	struct powervr_buffer *compute_switch_pds;

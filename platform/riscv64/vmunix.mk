@@ -155,6 +155,8 @@ RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/platform/visionfive2/vf2-pmu
 	src/drivers/gpu/powervr/vk/vk-queue.c \
 	src/drivers/gpu/powervr/vk/vk-pass.c \
 	src/drivers/gpu/powervr/vk/vk-transfer.c \
+	src/drivers/gpu/powervr/vk/vk-query.c \
+	src/drivers/gpu/powervr/video-state.c \
 	src/drivers/gpu/powervr/render-pass.c \
 	src/drivers/gpu/powervr/render-draw.c \
 	src/drivers/gpu/powervr/render-depth.c \

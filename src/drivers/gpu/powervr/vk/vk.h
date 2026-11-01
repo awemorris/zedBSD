@@ -74,6 +74,16 @@ struct powervr_vk_executor;
 #define POWERVR_VK_IMAGE_EDGE		4096U
 #define POWERVR_VK_IMAGE_LAYERS		256U
 
+/*
+ * The usages a multi-planar (NV12) image may have without a video
+ * decoder: copied out and its planes sampled (a decoder adds a decode's
+ * output and reference, powervr_video_image_usages); and the create flags
+ * it may have: views of its planes in their own formats, with the usages
+ * only they support.
+ */
+#define POWERVR_VK_PLANAR_USAGES	(VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+#define POWERVR_VK_PLANAR_FLAGS		(VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT)
+
 /* A command buffer's states. */
 #define POWERVR_VK_COMMAND_INITIAL	0U
 #define POWERVR_VK_COMMAND_RECORDING	1U
@@ -92,7 +102,11 @@ struct powervr_vk_object;
  * submission's work did not finish in time: the core may still run it,
  * so the executor's own memory stays with the core.  timelines has bit n
  * set once a queue completes jobs on timeline n (read by the job
- * operations, written by vkGetDeviceQueue2).
+ * operations, written by vkGetDeviceQueue2).  query_pool and query name the
+ * result status query a submission's commands have begun and not yet
+ * ended (vk-query.c), which a video decode between them reports into;
+ * query_pool is NULL outside such a scope, and is a record's hold, never
+ * one of its own.
  */
 struct powervr_vk_session {
 	struct powervr_session *owner;
@@ -106,6 +120,8 @@ struct powervr_vk_session {
 	struct i915_wire_arena arena;
 	uint64_t timelines;
 	struct powervr_vk_executor *executor;
+	struct powervr_vk_object *query_pool;
+	uint32_t query;
 };
 
 /*
@@ -168,22 +184,32 @@ struct powervr_vk_buffer {
 /*
  * A VkImage: its format, shape and layout, its usage, whether it declared
  * external memory, and once bound the memory object it holds and its
- * offset there.
+ * offset there.  A multi-planar image (NV12) has plane_count planes, each
+ * with its own one-plane format and linear layout inside the image's; an
+ * image of one format has none.
  */
 struct powervr_vk_image {
 	const struct powervr_format *format;
 	struct powervr_image_shape shape;
 	struct powervr_image_layout layout;
+	uint32_t plane_count;
+	struct powervr_image_plane planes[POWERVR_IMAGE_PLANES_MAX];
 	uint32_t usage;
 	bool external;
 	struct powervr_vk_object *memory;
 	uint64_t offset;
 };
 
-/* A VkImageView: the image it holds, the aspect it shows and the texture unit's two words of it. */
+/*
+ * A VkImageView: the image it holds, the aspect it shows, the format and
+ * the distance between layers of what it reads (a plane's for a plane's
+ * view, the image's otherwise), and the texture unit's two words of it.
+ */
 struct powervr_vk_image_view {
 	struct powervr_vk_object *image;
 	uint32_t aspect;
+	const struct powervr_format *format;
+	uint64_t layer_bytes;
 	uint32_t base_level;
 	uint32_t base_layer;
 	uint64_t words[2];
@@ -335,6 +361,13 @@ int powervr_vk_layout_route(struct powervr_vk_session *session, uint32_t opcode,
 int powervr_vk_command_route(struct powervr_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
 int powervr_vk_pass_route(struct powervr_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
 int powervr_vk_queue_route(struct powervr_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+int powervr_vk_query_route(struct powervr_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+
+/* The result status queries' records, their run in a submission, and a decode's report into the open one (vk-query.c). */
+bool powervr_vk_query_recorded(uint32_t opcode);
+int powervr_vk_record_query(struct powervr_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
+void powervr_vk_query_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry);
+void powervr_vk_query_report(struct powervr_vk_session *session, int32_t status);
 
 /* The render pass records and the render jobs of a command buffer (vk-pass.c). */
 struct powervr_render_job;

@@ -244,4 +244,34 @@ int drv_powervr_dc_wait(uint64_t target, uint64_t *reached);
  */
 void drv_powervr_dc_vblank_report(void);
 
+/*
+ * The codec operations a video engine beside the core performs (bits of
+ * the operations word): the render node shows them as Vulkan Video on its
+ * one queue family.
+ */
+#define DRV_POWERVR_VIDEO_DECODE_H264	0x1U
+#define DRV_POWERVR_VIDEO_DECODE_H265	0x2U
+#define DRV_POWERVR_VIDEO_ENCODE_H265	0x4U
+
+/*
+ * The operations of a video engine (a codec core the SoC has beside the
+ * GPU) the render node runs Vulkan Video on.
+ *
+ * Operations reports the codec operations the engine performs, once its
+ * firmware has started; it must not change afterwards, since every
+ * session reads it once, when it opens, and keeps the answer.  The table
+ * and the engine must live as long as the system.
+ */
+struct drv_powervr_video_ops {
+	uint32_t (*operations)(void *engine);
+};
+
+/*
+ * Registers the board's one video engine with the render node.  Sessions
+ * opened afterwards offer its operations; those opened before offer no
+ * video.  EINVAL for a table without its operations, EBUSY when an engine
+ * is registered already.
+ */
+int drv_powervr_video_register(const struct drv_powervr_video_ops *ops, void *engine);
+
 #endif

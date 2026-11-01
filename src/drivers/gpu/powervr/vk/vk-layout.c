@@ -884,17 +884,14 @@ set_image(
 {
 	const struct powervr_vk_image_view *view;
 	const struct powervr_vk_sampler *sampler;
-	const struct powervr_vk_image *image;
 	uint32_t offset;
 	int error;
 
 	/* The view's descriptor, where the binding has one. */
 	error = powervr_set_descriptor_offset(&set->layout, binding, element, POWERVR_SHADER_PART_IMAGE_STATE, &offset);
 	view = powervr_vk_payload(session, I915_VK_OBJ_IMAGE_VIEW, view_id);
-	if (error == 0 && view != NULL && view->image != NULL) {
-		image = view->image->payload;
-		powervr_descriptor_image(&set->bytes[offset], view->words, (uint32_t)image->layout.layer_bytes, powervr_pack_info(image->format->vk_format));
-	}
+	if (error == 0 && view != NULL && view->image != NULL)
+		powervr_descriptor_image(&set->bytes[offset], view->words, (uint32_t)view->layer_bytes, powervr_pack_info(view->format->vk_format));
 
 	/* The sampler's descriptor, where the binding has one; no comparison. */
 	error = powervr_set_descriptor_offset(&set->layout, binding, element, POWERVR_SHADER_PART_SAMPLER_STATE, &offset);

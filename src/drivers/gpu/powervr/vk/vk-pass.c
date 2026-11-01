@@ -232,6 +232,12 @@ framebuffer_view(
 		return EINVAL;
 	image_view = object->payload;
 	image = image_view->image->payload;
+
+	/* A multi-planar image is never drawn into: its views show one plane each, which a pass does not take. */
+	if (image->plane_count != 0)
+		return ENOTSUP;
+
+	/* The image's place in memory. */
 	kern_memset(view, 0, sizeof(*view));
 	error = powervr_vk_image_address(image, &view->shape.address);
 	if (error != 0)
