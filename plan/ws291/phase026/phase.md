@@ -104,3 +104,9 @@ Queue: q1832（P2）
 ## q1832-i01（2026-11-01 P2、worktree p2-ws291g1、main d4b741303）
 
 - 読んだ物と事実は design.md §1・§2。第 1 版を書いた（2026-11-01 09:24〜）。
+
+### 再開点（2026-11-01 P2、q1832-i01 をラップアップで返す）
+
+- design.md 第 1 版（§0〜§15）と phase.md の問い Q1〜Q4 は書いた。design-reviewer のレビューは済み（[design-review.md](design-review.md): blocker 2・major 7・minor 12）。
+- レビューの反映は未（design.md・phase.md は第 1 版のまま）。反映の方針: drain は `vulkan_context_execute` の入口だけで入口の通し番号まで、granule は record 前の最大の予約（bump の arena）、pool は session に 1 つで index を貸す、corners・zero page は slot 0、Q1 の「ring だけ」の文と Q3 の uapi（`gpu-op.h` 1869 行の comment）を直す、H1 を draw ごとの状態の比べに、libvulkan の結合の TSan 試験、`--record=once` は image×part の command buffer。
+- 次: 上の反映で第 2 版 → Q1 へ問いを返す。
