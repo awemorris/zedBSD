@@ -226,7 +226,7 @@ test_cookies(void)
 	CHECK_EQ(test_store(instance, "http://example.test/", "expires=2; Expires=Wed, 21 Oct 2099 07:28:00 GMT", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "both=3; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=3600", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "session=4", 0), 0);
-	CHECK_EQ(test_store(instance, "http://example.test/", "short=5; Max-Age=1", 0), 0);
+	CHECK_EQ(test_store(instance, "http://example.test/", "short=5; Max-Age=2", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "past=6; Expires=Sun, 06 Nov 1994 08:49:37 GMT", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "replaced=7; Max-Age=3600", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "replaced=8", 0), 0);
@@ -257,7 +257,7 @@ test_cookies(void)
 	CHECK_EQ(browser_instance_destroy(instance), 0);
 
 	/* After "short" has run out, the instance again: only the persistent ones still alive come back. */
-	nanosleep(&(struct timespec){ 1, 300000000 }, NULL);
+	nanosleep(&(struct timespec){ 2, 300000000 }, NULL);
 	error = test_files_instance("a", &instance);
 	CHECK_EQ(error, 0);
 	if (error != 0)
@@ -1145,7 +1145,10 @@ test_cache(void)
 	struct test_fetch result;
 	struct net_send post;
 	char file[TEST_PATH_MAX];
+	char other[TEST_PATH_MAX];
 	char url[TEST_PATH_MAX];
+	char record[1024];
+	size_t record_length;
 	int hits;
 	int conditional;
 	int error;
@@ -1261,8 +1264,24 @@ test_cache(void)
 	CHECK_EQ(browser_instance_destroy(instance), 0);
 	sync();
 
-	/* A record that does not decode is removed when it is read, and the URL is fetched again. */
+	/* A record that holds another URL's response (a shared key) is no answer, and is left for its owner. */
+	test_cache_path("c", "/etag", other, sizeof(other));
 	test_cache_path("c", "/max-age", file, sizeof(file));
+	CHECK_EQ(test_read_file(other, record, sizeof(record), &record_length), 0);
+	CHECK(record_length > 0);
+	test_write_file(file, record, record_length);
+	error = test_files_instance("c", &instance);
+	CHECK_EQ(error, 0);
+	if (error != 0)
+		return;
+	CHECK(!test_cache_has(instance, "/max-age"));
+	wb_storage_queue_flush(instance->queue);
+	CHECK(test_file_exists(file));
+	CHECK(test_cache_has(instance, "/etag"));
+	CHECK_EQ(browser_instance_destroy(instance), 0);
+	sync();
+
+	/* A record that does not decode is removed when it is read, and the URL is fetched again. */
 	test_write_file(file, "garbage", 7);
 	error = test_files_instance("c", &instance);
 	CHECK_EQ(error, 0);
@@ -1290,9 +1309,12 @@ test_cache(void)
 	CHECK_EQ(browser_instance_destroy(instance), 0);
 	sync();
 
-	/* An index that does not decode is dropped as empty: the records it should have listed go. */
+	/* An index that does not decode (its magic line altered) is dropped as empty: the records it listed go. */
 	snprintf(file, sizeof(file), "%s/c/cache/0", test_directory);
-	test_write_file(file, "not an index", 12);
+	CHECK_EQ(test_read_file(file, record, sizeof(record), &record_length), 0);
+	CHECK(record_length > 22);
+	record[0] = 'X';
+	test_write_file(file, record, record_length);
 	error = test_files_instance("c", &instance);
 	CHECK_EQ(error, 0);
 	if (error != 0)
