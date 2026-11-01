@@ -76,7 +76,7 @@ p006b の §7 と同じ。
 
 - `userland/desktop/libmedia/h265-dpb.c`（骨格を実装で置き換え）。header・道具・他の module は変えていない（check-skeleton の BASE 照合 PASS）。
 - `plan/ws324/tests/unit/test-dpb.c`。
-- commit: 実装と最初の試験 `c14ff1c812`、試験の追加（壊す確かめで見逃した所を塞いだ物）は次の commit（Q1 への報告に SHA）。
+- commit: 実装と最初の試験 `c14ff1c812`、試験の追加（壊す確かめで見逃した所を塞いだ物）は`b0b3acd002`。
 
 ### 確かめた command と最後の行
 
