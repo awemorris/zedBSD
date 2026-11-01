@@ -136,7 +136,10 @@ cryc_signature_verify(
 		return ENOTSUP;
 
 	/* Sorts the algorithm by the kind of key it needs: the RSA algorithms come first in the enumeration. */
-	rsa_alg = (int)params->alg <= (int)CRYC_SIG_RSA_PSS_SHA512;
+	if ((int)params->alg <= (int)CRYC_SIG_RSA_PSS_SHA512)
+		rsa_alg = 1;
+	else
+		rsa_alg = 0;
 
 	/* Refuses an algorithm that the key does not suit. */
 	if (rsa_alg && key->type != CRYC_KEY_RSA)
