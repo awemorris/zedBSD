@@ -13,7 +13,7 @@
 # -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE, UBSan in trap mode) into the static libraries
 # libcrypto-compat.a and libssl-compat.a, each test is linked with them and -lbcrypt -lcrypt32 -lws2_32 into one
 # .exe, and run under Wine (a prefix of its own, build/tmp/ws335-wine, made on first use and marked ready only
-# when wineboot succeeded; winedbg is disabled so a trap ends the test; WS335_VECTORS is given as its Z: path).
+# when wineboot succeeded; winedbg is disabled so a trap ends the test; WS335_VECTORS is given as its Z: path). Wine runs under LC_ALL=C.UTF-8 so non-ASCII file names work whatever the host locale.
 # Each .exe is built and run in a directory of its own ($out/<test>.run/, its current directory too), so a file
 # a test puts beside its .exe (cert.pem) is seen by that test only.  The prefix is kept between runs: a test that
 # adds certificates to its stores removes them before it ends and first removes any left by an earlier run.
@@ -127,7 +127,7 @@ for name in $names; do
 			status=1
 			continue
 		fi
-		(cd "$out/$label.run" && WINEPREFIX=$wine_prefix WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d \
+		(cd "$out/$label.run" && LC_ALL=C.UTF-8 WINEPREFIX=$wine_prefix WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d \
 		    WS335_VECTORS="Z:$WS335_VECTORS" timeout 600 wine "$top/$program") > "$out/$label.log" 2>&1
 		code=$?
 		last=$(tr -d '\r' < "$out/$label.log" | tail -1)

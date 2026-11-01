@@ -9,7 +9,7 @@
 | P2 | phase-runner-high | ws322 p007 速さと頑丈さ (q1896-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-02 01:55、VF2） | 6c49fc4f4（merge f9acea845） |
 | P3 | phase-runner-high | BUG-393 (q1891-i01) | `/home/awe/zedBSD-worktrees/p3-bug393` / `agent/p3-bug393` | 返却（2026-11-02 02:20、fixed） | 594f9edc4（2026-11-02 02:20 に main へ merge） |
 | P5 | phase-runner-high | ws334 p033 後半の Windows の口 (q1886-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | 返却（2026-11-02 02:44、cleared） | 7c8295924（2026-11-02 02:44 に main へ merge） |
-| P6 | phase-runner-low | ws335 p015 OS の層 (q1897-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-02 02:04） | 6ef86e45f（merge f533fd4cd） |
+| P6 | phase-runner-low | ws335 p015 OS の層 (q1897-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | 返却（2026-11-02 03:02、cleared） | 56a60f716（2026-11-02 03:02 に main へ merge） |
 | P7 | phase-runner-high | BUG-394 (q1892-i01) | `/home/awe/zedBSD-worktrees/p7-bug394` / `agent/p7-bug394` | 返却（2026-11-02 02:46、fixed） | 471d71a4e（2026-11-02 02:46 に main へ merge） |
 | P4 | phase-runner-high | BUG-390 (q1889-i01) | `/home/awe/zedBSD-worktrees/p4-bug390` / `agent/p4-bug390` | 返却（2026-11-02 01:42、fixed） | bf6c08971（merge 3b79cca9e） |
 | P8 | phase-runner-high | BUG-391・392 (q1890-i01) | `/home/awe/zedBSD-worktrees/p8-bug391` / `agent/p8-bug391` | 返却（2026-11-02 02:09、fixed） | bd3a783d4（2026-11-02 02:09 に main へ merge） |

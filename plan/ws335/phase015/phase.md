@@ -2,7 +2,7 @@
 
 # ws335-p015: OS の層（POSIX と Windows）
 
-Status: 実装済み・試験 PASS（2026-11-02 P6。cleared は Q1。依存: p002）
+Status: cleared（2026-11-02 03:02 Q1、main で test-os PASS）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

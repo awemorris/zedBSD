@@ -12,7 +12,7 @@
 | P3 | （q1898） | Pi 5 の desktop の動画 | host の UVC capture で Pi 5 の desktop の操作を 5〜10 秒の動画に撮る。準備の build 中、Pi 5 は P7 の計測の後 | — |
 | P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
 | P5 | — | Web ブラウザ OmniGrammaton の Windows 版 | 返却（02:44）。p033 cleared（頁の暗い mode・accent・Mica・DPAPI・touch と pen・drag out）。残りは本物の Windows が要るので p037 に分けた | p034 の後の Windows の file: の直し |
-| P6 | [WS335](ws335/ws.md) p015 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | OS の層（POSIX と Windows、q1897）。p014 ML-KEM-768 は cleared | p021 誤りの queue と RAND_bytes |
+| P6 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | p015（OS の層）cleared（03:02）。次は p037（試験の TLS server と ECDSA の署名器） | p021 誤りの queue と RAND_bytes |
 | P7 | — | — | 返却（02:46）。BUG-394 fixed。Pi 5 で kernel の起動 6.3 s → 0.5 s、greeter は init の開始から 2 ms。desktop が出ない時に network を 30 s 待つ件も sessiond で直した。画面までの時間は HDMI が見えず未計測 | 次の割当を待つ |
 | P8 | — | Bug の修正 | 返却（02:09）。BUG-391・392 fixed（QEMU で確認、Pi 5 は未実施） | 次を待つ |
 
