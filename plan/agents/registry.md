@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner-high | ws291 p027 RTX の B-U (q1849-i01) | `/home/awe/zedBSD-worktrees/p1-ws291p026` / `agent/p1-ws291p026` | in-progress（2026-11-01 21:07、同じ P1 に続けて頼んだ） | 5b032169b（merge 7c5168620） |
+| P1 | phase-runner-high | ws291 p027 RTX の B-U (q1849-i01、設計の担当では実装できないので phase-runner-high で起動し直した) | `/home/awe/zedBSD-worktrees/p1-ws291p026` / `agent/p1-ws291p026` | in-progress（2026-11-01 21:07、同じ P1 に続けて頼んだ） | 5b032169b（merge 7c5168620） |
 | P2 | kernel-and-driver-designer | ws322 p001 VF2 の VPU の設計 (q1845-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 20:43 起動） | acc9635ba（merge d5aded6bd） |
 | P3 | phase-runner-high | ws291 p021 Pi 5 の model の 50 fps (q1840-i02) | `/home/awe/zedBSD-worktrees/p3-ws291p021` / `agent/p3-ws291p021` | in-progress（2026-11-01 20:45 再開、Pi 5） | — |
 | P5 | phase-runner-high | ws334 p023 instance と API v4 (q1847-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 20:57 起動） | 5f1b29046（merge e1334ddfc） |
