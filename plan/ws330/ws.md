@@ -86,6 +86,10 @@
 | ws330-p048 | encoder の速さ（WPP の thread） | O | planning | p046、p047 |
 | ws330-p049 | 規約の全文の見直し | D | planning | p031、p046〜p048 |
 
+## WS324 との揃え（2026-11-02 00:10 Q1）
+
+- H.265 の解析の 7 header（h265sw-nal・scaling・vui・rps・ps・slice・poc）は WS324 の source の物が正になる（WS324 p006a〜h）。WS330 の p004・p006〜p011 は確かめだけになる。h265sw_rps_read の引数が 1 つ増えた。software の decoder だけが使う量子化の行列と h265sw_ps_scaling は WS330 p003 が足す。適合の道具は plan/tools/h265/conformance/ に移した。
+
 ## Resume point
 
 - 2026-10-30 Q1: 作成。WS329 の completed の後に p001。

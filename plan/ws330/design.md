@@ -362,7 +362,7 @@ WS329 §10.2 と同じ形: host の道具が raw の I420 を stdin から読み
 1. 仕様の PDF は main の `build/sources/specs/itu-t-h265-202601.pdf` に写してある（design-reviewer が SHA-256 `78b09348…d4d2` の一致を確かめた）。phase.md はその path を書いた。worktree の `build/tmp/ws330-spec/`（PDF と index の html）と `build/tmp/ws330-conf/`（3 つの zip、約 7 MB）と `build/tmp/ws330-hdr/` は使い捨て（Q1 が消す）。
 2. WS326 p026（P4 の設計、acb27716b）の名前に proposed/common を合わせた。旧い `proposed/common/vcodec-bits.h` は Q1 の OK（2026-10-31）で `git rm` した。p026 の §7 の提案（`vcodec_cabac_pcm` を位置と再開に分ける）は WS330 p002 の C4 で行う。WS329 の encoder も `h264sw_frame`・`h264sw_dpb` を使うので、p002 は WS329 の試験の前後一致も確かめる（§5.2）。
 3. WS329 p003 が proposed の header を source に置く時、`vcodec-cabac-enc.h` の表の参照（`h264sw_cabac_range_lps` など）を共通化の後の名前（`vcodec_cabac_range_lps` など）に、comment の「H.265 9.3.4.3」を「H.265 9.3.5」（V11 の encoder の engine の節）にしてほしい。
-4. 適合の cache: zip だけで 129 MB。main の `build/sources/h265-conformance/` に置くのを推す（WS318 §13.3 も同じ場所を予定、共有）。展開しない（`unzip -p`）ので disk はこれだけ。取得は p029 の前に Q1 が `H265SW_CONFORMANCE_DIR=… sh plan/ws330/tests/conformance/fetch.sh` で（パラメータの無い GET 147 回）。
+4. 適合の cache: zip だけで 129 MB。main の `build/sources/h265-conformance/` に置くのを推す（WS318 §13.3 も同じ場所を予定、共有）。展開しない（`unzip -p`）ので disk はこれだけ。取得は p029 の前に Q1 が `H265SW_CONFORMANCE_DIR=… sh plan/tools/h265/conformance/fetch.sh` で（パラメータの無い GET 147 回）。
 5. HM の参照の decoder（ITU-T/ISO の配布の C++、host でだけ build）を encoder の厳しい oracle に足すか（WS329 §14-4 の JM と同じ問い）。推しは「足す」（p046 の前、取得は zip 1 つ、SHA-256 を記録）。master.md の web の取得の条件に照らして Q1 が決める。
 6. WS318 の記録: Q330-2 が推しで決まれば、WS318 p016 の設計の入力にこの proposed の解析の header を、D19 を「H.265 の解析は WS330 の Vulkan に依らない module を共有」に直す記録を。
 7. ws.md の「ユーザーの決定（2026-10-30、原文）」は Q1 が書いた原文の記録。AGENTS §8（原文を載せない）との整理は Q1（この Phase では変えていない）。
