@@ -13,6 +13,8 @@
 
 - 2026-11-01 09:05 ユーザーから、WS326 の速さの続きは WS326 に Phase を足さず新しい WS にする、という趣旨の答えを受けた（Q1 の推しの案）。
 
+- 2026-11-01 09:30 Q1: SIMD（範囲の d）は WS329 のユーザーの答えと同じ形で行う（gcc・clang の vectorizer の report を見て C を整える Phase → 表せない所は short vector 型の intrinsics）。
+
 ## Phase
 
 | ID | 目的 | 状態 | 依存 |

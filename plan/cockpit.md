@@ -76,27 +76,6 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 06:5x にも、担当が消してよいと挙げた /tmp の試験の出力（/tmp/ws326-speed.run.*・/tmp/p1-speed-*.run.*・/tmp/p1-stage・/tmp/p1-video-check、scratchpad の interp）を wildcard で消そうとして、同じ判定で止められた。
 - 決めてほしい事: 00 の worktree の片付けと合わせて、許可を足すか、ユーザーが `! sh plan/tools/q1-clean.sh --tmp` を走らせるか。
 
-### 0d. WS329（libmedia の H.264 の software の encoder）の設計の問い Q329-1〜5（2026-10-31 新しい）
-
-- 背景: WS329 は、libmedia に既存の library を使わない H.264 の encoder を作る WS（標準廉価実装手順）。P5 が設計（header の案 26、Phase p002〜p026）を書き、敵対的レビュー（major 10）を反映した（main 455a7d5b4）。encoder は decoder（WS326）の部品と再構成をそのまま使うので、encoder と decoder の画がずれない。実装は WS326 の完了の後。全文は [ws329/user-questions.md](ws329/user-questions.md)。
-- 用語: BD-rate は同じ画質に要る bit の量の差（+40% は x264 より 4 割多く要る）。preset は速さと画質の釣り合いの段。x264 veryfast は広く使われる速い設定。
-- Q329-1 画質の目標: **推し A** 釣り合いの preset で x264 veryfast に対し BD-rate +40% 以内、速い preset で +80% 以内。
-- Q329-2 速さの目標: **推し A** 5330 で速い preset の 720p30 を実時間に（slice の 2〜4 thread）。1080p30 は目標にしない（SIMD を使わないため）。
-- Q329-3 B-frame: **推し A** 入れる（Main・High、参照にしない B を最大 3 枚、既定は 0）。
-- Q329-4 WS318 と並べて進める: **推し A** WS326 の完了の後に p002〜p023 を WS318 と並べ、p024 は WS318 p012a、p025 は WS318 p008 を待つ。
-- Q329-5 libmedia の encoder の設定に速さの欄を足す: **推し A** WS318 の media_encoder_config に `speed` を 1 つ足す。
-- 止めている物: 無し（実装は WS326 の完了待ち）。
-
-### 0f. WS330（libmedia の H.265 の software の decoder と encoder）の設計の問い Q330-1〜4（2026-10-31 新しい）
-
-- 背景: WS330 は、H.265 の decoder と encoder を既存の library を使わずに作る WS（実装は WS329 の後、ユーザーの決定）。P5 が設計（header の案 38、Phase p002〜p049）を書き、敵対的レビュー（blocker 1・major 11）を反映した（main 299a2f4b3）。H.264 と共通の部品（bit の読み・NAL・CABAC・frame・DPB）は `vcodec-` の名前で共有する。全文は [ws330/user-questions.md](ws330/user-questions.md)。
-- 用語: Main は 8 bit 4:2:0 の基本の profile、Main 10 は 10 bit（HDR など）。WPP・tile は 1 枚の画を並列に decode できる分け方。
-- Q330-1 範囲: **推し A** Main（8 bit）だけ。10 bit は libavcodec に回し、WS318 が 10 bit の出力を持った後に別の WS で。
-- Q330-2 H.265 の解析を WS318（GPU の Vulkan Video の道）と共有するか: **推し A** 1 つにする（WS318 p016 がこの設計の header を採る）。
-- Q330-3 速さと画質の目標: **推し A** decoder は 5330 で 1080p30（並列にできない stream は 720p30）、Pi 5 は 720p30。encoder は 5330 で速い preset。SIMD は範囲の外。
-- Q330-4 decoder の部分を早く始めるか: **推し A** 決定どおり WS329 の完了の後（共通化を 1 回で済ませる）。
-- 止めている物: 無し（実装は WS329 の後）。
-
 ### 0h. WS302（デスクトップのスレッドバランサ DTB）の設計の問い Q302-1〜7（2026-10-31 新しい）
 
 - 背景: WS302 は、kernel が thread の振る舞い（GPU を使う・入力に応える・長く計算する）と nice から、速い P-core と省電力の E-core への割り付けを scheduler に提案する仕組み（CONFIG_DTB、既定 off、ユーザーの決定）。WS333 の CPU の口が入ったので、P5 が設計（約 22 LW、Phase p002〜p007）を書き、敵対的レビュー（blocker 2・major 11）を反映した（main 896d3e3db）。HAL は変えない。全文は [ws302/user-questions.md](ws302/user-questions.md)。
@@ -212,6 +191,9 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - **10.0.10.3（[BUG-374](bugs/BUG-374.md)、RTX の cursor の色、2026-11-01 09:08 に更新）**: 直した（cursor の色の倍率の register、display の CRC で全色一致を確かめた）。目視の確かめ: 10.0.10.3 の lock の中で `sh plan/ws291/tests/rtx-cursor-view.sh build build/b374/u` → `RESTORE_CKSUM=1463007375 sh plan/ws291/tests/rtx-cursor-view.sh up OUT build/b374/u` で入れ（Q1・担当が行う）、desktop の矢印が内側 白・外枠 黒なら直った。戻しは `rtx-cursor-view.sh back OUT build/b374/u`。
 
 ## 決まった事
+
+- 2026-11-01 09:30 WS329（H.264 の encoder）: 画質より速さ、SIMD は自動の vector 化の Phase と short vector 型の intrinsics。残りは Q1 が推しで（[ws329/ws.md](ws329/ws.md)）。WS338 の SIMD も同じ形。
+- 2026-11-01 09:30 WS330（H.265）: Main（8 bit）だけ、10 bit は後の WS（[ws330/ws.md](ws330/ws.md)）。
 
 - 2026-11-01 09:24 WS318（libmedia）: hardware が無い所は独自の software に fallback、独自の software が揃えば libavcodec を使わず依存を切る、header は 2 段で更新、MJPEG は扱わない。残りの問いは Q1 が方針に沿って決めた。設計の改訂が要る（[ws318/ws.md](ws318/ws.md)）。
 
