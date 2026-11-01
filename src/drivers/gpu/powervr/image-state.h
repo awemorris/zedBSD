@@ -64,6 +64,10 @@
 #define POWERVR_FORMAT_DEPTH		0x2U
 #define POWERVR_FORMAT_SRGB		0x4U
 #define POWERVR_FORMAT_FLOAT		0x8U
+#define POWERVR_FORMAT_PLANAR		0x10U
+
+/* The most planes of a multi-planar image (NV12 has two). */
+#define POWERVR_IMAGE_PLANES_MAX	2U
 
 /* Where one output channel of a view comes from. */
 enum powervr_channel {
@@ -130,6 +134,19 @@ struct powervr_image_layout {
 };
 
 /*
+ * One plane of a multi-planar image: the one-plane format a view of it
+ * reads it as, its edges, where it starts in the image's memory, and how
+ * its texels lie (always linear rows).
+ */
+struct powervr_image_plane {
+	const struct powervr_format *format;
+	uint32_t width;
+	uint32_t height;
+	uint64_t offset;
+	struct powervr_image_layout layout;
+};
+
+/*
  * What a view shows of an image: the image's format, layout and address,
  * its level-0 edges and level count, the view's first level and layer and
  * their counts, and the client's component mapping (VkComponentSwizzle).
@@ -169,6 +186,7 @@ struct powervr_sampler_shape {
 const struct powervr_format *powervr_format_find(uint32_t vk_format);
 uint32_t powervr_format_linear_features(const struct powervr_format *format);
 int powervr_image_lay_out(const struct powervr_image_shape *shape, const struct powervr_format *format, struct powervr_image_layout *layout);
+int powervr_image_lay_out_planes(const struct powervr_image_shape *shape, const struct powervr_format *format, struct powervr_image_plane planes[POWERVR_IMAGE_PLANES_MAX], uint32_t *count, struct powervr_image_layout *layout);
 int powervr_view_words(const struct powervr_view_shape *view, uint64_t words[2]);
 int powervr_sampler_words(const struct powervr_sampler_shape *sampler, uint64_t words[2]);
 uint32_t powervr_descriptor_bytes(uint32_t type);

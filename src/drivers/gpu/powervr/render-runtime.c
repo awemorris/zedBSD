@@ -34,6 +34,7 @@
 #include <uapi/gpu-job.h>
 
 #include "drivers/gpu/powervr/render-private.h"
+#include "drivers/gpu/powervr/video-state.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
 /*
@@ -58,6 +59,20 @@
 #define CAPSET_XML_VERSION		((1U << 22) | (3U << 12) | 269U)
 #define CAPSET_VENDOR_MAGIC		0x5a424453U
 #define CAPSET_VENDOR_FLAGS		7U
+
+/*
+ * The native record a session with a video engine adds after the vendor
+ * suffix: its bytes, the places of its magic ("TANZ") and its flags (the
+ * codec bits, video-state.c).
+ *
+ * Values referenced: zedBSD userland/desktop/libvulkan/context.c
+ * (VULKAN_NATIVE_CAPSET_BYTES, VULKAN_NATIVE_CAPSET_MAGIC and the words
+ * at 168 and 172).
+ */
+#define CAPSET_NATIVE_BYTES		176U
+#define CAPSET_NATIVE_MAGIC_AT		168U
+#define CAPSET_NATIVE_FLAGS_AT		172U
+#define CAPSET_NATIVE_MAGIC		0x5a4e4154U
 
 /* The timelines a frame or a job may name (0 is the context's own). */
 #define RUNTIME_TIMELINES		64U
@@ -173,16 +188,25 @@ powervr_render_frame(
 	return 0;
 }
 
-/* Reports the protocol's capset: wire 1, XML 1.3.269, timelines, the vendor suffix and its flags. */
+/*
+ * Reports the protocol's capset: wire 1, XML 1.3.269, timelines, the
+ * vendor suffix and its flags; and, for a session whose video engine
+ * decodes a codec libvulkan knows, when the reply holds it, the native
+ * record that promises the video decode family.  Without one the capset
+ * is the plain one, as before there was video.
+ */
 static int
 runtime_capset(
 	void *device,
-	void *session,
+	void *opaque,
 	struct gpu_capset *capset)
 {
+	struct powervr_session *session;
+	uint32_t video;
+
 	/* Only the protocol's capset, version 0, in a reply that holds it. */
 	(void)device;
-	(void)session;
+	session = opaque;
 	if (capset->capset_id != CAPSET_ID || capset->capset_version != 0U)
 		return ENOTSUP;
 	if (capset->capacity < CAPSET_BYTES || capset->capacity > GPU_CAPSET_MAX)
@@ -196,6 +220,14 @@ runtime_capset(
 	put32(capset->data, CAPSET_MAGIC_AT, CAPSET_VENDOR_MAGIC);
 	put32(capset->data, CAPSET_FLAGS_AT, CAPSET_VENDOR_FLAGS);
 	capset->bytes = CAPSET_BYTES;
+
+	/* The native record, only for video libvulkan can use and a reply with room for it. */
+	video = powervr_video_capset_flags(session->video_operations);
+	if (video != 0 && capset->capacity >= CAPSET_NATIVE_BYTES) {
+		put32(capset->data, CAPSET_NATIVE_MAGIC_AT, CAPSET_NATIVE_MAGIC);
+		put32(capset->data, CAPSET_NATIVE_FLAGS_AT, video);
+		capset->bytes = CAPSET_NATIVE_BYTES;
+	}
 
 	/* Succeeded: the capset is reported. */
 	return 0;

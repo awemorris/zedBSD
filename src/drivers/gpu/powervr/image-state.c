@@ -61,6 +61,13 @@
 					 VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | \
 					 VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT)
 
+/*
+ * The features of a two-plane 4:2:0 format: its planes are copied out
+ * (and sampled through views of their own one-plane formats, which an
+ * image made with the extended usage flag takes).
+ */
+#define FEATURES_PLANAR			VK_FORMAT_FEATURE_TRANSFER_SRC_BIT
+
 /* The features of the copies of a linear image. */
 #define FEATURES_TRANSFER		(VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | \
 					 VK_FORMAT_FEATURE_TRANSFER_DST_BIT)
@@ -150,7 +157,11 @@ static const struct powervr_format format_table[] = {
 	  0, 0, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT },
 	{ VK_FORMAT_R32G32B32A32_SFLOAT, 16, POWERVR_FORMAT_COLOR | POWERVR_FORMAT_FLOAT, 61, 0x0D,
 	  { POWERVR_CHANNEL_0, POWERVR_CHANNEL_1, POWERVR_CHANNEL_2, POWERVR_CHANNEL_3 },
-	  FEATURES_SAMPLED_F32, FEATURES_TRANSFER, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT }
+	  FEATURES_SAMPLED_F32, FEATURES_TRANSFER, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT },
+	/* NV12: neither unit reads it whole, only its planes as R8 and R8G8 (powervr_image_lay_out_planes). */
+	{ VK_FORMAT_G8_B8R8_2PLANE_420_UNORM, 1, POWERVR_FORMAT_PLANAR, NO_CODE, NO_CODE,
+	  { POWERVR_CHANNEL_0, POWERVR_CHANNEL_1, POWERVR_CHANNEL_2, POWERVR_CHANNEL_ONE },
+	  FEATURES_PLANAR, FEATURES_PLANAR, 0 }
 };
 
 static uint64_t place(uint64_t value, unsigned low, unsigned high);
@@ -326,6 +337,98 @@ powervr_image_lay_out(
 	layout->bytes = layout->layer_bytes * shape->layers;
 
 	/* Succeeded: the image's layout. */
+	return 0;
+}
+
+/*
+ * Lays a multi-planar image of format out in memory: NV12 as a plane of
+ * R8 texels of the image's edges, then a plane of R8G8 texels of half
+ * its edges, each laid out as a linear image of its own (rows of the
+ * same bytes, run on to whole 32-row tiles), the second on the image
+ * boundary after the first.  The layout is linear whatever the tiling,
+ * so an image made with one usage and its import made with another lie
+ * the same way.  layout gets the whole image (its row is plane 0's, its
+ * bytes both planes').  Returns ENOTSUP for a format that is not
+ * multi-planar or a shape of more than one level, layer or depth, and
+ * EINVAL for odd or out-of-range edges.
+ */
+int
+powervr_image_lay_out_planes(
+	const struct powervr_image_shape *shape,
+	const struct powervr_format *format,
+	struct powervr_image_plane planes[POWERVR_IMAGE_PLANES_MAX],
+	uint32_t *count,
+	struct powervr_image_layout *layout)
+{
+	struct powervr_image_shape plane_shape;
+	uint64_t chroma_offset;
+	uint32_t level;
+	int error;
+
+	/* NV12, one level and one layer of a flat image. */
+	*count = 0;
+	if (format == NULL ||
+	    (format->kind & POWERVR_FORMAT_PLANAR) == 0 ||
+	    format->vk_format != VK_FORMAT_G8_B8R8_2PLANE_420_UNORM)
+		return ENOTSUP;
+	if (shape->levels != 1 ||
+	    shape->layers != 1 ||
+	    shape->depth != 1 ||
+	    shape->volume)
+		return ENOTSUP;
+
+	/* Even edges, as the half-size chroma plane needs, within the core's reach. */
+	if (shape->width == 0 || shape->height == 0)
+		return EINVAL;
+	if ((shape->width & 1U) != 0 || (shape->height & 1U) != 0)
+		return EINVAL;
+	if (shape->width > POWERVR_IMAGE_EDGE_MAX || shape->height > POWERVR_IMAGE_EDGE_MAX)
+		return EINVAL;
+
+	/* The luma plane: R8 texels of the image's edges, linear. */
+	plane_shape.width = shape->width;
+	plane_shape.height = shape->height;
+	plane_shape.depth = 1;
+	plane_shape.levels = 1;
+	plane_shape.layers = 1;
+	plane_shape.linear = true;
+	plane_shape.volume = false;
+	planes[0].format = powervr_format_find(VK_FORMAT_R8_UNORM);
+	planes[0].width = shape->width;
+	planes[0].height = shape->height;
+	planes[0].offset = 0;
+	error = powervr_image_lay_out(&plane_shape, planes[0].format, &planes[0].layout);
+	if (error != 0)
+		return error;
+
+	/*
+	 * The chroma plane: R8G8 texels (Cb then Cr) of half the edges,
+	 * linear, on the image boundary after the luma plane.  Its row is the
+	 * luma plane's: the same bytes of an even width, rounded the same way.
+	 */
+	plane_shape.width = shape->width / 2U;
+	plane_shape.height = shape->height / 2U;
+	planes[1].format = powervr_format_find(VK_FORMAT_R8G8_UNORM);
+	planes[1].width = plane_shape.width;
+	planes[1].height = plane_shape.height;
+	chroma_offset = (planes[0].layout.bytes + POWERVR_IMAGE_ALIGN - 1U) & ~(uint64_t)(POWERVR_IMAGE_ALIGN - 1U);
+	planes[1].offset = chroma_offset;
+	error = powervr_image_lay_out(&plane_shape, planes[1].format, &planes[1].layout);
+	if (error != 0)
+		return error;
+
+	/* The whole image: plane 0's rows, both planes' bytes. */
+	for (level = 0; level < POWERVR_IMAGE_LEVELS_MAX; level++)
+		layout->level_offset[level] = 0;
+	layout->row_pitch = planes[0].layout.row_pitch;
+	layout->padded_width = planes[0].layout.padded_width;
+	layout->padded_height = shape->height;
+	layout->padded_depth = 1;
+	layout->bytes = chroma_offset + planes[1].layout.bytes;
+	layout->layer_bytes = layout->bytes;
+	*count = 2;
+
+	/* Succeeded: the image's planes and its whole layout. */
 	return 0;
 }
 

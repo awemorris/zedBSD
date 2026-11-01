@@ -17,6 +17,13 @@
  * (libvulkan's declaration for a window system's shared image, of a
  * handle type the session shares by) is made as any other; its memory is
  * the exported or imported allocation it is bound to (vk-memory.c).
+ *
+ * An NV12 image is two linear planes (image-state.c,
+ * powervr_image_lay_out_planes) whatever its tiling: it is sampled
+ * through views of one plane each, its luma plane as R8 and its chroma
+ * plane as R8G8, and copied out plane by plane (vk-transfer.c).  An image
+ * a decoder writes and its import elsewhere, made with other usages, lie
+ * the same way.
  */
 
 #include <stdbool.h>
@@ -30,6 +37,7 @@
 #include <uapi/gpu-op.h>
 
 #include "drivers/gpu/powervr/render-private.h"
+#include "drivers/gpu/powervr/video-state.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
 #include "drivers/gpu/i915/vk/vk-codec.inc"
@@ -51,11 +59,15 @@ static bool border_noted;
 static int create_image(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int image_chain(const struct i915_wire_reader *reader, bool *present);
 static int image_check(const VkImageCreateInfo *info, const struct powervr_format *format);
+static int planar_check(const struct powervr_vk_session *session, const VkImageCreateInfo *info);
 static int bind_image(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int image_requirements(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int subresource_layout(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int create_view(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int view_build(struct powervr_vk_session *session, const VkImageViewCreateInfo *info, struct powervr_vk_image_view *view);
+static int plain_view(const VkImageViewCreateInfo *info, const struct powervr_vk_image *image, struct powervr_view_shape *shape);
+static int plane_view(const VkImageViewCreateInfo *info, const struct powervr_vk_image *image, struct powervr_view_shape *shape);
+static int plane_of_aspect(const struct powervr_vk_image *image, uint32_t aspect, const struct powervr_image_plane **plane);
 static int create_sampler(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int image_destroy(struct powervr_vk_session *session, void *payload);
 static int view_destroy(struct powervr_vk_session *session, void *payload);
@@ -175,11 +187,14 @@ create_image(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* A declaration the executor takes, then a shape and format it takes. */
+	/* A declaration the executor takes, then a shape and format it takes (a multi-planar one checked on its own). */
 	format = powervr_format_find(info.format);
 	error = declared;
-	if (error == 0)
+	if (error == 0 && format != NULL && (format->kind & POWERVR_FORMAT_PLANAR) != 0) {
+		error = planar_check(session, &info);
+	} else if (error == 0) {
 		error = image_check(&info, format);
+	}
 
 	/* The record with its layout. */
 	image = NULL;
@@ -199,6 +214,12 @@ create_image(
 		image->shape.layers = info.arrayLayers;
 		image->shape.linear = info.tiling == VK_IMAGE_TILING_LINEAR;
 		image->shape.volume = false;
+	}
+
+	/* The layout: a multi-planar image's planes and their whole, else the format's own. */
+	if (error == 0 && (format->kind & POWERVR_FORMAT_PLANAR) != 0) {
+		error = powervr_image_lay_out_planes(&image->shape, format, image->planes, &image->plane_count, &image->layout);
+	} else if (error == 0) {
 		error = powervr_image_lay_out(&image->shape, format, &image->layout);
 	}
 
@@ -315,6 +336,61 @@ image_check(
 }
 
 /*
+ * Checks a multi-planar (NV12) image's create: ENOTSUP for what the
+ * executor does not make of one, EINVAL for a create Vulkan does not
+ * allow.  A flat image of one level and layer and one sample, in either
+ * tiling, copied out and its planes sampled -- through plane views,
+ * which the extended usage flag lets take the sampling the format itself
+ * does not have -- and, once a video decoder is there, decoded into and
+ * referenced.
+ */
+static int
+planar_check(
+	const struct powervr_vk_session *session,
+	const VkImageCreateInfo *info)
+{
+	uint32_t usages;
+
+	/* Only the plane views' flags, of a flat image of one sample. */
+	if ((info->flags & ~(uint32_t)POWERVR_VK_PLANAR_FLAGS) != 0 ||
+	    info->imageType != VK_IMAGE_TYPE_2D ||
+	    info->samples != VK_SAMPLE_COUNT_1_BIT)
+		return ENOTSUP;
+	if (info->extent.depth != 1)
+		return EINVAL;
+
+	/* One level and one layer, no larger than the device reports. */
+	if (info->mipLevels != 1 || info->arrayLayers != 1)
+		return ENOTSUP;
+	if (info->extent.width > POWERVR_VK_IMAGE_EDGE || info->extent.height > POWERVR_VK_IMAGE_EDGE)
+		return ENOTSUP;
+
+	/* Either tiling: the planes are linear in both. */
+	if (info->tiling != VK_IMAGE_TILING_OPTIMAL && info->tiling != VK_IMAGE_TILING_LINEAR)
+		return ENOTSUP;
+
+	/* Some usage, all of them ones the planes or the session's decoder have. */
+	usages = POWERVR_VK_PLANAR_USAGES | powervr_video_image_usages(session->owner->video_operations);
+	if (info->usage == 0)
+		return EINVAL;
+	if ((info->usage & ~usages) != 0)
+		return ENOTSUP;
+
+	/* Sampling is the planes' only: an image sampled without the extended usage flag is not allowed. */
+	if ((info->usage & VK_IMAGE_USAGE_SAMPLED_BIT) != 0 && (info->flags & VK_IMAGE_CREATE_EXTENDED_USAGE_BIT) == 0)
+		return EINVAL;
+
+	/* Contents start undefined, but for a linear image the host may have filled. */
+	if (info->initialLayout == VK_IMAGE_LAYOUT_UNDEFINED)
+		return 0;
+	if (info->initialLayout == VK_IMAGE_LAYOUT_PREINITIALIZED && info->tiling == VK_IMAGE_TILING_LINEAR)
+		return 0;
+
+	/* Any other initial layout is not allowed. */
+	return EINVAL;
+}
+
+/*
  * vkBindImageMemory: [device][image][memory][offset] -> [result].  An
  * image is bound once, on the image boundary, wholly inside the
  * allocation; it holds the allocation from then on.
@@ -420,8 +496,11 @@ image_requirements(
 /*
  * vkGetImageSubresourceLayout: [device][image][present]
  * [VkImageSubresource][present] -> [present][VkSubresourceLayout].  A
- * linear image's one subresource starts at 0 with its rows; any other
- * subresource answers all zeros, since Vulkan asks only of linear ones.
+ * linear image's one subresource starts at 0 with its rows; a plane of a
+ * multi-planar image, in either tiling, at the plane's offset with the
+ * plane's rows (its planes are always linear, and the decoder's users
+ * read them so); any other subresource answers all zeros, since Vulkan
+ * asks only of linear ones.
  */
 static int
 subresource_layout(
@@ -432,7 +511,9 @@ subresource_layout(
 	VkImageSubresource subresource;
 	VkSubresourceLayout layout;
 	const struct powervr_vk_image *image;
+	const struct powervr_image_plane *plane;
 	uint64_t identity;
+	int error;
 
 	/* The image and the subresource behind their presence words. */
 	kern_memset(&subresource, 0, sizeof(subresource));
@@ -444,10 +525,21 @@ subresource_layout(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* The colour of a linear image's first level and layer. */
+	/* The colour of a linear image's first level and layer, or a plane of a multi-planar one. */
 	kern_memset(&layout, 0, sizeof(layout));
 	image = powervr_vk_payload(session, I915_VK_OBJ_IMAGE, identity);
-	if (image != NULL &&
+	plane = NULL;
+	error = ENOENT;
+	if (image != NULL && image->plane_count != 0 && subresource.mipLevel == 0 && subresource.arrayLayer == 0)
+		error = plane_of_aspect(image, subresource.aspectMask, &plane);
+	if (error == 0) {
+		layout.offset = plane->offset;
+		layout.size = plane->layout.bytes;
+		layout.rowPitch = plane->layout.row_pitch;
+		layout.arrayPitch = plane->layout.bytes;
+		layout.depthPitch = plane->layout.bytes;
+	} else if (image != NULL &&
+	    image->plane_count == 0 &&
 	    image->shape.linear &&
 	    subresource.aspectMask == VK_IMAGE_ASPECT_COLOR_BIT &&
 	    subresource.mipLevel == 0 &&
@@ -508,7 +600,9 @@ create_view(
 
 /*
  * Fills a view from its create info: checks it against the image, builds
- * the texture unit's words and takes a hold on the image.
+ * the texture unit's words and takes a hold on the image.  A view of a
+ * multi-planar image shows one plane in the plane's own format (R8 for
+ * NV12's luma, R8G8 for its chroma), as a linear image of its own.
  */
 static int
 view_build(
@@ -520,8 +614,6 @@ view_build(
 	struct powervr_vk_object *object;
 	const struct powervr_vk_image *image;
 	uint32_t aspect;
-	uint32_t levels;
-	uint32_t layers;
 	int error;
 
 	/* A bound image of the session. */
@@ -533,6 +625,60 @@ view_build(
 	error = powervr_vk_image_address(image, &shape.address);
 	if (error != 0)
 		return EINVAL;
+
+	/* A multi-planar image's view of one plane, or a plain view of any other. */
+	if (image->plane_count != 0) {
+		error = plane_view(info, image, &shape);
+		if (error != 0)
+			return error;
+		aspect = info->subresourceRange.aspectMask;
+	} else {
+		error = plain_view(info, image, &shape);
+		if (error != 0)
+			return error;
+		aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		if ((image->format->kind & POWERVR_FORMAT_DEPTH) != 0)
+			aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+	}
+
+	/* The words of the view, with the client's component mapping. */
+	shape.mapping[0] = info->components.r;
+	shape.mapping[1] = info->components.g;
+	shape.mapping[2] = info->components.b;
+	shape.mapping[3] = info->components.a;
+	error = powervr_view_words(&shape, view->words);
+	if (error != 0)
+		return error;
+
+	/* The view holds the image. */
+	error = powervr_vk_object_retain(object);
+	if (error != 0)
+		return error;
+	view->image = object;
+	view->aspect = aspect;
+	view->format = shape.format;
+	view->layer_bytes = shape.layout->layer_bytes;
+	view->base_level = info->subresourceRange.baseMipLevel;
+	view->base_layer = info->subresourceRange.baseArrayLayer;
+
+	/* Succeeded: the view is filled. */
+	return 0;
+}
+
+/*
+ * Checks a plain view against an image of one format and fills its shape:
+ * a two-dimensional view (or array of them) in the image's own format, of
+ * its one aspect, its levels and layers inside the image.
+ */
+static int
+plain_view(
+	const VkImageViewCreateInfo *info,
+	const struct powervr_vk_image *image,
+	struct powervr_view_shape *shape)
+{
+	uint32_t aspect;
+	uint32_t levels;
+	uint32_t layers;
 
 	/* A plain view in the image's format, of the image's one aspect. */
 	if (info->flags != 0 || info->format != image->format->vk_format)
@@ -559,35 +705,106 @@ view_build(
 	if (info->viewType == VK_IMAGE_VIEW_TYPE_2D && layers != 1)
 		return EINVAL;
 
-	/* The words of the view. */
-	shape.format = image->format;
-	shape.layout = &image->layout;
-	shape.width = image->shape.width;
-	shape.height = image->shape.height;
-	shape.image_levels = image->shape.levels;
-	shape.base_level = info->subresourceRange.baseMipLevel;
-	shape.level_count = levels;
-	shape.base_layer = info->subresourceRange.baseArrayLayer;
-	shape.layer_count = layers;
-	shape.linear = image->shape.linear;
-	shape.mapping[0] = info->components.r;
-	shape.mapping[1] = info->components.g;
-	shape.mapping[2] = info->components.b;
-	shape.mapping[3] = info->components.a;
-	error = powervr_view_words(&shape, view->words);
-	if (error != 0)
-		return error;
+	/* The view's shape: the image's format, layout and edges, the levels and layers shown. */
+	shape->format = image->format;
+	shape->layout = &image->layout;
+	shape->width = image->shape.width;
+	shape->height = image->shape.height;
+	shape->image_levels = image->shape.levels;
+	shape->base_level = info->subresourceRange.baseMipLevel;
+	shape->level_count = levels;
+	shape->base_layer = info->subresourceRange.baseArrayLayer;
+	shape->layer_count = layers;
+	shape->linear = image->shape.linear;
 
-	/* The view holds the image. */
-	error = powervr_vk_object_retain(object);
-	if (error != 0)
-		return error;
-	view->image = object;
-	view->aspect = aspect;
-	view->base_level = info->subresourceRange.baseMipLevel;
-	view->base_layer = info->subresourceRange.baseArrayLayer;
+	/* Succeeded: the view's shape. */
+	return 0;
+}
 
-	/* Succeeded: the view is filled. */
+/*
+ * Checks a view of one plane of a multi-planar image and fills its shape
+ * (the shape's address is the image's, moved here to the plane's): a
+ * two-dimensional view of level 0 and layer 0 in the plane's own format,
+ * of the plane's aspect, read as a linear image of the plane's edges.
+ * The image is made to be viewed so (its create flags), and only its
+ * planes can be: a view of the whole image or of its colour aspect is
+ * refused, as there is no conversion of its colours.
+ */
+static int
+plane_view(
+	const VkImageViewCreateInfo *info,
+	const struct powervr_vk_image *image,
+	struct powervr_view_shape *shape)
+{
+	const struct powervr_image_plane *plane;
+	int error;
+
+	/* A plain two-dimensional view. */
+	if (info->flags != 0 || info->viewType != VK_IMAGE_VIEW_TYPE_2D)
+		return ENOTSUP;
+
+	/* One plane's aspect, in that plane's format. */
+	error = plane_of_aspect(image, info->subresourceRange.aspectMask, &plane);
+	if (error != 0)
+		return EINVAL;
+	if (info->format != plane->format->vk_format)
+		return ENOTSUP;
+
+	/* Level 0 and layer 0, the only ones (or the remaining ones from them). */
+	if (info->subresourceRange.baseMipLevel != 0 ||
+	    (info->subresourceRange.levelCount != 1 &&
+	     info->subresourceRange.levelCount != VK_REMAINING_MIP_LEVELS))
+		return EINVAL;
+	if (info->subresourceRange.baseArrayLayer != 0 ||
+	    (info->subresourceRange.layerCount != 1 &&
+	     info->subresourceRange.layerCount != VK_REMAINING_ARRAY_LAYERS))
+		return EINVAL;
+
+	/* The plane as a linear image of its own, at its offset. */
+	shape->format = plane->format;
+	shape->layout = &plane->layout;
+	shape->address += plane->offset;
+	shape->width = plane->width;
+	shape->height = plane->height;
+	shape->image_levels = 1;
+	shape->base_level = 0;
+	shape->level_count = 1;
+	shape->base_layer = 0;
+	shape->layer_count = 1;
+	shape->linear = true;
+
+	/* Succeeded: the plane's shape. */
+	return 0;
+}
+
+/*
+ * Finds the plane of a multi-planar image an aspect names
+ * (VK_IMAGE_ASPECT_PLANE_0_BIT for the first, _PLANE_1_BIT for the
+ * second); EINVAL for any other aspect or a plane the image lacks.
+ */
+static int
+plane_of_aspect(
+	const struct powervr_vk_image *image,
+	uint32_t aspect,
+	const struct powervr_image_plane **plane)
+{
+	uint32_t index;
+
+	/* The plane's number from its aspect bit. */
+	if (aspect == VK_IMAGE_ASPECT_PLANE_0_BIT) {
+		index = 0;
+	} else if (aspect == VK_IMAGE_ASPECT_PLANE_1_BIT) {
+		index = 1;
+	} else {
+		return EINVAL;
+	}
+
+	/* A plane the image has. */
+	if (index >= image->plane_count)
+		return EINVAL;
+	*plane = &image->planes[index];
+
+	/* Succeeded: the plane. */
 	return 0;
 }
 

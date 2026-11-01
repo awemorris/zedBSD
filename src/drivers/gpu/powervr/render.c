@@ -39,6 +39,7 @@
 #include <kern/sysctl.h>
 #include <uapi/errno.h>
 #include <uapi/gpu.h>
+#include <uapi/gpu-allocation.h>
 #include <uapi/gpu-scanout.h>
 #include <uapi/sysctl.h>
 
@@ -47,6 +48,7 @@
 #include "drivers/gpu/powervr/fixed-area.h"
 #include "drivers/gpu/powervr/interface.h"
 #include "drivers/gpu/powervr/retry.h"
+#include "drivers/gpu/powervr/video-state.h"
 #include "drivers/gpu/powervr/render-pass.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
@@ -181,7 +183,7 @@ powervr_render_start(
 	waitq_init(&render->spare_wanted, "powervr-spare");
 	render->ops.version = DRV_GPU_INTERFACE_VERSION;
 	render->ops.size = sizeof(render->ops);
-	render->ops.capabilities = GPU_CAP_RESOURCE | GPU_CAP_BLOB | GPU_CAP_TRANSFER | GPU_CAP_MAPPING | GPU_CAP_SHARE | GPU_CAP_NOTIFICATION;
+	render->ops.capabilities = GPU_CAP_RESOURCE | GPU_CAP_BLOB | GPU_CAP_TRANSFER | GPU_CAP_MAPPING | GPU_CAP_SHARE | GPU_CAP_ALLOCATION_SHARE | GPU_CAP_NOTIFICATION;
 	render->ops.open = render_open;
 	render->ops.close = render_close;
 	render->ops.get_info = render_info;
@@ -864,6 +866,9 @@ render_open(
 	if (session == NULL)
 		return ENOMEM;
 	session->render = render;
+
+	/* The video engine's operations the session offers for its lifetime (none without an engine). */
+	session->video_operations = powervr_video_operations();
 
 	/* The general heap's allocations start on the page after the fixed area. */
 	powervr_gpu_space_init(&session->space, POWERVR_GENERAL_HEAP_BASE + POWERVR_FIXED_GENERAL_BYTES, POWERVR_GENERAL_HEAP_BYTES - POWERVR_FIXED_GENERAL_BYTES);

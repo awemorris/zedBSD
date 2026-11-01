@@ -12,7 +12,9 @@
  * that draws, computes and copies, and two memory types over one heap
  * of uncached system memory: device local, and host visible and
  * coherent.  The formats are the table's (image-state.c); the limits
- * are the ones the executor keeps.
+ * are the ones the executor keeps.  A session opened with a video engine
+ * (video-state.c) adds its video to the family and to NV12; memory is
+ * exported and imported by the node's handle types.
  */
 
 #include <stdbool.h>
@@ -24,6 +26,7 @@
 #include <uapi/gpu-op.h>
 
 #include "drivers/gpu/powervr/render-private.h"
+#include "drivers/gpu/powervr/video-state.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
 #include "drivers/gpu/i915/vk/vk-codec.inc"
@@ -75,10 +78,16 @@ static VkPhysicalDeviceProperties *device_record(struct powervr_vk_session *sess
 static void limits(VkPhysicalDeviceLimits *limit);
 static int features(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int memory_properties(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
-static int families(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
-static int format(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
-static int image_format(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int families(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int family_video(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int format(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int image_format(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int image_format_external(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static int buffer_external(struct i915_wire_reader *reader, struct i915_wire_writer *reply);
+static uint32_t image_limits(const struct powervr_vk_session *session, const uint32_t words[5], VkImageFormatProperties *record);
 static bool usage_allowed(uint32_t usage, uint32_t features);
+static bool planar_allowed(const struct powervr_vk_session *session, uint32_t type, uint32_t tiling, uint32_t usage, uint32_t flags);
+static void reply_external(struct i915_wire_writer *reply, uint32_t handle_type);
 static int create_device(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int device_queue(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int destroy(struct powervr_vk_session *session, enum i915_vk_object_kind kind, struct i915_wire_reader *reader);
@@ -122,10 +131,16 @@ powervr_vk_device_route(
 		error = features(session, reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_FORMAT_PROPERTIES:
-		error = format(reader, reply);
+		error = format(session, reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_IMAGE_FORMAT_PROPERTIES:
-		error = image_format(reader, reply);
+		error = image_format(session, reader, reply);
+		break;
+	case GPU_OP_GET_PHYSICAL_DEVICE_IMAGE_FORMAT_PROPERTIES2:
+		error = image_format_external(session, reader, reply);
+		break;
+	case GPU_OP_GET_PHYSICAL_DEVICE_EXTERNAL_BUFFER_PROPERTIES:
+		error = buffer_external(reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_PROPERTIES:
 		error = properties(session, reader, reply);
@@ -134,7 +149,10 @@ powervr_vk_device_route(
 		error = identity(session, reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_QUEUE_FAMILY_PROPERTIES:
-		error = families(reader, reply);
+		error = families(session, reader, reply);
+		break;
+	case GPU_OP_GET_PHYSICAL_DEVICE_QUEUE_FAMILY_VIDEO_PROPERTIES:
+		error = family_video(session, reader, reply);
 		break;
 	case GPU_OP_GET_PHYSICAL_DEVICE_MEMORY_PROPERTIES:
 		error = memory_properties(session, reader, reply);
@@ -557,10 +575,12 @@ memory_properties(
  * vkGetPhysicalDeviceQueueFamilyProperties: [physical][present][count]
  * [array count] -> [present][count][array count][families].  One family
  * of one queue that draws, computes and copies: the executor runs render
- * passes (vk-queue.c run_job), dispatches and transfers on its one queue.
+ * passes (vk-queue.c run_job), dispatches and transfers on its one queue;
+ * with the session's video engine it decodes (and encodes) on it too.
  */
 static int
 families(
+	struct powervr_vk_session *session,
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
@@ -583,6 +603,7 @@ families(
 	for (index = 0; index < array_count; index++) {
 		kern_memset(&family, 0, sizeof(family));
 		family.queueFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
+		family.queueFlags |= powervr_video_queue_flags(session->owner->video_operations);
 		family.queueCount = 1;
 		family.minImageTransferGranularity.width = 1;
 		family.minImageTransferGranularity.height = 1;
@@ -595,12 +616,48 @@ families(
 }
 
 /*
+ * The codec operations of each queue family (zedBSD's own op):
+ * [physical][u32 family count] -> [u64 1][u32 count][count x u32
+ * operations].  The one family's are the session's video engine's
+ * (none without one).
+ *
+ * Procedure referenced: zedBSD src/drivers/gpu/nvrtx/vk/vk-video.c
+ * (video_family_properties: the same wire).
+ */
+static int
+family_video(
+	struct powervr_vk_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	uint32_t count;
+	uint32_t codecs;
+
+	/* The physical device and the family count, which is the one family. */
+	(void)drv_i915_wire_read_u64(reader);
+	count = drv_i915_wire_read_u32(reader);
+	if (reader->error != 0 || count != DEVICE_FAMILIES)
+		return EINVAL;
+
+	/* The presence word, the count and the family's codec operations. */
+	codecs = powervr_video_codec_operations(session->owner->video_operations);
+	drv_i915_wire_reply_u64(reply, 1);
+	drv_i915_wire_reply_u32(reply, DEVICE_FAMILIES);
+	drv_i915_wire_reply_u32(reply, codecs);
+
+	/* Succeeded: the family's codec operations are reported. */
+	return 0;
+}
+
+/*
  * vkGetPhysicalDeviceFormatProperties: [physical][format][present] ->
  * [present][properties]; the features of the format table, none for a
- * format outside it.
+ * format outside it.  NV12 adds a decode's output and reference with the
+ * session's video decoder.
  */
 static int
 format(
+	struct powervr_vk_session *session,
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
@@ -623,6 +680,10 @@ format(
 		record.linearTilingFeatures = powervr_format_linear_features(entry);
 		record.bufferFeatures = entry->buffer_features;
 	}
+	if (entry != NULL && (entry->kind & POWERVR_FORMAT_PLANAR) != 0) {
+		record.optimalTilingFeatures |= powervr_video_format_features(session->owner->video_operations);
+		record.linearTilingFeatures |= powervr_video_format_features(session->owner->video_operations);
+	}
 	drv_i915_wire_reply_u64(reply, 1);
 	i915_vkc_enc_VkFormatProperties(reply, &record);
 
@@ -632,72 +693,228 @@ format(
 
 /*
  * vkGetPhysicalDeviceImageFormatProperties: [physical][format][type]
- * [tiling][usage][flags][present] -> [result][present][properties].  A
- * plain two-dimensional image of one sample whose every usage the
- * format's features on the tiling allow.
+ * [tiling][usage][flags][present] -> [result][present][properties].
  */
 static int
 image_format(
+	struct powervr_vk_session *session,
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
 	VkImageFormatProperties record;
-	const struct powervr_format *entry;
-	uint32_t vk_format;
-	uint32_t type;
-	uint32_t tiling;
-	uint32_t usage;
-	uint32_t flags;
-	uint32_t features;
+	uint32_t words[5];
 	uint32_t result;
-	bool allowed;
+	uint32_t index;
 
 	/* The physical device, the format, type, tiling, usage and flags, and the presence word. */
 	(void)drv_i915_wire_read_u64(reader);
-	vk_format = drv_i915_wire_read_u32(reader);
-	type = drv_i915_wire_read_u32(reader);
-	tiling = drv_i915_wire_read_u32(reader);
-	usage = drv_i915_wire_read_u32(reader);
-	flags = drv_i915_wire_read_u32(reader);
+	for (index = 0; index < 5U; index++)
+		words[index] = drv_i915_wire_read_u32(reader);
 	(void)drv_i915_wire_read_u64(reader);
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* The format's features on the tiling. */
-	features = 0;
-	entry = powervr_format_find(vk_format);
-	if (entry != NULL && tiling == VK_IMAGE_TILING_OPTIMAL)
-		features = entry->optimal_features;
-	else if (entry != NULL && tiling == VK_IMAGE_TILING_LINEAR)
-		features = powervr_format_linear_features(entry);
+	/* What such an image may be. */
+	result = image_limits(session, words, &record);
 
-	/* A plain image whose usages its features allow. */
-	result = (uint32_t)VK_SUCCESS;
-	allowed = usage_allowed(usage, features);
-	if (type != VK_IMAGE_TYPE_2D || flags != 0 || !allowed)
-		result = (uint32_t)VK_ERROR_FORMAT_NOT_SUPPORTED;
-
-	/* The limits of such an image: a linear one is one level and one layer. */
-	kern_memset(&record, 0, sizeof(record));
-	if (result == (uint32_t)VK_SUCCESS) {
-		record.maxExtent.width = POWERVR_VK_IMAGE_EDGE;
-		record.maxExtent.height = POWERVR_VK_IMAGE_EDGE;
-		record.maxExtent.depth = 1;
-		record.maxMipLevels = 13;
-		record.maxArrayLayers = POWERVR_VK_IMAGE_LAYERS;
-		if (tiling == VK_IMAGE_TILING_LINEAR) {
-			record.maxMipLevels = 1;
-			record.maxArrayLayers = 1;
-		}
-		record.sampleCounts = VK_SAMPLE_COUNT_1_BIT;
-		record.maxResourceSize = POWERVR_RENDER_MAX_BYTES;
-	}
+	/* The result, the presence word and the limits. */
 	drv_i915_wire_reply_u32(reply, result);
 	drv_i915_wire_reply_u64(reply, 1);
 	i915_vkc_enc_VkImageFormatProperties(reply, &record);
 
 	/* Succeeded: the format is reported. */
 	return 0;
+}
+
+/*
+ * vkGetPhysicalDeviceImageFormatProperties2 with an external memory
+ * handle type (the chains as uapi/gpu-op.h lays them out) -> [result]
+ * [u64 1], the two headers, the external memory properties and the
+ * image's limits.  An image of a handle type the node shares by is
+ * exported and imported as its memory is (vk-memory.c); its limits are
+ * those of the image without the handle type.
+ *
+ * Procedure referenced: zedBSD src/drivers/gpu/ghci/vk/vk-device.c
+ * (image_format2: the same wire).
+ */
+static int
+image_format_external(
+	struct powervr_vk_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	VkImageFormatProperties record;
+	uint32_t words[5];
+	uint32_t handle_type;
+	uint32_t result;
+	uint32_t index;
+
+	/* The physical device and the input chain up to the handle type. */
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	handle_type = drv_i915_wire_read_u32(reader);
+
+	/* The image, then the output chain's headers. */
+	for (index = 0; index < 5U; index++)
+		words[index] = drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* What such an image may be; an image the node cannot make has no external memory either. */
+	result = image_limits(session, words, &record);
+	if (result != (uint32_t)VK_SUCCESS)
+		handle_type = 0;
+
+	/* The result, the two headers, the external memory properties, then the limits. */
+	drv_i915_wire_reply_u32(reply, result);
+	drv_i915_wire_reply_u64(reply, 1);
+	drv_i915_wire_reply_u32(reply, VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2);
+	drv_i915_wire_reply_u64(reply, 1);
+	drv_i915_wire_reply_u32(reply, VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES);
+	drv_i915_wire_reply_u64(reply, 0);
+	reply_external(reply, handle_type);
+	i915_vkc_enc_VkImageFormatProperties(reply, &record);
+
+	/* Succeeded: the format is reported. */
+	return 0;
+}
+
+/*
+ * vkGetPhysicalDeviceExternalBufferProperties with the context's native
+ * handle type (the chains as uapi/gpu-op.h lays them out) -> [u64 1],
+ * the header and the external memory properties: a buffer's memory is
+ * exported and imported as any memory is, by the node's handle types.
+ *
+ * Procedure referenced: zedBSD src/drivers/gpu/ghci/vk/vk-device.c
+ * (buffer_external: the same wire).
+ */
+static int
+buffer_external(
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	uint32_t handle_type;
+
+	/* The physical device, the input chain with the handle type, and the output chain. */
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	handle_type = drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	(void)drv_i915_wire_read_u64(reader);
+	if (reader->error != 0)
+		return EINVAL;
+
+	/* The presence word, the header and the properties. */
+	drv_i915_wire_reply_u64(reply, 1);
+	drv_i915_wire_reply_u32(reply, VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES);
+	drv_i915_wire_reply_u64(reply, 0);
+	reply_external(reply, handle_type);
+
+	/* Succeeded: the buffer's external memory is reported. */
+	return 0;
+}
+
+/*
+ * Writes the external memory properties of one handle type: exported
+ * and imported, compatible only with itself, for one type the node
+ * shares by (POWERVR_VK_EXTERNAL_HANDLES); none for any other (or 0).
+ */
+static void
+reply_external(
+	struct i915_wire_writer *reply,
+	uint32_t handle_type)
+{
+	uint32_t features;
+
+	/* One known handle type, exported and imported as itself. */
+	features = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
+	if (handle_type == 0 ||
+	    (handle_type & (handle_type - 1U)) != 0 ||
+	    (handle_type & ~(uint32_t)POWERVR_VK_EXTERNAL_HANDLES) != 0) {
+		features = 0;
+		handle_type = 0;
+	}
+
+	/* The features, the types it exports from, the types it is compatible with. */
+	drv_i915_wire_reply_u32(reply, features);
+	drv_i915_wire_reply_u32(reply, handle_type);
+	drv_i915_wire_reply_u32(reply, handle_type);
+}
+
+/*
+ * Works out what an image of a format, type, tiling, usage and flags
+ * (words in that order) may be: VK_SUCCESS and its limits, or
+ * VK_ERROR_FORMAT_NOT_SUPPORTED and zeros.  A plain two-dimensional
+ * image of one sample whose every usage the format's features on the
+ * tiling allow; a multi-planar image as planar_allowed says.
+ */
+static uint32_t
+image_limits(
+	const struct powervr_vk_session *session,
+	const uint32_t words[5],
+	VkImageFormatProperties *record)
+{
+	const struct powervr_format *entry;
+	uint32_t features;
+	uint32_t result;
+	bool planar;
+	bool allowed;
+
+	/* The format's features on the tiling. */
+	features = 0;
+	entry = powervr_format_find(words[0]);
+	if (entry != NULL && words[2] == VK_IMAGE_TILING_OPTIMAL)
+		features = entry->optimal_features;
+	else if (entry != NULL && words[2] == VK_IMAGE_TILING_LINEAR)
+		features = powervr_format_linear_features(entry);
+
+	/* A multi-planar image as its planes allow, any other plain one whose usages its features allow. */
+	planar = false;
+	if (entry != NULL && (entry->kind & POWERVR_FORMAT_PLANAR) != 0)
+		planar = true;
+	if (planar) {
+		allowed = planar_allowed(session, words[1], words[2], words[3], words[4]);
+	} else {
+		allowed = usage_allowed(words[3], features);
+		if (words[1] != VK_IMAGE_TYPE_2D || words[4] != 0)
+			allowed = false;
+	}
+	result = (uint32_t)VK_SUCCESS;
+	if (!allowed)
+		result = (uint32_t)VK_ERROR_FORMAT_NOT_SUPPORTED;
+
+	/* The limits of such an image: a linear or multi-planar one is one level and one layer. */
+	kern_memset(record, 0, sizeof(*record));
+	if (result == (uint32_t)VK_SUCCESS) {
+		record->maxExtent.width = POWERVR_VK_IMAGE_EDGE;
+		record->maxExtent.height = POWERVR_VK_IMAGE_EDGE;
+		record->maxExtent.depth = 1;
+		record->maxMipLevels = 13;
+		record->maxArrayLayers = POWERVR_VK_IMAGE_LAYERS;
+		if (words[2] == VK_IMAGE_TILING_LINEAR || planar) {
+			record->maxMipLevels = 1;
+			record->maxArrayLayers = 1;
+		}
+		record->sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+		record->maxResourceSize = POWERVR_RENDER_MAX_BYTES;
+	}
+
+	/* Succeeded: the image's result. */
+	return result;
 }
 
 /* Says whether every usage of an image needs only features the format has; none at all is refused. */
@@ -732,6 +949,45 @@ usage_allowed(
 	}
 
 	/* Succeeded: every usage is allowed. */
+	return true;
+}
+
+/*
+ * Says whether a multi-planar (NV12) image of a type, tiling, usage and
+ * flags can be made (vk-image.c makes the same ones): a flat image in
+ * either tiling, with only its planes' views' flags, copied out and its
+ * planes sampled (the sampling only through the extended usage flag, as
+ * the format itself is not sampled), and with the session's video
+ * decoder decoded into and referenced.
+ */
+static bool
+planar_allowed(
+	const struct powervr_vk_session *session,
+	uint32_t type,
+	uint32_t tiling,
+	uint32_t usage,
+	uint32_t flags)
+{
+	uint32_t usages;
+
+	/* A flat image in a tiling the planes lie in, with only the plane views' flags. */
+	if (type != VK_IMAGE_TYPE_2D)
+		return false;
+	if (tiling != VK_IMAGE_TILING_OPTIMAL && tiling != VK_IMAGE_TILING_LINEAR)
+		return false;
+	if ((flags & ~(uint32_t)POWERVR_VK_PLANAR_FLAGS) != 0)
+		return false;
+
+	/* Some usage, all of them ones the planes or the session's decoder have. */
+	usages = POWERVR_VK_PLANAR_USAGES | powervr_video_image_usages(session->owner->video_operations);
+	if (usage == 0 || (usage & ~usages) != 0)
+		return false;
+
+	/* Sampling only through the planes' views. */
+	if ((usage & VK_IMAGE_USAGE_SAMPLED_BIT) != 0 && (flags & VK_IMAGE_CREATE_EXTENDED_USAGE_BIT) == 0)
+		return false;
+
+	/* Succeeded: such an image is made. */
 	return true;
 }
 

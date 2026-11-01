@@ -878,6 +878,9 @@ build_command_buffer(
 				error = powervr_vk_transfer_run(build->session, entry);
 				powervr_timing_add(POWERVR_TIMING_TRANSFER, started);
 			}
+		} else if (powervr_vk_query_recorded(entry->opcode)) {
+			/* A query's reset, begin or end, at once: the decodes it brackets run when they are reached. */
+			powervr_vk_query_run(build->session, entry);
 		} else if (entry->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
 			/* The dispatches before it run first, then the instance's jobs in order. */
 			error = run_flush(build);
