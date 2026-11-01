@@ -108,9 +108,21 @@ bind_window_view(
 	if (viewer == target)
 		return 0;
 
-	/* A frame's window is seen through the one proxy its element has, which stays the same as the frame goes from one document to another. */
+	/*
+	 * A frame whose document its parent cannot reach (of another origin, or of an opaque one) is seen through the one
+	 * proxy its element has, which shows postMessage and little else and stays the same as the frame goes from one
+	 * document to another.  The element keeps the proxy until it leaves its document, so that a released element or
+	 * proxy keeps no frame's document alive.  A frame the parent reaches is seen as its own global: that global belongs
+	 * to the frame's own realm, and outlives the parent's (an embedding may destroy the parent's realm while a script of
+	 * the frame, or the embedding, still holds it).
+	 */
 	owner = target->frame != NULL ? target->frame->node.document->view : NULL;
-	if (owner != NULL && !owner->detached && owner->frame_proxy_maker != NULL && bind_window_reachable(viewer, owner)) {
+	if (owner != NULL && !owner->detached && owner->frame_proxy_maker != NULL && bind_window_reachable(viewer, owner) &&
+	    !bind_window_reachable(owner, target)) {
+		if (target->frame->frame_proxy != NULL) {
+			*result = vm_value_cell(target->frame->frame_proxy);
+			return 0;
+		}
 		status = bind_wrap(owner, &target->frame->node, &argument);
 		if (status != 0)
 			return status;
@@ -121,6 +133,8 @@ bind_window_view(
 			*result = vm_value_cell(target->realm->global);
 			return 0;
 		}
+		if (status == 0 && vm_value_is_object(*result))
+			target->frame->frame_proxy = vm_value_as_cell(*result);
 		return status;
 	}
 
@@ -983,6 +997,7 @@ frame_remove_subtree(
 			element->child_source = NULL;
 			element->child_attribute = NULL;
 			element->child_navigation = NULL;
+			element->frame_proxy = NULL;
 
 			/* Only published child contexts participate in synchronous retirement. */
 			if (element->child_context != NULL) {
