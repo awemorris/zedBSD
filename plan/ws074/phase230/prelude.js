@@ -395,7 +395,12 @@
     }
     function markHandled(p) { then.call(p, undefined, function () {}); return p; }
     function baseURL() {
-      var b = document.querySelector('base[href]');
+      var b = document.querySelector('base[href]'), p;
+      // The initial about:blank document of a frame takes the base URL of its creator, the frame's parent.
+      if (!b && docURL() === 'about:blank' && native.frameElement() && g.parent && g.parent !== g) {
+        try { p = g.parent.document.baseURI; } catch (e) { p = null; }
+        if (p) return p;
+      }
       if (b) { try { return new URL(b.getAttribute('href'), docURL()).href; } catch (e) { /* the document's URL */ } }
       return docURL();
     }
@@ -746,7 +751,8 @@
       var i;
       if (ongoingTracker) notifyCommitted(ongoingTracker, nhe(entries[current]));
       if (transition) transition._c.resolve();
-      fire(navigation, new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: type, from: from }));
+      // A frame still on its initial about:blank has entries and events disabled.
+      if (!initialBlank()) fire(navigation, new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: type, from: from }));
       for (i = 0; i < disposed.length; i++) fire(disposed[i], new Event('dispose'));
     }
     function queueHashChange(oldURL, newURL) {
@@ -1070,6 +1076,8 @@
           try { state = serialize(options.state); } catch (e) { return earlyError(e); }
         }
         if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'navigate' on 'Navigation': The document is not fully active."));
+        // The initial about:blank document cannot get a new entry.
+        if (handling === 'push' && initialBlank()) return earlyError(domError('NotSupportedError', "Failed to execute 'navigate' on 'Navigation': A push navigation is not possible from the initial about:blank document."));
         t = makeTracker(options.info, state, null);
         upcomingTracker = t;
         if (handling === 'auto' && !native.loadEnded()) handling = 'replace';
