@@ -304,8 +304,7 @@ frame_load_scan(
 			element = (struct dom_element *)walk;
 			if (element->ns == DOM_NS_HTML &&
 			    (element->tag == DOM_TAG_IFRAME || element->tag == DOM_TAG_OBJECT)) {
-				/* Unsupported sandbox contexts never publish a new accessible resource owner. */
-				if (!bind_frame_sandboxed(element)) {
+				{
 					/* Object data and iframe src are ordinary live native attributes. */
 					if (element->tag == DOM_TAG_IFRAME) {
 						source = dom_attribute_ascii(element, "srcdoc");
@@ -629,9 +628,6 @@ frame_load_current(
 	connected = dom_is_inclusive_ancestor(&window->document->node, &element->node);
 	if (!connected)
 		return 0;
-	if (bind_frame_sandboxed(element))
-		return 0;
-
 	/* Attribute edits during completion events invalidate the remaining work immediately. */
 	if (element->tag == DOM_TAG_IFRAME) {
 		source = dom_attribute_ascii(element, "srcdoc");
@@ -1122,8 +1118,14 @@ frame_load_inline(
 	struct wb_units units;
 	int error;
 
-	/* A script with a source is fetched at once, where the parser stands, and run as the page's own are. */
+	/* A frame whose sandbox lacks allow-scripts runs none. */
 	window = context;
+	if (window->frame != NULL && !bind_frame_scripts_allowed(window->frame)) {
+		script->node.flags |= DOM_NODE_SCRIPT_STARTED;
+		return 0;
+	}
+
+	/* A script with a source is fetched at once, where the parser stands, and run as the page's own are. */
 	source = dom_attribute_ascii(script, "src");
 	if (source != NULL && source->length != 0 && window->host.context != NULL) {
 		struct page *page;

@@ -236,6 +236,8 @@ bind_frame_install(
 
 		/* Construct the independently retained owner with this complete abstract host adapter. */
 		error = bind_window_create(realm, document, &host, &made);
+		if (error == 0)
+			made->opaque = bind_frame_sandboxed(element);
 	}
 
 	/* Blank contexts need a copied inherited fallback before publication. */

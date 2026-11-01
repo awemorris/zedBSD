@@ -258,6 +258,7 @@ bind_window_create(
 	made->document = document;
 	made->host = *host;
 	made->frame = host->frame;
+	made->opaque = host->frame != NULL && bind_frame_sandboxed(host->frame);
 	made->next_timer_id = 1;
 	made->ready_state = "loading";
 	wb_vector_init(&made->timers, sizeof(struct bind_timer));
@@ -2030,7 +2031,9 @@ window_post_message(
 			goto cleanup;
 		event->origin = (struct vm_string *)vm_value_as_cell(origin_value);
 	}
-	event->source = vm_value_cell(sender->realm->global);
+	status = bind_window_view(window, sender, &event->source);
+	if (status != 0)
+		goto cleanup;
 	event->trusted = 1;
 
 	/* The ports transferred with the message (the second argument's transfer list, or the options' transfer). */
@@ -2235,6 +2238,10 @@ window_trace(
 		vm_heap_mark(heap, window->follow_hyperlink);
 	if (window->animation_hook != NULL)
 		vm_heap_mark(heap, window->animation_hook);
+	if (window->window_wrapper != NULL)
+		vm_heap_mark(heap, window->window_wrapper);
+	if (window->frame_proxy_maker != NULL)
+		vm_heap_mark(heap, window->frame_proxy_maker);
 	if (window->listeners != NULL)
 		vm_heap_mark(heap, window->listeners);
 	bind_timers_trace(heap, window);
