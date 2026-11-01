@@ -72,6 +72,6 @@
 | [p034](phase034/phase.md) | 安全の review と hardening: 定数時間・fuzz・checklist（Opus） | planned | p033 |
 | [p035](phase035/phase.md) | 規約の全文の見直しと header の持ち越しの直し | planned | p034 |
 | [p036](phase036/phase.md) | 提案（U2 は A で答え済み）: net/tls.c の libssl-compat への切り替え（zedBSD は開く名前、Windows は static link の表）。WS074・WS334 と調整 | planning | p033、WS334 の p022・p030 |
-| [p037](phase037/phase.md) | 試験の道具: scripted な TLS server（tlspeer.h）と試験の側の ECDSA の署名器（Opus。p029〜p032 が使う） | planned | p025、p026、p027、p011、p008 |
+| [p037](phase037/phase.md) | 試験の道具: scripted な TLS server（tlspeer.h）と試験の側の ECDSA の署名器（Opus。p029〜p032 が使う） | 実装済み・試験 PASS（2026-11-02 04:20 P6 q1904-i01。test-tlspeer 35566 checks、posix・win32 PASS、RFC 8448 3・5 節の server の側を byte ごとに再生、24 通りの壊しは全部 FAIL。RSA の秘密鍵は持たない（Q1 の判断、RSA の server は p033）。cleared は Q1） | p025、p026、p027、p011、p008 |
 | [p038](phase038/phase.md) | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類（Opus） | planned | p020 |
 | [p039](phase039/phase.md) | zedBSD の libcrypto-compat.so（build の規則・exports・package と image の登録、`sources.mk`）。TLS は無し。WS336 の zedBSD の Phase が待つ | planned | p023、p024 |
