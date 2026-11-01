@@ -29,7 +29,7 @@ Wine の結果は参考で、実機の Windows の判定ではない（ws.md の
 | SHA | 中身 |
 | --- | --- |
 | 77cdd4590 | `userland/desktop/libbrowser/paint/vulkan.c`: `--render-gpu` の offscreen（`offscreen_device`）が `vkCreateInstance` の前に `wb_os_library_open` で `vulkan-1.dll` を確かめ（`_WIN32` の時だけ）、無ければ `VK_ERROR_INITIALIZATION_FAILED`（operation は `loading vulkan-1.dll`）。確かめた後は閉じる（遅延の import が改めて読む）。libkeiland の `win32/present.c` の `kl_window_vulkan_extensions` と同じ考え |
-| （この commit） | `plan/ws334/tests/`: `host-tests-windows.sh`（1 本の script）、`binary-mode.c`・`win32-posix.h`（Windows の host 試験の下請け）、`compare-ppm.py`・`compare-reftests.py`（比べる道具） |
+| 34718204f | `plan/ws334/tests/`: `host-tests-windows.sh`（1 本の script）、`binary-mode.c`・`win32-posix.h`（Windows の host 試験の下請け）、`compare-ppm.py`・`compare-reftests.py`（比べる道具） |
 
 `plan/ws334/tests/host-tests-windows.sh`（`ONLY="build host runners gpu loader interop"` で部分、`TEST262_FILTERS` で test262 の範囲。Wine の各命令は `flock /tmp/zedbsd-wine.lock`、script ごとの flock は取らない）:
 
