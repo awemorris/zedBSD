@@ -44,6 +44,11 @@ static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_va
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_frame_proxy_maker(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_global(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_opaque(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_window_wrapper(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_is_opaque(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_animation_hook(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_frame_hold(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -502,6 +507,122 @@ prelude_view_transition(
 		return 0;
 	if (window->host.view_transition(window->host.context, (int)step) != 0)
 		*result = VM_VALUE_TRUE;
+	return 0;
+}
+
+/* setFrameProxyMaker(function): the function that makes the window proxy of an <iframe> element of this window's document. */
+static int
+prelude_set_frame_proxy_maker(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value maker;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	maker = js_argument(args, count, 0);
+	if (!vm_value_is_callable(maker))
+		return vm_throw_type_error(realm, "setFrameProxyMaker: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->frame_proxy_maker = vm_value_as_cell(maker);
+	return 0;
+}
+
+/* The window of the document an <iframe> element shows now (NULL when it shows none). */
+static struct bind_window *
+prelude_frame_window(
+	struct vm_realm *realm,
+	const vm_value *args,
+	unsigned count)
+{
+	struct dom_node *node;
+	struct bind_window *window;
+	const struct vm_realm *child;
+
+	if (!vm_value_is_object(js_argument(args, count, 0)) || bind_this_node(realm, js_argument(args, count, 0), &node) != 0)
+		return NULL;
+	window = bind_window_of(realm);
+	if (node->type != DOM_ELEMENT || node->document != window->document)
+		return NULL;
+	child = (const struct vm_realm *)((struct dom_element *)node)->child_context;
+	if (child == NULL || child->host == NULL)
+		return NULL;
+	return child->host;
+}
+
+/* frameGlobal(element): the global of the document an <iframe> element shows now, or null. */
+static int
+prelude_frame_global(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *child;
+
+	UNUSED_PARAMETER(this_value);
+	child = prelude_frame_window(realm, args, count);
+	*result = child != NULL && !child->detached ? vm_value_cell(child->realm->global) : VM_VALUE_NULL;
+	return 0;
+}
+
+/* frameOpaque(element): whether the document an <iframe> element shows has an opaque origin. */
+static int
+prelude_frame_opaque(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *child;
+
+	UNUSED_PARAMETER(this_value);
+	child = prelude_frame_window(realm, args, count);
+	*result = vm_value_boolean(child != NULL && child->opaque != 0);
+	return 0;
+}
+
+/* setWindowWrapper(function): the function that makes this window's restricted view of another window. */
+static int
+prelude_set_window_wrapper(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value wrapper;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	wrapper = js_argument(args, count, 0);
+	if (!vm_value_is_callable(wrapper))
+		return vm_throw_type_error(realm, "setWindowWrapper: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->window_wrapper = vm_value_as_cell(wrapper);
+	return 0;
+}
+
+/* isOpaque(): whether this window's document has an opaque origin (a sandboxed frame without allow-same-origin). */
+static int
+prelude_is_opaque(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+	*result = vm_value_boolean(bind_window_of(realm)->opaque != 0);
 	return 0;
 }
 
@@ -1482,6 +1603,26 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "viewTransition", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setFrameProxyMaker", 1, prelude_set_frame_proxy_maker, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setFrameProxyMaker", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameGlobal", 1, prelude_frame_global, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameGlobal", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameOpaque", 1, prelude_frame_opaque, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameOpaque", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setWindowWrapper", 1, prelude_set_window_wrapper, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setWindowWrapper", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "isOpaque", 0, prelude_is_opaque, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "isOpaque", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "setAnimationHook", 1, prelude_set_animation_hook, NULL, &function);
 	if (status == 0)

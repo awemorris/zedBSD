@@ -827,6 +827,8 @@
     // still on its initial about:blank has no navigate events, activation or entry state of its own.
     var unloading = false, unloadAsked = false;
     function active() { return native.fullyActive() && !unloading; }
+    // A document with an opaque origin has no navigation API: its calls return promises that never settle and fire nothing.
+    function neverSettles() { return { committed: new Promise(function () {}), finished: new Promise(function () {}) }; }
     function initialBlank() { return native.initialBlank(); }
     // A navigation to another document in this frame: the entries as they will be, handed to the document that loads.
     function packEntry(e) {
@@ -924,6 +926,8 @@
     // commit(), which carries out a navigation of this document that no listener intercepted.
     function fireNavigate(o) {
       var t, controller, event, n, dispatched, intercepted, from, promises, i;
+      // A document with an opaque origin has no navigate events: a navigation is only carried out.
+      if (native.isOpaque()) { upcomingTracker = null; if (o.sameDocument && o.commit) o.commit(); return; }
       if (initialBlank() && !o.sameDocument) {
         // The initial about:blank document is replaced by what it navigates to: no navigate event, and nothing settles.
         upcomingTracker = null;
@@ -1119,10 +1123,11 @@
         }
         return EventTarget.prototype.removeEventListener.apply(this, arguments);
       }
-      entries() { return native.fullyActive() ? entries.map(nhe) : []; }
-      get currentEntry() { return native.fullyActive() ? nhe(entries[current]) : null; }
+      entries() { return native.fullyActive() && !native.isOpaque() ? entries.map(nhe) : []; }
+      get currentEntry() { return native.fullyActive() && !native.isOpaque() ? nhe(entries[current]) : null; }
       updateCurrentEntry(options) {
         var state;
+        if (native.isOpaque()) throw domError('InvalidStateError', "Failed to execute 'updateCurrentEntry' on 'Navigation': The document has an opaque origin.");
         if (arguments.length < 1) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': 1 argument required.");
         options = dictionary(options, 'NavigationUpdateCurrentEntryOptions');
         if (!active()) throw domError('InvalidStateError', "Failed to execute 'updateCurrentEntry' on 'Navigation': The document is not fully active.");
@@ -1134,10 +1139,11 @@
       }
       get transition() { return transition; }
       get activation() { return activation; }
-      get canGoBack() { return native.fullyActive() && current > 0; }
-      get canGoForward() { return native.fullyActive() && current < entries.length - 1; }
+      get canGoBack() { return native.fullyActive() && !native.isOpaque() && current > 0; }
+      get canGoForward() { return native.fullyActive() && !native.isOpaque() && current < entries.length - 1; }
       navigate(url, options) {
         var handling, u, state = null, t;
+        if (native.isOpaque()) return neverSettles();
         options = dictionary(options, 'NavigationNavigateOptions');
         handling = options.history === undefined ? 'auto' : enumValue(options.history, ['auto', 'push', 'replace'], 'NavigationHistoryBehavior');
         u = resolveURL(url);
@@ -1158,6 +1164,7 @@
       }
       reload(options) {
         var state, t;
+        if (native.isOpaque()) return neverSettles();
         options = dictionary(options, 'NavigationReloadOptions');
         state = entries[current].navState;
         if (options.state !== undefined) {
@@ -1171,6 +1178,7 @@
         return trackerResult(t);
       }
       traverseTo(key, options) {
+        if (native.isOpaque()) return earlyError(domError('InvalidStateError', "Failed to execute 'traverseTo' on 'Navigation': The document has an opaque origin."));
         if (arguments.length < 1) throw new TypeError("Failed to execute 'traverseTo' on 'Navigation': 1 argument required.");
         key = String(key);
         options = dictionary(options, 'NavigationOptions');
@@ -1179,12 +1187,14 @@
         return traverseToKey(key, options);
       }
       back(options) {
+        if (native.isOpaque()) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': The document has an opaque origin."));
         options = dictionary(options, 'NavigationOptions');
         if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': The document is not fully active."));
         if (current <= 0) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': Cannot go back."));
         return traverseToKey(entries[current - 1].key, options);
       }
       forward(options) {
+        if (native.isOpaque()) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': The document has an opaque origin."));
         options = dictionary(options, 'NavigationOptions');
         if (!active()) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': The document is not fully active."));
         if (current >= entries.length - 1) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': Cannot go forward."));
@@ -1415,6 +1425,112 @@
       });
     });
   })();
+    // The window an <iframe> element gives (contentWindow, and the source of the messages its document posts) is one proxy that follows
+    // the element's current document: a frame keeps its window as it goes from one document to the next.  One with an opaque origin shows postMessage and little else.
+    (function () {
+      var proxies = new WeakMap(), bound = new WeakMap();
+      function blocked() { return new DOMException('Blocked a frame from accessing a cross-origin frame.', 'SecurityError'); }
+      function method(w, v) {
+        var m, b;
+        if (typeof v !== 'function' || /^[A-Z]/.test(v.name || '')) return v;
+        m = bound.get(w);
+        if (!m) { m = new WeakMap(); bound.set(w, m); }
+        b = m.get(v);
+        if (!b) { b = function () { return Reflect.apply(v, w, arguments); }; m.set(v, b); }
+        return b;
+      }
+      native.setFrameProxyMaker(function (element) {
+        var proxy = proxies.get(element), last = null;
+        if (proxy) return proxy;
+        // The window of the element's document now; after the frame is removed, the last one it had (a window kept by a script goes on).
+        function current() { var w = native.frameGlobal(element); if (w !== null) last = w; return w !== null ? w : last; }
+        proxy = new Proxy(Object.create(null), {
+          get: function (t, k) {
+            var w = current();
+            if (w === null) return k === 'closed' ? true : (k === 'postMessage' ? function () {} : undefined);
+            if (k === 'window' || k === 'self' || k === 'frames') return proxy;
+            if (native.frameOpaque(element)) {
+              if (k === 'postMessage') return w.postMessage;
+              if (k === 'closed') return w.closed;
+              if (k === 'length') return 0;
+              if (k === 'parent' || k === 'top' || k === 'opener') return w[k];
+              if (k === Symbol.toStringTag) return 'Window';
+              if (k === 'then') return undefined;
+              throw blocked();
+            }
+            return method(w, Reflect.get(w, k));
+          },
+          set: function (t, k, v) {
+            var w = current();
+            if (w === null) return true;
+            if (native.frameOpaque(element)) throw blocked();
+            return Reflect.set(w, k, v);
+          },
+          has: function (t, k) { var w = current(); return w !== null && Reflect.has(w, k); },
+          ownKeys: function () { var w = current(); return w === null || native.frameOpaque(element) ? [] : Reflect.ownKeys(w); },
+          getOwnPropertyDescriptor: function (t, k) {
+            var w = current(), d;
+            if (w === null || native.frameOpaque(element)) return undefined;
+            d = Reflect.getOwnPropertyDescriptor(w, k);
+            if (d) d.configurable = true;
+            return d;
+          },
+          defineProperty: function (t, k, d) { var w = current(); if (w === null || native.frameOpaque(element)) throw blocked(); return Reflect.defineProperty(w, k, d); },
+          deleteProperty: function (t, k) { var w = current(); if (w === null || native.frameOpaque(element)) throw blocked(); return Reflect.deleteProperty(w, k); },
+          getPrototypeOf: function () { var w = current(); return w === null || native.frameOpaque(element) ? null : Reflect.getPrototypeOf(w); },
+          setPrototypeOf: function () { return false; },
+          preventExtensions: function () { return false; },
+          isExtensible: function () { return true; }
+        });
+        proxies.set(element, proxy);
+        return proxy;
+      });
+    })();
+    // A window with an opaque origin (a sandboxed frame without allow-same-origin) and the windows around it see each other only through
+    // a restricted view: postMessage, closed and the window's own names.  The same view is the event source of the messages one sends the other.
+    (function () {
+      var views = new WeakMap();
+      function blocked() { return new DOMException('Blocked a frame from accessing a cross-origin frame.', 'SecurityError'); }
+      function wrap(w) {
+        var view = views.get(w);
+        if (view) return view;
+        view = new Proxy(Object.create(null), {
+          get: function (t, k) {
+            if (k === 'postMessage') return w.postMessage;
+            if (k === 'closed') return w.closed;
+            if (k === 'window' || k === 'self' || k === 'frames') return view;
+            if (k === 'parent' || k === 'top') { var p = w[k]; return p === w ? view : wrap(p); }
+            if (k === 'opener') { var o = w.opener; return o ? wrap(o) : null; }
+            if (k === 'length') return 0;
+            if (k === 'focus' || k === 'blur' || k === 'close') return function () {};
+            if (k === Symbol.toStringTag) return 'Window';
+            if (k === 'then') return undefined;
+            throw blocked();
+          },
+          set: function () { throw blocked(); },
+          has: function (t, k) { return k === 'postMessage' || k === 'closed' || k === 'window' || k === 'self' || k === 'frames' || k === 'parent' || k === 'top' || k === 'opener' || k === 'length'; },
+          ownKeys: function () { return []; },
+          getPrototypeOf: function () { return null; },
+          setPrototypeOf: function () { return false; },
+          defineProperty: function () { throw blocked(); },
+          deleteProperty: function () { throw blocked(); },
+          getOwnPropertyDescriptor: function () { return undefined; },
+          preventExtensions: function () { return false; },
+          isExtensible: function () { return true; }
+        });
+        views.set(w, view);
+        return view;
+      }
+      native.setWindowWrapper(wrap);
+      if (!('origin' in g)) Object.defineProperty(g, 'origin', { get: function () { return native.isOpaque() ? 'null' : String(g.location.origin); }, configurable: true, enumerable: true });
+      if (native.isOpaque()) {
+        // No cookies and no storage for an opaque origin.
+        if (typeof document !== 'undefined') Object.defineProperty(document, 'cookie', { get: function () { return ''; }, set: function () {}, configurable: true });
+        ['localStorage', 'sessionStorage'].forEach(function (name) {
+          Object.defineProperty(g, name, { get: function () { throw new DOMException("Failed to read the '" + name + "' property from 'Window': Storage is disabled inside 'data:' URLs.", 'SecurityError'); }, configurable: true });
+        });
+      }
+    })();
     // A link a script clicks (an a or area element, or SVG's a) navigates; a download link only fires its navigate event.
     native.setHyperlinkFollower(function (link) {
       var svg = link.namespaceURI === 'http://www.w3.org/2000/svg', href, target, u, download;

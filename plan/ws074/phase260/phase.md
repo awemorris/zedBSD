@@ -1342,3 +1342,16 @@ Origin: 2026-10-27 ユーザーの指示。
   親へは contentWindow の facade（postMessage だけ）、子の `navigation.currentEntry` は null・`entries()` は空、`postMessage` の `event.source`・`event.origin`（今は受け取り側の window・受け取り側の origin を入れている）を送り手のものにする、が要る。
   特に `event.source` が送り手を指さないと testharness の window 間の通信（`event.source.postMessage`）が自分に返る。windows をまたぐ呼び出し元の realm を native が知る作りが無い。数 session 分で、他の Navigation の残り（popup・form・meta refresh・data:・blob:・javascript:）も同じ型の足りない物。
 - 未実施: asan、host-NAME の全件、target の確認、子文書の scroll。
+
+### window 間の postMessage と opaque origin の frame の設計（続き 12、2026-11-01）
+
+- 今まで: `postMessage` の native は、受け取り側の realm で動き、event の `source` に受け取り側の global、`origin` に受け取り側の origin を入れ、ports は常に空。
+  testharness の window 間の通信（`event.source.postMessage`）が送り手へ返らず、自分に返る。sandbox で allow-same-origin が無い frame は、子の window を作らない（空白に見える）。
+- 設計:
+  1. 段階 1（呼び出し元の realm）: `struct vm_realm.caller` を足し、`vm_call` が native を呼ぶ間、その native の realm の `caller` を呼び出し元の realm にする（戻ると元に戻す）。
+     `window_post_message` は caller の window を送り手として、`event.source` と `event.origin` を送り手のものにする。転送リスト（第 3 引数か options の transfer）を `event.ports` に入れる（port は両方の window で使えるまま。neuter はしない）。
+     about:srcdoc・about:blank の frame の origin は親の origin にする（`bind_frame_location`）。
+  2. 段階 2（opaque origin の frame）: `sandbox` に allow-same-origin が無い frame も子の window を作って読み込む。script は `allow-scripts` がある時だけ走る。子の origin は "null"（`bind_window.opaque`）。
+     親から見た `contentWindow` は facade（postMessage・closed・length・frames・parent・top・location の set だけ。他は SecurityError）、`contentDocument` は null。
+     子の `navigation.currentEntry` は null、`entries()` は空、`canGoBack/canGoForward` は false。
+  3. 段階 3（Navigation の残り）: popup（`window.open`）・form の POST・meta refresh・data:・blob:・javascript: のうち、段階 1・2 の上で ID に効く物。
