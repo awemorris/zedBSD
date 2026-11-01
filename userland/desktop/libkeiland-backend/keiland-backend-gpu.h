@@ -129,4 +129,12 @@ uint32_t kl_backend_gpu_device_extensions(VkPhysicalDevice physical, const char 
 /* Reports the frame fence's exported handle type, or 0 for status polling. */
 VkExternalFenceHandleTypeFlagBits kl_backend_gpu_frame_fence_type(void);
 
+/*
+ * Explains, in one sentence for the person who started the compositor,
+ * why the system offers it no usable GPU (text holds at most size bytes
+ * with the NUL): 0 with the sentence, ENOENT when the system knows no
+ * reason, EINVAL for a missing buffer.
+ */
+int kl_backend_gpu_unavailable_reason(char *text, size_t size);
+
 #endif
