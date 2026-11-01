@@ -36,6 +36,7 @@ struct anchor_static {
 };
 
 static int anchor_value(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_expr *expr, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value, struct anchor_static *fixed);
+static int anchor_math(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
 static const struct css_style *anchor_cb_style(const struct layout_tree *tree, const struct layout_box *box);
 static int anchor_axis_reversed(const struct css_style *style, int vertical);
 static int anchor_query(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
@@ -197,6 +198,14 @@ anchor_value(
 
 	/* Each function, or its fallback. */
 	for (index = 0; index < expr->count; index++) {
+		/* A min(), max() or clamp(): any argument that has no value leaves the whole sum without one. */
+		if (expr->terms[index].math != CSS_ANCHOR_MATH_NONE) {
+			if (!anchor_math(tree, box, &expr->terms[index], slot, cb_start, cb_size, &part))
+				return 0;
+			fixed->pure = 0;
+			total += (layout_unit)((float)part * expr->terms[index].coef);
+			continue;
+		}
 		valid = anchor_query(tree, box, &expr->terms[index], slot, cb_start, cb_size, &part);
 		if (valid) {
 			fixed->pure = 0;
@@ -223,6 +232,45 @@ anchor_value(
 
 	/* Succeeded: the value is known. */
 	*value = total;
+	return 1;
+}
+
+/* Works out a min(), max() or clamp() term: the arguments are sums of their own. */
+static int
+anchor_math(
+	const struct layout_tree *tree,
+	const struct layout_box *box,
+	const struct css_anchor_query *query,
+	int slot,
+	layout_unit cb_start,
+	layout_unit cb_size,
+	layout_unit *value)
+{
+	struct anchor_static unused;
+	layout_unit part[CSS_ANCHOR_MATH_ARGS];
+	layout_unit result;
+	int index;
+
+	if (query->math_count > CSS_ANCHOR_MATH_ARGS)
+		return 0;
+	for (index = 0; index < query->math_count; index++) {
+		if (!anchor_value(tree, box, &query->math_args[index], slot, cb_start, cb_size, &part[index], &unused))
+			return 0;
+	}
+	if (query->math == CSS_ANCHOR_MATH_CLAMP) {
+		if (query->math_count != 3)
+			return 0;
+		result = part[1] > part[2] ? part[2] : part[1];
+		if (result < part[0])
+			result = part[0];
+	} else {
+		result = part[0];
+		for (index = 1; index < query->math_count; index++) {
+			if (query->math == CSS_ANCHOR_MATH_MIN ? part[index] < result : part[index] > result)
+				result = part[index];
+		}
+	}
+	*value = result;
 	return 1;
 }
 
@@ -559,6 +607,8 @@ layout_anchor_hides(
 	clipped = 0;
 	if (!anchor_find_state(tree, box, box->style.position_anchor, &rect, &anchor, &clipped) || anchor == NULL)
 		return 0;
+	if (anchor->style.visibility != 0)
+		return 1;
 	for (up = anchor; up != NULL; up = up->parent) {
 		if (up->anchor_hidden)
 			return 1;
@@ -602,7 +652,7 @@ anchor_search(
 		    anchor_scope_root(child, name, box->style.anchor_tree) == anchor_scope_root(box, name, box->style.anchor_tree) &&
 		    (anchor_top_layer(child) == 0 || (anchor_top_layer(box) != 0 && anchor_top_layer(child) < anchor_top_layer(box))) &&
 		    anchor_chain_before(child, box, containing) &&
-		    (!child->out_of_flow || !*passed || (layout_containing_box(child) != containing && !anchor_scrolls(layout_containing_box(child)))))
+		    (!child->out_of_flow || !*passed || layout_containing_box(child) != containing))
 			found[0] = child;
 		anchor_search(tree, child, box, containing, name, child_inside, passed, found, depth + 1);
 	}
@@ -1241,6 +1291,21 @@ anchor_turn(
 	/* Each function's side (a percentage from the other end when the axis turns round). */
 	map = how == 0 ? down : how == 1 ? across : diagonal;
 	for (index = 0; index < turned->count; index++) {
+		if (turned->terms[index].math != CSS_ANCHOR_MATH_NONE && turned->terms[index].math_count <= CSS_ANCHOR_MATH_ARGS) {
+			struct css_anchor_expr *args;
+			int at;
+
+			args = wb_arena_alloc(&tree->arena, (size_t)turned->terms[index].math_count * sizeof(*args));
+			if (args != NULL) {
+				for (at = 0; at < turned->terms[index].math_count; at++) {
+					const struct css_anchor_expr *one = anchor_turn(tree, &turned->terms[index].math_args[at], how);
+
+					args[at] = *one;
+				}
+				turned->terms[index].math_args = args;
+			}
+			continue;
+		}
 		if (turned->terms[index].side < 0 || turned->terms[index].side > CSS_ANCHOR_SIZE_DEFAULT)
 			continue;
 		if (turned->terms[index].side == CSS_ANCHOR_PERCENT && how != 2)

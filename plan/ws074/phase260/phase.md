@@ -1194,3 +1194,25 @@ Origin: 2026-10-27 ユーザーの指示。
 - 未実施: asan、host-NAME の全件、target の確認。
 - 消す候補（Q1 が消す。この container の中だけ）: build/ws074-cmp/dev149〜dev165 は Q1 が消した。今の dev166・dev167（dev168 と dev169 を残すため）とその log（dev166.log・dev167.log・gap166.json・gap167.json は残してよい）、
   build/tmp/ の中身（acid169・p8・host-build2.log 等）、build/ws074-suites/wpt/zz-*.html・zz-*.js、build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-*.html、acid3/zedbsd-acid3-reference-*.html・zedbsd-acid3-diagnostic-*.html。
+
+### クラウドのセッションの途中経過（続き 6、2026-11-01。dev170。anchor の残りと flex の percentage 上限）
+
+- 測定: dev170（539fd37c）= 3,178 / 3,473（91.51%）、gap 295（harness 141 / static 110 / scripted 42 / crash 2）。dev169（3,173）に対し +5、後退 0。
+- 直した ID（5 件）:
+  - anchor() と anchor-size() の中の min()・max()・clamp()（css/anchor.c・css/css.h・css/cascade.c・layout/anchor.c）: 引数を sum として持つ項（`css_anchor_query.math`）にし、layout で各引数を解いて最小・最大・clamp を取る
+    （em・rem の解決、論理の反転 `anchor_turn` も引数へ）。anchor() の percentage の位置に置く min(50%, 100%) のような物は percentage だけなら畳む。通った ID: anchor-in-css-min-max-function。
+  - anchor の serialization の正規形（css/anchor.c）: 入れ子の括弧の中でも名前を先にする（`anchor(calc(50%) --foo)` は `anchor(--foo calc(50%))`）、calc() が anchor 関数 1 つだけなら関数にする、
+    anchor + percentage は percentage を先にする、`calc((a + b) / 2)` は `calc(0.5 * (a + b))`、fallback の bare `0` は `0px`。通った ID: anchor-parse-valid。
+  - position-visibility: anchors-visible は anchor が visibility: hidden でも隠す（layout/anchor.c）。通った ID: position-visibility-anchors-visible-css-visibility。
+  - abspos の anchor が scroller の中にあって tree 順で後ろでも、containing block が違えば anchor にできる（`anchor_search` の `anchor_scrolls` の条件を外した）。通った ID: anchor-scroll-chained-003。
+  - flex の item の max-height・min-height の percentage を、container の高さが長さの時に stretch へ効かせた（layout/flex.c の配置と `flex_relay_cross`）。通った ID: css-flexbox/percentage-heights-012。
+- 調べて直さなかった物:
+  - multicol は engine に無い（`columns`・`column-count`・`column-width` を parse もしない）。anchor と multicol の 13 件、flex・grid の baseline-multicol 6 件、css-multicol 2 件の共通の原因。
+    baseline の試験は column-span: all と vertical の writing-mode を含み、blocks を columns に割る作りだけでは ID が通らない見込み（数 session）。
+  - inline の SVG は stylesheet の fill・stroke・width・height を読まない（page/svg.c が属性と style 属性だけを読む）。css-zoom の svg 5 件と backdrop-filter-invalid の原因。CSS の engine に fill・stroke の property が無く、zoom と em の解決も要る。
+  - anchor-size-parse-valid は 4306 の subtest を 18 秒で流し、runner の既定 20 秒に近い（JS の engine の速さ。`anchor-size(10px)` の parse も別に残る）。
+  - getComputedStyle の ::before・::after は element と区別せず、position-try の fallback の used 値を返せない（position-try-pseudo-element）。
+  - position-area の inline containing block が block を含む span（position-area-inline-container 2 件）、calc の正規形（flex-valid・grid-area-valid・grid-columns-rows-get-set-multiple、いずれも一般の calc 簡約が要る）。
+- Acid: dev170 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 未実施: asan、host-NAME の全件、target の確認。
+- 消す候補（Q1 が消す）: build/ws074-cmp/dev168（dev170 と dev169 を残すため）、build/tmp/ の acid170・p8・p9・host-build2.log、build/ws074-suites/wpt/acid/ の Acid の一時 html。

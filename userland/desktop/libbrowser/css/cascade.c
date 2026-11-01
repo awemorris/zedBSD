@@ -6788,6 +6788,21 @@ cascade_anchor_resolve(
 			if (query->fallback_expr == NULL)
 				return NULL;
 		}
+		if (query->math != CSS_ANCHOR_MATH_NONE) {
+			struct css_anchor_expr args[CSS_ANCHOR_MATH_ARGS];
+			const struct css_anchor_expr *one;
+			int at;
+
+			for (at = 0; at < query->math_count && at < CSS_ANCHOR_MATH_ARGS; at++) {
+				one = cascade_anchor_resolve(engine, style, &query->math_args[at]);
+				if (one == NULL)
+					return NULL;
+				args[at] = *one;
+			}
+			query->math_args = cascade_keep(engine, args, (size_t)at * sizeof(args[0]));
+			if (query->math_args == NULL)
+				return NULL;
+		}
 	}
 	return cascade_keep(engine, &resolved, sizeof(resolved));
 }

@@ -2388,6 +2388,7 @@ flex_relay_cross(
 	struct layout_box *child;
 	layout_unit frame;
 	layout_unit height;
+	layout_unit limit;
 	layout_unit ratio_cross;
 	size_t index;
 	int align;
@@ -2431,6 +2432,15 @@ flex_relay_cross(
 
 			/* Ordinary line stretch remains available when cross sizing is indefinite. */
 			height = line_cross - child->margin[CSS_TOP] - child->margin[CSS_BOTTOM] - frame;
+
+			/* A percentage limit of the container's definite height holds the stretch. */
+			if (percentage_basis >= 0 && child->style.max_height.unit == CSS_UNIT_PERCENT) {
+				limit = flex_length(&child->style.max_height, percentage_basis);
+				if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
+					limit -= frame;
+				if (height > limit)
+					height = limit;
+			}
 
 			/* Preserve the ratio calculation's constrained definite cross size. */
 			if (!child->replaced) {
@@ -2538,6 +2548,7 @@ flex_place_line(
 	layout_unit offset;
 	layout_unit frame;
 	layout_unit sizing;
+	layout_unit limit;
 	layout_unit reverse_extent;
 	size_t index;
 	int reverse;
@@ -2723,6 +2734,22 @@ flex_place_line(
 				if (child->style.min_height.unit == CSS_UNIT_PX &&
 				    child->height < layout_from_px(child->style.min_height.value) - sizing)
 					child->height = layout_from_px(child->style.min_height.value) - sizing;
+
+				/* A percentage limit is of the container's height when that is a length of its own. */
+				if (box->style.height.unit == CSS_UNIT_PX && box->style.box_sizing != CSS_BOX_SIZING_BORDER) {
+					if (child->style.max_height.unit == CSS_UNIT_PERCENT) {
+						limit = (layout_unit)((float)layout_from_px(box->style.height.value) * child->style.max_height.value / 100.0f) +
+						    layout_from_px(child->style.max_height.offset) - sizing;
+						if (child->height > limit)
+							child->height = limit;
+					}
+					if (child->style.min_height.unit == CSS_UNIT_PERCENT) {
+						limit = (layout_unit)((float)layout_from_px(box->style.height.value) * child->style.min_height.value / 100.0f) +
+						    layout_from_px(child->style.min_height.offset) - sizing;
+						if (child->height < limit)
+							child->height = limit;
+					}
+				}
 
 				/* Content inside a larger frame cannot have a negative height. */
 				if (child->height < 0)
