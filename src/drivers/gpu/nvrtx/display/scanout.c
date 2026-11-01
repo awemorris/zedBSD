@@ -246,7 +246,7 @@
 #define SCANOUT_DRAIN_US		100000U
 #define SCANOUT_DRAIN_STEP_US		50U
 
-/* The most words a cursor's core methods and update take (the cursor's 7, the update's 9), with a margin. */
+/* The most words a cursor's core methods and update take (the cursor's 9, the update's 9), with a margin. */
 #define SCANOUT_CURSOR_WORDS_MAX	32U
 
 /*
