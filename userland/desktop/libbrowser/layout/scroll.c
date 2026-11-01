@@ -30,6 +30,7 @@
 static int scroll_collect(const struct layout_box *box, struct wb_vector *containers, int depth);
 static void scroll_shift(struct layout_box *box, const struct layout_box *root, layout_unit dx, layout_unit dy, int self, int depth);
 static int scroll_inside(const struct layout_box *box, const struct layout_box *ancestor);
+static void scroll_hold(const struct layout_box *box, double *y);
 
 /*
  * Moves the content of the scroll containers, and the boxes that follow an
@@ -115,7 +116,69 @@ layout_scroll_offset(
 		return 0;
 	*x = element->scroll_x;
 	*y = element->scroll_y;
+	scroll_hold(box, y);
 	return 1;
+}
+
+/* The lowest edge of the boxes under a box (their margin boxes); -1 when a box out of the flow is among them. */
+static layout_unit
+scroll_bottom(
+	const struct layout_box *box,
+	int depth)
+{
+	const struct layout_box *child;
+	layout_unit bottom;
+	layout_unit inner;
+
+	bottom = 0;
+	if (depth > SCROLL_DEPTH)
+		return -1;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->kind == LAYOUT_TEXT || child->kind == LAYOUT_LINE_BREAK)
+			continue;
+		if (child->out_of_flow)
+			return -1;
+		if (child->kind != LAYOUT_INLINE) {
+			inner = child->y + child->border[CSS_TOP] + child->padding[CSS_TOP] + child->height + child->padding[CSS_BOTTOM] +
+			    child->border[CSS_BOTTOM] + child->margin[CSS_BOTTOM];
+			if (inner > bottom)
+				bottom = inner;
+		}
+		inner = scroll_bottom(child, depth + 1);
+		if (inner < 0)
+			return -1;
+		if (inner > bottom)
+			bottom = inner;
+	}
+	return bottom;
+}
+
+/*
+ * A scroll container that became larger (or whose content became smaller) cannot stay scrolled past
+ * its end: the vertical offset is held within the extent of the boxes inside it, when that is known
+ * from them (a container of blocks only).
+ */
+static void
+scroll_hold(
+	const struct layout_box *box,
+	double *y)
+{
+	layout_unit bottom;
+	layout_unit edge;
+	double most;
+
+	if (*y <= 0.0 || box->children_inline || box->first_child == NULL)
+		return;
+	bottom = scroll_bottom(box, 0);
+	if (bottom < 0)
+		return;
+	bottom += box->padding[CSS_BOTTOM];
+	edge = box->y + box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM];
+	most = (double)layout_to_px(bottom - edge);
+	if (most < 0.0)
+		most = 0.0;
+	if (*y > most)
+		*y = most;
 }
 
 /* Tells whether a box is a box or inside it. */
