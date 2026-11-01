@@ -12,8 +12,10 @@
  * picture unused and is short-term or long-term by its flag; another
  * reference picture follows its memory management operations (8.2.5.4) or
  * the sliding window (8.2.5.3), and is then short-term unless operation 6
- * made it long-term.  Operation 5 and gaps in frame_num are not followed
- * (the probe stops): x264 writes neither.
+ * made it long-term.  Operation 5 makes every other picture unused and the
+ * picture's frame_num 0 for the pictures after it.  A gap in frame_num,
+ * where the sequence allows one, puts a short-term frame without a picture
+ * in for each number skipped, each after the sliding window (8.2.5.2).
  */
 
 #include "dpb.h"
@@ -26,6 +28,7 @@ static int dpb_find_short(const struct dpb *dpb, int32_t pic_num, uint32_t frame
 static int dpb_find_long(const struct dpb *dpb, uint32_t index, int32_t skip);
 static const char *dpb_operation(struct dpb *dpb, const struct h264_mmco *mmco, uint32_t frame_num, uint32_t max_frame_num, int32_t current, int *current_long);
 static const char *dpb_sliding_window(struct dpb *dpb, uint32_t frame_num, uint32_t max_frame_num, int32_t current);
+static const char *dpb_fill_gap(struct dpb *dpb, const StdVideoH264SequenceParameterSet *sps, uint32_t frame_num, uint32_t max_frame_num);
 
 /*
  * Starts an empty DPB for a sequence of at most `max_references`
@@ -60,6 +63,7 @@ dpb_plan(
 	struct dpb_plan *plan)
 {
 	struct dpb_entry *entry;
+	const char *reason;
 	uint32_t max_frame_num;
 	uint32_t expected;
 	uint32_t slot;
@@ -79,16 +83,19 @@ dpb_plan(
 			dpb->entry[slot].reference = DPB_UNUSED;
 		dpb->max_long_term_frame_idx = -1;
 	} else {
-		/* Another picture's frame_num is the last reference picture's or the next: a gap is not followed. */
+		/* Another picture's frame_num is the last reference picture's or the next, or comes after a gap. */
 		expected = (dpb->previous_reference_frame_num + 1U) % max_frame_num;
-		if (picture->info.frame_num != dpb->previous_reference_frame_num && picture->info.frame_num != expected)
-			return "a gap in frame_num";
+		if (picture->info.frame_num != dpb->previous_reference_frame_num && picture->info.frame_num != expected) {
+			reason = dpb_fill_gap(dpb, sps, picture->info.frame_num, max_frame_num);
+			if (reason != NULL)
+				return reason;
+		}
 	}
 
-	/* The references: every slot holding a reference picture, with its information. */
+	/* The references: every slot holding a reference picture, with its information (a frame without a picture is none). */
 	for (slot = 0U; slot < dpb->slots; slot++) {
 		entry = &dpb->entry[slot];
-		if (entry->reference == DPB_UNUSED)
+		if (entry->reference == DPB_UNUSED || entry->missing)
 			continue;
 		if (plan->reference_count >= DPB_REFERENCES)
 			return "more than 16 references";
@@ -123,10 +130,10 @@ dpb_plan(
 	plan->setup_info.PicOrderCnt[0] = picture->info.PicOrderCnt[0];
 	plan->setup_info.PicOrderCnt[1] = picture->info.PicOrderCnt[1];
 
-	/* The slots the decoder holds that hold no reference any more (the picture's own slot among them). */
+	/* The slots the decoder holds that hold no reference picture any more (the picture's own slot among them). */
 	for (slot = 0U; slot < dpb->slots; slot++) {
 		entry = &dpb->entry[slot];
-		if (entry->device_active && entry->reference == DPB_UNUSED) {
+		if (entry->device_active && (entry->reference == DPB_UNUSED || entry->missing)) {
 			plan->deactivate[plan->deactivate_count] = (int32_t)slot;
 			plan->deactivate_count++;
 		}
@@ -163,6 +170,7 @@ dpb_mark(
 
 	/* A picture that is not a reference leaves its slot empty (the decoder does too). */
 	current = &dpb->entry[plan->setup];
+	current->missing = 0;
 	if (!picture->info.flags.is_reference) {
 		current->reference = DPB_UNUSED;
 		current->device_active = 0;
@@ -192,10 +200,12 @@ dpb_mark(
 			return reason;
 	}
 
-	/* The picture's own marking. */
+	/* The picture's own marking, as the pictures after it see it (frame_num 0 and the counts less the smaller after operation 5). */
 	current->frame_num = picture->info.frame_num;
-	current->poc[0] = picture->info.PicOrderCnt[0];
-	current->poc[1] = picture->info.PicOrderCnt[1];
+	if (picture->restart)
+		current->frame_num = 0U;
+	current->poc[0] = picture->reference_poc[0];
+	current->poc[1] = picture->reference_poc[1];
 	if (current_long) {
 		current->reference = DPB_LONG;
 		if (picture->info.flags.IdrPicFlag)
@@ -203,7 +213,7 @@ dpb_mark(
 	} else {
 		current->reference = DPB_SHORT;
 	}
-	dpb->previous_reference_frame_num = picture->info.frame_num;
+	dpb->previous_reference_frame_num = current->frame_num;
 
 	/* No more references than the sequence allows. */
 	count = 0U;
@@ -341,9 +351,17 @@ dpb_operation(
 		dpb->entry[current].long_term_frame_idx = mmco->long_term_frame_idx;
 		*current_long = 1;
 		break;
+	case H264_MMCO_ALL_UNUSED:
+		/* Every other picture becomes unused, and no long-term index is left. */
+		for (slot = 0U; slot < dpb->slots; slot++) {
+			if ((int32_t)slot != current)
+				dpb->entry[slot].reference = DPB_UNUSED;
+		}
+		dpb->max_long_term_frame_idx = -1;
+		break;
 	default:
-		/* Operation 5 restarts the numbering, which the probe does not follow. */
-		return "memory management operation 5";
+		/* The reader keeps no other operation. */
+		return "unknown memory management operation";
 	}
 
 	/* Succeeded: the operation is applied. */
@@ -399,5 +417,60 @@ dpb_sliding_window(
 	dpb->entry[oldest].reference = DPB_UNUSED;
 
 	/* Succeeded: room for the current picture. */
+	return NULL;
+}
+
+/*
+ * Puts in the frames a gap in frame_num implies (8.2.5.2): for each number
+ * skipped after the last reference picture's, the sliding window, then a
+ * short-term frame without a picture in a free slot.  Returns NULL, or why
+ * the probe cannot follow the gap (a sequence that does not allow one).
+ */
+static const char *
+dpb_fill_gap(
+	struct dpb *dpb,
+	const StdVideoH264SequenceParameterSet *sps,
+	uint32_t frame_num,
+	uint32_t max_frame_num)
+{
+	struct dpb_entry *entry;
+	const char *reason;
+	uint32_t unused;
+	uint32_t slot;
+	int found;
+
+	/* A gap the sequence does not allow is a lost picture, which the probe does not conceal. */
+	if (!sps->flags.gaps_in_frame_num_value_allowed_flag)
+		return "a gap in frame_num the sequence does not allow";
+
+	/* Each number skipped. */
+	unused = (dpb->previous_reference_frame_num + 1U) % max_frame_num;
+	while (unused != frame_num) {
+		/* Room by the sliding window. */
+		reason = dpb_sliding_window(dpb, unused, max_frame_num, -1);
+		if (reason != NULL)
+			return reason;
+
+		/* The first slot without a reference holds the frame. */
+		found = -1;
+		for (slot = 0U; slot < dpb->slots; slot++) {
+			if (dpb->entry[slot].reference == DPB_UNUSED) {
+				found = (int)slot;
+				break;
+			}
+		}
+		if (found < 0)
+			return "no free slot in the DPB for a gap in frame_num";
+		entry = &dpb->entry[found];
+		entry->reference = DPB_SHORT;
+		entry->missing = 1;
+		entry->frame_num = unused;
+		entry->poc[0] = 0;
+		entry->poc[1] = 0;
+		dpb->previous_reference_frame_num = unused;
+		unused = (unused + 1U) % max_frame_num;
+	}
+
+	/* Succeeded: the gap is filled. */
 	return NULL;
 }

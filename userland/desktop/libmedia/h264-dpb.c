@@ -758,9 +758,16 @@ h264_lists_admit(
 			error = h264_modify_list(dpb, &slice->list[list], picture->info.frame_num, maximum, 1, &real[list]);
 			if (error != 0)
 				return error;
-			if (active > logical[list].count || active > real[list].count)
-				return ENOENT;
 			for (reference = 0U; reference < active; reference++) {
+				/* An index past the logical list, or one naming a frame a gap in frame_num inferred, is never predicted from (8.2.5.2). */
+				if (reference >= logical[list].count)
+					continue;
+				if (dpb->entry[logical[list].entry[reference]].inferred)
+					continue;
+
+				/* Any other index must select the same decoded image the device's list holds there. */
+				if (reference >= real[list].count)
+					return ENOENT;
 				if (logical[list].entry[reference] != real[list].entry[reference])
 					return ENOENT;
 			}

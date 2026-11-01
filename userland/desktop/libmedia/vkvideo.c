@@ -24,6 +24,15 @@
 #define VKVIDEO_MAX_SKIPPED 8U
 
 /*
+ * How many submissions behind the newest a pending picture may fall before
+ * it is completed where it waits: the runtime keeps the results of its
+ * last 64 tickets only (vkvideo-runtime.c), and a picture may wait for its
+ * place in the display order far longer than the reorder depth's count of
+ * pictures (all the pictures before it in the order pass it meanwhile).
+ */
+#define VKVIDEO_SETTLE_BEHIND 32U
+
+/*
  * One retained picture carries its presentation time and order within the
  * current coded-video epoch, and while it is in flight its ticket (zero
  * once its pixels are in the picture).
@@ -657,6 +666,7 @@ vkvideo_decode(
 	struct h264_dpb_plan plan;
 	struct media_picture *output;
 	uint32_t ticket;
+	unsigned index;
 	int32_t poc;
 	int error;
 
@@ -748,6 +758,17 @@ vkvideo_decode(
 	decoder->pending[decoder->count].time_us = decoder->packet_time;
 	decoder->pending[decoder->count].ticket = ticket;
 	decoder->count++;
+
+	/* A picture that has waited long behind the newest completes in its place, before its result is overwritten. */
+	for (index = 0U; index < decoder->count; index++) {
+		if (decoder->pending[index].ticket == 0U)
+			continue;
+		if (ticket - decoder->pending[index].ticket < VKVIDEO_SETTLE_BEHIND)
+			continue;
+		error = vkvideo_settle(decoder, &decoder->pending[index]);
+		if (error != 0)
+			return error;
+	}
 
 	/* Succeeded: the submitted CPU picture waits for its pixels and its presentation position. */
 	return 0;

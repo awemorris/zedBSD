@@ -21,10 +21,18 @@
  * each picture into a free slot's image with every reference picture of
  * the DPB, reads the image's planes through the image's subresource layout
  * (zedBSD's promise for an optimal NV12 image) and hashes the display
- * window as ffmpeg hashes a raw NV12 frame (frame.c).  The frames are
- * printed in display order: by their order counts, between IDR pictures.
+ * window as ffmpeg hashes a raw NV12 frame (frame.c).  The session's
+ * parameters hold the stream's parameter sets in force (h264.c reads them
+ * as they come); a set that is new or comes again with other content
+ * makes new parameters before the next picture.  The frames are printed in
+ * display order: by their order counts, between IDR pictures and pictures
+ * with the memory management operation 5 (which come after every frame
+ * before them); of more frames than the probe keeps waiting, the half of
+ * the smaller counts is printed (as a DPB bumps them).
  * With --expect, each frame is compared with the file's line, and the exit
- * status says whether all matched.  Where the video family reports result
+ * status says whether all matched.  A stream of an H.264 profile the
+ * decoder does not take is refused before any decode, with its own exit
+ * status (PROBE_REFUSED).  Where the video family reports result
  * status (ws083-p008), each decode is in a result status query, and a
  * decode that did not complete is named and fails the run.  With --time,
  * each decode is timed from the recording of its commands to its fence, and
@@ -61,6 +69,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* The exit status of a stream whose H.264 profile the decoder does not take. */
+#define PROBE_REFUSED		6
 
 /* How long a decode may take before the probe gives up, in nanoseconds. */
 #define PROBE_WAIT_NS		5000000000ULL
@@ -140,6 +151,10 @@ struct probe {
 	uint32_t session_memory_count;
 	VkVideoSessionParametersKHR parameters;
 
+	/* The stream's generation of parameter sets the parameters hold, and how many parameters were made. */
+	uint32_t parameters_generation;
+	uint32_t parameters_made;
+
 	/*
 	 * Whether the pictures are sampled ones read back by a copy (--sampled),
 	 * and then the buffer of the image's layout the copy writes, its memory
@@ -201,7 +216,7 @@ static int probe_decode(struct probe *probe, const struct h264_stream *stream, c
 static void probe_hash(struct probe *probe, uint32_t slot, const StdVideoH264SequenceParameterSet *sps, char text[65]);
 static int probe_dump(struct probe *probe, uint32_t slot, const StdVideoH264SequenceParameterSet *sps, FILE *file, const char *stream, uint32_t picture, int32_t status, const char *hash);
 static void probe_output_add(struct probe_output *output, int32_t poc, const char *hash);
-static void probe_output_flush(struct probe_output *output);
+static void probe_output_flush(struct probe_output *output, uint32_t keep);
 static int probe_frame_compare(const void *left, const void *right);
 static int probe_run(struct probe *probe, const struct probe_options *options);
 static void probe_close(struct probe *probe);
@@ -578,6 +593,11 @@ probe_capabilities(
 	capabilities.sType = VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR;
 	capabilities.pNext = &decode;
 	result = vkGetPhysicalDeviceVideoCapabilitiesKHR(probe->physical, &probe->profile, &capabilities);
+	if (result == VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR) {
+		fprintf(stderr, "vkvideo-probe: refused: the decoder does not take the stream's H.264 profile (profile_idc %u)\n",
+			(unsigned)probe->h264_profile.stdProfileIdc);
+		return PROBE_REFUSED;
+	}
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkGetPhysicalDeviceVideoCapabilitiesKHR");
 	printf("vkvideo-probe: capabilities max %ux%u slots %u references %u level %u flags 0x%x decode 0x%x\n",
@@ -992,7 +1012,11 @@ probe_session(
 	return 0;
 }
 
-/* Makes the session's parameters from every parameter set of the stream. */
+/*
+ * Makes the session's parameters from the stream's parameter sets in
+ * force, in place of the parameters before (no decode is in flight: each
+ * is waited for).
+ */
 static int
 probe_parameters(
 	struct probe *probe,
@@ -1040,10 +1064,19 @@ probe_parameters(
 	info.sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_PARAMETERS_CREATE_INFO_KHR;
 	info.pNext = &h264;
 	info.videoSession = probe->session;
+	if (probe->parameters != VK_NULL_HANDLE) {
+		vkDestroyVideoSessionParametersKHR(probe->device, probe->parameters, NULL);
+		probe->parameters = VK_NULL_HANDLE;
+	}
 	result = vkCreateVideoSessionParametersKHR(probe->device, &info, NULL, &probe->parameters);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkCreateVideoSessionParametersKHR");
-	printf("vkvideo-probe: parameters %u SPS, %u PPS\n", sps_count, pps_count);
+	probe->parameters_generation = stream->generation;
+	probe->parameters_made++;
+
+	/* The first parameters are named; the later ones are counted at the end. */
+	if (probe->parameters_made == 1U)
+		printf("vkvideo-probe: parameters %u SPS, %u PPS\n", sps_count, pps_count);
 
 	/* Succeeded: the parameters. */
 	return 0;
@@ -1454,9 +1487,9 @@ probe_output_add(
 	int32_t poc,
 	const char *hash)
 {
-	/* A list that is full is printed as it is. */
+	/* Of a full list, the half of the smaller counts is printed. */
 	if (output->pending_count >= PROBE_PENDING)
-		probe_output_flush(output);
+		probe_output_flush(output, PROBE_PENDING / 2U);
 
 	/* The frame waits. */
 	output->pending[output->pending_count].poc = poc;
@@ -1466,22 +1499,28 @@ probe_output_add(
 
 /*
  * Prints the waiting frames in order of their order counts, each compared
- * with the next expected line when there is a file of them.
+ * with the next expected line when there is a file of them, but for the
+ * `keep` of the largest counts, which go on waiting.
  */
 static void
 probe_output_flush(
-	struct probe_output *output)
+	struct probe_output *output,
+	uint32_t keep)
 {
 	char expected[80];
 	char *line;
 	uint32_t index;
+	uint32_t printing;
 	int differs;
 
-	/* The display order. */
+	/* The display order, and the frames printed now. */
 	qsort(output->pending, output->pending_count, sizeof(output->pending[0]), probe_frame_compare);
+	printing = 0U;
+	if (output->pending_count > keep)
+		printing = output->pending_count - keep;
 
 	/* Each frame, compared with the expected line when there is one. */
-	for (index = 0U; index < output->pending_count; index++) {
+	for (index = 0U; index < printing; index++) {
 		line = NULL;
 		if (output->expect != NULL)
 			line = fgets(expected, sizeof(expected), output->expect);
@@ -1499,7 +1538,10 @@ probe_output_flush(
 		}
 		output->printed++;
 	}
-	output->pending_count = 0U;
+
+	/* The frames kept go to the front. */
+	memmove(output->pending, output->pending + printing, (output->pending_count - printing) * sizeof(output->pending[0]));
+	output->pending_count -= printing;
 }
 
 /* Orders two waiting frames by their order counts. */
@@ -1544,14 +1586,12 @@ probe_run(
 	const char *reason;
 	uint8_t *data;
 	size_t size;
-	uint32_t index;
 	uint32_t frames;
 	char text[65];
 	uint64_t started;
 	uint64_t elapsed;
 	FILE *dump;
 	int found;
-	int first_sps;
 	int error;
 
 	/* The stream and its parameter sets. */
@@ -1565,29 +1605,19 @@ probe_run(
 		return 1;
 	}
 
-	/* The profile of the first sequence set, and the largest coded picture of all of them. */
-	first_sps = -1;
-	for (index = 0U; index < H264_SPS_IDS; index++) {
-		if (!stream.has_sps[index])
-			continue;
-		if (first_sps < 0)
-			first_sps = (int)index;
-		if ((stream.sps[index].pic_width_in_mbs_minus1 + 1U) * 16U > probe->extent.width)
-			probe->extent.width = (stream.sps[index].pic_width_in_mbs_minus1 + 1U) * 16U;
-		if ((stream.sps[index].pic_height_in_map_units_minus1 + 1U) * 16U > probe->extent.height)
-			probe->extent.height = (stream.sps[index].pic_height_in_map_units_minus1 + 1U) * 16U;
-		if (stream.sps[index].max_num_ref_frames > probe->max_references)
-			probe->max_references = stream.sps[index].max_num_ref_frames;
-	}
-	if (first_sps < 0) {
+	/* The profile of the first sequence set, and the largest coded picture and the most references of all of them. */
+	if (!stream.has_profile) {
 		fprintf(stderr, "vkvideo-probe: %s: no sequence parameter set\n", options->stream);
 		free(data);
 		return 1;
 	}
 	memset(&probe->h264_profile, 0, sizeof(probe->h264_profile));
 	probe->h264_profile.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR;
-	probe->h264_profile.stdProfileIdc = stream.sps[first_sps].profile_idc;
+	probe->h264_profile.stdProfileIdc = (StdVideoH264ProfileIdc)stream.profile_idc;
 	probe->h264_profile.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR;
+	probe->extent.width = stream.max_width;
+	probe->extent.height = stream.max_height;
+	probe->max_references = stream.max_references;
 	memset(&probe->profile, 0, sizeof(probe->profile));
 	probe->profile.sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR;
 	probe->profile.pNext = &probe->h264_profile;
@@ -1618,9 +1648,11 @@ probe_run(
 	if (error == 0)
 		error = probe_session(probe);
 	if (error == 0)
-		error = probe_parameters(probe, &stream);
-	if (error == 0)
 		error = probe_commands(probe);
+	if (error == PROBE_REFUSED) {
+		free(data);
+		return PROBE_REFUSED;
+	}
 	if (error != 0) {
 		free(data);
 		return 1;
@@ -1666,9 +1698,16 @@ probe_run(
 			break;
 		}
 
-		/* An IDR picture comes after every frame before it in display order. */
-		if (picture.info.flags.IdrPicFlag)
-			probe_output_flush(&output);
+		/* An IDR picture and one with operation 5 come after every frame before them in display order. */
+		if (picture.info.flags.IdrPicFlag || picture.restart)
+			probe_output_flush(&output, 0U);
+
+		/* Parameters with the sets in force, when they changed. */
+		if (probe->parameters == VK_NULL_HANDLE || stream.generation != probe->parameters_generation) {
+			error = probe_parameters(probe, &stream);
+			if (error != 0)
+				break;
+		}
 
 		/* The DPB's plan for it. */
 		sps = &stream.sps[picture.info.seq_parameter_set_id];
@@ -1713,10 +1752,10 @@ probe_run(
 			break;
 		}
 		if (!options->no_hash)
-			probe_output_add(&output, picture.info.PicOrderCnt[0], text);
+			probe_output_add(&output, picture.display_poc, text);
 		frames++;
 	}
-	probe_output_flush(&output);
+	probe_output_flush(&output, 0U);
 	if (output.expect != NULL)
 		fclose(output.expect);
 	if (dump != NULL && fclose(dump) != 0 && error == 0) {
@@ -1726,6 +1765,8 @@ probe_run(
 	free(data);
 
 	/* The summary: every frame decoded, and matched when expected. */
+	if (probe->parameters_made > 1U)
+		printf("vkvideo-probe: parameters made %u times for the sets the stream sent again\n", probe->parameters_made);
 	printf("vkvideo-probe: %u frames decoded", frames);
 	if (options->expect != NULL)
 		printf(", %u match the reference", output.matched);

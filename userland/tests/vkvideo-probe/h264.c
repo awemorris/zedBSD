@@ -11,7 +11,8 @@
  * The syntax is Recommendation ITU-T H.264's: 7.3.1 (NAL unit), 7.3.2.1.1
  * (sequence parameter set), 7.3.2.1.1.1 (scaling list), 7.3.2.2 (picture
  * parameter set), 7.3.3 (slice header, up to the order count fields), and
- * the order counts of 8.2.1.1 and 8.2.1.3.
+ * the order counts of 8.2.1 (8.2.1.1, 8.2.1.2 and 8.2.1.3, with the
+ * memory management operation 5's restart).
  */
 
 #include "h264.h"
@@ -61,11 +62,17 @@ static void h264_list_modification(struct h264_bits *bits);
 static void h264_weight_table(struct h264_bits *bits, uint32_t count);
 static const char *h264_marking(struct h264_bits *bits, const struct h264_nal *nal, struct h264_picture *picture);
 static size_t h264_start_code_of(const uint8_t *data, size_t offset);
-static void h264_order_counts(struct h264_stream *stream, const StdVideoH264SequenceParameterSet *sps, const struct h264_nal *nal, uint32_t lsb, int32_t bottom_delta, struct h264_picture *picture);
+static void h264_order_counts(struct h264_stream *stream, const StdVideoH264SequenceParameterSet *sps, const struct h264_nal *nal, uint32_t lsb, const int32_t *deltas, struct h264_picture *picture);
+static int32_t h264_expected_order(const StdVideoH264SequenceParameterSet *sps, const struct h264_nal *nal, uint32_t frame_offset, uint32_t frame_num);
+static int h264_read_set(struct h264_stream *stream, const struct h264_nal *nal);
+static void h264_note_needs(struct h264_stream *stream, const StdVideoH264SequenceParameterSet *sps);
+static uint64_t h264_hash(const uint8_t *bytes, size_t size);
 
 /*
- * Opens a stream: reads every sequence and picture parameter set in it
- * (the last one of an id is kept), then rewinds to the first picture.
+ * Opens a stream: reads every sequence and picture parameter set in it for
+ * what the whole stream needs (the first sequence set's profile, the
+ * largest coded picture, the most references), then rewinds to the first
+ * picture with no set in force: the pictures read the sets as they come.
  * Returns -1 when a parameter set cannot be read.
  */
 int
@@ -100,11 +107,112 @@ h264_open(
 			error = h264_parse_pps(stream, data + nal.offset, nal.size);
 		if (error != 0)
 			return -1;
+
+		/* What a sequence set needs. */
+		if (nal.type == H264_NAL_SPS)
+			h264_note_needs(stream, &stream->sps[stream->last_sps]);
 	}
 
-	/* Succeeded: the pictures start from the beginning. */
+	/* Succeeded: the pictures start from the beginning, with no set in force. */
+	memset(stream->has_sps, 0, sizeof(stream->has_sps));
+	memset(stream->has_pps, 0, sizeof(stream->has_pps));
+	memset(stream->sps_unit_size, 0, sizeof(stream->sps_unit_size));
+	memset(stream->pps_unit_size, 0, sizeof(stream->pps_unit_size));
+	stream->generation = 0U;
 	stream->cursor = 0U;
 	return 0;
+}
+
+/* Adds a sequence set's profile (the first one's), coded size and references to what the stream needs. */
+static void
+h264_note_needs(
+	struct h264_stream *stream,
+	const StdVideoH264SequenceParameterSet *sps)
+{
+	uint32_t width;
+	uint32_t height;
+
+	/* The first set's profile. */
+	if (!stream->has_profile) {
+		stream->has_profile = 1;
+		stream->profile_idc = sps->profile_idc;
+	}
+
+	/* The largest coded picture and the most references. */
+	width = (sps->pic_width_in_mbs_minus1 + 1U) * 16U;
+	height = (sps->pic_height_in_map_units_minus1 + 1U) * 16U;
+	if (width > stream->max_width)
+		stream->max_width = width;
+	if (height > stream->max_height)
+		stream->max_height = height;
+	if (sps->max_num_ref_frames > stream->max_references)
+		stream->max_references = sps->max_num_ref_frames;
+}
+
+/*
+ * Reads a parameter set met between the pictures into the sets in force;
+ * the generation goes up when the set is new or its unit differs from the
+ * one of its id before.  Returns -1 when the set cannot be read.
+ */
+static int
+h264_read_set(
+	struct h264_stream *stream,
+	const struct h264_nal *nal)
+{
+	const uint8_t *unit;
+	uint64_t hash;
+	uint32_t id;
+	int error;
+
+	/* The unit and its hash. */
+	unit = stream->data + nal->offset;
+	hash = h264_hash(unit, nal->size);
+
+	/* A sequence set, kept in its id's place. */
+	if (nal->type == H264_NAL_SPS) {
+		error = h264_parse_sps(stream, unit, nal->size);
+		if (error != 0)
+			return -1;
+		id = stream->last_sps;
+		if (stream->sps_unit_size[id] != nal->size || stream->sps_unit_hash[id] != hash)
+			stream->generation++;
+		stream->sps_unit_size[id] = nal->size;
+		stream->sps_unit_hash[id] = hash;
+		return 0;
+	}
+
+	/* A picture set, kept in its id's place. */
+	error = h264_parse_pps(stream, unit, nal->size);
+	if (error != 0)
+		return -1;
+	id = stream->last_pps;
+	if (stream->pps_unit_size[id] != nal->size || stream->pps_unit_hash[id] != hash)
+		stream->generation++;
+	stream->pps_unit_size[id] = nal->size;
+	stream->pps_unit_hash[id] = hash;
+
+	/* Succeeded: the set is in force. */
+	return 0;
+}
+
+/* The 64-bit FNV-1a hash of bytes, which tells a set sent again from one with other content. */
+static uint64_t
+h264_hash(
+	const uint8_t *bytes,
+	size_t size)
+{
+	uint64_t hash;
+	size_t index;
+
+	/* Byte after byte. */
+	hash = 0xcbf29ce484222325ULL;
+	for (index = 0U; index < size; index++) {
+		hash ^= bytes[index];
+		hash *= 0x100000001b3ULL;
+	}
+
+	/* Succeeded: the hash. */
+	return hash;
 }
 
 /*
@@ -199,12 +307,19 @@ h264_next_picture(
 		if (picture->access_unit == (size_t)-1)
 			picture->access_unit = h264_start_code_of(stream->data, nal.offset);
 
-		/* A delimiter or a parameter set after slices ends the picture. */
+		/* A delimiter or a parameter set after slices ends the picture; a set before them is in force from here. */
 		if (nal.type != H264_NAL_SLICE && nal.type != H264_NAL_IDR) {
 			if (picture->slice_count != 0U &&
 			    (nal.type == H264_NAL_DELIMITER || nal.type == H264_NAL_SPS || nal.type == H264_NAL_PPS || nal.type == H264_NAL_SEI)) {
 				stream->cursor = before;
 				break;
+			}
+			if (nal.type == H264_NAL_SPS || nal.type == H264_NAL_PPS) {
+				error = h264_read_set(stream, &nal);
+				if (error != 0) {
+					*reason = "a parameter set the probe cannot read";
+					return -1;
+				}
 			}
 			continue;
 		}
@@ -549,6 +664,7 @@ h264_parse_sps(
 	stream->sps[id].pOffsetForRefFrame = stream->sps_offsets[id];
 	stream->sps[id].pSequenceParameterSetVui = NULL;
 	stream->has_sps[id] = 1;
+	stream->last_sps = id;
 
 	/* Succeeded: the set is kept. */
 	return 0;
@@ -627,6 +743,7 @@ h264_parse_pps(
 	stream->pps_scaling[id] = lists;
 	stream->pps[id].pScalingLists = &stream->pps_scaling[id];
 	stream->has_pps[id] = 1;
+	stream->last_pps = id;
 
 	/* Succeeded: the set is kept. */
 	return 0;
@@ -717,7 +834,7 @@ h264_slice_header(
 	uint32_t slice_type;
 	uint32_t pps_id;
 	uint32_t lsb;
-	int32_t bottom_delta;
+	int32_t deltas[2];
 	const char *reason;
 
 	/* The slice's macroblock, type and picture set. */
@@ -741,15 +858,18 @@ h264_slice_header(
 	if (nal->type == H264_NAL_IDR)
 		picture->info.idr_pic_id = (uint16_t)h264_ue(&bits);
 
-	/* The order count fields of type 0; type 2 has none; type 1 is not handled. */
+	/* The order count fields: type 0's LSB and bottom delta, type 1's two deltas, none of type 2. */
 	lsb = 0U;
-	bottom_delta = 0;
+	deltas[0] = 0;
+	deltas[1] = 0;
 	if (sps->pic_order_cnt_type == STD_VIDEO_H264_POC_TYPE_0) {
 		lsb = h264_u(&bits, sps->log2_max_pic_order_cnt_lsb_minus4 + 4U);
 		if (pps->flags.bottom_field_pic_order_in_frame_present_flag)
-			bottom_delta = h264_se(&bits);
-	} else if (sps->pic_order_cnt_type != STD_VIDEO_H264_POC_TYPE_2) {
-		return "order count type 1";
+			deltas[1] = h264_se(&bits);
+	} else if (sps->pic_order_cnt_type == STD_VIDEO_H264_POC_TYPE_1 && !sps->flags.delta_pic_order_always_zero_flag) {
+		deltas[0] = h264_se(&bits);
+		if (pps->flags.bottom_field_pic_order_in_frame_present_flag)
+			deltas[1] = h264_se(&bits);
 	}
 
 	/* The rest of the header up to the reference marking. */
@@ -775,17 +895,20 @@ h264_slice_header(
 	picture->info.flags.is_intra = (uint32_t)picture->intra;
 
 	/* Its order counts. */
-	h264_order_counts(stream, sps, nal, lsb, bottom_delta, picture);
+	h264_order_counts(stream, sps, nal, lsb, deltas, picture);
 
 	/* Succeeded: the picture can be decoded. */
 	return NULL;
 }
 
 /*
- * Works out a frame's order counts: type 0 from the LSB and the last
- * reference picture's MSB and LSB (8.2.1.1), type 2 from the frame number
- * and its wrap-around offset (8.2.1.3); an IDR picture starts both over.
- * The memory management operation 5 is not followed.
+ * Works out a frame's order counts (8.2.1): type 0 from the LSB and the
+ * last reference picture's MSB and LSB (8.2.1.1), type 1 from the frame
+ * number, its wrap-around offset and the sequence's cycle (8.2.1.2), type
+ * 2 from the frame number and its offset (8.2.1.3); an IDR picture starts
+ * them over.  A picture with the memory management operation 5 starts
+ * them over after itself: later pictures see its counts less the smaller
+ * of them, its frame number as 0 and no offset.
  */
 static void
 h264_order_counts(
@@ -793,12 +916,14 @@ h264_order_counts(
 	const StdVideoH264SequenceParameterSet *sps,
 	const struct h264_nal *nal,
 	uint32_t lsb,
-	int32_t bottom_delta,
+	const int32_t *deltas,
 	struct h264_picture *picture)
 {
 	int32_t maximum;
 	int32_t msb;
 	int32_t top;
+	int32_t bottom;
+	int32_t smaller;
 	uint32_t frame_offset;
 	uint32_t frame_maximum;
 
@@ -810,41 +935,117 @@ h264_order_counts(
 		stream->previous_frame_offset = 0U;
 	}
 
-	/* Type 2: twice the frame's number from the start, one less for a non-reference picture. */
+	/* Types 1 and 2: the frame number's offset grows by MaxFrameNum when the number wraps around. */
+	frame_maximum = 1U << (sps->log2_max_frame_num_minus4 + 4U);
+	frame_offset = stream->previous_frame_offset;
+	if (nal->type != H264_NAL_IDR && stream->previous_frame_num > picture->info.frame_num)
+		frame_offset += frame_maximum;
+
+	/* The counts of the picture's type. */
+	msb = 0;
 	if (sps->pic_order_cnt_type == STD_VIDEO_H264_POC_TYPE_2) {
-		frame_maximum = 1U << (sps->log2_max_frame_num_minus4 + 4U);
-		frame_offset = stream->previous_frame_offset;
-		if (nal->type != H264_NAL_IDR && stream->previous_frame_num > picture->info.frame_num)
-			frame_offset += frame_maximum;
+		/* Twice the frame's number from the start, one less for a non-reference picture. */
 		top = 0;
 		if (nal->type != H264_NAL_IDR) {
 			top = (int32_t)(2U * (frame_offset + picture->info.frame_num));
 			if (nal->ref_idc == 0U)
 				top--;
 		}
-		picture->info.PicOrderCnt[0] = top;
-		picture->info.PicOrderCnt[1] = top;
-		stream->previous_frame_num = picture->info.frame_num;
-		stream->previous_frame_offset = frame_offset;
-		return;
+		bottom = top;
+	} else if (sps->pic_order_cnt_type == STD_VIDEO_H264_POC_TYPE_1) {
+		/* The cycle's expected count, the slice's deltas and the field offset. */
+		top = h264_expected_order(sps, nal, frame_offset, picture->info.frame_num) + deltas[0];
+		bottom = top + sps->offset_for_top_to_bottom_field + deltas[1];
+	} else {
+		/* The MSB follows the LSB's wrap around from the last reference picture's. */
+		maximum = (int32_t)(1U << (sps->log2_max_pic_order_cnt_lsb_minus4 + 4U));
+		msb = stream->previous_msb;
+		if ((int32_t)lsb < stream->previous_lsb && stream->previous_lsb - (int32_t)lsb >= maximum / 2)
+			msb = stream->previous_msb + maximum;
+		else if ((int32_t)lsb > stream->previous_lsb && (int32_t)lsb - stream->previous_lsb > maximum / 2)
+			msb = stream->previous_msb - maximum;
+		top = msb + (int32_t)lsb;
+		bottom = top + deltas[1];
+	}
+	picture->info.PicOrderCnt[0] = top;
+	picture->info.PicOrderCnt[1] = bottom;
+
+	/* The counts later pictures see, and the place in the display order: the smaller count. */
+	smaller = top < bottom ? top : bottom;
+	picture->reference_poc[0] = top;
+	picture->reference_poc[1] = bottom;
+	if (picture->restart) {
+		picture->reference_poc[0] = top - smaller;
+		picture->reference_poc[1] = bottom - smaller;
+	}
+	picture->display_poc = picture->reference_poc[0] < picture->reference_poc[1] ? picture->reference_poc[0] : picture->reference_poc[1];
+
+	/* The numbering of the next picture: from 0 after a restart. */
+	stream->previous_frame_num = picture->info.frame_num;
+	stream->previous_frame_offset = frame_offset;
+	if (picture->restart) {
+		stream->previous_frame_num = 0U;
+		stream->previous_frame_offset = 0U;
 	}
 
-	/* Type 0: the MSB follows the LSB's wrap around from the last reference picture's. */
-	maximum = (int32_t)(1U << (sps->log2_max_pic_order_cnt_lsb_minus4 + 4U));
-	msb = stream->previous_msb;
-	if ((int32_t)lsb < stream->previous_lsb && stream->previous_lsb - (int32_t)lsb >= maximum / 2)
-		msb = stream->previous_msb + maximum;
-	else if ((int32_t)lsb > stream->previous_lsb && (int32_t)lsb - stream->previous_lsb > maximum / 2)
-		msb = stream->previous_msb - maximum;
-	top = msb + (int32_t)lsb;
-	picture->info.PicOrderCnt[0] = top;
-	picture->info.PicOrderCnt[1] = top + bottom_delta;
-
-	/* A reference picture is the next one's base. */
+	/* A reference picture is type 0's next base; after a restart, MSB 0 and its top count as the LSB. */
 	if (nal->ref_idc != 0U) {
 		stream->previous_msb = msb;
 		stream->previous_lsb = (int32_t)lsb;
+		if (picture->restart) {
+			stream->previous_msb = 0;
+			stream->previous_lsb = picture->reference_poc[0];
+		}
 	}
+}
+
+/*
+ * Reports type 1's expected order count of a frame (8.2.1.2): the cycles
+ * of the sequence's reference frame offsets before the frame and the
+ * offsets into its own cycle, with the offset of a non-reference picture.
+ */
+static int32_t
+h264_expected_order(
+	const StdVideoH264SequenceParameterSet *sps,
+	const struct h264_nal *nal,
+	uint32_t frame_offset,
+	uint32_t frame_num)
+{
+	uint32_t cycle_length;
+	uint32_t absolute;
+	uint32_t cycles;
+	uint32_t in_cycle;
+	uint32_t index;
+	int32_t per_cycle;
+	int32_t expected;
+
+	/* The frame's number from the start, counted among reference frames. */
+	cycle_length = sps->num_ref_frames_in_pic_order_cnt_cycle;
+	absolute = 0U;
+	if (cycle_length != 0U)
+		absolute = frame_offset + frame_num;
+	if (nal->ref_idc == 0U && absolute > 0U)
+		absolute--;
+
+	/* The whole cycles before it and the offsets into its own. */
+	expected = 0;
+	if (absolute > 0U) {
+		per_cycle = 0;
+		for (index = 0U; index < cycle_length; index++)
+			per_cycle += sps->pOffsetForRefFrame[index];
+		cycles = (absolute - 1U) / cycle_length;
+		in_cycle = (absolute - 1U) % cycle_length;
+		expected = (int32_t)cycles * per_cycle;
+		for (index = 0U; index <= in_cycle; index++)
+			expected += sps->pOffsetForRefFrame[index];
+	}
+
+	/* A non-reference picture's own offset. */
+	if (nal->ref_idc == 0U)
+		expected += sps->offset_for_non_ref_pic;
+
+	/* Succeeded: the expected count. */
+	return expected;
 }
 
 /*
@@ -1019,6 +1220,8 @@ h264_marking(
 			mmco->long_term_frame_idx = h264_ue(bits);
 		if (operation == H264_MMCO_MAX_LONG_INDEX)
 			mmco->max_long_term_frame_idx_plus1 = h264_ue(bits);
+		if (operation == H264_MMCO_ALL_UNUSED)
+			picture->restart = 1;
 		picture->mmco_count++;
 	}
 
