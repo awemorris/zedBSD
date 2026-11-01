@@ -353,3 +353,24 @@ ferror
 hypot
 isalpha
 puts
+
+# user32 and kernel32: the clipboard (CF_UNICODETEXT) and its global memory.
+CloseClipboard
+EmptyClipboard
+GetClipboardData
+GlobalAlloc
+GlobalFree
+GlobalLock
+GlobalSize
+GlobalUnlock
+IsClipboardFormatAvailable
+OpenClipboard
+SetClipboardData
+
+# imm32: the input method's context, its composition and its windows' places.
+ImmAssociateContextEx
+ImmGetCompositionStringW
+ImmGetContext
+ImmReleaseContext
+ImmSetCandidateWindow
+ImmSetCompositionWindow
