@@ -159,6 +159,7 @@ extern "C" {
  * 104: a program's network, kl_address_*, kl_socket_* and kl_socket_poll with its wakers
  *      (<keiland/keiland_socket.h>)
  * 105: kl_window_vulkan_extensions, kl_app_storage_directory, kl_data_directory; a key event's text
+ * 106: a titlebar's reload control, KL_CONTROL_RELOAD
  *
  * The file chooser of KL_VERSION 12 moved to the widgets with KL_VERSION 16:
  * kl_file_chooser_* of <keiland/keiland_file_chooser.h>, made of the
@@ -168,7 +169,7 @@ extern "C" {
  * are kl_settings_* of <keiland/keiland_settings.h>, and desktop.conf is the
  * compositor's own file.
  */
-#define KL_VERSION 105U
+#define KL_VERSION 106U
 
 /*
  * Reports the interface version of the library that was loaded.

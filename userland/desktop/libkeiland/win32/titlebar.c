@@ -9,13 +9,23 @@
  * The title bar's controls on Windows (kl_window_set_controls and the
  * rest), drawn by libkeiland in the frame's title bar, laid out by the
  * rules of the Keiland desktop's title bar: the navigation (back, forward,
- * up, home) on the left, the breadcrumb (the location's box) in the
- * middle taking the room left, the rest on the right before the caption
- * buttons; squares of CONTROL_SIZE, a generic control a pill with its
- * label.  When the room is short, the last secondary control on the right
- * gives way first, then the last normal one; a breadcrumb shown as a box
- * stays, and so do the primary controls.  (The desktop then offers the
- * hidden ones in an overflow menu; Windows has none yet.)
+ * up, home, reload) on the left, the breadcrumb (the location's box) after
+ * it, the rest on the right before the caption buttons; squares of
+ * TITLEBAR_CONTROL, a generic control a pill with its label.  When the
+ * room is short, the last secondary control on the right gives way first,
+ * then the last normal one; a breadcrumb shown as a box stays, and so do
+ * the primary controls.  (The desktop then offers the hidden ones in an
+ * overflow menu; Windows has none yet.)
+ *
+ * Unlike the desktop's, where the compositor moves the window by its
+ * title, a Windows title bar is moved by the pixels the hit test calls the
+ * caption: the box is lower than the bar (the strip below it is the
+ * caption, and the one above it too while the frame is maximized and has
+ * no resize band there) and takes the room up to TITLEBAR_CRUMB_MOST, leaving
+ * at least TITLEBAR_DRAG_LEAST of bare title bar before the controls on
+ * the right (it gives that up only to keep its own least width), so that
+ * there is always a part to drag the window by, to double-click to
+ * maximize it and to right-click for its system menu.
  *
  * A press on a button chooses it on its release (KL_WINDOW_ACTION); a
  * press on the box edits it in a field of one line: the keys go to the
@@ -41,6 +51,11 @@
 #define TITLEBAR_CRUMB_LEAST	120U
 #define TITLEBAR_CRUMB_INSET	10U
 #define TITLEBAR_RADIUS		6U
+
+/* The box's height, its most width, and the least bare title bar it leaves beside it (96 dpi). */
+#define TITLEBAR_CRUMB_HEIGHT	24U
+#define TITLEBAR_CRUMB_MOST	800U
+#define TITLEBAR_DRAG_LEAST	96U
 
 /* The sides of a control. */
 #define TITLEBAR_LEFT		0U
@@ -306,6 +321,10 @@ keiui_win32_titlebar_layout(
 	struct keiui_win32_control *control;
 	uint32_t size;
 	uint32_t gap;
+	uint32_t room;
+	uint32_t most;
+	uint32_t least;
+	uint32_t drag;
 	int32_t left;
 	int32_t right;
 	int32_t needed;
@@ -342,6 +361,10 @@ keiui_win32_titlebar_layout(
 		control->width = titlebar_width(window, control, size);
 		control->height = size;
 		control->y = y;
+		if (titlebar_side(control) == TITLEBAR_CRUMB) {
+			control->height = keiui_win32_scale(TITLEBAR_CRUMB_HEIGHT, window->dpi);
+			control->y = ((int32_t)height - (int32_t)control->height) / 2;
+		}
 		if (titlebar_side(control) == TITLEBAR_CRUMB && crumb == KEIUI_WIN32_NO_CONTROL)
 			crumb = index;
 	}
@@ -405,13 +428,29 @@ keiui_win32_titlebar_layout(
 	if (needed != 0)
 		right = right - needed + (int32_t)gap - (int32_t)keiui_win32_scale(TITLEBAR_SIDE, window->dpi);
 
-	/* The breadcrumb takes the room between. */
+	/*
+	 * The breadcrumb takes the room between, up to its most, less the
+	 * bare title bar left to drag the window by (given up only down to
+	 * the box's least).
+	 */
 	if (crumb != KEIUI_WIN32_NO_CONTROL && window->controls[crumb].shown) {
 		control = &window->controls[crumb];
 		control->x = left;
-		side = 0U;
+		room = 0U;
 		if (right - left > 0)
-			side = (unsigned)(right - left);
+			room = (uint32_t)(right - left);
+		most = keiui_win32_scale(TITLEBAR_CRUMB_MOST, window->dpi);
+		least = keiui_win32_scale(TITLEBAR_CRUMB_LEAST, window->dpi);
+		drag = keiui_win32_scale(TITLEBAR_DRAG_LEAST, window->dpi);
+		side = 0U;
+		if (room > drag)
+			side = room - drag;
+		if (side < least)
+			side = least;
+		if (side > room)
+			side = room;
+		if (side > most)
+			side = most;
 		control->width = side;
 		if (control->width == 0U)
 			control->shown = 0;
@@ -740,7 +779,7 @@ keiui_win32_field_end(
 	titlebar_copy_text(input->text, sizeof(input->text), window->field.text);
 }
 
-/* The side a control goes on: the navigation left, the breadcrumb between, the rest right. */
+/* The side a control goes on: the navigation and the reload left, the breadcrumb between, the rest right. */
 static unsigned
 titlebar_side(
 	const struct keiui_win32_control *control)
@@ -751,6 +790,7 @@ titlebar_side(
 	case KL_CONTROL_FORWARD:
 	case KL_CONTROL_UP:
 	case KL_CONTROL_HOME:
+	case KL_CONTROL_RELOAD:
 		return TITLEBAR_LEFT;
 	case KL_CONTROL_BREADCRUMB:
 		return TITLEBAR_CRUMB;
@@ -893,6 +933,9 @@ titlebar_button(
 		break;
 	case KL_CONTROL_UP:
 		icon = KL_ICON_UP;
+		break;
+	case KL_CONTROL_RELOAD:
+		icon = KL_ICON_REFRESH;
 		break;
 	case KL_CONTROL_SEARCH:
 		icon = KL_ICON_SEARCH;
