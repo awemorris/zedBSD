@@ -198,6 +198,7 @@ static void list_image_item(struct list_walk *walk, const struct img_bitmap *ima
 static void list_box_background(struct list_walk *walk, const struct layout_box *box);
 static void list_canvas_background(struct list_walk *walk, const struct layout_tree *tree);
 static int list_vt_left_out(const struct list_walk *walk, const struct layout_box *box);
+static int list_vt_inline_left_out(const struct list_walk *walk, const struct layout_box *node, const struct layout_box *block);
 static void list_vt_image(struct list_walk *walk, const struct layout_box *box);
 static int list_vt_paint(struct list_walk *walk, const struct layout_box *capture);
 static void list_background_image(struct list_walk *walk, const struct layout_box *box, const struct list_area *area, const struct list_area *painting);
@@ -1304,6 +1305,8 @@ list_lines(
 
 		/* The inline boxes' backgrounds and borders go under the line's text. */
 		for (item = 0; item < line->decoration_count; item++) {
+			if (list_vt_inline_left_out(walk, line->decorations[item].box, box))
+				continue;
 			if (box->vertical_inline)
 				list_inline_decoration_vertical(walk, &line->decorations[item], line, left, top, box->height, box->vertical_inline);
 			else
@@ -1311,6 +1314,8 @@ list_lines(
 		}
 		for (item = 0; item < line->fragment_count; item++) {
 			fragment = &line->fragments[item];
+			if (list_vt_inline_left_out(walk, fragment->box, box))
+				continue;
 
 			/* An inline block paints itself where the line put it. */
 			if (fragment->box->atomic) {
@@ -3722,7 +3727,7 @@ list_vt_named(
 {
 	if (walk->transition == NULL || box->node == NULL || box->parent == NULL)
 		return 0;
-	if (box->kind != LAYOUT_BLOCK && box->kind != LAYOUT_REPLACED)
+	if (box->kind != LAYOUT_BLOCK && box->kind != LAYOUT_REPLACED && box->kind != LAYOUT_INLINE)
 		return 0;
 	if (box->style.view_transition_name == NULL)
 		return 0;
@@ -3740,6 +3745,29 @@ list_vt_left_out(
 	if (box == walk->vt_capture)
 		return 0;
 	return list_vt_named(walk, box);
+}
+
+/*
+ * Tells whether the paint of a node of a block's lines is left out of what is painted: it is inside a named
+ * inline box that is not the one captured, or the capture is an inline box and the node is not inside it.
+ */
+static int
+list_vt_inline_left_out(
+	const struct list_walk *walk,
+	const struct layout_box *node,
+	const struct layout_box *block)
+{
+	const struct layout_box *up;
+
+	if (!walk->vt_hide)
+		return 0;
+	for (up = node; up != NULL && up != block; up = up->parent) {
+		if (up == walk->vt_capture)
+			return 0;
+		if (up->kind == LAYOUT_INLINE && list_vt_named(walk, up))
+			return 1;
+	}
+	return walk->vt_capture != NULL && walk->vt_capture->kind == LAYOUT_INLINE;
 }
 
 /* Tells whether a box or an ancestor of it up to stop is left out. */
@@ -3806,6 +3834,15 @@ list_vt_paint(
 		}
 		if (flow_index == order.count)
 			list_box(&sub, walk->tree->root, NULL, 0);
+	} else if (capture->kind == LAYOUT_INLINE) {
+		/* A named inline box: the lines of its block, with only what is inside it. */
+		const struct layout_box *block;
+
+		sub.canvas_box = NULL;
+		for (block = capture->parent; block != NULL && block->kind == LAYOUT_INLINE; block = block->parent)
+			;
+		if (block != NULL)
+			list_lines(&sub, block, block, 0);
 	} else {
 		sub.canvas_box = NULL;
 		list_box(&sub, capture, capture, 0);
@@ -3965,10 +4002,8 @@ list_vt_image(
 		live = layout_transition_box(walk->transition, walk->tree->root, entry->name, 0);
 		if (live == NULL)
 			return;
-		from.x = live->x;
-		from.y = live->y;
-		from.width = live->border[CSS_LEFT] + live->padding[CSS_LEFT] + live->width + live->padding[CSS_RIGHT] + live->border[CSS_RIGHT];
-		from.height = live->border[CSS_TOP] + live->padding[CSS_TOP] + live->height + live->padding[CSS_BOTTOM] + live->border[CSS_BOTTOM];
+		if (!layout_transition_box_rect(live, &from))
+			return;
 	}
 	list_vt_fit(box, &from, &left, &top, &width, &height);
 
@@ -4074,10 +4109,14 @@ paint_transition_capture(
 		snapshot->width = tree->viewport_width;
 		snapshot->height = tree->viewport_height;
 	} else {
-		snapshot->x = box->x;
-		snapshot->y = box->y;
-		snapshot->width = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
-		snapshot->height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		struct layout_rect rect;
+
+		memset(&rect, 0, sizeof(rect));
+		layout_transition_box_rect(box, &rect);
+		snapshot->x = rect.x;
+		snapshot->y = rect.y;
+		snapshot->width = rect.width;
+		snapshot->height = rect.height;
 	}
 	paint_release(&list);
 	*out = snapshot;

@@ -499,6 +499,7 @@ struct vm_string *layout_transition_name_of(const struct layout_transition *tran
 void layout_transition_release(struct layout_transition *transition);
 float layout_transition_progress(const struct css_style *style, float elapsed);
 float layout_transition_elapsed(const struct layout_transition *transition, const struct layout_transition_name *name, int kind);
+int layout_transition_box_rect(const struct layout_box *box, struct layout_rect *rect);
 int layout_transition_group_rect(const struct layout_transition_name *name, const struct css_style *style, float elapsed, struct layout_rect *rect);
 
 /* Anchor positioning (anchor.c). */
