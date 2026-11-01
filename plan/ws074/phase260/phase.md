@@ -1098,3 +1098,44 @@ Origin: 2026-10-27 ユーザーの指示。
 - Acid: 最終の source（dad58b84）で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
 - 一時物（Q1 が消す。この container の中だけ）: 前の節の物に加え、build/tmp/ の sub7〜sub10・pf.html・m1.html・v001*.xhtml・ab.js・a1.*、build/ws074-suites/wpt/css/css-grid/grid-items/zz-r14.html。
 
+### クラウドのセッションの途中経過（続き 3、2026-11-01。dev162〜dev165。Navigation API と frame）
+
+- 基準 dev161（bae62524 の前の build）= 3,151 / 3,473、gap 322。bae62524 の再測定はしていない（source は同じ）。
+- 先に調べた事: 縦書き grid・flex に horizontal-tb の item を入れた時の物理座標の処理（layout/logical.c `layout_logical_wanted` の早期 return）を外すと、
+  grid-self-baseline-vertical-lr-002 は Chromium と同じ形（column 方向の flow、直交 item）になる。しかし flex・grid の側が domain の中の直交 item を扱えず
+  （flex は item の主軸の大きさを swap しない、grid の baseline の整列の側）、static で 4 件後退し（flexbox-writing-mode-008、subgrid の orthogonal-writing-mode-005・006、repeat-auto-fill-007）、
+  通る物は無かったので戻した。これが grid-self-baseline 約 25 件と flexbox-writing-mode 9 件の共通の原因（直交 item の domain 化）。
+- 測定:
+
+  | 測定 | SHA | 内容 | 計 | gap（h/s/sc/c） | 後退 |
+  | --- | --- | --- | --- | --- | --- |
+  | dev161 | dad58b84 | 前の節の最終 | 3,151 | 159 / 112 / 49 / 2 | — |
+  | dev162 | f10d84f5 | frame の document の外部 script、iframe の src・srcdoc 属性の遷移の entry、cross-document の traverse の beforeunload | 3,155 | 155 / 112 / 49 / 2 | 0 |
+  | dev163 | be5cf927 | 共有の session history、frame の URL、sandbox の frame、window.frames・length | 3,161 | 149 / 112 / 49 / 2 | 0 |
+  | dev164 | f0a574dd | currentEntry を unload の最中も、src・srcdoc の属性の navigate event | 3,162 | 148 / 112 / 49 / 2 | 1（caretPositionFromPoint-with-transformation） |
+  | dev165（最終） | 136f5b19 | 上の後退の修正（`__zedLoaded`） | 3,163（91.07%、gap 310） | 147 / 112 / 49 / 2 | 0 |
+
+- 直した物（source は userland/desktop/libbrowser/ と plan/ws074/phase230/prelude.js、phase260/ の frames.js・html-unsafe.js）:
+  1. **frame の document の外部 script**（page/frame-load.c `frame_load_inline`）: `<script src>` を parser の位置で同期に取って実行する（以前は無視。
+     testharness.js を読む子の helper page が全て動かなかった）。通った ID: key-id-back-cross-document ほか、下の helper を使う物。
+  2. **iframe の src・srcdoc を親が変えた時の Navigation**（prelude）: 古い document が pagehide で entry を引き継ぎ（`__zedNav`、push）、
+     新しい document が +1 の entry を持つ。さらに属性の setter が、先に frame の navigate event を発火し（`navigation._attr`、cancel できる）、cancel なら属性を変えない。
+     `__zedLoaded`（読み込まれた frame の目印）で、blank の frame の contentWindow を先に作らない。通った ID: entries-after-blank-navigation、entries-after-srcdoc-navigation、navigate-to-srcdoc、navigate-from-initial-about-blank-src ほか。
+  3. **cross-document の traverse**: beforeunload を navigate event の前に（`unloadAsked`）。navigation.currentEntry・entries()・canGoBack・canGoForward は unload の最中も（fullyActive だけが条件）。
+     通った ID: navigate-navigation-back-cross-document、traverseTo-beforeunload。
+  4. **top の共有の session history**（prelude `joint`・`jointRecord`・`jointGo`）: frame の push（Navigation API・属性・fragment）を top が記録し、top の `history.back()`・`forward()` が frame の entry を traverse、
+     `history.length` が数える（top の entries ＋ frame の push）。frame を外した後の back は何もしない。通った ID: navigate-history-back-noop、cross-document-away-and-back の 2 つ。
+  5. **frame の URL**（bind/prelude.c `prelude_set_url`）: 読み込まれた frame の document の `resource_url` を fragment・pushState で更新する（以前は frame では何もしなかった）。
+     通った ID: activation-same-document-then-cross-document。
+  6. **sandbox の frame**（bind/frame.c `bind_frame_sandboxed`、page/frame-load.c）: `allow-same-origin` を持つ sandbox の frame は読み込む（持たない物は今まで通り子 window を出さない）。
+     `window.length` と `window.frames[n]`（plan/ws074/phase260/frames.js。frames は window を包む Proxy）。通った ID: sandboxing-navigate-parent・sandboxing-navigate-sibling。
+- Acid: dev165 の source（136f5b19）で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 調べて直さなかった物（Navigation の残り 約 28 ID）:
+  - popup（`window.open`）を使う 4 件、server 側の python（slow-no-store.py）、data:・blob:・javascript: URL の frame（opaque origin を含む 7 件）、form の POST・meta refresh の 3 件。
+  - dispose-for-navigation-in-child（top の entries が frame の push で切り詰められ、dispose が発火する共有の history の本格版）、sandboxing-back-parent・back-sibling（back の拒否、no_output）。
+  - signal-abort-window-stop-after-intercept（navigateerror の filename が、intercept で commit した後の URL でなく読み込んだ URL）、reload-navigation-timing（performance の navigation timing の type）。
+  - autofocus の 2 件は `multiple_completions`（通常の試験の結果が二重に出る）。
+- 未実施: asan、host-NAME の全件、target の確認。
+- 一時物（Q1 が消す。この container の中だけ）: 前の節の物に加え、build/ws074-suites/wpt/zz-*.html・zz-*.js（直接の試験の一時 page。wpt の tree の中、git の外）、build/tmp/ の sub11〜sub13・nav*.・cmpurl.sh・*-side.png・*-ours.ppm・*-chrome.ppm。
+- 記録: 途中で自分の command に `rm -f /dev/null` を誤って書き（削除の規則違反）、auto mode の分類器が拒否した。回避せず、その command から rm を外して続けた。
+

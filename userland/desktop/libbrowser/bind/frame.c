@@ -54,6 +54,33 @@ static void frame_removed(struct dom_document *document, struct dom_node *node);
 static void frame_remove_subtree(struct dom_node *root);
 
 /*
+ * Tells whether a frame's sandbox leaves it an opaque origin, which no child global is exposed for: it has a sandbox
+ * attribute without the allow-same-origin token.
+ */
+int
+bind_frame_sandboxed(
+	struct dom_element *element)
+{
+	struct vm_string *sandbox;
+	struct wb_buffer text;
+	const char *at;
+	int sandboxed;
+
+	sandbox = dom_attribute_ascii(element, "sandbox");
+	if (sandbox == NULL)
+		return 0;
+	wb_buffer_init(&text);
+	sandboxed = 1;
+	if (vm_string_to_utf8(sandbox, &text) == 0) {
+		at = strstr(wb_buffer_string(&text), "allow-same-origin");
+		if (at != NULL && (at == wb_buffer_string(&text) || at[-1] == ' ') && (at[17] == '\0' || at[17] == ' '))
+			sandboxed = 0;
+	}
+	wb_buffer_release(&text);
+	return sandboxed;
+}
+
+/*
  * Reports an object's actual loaded Document without creating a blank context.
  */
 int
@@ -553,7 +580,6 @@ frame_context(
 	struct dom_element *element;
 	struct bind_window *parent;
 	struct vm_realm *child;
-	struct vm_string *sandbox;
 	int connected;
 	int status;
 
@@ -587,8 +613,7 @@ frame_context(
 		return 0;
 
 	/* Unsupported sandbox origins must never expose an unverified child global. */
-	sandbox = dom_attribute_ascii(element, "sandbox");
-	if (sandbox != NULL)
+	if (bind_frame_sandboxed(element))
 		return 0;
 
 	/* Repeated observation preserves the one published context's identity. */
@@ -910,7 +935,6 @@ frame_loaded_document(
 	struct vm_realm *child;
 	struct bind_window *parent;
 	struct bind_window *window;
-	struct vm_string *sandbox;
 	int connected;
 	int error;
 
@@ -938,8 +962,7 @@ frame_loaded_document(
 	connected = dom_is_inclusive_ancestor(&node->document->node, node);
 	if (!connected)
 		return 0;
-	sandbox = dom_attribute_ascii(element, "sandbox");
-	if (sandbox != NULL || element->child_context == NULL)
+	if (bind_frame_sandboxed(element) || element->child_context == NULL)
 		return 0;
 
 	/* SVG availability follows the selected actual response MIME processing kind. */

@@ -140,15 +140,35 @@ prelude_set_url(
 	int status;
 
 	UNUSED_PARAMETER(this_value);
+	wb_buffer_init(&href);
 
 	/* A frame's URL belongs to its frame, not to the page's host. */
 	window = bind_window_of(realm);
 	*result = vm_value_boolean(0);
-	if (window->owned || window->host.url_set == NULL)
+	if (window->owned) {
+		struct vm_string *url;
+
+		/* A loaded frame's document keeps the new URL in its own record. */
+		if (window->document->resource_url == NULL)
+			return 0;
+		status = prelude_utf8_argument(args, count, 0, &href, &present);
+		if (status == 0 && present) {
+			url = vm_string_from_utf8(window->document->heap, wb_buffer_string(&href), href.length);
+			if (url == NULL)
+				status = ENOMEM;
+			else
+				window->document->resource_url = url;
+		}
+		wb_buffer_release(&href);
+		if (status == ENOMEM)
+			return status;
+		*result = vm_value_boolean(status == 0 && present);
+		return 0;
+	}
+	if (window->host.url_set == NULL)
 		return 0;
 
 	/* The href as UTF-8. */
-	wb_buffer_init(&href);
 	status = prelude_utf8_argument(args, count, 0, &href, &present);
 	if (status != 0 || !present) {
 		wb_buffer_release(&href);

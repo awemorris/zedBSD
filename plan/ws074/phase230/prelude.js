@@ -733,9 +733,29 @@
 
     // Changing the current entry: a pushed entry drops those after the current one, a replacing entry keeps
     // its key; either way the entries that left are disposed of after currententrychange.
+    // The joint session history of the top-level page: the pushes its frames make, so that its history.back() and length see them.
+    function joint() {
+      var t;
+      try {
+        t = g.top;
+        if (!t || t === g) return null;
+        if (!t.__zedJoint) Object.defineProperty(t, '__zedJoint', { value: { steps: [], pos: 0 }, configurable: true });
+        return t.__zedJoint;
+      } catch (e) { return null; }
+    }
+    function jointRecord(prev, key) {
+      var j = joint(), frame;
+      if (!j || initialBlank()) return;
+      frame = native.frameElement();
+      if (!frame) return;
+      j.steps.length = j.pos;
+      j.steps.push({ frame: frame, prev: prev, key: key });
+      j.pos++;
+    }
     function putEntry(entry, handling) {
       var disposed = [], removed, i;
       if (handling === 'push') {
+        jointRecord(entries[current].key, entry.key);
         removed = entries.splice(current + 1);
         for (i = 0; i < removed.length; i++) if (removed[i].nhe) disposed.push(removed[i].nhe);
         entries.push(entry);
@@ -804,7 +824,7 @@
     }
     // A document that is being left (beforeunload fired, then pagehide) refuses further navigations; one that is
     // still on its initial about:blank has no navigate events, activation or entry state of its own.
-    var unloading = false;
+    var unloading = false, unloadAsked = false;
     function active() { return native.fullyActive() && !unloading; }
     function initialBlank() { return native.initialBlank(); }
     // A navigation to another document in this frame: the entries as they will be, handed to the document that loads.
@@ -824,6 +844,7 @@
       if (o.type === 'push') {
         target = makeEntry(o.url, o.navState, null, old);
         target.docId = uuid();
+        jointRecord(old.key, target.key);
         list.splice(current + 1);
         list.push(target);
         index = list.length - 1;
@@ -838,9 +859,14 @@
         index = entries.indexOf(o.entry);
       }
       h = { url: o.url, type: o.type, current: index, from: initialBlank() ? null : packEntry(old), entries: list.map(packEntry) };
+      if (o.attribute) {
+        // The frame's element sets the source: the document loads from the attribute, with these entries.
+        Object.defineProperty(frame, '__zedNav', { value: h, writable: true, configurable: true, enumerable: false });
+        return true;
+      }
       if (!initialBlank()) {
         unloading = true;
-        fire(g, new Event('beforeunload', { cancelable: true }));
+        if (!unloadAsked) fire(g, new Event('beforeunload', { cancelable: true }));
       }
       Object.defineProperty(frame, '__zedNav', { value: h, writable: true, configurable: true, enumerable: false });
       if (native.navigateFrame(o.url)) return true;
@@ -848,6 +874,33 @@
       delete frame.__zedNav;
       return false;
     }
+    // The frame's element sets another source (the src or srcdoc attribute): the document that loads there gets this one's
+    // entries and one more, as for a navigation of its own (the old document learns of it when it is paged out).
+    g.addEventListener('pagehide', function () {
+      var frame, url, base, old, list, target, index;
+      if (unloading) return;
+      frame = native.frameElement();
+      if (!frame || frame.__zedNav || initialBlank()) return;
+      if (frame.getAttribute('srcdoc') !== null) {
+        url = 'about:srcdoc';
+      } else if (frame.getAttribute('src') !== null) {
+        try { url = new URL(frame.getAttribute('src'), frame.ownerDocument.baseURI).href; } catch (e) { return; }
+      } else {
+        url = 'about:blank';
+      }
+      old = entries[current];
+      leave(old);
+      censorEntries();
+      list = entries.slice();
+      target = makeEntry(url, null, null, old);
+      target.docId = uuid();
+      jointRecord(old.key, target.key);
+      list.splice(current + 1);
+      list.push(target);
+      index = list.length - 1;
+      Object.defineProperty(frame, '__zedNav', { value: { url: url, type: 'push', current: index, from: packEntry(old), entries: list.map(packEntry) },
+        writable: true, configurable: true, enumerable: false });
+    });
     // The document that was loaded after another of its frame: the entries are the ones that were handed over.
     function unpackEntry(r) {
       return { url: r.url, key: r.key, id: r.id, navState: r.navState ? { v: structuredClone(r.navState.v) } : null,
@@ -991,11 +1044,19 @@
     // A traversal runs as a task, like the browser's own back and forward.
     function traverse(find) {
       setTimeout(function () {
-        var entry = find(), t, same;
+        var entry = find(), t, same, proceed;
         if (!entry) return;
         t = upcomingTraverse.get(entry.key) || null;
         if (entry === entries[current]) { if (t) resolveFinished(t); return; }
         same = entry.docId === docId;
+        // A traversal to another document asks to unload this one first, before its navigate event.
+        if (!same && native.frameElement() && !initialBlank()) {
+          unloading = true;
+          proceed = fire(g, new Event('beforeunload', { cancelable: true }));
+          unloading = false;
+          if (!proceed) return;
+          unloadAsked = true;
+        }
         fireNavigate({ type: 'traverse', url: entry.url, entry: entry, navState: entry.navState, sameDocument: same,
           hashChange: same && noFrag(entry.url) === noFrag(docURL()) && frag(entry.url) !== frag(docURL()),
           commit: function () { commitTraverse(entry); } });
@@ -1025,6 +1086,15 @@
         writable: true, configurable: true, enumerable: false });
     }
 
+    // The frame's element is about to load a source from an attribute: the navigate event fires, and false says a listener
+    // cancelled the navigation.
+    function attributeNavigate(url) {
+      var frame = native.frameElement();
+      if (!frame || !native.fullyActive() || unloading) return true;
+      delete frame.__zedNav;
+      fireNavigate({ type: 'push', url: url, navState: null, sameDocument: false, attribute: true });
+      return !!frame.__zedNav || initialBlank();
+    }
     class Navigation extends EventTarget {
       constructor(key) {
         if (key !== KEY) throw new TypeError('Illegal constructor');
@@ -1048,8 +1118,8 @@
         }
         return EventTarget.prototype.removeEventListener.apply(this, arguments);
       }
-      entries() { return active() ? entries.map(nhe) : []; }
-      get currentEntry() { return active() ? nhe(entries[current]) : null; }
+      entries() { return native.fullyActive() ? entries.map(nhe) : []; }
+      get currentEntry() { return native.fullyActive() ? nhe(entries[current]) : null; }
       updateCurrentEntry(options) {
         var state;
         if (arguments.length < 1) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': 1 argument required.");
@@ -1063,8 +1133,8 @@
       }
       get transition() { return transition; }
       get activation() { return activation; }
-      get canGoBack() { return active() && current > 0; }
-      get canGoForward() { return active() && current < entries.length - 1; }
+      get canGoBack() { return native.fullyActive() && current > 0; }
+      get canGoForward() { return native.fullyActive() && current < entries.length - 1; }
       navigate(url, options) {
         var handling, u, state = null, t;
         options = dictionary(options, 'NavigationNavigateOptions');
@@ -1123,15 +1193,38 @@
     ['navigate', 'navigatesuccess', 'navigateerror', 'currententrychange'].forEach(function (type) { handlerAttribute(Navigation.prototype, type); });
     tag(Navigation, 'Navigation');
 
+    // history.go() of the top-level page when its frames pushed entries: the latest step is undone (or redone) in its frame.
+    function jointGo(delta) {
+      var j = g.__zedJoint, step, win;
+      if (delta < 0 && j.pos > 0) step = j.steps[--j.pos];
+      else if (delta > 0 && j.pos < j.steps.length) step = j.steps[j.pos++];
+      else return false;
+      win = step.frame.isConnected ? step.frame.contentWindow : null;
+      if (!win || !win.navigation) return true;
+      setTimeout(function () {
+        try { win.navigation.traverseTo(delta < 0 ? step.prev : step.key); } catch (e) { }
+      }, 0);
+      return true;
+    }
     class History {
       constructor(key) { if (key !== KEY) throw new TypeError('Illegal constructor'); }
-      get length() { return entries.length; }
+      get length() {
+        var t, j;
+        try {
+          t = g.top;
+          j = t && t.__zedJoint;
+          if (t && t !== g) return t.history.length;
+          if (j) return entries.length + j.pos;
+        } catch (e) { }
+        return entries.length;
+      }
       get state() { return classicState; }
       get scrollRestoration() { return entries[current].scrollMode; }
       set scrollRestoration(v) { v = String(v); if (v === 'auto' || v === 'manual') entries[current].scrollMode = v; }
       go(delta) {
         delta = delta === undefined ? 0 : Number(delta) | 0;
         if (delta === 0) { locationReload(); return; }
+        if (g.top === g && g.__zedJoint && jointGo(delta)) return;
         traverse(function () { return entries[current + delta] || null; });
       }
       back() { this.go(-1); }
@@ -1355,6 +1448,11 @@
       if (h) { delete frame.__zedNav; handover = h; }
     })();
     var navigation = new Navigation(KEY);
+    // A frame whose document was loaded from a resource says so, so that its element can ask it before another source is set.
+    (function () {
+      var frame = native.frameElement();
+      if (frame && !initialBlank()) Object.defineProperty(frame, '__zedLoaded', { value: true, writable: true, configurable: true, enumerable: false });
+    })();
     (function () {
       var frame = native.frameElement(), kept, type, same = false;
       if (!frame) return;
@@ -1376,6 +1474,7 @@
       entries.push(makeEntry(null, null, null, null));
       activation = initialBlank() ? null : new NavigationActivation(KEY, null, nhe(entries[0]), 'push');
     }
+    hidden(navigation, '_attr', attributeNavigate);
     def(g, 'navigation', navigation);
     def(g, 'history', new History(KEY));
     [['Navigation', Navigation], ['NavigationHistoryEntry', NavigationHistoryEntry], ['NavigationDestination', NavigationDestination],
@@ -2276,6 +2375,7 @@
   })();
 // @include plan/ws074/phase260/caret.js
 // @include plan/ws074/phase260/html-unsafe.js
+// @include plan/ws074/phase260/frames.js
   // ---- Popover: the popover attribute and showPopover(), hidePopover(), togglePopover() (the top layer is a high z-index)
   if (typeof g.Element === 'function' && !g.Element.prototype.showPopover) (function () {
     function kind(element) {
