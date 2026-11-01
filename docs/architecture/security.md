@@ -36,7 +36,9 @@ of the graphical login. Later sections will cover the other privileged paths.
 An administrator can do the following from Settings > Users:
 
 - add a user, with a name, a display name, a password and an administrator
-  switch;
+  switch; the new user is also put in the `video` group, whose members may
+  open the GPU and so start the desktop from a console login (`useradd`
+  puts only the groups it is given);
 - remove a user, keeping the home directory by default;
 - reset another user's password;
 - add a user to or remove a user from the `wheel` and `network` groups.

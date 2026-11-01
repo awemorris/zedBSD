@@ -7,6 +7,7 @@
 include config/ci/config-rpi5.mk
 
 CONFIG_DRIVER_BCM2712_GPU := y
+ZEDBSD_GRAPHICAL_LOGIN := n
 
 # The 3D scene.
 ZEDBSD_USER_PROGRAMS += $(filter-out $(ZEDBSD_USER_PROGRAMS),mview)

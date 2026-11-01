@@ -1973,8 +1973,9 @@ perf_value_order(
 
 /*
  * Tells the person who started the compositor why it has no GPU, when the
- * system knows: a GPU the kernel holds for root's start, or a GPU node
- * that belongs to the graphical login's user.
+ * system knows: a GPU the kernel holds for root's start, a GPU node
+ * that belongs to the graphical login's user, or one that only root and
+ * the video group may open.
  */
 static void
 compose_unavailable_reason(

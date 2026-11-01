@@ -7,7 +7,8 @@
 #  2. poisoned headers: every GPU UAPI header is replaced by one that is an #error, first on the include path, and every
 #     compositor source (the zedBSD Makefile's list, without libkeiland-backend's) is compiled with -fsyntax-only (the
 #     zedBSD build's compiler and flags); a source that reads a GPU UAPI header, directly or through another header, fails.
-#  3. the compositor opens no GPU node and has no --gpu option.
+#  3. the compositor opens no GPU node and has no --gpu option.  The zedBSD backend's gpu-buffer-zedbsd.c alone names the
+#     first node (its GPU_FIRST_NODE), which it only stats to tell why the GPU cannot be used; no source opens a GPU node.
 # There is no exception: the game mode's images are lent and shown through libvulkan (ws309-p015).
 # Prints "v1-check: PASS" or "v1-check: FAIL ...".
 #   sh plan/tools/gpu-boundary/v1-check.sh [BUILD]     (BUILD for the sysroot, default build/amd64)
@@ -17,6 +18,7 @@ cd "$(dirname -- "$0")/../../.."
 build=${1:-build/amd64}
 dir=userland/desktop/wayland
 backend=userland/desktop/libkeiland-backend-zedbsd/gpu-zedbsd.c
+reason=userland/desktop/libkeiland-backend-zedbsd/gpu-buffer-zedbsd.c
 files=$(find "$dir" userland/desktop/libkeiland-backend-zedbsd -name "*.[ch]" -print | sort)
 failures=0
 fail() { echo "v1-check: FAIL $*"; failures=$((failures + 1)); }
@@ -62,8 +64,10 @@ done
 echo "v1-check: $compiled sources compiled with the GPU UAPI headers poisoned"
 
 # 3. No GPU node and no --gpu option.
-nodes=$(grep -n '"/dev/gpu' $files)
+nodes=$(grep -Hn '"/dev/gpu' $files | grep -v "^$reason:[0-9]*:#define GPU_FIRST_NODE[[:space:]]")
 [ -z "$nodes" ] || fail "GPU node: $nodes"
+opened=$(grep -n 'open[a-z]*([^)]*GPU_FIRST_NODE' $files)
+[ -z "$opened" ] || fail "GPU node opened: $opened"
 option=$(grep -n '"--gpu' $(find "$dir" -name "*.c" -print))
 [ -z "$option" ] || fail "--gpu option: $option"
 

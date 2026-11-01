@@ -79,6 +79,9 @@
 #endif
 #define ADMIN_SHELL		"/bin/sh"
 
+/* The group whose members may open the GPU's nodes, which Settings' new person joins. */
+#define ADMIN_GPU_GROUP		"video"
+
 /*
  * The system's language, the login screen's (ws158-p004; the compositor's
  * language.c reads it), and its directory.
@@ -866,9 +869,9 @@ admin_add(
 
 /*
  * Edits a new user's lines into the new texts: its private group, the
- * groups asked for (Settings' wheel, root's list), its passwd line, and its
- * shadow line (Settings' password's hash, or root's lock: the password is
- * set with passwd).  Returns ADMIN_OK or a reason.
+ * groups asked for (Settings' wheel and video, root's list), its passwd
+ * line, and its shadow line (Settings' password's hash, or root's lock:
+ * the password is set with passwd).  Returns ADMIN_OK or a reason.
  */
 static int
 admin_add_lines(
@@ -907,6 +910,19 @@ admin_add_lines(
 		error = admin_groups_join(files, request->name, request->groups);
 		if (error != 0)
 			return ADMIN_FAILED;
+	}
+
+	/*
+	 * Settings' person, in the GPU's group so that a console login can
+	 * start the desktop; root's useradd puts only the groups it lists.  A
+	 * system without the group adds the user without it.
+	 */
+	if (!request->by_root) {
+		error = admin_member_set(text->text, text->length, ADMIN_GPU_GROUP, request->name, 1, files->scratch, ADMIN_OUTPUT_MAX, &written);
+		if (error != 0 && error != ENOENT)
+			return ADMIN_FAILED;
+		if (error == 0)
+			admin_take(files, ADMIN_FILE_GROUP, written);
 	}
 
 	/* The display name and the shell: Settings', or root's with their defaults. */

@@ -17,6 +17,14 @@
 #include <stdint.h>
 #include <uapi/ioctl.h>
 
+/*
+ * The group a GPU node (/dev/gpuN) belongs to while no graphical session
+ * has it, the video group of /etc/group, and the node's mode then: root
+ * and the group's members open it.  The number is FreeBSD's GID_VIDEO.
+ */
+#define GPU_NODE_GROUP			44U
+#define GPU_NODE_MODE			0660U
+
 #define GPU_ABI_VERSION			1U
 #define GPU_CAP_RESOURCE		1U
 #define GPU_CAP_CAPSET			2U

@@ -1,6 +1,7 @@
 wheel:x:0:root,user
 network:x:69:user
 sshd:x:22:
+video:x:44:user
 _greeter:x:78:
 _passkey:x:79:
 _bluetooth:x:80:

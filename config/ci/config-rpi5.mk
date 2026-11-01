@@ -7,9 +7,11 @@
 # off (CONFIG_DRIVER_RPI5_BT).  The fan connector follows the processor's
 # temperature (CONFIG_DRIVER_RPI5_FAN).  An NVMe drive on an M.2 HAT
 # behind the external PCIe port (config.txt's dtparam=pciex1) is a disk
-# (CONFIG_DRIVER_PCI_NVME).  The GPU is not bound yet, so the
-# login is the text console's, and the Pi 4's chip drivers are off (the
-# Pi 5's are part of its board).
+# (CONFIG_DRIVER_PCI_NVME).  The GPU (V3D 7.1, CONFIG_DRIVER_BCM2712_GPU)
+# starts at boot (cmdline.txt's rpi5gpu.start=boot), and the login is the
+# desktop's, as on the Pi 4 (ZEDBSD_GRAPHICAL_LOGIN); the boot itself
+# stays text.  The Pi 4's chip drivers are off (the Pi 5's are part of its
+# board).
 ZEDBSD_MENU_VERSION := 3
 ZEDBSD_PLATFORM := rpi5
 ZEDBSD_ARCHITECTURE := arm64
@@ -29,7 +31,7 @@ CONFIG_GPU_CONTROL_MS := 10000
 ZEDBSD_ROOTFS_DEVELOPMENT := y
 ZEDBSD_GRAPHICAL_BOOT := n
 ZEDBSD_BOOT_KERNEL_MESSAGES := y
-ZEDBSD_GRAPHICAL_LOGIN := n
+ZEDBSD_GRAPHICAL_LOGIN := y
 ZEDBSD_NOCT_ACCEL := n
 CONFIG_DRIVER_NE2000 := n
 CONFIG_DRIVER_PCI_UHCI := n
@@ -60,6 +62,7 @@ CONFIG_DRIVER_BCM2711_WIFI := n
 CONFIG_DRIVER_BCM2711_BT := n
 CONFIG_DRIVER_BCM2711_AUDIO := n
 CONFIG_DRIVER_BCM2711_GPU := n
+CONFIG_DRIVER_BCM2712_GPU := y
 CONFIG_DRIVER_BCM2711_VCHIQ := n
 CONFIG_DRIVER_BCM2711_VIDEO := n
 CONFIG_DRIVER_LGY98 := n

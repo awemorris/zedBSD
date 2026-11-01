@@ -12,7 +12,9 @@
  * (/dev/input/hidraw*) and the smart card slots (/dev/smartcard*,
  * ws161-p002, the user's approval U3) and the cameras (/dev/cam*) belong
  * to the seat's user, 0600, while sessiond runs a greeter or a session,
- * and go back to root when it stops (the keys and the cards to root alone:
+ * and go back to root when it stops (the display to root and the video
+ * group, whose members start a desktop from the text console; the keys and
+ * the cards to root alone:
  * whoever opens one can ask the key to sign; the cameras to root alone:
  * whoever opens one sees the room).  The login screen is not given the
  * keys, the cards and the cameras (ws172: its security key login is
@@ -44,6 +46,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <uapi/gpu.h>
 #include <uapi/system.h>
 
 /* The display devices sessiond looks for: /dev/gpu0 to /dev/gpu3. */
@@ -61,8 +64,8 @@
 /* The cameras sessiond looks for: /dev/cam0 to /dev/cam3. */
 #define SEAT_CAMERA_COUNT	4U
 
-/* devfs's own modes, which the devices go back to. */
-#define SEAT_GPU_MODE		0666
+/* devfs's own modes, which the devices go back to (a GPU's is the kernel's, with its group). */
+#define SEAT_GPU_MODE		GPU_NODE_MODE
 #define SEAT_INPUT_MODE		0640
 #define SEAT_BACKLIGHT_MODE	0644
 #define SEAT_KEY_MODE		0600
@@ -153,10 +156,10 @@ sessiond_seat_restore(
 	char path[32];
 	unsigned index;
 
-	/* Every display, root's again (the GPU node admits only root and the node's owner, whatever its mode). */
+	/* Every display, root's and the video group's again (the GPU node admits root, its owner and, by the mode, its group). */
 	for (index = 0U; index < SEAT_GPU_COUNT; index++) {
 		snprintf(path, sizeof(path), "/dev/gpu%u", index);
-		seat_set(path, 0, SEAT_WHEEL_GID, SEAT_GPU_MODE);
+		seat_set(path, 0, GPU_NODE_GROUP, SEAT_GPU_MODE);
 	}
 
 	/* Every input device, which root and wheel read; every security key's raw node, root's alone. */
