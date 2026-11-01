@@ -69,5 +69,8 @@ NVENC が driver の組んだ 1 絵の設定（`nvenc_h264_drv_pic_setup_s` と 
 | run21 | NVDEC の channel を作らない（`nvrtx.stop=nvdec-channel`）: buffer の VA が 8 KiB 上にずれ、**入力の 48 KiB の buffer の末尾を越えて 0x100000000 で MMU fault**（RC 31）。engine は入力の先頭から 56 KiB 以上を読む（chroma の面が luma と同じ行数あるかのよう） |
 | run22 | 絵の buffer を 4 倍（192 KiB）→ 読み越しは buffer の中に収まるが、同じ HW の誤り（読み越しは原因ではない、入力の形の手がかり） |
 
+| run23 | 入力の buffer の直ぐ上を空けて（写さない 64 KiB）、plane の始めを buffer の末尾から X 前に置き、読みの長さを測った: luma は 32 KiB 前から読んで fault 無し（32 KiB を読む＝期待どおり）。chroma は 16・24 KiB 前で fault、32・48 KiB 前で fault 無し → **chroma を 24〜32 KiB 読む**（4:2:0 の 256x128 なら 16 KiB。luma と同じ行数、4:2:2 の大きさ） |
+| run24 | 640x480 の絵（pitch 640、1200 MB、buffer 640 KiB）→ 同じ HW の誤り（大きさに依らない） |
+
 - GSP の log の書式: linux-firmware の `gsp-570.144.bin` には `.fwlogging`（libos の log の metadata）が無い。metadata の address（0x5e92fd0 など）は firmware の ELF の section の外。NVIDIA の driver の package の `gsp_tu10x.bin` に入っている見込み（open-gpu-kernel-modules の RM はそれで GSP の log を文に直す）。使うかは新しい出典（package の license）の判断なので Q1 に問う。
 - 次の候補: 入力の形（chroma の行数、tile の形）を MMU fault の位置で測る、大きい絵（720p）、GSP の log の文字列（判断の後）。
