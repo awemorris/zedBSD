@@ -118,4 +118,4 @@ header と phase.md の食い違い: 無し（header は変えていない。pha
 
 未実施: 性能の測定、32 bit の size_t の機械・aarch64 Windows の実行（build のみ）、鍵の導出・署名の中で seed 由来の値が 1 つずつ memcheck に見える形の細かい確認（seed を CT_SECRET にして全体を流した）、確かめの定数時間（公開の値だけなので対象外）、実機・QEMU（範囲外）。
 
-commit: （この節の後に追記）
+commit: 7fb4fc0167（実装・試験・この節。この行の追記は次の commit）
