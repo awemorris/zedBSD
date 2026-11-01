@@ -1,0 +1,370 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Checks X25519 (cryc-x25519.h).
+ *
+ * Expected values: the examples of RFC 7748 (January 2016) 5.2 (two
+ * single calls, and the iterated call after 1 and 1,000 iterations;
+ * the 1,000,000 iteration value is left out for its run time) and 6.1
+ * (the Diffie-Hellman example), and the Wycheproof vectors of
+ * x25519_test read from the vector file (the all-zero results must
+ * give EINVAL with the output written).  Properties checked beside them:
+ * the clamping of the scalar (the bits that decodeScalar25519 changes
+ * do not matter), the ignored top bit of u, the equality of the
+ * encodings p + k with k, the two sides of a Diffie-Hellman exchange
+ * giving one secret, the public function equal to the general one at
+ * u = 9, and the key generation with a good and a failing source.
+ */
+
+#include "check.h"
+#include "vecfile.h"
+
+#include "userland/base/libcrypto-compat/cryc-x25519.h"
+
+/* A byte that fills a buffer to show later that nothing was written to it. */
+#define SENTINEL_BYTE	0x5aU
+
+/* The state of the pseudo-random generator of the tests. */
+static uint32_t rng_state = 0x1234567U;
+
+/* Returns the next pseudo-random 32-bit value (xorshift32). */
+static uint32_t
+random32(void)
+{
+	/* Marsaglia's xorshift32 with the shifts 13, 17, 5. */
+	rng_state ^= rng_state << 13;
+	rng_state ^= rng_state >> 17;
+	rng_state ^= rng_state << 5;
+	return rng_state;
+}
+
+/* A random source for key generation: returns the next bytes of the generator, or fails when context says so. */
+static int
+test_random(
+	void *context,
+	uint8_t *out,
+	size_t size)
+{
+	size_t index;
+
+	/* A source set to fail leaves recognisable bytes in out and reports EIO. */
+	if (context != NULL) {
+		memset(out, 0x77, size);
+		return EIO;
+	}
+	for (index = 0; index < size; index++)
+		out[index] = (uint8_t)(random32() >> 7);
+	return 0;
+}
+
+/* Checks one call X25519(scalar, u) against a 64-hex-digit expected output. */
+static void
+check_known(
+	const char *scalar_hex,
+	const char *u_hex,
+	const char *out_hex)
+{
+	uint8_t scalar[32];
+	uint8_t u[32];
+	uint8_t want[32];
+	uint8_t out[32];
+
+	/* Decodes and runs. */
+	CHECK(hex_decode(scalar_hex, scalar, sizeof(scalar)) == 32U);
+	CHECK(hex_decode(u_hex, u, sizeof(u)) == 32U);
+	CHECK(hex_decode(out_hex, want, sizeof(want)) == 32U);
+	CHECK(cryc_x25519(out, scalar, u) == 0);
+	CHECK_BYTES(out, want, 32U);
+}
+
+/* Checks the examples of RFC 7748 5.2 and 6.1. */
+static void
+check_rfc(void)
+{
+	uint8_t k[32];
+	uint8_t u[32];
+	uint8_t out[32];
+	uint8_t want[32];
+	uint8_t pub_a[32];
+	uint8_t pub_b[32];
+	uint8_t key_a[32];
+	uint8_t key_b[32];
+	uint8_t secret[32];
+	uint8_t secret2[32];
+	unsigned iteration;
+
+	/* Values referenced: RFC 7748 (January 2016) 5.2, X25519 test vector 1. */
+	check_known("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4",
+	    "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c",
+	    "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552");
+
+	/* Values referenced: RFC 7748 (January 2016) 5.2, X25519 test vector 2. */
+	check_known("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d",
+	    "e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493",
+	    "95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957");
+
+	/* Values referenced: RFC 7748 (January 2016) 5.2, the iterated test: k = u = 9 at the start. */
+	memset(k, 0, sizeof(k));
+	k[0] = 9U;
+	memcpy(u, k, sizeof(u));
+	for (iteration = 1; iteration <= 1000U; iteration++) {
+		CHECK(cryc_x25519(out, k, u) == 0);
+		memcpy(u, k, sizeof(u));
+		memcpy(k, out, sizeof(k));
+
+		/* Values referenced: RFC 7748 (January 2016) 5.2, the value after 1 iteration. */
+		if (iteration == 1U) {
+			CHECK(hex_decode("422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079", want, sizeof(want)) == 32U);
+			CHECK_BYTES(k, want, 32U);
+		}
+	}
+
+	/* Values referenced: RFC 7748 (January 2016) 5.2, the value after 1,000 iterations. */
+	CHECK(hex_decode("684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51", want, sizeof(want)) == 32U);
+	CHECK_BYTES(k, want, 32U);
+
+	/* Values referenced: RFC 7748 (January 2016) 6.1, Alice's and Bob's keys and the shared secret. */
+	CHECK(hex_decode("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a", key_a, sizeof(key_a)) == 32U);
+	CHECK(hex_decode("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb", key_b, sizeof(key_b)) == 32U);
+	cryc_x25519_public(pub_a, key_a);
+	cryc_x25519_public(pub_b, key_b);
+	CHECK(hex_decode("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a", want, sizeof(want)) == 32U);
+	CHECK_BYTES(pub_a, want, 32U);
+	CHECK(hex_decode("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f", want, sizeof(want)) == 32U);
+	CHECK_BYTES(pub_b, want, 32U);
+	CHECK(hex_decode("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742", want, sizeof(want)) == 32U);
+	CHECK(cryc_x25519(secret, key_a, pub_b) == 0);
+	CHECK(cryc_x25519(secret2, key_b, pub_a) == 0);
+	CHECK_BYTES(secret, want, 32U);
+	CHECK_BYTES(secret2, want, 32U);
+}
+
+/* Checks the Wycheproof vectors: every record, with the all-zero results as EINVAL. */
+static void
+check_wycheproof(void)
+{
+	struct vec_file file;
+	uint8_t scalar[32];
+	uint8_t u[32];
+	uint8_t want[32];
+	uint8_t out[32];
+	uint8_t zero[32];
+	size_t size;
+	int error;
+	unsigned long zeros;
+	unsigned long records;
+
+	if (vec_open(&file, "wycheproof-x25519_test") != 0) {
+		CHECK(0);
+		return;
+	}
+	memset(zero, 0, sizeof(zero));
+	zeros = 0;
+	while (vec_next(&file)) {
+		/* The three fields; the public key and the private key are 32 bytes, the shared secret too. */
+		size = vec_hex(&file, "private", scalar, sizeof(scalar));
+		CHECK(size == 32U);
+		size = vec_hex(&file, "public", u, sizeof(u));
+		CHECK(size == 32U);
+		size = vec_hex(&file, "shared", want, sizeof(want));
+		CHECK(size == 32U);
+		memset(out, SENTINEL_BYTE, sizeof(out));
+		error = cryc_x25519(out, scalar, u);
+
+		/* A zero shared secret is an error with the (zero) output still written. */
+		if (memcmp(want, zero, 32U) == 0) {
+			CHECK(error == EINVAL);
+			zeros++;
+		} else {
+			CHECK(error == 0);
+		}
+		CHECK_BYTES(out, want, 32U);
+	}
+	records = file.records;
+	vec_close(&file);
+
+	/* All 518 records were read, and the file has zero-result cases. */
+	CHECK(records == 518U);
+	CHECK(zeros > 10U);
+}
+
+/* Checks the properties that no table lists. */
+static void
+check_properties(void)
+{
+	uint8_t scalar[32];
+	uint8_t other[32];
+	uint8_t u[32];
+	uint8_t u2[32];
+	uint8_t out[32];
+	uint8_t out2[32];
+	uint8_t base[32];
+	uint8_t pub[32];
+	uint8_t pub_a[32];
+	uint8_t pub_b[32];
+	uint8_t key_a[32];
+	uint8_t key_b[32];
+	uint8_t secret_a[32];
+	uint8_t secret_b[32];
+	unsigned round;
+	unsigned i;
+	int delta;
+
+	/* Every u below uses random bytes. */
+	for (round = 0; round < 40U; round++) {
+		for (i = 0; i < 32U; i++) {
+			scalar[i] = (uint8_t)random32();
+			u[i] = (uint8_t)random32();
+		}
+
+		/* The bits decodeScalar25519 changes do not matter: the three low bits, bit 255 and bit 254. */
+		memcpy(other, scalar, sizeof(other));
+		other[0] = (uint8_t)((other[0] & 0xf8U) | (random32() & 7U));
+		other[31] = (uint8_t)((other[31] & 0x3fU) | ((random32() & 3U) << 6));
+		CHECK(cryc_x25519(out, scalar, u) == 0);
+		CHECK(cryc_x25519(out2, other, u) == 0);
+		CHECK_BYTES(out, out2, 32U);
+
+		/* A scalar bit that decodeScalar25519 keeps does change the result. */
+		memcpy(other, scalar, sizeof(other));
+		other[10] ^= 0x04U;
+		CHECK(cryc_x25519(out2, other, u) == 0);
+		CHECK(memcmp(out, out2, 32U) != 0);
+
+		/* The top bit of u is ignored. */
+		memcpy(u2, u, sizeof(u2));
+		u2[31] ^= 0x80U;
+		CHECK(cryc_x25519(out2, scalar, u2) == 0);
+		CHECK_BYTES(out, out2, 32U);
+
+		/* The input buffers are not changed. */
+		memcpy(other, scalar, sizeof(other));
+		memcpy(u2, u, sizeof(u2));
+		CHECK(cryc_x25519(out2, scalar, u) == 0);
+		CHECK_BYTES(scalar, other, 32U);
+		CHECK_BYTES(u, u2, 32U);
+
+		/* public equals the general function at u = 9. */
+		memset(base, 0, sizeof(base));
+		base[0] = 9U;
+		cryc_x25519_public(pub, scalar);
+		CHECK(cryc_x25519(out, scalar, base) == 0);
+		CHECK_BYTES(pub, out, 32U);
+
+		/* Both sides of an exchange agree. */
+		for (i = 0; i < 32U; i++) {
+			key_a[i] = (uint8_t)random32();
+			key_b[i] = (uint8_t)random32();
+		}
+		cryc_x25519_public(pub_a, key_a);
+		cryc_x25519_public(pub_b, key_b);
+		CHECK(cryc_x25519(secret_a, key_a, pub_b) == 0);
+		CHECK(cryc_x25519(secret_b, key_b, pub_a) == 0);
+		CHECK_BYTES(secret_a, secret_b, 32U);
+	}
+
+	/* The encodings p + k and k are one point: u = 2..18 against p + 2..p + 18 (k below 19 keeps p + k below 2^255, so the low byte alone changes). */
+	for (round = 0; round < 6U; round++) {
+		for (i = 0; i < 32U; i++)
+			scalar[i] = (uint8_t)random32();
+		for (delta = 2; delta <= 18; delta++) {
+			memset(u, 0, sizeof(u));
+			u[0] = (uint8_t)delta;
+			memset(u2, 0xff, sizeof(u2));
+			u2[31] = 0x7fU;
+			u2[0] = (uint8_t)(0xedU + (unsigned)delta);
+			CHECK(cryc_x25519(out, scalar, u) == 0);
+			CHECK(cryc_x25519(out2, scalar, u2) == 0);
+			CHECK_BYTES(out, out2, 32U);
+		}
+	}
+}
+
+/* Checks the small-order inputs and the written output on error. */
+static void
+check_small_order(void)
+{
+	uint8_t scalar[32];
+	uint8_t u[32];
+	uint8_t out[32];
+	uint8_t zero[32];
+	unsigned i;
+
+	for (i = 0; i < 32U; i++)
+		scalar[i] = (uint8_t)(0x30U + i);
+	memset(zero, 0, sizeof(zero));
+
+	/* u = 0 and u = 1 are points of small order: the output is all zero and the call fails. */
+	memset(u, 0, sizeof(u));
+	memset(out, SENTINEL_BYTE, sizeof(out));
+	CHECK(cryc_x25519(out, scalar, u) == EINVAL);
+	CHECK_BYTES(out, zero, 32U);
+	u[0] = 1U;
+	memset(out, SENTINEL_BYTE, sizeof(out));
+	CHECK(cryc_x25519(out, scalar, u) == EINVAL);
+	CHECK_BYTES(out, zero, 32U);
+
+	/* u = p (the same point as 0). */
+	memset(u, 0xff, sizeof(u));
+	u[0] = 0xedU;
+	u[31] = 0x7fU;
+	memset(out, SENTINEL_BYTE, sizeof(out));
+	CHECK(cryc_x25519(out, scalar, u) == EINVAL);
+	CHECK_BYTES(out, zero, 32U);
+
+	/* u = p - 1 (order 2). */
+	u[0] = 0xecU;
+	memset(out, SENTINEL_BYTE, sizeof(out));
+	CHECK(cryc_x25519(out, scalar, u) == EINVAL);
+	CHECK_BYTES(out, zero, 32U);
+}
+
+/* Checks the key generation. */
+static void
+check_keygen(void)
+{
+	uint8_t private_key[32];
+	uint8_t public_key[32];
+	uint8_t expected[32];
+	uint8_t zero[32];
+
+	memset(zero, 0, sizeof(zero));
+
+	/* A good source: the private key is the source's bytes, the public key is X25519(private, 9). */
+	rng_state = 0xabcdef1U;
+	memset(private_key, SENTINEL_BYTE, sizeof(private_key));
+	memset(public_key, SENTINEL_BYTE, sizeof(public_key));
+	CHECK(cryc_x25519_keygen(private_key, public_key, test_random, NULL) == 0);
+	rng_state = 0xabcdef1U;
+	CHECK(test_random(NULL, expected, 32U) == 0);
+	CHECK_BYTES(private_key, expected, 32U);
+	cryc_x25519_public(expected, private_key);
+	CHECK_BYTES(public_key, expected, 32U);
+
+	/* A failing source: EIO, and both outputs wiped. */
+	memset(private_key, SENTINEL_BYTE, sizeof(private_key));
+	memset(public_key, SENTINEL_BYTE, sizeof(public_key));
+	CHECK(cryc_x25519_keygen(private_key, public_key, test_random, private_key) == EIO);
+	CHECK_BYTES(private_key, zero, 32U);
+	CHECK_BYTES(public_key, zero, 32U);
+}
+
+/* Runs the checks. */
+int
+main(void)
+{
+	/* The groups. */
+	check_rfc();
+	check_wycheproof();
+	check_small_order();
+	check_properties();
+	check_keygen();
+
+	/* The result. */
+	return check_finish("test-x25519");
+}
