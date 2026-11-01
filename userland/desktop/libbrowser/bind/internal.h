@@ -255,6 +255,10 @@ struct bind_window {
 	int viewport_height;
 	/* Nonzero when the view's color scheme is dark (prefers-color-scheme, matchMedia). */
 	int dark;
+	/* A frame's document is holding its painting (a view transition's update callback is running): the page shows the last one. */
+	int frame_hold;
+	/* The frame's document has an opaque origin (a sandbox without allow-same-origin): its origin is null. */
+	int opaque;
 	const char *ready_state;
 	/* Set once the window's load event has finished dispatching. */
 	int load_ended;
@@ -270,6 +274,12 @@ struct bind_window {
 	struct environment_mutation_observer *mutation_observers;
 	/* The prelude's function that follows a clicked hyperlink (NULL until the prelude sets it). */
 	struct vm_cell *follow_hyperlink;
+	/* The prelude's function that starts and stops the animation events of the page's elements (NULL until the prelude sets it). */
+	struct vm_cell *animation_hook;
+	/* The prelude's function that gives a restricted view of another window (postMessage only), for an opaque origin (NULL until the prelude sets it). */
+	struct vm_cell *window_wrapper;
+	/* The prelude's function that gives the one window proxy an <iframe> element has (it follows the element's current document) (NULL until the prelude sets it). */
+	struct vm_cell *frame_proxy_maker;
 };
 
 /* One traced inline source owns its C model and original DOM Text until its final GC release. */
@@ -489,6 +499,8 @@ int bind_document_links(struct vm_realm *realm, vm_value receiver, const vm_valu
 int bind_document_url(struct dom_document *document, int use_base, struct wb_buffer *out);
 int bind_frame_location(struct bind_window *window, int part, struct wb_buffer *out);
 int bind_frame_sandboxed(struct dom_element *element);
+int bind_frame_scripts_allowed(struct dom_element *element);
+int bind_window_view(struct bind_window *viewer, struct bind_window *target, vm_value *result);
 int bind_frame_install(struct bind_window *parent, struct dom_element *element, struct dom_document *document, struct bind_window **window);
 int bind_run_inline_script(struct bind_window *window, struct dom_element *script);
 int bind_reflection_base(struct dom_document *document, struct net_url *base);
@@ -625,6 +637,7 @@ int bind_string(struct vm_realm *realm, const char *ascii, vm_value *value);
 int bind_install_prelude(struct bind_window *window);
 void bind_requests_release(struct bind_window *window);
 int bind_follow_hyperlink(struct bind_window *window, struct dom_element *element);
+int bind_animation_sync(struct bind_window *window, int op, struct dom_element *element, const struct vm_string *name, double delay, double duration, double iterations);
 int bind_units(struct vm_realm *realm, const uint16_t *units, size_t length, vm_value *value);
 int bind_to_string(struct vm_realm *realm, vm_value value, struct vm_string **string);
 int bind_to_atom(struct vm_realm *realm, vm_value value, int lower, struct vm_string **atom);

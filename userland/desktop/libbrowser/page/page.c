@@ -31,6 +31,7 @@
 #define PAGE_DUMP_DEPTH		512
 
 static int page_gather_styles(struct page *page);
+static void page_animations_sync(struct page *page);
 static int page_load_xhtml(struct page *page, const unsigned char *bytes, size_t length);
 static int page_xhtml_inline_scripts(struct page *page);
 static int page_xhtml_script_eligible(const struct dom_node *node, const struct dom_document *document);
@@ -628,6 +629,7 @@ page_layout(
 	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 	page->laid_out = 1;
 	page->layout.image_variant = page_image_variant;
+	page->layout.frame_paint = page_frame_paint;
 	if (error != 0)
 		goto cleanup;
 
@@ -652,6 +654,7 @@ page_layout(
 		css_engine_forget_styles(page->css);
 		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 		page->layout.image_variant = page_image_variant;
+	page->layout.frame_paint = page_frame_paint;
 		if (error != 0)
 			goto cleanup;
 	}
@@ -674,6 +677,8 @@ page_layout(
 
 	/* Only a complete layout advances observable generation and geometry caches. */
 	page->laid_out_generation = page->document->generation;
+	page->laid_out_frames = page_frames_generation(page);
+	page_animations_sync(page);
 	page->laid_out_transition = page->transition_generation;
 	page->laid_out_visits = page->visits_generation;
 	page->layout_serial++;
@@ -699,6 +704,40 @@ cleanup:
 	/* Failed layout attempts do not consume a new image generation. */
 	page->laid_out_images = old_laid_out_images;
 	return error;
+}
+
+/* Tells the prelude which boxes have a running animation (a name with @keyframes), for the animation events. */
+static void
+page_animations_walk(
+	struct page *page,
+	const struct layout_box *box,
+	int depth)
+{
+	const struct layout_box *child;
+
+	if (depth > LAYOUT_DEPTH_MAX)
+		return;
+	for (child = box; child != NULL; child = child->next) {
+		if (child->node != NULL && child->node->type == DOM_ELEMENT && !child->vt_tree && child->style.animation_name != NULL &&
+		    child->continuation == 0 && child->style.animation_duration > 0.0f &&
+		    css_engine_has_keyframes(page->css, child->style.animation_name))
+			bind_animation_sync(page->window, 1, (struct dom_element *)child->node, child->style.animation_name,
+			    (double)child->style.animation_delay * 1000.0, (double)child->style.animation_duration * 1000.0,
+			    (double)child->style.animation_iterations);
+		page_animations_walk(page, child->first_child, depth + 1);
+	}
+}
+
+/* Starts and stops the animation events for the elements the layout shows animated. */
+static void
+page_animations_sync(
+	struct page *page)
+{
+	if (page->css == NULL || page->layout.root == NULL)
+		return;
+	bind_animation_sync(page->window, 0, NULL, NULL, 0.0, 0.0, 0.0);
+	page_animations_walk(page, page->layout.root, 0);
+	bind_animation_sync(page->window, 2, NULL, NULL, 0.0, 0.0, 0.0);
 }
 
 /*

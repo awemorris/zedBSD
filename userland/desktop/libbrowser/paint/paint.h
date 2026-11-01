@@ -97,7 +97,22 @@ struct paint_list {
 	uint32_t canvas_color;
 	layout_unit width;
 	layout_unit height;
+	/* Whether the document gave the canvas a color of its own (the root's or the body's background). */
+	int canvas_set;
+	/* The documents of <iframe> elements painted into the items: each laid out tree and its list, which the items point into (struct paint_frame *). */
+	struct wb_vector frames;
 };
+
+/* One frame's document painted into a list: kept as long as the list is. */
+struct paint_frame {
+	struct layout_tree *tree;
+	struct paint_list list;
+	/* The lists and the page's cache that hold it; it is freed when the last lets go. */
+	int refs;
+};
+
+/* Lets go of a reference to a frame (the last frees it). */
+void paint_frame_release(struct paint_frame *frame);
 
 /*
  * A bitmap the CPU renderer draws into: width by height pixels, each

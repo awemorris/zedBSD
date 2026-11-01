@@ -208,10 +208,28 @@ static void list_background_size(const struct layout_box *box, const struct img_
 static layout_unit list_background_length(const struct css_length *length, layout_unit whole);
 static layout_unit list_background_offset(const struct css_length *position, layout_unit room);
 static void list_clip_rect(struct list_walk *walk, const struct list_area *area);
+static void list_frame(struct list_walk *walk, const struct layout_box *box, layout_unit x, layout_unit y);
 static void list_clip(struct list_walk *walk, const struct layout_box *box);
 static void list_unclip(struct list_walk *walk);
 static int list_layer_clips(struct list_walk *walk, const struct layout_box *layer, int push);
 static void list_color(struct wb_buffer *out, uint32_t color);
+
+/*
+ * Lets go of a reference to a painted frame: the last frees its list and the tree the list's items point into.
+ */
+void
+paint_frame_release(
+	struct paint_frame *frame)
+{
+	if (frame == NULL || --frame->refs > 0)
+		return;
+	paint_release(&frame->list);
+	if (frame->tree != NULL) {
+		layout_release(frame->tree);
+		free(frame->tree);
+	}
+	free(frame);
+}
 
 /*
  * Builds the display list of a laid out page.
@@ -237,6 +255,7 @@ paint_build(
 	memset(list, 0, sizeof(*list));
 	wb_arena_init(&list->arena, 0);
 	wb_vector_init(&list->items, sizeof(struct paint_item));
+	wb_vector_init(&list->frames, sizeof(struct paint_frame *));
 	list->width = tree->viewport_width;
 	list->height = tree->document_height;
 	if (list->height < tree->viewport_height)
@@ -248,6 +267,7 @@ paint_build(
 	walk.text = tree->text;
 	walk.source = tree;
 	walk.canvas_box = list_canvas(tree, &list->canvas_color);
+	list->canvas_set = walk.canvas_box != NULL;
 	walk.viewport_width = tree->viewport_width;
 	walk.viewport_height = tree->viewport_height;
 
@@ -355,6 +375,16 @@ void
 paint_release(
 	struct paint_list *list)
 {
+	struct paint_frame **frame;
+	size_t index;
+
+	/* The frames' documents the items point into. */
+	for (index = 0; index < list->frames.count; index++) {
+		frame = wb_vector_at(&list->frames, index);
+		paint_frame_release(*frame);
+	}
+	wb_vector_release(&list->frames);
+
 	/* The items and the glyphs they point at. */
 	wb_vector_release(&list->items);
 	wb_arena_release(&list->arena);
@@ -1680,6 +1710,70 @@ list_replaced(
 	list_box_background(walk, &placed);
 	list_borders(walk, &placed);
 	list_image(walk, box, placed.x + box->border[CSS_LEFT] + box->padding[CSS_LEFT], placed.y + box->border[CSS_TOP] + box->padding[CSS_TOP]);
+
+	/* The document an <iframe> shows. */
+	list_frame(walk, box, placed.x + box->border[CSS_LEFT] + box->padding[CSS_LEFT], placed.y + box->border[CSS_TOP] + box->padding[CSS_TOP]);
+}
+
+/*
+ * Paints the document an <iframe> shows into its content box (x and y
+ * are its top left): the frame's own list, moved there, inside a clip of
+ * the content box, over the canvas color the frame's document gave.
+ */
+static void
+list_frame(
+	struct list_walk *walk,
+	const struct layout_box *box,
+	layout_unit x,
+	layout_unit y)
+{
+	const struct dom_element *element;
+	struct paint_frame *frame;
+	struct paint_item item;
+	struct paint_item *source;
+	struct list_area area;
+	size_t index;
+	int error;
+
+	if (walk->error != 0 || walk->source == NULL || walk->source->frame_paint == NULL || box->node == NULL ||
+	    box->node->type != DOM_ELEMENT || box->width <= 0 || box->height <= 0)
+		return;
+	element = (const struct dom_element *)box->node;
+	if (element->ns != DOM_NS_HTML || element->tag != DOM_TAG_IFRAME)
+		return;
+	frame = NULL;
+	error = walk->source->frame_paint(walk->source->image_context, element, box->width, box->height, box->style.zoom_eff, &frame);
+	if (error != 0) {
+		walk->error = error;
+		return;
+	}
+	if (frame == NULL)
+		return;
+	error = wb_vector_push(&walk->list->frames, &frame);
+	if (error != 0) {
+		paint_frame_release(frame);
+		walk->error = error;
+		return;
+	}
+
+	/* Clipped to the content box, the canvas first, the items after it. */
+	area.x = x;
+	area.y = y;
+	area.width = box->width;
+	area.height = box->height;
+	list_clip_rect(walk, &area);
+	if (frame->list.canvas_set)
+		list_rect(walk, x, y, box->width, box->height, frame->list.canvas_color);
+	for (index = 0; index < frame->list.items.count && walk->error == 0; index++) {
+		source = wb_vector_at(&frame->list.items, index);
+		item = *source;
+		item.x += x;
+		item.y += y;
+		error = wb_vector_push(&walk->list->items, &item);
+		if (error != 0)
+			walk->error = error;
+	}
+	list_unclip(walk);
 }
 
 /*
