@@ -110,4 +110,4 @@ header の comment への持ち越し（p035 向け）: (a) `cryc_signature_veri
 
 未実施: `cryc_signature_verify` の ct の試験（公開の値だけ）、性能の測定、aarch64 Windows の実行（build のみ）、32 bit の size_t の機械、RSA-PSS の SHA-384 の Wycheproof（file が無く、CAVP の SigVerPSS で確認）、x509-limbo の FAILURE 事例の全件の署名の確かめ（8 件に 1 件に絞った。時間の上限のため）。
 
-commit: 1568f960ad（実装と試験）、最終版は下の commit。
+commit: 1568f960ad（実装と試験）、03ef02fbdf（`rsa_alg` の代入の体裁の直し、この結果の節、ws.md の行）。
