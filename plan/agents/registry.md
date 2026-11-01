@@ -9,8 +9,8 @@
 | P2 | phase-runner-high | ws322 p002 VF2 の VPU の probe (q1852-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 21:35 起動、VF2） | 5b8debe04（merge 261624739） |
 | P3 | phase-runner-high | ws291 p027 の回帰 amd64・Venus (q1859-i01) | `/home/awe/zedBSD-worktrees/p3-ws291reg` / `agent/p3-ws291reg`（候補 60cf76c13） | in-progress（2026-11-01 22:16 起動、10.0.10.3） | d32bcb9f5（merge 9b865b038） |
 | P5 | phase-runner-high | ws334 p026 libmedia の Windows (q1853-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 21:45 起動） | 30bd64129（merge f5aad61a8） |
-| P6 | phase-runner-low | ws335 p007 整数と Montgomery (q1851-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 21:33 起動） | 556988325（merge 72bb7908a） |
-| P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | in-progress（2026-11-01 22:07 起動、QEMU） | — |
+| P6 | phase-runner-low | ws335 p010 P-256・P-384 (q1861-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 22:26 起動） | 34e9c77f1（merge 3666e69f0） |
+| P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |
 | Sonnet | phase-runner-low | ws334 p024 (q1855-i01) | `/home/awe/zedBSD-worktrees/s-ws334-p024` / `agent/s-ws334-p024` | in-progress（2026-11-01 21:48 起動） | — |
 | Sonnet | phase-runner-low | ws334 p030 (q1857-i01) | `/home/awe/zedBSD-worktrees/s-ws334-p030` / `agent/s-ws334-p030` | in-progress（2026-11-01 21:48 起動） | — |
 | P4 | phase-runner-high | ws291 p027 の回帰 arm64・riscv64 (q1860-i01) | `/home/awe/zedBSD-worktrees/p4-ws291reg` / `agent/p4-ws291reg`（候補 60cf76c13） | in-progress（2026-11-01 22:16 起動、Pi 5） | 42ae7d081（merge b29f3a5ae） |

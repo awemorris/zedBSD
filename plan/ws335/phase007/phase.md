@@ -2,7 +2,7 @@
 
 # ws335-p007: 固定幅の整数と Montgomery の算術
 
-Status: 実装済み・試験 PASS（2026-11-01 22:21 P6。cleared は Q1）。前: planned（2026-11-01 p001 が作成。起動は Q1。依存: p002）
+Status: cleared（2026-11-01 22:26 Q1、main 3666e69f0。main で run-unit all・run-ct bn PASS を流し直した）。前: 実装済み・試験 PASS（2026-11-01 22:21 P6。cleared は Q1）。前: planned（2026-11-01 p001 が作成。起動は Q1。依存: p002）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -111,3 +111,8 @@ git diff --check
 未実施: 性能の測定（mont_mul は O(limbs²)、mont_exp は 2048 bit で 17 bit の指数のみ測らず）、長い指数の mont_exp の 2048 bit 以上での参照との照合（参照の剰余が遅いため、24 limb 以上は指数 8 byte 未満（24〜64 limb は 2 byte の乱数、128・256 limb は 2 byte の乱数と 0x010001）。P-256・P-384 の p・n の p-2 は 32〜48 byte の指数で Fermat の性質のみ）、`significant` が size_t の溢れに近い大きさの init、32 bit の size_t の機械での実行、aarch64 Windows の実行（build のみ、check-skeleton）、実機・QEMU（範囲外）。
 
 commit: 下の ws.md の表と同じ commit。
+
+### Q1 の判断（2026-11-01 22:26）
+
+- header の cryc_bn_reduce_once の comment（FIPS 186-5 6.4.2 の step 3 の E か step 4 の e か）は p035 の header の持ち越しの直しで仕様と照らして直す。
+

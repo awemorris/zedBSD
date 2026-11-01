@@ -29,10 +29,10 @@
 | P1 | q1854 `p1-ws324` | [WS324](ws324/ws.md) p001: RTX の NVENC（H.264・H.265 encode）と NVDEC（H.265 decode）の調べと設計。WS291 p027 は 22:10 にラップアップ（branch agent/p1-ws291p026 は回帰の後に merge） |
 | P2 | q1852 `p2-ws322` | [WS322](ws322/ws.md) p002: VF2 の VPU（Wave5）の glue と core の boot、firmware、実機の probe（p001 の設計は 21:35 に cleared） |
 | P5 | q1853 `p5-ws334b` | [WS334](ws334/ws.md) p026: Windows 版のブラウザ、libmedia の Windows（p025・p023 は cleared） |
-| P6 | q1851 `p6-ws335b` | [WS335](ws335/ws.md) p007: 固定幅の整数と Montgomery の算術（p004 AES・p005 AES-GCM は cleared） |
+| P6 | q1861 `p6-ws335b` | [WS335](ws335/ws.md) p010: P-256・P-384 の群（p004・p005・p007 は cleared） |
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
-| P7 | q1858 `p7-ws334g` | [WS334](ws334/ws.md) p027 の zedBSD の guest（QEMU）の確かめ |
-| Sonnet ×2 | q1855・q1857（q1856 p027 は返却） | [WS334](ws334/ws.md) p024（HTTP の cache）・p027（UI の準備）・p030（OpenSSL の Windows）を並べて（2026-11-01 ユーザー） |
+| P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
+| Sonnet ×2 | q1855・q1857（q1856 p027 は cleared） | [WS334](ws334/ws.md) p024（HTTP の cache）・p027（UI の準備）・p030（OpenSSL の Windows）を並べて（2026-11-01 ユーザー） |
 | P3 | q1859 `p3-ws291reg` | [WS291](ws291/ws.md) p027 の回帰（RTX と QEMU の Venus）、候補 60cf76c13 |
 | P4 | q1860 `p4-ws291reg` | [WS291](ws291/ws.md) p027 の回帰（Pi 5 の arm64 と VF2 の riscv64） |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
@@ -112,7 +112,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1861 · WS341 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1862 · WS341 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

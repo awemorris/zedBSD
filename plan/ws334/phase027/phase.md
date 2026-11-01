@@ -3,7 +3,7 @@
 # ws334-p027 統合: browser の UI の準備（browser_main、libkeiland の 3 つの口、CPU の道、鍵の text、時計、files の backend の場所）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §4.1・§4.5（header の追加）・§4.6・§4.8・§6.5。
-- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1856-i01、Sonnet。結果は末尾）。前: planned（2026-11-01 p002 で作成）。
+- 状態: cleared（2026-11-01 22:26 Q1、main f58a8d93f。P7 の guest の確かめ（QEMU の Venus）PASS: Vulkan の道・--no-gpu の CPU の道で頁が出る、localStorage が browser と guest の再起動の後に残る、files・terminal・settings が起動）。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1856-i01、Sonnet。結果は末尾）。前: planned（2026-11-01 p002 で作成）。
 - 依存: p023。
 - 担当の想定: Opus（phase-runner）を 1 回。zedBSD の browser の挙動を変えない（`--no-gpu` を足すだけ）。
 
