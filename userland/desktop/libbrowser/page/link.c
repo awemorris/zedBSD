@@ -28,6 +28,7 @@
 static int link_resolve(const char *base, const char *href, struct net_url *target);
 static int link_named(const char *scheme, const char *name);
 static int link_base_local(const char *base);
+static int link_drive_path(const char *href);
 static const char *link_file_mime(const char *path);
 static const struct layout_box *link_image_box(const struct layout_tree *tree, const struct layout_box *box, layout_unit x, layout_unit y, int depth);
 
@@ -454,7 +455,11 @@ cleanup:
 	return 0;
 }
 
-/* Parses a target against a location (an absolute path is a file: URL; anything else a URL). */
+/*
+ * Parses a target against a location (an absolute path is a file: URL;
+ * anything else a URL).  A local page's target that is a drive's path is
+ * that file's URL.
+ */
 static int
 link_resolve(
 	const char *base,
@@ -465,6 +470,21 @@ link_resolve(
 	struct net_url base_url;
 	int local;
 	int error;
+
+	/*
+	 * A local page's target that is a drive's path (the location
+	 * page_resolve_location writes for a file on Windows) names that file,
+	 * not a URL of a one-letter scheme.
+	 */
+	if (link_drive_path(href) && link_base_local(base)) {
+		/* The path's own file: URL, which needs no base. */
+		wb_buffer_init(&base_text);
+		error = net_url_from_file_path(href, &base_text);
+		if (error == 0)
+			error = net_url_parse(wb_buffer_string(&base_text), base_text.length, NULL, target);
+		wb_buffer_release(&base_text);
+		return error;
+	}
 
 	/* The base as a URL. */
 	wb_buffer_init(&base_text);
@@ -509,6 +529,27 @@ link_resolve(
 }
 
 /*
+ * Tells whether a target is an absolute local path that starts with a
+ * drive.  A path that starts at a separator (every absolute path on POSIX,
+ * a UNC path on Windows) is also a URL's path, and is parsed as one.
+ */
+static int
+link_drive_path(
+	const char *href)
+{
+	/* Not an absolute local path of this system. */
+	if (!wb_os_path_is_absolute(href))
+		return 0;
+
+	/* A separator first. */
+	if (href[0] == '/' || href[0] == '\\')
+		return 0;
+
+	/* Succeeded: a drive's path. */
+	return 1;
+}
+
+/*
  * Tells whether a page's location is a local file: an absolute path (as
  * link_resolve takes it) or a file: URL.
  */
@@ -522,7 +563,7 @@ link_base_local(
 	/* A path is a local file; a location that does not parse is not. */
 	if (base == NULL)
 		return 0;
-	if (base[0] == '/')
+	if (wb_os_path_is_absolute(base))
 		return 1;
 	if (net_url_parse(base, strlen(base), NULL, &url) != 0)
 		return 0;
