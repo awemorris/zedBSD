@@ -36,6 +36,7 @@
 | P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
 | P8 | q1873 `p8-menutest` | menuconfig の host 試験（MAC-T001 で止まる）を直す |
 | Sonnet ×3 | q1876・q1877・q1878 | [WS335](ws335/ws.md) p009 Ed25519・p016 DER と PEM・p025 TLS の定数と読み書き（2026-11-02 ユーザー） |
+| Sonnet | q1879 `s-ws324-p006b` | [WS324](ws324/ws.md) p006b: H.265 の解析の nal・scaling・vui |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
 - 起動しない pending: q1836（WS336 p009 ssh-auth）。q1837（WS334 p025）は P5 の q1843 へ、q1835（WS335 p004）は P6 の q1844 へ。
@@ -112,7 +113,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-390 · q1879 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-390 · q1880 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

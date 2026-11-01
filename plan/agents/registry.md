@@ -23,3 +23,4 @@
 | Sonnet | phase-runner-low | ws335 p009 (q1876-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p009` / `agent/s-ws335-p009` | in-progress（2026-11-02 00:24 起動） | — |
 | Sonnet | phase-runner-low | ws335 p016 (q1877-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p016` / `agent/s-ws335-p016` | in-progress（2026-11-02 00:24 起動） | — |
 | Sonnet | phase-runner-low | ws335 p025 (q1878-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p025` / `agent/s-ws335-p025` | in-progress（2026-11-02 00:24 起動） | — |
+| Sonnet | phase-runner-low | ws324 p006b (q1879-i01) | `/home/awe/zedBSD-worktrees/s-ws324-p006b` / `agent/s-ws324-p006b` | in-progress（2026-11-02 00:33 起動） | — |
