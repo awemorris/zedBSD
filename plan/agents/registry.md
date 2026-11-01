@@ -11,6 +11,9 @@
 | P5 | phase-runner-high | ws334 p026 libmedia の Windows (q1853-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 21:45 起動） | 30bd64129（merge f5aad61a8） |
 | P6 | phase-runner-low | ws335 p007 整数と Montgomery (q1851-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 21:33 起動） | 556988325（merge 72bb7908a） |
 | P7 | phase-runner-high | VF2 の desktop の計測 (q1848-i01) | `/home/awe/zedBSD-worktrees/p7-vf2desk` / `agent/p7-vf2desk` | 返却（2026-11-01 21:35） | — |
+| Sonnet | phase-runner-low | ws334 p024 (q1855-i01) | `/home/awe/zedBSD-worktrees/s-ws334-p024` / `agent/s-ws334-p024` | in-progress（2026-11-01 21:48 起動） | — |
+| Sonnet | phase-runner-low | ws334 p027 (q1856-i01) | `/home/awe/zedBSD-worktrees/s-ws334-p027` / `agent/s-ws334-p027` | in-progress（2026-11-01 21:48 起動） | — |
+| Sonnet | phase-runner-low | ws334 p030 (q1857-i01) | `/home/awe/zedBSD-worktrees/s-ws334-p030` / `agent/s-ws334-p030` | in-progress（2026-11-01 21:48 起動） | — |
 | P4 | phase-runner-high | BUG-387 の残り (q1850-i01) | `/home/awe/zedBSD-worktrees/p4-bug387` / `agent/p4-bug387` | 返却（2026-11-01 21:28） | 42ae7d081（merge b29f3a5ae） |
 
 - 2026-11-01 20:20 の割り振り（ユーザーの指示）: P1 は RTX、P2 は VF2、P3 は Pi 5 の作業（どれも WS291 の描画の速さ、Q1 が選んだ）。Bug の修正は P4。

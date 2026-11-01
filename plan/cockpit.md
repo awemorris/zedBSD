@@ -16,6 +16,8 @@
 | P7 | — | VF2 の desktop の描画の速さ | 返却（21:35）。type 60・61 fps（10/22 は 41〜44）、output 43〜47（32〜41）、打鍵から表示 17 ms（30）、launch・drag・home・wiseview は 60 前後 | 未割当 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |
 
+- Sonnet ×3（WS334、2026-11-01 21:48〜）: p024 永続の HTTP の cache（q1855）、p027 browser の UI の準備（q1856）、p030 OpenSSL の Windows の build（q1857）。
+
 ## WS ごとの進捗
 
 （2026-11-01 10:29 クリア。これより後の進捗をここに書く。各 WS の状態は [master.md](master.md) と各 ws.md）
