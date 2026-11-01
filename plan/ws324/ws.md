@@ -37,11 +37,11 @@
 | p002 | Vulkan の header の段 1（H.265 decode の選び） | Q324-2（Q1 の toolchain の許可） |
 | p003 | Vulkan の header の段 2（`vulkan_core.h` を 1.4.309 で作り直し、KHR の encode） | p002、Q324-2 |
 | p004 | libvulkan の H.265 decode の転送、capset の bit 2、video の門を bit ごとに | p002、Q324-3 |
-| [p005](phase005/phase.md) | nvrtx の H.265 decode（NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離） | p004（libvulkan の転送は P2 が ws322-p005 で作った） — in-progress（P1 q1917、2026-11-02 08:20: 実装・host 試験・build、実機の H.264 の非退行 MATCH。H.265 は DXVA の形で NVDEC が走るが絵は誤り、p007 へ。判定は Q1） |
+| [p005](phase005/phase.md) | nvrtx の H.265 decode（NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離） | p004（libvulkan の転送は P2 が ws322-p005 で作った） — in-progress（P1 q1917、2026-11-02 08:20: 実装・host 試験・build、実機の H.264 の非退行 MATCH。H.265 は DXVA の形で NVDEC が走るが絵は誤り、p007 へ。判定は Q1） — cleared（2026-11-02 08:22 Q1、main で hevc 157・h265 wire 54・nvdec 88 PASS、vmunix warning 0、RTX で H.264 の回帰 PASS。H.265 の絵の正しさは p007） |
 | p006a | H.265 の解析の設計（標準廉価実装手順）と header の配置（段 2） | Q324-1（p002 は要らない: host の Vulkan の header で試験） |
 | p006b〜h | （上の Phase の表へ移した、2026-11-02 p006a 段 2。Q-B の A） | — |
 | p006i | vkvideo-probe の H.265（前の案の p006e）— P2 が ws322-p006 で作る（2026-11-02 07:22 Q1、WS322 と共有の probe） | p006h、p002 |
-| p007 | H.265 decode の実機の debug | p005、p006i、実機 |
+| p007 | H.265 decode の実機の debug | p005、p006i、実機 — in-progress（P1 q1922） |
 | p008a | libvulkan の encode の転送（queue と H.264、命令の番号、video の query pool、capset の bit 3） | p003、Q324-3 |
 | p008b | libvulkan の encode の転送（H.265、capset の bit 4） | p008a |
 | p009b | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode、時間の上限） | p009a、Q324-4 |

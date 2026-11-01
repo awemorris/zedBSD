@@ -2,7 +2,7 @@
 
 # ws324-p005 nvrtx の H.265 decode: NVDEC の HEVC、executor、行の揃え 64、timeout の後の隔離
 
-Status: in-progress（2026-11-02 08:20 P1、q1917-i01: 実装・host 試験・build・実機の H.264 の非退行まで。受け入れの判定と cleared は Q1。H.265 の正しい絵は p007）
+Status: cleared（2026-11-02 08:22 Q1、H.265 の絵の正しさは p007）。前: in-progress（2026-11-02 08:20 P1、q1917-i01: 実装・host 試験・build・実機の H.264 の非退行まで。受け入れの判定と cleared は Q1。H.265 の正しい絵は p007）
 
 - WS: [WS324](../ws.md)。設計: [design.md](../design.md) §3.2・§3.4・§8.1〜§8.6・§9・§10・§12 R3・R4・R12・§13・§14.1 T1・T2・T4・T7・§15 の p005。
 - 基点: main `5feabb6d5`、途中で main `12f6cb1e1`（P2 の libvulkan の H.265 の転送）へ fast-forward、後に main `245fa7cb9`（vkvideo-probe の H.265）を merge（`e534413ad`）。worktree `/home/awe/zedBSD-worktrees/p1-ws324`、branch `agent/p1-ws324`。
