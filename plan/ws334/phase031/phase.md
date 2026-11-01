@@ -75,3 +75,25 @@ zip の中身（`OmniGrammaton-0.1.0-win64.zip`、23 file、時刻は全部 1980
 
 - 配る OmniGrammaton.exe（今 20.8 MB、-g の debug の情報を含む）は debug の情報を外し、debug の情報は別の file（.pdb など）に分けて build の出力に残す。zip には入れない。q1875 の Sonnet で直す。
 
+
+### 追補（q1875）: 配る .exe から debug の情報を外す（2026-11-02）
+
+p031 の「気づいた事」と Q1 の判断（配る OmniGrammaton.exe は debug の情報を外し、別の file に残す）を実装した。
+
+- 変えた file: `apps/browser-win32/Makefile` だけ。program は `build/.../obj/OmniGrammaton-full.exe`（`-g` 込み）に link し、`<triple>-objcopy` で 2 つに分ける: `--only-keep-debug` で `OmniGrammaton.dbg`、`--strip-debug --add-gnu-debuglink=OmniGrammaton.dbg` で `OmniGrammaton.exe`。両方とも build の出力の直下。dist・zip は今まで通り `OmniGrammaton.exe` だけを使うので、zip に .dbg は入らない（`zip-contents.txt` は 23 file のまま）。`program`（と `all`）が .dbg も作る。
+- 方式の選択: objcopy。lld の `--pdb` は CodeView だけを PDB にする。この tree は DWARF（`-g`）で build しており、小さな試験では publics（名前だけ）の PDB しかできず、行の情報が無く、.exe の DWARF も残った。objcopy の方式は DWARF の全部（関数・行）を .dbg に移し、.exe に `.gnu_debuglink` が付く。`--strip-all` ではなく `--strip-debug`（COFF の symbol table は残す。1 MB ほど大きいが、.dbg が無くても stack に関数名が出る）。
+- 大きさ（`cross-build.sh` の出力、build/tmp/ws334-cross）:
+
+| | OmniGrammaton.exe（配る物） | 以前（-g 込み） | OmniGrammaton.dbg | zip |
+| --- | --- | --- | --- | --- |
+| win64 | 9,197,568 bytes | 20,821,504 | 12,696,064 | 6,150,454（以前 9.87 MB） |
+| winarm64 | 7,230,976 bytes | 19,172,352 | 12,997,120 | 5,608,889 |
+
+  配る .exe に `.debug_*` の section は 0 個、`.gnu_debuglink` が 1 つ。
+- 確かめ:
+  - `timeout 5400 flock /tmp/zedbsd-wine.lock sh plan/ws334/tests/cross-build.sh`: `cross-build: PASS`（両 arch で zip の中身が 23 file のまま、同じ directory から作り直すと同じ bytes、import は system の DLL 24 個と遅延の vulkan-1.dll だけ、icon 8 枚）。
+  - `llvm-symbolizer --obj=OmniGrammaton.dbg 0x140001480`（win64）が `wWinMain` と `apps/browser-win32/main.c:36` を返した。winarm64 の .dbg でも関数名と行が引けた。
+  - `sh plan/ws334/tests/zip-wine.sh`: `zip-wine: PASS`（debuglink 付きの .exe が Wine で zip から展開して起動し start.html を描いた）。
+  - `sh plan/ws334/tests/wine-run.sh`: `wine-run: PASS`。
+- 未実施: 本物の Windows での実行（debuglink の section は loader が見ない data）、winarm64 の .exe の実行、Windows の debugger で .dbg を使う事（WinDbg は PDB を使う。.dbg は gdb・lldb・llvm-symbolizer 向け）、objcopy の出力の決定性の単独の確認（zip が同じ bytes になる事で間接的に確認）。
+- Wine の試験は外側の flock なしで流した（`zip-wine.sh`・`wine-run.sh` は中で各 wine が lock を取る）。
