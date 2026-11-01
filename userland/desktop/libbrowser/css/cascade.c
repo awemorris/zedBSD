@@ -682,6 +682,28 @@ css_engine_parse_media(
 	return 0;
 }
 
+/* Tells whether any sheet has an @keyframes rule of a name (an animation of that name runs). */
+int
+css_engine_has_keyframes(
+	const struct css_engine *engine,
+	const struct vm_string *name)
+{
+	const struct cascade_sheet *sheets;
+	size_t index;
+	size_t at;
+
+	sheets = engine->sheets.items;
+	for (index = 0; index < engine->sheets.count; index++) {
+		if (sheets[index].sheet == NULL)
+			continue;
+		for (at = 0; at < sheets[index].sheet->keyframe_count; at++) {
+			if (vm_string_equal(sheets[index].sheet->keyframes[at].name, name))
+				return 1;
+		}
+	}
+	return 0;
+}
+
 /*
  * Sets the zoom a whole document is under (a frame whose element is zoomed: the lengths of the document are scaled by it, and its
  * viewport in CSS pixels is the frame's size divided by it).

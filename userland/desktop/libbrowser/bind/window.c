@@ -2167,6 +2167,8 @@ window_trace(
 		vm_heap_mark(heap, &window->location->cell);
 	if (window->follow_hyperlink != NULL)
 		vm_heap_mark(heap, window->follow_hyperlink);
+	if (window->animation_hook != NULL)
+		vm_heap_mark(heap, window->animation_hook);
 	if (window->listeners != NULL)
 		vm_heap_mark(heap, window->listeners);
 	bind_timers_trace(heap, window);

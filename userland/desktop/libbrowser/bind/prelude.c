@@ -44,6 +44,7 @@ static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_va
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_animation_hook(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_frame_hold(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -502,6 +503,72 @@ prelude_view_transition(
 	if (window->host.view_transition(window->host.context, (int)step) != 0)
 		*result = VM_VALUE_TRUE;
 	return 0;
+}
+
+/* setAnimationHook(function): the function bind_animation_sync calls (op, element, name, delay, duration, iterations). */
+static int
+prelude_set_animation_hook(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value hook;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	hook = js_argument(args, count, 0);
+	if (!vm_value_is_callable(hook))
+		return vm_throw_type_error(realm, "setAnimationHook: parameter 1 is not a function.");
+	window = bind_window_of(realm);
+	window->animation_hook = vm_value_as_cell(hook);
+	return 0;
+}
+
+/*
+ * Tells the prelude about the animations of the elements after a layout: op 0 starts a round, 1 names an element that has an
+ * animation (its name, and its delay, duration and iteration count in milliseconds and times), 2 ends the round (the elements not named stop).
+ */
+int
+bind_animation_sync(
+	struct bind_window *window,
+	int op,
+	struct dom_element *element,
+	const struct vm_string *name,
+	double delay,
+	double duration,
+	double iterations)
+{
+	struct vm_realm *realm;
+	vm_value arguments[6];
+	vm_value returned;
+	int status;
+
+	realm = window->realm;
+	if (window->animation_hook == NULL || window->detached)
+		return 0;
+	arguments[0] = vm_value_int32(op);
+	arguments[1] = VM_VALUE_UNDEFINED;
+	arguments[2] = VM_VALUE_UNDEFINED;
+	if (element != NULL) {
+		status = bind_wrap(window, &element->node, &arguments[1]);
+		if (status != 0)
+			return status;
+	}
+	if (name != NULL)
+		arguments[2] = vm_value_cell((struct vm_cell *)name);
+	arguments[3] = vm_value_number(delay);
+	arguments[4] = vm_value_number(duration);
+	arguments[5] = vm_value_number(iterations);
+	status = vm_call(realm, vm_value_cell(window->animation_hook), VM_VALUE_UNDEFINED, arguments, 6, &returned);
+	if (status == VM_THROWN) {
+		bind_report_exception(window, realm->exception);
+		realm->exception = VM_VALUE_UNDEFINED;
+		return 0;
+	}
+	return status;
 }
 
 /* frameHold(on): a document in a frame holds its painting (the page keeps showing the last one) or lets it go. */
@@ -1415,6 +1482,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "viewTransition", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setAnimationHook", 1, prelude_set_animation_hook, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setAnimationHook", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "frameHold", 1, prelude_frame_hold, NULL, &function);
 	if (status == 0)
