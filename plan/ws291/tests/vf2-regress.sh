@@ -10,13 +10,16 @@
 # bin/keiland-shot, bin/vkmatrix, bin/vkcoherency, bin/vkcompute and the dynamic libraries).  The board's kernel is kept
 # on the board as vmunix.OLD (when not kept already: the original) and read back (OUT/board-vmunix); BUILD's kernel is
 # put in and the board power-cycled (plan/tools/vf2/run.sh) unless it runs it already; the programs go to the user's
-# ~/p7 (the board's system files are not changed: they run with LD_LIBRARY_PATH) and run as root.  The kernel lines
+# ~/p7 or VF2_DIR (the board's system files are not changed: they run with LD_LIBRARY_PATH) and run as root.  The kernel lines
 # each step added (faults, lost sessions, resets) and whether the board restarted in between (the newest of the board's
 # boot logs, /boot/boot0/log, at the start and the end) are kept.  KEEP=1 leaves BUILD's kernel on the board; otherwise the board's own kernel is put back,
 # checked by reading it back, and the board power-cycled.  OUT/summary.txt holds what is printed.  The password comes
 # from the environment, never from this file.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
+# VF2_DIR: the directory the programs go to, under the user's home unless absolute (p7 by default; the board's
+# root file system is small, /tmp is a tmpfs).
+W=${VF2_DIR:-p7}
 out=${1:?usage: vf2-regress.sh OUT BUILD}
 build=${2:?the build directory}
 kernel=${KERNEL:-$build/vmunix}
@@ -61,12 +64,15 @@ else
 fi
 say "kernel $(cksum < "$kernel" | cut -d' ' -f1) on the board: $(b 'cksum /boot/boot0/vmunix; sysctl hw.gpu.powervr.stages' 2>&1 | tr '\n' ' ')"
 
-# The programs and the libraries in the user's ~/p7.
-b 'mkdir -p p7/bin p7/lib p7/run && chmod 700 p7/run'
+# The programs and the libraries in VF2_DIR.
+b "mkdir -p $W/bin $W/lib $W/run && chmod 700 $W/run"
 bcp "$build/bin/wayland" "$build/bin/files" "$build/bin/terminal" "$build/bin/keiland-shot" "$build/bin/vkmatrix" \
-    "$build/bin/vkcoherency" "$build/bin/vkcompute" "$VF2_HOST:p7/bin/" &&
-    bcp "$build"/dynamic/*.so "$VF2_HOST:p7/lib/" || say "FAIL the files were not copied"
-H=$(b 'echo $HOME')/p7
+    "$build/bin/vkcoherency" "$build/bin/vkcompute" "$VF2_HOST:$W/bin/" &&
+    bcp "$build"/dynamic/*.so "$VF2_HOST:$W/lib/" || say "FAIL the files were not copied"
+case $W in
+/*) H=$W ;;
+*) H=$(b 'echo $HOME')/$W ;;
+esac
 
 # The board's side: each step's verdict line, and the kernel lines it added.
 cat > "$out/board.sh" <<EOF
@@ -107,12 +113,12 @@ grep -E 'KWL (FAILED|VULKAN_ERROR)' \$H/desk-wayland.log | head -3 | sed 's/^/de
 grep -F -x -v -f \$H/r-desk.before \$H/r-desk.after | grep -v dw-mmc | grep -iE 'fault|lost|fatal|panic|reset|quarantine|hang|abandon|refus|fail' | head -5 | sed "s/^/desk kernel /"
 echo "end dmesg \$(lines) lines, boot \$(boot)"
 EOF
-bcp "$out/board.sh" "$VF2_HOST:p7/regress.sh" || say "FAIL the board's script was not copied"
+bcp "$out/board.sh" "$VF2_HOST:$W/regress.sh" || say "FAIL the board's script was not copied"
 printf '%s\n' "$VF2_PASSWORD" | BT=6000 b "sudo -S sh $H/regress.sh" > "$out/board.txt" 2>&1
 sed 's/^\[sudo\][^:]*: //' "$out/board.txt" | tee -a "$summary"
-bcp "$VF2_HOST:p7/desk.png" "$out/" > /dev/null 2>&1 && say "desk png $(cksum < "$out/desk.png")"
-for f in vkmatrix vkmatrix-p3 vkmatrix-r3 vkcoherency vkcompute; do bcp "$VF2_HOST:p7/r-$f.txt" "$out/" > /dev/null 2>&1; done
-bcp "$VF2_HOST:p7/desk-wayland.log" "$out/" > /dev/null 2>&1
+bcp "$VF2_HOST:$W/desk.png" "$out/" > /dev/null 2>&1 && say "desk png $(cksum < "$out/desk.png")"
+for f in vkmatrix vkmatrix-p3 vkmatrix-r3 vkcoherency vkcompute; do bcp "$VF2_HOST:$W/r-$f.txt" "$out/" > /dev/null 2>&1; done
+bcp "$VF2_HOST:$W/desk-wayland.log" "$out/" > /dev/null 2>&1
 say "after $(b 'dmesg | wc -l; cksum /boot/boot0/vmunix' 2>&1 | tr '\n' ' ')"
 
 if [ "${KEEP:-0}" = 1 ]; then
