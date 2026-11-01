@@ -408,6 +408,8 @@ page_start_scripts(
 	host.node_box = page_node_box;
 	host.pseudo_box = page_pseudo_box;
 	host.frame_capture = page_frame_capture;
+	host.frame_view_transition = page_frame_view_transition;
+	host.frame_view_transition_duration = page_frame_view_transition_duration;
 	host.node_rects = page_node_rects;
 	host.grid_tracks = page_grid_tracks;
 	host.document_size = page_document_size;

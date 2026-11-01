@@ -34,6 +34,10 @@ struct frame_load {
 struct frame_cache_entry {
 	const struct dom_element *element;
 	struct paint_frame *frame;
+	/* The view transition of the frame's document (see page.h's transition), and how many times it changed. */
+	struct layout_transition transition;
+	int on;
+	unsigned generation;
 };
 
 static void frame_load_release(struct frame_load *load);
@@ -89,8 +93,10 @@ page_frames_release(
 	wb_vector_release(&page->frame_loads);
 
 	/* The painted frames the page kept. */
-	for (index = 0; index < page->frame_cache.count; index++)
+	for (index = 0; index < page->frame_cache.count; index++) {
 		paint_frame_release(((struct frame_cache_entry *)wb_vector_at(&page->frame_cache, index))->frame);
+		layout_transition_release(&((struct frame_cache_entry *)wb_vector_at(&page->frame_cache, index))->transition);
+	}
 	wb_vector_release(&page->frame_cache);
 
 	/* Succeeded: loader completion cannot call this Page again. */
@@ -1301,6 +1307,83 @@ frame_cache_find(
 	return NULL;
 }
 
+/* Finds the entry the page keeps for an iframe, making an empty one when it has none (NULL when memory runs out). */
+static struct frame_cache_entry *
+frame_cache_get(
+	struct page *page,
+	const struct dom_element *element)
+{
+	struct frame_cache_entry *entry;
+	struct frame_cache_entry made;
+
+	entry = frame_cache_find(page, element);
+	if (entry != NULL)
+		return entry;
+	memset(&made, 0, sizeof(made));
+	made.element = element;
+	if (wb_vector_push(&page->frame_cache, &made) != 0)
+		return NULL;
+	return frame_cache_find(page, element);
+}
+
+/*
+ * Lays out the document an <iframe> element shows in a viewport of a size in the frame's own pixels device pixels
+ * (zoom is the factor the frame's document is under): a new tree the caller owns, or NULL when the frame has no
+ * document or cascade yet.  A transition given is the one the tree is built with.
+ */
+static int
+frame_tree(
+	struct page *page,
+	const struct dom_element *element,
+	layout_unit width,
+	layout_unit height,
+	float zoom,
+	const struct layout_transition *transition,
+	struct layout_tree **out)
+{
+	struct bind_window *window;
+	struct css_engine *engine;
+	struct layout_tree *tree;
+	int viewport_width;
+	int viewport_height;
+	int status;
+
+	*out = NULL;
+	window = bind_frame_child(&element->node);
+	if (window == NULL || window->detached || window->document == NULL)
+		return 0;
+	status = bind_window_child_styles(window, &engine, &viewport_width, &viewport_height);
+	if (status != 0 || engine == NULL || window->detached)
+		return 0;
+
+	/* No size given: the frame's own, in its unzoomed pixels, under the zoom it has. */
+	if (zoom <= 0.0f)
+		zoom = css_engine_base_zoom(engine);
+	if (layout_to_px(width) > 0)
+		viewport_width = (int)layout_to_px(width);
+	else
+		viewport_width = (int)((float)viewport_width * zoom);
+	if (layout_to_px(height) > 0)
+		viewport_height = (int)layout_to_px(height);
+	else
+		viewport_height = (int)((float)viewport_height * zoom);
+	tree = calloc(1, sizeof(*tree));
+	if (tree == NULL)
+		return ENOMEM;
+	css_engine_set_base_zoom(engine, zoom);
+	status = layout_build(tree, engine, &page->text, window->document, page_image_of, page_image_by_url, page,
+	    viewport_width, viewport_height, 0, 0, transition);
+	if (status != 0) {
+		layout_release(tree);
+		free(tree);
+		return 0;
+	}
+	tree->image_variant = page_image_variant;
+	tree->frame_paint = page_frame_paint;
+	*out = tree;
+	return 0;
+}
+
 /*
  * Lays out and paints the document an <iframe> element shows in a viewport of a size, and keeps the result in the
  * page's cache (NULL out when the frame has no document or cascade yet; otherwise a reference the caller releases).
@@ -1314,43 +1397,22 @@ frame_make(
 	float zoom,
 	struct paint_frame **out)
 {
-	struct bind_window *window;
-	struct css_engine *engine;
 	struct layout_tree *tree;
 	struct paint_frame *frame;
 	struct frame_cache_entry *entry;
-	struct frame_cache_entry made;
-	int viewport_width;
-	int viewport_height;
 	int status;
 
 	*out = NULL;
-	window = bind_frame_child(&element->node);
-	if (window == NULL || window->detached || window->document == NULL)
-		return 0;
-	status = bind_window_child_styles(window, &engine, &viewport_width, &viewport_height);
-	if (status != 0 || engine == NULL || window->detached)
-		return 0;
-	viewport_width = layout_to_px(width) > 0 ? (int)layout_to_px(width) : viewport_width;
-	viewport_height = layout_to_px(height) > 0 ? (int)layout_to_px(height) : viewport_height;
-	tree = calloc(1, sizeof(*tree));
+	entry = frame_cache_get(page, element);
+	status = frame_tree(page, element, width, height, zoom, entry != NULL && entry->on ? &entry->transition : NULL, &tree);
+	if (status != 0 || tree == NULL)
+		return status;
 	frame = calloc(1, sizeof(*frame));
-	if (tree == NULL || frame == NULL) {
-		free(tree);
-		free(frame);
-		return ENOMEM;
-	}
-	css_engine_set_base_zoom(engine, zoom);
-	status = layout_build(tree, engine, &page->text, window->document, page_image_of, page_image_by_url, page,
-	    layout_from_px((float)viewport_width), layout_from_px((float)viewport_height), 0, 0, NULL);
-	if (status != 0) {
+	if (frame == NULL) {
 		layout_release(tree);
 		free(tree);
-		free(frame);
-		return 0;
+		return ENOMEM;
 	}
-	tree->image_variant = page_image_variant;
-	tree->frame_paint = page_frame_paint;
 	frame->tree = tree;
 	frame->refs = 1;
 	status = paint_build(&frame->list, tree);
@@ -1360,16 +1422,11 @@ frame_make(
 	}
 
 	/* The page keeps it too, for as long as the frame's painting may be held. */
-	frame->refs++;
-	entry = frame_cache_find(page, element);
+	entry = frame_cache_get(page, element);
 	if (entry != NULL) {
+		frame->refs++;
 		paint_frame_release(entry->frame);
 		entry->frame = frame;
-	} else {
-		made.element = element;
-		made.frame = frame;
-		if (wb_vector_push(&page->frame_cache, &made) != 0)
-			frame->refs--;
 	}
 	*out = frame;
 	return 0;
@@ -1399,7 +1456,7 @@ page_frame_paint(
 	if (window == NULL || window->detached || window->document == NULL)
 		return 0;
 	entry = frame_cache_find(page, element);
-	if (window->frame_hold && entry != NULL) {
+	if (window->frame_hold && entry != NULL && entry->frame != NULL) {
 		entry->frame->refs++;
 		*out = entry->frame;
 		return 0;
@@ -1466,9 +1523,15 @@ uint64_t
 page_frames_generation(
 	const struct page *page)
 {
+	uint64_t sum;
+	size_t index;
+
 	if (page->document == NULL)
 		return 0;
-	return frame_generation_walk(&page->document->node, 0);
+	sum = frame_generation_walk(&page->document->node, 0);
+	for (index = 0; index < page->frame_cache.count; index++)
+		sum += ((const struct frame_cache_entry *)wb_vector_at(&page->frame_cache, index))->generation;
+	return sum;
 }
 
 /*
@@ -1531,4 +1594,115 @@ page_hit_node(
 	*offset_x = (int)layout_to_px(left);
 	*offset_y = (int)layout_to_px(top);
 	return node;
+}
+
+/* The view transition of a frame's document, as the page's is (page_view_transition): steps 1 (capture the old state), 2 (the new state, shown), 0 (end). */
+int
+page_frame_view_transition(
+	void *context,
+	struct dom_element *element,
+	int step)
+{
+	struct page *page;
+	struct frame_cache_entry *entry;
+	struct layout_transition_name *name;
+	struct layout_tree *tree;
+	const struct layout_box *box;
+	size_t index;
+	int error;
+
+	page = context;
+	entry = frame_cache_get(page, element);
+	if (entry == NULL)
+		return 0;
+	if (step == 0 || step == 1) {
+		if (entry->on) {
+			layout_transition_release(&entry->transition);
+			entry->on = 0;
+			entry->generation++;
+		}
+		if (step == 0)
+			return 1;
+		error = frame_tree(page, element, 0, 0, 0.0f, NULL, &tree);
+		if (error != 0 || tree == NULL || tree->root == NULL) {
+			if (tree != NULL) {
+				layout_release(tree);
+				free(tree);
+			}
+			return 0;
+		}
+		entry->on = 1;
+		entry->transition.heap = page->heap;
+		error = layout_transition_measure(tree, &entry->transition, 1);
+		for (index = 0; error == 0 && index < entry->transition.count; index++) {
+			name = &entry->transition.names[index];
+			box = NULL;
+			if (!name->is_root) {
+				box = layout_transition_box(&entry->transition, tree->root, name->name, 0);
+				if (box == NULL)
+					continue;
+			}
+			error = paint_transition_capture(tree, &entry->transition, box, &name->old_image);
+		}
+		layout_release(tree);
+		free(tree);
+		if (error != 0) {
+			layout_transition_release(&entry->transition);
+			entry->on = 0;
+			return 0;
+		}
+		entry->generation++;
+		return 1;
+	}
+
+	/* The new state: measured without the tree, then shown. */
+	if (!entry->on)
+		return 0;
+	entry->transition.show = 0;
+	entry->generation++;
+	error = frame_tree(page, element, 0, 0, 0.0f, &entry->transition, &tree);
+	if (error != 0 || tree == NULL || tree->root == NULL) {
+		if (tree != NULL) {
+			layout_release(tree);
+			free(tree);
+		}
+		layout_transition_release(&entry->transition);
+		entry->on = 0;
+		return 0;
+	}
+	error = layout_transition_measure(tree, &entry->transition, 0);
+	layout_release(tree);
+	free(tree);
+	if (error != 0) {
+		layout_transition_release(&entry->transition);
+		entry->on = 0;
+		return 0;
+	}
+	entry->transition.show = 1;
+	entry->transition.elapsed = 0.0f;
+	entry->generation++;
+	return 1;
+}
+
+/* The milliseconds until the animations of a frame's shown transition tree have all ended. */
+double
+page_frame_view_transition_duration(
+	void *context,
+	struct dom_element *element)
+{
+	struct page *page;
+	struct frame_cache_entry *entry;
+	struct layout_tree *tree;
+	double longest;
+
+	page = context;
+	entry = frame_cache_find(page, element);
+	if (entry == NULL || !entry->on)
+		return 0.0;
+	if (frame_tree(page, element, 0, 0, 0.0f, &entry->transition, &tree) != 0 || tree == NULL)
+		return 0.0;
+	longest = tree->root != NULL ? page_transition_longest(tree->root, 0) * 1000.0 : 0.0;
+	layout_release(tree);
+	free(tree);
+	return longest;
 }

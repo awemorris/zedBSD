@@ -454,6 +454,16 @@ prelude_view_transition(
 	status = vm_to_number(realm, js_argument(args, count, 0), &step);
 	if (status != 0)
 		return status;
+	if (window->frame != NULL && window->host.view_transition == NULL) {
+		struct bind_window *parent;
+
+		/* A frame's document: its parent page makes the transition. */
+		parent = window->frame->node.document->view;
+		if (parent != NULL && !parent->detached && parent->host.frame_view_transition != NULL &&
+		    parent->host.frame_view_transition(parent->host.context, window->frame, (int)step) != 0)
+			*result = VM_VALUE_TRUE;
+		return 0;
+	}
 	if (window->host.view_transition == NULL)
 		return 0;
 	if (window->host.view_transition(window->host.context, (int)step) != 0)
@@ -561,6 +571,14 @@ prelude_view_transition_duration(
 	UNUSED_PARAMETER(count);
 	window = bind_window_of(realm);
 	*result = vm_value_number(0.0);
+	if (window->frame != NULL && window->host.view_transition_duration == NULL) {
+		struct bind_window *parent;
+
+		parent = window->frame->node.document->view;
+		if (parent != NULL && !parent->detached && parent->host.frame_view_transition_duration != NULL)
+			*result = vm_value_number(parent->host.frame_view_transition_duration(parent->host.context, window->frame));
+		return 0;
+	}
 	if (window->host.view_transition_duration != NULL)
 		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
 	return 0;

@@ -252,6 +252,9 @@ struct bind_host {
 	int (*pseudo_box)(void *context, struct dom_node *node, int pseudo, struct bind_box *box);
 	/* Paints the document an <iframe> shows now and keeps it, to show while the frame holds its painting. */
 	int (*frame_capture)(void *context, struct dom_element *element);
+	/* A frame's document's view transition: view_transition's steps, and the milliseconds the animations of its shown tree have left, for the <iframe> element holding it. */
+	int (*frame_view_transition)(void *context, struct dom_element *element, int step);
+	double (*frame_view_transition_duration)(void *context, struct dom_element *element);
 	/*
 	 * Lists the rectangles of an inline node's lines (one for each line it takes part in): returns 1 and the count
 	 * (at most max) when the node is laid out as inline content, 0 when its one box is its rectangle.
