@@ -2,7 +2,7 @@
 
 # ws335-p003: SHA-3・SHAKE（Keccak）
 
-Status: 実装済み・試験 PASS（2026-11-01 08:55 担当 Sonnet。cleared は Q1）
+Status: cleared（2026-11-01 09:04 Q1 の判定、main b4c57515e。08:55 Sonnet 実装済み・試験 PASS、Q1 も run-unit sha3 を流して PASS）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

@@ -3,7 +3,7 @@
 # ws334-p036 build: 1 つの .exe（DLL を作らない static link）と libkeiland の Windows の pthread 無し
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §6.1・§6.2・§6.6・§6.10。ws.md のユーザーの決定（2026-11-01: Windows では DLL を作らず 1 つの .exe、libkeiland の Windows の port は pthread を使わない）。
-- 状態: in-progress（実装済み・試験 PASS。2026-11-01 q1808-i02、P7。p021 の後の同じ Queue の追い、Q1 の 2026-11-01 の指示。cleared の判定は Q1）。
+- 状態: cleared（2026-11-01 09:04 Q1 の判定、main 8970a6e96。実装済み・試験 PASS。2026-11-01 q1808-i02、P7。p021 の後の同じ Queue の追い、Q1 の 2026-11-01 の指示。cleared の判定は Q1）。
 - 依存: p016（platform-win32.c）・p020（`apps/browser-win32/Makefile` と cross-build.sh）・p021（libbrowser-core）。
 - 担当の想定: Opus（phase-runner）を 1 回。後の Phase（p022・p023・p026・p028・p030・p031）が同じ形に library と .exe を足す。
 

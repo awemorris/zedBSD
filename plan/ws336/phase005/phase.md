@@ -2,7 +2,7 @@
 
 # ws336-p005: ssh-key（ed25519 の blob・署名・公開鍵の行・秘密鍵の file・指紋）
 
-Status: in-progress（2026-11-01 06:59 q1824、Sonnet）
+Status: cleared（2026-11-01 09:04 Q1 の判定、main e41eccfc3。08:54 q1824-i03 Sonnet 実装済み・試験 PASS、Q1 も run-unit key を流して PASS）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p003
