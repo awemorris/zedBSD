@@ -110,4 +110,4 @@ phase.md の指示との食い違い・header の不備: 見つからなかっ�
 
 未実施: 性能の測定（8192 bit の署名は試験の側で約 10 秒）、CAVP の SigVer931（X9.31）・TruncatedSHAs（SHA-512/224・/256）・SHA-1・SHA-224（hash_id が無い）、SigGen の file、CAVP の SigVer15 の e が 2^32 を越える case（無かった）、Wycheproof の sha384 の PSS 等 vectors.py が変換しない file、2 素数の本物の RSA key（Mersenne 素数の積の multi-prime で代用。検証の式は同じ）、e = 3 での valid な署名の自作（Mersenne 素数 - 1 が 3 で割れるため d が無い。Wycheproof の e = 3 の group で valid・invalid は確認）、定数時間（公開の値だけ）、32 bit の size_t の機械・aarch64 Windows の実行（build のみ）、限られた stack での実行、実機・QEMU（範囲外）。
 
-commit: （下記）
+commit: 71495d412c（実装・試験・この結果の節。この行を足す commit が最後）
