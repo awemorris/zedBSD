@@ -439,3 +439,8 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-399](bugs/BUG-399.md) | Windows 版ブラウザ: Google の検索の入力欄を click すると、入力できる範囲が右へ窓の幅いっぱいに伸びる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
 | [BUG-400](bugs/BUG-400.md) | storage-test の Max-Age の cookie が期限の前に送られない事がある（時々 FAIL） | open（2026-11-02 06:58 Q1 が起票、P5） |
 | [BUG-401](bugs/BUG-401.md) | libbrowser の host の試験 10 本が退行（子の Document・realm が回収されない、frame-lifetime は segfault） | open（2026-11-02 07:50 Q1 が起票、P8） |
+| [BUG-402](bugs/BUG-402.md) | ブラウザ: Google の app の一覧の popup の中の app の icon（画像か SVG）が出ない | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
+| [BUG-403](bugs/BUG-403.md) | ブラウザ: link を押してから遷移まで約 2 秒 app が応答しない（取得の間も event の処理を続ける） | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
+| [BUG-404](bugs/BUG-404.md) | ブラウザ: 頁の取得中の視覚的な反応が無い（address の欄を進み具合の表示に、押した時点で URL を更新） | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
+| [BUG-405](bugs/BUG-405.md) | ブラウザ: Google の「Googleについて」の頁で画像が出ない | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
+| [BUG-406](bugs/BUG-406.md) | ブラウザ: 戻る button で数秒待たされる（cache で表示し、再取得は cache できない頁だけ） | open（2026-11-02 08:19 Q1 が起票、ユーザーの Windows の UAT、P8 の待ち） |
