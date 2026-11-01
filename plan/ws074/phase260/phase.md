@@ -1065,3 +1065,36 @@ Origin: 2026-10-27 ユーザーの指示。
 - 道具: plan/ws074/phase260/tools/cmpgap.sh（`sh cmpgap.sh 新 旧` で、dev 番号の gap を比べて fixed・REGRESS を出す。出力は build/ws074-cmp/gapNNN.json）。
   main の merge で st1.sh は `BROWSER=build/ws074-host/plain/browser` を渡さないと別の program を使う。
 
+### クラウドのセッションの途中経過（続き 2、2026-11-01。dev159〜dev161）
+
+- 基準 dev159（cd2e943e の build）= dev158 と同じ 3,148 / 3,473、gap 325、後退 0（merge の後の再測定。差はなかった）。
+- 測定:
+
+  | 測定 | SHA | 内容 | 計 | gap（h/s/sc/c） | 後退 |
+  | --- | --- | --- | --- | --- | --- |
+  | dev159 | cd2e943e | 基準 | 3,148 | 159 / 115 / 49 / 2 | — |
+  | dev160 | 7af426e0 | 圧縮できる replaced item の minimum contribution を 0、backdrop-filter を border box の角丸に | 3,151（90.73%、gap 322） | 159 / 112 / 49 / 2 | 0 |
+  | dev161（最終） | dad58b84 | 定義済みの height に min-height・max-height を掛けてから子の % を解く、縦 column の flex の主軸の大きさ | 3,151 | 159 / 112 / 49 / 2 | 0（増減なし） |
+
+- 直した物（source は userland/desktop/libbrowser/）:
+  1. 幅か max-width が % の replaced item（compressible replaced element）の grid の minimum contribution は 0（layout/grid.c `grid_column_item_contribution`）。
+     通った ID: grid-items/replaced-element-014（auto の track が container の幅に収まり、画像は 100%）。
+  2. backdrop-filter の領域を border box の角丸にする（paint/paint.h の paint_item に radius、paint/list.c `list_filter_items`、paint/software.c `software_round_span`。
+     行の中央の span と左右の端の部分被覆で、角丸の box の行の描き方と同じ）。通った ID: backdrop-filter-clip-radius-zoom、backdrop-filter-transform。
+  3. 定義済みの height に min-height・max-height（px と、定義済みの親の高さに対する %）を掛けてから子の % の基準にする（layout/block.c）。
+     column の flex container の主軸は、その基準（`tree->containing_height`）以上（layout/flex.c）。percentage-heights-003 の最初の 5 件ほどが通ったが ID は他の subtest（縦書きの item）で未通過。
+- 試して戻した物:
+  - 縦書きの行の atomic box を vertical-lr で鏡像にする（layout/logical.c で margin の上下を右・左に入れ替え、行の中で位置を `2·line.y + line.height − y − size`）。
+    grid-self-baseline-horiz-004 が通ったが、同じ ref を使う 4 件（grid-self-baseline-001・horiz-002・horiz-003・vertical-lr-001）と flexbox-basic-block-vert-001v が後退した。
+    ref の inline-block が Chromium に近づく一方、grid 側の item の baseline・orthogonal の整列が旧い並びに揃っていたため。grid 側（`grid_row_baseline` の orthogonal item を vertical-lr で under = 0 にする）も試したが後退は消えず、全体を戻した。
+    やり直すなら grid・flex の orthogonal item の baseline の整列を同時に直し、後退 5 件を見ながら進める。central baseline で atomic を中央に置く（Chromium の vertical の既定）仕様も確かめる。
+- 調べて直さなかった物:
+  - 直交 item の % padding（flexbox_align-items-stretch-3）: 計測 pass が `tree->measuring` で % を不定にする。
+  - 圧縮できる replaced の flex の最小値、ペア（float と負の margin の flex container、flexbox_flex-formatting-interop）、table の `width:100%` の cell を持つ flex item（table-with-infinite-max-intrinsic-width、table は 100 でなく 105）。
+  - grid-gap-003・item-percentage-height-001（subgrid の % gap）、grid-item-percentage-sizes-001・002（多数の writing-mode の組）、Ahem の幅に頼る試験（grid-intrinsic-maximums、writing-modes の table 系）。
+  - 8 件の VT 試験: transform-origin-view-transition-group は 496 画素の差（回転した group の clip-path の縁）、残りは iframe の中の transition や scrollbar。
+  - wasm/jsapi のうち Memory の toFixedLengthBuffer・toResizableBuffer は、JS engine の ArrayBuffer に resizable・maxByteLength・resize・transfer が無いので不可。js-string は WebAssembly.Module の実装が要る。
+  - CSS animation の animationstart・animationend は未実装（inline-grid-try-fallbacks-crash が待つ）。
+- Acid: 最終の source（dad58b84）で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 一時物（Q1 が消す。この container の中だけ）: 前の節の物に加え、build/tmp/ の sub7〜sub10・pf.html・m1.html・v001*.xhtml・ab.js・a1.*、build/ws074-suites/wpt/css/css-grid/grid-items/zz-r14.html。
+

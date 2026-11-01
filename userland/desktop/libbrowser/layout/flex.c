@@ -195,6 +195,12 @@ layout_flex(
 			if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
 				sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 			available = layout_from_px(box->style.height.value) - sizing;
+
+			/* The height held within its minimum and maximum, which the containing height of the box's own content already is. */
+			if (tree->containing_height_definite && available < tree->containing_height)
+				available = tree->containing_height;
+			if (available < 0)
+				available = 0;
 		} else if (wrap && box->style.max_height.unit == CSS_UNIT_PX) {
 			/* A wrapping column breaks its lines at its maximum height. */
 			sizing = 0;

@@ -3659,6 +3659,13 @@ grid_column_item_contribution(
 		return 0;
 	}
 
+	/* A replaced item with a percentage width or maximum width is compressible: its minimum contribution is nothing. */
+	if (kind == GRID_CONTRIBUTION_MINIMUM && item->replaced && item->style.min_width.unit == CSS_UNIT_AUTO &&
+	    (item->style.width.unit == CSS_UNIT_PERCENT || item->style.max_width.unit == CSS_UNIT_PERCENT)) {
+		*outer = frame + margins;
+		return 0;
+	}
+
 	/* The preferred width, when it is a length. */
 	definite = item->style.width.unit == CSS_UNIT_PX;
 
