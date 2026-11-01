@@ -111,5 +111,5 @@ phase.md の「注意」の指示との差: 1.2 の PRF の期待値は、試験
 
 未実施: section 4（PSK・0-RTT）の transcript と schedule の通し（schedule が PSK 無しのため）、`sslc_tls13_update_secret` と 1.2 の関数の公式の vector（RFC 8446・5246 に値が無い。試験側の式との照合だけ）、32 bit の size_t の機械と aarch64 Windows の実行（check-skeleton の build のみ）、実機・QEMU（範囲外）、規約の第三者のレビュー（§14 の checklist で自分の diff を見直した）。
 
-commit: 下の「commit」に Q1 への報告と同じ SHA を書く。
+commit: 5d5c591da5（実装・試験・結果。この行の追記だけが次の commit）。
 
