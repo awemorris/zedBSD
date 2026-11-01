@@ -58,6 +58,7 @@ static int frame_create(struct vm_realm *caller, struct bind_window *parent, str
 static int frame_tree(struct dom_document *document);
 static int frame_window_this(struct vm_realm *realm, vm_value this_value, struct bind_window **window);
 static int frame_origin(struct bind_window *window, struct wb_buffer *origin);
+static int frame_web_origin(const struct wb_buffer *origin);
 static void frame_removed(struct dom_document *document, struct dom_node *node);
 static void frame_remove_subtree(struct dom_node *root);
 
@@ -138,8 +139,10 @@ bind_window_view(
 }
 
 /*
- * Tells whether one window's scripts may reach another's objects: the same window, or two windows of the same
- * origin, neither of them opaque (an origin that cannot be read is another one).
+ * Tells whether one window's scripts may reach another's objects: not when either is a sandboxed frame of an opaque
+ * origin (unless they are the same window), nor when both have a web origin (a scheme, a host and a port) and the
+ * two differ.  Windows without such an origin (local files, about:blank, documents made by scripts) keep the file
+ * profile of one tab and reach each other.
  */
 int
 bind_window_reachable(
@@ -164,11 +167,13 @@ bind_window_reachable(
 	if (error == 0)
 		error = frame_origin(target, &other);
 
-	/* Equal serializations are the same origin. */
-	reachable = 0;
-	if (error == 0 && one.length == other.length) {
-		if (one.length == 0 || memcmp(one.data, other.data, one.length) == 0)
-			reachable = 1;
+	/* Two web origins must be equal; an origin that is not a web one ("null", or none) does not separate. */
+	reachable = 1;
+	if (error != 0)
+		reachable = 0;
+	if (error == 0 && frame_web_origin(&one) && frame_web_origin(&other)) {
+		if (one.length != other.length || memcmp(one.data, other.data, one.length) != 0)
+			reachable = 0;
 	}
 
 	/* The copies are released on either outcome. */
@@ -1176,4 +1181,24 @@ frame_origin(
 
 	/* Succeeded: origin holds the serialization. */
 	return 0;
+}
+
+/* Tells whether a serialized origin is a web one (scheme://host[:port]), not "null" or empty. */
+static int
+frame_web_origin(
+	const struct wb_buffer *origin)
+{
+	const char *separator;
+
+	/* An empty origin, or an opaque one, is not. */
+	if (origin->length == 0)
+		return 0;
+
+	/* A tuple origin names its scheme before "://". */
+	separator = strstr(wb_buffer_string(origin), "://");
+	if (separator == NULL)
+		return 0;
+
+	/* Succeeded: the origin is a web one. */
+	return 1;
 }
