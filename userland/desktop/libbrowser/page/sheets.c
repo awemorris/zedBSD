@@ -348,12 +348,12 @@ sheets_add_style(
 	/* The sheet's (and its imports') implicit @scope is under the element's parent. */
 	css_engine_set_owner_from(page->css, first, element);
 
-	/* A <style> that imports sheets has its load (or error) event queued, once, when they have all arrived (or failed). */
-	if ((element->node.flags & DOM_NODE_LINK_LOADED) == 0U && entry->sheet != NULL && css_sheet_import_count(entry->sheet) != 0) {
+	/* A <style> has its load (or error) event queued, once, when its imports (if it has any) have all arrived (or failed). */
+	if ((element->node.flags & DOM_NODE_LINK_LOADED) == 0U && entry->sheet != NULL) {
 		int failed;
 
 		failed = 0;
-		if (sheets_imports_settled(page, entry, 1, &failed)) {
+		if (css_sheet_import_count(entry->sheet) == 0 || sheets_imports_settled(page, entry, 1, &failed)) {
 			struct page_link_event event;
 
 			event.element = element;
