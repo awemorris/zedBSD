@@ -36,7 +36,7 @@
 | P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
 | Sonnet ×3 | q1877・q1885・q1893 | [WS335](ws335/ws.md) p016 DER と PEM・p026 record の保護・p028 handshake の message（p009・p025・p027 は cleared） |
 | Sonnet | q1883 `s-ws324-p006c` | [WS324](ws324/ws.md) p006c: H.265 の解析の rps・ps（p006b は cleared） |
-| P4 | q1889 `p4-bug390` | [BUG-390](bugs/BUG-390.md): Pi 5 の CI の image で App Home の icon が出ない |
+| P4 | — | 返却。[BUG-390](bugs/BUG-390.md) は fixed。次の Bug を待つ |
 | P8 | q1890 `p8-bug391` | [BUG-391](bugs/BUG-391.md)・[BUG-392](bugs/BUG-392.md): compositor が落ちた時の再開と PIN の既定 |
 | P3 | q1891 `p3-bug393` | [BUG-393](bugs/BUG-393.md): Pi 5 の GPU の起動時の自己試験を既定で off |
 | P7 | q1892 `p7-bug394` | [BUG-394](bugs/BUG-394.md): 起動が長い、init が desktop を優先 |

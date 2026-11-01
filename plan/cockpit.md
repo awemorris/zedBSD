@@ -10,7 +10,7 @@
 | P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の関門: I・P の絵の encode（q1884、上限なし）。p009a: NVENC の channel が開き、追加の firmware 不要 | p010 encode の共通の executor |
 | P2 | [WS322](ws322/ws.md) p004 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | H.264 decode の道（q1869）。p003: PowerVR の NV12・plane の view・export を VF2 で確かめた | p005〜p007 |
 | P3 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU | 起動時の自己試験を既定で off（q1891） | — |
-| P4 | [BUG-390](bugs/BUG-390.md) | Bug の修正の担当 | Pi 5 の CI の image で App Home の icon が出ない（q1889、Pi 5） | 次の Bug |
+| P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
 | P5 | [WS334](ws334/ws.md) p033 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 後半の Windows の口（TSF・drag と drop・touchpad など、頁に暗い mode、q1886）。p032: Wine で 15 項 PASS（https・cookie・localStorage・clipboard・dpi） | p035 規約の見直し |
 | P6 | [WS335](ws335/ws.md) p013 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | ML-KEM の多項式（q1881）。p012 RSA・p025 TLS の定数は cleared | p014 ML-KEM-768 |
 | P7 | [BUG-394](bugs/BUG-394.md) | 起動の時間 | network の待ちの調べ、init が desktop を優先（q1892） | 次は WS340（Pi の graphical boot） |
@@ -49,7 +49,7 @@
 | --- | --- | --- |
 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の起動時の自己試験の描画 | open（P3） |
 | [BUG-394](bugs/BUG-394.md) | 起動が長い、init が desktop を優先して順番を組めるように | open（P7） |
-| [BUG-390](bugs/BUG-390.md) | Pi 5 の CI の image で App Home の icon が出ない | open（P4） |
+| [BUG-390](bugs/BUG-390.md) | App Home の icon が出ない（全機械） | fixed（01:42、画面: build/review/q1889-pi5-home-after.png） |
 | [BUG-391](bugs/BUG-391.md) | compositor が落ちると login の画面から出直す（tablet で login できない） | open（P8） |
 | [BUG-392](bugs/BUG-392.md) | 初期の PIN 0000、login・lock の画面で PIN を既定に | open（P8） |
 | [BUG-389](bugs/BUG-389.md) | RTX の desktop で App Home から browser を開いても窓が出ない（main でも同じ） | open（23:19、WS291 の回帰で発見） |
