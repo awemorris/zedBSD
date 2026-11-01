@@ -9,8 +9,8 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS291](ws291/ws.md) p027 | GPU の driver の描画の速さ（RTX 2070） | libvulkan の submit を返事を待たずに返す形（B-U）の実装と計測（q1849） | p028 kernel の組み置き（B-K） |
 | P2 | [WS322](ws322/ws.md) p001 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | 調べと設計（q1845） | 設計 → レビュー → 実装の Phase の案。板は P4 の後 |
-| P3 | [WS291](ws291/ws.md) p021 | GPU の driver の描画の速さ（Pi 5 の V3D） | dcache clean を省く直し（6d4ef0df9）を Pi 5 で計測（q1840-i02、20:45 再開） | 50 fps を安定して超えたら判定の材料 |
-| P4 | — | Bug の修正の担当 | 返却（21:05）。BUG-387 は fixed（Pi 5・VF2 の実機で PASS） | 次の Bug。CI の Pi 5 の image の graphical login の確かめは Pi 5 が空いた時 |
+| P3 | — | — | 返却（21:17）。WS291 p021（Pi 5 の model の 50 fps）は cleared: c74 画面 51.6〜52.9 fps（前 49.2〜50.7） | 次の Pi 5 の作業は未割当 |
+| P4 | [BUG-387](bugs/BUG-387.md) | Bug の修正の担当 | CI の Pi 5 の image の graphical login の起動を Pi 5 で確かめる（q1850） | 次の Bug |
 | P5 | [WS334](ws334/ws.md) p023 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | instance と API v4（q1847）。p025 は cleared（script の core が単体の archive で link でき、Wine で host と bytes 一致） | p026（libmedia の Windows）へ |
 | P6 | [WS335](ws335/ws.md) p005 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | AES-GCM（q1846）。p004 AES は cleared（28516 checks） | p007 整数の算術・p009 Ed25519 へ |
 | P7 | — | VF2 の desktop の描画の速さ | 計測だけ（q1848、21:03 起動、VF2） | 計測の要約を返して終了 |
@@ -27,6 +27,8 @@
 - 2026-11-01 20:42: p021（Pi 5）の基準の計測（main b2392803f、offscreen c74）は起動により 44.74 fps と 50.75 fps に割れる。GPU は front-end の詰まり。P3 が CPU の直列の分（pass ごとの約 16 MiB の dcache clean 2 回、約 0.75 ms）を省く直しを build（6d4ef0df9、未計測）。
 
 - 2026-11-01 21:07: p026（RTX の push buffer の設計）cleared。計測で GPU の 1 回の仕事は 9〜10 µs（NVK 13.3 µs より短い）。B-U で subs-1000 は 75〜90 fps の見込み（今 56〜58）、B-K は fps より CPU の時間に効く。Q1 の判断: B-U は待たずに返す、p027（B-U）→ p028（B-K）、P-C は後。
+
+- 2026-11-01 21:17: p021（Pi 5 の V3D の model の 50 fps）cleared。GPU だけが触る作業用の memory（c74 で約 16 MiB）の cache の書き戻しを pass ごとに 2 回していたのを省き、c74 画面 51.58〜52.93 fps・offscreen 53.5〜55.5 fps（4 起動）。desktop は前と同じ（launch 60・drag 60・wiseview 62 ほか）。
 
 ### WS074 Web ブラウザ
 
@@ -46,6 +48,9 @@
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
 （2026-11-01 10:29 クリア。手順は各 Bug の ticket にある）
+
+- Pi 4 の GPU の回帰（WS291 p021 の直し 6d4ef0df9 は Pi 4 と Pi 5 で共有の code。Pi 4 は今 SwitchBot に繋がっておらず担当は遠隔で試せない）: Pi 4 に main の image を入れ、desktop と GPU の app（mview など）が前と同じに動くか。
+- Pi 5 の en0 の link: P3 の計測で、起動 3・4 の途中に en0 が 1000 Mbps から 100 Mbps に落ちて SSH が切れた。cable・switch の側か driver かは未調査。
 
 ## 決まった事
 
