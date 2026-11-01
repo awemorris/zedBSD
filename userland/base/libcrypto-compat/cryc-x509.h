@@ -248,7 +248,7 @@ int cryc_x509_public_key(const uint8_t *encoding, size_t size, struct cryc_pubke
  * BIT STRING of at most 9 bits with at least one set); extKeyUsage
  * (4.2.1.12; one or more OIDs); subjectAltName (4.2.1.6; a non-empty
  * GeneralNames whose contents are checked by cryc-name.h when used);
- * nameConstraints (4.2.1.10; must be critical, at least one of the two
+ * nameConstraints (4.2.1.10; critical or not, at least one of the two
  * subtrees, minimum 0 and no maximum, else EINVAL); subjectKeyIdentifier
  * (4.2.1.2); authorityKeyIdentifier (4.2.1.1; only keyIdentifier is kept).
  *

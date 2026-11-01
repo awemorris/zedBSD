@@ -1548,9 +1548,12 @@ x509_apply_extension(
 			cert->flags |= CRYC_X509_SAN_CRITICAL;
 		break;
 	case X509_EXT_NAME_CONSTRAINTS:
-		/* RFC 5280 4.2.1.10: conforming CAs MUST mark nameConstraints critical, and this parser requires it. */
-		if (!critical)
-			return EINVAL;
+		/*
+		 * RFC 5280 4.2.1.10 asks CAs to mark nameConstraints critical;
+		 * a reader that refused the others could not load a root whose
+		 * constraints are not marked, so the constraints are processed
+		 * whatever the flag says.
+		 */
 		error = x509_ext_name_constraints(cert, value);
 		break;
 	case X509_EXT_SUBJECT_KEY_ID:
