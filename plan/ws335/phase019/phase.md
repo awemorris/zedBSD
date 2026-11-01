@@ -2,7 +2,7 @@
 
 # ws335-p019: 名前（Name の比較・host と address の照合・name constraints）
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p017）
+Status: in-progress（2026-11-02 02:47 Sonnet）（2026-11-01 p001 が作成。起動は Q1。依存: p017）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

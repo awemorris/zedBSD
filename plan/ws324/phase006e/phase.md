@@ -2,7 +2,7 @@
 
 # ws324-p006e H.265: h265-dpb の実装（Vulkan の DPB、8.3.2 の marking と C.5.2 の出力の順。標準廉価実装手順、Sonnet 5.5 high）
 
-Status: planned（2026-11-01 P1 が p006a で作成。p006a 段 2 の基点の後に起動。p006b〜d と並べてよい）
+Status: in-progress（2026-11-02 02:47 Sonnet）（2026-11-01 P1 が p006a で作成。p006a 段 2 の基点の後に起動。p006b〜d と並べてよい）
 
 - WS: [WS324](../ws.md)。設計: [h265-parse-design.md](../h265-parse-design.md)（§1・§4 D2・D10・D11・D13・§5.3・§6・§7・§8）。
 - 基点 BASE: `1f16db0e6`（2026-11-02 p006a 段 2 の commit 1f16db0e619a9cd23c74f7f36a8729efdba4ecb3）。この module は他の module の実装を呼ばない（型だけを使う）。試験の入力は手で組む。

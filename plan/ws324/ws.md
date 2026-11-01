@@ -20,9 +20,9 @@
 | [ws324-p006a](phase006a/phase.md) | H.265 の解析の設計（標準廉価実装手順 §4、[h265-parse-design.md](h265-parse-design.md)、header は [proposed/h265/](proposed/h265/)）と、header を source に置く段 2 | cleared（2026-11-02 00:41 Q1、main e1eaa6761。段 1 の設計と段 2 の BASE 1f16db0e6、check-skeleton・run-unit を main で流し直して PASS、HEVC の適合の 147 本を取得） | Q324-1 |
 | [ws324-p006b](phase006b/phase.md) | h265sw-nal・h265sw-scaling・h265sw-vui の実装（Sonnet、BASE `1f16db0e6`） | cleared（2026-11-02 01:03 Q1、main で merge。test-nal 816099・scaling 5499・vui 2432070 checks、壊す確かめ 37 か所が全部試験の失敗で落ちた） | p006a 段 2 |
 | [ws324-p006c](phase006c/phase.md) | h265sw-rps・h265sw-ps の実装（Sonnet） | cleared（2026-11-02 02:46 Q1、main で test-rps 1891521・test-ps 1447981 PASS）。実装（2026-11-02 Sonnet q1883-i01、test-rps 1891521・ps 1447981 checks、壊す確かめ 142 か所中 140 が試験の失敗で落ち 2 は等価、適合 147 本の VPS・SPS・PPS の読みは失敗 0）。cleared は Q1 | p006b |
-| [ws324-p006d](phase006d/phase.md) | h265sw-slice・h265sw-poc の実装（Sonnet） | planned | p006c |
-| [ws324-p006e](phase006e/phase.md) | h265-dpb の実装（Sonnet） | planned | p006a 段 2 |
-| [ws324-p006f](phase006f/phase.md) | h265-std の実装（Sonnet） | planned | p006a 段 2 |
+| [ws324-p006d](phase006d/phase.md) | h265sw-slice・h265sw-poc の実装（Sonnet） | in-progress（Sonnet） | p006c |
+| [ws324-p006e](phase006e/phase.md) | h265-dpb の実装（Sonnet） | in-progress（Sonnet） | p006a 段 2 |
+| [ws324-p006f](phase006f/phase.md) | h265-std の実装（Sonnet） | in-progress（Sonnet） | p006a 段 2 |
 | [ws324-p006g](phase006g/phase.md) | h265-stream の実装（Sonnet） | planned | p006d |
 | [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | planned | p006e〜g |
 | [ws324-p009a](phase009a/phase.md) | NVENC の channel（段 nvenc-channel、class の bind、firmware の確かめ、RC の通知の記録） | cleared（2026-11-02 01:07 Q1、main a43959d8e。10.0.10.3 で NVENC の channel（class c4b7、chid 49）が開き engine 自身が semaphore を release、GSP-RM が NVENC の ucode を持つ（追加の firmware 不要）、channel error 0、NVDEC は前と同じ） | 実機 |
