@@ -3,7 +3,7 @@
 # ws334-p023 統合: instance と API v4（cookie の jar・Web Storage を instance へ、storage の module をつなぐ）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §3.5〜§3.8、§2.5、§9.1・§9.2。
-- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1847-i01、P5。結果は末尾）。
+- 状態: cleared（2026-11-01 21:45 Q1、main f5aad61a8。段 1 の前後比較で件数が同じ、storage-test 92 checks、cross-build PASS）。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1847-i01、P5。結果は末尾）。
 - **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: `libbrowser.dll` の link と `.def` の export の照合は無い。libbrowser の全部の object を static library `libbrowser.a` にし（p036 の `WIN32_STATIC_LIBRARY` の形）、cross-build.sh の libbrowser の `nm -u` の照合を全部の object に広げる。下の本文の `libbrowser.dll`・`.def` はこの通りに読み替える。
 - 依存: p010（records）・p011（files）・p012（queue）・p022。
 - 担当の想定: Opus（phase-runner）を 1 回。使う module の約束は `include/browser/storage.h`・`storage/records.h`・`storage/files.h`・`storage/queue.h` の comment。公開の API の形はこの phase.md の下の通り（design §3.8 を確定させた物）。
@@ -137,3 +137,10 @@ Q1 への問い・判断の材料:
 2. 過去の Expires を持つ cookie の削除と、Expires が未来の cookie の永続は挙動の変化（前は Expires を読まなかった）。WS074 の試験の件数は変わらない。
 
 消してよい物（Q1 へ）: `build/tmp/p023-base`・`build/tmp/p023-tip`（試しの tree の展開と stage1 の出力）、`build/tmp/p023-mut`（変異の元の写し）、`build/tmp/p023`（sysroot の写しと log）、`build/tmp/p023-*.log`・`build/tmp/p023-stage1.sh`、`build/tmp/ws334-storage.run.*`（最後の run 以外）、`build/amd64`（zedBSD の試しの build の出力）。どれも使い捨て。
+
+### Q1 の判断（2026-11-01 21:45）
+
+- headless が localStorage を書かなくなり WS074 の試験の setenv("XDG_DATA_HOME") が効かない件: 残す（害は無い）。WS074 はクラウドのセッションの担当で、消すかはそちらに任せる。
+- cookie の Expires を読むようにした件: 受け入れる（RFC 6265 どおり）。
+- check-skeleton の FAIL（libkeiland/platform/platform.h、基点でも同じ）: この Phase の外。p035（header の持ち越しの直し）で扱う。
+
