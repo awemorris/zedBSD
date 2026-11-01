@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の関門: I・P の絵の encode（q1884、上限なし）。p009a: NVENC の channel が開き、追加の firmware 不要 | p010 encode の共通の executor |
-| P2 | [WS322](ws322/ws.md) p004 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | H.264 decode の道（q1869）。p003: PowerVR の NV12・plane の view・export を VF2 で確かめた | p005〜p007 |
+| P2 | [WS322](ws322/ws.md) p007 | VF2 の VPU を Vulkan Video に | 速さと頑丈さ（timeout の立て直し・seek・1080p60、q1896）。p004: H.264 decode が VF2 で ffmpeg と一致、Video Player の GPU の道で 1080p30（画面: build/review/ws322-p004-vf2-play.png） | p005〜p006 H.265 decode（WS324 の解析の後） |
 | P3 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU | 起動時の自己試験を既定で off（q1891） | — |
 | P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
 | P5 | [WS334](ws334/ws.md) p033 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 後半の Windows の口（TSF・drag と drop・touchpad など、頁に暗い mode、q1886）。p032: Wine で 15 項 PASS（https・cookie・localStorage・clipboard・dpi） | p035 規約の見直し |

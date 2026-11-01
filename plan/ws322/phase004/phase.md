@@ -104,3 +104,8 @@ VF2 の Wave511 で H.264 を Vulkan Video の decode として出し、libmedia
 ## 問い（Q1 へ）
 
 - `CONFIG_DRIVER_VF2_VPU` を VF2 の既定の config で y にするか。design §20 は「p004 の実機の確かめまで n」。y にすると、`/lib/firmware/wave511/chagall.bin` が無い板では log 1 行で video 無しのまま（GPU は今どおり）、有る板では render node が H.264 decode を出し、libmedia が Vulkan Video を使う。firmware の package（`wave511-firmware`）を image に入れるかも合わせて。
+
+### Q1 の判断（2026-11-02 01:55）
+
+- CONFIG_DRIVER_VF2_VPU は VF2 の既定の config で n のまま。timeout の後の立て直し（core の reset・firmware の起こし直し）と seek を p007 で入れて確かめた後に y にし、wave511-firmware の package を image に入れるかも同じ時に決める（zedBSD-firmware への firmware の追加はユーザーの push の指示が要る）。
+

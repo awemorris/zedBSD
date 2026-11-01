@@ -27,7 +27,7 @@
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
 | P1 | q1884 `p1-ws324` | [WS324](ws324/ws.md) p009b: NVENC の関門（I・P の絵を encode、上限なし）。p009a の channel は cleared |
-| P2 | q1869 `p2-ws322` | [WS322](ws322/ws.md) p004: VF2 の H.264 decode の道（p001〜p003 は cleared） |
+| P2 | q1896 `p2-ws322` | [WS322](ws322/ws.md) p007: VF2 の VPU の速さと頑丈さ（timeout の立て直し・seek）。p004 H.264 decode は cleared（1080p30 を GPU の道で再生） |
 | P5 | q1886 `p5-ws334b` | [WS334](ws334/ws.md) p033: 後半の Windows の口（p032 Wine の確かめは cleared） |
 | Sonnet ×2 | q1887・q1888 | [WS334](ws334/ws.md) p034 libbrowser の試験を Windows で・TLS の誤りの文 |
 | P6 | q1894 `p6-ws335b` | [WS335](ws335/ws.md) p014: K-PKE と ML-KEM-768（p013 は cleared） |
@@ -116,7 +116,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-395 · q1896 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-395 · q1897 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
