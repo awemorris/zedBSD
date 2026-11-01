@@ -154,7 +154,9 @@ struct kl_window_options {
  * for a pen tablet's (KL_VERSION 44), its tool (KL_TABLET_*), its barrel
  * buttons held (KL_TABLET_BUTTON_*), its pressure (0 to 1, -1 for a tool
  * without it) and its tilt (degrees); for KL_WINDOW_POST, the code and the
- * data posted (data from KL_VERSION 97).
+ * data posted (data from KL_VERSION 97).  The text of a KL_WINDOW_KEY press
+ * (pressed 1) is the UTF-8 of the character the key types, where the
+ * backend knows it (a backend that does not leaves it empty) (KL_VERSION 105).
  */
 struct kl_window_event {
 	unsigned kind;
@@ -647,13 +649,22 @@ void kl_drop_caret(struct kl_canvas *canvas, const struct kl_theme *theme, float
 
 /*
  * A Vulkan surface over a window shown with KL_PRESENT_NONE, for an
- * application drawing with its own Vulkan instance (which enabled
- * VK_KHR_wayland_surface).  Declared for a program that included the
- * Vulkan header first.  Returns 0, EINVAL, or EIO when Vulkan refused.
+ * application drawing with its own Vulkan instance (which enabled the
+ * extensions kl_window_vulkan_extensions names).  Declared for a program
+ * that included the Vulkan header first.  Returns 0, EINVAL, or EIO when
+ * Vulkan refused.
  */
 #if defined(VK_VERSION_1_0)
 int kl_window_vulkan_surface(struct kl_window *window, VkInstance instance, VkSurfaceKHR *surface);
 #endif
+
+/*
+ * The instance extensions a Vulkan instance needs for kl_window_vulkan_surface
+ * on this system (KL_VERSION 105): VK_KHR_surface and the system's surface
+ * extension.  names receives a static array of count names.  Returns 0, or
+ * EINVAL for NULL arguments.
+ */
+int kl_window_vulkan_extensions(const char *const **names, uint32_t *count);
 
 #ifdef __cplusplus
 }

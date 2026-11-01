@@ -159,6 +159,24 @@ int kl_app_notify_lock(struct kl_app *app, const char *title, const char *body, 
 struct wl_display *kl_app_display(const struct kl_app *app);
 
 /*
+ * Writes the directory where the application keeps its data (KL_VERSION 105):
+ * Wayland systems use $XDG_DATA_HOME/keiland/<application> (with
+ * $HOME/.local/share when XDG_DATA_HOME is unset or not absolute); the
+ * directory is not created.  application is the kl_app_options application
+ * the app was opened with.  Returns 0, EINVAL (NULL arguments, size 0, no
+ * application name), ENOENT (neither variable set), ERANGE (buffer too small;
+ * it then holds the empty string).
+ */
+int kl_app_storage_directory(const struct kl_app *app, char *buffer, size_t size);
+
+/*
+ * Writes the directory of the bundled read-only data (KL_VERSION 105):
+ * KEILAND_DATADIR ("/usr/share") on the Wayland systems.  Returns 0, EINVAL,
+ * ERANGE.
+ */
+int kl_data_directory(char *buffer, size_t size);
+
+/*
  * Makes a window of the application (options->display is not used; a
  * NULL application takes the application's).  It is configured when this
  * returns, as kl_window_open's is.  Returns NULL with errno set as
