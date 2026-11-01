@@ -1,0 +1,554 @@
+diff --git a/src/drivers/gpu/nvrtx/display/cursor.c b/src/drivers/gpu/nvrtx/display/cursor.c
+index fdd7d890a4..aac7f10e8c 100644
+--- a/src/drivers/gpu/nvrtx/display/cursor.c
++++ b/src/drivers/gpu/nvrtx/display/cursor.c
+@@ -27,6 +27,7 @@
+ 
+ #include <drivers/gpu/gpu.h>
+ #include <drivers/gpu/gpu-display.h>
++#include <kern/clock.h>
+ #include <kern/kcrt.h>
+ #include <kern/kmem.h>
+ #include <uapi/errno.h>
+@@ -58,6 +59,9 @@ static int cursor_read(struct nvrtx_node *node, const struct nvrtx_resource *res
+ static void cursor_write(struct nvrtx_node *node, const uint32_t *pixels, unsigned slot);
+ static uint64_t cursor_slot_offset(const struct nvrtx_node *node, unsigned slot);
+ static uint32_t cursor_read_pixel(const volatile uint8_t *source);
++static void cursor_diag(struct nvrtx_node *node);
++static int cursor_diag_has_pixels(const struct nvrtx_node *node);
++static int cursor_diag_done;
+ 
+ /*
+  * Makes the cursor plane: the two slots' VRAM, cleared (transparent), the
+@@ -326,6 +330,17 @@ nvrtx_cursor_move(
+ 
+ 	mutex_unlock(&node->lock);
+ 
++	/* Diagnostic: once, after the first show, the plane's colours measured by the head's CRC. */
++	if (cursor_diag_done == 0 && node->cursor_visible != 0 && cursor_diag_has_pixels(node) != 0) {
++		cursor_diag_done = 1;
++		mutex_lock(&node->present_lock);
++		mutex_lock(&node->lock);
++		if (node->owner == session && node->lease == request->lease && node->cursor_visible != 0 && node->broken == 0)
++			cursor_diag(node);
++		mutex_unlock(&node->lock);
++		mutex_unlock(&node->present_lock);
++	}
++
+ 	/* Succeeded: the cursor is at the position from a coming frame on. */
+ 	return 0;
+ }
+@@ -528,3 +543,411 @@ cursor_read_pixel(
+ 	/* Succeeded: the pixel. */
+ 	return pixel;
+ }
++
++/* ---- Diagnostic: the cursor plane's colours measured by the head's CRC ---- */
++
++#define DIAG_HEAD(gpu, method)	(NVRTX_CORE_HEAD_FIRST + (gpu)->display.gop_head * NVRTX_CORE_HEAD_STRIDE + (method))
++#define DIAG_CRC_HANDLE		0xf0c0c001U
++#define DIAG_CRC_BYTES		0x20000U
++#define DIAG_RX			256U
++#define DIAG_RY			256U
++#define DIAG_SIDE		128U
++#define DIAG_CX			(DIAG_RX + 32U)
++#define DIAG_CY			(DIAG_RY + 32U)
++#define DIAG_CURSOR_ON		0x800001cfU
++#define DIAG_CURSOR_OFF		0x000000cfU
++#define DIAG_COMP_PREMULT	0x000072ffU
++
++struct diag_state {
++	struct nvrtx_node *node;
++	struct nvrtx_gpu *gpu;
++	struct nvrtx_bo frame;
++	struct nvrtx_bo crc;
++	struct nvrtx_disp_surface surface;
++	unsigned slot;
++	int crc_dumped;
++};
++
++static int
++cursor_diag_has_pixels(const struct nvrtx_node *node)
++{
++	const uint32_t *copy;
++	unsigned index;
++
++	copy = node->cursor_pixels + (size_t)node->cursor_slot * CURSOR_SLOT_PIXELS;
++	for (index = 0U; index < CURSOR_SLOT_PIXELS; index++) {
++		if (copy[index] != 0U)
++			return 1;
++	}
++	return 0;
++}
++
++static void
++diag_wait_frames(struct nvrtx_gpu *gpu, unsigned frames)
++{
++	uint32_t start;
++	uint64_t t0;
++
++	start = nvrtx_scanout_frame_counter(gpu);
++	t0 = nvrtx_now_us();
++	while (((nvrtx_scanout_frame_counter(gpu) - start) & 0xffffU) < frames) {
++		if (nvrtx_now_us() - t0 > 1000000U) {
++			nvrtx_stage_mark("cc frame counter stuck");
++			return;
++		}
++		kern_usleep_range(1000U, 2000U);
++	}
++}
++
++static int
++diag_methods(struct diag_state *d, const uint32_t *methods, const uint32_t *values, unsigned count)
++{
++	int error;
++
++	error = nvrtx_scanout_diag_core(d->gpu, methods, values, count);
++	if (error != 0)
++		nvrtx_stage_mark("cc core update %d", error);
++	diag_wait_frames(d->gpu, 2U);
++	return error;
++}
++
++/* Shows the test slot with a composition (or hides the cursor), optionally with a norm scale. */
++static int
++diag_cursor(struct diag_state *d, int shown, uint32_t composition, int set_norm, uint32_t norm)
++{
++	uint32_t methods[6];
++	uint32_t values[6];
++	unsigned count;
++
++	count = 0U;
++	if (shown != 0) {
++		methods[count] = DIAG_HEAD(d->gpu, NVRTX_HEAD_CONTROL_CURSOR); values[count++] = DIAG_CURSOR_ON;
++		methods[count] = DIAG_HEAD(d->gpu, NVRTX_HEAD_CONTROL_CURSOR_COMPOSITION); values[count++] = composition;
++		methods[count] = DIAG_HEAD(d->gpu, NVRTX_HEAD_CONTEXT_DMA_CURSOR); values[count++] = NVRTX_DISP_HANDLE_VRAM;
++		methods[count] = DIAG_HEAD(d->gpu, NVRTX_HEAD_OFFSET_CURSOR); values[count++] = (uint32_t)(cursor_slot_offset(d->node, d->slot) >> 8);
++	} else {
++		methods[count] = DIAG_HEAD(d->gpu, NVRTX_HEAD_CONTROL_CURSOR); values[count++] = DIAG_CURSOR_OFF;
++		methods[count] = DIAG_HEAD(d->gpu, NVRTX_HEAD_CONTEXT_DMA_CURSOR); values[count++] = 0U;
++	}
++	if (set_norm != 0) {
++		methods[count] = DIAG_HEAD(d->gpu, 0x228U); values[count++] = norm;
++	}
++	return diag_methods(d, methods, values, count);
++}
++
++static void
++diag_slot_fill(struct diag_state *d, uint32_t color)
++{
++	volatile uint32_t *target;
++	unsigned index;
++
++	target = (volatile uint32_t *)(volatile void *)(nvrtx_bo_cpu(d->gpu, &d->node->cursor_object) + (uint64_t)d->slot * CURSOR_SLOT_BYTES);
++	for (index = 0U; index < CURSOR_SLOT_PIXELS; index++)
++		target[index] = color;
++	(void)target[0];
++}
++
++/* Paints the frame's test region one colour. */
++static void
++diag_region(struct diag_state *d, uint32_t color)
++{
++	uint32_t row;
++
++	for (row = 0U; row < DIAG_SIDE; row++)
++		(void)nvrtx_vram_fill(d->gpu, d->frame.vram + (uint64_t)(DIAG_RY + row) * d->surface.pitch + DIAG_RX * 4U, color, DIAG_SIDE * 4U);
++}
++
++static uint32_t
++diag_over(uint32_t cursor, uint32_t bg)
++{
++	uint32_t a;
++	uint32_t out;
++	uint32_t shift;
++	uint32_t c;
++	uint32_t b;
++
++	a = cursor >> 24;
++	out = 0xff000000U;
++	for (shift = 0U; shift < 24U; shift += 8U) {
++		c = (cursor >> shift) & 0xffU;
++		b = (bg >> shift) & 0xffU;
++		c = c + (b * (255U - a) + 127U) / 255U;
++		if (c > 255U)
++			c = 255U;
++		out |= c << shift;
++	}
++	return out;
++}
++
++/*
++ * Paints an image composited over the region's colour at the cursor's place:
++ * mode 0 as it is, 1 inverted (a - c, premultiplied), 2 every opaque pixel
++ * black, 3 one colour (solid) over the whole 64 by 64.
++ */
++static void
++diag_paint(struct diag_state *d, const uint32_t *pixels, uint32_t bg, int mode, uint32_t solid)
++{
++	uint8_t line[NVRTX_DISP_CURSOR_SIDE * 4U];
++	uint32_t row;
++	uint32_t column;
++	uint32_t pixel;
++	uint32_t a;
++	uint32_t shift;
++	uint32_t changed;
++
++	for (row = 0U; row < NVRTX_DISP_CURSOR_SIDE; row++) {
++		for (column = 0U; column < NVRTX_DISP_CURSOR_SIDE; column++) {
++			if (mode == 3) {
++				pixel = solid;
++			} else {
++				pixel = pixels[row * NVRTX_DISP_CURSOR_SIDE + column];
++			}
++			a = pixel >> 24;
++			if (mode == 1) {
++				changed = pixel & 0xff000000U;
++				for (shift = 0U; shift < 24U; shift += 8U)
++					changed |= ((a - ((pixel >> shift) & 0xffU)) & 0xffU) << shift;
++				pixel = changed;
++			} else if (mode == 2) {
++				pixel &= 0xff000000U;
++			}
++			pixel = diag_over(pixel, bg);
++			line[column * 4U + 0U] = (uint8_t)pixel;
++			line[column * 4U + 1U] = (uint8_t)(pixel >> 8);
++			line[column * 4U + 2U] = (uint8_t)(pixel >> 16);
++			line[column * 4U + 3U] = (uint8_t)(pixel >> 24);
++		}
++		(void)nvrtx_vram_write(d->gpu, d->frame.vram + (uint64_t)(DIAG_CY + row) * d->surface.pitch + DIAG_CX * 4U, line, sizeof(line));
++	}
++	diag_wait_frames(d->gpu, 2U);
++}
++
++/* Measures the head's CRCs over 6 frames and logs them with a short label. */
++static void
++diag_crc(struct diag_state *d, const char *label)
++{
++	uint32_t methods[2];
++	uint32_t values[2];
++	uint32_t status;
++	uint32_t e[16][4];
++	uint64_t t0;
++	unsigned index;
++	unsigned agree;
++	unsigned word;
++	int error;
++
++	(void)nvrtx_vram_zero(d->gpu, d->crc.vram, 32U + 16U * 32U);
++	methods[0] = DIAG_HEAD(d->gpu, 0x180U); values[0] = DIAG_CRC_HANDLE;
++	methods[1] = DIAG_HEAD(d->gpu, 0x184U); values[1] = 0x20U | ((0x50U + d->gpu->display.gop_sor) << 12);
++	error = nvrtx_scanout_diag_core(d->gpu, methods, values, 2U);
++	if (error != 0) {
++		nvrtx_stage_mark("cc %s enable %d", label, error);
++		return;
++	}
++	diag_wait_frames(d->gpu, 6U);
++	methods[0] = DIAG_HEAD(d->gpu, 0x184U); values[0] = 0U;
++	methods[1] = DIAG_HEAD(d->gpu, 0x180U); values[1] = 0U;
++	error = nvrtx_scanout_diag_core(d->gpu, methods, values, 2U);
++	if (error != 0)
++		nvrtx_stage_mark("cc %s disable %d", label, error);
++
++	t0 = nvrtx_now_us();
++	status = 0U;
++	for (;;) {
++		(void)nvrtx_vram_read32(d->gpu, d->crc.vram, &status);
++		if ((status & 1U) != 0U || nvrtx_now_us() - t0 > 300000U)
++			break;
++		kern_usleep_range(1000U, 2000U);
++	}
++
++	for (index = 0U; index < 16U; index++) {
++		(void)nvrtx_vram_read32(d->gpu, d->crc.vram + 32U + index * 32U, &e[index][0]);
++		(void)nvrtx_vram_read32(d->gpu, d->crc.vram + 32U + index * 32U + 12U, &e[index][1]);
++		(void)nvrtx_vram_read32(d->gpu, d->crc.vram + 32U + index * 32U + 16U, &e[index][2]);
++		(void)nvrtx_vram_read32(d->gpu, d->crc.vram + 32U + index * 32U + 20U, &e[index][3]);
++	}
++	agree = 0U;
++	for (index = 2U; index <= 5U; index++) {
++		for (word = 1U; word < 4U; word++) {
++			if (e[index][word] != e[4][word])
++				break;
++		}
++		if (word == 4U)
++			agree++;
++	}
++	nvrtx_stage_mark("cc %s c%08x r%08x o%08x %u%c", label,
++	    (unsigned)e[4][1], (unsigned)e[4][2], (unsigned)e[4][3], agree, (status & 1U) != 0U ? ' ' : '!');
++}
++
++static void
++diag_armed(struct diag_state *d, const char *when)
++{
++	static const uint32_t methods[16] = {
++		0x088U, 0x090U, 0x098U, 0x09cU, 0x0a0U, 0x220U, 0x224U, 0x228U,
++		0x22cU, 0x238U, 0x23cU, 0x240U, 0x280U, 0x284U, 0x288U, 0x28cU
++	};
++	unsigned index;
++
++	for (index = 0U; index < 16U; index += 4U)
++		nvrtx_stage_mark("cc armed %s %03x %08x %08x %08x %08x", when, (unsigned)methods[index],
++		    (unsigned)nvrtx_scanout_diag_armed(d->gpu, DIAG_HEAD(d->gpu, methods[index])),
++		    (unsigned)nvrtx_scanout_diag_armed(d->gpu, DIAG_HEAD(d->gpu, methods[index + 1U])),
++		    (unsigned)nvrtx_scanout_diag_armed(d->gpu, DIAG_HEAD(d->gpu, methods[index + 2U])),
++		    (unsigned)nvrtx_scanout_diag_armed(d->gpu, DIAG_HEAD(d->gpu, methods[index + 3U])));
++}
++
++/* Counts a slot's words read back through the register window, against the CPU's copy. */
++static void
++diag_readback(struct diag_state *d, unsigned slot)
++{
++	const uint32_t *copy;
++	uint32_t word;
++	uint32_t first_bad;
++	unsigned index;
++	unsigned white;
++	unsigned black;
++	unsigned clear;
++	unsigned other;
++	unsigned bad;
++	unsigned bad_at;
++
++	copy = d->node->cursor_pixels + (size_t)slot * CURSOR_SLOT_PIXELS;
++	white = 0U; black = 0U; clear = 0U; other = 0U; bad = 0U; bad_at = 0U; first_bad = 0U;
++	for (index = 0U; index < CURSOR_SLOT_PIXELS; index++) {
++		(void)nvrtx_vram_read32(d->gpu, cursor_slot_offset(d->node, slot) + (uint64_t)index * 4U, &word);
++		if (word == 0xffffffffU) white++;
++		else if (word == 0xff000000U) black++;
++		else if (word == 0U) clear++;
++		else other++;
++		if (word != copy[index]) {
++			if (bad == 0U) { bad_at = index; first_bad = word; }
++			bad++;
++		}
++	}
++	nvrtx_stage_mark("cc slot %u at %llx", slot, (unsigned long long)cursor_slot_offset(d->node, slot));
++	nvrtx_stage_mark("cc slot %u w %u k %u t %u other %u", slot, white, black, clear, other);
++	nvrtx_stage_mark("cc slot %u differ %u at %u %08x copy %08x", slot, bad, bad_at, (unsigned)first_bad, (unsigned)copy[bad_at]);
++}
++
++static void
++cursor_diag(struct nvrtx_node *node)
++{
++	static const uint32_t refs[12] = {
++		0xffffffffU, 0xff000000U, 0xff808080U, 0xffff0000U, 0xff0000ffU, 0xfffefefeU,
++		0xff7f7f7fU, 0xff00ffffU, 0xffffff00U, 0xff404040U, 0xffc0c0c0U, 0xff010101U
++	};
++	static const char *const ref_names[12] = { "W", "K", "G", "R", "B", "254", "7f", "Cy", "Ye", "40", "c0", "01" };
++	static const uint32_t curs[10] = {
++		0xffffffffU, 0xff000000U, 0xff808080U, 0xffff0000U, 0xff0000ffU, 0xfffefefeU,
++		0xfff0f0f0U, 0xffc0c0c0U, 0xff404040U, 0xff010101U
++	};
++	static const char *const cur_names[10] = { "W", "K", "G", "R", "B", "254", "f0", "c0", "40", "01" };
++	struct diag_state d;
++	const struct nvrtx_disp_surface *last;
++	struct nvrtx_disp_surface saved;
++	const uint32_t *arrow;
++	char label[16];
++	unsigned bgi;
++	unsigned index;
++	unsigned image;
++	uint32_t bg;
++	int error;
++
++	kern_memset(&d, 0, sizeof(d));
++	d.node = node;
++	d.gpu = node->gpu;
++	d.slot = node->cursor_slot ^ 1U;
++	arrow = node->cursor_pixels + (size_t)node->cursor_slot * CURSOR_SLOT_PIXELS;
++
++	nvrtx_stage_mark("cc start head %u sor %u slot %u point %08x %ux%u",
++	    (unsigned)d.gpu->display.gop_head, (unsigned)d.gpu->display.gop_sor, node->cursor_slot,
++	    (unsigned)node->cursor_point, (unsigned)node->width, (unsigned)node->height);
++	diag_armed(&d, "shown");
++	diag_readback(&d, node->cursor_slot);
++
++	last = nvrtx_scanout_diag_last(d.gpu);
++	if (last == NULL) {
++		nvrtx_stage_mark("cc no flip seen; stop");
++		return;
++	}
++	saved = *last;
++	nvrtx_stage_mark("cc last %llx %ux%u", (unsigned long long)saved.offset, (unsigned)saved.width, (unsigned)saved.height);
++	nvrtx_stage_mark("cc last pitch %u h %08x f %02x bl %d", (unsigned)saved.pitch, (unsigned)saved.handle, (unsigned)saved.format, saved.block_linear);
++
++	/* The test frame: the node's frame's shape, cleared, in VRAM of its own. */
++	d.surface = node->frames[0];
++	error = nvrtx_bo_alloc(d.gpu, (uint64_t)d.surface.pitch * d.surface.height, 0x100000U, &d.frame);
++	if (error == 0)
++		error = nvrtx_bo_clear(d.gpu, &d.frame);
++	if (error == 0)
++		error = nvrtx_bo_alloc(d.gpu, DIAG_CRC_BYTES, 0x10000U, &d.crc);
++	if (error == 0)
++		error = nvrtx_vram_zero(d.gpu, d.crc.vram, DIAG_CRC_BYTES);
++	if (error == 0)
++		error = nvrtx_scanout_diag_bind(d.gpu, DIAG_CRC_HANDLE, d.crc.vram, d.crc.vram + DIAG_CRC_BYTES - 1U);
++	if (error != 0) {
++		nvrtx_stage_mark("cc setup %d; stop", error);
++		return;
++	}
++	d.surface.offset = d.frame.vram;
++
++	diag_crc(&d, "desktop");
++	diag_region(&d, refs[2]);
++	error = nvrtx_scanout_frame(d.gpu, &d.surface);
++	if (error != 0) {
++		nvrtx_stage_mark("cc flip %d; stop", error);
++		return;
++	}
++	(void)nvrtx_scanout_cursor_point(d.gpu, nvrtx_disp_cursor_point((int32_t)DIAG_CX, (int32_t)DIAG_CY));
++	(void)diag_cursor(&d, 0, 0U, 0, 0U);
++
++	/* On a grey and a white background: the references (squares painted, cursor hidden), then the cursor's colours. */
++	for (bgi = 0U; bgi < 2U; bgi++) {
++		bg = bgi == 0U ? refs[2] : refs[0];
++		diag_region(&d, bg);
++		diag_wait_frames(d.gpu, 2U);
++		kern_snprintf(label, sizeof(label), "%s", bgi == 0U ? "G" : "W");
++		diag_crc(&d, label);
++		for (index = 0U; index < 12U; index++) {
++			diag_paint(&d, NULL, bg, 3, refs[index]);
++			kern_snprintf(label, sizeof(label), "%s p%s", bgi == 0U ? "G" : "W", ref_names[index]);
++			diag_crc(&d, label);
++		}
++		diag_region(&d, bg);
++		diag_paint(&d, arrow, bg, 0, 0U);
++		kern_snprintf(label, sizeof(label), "%s pArrow", bgi == 0U ? "G" : "W");
++		diag_crc(&d, label);
++		diag_paint(&d, arrow, bg, 1, 0U);
++		kern_snprintf(label, sizeof(label), "%s pInv", bgi == 0U ? "G" : "W");
++		diag_crc(&d, label);
++		diag_paint(&d, arrow, bg, 2, 0U);
++		kern_snprintf(label, sizeof(label), "%s pBlack", bgi == 0U ? "G" : "W");
++		diag_crc(&d, label);
++		diag_region(&d, bg);
++		diag_wait_frames(d.gpu, 2U);
++		for (image = 0U; image < 10U; image++) {
++			diag_slot_fill(&d, curs[image]);
++			(void)diag_cursor(&d, 1, DIAG_COMP_PREMULT, 0, 0U);
++			kern_snprintf(label, sizeof(label), "%s c%s", bgi == 0U ? "G" : "W", cur_names[image]);
++			diag_crc(&d, label);
++		}
++		cursor_write(node, arrow, d.slot);
++		(void)diag_cursor(&d, 1, DIAG_COMP_PREMULT, 0, 0U);
++		kern_snprintf(label, sizeof(label), "%s cArrow", bgi == 0U ? "G" : "W");
++		diag_crc(&d, label);
++		(void)diag_cursor(&d, 0, 0U, 0, 0U);
++	}
++
++	diag_armed(&d, "tests");
++
++	/* Puts back: the test slot's copy, the cursor as shown, the frame. */
++	cursor_write(node, node->cursor_pixels + (size_t)d.slot * CURSOR_SLOT_PIXELS, d.slot);
++	error = nvrtx_scanout_cursor_show(d.gpu, cursor_slot_offset(node, node->cursor_slot), node->cursor_point);
++	if (error == 0)
++		error = nvrtx_scanout_core_settled(d.gpu, 200000U);
++	if (error == 0)
++		error = nvrtx_scanout_frame(d.gpu, &saved);
++	diag_wait_frames(d.gpu, 2U);
++	diag_armed(&d, "back");
++	nvrtx_stage_mark("cc end %d", error);
++}
+diff --git a/src/drivers/gpu/nvrtx/display/scanout.c b/src/drivers/gpu/nvrtx/display/scanout.c
+index a82b5dcad2..e9efb3ad6a 100644
+--- a/src/drivers/gpu/nvrtx/display/scanout.c
++++ b/src/drivers/gpu/nvrtx/display/scanout.c
+@@ -609,6 +609,7 @@ nvrtx_scanout_frame_send(
+ 		return error;
+ 
+ 	nvrtx_disp_first_window_flip(push, display->window, surface, gpu->identity.chip.profile->window_storage_pitch, *notifier, with_core);
++	nvrtx_scanout_diag_note(surface);
+ 	error = scanout_kick(gpu, push, user);
+ 	if (error != 0)
+ 		return error;
+@@ -2118,3 +2119,73 @@ scanout_diagnose_window(
+ 	    (unsigned)nvrtx_rd32(gpu, SCANOUT_REG_CORE_STATE),
+ 	    (unsigned)nvrtx_rd32(gpu, SCANOUT_REG_ERROR_DISP));
+ }
++
++/* Diagnostic: the last surface a flip was sent to, for a test that flips away and back. */
++static struct nvrtx_disp_surface scanout_diag_last_surface;
++static int scanout_diag_last_valid;
++
++const struct nvrtx_disp_surface *
++nvrtx_scanout_diag_last(
++	struct nvrtx_gpu *gpu)
++{
++	(void)gpu;
++	if (scanout_diag_last_valid == 0)
++		return NULL;
++	return &scanout_diag_last_surface;
++}
++
++void
++nvrtx_scanout_diag_note(
++	const struct nvrtx_disp_surface *surface)
++{
++	scanout_diag_last_surface = *surface;
++	scanout_diag_last_valid = 1;
++}
++
++/* Diagnostic: one armed core method's value (the method's absolute offset). */
++uint32_t
++nvrtx_scanout_diag_armed(
++	struct nvrtx_gpu *gpu,
++	uint32_t method)
++{
++	return nvrtx_rd32(gpu, SCANOUT_REG_CORE_ARMED + method);
++}
++
++/* Diagnostic: binds a context DMA object over a VRAM range to the core. */
++int
++nvrtx_scanout_diag_bind(
++	struct nvrtx_gpu *gpu,
++	uint32_t handle,
++	uint64_t start,
++	uint64_t limit)
++{
++	return scanout_bind(gpu, NVRTX_DISP_CHID_CORE, handle, NVRTX_DISP_CONTEXT_DMA_FLAGS, start, limit);
++}
++
++/*
++ * Diagnostic: sends core methods (absolute offsets) with an update without
++ * interlock and waits until it has finished.
++ */
++int
++nvrtx_scanout_diag_core(
++	struct nvrtx_gpu *gpu,
++	const uint32_t *methods,
++	const uint32_t *values,
++	unsigned count)
++{
++	unsigned index;
++	int error;
++
++	error = nvrtx_scanout_core_settled(gpu, 200000U);
++	if (error != 0)
++		return error;
++	error = scanout_core_room(gpu, SCANOUT_CURSOR_WORDS_MAX + count * 2U);
++	if (error != 0)
++		return error;
++	for (index = 0U; index < count; index++)
++		nvrtx_push_one(&gpu->display.core_push, methods[index], values[index]);
++	error = scanout_core_send_cursor(gpu);
++	if (error != 0)
++		return error;
++	return nvrtx_scanout_core_settled(gpu, 200000U);
++}
+diff --git a/src/drivers/gpu/nvrtx/nvrtx-gpu.h b/src/drivers/gpu/nvrtx/nvrtx-gpu.h
+index b1fcb9f7c7..0835d8b936 100644
+--- a/src/drivers/gpu/nvrtx/nvrtx-gpu.h
++++ b/src/drivers/gpu/nvrtx/nvrtx-gpu.h
+@@ -937,6 +937,11 @@ int nvrtx_scanout_cursor_point(struct nvrtx_gpu *gpu, uint32_t point);
+ int nvrtx_scanout_cursor_clear(struct nvrtx_gpu *gpu);
+ int nvrtx_scanout_core_settled(struct nvrtx_gpu *gpu, uint32_t wait_us);
+ uint32_t nvrtx_scanout_frame_counter(struct nvrtx_gpu *gpu);
++const struct nvrtx_disp_surface *nvrtx_scanout_diag_last(struct nvrtx_gpu *gpu);
++void nvrtx_scanout_diag_note(const struct nvrtx_disp_surface *surface);
++uint32_t nvrtx_scanout_diag_armed(struct nvrtx_gpu *gpu, uint32_t method);
++int nvrtx_scanout_diag_bind(struct nvrtx_gpu *gpu, uint32_t handle, uint64_t start, uint64_t limit);
++int nvrtx_scanout_diag_core(struct nvrtx_gpu *gpu, const uint32_t *methods, const uint32_t *values, unsigned count);
+ 
+ int nvrtx_node_start(struct nvrtx_gpu *gpu);
+ void nvrtx_node_stop(struct nvrtx_node *node);

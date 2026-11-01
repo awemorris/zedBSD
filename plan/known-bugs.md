@@ -241,7 +241,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking 全体を飛ばす | closed（2026-10-31 Q1 の判定、30fd47a4f。QEMU と VF2 の実機で有線が上がる。radio のある実機の失敗の場面は未実施） |
 | [BUG-372](bugs/BUG-372.md) | VisionFive 2 の今の main の kernel で serial の console が入力を受けない（WS331 p005 の疑い） | closed（2026-10-31 Q1 の判定、30fd47a4f。VF2 の実機で serial の login が通った） |
 | [BUG-373](bugs/BUG-373.md) | 今の main の kernel で networkd の初期の Wi-Fi の正規化が EINVAL、networking が上がらない（Wi-Fi の無い機械でも） | closed（2026-10-31 Q1 の判定、30fd47a4f。QEMU と VF2 の実機で版 1・main の networkd とも network が上がる） |
-| [BUG-374](bugs/BUG-374.md) | RTX（nvrtx）の mouse の cursor の色が他の GPU と逆（外枠が白・内側が黒） | open（2026-10-31、P3） |
+| [BUG-374](bugs/BUG-374.md) | RTX（nvrtx）の mouse の cursor の色が他の GPU と逆（外枠が白・内側が黒） | fixed（2026-11-01 P2 q1827-i01、f63d8e50c: cursor の NORM_SCALE が既定 1.0 で 255 の channel が黒に潰れていた。0x0ff0 にして実機の CRC で 10 色と arrow が window の参照と一致。目視は未実施） |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が lease の解放より先に swapchain を作り EBUSY で終了（VF2） | closed（2026-10-31 Q1 の判定、P7 157a69cc0: kernel の CCB の満杯を待つ。VF2 で 8 回とも落ちず） |
 | [BUG-376](bugs/BUG-376.md) | PS/2 の mouse の port が mouse が無くても node を作り、open のたびに約 80 ms 待って EIO | closed（2026-10-31 P6 q1743、933563341、QEMU と実機で確かめた。main に merge） |
 | [BUG-377](bugs/BUG-377.md) | ZEDBSD_NOCT_ACCEL=y で emacs を選び libegl を選ばない image で、/bin/noct が libEGL.so を要り emacs が起動しない | fixed（2026-10-31 P7 q1768-i01。ZEDBSD_NOCT_ACCEL=y の amd64 で noct の依存に libegl・libglesv2 を足す（Makefile・menuconfig）。make の解決と make -n で確かめた。image での起動は未実施） |
