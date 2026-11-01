@@ -842,7 +842,9 @@ reply_external(
 
 	/* One known handle type, exported and imported as itself. */
 	features = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
-	if (handle_type == 0 || (handle_type & (handle_type - 1U)) != 0 || (handle_type & ~(uint32_t)POWERVR_VK_EXTERNAL_HANDLES) != 0) {
+	if (handle_type == 0 ||
+	    (handle_type & (handle_type - 1U)) != 0 ||
+	    (handle_type & ~(uint32_t)POWERVR_VK_EXTERNAL_HANDLES) != 0) {
 		features = 0;
 		handle_type = 0;
 	}

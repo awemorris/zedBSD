@@ -352,7 +352,9 @@ planar_check(
 	uint32_t usages;
 
 	/* Only the plane views' flags, of a flat image of one sample. */
-	if ((info->flags & ~(uint32_t)POWERVR_VK_PLANAR_FLAGS) != 0 || info->imageType != VK_IMAGE_TYPE_2D || info->samples != VK_SAMPLE_COUNT_1_BIT)
+	if ((info->flags & ~(uint32_t)POWERVR_VK_PLANAR_FLAGS) != 0 ||
+	    info->imageType != VK_IMAGE_TYPE_2D ||
+	    info->samples != VK_SAMPLE_COUNT_1_BIT)
 		return ENOTSUP;
 	if (info->extent.depth != 1)
 		return EINVAL;
@@ -749,9 +751,13 @@ plane_view(
 		return ENOTSUP;
 
 	/* Level 0 and layer 0, the only ones (or the remaining ones from them). */
-	if (info->subresourceRange.baseMipLevel != 0 || (info->subresourceRange.levelCount != 1 && info->subresourceRange.levelCount != VK_REMAINING_MIP_LEVELS))
+	if (info->subresourceRange.baseMipLevel != 0 ||
+	    (info->subresourceRange.levelCount != 1 &&
+	     info->subresourceRange.levelCount != VK_REMAINING_MIP_LEVELS))
 		return EINVAL;
-	if (info->subresourceRange.baseArrayLayer != 0 || (info->subresourceRange.layerCount != 1 && info->subresourceRange.layerCount != VK_REMAINING_ARRAY_LAYERS))
+	if (info->subresourceRange.baseArrayLayer != 0 ||
+	    (info->subresourceRange.layerCount != 1 &&
+	     info->subresourceRange.layerCount != VK_REMAINING_ARRAY_LAYERS))
 		return EINVAL;
 
 	/* The plane as a linear image of its own, at its offset. */

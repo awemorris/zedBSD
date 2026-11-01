@@ -367,9 +367,14 @@ powervr_image_lay_out_planes(
 
 	/* NV12, one level and one layer of a flat image. */
 	*count = 0;
-	if (format == NULL || (format->kind & POWERVR_FORMAT_PLANAR) == 0 || format->vk_format != VK_FORMAT_G8_B8R8_2PLANE_420_UNORM)
+	if (format == NULL ||
+	    (format->kind & POWERVR_FORMAT_PLANAR) == 0 ||
+	    format->vk_format != VK_FORMAT_G8_B8R8_2PLANE_420_UNORM)
 		return ENOTSUP;
-	if (shape->levels != 1 || shape->layers != 1 || shape->depth != 1 || shape->volume)
+	if (shape->levels != 1 ||
+	    shape->layers != 1 ||
+	    shape->depth != 1 ||
+	    shape->volume)
 		return ENOTSUP;
 
 	/* Even edges, as the half-size chroma plane needs, within the core's reach. */
