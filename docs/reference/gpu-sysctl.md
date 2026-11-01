@@ -26,7 +26,7 @@ The graphical login uses the count to decide how long to wait for the display. T
 A driver may hold a GPU device back after it has attached, until root asks for the start. Two drivers do, and a kernel has the operations of at most one of them because they are built for different architectures:
 
 - i915 on amd64, when the boot parameter `i915.start=manual` is given. Each Intel GPU that attached waits, and a write of 1 launches the start of all of them. A device that attaches after the write starts by itself.
-- bcm2711 on the Raspberry Pi 5, in a kernel built with `CONFIG_DRIVER_BCM2712_GPU`. The V3D engine and the display wait. The boot parameter `rpi5gpu.start=boot` starts them at boot instead.
+- bcm2711 on the Raspberry Pi 5, in a kernel built with `CONFIG_DRIVER_BCM2712_GPU`. The V3D engine and the display wait. The boot parameter `rpi5gpu.start=boot` starts them at boot instead. The Pi 5 image's `cmdline.txt` names it, so the image's GPU starts at boot.
 
 A read returns how many devices are still held, which is 0 when no driver offers a start. For i915 it is the number of waiting devices; for bcm2711 it is 1 until the start has been taken. A write must be one 8-byte value and the value must be 1; the call then starts the held devices, and a read in the same call returns what is held afterwards. The write is refused with these errors:
 

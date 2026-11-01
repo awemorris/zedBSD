@@ -32,12 +32,19 @@
 /* The count of GPU devices the kernel holds until root starts them (a 64-bit word). */
 #define GPU_START_SYSCTL	"hw.gpu.start"
 
+/* The most supplementary groups a process has (the kernel's credential). */
+#define GPU_GROUPS_MAX		16
+
+/* The node's mode bits that give its group read and write. */
+#define GPU_GROUP_RW		0060U
+
 static uint32_t word_at(const unsigned char *bytes, size_t offset);
 static int factory_fence(const struct kl_backend_protocol_host *host, struct kl_backend_resource *factory, const unsigned char *bytes, size_t size);
 static int factory_alpha(const struct kl_backend_protocol_host *host, struct kl_backend_resource *factory, const unsigned char *bytes, size_t size);
 static int buffer_import(const struct kl_backend_protocol_host *host, struct kl_backend_resource *buffer, const struct kwl_buffer_layout *layout, int descriptor);
 static VkResult buffer_image(const struct kl_backend_gpu_device *device, const struct kwl_buffer_layout *image, int descriptor, VkImage *created, VkDeviceMemory *memory);
 static void buffer_image_release(const struct kl_backend_gpu_device *device, VkImage *image, VkDeviceMemory *memory);
+static int node_group_member(gid_t group);
 
 /*
  * Names the zedBSD GPU buffer global.
@@ -250,8 +257,7 @@ kl_backend_gpu_unavailable_reason(
 	struct stat node;
 	uint64_t held;
 	size_t held_size;
-	int descriptor;
-	int saved_errno;
+	uid_t euid;
 	int error;
 
 	/* Refuses a buffer that cannot hold a sentence. */
@@ -275,16 +281,16 @@ kl_backend_gpu_unavailable_reason(
 		return 0;
 	}
 
-	/* Opens the node as the compositor's Vulkan would; one that opens leaves no reason to tell. */
-	descriptor = open(GPU_FIRST_NODE, O_RDWR | O_CLOEXEC);
-	if (descriptor >= 0) {
-		(void)close(descriptor);
+	/*
+	 * Decides as the GPU driver's open does, from the node's owner, group
+	 * and mode, without opening it: root, the node's owner, and a member
+	 * of its group while the mode gives the group read and write may open
+	 * it.  Anyone of them has no reason of the system's to be told.
+	 */
+	euid = geteuid();
+	if (euid == 0 || euid == node.st_uid)
 		return ENOENT;
-	}
-	saved_errno = errno;
-
-	/* Only a refused open has a reason of the system's. */
-	if (saved_errno != EACCES)
+	if ((node.st_mode & GPU_GROUP_RW) == GPU_GROUP_RW && node_group_member(node.st_gid))
 		return ENOENT;
 
 	/* A node a user has is the graphical login's. */
@@ -297,6 +303,34 @@ kl_backend_gpu_unavailable_reason(
 	(void)snprintf(text, size, "only root and the video group may open %s: ask an administrator to run 'usermod -G video -a' for this account, then log in again", GPU_FIRST_NODE);
 
 	/* Succeeded: the reason is the node's group. */
+	return 0;
+}
+
+/*
+ * Reports whether the process's effective group or one of its
+ * supplementary groups is a group.
+ */
+static int
+node_group_member(
+	gid_t group)
+{
+	gid_t groups[GPU_GROUPS_MAX];
+	int count;
+	int i;
+
+	/* The effective group. */
+	if (getegid() == group)
+		return 1;
+
+	/* The supplementary groups; a list that cannot be read counts as none. */
+	count = getgroups(GPU_GROUPS_MAX, groups);
+	for (i = 0; i < count; i++) {
+		/* One group. */
+		if (groups[i] == group)
+			return 1;
+	}
+
+	/* Not a member. */
 	return 0;
 }
 
