@@ -2,8 +2,9 @@
 # Host checks of the H.265 decode path (ws322-p006): ps-host-test.c over every HEVC_v1 conformance bitstream
 # (plan/tools/h265/conformance/list.txt, read from the cache with unzip -p): each VPS, SPS and PPS through libmedia's
 # h265-std, libvulkan's wire (encode.c), the PowerVR executor's readers and the engine's writers (executor.c) and
-# libmedia's parse again, and each picture's record through the wire into the executor's record; then the engine's
-# H.265 checks (engine-h265-host-test.c over a stand-in core).
+# libmedia's parse again, and each picture's record through the wire into the executor's record; libmedia's H.265
+# Vulkan Video back end over a stand-in context (libmedia-h265-host-test.c: the output order, the slots and the
+# references of every decode); then the engine's H.265 checks (engine-h265-host-test.c over a stand-in core).
 #   plan/ws322/tests/p006/run.sh OUTDIR [NAME...]
 # The cache is $H265SW_CONFORMANCE_DIR (default /home/awe/zedBSD-claude1/build/sources/h265-conformance, read only).
 # Last line: p006: PASS (<n> streams) or p006: FAIL (<n> streams).
@@ -68,6 +69,24 @@ for name in $names; do
 	fi
 done
 
+# libmedia's H.265 back end over a stand-in context, on every stream, one packet and one access unit a packet.
+L=$root/userland/desktop/libmedia
+timeout 600 cc -std=gnu11 -O1 -g -D_DEFAULT_SOURCE -Wall -Wextra -Werror $san -I"$out/inc" -I"$root" -I"$root/userland/desktop/include" \
+	"$here/libmedia-h265-host-test.c" "$L/vkvideo-h265.c" "$L"/h265-*.c "$L"/h265sw-*.c "$L/vcodec-bitreader.c" "$L/vcodec-nal.c" \
+	"$L/bits.c" "$L/picture.c" "$L/bitstream.c" "$L/media-os-posix.c" -lpthread -lm -o "$out/libmedia-h265-host-test"
+for name in $names; do
+	zip="$cache/$name.zip"
+	member=$(unzip -Z1 "$zip" | grep -v '__MACOSX\|/\._\|^\._' | grep -i '\.\(bit\|bin\)$' | head -1)
+	for mode in "" --packets; do
+		if unzip -p "$zip" "$member" | timeout 600 "$out/libmedia-h265-host-test" $mode - > "$out/$name.libmedia$mode.txt" 2>&1; then
+			echo "$name libmedia$mode PASS $(tail -1 "$out/$name.libmedia$mode.txt")" >> "$out/summary.txt"
+		else
+			echo "$name libmedia$mode FAIL $(tail -1 "$out/$name.libmedia$mode.txt")" >> "$out/summary.txt"
+			failed=$((failed + 1))
+		fi
+	done
+done
+
 # The engine's H.265 checks.
 timeout 300 cc -std=c11 -O1 -g -Wall -Wextra -Werror $san -I"$root/include" -I"$root/src" \
 	"$root/src/drivers/vpu/wave5-video.c" "$root/src/drivers/vpu/vpu-h264-ps.c" "$root/src/drivers/vpu/vpu-h265-ps.c" \
@@ -79,7 +98,7 @@ fi
 tail -1 "$out/engine.txt"
 
 # The verdict.
-grep -c ' PASS ' "$out/summary.txt" | sed 's/^/streams passed: /'
+grep -c ' PASS ' "$out/summary.txt" | sed 's/^/stream runs passed: /'
 grep ' FAIL ' "$out/summary.txt" | head -20 || true
 if [ "$failed" = 0 ]; then
 	echo "p006: PASS ($streams streams)"

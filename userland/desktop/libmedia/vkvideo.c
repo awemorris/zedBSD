@@ -5,7 +5,12 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* Native H.264 uses standard Vulkan Video admission, logical reference marking and retained CPU display pictures. */
+/*
+ * Native H.264 uses standard Vulkan Video admission, logical reference
+ * marking and retained CPU display pictures.  An H.265 track is opened by
+ * vkvideo-h265.c through the same operations: each decoder's first member
+ * names its codec, and every operation on an H.265 one goes there.
+ */
 #include "media-private.h"
 #include "vkvideo-runtime.h"
 
@@ -46,6 +51,7 @@ struct vkvideo_output {
 
 /* One native backend owns packet conversion, parser history, GPU retirement and a bounded display reorder queue. */
 struct vkvideo_decoder {
+	unsigned codec;
 	struct media_bitstream bitstream;
 	struct h264_stream stream;
 	struct h264_picture picture;
@@ -92,6 +98,7 @@ static int vkvideo_decode(struct vkvideo_decoder *decoder);
 static void vkvideo_dpb_reset(struct vkvideo_decoder *decoder, unsigned max_references);
 static int vkvideo_errno(int problem);
 static int vkvideo_problem(int error);
+static int vkvideo_h265(const void *state);
 
 /* The native library's video operation table owns no software-codec loader or vendor-specific pixel layout. */
 const struct media_decoder_ops media_vkvideo_ops = {
@@ -129,13 +136,16 @@ vkvideo_open(
 	unsigned index;
 	int error;
 
-	/* Another codec is a normal backend-selection refusal. */
+	/* H.265 is vkvideo-h265.c's; another codec is a normal backend-selection refusal. */
 	*result = NULL;
+	if (track->codec == MEDIA_CODEC_HEVC)
+		return media_vkvideo_h265_ops.open(track, result);
 	if (track->codec != MEDIA_CODEC_H264)
 		return MEDIA_PROBLEM_FORMAT;
 	decoder = calloc(1U, sizeof(*decoder));
 	if (decoder == NULL)
 		return ENOMEM;
+	decoder->codec = MEDIA_CODEC_H264;
 	decoder->decode_order_times = track->decode_order_times;
 	decoder->aspect_num = track->aspect_num;
 	decoder->aspect_den = track->aspect_den;
@@ -213,7 +223,8 @@ static const char *
 vkvideo_name(
 	const void *state)
 {
-	(void)state;
+	if (vkvideo_h265(state))
+		return media_vkvideo_h265_ops.decoder_name(state);
 	return "h264";
 }
 
@@ -230,7 +241,9 @@ vkvideo_send(
 	int found;
 	int error;
 
-	/* Receive consumes each pending packet before the converter can overwrite its backing storage. */
+	/* An H.265 decoder's own; receive consumes each pending packet before the converter can overwrite its backing storage. */
+	if (vkvideo_h265(state))
+		return media_vkvideo_h265_ops.send(state, packet);
 	decoder = state;
 	if (decoder->failed != 0)
 		return decoder->failed;
@@ -283,7 +296,9 @@ vkvideo_receive(
 	int found;
 	int error;
 
-	/* The previous receive's picture stays available until this receive replaces it. */
+	/* An H.265 decoder's own; the previous receive's picture stays available until this receive replaces it. */
+	if (vkvideo_h265(state))
+		return media_vkvideo_h265_ops.receive(state, time_us);
 	decoder = state;
 	if (decoder->current != NULL) {
 		media_picture_unref(decoder->current);
@@ -366,7 +381,9 @@ vkvideo_picture(
 {
 	struct vkvideo_decoder *decoder;
 
-	/* Exported picture references belong to the caller, independently of the next receive. */
+	/* An H.265 decoder's own; exported picture references belong to the caller, independently of the next receive. */
+	if (vkvideo_h265(state))
+		return media_vkvideo_h265_ops.picture(state);
 	decoder = state;
 	if (decoder->current == NULL)
 		return NULL;
@@ -396,6 +413,12 @@ vkvideo_flush(
 {
 	struct vkvideo_decoder *decoder;
 
+	/* An H.265 decoder's own. */
+	if (vkvideo_h265(state)) {
+		media_vkvideo_h265_ops.flush(state);
+		return;
+	}
+
 	/* Seek cannot expose queued pre-seek CPU frames or retain active logical references; the pictures in flight retire first. */
 	decoder = state;
 	if (decoder->runtime != NULL)
@@ -423,10 +446,14 @@ vkvideo_close(
 {
 	struct vkvideo_decoder *decoder;
 
-	/* Partial opens share the same unwind path as completed decoders. */
+	/* Partial opens share the same unwind path as completed decoders; an H.265 decoder closes itself. */
 	decoder = state;
 	if (decoder == NULL)
 		return;
+	if (vkvideo_h265(state)) {
+		media_vkvideo_h265_ops.close(state);
+		return;
+	}
 	media_vkvideo_runtime_close(decoder->runtime);
 	vkvideo_pending_free(decoder);
 	if (decoder->current != NULL)
@@ -822,4 +849,16 @@ vkvideo_problem(
 
 	/* Invalid input and allocation failures remain ordinary errors. */
 	return error;
+}
+
+/* Reports whether a decoder is vkvideo-h265.c's (its first member names its codec). */
+static int
+vkvideo_h265(
+	const void *state)
+{
+	unsigned codec;
+
+	/* The codec word both decoders begin with. */
+	memcpy(&codec, state, sizeof(codec));
+	return codec == MEDIA_CODEC_HEVC;
 }

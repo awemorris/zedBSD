@@ -35,6 +35,14 @@
 #define VKVIDEO_SOURCE_MAX (65U * 1024U * 1024U)
 
 /*
+ * The most decode slots a context makes (H.265: the sixteen pictures of
+ * its DPB, those in flight and those the program holds), and the most
+ * slice segments of one picture (H.265's limit; H.264's is lower).
+ */
+#define VKVIDEO_SLOTS MEDIA_GPU_SLOTS
+#define VKVIDEO_SLICES 600U
+
+/*
  * The pictures submitted ahead of the one being read back, at most.  The Raspberry Pi 4's firmware decoder, known by its vendor, takes
  * the next pictures while one is read back; on other devices one picture
  * is decoded, read back and copied before the next is submitted.
@@ -194,13 +202,16 @@ struct vkvideo_runtime {
 	VkQueue transfer_queue;
 	VkCommandPool transfer_pool;
 	VkPhysicalDeviceMemoryProperties memory;
+	unsigned codec;
 	VkVideoDecodeH264ProfileInfoKHR h264_profile;
+	VkVideoDecodeH265ProfileInfoKHR h265_profile;
 	VkVideoProfileInfoKHR profile;
 	VkVideoProfileListInfoKHR profile_list;
 	VkVideoCapabilitiesKHR capabilities;
 	VkVideoDecodeCapabilitiesKHR decode_caps;
 	VkVideoDecodeH264CapabilitiesKHR h264_caps;
-	StdVideoH264LevelIdc level;
+	VkVideoDecodeH265CapabilitiesKHR h265_caps;
+	uint32_t level;
 	VkExtent2D extent;
 	VkExtent2D image_extent;
 	VkImageUsageFlags reference_usage;
@@ -211,9 +222,9 @@ struct vkvideo_runtime {
 	uint32_t slots;
 	uint32_t max_references;
 	int distinct;
-	VkImage image[H264_DPB_SLOTS + 1U];
-	VkDeviceMemory image_memory[H264_DPB_SLOTS + 1U];
-	VkImageView view[H264_DPB_SLOTS + 1U];
+	VkImage image[VKVIDEO_SLOTS + 1U];
+	VkDeviceMemory image_memory[VKVIDEO_SLOTS + 1U];
+	VkImageView view[VKVIDEO_SLOTS + 1U];
 	VkCommandPool pool;
 	VkBool32 status_supported;
 	VkQueryPool status_pool;
@@ -333,7 +344,10 @@ static pthread_once_t vkvideo_loader_once = PTHREAD_ONCE_INIT;
 static uint64_t vkvideo_gpu_identity;
 
 static void vkvideo_loader(void);
-static int vkvideo_runtime_make(const StdVideoH264SequenceParameterSet *sps, unsigned reorder, unsigned hold, struct vkvideo_runtime **runtime);
+static int vkvideo_runtime_open(const struct vkvideo_shape *shape, unsigned reorder, struct vkvideo_runtime **runtime);
+static int vkvideo_runtime_make(const struct vkvideo_shape *shape, unsigned reorder, unsigned hold, struct vkvideo_runtime **runtime);
+static int vkvideo_parameters(struct vkvideo_runtime *video, const void *create);
+static int vkvideo_submit(struct vkvideo_runtime *video, const struct vkvideo_job *job, struct media_picture *output, uint32_t *ticket);
 static int vkvideo_dispatch(struct vkvideo_runtime *video, int instance);
 static int vkvideo_instance(struct vkvideo_runtime *video);
 static int vkvideo_resources(struct vkvideo_runtime *video);
@@ -355,7 +369,7 @@ static int vkvideo_commands(struct vkvideo_runtime *video);
 static int vkvideo_flight_commands(struct vkvideo_runtime *video, struct vkvideo_flight *flight);
 static void vkvideo_flight_free(struct vkvideo_runtime *video, struct vkvideo_flight *flight);
 static struct vkvideo_flight *vkvideo_oldest(struct vkvideo_runtime *video, enum vkvideo_state state);
-static int vkvideo_record_decode(struct vkvideo_runtime *video, struct vkvideo_flight *flight, const struct h264_stream *stream, const struct h264_picture *picture, const struct h264_dpb_plan *plan, VkDeviceSize range, const uint32_t *offsets);
+static int vkvideo_record_decode(struct vkvideo_runtime *video, struct vkvideo_flight *flight, const struct vkvideo_job *job, VkDeviceSize range, const uint32_t *offsets);
 static int vkvideo_record_readback(struct vkvideo_runtime *video, struct vkvideo_flight *flight, VkImageLayout output_layout);
 static int vkvideo_submit_readback(struct vkvideo_runtime *video, struct vkvideo_flight *flight);
 static int vkvideo_complete(struct vkvideo_runtime *video, struct vkvideo_flight *flight, int discard);
@@ -378,6 +392,49 @@ media_vkvideo_runtime_open(
 	unsigned reorder,
 	struct vkvideo_runtime **runtime)
 {
+	struct vkvideo_shape shape;
+
+	/* The sequence's profile, level, coded size in macroblocks and references (at least one). */
+	memset(&shape, 0, sizeof(shape));
+	shape.codec = VKVIDEO_H264;
+	shape.profile = (uint32_t)sps->profile_idc;
+	shape.level = (uint32_t)sps->level_idc;
+	shape.width = (sps->pic_width_in_mbs_minus1 + 1U) * 16U;
+	shape.height = (sps->pic_height_in_map_units_minus1 + 1U) * 16U;
+	shape.references = sps->max_num_ref_frames;
+	if (shape.references == 0U)
+		shape.references = 1U;
+	return vkvideo_runtime_open(&shape, reorder, runtime);
+}
+
+/*
+ * Opens a standard H.265 decode context for one sequence of the shape
+ * (its StdVideoH265ProfileIdc, StdVideoH265LevelIdc, coded size in luma
+ * samples and the references its DPB keeps at most).
+ */
+int
+media_vkvideo_runtime_open_h265(
+	const struct vkvideo_shape *shape,
+	unsigned reorder,
+	struct vkvideo_runtime **runtime)
+{
+	struct vkvideo_shape copy;
+
+	/* The H.265 shape, with one reference at least. */
+	copy = *shape;
+	copy.codec = VKVIDEO_H265;
+	if (copy.references == 0U)
+		copy.references = 1U;
+	return vkvideo_runtime_open(&copy, reorder, runtime);
+}
+
+/* Opens a context of a shape: the one the program asked for, else one whose pictures are read back. */
+static int
+vkvideo_runtime_open(
+	const struct vkvideo_shape *shape,
+	unsigned reorder,
+	struct vkvideo_runtime **runtime)
+{
 	unsigned hold;
 	int error;
 
@@ -391,12 +448,12 @@ media_vkvideo_runtime_open(
 
 	/* The context the program asked for. */
 	hold = media_decoder_gpu_hold();
-	error = vkvideo_runtime_make(sps, reorder, hold, runtime);
+	error = vkvideo_runtime_make(shape, reorder, hold, runtime);
 
 	/* A context whose pictures the GPU would hold but that could not be made is made again, read back. */
 	if (error != 0 && hold != 0U) {
 		media_log("Vulkan Video: a context of pictures the GPU holds failed (%d); pictures are read back", error);
-		error = vkvideo_runtime_make(sps, reorder, 0U, runtime);
+		error = vkvideo_runtime_make(shape, reorder, 0U, runtime);
 	}
 
 	/* Reports a context that could not be made. */
@@ -408,13 +465,13 @@ media_vkvideo_runtime_open(
 }
 
 /*
- * Makes a context sized for the sequence, whose pictures the GPU holds
+ * Makes a context sized for the shape, whose pictures the GPU holds
  * (hold of them held by the program at once) when hold is not zero and the
  * device can.  Returns 0 or a problem (MEDIA_PROBLEM_*) or errno value.
  */
 static int
 vkvideo_runtime_make(
-	const StdVideoH264SequenceParameterSet *sps,
+	const struct vkvideo_shape *shape,
 	unsigned reorder,
 	unsigned hold,
 	struct vkvideo_runtime **runtime)
@@ -427,23 +484,29 @@ vkvideo_runtime_make(
 	video = calloc(1U, sizeof(*video));
 	if (video == NULL)
 		return ENOMEM;
-	video->level = sps->level_idc;
-	video->extent.width = (sps->pic_width_in_mbs_minus1 + 1U) * 16U;
-	video->extent.height = (sps->pic_height_in_map_units_minus1 + 1U) * 16U;
-	video->max_references = sps->max_num_ref_frames;
-	if (video->max_references == 0U)
-		video->max_references = 1U;
+	video->codec = shape->codec;
+	video->level = shape->level;
+	video->extent.width = shape->width;
+	video->extent.height = shape->height;
+	video->max_references = shape->references;
 	video->slots = video->max_references + 1U;
 	video->gpu_hold = hold;
 	video->reorder = reorder;
 
 	/* Profile chains are stable for the entire lifetime of this instance's resources. */
-	video->h264_profile.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR;
-	video->h264_profile.stdProfileIdc = sps->profile_idc;
-	video->h264_profile.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR;
 	video->profile.sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR;
-	video->profile.pNext = &video->h264_profile;
-	video->profile.videoCodecOperation = VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+	if (video->codec == VKVIDEO_H265) {
+		video->h265_profile.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PROFILE_INFO_KHR;
+		video->h265_profile.stdProfileIdc = (StdVideoH265ProfileIdc)shape->profile;
+		video->profile.pNext = &video->h265_profile;
+		video->profile.videoCodecOperation = VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR;
+	} else {
+		video->h264_profile.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR;
+		video->h264_profile.stdProfileIdc = (StdVideoH264ProfileIdc)shape->profile;
+		video->h264_profile.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR;
+		video->profile.pNext = &video->h264_profile;
+		video->profile.videoCodecOperation = VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+	}
 	video->profile.chromaSubsampling = VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR;
 	video->profile.lumaBitDepth = VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR;
 	video->profile.chromaBitDepth = VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR;
@@ -492,12 +555,9 @@ media_vkvideo_runtime_parameters(
 	StdVideoH264PictureParameterSet pps[H264_PPS_IDS];
 	VkVideoDecodeH264SessionParametersAddInfoKHR add;
 	VkVideoDecodeH264SessionParametersCreateInfoKHR h264;
-	VkVideoSessionParametersCreateInfoKHR info;
-	VkResult result;
 	uint32_t sps_count;
 	uint32_t pps_count;
 	uint32_t index;
-	int error;
 
 	/* The sets the stream has. */
 	sps_count = 0U;
@@ -517,15 +577,6 @@ media_vkvideo_runtime_parameters(
 		pps_count++;
 	}
 
-	/* The pictures in flight complete first: no submission may still use the old parameter object. */
-	error = vkvideo_complete_all(video, 0);
-	if (error != 0)
-		return error;
-	if (video->parameters != VK_NULL_HANDLE) {
-		video->fn.vkDestroyVideoSessionParametersKHR(video->device, video->parameters, NULL);
-		video->parameters = VK_NULL_HANDLE;
-	}
-
 	/* The parameters object holding them. */
 	memset(&add, 0, sizeof(add));
 	add.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_SESSION_PARAMETERS_ADD_INFO_KHR;
@@ -538,9 +589,53 @@ media_vkvideo_runtime_parameters(
 	h264.maxStdSPSCount = sps_count;
 	h264.maxStdPPSCount = pps_count;
 	h264.pParametersAddInfo = &add;
+	return vkvideo_parameters(video, &h264);
+}
+
+/*
+ * Replace the session parameter object with the H.265 sets of an add
+ * record (every VPS, SPS and PPS the stream has published).
+ */
+int
+media_vkvideo_runtime_parameters_h265(
+	struct vkvideo_runtime *video,
+	const VkVideoDecodeH265SessionParametersAddInfoKHR *add)
+{
+	VkVideoDecodeH265SessionParametersCreateInfoKHR h265;
+
+	/* Room for the add's sets. */
+	memset(&h265, 0, sizeof(h265));
+	h265.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_SESSION_PARAMETERS_CREATE_INFO_KHR;
+	h265.maxStdVPSCount = add->stdVPSCount;
+	h265.maxStdSPSCount = add->stdSPSCount;
+	h265.maxStdPPSCount = add->stdPPSCount;
+	h265.pParametersAddInfo = add;
+	return vkvideo_parameters(video, &h265);
+}
+
+/* Makes the session's parameters object from a codec's create record, in place of the one before. */
+static int
+vkvideo_parameters(
+	struct vkvideo_runtime *video,
+	const void *create)
+{
+	VkVideoSessionParametersCreateInfoKHR info;
+	VkResult result;
+	int error;
+
+	/* The pictures in flight complete first: no submission may still use the old parameter object. */
+	error = vkvideo_complete_all(video, 0);
+	if (error != 0)
+		return error;
+	if (video->parameters != VK_NULL_HANDLE) {
+		video->fn.vkDestroyVideoSessionParametersKHR(video->device, video->parameters, NULL);
+		video->parameters = VK_NULL_HANDLE;
+	}
+
+	/* The parameters object holding the record's sets. */
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_PARAMETERS_CREATE_INFO_KHR;
-	info.pNext = &h264;
+	info.pNext = create;
 	info.videoSession = video->session;
 	result = video->fn.vkCreateVideoSessionParametersKHR(video->device, &info, NULL, &video->parameters);
 	if (result != VK_SUCCESS) {
@@ -587,9 +682,8 @@ media_vkvideo_runtime_reserve(
 }
 
 /*
- * Submits one admitted picture's decode, and the readbacks of earlier
- * pictures that are due; ticket receives the picture's number for
- * media_vkvideo_runtime_finish.
+ * Submits one admitted H.264 picture's decode as the DPB planned it; see
+ * vkvideo_submit.
  */
 int
 media_vkvideo_runtime_submit(
@@ -600,9 +694,64 @@ media_vkvideo_runtime_submit(
 	struct media_picture *output,
 	uint32_t *ticket)
 {
-	uint32_t offsets[H264_MAX_SLICES];
-	struct vkvideo_flight *flight;
 	const StdVideoH264SequenceParameterSet *sps;
+	struct vkvideo_job job;
+
+	/* The picture's slices, its slots and records, its sequence's coded size and crop. */
+	sps = &stream->sps[picture->info.seq_parameter_set_id];
+	memset(&job, 0, sizeof(job));
+	job.data = stream->data;
+	job.slice_count = picture->slice_count;
+	job.slice_offsets = picture->slice_offsets;
+	job.slice_sizes = picture->slice_sizes;
+	job.setup = plan->setup;
+	job.reset = plan->reset;
+	job.reference_count = plan->reference_count;
+	job.references = plan->references;
+	job.reference_info = plan->info;
+	job.deactivate_count = plan->deactivate_count;
+	job.deactivate = plan->deactivate;
+	job.setup_info = &plan->setup_info;
+	job.picture_info = &picture->info;
+	job.width = (sps->pic_width_in_mbs_minus1 + 1U) * 16U;
+	job.height = (sps->pic_height_in_map_units_minus1 + 1U) * 16U;
+	job.crop_x = sps->frame_crop_left_offset * 2U;
+	job.crop_y = sps->frame_crop_top_offset * 2U;
+	return vkvideo_submit(video, &job, output, ticket);
+}
+
+/*
+ * Submits one admitted H.265 picture's decode (job's records are
+ * StdVideoDecodeH265PictureInfo and StdVideoDecodeH265ReferenceInfo); see
+ * vkvideo_submit.
+ */
+int
+media_vkvideo_runtime_submit_h265(
+	struct vkvideo_runtime *video,
+	const struct vkvideo_job *job,
+	struct media_picture *output,
+	uint32_t *ticket)
+{
+	/* An H.265 context only. */
+	if (video->codec != VKVIDEO_H265)
+		return EINVAL;
+	return vkvideo_submit(video, job, output, ticket);
+}
+
+/*
+ * Submits one admitted picture's decode, and the readbacks of earlier
+ * pictures that are due; ticket receives the picture's number for
+ * media_vkvideo_runtime_finish.
+ */
+static int
+vkvideo_submit(
+	struct vkvideo_runtime *video,
+	const struct vkvideo_job *job,
+	struct media_picture *output,
+	uint32_t *ticket)
+{
+	uint32_t offsets[VKVIDEO_SLICES];
+	struct vkvideo_flight *flight;
 	VkSubmitInfo submit;
 	VkDeviceSize aligned;
 	VkDeviceSize alignment;
@@ -634,11 +783,13 @@ media_vkvideo_runtime_submit(
 		return EIO;
 
 	/* Size and align the complete access unit before writing or submitting any part of it. */
+	if (job->slice_count > VKVIDEO_SLICES)
+		return EINVAL;
 	at = 0U;
-	for (slice = 0U; slice < picture->slice_count; slice++) {
-		if (picture->slice_sizes[slice] > VKVIDEO_SOURCE_MAX - at - 3U)
+	for (slice = 0U; slice < job->slice_count; slice++) {
+		if (job->slice_sizes[slice] > VKVIDEO_SOURCE_MAX - at - 3U)
 			return EINVAL;
-		at += 3U + picture->slice_sizes[slice];
+		at += 3U + job->slice_sizes[slice];
 	}
 
 	/* Pad the bitstream range to the queried device alignment. */
@@ -660,13 +811,13 @@ media_vkvideo_runtime_submit(
 
 	/* Pack complete Annex-B slice NALs into the mapped source buffer. */
 	at = 0U;
-	for (slice = 0U; slice < picture->slice_count; slice++) {
+	for (slice = 0U; slice < job->slice_count; slice++) {
 		offsets[slice] = (uint32_t)at;
 		flight->buffer_map[at] = 0U;
 		flight->buffer_map[at + 1U] = 0U;
 		flight->buffer_map[at + 2U] = 1U;
-		memcpy(flight->buffer_map + at + 3U, stream->data + picture->slice_offsets[slice], picture->slice_sizes[slice]);
-		at += 3U + picture->slice_sizes[slice];
+		memcpy(flight->buffer_map + at + 3U, job->data + job->slice_offsets[slice], job->slice_sizes[slice]);
+		at += 3U + job->slice_sizes[slice];
 	}
 
 	/* Zero only the required alignment padding after the final slice. */
@@ -679,20 +830,19 @@ media_vkvideo_runtime_submit(
 
 	/* The picture's output: its slot's image, or the distinct output image. */
 	output_layout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR;
-	flight->slot = (uint32_t)plan->setup;
+	flight->slot = (uint32_t)job->setup;
 	if (video->distinct) {
 		output_layout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR;
 		flight->slot = video->slots;
 	}
 
 	/* The crop of the sequence, for the copy into the CPU picture. */
-	sps = &stream->sps[picture->info.seq_parameter_set_id];
-	flight->crop_x = sps->frame_crop_left_offset * 2U;
-	flight->crop_y = sps->frame_crop_top_offset * 2U;
+	flight->crop_x = job->crop_x;
+	flight->crop_y = job->crop_y;
 	flight->output = output;
 
 	/* The decode's command buffer. */
-	error = vkvideo_record_decode(video, flight, stream, picture, plan, aligned, offsets);
+	error = vkvideo_record_decode(video, flight, job, aligned, offsets);
 	if (error != 0)
 		return error;
 
@@ -912,7 +1062,7 @@ media_vkvideo_runtime_close(
 			video->fn.vkDestroyVideoSessionKHR(video->device, video->session, NULL);
 		for (index = 0U; index < video->session_memory_count; index++)
 			video->fn.vkFreeMemory(video->device, video->session_memory[index], NULL);
-		for (index = 0U; index < H264_DPB_SLOTS + 1U; index++) {
+		for (index = 0U; index < VKVIDEO_SLOTS + 1U; index++) {
 			if (video->view[index] != VK_NULL_HANDLE)
 				video->fn.vkDestroyImageView(video->device, video->view[index], NULL);
 			if (video->image[index] != VK_NULL_HANDLE)
@@ -1156,6 +1306,9 @@ vkvideo_session(
 	static const VkExtensionProperties header = {
 	    VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_EXTENSION_NAME,
 	    VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_SPEC_VERSION};
+	static const VkExtensionProperties h265_header = {
+	    VK_STD_VULKAN_VIDEO_CODEC_H265_DECODE_EXTENSION_NAME,
+	    VK_STD_VULKAN_VIDEO_CODEC_H265_DECODE_SPEC_VERSION};
 	VkVideoSessionCreateInfoKHR info;
 	VkVideoSessionMemoryRequirementsKHR requirements[VKVIDEO_BINDINGS];
 	VkBindVideoSessionMemoryInfoKHR binds[VKVIDEO_BINDINGS];
@@ -1175,6 +1328,8 @@ vkvideo_session(
 	info.maxDpbSlots = video->slots;
 	info.maxActiveReferencePictures = video->max_references;
 	info.pStdHeaderVersion = &header;
+	if (video->codec == VKVIDEO_H265)
+		info.pStdHeaderVersion = &h265_header;
 	result = video->fn.vkCreateVideoSessionKHR(video->device, &info, NULL, &video->session);
 	if (result != VK_SUCCESS) {
 		error = vkvideo_failed(result, "vkCreateVideoSessionKHR");
@@ -1514,6 +1669,7 @@ vkvideo_family(
 	VkQueueFamilyProperties2 families[VKVIDEO_FAMILIES];
 	VkQueueFamilyVideoPropertiesKHR properties[VKVIDEO_FAMILIES];
 	VkQueueFamilyQueryResultStatusPropertiesKHR status[VKVIDEO_FAMILIES];
+	VkVideoCodecOperationFlagsKHR operation;
 	uint32_t count;
 	unsigned index;
 	int transfer;
@@ -1543,6 +1699,9 @@ vkvideo_family(
 	video->fn.vkGetPhysicalDeviceQueueFamilyProperties2KHR(video->physical, &count, families);
 	transfer = -1;
 	decoder = -1;
+	operation = VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+	if (video->codec == VKVIDEO_H265)
+		operation = VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR;
 	for (index = 0U; index < count; index++) {
 		/* Each family's flags and decode operations, for the log. */
 		media_log("Vulkan Video: queue family %u flags 0x%x operations 0x%x", index, (unsigned)families[index].queueFamilyProperties.queueFlags,
@@ -1551,13 +1710,13 @@ vkvideo_family(
 			transfer = (int)index;
 		if ((families[index].queueFamilyProperties.queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) == 0U)
 			continue;
-		if ((properties[index].videoCodecOperations & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) == 0U)
+		if ((properties[index].videoCodecOperations & operation) == 0U)
 			continue;
 		decoder = (int)index;
 		video->status_supported = status[index].queryResultStatusSupport;
 	}
 
-	/* Require both an H.264 decode family and a transfer-capable family. */
+	/* Require both a decode family of the codec and a transfer-capable family. */
 	if (decoder >= 0 && transfer >= 0) {
 		video->family = (uint32_t)decoder;
 		video->transfer_family = (uint32_t)transfer;
@@ -1647,6 +1806,7 @@ vkvideo_capabilities(
 {
 	VkResult result;
 	VkExtent2D granularity;
+	uint32_t max_level;
 	int error;
 
 	/* Each candidate begins with an independent image-model choice. */
@@ -1654,8 +1814,11 @@ vkvideo_capabilities(
 
 	/* The profile query provides bitstream alignment, extent, reference capacity and image-model flags. */
 	video->h264_caps.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_CAPABILITIES_KHR;
+	video->h265_caps.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_CAPABILITIES_KHR;
 	video->decode_caps.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_CAPABILITIES_KHR;
 	video->decode_caps.pNext = &video->h264_caps;
+	if (video->codec == VKVIDEO_H265)
+		video->decode_caps.pNext = &video->h265_caps;
 	video->capabilities.sType = VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR;
 	video->capabilities.pNext = &video->decode_caps;
 	result = video->fn.vkGetPhysicalDeviceVideoCapabilitiesKHR(video->physical, &video->profile, &video->capabilities);
@@ -1664,11 +1827,14 @@ vkvideo_capabilities(
 		return error;
 	}
 
-	/* The limits, for the log. */
+	/* The codec's level, then the limits, for the log. */
+	max_level = (uint32_t)video->h264_caps.maxLevelIdc;
+	if (video->codec == VKVIDEO_H265)
+		max_level = (uint32_t)video->h265_caps.maxLevelIdc;
 	media_log("Vulkan Video: extent %ux%u of %ux%u..%ux%u, level %u of %u, slots %u of %u, references %u of %u, flags 0x%x",
 	    video->extent.width, video->extent.height, video->capabilities.minCodedExtent.width, video->capabilities.minCodedExtent.height,
 	    video->capabilities.maxCodedExtent.width, video->capabilities.maxCodedExtent.height, (unsigned)video->level,
-	    (unsigned)video->h264_caps.maxLevelIdc, video->slots, video->capabilities.maxDpbSlots, video->max_references,
+	    (unsigned)max_level, video->slots, video->capabilities.maxDpbSlots, video->max_references,
 	    video->capabilities.maxActiveReferencePictures, (unsigned)video->decode_caps.flags);
 
 	/* The sequence must fit both coded-extent limits and the advertised profile level. */
@@ -1676,7 +1842,7 @@ vkvideo_capabilities(
 		return ENOTSUP;
 	if (video->extent.width < video->capabilities.minCodedExtent.width || video->extent.height < video->capabilities.minCodedExtent.height)
 		return ENOTSUP;
-	if (video->level > video->h264_caps.maxLevelIdc)
+	if (video->level > max_level)
 		return ENOTSUP;
 	video->flights = 1U;
 	video->slots = video->max_references + 1U;
@@ -1779,7 +1945,9 @@ vkvideo_device(
 	 * selected physical device; the last two export the images of pictures
 	 * the GPU holds, and are enabled only for them.
 	 */
-	static const char *const extensions[] = {VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_VIDEO_QUEUE_EXTENSION_NAME, VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME, VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
+	static const char *const h264_extensions[] = {VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_VIDEO_QUEUE_EXTENSION_NAME, VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME, VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
+	static const char *const h265_extensions[] = {VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_VIDEO_QUEUE_EXTENSION_NAME, VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME, VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
+	const char *const *extensions;
 	unsigned exporting;
 	VkPhysicalDevice devices[32];
 	VkExtensionProperties *available;
@@ -1798,6 +1966,11 @@ vkvideo_device(
 	int error;
 	float priority;
 	PFN_vkVoidFunction address;
+
+	/* The codec's decode extension among the required ones. */
+	extensions = h264_extensions;
+	if (video->codec == VKVIDEO_H265)
+		extensions = h265_extensions;
 
 	/* Bound enumeration before filling storage with driver-reported device handles. */
 	count = 0U;
@@ -1826,7 +1999,7 @@ vkvideo_device(
 		vkvideo_firmware(video);
 		error = vkvideo_family(video);
 		if (error != 0) {
-			media_log("Vulkan Video: device %u has no H.264 decode and transfer queue families", index);
+			media_log("Vulkan Video: device %u has no decode queue family of the codec and no transfer one", index);
 			continue;
 		}
 
@@ -2191,18 +2364,19 @@ static int
 vkvideo_record_decode(
 	struct vkvideo_runtime *video,
 	struct vkvideo_flight *flight,
-	const struct h264_stream *stream,
-	const struct h264_picture *picture,
-	const struct h264_dpb_plan *plan,
+	const struct vkvideo_job *job,
 	VkDeviceSize range,
 	const uint32_t *offsets)
 {
-	VkVideoPictureResourceInfoKHR resources[H264_DPB_SLOTS];
-	VkVideoReferenceSlotInfoKHR bound[H264_DPB_SLOTS * 2U];
-	VkVideoReferenceSlotInfoKHR references[H264_DPB_REFERENCES];
-	VkVideoDecodeH264DpbSlotInfoKHR reference_info[H264_DPB_REFERENCES];
+	VkVideoPictureResourceInfoKHR resources[VKVIDEO_SLOTS + 1U];
+	VkVideoReferenceSlotInfoKHR bound[VKVIDEO_SLOTS * 2U + 1U];
+	VkVideoReferenceSlotInfoKHR references[VKVIDEO_SLOTS];
+	VkVideoDecodeH264DpbSlotInfoKHR reference_info[VKVIDEO_SLOTS];
+	VkVideoDecodeH265DpbSlotInfoKHR h265_reference_info[VKVIDEO_SLOTS];
 	VkVideoDecodeH264DpbSlotInfoKHR setup_info;
+	VkVideoDecodeH265DpbSlotInfoKHR h265_setup_info;
 	VkVideoDecodeH264PictureInfoKHR h264;
+	VkVideoDecodeH265PictureInfoKHR h265;
 	VkVideoReferenceSlotInfoKHR setup;
 	VkVideoBeginCodingInfoKHR begin;
 	VkVideoCodingControlInfoKHR control;
@@ -2211,7 +2385,6 @@ vkvideo_record_decode(
 	VkCommandBufferBeginInfo record;
 	VkVideoPictureResourceInfoKHR destination;
 	VkImageLayout output_layout;
-	const StdVideoH264SequenceParameterSet *sps;
 	VkResult result;
 	uint32_t query;
 	uint32_t slot;
@@ -2219,13 +2392,24 @@ vkvideo_record_decode(
 	uint32_t count;
 	int error;
 
+	/* The slots the job names must be the session's. */
+	if (job->setup < 0 || (uint32_t)job->setup >= video->slots || job->reference_count > VKVIDEO_SLOTS || job->deactivate_count > VKVIDEO_SLOTS)
+		return EINVAL;
+	for (index = 0U; index < job->reference_count; index++) {
+		if (job->references[index] < 0 || (uint32_t)job->references[index] >= video->slots)
+			return EINVAL;
+	}
+	for (index = 0U; index < job->deactivate_count; index++) {
+		if (job->deactivate[index] < 0 || (uint32_t)job->deactivate[index] >= video->slots)
+			return EINVAL;
+	}
+
 	/* Every slot's picture resource: its image's coded picture of the sequence. */
-	sps = &stream->sps[picture->info.seq_parameter_set_id];
 	memset(resources, 0, sizeof(resources));
 	for (slot = 0U; slot < video->slots; slot++) {
 		resources[slot].sType = VK_STRUCTURE_TYPE_VIDEO_PICTURE_RESOURCE_INFO_KHR;
-		resources[slot].codedExtent.width = (sps->pic_width_in_mbs_minus1 + 1U) * 16U;
-		resources[slot].codedExtent.height = (sps->pic_height_in_map_units_minus1 + 1U) * 16U;
+		resources[slot].codedExtent.width = job->width;
+		resources[slot].codedExtent.height = job->height;
 		resources[slot].imageViewBinding = video->view[slot];
 	}
 
@@ -2254,7 +2438,7 @@ vkvideo_record_decode(
 
 	/* Select either the coincident current DPB image or the distinct output image. */
 	output_layout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR;
-	destination = resources[plan->setup];
+	destination = resources[job->setup];
 	if (video->distinct) {
 		output_layout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR;
 		destination.imageViewBinding = video->view[video->slots];
@@ -2263,17 +2447,17 @@ vkvideo_record_decode(
 	/* The scope's slots: the references, the deactivated slots, the written picture without a slot. */
 	memset(bound, 0, sizeof(bound));
 	count = 0U;
-	for (index = 0U; index < plan->reference_count; index++) {
+	for (index = 0U; index < job->reference_count; index++) {
 		bound[count].sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
-		bound[count].slotIndex = plan->references[index];
-		bound[count].pPictureResource = &resources[plan->references[index]];
+		bound[count].slotIndex = job->references[index];
+		bound[count].pPictureResource = &resources[job->references[index]];
 		count++;
 	}
 
 	/* Deactivate stale device slots before associating the new current picture. */
-	for (index = 0U; index < plan->deactivate_count; index++) {
+	for (index = 0U; index < job->deactivate_count; index++) {
 		bound[count].sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
-		bound[count].slotIndex = plan->deactivate[index];
+		bound[count].slotIndex = job->deactivate[index];
 		bound[count].pPictureResource = NULL;
 		count++;
 	}
@@ -2281,7 +2465,7 @@ vkvideo_record_decode(
 	/* Bind the current picture resource without an old reference-slot association. */
 	bound[count].sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
 	bound[count].slotIndex = -1;
-	bound[count].pPictureResource = &resources[plan->setup];
+	bound[count].pPictureResource = &resources[job->setup];
 	count++;
 
 	/* The scope, and the reset of the first decode. */
@@ -2292,50 +2476,69 @@ vkvideo_record_decode(
 	begin.referenceSlotCount = count;
 	begin.pReferenceSlots = bound;
 	video->fn.vkCmdBeginVideoCodingKHR(flight->command, &begin);
-	if (plan->reset || video->reset) {
+	if (job->reset || video->reset) {
 		memset(&control, 0, sizeof(control));
 		control.sType = VK_STRUCTURE_TYPE_VIDEO_CODING_CONTROL_INFO_KHR;
 		control.flags = VK_VIDEO_CODING_CONTROL_RESET_BIT_KHR;
 		video->fn.vkCmdControlVideoCodingKHR(flight->command, &control);
 	}
 
-	/* The references with their information. */
+	/* The references with their information, each of the codec's record. */
 	memset(references, 0, sizeof(references));
 	memset(reference_info, 0, sizeof(reference_info));
-	for (index = 0U; index < plan->reference_count; index++) {
-		reference_info[index].sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR;
-		reference_info[index].pStdReferenceInfo = &plan->info[index];
+	memset(h265_reference_info, 0, sizeof(h265_reference_info));
+	for (index = 0U; index < job->reference_count; index++) {
 		references[index].sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
-		references[index].pNext = &reference_info[index];
-		references[index].slotIndex = plan->references[index];
-		references[index].pPictureResource = &resources[plan->references[index]];
+		if (video->codec == VKVIDEO_H265) {
+			h265_reference_info[index].sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_DPB_SLOT_INFO_KHR;
+			h265_reference_info[index].pStdReferenceInfo = &((const StdVideoDecodeH265ReferenceInfo *)job->reference_info)[index];
+			references[index].pNext = &h265_reference_info[index];
+		} else {
+			reference_info[index].sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR;
+			reference_info[index].pStdReferenceInfo = &((const StdVideoDecodeH264ReferenceInfo *)job->reference_info)[index];
+			references[index].pNext = &reference_info[index];
+		}
+		references[index].slotIndex = job->references[index];
+		references[index].pPictureResource = &resources[job->references[index]];
 	}
 
 	/* The written slot, with the picture's own information. */
 	memset(&setup_info, 0, sizeof(setup_info));
 	setup_info.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR;
-	setup_info.pStdReferenceInfo = &plan->setup_info;
+	setup_info.pStdReferenceInfo = job->setup_info;
+	memset(&h265_setup_info, 0, sizeof(h265_setup_info));
+	h265_setup_info.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_DPB_SLOT_INFO_KHR;
+	h265_setup_info.pStdReferenceInfo = job->setup_info;
 	memset(&setup, 0, sizeof(setup));
 	setup.sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
 	setup.pNext = &setup_info;
-	setup.slotIndex = plan->setup;
-	setup.pPictureResource = &resources[plan->setup];
+	if (video->codec == VKVIDEO_H265)
+		setup.pNext = &h265_setup_info;
+	setup.slotIndex = job->setup;
+	setup.pPictureResource = &resources[job->setup];
 
-	/* The decode: the slices into the written slot's picture. */
+	/* The decode: the slices into the written slot's picture, with the codec's picture record. */
 	memset(&h264, 0, sizeof(h264));
 	h264.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PICTURE_INFO_KHR;
-	h264.pStdPictureInfo = &picture->info;
-	h264.sliceCount = picture->slice_count;
+	h264.pStdPictureInfo = job->picture_info;
+	h264.sliceCount = job->slice_count;
 	h264.pSliceOffsets = offsets;
+	memset(&h265, 0, sizeof(h265));
+	h265.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PICTURE_INFO_KHR;
+	h265.pStdPictureInfo = job->picture_info;
+	h265.sliceSegmentCount = job->slice_count;
+	h265.pSliceSegmentOffsets = offsets;
 	memset(&decode, 0, sizeof(decode));
 	decode.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_INFO_KHR;
 	decode.pNext = &h264;
+	if (video->codec == VKVIDEO_H265)
+		decode.pNext = &h265;
 	decode.srcBuffer = flight->buffer;
 	decode.srcBufferOffset = 0U;
 	decode.srcBufferRange = range;
 	decode.dstPictureResource = destination;
 	decode.pSetupReferenceSlot = &setup;
-	decode.referenceSlotCount = plan->reference_count;
+	decode.referenceSlotCount = job->reference_count;
 	decode.pReferenceSlots = references;
 	if (video->status_pool != VK_NULL_HANDLE)
 		video->fn.vkCmdBeginQuery(flight->command, video->status_pool, query, 0U);
@@ -2638,8 +2841,10 @@ vkvideo_gpu_capabilities(
 
 	/* Every image a picture may hold, within the device's and the decoder's limits. */
 	limit = video->capabilities.maxDpbSlots;
-	if (limit > H264_DPB_SLOTS)
+	if (video->codec == VKVIDEO_H264 && limit > H264_DPB_SLOTS)
 		limit = H264_DPB_SLOTS;
+	if (limit > VKVIDEO_SLOTS)
+		limit = VKVIDEO_SLOTS;
 	if (limit > MEDIA_GPU_SLOTS)
 		limit = MEDIA_GPU_SLOTS;
 	slots = video->max_references + video->reorder + video->flights + video->gpu_hold + 1U;

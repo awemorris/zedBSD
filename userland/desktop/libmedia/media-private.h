@@ -85,6 +85,7 @@ struct media_bitstream {
 /* Original LC reconstruction, with optional GPU video kept in a separate native backend. */
 extern const struct media_decoder_ops media_aac_ops;
 extern const struct media_decoder_ops media_vkvideo_ops;
+extern const struct media_decoder_ops media_vkvideo_h265_ops;
 
 /* The bitstream conversion (bitstream.c). */
 int media_bitstream_open(struct media_bitstream *stream, unsigned codec, const unsigned char *private_data, size_t private_size);
