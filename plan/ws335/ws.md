@@ -46,7 +46,7 @@
 | [p008](phase008/phase.md) | GF(2^255-19) と X25519（test-f25519、test-x25519） | cleared（2026-11-01 09:45 Q1、main 7ebb5367e）。実装済み・試験 PASS（2026-11-01 09:50 Sonnet。f25519 22903 checks、x25519 4538 checks、posix・win32・ct PASS、21 通りの破壊で FAIL。cleared は Q1） | p002 |
 | [p009](phase009/phase.md) | Ed25519（test-ed25519） | planned | p008 |
 | [p010](phase010/phase.md) | P-256・P-384 の群（test-ecp） | cleared（2026-11-01 23:19 Q1、main 47700ab9c。main で run-unit all・run-ct ecp PASS を流し直した） | p007 |
-| [p011](phase011/phase.md) | ECC: 鍵の生成・ECDH・ECDSA の確かめ（test-ecc） | planned（P6 q1866） | p010 |
+| [p011](phase011/phase.md) | ECC: 鍵の生成・ECDH・ECDSA の確かめ（test-ecc） | 実装済み・試験 PASS（2026-11-01 23:42 P6。test-ecc 22888 checks、posix・win32・ct PASS、50 通りの破壊のうち 43 通りが試験の失敗で FAIL・1 通りが crash、見逃し 6 通りは等価か冗長。cleared は Q1） | p010 |
 | [p012](phase012/phase.md) | RSA の署名の確かめ（PKCS#1 v1.5・PSS）（test-rsa） | planned | p007、p002 |
 | [p013](phase013/phase.md) | ML-KEM の多項式・符号化・sampling（test-mlkem-poly） | planned | p003 |
 | [p014](phase014/phase.md) | K-PKE と ML-KEM-768（test-mlkem） | planned | p013 |

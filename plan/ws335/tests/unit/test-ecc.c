@@ -2292,6 +2292,7 @@ check_x_above_order(
 	size_t total;
 	unsigned t;
 	unsigned hits;
+	unsigned variant;
 	int error;
 
 	size = ec->size;
@@ -2329,42 +2330,56 @@ check_x_above_order(
 		if (error != 0)
 			continue;
 
-		/* s and u1 are random; r = t; E = u1 s; u2 = r / s. */
+		/* s and u1 are random; E = u1 s. */
 		random_scalar(s_value, ec);
 		random_scalar(u1, ec);
-		memset(r_value, 0, sizeof(r_value));
-		r_value[0] = t;
 		order_inv(ec, s_inverse, s_value);
-		order_mul(ec, u2, r_value, s_inverse);
 		order_mul(ec, e_value, u1, s_value);
-
-		/* Q = u2^-1 R + (-(u1 u2^-1)) G, so that u1 G + u2 Q = R. */
-		order_inv(ec, u2_inverse, u2);
-		order_mul(ec, coefficient, u1, u2_inverse);
-		order_neg(ec, negative, coefficient);
-		cryc_ecp_mul_add_public(ec, &q_point, negative, u2_inverse, &r_point);
-		error = cryc_ecp_encode(ec, &q_point, public_key, total);
-		CHECK(error == 0);
-		if (error != 0)
-			continue;
-
-		/* The signature (t, s) over the hash E verifies only if x(R) is reduced modulo n. */
 		cryc_bn_encode(e_value, ec->limbs, hash, size);
-		cryc_bn_encode(r_value, ec->limbs, r, size);
 		cryc_bn_encode(s_value, ec->limbs, s, size);
-		error = cryc_ecdsa_verify(ec, public_key, total, hash, size, r, s);
-		CHECK(error == 0);
 
-		/* The x coordinate itself as r is out of range (it is not below n). */
-		memcpy(big_r, x_bytes, size);
-		error = cryc_ecdsa_verify(ec, public_key, total, hash, size, big_r, s);
-		CHECK(error == EBADMSG);
+		/*
+		 * Four values of r: t (the reduced x coordinate, which must
+		 * verify) and t plus one bit in the second, the middle and the
+		 * top limb (which must not: the comparison looks at every limb).
+		 * Each gets its own key, so that the verifier's R is the same
+		 * point for all four: u2 = r / s and Q = u2^-1 R - (u1 / u2) G.
+		 */
+		for (variant = 0; variant < 4U; variant++) {
+			memset(r_value, 0, sizeof(r_value));
+			r_value[0] = t;
+			if (variant == 1U)
+				r_value[1] += 1U;
+			if (variant == 2U)
+				r_value[ec->limbs / 2U] += 1U;
+			if (variant == 3U)
+				r_value[ec->limbs - 1U] += 1U;
+			order_mul(ec, u2, r_value, s_inverse);
+			order_inv(ec, u2_inverse, u2);
+			order_mul(ec, coefficient, u1, u2_inverse);
+			order_neg(ec, negative, coefficient);
+			cryc_ecp_mul_add_public(ec, &q_point, negative, u2_inverse, &r_point);
+			error = cryc_ecp_encode(ec, &q_point, public_key, total);
+			CHECK(error == 0);
+			if (error != 0)
+				continue;
+			cryc_bn_encode(r_value, ec->limbs, r, size);
 
-		/* Another r just below the true one does not verify. */
-		memcpy(big_r, r, size);
-		bytes_inc(big_r, size);
-		error = cryc_ecdsa_verify(ec, public_key, total, hash, size, big_r, s);
-		CHECK(error == EBADMSG);
+			/* Only the reduced x coordinate verifies. */
+			error = cryc_ecdsa_verify(ec, public_key, total, hash, size, r, s);
+			CHECK(error == (variant == 0U ? 0 : EBADMSG));
+
+			/* The x coordinate itself as r is out of range (it is not below n), and so is the next r. */
+			if (variant == 0U) {
+				memcpy(big_r, x_bytes, size);
+				error = cryc_ecdsa_verify(ec, public_key, total, hash, size, big_r, s);
+				CHECK(error == EBADMSG);
+				memcpy(big_r, r, size);
+				bytes_inc(big_r, size);
+				error = cryc_ecdsa_verify(ec, public_key, total, hash, size, big_r, s);
+				CHECK(error == EBADMSG);
+			}
+		}
 	}
 	printf("  %s verifications with x(R) at or above n: %u\n", params->name, hits);
 	CHECK(hits == 3U);

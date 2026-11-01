@@ -46,10 +46,12 @@ cryc_ecc_keygen(
 	uint32_t encoded;
 	unsigned tries;
 	int accepted;
+	int usable;
 	int error;
 
 	/* Refuses a curve that was never prepared and a missing source of randomness. */
-	if (!ecc_curve_usable(ec))
+	usable = ecc_curve_usable(ec);
+	if (usable == 0)
 		return EINVAL;
 	if (random == NULL)
 		return EINVAL;
@@ -157,10 +159,12 @@ cryc_ecc_ecdh(
 	uint32_t total;
 	uint32_t ok;
 	int product_error;
+	int usable;
 	int error;
 
 	/* Refuses a curve that was never prepared. */
-	if (!ecc_curve_usable(ec))
+	usable = ecc_curve_usable(ec);
+	if (usable == 0)
 		return EINVAL;
 
 	/* Starts the working values at zero, so the limbs above the width stay zero. */
@@ -242,10 +246,12 @@ cryc_ecdsa_verify(
 	size_t hash_used;
 	uint32_t below_order;
 	uint32_t zero;
+	int usable;
 	int error;
 
 	/* Refuses a curve that was never prepared and a hash of no bytes. */
-	if (!ecc_curve_usable(ec))
+	usable = ecc_curve_usable(ec);
+	if (usable == 0)
 		return EINVAL;
 	if (hash_size == 0U)
 		return EINVAL;
