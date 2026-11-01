@@ -92,6 +92,7 @@ static void inline_cut_text(struct inline_cutter *cutter, struct layout_box *box
 static void inline_add_replaced(struct inline_cutter *cutter, struct layout_box *box);
 static void inline_add_atomic(struct inline_cutter *cutter, struct layout_box *box);
 static int inline_first_baseline(const struct layout_box *box, layout_unit *baseline, int depth);
+static int inline_row_synthesized(const struct layout_box *row, layout_unit *baseline);
 static int inline_items_baseline(const struct layout_box *box, layout_unit *baseline, int last, int vertical);
 static int inline_is_legend(const struct layout_box *box, const struct layout_box *child);
 static int inline_last_baseline(const struct layout_box *box, layout_unit *baseline, int depth);
@@ -822,6 +823,19 @@ inline_last_baseline(
 		found = inline_items_baseline(box, baseline, 1, 0);
 		if (found >= 0)
 			return found;
+	}
+
+	/* A table row's baseline is the one its cells are aligned on: their first lines'. */
+	if (box->style.display == CSS_DISPLAY_TABLE_ROW) {
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (child->out_of_flow || child->kind != LAYOUT_BLOCK)
+				continue;
+			if (inline_first_baseline(child, &inner, depth + 1)) {
+				*baseline = child->y + child->border[CSS_TOP] + child->padding[CSS_TOP] + inner;
+				return 1;
+			}
+		}
+		return inline_row_synthesized(box, baseline);
 	}
 
 	/* A block of lines: its last line's baseline. */
@@ -2143,6 +2157,23 @@ inline_items_baseline(
 	return 1;
 }
 
+/* A row of cells without lines: the baseline is the bottom of its first cell's padding box. */
+static int
+inline_row_synthesized(
+	const struct layout_box *row,
+	layout_unit *baseline)
+{
+	const struct layout_box *cell;
+
+	for (cell = row->first_child; cell != NULL; cell = cell->next) {
+		if (cell->out_of_flow || cell->kind != LAYOUT_BLOCK)
+			continue;
+		*baseline = cell->y + cell->border[CSS_TOP] + cell->padding[CSS_TOP] + cell->height + cell->padding[CSS_BOTTOM];
+		return 1;
+	}
+	return 0;
+}
+
 /* Finds a laid out box's first baseline below its content box's top (a control's text, or its first line in the flow). */
 static int
 inline_first_baseline(
@@ -2172,6 +2203,19 @@ inline_first_baseline(
 		found = inline_items_baseline(box, baseline, 0, 0);
 		if (found >= 0)
 			return found;
+	}
+
+	/* A table row's baseline is its cells' first lines' (a row of cells without lines stands on its first cell's padding box's bottom). */
+	if (box->style.display == CSS_DISPLAY_TABLE_ROW) {
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (child->out_of_flow || child->kind != LAYOUT_BLOCK)
+				continue;
+			if (inline_first_baseline(child, &inner, depth + 1)) {
+				*baseline = child->y + child->border[CSS_TOP] + child->padding[CSS_TOP] + inner;
+				return 1;
+			}
+		}
+		return inline_row_synthesized(box, baseline);
 	}
 
 	/* A block of lines: its first line's baseline. */

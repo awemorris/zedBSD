@@ -44,6 +44,8 @@ static int anchor_find_state(const struct layout_tree *tree, const struct layout
 static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
 static int anchor_chain_before(const struct layout_box *candidate, const struct layout_box *box, const struct layout_box *containing);
 static const struct layout_box *anchor_scope_root(const struct layout_box *box, const struct vm_string *name, const void *tree);
+static int anchor_sticks(const struct layout_box *box, const struct layout_box *scroller);
+static int anchor_sticks(const struct layout_box *box, const struct layout_box *scroller);
 static int anchor_fixed(const struct layout_box *box);
 static int anchor_top_layer(const struct layout_box *box);
 static const struct layout_box *anchor_up(const struct layout_box *box);
@@ -440,8 +442,10 @@ anchor_find_state(
 	}
 
 	/* The box is placed by an anchor that scrolls with the page: it follows it (an anchor that is fixed itself stays with the viewport). */
-	if (!anchor_fixed(found))
+	if (!anchor_fixed(found)) {
 		((struct layout_box *)box)->anchored = 1;
+		((struct layout_box *)box)->anchor_box = found;
+	}
 
 	/* Whether a scroll container in between shows none of it. */
 	if (anchor != NULL)
@@ -459,11 +463,26 @@ anchor_find_state(
 				original.x -= layout_from_px((float)scroll_x);
 				original.y -= layout_from_px((float)scroll_y);
 			}
+			if (anchor_sticks(found, up))
+				continue;
 			if (anchor_outside(up, &original))
 				*clipped = 1;
 		}
 	}
 	return 1;
+}
+
+/* Tells whether a box, or a box it is in below a scroll container, is sticky (it stays in the scrollport the scroll container shows). */
+static int
+anchor_sticks(
+	const struct layout_box *box,
+	const struct layout_box *scroller)
+{
+	for (; box != NULL && box != scroller; box = box->parent) {
+		if (box->style.position == CSS_POSITION_STICKY)
+			return 1;
+	}
+	return 0;
 }
 
 /* Tells whether a box is fixed or inside a fixed box (it stays where the viewport is). */
