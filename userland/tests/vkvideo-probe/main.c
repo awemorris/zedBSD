@@ -7,11 +7,12 @@
 
 /*
  * vkvideo-probe: lists what a Vulkan device offers for video decode, and
- * decodes an H.264 elementary stream with Vulkan Video, printing the
- * SHA-256 of each frame (ws083).
+ * decodes an H.264 or H.265 elementary stream with Vulkan Video, printing
+ * the SHA-256 of each frame.
  *
  *   vkvideo-probe --list
  *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264
+ *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--h265] STREAM.h265
  *
  * The list names each queue family with its flags and video codec
  * operations and the device's video extensions; on a device without video
@@ -55,11 +56,18 @@
  * neither read nor printed (for the decode's time over a long stream,
  * where reading every frame would take longer than decoding it); it goes
  * with neither --expect nor --dump.
+ *
+ * With --h265, or a stream whose name ends in .h265, .hevc or .265, the
+ * stream is H.265 and h265.c decodes it (Main and Main 10 profiles; a
+ * profile, a bit depth or a size the decoder does not take is refused
+ * with PROBE_REFUSED): --frames, --expect, --time and --no-hash as for
+ * H.264, the frames printed in the DPB's output order.
  */
 
 #include "h264.h"
 #include "dpb.h"
 #include "frame.h"
+#include "probe.h"
 
 #include <vulkan/vulkan.h>
 
@@ -70,160 +78,25 @@
 #include <string.h>
 #include <time.h>
 
-/* The exit status of a stream whose H.264 profile the decoder does not take. */
-#define PROBE_REFUSED		6
-
-/* How long a decode may take before the probe gives up, in nanoseconds. */
-#define PROBE_WAIT_NS		5000000000ULL
-
-/* The most session memory bindings the probe binds. */
-#define PROBE_BINDINGS		32U
-
-/* The most frames waiting for their place in the display order. */
-#define PROBE_PENDING		256U
-
-/* The most families and extensions the list shows. */
-#define PROBE_FAMILIES		16U
-#define PROBE_EXTENSIONS	512U
-
-/* One decoded frame waiting for its place in the display order: its order count and hash. */
-struct probe_frame {
-	int32_t poc;
-	char hash[65];
-};
-
-/* The frames decoded and not yet printed, what was printed and matched, and the decodes that did not complete. */
-struct probe_output {
-	struct probe_frame pending[PROBE_PENDING];
-	uint32_t pending_count;
-	uint32_t printed;
-	uint32_t matched;
-	uint32_t failed;
-	FILE *expect;
-};
-
-/* What one run asked for. */
-struct probe_options {
-	int list;
-	const char *stream;
-	const char *expect;
-	uint32_t frames;
-	int time;
-	const char *dump;
-	int sampled;
-	int reset_at_idr;
-	int no_hash;
-};
-
-/* The decode times of a run with --time, in nanoseconds. */
-struct probe_timing {
-	uint32_t count;
-	uint64_t total;
-	uint64_t longest;
-};
-
-/*
- * The Vulkan objects of a decode, made in order and destroyed in reverse
- * by probe_close; a handle never made is VK_NULL_HANDLE.
- */
-struct probe {
-	VkInstance instance;
-	VkPhysicalDevice physical;
-	uint32_t family;
-
-	/* Whether decoded planes are linear rows (any decoder but Intel's, whose OPTIMAL planes are Y-tiled). */
-	int linear;
-	VkDevice device;
-	VkQueue queue;
-	VkPhysicalDeviceMemoryProperties memory;
-
-	/* The H.264 decode profile, and the list of it buffers and images name. */
-	VkVideoDecodeH264ProfileInfoKHR h264_profile;
-	VkVideoProfileInfoKHR profile;
-	VkVideoProfileListInfoKHR profile_list;
-
-	/* The largest coded picture of the stream. */
-	VkExtent2D extent;
-
-	/* The session, its memory and its parameters. */
-	VkVideoSessionKHR session;
-	VkDeviceMemory session_memory[PROBE_BINDINGS];
-	uint32_t session_memory_count;
-	VkVideoSessionParametersKHR parameters;
-
-	/* The stream's generation of parameter sets the parameters hold, and how many parameters were made. */
-	uint32_t parameters_generation;
-	uint32_t parameters_made;
-
-	/*
-	 * Whether the pictures are sampled ones read back by a copy (--sampled),
-	 * and then the buffer of the image's layout the copy writes, its memory
-	 * (mapped) and its size.
-	 */
-	int sampled;
-	VkBuffer readback;
-	VkDeviceMemory readback_memory;
-	uint8_t *readback_map;
-	VkDeviceSize readback_size;
-
-	/* The pictures, one a DPB slot: each image, its memory (mapped, or the readback's) and its view; the references the session reads. */
-	uint32_t slots;
-	uint32_t max_references;
-	VkImage image[DPB_SLOTS];
-	VkDeviceMemory image_memory[DPB_SLOTS];
-	uint8_t *image_map[DPB_SLOTS];
-	VkImageView view[DPB_SLOTS];
-
-	/* The bitstream buffer and its memory (mapped). */
-	VkBuffer buffer;
-	VkDeviceMemory buffer_memory;
-	uint8_t *buffer_map;
-	VkDeviceSize buffer_size;
-
-	/* The command buffer of the video family, and the fence a decode is waited on with. */
-	VkCommandPool pool;
-	VkCommandBuffer command;
-	VkFence fence;
-
-	/*
-	 * Whether the video family reports result status, the pool of the one
-	 * query each decode is in (VK_NULL_HANDLE without one), and the status
-	 * of the last decode (COMPLETE without a pool).
-	 */
-	VkBool32 status_supported;
-	VkQueryPool status_pool;
-	int32_t status;
-};
-
 static int probe_arguments(int argc, char **argv, struct probe_options *options);
 static int probe_instance(struct probe *probe);
 static int probe_list(struct probe *probe);
 static int probe_video_family(struct probe *probe, uint32_t *family);
-static int probe_device(struct probe *probe);
-static int probe_capabilities(struct probe *probe);
 static int probe_memory_type(const struct probe *probe, uint32_t bits, uint32_t *index);
 static int probe_allocate(struct probe *probe, const VkMemoryRequirements *requirements, VkDeviceMemory *memory);
-static int probe_pictures(struct probe *probe);
 static int probe_picture(struct probe *probe, uint32_t slot);
-static int probe_bitstream(struct probe *probe, size_t bytes);
 static int probe_readback(struct probe *probe);
 static void probe_copy_commands(struct probe *probe, uint32_t slot);
-static int probe_session(struct probe *probe);
 static int probe_parameters(struct probe *probe, const struct h264_stream *stream);
-static int probe_commands(struct probe *probe);
 static void probe_status_pool(struct probe *probe);
 static int probe_decode(struct probe *probe, const struct h264_stream *stream, const struct h264_picture *picture, const struct dpb_plan *plan);
 static void probe_hash(struct probe *probe, uint32_t slot, const StdVideoH264SequenceParameterSet *sps, char text[65]);
 static int probe_dump(struct probe *probe, uint32_t slot, const StdVideoH264SequenceParameterSet *sps, FILE *file, const char *stream, uint32_t picture, int32_t status, const char *hash);
-static void probe_output_add(struct probe_output *output, int32_t poc, const char *hash);
-static void probe_output_flush(struct probe_output *output, uint32_t keep);
 static int probe_frame_compare(const void *left, const void *right);
 static int probe_run(struct probe *probe, const struct probe_options *options);
 static void probe_close(struct probe *probe);
-static int probe_failed(VkResult result, const char *what);
+static int probe_h265_name(const char *path);
 static uint8_t *probe_read(const char *path, size_t *size);
-static uint64_t probe_now(void);
-static void probe_timing_print(const struct probe_timing *timing);
 
 /*
  * Lists the device's video decode, or decodes a stream and prints its frames' hashes.
@@ -241,7 +114,7 @@ main(
 	memset(&options, 0, sizeof(options));
 	status = probe_arguments(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264\n");
+		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264 | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--h265] STREAM.h265\n");
 		return 2;
 	}
 
@@ -335,6 +208,13 @@ probe_arguments(
 			continue;
 		}
 
+		/* --h265: the stream is H.265 (as a name ending in .h265, .hevc or .265 says too). */
+		differs = strcmp(argument, "--h265");
+		if (differs == 0) {
+			options->h265 = 1;
+			continue;
+		}
+
 		/* --dump=FILE: the decoded images. */
 		differs = strncmp(argument, "--dump=", 7U);
 		if (differs == 0) {
@@ -365,6 +245,12 @@ probe_arguments(
 	if (options->no_hash && (options->expect != NULL || options->dump != NULL))
 		return -1;
 	if (!options->list && options->stream == NULL)
+		return -1;
+
+	/* A stream's name may say it is H.265; an H.265 decode neither dumps, nor samples, nor resets at IDR pictures. */
+	if (options->stream != NULL && probe_h265_name(options->stream))
+		options->h265 = 1;
+	if (options->h265 && (options->list || options->dump != NULL || options->sampled || options->reset_at_idr))
 		return -1;
 
 	/* Succeeded: the options are read. */
@@ -492,6 +378,7 @@ probe_video_family(
 	VkQueueFamilyProperties2 families[PROBE_FAMILIES];
 	VkQueueFamilyVideoPropertiesKHR video[PROBE_FAMILIES];
 	VkQueueFamilyQueryResultStatusPropertiesKHR status[PROBE_FAMILIES];
+	VkVideoCodecOperationFlagsKHR operation;
 	uint32_t count;
 	uint32_t index;
 
@@ -509,11 +396,14 @@ probe_video_family(
 	}
 	vkGetPhysicalDeviceQueueFamilyProperties2KHR(probe->physical, &count, families);
 
-	/* The first one with video decode and H.264. */
+	/* The first one with video decode of the codec. */
+	operation = VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+	if (probe->codec == PROBE_H265)
+		operation = VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR;
 	for (index = 0U; index < count; index++) {
 		if ((families[index].queueFamilyProperties.queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) == 0U)
 			continue;
-		if ((video[index].videoCodecOperations & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) == 0U)
+		if ((video[index].videoCodecOperations & operation) == 0U)
 			continue;
 		*family = index;
 		probe->status_supported = status[index].queryResultStatusSupport;
@@ -521,12 +411,12 @@ probe_video_family(
 	}
 
 	/* None. */
-	fprintf(stderr, "vkvideo-probe: no queue family decodes H.264\n");
+	fprintf(stderr, "vkvideo-probe: no queue family decodes %s\n", probe->codec == PROBE_H265 ? "H.265" : "H.264");
 	return 1;
 }
 
 /* Makes the device with one queue of the video family and the four video extensions. */
-static int
+int
 probe_device(
 	struct probe *probe)
 {
@@ -535,6 +425,12 @@ probe_device(
 		VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,
 		VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
 		VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME
+	};
+	static const char *const h265_extensions[] = {
+		VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+		VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,
+		VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
+		VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME
 	};
 	VkDeviceQueueCreateInfo queue;
 	VkDeviceCreateInfo info;
@@ -560,6 +456,8 @@ probe_device(
 	info.pQueueCreateInfos = &queue;
 	info.enabledExtensionCount = 4U;
 	info.ppEnabledExtensionNames = extensions;
+	if (probe->codec == PROBE_H265)
+		info.ppEnabledExtensionNames = h265_extensions;
 	result = vkCreateDevice(probe->physical, &info, NULL, &probe->device);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkCreateDevice");
@@ -570,11 +468,12 @@ probe_device(
 }
 
 /* Asks the device's H.264 decode capabilities and NV12 output format for the profile, and prints them. */
-static int
+int
 probe_capabilities(
 	struct probe *probe)
 {
 	VkVideoDecodeH264CapabilitiesKHR h264;
+	VkVideoDecodeH265CapabilitiesKHR h265;
 	VkVideoDecodeCapabilitiesKHR decode;
 	VkVideoCapabilitiesKHR capabilities;
 	VkPhysicalDeviceVideoFormatInfoKHR format_info;
@@ -582,17 +481,29 @@ probe_capabilities(
 	VkResult result;
 	uint32_t count;
 	uint32_t index;
+	uint32_t level;
 
-	/* The capabilities, with the decode and H.264 ones chained. */
+	/* The capabilities, with the decode and the codec's ones chained. */
 	memset(&h264, 0, sizeof(h264));
 	h264.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_CAPABILITIES_KHR;
+	memset(&h265, 0, sizeof(h265));
+	h265.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_CAPABILITIES_KHR;
 	memset(&decode, 0, sizeof(decode));
 	decode.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_CAPABILITIES_KHR;
 	decode.pNext = &h264;
+	if (probe->codec == PROBE_H265)
+		decode.pNext = &h265;
 	memset(&capabilities, 0, sizeof(capabilities));
 	capabilities.sType = VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR;
 	capabilities.pNext = &decode;
 	result = vkGetPhysicalDeviceVideoCapabilitiesKHR(probe->physical, &probe->profile, &capabilities);
+	if (probe->codec == PROBE_H265 &&
+	    (result == VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR || result == VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR)) {
+		fprintf(stderr, "vkvideo-probe: refused: the decoder does not take the stream's H.265 profile (profile_idc %u, %s bit)\n",
+			(unsigned)probe->h265_profile.stdProfileIdc,
+			probe->profile.lumaBitDepth == VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR ? "8" : "10");
+		return PROBE_REFUSED;
+	}
 	if (result == VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR) {
 		fprintf(stderr, "vkvideo-probe: refused: the decoder does not take the stream's H.264 profile (profile_idc %u)\n",
 			(unsigned)probe->h264_profile.stdProfileIdc);
@@ -600,14 +511,33 @@ probe_capabilities(
 	}
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkGetPhysicalDeviceVideoCapabilitiesKHR");
+	level = (uint32_t)h264.maxLevelIdc;
+	if (probe->codec == PROBE_H265)
+		level = (uint32_t)h265.maxLevelIdc;
 	printf("vkvideo-probe: capabilities max %ux%u slots %u references %u level %u flags 0x%x decode 0x%x\n",
 	       capabilities.maxCodedExtent.width,
 	       capabilities.maxCodedExtent.height,
 	       capabilities.maxDpbSlots,
 	       capabilities.maxActiveReferencePictures,
-	       (unsigned)h264.maxLevelIdc,
+	       (unsigned)level,
 	       capabilities.flags,
 	       decode.flags);
+
+	/* An H.265 stream larger than the decoder's pictures is outside its limits: refused. */
+	if (probe->codec == PROBE_H265 &&
+	    (probe->extent.width > capabilities.maxCodedExtent.width || probe->extent.height > capabilities.maxCodedExtent.height)) {
+		fprintf(stderr, "vkvideo-probe: refused: the stream's %ux%u is larger than the decoder's %ux%u\n",
+			probe->extent.width, probe->extent.height, capabilities.maxCodedExtent.width, capabilities.maxCodedExtent.height);
+		return PROBE_REFUSED;
+	}
+
+	/* An H.265 session takes the slots and references the decoder offers, up to the probe's. */
+	if (probe->codec == PROBE_H265) {
+		if (probe->slots > capabilities.maxDpbSlots)
+			probe->slots = capabilities.maxDpbSlots;
+		if (probe->max_references > capabilities.maxActiveReferencePictures)
+			probe->max_references = capabilities.maxActiveReferencePictures;
+	}
 
 	/* The stream must fit. */
 	if (probe->extent.width > capabilities.maxCodedExtent.width || probe->extent.height > capabilities.maxCodedExtent.height) {
@@ -692,7 +622,7 @@ probe_allocate(
 }
 
 /* Makes the NV12 picture of every DPB slot. */
-static int
+int
 probe_pictures(
 	struct probe *probe)
 {
@@ -904,7 +834,7 @@ probe_copy_commands(
 }
 
 /* Makes the bitstream buffer of a picture's bytes, and its memory (mapped). */
-static int
+int
 probe_bitstream(
 	struct probe *probe,
 	size_t bytes)
@@ -945,13 +875,17 @@ probe_bitstream(
 }
 
 /* Makes the video session (the DPB's slots and references) and binds every memory it asks for. */
-static int
+int
 probe_session(
 	struct probe *probe)
 {
 	static const VkExtensionProperties header = {
 		VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_EXTENSION_NAME,
 		VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_SPEC_VERSION
+	};
+	static const VkExtensionProperties h265_header = {
+		VK_STD_VULKAN_VIDEO_CODEC_H265_DECODE_EXTENSION_NAME,
+		VK_STD_VULKAN_VIDEO_CODEC_H265_DECODE_SPEC_VERSION
 	};
 	VkVideoSessionCreateInfoKHR info;
 	VkVideoSessionMemoryRequirementsKHR requirements[PROBE_BINDINGS];
@@ -972,6 +906,8 @@ probe_session(
 	info.maxDpbSlots = probe->slots;
 	info.maxActiveReferencePictures = probe->max_references;
 	info.pStdHeaderVersion = &header;
+	if (probe->codec == PROBE_H265)
+		info.pStdHeaderVersion = &h265_header;
 	result = vkCreateVideoSessionKHR(probe->device, &info, NULL, &probe->session);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkCreateVideoSessionKHR");
@@ -1083,7 +1019,7 @@ probe_parameters(
 }
 
 /* Makes the command pool and buffer of the video family, and the fence. */
-static int
+int
 probe_commands(
 	struct probe *probe)
 {
@@ -1481,7 +1417,7 @@ probe_dump(
 }
 
 /* Keeps a decoded frame for its place in the display order; a full list is printed first. */
-static void
+void
 probe_output_add(
 	struct probe_output *output,
 	int32_t poc,
@@ -1502,7 +1438,7 @@ probe_output_add(
  * with the next expected line when there is a file of them, but for the
  * `keep` of the largest counts, which go on waiting.
  */
-static void
+void
 probe_output_flush(
 	struct probe_output *output,
 	uint32_t keep)
@@ -1594,10 +1530,14 @@ probe_run(
 	int found;
 	int error;
 
-	/* The stream and its parameter sets. */
+	/* The stream; an H.265 one is h265.c's to decode, which frees it. */
 	data = probe_read(options->stream, &size);
 	if (data == NULL)
 		return 1;
+	if (options->h265)
+		return probe_h265_run(probe, options, data, size);
+
+	/* Its parameter sets. */
 	error = h264_open(&stream, data, size);
 	if (error != 0) {
 		fprintf(stderr, "vkvideo-probe: %s: a parameter set the probe cannot read\n", options->stream);
@@ -1837,7 +1777,7 @@ probe_close(
 }
 
 /* Reports a failed Vulkan call and gives the run's failure status. */
-static int
+int
 probe_failed(
 	VkResult result,
 	const char *what)
@@ -1845,6 +1785,32 @@ probe_failed(
 	/* The call and its result. */
 	fprintf(stderr, "vkvideo-probe: %s failed: %d\n", what, (int)result);
 	return 1;
+}
+
+/* Reports whether a stream's name says it is H.265: it ends in .h265, .hevc or .265. */
+static int
+probe_h265_name(
+	const char *path)
+{
+	static const char *const endings[] = { ".h265", ".hevc", ".265" };
+	size_t length;
+	size_t ending;
+	uint32_t index;
+	int differs;
+
+	/* Each ending the name may have. */
+	length = strlen(path);
+	for (index = 0U; index < sizeof(endings) / sizeof(endings[0]); index++) {
+		ending = strlen(endings[index]);
+		if (length < ending)
+			continue;
+		differs = strcmp(path + length - ending, endings[index]);
+		if (differs == 0)
+			return 1;
+	}
+
+	/* Another name: H.264 unless --h265 says otherwise. */
+	return 0;
 }
 
 /* Reads a whole file; NULL (with a message) when it cannot. */
@@ -1892,7 +1858,7 @@ probe_read(
 }
 
 /* Reads the monotonic clock, in nanoseconds. */
-static uint64_t
+uint64_t
 probe_now(
 	void)
 {
@@ -1906,7 +1872,7 @@ probe_now(
 }
 
 /* Prints the decode times: how many, the total, the mean and the longest, in milliseconds. */
-static void
+void
 probe_timing_print(
 	const struct probe_timing *timing)
 {
