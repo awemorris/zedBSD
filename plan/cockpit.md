@@ -10,8 +10,8 @@
 | P1 | [WS324](ws324/ws.md) p005 | RTX 2070 の Vulkan Video | H.265 の decode（NVDEC の HEVC、q1917）。p009b は止めた（uncleared） | p006i・p007 |
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（06:45）。p005（libvulkan の H.265 decode の転送）cleared。VPU は VF2 で既定 on、firmware を zedBSD-firmware で配る | p006 H.265 decode（PowerVR の reader と Wave5 の HEVC） |
 | P3 | — | Pi 5 の作業 | 返却（03:03）。Pi 5 の desktop の動画 8 本（build/review/pi5-video/）。板は元に戻した | 次を待つ |
-| P4 | [BUG-397](bugs/BUG-397.md)・[BUG-399](bugs/BUG-399.md) | Windows 版ブラウザの UAT | Google の「サイト」の link で固まる、検索の欄が右へ伸びる（q1915） | — |
-| P5 | — | Windows 版ブラウザ | 返却（06:57）。p038（Windows の file: の頁の画像）cleared | p037 は本物の Windows が要る |
+| P4 | — | Bug の修正 | 返却（08:12）。BUG-397（ストアで固まる）・BUG-399（検索の欄の幅）fixed。以後ブラウザは P8 | 次を待つ |
+| P5 | — | Windows 版ブラウザ | 返却（08:12）。BUG-400（storage-test の時々の FAIL、試験の側）fixed。以後ブラウザは P8 | 次を待つ |
 | P6 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | 返却（03:59）。p037（試験の TLS server tlspeer）cleared | p024・p029（handshake）の候補 |
 | P7 | — | — | 返却（07:50）。BUG-398 fixed（Google の app の一覧が 15 個の icon で描ける、host と Wine）。以後ブラウザは P8 | 次を待つ |
 | P8 | [BUG-401](bugs/BUG-401.md) | ブラウザ（Windows 版と libbrowser、ユーザーの決定で P8） | host の試験 10 本の退行（q1921）。BUG-395・396 は fixed（Windows の題の帯、Reload の icon は zedBSD でも） | 次のブラウザの作業 |
