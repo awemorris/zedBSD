@@ -437,4 +437,4 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-397](bugs/BUG-397.md) | Windows 版ブラウザ: Google の頁の「サイト」の link を click すると app が固まって応答しなくなる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
 | [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザ: Google の app の一覧の button（右上の四角の並び）を押しても一覧が正しく出ない | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P7） |
 | [BUG-399](bugs/BUG-399.md) | Windows 版ブラウザ: Google の検索の入力欄を click すると、入力できる範囲が右へ窓の幅いっぱいに伸びる | open（2026-11-02 06:16 Q1 が起票、ユーザーの Windows の UAT、P4） |
-| [BUG-400](bugs/BUG-400.md) | storage-test の Max-Age の cookie が期限の前に送られない事がある（時々 FAIL） | open（2026-11-02 06:58 Q1 が起票、P5） |
+| [BUG-400](bugs/BUG-400.md) | storage-test の Max-Age の cookie が期限の前に送られない事がある（時々 FAIL） | fixed（2026-11-02 P5 q1918-i01、試験の側: 頁の localStorage の読みが先の cookie の record の fsync を待ち、disk が遅いと「short」の Max-Age が本当に切れていた。「short」を頁の後・header の直前に置き Max-Age 2 秒に。libbrowser は変えていない。fsync を遅らせた再現と storage-test.sh の連続 PASS は ticket） |
