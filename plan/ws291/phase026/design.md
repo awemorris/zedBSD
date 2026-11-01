@@ -583,7 +583,9 @@ QEMU:
 
 ## 13. Phase の分け方（案）と受け入れ
 
-順は phase.md の Q2 で決める。推しは P-A → P-B（P-C は Future Work）。
+決定（2026-11-01 21:07 Q1 の判断、phase.md の「Q1 の判断」）: B-U は入れる（nvrtx だけ、環境変数で切れる。Q1 = A）。順は P-A → P-B で、P-A を
+[p027](../phase027/phase.md)、P-B を [p028](../phase028/phase.md) にした。P-C は Future Work（Q2 = A）なので capset の bit と `include/uapi/gpu-op.h` の comment
+は変えない（Q3 は不要）。mview の `--record=once`・`--submit-all` は足す（第 1 版の Q4）。
 
 | Phase（案） | 中身 | 受け入れ |
 | --- | --- | --- |
