@@ -11,7 +11,7 @@
 | P2 | [WS322](ws322/ws.md) p004 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | H.264 decode の道（q1869）。p003: PowerVR の NV12・plane の view・export を VF2 で確かめた | p005〜p007 |
 | P3 | — | — | 返却（23:19）。WS291 p027 の amd64・Venus の回帰 PASS | 未割当 |
 | P4 | — | Bug の修正の担当 | 返却（22:48）。WS291 p027 の Pi 5・VF2 の回帰 PASS | 次の Bug の割当を待つ |
-| P5 | [WS334](ws334/ws.md) p032 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | Wine での確かめの第 1 回（q1874）。p031: zip（23 file、DLL なし、icon・版の情報） | p033・p034（並べられる） |
+| P5 | [WS334](ws334/ws.md) p033 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 後半の Windows の口（TSF・drag と drop・touchpad など、頁に暗い mode、q1886）。p032: Wine で 15 項 PASS（https・cookie・localStorage・clipboard・dpi） | p035 規約の見直し |
 | P6 | [WS335](ws335/ws.md) p013 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | ML-KEM の多項式（q1881）。p012 RSA・p025 TLS の定数は cleared | p014 ML-KEM-768 |
 | P7 | — | — | 返却（22:26）。WS334 p027 の QEMU の guest の確かめ PASS（画面: build/review/p027-guest/） | 未割当 |
 | P8 | — | — | 返却（00:41）。menuconfig の host 試験を全項目 PASS に（Pi 5 を menu に、CI の config の round trip の誤りを直した） | 未割当 |
@@ -60,6 +60,7 @@
 
 - Pi 4 の GPU の回帰（WS291 p021 の直し 6d4ef0df9 は Pi 4 と Pi 5 で共有の code。Pi 4 は今 SwitchBot に繋がっておらず担当は遠隔で試せない）: Pi 4 に main の image を入れ、desktop と GPU の app（mview など）が前と同じに動くか。
 - VF2 の root（UFS 256 MB）の空き: 2026-11-01 の計測で 95%〜満杯になり、P4 の mview の texture の写しが ENOSPC で切れた。試験は /tmp（tmpfs）に置く形で回避した。板の古い物（~kei の p7・p15 など他の担当の置き物を含む）の整理か、SD の root の拡げをするか。
+- OmniGrammaton.exe（Windows 版のブラウザ）を本物の Windows で: main の build の zip（`make browser-win64-zip`）を展開して起動し、WS334 p032 の M1〜M8（描画・--no-gpu・https・location の欄・IME での日本語入力・cookie と localStorage の保持・暗い mode・snap の配置）。Wine では IME・snap・公開の site が確かめられない。
 - Pi 5 の en0 の link: P3 の計測で、起動 3・4 の途中に en0 が 1000 Mbps から 100 Mbps に落ちて SSH が切れた。cable・switch の側か driver かは未調査。
 
 ## 決まった事

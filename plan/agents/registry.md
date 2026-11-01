@@ -8,7 +8,7 @@
 | P1 | phase-runner-high | ws324 p009b NVENC の関門 (q1884-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | in-progress（2026-11-02 01:07、10.0.10.3） | dce8421af（merge a43959d8e） |
 | P2 | phase-runner-high | ws322 p004 H.264 decode の道 (q1869-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 23:51 起動、VF2） | d1af4687c（merge 361044f95） |
 | P3 | phase-runner-high | ws291 p027 の回帰 amd64・Venus (q1859-i01) | `/home/awe/zedBSD-worktrees/p3-ws291reg` / `agent/p3-ws291reg` | 返却（2026-11-01 23:19、PASS） | 73669b953（merge 6f49769e7） |
-| P5 | phase-runner-high | ws334 p032 Wine の確かめ (q1874-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-02 00:19 起動） | 22e46046c（merge f9c278fa5） |
+| P5 | phase-runner-high | ws334 p033 後半の Windows の口 (q1886-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-02 01:25 起動） | fb9ee2715（merge 04eb03f1d） |
 | P6 | phase-runner-low | ws335 p013 ML-KEM の多項式 (q1881-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-02 01:07） | 4e7214b51（merge 9aa6bae4d） |
 | P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |
 | P4 | phase-runner-high | ws291 p027 の回帰 arm64・riscv64 (q1860-i01) | `/home/awe/zedBSD-worktrees/p4-ws291reg` / `agent/p4-ws291reg` | 返却（2026-11-01 22:48、PASS） | 42ae7d081（merge b29f3a5ae） |
@@ -25,3 +25,6 @@
 | Sonnet | phase-runner-low | ws324 p006c (q1883-i01) | `/home/awe/zedBSD-worktrees/s-ws324-p006c` / `agent/s-ws324-p006c` | in-progress（2026-11-02 01:07 起動） | — |
 
 | Sonnet | phase-runner-low | ws335 p026 (q1885-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p026` / `agent/s-ws335-p026` | in-progress（2026-11-02 01:21 起動） | — |
+
+| Sonnet | phase-runner-low | ws334 p034 (q1887-i01) | `/home/awe/zedBSD-worktrees/s-ws334-p034` / `agent/s-ws334-p034` | in-progress（2026-11-02 01:25 起動） | — |
+| Sonnet | phase-runner-low | ws334 の TLS の誤りの文 (q1888-i01) | `/home/awe/zedBSD-worktrees/s-ws334-errstr` / `agent/s-ws334-errstr` | in-progress（2026-11-02 01:25 起動） | — |
