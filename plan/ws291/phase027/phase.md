@@ -107,3 +107,86 @@ Status: in-progress（2026-11-01 22:10 P1、q1849-i01。実装・host 試験・�
 - H3a・H3b は plan/ws291/tests/ に置いた。今後も回帰に使うなら plan/tools/ へ移して tools.md に登録するのは Q1 の判断。
 - 消してよい物（Q1 の pipeline へ）: build/tmp/p027-maintree（main の git archive、約 700 MB と build）、build/tmp/handoff-host.*・handoff-lib.*・
   p027-h3a・p027-h3b（host 試験の出力）、build/p027/forge（image 2.4 GB）。計測の出力 build/tmp/p027-hw は記録の元なので残すかは Q1 の判断。
+
+## 回帰 amd64（P3 q1859-i01、2026-11-01 22:16〜23:15、worktree p3-ws291reg）
+
+- 対象: 候補 60cf76c13（main efd494305 に P1 の agent/p1-ws291p026 を merge）と main efd494305。2026-11-01 ユーザーから、WS291 は各 architecture で
+  回帰を流して merge を急ぐ、という趣旨の指示を受けた（Q1 経由）。source は変えていない。
+- build（`plan/ws291/tests/config.mk` の vmunix と 14 file）: 候補は `BUILD=build/p3reg/cand`、main は git archive efd494305 を
+  build/tmp/p3reg/maintree に展開して `BUILD=build/m`。両方 rc=0、tree の warning 0（warning の行は外の OpenSSL と perl の locale だけ）。
+  vmunix は両方 3328626646（kernel の source は同じ）、14 file で違うのは libvulkan だけ（main 509112954、候補 3050428356 = P1 の bu と同じ）。
+- 実機の script: build/tmp/p3reg-hw/session.sh（git の外、lock /tmp/zedbsd-rdna.lock の中、22:23〜23:14）。A = `rtx-p024.sh` ROUNDS=2 SHOT=1、
+  D = `plan/ws309/tests/rtx-p015.sh` PARTS='cycle scenes desk'、E = 新しい `plan/ws291/tests/rtx-apps.sh`（App Home から files・terminal・settings・
+  browser を開き、process・画面・終了）。要約は build/tmp/p3reg-hw/{a,d,e}/summary.txt。
+
+### A: 6 つの bench（fps、round 1 / round 2）
+
+腕: main = main の libvulkan、cand = 候補、off = 候補に `VULKAN_ZEDBSD_SUBMIT_HANDOFF=0`、offm = main の libvulkan に同じ変数（main は読まない。
+環境の差だけを見る）。kernel は全部 3328626646、他の 13 file は候補の物（main と同じ cksum）。TIMING=0・PERF=0。
+
+| bench | main | cand | off | offm |
+| --- | --- | --- | --- | --- |
+| big-100 | 586.9 / 574.4 | 580.0 / 577.8 | 573.6 / 562.3 | 555.8 / 578.9 |
+| big-1000 | 113.5 / 97.6 | 114.9 / 115.1 | 101.4 / 107.0 | 106.2 / 101.4 |
+| subs-100 | 461.8 / 470.9 | 619.5 / 625.4 | 477.1 / 477.1 | 456.8 / 476.8 |
+| subs-1000 | 52.9 / 52.9 | 83.8 / 81.2 | 57.0 / 51.2 | 54.8 / 54.8 |
+| scene-1500 | 157.4 / 157.4 | 157.2 / 157.6 | 157.4 / 157.8 | 156.1 / 156.8 |
+| scene-5000 | 49.5 / 49.9 | 49.9 / 49.9 | 49.9 / 49.8 | 49.7 / 49.8 |
+
+- 候補は main の幅の内か上: subs-100 +32〜35 %、subs-1000 +54〜58 %（record 6.5〜6.9 ms・submit 4.7〜5.4 ms 対 main record 6.3・submit 12.2）。
+  big-100 は main の幅（574.4〜586.9）の内、scene-1500・5000 は同じ。
+- 画素の比べ: 29（4 腕 × 2 round の still 3 つを最初の腕と、one と subs）が全部 max 0。mview の still は全部 frames=900 で終わった。
+  各 bench の dmesg に fault・lost の行 0。
+- **big-1000 の B-U を切った腕の −6 %（P1 の記録）**: off は 101.4・107.0 で再び main の round 1（113.5）より低い。ただし main 自身が round 2 で
+  97.6（record 5.24 ms 対 3.84 ms）、main の libvulkan に同じ変数を付けただけの offm も 106.2・101.4。よって off の低さは B-U の code の切り替えでは
+  なく、big-1000 の record の時間の揺れ（この機械で約 97〜115 fps）の内で、変数の有無（環境の大きさ）でも出る。候補の既定（cand）は 2 round とも
+  114.9・115.1 で main の上限の側。原因（配置・cache の推測）は未確かめ。
+
+### D: game mode の往復・画面・desktop の frame-ops（rtx-p015.sh、main と cand）
+
+- 往復: 両腕とも 3/3（direct=3 left=3 window=3 failed=0 refused=0 compositor=1）、lend images=0x3f result=0。
+- 画面（desktop・notes・browser）: cand と main の差は右上の時計（x=1868..1894 y=17..27）だけ。ただし、この起動では Settings の初回の
+  案内（Welcome to zedBSD）の窓が前に出ていて、notes・browser の画面にも Notes・browser の窓は写っていない（両腕で同じ。script の前提が
+  機械の状態と合わない、後退ではない）。
+- frame-ops（fps、main / cand）: launch 63 / 64、type 61 / 61、keys 250 / 250（入力の間隔）、output 69 / 67、scroll 19 / 19 と hover 23 / 22
+  （入力の間隔）、drag 61 / 60、home 63 / 64、wiseview 63 / 65。各段が main −2 fps の内。
+- kernel の行: 両腕とも起動の時の `vram-window bar1 before the tables: fault ...`（と cand の起動では `retry 1 (the fault record was cleared)`）だけ。
+  E の main の起動にも retry の行があり、起動ごとに出る既知の形で、GPU の仕事の fault・lost・executor fail は 0。
+
+### E: desktop の app（rtx-apps.sh、main と cand）
+
+| app | main | cand |
+| --- | --- | --- |
+| files | process 2、窓あり | process 2、窓あり（app-files.png） |
+| terminal | process 1、窓あり | process 1、窓あり |
+| settings | process 1 | process 1 |
+| browser | process 0、窓なし | process 0、窓なし |
+
+- 各 app を終えた後の残り 0、compositor は終始 1。cand と main の画面の差は時計だけ。
+- settings: 初回の案内の Settings が既に動いているので、process 1 は新しい起動と見分けられない（未確かめ）。
+- browser: 両腕とも App Home から開かなかった（main も同じなので候補の後退ではない）。原因（App Home の検索語、8 s の待ち、NVMe の root に
+  /bin/browser があるか）は未確かめ。
+
+### Venus（host の QEMU、候補の image）
+
+- image: `plan/tools/gpu-boundary/build-forge-image.sh build/p3reg/forge`（cksum 3366497359）、`test-image.sh plan/tools/rtx-video/config-amd64-venus-video.mk
+  build/p3reg/video`。どちらも rc=0。guest の uname は `1.0.0-beta2+g60cf76c`。
+- boot-test.sh（forge の image、uefi-nvme）: PASS、build/tmp/p3reg/boot-test/login.png（console の login）。
+- `plan/ws291/tests/venus-reg.sh`: **PASS**。cand・main の libvulkan とも forge-guest・fence-guest（600 frame）・wltest（mailbox と作り直し）・
+  mview mailbox・mview submits・compositor の VULKAN_ERROR 0。
+- glass の desktop に mview の窓（`--windowed`、10 体）が出て描く: build/tmp/p3reg/venus-mview-ab/mview-cand.png、30 s で status 0（14.2 fps、lavapipe）、
+  VULKAN_ERROR 0。同じ guest で main の libvulkan に入れ替えた後の腕は、動いている compositor の写した libvulkan.so をその場で上書きしたため
+  compositor が落ちて無効（試験の作りの誤り。main の mview は venus-reg で ok）。
+- Video Player（`plan/tools/rtx-video/venus-videoplayer.sh`、clip は tree の plan/tools/media/sample.mp4 の MPEG-4 320x240）: own presenter
+  （`PRESENT own=1 gpu_pictures=1`）、347 frame を 16 s で表示、FAILED 0、build/tmp/p3reg/vp/play.png に窓と画。
+
+### 判定と未実施
+
+- 判定（P3）: amd64 で後退なし。fps は main の揺れの内か上、画の比べ一致、device lost・fault・executor fail 0、game mode の往復 3/3、
+  frame-ops は main −2 fps の内、Venus の回帰 PASS。cleared の判定は Q1。
+- 機械の状態（23:14）: Debian 6.12.111、RTX の 4 function は vfio-pci、NVMe の kernel 1463007375 と 14 file を戻し cksum が expected と一致、
+  cfg の nvrtx.vk.perf・nvrtx.disp.bl の行 0、lock は free。
+- 未実施: Notes・browser の起動の確かめ（上の理由）、settings の新しい起動の見分け、hand-off の数の timing（TIMING=1）、big-1000 の揺れの原因、
+  arm64・riscv64（この Queue は amd64 だけ）。
+- 消してよい物（Q1 の pipeline へ）: build/tmp/p3reg（main の git archive と build、image の起動の作業 dir、Venus の runtime）、build/p3reg/forge・
+  build/p3reg/video（image 各約 2.4 GB）、build/p3reg/cand。計測の出力 build/tmp/p3reg-hw は記録の元なので残すかは Q1 の判断。
