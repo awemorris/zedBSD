@@ -45,7 +45,13 @@
  * URL, up to LOADER_CACHE_MAX bytes of bodies (the least recently used go
  * first).  A fresh entry answers a request without the network; a stale
  * one with an ETag is revalidated with If-None-Match, and a 304 answers
- * with the kept body.
+ * with the kept body.  Behind it an instance's persistent cache (cache.c),
+ * when the loader has one, keeps the same responses across runs: a
+ * response put in the memory cache is queued to be stored too, a URL the
+ * memory cache lacks is looked for there (the network thread waits for the
+ * disk, holding no lock), and what it finds goes into the memory cache and
+ * is judged as any entry is, by the wall clock since the response was
+ * stored.
  *
  * The caller makes requests and cancels them on its thread; the network
  * thread takes them from a list under the loader's lock.  An ended request
@@ -59,6 +65,7 @@
 #include "base/os-net.h"
 #include "base/os-system.h"
 #include "base/os-time.h"
+#include "storage/records.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -141,6 +148,13 @@ struct loader_connection {
  * (the Content-Type and the body), its ETag, when it was stored or last
  * revalidated, and how long it stays fresh (max-age in seconds, -1 for
  * none; no_cache revalidates it every time).
+ *
+ * The time is kept twice: stored_at on the loader's monotonic clock, and
+ * stored_wall on the wall clock (milliseconds since 1970 UTC, which is
+ * what the persistent cache's record keeps).  An entry read from the
+ * persistent cache has no meaningful stored_at (the monotonic clock does
+ * not span runs), so wall_clock is set and its age is the wall clock's;
+ * a revalidation gives it a new stored_at and clears wall_clock.
  */
 struct loader_entry {
 	struct loader_entry *next;
@@ -149,6 +163,8 @@ struct loader_entry {
 	struct wb_buffer body;
 	struct wb_buffer etag;
 	uint64_t stored_at;
+	int64_t stored_wall;
+	int wall_clock;
 	long max_age;
 	int no_cache;
 };
@@ -244,7 +260,9 @@ struct net_request {
  * is made), how many requests it started that have neither ended to it
  * nor been cancelled (pending), and the cookie jar of the requests
  * (cookies, set before the first request and read by the network thread;
- * the jar has its own lock).
+ * the jar has its own lock), and the persistent cache behind the memory
+ * cache (disk, set and read the same way; NULL for none, with its own
+ * lock).
  */
 struct net_loader {
 	struct net_request *requests;
@@ -282,6 +300,7 @@ struct net_loader {
 	void *notify_context;
 	size_t pending;
 	struct net_cookie_jar *cookies;
+	struct net_cache *disk;
 };
 
 static uint64_t loader_clock(void);
@@ -323,6 +342,10 @@ static int loader_cache_fresh(const struct loader_entry *entry, uint64_t now);
 static int loader_cache_answer(struct net_request *request, const struct loader_entry *entry);
 static void loader_cache_store(struct net_request *request);
 static void loader_cache_free(struct net_loader *loader, struct loader_entry *entry);
+static struct loader_entry *loader_cache_insert(struct net_loader *loader, const char *url, const struct wb_storage_cache_entry *record);
+static struct loader_entry *loader_cache_load(struct net_loader *loader, const char *url);
+static void loader_cache_persist(struct net_loader *loader, const struct loader_entry *entry);
+static int64_t loader_wall(void);
 
 /*
  * Makes a loader and starts its resolver's thread and its network thread.
@@ -426,6 +449,20 @@ net_loader_set_cookies(
 {
 	/* The jar of every request from now on. */
 	loader->cookies = jar;
+}
+
+/*
+ * Gives a loader the persistent cache behind its memory cache (NULL, as a
+ * new loader has, for none).  Called before the loader's first request,
+ * as net_loader_set_cookies is.  The cache outlives the loader.
+ */
+void
+net_loader_set_cache(
+	struct net_loader *loader,
+	struct net_cache *cache)
+{
+	/* The cache of every request from now on. */
+	loader->disk = cache;
 }
 
 /*
@@ -1325,10 +1362,13 @@ loader_begin(
 		return error;
 	}
 
-	/* The URL's entry, answering when it is fresh. */
+	/* The URL's entry, in memory or else in the persistent cache, answering when it is fresh. */
 	entry = NULL;
-	if (request->plain)
+	if (request->plain) {
 		entry = loader_cache_find(loader, wb_buffer_string(&url));
+		if (entry == NULL)
+			entry = loader_cache_load(loader, wb_buffer_string(&url));
+	}
 	wb_buffer_release(&url);
 	fresh = loader_cache_fresh(entry, now);
 	if (fresh) {
@@ -1770,6 +1810,8 @@ loader_finish(
 	/* A 304 to a revalidation is the kept body, fresh again. */
 	if (request->response.status == 304 && request->validating != NULL) {
 		request->validating->stored_at = loader_clock();
+		request->validating->stored_wall = loader_wall();
+		request->validating->wall_clock = 0;
 		if (request->response.max_age >= 0)
 			request->validating->max_age = request->response.max_age;
 		error = loader_cache_answer(request, request->validating);
@@ -1777,6 +1819,9 @@ loader_finish(
 			wb_buffer_release(&location);
 			return error;
 		}
+
+		/* The persistent cache keeps the response as freshly revalidated. */
+		loader_cache_persist(request->loader, request->validating);
 	}
 
 	/* A response that is not a redirect with a place to go ends the request at this URL. */
@@ -2187,9 +2232,21 @@ loader_cache_fresh(
 	const struct loader_entry *entry,
 	uint64_t now)
 {
+	int64_t age;
+
 	/* No entry, no max-age, or no-cache. */
 	if (entry == NULL || entry->max_age <= 0 || entry->no_cache)
 		return 0;
+
+	/* An entry of an earlier run is as old as the wall clock says; a clock set back makes it stale. */
+	if (entry->wall_clock) {
+		age = loader_wall() - entry->stored_wall;
+		if (age < 0)
+			return 0;
+		if (age < (int64_t)entry->max_age * 1000)
+			return 1;
+		return 0;
+	}
 
 	/* Younger than its max-age. */
 	if (now < entry->stored_at + (uint64_t)entry->max_age * 1000U)
@@ -2233,6 +2290,7 @@ static void
 loader_cache_store(
 	struct net_request *request)
 {
+	struct wb_storage_cache_entry record;
 	struct net_loader *loader;
 	struct loader_entry *entry;
 	struct wb_buffer url;
@@ -2265,29 +2323,75 @@ loader_cache_store(
 		return;
 	}
 
-	/* The entry. */
-	entry = calloc(1, sizeof(*entry));
+	/* The response as a record: what the memory entry keeps, stamped with the wall clock. */
+	memset(&record, 0, sizeof(record));
+	record.url = wb_buffer_string(&url);
+	record.url_length = url.length;
+	record.content_type = (const char *)request->response.content_type.data;
+	record.content_type_length = request->response.content_type.length;
+	record.etag = (const char *)request->response.etag.data;
+	record.etag_length = request->response.etag.length;
+	record.stored = loader_wall();
+	record.max_age = request->response.max_age;
+	if (record.max_age < -1)
+		record.max_age = -1;
+	record.no_cache = request->response.no_cache != 0;
+	record.body = request->response.body.data;
+	record.body_length = request->response.body.length;
+
+	/* The memory cache takes it, the least recently used going when the bodies are too many. */
+	entry = loader_cache_insert(loader, record.url, &record);
 	if (entry == NULL) {
 		wb_buffer_release(&url);
 		return;
 	}
 
-	/* Its URL, type, body, ETag, time and freshness. */
-	entry->url = strdup(wb_buffer_string(&url));
+	/* The persistent cache queues it to be stored too. */
+	loader_cache_persist(loader, entry);
 	wb_buffer_release(&url);
+}
+
+/*
+ * Puts a response in the memory cache, at the front, and drops the least
+ * recently used entries until the bodies fit.  The entry's URL, type,
+ * ETag and body are copies; its time is the response's stored time on
+ * the wall clock and now on the monotonic one.  Returns the entry, or
+ * NULL for lack of memory (nothing is kept).  The response's body is at
+ * most LOADER_CACHE_MAX.
+ */
+static struct loader_entry *
+loader_cache_insert(
+	struct net_loader *loader,
+	const char *url,
+	const struct wb_storage_cache_entry *record)
+{
+	struct loader_entry *entry;
+	struct loader_entry *last;
+	int error;
+
+	/* The entry. */
+	entry = calloc(1, sizeof(*entry));
+	if (entry == NULL)
+		return NULL;
+
+	/* Its URL, type, body and ETag. */
+	entry->url = strdup(url);
 	wb_buffer_init(&entry->content_type);
 	wb_buffer_init(&entry->body);
 	wb_buffer_init(&entry->etag);
 	error = ENOMEM;
 	if (entry->url != NULL)
-		error = wb_buffer_append(&entry->content_type, request->response.content_type.data, request->response.content_type.length);
+		error = wb_buffer_append(&entry->content_type, record->content_type, record->content_type_length);
 	if (error == 0)
-		error = wb_buffer_append(&entry->body, request->response.body.data, request->response.body.length);
+		error = wb_buffer_append(&entry->body, record->body, record->body_length);
 	if (error == 0)
-		error = wb_buffer_append(&entry->etag, request->response.etag.data, request->response.etag.length);
+		error = wb_buffer_append(&entry->etag, record->etag, record->etag_length);
+
+	/* Its time and freshness. */
 	entry->stored_at = loader_clock();
-	entry->max_age = request->response.max_age;
-	entry->no_cache = request->response.no_cache;
+	entry->stored_wall = record->stored;
+	entry->max_age = (long)record->max_age;
+	entry->no_cache = record->no_cache;
 
 	/* At the front; an entry that could not be made is dropped. */
 	entry->next = loader->cache;
@@ -2295,16 +2399,114 @@ loader_cache_store(
 	loader->cache_bytes += entry->body.length;
 	if (error != 0) {
 		loader_cache_free(loader, entry);
-		return;
+		return NULL;
 	}
 
-	/* The least recently used go until the bodies fit. */
+	/* The least recently used go until the bodies fit (the new entry, at the front, stays). */
 	while (loader->cache_bytes > LOADER_CACHE_MAX) {
-		entry = loader->cache;
-		while (entry->next != NULL)
-			entry = entry->next;
-		loader_cache_free(loader, entry);
+		last = loader->cache;
+		while (last->next != NULL)
+			last = last->next;
+		if (last == entry)
+			break;
+		loader_cache_free(loader, last);
 	}
+
+	/* Succeeded: the memory cache has the entry. */
+	return entry;
+}
+
+/*
+ * Finds a URL's response in the persistent cache and puts it in the
+ * memory cache, as an entry the wall clock dates.  Waits for the disk
+ * (only the network thread calls it, holding no lock).  Returns the
+ * entry, or NULL when there is no persistent cache, the URL is not in
+ * it, or it cannot be had.
+ */
+static struct loader_entry *
+loader_cache_load(
+	struct net_loader *loader,
+	const char *url)
+{
+	struct wb_storage_cache_entry record;
+	struct loader_entry *entry;
+	struct wb_buffer bytes;
+	int found;
+	int error;
+
+	/* No persistent cache. */
+	if (loader->disk == NULL)
+		return NULL;
+
+	/* The URL's record, checked to be the URL's. */
+	wb_buffer_init(&bytes);
+	found = 0;
+	error = net_cache_read(loader->disk, url, strlen(url), &bytes, &found);
+	if (error != 0 || !found) {
+		wb_buffer_release(&bytes);
+		return NULL;
+	}
+
+	/* The record, which the cache has decoded once already. */
+	error = wb_storage_cache_decode(bytes.data, bytes.length, &record);
+	if (error != 0 || record.body_length > LOADER_CACHE_MAX) {
+		wb_buffer_release(&bytes);
+		return NULL;
+	}
+
+	/* The memory cache takes it, dated by the wall clock until it is revalidated. */
+	entry = loader_cache_insert(loader, url, &record);
+	wb_buffer_release(&bytes);
+	if (entry == NULL)
+		return NULL;
+	entry->wall_clock = 1;
+
+	/* Succeeded: the entry answers or is revalidated like any other. */
+	return entry;
+}
+
+/*
+ * Queues an entry of the memory cache to be stored in the persistent
+ * cache, as it is now (its stored time included).  Nothing waits; a
+ * failure only means the response is not kept across runs.
+ */
+static void
+loader_cache_persist(
+	struct net_loader *loader,
+	const struct loader_entry *entry)
+{
+	struct wb_storage_cache_entry record;
+
+	/* No persistent cache. */
+	if (loader->disk == NULL)
+		return;
+
+	/* The entry as a record. */
+	memset(&record, 0, sizeof(record));
+	record.url = entry->url;
+	record.url_length = strlen(entry->url);
+	record.content_type = (const char *)entry->content_type.data;
+	record.content_type_length = entry->content_type.length;
+	record.etag = (const char *)entry->etag.data;
+	record.etag_length = entry->etag.length;
+	record.stored = entry->stored_wall;
+	record.max_age = entry->max_age;
+	if (record.max_age < -1)
+		record.max_age = -1;
+	record.no_cache = entry->no_cache != 0;
+	record.body = entry->body.data;
+	record.body_length = entry->body.length;
+
+	/* The cache queues the write; an error leaves the response in memory only. */
+	(void)net_cache_store(loader->disk, &record);
+}
+
+/* Reads the wall clock, in milliseconds since 1970 UTC. */
+static int64_t
+loader_wall(void)
+{
+	/* The wall clock. */
+	return wb_os_wall_ns() / INT64_C(1000000);
 }
 
 /* Takes an entry out of the cache and frees it (no request revalidates it any more). */

@@ -12,7 +12,8 @@
  *
  * Making an instance starts its storage queue over the program's backend,
  * then opens its cookie jar, which reads the persistent cookies through
- * the queue.  Destroying it does everything queued, stops the queue's
+ * the queue, and (with a backend) its persistent HTTP cache, which reads
+ * the cache's index.  Destroying it does everything queued, stops the queue's
  * thread and closes the backend (storage/queue.h), then frees the jar and
  * the Web Storage areas.
  *
@@ -175,7 +176,7 @@ wb_instance_default(
 
 /*
  * Makes an instance: its queue over a backend (NULL for none), whose close
- * is called on failure, then its jar and its empty areas.
+ * is called on failure, then its jar, its cache and its empty areas.
  */
 static int
 instance_make(
@@ -214,6 +215,17 @@ instance_make(
 		return error;
 	}
 
+	/* Its persistent HTTP cache and the index of its records; an instance without a backend keeps none. */
+	if (storage != NULL) {
+		error = net_cache_open(made->queue, cache_limit, &made->cache);
+		if (error != 0) {
+			net_cookie_jar_close(made->cookies);
+			wb_storage_queue_close(made->queue);
+			free(made);
+			return error;
+		}
+	}
+
 	/* Succeeded: the instance is made. */
 	*instance = made;
 	return 0;
@@ -224,6 +236,9 @@ static void
 instance_free(
 	struct browser_instance *instance)
 {
+	/* The cache's index record, if a use changed it, is queued before the queue is closed. */
+	net_cache_close(instance->cache);
+
 	/* Everything queued is written, and the backend closed. */
 	wb_storage_queue_close(instance->queue);
 

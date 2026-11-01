@@ -130,6 +130,10 @@ struct net_request;
 struct net_cookie_jar;
 struct wb_storage_queue;
 
+/* An instance's persistent HTTP cache (cache.c), and the record of one stored response (storage/records.h). */
+struct net_cache;
+struct wb_storage_cache_entry;
+
 /* A request's callback: called once when it ends (net_request_error tells how), from net_loader_dispatch. */
 typedef void (*net_request_done)(void *context, struct net_request *request);
 
@@ -199,6 +203,8 @@ int net_loader_create(net_loader_notify notify, void *context, struct net_loader
 void net_loader_destroy(struct net_loader *loader);
 /* The jar of the loader's requests (NULL, the start, for none); set before the first request. */
 void net_loader_set_cookies(struct net_loader *loader, struct net_cookie_jar *jar);
+/* The persistent cache behind the loader's memory cache (NULL, the start, for none); set before the first request. */
+void net_loader_set_cache(struct net_loader *loader, struct net_cache *cache);
 int net_loader_fetch(struct net_loader *loader, const char *url, net_request_done done, void *context, struct net_request **request);
 int net_loader_fetch_kind(struct net_loader *loader, const char *url, int kind, net_request_done done, void *context, struct net_request **request);
 int net_loader_send(struct net_loader *loader, const char *url, int kind, const struct net_send *send, net_request_done done, void *context, struct net_request **request);
@@ -219,6 +225,12 @@ int net_cookie_store(struct net_cookie_jar *jar, const struct net_url *url, cons
 int net_cookie_header(struct net_cookie_jar *jar, const struct net_url *url, struct wb_buffer *out);
 int net_cookie_store_script(struct net_cookie_jar *jar, const struct net_url *url, const char *text, size_t length);
 int net_cookie_string(struct net_cookie_jar *jar, const struct net_url *url, struct wb_buffer *out);
+
+/* The persistent HTTP cache (cache.c): an instance's index of the responses its storage keeps. */
+int net_cache_open(struct wb_storage_queue *queue, size_t limit, struct net_cache **cache);
+void net_cache_close(struct net_cache *cache);
+int net_cache_read(struct net_cache *cache, const char *url, size_t length, struct wb_buffer *record, int *found);
+int net_cache_store(struct net_cache *cache, const struct wb_storage_cache_entry *entry);
 
 /* data: URLs (data.c). */
 int net_data_parse(const struct net_url *url, struct net_data *data);

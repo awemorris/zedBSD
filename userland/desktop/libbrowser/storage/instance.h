@@ -14,6 +14,7 @@
  *
  * An instance holds its storage queue (storage/queue.h, the one thread
  * that calls its backend), its cookie jar (net/cookie.c, over the queue),
+ * its persistent HTTP cache (net/cache.c, over the queue),
  * the Web Storage areas of its pages (page/storage.c, which reads and
  * writes the localStorage areas through the queue), the limit of its
  * persistent HTTP cache, and how many views use it.
@@ -38,6 +39,7 @@
 
 struct wb_storage_queue;
 struct net_cookie_jar;
+struct net_cache;
 
 /*
  * One instance: made by browser_instance_create (or wb_instance_default)
@@ -49,7 +51,9 @@ struct net_cookie_jar;
  * cookies:       the cookie jar, over queue.
  * storage_areas: the Web Storage areas its pages made (page/storage.c
  *                owns what the pointers point to).
- * cache_limit:   bytes of the persistent HTTP cache (not used yet).
+ * cache:        the persistent HTTP cache, over queue (net/cache.c); NULL
+ *                for an instance without a backend, which keeps nothing.
+ * cache_limit:   bytes of the persistent HTTP cache.
  * view_count:    the views made with it and not yet destroyed; an
  *                instance with views is not destroyed.
  * is_default:    1 for a thread's default instance, which the program
@@ -58,6 +62,7 @@ struct net_cookie_jar;
 struct browser_instance {
 	struct wb_storage_queue *queue;
 	struct net_cookie_jar *cookies;
+	struct net_cache *cache;
 	struct wb_vector storage_areas;
 	size_t cache_limit;
 	size_t view_count;
