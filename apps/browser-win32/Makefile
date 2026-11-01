@@ -222,6 +222,12 @@ OMNIGRAMMATON_SOURCES := apps/browser-win32/main.c apps/browser-win32/single.c
 OMNIGRAMMATON_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(OMNIGRAMMATON_SOURCES)) \
 	$(BROWSER_WIN32_OBJ)/apps/browser-win32/resources/OmniGrammaton.res.o
 OMNIGRAMMATON_PROGRAM := $(BROWSER_WIN32_BUILD)/OmniGrammaton.exe
+# The program is linked with its debug information (OMNIGRAMMATON_FULL) and split in two: the .exe that
+# is shipped has none, and OmniGrammaton.dbg (the DWARF, which a .exe keeps in sections; lld's --pdb
+# makes a PDB only from CodeView) stays in the build's output, named by the .exe's .gnu_debuglink.
+OMNIGRAMMATON_FULL := $(BROWSER_WIN32_OBJ)/OmniGrammaton-full.exe
+OMNIGRAMMATON_DEBUG := $(BROWSER_WIN32_BUILD)/OmniGrammaton.dbg
+WIN32_OBJCOPY ?= $(WIN32_TOOL_PREFIX)objcopy
 OMNIGRAMMATON_VERSION_WORDS := $(subst ., ,$(OMNIGRAMMATON_VERSION))
 WIN32_WINDRES ?= $(WIN32_TOOL_PREFIX)windres
 OMNIGRAMMATON_SHARE := \
@@ -340,7 +346,7 @@ WIN32_VULKAN_LIBRARY := $(BROWSER_WIN32_OBJ)/libvulkan-1.a
 
 .PHONY: zip icon program dist keiland-objects all layers libbrowser-core libbrowser-script script-core libraries vulkan headers openssl fetch flags clean test-program
 all: layers libbrowser-core libraries vulkan $(BROWSER_WIN32_OBJ)/toolchain.txt program dist
-program: $(OMNIGRAMMATON_PROGRAM)
+program: $(OMNIGRAMMATON_PROGRAM) $(OMNIGRAMMATON_DEBUG)
 dist: $(BROWSER_WIN32_DIST)/OmniGrammaton.exe $(OMNIGRAMMATON_SHARE_COPIES) $(OMNIGRAMMATON_LICENSE_COPIES) \
 	$(BROWSER_WIN32_DIST)/share/certs/ca-certificates.pem
 zip: $(OMNIGRAMMATON_ZIP)
@@ -428,7 +434,16 @@ $(TEST_PROGRAM_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
 endif
 
 # OmniGrammaton.exe (wWinMain: -municode).
-$(eval $(call WIN32_PROGRAM,$(OMNIGRAMMATON_PROGRAM),$(OMNIGRAMMATON_OBJECTS),-mwindows -municode))
+$(eval $(call WIN32_PROGRAM,$(OMNIGRAMMATON_FULL),$(OMNIGRAMMATON_OBJECTS),-mwindows -municode))
+
+# The split: the debug information to its own file, the .exe without it and with the link to that file
+# (the symbol table stays, so a stack still has names without the .dbg).
+$(OMNIGRAMMATON_PROGRAM): $(OMNIGRAMMATON_FULL)
+	@mkdir -p $(dir $@)
+	$(WIN32_OBJCOPY) --only-keep-debug $< $(OMNIGRAMMATON_DEBUG)
+	$(WIN32_OBJCOPY) --strip-debug --add-gnu-debuglink=$(OMNIGRAMMATON_DEBUG) $< $@.new
+	mv -f $@.new $@
+$(OMNIGRAMMATON_DEBUG): $(OMNIGRAMMATON_PROGRAM) ;
 
 # The resources, compiled with the version's numbers and the icon.
 $(BROWSER_WIN32_OBJ)/apps/browser-win32/resources/OmniGrammaton.res.o: apps/browser-win32/resources/OmniGrammaton.rc \
