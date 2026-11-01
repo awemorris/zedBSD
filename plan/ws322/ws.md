@@ -22,12 +22,13 @@
 | [ws322-p004](phase004/phase.md) | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、COINCIDE で pool から GPU の transfer、Video Player の GPU の道） | cleared（2026-11-02 01:55 Q1、main f9acea845。VF2 で H.264 の 8 本が全 frame で ffmpeg と一致、1080p30 の 600 frame 一致、Video Player の GPU の道で 16 s に 479 frame（late 2、CPU 約 20%）） | p002、p003 |
 | ws322-p005 | libvulkan の H.265 decode の転送 | planned | WS318 p011a か先に着手（Q322-4） |
 | ws322-p006 | H.265 decode | planned | p004、p005 |
-| [ws322-p007](phase007/phase.md) | 速さと頑丈さ（timeout の後の立て直し、RESET の flush、task buffer の大きさ、速さの測り、JVT の照合） | cleared（2026-11-02 03:45 P2 q1896-i01、Q1 の受け入れ待ち。VF2 で立て直し・flush・3 回で停止・2 session・SIGKILL を確かめた、task buffer は vendor の ×1.5、1080p の VPU 7 ms・2160p 20 ms、Video Player 1080p60 は始めの数秒の後 late 0、JVT 75/101 一致。非同期・命令の queue は入れず） | p004 |
+| [ws322-p007](phase007/phase.md) | 速さと頑丈さ（timeout の後の立て直し、RESET の flush、task buffer の大きさ、速さの測り、JVT の照合） | cleared（2026-11-02 03:45 Q1 が受け入れ、main で p004/run.sh 全部 0 failed。2026-11-02 03:45 P2 q1896-i01。VF2 で立て直し・flush・3 回で停止・2 session・SIGKILL を確かめた、task buffer は vendor の ×1.5、1080p の VPU 7 ms・2160p 20 ms、Video Player 1080p60 は始めの数秒の後 late 0、JVT 75/101 一致。非同期・命令の queue は入れず） | p004 |
+| ws322-p007b | JVT の 26 本（probe の parser・DPB の planner で止まる 13 本、重み付き予測など絵が違う 13 本）の原因と直し | planned | p007 |
 | ws322-p008 | encode の設計の詳細（Wave420L） | planned | Q322-2 は A（2026-11-01 ユーザー） |
 | ws322-p009 | Wave420L の bring-up と probe | planned | p008 |
 | ws322-p010 | libvulkan の encode の転送 | planned | WS318 p011b か先に着手（Q322-4） |
 | ws322-p011 | executor の H.265 encode | planned | p009、p010 |
-| ws322-p012 | 実機の受け入れ（Video Player の GPU の道での再生） | planned | p006・p007・p011 |
+| ws322-p012 | 実機の受け入れ（Video Player の GPU の道での再生） | planned | p006・p007・p007b・p011 |
 | ws322-p013 | 規約の全文の見直し | planned | 全部 |
 
 ### 実装の Phase の案（2026-11-01 P2、design.md §15。Q1 の受け入れの後に表へ）
@@ -82,3 +83,9 @@
 
 - 2026-11-01 20:43 Q1: ユーザーの指示で前倒し、p001 を P2（q1845）に。
 - 2026-10-30 Q1: 作成。WS318 の completed の後。
+
+## Q1 の判断（2026-11-02 03:45、p007 の問い）
+
+- CONFIG_DRIVER_VF2_VPU の既定は、p007b で JVT の絵の違い（重み付き予測など 13 本）を直してから y にし、同時に wave511 の firmware を image に入れる。絵が黙って違う物を既定で出さないため。firmware は zedBSD-firmware に入れる物で、push はユーザーの指示を待つ。
+- JVT の 26 本は p012 の前に p007b で扱う。
+- 非同期の decode と 2 段の command queue は入れない（VPU の時間は 1080p で 4.3 ms、2160p で 14.5 ms で、枠に収まる）。1080p60 の始まりの遅れと 2160p の記録から fence まで約 36 ms は p012 の受け入れで見直す。

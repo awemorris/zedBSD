@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の関門: I・P の絵の encode（q1884、上限なし）。p009a: NVENC の channel が開き、追加の firmware 不要 | p010 encode の共通の executor |
-| P2 | [WS322](ws322/ws.md) p007 | VF2 の VPU を Vulkan Video に | 速さと頑丈さ（timeout の立て直し・seek・1080p60、q1896）。p004: H.264 decode が VF2 で ffmpeg と一致、Video Player の GPU の道で 1080p30（画面: build/review/ws322-p004-vf2-play.png） | p005〜p006 H.265 decode（WS324 の解析の後） |
+| P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（03:45）。p007 cleared（止まった時の立て直し、1080p60 を 60 fps で再生、JVT 101 本のうち 75 本が一致） | p007b JVT の残り 26 本 |
 | P3 | — | Pi 5 の作業 | 返却（03:03）。Pi 5 の desktop の動画 8 本（build/review/pi5-video/）。板は元に戻した | 次を待つ |
 | P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
 | P5 | — | Web ブラウザ OmniGrammaton の Windows 版 | 返却（02:44）。p033 cleared（頁の暗い mode・accent・Mica・DPAPI・touch と pen・drag out）。残りは本物の Windows が要るので p037 に分けた | p034 の後の Windows の file: の直し |
@@ -47,6 +47,10 @@
 ### WS334 Windows 版ブラウザ
 
 - 2026-11-02 02:44: p033 cleared。system の暗い mode を頁に渡す（prefers-color-scheme）、accent の追従、Mica、cookie を DPAPI で暗号化、touch と pen、頁の画像の drag out。Wine で 18 PASS。TSF・DirectManipulation・modal の間の描き直し・題の帯の透過は本物の Windows が要るので p037 に分けた。
+
+### WS322 VF2 の VPU
+
+- 2026-11-02 03:45: p007 cleared。VPU の 1 枚は 1080p で 7 ms・2160p で 20 ms。止まった時の立て直し、再生中の RESET、2 本同時、kill を VF2 で確かめた。Video Player は 1080p30・1080p60 とも再生（1080p60 は始めの数秒だけ遅れ）。JVT は 101 本のうち 75 本が全部の絵で一致、残り 26 本は p007b。VPU の driver の既定の on は p007b の後。
 
 ### WS074 Web ブラウザ
 
