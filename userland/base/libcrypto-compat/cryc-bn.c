@@ -7,9 +7,21 @@
 
 /*
  * Fixed-width integers and Montgomery arithmetic.
+ *
+ * A number is limbs words of 32 bits, least significant first.  Every
+ * loop below runs for the width, never for the value, and every mask is
+ * built from arithmetic, so the time and the addresses touched depend
+ * only on the widths.  A local buffer that holds a value which may be
+ * secret is wiped before the function returns.
  */
 
 #include "cryc-bn.h"
+
+/* Forward declarations. */
+static uint32_t bn_add(uint32_t *out, const uint32_t *a, const uint32_t *b, size_t limbs);
+static uint32_t bn_sub(uint32_t *out, const uint32_t *a, const uint32_t *b, size_t limbs);
+static uint32_t bn_borrow(const uint32_t *a, const uint32_t *b, size_t limbs);
+static uint32_t bn_mask_nonzero(uint32_t value);
 
 /*
  * Prepares the modulus given as size big-endian bytes (leading zero bytes
@@ -21,13 +33,92 @@ cryc_bn_mont_init(
 	const uint8_t *modulus,
 	size_t size)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(mont);
-	UNUSED_PARAMETER(modulus);
-	UNUSED_PARAMETER(size);
+	size_t start;
+	size_t significant;
+	size_t bits;
+	size_t limbs;
+	size_t doublings;
+	size_t index;
+	uint32_t top_byte;
+	uint32_t inverse;
+	uint32_t m_low;
+	int top_bits;
+	int error;
+	int step;
 
-	/* Not implemented: ENOSYS. */
-	return ENOSYS;
+	/* Starts from a zeroed result, which is what every error leaves. */
+	cryc_wipe(mont, sizeof(*mont));
+
+	/* Finds the first non-zero byte: leading zero bytes carry no value. */
+	start = 0;
+	while (start < size && modulus[start] == 0)
+		start++;
+
+	/* Refuses a modulus of zero. */
+	if (start == size)
+		return EINVAL;
+
+	/* Refuses an even modulus, which has no inverse of 2^32. */
+	if ((modulus[size - 1U] & 1U) == 0U)
+		return EINVAL;
+
+	/* Refuses the modulus 1, the only odd number below 3. */
+	significant = size - start;
+	if (significant == 1U && modulus[start] == 1U)
+		return EINVAL;
+
+	/* Refuses a modulus that is certainly wider than the largest allowed. */
+	if (significant > CRYC_BN_MAX_BITS / 8U + 1U)
+		return ENOTSUP;
+
+	/* Counts the bits of the first byte, then of the whole modulus. */
+	top_byte = modulus[start];
+	top_bits = 0;
+	while (top_byte != 0U) {
+		top_bits++;
+		top_byte >>= 1;
+	}
+	bits = (significant - 1U) * 8U + (size_t)top_bits;
+
+	/* Refuses a modulus wider than the largest allowed. */
+	if (bits > CRYC_BN_MAX_BITS)
+		return ENOTSUP;
+
+	/* Reads the modulus into limbs, which cannot fail since it fits. */
+	limbs = (bits + 31U) / 32U;
+	error = cryc_bn_decode(mont->modulus, limbs, modulus + start, significant);
+	if (error != 0) {
+		cryc_wipe(mont, sizeof(*mont));
+		return EINVAL;
+	}
+	mont->limbs = limbs;
+	mont->bits = bits;
+
+	/*
+	 * Finds the inverse of the lowest limb modulo 2^32 by Newton's
+	 * iteration: an odd number is its own inverse modulo 8 (three correct
+	 * bits), and each step doubles the correct bits, so five steps give
+	 * 32.  The per-word factor is its negative.
+	 */
+	m_low = mont->modulus[0];
+	inverse = m_low;
+	for (step = 0; step < 5; step++)
+		inverse = inverse * (2U - m_low * inverse);
+	mont->m0inv = 0U - inverse;
+
+	/*
+	 * Finds R^2 mod m by doubling: 2^(bits - 1) is below m (m is odd,
+	 * so not a power of two), and doubling it modulo m until the
+	 * exponent is 64 * limbs gives 2^(64 * limbs) = R^2.  The modulus is
+	 * public, so the loop may run for as long as it needs.
+	 */
+	mont->r2[(bits - 1U) / 32U] = (uint32_t)1U << ((bits - 1U) % 32U);
+	doublings = 64U * limbs - (bits - 1U);
+	for (index = 0; index < doublings; index++)
+		cryc_bn_mod_add(mont->r2, mont->r2, mont->r2, mont);
+
+	/* Succeeded: the modulus is ready for Montgomery arithmetic. */
+	return 0;
 }
 
 /*
@@ -40,14 +131,44 @@ cryc_bn_decode(
 	const uint8_t *in,
 	size_t size)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(limbs);
-	UNUSED_PARAMETER(in);
-	UNUSED_PARAMETER(size);
+	size_t position;
+	size_t index;
+	uint32_t excess;
+	uint32_t value;
+	uint32_t keep;
+	int error;
 
-	/* Not implemented: ENOSYS. */
-	return ENOSYS;
+	/* Clears the result, so that a value shorter than the width has zero high limbs. */
+	for (index = 0; index < limbs; index++)
+		out[index] = 0;
+
+	/*
+	 * Takes the bytes from the least significant end.  A byte inside the
+	 * width goes into its limb; a byte beyond the width is gathered into
+	 * excess, which stays zero when the value fits.  Which case a
+	 * position is in depends only on the sizes.
+	 */
+	excess = 0;
+	for (position = 0; position < size; position++) {
+		value = in[size - 1U - position];
+		if (position / 4U < limbs)
+			out[position / 4U] |= value << (8U * (position % 4U));
+		else
+			excess |= value;
+	}
+
+	/* Zeroes the result when the value did not fit, without branching on the bytes. */
+	keep = cryc_ct_mask_zero32(excess);
+	for (index = 0; index < limbs; index++)
+		out[index] &= keep;
+	error = (int)((uint32_t)EINVAL & ~keep);
+
+	/* Reports whether the value fitted. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the value is in out. */
+	return 0;
 }
 
 /*
@@ -62,11 +183,20 @@ cryc_bn_encode(
 	uint8_t *out,
 	size_t size)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(in);
-	UNUSED_PARAMETER(limbs);
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(size);
+	size_t position;
+	uint32_t value;
+
+	/*
+	 * Writes the bytes from the least significant end.  A position past
+	 * the width is zero; which case a position is in depends only on
+	 * the sizes.
+	 */
+	for (position = 0; position < size; position++) {
+		value = 0;
+		if (position / 4U < limbs)
+			value = in[position / 4U] >> (8U * (position % 4U));
+		out[size - 1U - position] = (uint8_t)(value & 0xffU);
+	}
 }
 
 /*
@@ -79,13 +209,13 @@ cryc_bn_lt(
 	const uint32_t *b,
 	size_t limbs)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(b);
-	UNUSED_PARAMETER(limbs);
+	uint32_t borrow;
 
-	/* Not implemented: the failure value. */
-	return 0;
+	/* Finds whether a - b borrows out of the top limb, which is a < b. */
+	borrow = bn_borrow(a, b, limbs);
+
+	/* Reports the borrow as a mask. */
+	return 0U - borrow;
 }
 
 /*
@@ -96,12 +226,16 @@ cryc_bn_is_zero(
 	const uint32_t *a,
 	size_t limbs)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(limbs);
+	size_t index;
+	uint32_t any;
 
-	/* Not implemented: the failure value. */
-	return 0;
+	/* Gathers every bit of every limb. */
+	any = 0;
+	for (index = 0; index < limbs; index++)
+		any |= a[index];
+
+	/* Reports whether nothing was set. */
+	return cryc_ct_mask_zero32(any);
 }
 
 /*
@@ -116,12 +250,11 @@ cryc_bn_select(
 	size_t limbs,
 	uint32_t mask)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(b);
-	UNUSED_PARAMETER(limbs);
-	UNUSED_PARAMETER(mask);
+	size_t index;
+
+	/* Takes each limb from a or from b by the mask. */
+	for (index = 0; index < limbs; index++)
+		out[index] = (a[index] & mask) | (b[index] & ~mask);
 }
 
 /*
@@ -134,11 +267,25 @@ cryc_bn_mod_add(
 	const uint32_t *b,
 	const struct cryc_bn_mont *mont)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(b);
-	UNUSED_PARAMETER(mont);
+	uint32_t diff[CRYC_BN_MAX_LIMBS];
+	size_t limbs;
+	uint32_t carry;
+	uint32_t borrow;
+	uint32_t mask;
+
+	/* Forms the sum a + b and keeps its carry out of the top limb. */
+	limbs = mont->limbs;
+	carry = bn_add(out, a, b, limbs);
+
+	/* Forms the sum minus m, which is the answer when the sum reached m. */
+	borrow = bn_sub(diff, out, mont->modulus, limbs);
+
+	/* The sum reached m when it carried out, or when subtracting m did not borrow. */
+	mask = bn_mask_nonzero(carry | (borrow ^ 1U));
+	cryc_bn_select(out, diff, out, limbs, mask);
+
+	/* Wipes the copy of a value that may be secret. */
+	cryc_wipe(diff, limbs * sizeof(diff[0]));
 }
 
 /*
@@ -152,11 +299,23 @@ cryc_bn_mod_sub(
 	const uint32_t *b,
 	const struct cryc_bn_mont *mont)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(b);
-	UNUSED_PARAMETER(mont);
+	uint32_t addend[CRYC_BN_MAX_LIMBS];
+	size_t limbs;
+	size_t index;
+	uint32_t borrow;
+	uint32_t mask;
+
+	/* Forms a - b and keeps its borrow, which says the difference is negative. */
+	limbs = mont->limbs;
+	borrow = bn_sub(out, a, b, limbs);
+
+	/* Takes m where the difference was negative and zero where it was not. */
+	mask = 0U - borrow;
+	for (index = 0; index < limbs; index++)
+		addend[index] = mont->modulus[index] & mask;
+
+	/* Adds m back to a negative difference, which wraps it into the range. */
+	bn_add(out, out, addend, limbs);
 }
 
 /*
@@ -170,10 +329,21 @@ cryc_bn_reduce_once(
 	const uint32_t *a,
 	const struct cryc_bn_mont *mont)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(mont);
+	uint32_t diff[CRYC_BN_MAX_LIMBS];
+	size_t limbs;
+	uint32_t borrow;
+	uint32_t mask;
+
+	/* Forms a - m, which is the answer when a is not below m. */
+	limbs = mont->limbs;
+	borrow = bn_sub(diff, a, mont->modulus, limbs);
+
+	/* Takes the difference when subtracting m did not borrow. */
+	mask = 0U - (borrow ^ 1U);
+	cryc_bn_select(out, diff, a, limbs, mask);
+
+	/* Wipes the copy of a value that may be secret. */
+	cryc_wipe(diff, limbs * sizeof(diff[0]));
 }
 
 /*
@@ -187,11 +357,68 @@ cryc_bn_mont_mul(
 	const uint32_t *b,
 	const struct cryc_bn_mont *mont)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(b);
-	UNUSED_PARAMETER(mont);
+	uint32_t total[CRYC_BN_MAX_LIMBS + 2];
+	uint32_t diff[CRYC_BN_MAX_LIMBS];
+	size_t limbs;
+	size_t row;
+	size_t column;
+	uint64_t accumulator;
+	uint32_t carry;
+	uint32_t factor;
+	uint32_t borrow;
+	uint32_t mask;
+
+	/* Starts the running total at zero; it has two words more than the modulus. */
+	limbs = mont->limbs;
+	for (column = 0; column < limbs + 2U; column++)
+		total[column] = 0;
+
+	/*
+	 * Takes one word of a at a time (REDC in its word-by-word form):
+	 * adds that word times b, then adds the multiple of m that clears the
+	 * lowest word of the total, and drops that word.  After every row
+	 * the total is below 2m.
+	 */
+	for (row = 0; row < limbs; row++) {
+		/* Adds a[row] * b to the total. */
+		carry = 0;
+		for (column = 0; column < limbs; column++) {
+			accumulator = (uint64_t)a[row] * b[column] + total[column] + carry;
+			total[column] = (uint32_t)accumulator;
+			carry = (uint32_t)(accumulator >> 32);
+		}
+		accumulator = (uint64_t)total[limbs] + carry;
+		total[limbs] = (uint32_t)accumulator;
+		total[limbs + 1U] = (uint32_t)(accumulator >> 32);
+
+		/* Chooses the multiple of m whose lowest word cancels the total's. */
+		factor = total[0] * mont->m0inv;
+
+		/* Adds factor * m, whose lowest word cancels, and shifts the total down one word. */
+		accumulator = (uint64_t)factor * mont->modulus[0] + total[0];
+		carry = (uint32_t)(accumulator >> 32);
+		for (column = 1; column < limbs; column++) {
+			accumulator = (uint64_t)factor * mont->modulus[column] + total[column] + carry;
+			total[column - 1U] = (uint32_t)accumulator;
+			carry = (uint32_t)(accumulator >> 32);
+		}
+		accumulator = (uint64_t)total[limbs] + carry;
+		total[limbs - 1U] = (uint32_t)accumulator;
+		carry = (uint32_t)(accumulator >> 32);
+		total[limbs] = total[limbs + 1U] + carry;
+		total[limbs + 1U] = 0;
+	}
+
+	/* Forms the total minus m, which is the answer when the total reached m. */
+	borrow = bn_sub(diff, total, mont->modulus, limbs);
+
+	/* The total reached m when it has a word above the width, or when subtracting m did not borrow. */
+	mask = bn_mask_nonzero(total[limbs] | (borrow ^ 1U));
+	cryc_bn_select(out, diff, total, limbs, mask);
+
+	/* Wipes the copies of values that may be secret. */
+	cryc_wipe(total, (limbs + 2U) * sizeof(total[0]));
+	cryc_wipe(diff, limbs * sizeof(diff[0]));
 }
 
 /*
@@ -204,10 +431,8 @@ cryc_bn_to_mont(
 	const uint32_t *a,
 	const struct cryc_bn_mont *mont)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(mont);
+	/* Multiplies by R^2, which Montgomery multiplication divides by R. */
+	cryc_bn_mont_mul(out, a, mont->r2, mont);
 }
 
 /*
@@ -220,10 +445,16 @@ cryc_bn_from_mont(
 	const uint32_t *a,
 	const struct cryc_bn_mont *mont)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(mont);
+	uint32_t one[CRYC_BN_MAX_LIMBS];
+	size_t index;
+
+	/* Builds the number 1 in the width of the modulus. */
+	for (index = 0; index < mont->limbs; index++)
+		one[index] = 0;
+	one[0] = 1U;
+
+	/* Multiplies by 1, which Montgomery multiplication divides by R. */
+	cryc_bn_mont_mul(out, a, one, mont);
 }
 
 /*
@@ -234,9 +465,16 @@ cryc_bn_mont_one(
 	uint32_t *out,
 	const struct cryc_bn_mont *mont)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(mont);
+	uint32_t one[CRYC_BN_MAX_LIMBS];
+	size_t index;
+
+	/* Builds the number 1 in the width of the modulus. */
+	for (index = 0; index < mont->limbs; index++)
+		one[index] = 0;
+	one[0] = 1U;
+
+	/* Brings 1 into Montgomery form. */
+	cryc_bn_to_mont(out, one, mont);
 }
 
 /*
@@ -252,10 +490,142 @@ cryc_bn_mont_exp(
 	size_t size,
 	const struct cryc_bn_mont *mont)
 {
-	/* The parameters are used once the function is written. */
-	UNUSED_PARAMETER(out);
-	UNUSED_PARAMETER(base);
-	UNUSED_PARAMETER(exponent);
-	UNUSED_PARAMETER(size);
-	UNUSED_PARAMETER(mont);
+	uint32_t power[CRYC_BN_MAX_LIMBS];
+	uint32_t factor[CRYC_BN_MAX_LIMBS];
+	size_t limbs;
+	size_t index;
+	int bit;
+	int started;
+
+	/* Keeps a copy of the base, since out may be the base. */
+	limbs = mont->limbs;
+	for (index = 0; index < limbs; index++)
+		factor[index] = base[index];
+
+	/* Starts the power at 1 in Montgomery form. */
+	cryc_bn_mont_one(power, mont);
+
+	/*
+	 * Runs square-and-multiply from the top bit of the exponent, which
+	 * is public.  Squaring is skipped until the first set bit, where the
+	 * power is still 1.
+	 */
+	started = 0;
+	for (index = 0; index < size; index++) {
+		for (bit = 7; bit >= 0; bit--) {
+			if (started != 0)
+				cryc_bn_mont_mul(power, power, power, mont);
+			if (((exponent[index] >> bit) & 1U) != 0U) {
+				cryc_bn_mont_mul(power, power, factor, mont);
+				started = 1;
+			}
+		}
+	}
+
+	/* Publishes the power. */
+	for (index = 0; index < limbs; index++)
+		out[index] = power[index];
+
+	/* Wipes the copies of values that may be secret. */
+	cryc_wipe(power, limbs * sizeof(power[0]));
+	cryc_wipe(factor, limbs * sizeof(factor[0]));
+}
+
+/*
+ * Adds b to a (limbs limbs), writes the sum to out (which may be a or b),
+ * and returns the carry out of the top limb (0 or 1).
+ */
+static uint32_t
+bn_add(
+	uint32_t *out,
+	const uint32_t *a,
+	const uint32_t *b,
+	size_t limbs)
+{
+	size_t index;
+	uint64_t sum;
+	uint32_t carry;
+
+	/* Adds limb by limb, carrying upward. */
+	carry = 0;
+	for (index = 0; index < limbs; index++) {
+		sum = (uint64_t)a[index] + b[index] + carry;
+		out[index] = (uint32_t)sum;
+		carry = (uint32_t)(sum >> 32);
+	}
+
+	/* Reports the carry out of the top. */
+	return carry;
+}
+
+/*
+ * Subtracts b from a (limbs limbs), writes the difference to out (which
+ * may be a or b), and returns the borrow out of the top limb (0 or 1).
+ */
+static uint32_t
+bn_sub(
+	uint32_t *out,
+	const uint32_t *a,
+	const uint32_t *b,
+	size_t limbs)
+{
+	size_t index;
+	uint64_t difference;
+	uint32_t borrow;
+
+	/*
+	 * Subtracts limb by limb, borrowing from above.  The 64-bit
+	 * difference wraps when negative, which sets bit 32.
+	 */
+	borrow = 0;
+	for (index = 0; index < limbs; index++) {
+		difference = (uint64_t)a[index] - b[index] - borrow;
+		out[index] = (uint32_t)difference;
+		borrow = (uint32_t)((difference >> 32) & 1U);
+	}
+
+	/* Reports the borrow out of the top. */
+	return borrow;
+}
+
+/*
+ * Returns the borrow out of the top limb of a - b (limbs limbs), 1 when
+ * a < b, without storing the difference.
+ */
+static uint32_t
+bn_borrow(
+	const uint32_t *a,
+	const uint32_t *b,
+	size_t limbs)
+{
+	size_t index;
+	uint64_t difference;
+	uint32_t borrow;
+
+	/* Runs the subtraction for its borrow alone. */
+	borrow = 0;
+	for (index = 0; index < limbs; index++) {
+		difference = (uint64_t)a[index] - b[index] - borrow;
+		borrow = (uint32_t)((difference >> 32) & 1U);
+	}
+
+	/* Reports the borrow out of the top. */
+	return borrow;
+}
+
+/*
+ * Returns 0xffffffff when value is not zero and 0 when it is, in constant
+ * time.
+ */
+static uint32_t
+bn_mask_nonzero(
+	uint32_t value)
+{
+	uint32_t zero_mask;
+
+	/* Inverts the mask of zero. */
+	zero_mask = cryc_ct_mask_zero32(value);
+
+	/* Reports the inverse. */
+	return ~zero_mask;
 }
