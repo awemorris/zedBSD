@@ -42,7 +42,7 @@
 | [p004](phase004/phase.md) | AES（bitsliced、定数時間）と counter mode（test-aes） | cleared（2026-11-01 20:55 Q1、main adf13ed5c。main で test-aes 28516 checks・ct-aes PASS を流し直した。P6 が決めた 5 点（schedule の配置、S-box の回路、NULL key の EINVAL、size 0、counter は公開の値）は妥当と判断。壊す確かめは 24 通りが FAIL、試験の失敗と build の誤りの区別は 5 通りだけ）。前: 実装済み・試験 PASS（2026-11-01 20:55 P6。test-aes 28516 checks、posix・win32・ct PASS、24 通りの破壊で FAIL。cleared は Q1） | p002 |
 | [p005](phase005/phase.md) | AES-GCM（test-gcm） | cleared（2026-11-01 21:33 Q1、main 72bb7908a。main で run-unit all 17 本・run-ct gcm PASS を流し直した）。前: 実装済み・試験 PASS（2026-11-01 21:29 P6。test-gcm 235197 checks、posix・win32・ct PASS、54 通りの破壊のうち 50 通りが試験の失敗で FAIL、見逃し 4 通りは等価か実行できない。cleared は Q1） | p004 |
 | [p006](phase006/phase.md) | ChaCha20・Poly1305・AEAD（と 64 bit の counter の ChaCha20）（test-chacha） | cleared（2026-11-01 09:23 Q1、main d0e048532。Sonnet、chacha 52156 checks、posix・win32・ct PASS） | p002 |
-| [p007](phase007/phase.md) | 固定幅の整数と Montgomery の算術（test-bn） | planned（P6 q1851） | p002 |
+| [p007](phase007/phase.md) | 固定幅の整数と Montgomery の算術（test-bn） | 実装済み・試験 PASS（2026-11-01 22:21 P6。test-bn 186097 checks、posix・win32・ct PASS、62 通りの破壊のうち 60 通りが試験の失敗で FAIL、見逃し 2 通りは等価、定数時間の破壊 10 通りが FAIL。cleared は Q1） | p002 |
 | [p008](phase008/phase.md) | GF(2^255-19) と X25519（test-f25519、test-x25519） | cleared（2026-11-01 09:45 Q1、main 7ebb5367e）。実装済み・試験 PASS（2026-11-01 09:50 Sonnet。f25519 22903 checks、x25519 4538 checks、posix・win32・ct PASS、21 通りの破壊で FAIL。cleared は Q1） | p002 |
 | [p009](phase009/phase.md) | Ed25519（test-ed25519） | planned | p008 |
 | [p010](phase010/phase.md) | P-256・P-384 の群（test-ecp） | planned | p007 |
