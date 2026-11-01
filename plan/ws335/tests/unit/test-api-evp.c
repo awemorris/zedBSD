@@ -30,6 +30,8 @@
  * an empty queue.
  */
 
+#include <limits.h>
+
 #include "check.h"
 #include "vecfile.h"
 
@@ -682,6 +684,7 @@ check_digest_message(
 
 	/* After the final the context is empty: the hash state is wiped and it must be started again. */
 	CHECK(ctx->mode == CRYC_MD_NONE);
+	CHECK(ctx->md == NULL);
 	CHECK(all_equal((const uint8_t *)&ctx->hash, sizeof(ctx->hash), 0));
 
 	/* Random chunks, among them empty ones and one of a NULL pointer with no bytes; the size output is optional. */
@@ -1540,6 +1543,30 @@ test_cipher_exhaustion(void)
 	REFUSED(EVP_CipherUpdate(ctx, output, &out_length, input, 1), 0, R_ARGUMENT);
 	EVP_CIPHER_CTX_free(ctx);
 
+	/* A request that is a multiple of 16 but not of 64 counts a partial block too: at counter 2^64 - 1, 80 bytes need two blocks. */
+	make_iv(iv, CRYC_U64(0xffffffffU, 0xffffffffU), nonce);
+	ctx = new_cipher(key, iv);
+	if (ctx == NULL)
+		return;
+	memset(output, SENTINEL_BYTE, sizeof(output));
+	REFUSED(EVP_CipherUpdate(ctx, output, &out_length, input, 80), 0, R_ARGUMENT);
+	CHECK(all_equal(output, sizeof(output), SENTINEL_BYTE));
+	OK(EVP_CipherUpdate(ctx, output, &out_length, input, 16));
+	EVP_CIPHER_CTX_free(ctx);
+
+	/* After the last block is used up, a request of 16, 32, 48 or 80 bytes (no whole block, or more) is refused too. */
+	for (index = 0; index < 4U; index++) {
+		make_iv(iv, CRYC_U64(0xffffffffU, 0xffffffffU), nonce);
+		ctx = new_cipher(key, iv);
+		if (ctx == NULL)
+			return;
+		OK(EVP_CipherUpdate(ctx, output, &out_length, input, 64));
+		memset(output, SENTINEL_BYTE, sizeof(output));
+		REFUSED(EVP_CipherUpdate(ctx, output, &out_length, input, 16 + 16 * (int)index + (index == 3U ? 16 : 0)), 0, R_ARGUMENT);
+		CHECK(all_equal(output, sizeof(output), SENTINEL_BYTE));
+		EVP_CIPHER_CTX_free(ctx);
+	}
+
 	/* A counter of 0 with no earlier use is not mistaken for the end: a long request from it works. */
 	make_iv(iv, 0, nonce);
 	ctx = new_cipher(key, iv);
@@ -1603,10 +1630,25 @@ test_cipher_setup(void)
 	REFUSED(EVP_CipherInit_ex(ctx, NULL, NULL, key, iv, 1), 0, R_NULL);
 	CHECK(ctx->cipher == NULL && ctx->key_set == 0);
 
-	/* The cipher alone sets up nothing usable; then the key; then a use with no IV runs with the zero IV. */
+	/* The cipher alone, or the cipher and an IV, set up nothing usable; then the key; then a use with no IV runs with the zero IV. */
 	OK(EVP_CipherInit_ex(ctx, EVP_chacha20(), NULL, NULL, NULL, 1));
 	REFUSED(EVP_CipherUpdate(ctx, output, &out_length, input, 16), 0, R_NOT_SET_UP);
+	OK(EVP_CipherInit_ex(ctx, NULL, NULL, NULL, iv, 1));
+	CHECK(ctx->key_set == 0);
+	REFUSED(EVP_CipherUpdate(ctx, output, &out_length, input, 16), 0, R_NOT_SET_UP);
+	REFUSED(EVP_Cipher(ctx, output, input, 16U), -1, R_NOT_SET_UP);
 	OK(EVP_CipherInit_ex(ctx, NULL, NULL, key, NULL, 1));
+	reference_stream(key, CRYC_U64(0x00000003U, 0x00000007U), nonce, stream, 100U);
+	OK(EVP_CipherUpdate(ctx, output, &out_length, input, 100));
+	CHECK_BYTES(output, stream, 100U);
+
+	/* A fresh context given a key and no IV at all runs with the zero IV. */
+	EVP_CIPHER_CTX_free(ctx);
+	ctx = EVP_CIPHER_CTX_new();
+	CHECK(ctx != NULL);
+	if (ctx == NULL)
+		return;
+	OK(EVP_CipherInit_ex(ctx, EVP_chacha20(), NULL, key, NULL, 1));
 	memset(zero_nonce, 0, sizeof(zero_nonce));
 	reference_stream(key, 0, zero_nonce, stream, 100U);
 	OK(EVP_CipherUpdate(ctx, output, &out_length, input, 100));
@@ -1665,6 +1707,8 @@ test_cipher_setup(void)
 	REFUSED(EVP_Cipher(ctx, output, NULL, 16U), -1, R_NULL);
 	REFUSED(EVP_Cipher(ctx, output, input, 0x80000000U), -1, R_ARGUMENT);
 	REFUSED(EVP_Cipher(ctx, output, input, 0xffffffffU), -1, R_ARGUMENT);
+	REFUSED(EVP_Cipher(ctx, NULL, NULL, (unsigned int)INT_MAX), -1, R_NULL);
+	REFUSED(EVP_Cipher(ctx, NULL, NULL, (unsigned int)INT_MAX + 1U), -1, R_ARGUMENT);
 	CHECK(out_length == 99);
 	CHECK_BYTES(output, guard, sizeof(output));
 	reference_stream(key, CRYC_U64(0x00000003U, 0x00000007U), nonce, stream, 100U);
@@ -1686,11 +1730,17 @@ test_cipher_setup(void)
 	CHECK(EVP_Cipher(ctx, output, input, 200U) == 200);
 	CHECK(ERR_peek_error() == 0UL);
 
-	/* The consumed keystream is wiped as soon as a block is used up. */
+	/* The consumed keystream is wiped as soon as a block is used up (here a block taken in two calls). */
 	OK(EVP_CipherInit_ex(ctx, NULL, NULL, NULL, iv, -1));
-	OK(EVP_CipherUpdate(ctx, output, &out_length, input, 64));
+	OK(EVP_CipherUpdate(ctx, output, &out_length, input, 10));
+	CHECK(ctx->available == 54U);
+	CHECK(!all_equal(ctx->keystream, sizeof(ctx->keystream), 0));
+	OK(EVP_CipherUpdate(ctx, output + 10, &out_length, input + 10, 54));
 	CHECK(ctx->available == 0U);
 	CHECK(all_equal(ctx->keystream, sizeof(ctx->keystream), 0));
+	reference_stream(key, CRYC_U64(0x00000003U, 0x00000007U), nonce, stream, 64U);
+	CHECK_BYTES(output, stream, 64U);
+
 
 	EVP_CIPHER_CTX_free(ctx);
 	CHECK(ERR_peek_error() == 0UL);

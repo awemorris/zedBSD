@@ -881,7 +881,6 @@ cipher_stream(
 	const unsigned char *in,
 	size_t size)
 {
-	uint8_t zeros[CRYC_CHACHA20_BLOCK];
 	uint64_t blocks;
 	uint64_t next_counter;
 	uint64_t blocks_left;
@@ -969,11 +968,11 @@ cipher_stream(
 		ctx->counter = next_counter;
 	}
 
-	/* Makes a new block for the last partial block and keeps the rest of it for the next call. */
+	/* Makes a new block for the last partial block (by encrypting zeros in place in the buffer) and keeps the rest of it for the next call. */
 	tail = need - whole;
 	if (tail > 0) {
-		memset(zeros, 0, sizeof(zeros));
-		error = cryc_chacha20_xor64(ctx->key, ctx->counter, ctx->nonce, zeros, ctx->keystream, sizeof(zeros));
+		memset(ctx->keystream, 0, sizeof(ctx->keystream));
+		error = cryc_chacha20_xor64(ctx->key, ctx->counter, ctx->nonce, ctx->keystream, ctx->keystream, sizeof(ctx->keystream));
 		if (error != 0) {
 			cryc_err_put(CRYC_LIB_EVP, CRYC_R_INTERNAL_ERROR);
 			return 0;
