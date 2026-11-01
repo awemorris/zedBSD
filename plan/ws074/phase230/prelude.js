@@ -1448,25 +1448,25 @@
       });
     });
   })();
-    // The window an <iframe> element gives (contentWindow, and the source of the messages its document posts) is one proxy that follows
-    // the element's current document: a frame keeps its window as it goes from one document to the next.  One with an opaque origin shows postMessage and little else.
+    // The window an <iframe> element gives when its document is of another origin, or of an opaque one (contentWindow, and the source of the
+    // messages its document posts), is one proxy that follows the element's current document and shows postMessage and little else.
+    // The element keeps its proxy (bind/frame.c), and the proxy keeps the methods it binds to its current window: the collections here
+    // hold their keys strongly, so a table of elements or windows would keep every frame's document alive.
     (function () {
-      var proxies = new WeakMap(), bound = new WeakMap();
       function blocked() { return new DOMException('Blocked a frame from accessing a cross-origin frame.', 'SecurityError'); }
-      function method(w, v) {
-        var m, b;
-        if (typeof v !== 'function' || /^[A-Z]/.test(v.name || '')) return v;
-        m = bound.get(w);
-        if (!m) { m = new WeakMap(); bound.set(w, m); }
-        b = m.get(v);
-        if (!b) { b = function () { return Reflect.apply(v, w, arguments); }; m.set(v, b); }
-        return b;
-      }
       native.setFrameProxyMaker(function (element) {
-        var proxy = proxies.get(element), last = null;
-        if (proxy) return proxy;
+        var proxy, last = null, boundWindow = null, bound = null;
         // The window of the element's document now; after the frame is removed, the last one it had (a window kept by a script goes on).
         function current() { var w = native.frameGlobal(element); if (w !== null) last = w; return w !== null ? w : last; }
+        // A method of the window, bound to it (the same function each time while the window stays the frame's).
+        function method(w, v) {
+          var b;
+          if (typeof v !== 'function' || /^[A-Z]/.test(v.name || '')) return v;
+          if (boundWindow !== w) { boundWindow = w; bound = new Map(); }
+          b = bound.get(v);
+          if (!b) { b = function () { return Reflect.apply(v, w, arguments); }; bound.set(v, b); }
+          return b;
+        }
         proxy = new Proxy(Object.create(null), {
           get: function (t, k) {
             var w = current();
@@ -1505,7 +1505,6 @@
           preventExtensions: function () { return false; },
           isExtensible: function () { return true; }
         });
-        proxies.set(element, proxy);
         return proxy;
       });
     })();
@@ -2202,13 +2201,23 @@
         for (j = 0; j < r.addedNodes.length; j++) if (r.addedNodes[j].nodeType === 1 && r.addedNodes[j].isConnected) connectedTree(r.addedNodes[j]);
       }
     }
-    var observer = new MutationObserver(handle);
+    // The trees are watched from the first definition on: until then there is nothing to upgrade or call, and the records an observer
+    // keeps until they are delivered would keep removed nodes alive.  A shadow root attached before then waits in early.
+    var observer = new MutationObserver(handle), watching = false, early = [];
     function watch(root) {
+      if (!watching) { if (early.indexOf(root) < 0) early.push(root); return; }
       if (observed.has(root)) return;
       observed.add(root);
       observer.observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true });
     }
-    watch(document);
+    function startWatching() {
+      var roots = early;
+      if (watching) return;
+      watching = true;
+      early = [];
+      watch(document);
+      roots.forEach(watch);
+    }
     function define(name, ctor) {
       var proto, callbacks = {}, names = ['connectedCallback', 'disconnectedCallback', 'attributeChangedCallback', 'adoptedCallback'], list, i, definition;
       name = String(name);
@@ -2223,6 +2232,7 @@
       definition = { name: name, ctor: ctor, callbacks: callbacks, observedAttributes: list };
       byName.set(name, definition);
       byCtor.set(ctor, definition);
+      startWatching();
       upgradeTree(document);
       if (waiting.has(name)) { waiting.get(name).resolve(ctor); waiting.delete(name); }
     }
