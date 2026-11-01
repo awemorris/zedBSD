@@ -1313,6 +1313,146 @@ check_calls(void)
 }
 
 /*
+ * The longest lists: each of the five lists with 16 entries is accepted (the
+ * Curr ones all missing here, the Foll ones not counted), and all five full
+ * at once; take_slot called again with another plan structure still reports
+ * the slot of the picture; a buffer with all 32 slots busy reports EBUSY.
+ */
+static void
+check_limits(void)
+{
+	struct h265sw_rps_pocs pocs;
+	struct h265_dpb_plan other_plan;
+	unsigned list;
+	unsigned index;
+	int rc;
+
+	h265_dpb_init(&dpb, 32U);
+	sps_make(16U, 0U, 0U, 4U);
+	for (list = 0U;
+	     list < 6U;
+	     list++) {
+		memset(&pocs, 0, sizeof(pocs));
+		for (index = 0U;
+		     index < 16U;
+		     index++) {
+			if (list == 0U || list == 5U) {
+				pocs.st_before[index] = 100 + (int32_t)index;
+				pocs.num_st_before = 16U;
+			}
+			if (list == 1U || list == 5U) {
+				pocs.st_after[index] = 200 + (int32_t)index;
+				pocs.num_st_after = 16U;
+			}
+			if (list == 2U || list == 5U) {
+				pocs.st_foll[index] = 300 + (int32_t)index;
+				pocs.num_st_foll = 16U;
+			}
+			if (list == 3U || list == 5U) {
+				pocs.lt_curr[index] = (int32_t)index;
+				pocs.lt_curr_msb[index] = 0U;
+				pocs.num_lt_curr = 16U;
+			}
+			if (list == 4U || list == 5U) {
+				pocs.lt_foll[index] = (int32_t)index;
+				pocs.lt_foll_msb[index] = 1U;
+				pocs.num_lt_foll = 16U;
+			}
+		}
+		rc = h265_dpb_begin(&dpb, &sps_store, &pocs, 1, 0, &plan);
+		CHECK(rc == 0);
+		if (list == 0U || list == 1U || list == 3U)
+			CHECK(plan.missing == 16U);
+		if (list == 2U || list == 4U)
+			CHECK(plan.missing == 0U);
+		if (list == 5U)
+			CHECK(plan.missing == 48U);
+		if (list == 0U || list == 5U)
+			CHECK(plan.num_st_before == 16U);
+		if (list == 1U || list == 5U)
+			CHECK(plan.num_st_after == 16U);
+		if (list == 3U || list == 5U)
+			CHECK(plan.num_lt_curr == 16U);
+		h265_dpb_abort(&dpb);
+	}
+
+	/* A second take_slot with a plan structure that has no slot yet fills it in. */
+	memset(&pocs, 0, sizeof(pocs));
+	rc = h265_dpb_begin(&dpb, &sps_store, &pocs, 1, 0, &plan);
+	CHECK(rc == 0);
+	rc = h265_dpb_take_slot(&dpb, &plan);
+	CHECK(rc == 0);
+	memset(&other_plan, 0, sizeof(other_plan));
+	other_plan.setup_slot = H265_DPB_NO_SLOT;
+	rc = h265_dpb_take_slot(&dpb, &other_plan);
+	CHECK(rc == 0);
+	CHECK(other_plan.setup_slot == plan.setup_slot);
+	h265_dpb_abort(&dpb);
+
+	/* All 32 slots busy. */
+	dpb.busy = 0xFFFFFFFFU;
+	rc = h265_dpb_begin(&dpb, &sps_store, &pocs, 1, 0, &plan);
+	CHECK(rc == 0);
+	rc = h265_dpb_take_slot(&dpb, &plan);
+	CHECK(rc == EBUSY);
+	CHECK(dpb.current == H265_DPB_NO_SLOT);
+	h265_dpb_release(&dpb, 31);
+	rc = h265_dpb_take_slot(&dpb, &plan);
+	CHECK(rc == 0);
+	CHECK(plan.setup_slot == 31);
+}
+
+/*
+ * A buffer whose entries hold slots outside the session (a caller that wrote
+ * the structure itself): take_slot ignores them, and bumping reports them
+ * without touching a busy bit or reading outside the mask.
+ */
+static void
+check_foreign_slots(void)
+{
+	struct h265_dpb_output out[H265_DPB_MAX_OUTPUT];
+	struct h265sw_rps_pocs pocs;
+	unsigned count;
+	unsigned index;
+	int rc;
+
+	h265_dpb_init(&dpb, 32U);
+	sps_make(8U, 0U, 0U, 4U);
+	dpb.entry[0].used = 1;
+	dpb.entry[0].marking = H265_DPB_SHORT;
+	dpb.entry[0].slot = 32;
+	dpb.entry[1].used = 1;
+	dpb.entry[1].marking = H265_DPB_SHORT;
+	dpb.entry[1].slot = 40;
+	dpb.entry[1].poc = 1;
+	dpb.entry[2].used = 1;
+	dpb.entry[2].marking = H265_DPB_SHORT;
+	dpb.entry[2].slot = H265_DPB_NO_SLOT;
+	dpb.entry[2].poc = 2;
+	dpb.in_picture = 1;
+	rc = h265_dpb_take_slot(&dpb, &plan);
+	CHECK(rc == 0);
+	CHECK(plan.setup_slot == 0);
+	dpb.in_picture = 0;
+	dpb.current = H265_DPB_NO_SLOT;
+	for (index = 0U;
+	     index < 3U;
+	     index++)
+		dpb.entry[index].needed = 1;
+	count = 0U;
+	rc = h265_dpb_flush(&dpb, out, &count);
+	CHECK(rc == 0);
+	CHECK(count == 3U);
+	CHECK(out[0].slot == 32);
+	CHECK(out[1].slot == 40);
+	CHECK(out[2].slot == H265_DPB_NO_SLOT);
+	CHECK(dpb.busy == 0U);
+	memset(&pocs, 0, sizeof(pocs));
+	h265_dpb_release(&dpb, 32);
+	h265_dpb_release(&dpb, 40);
+}
+
+/*
  * abort after take_slot gives the slot back and keeps what begin did: size 3,
  * reorder 4, pictures 0, 8, 4, then picture 2 (before 0) outputs 0 and 4 at
  * its begin and empties the entry of 4 (unused).  After the abort the entry
@@ -2350,6 +2490,8 @@ main(void)
 	check_sixteen_slots();
 	check_slots();
 	check_calls();
+	check_limits();
+	check_foreign_slots();
 	check_abort();
 	check_flush_clear();
 	for (run = 0U;
