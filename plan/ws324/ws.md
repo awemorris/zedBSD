@@ -26,6 +26,7 @@
 | [ws324-p006g](phase006g/phase.md) | h265-stream の実装（Sonnet） | planned | p006d |
 | [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | planned | p006e〜g |
 | [ws324-p009a](phase009a/phase.md) | NVENC の channel（段 nvenc-channel、class の bind、firmware の確かめ、RC の通知の記録） | cleared（2026-11-02 01:07 Q1、main a43959d8e。10.0.10.3 で NVENC の channel（class c4b7、chid 49）が開き engine 自身が semaphore を release、GSP-RM が NVENC の ucode を持つ（追加の firmware 不要）、channel error 0、NVDEC は前と同じ） | 実機 |
+| [ws324-p009b](phase009b/phase.md) | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode） | uncleared（2026-11-02 04:23 P1、q1884-i01。H.264・H.265 とも 1 枚目の encode が HW の誤り（RC 47）、25 起動・約 75 通りの値で同じ。GSP の log の書式の metadata の判断待ち Q-p009b-1） | p009a、Q324-4 |
 
 ### 実装の Phase の案（2026-11-01 P1、[design.md](design.md) 第 2 版 §15。Q1 の受け入れの後に表へ）
 
@@ -66,6 +67,7 @@
 
 ## Resume point
 
+- 2026-11-02 P1（q1884-i01）: p009b。nvenc-test の段（`nvrtx.nvenc.test=1`）で H.264 の IDR を encode。firmware は setup を受けて（magic・offset の検査は通る、誤りの番号は 2024 版の enum）、rc_process と入力の luma・chroma を読んだ後、出力に触る前に HW の誤り（error_status 1、約 20 µs、GSP の RC 47）。H.265・ME only・IPCM・640x480・monochrome でも同じ。channel は RC の後に作り直せるので 1 起動で 5〜7 通り試せる。GSP の LOGRM に falcon の dump らしい 24 値があるが書式が無い（Q-p009b-1）。次は Q1 の判断（[phase009b](phase009b/phase.md) §4〜§5）。
 - 2026-11-02 P1（q1880-i01）: p009a。NVENC の channel を実機（10.0.10.3）で開いた: chid 49・runlist 2・class c4b7、NOP と NVENC 自身の semaphore の release が通り、RC の通知 0。R5 は「GSP-RM が ucode を持つ、別の firmware は要らない」。機械は Debian に戻し cksum 一致。次は Q1 の受け入れと p009b（関門）。
 - 2026-11-02 P1（q1864-i02）: p006a 段 2。header 11 個を `userland/desktop/libmedia/` に置き、骨格 .c 10 個、`plan/ws324/tests/`（run-unit.sh・check-skeleton.sh・unit/h265write.h・unit/test-h265write.c）、基点 BASE `1f16db0e6`。p006b〜h の phase.md に BASE と道具の注意（design §8.1.1）。次は Q1 の受け入れと p006b・p006e・p006f の起動。
 - 2026-11-01 P1（q1864-i01）: p006a 段 1。[h265-parse-design.md](h265-parse-design.md)、[proposed/h265/](proposed/h265/) の header 11 個、phase006b〜h の phase.md、design-review.md の review 2（20 件を全部反映）。次は Q1 の受け入れと Q-A〜Q-E（[phase006a](phase006a/phase.md)）、その後に段 2。

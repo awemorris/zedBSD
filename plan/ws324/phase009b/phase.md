@@ -2,7 +2,7 @@
 
 # ws324-p009b NVENC の関門: kernel の中の自己診断で H.264 の I 絵と P 絵を encode し、host の ffmpeg で decode する
 
-Status: in-progress（2026-11-02 01:22 P1、q1884-i01）
+Status: uncleared（2026-11-02 04:23 P1、q1884-i01。関門は未達: H.264・H.265 の 1 枚目の encode が HW の誤りで止まる。Q-p009b-1 の判断待ち。前: in-progress 01:22）
 
 - WS: [WS324](../ws.md)。設計: [design.md](../design.md) §3.3（NVENC の interface、版の食い違い R1）・§7.2（push）・§7.4（H.264 の 1 絵の設定）・§12 R1・R2・§15 p009b。
 - 基点: main `ad65fbe3f`（worktree `/home/awe/zedBSD-worktrees/p1-ws324`、branch `agent/p1-ws324`）。前提: [p009a](../phase009a/phase.md)（channel は class c4b7・chid 49、GSP-RM が ucode を持つ）。
@@ -71,6 +71,23 @@ NVENC が driver の組んだ 1 絵の設定（`nvenc_h264_drv_pic_setup_s` と 
 
 | run23 | 入力の buffer の直ぐ上を空けて（写さない 64 KiB）、plane の始めを buffer の末尾から X 前に置き、読みの長さを測った: luma は 32 KiB 前から読んで fault 無し（32 KiB を読む＝期待どおり）。chroma は 16・24 KiB 前で fault、32・48 KiB 前で fault 無し → **chroma を 24〜32 KiB 読む**（4:2:0 の 256x128 なら 16 KiB。luma と同じ行数、4:2:2 の大きさ） |
 | run24 | 640x480 の絵（pitch 640、1200 MB、buffer 640 KiB）→ 同じ HW の誤り（大きさに依らない） |
+| run25 | sequence の chroma_format_idc を 0（monochrome）・2・3 → 同じ（chroma の道も原因ではない） |
 
 - GSP の log の書式: linux-firmware の `gsp-570.144.bin` には `.fwlogging`（libos の log の metadata）が無い。metadata の address（0x5e92fd0 など）は firmware の ELF の section の外。NVIDIA の driver の package の `gsp_tu10x.bin` に入っている見込み（open-gpu-kernel-modules の RM はそれで GSP の log を文に直す）。使うかは新しい出典（package の license）の判断なので Q1 に問う。
 - 次の候補: 入力の形（chroma の行数、tile の形）を MMU fault の位置で測る、大きい絵（720p）、GSP の log の文字列（判断の後）。
+
+### 4.4 R1・R2 の答え（今の所）
+
+- R1（版）: firmware の誤りの番号は 2024 版の enum に合う（13 = E_INPUT_BITSTREAM_OFFSET、14 = E_INPUT_HISTORY_OFFSET）→ Turing の firmware は 2024 版の interface と見る。使う field は 2 版で同じ位置（host で全 byte 照合）なので、今の設定では版の差は効いていない。
+- R2（既定の無い値）: 決められていない。どの値でも同じ HW の誤りなので、値の良し悪しを測る所まで行っていない。
+
+### 4.5 道具（試験だけの物）と未実施
+
+- 実機: `plan/ws324/tests/rtx-nvenc-test.sh OUT VMUNIX`（`EXTRA_CFG` で boot の行を足せる）。host: `nvenc-decode.py`（bitstream が出ていないので実機の出力では未使用。SPS・PPS の書き出しは ffmpeg の trace_headers で確かめた）。`nvenc-host-test.sh` 61 checks。
+- 自己診断（`nvenc-test.c`）は今は試しの道具の形（choice の表、setup の語の上書き、restart、GSP の log と RC の journal の表示）。関門が通ったら、決まった値を `nvrtx_nvenc_h264_setup` に入れ、試しの部分は外す（p010 の前に整理）。
+- 未実施: P 絵、bitstream の decode・PSNR・PNG、H.265 の host の decode（VPS・SPS・PPS の書き出し）、規約の全文の見直し（試しの code が残る間はしない）。
+- 機械: 毎回 Debian に戻し NVMe の kernel 1463007375・cfg 38198411 が一致（run14 だけ機械が止まり SwitchBot の cycle と Debian からの戻し）。Debian（10.0.10.3）に残した物（P1 は消さない、Q1 へ）: 空の dir `/mnt/p1-zboot`、`/tmp/p1-vmunix.back`・`/tmp/p1-zedbsd.cfg.back`。
+
+## 5. 問い
+
+- **Q-p009b-1**（Q1、出典と license の判断）: GSP の LOGRM の各 Xid 47 の直前に、1 引数の print が 24 個続く（falcon の register の dump と見る、値は 20 1418 0 0 2 fc0c fff7 38c00f2 1 6612 1f67a00 700 700 0 40410080 28101126 0 401e93xx 401e93xx 20000000 / e00ff 3000 f 0）。書式の文字列は firmware の `.fwlogging`（libos の log の metadata）にあり、linux-firmware の `gsp-570.144.bin` には無い。NVIDIA の driver の package（570.144 の .run）の `firmware/gsp_tu10x.bin` にある見込み（open-gpu-kernel-modules の RM はその section で GSP の log を文に直す）。これを host で取得し、log を文に直すためだけに読んでよいか（repo に入れない。driver の動作の観測ではない）。A: よい（次の起動で log を文に直し、誤りの register の意味から直す）。B: よくない（別の道: 例えば NVENC の engine の reset・電源の扱いを RM の control で確かめる、など手探りを続ける）。

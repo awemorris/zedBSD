@@ -402,13 +402,33 @@ static const struct test_poke test_h265_setup[] = {
 
 
 /*
- * The choices tried, in order: the 640x480 picture; the 256x128 picture as
- * built.  A choice whose encode does not finish stops the channel, which is
+ * The sequence word with another chroma format (bits 17:16): monochrome,
+ * 4:2:2 and 4:4:4, the rest as built (Main, level 3.0, frames only).
+ */
+#define TEST_SPS_BASE			(77U | (30U << 8) | (1U << 28))
+
+static const struct test_poke test_mono[] = {
+	{ 100U, TEST_SPS_BASE },
+};
+
+static const struct test_poke test_422[] = {
+	{ 100U, TEST_SPS_BASE | (2U << 16) },
+};
+
+static const struct test_poke test_444[] = {
+	{ 100U, TEST_SPS_BASE | (3U << 16) },
+};
+
+/*
+ * The choices tried, in order: monochrome, 4:2:2, 4:4:4 in the sequence
+ * word.  A choice whose encode does not finish stops the channel, which is
  * made again for the next.
  */
 static const struct test_attempt test_attempts[] = {
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_mono, TEST_POKES(test_mono) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_422, TEST_POKES(test_422) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_444, TEST_POKES(test_444) },
 	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_BIG, 0U, test_big, TEST_POKES(test_big) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, NULL, 0U },
 };
 
 static const uint32_t test_buffer_bytes[TEST_BUFFERS] = {
