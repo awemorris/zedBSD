@@ -253,6 +253,8 @@ struct bind_window {
 	double now;
 	int viewport_width;
 	int viewport_height;
+	/* Nonzero when the view's color scheme is dark (prefers-color-scheme, matchMedia). */
+	int dark;
 	const char *ready_state;
 	/* Set once the window's load event has finished dispatching. */
 	int load_ended;

@@ -1259,6 +1259,7 @@ int css_animation_is_off(void);
 void css_engine_set_scope(struct css_engine *engine, struct dom_node *scope);
 int css_engine_parse_media(struct css_engine *engine, const uint16_t *units, size_t length, const struct css_media **media);
 void css_engine_set_viewport(struct css_engine *engine, float width, float height);
+void css_engine_set_color_scheme(struct css_engine *engine, int dark);
 void css_engine_set_container_lookup(struct css_engine *engine, css_container_lookup lookup, void *context);
 int css_engine_container_missed(const struct css_engine *engine);
 size_t css_engine_container_uses(const struct css_engine *engine);

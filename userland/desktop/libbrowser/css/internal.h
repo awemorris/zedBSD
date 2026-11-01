@@ -879,7 +879,7 @@ const struct css_index_bucket *css_index_find(const struct css_index_table *tabl
 
 /* Media queries (media.c). */
 int css_media_parse(struct wb_arena *arena, const struct css_token *tokens, size_t count, const struct css_media *parent, struct css_media **media);
-int css_media_matches(const struct css_media *media, float width, float height);
+int css_media_matches(const struct css_media *media, float width, float height, int dark);
 
 /* Values (values.c). */
 int css_property_lookup(const struct css_token *name);

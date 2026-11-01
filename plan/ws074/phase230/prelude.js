@@ -1,6 +1,6 @@
 // The web platform pieces that are written in the page's own language (ws074-p230).
 // bind/prelude.c holds this text as a C string; this file is the readable source it is made from.
-// It is a function of the natives (parseURL, setURL, scrollToFragment, fire, setHyperlinkFollower, nodeRect) and the global object.
+// It is a function of the natives (parseURL, setURL, scrollToFragment, fire, setHyperlinkFollower, nodeRect, colorScheme) and the global object.
 (function (native, g) {
   'use strict';
   var parseURL = native.parseURL;
@@ -330,7 +330,8 @@
         addListener: function () {}, removeListener: function () {},
         addEventListener: function () {}, removeEventListener: function () {}, dispatchEvent: function () { return false; }
       };
-      if (/^\(\s*prefers-color-scheme\s*:\s*light\s*\)$/.test(q)) m.matches = true;
+      if (/^\(\s*prefers-color-scheme\s*:\s*light\s*\)$/.test(q)) m.matches = native.colorScheme() === 'light';
+      if (/^\(\s*prefers-color-scheme\s*:\s*dark\s*\)$/.test(q)) m.matches = native.colorScheme() === 'dark';
       if (/^\(\s*(any-)?hover\s*:\s*hover\s*\)$/.test(q)) m.matches = true;
       if (/^\(\s*(any-)?pointer\s*:\s*fine\s*\)$/.test(q)) m.matches = true;
       return m;

@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -39,6 +40,16 @@ struct records_reader {
 	const unsigned char *bytes;
 	size_t length;
 	size_t at;
+};
+
+/*
+ * A sink a backend made for itself (browser_storage_sink_create): the
+ * sink first, so that the sink's address is the whole's, and the buffer
+ * it fills, which the whole owns.
+ */
+struct records_own_sink {
+	struct browser_storage_sink sink;
+	struct wb_buffer buffer;
 };
 
 /* The digits that write a byte or a nibble in hexadecimal; read-only, program lifetime. */
@@ -134,6 +145,88 @@ browser_storage_sink_append(
 
 	/* Succeeded: the bytes are part of the record. */
 	return 0;
+}
+
+/*
+ * Makes a sink of a backend's own (one that reads through another
+ * backend), empty.
+ */
+int
+browser_storage_sink_create(
+	struct browser_storage_sink **sink)
+{
+	struct records_own_sink *made;
+
+	/* Somewhere to put it. */
+	if (sink == NULL)
+		return EINVAL;
+	*sink = NULL;
+
+	/* The sink and its buffer, bound. */
+	made = calloc(1U, sizeof(*made));
+	if (made == NULL)
+		return ENOMEM;
+	wb_buffer_init(&made->buffer);
+	wb_storage_sink_init(&made->sink, &made->buffer);
+
+	/* Succeeded: the caller owns the sink. */
+	*sink = &made->sink;
+	return 0;
+}
+
+/*
+ * Reports what was appended to a sink of a backend's own: its bytes
+ * (valid until the sink is destroyed or appended to) and their length, or
+ * the first error of an append.
+ */
+int
+browser_storage_sink_bytes(
+	const struct browser_storage_sink *sink,
+	const void **bytes,
+	size_t *length)
+{
+	/* A sink and somewhere to put the answer. */
+	if (sink == NULL ||
+	    bytes == NULL ||
+	    length == NULL)
+		return EINVAL;
+	if (sink->buffer == NULL)
+		return EINVAL;
+
+	/* An append that failed. */
+	if (sink->error != 0)
+		return sink->error;
+
+	/* Nothing appended yet: no bytes. */
+	if (sink->buffer->data == NULL) {
+		*bytes = NULL;
+		*length = 0;
+		return 0;
+	}
+
+	/* Succeeded: the record's bytes. */
+	*bytes = sink->buffer->data + sink->start;
+	*length = sink->buffer->length - sink->start;
+	return 0;
+}
+
+/*
+ * Destroys a sink of a backend's own and its bytes (NULL does nothing).
+ */
+void
+browser_storage_sink_destroy(
+	struct browser_storage_sink *sink)
+{
+	struct records_own_sink *own;
+
+	/* No sink. */
+	if (sink == NULL)
+		return;
+
+	/* The whole the sink begins. */
+	own = (struct records_own_sink *)sink;
+	wb_buffer_release(&own->buffer);
+	free(own);
 }
 
 /*

@@ -342,6 +342,7 @@ void bind_window_destroy(struct bind_window *window);
 void bind_window_detach(struct bind_window *window);
 void bind_window_set_time(struct bind_window *window, double now);
 void bind_window_set_viewport(struct bind_window *window, int width, int height);
+void bind_window_set_color_scheme(struct bind_window *window, int dark);
 void bind_window_set_ready_state(struct bind_window *window, const char *state);
 void bind_window_set_load_ended(struct bind_window *window);
 void bind_window_set_unloading(struct bind_window *window);

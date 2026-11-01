@@ -131,6 +131,7 @@ bind_style_context_engine(
 
 	/* Viewport changes invalidate the engine's own computed-style cache. */
 	css_engine_set_viewport(context->engine, window->viewport_width, window->viewport_height);
+	css_engine_set_color_scheme(context->engine, window->dark);
 	*engine = context->engine;
 
 	/* Succeeded: the caller can query the child's current cascade. */

@@ -54,4 +54,16 @@ struct shell_options {
 
 int shell_run(const struct shell_options *options);
 
+struct browser_storage_calls;
+
+/*
+ * The system's wrapping of the storage backend the instance keeps its
+ * records with: on Windows a backend that keeps the cookies encrypted for
+ * the user (apps/browser-win32/protect.c), on a POSIX system none (the
+ * backend as it is, main-posix.c).  *calls and *context are replaced by
+ * the wrapping backend's, which owns the one given.  Returns 0, or an
+ * error after closing the backend given (both NULL).
+ */
+int shell_storage_wrap(const struct browser_storage_calls **calls, void **context);
+
 #endif

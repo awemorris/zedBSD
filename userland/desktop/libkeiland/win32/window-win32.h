@@ -56,6 +56,12 @@
 #define KEIUI_WIN32_CONTROL_LABEL	64U
 #define KEIUI_WIN32_CONTROL_HINT	96U
 
+/* The message a drag's start is posted to its frame with (drag.c). */
+#define KEIUI_WIN32_DRAG_MESSAGE	(WM_APP + 1U)
+
+/* A drag waiting for its start (drag.c). */
+struct keiui_win32_drag;
+
 /* No control (an index of none). */
 #define KEIUI_WIN32_NO_CONTROL		0xffffffffU
 
@@ -124,8 +130,9 @@ struct keiui_win32_post {
  * The application: its name (UTF-8, and as UTF-16 for the windows'
  * property), its module, its windows, its thread, the counter that orders
  * every event queued, its own events (posts), the posts other threads made
- * (under post_lock, post_wake rung by the first), and whether the system
- * is in the dark appearance.
+ * (under post_lock, post_wake rung by the first), whether the system
+ * is in the dark appearance, and whether OLE was started on its thread
+ * (for a drag, drag.c).
  */
 struct kl_app {
 	char *application;
@@ -142,6 +149,7 @@ struct kl_app {
 	struct keiui_win32_post *post_first;
 	struct keiui_win32_post *post_last;
 	int dark;
+	int ole;
 };
 
 /*
@@ -158,7 +166,9 @@ struct kl_app {
  * pressed, the field being edited (editing 0 when none), the font the
  * title bar is written with (text_open 0 when it could not be opened), and
  * the text input: whether the program asked for it and its caret's
- * rectangle (the content's pixels).
+ * rectangle (the content's pixels); whether the program takes the pen
+ * as a tablet (tablet, pointer.c); and the drag waiting for its start
+ * (NULL when none, drag.c).
  */
 struct kl_window {
 	struct kl_app *app;
@@ -207,10 +217,13 @@ struct kl_window {
 	int text_open;
 	int text_wanted;
 	RECT text_caret;
+	int tablet;
+	struct keiui_win32_drag *drag;
 };
 
 /* app.c */
 uint64_t keiui_win32_next_order(struct kl_app *app);
+void keiui_win32_app_theme(struct kl_app *app);
 
 /* window.c */
 LRESULT CALLBACK keiui_win32_window_procedure(HWND handle, UINT message, WPARAM wparam, LPARAM lparam);
@@ -219,6 +232,7 @@ int keiui_win32_take(struct kl_window *window, uint64_t *order, struct kl_window
 int keiui_win32_peek(const struct kl_window *window, uint64_t *order);
 int keiui_win32_classes(struct kl_app *app);
 void keiui_win32_classes_drop(struct kl_app *app);
+void keiui_win32_window_theme(struct kl_window *window);
 
 /* present.c */
 void keiui_win32_paint_content(struct kl_window *window);
@@ -228,6 +242,7 @@ uint32_t keiui_win32_caption_pixels(const struct kl_window *window);
 
 /* theme.c */
 int keiui_win32_dark(void);
+int keiui_win32_theme_reread(struct kl_app *app);
 
 /* titlebar.c */
 void keiui_win32_titlebar_layout(struct kl_window *window, uint32_t width, uint32_t height);
@@ -244,6 +259,13 @@ void keiui_win32_titlebar_release_all(struct kl_window *window);
 /* ime.c */
 int keiui_win32_ime_message(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT *result);
 void keiui_win32_ime_place(struct kl_window *window);
+
+/* drag.c */
+void keiui_win32_drag_run(struct kl_window *window);
+void keiui_win32_drag_drop(struct kl_window *window);
+
+/* pointer.c */
+int keiui_win32_pointer_message(struct kl_window *window, UINT message, WPARAM wparam, LPARAM lparam);
 
 /* clipboard.c */
 int keiui_win32_clipboard_put(struct kl_window *window, const char *text, size_t length);

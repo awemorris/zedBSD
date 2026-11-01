@@ -173,6 +173,7 @@ static int shell_path_is_absolute(const char *typed);
 static int shell_frame(struct shell_state *state);
 static void shell_release(struct shell_state *state);
 static int shell_resize_view(struct shell_state *state);
+static void shell_color_scheme(struct shell_state *state);
 static void shell_redraw(void *context, struct browser_view *view);
 static void shell_title(void *context, struct browser_view *view, const char *title);
 static void shell_committed(void *context, struct browser_view *view);
@@ -264,6 +265,9 @@ shell_run(
 		return 1;
 	}
 
+	/* The pages are shown in the desktop's appearance (prefers-color-scheme). */
+	shell_color_scheme(&state);
+
 	/* The fingers; without memory for them they do nothing. */
 	state.touch_due = -1;
 	error = shell_touch_open(&state.touch);
@@ -318,6 +322,13 @@ shell_run(
 			status = shell_resize_view(&state);
 			if (status != 0)
 				break;
+			state.dirty = 1;
+		}
+
+		/* The desktop's appearance changed: the page in the new scheme, and the window drawn again. */
+		if (state.window.themed) {
+			state.window.themed = 0;
+			shell_color_scheme(&state);
 			state.dirty = 1;
 		}
 
@@ -412,6 +423,30 @@ shell_resize_view(
 
 	/* Succeeded: the page fits the window. */
 	return 0;
+}
+
+/* Gives the view the desktop's appearance as its color scheme, and writes the SCHEME line. */
+static void
+shell_color_scheme(
+	struct shell_state *state)
+{
+	enum browser_color_scheme scheme;
+	unsigned appearance;
+	int dark;
+
+	/* The appearance the program was told last. */
+	appearance = kl_appearance_get(NULL);
+	scheme = BROWSER_COLOR_SCHEME_LIGHT;
+	dark = 0;
+	if (appearance == KL_APPEARANCE_DARK) {
+		scheme = BROWSER_COLOR_SCHEME_DARK;
+		dark = 1;
+	}
+
+	/* The view's pages in it, and the line the tests read. */
+	browser_view_set_color_scheme(state->view, scheme);
+	printf("ZBROWSER SCHEME dark=%d\n", dark);
+	fflush(stdout);
 }
 
 /* Shows the page's title in the window and the history and location in the titlebar, and writes the NAVIGATE line. */
@@ -1058,8 +1093,9 @@ shell_surface_resize(
  * Makes the engine's instance over the files backend in the program's data
  * directory (kl_app_storage_directory: $XDG_DATA_HOME/keiland/browser, or
  * ~/.local/share/keiland/browser, where the localStorage of earlier versions
- * is).  When the directory cannot be used (no home, or another browser
- * holds it), the instance keeps nothing and one line says why.  Returns 0
+ * is), wrapped as the system wraps it (shell_storage_wrap).  When the
+ * directory cannot be used (no home, or another browser holds it), the
+ * instance keeps nothing and one line says why.  Returns 0
  * or the instance's error.
  */
 static int
@@ -1088,6 +1124,13 @@ shell_instance(
 			calls = NULL;
 			context = NULL;
 		}
+	}
+
+	/* The system's wrapping of the backend (the cookies encrypted on Windows). */
+	if (calls != NULL) {
+		error = shell_storage_wrap(&calls, &context);
+		if (error != 0)
+			fprintf(stderr, "browser: cannot protect the storage: %s: cookies and localStorage are not kept\n", strerror(error));
 	}
 
 	/* The instance, which owns the backend from now on. */

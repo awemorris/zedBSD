@@ -27,6 +27,14 @@
  * content's).  While the frame is resized in the system's modal loop
  * (WM_ENTERSIZEMOVE to WM_EXITSIZEMOVE) the program does not draw; the last
  * size is told at the end of the loop.
+ *
+ * The frame follows the system's colours: the dark title bar
+ * (DWMWA_USE_IMMERSIVE_DARK_MODE) in the dark appearance, and the system's
+ * backdrop (Mica, DWMWA_SYSTEMBACKDROP_TYPE, Windows 11 22H2 and later;
+ * an older system refuses it and keeps its own) behind what the program
+ * does not draw over.  A change of the colours (WM_SETTINGCHANGE
+ * "ImmersiveColorSet", WM_DWMCOLORIZATIONCOLORCHANGED) is read again by
+ * the application (app.c), which redoes every frame.
  */
 
 #include "userland/desktop/libkeiland/win32/window-win32.h"
@@ -57,6 +65,15 @@
 /* The units of text a key's characters may take, and the bytes they become. */
 #define WINDOW_CHAR_UNITS	16U
 
+/*
+ * The frame's attributes of the Desktop Window Manager by number (the
+ * SDK's names are newer than some headers): the dark title bar, and the
+ * system's backdrop with its value for a main window (Mica).
+ */
+#define WINDOW_DWM_DARK		20U
+#define WINDOW_DWM_BACKDROP	38U
+#define WINDOW_BACKDROP_MAIN	2
+
 static LRESULT window_frame_message(struct kl_window *window, HWND handle, UINT message, WPARAM wparam, LPARAM lparam);
 static LRESULT window_content_message(struct kl_window *window, HWND handle, UINT message, WPARAM wparam, LPARAM lparam);
 static void window_frame_box(const struct kl_window *window, struct keiui_win32_frame *frame);
@@ -76,6 +93,7 @@ static uint32_t window_caption(const struct kl_window *window);
 static int window_set_title(struct kl_window *window, const char *title);
 static void window_font(struct kl_window *window);
 static void window_title_mouse(struct kl_window *window, UINT message, LPARAM lparam);
+static int window_colors_changed(const WCHAR *area);
 
 /*
  * Makes a window of the application: the frame with its title and the
@@ -88,7 +106,6 @@ kl_app_window_create(
 {
 	struct kl_window *window;
 	MARGINS margins;
-	BOOL dark;
 	uint32_t width;
 	uint32_t height;
 	uint32_t caption;
@@ -162,14 +179,11 @@ kl_app_window_create(
 		}
 	}
 
-	/* The system's shadow, and the dark title bar in the dark appearance. */
+	/* The system's shadow, the title bar and the backdrop of the appearance. */
 	memset(&margins, 0, sizeof(margins));
 	margins.cyTopHeight = 1;
 	(void)DwmExtendFrameIntoClientArea(window->frame, &margins);
-	dark = FALSE;
-	if (app->dark)
-		dark = TRUE;
-	(void)DwmSetWindowAttribute(window->frame, 20U, &dark, sizeof(dark));
+	keiui_win32_window_theme(window);
 
 	/* The frame's size at its dpi, its client the whole window from now on. */
 	window->dpi = GetDpiForWindow(window->frame);
@@ -221,8 +235,9 @@ kl_window_close(
 		(void)DestroyWindow(window->frame);
 	}
 
-	/* The frames' memory, the title bar's font, the title and the state. */
+	/* The frames' memory, a drag that waited, the title bar's font, the title and the state. */
 	keiui_win32_present_release(window);
+	keiui_win32_drag_drop(window);
 	if (window->text_open)
 		kl_text_close(&window->text);
 	free(window->title);
@@ -269,6 +284,31 @@ kl_window_set_title(
 
 	/* The title, kept and shown. */
 	(void)window_set_title(window, title);
+}
+
+/*
+ * Puts a frame in the application's appearance: its dark title bar or not,
+ * the system's backdrop, and its title bar drawn again.
+ */
+void
+keiui_win32_window_theme(
+	struct kl_window *window)
+{
+	BOOL dark;
+	int backdrop;
+
+	/* The dark title bar in the dark appearance. */
+	dark = FALSE;
+	if (window->app->dark)
+		dark = TRUE;
+	(void)DwmSetWindowAttribute(window->frame, WINDOW_DWM_DARK, &dark, sizeof(dark));
+
+	/* Mica, where the system has it. */
+	backdrop = WINDOW_BACKDROP_MAIN;
+	(void)DwmSetWindowAttribute(window->frame, WINDOW_DWM_BACKDROP, &backdrop, sizeof(backdrop));
+
+	/* The title bar in the theme's colours. */
+	(void)InvalidateRect(window->frame, NULL, FALSE);
 }
 
 /*
@@ -488,6 +528,7 @@ window_frame_message(
 	LRESULT result;
 	BOOL zoomed;
 	int handled;
+	int changed;
 
 	/* The input method's messages. */
 	handled = keiui_win32_ime_message(window, message, wparam, lparam, &result);
@@ -616,6 +657,22 @@ window_frame_message(
 		/* A second start of the program's URLs. */
 		window_copy_data(window, (const COPYDATASTRUCT *)lparam);
 		return TRUE;
+	case WM_SETTINGCHANGE:
+		/* The apps' mode or the accent changed: the application reads them again. */
+		changed = 0;
+		if (lparam != 0)
+			changed = window_colors_changed((const WCHAR *)lparam);
+		if (changed)
+			keiui_win32_app_theme(window->app);
+		break;
+	case WM_DWMCOLORIZATIONCOLORCHANGED:
+		/* The accent changed. */
+		keiui_win32_app_theme(window->app);
+		break;
+	case KEIUI_WIN32_DRAG_MESSAGE:
+		/* A drag's start (drag.c), until its drop. */
+		keiui_win32_drag_run(window);
+		return 0;
 	default:
 		break;
 	}
@@ -623,6 +680,22 @@ window_frame_message(
 	/* The system's handling of the rest. */
 	result = DefWindowProcW(handle, message, wparam, lparam);
 	return result;
+}
+
+/* Tells whether a WM_SETTINGCHANGE's area is the system's colours ("ImmersiveColorSet"). */
+static int
+window_colors_changed(
+	const WCHAR *area)
+{
+	int differs;
+
+	/* The area's name. */
+	differs = wcscmp(area, L"ImmersiveColorSet");
+	if (differs != 0)
+		return 0;
+
+	/* The colours. */
+	return 1;
 }
 
 /* The content's messages. */
@@ -639,6 +712,12 @@ window_content_message(
 	unsigned hit;
 	unsigned button;
 	LRESULT result;
+	int taken;
+
+	/* A finger's or a pen's message the window uses (pointer.c). */
+	taken = keiui_win32_pointer_message(window, message, wparam, lparam);
+	if (taken)
+		return 0;
 
 	/* What the message is. */
 	switch (message) {

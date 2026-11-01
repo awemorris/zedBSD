@@ -197,7 +197,9 @@ LIBKEILAND_WIN32_OWN_SOURCES := \
 	userland/desktop/libkeiland/win32/theme.c \
 	userland/desktop/libkeiland/win32/titlebar.c \
 	userland/desktop/libkeiland/win32/ime.c \
-	userland/desktop/libkeiland/win32/clipboard.c
+	userland/desktop/libkeiland/win32/clipboard.c \
+	userland/desktop/libkeiland/win32/pointer.c \
+	userland/desktop/libkeiland/win32/drag.c
 # Files of the list that read files through the C runtime's POSIX calls only, which the Windows C runtime
 # has too (the fonts, read as binary).
 LIBKEILAND_WIN32_CRT_SOURCES := userland/desktop/libkeiland/ui/text.c
@@ -205,11 +207,13 @@ LIBKEILAND_WIN32_STUB_SOURCES := userland/desktop/libkeiland/win32/unsupported.c
 LIBKEILAND_WIN32_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBKEILAND_WIN32_COMMON_SOURCES) \
 	$(LIBKEILAND_WIN32_CRT_SOURCES) $(LIBKEILAND_WIN32_OWN_SOURCES))
 
-# The browser's user interface (the zedBSD build's list less its POSIX entry), a static library the
+# The browser's user interface (the zedBSD build's list less its POSIX entry, with the Windows wrapping of its
+# storage, protect.c), a static library the
 # program's entry (main.c) and a test's console program link: its files find their own headers under
 # userland/desktop/browser, and libkeiland's application is called OmniGrammaton.
 include userland/desktop/browser/sources.mk
-BROWSER_UI_SOURCES := $(filter-out $(KEILAND_BROWSER_DIR)/main-posix.c,$(KEILAND_BROWSER_SOURCES))
+BROWSER_UI_SOURCES := $(filter-out $(KEILAND_BROWSER_DIR)/main-posix.c,$(KEILAND_BROWSER_SOURCES)) \
+	apps/browser-win32/protect.c
 BROWSER_UI_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(BROWSER_UI_SOURCES))
 WIN32_SOURCES_browser-ui := $(BROWSER_UI_SOURCES)
 $(BROWSER_UI_OBJECTS): WIN32_CFLAGS += -I$(KEILAND_BROWSER_DIR) -DSHELL_APPLICATION_ID=\"OmniGrammaton\"

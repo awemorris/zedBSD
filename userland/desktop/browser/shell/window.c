@@ -18,7 +18,8 @@
  * a run of moves stands for them all), buttons, wheel and leaving, the keys
  * pressed, repeated and let go (a held key repeats within kl_app_dispatch,
  * after a release read with it, BUG-111), and the keyboard's focus coming
- * and going.  The fingers and a touch pad's scrolling are queued for
+ * and going.  The desktop's appearance changing is noted for the main
+ * loop (themed).  The fingers and a touch pad's scrolling are queued for
  * touch.c (ws081-p006, ws090-p019), and what is done with the titlebar's
  * controls goes to the titlebar (titlebar.c).
  */
@@ -118,6 +119,8 @@ shell_window_open(
 			break;
 		if (event.kind == KL_APP_WINDOW)
 			window_event(window, &event.input);
+		if (event.kind == KL_APP_THEME)
+			window->themed = 1;
 	}
 
 	/* Succeeded: the window can be drawn into. */
@@ -161,6 +164,10 @@ shell_window_dispatch(
 		/* The window's input. */
 		if (event.kind == KL_APP_WINDOW && event.window == window->kui)
 			window_event(window, &event.input);
+
+		/* The desktop's appearance changed: the main loop gives the view its scheme. */
+		if (event.kind == KL_APP_THEME)
+			window->themed = 1;
 	}
 
 	/* Succeeded: the events so far have run. */

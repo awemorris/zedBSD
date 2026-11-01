@@ -24,11 +24,14 @@
 
 #include "userland/desktop/libkeiland/win32/window-win32.h"
 
+#include <ole2.h>
+
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
 static void app_posts_move(struct kl_app *app);
+static int app_post_event(struct kl_app *app, const struct kl_app_event *event);
 static int app_deliver(struct kl_app *app, struct kl_app_event *event);
 static int app_has_window(const struct kl_app *app, const struct kl_window *window);
 static int app_queued(const struct kl_app *app);
@@ -138,6 +141,8 @@ kl_app_close(
 
 	/* The classes, the wake, the lock and the state. */
 	keiui_win32_classes_drop(app);
+	if (app->ole)
+		OleUninitialize();
 	keiui_wake_close(&app->post_wake);
 	keiui_lock_close(&app->post_lock);
 	free(app->application_wide);
@@ -220,10 +225,7 @@ kl_app_post(
 	void *data)
 {
 	struct kl_app_event event;
-	struct keiui_win32_post *post;
-	int own;
-	int queued;
-	int first;
+	int error;
 
 	/* An application. */
 	if (app == NULL)
@@ -235,45 +237,41 @@ kl_app_post(
 	event.code = code;
 	event.data = data;
 
-	/* The application's thread, with no post waiting before it: straight into the queue, while it has room. */
-	own = keiui_thread_is(app->thread);
-	if (own) {
-		keiui_lock_take(&app->post_lock);
+	/* Queued now or waiting for the dispatch. */
+	error = app_post_event(app, &event);
+	if (error != 0)
+		return error;
 
-		queued = 0;
-		if (app->post_first == NULL)
-			queued = app_deliver(app, &event);
-
-		keiui_lock_give(&app->post_lock);
-		if (queued)
-			return 0;
-	}
-
-	/* A post that waits for the dispatch. */
-	post = malloc(sizeof(*post));
-	if (post == NULL)
-		return ENOMEM;
-	post->event = event;
-	post->next = NULL;
-
-	/* At the list's end; the first one rings the wake. */
-	keiui_lock_take(&app->post_lock);
-
-	first = 0;
-	if (app->post_last != NULL) {
-		app->post_last->next = post;
-	} else {
-		app->post_first = post;
-		first = 1;
-	}
-	app->post_last = post;
-
-	keiui_lock_give(&app->post_lock);
-	if (first)
-		keiui_wake_ring(&app->post_wake);
-
-	/* Succeeded: it waits for the dispatch. */
+	/* Succeeded: the event is posted. */
 	return 0;
+}
+
+/*
+ * Reads the system's colours again (the window procedure heard they
+ * changed); when the appearance or the accent changed, every window's
+ * frame follows and the program is told with a KL_APP_THEME event.
+ */
+void
+keiui_win32_app_theme(
+	struct kl_app *app)
+{
+	struct kl_app_event event;
+	struct kl_window *window;
+	int changed;
+
+	/* The colours now; nothing to do when they are as they were. */
+	changed = keiui_win32_theme_reread(app);
+	if (!changed)
+		return;
+
+	/* Each window's frame in the new appearance. */
+	for (window = app->windows; window != NULL; window = window->next)
+		keiui_win32_window_theme(window);
+
+	/* The program's event; without memory for it the program is not told. */
+	memset(&event, 0, sizeof(event));
+	event.kind = KL_APP_THEME;
+	(void)app_post_event(app, &event);
 }
 
 /*
@@ -508,6 +506,65 @@ app_posts_move(
 
 	keiui_lock_give(&app->post_lock);
 	keiui_wake_ring(&app->post_wake);
+}
+
+/*
+ * Posts an application's event: on the application's thread with no post
+ * waiting before it, straight into the queue while it has room; otherwise
+ * at the end of the list the dispatch moves (the first one rings the
+ * wake).  Returns 0 or ENOMEM.
+ */
+static int
+app_post_event(
+	struct kl_app *app,
+	const struct kl_app_event *event)
+{
+	struct kl_app_event delivered;
+	struct keiui_win32_post *post;
+	int own;
+	int queued;
+	int first;
+
+	/* The application's thread, with no post waiting before it. */
+	own = keiui_thread_is(app->thread);
+	if (own) {
+		delivered = *event;
+		keiui_lock_take(&app->post_lock);
+
+		queued = 0;
+		if (app->post_first == NULL)
+			queued = app_deliver(app, &delivered);
+
+		keiui_lock_give(&app->post_lock);
+		if (queued)
+			return 0;
+	}
+
+	/* A post that waits for the dispatch. */
+	post = malloc(sizeof(*post));
+	if (post == NULL)
+		return ENOMEM;
+	post->event = *event;
+	post->next = NULL;
+
+	/* At the list's end; the first one rings the wake. */
+	keiui_lock_take(&app->post_lock);
+
+	first = 0;
+	if (app->post_last != NULL) {
+		app->post_last->next = post;
+	} else {
+		app->post_first = post;
+		first = 1;
+	}
+	app->post_last = post;
+
+	keiui_lock_give(&app->post_lock);
+	if (first)
+		keiui_wake_ring(&app->post_wake);
+
+	/* Succeeded: it waits for the dispatch. */
+	return 0;
 }
 
 /* Queues one post: a window's among its inputs while the window is open, else the application's.  1 when queued, 0 when there is no room. */

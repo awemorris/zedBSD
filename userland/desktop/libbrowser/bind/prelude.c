@@ -36,6 +36,7 @@ static int prelude_navigate_frame(struct vm_realm *realm, vm_value this_value, c
 static int prelude_load_ended(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_fully_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_initial_blank(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_color_scheme(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_frame_element(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_scroll_fragment(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -289,6 +290,37 @@ prelude_initial_blank(
 	window = bind_window_of(realm);
 	blank = (window->parent_global != NULL || window->frame != NULL) && window->document->resource_url == NULL;
 	*result = vm_value_boolean(blank);
+	return 0;
+}
+
+/* colorScheme(): the view's color scheme, "light" or "dark" (matchMedia's prefers-color-scheme). */
+static int
+prelude_color_scheme(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct vm_string *scheme;
+
+	UNUSED_PARAMETER(this_value);
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The window's scheme as its keyword. */
+	window = bind_window_of(realm);
+	if (window->dark) {
+		scheme = vm_string_from_utf8(realm->heap, "dark", 4);
+	} else {
+		scheme = vm_string_from_utf8(realm->heap, "light", 5);
+	}
+	if (scheme == NULL)
+		return ENOMEM;
+
+	/* Succeeded: the keyword. */
+	*result = vm_value_cell(scheme);
 	return 0;
 }
 
@@ -1264,6 +1296,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "initialBlank", 0, prelude_initial_blank, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "initialBlank", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "colorScheme", 0, prelude_color_scheme, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "colorScheme", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "frameElement", 0, prelude_frame_element, NULL, &function);
 	if (status == 0)

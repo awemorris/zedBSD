@@ -122,6 +122,8 @@ struct css_engine {
 	/* Whether the root element's writing mode is vertical (vi and vb follow it). */
 	int root_vertical;
 	float viewport_height;
+	/* Nonzero when the view's color scheme is dark (prefers-color-scheme). */
+	int dark;
 	struct wb_vector class_keys;
 	struct wb_vector candidates;
 	struct wb_units word;
@@ -694,6 +696,30 @@ css_engine_set_viewport(
 	/* Remembers the size. */
 	engine->viewport_width = width;
 	engine->viewport_height = height;
+}
+
+/*
+ * Sets the color scheme prefers-color-scheme tests (dark nonzero for the
+ * dark one; an engine starts light).
+ */
+void
+css_engine_set_color_scheme(
+	struct css_engine *engine,
+	int dark)
+{
+	int scheme;
+
+	/* The scheme as 0 or 1. */
+	scheme = 0;
+	if (dark)
+		scheme = 1;
+
+	/* The styles computed in the other scheme may differ (its media queries). */
+	if (engine->dark != scheme)
+		cascade_style_forget(engine);
+
+	/* Remembers the scheme. */
+	engine->dark = scheme;
 }
 
 /*
@@ -1539,7 +1565,7 @@ cascade_collect(
 	for (sheet = 0; sheet < engine->sheets.count; sheet++) {
 		holds = 1;
 		for (index = 0; index < sheets[sheet].media_count && holds; index++)
-			holds = css_media_matches(sheets[sheet].media[index], engine->viewport_width, engine->viewport_height);
+			holds = css_media_matches(sheets[sheet].media[index], engine->viewport_width, engine->viewport_height, engine->dark);
 		if (!holds)
 			continue;
 
@@ -2095,7 +2121,7 @@ cascade_collect_sheet(
 		/* A rule inside @media applies only while its lists hold. */
 		holds = 1;
 		if (rule->media != NULL)
-			holds = css_media_matches(rule->media, engine->viewport_width, engine->viewport_height);
+			holds = css_media_matches(rule->media, engine->viewport_width, engine->viewport_height, engine->dark);
 		if (holds && rule->container != NULL)
 			holds = cascade_container_holds(engine, rule->container);
 
@@ -3112,7 +3138,7 @@ cascade_container_holds(
 			return 0;
 		if (cached->style->container_type != CSS_CONTAINER_SIZE)
 			height = -1.0f;
-		return css_media_matches(conditions, width, height);
+		return css_media_matches(conditions, width, height, engine->dark);
 	}
 	return 0;
 }
@@ -6555,7 +6581,7 @@ cascade_try_rule(
 		/* A sheet whose media do not hold gives no rules. */
 		holds = 1;
 		for (media = 0; media < sheets[index].media_count && holds; media++)
-			holds = css_media_matches(sheets[index].media[media], engine->viewport_width, engine->viewport_height);
+			holds = css_media_matches(sheets[index].media[media], engine->viewport_width, engine->viewport_height, engine->dark);
 		if (!holds)
 			continue;
 		for (rule = 0; rule < sheets[index].sheet->try_rule_count; rule++) {

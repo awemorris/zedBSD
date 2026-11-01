@@ -7,10 +7,27 @@
 
 /*
  * The entry of the program on a POSIX system: the command line goes to
- * browser_main (main.c).
+ * browser_main (main.c).  The storage backend is not wrapped here
+ * (shell_storage_wrap).
  */
 
 #include "browser-main.h"
+#include "shell/shell.h"
+
+/*
+ * Leaves the storage backend as it is (shell.h).
+ */
+int
+shell_storage_wrap(
+	const struct browser_storage_calls **calls,
+	void **context)
+{
+	(void)calls;
+	(void)context;
+
+	/* Succeeded: nothing to wrap. */
+	return 0;
+}
 
 /*
  * Runs the program.

@@ -93,7 +93,8 @@ struct page_prefetched {
  * font_paths are the fonts the view gives (NULL until it does), with the
  * sans font's companions (font_companions; NULL for the defaults), and
  * viewport_width and viewport_height its size, with which a script's
- * question lays the page out when it changed; scroll_x and scroll_y are
+ * question lays the page out when it changed, and dark its color scheme
+ * (nonzero for the dark one, prefers-color-scheme); scroll_x and scroll_y are
  * how far the view is scrolled, in CSS pixels.  scroll_requested says a
  * script moved them (ws074-p082), which the view takes as its scroll.
  * layout_serial counts the layouts; box_index (box_index_capacity slots,
@@ -179,6 +180,7 @@ struct page {
 	const struct text_font_companions *font_companions;
 	int viewport_width;
 	int viewport_height;
+	int dark;
 	double scroll_x;
 	double scroll_y;
 	int scroll_requested;
@@ -342,6 +344,7 @@ void page_net_cancel(struct net_request *request);
 int page_net_result(const struct net_request *request, const unsigned char **bytes, size_t *length, const char **url);
 int page_load_images(struct page *page);
 void page_set_viewport(struct page *page, int width, int height);
+void page_set_color_scheme(struct page *page, int dark);
 void page_set_fonts(struct page *page, const struct text_font_paths *paths);
 void page_set_font_companions(struct page *page, const struct text_font_companions *companions);
 int page_sticky_sync(struct page *page, layout_unit scroll_y);

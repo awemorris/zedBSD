@@ -397,6 +397,29 @@ page_set_viewport(
 }
 
 /*
+ * Tells the page its view's color scheme (dark nonzero for the dark one):
+ * its media queries and its scripts' matchMedia see it, and the styles
+ * computed in the other scheme are forgotten.
+ */
+void
+page_set_color_scheme(
+	struct page *page,
+	int dark)
+{
+	/* The scheme as 0 or 1, the window object's too. */
+	page->dark = 0;
+	if (dark)
+		page->dark = 1;
+	bind_window_set_color_scheme(page->window, page->dark);
+
+	/* The engines made already test the new scheme. */
+	if (page->css != NULL)
+		css_engine_set_color_scheme(page->css, page->dark);
+	if (page->query_css != NULL)
+		css_engine_set_color_scheme(page->query_css, page->dark);
+}
+
+/*
  * Tells the page the fonts its view draws with, which a script's question
  * about the geometry lays the page out with (the paths must outlive the
  * page).
@@ -1302,6 +1325,7 @@ page_gather_styles(
 	if (page->visited_urls.count != 0)
 		css_engine_set_visited_lookup(page->css, page_link_visited, page);
 	css_engine_set_view_transition(page->css, page->vt_active, page->vt_types, page->vt_type_count);
+	css_engine_set_color_scheme(page->css, page->dark);
 
 	/* The document's sheets, parsed once and lent to the engine. */
 	error = page_sheets_add(page);

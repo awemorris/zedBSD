@@ -395,6 +395,21 @@ bind_window_set_viewport(
 }
 
 /*
+ * Tells the window the view's color scheme (dark nonzero for the dark
+ * one), which its media queries and matchMedia see.
+ */
+void
+bind_window_set_color_scheme(
+	struct bind_window *window,
+	int dark)
+{
+	/* The scheme as 0 or 1. */
+	window->dark = 0;
+	if (dark)
+		window->dark = 1;
+}
+
+/*
  * Sets the document's readiness (document.readyState): "loading",
  * "interactive" or "complete", a static string.
  */
