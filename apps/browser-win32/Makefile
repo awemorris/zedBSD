@@ -4,12 +4,18 @@
 # or through the top Makefile: make browser-win64, make browser-winarm64.
 # Output under $(BROWSER_WIN32_BUILD) (build/browser-win64 or build/browser-winarm64 by default).
 #
+# Windows gets no DLL of this tree: every library is a static library, and a program links them all
+# into one .exe that imports only Windows' own DLLs, the C runtime's (UCRT) and, delayed, the Vulkan
+# loader.  The threads of libbrowser and libmedia are winpthreads', linked statically; libkeiland's
+# Windows files use the system's threads and locks directly.
+#
 # What it builds so far: the files of the operating-system layers (libbrowser's base/os-*, its storage,
 # libmedia's media-os, libkeiland's Windows files), compiled with the Windows compiler and its warnings;
-# the static libraries libbrowser.dll links (libtruetype and the png, jpeg, gif and z compat libraries,
-# from the same source lists as the zedBSD build); the Vulkan headers and the import library of the
-# Vulkan loader; the threads' DLL that the DLLs and programs share.  The DLLs, programs and resources
-# join it later.
+# the static libraries: libbrowser.a (libbrowser without its network and storage, with its Windows
+# layer), libmedia.a and libkeiland.a (their Windows files so far), libtruetype and the png, jpeg, gif
+# and z compat libraries (from the same source lists as the zedBSD build); the Vulkan headers and the
+# import library of the Vulkan loader.  A test's program links with them all (test-program); the
+# browser's program and its resources join later, linked the same way (WIN32_PROGRAM).
 #
 # The toolchain, first found wins:
 #   1. WIN32_CC=<compiler>
@@ -56,13 +62,6 @@ else
 WIN32_DLLTOOL_MACHINE := arm64
 endif
 
-# The toolchain's root (the directory above the compiler's bin/), where llvm-mingw keeps the threads'
-# DLL: $(root)/<triple>/bin/libwinpthread-1.dll.  WIN32_WINPTHREAD_DLL=<path> names another.
-WIN32_CC_PATH := $(firstword $(shell command -v $(WIN32_CC) 2>/dev/null))
-WIN32_TOOLCHAIN_ROOT ?= $(patsubst %/bin/,%,$(dir $(WIN32_CC_PATH)))
-WIN32_WINPTHREAD_DLL ?= $(firstword $(wildcard $(WIN32_TOOLCHAIN_ROOT)/$(WIN32_TRIPLE)/bin/libwinpthread-1.dll \
-	$(WIN32_TOOLCHAIN_ROOT)/$(WIN32_TRIPLE)ucrt/lib/libwinpthread-1.dll))
-
 BROWSER_WIN32_OBJ := $(BROWSER_WIN32_BUILD)/obj
 # The directory of the zip's contents (what a user runs).
 BROWSER_WIN32_DIST := $(BROWSER_WIN32_BUILD)/OmniGrammaton
@@ -81,12 +80,16 @@ WIN32_COMMON_CFLAGS := -std=gnu11 -O2 -g -Wall -Wextra -MMD -MP \
 WIN32_CFLAGS := $(WIN32_COMMON_CFLAGS) -Werror
 WIN32_COMPAT_CFLAGS := $(WIN32_COMMON_CFLAGS)
 
-# What a DLL or a program links with.  The threads are winpthreads' one DLL for all of them (each module
-# holding its own copy would clean up a thread's state twice); llvm-mingw links it only when named.
-# Vulkan goes through the loader's import library as a delayed import (lld's --delayload): a program
-# starts on a machine without vulkan-1.dll and calls no vk* there.
+# What a program links with.  -static takes every library's static form: winpthreads (which llvm-mingw
+# links only when named) goes into the .exe, and the C runtime and the system's libraries, which have
+# no static form, stay imports of the UCRT's and Windows' own DLLs.  Vulkan goes through the loader's
+# import library as a delayed import (lld's --delayload): a program starts on a machine without
+# vulkan-1.dll and calls no vk* there.  The system's libraries are the ones the libraries call so far;
+# each file that calls another adds its library here.
 WIN32_THREAD_LDFLAGS := -lpthread
 WIN32_VULKAN_LDFLAGS := -L$(BROWSER_WIN32_OBJ) -lvulkan-1 -Wl,--delayload=vulkan-1.dll
+WIN32_SYSTEM_LDFLAGS := -lws2_32 -lbcrypt -lcrypt32 -lshell32 -lole32
+WIN32_PROGRAM_LDFLAGS := -static $(WIN32_VULKAN_LDFLAGS) $(WIN32_THREAD_LDFLAGS) $(WIN32_SYSTEM_LDFLAGS)
 
 # The operating-system layers: the Windows files and the files every system shares.
 BROWSER_WIN32_LAYER_SOURCES := \
@@ -101,6 +104,8 @@ BROWSER_WIN32_LAYER_SOURCES := \
 	userland/desktop/libbrowser/storage/queue.c \
 	userland/desktop/libmedia/media-os-win32.c \
 	userland/desktop/libkeiland/platform/platform-win32.c \
+	userland/desktop/libkeiland/platform/thread-win32.c \
+	userland/desktop/libkeiland/platform/socket-win32.c \
 	userland/desktop/libkeiland/win32/keys-table.c \
 	userland/desktop/libkeiland/win32/frame.c \
 	userland/desktop/libkeiland/win32/wide.c \
@@ -121,8 +126,16 @@ LIBBROWSER_CORE_EXCLUDED := $(LIBBROWSER_OS_SOURCES) \
 LIBBROWSER_CORE_SOURCES := $(filter-out $(LIBBROWSER_CORE_EXCLUDED),$(LIBBROWSER_SOURCES))
 LIBBROWSER_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBBROWSER_CORE_SOURCES))
 
-# libtruetype and the compat libraries: the zedBSD build's source lists, each a static library that
-# libbrowser.dll takes in.
+# The static libraries of the tree's libraries, each from its files of the Windows build so far:
+# libbrowser's core with its Windows layer and its storage modules, libmedia's and libkeiland's Windows
+# files (their shared files join with their Windows ports).
+WIN32_SOURCES_browser := $(LIBBROWSER_CORE_SOURCES) $(filter userland/desktop/libbrowser/%,$(BROWSER_WIN32_LAYER_SOURCES))
+WIN32_SOURCES_media := $(filter userland/desktop/libmedia/%,$(BROWSER_WIN32_LAYER_SOURCES))
+WIN32_SOURCES_keiland := $(filter userland/desktop/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES))
+WIN32_TREE_LIBRARIES := browser media keiland
+
+# libtruetype and the compat libraries: the zedBSD build's source lists, each a static library a
+# program links with libbrowser.a.
 include userland/desktop/libtruetype/sources.mk
 include userland/desktop/libpng-compat/sources.mk
 include userland/desktop/libjpeg-compat/sources.mk
@@ -137,6 +150,16 @@ WIN32_SOURCES_z-compat := $(LIBZ_COMPAT_SOURCES)
 WIN32_COMPAT_SOURCES := $(foreach library,$(WIN32_COMPAT_LIBRARIES),$(WIN32_SOURCES_$(library)))
 WIN32_COMPAT_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(WIN32_COMPAT_SOURCES))
 WIN32_COMPAT_ARCHIVES := $(foreach library,$(WIN32_COMPAT_LIBRARIES),$(BROWSER_WIN32_OBJ)/lib$(library).a)
+WIN32_TREE_ARCHIVES := $(foreach library,$(WIN32_TREE_LIBRARIES),$(BROWSER_WIN32_OBJ)/lib$(library).a)
+
+# Every static library a program links, a user's before what it uses (lld also finds a name in an
+# archive given earlier, but the order states the layers).
+WIN32_PROGRAM_ARCHIVES := $(WIN32_TREE_ARCHIVES) $(WIN32_COMPAT_ARCHIVES)
+
+# A test's program (test-program): TEST_PROGRAM=<name> TEST_PROGRAM_SOURCES="<file>.c ...", linked
+# with every static library into $(BROWSER_WIN32_BUILD)/tests/<name>.exe.
+BROWSER_WIN32_TESTS := $(BROWSER_WIN32_BUILD)/tests
+TEST_PROGRAM_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(TEST_PROGRAM_SOURCES))
 
 # The compat headers (<compat/zlib/zlib.h> and the others), copied from zedBSD's C library side.
 WIN32_COMPAT_HEADERS := $(wildcard include/libc/compat/*.h include/libc/compat/*/*.h)
@@ -154,15 +177,18 @@ VULKAN_LOADER_SHA256 := ddfeca84a868899fbb2c7f28b7c8fd1006e34b2b13ce653a63bddfb6
 WIN32_VULKAN_HEADERS := $(BROWSER_WIN32_OBJ)/include/vulkan/vulkan.h
 WIN32_VULKAN_LIBRARY := $(BROWSER_WIN32_OBJ)/libvulkan-1.a
 
-.PHONY: all layers libbrowser-core libraries vulkan runtime fetch flags clean
-all: layers libbrowser-core libraries vulkan runtime $(BROWSER_WIN32_OBJ)/toolchain.txt
+.PHONY: all layers libbrowser-core libraries vulkan fetch flags clean test-program
+all: layers libbrowser-core libraries vulkan $(BROWSER_WIN32_OBJ)/toolchain.txt
 
 layers: $(BROWSER_WIN32_LAYER_OBJECTS)
 libbrowser-core: $(LIBBROWSER_CORE_OBJECTS)
-libraries: $(WIN32_COMPAT_ARCHIVES)
+libraries: $(WIN32_PROGRAM_ARCHIVES)
 vulkan: $(WIN32_VULKAN_HEADERS) $(WIN32_VULKAN_LIBRARY)
-runtime: $(BROWSER_WIN32_DIST)/libwinpthread-1.dll
 fetch: $(VULKAN_HEADERS_TARBALL) $(VULKAN_LOADER_TARBALL)
+
+test-program:
+	@if [ -z '$(TEST_PROGRAM)' ] || [ -z '$(TEST_PROGRAM_SOURCES)' ]; then echo 'test-program needs TEST_PROGRAM=<name> TEST_PROGRAM_SOURCES="<file>.c ..."'; exit 1; fi
+	@$(MAKE) --no-print-directory -f $(firstword $(MAKEFILE_LIST)) $(BROWSER_WIN32_TESTS)/$(TEST_PROGRAM).exe
 
 $(BROWSER_WIN32_OBJ)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -176,18 +202,37 @@ $(WIN32_COMPAT_OBJECTS): $(BROWSER_WIN32_OBJ)/%.o: %.c | $(WIN32_COMPAT_HEADER_C
 	@mkdir -p $(dir $@)
 	$(WIN32_CC) $(WIN32_COMPAT_CFLAGS) -c $< -o $@ 2> $@.log || { cat $@.log; exit 1; }
 
-$(BROWSER_WIN32_OBJ)/include/%.h: include/libc/%.h
+# Only the compat headers: zedBSD's C library side also has Vulkan headers (include/libc/vulkan), which
+# must not replace the Khronos headers this build copies under the same directory.
+$(BROWSER_WIN32_OBJ)/include/compat/%.h: include/libc/compat/%.h
 	@mkdir -p $(dir $@)
 	cp $< $@
 
-# lib<name>.a from its list.
+# lib<name>.a from its list, made afresh each time.  The members are appended (q), not replaced (r):
+# libbrowser has files of the same name in different directories (page/input.c and html/input.c), and
+# an archive keeps members by their file's name, so replacing would keep only the last of them.
 define WIN32_STATIC_LIBRARY
 $(BROWSER_WIN32_OBJ)/lib$(1).a: $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(WIN32_SOURCES_$(1)))
 	@mkdir -p $$(dir $$@)
-	$(WIN32_AR) rcs $$@.new $$^
+	rm -f $$@.new
+	$(WIN32_AR) qcs $$@.new $$^
 	mv -f $$@.new $$@
 endef
-$(foreach library,$(WIN32_COMPAT_LIBRARIES),$(eval $(call WIN32_STATIC_LIBRARY,$(library))))
+$(foreach library,$(WIN32_TREE_LIBRARIES) $(WIN32_COMPAT_LIBRARIES),$(eval $(call WIN32_STATIC_LIBRARY,$(library))))
+
+# A program: <output>.exe from its objects and every static library, with the flags the subsystem
+# needs (-mwindows for the browser, -mconsole for a test), so that another program is one line.
+#   $(call WIN32_PROGRAM,<output>,<objects>,<subsystem flag>)
+define WIN32_PROGRAM
+$(1): $(2) $(WIN32_PROGRAM_ARCHIVES) $(WIN32_VULKAN_LIBRARY)
+	@mkdir -p $$(dir $$@)
+	$(WIN32_CC) $(3) -o $$@.new $(2) $(WIN32_PROGRAM_ARCHIVES) $(WIN32_PROGRAM_LDFLAGS)
+	mv -f $$@.new $$@
+endef
+ifneq ($(strip $(TEST_PROGRAM)),)
+$(eval $(call WIN32_PROGRAM,$(BROWSER_WIN32_TESTS)/$(TEST_PROGRAM).exe,$(TEST_PROGRAM_OBJECTS),-mconsole))
+$(TEST_PROGRAM_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
+endif
 
 # A tarball, fetched once and checked against its SHA-256.
 define WIN32_FETCH
@@ -217,12 +262,6 @@ $(BROWSER_WIN32_OBJ)/vulkan-1.def: $(VULKAN_LOADER_TARBALL)
 $(WIN32_VULKAN_LIBRARY): $(BROWSER_WIN32_OBJ)/vulkan-1.def
 	$(WIN32_DLLTOOL) -m $(WIN32_DLLTOOL_MACHINE) -d $< -D vulkan-1.dll -l $@
 
-# The threads' DLL, beside the programs.
-$(BROWSER_WIN32_DIST)/libwinpthread-1.dll: $(WIN32_WINPTHREAD_DLL)
-	@if [ -z '$(WIN32_WINPTHREAD_DLL)' ]; then echo 'no libwinpthread-1.dll under $(WIN32_TOOLCHAIN_ROOT): pass WIN32_WINPTHREAD_DLL=<its path>'; exit 1; fi
-	@mkdir -p $(dir $@)
-	cp $< $@
-
 # What compiled this build, for the record of a test, and how many warnings libtruetype and the compat
 # libraries have with it.
 $(BROWSER_WIN32_OBJ)/toolchain.txt: $(WIN32_COMPAT_OBJECTS) FORCE
@@ -238,6 +277,8 @@ flags:
 	@echo 'WIN32_CFLAGS=$(WIN32_CFLAGS)'
 	@echo 'WIN32_THREAD_LDFLAGS=$(WIN32_THREAD_LDFLAGS)'
 	@echo 'WIN32_VULKAN_LDFLAGS=$(WIN32_VULKAN_LDFLAGS)'
+	@echo 'WIN32_PROGRAM_LDFLAGS=$(WIN32_PROGRAM_LDFLAGS)'
+	@echo 'WIN32_PROGRAM_ARCHIVES=$(WIN32_PROGRAM_ARCHIVES)'
 	@echo 'LIBBROWSER_CORE_OBJECTS=$(LIBBROWSER_CORE_OBJECTS)'
 
 # Removes this build's output only; refuses an output directory that is empty, the root or build itself.
@@ -248,4 +289,5 @@ clean:
 .PHONY: FORCE
 FORCE:
 
--include $(BROWSER_WIN32_LAYER_OBJECTS:.o=.d) $(LIBBROWSER_CORE_OBJECTS:.o=.d) $(WIN32_COMPAT_OBJECTS:.o=.d)
+-include $(BROWSER_WIN32_LAYER_OBJECTS:.o=.d) $(LIBBROWSER_CORE_OBJECTS:.o=.d) $(WIN32_COMPAT_OBJECTS:.o=.d) \
+	$(TEST_PROGRAM_OBJECTS:.o=.d)

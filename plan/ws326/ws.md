@@ -45,6 +45,7 @@
 
 - 範囲の外（ユーザーの決定どおり）: interlace（PAFF・MBAFF）・4:2:2・4:4:4・10 bit・monochrome・slice group（FMO）・data partitioning・SP／SI の slice。
 - 速さの続き（p024 の設計の案 a〜e）: a deblocking の filter と weight、b neighbour・transform・syntax の消し・CABAC の file の中の fast path、c thread（deblock の行の pipeline、parse と再構成の分離）、d SIMD（NEON・SSE2）、e Pi 5・5330 の実測と目標（Pi 5 で 1080p30 の High を decoder 4 thread で 40 fps 以上）の判定。別の WS にするかは Q1 がユーザーに聞いている（2026-10-31）。段 A の目標（High CABAC B の 1080p で 1 thread 50 fps）まで残り約 2 倍。
+  → 2026-11-01 09:05 ユーザーから、速さの続きは新しい WS にする、という趣旨の答えを受けた: [WS338](../ws338/ws.md)。
 - frame・plane の確保と DPB・出力の順の codec に依らない形への共通化は [WS330](../ws330/ws.md)（H.265）の設計へ移した（WS329 の encoder も含めて WS330 で移す）。
 - 未実施: QEMU の Video Player での再生、実機（Pi 5・5330）での再生と計測、arm64 の build。
 - 出力の複写の削減は WS318 p006a へ（WS318 の設計からの引き継ぎ）。

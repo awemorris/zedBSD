@@ -551,7 +551,8 @@ test_threads(void)
 	self = keiui_thread_self();
 	CHECK_EQ(keiui_thread_is(self), 1);
 	job.parent = self;
-	job.own = 0;
+	job.own.number = 0;
+	job.own.handle = NULL;
 	job.own_is_self = 0;
 	job.parent_is_not_self = 0;
 	job.ready = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -575,14 +576,15 @@ test_threads(void)
 	CHECK_EQ(keiui_thread_is(job.own), 0);
 	CHECK_EQ(keiui_thread_is(thread), 0);
 	CHECK_EQ(keiui_thread_is(self), 1);
-	CHECK(job.own != self);
+	CHECK(job.own.number != self.number);
+	CHECK(thread.handle != NULL);
 	SetEvent(job.release);
 	keiui_thread_join(thread);
 
 	/* What the thread saw. */
 	CHECK_EQ(job.own_is_self, 1);
 	CHECK_EQ(job.parent_is_not_self, 1);
-	CHECK(job.own == thread);
+	CHECK(job.own.number == thread.number);
 
 	CloseHandle(job.ready);
 	CloseHandle(job.release);
@@ -632,10 +634,12 @@ test_refusals(void)
 	error = keiui_thread_start(NULL, NULL);
 	CHECK_EQ(error, EINVAL);
 
-	thread = 0;
+	thread.number = 0;
+	thread.handle = NULL;
 	error = keiui_thread_start_joined(NULL, NULL, &thread);
 	CHECK_EQ(error, EINVAL);
-	CHECK_EQ(thread, 0);
+	CHECK_EQ(thread.number, 0);
+	CHECK(thread.handle == NULL);
 
 	error = keiui_thread_start_joined(idle_thread, NULL, NULL);
 	CHECK_EQ(error, EINVAL);

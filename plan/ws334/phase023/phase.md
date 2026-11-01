@@ -4,6 +4,7 @@
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §3.5〜§3.8、§2.5、§9.1・§9.2。
 - 状態: planned（2026-11-01 p002 で作成）。
+- **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: `libbrowser.dll` の link と `.def` の export の照合は無い。libbrowser の全部の object を static library `libbrowser.a` にし（p036 の `WIN32_STATIC_LIBRARY` の形）、cross-build.sh の libbrowser の `nm -u` の照合を全部の object に広げる。下の本文の `libbrowser.dll`・`.def` はこの通りに読み替える。
 - 依存: p010（records）・p011（files）・p012（queue）・p022。
 - 担当の想定: Opus（phase-runner）を 1 回。使う module の約束は `include/browser/storage.h`・`storage/records.h`・`storage/files.h`・`storage/queue.h` の comment。公開の API の形はこの phase.md の下の通り（design §3.8 を確定させた物）。
 
