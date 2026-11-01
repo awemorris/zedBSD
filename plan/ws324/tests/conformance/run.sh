@@ -5,7 +5,8 @@
 #   conform (h265-stream, h265-dpb with 17 slots, h265-std and its StdVideo round trip),
 #   ffmpeg -bsf:v trace_headers (the syntax element values) and
 #   ffmpeg -threads 1 -loglevel debug (the decoded and output POCs),
-# and compares them with compare.py.  When ffmpeg cannot read the stream because a PPS comes before its SPS,
+# and compares them with compare.py.  ffmpeg runs with -nostats: its progress line ends with a carriage return, not
+# a newline, and a trace line written after it would join it.  When ffmpeg cannot read the stream because a PPS comes before its SPS,
 # ffmpeg is given the copy from reorder-ps.py (the parameter sets before the first picture in VPS, SPS, PPS order).
 #   sh plan/ws324/tests/conformance/run.sh [<name>...]     (default: every name of list.txt, and HRD_A_Fujitsu_3+du)
 # A name <zip>+du is the zip's bitstream through interleave-du.py (decoding unit information SEI and PPS NAL units
@@ -83,18 +84,18 @@ for name in $names; do
 
 	# ffmpeg's trace of the syntax; again over the reordered copy when it could not read the stream.
 	feed="cat"
-	bitstream | timeout 600 ffmpeg -hide_banner -nostdin -f hevc -i pipe:0 -c copy \
-	    -bsf:v trace_headers -f null - 2>&1 | sed 's/^\[trace_headers @ 0x[0-9a-f]*\] //' | gzip > "$out/$name.trace.gz"
+	bitstream | timeout 600 ffmpeg -hide_banner -nostdin -nostats -f hevc -i pipe:0 -c copy \
+	    -bsf:v trace_headers -f null - 2>&1 | sed 's/^.*\[trace_headers @ 0x[0-9a-f]*\] //' | gzip > "$out/$name.trace.gz"
 	if ! zcat "$out/$name.trace.gz" | grep -q '^Packet:'; then
 		feed="/usr/bin/python3 -I $here/reorder-ps.py"
 		echo "$name: ffmpeg read the reordered copy" >> "$out/reordered.txt"
-		bitstream | $feed | timeout 600 ffmpeg -hide_banner -nostdin -f hevc -i pipe:0 -c copy \
-		    -bsf:v trace_headers -f null - 2>&1 | sed 's/^\[trace_headers @ 0x[0-9a-f]*\] //' | \
+		bitstream | $feed | timeout 600 ffmpeg -hide_banner -nostdin -nostats -f hevc -i pipe:0 -c copy \
+		    -bsf:v trace_headers -f null - 2>&1 | sed 's/^.*\[trace_headers @ 0x[0-9a-f]*\] //' | \
 		    gzip > "$out/$name.trace.gz"
 	fi
 
 	# ffmpeg's decode, for the POCs.
-	bitstream | $feed | timeout 600 ffmpeg -hide_banner -nostdin -threads 1 -loglevel debug \
+	bitstream | $feed | timeout 600 ffmpeg -hide_banner -nostdin -nostats -threads 1 -loglevel debug \
 	    -f hevc -i pipe:0 -f null - 2>&1 | grep 'frame with POC\|^Stream mapping:\|Error\|error' | \
 	    gzip > "$out/$name.decode.gz"
 
