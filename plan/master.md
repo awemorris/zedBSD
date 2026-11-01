@@ -26,7 +26,7 @@
 
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
-| P1 | q1849 `p1-ws291p026` | [WS291](ws291/ws.md) p027: RTX の libvulkan の submit の hand-off（B-U）の実装と計測（p026 の設計は 21:07 に cleared、次は p028 の kernel の組み置き） |
+| P1 | q1854 `p1-ws324` | [WS324](ws324/ws.md) p001: RTX の NVENC（H.264・H.265 encode）と NVDEC（H.265 decode）の調べと設計。WS291 p027 は 22:10 にラップアップ（branch agent/p1-ws291p026 は回帰の後に merge） |
 | P2 | q1852 `p2-ws322` | [WS322](ws322/ws.md) p002: VF2 の VPU（Wave5）の glue と core の boot、firmware、実機の probe（p001 の設計は 21:35 に cleared） |
 | P3 | — | 返却。q1840（[WS291](ws291/ws.md) p021 Pi 5 の model の 50 fps）は 21:17 に cleared（c74 画面 51.6〜52.9 fps）。次の Pi 5 の作業は未割当 |
 | P4 | — | 返却。[BUG-387](bugs/BUG-387.md) は fixed、CI の Pi 5 の graphical login も 21:28 に確かめた（main b29f3a5ae）。次の Bug の割当を待つ |
@@ -37,6 +37,7 @@
 | Sonnet ×2 | q1855・q1857（q1856 p027 は返却） | [WS334](ws334/ws.md) p024（HTTP の cache）・p027（UI の準備）・p030（OpenSSL の Windows）を並べて（2026-11-01 ユーザー） |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
+- 未 merge の branch: agent/p1-ws291p026（WS291 p027 の B-U、subs-1000 86 fps。libvulkan の芯と全 architecture の TLS の link を変えるので、RTX の desktop・Venus・arm64・riscv64 の回帰の後に merge）。
 - 起動しない pending: q1836（WS336 p009 ssh-auth）。q1837（WS334 p025）は P5 の q1843 へ、q1835（WS335 p004）は P6 の q1844 へ。
 - ユーザーの答えで設計の改訂が要る: WS318（libavcodec を使わない、MJPEG 無し、hardware が無ければ独自の software）、WS329（速さ優先、vector 化の Phase と intrinsics）。WS310（_OSC、デスクトップで壊すつもりで）・WS339（起動の画面を EDID に）・WS338（H.264 の速さ）は担当の割当待ち。
 - **止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd、[WS287](ws287/ws.md) EHCI の full・low speed（保留）。HAL の差分の承認は無い。

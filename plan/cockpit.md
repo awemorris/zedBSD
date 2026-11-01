@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS291](ws291/ws.md) p027 | GPU の driver の描画の速さ（RTX 2070） | libvulkan の submit を返事を待たずに返す形（B-U）の実装と計測（q1849） | p028 kernel の組み置き（B-K） |
+| P1 | [WS324](ws324/ws.md) p001 | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | 調べと設計（q1854） | 設計 → レビュー → 実装の Phase |
 | P2 | [WS322](ws322/ws.md) p001 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | 調べと設計（q1845） | 設計 → レビュー → 実装の Phase の案。板は P4 の後 |
 | P3 | — | — | 返却（21:17）。WS291 p021（Pi 5 の model の 50 fps）は cleared: c74 画面 51.6〜52.9 fps（前 49.2〜50.7） | 次の Pi 5 の作業は未割当 |
 | P4 | — | Bug の修正の担当 | 返却（21:28）。BUG-387 は fixed、CI の Pi 5 の image で graphical login の desktop まで起動（画面: build/review/q1850-pi5-ci-desk1.png） | 次の Bug の割当を待つ |
@@ -31,6 +31,8 @@
 - 2026-11-01 21:07: p026（RTX の push buffer の設計）cleared。計測で GPU の 1 回の仕事は 9〜10 µs（NVK 13.3 µs より短い）。B-U で subs-1000 は 75〜90 fps の見込み（今 56〜58）、B-K は fps より CPU の時間に効く。Q1 の判断: B-U は待たずに返す、p027（B-U）→ p028（B-K）、P-C は後。
 
 - 2026-11-01 21:17: p021（Pi 5 の V3D の model の 50 fps）cleared。GPU だけが触る作業用の memory（c74 で約 16 MiB）の cache の書き戻しを pass ごとに 2 回していたのを省き、c74 画面 51.58〜52.93 fps・offscreen 53.5〜55.5 fps（4 起動）。desktop は前と同じ（launch 60・drag 60・wiseview 62 ほか）。
+
+- 2026-11-01 22:10: WS291 をラップアップ（ユーザーの指示）。p027（B-U）は実装と実機の段 A まで: 小さな submit 1000 回で 55.5/59.0 → 86.4/82.9 fps（NVK 75.4 を超えた）、100 回で +32 %、画は一致。回帰は未実施なので branch は未 merge。
 
 ### WS074 Web ブラウザ
 
