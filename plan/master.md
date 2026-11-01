@@ -27,7 +27,7 @@
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
 | P1 | q1849 `p1-ws291p026` | [WS291](ws291/ws.md) p027: RTX の libvulkan の submit の hand-off（B-U）の実装と計測（p026 の設計は 21:07 に cleared、次は p028 の kernel の組み置き） |
-| P2 | q1845 `p2-ws322` | [WS322](ws322/ws.md) p001: VF2 の VPU（Wave511 の H.264・H.265 decode、Wave420L の H.265 encode）を Vulkan Video にする調べと設計（ユーザーの指示で WS318 を待たない）。前の q1839（WS291 p020）は cleared |
+| P2 | q1852 `p2-ws322` | [WS322](ws322/ws.md) p002: VF2 の VPU（Wave5）の glue と core の boot、firmware、実機の probe（p001 の設計は 21:35 に cleared） |
 | P3 | — | 返却。q1840（[WS291](ws291/ws.md) p021 Pi 5 の model の 50 fps）は 21:17 に cleared（c74 画面 51.6〜52.9 fps）。次の Pi 5 の作業は未割当 |
 | P4 | — | 返却。[BUG-387](bugs/BUG-387.md) は fixed、CI の Pi 5 の graphical login も 21:28 に確かめた（main b29f3a5ae）。次の Bug の割当を待つ |
 | P5 | q1847 `p5-ws334b` | [WS334](ws334/ws.md) p023: Windows 版のブラウザ、instance と API v4（p025 は 20:57 に cleared、次は p026） |
@@ -109,7 +109,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1852 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1853 · WS341 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -184,7 +184,7 @@ BUG-389 · q1852 · WS341 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS319](ws319/ws.md) | MG006 | i915（5330、Alder Lake） の Vulkan Video: H.264 encode（VDEnc、HuC の firmware）、H.265 decode・encode | planning | WS318 の completed の後 |
 | [WS320](ws320/ws.md) | MG006 | Pi 4（BCM2711） の Vulkan Video: H.264 encode（VideoCore の MMAL video_encode を Vulkan Video の encode として、WS236 と同じ道）、H.265 decode（HEVC の block） | planning | WS318 の completed の後 |
 | [WS321](ws321/ws.md) | MG006 | Pi 5（BCM2712） の Vulkan Video: H.265 decode（HEVC の block を Vulkan Video として）。H.264 は hardware に無く libavcodec | planning | WS318 の completed の後 |
-| [WS322](ws322/ws.md) | MG006 | VisionFive 2（JH7110） の Vulkan Video: H.264・H.265 decode（Wave511）、H.265 encode（Wave420L）を PowerVR の Vulkan の executor の Vulkan Video として。H.264 encode は hardware に無く libavcodec | incomplete | p001 調べと設計（P2 q1845、2026-11-01 ユーザーの指示で WS318 を待たない） |
+| [WS322](ws322/ws.md) | MG006 | VisionFive 2（JH7110） の Vulkan Video: H.264・H.265 decode（Wave511）、H.265 encode（Wave420L）を PowerVR の Vulkan の executor の Vulkan Video として。H.264 encode は hardware に無く独自の software（WS329） | incomplete | p001 cleared（設計）、p002 実機の probe（P2 q1852）。Q322-2・Q322-3 はユーザーの判断待ち |
 | [WS323](ws323/ws.md) | MG006 | ODROID-C5（Amlogic S905X5M） の Vulkan Video: H.264・H.265 の decode と encode（Amlogic の VPU、encode は hardware の有無の確認から）を Mali の Vulkan の executor の Vulkan Video として | planning | WS318 の completed の後 |
 | [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | planning | WS318 の completed の後 |
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |

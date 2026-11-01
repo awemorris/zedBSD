@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=ws322 -->
 
-# WS322 VisionFive 2（JH7110） の Vulkan Video: H.264・H.265 decode（Wave511）、H.265 encode（Wave420L）を PowerVR の Vulkan の executor の Vulkan Video として。H.264 encode は hardware に無く libavcodec
+# WS322 VisionFive 2（JH7110） の Vulkan Video: H.264・H.265 decode（Wave511）、H.265 encode（Wave420L）を PowerVR の Vulkan の executor の Vulkan Video として。H.264 encode は hardware に無く独自の software（WS329）
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
 - Status: incomplete（2026-10-30 Q1 が作成。2026-11-01 ユーザーから、P2 で WS322 を実行する、という趣旨の指示を受け、WS318 の completed を待たずに p001 を始めた）
@@ -16,7 +16,19 @@
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [ws322-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | in-progress（2026-11-01 P2 q1845。design.md 第 2 版と review 1 の反映は済み、Q1 の受け入れと Q322-1〜7 の答え待ち） | （WS318 の completed を待たない、2026-11-01 ユーザー） |
+| [ws322-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | cleared（2026-11-01 21:35 Q1、main 261624739。design.md 第 2 版と review 1 回の反映） | （WS318 の completed を待たない、2026-11-01 ユーザー） |
+| ws322-p002 | VF2 の VPU の glue と Wave5 の core の boot、firmware の package（wave511）、実機の probe | planned（P2 q1852） | p001 |
+| ws322-p003 | PowerVR の executor: NV12 の image・plane の view・query pool・capset・queue family | planned | p001 |
+| ws322-p004 | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、vkvideo-probe の DISTINCT） | planned | p002、p003 |
+| ws322-p005 | libvulkan の H.265 decode の転送 | planned | WS318 p011a か先に着手（Q322-4） |
+| ws322-p006 | H.265 decode | planned | p004、p005 |
+| ws322-p007 | 速さ（非同期、SLC、命令の queue） | planned | p004 |
+| ws322-p008 | encode の設計の詳細（Wave420L） | planned | Q322-2（ユーザー） |
+| ws322-p009 | Wave420L の bring-up と probe | planned | p008 |
+| ws322-p010 | libvulkan の encode の転送 | planned | WS318 p011b か先に着手（Q322-4） |
+| ws322-p011 | executor の H.265 encode | planned | p009、p010 |
+| ws322-p012 | 実機の受け入れ | planned | p006・p007・p011、Q322-3（ユーザー） |
+| ws322-p013 | 規約の全文の見直し | planned | 全部 |
 
 ### 実装の Phase の案（2026-11-01 P2、design.md §15。Q1 の受け入れの後に表へ）
 
@@ -34,6 +46,15 @@
 | p011 | executor の H.265 encode | p009、p010 |
 | p012 | 実機の受け入れ | p006・p007・p011、WS318 p009・p020・p022 |
 | p013 | 規約の全文の見直し | 全部 |
+
+## Q1 の判断（2026-11-01 21:35、p001 の問い）
+
+- Q322-1 firmware（chagall.bin・monet.bin）は zedBSD-firmware で配る（A）。PowerVR の firmware と同じ条件（binary の再配布可・逆解析禁止）。
+- Q322-4 libvulkan の H.265 と encode の転送は、WS322 と WS319 のうち先に着手する方が持つ。
+- Q322-5 題の「H.264 encode は libavcodec」を「独自の software（WS329）」に直した（WS318 の Q318-2）。
+- Q322-6 実装の Phase も WS318 の completed を待たずに始める（A）。2026-11-01 のユーザーの「P2 で WS322 を実行する」は WS 全体の実行と読む。
+- Q322-7 libmedia の DISTINCT の道に bug が出たら、WS322 p004 の中で最小に直し、WS318 の担当に知らせる（A）。
+- Q322-2（Wave420L の参考の source の license）と Q322-3（受け入れの解像度と速さ）はユーザーに聞く。
 
 ## Resume point
 
