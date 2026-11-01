@@ -193,7 +193,7 @@ net_cache_close(
 /*
  * Reads the stored response of a URL, if the cache has one.
  *
- * url, length: the URL as the loader keys it (not NUL-terminated needed).
+ * url, length: the URL as the loader keys it (its serialization).
  * record:      an empty buffer; receives the record's bytes when found.
  *              It is left empty otherwise.
  * found:       receives 1 when the record exists, decodes and is the
