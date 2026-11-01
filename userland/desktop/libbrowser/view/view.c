@@ -402,7 +402,7 @@ browser_view_create(
 	}
 
 	/* The loader of the http and https pages and images, with the instance's cookies, which wakes the program when it has news. */
-	error = page_net_create(instance->cookies, options->wake, options->wake_context, &made->loader);
+	error = page_net_create(instance->cookies, instance->cache, options->wake, options->wake_context, &made->loader);
 	if (error != 0) {
 		free(made);
 		return error;

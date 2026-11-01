@@ -36,6 +36,7 @@ typedef void (*page_console)(void *context, int level, const char *text, size_t 
 struct net_loader;
 struct net_request;
 struct net_cookie_jar;
+struct net_cache;
 struct browser_instance;
 struct net_response;
 struct page_box_slot;
@@ -330,7 +331,7 @@ void page_set_instance(struct page *page, struct browser_instance *instance);
 struct browser_instance *page_instance(struct page *page);
 struct net_cookie_jar *page_cookies(struct page *page);
 int page_load_bytes(struct page *page, const unsigned char *bytes, size_t length, const char *location, const char *mime, size_t mime_length);
-int page_net_create(struct net_cookie_jar *jar, void (*notify)(void *context), void *context, struct net_loader **loader);
+int page_net_create(struct net_cookie_jar *jar, struct net_cache *cache, void (*notify)(void *context), void *context, struct net_loader **loader);
 void page_net_destroy(struct net_loader *loader);
 size_t page_net_pending(const struct net_loader *loader);
 void page_net_wait(struct net_loader *loader, int timeout);

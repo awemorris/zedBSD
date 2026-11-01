@@ -166,6 +166,7 @@ trunc
 _aligned_free
 _aligned_malloc
 atof
+bsearch
 memchr
 memcmp
 memmove

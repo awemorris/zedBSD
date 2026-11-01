@@ -4,7 +4,8 @@
 # close and errors).  The engine's objects come from the WS074 host build (plan/ws074/tests/host-build.sh
 # VARIANT, run first); the test's pages are served by the host's python3 -m http.server on 127.0.0.1.
 #   sh plan/ws334/tests/storage-test.sh [plain|asan]
-# PORT=<n> chooses the server's port (default 18335).  The output goes to a new directory of
+# PORT=<n> chooses the server's port (default 18335); the persistent cache part uses the server of
+# cache-server.py on the next port (the test stops it at the end).  The output goes to a new directory of
 # build/tmp/ws334-storage (fresh_out).
 # Last line: storage-test: PASS or storage-test: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -17,6 +18,7 @@ plain|asan) ;;
 *) echo "storage-test: unknown variant $variant" >&2; exit 2 ;;
 esac
 PORT=${PORT:-18335}
+CACHE_PORT=$((PORT + 1))
 out=build/tmp/ws334-storage
 fresh_out "$out"
 run=$(cd "$out" && pwd -P)
@@ -75,11 +77,26 @@ until /usr/bin/python3 -I -c "import socket,sys; socket.create_connection(('127.
 	sleep 0.1
 done
 
+# The cache part's server, which the test stops itself.
+/usr/bin/python3 -I plan/ws334/tests/cache-server.py "$CACHE_PORT" > "$run/cache-server.log" 2>&1 &
+cache_server=$!
+tries=0
+until /usr/bin/python3 -I -c "import socket,sys; socket.create_connection(('127.0.0.1', int(sys.argv[1])), 1).close()" "$CACHE_PORT" 2> /dev/null; do
+	tries=$((tries + 1))
+	if [ "$tries" -gt 50 ]; then
+		kill "$server" "$cache_server" 2> /dev/null
+		echo "storage-test: FAIL (the cache server did not start on port $CACHE_PORT)"
+		exit 1
+	fi
+	sleep 0.1
+done
+
 # The test.
-ASAN_OPTIONS=detect_stack_use_after_return=0 timeout 300 "$run/storage-test" "$run" "$PORT" > "$run/test.log" 2>&1
+ASAN_OPTIONS=detect_stack_use_after_return=0 timeout 300 "$run/storage-test" "$run" "$PORT" "$CACHE_PORT" > "$run/test.log" 2>&1
 code=$?
-kill "$server" 2> /dev/null
-wait "$server" 2> /dev/null
+kill "$server" "$cache_server" 2> /dev/null
+wait "$server" "$cache_server" 2> /dev/null
+sync
 cat "$run/test.log"
 if [ "$code" = 0 ] && tail -1 "$run/test.log" | grep -q '^test-storage: PASS'; then
 	echo "storage-test: PASS"

@@ -92,13 +92,14 @@ page_cookies(
 
 /*
  * Makes a loader (with its network and resolver threads) whose requests
- * use a cookie jar (NULL for none); notify (which may be NULL) is called
+ * use a cookie jar and a persistent cache (NULL for none); notify (which may be NULL) is called
  * with context from the loader's thread when there is news for
  * page_net_process.
  */
 int
 page_net_create(
 	struct net_cookie_jar *jar,
+	struct net_cache *cache,
 	void (*notify)(void *context),
 	void *context,
 	struct net_loader **loader)
@@ -110,8 +111,9 @@ page_net_create(
 	if (error != 0)
 		return error;
 
-	/* Its requests' cookies, before the first request. */
+	/* Its requests' cookies and persistent cache, before the first request. */
 	net_loader_set_cookies(*loader, jar);
+	net_loader_set_cache(*loader, cache);
 
 	/* Succeeded: the loader takes requests. */
 	return 0;
