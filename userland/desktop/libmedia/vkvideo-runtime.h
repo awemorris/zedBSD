@@ -22,6 +22,7 @@ void media_vkvideo_runtime_discard(struct vkvideo_runtime *runtime);
 uint32_t media_vkvideo_runtime_busy(const struct vkvideo_runtime *runtime);
 uint32_t media_vkvideo_runtime_slots(const struct vkvideo_runtime *runtime);
 uint32_t media_vkvideo_runtime_flights(const struct vkvideo_runtime *runtime);
+int media_vkvideo_runtime_skips_failed(const struct vkvideo_runtime *runtime);
 void media_vkvideo_runtime_close(struct vkvideo_runtime *runtime);
 void media_vkvideo_runtime_reset(struct vkvideo_runtime *runtime);
 #endif

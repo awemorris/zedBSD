@@ -16,16 +16,11 @@
 #define VKVIDEO_PENDING 20U
 
 /*
- * Whether a picture whose decode reported a failure is skipped instead of
- * ending the stream, and how many may fail in a row (ws236: only the
- * arm64 build, whose Vulkan Video device is the Raspberry Pi 4's firmware
- * decoder; other builds keep ending the stream).
+ * How many pictures whose decode reported a failure may be skipped in a
+ * row, where the device skips them instead of ending the stream (the
+ * Raspberry Pi 4's firmware decoder, known by its vendor; on other devices
+ * a failed decode ends the stream).
  */
-#if defined(__aarch64__)
-#define VKVIDEO_SKIP_FAILED 1
-#else
-#define VKVIDEO_SKIP_FAILED 0
-#endif
 #define VKVIDEO_MAX_SKIPPED 8U
 
 /*
@@ -615,6 +610,7 @@ vkvideo_settle(
 	struct vkvideo_decoder *decoder,
 	struct vkvideo_output *output)
 {
+	int skips;
 	int error;
 
 	/* A picture with its pixels has nothing to wait for. */
@@ -624,20 +620,21 @@ vkvideo_settle(
 	/* Its submission completes, with those before it. */
 	error = media_vkvideo_runtime_finish(decoder->runtime, output->ticket);
 	output->ticket = 0U;
-#if VKVIDEO_SKIP_FAILED
+
 	/*
 	 * A picture whose decode reported a failure (the Raspberry Pi 4's
-	 * firmware can miss a picture, ws236) is not shown: its clock position
-	 * is consumed as a missing picture's, its marking already updated the
-	 * DPB, and the stream goes on, unless too many fail in a row.
+	 * firmware can miss a picture) is not shown where the device
+	 * skips them: its clock position is consumed as a missing picture's,
+	 * its marking already updated the DPB, and the stream goes on, unless
+	 * too many fail in a row.
 	 */
-	if (error == EBADMSG && decoder->skipped < VKVIDEO_MAX_SKIPPED) {
+	skips = media_vkvideo_runtime_skips_failed(decoder->runtime);
+	if (skips && error == EBADMSG && decoder->skipped < VKVIDEO_MAX_SKIPPED) {
 		decoder->skipped++;
 		media_picture_unref(output->picture);
 		output->picture = NULL;
 		return 0;
 	}
-#endif
 
 	/* A failed decode ends the stream; another error is the runtime's. */
 	if (error == EBADMSG)

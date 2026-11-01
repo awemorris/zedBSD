@@ -8,11 +8,11 @@
 /* Linear video pictures and their CPU scaler; image tiling remains entirely inside the Vulkan implementation. */
 #include "picture.h"
 #include "media-decoder.h"
+#include "media-os.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* One decoder's reusable picture storage; live includes checked-out pictures and its idle list. */
 struct media_picture_pool {
@@ -437,10 +437,8 @@ media_gpu_slots_unref(
 		return;
 
 	/* The last one closes the handles and frees the record. */
-	for (index = 0U; index < MEDIA_GPU_SLOTS; index++) {
-		if (slots->fd[index] >= 0)
-			(void)close(slots->fd[index]);
-	}
+	for (index = 0U; index < MEDIA_GPU_SLOTS; index++)
+		media_os_close_descriptor(slots->fd[index]);
 
 	/* The record itself. */
 	pthread_mutex_destroy(&slots->lock);

@@ -20,8 +20,8 @@
 #define VK_NO_PROTOTYPES
 #include "vkvideo-runtime.h"
 #include "media-private.h"
+#include "media-os.h"
 
-#include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stddef.h>
@@ -35,16 +35,17 @@
 #define VKVIDEO_SOURCE_MAX (65U * 1024U * 1024U)
 
 /*
- * The pictures submitted ahead of the one being read back (ws236 p008).
- * The Raspberry Pi 4's decoder (the only arm64 Vulkan Video device) takes
- * the next pictures while one is read back; elsewhere one picture is
- * decoded, read back and copied before the next is submitted.
+ * The pictures submitted ahead of the one being read back, at most.  The Raspberry Pi 4's firmware decoder, known by its vendor, takes
+ * the next pictures while one is read back; on other devices one picture
+ * is decoded, read back and copied before the next is submitted.
  */
-#if defined(__aarch64__)
 #define VKVIDEO_FLIGHTS 4U
-#else
-#define VKVIDEO_FLIGHTS 1U
-#endif
+
+/*
+ * The vendor the Raspberry Pi 4's Vulkan driver reports (Broadcom's PCI
+ * vendor ID) in VkPhysicalDeviceProperties.
+ */
+#define VKVIDEO_FIRMWARE_VENDOR 0x14e4U
 
 /* The create flags of an image whose planes are viewed in their own formats. */
 #define VKVIDEO_PLANE_FLAGS (VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT)
@@ -166,6 +167,7 @@ struct vkvideo_functions {
 	PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
 	PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR;
 	PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
+	PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
 	PFN_vkGetPhysicalDeviceQueueFamilyProperties2KHR vkGetPhysicalDeviceQueueFamilyProperties2KHR;
 	PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR vkGetPhysicalDeviceVideoCapabilitiesKHR;
 	PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR vkGetPhysicalDeviceVideoFormatPropertiesKHR;
@@ -220,6 +222,12 @@ struct vkvideo_runtime {
 	uint32_t flights;
 	uint32_t lag;
 	int late_barrier;
+	/*
+	 * What the device takes (vkvideo_firmware): the pictures in flight at
+	 * most, and whether a picture whose decode failed is skipped.
+	 */
+	uint32_t flight_limit;
+	int skip_failed;
 	/*
 	 * Pictures the GPU holds: the pictures the program keeps at most (0:
 	 * none asked), the stream's reorder depth (the decoded pictures that
@@ -300,6 +308,7 @@ static const struct vkvideo_symbol vkvideo_symbols[] = {
 	{"vkGetInstanceProcAddr", offsetof(struct vkvideo_functions, vkGetInstanceProcAddr), 1},
 	{"vkGetPhysicalDeviceFeatures2KHR", offsetof(struct vkvideo_functions, vkGetPhysicalDeviceFeatures2KHR), 1},
 	{"vkGetPhysicalDeviceMemoryProperties", offsetof(struct vkvideo_functions, vkGetPhysicalDeviceMemoryProperties), 1},
+	{"vkGetPhysicalDeviceProperties", offsetof(struct vkvideo_functions, vkGetPhysicalDeviceProperties), 1},
 	{"vkGetPhysicalDeviceQueueFamilyProperties2KHR", offsetof(struct vkvideo_functions, vkGetPhysicalDeviceQueueFamilyProperties2KHR), 1},
 	{"vkGetPhysicalDeviceVideoCapabilitiesKHR", offsetof(struct vkvideo_functions, vkGetPhysicalDeviceVideoCapabilitiesKHR), 1},
 	{"vkGetPhysicalDeviceVideoFormatPropertiesKHR", offsetof(struct vkvideo_functions, vkGetPhysicalDeviceVideoFormatPropertiesKHR), 1},
@@ -315,7 +324,7 @@ static const struct vkvideo_symbol vkvideo_symbols[] = {
 };
 
 /* The optional Vulkan loader is retained for process lifetime because exported frames may outlive decoder close. */
-static void *vkvideo_library;
+static struct media_os_library *vkvideo_library;
 
 /* Loader publication is immutable after one attempt and synchronized before any runtime uses it. */
 static pthread_once_t vkvideo_loader_once = PTHREAD_ONCE_INIT;
@@ -329,6 +338,7 @@ static int vkvideo_dispatch(struct vkvideo_runtime *video, int instance);
 static int vkvideo_instance(struct vkvideo_runtime *video);
 static int vkvideo_resources(struct vkvideo_runtime *video);
 static int vkvideo_device(struct vkvideo_runtime *video);
+static void vkvideo_firmware(struct vkvideo_runtime *video);
 static int vkvideo_family(struct vkvideo_runtime *video);
 static int vkvideo_formats(struct vkvideo_runtime *video, VkImageUsageFlags usage);
 static int vkvideo_formats_flags(struct vkvideo_runtime *video, VkImageUsageFlags usage, VkImageCreateFlags flags);
@@ -375,7 +385,7 @@ media_vkvideo_runtime_open(
 	*runtime = NULL;
 	pthread_once(&vkvideo_loader_once, vkvideo_loader);
 	if (vkvideo_library == NULL) {
-		media_log("Vulkan Video: no Vulkan library (libvulkan.so.1, libvulkan.so)");
+		media_log("Vulkan Video: no Vulkan loader");
 		return MEDIA_PROBLEM_DEVICE;
 	}
 
@@ -837,6 +847,19 @@ media_vkvideo_runtime_flights(
 {
 	/* One per submission. */
 	return video->flights;
+}
+
+/*
+ * Reports whether a picture whose decode reported a failure is skipped
+ * instead of ending the stream (the Raspberry Pi 4's firmware decoder can
+ * miss a picture).
+ */
+int
+media_vkvideo_runtime_skips_failed(
+	const struct vkvideo_runtime *video)
+{
+	/* The device's answer, from when it was chosen. */
+	return video->skip_failed;
 }
 
 /*
@@ -1357,10 +1380,8 @@ static void
 vkvideo_loader(
 	void)
 {
-	/* Distribution SONAMEs are tried in their normal order and retained for process lifetime. */
-	vkvideo_library = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
-	if (vkvideo_library == NULL)
-		vkvideo_library = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
+	/* The system's loader, retained for process lifetime (NULL when there is none). */
+	(void)media_os_vulkan_open(&vkvideo_library);
 }
 
 /* Load only the entry points whose instance or device dispatch is already available. */
@@ -1370,13 +1391,13 @@ vkvideo_dispatch(
 	int instance)
 {
 	PFN_vkVoidFunction address;
-	void *symbol;
+	media_os_function symbol;
 	unsigned index;
 	int missing;
 
 	/* The loader's function-pointer representation is transferred explicitly rather than cast through ISO C. */
 	if (video->fn.vkGetInstanceProcAddr == NULL) {
-		symbol = dlsym(vkvideo_library, "vkGetInstanceProcAddr");
+		symbol = media_os_library_symbol(vkvideo_library, "vkGetInstanceProcAddr");
 		if (symbol == NULL)
 			return ENODEV;
 		if (sizeof(symbol) != sizeof(video->fn.vkGetInstanceProcAddr))
@@ -1426,11 +1447,11 @@ vkvideo_instance(
 	PFN_vkVoidFunction address;
 	VkResult result;
 	int error;
-	void *symbol;
+	media_os_function symbol;
 
 	/* Obtain the global creation operation before an instance exists. */
 	if (video->fn.vkGetInstanceProcAddr == NULL) {
-		symbol = dlsym(vkvideo_library, "vkGetInstanceProcAddr");
+		symbol = media_os_library_symbol(vkvideo_library, "vkGetInstanceProcAddr");
 		if (symbol == NULL) {
 			media_log("Vulkan Video: no vkGetInstanceProcAddr");
 			return ENODEV;
@@ -1694,7 +1715,7 @@ vkvideo_capabilities(
 	 * output to the transfer layout itself).
 	 */
 	if (!video->distinct && video->family == video->transfer_family) {
-		while (video->flights < VKVIDEO_FLIGHTS && video->max_references + video->flights + 1U <= video->capabilities.maxDpbSlots)
+		while (video->flights < video->flight_limit && video->max_references + video->flights + 1U <= video->capabilities.maxDpbSlots)
 			video->flights++;
 		video->slots = video->max_references + video->flights;
 	}
@@ -1721,6 +1742,31 @@ vkvideo_capabilities(
 
 	/* Succeeded: all standard capability and format requirements are admitted. */
 	return 0;
+}
+
+/*
+ * Sets what the device being probed takes: the Raspberry Pi 4's firmware
+ * decoder, known by its vendor, takes VKVIDEO_FLIGHTS pictures in flight
+ * and may miss a picture, which is then skipped; any other device takes
+ * one picture in flight and a failed decode ends the stream.
+ */
+static void
+vkvideo_firmware(
+	struct vkvideo_runtime *video)
+{
+	VkPhysicalDeviceProperties properties;
+
+	/* Any device but the firmware decoder. */
+	video->flight_limit = 1U;
+	video->skip_failed = 0;
+
+	/* The firmware decoder, by the vendor its driver reports. */
+	memset(&properties, 0, sizeof(properties));
+	video->fn.vkGetPhysicalDeviceProperties(video->physical, &properties);
+	if (properties.vendorID == VKVIDEO_FIRMWARE_VENDOR) {
+		video->flight_limit = VKVIDEO_FLIGHTS;
+		video->skip_failed = 1;
+	}
 }
 
 /* Enumerate every physical device instead of assuming the first enumerated GPU can decode video. */
@@ -1777,6 +1823,7 @@ vkvideo_device(
 	/* Probe every enumerated physical device independently. */
 	for (index = 0U; index < count; index++) {
 		video->physical = devices[index];
+		vkvideo_firmware(video);
 		error = vkvideo_family(video);
 		if (error != 0) {
 			media_log("Vulkan Video: device %u has no H.264 decode and transfer queue families", index);
