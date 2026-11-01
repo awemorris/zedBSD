@@ -465,7 +465,7 @@ anchor_find_state(
 		return 0;
 
 	/* Its rectangle: a block's border box, an inline box's lines. */
-	if (found->kind == LAYOUT_BLOCK || found->kind == LAYOUT_REPLACED || found->atomic) {
+	if ((found->kind == LAYOUT_BLOCK || found->kind == LAYOUT_REPLACED || found->atomic) && !(found->fragmented && found->node != NULL)) {
 		rect->x = found->x;
 		rect->y = found->y;
 		rect->width = found->border[CSS_LEFT] + found->padding[CSS_LEFT] + found->width +

@@ -23,6 +23,7 @@ static layout_unit block_collapse(layout_unit first, layout_unit second);
 static layout_unit block_outer_height(const struct layout_box *box);
 static int block_owns_context(const struct layout_box *box);
 static int block_content(struct layout_tree *tree, struct layout_box *box);
+static int block_columns(struct layout_tree *tree, struct layout_box *box);
 static int block_intrinsic(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 static int block_min_intrinsic(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 static int block_is_button(const struct layout_box *box);
@@ -667,6 +668,8 @@ block_content(
 		error = layout_grid(tree, box);
 	} else if (box->style.display == CSS_DISPLAY_TABLE || box->style.display == CSS_DISPLAY_INLINE_TABLE) {
 		error = layout_table(tree, box);
+	} else if (layout_multicol_wanted(box)) {
+		error = block_columns(tree, box);
 	} else if (box->children_inline) {
 		error = layout_inline(tree, box);
 	} else {
@@ -679,6 +682,31 @@ block_content(
 
 	/* Succeeded: the content is laid out. */
 	return 0;
+}
+
+/* Lays out the content of a box with columns: as a flow one column wide, which is then cut into the columns. */
+static int
+block_columns(
+	struct layout_tree *tree,
+	struct layout_box *box)
+{
+	layout_unit width;
+	layout_unit column;
+	layout_unit gap;
+	int columns;
+	int error;
+
+	width = box->width;
+	layout_multicol_geometry(box, width, &columns, &column, &gap);
+	box->width = column;
+	if (box->children_inline)
+		error = layout_inline(tree, box);
+	else
+		error = block_children(tree, box);
+	box->width = width;
+	if (error != 0)
+		return error;
+	return layout_multicol_cut(tree, box, width, columns, column, gap);
 }
 
 /* Tells whether a box starts a block formatting context of its own (the root, floats, boxes out of the flow, clipping boxes, inline blocks, cells, flex). */
@@ -723,6 +751,10 @@ block_owns_context(
 	if (box->style.display == CSS_DISPLAY_TABLE || box->style.display == CSS_DISPLAY_INLINE_TABLE)
 		return 1;
 	if (box->style.display == CSS_DISPLAY_TABLE_CAPTION)
+		return 1;
+
+	/* A box with columns. */
+	if (layout_multicol_wanted(box))
 		return 1;
 
 	/* A flex or grid item. */

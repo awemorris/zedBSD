@@ -73,6 +73,7 @@ enum values_shorthand {
 	SHORT_FLEX,
 	SHORT_FLEX_FLOW,
 	SHORT_GAP,
+	SHORT_COLUMNS,
 	SHORT_BORDER_RADIUS,
 	SHORT_RADIUS_TOP_LEFT,
 	SHORT_RADIUS_TOP_RIGHT,
@@ -285,6 +286,17 @@ static const struct values_name values_names[] = {
 	{ "container-type", CSS_PROP_CONTAINER_TYPE },
 	{ "border-collapse", CSS_PROP_BORDER_COLLAPSE },
 	{ "caption-side", CSS_PROP_CAPTION_SIDE },
+	{ "column-count", CSS_PROP_COLUMN_COUNT },
+	{ "column-width", CSS_PROP_COLUMN_WIDTH },
+	{ "column-fill", CSS_PROP_COLUMN_FILL },
+	{ "column-span", CSS_PROP_COLUMN_SPAN },
+	{ "columns", SHORT_COLUMNS },
+	{ "break-before", CSS_PROP_BREAK_BEFORE },
+	{ "break-after", CSS_PROP_BREAK_AFTER },
+	{ "break-inside", CSS_PROP_BREAK_INSIDE },
+	{ "page-break-before", CSS_PROP_BREAK_BEFORE },
+	{ "page-break-after", CSS_PROP_BREAK_AFTER },
+	{ "page-break-inside", CSS_PROP_BREAK_INSIDE },
 	{ "backdrop-filter", CSS_PROP_BACKDROP_FILTER },
 	{ "will-change", CSS_PROP_WILL_CHANGE },
 	{ "contain", CSS_PROP_CONTAIN },
@@ -459,6 +471,44 @@ static const struct values_keyword values_border_collapse[] = {
 static const struct values_keyword values_caption_side[] = {
 	{ "top", 0 },
 	{ "bottom", 1 },
+	{ NULL, 0 }
+};
+
+/* The keywords of column-fill, column-span and the fragmentation breaks (css_style's multicol_fill, multicol_span and break_*). */
+static const struct values_keyword values_column_fill[] = {
+	{ "balance", 0 },
+	{ "auto", 1 },
+	{ "balance-all", 2 },
+	{ NULL, 0 }
+};
+static const struct values_keyword values_column_span[] = {
+	{ "none", 0 },
+	{ "all", 1 },
+	{ NULL, 0 }
+};
+static const struct values_keyword values_break[] = {
+	{ "auto", 0 },
+	{ "avoid", 1 },
+	{ "always", 2 },
+	{ "all", 3 },
+	{ "avoid-page", 4 },
+	{ "page", 5 },
+	{ "left", 6 },
+	{ "right", 7 },
+	{ "recto", 8 },
+	{ "verso", 9 },
+	{ "column", 10 },
+	{ "avoid-column", 11 },
+	{ "region", 12 },
+	{ "avoid-region", 13 },
+	{ NULL, 0 }
+};
+static const struct values_keyword values_break_inside[] = {
+	{ "auto", 0 },
+	{ "avoid", 1 },
+	{ "avoid-page", 4 },
+	{ "avoid-column", 11 },
+	{ "avoid-region", 13 },
 	{ NULL, 0 }
 };
 
@@ -1112,6 +1162,7 @@ static size_t values_place_value(const struct css_token *tokens, const size_t *s
 static int values_flex_flow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_content(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_pair(struct css_parse *parse, int first, int second, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_columns(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_calc(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_calc_arguments(struct wb_arena *arena, const struct css_token *tokens, size_t count, int operation, struct css_calc *calc);
 static int values_calc_sum(struct wb_arena *arena, const struct css_token *tokens, size_t count, size_t *index, struct values_term *term);
@@ -1384,6 +1435,8 @@ css_parse_property(
 		return values_flex(parse, tokens, count, out, out_count);
 	case SHORT_FLEX_FLOW:
 		return values_flex_flow(parse, tokens, count, out, out_count);
+	case SHORT_COLUMNS:
+		return values_columns(parse, tokens, count, out, out_count);
 	case SHORT_GAP:
 		return values_pair(parse, CSS_PROP_ROW_GAP, CSS_PROP_COLUMN_GAP, tokens, count, out, out_count);
 	case SHORT_BORDER_RADIUS:
@@ -3005,6 +3058,19 @@ values_single(
 	case CSS_PROP_CAPTION_SIDE:
 		table = values_caption_side;
 		break;
+	case CSS_PROP_COLUMN_FILL:
+		table = values_column_fill;
+		break;
+	case CSS_PROP_COLUMN_SPAN:
+		table = values_column_span;
+		break;
+	case CSS_PROP_BREAK_BEFORE:
+	case CSS_PROP_BREAK_AFTER:
+		table = values_break;
+		break;
+	case CSS_PROP_BREAK_INSIDE:
+		table = values_break_inside;
+		break;
 	case CSS_PROP_CURSOR:
 		table = values_cursor;
 		break;
@@ -3178,6 +3244,35 @@ values_single(
 			return EINVAL;
 		value->kind = CSS_VALUE_NUMBER;
 		value->number = (float)tokens[0].number;
+		return 0;
+	}
+
+	/* column-count: auto or a positive integer (0 for auto). */
+	if (property == CSS_PROP_COLUMN_COUNT) {
+		value->kind = CSS_VALUE_NUMBER;
+		if (css_ident_equal(&tokens[0], "auto")) {
+			value->number = 0;
+			return 0;
+		}
+		if (tokens[0].type != CSS_TOKEN_NUMBER || !tokens[0].integer || tokens[0].number < 1)
+			return EINVAL;
+		value->number = (float)tokens[0].number;
+		return 0;
+	}
+
+	/* column-width: auto or a length that is not negative (auto is a zero length of unit pixels). */
+	if (property == CSS_PROP_COLUMN_WIDTH) {
+		if (css_ident_equal(&tokens[0], "auto")) {
+			value->kind = CSS_VALUE_LENGTH;
+			value->number = 0;
+			value->unit = CSS_DUNIT_PX;
+			return 0;
+		}
+		error = values_length(&tokens[0], 0, value);
+		if (error != 0)
+			return error;
+		if (value->unit == CSS_DUNIT_PERCENT || value->number < 0 || value->number == 0)
+			return EINVAL;
 		return 0;
 	}
 
@@ -5812,6 +5907,66 @@ values_calc_scale(
 
 	/* And the function's factor. */
 	sum->nested_factor *= factor;
+}
+
+/* Parses the columns shorthand: a column-width and a column-count in either order, each of which may be auto. */
+static int
+values_columns(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_value width;
+	struct css_value number;
+	struct css_value part;
+	size_t starts[3];
+	size_t lengths[3];
+	size_t components;
+	size_t index;
+	int have_width;
+	int have_count;
+	int autos;
+	int error;
+
+	components = values_components(tokens, count, starts, lengths, 3);
+	if (components == 0 || components > 2)
+		return EINVAL;
+	memset(&width, 0, sizeof(width));
+	memset(&number, 0, sizeof(number));
+	width.kind = CSS_VALUE_LENGTH;
+	width.unit = CSS_DUNIT_PX;
+	number.kind = CSS_VALUE_NUMBER;
+	have_width = 0;
+	have_count = 0;
+	autos = 0;
+	for (index = 0; index < components; index++) {
+		if (lengths[index] == 1U && css_ident_equal(&tokens[starts[index]], "auto")) {
+			autos++;
+			continue;
+		}
+		if (lengths[index] == 1U && tokens[starts[index]].type == CSS_TOKEN_NUMBER) {
+			error = values_single(parse, CSS_PROP_COLUMN_COUNT, tokens + starts[index], lengths[index], &part);
+			if (error != 0 || have_count)
+				return EINVAL;
+			number = part;
+			have_count = 1;
+			continue;
+		}
+		error = values_single(parse, CSS_PROP_COLUMN_WIDTH, tokens + starts[index], lengths[index], &part);
+		if (error != 0 || have_width)
+			return EINVAL;
+		width = part;
+		have_width = 1;
+	}
+
+	/* An auto fills a side that has none; there are no more autos than the sides left. */
+	if (autos > 2 - have_width - have_count)
+		return EINVAL;
+	values_add(out, made, CSS_PROP_COLUMN_WIDTH, &width);
+	values_add(out, made, CSS_PROP_COLUMN_COUNT, &number);
+	return 0;
 }
 
 /*

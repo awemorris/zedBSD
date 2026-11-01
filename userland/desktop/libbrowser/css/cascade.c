@@ -5232,6 +5232,32 @@ cascade_apply(
 	case CSS_PROP_CAPTION_SIDE:
 		style->caption_side = value->keyword;
 		break;
+	case CSS_PROP_COLUMN_COUNT:
+		style->multicol_count = (int)value->number;
+		break;
+	case CSS_PROP_COLUMN_WIDTH:
+		{
+			struct css_length width;
+
+			width = cascade_length(engine, value, style->font_size);
+			style->multicol_width = width.unit == CSS_UNIT_PX ? width.value : 0.0f;
+		}
+		break;
+	case CSS_PROP_COLUMN_FILL:
+		style->multicol_fill = value->keyword;
+		break;
+	case CSS_PROP_COLUMN_SPAN:
+		style->multicol_span = value->keyword;
+		break;
+	case CSS_PROP_BREAK_BEFORE:
+		style->break_before = value->keyword;
+		break;
+	case CSS_PROP_BREAK_AFTER:
+		style->break_after = value->keyword;
+		break;
+	case CSS_PROP_BREAK_INSIDE:
+		style->break_inside = value->keyword;
+		break;
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
 		style->column_names = cascade_line_names(engine, value);
@@ -5903,6 +5929,27 @@ cascade_inherit(
 		break;
 	case CSS_PROP_CAPTION_SIDE:
 		style->caption_side = parent->caption_side;
+		break;
+	case CSS_PROP_COLUMN_COUNT:
+		style->multicol_count = parent->multicol_count;
+		break;
+	case CSS_PROP_COLUMN_WIDTH:
+		style->multicol_width = parent->multicol_width;
+		break;
+	case CSS_PROP_COLUMN_FILL:
+		style->multicol_fill = parent->multicol_fill;
+		break;
+	case CSS_PROP_COLUMN_SPAN:
+		style->multicol_span = parent->multicol_span;
+		break;
+	case CSS_PROP_BREAK_BEFORE:
+		style->break_before = parent->break_before;
+		break;
+	case CSS_PROP_BREAK_AFTER:
+		style->break_after = parent->break_after;
+		break;
+	case CSS_PROP_BREAK_INSIDE:
+		style->break_inside = parent->break_inside;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		memcpy(style->columns, parent->columns, sizeof(style->columns));

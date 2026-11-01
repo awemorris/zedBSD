@@ -195,6 +195,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/layout/box.c \
 	$(LIBBROWSER_DIR)/layout/transition.c \
 	$(LIBBROWSER_DIR)/layout/block.c \
+	$(LIBBROWSER_DIR)/layout/multicol.c \
 	$(LIBBROWSER_DIR)/layout/flex.c \
 	$(LIBBROWSER_DIR)/layout/grid.c \
 	$(LIBBROWSER_DIR)/layout/grid-names.c \
