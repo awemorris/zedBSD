@@ -9,7 +9,7 @@
 # the original) and read
 # back from it (OUT/board-vmunix), BUILD's kernel
 # put in and the board power-cycled (plan/tools/vf2/run.sh); the programs, the libraries and the qs40 model go to the
-# user's ~/p7 (the board's system files are not changed: they run with LD_LIBRARY_PATH), the compositor is started on
+# user's ~/p7 or VF2_DIR (the board's system files are not changed: they run with LD_LIBRARY_PATH), the compositor is started on
 # its own socket, mview spins in the game mode (mailbox, 4 images) once for each of COPIES (its whole output in
 # OUT/cN.txt), then the compositor is ended (its whole log in OUT/wayland.log),
 # the board's kernel put back (checked by reading it back) and the board power-cycled again.  The password comes from
@@ -21,6 +21,9 @@
 # instead, and keiland-shot takes the screen half way through each spin (OUT/shot-cN.png).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
+# VF2_DIR: the directory the programs go to, under the user's home unless absolute (p7 by default; the board's
+# root file system is small, /tmp is a tmpfs).
+W=${VF2_DIR:-p7}
 out=${1:?usage: vf2-mview.sh OUT BUILD}
 build=${2:?the build directory}
 : "${VF2_HOST:?VF2_HOST=user@host}"
@@ -66,19 +69,22 @@ else
 fi
 say "kernel $(cksum < "$build/vmunix" | cut -d' ' -f1) on the board: $(b 'uname -sm; cksum /boot/boot0/vmunix; sysctl hw.gpu.powervr.stages' 2>&1 | tr '\n' ' ')"
 
-# The programs, the libraries and the model in the user's ~/p7.
-b 'mkdir -p p7/bin p7/lib p7/qs40/tex p7/run && chmod 700 p7/run'
+# The programs, the libraries and the model in VF2_DIR.
+b "mkdir -p $W/bin $W/lib $W/qs40/tex $W/run && chmod 700 $W/run"
 compositor=$build/bin/wayland
 [ -n "${SHOT_BUILD:-}" ] && compositor=$SHOT_BUILD/bin/wayland
-bcp "$compositor" "$build/bin/mview" "$VF2_HOST:p7/bin/" &&
-    bcp "$build"/dynamic/*.so "$VF2_HOST:p7/lib/" &&
-    bcp userland/tests/mview/models/qs40/model.txt "$VF2_HOST:p7/qs40/" &&
-    bcp userland/tests/mview/models/qs40/tex/*.pam "$VF2_HOST:p7/qs40/tex/" || say "FAIL the files were not copied"
-[ -n "${SHOT_BUILD:-}" ] && { bcp "$SHOT_BUILD/bin/keiland-shot" "$VF2_HOST:p7/bin/" || say "FAIL keiland-shot was not copied"; }
-say "files $(b 'cd p7 && cksum bin/wayland bin/mview lib/libc.so lib/libvulkan.so' 2>&1 | awk '{print $1, $3}' | tr '\n' ' ')"
+bcp "$compositor" "$build/bin/mview" "$VF2_HOST:$W/bin/" &&
+    bcp "$build"/dynamic/*.so "$VF2_HOST:$W/lib/" &&
+    bcp userland/tests/mview/models/qs40/model.txt "$VF2_HOST:$W/qs40/" &&
+    bcp userland/tests/mview/models/qs40/tex/*.pam "$VF2_HOST:$W/qs40/tex/" || say "FAIL the files were not copied"
+[ -n "${SHOT_BUILD:-}" ] && { bcp "$SHOT_BUILD/bin/keiland-shot" "$VF2_HOST:$W/bin/" || say "FAIL keiland-shot was not copied"; }
+say "files $(b "cd $W && cksum bin/wayland bin/mview lib/libc.so lib/libvulkan.so" 2>&1 | awk '{print $1, $3}' | tr '\n' ' ')"
 
 # The compositor as root on its own socket (a stale socket of an earlier run removed first), its pid kept.
-H=$(b 'echo $HOME')/p7
+case $W in
+/*) H=$W ;;
+*) H=$(b 'echo $HOME')/$W ;;
+esac
 ENV="env LD_LIBRARY_PATH=$H/lib XDG_RUNTIME_DIR=$H/run"
 printf '%s\n' "$VF2_PASSWORD" | b "sudo -S sh -c 'rm -f $H/run/wayland-0; $ENV nohup $H/bin/wayland --socket=$H/run/wayland-0 --desktop-client=none > $H/wayland.log 2>&1 < /dev/null & echo \$! > $H/wayland.pid'; sleep 8; test -S $H/run/wayland-0 && grep -q 'step=socket' $H/wayland.log && echo compositor up || { echo compositor down; tail -5 $H/wayland.log; }" > "$out/compositor.txt" 2>&1
 say "$(grep -v '^\[sudo\]' "$out/compositor.txt" | tr '\n' ' ')"
@@ -91,7 +97,7 @@ for copies in ${COPIES:-1 10 50 100 200}; do
 	[ -n "${SHOT_BUILD:-}" ] && shot="& sleep $((${SPIN:-12} / 2 + 4)); $H/bin/keiland-shot --socket $H/run/keiland-shot.sock $H/shot-c$copies.png; wait"
 	printf '%s\n' "$VF2_PASSWORD" | BT=$((${SPIN:-12} + 120)) b "sudo -S sh -c '$ENV $timing $H/bin/mview --display=$H/run/wayland-0 --model=$H/${MODEL:-qs40} --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-} $shot'" > "$out/c$copies.txt" 2>&1
 	if [ -n "${SHOT_BUILD:-}" ]; then
-		bcp "$VF2_HOST:p7/shot-c$copies.png" "$out/" > /dev/null 2>&1
+		bcp "$VF2_HOST:$W/shot-c$copies.png" "$out/" > /dev/null 2>&1
 		say "c$copies shot $(grep KEILAND-SHOT "$out/c$copies.txt" | tr '\n' ' ')"
 	fi
 	say "c$copies $(grep -E 'MVIEW (SPIN|STAGES|FAILED|HITCHES)' "$out/c$copies.txt" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')"
@@ -107,7 +113,7 @@ done
 b "grep -E 'KWL (SCANOUT|MODE [a-z]|FAILED|VULKAN_ERROR|DIRECT)' $H/wayland.log | sort | uniq -c | head -12" > "$out/scanout.txt" 2>&1
 sed 's/^/compositor /' "$out/scanout.txt" | tee -a "$summary"
 # The compositor's whole log, its lines in order (the kernel errors and the mode changes around a failure).
-bcp "$VF2_HOST:p7/wayland.log" "$out/wayland.log" > /dev/null 2>&1 || say "FAIL the compositor's log was not read back"
+bcp "$VF2_HOST:$W/wayland.log" "$out/wayland.log" > /dev/null 2>&1 || say "FAIL the compositor's log was not read back"
 printf '%s\n' "$VF2_PASSWORD" | b "sudo -S sh -c 'kill \$(cat $H/wayland.pid)'; sleep 1; dmesg | grep -iE 'powervr|fault|lost|hang' | grep -v timing: | tail -8" > "$out/kernel.txt" 2>&1
 grep -v '^\[sudo\]' "$out/kernel.txt" | sed 's/^/kernel /' | tee -a "$summary"
 

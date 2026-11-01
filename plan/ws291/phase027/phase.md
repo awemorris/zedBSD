@@ -2,7 +2,7 @@
 
 # ws291-p027 NVIDIA: libvulkan の submit の hand-off（B-U、design の P-A）
 
-Status: in-progress（2026-11-01 22:10 P1、q1849-i01。実装・host 試験・実機の A を終え、Q1 の指示で WS291 のラップアップのため途中で止めた。cleared の判定は Q1）
+Status: cleared（2026-11-01 23:18 Q1。全 architecture の回帰で後退なし: amd64 RTX（P3: subs-1000 52.9 → 81.2〜83.8 fps、subs-100 466 → 622 fps、他の bench・画の比較 29・game mode の往復・desktop は main と同じ）と QEMU の Venus、arm64 Pi 5・riscv64 VF2（P4: __thread の libvulkan が main と同じ結果）。main に merge）
 
 - WS: [WS291](../ws.md)。設計: [phase026/design.md](../phase026/design.md) の P-A（B-U）と [phase026/phase.md](../phase026/phase.md) の Phase の表・受け入れ。
 - 範囲: design.md の P-A のとおり（0. GPU の 1 run を timing 無しで測り直す、1. B-U: hand-off・入口の drain・back-pressure・失敗の latch・fork・環境変数の切り、2. host 試験、3. 10.0.10.3 の RTX 2070 で subs-100・subs-1000 ほかの計測と回帰、Venus の回帰）。
@@ -190,3 +190,60 @@ Status: in-progress（2026-11-01 22:10 P1、q1849-i01。実装・host 試験・�
   arm64・riscv64（この Queue は amd64 だけ）。
 - 消してよい物（Q1 の pipeline へ）: build/tmp/p3reg（main の git archive と build、image の起動の作業 dir、Venus の runtime）、build/p3reg/forge・
   build/p3reg/video（image 各約 2.4 GB）、build/p3reg/cand。計測の出力 build/tmp/p3reg-hw は記録の元なので残すかは Q1 の判断。
+
+## 回帰 arm64・riscv64（P4 q1860-i01、2026-11-01 22:19〜22:47）
+
+- 2026-11-01 ユーザーから、WS291 は各 architecture で回帰を流して merge を急ぐ、という趣旨の指示を受けた（Q1 経由）。source は変えていない。
+- 候補: 60cf76c13（main efd494305 に agent/p1-ws291p026 を merge した物）。V3D と PowerVR では hand-off は通らない（nvrtx だけ）ので、確かめる事は
+  __thread の TLS の解決と recording の thread の sender.c への移しが、arm64（TLSDESC）と riscv64（`__tls_get_addr` を rtld が解く）で動く事。
+- build（warning 0）: Pi 5 `make -j16 ZEDBSD_CONFIG=plan/ws291/tests/config-rpi5-shot.mk BUILD=build/q1860-pi build/q1860-pi/{vmunix,bin/mview,bin/wayland,bin/aat-input,bin/keiland-shot}`
+  （vmunix 4017073610、libvulkan.so 4160257452、R_AARCH64_TLSDESC 2、PT_TLS 8 byte）。VF2 `ZEDBSD_CONFIG=plan/ws291/tests/config-vf2-shot.mk BUILD=build/q1860-vf`
+  の vmunix・wayland・files・terminal・keiland-shot・vkmatrix・vkcoherency・vkcompute・mview（vmunix 2999248326、libvulkan.so 415768463、R_RISCV_TLS_DTPMOD64 2、
+  `__tls_get_addr` は UND、link は `--provider libwayland-client.so --provider libc.so` の check を通った）。
+- 道具（この Queue で足した物）: `plan/ws291/tests/rpi5-reg.sh OUT`（`CAND=BUILD`、`PI5=`）: 板の変える file を板の上に退避して cksum を残し、
+  rpi5-mview.sh（板の /root/p021 の program ＝ base と候補）・rpi5-offscreen.sh（板の /lib と、候補の libvulkan・libkeiland を入れた /lib）・rpi5-desk.sh
+  （graphical login、2 起動、候補の wayland）を流し、全部を戻して reboot、cksum を比べる。`plan/ws291/tests/vf2-reg.sh OUT BUILD`: vf2-regress.sh（KEEP=1）の後に
+  同じ起動で vf2-mview.sh（`COPIES='1 13' SPIN=12`）、板の kernel を戻す。vf2-regress.sh・vf2-mview.sh に `VF2_DIR`（板の上の置き場、既定 p7、絶対の path も可）を足した。
+
+### Pi 5（arm64、10.0.30.7、`CAND=build/q1860-pi sh plan/ws291/tests/rpi5-reg.sh build/tmp/q1860/pi5`、22:22〜22:35）
+
+- offscreen（1920x1080、301 frame、TFU=1、viewer 132219966）の checksum: 板の /lib（off-a、libvulkan 4289068210）と候補の /lib（off-b、4160257452）の両方で
+  c1 0c6e08c7・c21 dd5f82af・c62 90ab3e0f・c74 224da3e7（p021 の値と同じ）。
+
+| fps | offscreen 板の /lib | offscreen 候補 | 画面 base（p3-b の program、libvulkan 482186205） | 画面 候補 | p021 の記録（P3、21:16） |
+| --- | --- | --- | --- | --- | --- |
+| c1 | 353.36 | 352.53 | 310.67 | 304.08 | — |
+| c21 | 117.69 | 117.51 | 110.81 | 111.39 | 画面 110.6〜125.1、offscreen 117.3〜123.5 |
+| c62 | 60.78 | 60.77 | 59.11 | 59.12 | offscreen 59.44 |
+| c74 | 53.31 | 52.98 | 52.64 | 51.67 | 画面 51.58〜52.93、offscreen 53.5〜55.5 |
+
+- 画面の mview は同じ起動で base と候補を続けて（kernel は候補）。両方とも 4 つの spin で game の direct scanout が終わりに `direct=0 reason=no-window frames=…`
+  で閉じ、`MVIEW FAILED`・`VULKAN_ERROR` なし。base の libvulkan の source は main と同じ（p3-b の 5b25760f3 から efd494305 まで libvulkan の変更なし）。
+- desktop（graphical login、候補の wayland 2111495716 と /lib の候補の libvulkan・libkeiland、frame-ops、fps、起動 1・2）: launch 60・59、type 61・61、
+  output 64・69、drag 59・60、home 61・62、wiseview 63・60（P3 の p021: 60・61、61・61、65・64、60・59、60・60、62・63 と同じ帯）。
+- kernel: 各 step の kernel の行に fault・lost・hang・reset・job failed なし。desktop の dmesg の該当の行は起動の self-test（V9 の hang と reset、PCIe の reset）だけ。
+  libvulkan・compositor の失敗の行（device lost・handoff failed・VULKAN_ERROR・FAILED・undefined symbol・relocation）0。
+- 戻し: vmunix 604485635・cmdline.txt `login=console v3d.perf=1`・/lib/libvulkan.so・/lib/libkeiland.so・/bin/wayland・/bin/aat-input・/etc/keiland/session・
+  /root/p021/bin・lib の 19 file が前と cksum 一致（script の最後の読みは reboot の直後で SSH が答えず空だったので、手で読み直して一致を確かめ、script に再読みを足した）。
+  板の上の退避物（*.q1860old・/root/q1860save・rpi5-desk.sh が作った /bin/wayland.p021old）は板の中で消した。
+
+### VF2（riscv64、10.0.30.2、`VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=AC276E432AE6 sh plan/ws291/tests/vf2-reg.sh build/tmp/q1860/vf2 build/q1860-vf`、22:41〜22:45）
+
+- 回帰（候補の kernel と /tmp/q1860（tmpfs）に置いた候補の program・library、root）: vkmatrix 109/109、`-p 3` PASS、`-r 3` 327/327、vkcoherency PASS、vkcompute 4096/4096、
+  desktop の compositor の error 0・desktop の起動 1、keiland-shot の PNG の cksum 518389155（main の q1817・q1839 と同じ）。step の間の再起動なし（boot-000314）。
+- mview（game、mailbox 4 枚、1920x1080、qs40）: c1 173.86 fps、c13 56.27 fps（main b2392803f の P4 q1817: 167.97・169.04、55.99・56.04、P2 q1839: 167.1〜167.2、55.84〜56.33）。
+  2 つの game の chain とも `KWL SCANOUT direct=1`・`lend images=0x3f result=0`。各 run の kernel の行に fault・lost・hang・reset・HWR・quarantine なし。
+- 既存の行（main の log にも同じ形、候補の差ではない）: mview と compositor の終わりの `VULKAN kernel error errno=17 device lost`（display の lease の EBUSY、
+  BUG-375 の記録と同じ行）と、compositor の起動の時の `ld.so: undefined symbol`（spawn した /bin/settings が LD_LIBRARY_PATH の library を読む）。
+  P4 q1817 の vf2-regress（1・1）、vf2-p015（16・6）、P2 q1839 の r1（1・1）・m1（6・3）にも同じ行がある。
+- 1 回目（22:35〜22:39、build/tmp/q1860/vf2-try1）: 置き場を ~kei/q1860 にしたら板の /（ufs 256 MB）が満杯になり、qs40 の texture の写しが途中で切れて
+  mview は model の読みで `MVIEW FAILED`（回帰の部分は 2 回目と同じ結果）。自分の ~kei/q1860 は消し、2 回目は tmpfs の /tmp/q1860 で流した。
+- 戻し: /boot/boot0/vmunix 3758577736・/etc/group 4260090434・zedbsd.cfg 632416842 が前と一致、/boot/boot0 の file の一覧も前と同じ（自分の vmunix.q1860old は
+  一致を確かめて消した）。~kei/p7・~kei/p15 は触っていない。/ の空きは 14.8 MB（前の値は測っていない）。
+
+### 判定（P4）
+
+- arm64（Pi 5）と riscv64（VF2）の実機で、候補の __thread の libvulkan が読み込まれて動き、TLS の解決の誤りで落ちる事はなかった。
+  試験の結果は main と同じ（checksum・vkmatrix などの数・PNG の cksum が同じ、fps は main の幅の内）、HWR・device lost 0（上の既存の teardown の行を除く）。
+- 未実施: Pi 4（SwitchBot に無い、arm64 は Pi 5 で代えた）、VF2 の main の libvulkan との同じ起動の比べ（main の記録との比べだけ）、長い soak。
+- 消してよい物（Q1 の pipeline へ）: build/q1860-pi・build/q1860-vf（build）、build/tmp/q1860/vf2-try1（失敗した 1 回目）。build/tmp/q1860 の他は記録の元。
