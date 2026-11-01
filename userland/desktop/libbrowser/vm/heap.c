@@ -163,10 +163,14 @@ vm_heap_destroy(
  * Records where the C stack the collector scans ends.
  *
  * base is the frame address (__builtin_frame_address(0)) of the outermost
- * function that holds cells: main, or a thread's start function.  The
+ * function below which cells are held: main, or a thread's start function.  The
  * address of one of that function's variables is not enough, because the
- * compiler may place its other variables above it.  Without a base the
- * stack is not scanned, and only roots and tracers keep cells alive.
+ * compiler may place its other variables above it.  The frame address
+ * bounds only the frames that function calls, though: Win64's compilers
+ * point it into the function's own frame rather than at its top, so that
+ * function holds its cells in the functions it calls, not in its own
+ * variables.  Without a base the stack is not scanned, and only roots and
+ * tracers keep cells alive.
  */
 void
 vm_heap_set_stack_base(

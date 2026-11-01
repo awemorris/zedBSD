@@ -11,7 +11,9 @@
  * (plan/ws334/tests/host-tests-windows.sh includes this file with -include).
  *
  * setenv: _putenv_s.  The tests set XDG_DATA_HOME, which only the POSIX build reads.
- * realpath: the full path in the form a file: URL takes after "file://" (a slash, the drive, slashes).
+ * realpath: the full path with '/' for '\\' ("C:/dir/file"): an absolute path on Windows, which the
+ * tests also put after "file://" (a drive letter where a file: URL's host would be is the path's, as
+ * the URL standard parses it).
  */
 
 #ifndef WS334_WIN32_POSIX_H
@@ -43,13 +45,12 @@ realpath(
 	if (_fullpath(full, path, sizeof(full)) == NULL)
 		return NULL;
 	if (resolved == NULL)
-		resolved = malloc(strlen(full) + 2U);
+		resolved = malloc(strlen(full) + 1U);
 	if (resolved == NULL)
 		return NULL;
-	resolved[0] = '/';
 	for (index = 0; full[index] != '\0'; index++)
-		resolved[index + 1U] = full[index] == '\\' ? '/' : full[index];
-	resolved[index + 1U] = '\0';
+		resolved[index] = full[index] == '\\' ? '/' : full[index];
+	resolved[index] = '\0';
 	return resolved;
 }
 
