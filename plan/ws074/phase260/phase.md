@@ -1252,3 +1252,29 @@ Origin: 2026-10-27 ユーザーの指示。
     今の layout は abspos を layout_position の pass（root の layout の後）で置くので、column の情報（どの column が何処か）を box に持たせて、その pass で割る作りが要る。
   - css-multicol/getclientrects-001（sideways-lr・sideways-rl の writing-mode）、multicol-span-all-rule-002（column-rule の描画）。
 - 直していない物（fidelity のみ、gap の ID には効かない）: orphans・widows（既定 2）の行の扱い、column-rule、割れた block の 2 つ目以降の背景・border（中身のある block の分）、floats、`display: inline-block` の multicol の shrink-to-fit の幅。
+
+### クラウドのセッションの途中経過（続き 8、2026-11-01。dev174・dev175。OOF fragmentation の調査と個別の ID）
+
+- 依頼者の判断で abspos の OOF fragmentation（約 10 件）を調べた。結論: 今回は作らなかった。理由と、作るときの設計を残す。
+  - 試験（anchor-position-multicol-003・004・006・007・008・fixed-001・colspan-001・002、anchor-name-multicol-003、anchor-scroll-003）は、
+    column に割れる containing block（fragmentainer をまたぐ relpos の block）、abspos 自身の fragment、spanner の containing block の連鎖（spanner の containing block は multicol container）、
+    縦書き・position-area・fixed を、それぞれ別の規則で試す。1 件ずつ Chromium の挙動を合わせる必要があり、見込みが立たない。
+  - 作るときの設計（stitched coordinates）: containing block が column に割れている box は、各 fragment の（x、y、高さ）を box に持つ（最初の fragment の origin からの相対。layout_absolute で動かされても崩れない）。
+    abspos は containing block を「fragment を積み重ねた 1 つの block」（幅 = column の幅、高さ = fragment の高さの和）として置く。anchor の矩形は、anchor の各 fragment（物理座標）を containing block の fragment の積み重ねの座標に写した union。
+    置いた abspos の矩形は、containing block の fragment の区間で切って、2 つ目以降は continuation の box（既に multicol で使っている `continuation`）にする。abspos の子（::before など）は同じ手順を繰り返す。
+    abspos box 自身の中身（in-flow の子）は最初の fragment にだけ置く（試験の target は中身が空）。
+  - 必要な変更: layout_box に fragment の配列、layout/position.c の containing block の矩形と置く pass、layout/anchor.c の矩形（`anchor_find_state`）、paint の continuation。数 session。
+- 直した ID（dev173 から +3）:
+  - flex の `align-self: self-start/self-end` を column の cross 軸（inline 軸）で item の direction に従わせた（layout/flex.c `flex_align_of`）。通った ID: flexbox-align-self-vert-002。
+  - 右から左（rtl）の block の行で、atomic な piece（inline-block など）と中立の piece を bidi の順（右から）に並べ直した（layout/inline.c `inline_reorder`、UBA の L1〜L2 を piece 単位で、右から左の文字を含む行は触らない）。
+    通った ID: flexbox-justify-content-horiz-006。
+  - getComputedStyle(el, "::before"・"::after") の used 値（top・left など）を pseudo-element の box から返す（layout_box の `pseudo`、bind_host の `pseudo_box`）。通った ID: position-try-pseudo-element。
+- 測定: dev174（flex の self-start、bidi の並べ直し）= 3,190、後退 0。dev175（pseudo の box）= 3,191 / 3,473（91.88%、gap 282）、後退 0。dev173 からは +3。
+- Acid: dev175 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 調べて直さなかった物（個別の原因）:
+  - 引き続き残る grid・flex: flexbox-sizing-vert-001（float の縦 flex の min/max-height）、align-items-007（viewBox だけの SVG は固有の幅が無く、flex の cross の fit-content で 0 から縮む。今は 200x100 を固有の大きさにしている）、
+    grid-limits-001（repeat(9999) の track の保持）、grid-gutters-as-percentage-001（auto-fill と百分率の gap）。
+  - @scope の入れ子（scope-nesting 約 12 の subtest、& と近さ）、@scope の中の @starting-style（@starting-style 自体が未実装）。
+  - position-try-cascade（!important・animation・transition に @position-try が勝たない）、position-try-backdrop（::backdrop の fallback）。
+  - 右から左の文字を含む行の bidi（文字の順の反転と piece の並べ直し、paint の glyph の向きまで要る）。
+- 未実施: asan、host-NAME の全件、target の確認。

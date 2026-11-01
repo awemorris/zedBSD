@@ -2902,6 +2902,10 @@ flex_align_of(
 				reverse = item->style.direction == CSS_DIRECTION_RTL;
 			else
 				reverse = item->style.writing_mode == CSS_WRITING_VERTICAL_RL;
+		} else if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && item->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+		    box->style.flex_direction != CSS_FLEX_ROW && box->style.flex_direction != CSS_FLEX_ROW_REVERSE) {
+			/* A column's cross axis is the inline one: it starts where the item's direction does. */
+			reverse = (item->style.direction == CSS_DIRECTION_RTL) != (box->style.direction == CSS_DIRECTION_RTL);
 		}
 		if ((align == CSS_ALIGN_SELF_START) != (reverse != 0))
 			align = CSS_ALIGN_START;
