@@ -38,6 +38,7 @@ static const struct vm_cell_type window_script_source_type = {
 };
 
 static int window_queue_microtask(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int window_message_ports(struct vm_realm *realm, const vm_value *args, unsigned count, vm_value *ports);
 static int window_post_message(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int window_inner_width(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int window_inner_height(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -1867,6 +1868,57 @@ window_queue_microtask(
 }
 
 /*
+ * Makes the array of the objects a postMessage call transfers: the list of its second argument (when it is not a
+ * target origin string), or the transfer option of its options.  The objects are kept as they are (a transferred
+ * port stays usable in both windows); an empty array when there are none.
+ */
+static int
+window_message_ports(
+	struct vm_realm *realm,
+	const vm_value *args,
+	unsigned count,
+	vm_value *ports)
+{
+	vm_value list;
+	vm_value items[16];
+	vm_value item;
+	vm_value length_value;
+	double length;
+	size_t used;
+	size_t index;
+	int present;
+	int status;
+
+	list = VM_VALUE_UNDEFINED;
+	if (count >= 3U && vm_value_is_object(js_argument(args, count, 2))) {
+		list = js_argument(args, count, 2);
+	} else if (count >= 2U && vm_value_is_object(js_argument(args, count, 1))) {
+		/* The options overload: the transfer option, or (the second argument itself being the list) an array. */
+		status = bind_get_option(realm, js_argument(args, count, 1), "transfer", &present, &list);
+		if (status != 0)
+			return status;
+		if (!present)
+			list = VM_VALUE_UNDEFINED;
+	}
+	used = 0;
+	if (vm_value_is_object(list)) {
+		status = vm_get(realm, list, vm_value_cell(vm_atom_from_ascii(realm->heap, "length")), &length_value);
+		if (status != 0)
+			return status;
+		status = vm_to_number(realm, length_value, &length);
+		if (status != 0)
+			return status;
+		for (index = 0; index < (size_t)length && used < 16U; index++) {
+			status = vm_get(realm, list, vm_value_int32((int32_t)index), &item);
+			if (status != 0)
+				return status;
+			items[used++] = item;
+		}
+	}
+	return js_builtin_array(realm, used != 0 ? items : NULL, used, ports);
+}
+
+/*
  * Queues a message for the callee's Window (postMessage).
  * Delivery is a later task; source/origin transport between child contexts
  * remains outside the initial about:blank context interface.
@@ -1880,6 +1932,7 @@ window_post_message(
 	vm_value *result)
 {
 	struct bind_window *window;
+	struct bind_window *sender;
 	struct bind_event *event;
 	struct vm_function *deliver;
 	struct vm_string *type;
@@ -1965,10 +2018,23 @@ window_post_message(
 		goto cleanup;
 	roots[2] = vm_value_as_cell(event_value);
 	event->detail = js_argument(args, count, 0);
+
+	/* The sender is the window whose script called this one (this window when none did): its origin and its global. */
+	sender = window;
+	if (realm->caller != NULL && realm->caller->host != NULL && realm->caller != realm)
+		sender = bind_window_of(realm->caller);
 	event->origin = origin;
-	event->source = vm_value_cell(realm->global);
+	if (sender != window) {
+		status = bind_location_part(sender, BIND_LOCATION_ORIGIN, &origin_value);
+		if (status != 0)
+			goto cleanup;
+		event->origin = (struct vm_string *)vm_value_as_cell(origin_value);
+	}
+	event->source = vm_value_cell(sender->realm->global);
 	event->trusted = 1;
-	status = js_builtin_array(realm, NULL, 0, &event->ports);
+
+	/* The ports transferred with the message (the second argument's transfer list, or the options' transfer). */
+	status = window_message_ports(realm, args, count, &event->ports);
 	if (status != 0)
 		goto cleanup;
 
