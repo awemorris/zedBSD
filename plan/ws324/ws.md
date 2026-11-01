@@ -26,7 +26,7 @@
 | [ws324-p006e](phase006e/phase.md) | h265-dpb の実装（Sonnet） | cleared（2026-11-02 03:43 Q1、main で test-dpb 40617273 PASS）。実装（2026-11-02、cleared は Q1） | p006a 段 2 |
 | [ws324-p006f](phase006f/phase.md) | h265-std の実装（Sonnet） | cleared（2026-11-02 03:15 Q1、main で test-std 1680 PASS。zedBSD の clang は H.265 の Vulkan header が入る p002 の後）。実装（2026-11-02 Sonnet q1901-i01、test-std 1680 checks、壊す確かめ 220 通りが全部試験の失敗で落ちた）。cleared は Q1 | p006a 段 2 |
 | [ws324-p006g](phase006g/phase.md) | h265-stream の実装（Sonnet） | cleared（2026-11-02 06:09 Q1、main で test-stream PASS）。実装済み・試験 PASS（2026-11-02 Sonnet q1906-i01、test-stream 1331307 checks、壊す確かめ 994 か所中 889 が試験の失敗で落ち、残り 105 は等価・観測できない物（ENOMEM の道、冗長な初期化、unreachable の守り）。cleared は Q1） | p006d |
-| [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | in-progress（P6） | p006e〜g |
+| [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | in-progress（2026-11-02 P6 q1910-i01、`conformance: PASS (136 streams, 11 out of range, 1 derived)`、module の誤り 0、EOS の後に flush しない直しを Q1 が受け入れ（header の comment と design §5.3 は p015）。cleared は Q1） | p006e〜g |
 | [ws324-p009a](phase009a/phase.md) | NVENC の channel（段 nvenc-channel、class の bind、firmware の確かめ、RC の通知の記録） | cleared（2026-11-02 01:07 Q1、main a43959d8e。10.0.10.3 で NVENC の channel（class c4b7、chid 49）が開き engine 自身が semaphore を release、GSP-RM が NVENC の ucode を持つ（追加の firmware 不要）、channel error 0、NVDEC は前と同じ） | 実機 |
 | [ws324-p009b](phase009b/phase.md) | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode） | uncleared（2026-11-02 06:28 Q1、P1 q1884-i01 が 27 起動・約 90 通りで同じ HW の誤り。GSP の log の書式は NVIDIA の package にも無かった（Q-p009b-1 A の結果）、nouveau との比較（channel の特権を含む）も外れ。止める（2026-11-02 06:30 ユーザーの判断、H.265 の decode を先に）） | p009a、Q324-4 |
 
