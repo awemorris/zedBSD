@@ -29,6 +29,7 @@
 
 static int sticky_collect(struct layout_tree *tree, struct layout_box *box, struct wb_vector *found, int depth);
 static void sticky_shift(struct layout_box *box, layout_unit dx, layout_unit dy, int depth);
+static void sticky_follow(struct layout_box *box, const struct layout_box *sticky, layout_unit dx, layout_unit dy, int depth);
 static int sticky_edge(const struct css_length *length, layout_unit size, layout_unit *result);
 static layout_unit sticky_clamp(layout_unit shift, layout_unit low, layout_unit high);
 static void sticky_axis(layout_unit start, layout_unit end, layout_unit port_start, layout_unit port_end, const struct css_length *lead, const struct css_length *trail, layout_unit limit_start, layout_unit limit_end, layout_unit *shift);
@@ -168,13 +169,48 @@ layout_sticky_apply(
 		if (dx == box->sticky_dx && dy == box->sticky_dy)
 			continue;
 
-		/* The box and what is inside it. */
+		/* The box and what is inside it, and the boxes placed by an anchor in it. */
 		sticky_shift(box, dx - box->sticky_dx, dy - box->sticky_dy, 0);
+		sticky_follow(tree->root, box, dx - box->sticky_dx, dy - box->sticky_dy, 0);
 		box->sticky_dx = dx;
 		box->sticky_dy = dy;
 		moved = 1;
 	}
 	return moved;
+}
+
+/* Moves the boxes placed by an anchor inside a sticky box (and not themselves inside it) with it. */
+static void
+sticky_follow(
+	struct layout_box *box,
+	const struct layout_box *sticky,
+	layout_unit dx,
+	layout_unit dy,
+	int depth)
+{
+	struct layout_box *child;
+	const struct layout_box *up;
+	int inside;
+
+	if (depth > STICKY_DEPTH)
+		return;
+	if (box->anchored && box->anchor_box != NULL && box != sticky) {
+		inside = 0;
+		for (up = box->anchor_box; up != NULL; up = up->parent) {
+			if (up == sticky) {
+				inside = 1;
+				break;
+			}
+		}
+		for (up = box; inside && up != NULL; up = up->parent) {
+			if (up == sticky)
+				inside = 0;
+		}
+		if (inside)
+			sticky_shift(box, dx, dy, 0);
+	}
+	for (child = box->first_child; child != NULL; child = child->next)
+		sticky_follow(child, sticky, dx, dy, depth + 1);
 }
 
 /* Finds the sticky boxes under a box, in tree order. */

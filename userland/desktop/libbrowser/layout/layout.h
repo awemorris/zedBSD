@@ -348,6 +348,8 @@ struct layout_box {
 	int static_scrolled;
 	/* A box placed by an anchor follows it when the page scrolls, even a fixed one (set by the anchor functions). */
 	int anchored;
+	/* The box its anchor function found (set when anchored): where a sticky anchor's move is followed. */
+	const struct layout_box *anchor_box;
 	/* A flex container gave a table its whole height (captions included), not its grid box's (set while it is laid out). */
 	int table_wrapper_height;
 
