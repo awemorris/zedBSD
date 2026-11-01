@@ -34,7 +34,7 @@
 | P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
 | Sonnet ×2 | q1855・q1857（q1856 p027 は cleared） | [WS334](ws334/ws.md) p024（HTTP の cache）・p027（UI の準備）・p030（OpenSSL の Windows）を並べて（2026-11-01 ユーザー） |
 | P3 | q1859 `p3-ws291reg` | [WS291](ws291/ws.md) p027 の回帰（RTX と QEMU の Venus）、候補 60cf76c13 |
-| P4 | q1860 `p4-ws291reg` | [WS291](ws291/ws.md) p027 の回帰（Pi 5 の arm64 と VF2 の riscv64） |
+| P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
 | WS074 | クラウド | origin/browser を merge（2026-11-01 20:1x、main 272e6c226。P8 の i17 とクラウドの dev153 を合わせた、測り直しは未実施） |
 
 - 未 merge の branch: agent/p1-ws291p026（WS291 p027 の B-U、subs-1000 86 fps。libvulkan の芯と全 architecture の TLS の link を変えるので、RTX の desktop・Venus・arm64・riscv64 の回帰の後に merge）。
