@@ -85,7 +85,7 @@
 | [p027](phase027/phase.md) | 統合（Opus、旧 p009）: browser の UI の準備（`browser_main`、libkeiland の header の追加と Wayland の実装、present・CPU の道・鍵の text・時計） | cleared（2026-11-01 22:26 Q1、main f58a8d93f。P7 の guest の確かめ（QEMU の Venus）PASS: Vulkan の道・--no-gpu の CPU の道で頁が出る、localStorage が browser と guest の再起動の後に残る、files・terminal・settings が起動）。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1856-i01、Sonnet。guest の確かめ PASS q1858-i01、P7） | p023 |
 | [p028](phase028/phase.md) | 統合（Opus、旧 p011）: libkeiland の Win32 その 1（共通の file の棚卸し、kl_app・kl_window・loop・入力・枠・暗い mode・Vulkan の surface・CPU の表示・stub）、`apps/browser-win32/` の入口・単一の起動・resource。Wine＋xvfb-run で画面を撮る | planned | p014・p015・p016・p017・p025・p026・p027 |
 | [p029](phase029/phase.md) | 統合（Opus、旧 p012）: その 2（題の帯の controls、IMM32、clipboard、DPI） | planned | p018・p028 |
-| [p030](phase030/phase.md) | 統合（Opus、旧 p013）: OpenSSL の Windows の build と根（packages の ca-certificates ＋ Windows の store） | planned | p005・p022 |
+| [p030](phase030/phase.md) | 統合（Opus、旧 p013）: OpenSSL の Windows の build と根（packages の ca-certificates ＋ Windows の store） | in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1857-i01、Sonnet: openssl-windows.sh で x86_64・aarch64 の static library、tls-wine.sh PASS（a〜f、Disallowed も Wine で拒む）、cross-build PASS、stage1 の件数が基点と同じ、zedBSD amd64 の libbrowser.so warning 0。aarch64 は自前の target で実行未確認） | p005・p022 |
 | [p031](phase031/phase.md) | 統合（Opus、旧 p014）: 配る形（zip、license、icon、版の情報） | planned | p019・p029・p030 |
 | [p032](phase032/phase.md) | 試験（Opus、旧 p015）: Wine＋llvmpipe での確かめの第 1 回（決定 20） | planned | p031 |
 | [p033](phase033/phase.md) | 統合（Opus、旧 p016）: 後半の Windows の口（TSF・drag と drop・touchpad・accent・Mica・DPAPI、arm64） | planned | p032 |
