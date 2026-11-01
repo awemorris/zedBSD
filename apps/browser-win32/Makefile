@@ -15,7 +15,8 @@
 # layer), libmedia.a and libkeiland.a (their Windows files so far), libtruetype and the png, jpeg, gif
 # and z compat libraries (from the same source lists as the zedBSD build); the Vulkan headers and the
 # import library of the Vulkan loader.  A test's program links with them all (test-program); the
-# browser's program and its resources join later, linked the same way (WIN32_PROGRAM).
+# browser's program and its resources join later, linked the same way (WIN32_PROGRAM).  Apart from those:
+# libbrowser-script.a, the script core alone with its Windows layer, and script-core.exe over it.
 #
 # The toolchain, first found wins:
 #   1. WIN32_CC=<compiler>
@@ -124,6 +125,23 @@ LIBBROWSER_CORE_EXCLUDED := $(LIBBROWSER_OS_SOURCES) \
 LIBBROWSER_CORE_SOURCES := $(filter-out $(LIBBROWSER_CORE_EXCLUDED),$(LIBBROWSER_SOURCES))
 LIBBROWSER_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBBROWSER_CORE_SOURCES))
 
+# libbrowser's script core alone (the base library, the virtual machine and JavaScript), with the Windows
+# files of the operating-system layer it uses (the system, the files and the clocks, not the network):
+# libbrowser-script.a, the library a program that runs only JavaScript links.  Its objects are
+# libbrowser.a's.  script-core.exe (a test's program over it and nothing else of libbrowser) links only
+# when the core needs nothing of the engine.
+LIBBROWSER_SCRIPT_WIN32_LAYER := $(LIBBROWSER_DIR)/base/os-win32.c \
+	$(LIBBROWSER_DIR)/base/os-system-win32.c \
+	$(LIBBROWSER_DIR)/base/os-file-win32.c \
+	$(LIBBROWSER_DIR)/base/os-time-win32.c \
+	$(LIBBROWSER_DIR)/base/os-zones.c
+WIN32_SOURCES_browser-script := $(filter-out $(LIBBROWSER_OS_SOURCES),$(LIBBROWSER_SCRIPT_SOURCES)) \
+	$(LIBBROWSER_SCRIPT_WIN32_LAYER)
+LIBBROWSER_SCRIPT_ARCHIVE := $(BROWSER_WIN32_OBJ)/libbrowser-script.a
+SCRIPT_CORE_SOURCES := plan/ws334/tests/script-core-main.c
+SCRIPT_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(SCRIPT_CORE_SOURCES))
+SCRIPT_CORE_PROGRAM := $(BROWSER_WIN32_BUILD)/tests/script-core.exe
+
 # The static libraries of the tree's libraries, each from its files of the Windows build so far:
 # libbrowser's core with its Windows layer and its storage modules, libmedia's and libkeiland's Windows
 # files (their shared files join with their Windows ports).
@@ -175,13 +193,15 @@ VULKAN_LOADER_SHA256 := ddfeca84a868899fbb2c7f28b7c8fd1006e34b2b13ce653a63bddfb6
 WIN32_VULKAN_HEADERS := $(BROWSER_WIN32_OBJ)/include/vulkan/vulkan.h
 WIN32_VULKAN_LIBRARY := $(BROWSER_WIN32_OBJ)/libvulkan-1.a
 
-.PHONY: all layers libbrowser-core libraries vulkan fetch flags clean test-program
+.PHONY: all layers libbrowser-core libbrowser-script script-core libraries vulkan fetch flags clean test-program
 all: layers libbrowser-core libraries vulkan $(BROWSER_WIN32_OBJ)/toolchain.txt
 
 layers: $(BROWSER_WIN32_LAYER_OBJECTS)
 libbrowser-core: $(LIBBROWSER_CORE_OBJECTS)
 libraries: $(WIN32_PROGRAM_ARCHIVES)
 vulkan: $(WIN32_VULKAN_HEADERS) $(WIN32_VULKAN_LIBRARY)
+libbrowser-script: $(LIBBROWSER_SCRIPT_ARCHIVE)
+script-core: $(SCRIPT_CORE_PROGRAM)
 fetch: $(VULKAN_HEADERS_TARBALL) $(VULKAN_LOADER_TARBALL)
 
 test-program:
@@ -192,8 +212,11 @@ $(BROWSER_WIN32_OBJ)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(WIN32_CC) $(WIN32_CFLAGS) -c $< -o $@
 
-# libbrowser includes the compat headers (the images) and the Vulkan headers (the GPU renderer).
+# libbrowser includes the compat headers (the images) and the Vulkan headers (the GPU renderer, and
+# <browser/browser.h>, which names Vulkan's types).  Of the script core only js/tool.c includes
+# <browser/browser.h>, and so does script-core.exe's main.
 $(LIBBROWSER_CORE_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
+$(SCRIPT_CORE_OBJECTS): | $(WIN32_VULKAN_HEADERS)
 
 # A compat object keeps what the compiler said in <object>.log, and shows it only when the compile fails.
 $(WIN32_COMPAT_OBJECTS): $(BROWSER_WIN32_OBJ)/%.o: %.c | $(WIN32_COMPAT_HEADER_COPIES)
@@ -216,7 +239,7 @@ $(BROWSER_WIN32_OBJ)/lib$(1).a: $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(WIN32_
 	$(WIN32_AR) qcs $$@.new $$^
 	mv -f $$@.new $$@
 endef
-$(foreach library,$(WIN32_TREE_LIBRARIES) $(WIN32_COMPAT_LIBRARIES),$(eval $(call WIN32_STATIC_LIBRARY,$(library))))
+$(foreach library,$(WIN32_TREE_LIBRARIES) $(WIN32_COMPAT_LIBRARIES) browser-script,$(eval $(call WIN32_STATIC_LIBRARY,$(library))))
 
 # A program: <output>.exe from its objects and every static library, with the flags the subsystem
 # needs (-mwindows for the browser, -mconsole for a test), so that another program is one line.
@@ -231,6 +254,13 @@ ifneq ($(strip $(TEST_PROGRAM)),)
 $(eval $(call WIN32_PROGRAM,$(BROWSER_WIN32_TESTS)/$(TEST_PROGRAM).exe,$(TEST_PROGRAM_OBJECTS),-mconsole))
 $(TEST_PROGRAM_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
 endif
+
+# script-core.exe: the script core's library alone, with the system's libraries, no thread library (the
+# core's Windows layer starts no thread) and no Vulkan.
+$(SCRIPT_CORE_PROGRAM): $(SCRIPT_CORE_OBJECTS) $(LIBBROWSER_SCRIPT_ARCHIVE)
+	@mkdir -p $(dir $@)
+	$(WIN32_CC) -mconsole -o $@.new $(SCRIPT_CORE_OBJECTS) $(LIBBROWSER_SCRIPT_ARCHIVE) -static $(WIN32_SYSTEM_LDFLAGS)
+	mv -f $@.new $@
 
 # A tarball, fetched once and checked against its SHA-256.
 define WIN32_FETCH
@@ -288,4 +318,4 @@ clean:
 FORCE:
 
 -include $(BROWSER_WIN32_LAYER_OBJECTS:.o=.d) $(LIBBROWSER_CORE_OBJECTS:.o=.d) $(WIN32_COMPAT_OBJECTS:.o=.d) \
-	$(TEST_PROGRAM_OBJECTS:.o=.d)
+	$(TEST_PROGRAM_OBJECTS:.o=.d) $(SCRIPT_CORE_OBJECTS:.o=.d)

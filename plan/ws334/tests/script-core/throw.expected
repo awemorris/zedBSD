@@ -1,0 +1,7 @@
+deep 2000 49000 2000
+chain 2000
+finally 2 returned
+native 2000
+generator 45150 from the generator {"done":true}
+syntax 2800 22800 80000 3 42
+async 300 rejected,fulfilled,rejected
