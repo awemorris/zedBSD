@@ -17,7 +17,10 @@
 #ifndef KERN_DRIVERS_GPU_POWERVR_H
 #define KERN_DRIVERS_GPU_POWERVR_H
 
+#include <stddef.h>
 #include <stdint.h>
+
+#include "drivers/vpu/vpu-codec.h"
 
 /*
  * Whether the driver and its board's glue say how the start and the
@@ -254,6 +257,77 @@ void drv_powervr_dc_vblank_report(void);
 #define DRV_POWERVR_VIDEO_ENCODE_H265	0x4U
 
 /*
+ * One picture of an engine's pool, NV12: the bus addresses of its luma
+ * plane and of its interleaved chroma plane.
+ */
+struct drv_powervr_video_picture {
+	uint64_t luma;
+	uint64_t chroma;
+};
+
+/*
+ * What a stream of an engine is opened with: the largest coded picture
+ * the session decodes, and how the engine gets the pool its core decodes
+ * into.
+ *
+ * Pool is called by the engine, from a decode, once it knows the
+ * sequence: it makes count NV12 pictures of the coded size width x height
+ * in memory the core reaches below 4 GiB and the GPU reads, all of one
+ * pitch (both planes the same), and reports the pitch and each picture's
+ * planes.  A later call (a new sequence) replaces the pool; owner is the
+ * render node's, passed back.  It reports ENOMEM when the memory is not
+ * there.
+ */
+struct drv_powervr_video_open {
+	uint32_t width;
+	uint32_t height;
+	void *owner;
+	int (*pool)(void *owner, uint32_t count, uint32_t width, uint32_t height, uint32_t *pitch, struct drv_powervr_video_picture *pictures);
+};
+
+/* A picture is an IDR picture; it has only I slices. */
+#define DRV_POWERVR_VIDEO_PICTURE_IDR	0x1U
+#define DRV_POWERVR_VIDEO_PICTURE_INTRA	0x2U
+
+/*
+ * One picture to decode: its slices' bytes (as the application's buffer
+ * holds them, start codes and all; the engine reads them before it
+ * returns), the parameter sets it names, its flags, its order count, the
+ * DPB slot it becomes (-1 for none), and the slots it references and its
+ * coding scope keeps active, a bit per slot.
+ */
+struct drv_powervr_video_decode {
+	const uint8_t *bitstream;
+	size_t length;
+	const struct vpu_h264_sps *sps;
+	const struct vpu_h264_pps *pps;
+	uint32_t flags;
+	int32_t order;
+	int32_t setup;
+	uint32_t references;
+	uint32_t active;
+};
+
+/* A decode's status: the picture is there, or it could not be decoded. */
+#define DRV_POWERVR_VIDEO_COMPLETE	1
+#define DRV_POWERVR_VIDEO_ERROR		(-1)
+
+/*
+ * What a decode did: its status, the picture of the pool the picture went
+ * into (-1 for none: an error, or a picture the stream says to skip), the
+ * coded size there, and the core's time for it in its own cycles and the
+ * host's in microseconds.
+ */
+struct drv_powervr_video_result {
+	int32_t status;
+	int32_t index;
+	uint32_t width;
+	uint32_t height;
+	uint64_t ticks;
+	uint64_t wall;
+};
+
+/*
  * The operations of a video engine (a codec core the SoC has beside the
  * GPU) the render node runs Vulkan Video on.
  *
@@ -261,9 +335,24 @@ void drv_powervr_dc_vblank_report(void);
  * firmware has started; it must not change afterwards, since every
  * session reads it once, when it opens, and keeps the answer.  The table
  * and the engine must live as long as the system.
+ *
+ * A stream is one Vulkan video session.  Open makes one for an operation
+ * (ENOMEM, EBUSY when the engine holds as many as it can, EIO when the
+ * engine stopped).  Decode decodes one picture and waits for it, and
+ * reports 0 with the result, or EIO when the core stopped answering (the
+ * picture is an error).  Keep says which DPB slots a coding scope keeps
+ * active, reset forgets the stream's pictures (a decode after it starts
+ * at an IDR or I picture), and close ends the stream; it reports EIO when
+ * the core may still write the stream's pool, which must then be kept.
+ * The render node serializes the calls of one stream.
  */
 struct drv_powervr_video_ops {
 	uint32_t (*operations)(void *engine);
+	int (*open)(void *engine, uint32_t operation, const struct drv_powervr_video_open *open, void **stream);
+	int (*decode)(void *stream, const struct drv_powervr_video_decode *job, struct drv_powervr_video_result *result);
+	void (*keep)(void *stream, uint32_t active);
+	void (*reset)(void *stream);
+	int (*close)(void *stream);
 };
 
 /*

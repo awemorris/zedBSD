@@ -369,6 +369,16 @@ int powervr_vk_record_query(struct powervr_vk_session *session, uint32_t opcode,
 void powervr_vk_query_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry);
 void powervr_vk_query_report(struct powervr_vk_session *session, int32_t status);
 
+/*
+ * The video sessions, their parameters and the video commands' records,
+ * their run in a submission and their release (vk-video.c).
+ */
+int powervr_vk_video_route(struct powervr_vk_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+bool powervr_vk_video_recorded(uint32_t opcode);
+int powervr_vk_record_video(struct powervr_vk_session *session, const struct powervr_vk_command_buffer *command, uint32_t opcode, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
+void powervr_vk_video_drop(struct powervr_vk_record *entry);
+int powervr_vk_video_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry);
+
 /* The render pass records and the render jobs of a command buffer (vk-pass.c). */
 struct powervr_render_job;
 int powervr_vk_record_begin_pass(struct powervr_vk_session *session, struct i915_wire_reader *reader, struct powervr_vk_record *entry);
@@ -378,6 +388,9 @@ int powervr_vk_record_transfer(struct powervr_vk_session *session, uint32_t opco
 
 /* Runs a recorded transfer command on the session's transfer context, region by region. */
 int powervr_vk_transfer_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry);
+
+/* Copies rows of 32-bit words between two linear places, each of its own pitch, on the transfer context (a video decode's output). */
+int powervr_vk_transfer_rows(struct powervr_vk_session *session, uint64_t source, uint32_t source_pitch, uint64_t destination, uint32_t destination_pitch, uint32_t row_bytes, uint32_t rows);
 
 int powervr_vk_render_jobs(const struct powervr_vk_command_buffer *command, struct powervr_render_job *jobs, uint32_t room, uint32_t *count);
 

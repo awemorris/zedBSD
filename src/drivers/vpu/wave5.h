@@ -199,9 +199,44 @@ int drv_wave5_load(struct drv_wave5_stream *stream, const uint8_t *bytes, size_t
 /*
  * Puts one picture's bytes right after the bytes the last command read, as
  * the bytes the next command reads; the core's own read position is
- * already there.  EFBIG means the ring has no room left before its end.
+ * already there.  Bytes that run past the ring's end go on at its start,
+ * as the core reads its ring.  EFBIG means the picture is larger than the
+ * ring less 1 KiB.
  */
 int drv_wave5_append(struct drv_wave5_stream *stream, const uint8_t *bytes, size_t length);
+
+/* One piece of a picture's bytes. */
+struct drv_wave5_piece {
+	const uint8_t *bytes;
+	size_t length;
+};
+
+/*
+ * Puts one picture's bytes, given in pieces one after the other, where
+ * drv_wave5_append() puts them.
+ */
+int drv_wave5_append_pieces(struct drv_wave5_stream *stream, const struct drv_wave5_piece *pieces, unsigned count);
+
+/*
+ * Tells the core where the ring's bytes end after an append, before the
+ * command that reads them.  EIO means the firmware refused it.
+ */
+int drv_wave5_update_stream(struct drv_wave5_stream *stream);
+
+/*
+ * Takes back the bytes the last append put in the ring, for a picture the
+ * core refused without reading it: the next append puts its bytes there.
+ */
+void drv_wave5_unread(struct drv_wave5_stream *stream);
+
+/*
+ * Reports the bus addresses the last append put the picture's bytes
+ * between (where the next command reads from and to).
+ */
+void drv_wave5_positions(const struct drv_wave5_stream *stream, uint32_t *read, uint32_t *write);
+
+/* Reports how many pictures' bytes went past the ring's end so far. */
+uint32_t drv_wave5_wraps(const struct drv_wave5_stream *stream);
 
 /*
  * Reports where the ring's bytes start: the ring's kernel view and its

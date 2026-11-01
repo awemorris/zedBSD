@@ -259,8 +259,8 @@ check_images(
 static void
 check_registration(void)
 {
-	static const struct drv_powervr_video_ops empty = { NULL };
-	static const struct drv_powervr_video_ops ops = { engine_operations };
+	static const struct drv_powervr_video_ops empty = { .operations = NULL };
+	static const struct drv_powervr_video_ops ops = { .operations = engine_operations };
 	static uint32_t first = DRV_POWERVR_VIDEO_DECODE_H264 | 0x80U;
 	static uint32_t second = DRV_POWERVR_VIDEO_DECODE_H265;
 	int error;
