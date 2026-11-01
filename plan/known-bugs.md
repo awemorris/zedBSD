@@ -427,6 +427,6 @@ Preserve both topologies when investigating; the passing order is no general fix
 
 2026-10-08 q869（P2）: BUG-200〜257 の tracking・scheduled の 51 件を確かめ、各 ticket に「2026-10-08 P2 の確認」の節。A（実装済み、QEMU・host の証拠、残りは実機の UAT）33 件: 203–209・211・213–220・222・223・225・226・228–230・232–237・248・249・254。B（実装済み、証拠無し）4 件: 231・247・251・252。C（未実装・一部）: 212・221（q866 で desktop を直した）・238・239・240・241・242・244・256。D（判断）: 200・201・224・227・255。各行の古い記載は ticket の節が正。
 | [BUG-389](bugs/BUG-389.md) | RTX 2070 の desktop で App Home から browser を開いても窓が出ない（main でも同じ） | open（2026-11-01 23:19 Q1 が起票、P3 の WS291 の回帰で発見） |
-| [BUG-390](bugs/BUG-390.md) | Pi 5 の CI の image で App Home の icon が出ない | open（2026-11-02 01:27 Q1 が起票、ユーザーの Pi 5 の UAT） |
+| [BUG-390](bugs/BUG-390.md) | Pi 5 の CI の image で App Home の icon が出ない | 直した・merge 待ち（2026-11-02 P4 q1889。compositor の app の tile の image（glass.c、1024×256）が 21 個目の絵で溢れ tile が一つも描かれなかった。全機械の問題。高さを 512 に。Pi 5 の UAT の image で直す前は名前だけ・後は icon が出る PNG、板は戻して cksum 一致） |
 | [BUG-391](bugs/BUG-391.md) | compositor が落ちると login の画面から出直し、tablet で login できない | open（2026-11-02 01:27 Q1 が起票、ユーザーの Pi 5 の UAT） |
 | [BUG-392](bugs/BUG-392.md) | 初期の PIN を 0000 にし、login・lock の画面で PIN の入力を既定に（UAT の要望） | open（2026-11-02 01:27 Q1 が起票、ユーザーの Pi 5 の UAT） |
