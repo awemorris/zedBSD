@@ -1306,3 +1306,21 @@ Origin: 2026-10-27 ユーザーの指示。
   - Acid: dev181 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
   - 未実施・残り: 子文書の scroll（window.scrollTo・scrollY は子では動かない。長い子文書は上から切れる）、iframe の中の focus・caret・link の操作（click の event は子へ届くが、focus と link の遷移は親の物）、子文書の image・web font が遅れて来た時の再描画、
     iframe-transition-destroyed-document-crash（crash の runner。今も gap）、asan・host-NAME の全件・target の確認。
+
+### クラウドのセッションの途中経過（続き 10、2026-11-01。dev182〜dev184。merge の後の確認と @scope・style の load・animation event）
+
+- dev182（merge 2a8742d54 を build し直した物）= 3,201 / 3,473（dev181 と同じ、後退 0）。Acid2 100% / Acid3 100/100 exact。子文書の css engine の color scheme は、子の window が作られる時に親の `dark` を受け取り（bind/frame-resource.c）、
+  `bind_style_context_engine` が engine に渡している（bind/style-context.c）ので、子の描画にも効く。親が後から scheme を変えた時に既存の子へ伝える所は無い（未対応）。
+- 優先順位の確認（依頼者の順）:
+  1. @starting-style: CSS transitions が engine に無い（computed の値は即座に変わる）。選んだ ID の中で @starting-style を使う物は css-cascade/scope-starting-style の 1 件だけで、transition の補間（steps(2, start) の 50%）と一緒に要る。transitions を作る物は大きく、1 件のために作らず見送った。
+  2. @scope の入れ子: style rule の中の `@scope`（preludeあり・なし）を parse した（css/parser.c `parser_nested_scope`: 外側の rule の selector を root とする scope の中で読む）。scope-nesting.html の subtest は 12 → 2 に減った。
+     残る 2 つは CSSOM（CSSScopeRule.insertRule('color: green') が CSSNestedDeclarations を作る）と、`@scope (&) { --x: 1; color: red }` の中に直に置いた declaration（`:where(:scope)` の rule になる）と selectorText の書き換え。ID はまだ通らない。
+     scope-part.html は custom element の shadow の ::part() を `:scope::part()` で選ぶ事が要る（::part の支援が無い）。
+  3. position-try-cascade: 「@position-try が !important・animation・transition に勝たない」の 3 つの subtest のうち transition は transitions が無いので通らない。見送り。
+- 通した ID（dev181 から +2）:
+  - `<style>` の `load` event: imports の無い inline の style も、取り込んだ時に一度だけ queue する（page/sheets.c）。iframe-transition-destroyed-document-crash が通った（crash）。
+  - CSS animation の event（animationstart・animationend・animationcancel）: layout の後に、keyframes のある animation を持つ box を prelude へ知らせ（`bind_animation_sync`・`page_animations_sync`）、prelude が page の timer で event（`AnimationEvent`）を出す。
+    pseudo-element の animation（view transition の pseudo）と複数の animation（カンマ区切り）、animationiteration は未対応。inline-grid-try-fallbacks-crash が通った（crash）。
+- 測定: dev183（style の load）= 3,202、dev184（animation の event）= 3,203 / 3,473（92.23%、gap 270、crash は 0）、後退 0。dev181 からは +2。
+- Acid: dev184 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 未実施: asan、host-NAME の全件、target の確認、子文書の scroll（window.scrollTo・scrollY）。
