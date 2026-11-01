@@ -12,11 +12,12 @@
  * decoder the parameter sets and each picture's information as StdVideo
  * structures, and the slices as offsets into a buffer.  This reader splits
  * an Annex B stream into its NAL units, parses the sequence and picture
- * parameter sets into StdVideo form, groups the slices into pictures and
+ * parameter sets into StdVideo form as they come (a set may be sent again
+ * with other content under its id), groups the slices into pictures and
  * works out each picture's frame number and order counts from its first
  * slice header.  It covers what the probe decodes: progressive frames of
- * 4:2:0 8-bit Baseline, Main and High streams, one slice group, the order
- * count types 0 and 2.
+ * 4:2:0 8-bit Baseline, Main and High streams, one slice group, the three
+ * order count types and the memory management operation 5.
  */
 
 #ifndef VKVIDEO_PROBE_H264_H
@@ -75,10 +76,17 @@ struct h264_mmco {
  * One picture: its StdVideoDecodeH264PictureInfo, whether all its slices
  * are intra, its first slice's type, its slices (the NAL units after their
  * start codes), where its access unit starts in the stream, and its first
- * slice's reference picture marking.
+ * slice's reference picture marking.  After a memory management operation
+ * 5 the picture's order counts and frame number start over (8.2.1): later
+ * pictures see it with the counts less the smaller of them and frame_num
+ * 0; reference_poc holds the counts later pictures see, and display_poc
+ * the smaller of them, its place in the display order.
  */
 struct h264_picture {
 	StdVideoDecodeH264PictureInfo info;
+	int32_t reference_poc[2];
+	int32_t display_poc;
+	int restart;
 	int intra;
 	uint32_t slice_type;
 	uint32_t slice_count;
@@ -94,13 +102,34 @@ struct h264_picture {
 };
 
 /*
- * A stream being read: the bytes, the parameter sets seen (the last of
- * each id), and the order count state the pictures carry over.
+ * A stream being read: the bytes; what h264_open found over all of its
+ * parameter sets (the first sequence set's profile, the widest and
+ * tallest coded picture, the most references); the parameter sets in
+ * force at the cursor (the last of each id read so far), each with the
+ * length and a hash of the unit it came from, and a count bumped whenever
+ * one of them is new or changed; and the order count state the pictures
+ * carry over.
  */
 struct h264_stream {
 	const uint8_t *data;
 	size_t size;
 	size_t cursor;
+
+	/* The whole stream's needs. */
+	int has_profile;
+	uint32_t profile_idc;
+	uint32_t max_width;
+	uint32_t max_height;
+	uint32_t max_references;
+
+	/* How often the sets in force changed, the id of the set read last of each kind, and each set's unit. */
+	uint32_t generation;
+	uint32_t last_sps;
+	uint32_t last_pps;
+	size_t sps_unit_size[H264_SPS_IDS];
+	uint64_t sps_unit_hash[H264_SPS_IDS];
+	size_t pps_unit_size[H264_PPS_IDS];
+	uint64_t pps_unit_hash[H264_PPS_IDS];
 
 	/* The sequence parameter sets, with the lists their pointers name. */
 	int has_sps[H264_SPS_IDS];
@@ -113,7 +142,7 @@ struct h264_stream {
 	StdVideoH264PictureParameterSet pps[H264_PPS_IDS];
 	StdVideoH264ScalingLists pps_scaling[H264_PPS_IDS];
 
-	/* The order count state: the last reference picture's MSB and LSB (type 0), frame number and offset (type 2). */
+	/* The order count state: the last reference picture's MSB and LSB (type 0), the last picture's frame number and offset (types 1 and 2). */
 	int32_t previous_msb;
 	int32_t previous_lsb;
 	uint32_t previous_frame_num;

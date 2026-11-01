@@ -11,8 +11,9 @@
  * Vulkan Video leaves the DPB to the application: which pictures are
  * references, in which slots, and which slot each new picture is written
  * into.  The probe gives every slot its own picture (slot n is image n),
- * keeps H.264's reference marking (8.2.5: the sliding window and the memory
- * management operations 1 to 4 and 6, for frames), and plans each decode:
+ * keeps H.264's reference marking (8.2.5: the sliding window, the memory
+ * management operations 1 to 6 and the frames a gap in frame_num implies,
+ * for frames), and plans each decode:
  * the references and their StdVideoDecodeH264ReferenceInfo, a free slot
  * for the new picture, and the slots the decoder still holds that no
  * longer hold a reference (deactivated in the coding scope's begin).
@@ -34,9 +35,15 @@
 #define DPB_SHORT		1
 #define DPB_LONG		2
 
-/* One slot: its reference marking, numbers and order counts, and whether the decoder holds its picture. */
+/*
+ * One slot: its reference marking, whether it is a frame a gap in
+ * frame_num implies (it has no picture, is never a reference given to the
+ * decoder, and only takes its place in the marking), its numbers and order
+ * counts, and whether the decoder holds its picture.
+ */
 struct dpb_entry {
 	int reference;
+	int missing;
 	uint32_t frame_num;
 	uint32_t long_term_frame_idx;
 	int32_t poc[2];
