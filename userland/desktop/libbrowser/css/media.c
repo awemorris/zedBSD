@@ -11,10 +11,11 @@
  * an element is styled (a sheet is parsed once and used at any size).
  *
  * The browser is a screen with a fine pointer that hovers, one device
- * pixel per CSS pixel, a light color scheme and no wish for reduced
- * motion; the features that depend only on that are decided while
- * parsing, and the width, height, aspect ratio and orientation stay tests.
- * A feature this pass does not know makes its query false.
+ * pixel per CSS pixel and no wish for reduced motion; the features that
+ * depend only on that are decided while parsing, and the width, height,
+ * aspect ratio, orientation and the color scheme (light or dark, as the
+ * program set its view's) stay tests.  A feature this pass does not know
+ * makes its query false.
  */
 
 #include "css/internal.h"
@@ -37,7 +38,8 @@ enum media_feature {
 	MEDIA_FEATURE_ORIENTATION,
 	MEDIA_FEATURE_RESOLUTION,
 	MEDIA_FEATURE_COLOR,
-	MEDIA_FEATURE_MONOCHROME
+	MEDIA_FEATURE_MONOCHROME,
+	MEDIA_FEATURE_COLOR_SCHEME
 };
 
 /* How a test compares the feature with its value. */
@@ -103,7 +105,11 @@ static const struct media_name media_names[] = {
     {"-webkit-max-device-pixel-ratio", MEDIA_FEATURE_RESOLUTION, MEDIA_AT_MOST},
     {NULL, 0, 0}};
 
-/* The discrete features and the values the browser has. */
+/*
+ * The discrete features and the values the browser has
+ * (prefers-color-scheme alone is true in either scheme; with a value it is
+ * a test, media_scheme).
+ */
 static const struct media_discrete media_discretes[] = {
     {"prefers-reduced-motion", {"no-preference", NULL, NULL}},
     {"prefers-color-scheme", {"light", NULL, NULL}},
@@ -128,11 +134,12 @@ static int media_condition(const struct css_token *tokens, size_t count, struct 
 static int media_range(const struct css_token *tokens, size_t count, struct css_media_test *tests, size_t *made);
 static int media_feature_name(const struct css_token *token, int *feature, int *comparison);
 static int media_discrete_true(const struct css_token *name, const struct css_token *value);
+static int media_scheme(const struct css_token *name, const struct css_token *value, struct css_media_test *test);
 static int media_value(const struct css_token *tokens, size_t count, int feature, float *value);
 static int media_operator(const struct css_token *tokens, size_t count, size_t *index, int *comparison);
 static int media_flip(int comparison);
-static int media_test_holds(const struct css_media_test *test, float width, float height);
-static int media_query_holds(const struct css_media_query *query, float width, float height);
+static int media_test_holds(const struct css_media_test *test, float width, float height, int dark);
+static int media_query_holds(const struct css_media_query *query, float width, float height, int dark);
 static size_t media_skip_space(const struct css_token *tokens, size_t count, size_t index);
 
 /*
@@ -207,14 +214,16 @@ css_media_parse(
 }
 
 /*
- * Tests a media query list and its parents against the CSS viewport.
+ * Tests a media query list and its parents against the CSS viewport and
+ * the color scheme (dark nonzero for the dark one).
  * A NULL list holds at every viewport size.
  */
 int
 css_media_matches(
 	const struct css_media *media,
 	float width,
-	float height)
+	float height,
+	int dark)
 {
 	const struct css_media *list;
 	size_t index;
@@ -229,7 +238,7 @@ css_media_matches(
 		/* One of its queries must hold. */
 		holds = 0;
 		for (index = 0; index < list->query_count; index++) {
-			holds = media_query_holds(&list->queries[index], width, height);
+			holds = media_query_holds(&list->queries[index], width, height, dark);
 			if (holds)
 				break;
 		}
@@ -441,6 +450,11 @@ media_condition(
 		if (end != count)
 			return EINVAL;
 
+		/* The color scheme is the view's, tested when an element is styled. */
+		known = media_scheme(name, &tokens[index], test);
+		if (known)
+			return 0;
+
 		/* The validated discrete token contributes one constant test. */
 		test->feature = MEDIA_FEATURE_CONSTANT;
 		holds = 0;
@@ -646,6 +660,48 @@ media_discrete_true(
 
 	/* An unknown feature. */
 	return 0;
+}
+
+/*
+ * Reads prefers-color-scheme with a value into a test of the view's
+ * scheme: light and dark test it, another value is false.  Returns 1 when
+ * the feature is prefers-color-scheme (the test is made), 0 otherwise.
+ */
+static int
+media_scheme(
+	const struct css_token *name,
+	const struct css_token *value,
+	struct css_media_test *test)
+{
+	int same;
+
+	/* Only prefers-color-scheme is the view's. */
+	same = css_ident_equal(name, "prefers-color-scheme");
+	if (!same)
+		return 0;
+
+	/* A value that is not light or dark holds in neither scheme. */
+	test->feature = MEDIA_FEATURE_CONSTANT;
+	test->comparison = MEDIA_EQUAL;
+	test->value = 0;
+	if (value->type != CSS_TOKEN_IDENT)
+		return 1;
+
+	/* light is the scheme 0, dark the scheme 1. */
+	same = css_ident_equal(value, "light");
+	if (same) {
+		test->feature = MEDIA_FEATURE_COLOR_SCHEME;
+		test->value = 0;
+		return 1;
+	}
+	same = css_ident_equal(value, "dark");
+	if (same) {
+		test->feature = MEDIA_FEATURE_COLOR_SCHEME;
+		test->value = 1;
+	}
+
+	/* The test is made. */
+	return 1;
 }
 
 /* Reads a feature's value: a length in pixels, a ratio, a resolution in dppx, or an orientation. */
@@ -865,7 +921,8 @@ static int
 media_test_holds(
 	const struct css_media_test *test,
 	float width,
-	float height)
+	float height,
+	int dark)
 {
 	float actual;
 
@@ -900,6 +957,12 @@ media_test_holds(
 	case MEDIA_FEATURE_RESOLUTION:
 		actual = 1;
 		break;
+	case MEDIA_FEATURE_COLOR_SCHEME:
+		/* The view's scheme: 0 light, 1 dark. */
+		actual = 0;
+		if (dark)
+			actual = 1;
+		break;
 	default:
 		return 0;
 	}
@@ -924,7 +987,8 @@ static int
 media_query_holds(
 	const struct css_media_query *query,
 	float width,
-	float height)
+	float height,
+	int dark)
 {
 	size_t index;
 	int holds;
@@ -932,7 +996,7 @@ media_query_holds(
 	/* The type, then each test. */
 	holds = query->type_matches;
 	for (index = 0; index < query->test_count && holds; index++) {
-		holds = media_test_holds(&query->tests[index], width, height);
+		holds = media_test_holds(&query->tests[index], width, height, dark);
 	}
 
 	/* not turns the answer round. */

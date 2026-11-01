@@ -344,6 +344,20 @@ void browser_view_stop(struct browser_view *view);
 /* The size in pixels. */
 int browser_view_resize(struct browser_view *view, unsigned width, unsigned height);
 
+/*
+ * The color scheme the pages of a view are shown in, which their
+ * prefers-color-scheme media queries and matchMedia see: the program
+ * tells the system's (light or dark) and tells it again when it changes;
+ * a view starts light.  The view's options and BROWSER_API_VERSION are
+ * unchanged (a call added).
+ */
+enum browser_color_scheme {
+	BROWSER_COLOR_SCHEME_LIGHT,
+	BROWSER_COLOR_SCHEME_DARK
+};
+
+void browser_view_set_color_scheme(struct browser_view *view, enum browser_color_scheme scheme);
+
 /* The page shown: its location, its title (its location when it has none), and its document's height in pixels. */
 const char *browser_view_url(const struct browser_view *view);
 const char *browser_view_title(const struct browser_view *view);

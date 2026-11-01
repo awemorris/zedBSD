@@ -24,11 +24,16 @@
 #  M5 letters typed into a page's text field reach it (the page prints its input events); the input
 #     method's composition: a real Windows;
 #  M6 after the program is closed (its close button) and started again, a cookie with an expiry and
-#     localStorage are still there, and a cookie without one is not;
-#  M7 the dark mode (AppsUseLightTheme 0 in the registry) gives a dark title bar; at 144 dpi the title bar
-#     is 1.5 times as tall; the snap layouts: a real Windows (Wine shows none).
+#     localStorage are still there, and a cookie without one is not; the cookies' records on disk are
+#     protected for the user (DPAPI: each starts with the wrapping's magic), and
+#     plan/ws334/tests/protect-main.c checks the wrapping backend over a files backend of its own;
+#  M7 the dark mode (AppsUseLightTheme 0 in the registry) gives a dark title bar and the page its dark
+#     scheme (start.html's prefers-color-scheme: dark, a dark ground; the light one in the light mode);
+#     the mode changed while the program runs (plan/ws334/tests/theme-main.c writes the value and
+#     broadcasts WM_SETTINGCHANGE "ImmersiveColorSet") turns the page light and dark again; at 144 dpi
+#     the title bar is 1.5 times as tall; the snap layouts and Mica: a real Windows (Wine shows none).
 # A window's screenshot passes when it has more than 100 colours (a page, not an empty window).  The PNGs
-# go to build/review/ws334-p032/.  Each Wine command runs under flock /tmp/zedbsd-wine.lock (do not run
+# go to build/review/ws334-p033/.  Each Wine command runs under flock /tmp/zedbsd-wine.lock (do not run
 # the whole script under that lock: it would wait for itself).
 #   sh plan/ws334/tests/wine-run.sh
 # LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64),
@@ -48,7 +53,7 @@ LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
 port=${PORT:-18444}
 build=build/tmp/ws334-wine-build/browser-win64
 sources=build/tmp/ws334-win32-sources
-review=build/review/ws334-p032
+review=build/review/ws334-p033
 lock=/tmp/zedbsd-wine.lock
 lvp=/usr/share/vulkan/icd.d/lvp_icd.json
 mkdir -p "$sources" "$review"
@@ -94,8 +99,12 @@ fi
 if ! win32_make "$out/make-cli.log" test-program TEST_PROGRAM=browser-cli \
     TEST_PROGRAM_SOURCES=plan/ws334/tests/browser-cli-main.c TEST_PROGRAM_LDFLAGS=-municode ||
     ! win32_make "$out/make-cert.log" test-program TEST_PROGRAM=cert-store \
-    TEST_PROGRAM_SOURCES=plan/ws334/tests/cert-store-main.c; then
-	echo "wine-run: a test's program did not build cleanly (logs $out/make-cli.log, $out/make-cert.log)"
+    TEST_PROGRAM_SOURCES=plan/ws334/tests/cert-store-main.c ||
+    ! win32_make "$out/make-theme.log" test-program TEST_PROGRAM=theme-set \
+    TEST_PROGRAM_SOURCES=plan/ws334/tests/theme-main.c ||
+    ! win32_make "$out/make-protect.log" test-program TEST_PROGRAM=protect-test \
+    TEST_PROGRAM_SOURCES=plan/ws334/tests/protect-main.c; then
+	echo "wine-run: a test's program did not build cleanly (logs $out/make-cli.log, $out/make-cert.log, $out/make-theme.log, $out/make-protect.log)"
 	echo "wine-run: FAIL"
 	exit 1
 fi
@@ -106,6 +115,8 @@ if ! timeout 3600 sh plan/ws074/tests/host-build.sh plain > "$out/host-build.log
 fi
 cli=$build/tests/browser-cli.exe
 certs=$root/$build/tests/cert-store.exe
+THEME_SET=$root/$build/tests/theme-set.exe
+export THEME_SET
 host=build/ws074-host/plain/browser
 sync
 
@@ -180,7 +191,8 @@ fi
 # The windows, in Xvfb, one Xvfb for each start: windows.sh <the program's directory> <the output> <mode>
 # <the program's options...>.  The mode: "second" (a second start, then a change of the size),
 # "controls" (the title bar's controls), "input" (a page's text field), "close" (the close button,
-# waiting for the program to end), "wait" (waits for the start page's load to end) or "plain".
+# waiting for the program to end), "theme" (the apps' mode set light, then dark, while it runs, with
+# $THEME_SET), "wait" (waits for the start page's load to end) or "plain".
 cat > "$out/windows.sh" << 'EOF'
 #!/bin/sh
 dist=$1
@@ -290,6 +302,15 @@ if [ "$mode" = input ]; then
 	xdotool type --delay 80 'hello wine'
 	sleep 4
 	import -window root "$out/input.png"
+fi
+if [ "$mode" = theme ]; then
+	# The light mode, then the dark one again, each told to the windows as the Settings do.
+	WINEDEBUG=-all timeout 60 wine "$THEME_SET" light > "$out/theme-light.out" 2>&1
+	sleep 8
+	import -window root "$out/theme-light.png"
+	WINEDEBUG=-all timeout 60 wine "$THEME_SET" dark > "$out/theme-dark.out" 2>&1
+	sleep 8
+	import -window root "$out/theme-dark.png"
 fi
 if [ "$mode" = close ]; then
 	# The close button, the rightmost 46 pixels of the title bar; then up to 40 seconds for the end.
@@ -466,6 +487,23 @@ if [ "$before" != "ls=$token" ] && echo "$set_line" | grep -q "kept=$token" &&
 else
 	result FAIL M6 "before '$before', set '$set_line', after the restart '$check_line', the closes' exit '$closes'"
 fi
+# The cookies' records of the program's data directory, and the wrapping backend's own test.
+records=0
+plain=0
+for record in "$gui"/drive_c/users/*/AppData/Local/OmniGrammaton/cookies/*; do
+	[ -f "$record" ] || continue
+	records=$((records + 1))
+	[ "$(head -c 8 "$record")" = OGDPAPI1 ] || plain=$((plain + 1))
+done
+mkdir -p "$out/protect"
+WINEPREFIX=$root/build/tmp/ws334-wine WINEDEBUG=-all timeout 300 flock "$lock" wine "$root/$build/tests/protect-test.exe" \
+    "Z:$(echo "$out/protect" | tr / '\\')" > "$out/protect.log" 2>&1
+protect=$(tr -d '\r' < "$out/protect.log" | tail -1)
+if [ "$records" -gt 0 ] && [ "$plain" = 0 ] && echo "$protect" | grep -q '^test-protect: PASS'; then
+	result PASS M6p "the cookies' $records records on disk are protected (DPAPI); $protect"
+else
+	result FAIL M6p "records $records, of them not protected $plain; $protect ($out/protect.log)"
+fi
 
 # M3. The CA also in the Disallowed store: refused.
 cert_store add Disallowed
@@ -516,9 +554,11 @@ else
 fi
 unrun M5j "an input method's composition in the page's field"
 
-# M7. The dark mode, and 144 dpi.
-start dark "$dark" plain share/browser/start.html
+# M7. The dark mode (the title bar and the page), changed while the program runs, and 144 dpi.
+start dark "$dark" theme share/browser/start.html
 cp "$out/dark/first.png" "$review/m7-dark.png" 2> /dev/null
+cp "$out/dark/theme-light.png" "$review/m7-to-light.png" 2> /dev/null
+cp "$out/dark/theme-dark.png" "$review/m7-to-dark.png" 2> /dev/null
 convert "$out/dark/first.png" -crop 1280x32+0+0 "$review/titlebar-dark.png" 2> /dev/null
 light_bar=$(brightness "$out/gpu/first.png" 700 5)
 dark_bar=$(brightness "$out/dark/first.png" 700 5)
@@ -527,7 +567,31 @@ if drew dark && [ "$dark_bar" -ge 0 ] && [ "$dark_bar" -lt 100 ] && [ "$light_ba
 else
 	result FAIL M7 "the title bar's ground: brightness $dark_bar dark, $light_bar light ($out/dark/first.png)"
 fi
+# The page's ground beside start.html's column (x 950 of the 1024 pixels wide window), and the scheme the program gave the page.
+light_page=$(brightness "$out/gpu/first.png" 950 600)
+dark_page=$(brightness "$out/dark/first.png" 950 600)
+light_scheme=$(grep -m1 '^ZBROWSER SCHEME' "$out/gpu/first.txt" | sed 's/^ZBROWSER SCHEME //')
+dark_scheme=$(grep -m1 '^ZBROWSER SCHEME' "$out/dark/first.txt" | sed 's/^ZBROWSER SCHEME //')
+if [ "$dark_page" -ge 0 ] && [ "$dark_page" -lt 100 ] && [ "$light_page" -gt 150 ] &&
+    [ "$light_scheme" = dark=0 ] && [ "$dark_scheme" = dark=1 ]; then
+	result PASS M7p "the page's ground in the dark mode: brightness $dark_page dark, $light_page light (prefers-color-scheme, $review/m7-dark.png)"
+else
+	result FAIL M7p "the page's ground: brightness $dark_page dark, $light_page light, the first SCHEME lines light '$light_scheme' dark '$dark_scheme' ($out/dark/first.txt)"
+fi
+# The mode changed while it runs: light, then dark again.
+to_light=$(brightness "$out/dark/theme-light.png" 950 600)
+to_dark=$(brightness "$out/dark/theme-dark.png" 950 600)
+to_light_bar=$(brightness "$out/dark/theme-light.png" 700 5)
+schemes=$(grep '^ZBROWSER SCHEME' "$out/dark/first.txt" | sed 's/^ZBROWSER SCHEME //' | tr '\n' ' ')
+told=$(cat "$out/dark/theme-light.out" "$out/dark/theme-dark.out" 2> /dev/null | tr -d '\r' | tr '\n' ' ')
+if [ "$to_light" -gt 150 ] && [ "$to_light_bar" -gt 150 ] && [ "$to_dark" -ge 0 ] && [ "$to_dark" -lt 100 ] &&
+    [ "$schemes" = "dark=1 dark=0 dark=1 " ]; then
+	result PASS M7t "the mode changed while it runs: the page $to_light and the title bar $to_light_bar light, the page $to_dark dark again (SCHEME $schemes; $told; $review/m7-to-light.png, m7-to-dark.png)"
+else
+	result FAIL M7t "after the changes: page $to_light, title bar $to_light_bar, page $to_dark, SCHEME $schemes ($told; $out/dark/)"
+fi
 unrun M7s "the snap layouts over the maximize button (Windows 11)"
+unrun M7m "Mica behind the frame (Windows 11 22H2), the accent of the system (Wine has no DWM colours)"
 start dpi144 "$gui144" plain share/browser/start.html
 convert "$out/dpi144/first.png" -crop 1280x48+0+0 "$review/titlebar-144dpi.png" 2> /dev/null
 cp "$out/dpi144/first.png" "$review/dpi144.png" 2> /dev/null

@@ -83,8 +83,9 @@ page_selector_engine(
 		return NULL;
 	}
 
-	/* Succeeded: the engine, told of the active view transition. */
+	/* Succeeded: the engine, told of the active view transition and the color scheme. */
 	css_engine_set_view_transition(page->query_css, page->vt_active, page->vt_types, page->vt_type_count);
+	css_engine_set_color_scheme(page->query_css, page->dark);
 	return page->query_css;
 }
 

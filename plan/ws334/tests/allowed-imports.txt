@@ -323,8 +323,9 @@ DeleteObject
 GdiFlush
 SelectObject
 
-# dwmapi: the frame's shadow and its dark title bar.
+# dwmapi: the frame's shadow, its dark title bar and backdrop, and the system's accent.
 DwmExtendFrameIntoClientArea
+DwmGetColorizationColor
 DwmSetWindowAttribute
 
 # advapi32: the apps' light or dark mode in the registry.
@@ -375,3 +376,23 @@ ImmGetContext
 ImmReleaseContext
 ImmSetCandidateWindow
 ImmSetCompositionWindow
+
+# user32: the fingers' and the pen's pointer messages.
+GetPointerInfo
+GetPointerPenInfo
+GetPointerType
+
+# ole32, shell32, user32 and uuid: a drag out of a window (OLE's DoDragDrop, its data object's formats).
+DoDragDrop
+IID_IDataObject
+IID_IDropSource
+IID_IUnknown
+OleInitialize
+OleUninitialize
+RegisterClipboardFormatW
+SHCreateStdEnumFmtEtc
+
+# crypt32 and kernel32: the browser's cookies kept protected for the user (DPAPI) and the blobs' memory.
+CryptProtectData
+CryptUnprotectData
+LocalFree

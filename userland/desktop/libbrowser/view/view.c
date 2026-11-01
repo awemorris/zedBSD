@@ -159,7 +159,8 @@ struct view_prefetch_script {
  * how far the caller shifts the content past an end (overscroll_y, layout
  * units, positive down; the drawing's alone, zero on a new page),
  * the view's size and whether the page was laid out at another size
- * (resized), the fonts and the sans font's companions, the stack frame
+ * or color scheme (resized), the color scheme (dark nonzero for the dark
+ * one, which every page of the view is told), the fonts and the sans font's companions, the stack frame
  * the pages' heaps scan up to, the clock's time when the page shown (page_epoch) and the page being made
  * (open_epoch) began, how pages are fetched, the loader (NULL when every
  * page is read at once), the page being fetched (its location and how it
@@ -192,6 +193,7 @@ struct browser_view {
 	unsigned width;
 	unsigned height;
 	int resized;
+	int dark;
 	struct text_font_paths fonts;
 	struct text_font_companions companions;
 	const void *stack_base;
@@ -631,6 +633,35 @@ browser_view_resize(
 
 	/* Succeeded: the page will fit the new size. */
 	return 0;
+}
+
+/*
+ * Gives the view the color scheme prefers-color-scheme tests: the page is
+ * styled and laid out in it again when it changed.
+ */
+void
+browser_view_set_color_scheme(
+	struct browser_view *view,
+	enum browser_color_scheme scheme)
+{
+	int dark;
+
+	/* The scheme as 0 or 1; the same one changes nothing. */
+	dark = 0;
+	if (scheme == BROWSER_COLOR_SCHEME_DARK)
+		dark = 1;
+	if (dark == view->dark)
+		return;
+
+	/* The view's pages from now on, and the one shown at once. */
+	view->dark = dark;
+	if (view->page == NULL)
+		return;
+	page_set_color_scheme(view->page, dark);
+
+	/* The page is laid out again when it is drawn next. */
+	view->resized = 1;
+	view_redraw(view);
 }
 
 /* The page shown's location (NULL before the first page). */
@@ -2175,6 +2206,7 @@ view_make_page(
 
 	/* Its scripts see the view's size and its fonts, write their console through the view, and count time from now. */
 	page_set_viewport(made, (int)view->width, (int)view->height);
+	page_set_color_scheme(made, view->dark);
 	page_set_fonts(made, &view->fonts);
 	page_set_font_companions(made, &view->companions);
 	page_set_console(made, view_console, view);

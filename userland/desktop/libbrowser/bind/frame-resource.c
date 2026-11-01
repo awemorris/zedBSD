@@ -235,6 +235,7 @@ bind_frame_install(
 
 		/* Initialize the child with the parent's current viewport and timer origin before publication. */
 		bind_window_set_viewport(made, parent->viewport_width, parent->viewport_height);
+		bind_window_set_color_scheme(made, parent->dark);
 		bind_window_set_time(made, parent->now);
 
 		/* Saved references keep the former Document, but no timer or host callback remains active. */

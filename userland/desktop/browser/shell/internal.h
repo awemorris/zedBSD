@@ -136,6 +136,9 @@ struct shell_window {
 	/* Whether the compositor asked to close. */
 	int closed;
 
+	/* Whether the desktop's appearance (light or dark) changed since it was last taken. */
+	int themed;
+
 	/* The modifiers held (SHELL_MOD_*), and the pointer's place in the window. */
 	uint32_t modifiers;
 	int pointer_x;

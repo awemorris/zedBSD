@@ -3735,17 +3735,6 @@ kl_window_accept_drops(
 }
 
 /* Not on Windows. */
-int
-kl_window_accept_tablet(
-	struct kl_window *window)
-{
-	(void)window;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
 void
 kl_window_answer_drop(
 	struct kl_window *window,
@@ -3826,40 +3815,6 @@ kl_window_display(
 
 	/* Not on Windows. */
 	return NULL;
-}
-
-/* Not on Windows. */
-int
-kl_window_drag_fill(
-	struct kl_window *window,
-	const char *type,
-	const void *data,
-	size_t length)
-{
-	(void)window;
-	(void)type;
-	(void)data;
-	(void)length;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_window_drag_text(
-	struct kl_window *window,
-	const char *text,
-	size_t length,
-	uint32_t serial)
-{
-	(void)window;
-	(void)text;
-	(void)length;
-	(void)serial;
-
-	/* Not on Windows. */
-	return ENOTSUP;
 }
 
 /* Not on Windows. */
@@ -4386,46 +4341,6 @@ kl_window_set_tabs(
 	(void)tabs;
 	(void)count;
 	(void)options;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_window_start_drag(
-	struct kl_window *window,
-	const struct kl_drag_data *data,
-	size_t count,
-	unsigned actions,
-	uint32_t serial)
-{
-	(void)window;
-	(void)data;
-	(void)count;
-	(void)actions;
-	(void)serial;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_window_start_drag_icon(
-	struct kl_window *window,
-	const struct kl_drag_data *data,
-	size_t count,
-	unsigned actions,
-	uint32_t serial,
-	const struct kl_drag_icon *icon)
-{
-	(void)window;
-	(void)data;
-	(void)count;
-	(void)actions;
-	(void)serial;
-	(void)icon;
 
 	/* Not on Windows. */
 	return ENOTSUP;

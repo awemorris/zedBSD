@@ -154,7 +154,7 @@ media_run(
 	}
 
 	/* Numeric display features combine with the actual zero-size viewport. */
-	*matches = css_media_matches(media, 0, 0);
+	*matches = css_media_matches(media, 0, 0, 0);
 	wb_arena_release(&arena);
 
 	/* Succeeded: the caller can compare this query's real result. */

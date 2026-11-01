@@ -116,6 +116,26 @@ struct browser_storage_calls {
 int browser_storage_sink_append(struct browser_storage_sink *sink, const void *bytes, size_t length);
 
 /*
+ * A sink of a backend's own, for a backend that wraps another (one that
+ * transforms the records, such as encrypting them): it reads through the
+ * other backend's read into a sink it made, takes the bytes and appends
+ * what it makes of them to the engine's sink.  The table's version is
+ * unchanged (calls added).
+ *
+ * create:  makes an empty sink (*sink).  Returns 0, EINVAL (sink NULL) or
+ *          ENOMEM; *sink is NULL on failure.
+ * bytes:   what was appended so far (*bytes, valid until the sink is
+ *          appended to or destroyed; *length may be 0).  Returns 0, EINVAL
+ *          (an argument NULL), or the first error an append to it failed
+ *          with.
+ * destroy: frees a sink create made (NULL does nothing); never the
+ *          engine's sink a read was given.
+ */
+int browser_storage_sink_create(struct browser_storage_sink **sink);
+int browser_storage_sink_bytes(const struct browser_storage_sink *sink, const void **bytes, size_t *length);
+void browser_storage_sink_destroy(struct browser_storage_sink *sink);
+
+/*
  * Opens the files backend over a directory.
  *
  * directory: where the records go (UTF-8; created with its parents when

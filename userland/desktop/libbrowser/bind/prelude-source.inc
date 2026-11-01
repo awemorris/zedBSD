@@ -2,7 +2,7 @@
 static const char prelude_source[] =
 	"// The web platform pieces that are written in the page's own language (ws074-p230).\n"
 	"// bind/prelude.c holds this text as a C string; this file is the readable source it is made from.\n"
-	"// It is a function of the natives (parseURL, setURL, scrollToFragment, fire, setHyperlinkFollower, nodeRect) and the global object.\n"
+	"// It is a function of the natives (parseURL, setURL, scrollToFragment, fire, setHyperlinkFollower, nodeRect, colorScheme) and the global object.\n"
 	"(function (native, g) {\n"
 	"  'use strict';\n"
 	"  var parseURL = native.parseURL;\n"
@@ -332,7 +332,8 @@ static const char prelude_source[] =
 	"        addListener: function () {}, removeListener: function () {},\n"
 	"        addEventListener: function () {}, removeEventListener: function () {}, dispatchEvent: function () { return false; }\n"
 	"      };\n"
-	"      if (/^\\(\\s*prefers-color-scheme\\s*:\\s*light\\s*\\)$/.test(q)) m.matches = true;\n"
+	"      if (/^\\(\\s*prefers-color-scheme\\s*:\\s*light\\s*\\)$/.test(q)) m.matches = native.colorScheme() === 'light';\n"
+	"      if (/^\\(\\s*prefers-color-scheme\\s*:\\s*dark\\s*\\)$/.test(q)) m.matches = native.colorScheme() === 'dark';\n"
 	"      if (/^\\(\\s*(any-)?hover\\s*:\\s*hover\\s*\\)$/.test(q)) m.matches = true;\n"
 	"      if (/^\\(\\s*(any-)?pointer\\s*:\\s*fine\\s*\\)$/.test(q)) m.matches = true;\n"
 	"      return m;\n"
