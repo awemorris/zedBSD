@@ -50,15 +50,15 @@
 
 /*
  * The pictures: their size, their planes' pitch, where the chroma plane
- * starts in a picture's buffer and the bytes of the buffer: four times the
- * planes' own, as the encoder reads past the planes' ends (it read 56 KiB
- * from the start of a 48 KiB picture).
+ * starts in a picture's buffer and the bytes of the buffer: room for a
+ * 640x480 picture whose chroma plane the encoder reads as many rows as
+ * the luma plane (it read 24 to 32 KiB of a 256x128 picture's chroma).
  */
 #define TEST_WIDTH			256U
 #define TEST_HEIGHT			128U
 #define TEST_PITCH			256U
 #define TEST_CHROMA_AT			(TEST_PITCH * TEST_HEIGHT)
-#define TEST_PICTURE_BYTES		(4U * (TEST_CHROMA_AT + TEST_PITCH * TEST_HEIGHT / 2U))
+#define TEST_PICTURE_BYTES		0xa0000U
 
 /* A 16x16 tile's side and bytes. */
 #define TEST_TILE			16U
@@ -186,11 +186,13 @@ struct test_poke {
  * picture control's codec field, the control parameters' extra bits (or
  * none at all when control_mask clears them), the buffers' flags, the
  * engine's watchdog (0 for none), the setup's words written over, and
- * which of the scratch methods it sends (extra_data unused).
+ * where the input's planes start for the reading test (luma_tail and
+ * chroma_tail bytes before the end of the input buffer, with nothing
+ * mapped after it; 0 for the planes' own places).
  */
 struct test_attempt {
-	uint32_t scratch;
-	uint32_t extra_data;
+	uint32_t luma_tail;
+	uint32_t chroma_tail;
 	uint32_t codec_field;
 	uint32_t control_extra;
 	uint32_t control_mask;
@@ -224,6 +226,29 @@ struct test_memory {
 struct test_state {
 	struct test_memory memory[TEST_BUFFERS];
 	uint32_t vram;
+};
+
+/*
+ * The run of the work space kept free just above the first input
+ * picture's buffer (the space hands out addresses downward): mapped before
+ * the buffers and unmapped after them, so a read past that buffer's end
+ * faults with its address.
+ */
+#define TEST_HOLE_BYTES			0x10000U
+
+/* A choice that encodes a 640x480 picture instead (its chroma after 640 x 480 bytes of luma). */
+#define TEST_BIG			(1U << 20)
+#define TEST_BIG_CHROMA_AT		(640U * 480U)
+
+/* The 640x480 picture's surfaces (sizes less one, pitches 640) and slice (1200 macroblocks at QP 26). */
+static const struct test_poke test_big[] = {
+	{ 4U, 639U | (479U << 16) },
+	{ 8U, 640U | (640U << 16) },
+	{ 36U, 639U | (479U << 16) },
+	{ 40U, 640U | (640U << 16) },
+	{ 68U, 639U | (479U << 16) },
+	{ 72U, 640U | (640U << 16) },
+	{ 512U, 1200U | (26U << 19) },
 };
 
 /* The mode decision's word at 52 as built: no early intra decision (3 at 20:19), 4x4 and 16x16 searched (5 at 28:26). */
@@ -375,43 +400,15 @@ static const struct test_poke test_h265_setup[] = {
 /* The number of words in a list of pokes. */
 #define TEST_POKES(list)		((uint32_t)(sizeof(list) / sizeof((list)[0])))
 
-/*
- * The picture control's buffer sizes (the history's at 412 of the setup,
- * the bitstream's at 416, the cap on the bytes before the residuals are
- * dropped at 372): the history as the description's formula for 256
- * pixels with 224-byte blocks ((256 / 16 + 16) * 224 = 7168); the
- * bitstream's 32 KiB; no cap; all three.
- */
-static const struct test_poke test_history_size[] = {
-	{ 412U, 7168U },
-};
-
-static const struct test_poke test_bitstream_size[] = {
-	{ 416U, 0x8000U },
-};
-
-static const struct test_poke test_no_cap[] = {
-	{ 372U, 0U },
-};
-
-static const struct test_poke test_sizes[] = {
-	{ 412U, 7168U },
-	{ 416U, 0x8000U },
-	{ 372U, 0U },
-};
 
 /*
- * The choices tried, in order: the setup as built; the history's size by the formula; a
- * smaller bitstream size; no residual cap; all three.  A choice whose
- * encode does not finish stops the channel, which is made again for the
- * next.
+ * The choices tried, in order: the 640x480 picture; the 256x128 picture as
+ * built.  A choice whose encode does not finish stops the channel, which is
+ * made again for the next.
  */
 static const struct test_attempt test_attempts[] = {
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_BIG, 0U, test_big, TEST_POKES(test_big) },
 	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, NULL, 0U },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_history_size, TEST_POKES(test_history_size) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_bitstream_size, TEST_POKES(test_bitstream_size) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_no_cap, TEST_POKES(test_no_cap) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_sizes, TEST_POKES(test_sizes) },
 };
 
 static const uint32_t test_buffer_bytes[TEST_BUFFERS] = {
@@ -556,12 +553,28 @@ test_memory_make(
 	struct nvrtx_gpu *gpu,
 	struct test_state *state)
 {
+	struct nvrtx_buffer hole;
 	struct test_memory *memory;
+	uint64_t hole_va;
 	uint64_t *pages;
+	int hole_error;
 	uint32_t count;
 	uint32_t page;
 	uint32_t index;
 	int error;
+
+	/* Takes the run just above the first buffer, to give it back after the buffers are mapped. */
+	error = nvrtx_buffer_alloc(gpu, TEST_HOLE_BYTES, &hole);
+	if (error != 0)
+		return error;
+	count = TEST_HOLE_BYTES / NVRTX_GSP_PAGE_SIZE;
+	pages = kern_calloc(count, sizeof(*pages));
+	if (pages == NULL)
+		return ENOMEM;
+	for (page = 0U; page < count; page++)
+		pages[page] = hole.dma.device_address + (uint64_t)page * NVRTX_GSP_PAGE_SIZE;
+	hole_error = nvrtx_work_map_system(gpu, pages, count, &hole_va);
+	kern_free(pages);
 
 	/* Makes and maps each buffer in turn. */
 	for (index = 0U; index < TEST_BUFFERS; index++) {
@@ -625,6 +638,15 @@ test_memory_make(
 		/* Marks the twin mapped, so the free unmaps it. */
 		memory->bo_mapped = 1;
 	}
+
+	/* Gives the run above the first buffer back, so nothing is mapped there. */
+	if (hole_error == 0) {
+		hole_error = nvrtx_work_unmap(gpu, hole_va, TEST_HOLE_BYTES);
+		nvrtx_stage_mark("nvenc-test: the run %llx above the first input (%llx) is free (%d)", (unsigned long long)hole_va,
+		    (unsigned long long)state->memory[TEST_INPUT_I].va, hole_error);
+	}
+	if (hole_error == 0)
+		nvrtx_buffer_free(gpu, &hole);
 
 	/* Succeeded: every buffer is in the work space. */
 	return 0;
@@ -947,6 +969,20 @@ test_encode(
 		frame.coloc_out = TEST_UNMAPPED;
 	if ((attempt->flags & TEST_UNMAP_RC) != 0U)
 		frame.rc_process = TEST_UNMAPPED;
+
+	/* The 640x480 picture's chroma planes after its luma planes. */
+	if ((attempt->flags & TEST_BIG) != 0U) {
+		frame.input_chroma = frame.input_luma + TEST_BIG_CHROMA_AT;
+		frame.output_chroma = frame.output_luma + TEST_BIG_CHROMA_AT;
+		if (frame.reference_luma != 0U)
+			frame.reference_chroma = frame.reference_luma + TEST_BIG_CHROMA_AT;
+	}
+
+	/* The input's planes moved to the end of its buffer for the reading test. */
+	if (attempt->luma_tail != 0U)
+		frame.input_luma = test_va(state, input) + TEST_PICTURE_BYTES - attempt->luma_tail;
+	if (attempt->chroma_tail != 0U)
+		frame.input_chroma = test_va(state, input) + TEST_PICTURE_BYTES - attempt->chroma_tail;
 
 	/* Where the encode's buffers are in the work space. */
 	nvrtx_stage_mark("nvenc-test va: setup %llx status %llx bits %llx hist %llx", (unsigned long long)frame.setup,
