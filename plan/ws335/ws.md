@@ -51,7 +51,7 @@
 | [p013](phase013/phase.md) | ML-KEM の多項式・符号化・sampling（test-mlkem-poly） | cleared（2026-11-02 01:44 Q1、main 3b0b0dd1e。main で test-mlkem-poly 10117・ct PASS。不正な d の扱いは p035 で header の comment に足す） | p003 |
 | [p014](phase014/phase.md) | K-PKE と ML-KEM-768（test-mlkem） | planned（P6 q1894） | p013 |
 | [p015](phase015/phase.md) | OS の層（POSIX と Windows）（test-os） | planned | p002 |
-| [p016](phase016/phase.md) | DER の reader と PEM・base64（test-der、test-pem） | planned（Sonnet q1877） | p002 |
+| [p016](phase016/phase.md) | DER の reader と PEM・base64（test-der、test-pem） | 実装済み・試験 PASS（2026-11-02 01:40 Sonnet。test-der 1967・test-pem 666 checks、posix・win32 PASS、der 78 通り・pem 48 通りの破壊で 102 通りが試験の失敗、16 通りが sanitizer の異常終了、見逃し 8 通りは等価か冗長。cleared は Q1） | p002 |
 | [p017](phase017/phase.md) | X.509 の parse（証明書・公開鍵・署名の algorithm）（test-x509） | planned | p016 |
 | [p018](phase018/phase.md) | 署名の確かめ（algorithm ごと）（test-sigver） | planned | p017、p011、p012 |
 | [p019](phase019/phase.md) | 名前（Name の比較・host と address の照合・name constraints）（test-name） | planned | p017 |
