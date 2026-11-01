@@ -106,4 +106,3 @@ script の直し（1〜3 回目の FAIL のうち program の不具合でない�
 - video（Vulkan Video・software）は p032 の項に無い。
 
 消してよい物（Q1 へ）: `build/tmp/p032`（試しの script・log・exp の出力）、`build/p032`（zedBSD amd64 の試しの build）、`build/tmp/ws334-wine-run.run.*` のうち `build/tmp/ws334-wine-run` が指していない物。prefix `build/tmp/ws334-wine-dark` は次の wine-run でも使う。
-
