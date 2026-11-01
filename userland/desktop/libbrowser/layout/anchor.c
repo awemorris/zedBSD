@@ -607,6 +607,8 @@ layout_anchor_hides(
 	clipped = 0;
 	if (!anchor_find_state(tree, box, box->style.position_anchor, &rect, &anchor, &clipped) || anchor == NULL)
 		return 0;
+	if (anchor->style.visibility != 0)
+		return 1;
 	for (up = anchor; up != NULL; up = up->parent) {
 		if (up->anchor_hidden)
 			return 1;
@@ -650,7 +652,7 @@ anchor_search(
 		    anchor_scope_root(child, name, box->style.anchor_tree) == anchor_scope_root(box, name, box->style.anchor_tree) &&
 		    (anchor_top_layer(child) == 0 || (anchor_top_layer(box) != 0 && anchor_top_layer(child) < anchor_top_layer(box))) &&
 		    anchor_chain_before(child, box, containing) &&
-		    (!child->out_of_flow || !*passed || (layout_containing_box(child) != containing && !anchor_scrolls(layout_containing_box(child)))))
+		    (!child->out_of_flow || !*passed || layout_containing_box(child) != containing))
 			found[0] = child;
 		anchor_search(tree, child, box, containing, name, child_inside, passed, found, depth + 1);
 	}
