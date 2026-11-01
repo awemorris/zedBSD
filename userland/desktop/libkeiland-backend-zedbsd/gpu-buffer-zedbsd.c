@@ -238,8 +238,9 @@ kl_backend_gpu_frame_fence_type(
 
 /*
  * Explains why the compositor has no usable GPU: the kernel holds the GPU
- * until root starts it (no node yet), or the node belongs to the graphical
- * login's user and this user is neither that user nor root.
+ * until root starts it (no node yet), the node belongs to the graphical
+ * login's user and this user is neither that user nor root, or no one has
+ * the seat and this user is neither root nor in the video group.
  */
 int
 kl_backend_gpu_unavailable_reason(
@@ -286,10 +287,16 @@ kl_backend_gpu_unavailable_reason(
 	if (saved_errno != EACCES)
 		return ENOENT;
 
-	/* Says whose the node is and who may open it. */
-	(void)snprintf(text, size, "%s belongs to the graphical login's user; outside the graphical login only root may open it", GPU_FIRST_NODE);
+	/* A node a user has is the graphical login's. */
+	if (node.st_uid != 0) {
+		(void)snprintf(text, size, "%s belongs to the graphical login's user; while that login runs only that user and root may open it", GPU_FIRST_NODE);
+		return 0;
+	}
 
-	/* Succeeded: the reason is the node's owner. */
+	/* Otherwise the node is root's and its group's: says how to join the group. */
+	(void)snprintf(text, size, "only root and the video group may open %s: ask an administrator to run 'usermod -G video -a' for this account, then log in again", GPU_FIRST_NODE);
+
+	/* Succeeded: the reason is the node's group. */
 	return 0;
 }
 

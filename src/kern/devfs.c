@@ -48,6 +48,7 @@
 #include <uapi/block.h>
 #include <uapi/errno.h>
 #include <uapi/fcntl.h>
+#include <uapi/gpu.h>
 #include <limits.h>
 #include <stdint.h>
 #include <uapi/statvfs.h>
@@ -147,6 +148,7 @@ static DEVFS_HIGH int bridge_name(const char *name);
 static DEVFS_HIGH int smartcard_name(const char *name);
 static DEVFS_HIGH int bluetooth_name(const char *name);
 static DEVFS_HIGH int camera_name(const char *name);
+static DEVFS_HIGH int gpu_name(const char *name);
 static DEVFS_HIGH int backlight_name(const char *name);
 static DEVFS_HIGH ino_t cdev_directory(const char *name);
 static DEVFS_HIGH int devfs_cdev_inode(struct inode *directory, struct cdev *device, struct inode **result);
@@ -522,6 +524,26 @@ camera_name(
 	return 1;
 }
 
+/* Identifies the GPU framework's nodes, /dev/gpu<n>. */
+static DEVFS_HIGH int
+gpu_name(
+	const char *name)
+{
+	int comparison;
+
+	/* GPU nodes are named gpu<n>. */
+	comparison = kern_strncmp(name, "gpu", 3);
+	if (comparison != 0)
+		return 0;
+
+	/* The number follows at once. */
+	if (name[3] < '0' || name[3] > '9')
+		return 0;
+
+	/* Succeeded: the name is a GPU's. */
+	return 1;
+}
+
 /* Identifies names owned by the /dev/backlight namespace. */
 static DEVFS_HIGH int
 backlight_name(
@@ -578,12 +600,14 @@ devfs_cdev_inode(
 	struct inode *inode;
 	uint64_t number;
 	mode_t mode;
+	gid_t group;
 	int backlight;
 	int raw;
 	int smartcard;
 	int bluetooth;
 	int bridge;
 	int camera;
+	int gpu;
 
 	/* Creates a generation-unique inode and gives it one cdev reference. */
 	number = cdev_generation(device);
@@ -605,7 +629,10 @@ devfs_cdev_inode(
 	 * the hardware.  A camera is root's until sessiond gives it
 	 * to the seat's user: whoever opens it sees the room.  The ACPI
 	 * namespace node is root's: a write evaluates any AML method, and
-	 * methods write the embedded controller and raise SMIs.
+	 * methods write the embedded controller and raise SMIs.  A GPU is
+	 * root's and the video group's until sessiond gives it to the seat's
+	 * user: a member of that group starts a desktop from the text
+	 * console.
 	 */
 	backlight = backlight_name(device->name);
 	raw = hidraw_name(device->name);
@@ -613,6 +640,7 @@ devfs_cdev_inode(
 	bluetooth = bluetooth_name(device->name);
 	bridge = bridge_name(device->name);
 	camera = camera_name(device->name);
+	gpu = gpu_name(device->name);
 	if (event_name(device->name))
 		mode = 0640U;
 	else if (backlight)
@@ -625,8 +653,15 @@ devfs_cdev_inode(
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "acpi") == 0)
 		mode = 0600U;
+	else if (gpu)
+		mode = GPU_NODE_MODE;
 	else
 		mode = 0666U;
+
+	/* A GPU's group is the video group; every other node's is wheel. */
+	group = 0;
+	if (gpu)
+		group = GPU_NODE_GROUP;
 
 	/* Describes the device; the inode starts dead until it is published. */
 	cdev_ref(device);
@@ -638,6 +673,7 @@ devfs_cdev_inode(
 	inode->i_special = device;
 	inode->i_special_destroy = devfs_cdev_release;
 	inode->i_linkcount = 1;
+	inode->i_gid = group;
 	inode->i_mode = S_IFCHR | mode;
 	inode->i_rdev = device->rdev;
 	inode->i_flags = INODE_DEAD;

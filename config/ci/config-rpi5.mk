@@ -7,9 +7,10 @@
 # off (CONFIG_DRIVER_RPI5_BT).  The fan connector follows the processor's
 # temperature (CONFIG_DRIVER_RPI5_FAN).  An NVMe drive on an M.2 HAT
 # behind the external PCIe port (config.txt's dtparam=pciex1) is a disk
-# (CONFIG_DRIVER_PCI_NVME).  The GPU is not bound yet, so the
-# login is the text console's, and the Pi 4's chip drivers are off (the
-# Pi 5's are part of its board).
+# (CONFIG_DRIVER_PCI_NVME).  The GPU (V3D 7.1) starts at boot
+# (cmdline.txt's rpi5gpu.start=boot); the login is the text console's,
+# from which a member of the video group starts the desktop.  The Pi 4's
+# chip drivers are off (the Pi 5's are part of its board).
 ZEDBSD_MENU_VERSION := 3
 ZEDBSD_PLATFORM := rpi5
 ZEDBSD_ARCHITECTURE := arm64

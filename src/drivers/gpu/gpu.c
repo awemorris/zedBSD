@@ -1518,6 +1518,7 @@ gpu_open(
 	uid_t euid;
 	int root;
 	int owner;
+	int member;
 	int error;
 
 	/* Rejects absent credentials. */
@@ -1528,9 +1529,12 @@ gpu_open(
 		return EACCES;
 
 	/*
-	 * Admits root, and the user the device node belongs to: the graphical
-	 * login gives the node to the seat's user (sessiond), and
-	 * devfs's own owner is root, so without a login only root opens it, as
+	 * Admits root, the user the device node belongs to, and a member of
+	 * the node's group when the node's mode lets its group read and
+	 * write.  The graphical login gives the node to the seat's user alone
+	 * (sessiond, 0600); without a login the node is root's and the video
+	 * group's (devfs, 0660), so a member of that group starts a desktop
+	 * from the text console.  Anyone else is refused whatever the mode, as
 	 * in ABI version 1.  Authority is copied rather than borrowed from the
 	 * mutable process credentials.
 	 */
@@ -1538,10 +1542,17 @@ gpu_open(
 	owner = 0;
 	if (file->f_inode != NULL && credential->euid == file->f_inode->i_uid)
 		owner = 1;
+
+	/* The group counts only while the mode gives it both read and write. */
+	member = 0;
+	if (file->f_inode != NULL && (file->f_inode->i_mode & 0060U) == 0060U)
+		member = cred_in_group(credential, file->f_inode->i_gid);
+
+	/* Refuses everyone the three rules leave out. */
 	euid = credential->euid;
 	cred_release(credential);
-	if (root == 0 && owner == 0) {
-		kern_logf("gpu: open refused: uid %u is neither root nor the device's owner\n", (unsigned)euid);
+	if (root == 0 && owner == 0 && member == 0) {
+		kern_logf("gpu: open refused: uid %u is neither root, the device's owner nor in its group\n", (unsigned)euid);
 		return EACCES;
 	}
 

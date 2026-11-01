@@ -103,25 +103,28 @@ split a GPU this way, and what each kind of node offers, is in
 [Drivers and node kinds](gpu-drivers.md).
 
 **Who may open.** `gpu_open` admits a caller whose credential is the
-superuser, or whose effective user ID equals the owner of the node. It refuses
-anyone else with `EACCES`, and also refuses a caller that has no credential.
-This rule is applied in addition to the node's file mode: the file mode must
-let the open through first, and then `gpu_open` applies the rule above. The
-group and other permission bits therefore do not admit a user who is not the
-owner.
+superuser, whose effective user ID equals the owner of the node, or that
+belongs to the node's group (by its effective group or a supplementary group)
+while the node's mode gives the group both read and write. It refuses anyone
+else with `EACCES`, and also refuses a caller that has no credential. This
+rule is applied in addition to the node's file mode: the file mode must let
+the open through first, and then `gpu_open` applies the rule above. The other
+permission bits therefore never admit a user.
 
-devfs creates the node with owner root and mode 0666, so without a graphical
-login only root opens a GPU node. When the graphical login runs, the seat
-manager (sessiond) changes the owner of `/dev/gpu0` to `/dev/gpu3` to the seat
-user and the mode to 0600, both for the login screen's account and for a
-session's user. It returns them to root and mode 0666 when it stops. devfs
-remembers the owner and mode given to a node by its device number, so a node
-that is registered again under the same number comes back with them. The seat
-manager handles only the nodes from `/dev/gpu0` to `/dev/gpu3`. A node with a
-higher number, or any node while no seat manager has given it away, keeps its
-owner root, and a user other than root gets `EACCES` from it whatever the
-mode. Giving a node away does not take it from a process that already has it
-open.
+devfs creates the node with owner root, group `video` (group ID 44,
+`GPU_NODE_GROUP` in `<uapi/gpu.h>`) and mode 0660 (`GPU_NODE_MODE`), so
+without a graphical login root and the members of the video group open a GPU
+node; a member of the group starts a desktop from the text console. The
+image's default user is a member. When the graphical login runs, the seat
+manager (sessiond) changes the owner and group of `/dev/gpu0` to `/dev/gpu3`
+to the seat user and the user's primary group and the mode to 0600, both for
+the login screen's account and for a session's user, so the video group does
+not open them then. It returns them to root, the video group and mode 0660
+when it stops. devfs remembers the owner, group and mode given to a node by
+its device number, so a node that is registered again under the same number
+comes back with them. The seat manager handles only the nodes from
+`/dev/gpu0` to `/dev/gpu3`. Giving a node away does not take it from a
+process that already has it open.
 
 **Read and write permission.** The open's access mode decides what the open
 may do. The kernel records it at open time and requests use the record, not
