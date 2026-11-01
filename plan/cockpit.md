@@ -7,7 +7,7 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | NVENC の関門: I・P の絵の encode（q1884、上限なし）。p009a: NVENC の channel が開き、追加の firmware 不要 | p010 encode の共通の executor |
+| P1 | [WS324](ws324/ws.md) p009b | RTX 2070 の Vulkan Video | 返却（06:28）。p009b uncleared: NVENC の最初の encode が 27 起動・約 90 通りで同じ HW の誤り。次の道はユーザーの判断待ち | — |
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（06:09）。p007b cleared: JVT 100/101 一致（1 本は Extended profile で理由付きで断る）。原因は試験の probe と libmedia の 3 か所 | p005〜p006 H.265 decode |
 | P3 | — | Pi 5 の作業 | 返却（03:03）。Pi 5 の desktop の動画 8 本（build/review/pi5-video/）。板は元に戻した | 次を待つ |
 | P4 | [BUG-397](bugs/BUG-397.md)・[BUG-399](bugs/BUG-399.md) | Windows 版ブラウザの UAT | Google の「サイト」の link で固まる、検索の欄が右へ伸びる（q1915） | — |
@@ -72,7 +72,7 @@
 
 ## ユーザーの判断を待つ事
 
-（無し）
+- [WS324](ws324/ws.md) p009b の次の道（NVENC の HW の誤り）。
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 

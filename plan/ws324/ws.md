@@ -27,7 +27,7 @@
 | [ws324-p006g](phase006g/phase.md) | h265-stream の実装（Sonnet） | cleared（2026-11-02 06:09 Q1、main で test-stream PASS）。実装済み・試験 PASS（2026-11-02 Sonnet q1906-i01、test-stream 1331307 checks、壊す確かめ 994 か所中 889 が試験の失敗で落ち、残り 105 は等価・観測できない物（ENOMEM の道、冗長な初期化、unreachable の守り）。cleared は Q1） | p006d |
 | [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | in-progress（P6） | p006e〜g |
 | [ws324-p009a](phase009a/phase.md) | NVENC の channel（段 nvenc-channel、class の bind、firmware の確かめ、RC の通知の記録） | cleared（2026-11-02 01:07 Q1、main a43959d8e。10.0.10.3 で NVENC の channel（class c4b7、chid 49）が開き engine 自身が semaphore を release、GSP-RM が NVENC の ucode を持つ（追加の firmware 不要）、channel error 0、NVDEC は前と同じ） | 実機 |
-| [ws324-p009b](phase009b/phase.md) | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode） | in-progress（2026-11-02 06:09 Q-p009b-1 は A（ユーザー）で P1 が再開。前: 04:23 P1、q1884-i01。H.264・H.265 とも 1 枚目の encode が HW の誤り（RC 47）、25 起動・約 75 通りの値で同じ。GSP の log の書式の metadata の判断待ち Q-p009b-1） | p009a、Q324-4 |
+| [ws324-p009b](phase009b/phase.md) | NVENC の関門（kernel の中の自己診断で I・P 絵、host の ffmpeg で decode） | uncleared（2026-11-02 06:28 Q1、P1 q1884-i01 が 27 起動・約 90 通りで同じ HW の誤り。GSP の log の書式は NVIDIA の package にも無かった（Q-p009b-1 A の結果）、nouveau との比較（channel の特権を含む）も外れ。次の道はユーザーの判断待ち） | p009a、Q324-4 |
 
 ### 実装の Phase の案（2026-11-01 P1、[design.md](design.md) 第 2 版 §15。Q1 の受け入れの後に表へ）
 
