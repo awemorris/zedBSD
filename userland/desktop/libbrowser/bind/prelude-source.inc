@@ -1648,7 +1648,7 @@ static const char prelude_source[] =
 	"      get size() { return this._s; }\n"
 	"      get id() { return this._i; }\n"
 	"      get url() { return this._u; }\n"
-	"      get element() { var e = this._e; return e && e.isConnected && e.ownerDocument === document ? e : null; }\n"
+	"      get element() { var e = this._e; return e && e.isConnected && e.ownerDocument === document && native.fullyActive() ? e : null; }\n"
 	"      toJSON() {\n"
 	"        return { name: this.name, entryType: this.entryType, startTime: this.startTime, duration: this.duration,\n"
 	"          renderTime: this.renderTime, loadTime: this.loadTime, size: this.size, id: this.id, url: this.url };\n"
