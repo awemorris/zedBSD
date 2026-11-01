@@ -2,7 +2,7 @@
 
 # ws335-p014: K-PKE と ML-KEM-768
 
-Status: planned（2026-11-01 p001 が作成。起動は Q1。依存: p013）
+Status: 実装済み・試験 PASS（2026-11-02 02:05 P6 q1894-i01。cleared は Q1）。前: planned（2026-11-01 p001 が作成。起動は Q1。依存: p013）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -62,4 +62,52 @@ git diff --check
 
 ## 結果
 
-（未着手）
+2026-11-02（host の `date` は 02:02 JST）P6（Sonnet 5.5）、Queue q1894-i01。worktree p6-ws335b（main 290dfb1d0）。
+
+作った物: `userland/base/libcrypto-compat/cryc-mlkem.c`（骨格の置き換え）、`plan/ws335/tests/unit/test-mlkem.c`、`plan/ws335/tests/unit/ct-mlkem.c`。header・試験の道具・他の module は変えていない。実装の commit は 74838e0630。
+
+実行した command と最後の行（`WS335_VECTORS=/home/awe/zedBSD-claude1/build/sources/tls-vectors`）:
+
+| command | 最後の行 |
+| --- | --- |
+| `sh plan/ws335/tests/run-unit.sh mlkem`（ASan・UBSan） | `test-mlkem: PASS (8135 checks)` / `run-unit: PASS` |
+| `sh plan/ws335/tests/run-unit.sh --win32 mlkem`（x86_64、Wine） | `test-mlkem: PASS (8135 checks) (win32)` / `run-unit: PASS` |
+| `sh plan/ws335/tests/run-ct.sh mlkem` | `ct-mlkem: PASS (4 checks)` / `run-ct: PASS` |
+| `sh plan/ws335/tests/run-unit.sh all` | 34 本（test 20 本と ct 14 本）全部 PASS、最後の行 `run-unit: PASS` |
+| `BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh` | `check-skeleton: PASS`（warning 0、cc・clang・zedBSD の clang・llvm-mingw の 2 arch、名前の範囲） |
+| `git diff --check` | 出力なし |
+
+実装（FIPS 203 のアルゴリズム 13〜21）:
+
+- K-PKE.KeyGen は `cryc_mlkem768_keygen_internal` に inline。行列 A は保持せず、積に使う瞬間に rho から SampleNTT で作る（アルゴリズム 13・14 で各要素は 1 回しか使われない）。誤差 e[i] も使う直前に標本化（nonce は s の後の 3 から）。
+- K-PKE.Encrypt は y を 3 本保持して NTT、u[i] = NTT^-1(sum_j A[j][i] y[j]) + e1[i] を圧縮して c1、v = NTT^-1(t^T y) + e2 + mu を圧縮して c2。nonce は y が 0〜2、e1 が 3〜5、e2 が 6。
+- K-PKE.Decrypt は u'[i] を decode・decompress・NTT して s^T u' を蓄積、w = v' - NTT^-1(...)、Compress_1 して ByteEncode_1。
+- Decaps は m' = Decrypt、(K', r') = G(m' || h)、K-bar = J(z || c)、c' = Encrypt(ek, m', r')、`cryc_ct_equal` と `cryc_ct_mask_eq32` と `cryc_ct_select_bytes` で K' か K-bar を選ぶ（暗黙の拒否、分岐なし）。
+- `cryc_mlkem768_check_dk` は H(ek 部) と保存の h を `cryc_ct_equal` で比べ、結果を分岐なしの mask で 0 か EINVAL にする。`cryc_mlkem768_check_ek` は 3 本の ByteDecode12 の clean flag（公開の値なので最初の誤りで止める）。
+- 秘密を載せる局所の配列と多項式は全ての return の前に `cryc_wipe`。keygen の乱数の失敗は ek・dk を、encaps の失敗（EINVAL・EIO）は shared・ciphertext を wipe。
+
+試験（8135 checks）:
+
+- 公式 vector: Wycheproof ML-KEM-768。keygen_seed 100 件（seed から ek・dk がバイトまで一致、dk の配置、check_ek・check_dk が 0）、encaps 133 件の valid（Encaps_internal と、m を返す乱数で Encaps の両方が c・K と一致）、encaps の invalid のうち ek が 1184 byte の 112 件（not reduced 100 と ModulusOverflow 12）は check_ek と Encaps が EINVAL で出力を wipe・乱数を引かない、長さだけの誤りの 20 件は呼び出し側の確認なので数えるだけ、general 161 件の valid（seed から鍵を作り ek 一致、check_dk、Decaps が K。うち random ciphertext と bit flip は暗黙の拒否の鍵で、J(z||c) を SHAKE256 から試験の側で計算した値と 20 件以上で一致）、general の長さの誤り 40 件は数えるだけ、semi-expanded decaps の valid 3 件（zeroed byte の MalleableCiphertext 2 件を含む）が K と一致、InvalidDecapsulationKey 2 件が check_dk で EINVAL、長さだけの 4 件は数えるだけ。件数は試験の中で CHECK している。
+- 自作: 表 3 の大きさ、乱数つき KeyGen（d・z の順、2 回の呼び出し、どちらの失敗でも EIO と wipe、乱数が途中で尽きても EIO）、Encaps の乱数の失敗、check_ek（各多項式の先頭・2 番目・254・255 番の係数に q-1 は通り、q・q+1・4095 は EINVAL、rho は対象外）、check_dk（dk の全 2400 byte を 1 bit ずつ反転し、1152〜2367 だけが EINVAL）、暗黙の拒否（c の全 1088 byte を順に反転、最初と最後の byte の全 bit、全 0・全 0xff・乱数 30 件が全て J(z||c') と一致し K と違う）、壊れた dk（z を替えると有効な c は K のまま・不正な c は新しい z の鍵、dk の秘密部を 3 本それぞれ壊すと check_dk は通り復号が外れて拒否の鍵）、往復 40 件（Encaps_internal・Decaps・乱数つき Encaps、決定性、別の m で別の c・K、m が全 0・全 0xff、別の鍵での Decaps は拒否の鍵）。全て exact-size の malloc で ASan が範囲外を拾う。
+
+定数時間（ct-mlkem、valgrind memcheck）: keygen_internal（z を秘密）、encaps_internal（m を秘密）、decaps（dk の dkPKE と z を秘密、有効な c と壊れた c の両方）、check_dk（dk 全部を秘密、結果は mask から作った値）が PASS。制約: keygen の seed d を秘密にすると rho（= ek の一部、公開）が SampleNTT の棄却の分岐に入り memcheck が報告する（cryc-mlkem-poly.c の sample_ntt で確認、公開の値の分岐で仕様どおり）ので、d は公開にして z だけ秘密にした。d から作る s・e の係数 NTT・CBD は p013 の ct と、decaps の再暗号化（m' 由来の y・e1・e2 を秘密として流す）で確認している。
+
+わざと壊す確かめ（git の外。`build/tmp/p014/brk.py`、.c を `build/tmp/p014/brk/m-N/` に複写して書き換え、-O2・sanitizer 無しの build で流す。実装 file は触らず最後に sha256 が変わっていないことを script が確認。判定は BUILD-ERROR・CRASH・TEST-FAIL・CT-FAIL・MISSED を区別した）。123 通り、build の誤りは 0。
+
+- 単体試験の対象 108 通り（定数 9、keygen 16、keygen の乱数 4、check_ek 5、check_dk 6、encaps_internal・encaps 10、decaps 11、J・G・H・noise 7、add・sub・行列の seed 9、encrypt 20、decrypt 11）のうち 103 通りが `test-mlkem: FAIL (n of 8135 failed)` で落ち、1 通り（DV 4→5）が crash（signal 6、build は成功、範囲外の書き込みで abort）。
+- 見逃し 4 通りは全て等価な変異: (1) decrypt の `v - x` を `x - v` にする（Compress_1 が x と q-x に対し対称で、全入力で同じ bit。等価）、(2) mlkem_poly_sub の差に +1（復号の雑音の余裕の内、観測できない）、(3)(4) mlkem_poly_sub と decrypt の差から masked subtraction を外す（Compress が入力を先に還元するので同じ。sub の loop を 1 つ短くする変異は落ちる）。
+- 定数時間の対象 15 通り（変異の番号 108〜122）のうち 14 通りが memcheck で落ちた: 秘密に依存する分岐（decaps の comparison の結果・m'・z・dk の byte、encrypt の m・r、keygen の z、check_dk の hash の byte）、秘密で引く table（m'、sub・add の係数）、sub の中の分岐、decaps の ciphertext 比較を `memcmp` に替えた形、check_dk と decaps の mask の volatile 書き込みの分岐。1 通り（check_dk の `if (equal == 0) error = EINVAL; else error = 0;`）は optimizer が分岐の無い形にするため見逃し（memcheck で見える差が無い。volatile の書き込みを入れた形は落ちる）。
+
+自分で決めた点（header が黙っていた所）:
+
+1. 行列 A を保持せず都度 SampleNTT。誤差 e も使う直前に標本化（nonce の順は仕様のまま）。
+2. `cryc_mlkem768_keygen` の乱数は d と z を 2 回に分けて引く（アルゴリズム 19 の順）。どちらの失敗でも ek と dk を全部 wipe して EIO。
+3. `cryc_mlkem768_encaps` は先に check_ek を行い、EINVAL なら乱数を引かず shared と ciphertext を wipe して返す（header は EIO のときだけ wipe と書く。EINVAL の wipe は安全側）。
+4. `cryc_mlkem768_check_dk` は分岐なしで 0 か EINVAL を作る（header の「Constant time in dk」のため）。dk の 7.3 の hash check だけで、埋め込みの ek の modulus check はしない（header どおり）。
+5. decaps は dk の ek が check 済みとして byte_decode の clean flag を見ない（秘密に依存する分岐を避ける）。
+6. K-PKE の三つ（KeyGen・Encrypt・Decrypt）のうち公開の関数にするのは header の宣言の分だけ。Encrypt・Decrypt は static。
+
+phase.md と仕様の食い違い・header の不備: 見つからなかった。
+
+未実施: 性能の測定、32 bit の size_t の機械・aarch64 Windows の実行（check-skeleton で build のみ）、実機・QEMU（範囲外）、decaps の入力の長さの確認（header どおり呼び出し側）。
