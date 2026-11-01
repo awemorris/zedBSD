@@ -76,6 +76,8 @@
 
 （無し）
 
+- 2026-11-02 08:15 Latitude 5330 の NVMe の zedBSD を main d00e07108 の image（plan/tools/hw5330/config-5330.mk）に更新（ユーザーの指示）。5330-run --nvme-image PASS、画面 build/review/5330/q1-5330-main-d00e071.png。Debian に戻した。
+
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
 （2026-11-01 10:29 クリア。手順は各 Bug の ticket にある）
