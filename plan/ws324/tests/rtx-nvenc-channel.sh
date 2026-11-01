@@ -80,8 +80,8 @@ if [ -n "$IP" ]; then
 	say "nvenc lines:"
 	grep -E 'nvenc' "$OUT/nvrtx.log" | cut -c1-160 | sed 's/^/    /' | tee -a "$SUMMARY"
 	say "nvdec and work: $(grep -E 'nvdec-channel (ok|fail)' "$OUT/nvrtx.log" | tail -1 | cut -c1-120) | $(grep -c 'work-channel ok' "$OUT/nvrtx.log") work-channel ok"
-	say "channel errors $(grep -c 'channel error' "$OUT/nvrtx.log"), faults $(grep -ci 'fault' "$OUT/nvrtx.log"), lost $(grep -c 'lost' "$OUT/nvrtx.log"), session $(grep -c session-socket "$OUT/session.txt")"
-	grep -E 'channel error|fault' "$OUT/nvrtx.log" | head -6 | cut -c1-160 | sed 's/^/    /' | tee -a "$SUMMARY"
+	say "channel errors $(grep -c 'channel-stop channel error' "$OUT/nvrtx.log"), faults outside the boot's record of an earlier fault $(grep -i 'fault' "$OUT/nvrtx.log" | grep -vc 'before the tables'), lost $(grep -c 'lost' "$OUT/nvrtx.log"), session $(grep -c session-socket "$OUT/session.txt")"
+	grep -E 'channel-stop channel error|fault' "$OUT/nvrtx.log" | grep -v 'before the tables' | head -6 | cut -c1-160 | sed 's/^/    /' | tee -a "$SUMMARY"
 else
 	say "FAIL zedBSD not up with the kernel under test"
 fi

@@ -2,7 +2,7 @@
 
 # ws324-p009a NVENC の channel（段 nvenc-channel）: engine の確保、class の bind、firmware の確かめ、RC の通知の記録
 
-Status: in-progress（2026-11-02 P1、q1880-i01）
+Status: 受け入れ達成（2026-11-02 00:58 P1、q1880-i01。cleared は Q1）
 
 - WS: [WS324](../ws.md)。設計: [design.md](../design.md) §3.1・§3.3（firmware）・§7.1・§9・§12 R5・§14.1 T3・§14.3・§15。
 - 基点: main `0a4779015`（worktree `/home/awe/zedBSD-worktrees/p1-ws324`、branch `agent/p1-ws324`）。
@@ -31,8 +31,17 @@ RTX 2070（TU106、nvrtx）の NVENC に、NVDEC と同じ形の channel を wor
 
 ## 4. 結果
 
-（実機の前。build と host 試験は下。）
-
-- build（2026-11-02 00:51）: 上の command で rc=0、warning 0（log の `warning` 0 行）。vmunix 3631880 byte。
-- host（2026-11-02）: `nvenc host test: 24 checks, 0 failed`、続く `nvdec host test: 88 checks, 0 failed`。
-- 未実施: 実機。
+- build（2026-11-02 00:51）: `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=build/ws324-p009a/k build/ws324-p009a/k/vmunix` rc=0、warning 0（log の `warning` 0 行）。vmunix の cksum 33795609。
+- host（2026-11-02）: `sh plan/ws324/tests/nvenc-host-test.sh` → `nvenc host test: 24 checks, 0 failed`、続く `nvdec host test: 88 checks, 0 failed`（devinfo の pick の変更の非退行）。
+- 実機（RTX 2070 の実機だけ。QEMU は使っていない。2026-11-02 00:54〜00:58、lock の中、1 起動）: `flock -n /tmp/zedbsd-rdna.lock sh plan/ws324/tests/rtx-nvenc-channel.sh build/tmp/p009a-run1 build/ws324-p009a/k/vmunix` rc=0。kernel は wanted 33795609 と一致、`nvrtx.video=1` の行 1。dmesg（SSH）の行:
+  - `nvenc-channel: engine e97b6c00 on runlist 2, context 4096 bytes`（devinfo の 0x25 の entry と falcon の list に NVENC がある）
+  - `nvenc-channel: the encoder released 4e56454e itself`（1 つ目の fence（SET_OBJECT と NOP）と 2 つ目の fence が 2 s の内に通り、NVENC 自身の semaphore の release の値が入った）
+  - `nvenc-channel: no channel error was reported`（段の中の RC の通知 0、200 ms の drain の後）
+  - `nvenc-channel ok: class c4b7, channel 49 on runlist 2`
+  - 非退行: `nvdec-channel ok: class c4b0, channel 48 on runlist 1, context 4096 byte`、work channel ok、`channel-stop channel error` 0 行、lost 0、desktop の session の socket あり。
+  - `vram-window bar1 before the tables: fault …`（3 行）は、前の boot の fault の record を毎 boot に出す既存の行（main の kernel の log、P2 の `rtx-p015-i02.log` にも同じ address 0x62e000 で出る）で、この変更とは関係しない。
+- **R5 の答え**: GSP-RM（570.144）が NVENC の falcon の ucode を持ち、channel の schedule で動かす。driver が load する firmware は要らない（NVDEC と同じ）。
+- 戻し（00:57）: NVMe の `/boot/boot0/vmunix` 1463007375・`zedbsd.cfg` 38198411 を読み戻しの写しから戻し、前の cksum と一致（`restore MATCH`）。Debian 6.12.111、RTX の 4 function は vfio-pci、`measure.sh where` は linux。lock の file は free に戻した。
+- 直した事: script の要約の channel error の数え方が自分の「no channel error was reported」の行も数えて 1 と出したので、`channel-stop channel error` だけを数え、既存の record の fault の行を除くように直した（直した script は実機で流し直していない。同じ log に直した filter を当てると channel error 0・fault 0）。
+- 未実施: NVENC の encode の method（APPLICATION_ID 以降）は p009b。timeout の後の隔離（design §9）は p009b 以降の encode の executor で。chid 49 と 48 の重なりの host 試験は、chid の define が nvenc.c・nvdec.c の中にあるので行っていない（式は NVDEC の +1）。
+- 成果物: `src/drivers/gpu/nvrtx/nvenc.c`・`nvenc-records.c`・`nvrtx-nvenc.h`、`objects.c`（devinfo の 0x25）・`nvrtx-gsp.h`・`nvrtx-gpu.h`（`gpu->nvenc`、RC の記録の 3 欄）・`rpc.c`（RC の数え）・`gsp.c`（段・stop・release）・`platform/amd64/vmunix.mk`、試験 `plan/ws324/tests/nvenc-host-test.sh`・`.c`・`rtx-nvenc-channel.sh`。log は worktree の `build/tmp/p009a-run1/`（summary.txt・nvrtx.log・before.txt・restore.txt）。
