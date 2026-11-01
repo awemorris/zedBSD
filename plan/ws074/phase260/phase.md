@@ -1324,3 +1324,21 @@ Origin: 2026-10-27 ユーザーの指示。
 - 測定: dev183（style の load）= 3,202、dev184（animation の event）= 3,203 / 3,473（92.23%、gap 270、crash は 0）、後退 0。dev181 からは +2。
 - Acid: dev184 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
 - 未実施: asan、host-NAME の全件、target の確認、子文書の scroll（window.scrollTo・scrollY）。
+
+### クラウドのセッションの途中経過（続き 11、2026-11-01。dev185。transitions の数え直し・custom elements・opaque origin の調査）
+
+- transitions の数え直し（依頼者の指示の 1）: gap の ID のうち CSS の transition（`transition` の property・transitionrun/start/end/cancel の event・@starting-style・CSSTransition）を使う物は 2 件だけ
+  （css-cascade/scope-starting-style と css-anchor-position/position-try-cascade）。view-transitions の `getAnimations` を使う 3 件（pseudo-element-animations 系・backdrop-filter-animated）は Web Animations の物で transitions ではない。
+  position-try-cascade は transition のほか animation・revert-layer の subtest も全て通す必要があり、scope-starting-style は transition の補間と @starting-style の両方が要る。
+  依頼者の判断 3（見込みが小さければ区切ってよい）に従い、transitions の実装は見送って記録する。作る時の設計: 既存の animation の補間（css/cascade.c の filter だけ）を一般の値（数値・長さ・色・transform）へ広げ、
+  style の変化の検出（前の computed と比べる）・page の timer（今回の animation event と同じ `bind_animation_sync` の経路）・view 側の再描画の駆動が要る。実際のサイトの動きは再描画の駆動（今は時間で再 layout しない）が先に要る。
+- custom elements（JS の prelude の中。今まで `customElements.define` は名前を覚えるだけで何もしなかった）:
+  `customElements` に define・get・getName・whenDefined・upgrade を作った。`HTMLElement` を `new.target` を見る constructor に差し替え、既にある要素（document と shadow tree）の upgrade、`document.createElement(NS)` と `new` での作成、
+  connectedCallback・disconnectedCallback・attributeChangedCallback（observedAttributes）を MutationObserver から呼ぶ（変更の少し後）。attachShadow した shadow root も観る。
+  `@scope` の root を探す時、shadow tree の一番上の要素から host へも辿る（css/cascade.c `cascade_scope_parent`）ので `:scope::part()` が効く。通った ID: css-cascade/scope-part。
+- 測定: dev185 = 3,204 / 3,473（92.25%、gap 269）、後退 0。dev184 から +1。Acid2 100% / Acid3 100/100・pixel 100%（exact match）。host build は warning 0。
+- Navigation の残りの調べ直し（見送り）: opaque origin の frame（`sandbox` に allow-same-origin が無い。4 件: navigation-history-entry/opaque-origin・return-value/back-forward-opaque-origin・navigate-opaque-origin・updateCurrentEntry-method/opaque-origin）は
+  今は子の window を作らない（`bind_frame_sandboxed`）ので、`i.contentWindow` が null になって `fetch_tests_from_window(i.contentWindow)` が壊れる。作るには、sandbox の frame も読み込む（scripts は allow-scripts がある時だけ）、
+  親へは contentWindow の facade（postMessage だけ）、子の `navigation.currentEntry` は null・`entries()` は空、`postMessage` の `event.source`・`event.origin`（今は受け取り側の window・受け取り側の origin を入れている）を送り手のものにする、が要る。
+  特に `event.source` が送り手を指さないと testharness の window 間の通信（`event.source.postMessage`）が自分に返る。windows をまたぐ呼び出し元の realm を native が知る作りが無い。数 session 分で、他の Navigation の残り（popup・form・meta refresh・data:・blob:・javascript:）も同じ型の足りない物。
+- 未実施: asan、host-NAME の全件、target の確認、子文書の scroll。
