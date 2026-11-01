@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) p001 | RTX 2070 の Vulkan Video（H.264 encode、H.265 decode・encode） | 調べと設計（q1854） | 設計 → レビュー → 実装の Phase |
-| P2 | [WS322](ws322/ws.md) p001 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | 調べと設計（q1845） | 設計 → レビュー → 実装の Phase の案。板は P4 の後 |
+| P2 | [WS322](ws322/ws.md) p003 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | PowerVR の executor の NV12・plane の view・export（q1863）。p002: VF2 で Wave511 が起動し 6 本 68 frame が ffmpeg と一致 | p004 H.264 decode の道 |
 | P3 | [WS291](ws291/ws.md) p027 | GPU の描画の速さ（RTX の submit の hand-off） | 回帰: RTX の desktop・game mode・bench と QEMU の Venus（q1859） | PASS なら merge |
 | P4 | [WS291](ws291/ws.md) p027 | 同上 | 回帰: Pi 5（arm64）と VF2（riscv64）の __thread の libvulkan（q1860） | PASS なら merge。その後 Bug |
 | P5 | [WS334](ws334/ws.md) p028 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | libkeiland の Win32 その 1（窓・loop・入力・Vulkan の surface、q1862）。p026 libmedia の Windows は cleared | p029（題の帯・IME・clipboard・DPI） |
