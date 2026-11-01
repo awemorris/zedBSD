@@ -8,7 +8,7 @@
 | P1 | kernel-and-driver-designer | ws324 p001 RTX の video の設計 (q1854-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | in-progress（2026-11-01 22:10 起動）。前の agent/p1-ws291p026 は未 merge | 7973c156f（main） |
 | P2 | phase-runner-high | ws322 p002 VF2 の VPU の probe (q1852-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 21:35 起動、VF2） | 5b8debe04（merge 261624739） |
 | P3 | phase-runner-high | ws291 p027 の回帰 amd64・Venus (q1859-i01) | `/home/awe/zedBSD-worktrees/p3-ws291reg` / `agent/p3-ws291reg`（候補 60cf76c13） | in-progress（2026-11-01 22:16 起動、10.0.10.3） | d32bcb9f5（merge 9b865b038） |
-| P5 | phase-runner-high | ws334 p026 libmedia の Windows (q1853-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 21:45 起動） | 30bd64129（merge f5aad61a8） |
+| P5 | phase-runner-high | ws334 p028 libkeiland の Win32 その 1 (q1862-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 22:29、同じ P5 に続けて頼んだ） | 84efc4b2d（merge b72145b7a） |
 | P6 | phase-runner-low | ws335 p010 P-256・P-384 (q1861-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 22:26 起動） | 34e9c77f1（merge 3666e69f0） |
 | P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |
 | Sonnet | phase-runner-low | ws334 p024 (q1855-i01) | `/home/awe/zedBSD-worktrees/s-ws334-p024` / `agent/s-ws334-p024` | in-progress（2026-11-01 21:48 起動） | — |

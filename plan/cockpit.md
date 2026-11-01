@@ -11,7 +11,7 @@
 | P2 | [WS322](ws322/ws.md) p001 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | 調べと設計（q1845） | 設計 → レビュー → 実装の Phase の案。板は P4 の後 |
 | P3 | [WS291](ws291/ws.md) p027 | GPU の描画の速さ（RTX の submit の hand-off） | 回帰: RTX の desktop・game mode・bench と QEMU の Venus（q1859） | PASS なら merge |
 | P4 | [WS291](ws291/ws.md) p027 | 同上 | 回帰: Pi 5（arm64）と VF2（riscv64）の __thread の libvulkan（q1860） | PASS なら merge。その後 Bug |
-| P5 | [WS334](ws334/ws.md) p026 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | libmedia の Windows（q1853）。p023（instance と API v4、cookie・Web Storage の永続）は cleared | p027（browser の UI の準備）へ |
+| P5 | [WS334](ws334/ws.md) p028 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | libkeiland の Win32 その 1（窓・loop・入力・Vulkan の surface、q1862）。p026 libmedia の Windows は cleared | p029（題の帯・IME・clipboard・DPI） |
 | P6 | [WS335](ws335/ws.md) p010 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | P-256・P-384 の群（q1861）。p004 AES・p005 GCM・p007 整数は cleared | p011 ECC の鍵・ECDH・ECDSA へ |
 | P7 | — | — | 返却（22:26）。WS334 p027 の QEMU の guest の確かめ PASS（画面: build/review/p027-guest/） | 未割当 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ | 立てない。Claude のクラウドのセッションが担当 | 成果の origin/browser を Q1 が merge |
