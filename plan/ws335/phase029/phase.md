@@ -33,6 +33,7 @@ Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（重い。Q1 の判断で O
 
 - 試験の相手は [p037](../phase037/phase.md) の `tests/unit/tlspeer.h`（試験の側の scripted な TLS server）。RFC 8448 の full の trace は使わない（RFC 8448 の ClientHello は libssl-compat の送らない拡張を含み、server の鍵は RSA-1024 で CRYC_RSA_MIN_BITS に届かないため、transcript も CertificateVerify も一致しない。RFC 8448 の値は p026〜p028 が使う）。
 - tlspeer で: 1-RTT（x25519、P-256 の HRR、ECDSA P-256 と RSA 2048 の鍵）、HRR の cookie、2 回目の HRR、downgrade の印、unsolicited な拡張、壊した Finished・CertificateVerify、ServerHello と EncryptedExtensions の同じ record（conn の試験だが hs の側の状態も確かめる）。固定の random の源で送る bytes が tlspeer の期待と一致すること。
+- （2026-11-02 Q1 の判断）tlspeer は RSA の秘密鍵を持たない（p037）。上の「RSA 2048 の鍵」の server の場合は、ここでなく p033 の OpenSSL `s_server` との相互接続で確かめる。tlspeer の使い方は `tests/unit/tlspeer.h` の冒頭と [p037](../phase037/phase.md) の結果。
 - 2 回目の HRR、downgrade の印、unsolicited な拡張の拒否。
 - 他の実装（OpenSSL・BoringSSL・LibreSSL・mbedTLS・wolfSSL・libsodium・BearSSL・Go の crypto・Rust の crypto ほか）の code・comment・構造・内部の名前を写さない。表・定数は data として block ごとに直前の複数行の comment で「Values referenced: <仕様の名前と版> <節・表>」。file の先頭に出典を書かない。source に開発の管理情報（WS・Phase の番号、plan/ への参照、日付）を書かない。
 - Windows（static link）: 同じ source が llvm-mingw で Windows の static library になり、OmniGrammaton の 1 つの .exe に link される（[design.md](../design.md) D23・D25）。`long` は Windows で 32 bit（LLP64）なので、32 bit を越える値に `long`・`unsigned long` を使わない（`uint64_t`・`size_t`）。static でない関数・object の名前は公開の名前か `cryc_`・`sslc_` で始める（check-skeleton の 7 が照合）。試験で binary の file を読む時は `fopen(…, "rb")`（Windows の text mode を避ける）。
