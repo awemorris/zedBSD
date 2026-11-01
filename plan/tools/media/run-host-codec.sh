@@ -43,7 +43,7 @@ cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,un
     userland/desktop/libmedia/aac-synth.c userland/desktop/libmedia/aac.c userland/desktop/libmedia/sound.c \
     userland/desktop/libmedia/h264sw-*.c userland/desktop/libmedia/vcodec-*.c \
     userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c \
-    "$out/thread-posix.o" -ldl -lpthread -lm -o "$out/host-codec" || { echo "run-host-codec: FAIL (build)"; exit 1; }
+    userland/desktop/libmedia/media-os-posix.c "$out/thread-posix.o" -ldl -lpthread -lm -o "$out/host-codec" || { echo "run-host-codec: FAIL (build)"; exit 1; }
 files=plan/tools/media/sample.mp4
 if command -v ffmpeg > /dev/null 2>&1; then
 	src="-f lavfi -i testsrc2=size=320x180:rate=25 -f lavfi -i sine=frequency=440:sample_rate=44100 -t 4"

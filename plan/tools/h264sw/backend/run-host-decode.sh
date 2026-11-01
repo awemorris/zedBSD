@@ -16,7 +16,7 @@ lib=userland/desktop/libmedia
 if ! cc -std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. \
     plan/tools/h264sw/backend/host-decode.c $lib/decoder.c $lib/bitstream.c $lib/picture.c $lib/bits.c $lib/h264sw-*.c $lib/vcodec-*.c \
     userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c \
-    userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c \
+    userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c $lib/media-os-posix.c \
     -lpthread -lm -o "$out/host-decode" > "$out/build.log" 2>&1; then
 	echo "run-host-decode: FAIL (build)"
 	head -20 "$out/build.log"

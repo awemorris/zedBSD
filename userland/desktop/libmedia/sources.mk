@@ -1,6 +1,8 @@
 # The source list of libmedia, read by its Makefile and apps/browser-win32/Makefile.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-LIBMEDIA_SOURCES := userland/desktop/libmedia/engine.c userland/desktop/libmedia/decoder.c \
+# Its operating-system layer on a POSIX system (the Windows build has media-os-win32.c in its place).
+LIBMEDIA_OS_SOURCES := userland/desktop/libmedia/media-os-posix.c
+LIBMEDIA_SOURCES := $(LIBMEDIA_OS_SOURCES) userland/desktop/libmedia/engine.c userland/desktop/libmedia/decoder.c \
 	userland/desktop/libmedia/bitstream.c userland/desktop/libmedia/picture.c \
 	userland/desktop/libmedia/h264.c userland/desktop/libmedia/h264-dpb.c \
 	userland/desktop/libmedia/vkvideo.c userland/desktop/libmedia/vkvideo-runtime.c \

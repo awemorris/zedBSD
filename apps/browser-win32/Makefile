@@ -11,8 +11,8 @@
 #
 # What it builds so far: the files of the operating-system layers (libbrowser's base/os-*, its storage,
 # libmedia's media-os, libkeiland's Windows files), compiled with the Windows compiler and its warnings;
-# the static libraries: libbrowser.a (all of libbrowser, with its Windows layer), libmedia.a and
-# libkeiland.a (their Windows files so far), libtruetype and the png, jpeg, gif and z compat libraries
+# the static libraries: libbrowser.a (all of libbrowser, with its Windows layer), libmedia.a (all of
+# libmedia and its container reader, with media-os-win32.c), libkeiland.a (its Windows files so far), libtruetype and the png, jpeg, gif and z compat libraries
 # (from the same source lists as the zedBSD build); the Vulkan headers and the import library of the
 # Vulkan loader.  A test's program links with them all (test-program); the
 # browser's program and its resources join later, linked the same way (WIN32_PROGRAM).  Apart from those:
@@ -140,12 +140,19 @@ SCRIPT_CORE_SOURCES := plan/ws334/tests/script-core-main.c
 SCRIPT_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(SCRIPT_CORE_SOURCES))
 SCRIPT_CORE_PROGRAM := $(BROWSER_WIN32_BUILD)/tests/script-core.exe
 
+# libmedia (with the container reader built into it): the zedBSD build's list less its POSIX
+# operating-system layer, which media-os-win32.c of the layers above replaces.
+include userland/desktop/libmedia/sources.mk
+LIBMEDIA_CORE_SOURCES := $(filter-out $(LIBMEDIA_OS_SOURCES),$(LIBMEDIA_SOURCES))
+LIBMEDIA_CORE_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBMEDIA_CORE_SOURCES))
+
 # The static libraries of the tree's libraries, each from its files of the Windows build so far:
 # libbrowser (its storage modules, which the layers above list too, once) with its Windows layer,
-# libmedia's and libkeiland's Windows files (their shared files join with their Windows ports).
+# libmedia with media-os-win32.c, and libkeiland's Windows files (its shared files join with its
+# Windows port).
 WIN32_SOURCES_browser := $(LIBBROWSER_CORE_SOURCES) \
 	$(filter-out $(LIBBROWSER_CORE_SOURCES),$(filter userland/desktop/libbrowser/%,$(BROWSER_WIN32_LAYER_SOURCES)))
-WIN32_SOURCES_media := $(filter userland/desktop/libmedia/%,$(BROWSER_WIN32_LAYER_SOURCES))
+WIN32_SOURCES_media := $(LIBMEDIA_CORE_SOURCES) $(filter userland/desktop/libmedia/%,$(BROWSER_WIN32_LAYER_SOURCES))
 WIN32_SOURCES_keiland := $(filter userland/desktop/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES))
 WIN32_TREE_LIBRARIES := browser media keiland
 
@@ -215,6 +222,8 @@ $(BROWSER_WIN32_OBJ)/%.o: %.c
 # <browser/browser.h>, which names Vulkan's types).  Of the script core only js/tool.c includes
 # <browser/browser.h>, and so does script-core.exe's main.
 $(LIBBROWSER_CORE_OBJECTS): | $(WIN32_COMPAT_HEADER_COPIES) $(WIN32_VULKAN_HEADERS)
+# libmedia's Vulkan Video files include the Vulkan headers (and the others include nothing copied).
+$(LIBMEDIA_CORE_OBJECTS): | $(WIN32_VULKAN_HEADERS)
 $(SCRIPT_CORE_OBJECTS): | $(WIN32_VULKAN_HEADERS)
 
 # A compat object keeps what the compiler said in <object>.log, and shows it only when the compile fails.
@@ -316,5 +325,6 @@ clean:
 .PHONY: FORCE
 FORCE:
 
--include $(BROWSER_WIN32_LAYER_OBJECTS:.o=.d) $(LIBBROWSER_CORE_OBJECTS:.o=.d) $(WIN32_COMPAT_OBJECTS:.o=.d) \
+-include $(BROWSER_WIN32_LAYER_OBJECTS:.o=.d) $(LIBBROWSER_CORE_OBJECTS:.o=.d) $(LIBMEDIA_CORE_OBJECTS:.o=.d) \
+	$(WIN32_COMPAT_OBJECTS:.o=.d) \
 	$(TEST_PROGRAM_OBJECTS:.o=.d) $(SCRIPT_CORE_OBJECTS:.o=.d)

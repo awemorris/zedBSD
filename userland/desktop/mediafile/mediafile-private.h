@@ -18,6 +18,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct media_os_file;
+
 /* The most tracks a file may have; the rest are left out. */
 #define MF_TRACK_MAX		16U
 
@@ -44,12 +46,12 @@ struct mf_format {
 };
 
 /*
- * An open file: its descriptor (-1 for a source) or its source, its size,
+ * An open file: the file read (NULL for a source) or its source, its size,
  * its format and that format's state, the tracks found, the length of the
  * presentation, and the buffer the last packet was read into.
  */
 struct media_file {
-	int fd;
+	struct media_os_file *file;
 	struct media_source source;
 	uint64_t size;
 	const struct mf_format *format;

@@ -12,12 +12,10 @@
  */
 
 #include "mediafile-private.h"
+#include "userland/desktop/libmedia/media-os.h"
 #include <errno.h>
-#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 /* The first bytes of a file read to tell its format: three transport packets of 192 bytes. */
 #define MF_HEAD_SIZE		(3U * 192U + 8U)
@@ -36,35 +34,30 @@ media_file_open(
 	struct media_file **file)
 {
 	struct media_file *opened;
-	struct stat status;
+	uint64_t size;
 	int error;
 
-	/* The state, with no descriptor yet. */
+	/* The state, with no file open yet. */
 	*file = NULL;
 	opened = calloc(1, sizeof(*opened));
 	if (opened == NULL)
 		return ENOMEM;
 
-	/* No descriptor until the open succeeds. */
-	opened->fd = -1;
-
 	/* The file and its size. */
-	opened->fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (opened->fd < 0) {
-		error = errno;
+	error = media_os_file_open(path, &opened->file, &size);
+	if (error != 0) {
 		media_file_close(opened);
 		return error;
 	}
 
-	/* Its size; a file too small to hold a header is not a media file. */
-	error = fstat(opened->fd, &status);
-	if (error != 0 || status.st_size < 12) {
+	/* A file too small to hold a header is not a media file. */
+	if (size < 12U) {
 		media_file_close(opened);
 		return EINVAL;
 	}
 
 	/* Its format, header and index. */
-	opened->size = (uint64_t)status.st_size;
+	opened->size = size;
 	error = mediafile_start(opened);
 	if (error != 0) {
 		media_file_close(opened);
@@ -96,7 +89,6 @@ media_file_open_source(
 	opened = calloc(1, sizeof(*opened));
 	if (opened == NULL)
 		return ENOMEM;
-	opened->fd = -1;
 	opened->source = *source;
 	opened->size = source->size;
 
@@ -247,9 +239,8 @@ media_file_close(
 	for (i = 0; i < MF_TRACK_MAX; i++)
 		free((void *)file->tracks[i].private_data);
 
-	/* The descriptor, the buffer and the file itself. */
-	if (file->fd >= 0)
-		(void)close(file->fd);
+	/* The open file. */
+	media_os_file_close(file->file);
 
 	/* The packet buffer and the state. */
 	free(file->buffer);
@@ -267,8 +258,6 @@ mf_read_at(
 	void *data,
 	size_t size)
 {
-	unsigned char *cursor;
-	ssize_t got;
 	int error;
 
 	/* Refuses a range past the end of the file. */
@@ -276,28 +265,15 @@ mf_read_at(
 		return EINVAL;
 
 	/* A source reads for itself. */
-	if (file->fd < 0 && file->source.read_at != NULL) {
+	if (file->file == NULL && file->source.read_at != NULL) {
 		error = file->source.read_at(file->source.context, offset, data, size);
 		return error;
 	}
 
-	/* Reads until every byte is in. */
-	cursor = data;
-	while (size != 0) {
-		/* One read; an interrupted one is tried again. */
-		got = pread(file->fd, cursor, size, (off_t)offset);
-		if (got < 0 && errno == EINTR)
-			continue;
-
-		/* A failure, or the file shrank under the reader. */
-		if (got <= 0)
-			return EIO;
-
-		/* Moves on by what was read. */
-		cursor += got;
-		offset += (uint64_t)got;
-		size -= (size_t)got;
-	}
+	/* Every byte, or EIO when a read fails or the file shrank under the reader. */
+	error = media_os_file_read_at(file->file, offset, data, size);
+	if (error != 0)
+		return EIO;
 
 	/* Succeeded: every byte was read. */
 	return 0;
