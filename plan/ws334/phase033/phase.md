@@ -3,7 +3,7 @@
 # ws334-p033 統合: 後半の Windows の口（TSF・drag と drop・touchpad と pen・accent・Mica・DPAPI・arm64）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §4.4 の「後」の列、§4.9、決定 21（U14: DPAPI は後半）。
-- 状態: in-progress（2026-11-02 q1886-i01、P5: d・DPAPI・c・b の drag out・system の theme の prefers-color-scheme を実装し試験 PASS、a の TSF・b の drop の受け・c の DirectManipulation・d の modal の描き直しと題の帯の透過は未実装（理由と案は末尾）。cleared か分けるかは Q1。2026-11-01 p003 で作成）。
+- 状態: cleared（2026-11-02 02:44 Q1。残りは p037）。前: in-progress（2026-11-02 q1886-i01、P5: d・DPAPI・c・b の drag out・system の theme の prefers-color-scheme を実装し試験 PASS、a の TSF・b の drop の受け・c の DirectManipulation・d の modal の描き直しと題の帯の透過は未実装（理由と案は末尾）。cleared か分けるかは Q1。2026-11-01 p003 で作成）。
 - 依存: p032。
 - **設計の残り（この Phase の前に要る）**: b の貼り付けの公開の口（libkeiland の header の変更）と d の modal な loop の間の描き直しの口は、まだ決めていない。p032 の後に Q1 がこの 2 つの設計の小さな Phase（Opus）を立ててから、この Phase を起動する（2026-11-01 design-reviewer の指摘 #23 で明記）。a・c と d の残りは下の通り決めてある。
 - 担当の想定: Opus。大きい（約 14 LW）ので、p032 の後に Q1 が次の 4 つに分けて起動してよい（各々の phase.md の節をそのまま使う）。どれも実機の Windows でしか確かめられない部分が多く、Wine の確かめは build と起動まで。

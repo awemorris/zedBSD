@@ -11,7 +11,7 @@
 | P2 | [WS322](ws322/ws.md) p007 | VF2 の VPU を Vulkan Video に | 速さと頑丈さ（timeout の立て直し・seek・1080p60、q1896）。p004: H.264 decode が VF2 で ffmpeg と一致、Video Player の GPU の道で 1080p30（画面: build/review/ws322-p004-vf2-play.png） | p005〜p006 H.265 decode（WS324 の解析の後） |
 | P3 | （q1898） | Pi 5 の desktop の動画 | host の UVC capture で Pi 5 の desktop の操作を 5〜10 秒の動画に撮る。準備の build 中、Pi 5 は P7 の計測の後 | — |
 | P4 | — | Bug の修正の担当 | 返却（01:42）。BUG-390 fixed | 次の Bug を待つ |
-| P5 | [WS334](ws334/ws.md) p033 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | 後半の Windows の口（TSF・drag と drop・touchpad など、頁に暗い mode、q1886）。p032: Wine で 15 項 PASS（https・cookie・localStorage・clipboard・dpi） | p035 規約の見直し |
+| P5 | — | Web ブラウザ OmniGrammaton の Windows 版 | 返却（02:44）。p033 cleared（頁の暗い mode・accent・Mica・DPAPI・touch と pen・drag out）。残りは本物の Windows が要るので p037 に分けた | p034 の後の Windows の file: の直し |
 | P6 | [WS335](ws335/ws.md) p015 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | OS の層（POSIX と Windows、q1897）。p014 ML-KEM-768 は cleared | p021 誤りの queue と RAND_bytes |
 | P7 | [BUG-394](bugs/BUG-394.md) | 起動の時間 | BUG-394 fixed を merge。Pi 5 で変更後の起動の時間を計測中 | 次は WS340 の候補 |
 | P8 | — | Bug の修正 | 返却（02:09）。BUG-391・392 fixed（QEMU で確認、Pi 5 は未実施） | 次を待つ |
@@ -43,6 +43,10 @@
 - 2026-11-02 02:2x: p026（TLS の record の保護）cleared。RFC 8448 の record 41 件が一致、9 suite、定数時間の試験 PASS。
 
 - 2026-11-02 02:34: p028（handshake の message の encode と読み）cleared。test-msg 936784 checks、RFC 8448 の ClientHello と送る拡張は byte 一致。
+
+### WS334 Windows 版ブラウザ
+
+- 2026-11-02 02:44: p033 cleared。system の暗い mode を頁に渡す（prefers-color-scheme）、accent の追従、Mica、cookie を DPAPI で暗号化、touch と pen、頁の画像の drag out。Wine で 18 PASS。TSF・DirectManipulation・modal の間の描き直し・題の帯の透過は本物の Windows が要るので p037 に分けた。
 
 ### WS074 Web ブラウザ
 

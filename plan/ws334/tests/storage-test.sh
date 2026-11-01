@@ -31,7 +31,7 @@ if ! timeout 3600 sh plan/ws074/tests/host-build.sh "$variant" > "$run/host-buil
 fi
 host=build/ws074-host/$variant
 flags=$(cat "$host/flags" | cut -d' ' -f2-)
-engine=$(ls "$host"/obj/*.o | grep -v -e '/browser_main\.o$' -e '/browser_main-posix\.o$' -e '/host-shell\.o$')
+engine=$(ls "$host"/obj/*.o | grep -v -e '/browser_main\.o$' -e '/browser_main-posix\.o$' -e '/host-shell\.o$' -e '/browser-os-error\.o$')
 if ! timeout 600 ${CC:-cc} $flags -Iplan/ws334/tests/unit -o "$run/storage-test" plan/ws334/tests/storage-test.c \
     $engine -lvulkan -lm -ldl -lpthread > "$run/compile.log" 2>&1 || [ -s "$run/compile.log" ]; then
 	cat "$run/compile.log"
