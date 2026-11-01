@@ -23,11 +23,11 @@
 | ws322-p005 | libvulkan の H.265 decode の転送 | planned | WS318 p011a か先に着手（Q322-4） |
 | ws322-p006 | H.265 decode | planned | p004、p005 |
 | ws322-p007 | 速さ（非同期、SLC、命令の queue） | planned | p004 |
-| ws322-p008 | encode の設計の詳細（Wave420L） | planned | Q322-2（ユーザー） |
+| ws322-p008 | encode の設計の詳細（Wave420L） | planned | Q322-2 は A（2026-11-01 ユーザー） |
 | ws322-p009 | Wave420L の bring-up と probe | planned | p008 |
 | ws322-p010 | libvulkan の encode の転送 | planned | WS318 p011b か先に着手（Q322-4） |
 | ws322-p011 | executor の H.265 encode | planned | p009、p010 |
-| ws322-p012 | 実機の受け入れ | planned | p006・p007・p011、Q322-3（ユーザー） |
+| ws322-p012 | 実機の受け入れ（GPU の直の表示の道の上で） | planned | p006・p007・p011、WS318 p009（Q322-3、2026-11-01 ユーザー） |
 | ws322-p013 | 規約の全文の見直し | planned | 全部 |
 
 ### 実装の Phase の案（2026-11-01 P2、design.md §15。Q1 の受け入れの後に表へ）
@@ -54,7 +54,8 @@
 - Q322-5 題の「H.264 encode は libavcodec」を「独自の software（WS329）」に直した（WS318 の Q318-2）。
 - Q322-6 実装の Phase も WS318 の completed を待たずに始める（A）。2026-11-01 のユーザーの「P2 で WS322 を実行する」は WS 全体の実行と読む。
 - Q322-7 libmedia の DISTINCT の道に bug が出たら、WS322 p004 の中で最小に直し、WS318 の担当に知らせる（A）。
-- Q322-2（Wave420L の参考の source の license）と Q322-3（受け入れの解像度と速さ）はユーザーに聞く。
+- （2026-11-01 21:41）Q322-2: ユーザーから、Wave420L の参考の source は file の SPDX の BSD-3-Clause を採って使う（A）、という趣旨の答えを受けた。値と手順だけを出典つきで使い、code・comment・構造・名前は写さない。食い違いは記録に残し、権利者の異議があれば encode の部分を外す。
+- （2026-11-01 21:41）Q322-3: ユーザーから、GPU で直に表示する道（WS318 の p006b・p007a・p009、decode の絵を CPU に読み出さずに表示する）を先に実装する、という趣旨の答えを受けた。WS322 の受け入れ（p012）はその道の上で決め直す。
 
 ## Resume point
 

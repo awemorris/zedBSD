@@ -43,33 +43,7 @@
 
 ## ユーザーの判断を待つ事
 
-| 番号 | WS | 問い |
-| --- | --- | --- |
-| Q322-2 | [WS322](ws322/ws.md) VF2 の VPU を Vulkan Video に | H.265 の hardware encode（Wave420L）の参考に、license の表示が食い違う StarFive の source を使ってよいか |
-| Q322-3 | 同上 | decode の受け入れをどの解像度・速さにするか |
-
-### Q322-2 Wave420L の参考の source の license
-
-- 背景: WS322 は VisionFive 2（VF2、RISC-V の SBC、SoC は StarFive の JH7110）の video の hardware（VPU）を、app から Vulkan Video として使えるようにする WS。P2 が設計（p001）を終え、今は decode の側の実装（p002 の実機の probe）に入った。VPU は 2 つあり、Wave511 は H.264・H.265 の decode、Wave420L は H.265 の encode。どちらも Chips&Media 社の IP。
-- 問題: Wave511 は Linux の driver（Chips&Media 自身が GPL-2.0 か BSD-3-Clause を選べる形で公開）から仕様を読める。Wave420L は Linux に driver が無く、register の値と手順が分かる公開の source は StarFive の「soft_3rdpart」の vpuapi だけ。その file の先頭の印（SPDX）は「LGPL-2.1 か BSD-3-Clause を選べる」だが、同じ file に「confidential and proprietary」の文があり、directory の LICENSE.txt は binary の再配布だけを許す。表示が食い違っている。P2 は中身を読んでいない。
-- 選択肢:
-  - A（Q1・P2 の推し）: file の SPDX の BSD-3-Clause を採り、guardrail の規則（値と手順は事実として出典を明示して使い、code・comment・構造・名前は写さない）で使う。食い違いは記録に残し、異議があれば encode の部分を外す。得: VF2 で H.265 の hardware encode ができる。失: 権利者が後で異議を出す小さな危険。
-  - B: 先に StarFive に問い合わせ、はっきりするまで encode を止める。得: 危険が小さい。失: 答えが来る保証が無く、encode が止まる。
-  - C: VF2 の hardware encode をやめ、H.265 の encode は自前の software（WS330）だけにする。得: 危険が無い。失: VF2 の CPU では 1080p30 の encode に届かない見込み。
-- 推しの理由: 同じ会社が同じ系統の Wave5 の code を BSD-3-Clause で公開しており、file の SPDX は著作者が明示した印。値と手順の引用だけなら、GPL の source を同じ形で使うのを guardrail が既に認めている。
-- 用語: SPDX は license を機械が読める形で書いた印。BSD-3-Clause は商用でも自由に使える寛容な license。LGPL-2.1 は改変の公開を求める license。register は hardware を動かす設定の場所。
-- 決まらない間: decode（p002〜p007）は進む。encode の Phase（p008〜p011）は止まる。
-
-### Q322-3 decode の受け入れの解像度と速さ
-
-- 背景: Wave511 は公表で 4K60 の decode ができる。ただし今の libmedia は decode した絵を一度 CPU に読み出す（readback）ので、GPU で直に表示する道（WS318 の作り直し）ができるまでは再生の速さに限りがある。
-- 選択肢:
-  - A（推し）: 4K（H.264 4096×2304・H.265 4096×2176）まで app に報告し、受け入れは「1080p30 の再生が落ちない」と「1080p60・4K30 の decode の正しさ（hash の一致）と時間」。1080p60 の再生は WS318 の GPU の道ができた後の最後の Phase（p012）で見る。
-  - B: 1080p30 だけを受け入れにし、報告も 1920×1088 まで。得: 早く終わる。失: 4K の動画は software の decode に落ちる。
-  - C: 4K60 の再生まで受け入れにする。失: WS318 と memory の帯域が前提で、届かない危険が高い。
-- 推しの理由: decode の正しさは解像度によらず同じ code で確かめられる。再生の速さの目標は今の板と今の libmedia で届く所に置き、高い目標は WS318 の後に回す。
-- 用語: 1080p30 は 1920x1080 で毎秒 30 frame。readback は GPU や VPU の memory から CPU が絵を読み出すこと。
-- 決まらない間: p002〜p007 は進む。受け入れの Phase（p012）の条件が決まらない。
+（無し）
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
@@ -81,3 +55,6 @@
 ## 決まった事
 
 （2026-11-01 10:29 クリア。決定は各 ws.md の「ユーザーの決定」と [master-design-policy.md](master-design-policy.md)）
+
+- 2026-11-01 21:41 [WS322](ws322/ws.md) Q322-2: Wave420L の参考の source は BSD-3-Clause を採って値と手順だけ使う。
+- 2026-11-01 21:41 [WS322](ws322/ws.md) Q322-3: GPU で直に表示する道（WS318 の p006b・p007a・p009）を先に実装する。
