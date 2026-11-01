@@ -10,7 +10,7 @@
 | P1 | [WS291](ws291/ws.md) p027 | GPU の driver の描画の速さ（RTX 2070） | libvulkan の submit を返事を待たずに返す形（B-U）の実装と計測（q1849） | p028 kernel の組み置き（B-K） |
 | P2 | [WS322](ws322/ws.md) p001 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | 調べと設計（q1845） | 設計 → レビュー → 実装の Phase の案。板は P4 の後 |
 | P3 | — | — | 返却（21:17）。WS291 p021（Pi 5 の model の 50 fps）は cleared: c74 画面 51.6〜52.9 fps（前 49.2〜50.7） | 次の Pi 5 の作業は未割当 |
-| P4 | [BUG-387](bugs/BUG-387.md) | Bug の修正の担当 | CI の Pi 5 の image の graphical login の起動を Pi 5 で確かめる（q1850） | 次の Bug |
+| P4 | — | Bug の修正の担当 | 返却（21:28）。BUG-387 は fixed、CI の Pi 5 の image で graphical login の desktop まで起動（画面: build/review/q1850-pi5-ci-desk1.png） | 次の Bug の割当を待つ |
 | P5 | [WS334](ws334/ws.md) p023 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | instance と API v4（q1847）。p025 は cleared（script の core が単体の archive で link でき、Wine で host と bytes 一致） | p026（libmedia の Windows）へ |
 | P6 | [WS335](ws335/ws.md) p005 | libssl-compat・libcrypto-compat（OpenSSL と互換の自前の TLS と暗号） | AES-GCM（q1846）。p004 AES は cleared（28516 checks） | p007 整数の算術・p009 Ed25519 へ |
 | P7 | — | VF2 の desktop の描画の速さ | 計測だけ（q1848、21:03 起動、VF2） | 計測の要約を返して終了 |
