@@ -12,6 +12,7 @@
  */
 
 #include "bind/internal.h"
+#include "net/net.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -31,6 +32,12 @@ static const struct bind_attribute frame_attributes[] = {
 	{ "src", frame_src_get, frame_src_set },
 	{ "contentDocument", frame_document, NULL },
 	{ "contentWindow", frame_global, NULL },
+	{ "name", bind_iframe_name_get, bind_iframe_name_set },
+	{ "frameBorder", bind_iframe_frame_border_get, bind_iframe_frame_border_set },
+	{ "scrolling", bind_iframe_scrolling_get, bind_iframe_scrolling_set },
+	{ "width", bind_iframe_width_get, bind_iframe_width_set },
+	{ "height", bind_iframe_height_get, bind_iframe_height_set },
+	{ "allow", bind_iframe_allow_get, bind_iframe_allow_set },
 	{ NULL, NULL, NULL }
 };
 
@@ -50,6 +57,8 @@ static int frame_context(struct vm_realm *realm, vm_value this_value, struct bin
 static int frame_create(struct vm_realm *caller, struct bind_window *parent, struct dom_element *element, struct bind_window **window);
 static int frame_tree(struct dom_document *document);
 static int frame_window_this(struct vm_realm *realm, vm_value this_value, struct bind_window **window);
+static int frame_origin(struct bind_window *window, struct wb_buffer *origin);
+static int frame_web_origin(const struct wb_buffer *origin);
 static void frame_removed(struct dom_document *document, struct dom_node *node);
 static void frame_remove_subtree(struct dom_node *root);
 
@@ -80,8 +89,9 @@ bind_frame_scripts_allowed(
 }
 
 /*
- * Gives how a window sees another: the other's global, or (when either has an opaque origin, and they are not the
- * same window) the restricted view the viewer's prelude makes of it, which has postMessage and little else.
+ * Gives how a window sees another: the other's global, or (when the two are not of the same origin: of different
+ * origins, or either with an opaque one) the restricted view the viewer's prelude makes of it, which has postMessage
+ * and little else.
  */
 int
 bind_window_view(
@@ -100,7 +110,7 @@ bind_window_view(
 
 	/* A frame's window is seen through the one proxy its element has, which stays the same as the frame goes from one document to another. */
 	owner = target->frame != NULL ? target->frame->node.document->view : NULL;
-	if (owner != NULL && !owner->detached && owner->frame_proxy_maker != NULL && !viewer->opaque) {
+	if (owner != NULL && !owner->detached && owner->frame_proxy_maker != NULL && bind_window_reachable(viewer, owner)) {
 		status = bind_wrap(owner, &target->frame->node, &argument);
 		if (status != 0)
 			return status;
@@ -114,8 +124,8 @@ bind_window_view(
 		return status;
 	}
 
-	/* An opaque origin's window sees others (and is seen by them) only through a restricted view. */
-	if ((!viewer->opaque && !target->opaque) || viewer->window_wrapper == NULL)
+	/* A window of another origin (or of an opaque one) is seen only through a restricted view. */
+	if (bind_window_reachable(viewer, target) || viewer->window_wrapper == NULL)
 		return 0;
 	realm = viewer->realm;
 	argument = vm_value_cell(target->realm->global);
@@ -126,6 +136,50 @@ bind_window_view(
 		return 0;
 	}
 	return status;
+}
+
+/*
+ * Tells whether one window's scripts may reach another's objects: not when either is a sandboxed frame of an opaque
+ * origin (unless they are the same window), nor when both have a web origin (a scheme, a host and a port) and the
+ * two differ.  Windows without such an origin (local files, about:blank, documents made by scripts) keep the file
+ * profile of one tab and reach each other.
+ */
+int
+bind_window_reachable(
+	struct bind_window *viewer,
+	struct bind_window *target)
+{
+	struct wb_buffer one;
+	struct wb_buffer other;
+	int reachable;
+	int error;
+
+	/* A window reaches itself; an opaque origin reaches no other. */
+	if (viewer == target)
+		return 1;
+	if (viewer->opaque || target->opaque)
+		return 0;
+
+	/* Both origins, serialized. */
+	wb_buffer_init(&one);
+	wb_buffer_init(&other);
+	error = frame_origin(viewer, &one);
+	if (error == 0)
+		error = frame_origin(target, &other);
+
+	/* Two web origins must be equal; an origin that is not a web one ("null", or none) does not separate. */
+	reachable = 1;
+	if (error != 0)
+		reachable = 0;
+	if (error == 0 && frame_web_origin(&one) && frame_web_origin(&other)) {
+		if (one.length != other.length || memcmp(one.data, other.data, one.length) != 0)
+			reachable = 0;
+	}
+
+	/* The copies are released on either outcome. */
+	wb_buffer_release(&one);
+	wb_buffer_release(&other);
+	return reachable;
 }
 
 /*
@@ -453,8 +507,9 @@ bind_frame_parent(
 		global = window->realm->global;
 	*result = vm_value_cell(global);
 
-	/* An opaque origin's window sees its parent only through the restricted view. */
-	if (window->opaque && window->frame != NULL && window->frame->node.document->view != NULL)
+	/* A parent of another origin (or a frame of an opaque one) is seen only through the restricted view. */
+	if (window->frame != NULL && window->frame->node.document->view != NULL &&
+	    !bind_window_reachable(window, window->frame->node.document->view))
 		return bind_window_view(window, window->frame->node.document->view, result);
 
 	/* Succeeded: the receiver's parent identity is reported. */
@@ -473,7 +528,9 @@ bind_frame_top(
 	vm_value *result)
 {
 	struct bind_window *window;
+	struct bind_window *top;
 	struct vm_object *global;
+	int depth;
 	int status;
 
 	UNUSED_PARAMETER(args);
@@ -490,17 +547,12 @@ bind_frame_top(
 		global = window->realm->global;
 	*result = vm_value_cell(global);
 
-	/* An opaque origin's window sees the top window only through the restricted view. */
-	if (window->opaque) {
-		struct bind_window *top;
-		int depth;
-
-		top = window;
-		for (depth = 0; depth < 64 && top->frame != NULL && top->frame->node.document->view != NULL; depth++)
-			top = top->frame->node.document->view;
-		if (top != window)
-			return bind_window_view(window, top, result);
-	}
+	/* A top window of another origin (or seen from a frame of an opaque one) is seen only through the restricted view. */
+	top = window;
+	for (depth = 0; depth < 64 && top->frame != NULL && top->frame->node.document->view != NULL; depth++)
+		top = top->frame->node.document->view;
+	if (top != window && !bind_window_reachable(window, top))
+		return bind_window_view(window, top, result);
 
 	/* Succeeded: the outermost ancestor's identity is reported. */
 	return 0;
@@ -591,6 +643,10 @@ bind_frame_element(
 	if (window->frame == NULL)
 		return 0;
 
+	/* The element is in the parent's Document, out of reach from another origin. */
+	if (window->frame->node.document->view == NULL || !bind_window_reachable(window, window->frame->node.document->view))
+		return 0;
+
 	/* The parent Document chooses the frame wrapper's original realm. */
 	status = bind_wrap(window, &window->frame->node, result);
 	if (status != 0)
@@ -625,8 +681,8 @@ frame_document(
 	if (window == NULL)
 		return 0;
 
-	/* An opaque origin's Document is not reachable from the parent. */
-	if (window->opaque)
+	/* A Document of another origin (or of an opaque one) is not reachable from the parent. */
+	if (!bind_window_reachable(bind_window_of(realm), window))
 		return 0;
 
 	/* Its own realm's wrapper was installed with its global document property. */
@@ -1071,10 +1127,78 @@ frame_loaded_document(
 		return 0;
 	if (svg && window->document->content != DOM_CONTENT_SVG)
 		return 0;
+
+	/* A Document of another origin stays out of reach. */
+	if (!bind_window_reachable(parent, window))
+		return 0;
 	error = bind_wrap(window, &window->document->node, result);
 	if (error != 0)
 		return error;
 
 	/* Succeeded: cached wrapping preserves actual owner identity. */
 	return 0;
+}
+
+/*
+ * Copies a window's origin, serialized, into origin: a frame's is its resource's (an initial about:blank or a
+ * srcdoc document has the origin of the document it was made from), a page's is its location's.
+ */
+static int
+frame_origin(
+	struct bind_window *window,
+	struct wb_buffer *origin)
+{
+	struct wb_buffer href;
+	struct net_url url;
+	int error;
+
+	/* A page's origin is the host's. */
+	if (!window->owned) {
+		error = 0;
+		if (window->host.location != NULL)
+			error = window->host.location(window->host.context, BIND_LOCATION_ORIGIN, origin);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* A frame's URL, the inherited one for a blank or srcdoc document. */
+	wb_buffer_init(&href);
+	memset(&url, 0, sizeof(url));
+	error = bind_document_url(window->document, 1, &href);
+
+	/* Its origin. */
+	if (error == 0)
+		error = net_url_parse(wb_buffer_string(&href), href.length, NULL, &url);
+	if (error == 0)
+		error = net_url_component(&url, NET_URL_ORIGIN, origin);
+
+	/* The URL's copies are released on either outcome. */
+	net_url_release(&url);
+	wb_buffer_release(&href);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: origin holds the serialization. */
+	return 0;
+}
+
+/* Tells whether a serialized origin is a web one (scheme://host[:port]), not "null" or empty. */
+static int
+frame_web_origin(
+	const struct wb_buffer *origin)
+{
+	const char *separator;
+
+	/* An empty origin, or an opaque one, is not. */
+	if (origin->length == 0)
+		return 0;
+
+	/* A tuple origin names its scheme before "://". */
+	separator = strstr(wb_buffer_string(origin), "://");
+	if (separator == NULL)
+		return 0;
+
+	/* Succeeded: the origin is a web one. */
+	return 1;
 }

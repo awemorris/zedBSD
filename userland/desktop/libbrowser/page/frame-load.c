@@ -45,7 +45,7 @@ static void frame_load_done(void *context, struct net_request *request);
 static int frame_load_drain(struct page *page, int error);
 static int frame_load_scan(struct page *page, struct bind_window *window);
 static int frame_load_start(struct page *page, struct dom_element *element, struct vm_string *source);
-static int frame_load_allowed(struct dom_document *document, const struct wb_buffer *location, int *allowed);
+static int frame_load_allowed(struct dom_document *document, const struct wb_buffer *location, int foreign, int *allowed);
 static int frame_load_current(struct frame_load *load);
 static int frame_load_activate(struct frame_load *load);
 static int frame_load_parse(struct frame_load *load, struct dom_document **document);
@@ -434,7 +434,7 @@ frame_load_start(
 			goto release_urls;
 
 		/* Allows only the established native same-origin resource profile. */
-		error = frame_load_allowed(element->node.document, &location, &allowed);
+		error = frame_load_allowed(element->node.document, &location, element->tag == DOM_TAG_IFRAME, &allowed);
 		if (error != 0)
 			goto release_urls;
 	}
@@ -528,11 +528,16 @@ release_urls:
 	return 0;
 }
 
-/* Checks actual native origin before requests and again against their final redirect URL. */
+/*
+ * Checks actual native origin before requests and again against their final redirect URL; with foreign
+ * (an iframe), a web page may also embed a web page of another origin, whose Window its scripts reach
+ * only across origins.
+ */
 static int
 frame_load_allowed(
 	struct dom_document *document,
 	const struct wb_buffer *location,
+	int foreign,
 	int *allowed)
 {
 	struct wb_buffer owner;
@@ -590,6 +595,10 @@ frame_load_allowed(
 			if (same == 0)
 				*allowed = 1;
 		}
+
+		/* A web document of another origin is embedded as its own origin's. */
+		if (foreign && net_http_is_web(child.scheme))
+			*allowed = 1;
 	}
 
 release_origins:
@@ -680,7 +689,7 @@ frame_load_activate(
 
 	/* Redirects must retain the verified actual origin before any parsed DOM is exposed. */
 	if (!load->blank && !load->srcdoc) {
-		error = frame_load_allowed(load->element->node.document, &load->response.url, &allowed);
+		error = frame_load_allowed(load->element->node.document, &load->response.url, load->element->tag == DOM_TAG_IFRAME, &allowed);
 		if (error != 0)
 			return error;
 		if (!allowed)

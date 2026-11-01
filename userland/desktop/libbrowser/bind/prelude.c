@@ -571,7 +571,10 @@ prelude_frame_global(
 	return 0;
 }
 
-/* frameOpaque(element): whether the document an <iframe> element shows has an opaque origin. */
+/*
+ * frameOpaque(element): whether the document an <iframe> element shows is out of reach of the element's own
+ * window (an opaque origin, or another origin).
+ */
 static int
 prelude_frame_opaque(
 	struct vm_realm *realm,
@@ -584,7 +587,9 @@ prelude_frame_opaque(
 
 	UNUSED_PARAMETER(this_value);
 	child = prelude_frame_window(realm, args, count);
-	*result = vm_value_boolean(child != NULL && child->opaque != 0);
+	*result = VM_VALUE_FALSE;
+	if (child != NULL && child->frame != NULL && child->frame->node.document->view != NULL)
+		*result = vm_value_boolean(!bind_window_reachable(child->frame->node.document->view, child));
 	return 0;
 }
 

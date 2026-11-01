@@ -501,6 +501,7 @@ int bind_frame_location(struct bind_window *window, int part, struct wb_buffer *
 int bind_frame_sandboxed(struct dom_element *element);
 int bind_frame_scripts_allowed(struct dom_element *element);
 int bind_window_view(struct bind_window *viewer, struct bind_window *target, vm_value *result);
+int bind_window_reachable(struct bind_window *viewer, struct bind_window *target);
 int bind_frame_install(struct bind_window *parent, struct dom_element *element, struct dom_document *document, struct bind_window **window);
 int bind_run_inline_script(struct bind_window *window, struct dom_element *script);
 int bind_reflection_base(struct dom_document *document, struct net_url *base);
@@ -518,6 +519,20 @@ int bind_frame_top(struct vm_realm *realm, vm_value this_value, const vm_value *
 int bind_frame_self(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_frame_closed(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_frame_element(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+
+/* HTMLIFrameElement's reflected string attributes (html-reflection.c). */
+int bind_iframe_name_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_name_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_frame_border_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_frame_border_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_scrolling_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_scrolling_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_width_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_width_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_height_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_height_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_allow_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+int bind_iframe_allow_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 
 /* Native CSSOM getters and mutations operate on the traced source model. */
 int bind_cssom_document_sheets(struct vm_realm *realm, vm_value receiver, const vm_value *args, unsigned count, vm_value *result);

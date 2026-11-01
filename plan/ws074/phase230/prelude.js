@@ -337,18 +337,41 @@
       return m;
     });
   }
+  // A port's messages wait in its queue until the port is started (start(), or an onmessage handler set), then
+  // each is a task of its own.
+  function portFlush(port) {
+    if (port._pending || !port._started || port._queue.length === 0) return;
+    port._pending = true;
+    setTimeout(function () {
+      var item, ev;
+      port._pending = false;
+      while (port._open && port._queue.length !== 0) {
+        item = port._queue.shift();
+        ev = new MessageEvent('message', { data: item.data, ports: item.ports });
+        if (typeof port._onmessage === 'function') port._onmessage.call(port, ev);
+        port.dispatchEvent(ev);
+      }
+    }, 0);
+  }
   class MessagePort extends EventTarget {
-    constructor(key) { if (key !== KEY) throw new TypeError('Illegal constructor'); super(); this.onmessage = null; hidden(this, '_peer', null); hidden(this, '_open', true); }
-    postMessage(data) {
-      var peer = this._peer;
-      if (!peer || !this._open) return;
-      setTimeout(function () {
-        var ev = new MessageEvent('message', { data: data });
-        if (typeof peer.onmessage === 'function') peer.onmessage.call(peer, ev);
-        peer.dispatchEvent(ev);
-      }, 0);
+    constructor(key) {
+      if (key !== KEY) throw new TypeError('Illegal constructor');
+      super();
+      hidden(this, '_peer', null); hidden(this, '_open', true); hidden(this, '_onmessage', null);
+      hidden(this, '_started', false); hidden(this, '_pending', false); hidden(this, '_queue', []);
     }
-    start() {}
+    get onmessage() { return this._onmessage; }
+    set onmessage(f) { this._onmessage = typeof f === 'function' ? f : null; this.start(); }
+    postMessage(data, transfer) {
+      var peer = this._peer, ports = [], i;
+      if (!peer || !this._open) return;
+      // The transfer list (an array, or the options' transfer) becomes the event's ports.
+      if (transfer && !Array.isArray(transfer)) transfer = transfer.transfer;
+      if (transfer) for (i = 0; i < transfer.length; i++) if (transfer[i] !== null && typeof transfer[i] === 'object') ports.push(transfer[i]);
+      peer._queue.push({ data: data, ports: ports });
+      portFlush(peer);
+    }
+    start() { this._started = true; portFlush(this); }
     close() { this._open = false; }
   }
   class MessageChannel {
