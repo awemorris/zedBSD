@@ -1150,7 +1150,7 @@ box_build_transition(
 		if (group == NULL)
 			continue;
 		memset(&rect, 0, sizeof(rect));
-		layout_transition_group_rect(name, &group->style, transition->elapsed, &rect);
+		layout_transition_group_rect(name, &group->style, layout_transition_elapsed(transition, name, 0), &rect);
 		if (group->style.width.unit == CSS_UNIT_AUTO)
 			box_transition_px(&group->style.width, rect.width);
 		if (group->style.height.unit == CSS_UNIT_AUTO)
@@ -1210,7 +1210,7 @@ box_build_transition(
 			/* The UA's animations fade the old image out and the new one in. */
 			if (image->style.animation_name != NULL &&
 			    vm_string_equal_ascii(image->style.animation_name, which == 0 ? "-ua-view-transition-fade-out" : "-ua-view-transition-fade-in")) {
-				progress = layout_transition_progress(&image->style, transition->elapsed);
+				progress = layout_transition_progress(&image->style, layout_transition_elapsed(transition, name, which == 0 ? 2 : 3));
 				image->style.opacity = which == 0 ? 1.0f - progress : progress;
 			}
 		}

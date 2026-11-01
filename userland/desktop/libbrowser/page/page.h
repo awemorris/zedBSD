@@ -341,6 +341,7 @@ int page_view_transition(void *context, int step);
 int page_vt_pseudo_style(void *context, struct dom_element *element, int pseudo, const struct vm_string *name, struct css_style *style);
 double page_view_transition_duration(void *context);
 void page_view_transition_time(void *context, double milliseconds);
+void page_view_transition_time_of(void *context, double milliseconds, int pseudo, const struct vm_string *name);
 int page_view_transition_names(void *context, struct wb_units *units);
 void page_view_transition_style(void *context, int pseudo, const struct vm_string *name, const char *text);
 void page_view_transition_active(void *context, int active, struct vm_string **types, size_t count);

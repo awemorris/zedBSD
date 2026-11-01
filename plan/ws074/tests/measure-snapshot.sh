@@ -11,9 +11,9 @@ set -eu
 cd "$(dirname -- "$0")/../../.."
 name=$1
 jobs=${2:-24}
-out=/tmp/p8out/$name
+out=${OUTROOT:-/tmp/p8out}/$name
 mkdir -p "$out/bin" "$out/static"
-for f in browser wpt-ready-render libbrowser.so; do cp build/ws074-host/plain/$f "$out/bin/$f"; done
+for f in browser wpt-ready-render libbrowser.so; do cp ${HOSTOUT:-build/ws074-host/plain}/$f "$out/bin/$f"; done
 python3 plan/ws074/tests/interop2025-chrome-gap.py measure --kind ours --out "$out" --build "$out/bin" --jobs "$jobs" --only harness,scripted,crash
 python3 plan/ws074/tests/static-subset.py --jobs "$jobs" --out "$out/static-shards" --program "$out/bin/browser" / > "$out/static-subset.log" 2>&1 || true
 python3 - "$out" <<'P'
