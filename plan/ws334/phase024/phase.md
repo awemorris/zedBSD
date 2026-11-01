@@ -3,7 +3,7 @@
 # ws334-p024 統合: 永続の HTTP の cache（第 2 段）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §3.5.1（CACHE の space）、§3.5.4、§3.7。
-- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1855-i01、Sonnet。結果は末尾）。前: planned（2026-11-01 p002 で作成）。ユーザーの決定 21（U5）で第 2 段: WS334 の第 1 段の受け入れ（p032）には入れない。
+- 状態: cleared（2026-11-01 22:55 Q1、main c7a3a7ad3。merge の後の main で storage-test の link が p027 の main-posix.c と二重の main で落ちたので、Q1 が storage-test.sh で browser_main-posix.o を除いて直した: storage-test plain 200 checks PASS、host-build 94・warning 0）。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1855-i01、Sonnet。結果は末尾）。前: planned（2026-11-01 p002 で作成）。ユーザーの決定 21（U5）で第 2 段: WS334 の第 1 段の受け入れ（p032）には入れない。
 - 依存: p023。
 - 担当の想定: Opus（phase-runner）を 1 回。使う約束は `storage/records.h` の `wb_storage_cache_*` と `storage/queue.h`。
 
@@ -71,3 +71,10 @@ Q1 への問い・判断の材料:
 2. 上の 200 の再検証の既存の挙動を別 Phase で直すか。
 
 消してよい物（Q1 へ）: `build/tmp/p024-base`・`build/tmp/p024-tip`（git archive の展開と stage1 の出力）、`build/tmp/p024`（sysroot の写しと zedbsd-build.log）、`build/tmp/p024-stage1-*.out`・`p024-stage1-driver.log`・`p024-stage1.done`・`p024-run-stage1.sh`、`build/tmp-p024-hb.log`（置き場を誤った log、build/ 直下）、`build/tmp/ws334-storage.run.*`（最後の run 以外）、`build/amd64`・`build/ws074-host`（試しの build の出力）。どれも使い捨て。
+
+### Q1 の判断（2026-11-01 22:55）
+
+- Sonnet が決めた 1〜4（net/cache.c に置く、key の衝突は読みで URL を照合、孤児の掃除は instance の作成の時、同期の ENOSPC だけやり直す）を受け入れる。
+- stale の ETag の再検証で 200（本文が変わった）が返った時に新しい本文を memory・disk に入れない件は、前からの挙動。この Phase の外として WS334 の ws.md の残りに記録した。
+- 存在しない file への rm -f を 1 回走らせた件（何も消していない）は、削除の規則に反した操作として記録する。
+
