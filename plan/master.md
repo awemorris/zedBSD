@@ -112,7 +112,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-389 · q1864 · WS341 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1864 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -192,6 +192,7 @@ BUG-389 · q1864 · WS341 · KL_VERSION 106（105 は WS334 p027 の q1856）。
 | [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | incomplete | p001 調べと設計（P1 q1854、2026-11-01 ユーザーの指示で WS318 を待たない） |
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
 | [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
+| [WS341](ws341/ws.md) | MG006 | 仮想 GPU の driver の枠組み（user の program が作る scanout だけの /dev/gpuN、他の GPU が描き、Vulkan Video で H.264・H.265 に encode して USB・network の遠隔の display・RDP へ）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
 | [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
 | [WS339](ws339/ws.md) | MG004 | x86 の PC の UEFI の起動の画面の解像度を monitor（EDID）に合わせる、標準の設定の video=640x480 を外す（2026-11-01 ユーザー） | planning | p001（担当の割当はユーザーの指示で） |
 | [WS338](ws338/ws.md) | MG006 | libmedia の H.264 の software の decoder の速さの続き（WS326 から分けた、2026-11-01 ユーザー） | planning | p001 設計（担当の割当はユーザーの指示で） |
