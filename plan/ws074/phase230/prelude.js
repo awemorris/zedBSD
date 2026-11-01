@@ -1968,15 +1968,164 @@
       configurable: true, enumerable: true
     });
   })();
-  if (!g.customElements) {
-    var registry = new Map();
-    def(g, 'customElements', {
-      define: function (name, ctor) { registry.set(name, ctor); },
-      get: function (name) { return registry.get(name); },
-      whenDefined: function (name) { return Promise.resolve(registry.get(name)); },
-      upgrade: function () {}
-    });
-  }
+  // Custom elements (https://html.spec.whatwg.org/multipage/custom-elements.html): definitions, upgrades of the elements in the
+  // document and in shadow trees, creation by createElement and by `new`, and the connected, disconnected and attribute callbacks
+  // (the last three from a MutationObserver, so a little after the change).
+  if (!g.customElements && typeof g.HTMLElement === 'function' && typeof document !== 'undefined') (function () {
+    var Native = g.HTMLElement, NS = 'http://www.w3.org/1999/xhtml';
+    var byName = new Map(), byCtor = new Map(), waiting = new Map(), pending = null, observed = new WeakSet();
+    var createElement = document.createElement, createElementNS = document.createElementNS;
+    function validName(name) {
+      return /^[a-z][-.0-9_a-z]*-[-.0-9_a-z]*$/.test(name) &&
+        ['annotation-xml', 'color-profile', 'font-face', 'font-face-src', 'font-face-uri', 'font-face-format', 'font-face-name', 'missing-glyph'].indexOf(name) < 0;
+    }
+    function report(e) {
+      if (typeof g.reportError === 'function') g.reportError(e);
+      else if (typeof console !== 'undefined') console.error(e);
+    }
+    function HTMLElementCtor() {
+      var element, definition;
+      if (pending !== null) {
+        element = pending; pending = null;
+        Object.setPrototypeOf(element, new.target.prototype);
+        return element;
+      }
+      definition = new.target ? byCtor.get(new.target) : undefined;
+      if (!definition) throw new TypeError('Illegal constructor');
+      element = createElementNS.call(document, NS, definition.name);
+      Object.setPrototypeOf(element, new.target.prototype);
+      hidden(element, '_ce', definition);
+      return element;
+    }
+    HTMLElementCtor.prototype = Native.prototype;
+    Object.defineProperty(Native.prototype, 'constructor', { value: HTMLElementCtor, writable: true, configurable: true, enumerable: false });
+    Object.setPrototypeOf(HTMLElementCtor, Object.getPrototypeOf(Native));
+    Object.defineProperty(HTMLElementCtor, 'name', { value: 'HTMLElement', configurable: true });
+    def(g, 'HTMLElement', HTMLElementCtor);
+
+    function callback(element, name, args) {
+      var f = element._ce && element._ce.callbacks[name];
+      if (typeof f !== 'function') return;
+      try { f.apply(element, args); } catch (e) { report(e); }
+    }
+    function upgrade(element) {
+      var definition = byName.get(element.localName), attributes, i, a;
+      if (!definition || element._ce || element.namespaceURI !== NS) return;
+      hidden(element, '_ce', definition);
+      pending = element;
+      try {
+        var made = new definition.ctor();
+        if (made !== element) throw new TypeError('The custom element constructor did not produce the element being upgraded.');
+      } catch (e) {
+        pending = null;
+        report(e);
+        return;
+      }
+      pending = null;
+      if (definition.observedAttributes.length) {
+        attributes = element.attributes;
+        for (i = 0; i < attributes.length; i++) {
+          a = attributes[i];
+          if (definition.observedAttributes.indexOf(a.name) >= 0) callback(element, 'attributeChangedCallback', [a.name, null, a.value, null]);
+        }
+      }
+      if (element.isConnected) callback(element, 'connectedCallback', []);
+    }
+    function walk(root, visit) {
+      var list, i, e;
+      if (root.nodeType === 1) visit(root);
+      list = root.querySelectorAll ? root.querySelectorAll('*') : [];
+      for (i = 0; i < list.length; i++) {
+        e = list[i];
+        visit(e);
+      }
+      list = root.querySelectorAll ? root.querySelectorAll('*') : [];
+      for (i = 0; i < list.length; i++) {
+        e = list[i];
+        if (e.shadowRoot) { watch(e.shadowRoot); walk(e.shadowRoot, visit); }
+      }
+      if (root.nodeType === 1 && root.shadowRoot) { watch(root.shadowRoot); walk(root.shadowRoot, visit); }
+    }
+    function upgradeTree(root) { walk(root, function (e) { if (byName.has(e.localName)) upgrade(e); }); }
+    function connectedTree(root) { walk(root, function (e) { if (e._ce) callback(e, 'connectedCallback', []); else if (byName.has(e.localName)) upgrade(e); }); }
+    function disconnectedTree(root) { walk(root, function (e) { if (e._ce) callback(e, 'disconnectedCallback', []); }); }
+    function handle(records) {
+      var i, j, r, n;
+      for (i = 0; i < records.length; i++) {
+        r = records[i];
+        if (r.type === 'attributes') {
+          n = r.target;
+          if (n._ce && n._ce.observedAttributes.indexOf(r.attributeName) >= 0)
+            callback(n, 'attributeChangedCallback', [r.attributeName, r.oldValue, n.getAttribute(r.attributeName), null]);
+          continue;
+        }
+        for (j = 0; j < r.removedNodes.length; j++) if (r.removedNodes[j].nodeType === 1 && !r.removedNodes[j].isConnected) disconnectedTree(r.removedNodes[j]);
+        for (j = 0; j < r.addedNodes.length; j++) if (r.addedNodes[j].nodeType === 1 && r.addedNodes[j].isConnected) connectedTree(r.addedNodes[j]);
+      }
+    }
+    var observer = new MutationObserver(handle);
+    function watch(root) {
+      if (observed.has(root)) return;
+      observed.add(root);
+      observer.observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true });
+    }
+    watch(document);
+    function define(name, ctor) {
+      var proto, callbacks = {}, names = ['connectedCallback', 'disconnectedCallback', 'attributeChangedCallback', 'adoptedCallback'], list, i, definition;
+      name = String(name);
+      if (typeof ctor !== 'function') throw new TypeError("Failed to execute 'define' on 'CustomElementRegistry': The callback provided as parameter 2 is not a constructor.");
+      if (!validName(name)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': \"" + name + '" is not a valid custom element name', 'SyntaxError');
+      if (byName.has(name)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': the name \"" + name + '" has already been used with this registry', 'NotSupportedError');
+      if (byCtor.has(ctor)) throw new DOMException("Failed to execute 'define' on 'CustomElementRegistry': this constructor has already been used with this registry", 'NotSupportedError');
+      proto = ctor.prototype;
+      for (i = 0; i < names.length; i++) callbacks[names[i]] = proto ? proto[names[i]] : undefined;
+      list = ctor.observedAttributes;
+      list = list && typeof callbacks.attributeChangedCallback === 'function' ? Array.from(list).map(String) : [];
+      definition = { name: name, ctor: ctor, callbacks: callbacks, observedAttributes: list };
+      byName.set(name, definition);
+      byCtor.set(ctor, definition);
+      upgradeTree(document);
+      if (waiting.has(name)) { waiting.get(name).resolve(ctor); waiting.delete(name); }
+    }
+    var registry = {
+      define: define,
+      get: function (name) { var d = byName.get(String(name)); return d ? d.ctor : undefined; },
+      getName: function (ctor) { var d = byCtor.get(ctor); return d ? d.name : null; },
+      whenDefined: function (name) {
+        var d, entry;
+        name = String(name);
+        if (!validName(name)) return Promise.reject(new DOMException("Failed to execute 'whenDefined' on 'CustomElementRegistry': \"" + name + '" is not a valid custom element name', 'SyntaxError'));
+        d = byName.get(name);
+        if (d) return Promise.resolve(d.ctor);
+        entry = waiting.get(name);
+        if (!entry) {
+          entry = {};
+          entry.promise = new Promise(function (resolve) { entry.resolve = resolve; });
+          waiting.set(name, entry);
+        }
+        return entry.promise;
+      },
+      upgrade: function (root) { if (root && root.nodeType) upgradeTree(root); }
+    };
+    Object.defineProperty(registry, Symbol.toStringTag, { value: 'CustomElementRegistry', configurable: true });
+    def(g, 'customElements', registry);
+    document.createElement = function createElement() {
+      var element = createElementOriginal.apply(this, arguments);
+      if (this === document && element && byName.has(element.localName) && element.namespaceURI === NS) upgrade(element);
+      return element;
+    };
+    var createElementOriginal = createElement;
+    document.createElementNS = function createElementNS(ns, name) {
+      var element = createElementNSOriginal.apply(this, arguments);
+      if (this === document && element && ns === NS && byName.has(element.localName)) upgrade(element);
+      return element;
+    };
+    var createElementNSOriginal = createElementNS;
+    // The document's parsed elements are upgraded when the page has been read, and a shadow root attached later is watched.
+    var attach = g.Element && g.Element.prototype.attachShadow;
+    if (attach) def(g.Element.prototype, 'attachShadow', function attachShadow() { var root = attach.apply(this, arguments); watch(root); return root; });
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { upgradeTree(document); });
+  })();
   [['ErrorEvent', 'error'], ['ProgressEvent', 'progress'], ['HashChangeEvent', 'hashchange'], ['PopStateEvent', 'popstate'],
     ['PointerEvent', 'pointer'], ['InputEvent', 'input'], ['TouchEvent', 'touch'], ['StorageEvent', 'storage']].forEach(function (p) {
     if (g[p[0]]) return;
