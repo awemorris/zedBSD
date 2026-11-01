@@ -286,6 +286,11 @@ nvrtx_rpc_wait(
 			if (nvrtx_get32(gpu->reply, RPC_ERROR_TYPE_AT) == RPC_GR_CLASS_ERROR)
 				rpc_gr_class_error(gpu);
 
+			/* Keeps the record of the notices, which a channel's bring-up reads. */
+			gpu->rc_notices++;
+			gpu->rc_last_chid = nvrtx_get32(gpu->reply, RPC_ERROR_CHANNEL_AT);
+			gpu->rc_last_type = nvrtx_get32(gpu->reply, RPC_ERROR_TYPE_AT);
+
 			/* The renderer loses the channel's session. */
 			if (gpu->channel_error != NULL)
 				gpu->channel_error(gpu->channel_error_argument, nvrtx_get32(gpu->reply, RPC_ERROR_CHANNEL_AT), nvrtx_get32(gpu->reply, RPC_ERROR_TYPE_AT));

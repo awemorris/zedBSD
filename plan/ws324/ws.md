@@ -25,6 +25,7 @@
 | [ws324-p006f](phase006f/phase.md) | h265-std の実装（Sonnet） | planned | p006a 段 2 |
 | [ws324-p006g](phase006g/phase.md) | h265-stream の実装（Sonnet） | planned | p006d |
 | [ws324-p006h](phase006h/phase.md) | H.265 の解析の適合の試験（HEVC_v1、host、Opus） | planned | p006e〜g |
+| [ws324-p009a](phase009a/phase.md) | NVENC の channel（段 nvenc-channel、class の bind、firmware の確かめ、RC の通知の記録） | 受け入れ達成（2026-11-02 00:58 P1 q1880-i01。実機で `nvenc-channel ok`、NVENC 自身の release、RC 0。cleared は Q1） | 実機 |
 
 ### 実装の Phase の案（2026-11-01 P1、[design.md](design.md) 第 2 版 §15。Q1 の受け入れの後に表へ）
 
@@ -66,6 +67,7 @@
 
 ## Resume point
 
+- 2026-11-02 P1（q1880-i01）: p009a。NVENC の channel を実機（10.0.10.3）で開いた: chid 49・runlist 2・class c4b7、NOP と NVENC 自身の semaphore の release が通り、RC の通知 0。R5 は「GSP-RM が ucode を持つ、別の firmware は要らない」。機械は Debian に戻し cksum 一致。次は Q1 の受け入れと p009b（関門）。
 - 2026-11-02 P1（q1864-i02）: p006a 段 2。header 11 個を `userland/desktop/libmedia/` に置き、骨格 .c 10 個、`plan/ws324/tests/`（run-unit.sh・check-skeleton.sh・unit/h265write.h・unit/test-h265write.c）、基点 BASE `1f16db0e6`。p006b〜h の phase.md に BASE と道具の注意（design §8.1.1）。次は Q1 の受け入れと p006b・p006e・p006f の起動。
 - 2026-11-01 P1（q1864-i01）: p006a 段 1。[h265-parse-design.md](h265-parse-design.md)、[proposed/h265/](proposed/h265/) の header 11 個、phase006b〜h の phase.md、design-review.md の review 2（20 件を全部反映）。次は Q1 の受け入れと Q-A〜Q-E（[phase006a](phase006a/phase.md)）、その後に段 2。
 - 2026-11-01 P1（q1854）: p001 の design.md 第 2 版（review 1 の 31 件を反映、design-review.md）・proposed/・問い Q324-1〜6（phase.md）。次は Q1 の受け入れと問いの答え。
