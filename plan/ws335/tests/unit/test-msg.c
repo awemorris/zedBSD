@@ -819,6 +819,78 @@ test_write_models(void)
 		free(out);
 		free(many);
 	}
+
+	/* Long lists of groups and schemes: 30000 fit; 32766 and 32767 do not (the extensions block, 2^16-1 bytes, is full first). */
+	{
+		uint16_t *many;
+		uint8_t *out;
+		size_t room;
+		int status;
+
+		many = malloc(32767U * sizeof(*many));
+		for (index = 0; index < 32767U; index++)
+			many[index] = (uint16_t)(0x0100U + (index & 0xffU));
+		input_typical(input, SSLC_TLS13, SSLC_TLS13);
+		room = 70000U + 2000U;
+		out = malloc(room);
+
+		/* Groups. */
+		input->hello.groups = many;
+		input->hello.group_count = 30000;
+		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+		CHECK(status == 0 && written > 60000U);
+		input->hello.group_count = 32766;
+		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+		CHECK(status == EINVAL && written == 0U);
+		input->hello.group_count = 32767;
+		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+		CHECK(status == EINVAL && written == 0U);
+		input->hello.groups = input->groups;
+		input->hello.group_count = 2;
+
+		/* Schemes. */
+		input->hello.schemes = many;
+		input->hello.scheme_count = 30000;
+		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+		CHECK(status == 0 && written > 60000U);
+		input->hello.scheme_count = 32766;
+		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+		CHECK(status == EINVAL && written == 0U);
+		input->hello.scheme_count = 32767;
+		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+		CHECK(status == EINVAL && written == 0U);
+		free(out);
+		free(many);
+	}
+
+	/* Key shares of 1 byte and of 60000 bytes; 65529 and above fill the extensions block (2^16-1 bytes) past its end. */
+	{
+		uint8_t *key;
+		uint8_t *out;
+		size_t room;
+		int status;
+
+		key = calloc(65536U, 1U);
+		room = 70000U;
+		out = malloc(room);
+		input_typical(input, SSLC_TLS13, SSLC_TLS13);
+		input->hello.shares[0].key = key;
+		input->hello.shares[0].key_size = 1;
+		CHECK(check_writer(&input->hello) != 0U);
+		input->hello.shares[0].key_size = 60000;
+		CHECK(check_writer(&input->hello) != 0U);
+		input->hello.shares[0].key_size = 65529;
+		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+		CHECK(status == EINVAL && written == 0U);
+		input->hello.shares[0].key_size = 65530;
+		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+		CHECK(status == EINVAL && written == 0U);
+		input->hello.shares[0].key_size = 65535;
+		status = sslc_msg_write_client_hello(&input->hello, out, room, &written);
+		CHECK(status == EINVAL && written == 0U);
+		free(out);
+		free(key);
+	}
 	buffer_free(&model);
 	free(input);
 }
@@ -2070,6 +2142,24 @@ test_server_hello_good(void)
 	CHECK(status == EPROTO && alert == ILL);
 	free(block);
 
+	/* A random that differs from the HelloRetryRequest's in any one byte is an ordinary ServerHello. */
+	for (index = 0; index < 32U; index++) {
+		struct buffer built;
+
+		buffer_init(&built);
+		put16(&built, 0x0303U);
+		put_bytes(&built, (const uint8_t *)"\xcf\x21\xad\x74\xe5\x9a\x61\x11\xbe\x1d\x8c\x02\x1e\x65\xb8\x91\xc2\xa2\x11\x16\x7a\xbb\x8c\x5e\x07\x9e\x09\xe2\xc8\xa8\x33\x9c", 32);
+		built.bytes[2U + index] ^= 0x01U;
+		put8(&built, 0);
+		put16(&built, 0x1301U);
+		put8(&built, 0);
+		block = exact_copy(built.bytes, built.size);
+		status = sslc_msg_parse_server_hello(block, built.size, &hello, &alert);
+		CHECK(status == 0 && hello.is_retry == 0);
+		free(block);
+		buffer_free(&built);
+	}
+
 	/* ec_point_formats: lists (a length byte, then formats) that contain uncompressed are good, those without are illegal_parameter. */
 	{
 		static const char *const lists[] = { "0100", "020001", "020100", "03010200", "03000102", "0300ff00" };
@@ -2752,6 +2842,51 @@ test_certificate(void)
 	buffer_free(&body);
 }
 
+/* Checks the largest messages a 3-byte length field holds: a Finished and a TLS 1.2 Certificate of 2^24-1 bytes. */
+static void
+test_largest_messages(void)
+{
+	struct sslc_certificate_msg certificate;
+	uint8_t *data;
+	uint8_t *out;
+	uint8_t *body;
+	size_t written;
+	size_t size;
+	unsigned alert;
+	int status;
+
+	/* A Finished whose verify_data is 16777215 bytes: the header says ff ff ff. */
+	size = 16777215U;
+	data = calloc(size, 1U);
+	out = malloc(size + 4U);
+	data[0] = 0x11U;
+	data[size - 1U] = 0x22U;
+	status = sslc_msg_write_finished(data, size, out, size + 4U, &written);
+	CHECK(status == 0 && written == size + 4U);
+	CHECK(out[0] == 0x14U && out[1] == 0xffU && out[2] == 0xffU && out[3] == 0xffU);
+	CHECK(out[4] == 0x11U && out[size + 3U] == 0x22U);
+	status = sslc_msg_write_finished(data, size, out, size + 3U, &written);
+	CHECK(status == ENOBUFS && written == 0U);
+	free(out);
+	free(data);
+
+	/* A TLS 1.2 Certificate: the list is 2^24-1 bytes, one certificate of 2^24-4 bytes. */
+	size = 3U + 16777215U;
+	body = malloc(size);
+	body[0] = 0xffU;
+	body[1] = 0xffU;
+	body[2] = 0xffU;
+	body[3] = 0xffU;
+	body[4] = 0xffU;
+	body[5] = 0xfcU;
+	memset(body + 6, 0x30, size - 6U);
+	alert = 777;
+	status = sslc_msg_parse_certificate(body, size, 0, &certificate, &alert);
+	CHECK(status == 0 && alert == 0U);
+	CHECK(certificate.count == 1U && certificate.der_size[0] == 16777212U && certificate.der[0] == body + 6U);
+	free(body);
+}
+
 /* Checks the CertificateVerify parser over boundary lengths. */
 static void
 test_certificate_verify(void)
@@ -3382,6 +3517,7 @@ main(void)
 	test_rfc_server_hello();
 	test_rfc_messages();
 	test_certificate();
+	test_largest_messages();
 	test_certificate_verify();
 	test_server_key_exchange();
 	test_encrypted_extensions();

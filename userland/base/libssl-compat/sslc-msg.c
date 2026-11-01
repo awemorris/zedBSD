@@ -198,6 +198,8 @@ sslc_msg_parse_server_hello(
 	struct sslc_reader data;
 	const uint8_t *random;
 	uint32_t type;
+	size_t left;
+	int same;
 	int error;
 
 	/* Starts with nothing found and no alert. */
@@ -226,11 +228,13 @@ sslc_msg_parse_server_hello(
 		return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
 
 	/* A HelloRetryRequest is a ServerHello with one fixed random. */
-	if (memcmp(hello->random, sslc_tls_hrr_random, sizeof(hello->random)) == 0)
+	same = memcmp(hello->random, sslc_tls_hrr_random, sizeof(hello->random));
+	if (same == 0)
 		hello->is_retry = 1;
 
 	/* No extensions block at all is a valid TLS 1.2 ServerHello. */
-	if (sslc_reader_left(&reader) == 0)
+	left = sslc_reader_left(&reader);
+	if (left == 0U)
 		return 0;
 
 	/* The extensions block ends the body. */
@@ -242,13 +246,15 @@ sslc_msg_parse_server_hello(
 		return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
 
 	/* Takes in each extension in turn, stopping at the first that is not acceptable. */
-	while (sslc_reader_left(&block) > 0) {
+	left = sslc_reader_left(&block);
+	while (left > 0U) {
 		error = sslc_msg_next_extension(&block, &type, &data);
 		if (error != 0)
 			return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
 		error = sslc_msg_hello_extension(hello, type, &data, alert);
 		if (error != 0)
 			return error;
+		left = sslc_reader_left(&block);
 	}
 
 	/* Every extension was well formed and allowed. */
@@ -274,6 +280,7 @@ sslc_msg_parse_encrypted_extensions(
 	struct sslc_reader data;
 	struct sslc_reader groups;
 	uint32_t type;
+	size_t left;
 	int seen_name;
 	int seen_groups;
 	int error;
@@ -294,7 +301,8 @@ sslc_msg_parse_encrypted_extensions(
 		return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
 
 	/* Takes in each extension in turn, stopping at the first that is not acceptable. */
-	while (sslc_reader_left(&block) > 0) {
+	left = sslc_reader_left(&block);
+	while (left > 0U) {
 		error = sslc_msg_next_extension(&block, &type, &data);
 		if (error != 0)
 			return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
@@ -312,6 +320,7 @@ sslc_msg_parse_encrypted_extensions(
 			if (error != 0)
 				return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
 			*server_name_ack = 1;
+			left = sslc_reader_left(&block);
 			continue;
 		}
 
@@ -327,6 +336,7 @@ sslc_msg_parse_encrypted_extensions(
 			return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
 		if (groups.size % 2U != 0U)
 			return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
+		left = sslc_reader_left(&block);
 	}
 
 	/* Every extension was well formed and allowed. */
@@ -350,6 +360,7 @@ sslc_msg_parse_certificate(
 	struct sslc_reader list;
 	struct sslc_reader entry;
 	struct sslc_reader extensions;
+	size_t left;
 	int error;
 
 	/* Starts with nothing found and no alert. */
@@ -379,7 +390,8 @@ sslc_msg_parse_certificate(
 		return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
 
 	/* Takes in each certificate in turn. */
-	while (sslc_reader_left(&list) > 0) {
+	left = sslc_reader_left(&list);
+	while (left > 0U) {
 		/* A chain longer than the verifier keeps. */
 		if (message->count >= CRYC_CHAIN_MAX_PEER)
 			return sslc_msg_fail(alert, SSLC_ALERT_BAD_CERTIFICATE, EPROTO);
@@ -403,6 +415,7 @@ sslc_msg_parse_certificate(
 			if (extensions.size != 0U)
 				return sslc_msg_fail(alert, SSLC_ALERT_UNSUPPORTED_EXTENSION, EPROTO);
 		}
+		left = sslc_reader_left(&list);
 	}
 
 	/* The whole list was read. */
@@ -535,6 +548,7 @@ sslc_msg_parse_certificate_request(
 	struct sslc_reader inner;
 	struct sslc_reader names;
 	struct sslc_reader name;
+	size_t left;
 	int error;
 
 	/* Starts with nothing found and no alert. */
@@ -578,10 +592,12 @@ sslc_msg_parse_certificate_request(
 	error = sslc_reader_vector(&reader, 2, 0, SSLC_MSG_MAX_U16, &names);
 	if (error != 0)
 		return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
-	while (sslc_reader_left(&names) > 0) {
+	left = sslc_reader_left(&names);
+	while (left > 0U) {
 		error = sslc_reader_vector(&names, 2, 1, SSLC_MSG_MAX_U16, &name);
 		if (error != 0)
 			return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
+		left = sslc_reader_left(&names);
 	}
 
 	/* The body ends there. */
@@ -853,15 +869,20 @@ sslc_msg_skip_extensions(
 	struct sslc_reader copy;
 	struct sslc_reader data;
 	uint32_t type;
+	size_t left;
 	int error;
 
 	/* Walks a copy, so that the block itself is left whole. */
 	copy = *block;
-	while (sslc_reader_left(&copy) > 0) {
+	left = sslc_reader_left(&copy);
+	while (left > 0U) {
 		error = sslc_msg_next_extension(&copy, &type, &data);
 		if (error != 0)
 			return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
+		left = sslc_reader_left(&copy);
 	}
+
+	/* Every extension fits its length. */
 	return 0;
 }
 
