@@ -8,7 +8,7 @@
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS291](ws291/ws.md) p026 | GPU の driver の描画の速さ（RTX 2070） | push buffer を記録の時に組む設計（q1838） | 設計 → 敵対的レビュー → 実装は別の Queue |
-| P2 | — | — | 返却（20:38）。WS291 p020（VF2 の model の 50 fps）は cleared: c13 55.8〜56.3 fps、回帰 PASS | 次の VF2 の作業は未割当（VF2 は今 P4 の BUG-387 の試験） |
+| P2 | [WS322](ws322/ws.md) p001 | VF2 の VPU を Vulkan Video に（H.264・H.265 decode、H.265 encode） | 調べと設計（q1845） | 設計 → レビュー → 実装の Phase の案。板は P4 の後 |
 | P3 | [WS291](ws291/ws.md) p021 | GPU の driver の描画の速さ（Pi 5 の V3D） | 返却（20:42）。dcache clean を省く直し（約 0.75 ms/frame の見込み）を build、板では未計測 | Pi 5 が P4 から戻ったら i02 で計測（基準は起動により 44.7〜50.8 fps） |
 | P4 | [BUG-387](bugs/BUG-387.md) | VF2・Pi 5 で console から Wayland の desktop を起動できない | 直しは 9616367f5（build だけ）。Pi 5・VF2 の板の窓を待つ（q1842） | 板の試験 → merge。以後の Bug の修正も P4 |
 | P5 | [WS334](ws334/ws.md) p025 | Web ブラウザ OmniGrammaton の Windows 版（.exe） | script の core の archive と link の確かめ（q1843） | p023（instance と API v4）・p026（libmedia の Windows）へ |

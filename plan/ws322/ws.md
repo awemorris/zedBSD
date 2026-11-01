@@ -3,7 +3,7 @@
 # WS322 VisionFive 2（JH7110） の Vulkan Video: H.264・H.265 decode（Wave511）、H.265 encode（Wave420L）を PowerVR の Vulkan の executor の Vulkan Video として。H.264 encode は hardware に無く libavcodec
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: planning（2026-10-30 Q1 が作成。[WS318](../ws318/ws.md)（libmedia）の completed の後に始める）
+- Status: incomplete（2026-10-30 Q1 が作成。2026-11-01 ユーザーから、P2 で WS322 を実行する、という趣旨の指示を受け、WS318 の completed を待たずに p001 を始めた）
 - 目標: VisionFive 2（JH7110） の video の hardware のうち zedBSD で未実装の物を、kernel の Vulkan の executor（`src/drivers/gpu/powervr/`）の Vulkan Video（`VK_KHR_video_decode_*`・`VK_KHR_video_encode_*`）として実装し、libmedia から使えるようにする。
 
 ## ユーザーの決定（2026-10-30、原文）
@@ -16,8 +16,9 @@
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| ws322-p001 | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | planning | WS318 completed |
+| [ws322-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | planned（2026-11-01 20:43 P2 q1845） | （WS318 の completed を待たない、2026-11-01 ユーザー） |
 
 ## Resume point
 
+- 2026-11-01 20:43 Q1: ユーザーの指示で前倒し、p001 を P2（q1845）に。
 - 2026-10-30 Q1: 作成。WS318 の completed の後。

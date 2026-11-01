@@ -6,7 +6,7 @@
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
 | P1 | kernel-and-driver-designer | ws291 p026 RTX の push buffer の設計 (q1838-i01) | `/home/awe/zedBSD-worktrees/p1-ws291p026` / `agent/p1-ws291p026` | in-progress（2026-11-01 20:2x 起動、10.0.10.3） | — |
-| P2 | phase-runner-high | ws291 p020 VF2 の model の 50 fps (q1839-i01) | `/home/awe/zedBSD-worktrees/p2-ws291p020` / `agent/p2-ws291p020` | 返却（2026-11-01 20:38、cleared） | acc9635ba（merge d5aded6bd） |
+| P2 | kernel-and-driver-designer | ws322 p001 VF2 の VPU の設計 (q1845-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 20:43 起動） | acc9635ba（merge d5aded6bd） |
 | P3 | phase-runner-high | ws291 p021 Pi 5 の model の 50 fps (q1840-i01 返却、次は i02) | `/home/awe/zedBSD-worktrees/p3-ws291p021` / `agent/p3-ws291p021` | 返却（2026-11-01 20:42、in-progress。Pi 5 の返却待ち） | — |
 | P5 | phase-runner-high | ws334 p025 Windows のブラウザ (q1843-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-01 20:35 起動） | — |
 | P6 | phase-runner-low | ws335 p004 AES (q1844-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-01 20:37 起動） | — |
