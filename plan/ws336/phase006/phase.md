@@ -2,7 +2,7 @@
 
 # ws336-p006: ssh-hostfile（authorized_keys・known_hosts・host の pattern）
 
-Status: in-progress（実装済み・試験 PASS、cleared は Q1 が決める）
+Status: cleared（2026-11-01 09:34 Q1 の判定、main 9622eaa29。Sonnet 実装済み・試験 PASS、Q1 も run-unit hostfile を流して PASS）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p005

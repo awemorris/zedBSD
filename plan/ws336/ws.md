@@ -39,7 +39,7 @@
 | [p003](phase003/phase.md) | ssh-crypto（libcrypto-compat の呼び出し） | cleared（2026-11-01 06:52 Q1、main 28213c738。ssh-crypto 実装（libcrypto-compat の公開の口だけを呼ぶ）、run-unit crypto 1656 checks PASS（host の OpenSSL 3.5 で、Q1 再実行で確認）。libcrypto-compat との試験は p021） | p002 | WS335 header（解けた: 基点 60760d2a0 が main にある） |
 | [p004](phase004/phase.md) | ssh-cipher・ssh-packet | cleared（2026-11-01 08:40 Q1、main a7cb17936。08:34 q1823-i03、Sonnet。run-unit all PASS、cipher 1064・packet 369168 checks、壊す確かめ 23 通り全部 FAIL。） | p003 | p003 経由 |
 | [p005](phase005/phase.md) | ssh-key | cleared（2026-11-01 09:04 Q1、main e41eccfc3。08:54 q1824-i03、Sonnet。run-unit all PASS、key 2771 checks、壊す確かめ 38 通り中 36 が FAIL・2 は同値の変更） | p003 | p003 経由 |
-| [p006](phase006/phase.md) | ssh-hostfile | 実装済み・試験 PASS（2026-11-01 09:32、run-unit all PASS、hostfile 736314 checks、壊す確かめ 48 通り中 46 が FAIL・2 は同値の変更。cleared は Q1） | p005 | p003 経由 |
+| [p006](phase006/phase.md) | ssh-hostfile | cleared（2026-11-01 09:34 Q1、main 9622eaa29。Sonnet、hostfile 736314 checks、壊す確かめ 48 通り中 46 が FAIL・2 は同値） | p005 | p003 経由 |
 | [p007](phase007/phase.md) | ssh-kex | planned | p004 | p003 経由 |
 | [p008](phase008/phase.md) | ssh-transport（Opus） | planned | p005・p007 | p003 経由 |
 | [p009](phase009/phase.md) | ssh-auth | planned | p005 | p003 経由 |
