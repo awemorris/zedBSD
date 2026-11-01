@@ -60,6 +60,7 @@
 ### 統合の注意
 
 <!-- master:merge:start -->
+- ブラウザの担当（2026-11-02 07:18 ユーザーの決定）: Windows 版のブラウザ（WS334）と libbrowser（WS074）の直しは当面 P8 が行う。ユーザーは主に Windows 版を操作して review の comment を出す。P7（BUG-398）と P4（BUG-397・399）は今の作業の後、ブラウザの関係の作業を P8 に寄せる。
 - WS074（2026-10-30 ユーザー「Codexは解約しました。WS074はClaudeの管理下に移ります。」）: Codex のセッションは終わった。WS074 は Q1 が管理し、Claude の担当（P1〜P8・B1・Sonnet）に割り当ててよい。main の checkout の WS074 の未 commit の変更は無い（2026-10-30 git status で確かめた）。
 - H.265（2026-10-30 ユーザー「H.265のパテントプールへの支払いは行う方針です。H.265の実装を行っていいです。」）: HEVC の decode・encode を実装してよい（WS236 の「HEVCはライセンスがないのでやらないです」を置き換え）。
 - 5330 への SSH（2026-10-30 ユーザー「5330へのSSHは許可します。」）: 権限の判定に止められた 5330（ssh の別名 solaris10-man、10.0.30.3）への SSH を許可。担当は試験の前に uname で 5330 の Debian か zedBSD かを確かめる。身元の分からない host には login しない。
@@ -116,7 +117,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-401 · q1919 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-401 · q1919 · WS343 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -197,6 +198,7 @@ BUG-401 · q1919 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
 | [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
 | [WS341](ws341/ws.md) | MG006 | 仮想 GPU の driver の枠組み（user の program が作る scanout だけの /dev/gpuN、他の GPU が描き、Vulkan Video で H.264・H.265 に encode して USB・network の遠隔の display・RDP へ）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
+| [WS342](ws342/ws.md) | MG006 | Windows 版の libvulkan（userland/desktop/libvulkan-win32、vulkan-1.dll への橋渡し、handle の共有）と Keiland の Windows の backend の compositor（userland/desktop/libkeiland-backend-win32、DWM の上）（2026-11-02 ユーザー） | planning | 着手しない（議論の後） |
 | [WS340](ws340/ws.md) | MG006 | Pi 4・Pi 5・VF2 の graphical boot（logo を出し log を出さない、PC/AT と同じ起動を menuconfig の ZEDBSD_GRAPHICAL_BOOT で選べる）（2026-11-01 ユーザー） | planning | p001 調べと設計（担当は未割当） |
 | [WS339](ws339/ws.md) | MG004 | x86 の PC の UEFI の起動の画面の解像度を monitor（EDID）に合わせる、標準の設定の video=640x480 を外す（2026-11-01 ユーザー） | planning | p001（担当の割当はユーザーの指示で） |
 | [WS338](ws338/ws.md) | MG006 | libmedia の H.264 の software の decoder の速さの続き（WS326 から分けた、2026-11-01 ユーザー） | planning | p001 設計（担当の割当はユーザーの指示で） |
