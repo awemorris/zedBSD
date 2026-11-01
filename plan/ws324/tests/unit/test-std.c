@@ -211,7 +211,7 @@ hrd_fill(
 	/*
 	 * The per-sub-layer flags: fixed_pic_rate_general 1,0,1,0,0,0,1 (bits
 	 * 0, 2 and 6), fixed_pic_rate_within_cvs 0,1,1,0,0,1,0 (bits 1, 2 and
-	 * 5), low_delay_hrd 1,1,0,0,0,0,0 (bits 0 and 1).  The flags are
+	 * 5), low_delay_hrd 1,1,0,0,0,0,1 (bits 0, 1 and 6).  The flags are
 	 * stored as 1 here, and as 2 for one to show any non-zero value counts.
 	 */
 	hrd->fixed_pic_rate_general[0] = 1U;
@@ -222,6 +222,7 @@ hrd_fill(
 	hrd->fixed_pic_rate_within_cvs[5] = 2U;
 	hrd->low_delay_hrd[0] = 1U;
 	hrd->low_delay_hrd[1] = 1U;
+	hrd->low_delay_hrd[6] = 1U;
 
 	/* Writes the CPB count and the elemental duration of each sub-layer. */
 	for (i = 0U; i < H265SW_MAX_SUB_LAYERS; i++) {
@@ -499,7 +500,7 @@ hrd_check(
 	CHECK(out->flags.sub_pic_cpb_params_in_pic_timing_sei_flag == 1U);
 	CHECK(out->flags.fixed_pic_rate_general_flag == 0x45U);
 	CHECK(out->flags.fixed_pic_rate_within_cvs_flag == 0x26U);
-	CHECK(out->flags.low_delay_hrd_flag == 0x03U);
+	CHECK(out->flags.low_delay_hrd_flag == 0x43U);
 
 	/* Compares the common fields. */
 	CHECK(out->tick_divisor_minus2 == 11U);
@@ -728,6 +729,7 @@ test_ptl_flags(void)
 {
 	struct h265sw_ptl ptl;
 	StdVideoH265ProfileTierLevel out;
+	StdVideoH265ProfileTierLevel expected;
 	unsigned k;
 	int error;
 
@@ -757,6 +759,22 @@ test_ptl_flags(void)
 		CHECK(out.flags.general_frame_only_constraint_flag == (k == 4U));
 		CHECK(out.general_level_idc == STD_VIDEO_H265_LEVEL_IDC_3_1);
 	}
+
+	/* The whole output is defined: it equals a cleared structure with the seven fields set. */
+	memset(&ptl, 0, sizeof(ptl));
+	ptl.profile_idc = 2U;
+	ptl.level_idc = 93U;
+	ptl.tier = 1U;
+	ptl.non_packed = 1;
+	memset(&out, 0xCC, sizeof(out));
+	error = h265_std_ptl(&ptl, &out);
+	CHECK(error == 0);
+	memset(&expected, 0, sizeof(expected));
+	expected.flags.general_tier_flag = 1U;
+	expected.flags.general_non_packed_constraint_flag = 1U;
+	expected.general_profile_idc = STD_VIDEO_H265_PROFILE_IDC_MAIN_10;
+	expected.general_level_idc = STD_VIDEO_H265_LEVEL_IDC_3_1;
+	CHECK(memcmp(&out, &expected, sizeof(out)) == 0);
 
 	/* A flag stored as another non-zero value is still 1. */
 	memset(&ptl, 0, sizeof(ptl));
@@ -795,6 +813,21 @@ test_hrd(void)
 		CHECK(vps_out.vps.pHrdParameters == &vps_out.hrd);
 		hrd_check(&vps_out.hrd, vps_out.hrd_nal, vps_out.hrd_vcl, nal, vcl);
 	}
+
+	/* The two sub-picture flags are independent. */
+	vps_in.hrd.sub_pic_hrd_params_present = 1;
+	vps_in.hrd.sub_pic_cpb_params_in_pic_timing_sei = 0;
+	error = h265_std_vps(&vps_in, &vps_out);
+	CHECK(error == 0);
+	CHECK(vps_out.hrd.flags.sub_pic_hrd_params_present_flag == 1U);
+	CHECK(vps_out.hrd.flags.sub_pic_cpb_params_in_pic_timing_sei_flag == 0U);
+
+	vps_in.hrd.sub_pic_hrd_params_present = 0;
+	vps_in.hrd.sub_pic_cpb_params_in_pic_timing_sei = 1;
+	error = h265_std_vps(&vps_in, &vps_out);
+	CHECK(error == 0);
+	CHECK(vps_out.hrd.flags.sub_pic_hrd_params_present_flag == 0U);
+	CHECK(vps_out.hrd.flags.sub_pic_cpb_params_in_pic_timing_sei_flag == 1U);
 
 	/* The sub-layer arrays are not copied when their present flag is 0: the arrays stay cleared. */
 	vps_in.hrd.nal_hrd_present = 0;
@@ -904,6 +937,17 @@ test_vps(void)
 	CHECK(vps_out.vps.flags.vps_temporal_id_nesting_flag == 1U);
 
 	/* Each flag alone sets only its bit. */
+	vps_in.temporal_id_nesting = 1;
+	vps_in.sub_layer_ordering_info_present = 0;
+	vps_in.timing_present = 0;
+	vps_in.poc_proportional_to_timing = 0;
+	error = h265_std_vps(&vps_in, &vps_out);
+	CHECK(error == 0);
+	CHECK(vps_out.vps.flags.vps_temporal_id_nesting_flag == 1U);
+	CHECK(vps_out.vps.flags.vps_sub_layer_ordering_info_present_flag == 0U);
+	CHECK(vps_out.vps.flags.vps_timing_info_present_flag == 0U);
+	CHECK(vps_out.vps.flags.vps_poc_proportional_to_timing_flag == 0U);
+
 	vps_in.temporal_id_nesting = 0;
 	vps_in.sub_layer_ordering_info_present = 0;
 	vps_in.timing_present = 0;
@@ -1302,6 +1346,13 @@ test_sps_pointers(void)
 	CHECK((sps_out.lt.used_by_curr_pic_lt_sps_flag & 0x80000000U) != 0U);
 	CHECK(sps_out.lt.used_by_curr_pic_lt_sps_flag == 0x80000005U);
 
+	/* A count above 32 is cut to the 32 entries the array holds. */
+	sps_in.num_lt_sps = 40U;
+	error = h265_std_sps(&sps_in, &sps_out);
+	CHECK(error == 0);
+	CHECK(sps_out.lt.lt_ref_pic_poc_lsb_sps[31] == 0xABCDU);
+	CHECK(sps_out.lt.used_by_curr_pic_lt_sps_flag == 0x80000005U);
+
 	/* Short-term sets: the pointer names the array of the output when there is at least one. */
 	sps_in.num_st_rps = 1U;
 	error = h265_std_sps(&sps_in, &sps_out);
@@ -1658,8 +1709,19 @@ test_short_term_sets(void)
 	sps_in.st_rps[0].used[2] = 1U;
 	sps_in.st_rps[0].used[3] = 0U;
 	sps_in.st_syntax[0].inter_rps_pred = 1;
+	sps_in.st_syntax[0].delta_idx_minus1 = 2U;
+	sps_in.st_syntax[0].delta_rps_sign = 0;
+	sps_in.st_syntax[0].abs_delta_rps_minus1 = 300U;
+	sps_in.st_syntax[0].used_by_curr_pic_flags = 0x1234U;
+	sps_in.st_syntax[0].use_delta_flags = 0x4321U;
 	error = h265_std_sps(&sps_in, &sps_out);
 	CHECK(error == 0);
+	CHECK(sps_out.st_rps[0].flags.inter_ref_pic_set_prediction_flag == 1U);
+	CHECK(sps_out.st_rps[0].flags.delta_rps_sign == 0U);
+	CHECK(sps_out.st_rps[0].delta_idx_minus1 == 2U);
+	CHECK(sps_out.st_rps[0].abs_delta_rps_minus1 == 300U);
+	CHECK(sps_out.st_rps[0].used_by_curr_pic_flag == 0x1234U);
+	CHECK(sps_out.st_rps[0].use_delta_flag == 0x4321U);
 	CHECK(sps_out.st_rps[0].num_negative_pics == 0U);
 	CHECK(sps_out.st_rps[0].num_positive_pics == 4U);
 	CHECK(sps_out.st_rps[0].delta_poc_s1_minus1[0] == 2U);
@@ -1711,6 +1773,36 @@ test_short_term_sets(void)
 	CHECK(sps_out.st_rps[0].used_by_curr_pic_s0_flag == 0x80U);
 	CHECK(sps_out.st_rps[0].used_by_curr_pic_s1_flag == 0x40U);
 
+	/* Sixteen entries in all (8 + 8) still fit the arrays; the explicit form takes 16 in one list as well. */
+	sps_in.st_rps[0].num_positive = 8U;
+	sps_in.st_rps[0].delta_poc[15] = 8;
+	sps_in.st_rps[0].used[15] = 1U;
+	error = h265_std_sps(&sps_in, &sps_out);
+	CHECK(error == 0);
+	CHECK(sps_out.st_rps[0].num_positive_pics == 8U);
+	CHECK(sps_out.st_rps[0].delta_poc_s1_minus1[7] == 0U);
+	CHECK(sps_out.st_rps[0].used_by_curr_pic_s1_flag == 0xC0U);
+
+	memset(&sps_in.st_syntax[0], 0, sizeof(sps_in.st_syntax[0]));
+	sps_in.st_syntax[0].num_negative_pics = 16U;
+	sps_in.st_syntax[0].delta_poc_s0_minus1[15] = 123U;
+	sps_in.st_syntax[0].used_by_curr_pic_s0_flags = 0x8000U;
+	error = h265_std_sps(&sps_in, &sps_out);
+	CHECK(error == 0);
+	CHECK(sps_out.st_rps[0].num_negative_pics == 16U);
+	CHECK(sps_out.st_rps[0].delta_poc_s0_minus1[15] == 123U);
+	CHECK(sps_out.st_rps[0].used_by_curr_pic_s0_flag == 0x8000U);
+
+	memset(&sps_in.st_syntax[0], 0, sizeof(sps_in.st_syntax[0]));
+	sps_in.st_syntax[0].num_positive_pics = 16U;
+	sps_in.st_syntax[0].delta_poc_s1_minus1[15] = 321U;
+	sps_in.st_syntax[0].used_by_curr_pic_s1_flags = 0x8001U;
+	error = h265_std_sps(&sps_in, &sps_out);
+	CHECK(error == 0);
+	CHECK(sps_out.st_rps[0].num_positive_pics == 16U);
+	CHECK(sps_out.st_rps[0].delta_poc_s1_minus1[15] == 321U);
+	CHECK(sps_out.st_rps[0].used_by_curr_pic_s1_flag == 0x8001U);
+
 	/* Sixty-four explicit sets keep their order in the array. */
 	sps_fill(&sps_in);
 	sps_in.num_st_rps = 64U;
@@ -1731,6 +1823,7 @@ static void
 test_short_term_limits(void)
 {
 	int error;
+	unsigned i;
 
 	/* Sets up one predicted set; the first negative step is varied around 65536. */
 	sps_fill(&sps_in);
@@ -1825,8 +1918,32 @@ test_short_term_limits(void)
 	memset(&sps_in.st_rps[0], 0, sizeof(sps_in.st_rps[0]));
 	sps_in.st_rps[0].num_negative = 9U;
 	sps_in.st_rps[0].num_positive = 8U;
+	for (i = 0U; i < 9U; i++)
+		sps_in.st_rps[0].delta_poc[i] = -(int32_t)(i + 1U);
+	for (i = 0U; i < 7U; i++)
+		sps_in.st_rps[0].delta_poc[9U + i] = (int32_t)(i + 1U);
 	error = h265_std_sps(&sps_in, &sps_out);
 	CHECK(error == EINVAL);
+
+	/* Sixteen entries in one list fit, with valid steps. */
+	memset(&sps_in.st_rps[0], 0, sizeof(sps_in.st_rps[0]));
+	sps_in.st_rps[0].num_negative = 16U;
+	for (i = 0U; i < 16U; i++)
+		sps_in.st_rps[0].delta_poc[i] = -(int32_t)(i + 1U);
+	error = h265_std_sps(&sps_in, &sps_out);
+	CHECK(error == 0);
+	CHECK(sps_out.st_rps[0].num_negative_pics == 16U);
+	CHECK(sps_out.st_rps[0].delta_poc_s0_minus1[15] == 0U);
+
+	memset(&sps_in.st_rps[0], 0, sizeof(sps_in.st_rps[0]));
+	sps_in.st_rps[0].num_positive = 16U;
+	for (i = 0U; i < 16U; i++)
+		sps_in.st_rps[0].delta_poc[i] = (int32_t)(i + 1U);
+	sps_in.st_rps[0].used[15] = 1U;
+	error = h265_std_sps(&sps_in, &sps_out);
+	CHECK(error == 0);
+	CHECK(sps_out.st_rps[0].num_positive_pics == 16U);
+	CHECK(sps_out.st_rps[0].used_by_curr_pic_s1_flag == 0x8000U);
 
 	/* An explicit set with counts above the arrays is refused as well. */
 	memset(&sps_in.st_syntax[0], 0, sizeof(sps_in.st_syntax[0]));
@@ -2212,6 +2329,14 @@ test_picture(void)
 
 	CHECK(good);
 
+	/* A CRA picture is an IRAP picture but not an IDR picture. */
+	picture_in.irap = 1;
+	picture_in.idr = 0;
+	error = h265_std_picture(&picture_in, &plan_in, &info);
+	CHECK(error == 0);
+	CHECK(info.flags.IrapPicFlag == 1U);
+	CHECK(info.flags.IdrPicFlag == 0U);
+
 	/* A non-IRAP picture with a set of the SPS: no bits, and no entries of a predicted set, whatever the syntax holds. */
 	picture_in.irap = 0;
 	picture_in.idr = 0;
@@ -2383,6 +2508,25 @@ test_picture_lists(void)
 	plan_in.st_before[0] = 256;
 	error = h265_std_picture(&picture_in, &plan_in, &info);
 	CHECK(error == EINVAL);
+
+	/* The slots of the other two lists are checked the same way. */
+	plan_in.st_before[0] = 1;
+	plan_in.num_st_after = 1U;
+	plan_in.st_after[0] = 255;
+	error = h265_std_picture(&picture_in, &plan_in, &info);
+	CHECK(error == EINVAL);
+
+	plan_in.st_after[0] = 2;
+	plan_in.num_lt_curr = 1U;
+	plan_in.lt_curr[0] = 255;
+	error = h265_std_picture(&picture_in, &plan_in, &info);
+	CHECK(error == EINVAL);
+
+	plan_in.lt_curr[0] = 254;
+	error = h265_std_picture(&picture_in, &plan_in, &info);
+	CHECK(error == 0);
+	CHECK(info.RefPicSetStCurrAfter[0] == 2U);
+	CHECK(info.RefPicSetLtCurr[0] == 254U);
 }
 
 /* Tests the reference information of the references and of the setup slot. */
