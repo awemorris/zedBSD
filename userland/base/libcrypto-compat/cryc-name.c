@@ -494,6 +494,7 @@ name_folder_next(
 	struct name_folder *folder)
 {
 	unsigned character;
+	int folded;
 
 	/* Nothing is left. */
 	if (folder->position >= folder->end)
@@ -509,9 +510,10 @@ name_folder_next(
 
 	/* Any other character is read in lower case. */
 	folder->position++;
+	folded = (int)name_lower(character);
 
 	/* Succeeded: the next folded character. */
-	return (int)name_lower(character);
+	return folded;
 }
 
 /* Compares two text values after the folding of RFC 5280 7.1; returns 1 when equal. */
@@ -526,20 +528,27 @@ name_text_equal(
 	struct name_folder right_folder;
 	int left_character;
 	int right_character;
+	int equal;
 
 	/* Reads both values in their folded form. */
 	name_folder_init(&left_folder, left, left_size);
 	name_folder_init(&right_folder, right, right_size);
 
 	/* Compares them character by character until both end together. */
+	equal = 1;
 	for (;;) {
 		left_character = name_folder_next(&left_folder);
 		right_character = name_folder_next(&right_folder);
-		if (left_character != right_character)
-			return 0;
+		if (left_character != right_character) {
+			equal = 0;
+			break;
+		}
 		if (left_character < 0)
-			return 1;
+			break;
 	}
+
+	/* Succeeded: reports whether the folded values are equal. */
+	return equal;
 }
 
 /* Tells whether a value is a PrintableString or UTF8String holding only ASCII, the values RFC 5280 7.1 folds. */
@@ -744,6 +753,7 @@ name_rdn_equal(
 	struct cryc_der_element right_value;
 	int left_end;
 	int right_end;
+	int same;
 	int equal;
 	int difference;
 	int error;
@@ -757,34 +767,50 @@ name_rdn_equal(
 		return 0;
 
 	/* Compares the attributes pair by pair until both sets end together. */
+	equal = 1;
 	for (;;) {
 		left_end = cryc_der_empty(&left_set);
 		right_end = cryc_der_empty(&right_set);
 		if (left_end && right_end)
-			return 1;
-		if (left_end || right_end)
-			return 0;
+			break;
+		if (left_end || right_end) {
+			equal = 0;
+			break;
+		}
 
 		/* Reads the next attribute of each. */
 		error = name_read_attribute(&left_set, &left_type, &left_value);
-		if (error != 0)
-			return 0;
+		if (error != 0) {
+			equal = 0;
+			break;
+		}
 		error = name_read_attribute(&right_set, &right_type, &right_value);
-		if (error != 0)
-			return 0;
+		if (error != 0) {
+			equal = 0;
+			break;
+		}
 
 		/* The types are equal by their OID octets. */
-		if (left_type.length != right_type.length)
-			return 0;
+		if (left_type.length != right_type.length) {
+			equal = 0;
+			break;
+		}
 		difference = memcmp(left_type.contents, right_type.contents, left_type.length);
-		if (difference != 0)
-			return 0;
+		if (difference != 0) {
+			equal = 0;
+			break;
+		}
 
 		/* The values are equal by the rule of RFC 5280 7.1. */
-		equal = name_value_equal(&left_value, &right_value);
-		if (!equal)
-			return 0;
+		same = name_value_equal(&left_value, &right_value);
+		if (!same) {
+			equal = 0;
+			break;
+		}
 	}
+
+	/* Succeeded: reports whether every attribute pair was equal. */
+	return equal;
 }
 
 /*
@@ -805,6 +831,7 @@ name_rdns_equal(
 	struct cryc_der_element right_rdn;
 	int left_end;
 	int right_end;
+	int same;
 	int equal;
 	int error;
 
@@ -817,32 +844,44 @@ name_rdns_equal(
 		return 0;
 
 	/* Compares the RDNs in order. */
+	equal = 1;
 	for (;;) {
 		left_end = cryc_der_empty(&left_names);
 		right_end = cryc_der_empty(&right_names);
 
 		/* The right Name is used up: a prefix is enough, a whole comparison also needs the left one used up. */
 		if (right_end) {
-			if (!whole)
-				return 1;
-			return left_end;
+			if (whole)
+				equal = left_end;
+			break;
 		}
 
 		/* The left Name ended first: it is shorter than the right one. */
-		if (left_end)
-			return 0;
+		if (left_end) {
+			equal = 0;
+			break;
+		}
 
 		/* Compares the next RDN of each. */
 		error = cryc_der_expect(&left_names, CRYC_DER_SET, &left_rdn);
-		if (error != 0)
-			return 0;
+		if (error != 0) {
+			equal = 0;
+			break;
+		}
 		error = cryc_der_expect(&right_names, CRYC_DER_SET, &right_rdn);
-		if (error != 0)
-			return 0;
-		equal = name_rdn_equal(&left_rdn, &right_rdn);
-		if (!equal)
-			return 0;
+		if (error != 0) {
+			equal = 0;
+			break;
+		}
+		same = name_rdn_equal(&left_rdn, &right_rdn);
+		if (!same) {
+			equal = 0;
+			break;
+		}
 	}
+
+	/* Succeeded: reports whether the RDNs are equal. */
+	return equal;
 }
 
 /* Tells whether every byte is printable ASCII without the space. */
@@ -1442,7 +1481,7 @@ name_scan_subtrees(
 	*forms = 0;
 
 	/* Checks each subtree's base and records its form. */
-	while (!cryc_der_empty(&reader)) {
+	while (reader.size != 0) {
 		error = name_subtree_next(&reader, &base);
 		if (error != 0)
 			return EINVAL;
@@ -1534,7 +1573,7 @@ name_match_list(
 	/* Walks the subtrees. */
 	cryc_der_init(&reader, list, list_size);
 	*matched = 0;
-	while (!cryc_der_empty(&reader)) {
+	while (reader.size != 0) {
 		error = name_subtree_next(&reader, &base);
 		if (error != 0)
 			return EINVAL;
@@ -1675,14 +1714,14 @@ name_check_email_attributes(
 	error = cryc_der_enter(name, &names);
 	if (error != 0)
 		return EINVAL;
-	while (!cryc_der_empty(&names)) {
+	while (names.size != 0) {
 		error = cryc_der_expect(&names, CRYC_DER_SET, &rdn);
 		if (error != 0)
 			return EINVAL;
 		error = cryc_der_enter(&rdn, &set);
 		if (error != 0)
 			return EINVAL;
-		while (!cryc_der_empty(&set)) {
+		while (set.size != 0) {
 			error = name_read_attribute(&set, &type, &value);
 			if (error != 0)
 				return EINVAL;
@@ -1763,7 +1802,7 @@ name_check_san(
 
 	/* Walks the names. */
 	cryc_der_init(&reader, subject->san, subject->san_size);
-	while (!cryc_der_empty(&reader)) {
+	while (reader.size != 0) {
 		error = cryc_der_next(&reader, &name);
 		if (error != 0)
 			return EINVAL;
@@ -1806,7 +1845,7 @@ name_san_match(
 	/* Walks every entry, to the end even after a match, so that a malformed one anywhere means no match. */
 	cryc_der_init(&reader, cert->san, cert->san_size);
 	matched = 0;
-	while (!cryc_der_empty(&reader)) {
+	while (reader.size != 0) {
 		error = cryc_der_next(&reader, &name);
 		if (error != 0)
 			return 0;

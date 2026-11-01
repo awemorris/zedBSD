@@ -768,6 +768,8 @@ test_equal_cases(void)
 	CHECK(cryc_name_equal(left->data, left->size, NULL, 0) == 0);
 	CHECK(cryc_name_equal(NULL, 0, left->data, left->size) == 0);
 	CHECK(cryc_name_equal(left->data, 0, left->data, left->size) == 0);
+	CHECK(cryc_name_equal(NULL, 10, left->data, left->size) == 0);
+	CHECK(cryc_name_equal(left->data, left->size, NULL, 10) == 0);
 	CHECK(cryc_name_equal(left->data, left->size, left->data, left->size - 1U) == 0);
 	CHECK(cryc_name_equal(left->data, left->size - 1U, left->data, left->size - 1U) == 0);
 	both = b_cat(left, b_hex("00"));
@@ -1861,6 +1863,11 @@ test_nc_ip(void)
 	CHECK(nc_ip("c0000200ffffff00", NULL, "c0000201") == ALLOW);
 	CHECK(nc_ip("c0000200ffff00ff", NULL, "c0000201") == EINVAL);
 	CHECK(nc_ip("c0000200ff00ff00", NULL, "c0000201") == EINVAL);
+	CHECK(nc_ip("c000020000ffffff", NULL, "c0000201") == EINVAL);
+	CHECK(nc_ip("c00002007fffffff", NULL, "c0000201") == EINVAL);
+	CHECK(nc_ip("c0000200fe000000", NULL, "c0000201") == ALLOW);
+	CHECK(nc_ip("c0000200f0000000", NULL, "c0000201") == ALLOW);
+	CHECK(nc_ip("c0000200f0000000", NULL, "d0000201") == DENY);
 	CHECK(nc_ip("c0000200ffffff81", NULL, "c0000201") == EINVAL);
 	CHECK(nc_ip("c0000200ffffff0f", NULL, "c0000201") == EINVAL);
 	CHECK(nc_ip("c0000200ffffff01", NULL, "c0000201") == EINVAL);
@@ -1932,6 +1939,8 @@ test_nc_mail(void)
 	CHECK(nc_mail(".example.com", NULL, "a@a.b.example.com") == ALLOW);
 	CHECK(nc_mail(".example.com", NULL, "a@SUB.EXAMPLE.com") == ALLOW);
 	CHECK(nc_mail(".example.com", NULL, "a@example.com") == DENY);
+	CHECK(nc_mail(".example.com", NULL, "a@.example.com") == DENY);
+	CHECK(nc_mail(".example.com", NULL, "a@x.example.com") == ALLOW);
 	CHECK(nc_mail(".example.com", NULL, "a@notexample.com") == DENY);
 	CHECK(nc_mail(".example.com", NULL, "a@xexample.com") == DENY);
 	CHECK(nc_mail(".example.com", NULL, "a@sub.example.org") == DENY);
@@ -2125,6 +2134,24 @@ test_nc_directory(void)
 	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
 	bad = b_name(b_tlv(0x31U, b_new()));
 	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
+	bad = b_name(b_tlv(0x30U, b_attr(OID_CN, TAG_UTF8, "a")));
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, n_empty(), g_dir(bad)) == ALLOW);
+	CHECK(nc(s_sub(g_dir(bad)), NULL, n_empty(), NULL) == EINVAL);
+	bad = b_name(b_cat(b_rdn(b_attr(OID_CN, TAG_UTF8, "a")), b_tlv(0x30U, b_attr(OID_CN, TAG_UTF8, "a"))));
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
+	bad = b_name(b_tlv(0x31U, b_tlv(0x04U, b_text("x"))));
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
+	bad = b_name(b_rdn(b_tlv(0x30U, b_cat(b_str(TAG_UTF8, "a"), b_str(TAG_UTF8, "b")))));
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
+	bad = b_name(b_rdn(b_tlv(0x30U, b_cat3(b_oid(OID_CN), b_str(TAG_UTF8, "a"), b_str(TAG_UTF8, "b")))));
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
+	bad = b_name(b_rdn(b_tlv(0x30U, b_cat(b_hex("060180"), b_str(TAG_UTF8, "a")))));
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
+	bad = b_name(b_tlv(0x31U, b_tlv(0x30U, b_oid(OID_CN))));
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
+	bad = b_name(b_tlv(0x31U, b_cat(b_attr(OID_CN, TAG_UTF8, "a"), b_hex("0500"))));
+	CHECK(nc(s_sub(g_dns("example.com")), NULL, bad, NULL) == EINVAL);
 	CHECK(nc(constraint, NULL, bad, NULL) == EINVAL);
 	CHECK(nc(constraint, NULL, n_empty(), g_dir(bad)) == EINVAL);
 	CHECK(nc(NULL, constraint, n_empty(), g_dir(b_cat(n_spec("C=US"), b_hex("00")))) == EINVAL);
@@ -2250,6 +2277,11 @@ test_nc_other(void)
 	/* A certificate whose subject is absent and has no SAN. */
 	make_ca(&ca, s_sub(g_dns("example.com")), NULL);
 	make_cert(&leaf, NULL, NULL);
+	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == 0);
+
+	/* Names in the SAN bytes are not read when the SAN flag is off. */
+	make_cert(&leaf, NULL, b_cat(g_dns("a..b"), g_dns("other.org")));
+	leaf.flags = 0;
 	CHECK(cryc_name_constraints_check(&ca, &leaf, 1) == 0);
 
 	/* A SAN flag with no bytes has no names. */
