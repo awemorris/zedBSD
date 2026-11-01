@@ -4,6 +4,7 @@
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §2.2 の O1〜O12・O25・O32・O33、§3.4、§5 の M1、§9.1。
 - 状態: planned（2026-11-01 p002 で作成）。
+- **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: 名前の表に Windows の DLL の名前（`libssl-3-x64.dll`・`libcrypto-3-x64.dll` ほか）を足さない。Windows の build は p030 の前は OpenSSL を開けずに今の EPROTONOSUPPORT、p030 で `net/tls-static.c` が表を埋める。下の本文の DLL の名前はこの通りに読み替える。
 - 依存: p007（os-net）・p021。
 - 担当の想定: Opus（phase-runner）を 1 回。module の約束は `base/os-net.h`・`base/os-system.h` の comment。挙動を変えない（zedBSD・Linux の host の network の試験の件数が前と同じ）。
 

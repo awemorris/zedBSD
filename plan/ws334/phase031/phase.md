@@ -4,6 +4,7 @@
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §6.2・§6.4・§6.7・§6.8、決定 21（U9: 名前 OmniGrammaton・icon は今の物・発行者 Awe Morris、U11: zip）。
 - 状態: planned（2026-11-01 p003 で作成）。
+- **2026-11-01 の変更（DLL を作らず 1 つの .exe、libkeiland の Windows は pthread 無し。ws.md のユーザーの決定、design §6.2・§6.6、build の形は p036）**: zip に DLL は入らない（`OmniGrammaton.exe`・`cert.pem`・`share/`、design §6.2）。依存の確かめは .exe の import が Windows の system の DLL・UCRT の `api-ms-win-crt-*`・遅延の `vulkan-1.dll` だけ（同梱の DLL の欄は無い）。OpenSSL と winpthreads の許諾の文は .exe に静的に入る分として同梱する。
 - 依存: p019（ico）・p029・p030。
 - 担当の想定: Opus（phase-runner）を 1 回（約 5 LW）。使う module の約束は `apps/browser-win32/tools/ico.h`。
 

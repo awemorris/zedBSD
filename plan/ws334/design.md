@@ -101,7 +101,7 @@ ISO C の `<stdio.h>`・`<time.h>` の `time` などは除いた。
 | O26 | `vm/heap.c:59`・`:270`、`vm/vm.h`・`vm/bytecode.h`・`vm/interpreter.c` | `__attribute__((noinline))`・`__builtin_unwind_init`・`__builtin_frame_address`（保守的な stack の走査） | gcc・clang の拡張。mingw の gcc と clang で使える。MSVC は対象にしない（§6.1） |
 | O27 | `js/internal.h:17`、`js/compile.h:30`、`image/jpeg.c:21` | `setjmp`・`longjmp` | mingw の x64 の `setjmp` は既定で SEH の巻き戻しをする。全部の frame に unwind の情報があれば正しい（gcc・clang は付ける）。p003 で確かめる（§12 R4） |
 | O28 | `bind/window.c:491`・`:516`、`bind/prelude.c:922`、`page/module.c:477`、`js/tool.c:110`ほか | `strerror` の文（console と標準の誤りの出力） | errno の名前は mingw の `errno.h` にあるが値が違い（POSIX の補いの値）、UCRT の `strerror` は EPROTO などを「Unknown error」と書く見込み（未確かめ）。挙動は変えない。試験が誤りの文を比べる所（runner の照合）は Windows で差になりうる → p016 で runner の期待を見る |
-| O29 | 標準の出力の text の mode（`--dump`・`--run`・`--js` の出力、`browser/main.c` の `printf`・`fwrite`） | Windows の CRT は text の mode で `\n` を `\r\n` にする | `omnigrammaton-cli.exe` の入口で標準の出力と誤りの出力を binary の mode（`_setmode(_fileno(stdout), _O_BINARY)`）にする（`apps/browser-win32/main.c`）。golden の比較を zedBSD と同じ bytes にするため |
+| O29 | 標準の出力の text の mode（`--dump`・`--run`・`--js` の出力、`browser/main.c` の `printf`・`fwrite`） | Windows の CRT は text の mode で `\n` を `\r\n` にする | Windows の試験の program（`plan/ws334/tests`、配らない）が標準の出力と誤りの出力を binary の mode（`_setmode(_fileno(stdout), _O_BINARY)`）にする。golden の比較を zedBSD と同じ bytes にするため。配る `OmniGrammaton.exe` は console の出力を持たない（2026-11-01 ユーザーの答え、§6.2） |
 | O30 | `vm/heap.c:555`・`:745`（解放は `free`、`:137`・`:570`・`:1005`・`:1067`） | `posix_memalign` | mingw・UCRT に無い。`_aligned_malloc` は `_aligned_free` で放す。`wb_os_aligned_alloc`・`wb_os_aligned_free` を OS の層に足し、vm/heap.c の 6 か所を替える（レビュー #1） |
 | O31 | `page/svg.c:1968` | `memmem`（GNU の拡張） | mingw に無い。`base/` に ISO C の `wb_memmem` を置く（`net/http.c:1348` の `http_memmem` と同じ働き）。OS の層でなく base の関数 |
 | O32 | `net/tls.c:302`・`:482` | `SSL_ERROR_SYSCALL` の後に `errno` を読む | WinSock の誤りは `errno` に入らない。OS の層の「最後の socket の誤り」（`wb_os_socket_error`、Win32 は `WSAGetLastError` を errno に写す）を読む |
@@ -587,7 +587,7 @@ struct browser_storage_calls {
 | file（案） | 中身 |
 | --- | --- |
 | `Makefile` | §6.9。libbrowser・libmedia・libkeiland（共通の file と `win32/`）と browser の UI を compile |
-| `main.c` | `wWinMain`（`OmniGrammaton.exe`、GUI）と `wmain`（`omnigrammaton-cli.exe`、console。標準の出力を binary の mode に、O29）。UTF-16 の argv → UTF-8 → `browser_main` |
+| `main.c` | `wWinMain`（`OmniGrammaton.exe`、GUI。console の入口は作らない、§6.2）。UTF-16 の argv → UTF-8 → `browser_main` |
 | `single.c` | 単一の起動（名前付きの mutex と `WM_COPYDATA` で既にある窓に URL を渡す） |
 | `resources/OmniGrammaton.rc`・`OmniGrammaton.manifest`・`OmniGrammaton.ico` | §6.4 |
 | `tools/make-ico.c` | host の道具: 今の browser の icon の絵を各大きさに描き ICO に書く（§8 T3）。host の cc で build |
@@ -639,6 +639,8 @@ struct browser_storage_calls {
 
 ## 6. build
 
+- 2026-11-01 のユーザーの決定（Windows では DLL を作らず 1 つの .exe、libkeiland の Windows は pthread を使わない。ws.md）で §6.1・§6.2・§6.6・§6.8・§6.9 を改め、§6.10 を足した。§0〜§5・§7〜§14 に残る DLL（`libbrowser.dll`・`libmedia.dll`・`libkeiland.dll`・OpenSSL の DLL・`libwinpthread-1.dll`）・`.def` の言及は §6.2 の形（static library と 1 つの `OmniGrammaton.exe`）に、`omnigrammaton-cli.exe` の言及は配らない試験の program（§6.2、2026-11-01 ユーザーの答え）に読み替える。
+
 ### 6.1 cross compile の toolchain（案。導入は Q1 の許可、問い U3）
 
 | 案 | 中身 | x86_64 | arm64 | 今の host |
@@ -651,43 +653,45 @@ struct browser_storage_calls {
 - 推し: Q1 の許可の後、p002 で T-A（llvm-mingw）を入れて x86_64 と arm64 の両方を build する。T-A の許可が遅れる時は、T-B（Debian の UCRT 版の gcc。apt で入る）で x86_64 だけを先に立てる。
   以後の本線は T-A（決定 11: clang の mingw を好む、arm64 の Windows）。T-B は warning の第 2 の compiler として残す。
 - CRT は UCRT（Windows 10 以降は OS の一部。`%zu` などが正しい、UTF-8 の active code page が効く）。OpenSSL も同じ toolchain・同じ UCRT で build する（`errno`・heap を揃える）。
-  thread は winpthreads を 1 つの `libwinpthread-1.dll` として同梱する（libbrowser.dll と libmedia.dll の 2 つに静的に入れる形は、thread ごとの片付けが 2 組になるので避ける。
-  動けば静的でもよいが、確かめが要る）。libgcc は gcc が必ず link するので `-static-libgcc`（llvm-mingw は compiler-rt）。C++ の runtime は使わない。
-  llvm-mingw の libwinpthread の静的な版）。libgcc・libc++ は使わない（C だけ）。
+  thread（2026-11-01 に改めた）: libbrowser と libmedia の pthread は mingw-w64 の winpthreads を **.exe に静的に**入れる（`-Wl,-Bstatic -lpthread -Wl,-Bdynamic`。llvm-mingw は名指さないと link しない）。
+  DLL を作らないので module は .exe の 1 つで、thread ごとの片付けが 2 組になる心配は無い。`libwinpthread-1.dll` は配らない。Win32 の API への書き換えは Future Work F-WS334-win32-threads。
+  libkeiland の Windows の port は native の port なので pthread を使わない: `platform-win32.c` は SRWLOCK・CreateThread・GetCurrentThreadId、`kl_thread` は WS327 の `thread-win32.c`（SRWLOCK・CONDITION_VARIABLE・INIT_ONCE・FLS）。
+  libkeiland の Windows の object が pthread の名前を参照しない事を `llvm-nm -u` で確かめる（cross-build.sh）。libgcc・libc++ は使わない（C だけ。llvm-mingw は compiler-rt、Debian の gcc は `-static-libgcc`）。
 - flags: `-std=gnu11`（libbrowser の host の build と同じ）`-Wall -Wextra -Werror -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DUNICODE -D_UNICODE`
   （Win32 の W の API だけを使う。A の API は使わない）。
 - 対象の版: **Windows 10 1903 以降**の x64 と Windows 11 の arm64（manifest の `activeCodePage` UTF-8 が 1903 から。libtruetype の `companion.c:250`・`browser/main.c:590`・
   `net/http.c:74`・`js/builtin_global.c:110` の narrow の path の open が、日本語の利用者名の folder でも UTF-8 で開けるため。レビュー #12）。`SetThreadDescription` の有無は実行時に探す（WS327 W6）。
 
-### 6.2 成果物
+### 6.2 成果物（2026-11-01 に改めた: DLL を作らず 1 つの .exe）
 
 ```
 build/browser-win64/                 (arm64 は build/browser-winarm64/)
-  obj/ ...                           中間の物（object・.def・import library・resource の .o・toolchain.txt）
+  obj/ ...                           中間の物（object・static library（lib*.a）・Vulkan の import library・resource の .o・toolchain.txt）
   OmniGrammaton/                     配る形（zip の中身、§6.7）
-    OmniGrammaton.exe                GUI の subsystem（-mwindows）。browser の UI（userland/desktop/browser）+ apps/browser-win32 の入口
-    omnigrammaton-cli.exe            console の subsystem。同じ browser の UI の headless の mode（試験・script 用）
-    libbrowser.dll  libmedia.dll  libkeiland.dll
-    libssl-3-x64.dll  libcrypto-3-x64.dll   (arm64 は libssl-3-arm64.dll・libcrypto-3-arm64.dll)
+    OmniGrammaton.exe                ただ 1 つの program（GUI の subsystem、-mwindows）。browser の UI・apps/browser-win32 の入口・下の全部の library
+    cert.pem                         packages の ca-certificates の束（§6.6、.exe の隣）
     share/fonts/*.ttf  share/browser/{start,about,text}.html
     share/licenses/...               (§6.8)
   OmniGrammaton-<版>-win64.zip       (browser-win64-zip)
-  tests/                             試験の .exe（host-*.exe・os-test.exe・storage-test.exe、§7）
+  tests/                             試験の .exe（host-*.exe・os-test.exe・storage-test.exe、§7。同じ static library を link）
 ```
 
-- DLL にする物: libbrowser・libmedia（公開の API の境。決定 9 の engine の単体性）。libtruetype・compat の library（png・jpeg・gif・z）は libbrowser.dll に
-  静的に link（libmedia は compat を使わない）。`libkeiland.dll`（共通の file と Win32 の backend）も DLL（F-WS327 の W5、WS234 の DLL 版の土台）。
-- export: libbrowser は `exports.map` の glob を objects の `nm` で展開した .def（build の規則の中）。libmedia は `libmedia/exports.map` から。
-  `__declspec(dllexport)` を公開の header に足さない（header を変えない）。
-- import library と Vulkan の loader（レビュー #2 で直した）: libbrowser（`paint/vulkan.c`・`view/view.c`）・libkeiland の Vulkan の present・browser の UI の `present.c` は
-  `vk*` を prototype で直に呼ぶ。普通の import library で link すると、`vulkan-1.dll` の無い機械（GPU の driver の無い VM・RDP の一部・一部の arm64 の機械）で .exe が
-  起動しない（CPU の道も `omnigrammaton-cli.exe` も使えない）。**遅延の import**（delay-load）にする: `vulkan-1.dll` の .def（Khronos の loader の export）から
-  binutils の `dlltool --output-delaylib` で遅延の import library を作り link する。最初の `vk*` の前に、libkeiland（`kl_window_vulkan_extensions` が拡張を返さない）と
-  libbrowser（`wb_os_library_open` で `vulkan-1.dll` を確かめる）が loader の有無を確かめ、無ければ Vulkan を呼ばずに CPU の道へ。llvm-mingw（lld）で遅延の import と
-  mingw の `__delayLoadHelper2` が働くかは未確かめ（p002 で確かめる）。働かない時の予備は Windows だけの thunk の file（使う `vk*` 約 40 個を `vkGetInstanceProcAddr` で
-  引いて呼ぶ、`paint/vulkan-win32.c` など）。受け入れに「`vulkan-1.dll` の無い所で `omnigrammaton-cli.exe --render` と `OmniGrammaton.exe --no-gpu` が動く」を入れる。
-  OpenSSL は libbrowser が実行時に開くので import library は要らない。
-  開くので import library は要らない。
+- **DLL を作らない**（ws.md のユーザーの決定）。libbrowser（`libbrowser.a`）・libmedia（`libmedia.a`）・libkeiland（共通の file と Win32 の backend、`libkeiland.a`）・libtruetype と compat（png・jpeg・gif・z）・
+  OpenSSL（`libssl.a`・`libcrypto.a`、§6.6）・winpthreads（toolchain の `libwinpthread.a`）を static library にし、`OmniGrammaton.exe` に link する。
+  .exe が import する DLL は Windows の物だけ: KERNEL32・USER32・GDI32・ADVAPI32・SHELL32・ole32・CRYPT32・bcrypt・ws2_32・iphlpapi・imm32・dwmapi・shcore など（使う物を使う Phase が許す表に足す）、
+  UCRT の `api-ms-win-crt-*`、遅延の `vulkan-1.dll`。確かめは `llvm-readobj --coff-imports` と cross-build.sh の許す表（同梱の DLL の欄は無い）。
+- **配る .exe は 1 本**（2026-11-01 ユーザーの答え、ws.md）: 配るのは `OmniGrammaton.exe`（GUI の subsystem）だけ。前の設計の console 用の `omnigrammaton-cli.exe` は作らない。
+  配る .exe のために console 向けの機能（`AttachConsole` で端末に出力をつなぐ headless の mode）を作り込まない。Windows の headless の確かめ（`--js`・`--dump`・`--render` に当たる物）は
+  試験の program（`plan/ws334/tests` の配らない .exe、p036 の `test-program` で同じ static library を link）で行う（p021・p036 の `script-tool.exe` の形）。
+- **export**: .exe は名前を export しないので、Windows では `.def` と `exports.map` の展開が要らない（zedBSD・Linux の `.so` は今のまま）。公開の header に `__declspec` を足さない。
+- **名前の衝突**: zedBSD の `.so` は version script で private の名前を隠すが、1 つの .exe では全部の library の外の名前が 1 つの空間に入る。lld は object の間の重複の定義を誤りにするので link で分かる
+  （`--allow-multiple-definition` を使わない）。static library は使われた member だけを取り込む（`--whole-archive` にしない）。
+- **確保と解放**: process の中の UCRT は 1 つ（全部を同じ toolchain・同じ UCRT で build、§2.11）。公開の API の「libbrowser の外で確保した memory を中で放さない」形（`browser_free`、§3.8）は zedBSD と同じ約束として残す。
+- **Vulkan の loader**（レビュー #2 で直した）: libbrowser（`paint/vulkan.c`・`view/view.c`）・libkeiland の Vulkan の present・browser の UI の `present.c` は `vk*` を prototype で直に呼ぶ。普通の import にすると
+  `vulkan-1.dll` の無い機械（GPU の driver の無い VM・RDP の一部・一部の arm64 の機械）で .exe が起動しない。**遅延の import** にする: Vulkan-Loader の `vulkan-1.def` から import library
+  （`dlltool -d vulkan-1.def -l`）を作り、lld の `-Wl,--delayload=vulkan-1.dll` で link する（p020 で確かめた、§16）。最初の `vk*` の前に、libkeiland（`kl_window_vulkan_extensions` が拡張を返さない）と
+  libbrowser（`wb_os_library_open` で `vulkan-1.dll` を確かめる）が loader の有無を確かめ、無ければ Vulkan を呼ばずに CPU の道へ。受け入れに「`vulkan-1.dll` の無い所で `OmniGrammaton.exe --no-gpu` と、CPU の道で描く試験の program が動く」を入れる。
+- OpenSSL は static library を link するので、Windows の build は OpenSSL を実行時に開かない（§6.6）。
 
 ### 6.3 libtruetype と compat（決定 6）
 
@@ -719,14 +723,20 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
 
 | 案 | 中身 | 推し |
 | --- | --- | --- |
-| S-A | OpenSSL 3.5.8（`userland/packages/security/openssl/Makefile` と同じ版・SHA-256）を同じ toolchain で cross build（`./Configure mingw64`。arm64 の target 名と DLL の名前は未確かめ）し DLL を同梱。根は Windows の ROOT の store の写しと同梱の Mozilla の根（S-B）を合わせて `X509_STORE` に入れ、Windows の `Disallowed` の store の証明書は拒む（`wb_os_trust_roots`、`SSL_CTX_get_cert_store`・`d2i_X509`・`X509_STORE_add_cert`・`X509_free` を `net/tls.c` の symbol の表に）。**`SSL_CTX_set_default_verify_paths` は Windows では呼ばない**、OpenSSL は `--openssldir` を利用者が書けない path にし、設定の file を自動で読まない（`OPENSSL_INIT_NO_LOAD_CONFIG`。利用者が作れる path の `openssl.cnf` を読む類の弱さを避ける、レビュー #10） | ○（第 1 段） |
+| S-A | OpenSSL 3.5.8（`userland/packages/security/openssl/Makefile` と同じ版・SHA-256）を同じ toolchain で cross build（`./Configure mingw64`、`no-shared`。arm64 の target 名は未確かめ）し、static library を .exe に link（2026-11-01 に DLL の同梱から改めた、§6.2）。根は Windows の ROOT の store の写しと同梱の Mozilla の根（S-B）を合わせて `X509_STORE` に入れ、Windows の `Disallowed` の store の証明書は拒む（`wb_os_trust_roots`、`SSL_CTX_get_cert_store`・`d2i_X509`・`X509_STORE_add_cert`・`X509_free` を `net/tls.c` の symbol の表に）。**`SSL_CTX_set_default_verify_paths` は Windows では呼ばない**、OpenSSL は `--openssldir` を利用者が書けない path にし、設定の file を自動で読まない（`OPENSSL_INIT_NO_LOAD_CONFIG`。利用者が作れる path の `openssl.cnf` を読む類の弱さを避ける、レビュー #10） | ○（第 1 段） |
 | S-B | S-A の根を Mozilla の `cacert.pem`（`ca-certificates` の package と同じ、MPL-2.0）にして同梱 | 予備（Windows の store が読めない時に `--ca-file` で） |
-| S-C | SChannel（Windows の TLS、SSPI）で `net_tls_*`（`net/net.h:176-188`）の別の実装 `net/tls-schannel.c` | 将来の案。DLL が要らず、OS の失効の確かめ・根の更新が効く。code が大きく（`InitializeSecurityContextW` の loop）、zedBSD と TLS の挙動が分かれる |
+| S-C | SChannel（Windows の TLS、SSPI）で `net_tls_*`（`net/net.h:176-188`）の別の実装 `net/tls-schannel.c` | 将来の案。OpenSSL が要らず、OS の失効の確かめ・根の更新が効く。code が大きく（`InitializeSecurityContextW` の loop）、zedBSD と TLS の挙動が分かれる |
 
 - 推し S-A（問い U10）。理由: zedBSD と同じ TLS の code（`net/tls.c`）で、libbrowser の変更が library の名前と根の読み込みだけ。TLS は当面 OpenSSL という WS074 の
   決め（master.md の WS074 の行）とも合う。
 - 既知の限り（S-A）: Windows は足りない根を必要な時に Windows Update から取る（ROOT の store は全部を持たない）ので、store の写しだけでは正しい site が失敗しうる。
   同梱の Mozilla の根を合わせて補う。Windows の検証（`CertGetCertificateChain`）を OpenSSL の検証の callback から呼ぶ形は第 2 段の案（失効・企業の方針も効く）。
+- **static の OpenSSL と net/tls.c**（2026-11-01 に改めた）: net/tls.c は今 OpenSSL を名前で開いて関数の表（`struct tls_library`）を埋める。Windows の build は開かない。Windows の build だけが compile する小さな file
+  （`net/tls-static.c`。sources.mk に書かない）が `<openssl/ssl.h>` を include し、表の member と同じ型の 1 行の wrapper で表を埋める（関数 pointer の型の変換をしない。WS335 の design §4.2 の Windows の形と同じ）。
+  library が無い時の EPROTONOSUPPORT の道は Windows では通らない。p022 は Windows の DLL の名前（`libssl-3-x64.dll` など）を表に足さず（Windows で p030 の前は開けずに EPROTONOSUPPORT）、p030 が `tls-static.c` と OpenSSL の static library を足す。
+- **p030 の前に**（Q1 の 2026-11-01 の指示、WS335 の D28 の 1）: net/tls.c の表の各行に「OpenSSL だけ」の印を足し、その行（`OPENSSL_init_ssl`・`X509_digest`・`EVP_sha256`・`X509_STORE_CTX_get_current_cert`・
+  `X509_STORE_CTX_set_error` と、p030 が足す証明書ごとの検証の callback が使う関数）が無くても TLS が動く形にする（無い時は設定の読みの切り・Disallowed の指紋の照合・callback を使わない）。
+  libssl-compat への切り替え（§6.10）の時の net/tls.c の変更を `#ifdef` の 2 つ（WS335 の D28 の 2・3）に抑えるため。p030 の手順に入れる。
 - OpenSSL の build は外部 package の規則（tarball を取得・照合・patch、`userland/packages/` の境界、license は Apache-2.0）。置き場は
   `userland/packages/security/openssl/Makefile.windows`（新）か WS334 の build の script（p013 で決める）。
 
@@ -739,8 +749,8 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
 
 - `share\licenses\`: zedBSD（Zlib）、font 3 つ（Mahora は Zlib、JetBrains Mono は OFL-1.1、Droid Sans Fallback は Apache-2.0、`userland/desktop/fonts/`）、
   libbrowser の表（`userland/base/licenses/browser/WHATWG-entities`・`Unicode-License-V3`、`libbrowser/Makefile` の IMAGE_DATA）、OpenSSL（Apache-2.0）、
-  mingw-w64 の runtime（静的に入る CRT の start-up・`libwinpthread-1.dll` の許諾の文。版で文が違うので p014 で取得した tarball の COPYING から写す）、
-  Mozilla の根（S-B を使う時、MPL-2.0。今の `ca-certificates/MPL-2.0.txt`）、Vulkan-Headers は build の時だけ（配らない）。
+  mingw-w64 の runtime（静的に入る CRT の start-up と winpthreads の許諾の文。版で文が違うので使った llvm-mingw の release の COPYING から写す）、
+  Mozilla の根（S-B を使う時、MPL-2.0。今の `ca-certificates/MPL-2.0.txt`）、Vulkan-Headers は build の時だけ（配らない）。OpenSSL・winpthreads は .exe に静的に入るので、DLL の時と同じく許諾の文を同梱する（.exe の中に入る物の license も配る物に含まれる）。
 
 ### 6.9 `make browser-win64`・`make browser-winarm64`（決定 12・13）
 
@@ -778,7 +788,22 @@ build/browser-win64/                 (arm64 は build/browser-winarm64/)
 - **Vulkan の header と import library**: Vulkan-Headers を版を固定した tarball で取得（SHA-256 を照合）して `$(BROWSER_WIN32_BUILD)/sources/` に置き（担当の worktree から共有の
   `build/sources/` に書かない、AGENTS.md §7。共有の写しが要れば Q1 が置く）、`$(BROWSER_WIN32_BUILD)/obj/include/vulkan/` に写す。import library は §6.2（遅延の import）。
   取得の規則は `make -f apps/browser-win32/Makefile fetch`（`make download` は使わない）。
-- **Wine での試し（任意）**: `make browser-win64-wine-smoke`（`omnigrammaton-cli.exe --js` と `--dump=layout` の数件）。判定には使わない（決定 11）。
+- **Wine での試し（任意）**: `make browser-win64-wine-smoke`（試験の program の `--js` と `--dump=layout` に当たる数件）。判定には使わない（決定 11）。
+
+### 6.10 libssl-compat への切り替え（WS335、[plan/ws335/design.md](../ws335/design.md) §4.2・§4.4）
+
+- 決定 16 の「後で libssl-compat へ切り替える」の時、WS334 の側で要る事（WS335 の §4.4 の 6。決めて直すのは WS334 の担当）:
+  1. `apps/browser-win32/Makefile` が `userland/base/libcrypto-compat/sources.mk`・`userland/base/libssl-compat/sources.mk` を include し、`WIN32_STATIC_LIBRARY` で `libcrypto-compat.a`（`LIBCRYPTO_COMPAT_SOURCES` と
+     `LIBCRYPTO_COMPAT_WIN32_SOURCES`）と `libssl-compat.a`（`LIBSSL_COMPAT_SOURCES`）を作り、.exe の link に `libssl-compat.a libcrypto-compat.a -lbcrypt -lcrypt32 -lws2_32` を足す。include は `<compat/...>` の
+     header の写し（`$(BROWSER_WIN32_OBJ)/include/compat/`、§6.9）。compat の内部の header は相対の名前なので source の tree の形のまま compile する。
+  2. OpenSSL の static library・`openssl` の target・Apache-2.0 の許諾の文を外す。`net/tls-static.c` の include を `<compat/ssl/ssl.h>` に替える（表を満たす形は同じ）。
+  3. 根: compat の `SSL_CTX_set_default_verify_paths` が Windows の ROOT（Disallowed を除く）と、.exe の隣の `cert.pem` を読む（WS335 の D14・D24）。packages の ca-certificates の束を `cert.pem` の名前で
+     .exe の隣に置く（§6.2 の一覧。今の `share/certs/` の読み込みを残してもよい）。OpenSSL の時の `OPENSSL_init_ssl`・`X509_digest`・`X509_STORE_CTX_get_current_cert`・`X509_STORE_CTX_set_error` と
+     検証の callback での Disallowed の照合は使わない（§6.6 の「OpenSSL だけ」の印の行）。
+  4. net/tls.c の変更は WS335 の §4.2 の 1〜4（切り替えは WS335 の p036、WS074・WS334 と調整の後）。
+  5. `SSL_set_fd` の前に `WSAStartup`（compat も OpenSSL と同じ約束）。今の os-net の層（`os-net-win32.c`）が呼んでいる事を切り替えの時に確かめる。
+  6. 許諾の一覧（§6.8）に WS335 の source の Zlib の文を足す（zedBSD の Zlib と同じ文なら 1 つでよい）。
+- 切り替えの前でも、OpenSSL を static library で .exe に入れる今の形（§6.2・§6.6）は、切り替えを「static library と include の差し替え」にとどめる。
 
 ## 7. 試験
 
@@ -1032,7 +1057,7 @@ make の target の名前（`browser-win64`・`browser-winarm64`）は §6.9 の
   - libkeiland の platform の wake は Windows で event object（`struct keiui_wake` に `event`、`keiui_wake_event`）。
 - 第 1 段の制限として決めた事: 大きさの変更の modal の loop の間は描き直さない（p028）、headless の mode は storage の backend を持たない（p023）。
 - §6.2 の遅延の import の作り方の訂正（2026-11-01 P7 が確かめた）: llvm-mingw の llvm-dlltool に `--output-delaylib` は無い。普通の import library（`dlltool -d vulkan-1.def -l`）と lld の MinGW の driver の `-Wl,--delayload=vulkan-1.dll` で遅延の import になり、Wine 10 で `vulkan-1.dll` の有る時・無い時の両方で .exe が起動した（p020 に書いた）。
-- winpthreads（§6.1）: llvm-mingw は `-lpthread` を明示しないと winpthreads を link しない。DLL・.exe は動的（`libwinpthread-1.dll` を配る）、単体試験は静的（p020・run-unit.sh）。
+- winpthreads（§6.1）: llvm-mingw は `-lpthread` を明示しないと winpthreads を link しない。2026-11-01 の決定で .exe も単体試験も静的（`libwinpthread-1.dll` を配らない）。
 - §0・§1・§7.1 の古い所（design-reviewer #32）: Wine は決定 20 で開発の試験の道（「任意・Vulkan の判定に使わない」は決定 20 の前の書き方）、Phase の数と番号は ws.md の表、OS の層の file の名前は上の通り（`base/os-posix.c` ではなく群ごとの `os-*-posix.c`）。§0 から §14 は経緯として残し、食い違う所は §15・§16 と ws.md が正。
 
 ## 16. 設計の確定の design-reviewer（p004、2026-11-01）

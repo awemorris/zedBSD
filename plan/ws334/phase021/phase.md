@@ -3,7 +3,7 @@
 # ws334-p021 統合: libbrowser の OS に触れる所を OS の層へ（network を除く）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §2.2・§3.4・§9.1。
-- 状態: in-progress（実装済み・試験 PASS。2026-11-01 08:26 q1808-i02、P7。受け入れの全部が PASS、cleared の判定は Q1）。
+- 状態: cleared（2026-11-01 Q1、main 2c7e666e2。実装済み・試験 PASS、2026-11-01 08:26 q1808-i02、P7）。
 - 依存: p005（os-system）・p006（os-file）・p008（os-time）・p020（sources.mk と Windows の build の第 1 段）。
 - 担当の想定: Opus（phase-runner）を 1 回。module の約束は各 header（`base/os-*.h`）の comment で、この Phase は呼び出しを替えるだけ。挙動を変えない（zedBSD・Linux の host の結果は前と同じ）。
 
