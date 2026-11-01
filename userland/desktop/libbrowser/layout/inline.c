@@ -96,6 +96,7 @@ static int inline_row_synthesized(const struct layout_box *row, layout_unit *bas
 static int inline_items_baseline(const struct layout_box *box, layout_unit *baseline, int last, int vertical);
 static int inline_is_legend(const struct layout_box *box, const struct layout_box *child);
 static int inline_last_baseline(const struct layout_box *box, layout_unit *baseline, int depth);
+static void inline_reorder(struct layout_line *line, size_t count);
 static void inline_align(struct layout_tree *tree, struct layout_box *box, struct layout_line *line, struct inline_reach *reach, size_t count, layout_unit *above, layout_unit *below);
 static layout_unit inline_shift(struct layout_tree *tree, const struct layout_box *box, const struct css_style *style, const struct inline_reach *reach);
 static layout_unit inline_x_height(struct layout_tree *tree, const struct css_style *style);
@@ -1410,6 +1411,10 @@ inline_finish_line(
 	inline_align(tree, box, &line, reach, piece_count, &above, &below);
 	free(reach);
 
+	/* The pieces of a right-to-left line stand in the order the bidirectional algorithm gives them. */
+	if (box->style.direction == CSS_DIRECTION_RTL && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+		inline_reorder(&line, piece_count);
+
 	/* The inline boxes with a background, borders or padding take their share of the line. */
 	error = inline_decorations(tree, &line, piece_count);
 	if (error != 0)
@@ -1451,6 +1456,153 @@ inline_finish_line(
 
 	/* Succeeded: the line is made. */
 	return 0;
+}
+
+/*
+ * Puts the pieces of a line of a right-to-left block in their visual order
+ * (the bidirectional algorithm's rules L1 to L2 for the pieces, which are
+ * whole runs of text or atomic boxes): text of a left-to-right script is
+ * at an even level, what is neutral between two such runs with them, and
+ * the rest at the block's level, so the pieces run from the right.  A line
+ * with text of a right-to-left script is left as it is (its words would need
+ * their letters turned too).
+ */
+static void
+inline_reorder(
+	struct layout_line *line,
+	size_t count)
+{
+	struct layout_fragment *copy;
+	unsigned char *kind;
+	unsigned char *level;
+	size_t *order;
+	size_t index;
+	size_t at;
+	size_t start;
+	size_t end;
+	size_t unit;
+	layout_unit x;
+	int strong;
+	int right;
+	int number;
+	int left_kind;
+	int right_kind;
+	int top;
+	int lowest;
+
+	if (count < 2U)
+		return;
+	kind = malloc(count * 3U);
+	if (kind == NULL)
+		return;
+	level = kind + count;
+	order = NULL;
+	copy = NULL;
+
+	/* Each piece: 1 left-to-right text, 2 a number, 0 neutral; right-to-left text leaves the line alone. */
+	right = 0;
+	strong = 0;
+	for (index = 0; index < count; index++) {
+		kind[index] = 0;
+		if (line->fragments[index].edge != 0 || line->fragments[index].text == NULL)
+			continue;
+		number = 0;
+		for (unit = 0; unit < line->fragments[index].length; unit++) {
+			uint16_t c;
+
+			c = line->fragments[index].text[unit];
+			if ((c >= 0x0590U && c <= 0x08FFU) || (c >= 0xFB1DU && c <= 0xFDFFU) || (c >= 0xFE70U && c <= 0xFEFFU) || (c >= 0xD800U && c <= 0xDFFFU)) {
+				right = 1;
+				break;
+			}
+			if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= 0xC0U && c < 0x0590U) || (c >= 0x0900U && c < 0xD800U))
+				kind[index] = 1;
+			else if (c >= '0' && c <= '9')
+				number = 1;
+		}
+		if (right)
+			break;
+		if (kind[index] == 0 && number)
+			kind[index] = 2;
+		if (kind[index] != 0)
+			strong = 1;
+	}
+	if (right || !strong) {
+		if (right) {
+			free(kind);
+			return;
+		}
+	}
+
+	/* The levels: neutrals between two left-to-right pieces are left-to-right, the others right-to-left. */
+	for (index = 0; index < count; index++) {
+		if (kind[index] != 0) {
+			level[index] = 2;
+			continue;
+		}
+		left_kind = 0;
+		for (at = index; at > 0; at--) {
+			if (kind[at - 1U] != 0) {
+				left_kind = kind[at - 1U];
+				break;
+			}
+		}
+		right_kind = 0;
+		for (at = index + 1U; at < count; at++) {
+			if (kind[at] != 0) {
+				right_kind = kind[at];
+				break;
+			}
+		}
+		level[index] = (left_kind == 1 && right_kind == 1) ? 2 : 1;
+	}
+
+	/* The order: the runs at the higher level turned first, then the whole line. */
+	order = malloc(count * sizeof(*order));
+	copy = malloc(count * sizeof(*copy));
+	if (order == NULL || copy == NULL) {
+		free(order);
+		free(copy);
+		free(kind);
+		return;
+	}
+	for (index = 0; index < count; index++)
+		order[index] = index;
+	top = 2;
+	lowest = 1;
+	for (; top >= lowest; top--) {
+		index = 0;
+		while (index < count) {
+			if (level[order[index]] < top) {
+				index++;
+				continue;
+			}
+			start = index;
+			while (index < count && level[order[index]] >= top)
+				index++;
+			end = index;
+			while (start + 1U < end) {
+				at = order[start];
+				order[start] = order[end - 1U];
+				order[end - 1U] = at;
+				start++;
+				end--;
+			}
+		}
+	}
+
+	/* The pieces take the places in turn, from where the first one began. */
+	x = line->fragments[0].x;
+	for (index = 0; index < count; index++)
+		copy[index] = line->fragments[order[index]];
+	for (index = 0; index < count; index++) {
+		line->fragments[index] = copy[index];
+		line->fragments[index].x = x;
+		x += line->fragments[index].width;
+	}
+	free(copy);
+	free(order);
+	free(kind);
 }
 
 /*
