@@ -78,3 +78,17 @@ Q1 への問い・判断の材料:
 - stale の ETag の再検証で 200（本文が変わった）が返った時に新しい本文を memory・disk に入れない件は、前からの挙動。この Phase の外として WS334 の ws.md の残りに記録した。
 - 存在しない file への rm -f を 1 回走らせた件（何も消していない）は、削除の規則に反した操作として記録する。
 
+
+### 追補（q1868）
+
+2026-11-01 q1868-i01（Sonnet）。stale の ETag の entry の再検証で 200（本文が変わった）が返った時に新しい本文を cache に入れない件（上の「見つけた既存の挙動」）を直した。
+
+- 直し（`userland/desktop/libbrowser/net/loader.c`）: `struct net_request` に `revalidated` を足し、再検証の開始で 0、304 の分岐で 1。`loader_cache_store` は、`entry == request->validating` かつ `revalidated`（304 で更新済み）の時だけ早く戻る。それ以外は、同じ URL の古い entry（再検証した物を含む）を `loader_cache_free` で外し、200 の応答の本文・type・ETag・max-age で新しい entry を入れて `loader_cache_persist` で disk に queue する（record は同じ key で置き換わる）。304 の挙動（`stored_at`・`stored_wall` を今にし、`wall_clock` を外し、disk の record を書き直す）は変えていない。公開の header・他の file は変えていない。
+- 試験の道具: `plan/ws334/tests/cache-server.py` に `/etag-change`（最初は 200 `change-v1`・ETag `w1`・max-age=1、`If-None-Match: "w1"` には 200 `change-v2`・ETag `w2`・max-age=3600、`"w2"` には 304）。`storage-test.c` に `test_cache_changed`（directory `e`）: 1 回目 `change-v1`、1.3 s の後の 2 回目が条件付きの要求（server の hits 2・conditional 1）で `change-v2`、3 回目は cache から（hits 2 のまま）、instance を作り直した 4 回目も record から `change-v2`（hits 2 のまま）。
+- 確かめた事:
+  - `sh plan/ws334/tests/storage-test.sh plain` → `test-storage: PASS (222 checks)`（前は 200）、`asan` も 222 PASS。
+  - 変異: 早い戻りを `entry == request->validating` だけに戻す（直す前の挙動）と `storage-test.c:1469`（3 回目で hits 3）と `:1490`（4 回目で hits 4）の 2 件が FAIL し、`test-storage: FAIL (2 of 222)`。直しを戻すと PASS。304 の項（既存の `/etag`）はどちらでも PASS。
+  - 段 1 の前後比較（`stage1.sh`、基点は `git archive 9dae26145` を `build/tmp/q1868-base`、後は `git archive d8a0b7953` を `build/tmp/q1868-tip`）: host-build は exit 0・warning 0・built 94、host-* は 75 exit 0・17 その他で `host-exits.txt` が前後で diff なし、js 17/17、loader 11/11、http 15/15、fetch 38/38、component 83 PASS。asan は全部が前後で同じ。plain の `--async` は後が 19/20（p024 と同じ値）、前は 18/20（前後を同時に流した時の揺れ。この変更の側が悪くなったのではない）。
+  - `LC_ALL=C.UTF-8 sh plan/ws334/tests/cross-build.sh` → `cross-build: PASS`。zedBSD amd64 の `build/amd64/dynamic/libbrowser.so`・`build/amd64/bin/browser`（p024 と同じ command と sysroot の写し）→ exit 0、warning 0（log `build/tmp/q1868/zedbsd-build.log`、loader.c は compile された）。
+- 未実施: `run-unit.sh all`・`fetch-wine.sh`（この変更は net/loader.c の cache の道だけで、host の試験と cross-build は PASS）。QEMU・実機。再検証の 200 が保存できない物（no-store・ETag も max-age も無し）の時に古い entry が残る前からの挙動は直していない。
+- 消してよい物（Q1 へ）: `build/tmp/q1868-base`・`build/tmp/q1868-tip`（git archive の展開と stage1 の出力）、`build/tmp/q1868`（sysroot の写しと zedbsd-build.log）、`build/tmp/q1868-*.out`・`q1868-run.sh`・`q1868-stage1.done`・`q1868-cross.log`、`build/tmp-st-plain.log`・`tmp-st-mut.log`・`tmp-st-asan.log`（build/ 直下の log）、`build/tmp/ws334-storage.run.*`（最後の run 以外）、`build/amd64`・`build/ws074-host`。どれも使い捨て。

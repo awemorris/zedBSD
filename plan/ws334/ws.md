@@ -45,7 +45,7 @@
 
 ## 残り（Phase の外）
 
-- （2026-11-01 Q1、p024 で見つけた）loader_cache_store は stale の ETag の entry を再検証して 200 が返った時も新しい本文を cache に入れず、毎回再検証して取り直す。304 と 200 を見分けて直す。
+- （2026-11-01 Q1、p024 で見つけた）loader_cache_store が stale の ETag の entry の再検証の 200 の新しい本文を cache に入れない件は、q1868-i01（Sonnet）で直した（304 は request の `revalidated` で見分け、200 は entry を置き換えて memory と disk に保存。storage-test に項を足した。詳細は [phase024/phase.md](phase024/phase.md) の「追補（q1868）」）。残る小さな点: 再検証の 200 が保存できない物（no-store・ETag も max-age も無し）の時は、古い entry が残る（前からの挙動）。
 
 ## Resume point
 
