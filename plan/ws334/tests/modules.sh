@@ -10,7 +10,7 @@ ab=apps/browser-win32
 ws334_includes="-I. -Iuserland/desktop/include -I$lb -I$lm -I$ab/tools -Iplan/ws334/tests/unit"
 
 # The headers that are the modules' contracts (fixed once the design is frozen).
-ws334_headers="$lb/base/os.h $lb/base/os-win32.h $lb/base/os-system.h $lb/base/os-file.h $lb/base/os-net.h
+ws334_headers="$lb/base/os.h $lb/base/os-error.h $lb/base/os-win32.h $lb/base/os-system.h $lb/base/os-file.h $lb/base/os-net.h
 	$lb/base/os-time.h $lb/base/os-zones.h
 	userland/desktop/include/browser/storage.h $lb/storage/records.h $lb/storage/files.h $lb/storage/queue.h
 	$lm/media-os.h
@@ -18,7 +18,7 @@ ws334_headers="$lb/base/os.h $lb/base/os-win32.h $lb/base/os-system.h $lb/base/o
 	$lk/platform/platform.h $ab/tools/ico.h"
 
 # The modules' sources.
-ws334_sources="$lb/base/os-win32.c
+ws334_sources="$lb/base/os-win32.c $lb/base/os-error.c
 	$lb/base/os-system-posix.c $lb/base/os-system-win32.c
 	$lb/base/os-file-posix.c $lb/base/os-file-win32.c
 	$lb/base/os-net-posix.c $lb/base/os-net-win32.c
@@ -43,6 +43,7 @@ ws334_test_sources() {
 	case "$1:$2" in
 	os-win32:posix) echo none ;;
 	os-win32:win32) echo "$lb/base/os-win32.c $ws334_base" ;;
+	os-error:*) echo "$lb/base/os-error.c" ;;
 	os-system:posix) echo "$lb/base/os-system-posix.c $ws334_base" ;;
 	os-system:win32) echo "$lb/base/os-system-win32.c $lb/base/os-win32.c $ws334_base" ;;
 	os-file:posix) echo "$lb/base/os-file-posix.c $ws334_base" ;;

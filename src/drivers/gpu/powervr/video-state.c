@@ -115,6 +115,26 @@ powervr_video_operations(
 }
 
 /*
+ * Reports the registered engine's operations table and the engine, or
+ * NULL when no engine is registered.
+ */
+const struct drv_powervr_video_ops *
+powervr_video_engine(
+	void **engine)
+{
+	const struct drv_powervr_video_ops *ops;
+
+	/* No engine. */
+	ops = __atomic_load_n(&video_ops, __ATOMIC_ACQUIRE);
+	if (ops == NULL)
+		return NULL;
+
+	/* Succeeded: the table, and the engine it publishes. */
+	*engine = __atomic_load_n(&video_engine, __ATOMIC_RELAXED);
+	return ops;
+}
+
+/*
  * Reports the native capset's flags for a session's operations: H.264
  * decode, the one codec bit libvulkan reads; 0 when the session offers
  * nothing libvulkan can use, and the node then reports the plain capset.

@@ -16,6 +16,7 @@
 
 #include "js/js.h"
 #include "vm/bytecode.h"
+#include "base/os-error.h"
 
 #include <browser/browser.h>
 
@@ -107,7 +108,7 @@ tool_dump_ast(
 
 	/* Any other failure of the parse. */
 	if (status != 0) {
-		fprintf(stderr, "browser: cannot parse %s: %s\n", path, strerror(status));
+		fprintf(stderr, "browser: cannot parse %s: %s\n", path, wb_os_error_text(status));
 		wb_units_release(&units);
 		return 1;
 	}
@@ -163,7 +164,7 @@ tool_run(
 	/* The heap. */
 	status = vm_heap_create(&heap, TOOL_HEAP_LIMIT);
 	if (status != 0) {
-		fprintf(stderr, "browser: cannot make a heap: %s\n", strerror(status));
+		fprintf(stderr, "browser: cannot make a heap: %s\n", wb_os_error_text(status));
 		wb_units_release(&units);
 		return 1;
 	}
@@ -174,7 +175,7 @@ tool_run(
 	/* The realm. */
 	status = vm_realm_create(heap, &realm);
 	if (status != 0) {
-		fprintf(stderr, "browser: cannot make a realm: %s\n", strerror(status));
+		fprintf(stderr, "browser: cannot make a realm: %s\n", wb_os_error_text(status));
 		vm_heap_destroy(heap);
 		wb_units_release(&units);
 		return 1;
@@ -185,7 +186,7 @@ tool_run(
 	if (status == 0)
 		status = js_define_print(realm);
 	if (status != 0) {
-		fprintf(stderr, "browser: cannot make a realm: %s\n", strerror(status));
+		fprintf(stderr, "browser: cannot make a realm: %s\n", wb_os_error_text(status));
 		vm_realm_destroy(realm);
 		vm_heap_destroy(heap);
 		wb_units_release(&units);
@@ -255,7 +256,7 @@ tool_report(
 	}
 
 	/* Any other failure. */
-	fprintf(stderr, "browser: cannot run %s: %s\n", path, strerror(status));
+	fprintf(stderr, "browser: cannot run %s: %s\n", path, wb_os_error_text(status));
 	return 1;
 }
 
@@ -388,7 +389,7 @@ tool_read(
 		status = wb_utf8_to_units((const unsigned char *)bytes.data, bytes.length, units);
 	wb_buffer_release(&bytes);
 	if (status != 0) {
-		fprintf(stderr, "browser: cannot read %s: %s\n", path, strerror(status));
+		fprintf(stderr, "browser: cannot read %s: %s\n", path, wb_os_error_text(status));
 		wb_units_release(units);
 		return status;
 	}

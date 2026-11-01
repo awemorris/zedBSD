@@ -304,6 +304,7 @@ bool bcm2711_stage_allowed(const char *family, const char *stage);
 bool bcm2711_stage_tfu_off(void);
 bool bcm2711_stage_perf_on(void);
 bool bcm2711_stage_tfu_probe(void);
+bool bcm2711_stage_selftest(void);
 void bcm2711_stage_mark(const char *family, const char *format, ...) __attribute__((format(printf, 2, 3)));
 void bcm2711_stage_pause(const char *family, const char *stage);
 

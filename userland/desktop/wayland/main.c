@@ -82,6 +82,7 @@ main(
 	int error;
 	int keymap_error;
 	int cleanup_failed;
+	int locked;
 	uint64_t step_start;
 
 	/* Every descriptor starts invalid so partial initialization can use ordinary cleanup. */
@@ -144,7 +145,7 @@ main(
 	/* Reads the command line; a mistake ends the run with the usage. */
 	error = parse_options(&server, count, arguments);
 	if (error != 0) {
-		fprintf(stderr, "usage: wayland [--socket=/path] [--width=N] [--height=N] [--rotate=0|90|180|270] [--testing [--timeout=seconds] [--max-frames=N]] [--log-frames] [--no-layer-cache] [--keyboard-blur] [--glass] [--font=/path] [--fallback-font=/path] [--wallpaper=/path.png|.jpg] [--window-opacity=1..100] [--desktop-client=COMMAND|none] [--desktop-token=TOKEN] [--session [--control-fd=N] [--lock-idle=seconds] | --greeter --auth-fd=N]\n");
+		fprintf(stderr, "usage: wayland [--socket=/path] [--width=N] [--height=N] [--rotate=0|90|180|270] [--testing [--timeout=seconds] [--max-frames=N]] [--log-frames] [--no-layer-cache] [--keyboard-blur] [--glass] [--font=/path] [--fallback-font=/path] [--wallpaper=/path.png|.jpg] [--window-opacity=1..100] [--desktop-client=COMMAND|none] [--desktop-token=TOKEN] [--session [--control-fd=N [--locked]] [--lock-idle=seconds] | --greeter --auth-fd=N]\n");
 		return 2;
 	}
 
@@ -352,6 +353,13 @@ main(
 	/* The system's input method starts on a connection of its own (input-method.c). */
 	if (error == 0)
 		kwl_ime_start(&server);
+
+	/* A session started again after a crash while it was locked shows the lock screen from its first frame. */
+	if (error == 0 && server.start_locked) {
+		locked = kwl_lock(&server, "restart");
+		if (!locked)
+			printf("KWL LOCK restart refused\n");
+	}
 
 	/* READY appears only after the hardware contract and socket namespace are both usable. */
 	if (error == 0) {
@@ -629,6 +637,14 @@ parse_options(
 			server->lock_idle_ms = (uint64_t)number * 1000U;
 			server->lock_idle_given = 1U;
 			request.lock_idle = 1U;
+			continue;
+		}
+
+		/* A login session that starts with its lock screen (sessiond's, after a crash while it was locked). */
+		match = strcmp(argument, "--locked");
+		if (match == 0) {
+			server->start_locked = 1U;
+			request.locked = 1U;
 			continue;
 		}
 

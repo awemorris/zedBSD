@@ -21,6 +21,7 @@
 #include "base/os-file.h"
 #include "base/os-time.h"
 #include "net/net.h"
+#include "base/os-error.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -1788,7 +1789,7 @@ script_run_file(
 	if (error == 0) {
 		error = bind_run_script(page->window, units.data, units.length, wb_buffer_string(&path));
 	} else if (error != ENOMEM) {
-		error = wb_buffer_printf(&line, "Failed to load the script %s: %s", wb_buffer_string(&href), strerror(error));
+		error = wb_buffer_printf(&line, "Failed to load the script %s: %s", wb_buffer_string(&href), wb_os_error_text(error));
 		if (error == 0)
 			bind_console(page->window, BIND_CONSOLE_ERROR, wb_buffer_string(&line));
 	}
@@ -1800,7 +1801,7 @@ script_run_file(
 	wb_buffer_release(&line);
 	wb_units_release(&units);
 	if (error != 0 && getenv("BROWSER_STACK") != NULL)
-		fprintf(stderr, "script: stopped by error %d (%s)\n", error, strerror(error));
+		fprintf(stderr, "script: stopped by error %d (%s)\n", error, wb_os_error_text(error));
 	if (error != 0)
 		return error;
 

@@ -904,6 +904,8 @@ $(BUILD)/ufs-root.img: $(AARCH64_ARCH_UFS_IMAGE) \
 
 # Firmware forwards this one-line file through /chosen/bootargs.  sessiond
 # reads login= through kern.boot.login, independently of splash/quiet boot.
+# Without the kernel's messages on the screen (ZEDBSD_BOOT_KERNEL_MESSAGES n)
+# the line carries kmsg=quiet: the records stay in dmesg only.
 # The Pi 5's line also starts its GPU at boot (rpi5gpu.start=boot), so the
 # graphical login and a desktop started from the text console find the
 # display and render nodes; without it the GPU waits for root's
@@ -913,7 +915,7 @@ $(BUILD)/ufs-root.img: $(AARCH64_ARCH_UFS_IMAGE) \
 .PHONY: rpi4-boot-command-line
 rpi4-boot-command-line:
 
-RPI_BOOT_COMMAND_LINE := login=$(if $(filter y,$(ZEDBSD_GRAPHICAL_LOGIN)),graphical,console)$(if $(filter rpi5,$(ZEDBSD_BOARD)), rpi5gpu.start=boot)
+RPI_BOOT_COMMAND_LINE := login=$(if $(filter y,$(ZEDBSD_GRAPHICAL_LOGIN)),graphical,console)$(if $(filter n,$(ZEDBSD_BOOT_KERNEL_MESSAGES)), kmsg=quiet)$(if $(filter rpi5,$(ZEDBSD_BOARD)), rpi5gpu.start=boot)
 
 $(BUILD)/cmdline.txt: rpi4-boot-command-line
 	@mkdir -p $(dir $@)

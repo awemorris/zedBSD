@@ -100,23 +100,23 @@ passkey_request_parse(
 	return EINVAL;
 }
 
-/* Tells whether text is a PIN: exactly six decimal digits. */
+/* Tells whether text is a PIN: four to six decimal digits. */
 int
 passkey_is_pin(
 	const char *text)
 {
 	size_t index;
 
-	/* Six digits and nothing after them. */
-	for (index = 0U; index < PASSKEY_PIN_DIGITS; index++) {
+	/* Digits up to the end, six at most. */
+	for (index = 0U; text[index] != '\0'; index++) {
+		if (index >= PASSKEY_PIN_DIGITS)
+			return 0;
 		if (text[index] < '0' || text[index] > '9')
 			return 0;
 	}
-	if (text[PASSKEY_PIN_DIGITS] != '\0')
-		return 0;
 
-	/* A PIN. */
-	return 1;
+	/* A PIN when there are four at least. */
+	return index >= PASSKEY_PIN_MIN;
 }
 
 /* Wipes a secret through a volatile pointer, so the stores are not left out. */

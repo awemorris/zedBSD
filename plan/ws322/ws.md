@@ -19,10 +19,10 @@
 | [ws322-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | cleared（2026-11-01 21:35 Q1、main 261624739。design.md 第 2 版と review 1 回の反映） | （WS318 の completed を待たない、2026-11-01 ユーザー） |
 | [ws322-p002](phase002/phase.md) | VF2 の VPU の glue と Wave5 の core の boot、firmware の package（wave511）、実機の probe | cleared（2026-11-01 22:37 Q1 受け入れ、da223ef78 を main に merge。VF2 の実機で Wave511 が起動、6 本の stream の 68 frame が ffmpeg と一致、chagall.bin だけで足りる、VPU は CPU の cache と非一貫。p003 以降の設計の直しは design.md へ） | p001 |
 | [ws322-p003](phase003/phase.md) | PowerVR の executor: NV12 の image・plane の view・export・import（Video Player の GPU の道）・query pool・capset・queue family | cleared（2026-11-01 23:51 Q1、main 361044f95。host の state 69・executor 752 PASS、VF2 で vf2-regress と nv12-board PASS、VF2 の既定の kernel は merge の後も warning 0） | p001 |
-| ws322-p004 | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、vkvideo-probe の DISTINCT、riscv64 の VP_GPU_PRESENT） | planned | p002、p003 |
+| [ws322-p004](phase004/phase.md) | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、COINCIDE で pool から GPU の transfer、Video Player の GPU の道） | cleared（2026-11-02 01:55 Q1、main f9acea845。VF2 で H.264 の 8 本が全 frame で ffmpeg と一致、1080p30 の 600 frame 一致、Video Player の GPU の道で 16 s に 479 frame（late 2、CPU 約 20%）） | p002、p003 |
 | ws322-p005 | libvulkan の H.265 decode の転送 | planned | WS318 p011a か先に着手（Q322-4） |
 | ws322-p006 | H.265 decode | planned | p004、p005 |
-| ws322-p007 | 速さ（非同期、SLC、命令の queue） | planned | p004 |
+| ws322-p007 | 速さ（非同期、SLC、命令の queue） | planned（P2 q1896） | p004 |
 | ws322-p008 | encode の設計の詳細（Wave420L） | planned | Q322-2 は A（2026-11-01 ユーザー） |
 | ws322-p009 | Wave420L の bring-up と probe | planned | p008 |
 | ws322-p010 | libvulkan の encode の転送 | planned | WS318 p011b か先に着手（Q322-4） |
@@ -68,6 +68,8 @@
 - p006（H.265 decode）は WS324 の h265-std.h の約束（StdVideoH265 の埋め方）を入力にする。
 
 ## Resume point
+
+- 2026-11-02 01:53 P2（q1869-i01）: p004 を実装し VF2 で確かめた（[phase004](phase004/phase.md)）。task buffer を vendor の式の 2 倍にした（足りないと約 2 MB で firmware が止まる）。次: Q1 の受け入れ、`CONFIG_DRIVER_VF2_VPU` の既定の判断、p005〜p007。
 
 - 2026-11-01 23:42 P2（q1863-i01）: p003 を実装し VF2 で確かめた（[phase003](phase003/phase.md)）。次: Q1 の受け入れ、p004（engine の口を広げ VF2 の glue から登録、COINCIDE で H.264 decode、pool から GPU の transfer）。
 - 2026-11-01 P2（q1863-i01）: design.md を第 3 版に直した（p002 の観測: ring を続けて使う、pool と GPU の transfer を正の道、index は生きた slot から厳密に、VPU は CPU の cache と非一貫、配るのは chagall.bin。Video Player の GPU の道に載せるため DPB_AND_OUTPUT_COINCIDE に改めた（libmedia の GPU の道は DISTINCT を断る）、R13 と Q322-3 の訂正）。p003 を実装中（[phase003](phase003/phase.md)）。

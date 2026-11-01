@@ -26,6 +26,10 @@
  * so the outcome can be read with dmesg.  A failed stage stops the later
  * ones; the engine is reset when a job failed after its launch, and the
  * storage is released only when no job can still reach it.
+ *
+ * The self-test runs only when the boot asked for it (rpi4gpu.selftest=1).
+ * Otherwise no job is submitted, and the texture formatting unit converts
+ * textures unless v3d.tfu=0 keeps the CPU's conversion.
  */
 
 #include <kern/clock.h>
@@ -117,9 +121,10 @@ static uint32_t pattern_pixel(uint32_t x, uint32_t y);
 static void summary(const int *results);
 
 /*
- * Runs the self-test jobs before any client can submit work.
+ * Runs the self-test jobs before any client can submit work, when the boot
+ * asked for them.
  *
- * Returns 0 when every stage passed.  A failure after a launch resets the
+ * Returns 0 when every stage passed or none was asked for.  A failure after a launch resets the
  * engine (boot owns all of its DMA here) and leaves the diagnostic storage
  * retained when the reset fails.
  */
@@ -130,6 +135,8 @@ bcm2711_v3d_diagnostic(
 	int results[STEP_COUNT];
 	unsigned step;
 	bool allowed;
+	bool selftest;
+	bool tfu_off;
 	int error;
 	int reset_error;
 	int retired;
@@ -144,6 +151,16 @@ bcm2711_v3d_diagnostic(
 		return ECANCELED;
 	if (!engine->hardware.ready || engine->hardware.diagnostic != NULL)
 		return EBUSY;
+
+	/* Submits nothing unless the boot asked for the self-test. */
+	selftest = bcm2711_stage_selftest();
+	if (!selftest) {
+		/* The unit converts textures unless the boot kept the CPU's conversion. */
+		tfu_off = bcm2711_stage_tfu_off();
+		if (!tfu_off)
+			engine->hardware.tfu_uif_ready = true;
+		return 0;
+	}
 	error = prepare_storage(engine);
 	if (error != 0) {
 		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V5 storage unavailable (%d)", error);

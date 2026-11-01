@@ -16,6 +16,11 @@
  * SESSIOND_GREETER_FAILURES such greeters in a row, or once the failures in
  * a row have kept the screen for SESSIOND_FAILURE_STREAK_MS, sessiond gives
  * the screen back to the text console and init starts the console's getty.
+ *
+ * A user's session that crashes (a signal or an error, without a Log Out)
+ * is started again for the same user without the login screen, so that a
+ * machine without a keyboard (a tablet) is not left at a login it cannot
+ * type; its third crash within two minutes brings the login screen.
  */
 
 #include "fallback-rules.h"
@@ -112,4 +117,86 @@ sessiond_display_next(
 
 	/* Succeeded: a device is still attaching, so the wait goes on. */
 	return SESSIOND_DISPLAY_WAIT;
+}
+
+/*
+ * Decides whether a session that ended crashed: status is its wait status,
+ * logged_out says it asked for the Log Out, stopping that sessiond or the
+ * machine is ending.  A signal or an exit with an error is a crash; an exit
+ * of 0 is the session's own end.  Returns 1 when it crashed.
+ */
+int
+sessiond_session_crashed(
+	int status,
+	int logged_out,
+	int stopping)
+{
+	int exited;
+
+	/* A Log Out, or an end sessiond or the machine asked for. */
+	if (logged_out || stopping)
+		return 0;
+
+	/* Killed by a signal. */
+	exited = WIFEXITED(status);
+	if (!exited)
+		return 1;
+
+	/* Succeeded: an error is a crash, 0 the session's own end. */
+	return WEXITSTATUS(status) != 0;
+}
+
+/*
+ * Notes a crash of the session at now_ms and decides whether the same
+ * user's session starts again: not when it is the
+ * SESSIOND_RESTART_CRASHES-th within SESSIOND_RESTART_WINDOW_MS (the
+ * crashes are then forgotten, and the login screen comes).  Returns 1 when
+ * the session starts again.
+ */
+int
+sessiond_restart_due(
+	struct sessiond_crashes *crashes,
+	long long now_ms)
+{
+	unsigned index;
+	unsigned kept;
+
+	/* The crashes older than the window are forgotten. */
+	kept = 0U;
+	for (index = 0U; index < crashes->count; index++) {
+		if (now_ms - crashes->at_ms[index] < SESSIOND_RESTART_WINDOW_MS)
+			crashes->at_ms[kept++] = crashes->at_ms[index];
+	}
+	crashes->count = kept;
+
+	/* This one, the oldest giving way when the list is full. */
+	if (crashes->count == SESSIOND_RESTART_CRASHES) {
+		for (index = 1U; index < crashes->count; index++)
+			crashes->at_ms[index - 1U] = crashes->at_ms[index];
+		crashes->count--;
+	}
+	crashes->at_ms[crashes->count] = now_ms;
+	crashes->count++;
+
+	/* Too many in the window: the login screen. */
+	if (crashes->count >= SESSIOND_RESTART_CRASHES) {
+		sessiond_crashes_clear(crashes);
+		return 0;
+	}
+
+	/* Succeeded: the session starts again. */
+	return 1;
+}
+
+/* Forgets the seat's crashes: a new login's session starts with none. */
+void
+sessiond_crashes_clear(
+	struct sessiond_crashes *crashes)
+{
+	unsigned index;
+
+	/* No crash noted. */
+	for (index = 0U; index < SESSIOND_RESTART_CRASHES; index++)
+		crashes->at_ms[index] = 0;
+	crashes->count = 0U;
 }

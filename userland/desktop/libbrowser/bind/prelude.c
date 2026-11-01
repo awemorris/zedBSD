@@ -19,6 +19,7 @@
 #include "css/css.h"
 #include "js/builtin.h"
 #include "net/net.h"
+#include "base/os-error.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -958,7 +959,7 @@ prelude_request_done(
 		bind_report_exception(window, realm->exception);
 		realm->exception = VM_VALUE_UNDEFINED;
 	} else if (result != 0 && getenv("BROWSER_STACK") != NULL) {
-		fprintf(stderr, "request callback stopped by error %d (%s)\n", result, strerror(result));
+		fprintf(stderr, "request callback stopped by error %d (%s)\n", result, wb_os_error_text(result));
 	}
 	prelude_request_end(pending);
 }

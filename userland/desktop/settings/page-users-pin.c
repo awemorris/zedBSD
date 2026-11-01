@@ -8,15 +8,15 @@
 /*
  * The Security Keys page's Software Security Key (ws199-p001 section 3.1;
  * before it the Users page's PIN card, ws163-p003, ws172-p002): the
- * six-digit PIN that logs in and unlocks on this machine's screen, a key
- * with no device.
+ * PIN of four to six digits that logs in and unlocks on this machine's
+ * screen, a key with no device.  A new account has the PIN 0000.
  *
  * The card says whether a PIN is set, as the desktop tells it
  * (kl_system_account_enrolled: the session manager keeps the PIN, in
  * /etc/passkey on zedBSD, which Settings cannot read), and has Set Up PIN
  * (Change PIN when one is set) and Remove.  Each opens the popup
- * (dialog.c): the current password first, then for a new PIN the six
- * digits twice; the desktop is asked with the password and the PIN
+ * (dialog.c): the current password first, then for a new PIN its four to
+ * six digits twice; the desktop is asked with the password and the PIN
  * (libkeiland's kl_system_account_set_pin, an empty PIN to remove it),
  * and the session manager checks the password.  The password is kept from
  * its step to the one that sends it, and wiped then, when the popup closes
@@ -36,7 +36,8 @@
 #define SOFT_APPLY		210
 #define SOFT_REMOVE		211
 
-/* The digits of a PIN. */
+/* The fewest and most digits of a PIN. */
+#define SOFT_DIGITS_MIN		4U
 #define SOFT_DIGITS		6U
 
 /* The steps of a new PIN (the password, the PIN), and of a removal (the password). */
@@ -86,7 +87,7 @@ se_keys_soft_draw(
 	height = 64 + 36 + 56;
 	if (!available)
 		height = 64 + 50;
-	y = se_card_begin(app, canvas, x, top, width, height, "Software Security Key", "A six-digit PIN that signs in and unlocks on this computer's screen.");
+	y = se_card_begin(app, canvas, x, top, width, height, "Software Security Key", "A PIN of four to six digits that signs in and unlocks on this computer's screen.");
 	if (!available) {
 		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 24, "This desktop cannot set a PIN here.", SOFT_TEXT_ROW, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
 		return top + height;
@@ -98,7 +99,7 @@ se_keys_soft_draw(
 	if (known && !set)
 		state = "No PIN is set. The login and locked screens take your password.";
 	if (known && set)
-		state = "A PIN is set. After a restart, sign in once with your password.";
+		state = "A PIN is set. The login and locked screens ask for it first.";
 	(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 22, state, SOFT_TEXT_SUB, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
 	y += 36;
 
@@ -233,8 +234,8 @@ se_keys_soft_ready(
 	if (app->keys.step == SOFT_STEP_PASSWORD)
 		return length != 0U;
 
-	/* The new PIN of six digits, twice the same. */
-	if (length != SOFT_DIGITS)
+	/* The new PIN of four to six digits, twice the same. */
+	if (length < SOFT_DIGITS_MIN || length > SOFT_DIGITS)
 		return 0;
 	pin = se_dialog_text(app, 0U);
 	again = se_dialog_text(app, 1U);
@@ -295,7 +296,7 @@ se_keys_soft_result(
 			message = "Your account is locked: it cannot have a PIN.";
 		break;
 	case EINVAL:
-		message = "The PIN is not accepted: use six digits.";
+		message = "The PIN is not accepted: use four to six digits.";
 		break;
 	case ENOTSUP:
 		message = "This desktop cannot set a PIN.";
@@ -402,8 +403,8 @@ soft_step(
 	}
 
 	/* The new PIN, twice. */
-	se_dialog_step(app, "Software Security Key", 2U, steps, "Choose six digits. After a restart, sign in once with your password before the PIN works.", "Set PIN", 1);
-	se_dialog_field(app, "New PIN", "Six digits", SE_FIELD_SECRET, 0U);
+	se_dialog_step(app, "Software Security Key", 2U, steps, "Choose four to six digits.", "Set PIN", 1);
+	se_dialog_field(app, "New PIN", "Four to six digits", SE_FIELD_SECRET, 0U);
 	se_dialog_digits(app, 0U, SOFT_DIGITS);
 	se_dialog_field(app, "New PIN again", "The same again", SE_FIELD_SECRET, 0U);
 	se_dialog_digits(app, 1U, SOFT_DIGITS);

@@ -77,17 +77,27 @@ enum sessiond_command {
 };
 
 /*
+ * The file that keeps the PIN's wrong tries in a row across restarts (root's
+ * alone), and its directory; the host test sets its own.
+ */
+#ifndef SESSIOND_PIN_TRIES_PATH
+#define SESSIOND_PIN_TRIES_DIRECTORY	"/var/db/sessiond"
+#define SESSIOND_PIN_TRIES_PATH		"/var/db/sessiond/pin-tries"
+#endif
+
+/* The longest text of that file. */
+#define SESSIOND_PIN_TRIES_TEXT		2048U
+
+/*
  * One account's counts (by user ID; the names no account has share one
- * entry): the failures in a row of every style, those of the PIN, and
- * whether the account has logged in or unlocked with its password or a
- * security key since sessiond started (until then no PIN is offered).
+ * entry): the failures in a row of every style, and those of the PIN (kept
+ * in SESSIOND_PIN_TRIES_PATH too, so that a restart gives no new tries).
  */
 struct sessiond_count {
 	uid_t uid;
 	int used;
 	unsigned wrong;
 	unsigned pin_wrong;
-	int signed_in;
 };
 
 /* Every account's counts, for sessiond's life. */
@@ -103,6 +113,8 @@ int sessiond_policy_pin_allowed(const struct sessiond_count *count);
 void sessiond_policy_attempt(struct sessiond_count *count, int style);
 void sessiond_policy_success(struct sessiond_count *count, int style);
 unsigned sessiond_policy_delay(const struct sessiond_count *count);
+void sessiond_policy_tries_read(struct sessiond_policy *policy, const char *text);
+size_t sessiond_policy_tries_write(const struct sessiond_policy *policy, char *out, size_t size);
 const char *sessiond_policy_reason(const char *passkey_reason);
 void sessiond_policy_styles(const char *listed, const struct sessiond_count *count, char *out, size_t size);
 int sessiond_policy_key_counts(const char *passkey_reason);

@@ -48,6 +48,21 @@ kl_backend_session_logout(
 }
 
 /*
+ * Has no manager to tell about the lock screen.
+ */
+int
+kl_backend_session_lock_state(
+	struct kl_backend *backend,
+	unsigned locked)
+{
+	/* Nothing is sent. */
+	(void)locked;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/*
  * Has no login screen to log in from.
  */
 int

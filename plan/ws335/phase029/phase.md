@@ -63,3 +63,6 @@ git diff --check
 ## 結果
 
 （未着手）
+
+- 注意（2026-11-02 Q1、p027 の結果から）: struct sslc_tls13_schedule は段を表す field を持たず、sslc_tls13_handshake・sslc_tls13_master を順どおりに呼んだかを検出しない。順を守るのは p029（handshake の状態機械）の責任。header は変えない。
+

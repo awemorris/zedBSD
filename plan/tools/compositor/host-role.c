@@ -28,6 +28,7 @@
 #define OPTION_LOCK_IDLE	0x10U
 #define OPTION_TIMEOUT		0x20U
 #define OPTION_MAX_FRAMES	0x40U
+#define OPTION_LOCKED		0x80U
 
 /* What a case expects: an error (0 or EINVAL), and when 0 the role and deadline. */
 struct role_case {
@@ -60,6 +61,9 @@ static const struct role_case cases[] = {
 	{ "--testing --lock-idle: refused", OPTION_TESTING | OPTION_LOCK_IDLE, EINVAL, 0U, 0U },
 	{ "--greeter --session: refused", OPTION_GREETER | OPTION_SESSION, EINVAL, 0U, 0U },
 	{ "--greeter --timeout: refused", OPTION_GREETER | OPTION_TIMEOUT, EINVAL, 0U, 0U },
+	{ "--session --control-fd --locked: sessiond's after a crash", OPTION_SESSION | OPTION_CONTROL_FD | OPTION_LOCKED, 0, KWL_ROLE_NORMAL, UINT64_MAX },
+	{ "--locked without --control-fd: refused", OPTION_SESSION | OPTION_LOCKED, EINVAL, 0U, 0U },
+	{ "--greeter --control-fd --locked: refused", OPTION_GREETER | OPTION_CONTROL_FD | OPTION_LOCKED, EINVAL, 0U, 0U },
 };
 
 /*
@@ -112,6 +116,7 @@ run_case(
 	request.greeter = option_given(item->options, OPTION_GREETER);
 	request.control_fd = option_given(item->options, OPTION_CONTROL_FD);
 	request.lock_idle = option_given(item->options, OPTION_LOCK_IDLE);
+	request.locked = option_given(item->options, OPTION_LOCKED);
 	request.timeout = option_given(item->options, OPTION_TIMEOUT);
 	request.max_frames = option_given(item->options, OPTION_MAX_FRAMES);
 	request.timeout_ms = 900000U;

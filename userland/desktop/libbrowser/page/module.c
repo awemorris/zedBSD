@@ -9,6 +9,7 @@
 
 #include "page/page.h"
 #include "net/net.h"
+#include "base/os-error.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -510,7 +511,7 @@ module_report(
 		return;
 	} else
 		written = wb_buffer_printf(&message, "Failed to load module %s: %s",
-		    entry->url, strerror(status));
+		    entry->url, wb_os_error_text(status));
 	if (written == 0)
 		bind_console(page->window, BIND_CONSOLE_ERROR, wb_buffer_string(&message));
 	wb_buffer_release(&message);

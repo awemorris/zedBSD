@@ -82,11 +82,14 @@
  * The applications' tiles: the sizes kept, in pixels a side
  * (a window's mark by its title and on Wiseview's tiles, the system bar's
  * applications, Alt+Tab, App Home), how many, the image they are kept in
- * and the empty pixels between them.
+ * and the empty pixels between them.  Each size takes rows of its own, as
+ * many as its tiles need side by side; the image is tall enough for
+ * those of every picture with room to spare (tiles_create fails, and
+ * no tile is drawn anywhere, when they do not fit).
  */
 #define GLASS_TILE_SIZES	4U
 #define GLASS_TILE_WIDTH	1024U
-#define GLASS_TILE_HEIGHT	256U
+#define GLASS_TILE_HEIGHT	512U
 #define GLASS_TILE_GAP		2U
 
 /*

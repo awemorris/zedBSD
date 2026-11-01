@@ -68,7 +68,8 @@ static const powervr_vk_route routes[] = {
 	powervr_vk_command_route,
 	powervr_vk_pass_route,
 	powervr_vk_queue_route,
-	powervr_vk_query_route
+	powervr_vk_query_route,
+	powervr_vk_video_route
 };
 
 /*

@@ -108,10 +108,13 @@ done
 
 # The stand-in for the window.
 "$cc" $flags -c plan/ws074/tests/host-shell.c -o "$out/obj/host-shell.o"
+# The program's own copy of the error texts (the production browser app compiles it too; the library keeps
+# its symbols local).
+"$cc" $flags -c userland/desktop/libbrowser/base/os-error.c -o "$out/obj/browser-os-error.o"
 # The host component has the same public exports as the production library.
 "$cc" $flags -shared -Wl,-z,defs -Wl,-soname,libbrowser.so \
     -Wl,--version-script=userland/desktop/libbrowser/exports.map -o "$out/libbrowser.so" $engine -lvulkan -lm -ldl -lpthread
-"$cc" $flags -o "$out/browser" "$out/obj/browser_main.o" "$out/obj/browser_main-posix.o" "$out/obj/host-shell.o" \
+"$cc" $flags -o "$out/browser" "$out/obj/browser_main.o" "$out/obj/browser_main-posix.o" "$out/obj/host-shell.o" "$out/obj/browser-os-error.o" \
     -L"$out" -Wl,-rpath,'$ORIGIN' -l:libbrowser.so -lvulkan -lm
 echo "built $out/browser"
 

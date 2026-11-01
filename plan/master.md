@@ -27,16 +27,16 @@
 | 担当 | Queue | 中身 |
 | --- | --- | --- |
 | P1 | q1884 `p1-ws324` | [WS324](ws324/ws.md) p009b: NVENC の関門（I・P の絵を encode、上限なし）。p009a の channel は cleared |
-| P2 | q1869 `p2-ws322` | [WS322](ws322/ws.md) p004: VF2 の H.264 decode の道（p001〜p003 は cleared） |
+| P2 | q1896 `p2-ws322` | [WS322](ws322/ws.md) p007: VF2 の VPU の速さと頑丈さ（timeout の立て直し・seek）。p004 H.264 decode は cleared（1080p30 を GPU の道で再生） |
 | P5 | q1886 `p5-ws334b` | [WS334](ws334/ws.md) p033: 後半の Windows の口（p032 Wine の確かめは cleared） |
 | Sonnet ×2 | q1887・q1888 | [WS334](ws334/ws.md) p034 libbrowser の試験を Windows で・TLS の誤りの文 |
-| P6 | q1881 `p6-ws335b` | [WS335](ws335/ws.md) p013: ML-KEM の多項式（p012 RSA は cleared） |
+| P6 | q1897 `p6-ws335b` | [WS335](ws335/ws.md) p015: OS の層（p014 ML-KEM-768 は cleared） |
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
 | P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
 | P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
-| Sonnet ×3 | q1877・q1882・q1885 | [WS335](ws335/ws.md) p016 DER と PEM・p027 鍵の schedule・p026 record の保護（p009 Ed25519 は cleared） |
+| Sonnet ×3 | q1885・q1893・q1895 | [WS335](ws335/ws.md) p026 record の保護・p028 handshake の message・p017 X.509 の parse（p016 は cleared） |
 | Sonnet | q1883 `s-ws324-p006c` | [WS324](ws324/ws.md) p006c: H.265 の解析の rps・ps（p006b は cleared） |
-| P4 | q1889 `p4-bug390` | [BUG-390](bugs/BUG-390.md): Pi 5 の CI の image で App Home の icon が出ない |
+| P4 | — | 返却。[BUG-390](bugs/BUG-390.md) は fixed。次の Bug を待つ |
 | P8 | q1890 `p8-bug391` | [BUG-391](bugs/BUG-391.md)・[BUG-392](bugs/BUG-392.md): compositor が落ちた時の再開と PIN の既定 |
 | P3 | q1891 `p3-bug393` | [BUG-393](bugs/BUG-393.md): Pi 5 の GPU の起動時の自己試験を既定で off |
 | P7 | q1892 `p7-bug394` | [BUG-394](bugs/BUG-394.md): 起動が長い、init が desktop を優先 |
@@ -67,7 +67,7 @@
 - web の取得（2026-10-29）: 一度禁止（Fable の配下が bot の確認の回避で権限の判定に 3 回止められた件）、その後ユーザー「Webから取得してOKです。サブエージェントにWebの取得(GET)を許可して下さい。GETはパラメータなしなら安全と見なしていいです。」→ 担当と配下に web の GET を許す。条件: WebFetch・WebSearch の tool と、パラメータの無い GET の取得（BSD の source の tarball など）。bot の確認・拒否に当たったら即やめて Q1 に報告、User-Agent の変更・別の取り方の再試行はしない。
 - サブエージェントの起動は番号の小さい担当を優先（2026-10-29 ユーザー「P1,P2,..というふうに、数字の小さなエージェントに優先してサブエージェントを起動させてください。必要なら優先度の低いものを停止してください。」）。上限に当たったら Q1 が番号の大きい担当の配下を止める。今の枠: P5 の配下は同時 2 本、P6 は 1 本、P7 は 2 本（2026-10-29 ユーザー「WS313は調査、コード作成などで、2つまでサブエージェントを作って並列化し、効率化してください。」）。
 - 全担当の成果は main に merge 済み（上の Queue の作業中の物を除く）。`agent/p2-ws288-p006` は WS288 の終了で使わない。
-- 既定の config: Pi の BT は config-rpi4.mk・config-rpi5.mk で n（ユーザー）、Pi 5 の GPU（CONFIG_DRIVER_BCM2712_GPU）は CI で y と graphical login（2026-11-01 ユーザーの決定、P4 の q1842 で実装中）、
+- 既定の config: Pi の BT は config-rpi4.mk・config-rpi5.mk で n（ユーザー）、Pi 5 の GPU（CONFIG_DRIVER_BCM2712_GPU）は CI で y と graphical login（2026-11-01 ユーザーの決定）、Pi 4・Pi 5 の CI は graphical login かつ kernel の message を画面に出さない（ZEDBSD_BOOT_KERNEL_MESSAGES n、cmdline.txt に kmsg=quiet、2026-11-02 ユーザーの決定）、
   fan（CONFIG_DRIVER_RPI5_FAN）は y、CI の VF2 は CONFIG_POWERVR_DEBUG n。
 - firmware は全部 zedBSD-firmware（rev 43662bd、i915 の DMC 6 file、Mali の CSF、ODROID-C5 の公式の image（Amlogic の bootloader）を含む、push 済み）から取る。
 <!-- master:merge:end -->
@@ -116,7 +116,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-395 · q1893 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-395 · q1898 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
