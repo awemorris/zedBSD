@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>input</title>
+<style>
+body { margin: 0; font-family: sans-serif; }
+input { position: absolute; left: 20px; top: 20px; width: 600px; height: 40px; font-size: 24px; }
+p { position: absolute; left: 20px; top: 90px; font-size: 24px; }
+</style>
+</head>
+<body>
+<input id="field" type="text">
+<p id="shown">typed: </p>
+<script>
+// Each change of the field's text is printed (the console's line) and shown under it.
+var field = document.getElementById("field");
+var shown = document.getElementById("shown");
+field.addEventListener("input", function () {
+	console.log("M5 value=" + field.value);
+	shown.textContent = "typed: " + field.value;
+});
+console.log("M5 ready");
+</script>
+</body>
+</html>
