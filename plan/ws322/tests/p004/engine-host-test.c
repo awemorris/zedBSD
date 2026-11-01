@@ -11,9 +11,12 @@
  * ring (the sets when new or at an IDR picture, then the slices), the
  * sequence and the pool (one more than the firmware asks), the frame
  * buffer picked and the display flags around it, and each result of the
- * firmware: decoded, skipped, refused (the bytes taken back), failed, not
- * answered (the stream broken, its pool kept); a new size at an I
- * picture, a reset and a picture before any I picture.
+ * firmware: decoded, skipped, refused (the bytes taken back), failed; a
+ * new size at an I picture, a reset (the instance flushed, or closed when
+ * the flush is refused) and a picture before any I picture; a core that
+ * did not answer: recovered (the picture an error, the lost instance
+ * closed, another opened at the next I picture) or given up on (EIO,
+ * nothing opened any more).
  *
  *   engine-host-test
  */
@@ -81,6 +84,11 @@ static struct {
 	int32_t order;
 	int pools;
 	uint32_t pool_count;
+	int lost;
+	int flushes;
+	int flush_error;
+	int recoveries;
+	int recover_error;
 } core;
 
 /* The one stand-in instance. */
@@ -116,6 +124,10 @@ drv_wave5_close(
 {
 	(void)stream;
 	core.closes++;
+	if (core.lost) {
+		core.lost = 0;
+		return 0;
+	}
 	return core.close_error;
 }
 
@@ -137,6 +149,27 @@ drv_wave5_append_pieces(
 }
 
 int drv_wave5_update_stream(struct drv_wave5_stream *stream) { (void)stream; return 0; }
+int drv_wave5_lost(const struct drv_wave5_stream *stream) { (void)stream; return core.lost; }
+
+int
+drv_wave5_flush(
+	struct drv_wave5_stream *stream)
+{
+	(void)stream;
+	core.flushes++;
+	return core.flush_error;
+}
+
+int
+drv_wave5_recover(
+	struct drv_wave5 *owner)
+{
+	(void)owner;
+	core.recoveries++;
+	if (core.recover_error == 0)
+		core.lost = 1;
+	return core.recover_error;
+}
 
 void
 drv_wave5_unread(
@@ -351,31 +384,59 @@ main(void)
 	error = decode(stream, DRV_POWERVR_VIDEO_PICTURE_IDR | DRV_POWERVR_VIDEO_PICTURE_INTRA, 0, 0, 0x1, &result);
 	check(error == 0 && result.status == DRV_POWERVR_VIDEO_COMPLETE && core.opens == 2 && core.closes == 1 && core.pools == 2, "new size, new instance");
 
-	/* A reset closes the instance; the next P picture is an error. */
+	/* A reset flushes the instance; the next P picture is an error, the next I picture goes on in it with the sets. */
 	core.ops->reset(stream);
-	check(core.closes == 2, "reset closes");
+	check(core.flushes == 1 && core.closes == 1, "reset flushes");
 	error = decode(stream, 0, 1, 0x1, 0x3, &result);
 	check(error == 0 && result.status == DRV_POWERVR_VIDEO_ERROR && core.opens == 2, "P after reset is an error");
+	core.decoded = 1;
+	error = decode(stream, DRV_POWERVR_VIDEO_PICTURE_INTRA, 1, 0, 0x2, &result);
+	check(error == 0 && result.status == DRV_POWERVR_VIDEO_COMPLETE && core.opens == 2 && core.pieces == 3 && core.sequences == 2,
+	      "I after reset in the flushed instance, sets again, no new sequence");
 
-	/* No answer: EIO, broken, the pool kept at the close. */
+	/* A flush the firmware refuses closes the instance; the next I picture opens another. */
+	core.flush_error = EIO;
+	core.ops->reset(stream);
+	check(core.flushes == 2 && core.closes == 2, "a refused flush closes");
+	core.flush_error = 0;
+	core.decoded = 0;
+	error = decode(stream, DRV_POWERVR_VIDEO_PICTURE_IDR | DRV_POWERVR_VIDEO_PICTURE_INTRA, 0, 0, 0x1, &result);
+	check(error == 0 && result.status == DRV_POWERVR_VIDEO_COMPLETE && core.opens == 3, "IDR opens another");
+
+	/* No answer, recovered: the picture is an error, the lost instance is closed, the next I picture opens another. */
 	core.decode_error = ETIMEDOUT;
+	error = decode(stream, 0, 1, 0x1, 0x3, &result);
+	check(error == 0 && result.status == DRV_POWERVR_VIDEO_ERROR && core.recoveries == 1, "no answer, recovered: an error");
+	core.decode_error = 0;
+	core.decoded = 1;
+	error = decode(stream, 0, 1, 0x1, 0x3, &result);
+	check(error == 0 && result.status == DRV_POWERVR_VIDEO_ERROR && core.closes == 3 && core.opens == 3, "the lost instance closed, P an error");
+	core.decoded = 0;
 	error = decode(stream, DRV_POWERVR_VIDEO_PICTURE_IDR | DRV_POWERVR_VIDEO_PICTURE_INTRA, 0, 0, 0x1, &result);
-	check(error == EIO && result.status == DRV_POWERVR_VIDEO_ERROR, "no answer is EIO");
-	error = decode(stream, DRV_POWERVR_VIDEO_PICTURE_IDR | DRV_POWERVR_VIDEO_PICTURE_INTRA, 0, 0, 0x1, &result);
-	check(error == EIO, "a broken stream decodes nothing");
-	error = core.ops->close(stream);
-	check(error == EIO, "a broken stream's pool is kept");
+	check(error == 0 && result.status == DRV_POWERVR_VIDEO_COMPLETE && core.opens == 4, "IDR after the recovery opens another");
 
-	/* Eight streams at most. */
+	/* Eight streams at most (this one and seven more). */
 	{
-		void *streams[9];
+		void *streams[8];
 		int index;
-		for (index = 0; index < 8; index++)
+		for (index = 0; index < 7; index++)
 			check(core.ops->open(core.engine, DRV_POWERVR_VIDEO_DECODE_H264, &open, &streams[index]) == 0, "a stream of eight");
-		check(core.ops->open(core.engine, DRV_POWERVR_VIDEO_DECODE_H264, &open, &streams[8]) == EBUSY, "a ninth is EBUSY");
-		for (index = 0; index < 8; index++)
+		check(core.ops->open(core.engine, DRV_POWERVR_VIDEO_DECODE_H264, &open, &streams[7]) == EBUSY, "a ninth is EBUSY");
+		for (index = 0; index < 7; index++)
 			check(core.ops->close(streams[index]) == 0, "closed");
 	}
+
+	/* No answer, given up on (the core held in reset and off): EIO, nothing more decoded or opened, the pool may go. */
+	core.decode_error = ETIMEDOUT;
+	core.recover_error = ENODEV;
+	error = decode(stream, 0, 1, 0x1, 0x3, &result);
+	check(error == EIO && result.status == DRV_POWERVR_VIDEO_ERROR && core.recoveries == 2, "given up on is EIO");
+	error = decode(stream, DRV_POWERVR_VIDEO_PICTURE_IDR | DRV_POWERVR_VIDEO_PICTURE_INTRA, 0, 0, 0x1, &result);
+	check(error == EIO && core.recoveries == 2, "a stopped core decodes nothing");
+	error = core.ops->close(stream);
+	check(error == 0, "the pool of a core held in reset may go");
+	error = core.ops->open(core.engine, DRV_POWERVR_VIDEO_DECODE_H264, &open, &stream);
+	check(error == EIO, "a stopped core opens nothing");
 
 	printf("engine: %d passed, %d failed\n", passes, failures);
 	return failures == 0 ? 0 : 1;

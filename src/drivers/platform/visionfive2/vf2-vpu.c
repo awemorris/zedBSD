@@ -131,6 +131,7 @@ static size_t probe_length;
 
 static int power_up(struct vf2_vpu *vpu);
 static void power_down(struct vf2_vpu *vpu);
+static void hold_lines(void *glue, unsigned what);
 static int release_outer(struct vf2_vpu *vpu);
 static void make_clock(uint32_t index, struct drv_vf2_clock *clock);
 static void make_reset(uint32_t index, struct drv_vf2_reset *reset);
@@ -310,6 +311,8 @@ boot(
 	place.dma_limit = VPU_DMA_LIMIT;
 	place.sram_address = VPU_SRAM_ADDRESS;
 	place.sram_size = VPU_SRAM_SIZE;
+	place.lines = hold_lines;
+	place.glue = vpu;
 
 	/* Boots the firmware; a start that fails is tried again with the outer resets released. */
 	core = NULL;
@@ -452,6 +455,45 @@ power_down(
 
 	/* The decoder is off. */
 	vpu->stage = VPU_OFF;
+}
+
+/*
+ * Holds or releases the decoder's resets, or holds them and powers it
+ * off, for the core's recovery (wave5.h).  The core calls it with its
+ * command lock held, in a decode; the glue's lock is not taken, since a
+ * bring-down takes the core's lock under it, and nothing else changes the
+ * stage of a decoder the render node's engine holds.
+ */
+static void
+hold_lines(
+	void *glue,
+	unsigned what)
+{
+	struct drv_vf2_reset reset;
+	struct vf2_vpu *vpu;
+	unsigned position;
+
+	/* The decoder whose core asks. */
+	vpu = glue;
+
+	/* Off: the resets held, the clocks stopped, the domain off. */
+	if (what == DRV_WAVE5_LINES_OFF) {
+		power_down(vpu);
+		return;
+	}
+
+	/* Holds the resets in reverse, or releases them in order. */
+	if (what == DRV_WAVE5_LINES_HOLD) {
+		for (position = sizeof(vpu_resets) / sizeof(vpu_resets[0]); position > 0; position--) {
+			make_reset(vpu_resets[position - 1U], &reset);
+			(void)drv_vf2_reset_assert(&reset);
+		}
+		return;
+	}
+	for (position = 0; position < sizeof(vpu_resets) / sizeof(vpu_resets[0]); position++) {
+		make_reset(vpu_resets[position], &reset);
+		(void)drv_vf2_reset_deassert(&reset);
+	}
 }
 
 /* Releases the two reset lines of the decoder's subsystem the tree leaves out. */

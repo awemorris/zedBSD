@@ -253,14 +253,15 @@
 #define DISPLAY_CLEAR		0x011cU
 
 /*
- * The task buffer is made twice the size the vendor's driver gives it
- * (two VLC buffers and a parameter buffer per queued command): with that
- * size the Wave511's firmware stopped answering a picture command once
- * about 2 MB of a 1080p stream had been decoded, whatever the ring's size
- * (as seen on the VisionFive 2), and with twice it every
- * stream ran to its end.
+ * The task buffer is made one and a half times the size the vendor's
+ * driver gives it (two VLC buffers and a parameter buffer per queued
+ * command), in thousandths.  With the vendor's size the Wave511's
+ * firmware stopped answering a picture command once about 2 MB of a 1080p
+ * stream had been decoded, whatever the ring's size and the buffer's
+ * alignment; with a quarter more every stream ran to its end (as seen on
+ * the VisionFive 2), and half more leaves a margin.
  */
-#define TASK_FACTOR		2U
+#define TASK_PERMILLE		1500U
 
 /* How many times a destruction the firmware is not ready for is retried. */
 #define DESTROY_TRIES		10U
@@ -341,6 +342,7 @@ drv_wave5_open(
 		drv_wave5_core_write(core, CREATE_RING_ORDER, RING_BYTES_IN_ORDER);
 		drv_wave5_core_write(core, CREATE_EXTENDED, 0);
 		drv_wave5_core_write(core, CREATE_QUEUE_DEPTH, QUEUE_DEPTH - 1U);
+		opened->generation = core->generation;
 		error = drv_wave5_core_command(core, opened, VPU_RUN_CREATE, 1, NULL);
 		if (error == 0)
 			core->instances |= 1U << id;
@@ -379,10 +381,22 @@ drv_wave5_close(
 	struct drv_wave5 *core;
 	unsigned tries;
 	uint32_t reason;
+	int lost;
 	int error;
 
-	/* Destroys the instance, retrying while the firmware still runs it. */
+	/* An instance a recovery lost is no longer the firmware's: its memory goes at once. */
 	core = stream->core;
+	mutex_lock(&core->command_lock);
+
+	lost = stream->generation != core->generation;
+
+	mutex_unlock(&core->command_lock);
+	if (lost) {
+		drv_wave5_stream_free(stream);
+		return 0;
+	}
+
+	/* Destroys the instance, retrying while the firmware still runs it. */
 	error = EIO;
 	for (tries = 0; tries < DESTROY_TRIES; tries++) {
 		mutex_lock(&core->command_lock);
@@ -391,6 +405,8 @@ drv_wave5_close(
 		error = drv_wave5_core_command(core, stream, VPU_RUN_DESTROY, 1, &reason);
 		if (error == 0)
 			core->instances &= ~(1U << stream->id);
+		if (error == ESTALE)
+			lost = 1;
 
 		mutex_unlock(&core->command_lock);
 
@@ -398,6 +414,12 @@ drv_wave5_close(
 		if (error != EBUSY)
 			break;
 		kern_usleep_range(1000, 2000);
+	}
+
+	/* A recovery between the tries lost the instance: its memory goes. */
+	if (lost) {
+		drv_wave5_stream_free(stream);
+		return 0;
 	}
 
 	/* Keeps the memory of an instance the firmware may still use until the core is detached. */
@@ -413,6 +435,90 @@ drv_wave5_close(
 
 	/* Succeeded: the instance is gone and its memory free. */
 	drv_wave5_stream_free(stream);
+	return 0;
+}
+
+/*
+ * Reports whether a recovery lost the instance.
+ */
+int
+drv_wave5_lost(
+	const struct drv_wave5_stream *stream)
+{
+	struct drv_wave5 *core;
+	int lost;
+
+	/* The core's generation moves on in a recovery, under the command lock. */
+	core = stream->core;
+	mutex_lock(&core->command_lock);
+
+	lost = stream->generation != core->generation;
+
+	mutex_unlock(&core->command_lock);
+
+	/* Succeeded: whether the firmware still knows the instance. */
+	return lost;
+}
+
+/*
+ * Has the firmware drop the instance's pictures and unread bytes.
+ *
+ * Procedure referenced:
+ * StarFive Linux JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
+ * drivers/media/platform/chips-media/wave5/wave5-vpuapi.c
+ * (wave5_vpu_flush_instance: the flush command repeated while the firmware
+ * still runs the instance) and wave5-vpu-dec.c (the read position asked
+ * after the flush becomes both ring positions).
+ */
+int
+drv_wave5_flush(
+	struct drv_wave5_stream *stream)
+{
+	struct drv_wave5 *core;
+	uint32_t position;
+	uint32_t start;
+	unsigned tries;
+	int error;
+
+	/* Flushes the instance, retrying while the firmware still runs it. */
+	core = stream->core;
+	error = EIO;
+	for (tries = 0; tries < DESTROY_TRIES; tries++) {
+		mutex_lock(&core->command_lock);
+
+		error = drv_wave5_core_command(core, stream, VPU_RUN_FLUSH, 1, NULL);
+
+		mutex_unlock(&core->command_lock);
+
+		/* Stops unless the firmware asked for another try. */
+		if (error != EBUSY)
+			break;
+		kern_usleep_range(1000, 2000);
+	}
+	if (error != 0)
+		return error;
+
+	/* The firmware reads on from where it stopped: the next bytes go there. */
+	mutex_lock(&core->command_lock);
+
+	core->flushes++;
+	error = drv_wave5_core_query(core, stream, VPU_ASK_READ_POSITION);
+	position = 0;
+	if (error == 0)
+		position = drv_wave5_core_read(core, POSITION_ANSWER);
+
+	mutex_unlock(&core->command_lock);
+	if (error != 0)
+		return error;
+
+	/* A position outside the ring leaves the positions as they were. */
+	start = drv_wave5_core_address(&stream->ring);
+	if (position >= start && position < start + (uint32_t)stream->ring_size) {
+		stream->read = position;
+		stream->write = position;
+	}
+
+	/* Succeeded: the instance waits for a picture to start at. */
 	return 0;
 }
 
@@ -973,6 +1079,10 @@ drv_wave5_decode(
 			result->read_position = drv_wave5_core_read(core, POSITION_ANSWER);
 	}
 
+	/* A picture that completed ends a run of recoveries. */
+	if (waited == 0 && error == 0)
+		core->strikes = 0;
+
 	mutex_unlock(&core->command_lock);
 
 	/* The host's time from the command to the result. */
@@ -1061,6 +1171,8 @@ take_compressed(
 	uint32_t motion;
 	uint32_t luma_table;
 	uint32_t chroma_table;
+	uint32_t share;
+	uint32_t alignment;
 	uint32_t task;
 	unsigned index;
 	int error;
@@ -1082,10 +1194,19 @@ take_compressed(
 	luma_table = align_up(align_up(luma_table, 16U), 4096U) + 4096U;
 	chroma_table = align_up(height, 64U) * align_up(width / 2U, 256U) / 32U;
 	chroma_table = align_up(align_up(chroma_table, 16U), 4096U) + 4096U;
-	task = (stream->vlc_size * 2U + stream->parameter_size * QUEUE_DEPTH) * TASK_FACTOR;
+	mutex_lock(&stream->core->command_lock);
+
+	share = stream->core->task_permille;
+	alignment = stream->core->task_alignment;
+
+	mutex_unlock(&stream->core->command_lock);
+	task = stream->vlc_size * 2U + stream->parameter_size * QUEUE_DEPTH;
+	if (share == 0)
+		share = TASK_PERMILLE;
+	task = (uint32_t)((uint64_t)task * share / 1000U);
 
 	/* Takes the task buffer the firmware works through the queued commands in. */
-	error = drv_wave5_core_take(stream->core, task, &stream->task);
+	error = drv_wave5_core_take_aligned(stream->core, task, alignment, &stream->task);
 	if (error != 0)
 		return error;
 
@@ -1106,11 +1227,12 @@ take_compressed(
 	}
 
 	/* The sizes, for the log. */
-	kern_logf("wave5: instance %u: vlc %u parameter %u task %u, luma %u chroma %u motion %u tables %u %u\n",
+	kern_logf("wave5: instance %u: vlc %u parameter %u task %u at %08x, luma %u chroma %u motion %u tables %u %u\n",
 		  stream->id,
 		  (unsigned)stream->vlc_size,
 		  (unsigned)stream->parameter_size,
 		  (unsigned)task,
+		  (unsigned)drv_wave5_core_address(&stream->task),
 		  (unsigned)stream->compressed_luma,
 		  (unsigned)chroma,
 		  (unsigned)motion,

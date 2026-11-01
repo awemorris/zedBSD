@@ -127,6 +127,9 @@
 #define VPU_BOOT_MS		1000U
 #define VPU_DECODE_MS		500U
 
+/* The recoveries in a row, without a picture decoded between them, after which a core is stopped. */
+#define VPU_STRIKES		3U
+
 /* The most instances one core holds. */
 #define VPU_MAX_INSTANCES	8U
 
@@ -158,12 +161,15 @@ struct wave5_compressed {
  * between, and wraps counts the pictures whose bytes went past the ring's
  * end.  The compressed buffers and the task buffer exist from
  * drv_wave5_register() on.  An instance the firmware would not destroy
- * waits on the core's orphan list for drv_wave5_detach().
+ * waits on the core's orphan list for drv_wave5_detach() or a recovery.
+ * Generation is the core's when the instance was created; a recovery
+ * moves the core's on, which loses the instance.
  */
 struct drv_wave5_stream {
 	struct drv_wave5 *core;
 	unsigned codec;
 	unsigned id;
+	uint32_t generation;
 	uint32_t standard;
 	struct wave5_memory work;
 	struct wave5_memory ring;
@@ -191,14 +197,29 @@ struct drv_wave5_stream {
  * at a time through the same registers.  The interrupt lock guards the
  * completion masks, the reasons and the count, which the interrupt
  * handler and a polling waiter both fill; the waiters sleep on the
- * queue.  Stopped is set once by drv_wave5_stop() and refuses every later
- * command.
+ * queue.  Stopped is set once by drv_wave5_stop() or a recovery that gave
+ * up and refuses every later command; resetting is set while a recovery
+ * holds the core, whose registers are not read then.  The firmware's
+ * copy boots the core again in a recovery.  The generation, the counts of
+ * the recoveries and the task share change under the command lock; lose
+ * (completions a test has go unseen) under the interrupt lock.
  */
 struct drv_wave5 {
 	struct drv_wave5_place place;
 	volatile uint8_t *registers;
 	struct wave5_memory common;
 	struct drv_wave5_identity identity;
+	uint8_t *firmware;
+	size_t firmware_size;
+	uint32_t generation;
+	uint32_t recoveries;
+	uint32_t lost;
+	uint32_t strikes;
+	uint32_t flushes;
+	uint32_t task_permille;
+	uint32_t task_alignment;
+	uint32_t lose;
+	volatile int resetting;
 	struct mutex command_lock;
 	struct spinlock irq_lock;
 	struct wait_queue irq_wait;
@@ -242,6 +263,9 @@ int drv_wave5_core_wait(struct drv_wave5 *core, const struct drv_wave5_stream *s
 
 /* Takes zeroed contiguous memory the core reaches, with its uncached view. */
 int drv_wave5_core_take(struct drv_wave5 *core, size_t size, struct wave5_memory *memory);
+
+/* Takes such memory at an alignment of its start (a power of two, at least a page). */
+int drv_wave5_core_take_aligned(struct drv_wave5 *core, size_t size, size_t alignment, struct wave5_memory *memory);
 
 /* Gives such memory back; an empty one is left alone. */
 void drv_wave5_core_give(struct wave5_memory *memory);
