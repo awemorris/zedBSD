@@ -1247,7 +1247,7 @@ image_src_set(
 	return 0;
 }
 
-/* Reports the script's src attribute. */
+/* Reports the script's src attribute resolved against the document's URL, or the empty string (src). */
 static int
 script_src_get(
 	struct vm_realm *realm,
@@ -1256,7 +1256,18 @@ script_src_get(
 	unsigned count,
 	vm_value *result)
 {
-	return image_src_get(realm, this_value, args, count, result);
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* The reflected attribute of a <script> receiver, resolved against the document's URL. */
+	status = bind_reflect_url_get(realm, this_value, DOM_TAG_SCRIPT, "src", result);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the URL is reported. */
+	return 0;
 }
 
 /* Sets the script's src attribute. */

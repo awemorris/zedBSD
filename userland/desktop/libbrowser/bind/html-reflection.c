@@ -112,6 +112,30 @@ LINK_STRING(integrity, "integrity")
 LINK_STRING(hreflang, "hreflang")
 LINK_STRING(sizes, "sizes")
 
+/* HTMLIFrameElement's reflected attributes besides src (a script that builds a frame sets them as properties). */
+#define IFRAME_STRING(function, attribute) \
+	int bind_iframe_##function##_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result) \
+	{ \
+		UNUSED_PARAMETER(args); \
+		UNUSED_PARAMETER(count); \
+		return reflection_get(realm, this_value, DOM_TAG_IFRAME, attribute, result); \
+	} \
+	int bind_iframe_##function##_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result) \
+	{ \
+		int error; \
+		error = reflection_set(realm, this_value, DOM_TAG_IFRAME, attribute, args, count); \
+		if (error == 0) \
+			*result = VM_VALUE_UNDEFINED; \
+		return error; \
+	}
+
+IFRAME_STRING(name, "name")
+IFRAME_STRING(frame_border, "frameborder")
+IFRAME_STRING(scrolling, "scrolling")
+IFRAME_STRING(width, "width")
+IFRAME_STRING(height, "height")
+IFRAME_STRING(allow, "allow")
+
 static int
 link_href_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result)
 {

@@ -31,6 +31,12 @@ static const struct bind_attribute frame_attributes[] = {
 	{ "src", frame_src_get, frame_src_set },
 	{ "contentDocument", frame_document, NULL },
 	{ "contentWindow", frame_global, NULL },
+	{ "name", bind_iframe_name_get, bind_iframe_name_set },
+	{ "frameBorder", bind_iframe_frame_border_get, bind_iframe_frame_border_set },
+	{ "scrolling", bind_iframe_scrolling_get, bind_iframe_scrolling_set },
+	{ "width", bind_iframe_width_get, bind_iframe_width_set },
+	{ "height", bind_iframe_height_get, bind_iframe_height_set },
+	{ "allow", bind_iframe_allow_get, bind_iframe_allow_set },
 	{ NULL, NULL, NULL }
 };
 
