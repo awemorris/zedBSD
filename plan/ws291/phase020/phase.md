@@ -3,7 +3,7 @@
 # ws291-p020 PowerVR（VisionFive 2）: model の 50 fps
 
 - 親: [WS291](../ws.md)。
-- 状態: in-progress（2026-10-31 01:5x P2 q1733-i01: SLC を既定にし（回帰 PASS）、present の copy を geometry が待たない形にして direct scanout の c13 45.8 fps・c1 86.9 fps（目標 50）。下の「q1733-i01」節）。前: in-progress（2026-10-31 01:1x P2 q1726-i01: direct scanout の c13 42.35 fps（目標 50）。前の「direct」は合成だった。下の「q1726-i01」節と「訂正」節。権限の判定で板の回帰の前に止まった）。前: in-progress（2026-10-30 16:50 P3、q1715-i02: 表示が出て、driver の欠け（instance rate・discard・vkCmdCopyBuffer・mip の transfer・direct scanout の BLOB）を
+- 状態: in-progress・Q1 の判定待ち（2026-11-01 20:36 P2 q1839-i01: main（3b5614897 と source 同じ）で受け入れの条件を測り直し、game mode の direct scanout の c13 55.84・56.33・56.22 fps（目標 50 以上）、回帰 PASS。下の「q1839-i01」節）。前: in-progress（2026-10-31 01:5x P2 q1733-i01: SLC を既定にし（回帰 PASS）、present の copy を geometry が待たない形にして direct scanout の c13 45.8 fps・c1 86.9 fps（目標 50）。下の「q1733-i01」節）。前: in-progress（2026-10-31 01:1x P2 q1726-i01: direct scanout の c13 42.35 fps（目標 50）。前の「direct」は合成だった。下の「q1726-i01」節と「訂正」節。権限の判定で板の回帰の前に止まった）。前: in-progress（2026-10-30 16:50 P3、q1715-i02: 表示が出て、driver の欠け（instance rate・discard・vkCmdCopyBuffer・mip の transfer・direct scanout の BLOB）を
   埋めて mview の qs40 が描けた。目標の copies 13 は 26.6 fps（目標 50）。profile の途中。下の「q1715-i02」節）。
 - 承認: ユーザー（2026-10-30 原文）「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」。VF2 の割り当て: Q1（2026-10-30）「VF2 を P7 に割り当てます。」。
 - 未決（ws.md）: 50 fps の基準（Linux との比較か、絶対値か）。VF2 の Linux の PowerVR の driver は今の板の SD に無い。Q1 がユーザーに (a) Linux の基準を立てる、
@@ -291,4 +291,33 @@ P3 の基点（cb03c9983 ＋ 差分、p15、scratch の tree に同じ直し）�
 
 - 今: c13 45.8 fps（direct、目標 50）。commit c8f69f7fa（SLC 既定と異常系の直し、transfer の待ちの分け、道具）。
 - 次の手の候補: (1) zero copy（WS309 p015、範囲の外: Q1 の判断）で copy と TA の競合を無くす。(2) submit の CPU（frame あたり GPU が止まる 約 1.8 ms）を縮める: libvulkan の submit 1.3 ms の内訳（wire の encode・ioctl）、kernel の job map 80 µs。(3) `--inflight=2` が遅くなる理由。(4) SLC の残りの直し（isolate・abandoned の buffer、解放の多い負荷での照合）。
+
+### q1839-i01（2026-11-01 20:23〜20:36 P2、worktree p2-ws291p020、基点 272e6c226。main 3b5614897 との差は plan だけ）
+
+受け入れ（qs40 × 13、1920x1080、direct scanout で 50 fps 以上）を main の今の source で測り直した。source は変えていない。
+
+- build（warning 0）: 計測 `make -j32 ZEDBSD_CONFIG=plan/ws291/tests/config-vf2.mk BUILD=build/p020m ZEDBSD_TEST_CPPFLAGS=-DPOWERVR_SUBMIT_TIMING=1 build/p020m/vmunix build/p020m/bin/wayland build/p020m/bin/mview build/p020m/dynamic/libvulkan.so build/p020m/dynamic/libwayland-client.so`（vmunix 1775179009）。
+  回帰 `config-vf2-shot.mk`、BUILD=build/p020s（vmunix 1886174425、wayland・files・terminal・keiland-shot・vkmatrix・vkcoherency・vkcompute・libvulkan・libwayland-client）。
+- 計測の command（板 kei@10.0.30.2、電源はプラグミニ 3 AC276E432AE6、password は環境変数だけ）:
+  `VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=AC276E432AE6 OLD=q1825orig COPIES='1 13' SPIN=12 CYCLES=4 sh plan/ws309/tests/vf2-p015.sh build/tmp/q1839/m1 main:build/p020m`、
+  2 回目は `COPIES='13 13 1' SPIN=30 CYCLES=2`（build/tmp/q1839/m2）。どの spin も compositor を起こし直し、mview は `--content=game --present=mailbox --images=4 --copies=N`、root。
+- 条件の確かめ: 全 spin で WSI の game の chain が `lent=1 direct=1 tiling=0x1`、その chain の `copies=0`（present の copy 無し）、compositor の `KWL SCANOUT direct=1`・`lend images=0x3f result=0`。
+
+| scene | run | fps | frame ms（min・平均・max） | hitch |
+| --- | --- | --- | --- | --- |
+| c13 | m1、SPIN 12 | 55.84 | 16・17.87・59 | 1（frame 9、window → game の切り替え） |
+| c13 | m2、SPIN 30 | 56.33 | 16・17.74・62 | 1（同じ） |
+| c13 | m2、SPIN 30 | 56.22 | 16・17.77・60 | 1（同じ） |
+| c1 | m1、SPIN 12 | 167.24 | 5・5.97・49 | — |
+| c1 | m2、SPIN 30 | 167.11 | 4・5.98・49 | — |
+
+- 揺れ: c13 は 3 run で 55.84〜56.33（差 0.9 %）、P4 の 06:49 の b2392803f の 56.04・55.99 と同じ帯。c1 も P4 の 167.97・169.04 と同じ帯。hitch（mview の判定は 33 ms 以上の間隔）は各 run の最初の切り替えの 1 frame だけ。
+- c13 の内訳（m1、mview の STAGES と kernel の timing）: frame 17.88 ms ＝ acquire 0.26・record 0.25・submit 1.30・present 0.50・fence 15.10 ms。GPU の ta 8.6〜8.8 ms・3d 6.8〜7.0 ms・gpu frame 17.6〜18.1 ms。
+  q1733-i01（c13 45.8 fps、ta 13.1 ms）からの差は主に TA（13.1 → 8.7 ms）で、ws309-p015 の lent の image（present の copy 無し、copy と TA の帯域の競合が消えた）と、その後の main の変更（copyin・copyout の近道など、どれの効果かは分けていない）。
+- game ↔ window の往復（1 つの compositor で短い game の spin を繰り返す）: m1 4/4・m2 2/2 が `MVIEW DONE`、compositor は生きていて refused 0・failed 0（BUG-375 の形は出ない）。
+- 回帰（`VF2_HOST=… VF2_PASSWORD=… VF2_PLUG=AC276E432AE6 OLD=q1825orig sh plan/ws291/tests/vf2-regress.sh build/tmp/q1839/r1 build/p020s`）: vkmatrix 109/109、`-p 3` PASS、`-r 3` 327/327、vkcoherency PASS、vkcompute 4096/4096、
+  desktop の compositor の error 0・desktop の起動 1、keiland-shot の PNG の cksum 518389155（s3・P4 の q1817 と同じ）。step の間に再起動なし（boot-000291 のまま）、出力に fault・lost・hang・reset の行なし。
+- 板（20:36）: /boot/boot0/vmunix 3758577736（計測の前と同じ、vmunix.q1825orig と照合して一致）。zedbsd.cfg・他の vmunix.* は触っていない。~/p15・~/p7 に main の build の program を置いた（system の file は変えていない）。
+- 未実施: 画面の PNG（game mode の間は keiland-shot が撮れない。見た目は q1733-i01 の window の PNG で確かめた形と同じ program）。長い soak。
+- 結論（P2）: 受け入れの「qs40 × 13、1920x1080、direct scanout で 50 fps 以上」を満たす（最低 55.84 fps、目標を約 12 % 上回る）。cleared の判定は Q1。
 
