@@ -113,3 +113,32 @@ script の直し（1〜3 回目の FAIL のうち program の不具合でない�
 - --render-gpu（paint/vulkan.c の offscreen）が loader を確かめずに vkCreateInstance を呼ぶ件: p034 で扱う。
 - 暗い mode で頁の中身が明るいままの件: system の theme を prefers-color-scheme で頁に渡す。p033 で扱う。
 
+
+### 追補（q1888）
+
+Windows の失敗の頁と `ZBROWSER ERROR load` の行の `Unknown error: ...`（UCRT の `strerror` が mingw の `EPROTO` などの番号を知らない）を直した。
+
+変更:
+
+- `userland/desktop/libbrowser/base/os-error.h`・`os-error.c`（新規）: `const char *wb_os_error_text(int error)`。ISO C だけの表で、POSIX の `strerror`（glibc の英文）と同じ文を全 system で返す。層が返す errno（os.h・os-net.h の一覧、TLS の `EPROTO`・`EPROTONOSUPPORT`）と `0`（"Success"）を持ち、表に無い値は "Unknown error"。`EWOULDBLOCK`・`EOPNOTSUPP` のように別の名前が別の番号になる system（mingw）にも別の行を持つ。`EDQUOT` は有る system だけ。
+- `strerror` の呼び出しを全部差し替えた: libbrowser の `bind/window.c`（2）・`bind/prelude.c`（1）・`page/module.c`（1）・`page/script.c`（2）・`js/tool.c`（6）・`view/view.c`（1）、browser の `main.c`（11）・`shell/shell.c`（20）。差し替えの後 `strerror` を呼ぶ所は libbrowser と browser に無い。
+- shell・main.c は libbrowser.so（符号は local）の関数を呼べないので、`userland/desktop/browser/sources.mk` に `os-error.c` を足して app が自分の写しを持つ（`png-write.c` と同じ形）。`libbrowser/sources.mk` では `LIBBROWSER_SCRIPT_SOURCES`（OS の層の組ではない。Windows の build が OS の組を抜くため）。公開の header は変えていない。
+- `plan/ws074/tests/host-build.sh`: 試験の program `browser` が `os-error.c` の物を 1 つ足して link する（list-sources.sh は `$(LIBBROWSER_DIR)/` と `$(KEILAND_BROWSER_DIR)/` の行だけ拾うため）。
+- `plan/ws334/tests/unit/test-os-error.c`（新規）と `modules.sh` の登録。`os.h` の冒頭の comment に os-error.h を一言。
+
+WS074 の試験が文を読んでいる所: `plan/ws074/tests`・`plan/ws334/tests` の script・C・HTML・JS を、層が返す errno の英文で grep した（証拠の `evidence/`・`import/` は履歴なので除く）。読んでいる所は無い。文は glibc の `strerror` と同じなので host（Linux）の出力は前と同じ。
+
+試験（worktree `/home/awe/zedBSD-worktrees/s-ws334-errstr`、2026-11-02）:
+
+| 試験 | 結果 |
+| --- | --- |
+| `sh plan/ws334/tests/run-unit.sh os-error` | `test-os-error: PASS (77 checks)` を posix（ASan・UBSan）と win32（Wine）の両方、`run-unit: PASS` |
+| `sh plan/ws074/tests/host-build.sh plain` | exit 0、built 94、warning 0 |
+| `sh plan/ws334/tests/stage1.sh TREE plain` の前後比較（前は基点 4f58e7b9b の `git archive`、後はこの tree、port offset 0 と 100） | `summary.txt` が時間の数字を除いて同じ（host-build 94・warning 0、host-tests 75 exit 0 と 17 other、js 17/17、loader 11/11、http 15/15、http-async 19/20（前も同じ）、fetch 38/38、component 83 checks PASS）、`host-exits.txt` も同じ |
+| `timeout 5400 flock /tmp/zedbsd-wine.lock sh plan/ws334/tests/cross-build.sh` | `cross-build: PASS`（win64・winarm64。`os-error.o` が libbrowser.a と libbrowser-ui.a の両方に入るが、重複の symbol・warning は無い） |
+| `sh plan/ws334/tests/wine-run.sh`（外側の flock なし） | `15 passed, 0 failed, 4 not run (a real Windows)`、`wine-run: PASS`。log に `Unknown error` は 0 件。M3a は `ZBROWSER ERROR load ... error=Protocol error tls=handshake: certificate verify failed: unable to get local issuer certificate`、M3c は `error=Protocol error tls=handshake: certificate verify failed: certificate rejected`。失敗の頁（`build/review/ws334-p032/m3-disallowed.png`）は `Protocol error: handshake: certificate verify failed: certificate rejected` |
+| zedBSD amd64（`make ZEDBSD_CONFIG=plan/ws334/tests/config-amd64-p027-guest.mk BUILD=build/q1888 build/q1888/dynamic/libbrowser.so build/q1888/bin/browser`） | exit 0、warning 0、`check-dynamic-elf.py` 通過 |
+
+未実施: 実機の Windows と zedBSD 上の起動（Windows の表示は Wine の PNG の確認まで）。zedBSD の libc の `strerror` の文との差（zedBSD の libc は glibc と同じ文でない物があり得る。`EBUSY` など）は確かめていない（文は glibc に揃えた）。
+
+消してよい物（Q1 へ）: `build/tmp/q1888-base`（基点の `git archive`。中に stage1 の出力）、`build/q1888`、`build/tmp/q1888-*.log`・`build/tmp/q1888-*.out`、`build/tmp-hostbuild.log`、`build/tmp/ws334-stage1-plain`、`build/ws074-host`（host-build の出力。他の担当の物と混ざらない worktree の中）。

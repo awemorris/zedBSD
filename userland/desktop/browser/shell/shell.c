@@ -32,6 +32,7 @@
 
 #include "shell/internal.h"
 #include "../../picture/png-write.h"
+#include "../../libbrowser/base/os-error.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -224,14 +225,14 @@ shell_run(
 	/* The connection to the compositor: its application names the program's data directory. */
 	status = shell_window_connect(&state.window, options->display);
 	if (status != 0) {
-		fprintf(stderr, "browser: cannot open a window: %s\n", strerror(errno));
+		fprintf(stderr, "browser: cannot open a window: %s\n", wb_os_error_text(errno));
 		return 1;
 	}
 
 	/* The engine's instance, which remembers the cookies and localStorage. */
 	error = shell_instance(state.window.app, &state.instance);
 	if (error != 0) {
-		fprintf(stderr, "browser: cannot make the engine's instance: %s\n", strerror(error));
+		fprintf(stderr, "browser: cannot make the engine's instance: %s\n", wb_os_error_text(error));
 		shell_window_close(&state.window);
 		return 1;
 	}
@@ -258,7 +259,7 @@ shell_run(
 	view_options.instance = state.instance;
 	error = browser_view_create(&view_options, &state.view);
 	if (error != 0) {
-		fprintf(stderr, "browser: cannot start the network: %s\n", strerror(error));
+		fprintf(stderr, "browser: cannot start the network: %s\n", wb_os_error_text(error));
 		(void)browser_instance_destroy(state.instance);
 		shell_window_close(&state.window);
 		return 1;
@@ -277,7 +278,7 @@ shell_run(
 	if (error != 0) {
 		error = shell_open_failure(&state, options->start, error);
 		if (error != 0) {
-			fprintf(stderr, "browser: cannot open %s: %s\n", options->start, strerror(error));
+			fprintf(stderr, "browser: cannot open %s: %s\n", options->start, wb_os_error_text(error));
 			shell_release(&state);
 			return 1;
 		}
@@ -406,7 +407,7 @@ shell_resize_view(
 	/* The view at the frames' size. */
 	error = browser_view_resize(state->view, state->width, state->height);
 	if (error != 0) {
-		fprintf(stderr, "browser: cannot lay out the page: %s\n", strerror(error));
+		fprintf(stderr, "browser: cannot lay out the page: %s\n", wb_os_error_text(error));
 		return 1;
 	}
 
@@ -525,7 +526,7 @@ shell_input(
 
 	/* A failure of the page's scripts or its layout is reported and the window goes on. */
 	if (error != 0) {
-		printf("ZBROWSER ERROR input error=%s\n", strerror(error));
+		printf("ZBROWSER ERROR input error=%s\n", wb_os_error_text(error));
 		fflush(stdout);
 	}
 }
@@ -557,7 +558,7 @@ shell_button(
 	modifiers = shell_key_modifiers(event->modifiers);
 	error = browser_view_pointer_button(state->view, (float)event->x, (float)event->y, button, event->pressed, modifiers);
 	if (error != 0) {
-		printf("ZBROWSER ERROR click error=%s\n", strerror(error));
+		printf("ZBROWSER ERROR click error=%s\n", wb_os_error_text(error));
 		fflush(stdout);
 	}
 }
@@ -583,7 +584,7 @@ shell_key(
 	modifiers = shell_key_modifiers(event->modifiers);
 	error = browser_view_key(state->view, names.key, names.code, names.text, event->pressed, event->repeat, modifiers);
 	if (error != 0) {
-		printf("ZBROWSER ERROR key error=%s\n", strerror(error));
+		printf("ZBROWSER ERROR key error=%s\n", wb_os_error_text(error));
 		fflush(stdout);
 	}
 }
@@ -794,7 +795,7 @@ shell_follow(
 	/* The view's navigation; a location that does not resolve is reported here. */
 	error = browser_view_follow(state->view, target);
 	if (error == EINVAL) {
-		printf("ZBROWSER ERROR follow target=%s error=%s\n", target, strerror(error));
+		printf("ZBROWSER ERROR follow target=%s error=%s\n", target, wb_os_error_text(error));
 		fflush(stdout);
 	}
 }
@@ -881,7 +882,7 @@ shell_frame(
 	/* The page laid out as it is now, before a frame begins; one that cannot be laid out is reported and not drawn. */
 	error = browser_view_prepare(state->view);
 	if (error != 0) {
-		printf("ZBROWSER ERROR layout error=%s\n", strerror(error));
+		printf("ZBROWSER ERROR layout error=%s\n", wb_os_error_text(error));
 		fflush(stdout);
 		return 0;
 	}
@@ -892,7 +893,7 @@ shell_frame(
 		if (error == EAGAIN)
 			return 2;
 		if (error != 0) {
-			fprintf(stderr, "browser: cannot draw a frame: %s\n", strerror(error));
+			fprintf(stderr, "browser: cannot draw a frame: %s\n", wb_os_error_text(error));
 			return 1;
 		}
 	} else {
@@ -983,7 +984,7 @@ shell_surface_open(
 	state->use_cpu = 1;
 	error = shell_cpu_open(&state->cpu, &state->window);
 	if (error != 0) {
-		fprintf(stderr, "browser: cannot draw in the window: %s\n", strerror(error));
+		fprintf(stderr, "browser: cannot draw in the window: %s\n", wb_os_error_text(error));
 		return 1;
 	}
 	state->width = state->cpu.width;
@@ -1006,7 +1007,7 @@ shell_window_up(
 	/* The window, with the page's title. */
 	status = shell_window_open(&state->window, options->width, options->height, browser_view_title(state->view), present);
 	if (status != 0) {
-		fprintf(stderr, "browser: cannot open a window: %s\n", strerror(errno));
+		fprintf(stderr, "browser: cannot open a window: %s\n", wb_os_error_text(errno));
 		return 1;
 	}
 
@@ -1033,7 +1034,7 @@ shell_surface_resize(
 	if (state->use_cpu) {
 		error = shell_cpu_resize(&state->cpu, &state->window);
 		if (error != 0) {
-			fprintf(stderr, "browser: cannot resize: %s\n", strerror(error));
+			fprintf(stderr, "browser: cannot resize: %s\n", wb_os_error_text(error));
 			return 1;
 		}
 		state->width = state->cpu.width;
@@ -1084,7 +1085,7 @@ shell_instance(
 	} else {
 		error = browser_storage_files_open(directory, &calls, &context);
 		if (error != 0) {
-			fprintf(stderr, "browser: cannot use %s: %s: cookies and localStorage are not kept\n", directory, strerror(error));
+			fprintf(stderr, "browser: cannot use %s: %s: cookies and localStorage are not kept\n", directory, wb_os_error_text(error));
 			calls = NULL;
 			context = NULL;
 		}
@@ -1206,7 +1207,7 @@ shell_load(
 	if (state == BROWSER_LOAD_STOPPED)
 		printf("ZBROWSER STOPPED url=%s\n", url);
 	if (state == BROWSER_LOAD_FAILED)
-		printf("ZBROWSER ERROR load path=%s error=%s tls=%s\n", url, strerror(error), reason);
+		printf("ZBROWSER ERROR load path=%s error=%s tls=%s\n", url, wb_os_error_text(error), reason);
 	fflush(stdout);
 
 	/* The reason of a failure, kept for the page that says why the start page did not open (cut to what fits). */
@@ -1285,7 +1286,7 @@ shell_script_error(
 	/* The line the tests read. */
 	UNUSED_PARAMETER(context);
 	UNUSED_PARAMETER(view);
-	printf("ZBROWSER ERROR script error=%s\n", strerror(error));
+	printf("ZBROWSER ERROR script error=%s\n", wb_os_error_text(error));
 	fflush(stdout);
 }
 
@@ -1371,7 +1372,7 @@ shell_touch_pointer(
 
 	/* A failure of the page's scripts or its layout is reported and the window goes on. */
 	if (error != 0) {
-		printf("ZBROWSER ERROR touch-click error=%s\n", strerror(error));
+		printf("ZBROWSER ERROR touch-click error=%s\n", wb_os_error_text(error));
 		fflush(stdout);
 	}
 }
@@ -1474,9 +1475,9 @@ shell_open_failure(
 
 	/* The error in words, with what the view said beyond its number (for example, the certificate's). */
 	if (state->load_failure[0] != '\0') {
-		snprintf(reason, sizeof(reason), "%s: %s", strerror(failure), state->load_failure);
+		snprintf(reason, sizeof(reason), "%s: %s", wb_os_error_text(failure), state->load_failure);
 	} else {
-		snprintf(reason, sizeof(reason), "%s", strerror(failure));
+		snprintf(reason, sizeof(reason), "%s", wb_os_error_text(failure));
 	}
 
 	/* The page, as a data: URL. */

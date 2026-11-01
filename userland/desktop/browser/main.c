@@ -44,6 +44,7 @@
 
 #include "browser-main.h"
 #include "shell/shell.h"
+#include "../libbrowser/base/os-error.h"
 
 #include <browser/browser.h>
 
@@ -272,7 +273,7 @@ main_dump(
 	browser_free(text);
 	browser_view_destroy(page.view);
 	if (error != 0) {
-		fprintf(stderr, "browser: cannot dump %s: %s\n", options->shell.start, strerror(error));
+		fprintf(stderr, "browser: cannot dump %s: %s\n", options->shell.start, wb_os_error_text(error));
 		return 1;
 	}
 
@@ -308,7 +309,7 @@ main_render(
 	height = options->shell.height;
 	pixels = calloc((size_t)width * (size_t)height, sizeof(uint32_t));
 	if (pixels == NULL) {
-		fprintf(stderr, "browser: cannot draw %s: %s\n", options->shell.start, strerror(ENOMEM));
+		fprintf(stderr, "browser: cannot draw %s: %s\n", options->shell.start, wb_os_error_text(ENOMEM));
 		browser_view_destroy(page.view);
 		return 1;
 	}
@@ -319,7 +320,7 @@ main_render(
 	} else {
 		error = browser_view_draw_pixels(page.view, pixels, width, height, (size_t)width * sizeof(uint32_t));
 		if (error != 0)
-			fprintf(stderr, "browser: cannot draw %s: %s\n", options->shell.start, strerror(error));
+			fprintf(stderr, "browser: cannot draw %s: %s\n", options->shell.start, wb_os_error_text(error));
 	}
 
 	/* The view is no longer needed; a picture that could not be drawn is not written. */
@@ -333,7 +334,7 @@ main_render(
 	error = main_write_ppm(options->output, pixels, width, height);
 	free(pixels);
 	if (error != 0) {
-		fprintf(stderr, "browser: cannot write %s: %s\n", options->output, strerror(error));
+		fprintf(stderr, "browser: cannot write %s: %s\n", options->output, wb_os_error_text(error));
 		return 1;
 	}
 
@@ -357,7 +358,7 @@ main_run_page(
 	/* The page is no longer needed. */
 	browser_view_destroy(page.view);
 	if (page.output_failed) {
-		fprintf(stderr, "browser: cannot write page console: %s\n", strerror(EIO));
+		fprintf(stderr, "browser: cannot write page console: %s\n", wb_os_error_text(EIO));
 		return 1;
 	}
 
@@ -415,7 +416,7 @@ main_open(
 		view_options.fetch = BROWSER_FETCH_BACKGROUND;
 	error = browser_view_create(&view_options, &page->view);
 	if (error != 0) {
-		fprintf(stderr, "browser: cannot make a view: %s\n", strerror(error));
+		fprintf(stderr, "browser: cannot make a view: %s\n", wb_os_error_text(error));
 		return 1;
 	}
 
@@ -423,7 +424,7 @@ main_open(
 	error = browser_view_load(page->view, options->shell.start);
 	if (error != 0) {
 		if (!page->failed)
-			fprintf(stderr, "browser: cannot load %s: %s\n", options->shell.start, strerror(error));
+			fprintf(stderr, "browser: cannot load %s: %s\n", options->shell.start, wb_os_error_text(error));
 		browser_view_destroy(page->view);
 		return 1;
 	}
@@ -432,7 +433,7 @@ main_open(
 	error = browser_view_settle(page->view, options->settle_budget, flags);
 	if (error != 0) {
 		if (!page->failed)
-			fprintf(stderr, "browser: cannot run %s: %s\n", options->shell.start, strerror(error));
+			fprintf(stderr, "browser: cannot run %s: %s\n", options->shell.start, wb_os_error_text(error));
 		browser_view_destroy(page->view);
 		return 1;
 	}
@@ -462,7 +463,7 @@ main_loaded(
 
 	/* The line, by the location the command line gave. */
 	page = context;
-	fprintf(stderr, "browser: cannot load %s: %s", page->options->shell.start, strerror(error));
+	fprintf(stderr, "browser: cannot load %s: %s", page->options->shell.start, wb_os_error_text(error));
 	if (reason[0] != '\0')
 		fprintf(stderr, " (TLS: %s)", reason);
 	fputc('\n', stderr);
@@ -538,7 +539,7 @@ main_draw_gpu(
 		fprintf(stderr, "browser: cannot draw on the GPU: %s failed (%d)\n", failure.operation, (int)failure.result);
 		return error;
 	} else if (error != 0) {
-		fprintf(stderr, "browser: cannot draw on the GPU: %s\n", strerror(error));
+		fprintf(stderr, "browser: cannot draw on the GPU: %s\n", wb_os_error_text(error));
 		return error;
 	}
 
@@ -550,7 +551,7 @@ main_draw_gpu(
 		browser_view_gpu_failure(view, &failure);
 		fprintf(stderr, "browser: cannot draw on the GPU: %s failed (%d)\n", failure.operation, (int)failure.result);
 	} else if (error != 0) {
-		fprintf(stderr, "browser: cannot draw on the GPU: %s\n", strerror(error));
+		fprintf(stderr, "browser: cannot draw on the GPU: %s\n", wb_os_error_text(error));
 	}
 
 	/* The picture read back. */

@@ -44,6 +44,7 @@
 #include "paint/gpu.h"
 #include "storage/instance.h"
 #include "storage/queue.h"
+#include "base/os-error.h"
 
 #include <browser/browser.h>
 
@@ -2916,7 +2917,7 @@ view_storage_failed(
 	int length;
 
 	/* The line, with the backend's reason. */
-	length = snprintf(line, sizeof(line), "storage: could not save (%s)", strerror(error));
+	length = snprintf(line, sizeof(line), "storage: could not save (%s)", wb_os_error_text(error));
 	if (length < 0)
 		return;
 	if ((size_t)length >= sizeof(line))
