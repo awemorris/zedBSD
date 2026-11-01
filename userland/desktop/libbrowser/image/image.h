@@ -45,6 +45,8 @@ struct img_bitmap {
 	int has_natural;
 	int natural_width;
 	int natural_height;
+	/* Set for a picture drawn from vector markup, which the page can draw again at the size it is shown. */
+	int vector;
 };
 
 /* The size layout gives a picture: its natural size when it has one apart from its bitmap's. */

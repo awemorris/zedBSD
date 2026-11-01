@@ -38,12 +38,23 @@
  * that a bitmap the layout and the display list point at does not move
  * when the table grows.
  */
+struct page_image_variant {
+	int width;
+	int height;
+	struct img_bitmap bitmap;
+};
+
 struct page_image {
 	char *location;
 	struct img_bitmap bitmap;
 	int failed;
 	struct page *page;
 	struct net_request *request;
+	/* A vector picture's markup, kept to draw it again at the size it is shown at, and those drawings. */
+	unsigned char *markup;
+	size_t markup_length;
+	struct page_image_variant **variants;
+	size_t variant_count;
 };
 
 /* An <img> (a root of the page's heap while it is watched) and the location whose event it waits for. */
@@ -59,7 +70,8 @@ static int images_load(struct page *page, const struct dom_element *element, con
 static const struct img_bitmap *images_svg(struct page *page, const struct dom_element *element);
 static int images_fetch(struct page *page, const char *location, struct page_image **loaded);
 static void images_arrived(void *context, struct net_request *request);
-static int images_decode(struct page *page, const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
+static int images_decode(struct page *page, struct page_image *image, const unsigned char *bytes, size_t length);
+static void images_free(struct page_image *image);
 static int images_watch(struct page *page, struct dom_element *element, const char *location);
 static void images_unwatch(struct page *page, struct page_image_watch *watch);
 
@@ -219,9 +231,7 @@ page_images_release(
 	for (index = 0; index < page->images.count; index++) {
 		image = *(struct page_image **)wb_vector_at(&page->images, index);
 		net_request_cancel(image->request);
-		free(image->location);
-		img_bitmap_release(&image->bitmap);
-		free(image);
+		images_free(image);
 	}
 
 	/* The table itself. */
@@ -428,7 +438,7 @@ images_fetch(
 		error = page_fetch(page->base, image->location, &bytes, NULL);
 		net_http_set_kind(NET_FETCH_DOCUMENT);
 		if (error == 0)
-			error = images_decode(page, bytes.data, bytes.length, &image->bitmap);
+			error = images_decode(page, image, bytes.data, bytes.length);
 		wb_buffer_release(&bytes);
 		if (error != 0)
 			image->failed = 1;
@@ -438,9 +448,7 @@ images_fetch(
 	error = wb_vector_push(&page->images, &image);
 	if (error != 0) {
 		net_request_cancel(image->request);
-		free(image->location);
-		img_bitmap_release(&image->bitmap);
-		free(image);
+		images_free(image);
 		return error;
 	}
 
@@ -453,16 +461,116 @@ images_fetch(
 static int
 images_decode(
 	struct page *page,
+	struct page_image *image,
 	const unsigned char *bytes,
-	size_t length,
-	struct img_bitmap *bitmap)
+	size_t length)
 {
 	int error;
 
-	error = img_decode(bytes, length, bitmap);
-	if (error == ENOTSUP)
-		error = page_svg_decode(page, bytes, length, bitmap);
+	error = img_decode(bytes, length, &image->bitmap);
+	if (error == ENOTSUP) {
+		error = page_svg_decode(page, bytes, length, &image->bitmap, 0, 0);
+		if (error == 0) {
+			/* The markup stays, for drawing the picture at the size it is shown at. */
+			image->markup = malloc(length);
+			if (image->markup != NULL) {
+				memcpy(image->markup, bytes, length);
+				image->markup_length = length;
+			}
+		}
+	}
 	return error;
+}
+
+/* Releases an image of the table with its pixels, markup and drawings. */
+static void
+images_free(
+	struct page_image *image)
+{
+	size_t index;
+
+	for (index = 0; index < image->variant_count; index++) {
+		img_bitmap_release(&image->variants[index]->bitmap);
+		free(image->variants[index]);
+	}
+	free(image->variants);
+	free(image->markup);
+	free(image->location);
+	img_bitmap_release(&image->bitmap);
+	free(image);
+}
+
+/* How many drawings of a vector picture are kept, and the largest one (in pixels on a side, and in all). */
+#define IMAGES_VARIANTS		8U
+#define IMAGES_VARIANT_SIDE	4096
+#define IMAGES_VARIANT_PIXELS	(2 * 1024 * 1024)
+
+/*
+ * Finds a vector picture of the table drawn at a pixel size (layout_image_variant;
+ * its context is the page): the picture itself when it is not one of the
+ * table's with kept markup or the size is unusable.
+ */
+const struct img_bitmap *
+page_image_variant(
+	void *context,
+	const struct img_bitmap *base,
+	int width,
+	int height)
+{
+	struct page *page;
+	struct page_image *image;
+	struct page_image_variant **grown;
+	struct page_image_variant *made;
+	struct img_bitmap drawn;
+	size_t index;
+	int error;
+
+	page = context;
+	if (width < 1 || height < 1 || width > IMAGES_VARIANT_SIDE || height > IMAGES_VARIANT_SIDE ||
+	    (long)width * (long)height > IMAGES_VARIANT_PIXELS)
+		return base;
+	if (width == base->width && height == base->height)
+		return base;
+
+	/* The table's image whose bitmap this is. */
+	image = NULL;
+	for (index = 0; index < page->images.count; index++) {
+		image = *(struct page_image **)wb_vector_at(&page->images, index);
+		if (&image->bitmap == base)
+			break;
+		image = NULL;
+	}
+	if (image == NULL || image->markup == NULL)
+		return base;
+
+	/* One drawn before. */
+	for (index = 0; index < image->variant_count; index++) {
+		if (image->variants[index]->width == width && image->variants[index]->height == height)
+			return &image->variants[index]->bitmap;
+	}
+	if (image->variant_count >= IMAGES_VARIANTS)
+		return base;
+
+	/* A new drawing; the bitmap keeps its natural size's description. */
+	memset(&drawn, 0, sizeof(drawn));
+	error = page_svg_decode(page, image->markup, image->markup_length, &drawn, width, height);
+	if (error != 0)
+		return base;
+	made = malloc(sizeof(*made));
+	grown = realloc(image->variants, (image->variant_count + 1U) * sizeof(*grown));
+	if (made == NULL || grown == NULL) {
+		free(made);
+		img_bitmap_release(&drawn);
+		return base;
+	}
+
+	/* Each drawing stays where it is (display lists point at it) while the table of them grows. */
+	made->width = width;
+	made->height = height;
+	made->bitmap = drawn;
+	image->variants = grown;
+	image->variants[image->variant_count++] = made;
+	return &made->bitmap;
 }
 
 /*
@@ -489,7 +597,7 @@ images_arrived(
 	if (error == 0 && (response->status < 200 || response->status > 299))
 		error = EINVAL;
 	if (error == 0)
-		error = images_decode(image->page, response->body.data, response->body.length, &image->bitmap);
+		error = images_decode(image->page, image, response->body.data, response->body.length);
 	if (error != 0)
 		image->failed = 1;
 
@@ -530,16 +638,14 @@ images_svg(
 		return NULL;
 	}
 	image->page = page;
-	error = page_svg_render(element, &image->bitmap);
+	error = page_svg_render(element, &image->bitmap, 0, 0);
 	if (error != 0)
 		image->failed = 1;
 
 	/* The entry goes into the table. */
 	error = wb_vector_push(&page->images, &image);
 	if (error != 0) {
-		free(image->location);
-		img_bitmap_release(&image->bitmap);
-		free(image);
+		images_free(image);
 		return NULL;
 	}
 	if (image->failed)
