@@ -19,7 +19,7 @@
 #include <string.h>
 
 static void transition_end(struct page *page);
-static double transition_longest(const struct layout_box *box, int depth);
+
 
 /* Ends the transition: its snapshots are freed and the page is laid out without its tree. */
 static void
@@ -120,8 +120,8 @@ page_view_transition(
 }
 
 /* The longest an animation of the transition's pseudo-elements runs below a box, in seconds (a paused one never ends). */
-static double
-transition_longest(
+double
+page_transition_longest(
 	const struct layout_box *box,
 	int depth)
 {
@@ -139,7 +139,7 @@ transition_longest(
 			longest = (double)box->style.animation_duration + (box->style.animation_delay > 0 ? (double)box->style.animation_delay : 0.0);
 	}
 	for (child = box->first_child; child != NULL; child = child->next) {
-		length = transition_longest(child, depth + 1);
+		length = page_transition_longest(child, depth + 1);
 		if (length > longest)
 			longest = length;
 	}
@@ -254,7 +254,7 @@ page_view_transition_duration(
 	page = context;
 	if (!page->transition_on || transition_layout(page) != 0 || page->layout.root == NULL)
 		return 0.0;
-	return transition_longest(page->layout.root, 0) * 1000.0;
+	return page_transition_longest(page->layout.root, 0) * 1000.0;
 }
 
 /*

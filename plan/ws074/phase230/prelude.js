@@ -2169,6 +2169,9 @@
       if (current) skip(current, new DOMException('Old view transition aborted by new view transition.', 'AbortError'));
       current = t;
       native.viewTransitionActive(1, Array.from(t._types));
+      // A document in a frame keeps showing its old painting until the update callback is done.
+      native.frameHold(1);
+      then.call(t._done.promise, function () { native.frameHold(0); }, function () { native.frameHold(0); });
       // The next rendering opportunity: the old state is captured, then the callback runs and the new state is made.
       requestAnimationFrame(function () {
         if (t._phase === 'done') return;

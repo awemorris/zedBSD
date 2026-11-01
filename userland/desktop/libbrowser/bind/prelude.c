@@ -44,6 +44,7 @@ static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_va
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_frame_hold(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_duration(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -486,10 +487,51 @@ prelude_view_transition(
 	status = vm_to_number(realm, js_argument(args, count, 0), &step);
 	if (status != 0)
 		return status;
+	if (window->frame != NULL && window->host.view_transition == NULL) {
+		struct bind_window *parent;
+
+		/* A frame's document: its parent page makes the transition. */
+		parent = window->frame->node.document->view;
+		if (parent != NULL && !parent->detached && parent->host.frame_view_transition != NULL &&
+		    parent->host.frame_view_transition(parent->host.context, window->frame, (int)step) != 0)
+			*result = VM_VALUE_TRUE;
+		return 0;
+	}
 	if (window->host.view_transition == NULL)
 		return 0;
 	if (window->host.view_transition(window->host.context, (int)step) != 0)
 		*result = VM_VALUE_TRUE;
+	return 0;
+}
+
+/* frameHold(on): a document in a frame holds its painting (the page keeps showing the last one) or lets it go. */
+static int
+prelude_frame_hold(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	double on;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+	*result = VM_VALUE_UNDEFINED;
+	status = vm_to_number(realm, js_argument(args, count, 0), &on);
+	if (status != 0)
+		return status;
+	if (window->frame != NULL) {
+		struct bind_window *parent;
+
+		/* The painting of the frame as it is now is the one that stays. */
+		parent = window->frame->node.document->view;
+		if (on != 0.0 && !window->frame_hold && parent != NULL && !parent->detached && parent->host.frame_capture != NULL)
+			parent->host.frame_capture(parent->host.context, window->frame);
+		window->frame_hold = on != 0.0;
+	}
 	return 0;
 }
 
@@ -562,6 +604,14 @@ prelude_view_transition_duration(
 	UNUSED_PARAMETER(count);
 	window = bind_window_of(realm);
 	*result = vm_value_number(0.0);
+	if (window->frame != NULL && window->host.view_transition_duration == NULL) {
+		struct bind_window *parent;
+
+		parent = window->frame->node.document->view;
+		if (parent != NULL && !parent->detached && parent->host.frame_view_transition_duration != NULL)
+			*result = vm_value_number(parent->host.frame_view_transition_duration(parent->host.context, window->frame));
+		return 0;
+	}
 	if (window->host.view_transition_duration != NULL)
 		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
 	return 0;
@@ -1365,6 +1415,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "viewTransition", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "frameHold", 1, prelude_frame_hold, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "frameHold", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "viewTransitionActive", 2, prelude_view_transition_active, NULL, &function);
 	if (status == 0)

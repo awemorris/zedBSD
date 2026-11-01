@@ -1609,6 +1609,20 @@ geometry_rect_value(
 	return fmin(rect->x, rect->x + rect->width);
 }
 
+/* Computes an element's style: by the host, or for a frame's document by its own cascade (ENOENT when neither can). */
+static int
+geometry_style_of(
+	struct bind_window *window,
+	struct dom_element *element,
+	struct css_style *style)
+{
+	if (window->host.computed_style != NULL)
+		return window->host.computed_style(window->host.context, element, style);
+	if (!window->owned || window->context_depth == 0 || window->detached)
+		return ENOENT;
+	return bind_style_context_compute(window, element, style);
+}
+
 /*
  * Finds an element's computed position (static when the host cannot say:
  * an element outside the document).
@@ -1624,14 +1638,12 @@ geometry_position(
 
 	/* Static until the host says. */
 	*position = CSS_POSITION_STATIC;
-	if (window->host.computed_style == NULL)
-		return 0;
 
 	/* The element's style (on the heap: it is large). */
 	style = malloc(sizeof(*style));
 	if (style == NULL)
 		return ENOMEM;
-	error = window->host.computed_style(window->host.context, element, style);
+	error = geometry_style_of(window, element, style);
 	if (error == 0) {
 		*position = style->position;
 
@@ -1662,12 +1674,10 @@ geometry_fixed_container(
 	int error;
 
 	*contains = 0;
-	if (window->host.computed_style == NULL)
-		return 0;
 	style = malloc(sizeof(*style));
 	if (style == NULL)
 		return ENOMEM;
-	error = window->host.computed_style(window->host.context, element, style);
+	error = geometry_style_of(window, element, style);
 	if (error == 0)
 		*contains = style->transform_set || style->backdrop_filter_count != 0 || (style->will_change_contains & 1) != 0;
 	free(style);

@@ -1278,3 +1278,31 @@ Origin: 2026-10-27 ユーザーの指示。
   - position-try-cascade（!important・animation・transition に @position-try が勝たない）、position-try-backdrop（::backdrop の fallback）。
   - 右から左の文字を含む行の bidi（文字の順の反転と piece の並べ直し、paint の glyph の向きまで要る）。
 - 未実施: asan、host-NAME の全件、target の確認。
+
+### iframe の内容の描画の設計（続き 9、2026-11-01。依頼者の優先順位の 1 番）
+
+- 今までの状態: `<iframe>` は 300x150 の replaced box で、子文書は DOM・script・cascade（`bind_style_context_engine`）はあるが、layout tree が無く描かれない。
+  子文書の geometry の問い合わせ（`geometry_child_box`）だけは一時の layout tree を作っている。
+- 設計:
+  1. 段階 1（paint の合成）: paint が iframe の box を描く時、page が子文書の layout tree を作る（`layout_tree.frame_build` = `page_frame_build`: 子の cascade と viewport = iframe の content box の大きさで `layout_build`）。
+     その tree から子の display list を作り（`paint_build` を入れ子で呼ぶ）、items を iframe の content box の左上へずらして、content box の clip の中に追加する。
+     子の canvas の色（root か body の背景）は先に矩形で塗る（無ければ親が透ける）。子の list と tree は親の list（`paint_list.frames`）が持ち、親の list と同じ間生きる（glyph・画像・filter の指す先）。
+  2. 段階 2（更新）: 子文書が読み込み・変更されたら親を描き直す（今は親の generation が変わった時だけ）。子の scroll と、子の viewport の大きさ（iframe の大きさの変化）。
+  3. 段階 3（hit test・scroll・focus）: 親の座標から子の box を探す。子の中の click・scroll・caret。
+  4. 段階 4（view transition）: 子文書の transition と、iframe に view-transition-name を付けた時の撮影。
+
+- 結果（dev176〜dev181。段階 1〜4 を作った）:
+  - 段階 1（paint の合成。paint/list.c `list_frame`、page/frame-load.c `page_frame_paint`・`frame_make`・`frame_tree`）: iframe の box を描く時に子文書を layout し（`layout_tree.frame_paint`）、子の display list を content box へずらして clip の中に足す。
+    子の canvas の色（root か body の背景）は先に矩形で塗る。子の list と tree は親の list（`paint_list.frames`、参照数つき `paint_frame`）が持つ。入れ子の iframe は子の tree の中の iframe を同じ手順で描く。
+  - 段階 1b（zoom と paint holding）: iframe に `zoom` が掛かる時、子文書の root は `css_engine_set_base_zoom` からその倍率で始まり、子の viewport（CSS px）は frame の大きさ ÷ 倍率（layout/box.c、bind/frame.c の `bind_frame_viewport`）。
+    子の `startViewTransition` の間（update callback が終わるまで）は、frame を最後に描いた物のまま見せる（`native.frameHold`、`bind_window.frame_hold`、host の `frame_capture` で開始の時に描き直して取っておく）。
+  - 段階 2（更新）: 子文書の generation の和（`page_frames_generation`）と frame の transition の世代を `page_needs_layout` が見て、親を描き直す。
+  - 段階 3（hit test）: `page_hit_node` が点から子文書の box へ降りる（キャッシュした子の tree を使う）。マウス・wheel の event は子文書の window の realm で、子の座標で発火する。focus・control の操作は今まで通り親の文書の物だけ。
+  - 段階 4（view transition）: frame の文書の view transition（`page_frame_view_transition`・`page_frame_view_transition_duration`、host の `frame_view_transition`）を、page の物と同じ手順（old を撮る・new を測る・tree を見せる）で frame ごとの `struct layout_transition` に持つ。
+  - 子文書の geometry（`offsetParent` など）が子の cascade を読むようにした（bind/geometry.c `geometry_style_of`）。
+  - 測定: dev176（段階 1）= 3,190（後退 1: iframe-zoom-nested が中身を描かなかったので偶然通っていた、paint-holding-in-iframe も同じ）→ dev178（zoom と paint holding を足した）= 3,191（後退 0）→ dev179（hit test）= 3,191 → dev180（view transition）= 3,200 → dev181（geometry）= 3,201 / 3,473（92.17%、gap 272）、後退 0。
+    dev175（3,191）から +10: view-transitions の iframe 系 9 件（dialog-in-rtl-iframe・iframe-and-main-frame-transition 4 件・iframe-new-has-scrollbar・iframe-old-has-scrollbar・sibling-frames-transition・transition-in-empty-iframe）と css-anchor-position/last-successful-iframe。
+  - 見て比べた図: plan/ws074/phase260/render-compare/ の iframe-stage1-zoom-nested.png（上が試験、下が ref）と iframe-stage4-vt-in-empty-iframe.png。段階 1 の前は iframe の中が白だった。
+  - Acid: dev181 の source で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+  - 未実施・残り: 子文書の scroll（window.scrollTo・scrollY は子では動かない。長い子文書は上から切れる）、iframe の中の focus・caret・link の操作（click の event は子へ届くが、focus と link の遷移は親の物）、子文書の image・web font が遅れて来た時の再描画、
+    iframe-transition-destroyed-document-crash（crash の runner。今も gap）、asan・host-NAME の全件・target の確認。

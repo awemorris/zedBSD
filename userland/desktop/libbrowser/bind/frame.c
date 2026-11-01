@@ -205,6 +205,12 @@ bind_frame_viewport(
 		/* Borders and padding surround, rather than enlarge, the child's content viewport. */
 		width = box.width - box.border_left - box.border_right - box.padding_left - box.padding_right;
 		height = box.height - box.border_top - box.border_bottom - box.padding_top - box.padding_bottom;
+
+		/* A zoomed frame's document sees its size in its own, unzoomed, pixels. */
+		if (box.zoom > 0.0) {
+			width /= box.zoom;
+			height /= box.zoom;
+		}
 	}
 
 	/* Native negative content extents clamp to zero independently on each axis. */

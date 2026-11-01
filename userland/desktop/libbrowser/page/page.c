@@ -628,6 +628,7 @@ page_layout(
 	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 	page->laid_out = 1;
 	page->layout.image_variant = page_image_variant;
+	page->layout.frame_paint = page_frame_paint;
 	if (error != 0)
 		goto cleanup;
 
@@ -652,6 +653,7 @@ page_layout(
 		css_engine_forget_styles(page->css);
 		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, width, height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 		page->layout.image_variant = page_image_variant;
+	page->layout.frame_paint = page_frame_paint;
 		if (error != 0)
 			goto cleanup;
 	}
@@ -674,6 +676,7 @@ page_layout(
 
 	/* Only a complete layout advances observable generation and geometry caches. */
 	page->laid_out_generation = page->document->generation;
+	page->laid_out_frames = page_frames_generation(page);
 	page->laid_out_transition = page->transition_generation;
 	page->laid_out_visits = page->visits_generation;
 	page->layout_serial++;

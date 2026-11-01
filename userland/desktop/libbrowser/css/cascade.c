@@ -113,7 +113,8 @@ struct css_engine {
 	/* The line height in pixels of the element being styled and of the root (the lh and rlh units). */
 	float line_px;
 	float root_line_px;
-	/* The zoom of the element being styled: the product through its ancestors, and its own factor. */
+	/* The zoom the whole document is under (a frame's zoom: the root starts from it), and of the element being styled: the product through its ancestors, and its own factor. */
+	float base_zoom;
 	float zoom_eff;
 	float zoom_rel;
 	/* The root element's zoom, which rem units are unscaled by. */
@@ -400,6 +401,7 @@ css_engine_create(
 	created->heap = heap;
 	created->root_font_size = CASCADE_DEFAULT_FONT_SIZE;
 	created->zoom_eff = 1.0f;
+	created->base_zoom = 1.0f;
 	created->zoom_rel = 1.0f;
 	created->root_zoom = 1.0f;
 	created->line_px = CASCADE_DEFAULT_FONT_SIZE * 1.2f;
@@ -678,6 +680,30 @@ css_engine_parse_media(
 	/* Succeeded: the list lives as long as the engine. */
 	*media = parsed;
 	return 0;
+}
+
+/*
+ * Sets the zoom a whole document is under (a frame whose element is zoomed: the lengths of the document are scaled by it, and its
+ * viewport in CSS pixels is the frame's size divided by it).
+ */
+void
+css_engine_set_base_zoom(
+	struct css_engine *engine,
+	float zoom)
+{
+	if (zoom <= 0.0f)
+		zoom = 1.0f;
+	if (engine->base_zoom != zoom)
+		cascade_style_forget(engine);
+	engine->base_zoom = zoom;
+}
+
+/* Tells the zoom a document is under (see css_engine_set_base_zoom). */
+float
+css_engine_base_zoom(
+	const struct css_engine *engine)
+{
+	return engine->base_zoom;
 }
 
 /*
@@ -1194,10 +1220,10 @@ cascade_compute(
 		    matches[index].declaration->value.kind != CSS_VALUE_INHERIT && matches[index].declaration->value.number > 0.0f)
 			engine->zoom_rel = matches[index].declaration->value.number;
 	}
-	engine->zoom_eff = (parent != NULL ? parent->zoom_eff : 1.0f) * engine->zoom_rel;
+	engine->zoom_eff = (parent != NULL ? parent->zoom_eff : engine->base_zoom) * engine->zoom_rel;
 	style->zoom_eff = engine->zoom_eff;
-	if (engine->zoom_rel != 1.0f && parent == NULL)
-		style->font_size *= engine->zoom_rel;
+	if ((engine->zoom_rel != 1.0f || engine->base_zoom != 1.0f) && parent == NULL)
+		style->font_size *= engine->zoom_rel * engine->base_zoom;
 	if (engine->zoom_rel != 1.0f && parent != NULL) {
 		/* What the element inherits is in the parent's zoom: it is scaled to its own. */
 		style->font_size *= engine->zoom_rel;

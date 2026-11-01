@@ -255,6 +255,8 @@ struct bind_window {
 	int viewport_height;
 	/* Nonzero when the view's color scheme is dark (prefers-color-scheme, matchMedia). */
 	int dark;
+	/* A frame's document is holding its painting (a view transition's update callback is running): the page shows the last one. */
+	int frame_hold;
 	const char *ready_state;
 	/* Set once the window's load event has finished dispatching. */
 	int load_ended;
