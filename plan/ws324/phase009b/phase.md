@@ -52,4 +52,14 @@ NVENC が driver の組んだ 1 絵の設定（`nvenc_h264_drv_pic_setup_s` と 
 | run5 | GPTIMER_ON と 504・508 の両方に 81000000、rate control の値（rhopbi・30 fps・2 Mbit/s・gop 30・Np・Ravg・R）、SET_WATCHDOG_TIMER 0xffffffff、SET_IN_RCDATA（0 の page）、入力を block linear（tiled 0）、ME の mbc_mb_size 16・FBM の winner 1、その全部 |
 | run7 | strips_in_frame 1・slice_encoding_row_num 8、＋mpec_threshold 16、＋GPTIMER・ME cache、行数だけ、strip だけ |
 
-- 次: pipeline の切り分け（ME only、deblock off、CABAC、intra 16x16 だけ、64x64 の絵、非 IDR の I）。
+| run8 | ME only（SET_OUT_MEPRED あり・なし）、deblock off、CABAC、intra 16x16 だけ、64x64 の絵、非 IDR の I（pic_type 2） |
+| run9 | 再構成の method 無し（→ 同じ HW の誤り、検査の外）、setup 無し（→ code 3、E_PICSETUP_OFFSET）、256x64・pitch 512、tu_search_num 1。buffer の VA は 0xfff3c000〜0xffff0000（40 bit の内） |
+| run10 | 送っていない address の method 14 個（UCODE_STATE・VP8 status・BITSTREAM_RES・RCDATA・IN_COLOC・IN/OUT_MEPRED・QP_MAP・PARTITION_BUF・OUT_TASK_STATUS・CUR_PIC1/2_TASK_STATUS・MV_HINTS_TASK_STATUS・CEAHINTS）に 0 の scratch、全部・一部・1 つずつ |
+| run11 | force_ipcm、early_ip_is_final＋16x16、ME の predictor 無し、watchdog 0x1000。**status の変化は doorbell から 17〜21 µs**（すぐ止まる＝programming の誤り、hang ではない）。GSP の NOCAT の record が 1 回に 8 個（GR の bug-check の一般の物で NVENC の値は読めない） |
+| run12 | 参照の list を -1 でなく 0（両方・片方）、＋IPCM |
+| run14 | （test kernel の起動で GSP の途中で機械が応答しなくなった。SwitchBot で cycle、Debian から boot 区画を戻した。run15 で同じ kernel が普通に起動したので偶然と見る） |
+| run15 | setup の plane の offset を絶対の address に → method の address と足されて MMU fault（RC 31、fault 0x1fffe0000 = 入力の luma の 2 倍）。→ offset は method の address からの相対（今の使い方が正しい）、hardware は最初に入力の luma を読む |
+| run16 | 1 つずつ写していない address に: 入力の chroma → MMU fault、rc_process → MMU fault、再構成の luma・chroma・history・bitstream・co-located → 同じ HW の誤り（そこまで行かない） |
+
+- 分かった事（まとめ）: firmware は setup を読み（magic・offset の検査を通り）、rc_process を読み、hardware が入力の luma・chroma を読んだ後、出力（再構成・history・bitstream・co-located）を書く前に hardware の誤り割り込み（error_status 1、clc5b7 の ENC_ERROR_H264_HWERR_INTERRUPT と見る）で止まる。圧縮の段（ME・MD・量子化・entropy）のどこか、または入力の前処理。
+- 次: H.265 で同じ形の I 絵（全体の原因か H.264 の設定の原因かを分ける）。

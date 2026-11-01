@@ -220,39 +220,12 @@ struct test_state {
 /* The mode decision's word at 52 as built: no early intra decision (3 at 20:19), 4x4 and 16x16 searched (5 at 28:26). */
 #define TEST_MD_DECISION		((3U << 19) | (5U << 26))
 
-/* Every macroblock as IPCM (force_ipcm, bit 30 of the mode decision's word at 52). */
-static const struct test_poke test_ipcm[] = {
-	{ 1024U + 52U, TEST_MD_DECISION | (1U << 30) },
-};
-
-/* Both reference lists all 0 instead of -1 (the picture control's first 16 bytes). */
-static const struct test_poke test_lists_zero[] = {
-	{ 200U, 0U },
-	{ 204U, 0U },
-	{ 208U, 0U },
-	{ 212U, 0U },
-};
-
-/* List 1 all 0, list 0 left at -1. */
-static const struct test_poke test_l1_zero[] = {
-	{ 208U, 0U },
-	{ 212U, 0U },
-};
-
-/* List 0 all 0, list 1 left at -1. */
-static const struct test_poke test_l0_zero[] = {
-	{ 200U, 0U },
-	{ 204U, 0U },
-};
-
-/* Both lists all 0 and every macroblock IPCM. */
-static const struct test_poke test_lists_zero_ipcm[] = {
-	{ 200U, 0U },
-	{ 204U, 0U },
-	{ 208U, 0U },
-	{ 212U, 0U },
-	{ 1024U + 52U, TEST_MD_DECISION | (1U << 30) },
-};
+/* The setup's three surfaces (reference, input, reconstruction) and their planes' offset fields. */
+#define TEST_SURFACE_REFERENCE_AT	4U
+#define TEST_SURFACE_INPUT_AT		36U
+#define TEST_SURFACE_OUTPUT_AT		68U
+#define TEST_SURFACE_LUMA_AT		12U
+#define TEST_SURFACE_CHROMA_AT		20U
 
 /* A watchdog of 0x1000, to see whether the time to the error follows it. */
 #define TEST_WATCHDOG_SHORT		0x1000U
@@ -278,21 +251,46 @@ static const struct test_poke test_lists_zero_ipcm[] = {
 #define TEST_NO_OUTPUT			(1U << 8)
 #define TEST_NO_SETUP			(1U << 9)
 
+/*
+ * The setup's plane offsets as the planes' own addresses (in 256-byte
+ * units) instead of offsets from the methods' addresses; with
+ * TEST_NO_PLANE_METHODS the planes' methods are not sent at all.
+ */
+#define TEST_ABSOLUTE			(1U << 10)
+#define TEST_NO_PLANE_METHODS		(1U << 11)
+
+/*
+ * One buffer a choice points at an address of the work space nothing is
+ * mapped at, so the encoder's first access to it faults with its address:
+ * which buffers the encoder reaches before it stops.
+ */
+#define TEST_UNMAPPED			0x1000000000ULL
+#define TEST_UNMAP_INPUT_CHROMA		(1U << 12)
+#define TEST_UNMAP_OUTPUT_LUMA		(1U << 13)
+#define TEST_UNMAP_OUTPUT_CHROMA	(1U << 14)
+#define TEST_UNMAP_HISTORY		(1U << 15)
+#define TEST_UNMAP_BITSTREAM		(1U << 16)
+#define TEST_UNMAP_COLOC		(1U << 17)
+#define TEST_UNMAP_RC			(1U << 18)
+
 /* The number of words in a list of pokes. */
 #define TEST_POKES(list)		((uint32_t)(sizeof(list) / sizeof((list)[0])))
 
 /*
- * The choices tried, in order: both reference lists 0 instead of -1; list
- * 1 alone 0; list 0 alone 0; both 0 with every macroblock IPCM; every
- * macroblock IPCM alone.  A choice whose encode does not finish stops the
- * channel, which is made again for the next.
+ * The choices tried, in order, each with one buffer at an unmapped
+ * address: the input's chroma, the reconstruction's luma and chroma, the
+ * history, the bitstream, the co-located output, the rate control's
+ * state.  A choice whose encode does not finish stops the channel, which
+ * is made again for the next.
  */
 static const struct test_attempt test_attempts[] = {
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_lists_zero, TEST_POKES(test_lists_zero) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_l1_zero, TEST_POKES(test_l1_zero) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_l0_zero, TEST_POKES(test_l0_zero) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_lists_zero_ipcm, TEST_POKES(test_lists_zero_ipcm) },
-	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_ipcm, TEST_POKES(test_ipcm) },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_INPUT_CHROMA, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_OUTPUT_LUMA, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_OUTPUT_CHROMA, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_HISTORY, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_BITSTREAM, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_COLOC, 0U, NULL, 0U },
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, TEST_UNMAP_RC, 0U, NULL, 0U },
 };
 
 static const uint32_t test_buffer_bytes[TEST_BUFFERS] = {
@@ -315,6 +313,7 @@ static int test_attempt(struct nvrtx_gpu *gpu, struct test_state *state, uint32_
 static int test_encode(struct nvrtx_gpu *gpu, struct test_state *state, uint32_t number, const struct test_attempt *attempt, uint32_t index, bool *clean);
 static void test_dump(const char *tag, const uint8_t *bytes, size_t length);
 static uint8_t *test_cpu(struct test_state *state, enum test_buffer buffer);
+static void test_absolute(uint8_t *surface, uint64_t luma, uint64_t chroma);
 static uint64_t test_va(const struct test_state *state, enum test_buffer buffer);
 
 /*
@@ -782,6 +781,37 @@ test_encode(
 	if ((attempt->flags & TEST_NO_SETUP) != 0U)
 		frame.setup = 0U;
 
+	/* The plane offsets as the planes' own addresses, with or without the planes' methods. */
+	if ((attempt->flags & TEST_ABSOLUTE) != 0U) {
+		test_absolute(work + TEST_SETUP_AT + index * TEST_SETUP_STRIDE + TEST_SURFACE_INPUT_AT, frame.input_luma, frame.input_chroma);
+		test_absolute(work + TEST_SETUP_AT + index * TEST_SETUP_STRIDE + TEST_SURFACE_OUTPUT_AT, frame.output_luma, frame.output_chroma);
+		test_absolute(work + TEST_SETUP_AT + index * TEST_SETUP_STRIDE + TEST_SURFACE_REFERENCE_AT, frame.reference_luma, frame.reference_chroma);
+	}
+	if ((attempt->flags & TEST_NO_PLANE_METHODS) != 0U) {
+		frame.input_luma = 0U;
+		frame.input_chroma = 0U;
+		frame.output_luma = 0U;
+		frame.output_chroma = 0U;
+		frame.reference_luma = 0U;
+		frame.reference_chroma = 0U;
+	}
+
+	/* The one buffer the choice puts where nothing is mapped. */
+	if ((attempt->flags & TEST_UNMAP_INPUT_CHROMA) != 0U)
+		frame.input_chroma = TEST_UNMAPPED;
+	if ((attempt->flags & TEST_UNMAP_OUTPUT_LUMA) != 0U)
+		frame.output_luma = TEST_UNMAPPED;
+	if ((attempt->flags & TEST_UNMAP_OUTPUT_CHROMA) != 0U)
+		frame.output_chroma = TEST_UNMAPPED;
+	if ((attempt->flags & TEST_UNMAP_HISTORY) != 0U)
+		frame.history = TEST_UNMAPPED;
+	if ((attempt->flags & TEST_UNMAP_BITSTREAM) != 0U)
+		frame.bitstream = TEST_UNMAPPED;
+	if ((attempt->flags & TEST_UNMAP_COLOC) != 0U)
+		frame.coloc_out = TEST_UNMAPPED;
+	if ((attempt->flags & TEST_UNMAP_RC) != 0U)
+		frame.rc_process = TEST_UNMAPPED;
+
 	/* Where the encode's buffers are in the work space. */
 	nvrtx_stage_mark("nvenc-test va: setup %llx status %llx bits %llx hist %llx", (unsigned long long)frame.setup,
 	    (unsigned long long)frame.status, (unsigned long long)frame.bitstream, (unsigned long long)frame.history);
@@ -894,6 +924,21 @@ test_dump(
 
 	/* Closes the run with its length and hash. */
 	kern_logf("nvrtx: nvenc-sum %s %u %08x\n", tag, (unsigned)length, (unsigned)hash);
+}
+
+/*
+ * Writes a setup surface's luma and chroma offsets as the planes' own
+ * addresses in 256-byte units (the planes' offset fields at 12 and 20).
+ */
+static void
+test_absolute(
+	uint8_t *surface,
+	uint64_t luma,
+	uint64_t chroma)
+{
+	/* Both planes' addresses. */
+	nvrtx_put32(surface, TEST_SURFACE_LUMA_AT, (uint32_t)(luma >> 8));
+	nvrtx_put32(surface, TEST_SURFACE_CHROMA_AT, (uint32_t)(chroma >> 8));
 }
 
 /* Reports the CPU's address of one of the test's buffers. */
