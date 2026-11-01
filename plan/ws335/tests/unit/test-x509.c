@@ -2167,12 +2167,13 @@ test_names_extensions(void)
 	error = parse_ext(&cert, "2.5.29.17", 0, hx_cat(hx_tlv(0x30, dns), "00"));
 	CHECK(error == EINVAL);
 
-	/* nameConstraints must be critical. */
+	/* nameConstraints is processed whether or not it is marked critical. */
 	subtree = hx_tlv(0x30, dns);
 	permitted = hx_tlv(0xa0, subtree);
 	excluded = hx_tlv(0xa1, hx_tlv(0x30, address));
 	error = parse_ext(&cert, "2.5.29.30", 0, hx_tlv(0x30, permitted));
-	CHECK(error == EINVAL);
+	CHECK(error == 0 && (cert.flags & CRYC_X509_HAS_NAME_CONSTRAINTS) != 0U);
+	CHECK(cert.permitted_size == 8U && cert.excluded == NULL);
 	error = parse_ext(&cert, "2.5.29.30", 1, hx_tlv(0x30, permitted));
 	CHECK(error == 0 && (cert.flags & CRYC_X509_HAS_NAME_CONSTRAINTS) != 0U);
 	CHECK(cert.permitted_size == 8U && view_byte(cert.permitted, cert.permitted_size, 0) == 0x30 && cert.excluded == NULL && cert.excluded_size == 0U);
@@ -2748,18 +2749,15 @@ test_bundle(void)
  * The x509-limbo cases whose certificates this parser refuses, each for a
  * reason in RFC 5280: a malformed or empty field, a repeated extension, a
  * signature algorithm that differs between tbsCertificate and the
- * Certificate, a serial number of more than 20 octets.  All but the one
- * marked are cases a verifier must reject; the marked one expects SUCCESS
- * although nameConstraints is not critical, which the header's rule (RFC
- * 5280 4.2.1.10 says conforming CAs MUST mark it critical) refuses.
+ * Certificate, a serial number of more than 20 octets.  All of them are
+ * cases a verifier must reject.  (A nameConstraints that is not critical
+ * is read and processed, so those cases parse.)
  */
 static const char *const limbo_refused_ids[] = {
 	"invalid::invalid-issuer-key",
 	"rfc5280::eku::ee-eku-empty",
-	"rfc5280::nc::permitted-dns-match-noncritical",
 	"rfc5280::nc::permitted-empty-sequence-excluded-nonempty",
 	"rfc5280::nc::permitted-nonempty-excluded-empty-sequence",
-	"rfc5280::nc::not-allowed-in-ee-noncritical",
 	"rfc5280::san::malformed",
 	"rfc5280::serial::too-long",
 	"rfc5280::ee-empty-issuer",
@@ -2767,17 +2765,13 @@ static const char *const limbo_refused_ids[] = {
 	"rfc5280::root-inconsistent-ca-extensions",
 	"rfc5280::duplicate-extensions",
 	"rfc5280::mismatching-signature-algorithm",
-	"webpki::nc::permitted-dns-match-noncritical",
 	"webpki::nc::intermediate-permitted-excluded-subtrees-both-null",
 	"webpki::nc::intermediate-permitted-excluded-subtrees-both-empty-sequences",
 	NULL
 };
 
-/* The one case of limbo_refused_ids that expects SUCCESS. */
-#define LIMBO_SUCCESS_REFUSED	"webpki::nc::permitted-dns-match-noncritical"
-
 /* How many certificates of each id of limbo_refused_ids were refused. */
-static unsigned long limbo_refused_count[17];
+static unsigned long limbo_refused_count[14];
 
 /* Parses one limbo certificate (hex in the record): a refusal must be one of the known ones. */
 static void
@@ -2824,7 +2818,7 @@ limbo_one(
 	CHECK(known);
 	if (expect_success) {
 		limbo_success_failed++;
-		CHECK(strcmp(id, LIMBO_SUCCESS_REFUSED) == 0);
+		CHECK(0);
 	}
 }
 
@@ -2872,12 +2866,12 @@ test_limbo(void)
 	CHECK(records == 9792UL);
 	CHECK(success_cases == 930UL);
 
-	/* Every certificate parses but the 16 known ones, one in each case of the list; of the SUCCESS cases only the one with the non-critical nameConstraints is refused. */
+	/* Every certificate parses but the 13 known ones, one in each case of the list; no certificate of a SUCCESS case is refused. */
 	CHECK(limbo_certs == 39936UL);
-	CHECK(limbo_certs - limbo_parsed == 16UL);
+	CHECK(limbo_certs - limbo_parsed == 13UL);
 	for (index = 0; limbo_refused_ids[index] != NULL; index++)
 		CHECK(limbo_refused_count[index] == 1UL);
-	CHECK(limbo_success_failed == 1UL);
+	CHECK(limbo_success_failed == 0UL);
 	printf("limbo: %lu certificates, %lu parsed, %lu refused (%lu certificates of SUCCESS cases, %lu of them refused)\n", limbo_certs, limbo_parsed, limbo_certs - limbo_parsed, limbo_success_certs, limbo_success_failed);
 }
 
