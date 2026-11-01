@@ -31,10 +31,15 @@
  * A picture that cannot be decoded is an error and the stream goes on: a
  * refused one is taken back out of the ring; after a refused sequence or
  * a sequence change the instance is closed and the next I picture opens
- * another.  A reset closes the instance too.  A core that stops
- * answering leaves its stream broken, its pool kept for the core may still
- * write it.  The calls of every stream are serialized by the engine's
- * lock, since the firmware's commands of one picture belong together.
+ * another.  A reset flushes the instance, which keeps its sequence and
+ * frame buffers, and the next picture must be an I picture.  A core that
+ * stops answering is recovered (wave5.h): its picture is an error, every
+ * stream's instance is lost and each stream opens another at its next I
+ * picture.  A core the recoveries gave up on decodes nothing more; one
+ * that could not even be stopped leaves its streams broken, their pools
+ * kept for the core may still write them.  The calls of every stream are
+ * serialized by the engine's lock, since the firmware's commands of one
+ * picture belong together.
  */
 
 #include <stddef.h>
@@ -45,6 +50,10 @@
 #include <kern/kmem.h>
 #include <kern/lock.h>
 #include <uapi/errno.h>
+#if WAVE5_VIDEO_TEST
+#include <kern/cdev.h>
+#include <kern/file.h>
+#endif
 
 #include "drivers/gpu/powervr/powervr.h"
 #include "drivers/vpu/vpu-codec.h"
@@ -78,13 +87,47 @@
 #define VIDEO_PLACE_LINES		4U
 
 /*
+ * A measurement build publishes /dev/wave5-test (ZEDBSD_TEST_CPPFLAGS +=
+ * -DWAVE5_VIDEO_TEST=1): a read gives the engine's counts and the core's
+ * health, a write of "task <thousandths> [<KiB alignment>]" sizes and
+ * aligns the task buffers of the next sequences, "lose <count>" has
+ * picture completions go unseen and "clear" starts the counts afresh.
+ */
+#ifndef WAVE5_VIDEO_TEST
+#define WAVE5_VIDEO_TEST		0
+#endif
+#define TEST_DEVICE_NUMBER		0x001b0000U
+#define TEST_DEVICE_NAME		"wave5-test"
+#define TEST_TEXT			512U
+
+/*
+ * What the engine did, for the measurements: the decodes that completed,
+ * the host's time for them (their sum and the longest, in microseconds)
+ * and the core's (its cycles), the pictures in error, the instances
+ * opened, flushed by a reset and closed (for any reason).
+ */
+struct video_counts {
+	uint32_t decodes;
+	uint64_t wall;
+	uint64_t longest;
+	uint64_t ticks;
+	uint32_t errors;
+	uint32_t opened;
+	uint32_t flushed;
+	uint32_t closed;
+};
+
+/*
  * The engine: its core, its lock (every stream's calls, see the file's
- * comment), and the count of open streams, which the lock guards.
+ * comment), the count of open streams, whether the core was given up on,
+ * and the counts, all of which the lock guards.
  */
 struct video_engine {
 	struct drv_wave5 *core;
 	struct mutex lock;
 	uint32_t streams;
+	int stopped;
+	struct video_counts counts;
 };
 
 /*
@@ -92,14 +135,16 @@ struct video_engine {
  * until an I picture opens one, and after a reset); whether the
  * instance's sequence is set up, its coded size and the pool registered
  * for it; the slots' ties to the frame buffers; the parameter sets sent
- * last; the scratch a set is written in; whether the core stopped
- * answering (broken); and the counts of pictures and errors.
+ * last; the scratch a set is written in; whether a flushed instance
+ * waits for an I picture; whether the core could not be stopped (broken);
+ * and the counts of pictures and errors.
  */
 struct video_stream {
 	struct video_engine *engine;
 	struct drv_powervr_video_open open;
 	struct drv_wave5_stream *instance;
 	int sequenced;
+	int flushed;
 	uint32_t width;
 	uint32_t height;
 	uint32_t count;
@@ -138,6 +183,17 @@ static int put_picture(struct video_stream *video, const struct drv_powervr_vide
 static int start_sequence(struct video_stream *video);
 static int set_differs(const uint8_t *unit, size_t bytes, const uint8_t *sent, size_t sent_bytes);
 static void close_instance(struct video_stream *video);
+static int recover(struct video_stream *video, int error);
+#if WAVE5_VIDEO_TEST
+static ssize_t test_read(struct file *file, void *buffer, size_t size);
+static ssize_t test_write(struct file *file, const void *buffer, size_t size);
+
+/* The test device: a read gives the counts, a write sets a test's knob. */
+static const struct cdev_ops test_ops = {
+	.read = test_read,
+	.write = test_write,
+};
+#endif
 static void note(const struct video_stream *video, const char *what, int value);
 static void describe(const struct video_stream *video, const struct drv_wave5_result *decoded, uint32_t index, int32_t setup);
 
@@ -185,6 +241,11 @@ drv_wave5_video_register(
 
 	/* Succeeded: the engine stays for the system's life. */
 	video_engine = engine;
+#if WAVE5_VIDEO_TEST
+	error = cdev_register(TEST_DEVICE_NAME, (dev_t)TEST_DEVICE_NUMBER, &test_ops, NULL);
+	if (error != 0)
+		kern_logf("wave5: video: /dev/%s not published (%d)\n", TEST_DEVICE_NAME, error);
+#endif
 	return 0;
 }
 
@@ -223,22 +284,24 @@ engine_open(
 	video->open = *open;
 	vpu_slots_reset(&video->slots, 0);
 
-	/* A free place among the firmware's instances. */
+	/* A free place among the firmware's instances, on a core not given up on. */
 	mutex_lock(&owner->lock);
 
 	refused = 0;
-	if (owner->streams >= VIDEO_STREAMS_MAX) {
-		refused = 1;
+	if (owner->stopped) {
+		refused = EIO;
+	} else if (owner->streams >= VIDEO_STREAMS_MAX) {
+		refused = EBUSY;
 	} else {
 		owner->streams++;
 	}
 
 	mutex_unlock(&owner->lock);
 
-	/* Refuses a stream past the instances the firmware holds. */
-	if (refused) {
+	/* Refuses a stream past the instances the firmware holds, or on a stopped core. */
+	if (refused != 0) {
 		kern_free(video);
-		return EBUSY;
+		return refused;
 	}
 
 	/* Succeeded: the stream is open. */
@@ -267,8 +330,16 @@ engine_decode(
 
 	error = decode_locked(video, job, result);
 	video->pictures++;
-	if (result->status != DRV_POWERVR_VIDEO_COMPLETE)
+	if (result->status != DRV_POWERVR_VIDEO_COMPLETE) {
 		video->errors++;
+		video->engine->counts.errors++;
+	} else {
+		video->engine->counts.decodes++;
+		video->engine->counts.wall += result->wall;
+		video->engine->counts.ticks += result->ticks;
+		if (result->wall > video->engine->counts.longest)
+			video->engine->counts.longest = result->wall;
+	}
 
 	mutex_unlock(&video->engine->lock);
 
@@ -297,18 +368,42 @@ engine_keep(
 	mutex_unlock(&video->engine->lock);
 }
 
-/* Forgets the stream's pictures: its instance goes, the next I picture opens another. */
+/*
+ * Forgets the stream's pictures: the instance is flushed, keeping its
+ * sequence and frame buffers, and waits for an I picture; one the
+ * firmware does not flush goes, and the next I picture opens another.
+ */
 static void
 engine_reset(
 	void *stream)
 {
 	struct video_stream *video;
+	int error;
 
 	/* The instance and the ties, under the engine's lock. */
 	video = stream;
 	mutex_lock(&video->engine->lock);
 
-	close_instance(video);
+	if (video->instance != NULL && drv_wave5_lost(video->instance))
+		close_instance(video);
+	if (video->instance != NULL && video->sequenced) {
+		error = drv_wave5_flush(video->instance);
+		if (error == 0) {
+			video->flushed = 1;
+			video->sent_sps_bytes = 0;
+			video->sent_pps_bytes = 0;
+			vpu_slots_reset(&video->slots, video->count);
+			video->engine->counts.flushed++;
+		} else if (error == ETIMEDOUT) {
+			(void)recover(video, error);
+			close_instance(video);
+		} else {
+			note(video, "the instance was not flushed", error);
+			close_instance(video);
+		}
+	} else if (video->instance != NULL) {
+		close_instance(video);
+	}
 
 	mutex_unlock(&video->engine->lock);
 }
@@ -368,9 +463,13 @@ decode_locked(
 	int intra;
 	int error;
 
-	/* A stream the core stopped answering decodes nothing more. */
-	if (video->broken)
+	/* A stream the core stopped answering decodes nothing more, nor one on a core given up on. */
+	if (video->broken || video->engine->stopped)
 		return EIO;
+
+	/* An instance a recovery lost goes; the next I picture opens another. */
+	if (video->instance != NULL && drv_wave5_lost(video->instance))
+		close_instance(video);
 
 	/* Whether the picture has only I slices: an instance starts at one. */
 	intra = 0;
@@ -388,9 +487,12 @@ decode_locked(
 		close_instance(video);
 	}
 
-	/* An instance starts at an I picture. */
+	/* An instance starts at an I picture, and a flushed one goes on at one. */
 	if (video->instance == NULL && !intra)
 		return 0;
+	if (video->flushed && !intra)
+		return 0;
+	video->flushed = 0;
 
 	/* An instance for the stream. */
 	if (video->instance == NULL) {
@@ -402,10 +504,13 @@ decode_locked(
 		video->sequenced = 0;
 		video->sent_sps_bytes = 0;
 		video->sent_pps_bytes = 0;
+		video->engine->counts.opened++;
 	}
 
 	/* The picture's parameter sets and slices in the ring. */
 	error = put_picture(video, job);
+	if (error == ETIMEDOUT)
+		return recover(video, error);
 	if (error != 0) {
 		note(video, "not put in the ring", error);
 		return 0;
@@ -414,6 +519,8 @@ decode_locked(
 	/* The sequence from the first picture: its frame buffers and the pool. */
 	if (!video->sequenced) {
 		error = start_sequence(video);
+		if (error == ETIMEDOUT)
+			return recover(video, error);
 		if (error != 0) {
 			note(video, "no sequence", error);
 			close_instance(video);
@@ -438,6 +545,8 @@ decode_locked(
 	mask = (uint32_t)((1ULL << video->count) - 1U);
 	taken = vpu_slots_taken(&video->slots, job->references, job->active, job->setup);
 	error = drv_wave5_display_flags(video->instance, taken, mask & ~taken, NULL);
+	if (error == ETIMEDOUT)
+		return recover(video, error);
 	if (error != 0) {
 		drv_wave5_unread(video->instance);
 		note(video, "display flags refused", error);
@@ -453,10 +562,9 @@ decode_locked(
 	video->history[video->pictures % VIDEO_HISTORY][2] = decoded.display_flags;
 	video->history[video->pictures % VIDEO_HISTORY][3] = (uint32_t)decoded.order | (job->references << 16) | (job->active << 24);
 	if (error == ETIMEDOUT) {
-		video->broken = 1;
 		note(video, "the core did not answer", error);
 		describe(video, &decoded, index, job->setup);
-		return EIO;
+		return recover(video, error);
 	}
 
 	/* A command the firmware refused reads nothing. */
@@ -679,7 +787,40 @@ close_instance(
 	/* The stream has no instance, no sequence and no ties. */
 	video->instance = NULL;
 	video->sequenced = 0;
+	video->flushed = 0;
 	vpu_slots_reset(&video->slots, 0);
+	video->engine->counts.closed++;
+}
+
+/*
+ * Brings the core back after work that timed out, with the engine's lock
+ * held: the picture is an error and every stream's instance is lost (the
+ * next I picture opens another).  EIO for a core given up on, whose
+ * streams decode nothing more; a core that could not be stopped leaves
+ * the stream broken too, its pool kept.
+ */
+static int
+recover(
+	struct video_stream *video,
+	int error)
+{
+	int recovered;
+
+	/* Only a timeout is recovered from. */
+	if (error != ETIMEDOUT)
+		return 0;
+
+	/* The core again, or given up on. */
+	recovered = drv_wave5_recover(video->engine->core);
+	if (recovered == 0) {
+		note(video, "the core was recovered", 0);
+		return 0;
+	}
+	video->engine->stopped = 1;
+	if (recovered == EIO)
+		video->broken = 1;
+	note(video, "the core was given up on", recovered);
+	return EIO;
 }
 
 /* Logs why a picture went wrong, the first few times. */
@@ -763,3 +904,115 @@ describe(
 			  (unsigned)(entry[3] >> 24));
 	}
 }
+
+#if WAVE5_VIDEO_TEST
+/* Gives the engine's counts and the core's health from the start; nothing at a later offset. */
+static ssize_t
+test_read(
+	struct file *file,
+	void *buffer,
+	size_t size)
+{
+	struct drv_wave5_health health;
+	struct video_counts counts;
+	struct video_engine *engine;
+	char text[TEST_TEXT];
+	size_t length;
+
+	/* The text once, from the start. */
+	engine = video_engine;
+	if (engine == NULL || file->f_offset != 0)
+		return 0;
+
+	/* The counts under the engine's lock, the health under the core's. */
+	mutex_lock(&engine->lock);
+
+	counts = engine->counts;
+
+	mutex_unlock(&engine->lock);
+	drv_wave5_health(engine->core, &health);
+
+	/* One line. */
+	kern_snprintf(text,
+		      sizeof(text),
+		      "decodes %u errors %u wall %llu longest %llu ticks %llu opened %u flushed %u closed %u"
+		      " recoveries %u lost %u strikes %u stopped %d flushes %u\n",
+		      (unsigned)counts.decodes,
+		      (unsigned)counts.errors,
+		      (unsigned long long)counts.wall,
+		      (unsigned long long)counts.longest,
+		      (unsigned long long)counts.ticks,
+		      (unsigned)counts.opened,
+		      (unsigned)counts.flushed,
+		      (unsigned)counts.closed,
+		      (unsigned)health.recoveries,
+		      (unsigned)health.lost,
+		      (unsigned)health.strikes,
+		      health.stopped,
+		      (unsigned)health.flushes);
+	length = kern_strlen(text);
+	if (length > size)
+		length = size;
+	kern_memcpy(buffer, text, length);
+	file->f_offset = (off_t)length;
+
+	/* Succeeded: the line. */
+	return (ssize_t)length;
+}
+
+/* Takes one of "task <thousandths> [<KiB alignment>]", "lose <count>" and "clear". */
+static ssize_t
+test_write(
+	struct file *file,
+	const void *buffer,
+	size_t size)
+{
+	struct video_engine *engine;
+	const char *text;
+	uint32_t alignment;
+	uint32_t value;
+	size_t at;
+
+	/* A word, then a number. */
+	(void)file;
+	engine = video_engine;
+	if (engine == NULL)
+		return -ENODEV;
+	text = buffer;
+	at = 0;
+	while (at < size && text[at] != ' ' && text[at] != '\n')
+		at++;
+	value = 0;
+	while (at < size && text[at] == ' ')
+		at++;
+	while (at < size && text[at] >= '0' && text[at] <= '9') {
+		value = value * 10U + (uint32_t)(text[at] - '0');
+		at++;
+	}
+
+	/* The knob the word names. */
+	if (size >= 5U && kern_memcmp(text, "task ", 5U) == 0) {
+		alignment = 0;
+		while (at < size && text[at] == ' ')
+			at++;
+		while (at < size && text[at] >= '0' && text[at] <= '9') {
+			alignment = alignment * 10U + (uint32_t)(text[at] - '0');
+			at++;
+		}
+		drv_wave5_set_task_share(engine->core, value, alignment * 1024U);
+	} else if (size >= 5U && kern_memcmp(text, "lose ", 5U) == 0) {
+		drv_wave5_lose_completions(engine->core, value);
+	} else if (size >= 5U && kern_memcmp(text, "clear", 5U) == 0) {
+		mutex_lock(&engine->lock);
+
+		kern_memset(&engine->counts, 0, sizeof(engine->counts));
+
+		mutex_unlock(&engine->lock);
+	} else {
+		return -EINVAL;
+	}
+
+	/* Succeeded: the whole write taken. */
+	return (ssize_t)size;
+}
+#endif

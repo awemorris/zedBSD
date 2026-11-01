@@ -45,11 +45,20 @@
 struct drv_wave5;
 struct drv_wave5_stream;
 
+/* What the glue does to the core's reset lines and power (drv_wave5_place's lines). */
+#define DRV_WAVE5_LINES_HOLD		0U
+#define DRV_WAVE5_LINES_RELEASE		1U
+#define DRV_WAVE5_LINES_OFF		2U
+
 /*
  * Where one core is and what its bus master reaches.
  *
  * The secondary memory is the core's on-chip line buffer, named by the
- * address the core itself sees it at.
+ * address the core itself sees it at.  Lines, when the glue gives it,
+ * holds the core's reset lines (the core stops at once, its bus master
+ * too), releases them, or holds them and powers the core off; the core
+ * calls it from drv_wave5_recover(), with its command lock held, so it
+ * must not wait for anything but the lines and the power.
  */
 struct drv_wave5_place {
 	uint64_t registers;
@@ -58,6 +67,21 @@ struct drv_wave5_place {
 	uint64_t dma_limit;
 	uint32_t sram_address;
 	uint32_t sram_size;
+	void (*lines)(void *glue, unsigned what);
+	void *glue;
+};
+
+/*
+ * What a core went through since it was attached: the recoveries that
+ * booted the firmware again, the instances they lost, the timeouts in a
+ * row, whether the core is stopped for good, and the flushes.
+ */
+struct drv_wave5_health {
+	uint32_t recoveries;
+	uint32_t lost;
+	uint32_t strikes;
+	int stopped;
+	uint32_t flushes;
 };
 
 /*
@@ -173,6 +197,37 @@ void drv_wave5_interrupts(struct drv_wave5 *core, unsigned *taken, unsigned *pol
 uint32_t drv_wave5_last_reason(struct drv_wave5 *core);
 
 /*
+ * Brings a core back after a command, a sequence or a picture that did
+ * not complete: holds its reset lines (its bus master stops writing),
+ * forgets every instance (their memory is freed when they are closed;
+ * drv_wave5_lost() names them), releases the lines, resets the core and
+ * boots the firmware again.  The third recovery in a row without a
+ * picture decoded between them holds the core in reset and powers it
+ * off instead, as does a boot that fails: ENODEV, and every later
+ * command is refused.  EIO when the core could not be stopped (no lines
+ * and its software reset failed): the memory it was writing must be kept.
+ */
+int drv_wave5_recover(struct drv_wave5 *core);
+
+/* Reports what the core went through. */
+void drv_wave5_health(struct drv_wave5 *core, struct drv_wave5_health *health);
+
+/*
+ * Sets the size of the task buffer the next registrations give the
+ * firmware, in thousandths of the two VLC buffers and the parameter
+ * buffer per queued command the firmware asks for (0 for the driver's
+ * own size), and its alignment in bytes (a power of two, 0 for a page),
+ * for a measurement of what the firmware needs.
+ */
+void drv_wave5_set_task_share(struct drv_wave5 *core, uint32_t permille, uint32_t alignment);
+
+/*
+ * Has the next count picture completions go unseen, so their decodes
+ * time out with the firmware idle, for a test of the recovery.
+ */
+void drv_wave5_lose_completions(struct drv_wave5 *core, uint32_t count);
+
+/*
  * Opens an instance that decodes one codec from a bitstream ring of the
  * given size (a multiple of 1 KiB).
  */
@@ -182,9 +237,25 @@ int drv_wave5_open(struct drv_wave5 *core, unsigned codec, size_t ring_size, str
  * Destroys an instance and frees its memory.
  *
  * When the firmware does not let the instance go, the memory is kept
- * until drv_wave5_detach() and EIO is reported.
+ * until drv_wave5_detach() or a recovery and EIO is reported.  An
+ * instance a recovery lost is freed at once.
  */
 int drv_wave5_close(struct drv_wave5_stream *stream);
+
+/*
+ * Reports whether a recovery lost the instance: the firmware no longer
+ * knows it, every command for it is refused (ESTALE), and it is only
+ * closed.
+ */
+int drv_wave5_lost(const struct drv_wave5_stream *stream);
+
+/*
+ * Has the firmware drop the instance's pictures and the bytes it has not
+ * read, keeping its sequence and frame buffers, and moves the ring's
+ * positions to where the firmware reads next.  The next picture must be
+ * one the decoder can start at (an I picture).
+ */
+int drv_wave5_flush(struct drv_wave5_stream *stream);
 
 /*
  * Puts one picture's bytes at the start of the ring as the bytes the next

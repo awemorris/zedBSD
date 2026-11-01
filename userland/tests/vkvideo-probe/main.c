@@ -11,7 +11,7 @@
  * SHA-256 of each frame (ws083).
  *
  *   vkvideo-probe --list
- *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] STREAM.h264
+ *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] STREAM.h264
  *
  * The list names each queue family with its flags and video codec
  * operations and the device's video extensions; on a device without video
@@ -41,6 +41,9 @@
  * vkCmdCopyImageToBuffer, both planes into a buffer of the image's layout,
  * in the decode's command buffer, and the hash and the dump read that
  * buffer (the decode's time then includes the copy).
+ * With --reset-at-idr (ws322-p007), every IDR picture after the first is
+ * decoded behind a coding reset, as a player records one after a seek;
+ * the frames are the same.
  */
 
 #include "h264.h"
@@ -94,6 +97,7 @@ struct probe_options {
 	int time;
 	const char *dump;
 	int sampled;
+	int reset_at_idr;
 };
 
 /* The decode times of a run with --time, in nanoseconds. */
@@ -218,7 +222,7 @@ main(
 	memset(&options, 0, sizeof(options));
 	status = probe_arguments(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] STREAM.h264\n");
+		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] STREAM.h264\n");
 		return 2;
 	}
 
@@ -295,6 +299,13 @@ probe_arguments(
 		differs = strcmp(argument, "--sampled");
 		if (differs == 0) {
 			options->sampled = 1;
+			continue;
+		}
+
+		/* --reset-at-idr: a coding reset before every IDR picture after the first. */
+		differs = strcmp(argument, "--reset-at-idr");
+		if (differs == 0) {
+			options->reset_at_idr = 1;
 			continue;
 		}
 
@@ -1654,6 +1665,8 @@ probe_run(
 			error = 3;
 			break;
 		}
+		if (options->reset_at_idr && picture.info.flags.IdrPicFlag && frames != 0U)
+			plan.reset = 1;
 
 		/* Decodes it and hashes the frame while its slot still holds it; a decode that did not complete is named. */
 		started = probe_now();

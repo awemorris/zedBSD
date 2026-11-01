@@ -27,6 +27,7 @@
 #include <kern/device-io.h>
 #include <kern/irq.h>
 #include <kern/kcrt.h>
+#include <kern/klog.h>
 #include <kern/kmem.h>
 #include <kern/sched.h>
 #include <uapi/errno.h>
@@ -248,9 +249,20 @@ drv_wave5_attach(
 		return ENODEV;
 	}
 
+	/* Keeps a copy of the firmware, which a recovery boots again. */
+	booted->firmware = kern_malloc(size);
+	if (booted->firmware == NULL) {
+		(void)kern_device_unmap(mapped, (size_t)place->register_size);
+		kern_free(booted);
+		return ENOMEM;
+	}
+	kern_memcpy(booted->firmware, firmware, size);
+	booted->firmware_size = size;
+
 	/* Takes the code and temporary areas. */
 	error = drv_wave5_core_take(booted, CODE_SIZE + TEMP_SIZE, &booted->common);
 	if (error != 0) {
+		kern_free(booted->firmware);
 		(void)kern_device_unmap(mapped, (size_t)place->register_size);
 		kern_free(booted);
 		return error;
@@ -270,6 +282,7 @@ drv_wave5_attach(
 	/* Leaves nothing behind when the boot failed. */
 	if (error != 0) {
 		drv_wave5_core_give(&booted->common);
+		kern_free(booted->firmware);
 		(void)kern_device_unmap(mapped, (size_t)place->register_size);
 		kern_free(booted);
 		return error;
@@ -281,6 +294,7 @@ drv_wave5_attach(
 	if (error != 0) {
 		drv_wave5_core_write(booted, VPU_IRQ_ENABLE, 0);
 		drv_wave5_core_give(&booted->common);
+		kern_free(booted->firmware);
 		(void)kern_device_unmap(mapped, (size_t)place->register_size);
 		kern_free(booted);
 		return error;
@@ -332,8 +346,9 @@ drv_wave5_detach(
 		drv_wave5_stream_free(orphan);
 	}
 
-	/* Frees the code area, the register mapping and the state. */
+	/* Frees the code area, the firmware's copy, the register mapping and the state. */
 	drv_wave5_core_give(&core->common);
+	kern_free(core->firmware);
 	(void)kern_device_unmap((void *)core->registers, (size_t)core->place.register_size);
 	kern_free(core);
 }
@@ -382,6 +397,174 @@ drv_wave5_last_reason(
 {
 	/* The reason the command path kept. */
 	return core->last_reason;
+}
+
+/*
+ * Brings a core back after work that did not complete.
+ *
+ * Procedure referenced:
+ * StarFive Linux JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
+ * drivers/media/platform/chips-media/wave5/wave5-hw.c (wave5_vpu_reset,
+ * wave5_vpu_re_init: the bus stopped, every block reset, the firmware
+ * copied and booted again).
+ */
+int
+drv_wave5_recover(
+	struct drv_wave5 *core)
+{
+	struct drv_wave5_stream *orphan;
+	unsigned long irq;
+	uint32_t instances;
+	int stopped;
+	int error;
+
+	/* Nothing to bring back on a stopped core. */
+	mutex_lock(&core->command_lock);
+
+	if (core->stopped) {
+		mutex_unlock(&core->command_lock);
+		return ENODEV;
+	}
+
+	/* Stops reading the core: the handler and the waiters leave it alone. */
+	irq = spin_lock_irqsave(&core->irq_lock);
+
+	core->resetting = 1;
+
+	spin_unlock_irqrestore(&core->irq_lock, irq);
+	if (core->irq_installed)
+		kern_irq_mask((int)core->place.interrupt);
+
+	/*
+	 * Stops the core: a software reset with its bus traffic stopped first
+	 * ends what its bus master does in an orderly way, and the reset lines
+	 * held stop it whatever it is doing.
+	 */
+	stopped = software_reset(core) == 0;
+	if (core->place.lines != NULL) {
+		core->place.lines(core->place.glue, DRV_WAVE5_LINES_HOLD);
+		stopped = 1;
+	}
+
+	/* A core that may still be writing is left as it is, its memory kept. */
+	if (!stopped) {
+		core->stopped = 1;
+		mutex_unlock(&core->command_lock);
+		kern_logf("wave5: the core could not be stopped\n");
+		return EIO;
+	}
+
+	/* The firmware forgets every instance; those it would not destroy may go now. */
+	instances = core->instances;
+	while (instances != 0) {
+		core->lost += instances & 1U;
+		instances >>= 1;
+	}
+	core->instances = 0;
+	core->generation++;
+	while (core->orphans != NULL) {
+		orphan = core->orphans;
+		core->orphans = orphan->next_orphan;
+		drv_wave5_stream_free(orphan);
+	}
+	core->recoveries++;
+	core->strikes++;
+
+	/* Boots the firmware again, unless the core stopped answering too often in a row. */
+	error = ENODEV;
+	if (core->strikes < VPU_STRIKES) {
+		if (core->place.lines != NULL)
+			core->place.lines(core->place.glue, DRV_WAVE5_LINES_RELEASE);
+		error = software_reset(core);
+		if (error == 0)
+			error = boot_firmware(core, core->firmware, core->firmware_size);
+		if (error == 0)
+			error = read_identity(core);
+	}
+
+	/* Gives up: the core is held in reset and off, and refuses every later command. */
+	if (error != 0) {
+		if (core->place.lines != NULL)
+			core->place.lines(core->place.glue, DRV_WAVE5_LINES_OFF);
+		core->stopped = 1;
+		mutex_unlock(&core->command_lock);
+		kern_logf("wave5: the core is stopped after %u recoveries (%d)\n", (unsigned)core->recoveries, error);
+		return ENODEV;
+	}
+
+	/* Takes the core's interrupts again, with no completion left from before. */
+	irq = spin_lock_irqsave(&core->irq_lock);
+
+	core->sequence_done = 0;
+	core->picture_done = 0;
+	core->resetting = 0;
+
+	spin_unlock_irqrestore(&core->irq_lock, irq);
+	drv_wave5_core_write(core, VPU_IRQ_ENABLE, VPU_IRQ_SEQUENCE | VPU_IRQ_PICTURE | VPU_IRQ_STREAM_EMPTY);
+	if (core->irq_installed)
+		kern_irq_unmask((int)core->place.interrupt);
+
+	mutex_unlock(&core->command_lock);
+
+	/* Succeeded: the firmware runs again, with no instance. */
+	kern_logf("wave5: the core is back (recovery %u)\n", (unsigned)core->recoveries);
+	return 0;
+}
+
+/*
+ * Reports what the core went through.
+ */
+void
+drv_wave5_health(
+	struct drv_wave5 *core,
+	struct drv_wave5_health *health)
+{
+	/* The counts, under the command lock that changes them. */
+	mutex_lock(&core->command_lock);
+
+	health->recoveries = core->recoveries;
+	health->lost = core->lost;
+	health->strikes = core->strikes;
+	health->stopped = core->stopped;
+	health->flushes = core->flushes;
+
+	mutex_unlock(&core->command_lock);
+}
+
+/*
+ * Sets the share of the task buffer the next registrations give.
+ */
+void
+drv_wave5_set_task_share(
+	struct drv_wave5 *core,
+	uint32_t permille,
+	uint32_t alignment)
+{
+	/* Under the command lock the registrations read it under. */
+	mutex_lock(&core->command_lock);
+
+	core->task_permille = permille;
+	core->task_alignment = alignment;
+
+	mutex_unlock(&core->command_lock);
+}
+
+/*
+ * Has the next picture completions go unseen.
+ */
+void
+drv_wave5_lose_completions(
+	struct drv_wave5 *core,
+	uint32_t count)
+{
+	unsigned long irq;
+
+	/* Under the interrupt lock the waiters read it under. */
+	irq = spin_lock_irqsave(&core->irq_lock);
+
+	core->lose = count;
+
+	spin_unlock_irqrestore(&core->irq_lock, irq);
 }
 
 /*
@@ -437,9 +620,11 @@ drv_wave5_core_command(
 	uint32_t why;
 	int error;
 
-	/* Refuses a command to a stopped core. */
+	/* Refuses a command to a stopped core, and one for an instance a recovery lost. */
 	if (core->stopped)
 		return EIO;
+	if (stream != NULL && stream->generation != core->generation)
+		return ESTALE;
 
 	/*
 	 * Names the instance and its codec, raising the busy flag the
@@ -545,7 +730,19 @@ drv_wave5_core_wait(
 	uint64_t now;
 	unsigned long irq;
 	uint32_t bit;
+	int unseen;
 	int done;
+
+	/* A picture completion a test has go unseen. */
+	irq = spin_lock_irqsave(&core->irq_lock);
+
+	unseen = 0;
+	if (!sequence && core->lose != 0) {
+		core->lose--;
+		unseen = 1;
+	}
+
+	spin_unlock_irqrestore(&core->irq_lock, irq);
 
 	/* Sleeps until the instance's bit shows, polling the core each millisecond. */
 	bit = 1U << stream->id;
@@ -559,7 +756,7 @@ drv_wave5_core_wait(
 		if (sequence && (core->sequence_done & bit) != 0) {
 			core->sequence_done &= ~bit;
 			done = 1;
-		} else if (!sequence && (core->picture_done & bit) != 0) {
+		} else if (!sequence && !unseen && (core->picture_done & bit) != 0) {
 			core->picture_done &= ~bit;
 			done = 1;
 		}
@@ -598,15 +795,38 @@ drv_wave5_core_take(
 	size_t size,
 	struct wave5_memory *memory)
 {
+	int error;
+
+	/* Page-aligned. */
+	error = drv_wave5_core_take_aligned(core, size, 0x1000U, memory);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the memory is the caller's. */
+	return 0;
+}
+
+/*
+ * Takes zeroed contiguous memory at an alignment.
+ */
+int
+drv_wave5_core_take_aligned(
+	struct drv_wave5 *core,
+	size_t size,
+	size_t alignment,
+	struct wave5_memory *memory)
+{
 	size_t rounded;
 	int error;
 
-	/* Rounds to whole pages, as the uncached view maps them. */
+	/* Rounds to whole pages, as the uncached view maps them, and aligns to a page at least. */
 	rounded = (size + 0xfffU) & ~(size_t)0xfffU;
+	if (alignment < 0x1000U)
+		alignment = 0x1000U;
 
 	/* Takes the run below the core's reach. */
 	memory->view = NULL;
-	error = kern_pmem_alloc_limited(rounded, 0x1000U, core->place.dma_limit, 0, &memory->run);
+	error = kern_pmem_alloc_limited(rounded, alignment, core->place.dma_limit, 0, &memory->run);
 	if (error != 0)
 		return error;
 
@@ -1022,9 +1242,13 @@ service_interrupt(
 	uint32_t pictures;
 	uint32_t host;
 
-	/* Takes the interrupt at the core and gathers its completions. */
+	/* Takes the interrupt at the core and gathers its completions; a core in a recovery is not read. */
 	irq = spin_lock_irqsave(&core->irq_lock);
 
+	if (core->resetting) {
+		spin_unlock_irqrestore(&core->irq_lock, irq);
+		return 0;
+	}
 	status = drv_wave5_core_read(core, VPU_IRQ_STATUS);
 	if (status == 0) {
 		spin_unlock_irqrestore(&core->irq_lock, irq);
@@ -1076,7 +1300,7 @@ interrupt_handler(
 	(void)irq;
 	core = argument;
 
-	/* Takes the interrupt; a stopped core is not read. */
+	/* Takes the interrupt; a stopped core is not read, nor one in a recovery (service_interrupt() sees that). */
 	if (!core->stopped)
 		(void)service_interrupt(core, 1);
 
