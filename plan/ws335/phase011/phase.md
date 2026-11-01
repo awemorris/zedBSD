@@ -96,7 +96,7 @@ git diff --check
 
 わざと壊す確かめ（git の外。`build/tmp/p011/brk.py`、.c を `build/tmp/p011/brk/unit-N/` に複写して書き換え、非 sanitizer の -O2 で test-ecc を build して流す。実装 file は触らず、最後に sha256 が変わっていないことを script が確認）。判定は build の誤り（BUILD-ERROR）、試験の失敗（`test-ecc: FAIL`）、crash を区別した。50 通り: 43 通りが試験の失敗（`test-ecc: FAIL (...)`）、1 通りが crash（NULL の乱数源の check を外し、NULL を呼んで segfault）、build の誤りは 0、見逃しは 6 通りで全部等価か冗長:
 
-- 試験の失敗 43: 鍵の生成 18（draw の回数 2、比較の向き、limit の n-1・n-3、繰り上がり 2、borrow の amount を戻さない、要求の大きさ、乱数の失敗・棄却の尽きた時の wipe 4 とその誤りの値 2、公開鍵・秘密鍵を c から作る 2）、ECDH 10（範囲の比較の向き、範囲の検査の脱落、誤りの mask の反転、誤りの時に出力を消さない、peer の x を返す、decode の誤りの値、初めの wipe の脱落、size の検査、d を書き換える、zero の曲線）、検証 15（hash_size 0 を受ける・1 を拒む、左端 byte に切らない 2、s ≥ n を受ける、u1・u2 の取り違え 3、x を mod n しない、比較の limb が足りない・低い limb だけ（2 通りとも r に第 2・中・最上位の limb の 1 bit を足す試験で落ちる。最初の実行では見逃したので `check_x_above_order` にその 3 通りを足した）、key の誤りの値、w = s にする・指数 n-1、R が無限遠で 0 を返す、結果の反転、r を s から読む）。
+- 試験の失敗 43: 鍵の生成 17（draw の回数 2、比較の向き、limit の n-1・n-3、繰り上がり 2、borrow の amount を戻さない、要求の大きさ、乱数の失敗・棄却の尽きた時の wipe 4 とその誤りの値 2、公開鍵・秘密鍵を c から作る 2）、ECDH 9（範囲の比較の向き、範囲の検査の脱落、誤りの mask の反転、誤りの時に出力を消さない、peer の x を返す、decode の誤りの値、初めの wipe の脱落、size の検査、d を書き換える）、検証 17（hash_size 0 を受ける・1 を拒む、左端 byte に切らない 2、s ≥ n を受ける、u1・u2 の取り違え 3、x を mod n しない、比較の limb が足りない・低い limb だけ（2 通りとも r に第 2・中・最上位の limb の 1 bit を足す試験で落ちる。最初の実行では見逃したので `check_x_above_order` にその 3 通りを足した）、key の誤りの値、w = s にする・指数 n-1、R が無限遠で 0 を返す、結果の反転、r を s から読む）。
 - 見逃し 6（等価か冗長で、観測できる違いが無い）: (1) n - 2 の borrow の脱落: n の最下位の limb が両曲線で 2 以上なので borrow が起きない（等価）。(2) ECDH で d = 0 の mask の脱落: d = 0 は積が無限遠になり affine_x の誤りで同じ EINVAL（冗長な検査）。(3) 検証で E を reduce_once しない: Montgomery 積は a < R で正しく畳むので出力が同じ（等価。契約の上では reduce が要るので残す）。(4)(5)(6) 検証で r ≥ n・r = 0・s = 0 の検査を脱落: v は mod n で n 未満・0 でない（s = 0 では u1 = u2 = 0 で R が無限遠）ため、後の比較か無限遠の判定で必ず EBADMSG になり、結果が同じ（冗長な検査）。s ≥ n の脱落は落ちる（s = n + k が s = k と同じ剰余になるため）。
 - 定数時間の壊し（valgrind memcheck、ct-ecc を build し直し）4 通りが全部 memcheck の誤りで落ちる: 出力の wipe を分岐に、d = 0 で早く返す、範囲外で早く返す、積の誤りを分岐に（最後のは最初 `product_error = EINVAL` の形にしたら compiler が分岐の無い命令にして見逃したので、compiler が畳めない形（関数 `cryc_wipe` を分岐の中で呼ぶ）に直して落ちることを確認）。
 
@@ -113,6 +113,6 @@ header と phase.md の食い違い: header の「CRYC_ECC_KEYGEN_TRIES 回の�
 
 未実施: `run-unit.sh all` の全 module 通し（Q1 が main で）、性能の測定、P-384 の ECDH の CAVP を rec から読む形（CAVP の ECC CDH は .txt で vectors.py が .rsp だけ変換するため rec が無い。P-256・P-384 各 25 件の全部を試験の中に出典の comment 付きで置いて確認した。rec からの読みは vectors.py の .txt の変換の後）、P-384 の ECDH の Wycheproof（file が無い）、鍵の生成の中で d を秘密として memcheck に見せる形、ECDSA の署名の生成（p037 の試験の側の署名器は別）、32 bit の size_t の機械・aarch64 Windows の実行（build のみ）、限られた stack での実行、実機・QEMU（範囲外）。
 
-commit: dc4adcd353（初版）と、次の最終版の commit（SHA は Q1 への報告）。
+commit: dc4adcd353（初版）、63d76158af（最終版: `check_x_above_order` の r の 4 通り、`ecc_curve_usable` の呼び出しを条件の外へ、この結果の節）。
 
 - 注意（2026-11-01 Q1、p010 の P6 の報告から）: CAVP の rec の file は record ごとに section の key が累積する。曲線を絞るには最後の section の key を使う（ECDSA SigVer・KeyPair も同じ形）。
