@@ -1098,7 +1098,55 @@ frame_load_inline(
 	void *context,
 	struct dom_element *script)
 {
+	struct bind_window *window;
+	struct vm_string *source;
+	struct net_url base;
+	struct net_url parsed;
+	struct wb_buffer raw;
+	struct wb_buffer location;
+	struct wb_buffer bytes;
+	struct wb_units units;
 	int error;
+
+	/* A script with a source is fetched at once, where the parser stands, and run as the page's own are. */
+	window = context;
+	source = dom_attribute_ascii(script, "src");
+	if (source != NULL && source->length != 0 && window->host.context != NULL) {
+		struct page *page;
+
+		page = window->host.context;
+		script->node.flags |= DOM_NODE_SCRIPT_STARTED;
+		wb_buffer_init(&raw);
+		wb_buffer_init(&location);
+		wb_buffer_init(&bytes);
+		wb_units_init(&units);
+		memset(&base, 0, sizeof(base));
+		memset(&parsed, 0, sizeof(parsed));
+		error = vm_string_to_utf8(source, &raw);
+		if (error == 0)
+			error = bind_reflection_base(script->node.document, &base);
+		if (error == 0)
+			error = net_url_parse(wb_buffer_string(&raw), raw.length, &base, &parsed);
+		if (error == 0)
+			error = net_url_serialize(&parsed, 0, &location);
+		if (error == 0)
+			error = page_fetch(page->base, wb_buffer_string(&location), &bytes, NULL);
+		if (error == 0)
+			error = wb_utf8_to_units(bytes.data, bytes.length, &units);
+		if (error == 0)
+			error = bind_run_script_source(window, units.data, units.length, wb_buffer_string(&location), 0);
+		net_url_release(&base);
+		net_url_release(&parsed);
+		wb_buffer_release(&raw);
+		wb_buffer_release(&location);
+		wb_buffer_release(&bytes);
+		wb_units_release(&units);
+
+		/* A script that cannot be fetched, or fails, is only that script's failure. */
+		if (error == ENOMEM)
+			return error;
+		return 0;
+	}
 
 	/* The shared hook preserves document.write insertion and ordinary child globals. */
 	error = bind_run_inline_script(context, script);

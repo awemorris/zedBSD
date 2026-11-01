@@ -804,7 +804,7 @@
     }
     // A document that is being left (beforeunload fired, then pagehide) refuses further navigations; one that is
     // still on its initial about:blank has no navigate events, activation or entry state of its own.
-    var unloading = false;
+    var unloading = false, unloadAsked = false;
     function active() { return native.fullyActive() && !unloading; }
     function initialBlank() { return native.initialBlank(); }
     // A navigation to another document in this frame: the entries as they will be, handed to the document that loads.
@@ -840,7 +840,7 @@
       h = { url: o.url, type: o.type, current: index, from: initialBlank() ? null : packEntry(old), entries: list.map(packEntry) };
       if (!initialBlank()) {
         unloading = true;
-        fire(g, new Event('beforeunload', { cancelable: true }));
+        if (!unloadAsked) fire(g, new Event('beforeunload', { cancelable: true }));
       }
       Object.defineProperty(frame, '__zedNav', { value: h, writable: true, configurable: true, enumerable: false });
       if (native.navigateFrame(o.url)) return true;
@@ -1017,11 +1017,19 @@
     // A traversal runs as a task, like the browser's own back and forward.
     function traverse(find) {
       setTimeout(function () {
-        var entry = find(), t, same;
+        var entry = find(), t, same, proceed;
         if (!entry) return;
         t = upcomingTraverse.get(entry.key) || null;
         if (entry === entries[current]) { if (t) resolveFinished(t); return; }
         same = entry.docId === docId;
+        // A traversal to another document asks to unload this one first, before its navigate event.
+        if (!same && native.frameElement() && !initialBlank()) {
+          unloading = true;
+          proceed = fire(g, new Event('beforeunload', { cancelable: true }));
+          unloading = false;
+          if (!proceed) return;
+          unloadAsked = true;
+        }
         fireNavigate({ type: 'traverse', url: entry.url, entry: entry, navState: entry.navState, sameDocument: same,
           hashChange: same && noFrag(entry.url) === noFrag(docURL()) && frag(entry.url) !== frag(docURL()),
           commit: function () { commitTraverse(entry); } });
