@@ -736,6 +736,7 @@ http_receive_all(
 	struct wb_os_poll_item waiting;
 	unsigned char chunk[16384];
 	uint64_t started;
+	uint64_t waited;
 	size_t received;
 	size_t ready;
 	int pending;
@@ -756,7 +757,8 @@ http_receive_all(
 				return error;
 
 			/* Nothing in time is the end; a wait a signal cut short is begun again. */
-			if (ready == 0 && wb_os_monotonic_ns() - started >= (uint64_t)NET_HTTP_TIMEOUT * 1000000U)
+			waited = wb_os_monotonic_ns() - started;
+			if (ready == 0 && waited >= (uint64_t)NET_HTTP_TIMEOUT * 1000000U)
 				return ETIMEDOUT;
 			if (ready == 0)
 				continue;
