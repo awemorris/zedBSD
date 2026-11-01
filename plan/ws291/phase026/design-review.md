@@ -258,3 +258,64 @@
 - major 7: (3) Q1 の「B-K の後は非同期が ring だけ」は違う、(4) native の capset の word は `include/uapi/gpu-op.h` に書かれている、(5) list の segment の境で
   pool の base が WFI なしに替わる（推測）、(6) 試験の計画が 1・2・5 と内部の quad の corners の誤りを見つけられない、(7) drain が 0 を待つので飢える、
   (8) 見積もりと受け入れが GPU の 1 run と back-pressure の起床を数えていない、(9) `--record=once` が mview の image ごとの記録と合わない。
+
+## 第 1 回の指摘の反映（design.md 第 2 版、2026-11-01 P1、q1838-i01）
+
+| # | 反映 |
+| --- | --- |
+| 1 | drain は `vulkan_context_execute` の入口だけ（§6.4）。RESERVE・ACTION・RETIRE・COMMAND_WAIT は drain しない理由を書いた。thread local の mutex の数の abort（sync.c の直の lock は包みに替える、第 2 回の N10） |
+| 2 | 組み置きの chunk は push だけ、record の前に `EXECUTE_RECORD_ROOM` の確かめ、確保に 32 KiB の余白（§5.4） |
+| 3 | §6.7 と phase.md の Q1 を「非同期は submit の kernel の仕事の全部、B-K の有無で変わらない」に |
+| 4 | §10 と phase.md の Q3 を「約束は `include/uapi/gpu-op.h` の comment、bit を足すなら同じ comment に書き足す」に |
+| 5 | session の heap（view・sampler ごとの固定の index）、pool の base は list の頭の固定の push だけが書く（§5.3） |
+| 6 | H1 を意味の状態の比べに、H1b（work.c の list）、H3b（libvulkan の結合と TSan の 3 thread）、共有の work channel の腕、fault の注入、`--submit-all` の画素の比べを P-B に（§12） |
+| 7 | drain は入口の番号まで（§6.4） |
+| 8 | §3.2 に GPU の段と起床、根拠の計測を名指し。第 2 回の N1 の後、10.0.10.3 で測った値で置き換えた（§3.2） |
+| 9 | `--record=once` は image ごと・part ごと、ONE_TIME_SUBMIT 無し、camera 固定、image ごとの fence（§12） |
+| 10 | class の前置きは heap の run の固定の push h2（§5.3・§5.6） |
+| 11 | list の上限で分け、2 回目以降の失敗は `gpu_sends` の規則、更新は ring の書きの成功の後（§5.6） |
+| 12 | §12 の前提（WSI が block-linear）、perf の refused の理由ごとの数 |
+| 13 | draw 256 以下だけ組む（§3.3・§5.5） |
+| 14 | chunk の表を順に見る、build 中と追記先を回収から外す（第 2 回の B1）（§5.4） |
+| 15 | thread は `sent_error` だけ、印は `command_sender_lock` の下、back-pressure は専用の cond（§6.3・§6.5） |
+| 16 | chunk と heap の解放は `session->execute` が NULL なら何もしない（§5.3・§5.4） |
+| 17 | drain しない raw の ioctl の一覧と理由（wsi-display.c も）（§6.4） |
+| 18 | fork は prepare・parent・child、まとめる形は P-A では入れない（§6.3・§6.6） |
+| 19 | 読み取りだけの PTE を Future Work の候補に（§8） |
+| 20 | phase.md の Q2 を並べ直し、B-U を認めない時の P-B の受け入れを §13 に |
+| 21 | 名前を合わせた。`vk-command.c` 16〜17 行の file の comment は P-B で直す（§13） |
+
+## 第 2 回のレビュー（design.md 第 2 版、2026-11-01 design-reviewer、HEAD c74cd26650）
+
+- 読むだけ。照らした code は worktree p1-ws291p026。分類は第 1 回と同じ。
+- 確かめた事: view の header は memory の attach が 1 回だけなので view の寿命の間変わらない（vk-memory.c 116〜130・170〜191）。set の slot と record は
+  object の参照を持つ。handle は header 20 bit・sampler 12 bit。fence は `OBJECTS_SEM_RELEASE_WFI`（objects.c 572）で、ring の書きの間の pool の base の
+  替わりは安全。256 KiB の chunk は ring の 1 entry に入る。仕事を出す ioctl は全部 `vulkan_context_transaction` の中で、入口は `vulkan_context_execute`
+  だけ（descriptor の更新・WSI の present も通る）。sync.c の wait は context の mutex を持たずに眠るので、第 1 回の指摘 1 の deadlock は第 2 版の置き場所では
+  起きない。HAL・`include/uapi/`（P-A・P-B）を変えないという主張は正しい。
+- 第 1 回の 21 件: 解決 12、部分的 6（1・6・16・17・18・21）、design.md では解決したが phase.md で未解決 2（3・4）、未解決 1（20）。
+
+| # | 分類 | 指摘 | 根拠 | 反映（design.md 第 3 版） |
+| --- | --- | --- | --- | --- |
+| B1 | blocker | build 中の chunk が回収の候補になり、同じ build の前の segment を CPU が上書きしうる | §5.4 の回収の規則に build 中の chunk の扱いが無い | segment を開いた時に live を増やす、追記先を候補から外す、H1 の場合（§5.4） |
+| N1 | major | §3.2 の GPU 5.6 µs の根拠（subs-100 の 1 run 160 draw）が誤り。subs の 1 run は約 16 draw で、timing 有り 約 20 µs | rtx-cmdprof.sh 31 行・kab.list、renderer.c 2665〜2672 | 10.0.10.3 で測り、§3.2・§13・Q1 を測った値で書き直した（§3.2） |
+| N2 | major | hand-off の条件「recording の thread が動いている」が subs では成り立たない（thread は長い記録の時だけ起きる） | commands.c 1026 行の `pthread_once` | hand-off の道も `pthread_once` を呼ぶ、入った数を数える（§6.1） |
+| N3 | major | set の上限 16 が bench とちょうど同じ（推測） | renderer.c 2681〜2698 | 固定の上限をやめ、伸ばせる配列に（§5.2・§5.5） |
+| N4 | major | phase.md の要点・表・Q1〜Q3 が第 1 版のまま | phase.md 45・70・86〜87 行 | phase.md を第 3 版に合わせて書き直した |
+| N5 | major | GPU の時間の受け入れが測れない（retire が slot の替わりの時だけ、組み置きの run は数えられず trap の確かめも漏れる）。runs で割ると誤る | vk-node.c 662〜698、vk-execute.c 776 | 組み置きの run を小さな輪から retire に通す（§5.6）、数の取り方（`gpu_us ÷ timed`、`held_us ÷ frames`）（§12・§13） |
+| N6 | major | 複数の command buffer の list を実機で通すのが P-C だけ | §12・§14 | `--submit-all` を P-B に移し、prebuild 入で画素の比べ。heap の index の再利用の試験（§12） |
+| N7 | major | back-pressure の起床が `command_sender_done` を共用すると 1 件ごとに起こされる | commands.c 1228 行 | queue ごとの専用の cond（§6.5） |
+| N8 | minor | H1 は work.c の list の口を通らない（`entries[4]` の固定の配列） | work.c 1065 行 | H1b（§12）、entry の配列を広げる（§5.6） |
+| N9 | minor | chunk の後の確かめは越え書きを防げず、説明も誤り | §5.4 | 前の確かめだけが守ると明記、確保に余白、後の確かめは診断（§5.4） |
+| N10 | minor | thread local の mutex の数が sync.c の直の lock を数えない | sync.c の 11 か所 | 包みに替える、abort の前に lock の道を一覧で確かめる（§6.4） |
+| N11 | minor | fork の handler は prepare と parent も要る | — | prepare で lock を取り parent・child で離す（§6.6） |
+| N12 | minor | heap の index の解放に execute が無い時の守りが無い。`nvrtx_vk_command_reset` は session を受けない | vk-session.c 76〜83、vk-command.c 110 | 守りを書いた、引数を足す（§5.3・§5.4） |
+| N13 | minor | free・reset が slot の関数を通るという記述は事実と違う（結論は保たれる） | vk-layout.c 430〜624・880〜906 | §5.7 の文を直した |
+| N14 | minor | build の失敗を全部の error に広げる | vk-execute.c 1485〜1488・2040〜2042・1903〜1914 | 0 以外は全部 refused（§5.5） |
+| N15 | minor | compositor が毎 frame build を途中まで走らせて捨てうる | — | opcode の pre-scan（§5.5） |
+| N16 | minor | `--record=once` は image ごとの fence を要する。memory の量 | renderer.c 420〜427 | image ごとの fence、P-A の 0 番で 1 part の大きさ（§12） |
+| N17 | minor | list の頭を上限に数えるか、`VULKAN_HANDOFF_COMMANDS` を越える時、latch の時の印、present の drain の遅れ | — | §5.6・§6.1・§6.4 に書いた |
+| N18 | minor | P-C の引き戻しが FIFO の順を壊しうる | §7 | 後ろに同じ context の項が無い時だけ引き戻す（§7） |
+| 第 1 回 7 の補足 | minor | 飢えの上限に 256 KiB の batch の分を数えていない | commands.c 22 行 | §6.4 に書いた |
+| 第 1 回 17 の補足 | minor | wsi-display.c の raw の ioctl が一覧に無い | wsi-display.c 1460〜1479・1873 | §6.4 に足した |
+| 記録 | minor | design.md の「反映の対応は design-review.md の末尾」に表が無かった | — | この節を足した |

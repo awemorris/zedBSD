@@ -2,10 +2,10 @@
 
 # ws291-p026 設計: NVIDIA（nvrtx）で記録の時に push buffer まで組み、submit は ring に載せるだけにする
 
-- 版: 第 2 版（2026-11-01 P1、q1838-i01）。第 1 版（P2、q1832-i01）への敵対的レビュー [design-review.md](design-review.md) の指摘を反映した。
-  反映の対応は design-review.md の末尾、版の差は末尾の「改訂の記録」。
+- 版: 第 3 版（2026-11-01 P1、q1838-i01）。第 1 版（P2、q1832-i01）と第 2 版への敵対的レビュー 2 回（[design-review.md](design-review.md)）の指摘を
+  反映した。指摘ごとの反映は design-review.md の表、版の差は末尾の「改訂の記録」。
 - 親: [phase.md](phase.md)、[WS291](../ws.md)。前提の計測: [p024](../phase024/phase.md)（G1〜G4、NVK との段ごとの比べ、(a)(b)(c)、実機の A/B）。
-- code は書かない。実機・QEMU は使っていない。この文書の「見積もり」は全部未計測（根拠の計測は p024 の物を名指す）。
+- code は書かない。QEMU は使っていない。実機は §3.2 の GPU の 1 part の計測を 1 本だけ（10.0.10.3、診断）。他の「見積もり」は未計測（根拠の計測を名指す）。
 
 ## 0. 要旨
 
@@ -18,7 +18,8 @@
 2. **重なりの条件**: mview の subs は「記録 → End → submit → 次の記録」を繰り返す（`userland/tests/mview/renderer.c` 393〜436 行）。submit が kernel の
    仕事の終わりを待つ限り、組み立てを End に移しても別の thread に置いても、アプリの thread の 1 part は縮まない（§3.2）。subs の伸びは B-U からしか
    生まれない。B-U は vkQueueSubmit の失敗の報告を後へ遅らせる（§6.7）ので、ユーザーの判断が要る（phase.md の Q1）。
-3. **B-K は今の 6 つの bench の fps を動かさない見込み**（毎 frame 記録し直すので組む回数は減らない）。効くのは、記録し直さずに同じ command buffer を
+3. **B-K は今の 6 つの bench の fps を動かさない見込み**（毎 frame 記録し直すので組む回数は減らない）。記録し直さない bench（`--record=once`）でも、B-U の上では
+   GPU の 1 part（実測 約 9 µs）が律速に近く、fps の伸びは 1 割に届かない見込みで、効き目は submit の CPU の時間（kernel の時間が半分以下）に出る。効くのは、記録し直さずに同じ command buffer を
    出し直す時（2 回目から ring だけ）と、P-C（End を先に送る）の時。実装はユーザーの (b) の決定に従って P-A の後に置き、受け入れは新しい bench の
    mode（`--record=once`）で測る（§12、§13）。
 4. **big-1000 は (b) では縮まない**（inflight 1、GPU は今も submit の始めから走る）。B-K は draw が 256 を越える command buffer を組まない（§3.3、§5.4）。
@@ -102,15 +103,23 @@ p024 の G1（約 8 µs）は decode 1.7・RESET 0.8・executor 6（ring 1.0）�
 
 | 形 | 生産（アプリ） | 消費（thread） | GPU | 1 part | subs-1000 |
 | --- | --- | --- | --- | --- | --- |
-| 今（ac） | record 5.7 ＋ submit 11 | — | 約 5〜6 | 約 17 µs | 58.5 fps（実測） |
+| 今（ac） | record 5.7 ＋ submit 11 | — | 約 9〜10（timing 有りの実測） | 約 17 µs | 58.5 fps（実測） |
 | B-K だけ | 同じ（End と submit が同じ transaction） | — | 同じ | 約 17 µs | 変わらない |
 | B-K ＋ End を thread で先に送る、submit は待つ | record 5.7 ＋ End の組み立てを待つ 約 9 ＋ ring の ioctl 約 3.5 | End の ioctl | 同じ | 約 18 µs | 下がる |
 | **B-U** | record 5.7 ＋ hand-off 約 1〜2 | 今の submit の transaction 約 9.5〜10.5 | 同じ | 約 10 µs（消費） | 上限 約 95、見込み 75〜90 fps |
 | B-U ＋ B-K | 同上 | 同上（END で組み、QUEUE_SUBMIT で ring、同じ transaction） | 同じ | 約 10 µs | B-U と同じ |
 
-- GPU の列: p024 i01 の subs-100（timing 有り）で 1 run（160 draw）約 20 µs、空の run 4 µs → 16 draw の part は 4 ＋ 16 × 0.1 ≒ 5.6 µs（推測、timing の
-  end stamp の WFI を含む値）。消費側（約 10 µs）より短い。P-A の最初の手で main の `nvrtx.vk.perf=1` の gpu の時間と runs から subs-1000 の 1 run を
-  測り、この表を測った値で置き換える（§13 の P-A の 0 番）。GPU が律速に近ければ P-A の受け入れの数を Q1 と見直す。
+- GPU の列（2026-11-01 20:56〜 P1 が 10.0.10.3 で測った、build/tmp/p026-diag/subs1000/summary.txt）: kernel は p024 i3a（2764259344、ac の腕）、
+  userland は p024 の base の 13 file と libvulkan lv9（509112954）、`rtx-runcost.sh` TIMING=on RUNS=6、subs-1000（`--draws=each --copies=1000
+  --submits=1000`、1 part は約 16 draw: 第 1 版の「subs-100 の 1 run は 160 draw」は誤り）。
+  - fps 56.4〜58.5（timing の分だけ下がる）、段は record 5.6〜5.8・submit 11.2〜11.8・**fence 0.00〜0.05 ms**（最後の submit の後に GPU が約 1 part で
+    終わる = 今は GPU が CPU の 17 µs/part に遅れない）。
+  - `nvrtx.vk.perf` の GPU の 1 run（`gpu_us ÷ timed`、timed は slot が替わる時に retire される run だけの標本で 1 窓 150〜580 個）: 最初の窓だけ
+    avg 29 µs・max 1090 µs（起動の直後）、後の 10 窓は **avg 9〜10 µs**（max 10〜117 µs）。timing 有りは end stamp の WFI が足されるので、timing 無しは
+    これ以下の見込み。runs は 1 窓 5 s に 21〜30 万（1 frame 1000 run と合う）。
+  - よって B-U の後の律速は消費側（約 10 µs）で、GPU（約 9 µs 以下）は 1 part 13.3 µs（NVK の 75.4 fps）より短い。GPU と消費側の差が小さいので、
+    見込みは 75〜90 fps のまま、上限は GPU と消費側の遅い方で 約 100 fps。P-A の 0 番では timing 無しの値と、標本の偏り（slot の替わりの run だけ）の
+    無い数え方（§5.6 の retire の輪を P-A の前に入れない場合は、diag で全 run を数える）で確かめ直す。
 - 同じ open の ioctl は GPU core が 1 本ずつに限り（`gpu_session_enter`）、executor は node の lock の下で走る。End と submit を 2 本の thread に分けても
   kernel の中では並ばない。重なりは「アプリの thread が kernel を待たない」事からしか生まれない。
 - 生産側が速いので thread の queue は満ちる。満ちた時は生産側が眠り、半分空いたら起きる（§6.5）。1 frame に約 1000 ÷ 32 ≒ 30 回の眠りと起床は
@@ -185,8 +194,9 @@ struct nvrtx_vk_prebuilt {
 	uint32_t segment_count;
 	uint32_t draws;
 	uint64_t set_epoch;                                             /* the session's when built */
-	struct { const struct nvrtx_vk_descriptor_set *set; uint64_t generation; } sets[NVRTX_VK_PREBUILT_SETS]; /* 16 */
+	struct nvrtx_vk_prebuilt_set *sets;                             /* each distinct set bound, with its generation; kept for the next build like records */
 	uint32_t set_count;
+	uint32_t set_capacity;
 };
 ```
 
@@ -217,8 +227,9 @@ struct nvrtx_vk_prebuilt {
   - view と sampler の object に heap の index（`heap_index`、0 は無し）を足す。組む時に初めて使う view・sampler に index を割り当て、header
     （`view->header`、今と同じく view ごとに 1 回作る）と sampler の words を heap に書く。handle は `view->heap_index | sampler->heap_index << 20`。
   - index の解放: view の payload の destroy（`resource_view_destroy`）と sampler の payload の destroy（今は `nvrtx_vk_free_payload`、専用の destructor
-    を足す）で、session の最新の run の ticket（`nvrtx_vk_gpu_last`）を付けて退き待ちの list へ。割り当ては空きの index、無ければ退き待ちの先頭から
-    passed を見た物（ticket を 0 にする）。heap が満ちたら組まない（fallback）。
+    を足す）で、session の最新の run の ticket（`nvrtx_vk_gpu_last`）を付けて退き待ちの list へ。`session->execute` が NULL（close の後）なら何もしない
+    （heap は execute_close が返す）。割り当ては空きの index、無ければ退き待ちの先頭から passed を見た物（ticket を 0 にする）。heap が満ちたら組まない
+    （fallback）。
   - 正しさ: 組み置きの record は set と framebuffer の参照を持ち、set の slot は view・sampler の参照を持つ（`layout_slot_clear` が離す）。組み置きが
     生きる間、その view・sampler は destroy されず index は変わらない。set の slot が書き換わると世代が変わり、組み置きは使われない（§5.7）。
     index の再利用は GPU が passed を越えた後。各 segment の頭には header と sampler の cache の invalidate（`_NO_WFI`）を置く（再利用された index の
@@ -236,17 +247,22 @@ struct nvrtx_vk_prebuilt {
 - 書きの安全: 今の method の書き手は境を見ずに書き、安全は `execute_room` の「record の前に `EXECUTE_RECORD_ROOM`（32 KiB）を空ける」だけで守られる。
   BUILD の sink も同じ規則で、record の前に `chunk.at + EXECUTE_RECORD_ROOM ≤ chunk の大きさ` を確かめ、足りなければ segment をそこで閉じ、次の chunk の
   頭で新しい segment を始める（cache の invalidate、target の書き直し: 今の `execute_room` の後の `state->target_written = false` と同じ）。record を
-  跨いで segment を閉じない。加えて BUILD の sink の書きの後に `at` が chunk を越えていないかを確かめ、越えていれば kernel の log 1 行と refused
-  （越え書きは隣の command buffer の物を壊すので、確かめは常に入れる。1 record に比べ 1 回）。
+  跨いで segment を閉じない。安全はこの前の確かめだけが守る。chunk は使う大きさ（256 KiB）に `EXECUTE_RECORD_ROOM` の余白を足して確保し
+  （256 ＋ 32 KiB）、record の後に `at` が使う大きさを越えていれば kernel の log 1 行と refused にする（診断。越えるのは前の確かめの誤りの時だけで、
+  その時も余白の中に収まる）。chunk の中は前から書くので、他の command buffer の bytes を越えて書く事は無い。
 - build の始めに今の chunk の残りが `EXECUTE_RECORD_ROOM` の 2 倍に満たなければ次の chunk から始める（1 command buffer が 2 つに割れにくくする）。
   End の後、chunk の `at` は build の終わり（8 byte 境）へ進む。次の command buffer はその後に続ける。chunk の中は前から後ろへ書くだけで、
   回収するまで書き直さない。
-- 回収: chunk は `live`（segment を持つ組み置きの数）と `ticket`（読んだ最新の run）を持つ。`live` が 0 で `nvrtx_vk_gpu_passed(ticket)` の chunk は
-  `at` を 0 に戻して使える。次の chunk が要る時は chunk の表（最大 128 個）を順に見る（順序の付いた free list は使わない: Reset の順は submit の順と
-  限らない）。無ければ新しい chunk（session の上限 32 MiB = 128 chunk の内）、上限なら組まない（fallback）。GPU を待たない。
+- 回収: chunk は `live`（segment を持つ組み置きと、今の build の数）と `ticket`（読んだ最新の run）を持つ。build が segment を開いた時点で、その
+  chunk の `live` を 1 増す（build の途中の chunk は回収されない）。`live` が 0 で `nvrtx_vk_gpu_passed(ticket)` の chunk は `at` を 0 に戻して使える。
+  ただし今の追記先の chunk（`execute->chunk`）は回収の候補から外す（追記先が live 0 で passed なら、その場で `at` を 0 に戻してから build を始めて
+  よい。build の途中では戻さない）。次の chunk が要る時は chunk の表（最大 128 個）を順に見る（順序の付いた free list は使わない: Reset の順は
+  submit の順と限らない）。無ければ新しい chunk（session の上限 32 MiB = 128 chunk の内）、上限なら組まない（fallback）。GPU を待たない。
+  H1 に「live 0 の追記先の途中から始まり 2 segment になる build」の場合を入れる（再レビューの B1）。
 - 解放: Begin・Reset・Free・pool の Reset と Destroy・command buffer の destroy（`nvrtx_vk_command_reset` の中）で組み置きを捨て、各 chunk の `live` を
-  1 減らす。`session->execute` が NULL の時（session の close で `nvrtx_vk_objects_close` の後）は何もしない（chunk は `nvrtx_vk_execute_close` が返す。
-  順は `vk-session.c` 76〜77 行）。chunk の run を返すのは session の close の時だけ（`nvrtx_vk_gpu_free` は idle を待つ。今の slot と同じ規則）。
+  1 減らす。`nvrtx_vk_command_reset` は今 session を受けない（vk-command.c 110 行）ので引数を足す（nvrtx の内部の関数）。`session->execute` が NULL の時
+  （session の close で `nvrtx_vk_objects_close` の後。payload が他で持たれて EBUSY の後に走る destructor も同じ）は何もしない（chunk は
+  `nvrtx_vk_execute_close` が返す。順は `vk-session.c` 76〜83 行）。chunk の run を返すのは session の close の時だけ（`nvrtx_vk_gpu_free` は idle を待つ。今の slot と同じ規則）。
 - refused の build: build の始めの chunk と `at` を覚え、組めないと分かったら `at` を戻し、途中で取った chunk の `live` を戻す（ring に一度も出して
   いないので ticket は変えない）。record は変えない。
 - 量: subs の 1 part は push 約 3〜4 KiB（推測）。1000 part で約 4 MiB。frame N＋1 は frame N の chunk がまだ live の間に別の chunk に組み、frame N の
@@ -263,7 +279,14 @@ End の時に次を全部満たす時だけ組む。どれかに当たれば `re
 3. 組む途中で BUILD の sink が `EXECUTE_REFUSED` に当たらない: quad を作る record（copy image・blit・buffer と image の copy、shadow の pass）、
    CPU の copy（copy buffer、`execute_cpu_copy`）、`execute_drain`・`execute_flush`、video と query、segment の数の上限（4）、chunk・heap の index が
    取れない、chunk の越えの確かめ。
-4. 使った descriptor set の数が `NVRTX_VK_PREBUILT_SETS`（16）以下。
+4. 使った descriptor set（重ねを除く）の世代の写しが取れる（配列は record の配列と同じく command buffer に残して使い回し、足りなければ伸ばす。
+   伸ばせない ENOMEM は refused）。固定の上限は置かない（mview の part は group ごとに texture の set を bind する: renderer.c 2681〜2698 行。
+   group の数は model に依る）。
+5. build の結果が 0 以外なら、`EXECUTE_REFUSED` に限らず全部 refused（理由を数える）。今の code は draw の EINVAL・memory の無い EIO・uniform の
+   EINVAL などを返す。submit の時は今の executor が同じ error を返すので、End の返事は変えない。
+6. build の前に record の opcode を一度見て（pre-scan）、組めない opcode（COPY_*・BLIT・BUFFER と IMAGE の copy・DECODE・video・query）があれば
+   build を始めない（毎 frame 記録し直す compositor が blit を持つ時に、毎 frame 途中まで組んで捨てない）。shadow の pass は target が決まるまで
+   分からないので build の中で refused。
 
 - 組める record（v1）: bind の全部、push constants、viewport・scissor、render pass の begin・end（shadow を通らない物: block-linear の target か深度の無い
   pitch-linear）、draw・draw indexed、clear color image（method だけ）。mview の subs の part はこれだけで、WSI の image が block-linear の時に組める
@@ -272,11 +295,16 @@ End の時に次を全部満たす時だけ組む。どれかに当たれば `re
 
 ### 5.6 submit（`queue_submit`）
 
-1. vkQueueSubmit の command buffer を順に見て、組み置きがあり世代が合う（§5.7）物が続く間、その segment を list に集める（上限 `NVRTX_WORK_LIST_MAX`）。
+1. vkQueueSubmit の command buffer を順に見て、組み置きがあり世代が合う（§5.7）物が続く間、その segment を list に集める（上限 `NVRTX_WORK_LIST_MAX`
+   は list の頭を含めて 32）。`work.c` の今の固定の `entries[4]`（1065 行）は list の entry の数（stamp ＋ 32 ＋ timed の end ＋ fence = 35）に広げる。
 2. list の頭に固定の push を 1 つ足す: channel が class の state を保たない（`class_ready` が偽: session の最初の run、共有の work channel）なら h2、保つなら h1。
    どちらも heap の run の中の書き済みの bytes なので、submit の時に確保も書きもしない（レビューの指摘 10 への答え）。
 3. `nvrtx_vk_gpu_submit_list` で出す。成功した時だけ: 各組み置きの chunk の `ticket` を今の run に、`class_ready = nvrtx_vk_gpu_state_kept`、
-   `execute->kept.valid = false`（組み置きの pass が shadow の写しの元を書きうる。quiet の epoch も submit で動く）、`nvrtx_vk_gpu_drawn` に draws。
+   `execute->kept.valid = false`（組み置きの pass が shadow の写しの元を書きうる。quiet の epoch も submit で動く: 1 回の publish と 1 回の
+   `nvrtx_gpu_submitted` を守る）、`nvrtx_vk_gpu_drawn` に draws。run の ticket を session の小さな輪（64）に積み、次の submit と chunk を探す時に、
+   passed になった物から `nvrtx_vk_gpu_retire` に通す（今 retire は slot が替わる時にしか呼ばれず、GPU の時間 `gpu_us`・`timed` と engine の trap の
+   確かめ `vk_node_gr_check` はそこで走る: vk-node.c 662〜698 行、vk-execute.c 776 行。組み置きの run もそこに数える。輪が満ちたら最古を passed の
+   有無に関わらず数えずに捨て、捨てた数を perf に出す）。
 4. list が上限に達した時、世代が合わない・組み置きの無い command buffer に来た時は、集めた list を先に出し、その command buffer は今の `nvrtx_vk_execute`。
    2 回目以降の ring の書きの失敗は今の `gpu_sends` の規則で EIO（出した後の失敗。BUG-381 の規則のまま）。
 5. fence は今どおり session の最新の run（`nvrtx_vk_gpu_last`）。`queue_ran`・`queue_accepted` も今どおり。
@@ -288,8 +316,10 @@ End の時に次を全部満たす時だけ組む。どれかに当たれば `re
 ### 5.7 descriptor set の世代
 
 - `struct nvrtx_vk_descriptor_set` に `generation`、session に `set_epoch` を足し、set の slot を変える所で両方を増やす: `layout_slot_set`・
-  `layout_slot_buffer`・`layout_slot_clear`（`layout_update_write` 686 行・copy の `layout_update_sets` 633 行・`layout_free_sets` 586 行・
-  `layout_pool_sets_free` 466 行・`layout_reset_pool` 430 行は全部これらを通る。実装で確かめる）。
+  `layout_slot_buffer`・`layout_slot_clear`（`layout_update_write` 686 行と copy の `layout_update_sets` 633 行はこれらを通る）。`layout_free_sets`
+  586 行・`layout_pool_sets_free` 466 行・`layout_reset_pool` 430 行は公開を外すだけで slot に触らず、slot が離されるのは最後の参照が消えた時の
+  `layout_set_destroy`（880〜906 行）だけ。record が set を持つ間は中身が変わらないので、free と reset は世代を変えない（今の executor も submit の時に
+  同じ set を読み、結果は同じ）。
 - build は使った set とその世代を `prebuilt.sets` に残し、`set_epoch` を写す。submit は session の `set_epoch` が同じなら確かめ無しで使い、違えば残した set の
   世代を 1 つずつ比べる。違う set があれば組み置きを捨て（chunk の live を戻す、ticket はそのまま）、今の executor で走らせる。
 - Vulkan では bind した set を更新すると command buffer は invalid になる（update-after-bind は nvrtx が報告していない）ので、正しいアプリでは起きない。
@@ -335,7 +365,11 @@ secondary の command buffer: nvrtx は今も primary だけ（`command_allocate
 
 `queue_enqueue` で次を全部満たす時だけ: `queue_unfenced` が真（public、fence・semaphore・pNext 無し、WSI の lock を持たない、`GPU_CAP_JOB_SUBMIT` と同期の
 command の kernel = 今は nvrtx だけ）、hand-off が入（環境変数 `VULKAN_ZEDBSD_SUBMIT_HANDOFF` が 0 でない、`sysconf(_SC_NPROCESSORS_ONLN)` が 2 以上、
-recording の thread が動いている、fork の子でない）、context に失敗が latch されていない（されていれば DEVICE_LOST を返す）。
+fork の子でない）、recording の thread が動いている（今は長い記録の batch の `command_send_later` だけが `pthread_once` で起こすので、subs の 64 KiB
+以下の part だけでは起きない。hand-off の道も同じ `pthread_once(&command_sender_once, command_sender_start)` を呼び、起こせなかった時だけ今の
+同期の道へ）、1 回の vkQueueSubmit の command buffer の数が `VULKAN_HANDOFF_COMMANDS` 以下（越えれば同期の道）、context に失敗が latch されていない
+（されていれば今の同期の道と同じく `vulkan_device_error` と、device の mutex の下の `vulkan_sync_device_error` で印を付けて DEVICE_LOST を返す）。
+hand-off が入った数を timing に数え、P-A の受け入れで 0 でない事を確かめる。
 
 ### 6.2 hand-off の場所
 
@@ -383,17 +417,21 @@ struct vulkan_submit_handoff {
   descriptor の更新は、前の hand-off の後に kernel に届く。
 - drain しない raw の ioctl と理由: `sync.c` の GPU_JOB_RESERVE・ACTION（COMMIT・CANCEL）・RETIRE・GPU_COMMAND_WAIT（`context->mutex` の下で出る。仕事を
   出さず、hand-off は job を持たないので ledger と食い違わない）、`memory.c` の GPU_RESOURCE_DESTROY・mmap・export・import・GPU_BLOB_CREATE_PLACED、
-  `external-fence.c` の GPU_FENCE_*、`wsi-image.c`・`wsi-swapchain.c` の raw の ioctl（どれも仕事を出さない。hand-off の中の仕事が読む物を壊すのは
+  `external-fence.c` の GPU_FENCE_*、`wsi-image.c`・`wsi-swapchain.c` の raw の ioctl、`wsi-display.c` の GPU_DISPLAY_PRESENT・PRESENT_SYNC・
+  GPU_FENCE_RESET（1460〜1479・1873 行、display node の fd。drain 済みの job の wait_fd に頼る）（どれも仕事を出さない。hand-off の中の仕事が読む物を壊すのは
   「GPU で使い終わる前に free する」誤ったアプリだけで、その時も kernel の VkDeviceMemory は backing の参照を持つ: `vk-node.c` 127〜129 行）。
   P-A のレビューの確かめ項目にする。
 - deadlock が無い理由: drain の待ちは `context->mutex` を持たない（入口が mutex の前）。呼び手が queue・device の mutex を持つのはよい。thread は
   `command_sender_lock`（短く持つだけ）と `context->mutex`（`vulkan_context_execute` の中）だけを取り、queue・device の mutex を取らない。
   `vulkan_context_lock` で `context->mutex` を持ったまま `vulkan_context_execute` を呼ぶ道は今も自己 deadlock なので無い。これを code で守るため、
-  thread local の「この thread が持つ context の mutex の数」を `vulkan_context_lock`・`vulkan_context_execute` で増減し、drain に入る時に 0 でなければ
-  abort する（debug でなく常に。1 回の比べ）。
-- 飢えない理由: drain は入口の時点の番号までしか待たない。描く thread が hand-off を続けても待ちは伸びず、上限は FIFO の長さ（その時に並んでいる
-  hand-off と batch）× 1 本の時間（約 10 µs × 64 ≒ 0.6 ms）。FIFO は process に 1 本なので、別の context の物が前にあればそれも待つ（上限は同じ形）。
-  context ごとの FIFO は同じ open の中で並ばない事（R7）から得が小さく、入れない。
+  thread local の「この thread が持つ context の mutex の数」を増減し、drain に入る時に 0 でなければ abort する（1 回の比べ）。`sync.c` は
+  `pthread_mutex_lock(&context->mutex)` を直に取る（648・760・1067・1107・1153・1189・1575・1943・1974・2041・2112 行）ので、これらを
+  `vulkan_context_lock`・`_unlock`（数を増減する包み）に替える。別の context の mutex を持ったまま execute を呼ぶ既存の道が無い事を、abort を
+  入れる前に全部の lock の道の一覧で確かめる（P-A の作業。memory.c 1276〜1334 行の lock の中は raw の ioctl だけと読める）。
+- 飢えない理由: drain は入口の時点の番号までしか待たない。描く thread が hand-off を続けても待ちは伸びず、上限はその時に FIFO に並んでいる物の
+  時間（hand-off は約 10 µs × 64 ≒ 0.6 ms、加えて 256 KiB の長い記録の batch が並んでいればその decode の分）。FIFO は process に 1 本なので、別の
+  context の物が前にあればそれも待つ（上限は同じ形）。context ごとの FIFO は同じ open の中で並ばない事（R7）から得が小さく、入れない。present の
+  worker の drain も、その時に並んでいる次の frame の hand-off を待つ（present が最大 約 0.6 ms 遅れうる。推測、P-A の frame-ops で確かめる）。
 - vkDestroyDevice・context の close は drain してから（close も `vulkan_context_execute` を通る物は自然に、通らない物は明示に）。
 
 ### 6.5 lock の順と待ち
@@ -402,15 +440,18 @@ struct vulkan_submit_handoff {
 - recording の thread: `command_sender_lock` と `context->mutex` だけ。device の失敗の印は context の atomic の latch（`vulkan_context_error`）で付け、
   device の mutex が要る処理（`vulkan_sync_device_error`）は次の同期の呼び出しが拾う（`queue_attempt` は `vulkan_context_execute` の DEVICE_LOST を見て
   `vulkan_sync_device_error` を呼ぶ: 今と同じ）。
-- back-pressure: queue の 64 個の場所が全部使用中なら、アプリの thread は「待つ者がいる」印を立てて眠り、半分（32 個）空いた時に thread が起こす。
-  thread は FIFO が空の時だけ「眠る」印を立てて眠り、アプリは印がある時だけ起こす（今の `command_sender_ready` の signal は毎回なので、印の時だけに）。
+- back-pressure: queue の 64 個の場所が全部使用中なら、アプリの thread は queue ごとの専用の cond（`handoff_room`）で「待つ者がいる」印を立てて
+  眠り、使用中が半分（32 個）を下回った時に thread がその cond を 1 回 signal する。今の `command_sender_done` は 1 件ごとに broadcast され
+  （commands.c 1228 行）、`command_sent_wait`・batch の場所・drain が使うので、back-pressure はそれを共用しない（共用すると 1 frame に約 1000 回
+  起こされる）。thread は FIFO が空の時だけ「眠る」印を立てて眠り、アプリは印がある時だけ `command_sender_ready` を signal する（今は毎回）。
   どちらの印も `command_sender_lock` の下で読み書きする（起こし損ねを防ぐ）。眠りと起床の回数を timing（`VULKAN_ZEDBSD_SUBMIT_TIMING`）に数える。
 
 ### 6.6 1 CPU・fork・他の driver・Venus
 
 - 1 CPU では hand-off は切り（費用だけ増える）。
-- fork: `pthread_atfork` の子の handler で hand-off を切り、子の `handoff_queued`・`handoff_sent` を揃える（子には thread が無い。子が親の device を使うのは
-  Vulkan の外）。
+- fork: `pthread_atfork` の prepare で `command_sender_lock` を取り、parent と child で離す（fork の瞬間に thread が持っていた lock で子が止まらない
+  ように）。child では hand-off を切り、`command_sender_started` も偽にし（今の batch の道も子では同期に戻る）、子の `handoff_queued`・`handoff_sent` を
+  揃える。thread が `context->mutex` を持つ瞬間の fork は今の batch の道と同じ危険で、子が親の device を使うのは Vulkan の外として扱う。
 - `GPU_CAP_JOB_SUBMIT` は backend の job の表に `command` がある時だけ gpu.c が立て、それは nvrtx だけ（p024 i03 の (c) の調べ）。amdrdna・i915・powervr・
   bcm2711・venus・mali・ghci の道は変わらない。drain の確かめは全部の context に入る（hand-off が無ければ atomic の読み 2 回）。Venus の回帰は libvulkan の
   変更として流す（§12）。
@@ -432,7 +473,9 @@ struct vulkan_submit_handoff {
 - kernel が「End で組む」事を知らせる時（§10 の capset の bit）、短い primary の vkEndCommandBuffer は記録（End 込み）を recording の thread に渡して返る
   （`end_pending` にしない）。kernel は END で組む。アプリが次の command buffer を記録する間に組み立てが走る。
 - 同期の vkQueueSubmit（fence あり、または B-U が切り）がその command buffer を名指した時、その End がまだ FIFO にあり送り始めていなければ FIFO から
-  引き戻し、今どおり submit の transaction に入れる（system call を増やさない）。送り始めていれば `command_sent_wait`。
+  引き戻し、今どおり submit の transaction に入れる（system call を増やさない）。送り始めていれば `command_sent_wait`。引き戻せるのは、FIFO の中で
+  その End より後ろに同じ context の項が無い時だけ（後ろに同じ command buffer を名指す hand-off の QUEUE_SUBMIT があれば、引き戻すと QUEUE_SUBMIT が
+  END より先に kernel に届く）。それ以外は End が送られるのを待つ。
 - 効く場面: 複数の command buffer を記録してから 1 回 submit するアプリ。mview に `--submit-all` を足して測る（§12）。compositor（1 frame 1 command buffer、
   fence あり）は引き戻しで今と同じ。
 - END が非同期になるので、End の失敗も B-U と同じく後の DEVICE_LOST になる（Q1 の答えに従う）。
@@ -495,6 +538,8 @@ host（担当が流す、各 Phase の受け入れの前提）:
   （256 draw 近く）、class の前置きの h1・h2。fallback（quad の record、copy buffer、shadow、video の stub、record と draw の上限、chunk と heap の確保の
   失敗の注入、End と submit の間の set の更新、segment の上限）がどれも切と同じ状態の列。Reset の後の chunk と退いた heap の index が、偽の fence の passed
   の前に使われない事。chunk の越えの確かめが働く事（注入）。
+- H1b（P-B）`work.c` の ring の部分を偽の USERD と semaphore で繋ぐ小さな host 試験（新しい。H1 は node を偽にするので work.c の list の口を通らない）:
+  count 1 と 32（entry 35）、ring 512 の折り返し、空きの待ち、2 s の時間切れ、all-or-nothing（空きが足りない時に何も書かない）、put が 1 回。
 - H2 `plan/ws291/tests/run-gpu-job-host.sh` PASS（GPU core は変えないが job の outcome の確かめに）。
 - H3a（P-A）hand-off の FIFO の単体の host 試験（新しい）: transport を偽の callback にして、順序、入口の番号までの drain、back-pressure と起床の印、
   失敗の latch、`command_sent_wait`、fork の子、引き戻し（P-C）を plain・ASan/UBSan・TSan で。
@@ -519,11 +564,19 @@ QEMU:
   token を確かめる）で、subs-100 と画素の比べを 1 本。h2 の前置きの道を通す。
 - fault の注入（P-B、1 本）: 組み置きが GPU にある間の channel の停止（既存の recovery の試験の形）と session の close の後に、別の session が描ける事と
   kernel の log に chunk の越えの行が無い事。
-- 新しい bench の mode（mview、P-B・P-C の範囲）:
+- 新しい bench の mode（mview、P-B の範囲）:
   - `--record=once`: swapchain の image ごと・part ごとの command buffer を最初の frame の前に全部記録し（ONE_TIME_SUBMIT を付けず、Reset しない）、毎 frame
-    取得した image の分を submit し直す。camera は固定（still の比べもその前提）。fence の後に出し直す（SIMULTANEOUS_USE は使わない）。
-  - `--submit-all`（P-C）: 全 part を記録してから 1 回の fence つきの vkQueueSubmit。
+    取得した image の分を submit し直す。camera は固定（still の比べもその前提）。image ごとに「最後にその image の command buffer を出した frame の
+    fence」を覚え、出し直す前にそれを待つ（mview の fence は slot ごと: renderer.c 420〜427 行。`--images=4` では slot の fence と一致しない）。
+    SIMULTANEOUS_USE は使わない。組み置きの量は 4 image × 1000 part × 1 part の push で、part が 8 KiB なら session の上限 32 MiB に届く。P-A の 0 番で
+    main の `push_bytes ÷ runs` から 1 part の大きさを測り、上限と mode の image の数を決める。
+  - `--submit-all`: 全 part を記録してから 1 回の fence つきの vkQueueSubmit（eager End は要らない。複数の command buffer の list を実機で通す）。
+    prebuild 入で画素の比べを 1 本（heap の base、segment の頭の invalidate、class の state の持ち越しは hardware でしか判らない）。P-C の受け入れにも使う。
+  - heap の index の再利用: view と sampler を毎 frame 作り壊す短い試験（mview の mode か host の長い run）を 1 本。
   - NVK の基準も同じ source の同じ mode で（Debian の ~/linux-mview、Q1 の割当の window で 1 回）。
+- 数の取り方: GPU の 1 run の時間は `gpu_us ÷ timed`（runs で割らない。timed が runs の何割かも出す）、GPU の使用率は「1 run の平均 × runs ÷ frame の
+  時間」、1 submit の kernel の時間は runtime の `held_us ÷ frames`（runtime.c 1812〜1820 行）。timing 有り（end stamp の WFI が足される）と無しの差を
+  P-A の 0 番で見ておく。
 - TIMING=1 の段（vkQueueSubmit・record、hand-off の数・眠りと起床の数）と、`nvrtx.vk.perf=1` の runs・push_bytes・gpu の時間に、組み置きの submit・refused の
   理由ごと・世代の食い違い・chunk の数・heap の index の数を足して、通った道を確かめる。perf の行・log の文字列に WS・Phase・Bug の番号を書かない。
 - console・serial の log で判定しない。数は mview の出力と perf の行（ssh で読む）、画面は keiland-shot の PNG。
@@ -534,11 +587,15 @@ QEMU:
 
 | Phase（案） | 中身 | 受け入れ |
 | --- | --- | --- |
-| P-A（libvulkan、約 1.5〜2 日） | 0. main で subs-1000 の GPU の 1 run の時間を測り §3.2 を置き換える。1. B-U: hand-off の場所と FIFO、`queue_enqueue` の分かれ道、入口の drain、back-pressure、失敗の latch、fork、環境変数の切り、timing の数。2. H3a・H3b | H3a・H3b PASS（TSan の警告 0、時間切れ 0）。実機の同じ window の 2 round で **subs-1000 ≥ 75.4 fps（NVK）**、subs-100 が main 比 +20 % 以上。big-100・big-1000・scene-1500・scene-5000 が main の 2 round の幅の内か上（−3 % まで）。画素の比べ 31 が max 0。rtx-p015.sh の往復 3/3、frame-ops の各段が main −2 fps の内。Venus の回帰 PASS。`VULKAN_ZEDBSD_SUBMIT_HANDOFF=0` で main と同じ fps の幅。0 番の計測で GPU が 1 part 13.3 µs を越えると分かれば、数の受け入れを Q1 と見直す |
-| P-B（nvrtx、約 3 日） | B-K: sink の分け、heap（view・sampler の index、h1・h2）、chunk と回収、END の build と適格と refused、`nvrtx_work_channel_submit_list`、submit の list、set の世代、perf の数、`nvrtx.vk.prebuild=1`（入れる token、既定は切）、mview `--record=once`、H1 の解釈器 | H1・H2 PASS、build warning 0。実機（どの腕も P-A の libvulkan）: `--record=once` の subs-1000 で、prebuild 入の 1 submit の kernel の時間（perf）が切の半分以下、かつ fps が切の 1.3 倍以上か GPU の時間が frame の 90 % 以上（律速が GPU に移った）。prebuild 入と切で 6 bench の fps が幅の内、画素の比べ max 0、rtx-p015.sh の往復・画面・frame-ops の後退なし。perf の数で `--record=once` の subs の part の 99 % 以上が組み置きで出た事。共有の work channel の腕と fault の注入の 1 本 |
+| P-A（libvulkan、約 1.5〜2 日） | 0. main で subs-1000 の GPU の 1 run の時間を測り §3.2 を置き換える。1. B-U: hand-off の場所と FIFO、`queue_enqueue` の分かれ道、入口の drain、back-pressure、失敗の latch、fork、環境変数の切り、timing の数。2. H3a・H3b | H3a・H3b PASS（TSan の警告 0、時間切れ 0）。実機の同じ window の 2 round で **subs-1000 ≥ 75.4 fps（NVK）**、subs-100 が main 比 +20 % 以上。big-100・big-1000・scene-1500・scene-5000 が main の 2 round の幅の内か上（−3 % まで）。画素の比べ 31 が max 0。rtx-p015.sh の往復 3/3、frame-ops の各段が main −2 fps の内。Venus の回帰 PASS。`VULKAN_ZEDBSD_SUBMIT_HANDOFF=0` で main と同じ fps の幅。timing の hand-off の数が subs-1000 で 1 frame 998 前後（0 でない）。0 番の計測で GPU が 1 part 13.3 µs を越えると分かれば、数の受け入れを Q1 と見直す |
+| P-B（nvrtx、約 3 日） | B-K: sink の分け、heap（view・sampler の index、h1・h2）、chunk と回収、END の build と適格と refused、`nvrtx_work_channel_submit_list`、submit の list、set の世代、perf の数、`nvrtx.vk.prebuild=1`（入れる token、既定は切）、mview `--record=once`、H1 の解釈器 | H1・H2 PASS、build warning 0。実機（どの腕も P-A の libvulkan）: H1b PASS。`--record=once` の subs-1000 で、prebuild 入の 1 submit の kernel の時間（`held_us ÷ frames`）が切の半分以下、fps が切以上、GPU の使用率（`gpu_us ÷ timed` × runs ÷ frame）が入で 85 % 以上（律速が GPU に移った。§3.2 の実測では GPU の 1 part 約 9 µs と切の消費側 約 9.5 µs が近く、fps の伸びは 1 割に届かない見込みなので、fps の倍率は受け入れにしない）。`--submit-all` の prebuild 入で画素の比べ max 0。prebuild 入と切で 6 bench の fps が幅の内、画素の比べ max 0、rtx-p015.sh の往復・画面・frame-ops の後退なし。perf の数で `--record=once` の subs の part の 99 % 以上が組み置きで出た事。共有の work channel の腕と fault の注入の 1 本 |
 | P-C（libvulkan、約 1 日、任意） | eager End と引き戻し、capset の bit（Q3 の答え次第）、mview `--submit-all` | H3a（引き戻し）PASS。`--submit-all` の subs-1000 で、eager End 入が切より frame −15 % 以上。compositor の frame-ops の後退なし、Venus PASS |
 | P-D（任意、この設計の外） | build を node の lock の外へ、quad の record の組み置き、長い command buffer の retain（R6）、chunk と heap の読み取りだけの写し | 別に設計 |
 
+- P-B の数の取り方は §12（1 submit の kernel の時間は `held_us ÷ frames`、GPU は `gpu_us ÷ timed` × runs ÷ frame）。P-B の範囲で `vk-command.c` 16〜17 行の
+  file の comment（「submission は GPU を待つ」は今の code と違う）も直す。
+- phase.md の Q1 で B-U を認めない（B）時の P-B: 腕の libvulkan は main のまま、`--record=once` の subs-1000 を同期の submit で測り、受け入れは
+  「prebuild 入の 1 submit の kernel の時間が切の半分以下、fps が切の 1.2 倍以上」（同期の submit では vkQueueSubmit が組み立てを待たなくなる分だけアプリの thread の 1 part が縮む。切は record 無しで約 11 µs、入は約 5 µs の見込みで、GPU の約 9 µs が上限）と、上の後退なしの項目。
 - どの Phase も既定の切り替え（§14）を残したまま入れ、受け入れの後に Q1 がユーザーに既定を入にするかを聞く（P-B の `nvrtx.vk.prebuild`）。
 - WS291 の最後の「規約の全文の見直し」に、この Phase が変えた C の file を足す。
 - P-A の見積もりは第 1 版の 1〜1.5 日から、H3b（libvulkan の結合の host 試験の shim は今の tree に無い）の分を足した。
@@ -578,3 +635,8 @@ QEMU:
   record の前の 32 KiB の確かめにした（§5.4）、quad・CPU copy の record を v1 で組まない（§5.5）、draw 256 以下だけ組む（§3.3）、class の前置きを
   固定の push に（§5.6）、失敗の意味の誤り（「ring だけ」）を直した（§6.7）、capset の約束が `include/uapi/gpu-op.h` にある事（§10）、見積もりに GPU の
   段と起床（§3.2）、`--record=once` の形（§12）、H1 を意味の状態の比べに、H3b（libvulkan の結合）を足した（§12）。
+- 第 3 版（2026-11-01 P1、q1838-i01）: 2 回目のレビューの blocker 1・major 7・minor 11 を反映。build 中と追記先の chunk を回収から外す（§5.4）、
+  GPU の 1 part を 10.0.10.3 で測り §3.2 を実測で置き換え（約 9〜10 µs、timing 有り）、P-B の受け入れを fps の倍率から kernel の時間と GPU の使用率へ（§13）、
+  hand-off の道で thread を起こす（§6.1）、set の配列を伸ばせる形に（§5.5）、組み置きの run を retire に通す（§5.6）、`--submit-all` を P-B に（§12）、
+  back-pressure の専用の cond（§6.5）、sync.c の直の lock の包み（§6.4）、fork の prepare・parent（§6.6）、H1b（§12）、build の失敗と pre-scan（§5.5）、
+  P-C の引き戻しの条件（§7）。
