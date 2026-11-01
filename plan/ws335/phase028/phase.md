@@ -2,7 +2,7 @@
 
 # ws335-p028: handshake の message の encode と syntax の確かめ
 
-Status: 実装済み・試験 PASS（2026-11-02 Sonnet q1893-i01。cleared の判定は Q1）。前: planned（2026-11-01 p001 が作成。依存: p025）
+Status: cleared（2026-11-02 02:34 Q1、main で test-msg PASS。拡張の alert の分けは p035。依存: p025）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物

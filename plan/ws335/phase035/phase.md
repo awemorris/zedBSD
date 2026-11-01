@@ -18,3 +18,7 @@ Parent: [WS335](../ws.md)。担当: conformance-reviewer（他に作業が無い
 - 2026-11-01 p002: `cryc-hash.h` の HKDF（extract・expand）と HMAC の init の comment に、NULL の pointer と 0 でない長さの組が EINVAL である事を書く（今は ENOTSUP だけを約束）。
 - 2026-11-01 p002: `plan/ws335/tests/run-unit.sh --win32` が新しい Wine の prefix を作る時、この host では `wineboot -i` が kernel32.dll を読めず止まる（担当は ws334-p019 の prefix を写して回避）。prefix の作り方を直すか、出来た prefix を写す手順を script に入れる。
 
+
+## Q1 の追記（2026-11-02 02:35）
+
+- p028 の結果から: ServerHello・HelloRetryRequest で、知っていてその message に指定の無い拡張は RFC 8446 4.2 どおり illegal_parameter、送っていない拡張は unsupported_extension に分ける（sslc-msg.c と header の comment）。`sslc_msg_write_client_hello` の EINVAL の一覧も header に足す。

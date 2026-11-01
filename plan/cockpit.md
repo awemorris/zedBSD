@@ -42,6 +42,8 @@
 
 - 2026-11-02 02:2x: p026（TLS の record の保護）cleared。RFC 8448 の record 41 件が一致、9 suite、定数時間の試験 PASS。
 
+- 2026-11-02 02:34: p028（handshake の message の encode と読み）cleared。test-msg 936784 checks、RFC 8448 の ClientHello と送る拡張は byte 一致。
+
 ### WS074 Web ブラウザ
 
 - 2026-11-01 20:1x: origin/browser（クラウド、dev153 = 3,113 / 3,473）を main に merge（272e6c226、push 済み）。同じ基点から P8（local）も i17 で 3,125 / 3,472 まで進めていたので、縦書きの inline の装飾は P8 の版を採って衝突を解いた。host build は warning 0。merge の後の WPT の測り直しは未実施（クラウドのセッションの次の測定で分かる）。
