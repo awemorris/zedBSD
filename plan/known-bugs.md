@@ -430,5 +430,5 @@ Preserve both topologies when investigating; the passing order is no general fix
 | [BUG-390](bugs/BUG-390.md) | Pi 5 の CI の image で App Home の icon が出ない | open（2026-11-02 01:27 Q1 が起票、ユーザーの Pi 5 の UAT） |
 | [BUG-391](bugs/BUG-391.md) | compositor が落ちると login の画面から出直し、tablet で login できない | open（2026-11-02 01:27 Q1 が起票、ユーザーの Pi 5 の UAT） |
 | [BUG-392](bugs/BUG-392.md) | 初期の PIN を 0000 にし、login・lock の画面で PIN の入力を既定に（UAT の要望） | open（2026-11-02 01:27 Q1 が起票、ユーザーの Pi 5 の UAT） |
-| [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の driver が起動時にテストの描画（自己試験）を行う | fixed（2026-11-02 P3 q1891-i01、自己試験は既定で off・`rpi4gpu.selftest=1` で on、Pi 4 も同じ。build warning 0、Pi 5 の実機は ticket） |
+| [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の driver が起動時にテストの描画（自己試験）を行う | fixed（2026-11-02 P3 q1891-i01、自己試験と試験の絵は既定で off・`rpi4gpu.selftest=1` で on、R1・P1 も短く、Pi 4 も同じ。Pi 5 の実機で自己試験の行 0・desktop と mview OK・storage まで 6315→1203 ms。Pi 4 の実機は未実施） |
 | [BUG-394](bugs/BUG-394.md) | 起動が長い（network の待ちが desktop の前に戻った見込み）、init が desktop を優先して順番を組めるように | open（2026-11-02 01:39 Q1 が起票、ユーザーの UAT） |
