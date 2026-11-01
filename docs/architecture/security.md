@@ -304,7 +304,8 @@ The graphical login screen and the lock screen accept three kinds of
 credential, called styles:
 
 - **password**: the account's password, as everywhere else;
-- **pin**: a six-digit PIN the user sets in Settings > Users;
+- **pin**: a PIN of four to six digits; a person's new account has the PIN
+  0000, which the user changes in Settings > Users;
 - **fido2**: a FIDO2 security key the user registers in Settings > Users,
   touched (or tapped on an NFC reader) and unlocked with the key's own PIN.
 
@@ -407,22 +408,25 @@ the key's request and answers `fail timeout`.
 ### Failure counts and delays
 
 sessiond counts the failures in a row for each account (by user ID; the
-unknown names share one count) and style in memory. They are never written
-to a file, so that an attempt leaves no trace an attacker could time or
-watch. An attempt is counted before passkey is started and the count is
+unknown names share one count) and style in memory. Only the wrong PINs in a
+row are also kept in a file, `/var/db/sessiond/pin-tries` (root's alone, mode
+0600 in a directory of mode 0700, one line `UID TRIES` for each account with
+some), written before passkey is started; the other counts are never written,
+so that an attempt leaves as little trace as it can. An attempt is counted before passkey is started and the count is
 cleared only by a success, so a crash or a timeout in the middle of an
 attempt counts as a failure. After a failure the answer waits: 2 seconds,
 doubling after every three failures in a row, up to 16 seconds, for every
 style of the account together. A wrong password given to set or remove a
 PIN or a key counts the same way.
 
-The PIN is offered for an account only after that account has logged in or
-unlocked with its password or a security key, or proved its password to set
-or remove its PIN or a key, since sessiond started, like a phone that asks for
-its passcode after a restart. So a restart, which anyone
-at the login screen can cause, gives no new PIN attempts. After five wrong
-PINs in a row the PIN is turned off again until the next password or
-security key login. A security key counts its own wrong PINs and locks
+The PIN is offered from the start, before any password: a tablet without a
+keyboard logs in and unlocks with the PIN on the screen's keypad, so a rule
+that asked for the password first after a restart would lock it out. After
+five wrong PINs in a row the PIN is turned off until the account logs in or
+unlocks with its password or a security key, or proves its password to set
+or remove its PIN or a key. Because the wrong PINs are kept in their file, a
+restart, which anyone at the login screen can cause, gives no new PIN
+attempts. A security key counts its own wrong PINs and locks
 itself after eight.
 
 ### /etc/passkey
@@ -449,17 +453,24 @@ later version is only read. A malformed line is ignored and logged once.
 
 When an account is removed, its lines go first, before its `/etc/shadow`,
 `/etc/passwd` and `/etc/group` entries; adding an account removes any line
-left for its name. Resetting a user's password through account
+left for its name and, for a person's account, adds the PIN 0000. Resetting a user's password through account
 administration removes the user's PIN and security keys too, since a reset
 often follows a lost or misused account.
 
 ### The PIN
 
-A PIN is exactly six decimal digits, hashed like a password (SHA-512 crypt).
+A PIN is four to six decimal digits, hashed like a password (SHA-512 crypt).
 Setting, changing or removing it requires the account's current password. An
-account whose password is locked cannot have a PIN. Six digits give a
-million combinations: the protection is the file's permissions, the limit of
-five attempts and the rule that a restart gives no new ones, not the hash.
+account whose password is locked cannot have a PIN.
+
+A person's account is given the PIN 0000 when it is made (Settings' or
+root's account administration, and the default user of an image), so that a
+tablet without a keyboard can log in before anyone has set a PIN; the user
+changes it in Settings. This is weaker than a PIN the user chose: anyone who
+knows the default can log in to an account whose PIN was never changed.
+Four digits give ten thousand combinations and six a million: the
+protection is the file's permissions, the limit of five attempts and the
+file of wrong attempts that a restart does not clear, not the hash.
 
 ### The security key
 
@@ -575,7 +586,7 @@ above. What the key is (how many keys, a key's name, whether it has a PIN,
 its retries) is told without any secret. Its PIN is checked by the key
 alone, which counts the wrong ones itself (eight in all, three per power
 cycle), so `KEYINFO` and `KEYPIN` are not attempts of the account: they
-neither count, clear the counts, delay nor offer the six-digit PIN. A reset
+neither count, clear the counts, delay nor offer the account's PIN. A reset
 erases every credential and the PIN on the key, so it asks the account's
 password, counted as a password attempt; once passkey-fido2 says the
 password was right (`status verified`) the counts are cleared as by a
