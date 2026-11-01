@@ -2,7 +2,7 @@
 
 # ws335-p016: DER の reader と PEM・base64
 
-Status: 実装済み・試験 PASS（2026-11-02 01:40 Sonnet、q1877-i01。cleared は Q1 が決める。起動は Q1。依存: p002）
+Status: cleared（2026-11-02 01:47 Q1、main 03a1ab446。main で test-der 1967・test-pem 666 PASS。bundle 121 枚・limbo 19,587/19,589 枚が読める）。前: 実装済み・試験 PASS（2026-11-02 01:40 Sonnet、q1877-i01。cleared は Q1 が決める。起動は Q1。依存: p002）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -106,3 +106,8 @@ git diff --check
 header と phase.md の食い違い: header の cryc_der_boolean の comment は「length other than 1」だけだが、tag を見ない。header の `cryc_der_small_integer` の ERANGE は「max を越える」だけで、5 byte 以上の大きさを含むと解釈した。他は見つからなかった。
 
 未実施: vectors.py が変換しない形式の vectors は使っていない（PEM の例は RFC 7468 Figure 6・7 を出典の comment 付きで試験に data として置いた、alphabet は RFC 4648 Table 1 を出典の comment 付きで置いた。他に data は無し）、run-ct（この Phase は秘密を扱わない）、32 bit の size_t の機械、aarch64 Windows の実行（build のみ）、性能の測定、実機・QEMU（範囲外）。
+
+### Q1 の記録（2026-11-02 01:47）
+
+- 破壊の確かめの 1 回目で、試験の無限 loop の失敗の出力を python が溜め、数分 100 GB 超の memory を使った（host の used 130 GB、kill で解放、他への害は見ていない）。以後の破壊の確かめは、試験の loop に上限を付け、出力を file に書き、size と memory に上限（ulimit など）を付けて流す。
+

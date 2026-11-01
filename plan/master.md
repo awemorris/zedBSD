@@ -34,7 +34,7 @@
 | P7 | — | 返却。q1848（VF2 の desktop の計測）は 21:35 に終わった。次は未割当 |
 | P7 | — | 返却（q1858 の WS334 p027 の guest の確かめは PASS）。次は未割当 |
 | P4 | — | 返却（q1860 の WS291 p027 の arm64・riscv64 の回帰は PASS）。次の Bug の割当を待つ |
-| Sonnet ×3 | q1877・q1885・q1893 | [WS335](ws335/ws.md) p016 DER と PEM・p026 record の保護・p028 handshake の message（p009・p025・p027 は cleared） |
+| Sonnet ×3 | q1885・q1893・q1895 | [WS335](ws335/ws.md) p026 record の保護・p028 handshake の message・p017 X.509 の parse（p016 は cleared） |
 | Sonnet | q1883 `s-ws324-p006c` | [WS324](ws324/ws.md) p006c: H.265 の解析の rps・ps（p006b は cleared） |
 | P4 | — | 返却。[BUG-390](bugs/BUG-390.md) は fixed。次の Bug を待つ |
 | P8 | q1890 `p8-bug391` | [BUG-391](bugs/BUG-391.md)・[BUG-392](bugs/BUG-392.md): compositor が落ちた時の再開と PIN の既定 |
@@ -116,7 +116,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-395 · q1895 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-395 · q1896 · WS342 · KL_VERSION 106（105 は WS334 p027 の q1856）。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

@@ -19,7 +19,6 @@
 - WS074 は Claude のクラウドのセッションが担当（2026-11-01 ユーザー）。成果は origin/browser にあり、Q1 が main に merge する。P8 は立てない。
 - WS335・WS336（Sonnet）・WS334（P7）の pending の Queue（q1835・q1836・q1837）は今回は起動しない。
 - 試験の担当 T・ブラウザの B1 は今は立てていない。
-| Sonnet | phase-runner-low | ws335 p016 (q1877-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p016` / `agent/s-ws335-p016` | in-progress（2026-11-02 00:24 起動） | — |
 
 | Sonnet | phase-runner-low | ws324 p006c (q1883-i01) | `/home/awe/zedBSD-worktrees/s-ws324-p006c` / `agent/s-ws324-p006c` | in-progress（2026-11-02 01:07 起動） | — |
 
@@ -29,3 +28,5 @@
 | Sonnet | phase-runner-low | ws334 の TLS の誤りの文 (q1888-i01) | `/home/awe/zedBSD-worktrees/s-ws334-errstr` / `agent/s-ws334-errstr` | in-progress（2026-11-02 01:25 起動） | — |
 
 | Sonnet | phase-runner-low | ws335 p028 (q1893-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p028` / `agent/s-ws335-p028` | in-progress（2026-11-02 01:41 起動） | — |
+
+| Sonnet | phase-runner-low | ws335 p017 (q1895-i01) | `/home/awe/zedBSD-worktrees/s-ws335-p017` / `agent/s-ws335-p017` | in-progress（2026-11-02 01:47 起動） | — |
