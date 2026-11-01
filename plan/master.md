@@ -22,6 +22,8 @@
 
 <!-- master:agents:start -->
 **引き継ぎ（2026-11-01 07:07、Q1、host の再起動の前）**: ユーザーが host を再起動する（Vivado などで負荷が高い）。全担当をラップアップした。次のセッションの Q1 は [cockpit.md](cockpit.md)・この表・[queue.md](queue.md) の最後の行から再開する。
+**再起動の後の修理（2026-11-01 08:05、Q1）**: 07:22 の host の再起動で、06:56〜07:10 に書いた file が空になった（main の .git の object 242 個、作業ツリーの file）。GitHub の main（e33011813、07:11 に push 済み）から object を補い（空の object は /home/awe/zedBSD-recovery/empty-objects へ退避）、空の file を HEAD から戻した（main の 35 個、p8-ws074 の 49 個）。Sonnet の 5 本（s-ws335-p003・p006・p008、s-ws336-p004・p005）は push されておらず commit と checkout が消えたので、main e33011813 から worktree を作り直し、残っていた source と phase.md を commit し直した（下の表の SHA は作り直した物）。担当の worktree の build/ に、その時間の出力が空で残っている（約 850 個）。使う前にその出力を作り直す。`~/.local/bin/python3`・`~/.local/bin/vivado` も空（別のセッションの wrapper）。PATH の python3 は何もせずに 0 で終わるので、直るまで `/usr/bin/python3` を使う。
+**今の割り振り（2026-11-01 08:2x、ユーザーの指示）**: まず open の Bug を全部直す。Bug の担当は VF2（P1: BUG-386 → BUG-385）と RTX（P2: BUG-374）に 1 人ずつ。他は WS335（Sonnet p003）・WS336（Sonnet p004）・WS334（P7）・WS074（P8）に 1 人ずつ。
 再開の手順: (1) `git log -1` と registry の SHA を確かめる。(2) 担当は同じ名前・同じ worktree で起動し、phase.md の「再開点」・「結果」から続けさせる。worktree の build/ の toolchain は main の build/ への symlink（無ければ作ってから起動）。
 (3) /tmp は tmpfs で消える（P8 の /tmp/p8out の dev148・acid148 も消える。次の自走は測り直しから）。(4) 新しい worktree の作成は 10 分ほどかかる事がある（disk の負荷）。(5) Wine の新しい prefix は `wineboot -i` で作れない（WS335 の担当は s-ws335-p002 の build/tmp/ws335-wine を写す）。
 
@@ -29,7 +31,7 @@
 | --- | --- | --- | --- |
 | P7 | q1808-i01 ラップアップ | [WS334 p021](ws334/phase021/phase.md) 統合: p021 の commit は全部 main（8a27af470）、残りは run-unit all の単独の実行（phase.md の再開点のコマンド）→ 1 つの .exe の build と libkeiland の pthread 抜き（ws.md の 2026-11-01 の決定） | — |
 | P8 | q1727-i15 ラップアップ | [WS074](ws074/ws.md) phase260 の自走（100% まで、返却のたびに同じ目標で起動し直す）。i14 の終わりで 3,107（89.49%）、Acid2・3 100% | — |
-| Sonnet | q1820〜q1824 ラップアップ（全部 uncleared、source だけ commit、試験は未作成・未実行） | WS335 p003（s-ws335-p003 の 8e06b344e、cryc-sha3.c）・p006（s-ws335-p006 の e95bacc79、cryc-chacha.c）・p008（s-ws335-p008 の 1e11aeaca、cryc-f25519.c、x25519 は未）、WS336 p004（s-ws336-p004 の 8a9d00e6d、ssh-cipher・ssh-packet）・p005（s-ws336-p005 の 4b01c55e5、ssh-key）。同じ worktree で起動し直し、各 phase.md の結果の節の「次の手」（試験を書く → 流す → 壊す確かめ）から続ける。main には未 merge | — |
+| Sonnet | q1820〜q1824 ラップアップ（全部 uncleared、source だけ commit、試験は未作成・未実行） | WS335 p003（s-ws335-p003 の 83a9cd131、cryc-sha3.c）・p006（s-ws335-p006 の c27c65007、cryc-chacha.c）・p008（s-ws335-p008 の 361aec12f、cryc-f25519.c、x25519 は未）、WS336 p004（s-ws336-p004 の 2418e1b03、ssh-cipher・ssh-packet）・p005（s-ws336-p005 の e22e7431c、ssh-key）。同じ worktree で起動し直し、各 phase.md の結果の節の「次の手」（試験を書く → 流す → 壊す確かめ）から続ける。main には未 merge | — |
 | P1〜P6 | 返却・ラップアップ | 割当なし（P3 の RTX は uncleared: G1 は (b) の設計とユーザーの判断が要る） | — |
 
 **次のセッションの始めにする事**:
@@ -111,7 +113,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-387 · q1825 · WS338 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-389 · q1833 · WS339 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -191,6 +193,7 @@ BUG-387 · q1825 · WS338 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | planning | WS318 の completed の後 |
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
 | [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
+| [WS338](ws338/ws.md) | MG006 | libmedia の H.264 の software の decoder の速さの続き（WS326 から分けた、2026-11-01 ユーザー） | planning | p001 設計（担当の割当はユーザーの指示で） |
 | [WS329](ws329/ws.md) | MG006 | libmedia の H.264 の software の encoder（標準廉価実装手順、decoder と共通化）（2026-10-30 ユーザー） | planning | WS326 の completed の後に p001 設計（Opus） |
 | [WS330](ws330/ws.md) | MG006 | libmedia の H.265 の software の decoder と encoder（標準廉価実装手順、H.264 と共通化）（2026-10-30 ユーザー） | planning | WS329 の completed の後に p001 設計（Opus） |
 | [WS292](ws292/ws.md) | MG006 | GHCI の session の保護（PROT）を zedBSD の driver に（WS290 の後） | planning | p001 設計（WS290 と G29 の回答の後） |

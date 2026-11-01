@@ -455,7 +455,7 @@
     var handover = null;
     function makeEntry(url, navState, classic, from) {
       return { url: url, key: uuid(), id: uuid(), navState: navState, classic: classic, scroll: null,
-        scrollMode: from ? from.scrollMode : 'auto', nhe: null, docId: docId };
+        scrollMode: from ? from.scrollMode : 'auto', nhe: null, docId: docId, noRef: false };
     }
     // The first entry follows the document's URL until it is left (the URL is set after this runs).
     var loadedURL = null;
@@ -463,6 +463,20 @@
     function leave(entry) {
       if (entry.url === null) { entry.url = docURL(); loadedURL = entry.url; }
       saveScroll(entry);
+    }
+    // The referrer policy the document has now: the last valid <meta name=referrer>.
+    function censorEntries() {
+      var metas, i, policy = '', value;
+      try {
+        metas = g.document.querySelectorAll('meta[name]');
+        for (i = 0; i < metas.length; i++) {
+          if (String(metas[i].getAttribute('name')).toLowerCase() !== 'referrer') continue;
+          value = String(metas[i].getAttribute('content') || '').trim().toLowerCase();
+          if (['no-referrer', 'no-referrer-when-downgrade', 'same-origin', 'origin', 'strict-origin', 'origin-when-cross-origin',
+            'strict-origin-when-cross-origin', 'unsafe-url'].indexOf(value) >= 0) policy = value;
+        }
+      } catch (e) { policy = ''; }
+      for (i = 0; i < entries.length; i++) if (entries[i].docId === docId) entries[i].noRef = policy === 'no-referrer';
     }
     function findEntry(key) {
       for (var i = 0; i < entries.length; i++) if (entries[i].key === key) return entries[i];
@@ -475,7 +489,8 @@
         super();
         hidden(this, '_e', entry);
       }
-      get url() { return active() ? urlOf(this._e) : ''; }
+      // The url of an entry of a document that was left under a no-referrer policy is hidden from the documents after it.
+      get url() { return !active() ? '' : this._e.noRef && this._e.docId !== docId ? null : urlOf(this._e); }
       get key() { return active() ? this._e.key : ''; }
       get id() { return active() ? this._e.id : ''; }
       get index() { return active() ? entries.indexOf(this._e) : -1; }
@@ -788,7 +803,7 @@
     function initialBlank() { return native.initialBlank(); }
     // A navigation to another document in this frame: the entries as they will be, handed to the document that loads.
     function packEntry(e) {
-      return { url: urlOf(e), key: e.key, id: e.id, navState: e.navState, classic: e.classic, scrollMode: e.scrollMode, docId: e.docId };
+      return { url: urlOf(e), key: e.key, id: e.id, navState: e.navState, classic: e.classic, scrollMode: e.scrollMode, docId: e.docId, noRef: e.noRef };
     }
     function leaveForDocument(o) {
       var frame = null, list, target, index, old, h;
@@ -796,6 +811,7 @@
       if (!frame || o.formData || (o.downloadRequest !== undefined && o.downloadRequest !== null)) return false;
       old = entries[current];
       leave(old);
+      censorEntries();
       list = entries.slice();
       index = current;
       if (initialBlank()) o = { type: 'replace', url: o.url, navState: null };
@@ -829,7 +845,7 @@
     // The document that was loaded after another of its frame: the entries are the ones that were handed over.
     function unpackEntry(r) {
       return { url: r.url, key: r.key, id: r.id, navState: r.navState ? { v: structuredClone(r.navState.v) } : null,
-        classic: r.classic ? { v: structuredClone(r.classic.v) } : null, scroll: null, scrollMode: r.scrollMode, nhe: null, docId: r.docId };
+        classic: r.classic ? { v: structuredClone(r.classic.v) } : null, scroll: null, scrollMode: r.scrollMode, nhe: null, docId: r.docId, noRef: !!r.noRef };
     }
     function adoptHandover() {
       var h = handover, i, fromEntry = null;
@@ -838,7 +854,7 @@
       docId = entries[current].docId;
       entries[current].url = null;
       classicState = entries[current].classic ? deserialize(entries[current].classic) : null;
-      for (i = 0; i < entries.length; i++) if (entries[i].key === h.from.key && entries[i].id === h.from.id) fromEntry = entries[i];
+      for (i = 0; h.from && i < entries.length; i++) if (entries[i].key === h.from.key && entries[i].id === h.from.id) fromEntry = entries[i];
       if (!fromEntry && h.from) fromEntry = unpackEntry(h.from);
       return new NavigationActivation(KEY, fromEntry ? nhe(fromEntry) : null, nhe(entries[current]), h.type);
     }

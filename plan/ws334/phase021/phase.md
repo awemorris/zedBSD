@@ -3,7 +3,7 @@
 # ws334-p021 統合: libbrowser の OS に触れる所を OS の層へ（network を除く）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §2.2・§3.4・§9.1。
-- 状態: in-progress（2026-11-01 04:49 q1808、P7。2026-11-01 07:07 中断: host の再起動、下の「再開の点」）。
+- 状態: cleared（2026-11-01 Q1、main 2c7e666e2。実装済み・試験 PASS、2026-11-01 08:26 q1808-i02、P7）。
 - 依存: p005（os-system）・p006（os-file）・p008（os-time）・p020（sources.mk と Windows の build の第 1 段）。
 - 担当の想定: Opus（phase-runner）を 1 回。module の約束は各 header（`base/os-*.h`）の comment で、この Phase は呼び出しを替えるだけ。挙動を変えない（zedBSD・Linux の host の結果は前と同じ）。
 
@@ -87,8 +87,9 @@ commit（`git commit -m WIP -- <path>`、file の群ごと）:
 - zedBSD amd64（`make ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-claude1/build/llvm/bin ZEDBSD_SYSROOT_AMD64=<写し> -o <写し>/.zedbsd-sysroot-complete -j16 build/amd64/dynamic/libbrowser.so build/amd64/bin/browser`）→ exit 0、warning 0。sysroot は p020 と同じく `build/tmp/p021/sysroot-amd64` に写し、tree の `include/libc`・`userland/desktop/include` を重ねた。
 - `timeout 3000 sh plan/ws334/tests/cross-build.sh` → `cross-build: PASS`（win64: compat 26 imports、libbrowser-core 126 imports、winarm64: 24・122、全部が表の中。遅延の import と Wine の 2 通りも PASS）。libbrowser-core は 189 の object（`LIBBROWSER_SOURCES` から posix の OS の層 3 つと net/loader・http・tls・cookie、page/storage を除く）が x86_64・aarch64 とも warning 0（`-Werror`）。
 - Wine（`build/tmp/ws334-wine`、zone は host の Asia/Tokyo）: script の core（`LIBBROWSER_SCRIPT_SOURCES` の win32 の object）と Windows の OS の層と `script-tool-main.c` を `-static` で link した `script-tool.exe`（import は KERNEL32・CRYPT32・bcrypt・UCRT の api-ms-win-crt-* だけ、winpthreads は静的）: `new Date(0).toString()` → `Thu Jan 01 1970 09:00:00 GMT+0900 (Japan Standard Time)`、`getTimezoneOffset()` → -540、`Date.now()` は 13 桁の整数、`script-tool random` → 16 byte の乱数（2 回で違う値）。
+- Wine の別の zone（2026-11-01 08:27、q1808-i02、同じ `script-tool.exe` と `date.js`、`flock /tmp/zedbsd-wine.lock`）: `TZ=America/New_York` → `Wed Dec 31 1969 19:00:00 GMT-0500 (Eastern Standard Time)`・夏の 2026-07-01 は `GMT-0400 (Eastern Daylight Time)`・offset 300（Linux の host の答えと同じ）。`TZ=Europe/London` → 冬は `GMT+0000 (Greenwich Mean Time)`、夏は `GMT+0100 (British Summer Time)`。Wine の registry の夏の名前は "GMT Daylight Time" なので、"British Summer Time" は Windows の key（GMT Standard Time）から os-zones の CLDR の表を引いた道を通った印。1970-01-01 の London は Windows の時刻帯の data に 1968〜1971 の英国標準時（年中 +1）が無いので +0000 になる（Linux の host は +0100。Windows の data の限りで、os-time の誤りではない）。
 - `git diff --check` → 出力なし。
-- **未検証** `LC_ALL=C.UTF-8 timeout 3600 sh plan/ws334/tests/run-unit.sh all`: 1 回目（781ec96c8 の worktree）は `run-unit: FAIL`。Wine の 6 本は「wine server に繋げない」（cross-build.sh と別の Wine の試しを同時に流したため）、test-files の posix・win32 は負荷で時間切れ（exit 124）。2 回目を単独で流し、cf-html・files・frame・ico・input・keys-table・media-os の posix・win32 と os-file の posix の 15 本が PASS（FAIL 0）の所で、host の再起動のため止めた。残りの試験は未実施。p021 は module と試験の道具を変えていない。
+- `LC_ALL=C.UTF-8 timeout 3600 sh plan/ws334/tests/run-unit.sh all`（2026-11-01 08:22〜08:26、q1808-i02、main 143245b82 の tree、他の Wine と並べないよう `flock /tmp/zedbsd-wine.lock` で包んで単独に）→ `run-unit: PASS`。34 本（posix 16・win32 18）が PASS、FAIL 0。log は `build/tmp/p021/run-unit-3.log`。これより前の 2 回（1 回目は Wine の同時の実行と負荷で FAIL、2 回目は host の再起動で中断）の出力は使わない（再起動で壊れた file を含む）。
 
 自分で決めた点・phase.md と code の食い違い:
 
@@ -107,15 +108,13 @@ commit（`git commit -m WIP -- <path>`、file の群ごと）:
 
 未実施:
 
-- Wine の別の zone（`TZ=America/New_York`）で Windows の長い名前の道（表の key → 名前）を見る確かめ: 新しい prefix を 2 つ作って試したが、host の負荷で prefix の作成が 300 s で切れた物と、`could not load kernel32.dll` になった物で、流せていない。Tokyo の "Japan Standard Time" は POSIX の略号の表と Windows の表の両方で同じ文字なので、Windows の道を通ったことの区別にはならない。
 - `crypto.getRandomValues` を Wine で JavaScript から呼ぶこと（script の core だけの realm に crypto が無い。`wb_os_random` を同じ object から直に呼んで確かめた）。
 - 実機の Windows、aarch64 の Windows の実行（compile と link の表だけ）、zedBSD arm64・Linux の Keiland・FreeBSD の build。
 
-## 再開の点（2026-11-01 07:07、host の再起動で中断）
+## 再開の点（2026-11-01 07:07 に中断、08:26 に q1808-i02 で残り 1 を済ませた）
 
-- main に入った物: 4d451e9d3（e0e0dae6e で merge 済み）。merge を待つ物（検証済み、この順）: 525bc577a、781ec96c8、8c4fc75b4。この節の記録は別の commit。
-- 残り 1（p021 の受け入れ）: 他の Wine と並べずに単独で `cd /home/awe/zedBSD-worktrees/p7-ws334 && LC_ALL=C.UTF-8 timeout 3600 sh plan/ws334/tests/run-unit.sh all > build/tmp/p021/run-unit-3.log 2>&1; tail -1 build/tmp/p021/run-unit-3.log`。`run-unit: PASS` なら上の「未検証」の行を直し、ws.md の p021 の行を「実装済み・試験 PASS」にして Q1 に。
-- 残り 1 の任意: Wine の別の zone の確かめ（`build/tmp/ws334-wine` の wineserver が止まっている時に `WINEPREFIX=$PWD/build/tmp/ws334-wine TZ=America/New_York WINEDEBUG=-all timeout 600 wine build/tmp/p021/win64/script-tool.exe build/tmp/p021/win64/date.js`。script-tool.exe と date.js は `build/tmp/p021/win64/` にある。無ければ上の結果の節の link の形で作り直す）。Linux の host の答えは "Eastern Standard Time"・"Eastern Daylight Time"、offset 300。
+- main に入った物: 4d451e9d3・525bc577a・781ec96c8・8c4fc75b4（全部 main 143245b82 の祖先）。
+- 残り 1（p021 の受け入れの run-unit.sh all と任意の zone の確かめ）: 済み（上の結果）。
 - 残り 2（p021 の後、同じ Queue の追い、p021 の commit に混ぜない。Q1 の 2026-11-01 の指示）:
   1. 単一の .exe（DLL を作らない。libbrowser・libmedia・libkeiland・compat・winpthreads・当面の OpenSSL を静的に、vulkan-1.dll は遅延の import のまま）: design.md §6（§6.1 の winpthreads の注、§6.2 の配る形・DLL の一覧・export（Windows では .def・exports.map が要らない）、§6.6・§6.8 の OpenSSL の静的な library と license の文）を直す。WS335 の注（main 8e44fa17e、plan/ws335/design.md §4.2・§4.4）も §6 に: 切り替えの時は WS335 の 2 つの sources.mk で libssl-compat.a・libcrypto-compat.a と -lbcrypt -lcrypt32 -lws2_32 を link、OpenSSL とその license の文を外す、ca-certificates の束を .exe の隣の cert.pem に、SSL_set_fd の前に WSAStartup、Zlib の license の文。p030 の前に net/tls.c の表の OpenSSL だけの項（p030 が足す証明書ごとの検証の callback など）を任意にする。
   2. ws.md に p035 の前の新しい Phase の行（次の空き番号）を足し、`apps/browser-win32/Makefile` と build の glue で `make browser-win64` が 1 つの .exe を作る形にし、`llvm-readobj --coff-imports`（か `objdump -p`）で system の DLL だけを import することを確かめ、win32 の単体の試験を Wine で流す。

@@ -76,6 +76,8 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 
 ## 未決（その Phase の前に確かめる）
 
+- 2026-11-01 09:05 ユーザーから、p024 の残り G1 は (b)「記録の時に push buffer まで作る」で、設計の Phase から始める、という趣旨の答えを受けた（数日の規模、HAL と UAPI は変えない見込み、設計と敵対的レビューの後に実装）。担当は RTX の Bug の後（P2 の予定）。
+
 - （決まった 2026-10-29）NVIDIA の Linux の基準の driver: ユーザーの回答（クリック）「NVK（nouveau） (推し)」。GPU は RTX 2070（TU106）。
 - PowerVR の 50 fps の基準: Linux との比較か、50 fps の絶対値か（VF2 の Linux の PowerVR の driver の有無で決まる）。
 

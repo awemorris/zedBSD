@@ -7,8 +7,9 @@
 
 /*
  * What libkeiland asks of Windows: the wake is a manual-reset event object
- * the dispatch waits on, the lock a mutex and the threads POSIX threads of
- * the C library's pthread layer.
+ * the dispatch waits on, the lock a slim reader-writer lock taken
+ * exclusively, and the threads the system's own (CreateThread), identified by
+ * their numbers.  No POSIX thread layer is used.
  */
 
 #include "userland/desktop/libkeiland/platform/platform.h"
@@ -16,8 +17,8 @@
 #include <windows.h>
 
 #include <errno.h>
-#include <pthread.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 /*
  * The most bytes of a thread's name the debugger is given; a longer name is
@@ -29,10 +30,32 @@
 #define PLATFORM_UTF8_MASK		0xC0U
 #define PLATFORM_UTF8_CONTINUATION	0x80U
 
+/* The lock's room holds the system's lock (one pointer). */
+_Static_assert(sizeof(SRWLOCK) <= sizeof(((struct keiui_lock *)0)->room), "a lock fits its room");
+_Static_assert(_Alignof(SRWLOCK) <= _Alignof(void *), "a lock is aligned in its room");
+
+/* The thread's number is the system's DWORD. */
+_Static_assert(sizeof(DWORD) == sizeof(((keiui_thread_id *)0)->number), "a thread's number fits");
+
 /* The system's call that names a thread, as GetProcAddress gives it. */
 typedef HRESULT (WINAPI *platform_describe_function)(HANDLE thread, PCWSTR description);
 
+/*
+ * What a new thread runs: the function and its argument, handed from the
+ * starting thread to the new one on the heap.  The new thread frees it before
+ * it runs the function; when the thread does not start, the starting thread
+ * frees it.
+ */
+struct platform_start {
+	void *(*run)(void *);
+	void *argument;
+};
+
 static int platform_wake_error(DWORD code);
+static int platform_thread_error(DWORD code);
+static int platform_thread_create(void *(*run)(void *), void *argument, HANDLE *handle, DWORD *number);
+static DWORD WINAPI platform_thread_main(LPVOID parameter);
+static SRWLOCK *platform_lock(struct keiui_lock *lock);
 
 /*
  * Opens a wake: a manual-reset event object that starts quiet, has no name
@@ -143,43 +166,48 @@ keiui_wake_event(
 }
 
 /*
- * Opens a lock.
+ * Opens a lock: a slim reader-writer lock, which needs no closing and never
+ * fails to open.
  */
 int
 keiui_lock_open(
 	struct keiui_lock *lock)
 {
-	int error;
+	SRWLOCK *slim;
 
-	/* The mutex. */
-	error = pthread_mutex_init(&lock->mutex, NULL);
-	if (error != 0)
-		return error;
+	/* The lock in its room, free. */
+	slim = platform_lock(lock);
+	InitializeSRWLock(slim);
 
 	/* Succeeded. */
 	return 0;
 }
 
 /*
- * Closes a lock nobody holds.
+ * Closes a lock nobody holds: a slim reader-writer lock holds nothing to
+ * release, so the room is only cleared.
  */
 void
 keiui_lock_close(
 	struct keiui_lock *lock)
 {
-	/* The mutex. */
-	(void)pthread_mutex_destroy(&lock->mutex);
+	/* Nothing of the system's to release. */
+	lock->room = NULL;
 }
 
 /*
- * Takes a lock, waiting while another thread holds it.
+ * Takes a lock, waiting while another thread holds it.  The lock is not
+ * recursive: the thread that holds it must not take it again.
  */
 void
 keiui_lock_take(
 	struct keiui_lock *lock)
 {
-	/* The mutex (it fails only for a lock never opened). */
-	(void)pthread_mutex_lock(&lock->mutex);
+	SRWLOCK *slim;
+
+	/* Taken exclusively. */
+	slim = platform_lock(lock);
+	AcquireSRWLockExclusive(slim);
 }
 
 /*
@@ -189,39 +217,42 @@ void
 keiui_lock_give(
 	struct keiui_lock *lock)
 {
-	/* The mutex. */
-	(void)pthread_mutex_unlock(&lock->mutex);
+	SRWLOCK *slim;
+
+	/* Released by the thread that took it. */
+	slim = platform_lock(lock);
+	ReleaseSRWLockExclusive(slim);
 }
 
 /*
- * Reports the calling thread's identity.
+ * Reports the calling thread's identity: its number, without a handle.
  */
 keiui_thread_id
 keiui_thread_self(void)
 {
-	pthread_t self;
+	keiui_thread_id self;
 
-	/* Asks the thread layer for the calling thread. */
-	self = pthread_self();
+	/* The system's number of the calling thread. */
+	self.number = GetCurrentThreadId();
+	self.handle = NULL;
 
 	/* The calling thread. */
 	return self;
 }
 
 /*
- * Reports whether the calling thread is the one named.
+ * Reports whether the calling thread is the one named, by the threads'
+ * numbers.
  */
 int
 keiui_thread_is(
 	keiui_thread_id thread)
 {
-	pthread_t self;
-	int same;
+	DWORD self;
 
 	/* The caller, compared. */
-	self = pthread_self();
-	same = pthread_equal(self, thread);
-	if (same == 0)
+	self = GetCurrentThreadId();
+	if (self != thread.number)
 		return 0;
 
 	/* The same thread. */
@@ -230,37 +261,30 @@ keiui_thread_is(
 
 /*
  * Starts a thread of the library's own that ends by itself (nobody joins
- * it).  Windows has no signals to block.  It names itself first
- * (keiui_thread_name).  Without a function to run nothing starts.
+ * it): its handle is closed at once, and the thread runs on.  Windows has no
+ * signals to block.  It names itself first (keiui_thread_name).  Without a
+ * function to run nothing starts.
  */
 int
 keiui_thread_start(
 	void *(*run)(void *),
 	void *argument)
 {
-	pthread_attr_t attributes;
-	pthread_t thread;
+	HANDLE handle;
+	DWORD number;
 	int error;
 
 	/* A thread needs something to run. */
 	if (run == NULL)
 		return EINVAL;
 
-	/* Detached, so that it leaves nothing behind when it ends. */
-	error = pthread_attr_init(&attributes);
-	if (error != 0)
-		return error;
-	error = pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
-	if (error != 0) {
-		(void)pthread_attr_destroy(&attributes);
-		return error;
-	}
-
 	/* The thread. */
-	error = pthread_create(&thread, &attributes, run, argument);
-	(void)pthread_attr_destroy(&attributes);
+	error = platform_thread_create(run, argument, &handle, &number);
 	if (error != 0)
 		return error;
+
+	/* Nobody waits for it, so its handle is not kept. */
+	(void)CloseHandle(handle);
 
 	/* Succeeded: the thread runs. */
 	return 0;
@@ -268,8 +292,8 @@ keiui_thread_start(
 
 /*
  * Starts a thread of the library's own that its owner waits for
- * (keiui_thread_join).  Without a function to run, or without a place to
- * keep the identity, nothing starts.
+ * (keiui_thread_join), which keeps its handle until then.  Without a
+ * function to run, or without a place to keep the identity, nothing starts.
  */
 int
 keiui_thread_start_joined(
@@ -277,6 +301,8 @@ keiui_thread_start_joined(
 	void *argument,
 	keiui_thread_id *thread)
 {
+	HANDLE handle;
+	DWORD number;
 	int error;
 
 	/* A thread needs something to run and an identity to be joined by. */
@@ -286,23 +312,36 @@ keiui_thread_start_joined(
 		return EINVAL;
 
 	/* The thread. */
-	error = pthread_create(thread, NULL, run, argument);
+	error = platform_thread_create(run, argument, &handle, &number);
 	if (error != 0)
 		return error;
+
+	/* Its identity, with the handle the join waits for. */
+	thread->number = number;
+	thread->handle = handle;
 
 	/* Succeeded: the thread runs. */
 	return 0;
 }
 
 /*
- * Waits for a thread started by keiui_thread_start_joined to end.
+ * Waits for a thread started by keiui_thread_start_joined to end, then closes
+ * its handle.  An identity without a handle names no thread to wait for.
  */
 void
 keiui_thread_join(
 	keiui_thread_id thread)
 {
-	/* The thread's end. */
-	(void)pthread_join(thread, NULL);
+	HANDLE handle;
+
+	/* Only a joined thread has a handle. */
+	handle = (HANDLE)thread.handle;
+	if (handle == NULL)
+		return;
+
+	/* The thread's end, then its handle. */
+	(void)WaitForSingleObject(handle, INFINITE);
+	(void)CloseHandle(handle);
 }
 
 /*
@@ -366,6 +405,111 @@ keiui_thread_name(
 	self = GetCurrentThread();
 	status = describe(self, wide);
 	(void)status;
+}
+
+/*
+ * Starts a thread that runs the function with its argument: the pair goes to
+ * the new thread on the heap (platform_thread_main frees it).  On success the
+ * thread's handle and number are reported; on failure nothing runs and the
+ * error number is returned: ENOMEM for no memory, EAGAIN when the system
+ * cannot make another thread, EIO otherwise.
+ */
+static int
+platform_thread_create(
+	void *(*run)(void *),
+	void *argument,
+	HANDLE *handle,
+	DWORD *number)
+{
+	struct platform_start *start;
+	HANDLE created;
+	DWORD code;
+
+	/* What the new thread runs. */
+	start = malloc(sizeof(*start));
+	if (start == NULL)
+		return ENOMEM;
+
+	start->run = run;
+	start->argument = argument;
+
+	/* The thread, with the default stack and security; it runs at once. */
+	created = CreateThread(NULL, 0, platform_thread_main, start, 0, number);
+	if (created == NULL) {
+		code = GetLastError();
+		free(start);
+		return platform_thread_error(code);
+	}
+
+	/* Succeeded: the new thread owns the pair now. */
+	*handle = created;
+	return 0;
+}
+
+/*
+ * A thread's first function: takes the function and argument off the heap,
+ * frees the pair and runs the function.  What the function returns is not
+ * kept (keiui_thread_join reports nothing).
+ */
+static DWORD WINAPI
+platform_thread_main(
+	LPVOID parameter)
+{
+	struct platform_start *start;
+	void *(*run)(void *);
+	void *argument;
+	void *result;
+
+	/* The pair, freed before the function runs. */
+	start = (struct platform_start *)parameter;
+	run = start->run;
+	argument = start->argument;
+	free(start);
+
+	/* The function. */
+	result = run(argument);
+	(void)result;
+
+	/* The thread ends. */
+	return 0;
+}
+
+/*
+ * The system's lock in a lock's room.
+ */
+static SRWLOCK *
+platform_lock(
+	struct keiui_lock *lock)
+{
+	/* The room is aligned and large enough for the lock (checked above). */
+	return (SRWLOCK *)(void *)&lock->room;
+}
+
+/*
+ * Turns a failure of the system's thread call into the error number a start
+ * reports: no memory (ENOMEM), no room for another thread (EAGAIN, as POSIX
+ * reports it), or another failure (EIO).
+ */
+static int
+platform_thread_error(
+	DWORD code)
+{
+	/* The codes that mean the system ran out of memory. */
+	if (code == ERROR_NOT_ENOUGH_MEMORY)
+		return ENOMEM;
+	if (code == ERROR_OUTOFMEMORY)
+		return ENOMEM;
+	if (code == ERROR_COMMITMENT_LIMIT)
+		return ENOMEM;
+
+	/* The codes that mean the system cannot make another thread now. */
+	if (code == ERROR_NO_SYSTEM_RESOURCES)
+		return EAGAIN;
+	if (code == ERROR_MAX_THRDS_REACHED)
+		return EAGAIN;
+
+	/* Any other failure. */
+	return EIO;
 }
 
 /*

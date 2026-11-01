@@ -1477,13 +1477,14 @@ test_disp_cursor(void)
 	}
 	check(nvrtx_get32(pio, 0) == 1 && zero, "disp cursor channel params");
 
-	/* The cursor on head 0: control and composition in one run, the object, the offset in 256-byte units. */
+	/* The cursor on head 0: control and composition in one run, the colour scale 255/256, the object, the offset in 256-byte units. */
 	nvrtx_push_init(&push, memory, 64);
 	nvrtx_disp_core_cursor_set(&push, 0, NVRTX_DISP_HANDLE_VRAM, 0x1e0040000ULL);
-	check(push.count == 7 && nvrtx_get32(memory, 0) == 0x0008209cU && nvrtx_get32(memory, 4) == 0x800001cfU &&
-	    nvrtx_get32(memory, 8) == 0x000072ffU && nvrtx_get32(memory, 12) == 0x00042088U &&
-	    nvrtx_get32(memory, 16) == 0xf0000001U && nvrtx_get32(memory, 20) == 0x00042090U &&
-	    nvrtx_get32(memory, 24) == 0x01e00400U, "disp core cursor set");
+	check(push.count == 9 && nvrtx_get32(memory, 0) == 0x0008209cU && nvrtx_get32(memory, 4) == 0x800001cfU &&
+	    nvrtx_get32(memory, 8) == 0x000072ffU && nvrtx_get32(memory, 12) == 0x00042228U &&
+	    nvrtx_get32(memory, 16) == 0x00000ff0U && nvrtx_get32(memory, 20) == 0x00042088U &&
+	    nvrtx_get32(memory, 24) == 0xf0000001U && nvrtx_get32(memory, 28) == 0x00042090U &&
+	    nvrtx_get32(memory, 32) == 0x01e00400U, "disp core cursor set");
 
 	/* The cursor off on head 1: control A8R8G8B8 disabled, no object. */
 	nvrtx_push_init(&push, memory, 64);

@@ -2,7 +2,7 @@
 
 # ws335-p003: SHA-3・SHAKE（Keccak）
 
-Status: in-progress（2026-11-01 06:59 q1820、Sonnet）
+Status: cleared（2026-11-01 09:04 Q1 の判定、main b4c57515e。08:55 Sonnet 実装済み・試験 PASS、Q1 も run-unit sha3 を流して PASS）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
@@ -62,4 +62,51 @@ git diff --check
 
 ## 結果
 
-（未着手）
+実装済み・試験 PASS（2026-11-01 08:55 担当、Sonnet。cleared は Q1）。
+
+### 実行した command と最後の行
+
+WS335_VECTORS=/home/awe/zedBSD-claude1/build/sources/tls-vectors で:
+
+- `sh plan/ws335/tests/run-unit.sh sha3`: `test-sha3: PASS (629616 checks)` / `run-unit: PASS`（ASan・UBSan）。
+- `sh plan/ws335/tests/run-unit.sh --win32 sha3`（flock /tmp/zedbsd-wine.lock 内）: `test-sha3: PASS (629616 checks) (win32)` / `run-unit: PASS`。
+- `sh plan/ws335/tests/run-unit.sh all`: test-hash 12965、test-sha2 14092、test-sha3 629616、test-tools 18、test-util 169160、ct-hash 37、ct-sha3 1、ct-util 33、最後 `run-unit: PASS`。
+- `sh plan/ws335/tests/run-ct.sh sha3`: `ct-sha3: PASS (1 checks)` / `run-ct: PASS`。
+- `BASE=b7dfd3952 sh plan/ws335/tests/check-skeleton.sh`（flock 内）: `check-skeleton: PASS`。
+- `git diff --check`: 出力なし、終了 0。
+
+### 試験の内容
+
+- 参照: FIPS 202 の Algorithm 1〜7 をビット配列で書いた permute（rho の offset は経路 (x,y)→(y,(2x+3y) mod 5) と (t+1)(t+2)/2 から、round 定数は Algorithm 5・6 の rc から計算。実装の表とは独立）と、B.2 の padding を byte 列に当てた sponge。
+  cryc_keccak_permute を 0・全 1・各 lane の最下位と最上位の 1 bit・乱数 40 個・0 から 10 回連鎖で照合。
+  4 関数の長さ 0..2*rate+3 を、一括・分割 absorb・分割 squeeze（出力 1 byte から 3*168+5 byte まで、q=1・2・>2）で照合（SHA-3 を XOF として使う場合も）。100000 byte の message も。
+- 公式 vector（NIST CAVP byte 版）: SHA3-256 ShortMsg 137・LongMsg 100、SHA3-512 ShortMsg 73・LongMsg 100、SHAKE128 ShortMsg 337・LongMsg 100・VariableOut 1126、SHAKE256 ShortMsg 273・LongMsg 100・VariableOut 1246
+  （各 record を 16 通りの absorb の分割と出力の分割で）。Monte: SHA3-256・SHA3-512 各 100 checkpoint（1000 回の連鎖）、SHAKE128・SHAKE256 各 100 checkpoint（message は前の出力の先頭 16 byte、次の長さは最後の 2 byte の big-endian を範囲で割った余り）。
+  vector の record は計 3992 件（件数は test が各ファイルで完全一致を CHECK）。
+- 誤りの入力: NULL の sponge の全関数、NULL の data（size>0、size=SIZE_MAX）、squeeze 開始後の absorb（構造体不変）、final・clear 後の全呼び出し（構造体は全 0、squeeze は 0 を出力、final は何も書かない）、
+  SHAKE への final（何も書かず wipe）、squeeze 開始済みの SHA-3 への final、out が NULL の final と squeeze、size 0 の最初の squeeze（入力を閉じる）、構造体の複写後の続行、init が汚れた構造体を完全に初期化すること、
+  rate が不正・position が範囲外の壊れた構造体（rate 16 通り × position 多数）と完全に乱数の構造体 3000 個（ASan・UBSan で落ちない。使えない物は absorb・squeeze で不変、final は常に wipe）。
+- 定数時間: 秘密の message・seed（SHA3-256・SHA3-512・SHAKE128・SHAKE256、block の境をまたぐ分割）と秘密の permute の状態を CT_SECRET、出力を CT_PUBLIC。
+
+### わざと壊す確かめ（実装を git の外で壊し、FAIL を確かめ、cmp で戻した）
+
+全て run-unit.sh sha3 が FAIL（13 通り）: 5 番目の round 定数 0x...808b→0x...808a、rho の offset 36→37、pad の 0x80 を rate-1→rate-2、absorb の block 満杯の判定 `>=`→`>`、chi の ~ の位置の入れ替え、SHAKE の suffix 0x1f→0x0f、
+squeeze の block 使い切りの判定 `>=`→`>`、theta の回転 1→63、使える sponge の判定 `position > rate`→`>=`、rotate_left の `% 64` を外す（UBSan）、SHA3-512 の digest を 32 byte に、lane 単位の xor-in で load を 1 bit ずらす、pi の index。
+定数時間: permute の末尾に `lanes[0] & 1` の分岐（volatile への加算）を足すと run-ct.sh sha3 が FAIL（memcheck が cryc-sha3.c の該当行の条件分岐を報告）。戻した後 `cmp` で元と一致、run-ct.sh sha3 が PASS に戻った。
+見逃しは無く、試験の追加は無し。
+
+### 自分で決めた点（header が黙っている所）
+
+- 表の data: rho の offset は FIPS 202 Table 2 の値を x+5y の順に並べ直した 25 個（回転は 64 で割った余り）。round 定数は Algorithm 5・6 を ir=0..23 について評価した 24 個を data として置いた（試験の ref_rc が独立に再計算して照合）。block ごとに "Values referenced" の出典を書いた。
+- permute の作業用の配列は終わりに cryc_wipe。lanes が NULL なら何もしない。
+- 使えない sponge（rate が 72・136・168 以外＝未起動・wipe 済み・壊れた物、または position が rate を越える物）への absorb・final は何もしない。squeeze は out に 0 を書く。sponge が NULL なら全関数が何もしない。
+- absorb は data が NULL で size>0 なら何もしない。squeeze 開始後の absorb は何もしない。block が満ちたらすぐ permute（absorb の終わりで position < rate）。
+- final は SHA-3（suffix 0x06）で未 squeeze の sponge だけ digest を書く（rate 136 なら 32 byte、rate 72 なら 64 byte）。それ以外は何も書かず、どの場合も sponge を wipe する。
+- shake_squeeze の最初の呼び出しは size 0 でも padding と permute をして squeezing=1 にする。out が NULL で size>0 でも padding までは行い、書き込みはしない。
+- SHA-3 の sponge への shake_squeeze も定義された動作（domain bits 01 の XOF）にした（試験が参照で照合）。header は SHAKE の sponge への使用だけを述べる。
+- padding は suffix の byte を position に、0x80 を rate-1 に XOR（同じ byte なら 0x86 / 0x9f になる。B.2 Table 6）。
+
+### 未実施
+
+- aarch64 Windows は check-skeleton の compile・link のみ（実行なし）。
+- coding-style §14 の見直しは自分の diff の目視まで（規約の全文の見直しの Phase で改めて）。

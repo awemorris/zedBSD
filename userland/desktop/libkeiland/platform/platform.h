@@ -11,14 +11,18 @@
  * for, a lock, the threads, and the processes the application starts.  The
  * public interface (<keiland/keiland.h>) shows none of it: no descriptor, no
  * process ID and no signal leaves the library.  platform-posix.c implements
- * it for the POSIX systems (zedBSD, Linux, FreeBSD); another system brings a
- * file of its own.  Nothing here leaves the library.
+ * it for the POSIX systems (zedBSD, Linux, FreeBSD) with POSIX threads;
+ * platform-win32.c implements it for Windows with the system's own threads
+ * and locks, without a POSIX thread layer, so on Windows this header does not
+ * include <pthread.h>.  Nothing here leaves the library.
  */
 
 #ifndef KEIUI_PLATFORM_H
 #define KEIUI_PLATFORM_H
 
+#ifndef _WIN32
 #include <pthread.h>
+#endif
 #include <stddef.h>
 
 /*
@@ -35,9 +39,18 @@ struct keiui_wake {
 	void *event;
 };
 
-/* A lock between the application's thread and the library's others. */
+/*
+ * A lock between the application's thread and the library's others.  On
+ * POSIX it is a mutex.  On Windows it is a slim reader-writer lock taken
+ * exclusively, kept in room (the system's SRWLOCK is one pointer, and this
+ * header does not include <windows.h>).
+ */
 struct keiui_lock {
+#ifdef _WIN32
+	void *room;
+#else
 	pthread_mutex_t mutex;
+#endif
 };
 
 /*
@@ -56,8 +69,25 @@ struct keiui_child {
 	int hang_up;
 };
 
+#ifdef _WIN32
+/*
+ * A thread's identity on Windows: the system's number of the thread (a
+ * DWORD), which tells threads apart while they live, and the handle of a
+ * thread started by keiui_thread_start_joined (NULL for any other), which
+ * keiui_thread_join waits for and closes.
+ */
+struct keiui_thread {
+	unsigned long number;
+	void *handle;
+};
+#endif
+
 /* A thread's identity, for asking whether the caller is the application's thread. */
+#ifdef _WIN32
+typedef struct keiui_thread keiui_thread_id;
+#else
 typedef pthread_t keiui_thread_id;
+#endif
 
 /* The wake (platform-posix.c). */
 int keiui_wake_open(struct keiui_wake *wake);
