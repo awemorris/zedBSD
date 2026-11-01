@@ -228,7 +228,6 @@ test_cookies(void)
 	CHECK_EQ(test_store(instance, "http://example.test/", "expires=2; Expires=Wed, 21 Oct 2099 07:28:00 GMT", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "both=3; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=3600", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "session=4", 0), 0);
-	CHECK_EQ(test_store(instance, "http://example.test/", "short=5; Max-Age=8", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "past=6; Expires=Sun, 06 Nov 1994 08:49:37 GMT", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "replaced=7; Max-Age=3600", 0), 0);
 	CHECK_EQ(test_store(instance, "http://example.test/", "replaced=8", 0), 0);
@@ -239,6 +238,14 @@ test_cookies(void)
 	error = test_page(instance, location, &console);
 	CHECK_EQ(error, 0);
 	CHECK(console.count >= 1 && strcmp(console.lines[0], "set") == 0);
+
+	/*
+	 * The short-lived one only now: the page's localStorage waited for the
+	 * records queued before it, so a slow disk could have used up its
+	 * Max-Age before the header below was made.  Nothing between the two
+	 * waits for the storage.
+	 */
+	CHECK_EQ(test_store(instance, "http://example.test/", "short=5; Max-Age=2", 0), 0);
 
 	/* All but the past one are sent now; the Expires before the Max-Age does not end "both". */
 	error = test_cookie_header(instance, "http://example.test/", header, sizeof(header));
@@ -252,14 +259,14 @@ test_cookies(void)
 	CHECK(strstr(header, "replaced=8") != NULL);
 	CHECK(strstr(header, "script=9") != NULL);
 
-	/* The records written: max, expires, both, short, script (the session and the replaced ones have none). */
+	/* The records written: max, expires, both, short, script and the page's (the session and the replaced ones have none). */
 	wb_storage_queue_flush(instance->queue);
 	count = test_count_files("a", "cookies");
 	CHECK_EQ(count, 6);
 	CHECK_EQ(browser_instance_destroy(instance), 0);
 
 	/* After "short" has run out, the instance again: only the persistent ones still alive come back. */
-	nanosleep(&(struct timespec){ 8, 300000000 }, NULL);
+	nanosleep(&(struct timespec){ 2, 300000000 }, NULL);
 	error = test_files_instance("a", &instance);
 	CHECK_EQ(error, 0);
 	if (error != 0)
