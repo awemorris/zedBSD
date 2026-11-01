@@ -3,7 +3,7 @@
 #
 #   sh plan/ws074/tests/host-build.sh [plain|asan]     (default plain)
 #
-# Every engine source listed in userland/desktop/libbrowser/Makefile and main.c from
+# Every engine source listed in userland/desktop/libbrowser/Makefile and main.c and main-posix.c from
 # userland/desktop/browser/Makefile are built, not the shell/ directory (the zdesktop window);
 # plan/ws074/tests/host-shell.c stands in for it.
 # The GPU renderer (paint/vulkan.c) links the host's libvulkan (Debian's libvulkan-dev; lavapipe
@@ -101,7 +101,7 @@ for file in $sources; do
 	fi
 	objects="$objects $object"
 	case $file in
-	*/main.c) ;;
+	*/main.c|*/main-posix.c) ;;
 	*) engine="$engine $object" ;;
 	esac
 done
@@ -111,7 +111,7 @@ done
 # The host component has the same public exports as the production library.
 "$cc" $flags -shared -Wl,-z,defs -Wl,-soname,libbrowser.so \
     -Wl,--version-script=userland/desktop/libbrowser/exports.map -o "$out/libbrowser.so" $engine -lvulkan -lm -ldl -lpthread
-"$cc" $flags -o "$out/browser" "$out/obj/browser_main.o" "$out/obj/host-shell.o" \
+"$cc" $flags -o "$out/browser" "$out/obj/browser_main.o" "$out/obj/browser_main-posix.o" "$out/obj/host-shell.o" \
     -L"$out" -Wl,-rpath,'$ORIGIN' -l:libbrowser.so -lvulkan -lm
 echo "built $out/browser"
 

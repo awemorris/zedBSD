@@ -31,6 +31,7 @@
 #include "window.h"
 
 #include "userland/desktop/libkeiland/process.h"
+#include "userland/desktop/paths.h"
 
 #include <keiland/keiland.h>
 
@@ -556,6 +557,80 @@ kl_app_display(
 {
 	/* The connection. */
 	return app->display;
+}
+
+/*
+ * Writes the application's data directory (KL_VERSION 105):
+ * $XDG_DATA_HOME/keiland/APPLICATION, or $HOME/.local/share/keiland/APPLICATION
+ * when XDG_DATA_HOME is not set or not an absolute path.  Nothing is created.
+ */
+int
+kl_app_storage_directory(
+	const struct kl_app *app,
+	char *buffer,
+	size_t size)
+{
+	const char *application;
+	const char *data;
+	const char *home;
+	const char *base;
+	const char *middle;
+	int written;
+
+	/* Somewhere to write, and an application whose directory it is. */
+	if (app == NULL || buffer == NULL || size == 0U)
+		return EINVAL;
+	application = app->application;
+	if (application == NULL || application[0] == '\0')
+		return EINVAL;
+	buffer[0] = '\0';
+
+	/* The data directory: XDG_DATA_HOME when it is an absolute path, else under the home. */
+	data = getenv("XDG_DATA_HOME");
+	home = getenv("HOME");
+	base = NULL;
+	middle = "";
+	if (data != NULL && data[0] == '/') {
+		base = data;
+	} else if (home != NULL && home[0] != '\0') {
+		base = home;
+		middle = "/.local/share";
+	}
+	if (base == NULL)
+		return ENOENT;
+
+	/* The path, which must fit with its NUL. */
+	written = snprintf(buffer, size, "%s%s/keiland/%s", base, middle, application);
+	if (written < 0 || (size_t)written >= size) {
+		buffer[0] = '\0';
+		return ERANGE;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Writes the directory of the bundled read-only data (KL_VERSION 105). */
+int
+kl_data_directory(
+	char *buffer,
+	size_t size)
+{
+	int written;
+
+	/* Somewhere to write. */
+	if (buffer == NULL || size == 0U)
+		return EINVAL;
+
+	/* The directory, which must fit with its NUL. */
+	written = snprintf(buffer, size, "%s", KEILAND_DATADIR);
+	if (written < 0 || (size_t)written >= size) {
+		buffer[0] = '\0';
+		return ERANGE;
+	}
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*

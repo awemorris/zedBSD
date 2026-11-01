@@ -33,13 +33,17 @@
 #include "shell/internal.h"
 #include "../../picture/png-write.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Where the engine keeps what it remembers, under the user's data directory (the localStorage files of earlier versions are there). */
-#define SHELL_STORAGE_DIRECTORY	"keiland/browser"
+/* The longest data directory the shell keeps. */
+#define SHELL_DIRECTORY_MAX	4096U
+
+/* How long a frame the window cannot take yet waits before it is drawn again, in milliseconds. */
+#define SHELL_RETRY_MS		8
 
 /* The longest location typed into the URL's field that is opened (a longer one is cut). */
 #define SHELL_LOCATION_MAX	4096U
@@ -75,8 +79,10 @@
 
 /*
  * What the window mode holds while it runs: the view, the window with its
- * titlebar and presenter, whether the view must be drawn again, and
- * whether the window is up (the view's first page is loaded before it).
+ * titlebar and presenter (the Vulkan one, or with use_cpu the CPU one,
+ * cpu), the size frames are drawn at (width and height), whether the view
+ * must be drawn again, and whether the window is up (the view's first page
+ * is loaded before it).
  *
  * The fingers (touch.c, ws081-p006): their gestures and scroller (without
  * them fingers do nothing), in how many milliseconds they want the next
@@ -114,6 +120,10 @@ struct shell_state {
 	struct shell_window window;
 	struct shell_titlebar titlebar;
 	struct shell_present present;
+	struct shell_cpu cpu;
+	int use_cpu;
+	uint32_t width;
+	uint32_t height;
 	int dirty;
 	int ready;
 	struct shell_touch touch;
@@ -155,7 +165,11 @@ static void shell_go(struct shell_state *state, int steps);
 static void shell_reload(struct shell_state *state);
 static void shell_follow(struct shell_state *state, const char *target);
 static void shell_follow_typed(struct shell_state *state, const char *typed);
-static int shell_instance(struct browser_instance **instance);
+static int shell_instance(struct kl_app *app, struct browser_instance **instance);
+static int shell_surface_open(struct shell_state *state, const struct shell_options *options);
+static int shell_window_up(struct shell_state *state, const struct shell_options *options, unsigned present);
+static int shell_surface_resize(struct shell_state *state);
+static int shell_path_is_absolute(const char *typed);
 static int shell_frame(struct shell_state *state);
 static void shell_release(struct shell_state *state);
 static int shell_resize_view(struct shell_state *state);
@@ -195,10 +209,10 @@ shell_run(
 	int network;
 	int mail_due;
 	int missed;
+	int retry;
 	int status;
 	int taken;
 	int error;
-	VkResult result;
 
 	/* A window needs a page to show. */
 	memset(&state, 0, sizeof(state));
@@ -207,10 +221,18 @@ shell_run(
 		return 2;
 	}
 
+	/* The connection to the compositor: its application names the program's data directory. */
+	status = shell_window_connect(&state.window, options->display);
+	if (status != 0) {
+		fprintf(stderr, "browser: cannot open a window: %s\n", strerror(errno));
+		return 1;
+	}
+
 	/* The engine's instance, which remembers the cookies and localStorage. */
-	error = shell_instance(&state.instance);
+	error = shell_instance(state.window.app, &state.instance);
 	if (error != 0) {
 		fprintf(stderr, "browser: cannot make the engine's instance: %s\n", strerror(error));
+		shell_window_close(&state.window);
 		return 1;
 	}
 
@@ -238,6 +260,7 @@ shell_run(
 	if (error != 0) {
 		fprintf(stderr, "browser: cannot start the network: %s\n", strerror(error));
 		(void)browser_instance_destroy(state.instance);
+		shell_window_close(&state.window);
 		return 1;
 	}
 
@@ -260,33 +283,9 @@ shell_run(
 		}
 	}
 
-	/* The window, with the page's title. */
-	status = shell_window_open(&state.window, options->display, options->width, options->height,
-	    browser_view_title(state.view));
+	/* The window with the page's title, and the presenter that shows the page in it (the GPU's, or the CPU's). */
+	status = shell_surface_open(&state, options);
 	if (status != 0) {
-		fprintf(stderr, "browser: cannot open a window: %s\n", strerror(errno));
-		shell_release(&state);
-		return 1;
-	}
-
-	/* The compositor's titlebar with the browser's controls (a compositor without it leaves the plain titlebar). */
-	error = shell_titlebar_open(&state.titlebar, &state.window);
-	if (error != 0) {
-		printf("ZBROWSER ERROR titlebar error=%d\n", error);
-		shell_titlebar_close(&state.titlebar);
-	}
-
-	/* The arrivals of mail with their sign-in codes (a compositor without them leaves the browser without codes). */
-	shell_mail_open(&state.mail, state.window.app);
-
-	/* The view's wakes go to the application from now on; what came before is taken at once. */
-	__atomic_store_n(&state.wake_app, state.window.app, __ATOMIC_RELEASE);
-	browser_view_process(state.view);
-
-	/* The Vulkan presenter in the window. */
-	result = shell_present_open(&state.present, &state.window, state.view);
-	if (result != VK_SUCCESS) {
-		fprintf(stderr, "browser: cannot draw in the window: %s failed (%d)\n", state.present.operation, (int)result);
 		shell_release(&state);
 		return 1;
 	}
@@ -299,8 +298,8 @@ shell_run(
 	}
 
 	/* The line the tests wait for, and the titlebar's state. */
-	printf("ZBROWSER READY width=%u height=%u document=%.0f\n", (unsigned)state.present.extent.width,
-	    (unsigned)state.present.extent.height, browser_view_document_height(state.view));
+	printf("ZBROWSER READY width=%u height=%u document=%.0f\n", (unsigned)state.width,
+	    (unsigned)state.height, browser_view_document_height(state.view));
 	fflush(stdout);
 	state.ready = 1;
 	shell_show_state(&state);
@@ -311,11 +310,9 @@ shell_run(
 		/* A new size replaces the swapchain and lays the page out again. */
 		if (state.window.resized) {
 			state.window.resized = 0;
-			result = shell_present_resize(&state.present, state.view, state.window.width, state.window.height);
-			if (result != VK_SUCCESS) {
-				fprintf(stderr, "browser: cannot resize: %s failed (%d)\n", state.present.operation, (int)result);
+			status = shell_surface_resize(&state);
+			if (status != 0)
 				break;
-			}
 
 			/* The page at the new size. */
 			status = shell_resize_view(&state);
@@ -324,12 +321,17 @@ shell_run(
 			state.dirty = 1;
 		}
 
-		/* Draws the page when it changed. */
+		/* Draws the page when it changed (a frame the window cannot take yet is drawn again soon). */
+		retry = 0;
 		if (state.dirty) {
 			status = shell_frame(&state);
-			if (status != 0)
+			if (status == 2) {
+				retry = 1;
+			} else if (status != 0) {
 				break;
-			state.dirty = 0;
+			} else {
+				state.dirty = 0;
+			}
 		}
 
 		/* Waits for the compositor, the view's wake, the view's next timer or the end of a code's offer (a held key's repeat waits less, within the dispatch). */
@@ -342,6 +344,10 @@ shell_run(
 		mail_due = shell_mail_timeout(&state.mail, shell_clock());
 		if (mail_due >= 0 && (timeout < 0 || mail_due < timeout))
 			timeout = mail_due;
+
+		/* A frame that waits for the window is tried again after a short wait. */
+		if (retry && (timeout < 0 || timeout > SHELL_RETRY_MS))
+			timeout = SHELL_RETRY_MS;
 
 		/* A wake that could not be posted is not waited for. */
 		missed = __atomic_exchange_n(&state.wake_missed, 0, __ATOMIC_ACQ_REL);
@@ -397,8 +403,8 @@ shell_resize_view(
 {
 	int error;
 
-	/* The view at the swapchain's extent. */
-	error = browser_view_resize(state->view, state->present.extent.width, state->present.extent.height);
+	/* The view at the frames' size. */
+	error = browser_view_resize(state->view, state->width, state->height);
 	if (error != 0) {
 		fprintf(stderr, "browser: cannot lay out the page: %s\n", strerror(error));
 		return 1;
@@ -564,7 +570,7 @@ shell_key(
 		return;
 
 	/* The key with the DOM's names. */
-	shell_key_names(event->key, event->modifiers, &names);
+	shell_key_names(event->key, event->modifiers, event->text, &names);
 	modifiers = shell_key_modifiers(event->modifiers);
 	error = browser_view_key(state->view, names.key, names.code, names.text, event->pressed, event->repeat, modifiers);
 	if (error != 0) {
@@ -785,30 +791,77 @@ shell_follow(
 }
 
 /*
- * Opens what was typed into the URL's field (BUG-240): a path from the
- * root ("/usr/...") is a local file whatever page is shown, so it opens as
- * file://; anything else is resolved against the page as before.
+ * Tells whether a typed location is an absolute path: from the root
+ * ("/usr/..."), a drive's ("C:\x" or "C:/x") or a network share's
+ * ("\\host\x").  Both forms are paths on every system; nobody types a
+ * URL of that shape.
+ */
+static int
+shell_path_is_absolute(
+	const char *typed)
+{
+	/* From the root. */
+	if (typed[0] == '/')
+		return 1;
+
+	/* A network share: two separators. */
+	if (typed[0] == '\\' && (typed[1] == '\\' || typed[1] == '/'))
+		return 1;
+
+	/* A drive: a letter, a colon and a separator. */
+	if (isalpha((unsigned char)typed[0]) && typed[1] == ':' && (typed[2] == '\\' || typed[2] == '/'))
+		return 1;
+
+	/* Anything else is resolved against the page. */
+	return 0;
+}
+
+/*
+ * Opens what was typed into the URL's field (BUG-240): an absolute path
+ * (shell_path_is_absolute) is a local file whatever page is shown, so it
+ * opens as file://; anything else is resolved against the page as before.
  */
 static void
 shell_follow_typed(
 	struct shell_state *state,
 	const char *typed)
 {
-	static char location[sizeof("file://") + SHELL_LOCATION_MAX];
+	static char location[sizeof("file://") + SHELL_LOCATION_MAX + 1U];
+	size_t index;
+	int written;
 
 	/* Anything but an absolute path: as typed. */
-	if (typed[0] != '/') {
+	if (!shell_path_is_absolute(typed)) {
 		shell_follow(state, typed);
 		return;
 	}
 
-	/* An absolute path: a local file, not a path of the page's site. */
-	snprintf(location, sizeof(location), "file://%s", typed);
+	/* An absolute path: a local file, not a path of the page's site.  A drive's path is /C:/x with its separators turned, a network share's is //host/x. */
+	if (typed[0] == '/') {
+		written = snprintf(location, sizeof(location), "file://%s", typed);
+	} else if (typed[0] == '\\') {
+		written = snprintf(location, sizeof(location), "file:%s", typed);
+	} else {
+		written = snprintf(location, sizeof(location), "file:///%s", typed);
+	}
+	if (written < 0)
+		location[0] = '\0';
+	if (typed[0] != '/') {
+		for (index = 0; location[index] != '\0'; index++) {
+			if (location[index] == '\\')
+				location[index] = '/';
+		}
+	}
 	printf("ZBROWSER location typed=path url=%s\n", location);
 	shell_follow(state, location);
 }
 
-/* Draws the view into the window; a swapchain out of date is replaced and the frame drawn again. Nonzero on failure. */
+/*
+ * Draws the view into the window; a swapchain out of date is replaced and
+ * the frame drawn again.  Returns 0 once the frame is shown, 1 on failure,
+ * or 2 when the window cannot take the frame yet (the CPU presenter's
+ * memory is still with the compositor: the caller draws again soon).
+ */
 static int
 shell_frame(
 	struct shell_state *state)
@@ -824,20 +877,34 @@ shell_frame(
 		return 0;
 	}
 
-	/* The frame, which the view records into the window's image. */
-	result = shell_present_frame(&state->present, state->view);
+	/* The CPU presenter draws the page into its memory and shows that. */
+	if (state->use_cpu) {
+		error = shell_cpu_frame(&state->cpu, &state->window, state->view);
+		if (error == EAGAIN)
+			return 2;
+		if (error != 0) {
+			fprintf(stderr, "browser: cannot draw a frame: %s\n", strerror(error));
+			return 1;
+		}
+	} else {
+		/* The frame, which the view records into the window's image. */
+		result = shell_present_frame(&state->present, state->view);
 
-	/* A swapchain that no longer fits the window is replaced, and the frame drawn once more. */
-	if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-		result = shell_present_resize(&state->present, state->view, state->window.width, state->window.height);
-		if (result == VK_SUCCESS)
-			result = shell_present_frame(&state->present, state->view);
-	}
+		/* A swapchain that no longer fits the window is replaced, and the frame drawn once more. */
+		if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+			result = shell_present_resize(&state->present, state->view, state->window.width, state->window.height);
+			if (result == VK_SUCCESS) {
+				state->width = state->present.extent.width;
+				state->height = state->present.extent.height;
+				result = shell_present_frame(&state->present, state->view);
+			}
+		}
 
-	/* Says what failed. */
-	if (result != VK_SUCCESS) {
-		fprintf(stderr, "browser: cannot draw a frame: %s failed (%d)\n", state->present.operation, (int)result);
-		return 1;
+		/* Says what failed. */
+		if (result != VK_SUCCESS) {
+			fprintf(stderr, "browser: cannot draw a frame: %s failed (%d)\n", state->present.operation, (int)result);
+			return 1;
+		}
 	}
 
 	/* The window's text input follows the frame: on while the page's focus takes an input method's text. */
@@ -845,7 +912,7 @@ shell_frame(
 
 	/* The line the tests read. */
 	printf("ZBROWSER FRAME scroll=%.0f width=%u height=%u\n", browser_view_scroll_y(state->view),
-	    (unsigned)state->present.extent.width, (unsigned)state->present.extent.height);
+	    (unsigned)state->width, (unsigned)state->height);
 	fflush(stdout);
 
 	/* Succeeded: the frame is shown. */
@@ -853,57 +920,157 @@ shell_frame(
 }
 
 /*
- * Makes the engine's instance over the files backend in the user's data
- * directory: $XDG_DATA_HOME/keiland/browser, or ~/.local/share/keiland/browser
- * when XDG_DATA_HOME is not set (where the localStorage of earlier versions
+ * Opens the window and the presenter that shows the page in it: the
+ * window's own Vulkan, or the CPU's when the options ask for it or Vulkan
+ * cannot show the window (said in one line).  The titlebar's controls, the
+ * arrivals of mail and the view's wakes start with the first window.
+ * Returns 0, or 1 after saying why not.
+ */
+static int
+shell_surface_open(
+	struct shell_state *state,
+	const struct shell_options *options)
+{
+	VkResult result;
+	unsigned present;
+	int error;
+	int status;
+
+	/* The window for the way asked for. */
+	present = KL_PRESENT_NONE;
+	if (options->no_gpu)
+		present = KL_PRESENT_SHM;
+	status = shell_window_up(state, options, present);
+	if (status != 0)
+		return 1;
+
+	/* The arrivals of mail with their sign-in codes (a compositor without them leaves the browser without codes). */
+	shell_mail_open(&state->mail, state->window.app);
+
+	/* The view's wakes go to the application from now on; what came before is taken at once. */
+	__atomic_store_n(&state->wake_app, state->window.app, __ATOMIC_RELEASE);
+	browser_view_process(state->view);
+
+	/* The Vulkan presenter in the window. */
+	if (!options->no_gpu) {
+		result = shell_present_open(&state->present, &state->window, state->view);
+		if (result == VK_SUCCESS) {
+			state->width = state->present.extent.width;
+			state->height = state->present.extent.height;
+			return 0;
+		}
+
+		/* Vulkan cannot show this window: its objects go, and a window of the CPU's way replaces it. */
+		fprintf(stderr, "browser: cannot draw with the GPU: %s failed (%d): drawing with the CPU\n", state->present.operation, (int)result);
+		shell_present_close(&state->present, state->view);
+		shell_titlebar_close(&state->titlebar);
+		shell_window_drop(&state->window);
+		status = shell_window_up(state, options, KL_PRESENT_SHM);
+		if (status != 0)
+			return 1;
+	}
+
+	/* The CPU presenter's memory at the window's size. */
+	state->use_cpu = 1;
+	error = shell_cpu_open(&state->cpu, &state->window);
+	if (error != 0) {
+		fprintf(stderr, "browser: cannot draw in the window: %s\n", strerror(error));
+		return 1;
+	}
+	state->width = state->cpu.width;
+	state->height = state->cpu.height;
+
+	/* Succeeded: pages can be shown. */
+	return 0;
+}
+
+/* Makes the window for a way of showing frames, with the page's title and the compositor's titlebar. Returns 0, or 1 after saying why not. */
+static int
+shell_window_up(
+	struct shell_state *state,
+	const struct shell_options *options,
+	unsigned present)
+{
+	int status;
+	int error;
+
+	/* The window, with the page's title. */
+	status = shell_window_open(&state->window, options->width, options->height, browser_view_title(state->view), present);
+	if (status != 0) {
+		fprintf(stderr, "browser: cannot open a window: %s\n", strerror(errno));
+		return 1;
+	}
+
+	/* The compositor's titlebar with the browser's controls (a compositor without it leaves the plain titlebar). */
+	error = shell_titlebar_open(&state->titlebar, &state->window);
+	if (error != 0) {
+		printf("ZBROWSER ERROR titlebar error=%d\n", error);
+		shell_titlebar_close(&state->titlebar);
+	}
+
+	/* Succeeded: the window is up. */
+	return 0;
+}
+
+/* Makes the presenter fit the window's new size; says why on failure. Returns 0, or 1. */
+static int
+shell_surface_resize(
+	struct shell_state *state)
+{
+	VkResult result;
+	int error;
+
+	/* The CPU presenter's memory at the new size. */
+	if (state->use_cpu) {
+		error = shell_cpu_resize(&state->cpu, &state->window);
+		if (error != 0) {
+			fprintf(stderr, "browser: cannot resize: %s\n", strerror(error));
+			return 1;
+		}
+		state->width = state->cpu.width;
+		state->height = state->cpu.height;
+		return 0;
+	}
+
+	/* The swapchain at the new size. */
+	result = shell_present_resize(&state->present, state->view, state->window.width, state->window.height);
+	if (result != VK_SUCCESS) {
+		fprintf(stderr, "browser: cannot resize: %s failed (%d)\n", state->present.operation, (int)result);
+		return 1;
+	}
+	state->width = state->present.extent.width;
+	state->height = state->present.extent.height;
+
+	/* Succeeded: the next frame is shown at the new size. */
+	return 0;
+}
+
+/*
+ * Makes the engine's instance over the files backend in the program's data
+ * directory (kl_app_storage_directory: $XDG_DATA_HOME/keiland/browser, or
+ * ~/.local/share/keiland/browser, where the localStorage of earlier versions
  * is).  When the directory cannot be used (no home, or another browser
  * holds it), the instance keeps nothing and one line says why.  Returns 0
  * or the instance's error.
  */
 static int
 shell_instance(
+	struct kl_app *app,
 	struct browser_instance **instance)
 {
 	struct browser_instance_options options;
 	const struct browser_storage_calls *calls;
-	const char *data;
-	const char *home;
-	char *directory;
-	size_t size;
+	char directory[SHELL_DIRECTORY_MAX];
 	void *context;
-	int written;
 	int error;
 
-	/* The data directory: XDG_DATA_HOME, or ~/.local/share. */
-	directory = NULL;
-	data = getenv("XDG_DATA_HOME");
-	home = getenv("HOME");
-	if (data != NULL && data[0] != '\0') {
-		size = strlen(data) + sizeof("/" SHELL_STORAGE_DIRECTORY);
-		directory = malloc(size);
-		if (directory != NULL) {
-			written = snprintf(directory, size, "%s/%s", data, SHELL_STORAGE_DIRECTORY);
-			if (written < 0) {
-				free(directory);
-				directory = NULL;
-			}
-		}
-	} else if (home != NULL && home[0] != '\0') {
-		size = strlen(home) + sizeof("/.local/share/" SHELL_STORAGE_DIRECTORY);
-		directory = malloc(size);
-		if (directory != NULL) {
-			written = snprintf(directory, size, "%s/.local/share/%s", home, SHELL_STORAGE_DIRECTORY);
-			if (written < 0) {
-				free(directory);
-				directory = NULL;
-			}
-		}
-	}
+	/* The data directory of the application. */
+	error = kl_app_storage_directory(app, directory, sizeof(directory));
 
 	/* The files backend over it; without it the instance remembers nothing. */
 	calls = NULL;
 	context = NULL;
-	if (directory == NULL) {
+	if (error != 0) {
 		fprintf(stderr, "browser: no data directory: cookies and localStorage are not kept\n");
 	} else {
 		error = browser_storage_files_open(directory, &calls, &context);
@@ -913,7 +1080,6 @@ shell_instance(
 			context = NULL;
 		}
 	}
-	free(directory);
 
 	/* The instance, which owns the backend from now on. */
 	memset(&options, 0, sizeof(options));
@@ -935,6 +1101,7 @@ shell_release(
 {
 	/* The presenter before the window whose surface it draws. */
 	shell_present_close(&state->present, state->view);
+	shell_cpu_close(&state->cpu);
 
 	/* The titlebar before the window it belongs to. */
 	shell_titlebar_close(&state->titlebar);
@@ -1142,7 +1309,7 @@ shell_touch_round(
 	if (error != 0)
 		largest_y = 0.0;
 	shell_touch_layout(&state->touch, state->page_number, browser_view_scroll_y(state->view), largest_y,
-	    (double)state->present.extent.height);
+	    (double)state->height);
 
 	/* The fingers' events. */
 	for (index = 0; index < state->window.touch_count; index++)

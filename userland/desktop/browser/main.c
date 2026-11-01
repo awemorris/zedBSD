@@ -8,7 +8,7 @@
 /*
  * browser: the Web browser of the zedBSD desktop.
  *
- *   browser [--display=NAME] [--width=N] [--height=N] [--ca-file=PEM] [URL]
+ *   browser [--display=NAME] [--width=N] [--height=N] [--ca-file=PEM] [--no-gpu] [URL]
  *   browser --dump=dom|style|layout|paint [--width=N] [--height=N] [--font=PATH] FILE
  *   browser --run [--width=N] [--height=N] FILE
  *   browser --dump=ast [--module] [--strict] FILE.js
@@ -18,7 +18,8 @@
  *   browser --version | --help
  *
  * Without a headless mode it opens a compositor window on URL, or on the
- * home page (MAIN_HOME_PAGE, https://www.google.com/).  The headless
+ * home page (MAIN_HOME_PAGE, https://www.google.com/); --no-gpu draws the
+ * window with the CPU (as it does when Vulkan cannot show the window).  The headless
  * modes (added with the engine, one per phase) draw or dump a page, or run
  * a script, without a window; the tests use them on the host and in the
  * guest.  The modes that load a page do it through a view (<browser/browser.h>),
@@ -41,6 +42,7 @@
  * a PEM file besides the system's roots for https (the tests' own CA).
  */
 
+#include "browser-main.h"
 #include "shell/shell.h"
 
 #include <browser/browser.h>
@@ -160,7 +162,7 @@ static void main_usage(FILE *stream);
  * Runs the mode the command line names.
  */
 int
-main(
+browser_main(
 	int argc,
 	char **argv)
 {
@@ -776,6 +778,13 @@ main_parse(
 			continue;
 		}
 
+		/* The window drawn with the CPU, without trying the GPU. */
+		differs = strcmp(argv[index], "--no-gpu");
+		if (differs == 0) {
+			options->shell.no_gpu = 1;
+			continue;
+		}
+
 		/* The Wayland display to connect to. */
 		value = main_value(argv[index], "--display=");
 		if (value != NULL) {
@@ -917,7 +926,7 @@ main_usage(
 {
 	/* Lists the forms of the command line. */
 	fprintf(stream,
-		"usage: browser [--display=NAME] [--width=N] [--height=N] [--ca-file=PEM] [URL]\n"
+		"usage: browser [--display=NAME] [--width=N] [--height=N] [--ca-file=PEM] [--no-gpu] [URL]\n"
 		"       browser --dump=dom|style|layout|paint [--width=N] [--height=N] [--font=PATH]\n"
 		"                        [--mono-font=PATH] [--fallback-font=PATH] FILE\n"
 		"       browser --run [--width=N] [--height=N] FILE\n"

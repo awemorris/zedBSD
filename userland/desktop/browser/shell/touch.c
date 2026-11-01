@@ -19,7 +19,6 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /* How often the scroll is set while fingers are down or the page glides, in milliseconds. */
 #define TOUCH_TICK_MS		16
@@ -363,13 +362,8 @@ shell_touch_take_pointer(
 uint64_t
 shell_touch_clock(void)
 {
-	struct timespec now;
-
-	/* The monotonic clock. */
-	(void)clock_gettime(CLOCK_MONOTONIC, &now);
-
-	/* Reports it in microseconds. */
-	return (uint64_t)now.tv_sec * 1000000U + (uint64_t)now.tv_nsec / 1000U;
+	/* libkeiland's clock, in microseconds. */
+	return kl_clock_us();
 }
 
 /*

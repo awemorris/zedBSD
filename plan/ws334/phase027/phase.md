@@ -3,7 +3,7 @@
 # ws334-p027 統合: browser の UI の準備（browser_main、libkeiland の 3 つの口、CPU の道、鍵の text、時計、files の backend の場所）
 
 - 親: [WS334](../ws.md)、設計 [design.md](../design.md) の §4.1・§4.5（header の追加）・§4.6・§4.8・§6.5。
-- 状態: planned（2026-11-01 p002 で作成）。
+- 状態: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1856-i01、Sonnet。結果は末尾）。前: planned（2026-11-01 p002 で作成）。
 - 依存: p023。
 - 担当の想定: Opus（phase-runner）を 1 回。zedBSD の browser の挙動を変えない（`--no-gpu` を足すだけ）。
 
@@ -78,3 +78,40 @@
 
 - module の header と .c、試験の道具。libbrowser（p023 で済み）。compositor・libkeiland-backend。HAL・toolchain・共有の build/。rm をしない。push しない。
 - file の群ごとの commit、SHA と結果を Q1 に、結果の節と ws.md の行。
+
+## 結果（2026-11-01、Sonnet、q1856-i01、基点 3c076f4e8）
+
+commit（`git commit -m WIP -- <path>`、file の群ごと）:
+
+| SHA | 中身 |
+| --- | --- |
+| 2b501fe030 | libkeiland: `keiland_version.h`（KL_VERSION 105 と版の一覧の 1 行）、`keiland_window.h`（`kl_window_vulkan_extensions`、`kl_window_vulkan_surface` と key の `text` の comment）、`keiland_app.h`（`kl_app_storage_directory`・`kl_data_directory`）、`ui/window-declare.c`・`ui/app.c`（Wayland の実装）、`exports.map`（`exports.py` で生成、`--check` OK） |
+| cb2a7ae598 | browser の UI: `main.c`（`browser_main`、`--no-gpu`）、新 `browser-main.h`・`main-posix.c`、`sources.mk`、`shell/`（新 `present-cpu.c`、`present.c`・`keys.c`・`window.c`・`touch.c`・`shell.c`・`shell.h`・`internal.h`）、`plan/ws074/tests/host-build.sh`（2 行。差分の要点は Q1 に送って了解済み） |
+
+試験（実機・QEMU は使っていない。host と zedBSD の amd64 の build）:
+
+- zedBSD amd64（`make ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-claude1/build/llvm/bin ZEDBSD_SYSROOT_AMD64=<写し> -o <写し>/.zedbsd-sysroot-complete -j8 build/amd64/dynamic/libkeiland.so build/amd64/bin/browser build/amd64/bin/files build/amd64/bin/terminal build/amd64/bin/settings`、写しは main の `build/amd64/sysroot` を `build/tmp/p027/sysroot-amd64` に写し `include/libc`・`userland/desktop/include` を重ねた物）→ exit 0、warning 0。`llvm-nm -D` で libkeiland.so に `kl_window_vulkan_extensions`・`kl_app_storage_directory`・`kl_data_directory` が export されている。
+- Linux の Keiland（`make -f userland/desktop/keiland-linux.mk all -j6 KEILAND_LINUX_BUILD=build/tmp/p027/keiland-linux`、`make keiland-linux` の `all` の部分。install の確認は流していない）→ exit 0、warning 0（-Werror）。
+- `sh plan/ws074/tests/host-build.sh plain`・`asan` → 両方 exit 0、warning 0、`built` 94 本（前の 94 と同じ）。plain の browser に `--version`・`--help`（`--no-gpu` が usage に出る）と `--render`（font 指定、exit 0）。`run-js-tests.py` 17/17。
+- `sh plan/tools/keiland-layers/host-test.sh build/tmp/p027/keiland-linux`（libkeiland の host 試験）→ SUMMARY pass=12 fail=0（thread 28 checks ×5、socket 53 checks ×6、全部 PASS）。
+- 使い捨ての試験（commit しない）: `shell_key_names` を host で 15 case（US の表、JIS の `@`、Ctrl で制御文字の text、Enter の CR、UTF-8 の 2 byte、2 文字・C1・不正な UTF-8・Alt・未知の key・空白・DEL）→ 全部 期待どおり。
+- `timeout 3600 flock /tmp/zedbsd-wine.lock sh plan/ws334/tests/cross-build.sh` → `cross-build: PASS`（exit 0。この Phase では Windows の browser の UI は compile しない）。
+- `git diff --check` → 出力なし。
+
+自分で決めた点・phase.md と code の食い違い:
+
+- **application を window より先に開く**（手順 7）: `kl_app_storage_directory` が `kl_app` を取り、instance は view より前、view の題が window の題に要る、という順の制約のため、`shell_window_open` を `shell_window_connect`（`kl_app_open`）と `shell_window_open`（窓。present の方式の引数 `KL_PRESENT_NONE`/`SHM` を足した）に分け、`shell_run` は connect → instance → view → 頁の読み込み → window の順にした。窓を開けない時の error の行は同じ（"cannot open a window"）だが、compositor に繋がらない時は頁の読み込みより前に終わる。
+- **Vulkan が窓の後で失敗した時**（手順 3）: `shell_surface_open` が Vulkan の presenter を close し、titlebar を close し、`shell_window_drop`（窓だけ閉じ application は残す）、窓を `KL_PRESENT_SHM` で作り直して CPU の presenter を開く（stderr に "browser: cannot draw with the GPU: <操作> failed (<code>): drawing with the CPU" の 1 行）。mail と view の wake は application に付くので再設定しない。SHM の `kl_window_present` が EAGAIN（buffer が compositor 側）の時は `shell_frame` が 2 を返し、main loop が dirty を残して 8 ms（`SHELL_RETRY_MS`）以内に再び描く。
+- **`internal.h` の `VK_USE_PLATFORM_WAYLAND_KHR` の define を外した**: 拡張の名前を `kl_window_vulkan_extensions` から取るので shell は Wayland の Vulkan の型を使わない（Windows の p028 で platform の define を替えなくてよい）。libkeiland 側の `window-declare.c` は従来どおり自分で使う。
+- **`shell_key_names` の引数に `typed`（event の text）を足し、`struct shell_key_names` に `typed[]` を足した**（手順 4）: 印字できる 1 文字（well-formed な UTF-8、C0・DEL・C1 でない）なら DOM の key と text（Ctrl・Alt・Meta が無い時）にし、code は表のまま。それ以外は今の US の表。`window.c` の `window_key` が押下の時だけ `input->text` を `shell_event.text` に写す。Wayland の backend の text は空なので zedBSD の挙動は変わらない。
+- **`kl_app_storage_directory`**: phase.md の文面どおり、`XDG_DATA_HOME` は絶対の path の時だけ使う（今までの shell は空でなければ使った。相対の値の時だけ差が出る）。`kl_data_directory` は `KEILAND_DATADIR`（`userland/desktop/paths.h`）。
+- **`SHELL_PRODUCT_NAME` は `shell.h` に無条件、`SHELL_APPLICATION_ID` は `#ifndef` で**。窓の題・mail の名前（`mail.c` の "browser"）は変えていない。
+- 手順 1b: `shell_path_is_absolute`（'/' 始まり、drive の文字＋':'＋区切り、先頭が '\\' で次が '\\' か '/'）。`file:` の URL は '/' 始まりは今のまま `file://<typed>`、drive は `file:///C:/x`（'\\' を '/' に）、'\\' 始まりは `file:` + typed（'\\' を '/' に、`file://host/x`）。
+- 手順 8（`png-write.c`）・libbrowser・compositor・libkeiland-backend・HAL・toolchain は触っていない。`browser_fonts` は従来どおり（main.c の `--font=` のみ）。
+
+未実施:
+
+- zedBSD の guest の browser の確かめ（Vulkan の道と `--no-gpu` の道の 2 枚の画面の PNG、localStorage が残る、JIS でない US の鍵の入力）は Q1 の割当（design §7.1 段 5）。CPU の道（`present-cpu.c`）と窓の作り直し、`kl_app_storage_directory`・`kl_window_vulkan_extensions` の実行は、compositor の無い host では動かせず、build と読みだけ。
+- `plan/ws334/tests/check-skeleton.sh` は 100 秒で打ち切り（p023 の記録のとおり基点でも FAIL する物。この Phase と無関係）。
+
+消してよい物（Q1 へ）: `build/tmp/p027`（sysroot の写し・build の log・Linux Keiland の出力 `build/tmp/p027/keiland-linux`）、`build/ws074-host`、`build/amd64`、`build/tmp/ws327-host-test.run.*`。どれも使い捨て。

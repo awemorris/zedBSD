@@ -16,8 +16,6 @@
 #ifndef KEILAND_BROWSER_SHELL_INTERNAL_H
 #define KEILAND_BROWSER_SHELL_INTERNAL_H
 
-/* The Wayland platform's parts of Vulkan (the instance's surface extension), declared before anything includes vulkan.h. */
-#define VK_USE_PLATFORM_WAYLAND_KHR 1
 #include <vulkan/vulkan.h>
 
 #include "shell/shell.h"
@@ -66,7 +64,9 @@ enum shell_event_type {
  * positive), a pointer button pressed or let go (its evdev code), the
  * pointer moving or leaving, or the keyboard's focus gained or lost
  * (pressed), with the pointer's place in the window and the modifiers
- * held.  An input method's text (ws090-p025) is the text it commits, the
+ * held.  A key pressed carries in text the character it types, in UTF-8,
+ * when the window's backend knows it (empty otherwise).  An input method's
+ * text (ws090-p025) is the text it commits, the
  * text it composes with its cursor's byte offsets (begin and end, -1 when
  * hidden), or the bytes it deletes before and after the caret.
  */
@@ -90,19 +90,22 @@ struct shell_event {
 
 /*
  * A key as the view names it (keys.c): its DOM code and key, and the text
- * it types ("" when none).  The strings live for the life of the program.
+ * it types ("" when none).  The strings live for the life of the program,
+ * except that a key or text the backend named is in typed.
  */
 struct shell_key_names {
 	const char *code;
 	const char *key;
 	const char *text;
+	char typed[KL_WINDOW_TEXT_MAX];
 };
 
 struct shell_titlebar;
 
 /*
  * The window: libkeiland's application and its one window (shown with
- * KL_PRESENT_NONE; the presenter draws on its surface), the size the
+ * KL_PRESENT_NONE, the presenter drawing on its surface, or with
+ * KL_PRESENT_SHM, the CPU presenter's memory shown), the size the
  * compositor gave it, and the input waiting for the main loop.  What is
  * done with the titlebar goes to the titlebar's queue (titlebar.c).
  *
@@ -187,6 +190,16 @@ struct shell_present {
 	const char *operation;
 };
 
+/*
+ * The CPU presenter's frame (present-cpu.c): the memory the view draws the
+ * page into (0xAARRGGBB words, width by height, packed rows) and its size.
+ */
+struct shell_cpu {
+	uint32_t *pixels;
+	uint32_t width;
+	uint32_t height;
+};
+
 /* The titlebar's controls. */
 #define SHELL_CONTROL_BACK	1U
 #define SHELL_CONTROL_FORWARD	2U
@@ -244,7 +257,9 @@ struct shell_mail {
 };
 
 /* The window (window.c). */
-int shell_window_open(struct shell_window *window, const char *display, uint32_t width, uint32_t height, const char *title);
+int shell_window_connect(struct shell_window *window, const char *display);
+int shell_window_open(struct shell_window *window, uint32_t width, uint32_t height, const char *title, unsigned present);
+void shell_window_drop(struct shell_window *window);
 int shell_window_dispatch(struct shell_window *window, int timeout);
 int shell_window_take(struct shell_window *window, struct shell_event *event);
 void shell_window_title(struct shell_window *window, const char *title);
@@ -252,7 +267,7 @@ void shell_window_close(struct shell_window *window);
 uint64_t shell_clock(void);
 
 /* The keys (keys.c). */
-void shell_key_names(uint32_t evdev, uint32_t modifiers, struct shell_key_names *names);
+void shell_key_names(uint32_t evdev, uint32_t modifiers, const char *typed, struct shell_key_names *names);
 uint32_t shell_key_modifiers(uint32_t modifiers);
 int shell_key_button(uint32_t button);
 
@@ -271,6 +286,12 @@ int shell_mail_round(struct shell_mail *mail, struct browser_view *view, struct 
 int shell_mail_timeout(const struct shell_mail *mail, uint64_t now_ms);
 void shell_mail_fill(struct shell_mail *mail, struct browser_view *view, struct shell_titlebar *titlebar);
 void shell_mail_close(struct shell_mail *mail, struct shell_titlebar *titlebar);
+
+/* The CPU presenter (present-cpu.c). */
+int shell_cpu_open(struct shell_cpu *cpu, struct shell_window *window);
+int shell_cpu_resize(struct shell_cpu *cpu, struct shell_window *window);
+int shell_cpu_frame(struct shell_cpu *cpu, struct shell_window *window, struct browser_view *view);
+void shell_cpu_close(struct shell_cpu *cpu);
 
 /* The presenter (present.c). */
 VkResult shell_present_open(struct shell_present *present, struct shell_window *window, struct browser_view *view);

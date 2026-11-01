@@ -78,7 +78,7 @@
 | [p024](phase024/phase.md) | 統合（Opus、旧 p006）: 永続の HTTP の cache（U5 で第 2 段、後へ） | planned | p023 |
 | [p025](phase025/phase.md) | 統合（Opus、旧 p007）: script の core の archive と link の確かめ | cleared（2026-11-01 20:57 Q1、main e1334ddfc。main で script-core-link.sh PASS を流し直した）。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1843-i01、P5: script-core-link.sh PASS（host の archive 62 本の未定義 92 個は全部 libc・libm・libpthread・libdl、js-tests 17/17、win64・winarm64 の archive と script-core.exe、Wine で 20/20 が host と同じ bytes）、cross-build PASS。core の js/tool.c が browser.h 経由で vulkan.h に依る事と Math.cbrt の libm の差を phase.md に） | p021 |
 | [p026](phase026/phase.md) | 統合（Opus、旧 p008）: libmedia の Windows（M2・M4・M7・M9 を media-os へ）と mediafile | planned | p013・p022 |
-| [p027](phase027/phase.md) | 統合（Opus、旧 p009）: browser の UI の準備（`browser_main`、libkeiland の header の追加と Wayland の実装、present・CPU の道・鍵の text・時計） | planned | p023 |
+| [p027](phase027/phase.md) | 統合（Opus、旧 p009）: browser の UI の準備（`browser_main`、libkeiland の header の追加と Wayland の実装、present・CPU の道・鍵の text・時計） | in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-01 q1856-i01、Sonnet） | p023 |
 | [p028](phase028/phase.md) | 統合（Opus、旧 p011）: libkeiland の Win32 その 1（共通の file の棚卸し、kl_app・kl_window・loop・入力・枠・暗い mode・Vulkan の surface・CPU の表示・stub）、`apps/browser-win32/` の入口・単一の起動・resource。Wine＋xvfb-run で画面を撮る | planned | p014・p015・p016・p017・p025・p026・p027 |
 | [p029](phase029/phase.md) | 統合（Opus、旧 p012）: その 2（題の帯の controls、IMM32、clipboard、DPI） | planned | p018・p028 |
 | [p030](phase030/phase.md) | 統合（Opus、旧 p013）: OpenSSL の Windows の build と根（packages の ca-certificates ＋ Windows の store） | planned | p005・p022 |

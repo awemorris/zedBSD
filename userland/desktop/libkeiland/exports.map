@@ -499,6 +499,7 @@
 		kl_drop_frame;
 		kl_drop_caret;
 		kl_window_vulkan_surface;
+		kl_window_vulkan_extensions;
 		kl_app_open;
 		kl_app_close;
 		kl_app_dispatch;
@@ -509,6 +510,8 @@
 		kl_app_notify;
 		kl_app_notify_lock;
 		kl_app_display;
+		kl_app_storage_directory;
+		kl_data_directory;
 		kl_app_window_create;
 		kl_process_start;
 		kl_process_write;

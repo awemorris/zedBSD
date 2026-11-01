@@ -690,6 +690,32 @@ kl_window_vulkan_surface(
 	return 0;
 }
 
+/*
+ * Names the instance extensions a Vulkan instance needs for a window's
+ * surface: the surface extension and Wayland's.
+ */
+int
+kl_window_vulkan_extensions(
+	const char *const **names,
+	uint32_t *count)
+{
+	static const char *const extensions[] = {
+		VK_KHR_SURFACE_EXTENSION_NAME,
+		VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME
+	};
+
+	/* Somewhere to put the names. */
+	if (names == NULL || count == NULL)
+		return EINVAL;
+
+	/* The names, which live for the life of the program. */
+	*names = extensions;
+	*count = (uint32_t)(sizeof(extensions) / sizeof(extensions[0]));
+
+	/* Succeeded. */
+	return 0;
+}
+
 /* The menu service the window's menus use: its application's, or one of its own made once. */
 static struct kl_menu_service *
 declare_service(

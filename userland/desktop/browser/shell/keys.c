@@ -13,6 +13,8 @@
  * zedDesktop sends evdev codes (userland/desktop/wayland/seat.c) and the
  * browser, like the terminal, carries the US layout itself.  A key missing
  * from the table is "Unidentified", as the DOM calls a key it cannot name.
+ * When the window's backend tells the character a key types, that character
+ * is the DOM's key instead of the table's (a layout other than the US one).
  */
 
 #include "shell/internal.h"
@@ -129,25 +131,38 @@ static const struct keys_entry keys_table[] = {
 	{ 0U, NULL, NULL, NULL, 0 }
 };
 
+static int keys_single_character(const char *text);
+
 /*
  * Names an evdev key for the view: its DOM code and key (the shifted key
  * with Shift held), and the text it types (a character key without
- * Control, Alt or Meta; "" otherwise).  The names live for the life of the
- * program.
+ * Control, Alt or Meta; "" otherwise).  typed is the character the backend
+ * says the key types, in UTF-8 ("" when it does not say): when it is one
+ * printable character it is the key and the text, in place of the table's.
+ * The names live for the life of the program, except the key and text
+ * taken from typed, which live in names.
  */
 void
 shell_key_names(
 	uint32_t evdev,
 	uint32_t modifiers,
+	const char *typed,
 	struct shell_key_names *names)
 {
 	const struct keys_entry *entry;
 	size_t index;
+	int printable;
 
 	/* A key the table does not have. */
 	names->code = "Unidentified";
 	names->key = "Unidentified";
 	names->text = "";
+	names->typed[0] = '\0';
+	printable = keys_single_character(typed);
+	if (printable) {
+		memcpy(names->typed, typed, strlen(typed) + 1U);
+		names->key = names->typed;
+	}
 
 	/* The key's entry. */
 	entry = NULL;
@@ -158,22 +173,74 @@ shell_key_names(
 		}
 	}
 
-	/* A key the table does not have keeps the names it was given. */
-	if (entry == NULL)
+	/* A key the table does not have keeps the names it was given (a character the backend named is its key and its text). */
+	if (entry == NULL) {
+		if (printable && (modifiers & (SHELL_MOD_CTRL | SHELL_MOD_ALT | SHELL_MOD_META)) == 0U)
+			names->text = names->typed;
 		return;
+	}
 
-	/* Its code, and its key with or without Shift. */
+	/* Its code, and its key with or without Shift, or the character the backend named. */
 	names->code = entry->code;
-	names->key = entry->key;
-	if ((modifiers & SHELL_MOD_SHIFT) != 0U)
-		names->key = entry->shifted;
+	if (!printable) {
+		names->key = entry->key;
+		if ((modifiers & SHELL_MOD_SHIFT) != 0U)
+			names->key = entry->shifted;
+	}
 
 	/* A character key types its key unless Control, Alt or Meta is held. */
-	if (!entry->types)
+	if (!entry->types && !printable)
 		return;
 	if ((modifiers & (SHELL_MOD_CTRL | SHELL_MOD_ALT | SHELL_MOD_META)) != 0U)
 		return;
 	names->text = names->key;
+}
+
+/*
+ * Tells whether a text is one printable character in UTF-8: a well-formed
+ * sequence that is not a control character (C0, DEL, or C1).
+ */
+static int
+keys_single_character(
+	const char *text)
+{
+	const unsigned char *bytes;
+	size_t length;
+	size_t index;
+
+	/* Nothing is not a character. */
+	if (text == NULL || text[0] == '\0')
+		return 0;
+
+	/* The sequence's length by its first byte; a control character is not printable. */
+	bytes = (const unsigned char *)text;
+	if (bytes[0] < 0x20U || bytes[0] == 0x7FU)
+		return 0;
+	if (bytes[0] < 0x80U)
+		length = 1U;
+	else if (bytes[0] >= 0xC2U && bytes[0] <= 0xDFU)
+		length = 2U;
+	else if (bytes[0] >= 0xE0U && bytes[0] <= 0xEFU)
+		length = 3U;
+	else if (bytes[0] >= 0xF0U && bytes[0] <= 0xF4U)
+		length = 4U;
+	else
+		return 0;
+
+	/* Its continuation bytes, and nothing after it. */
+	for (index = 1U; index < length; index++) {
+		if ((bytes[index] & 0xC0U) != 0x80U)
+			return 0;
+	}
+	if (bytes[length] != 0U)
+		return 0;
+
+	/* A C1 control character (U+0080 to U+009F) is not printable. */
+	if (bytes[0] == 0xC2U && bytes[1] < 0xA0U)
+		return 0;
+
+	/* Succeeded: one printable character. */
+	return 1;
 }
 
 /* Turns the window's modifier bits into the view's. */
