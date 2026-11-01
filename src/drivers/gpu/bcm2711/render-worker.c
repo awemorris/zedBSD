@@ -226,6 +226,7 @@ bcm2711_render_worker_submit(
 	request->canceled = 0;
 	request->next = NULL;
 	request->queued_ticks = clock_ticks();
+	request->queued_ns = bcm2711_v3d_busy_clock();
 	session->pending++;
 	if (worker->tail == NULL) {
 		worker->head = request;
@@ -262,6 +263,7 @@ bcm2711_render_worker_step(
 	struct bcm2711_v3d_perf *perf;
 	unsigned long enabled;
 	uint64_t started;
+	uint64_t started_ns;
 	uint64_t waited;
 	uint64_t taken;
 	bool parked;
@@ -276,6 +278,7 @@ bcm2711_render_worker_step(
 	if (request == NULL)
 		return EAGAIN;
 	started = clock_ticks();
+	started_ns = bcm2711_v3d_busy_clock();
 	mutex_lock(&controller->mutex);
 
 	/* Stop and global fault may arrive after dequeue while this worker waits for the controller. */
@@ -343,6 +346,11 @@ bcm2711_render_worker_step(
 		perf->request_wait_max = waited;
 	if (taken > perf->request_run_max)
 		perf->request_run_max = taken;
+
+	/* Diagnostic: the same two on the fine counter, for the submission chain. */
+	perf->chain_requests++;
+	perf->chain_fifo_ns += started_ns - request->queued_ns;
+	perf->chain_worker_ns += bcm2711_v3d_busy_clock() - started_ns;
 
 	mutex_unlock(&controller->mutex);
 
@@ -1233,13 +1241,23 @@ bcm2711_render_execution_submit(
 	struct bcm2711_render_execution *execution)
 {
 	struct bcm2711_render_device *controller;
+	struct bcm2711_v3d_perf *perf;
 	unsigned long enabled;
 
-	/* The execution joins the tail of its session's queue. */
+	/* The execution joins the tail of its session's queue, stamped for the submission chain's diagnostic. */
 	controller = session->device;
 	execution->session = session;
 	execution->next = NULL;
+	execution->queued_ns = bcm2711_v3d_busy_clock();
+	execution->started = false;
+	perf = &controller->space.native->hardware.perf;
 	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
+
+	/* Diagnostic: an execution that finds the executor idle ends its idle time since the last delivery. */
+	if (controller->worker.executions == 0 && perf->chain_last_end_ns != 0 && execution->queued_ns > perf->chain_last_end_ns) {
+		perf->chain_idles++;
+		perf->chain_idle_ns += execution->queued_ns - perf->chain_last_end_ns;
+	}
 
 	if (session->execution_tail == NULL) {
 		session->execution_head = execution;
@@ -1309,6 +1327,7 @@ bcm2711_render_executor_step(
 	uint64_t held;
 	uint64_t released;
 	uint64_t ordinal;
+	uint64_t done_ns;
 	bool display;
 	bool failed;
 	bool done;
@@ -1368,6 +1387,14 @@ bcm2711_render_executor_step(
 		ordinal = execution->ordinal;
 		done = true;
 		if (error == 0) {
+			/* Diagnostic: an execution's first step ends its wait in the queue. */
+			perf = &controller->space.native->hardware.perf;
+			if (!execution->started) {
+				execution->started = true;
+				perf->chain_executions++;
+				perf->chain_queue_ns += bcm2711_v3d_busy_clock() - execution->queued_ns;
+			}
+
 			execution->engine = true;
 			error = execution->step(controller, execution, &done);
 			stage = "step";
@@ -1379,6 +1406,11 @@ bcm2711_render_executor_step(
 			}
 		}
 	}
+
+	/* Diagnostic: when the step that finished the execution returned, for its delivery's wait. */
+	done_ns = 0;
+	if (done)
+		done_ns = bcm2711_v3d_busy_clock();
 
 	/* A finished execution leaves its queue before its end frees it; a submit may be linking behind it. */
 	settled = 0;
@@ -1531,6 +1563,14 @@ bcm2711_render_executor_step(
 		next = request->parked_next;
 		request->parked_next = NULL;
 		finish_request(controller, request, parked_outcome(controller, request));
+	}
+
+	/* Diagnostic: the delivery of a finished execution's completions, and where the executor's idle time starts. */
+	if (done_ns != 0) {
+		perf = &controller->space.native->hardware.perf;
+		perf->chain_last_end_ns = bcm2711_v3d_busy_clock();
+		perf->chain_finishes++;
+		perf->chain_finish_ns += perf->chain_last_end_ns - done_ns;
 	}
 
 	/* The ended executions give back their session's pending holds. */

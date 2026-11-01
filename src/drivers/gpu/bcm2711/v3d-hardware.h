@@ -97,6 +97,25 @@ struct bcm2711_v3d_perf {
 	uint64_t request_run_ticks;
 	uint64_t request_wait_max;
 	uint64_t request_run_max;
+	/*
+	 * The submission chain on the fine counter (nanoseconds), for the
+	 * frame a client that waits for each submission sees: requests'
+	 * FIFO waits and worker time; executions' waits from queueing to
+	 * their first step and from their last step to their completions'
+	 * delivery; and the executor's idle time before an execution came to
+	 * an empty queue, from the delivery of the one before.  Written by
+	 * the worker and the executor, read by the report.
+	 */
+	uint64_t chain_requests;
+	uint64_t chain_fifo_ns;
+	uint64_t chain_worker_ns;
+	uint64_t chain_executions;
+	uint64_t chain_queue_ns;
+	uint64_t chain_finishes;
+	uint64_t chain_finish_ns;
+	uint64_t chain_idles;
+	uint64_t chain_idle_ns;
+	uint64_t chain_last_end_ns;
 	/* Release diagnostics: draw teardown and batch-end ticks, released draws, and views kept in the cache or unmapped. */
 	uint64_t release_draw_ticks;
 	uint64_t release_end_ticks;
