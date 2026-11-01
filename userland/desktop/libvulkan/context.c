@@ -229,10 +229,11 @@ vulkan_context_open(
 	/*
 	 * Only the native renderer's record carries the native word.  Each video
 	 * decode bit (H.264, H.265) is the renderer's promise that a video
-	 * decode queue family of that codec exists and that it reads the codec's
-	 * structures on the video wire, the command bit its promise that GPU_COMMAND runs at once
-	 * (used only with the decoder's notifications); unknown bits are
-	 * ignored so a later renderer stays usable.
+	 * decode queue family of that codec exists and that it reads the
+	 * codec's structures on the video wire, the command bit its promise
+	 * that GPU_COMMAND runs at once (used only with the decoder's
+	 * notifications); unknown bits are ignored so a later renderer stays
+	 * usable.
 	 */
 	if (capset.bytes == VULKAN_NATIVE_CAPSET_BYTES) {
 		native_magic = vulkan_load_word(capset.data + 168);
