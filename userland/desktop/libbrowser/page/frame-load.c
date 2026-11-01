@@ -304,8 +304,14 @@ frame_load_scan(
 						same = vm_string_equal(source, element->child_attribute);
 					}
 
-					/* A changed attribute replaces where a script in the child navigated it. */
-					if (!element->child_load_seen || !same) {
+					/* A frame a script navigated before its first load starts at that location: its initial about:blank never loads. */
+					if (!element->child_load_seen && element->child_navigation != NULL) {
+						element->child_attribute = source;
+						error = frame_load_start(page, element, element->child_navigation);
+						if (error != 0)
+							return error;
+					} else if (!element->child_load_seen || !same) {
+						/* A changed attribute replaces where a script in the child navigated it. */
 						element->child_attribute = source;
 						element->child_navigation = NULL;
 						error = frame_load_start(page, element, source);

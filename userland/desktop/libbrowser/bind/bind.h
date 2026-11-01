@@ -90,6 +90,14 @@ struct css_style;
  * of its own), and that box's border widths, together with that
  * box's used margins and paddings (getComputedStyle's resolved values).
  */
+/* One rectangle of an inline element's lines, in CSS pixels from the document's top left. */
+struct bind_rect {
+	double x;
+	double y;
+	double width;
+	double height;
+};
+
 struct bind_box {
 	double x;
 	double y;
@@ -237,6 +245,11 @@ struct bind_host {
 	struct css_engine *(*selector_engine)(void *context);
 	/* May copy no_generated_box proof even when the ordinary bounds query returns zero. */
 	int (*node_box)(void *context, struct dom_node *node, struct bind_box *box);
+	/*
+	 * Lists the rectangles of an inline node's lines (one for each line it takes part in): returns 1 and the count
+	 * (at most max) when the node is laid out as inline content, 0 when its one box is its rectangle.
+	 */
+	int (*node_rects)(void *context, struct dom_node *node, struct bind_rect *rects, size_t max, size_t *count);
 	/*
 	 * Appends used CSS-pixel Grid tracks to a caller-owned double vector and
 	 * reports how many implicit ones come before the explicit grid and how

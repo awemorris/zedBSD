@@ -328,9 +328,10 @@ page_vt_pseudo_style(
 		entry = layout_transition_find(&page->transition, name);
 		if (entry != NULL && pseudo == CSS_PSEUDO_ELEMENT_VT_GROUP)
 			siblings = (entry == &page->transition.names[first] ? CSS_VT_FIRST : 0) | (entry == &page->transition.names[last] ? CSS_VT_LAST : 0);
-		if (entry != NULL && entry->has_old && entry->has_new && pseudo == CSS_PSEUDO_ELEMENT_VT_OLD)
+		/* An image the name does not have yet is still told by its other: the new one follows an old one, the old one precedes a new one. */
+		if (entry != NULL && entry->has_new && pseudo == CSS_PSEUDO_ELEMENT_VT_OLD)
 			siblings = CSS_VT_FIRST;
-		if (entry != NULL && entry->has_old && entry->has_new && pseudo == CSS_PSEUDO_ELEMENT_VT_NEW)
+		if (entry != NULL && entry->has_old && pseudo == CSS_PSEUDO_ELEMENT_VT_NEW)
 			siblings = CSS_VT_LAST;
 	}
 	for (level = 0; error == 0 && level < count; level++) {
