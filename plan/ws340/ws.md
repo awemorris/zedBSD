@@ -17,6 +17,8 @@
 - Pi 4・Pi 5: zedBSD の loader を通らない。Pi の firmware（Pi 4 は boot partition の start4.elf など、Pi 5 は EEPROM の bootloader）が `config.txt` と `cmdline.txt` を読んで kernel を直に起こす（`platform/arm64/bootloader.mk`・`firmware.mk`・`rpi5-firmware.mk`）。cmdline.txt の `login=` は `platform/arm64/vmunix.mk` が書く。`ZEDBSD_GRAPHICAL_BOOT` は arm64 の側では使われていない。firmware の虹色の splash（`disable_splash`）もある。
 - VF2: 板の `/boot/boot0/zedbsd.cfg` で起動する（今の板の cfg は kernel・rootpart の 2 行、login=graphical を外したまま。master の「止まっている物」）。経路（U-Boot と zedBSD の loader の関係）と graphical boot の扱いは p001 で調べる。
 
+- （2026-11-02）ユーザーの Pi 5 の UAT で、CI の image では graphical boot が有効になっていなかった、という趣旨の指摘を受けた。この WS で Pi で graphical boot を働かせた後に、CI の Pi 5（と Pi 4・VF2）の config で ZEDBSD_GRAPHICAL_BOOT を y にする。
+
 ## Phase
 
 | Phase | 目的 | 状態 | 依存 |

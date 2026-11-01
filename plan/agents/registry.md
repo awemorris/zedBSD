@@ -7,10 +7,10 @@
 | --- | --- | --- | --- | --- | --- |
 | P1 | phase-runner-high | ws324 p009b NVENC の関門 (q1884-i01) | `/home/awe/zedBSD-worktrees/p1-ws324` / `agent/p1-ws324` | in-progress（2026-11-02 01:07、10.0.10.3） | dce8421af（merge a43959d8e） |
 | P2 | phase-runner-high | ws322 p004 H.264 decode の道 (q1869-i01) | `/home/awe/zedBSD-worktrees/p2-ws322` / `agent/p2-ws322` | in-progress（2026-11-01 23:51 起動、VF2） | d1af4687c（merge 361044f95） |
-| P3 | phase-runner-high | ws291 p027 の回帰 amd64・Venus (q1859-i01) | `/home/awe/zedBSD-worktrees/p3-ws291reg` / `agent/p3-ws291reg` | 返却（2026-11-01 23:19、PASS） | 73669b953（merge 6f49769e7） |
+| P3 | phase-runner-high | BUG-393 (q1891-i01) | `/home/awe/zedBSD-worktrees/p3-bug393` / `agent/p3-bug393` | in-progress（2026-11-02 01:39 起動） | 73669b953（merge 6f49769e7） |
 | P5 | phase-runner-high | ws334 p033 後半の Windows の口 (q1886-i01) | `/home/awe/zedBSD-worktrees/p5-ws334b` / `agent/p5-ws334b` | in-progress（2026-11-02 01:25 起動） | fb9ee2715（merge 04eb03f1d） |
 | P6 | phase-runner-low | ws335 p013 ML-KEM の多項式 (q1881-i01) | `/home/awe/zedBSD-worktrees/p6-ws335b` / `agent/p6-ws335b` | in-progress（2026-11-02 01:07） | 4e7214b51（merge 9aa6bae4d） |
-| P7 | phase-runner-high | ws334 p027 の guest の確かめ (q1858-i01) | `/home/awe/zedBSD-worktrees/p7-ws334g` / `agent/p7-ws334g` | 返却（2026-11-01 22:26、PASS） | f45a3e728（merge f58a8d93f） |
+| P7 | phase-runner-high | BUG-394 (q1892-i01) | `/home/awe/zedBSD-worktrees/p7-bug394` / `agent/p7-bug394` | in-progress（2026-11-02 01:39 起動） | f45a3e728（merge f58a8d93f） |
 | P4 | phase-runner-high | BUG-390 (q1889-i01) | `/home/awe/zedBSD-worktrees/p4-bug390` / `agent/p4-bug390` | in-progress（2026-11-02 01:27 起動、Pi 5） | 42ae7d081（merge b29f3a5ae） |
 | P8 | phase-runner-high | BUG-391・392 (q1890-i01) | `/home/awe/zedBSD-worktrees/p8-bug391` / `agent/p8-bug391` | in-progress（2026-11-02 01:27 起動、QEMU） | c2d396e24（merge cc506bb26） |
 
