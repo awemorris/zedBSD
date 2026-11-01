@@ -276,7 +276,11 @@ bcm2711_display_register(
 	return 0;
 }
 
-/* Counts selected-PV frames over one bounded second without holding the IRQ guard. */
+/*
+ * Waits, at most one bounded second, for a selected-PV frame without holding
+ * the IRQ guard.  The self-test (rpi4gpu.selftest=1) counts the frames of the
+ * whole second instead.
+ */
 static int
 observe_frames(
 	struct bcm2711_display *display)
@@ -284,19 +288,28 @@ observe_frames(
 	struct bcm2711_flip_status before;
 	struct bcm2711_flip_status after;
 	uint32_t step;
+	uint32_t waited_ms;
+	bool selftest;
 
-	/* Leaves the native console visible while measuring actual serviced frame sources. */
+	/* Leaves the native console visible while observing actual serviced frame sources. */
 	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P1 begin vblank observation");
+	selftest = bcm2711_stage_selftest();
 	bcm2711_display_flip_snapshot(display, &before);
+	after = before;
+	waited_ms = 0;
 	for (step = 0; step < 1000U; step++) {
 		/* Millisecond waits allow the selected PV IRQ to update its persistent counter. */
 		kern_usleep_range(1000, 1000);
+		waited_ms++;
+		bcm2711_display_flip_snapshot(display, &after);
+		if (!selftest && after.frame_sequence != before.frame_sequence)
+			break;
 	}
 
 	/* The captured cadence is evidence for the physical test, never an assumed 60 Hz. */
-	bcm2711_display_flip_snapshot(display, &after);
-	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P1 frames %llu in 1s expected %u mHz",
+	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P1 frames %llu in %u ms expected %u mHz",
 			   (unsigned long long)(after.frame_sequence - before.frame_sequence),
+			   waited_ms,
 			   display->refresh_millihz);
 	if (after.frame_sequence == before.frame_sequence)
 		return ETIMEDOUT;

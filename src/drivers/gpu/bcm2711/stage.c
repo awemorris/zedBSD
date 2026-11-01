@@ -20,9 +20,11 @@
  *   rpi4gpu.off=1         the driver does not attach at all
  *   rpi4gpu.selftest=1    the bring-up also runs the self-test: the
  *                         engine's test jobs (the V9/V10 hang and reset
- *                         among them) and the display's test pictures
- *                         (the moving square, the stripes and the
- *                         checker); none of it runs by default
+ *                         among them), the display's test pictures (the
+ *                         moving square, the stripes and the checker), a
+ *                         whole second of frame counting and the pauses
+ *                         before dangerous writes; none of it runs by
+ *                         default
  *   rpi4gpu.stop=<stage>  the display path stops before that stage
  *   v3d.stop=<stage>      the V3D engine stops before that stage
  *   v3d.tfu=0             textures are converted by the CPU, never the
@@ -245,11 +247,13 @@ bcm2711_stage_mark(
 }
 
 /*
- * Waits before a write that may blank the screen.
+ * Waits before a write that may blank the screen, during the self-test
+ * (rpi4gpu.selftest=1) only.
  *
- * The begin line briefly remains visible before the screen may go dark.
- * This observation pause does not replace hardware-specific settling or
- * completion waits.  The sleep also works during early boot.
+ * The begin line briefly remains visible before the screen may go dark, for
+ * a photograph of the bring-up.  This observation pause does not replace
+ * hardware-specific settling or completion waits.  The sleep also works
+ * during early boot.
  */
 void
 bcm2711_stage_pause(
@@ -257,6 +261,12 @@ bcm2711_stage_pause(
 	const char *stage)
 {
 	unsigned waited_ms;
+	bool selftest;
+
+	/* The ordinary boot does not wait to be photographed. */
+	selftest = bcm2711_stage_selftest();
+	if (!selftest)
+		return;
 
 	/* Says on the screen that the next step is a dangerous one. */
 	bcm2711_stage_mark(family, "%s waits %u ms before writing", stage, BCM2711_STAGE_PAUSE_MS);

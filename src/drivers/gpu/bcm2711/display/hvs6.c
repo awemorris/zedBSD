@@ -129,6 +129,13 @@
 #define ADOPT_POLL_US			1000U
 #define ADOPT_POLLS			200U
 
+/*
+ * The vertical blanks R1 times: their first and last are four frames apart,
+ * about 67 ms at 60 Hz; R1 gives up after one second without them.
+ */
+#define VBLANK_TIMED			5U
+#define VBLANK_LIMIT_MS			1000U
+
 /* The overlay of the R2 test: a 64x64 opaque square moved 30 times. */
 #define OVERLAY_SIZE			64U
 #define OVERLAY_STEPS			30U
@@ -456,10 +463,12 @@ bcm2712_display_adopt(
 }
 
 /*
- * Runs stage R1: counts the pixel valve's vertical blanks for one second.
+ * Runs stage R1: times the pixel valve's vertical blanks.
  *
  * Enables the start-of-front-porch interrupt of the valve behind the
- * channel, counts it, and puts the enable back as it was.
+ * channel, waits for VBLANK_TIMED of them (at most VBLANK_LIMIT_MS), puts
+ * the enable back as it was, and takes the refresh from the time between
+ * the first and the last.
  */
 int
 bcm2712_display_vblank_test(
@@ -471,8 +480,12 @@ bcm2712_display_vblank_test(
 	uint32_t enable;
 	uint32_t status;
 	uint64_t count;
+	uint64_t first;
+	uint64_t last;
 	uint64_t started;
 	uint64_t elapsed;
+	uint64_t span_us;
+	uint64_t millihz;
 	unsigned step;
 	bool allowed;
 
@@ -498,37 +511,52 @@ bcm2712_display_vblank_test(
 	enabled = spin_lock_irqsave(&display->guard);
 
 	display->vblank_count = 0;
+	display->vblank_first_ticks = 0;
+	display->vblank_last_ticks = 0;
 
 	spin_unlock_irqrestore(&display->guard, enabled);
 	kern_mmio_write32(valve + VALVE_INTSTAT, VALVE_VFP_START);
 	kern_mmio_write32(valve + VALVE_INTEN, enable | VALVE_VFP_START);
 	kern_irq_unmask(line->irq);
 
-	/* Counts for one second. */
+	/* Looks each millisecond until enough vertical blanks came or the limit passed. */
 	started = clock_ticks();
-	for (step = 0; step < 100U; step++)
-		kern_usleep_range(10000, 10000);
-	enabled = spin_lock_irqsave(&display->guard);
+	count = 0;
+	first = 0;
+	last = 0;
+	for (step = 0; step < VBLANK_LIMIT_MS; step++) {
+		kern_usleep_range(1000, 1000);
+		enabled = spin_lock_irqsave(&display->guard);
 
-	count = display->vblank_count;
+		count = display->vblank_count;
+		first = display->vblank_first_ticks;
+		last = display->vblank_last_ticks;
 
-	spin_unlock_irqrestore(&display->guard, enabled);
+		spin_unlock_irqrestore(&display->guard, enabled);
+		if (count >= VBLANK_TIMED)
+			break;
+	}
 
 	/* Puts the valve back as it was and masks the line. */
 	kern_irq_mask(line->irq);
 	kern_mmio_write32(valve + VALVE_INTEN, enable);
 	kern_mmio_write32(valve + VALVE_INTSTAT, VALVE_VFP_START);
 	elapsed = kern_ticks_to_ms(clock_ticks() - started);
-	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R1 %llu vblanks in %llu ms",
+	span_us = 0;
+	if (count >= 2U)
+		span_us = kern_ticks_to_us(last - first);
+	bcm2711_stage_mark(BCM2712_FAMILY_DISPLAY, "R1 %llu vblanks %llu us apart in %llu ms",
 			   (unsigned long long)count,
+			   (unsigned long long)span_us,
 			   (unsigned long long)elapsed);
 
-	/* Refuses a valve that gave no interrupt. */
-	if (count == 0 || elapsed == 0)
+	/* Refuses a valve that gave fewer than two interrupts. */
+	if (count < 2U || span_us == 0)
 		return EIO;
 
 	/* Records the measured refresh, rounded to the whole hertz (the flip code budgets with it). */
-	display->base.refresh_millihz = (uint32_t)((count * 1000U + elapsed / 2U) / elapsed) * 1000U;
+	millihz = ((count - 1U) * 1000000000ULL + span_us / 2U) / span_us;
+	display->base.refresh_millihz = (uint32_t)((millihz + 500U) / 1000U) * 1000U;
 
 	/* Succeeded: the valve's vertical blank reaches the driver. */
 	return 0;
@@ -1024,6 +1052,7 @@ valve_service(
 	struct bcm2712_display *display;
 	volatile uint8_t *valve;
 	uint32_t status;
+	uint64_t now;
 	unsigned long enabled;
 
 	/* Ignores an interrupt that is not the vertical blank. */
@@ -1033,11 +1062,15 @@ valve_service(
 	if ((status & VALVE_VFP_START) == 0)
 		return false;
 
-	/* Acknowledges and counts it. */
+	/* Acknowledges, counts and times it. */
 	kern_mmio_write32(valve + VALVE_INTSTAT, VALVE_VFP_START);
+	now = clock_ticks();
 	enabled = spin_lock_irqsave(&display->guard);
 
 	display->vblank_count++;
+	if (display->vblank_count == 1U)
+		display->vblank_first_ticks = now;
+	display->vblank_last_ticks = now;
 
 	spin_unlock_irqrestore(&display->guard, enabled);
 
