@@ -62,4 +62,12 @@ NVENC が driver の組んだ 1 絵の設定（`nvenc_h264_drv_pic_setup_s` と 
 | run16 | 1 つずつ写していない address に: 入力の chroma → MMU fault、rc_process → MMU fault、再構成の luma・chroma・history・bitstream・co-located → 同じ HW の誤り（そこまで行かない） |
 
 - 分かった事（まとめ）: firmware は setup を読み（magic・offset の検査を通り）、rc_process を読み、hardware が入力の luma・chroma を読んだ後、出力（再構成・history・bitstream・co-located）を書く前に hardware の誤り割り込み（error_status 1、clc5b7 の ENC_ERROR_H264_HWERR_INTERRUPT と見る）で止まる。圧縮の段（ME・MD・量子化・entropy）のどこか、または入力の前処理。
-- 次: H.265 で同じ形の I 絵（全体の原因か H.264 の設定の原因かを分ける）。
+| run17 | H.265 の IDR（2024 版の header を host で compile して作った 1024 byte の setup、APPLICATION_ID 3、control の codec 7・3・0）→ H.264 と全く同じ HW の誤り。**原因は codec に依らない**（共通の surface・ME の制御・入力・engine の環境） |
+| run18 | 入力の pitch を 1・4（単位の取り違えなら）、入力を BL の block height 1・4、tiled で block height 1、ME の制御を空に |
+| run19 | history の大きさを式（7168）、bitstream 32 KiB、residual の cap 0、その全部 |
+| run20 | GSP の LOGRM（31.9 KiB）を回収: 各 Xid 47 の直前に 1 引数の print が 24 個続く（falcon の register の dump と見る。1 つ目が 0x20 で IRQSTAT の EXTERR なら外の bus の誤り、NOCAT の "Bus Error" の文字と合う）。5 回とも値は同じで、18・19 番目（0x401e9350 → 92a0 → 9290 …）だけ違う。書式の文字列が無いので確かめられない |
+| run21 | NVDEC の channel を作らない（`nvrtx.stop=nvdec-channel`）: buffer の VA が 8 KiB 上にずれ、**入力の 48 KiB の buffer の末尾を越えて 0x100000000 で MMU fault**（RC 31）。engine は入力の先頭から 56 KiB 以上を読む（chroma の面が luma と同じ行数あるかのよう） |
+| run22 | 絵の buffer を 4 倍（192 KiB）→ 読み越しは buffer の中に収まるが、同じ HW の誤り（読み越しは原因ではない、入力の形の手がかり） |
+
+- GSP の log の書式: linux-firmware の `gsp-570.144.bin` には `.fwlogging`（libos の log の metadata）が無い。metadata の address（0x5e92fd0 など）は firmware の ELF の section の外。NVIDIA の driver の package の `gsp_tu10x.bin` に入っている見込み（open-gpu-kernel-modules の RM はそれで GSP の log を文に直す）。使うかは新しい出典（package の license）の判断なので Q1 に問う。
+- 次の候補: 入力の形（chroma の行数、tile の形）を MMU fault の位置で測る、大きい絵（720p）、GSP の log の文字列（判断の後）。

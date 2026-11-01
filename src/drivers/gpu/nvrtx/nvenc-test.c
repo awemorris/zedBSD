@@ -50,13 +50,15 @@
 
 /*
  * The pictures: their size, their planes' pitch, where the chroma plane
- * starts in a picture's buffer and the bytes of the buffer.
+ * starts in a picture's buffer and the bytes of the buffer: four times the
+ * planes' own, as the encoder reads past the planes' ends (it read 56 KiB
+ * from the start of a 48 KiB picture).
  */
 #define TEST_WIDTH			256U
 #define TEST_HEIGHT			128U
 #define TEST_PITCH			256U
 #define TEST_CHROMA_AT			(TEST_PITCH * TEST_HEIGHT)
-#define TEST_PICTURE_BYTES		(TEST_CHROMA_AT + TEST_PITCH * TEST_HEIGHT / 2U)
+#define TEST_PICTURE_BYTES		(4U * (TEST_CHROMA_AT + TEST_PITCH * TEST_HEIGHT / 2U))
 
 /* A 16x16 tile's side and bytes. */
 #define TEST_TILE			16U
@@ -122,6 +124,13 @@
 /* FNV-1a's start and multiplier. */
 #define TEST_FNV_START			2166136261U
 #define TEST_FNV_PRIME			16777619U
+
+/*
+ * The GSP logs' head before their words (the put pointer and the list of
+ * the 16 pages' addresses), and the most bytes of each the test shows.
+ */
+#define TEST_GSP_LOG_HEAD		(8U + 16U * 8U)
+#define TEST_GSP_LOG_SHOWN		0x8000U
 
 /* The pictures of one attempt: the IDR picture, then the P picture. */
 #define TEST_PICTURES			2U
@@ -392,12 +401,13 @@ static const struct test_poke test_sizes[] = {
 };
 
 /*
- * The choices tried, in order: the history's size by the formula; a
+ * The choices tried, in order: the setup as built; the history's size by the formula; a
  * smaller bitstream size; no residual cap; all three.  A choice whose
  * encode does not finish stops the channel, which is made again for the
  * next.
  */
 static const struct test_attempt test_attempts[] = {
+	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, NULL, 0U },
 	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_history_size, TEST_POKES(test_history_size) },
 	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_bitstream_size, TEST_POKES(test_bitstream_size) },
 	{ 0U, 0U, 0U, 0U, 0xffffffffU, 0U, 0U, test_no_cap, TEST_POKES(test_no_cap) },
@@ -423,6 +433,7 @@ static uint32_t test_tiled(uint32_t x, uint32_t y);
 static int test_attempt(struct nvrtx_gpu *gpu, struct test_state *state, uint32_t number, const struct test_attempt *attempt, bool *clean);
 static int test_encode(struct nvrtx_gpu *gpu, struct test_state *state, uint32_t number, const struct test_attempt *attempt, uint32_t index, bool *clean);
 static void test_dump(const char *tag, const uint8_t *bytes, size_t length);
+static void test_gsp_logs(struct nvrtx_gpu *gpu);
 static uint8_t *test_cpu(struct test_state *state, enum test_buffer buffer);
 static void test_absolute(uint8_t *surface, uint64_t luma, uint64_t chroma);
 static uint64_t test_va(const struct test_state *state, enum test_buffer buffer);
@@ -506,6 +517,9 @@ nvrtx_nvenc_test(
 	/* Reads what the GSP sent meanwhile and counts the channel errors; its prints are dropped again afterwards. */
 	nvrtx_nvenc_report_notices(gpu, before, "nvenc-test");
 	gpu->rpc_show_events = 0;
+
+	/* The GSP's own logs of what it saw, for a reader with the firmware's log metadata. */
+	test_gsp_logs(gpu);
 
 	/* Leaves the memory to an engine that may still write it. */
 	if (stopped) {
@@ -1061,6 +1075,39 @@ test_absolute(
 	/* Both planes' addresses. */
 	nvrtx_put32(surface, TEST_SURFACE_LUMA_AT, (uint32_t)(luma >> 8));
 	nvrtx_put32(surface, TEST_SURFACE_CHROMA_AT, (uint32_t)(chroma >> 8));
+}
+
+/*
+ * Writes the GSP's interrupt log and resource manager log (the second and
+ * third of its logs) to the kernel log: each from its start up to the
+ * words its put pointer (its first word, a count of 8-byte words) says
+ * are written, past the page list after it, at most TEST_GSP_LOG_SHOWN
+ * bytes each.
+ */
+static void
+test_gsp_logs(
+	struct nvrtx_gpu *gpu)
+{
+	const uint8_t *log;
+	uint64_t put;
+	size_t length;
+	uint32_t index;
+
+	/* The interrupt log, then the resource manager's. */
+	for (index = 1U; index < 3U; index++) {
+		log = (const uint8_t *)gpu->memory.logs[index].dma.address;
+		__atomic_thread_fence(__ATOMIC_ACQUIRE);
+		put = nvrtx_get64(log, 0U);
+		length = TEST_GSP_LOG_HEAD + (size_t)put * 8U;
+		if (length > TEST_GSP_LOG_SHOWN)
+			length = TEST_GSP_LOG_SHOWN;
+		nvrtx_stage_mark("nvenc-test: GSP log %u put %llx", (unsigned)index, (unsigned long long)put);
+		if (index == 1U) {
+			test_dump("gsp-logintr", log, length);
+		} else {
+			test_dump("gsp-logrm", log, length);
+		}
+	}
 }
 
 /* Reports the CPU's address of one of the test's buffers. */

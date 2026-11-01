@@ -12,6 +12,7 @@
 #      driver in use)
 # OUT/summary.txt has what is printed; the logs stay in OUT.
 #   usage: plan/ws324/tests/rtx-nvenc-test.sh OUT VMUNIX   (from the top of the tree)
+#   EXTRA_CFG="word ..." adds each word as a boot line for the run under test (e.g. nvrtx.stop=nvdec-channel).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 OUT=${1:?usage: rtx-nvenc-test.sh OUT VMUNIX}
@@ -67,6 +68,9 @@ say "before: zedbsd $IP kernel $kernel_before (kept $kept_kernel) cfg $cfg_befor
 # 2. The kernel and the line in, zedBSD restarted.
 zcp "$VMUNIX" "root@$IP:/tmp/vmunix.new" || { say "FAIL copy kernel"; exit 1; }
 zs "$IP" "cp /tmp/vmunix.new /boot/boot0/vmunix && sed -i -e '/^nvrtx\\.video=/d' -e '/^nvrtx\\.nvenc\\.test=/d' /boot/boot0/zedbsd.cfg && echo nvrtx.video=1 >> /boot/boot0/zedbsd.cfg && echo nvrtx.nvenc.test=1 >> /boot/boot0/zedbsd.cfg && sync" < /dev/null || say "FAIL kernel and line"
+for w in ${EXTRA_CFG:-}; do
+	zs "$IP" "echo $w >> /boot/boot0/zedbsd.cfg && sync" < /dev/null || say "FAIL extra line $w"
+done
 timeout 900 $MEASURE linux > "$OUT/restart.log" 2>&1 || say "FAIL Debian not up"
 IP=$(timeout 900 $MEASURE zedbsd 2>> "$OUT/zedbsd.log")
 if [ -n "$IP" ]; then
