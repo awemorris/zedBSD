@@ -72,6 +72,7 @@ struct probe_options {
 	int reset_at_idr;
 	int no_hash;
 	int h265;
+	const char *raw;
 };
 
 /* The decode times of a run with --time, in nanoseconds. */

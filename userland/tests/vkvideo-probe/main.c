@@ -12,7 +12,7 @@
  *
  *   vkvideo-probe --list
  *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264
- *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--h265] STREAM.h265
+ *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--raw=FILE] [--h265] STREAM.h265
  *
  * The list names each queue family with its flags and video codec
  * operations and the device's video extensions; on a device without video
@@ -61,7 +61,9 @@
  * stream is H.265 and h265.c decodes it (Main and Main 10 profiles; a
  * profile, a bit depth or a size the decoder does not take is refused
  * with PROBE_REFUSED): --frames, --expect, --time and --no-hash as for
- * H.264, the frames printed in the DPB's output order.
+ * H.264, the frames printed in the DPB's output order.  With --raw, each
+ * frame's display window is also appended to FILE as raw NV12 in that
+ * order, the bytes the hash reads (frame-raw.c).
  */
 
 #include "h264.h"
@@ -114,7 +116,7 @@ main(
 	memset(&options, 0, sizeof(options));
 	status = probe_arguments(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264 | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--h265] STREAM.h265\n");
+		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264 | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--raw=FILE] [--h265] STREAM.h265\n");
 		return 2;
 	}
 
@@ -222,6 +224,13 @@ probe_arguments(
 			continue;
 		}
 
+		/* --raw=FILE: the H.265 frames' display windows as raw NV12. */
+		differs = strncmp(argument, "--raw=", 6U);
+		if (differs == 0) {
+			options->raw = argument + 6;
+			continue;
+		}
+
 		/* --expect=FILE: the reference hashes. */
 		differs = strncmp(argument, "--expect=", 9U);
 		if (differs == 0) {
@@ -251,6 +260,8 @@ probe_arguments(
 	if (options->stream != NULL && probe_h265_name(options->stream))
 		options->h265 = 1;
 	if (options->h265 && (options->list || options->dump != NULL || options->sampled || options->reset_at_idr))
+		return -1;
+	if (options->raw != NULL && (!options->h265 || options->no_hash))
 		return -1;
 
 	/* Succeeded: the options are read. */

@@ -30,6 +30,7 @@
 
 #include "probe.h"
 #include "frame.h"
+#include "frame-raw.h"
 
 #include "../../desktop/libmedia/h265-stream.h"
 #include "../../desktop/libmedia/h265-dpb.h"
@@ -71,6 +72,7 @@ struct h265_probe {
 	struct frame_window window[DPB_SLOTS];
 	uint32_t active;
 	int laid_out;
+	FILE *raw;
 	uint32_t slices[H265SW_MAX_SLICE_SEGMENTS];
 };
 
@@ -170,6 +172,19 @@ probe_h265_run(
 		output.expect = fopen(options->expect, "r");
 		if (output.expect == NULL) {
 			fprintf(stderr, "vkvideo-probe: %s: %s\n", options->expect, strerror(errno));
+			free(state);
+			free(data);
+			return 1;
+		}
+	}
+
+	/* The raw frames, when asked for. */
+	if (options->raw != NULL) {
+		state->raw = fopen(options->raw, "wb");
+		if (state->raw == NULL) {
+			fprintf(stderr, "vkvideo-probe: %s: %s\n", options->raw, strerror(errno));
+			if (output.expect != NULL)
+				fclose(output.expect);
 			free(state);
 			free(data);
 			return 1;
@@ -305,6 +320,8 @@ probe_h265_run(
 	/* The decode times, when asked for. */
 	if (options->time)
 		probe_timing_print(&timing);
+	if (state->raw != NULL)
+		fclose(state->raw);
 	h265_stream_destroy(&state->stream);
 	free(state);
 	free(data);
@@ -842,6 +859,11 @@ h265_outputs(
 			planes.chroma_pitch = (size_t)chroma.rowPitch;
 			planes.linear = probe->linear;
 			frame_hash(&planes, &state->window[slot], text);
+			if (state->raw != NULL && frame_raw(state->raw, &planes, &state->window[slot]) != 0) {
+				fprintf(stderr, "vkvideo-probe: the raw frames could not be written\n");
+				fclose(state->raw);
+				state->raw = NULL;
+			}
 			probe_output_add(printed, output[index].poc, text);
 			probe_output_flush(printed, 0U);
 		}
