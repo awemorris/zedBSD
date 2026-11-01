@@ -3,7 +3,7 @@
 # ws334-p038 Windows の file: の頁の副資源（画像・CSS の url()）
 
 - 親: [WS334](../ws.md)。2026-11-02 06:10 Q1 が p034 の結果から作成。
-- Status: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-02 06:52 P5 q1909-i01）
+- Status: cleared（2026-11-02 06:57 Q1）。前: in-progress（実装済み・試験 PASS、cleared は Q1。2026-11-02 06:52 P5 q1909-i01）
 - 依存: p034。
 
 ## 目的

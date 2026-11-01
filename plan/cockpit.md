@@ -11,7 +11,7 @@
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（06:45）。p005（libvulkan の H.265 decode の転送）cleared。VPU は VF2 で既定 on、firmware を zedBSD-firmware で配る | p006 H.265 decode（PowerVR の reader と Wave5 の HEVC） |
 | P3 | — | Pi 5 の作業 | 返却（03:03）。Pi 5 の desktop の動画 8 本（build/review/pi5-video/）。板は元に戻した | 次を待つ |
 | P4 | [BUG-397](bugs/BUG-397.md)・[BUG-399](bugs/BUG-399.md) | Windows 版ブラウザの UAT | Google の「サイト」の link で固まる、検索の欄が右へ伸びる（q1915） | — |
-| P5 | — | Web ブラウザ OmniGrammaton の Windows 版 | 返却（02:44）。p033 cleared（頁の暗い mode・accent・Mica・DPAPI・touch と pen・drag out）。残りは本物の Windows が要るので p037 に分けた | p034 の後の Windows の file: の直し |
+| P5 | — | Windows 版ブラウザ | 返却（06:57）。p038（Windows の file: の頁の画像）cleared | p037 は本物の Windows が要る |
 | P6 | [WS335](ws335/ws.md) | libssl-compat・libcrypto-compat | 返却（03:59）。p037（試験の TLS server tlspeer）cleared | p024・p029（handshake）の候補 |
 | P7 | [BUG-398](bugs/BUG-398.md) | Windows 版ブラウザの UAT | Google の app の一覧の button（q1916） | — |
 | P8 | [BUG-395](bugs/BUG-395.md)・[BUG-396](bugs/BUG-396.md) | Windows 版ブラウザの UAT | 題の帯の drag・double click、Reload の icon（q1914） | — |
