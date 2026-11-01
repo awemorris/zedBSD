@@ -2878,6 +2878,10 @@ flex_align_of(
 	if (align == CSS_ALIGN_NORMAL)
 		align = CSS_ALIGN_STRETCH;
 
+	/* anchor-center is center for a box that is not out of the flow. */
+	if (align == CSS_ALIGN_ANCHOR_CENTER)
+		align = CSS_ALIGN_CENTER;
+
 	/* An item with an auto margin across is not stretched: the margin takes the room (css-flexbox-1 8.1). */
 	if (align == CSS_ALIGN_STRETCH && item->style.writing_mode == box->style.writing_mode) {
 		if (box->style.flex_direction == CSS_FLEX_ROW || box->style.flex_direction == CSS_FLEX_ROW_REVERSE) {

@@ -262,11 +262,11 @@ page_svg_render(
 		natural_set = 1;
 		natural_width = (int)SVG_DEFAULT_WIDTH;
 		natural_height = (int)SVG_DEFAULT_HEIGHT;
-	} else if ((has_width && width <= 0.0f) || (has_height && height <= 0.0f)) {
-		/* A viewBox with a width or height of zero: that side is zero and the other is the attribute's, or follows the viewBox's ratio. */
+	} else if (has_width && width <= 0.0f) {
+		/* A viewBox with a width of zero: the natural width is zero, the height the attribute's (a zero height follows the viewBox's ratio instead). */
 		natural_set = 1;
-		natural_width = has_width ? (int)(width + 0.5f) : (int)(height * view_width / view_height + 0.5f);
-		natural_height = has_height ? (int)(height + 0.5f) : (int)(width * view_height / view_width + 0.5f);
+		natural_width = 0;
+		natural_height = has_height && height > 0.0f ? (int)(height + 0.5f) : (int)SVG_DEFAULT_HEIGHT;
 	}
 	if (width <= 0.0f && height <= 0.0f) {
 		if (have_view) {

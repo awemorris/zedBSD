@@ -1721,8 +1721,8 @@ box_table_children(
 		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
 			display = CSS_DISPLAY_INLINE;
 
-		/* A box out of the flow or a float stays as it is. */
-		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE) {
+		/* A box out of the flow stays as it is (a float is not a part of a table: it goes into a cell). */
+		if (child->out_of_flow) {
 			box_append(box, child);
 			child = next;
 			continue;
