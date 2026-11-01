@@ -222,7 +222,10 @@ kl_window_vulkan_surface(
 
 /*
  * Names the instance extensions a Vulkan instance needs for a window's
- * surface: the surface extension and Win32's.
+ * surface: the surface extension and Win32's.  Without the system's Vulkan
+ * loader (no vulkan-1.dll where Windows keeps it) there is no instance to
+ * make, and it returns EIO before the program's first Vulkan call: the
+ * program imports the loader late, and that call would end the process.
  */
 int
 kl_window_vulkan_extensions(
@@ -233,10 +236,21 @@ kl_window_vulkan_extensions(
 		VK_KHR_SURFACE_EXTENSION_NAME,
 		VK_KHR_WIN32_SURFACE_EXTENSION_NAME
 	};
+	HMODULE loader;
 
 	/* Somewhere to put the names. */
 	if (names == NULL || count == NULL)
 		return EINVAL;
+
+	/*
+	 * The loader, the system's (loaded here, it stays loaded, so the late
+	 * import later finds this one).
+	 */
+	loader = GetModuleHandleW(L"vulkan-1.dll");
+	if (loader == NULL)
+		loader = LoadLibraryExW(L"vulkan-1.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+	if (loader == NULL)
+		return EIO;
 
 	/* The names, which live for the life of the program. */
 	*names = extensions;

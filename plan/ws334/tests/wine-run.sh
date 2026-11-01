@@ -1,26 +1,41 @@
 #!/bin/sh
-# OmniGrammaton under Wine on the host (x86_64; the reference, not the judgement of a real Windows):
-#  0. the Windows build (make -f apps/browser-win32/Makefile: OmniGrammaton.exe and its directory) and a
-#     test's console program over the browser's entry (plan/ws334/tests/browser-cli-main.c), and the host's
-#     browser (plan/ws074/tests/host-build.sh plain);
-#  1. the headless modes print the same bytes: --js of some of plan/ws074/tests/js, and --dump=layout of
-#     the bundled start.html with the tree's fonts, from the console program under Wine and the host's;
-#  2. OmniGrammaton.exe starts on start.html in Xvfb (1280x800) and draws it with Vulkan (Mesa's
-#     lavapipe through Wine's Vulkan): a screenshot of the root window (gpu.png);
-#  3. the same with --no-gpu (the CPU's frames): nogpu.png;
-#  4. while the first runs, a second start with about.html hands it over (WM_COPYDATA) and ends with 0;
-#     the first says so (ZBROWSER OPEN) and shows it: second.png;
-#  5. the title bar's controls (xdotool): a press on the location's box edits it, about.html typed and
-#     Enter opens it, Back returns to start.html; the bar's picture (titlebar.png);
-#  6. Ctrl+L and Ctrl+C put the box's text on the clipboard (xclip reads Wine's CLIPBOARD);
-#  7. at 144 dpi (a prefix with LogPixels 144) the title bar is 1.5 times as tall (titlebar-144dpi.png).
-# The input method cannot be checked under Wine (a real Windows, later).
-# A screenshot passes when it has more than 100 colours (a page, not an empty window).  The PNGs are
-# copied to build/review/ws334-p028/ (2 to 4) and build/review/ws334-p029/ (5 to 7).  Wine runs under flock /tmp/zedbsd-wine.lock.
+# OmniGrammaton from its zip under Wine on the host (x86_64) with Mesa's lavapipe (the CPU's Vulkan): the
+# reference, not the judgement of a real Windows.  The items of the minimal set M1 to M8 that Wine can show
+# (an item Wine cannot show is "not run (a real Windows)" and is not counted):
+#  0. the Windows build (make -f apps/browser-win32/Makefile all zip: OmniGrammaton.exe and its zip), two
+#     test's console programs over the same libraries (plan/ws334/tests/browser-cli-main.c over the
+#     browser's entry, cert-store-main.c that puts a certificate into a store of the current user), the
+#     host's browser (plan/ws074/tests/host-build.sh plain); the zip extracted into a new directory, and
+#     every window below started from there;
+#  M8 the headless modes print the same bytes on the host and under Wine: --js of all of plan/ws074/tests/js
+#     and of plan/ws334/tests/js/gc-parse.js (the parser's setjmp and longjmp between collections of the
+#     heap), --dump=layout of the bundled start.html, about.html and text.html;
+#  M1 OmniGrammaton.exe draws start.html with Vulkan (lavapipe through Wine's Vulkan) in Xvfb (1280x800);
+#  M2 the CPU's way: with --no-gpu, and with Wine's vulkan-1.dll turned off (WINEDLLOVERRIDES=vulkan-1=d,
+#     the program says it draws with the CPU);
+#     a second start hands its URL to the first (WM_COPYDATA) and ends with 0; the window's right edge
+#     dragged (xdotool) and the maximize button draw frames at the new sizes;
+#  M3 https from the host's `openssl s_server` on 127.0.0.1 (a test CA made here, the network outside is
+#     not used): refused while nothing trusts the CA, opened when the CA is in the current user's ROOT
+#     store, refused when it is also in the Disallowed store;
+#  M4 the location's box: about.html typed and Enter opens it, Back returns, the box's file: URL to the
+#     clipboard (Ctrl+L, Ctrl+C) and typed back opens it again (Japanese with an input method: a real
+#     Windows);
+#  M5 letters typed into a page's text field reach it (the page prints its input events); the input
+#     method's composition: a real Windows;
+#  M6 after the program is closed (its close button) and started again, a cookie with an expiry and
+#     localStorage are still there, and a cookie without one is not;
+#  M7 the dark mode (AppsUseLightTheme 0 in the registry) gives a dark title bar; at 144 dpi the title bar
+#     is 1.5 times as tall; the snap layouts: a real Windows (Wine shows none).
+# A window's screenshot passes when it has more than 100 colours (a page, not an empty window).  The PNGs
+# go to build/review/ws334-p032/.  Each Wine command runs under flock /tmp/zedbsd-wine.lock (do not run
+# the whole script under that lock: it would wait for itself).
 #   sh plan/ws334/tests/wine-run.sh
-# LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64);
-# the Wine prefixes are build/tmp/ws334-wine (the console program) and build/tmp/ws334-wine-gui (the
-# windows).  Last line: wine-run: PASS or wine-run: FAIL.
+# LLVM_MINGW=<root> chooses llvm-mingw (default $HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64),
+# PORT=<n> the https server's port (18444).  The Wine prefixes are build/tmp/ws334-wine (the console
+# programs), build/tmp/ws334-wine-gui (the windows), build/tmp/ws334-wine-gui144 (LogPixels 144) and
+# build/tmp/ws334-wine-dark (the dark mode); a missing one is made.  Last line: wine-run: PASS or
+# wine-run: FAIL.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
@@ -30,27 +45,57 @@ out=build/tmp/ws334-wine-run
 fresh_out "$out"
 out=$root/$out
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64}
+port=${PORT:-18444}
 build=build/tmp/ws334-wine-build/browser-win64
 sources=build/tmp/ws334-win32-sources
-review=build/review/ws334-p028
+review=build/review/ws334-p032
+lock=/tmp/zedbsd-wine.lock
+lvp=/usr/share/vulkan/icd.d/lvp_icd.json
 mkdir -p "$sources" "$review"
 status=0
+passed=0
+failed=0
+unrun=0
+
+# The result of an item: result PASS|FAIL <item> <text>.
+result() {
+	verdict=$1
+	item=$2
+	shift 2
+	printf 'wine-run: %s: %s: %s\n' "$item" "$verdict" "$*"
+	if [ "$verdict" = PASS ]; then
+		passed=$((passed + 1))
+	else
+		failed=$((failed + 1))
+		status=1
+	fi
+}
+
+# An item Wine cannot show.
+unrun() {
+	printf 'wine-run: %s: not run (a real Windows): %s\n' "$1" "$2"
+	unrun=$((unrun + 1))
+}
 
 # 0. The builds.
-if ! timeout 1800 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 -j8 \
-    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" all \
-    > "$out/make.log" 2>&1 || grep -q 'warning:' "$out/make.log"; then
+win32_make() {
+	log=$1
+	shift
+	timeout 3000 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 -j8 \
+	    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" "$@" > "$log" 2>&1 &&
+	    ! grep -q 'warning:' "$log"
+}
+if ! win32_make "$out/make.log" all zip; then
 	echo "wine-run: the Windows build did not build cleanly (log $out/make.log)"
 	tail -10 "$out/make.log"
 	echo "wine-run: FAIL"
 	exit 1
 fi
-if ! timeout 1800 make --no-print-directory -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 -j8 \
-    LLVM_MINGW="$LLVM_MINGW" BROWSER_WIN32_BUILD="$build" BROWSER_WIN32_SOURCES="$sources" \
-    test-program TEST_PROGRAM=browser-cli TEST_PROGRAM_SOURCES=plan/ws334/tests/browser-cli-main.c \
-    TEST_PROGRAM_LDFLAGS=-municode > "$out/make-cli.log" 2>&1 || grep -q 'warning:' "$out/make-cli.log"; then
-	echo "wine-run: the console program did not build cleanly (log $out/make-cli.log)"
-	tail -10 "$out/make-cli.log"
+if ! win32_make "$out/make-cli.log" test-program TEST_PROGRAM=browser-cli \
+    TEST_PROGRAM_SOURCES=plan/ws334/tests/browser-cli-main.c TEST_PROGRAM_LDFLAGS=-municode ||
+    ! win32_make "$out/make-cert.log" test-program TEST_PROGRAM=cert-store \
+    TEST_PROGRAM_SOURCES=plan/ws334/tests/cert-store-main.c; then
+	echo "wine-run: a test's program did not build cleanly (logs $out/make-cli.log, $out/make-cert.log)"
 	echo "wine-run: FAIL"
 	exit 1
 fi
@@ -60,55 +105,152 @@ if ! timeout 3600 sh plan/ws074/tests/host-build.sh plain > "$out/host-build.log
 	exit 1
 fi
 cli=$build/tests/browser-cli.exe
+certs=$root/$build/tests/cert-store.exe
 host=build/ws074-host/plain/browser
-dist=$root/$build/OmniGrammaton
+sync
 
-# 1. The headless modes, the same bytes on both.
+# The zip, extracted into a new directory.
+zip=$(ls "$build"/OmniGrammaton-*-win64.zip | head -1)
+mkdir -p "$out/extracted"
+if ! unzip -q "$zip" -d "$out/extracted"; then
+	echo "wine-run: cannot extract $zip"
+	echo "wine-run: FAIL"
+	exit 1
+fi
+dist=$out/extracted/OmniGrammaton
+echo "wine-run: $(basename "$zip") ($(wc -c < "$zip") bytes) extracted to $dist"
+
+# The prefixes, each made once (so that making one prints nothing into a test's output), and the
+# registry values the dpi's and the dark mode's prefixes need (set again on each run, the same value).
+prefix() {
+	if [ ! -f "$1/system.reg" ]; then
+		WINEPREFIX=$1 WINEDEBUG=-all timeout 600 flock "$lock" xvfb-run -a wineboot -i > "$out/prefix-$(basename "$1").log" 2>&1
+		WINEPREFIX=$1 timeout 120 wineserver -w
+	fi
+}
+gui=$root/build/tmp/ws334-wine-gui
+gui144=$root/build/tmp/ws334-wine-gui144
+dark=$root/build/tmp/ws334-wine-dark
+for each in "$root/build/tmp/ws334-wine" "$gui" "$gui144" "$dark"; do
+	prefix "$each"
+done
+WINEPREFIX=$gui144 WINEDEBUG=-all timeout 300 flock "$lock" \
+    wine reg add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d 144 /f > "$out/reg-144.log" 2>&1
+WINEPREFIX=$dark WINEDEBUG=-all timeout 300 flock "$lock" \
+    wine reg add 'HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' /v AppsUseLightTheme \
+    /t REG_DWORD /d 0 /f > "$out/reg-dark.log" 2>&1
+for each in "$gui144" "$dark"; do
+	WINEPREFIX=$each timeout 120 wineserver -w
+done
+
+# M8. The headless modes, the same bytes on both.
 fonts="--font=userland/desktop/fonts/Mahora-Regular.ttf --mono-font=userland/desktop/fonts/Mahora-Mono.ttf"
 fonts="$fonts --fallback-font=userland/desktop/fonts/DroidSansFallbackFull.ttf"
+same=0
+differ=""
 compare() {
 	name=$1
 	shift
 	timeout 300 "$host" "$@" > "$out/$name.host" 2>&1
-	WINEPREFIX=$root/build/tmp/ws334-wine WINEDEBUG=-all timeout 300 flock /tmp/zedbsd-wine.lock wine "$cli" "$@" \
+	WINEPREFIX=$root/build/tmp/ws334-wine WINEDEBUG=-all timeout 300 flock "$lock" wine "$cli" "$@" \
 	    > "$out/$name.wine" 2>&1
 	if cmp -s "$out/$name.host" "$out/$name.wine" && [ -s "$out/$name.host" ]; then
-		echo "wine-run: $name: the same $(wc -c < "$out/$name.host") bytes"
+		same=$((same + 1))
 	else
-		echo "wine-run: $name: the host and Wine differ ($out/$name.host, $out/$name.wine)"
-		status=1
+		differ="$differ $name"
 	fi
 }
-for test in closures builtins class; do
-	compare "js-$test" --js "plan/ws074/tests/js/$test.js"
+total=0
+for test in plan/ws074/tests/js/*.js plan/ws334/tests/js/*.js; do
+	compare "js-$(basename "$test" .js)" --js "$test"
+	total=$((total + 1))
 done
-# shellcheck disable=SC2086
-compare dump-layout --dump=layout $fonts userland/desktop/browser/data/start.html
+for page in start about text; do
+	# shellcheck disable=SC2086
+	compare "dump-layout-$page" --dump=layout $fonts "userland/desktop/browser/data/$page.html"
+	total=$((total + 1))
+done
+gc=$(tr -d '\r' < "$out/js-gc-parse.wine" 2> /dev/null | tr '\n' ';')
+if [ -z "$differ" ]; then
+	result PASS M8 "--js of $((total - 3)) files and --dump=layout of 3 pages: the same bytes on the host and under Wine ($same of $total; gc-parse under Wine: $gc)"
+else
+	result FAIL M8 "the host and Wine differ:$differ ($out/<name>.host, .wine)"
+fi
 
-# 2 to 7. The windows, in Xvfb, one Xvfb for each start.
+# The windows, in Xvfb, one Xvfb for each start: windows.sh <the program's directory> <the output> <mode>
+# <the program's options...>.  The mode: "second" (a second start, then a change of the size),
+# "controls" (the title bar's controls), "input" (a page's text field), "close" (the close button,
+# waiting for the program to end), "wait" (waits for the start page's load to end) or "plain".
 cat > "$out/windows.sh" << 'EOF'
 #!/bin/sh
-# In Xvfb: $1 the program's directory, $2 the output, $3 the program's options (one word or none), $4 what
-# else: "second" (a second start), "controls" (the title bar's controls, with xdotool) or nothing.
 dist=$1
 out=$2
-options=$3
-mode=$4
+mode=$3
+shift 3
 cd "$dist" || exit 2
-WINEDEBUG=-all timeout 120 wine OmniGrammaton.exe $options share/browser/start.html > "$out/first.out" 2> "$out/first.err" &
-sleep 25
+# No key repeat: on a loaded host a key held between xdotool's press and release would repeat (a letter
+# typed twice).
+xset r off 2> /dev/null
+WINEDEBUG=-all timeout 150 wine OmniGrammaton.exe "$@" > "$out/first.out" 2> "$out/first.err" &
+program=$!
+# Up to 90 seconds for the window, then the first frames.
+for second in $(seq 90); do
+	grep -q '^ZBROWSER READY' "$out/first.out" 2> /dev/null && break
+	kill -0 "$program" 2> /dev/null || break
+	sleep 1
+done
+echo "ready after $second s" > "$out/notes.txt"
+if [ "$mode" = wait ] || [ "$mode" = close ]; then
+	for second in $(seq 30); do
+		grep -q '^ZBROWSER \(STOPPED\|ERROR load\)' "$out/first.out" 2> /dev/null && break
+		sleep 1
+	done
+	echo "the load ended after $second s" >> "$out/notes.txt"
+fi
+sleep 5
 import -window root "$out/first.png"
-xdotool search --class omnigrammaton getwindowgeometry --shell 2> /dev/null | head -3 > "$out/geometry.txt"
+# The program's window: the largest of its class (Wine has small hidden windows of the same class).
+window=
+X=0
+Y=0
+WIDTH=0
+HEIGHT=0
+for each in $(xdotool search --class omnigrammaton 2> /dev/null); do
+	geometry=$(xdotool getwindowgeometry --shell "$each" 2> /dev/null)
+	size=$(echo "$geometry" | sed -n 's/^WIDTH=//p')
+	if [ -n "$size" ] && [ "$size" -gt "$WIDTH" ]; then
+		eval "$geometry"
+		window=$each
+	fi
+done
+echo "window $window x $X y $Y width $WIDTH height $HEIGHT" >> "$out/notes.txt"
 if [ "$mode" = second ]; then
 	WINEDEBUG=-all timeout 60 wine OmniGrammaton.exe share/browser/about.html > "$out/second.out" 2> "$out/second.err"
 	echo "$?" > "$out/second.status"
 	sleep 10
 	import -window root "$out/second.png"
+	# A new size: the right edge (inside its 8 pixels, the frame's hit test) dragged 126 pixels left,
+	# which the window's own size loop follows (Wine without a window manager does not pass on a size
+	# set from outside, xdotool windowsize); then the maximize button, the second from the right.
+	xdotool mousemove $((X + WIDTH - 3)) $((Y + 400))
+	sleep 1
+	xdotool mousedown 1
+	sleep 1
+	for step in 1 2 3 4 5 6; do
+		xdotool mousemove_relative -- -21 0
+		sleep 0.3
+	done
+	xdotool mouseup 1
+	sleep 6
+	import -window root "$out/resized.png"
+	tr -d '\r' < "$out/first.out" | grep '^ZBROWSER FRAME' | tail -1 > "$out/resized.txt"
+	eval "$(xdotool getwindowgeometry --shell "$window")"
+	xdotool mousemove $((X + WIDTH - 69)) $((Y + 16)) click 1
+	sleep 6
+	import -window root "$out/maximized.png"
+	tr -d '\r' < "$out/first.out" | grep '^ZBROWSER FRAME' | tail -1 > "$out/maximized.txt"
 fi
 if [ "$mode" = controls ]; then
-	X=0
-	Y=0
-	. "$out/geometry.txt"
 	# The location's box: a press edits it; a relative URL typed and Enter.
 	xdotool mousemove $((X + 400)) $((Y + 16)) click 1
 	sleep 2
@@ -141,95 +283,264 @@ if [ "$mode" = controls ]; then
 	sleep 8
 	import -window root "$out/retyped.png"
 fi
+if [ "$mode" = input ]; then
+	# The page's field (20 to 620 across, 20 to 60 down in the page, below the 32 pixels of the title bar).
+	xdotool mousemove $((X + 200)) $((Y + 32 + 40)) click 1
+	sleep 2
+	xdotool type --delay 80 'hello wine'
+	sleep 4
+	import -window root "$out/input.png"
+fi
+if [ "$mode" = close ]; then
+	# The close button, the rightmost 46 pixels of the title bar; then up to 40 seconds for the end.
+	xdotool mousemove $((X + WIDTH - 23)) $((Y + 16)) click 1
+	for second in $(seq 40); do
+		kill -0 "$program" 2> /dev/null || break
+		sleep 1
+	done
+	if kill -0 "$program" 2> /dev/null; then
+		echo "running" > "$out/close.status"
+	else
+		wait "$program"
+		echo "$?" > "$out/close.status"
+	fi
+	echo "closed after $second s" >> "$out/notes.txt"
+fi
 wineserver -k 2> /dev/null
 wait
 EOF
+
+# One start in its own Xvfb: start <run> <prefix> <mode> <the program's options...>; the output in
+# $out/<run>/ (first.txt the standard output without the CRs); $overrides is WINEDLLOVERRIDES (none when empty).
+overrides=
+start() {
+	run=$1
+	prefix=$2
+	mode=$3
+	shift 3
+	mkdir -p "$out/$run"
+	WINEPREFIX=$prefix VK_ICD_FILENAMES=$lvp WINEDLLOVERRIDES=$overrides timeout 600 flock "$lock" xvfb-run -a -s "-screen 0 1280x800x24" \
+	    sh "$out/windows.sh" "$dist" "$out/$run" "$mode" "$@" > "$out/$run/xvfb.log" 2>&1
+	tr -d '\r' < "$out/$run/first.out" > "$out/$run/first.txt" 2> /dev/null
+	tr -d '\r' < "$out/$run/first.err" > "$out/$run/first-err.txt" 2> /dev/null
+}
 colours() {
 	convert "$1" -format %k info: 2> /dev/null || echo 0
 }
 pixel() {
 	convert "$1" -format "%[pixel:p{$2,$3}]" info: 2> /dev/null
 }
-gui144=$root/build/tmp/ws334-wine-gui144
-if [ ! -d "$gui144" ]; then
-	WINEPREFIX=$gui144 WINEDEBUG=-all timeout 300 flock /tmp/zedbsd-wine.lock xvfb-run -a \
-	    wine reg add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d 144 /f > "$out/gui144.log" 2>&1
-fi
-for run in gpu nogpu controls dpi144; do
-	mkdir -p "$out/$run"
-	options=
-	mode=
-	prefix=$root/build/tmp/ws334-wine-gui
-	[ "$run" = nogpu ] && options=--no-gpu
-	[ "$run" = gpu ] && mode=second
-	[ "$run" = controls ] && mode=controls
-	[ "$run" = dpi144 ] && prefix=$gui144
-	WINEPREFIX=$prefix VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-	    timeout 600 flock /tmp/zedbsd-wine.lock xvfb-run -a -s "-screen 0 1280x800x24" \
-	    sh "$out/windows.sh" "$dist" "$out/$run" "$options" "$mode" > "$out/$run/xvfb.log" 2>&1
-	tr -d '\r' < "$out/$run/first.out" > "$out/$run/first.txt" 2> /dev/null
-	count=$(colours "$out/$run/first.png")
-	if [ "$run" = gpu ] || [ "$run" = nogpu ]; then
-		cp "$out/$run/first.png" "$review/$run.png" 2> /dev/null
-	fi
-	if [ "$count" -gt 100 ] && grep -q '^ZBROWSER READY' "$out/$run/first.txt"; then
-		echo "wine-run: $run: the window drew start.html ($count colours)"
-	else
-		echo "wine-run: $run: no page in the window ($count colours; $out/$run/first.txt)"
-		status=1
-	fi
-done
+# The brightness (0 to 255) of a pixel.
+brightness() {
+	convert "$1" -crop "1x1+$2+$3" -colorspace Gray -format '%[fx:int(255*u)]' info: 2> /dev/null || echo -1
+}
+# A window that drew its page: more than 100 colours and the READY line.
+drew() {
+	[ "$(colours "$out/$1/first.png")" -gt 100 ] && grep -q '^ZBROWSER READY' "$out/$1/first.txt"
+}
 
-# 4. The second start.
-second=$(cat "$out/gpu/second.status" 2> /dev/null)
-count=$(colours "$out/gpu/second.png")
-cp "$out/gpu/second.png" "$review/second.png" 2> /dev/null
-if [ "$second" = 0 ] && grep -q '^ZBROWSER OPEN handed=.*about\.html$' "$out/gpu/first.txt" && [ "$count" -gt 100 ]; then
-	printf "wine-run: second start: handed over and ended with 0; %s (%s)\n" "$(grep "^ZBROWSER OPEN" "$out/gpu/first.txt" | head -1)" "$review/second.png"
+# M1. Vulkan (with the second start and the new size).
+start gpu "$gui" second share/browser/start.html
+cp "$out/gpu/first.png" "$review/m1-gpu.png" 2> /dev/null
+if drew gpu && ! grep -q 'drawing with the CPU' "$out/gpu/first-err.txt"; then
+	result PASS M1 "start.html drawn with Vulkan ($(colours "$out/gpu/first.png") colours, $review/m1-gpu.png)"
 else
-	echo "wine-run: second start: status '$second', the first did not say it opened about.html ($out/gpu/first.txt)"
-	status=1
+	result FAIL M1 "no page drawn with Vulkan ($out/gpu/first.txt, first-err.txt)"
 fi
 
-# 5. The title bar's controls: the bar's picture, the typed URL followed, and Back.
-review29=build/review/ws334-p029
-mkdir -p "$review29"
-convert "$out/controls/first.png" -crop 1024x32+0+0 "$review29/titlebar.png" 2> /dev/null
-cp "$out/controls/typing.png" "$review29/typing.png" 2> /dev/null
-cp "$out/controls/typed.png" "$review29/typed.png" 2> /dev/null
-cp "$out/controls/back.png" "$review29/back.png" 2> /dev/null
+# M2. The CPU's way: --no-gpu, and no vulkan-1.dll.
+start nogpu "$gui" plain --no-gpu share/browser/start.html
+cp "$out/nogpu/first.png" "$review/m2-nogpu.png" 2> /dev/null
+if drew nogpu; then
+	result PASS M2a "--no-gpu drew start.html ($(colours "$out/nogpu/first.png") colours, $review/m2-nogpu.png)"
+else
+	result FAIL M2a "--no-gpu drew no page ($out/nogpu/first.txt)"
+fi
+overrides=vulkan-1=d
+start novulkan "$gui" plain share/browser/start.html
+overrides=
+cp "$out/novulkan/first.png" "$review/m2-no-vulkan.png" 2> /dev/null
+if drew novulkan && grep -q 'drawing with the CPU' "$out/novulkan/first-err.txt"; then
+	result PASS M2b "without vulkan-1.dll: $(grep -m1 'drawing with the CPU' "$out/novulkan/first-err.txt"); start.html drawn ($review/m2-no-vulkan.png)"
+else
+	result FAIL M2b "without vulkan-1.dll no page drawn with the CPU ($out/novulkan/first.txt, first-err.txt)"
+fi
+
+# The second start.
+second=$(cat "$out/gpu/second.status" 2> /dev/null)
+cp "$out/gpu/second.png" "$review/second.png" 2> /dev/null
+if [ "$second" = 0 ] && grep -q '^ZBROWSER OPEN handed=.*about\.html$' "$out/gpu/first.txt" &&
+    [ "$(colours "$out/gpu/second.png")" -gt 100 ]; then
+	result PASS second "handed over and ended with 0; $(grep -m1 '^ZBROWSER OPEN' "$out/gpu/first.txt") ($review/second.png)"
+else
+	result FAIL second "status '$second', the first did not say it opened about.html ($out/gpu/first.txt)"
+fi
+
+# The new size: a narrower frame after the drag of the edge, the screen's width after the maximize button.
+cp "$out/gpu/resized.png" "$review/resized.png" 2> /dev/null
+cp "$out/gpu/maximized.png" "$review/maximized.png" 2> /dev/null
+dragged=$(sed -n 's/.* width=\([0-9]*\) .*/\1/p' "$out/gpu/resized.txt" 2> /dev/null)
+maximized=$(sed -n 's/.* width=\([0-9]*\) .*/\1/p' "$out/gpu/maximized.txt" 2> /dev/null)
+if [ -n "$dragged" ] && [ "$dragged" -lt 1000 ] && [ "$dragged" -gt 850 ] && [ "$maximized" = 1280 ]; then
+	result PASS resize "the right edge dragged: a frame $dragged wide; maximized: $(cat "$out/gpu/maximized.txt") ($review/resized.png, maximized.png)"
+else
+	result FAIL resize "the frame after the drag '$(cat "$out/gpu/resized.txt" 2> /dev/null)', after the maximize button '$(cat "$out/gpu/maximized.txt" 2> /dev/null)'"
+fi
+
+# M3. https: the server, a test CA and a certificate for 127.0.0.1 signed by it; the pages are whole
+# HTTP responses (s_server -HTTP), the cookies' pages of M6 among them.
+pki=$out/pki
+site=$out/site
+mkdir -p "$pki" "$site"
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=wine-run test CA" \
+    -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    -keyout "$pki/ca.key" -out "$pki/ca.pem" > "$out/pki.log" 2>&1
+openssl req -newkey rsa:2048 -nodes -subj "/CN=127.0.0.1" -keyout "$pki/server.key" -out "$pki/server.csr" >> "$out/pki.log" 2>&1
+printf 'subjectAltName=IP:127.0.0.1\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n' > "$pki/server.ext"
+openssl x509 -req -in "$pki/server.csr" -CA "$pki/ca.pem" -CAkey "$pki/ca.key" -CAcreateserial -days 2 \
+    -extfile "$pki/server.ext" -out "$pki/server.pem" >> "$out/pki.log" 2>&1
+openssl x509 -in "$pki/ca.pem" -outform DER -out "$pki/ca.der" >> "$out/pki.log" 2>&1
+token=$(date +%s)
+crlf=$(printf '\r')
+# response <file> <extra header lines, each ending with CR LF> <title> <script>
+response() {
+	body="<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>$3</title></head><body style=\"font-size:28px\"><p id=\"shown\">$3</p><script>$4</script></body></html>"
+	{
+		printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %s\r\nConnection: close\r\n' "$(printf '%s' "$body" | wc -c)"
+		printf '%s' "$2"
+		printf '\r\n%s' "$body"
+	} > "$site/$1"
+}
+response page.html "" "https page" 'console.log("M3 page");'
+show='var text = "cookie=" + document.cookie + " ls=" + localStorage.getItem("kept"); document.getElementById("shown").textContent = text;'
+response set.html "Set-Cookie: kept=$token; Max-Age=86400; Path=/$crlf
+Set-Cookie: session=$token; Path=/$crlf
+" "set" "console.log(\"M6 before ls=\" + localStorage.getItem(\"kept\")); localStorage.setItem(\"kept\", \"$token\"); $show console.log(\"M6 set \" + text);"
+response check.html "" "check" "$show console.log(\"M6 check \" + text);"
+(cd "$site" && exec timeout 1800 openssl s_server -accept "127.0.0.1:$port" -cert ../pki/server.pem -key ../pki/server.key \
+    -HTTP -quiet > ../server.log 2>&1) &
+server=$!
+for i in 1 2 3 4 5 6 7 8 9 10; do
+	if /usr/bin/python3 -I -c "import socket,sys; s=socket.socket(); s.settimeout(1); sys.exit(s.connect_ex(('127.0.0.1', $port)))"; then
+		break
+	fi
+	sleep 1
+done
+https=https://127.0.0.1:$port
+# cert_store add|remove <store>
+cert_store() {
+	WINEPREFIX=$gui WINEDEBUG=-all timeout 120 flock "$lock" wine "$certs" "$1" "$2" "$pki/ca.der" 2>&1 | tr -d '\r' >> "$out/cert-store.txt"
+	WINEPREFIX=$gui timeout 120 wineserver -w
+}
+cert_store remove Disallowed
+cert_store remove Root
+start untrusted "$gui" wait "$https/page.html"
+cert_store add Root
+start trusted "$gui" wait "$https/page.html"
+cp "$out/trusted/first.png" "$review/m3-https.png" 2> /dev/null
+cp "$out/untrusted/first.png" "$review/m3-untrusted.png" 2> /dev/null
+if grep -q "^ZBROWSER ERROR load path=$https/page.html .*tls=.*verif" "$out/untrusted/first.txt"; then
+	result PASS M3a "refused while nothing trusts the CA: $(grep -m1 '^ZBROWSER ERROR load' "$out/untrusted/first.txt" | cut -c1-160) ($review/m3-untrusted.png)"
+else
+	result FAIL M3a "not refused for the verification ($out/untrusted/first.txt)"
+fi
+if grep -q "^ZBROWSER NAVIGATE path=$https/page.html title=https page" "$out/trusted/first.txt" &&
+    grep -q '^ZBROWSER CONSOLE level=[0-9]* M3 page' "$out/trusted/first.txt" && drew trusted; then
+	result PASS M3b "opened with the CA in the ROOT store ($review/m3-https.png)"
+else
+	result FAIL M3b "the page did not open with the CA in the ROOT store ($out/trusted/first.txt)"
+fi
+
+# M6. The cookies and localStorage, set, the program closed, started again.
+start set "$gui" close "$https/set.html"
+start check "$gui" close "$https/check.html"
+cp "$out/check/first.png" "$review/m6-after-restart.png" 2> /dev/null
+before=$(grep -m1 '^ZBROWSER CONSOLE level=[0-9]* M6 before' "$out/set/first.txt" | sed 's/.* M6 before //')
+set_line=$(grep -m1 '^ZBROWSER CONSOLE level=[0-9]* M6 set' "$out/set/first.txt" | sed 's/.* M6 set //')
+check_line=$(grep -m1 '^ZBROWSER CONSOLE level=[0-9]* M6 check' "$out/check/first.txt" | sed 's/.* M6 check //')
+closes="$(cat "$out/set/close.status" 2> /dev/null) $(cat "$out/check/close.status" 2> /dev/null)"
+if [ "$before" != "ls=$token" ] && echo "$set_line" | grep -q "kept=$token" &&
+    echo "$check_line" | grep -q "kept=$token" && echo "$check_line" | grep -q "ls=$token\$" &&
+    ! echo "$check_line" | grep -q "session=" && [ "$closes" = "0 0" ]; then
+	result PASS M6 "set: '$set_line'; after the close button (exit $closes) and a new start: '$check_line' ($review/m6-after-restart.png)"
+else
+	result FAIL M6 "before '$before', set '$set_line', after the restart '$check_line', the closes' exit '$closes'"
+fi
+
+# M3. The CA also in the Disallowed store: refused.
+cert_store add Disallowed
+start disallowed "$gui" wait "$https/page.html"
+cert_store remove Disallowed
+cert_store remove Root
+cp "$out/disallowed/first.png" "$review/m3-disallowed.png" 2> /dev/null
+if grep -q "^ZBROWSER ERROR load path=$https/page.html " "$out/disallowed/first.txt" &&
+    ! grep -q "^ZBROWSER NAVIGATE path=$https/page.html title=https page" "$out/disallowed/first.txt"; then
+	result PASS M3c "refused with the CA also in the Disallowed store: $(grep -m1 '^ZBROWSER ERROR load' "$out/disallowed/first.txt" | cut -c1-160) ($review/m3-disallowed.png)"
+else
+	result FAIL M3c "not refused with the CA in the Disallowed store ($out/disallowed/first.txt)"
+fi
+kill "$server" 2> /dev/null
+wait "$server" 2> /dev/null
+unrun M3d "a public site with the roots of Windows (the network outside is not used)"
+
+# M4. The title bar's controls and the location's box.
+start controls "$gui" controls share/browser/start.html
+convert "$out/controls/first.png" -crop 1280x32+0+0 "$review/titlebar.png" 2> /dev/null
+for each in typing typed back retyped; do
+	cp "$out/controls/$each.png" "$review/m4-$each.png" 2> /dev/null
+done
 navigations=$(grep '^ZBROWSER NAVIGATE path=' "$out/controls/first.txt" | sed 's/ title=.*//; s/.*[\\/]//')
 typed=$(echo "$navigations" | sed -n 2p)
 back=$(echo "$navigations" | sed -n 3p)
 retyped=$(echo "$navigations" | sed -n 4p)
-cp "$out/controls/retyped.png" "$review29/retyped.png" 2> /dev/null
 if [ "$typed" = about.html ] && [ "$back" = start.html ] && [ "$retyped" = about.html ]; then
-	echo "wine-run: title bar: the typed about.html opened, Back returned to start.html, the shown file: URL typed back opened about.html ($review29/titlebar.png, typed.png, back.png, retyped.png)"
+	result PASS M4 "about.html typed opened, Back returned to start.html, the box's file: URL typed back opened about.html ($review/m4-typed.png, m4-back.png, m4-retyped.png)"
 else
-	echo "wine-run: title bar: the pages opened were: $(echo $navigations) ($out/controls/first.txt)"
-	status=1
+	result FAIL M4 "the pages opened were: $(echo $navigations) ($out/controls/first.txt)"
 fi
-
-# 6. The clipboard.
 if grep -q '^file:///[A-Za-z]:/.*about\.html' "$out/controls/clipboard.txt" 2> /dev/null; then
-	printf "wine-run: clipboard: the box's text (a file: URL, with / as the separators) copied: %s\n" "$(head -c 200 "$out/controls/clipboard.txt" | tr -d '\r')"
+	result PASS clipboard "the box's text copied: $(head -c 200 "$out/controls/clipboard.txt" | tr -d '\r')"
 else
-	echo "wine-run: clipboard: the box's text is not a file: URL of the drive's path on the clipboard ($out/controls/clipboard.txt)"
-	status=1
+	result FAIL clipboard "the box's text is not a file: URL of the drive's path on the clipboard ($out/controls/clipboard.txt)"
 fi
+unrun M4j "Japanese with an input method (MS-IME) in the box, the candidates' window"
 
-# 7. 144 dpi: the title bar 48 pixels tall (at y 40 the bar's ground, as at y 5; at 96 dpi the page).
-convert "$out/dpi144/first.png" -crop 1280x48+0+0 "$review29/titlebar-144dpi.png" 2> /dev/null
-cp "$out/dpi144/first.png" "$review29/dpi144.png" 2> /dev/null
+# M5. A page's text field.
+start input "$gui" input "$root/plan/ws334/tests/wine-pages/input.html"
+cp "$out/input/input.png" "$review/m5-input.png" 2> /dev/null
+value=$(grep '^ZBROWSER CONSOLE level=[0-9]* M5 value=' "$out/input/first.txt" | tail -1 | sed 's/.* M5 value=//')
+if [ "$value" = "hello wine" ]; then
+	result PASS M5 "the field took 'hello wine' ($(grep -c ' M5 value=' "$out/input/first.txt") input events, $review/m5-input.png)"
+else
+	result FAIL M5 "the field's last value '$value' ($out/input/first.txt)"
+fi
+unrun M5j "an input method's composition in the page's field"
+
+# M7. The dark mode, and 144 dpi.
+start dark "$dark" plain share/browser/start.html
+cp "$out/dark/first.png" "$review/m7-dark.png" 2> /dev/null
+convert "$out/dark/first.png" -crop 1280x32+0+0 "$review/titlebar-dark.png" 2> /dev/null
+light_bar=$(brightness "$out/gpu/first.png" 700 5)
+dark_bar=$(brightness "$out/dark/first.png" 700 5)
+if drew dark && [ "$dark_bar" -ge 0 ] && [ "$dark_bar" -lt 100 ] && [ "$light_bar" -gt 150 ]; then
+	result PASS M7 "the title bar's ground: brightness $dark_bar dark, $light_bar light ($review/titlebar-dark.png)"
+else
+	result FAIL M7 "the title bar's ground: brightness $dark_bar dark, $light_bar light ($out/dark/first.png)"
+fi
+unrun M7s "the snap layouts over the maximize button (Windows 11)"
+start dpi144 "$gui144" plain share/browser/start.html
+convert "$out/dpi144/first.png" -crop 1280x48+0+0 "$review/titlebar-144dpi.png" 2> /dev/null
+cp "$out/dpi144/first.png" "$review/dpi144.png" 2> /dev/null
 top=$(pixel "$out/dpi144/first.png" 700 5)
 low=$(pixel "$out/dpi144/first.png" 700 40)
 page=$(pixel "$out/gpu/first.png" 700 40)
 if [ -n "$top" ] && [ "$top" = "$low" ] && [ "$page" != "$low" ]; then
-	echo "wine-run: 144 dpi: the title bar is 48 pixels tall ($review29/titlebar-144dpi.png)"
+	result PASS dpi "at 144 dpi the title bar is 48 pixels tall ($review/titlebar-144dpi.png)"
 else
-	echo "wine-run: 144 dpi: the title bar is not 1.5 times as tall (y 5 $top, y 40 $low, 96 dpi y 40 $page)"
-	status=1
+	result FAIL dpi "the title bar is not 1.5 times as tall (y 5 $top, y 40 $low, 96 dpi y 40 $page)"
 fi
+
 sync
+echo "wine-run: $passed passed, $failed failed, $unrun not run (a real Windows); Wine is the reference, not the judgement of a real Windows"
 if [ "$status" = 0 ]; then echo "wine-run: PASS"; else echo "wine-run: FAIL"; fi
 exit "$status"

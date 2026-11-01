@@ -661,8 +661,9 @@ int kl_window_vulkan_surface(struct kl_window *window, VkInstance instance, VkSu
 /*
  * The instance extensions a Vulkan instance needs for kl_window_vulkan_surface
  * on this system (KL_VERSION 105): VK_KHR_surface and the system's surface
- * extension.  names receives a static array of count names.  Returns 0, or
- * EINVAL for NULL arguments.
+ * extension.  names receives a static array of count names.  Returns 0,
+ * EINVAL for NULL arguments, or EIO when the system has no Vulkan loader
+ * (Windows without vulkan-1.dll).
  */
 int kl_window_vulkan_extensions(const char *const **names, uint32_t *count);
 
