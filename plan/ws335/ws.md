@@ -54,7 +54,7 @@
 | [p016](phase016/phase.md) | DER の reader と PEM・base64（test-der、test-pem） | cleared（2026-11-02 01:47 Q1、main 03a1ab446。main で test-der 1967・test-pem 666 PASS。bundle 121 枚・limbo 19,587/19,589 枚が読める） | p002 |
 | [p017](phase017/phase.md) | X.509 の parse（証明書・公開鍵・署名の algorithm）（test-x509） | cleared（2026-11-02 02:46 Q1、main で test-x509 159986 PASS。Q1 の判断: critical でない nameConstraints も受けて処理する（RFC 5280 4.2.1.10 は CA に critical を求めるが、読む側が拒むと制約の付いた root を読めず、制約は処理すれば守れる）。header・試験は p020 の前に直す。ECDSA の parameters の header の comment は p035）。実装（2026-11-02 02:36 Sonnet。test-x509 159986 checks、posix・win32 PASS、254 通りの破壊のうち 241 通りが試験の失敗、3 通りが sanitizer、10 通りは等価。limbo 39,936 枚のうち 16 枚を拒否（1 枚は expected SUCCESS: header の nameConstraints critical 必須との食い違い）。cleared は Q1） | p016 |
 | [p018](phase018/phase.md) | 署名の確かめ（algorithm ごと）（test-sigver） | planned | p017、p011、p012 |
-| [p019](phase019/phase.md) | 名前（Name の比較・host と address の照合・name constraints）（test-name） | planned | p017 |
+| [p019](phase019/phase.md) | 名前（Name の比較・host と address の照合・name constraints）（test-name） | 実装済み・試験 PASS（2026-11-02 Sonnet。test-name 255567 checks、posix・win32 PASS、1633 通りの破壊のうち 1470 通りが検出、159 通りは等価、4 通りは build の誤り（別の形 7 通りで検出）。Q1 の承認済みの変更: critical でない nameConstraints を受理（cryc-x509.c・header の 1 語・test-x509 の拒否 id 一覧、limbo の拒否は 16 枚から 13 枚）。limbo の nameConstraints の case 9538 のうち 4 件は expected と違い p020 へ。cleared は Q1） | p017 |
 | [p020](phase020/phase.md) | trust store と path の検証（test-chain） | planned | p018、p019、p015 |
 | [p021](phase021/phase.md) | 誤りの queue と ERR_・RAND_bytes・OPENSSL_cleanse・CRYPTO_memcmp（test-err） | planned | p015 |
 | [p022](phase022/phase.md) | 公開の X509（d2i_X509 ほか）と内部の store の生成（test-api-x509） | planned | p020、p021 |
