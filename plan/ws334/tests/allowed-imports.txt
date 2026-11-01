@@ -226,3 +226,18 @@ pthread_setspecific
 
 # UCRT: the wall clock of the loader's timed waits (timespec_get).
 _timespec64_get
+
+# What libmedia (all of it, libmedia.a, with media-os-win32.c and the container reader) leaves undefined
+# beyond the above (cross-build.sh, the libmedia.a check).
+# kernel32: a media file's size and type, and its name in UTF-16.
+GetFileSizeEx
+GetFileType
+MultiByteToWideChar
+
+# UCRT: the maths of the sound's decoders.
+exp2
+lrint
+
+# winpthreads (linked statically): the clock and the sleep of <pthread_time.h> (the engine's clock and waits).
+clock_gettime64
+nanosleep64

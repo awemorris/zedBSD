@@ -23,7 +23,7 @@ done
 flags="-std=c89 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. -Iuserland/desktop/libmedia -Iplan/tools/h264sw/unit -Iuserland/desktop/include"
 
 status=0
-if cc $flags plan/tools/h264sw/backend/test-backend.c $lib/h264sw-backend.c $lib/bitstream.c $lib/picture.c $lib/bits.c $modules \
+if cc $flags plan/tools/h264sw/backend/test-backend.c $lib/h264sw-backend.c $lib/bitstream.c $lib/picture.c $lib/media-os-posix.c $lib/bits.c $modules \
     -lm -lpthread -o "$out/test-backend" > "$out/test-backend.build.log" 2>&1; then
 	if ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 timeout 300 "$out/test-backend" > "$out/test-backend.log" 2>&1; then
 		tail -1 "$out/test-backend.log"
