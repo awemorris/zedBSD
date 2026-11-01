@@ -114,4 +114,4 @@ phase.md と仕様の食い違い・header の不備: 見つからなかった�
 
 未実施: p014 が使う K-PKE 全体と ML-KEM の関数（試験の側の薄い再実装で Algorithm 13・14 を確認したのみ。Wycheproof の decaps・暗黙の拒否の vector は p014）、vectors.py が変換しない形式の vector は使っていない（今回の範囲では不要）、性能の測定、32 bit の size_t の機械・aarch64 Windows の実行（build のみ）、実機・QEMU（範囲外）。
 
-commit: （この行を足す commit が最後）
+commit: dcc00c9634（実装・試験・ct 試験）、5cf3ef3cec（Compress の範囲外入力の試験の追加と、この結果の節）。この行を足す commit が最後。
