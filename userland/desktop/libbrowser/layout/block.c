@@ -146,8 +146,23 @@ layout_block(
 		}
 	}
 
-	/* A definite specified size becomes the nonnegative content height. */
+	/* A definite specified size becomes the nonnegative content height, held within a definite minimum and maximum. */
 	if (height_definite) {
+		layout_unit bound;
+
+		if (box->style.max_height.unit == CSS_UNIT_PX) {
+			bound = layout_from_px(box->style.max_height.value);
+			if (specified_height > bound)
+				specified_height = bound;
+		}
+		bound = -1;
+		if (box->style.min_height.unit == CSS_UNIT_PX)
+			bound = layout_from_px(box->style.min_height.value);
+		else if (box->style.min_height.unit == CSS_UNIT_PERCENT && tree->containing_height_definite)
+			bound = (layout_unit)((float)tree->containing_height * box->style.min_height.value / 100.0f) +
+			    layout_from_px(box->style.min_height.offset);
+		if (bound >= 0 && specified_height < bound)
+			specified_height = bound;
 		height = specified_height - sizing;
 		if (height < 0)
 			height = 0;
