@@ -36,6 +36,7 @@
 
 #include <dwmapi.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -70,6 +71,8 @@ static void window_copy_data(struct kl_window *window, const COPYDATASTRUCT *cop
 static unsigned window_modifiers(void);
 static uint32_t window_caption(const struct kl_window *window);
 static int window_set_title(struct kl_window *window, const char *title);
+static void window_font(struct kl_window *window);
+static void window_title_mouse(struct kl_window *window, UINT message, LPARAM lparam);
 
 /*
  * Makes a window of the application: the frame with its title and the
@@ -105,6 +108,9 @@ kl_app_window_create(
 	window->dpi = 96U;
 	window->hover = WINDOW_NO_BUTTON;
 	window->pressed = WINDOW_NO_BUTTON;
+	window->control_hover = KEIUI_WIN32_NO_CONTROL;
+	window->control_pressed = KEIUI_WIN32_NO_CONTROL;
+	window_font(window);
 	width = 800U;
 	height = 600U;
 	if (options != NULL) {
@@ -119,6 +125,8 @@ kl_app_window_create(
 	window->frame = CreateWindowExW(0U, WINDOW_FRAME_CLASS, L"", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
 	    CW_USEDEFAULT, CW_USEDEFAULT, (int)width, (int)(height + KEIUI_WIN32_CAPTION), NULL, NULL, app->module, window);
 	if (window->frame == NULL) {
+		if (window->text_open)
+			kl_text_close(&window->text);
 		free(window);
 		errno = ENOMEM;
 		return NULL;
@@ -129,6 +137,8 @@ kl_app_window_create(
 	    0, 0, (int)width, (int)height, window->frame, NULL, app->module, window);
 	if (window->content == NULL) {
 		(void)DestroyWindow(window->frame);
+		if (window->text_open)
+			kl_text_close(&window->text);
 		free(window);
 		errno = ENOMEM;
 		return NULL;
@@ -208,8 +218,10 @@ kl_window_close(
 		(void)DestroyWindow(window->frame);
 	}
 
-	/* The frames' memory, the title and the state. */
+	/* The frames' memory, the title bar's font, the title and the state. */
 	keiui_win32_present_release(window);
+	if (window->text_open)
+		kl_text_close(&window->text);
 	free(window->title);
 	free(window);
 }
@@ -471,9 +483,23 @@ window_frame_message(
 	unsigned button;
 	LRESULT result;
 	BOOL zoomed;
+	int handled;
+
+	/* The input method's messages. */
+	handled = keiui_win32_ime_message(window, message, wparam, lparam, &result);
+	if (handled)
+		return result;
 
 	/* What the message is. */
 	switch (message) {
+	case WM_MOUSEMOVE:
+	case WM_MOUSELEAVE:
+	case WM_LBUTTONDOWN:
+	case WM_LBUTTONDBLCLK:
+	case WM_LBUTTONUP:
+		/* The pointer over the title bar's controls. */
+		window_title_mouse(window, message, lparam);
+		return 0;
 	case WM_NCCALCSIZE:
 		/* The client is the whole window; a maximized one keeps to its monitor's work area. */
 		if (!wparam)
@@ -522,6 +548,7 @@ window_frame_message(
 	case WM_DPICHANGED:
 		/* The new dpi, and the rectangle the system suggests for it. */
 		window->dpi = HIWORD(wparam);
+		window->resize_waiting = 1;
 		suggested = (const RECT *)lparam;
 		(void)SetWindowPos(handle, NULL, suggested->left, suggested->top, suggested->right - suggested->left,
 		    suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -661,6 +688,10 @@ window_content_message(
 				button = KEIUI_WIN32_BUTTON_X2;
 		}
 
+		/* A press on the content ends the title bar's field. */
+		if (window->editing && message != WM_LBUTTONUP && message != WM_RBUTTONUP && message != WM_MBUTTONUP && message != WM_XBUTTONUP)
+			keiui_win32_field_end(window, KL_TEXT_CANCELLED);
+
 		/* Pressed: the pointer is captured while a button is held. */
 		if (message != WM_LBUTTONUP && message != WM_RBUTTONUP && message != WM_MBUTTONUP && message != WM_XBUTTONUP) {
 			if (window->buttons == 0U)
@@ -728,6 +759,8 @@ window_frame_box(
 	frame->maximized = window->maximized;
 	frame->fullscreen = window->fullscreen;
 	frame->caption_height = KEIUI_WIN32_CAPTION;
+	frame->controls = window->control_places;
+	frame->control_count = window->control_place_count;
 }
 
 /* frame.c's hit test at a point of the frame's client. */
@@ -787,8 +820,9 @@ window_layout(
 	if (width < 1)
 		width = 1;
 
-	/* The content there, and the title bar painted again. */
+	/* The content there, the title bar's controls laid out, and the title bar painted again. */
 	(void)MoveWindow(window->content, 0, (int)caption, (int)width, (int)height, TRUE);
+	keiui_win32_titlebar_layout(window, (uint32_t)(client.right - client.left), caption);
 	(void)InvalidateRect(window->frame, NULL, FALSE);
 
 	/* The size, unless it is the one told already. */
@@ -827,12 +861,17 @@ window_key(
 	struct keiui_win32_key_flags flags;
 	struct kl_window_event *input;
 	uint16_t units[WINDOW_CHAR_UNITS];
+	char text[KL_WINDOW_TEXT_MAX];
 	uint32_t code_point;
 	uint32_t code;
 	size_t count;
 	MSG next;
 	BOOL found;
 	int complete;
+
+	/* A key the input method takes is its own. */
+	if (wparam == VK_PROCESSKEY)
+		return;
 
 	/* The key's code. */
 	keiui_win32_key_flags((int64_t)lparam, &flags);
@@ -863,6 +902,17 @@ window_key(
 		}
 	}
 
+	/* While the title bar's field is edited, its keys are the field's. */
+	if (window->editing) {
+		if (!flags.released) {
+			text[0] = '\0';
+			if (count != 0U)
+				(void)keiui_win32_utf8_from_utf16(units, count, text, sizeof(text), NULL);
+			(void)keiui_win32_field_key(window, code, window_modifiers(), text);
+		}
+		return;
+	}
+
 	/* An unknown key with no text tells nothing. */
 	if (code == 0U && count == 0U)
 		return;
@@ -890,6 +940,7 @@ window_char(
 {
 	struct kl_window_event *input;
 	uint16_t units[2];
+	char text[16];
 	uint32_t code_point;
 	size_t count;
 	int complete;
@@ -908,6 +959,13 @@ window_char(
 		units[0] = (uint16_t)(0xd800U + ((code_point - 0x10000U) >> 10));
 		units[1] = (uint16_t)(0xdc00U + ((code_point - 0x10000U) & 0x3ffU));
 		count = 2U;
+	}
+
+	/* The title bar's field takes it while edited. */
+	if (window->editing) {
+		(void)keiui_win32_utf8_from_utf16(units, count, text, sizeof(text), NULL);
+		keiui_win32_field_insert(window, text);
+		return;
 	}
 
 	/* The input. */
@@ -1163,4 +1221,70 @@ window_set_title(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Opens the title bar's font: the bundled data's fonts (none: the title bar draws no text). */
+static void
+window_font(
+	struct kl_window *window)
+{
+	char directory[MAX_PATH * 3];
+	char primary[MAX_PATH * 3 + 32];
+	char fallback[MAX_PATH * 3 + 32];
+	int error;
+
+	/* The bundled data's directory. */
+	window->text_open = 0;
+	error = kl_data_directory(directory, sizeof(directory));
+	if (error != 0)
+		return;
+
+	/* The sans font and its fallback. */
+	(void)snprintf(primary, sizeof(primary), "%s\\fonts\\keiland.ttf", directory);
+	(void)snprintf(fallback, sizeof(fallback), "%s\\fonts\\keiland-fallback.ttf", directory);
+	error = kl_text_open(&window->text, primary, fallback);
+	if (error == 0)
+		window->text_open = 1;
+}
+
+/* The pointer over the title bar's client (its controls): the one under it, a press and a release. */
+static void
+window_title_mouse(
+	struct kl_window *window,
+	UINT message,
+	LPARAM lparam)
+{
+	TRACKMOUSEEVENT track;
+	int32_t x;
+	int32_t y;
+	unsigned index;
+
+	/* Leaving: nothing under the pointer or held. */
+	if (message == WM_MOUSELEAVE) {
+		window->title_tracking = 0;
+		keiui_win32_titlebar_release_all(window);
+		return;
+	}
+
+	/* The control under the pointer, and its leaving asked for once. */
+	keiui_win32_point((int64_t)lparam, &x, &y);
+	index = keiui_win32_titlebar_at(window, x, y);
+	if (index != window->control_hover) {
+		window->control_hover = index;
+		(void)InvalidateRect(window->frame, NULL, FALSE);
+	}
+	if (!window->title_tracking) {
+		memset(&track, 0, sizeof(track));
+		track.cbSize = sizeof(track);
+		track.dwFlags = TME_LEAVE;
+		track.hwndTrack = window->frame;
+		if (TrackMouseEvent(&track))
+			window->title_tracking = 1;
+	}
+
+	/* A press, and a release. */
+	if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK)
+		keiui_win32_titlebar_press(window, index);
+	if (message == WM_LBUTTONUP)
+		keiui_win32_titlebar_release(window, index);
 }

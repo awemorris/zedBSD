@@ -194,10 +194,16 @@ LIBKEILAND_WIN32_OWN_SOURCES := \
 	userland/desktop/libkeiland/win32/window.c \
 	userland/desktop/libkeiland/win32/present.c \
 	userland/desktop/libkeiland/win32/places.c \
-	userland/desktop/libkeiland/win32/theme.c
+	userland/desktop/libkeiland/win32/theme.c \
+	userland/desktop/libkeiland/win32/titlebar.c \
+	userland/desktop/libkeiland/win32/ime.c \
+	userland/desktop/libkeiland/win32/clipboard.c
+# Files of the list that read files through the C runtime's POSIX calls only, which the Windows C runtime
+# has too (the fonts, read as binary).
+LIBKEILAND_WIN32_CRT_SOURCES := userland/desktop/libkeiland/ui/text.c
 LIBKEILAND_WIN32_STUB_SOURCES := userland/desktop/libkeiland/win32/unsupported.c
 LIBKEILAND_WIN32_OBJECTS := $(patsubst %.c,$(BROWSER_WIN32_OBJ)/%.o,$(LIBKEILAND_WIN32_COMMON_SOURCES) \
-	$(LIBKEILAND_WIN32_OWN_SOURCES))
+	$(LIBKEILAND_WIN32_CRT_SOURCES) $(LIBKEILAND_WIN32_OWN_SOURCES))
 
 # The browser's user interface (the zedBSD build's list less its POSIX entry), a static library the
 # program's entry (main.c) and a test's console program link: its files find their own headers under
@@ -236,7 +242,7 @@ WIN32_SOURCES_browser := $(LIBBROWSER_CORE_SOURCES) \
 	$(filter-out $(LIBBROWSER_CORE_SOURCES),$(filter userland/desktop/libbrowser/%,$(BROWSER_WIN32_LAYER_SOURCES)))
 WIN32_SOURCES_media := $(LIBMEDIA_CORE_SOURCES) $(filter userland/desktop/libmedia/%,$(BROWSER_WIN32_LAYER_SOURCES))
 WIN32_SOURCES_keiland := $(LIBKEILAND_WIN32_COMMON_SOURCES) $(filter userland/desktop/libkeiland/%,$(BROWSER_WIN32_LAYER_SOURCES)) \
-	$(LIBKEILAND_WIN32_OWN_SOURCES) $(LIBKEILAND_WIN32_STUB_SOURCES)
+	$(LIBKEILAND_WIN32_CRT_SOURCES) $(LIBKEILAND_WIN32_OWN_SOURCES) $(LIBKEILAND_WIN32_STUB_SOURCES)
 WIN32_TREE_LIBRARIES := browser-ui browser media keiland
 
 # libtruetype and the compat libraries: the zedBSD build's source lists, each a static library a

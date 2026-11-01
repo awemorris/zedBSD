@@ -3284,187 +3284,6 @@ kl_system_take_result(
 }
 
 /* Not on Windows. */
-size_t
-kl_text_break(
-	struct kl_text *text,
-	const char *string,
-	unsigned pixels,
-	int bold,
-	int width)
-{
-	(void)text;
-	(void)string;
-	(void)pixels;
-	(void)bold;
-	(void)width;
-
-	/* Not on Windows. */
-	return 0;
-}
-
-/* Not on Windows. */
-int
-kl_text_center(
-	unsigned pixels,
-	int top,
-	int height)
-{
-	(void)pixels;
-	(void)top;
-	(void)height;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-void
-kl_text_close(
-	struct kl_text *text)
-{
-	(void)text;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-void
-kl_text_companions(
-	const char *bold,
-	const char *mono)
-{
-	(void)bold;
-	(void)mono;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-int
-kl_text_draw(
-	struct kl_text *text,
-	struct kl_canvas *canvas,
-	int x,
-	int baseline,
-	const char *string,
-	size_t length,
-	unsigned pixels,
-	int bold,
-	kl_color color)
-{
-	(void)text;
-	(void)canvas;
-	(void)x;
-	(void)baseline;
-	(void)string;
-	(void)length;
-	(void)pixels;
-	(void)bold;
-	(void)color;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_text_draw_fit(
-	struct kl_text *text,
-	struct kl_canvas *canvas,
-	int x,
-	int baseline,
-	const char *string,
-	unsigned pixels,
-	int bold,
-	int width,
-	kl_color color)
-{
-	(void)text;
-	(void)canvas;
-	(void)x;
-	(void)baseline;
-	(void)string;
-	(void)pixels;
-	(void)bold;
-	(void)width;
-	(void)color;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-size_t
-kl_text_fit(
-	struct kl_text *text,
-	const char *string,
-	unsigned pixels,
-	int bold,
-	int width,
-	char *out,
-	size_t size)
-{
-	(void)text;
-	(void)string;
-	(void)pixels;
-	(void)bold;
-	(void)width;
-	(void)out;
-	(void)size;
-
-	/* Not on Windows. */
-	return 0;
-}
-
-/* Not on Windows. */
-void
-kl_text_metrics(
-	struct kl_text *text,
-	unsigned pixels,
-	struct kl_text_line *line)
-{
-	(void)text;
-	(void)pixels;
-	(void)line;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-int
-kl_text_open(
-	struct kl_text *text,
-	const char *primary,
-	const char *fallback)
-{
-	(void)text;
-	(void)primary;
-	(void)fallback;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_text_width(
-	struct kl_text *text,
-	const char *string,
-	size_t length,
-	unsigned pixels,
-	int bold)
-{
-	(void)text;
-	(void)string;
-	(void)length;
-	(void)pixels;
-	(void)bold;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
 int
 kl_titlebar_add_control(
 	struct kl_titlebar *titlebar,
@@ -3903,21 +3722,6 @@ kl_ui_window_text(
 }
 
 /* Not on Windows. */
-uint32_t
-kl_utf8_next(
-	const char *string,
-	size_t length,
-	size_t *index)
-{
-	(void)string;
-	(void)length;
-	(void)index;
-
-	/* Not on Windows. */
-	return 0;
-}
-
-/* Not on Windows. */
 int
 kl_window_accept_drops(
 	struct kl_window *window,
@@ -3951,31 +3755,6 @@ kl_window_answer_drop(
 	(void)window;
 	(void)actions;
 	(void)preferred;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-int
-kl_window_can_paste(
-	const struct kl_window *window)
-{
-	(void)window;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-void
-kl_window_copy(
-	struct kl_window *window,
-	const char *text,
-	size_t length)
-{
-	(void)window;
-	(void)text;
-	(void)length;
 
 	/* Nothing is done on Windows. */
 }
@@ -4115,34 +3894,6 @@ kl_window_finish_drop(
 	(void)action;
 
 	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-int
-kl_window_focus_control(
-	struct kl_window *window,
-	uint32_t id)
-{
-	(void)window;
-	(void)id;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_window_focus_control_mode(
-	struct kl_window *window,
-	uint32_t id,
-	unsigned mode)
-{
-	(void)window;
-	(void)id;
-	(void)mode;
-
-	/* Not on Windows. */
-	return ENOTSUP;
 }
 
 /* Not on Windows. */
@@ -4298,21 +4049,6 @@ kl_window_output_mode(
 
 	/* Not on Windows. */
 	return ENOTSUP;
-}
-
-/* Not on Windows. */
-size_t
-kl_window_paste(
-	struct kl_window *window,
-	char *text,
-	size_t size)
-{
-	(void)window;
-	(void)text;
-	(void)size;
-
-	/* Not on Windows. */
-	return 0;
 }
 
 /* Not on Windows. */
@@ -4488,44 +4224,12 @@ kl_window_serial(
 
 /* Not on Windows. */
 int
-kl_window_set_action_state(
-	struct kl_window *window,
-	uint32_t action,
-	unsigned state)
-{
-	(void)window;
-	(void)action;
-	(void)state;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
 kl_window_set_content_type(
 	struct kl_window *window,
 	unsigned type)
 {
 	(void)window;
 	(void)type;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_window_set_control_parts(
-	struct kl_window *window,
-	uint32_t id,
-	const char *const *parts,
-	size_t count)
-{
-	(void)window;
-	(void)id;
-	(void)parts;
-	(void)count;
 
 	/* Not on Windows. */
 	return ENOTSUP;
@@ -4544,53 +4248,6 @@ kl_window_set_control_suggestions(
 	(void)id;
 	(void)labels;
 	(void)texts;
-	(void)count;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_window_set_control_text(
-	struct kl_window *window,
-	uint32_t id,
-	const char *text,
-	const char *placeholder)
-{
-	(void)window;
-	(void)id;
-	(void)text;
-	(void)placeholder;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_window_set_control_value(
-	struct kl_window *window,
-	uint32_t id,
-	unsigned value)
-{
-	(void)window;
-	(void)id;
-	(void)value;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-int
-kl_window_set_controls(
-	struct kl_window *window,
-	const struct kl_control_entry *entries,
-	size_t count)
-{
-	(void)window;
-	(void)entries;
 	(void)count;
 
 	/* Not on Windows. */
@@ -4813,56 +4470,6 @@ kl_window_take_drop(
 
 	/* Not on Windows. */
 	return 0;
-}
-
-/* Not on Windows. */
-void
-kl_window_text_context(
-	struct kl_window *window,
-	const char *text,
-	size_t cursor,
-	size_t anchor,
-	unsigned hint,
-	unsigned purpose)
-{
-	(void)window;
-	(void)text;
-	(void)cursor;
-	(void)anchor;
-	(void)hint;
-	(void)purpose;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-void
-kl_window_text_cursor(
-	struct kl_window *window,
-	int x,
-	int y,
-	int width,
-	int height)
-{
-	(void)window;
-	(void)x;
-	(void)y;
-	(void)width;
-	(void)height;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-void
-kl_window_text_input(
-	struct kl_window *window,
-	int enabled)
-{
-	(void)window;
-	(void)enabled;
-
-	/* Nothing is done on Windows. */
 }
 
 /* Not on Windows. */
