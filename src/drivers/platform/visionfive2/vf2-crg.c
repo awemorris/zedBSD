@@ -340,6 +340,64 @@ static const struct crg_clock sys_clocks[] = {
 	{ 63, CLOCK_GATE, 0, 0, 1,
 	  { { SOURCE_NONE, DRV_VF2_CRG_SYS, 0, NULL } } },
 
+	/*
+	 * The video decoder's clocks: its AXI divider, the core's bus master,
+	 * bit-stream processor, video codec engine and register bus clocks, the
+	 * decoder subsystem's main clock and its network-on-chip port.  The
+	 * dividers stay as the firmware left them.
+	 *
+	 * Values referenced:
+	 * StarFive Linux JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
+	 * include/dt-bindings/clock/starfive,jh7110-crg.h
+	 * (JH7110_SYSCLK_VDEC_AXI 69 to JH7110_SYSCLK_NOC_BUS_VDEC_AXI 76) and
+	 * drivers/clk/starfive/clk-starfive-jh7110-sys.c (vdec_axi divider of
+	 * at most 7 on bus_root; wave511_axi, vdec_main and noc_bus_vdec_axi
+	 * gates on vdec_axi; wave511_bpu gated divider of at most 7 on
+	 * bus_root; wave511_vce gated divider of at most 7 on pll0_out;
+	 * wave511_apb gate on apb_bus).
+	 */
+	{ 69, CLOCK_DIVIDER, 1, 7, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 5, NULL } } },
+	{ 70, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 69, NULL } } },
+	{ 71, CLOCK_GATE | CLOCK_DIVIDER, 1, 7, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 5, NULL } } },
+	{ 72, CLOCK_GATE | CLOCK_DIVIDER, 1, 7, 1,
+	  { { SOURCE_PLL, DRV_VF2_CRG_SYS, 0, NULL } } },
+	{ 73, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 11, NULL } } },
+	{ 75, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 69, NULL } } },
+	{ 76, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 69, NULL } } },
+
+	/*
+	 * The video encoder's clocks: its AXI divider, the core's bus master,
+	 * bit-stream processor, video codec engine and register bus clocks and
+	 * its network-on-chip port.
+	 *
+	 * Values referenced:
+	 * StarFive Linux JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
+	 * include/dt-bindings/clock/starfive,jh7110-crg.h
+	 * (JH7110_SYSCLK_VENC_AXI 77 to JH7110_SYSCLK_NOC_BUS_VENC_AXI 82) and
+	 * drivers/clk/starfive/clk-starfive-jh7110-sys.c (venc_axi divider of
+	 * at most 15 on pll2_out; wave420l_axi and noc_bus_venc_axi gates on
+	 * venc_axi; wave420l_bpu and wave420l_vce gated dividers of at most 15
+	 * on pll2_out; wave420l_apb gate on apb_bus).
+	 */
+	{ 77, CLOCK_DIVIDER, 1, 15, 1,
+	  { { SOURCE_PLL, DRV_VF2_CRG_SYS, 2, NULL } } },
+	{ 78, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 77, NULL } } },
+	{ 79, CLOCK_GATE | CLOCK_DIVIDER, 1, 15, 1,
+	  { { SOURCE_PLL, DRV_VF2_CRG_SYS, 2, NULL } } },
+	{ 80, CLOCK_GATE | CLOCK_DIVIDER, 1, 15, 1,
+	  { { SOURCE_PLL, DRV_VF2_CRG_SYS, 2, NULL } } },
+	{ 81, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 11, NULL } } },
+	{ 82, CLOCK_GATE, 0, 0, 1,
+	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 77, NULL } } },
+
 	/* The SD card controller's bus interface. */
 	{ 92, CLOCK_GATE, 0, 0, 1,
 	  { { SOURCE_CLOCK, DRV_VF2_CRG_SYS, 9, NULL } } },

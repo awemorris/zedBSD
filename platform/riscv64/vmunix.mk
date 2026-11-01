@@ -160,6 +160,19 @@ RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/platform/visionfive2/vf2-pmu
 	src/drivers/gpu/powervr/render-depth.c \
 	src/drivers/gpu/powervr/vk/vk-draw.c \
 	src/drivers/gpu/i915/vk/vk-codec.c
+# The Wave511 video decoder: its glue, the Wave5 core and its instances,
+# and the test kernel's probe of it.
+ifneq ($(filter y,$(CONFIG_DRIVER_VF2_VPU) $(CONFIG_DRIVER_VF2_VPU_PROBE)),)
+ifneq ($(CONFIG_DRIVER_POWERVR),y)
+$(error CONFIG_DRIVER_VF2_VPU and CONFIG_DRIVER_VF2_VPU_PROBE need CONFIG_DRIVER_POWERVR=y)
+endif
+RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/platform/visionfive2/vf2-vpu.c \
+	src/drivers/vpu/wave5-core.c \
+	src/drivers/vpu/wave5-decode.c
+endif
+ifeq ($(CONFIG_DRIVER_VF2_VPU_PROBE),y)
+RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/platform/visionfive2/vf2-vpu-probe.c
+endif
 # The test kernel's check of the core's compute path (ws269-p008).
 ifeq ($(CONFIG_POWERVR_COMPUTE_CHECK),y)
 RISCV64_PLATFORM_SOURCES_visionfive2 += src/drivers/gpu/powervr/compute-check.c

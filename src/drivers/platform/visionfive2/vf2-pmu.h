@@ -8,10 +8,10 @@
 /*
  * The JH7110's power management unit.
  *
- * The unit switches the SoC's power domains.  Only the GPU's outer domain
- * and the display's domain are switched from here, each by its own
- * driver; every other domain (the CPUs', the codecs', the camera's) stays
- * as the firmware left it.
+ * The unit switches the SoC's power domains.  Only the GPU's outer domain,
+ * the display's domain and the video decoder's and encoder's domains are
+ * switched from here, each by its own driver; every other domain (the
+ * CPUs', the camera's) stays as the firmware left it.
  */
 
 #ifndef KERN_DRIVERS_VF2_PMU_H
@@ -41,6 +41,17 @@
 #define DRV_VF2_PD_VOUT	4U
 
 /*
+ * The video decoder's and the video encoder's power domains, as the
+ * device tree's power-domains property numbers them.
+ *
+ * Values referenced:
+ * Linux v6.12 include/dt-bindings/power/starfive,jh7110-pmu.h
+ * (JH7110_PD_VDEC 3, JH7110_PD_VENC 6).
+ */
+#define DRV_VF2_PD_VDEC	3U
+#define DRV_VF2_PD_VENC	6U
+
+/*
  * Finds the power management unit in the device tree and maps it.
  *
  * Touches no register.  ENODEV means the tree has no unit.
@@ -50,9 +61,9 @@ int drv_vf2_pmu_init(const struct drv_fdt *fdt);
 /*
  * Turns a power domain on or off and waits until the unit reports it so.
  *
- * Only DRV_VF2_PD_GPU and DRV_VF2_PD_VOUT are accepted (EPERM for the
- * others).  ETIMEDOUT
- * means the unit's state did not follow.
+ * Only DRV_VF2_PD_GPU, DRV_VF2_PD_VOUT, DRV_VF2_PD_VDEC and
+ * DRV_VF2_PD_VENC are accepted (EPERM for the others).  ETIMEDOUT means
+ * the unit's state did not follow.
  */
 int drv_vf2_pmu_set_power(unsigned domain, int on);
 

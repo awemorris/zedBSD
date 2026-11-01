@@ -74,6 +74,9 @@
 #include <drivers/platform/visionfive2/vf2-pmu.h>
 #include "drivers/gpu/powervr/powervr.h"
 #endif
+#if CONFIG_DRIVER_VF2_VPU || CONFIG_DRIVER_VF2_VPU_PROBE
+#include "drivers/platform/visionfive2/vf2-vpu.h"
+#endif
 #include <drivers/platform/visionfive2/vf2-mmc.h>
 #include <drivers/platform/visionfive2/vf2-pcie.h>
 #include <drivers/platform/visionfive2/vf2-pinctrl.h>
@@ -143,6 +146,23 @@ static const struct drv_vf2_gpu_place vf2_gpu_builtin = {
 	0x100000ULL,
 	82U
 };
+
+#if CONFIG_DRIVER_VF2_VPU || CONFIG_DRIVER_VF2_VPU_PROBE
+/*
+ * Where the video decoder is: the vendor's device tree ships its node
+ * disabled and mainline's has none, so the board describes it itself.
+ *
+ * Values referenced:
+ * StarFive Linux JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
+ * arch/riscv/boot/dts/starfive/jh7110.dtsi (vpu_dec@130a0000: 64 KiB of
+ * registers, interrupts 13).
+ */
+static const struct drv_vf2_vpu_place vf2_vpu_builtin = {
+	0x130a0000ULL,
+	0x10000ULL,
+	13U
+};
+#endif
 
 /*
  * Where the display controller is: the board's device tree usually has no
@@ -775,6 +795,13 @@ probe_soc(
 
 	/* Reads the display controller the loader left on and decides on its takeover. */
 	probe_display_controller(&fdt);
+#endif
+#if CONFIG_DRIVER_VF2_VPU || CONFIG_DRIVER_VF2_VPU_PROBE
+
+	/* Starts the video decoder's bring-up; the board boots without video when it fails. */
+	error = drv_vf2_vpu_attach(&fdt, &vf2_vpu_builtin);
+	if (error != 0)
+		kern_logf("visionfive2: video decoder unavailable (%d)\n", error);
 #endif
 #ifdef CONFIG_VF2_DMA_TEST
 

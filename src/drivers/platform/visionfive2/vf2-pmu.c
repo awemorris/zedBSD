@@ -137,10 +137,13 @@ drv_vf2_pmu_set_power(
 	unsigned poll;
 
 	/*
-	 * Refuses every domain but the GPU's and the display's, which their
-	 * own drivers own.
+	 * Refuses every domain but the GPU's, the display's and the video
+	 * codecs', which their own drivers own.
 	 */
-	if (domain != DRV_VF2_PD_GPU && domain != DRV_VF2_PD_VOUT)
+	if (domain != DRV_VF2_PD_GPU &&
+	    domain != DRV_VF2_PD_VOUT &&
+	    domain != DRV_VF2_PD_VDEC &&
+	    domain != DRV_VF2_PD_VENC)
 		return EPERM;
 
 	/* Refuses the call before the unit is mapped. */
@@ -151,13 +154,16 @@ drv_vf2_pmu_set_power(
 	 * Names the domain and writes the command (the GPU's hardware events are
 	 * handled below): the reset byte
 	 * restarts the unit's command parser, the two bytes after it select
-	 * turning on or off.  The display's domain has no hardware event
-	 * (TRM Table 3-12 lists none for it), so nothing is masked for it.
+	 * turning on or off.  The display's and the video codecs' domains are
+	 * switched by software alone, so no event is unmasked for them.
 	 *
 	 * Procedure referenced:
 	 * StarFive JH7110 TRM Preliminary V2, section 3.6.4 (SW encourage
 	 * turn-on and turn-off sequences) and Tables 3-12 and 3-13 (the VOUT
-	 * domain in bit 4 of the software modes).
+	 * domain in bit 4 of the software modes); StarFive Linux
+	 * JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
+	 * drivers/pmdomain/starfive/jh71xx-pmu.c (jh7110_power_domains: VDEC
+	 * in bit 3, VENC in bit 6).
 	 */
 	mask = 1U << domain;
 	irq = spin_lock_irqsave(&pmu_lock);
