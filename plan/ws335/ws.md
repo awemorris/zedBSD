@@ -49,8 +49,8 @@
 | [p011](phase011/phase.md) | ECC: 鍵の生成・ECDH・ECDSA の確かめ（test-ecc） | cleared（2026-11-01 23:51 Q1、main 2d7097dd3。main で run-unit all・run-ct ecc PASS） | p010 |
 | [p012](phase012/phase.md) | RSA の署名の確かめ（PKCS#1 v1.5・PSS）（test-rsa） | cleared（2026-11-02 01:07 Q1、main 9aa6bae4d。test-rsa 31057 PASS） | p007、p002 |
 | [p013](phase013/phase.md) | ML-KEM の多項式・符号化・sampling（test-mlkem-poly） | cleared（2026-11-02 01:44 Q1、main 3b0b0dd1e。main で test-mlkem-poly 10117・ct PASS。不正な d の扱いは p035 で header の comment に足す） | p003 |
-| [p014](phase014/phase.md) | K-PKE と ML-KEM-768（test-mlkem） | 実装済み・試験 PASS（2026-11-02 02:05 P6 q1894-i01、74838e0630。test-mlkem 8135・ct PASS。cleared は Q1） | p013 |
-| [p015](phase015/phase.md) | OS の層（POSIX と Windows）（test-os） | planned | p002 |
+| [p014](phase014/phase.md) | K-PKE と ML-KEM-768（test-mlkem） | cleared（2026-11-02 02:04 Q1、main f533fd4cd。main で test-mlkem 8135・ct-mlkem PASS。Wycheproof 4 file 全部、暗黙の拒否も一致） | p013 |
+| [p015](phase015/phase.md) | OS の層（POSIX と Windows）（test-os） | planned（P6 q1897） | p002 |
 | [p016](phase016/phase.md) | DER の reader と PEM・base64（test-der、test-pem） | cleared（2026-11-02 01:47 Q1、main 03a1ab446。main で test-der 1967・test-pem 666 PASS。bundle 121 枚・limbo 19,587/19,589 枚が読める） | p002 |
 | [p017](phase017/phase.md) | X.509 の parse（証明書・公開鍵・署名の algorithm）（test-x509） | planned（Sonnet q1895） | p016 |
 | [p018](phase018/phase.md) | 署名の確かめ（algorithm ごと）（test-sigver） | planned | p017、p011、p012 |

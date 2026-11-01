@@ -2,7 +2,7 @@
 
 # ws335-p014: K-PKE と ML-KEM-768
 
-Status: 実装済み・試験 PASS（2026-11-02 02:05 P6 q1894-i01。cleared は Q1）。前: planned（2026-11-01 p001 が作成。起動は Q1。依存: p013）
+Status: cleared（2026-11-02 02:04 Q1、main f533fd4cd。main で test-mlkem 8135・ct-mlkem PASS。Wycheproof 4 file 全部、暗黙の拒否も一致）。前: 実装済み・試験 PASS（2026-11-02 02:05 P6 q1894-i01。cleared は Q1）。前: planned（2026-11-01 p001 が作成。起動は Q1。依存: p013）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
