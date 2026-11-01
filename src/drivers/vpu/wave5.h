@@ -114,7 +114,9 @@ struct drv_wave5_picture {
  * Decoded is the frame buffer the picture went into and display the one
  * the core gives out now, each an index or a negative DRV_WAVE5_INDEX_*.
  * Ticks is the core's time for the picture in its own cycles, wall the
- * host's time from the command to the result in microseconds.
+ * host's time from the command to the result in microseconds.  Queue is
+ * the firmware's queue status after the command and after the result
+ * (queued commands in bits 16 to 23, waiting reports below).
  */
 struct drv_wave5_result {
 	uint32_t success;
@@ -131,6 +133,7 @@ struct drv_wave5_result {
 	uint64_t ticks;
 	uint64_t wall;
 	uint32_t read_position;
+	uint32_t queue[2];
 };
 
 /*
@@ -166,6 +169,9 @@ void drv_wave5_identity(const struct drv_wave5 *core, struct drv_wave5_identity 
  */
 void drv_wave5_interrupts(struct drv_wave5 *core, unsigned *taken, unsigned *polled, uint32_t *reasons);
 
+/* Reports the reason the firmware gave for the last command it refused. */
+uint32_t drv_wave5_last_reason(struct drv_wave5 *core);
+
 /*
  * Opens an instance that decodes one codec from a bitstream ring of the
  * given size (a multiple of 1 KiB).
@@ -189,6 +195,13 @@ int drv_wave5_close(struct drv_wave5_stream *stream);
  * command carries.  EFBIG means the bytes do not fit.
  */
 int drv_wave5_load(struct drv_wave5_stream *stream, const uint8_t *bytes, size_t length, unsigned rewind);
+
+/*
+ * Puts one picture's bytes right after the bytes the last command read, as
+ * the bytes the next command reads; the core's own read position is
+ * already there.  EFBIG means the ring has no room left before its end.
+ */
+int drv_wave5_append(struct drv_wave5_stream *stream, const uint8_t *bytes, size_t length);
 
 /*
  * Reports where the ring's bytes start: the ring's kernel view and its
@@ -230,7 +243,8 @@ int drv_wave5_display_flags(struct drv_wave5_stream *stream, uint32_t set, uint3
  * In decode order: the core is told to give each picture out as soon as
  * it is decoded.  EIO means the command was refused; a decode the
  * firmware reports as failed still returns 0 with the result's success
- * clear.
+ * clear.  ETIMEDOUT means the completion did not come; the result is what
+ * the firmware answered then.
  */
 int drv_wave5_decode(struct drv_wave5_stream *stream, struct drv_wave5_result *result);
 

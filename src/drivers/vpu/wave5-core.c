@@ -374,6 +374,17 @@ drv_wave5_interrupts(
 }
 
 /*
+ * Reports the reason the firmware gave for the last command it refused.
+ */
+uint32_t
+drv_wave5_last_reason(
+	struct drv_wave5 *core)
+{
+	/* The reason the command path kept. */
+	return core->last_reason;
+}
+
+/*
  * Reads one host register.
  */
 uint32_t
@@ -458,6 +469,7 @@ drv_wave5_core_command(
 	taken = drv_wave5_core_read(core, VPU_SUCCESS);
 	if (taken == 0) {
 		why = drv_wave5_core_read(core, VPU_FAIL_REASON);
+		core->last_reason = why;
 		if (reason != NULL)
 			*reason = why;
 		if (why == VPU_REASON_STILL_RUNNING)

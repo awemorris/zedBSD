@@ -389,6 +389,19 @@
    "note": "The whole software with its notices and the licence; use solely with Mali-based products; the licence forbids reverse engineering except as the law permits and is subject to export control laws."
   },
   {
+   "id": "wave511-firmware",
+   "name": "Chips&Media Wave511 video decoder firmware (VisionFive 2)",
+   "when": "program:wave511-firmware",
+   "license": "LicenseRef-chipsmedia-wave511 (binary redistribution allowed)",
+   "upstream": "starfive-tech/soft_3rdpart",
+   "version": "",
+   "notices": [
+    "/usr/share/licenses/wave511-firmware/LICENSE.txt"
+   ],
+   "paths": [],
+   "note": "Binary form only, with the copyright notice, the conditions and the disclaimer; the licence forbids reverse engineering, decompilation and disassembly."
+  },
+  {
    "id": "amlogic-s7d-bootloader",
    "name": "ODROID-C5 bootloader (Amlogic S905X5M boot stages BL2-BL32 and Hardkernel's U-Boot)",
    "when": "program:amlogic-s7d-bootloader",

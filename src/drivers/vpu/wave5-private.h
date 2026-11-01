@@ -202,6 +202,7 @@ struct drv_wave5 {
 	uint32_t sequence_done;
 	uint32_t picture_done;
 	uint32_t reasons;
+	uint32_t last_reason;
 	unsigned interrupts;
 	unsigned polled;
 	int irq_installed;

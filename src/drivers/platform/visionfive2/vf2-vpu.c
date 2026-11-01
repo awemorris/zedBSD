@@ -81,8 +81,8 @@ static const uint32_t vpu_rate_clocks[] = { 69U, 70U, 71U, 72U, 73U, 75U, 76U };
 /* The highest address the core's 32-bit bus master names. */
 #define VPU_DMA_LIMIT		0xffffffffULL
 
-/* Where the firmware is and how large it may be. */
-#define VPU_FIRMWARE_PATH	"/lib/firmware/wave511/wave511_dec_fw.bin"
+/* Where the firmware is (the wave511-firmware package's file) and how large it may be. */
+#define VPU_FIRMWARE_PATH	"/lib/firmware/wave511/chagall.bin"
 #define VPU_FIRMWARE_LIMIT	0x100000U
 
 /* The probe device's number (a major of its own), its name and its text's room. */

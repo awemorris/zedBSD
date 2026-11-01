@@ -22,8 +22,12 @@ def fill_hash(width, height, byte):
 
 frames = {}
 others = []
+refused = {}
 for line in open(probe, errors='replace'):
     line = line.strip()
+    if line.startswith('refused '):
+        key = tuple(line.split()[1:3])
+        refused[key] = refused.get(key, 0) + 1
     if not line.startswith('frame '):
         if line:
             others.append(line)
@@ -34,7 +38,7 @@ for line in open(probe, errors='replace'):
     frames.setdefault((name, way), []).append(fields)
 
 for line in others:
-    if re.match(r'(vpu |stream |open |sequence |register |pool |flags |run |close |probe )', line):
+    if re.match(r'(vpu |stream |open |sequence |register |pool |flags |run |close |probe |replace |refused )', line):
         print('#', line)
 
 fills = {}
@@ -67,5 +71,6 @@ for (name, way), rows in sorted(frames.items()):
         stale = sum(1 for r in rows if r.get('cached') == fills[(w, h)])
         extra = ' cached-new=%d cached-fill=%d' % (fresh, stale)
     print('%s %s frames=%d ref=%d decoded-ok=%d match-display-order=%d hash-in-ref=%d dec==disp=%d dec==pick=%d'
-          ' us-max=%d ticks-max=%d%s' % (name, way, len(rows), len(ref), len(ok), matched, in_ref, at_once, picked,
-                                         max(us) if us else 0, max(ticks) if ticks else 0, extra))
+          ' refused=%d us-max=%d ticks-max=%d%s' % (name, way, len(rows), len(ref), len(ok), matched, in_ref, at_once,
+                                                    picked, refused.get((name, way), 0), max(us) if us else 0,
+                                                    max(ticks) if ticks else 0, extra))

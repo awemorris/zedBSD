@@ -17,7 +17,7 @@
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
 | [ws322-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | cleared（2026-11-01 21:35 Q1、main 261624739。design.md 第 2 版と review 1 回の反映） | （WS318 の completed を待たない、2026-11-01 ユーザー） |
-| ws322-p002 | VF2 の VPU の glue と Wave5 の core の boot、firmware の package（wave511）、実機の probe | planned（P2 q1852） | p001 |
+| [ws322-p002](phase002/phase.md) | VF2 の VPU の glue と Wave5 の core の boot、firmware の package（wave511）、実機の probe | cleared（2026-11-01 P2 q1852-i01、Q1 の受け入れ待ち。probe: R1 可・R2 可（参照の index は断られる）・R3 不可（decode の後の更新で止まる）・R5 query 無し、ring は続けて使う・R14 VPU は非一貫） | p001 |
 | ws322-p003 | PowerVR の executor: NV12 の image・plane の view・query pool・capset・queue family | planned | p001 |
 | ws322-p004 | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、vkvideo-probe の DISTINCT） | planned | p002、p003 |
 | ws322-p005 | libvulkan の H.265 decode の転送 | planned | WS318 p011a か先に着手（Q322-4） |
@@ -57,6 +57,8 @@
 - Q322-2（Wave420L の参考の source の license）と Q322-3（受け入れの解像度と速さ）はユーザーに聞く。
 
 ## Resume point
+
+- 2026-11-01 P2（q1852-i01）: p002 を実装し VF2 で probe した（[phase002](phase002/phase.md)）。次: Q1 の受け入れ、design.md の §7.3・§7.5・§9.2・R11・R13 の直し（p002 の観測を反映、後の Queue）、p003・p004。
 
 - 2026-11-01 P2（q1845）: p001 の設計（design.md 第 2 版）と review 1（design-review.md、27 件）の反映が済んだ。次: Q1 の受け入れ、Q322-1〜7 の答え（Q322-2・Q322-3 はユーザー）、その後 p002・p003 から。
 

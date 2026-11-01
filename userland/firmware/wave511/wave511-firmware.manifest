@@ -1,0 +1,29 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=wave511-firmware
+package-version=0002d46a
+consumer=the Wave5 decoder driver (src/drivers/vpu) through the VisionFive 2 glue (src/drivers/platform/visionfive2/vf2-vpu.c)
+installed-firmware=/lib/firmware/wave511/chagall.bin
+installed-license=/usr/share/licenses/wave511-firmware/LICENSE.txt
+
+acquisition-repository=https://github.com/starfive-tech/soft_3rdpart.git
+acquisition-branch=JH7110_VisionFive2_devel
+acquisition-revision=b60da16be1b36453aa46599889c28310fd148fb8
+acquisition-base-url=https://raw.githubusercontent.com/starfive-tech/soft_3rdpart/b60da16be1b36453aa46599889c28310fd148fb8
+acquisition-file=wave511/firmware/chagall.bin size=949120 sha256=aad0383bc9ea7694b7038e903710fe5ba8571a74769c909fecc99623b2ec252e
+acquisition-license-path=wave511/firmware/LICENSE.txt
+acquisition-license-size=1175
+acquisition-license-sha256=8c15e1830a2e7638ca982f22db27c226df3f4b05771f8b28369549e0298cea2c
+firmware-revision=0x0002d46a (the decoder's identity query)
+
+mirror-repository=https://github.com/awemorris/zedBSD-firmware.git
+mirror-revision=43662bd72419deb927af6d533d90fe72aa158c74
+mirror-path=wave511/
+
+hardware=Chips&Media Wave511 video decoder (product 0x5110) of the StarFive JH7110 (VisionFive 2)
+redistribution=binary form only, with the copyright notice, the conditions and the disclaimer of LICENSE.txt
+license=Chips&Media binary firmware terms in the installed LICENSE.txt file
+reverse-engineering=forbidden; the driver uses only the firmware's command replies and register values
+source-tree-blob=absent
+runtime-network-fetch=forbidden

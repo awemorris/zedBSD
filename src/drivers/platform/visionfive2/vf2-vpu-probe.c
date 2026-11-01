@@ -13,7 +13,9 @@
  * them into pictures and decodes each stream in several ways, writing one
  * line per picture: the frame buffer the picture went into, the one the
  * core gave out, its order count and the FNV-1a of its visible NV12
- * bytes, which the host compares with a reference decode.  The ways are:
+ * bytes, which the host compares with a reference decode.  Unless a way
+ * says otherwise, each picture is put in the ring right after the one
+ * before, where the core's read position already is.  The ways are:
  *
  *   A  the core picks the frame buffer, each one handed back after its
  *      picture is read (the baseline, and whether a picture comes out
@@ -23,14 +25,19 @@
  *      core and leave the references readable);
  *   C  as B, with the picked pair's linear buffer first pointed at one of
  *      two other pictures (whether one pair can be updated alone);
- *   D  as A, the read position moved back only by the position the
- *      picture command carries (whether the query is needed);
+ *   D  as A, every picture put at the ring's start and the read position
+ *      moved back there by the set read position query;
  *   E  as A, the ring's old bytes read through the cached direct map
  *      before the new bytes are written uncached (whether the core reads
  *      through the CPU's caches);
  *   F  as B, the frame buffer read through the cached direct map before
  *      the decode and both ways after it (whether the core's writes reach
- *      the CPU's caches).
+ *      the CPU's caches);
+ *   G  as A, every picture put at the ring's start and the read position
+ *      moved back only by the position the picture command carries
+ *      (whether the query is needed);
+ *   H  as C, the pair pointed at its own linear buffer again (whether the
+ *      update alone, without a new address, disturbs the core).
  */
 
 #include <stdarg.h>
@@ -74,8 +81,10 @@
 #define RUN_D		0x08U
 #define RUN_E		0x10U
 #define RUN_F		0x20U
-#define RUN_EVERY	0x3fU
-#define RUN_COUNT	6U
+#define RUN_G		0x40U
+#define RUN_H		0x80U
+#define RUN_EVERY	0xffU
+#define RUN_COUNT	8U
 
 /*
  * One stream of the probe: its file below the probe's directory, the name
@@ -113,7 +122,8 @@ struct probe_text {
 /*
  * What one decode of a stream works with: the stream, its bytes and
  * pictures, the way, the frame buffers, the destinations, the stride and
- * the planes' offsets, and when each buffer was last decoded into.
+ * the planes' offsets, when each buffer was last decoded into, and how
+ * far into the ring the pictures put after one another reach.
  */
 struct probe_run {
 	const struct probe_stream *stream;
@@ -121,6 +131,7 @@ struct probe_run {
 	struct probe_unit units[PROBE_MAX_UNITS];
 	unsigned unit_count;
 	unsigned way;
+	struct drv_wave5 *core;
 	struct drv_wave5_stream *instance;
 	struct drv_wave5_sequence sequence;
 	struct probe_buffer pool[DRV_WAVE5_MAX_BUFFERS];
@@ -130,6 +141,7 @@ struct probe_run {
 	size_t chroma_offset;
 	size_t buffer_size;
 	unsigned last_used[DRV_WAVE5_MAX_BUFFERS];
+	size_t fed;
 };
 
 /* The probe's streams. */
@@ -143,7 +155,13 @@ static const struct probe_stream probe_streams[] = {
 };
 
 /* The letters the ways' lines carry, in bit order. */
-static const char probe_way_names[RUN_COUNT] = { 'A', 'B', 'C', 'D', 'E', 'F' };
+static const char probe_way_names[RUN_COUNT] = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H' };
+
+/*
+ * The order the ways run in: those the core picks for first, since a way
+ * the core cannot finish ends the stream's ways.
+ */
+static const unsigned probe_order[RUN_COUNT] = { RUN_A, RUN_D, RUN_G, RUN_E, RUN_F, RUN_B, RUN_H, RUN_C };
 
 /*
  * The uncached view of RAM, which only architectures with devices that do
@@ -164,8 +182,10 @@ static int take_buffer(size_t size, size_t chroma_offset, struct probe_buffer *b
 static void give_buffer(struct probe_buffer *buffer);
 static uint32_t hash_picture(const struct probe_run *run, const uint8_t *bytes);
 static void touch_cached(const uint8_t *bytes, size_t size);
+static void compare_lines(const struct probe_run *run, const uint8_t *cached, const uint8_t *uncached, struct probe_text *text);
 static void drop_cached(const void *bytes, size_t size);
-static unsigned least_used(const struct probe_run *run);
+static unsigned least_used(const struct probe_run *run, uint32_t tried);
+static int host_picks(unsigned way);
 
 /*
  * Decodes the probe's streams in each of its ways and appends the lines.
@@ -257,11 +277,11 @@ probe_stream(
 
 	/* Decodes it each way it asks for, stopping at a decode that left memory the core may use. */
 	for (way = 0; way < RUN_COUNT; way++) {
-		if ((stream->runs & (1U << way)) == 0)
+		if ((stream->runs & probe_order[way]) == 0)
 			continue;
-		run->way = 1U << way;
+		run->way = probe_order[way];
 		error = decode_stream(core, run, text);
-		put(text, "run %s %c end %d\n", stream->name, probe_way_names[way], error);
+		put(text, "run %s %c end %d\n", stream->name, probe_way_names[__builtin_ctz(run->way)], error);
 		if (error == EBUSY)
 			break;
 	}
@@ -289,13 +309,13 @@ decode_stream(
 	uint32_t flags;
 	uint32_t hash;
 	uint32_t pattern_hash;
-	unsigned rewind;
 	unsigned position;
 	unsigned written;
 	int error;
 	int closed;
 
 	/* Starts with a clean slate of buffers and use. */
+	run->core = core;
 	run->count = 0;
 	run->instance = NULL;
 	kern_memset(run->last_used, 0, sizeof(run->last_used));
@@ -312,19 +332,19 @@ decode_stream(
 	if (error != 0)
 		return error;
 
-	/* Sets the sequence up from the first picture. */
+	/* Sets the sequence up from the first picture, at the start of a fresh ring. */
 	unit = &run->units[0];
-	rewind = DRV_WAVE5_REWIND_QUERY;
-	if (run->way == RUN_D)
-		rewind = DRV_WAVE5_REWIND_REGISTER;
-	error = drv_wave5_load(run->instance, run->bytes + unit->offset, unit->length, rewind);
+	kern_memset(&run->sequence, 0, sizeof(run->sequence));
+	error = drv_wave5_load(run->instance, run->bytes + unit->offset, unit->length, DRV_WAVE5_REWIND_REGISTER);
 	if (error == 0)
 		error = drv_wave5_init_sequence(run->instance, &run->sequence);
+	run->fed = unit->length;
 	drv_wave5_interrupts(core, &taken, &polled, &reasons);
 	put(text,
-	    "sequence %s %d ok=%u err=%08x size=%ux%u required=%u crop=%u,%u,%u,%u depth=%u,%u profile=%u rd=%08x irq=%u polled=%u reasons=%08x\n",
+	    "sequence %s %d reason=%08x ok=%u err=%08x size=%ux%u required=%u crop=%u,%u,%u,%u depth=%u,%u profile=%u rd=%08x irq=%u polled=%u reasons=%08x\n",
 	    run->stream->name,
 	    error,
+	    drv_wave5_last_reason(core),
 	    run->sequence.success,
 	    run->sequence.error,
 	    run->sequence.width,
@@ -416,15 +436,22 @@ decode_unit(
 	uint32_t hash;
 	uint32_t cached_hash;
 	uint32_t flags;
-	unsigned rewind;
 	unsigned chosen;
+	unsigned attempt;
+	unsigned taken;
+	unsigned polled;
+	uint32_t reasons;
+	uint32_t tried;
 	int index;
 	int error;
 
-	/* Reads the ring's old bytes through the direct map first for E, so stale lines are cached. */
+	/* Reads the bytes about to be overwritten through the direct map first for E, so stale lines are cached. */
 	piece = &run->units[unit];
-	if (run->way == RUN_E) {
-		drv_wave5_ring(run->instance, &ring_view, &ring_address);
+	drv_wave5_ring(run->instance, &ring_view, &ring_address);
+	ring_address += run->fed;
+	if (unit == 0)
+		ring_address -= piece->length;
+	if (run->way == RUN_E && unit != 0) {
 		direct = kern_pmem_to_kernel((kern_physaddr_t)ring_address);
 		if (direct != NULL) {
 			drop_cached(direct, piece->length);
@@ -432,70 +459,139 @@ decode_unit(
 		}
 	}
 
-	/* Puts the picture in the ring. */
-	rewind = DRV_WAVE5_REWIND_QUERY;
-	if (run->way == RUN_D)
-		rewind = DRV_WAVE5_REWIND_REGISTER;
-	error = drv_wave5_load(run->instance, run->bytes + piece->offset, piece->length, rewind);
+	/*
+	 * Puts the picture in the ring: D and G at its start, moving the read
+	 * position back their way; the others after the picture before, the
+	 * first already being there from the sequence.
+	 */
+	error = 0;
+	if (run->way == RUN_D) {
+		error = drv_wave5_load(run->instance, run->bytes + piece->offset, piece->length, DRV_WAVE5_REWIND_QUERY);
+	} else if (run->way == RUN_G) {
+		error = drv_wave5_load(run->instance, run->bytes + piece->offset, piece->length, DRV_WAVE5_REWIND_REGISTER);
+	} else if (unit != 0) {
+		error = drv_wave5_append(run->instance, run->bytes + piece->offset, piece->length);
+		if (error == 0)
+			run->fed += piece->length;
+	}
 	if (error != 0) {
-		put(text, "frame %s %c n=%u load %d\n", run->stream->name, probe_way_names[__builtin_ctz(run->way)], unit, error);
+		put(text,
+		    "frame %s %c n=%u load %d reason=%08x\n",
+		    run->stream->name,
+		    probe_way_names[__builtin_ctz(run->way)],
+		    unit,
+		    error,
+		    drv_wave5_last_reason(run->core));
 		return error;
 	}
 
-	/* For B, C and F picks the least recently used frame buffer and flags every other one. */
+	/*
+	 * Decodes the picture.  For B, C, F and H the host picks the least
+	 * recently used frame buffer and flags every other one; a pick the
+	 * core refuses (no frame buffer, the picture's bytes left unread) is
+	 * reported and the next one tried.
+	 */
+	tried = 0;
 	chosen = 0;
-	if (run->way == RUN_B || run->way == RUN_C || run->way == RUN_F) {
-		chosen = least_used(run);
+	direct = NULL;
+	for (attempt = 0; attempt < run->count; attempt++) {
+		/* The core picks for A, D, E and G. */
+		if (!host_picks(run->way)) {
+			error = drv_wave5_decode(run->instance, &result);
+			break;
+		}
+
+		/* Picks a buffer not tried yet and flags every other one. */
+		chosen = least_used(run, tried);
+		tried |= 1U << chosen;
 		mask = (uint32_t)((1ULL << run->count) - 1U);
 		error = drv_wave5_display_flags(run->instance, mask & ~(1U << chosen), 1U << chosen, &flags);
 		if (error != 0)
 			return error;
-	}
 
-	/* For C points the picked pair's linear buffer at a destination, filled to show what is written. */
-	if (run->way == RUN_C) {
-		target = &run->destinations[unit & 1U];
-		kern_memset(target->view, PROBE_DESTINATION_FILL, run->buffer_size);
-		error = drv_wave5_replace(run->instance, chosen, &target->picture);
-		if (error != 0) {
-			put(text, "frame %s C n=%u replace %d\n", run->stream->name, unit, error);
-			return error;
+		/* For C points the pair's linear buffer at a filled destination, for H at its own buffer again. */
+		if (run->way == RUN_C || run->way == RUN_H) {
+			target = &run->pool[chosen];
+			if (run->way == RUN_C) {
+				target = &run->destinations[unit & 1U];
+				kern_memset(target->view, PROBE_DESTINATION_FILL, run->buffer_size);
+			}
+			error = drv_wave5_replace(run->instance, chosen, &target->picture);
+			flags = 0;
+			(void)drv_wave5_display_flags(run->instance, 0, 0, &flags);
+			put(text,
+			    "replace %s %c n=%u pick=%u %d reason=%08x flags=%08x\n",
+			    run->stream->name,
+			    probe_way_names[__builtin_ctz(run->way)],
+			    unit,
+			    chosen,
+			    error,
+			    drv_wave5_last_reason(run->core),
+			    flags);
+			if (error != 0)
+				return error;
 		}
-	}
 
-	/* For F fills the picked buffer and caches its filled lines through the direct map. */
-	direct = NULL;
-	if (run->way == RUN_F) {
-		kern_memset(run->pool[chosen].view, PROBE_POOL_FILL, run->buffer_size);
-		direct = kern_pmem_to_kernel(run->pool[chosen].run.paddr);
+		/* For F fills the buffer and caches its filled lines through the direct map. */
+		if (run->way == RUN_F) {
+			kern_memset(run->pool[chosen].view, PROBE_POOL_FILL, run->buffer_size);
+			direct = kern_pmem_to_kernel(run->pool[chosen].run.paddr);
+			if (direct != NULL) {
+				drop_cached(direct, run->buffer_size);
+				touch_cached(direct, run->buffer_size);
+			}
+		}
+
+		/* Decodes; stops unless the core refused the pick. */
+		error = drv_wave5_decode(run->instance, &result);
+		if (error != 0 || result.success == 0 || result.decoded != DRV_WAVE5_INDEX_NONE)
+			break;
+		put(text, "refused %s %c n=%u pick=%u flags=%08x\n", run->stream->name, probe_way_names[__builtin_ctz(run->way)], unit, chosen, result.display_flags);
 		if (direct != NULL) {
 			drop_cached(direct, run->buffer_size);
-			touch_cached(direct, run->buffer_size);
+			direct = NULL;
 		}
 	}
 
-	/* Decodes the picture. */
-	error = drv_wave5_decode(run->instance, &result);
-
-	/* Hashes the picture given out: the core's choice for A, D and E, the host's otherwise. */
+	/* Hashes the picture given out: the core's choice for A, D, E and G, the host's otherwise. */
 	index = result.display;
-	if (run->way == RUN_B || run->way == RUN_C || run->way == RUN_F)
+	if (host_picks(run->way))
 		index = result.decoded;
 	hash = 0;
 	cached_hash = 0;
-	if (error == 0 && index >= 0 && (unsigned)index < run->count) {
+	if ((error == 0 || error == ETIMEDOUT) && index >= 0 && (unsigned)index < run->count) {
 		target = &run->pool[index];
 		if (run->way == RUN_C)
 			target = &run->destinations[unit & 1U];
 		hash = hash_picture(run, target->view);
 		if (run->way == RUN_F && direct != NULL && (unsigned)index == chosen) {
 			cached_hash = hash_picture(run, direct);
+			compare_lines(run, direct, target->view, text);
 			drop_cached(direct, run->buffer_size);
 		}
 	}
 
+	/* Reports the interrupt reasons around a decode that did not end. */
+	if (error != 0) {
+		drv_wave5_interrupts(run->core, &taken, &polled, &reasons);
+		put(text,
+		    "stuck %s n=%u %d irq=%u polled=%u reasons=%08x queue=%08x,%08x ok=%u dec=%d disp=%d flags=%08x\n",
+		    run->stream->name,
+		    unit,
+		    error,
+		    taken,
+		    polled,
+		    reasons,
+		    result.queue[0],
+		    result.queue[1],
+		    result.success,
+		    (int)result.decoded,
+		    (int)result.display,
+		    result.display_flags);
+	}
+
 	/* Drops the ring's lines cached for E. */
-	if (run->way == RUN_E) {
+	if (run->way == RUN_E && unit != 0) {
 		direct = kern_pmem_to_kernel((kern_physaddr_t)ring_address);
 		if (direct != NULL)
 			drop_cached(direct, piece->length);
@@ -503,11 +599,13 @@ decode_unit(
 
 	/* Appends the picture's line. */
 	put(text,
-	    "frame %s %c n=%u err=%d ok=%u fail=%08x warn=%08x dec=%d disp=%d pick=%u poc=%d type=%08x change=%08x flags=%08x hash=%08x cached=%08x ticks=%llu us=%llu rd=%08x size=%ux%u\n",
+	    "frame %s %c n=%u err=%d reason=%08x queue=%08x ok=%u fail=%08x warn=%08x dec=%d disp=%d pick=%u poc=%d type=%08x change=%08x flags=%08x hash=%08x cached=%08x ticks=%llu us=%llu rd=%08x size=%ux%u\n",
 	    run->stream->name,
 	    probe_way_names[__builtin_ctz(run->way)],
 	    unit,
 	    error,
+	    drv_wave5_last_reason(run->core),
+	    result.queue[0],
 	    result.success,
 	    result.error,
 	    result.warning,
@@ -528,8 +626,8 @@ decode_unit(
 	if (error != 0)
 		return error;
 
-	/* For A, D and E hands the picture's frame buffer back to the core. */
-	if ((run->way == RUN_A || run->way == RUN_D || run->way == RUN_E) && result.display >= 0) {
+	/* For A, D, E and G hands the picture's frame buffer back to the core. */
+	if ((run->way == RUN_A || run->way == RUN_D || run->way == RUN_E || run->way == RUN_G) && result.display >= 0) {
 		error = drv_wave5_display_flags(run->instance, 0, 1U << (unsigned)result.display, &flags);
 		if (error != 0)
 			return error;
@@ -828,6 +926,56 @@ touch_cached(
 	(void)sum;
 }
 
+/*
+ * Counts the buffer's 64-byte lines the cached view shows as the core
+ * wrote them (the uncached view's bytes), as the fill from before the
+ * decode, or as neither, and appends the counts.
+ */
+static void
+compare_lines(
+	const struct probe_run *run,
+	const uint8_t *cached,
+	const uint8_t *uncached,
+	struct probe_text *text)
+{
+	const volatile uint8_t *seen;
+	const volatile uint8_t *written;
+	unsigned fresh;
+	unsigned stale;
+	unsigned other;
+	size_t offset;
+	size_t byte;
+	int same;
+	int filled;
+
+	/* Compares each line through both views. */
+	fresh = 0;
+	stale = 0;
+	other = 0;
+	for (offset = 0; offset + 64U <= run->buffer_size; offset += 64U) {
+		seen = cached + offset;
+		written = uncached + offset;
+		same = 1;
+		filled = 1;
+		for (byte = 0; byte < 64U; byte++) {
+			if (seen[byte] != written[byte])
+				same = 0;
+			if (seen[byte] != PROBE_POOL_FILL)
+				filled = 0;
+		}
+		if (same) {
+			fresh++;
+		} else if (filled) {
+			stale++;
+		} else {
+			other++;
+		}
+	}
+
+	/* Appends the counts. */
+	put(text, "lines %s new=%u fill=%u other=%u\n", run->stream->name, fresh, stale, other);
+}
+
 /* Writes back and discards a direct-map range's cached lines. */
 static void
 drop_cached(
@@ -839,21 +987,41 @@ drop_cached(
 	kern_dcache_invalidate_range(bytes, size);
 }
 
-/* Picks the frame buffer decoded into longest ago, an unused one first. */
+/* Picks the frame buffer not tried yet that was decoded into longest ago, an unused one first. */
 static unsigned
 least_used(
-	const struct probe_run *run)
+	const struct probe_run *run,
+	uint32_t tried)
 {
 	unsigned position;
 	unsigned best;
+	int found;
 
-	/* The lowest last use wins; ties go to the lower index. */
+	/* The lowest last use among those not tried wins; ties go to the lower index. */
 	best = 0;
-	for (position = 1; position < run->count; position++) {
-		if (run->last_used[position] < run->last_used[best])
+	found = 0;
+	for (position = 0; position < run->count; position++) {
+		if ((tried & (1U << position)) != 0)
+			continue;
+		if (!found || run->last_used[position] < run->last_used[best]) {
 			best = position;
+			found = 1;
+		}
 	}
 
 	/* Succeeded: the buffer to decode into. */
 	return best;
+}
+
+/* Reports whether the host picks the frame buffer in a way. */
+static int
+host_picks(
+	unsigned way)
+{
+	/* B, C, F and H flag every buffer but the pick. */
+	if (way == RUN_B || way == RUN_C || way == RUN_F || way == RUN_H)
+		return 1;
+
+	/* The core picks in the others. */
+	return 0;
 }

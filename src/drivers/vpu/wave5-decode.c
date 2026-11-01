@@ -217,8 +217,9 @@
 
 /*
  * The update of one frame buffer pair: the option, both strides (the
- * linear one in the upper half), the index, the linear planes, the
- * motion vectors, the compressed planes and their offset tables.
+ * linear one in the upper half), the index (as a range of one, the form
+ * the registration names its buffers in), the linear planes, the motion
+ * vectors, the compressed planes and their offset tables.
  *
  * Values referenced:
  * StarFive Linux JH7110_VisionFive2_6.12.y_devel 4cecf169f38e
@@ -458,6 +459,34 @@ drv_wave5_load(
 }
 
 /*
+ * Puts one picture's bytes right after the bytes the last command read.
+ */
+int
+drv_wave5_append(
+	struct drv_wave5_stream *stream,
+	const uint8_t *bytes,
+	size_t length)
+{
+	uint32_t start;
+	size_t offset;
+
+	/* Refuses bytes the ring has no room for before its end. */
+	start = drv_wave5_core_address(&stream->ring);
+	offset = stream->write - start;
+	if (length == 0 || length > stream->ring_size - offset)
+		return EFBIG;
+
+	/* Copies the bytes after the last ones, before any command names them. */
+	kern_memcpy((uint8_t *)stream->ring.view + offset, bytes, length);
+	kern_io_write_barrier();
+
+	/* Succeeded: the next command reads from the last end to the new one. */
+	stream->read = stream->write;
+	stream->write += (uint32_t)length;
+	return 0;
+}
+
+/*
  * Reports where the ring's bytes start.
  */
 void
@@ -630,7 +659,7 @@ drv_wave5_replace(
 
 	drv_wave5_core_write(core, BUFFERS_OPTION, UPDATE_OPTION);
 	drv_wave5_core_write(core, UPDATE_STRIDES, (stream->linear_stride << 16) | stream->compressed_stride);
-	drv_wave5_core_write(core, UPDATE_INDEX, index);
+	drv_wave5_core_write(core, UPDATE_INDEX, (index << 8) | index);
 	drv_wave5_core_write(core, UPDATE_LUMA, (uint32_t)linear->luma);
 	drv_wave5_core_write(core, UPDATE_CHROMA, (uint32_t)linear->chroma);
 	drv_wave5_core_write(core, UPDATE_SECOND, second);
@@ -713,6 +742,7 @@ drv_wave5_decode(
 	uint32_t reason;
 	uint32_t host_tick;
 	uint32_t end_tick;
+	int waited;
 	int error;
 
 	/* Refuses a decode before frame buffers are registered. */
@@ -744,6 +774,7 @@ drv_wave5_decode(
 	drv_wave5_core_write(core, PICTURE_LATENCY, 1);
 	reason = 0;
 	error = drv_wave5_core_command(core, stream, VPU_RUN_PICTURE, 1, &reason);
+	result->queue[0] = drv_wave5_core_read(core, VPU_QUEUE_STATUS);
 
 	mutex_unlock(&core->command_lock);
 
@@ -753,10 +784,11 @@ drv_wave5_decode(
 		return error;
 	}
 
-	/* Waits for the picture's completion. */
-	error = drv_wave5_core_wait(core, stream, 0, VPU_DECODE_MS);
-	if (error != 0)
-		return error;
+	/*
+	 * Waits for the picture's completion.  A wait that ends without it
+	 * still asks for the result, which tells what the firmware did.
+	 */
+	waited = drv_wave5_core_wait(core, stream, 0, VPU_DECODE_MS);
 
 	/* Asks for the result and takes it. */
 	mutex_lock(&core->command_lock);
@@ -780,6 +812,7 @@ drv_wave5_decode(
 		host_tick = drv_wave5_core_read(core, RESULT_HOST_TICK);
 		end_tick = drv_wave5_core_read(core, RESULT_END_TICK);
 		result->ticks = (uint64_t)(end_tick - host_tick) * CYCLES_PER_TICK;
+		result->queue[1] = drv_wave5_core_read(core, VPU_QUEUE_STATUS);
 		error = drv_wave5_core_query(core, stream, VPU_ASK_READ_POSITION);
 		if (error == 0)
 			result->read_position = drv_wave5_core_read(core, POSITION_ANSWER);
@@ -791,7 +824,9 @@ drv_wave5_decode(
 	ended = clock_ticks();
 	result->wall = kern_ticks_to_us(ended - started);
 
-	/* Reports a refused query. */
+	/* Reports a picture that did not complete, then a refused query. */
+	if (waited != 0)
+		return waited;
 	if (error != 0)
 		return error;
 
