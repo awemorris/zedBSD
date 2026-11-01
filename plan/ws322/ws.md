@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | [ws322-p001](phase001/phase.md) | 調べと設計: hardware の能力の確認、firmware、出典と license、Vulkan Video の対応の範囲、試験の道 | cleared（2026-11-01 21:35 Q1、main 261624739。design.md 第 2 版と review 1 回の反映） | （WS318 の completed を待たない、2026-11-01 ユーザー） |
 | [ws322-p002](phase002/phase.md) | VF2 の VPU の glue と Wave5 の core の boot、firmware の package（wave511）、実機の probe | cleared（2026-11-01 22:37 Q1 受け入れ、da223ef78 を main に merge。VF2 の実機で Wave511 が起動、6 本の stream の 68 frame が ffmpeg と一致、chagall.bin だけで足りる、VPU は CPU の cache と非一貫。p003 以降の設計の直しは design.md へ） | p001 |
-| [ws322-p003](phase003/phase.md) | PowerVR の executor: NV12 の image・plane の view・export・import（Video Player の GPU の道）・query pool・capset・queue family | cleared（2026-11-01 23:45 P2 q1863-i01、Q1 の受け入れ待ち。host 試験 821 件 0 失敗、VF2 で vf2-regress の非退行と NV12 の plane の view の sample・plane の copy・OPAQUE_FD の export/import が PASS） | p001 |
+| [ws322-p003](phase003/phase.md) | PowerVR の executor: NV12 の image・plane の view・export・import（Video Player の GPU の道）・query pool・capset・queue family | cleared（2026-11-01 23:42 P2 q1863-i01、Q1 の受け入れ待ち。host 試験 821 件 0 失敗、VF2 で vf2-regress の非退行と NV12 の plane の view の sample・plane の copy・OPAQUE_FD の export/import が PASS） | p001 |
 | ws322-p004 | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、vkvideo-probe の DISTINCT、riscv64 の VP_GPU_PRESENT） | planned | p002、p003 |
 | ws322-p005 | libvulkan の H.265 decode の転送 | planned | WS318 p011a か先に着手（Q322-4） |
 | ws322-p006 | H.265 decode | planned | p004、p005 |
@@ -61,7 +61,7 @@
 
 ## Resume point
 
-- 2026-11-01 23:45 P2（q1863-i01）: p003 を実装し VF2 で確かめた（[phase003](phase003/phase.md)）。次: Q1 の受け入れ、p004（engine の口を広げ VF2 の glue から登録、COINCIDE で H.264 decode、pool から GPU の transfer）。
+- 2026-11-01 23:42 P2（q1863-i01）: p003 を実装し VF2 で確かめた（[phase003](phase003/phase.md)）。次: Q1 の受け入れ、p004（engine の口を広げ VF2 の glue から登録、COINCIDE で H.264 decode、pool から GPU の transfer）。
 - 2026-11-01 P2（q1863-i01）: design.md を第 3 版に直した（p002 の観測: ring を続けて使う、pool と GPU の transfer を正の道、index は生きた slot から厳密に、VPU は CPU の cache と非一貫、配るのは chagall.bin。Video Player の GPU の道に載せるため DPB_AND_OUTPUT_COINCIDE に改めた（libmedia の GPU の道は DISTINCT を断る）、R13 と Q322-3 の訂正）。p003 を実装中（[phase003](phase003/phase.md)）。
 
 - 2026-11-01 P2（q1852-i01）: p002 を実装し VF2 で probe した（[phase002](phase002/phase.md)）。次: Q1 の受け入れ、design.md の §7.3・§7.5・§9.2・R11・R13 の直し（p002 の観測を反映、後の Queue）、p003・p004。

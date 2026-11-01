@@ -2,7 +2,7 @@
 
 # ws322-p003 PowerVR の executor: NV12 の image・plane の view・export・import（Video Player の GPU の道）・query pool・capset・queue family
 
-- WS: [WS322](../ws.md)。状態: cleared（2026-11-01 23:45 P2 q1863-i01。Q1 の受け入れ待ち）。担当: P2（q1863-i01、worktree p2-ws322、branch agent/p2-ws322）。
+- WS: [WS322](../ws.md)。状態: cleared（2026-11-01 23:42 P2 q1863-i01。Q1 の受け入れ待ち）。担当: P2（q1863-i01、worktree p2-ws322、branch agent/p2-ws322）。
 - 設計: [design.md](../design.md) 第 3 版の §8.1（engine の口の最初の形）・§8.2・§8.4・§8.5（query の記録）・§15 の p003。
 
 ## 目的
