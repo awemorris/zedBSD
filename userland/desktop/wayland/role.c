@@ -106,6 +106,12 @@ role_refusal(
 	if (request->testing && request->lock_idle)
 		return "--lock-idle is for a login session, not --testing";
 
+	/* A session that starts locked is one sessiond started, which unlocks it. */
+	if (request->locked && !request->control_fd)
+		return "--locked needs --control-fd";
+	if (request->locked && (request->testing || request->greeter))
+		return "--locked is for a login session";
+
 	/* The login screen is not a session. */
 	if (request->greeter && request->session)
 		return "--greeter and --session cannot be given together";

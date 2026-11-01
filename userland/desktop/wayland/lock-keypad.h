@@ -10,7 +10,7 @@
  * ws199-p001 section 3.8): drawn just under the field while it takes a
  * PIN, so a machine without a keyboard (a tablet) can type one.  The
  * digits 3 by 4, and for a security key's PIN "ABC" turns it into the
- * letters (with Shift); the Software Security Key's six digits have the
+ * letters (with Shift); the Software Security Key's PIN has the
  * digits alone.  A physical keyboard types as well.
  *
  * It knows nothing of the server or the fonts: the caller hands it the
@@ -41,7 +41,7 @@ enum kwl_keypad_action {
 	KWL_KEYPAD_SHIFT
 };
 
-/* The keypad's state: the digits alone (a six-digit PIN), the letters shown, and the capitals. */
+/* The keypad's state: the digits alone (the PIN), the letters shown, and the capitals. */
 struct kwl_keypad {
 	unsigned digits_only;
 	unsigned letters;

@@ -428,7 +428,7 @@ Preserve both topologies when investigating; the passing order is no general fix
 2026-10-08 q869（P2）: BUG-200〜257 の tracking・scheduled の 51 件を確かめ、各 ticket に「2026-10-08 P2 の確認」の節。A（実装済み、QEMU・host の証拠、残りは実機の UAT）33 件: 203–209・211・213–220・222・223・225・226・228–230・232–237・248・249・254。B（実装済み、証拠無し）4 件: 231・247・251・252。C（未実装・一部）: 212・221（q866 で desktop を直した）・238・239・240・241・242・244・256。D（判断）: 200・201・224・227・255。各行の古い記載は ticket の節が正。
 | [BUG-389](bugs/BUG-389.md) | RTX 2070 の desktop で App Home から browser を開いても窓が出ない（main でも同じ） | open（2026-11-01 23:19 Q1 が起票、P3 の WS291 の回帰で発見） |
 | [BUG-390](bugs/BUG-390.md) | App Home の icon が出ない（Pi 5 の UAT で発見、10-29 以降の全機械） | fixed（2026-11-02 01:42、bf6c08971、main 3b79cca9e。Pi 5 の実機で確かめた） |
-| [BUG-391](bugs/BUG-391.md) | compositor が落ちると login の画面から出直し、tablet で login できない | open（2026-11-02 01:27 Q1 が起票、ユーザーの Pi 5 の UAT） |
-| [BUG-392](bugs/BUG-392.md) | 初期の PIN を 0000 にし、login・lock の画面で PIN の入力を既定に（UAT の要望） | open（2026-11-02 01:27 Q1 が起票、ユーザーの Pi 5 の UAT） |
+| [BUG-391](bugs/BUG-391.md) | compositor が落ちると login の画面から出直し、tablet で login できない | fixed（2026-11-02 P8、q1890、bd3a783d4、main マージ済み。crash の後は同じ利用者の desktop か lock の画面から出し直し、2 分に 3 回目で login の画面。QEMU で確認、Pi 5 は未実施） |
+| [BUG-392](bugs/BUG-392.md) | 初期の PIN を 0000 にし、login・lock の画面で PIN の入力を既定に（UAT の要望） | fixed（2026-11-02 P8、q1890、bd3a783d4、main マージ済み。PIN 4〜6 桁、起動直後から PIN、誤りは root の file に、新しい account と image の user に 0000。QEMU で確認、Pi 5 は未実施） |
 | [BUG-393](bugs/BUG-393.md) | Pi 5 の GPU の driver が起動時にテストの描画（自己試験）を行う | open（2026-11-02 01:39 Q1 が起票、ユーザーの UAT） |
 | [BUG-394](bugs/BUG-394.md) | 起動が長い（network の待ちが desktop の前に戻った見込み）、init が desktop を優先して順番を組めるように | open（2026-11-02 01:39 Q1 が起票、ユーザーの UAT） |

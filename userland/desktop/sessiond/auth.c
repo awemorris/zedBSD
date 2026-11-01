@@ -59,6 +59,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -97,8 +98,12 @@ static const char *const auth_styles[] = {
 	"fido2",
 };
 
-/* The counts, for sessiond's life (in memory only). */
+/*
+ * The counts, for sessiond's life; the PIN's wrong tries are read from
+ * their file once, before the first request that needs them.
+ */
 static struct sessiond_policy auth_policy;
+static int auth_tries_loaded;
 
 /* When sessiond last started a KEYOWNER (the monotonic milliseconds; 0 before the first), for its once a second. */
 static long long auth_owner_ms;
@@ -120,6 +125,8 @@ static int auth_status(struct sessiond_exchange *exchange, const char *line);
 static void auth_reply(struct sessiond_exchange *exchange, const char *line);
 static int auth_lookup(const char *name, uid_t *uid);
 static void auth_wipe(void *memory, size_t size);
+static void auth_tries_load(void);
+static void auth_tries_keep(const struct sessiond_exchange *exchange, unsigned before);
 
 /*
  * Starts the exchange of one socket: a session's, whose user owner is, or
@@ -538,6 +545,7 @@ auth_begin(
 {
 	char request[SESSIOND_REQUEST_SIZE];
 	long long timeout;
+	unsigned tries;
 	uid_t uid;
 	int known;
 	int allowed;
@@ -591,7 +599,9 @@ auth_begin(
 	uid = (uid_t)-1;
 	known = auth_lookup(exchange->name, &uid);
 	exchange->uid = uid;
+	auth_tries_load();
 	exchange->count = sessiond_policy_count(&auth_policy, known, uid);
+	tries = exchange->count->pin_wrong;
 
 	/* The PIN is tried only while it is offered; that is no attempt. */
 	allowed = 1;
@@ -621,6 +631,9 @@ auth_begin(
 		   exchange->command == SESSIOND_COMMAND_SETMETHODS) {
 		sessiond_policy_attempt(exchange->count, SESSIOND_STYLE_PASSWORD);
 	}
+
+	/* A PIN's try is in the file before passkey runs, so that a restart in the middle counts it too. */
+	auth_tries_keep(exchange, tries);
 
 	/* passkey's request; the secrets are in it only. */
 	length = auth_request(exchange, request, sizeof(request));
@@ -1038,22 +1051,23 @@ auth_granted(
 	char reply[SESSIOND_LINE_MAX];
 	struct passwd *found;
 	const char *style;
+	unsigned tries;
 	int error;
 	int match;
 
 	/*
-	 * The counts start again.  A change (a PIN or a key set or removed) is
-	 * checked by the account's password, so it proves the password as a
-	 * login does and offers the PIN from now on (BUG-285: a PIN set in a
-	 * session that started without the password, an automatic login, was
-	 * never offered on the lock screen).
+	 * The counts start again, in the file too.  A change (a PIN or a key
+	 * set or removed) is checked by the account's password, so it proves
+	 * the password as a login does.
 	 */
 	style = auth_styles[exchange->style];
+	tries = exchange->count->pin_wrong;
 	if (exchange->command == SESSIOND_COMMAND_AUTH || exchange->command == SESSIOND_COMMAND_UNLOCK) {
 		sessiond_policy_success(exchange->count, exchange->style);
 	} else {
 		sessiond_policy_success(exchange->count, SESSIOND_STYLE_PASSWORD);
 	}
+	auth_tries_keep(exchange, tries);
 
 	/* A greeter's login: the account sessiond starts the session for. */
 	if (exchange->command == SESSIOND_COMMAND_AUTH) {
@@ -1274,6 +1288,7 @@ auth_status(
 	struct sessiond_exchange *exchange,
 	const char *line)
 {
+	unsigned tries;
 	int match;
 
 	/* The touch. */
@@ -1295,7 +1310,9 @@ auth_status(
 	if (match == 0) {
 		if (exchange->command == SESSIOND_COMMAND_KEYRESET && !exchange->verified) {
 			exchange->verified = 1;
+			tries = exchange->count->pin_wrong;
 			sessiond_policy_success(exchange->count, SESSIOND_STYLE_PASSWORD);
+			auth_tries_keep(exchange, tries);
 		}
 
 		/* Taken. */
@@ -1356,4 +1373,111 @@ auth_wipe(
 	byte = memory;
 	for (index = 0U; index < size; index++)
 		byte[index] = 0U;
+}
+
+/*
+ * Reads the PIN's wrong tries from their file, once in sessiond's life.  A
+ * file that is not there (none yet) leaves every count at 0; one that is
+ * not root's alone is not believed and is replaced at the next try.
+ */
+static void
+auth_tries_load(
+	void)
+{
+	char text[SESSIOND_PIN_TRIES_TEXT];
+	struct stat status;
+	ssize_t count;
+	int descriptor;
+	int error;
+
+	/* Once. */
+	if (auth_tries_loaded)
+		return;
+	auth_tries_loaded = 1;
+
+	/* The file, not a link, root's and read by root alone. */
+	descriptor = open(SESSIOND_PIN_TRIES_PATH, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (descriptor < 0) {
+		if (errno != ENOENT)
+			sessiond_log("SESSIOND PIN tries open errno=%d", errno);
+		return;
+	}
+	error = fstat(descriptor, &status);
+	if (error != 0 || !S_ISREG(status.st_mode) || status.st_uid != geteuid() || (status.st_mode & 0077) != 0) {
+		sessiond_log("SESSIOND PIN tries refused");
+		(void)close(descriptor);
+		return;
+	}
+
+	/* Its text, which is short. */
+	count = read(descriptor, text, sizeof(text) - 1U);
+	(void)close(descriptor);
+	if (count < 0) {
+		sessiond_log("SESSIOND PIN tries read errno=%d", errno);
+		return;
+	}
+	text[count] = '\0';
+
+	/* Succeeded: the tries are counted. */
+	sessiond_policy_tries_read(&auth_policy, text);
+}
+
+/*
+ * Writes the PIN's wrong tries to their file when an account's changed
+ * (before is its number before the change): a new file renamed over the
+ * old one.  A failure is logged; the count in memory still holds.
+ */
+static void
+auth_tries_keep(
+	const struct sessiond_exchange *exchange,
+	unsigned before)
+{
+	char text[SESSIOND_PIN_TRIES_TEXT];
+	char temporary[sizeof(SESSIOND_PIN_TRIES_PATH) + 8U];
+	ssize_t written;
+	size_t length;
+	int descriptor;
+	int error;
+
+	/* Only a change of an account's (the names of no account have no PIN). */
+	if (exchange->count == NULL || exchange->count->pin_wrong == before)
+		return;
+	if (exchange->count == &auth_policy.unknown)
+		return;
+
+	/* The text. */
+	length = sessiond_policy_tries_write(&auth_policy, text, sizeof(text));
+	if (length == 0U) {
+		sessiond_log("SESSIOND PIN tries too many");
+		return;
+	}
+
+	/* The directory, root's alone (a new root has none). */
+	(void)mkdir("/var/db", 0755);
+	(void)mkdir(SESSIOND_PIN_TRIES_DIRECTORY, 0700);
+
+	/* The new file, written whole and flushed, then renamed over the old. */
+	snprintf(temporary, sizeof(temporary), "%s.new", SESSIOND_PIN_TRIES_PATH);
+	descriptor = open(temporary, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (descriptor < 0) {
+		sessiond_log("SESSIOND PIN tries create errno=%d", errno);
+		return;
+	}
+	written = write(descriptor, text, length);
+	error = 0;
+	if (written != (ssize_t)length)
+		error = EIO;
+	if (error == 0 && fsync(descriptor) != 0)
+		error = errno;
+	(void)close(descriptor);
+	if (error == 0 && rename(temporary, SESSIOND_PIN_TRIES_PATH) != 0)
+		error = errno;
+	if (error != 0) {
+		sessiond_log("SESSIOND PIN tries write errno=%d", error);
+		(void)unlink(temporary);
+		return;
+	}
+
+	/* Succeeded: the file says what memory does. */
+	sessiond_log("SESSIOND PIN tries uid=%u tries=%u", (unsigned)exchange->count->uid, exchange->count->pin_wrong);
 }

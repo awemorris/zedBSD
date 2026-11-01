@@ -11,7 +11,7 @@
  * The digits, three keys a row:
  *
  *   1 2 3 / 4 5 6 / 7 8 9 / ABC 0 <-      (a security key's PIN)
- *   1 2 3 / 4 5 6 / 7 8 9 / OK  0 <-      (the six digits of the PIN)
+ *   1 2 3 / 4 5 6 / 7 8 9 / OK  0 <-      (the PIN's four to six digits)
  *
  * The letters, ten key widths a row:
  *
@@ -41,7 +41,7 @@ static void keypad_key(struct kwl_keypad_key *keys, size_t capacity, size_t *cou
 static void keypad_digits(const struct kwl_keypad *pad, int32_t x, int32_t y, int32_t width, struct kwl_keypad_key *keys, size_t capacity, size_t *count);
 static void keypad_letters(const struct kwl_keypad *pad, int32_t x, int32_t y, int32_t width, struct kwl_keypad_key *keys, size_t capacity, size_t *count);
 
-/* Starts a keypad on its digits, lower case; digits_only for a six-digit PIN. */
+/* Starts a keypad on its digits, lower case; digits_only for the PIN. */
 void
 kwl_keypad_reset(
 	struct kwl_keypad *pad,
@@ -220,7 +220,7 @@ keypad_digits(
 		}
 	}
 
-	/* The last row: the letters (or OK for six digits), 0, Backspace. */
+	/* The last row: the letters (or OK for the PIN), 0, Backspace. */
 	row_y = y + 3 * (KWL_KEYPAD_KEY + KWL_KEYPAD_GAP);
 	if (pad->digits_only) {
 		keypad_key(keys, capacity, count, x, row_y, key_width, KWL_KEYPAD_ENTER, '\0', "OK");

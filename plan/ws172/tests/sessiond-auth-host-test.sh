@@ -29,10 +29,13 @@ silent) exit 2 ;;
 esac
 SCRIPT
 chmod 0700 "$OUT/passkey"
+mkdir -p "$OUT/db"
+chmod 0700 "$OUT/db"
 
 cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -I. \
 	-DSESSIOND_PASSKEY="\"$PWD/$OUT/passkey\"" -DSESSIOND_PASSKEY_MS=1500LL -DSESSIOND_PASSKEY_KEY_MS=1500LL \
-	-DSESSIOND_PASSKEY_GRACE_MS=500LL \
+	-DSESSIOND_PASSKEY_GRACE_MS=500LL -DSESSIOND_PIN_TRIES_DIRECTORY="\"$PWD/$OUT/db\"" \
+	-DSESSIOND_PIN_TRIES_PATH="\"$PWD/$OUT/db/pin-tries\"" \
 	-o "$OUT/sessiond-auth-host-test" plan/ws172/tests/sessiond-auth-host-test.c userland/desktop/sessiond/auth.c \
 	userland/desktop/sessiond/auth-policy.c
 timeout 120 "$OUT/sessiond-auth-host-test" 2> "$OUT/log"

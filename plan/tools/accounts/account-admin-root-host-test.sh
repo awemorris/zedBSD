@@ -10,7 +10,7 @@
 # primary group kept (M7), and Settings' form from kei through a set-user-ID copy (ws089-p026's add, busy, removal
 # keeping the home and home-exists, each answered within 20 s; T1-600).  The last line is
 # "account-admin-root-host-test: PASS".
-#   sh plan/tools/accounts/account-admin-root-host-test.sh   (from the repository's top; needs sudo, unshare, flock, openssl,
+#   sh plan/tools/accounts/account-admin-root-host-test.sh   (from the repository's top; needs sudo, unshare, flock, openssl, perl,
 #   setpriv)
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
@@ -109,6 +109,11 @@ is add-bob-home-owner "\$(stat -c %u:%g:%a "\$O/home/bob")" 1021:1021:700
 there add-bob-skeleton "\$O/home/bob/.profile"
 is add-bob-record "\$(cat "\$O/etc/account-admin.last-id")" 1021
 is add-bob-shadow-mode "\$(stat -c %a "\$O/shadowdir/shadow")" 400
+# A person's new account gets the first PIN, 0000, in /etc/passkey (root's alone).
+has add-bob-pin "\$O/etc/passkey" '^bob:1021:pin:\\\$6\\\$'
+pin=\$(grep '^bob:1021:pin:' "\$O/etc/passkey" | cut -d: -f4-)
+is add-bob-pin-0000 "\$(LC_ALL=C perl -e 'print crypt("0000", \$ARGV[0])' "\$pin")" "\$pin"
+is add-bob-passkey-mode "\$(stat -c %a "\$O/etc/passkey")" 600
 expect add-bob-again 'user-add\nname bob\n' 'error name-taken'
 
 # F1: an account made without a password is not unlocked into an empty one.
@@ -156,6 +161,7 @@ expect remove-bob 'user-remove\nname bob\nhome remove\n' ok
 lacks remove-bob-passwd "\$O/etc/passwd" '^bob:'
 lacks remove-bob-shadow "\$O/shadowdir/shadow" '^bob:'
 lacks remove-bob-group "\$O/etc/group" '^bob:'
+lacks remove-bob-pin "\$O/etc/passkey" '^bob:'
 has remove-bob-wheel "\$O/etc/group" '^wheel:x:0:root,ghost,kei\$'
 gone remove-bob-home "\$O/home/bob"
 gone remove-bob-cron "\$O/cron/1021"

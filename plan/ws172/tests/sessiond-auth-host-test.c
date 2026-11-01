@@ -38,6 +38,8 @@ static void test_policy(void);
 static void test_exchange(const char *name);
 static void test_change_offers_pin(const char *name);
 static int answer(struct sessiond_exchange *exchange, int peer, char *line, size_t size, int timeout_ms);
+static int file_put(const char *path, const char *text);
+static int file_says(const char *path, const char *text);
 static void send_line(struct sessiond_exchange *exchange, const char *text);
 
 /* sessiond's own (main.c), for the test. */
@@ -73,8 +75,9 @@ main(void)
 	uid_t uid;
 	int status;
 
-	/* The counts' rules. */
+	/* The counts' rules, and no PIN's try kept from an earlier run. */
 	test_policy();
+	check(file_put(SESSIOND_PIN_TRIES_PATH, ""), "the tries file emptied");
 
 	/* The exchange, about the test's own account (the fake passkey answers its user ID). */
 	uid = getuid();
@@ -129,6 +132,8 @@ static void
 test_policy(void)
 {
 	static struct sessiond_policy policy;
+	static struct sessiond_policy read_back;
+	char file[SESSIOND_PIN_TRIES_TEXT];
 	struct sessiond_count *count;
 	struct sessiond_count *other;
 	char styles[64];
@@ -152,19 +157,20 @@ test_policy(void)
 	check(sessiond_policy_count(&policy, 0, 0) == &policy.unknown, "unknown names share");
 	check(sessiond_policy_count(&policy, 0, 1000) == &policy.unknown, "unknown with a uid shares");
 
-	/* The PIN: not before a password or key since the start. */
-	check(!sessiond_policy_pin_allowed(count), "no PIN before a password");
+	/* The PIN: offered from the start (a machine without a keyboard logs in with it). */
+	check(sessiond_policy_pin_allowed(count), "the PIN from the start");
 	sessiond_policy_styles("password,pin,fido2", count, styles, sizeof(styles));
-	check(strcmp(styles, "password fido2") == 0, "styles without the PIN");
+	check(strcmp(styles, "password pin fido2") == 0, "styles with the PIN from the start");
 	sessiond_policy_attempt(count, SESSIOND_STYLE_PASSWORD);
 	sessiond_policy_success(count, SESSIOND_STYLE_PASSWORD);
 	check(sessiond_policy_pin_allowed(count), "PIN after a password");
 	sessiond_policy_styles("password,pin", count, styles, sizeof(styles));
 	check(strcmp(styles, "password pin") == 0, "styles with the PIN");
 
-	/* A PIN success does not count as a password. */
+	/* A right PIN keeps it offered and clears its wrong tries. */
+	sessiond_policy_attempt(other, SESSIOND_STYLE_PIN);
 	sessiond_policy_success(other, SESSIOND_STYLE_PIN);
-	check(!sessiond_policy_pin_allowed(other), "a PIN success gives no PIN");
+	check(sessiond_policy_pin_allowed(other) && other->pin_wrong == 0U, "a PIN success keeps the PIN");
 
 	/* Five wrong PINs turn it off; a password turns it on again. */
 	for (index = 0U; index < 4U; index++)
@@ -186,6 +192,24 @@ test_policy(void)
 	check(!sessiond_policy_pin_allowed(count), "PIN off across a wrong password");
 	sessiond_policy_success(count, SESSIOND_STYLE_FIDO2);
 	check(sessiond_policy_pin_allowed(count), "PIN back after a key");
+
+	/* The PIN's tries in their file's text: written for the accounts with some, read back the larger. */
+	for (index = 0U; index < 2U; index++)
+		sessiond_policy_attempt(count, SESSIOND_STYLE_PIN);
+	check(sessiond_policy_tries_write(&policy, file, sizeof(file)) != 0U, "tries written");
+	check(strcmp(file, "# sessiond pin-tries 1\n1000 2\n") == 0, "tries text");
+	check(sessiond_policy_tries_write(&policy, file, 20U) == 0U, "tries that do not fit");
+	memset(&read_back, 0, sizeof(read_back));
+	sessiond_policy_tries_read(&read_back, "# sessiond pin-tries 1\n1000 2\n1001 9\nx 3\n1002 1x\n1003 4");
+	check(sessiond_policy_count(&read_back, 1, 1000)->pin_wrong == 2U, "tries read");
+	check(sessiond_policy_count(&read_back, 1, 1001)->pin_wrong == SESSIOND_PIN_TRIES, "tries bounded");
+	check(!sessiond_policy_pin_allowed(sessiond_policy_count(&read_back, 1, 1001)), "PIN off from the file");
+	check(sessiond_policy_count(&read_back, 1, 1002)->pin_wrong == 0U, "a bad line skipped");
+	check(sessiond_policy_count(&read_back, 1, 1003)->pin_wrong == 4U, "the last line without its end");
+	memset(&read_back, 0, sizeof(read_back));
+	sessiond_policy_tries_read(&read_back, "# other 1\n1000 3\n");
+	check(sessiond_policy_count(&read_back, 1, 1000)->pin_wrong == 0U, "another file's text ignored");
+	sessiond_policy_success(count, SESSIOND_STYLE_PASSWORD);
 
 	/* The delays: 2, 2, 2, 4, 4, 4, 8, 8, 8, 16, 16... */
 	count->wrong = 0U;
@@ -288,6 +312,7 @@ test_exchange(
 	struct passwd *found;
 	char line[SESSIOND_LINE_MAX];
 	char text[SESSIOND_LINE_MAX];
+	char expected[64];
 	long long started;
 	long long took;
 	int pair[2];
@@ -301,20 +326,22 @@ test_exchange(
 		return;
 	}
 
-	/* The greeter's: STYLES before any login has no PIN. */
+	/* The greeter's: STYLES before any login has the PIN. */
 	memset(&login, 0, sizeof(login));
 	sessiond_exchange_init(&exchange, pair[0], NULL, &login);
 	snprintf(text, sizeof(text), "STYLES %s", name);
 	send_line(&exchange, text);
 	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
-	check(got && strcmp(line, "STYLES password") == 0, "greeter STYLES without the PIN");
+	check(got && strcmp(line, "STYLES password pin") == 0, "greeter STYLES with the PIN from the start");
 
-	/* AUTH with the PIN before a password: refused at once. */
+	/* A wrong PIN before any password: tried, refused after the delay, and its try is in the file. */
 	snprintf(text, sizeof(text), "AUTH %s pin", name);
 	send_line(&exchange, text);
 	send_line(&exchange, "123456");
 	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
-	check(got && strcmp(line, "FAIL pin-off") == 0, "PIN refused before a password");
+	check(got && strcmp(line, "FAIL bad-secret") == 0, "a wrong PIN before a password");
+	snprintf(expected, sizeof(expected), "# sessiond pin-tries 1\n%u 1\n", (unsigned)getuid());
+	check(file_says(SESSIOND_PIN_TRIES_PATH, expected), "the PIN's try in the file");
 
 	/* A wrong password: FAIL after the 2-second delay. */
 	snprintf(text, sizeof(text), "AUTH %s password", name);
@@ -340,6 +367,7 @@ test_exchange(
 	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
 	check(got && strcmp(line, "OK") == 0, "right password");
 	check(exchange.logged_in && login.passwd.pw_name != NULL && strcmp(login.passwd.pw_name, name) == 0, "login account");
+	check(file_says(SESSIOND_PIN_TRIES_PATH, "# sessiond pin-tries 1\n"), "the PIN's tries cleared in the file");
 
 	/* Now the PIN is offered. */
 	exchange.logged_in = 0;
@@ -451,8 +479,9 @@ test_exchange(
 }
 
 /*
- * A session that started without the password (an automatic login): no
- * PIN until a change by the password, which proves it (BUG-285).
+ * A session that started without the password (an automatic login): the
+ * PIN from the start, but not while the file keeps five wrong tries of the
+ * account from before a restart; a change by the password clears them.
  */
 static void
 test_change_offers_pin(
@@ -462,6 +491,7 @@ test_change_offers_pin(
 	struct sessiond_account owner;
 	struct passwd *found;
 	char line[SESSIOND_LINE_MAX];
+	char text[64];
 	int pair[2];
 	int got;
 	int error;
@@ -479,10 +509,12 @@ test_change_offers_pin(
 	(void)getpwnam_r(name, &owner.passwd, owner.buffer, sizeof(owner.buffer), &found);
 	sessiond_exchange_init(&exchange, pair[0], &owner, NULL);
 
-	/* No PIN yet. */
+	/* Five wrong tries kept from before the restart: no PIN. */
+	snprintf(text, sizeof(text), "# sessiond pin-tries 1\n%u 5\n", (unsigned)getuid());
+	check(file_put(SESSIOND_PIN_TRIES_PATH, text), "the tries file of before the restart");
 	send_line(&exchange, "STYLES");
 	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
-	check(got && strcmp(line, "STYLES password") == 0, "no PIN before the password (change)");
+	check(got && strcmp(line, "STYLES password") == 0, "no PIN after five wrong before a restart (change)");
 
 	/* The PIN set with the password. */
 	send_line(&exchange, "ENROLL pin");
@@ -495,7 +527,47 @@ test_change_offers_pin(
 	send_line(&exchange, "STYLES");
 	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
 	check(got && strcmp(line, "STYLES password pin") == 0, "the PIN offered after a change by the password");
+	check(file_says(SESSIOND_PIN_TRIES_PATH, "# sessiond pin-tries 1\n"), "the tries cleared by the change");
 	sessiond_exchange_stop(&exchange);
 	(void)close(pair[0]);
 	(void)close(pair[1]);
+}
+
+/* Writes a file whole (0600), in place of what it held.  Returns 1 when it did. */
+static int
+file_put(
+	const char *path,
+	const char *text)
+{
+	FILE *file;
+	int closed;
+
+	/* The file, emptied first. */
+	file = fopen(path, "w");
+	if (file == NULL)
+		return 0;
+	(void)chmod(path, 0600);
+	(void)fputs(text, file);
+	closed = fclose(file);
+	return closed == 0;
+}
+
+/* Tells whether a file holds exactly a text. */
+static int
+file_says(
+	const char *path,
+	const char *text)
+{
+	char held[256];
+	size_t length;
+	FILE *file;
+
+	/* The file whole. */
+	file = fopen(path, "r");
+	if (file == NULL)
+		return 0;
+	length = fread(held, 1U, sizeof(held) - 1U, file);
+	(void)fclose(file);
+	held[length] = '\0';
+	return strcmp(held, text) == 0;
 }

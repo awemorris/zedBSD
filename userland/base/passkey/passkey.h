@@ -47,7 +47,12 @@
 #define PASSKEY_HEADER		"# zedBSD passkey "
 #define PASSKEY_VERSION		1
 
-/* The digits of a PIN, the most security keys of an account, and a key's reference's size (with its NUL). */
+/*
+ * The fewest and most digits of a PIN (four, so that the PIN a new account
+ * is given, 0000, is one), the most security keys of an account, and a
+ * key's reference's size (with its NUL).
+ */
+#define PASSKEY_PIN_MIN		4U
 #define PASSKEY_PIN_DIGITS	6U
 #define PASSKEY_FIDO2_MAX	5U
 #define PASSKEY_REF_SIZE	17U

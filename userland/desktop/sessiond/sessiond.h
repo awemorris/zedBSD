@@ -82,6 +82,23 @@ struct sessiond {
 
 	/* Set once the running session has said READY (it took the display), on time or late. */
 	int session_ready;
+
+	/*
+	 * The session's lock screen: whether the next session starts with it
+	 * (the session that crashed showed it), and whether the running one
+	 * shows it now (its compositor says LOCKED and UNLOCKED; it starts as
+	 * the session was started).
+	 */
+	int session_start_locked;
+	int session_locked;
+
+	/*
+	 * Set when the session that ended crashed: it ended by a signal or an
+	 * error, without a Log Out, while sessiond was not stopping and the
+	 * machine was not ending (sessiond_session_crashed).  The same user's
+	 * session is then started again in its place (sessiond_restart_due).
+	 */
+	int session_crashed;
 };
 
 /* Set by SIGTERM and SIGINT: sessiond ends its greeter or session and stops. */

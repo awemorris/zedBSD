@@ -38,6 +38,12 @@
  * (another script) has the greeter ended after SESSION_READY_SECONDS.  The
  * session's requests on the socket, one line each:
  *
+ *   LOCKED, UNLOCKED the lock screen shows, or has gone; no answer.  A
+ *                    session that crashes (sessiond_session_crashed) is
+ *                    started again for the same user without the login
+ *                    screen, with the lock screen (--locked) when it showed
+ *                    it: a machine without a keyboard is not left at a
+ *                    login it cannot type, and a lock is never skipped
  *   LOGOUT           Log Out with the display handed to a new greeter:
  *                    QUIT comes once the greeter is ready; the session
  *                    answers RELEASED when it has given the display back,
@@ -204,6 +210,10 @@ sessiond_session_run(
 	/* networkd may join the user's saved Wi-Fi networks while the session is open. */
 	session_network_notify(account, "open");
 
+	/* The lock screen as the session starts with it, until its compositor says otherwise. */
+	daemon->session_locked = daemon->session_start_locked;
+	daemon->session_crashed = 0;
+
 	/* The display goes from the greeter to the session, which may say READY late too. */
 	start_ms = sessiond_milliseconds();
 	daemon->session_ready = session_handoff(daemon, control);
@@ -307,7 +317,12 @@ sessiond_session_run(
 	sessiond_sleep_forget(control);
 	if (control >= 0)
 		(void)close(control);
-	sessiond_log("SESSIOND SESSION end user=%s pid=%ld status=%d", account->passwd.pw_name, (long)child, status);
+
+	/* A crash, not a session ended for not taking the display in time, is started again (main.c). */
+	if (!hung)
+		daemon->session_crashed = sessiond_session_crashed(status, leaving, sessiond_stopping || sessiond_power_started);
+	sessiond_log("SESSIOND SESSION end user=%s pid=%ld status=%d crashed=%d locked=%d", account->passwd.pw_name, (long)child, status,
+	    daemon->session_crashed, daemon->session_locked);
 	session_sweep(account, child);
 	session_record(DEAD_PROCESS, child, "");
 	session_runtime_clean(directory);
@@ -426,6 +441,20 @@ session_request(
 	match = strncmp(line, "POWER ", 6);
 	if (match == 0) {
 		sessiond_power_session(account, control, line + 6);
+		return 0;
+	}
+
+	/* The lock screen shows, or has gone (a session started again after a crash starts with it then). */
+	match = strcmp(line, "LOCKED");
+	if (match == 0) {
+		daemon->session_locked = 1;
+		sessiond_log("SESSIOND SESSION locked user=%s", account->passwd.pw_name);
+		return 0;
+	}
+	match = strcmp(line, "UNLOCKED");
+	if (match == 0) {
+		daemon->session_locked = 0;
+		sessiond_log("SESSIOND SESSION unlocked user=%s", account->passwd.pw_name);
 		return 0;
 	}
 
@@ -645,7 +674,7 @@ session_child(
 	const char *directory,
 	int control)
 {
-	char *arguments[4];
+	char *arguments[5];
 	char *environment[8];
 	char home[320];
 	char user[96];
@@ -717,11 +746,14 @@ session_child(
 	environment[5] = runtime;
 	environment[6] = NULL;
 
-	/* The session script, told the descriptor; only a failed exec comes back. */
+	/* The session script, told the descriptor and whether it starts locked; only a failed exec comes back. */
 	arguments[0] = "sh";
 	arguments[1] = (char *)daemon->session;
 	arguments[2] = "--control-fd=3";
 	arguments[3] = NULL;
+	if (daemon->session_start_locked)
+		arguments[3] = "--locked";
+	arguments[4] = NULL;
 	(void)execve("/bin/sh", arguments, environment);
 	_exit(127);
 }

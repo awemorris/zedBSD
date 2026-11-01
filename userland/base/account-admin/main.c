@@ -36,8 +36,9 @@
  * Only then are the files changed, under the lock of the account files:
  * the record of the last user ID given, /etc/passkey's lines of the name
  * (its PIN and security keys, ws172-p002: at an addition, so that none
- * left over is taken; at a removal, so that a new account of the same
- * name never finds them; at a password's reset), then each account file
+ * left over is taken, a person's account then given the first PIN, 0000;
+ * at a removal, so that a new account of the same name never finds them;
+ * at a password's reset), then each account file
  * that changed, replaced atomically (group, passwd, shadow for an
  * addition, the reverse otherwise), every one written already put back
  * when a later one fails.  The signals that would stop the tool are held
@@ -126,6 +127,13 @@
 /* The longest path built, and a line of an account file. */
 #define ADMIN_PATH_MAX		512U
 #define ADMIN_LINE_MAX		(ACCOUNT_HASH_MAX + 512U)
+
+/*
+ * The PIN a person's new account is given, which the person changes in
+ * Settings: a machine without a keyboard (a tablet) can type it on the
+ * login screen's keypad.
+ */
+#define ADMIN_FIRST_PIN		"0000"
 
 /* The largest small file read whole: the record of the last user ID, and the automatic login's. */
 #define ADMIN_SMALL_MAX		128U
@@ -217,7 +225,9 @@ static long admin_id_floor(void);
 static void admin_highest_in_directory(const char *path, int by_name, long *highest);
 static int admin_last_id_raise(long id);
 static int admin_passkey_forget(const char *name, int *changed);
-static int admin_passkey_edit(const char *name, char *text, char *output, int *changed);
+static int admin_passkey_first(const char *name, long uid);
+static int admin_passkey_lines(const char *name, const char *added, int *changed);
+static int admin_passkey_edit(const char *name, const char *added, char *text, char *output, int *changed);
 static int admin_busy(const char *name, long uid);
 static int admin_shell_there(const char *shell);
 static int admin_after_work(const struct admin_after *after);
@@ -749,7 +759,6 @@ admin_add(
 	int valid;
 	int rule;
 	int used;
-	int changed;
 	int reason;
 	int error;
 
@@ -847,8 +856,12 @@ admin_add(
 	if (error != 0)
 		return ADMIN_FAILED;
 
-	/* No PIN or security key left for the name is taken (ws172-p002). */
-	error = admin_passkey_forget(request->name, &changed);
+	/*
+	 * No PIN or security key left for the name is taken (ws172-p002), and
+	 * a person's account gets the first PIN, 0000, so that it can log in
+	 * on a machine without a keyboard (a tablet).
+	 */
+	error = admin_passkey_first(request->name, id);
 	if (error != 0)
 		return ADMIN_FAILED;
 
@@ -1811,6 +1824,75 @@ admin_passkey_forget(
 	int *changed)
 {
 	const char *message;
+	int error;
+
+	/* The name's lines go, and none comes. */
+	error = admin_passkey_lines(name, NULL, changed);
+
+	/* A failure is said. */
+	if (error != 0) {
+		message = strerror(error);
+		syslog(LOG_ERR, "the passkey lines of %s could not be removed: %s", name, message);
+		return error;
+	}
+
+	/* Succeeded: the name has no line left. */
+	return 0;
+}
+
+/*
+ * Gives a new account its lines in /etc/passkey: none of the name's left
+ * over, and for a person's account (a user ID from ADMIN_ID_FIRST to
+ * ADMIN_ID_LAST) the first PIN, ADMIN_FIRST_PIN, hashed like a password.
+ * Under the lock of the account files the caller holds.  Returns 0, or an
+ * errno value, said in the log.
+ */
+static int
+admin_passkey_first(
+	const char *name,
+	long uid)
+{
+	char hash[ACCOUNT_HASH_MAX];
+	char line[ADMIN_LINE_MAX];
+	const char *message;
+	int changed;
+	int error;
+
+	/* A system account gets no PIN: only what was left over goes. */
+	if (uid < ADMIN_ID_FIRST || uid > ADMIN_ID_LAST)
+		return admin_passkey_forget(name, &changed);
+
+	/* The PIN's line. */
+	error = account_password_hash(ADMIN_FIRST_PIN, hash, sizeof(hash));
+	if (error == 0) {
+		(void)snprintf(line, sizeof(line), "%s:%ld:pin:%s", name, uid, hash);
+		error = admin_passkey_lines(name, line, &changed);
+	}
+	admin_wipe(hash, sizeof(hash));
+	admin_wipe(line, sizeof(line));
+
+	/* A failure is said. */
+	if (error != 0) {
+		message = strerror(error);
+		syslog(LOG_ERR, "the first PIN of %s could not be set: %s", name, message);
+		return error;
+	}
+
+	/* Succeeded: the account has its first PIN. */
+	return 0;
+}
+
+/*
+ * Rewrites /etc/passkey with every line of a name taken out, and added (a
+ * whole line, or NULL) put in; changed says whether the file changed.
+ * Returns 0 or an errno value.
+ */
+static int
+admin_passkey_lines(
+	const char *name,
+	const char *added,
+	int *changed)
+{
 	char *text;
 	char *output;
 	int error;
@@ -1824,7 +1906,7 @@ admin_passkey_forget(
 		/* Its edited copy, and the edit through both. */
 		output = malloc(ADMIN_OUTPUT_MAX);
 		if (output != NULL)
-			error = admin_passkey_edit(name, text, output, changed);
+			error = admin_passkey_edit(name, added, text, output, changed);
 	}
 
 	/* Both wiped (they hold the PINs' hashes) and freed. */
@@ -1839,25 +1921,21 @@ admin_passkey_forget(
 		free(output);
 	}
 
-	/* A failure is said. */
-	if (error != 0) {
-		message = strerror(error);
-		syslog(LOG_ERR, "the passkey lines of %s could not be removed: %s", name, message);
-		return error;
-	}
-
-	/* Succeeded: the name has no line left. */
-	return 0;
+	/* Succeeded or not. */
+	return error;
 }
 
 /*
- * Rewrites /etc/passkey without the name's lines, through the two buffers
- * (ADMIN_FILE_MAX and ADMIN_OUTPUT_MAX bytes).  An unchanged file is not
- * written, and a file a later passkey wrote is not changed (EROFS).
+ * Rewrites /etc/passkey without the name's lines and with added (NULL for
+ * none), through the two buffers (ADMIN_FILE_MAX and ADMIN_OUTPUT_MAX
+ * bytes).  An unchanged file is not written, a missing one is made only
+ * for a line added, and a file a later passkey wrote is not changed
+ * (EROFS).
  */
 static int
 admin_passkey_edit(
 	const char *name,
+	const char *added,
 	char *text,
 	char *output,
 	int *changed)
@@ -1868,10 +1946,15 @@ admin_passkey_edit(
 	int differs;
 	int error;
 
-	/* The file; none has no line. */
+	/* The file; none has no line, and is made for a line added. */
 	error = account_file_read(PASSKEY_FILE, text, ADMIN_FILE_MAX, &length);
-	if (error == ENOENT)
+	if (error == ENOENT && added == NULL)
 		return 0;
+	if (error == ENOENT) {
+		text[0] = '\0';
+		length = 0U;
+		error = 0;
+	}
 	if (error != 0)
 		return error;
 
@@ -1881,7 +1964,7 @@ admin_passkey_edit(
 		return EROFS;
 
 	/* The text without the name's lines. */
-	error = passkey_record_replace(text, length, name, NULL, NULL, output, ADMIN_OUTPUT_MAX, &written);
+	error = passkey_record_replace(text, length, name, NULL, added, output, ADMIN_OUTPUT_MAX, &written);
 	if (error != 0)
 		return error;
 
@@ -1895,7 +1978,7 @@ admin_passkey_edit(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the name's lines are gone. */
+	/* Succeeded: the name's lines are gone, and the one added is there. */
 	*changed = 1;
 	return 0;
 }

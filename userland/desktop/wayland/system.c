@@ -175,8 +175,9 @@ struct system_network_wait {
 /* The most mounts and ejects waiting for volumed's answer at once; one more is answered busy. */
 #define SYSTEM_DEVICES_WAITING	8U
 
-/* A PIN's digits, and the longest home directory the old PIN file is looked for in (ws172-p002). */
-#define SYSTEM_PIN_DIGITS	6U
+/* A PIN's fewest and most digits (ws172-p002). */
+#define SYSTEM_PIN_MIN		4U
+#define SYSTEM_PIN_MAX		6U
 
 /* What the change that waits is (system_state.pin_kind, ws199-p001): a PIN's or a key's change, what the keys are, or a key's own operation. */
 #define SYSTEM_PIN_CHANGE	0U
@@ -2052,7 +2053,7 @@ system_pin_begin(
 	if (current_length == 0U || current_length > KL_SYSTEM_PASSWORD_MAX)
 		return EINVAL;
 
-	/* Six digits, or nothing for a removal. */
+	/* Four to six digits, or nothing for a removal. */
 	valid = system_pin_valid(pin);
 	if (pin[0] != '\0' && !valid)
 		return EINVAL;
@@ -2498,25 +2499,23 @@ system_methods_begin(
 	return 0;
 }
 
-/* Tells whether a PIN is exactly six decimal digits. */
+/* Tells whether a PIN is four to six decimal digits. */
 static int
 system_pin_valid(
 	const char *pin)
 {
 	size_t index;
 
-	/* Each of the six. */
-	for (index = 0U; index < SYSTEM_PIN_DIGITS; index++) {
+	/* Digits up to the end, six at most. */
+	for (index = 0U; pin[index] != '\0'; index++) {
+		if (index >= SYSTEM_PIN_MAX)
+			return 0;
 		if (pin[index] < '0' || pin[index] > '9')
 			return 0;
 	}
 
-	/* Nothing after them. */
-	if (pin[SYSTEM_PIN_DIGITS] != '\0')
-		return 0;
-
-	/* Succeeded: six digits. */
-	return 1;
+	/* Succeeded when there are four at least. */
+	return index >= SYSTEM_PIN_MIN;
 }
 
 /* Tells an account object what the user has enrolled, when it is known and the object is new enough to hear it. */

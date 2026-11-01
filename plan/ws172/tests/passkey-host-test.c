@@ -86,9 +86,10 @@ main(void)
 	expect(parse("styles\n\n", &request, buffer) == EINVAL, "an empty name");
 	expect(parse("styles\nabcdefghijabcdefghijabcdefghijabc\n", &request, buffer) == EINVAL, "a name too long");
 
-	/* PINs. */
-	expect(passkey_is_pin("012345") && !passkey_is_pin("01234") && !passkey_is_pin("0123456") &&
-	    !passkey_is_pin("01234a"), "the PIN rule");
+	/* PINs: four to six digits. */
+	expect(passkey_is_pin("012345") && passkey_is_pin("01234") && passkey_is_pin("0000") && !passkey_is_pin("000") &&
+	    !passkey_is_pin("") && !passkey_is_pin("0123456") && !passkey_is_pin("01234a") && !passkey_is_pin("12a4"),
+	    "the PIN rule");
 
 	/* Records: the version, the PIN of the name and user ID, a stale line, counts. */
 	expect(passkey_record_version(file, sizeof(file) - 1) == 1, "version 1");

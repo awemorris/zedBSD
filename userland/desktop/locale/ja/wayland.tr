@@ -105,7 +105,7 @@ msg	Security key PIN	セキュリティキーの PIN
 # userland/desktop/wayland/greeter.c:1488
 msg	Swipe up to unlock	上にスワイプしてロックを解除
 # userland/desktop/wayland/greeter.c:1647
-msg	A PIN has six digits.	PIN は 6 桁です。
+msg	A PIN has four to six digits.	PIN は 4 桁から 6 桁です。
 # userland/desktop/wayland/greeter.c:1654
 msg	A security key's PIN has at least four characters.	セキュリティキーの PIN は 4 文字以上です。
 # userland/desktop/wayland/greeter.c:1776

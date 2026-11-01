@@ -33,6 +33,11 @@
  * (/dev/gpu0) a moment after init has started the services; while the
  * kernel reports a GPU device still attaching (hw.gpu.attaching), sessiond
  * waits for the display for a bounded time.
+ *
+ * A user's session that crashes is not a new login: the same user's
+ * session starts again at once, without the login screen, and with the
+ * lock screen when it showed it (session.c); the third crash within two
+ * minutes brings the login screen (fallback-rules.c).
  */
 
 #include "sessiond.h"
@@ -90,6 +95,9 @@
 /* The file naming the account logged in by itself at boot (2026-09-29 user decision); without it, the greeter. */
 #define MAIN_AUTOLOGIN_PATH	"/etc/keiland/autologin"
 
+/* The pause, in seconds, before a session that crashed starts again (the GPU it left may need a moment). */
+#define MAIN_RESTART_PAUSE	1U
+
 /* The room of the automatic login's shadow entry. */
 #define MAIN_SHADOW_BUFFER	1024U
 
@@ -113,6 +121,7 @@ static void main_open_log(void);
 static int main_autologin(struct sessiond_account *account);
 static int main_autologin_allowed(const char *name);
 static void main_console_back(const char *reason);
+static int main_session(struct sessiond *daemon, struct sessiond_account *account);
 
 /*
  * Runs the session manager until it is stopped or gives the console back.
@@ -206,7 +215,7 @@ main(
 		syslog(LOG_NOTICE, "automatic login of %s", account.passwd.pw_name);
 		autologin_ms = sessiond_milliseconds();
 		daemon.session_bounded = 1;
-		error = sessiond_session_run(&daemon, &account);
+		error = main_session(&daemon, &account);
 		daemon.session_bounded = 0;
 		memset(&account, 0, sizeof(account));
 
@@ -257,7 +266,7 @@ main(
 			continue;
 
 		/* A login: the user's session (the greeter left on the screen goes once it is ready), and the greeter again when it ends. */
-		(void)sessiond_session_run(&daemon, &account);
+		(void)main_session(&daemon, &account);
 		memset(&account, 0, sizeof(account));
 	}
 
@@ -268,6 +277,55 @@ main(
 
 	/* Succeeded: sessiond ended its greeter or session. */
 	return 0;
+}
+
+/*
+ * Runs a login's session, and starts the same user's session again each
+ * time it crashes until the crashes come too often (sessiond_restart_due):
+ * with the lock screen when the session that crashed showed it, and with
+ * the bound of a session without a greeter behind it (one that does not
+ * take the display in time is ended, and the login screen comes).
+ * Returns as the last sessiond_session_run.
+ */
+static int
+main_session(
+	struct sessiond *daemon,
+	struct sessiond_account *account)
+{
+	struct sessiond_crashes crashes;
+	int bounded;
+	int due;
+	int error;
+
+	/* A new login starts unlocked, with no crash behind it. */
+	sessiond_crashes_clear(&crashes);
+	bounded = daemon->session_bounded;
+	daemon->session_start_locked = 0;
+	for (;;) {
+		error = sessiond_session_run(daemon, account);
+		if (!daemon->session_crashed || sessiond_stopping)
+			break;
+
+		/* Too many crashes: the login screen. */
+		due = sessiond_restart_due(&crashes, sessiond_milliseconds());
+		if (!due) {
+			sessiond_log("SESSIOND SESSION restart refused user=%s crashes=%u", account->passwd.pw_name, SESSIOND_RESTART_CRASHES);
+			syslog(LOG_WARNING, "the session of %s crashed %u times; the login screen comes", account->passwd.pw_name, SESSIOND_RESTART_CRASHES);
+			break;
+		}
+
+		/* The same user's session again, locked when it was. */
+		daemon->session_start_locked = daemon->session_locked;
+		daemon->session_bounded = 1;
+		sessiond_log("SESSIOND SESSION restart user=%s locked=%d crashes=%u", account->passwd.pw_name, daemon->session_start_locked, crashes.count);
+		syslog(LOG_NOTICE, "the session of %s crashed and starts again%s", account->passwd.pw_name, daemon->session_start_locked ? " locked" : "");
+		sleep(MAIN_RESTART_PAUSE);
+	}
+
+	/* The next login starts unlocked, with the caller's bound. */
+	daemon->session_start_locked = 0;
+	daemon->session_bounded = bounded;
+	return error;
 }
 
 /*

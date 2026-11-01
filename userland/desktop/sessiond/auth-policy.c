@@ -16,15 +16,22 @@
  * a key that was not there, not touched, or taken away does not (the key
  * counts its own wrong PINs).  The answer to a
  * failure waits 2 seconds, twice as long after every three in a row, at
- * most 16.  The PIN is offered only after the account's password or
- * security key has been accepted since sessiond started, and is turned off
- * again by five wrong PINs in a row.
+ * most 16.  The PIN is offered from the start, so that a machine without
+ * a keyboard (a tablet) can log in, and is turned off by five wrong PINs in
+ * a row until the account's password or security key is accepted.  The
+ * PIN's wrong tries are kept in a file of root's too (auth.c reads and
+ * writes it; the text is made and read here), so that a restart, which
+ * anyone at the login screen can cause, gives no new tries.
  */
 
 #include "auth.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* The first line of the file of the PIN's tries. */
+#define POLICY_TRIES_HEADER	"# sessiond pin-tries 1\n"
 
 /* passkey's reasons and the words the greeter and the session are told. */
 struct policy_reason {
@@ -162,10 +169,6 @@ int
 sessiond_policy_pin_allowed(
 	const struct sessiond_count *count)
 {
-	/* Not before a password or a key since sessiond started. */
-	if (!count->signed_in)
-		return 0;
-
 	/* Not after five wrong in a row. */
 	if (count->pin_wrong >= SESSIOND_PIN_TRIES)
 		return 0;
@@ -183,16 +186,105 @@ sessiond_policy_attempt(
 		count->pin_wrong++;
 }
 
-/* Clears the counts after a success: the password or a key also lets the PIN be offered again. */
+/* Clears the counts after a success of any style (a right PIN too, before the fifth wrong one). */
 void
 sessiond_policy_success(
 	struct sessiond_count *count,
 	int style)
 {
+	(void)style;
 	count->wrong = 0U;
 	count->pin_wrong = 0U;
-	if (style != SESSIOND_STYLE_PIN)
-		count->signed_in = 1;
+}
+
+/*
+ * Takes the PIN's wrong tries from the file's text: after its first line,
+ * a line "UID TRIES" for each account with some.  A line that is not of
+ * that form is skipped; an account already counted keeps the larger
+ * number.
+ */
+void
+sessiond_policy_tries_read(
+	struct sessiond_policy *policy,
+	const char *text)
+{
+	struct sessiond_count *count;
+	unsigned long uid;
+	unsigned long tries;
+	const char *line;
+	const char *next;
+	char *end;
+	int match;
+
+	/* Only a file of this form. */
+	match = strncmp(text, POLICY_TRIES_HEADER, strlen(POLICY_TRIES_HEADER));
+	if (match != 0)
+		return;
+
+	/* Each line after the first. */
+	for (line = text + strlen(POLICY_TRIES_HEADER); *line != '\0'; line = next) {
+		next = strchr(line, '\n');
+		if (next == NULL)
+			next = line + strlen(line);
+		else
+			next++;
+
+		/* The user ID, a space, the tries and the line's end. */
+		if (*line < '0' || *line > '9')
+			continue;
+		uid = strtoul(line, &end, 10);
+		if (*end != ' ' || end[1] < '0' || end[1] > '9' || uid >= 0xffffffffUL)
+			continue;
+		tries = strtoul(end + 1, &end, 10);
+		if (*end != '\n' && *end != '\0')
+			continue;
+
+		/* The account's count, the larger of the two. */
+		if (tries > SESSIOND_PIN_TRIES)
+			tries = SESSIOND_PIN_TRIES;
+		count = sessiond_policy_count(policy, 1, (uid_t)uid);
+		if (count == &policy->unknown)
+			continue;
+		if (count->pin_wrong < (unsigned)tries)
+			count->pin_wrong = (unsigned)tries;
+	}
+}
+
+/*
+ * Writes the file's text from the counts: the first line, then "UID TRIES"
+ * for each account with a PIN's wrong try.  Returns its length, or 0 when
+ * it does not fit.
+ */
+size_t
+sessiond_policy_tries_write(
+	const struct sessiond_policy *policy,
+	char *out,
+	size_t size)
+{
+	const struct sessiond_count *count;
+	unsigned index;
+	size_t used;
+	int length;
+
+	/* The first line. */
+	length = snprintf(out, size, "%s", POLICY_TRIES_HEADER);
+	if (length < 0 || (size_t)length >= size)
+		return 0U;
+	used = (size_t)length;
+
+	/* Each account with tries. */
+	for (index = 0U; index < SESSIOND_COUNTS_MAX; index++) {
+		count = &policy->counts[index];
+		if (!count->used || count->pin_wrong == 0U)
+			continue;
+		length = snprintf(out + used, size - used, "%u %u\n", (unsigned)count->uid, count->pin_wrong);
+		if (length < 0 || (size_t)length >= size - used)
+			return 0U;
+		used += (size_t)length;
+	}
+
+	/* Succeeded: the text. */
+	return used;
 }
 
 /* Gives the delay of a failure's answer, in seconds. */

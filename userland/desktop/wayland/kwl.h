@@ -1396,9 +1396,11 @@ struct kwl_server {
 	 * The lock screen (ws035-p102): whether it shows, how long without
 	 * input locks the session (--lock-idle, or else the power.lock
 	 * setting; 0: never), whether --lock-idle gave it, and when the last
-	 * input came.
+	 * input came.  start_locked: --locked, the session starts with the
+	 * lock screen (sessiond starts a session that crashed while locked so).
 	 */
 	unsigned locked;
+	unsigned start_locked;
 	uint64_t lock_idle_ms;
 	unsigned lock_idle_given;
 	uint64_t lock_input_ms;
