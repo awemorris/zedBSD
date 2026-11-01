@@ -1360,6 +1360,61 @@
       });
     })();
 
+  // CSS animation events (animationstart, animationend, animationcancel): the page tells, after each layout, which elements have an animation
+  // (a name with @keyframes) and for how long; the events come at the animation's times, on the page's timers.
+  if (!g.AnimationEvent) {
+    class AnimationEvent extends Event {
+      constructor(type, init) {
+        super(type, init);
+        init = init || {};
+        hidden(this, '_name', init.animationName === undefined ? '' : String(init.animationName));
+        hidden(this, '_elapsed', init.elapsedTime === undefined ? 0 : +init.elapsedTime);
+        hidden(this, '_pseudo', init.pseudoElement === undefined ? '' : String(init.pseudoElement));
+      }
+      get animationName() { return this._name; }
+      get elapsedTime() { return this._elapsed; }
+      get pseudoElement() { return this._pseudo; }
+    }
+    def(g, 'AnimationEvent', AnimationEvent);
+  }
+  (function () {
+    var active = new Map(), pass = 0;
+    function fire(element, type, name, seconds) {
+      element.dispatchEvent(new g.AnimationEvent(type, { bubbles: true, animationName: name, elapsedTime: seconds }));
+    }
+    function stop(element, state) {
+      var i;
+      for (i = 0; i < state.timers.length; i++) clearTimeout(state.timers[i]);
+      active.delete(element);
+      if (!state.ended && state.started) fire(element, 'animationcancel', state.name, 0);
+    }
+    function begin(element, name, delay, duration, iterations) {
+      var state = { name: name, pass: pass, timers: [], started: false, ended: false };
+      active.set(element, state);
+      state.timers.push(setTimeout(function () { state.started = true; fire(element, 'animationstart', name, 0); }, Math.max(delay, 0)));
+      if (isFinite(iterations) && iterations >= 0) {
+        state.timers.push(setTimeout(function () {
+          state.ended = true;
+          fire(element, 'animationend', name, duration * iterations / 1000);
+        }, Math.max(delay, 0) + duration * iterations));
+      }
+    }
+    native.setAnimationHook(function (op, element, name, delay, duration, iterations) {
+      var state;
+      if (op === 0) { pass++; return; }
+      if (op === 1) {
+        state = active.get(element);
+        if (state && state.name === name) { state.pass = pass; return; }
+        if (state) stop(element, state);
+        begin(element, name, delay, duration, iterations);
+        return;
+      }
+      Array.from(active.keys()).forEach(function (element) {
+        var s = active.get(element);
+        if (s && s.pass !== pass) stop(element, s);
+      });
+    });
+  })();
     // A link a script clicks (an a or area element, or SVG's a) navigates; a download link only fires its navigate event.
     native.setHyperlinkFollower(function (link) {
       var svg = link.namespaceURI === 'http://www.w3.org/2000/svg', href, target, u, download;

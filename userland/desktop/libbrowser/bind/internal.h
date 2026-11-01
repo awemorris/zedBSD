@@ -272,6 +272,8 @@ struct bind_window {
 	struct environment_mutation_observer *mutation_observers;
 	/* The prelude's function that follows a clicked hyperlink (NULL until the prelude sets it). */
 	struct vm_cell *follow_hyperlink;
+	/* The prelude's function that starts and stops the animation events of the page's elements (NULL until the prelude sets it). */
+	struct vm_cell *animation_hook;
 };
 
 /* One traced inline source owns its C model and original DOM Text until its final GC release. */
@@ -627,6 +629,7 @@ int bind_string(struct vm_realm *realm, const char *ascii, vm_value *value);
 int bind_install_prelude(struct bind_window *window);
 void bind_requests_release(struct bind_window *window);
 int bind_follow_hyperlink(struct bind_window *window, struct dom_element *element);
+int bind_animation_sync(struct bind_window *window, int op, struct dom_element *element, const struct vm_string *name, double delay, double duration, double iterations);
 int bind_units(struct vm_realm *realm, const uint16_t *units, size_t length, vm_value *value);
 int bind_to_string(struct vm_realm *realm, vm_value value, struct vm_string **string);
 int bind_to_atom(struct vm_realm *realm, vm_value value, int lower, struct vm_string **atom);
