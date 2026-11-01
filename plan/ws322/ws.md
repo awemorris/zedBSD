@@ -20,7 +20,7 @@
 | [ws322-p002](phase002/phase.md) | VF2 の VPU の glue と Wave5 の core の boot、firmware の package（wave511）、実機の probe | cleared（2026-11-01 22:37 Q1 受け入れ、da223ef78 を main に merge。VF2 の実機で Wave511 が起動、6 本の stream の 68 frame が ffmpeg と一致、chagall.bin だけで足りる、VPU は CPU の cache と非一貫。p003 以降の設計の直しは design.md へ） | p001 |
 | [ws322-p003](phase003/phase.md) | PowerVR の executor: NV12 の image・plane の view・export・import（Video Player の GPU の道）・query pool・capset・queue family | cleared（2026-11-01 23:51 Q1、main 361044f95。host の state 69・executor 752 PASS、VF2 で vf2-regress と nv12-board PASS、VF2 の既定の kernel は merge の後も warning 0） | p001 |
 | [ws322-p004](phase004/phase.md) | H.264 decode の道（engine の口、Wave5 の decoder、parameter set の書き出し、executor、COINCIDE で pool から GPU の transfer、Video Player の GPU の道） | cleared（2026-11-02 01:55 Q1、main f9acea845。VF2 で H.264 の 8 本が全 frame で ffmpeg と一致、1080p30 の 600 frame 一致、Video Player の GPU の道で 16 s に 479 frame（late 2、CPU 約 20%）） | p002、p003 |
-| [ws322-p005](phase005/phase.md) | libvulkan の H.265 decode の転送 | in-progress（2026-11-02 P2 q1911-i01。H.265 の header（bafa50879）と libvulkan の転送・host 試験を実装、host の試験は全部 0 failed。make の build は Q1 の返事待ち） | WS318 p011a か先に着手（Q322-4） |
+| [ws322-p005](phase005/phase.md) | libvulkan の H.265 decode の転送 | cleared（2026-11-02 06:44 P2 q1911-i01、Q1 の受け入れ待ち。H.265 の header（bafa50879）と libvulkan の転送・host 試験、host の試験は全部 0 failed、amd64・riscv64 の libvulkan.so が warning 0） | WS318 p011a か先に着手（Q322-4） |
 | ws322-p006 | H.265 decode | planned | p004、p005 |
 | [ws322-p007](phase007/phase.md) | 速さと頑丈さ（timeout の後の立て直し、RESET の flush、task buffer の大きさ、速さの測り、JVT の照合） | cleared（2026-11-02 03:45 Q1 が受け入れ、main で p004/run.sh 全部 0 failed。2026-11-02 03:45 P2 q1896-i01。VF2 で立て直し・flush・3 回で停止・2 session・SIGKILL を確かめた、task buffer は vendor の ×1.5、1080p の VPU 7 ms・2160p 20 ms、Video Player 1080p60 は始めの数秒の後 late 0、JVT 75/101 一致。非同期・命令の queue は入れず） | p004 |
 | [ws322-p007b](phase007b/phase.md) | JVT の 26 本（probe の parser・DPB の planner で止まる 13 本、重み付き予測など絵が違う 13 本）の原因と直し | cleared（2026-11-02 06:09 Q1 が受け入れ、main で p004/run.sh PASS。2026-11-02 05:39 P2 q1907-i01。原因は全部 vkvideo-probe（PPS の送り直し、表示順の 256 の境目、type 1、operation 5、gap）で firmware・engine は正しかった。VF2 で vkvideo-probe 100/101 が全部の絵で一致し BA3_SVA_C（Extended）は理由を出して断る。libmedia の 3 つ（gap の list の比べ、Baseline の並べ替え 0、待ちの長い絵の結果）を直し media-probe 101/101 一致。p007 の回帰と host 試験は前と同じ） | p007 |
@@ -70,7 +70,7 @@
 
 ## Resume point
 
-- 2026-11-02 P2（q1911-i01）: p005 を実装した（[phase005](phase005/phase.md)）。header は Q1 の許しで別の commit（bafa50879）。wire は WS324 design §10 の形で、WS324 p005 がそのまま使える。次: make の libvulkan の build（Q1 の返事）、Q1 の受け入れ、p006（PowerVR の reader と Wave5 の HEVC）。
+- 2026-11-02 P2（q1911-i01）: p005 を実装した（[phase005](phase005/phase.md)）。header は Q1 の許しで別の commit（bafa50879）。wire は WS324 design §10 の形で、WS324 p005 がそのまま使える。次: Q1 の受け入れ、p006（PowerVR の reader と Wave5 の HEVC）。
 
 - 2026-11-02 05:39 P2（q1907-i01）: p007b を実装し VF2 で確かめた（[phase007b](phase007b/phase.md)）。vkvideo-probe と libmedia の直し、host の道具 `tests/p007b/`。次: Q1 の受け入れ、`CONFIG_DRIVER_VF2_VPU` の既定を y にする判断（Q1 の 03:45 の判断の条件の JVT は済んだ）、Video Player の読み戻しの道の速さ（小さい stream、Video Player の側）、p005・p006。
 

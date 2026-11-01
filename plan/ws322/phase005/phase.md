@@ -3,7 +3,7 @@
 # ws322-p005 libvulkan の H.265 decode の転送
 
 - 親: [WS322](../ws.md)。設計: [design.md](../design.md) §8.2・§12・§15 の p005、WS324 の [design.md](../../ws324/design.md) §10・§11 と [proposed/gpu-op-video-encode.md](../../ws324/proposed/gpu-op-video-encode.md) §2（capset の bit）。
-- Status: in-progress（2026-11-02 06:14 P2、q1911-i01、worktree p2-ws322、branch agent/p2-ws322、基点 main 4eae22020）
+- Status: cleared（2026-11-02 06:44 P2 q1911-i01、Q1 の受け入れ待ち。worktree p2-ws322、branch agent/p2-ws322、基点 main 4eae22020）
 - 依存: Vulkan の H.265 decode の header（下の「header」、この Phase の最初の commit）。WS318 p011a・WS324 p002 の段 1 と同じ物。
 
 ## 目的
@@ -96,6 +96,7 @@ H.264 の転送は WS083・WS243 で作られ、p004 はそれを PowerVR の ex
 | H.264 の非退行 | `plan/tools/rtx-video/wire-encode.c` の 3 つ（decode・begin・parameters create）の byte が基点 4eae22020 の video.c と同じ（2931 文字の hex が一致）。`sh plan/ws322/tests/p004/run.sh build/tmp/p005-p004`: ps-slots 4094・engine 56・wire 33・nv12 state 69・executor 505・nv12 752、全部 0 failed。`sh plan/tools/rtx-video/wire-host-test.sh`: 32 checks、0 failed |
 | compile | host の gcc（`-Wall -Wextra -Werror`）で video.c・instance.c・context.c・device.c。zedBSD の clang（`build/llvm/bin/clang`、x86_64・aarch64・riscv64、`-std=gnu99 -Wall -Wextra -Werror -fsyntax-only`、`-isystem include/libc`）で同じ 4 つが warning 0 |
 | WS324 の骨格 | `BASE=1f16db0e6 sh plan/ws324/tests/check-skeleton.sh` → `check-skeleton: PASS`、h265-std の「skipped」の行が消えた（zedBSD の clang で h265-std.c も syntax を通る） |
+| build | Q1 の許しの後（自分の worktree の `build/<arch>/sysroot` の写しだけ）: `make ZEDBSD_CONFIG=config/ci/config-visionfive2.mk BUILD=build/ws322-p005r build/ws322-p005r/dynamic/libvulkan.so` と `config/ci/config-amd64.mk`・`BUILD=build/ws322-p005a` が rc 0、log に warning 0 行、video.c を compile し、check-dynamic-elf.py（exports を api-commands.tsv と照合）を通った |
 | whitespace | `git diff --check` 0 |
 
 ### 判断（範囲の中の技術）
@@ -108,5 +109,4 @@ H.264 の転送は WS083・WS243 で作られ、p004 はそれを PowerVR の ex
 
 ## 未実施
 
-- `make` での libvulkan（amd64・riscv64）の build: 自分の worktree の `build/riscv64/sysroot` の作り直しを伴うので、Q1 の返事を待っている（上の zedBSD の clang の syntax の確かめで代えている）。
 - PowerVR の reader（p006）・nvrtx の reader（WS324 p005）との往復。capset の bit 2 を立てる renderer はまだ無いので、実機・QEMU での確かめは無い（QEMU の Venus では bit が無く今と同じ道）。
