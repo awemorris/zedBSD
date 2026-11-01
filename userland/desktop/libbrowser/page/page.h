@@ -227,6 +227,7 @@ int page_title(const struct page *page, struct wb_buffer *out);
 void page_frames_init(struct page *page);
 void page_frames_release(struct page *page);
 int page_frames_checkpoint(struct page *page);
+void page_frames_size(struct page *page);
 
 /* Dynamic scripts (script.c). */
 void page_scripts_init(struct page *page);
@@ -351,6 +352,7 @@ void page_box_index_release(struct page *page);
 void page_scroll_to(void *context, double x, double y);
 void page_rendering(void *context);
 struct dom_node *page_element_at(void *context, double x, double y);
+struct dom_node *page_child_element_at(void *context, struct bind_window *window, double x, double y);
 
 /* Web Storage (storage.c, ws074-p080). */
 const struct bind_storage_calls *page_storage_calls(void);

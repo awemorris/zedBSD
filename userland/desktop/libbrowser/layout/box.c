@@ -532,6 +532,13 @@ box_build_element(
 			kind = LAYOUT_REPLACED;
 	}
 
+	/* An <iframe> is a replaced box of 300 by 150 pixels unless its style says otherwise; its document is not drawn in it. */
+	if (is_iframe && !replaced) {
+		replaced = 1;
+		if (kind == LAYOUT_INLINE || style->display == CSS_DISPLAY_INLINE_BLOCK)
+			kind = LAYOUT_REPLACED;
+	}
+
 	/* The root is a block. */
 	if (parent == NULL)
 		kind = LAYOUT_BLOCK;
@@ -585,6 +592,13 @@ box_build_element(
 		error = layout_control_measure(tree, box);
 		if (error != 0)
 			return error;
+	}
+
+	if (is_iframe && replaced && !is_control) {
+		box->replaced = 1;
+		box->natural_width = layout_from_px(300.0f * box->style.zoom_eff);
+		box->natural_height = layout_from_px(150.0f * box->style.zoom_eff);
+		box->has_baseline = 0;
 	}
 
 	/* The box goes under its parent, or is the root. */

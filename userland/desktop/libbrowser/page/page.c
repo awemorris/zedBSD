@@ -606,6 +606,9 @@ page_layout(
 			goto cleanup;
 	}
 
+	/* The loaded frames' windows have their iframes' sizes. */
+	page_frames_size(page);
+
 	/* The ready promise may allocate; retain the prior layout if it fails. */
 	if (!page_sheets_pending(page) && !page_fonts_pending(page)) {
 		error = bind_document_fonts_settle(page->document);

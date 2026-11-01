@@ -204,6 +204,7 @@ bind_frame_install(
 		host.node_box = parent->host.node_box;
 		host.user_agent = parent->host.user_agent;
 		host.checkpoint = parent->host.checkpoint;
+		host.child_element_at = parent->host.child_element_at;
 		host.frame = element;
 
 		/* Construct the independently retained owner with this complete abstract host adapter. */

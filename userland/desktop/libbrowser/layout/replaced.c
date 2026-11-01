@@ -90,6 +90,13 @@ layout_replaced_size(
 		has_ratio = 1;
 	}
 
+	/* An <iframe>'s natural size is 300 by 150, and has no ratio. */
+	if (box->image == NULL && box->node != NULL && box->node->type == DOM_ELEMENT &&
+	    ((const struct dom_element *)box->node)->ns == DOM_NS_HTML && ((const struct dom_element *)box->node)->tag == DOM_TAG_IFRAME) {
+		natural_width = box->natural_width;
+		natural_height = box->natural_height;
+	}
+
 	/* A form control's natural size is its text's, and has no ratio. */
 	if (box->control != DOM_CONTROL_NONE) {
 		natural_width = box->natural_width;
