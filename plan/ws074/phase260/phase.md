@@ -1156,3 +1156,41 @@ Origin: 2026-10-27 ユーザーの指示。
   LCP の残り（slow-style-change.py の server、PerformanceResourceTiming）、URLPattern・WebAssembly、javascript: URL の frame（2 件）。
 - 注意: `storage-access-api/idlharness` は h1.sh の単発では未通過と出るが全件の測定（runner の経由）では通る（h1.sh の出力は無視してよい。原因は未調査）。
 
+
+### クラウドのセッションの途中経過（続き 5、2026-11-01。dev168・dev169。anchor と scroll、table の baseline）
+
+- 測定:
+  | dev | SHA | 内容 | total | gap（harness / static / scripted / crash） | 後退 |
+  | --- | --- | --- | --- | --- | --- |
+  | dev167 | 9f29d01a | LCP の fully active | 3,165 / 3,473 | 308（145 / 112 / 49 / 2） | 0 |
+  | dev168 | 2b88f599 | Q1 の merge（libbrowser 75 file）を build し直した物 | 3,165 | 308（145 / 112 / 49 / 2） | 0（dev167 と同一） |
+  | dev169 | d7751df9 | table の baseline・scroll の clamp・sticky の anchor | 3,173（91.36%） | 300（143 / 112 / 43 / 2） | 0 |
+- 修正した ID（dev168 → dev169、8 件）:
+  - table の baseline（layout/inline.c）: table row は先頭の cell の baseline を持ち、cell に行が無ければ最初の cell の padding box の下端を baseline とする（Chromium で測った形）。
+    通った ID: flex-align-baseline-table-001、grid-align-baseline-table-001。
+  - scroller の resize 後の scroll offset（layout/scroll.c `layout_scroll_offset`）: 内容より大きくなった scroller の offset を、anchor の scroll 補正が読む所で clamp する。通った ID: anchor-scroll-update-005・006。
+  - sticky な anchor に従う（layout/anchor.c・sticky.c・layout.h）: anchor で置いた box は anchor の box を覚え（`anchor_box`）、sticky の移動を `sticky_follow` で同じだけ動かす。
+    sticky の anchor は scroller に隠れた物として扱わない（`anchor_sticks`）。通った ID: anchor-scroll-to-sticky-001〜004。
+- 残りの gap（308 件、dev168）を原因の群で数えた表（「見込み」は 1 群を選ぶ時の ID 数 ÷ 作業量の目安）:
+  | 群 | 件数 | 作業量 | 見込み |
+  | --- | --- | --- | --- |
+  | 縦書き・baseline・直交 item（flex・grid の orthogonal の全分岐） | 113 | 数 session | 低（ID が glyph の置き方で通らない物が多い） |
+  | view-transitions | 37 | 大（snapshot の合成が要る） | 低 |
+  | grid の他 | 27 | 中（個別） | 中 |
+  | Navigation API の残り | 27 | 中（popup・data: URL・sandbox の frame） | 中 |
+  | anchor の他 | 26（うち 6 件を今回直した） | 小〜中 | 高 |
+  | flexbox の他 | 22 | 個別 | 中 |
+  | anchor と multicol | 13 | 大（強制 column break が layout で分割されない） | 低 |
+  | その他 | 10 | 個別 | 中 |
+  | subgrid | 10 | 大（orthogonal と同根） | 低 |
+  | wasm・URLPattern | 8 | 大（新しい engine） | 低 |
+  | backdrop-filter | 7 | 中 | 中 |
+  | css-zoom の svg | 5 | 中 | 中 |
+  | LCP | 3 | server 側が要る | 低 |
+  今回は 1 群「anchor（anchor positioning と scroll）」に集中した。次も anchor の残り（chained・min()/max() の anchor 和、anchor-scroll-003）を狙う。
+- 調べて直さなかった物: multicol の `break-before: column` が column に分割されない（強制 break の layout が無い。anchor と multicol 13 件と table-003 の vertical 版の原因）、
+  CSS animation の event（animationstart・animationend が出ない）、scroll・scrollend の event、iframe の内容の描画。
+- Acid: dev169 の source（d7751df9）で Acid2 100.00%、Acid3 100/100・pixel 100.00%（exact match）。host build は warning 0。
+- 未実施: asan、host-NAME の全件、target の確認。
+- 消す候補（Q1 が消す。この container の中だけ）: build/ws074-cmp/dev149〜dev165 は Q1 が消した。今の dev166・dev167（dev168 と dev169 を残すため）とその log（dev166.log・dev167.log・gap166.json・gap167.json は残してよい）、
+  build/tmp/ の中身（acid169・p8・host-build2.log 等）、build/ws074-suites/wpt/zz-*.html・zz-*.js、build/ws074-suites/wpt/acid/acid2/zedbsd-acid2-*.html、acid3/zedbsd-acid3-reference-*.html・zedbsd-acid3-diagnostic-*.html。
