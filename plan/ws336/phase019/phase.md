@@ -2,7 +2,7 @@
 
 # ws336-p019: sftp-server の program
 
-Status: in-progress（2026-11-02 P6 q1975。2026-11-02 17:59 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
+Status: in-progress（2026-11-02 16:35 P6 q1975。2026-11-02 17:59 実装済み・試験 PASS、cleared は Q1）。前: planned（2026-11-01 p001 の設計で作成）
 Parent: [WS336](../ws.md)
 担当（推し）: phase-runner-low（Sonnet 5.5 high）
 依存: p013・p018
