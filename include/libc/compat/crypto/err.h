@@ -62,8 +62,8 @@ unsigned long ERR_peek_error(void);
 
 /*
  * Writes the text of code into buffer (length bytes, NUL-terminated,
- * cut to fit; nothing when length is 0).  An unknown code gives a text
- * with its numbers.
+ * cut to fit; nothing when length is 0).  A library or reason without a
+ * name is written as its number, "lib(<number>)" or "reason(<number>)".
  */
 void ERR_error_string_n(unsigned long code, char *buffer, size_t length);
 

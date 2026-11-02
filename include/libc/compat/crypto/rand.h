@@ -21,9 +21,10 @@ extern "C" {
 #endif
 
 /*
- * Fills count bytes of buffer with random bytes.  Returns 1, or 0 when
- * the system refused (buffer is then zeroed, an error is queued) or count
- * is negative.  count 0 returns 1.
+ * Fills count bytes of buffer with random bytes.  Returns 1, or 0 with an
+ * error of the RAND library queued when count is negative, when buffer is
+ * NULL with a count above 0, or when the system refused (buffer is then
+ * zeroed).  count 0 returns 1, even with a NULL buffer.
  */
 int RAND_bytes(unsigned char *buffer, int count);
 

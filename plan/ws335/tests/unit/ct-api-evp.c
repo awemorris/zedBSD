@@ -22,6 +22,12 @@
 #include <compat/crypto/evp.h>
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -48,6 +54,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value, one byte wide. */
 	return value & 0xffU;
 }
 
@@ -71,6 +79,7 @@ main(void)
 	int out_length;
 	int status;
 
+	/* Starts the folded value at zero. */
 	total = 0;
 
 	/* ChaCha20 with a secret key and plaintext: a partial block, whole blocks, a partial block, an in-place call. */

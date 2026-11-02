@@ -282,6 +282,137 @@ struct thread_job {
 	unsigned ok;
 };
 
+/* The same check for a call made outside the REFUSED macro. */
+#define check_refusal(reason) check_refusal_at((reason), __LINE__)
+
+/* Runs a call that must return the failure value and queue the one error of the reason. */
+#define REFUSED(call, failure, reason) \
+	do { \
+		ERR_clear_error(); \
+		CHECK((call) == (failure)); \
+		check_refusal_at((reason), __LINE__); \
+	} while (0)
+
+/* Runs a call that must succeed (return 1) and queue nothing. */
+#define OK(call) \
+	do { \
+		ERR_clear_error(); \
+		CHECK((call) == 1); \
+		CHECK(ERR_peek_error() == 0UL); \
+	} while (0)
+
+/* Returns the next pseudo-random 32-bit value (xorshift32). */
+static uint32_t random32(void);
+
+/* Fills size bytes with pseudo-random bytes. */
+static void random_bytes(uint8_t *out, size_t size);
+
+/* Fills out with the message of the illustration: byte i is (i * 7 + 3) mod 256. */
+static void pattern_message(uint8_t *out, size_t size);
+
+/* Decodes exactly size bytes of hex text into out and checks that the text had that length. */
+static void decode_fixed(const char *text, uint8_t *out, size_t size);
+
+/* Checks that the call queued exactly one error, of the EVP library with the given reason, and empties the queue; line names the call in a report. */
+static void check_refusal_at(unsigned reason, int line);
+
+/* Makes an Ed25519 or X25519 key from a private form given in hex; the call must succeed. */
+static EVP_PKEY * private_key_from_hex(int type, const char *hex);
+
+/* Makes a public key of a type from 32 bytes given in hex; the call must succeed. */
+static EVP_PKEY * public_key_from_hex(int type, const char *hex);
+
+/*
+ * Makes an ML-KEM-768 key object by hand from a decapsulation key (2400
+ * bytes), the way a key made by the public interface looks: the private
+ * form in allocated memory, the encapsulation key stored inside dk
+ * (bytes 1152 to 2335, FIPS 203 Algorithm 16 line 20) as the public form.
+ */
+static EVP_PKEY * mlkem_key_from_dk(const uint8_t *dk);
+
+/* Makes an ML-KEM-768 key object from the seeds d and z (64 bytes, d first) with the internal key generation. */
+static EVP_PKEY * mlkem_key_from_seed(const uint8_t *seed);
+
+/* Makes an ML-KEM-768 key pair with the public interface. */
+static EVP_PKEY * mlkem_generate(void);
+
+/* Checks the refusals and the round trips of the raw private and public key functions. */
+static void test_raw_keys(void);
+
+/* Checks that every holder of a key (operation contexts, signing and verification contexts, a derivation's peer) owns one reference, taken and dropped at the right moments. */
+static void test_references(void);
+
+/* What a thread does: takes a reference to the shared key through a context and a signing context, and drops them, many times. */
+static void thread_body(struct thread_job *job);
+
+#ifdef _WIN32
+/* The thread function of Windows. */
+static DWORD WINAPI thread_entry(LPVOID argument);
+#else
+/* The thread function of POSIX. */
+static void * thread_entry(void *argument);
+#endif
+
+/* Checks that references taken and dropped by several threads together balance, so the key is neither freed early nor kept. */
+static void test_threads(void);
+
+/*
+ * Signs a message through EVP_DigestSign with a key made from the seed,
+ * checks the signature against the expected one (when given) and that a
+ * verification context built from the public key accepts it, then that
+ * the verification fails for a signature with any one byte changed
+ * (every byte position, with a rotating bit) and for a changed message.
+ */
+static void check_sign_verify(EVP_PKEY *private_key, EVP_PKEY *public_key, const uint8_t *message, size_t message_size, const uint8_t *expected_signature);
+
+/* Checks signing and verification with the vectors of RFC 8032 7.1 and the signatures of the illustration of RFC 8032 6. */
+static void test_ed25519_vectors(void);
+
+/* Checks the Wycheproof Ed25519 verification vectors through EVP_DigestVerify (every signature size, valid, invalid and the acceptable ones). */
+static void test_ed25519_wycheproof(void);
+
+/* Checks the refusals and the state rules of the signing and verification functions. */
+static void test_ed25519_states(void);
+
+/* Checks that the signature through EVP matches the primitive and verifies with it, for random seeds and messages of many sizes (including 0 and the block boundaries of SHA-512). */
+static void test_ed25519_random(void);
+
+/* Derives with a private scalar and a peer's u-coordinate (hex) and checks the 32-byte result against the expected hex. */
+static void check_derive_known(const char *scalar_hex, const char *u_hex, const char *shared_hex);
+
+/* Checks the examples of RFC 7748 5.2 and 6.1 through the EVP interface. */
+static void test_x25519_rfc(void);
+
+/* Checks the Wycheproof X25519 vectors: the shared secret of every record, and a zero one fails with the output zeroed. */
+static void test_x25519_wycheproof(void);
+
+/* Checks the refusals and the state rules of the derivation functions, and random exchanges. */
+static void test_x25519_states(void);
+
+/*
+ * Encapsulates to the public form ek through the EVP interface (key
+ * imported by name, context from the key) and checks the ciphertext and
+ * the shared key: 1088 and 32 bytes, nothing written beyond them, the
+ * key decapsulates through the EVP interface with the key pair and, with
+ * the primitive's decapsulation (independent of the EVP layer) with dk.
+ */
+static void check_encapsulation(const uint8_t *ek, EVP_PKEY *pair, const uint8_t *dk);
+
+/* Checks the Wycheproof mlkem_768_test vectors: a key made from the seed has the published ek and decapsulates c to K, and a ciphertext of another size is refused. */
+static void test_mlkem_wycheproof_keys(void);
+
+/* Checks the Wycheproof mlkem_768_encaps_test vectors: an ek is accepted exactly when it has 1184 bytes with every coefficient below q, and encapsulating to an accepted one works. */
+static void test_mlkem_wycheproof_encaps(void);
+
+/* Checks the Wycheproof mlkem_768_semi_expanded_decaps_test vectors: a decapsulation key put into a key object decapsulates c to K, and a ciphertext of another size is refused. */
+static void test_mlkem_wycheproof_semi_expanded(void);
+
+/* Checks key generation, encapsulation and decapsulation round trips through the EVP interface, and the implicit rejection. */
+static void test_mlkem_round_trips(void);
+
+/* Checks the refusals and the state rules of the key generation, encapsulation and decapsulation functions. */
+static void test_mlkem_states(void);
+
 /* Returns the next pseudo-random 32-bit value (xorshift32). */
 static uint32_t
 random32(void)
@@ -341,34 +472,17 @@ check_refusal_at(
 {
 	unsigned long code;
 	unsigned long second;
+	unsigned long wanted;
 
 	/* The one error. */
 	code = ERR_get_error();
-	if (code != cryc_err_pack(CRYC_LIB_EVP, reason))
+	wanted = cryc_err_pack(CRYC_LIB_EVP, reason);
+	if (code != wanted)
 		printf("  refusal at line %d: error code %08lx, wanted reason %u\n", line, code, reason);
-	CHECK(code == cryc_err_pack(CRYC_LIB_EVP, reason));
+	CHECK(code == wanted);
 	second = ERR_get_error();
 	CHECK(second == 0UL);
 }
-
-/* The same check for a call made outside the REFUSED macro. */
-#define check_refusal(reason) check_refusal_at((reason), __LINE__)
-
-/* Runs a call that must return the failure value and queue the one error of the reason. */
-#define REFUSED(call, failure, reason) \
-	do { \
-		ERR_clear_error(); \
-		CHECK((call) == (failure)); \
-		check_refusal_at((reason), __LINE__); \
-	} while (0)
-
-/* Runs a call that must succeed (return 1) and queue nothing. */
-#define OK(call) \
-	do { \
-		ERR_clear_error(); \
-		CHECK((call) == 1); \
-		CHECK(ERR_peek_error() == 0UL); \
-	} while (0)
 
 /* Makes an Ed25519 or X25519 key from a private form given in hex; the call must succeed. */
 static EVP_PKEY *
@@ -502,6 +616,7 @@ test_raw_keys(void)
 	unsigned type_index;
 	int fake_engine;
 
+	/* Prepares random key bytes and an engine stand-in that is not allowed. */
 	random_bytes(raw, sizeof(raw));
 	fake_engine = 0;
 
@@ -513,6 +628,8 @@ test_raw_keys(void)
 		for (index = 0; index < sizeof(bad_lengths) / sizeof(bad_lengths[0]); index++)
 			REFUSED(EVP_PKEY_new_raw_private_key(types[type_index], NULL, raw, bad_lengths[index]), NULL, R_KEY_LENGTH);
 	}
+
+	/* A type number without a raw private key form is refused. */
 	for (index = 0; index < sizeof(bad_types) / sizeof(bad_types[0]); index++)
 		REFUSED(EVP_PKEY_new_raw_private_key(bad_types[index], NULL, raw, 32U), NULL, R_ALGORITHM);
 
@@ -523,6 +640,8 @@ test_raw_keys(void)
 		for (index = 0; index < sizeof(bad_lengths) / sizeof(bad_lengths[0]); index++)
 			REFUSED(EVP_PKEY_new_raw_public_key(types[type_index], NULL, raw, bad_lengths[index]), NULL, R_KEY_LENGTH);
 	}
+
+	/* A type number without a raw public key form is refused. */
 	for (index = 0; index < sizeof(bad_types) / sizeof(bad_types[0]); index++)
 		REFUSED(EVP_PKEY_new_raw_public_key(bad_types[index], NULL, raw, 32U), NULL, R_ALGORITHM);
 
@@ -686,6 +805,8 @@ test_raw_keys(void)
 		CHECK_BYTES(out, raw, 32U);
 		EVP_PKEY_free(key);
 	}
+
+	/* The named constructor makes an X25519 public key too. */
 	key = EVP_PKEY_new_raw_public_key_ex(NULL, "X25519", NULL, raw, 32U);
 	CHECK(key != NULL);
 	if (key != NULL) {
@@ -717,6 +838,7 @@ test_references(void)
 	EVP_MD_CTX *md2;
 	EVP_PKEY_CTX *pctx;
 
+	/* Prepares random seeds and raw bytes for the keys. */
 	random_bytes(seed, sizeof(seed));
 	random_bytes(raw, sizeof(raw));
 
@@ -729,6 +851,8 @@ test_references(void)
 		EVP_PKEY_free(other);
 		return;
 	}
+
+	/* A new key holds one reference, and so does the other key. */
 	CHECK(key->references == 1 && other->references == 1);
 
 	/* Operation contexts take a reference, whichever constructor, and give it back when freed. */
@@ -742,6 +866,8 @@ test_references(void)
 		CHECK(ctx->key == key && ctx->keygen_type == 0 && ctx->operation == CRYC_OP_NONE && ctx->peer == NULL);
 		CHECK(ctx2->key == key && ctx2->keygen_type == 0 && ctx2->operation == CRYC_OP_NONE && ctx2->peer == NULL);
 	}
+
+	/* Every operation context holds one reference to the key. */
 	CHECK(key->references == 3);
 	EVP_PKEY_CTX_free(ctx);
 	CHECK(key->references == 2);
@@ -848,6 +974,8 @@ test_references(void)
 			CHECK(key->references == 1 && peer->references == 1);
 		}
 	}
+
+	/* Releases the keys. */
 	EVP_PKEY_free(key);
 	EVP_PKEY_free(peer);
 	EVP_PKEY_free(other);
@@ -888,6 +1016,7 @@ thread_body(
 	EVP_PKEY_CTX *ctx;
 	EVP_MD_CTX *md;
 	unsigned round;
+	int status;
 
 	/* Many rounds of take and drop. */
 	job->ok = 1;
@@ -896,8 +1025,13 @@ thread_body(
 		md = EVP_MD_CTX_new();
 		if (ctx == NULL || md == NULL)
 			job->ok = 0;
-		if (md != NULL && EVP_DigestVerifyInit(md, NULL, NULL, NULL, job->key) != 1)
-			job->ok = 0;
+		if (md != NULL) {
+			status = EVP_DigestVerifyInit(md, NULL, NULL, NULL, job->key);
+			if (status != 1)
+				job->ok = 0;
+		}
+
+		/* Releases the context and the digest context of the round. */
 		EVP_PKEY_CTX_free(ctx);
 		EVP_MD_CTX_free(md);
 	}
@@ -1015,6 +1149,8 @@ check_sign_verify(
 		EVP_MD_CTX_free(verify_ctx);
 		return;
 	}
+
+	/* Starts signing with the private key and verification with the public key. */
 	OK(EVP_DigestSignInit(sign_ctx, NULL, NULL, NULL, private_key));
 	OK(EVP_DigestVerifyInit(verify_ctx, NULL, NULL, NULL, public_key));
 
@@ -1043,6 +1179,8 @@ check_sign_verify(
 		status = EVP_DigestVerify(verify_ctx, changed, 64U, message, message_size);
 		CHECK(status == 0);
 	}
+
+	/* No verification left an error queued. */
 	CHECK(ERR_peek_error() == 0UL);
 
 	/* A different message fails too: the last byte changed, a byte appended, one removed. */
@@ -1054,10 +1192,14 @@ check_sign_verify(
 		status = EVP_DigestVerify(verify_ctx, signature, 64U, message, message_size - 1U);
 		CHECK(status == 0);
 	}
+
+	/* An empty message is not the same as a message of one zero byte. */
 	if (message_size == 0U) {
 		status = EVP_DigestVerify(verify_ctx, signature, 64U, (const unsigned char *)"\0", 1U);
 		CHECK(status == 0);
 	}
+
+	/* No error is left queued. */
 	CHECK(ERR_peek_error() == 0UL);
 
 	/* The signing context verifies nothing and the verification context signs nothing. */
@@ -1105,6 +1247,8 @@ test_ed25519_vectors(void)
 			/* The key made from the seed verifies as well (a private key holds the public one). */
 			check_sign_verify(private_key, private_key, message, size, signature);
 		}
+
+		/* Releases the keys of the round. */
 		EVP_PKEY_free(private_key);
 		EVP_PKEY_free(public_key);
 	}
@@ -1152,11 +1296,20 @@ test_ed25519_wycheproof(void)
 	int want_accept;
 	int status;
 	int have_key;
+	int opened;
+	int more;
+	int valid_comparison;
+	int invalid_comparison;
+	const char *tc_text;
 
-	if (vec_open(&file, "wycheproof-ed25519_test") != 0) {
+	/* Opens the Wycheproof file. */
+	opened = vec_open(&file, "wycheproof-ed25519_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Starts the counts of what the file holds. */
 	tests = 0;
 	valid = 0;
 	invalid = 0;
@@ -1170,7 +1323,7 @@ test_ed25519_wycheproof(void)
 	memset(public_form, 0, sizeof(public_form));
 
 	/* The group's key is on the first record of the group; a record with a tcId is a test. */
-	while (vec_next(&file)) {
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		text = vec_get(&file, "group.publicKey.pk");
 		if (text != NULL) {
 			public_size = hex_decode(text, public_form, sizeof(public_form));
@@ -1180,7 +1333,10 @@ test_ed25519_wycheproof(void)
 			CHECK(key != NULL);
 			have_key = 1;
 		}
-		if (vec_get(&file, "tcId") == NULL)
+
+		/* Skips a record that is not a test. */
+		tc_text = vec_get(&file, "tcId");
+		if (tc_text == NULL)
 			continue;
 		CHECK(have_key == 1);
 		if (key == NULL || ctx == NULL)
@@ -1208,30 +1364,38 @@ test_ed25519_wycheproof(void)
 			other_sizes++;
 			continue;
 		}
+
+		/* A signature of the right size is verified, and the answer is sorted by the file's verdict. */
 		memcpy(signature, scratch, sizeof(signature));
 		ERR_clear_error();
 		status = EVP_DigestVerify(ctx, signature, 64U, message, message_size);
 		CHECK(ERR_peek_error() == 0UL);
-		if (strcmp(result, "valid") == 0) {
+		valid_comparison = strcmp(result, "valid");
+		invalid_comparison = strcmp(result, "invalid");
+		if (valid_comparison == 0) {
 			CHECK(status == 1);
 			valid++;
-		} else if (strcmp(result, "invalid") == 0) {
+		} else if (invalid_comparison == 0) {
 			CHECK(status == 0);
 			invalid++;
 		} else {
 			/* Either answer is allowed by the file; the equation of RFC 8032 5.1.7 step 3 with the full k accepts exactly the listed ones. */
-			tc_id = (unsigned)strtoul(vec_get(&file, "tcId"), NULL, 10);
+			tc_id = (unsigned)strtoul(tc_text, NULL, 10);
 			want_accept = 0;
 			for (index = 0; index < sizeof(accepted_ids) / sizeof(accepted_ids[0]); index++) {
 				if (accepted_ids[index] == tc_id)
 					want_accept = 1;
 			}
+
+			/* The answer must be the one the equation gives. */
 			CHECK(status == want_accept);
 			acceptable++;
 			if (status == 1)
 				accepted++;
 		}
 	}
+
+	/* Releases the file, the context and the key. */
 	vec_close(&file);
 	EVP_MD_CTX_free(ctx);
 	EVP_PKEY_free(key);
@@ -1268,9 +1432,12 @@ test_ed25519_states(void)
 	EVP_MD_CTX *ctx;
 	EVP_MD_CTX *digest;
 	uint8_t ek[CRYC_MLKEM768_EK];
+	uint8_t again[64];
+	uint8_t longer[131];
 	int fake_engine;
 	int status;
 
+	/* Makes the keys and the message of the checks from random bytes. */
 	random_bytes(seed, sizeof(seed));
 	random_bytes(other_seed, sizeof(other_seed));
 	random_bytes(message, sizeof(message));
@@ -1288,6 +1455,8 @@ test_ed25519_states(void)
 		EVP_PKEY_free(x25519_key);
 		return;
 	}
+
+	/* Takes the public form of the key pair for the verification. */
 	(void)length;
 	memcpy(expected, private_key->public_key, 32U);
 	public_key = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL, expected, 32U);
@@ -1407,13 +1576,9 @@ test_ed25519_states(void)
 	length = 100U;
 	OK(EVP_DigestSign(ctx, signature, &length, signature, 64U));
 	memcpy(expected, message, 64U);
-	{
-		uint8_t again[64];
-
-		length = 64U;
-		OK(EVP_DigestSign(ctx, again, &length, expected, 64U));
-		CHECK_BYTES(signature, again, 64U);
-	}
+	length = 64U;
+	OK(EVP_DigestSign(ctx, again, &length, expected, 64U));
+	CHECK_BYTES(signature, again, 64U);
 
 	/* The verification: a wrong key, every signature length from 0 to 130 (only 64 can verify), and the NULL combinations. */
 	OK(EVP_DigestSignInit(ctx, NULL, NULL, NULL, other_key));
@@ -1425,14 +1590,14 @@ test_ed25519_states(void)
 	OK(EVP_DigestVerifyInit(digest, NULL, NULL, NULL, public_key));
 	CHECK(EVP_DigestVerify(digest, signature, 64U, message, 77U) == 0);
 	for (size = 0; size <= 130U; size++) {
-		uint8_t longer[131];
-
 		random_bytes(longer, sizeof(longer));
 		if (size >= 64U)
 			memcpy(longer, signature, 64U);
 		status = EVP_DigestVerify(digest, longer, size, message, 77U);
 		CHECK(status == 0);
 	}
+
+	/* An impossible signature length does not verify and queues nothing. */
 	CHECK(EVP_DigestVerify(digest, signature, (size_t)-1, message, 77U) == 0);
 	CHECK(ERR_peek_error() == 0UL);
 	REFUSED(EVP_DigestVerify(NULL, signature, 64U, message, 77U), -1, R_NULL);
@@ -1453,6 +1618,7 @@ test_ed25519_states(void)
 		CHECK(ERR_peek_error() == 0UL);
 	}
 
+	/* Releases the contexts and the keys. */
 	EVP_MD_CTX_free(ctx);
 	EVP_MD_CTX_free(digest);
 	EVP_PKEY_free(private_key);
@@ -1489,6 +1655,8 @@ test_ed25519_random(void)
 		EVP_MD_CTX_free(verify_ctx);
 		return;
 	}
+
+	/* Signs and verifies with three random key pairs. */
 	for (round = 0; round < 3U; round++) {
 		random_bytes(seed, sizeof(seed));
 		private_key = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, NULL, seed, 32U);
@@ -1501,6 +1669,8 @@ test_ed25519_random(void)
 			EVP_PKEY_free(private_key);
 			continue;
 		}
+
+		/* Starts signing with the private key and verification with the public key. */
 		OK(EVP_DigestSignInit(sign_ctx, NULL, NULL, NULL, private_key));
 		OK(EVP_DigestVerifyInit(verify_ctx, NULL, NULL, NULL, public_key));
 		for (index = 0; index < sizeof(sizes) / sizeof(sizes[0]); index++) {
@@ -1513,9 +1683,13 @@ test_ed25519_random(void)
 			CHECK(status == 1);
 			CHECK(cryc_ed25519_verify(made, message + round, sizes[index], private_key->public_key) == 0);
 		}
+
+		/* Releases the keys of the round. */
 		EVP_PKEY_free(private_key);
 		EVP_PKEY_free(public_key);
 	}
+
+	/* Releases the contexts. */
 	EVP_MD_CTX_free(sign_ctx);
 	EVP_MD_CTX_free(verify_ctx);
 }
@@ -1548,6 +1722,8 @@ check_derive_known(
 		EVP_PKEY_free(peer);
 		return;
 	}
+
+	/* Derives with the first key and the peer. */
 	ctx = EVP_PKEY_CTX_new(own, NULL);
 	CHECK(ctx != NULL);
 	if (ctx != NULL) {
@@ -1560,6 +1736,8 @@ check_derive_known(
 		CHECK_BYTES(shared, expected, 32U);
 		EVP_PKEY_CTX_free(ctx);
 	}
+
+	/* Releases the keys. */
 	EVP_PKEY_free(own);
 	EVP_PKEY_free(peer);
 }
@@ -1599,7 +1777,9 @@ test_x25519_rfc(void)
 		own = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, k, 32U);
 		peer = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, u, 32U);
 		CHECK(own != NULL && peer != NULL);
-		ctx = (own != NULL) ? EVP_PKEY_CTX_new(own, NULL) : NULL;
+		ctx = NULL;
+		if (own != NULL)
+			ctx = EVP_PKEY_CTX_new(own, NULL);
 		CHECK(ctx != NULL);
 		if (ctx == NULL || peer == NULL) {
 			EVP_PKEY_CTX_free(ctx);
@@ -1607,6 +1787,8 @@ test_x25519_rfc(void)
 			EVP_PKEY_free(peer);
 			break;
 		}
+
+		/* Derives the shared secret, which is the input of the next iteration. */
 		OK(EVP_PKEY_derive_init(ctx));
 		OK(EVP_PKEY_derive_set_peer(ctx, peer));
 		length = 32U;
@@ -1642,13 +1824,19 @@ test_x25519_rfc(void)
 			sprintf(scalar_hex + 2U * index, "%02x", (unsigned)alice->private_key[index]);
 			sprintf(u_hex + 2U * index, "%02x", (unsigned)bob->public_key[index]);
 		}
+
+		/* The shared secret of the first key's private form and the second key's public form. */
 		check_derive_known(scalar_hex, u_hex, "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
 		for (index = 0; index < 32U; index++) {
 			sprintf(scalar_hex + 2U * index, "%02x", (unsigned)bob->private_key[index]);
 			sprintf(u_hex + 2U * index, "%02x", (unsigned)alice->public_key[index]);
 		}
+
+		/* The shared secret of the second key's private form and the first key's public form. */
 		check_derive_known(scalar_hex, u_hex, "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742");
 	}
+
+	/* Releases the keys. */
 	EVP_PKEY_free(alice);
 	EVP_PKEY_free(bob);
 }
@@ -1671,14 +1859,21 @@ test_x25519_wycheproof(void)
 	EVP_PKEY *peer;
 	EVP_PKEY_CTX *ctx;
 	int status;
+	int opened;
+	int more;
+	int comparison;
 
-	if (vec_open(&file, "wycheproof-x25519_test") != 0) {
+	/* Opens the Wycheproof file. */
+	opened = vec_open(&file, "wycheproof-x25519_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* The all-zero value that a failing secret is compared with. */
 	memset(zero, 0, sizeof(zero));
 	zeros = 0;
-	while (vec_next(&file)) {
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		/* The three fields of a record. */
 		size = vec_hex(&file, "private", scalar, sizeof(scalar));
 		CHECK(size == 32U);
@@ -1688,7 +1883,9 @@ test_x25519_wycheproof(void)
 		CHECK(size == 32U);
 		own = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, scalar, 32U);
 		peer = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, u, 32U);
-		ctx = (own != NULL) ? EVP_PKEY_CTX_new(own, NULL) : NULL;
+		ctx = NULL;
+		if (own != NULL)
+			ctx = EVP_PKEY_CTX_new(own, NULL);
 		CHECK(own != NULL && peer != NULL && ctx != NULL);
 		if (own != NULL && peer != NULL && ctx != NULL) {
 			OK(EVP_PKEY_derive_init(ctx));
@@ -1697,7 +1894,8 @@ test_x25519_wycheproof(void)
 			length = 32U;
 			ERR_clear_error();
 			status = EVP_PKEY_derive(ctx, out, &length);
-			if (memcmp(want, zero, 32U) == 0) {
+			comparison = memcmp(want, zero, 32U);
+			if (comparison == 0) {
 				/* An all-zero secret fails, queues the one error and leaves zeros. */
 				CHECK(status == 0);
 				check_refusal(R_INVALID_KEY);
@@ -1711,10 +1909,14 @@ test_x25519_wycheproof(void)
 				CHECK_BYTES(out, want, 32U);
 			}
 		}
+
+		/* Releases the context and the keys of the record. */
 		EVP_PKEY_CTX_free(ctx);
 		EVP_PKEY_free(own);
 		EVP_PKEY_free(peer);
 	}
+
+	/* Keeps the record count and closes the file. */
 	records = file.records;
 	vec_close(&file);
 
@@ -1745,6 +1947,7 @@ test_x25519_states(void)
 	EVP_PKEY_CTX *generator;
 	EVP_PKEY_CTX *other_ctx;
 
+	/* Makes random seeds and the guard bytes for the checks. */
 	random_bytes(seed, sizeof(seed));
 	random_bytes(raw, sizeof(raw));
 	memset(guard, SENTINEL_BYTE, sizeof(guard));
@@ -1855,6 +2058,8 @@ test_x25519_states(void)
 			EVP_PKEY_free(peer);
 			continue;
 		}
+
+		/* Each side derives with the other side's key. */
 		ctx = EVP_PKEY_CTX_new(own, NULL);
 		other_ctx = EVP_PKEY_CTX_new(peer, NULL);
 		CHECK(ctx != NULL && other_ctx != NULL);
@@ -1871,6 +2076,8 @@ test_x25519_states(void)
 			CHECK(cryc_x25519(shared, seed, peer->public_key) == 0);
 			CHECK_BYTES(reference, shared, 32U);
 		}
+
+		/* Releases the contexts and the keys of the round. */
 		EVP_PKEY_CTX_free(ctx);
 		EVP_PKEY_CTX_free(other_ctx);
 		EVP_PKEY_free(own);
@@ -1881,7 +2088,9 @@ test_x25519_states(void)
 	memset(raw, 0, sizeof(raw));
 	own = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, seed, 32U);
 	peer = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, raw, 32U);
-	ctx = (own != NULL) ? EVP_PKEY_CTX_new(own, NULL) : NULL;
+	ctx = NULL;
+	if (own != NULL)
+		ctx = EVP_PKEY_CTX_new(own, NULL);
 	CHECK(own != NULL && peer != NULL && ctx != NULL);
 	if (own != NULL && peer != NULL && ctx != NULL) {
 		OK(EVP_PKEY_derive_init(ctx));
@@ -1894,6 +2103,8 @@ test_x25519_states(void)
 		CHECK_BYTES(shared + 32, guard, 8U);
 		CHECK(length == 40U);
 	}
+
+	/* Releases the context and the keys. */
 	EVP_PKEY_CTX_free(ctx);
 	EVP_PKEY_free(own);
 	EVP_PKEY_free(peer);
@@ -1944,6 +2155,8 @@ check_encapsulation(
 		EVP_PKEY_free(public_key);
 		return;
 	}
+
+	/* Encapsulates to the key, with the buffers filled to show any write beyond the sizes. */
 	OK(EVP_PKEY_encapsulate_init(encapsulator, NULL));
 	memset(ciphertext, SENTINEL_BYTE, sizeof(ciphertext));
 	memset(shared, SENTINEL_BYTE, sizeof(shared));
@@ -1972,6 +2185,8 @@ check_encapsulation(
 		CHECK_BYTES(decapsulated + 32, guard, 16U);
 		EVP_PKEY_CTX_free(decapsulator);
 	}
+
+	/* Releases the context and the key. */
 	EVP_PKEY_CTX_free(encapsulator);
 	EVP_PKEY_free(public_key);
 }
@@ -1999,16 +2214,23 @@ test_mlkem_wycheproof_keys(void)
 	unsigned long wrong_ciphertext;
 	EVP_PKEY *pair;
 	EVP_PKEY_CTX *ctx;
+	int opened;
+	int more;
+	int comparison;
 
-	if (vec_open(&file, "wycheproof-mlkem_768_test") != 0) {
+	/* Opens the Wycheproof file. */
+	opened = vec_open(&file, "wycheproof-mlkem_768_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Fills the guard buffer and starts the counts. */
 	memset(guard, SENTINEL_BYTE, sizeof(guard));
 	records = 0;
 	valid = 0;
 	wrong_ciphertext = 0;
-	while (vec_next(&file)) {
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		if (result == NULL)
 			continue;
@@ -2017,9 +2239,13 @@ test_mlkem_wycheproof_keys(void)
 		ek_size = vec_hex(&file, "ek", ek, sizeof(ek));
 		c_size = vec_hex(&file, "c", c, sizeof(c));
 		key_size = vec_hex(&file, "K", key, sizeof(key));
-		if (strcmp(result, "valid") == 0) {
+		comparison = strcmp(result, "valid");
+		if (comparison == 0) {
 			CHECK(seed_size == 64U && ek_size == 1184U && c_size == 1088U && key_size == 32U);
-			if (seed_size != 64U || ek_size != 1184U || c_size != 1088U || key_size != 32U)
+			if (seed_size != 64U ||
+			    ek_size != 1184U ||
+			    c_size != 1088U ||
+			    key_size != 32U)
 				continue;
 			valid++;
 
@@ -2068,10 +2294,14 @@ test_mlkem_wycheproof_keys(void)
 				CHECK_BYTES(out, guard, sizeof(out));
 				EVP_PKEY_CTX_free(ctx);
 			}
+
+			/* Releases the key and counts the refused ciphertext. */
 			EVP_PKEY_free(pair);
 			wrong_ciphertext++;
 		}
 	}
+
+	/* Closes the file. */
 	vec_close(&file);
 
 	/* The file has 201 records, 161 valid; 20 of the invalid ones have a good key and a ciphertext of the wrong size. */
@@ -2101,16 +2331,23 @@ test_mlkem_wycheproof_encaps(void)
 	unsigned long refused_modulus;
 	EVP_PKEY *key;
 	EVP_PKEY_CTX *ctx;
+	int opened;
+	int more;
+	int comparison;
 
-	if (vec_open(&file, "wycheproof-mlkem_768_encaps_test") != 0) {
+	/* Opens the Wycheproof file. */
+	opened = vec_open(&file, "wycheproof-mlkem_768_encaps_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Starts the counts. */
 	records = 0;
 	accepted = 0;
 	refused_length = 0;
 	refused_modulus = 0;
-	while (vec_next(&file)) {
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		if (result == NULL)
 			continue;
@@ -2121,7 +2358,8 @@ test_mlkem_wycheproof_encaps(void)
 			continue;
 		ERR_clear_error();
 		key = EVP_PKEY_new_raw_public_key_ex(NULL, "ML-KEM-768", NULL, ek, ek_size);
-		if (strcmp(result, "valid") == 0) {
+		comparison = strcmp(result, "valid");
+		if (comparison == 0) {
 			CHECK(key != NULL);
 			CHECK(ERR_peek_error() == 0UL);
 			if (key == NULL)
@@ -2143,6 +2381,8 @@ test_mlkem_wycheproof_encaps(void)
 				CHECK(ciphertext_size == 1088U && shared_size == 32U);
 				EVP_PKEY_CTX_free(ctx);
 			}
+
+			/* Releases the key. */
 			EVP_PKEY_free(key);
 		} else {
 			/* A refusal: the length (1184 bytes are needed) or the modulus check of FIPS 203 7.2. */
@@ -2154,9 +2394,13 @@ test_mlkem_wycheproof_encaps(void)
 				check_refusal(R_INVALID_KEY);
 				refused_modulus++;
 			}
+
+			/* Releases the key. */
 			EVP_PKEY_free(key);
 		}
 	}
+
+	/* Closes the file. */
 	vec_close(&file);
 
 	/* The file has 265 records: 133 valid, 112 whose ek is not reduced (100 "Public key not reduced" and 12 ModulusOverflow), 20 of the wrong length. */
@@ -2188,15 +2432,22 @@ test_mlkem_wycheproof_semi_expanded(void)
 	unsigned long records;
 	EVP_PKEY *pair;
 	EVP_PKEY_CTX *ctx;
+	int opened;
+	int more;
+	int comparison;
 
-	if (vec_open(&file, "wycheproof-mlkem_768_semi_expanded_decaps_test") != 0) {
+	/* Opens the Wycheproof file. */
+	opened = vec_open(&file, "wycheproof-mlkem_768_semi_expanded_decaps_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Starts the counts. */
 	valid = 0;
 	wrong_ciphertext = 0;
 	records = 0;
-	while (vec_next(&file)) {
+	for (more = vec_next(&file); more != 0; more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		if (result == NULL)
 			continue;
@@ -2218,9 +2469,12 @@ test_mlkem_wycheproof_semi_expanded(void)
 			EVP_PKEY_free(pair);
 			continue;
 		}
+
+		/* Starts decapsulation with the key. */
 		OK(EVP_PKEY_decapsulate_init(ctx, NULL));
 		length = sizeof(out);
-		if (strcmp(result, "valid") == 0) {
+		comparison = strcmp(result, "valid");
+		if (comparison == 0) {
 			CHECK(c_size == 1088U && key_size == 32U);
 			memset(out, SENTINEL_BYTE, sizeof(out));
 			OK(EVP_PKEY_decapsulate(ctx, out, &length, c, c_size));
@@ -2231,9 +2485,13 @@ test_mlkem_wycheproof_semi_expanded(void)
 			REFUSED(EVP_PKEY_decapsulate(ctx, out, &length, c, c_size), 0, R_ARGUMENT);
 			wrong_ciphertext++;
 		}
+
+		/* Releases the context and the key. */
 		EVP_PKEY_CTX_free(ctx);
 		EVP_PKEY_free(pair);
 	}
+
+	/* Closes the file. */
 	vec_close(&file);
 
 	/* Nine records: three decapsulate (one plain, two with a zeroed byte that makes the re-encryption comparison matter), two have a wrong ciphertext size. */
@@ -2265,7 +2523,11 @@ test_mlkem_round_trips(void)
 	EVP_PKEY *public_key;
 	EVP_PKEY_CTX *encapsulator;
 	EVP_PKEY_CTX *decapsulator;
+	EVP_PKEY_CTX *generator;
+	EVP_PKEY *first_key;
+	EVP_PKEY *second_key;
 
+	/* Prepares the guard bytes and the first key's public form. */
 	memset(guard, SENTINEL_BYTE, sizeof(guard));
 	previous_pair = NULL;
 	memset(first_ek, 0, sizeof(first_ek));
@@ -2304,13 +2566,17 @@ test_mlkem_round_trips(void)
 			CHECK(memcmp(previous_pair->public_key, pair->public_key, 1184U) != 0);
 			CHECK(memcmp(previous_pair->private_key, pair->private_key, 2400U) != 0);
 		}
+
+		/* Remembers the public form of the first key. */
 		if (round == 0U)
 			memcpy(first_ek, ek, sizeof(first_ek));
 
 		/* Encapsulation to the imported key and decapsulation with the pair, three times: the secrets agree and the ciphertexts differ. */
 		public_key = EVP_PKEY_new_raw_public_key_ex(NULL, "ML-KEM-768", NULL, ek, 1184U);
 		CHECK(public_key != NULL);
-		encapsulator = (public_key != NULL) ? EVP_PKEY_CTX_new(public_key, NULL) : NULL;
+		encapsulator = NULL;
+		if (public_key != NULL)
+			encapsulator = EVP_PKEY_CTX_new(public_key, NULL);
 		decapsulator = EVP_PKEY_CTX_new(pair, NULL);
 		CHECK(encapsulator != NULL && decapsulator != NULL);
 		if (encapsulator != NULL && decapsulator != NULL) {
@@ -2349,39 +2615,37 @@ test_mlkem_round_trips(void)
 				CHECK_BYTES(decapsulated, shared, 32U);
 			}
 		}
+
+		/* Releases the contexts and the key of the round. */
 		EVP_PKEY_CTX_free(encapsulator);
 		EVP_PKEY_CTX_free(decapsulator);
 		EVP_PKEY_free(public_key);
 		EVP_PKEY_free(previous_pair);
 		previous_pair = pair;
 	}
+
+	/* Releases the last key and checks that the first public form was recorded. */
 	EVP_PKEY_free(previous_pair);
 	CHECK(memcmp(first_ek, guard, 64U) != 0);
 
 	/* One key-generation context makes several keys. */
-	{
-		EVP_PKEY_CTX *generator;
-		EVP_PKEY *a;
-		EVP_PKEY *b;
+	generator = EVP_PKEY_CTX_new_from_name(NULL, "ml-kem-768", NULL);
+	CHECK(generator != NULL);
+	first_key = NULL;
+	second_key = NULL;
+	if (generator != NULL) {
+		OK(EVP_PKEY_keygen_init(generator));
+		OK(EVP_PKEY_keygen(generator, &first_key));
+		OK(EVP_PKEY_keygen(generator, &second_key));
+		CHECK(first_key != NULL && second_key != NULL && first_key != second_key);
+		if (first_key != NULL && second_key != NULL)
+			CHECK(memcmp(first_key->public_key, second_key->public_key, 1184U) != 0);
 
-		generator = EVP_PKEY_CTX_new_from_name(NULL, "ml-kem-768", NULL);
-		CHECK(generator != NULL);
-		a = NULL;
-		b = NULL;
-		if (generator != NULL) {
-			OK(EVP_PKEY_keygen_init(generator));
-			OK(EVP_PKEY_keygen(generator, &a));
-			OK(EVP_PKEY_keygen(generator, &b));
-			CHECK(a != NULL && b != NULL && a != b);
-			if (a != NULL && b != NULL)
-				CHECK(memcmp(a->public_key, b->public_key, 1184U) != 0);
-
-			/* A second preparation does no harm. */
-			OK(EVP_PKEY_keygen_init(generator));
-			EVP_PKEY_free(a);
-			EVP_PKEY_free(b);
-			EVP_PKEY_CTX_free(generator);
-		}
+		/* A second preparation does no harm. */
+		OK(EVP_PKEY_keygen_init(generator));
+		EVP_PKEY_free(first_key);
+		EVP_PKEY_free(second_key);
+		EVP_PKEY_CTX_free(generator);
 	}
 }
 
@@ -2400,6 +2664,7 @@ test_mlkem_states(void)
 	size_t length;
 	size_t position;
 	size_t room;
+	size_t room_step;
 	unsigned index;
 	EVP_PKEY *pair;
 	EVP_PKEY *public_key;
@@ -2415,6 +2680,7 @@ test_mlkem_states(void)
 	int fake_engine;
 	static OSSL_PARAM fake_params[1];
 
+	/* Prepares the guard bytes, the seeds and the engine stand-in. */
 	fake_engine = 0;
 	memset(guard, SENTINEL_BYTE, sizeof(guard));
 	random_bytes(seed, sizeof(seed));
@@ -2498,6 +2764,8 @@ test_mlkem_states(void)
 		EVP_PKEY_free(x_key);
 		return;
 	}
+
+	/* The preparation refuses a missing context and any parameter set. */
 	REFUSED(EVP_PKEY_encapsulate_init(NULL, NULL), 0, R_NULL);
 	REFUSED(EVP_PKEY_encapsulate_init(public_ctx, fake_params), 0, R_ARGUMENT);
 	REFUSED(EVP_PKEY_decapsulate_init(pair_ctx, fake_params), 0, R_ARGUMENT);
@@ -2545,7 +2813,12 @@ test_mlkem_states(void)
 	CHECK_BYTES(shared, guard, sizeof(shared));
 
 	/* A buffer too small (either one) is refused with both buffers and both lengths as they were. */
-	for (room = 0; room < 1088U; room += (room < 40U ? 1U : 97U)) {
+	room_step = 1U;
+	for (room = 0; room < 1088U; room += room_step) {
+		/* Every size is tried up to 39, then every 97th. */
+		room_step = 97U;
+		if (room < 40U)
+			room_step = 1U;
 		wrapped_length = room;
 		shared_length = 32U;
 		REFUSED(EVP_PKEY_encapsulate(public_ctx, ciphertext, &wrapped_length, shared, &shared_length), 0, R_TOO_SMALL);
@@ -2553,6 +2826,8 @@ test_mlkem_states(void)
 		CHECK(ciphertext[0] == SENTINEL_BYTE && ciphertext[1087] == SENTINEL_BYTE);
 		CHECK_BYTES(shared, guard, sizeof(shared));
 	}
+
+	/* One byte short of the ciphertext is refused too. */
 	wrapped_length = 1087U;
 	shared_length = 32U;
 	REFUSED(EVP_PKEY_encapsulate(public_ctx, ciphertext, &wrapped_length, shared, &shared_length), 0, R_TOO_SMALL);
@@ -2588,6 +2863,8 @@ test_mlkem_states(void)
 		CHECK(length == 32U);
 		CHECK(ek[0] == SENTINEL_BYTE && ek[31] == SENTINEL_BYTE);
 	}
+
+	/* An output buffer smaller than the 32-byte shared key is refused. */
 	for (room = 0; room < 32U; room++) {
 		length = room;
 		REFUSED(EVP_PKEY_decapsulate(pair_ctx, ek, &length, ciphertext, 1088U), 0, R_TOO_SMALL);
@@ -2644,6 +2921,8 @@ test_mlkem_states(void)
 			CHECK(wrapped_length == 1088U && shared_length == 32U);
 			EVP_PKEY_CTX_free(ctx);
 		}
+
+		/* Releases the key of the case. */
 		EVP_PKEY_free(bad_ek_key);
 	}
 
@@ -2661,6 +2940,8 @@ test_mlkem_states(void)
 		ek[index + 1U] = 0x0dU | 0x00U;
 		ek[index + 2U] = 0xd0U;
 	}
+
+	/* A key whose every coefficient is the largest reduced one is accepted. */
 	made = EVP_PKEY_new_raw_public_key_ex(NULL, "ML-KEM-768", NULL, ek, 1184U);
 	CHECK(made != NULL);
 	EVP_PKEY_free(made);
@@ -2694,6 +2975,7 @@ test_mlkem_states(void)
 	/* The interface's numbered constructors refuse ML-KEM (it is made by name): no type number exists for it. */
 	REFUSED(EVP_PKEY_new_raw_public_key(CRYC_PKEY_MLKEM768, NULL, ek, 1184U), NULL, R_ALGORITHM);
 
+	/* Releases the keys and the contexts. */
 	EVP_PKEY_free(pair);
 	EVP_PKEY_free(public_key);
 	EVP_PKEY_free(ed_key);

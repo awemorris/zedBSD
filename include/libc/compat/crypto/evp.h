@@ -24,6 +24,15 @@
  * OSSL_LIB_CTX and property query argument must be NULL, and so must
  * every OSSL_PARAM array argument except those of EVP_PKEY_fromdata.
  *
+ * A failure queues an error of the EVP library whose reason is OpenSSL's
+ * number for the condition (a NULL argument, an argument that must be
+ * NULL or is out of range, an unsupported algorithm or key type, a wrong
+ * key length, an unusable key, an operation not prepared, a buffer too
+ * small, keys of different types); a success queues nothing.  A failing
+ * EVP_PKEY function leaves the keys, the context and the caller's buffers
+ * and lengths as they were, unless its comment says otherwise.  Key type
+ * and algorithm names are not case sensitive.
+ *
  * Objects may be used by one thread at a time each; different objects on
  * different threads need no locking (EVP_PKEY's reference count is
  * atomic).
@@ -70,7 +79,7 @@ extern "C" {
 /* Returns the SHA-256 digest algorithm (a constant object). */
 const EVP_MD *EVP_sha256(void);
 
-/* Returns a digest's output size in bytes (32 for SHA-256), or -1 for NULL. */
+/* Returns a digest's output size in bytes (32 for SHA-256), or -1 for NULL (nothing queued). */
 int EVP_MD_get_size(const EVP_MD *md);
 
 /* Makes an empty digest context; NULL without memory. */
@@ -88,7 +97,12 @@ int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count);
 /* Writes the digest to md, its size to *size when size is not NULL; ctx must be started again for reuse. */
 int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *size);
 
-/* Makes out a copy of the digest in progress in in (a snapshot); out need not be started. */
+/*
+ * Makes out a copy of the digest in progress in in (a snapshot); out need
+ * not be started.  in must hold a digest started with EVP_DigestInit_ex
+ * and not finished (a finished one, or a context of a signature or
+ * verification, fails).
+ */
 int EVP_MD_CTX_copy_ex(EVP_MD_CTX *out, const EVP_MD_CTX *in);
 
 /* Hashes count bytes in one call into md (and its size into *size when not NULL). */
@@ -141,9 +155,10 @@ void EVP_PKEY_free(EVP_PKEY *pkey);
 int EVP_DigestSignInit(EVP_MD_CTX *ctx, EVP_PKEY_CTX **pctx, const EVP_MD *type, ENGINE *e, EVP_PKEY *pkey);
 
 /*
- * Signs tbs (one shot, RFC 8032 5.1.6).  With signature NULL sets
- * *length to 64 and returns 1; otherwise *length is the room (at least
- * 64) and becomes 64.
+ * Signs tbs (one shot, RFC 8032 5.1.6).  ctx must have been started with
+ * EVP_DigestSignInit, also for the size: with signature NULL sets *length
+ * to 64 and returns 1; otherwise *length is the room (at least 64) and
+ * becomes 64.
  */
 int EVP_DigestSign(EVP_MD_CTX *ctx, unsigned char *signature, size_t *length, const unsigned char *tbs, size_t tbs_length);
 
@@ -152,8 +167,10 @@ int EVP_DigestVerifyInit(EVP_MD_CTX *ctx, EVP_PKEY_CTX **pctx, const EVP_MD *typ
 
 /*
  * Verifies a signature over tbs (one shot, RFC 8032 5.1.7).  Returns 1
- * when it verifies, 0 when it does not (including a signature of a length
- * other than 64), and a negative value for a context not started.
+ * when it verifies; 0 when it does not, including a signature of a length
+ * other than 64 (nothing queued: a verdict, not an error); 0 with an error
+ * queued for a NULL signature or a NULL tbs that is not empty; -1 with an
+ * error queued for a NULL context or one not started for verification.
  */
 int EVP_DigestVerify(EVP_MD_CTX *ctx, const unsigned char *signature, size_t length, const unsigned char *tbs, size_t tbs_length);
 
@@ -173,7 +190,7 @@ EVP_PKEY_CTX *EVP_PKEY_CTX_new_from_pkey(OSSL_LIB_CTX *libctx, EVP_PKEY *pkey, c
 /* Frees a context and drops its keys; NULL is ignored. */
 void EVP_PKEY_CTX_free(EVP_PKEY_CTX *ctx);
 
-/* Prepares an X25519 or P-256 ECDH derivation with the context's private key. */
+/* Prepares an X25519 or P-256 ECDH derivation with the context's private key; a peer set before is let go. */
 int EVP_PKEY_derive_init(EVP_PKEY_CTX *ctx);
 
 /* Sets the peer's public key, of the same type as the context's key (the context takes a reference). */
@@ -183,15 +200,19 @@ int EVP_PKEY_derive_set_peer(EVP_PKEY_CTX *ctx, EVP_PKEY *peer);
  * Derives the shared secret: X25519's (RFC 7748 6.1), or P-256 ECDH's,
  * the x coordinate of the shared point (NIST SP 800-56A Rev. 3 5.7.1.2),
  * 32 bytes either way.  With key NULL sets *length to 32 and returns 1.
- * An all-zero X25519 result fails (returns 0, nothing usable written: key
- * is zeroed).
+ * An all-zero X25519 result fails (returns 0, nothing usable written: the
+ * 32 bytes of key are zeroed, *length is unchanged).
  */
 int EVP_PKEY_derive(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *length);
 
 /* Prepares a key generation on a context from EVP_PKEY_CTX_new_from_name("ML-KEM-768") (an "EC" context: 0). */
 int EVP_PKEY_keygen_init(EVP_PKEY_CTX *ctx);
 
-/* Generates an ML-KEM-768 key pair (FIPS 203 Algorithm 19) into a new key in *pkey. */
+/*
+ * Generates an ML-KEM-768 key pair (FIPS 203 Algorithm 19) into a new key
+ * in *pkey, with one reference.  A key *pkey pointed to before is not
+ * freed: the caller keeps its reference.
+ */
 int EVP_PKEY_keygen(EVP_PKEY_CTX *ctx, EVP_PKEY **pkey);
 
 /* Prepares an encapsulation to the context's ML-KEM-768 public key; params must be NULL. */
@@ -199,9 +220,10 @@ int EVP_PKEY_encapsulate_init(EVP_PKEY_CTX *ctx, const OSSL_PARAM params[]);
 
 /*
  * Encapsulates (FIPS 203 Algorithm 20): writes the 1088-byte ciphertext
- * to wrapped and the 32-byte shared key to key.  With both NULL sets the
- * two lengths and returns 1; otherwise each length is the room (too
- * small: 0) and becomes the size.
+ * to wrapped and the 32-byte shared key to key.  Both lengths are
+ * required.  With both buffers NULL sets the two lengths and returns 1;
+ * one buffer without the other fails; otherwise each length is the room
+ * (too small: 0, before any random bytes are drawn) and becomes the size.
  */
 int EVP_PKEY_encapsulate(EVP_PKEY_CTX *ctx, unsigned char *wrapped, size_t *wrapped_length, unsigned char *key, size_t *key_length);
 
@@ -303,8 +325,12 @@ void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx);
  * enc 1, 0 or -1 (keep; ChaCha20 is the same both ways).  The IV is
  * OpenSSL's layout: bytes 0 to 15 are the block function's state words
  * 12 to 15, little-endian, and the block counter is words 12 and 13 taken
- * as one 64-bit little-endian counter.  Setting an IV restarts the
- * keystream.
+ * as one 64-bit little-endian counter.  A new context has no key and a
+ * zero IV; a key alone keeps the IV (and drops the buffered
+ * keystream), an IV alone keeps the key, and setting an IV restarts the
+ * keystream.  A call that would need a block past counter 2^64 - 1 fails
+ * before anything is written, and once the block with counter 2^64 - 1
+ * has been made only its buffered bytes remain; a new IV or key goes on.
  *
  * Sets up AES-256-CBC: cipher EVP_aes_256_cbc starts afresh (no key, a
  * zero IV, padding on, no buffered bytes) and NULL keeps the AES set up;
@@ -363,13 +389,21 @@ EVP_MAC_CTX *EVP_MAC_CTX_new(EVP_MAC *mac);
 /* Wipes and frees a MAC context; NULL is ignored. */
 void EVP_MAC_CTX_free(EVP_MAC_CTX *ctx);
 
-/* (Re)starts Poly1305 with a 32-byte one-time key (params NULL); may be called again on the same context. */
+/*
+ * (Re)starts Poly1305 with a 32-byte one-time key (params NULL); may be
+ * called again on the same context.  The key is required every time
+ * (Poly1305 keeps no key between computations).
+ */
 int EVP_MAC_init(EVP_MAC_CTX *ctx, const unsigned char *key, size_t length, const OSSL_PARAM params[]);
 
 /* Absorbs length bytes. */
 int EVP_MAC_update(EVP_MAC_CTX *ctx, const unsigned char *data, size_t length);
 
-/* Writes the 16-byte tag (out_size at least 16; *out_length 16); the context needs EVP_MAC_init before reuse. */
+/*
+ * Writes the 16-byte tag (out_size at least 16; *out_length 16 when
+ * out_length is not NULL); the context needs EVP_MAC_init before reuse.
+ * With out NULL sets *out_length to 16 and returns 1, computing nothing.
+ */
 int EVP_MAC_final(EVP_MAC_CTX *ctx, unsigned char *out, size_t *out_length, size_t out_size);
 
 #ifdef __cplusplus

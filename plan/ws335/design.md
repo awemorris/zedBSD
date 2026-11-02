@@ -193,8 +193,13 @@ WS334 の file は WS334 の担当が直す。WS335 が渡し、約束する物�
 | compat/crypto/err.h | `ERR_get_error`・`ERR_peek_error`・`ERR_error_string_n`・`ERR_clear_error`、`ERR_GET_LIB`・`ERR_GET_REASON`、`ERR_LIB_*` | net/tls.c |
 | compat/crypto/x509.h | `d2i_X509`・`X509_free`・`X509_STORE_add_cert`・`X509_VERIFY_PARAM_set1_host`・`X509_VERIFY_PARAM_set1_ip_asc`・`X509_verify_cert_error_string`、`X509_V_*` | net/tls.c（＋WS334） |
 | compat/crypto/evp.h | §4.1 の 45 関数と `EVP_PKEY_X25519`・`EVP_PKEY_ED25519`・`EVP_MAX_MD_SIZE` | WS336 |
-| compat/crypto/rand.h・crypto.h | `RAND_bytes`、`OPENSSL_cleanse`・`CRYPTO_memcmp` | WS336 |
-| compat/crypto/types.h | 型（OpenSSL の tag）、`OSSL_PARAM`（完全な struct、引数は NULL だけ） | 全部 |
+| compat/crypto/evp.h（passkey の部分集合） | EC P-256 の鍵: `EVP_PKEY_Q_keygen`（"EC" と群の名前）・`EVP_PKEY_fromdata_init`/`fromdata`（群の名前と非圧縮の点）・`EVP_PKEY_public_check`・`EVP_PKEY_get_octet_string_param`、ECDH（`EVP_PKEY_derive*`）、ECDSA の検証（`EVP_PKEY_verify_init`・`EVP_PKEY_CTX_set_signature_md`・`EVP_PKEY_verify`、SHA-256）、AES-256-CBC の padding 無し（`EVP_aes_256_cbc`・`EVP_CIPHER_CTX_set_padding`・`EVP_CipherFinal_ex`）、定数 `OSSL_KEYMGMT_SELECT_*`・`EVP_PKEY_KEYPAIR` ほか | WS343（libpasskey） |
+| compat/crypto/hmac.h・kdf.h | `HMAC`（SHA-256 の一回の呼び出し）、`EVP_KDF_fetch("HKDF")`・`EVP_KDF_free`・`EVP_KDF_CTX_new`/`free`・`EVP_KDF_derive`（digest・key・salt・info の OSSL_PARAM） | WS343 |
+| compat/crypto/params.h・core_names.h | `OSSL_PARAM_construct_utf8_string`/`octet_string`/`end`、`OSSL_PARAM_UTF8_STRING`・`OCTET_STRING`・`UNMODIFIED`、`OSSL_KDF_PARAM_*`・`OSSL_PKEY_PARAM_GROUP_NAME`/`PUB_KEY`/`ENCODED_PUBLIC_KEY` | WS343 |
+| compat/crypto/rand.h・crypto.h | `RAND_bytes`、`OPENSSL_cleanse`・`CRYPTO_memcmp` | WS336・WS343 |
+| compat/crypto/types.h | 型（OpenSSL の tag）、`OSSL_PARAM`（完全な struct。引数は `EVP_PKEY_fromdata`・`EVP_KDF_derive` の他は NULL だけ） | 全部 |
+
+- `userland/base/libcrypto-compat/openssl-names/openssl/` は OpenSSL の名前（`<openssl/evp.h>` など）から上の header へ転送するだけの header で、OpenSSL の名前で include する使う側（libpasskey）のため。
 
 - 範囲の外の引数（別の ctrl、ENGINE・OSSL_LIB_CTX・propq が NULL でない、別の algorithm）は失敗（誤りを queue）か無視（未知の `SSL_OP_` bit は記録だけ）。各関数の comment に書いた。
 - 振る舞いの詳細の正は OpenSSL 3.5.8 の `doc/man3/*.pod`（data として読む、文を写さない）。header の comment が食い違う時は header が正で、実装の担当は報告する。

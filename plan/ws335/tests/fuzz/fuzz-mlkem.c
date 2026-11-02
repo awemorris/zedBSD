@@ -24,8 +24,14 @@
 
 #include "userland/base/libcrypto-compat/cryc-mlkem.h"
 
+/* The libFuzzer entry point, run once for every generated input. */
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
+/*
+ * Runs the ML-KEM operations on the input.
+ *
+ * Always reports 0, because a refusal is not a failure.
+ */
 int
 LLVMFuzzerTestOneInput(
 	const uint8_t *data,
@@ -39,6 +45,9 @@ LLVMFuzzerTestOneInput(
 	uint8_t shared[32];
 	uint8_t seed[32];
 	size_t index;
+	size_t ciphertext_size;
+	size_t candidate_size;
+	int status;
 	EVP_PKEY *key;
 
 	/* The fixed key pair, made once from fixed seeds. */
@@ -49,19 +58,28 @@ LLVMFuzzerTestOneInput(
 		ready = 1;
 	}
 
-	/* Decapsulation of the input as a ciphertext. */
+	/* Decapsulation of the input as a ciphertext, zero-padded or cut to size. */
+	ciphertext_size = size;
+	if (ciphertext_size > sizeof(ciphertext))
+		ciphertext_size = sizeof(ciphertext);
 	memset(ciphertext, 0, sizeof(ciphertext));
-	memcpy(ciphertext, data, size < sizeof(ciphertext) ? size : sizeof(ciphertext));
+	memcpy(ciphertext, data, ciphertext_size);
 	cryc_mlkem768_decaps(shared, ciphertext, dk);
 
 	/* The input as an encapsulation key: checked, and used when it passes. */
+	candidate_size = size;
+	if (candidate_size > sizeof(candidate))
+		candidate_size = sizeof(candidate);
 	memset(candidate, 0, sizeof(candidate));
-	memcpy(candidate, data, size < sizeof(candidate) ? size : sizeof(candidate));
-	if (cryc_mlkem768_check_ek(candidate) == 0)
+	memcpy(candidate, data, candidate_size);
+	status = cryc_mlkem768_check_ek(candidate);
+	if (status == 0)
 		cryc_mlkem768_encaps_internal(shared, ciphertext, candidate, seed);
 
 	/* The public import of the raw key, of any length. */
 	key = EVP_PKEY_new_raw_public_key_ex(NULL, "ML-KEM-768", NULL, data, size);
 	EVP_PKEY_free(key);
+
+	/* The input never fails the run on its own. */
 	return 0;
 }
