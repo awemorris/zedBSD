@@ -78,7 +78,8 @@ struct usb_hid {
 	struct drv_usb_urb *urb;
 	/*
 	 * The devices the report descriptor declares and the events of its
-	 * reports (the HID input glue, ws143-p005), NULL for a raw interface.
+	 * reports (the HID input glue, ws143-p005), NULL for a raw or a
+	 * drained interface.
 	 */
 	struct hid_input *hidinput;
 	struct thread *worker;
@@ -130,6 +131,14 @@ struct usb_hid {
 	struct drv_hidraw *hidraw;
 	struct drv_usb_endpoint *out_endpoint;
 	uint8_t *out_buffer;
+	/*
+	 * An interface whose top collections are all vendor-defined (a
+	 * receiver's own protocol, such as Logitech's HID++ beside its mouse
+	 * and keyboard) publishes nothing, but its interrupt transfer is kept
+	 * armed and its reports are dropped: a device may hold back its other
+	 * interfaces' reports while its own wait unread.
+	 */
+	unsigned drain;
 	/*
 	 * BUG-267: the step of the attachment under way, named in the
 	 * kernel's log when it fails, and how many of the interface's reports
@@ -410,7 +419,7 @@ usb_hid_attach(
 		goto fail;
 
 	/* A digitizer's fingers rather than its mouse (BUG-267); a device that refuses keeps working as it starts. */
-	if (!hid->raw) {
+	if (!hid->raw && !hid->drain) {
 		error = usb_hid_set_device_mode(hid);
 		hid->fingers = 0U;
 		if ((error == 0 || error == ENOENT) && drv_hid_input_touch_screen(hid->hidinput))
@@ -762,6 +771,18 @@ usb_hid_fetch_layout(
 			hid->buffer_size = capacity;
 			return 0;
 		}
+
+		/* A vendor's interface alone is read and its reports dropped (struct usb_hid's drain). */
+		if (raw == 0 && hid->raw_layout.vendor_only) {
+			kern_free(descriptor);
+			hid->drain = 1U;
+			hid->stage = "capacity";
+			error = usb_hid_endpoint_capacity(hid->interface, hid->endpoint, &capacity);
+			if (error != 0)
+				return error;
+			hid->buffer_size = capacity;
+			return 0;
+		}
 	}
 
 	/* Any other interface's descriptor is parsed for its input. */
@@ -911,6 +932,12 @@ usb_hid_identity(
 		return;
 	}
 
+	/* So is a vendor's interface that is only drained. */
+	if (hid->drain) {
+		(void)kern_snprintf(hid->name, sizeof(hid->name), "USB HID vendor interface");
+		return;
+	}
+
 	/* Any other device without a name is named after what it chiefly is. */
 	kind = drv_hid_input_kind(hid->hidinput);
 	switch (kind) {
@@ -1055,6 +1082,10 @@ usb_hid_publish_report(
 		hid->reports_dumped++;
 		usb_hid_log_hex(hid, "usb-hid-report", buffer, length);
 	}
+
+	/* A drained interface's report goes no further. */
+	if (hid->drain)
+		return;
 
 	/* The glue decodes the report and tells the devices what changed. */
 	drv_hid_input_report(hid->hidinput, buffer, length, milliseconds);
@@ -1392,18 +1423,18 @@ usb_hid_activate_start(
 	identity.id.vendor = usb_descriptor->vendor;
 	identity.id.product = usb_descriptor->product;
 	identity.id.version = usb_descriptor->device_release;
-	if (!hid->raw)
+	if (!hid->raw && !hid->drain)
 		identity.flags = usb_hid_publish_flags(hid);
 
 	/*
 	 * The interface's own device, unless the interface is a touch screen
 	 * and nothing else (its own capabilities are then EV_SYN alone); a
-	 * raw interface's node in place of both.
+	 * raw interface's node in place of both; nothing for a drained one.
 	 */
 	error = 0;
 	if (hid->raw)
 		error = usb_hid_raw_publish(hid);
-	else
+	else if (!hid->drain)
 		error = drv_hid_input_publish(hid->hidinput, &identity);
 
 	/* A failed publication takes back what was published and stops the worker. */
@@ -1433,6 +1464,15 @@ usb_hid_activate_start(
 
 	/* The worker takes the reports from now on. */
 	thread_start(worker);
+	if (hid->drain) {
+		kern_logf("usb-hid: drained vendor interface usb%u device=%u interface=%u endpoint=%02x report-bytes=%u\n",
+			  drv_usb_bus_number(drv_usb_device_bus(hid->device)),
+			  drv_usb_device_address(hid->device),
+			  drv_usb_interface_number(hid->interface),
+			  drv_usb_endpoint_address(hid->endpoint),
+			  (unsigned)hid->buffer_size);
+		return 0;
+	}
 	kern_logf("usb-hid: event device usb%u device=%u interface=%u endpoint=%02x report-bytes=%u\n",
 		  drv_usb_bus_number(drv_usb_device_bus(hid->device)),
 		  drv_usb_device_address(hid->device),
