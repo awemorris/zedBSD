@@ -22,3 +22,5 @@ Parent: [WS335](../ws.md)。担当: conformance-reviewer（他に作業が無い
 ## Q1 の追記（2026-11-02 02:35）
 
 - p028 の結果から: ServerHello・HelloRetryRequest で、知っていてその message に指定の無い拡張は RFC 8446 4.2 どおり illegal_parameter、送っていない拡張は unsupported_extension に分ける（sslc-msg.c と header の comment）。`sslc_msg_write_client_hello` の EINVAL の一覧も header に足す。
+
+- （2026-11-02 11:50 Q1、p038 から）cryc-chain.h と cryc-chain.c: 知らない critical の拡張を持つ anchor を断る。run-unit.sh の 1 本あたりの timeout を 1200 秒に。

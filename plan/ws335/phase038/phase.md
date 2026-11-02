@@ -2,7 +2,7 @@
 
 # ws335-p038: x509-limbo の全件の照合（path validation の適合）
 
-Status: 実装済み・試験 PASS（2026-11-02 P7。cleared は Q1）。前: in-progress（2026-11-02 10:10 P7）。前: planned（2026-11-01 p001 が design-review の指摘 23・27 を受けて p020 から分けた。依存: p020）
+Status: cleared（2026-11-02 11:50 Q1）。前: 実装済み・試験 PASS（2026-11-02 P7。cleared は Q1）。前: in-progress（2026-11-02 10:10 P7）。前: planned（2026-11-01 p001 が design-review の指摘 23・27 を受けて p020 から分けた。依存: p020）
 Parent: [WS335](../ws.md)。担当: Opus（違いの理由の判断が要る）。
 
 - `plan/ws335/tests/unit/test-limbo.c`: `WS335_VECTORS/rec/limbo.vec` の SERVER の 9,792 件を cryc_chain_verify（store に trusted、peer に leaf と untrusted、params に time・peer の名前・max_depth）で流し、期待（SUCCESS・FAILURE）との一致の数を数える。

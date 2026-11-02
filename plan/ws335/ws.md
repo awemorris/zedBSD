@@ -75,7 +75,15 @@
 | [p035](phase035/phase.md) | 規約の全文の見直しと header の持ち越しの直し | planned | p034 |
 | [p036](phase036/phase.md) | 提案（U2 は A で答え済み）: net/tls.c の libssl-compat への切り替え（zedBSD は開く名前、Windows は static link の表）。WS074・WS334 と調整 | planning | p033、WS334 の p022・p030 |
 | [p037](phase037/phase.md) | 試験の道具: scripted な TLS server（tlspeer.h）と試験の側の ECDSA の署名器（Opus。p029〜p032 が使う） | cleared（2026-11-02 03:59 Q1、main で test-tlspeer 35566 PASS）。実装済み・試験 PASS（2026-11-02 04:20 P6 q1904-i01。test-tlspeer 35566 checks、posix・win32 PASS、RFC 8448 3・5 節の server の側を byte ごとに再生、24 通りの壊しは全部 FAIL。RSA の秘密鍵は持たない（Q1 の判断、RSA の server は p033）。cleared は Q1） | p025、p026、p027、p011、p008 |
-| [p038](phase038/phase.md) | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類（Opus） | 実装済み・試験 PASS（2026-11-02 P7 q1929-i01。test-limbo 95464 checks、posix・win32 PASS、9,792 件のうち一致 9,733・理由つきの違い 59（issuance 11・cabf 23・no-crl 10・name 4・no-mldsa 3・anchor 2・key-usage 2・nc-leaf 2・depth 1・nc-noncritical 1）・理由の無い違い 0。cryc の欠陥は無し。16 枚を越える list は名前で辿れる certificate に減らしてから切る（bettertls pathbuilding の 20 件が path の組み立てを経る）。anchor の制約・CA/B Forum の規則・先頭の dot は Q1 に案を返した。cleared は Q1） | p020 |
+| [p038](phase038/phase.md) | x509-limbo の SERVER 全 9,792 件の照合と違いの理由の分類（Opus） | cleared（2026-11-02 11:50 Q1、limbo 9,792 件のうち 9,733 件が一致・59 件は理由付き・理由の無い違い 0。Q1 の判断は ws.md の「Q1 の判断（p038）」）。実装済み・試験 PASS（2026-11-02 P7 q1929-i01。test-limbo 95464 checks、posix・win32 PASS、9,792 件のうち一致 9,733・理由つきの違い 59（issuance 11・cabf 23・no-crl 10・name 4・no-mldsa 3・anchor 2・key-usage 2・nc-leaf 2・depth 1・nc-noncritical 1）・理由の無い違い 0。cryc の欠陥は無し。16 枚を越える list は名前で辿れる certificate に減らしてから切る（bettertls pathbuilding の 20 件が path の組み立てを経る）。anchor の制約・CA/B Forum の規則・先頭の dot は Q1 に案を返した。cleared は Q1） | p020 |
 | [p039](phase039/phase.md) | zedBSD の libcrypto-compat.so（build の規則・exports・package と image の登録、`sources.mk`）。TLS は無し。WS336 の zedBSD の Phase が待つ | cleared（2026-11-02 10:21 Q1、main で libcrypto-compat.so の build warning 0・check-exports PASS。version node は置かない（Q1、p035 で design.md を直す）。dlclose の NODELETE は BUG-409）。実装済み・試験 PASS（2026-11-02 10:20 Sonnet 5.5 q1925-i01。amd64・aarch64・riscv64 の libcrypto-compat.so が warning 0 で build、check-dynamic-elf と check-exports PASS、QEMU の serial で crypto-smoke 47 checks PASS、run-unit all・check-skeleton PASS。map は version node 無し（Q1 承認）。ld.so が NODELETE を守らない件は phase039 の結果に。cleared は Q1） | p023、p024 |
 
 - 2026-11-02 03:56 Q1: check-skeleton の BASE は 641a2f195 に移す（p015 で Q1 が run-unit.sh に Wine の LC_ALL=C.UTF-8 を足したため。header と道具はこの commit で固定）。
+
+
+## Q1 の判断（2026-11-02 11:50、p038 の問い）
+
+- 信頼の起点（anchor）: 知らない critical の拡張を持つ anchor は断る（B）。basicConstraints は anchor に求めない（Windows の ROOT の store の版 1 の root を断らないため）。cryc-chain.h の 1 文と実装の変更は p035 で行う。
+- CA/Browser Forum の規則（23 件）は守らせない。D11（RFC 5280 6.1 の web PKI の client）のとおり。private な CA（例: mail の試験の server の証明書は EKU を持たない）を断らないため。
+- dNSName の制限の先頭の「.」は、今の header の規則（その下の名前だけ）のまま。
+- run-unit.sh の 1 本あたりの timeout（600 秒）に test-limbo（ASan で約 6 分）が近い。p035 で timeout を 1200 秒にする（試験の道具の変更、Q1 の判断）。
