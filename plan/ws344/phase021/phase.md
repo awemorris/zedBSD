@@ -2,7 +2,7 @@
 
 # ws344-p021 libbrowser への組み込み
 
-- Status: planned
+- Status: in-progress（P2、q1979-i01。実装済み・試験 PASS、cleared は Q1 が決める）
 - 親: [ws.md](../ws.md)、設計: [design.md](../design.md)。担当の model: Opus を推す（phase-runner）。依存: p020。
 - 目的: img_sniff の RIFF/WEBP、img_decode の WebP の枝（image/webp.c）、link、Accept、Windows の build、QEMU の頁の試験。BUG-405 の直し。
 - 基点の SHA（header と道具の凍結）: `aa2426a5763975c358cf667aff3e17bfb841b7e2`。
@@ -68,4 +68,17 @@ git diff --check
 
 ## 結果
 
-（未着手）
+（2026-11-02 17:47、P2、q1979-i01）
+
+- 変えた物: `userland/desktop/libbrowser/image/image.h`（IMG_WEBP、img_decode_webp、先頭の comment）、`image/decode.c`（img_sniff: 14 byte で「RIFF」+ 4 byte +「WEBPVP」、MIME Sniffing の image の型、img_decode の枝）、`image/webp.c`（新しい: WebPGetInfo → img_bitmap_create（IMG_PIXELS_MAX で断る）→ 機械の byte の順で WebPDecodeBGRAInto か WebPDecodeARGBInto で bitmap の画素に直に。失敗は EINVAL、animation も EINVAL（ENOTSUP は SVG に回るので使わない）。thread は足していない、今の image decode の thread のまま）、`sources.mk`、libbrowser の `Makefile`（依存に desktop/libwebp-compat）、`platform/common/userland-dynamic.mk`（libbrowser.so の依存・`-l:libwebp-compat.so`・`--needed libwebp-compat.so`）、`net/http.c`（画像の Accept を `image/webp,image/png,image/jpeg,image/gif` に、comment）、`plan/ws074/tests/host-build.sh`（host の engine の build に libwebp-compat の source、WS074 の道具だが libbrowser の link に要る）、`plan/tools/boot-test.py`・`boot-test.sh`（Q1 の指示: 既定の login の正規表現を `(?:^(?:\S+ )?|\S)login: ?` にし、他の出力が同じ行に続いた prompt も認める）。Windows の build は p020 で libwebp-compat の static library を link 済み（Makefile の変更は無い）。
+- 新しい試験の道具（`plan/ws344/tests/browser/`）: `host-image.c`・`run-host-image.sh`（libbrowser の image/*.c と compat の library を host で ASan・UBSan で build し、各 WebP を img_sniff・img_decode して dwebp の -pam の RGBA から作った 0xAARRGGBB と全画素比べる。dwebp が断る file は EINVAL。`EXTRA=DIR` の file も）。
+- 確かめた事（PATH=/usr/bin:$PATH）:
+  - `sh plan/ws344/tests/browser/run-host-image.sh` に `EXTRA=build/tmp/ws344-p021/img`（about.google の画像）→ `host-image: PASS (365 files)`。conformance の集合で `PASS (221 files)`。about.google の 9 枚の `<img src>` のうち 7 枚が WebP（`about-homepage-3up-research.png=…-rw`・`g-about-gatg.png=…-rw` の拡張子 .png を含む、VP8 と VP8X）で、全部が dwebp と全画素一致（543x305 ほか）。2 枚は SVG。
+  - host の browser: `sh plan/ws074/tests/host-build.sh plain`（rc 0）、about.google の HTML を curl で取り `<base href="https://about.google/">` を足し script と iframe を除いた複写を `build/ws074-host/plain/browser --render --output=... --width=1280 --height=3200 --settle-ms=20000 --font=…Mahora-Regular.ttf --mono-font=…JetBrainsMono-Regular.ttf --fallback-font=…DroidSansFallbackFull.ttf` で描いた（rc 0）。hero・3 列のカード・Suncatcher の地球などの画像が全部出た（`build/review/ws344-p021-about-host.png`、1280x2400 を半分に縮めた物）。script を残した頁は host の `--render` が settle で ENOENT を返して描けなかった（この Phase の外の host の mode の事情。window の browser・Windows の利用者の頁の読みとは別）。
+  - Wine: `make -f apps/browser-win32/Makefile WIN32_ARCH=x86_64 LLVM_MINGW=$HOME/opt/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64 BROWSER_WIN32_BUILD=build/ws344-win64-full program`（OpenSSL と取得物は main の build/browser-win64 から複写、warning 0、libwebp-compat の .o.log も空）→ OmniGrammaton.exe。`wine OmniGrammaton.exe --render ...` で同じ頁を描き（rc 0）、出力は host の browser の出力と byte ごとに同一（`build/review/ws344-p021-about-wine.png`）。
+  - WS074 の image の host 試験（repository の root から）: host-document-images 10/10、host-image-geometry 10/10、host-image-zero 10/10、host-tall-image 15 checks 0 failed。
+  - zedBSD の target: 共有の sysroot（Q1 が作り直した物）で `make ZEDBSD_CONFIG=config/ci/config-amd64.mk ... BUILD=build/ws344-amd64 build/ws344-amd64/dynamic/libbrowser.so build/ws344-amd64/bin/browser` → rc 0、warning 0、libbrowser.so の NEEDED に libwebp-compat.so。target-build.sh の worktree の sysroot の複写は libkeiland の header が古く browser の build が通らなかった（共有の sysroot が作り直された今は複写を使わない）。
+  - boot-test: 新しい正規表現の照合（`zedbsd login:`・`...writelogin:`・`Last login:` は合い、`init: system running` は合わない）、`plan/tools/boot-test.sh build/ws344-guest/hdd-image.img` → `boot-test: PASS`（前は同じ image で never saw）。
+  - `BASE=aa2426a5763975c358cf667aff3e17bfb841b7e2 sh plan/ws344/tests/check-skeleton.sh` → `PASS`、`git diff --check` は出力無し。
+- BUG-405 と Bug Board の行を fixed（merge と Q1 の確かめ待ち）にした。
+- 未実施: QEMU の zedBSD の browser での WebP の頁（browser の image が要る大きな build、host と Wine と guest の driver（p020）で代えた）、実機の Windows の UAT（ユーザーが拾える試験へ）、arm64・riscv64 の libbrowser の build。

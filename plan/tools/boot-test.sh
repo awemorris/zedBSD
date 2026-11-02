@@ -23,7 +23,8 @@
 #                  armv7-virt or sun4u
 #   BOOT_PATTERN   what the screen must show, one regular expression per line;
 #                  every one must be seen on some screen (default the login
-#                  prompt, ^(?:\S+ )?login: ?)
+#                  prompt, (?:^(?:\S+ )?|\S)login: ?, also when other output
+#                  runs into it on its line)
 #   BOOT_THEN      steps after the patterns were seen, one per line:
 #                  "type:TEXT" types TEXT and a return on the guest's serial
 #                  line, "keys:TEXT" types TEXT and a return on the emulated

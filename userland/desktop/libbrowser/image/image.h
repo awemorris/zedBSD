@@ -8,9 +8,9 @@
 /*
  * Images (plan/ws074/design.md §10): the kind of an image told from its
  * first bytes, and its decoding into a bitmap the renderers draw.  JPEG
- * goes through libjpeg-compat, PNG through libpng-compat and GIF through
- * libgif-compat (the first frame); the module depends on nothing of the
- * browser but base.
+ * goes through libjpeg-compat, PNG through libpng-compat, GIF through
+ * libgif-compat (the first frame) and WebP through libwebp-compat (still
+ * images); the module depends on nothing of the browser but base.
  */
 
 #ifndef KEILAND_BROWSER_IMAGE_H
@@ -24,7 +24,8 @@ enum img_kind {
 	IMG_UNKNOWN,
 	IMG_JPEG,
 	IMG_PNG,
-	IMG_GIF
+	IMG_GIF,
+	IMG_WEBP
 };
 
 /*
@@ -76,5 +77,6 @@ void img_bitmap_renew(struct img_bitmap *bitmap);
 int img_decode_jpeg(const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
 int img_decode_png(const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
 int img_decode_gif(const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
+int img_decode_webp(const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
 
 #endif
