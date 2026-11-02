@@ -130,6 +130,37 @@ test_read_file(
 	fclose(file);
 }
 
+/* The descriptor the standard error stream had before a capture, and the capture file. */
+static int saved_stderr = -1;
+static char capture_path[600];
+
+/* Sends the standard error stream into a new file. */
+static void
+test_capture_start(void)
+{
+	int descriptor;
+
+	fflush(stderr);
+	snprintf(capture_path, sizeof(capture_path), "%s/stderr", directory);
+	descriptor = open(capture_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	CHECK(descriptor >= 0);
+	saved_stderr = dup(STDERR_FILENO);
+	dup2(descriptor, STDERR_FILENO);
+	close(descriptor);
+}
+
+/* Puts the standard error stream back and reads what was captured. */
+static void
+test_capture_end(
+	char *out,
+	size_t capacity)
+{
+	fflush(stderr);
+	dup2(saved_stderr, STDERR_FILENO);
+	close(saved_stderr);
+	test_read_file(capture_path, out, capacity);
+}
+
 /* Builds argv from a NUL-separated list of words ending with an empty word, into words. */
 static int
 test_argv(
@@ -189,6 +220,13 @@ test_args(void)
 	static const char *const last_at[] = { "ssh", "a@b@host", NULL };
 	static const char *const n_with_command[] = { "ssh", "-N", "host", "ls", NULL };
 	static const char *const dash_alone[] = { "ssh", "-", NULL };
+	static const char *const dash_then_host[] = { "ssh", "-", "host", NULL };
+	static const char *const p_last[] = { "ssh", "-v", "-p", NULL };
+	static char storage[8192];
+	static char *argv[16];
+	char error[256];
+	char *long_word;
+	int argc;
 	struct ssh_client_args args;
 	char long_host[SSH_HOST_MAX + 2];
 	char long_user[SSH_USER_MAX + 2 + 6];
@@ -257,6 +295,12 @@ test_args(void)
 	CHECK_EQ(test_parse(empty_host, &args), EINVAL);
 	CHECK_EQ(test_parse(n_with_command, &args), EINVAL);
 	CHECK_EQ(test_parse(dash_alone, &args), EINVAL);
+	CHECK_EQ(test_parse(dash_then_host, &args), EINVAL);
+
+	/* An option without its value says so (not that the destination is missing). */
+	argc = test_argv(argv, storage, p_last);
+	CHECK_EQ(ssh_client_parse_args(argc, argv, &args, error, sizeof(error)), EINVAL);
+	CHECK(strcmp(error, "option -p needs an argument") == 0);
 
 	/* The user ends at the last '@'. */
 	CHECK_EQ(test_parse(last_at, &args), 0);
@@ -303,6 +347,41 @@ test_args(void)
 	CHECK_EQ(command.size, 7);
 	CHECK(memcmp(command.data, "ls -l /", 7) == 0);
 	ssh_buf_free(&command);
+
+	/* A command of exactly SSH_CLIENT_COMMAND_MAX bytes is taken, one byte more is EMSGSIZE. */
+	long_word = malloc(SSH_CLIENT_COMMAND_MAX + 2U);
+	CHECK(long_word != NULL);
+	if (long_word == NULL)
+		return;
+	memset(long_word, 'c', SSH_CLIENT_COMMAND_MAX + 1U);
+	long_word[SSH_CLIENT_COMMAND_MAX - 2U] = '\0';
+	args.command[0] = long_word;
+	args.command[1] = "x";
+	args.command_count = 2;
+	ssh_buf_init(&command, SSH_CLIENT_COMMAND_MAX, 0);
+	CHECK_EQ(ssh_client_join_command(&args, &command), 0);
+	CHECK_EQ(command.size, SSH_CLIENT_COMMAND_MAX);
+	ssh_buf_free(&command);
+	args.command[1] = "xy";
+	ssh_buf_init(&command, SSH_CLIENT_COMMAND_MAX, 0);
+	CHECK_EQ(ssh_client_join_command(&args, &command), EMSGSIZE);
+	ssh_buf_free(&command);
+	ssh_buf_init(&command, 2U * SSH_CLIENT_COMMAND_MAX, 0);
+	CHECK_EQ(ssh_client_join_command(&args, &command), EMSGSIZE);
+	ssh_buf_free(&command);
+	long_word[SSH_CLIENT_COMMAND_MAX - 2U] = 'c';
+	long_word[SSH_CLIENT_COMMAND_MAX] = '\0';
+	args.command_count = 1;
+	ssh_buf_init(&command, SSH_CLIENT_COMMAND_MAX, 0);
+	CHECK_EQ(ssh_client_join_command(&args, &command), 0);
+	CHECK_EQ(command.size, SSH_CLIENT_COMMAND_MAX);
+	ssh_buf_free(&command);
+	args.command_count = 2;
+	args.command[1] = "";
+	ssh_buf_init(&command, SSH_CLIENT_COMMAND_MAX, 0);
+	CHECK_EQ(ssh_client_join_command(&args, &command), EMSGSIZE);
+	ssh_buf_free(&command);
+	free(long_word);
 }
 
 /* Applies the words' settings and returns the error. */
@@ -494,6 +573,7 @@ test_check_host_key(void)
 	char home_path[SSH_CLIENT_PATH_MAX];
 	char text[4096];
 	char expected[4096];
+	char captured[1024];
 	const char *options[6];
 	struct stat information;
 	int status;
@@ -534,10 +614,14 @@ test_check_host_key(void)
 	CHECK_EQ(ssh_client_check_host_key(&client, blob1.data, blob1.size), EACCES);
 	CHECK_EQ(client.have_host_key, 0);
 
-	/* Port 22 is named without brackets. */
+	/* Port 22 is named without brackets, in the file and in the message. */
 	options[2] = "StrictHostKeyChecking no";
 	test_client_setup(options, "example.org", 22);
+	client.log_level = SSH_CLIENT_LOG_INFO;
+	test_capture_start();
 	CHECK_EQ(ssh_client_check_host_key(&client, blob2.data, blob2.size), 0);
+	test_capture_end(captured, sizeof(captured));
+	CHECK(strcmp(captured, "Warning: Permanently added 'example.org' (ED25519) to the list of known hosts.\n") == 0);
 	test_read_file(user_path, text, sizeof(text));
 	snprintf(expected, sizeof(expected), "[example.org]:2222 ssh-ed25519 %s\nexample.org ssh-ed25519 %s\n", base1, base2);
 	CHECK(strcmp(text, expected) == 0);
@@ -582,11 +666,15 @@ test_check_host_key(void)
 	snprintf(expected, sizeof(expected), "# no final newline\nnew.example ssh-ed25519 %s\n", base2);
 	CHECK(strcmp(text, expected) == 0);
 
-	/* "none" (read as /dev/null) adds nothing and accepts with "no". */
+	/* "none" (read as /dev/null) adds nothing, says nothing, and accepts with "no". */
 	options[0] = "UserKnownHostsFile none";
 	options[2] = "StrictHostKeyChecking no";
 	test_client_setup(options, "new.example", 22);
+	client.log_level = SSH_CLIENT_LOG_INFO;
+	test_capture_start();
 	CHECK_EQ(ssh_client_check_host_key(&client, blob1.data, blob1.size), 0);
+	test_capture_end(captured, sizeof(captured));
+	CHECK(strcmp(captured, "") == 0);
 
 	/* The default file under HOME: the missing key directory is made with mode 0700. */
 	snprintf(home_path, sizeof(home_path), "%s/home", directory);
@@ -605,6 +693,27 @@ test_check_host_key(void)
 	test_read_file(user_path, text, sizeof(text));
 	snprintf(expected, sizeof(expected), "[home.example]:2022 ssh-ed25519 %s\n", base1);
 	CHECK(strcmp(text, expected) == 0);
+
+	/* A missing directory other than the user's key directory is not made (the line is not written). */
+	snprintf(user_option, sizeof(user_option), "UserKnownHostsFile %s/missing/known_hosts", directory);
+	options[0] = user_option;
+	options[1] = "StrictHostKeyChecking accept-new";
+	options[2] = NULL;
+	test_client_setup(options, "home.example", 2022);
+	CHECK_EQ(ssh_client_check_host_key(&client, blob1.data, blob1.size), 0);
+	snprintf(user_path, sizeof(user_path), "%s/missing", directory);
+	status = stat(user_path, &information);
+	CHECK(status != 0);
+
+	/* Nor is the user's key directory made for a file elsewhere. */
+	snprintf(home_path, sizeof(home_path), "%s/home2", directory);
+	CHECK_EQ(mkdir(home_path, 0700), 0);
+	CHECK_EQ(setenv("HOME", home_path, 1), 0);
+	test_client_setup(options, "home.example", 2022);
+	CHECK_EQ(ssh_client_check_host_key(&client, blob1.data, blob1.size), 0);
+	snprintf(user_path, sizeof(user_path), "%s/.ssh", home_path);
+	status = stat(user_path, &information);
+	CHECK(status != 0);
 
 	/* A user file that cannot be read is a refusal. */
 	options[0] = "UserKnownHostsFile /";
@@ -733,6 +842,10 @@ test_reason_and_backlog(void)
 	CHECK_EQ(ssh_client_local_reason(&client, small, sizeof(small)), 1);
 	CHECK(strcmp(small, "no m") == 0);
 	CHECK_EQ(ssh_client_local_reason(&client, small, 0), 0);
+	CHECK_EQ(ssh_client_local_reason(&client, reason, 26), 1);
+	CHECK(strcmp(reason, "no matching kex_algorithm") == 0);
+	CHECK_EQ(ssh_client_local_reason(&client, reason, 27), 1);
+	CHECK(strcmp(reason, "no matching kex_algorithms") == 0);
 
 	/* Without the identification line in front (written already) it is found too. */
 	(void)ssh_transport_pending(&client.transport, &size);
@@ -776,7 +889,35 @@ test_reason_and_backlog(void)
 		CHECK_EQ(ssh_load_be32(client.backlog.data + offset + 5U), sent - kept + (unsigned)(offset / (4U + sizeof(message))));
 		offset += 4U + length;
 	}
+
+	/* The backlog's limit counts the length field: a message 2 bytes too big is refused, one that fits exactly is kept. */
+	CHECK_EQ(ssh_client_send(&client, message, SSH_CLIENT_BACKLOG_MAX - client.backlog.size - 2U), ENOBUFS);
+	size = client.backlog.size;
+	CHECK_EQ(ssh_client_send(&client, message, SSH_CLIENT_BACKLOG_MAX - client.backlog.size - 4U), 0);
+	CHECK_EQ(client.backlog.size, SSH_CLIENT_BACKLOG_MAX);
+	CHECK(client.backlog.size > size);
+	CHECK_EQ(ssh_client_send(&client, message, 1), ENOBUFS);
 	ssh_client_free(&client);
+}
+
+/* Reading a whole file within a limit. */
+static void
+test_read_limit(void)
+{
+	char path[600];
+	struct ssh_buf text;
+
+	snprintf(path, sizeof(path), "%s/ten", directory);
+	test_write_file(path, "0123456789");
+	ssh_buf_init(&text, 64, 0);
+	CHECK_EQ(ssh_client_read_file(path, &text, 10), 0);
+	CHECK_EQ(text.size, 10);
+	ssh_buf_free(&text);
+	CHECK_EQ(ssh_client_read_file(path, &text, 9), EMSGSIZE);
+	ssh_buf_free(&text);
+	snprintf(path, sizeof(path), "%s/absent", directory);
+	CHECK_EQ(ssh_client_read_file(path, &text, 9), ENOENT);
+	ssh_buf_free(&text);
 }
 
 /*
@@ -813,6 +954,7 @@ main(void)
 	test_escape();
 	test_paths();
 	test_reason_and_backlog();
+	test_read_limit();
 	ssh_client_free(&client);
 	return check_finish("client");
 }

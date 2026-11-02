@@ -122,6 +122,49 @@ def silent(port, seconds):
         except OSError:
             pass
 
+def owner(port, root):
+    inodes = set()
+    for line in open("/proc/net/tcp").read().splitlines()[1:]:
+        fields = line.split()
+        local, state, inode = fields[1], fields[3], fields[9]
+        if state == "0A" and local == "0100007F:%04X" % port:
+            inodes.add("socket:[%s]" % inode)
+    if not inodes:
+        return 1
+    children = {}
+    for entry in os.listdir("/proc"):
+        if entry.isdigit():
+            try:
+                parent = int(open("/proc/%s/stat" % entry).read().rsplit(")", 1)[1].split()[1])
+            except OSError:
+                continue
+            children.setdefault(parent, []).append(int(entry))
+    pending = [root]
+    while pending:
+        pid = pending.pop()
+        pending.extend(children.get(pid, []))
+        try:
+            links = [os.readlink("/proc/%d/fd/%s" % (pid, fd)) for fd in os.listdir("/proc/%d/fd" % pid)]
+        except OSError:
+            continue
+        if inodes & set(links):
+            return 0
+    return 1
+
+def closer(port, seconds):
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("127.0.0.1", port))
+    s.listen(4)
+    end = time.time() + seconds
+    s.settimeout(0.5)
+    while time.time() < end:
+        try:
+            c = s.accept()[0]
+            c.close()
+        except OSError:
+            pass
+
 def set_size(fd, rows, cols):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
@@ -184,6 +227,10 @@ elif what == "wait-port":
     sys.exit(wait_port(int(sys.argv[2]), float(sys.argv[3])))
 elif what == "silent":
     silent(int(sys.argv[2]), float(sys.argv[3]))
+elif what == "owner":
+    sys.exit(owner(int(sys.argv[2]), int(sys.argv[3])))
+elif what == "closer":
+    closer(int(sys.argv[2]), float(sys.argv[3]))
 elif what == "pty":
     sys.exit(run_pty(sys.argv[2:]))
 EOF
@@ -193,6 +240,7 @@ helper() {
 
 # The processes to stop at the end: each sshd and every process under it (a stopped one is continued first).
 server_pids=""
+owned=""
 stop_servers() {
 	for pid in $server_pids; do
 		"$python" -I - "$pid" <<'EOF'
@@ -224,6 +272,7 @@ EOF
 	server_pids=""
 }
 trap stop_servers EXIT
+trap 'stop_servers; exit 1' INT TERM HUP
 
 # The keys: the server's host key and a second key to stand for a changed one (OpenSSH's ssh-keygen, the server's
 # side), the user's key and a key the server does not know (zedBSD's ssh-keygen).
@@ -239,12 +288,25 @@ cp "$HOME/.ssh/id_ed25519.pub" "$work/server/authorized_keys"
 host_blob=$(cut -d ' ' -f 2 "$work/server/host_key.pub")
 other_blob=$(cut -d ' ' -f 2 "$work/server/other_key.pub")
 
-# start_sshd NAME PORT EXTRA-LINES: starts the host's sshd as this user with a configuration of its own.
+# start_sshd NAME PORT EXTRA-LINES: starts the host's sshd as this user with a configuration of its own, and fails
+# closed unless the listening socket of the port belongs to that sshd.  The sshd runs as this account, so every
+# command runs through the account's login shell with "-c" in its home directory: ForceCommand runs the client's
+# command with eval (or the instance's own command), so a session without a command (a shell request) never starts an
+# interactive login shell, which would write the account's history; PermitUserRC no keeps ~/.ssh/rc from running, and
+# AuthorizedKeysFile is the test's own, so the account's ~/.ssh is not read.
 start_sshd() {
 	name=$1
 	port=$2
 	extra=$3
 	{
+		echo "$extra"
+		echo "ForceCommand eval \"\$SSH_ORIGINAL_COMMAND\""
+		echo "PermitUserRC no"
+		echo "PermitUserEnvironment no"
+		echo "X11Forwarding no"
+		echo "AllowAgentForwarding no"
+		echo "AllowTcpForwarding no"
+		echo "PermitTunnel no"
 		echo "Port $port"
 		echo "ListenAddress 127.0.0.1"
 		echo "HostKey $work/server/host_key"
@@ -254,15 +316,31 @@ start_sshd() {
 		echo "StrictModes no"
 		echo "HostKeyAlgorithms ssh-ed25519"
 		echo "Ciphers chacha20-poly1305@openssh.com"
-		echo "$extra"
 	} > "$work/server/$name.conf"
 	timeout 600 "$sshd_program" -D -e -f "$work/server/$name.conf" > "$work/server/$name.log" 2>&1 &
-	server_pids="$server_pids $!"
+	started=$!
+	server_pids="$server_pids $started"
 	if ! helper wait-port "$port" 10; then
 		fail "sshd $name did not start (log $work/server/$name.log)"
 		return 1
 	fi
+	if ! helper owner "$port" "$started"; then
+		fail "port $port is not served by the test's sshd $name"
+		return 1
+	fi
+	owned="$owned $port $started"
 	return 0
+}
+
+# servers_owned: checks again, at the end, that every test port is still served by the test's own process.
+servers_owned() {
+	set -- $owned
+	while [ $# -ge 2 ]; do
+		if ! helper owner "$1" "$2"; then
+			fail "port $1 is no longer served by the test's process $2"
+		fi
+		shift 2
+	done
 }
 
 port_a=$(helper free-port)
@@ -270,6 +348,14 @@ port_rekey=$(helper free-port)
 port_old=$(helper free-port)
 port_password=$(helper free-port)
 port_silent=$(helper free-port)
+port_alive=$(helper free-port)
+port_shell=$(helper free-port)
+port_sh=$(helper free-port)
+port_tries=$(helper free-port)
+port_nosession=$(helper free-port)
+port_notty=$(helper free-port)
+port_closer=$(helper free-port)
+port_closed=$(helper free-port)
 start_sshd a "$port_a" "KexAlgorithms mlkem768x25519-sha256
 PasswordAuthentication no" || { echo "interop-host: FAIL"; exit 1; }
 start_sshd rekey "$port_rekey" "KexAlgorithms mlkem768x25519-sha256
@@ -279,9 +365,35 @@ start_sshd old "$port_old" "KexAlgorithms curve25519-sha256" || { echo "interop-
 start_sshd password "$port_password" "KexAlgorithms mlkem768x25519-sha256
 PasswordAuthentication yes
 PubkeyAuthentication no" || { echo "interop-host: FAIL"; exit 1; }
+start_sshd alive "$port_alive" "KexAlgorithms mlkem768x25519-sha256
+PasswordAuthentication no
+ClientAliveInterval 1
+ClientAliveCountMax 2" || { echo "interop-host: FAIL"; exit 1; }
+start_sshd shell "$port_shell" "KexAlgorithms mlkem768x25519-sha256
+PasswordAuthentication no
+ForceCommand tty; exit 6" || { echo "interop-host: FAIL"; exit 1; }
+start_sshd sh "$port_sh" "KexAlgorithms mlkem768x25519-sha256
+PasswordAuthentication no
+ForceCommand exec /bin/sh" || { echo "interop-host: FAIL"; exit 1; }
+start_sshd tries "$port_tries" "KexAlgorithms mlkem768x25519-sha256
+PasswordAuthentication no
+MaxAuthTries 1" || { echo "interop-host: FAIL"; exit 1; }
+start_sshd nosession "$port_nosession" "KexAlgorithms mlkem768x25519-sha256
+PasswordAuthentication no
+MaxSessions 0" || { echo "interop-host: FAIL"; exit 1; }
+start_sshd notty "$port_notty" "KexAlgorithms mlkem768x25519-sha256
+PasswordAuthentication no
+PermitTTY no" || { echo "interop-host: FAIL"; exit 1; }
 timeout 120 "$python" -I "$out/helper.py" silent "$port_silent" 110 &
 server_pids="$server_pids $!"
 helper wait-port "$port_silent" 10 || fail "the silent listener did not start"
+helper owner "$port_silent" "$!" || { echo "interop-host: FAIL (port $port_silent is not the test's)"; exit 1; }
+owned="$owned $port_silent $!"
+timeout 120 "$python" -I "$out/helper.py" closer "$port_closer" 110 &
+server_pids="$server_pids $!"
+helper wait-port "$port_closer" 10 || fail "the closing listener did not start"
+helper owner "$port_closer" "$!" || { echo "interop-host: FAIL (port $port_closer is not the test's)"; exit 1; }
+owned="$owned $port_closer $!"
 
 config="$work/ssh_config"
 cat > "$config" <<EOF
@@ -294,6 +406,8 @@ Host *
 EOF
 known="$HOME/.ssh/known_hosts"
 
+# No test asks for the user's own shell: a session without a command goes to a server whose ForceCommand runs /bin/sh
+# or a fixed command, so no interactive login shell of the account runs (it would write the account's history).
 # zssh ARGS...: zedBSD's ssh with the test's configuration and a time limit.
 zssh() {
 	timeout 60 "$ssh" -F "$config" "$@"
@@ -338,15 +452,21 @@ check "8 MiB round trip into a pipe is the same bytes" $?
 # --- -n, a shell fed by stdin, -N.
 zssh -n -p "$port_a" 127.0.0.1 cat > "$work/t8.out" 2>&1 < "$work/data8"
 expect_eq "-n gives the command an empty input" "$?:$(wc -c < "$work/t8.out" | tr -d ' ')" "0:0"
-echo 'echo shell-ran; exit 4' | zssh -p "$port_a" 127.0.0.1 > "$work/t9.out" 2> "$work/t9.err"
+echo 'echo shell-ran; exit 4' | zssh -o StrictHostKeyChecking=accept-new -p "$port_sh" 127.0.0.1 > "$work/t9.out" \
+    2> "$work/t9.err"
 expect_eq "a shell fed by stdin exit" "$?" 4
 expect_eq "a shell fed by stdin output" "$(cat "$work/t9.out")" shell-ran
-timeout 60 "$ssh" -F "$config" -N -p "$port_a" 127.0.0.1 > /dev/null 2> "$work/t10.err" &
+timeout 60 "$ssh" -F "$config" -o StrictHostKeyChecking=accept-new -N -p "$port_alive" 127.0.0.1 > /dev/null \
+    2> "$work/t10.err" &
 n_pid=$!
-sleep 2
+sleep 5
+kill -0 "$n_pid" 2>/dev/null
+check "-N answers the server's global keepalives and is still connected after 5 s" $?
 kill -TERM "$n_pid" 2>/dev/null
 wait "$n_pid"
 expect_eq "-N runs until a signal and gives 255" "$?" 255
+grep -q 'Killed by signal 15' "$work/t10.err"
+check "-N reports the signal" $?
 
 # --- a terminal: -tt with the size, a size change, and the "~." escape.
 helper pty "$work/pty1.out" 37 123 30 on SIZE1 resize 40:100 -- "$ssh" -F "$config" -tt -p "$port_a" 127.0.0.1 \
@@ -368,6 +488,23 @@ helper pty "$work/pty3.out" 24 80 30 on READY write '~~tilde a~b\r' -- "$ssh" -F
 expect_eq "~~ on a terminal exit" "$?" 0
 grep -q 'GOT\[~tilde a~b\]' "$work/pty3.out"
 check "~~ at the start of a line sends one ~, and a ~ inside a line is sent as it is" $?
+
+# (The server runs "tty; exit 6" in place of the shell, so no interactive shell of the user runs.)
+helper pty "$work/pty7.out" 24 80 30 -- "$ssh" -F "$config" -o StrictHostKeyChecking=accept-new -p "$port_shell" \
+    127.0.0.1
+expect_eq "a shell request on the terminal (no command, stdin a terminal) exit" "$?" 6
+grep -q '/dev/pts/' "$work/pty7.out"
+check "without a command and with a terminal, the remote shell gets a terminal" $?
+helper pty "$work/pty8.out" 24 80 30 -- "$ssh" -F "$config" -p "$port_a" 127.0.0.1 'tty; true'
+expect_eq "a command on the terminal without -t exit" "$?" 0
+grep -q 'not a tty' "$work/pty8.out"
+check "with a command and without -t, no terminal is asked for" $?
+echo 'tty' | zssh -t -p "$port_sh" 127.0.0.1 > "$work/t30.out" 2> "$work/t30.err"
+expect_eq "-t with stdin not a terminal exit" "$?" 1
+grep -q 'not a tty' "$work/t30.out"
+check "-t with stdin not a terminal asks for no terminal" $?
+grep -q 'Pseudo-terminal will not be allocated' "$work/t30.err"
+check "-t with stdin not a terminal says so" $?
 
 # --- known_hosts refusals and the question.
 printf '[127.0.0.1]:%s ssh-ed25519 %s\n' "$port_a" "$other_blob" > "$work/known_changed"
@@ -424,23 +561,31 @@ rekeys=$(grep -c 'host key checked again is the same' "$work/t18.err")
 check "the server re-keyed at least 60 times and the same host key was shown each time ($rekeys)" $?
 
 # --- ServerAliveInterval: answered keepalives, and a server that stops answering.
-zssh -o ServerAliveInterval=1 -p "$port_a" 127.0.0.1 'sleep 3; echo alive-ok' > "$work/t19.out" 2> "$work/t19.err"
+zssh -o ServerAliveInterval=1 -o ServerAliveCountMax=2 -p "$port_a" 127.0.0.1 'sleep 6; echo alive-ok' \
+    > "$work/t19.out" 2> "$work/t19.err"
 expect_eq "keepalives the server answers keep the session" "$?:$(cat "$work/t19.out")" "0:alive-ok"
 start=$(date +%s)
 zssh -o ServerAliveInterval=1 -o ServerAliveCountMax=2 -p "$port_a" 127.0.0.1 'kill -STOP $PPID; sleep 50' \
     > "$work/t20.out" 2> "$work/t20.err"
 expect_eq "a server that stops answering keepalives gives 255" "$?" 255
 elapsed=$(( $(date +%s) - start ))
-[ "$elapsed" -lt 20 ]
-check "the unanswered keepalives end it in a few seconds (took ${elapsed} s)" $?
+[ "$elapsed" -le 8 ]
+check "two unanswered keepalives a second apart end it in about 3 s (took ${elapsed} s)" $?
 grep -q 'not responding' "$work/t20.err"
 check "the timeout is reported" $?
+
+# --- the server's keepalives (ClientAliveInterval) are answered.
+zssh -o StrictHostKeyChecking=accept-new -p "$port_alive" 127.0.0.1 'sleep 6; echo client-alive-ok' > "$work/t29.out" \
+    2> "$work/t29.err"
+expect_eq "the server's keepalives are answered and the session lasts" "$?:$(cat "$work/t29.out")" "0:client-alive-ok"
 
 # --- a server without the key exchange: "no matching", 255.
 zssh -o StrictHostKeyChecking=accept-new -p "$port_old" 127.0.0.1 'echo reached' > "$work/t21.out" 2> "$work/t21.err"
 expect_eq "a server with only curve25519-sha256 gives 255" "$?:$(cat "$work/t21.out")" "255:"
 grep -q 'no matching key exchange method' "$work/t21.err"
 check "the failed key exchange says no matching key exchange method" $?
+crs=$(tr -cd '\r' < "$work/t21.err" | wc -c | tr -d ' ')
+expect_eq "messages without a terminal end with LF alone" "$crs" 0
 
 # --- ConnectTimeout against a server that never sends its identification.
 start=$(date +%s)
@@ -463,7 +608,7 @@ expect_eq "a missing identity file named with -i gives 255" "$?" 255
 grep -q 'not accessible' "$work/t25.err"
 check "a missing identity file named with -i is reported" $?
 cp "$HOME/.ssh/id_ed25519" "$work/open_key"
-chmod 644 "$work/open_key"
+chmod 604 "$work/open_key"
 zssh -i "$work/open_key" -p "$port_a" 127.0.0.1 'echo reached' > "$work/t26.out" 2> "$work/t26.err"
 expect_eq "a key file others may read is not used" "$?:$(cat "$work/t26.out")" "255:"
 zssh -o StrictHostKeyChecking=accept-new -p "$port_password" 127.0.0.1 'echo reached' > "$work/t27.out" \
@@ -477,10 +622,49 @@ expect_eq "the password is asked three times" "$prompts" 3
 grep -q 'wrong-' "$work/pty6.out"
 expect_eq "the password is not echoed" "$?" 1
 
+chmod 640 "$work/open_key"
+zssh -i "$work/open_key" -p "$port_a" 127.0.0.1 'echo reached' > "$work/t31.out" 2> "$work/t31.err"
+expect_eq "a key file the group may read is not used" "$?:$(cat "$work/t31.out")" "255:"
+helper pty "$work/pty9.out" 24 80 30 -- "$ssh" -F "$config" -o BatchMode=yes -p "$port_password" 127.0.0.1 'echo reached'
+expect_eq "batch mode on a terminal gives 255" "$?" 255
+grep -q 'password:' "$work/pty9.out"
+expect_eq "batch mode asks no password even on a terminal" "$?" 1
+"$keygen" -q -t ed25519 -N '' -C stranger2 -f "$work/stranger_key2" > /dev/null 2>&1
+zssh -o StrictHostKeyChecking=accept-new -i "$work/stranger_key" -i "$work/stranger_key2" -p "$port_tries" 127.0.0.1 \
+    'echo reached' > "$work/t32.out" 2> "$work/t32.err"
+expect_eq "a server that ends the connection after too many tries gives 255" "$?:$(cat "$work/t32.out")" "255:"
+grep -q "Received disconnect from 127.0.0.1 port $port_tries:" "$work/t32.err"
+check "the server's DISCONNECT and its reason are shown" $?
+
+# --- channels refused, terminals refused, connections cut.
+zssh -o StrictHostKeyChecking=accept-new -p "$port_nosession" 127.0.0.1 'echo reached' > "$work/t33.out" \
+    2> "$work/t33.err"
+expect_eq "a refused session channel gives 255" "$?:$(cat "$work/t33.out")" "255:"
+grep -q 'open failed' "$work/t33.err"
+check "a refused session channel is reported" $?
+zssh -o StrictHostKeyChecking=accept-new -tt -p "$port_notty" 127.0.0.1 'echo notty-ok; exit 5' < /dev/null \
+    > "$work/t34.out" 2> "$work/t34.err"
+expect_eq "a refused terminal: the command still runs" "$?:$(tr -d '\r' < "$work/t34.out")" "5:notty-ok"
+grep -q 'PTY allocation request failed' "$work/t34.err"
+check "a refused terminal is reported" $?
+zssh -n -p "$port_a" 127.0.0.1 'kill -KILL $PPID; sleep 30' > "$work/t35.out" 2> "$work/t35.err"
+expect_eq "a connection cut under a running command gives 255" "$?" 255
+grep -q 'closed by remote host' "$work/t35.err"
+check "a connection cut under a running command is reported" $?
+zssh -p "$port_closer" 127.0.0.1 true > /dev/null 2> "$work/t36.err"
+expect_eq "a server that closes at once gives 255" "$?" 255
+grep -q "Connection closed by 127.0.0.1 port $port_closer" "$work/t36.err"
+check "a server that closes at once is reported" $?
+zssh -p "$port_closed" 127.0.0.1 true > /dev/null 2> "$work/t37.err"
+expect_eq "a port nobody listens on gives 255" "$?" 255
+grep -q "connect to host 127.0.0.1 port $port_closed: Connection refused" "$work/t37.err"
+check "a refused connection is reported" $?
+
 # --- the sshd processes are still serving after all of the above.
 zssh -p "$port_a" 127.0.0.1 'echo still-serving' > "$work/t28.out" 2> "$work/t28.err"
 expect_eq "the server still serves" "$?:$(cat "$work/t28.out")" "0:still-serving"
 
+servers_owned
 stop_servers
 sync
 pass
