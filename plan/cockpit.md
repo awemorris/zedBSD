@@ -11,7 +11,7 @@
 | P2 | — | 待機 | WS344（自前の WebP の decoder）p001 の設計を 13:21 に merge。実装は Sonnet ×3（p002・p003・p009）が始めた | p017・p019〜p021（Opus）の候補 |
 | P3 | — | 待機 | BUG-412（Pi 5 の click）は再現せず。compositor が client に渡さない press・release を `KWL PRESS` の行で session.log に出す口を 13:31 に merge（次に起きた時の材料） | — |
 | P4 | — | 待機 | WS319 の H.265 decode と Video Player の GPU の道を 12:03 に merge（q1926 cleared）。5330 は Debian で空き | — |
-| P5 | [WS336](ws336/ws.md) p008 | 自前の ssh・sshd | ssh-transport（q1932、Opus） | p015 以降 |
+| P5 | — | 待機 | WS336 p015（自前の ssh の client）を 13:46 に merge（host の OpenSSH の sshd と 93 項目 PASS） | p018（sshd の listener、p017 の後） |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p016（sshd の monitor）cleared。p017（sshd の pre-auth と session の process、q1944）に着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | [BUG-411](bugs/BUG-411.md) | ブラウザ | JS の engine の速さ（store.google.com の 17〜21 秒）と小さな残り（q1941）。UAT の 2 回目は BUG-402・403・404・406・407 が fixed、405 は WS344 | — |
