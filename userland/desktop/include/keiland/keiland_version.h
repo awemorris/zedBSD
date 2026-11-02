@@ -161,6 +161,7 @@ extern "C" {
  * 105: kl_window_vulkan_extensions, kl_app_storage_directory, kl_data_directory; a key event's text
  * 106: a titlebar's reload control, KL_CONTROL_RELOAD
  * 107: a boxed breadcrumb's load, KL_BREADCRUMB_PROGRESS (kl_titlebar_v1 version 7)
+ * 108: a network link's IPv6 addresses and router, kl_network_link's inet6_count, inet6 and router6
  *
  * The file chooser of KL_VERSION 12 moved to the widgets with KL_VERSION 16:
  * kl_file_chooser_* of <keiland/keiland_file_chooser.h>, made of the
@@ -170,7 +171,7 @@ extern "C" {
  * are kl_settings_* of <keiland/keiland_settings.h>, and desktop.conf is the
  * compositor's own file.
  */
-#define KL_VERSION 107U
+#define KL_VERSION 108U
 
 /*
  * Reports the interface version of the library that was loaded.

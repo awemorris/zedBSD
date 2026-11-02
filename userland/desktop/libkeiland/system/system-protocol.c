@@ -118,7 +118,7 @@ static const struct wl_message system_manager_events[] = {
 	{ "capabilities", "u", system_plain_types },
 };
 
-/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: seventeen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25; its methods since 26; the phone's messages since 27; the phone's contacts and calls since 28; media metadata since 29; the phone's calls since 33; the displays' angles since 34) and one event.  It lives for the program. */
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: seventeen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25; its methods since 26; the phone's messages since 27; the phone's contacts and calls since 28; media metadata since 29; the phone's calls since 33; the displays' angles since 34; the network's IPv6 since 35) and one event.  It lives for the program. */
 const struct wl_interface kl_system_manager_v1_interface = {
     KL_SYSTEM_MANAGER_NAME,
     KL_SYSTEM_MANAGER_VERSION,
@@ -174,15 +174,17 @@ static const struct wl_message system_network_events[] = {
 	{ "result", "uuu", system_plain_types },
 	{ "wired", "6sus", system_plain_types },
 	{ "link_speed", "12su", system_plain_types },
+	{ "link_inet6", "35ss", system_plain_types },
+	{ "link_router6", "35ss", system_plain_types },
 };
 
-/* kl_system_network_v1, version 12: six requests (set_scanning since 3, configure_wired since 6) and eleven events (wired since 6, link_speed since 12).  It lives for the program. */
+/* kl_system_network_v1, version 35: six requests (set_scanning since 3, configure_wired since 6) and thirteen events (wired since 6, link_speed since 12, link_inet6 and link_router6 since 35).  It lives for the program. */
 const struct wl_interface kl_system_network_v1_interface = {
 	KL_SYSTEM_NETWORK_NAME,
-	KL_SYSTEM_NETWORK_SINCE_LINK_SPEED,
+	KL_SYSTEM_NETWORK_SINCE_INET6,
 	6,
 	system_network_requests,
-	11,
+	13,
 	system_network_events
 };
 

@@ -12,11 +12,66 @@
 #include "network-wpa.h"
 #include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static int network_ack(struct kwpa_socket *connection, const char *command);
+static unsigned network_prefix6(const struct sockaddr *netmask);
+
+/*
+ * Adds an IPv6 address of getifaddrs to an interface as "ADDRESS/LENGTH",
+ * its length counted from the netmask: the global ones are kept before
+ * the link-local ones, a global one taking the place of a link-local one
+ * when the interface has no room left.
+ */
+void
+kwpa_link_inet6(
+	struct kl_backend_network_link *link,
+	const struct sockaddr *address,
+	const struct sockaddr *netmask)
+{
+	const struct sockaddr_in6 *inet6;
+	char text[INET6_ADDRSTRLEN];
+	const char *written;
+	unsigned slot;
+	unsigned index;
+	int differs;
+	int local;
+
+	/* Only an IPv6 address. */
+	if (link == NULL || address == NULL || address->sa_family != AF_INET6)
+		return;
+	inet6 = (const struct sockaddr_in6 *)address;
+	written = inet_ntop(AF_INET6, &inet6->sin6_addr, text, sizeof(text));
+	if (written == NULL)
+		return;
+	local = IN6_IS_ADDR_LINKLOCAL(&inet6->sin6_addr) ? 1 : 0;
+
+	/* A link-local one after the others; a global one before the first link-local one. */
+	slot = link->inet6_count;
+	if (!local) {
+		for (slot = 0; slot < link->inet6_count; slot++) {
+			differs = strncmp(link->inet6[slot], "fe80:", 5U);
+			if (differs == 0)
+				break;
+		}
+	}
+
+	/* No room left: a link-local one is dropped, a global one drops the last link-local one. */
+	if (link->inet6_count >= KL_BACKEND_NETWORK_INET6_COUNT) {
+		if (local || slot >= link->inet6_count)
+			return;
+		link->inet6_count--;
+	}
+
+	/* The ones after the slot move down, and the address takes it. */
+	for (index = link->inet6_count; index > slot; index--)
+		memcpy(link->inet6[index], link->inet6[index - 1U], sizeof(link->inet6[0]));
+	(void)snprintf(link->inet6[slot], sizeof(link->inet6[0]), "%s/%u", text, network_prefix6(netmask));
+	link->inet6_count++;
+}
 
 /*
  * Copies dotted IPv4 resolver addresses from the system configuration.
@@ -359,4 +414,33 @@ network_ack(
 
 	/* Succeeded: the daemon accepted this exact credential operation. */
 	return 0;
+}
+
+/* Counts the leading ones of an IPv6 netmask (128 when there is none). */
+static unsigned
+network_prefix6(
+	const struct sockaddr *netmask)
+{
+	const struct sockaddr_in6 *mask;
+	unsigned length;
+	unsigned byte;
+	unsigned bit;
+
+	/* A missing netmask is a host's address. */
+	if (netmask == NULL || netmask->sa_family != AF_INET6)
+		return 128U;
+	mask = (const struct sockaddr_in6 *)netmask;
+
+	/* The ones from the top, until the first zero. */
+	length = 0U;
+	for (byte = 0U; byte < 16U; byte++) {
+		for (bit = 0U; bit < 8U; bit++) {
+			if ((mask->sin6_addr.s6_addr[byte] & (0x80U >> bit)) == 0U)
+				return length;
+			length++;
+		}
+	}
+
+	/* Succeeded: every bit is one. */
+	return length;
 }

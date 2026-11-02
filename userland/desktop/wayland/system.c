@@ -317,6 +317,7 @@ static void system_network_change(struct kwl_object *object);
 static void system_network_state(struct kwl_object *object);
 static void system_network_scan(struct kwl_object *object);
 static void system_network_details_send(struct kwl_object *object);
+static void system_network_inet6_send(struct kwl_object *object, const struct kl_backend_network_link *link);
 static void system_network_finish(struct kwl_server *server, int error);
 static void system_network_job_next(struct kwl_server *server);
 static void system_details_read(struct kwl_server *server);
@@ -3050,6 +3051,10 @@ system_network_details_send(
 			offset = system_put_word(payload, offset, link->link_mbps);
 			(void)kwl_emit(object->client, object->id, KL_SYSTEM_NETWORK_EVENT_LINK_SPEED, payload, offset);
 		}
+
+		/* Its IPv6 addresses and the router of its IPv6 default route, to a client that knows them (since version 35). */
+		if (object->version >= KL_SYSTEM_NETWORK_SINCE_INET6)
+			system_network_inet6_send(object, link);
 	}
 
 	/* Each DNS server. */
@@ -3066,6 +3071,31 @@ system_network_details_send(
 
 	/* The end of the details. */
 	(void)kwl_emit(object->client, object->id, KL_SYSTEM_NETWORK_EVENT_DETAILS_DONE, NULL, 0U);
+}
+
+/* Sends an interface's IPv6 addresses, one event each, and the router of its IPv6 default route when it has one. */
+static void
+system_network_inet6_send(
+	struct kwl_object *object,
+	const struct kl_backend_network_link *link)
+{
+	unsigned char payload[SYSTEM_EVENT_MAX];
+	size_t offset;
+	unsigned index;
+
+	/* Each address, as the backend read them. */
+	for (index = 0; index < link->inet6_count && index < KL_BACKEND_NETWORK_INET6_COUNT; index++) {
+		offset = system_put_string(payload, 0U, link->name);
+		offset = system_put_string(payload, offset, link->inet6[index]);
+		(void)kwl_emit(object->client, object->id, KL_SYSTEM_NETWORK_EVENT_LINK_INET6, payload, offset);
+	}
+
+	/* The router, when there is one. */
+	if (link->router6[0] != '\0') {
+		offset = system_put_string(payload, 0U, link->name);
+		offset = system_put_string(payload, offset, link->router6);
+		(void)kwl_emit(object->client, object->id, KL_SYSTEM_NETWORK_EVENT_LINK_ROUTER6, payload, offset);
+	}
 }
 
 /*
