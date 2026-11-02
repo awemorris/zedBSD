@@ -15,6 +15,7 @@
 #include <drivers/pci/pci-xhci-control.h>
 #include <drivers/pci/pci-xhci-isoch.h>
 #include <drivers/pci/pci-xhci-lifecycle.h>
+#include <drivers/pci/pci-xhci-normal.h>
 #include <drivers/pci/pci-xhci-queue.h>
 #include <drivers/usb/usb.h>
 #include <kern/kcrt.h>
@@ -240,6 +241,17 @@ struct xhci_request {
 	int input;
 	unsigned cancelling, transfer_seen, completion_code;
 	unsigned short_seen;
+
+	/*
+	 * zero_packet: the request is a payload TD and then a TD of one
+	 * zero-length TRB, its last.  payload_seen: the payload TD's event
+	 * has come and the request waits for the zero-length TD's; the
+	 * payload's code, residual and TRB are kept to end the request with.
+	 * Under active_lock.
+	 */
+	unsigned zero_packet, payload_seen;
+	unsigned payload_code, payload_trb_offset;
+	size_t payload_residual;
 
 	/*
 	 * queued: the request is in its endpoint's queue.  aborted: it was
@@ -2835,6 +2847,8 @@ transfer_claim(
 	unsigned state;
 	unsigned ignored;
 	int normal_short_valid = 1;
+	enum drv_xhci_normal_event event_kind;
+	int payload_decides;
 	int isochronous;
 	int halts;
 	int stopped;
@@ -2916,6 +2930,41 @@ transfer_claim(
 
 		/* Not claimed. */
 		return 0;
+	}
+
+	/*
+	 * The payload TD of a request that ends with a zero-length TD has
+	 * ended without halting the endpoint, so the zero-length TD runs next:
+	 * the request waits for that TD's event and keeps what the payload
+	 * reported.
+	 */
+	event_kind = drv_xhci_normal_event_kind(
+		request->zero_packet != 0,
+		trb_offset,
+		request->trb_count,
+		code);
+	if (event_kind == DRV_XHCI_NORMAL_EVENT_WAIT_ZERO) {
+		request->payload_seen = 1U;
+		request->payload_code = code;
+		request->payload_residual = residual;
+		request->payload_trb_offset = trb_offset;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+
+		/* Claimed: the request stays at the head. */
+		return 1;
+	}
+
+	/*
+	 * The zero-length TD's event ends the request with what its payload
+	 * TD reported, when the payload did not succeed.
+	 */
+	payload_decides = drv_xhci_normal_payload_decides(
+		request->payload_seen != 0,
+		request->payload_code);
+	if (payload_decides) {
+		code = request->payload_code;
+		residual = request->payload_residual;
+		trb_offset = request->payload_trb_offset;
 	}
 
 	control_request = drv_usb_urb_control_request(request->urb);
@@ -3580,69 +3629,56 @@ enqueue_normal(
 	size_t maximum_packet_size,
 	int zero_packet)
 {
-	uint64_t function_result;
-	size_t chunk;
-	uint32_t control;
-	unsigned td_size;
-	int final;
-	unsigned count = normal_trb_count(address, length);
-	size_t cumulative = 0;
-	size_t total_length = length;
-	uint64_t final_trb = 0;
+	struct drv_xhci_normal_words words;
+	uint64_t final_trb;
+	size_t total_length, cumulative, chunk;
+	unsigned count;
+	int last_trb;
 
-	/* Checks the current data length. */
+	/* A transfer of no data is one zero-length TRB, its own TD. */
 	if (length == 0) {
-		/* Obtains the ring push result. */
-		function_result = ring_push(ring, address, 0,
-					    XHCI_TRB_TYPE(1) | XHCI_TRB_IOC);
+		final_trb = ring_push(ring, address, 0,
+				      XHCI_TRB_TYPE(1) | XHCI_TRB_IOC);
 
-		/* Returns the computed result. */
-		return function_result;
+		/* Succeeded: the TD's only TRB. */
+		return final_trb;
 	}
+
+	/* Splits the payload at each 64 KiB boundary into one TD of chained TRBs. */
+	count = normal_trb_count(address, length);
+	total_length = length;
+	cumulative = 0;
+	final_trb = 0;
 	while (length != 0) {
 		chunk = 0x10000U - (size_t)(address & 0xffffU);
-		control = XHCI_TRB_TYPE(1);
-
-		/* Handles the chunk condition. */
 		if (chunk > length)
 			chunk = length;
 		count--;
 		cumulative += chunk;
-
-		/* Validates the current input. */
-		if (input)
-			control |= DRV_XHCI_TRB_ISP;
-
-		/* Handles the final condition. */
-		final = count == 0 && !zero_packet;
-		if (!final)
-			control |= XHCI_TRB_CHAIN;
-		else
-			control |= XHCI_TRB_IOC;
-		td_size = drv_xhci_normal_td_size(total_length, cumulative,
-						  maximum_packet_size, final);
-
-		/*
-		 * A requested terminating zero packet is one more packet in
-		 * this TD. The final payload TRB therefore reports one packet
-		 * remaining instead of looking terminal to the controller.
-		 */
-		if (zero_packet && td_size < 31U)
-			td_size++;
-		final_trb =
-			ring_push(ring, address,
-				  (uint32_t)chunk | (td_size << 17), control);
+		last_trb = 0;
+		if (count == 0)
+			last_trb = 1;
+		drv_xhci_normal_payload_words(
+			chunk,
+			total_length,
+			cumulative,
+			maximum_packet_size,
+			input,
+			last_trb,
+			&words);
+		final_trb = ring_push(ring, address, words.status,
+				      words.control);
 		address += chunk;
 		length -= chunk;
 	}
 
-	/* Handles the zero packet condition. */
+	/* The terminating zero-length packet is a TD of its own after the payload's. */
 	if (zero_packet) {
-		final_trb = ring_push(ring, address, 0,
-				      XHCI_TRB_TYPE(1) | XHCI_TRB_IOC);
+		drv_xhci_normal_zero_words(&words);
+		final_trb = ring_push(ring, 0, words.status, words.control);
 	}
 
-	/* Returns the computed result. */
+	/* Succeeded: the last TRB pushed. */
 	return final_trb;
 }
 
@@ -4376,6 +4412,9 @@ xhci_urb_enqueue(
 	unsigned depth, queued, state;
 	unsigned long irq;
 	int e, input, zero_packet = 0;
+	int bulk, zero_requested;
+	enum drv_usb_transfer_type transfer_type;
+	unsigned urb_flags;
 
 	/* Handles the e condition. */
 	e = xhci_submission_enter(c);
@@ -4517,13 +4556,32 @@ xhci_urb_enqueue(
 			normal_count = normal_trb_count(dma, length);
 		}
 
-		zero_packet =
-			drv_usb_endpoint_type(drv_usb_urb_endpoint(u)) ==
-				DRV_USB_TRANSFER_BULK &&
-			!input && length != 0 &&
-			(drv_usb_urb_flags(u) & DRV_USB_URB_ZERO_PACKET) != 0 &&
-			length % maximum_packet_size == 0;
+		/*
+		 * A bulk OUT payload of whole packets whose class driver asked
+		 * for a terminating zero-length packet gets a second TD for it.
+		 */
+		transfer_type = drv_usb_endpoint_type(drv_usb_urb_endpoint(u));
+		urb_flags = drv_usb_urb_flags(u);
+		bulk = 0;
+		if (transfer_type == DRV_USB_TRANSFER_BULK)
+			bulk = 1;
+		zero_requested = 0;
+		if ((urb_flags & DRV_USB_URB_ZERO_PACKET) != 0)
+			zero_requested = 1;
+		zero_packet = drv_xhci_normal_zero_packet(
+			bulk,
+			input,
+			length,
+			zero_requested,
+			maximum_packet_size);
 	}
+
+	/*
+	 * The request remembers its zero-length TD, so that the payload TD's
+	 * event leaves it waiting for that TD's event (transfer_claim).
+	 */
+	r->zero_packet = zero_packet ? 1U : 0U;
+	r->payload_seen = 0;
 
 	/* Handles the q condition. */
 	if ((!q && (normal_count >= XHCI_RING_TRBS - 1U ||
@@ -8046,39 +8104,36 @@ xhci_sg_enqueue(
 	size_t packet_size,
 	int zero_packet)
 {
+	struct drv_xhci_normal_words words;
 	size_t cumulative;
-	uint32_t control;
-	unsigned index, td_size;
-	int final;
+	unsigned index;
+	int last_trb;
 
+	/* Pushes one chained TRB for each segment of the payload; the last ends the TD. */
 	cumulative = 0;
-	/* Process each remaining element. */
 	for (index = 0; index < request->normal_count; index++) {
 		cumulative += request->normal[index].length;
-		final = index + 1U == request->normal_count && !zero_packet;
-
-		/* Validates the current input. */
-		control = XHCI_TRB_TYPE(1) |
-			  (final ? XHCI_TRB_IOC : XHCI_TRB_CHAIN);
-		if (input)
-			control |= DRV_XHCI_TRB_ISP;
-
-		/* Handles the zero packet condition. */
-		td_size = drv_xhci_normal_td_size(request->length, cumulative,
-						  packet_size, final);
-		if (zero_packet && td_size < 31U)
-			td_size++;
+		last_trb = 0;
+		if (index + 1U == request->normal_count)
+			last_trb = 1;
+		drv_xhci_normal_payload_words(
+			request->normal[index].length,
+			request->length,
+			cumulative,
+			packet_size,
+			input,
+			last_trb,
+			&words);
 		(void)ring_push(ring, request->normal[index].address,
-				(uint32_t)request->normal[index].length |
-					(td_size << 17),
-				control);
+				words.status, words.control);
 		io_stats_record(IO_XHCI_DATA_TRB,
 				request->normal[index].length);
 	}
 
-	/* Handles the zero packet condition. */
+	/* The terminating zero-length packet is a TD of its own after the payload's. */
 	if (zero_packet) {
-		(void)ring_push(ring, 0, 0, XHCI_TRB_TYPE(1) | XHCI_TRB_IOC);
+		drv_xhci_normal_zero_words(&words);
+		(void)ring_push(ring, 0, words.status, words.control);
 		io_stats_record(IO_XHCI_DATA_TRB, 0);
 	}
 }
