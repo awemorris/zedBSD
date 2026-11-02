@@ -12,7 +12,7 @@
 | P3 | [BUG-412](bugs/BUG-412.md) | Pi 5 | desktop の click が効かない（q1936）。注入の入力・今の main の kernel では再現せず、ユーザーの元の kernel 8f91a0d に戻して本物の mouse の押し方を記録する所（11:43〜） | — |
 | P4 | — | 待機 | WS319 の H.265 decode と Video Player の GPU の道を 12:03 に merge（q1926 cleared）。5330 は Debian で空き | — |
 | P5 | [WS336](ws336/ws.md) p008 | 自前の ssh・sshd | ssh-transport（q1932、Opus） | p015 以降 |
-| P6 | — | libssl-compat・libcrypto-compat | 返却。p029（TLS 1.3 の handshake）cleared | p031・p032 の候補 |
+| P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p016（sshd の monitor）cleared。p017（sshd の pre-auth と session の process、q1944）に着手 | — |
 | P7 | [WS335](ws335/ws.md) p038 | libssl-compat・libcrypto-compat | limbo の全件の照合と違いの理由（q1929） | — |
 | P8 | [BUG-411](bugs/BUG-411.md) | ブラウザ | JS の engine の速さ（store.google.com の 17〜21 秒）と小さな残り（q1941）。UAT の 2 回目は BUG-402・403・404・406・407 が fixed、405 は WS344 | — |
 
