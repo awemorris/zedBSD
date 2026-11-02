@@ -400,6 +400,11 @@ ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/compiler/qpu71.c \
 	src/drivers/gpu/bcm2711/compiler/shader71-lower.c src/drivers/gpu/bcm2711/compiler/shader71-output.c \
 	src/drivers/gpu/bcm2711/compiler/shader71-schedule.c
 endif
+# The Raspberry Pi 5's H.265 decode as Vulkan Video on the V3D 7.1 device, with the HEVC decoder block.
+ifeq ($(ZEDBSD_BOARD)$(CONFIG_DRIVER_BCM2712_GPU)$(CONFIG_DRIVER_BCM2712_VIDEO),rpi5yy)
+ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/hevc-decoder.c src/drivers/gpu/bcm2711/vk/vulkan-video-hevc.c \
+	src/drivers/gpu/bcm2711/vk/vulkan-video-hevc-slice.c
+endif
 # The H.264 decode as Vulkan Video on the V3D device (ws236-p004), with the VideoCore firmware's decoder.
 ifeq ($(CONFIG_DRIVER_BCM2711_GPU)$(CONFIG_DRIVER_BCM2711_VIDEO),yy)
 ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/vk/vulkan-video.c

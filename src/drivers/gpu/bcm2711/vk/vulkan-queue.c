@@ -23,7 +23,7 @@
 #include "drivers/gpu/bcm2711/vk/vulkan-resource.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-memory.h"
 #include "drivers/gpu/bcm2711/buffer.h"
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 #include "drivers/gpu/bcm2711/vk/vulkan-command.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-video.h"
 #endif
@@ -98,7 +98,7 @@ struct queue_execution {
 	struct bcm2711_vulkan_session *session;
 	struct queue_owner owner;
 	uint32_t cursor;
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 	struct bcm2711_vulkan_video_mark mark;
 #endif
 };
@@ -116,7 +116,7 @@ static bool owner_displayed(const struct queue_owner *owner);
 static bool object_displayed(const struct bcm2711_vulkan_object *object);
 static int execution_step(struct bcm2711_render_device *controller, struct bcm2711_render_execution *base, bool *done);
 static int execution_end(struct bcm2711_render_device *controller, struct bcm2711_render_execution *base, int error);
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 static void execution_mark(struct queue_execution *execution);
 static int execution_settle(struct bcm2711_render_device *controller, struct bcm2711_render_execution *base, bool wait);
 #endif
@@ -796,7 +796,7 @@ execution_step(
 		}
 		if (!finished)
 			return 0;
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 		/* The command buffer's decodes were sent; its fence waits for those still in flight. */
 		if (execution->owner.fence != NULL)
 			bcm2711_vulkan_video_mark_commands(&execution->mark, action->object->payload);
@@ -808,7 +808,7 @@ execution_step(
 		execution->cursor++;
 	}
 
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 	/*
 	 * An execution with a fence ends only when the frames of its decodes are
 	 * in their images: the host may read them once the fence signals.  It
@@ -853,7 +853,7 @@ execution_end(
 	return 0;
 }
 
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 /*
  * Gives an execution with a fence its settle when decodes it waits for are
  * still in flight.  An empty submission (no command buffer) waits for every

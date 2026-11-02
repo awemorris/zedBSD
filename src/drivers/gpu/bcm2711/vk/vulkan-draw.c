@@ -10,7 +10,7 @@
 #include <kern/kmem.h>
 #include <uapi/errno.h>
 
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 #include "drivers/gpu/bcm2711/vk/vulkan-video.h"
 #endif
 #include "drivers/gpu/bcm2711/vk/vulkan-draw.h"
@@ -195,7 +195,7 @@ walk_records(
 			selected = true;
 			break;
 		default:
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 			/* Video and status query commands run on the CPU outside any render pass. */
 			if (bcm2711_vulkan_video_event(record->opcode)) {
 				if (state->pass != NULL)

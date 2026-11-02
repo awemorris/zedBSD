@@ -24,7 +24,7 @@
 #include "drivers/gpu/bcm2711/vk/vulkan-buffer-copy.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-record.h"
 #include "drivers/gpu/bcm2711/vk/vulkan-transfer.h"
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 #include "drivers/gpu/bcm2711/vk/vulkan-video.h"
 #endif
 
@@ -53,7 +53,7 @@ static const vulkan_route routes[] = {
 	bcm2711_vulkan_buffer_copy_dispatch,
 	bcm2711_vulkan_transfer_dispatch,
 	bcm2711_vulkan_record_dispatch,
-#if CONFIG_DRIVER_BCM2711_VIDEO
+#if CONFIG_DRIVER_BCM2711_VIDEO || CONFIG_DRIVER_BCM2712_VIDEO
 	bcm2711_vulkan_video_dispatch,
 	bcm2711_vulkan_video_query_dispatch
 #endif
