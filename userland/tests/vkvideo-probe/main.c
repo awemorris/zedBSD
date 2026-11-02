@@ -12,7 +12,7 @@
  *
  *   vkvideo-probe --list
  *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264
- *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--raw=FILE] [--h265] STREAM.h265
+ *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--raw=FILE] [--copy] [--h265] STREAM.h265
  *
  * The list names each queue family with its flags and video codec
  * operations and the device's video extensions; on a device without video
@@ -63,7 +63,9 @@
  * with PROBE_REFUSED): --frames, --expect, --time and --no-hash as for
  * H.264, the frames printed in the DPB's output order.  With --raw, each
  * frame's display window is also appended to FILE as raw NV12 in that
- * order, the bytes the hash reads (frame-raw.c).
+ * order, the bytes the hash reads (frame-raw.c).  With --copy, each frame
+ * is read through a copy into a buffer of plain rows when it is output
+ * (copy-out.c), for a device whose optimal pictures the host cannot read.
  */
 
 #include "h264.h"
@@ -116,7 +118,7 @@ main(
 	memset(&options, 0, sizeof(options));
 	status = probe_arguments(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264 | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--raw=FILE] [--h265] STREAM.h265\n");
+		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--dump=FILE] [--sampled] [--reset-at-idr] [--no-hash] STREAM.h264 | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] [--no-hash] [--raw=FILE] [--copy] [--h265] STREAM.h265\n");
 		return 2;
 	}
 
@@ -224,6 +226,13 @@ probe_arguments(
 			continue;
 		}
 
+		/* --copy: the H.265 frames read by a copy into plain rows (copy-out.c). */
+		differs = strcmp(argument, "--copy");
+		if (differs == 0) {
+			options->copy = 1;
+			continue;
+		}
+
 		/* --raw=FILE: the H.265 frames' display windows as raw NV12. */
 		differs = strncmp(argument, "--raw=", 6U);
 		if (differs == 0) {
@@ -262,6 +271,8 @@ probe_arguments(
 	if (options->h265 && (options->list || options->dump != NULL || options->sampled || options->reset_at_idr))
 		return -1;
 	if (options->raw != NULL && (!options->h265 || options->no_hash))
+		return -1;
+	if (options->copy && !options->h265)
 		return -1;
 
 	/* Succeeded: the options are read. */
@@ -678,6 +689,8 @@ probe_picture(
 	image.samples = VK_SAMPLE_COUNT_1_BIT;
 	image.tiling = VK_IMAGE_TILING_OPTIMAL;
 	image.usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+	if (probe->copy_out)
+		image.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	if (probe->sampled) {
 		/* A sampled picture, whose planes a renderer views, read back by a copy. */
 		image.flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;

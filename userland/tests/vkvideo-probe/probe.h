@@ -73,6 +73,7 @@ struct probe_options {
 	int no_hash;
 	int h265;
 	const char *raw;
+	int copy;
 };
 
 /* The decode times of a run with --time, in nanoseconds. */
@@ -127,6 +128,7 @@ struct probe {
 	 * (mapped) and its size.
 	 */
 	int sampled;
+	int copy_out;
 	VkBuffer readback;
 	VkDeviceMemory readback_memory;
 	uint8_t *readback_map;

@@ -31,6 +31,7 @@
 #include "probe.h"
 #include "frame.h"
 #include "frame-raw.h"
+#include "copy-out.h"
 
 #include "../../desktop/libmedia/h265-stream.h"
 #include "../../desktop/libmedia/h265-dpb.h"
@@ -140,6 +141,7 @@ probe_h265_run(
 	/* The DPB's slots and references, which the decoder may lower. */
 	probe->slots = H265_PROBE_SLOTS;
 	probe->max_references = H265_PROBE_REFERENCES;
+	probe->copy_out = options->copy;
 
 	/* The device and the decoder's objects. */
 	error = probe_device(probe);
@@ -322,6 +324,7 @@ probe_h265_run(
 		probe_timing_print(&timing);
 	if (state->raw != NULL)
 		fclose(state->raw);
+	probe_copy_out_close(probe);
 	h265_stream_destroy(&state->stream);
 	free(state);
 	free(data);
@@ -858,6 +861,8 @@ h265_outputs(
 			planes.chroma = probe->image_map[slot] + chroma.offset;
 			planes.chroma_pitch = (size_t)chroma.rowPitch;
 			planes.linear = probe->linear;
+			if (probe->copy_out && probe_copy_out(probe, (uint32_t)slot, &planes) != 0)
+				fprintf(stderr, "vkvideo-probe: frame %d could not be copied out\n", output[index].poc);
 			frame_hash(&planes, &state->window[slot], text);
 			if (state->raw != NULL && frame_raw(state->raw, &planes, &state->window[slot]) != 0) {
 				fprintf(stderr, "vkvideo-probe: the raw frames could not be written\n");
