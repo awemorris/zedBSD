@@ -646,6 +646,8 @@ SSL_ctrl(
 			ssl->conn.config.min_version = minimum;
 			ssl->conn.config.max_version = maximum;
 		}
+
+		/* Reports 1 for a set kept, 0 for a value refused. */
 		return answer;
 	}
 
@@ -756,10 +758,11 @@ SSL_connect(
 		return -1;
 
 	/* Runs the handshake as far as the socket lets it go. */
-	was_failed = (ssl->conn.flags & SSLC_CONN_FAILED) != 0U;
+	was_failed = 0;
+	if ((ssl->conn.flags & SSLC_CONN_FAILED) != 0U)
+		was_failed = 1;
 	wants = 0;
 	error = sslc_conn_handshake(&ssl->conn, &wants);
-	ssl->verify_result = ssl_verify_code(ssl);
 	if (error == 0)
 		return 1;
 
@@ -813,11 +816,12 @@ SSL_read(
 		return -1;
 
 	/* Reads the application data, running the handshake first when needed. */
-	was_failed = (ssl->conn.flags & SSLC_CONN_FAILED) != 0U;
+	was_failed = 0;
+	if ((ssl->conn.flags & SSLC_CONN_FAILED) != 0U)
+		was_failed = 1;
 	wants = 0;
 	done = 0;
 	error = sslc_conn_read(&ssl->conn, (uint8_t *)buffer, (size_t)length, &done, &wants);
-	ssl->verify_result = ssl_verify_code(ssl);
 	if (error == 0)
 		return (int)done;
 
@@ -878,11 +882,12 @@ SSL_write(
 		return -1;
 
 	/* Writes the application data, running the handshake first when needed. */
-	was_failed = (ssl->conn.flags & SSLC_CONN_FAILED) != 0U;
+	was_failed = 0;
+	if ((ssl->conn.flags & SSLC_CONN_FAILED) != 0U)
+		was_failed = 1;
 	wants = 0;
 	done = 0;
 	error = sslc_conn_write(&ssl->conn, (const uint8_t *)buffer, (size_t)length, &done, &wants);
-	ssl->verify_result = ssl_verify_code(ssl);
 	if (error == 0)
 		return length;
 
@@ -1246,7 +1251,9 @@ ssl_start(
 	cryc_os_mutex_lock(&ssl->ctx->lock);
 
 	options = ssl->ctx->options;
-	verify_peer = (ssl->ctx->verify_mode & SSL_VERIFY_PEER) != 0;
+	verify_peer = 0;
+	if ((ssl->ctx->verify_mode & SSL_VERIFY_PEER) != 0)
+		verify_peer = 1;
 
 	cryc_os_mutex_unlock(&ssl->ctx->lock);
 
@@ -1290,6 +1297,8 @@ ssl_start(
 		ssl_refuse(ssl, CRYC_R_MALLOC_FAILURE);
 		return -1;
 	}
+
+	/* Any other failure of the start is an internal fault. */
 	if (error != 0) {
 		ssl_refuse(ssl, CRYC_R_INTERNAL_ERROR);
 		return -1;
@@ -1414,15 +1423,6 @@ ssl_finish(
 		return -1;
 	}
 
-	/* The stream ended without a close_notify: the data may have been cut short. */
-	if (error == ECONNRESET) {
-		reason = ssl->conn.reason;
-		if (reason == 0U)
-			reason = SSL_R_UNEXPECTED_EOF_WHILE_READING;
-		ssl_refuse(ssl, reason);
-		return -1;
-	}
-
 	/* A socket failure: errno is kept for SSL_get_error, and the system's code is queued. */
 	if (error == EIO && ssl->last_errno != 0) {
 		ssl->last_error = SSL_ERROR_SYSCALL;
@@ -1442,7 +1442,11 @@ ssl_finish(
 		return -1;
 	}
 
-	/* A failure of the protocol, with the reason the connection recorded (none: an internal fault). */
+	/*
+	 * A failure of the protocol, or a stream that ended without a
+	 * close_notify (ECONNRESET), with the reason the connection recorded
+	 * (none: an internal fault).
+	 */
 	reason = ssl->conn.reason;
 	if (reason == 0U)
 		reason = CRYC_R_INTERNAL_ERROR;
@@ -1580,12 +1584,14 @@ ssl_address_form(
 	const char *text)
 {
 	const char *cursor;
+	const char *colon;
 	unsigned fields;
 	unsigned digits;
 	unsigned value;
 
 	/* A colon makes it an IPv6 candidate; the parser of X509_VERIFY_PARAM_set1_ip_asc decides. */
-	if (strchr(text, ':') != NULL)
+	colon = strchr(text, ':');
+	if (colon != NULL)
 		return 2;
 
 	/* Reads four decimal fields of at most 255, without a leading zero, separated by dots. */

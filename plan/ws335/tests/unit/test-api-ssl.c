@@ -881,6 +881,17 @@ test_ctx(void)
 	CHECK(SSL_CTX_ctrl(ctx, 129, 0, NULL) == 0L);
 	CHECK(SSL_CTX_ctrl(ctx, 132, 0, NULL) == 0L);
 
+	/* The verify mode keeps only SSL_VERIFY_PEER of the bits given, and the callback is kept and replaced. */
+	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | 2 | 4 | 8, NULL);
+	CHECK(ctx->verify_mode == SSL_VERIFY_PEER);
+	SSL_CTX_set_verify(ctx, 2 | 8, NULL);
+	CHECK(ctx->verify_mode == SSL_VERIFY_NONE);
+	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, verify_callback);
+	CHECK(ctx->verify_callback == verify_callback);
+	SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+	CHECK(ctx->verify_callback == NULL);
+	expect_no_error();
+
 	/* An SSL holds the context: freeing the caller's reference first leaves it working, and the last SSL frees it. */
 	first = SSL_new(ctx);
 	second = SSL_new(ctx);
@@ -1052,6 +1063,10 @@ test_ssl(void)
 	CHECK(SSL_get_error(ssl, -1) == SSL_ERROR_SSL);
 	expect_error(L_SSL, R_SHUTDOWN_WHILE_IN_INIT);
 
+	/* Descriptor 0 is a descriptor; the value is kept as it is. */
+	CHECK(SSL_set_fd(ssl, 0) == 1);
+	CHECK(ssl->descriptor == 0);
+
 	/* Bad lengths and buffers are refused before anything starts, whatever the socket. */
 	CHECK(SSL_read(ssl, buffer, 0) == -1);
 	expect_error(L_SSL, R_BAD_LENGTH);
@@ -1149,6 +1164,18 @@ test_ssl(void)
 	CHECK(SSL_set1_host(ssl, "") == 1);
 	CHECK(param->params.has_host == 0);
 	expect_no_error();
+
+	/* An address is cleared by NULL, by the empty text and by a text that is neither. */
+	CHECK(SSL_set1_host(ssl, "192.0.2.9") == 1);
+	CHECK(SSL_set1_host(ssl, NULL) == 1);
+	CHECK(param->params.ip_size == 0U);
+	CHECK(SSL_set1_host(ssl, "192.0.2.9") == 1);
+	CHECK(SSL_set1_host(ssl, "") == 1);
+	CHECK(param->params.ip_size == 0U);
+	CHECK(SSL_set1_host(ssl, "192.0.2.9") == 1);
+	CHECK(SSL_set1_host(ssl, "bad name") == 0);
+	expect_error(L_X509, (int)CRYC_R_PASSED_INVALID_ARGUMENT);
+	CHECK(param->params.ip_size == 0U);
 
 	/* A text that is neither: 0 with one error and both settings cleared. */
 	CHECK(SSL_set1_host(ssl, "host.example") == 1);
@@ -1957,8 +1984,11 @@ test_close(void)
 		/* Our close first: 0 (not an error, nothing queued), once on the wire; data may still be read; then the peer's close makes the next call 1. */
 		rig = rig_open(&config, &pki256, RIG_STD);
 		rig_up(rig);
+		CHECK(SSL_read(rig->ssl, big_buffer, 10) == -1);
+		CHECK(SSL_get_error(rig->ssl, -1) == SSL_ERROR_WANT_READ);
 		ERR_clear_error();
 		CHECK(SSL_shutdown(rig->ssl) == 0);
+		CHECK(SSL_get_error(rig->ssl, 0) == SSL_ERROR_NONE);
 		expect_no_error();
 		rig_settle_alerts(rig, 1U);
 		CHECK(rig->peer->close_notify == 1);
