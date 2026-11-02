@@ -119,6 +119,7 @@ for each in $(xdotool search --class omnigrammaton 2> /dev/null); do
 done
 echo "window $window x $X y $Y width $WIDTH height $HEIGHT" >> "$out/notes.txt"
 more "CONSOLE level=0 $start" 0 30 || echo "no $start" >> "$out/notes.txt"
+started=$(date +%s)
 xdotool mousemove $((X + 400)) $((Y + 300))
 sleep 1
 import -window root "$out/1-running.png"
@@ -172,9 +173,8 @@ fi
 if [ "$mode" = prompt ]; then
 # E. The question 10 s into the script.
 xdotool mousemove $((X + 100)) $((Y + 500))
-begin=$(date +%s)
 if more '^ZBROWSER PROMPT shown ' 0 16; then
-	echo "shown $(($(date +%s) - begin)) $(tr -d '\r' < "$out/first.out" | grep '^ZBROWSER PROMPT shown ' | tail -1)" >> "$out/steps.txt"
+	echo "shown $(($(date +%s) - started)) $(tr -d '\r' < "$out/first.out" | grep '^ZBROWSER PROMPT shown ' | tail -1)" >> "$out/steps.txt"
 else
 	echo "shown missing" >> "$out/steps.txt"
 fi
