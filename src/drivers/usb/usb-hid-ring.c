@@ -58,7 +58,7 @@ drv_usb_hid_ring_put(
 	/* The slot of the next sequence, which held the record capacity older. */
 	slot = &ring->records[ring->next & (ring->capacity - 1U)];
 	*slot = *record;
-	slot->sequence = ring->next;
+	slot->sequence = (uint32_t)ring->next;
 
 	/* The record is held; the next one follows it. */
 	ring->next++;

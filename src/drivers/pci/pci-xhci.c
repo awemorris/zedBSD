@@ -2958,6 +2958,7 @@ transfer_claim(
 	request->completion_code = code;
 	request->completion_actual = actual;
 	request->completion_residual = residual;
+	drv_usb_urb_hcd_note(request->urb, code, residual);
 	request->completion_trb_offset = trb_offset;
 	request->completion_next = NULL;
 

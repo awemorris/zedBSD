@@ -22,7 +22,7 @@
 #include <stdint.h>
 
 /* The most bytes of one report a record keeps. */
-#define DRV_USB_HID_RING_BYTES		32U
+#define DRV_USB_HID_RING_BYTES		27U
 
 /* A record's flags: what the interface is, and what the record stands for. */
 #define DRV_USB_HID_RING_RAW		0x01U	/* a raw interface (hidraw) */
@@ -38,23 +38,38 @@
  * first.
  *
  * counter_us is the platform's fixed-frequency counter in microseconds (fine
- * enough to space reports apart, its epoch the counter's own); monotonic_us
- * is CLOCK_MONOTONIC in microseconds, as fine as the kernel's tick, the clock
- * the input events and user space's logs carry.  Both are taken when the
- * transfer finished.  sequence counts every record the ring was given since
- * it started, so a gap between two read records is what was overwritten.
+ * enough to space reports apart, its epoch the counter's own) when the
+ * transfer's completion reached the HID driver; monotonic_us is
+ * CLOCK_MONOTONIC in microseconds at the same moment, as fine as the
+ * kernel's tick, the clock the input events and user space's logs carry.
+ * sequence counts (modulo 2^32) every record the ring was given since it
+ * started, so a gap between two read records is what was overwritten.
+ *
+ * What the host controller said of the transfer: queued_us, how long it
+ * was on the controller (from its submission to the controller's event);
+ * event_us, from that event to the completion (counter_us); code, the
+ * controller's completion code (xHCI: 1 success, 13 short packet; 0 when
+ * the controller's driver does not say); residual, the bytes it did not
+ * move.  The submission of this transfer is at counter_us - event_us -
+ * queued_us, so the previous record of the interface ended that long
+ * before it was armed again.  queued_us and event_us are 0 when not known
+ * and saturate at their largest value.
  */
 struct drv_usb_hid_ring_record {
 	uint64_t counter_us;
 	uint64_t monotonic_us;
-	uint64_t sequence;
+	uint32_t sequence;
+	uint32_t queued_us;
+	uint16_t event_us;
 	uint16_t length;
+	uint16_t residual;
 	uint8_t bus;
 	uint8_t address;
 	uint8_t interface;
 	uint8_t endpoint;
 	uint8_t kept;
 	uint8_t flags;
+	uint8_t code;
 	uint8_t bytes[DRV_USB_HID_RING_BYTES];
 };
 

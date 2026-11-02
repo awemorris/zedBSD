@@ -7,8 +7,15 @@ usage: python3 -I ring-decode.py DIR [--mouse BUS:ADDR:IF] [--at EPOCH_SECONDS] 
 DIR is what ring-save.sh left: ring.bin, session.log and info.txt.
 
 The ring's records are 64 bytes (src/drivers/usb/usb-hid-ring.h):
-counter_us, monotonic_us, sequence (u64 each), length (u16), bus, address,
-interface, endpoint, kept, flags (u8 each), bytes[32].  monotonic_us is
+counter_us, monotonic_us (u64), sequence, queued_us (u32), event_us, length,
+residual (u16), bus, address, interface, endpoint, kept, flags, code (u8),
+bytes[27].  queued_us is how long the transfer was on the host controller
+(submission to the controller's event), event_us from that event to the HID
+driver's completion, code the xHCI completion code (1 success, 13 short
+packet), residual the bytes the controller did not move.  The re-arm gap of
+a record is its submission (counter_us - event_us - queued_us) minus the
+previous record's counter_us on the same interface: the time the endpoint had
+no transfer queued.  monotonic_us is
 CLOCK_MONOTONIC, the clock of the compositor's at_ms and of the input
 events' time (the event time in ms is monotonic_us // 1000 of the same
 report), so the report of a press is matched to its KWL FRAME and KWL BTN
@@ -46,23 +53,57 @@ import re
 import struct
 import sys
 
-RECORD = struct.Struct("<QQQHBBBBBB32s")
+RECORD = struct.Struct("<QQIIHHHBBBBBBB27s")
+# The first ring's layout (kernel 8e1d6826a4): counter_us, monotonic_us, sequence (u64), length (u16), bus, address,
+# interface, endpoint, kept, flags (u8), bytes[32]; no host controller fields.
+RECORD_OLD = struct.Struct("<QQQHBBBBBB32s")
 FLAGS = [(0x01, "raw"), (0x02, "drain"), (0x04, "stall"), (0x08, "error"), (0x10, "attach"), (0x20, "detach")]
 LEFT = 272
 
 
-def read_ring(path):
+def ring_layout(data):
+	"""old or new: the old layout's sequence is a u64, so its upper half (offset 20) is 0 in every record; the new
+	layout has queued_us there, nonzero in every report the host controller timed."""
+	for offset in range(0, len(data) - len(data) % RECORD.size, RECORD.size):
+		if struct.unpack_from("<I", data, offset + 20)[0] != 0:
+			return "new"
+	return "old"
+
+
+def read_ring(path, layout="auto"):
 	"""The ring's records, oldest first, as dicts."""
 	data = open(path, "rb").read()
 	records = []
+	if layout == "auto":
+		layout = ring_layout(data)
+	print("layout=%s" % layout)
+	if layout == "old":
+		for offset in range(0, len(data) - len(data) % RECORD_OLD.size, RECORD_OLD.size):
+			fields = RECORD_OLD.unpack_from(data, offset)
+			records.append({
+				"counter_us": fields[0], "monotonic_us": fields[1], "sequence": fields[2] & 0xffffffff,
+				"queued_us": 0, "event_us": 0, "length": fields[3], "residual": 0,
+				"bus": fields[4], "address": fields[5], "interface": fields[6], "endpoint": fields[7],
+				"kept": fields[8], "flags": fields[9], "code": 0, "bytes": fields[10][:fields[8]],
+			})
+		return records, len(data) % RECORD_OLD.size
 	for offset in range(0, len(data) - len(data) % RECORD.size, RECORD.size):
 		fields = RECORD.unpack_from(data, offset)
 		records.append({
-			"counter_us": fields[0], "monotonic_us": fields[1], "sequence": fields[2], "length": fields[3],
-			"bus": fields[4], "address": fields[5], "interface": fields[6], "endpoint": fields[7],
-			"kept": fields[8], "flags": fields[9], "bytes": fields[10][:fields[8]],
+			"counter_us": fields[0], "monotonic_us": fields[1], "sequence": fields[2], "queued_us": fields[3],
+			"event_us": fields[4], "length": fields[5], "residual": fields[6],
+			"bus": fields[7], "address": fields[8], "interface": fields[9], "endpoint": fields[10],
+			"kept": fields[11], "flags": fields[12], "code": fields[13], "bytes": fields[14][:fields[11]],
 		})
 	return records, len(data) % RECORD.size
+
+
+def spread(values):
+	"""min/median/p99/max of a list, or '-'."""
+	if not values:
+		return "-"
+	ordered = sorted(values)
+	return "%d/%d/%d/%d" % (ordered[0], ordered[len(ordered) // 2], ordered[min(len(ordered) - 1, len(ordered) * 99 // 100)], ordered[-1])
 
 
 def flag_names(flags):
@@ -80,16 +121,15 @@ def mouse_report(record):
 	return buttons, dx, dy
 
 
-def find_mouse(records):
-	"""The (bus, address, interface) with the most mouse reports."""
-	counts = {}
+def find_mice(records):
+	"""Every (bus, address, interface) with mouse reports: a receiver that comes back after a reset has new numbers."""
+	keys = []
 	for record in records:
 		if mouse_report(record) is not None:
 			key = (record["bus"], record["address"], record["interface"])
-			counts[key] = counts.get(key, 0) + 1
-	if not counts:
-		return None
-	return max(counts, key=counts.get)
+			if key not in keys:
+				keys.append(key)
+	return keys
 
 
 def read_log(path):
@@ -196,20 +236,22 @@ def row_of(rows, y):
 def main():
 	parser = argparse.ArgumentParser(description="Decodes a saved USB HID report ring beside the session's log.")
 	parser.add_argument("dir")
-	parser.add_argument("--mouse", help="BUS:ADDR:IF of the mouse (default: the interface with the most mouse reports)")
+	parser.add_argument("--mouse", help="BUS:ADDR:IF of the mouse (default: every interface with mouse reports)")
 	parser.add_argument("--at", type=float, help="wall time (seconds since the epoch) a click was seen to fail")
 	parser.add_argument("--window", type=float, default=3.0, help="seconds around --at to list")
 	parser.add_argument("--dump", action="store_true", help="print every record")
+	parser.add_argument("--layout", choices=["auto", "old", "new"], default="auto",
+			    help="the record layout: old for the kernel 8e1d6826a4 (no host controller fields)")
 	options = parser.parse_args()
 
-	records, tail = read_ring(os.path.join(options.dir, "ring.bin"))
+	records, tail = read_ring(os.path.join(options.dir, "ring.bin"), options.layout)
 	entries = read_log(os.path.join(options.dir, "session.log"))
 	if not records:
 		print("ring-decode: no records")
 		return 1
 
 	# The ring's span, and the records it lost (overwritten while the reader read).
-	gaps = sum(1 for before, after in zip(records, records[1:]) if after["sequence"] != before["sequence"] + 1)
+	gaps = sum(1 for before, after in zip(records, records[1:]) if after["sequence"] != (before["sequence"] + 1) & 0xffffffff)
 	print("records=%d first-sequence=%d last-sequence=%d monotonic=%.3f..%.3f s gaps=%d partial-bytes=%d" % (
 		len(records), records[0]["sequence"], records[-1]["sequence"],
 		records[0]["monotonic_us"] / 1e6, records[-1]["monotonic_us"] / 1e6, gaps, tail))
@@ -219,6 +261,31 @@ def main():
 		interfaces[key] = interfaces.get(key, 0) + 1
 	for (bus, address, interface, kind), count in sorted(interfaces.items()):
 		print("  usb%d device %d interface %d (%s): %d records" % (bus, address, interface, kind, count))
+	# The host controller's side, per interface: completion codes, residues, time on the controller, re-arm gaps.
+	last = {}
+	stats = {}
+	for record in records:
+		key = (record["bus"], record["address"], record["interface"])
+		if record["flags"] & 0x30:
+			last.pop(key, None)
+			continue
+		entry = stats.setdefault(key, {"codes": {}, "residual": {}, "queued": [], "event": [], "gap": []})
+		entry["codes"][record["code"]] = entry["codes"].get(record["code"], 0) + 1
+		entry["residual"][record["residual"]] = entry["residual"].get(record["residual"], 0) + 1
+		if record["queued_us"]:
+			entry["queued"].append(record["queued_us"])
+			entry["event"].append(record["event_us"])
+			submitted = record["counter_us"] - record["event_us"] - record["queued_us"]
+			if key in last:
+				record["gap_us"] = submitted - last[key]
+				entry["gap"].append(record["gap_us"])
+		last[key] = record["counter_us"]
+	for (bus, address, interface), entry in sorted(stats.items()):
+		print("  hc usb%d/%d/%d codes=%s residual=%s queued_us=%s event_us=%s rearm_gap_us=%s" % (
+			bus, address, interface,
+			",".join("%d:%d" % item for item in sorted(entry["codes"].items())),
+			",".join("%d:%d" % item for item in sorted(entry["residual"].items())),
+			spread(entry["queued"]), spread(entry["event"]), spread(entry["gap"])))
 	for record in records:
 		if record["flags"] & 0x3c:
 			print("  event %s usb%d device %d interface %d at %.3f s length=%d" % (
@@ -227,21 +294,26 @@ def main():
 
 	if options.dump:
 		for record in records:
-			print("%10d %12.6f %12.6f usb%d/%d/%d ep%02x %-6s len=%-3d %s" % (
+			print("%10d %12.6f %12.6f usb%d/%d/%d ep%02x %-6s len=%-3d code=%-2d res=%-3d q=%-6d ev=%-5d gap=%-6s %s" % (
 				record["sequence"], record["monotonic_us"] / 1e6, record["counter_us"] / 1e6,
 				record["bus"], record["address"], record["interface"], record["endpoint"],
-				flag_names(record["flags"]), record["length"], record["bytes"].hex(" ")))
+				flag_names(record["flags"]), record["length"], record["code"], record["residual"],
+				record["queued_us"], record["event_us"], record.get("gap_us", "-"), record["bytes"].hex(" ")))
 
 	# The mouse and its clicks.
 	if options.mouse:
-		mouse = tuple(int(part) for part in options.mouse.split(":"))
+		mice = [tuple(int(part) for part in options.mouse.split(":"))]
 	else:
-		mouse = find_mouse(records)
-	if mouse is None:
+		mice = find_mice(records)
+	if not mice:
 		print("ring-decode: no mouse reports")
 		return 1
-	clicks = clicks_of(records, mouse)
-	print("mouse usb%d device %d interface %d: %d presses" % (mouse[0], mouse[1], mouse[2], len(clicks)))
+	clicks = []
+	for mouse in mice:
+		found = clicks_of(records, mouse)
+		print("mouse usb%d device %d interface %d: %d presses" % (mouse[0], mouse[1], mouse[2], len(found)))
+		clicks.extend(found)
+	clicks.sort(key=lambda click: click["press"]["monotonic_us"])
 
 	# Each click's lines: FRAME, BTN and PRESS by time; the page by order.
 	results = []
@@ -312,9 +384,12 @@ def main():
 		if result["page"] is None:
 			failed += 1
 		held_ms = (result["release_ms"] - result["press_ms"]) if result["release_ms"] is not None else -1
-		print("click press=%.3f s held=%d ms moved=%d counts in %d reports at (%s,%s)->(%s,%s): %s" % (
+		release = click["release"] or {}
+		print("click press=%.3f s held=%d ms moved=%d counts in %d reports at (%s,%s)->(%s,%s) hc press code=%d q=%d gap=%s release code=%s q=%s gap=%s: %s" % (
 			result["press_ms"] / 1000.0, held_ms, click["moved"], click["reports"],
-			result["press_x"], result["press_y"], result["release_x"], result["release_y"], verdict))
+			result["press_x"], result["press_y"], result["release_x"], result["release_y"],
+			click["press"]["code"], click["press"]["queued_us"], click["press"].get("gap_us", "-"),
+			release.get("code", "-"), release.get("queued_us", "-"), release.get("gap_us", "-"), verdict))
 	print("clicks=%d without-page-change=%d rows-learned=%s" % (len(results), failed,
 	      " ".join("%s:%d-%d" % (page, low, high) for page, (low, high) in sorted(rows.items(), key=lambda item: item[1]))))
 
@@ -337,7 +412,7 @@ def main():
 		for record in records:
 			if low <= record["monotonic_us"] <= high:
 				report = mouse_report(record)
-				if report is not None and (record["bus"], record["address"], record["interface"]) == mouse and report[0] & 1:
+				if report is not None and (record["bus"], record["address"], record["interface"]) in mice and report[0] & 1:
 					lefts += 1
 				print("  %12.6f usb%d/%d/%d %-6s len=%-3d %s" % (record["monotonic_us"] / 1e6, record["bus"], record["address"],
 				      record["interface"], flag_names(record["flags"]), record["length"], record["bytes"].hex(" ")))

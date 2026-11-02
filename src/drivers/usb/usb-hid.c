@@ -17,7 +17,6 @@
 #include <drivers/usb/usb-hid.h>
 #include <drivers/usb/usb-hid-ring.h>
 #include <drivers/usb/usb.h>
-#include <hal/hal.h>
 #include <kern/boot.h>
 #include <kern/cdev.h>
 #include <kern/clock.h>
@@ -263,7 +262,7 @@ static int usb_hid_drain_wanted(void);
 static void usb_hid_ring_start(void);
 static int usb_hid_ring_on(void);
 static void usb_hid_now(uint64_t *counter_us, uint64_t *monotonic_us);
-static void usb_hid_ring_note(struct usb_hid *hid, uint64_t counter_us, uint64_t monotonic_us, unsigned flags, const uint8_t *bytes, size_t length);
+static void usb_hid_ring_note(struct usb_hid *hid, uint64_t counter_us, uint64_t monotonic_us, const struct drv_usb_urb_hcd_result *hcd, unsigned flags, const uint8_t *bytes, size_t length);
 static unsigned usb_hid_ring_flags(const struct usb_hid *hid);
 static void usb_hid_ring_note_status(struct usb_hid *hid, unsigned flags, enum drv_usb_urb_status status);
 static ssize_t usb_hid_ring_device_read(struct file *file, void *buffer, size_t size);
@@ -591,7 +590,7 @@ usb_hid_detach(
 
 	/* The report ring shows when the interface left. */
 	usb_hid_now(&counter_us, &monotonic_us);
-	usb_hid_ring_note(hid, counter_us, monotonic_us, DRV_USB_HID_RING_DETACH, NULL, 0);
+	usb_hid_ring_note(hid, counter_us, monotonic_us, NULL, DRV_USB_HID_RING_DETACH, NULL, 0);
 
 	usb_hid_pending_remove(hid);
 	usb_hid_close_admission(hid);
@@ -1127,6 +1126,8 @@ static int
 usb_hid_arm(
 	struct usb_hid *hid)
 {
+	unsigned urb_flags;
+	int ring;
 	int error;
 
 	/* Checks the operation status. */
@@ -1135,9 +1136,15 @@ usb_hid_arm(
 		return error;
 	kern_memset(hid->buffer, 0, hid->buffer_size);
 
+	/* The report ring keeps when the controller was given the transfer and when it ended it. */
+	urb_flags = DRV_USB_URB_SHORT_OK;
+	ring = usb_hid_ring_on();
+	if (ring)
+		urb_flags |= DRV_USB_URB_HCD_TIMES;
+
 	/* Checks the operation status. */
 	error = drv_usb_urb_setup(hid->urb, hid->buffer, hid->buffer_size,
-				  DRV_USB_URB_SHORT_OK, 0, usb_hid_completion,
+				  urb_flags, 0, usb_hid_completion,
 				  hid);
 	if (error == 0)
 		error = drv_usb_urb_submit(hid->urb);
@@ -1159,6 +1166,7 @@ usb_hid_publish_report(
 	size_t length)
 {
 	uint64_t milliseconds;
+	struct drv_usb_urb_hcd_result hcd;
 	uint64_t counter_us;
 	uint64_t monotonic_us;
 	unsigned long irq;
@@ -1174,9 +1182,10 @@ usb_hid_publish_report(
 
 	spin_unlock_irqrestore(&hid->lock, irq);
 
-	/* The report ring keeps every report of every interface, as it came. */
+	/* The report ring keeps every report of every interface, as it came, with what the controller said of it. */
+	drv_usb_urb_hcd_result(hid->urb, &hcd);
 	flags = usb_hid_ring_flags(hid);
-	usb_hid_ring_note(hid, counter_us, monotonic_us, flags, buffer, length);
+	usb_hid_ring_note(hid, counter_us, monotonic_us, &hcd, flags, buffer, length);
 
 	/* A raw interface's report goes to its readers as it came. */
 	if (hid->raw) {
@@ -1585,7 +1594,7 @@ usb_hid_activate_start(
 	/* The report ring shows when the interface went into service, and how long its transfer is. */
 	usb_hid_now(&counter_us, &monotonic_us);
 	flags = usb_hid_ring_flags(hid) | DRV_USB_HID_RING_ATTACH;
-	usb_hid_ring_note(hid, counter_us, monotonic_us, flags, NULL, hid->buffer_size);
+	usb_hid_ring_note(hid, counter_us, monotonic_us, NULL, flags, NULL, hid->buffer_size);
 
 	if (hid->drain) {
 		kern_logf("usb-hid: drained vendor interface usb%u device=%u interface=%u endpoint=%02x report-bytes=%u\n",
@@ -1963,23 +1972,19 @@ usb_hid_ring_on(
 }
 
 /*
- * Gives the time now in microseconds of the platform's fixed-frequency
- * counter (0 without one) and of CLOCK_MONOTONIC.
+ * Gives the time now in microseconds of the USB core's counter (the clock
+ * of drv_usb_urb_hcd_result's times) and of CLOCK_MONOTONIC.
  */
 static void
 usb_hid_now(
 	uint64_t *counter_us,
 	uint64_t *monotonic_us)
 {
-	uint64_t counter;
-	uint64_t frequency;
-	bool counted;
+	uint64_t nanoseconds;
 
-	/* The counter scaled in two steps, so a large count does not overflow. */
-	*counter_us = 0;
-	counted = hal_rtc_read_counter(&counter, &frequency);
-	if (counted && frequency != 0U)
-		*counter_us = (counter / frequency) * 1000000U + ((counter % frequency) * 1000000U) / frequency;
+	/* The counter the controller's times are read from. */
+	nanoseconds = drv_usb_trace_now_ns();
+	*counter_us = nanoseconds / 1000U;
 
 	/* The clock user space reads as CLOCK_MONOTONIC. */
 	*monotonic_us = kern_ticks_to_us(clock_ticks());
@@ -1995,11 +2000,15 @@ usb_hid_ring_note(
 	struct usb_hid *hid,
 	uint64_t counter_us,
 	uint64_t monotonic_us,
+	const struct drv_usb_urb_hcd_result *hcd,
 	unsigned flags,
 	const uint8_t *bytes,
 	size_t length)
 {
 	struct drv_usb_hid_ring_record record;
+	uint64_t event_us;
+	uint64_t submitted_us;
+	uint64_t span;
 	unsigned bus;
 	unsigned address;
 	unsigned interface_number;
@@ -2022,6 +2031,32 @@ usb_hid_ring_note(
 	record.interface = (uint8_t)interface_number;
 	record.endpoint = (uint8_t)drv_usb_endpoint_address(hid->endpoint);
 	record.flags = (uint8_t)flags;
+
+	/* What the controller said: its code, the bytes left, and the times it was given the transfer and ended it. */
+	if (hcd != NULL && hcd->noted) {
+		record.code = (uint8_t)hcd->code;
+		record.residual = (uint16_t)hcd->residual;
+		if (hcd->residual > UINT16_MAX)
+			record.residual = UINT16_MAX;
+	}
+
+	/* The times, when the transfer asked for them and the controller's driver took its event. */
+	if (hcd != NULL &&
+	    hcd->submitted_ns != 0U &&
+	    hcd->event_ns >= hcd->submitted_ns) {
+		submitted_us = hcd->submitted_ns / 1000U;
+		event_us = hcd->event_ns / 1000U;
+		span = event_us - submitted_us;
+		record.queued_us = (uint32_t)span;
+		if (span > UINT32_MAX)
+			record.queued_us = UINT32_MAX;
+		span = 0;
+		if (counter_us > event_us)
+			span = counter_us - event_us;
+		record.event_us = (uint16_t)span;
+		if (span > UINT16_MAX)
+			record.event_us = UINT16_MAX;
+	}
 
 	/* The length as it came, and as many of the bytes as a record holds. */
 	record.length = (uint16_t)length;
@@ -2066,6 +2101,7 @@ usb_hid_ring_note_status(
 	unsigned flags,
 	enum drv_usb_urb_status status)
 {
+	struct drv_usb_urb_hcd_result hcd;
 	uint64_t counter_us;
 	uint64_t monotonic_us;
 	unsigned long irq;
@@ -2079,10 +2115,11 @@ usb_hid_ring_note_status(
 
 	spin_unlock_irqrestore(&hid->lock, irq);
 
-	/* The status, in the record's first byte. */
+	/* The status, in the record's first byte, and what the controller said of it. */
+	drv_usb_urb_hcd_result(hid->urb, &hcd);
 	code = (uint8_t)status;
 	flags |= usb_hid_ring_flags(hid);
-	usb_hid_ring_note(hid, counter_us, monotonic_us, flags, &code, 1U);
+	usb_hid_ring_note(hid, counter_us, monotonic_us, &hcd, flags, &code, 1U);
 }
 
 /*
