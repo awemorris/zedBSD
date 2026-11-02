@@ -15,8 +15,14 @@
 #                                                 of the cases, then the trust sources of Windows: cert.pem beside
 #                                                 the .exe with SSL_CTX_set_default_verify_paths, and the test
 #                                                 intermediate in the current user's Disallowed store
-#   sh plan/ws335/tests/run-interop.sh --client PATH   the cases with a client built elsewhere (it is run as
-#                                                 given; the guest test runs its own client)
+#   sh plan/ws335/tests/run-interop.sh --make-pki DIR  only makes the test PKI into DIR (for an image)
+#   sh plan/ws335/tests/run-interop.sh --guest SOCKET DIR   zedBSD: the client is /root/tls-client of a running
+#                                                 QEMU guest, run over its serial console (plan/tools/guest/
+#                                                 serial.py on SOCKET), with DIR the PKI made by --make-pki and in
+#                                                 the image as /root/ca.pem; the guest reaches the host's
+#                                                 127.0.0.1 as 10.0.2.2 (QEMU's user network).  The subset of the
+#                                                 Windows run, without the EOF cases (the serial console returns a
+#                                                 command's output when it ends); run-guest.sh drives it.
 # Each case prints one line "interop: <name>: PASS" or "interop: <name>: FAIL (<why>; <dir>)"; the last line is
 # "run-interop: PASS (<n> cases)" or "run-interop: FAIL (<failed> of <n> cases)".  Output under build/tmp/ws335-interop
 # (a fresh run directory); each case's client and server output is in its own directory.
@@ -36,12 +42,15 @@ python=/usr/bin/python3
 
 system=posix
 client=
+pki=$out/pki
+client_address=127.0.0.1
 case "${1:-}" in
 --win32) system=win32; shift ;;
---client) system=given; client=$2; shift 2 ;;
+--make-pki) [ $# -eq 2 ] && { system=make-pki; pki=$2; shift 2; } ;;
+--guest) [ $# -eq 3 ] && { system=guest; guest_socket=$2; pki=$3; client_address=10.0.2.2; shift 3; } ;;
 esac
 if [ $# -ne 0 ]; then
-	echo "usage: sh plan/ws335/tests/run-interop.sh [--win32 | --client PATH]"
+	echo "usage: sh plan/ws335/tests/run-interop.sh [--win32 | --make-pki DIR | --guest SOCKET DIR]"
 	exit 2
 fi
 if ! command -v "$openssl" > /dev/null 2>&1 || ! command -v ss > /dev/null 2>&1; then
@@ -129,7 +138,7 @@ fi
 # 2. The test PKI: for each key a root, an intermediate and a leaf for interop.test, 127.0.0.1 and 10.0.2.2 (the
 # host as a QEMU guest sees it); RSA 4096's certificates are signed with RSASSA-PSS.  Also a root no client trusts
 # with its own leaf, and an RSA 1024 leaf.
-pki=$out/pki
+if [ "$system" != guest ]; then
 mkdir -p "$pki"
 cat > "$pki/openssl.cnf" << 'EOF'
 [req]
@@ -207,6 +216,15 @@ cp "$pki/int-rsa2048.key" "$pki/int-rsa1024.key"
 cat "$pki/root-p256.pem" "$pki/root-p384.pem" "$pki/root-rsa2048.pem" "$pki/root-rsa4096.pem" > "$pki/ca.pem"
 "$openssl" x509 -in "$pki/int-p256.pem" -outform DER -out "$pki/int-p256.der" 2>> "$pki/pki.log" || pki_fail "DER"
 echo "interop: test PKI made (p256, p384, rsa2048, rsa4096 with RSASSA-PSS, an untrusted root, an rsa1024 leaf)"
+fi
+if [ "$system" = make-pki ]; then
+	echo "run-interop: PASS (the test PKI in $pki)"
+	exit 0
+fi
+if [ "$system" = guest ] && [ ! -f "$pki/ca.pem" ]; then
+	echo "run-interop: FAIL (no test PKI in $pki)"
+	exit 1
+fi
 
 # 3. The cases.
 cases=0
@@ -257,7 +275,10 @@ start_server() {
 
 # Runs the client (its arguments) for the case's directory; the output goes to dir/client.txt.
 run_client() {
-	if [ "$system" = win32 ]; then
+	if [ "$system" = guest ]; then
+		timeout 150 "$python" plan/tools/guest/serial.py --socket "$guest_socket" --timeout 120 run \
+		    "/root/tls-client $*" > "$dir/client.txt" 2>&1
+	elif [ "$system" = win32 ]; then
 		(cd "$dir" && LC_ALL=C.UTF-8 WINEPREFIX=$wine_prefix WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d \
 		    timeout 120 wine "$client_exe" "$@") > "$dir/client.txt" 2>&1
 	else
@@ -267,7 +288,9 @@ run_client() {
 
 # The CA file as the client names it.
 ca_path() {
-	if [ "$system" = win32 ]; then
+	if [ "$system" = guest ]; then
+		echo /root/ca.pem
+	elif [ "$system" = win32 ]; then
 		echo "Z:$top/$pki/$1"
 	else
 		echo "$top/$pki/$1"
@@ -308,7 +331,7 @@ interop() {
 		*" -c eof"*)
 			# The server vanishes without a close_notify once the client has its line back.
 			# shellcheck disable=SC2086
-			run_client -a 127.0.0.1 $client_args "${case_host:-interop.test}" "$port" $ca_arg &
+			run_client -a $client_address $client_args "${case_host:-interop.test}" "$port" $ca_arg &
 			client_pid=$!
 			tries=0
 			while [ $tries -lt 300 ] && ! grep -q 'waiting for eof' "$dir/client.txt" 2> /dev/null; do
@@ -321,7 +344,7 @@ interop() {
 			;;
 		*)
 			# shellcheck disable=SC2086
-			run_client -a 127.0.0.1 $client_args "${case_host:-interop.test}" "$port" $ca_arg
+			run_client -a $client_address $client_args "${case_host:-interop.test}" "$port" $ca_arg
 			;;
 		esac
 		# A server the client never reached is not waited for.
@@ -391,7 +414,7 @@ group_text() {
 	esac
 }
 
-if [ "$system" = win32 ]; then
+if [ "$system" = win32 ] || [ "$system" = guest ]; then
 	keys="p256 rsa2048"
 	suites13_run="TLS_AES_256_GCM_SHA384"
 	groups_run="X25519"
@@ -419,7 +442,7 @@ for key in $keys; do
 			    v13 "suite=$suite" "group=$code" $retry "scheme=$(scheme_of $key)"
 		done
 		set -- $(suites12_of $key)
-		[ "$system" = win32 ] && set -- "$2"
+		[ "$system" = posix ] || set -- "$2"
 		for suite in "$@"; do
 			if [ "$key" = p384 ]; then
 				case_limit=yes
@@ -436,7 +459,7 @@ done
 
 # 3b. Every signature scheme the client offers, with the server held to it (RSA: PSS in both versions, PKCS #1 v1.5
 # in TLS 1.2; ECDSA in TLS 1.2 takes either hash with either curve).
-if [ "$system" != win32 ]; then
+if [ "$system" = posix ]; then
 	for key in rsa2048 rsa4096; do
 		for scheme in rsa_pss_rsae_sha256 rsa_pss_rsae_sha384 rsa_pss_rsae_sha512; do
 			interop "1.3 $scheme $key" $key "-tls1_3 -sigalgs $scheme" "" v13 "scheme=$scheme"
@@ -475,8 +498,10 @@ for version in 1.3 1.2; do
 	flag=-tls1_3
 	[ $version = 1.2 ] && flag=-tls1_2
 	interop "$version close_notify from the server" p256 "$flag" "-c notify"
-	interop "$version eof without close_notify" p256 "$flag" "-c eof"
-	interop "$version eof without close_notify, ignored" p256 "$flag" "-c eof-ok"
+	if [ "$system" != guest ]; then
+		interop "$version eof without close_notify" p256 "$flag" "-c eof"
+		interop "$version eof without close_notify, ignored" p256 "$flag" "-c eof-ok"
+	fi
 	interop "$version close_notify from the client" rsa2048 "$flag" "-c client"
 done
 

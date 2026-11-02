@@ -511,8 +511,10 @@ run(
 
 	/* The context: versions, verification, the trust store. */
 	ctx = SSL_CTX_new(TLS_client_method());
-	if (ctx == NULL)
+	if (ctx == NULL) {
+		print_errors();
 		return "SSL_CTX_new";
+	}
 	if (options->version != 0) {
 		if (SSL_CTX_set_min_proto_version(ctx, options->version) != 1 ||
 		    SSL_CTX_set_max_proto_version(ctx, options->version) != 1) {
@@ -546,6 +548,7 @@ run(
 	}
 	ssl = SSL_new(ctx);
 	if (ssl == NULL || SSL_set_fd(ssl, (int)socket_value) != 1) {
+		print_errors();
 		why = "SSL_new or SSL_set_fd";
 		goto out;
 	}
