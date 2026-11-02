@@ -86,6 +86,134 @@ static uint32_t rng_state = 0x1b873593U;
 static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /* Returns the next pseudo-random 32-bit value. */
+static uint32_t random32(void);
+
+/* Encodes bytes as base64 with a chosen wrapping and line end. */
+static size_t encode(const unsigned char *data, size_t size, char *out, size_t wrap, const char *eol);
+
+/* Returns a copy of a text of exactly the given size, with no NUL after it. */
+static char *dup_exact(const char *text, size_t size);
+
+/* Reports whether a decode succeeded and wrote exactly the expected bytes. */
+static int decode_matches(int error, size_t written, size_t want_size, const unsigned char *got, const void *expected);
+
+/* Decodes a text and checks the error and the bytes. */
+static void check_decode(const char *text, size_t room, int expected_error, const char *expected_hex);
+
+/* Checks the test vectors of RFC 4648 section 10 and other examples. */
+static void test_rfc4648_vectors(void);
+
+/* Checks every alphabet character and every other byte value. */
+static void test_alphabet(void);
+
+/* Checks where padding may stand and the zero bits it leaves. */
+static void test_padding(void);
+
+/* Checks every two-character and three-character tail. */
+static void test_tails(void);
+
+/* Checks that whitespace between characters is skipped. */
+static void test_whitespace(void);
+
+/* Checks the output-room limits. */
+static void test_room(void);
+
+/* Returns 1 when a text without whitespace is canonical padded base64. */
+static int reference_valid(const char *stripped, size_t length);
+
+/* Checks round trips through the encoder and random text against the reference rule. */
+static void test_roundtrip_and_random(void);
+
+/* Checks a megabyte of data. */
+static void test_large(void);
+
+/* Reads from a text with the reader and checks every output of the call. */
+static void check_next(const char *text, size_t from, int expected_error, size_t expected_position, const char *expected_der);
+
+/* Checks that a text holds no certificate. */
+static void check_none(const char *text);
+
+/* Checks one block in its forms. */
+static void test_pem_forms(void);
+
+/* Checks text that only looks like a BEGIN line. */
+static void test_pem_lookalikes(void);
+
+/* Checks a BEGIN line with no usable block after it. */
+static void test_pem_broken(void);
+
+/* Checks several blocks and a caller that goes on after an error. */
+static void test_pem_sequences(void);
+
+/* Checks a search that starts in the middle of a block. */
+static void test_pem_positions(void);
+
+/* Checks the two certificate examples of RFC 7468. */
+static void test_pem_examples(void);
+
+/* Checks random mixes of PEM fragments. */
+static void test_pem_random(void);
+
+/* Checks the PEM text and the DER of the public keys of a Wycheproof file. */
+static void test_wycheproof_pem(const char *name, unsigned long *keys);
+
+/* Reads a whole file; returns a malloc'd buffer with a NUL after the data, or NULL. */
+static char *read_file(const char *path, size_t *size);
+
+/* Checks every certificate of the ca-certificates bundle. */
+static void test_bundle(void);
+
+/* Checks the certificates of the x509-limbo cases wrapped in PEM. */
+static void test_limbo_pem(void);
+
+/*
+ * Runs every check of the base64 decoder and the PEM reader.
+ *
+ * The exit status is the one check_finish reports.
+ */
+int
+main(void)
+{
+	int status;
+	unsigned long keys;
+
+	/* Base64. */
+	test_rfc4648_vectors();
+	test_alphabet();
+	test_padding();
+	test_tails();
+	test_whitespace();
+	test_room();
+	test_roundtrip_and_random();
+	test_large();
+
+	/* PEM. */
+	test_pem_forms();
+	test_pem_lookalikes();
+	test_pem_broken();
+	test_pem_sequences();
+	test_pem_positions();
+	test_pem_examples();
+	test_pem_random();
+
+	/* The public keys of the Wycheproof files, which are not certificates. */
+	keys = 0;
+	test_wycheproof_pem("wycheproof-ecdsa_secp256r1_sha256_test", &keys);
+	test_wycheproof_pem("wycheproof-ed25519_test", &keys);
+	test_wycheproof_pem("wycheproof-rsa_signature_2048_sha256_test", &keys);
+	test_wycheproof_pem("wycheproof-rsa_pss_4096_sha512_mgf1_64_test", &keys);
+	CHECK(keys > 100UL);
+
+	/* The certificates of the limbo cases and of the ca-certificates bundle. */
+	test_limbo_pem();
+	test_bundle();
+
+	/* Reports the number of checks and the exit status of the test. */
+	status = check_finish("test-pem");
+	return status;
+}
+
+/* Returns the next pseudo-random 32-bit value. */
 static uint32_t
 random32(void)
 {
@@ -113,45 +241,69 @@ encode(
 	size_t used;
 	size_t column;
 	size_t index;
+	size_t eol_size;
 	unsigned long group;
 	unsigned count;
 	unsigned shift;
 	char characters[4];
 	unsigned part;
 
+	/* The length of the line end, which is written at every break. */
+	eol_size = strlen(eol);
+
 	/* Every group of up to three bytes. */
 	used = 0;
 	column = 0;
 	for (index = 0; index < size; index += 3U) {
-		count = (unsigned)(size - index < 3U ? size - index : 3U);
+		/* The bytes in this group: three, fewer only at the end. */
+		count = 3U;
+		if (size - index < 3U)
+			count = (unsigned)(size - index);
+
+		/* The group of bytes as one 24-bit number, a missing byte being zero. */
 		group = (unsigned long)data[index] << 16;
 		if (count > 1U)
 			group |= (unsigned long)data[index + 1U] << 8;
 		if (count > 2U)
 			group |= (unsigned long)data[index + 2U];
+
+		/* The four alphabet characters of the group, six bits each. */
 		for (part = 0; part < 4U; part++) {
 			shift = 18U - 6U * part;
 			characters[part] = alphabet[(group >> shift) & 63UL];
 		}
+
+		/* A short group is padded with "=" in the places of the missing bytes. */
 		if (count < 3U)
 			characters[3] = '=';
 		if (count < 2U)
 			characters[2] = '=';
+
+		/* Appends the four characters, breaking the line when it is full. */
 		for (part = 0; part < 4U; part++) {
+			/* A full line ends with the line end. */
 			if (wrap != 0U && column == wrap) {
-				memcpy(out + used, eol, strlen(eol));
-				used += strlen(eol);
+				memcpy(out + used, eol, eol_size);
+				used += eol_size;
 				column = 0;
 			}
+
+			/* The character itself, one column further. */
 			out[used++] = characters[part];
 			column++;
 		}
 	}
+
+	/* A wrapped text ends with a line end too. */
 	if (wrap != 0U) {
-		memcpy(out + used, eol, strlen(eol));
-		used += strlen(eol);
+		memcpy(out + used, eol, eol_size);
+		used += eol_size;
 	}
+
+	/* Terminates the text. */
 	out[used] = '\0';
+
+	/* Reports the length of the text, not counting the NUL. */
 	return used;
 }
 
@@ -162,16 +314,54 @@ dup_exact(
 	size_t size)
 {
 	char *copy;
+	size_t room;
 
 	/* One byte at least, so that an empty text has an address. */
-	copy = malloc(size == 0U ? 1U : size);
+	room = size;
+	if (size == 0U)
+		room = 1U;
+
+	/* Allocates the copy; running out of memory ends the test. */
+	copy = malloc(room);
 	if (copy == NULL) {
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Copies exactly the bytes of the text. */
 	if (size > 0U)
 		memcpy(copy, text, size);
+
+	/* Reports the copy, which the caller frees. */
 	return copy;
+}
+
+/* Reports whether a decode succeeded and wrote exactly want_size bytes equal to expected. */
+static int
+decode_matches(
+	int error,
+	size_t written,
+	size_t want_size,
+	const unsigned char *got,
+	const void *expected)
+{
+	int compare;
+
+	/* A failed decode is not a match. */
+	if (error != 0)
+		return 0;
+
+	/* A wrong length is not a match. */
+	if (written != want_size)
+		return 0;
+
+	/* The bytes must be equal. */
+	compare = memcmp(got, expected, want_size);
+	if (compare != 0)
+		return 0;
+
+	/* Succeeded: the decode gave the expected bytes. */
+	return 1;
 }
 
 /* Decodes text (a C string) with room bytes of output; checks the error and, for success, the bytes. */
@@ -203,10 +393,14 @@ check_decode(
 		CHECK(out[room] == SENTINEL_BYTE);
 		CHECK(out[sizeof(out) - 1U] == SENTINEL_BYTE);
 	}
+
+	/* A refused text writes nothing and reports no bytes. */
 	if (expected_error != 0) {
 		CHECK(written == 0U);
 		return;
 	}
+
+	/* An accepted text gives the bytes of the expected hex. */
 	want_size = hex_decode(expected_hex, want, sizeof(want));
 	CHECK(written == want_size);
 	CHECK_BYTES(out, want, want_size);
@@ -248,6 +442,7 @@ test_alphabet(void)
 	unsigned value;
 	unsigned character;
 	unsigned position;
+	const char *found;
 	int in_alphabet;
 	int error;
 	int bad;
@@ -255,19 +450,32 @@ test_alphabet(void)
 	/* Each character first and last in a group: its value, in the right bits of the output. */
 	bad = 0;
 	for (value = 0; value < 64U; value++) {
+		/* The character first in a group makes the top six bits of the first byte. */
 		text[0] = alphabet[value];
 		text[1] = 'A';
 		text[2] = 'A';
 		text[3] = 'A';
 		error = cryc_base64_decode(text, 4, out, sizeof(out), &written);
-		if (error != 0 || written != 3U || out[0] != (unsigned char)(value << 2) || out[1] != 0U || out[2] != 0U)
+		if (error != 0 ||
+		    written != 3U ||
+		    out[0] != (unsigned char)(value << 2) ||
+		    out[1] != 0U ||
+		    out[2] != 0U)
 			bad++;
+
+		/* The character last in a group makes the low six bits of the third byte. */
 		text[0] = 'A';
 		text[3] = alphabet[value];
 		error = cryc_base64_decode(text, 4, out, sizeof(out), &written);
-		if (error != 0 || written != 3U || out[0] != 0U || out[1] != 0U || out[2] != (unsigned char)value)
+		if (error != 0 ||
+		    written != 3U ||
+		    out[0] != 0U ||
+		    out[1] != 0U ||
+		    out[2] != (unsigned char)value)
 			bad++;
 	}
+
+	/* No character decoded to a wrong value. */
 	CHECK(bad == 0);
 
 	/* Each byte value at each place of a long text: only the alphabet decodes (whitespace and "=" make it ragged). */
@@ -276,7 +484,16 @@ test_alphabet(void)
 		for (character = 0; character < 256U; character++) {
 			memcpy(text, "QUJDQUJD", 8);
 			text[position] = (char)character;
-			in_alphabet = character != 0U && strchr(alphabet, (int)character) != NULL;
+
+			/* A nonzero byte is in the alphabet when strchr finds it (strchr also finds the terminator). */
+			in_alphabet = 0;
+			if (character != 0U) {
+				found = strchr(alphabet, (int)character);
+				if (found != NULL)
+					in_alphabet = 1;
+			}
+
+			/* An alphabet character gives six bytes; any other byte is refused. */
 			error = cryc_base64_decode(text, 8, out, sizeof(out), &written);
 			if (in_alphabet && (error != 0 || written != 6U))
 				bad++;
@@ -284,6 +501,8 @@ test_alphabet(void)
 				bad++;
 		}
 	}
+
+	/* Every byte value was judged correctly at every place. */
 	CHECK(bad == 0);
 
 	/* The URL alphabet (RFC 4648 section 5) is not accepted here. */
@@ -341,12 +560,17 @@ test_tails(void)
 			text[1] = alphabet[second];
 			expected = (second & 15U) == 0U;
 			error = cryc_base64_decode(text, 4, out, sizeof(out), &written);
-			if (expected && (error != 0 || written != 1U || out[0] != (unsigned char)((first << 2) | (second >> 4))))
+			if (expected &&
+			    (error != 0 ||
+			     written != 1U ||
+			     out[0] != (unsigned char)((first << 2) | (second >> 4))))
 				bad++;
 			if (!expected && (error != EINVAL || written != 0U))
 				bad++;
 		}
 	}
+
+	/* Every two-character tail was judged correctly. */
 	CHECK(bad == 0);
 
 	/* "xyz=": two bytes, valid when the low two bits of z's value are zero. */
@@ -362,14 +586,18 @@ test_tails(void)
 				error = cryc_base64_decode(text, 4, out, sizeof(out), &written);
 				if (expected && error != 0)
 					bad++;
-				if (expected && (written != 2U || out[0] != (unsigned char)((first << 2) | (second >> 4)) ||
-				    out[1] != (unsigned char)((second << 4) | (third >> 2))))
+				if (expected &&
+				    (written != 2U ||
+				     out[0] != (unsigned char)((first << 2) | (second >> 4)) ||
+				     out[1] != (unsigned char)((second << 4) | (third >> 2))))
 					bad++;
 				if (!expected && (error != EINVAL || written != 0U))
 					bad++;
 			}
 		}
 	}
+
+	/* Every three-character tail was judged correctly. */
 	CHECK(bad == 0);
 }
 
@@ -386,29 +614,38 @@ test_whitespace(void)
 	size_t written;
 	size_t position;
 	size_t index;
+	size_t skipped_length;
 	int bad;
 	int error;
+	int matched;
 
 	/* One whitespace character at every position of an unpadded and a padded text. */
 	bad = 0;
-	for (index = 0; index < strlen(skipped); index++) {
+	skipped_length = strlen(skipped);
+	for (index = 0; index < skipped_length; index++) {
 		for (position = 0; position <= 8U; position++) {
 			memcpy(text, unpadded, position);
 			text[position] = skipped[index];
 			memcpy(text + position + 1U, &unpadded[position], 8U - position);
 			error = cryc_base64_decode(text, 9, out, sizeof(out), &written);
-			if (error != 0 || written != 6U || memcmp(out, "foobar", 6) != 0)
+			matched = decode_matches(error, written, 6U, out, "foobar");
+			if (!matched)
 				bad++;
 		}
+
+		/* The same at every position of the padded text. */
 		for (position = 0; position <= 8U; position++) {
 			memcpy(text, padded, position);
 			text[position] = skipped[index];
 			memcpy(text + position + 1U, &padded[position], 8U - position);
 			error = cryc_base64_decode(text, 9, out, sizeof(out), &written);
-			if (error != 0 || written != 4U || memcmp(out, "foob", 4) != 0)
+			matched = decode_matches(error, written, 4U, out, "foob");
+			if (!matched)
 				bad++;
 		}
 	}
+
+	/* Every placement of whitespace was skipped. */
 	CHECK(bad == 0);
 
 	/* Only whitespace, whitespace around padding, and line ends of every kind. */
@@ -431,6 +668,8 @@ test_whitespace(void)
 		if (error != EINVAL || written != 0U)
 			bad++;
 	}
+
+	/* Every other character was refused. */
 	CHECK(bad == 0);
 
 	/* A NUL byte in the text is not whitespace. */
@@ -452,18 +691,26 @@ test_room(void)
 	size_t index;
 	int error;
 	int bad;
+	int matched;
 
 	/* Every size from 0 to 40: the exact room works, one byte less is ENOBUFS and writes nothing past the room. */
 	bad = 0;
 	for (index = 0; index < sizeof(data); index++)
 		data[index] = (unsigned char)(index * 37U + 11U);
 	for (size = 0; size <= 40U; size++) {
+		/* The exact room takes every byte and leaves the byte after the room untouched. */
 		length = encode(data, size, text, 0, "");
 		memset(out, SENTINEL_BYTE, sizeof(out));
 		written = 99;
 		error = cryc_base64_decode(text, length, out, size, &written);
-		if (error != 0 || written != size || memcmp(out, data, size) != 0 || out[size] != SENTINEL_BYTE)
+		matched = decode_matches(error, written, size, out, data);
+		if (!matched) {
 			bad++;
+		} else if (out[size] != SENTINEL_BYTE) {
+			bad++;
+		}
+
+		/* One byte less is refused, and the byte just past that room is untouched. */
 		if (size > 0U) {
 			memset(out, SENTINEL_BYTE, sizeof(out));
 			written = 99;
@@ -474,6 +721,8 @@ test_room(void)
 				bad++;
 		}
 	}
+
+	/* Every size behaved as described. */
 	CHECK(bad == 0);
 
 	/* Every room too small for 12 bytes of data: ENOBUFS, and no byte at or after the room is touched. */
@@ -490,6 +739,8 @@ test_room(void)
 				bad++;
 		}
 	}
+
+	/* No too-small room gave anything but ENOBUFS, and none was overrun. */
 	CHECK(bad == 0);
 
 	/* Room zero, with and without a buffer, for empty and non-empty text. */
@@ -532,26 +783,38 @@ reference_valid(
 	padding = 0;
 	if (length >= 1U && stripped[length - 1U] == '=')
 		padding = 1;
-	if (length >= 2U && stripped[length - 1U] == '=' && stripped[length - 2U] == '=')
+	if (length >= 2U &&
+	    stripped[length - 1U] == '=' &&
+	    stripped[length - 2U] == '=')
 		padding = 2;
 	for (index = 0; index < length - padding; index++) {
-		if (stripped[index] == '\0' || strchr(alphabet, stripped[index]) == NULL)
+		/* A NUL byte is never an alphabet character, though strchr finds the terminator. */
+		if (stripped[index] == '\0')
+			return 0;
+
+		/* Any other character must be in the alphabet. */
+		found = strchr(alphabet, stripped[index]);
+		if (found == NULL)
 			return 0;
 	}
 
-	/* The bits that padding leaves must be zero. */
+	/* One padding character leaves two bits, which must be zero. */
 	if (padding == 1U) {
 		found = strchr(alphabet, stripped[length - 2U]);
 		last = (unsigned)(found - alphabet);
 		if ((last & 3U) != 0U)
 			return 0;
 	}
+
+	/* Two padding characters leave four bits, which must be zero. */
 	if (padding == 2U) {
 		found = strchr(alphabet, stripped[length - 3U]);
 		last = (unsigned)(found - alphabet);
 		if ((last & 15U) != 0U)
 			return 0;
 	}
+
+	/* Succeeded: the text is canonical padded base64. */
 	return 1;
 }
 
@@ -577,6 +840,8 @@ test_roundtrip_and_random(void)
 	int error;
 	int bad;
 	int expected;
+	int matched;
+	int compare;
 
 	/* Data of random sizes (0 to 39 all hit) with every wrapping and line end. */
 	text = malloc(sizeof(data) * 2U + 64U);
@@ -585,28 +850,46 @@ test_roundtrip_and_random(void)
 		return;
 	bad = 0;
 	for (round = 0; round < 3000U; round++) {
-		size = round < 40U ? round : random32() % (sizeof(data) + 1U);
+		/* The first sizes are 0 to 39, so that each short tail is hit; later sizes are random. */
+		size = round;
+		if (round >= 40U)
+			size = random32() % (sizeof(data) + 1U);
+
+		/* Random data of that size. */
 		for (index = 0; index < size; index++)
 			data[index] = (unsigned char)random32();
+
+		/* Encodes it with the wrapping and line end of this round and decodes it back. */
 		length = encode(data, size, text, wraps[round % (sizeof(wraps) / sizeof(wraps[0]))], eols[round % 5U]);
 		error = cryc_base64_decode(text, length, out, sizeof(out), &written);
-		if (error != 0 || written != size || memcmp(out, data, size) != 0)
+		matched = decode_matches(error, written, size, out, data);
+		if (!matched)
 			bad++;
 	}
+
+	/* Every round gave back its data. */
 	CHECK(bad == 0);
 	free(text);
 
 	/* Random text from a pool of alphabet characters, "=" and whitespace: the verdict is the reference rule's. */
 	bad = 0;
 	for (round = 0; round < 200000U; round++) {
+		/* A random text of up to 16 characters, and the same text without its whitespace. */
 		size = random32() % 17U;
 		count = 0;
 		for (index = 0; index < size; index++) {
 			sample[index] = pool[random32() % (sizeof(pool) - 1U)];
-			if (sample[index] != ' ' && sample[index] != '\n' && sample[index] != '\r' && sample[index] != '\t')
+			if (sample[index] != ' ' &&
+			    sample[index] != '\n' &&
+			    sample[index] != '\r' &&
+			    sample[index] != '\t')
 				stripped[count++] = sample[index];
 		}
+
+		/* Terminates the text without whitespace. */
 		stripped[count] = '\0';
+
+		/* The verdict of the reference rule and the answer of the decoder. */
 		expected = reference_valid(stripped, count);
 		error = cryc_base64_decode(sample, size, out, sizeof(out), &written);
 		if (expected && (error != 0 || written > count / 4U * 3U))
@@ -617,10 +900,17 @@ test_roundtrip_and_random(void)
 		/* A text accepted must re-encode to the same characters (the form is canonical). */
 		if (error == 0) {
 			length = encode(out, written, again, 0, "");
-			if (length != count || memcmp(again, stripped, count) != 0)
+			if (length != count) {
 				bad++;
+			} else {
+				compare = memcmp(again, stripped, count);
+				if (compare != 0)
+					bad++;
+			}
 		}
 	}
+
+	/* The decoder agreed with the reference rule on every text. */
 	CHECK(bad == 0);
 }
 
@@ -643,7 +933,9 @@ test_large(void)
 	out = malloc(size);
 	text = malloc(size * 2U);
 	CHECK(data != NULL && out != NULL && text != NULL);
-	if (data == NULL || out == NULL || text == NULL)
+	if (data == NULL ||
+	    out == NULL ||
+	    text == NULL)
 		return;
 	for (index = 0; index < size; index++)
 		data[index] = (unsigned char)random32();
@@ -670,6 +962,7 @@ check_next(
 	size_t position;
 	size_t size;
 	size_t der_size;
+	size_t expected_size;
 	uint8_t *der;
 	int error;
 
@@ -682,16 +975,25 @@ check_next(
 	error = cryc_pem_next_certificate(copy, size, &position, &der, &der_size);
 	CHECK(error == expected_error);
 	CHECK(position == expected_position);
+	/* A failure gives no certificate; a success gives exactly the expected bytes. */
 	if (expected_error != 0) {
 		CHECK(der == NULL);
 		CHECK(der_size == 0U);
 	} else {
+		/* The expected certificate is a C string, so its length is its size. */
+		expected_size = strlen(expected_der);
 		CHECK(der != NULL);
-		CHECK(der_size == strlen(expected_der));
-		if (der != NULL && der_size == strlen(expected_der))
+		CHECK(der_size == expected_size);
+
+		/* The bytes are compared only when there are some of the right size. */
+		if (der != NULL && der_size == expected_size)
 			CHECK_BYTES(der, expected_der, der_size);
+
+		/* The certificate belongs to the caller. */
 		free(der);
 	}
+
+	/* Releases the copy of the text. */
 	free(copy);
 }
 
@@ -916,6 +1218,8 @@ test_pem_sequences(void)
 			CHECK(der == NULL);
 		}
 	}
+
+	/* Releases the copy of the text. */
 	free(copy);
 	CHECK(guard < 32U);
 	CHECK(count == 3U);
@@ -978,6 +1282,8 @@ test_pem_examples(void)
 			CHECK(element.encoding_size == der_size);
 			free(der);
 		}
+
+		/* Releases the copy of the text. */
 		free(copy);
 	}
 }
@@ -1008,44 +1314,67 @@ test_pem_random(void)
 	/* Each text is a handful of fragments and sometimes a NUL byte; every call is checked. */
 	bad = 0;
 	for (round = 0; round < 40000U; round++) {
+		/* Builds a text of up to 13 random fragments. */
 		size = 0;
 		count = random32() % 14U;
 		while (count-- > 0U) {
 			choice = random32() % (sizeof(fragments) / sizeof(fragments[0]) + 1U);
+
+			/* The one choice past the fragments stands for a NUL byte. */
 			if (choice == sizeof(fragments) / sizeof(fragments[0])) {
 				text[size++] = '\0';
 				continue;
 			}
+
+			/* Appends the chosen fragment. */
 			memcpy(text + size, fragments[choice], strlen(fragments[choice]));
 			size += strlen(fragments[choice]);
 		}
+
+		/* Copies the text exactly, so that the sanitizer sees any overread. */
 		copy = dup_exact(text, size);
+
+		/* Reads the copy from its start for at most 64 steps. */
 		position = 0;
 		for (steps = 0; steps < 64; steps++) {
 			previous = position;
 			error = cryc_pem_next_certificate(copy, size, &position, &der, &der_size);
 			if (position > size)
 				bad++;
+
+			/* A certificate must be non-empty and the position must advance. */
 			if (error == 0) {
 				if (der == NULL || der_size == 0U || position <= previous)
 					bad++;
 				free(der);
 				continue;
 			}
+
+			/* A failure gives no certificate. */
 			if (der != NULL || der_size != 0U)
 				bad++;
+
+			/* The end of the text puts the position at the end and ends the run. */
 			if (error == ENOENT) {
 				if (position != size)
 					bad++;
 				break;
 			}
+
+			/* Any other error is EINVAL, and the position must advance past the broken block. */
 			if (error != EINVAL || position <= previous)
 				bad++;
 		}
+
+		/* A run that did not reach the end of the text in 64 steps is wrong. */
 		if (steps == 64)
 			bad++;
+
+		/* Releases the copy of the text. */
 		free(copy);
 	}
+
+	/* No text broke the contract of the reader. */
 	CHECK(bad == 0);
 }
 
@@ -1060,6 +1389,7 @@ test_wycheproof_pem(
 	unsigned char decoded[8192];
 	char text[16384];
 	const char *piece;
+	const char *value;
 	size_t size;
 	size_t used;
 	size_t written;
@@ -1068,21 +1398,39 @@ test_wycheproof_pem(
 	size_t first;
 	size_t line;
 	size_t body_end;
+	size_t piece_size;
 	uint8_t *certificate;
 	unsigned long wrong;
 	unsigned long seen;
 	int error;
+	int compare;
+	int matched;
+	int more;
 
 	/* The record with the key holds the PEM as a first line in a value and the rest as lines without " = ". */
-	if (vec_open(&file, name) != 0) {
+	error = vec_open(&file, name);
+	if (error != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Reads every record, counting the keys seen and the answers that are wrong. */
 	wrong = 0;
 	seen = 0;
-	while (vec_next(&file)) {
-		if (vec_get(&file, "group.publicKeyDer") == NULL || vec_get(&file, "group.publicKeyPem") == NULL)
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
+
+		/* A record without both the DER and the PEM of a key is not a key record. */
+		value = vec_get(&file, "group.publicKeyDer");
+		if (value == NULL)
 			continue;
+		value = vec_get(&file, "group.publicKeyPem");
+		if (value == NULL)
+			continue;
+
+		/* The DER that the file gives. */
 		size = vec_hex(&file, "group.publicKeyDer", der, sizeof(der));
 		if (size == (size_t)-1) {
 			wrong++;
@@ -1091,41 +1439,70 @@ test_wycheproof_pem(
 
 		/* The lines of the PEM text, from the field to the END line. */
 		for (first = 0; first < file.count; first++) {
-			if (strcmp(file.keys[first], "group.publicKeyPem") == 0)
+			compare = strcmp(file.keys[first], "group.publicKeyPem");
+			if (compare == 0)
 				break;
 		}
+
+		/* Joins the lines up to the END line, each ended by a line end. */
 		used = 0;
 		for (line = first; line < file.count; line++) {
-			piece = line == first ? file.values[line] : file.keys[line];
-			if (used + strlen(piece) + 2U > sizeof(text))
+			/* The first line is the value of the field; the others are keys with no value. */
+			piece = file.keys[line];
+			if (line == first)
+				piece = file.values[line];
+			piece_size = strlen(piece);
+
+			/* Stops when the line would not fit. */
+			if (used + piece_size + 2U > sizeof(text))
 				break;
-			memcpy(text + used, piece, strlen(piece));
-			used += strlen(piece);
+
+			/* Appends the line and its line end. */
+			memcpy(text + used, piece, piece_size);
+			used += piece_size;
 			text[used++] = '\n';
-			if (strncmp(piece, "-----END", 8) == 0)
+
+			/* The END line is the last one. */
+			compare = strncmp(piece, "-----END", 8);
+			if (compare == 0)
 				break;
 		}
+
+		/* Counts the key. */
 		seen++;
 
 		/* A PUBLIC KEY block is not a certificate. */
 		position = 0;
 		error = cryc_pem_next_certificate(text, used, &position, &certificate, &der_size);
-		if (error != ENOENT || position != used || certificate != NULL)
+		if (error != ENOENT ||
+		    position != used ||
+		    certificate != NULL)
 			wrong++;
 
-		/* Its base64 (the lines between BEGIN and END) is the DER the file gives. */
-		if (used < 27U || strncmp(text, "-----BEGIN PUBLIC KEY-----\n", 27) != 0) {
+		/* The text must start with the BEGIN line of a public key. */
+		compare = 1;
+		if (used >= 27U)
+			compare = strncmp(text, "-----BEGIN PUBLIC KEY-----\n", 27);
+		if (compare != 0) {
 			wrong++;
 			continue;
 		}
+
+		/* The base64 is the lines between the BEGIN line and the END line. */
 		for (body_end = 27; body_end + 8U < used; body_end++) {
-			if (strncmp(text + body_end, "-----END", 8) == 0)
+			compare = strncmp(text + body_end, "-----END", 8);
+			if (compare == 0)
 				break;
 		}
+
+		/* Its base64 is the DER that the file gives. */
 		error = cryc_base64_decode(text + 27, body_end - 27U, decoded, sizeof(decoded), &written);
-		if (error != 0 || written != size || memcmp(decoded, der, size) != 0)
+		matched = decode_matches(error, written, size, decoded, der);
+		if (!matched)
 			wrong++;
 	}
+
+	/* Closes the file and reports the counts of this file. */
 	vec_close(&file);
 	printf("  %s: %lu PEM keys, %lu wrong\n", name, seen, wrong);
 	CHECK(seen > 0UL);
@@ -1147,6 +1524,8 @@ read_file(
 	stream = fopen(path, "rb");
 	if (stream == NULL)
 		return NULL;
+
+	/* Measures the file, then rewinds it. */
 	fseek(stream, 0, SEEK_END);
 	length = ftell(stream);
 	fseek(stream, 0, SEEK_SET);
@@ -1154,14 +1533,20 @@ read_file(
 		fclose(stream);
 		return NULL;
 	}
+
+	/* Allocates room for the data and a NUL. */
 	data = malloc((size_t)length + 1U);
 	if (data == NULL) {
 		fclose(stream);
 		return NULL;
 	}
+
+	/* Reads the whole file and ends the data with a NUL. */
 	*size = fread(data, 1, (size_t)length, stream);
 	fclose(stream);
 	data[*size] = '\0';
+
+	/* Reports the data, which the caller frees. */
 	return data;
 }
 
@@ -1193,6 +1578,9 @@ test_bundle(void)
 	struct cryc_der reader;
 	struct cryc_der_element element;
 	int error;
+	int der_error;
+	int compare;
+	int empty;
 
 	/* The bundle must be readable: a missing file is a failure, not a pass. */
 	path = getenv("WS335_CACERT");
@@ -1202,6 +1590,8 @@ test_bundle(void)
 	CHECK(text != NULL);
 	if (text == NULL)
 		return;
+
+	/* Allocates the buffers of the second method; both must exist. */
 	joined = malloc(size + 1U);
 	encoded = malloc(size * 2U + 16U);
 	CHECK(joined != NULL && encoded != NULL);
@@ -1228,6 +1618,8 @@ test_bundle(void)
 			if (*line != '\n' && *line != '\r' && *line != ' ')
 				joined[joined_size++] = *line;
 		}
+
+		/* Terminates the joined text. */
 		joined[joined_size] = '\0';
 
 		/* The reader's answer. */
@@ -1237,21 +1629,42 @@ test_bundle(void)
 			begin = strstr(end, BEGIN_LINE);
 			continue;
 		}
+
+		/* Counts the certificate, and compares its re-encoding with the bundle's own text. */
 		count++;
 		length = encode(der, der_size, encoded, 0, "");
-		if (length != joined_size || memcmp(encoded, joined, joined_size) != 0)
+		if (length != joined_size) {
 			wrong++;
+		} else {
+			compare = memcmp(encoded, joined, joined_size);
+			if (compare != 0)
+				wrong++;
+		}
+
+		/* The certificate must be one DER sequence with nothing after it. */
 		cryc_der_init(&reader, der, der_size);
-		if (cryc_der_expect(&reader, CRYC_DER_SEQUENCE, &element) != 0 || !cryc_der_empty(&reader))
+		der_error = cryc_der_expect(&reader, CRYC_DER_SEQUENCE, &element);
+		if (der_error != 0) {
 			wrong++;
+		} else {
+			empty = cryc_der_empty(&reader);
+			if (!empty)
+				wrong++;
+		}
+
+		/* Releases the certificate and goes on to the next block. */
 		free(der);
 		begin = strstr(end, BEGIN_LINE);
 	}
+
+	/* After the last block the reader finds nothing more. */
 	error = cryc_pem_next_certificate(text, size, &position, &der, &der_size);
 	CHECK(error == ENOENT);
 	CHECK(expected > 100UL);
 	CHECK(count == expected);
 	CHECK(wrong == 0UL);
+
+	/* Reports the number of certificates and releases the buffers. */
 	printf("  bundle: %lu certificates\n", count);
 	free(joined);
 	free(encoded);
@@ -1276,29 +1689,45 @@ test_limbo_pem(void)
 	unsigned long count;
 	unsigned long wrong;
 	int error;
+	int matched;
+	int more;
 
 	/* Room for the largest certificate of the cases (about 78 KB), its text and the lines around it. */
 	der = malloc(LIMBO_MAX);
 	body = malloc(LIMBO_MAX * 2U);
 	text = malloc(LIMBO_MAX * 2U + 128U);
 	CHECK(der != NULL && body != NULL && text != NULL);
-	if (der == NULL || body == NULL || text == NULL)
+	if (der == NULL ||
+	    body == NULL ||
+	    text == NULL)
 		return;
 
 	/* The peer certificate of every case, as "text", BEGIN, body, END. */
-	if (vec_open(&file, "limbo") != 0) {
+	error = vec_open(&file, "limbo");
+	if (error != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Wraps each certificate with the width and line end of its turn, and reads it back. */
 	count = 0;
 	wrong = 0;
-	while (vec_next(&file)) {
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
+
+		/* The DER of the peer certificate. */
 		size = vec_hex(&file, "peer", der, LIMBO_MAX);
 		if (size == (size_t)-1) {
 			wrong++;
 			continue;
 		}
+
+		/* Encodes it with the width and line end of this turn. */
 		encode(der, size, body, wraps[count % 4U], eols[count % 4U]);
+
+		/* Builds the text: a line of text, the BEGIN line and the body. */
 		used = 0;
 		memcpy(text + used, "text\n", 5);
 		used += 5U;
@@ -1308,59 +1737,42 @@ test_limbo_pem(void)
 		used += strlen(eols[count % 4U]);
 		memcpy(text + used, body, strlen(body));
 		used += strlen(body);
+
+		/* An unwrapped body has no line end of its own, so one is put before the END line. */
 		if (wraps[count % 4U] == 0U) {
 			memcpy(text + used, eols[count % 4U], strlen(eols[count % 4U]));
 			used += strlen(eols[count % 4U]);
 		}
+
+		/* The END line closes the block, with no line end after it. */
 		memcpy(text + used, END_LINE, strlen(END_LINE));
 		used += strlen(END_LINE);
+
+		/* Reads the block back: the same DER, and the position at the end of the text. */
 		position = 0;
 		error = cryc_pem_next_certificate(text, used, &position, &read, &der_size);
-		if (error != 0 || der_size != size || memcmp(read, der, size) != 0 || position != used)
+		matched = decode_matches(error, der_size, size, read, der);
+		if (!matched) {
 			wrong++;
+		} else if (position != used) {
+			wrong++;
+		}
+
+		/* Releases the certificate when one was read. */
 		if (error == 0)
 			free(read);
+
+		/* Goes on to the next case. */
 		count++;
 	}
+
+	/* Closes the file and releases the buffers. */
 	vec_close(&file);
 	free(der);
 	free(body);
 	free(text);
+
+	/* Every case was read back. */
 	CHECK(count == 9792UL);
 	CHECK(wrong == 0UL);
-}
-
-/* Runs the checks. */
-int
-main(void)
-{
-	unsigned long keys;
-
-	/* Base64. */
-	test_rfc4648_vectors();
-	test_alphabet();
-	test_padding();
-	test_tails();
-	test_whitespace();
-	test_room();
-	test_roundtrip_and_random();
-	test_large();
-
-	/* PEM. */
-	test_pem_forms();
-	test_pem_lookalikes();
-	test_pem_broken();
-	test_pem_sequences();
-	test_pem_positions();
-	test_pem_examples();
-	test_pem_random();
-	keys = 0;
-	test_wycheproof_pem("wycheproof-ecdsa_secp256r1_sha256_test", &keys);
-	test_wycheproof_pem("wycheproof-ed25519_test", &keys);
-	test_wycheproof_pem("wycheproof-rsa_signature_2048_sha256_test", &keys);
-	test_wycheproof_pem("wycheproof-rsa_pss_4096_sha512_mgf1_64_test", &keys);
-	CHECK(keys > 100UL);
-	test_limbo_pem();
-	test_bundle();
-	return check_finish("test-pem");
 }

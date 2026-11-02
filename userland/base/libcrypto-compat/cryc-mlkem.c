@@ -113,6 +113,8 @@ cryc_mlkem768_keygen_internal(
 			cryc_mlkem_multiply_ntts(&product, &entry, &s[j]);
 			mlkem_poly_add(&t, &t, &product);
 		}
+
+		/* Encodes the sum into the public key and the secret into the private key. */
 		cryc_mlkem_byte_encode(ek + MLKEM_POLY_BYTES * i, &t, 12U);
 		cryc_mlkem_byte_encode(dk + MLKEM_POLY_BYTES * i, &s[i], 12U);
 	}
@@ -561,6 +563,8 @@ mlkem_kpke_encrypt(
 			cryc_mlkem_multiply_ntts(&product, &entry, &y[j]);
 			mlkem_poly_add(&sum, &sum, &product);
 		}
+
+		/* Returns the row to the plain domain and adds the noise to it. */
 		cryc_mlkem_ntt_inverse(&sum);
 		mlkem_noise(&noise, r, nonce);
 		nonce++;
@@ -632,6 +636,8 @@ mlkem_kpke_decrypt(
 		cryc_mlkem_multiply_ntts(&product, &s, &u);
 		mlkem_poly_add(&sum, &sum, &product);
 	}
+
+	/* Returns the sum to the plain domain. */
 	cryc_mlkem_ntt_inverse(&sum);
 
 	/* Decodes v' = Decompress_dv(ByteDecode_dv(c2)), line 4. */

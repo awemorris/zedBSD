@@ -185,6 +185,8 @@ sslc_hs13_message(
 	default:
 		return sslc_hs13_fail(hs, SSLC_ALERT_UNEXPECTED_MESSAGE, EPROTO);
 	}
+
+	/* Propagates a failed message. */
 	if (error != 0)
 		return error;
 
@@ -366,6 +368,8 @@ sslc_hs13_scheme(
 		if (hs->schemes[index] == scheme)
 			offered = 1;
 	}
+
+	/* Refuses a scheme the client did not offer. */
 	if (!offered)
 		return sslc_hs13_fail(hs, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
 
@@ -534,6 +538,8 @@ sslc_hs13_client_flight(
 		cryc_wipe(message, sizeof(message));
 		return sslc_hs13_fail(hs, 0, error);
 	}
+
+	/* Queues the Finished message. */
 	error = sslc_hs_queue_message(hs, actions, message, written);
 
 	/* The Finished is copied into the actions; the local copy of verify_data goes. */

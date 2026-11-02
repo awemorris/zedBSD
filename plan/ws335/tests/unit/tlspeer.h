@@ -548,14 +548,14 @@ struct tlspeer {
  * big-endian bytes and computes Q = d G.  Returns 0, EINVAL when d is 0 or
  * not below n, ENOTSUP for an unknown curve.
  */
-static int __attribute__((unused)) tlspeer_key_init(struct tlspeer_key *key, enum cryc_curve_id curve, const uint8_t *private_key);
+static int tlspeer_key_init(struct tlspeer_key *key, enum cryc_curve_id curve, const uint8_t *private_key) __attribute__((unused));
 
 /*
  * Prepares a fixed key made from a label: d = SHA-256(label) for P-256,
  * SHA-384(label) for P-384.  Returns as tlspeer_key_init (EINVAL in the
  * unlikely case the digest is not below n: choose another label).
  */
-static int __attribute__((unused)) tlspeer_key_from_label(struct tlspeer_key *key, enum cryc_curve_id curve, const char *label);
+static int tlspeer_key_from_label(struct tlspeer_key *key, enum cryc_curve_id curve, const char *label) __attribute__((unused));
 
 /*
  * Signs a hash with ECDSA (FIPS 186-5 6.4.1 steps 3 to 11; the hash is
@@ -568,20 +568,20 @@ static int __attribute__((unused)) tlspeer_key_from_label(struct tlspeer_key *ke
  * Returns 0, or EINVAL for a k out of range or a k that gives r = 0 or
  * s = 0.
  */
-static int __attribute__((unused)) tlspeer_ecdsa_sign(const struct tlspeer_key *key, const uint8_t *hash, size_t hash_size, const uint8_t *k, uint8_t *r, uint8_t *s);
+static int tlspeer_ecdsa_sign(const struct tlspeer_key *key, const uint8_t *hash, size_t hash_size, const uint8_t *k, uint8_t *r, uint8_t *s) __attribute__((unused));
 
 /*
  * Signs a hash as tlspeer_ecdsa_sign with the fixed k and writes the DER
  * Ecdsa-Sig-Value (RFC 5480 2.2: SEQUENCE { r INTEGER, s INTEGER }), the
  * form TLS and X.509 carry.  Returns 0, EINVAL, or ENOBUFS.
  */
-static int __attribute__((unused)) tlspeer_ecdsa_sign_der(const struct tlspeer_key *key, const uint8_t *hash, size_t hash_size, uint8_t *out, size_t room, size_t *written);
+static int tlspeer_ecdsa_sign_der(const struct tlspeer_key *key, const uint8_t *hash, size_t hash_size, uint8_t *out, size_t room, size_t *written) __attribute__((unused));
 
 /* Writes the certificate spec describes as DER.  Returns 0, EINVAL or ENOBUFS. */
-static int __attribute__((unused)) tlspeer_make_cert(const struct tlspeer_cert *spec, uint8_t *out, size_t room, size_t *written);
+static int tlspeer_make_cert(const struct tlspeer_cert *spec, uint8_t *out, size_t room, size_t *written) __attribute__((unused));
 
 /* Makes the root and the leaf for host on curve (P-256 or P-384).  Returns 0 or an error. */
-static int __attribute__((unused)) tlspeer_pki_init(struct tlspeer_pki *pki, enum cryc_curve_id curve, const char *host);
+static int tlspeer_pki_init(struct tlspeer_pki *pki, enum cryc_curve_id curve, const char *host) __attribute__((unused));
 
 /*
  * Fills a working script: version; TLS 1.3 suite TLS_AES_128_GCM_SHA256,
@@ -589,13 +589,13 @@ static int __attribute__((unused)) tlspeer_pki_init(struct tlspeer_pki *pki, enu
  * scheme of pki's leaf curve; the leaf as the only certificate; fixed
  * random values made from labels.  Returns 0 or an error.
  */
-static int __attribute__((unused)) tlspeer_config_init(struct tlspeer_config *config, uint16_t version, const struct tlspeer_pki *pki);
+static int tlspeer_config_init(struct tlspeer_config *config, uint16_t version, const struct tlspeer_pki *pki) __attribute__((unused));
 
 /* Makes a peer for config (copied).  Returns 0, EINVAL for a config out of range, or ENOMEM. */
-static int __attribute__((unused)) tlspeer_new(struct tlspeer **peer, const struct tlspeer_config *config);
+static int tlspeer_new(struct tlspeer **peer, const struct tlspeer_config *config) __attribute__((unused));
 
 /* Wipes and frees a peer (NULL is allowed). */
-static void __attribute__((unused)) tlspeer_free(struct tlspeer *peer);
+static void tlspeer_free(struct tlspeer *peer) __attribute__((unused));
 
 /*
  * Reads a whole ClientHello message (its 4-byte header and body) into
@@ -606,10 +606,10 @@ static void __attribute__((unused)) tlspeer_free(struct tlspeer *peer);
  * renegotiation_info.  Returns 0, EINVAL (malformed), ENOBUFS (over a
  * limit of the tool).
  */
-static int __attribute__((unused)) tlspeer_parse_client_hello(const uint8_t *message, size_t size, struct tlspeer_hello *hello);
+static int tlspeer_parse_client_hello(const uint8_t *message, size_t size, struct tlspeer_hello *hello) __attribute__((unused));
 
 /* Returns 1 when hello carries an extension of type, else 0. */
-static int __attribute__((unused)) tlspeer_hello_has(const struct tlspeer_hello *hello, uint16_t type);
+static int tlspeer_hello_has(const struct tlspeer_hello *hello, uint16_t type) __attribute__((unused));
 
 /*
  * Takes one whole client handshake message (header and body) and moves
@@ -619,17 +619,17 @@ static int __attribute__((unused)) tlspeer_hello_has(const struct tlspeer_hello 
  * Finished), a TLS 1.3 KeyUpdate moves the read keys (and when it
  * requests it, the peer answers with its own).  Returns 0 or an error.
  */
-static int __attribute__((unused)) tlspeer_handshake(struct tlspeer *peer, const uint8_t *message, size_t size);
+static int tlspeer_handshake(struct tlspeer *peer, const uint8_t *message, size_t size) __attribute__((unused));
 
 /*
  * Takes the client's change_cipher_spec: TLS 1.2 after the
  * ClientKeyExchange it switches the read keys; TLS 1.3 before the
  * client's Finished it is counted and dropped.  Elsewhere EPROTO.
  */
-static int __attribute__((unused)) tlspeer_change_cipher_spec(struct tlspeer *peer);
+static int tlspeer_change_cipher_spec(struct tlspeer *peer) __attribute__((unused));
 
 /* Gives the next thing the server sends; returns 1 with *item filled, or 0 when there is none. */
-static int __attribute__((unused)) tlspeer_next(struct tlspeer *peer, struct tlspeer_item *item);
+static int tlspeer_next(struct tlspeer *peer, struct tlspeer_item *item) __attribute__((unused));
 
 /*
  * Takes size bytes the client wrote (any split of its records), opens
@@ -638,195 +638,195 @@ static int __attribute__((unused)) tlspeer_next(struct tlspeer *peer, struct tls
  * time (a client that fails before it has keys sends one).  Returns 0 or
  * an error (a record that does not open is EBADMSG).
  */
-static int __attribute__((unused)) tlspeer_input(struct tlspeer *peer, const uint8_t *data, size_t size);
+static int tlspeer_input(struct tlspeer *peer, const uint8_t *data, size_t size) __attribute__((unused));
 
 /* Seals everything sent so far into records; returns 0 or an error. */
-static int __attribute__((unused)) tlspeer_flush(struct tlspeer *peer);
+static int tlspeer_flush(struct tlspeer *peer) __attribute__((unused));
 
 /*
  * Flushes, then gives up to room of the bytes for the client; *taken
  * receives the count (0 when none wait).  Returns 0 or an error.
  */
-static int __attribute__((unused)) tlspeer_take(struct tlspeer *peer, uint8_t *out, size_t room, size_t *taken);
+static int tlspeer_take(struct tlspeer *peer, uint8_t *out, size_t room, size_t *taken) __attribute__((unused));
 
 /*
  * Sends a TLS 1.3 NewSessionTicket (lifetime 7200, age_add 0x01020304,
  * nonce 00, a 16-byte ticket, no extensions) under the current keys.
  */
-static int __attribute__((unused)) tlspeer_send_ticket(struct tlspeer *peer);
+static int tlspeer_send_ticket(struct tlspeer *peer) __attribute__((unused));
 
 /* Sends a TLS 1.3 KeyUpdate (request_update 0 or 1) and moves the write keys to the next generation. */
-static int __attribute__((unused)) tlspeer_send_key_update(struct tlspeer *peer, int request_update);
+static int tlspeer_send_key_update(struct tlspeer *peer, int request_update) __attribute__((unused));
 
 /* Sends application data (split into records of record_size; an alert or a raw record is never split). */
-static int __attribute__((unused)) tlspeer_send_data(struct tlspeer *peer, const uint8_t *data, size_t size);
+static int tlspeer_send_data(struct tlspeer *peer, const uint8_t *data, size_t size) __attribute__((unused));
 
 /* Sends an alert of level and description under the current keys. */
-static int __attribute__((unused)) tlspeer_send_alert(struct tlspeer *peer, unsigned level, unsigned description);
+static int tlspeer_send_alert(struct tlspeer *peer, unsigned level, unsigned description) __attribute__((unused));
 
 /*
  * Sends a handshake message the test made (whole, header and body) under
  * the current keys; it is not added to the transcript (a HelloRequest, an
  * unexpected or malformed message).
  */
-static int __attribute__((unused)) tlspeer_send_handshake(struct tlspeer *peer, const uint8_t *message, size_t size);
+static int tlspeer_send_handshake(struct tlspeer *peer, const uint8_t *message, size_t size) __attribute__((unused));
 
 /* Sends one record of content type type (20 to 23) with these bytes (at most 2^14) under the current keys. */
-static int __attribute__((unused)) tlspeer_send_record(struct tlspeer *peer, unsigned type, const uint8_t *content, size_t size);
+static int tlspeer_send_record(struct tlspeer *peer, unsigned type, const uint8_t *content, size_t size) __attribute__((unused));
 
 /* Sends bytes as they are, after everything before them (a hand-made record). */
-static int __attribute__((unused)) tlspeer_send_bytes(struct tlspeer *peer, const uint8_t *bytes, size_t size);
+static int tlspeer_send_bytes(struct tlspeer *peer, const uint8_t *bytes, size_t size) __attribute__((unused));
 
 /*
  * The tool's own parts.
  */
 
 /* Starts a writer over room bytes. */
-static void __attribute__((unused)) tlspeer_writer_init(struct tlspeer_writer *writer, uint8_t *data, size_t room);
+static void tlspeer_writer_init(struct tlspeer_writer *writer, uint8_t *data, size_t room) __attribute__((unused));
 
 /* Writes size bytes. */
-static void __attribute__((unused)) tlspeer_put(struct tlspeer_writer *writer, const uint8_t *data, size_t size);
+static void tlspeer_put(struct tlspeer_writer *writer, const uint8_t *data, size_t size) __attribute__((unused));
 
 /* Writes the low bytes of value big-endian in count bytes (1 to 4). */
-static void __attribute__((unused)) tlspeer_put_int(struct tlspeer_writer *writer, uint32_t value, unsigned count);
+static void tlspeer_put_int(struct tlspeer_writer *writer, uint32_t value, unsigned count) __attribute__((unused));
 
 /* Begins a vector with a length prefix of prefix bytes. */
-static void __attribute__((unused)) tlspeer_begin(struct tlspeer_writer *writer, unsigned prefix);
+static void tlspeer_begin(struct tlspeer_writer *writer, unsigned prefix) __attribute__((unused));
 
 /* Ends the innermost vector and fills its length. */
-static void __attribute__((unused)) tlspeer_end(struct tlspeer_writer *writer);
+static void tlspeer_end(struct tlspeer_writer *writer) __attribute__((unused));
 
 /* Writes one extension: type and data<0..2^16-1>. */
-static void __attribute__((unused)) tlspeer_put_extension(struct tlspeer_writer *writer, uint32_t type, const uint8_t *data, size_t size);
+static void tlspeer_put_extension(struct tlspeer_writer *writer, uint32_t type, const uint8_t *data, size_t size) __attribute__((unused));
 
 /* Starts a reader over size bytes. */
-static void __attribute__((unused)) tlspeer_reader_init(struct tlspeer_reader *reader, const uint8_t *data, size_t size);
+static void tlspeer_reader_init(struct tlspeer_reader *reader, const uint8_t *data, size_t size) __attribute__((unused));
 
 /* Reads a big-endian integer of count bytes (1 to 3). */
-static uint32_t __attribute__((unused)) tlspeer_get_int(struct tlspeer_reader *reader, unsigned count);
+static uint32_t tlspeer_get_int(struct tlspeer_reader *reader, unsigned count) __attribute__((unused));
 
 /* Gives a view of the next size bytes, or NULL (error set). */
-static const uint8_t * __attribute__((unused)) tlspeer_get(struct tlspeer_reader *reader, size_t size);
+static const uint8_t * tlspeer_get(struct tlspeer_reader *reader, size_t size) __attribute__((unused));
 
 /* Reads a vector with a prefix of prefix bytes and a length in [min, max] into inner. */
-static void __attribute__((unused)) tlspeer_get_vector(struct tlspeer_reader *reader, unsigned prefix, size_t min, size_t max, struct tlspeer_reader *inner);
+static void tlspeer_get_vector(struct tlspeer_reader *reader, unsigned prefix, size_t min, size_t max, struct tlspeer_reader *inner) __attribute__((unused));
 
 /* Returns 1 when the reader has no error and nothing left. */
-static int __attribute__((unused)) tlspeer_reader_done(const struct tlspeer_reader *reader);
+static int tlspeer_reader_done(const struct tlspeer_reader *reader) __attribute__((unused));
 
 /* Reads a list of 2-byte values of a vector into out; returns 0, EINVAL or ENOBUFS. */
-static int __attribute__((unused)) tlspeer_get_list16(struct tlspeer_reader *reader, unsigned prefix, size_t min, size_t max, uint16_t *out, size_t *count);
+static int tlspeer_get_list16(struct tlspeer_reader *reader, unsigned prefix, size_t min, size_t max, uint16_t *out, size_t *count) __attribute__((unused));
 
 /* Reads one ClientHello extension's data into hello; returns 0, EINVAL or ENOBUFS. */
-static int __attribute__((unused)) tlspeer_parse_extension(struct tlspeer_hello *hello, uint32_t type, struct tlspeer_reader *data);
+static int tlspeer_parse_extension(struct tlspeer_hello *hello, uint32_t type, struct tlspeer_reader *data) __attribute__((unused));
 
 /* Writes the n - 2 of key's curve as ec.size big-endian bytes. */
-static void __attribute__((unused)) tlspeer_order_minus_two(const struct tlspeer_key *key, uint8_t *out);
+static void tlspeer_order_minus_two(const struct tlspeer_key *key, uint8_t *out) __attribute__((unused));
 
 /* Makes the fixed per-message k for a hash. */
-static int __attribute__((unused)) tlspeer_fixed_k(const struct tlspeer_key *key, const uint8_t *hash, size_t hash_size, unsigned counter, uint8_t *k);
+static int tlspeer_fixed_k(const struct tlspeer_key *key, const uint8_t *hash, size_t hash_size, unsigned counter, uint8_t *k) __attribute__((unused));
 
 /* Writes a Name of one commonName. */
-static void __attribute__((unused)) tlspeer_der_name(struct der_writer *writer, const char *common_name);
+static void tlspeer_der_name(struct der_writer *writer, const char *common_name) __attribute__((unused));
 
 /* Writes one Extension: extnID, critical when 1, extnValue. */
-static void __attribute__((unused)) tlspeer_der_extension(struct der_writer *writer, const char *oid, int critical, const struct der_writer *value);
+static void tlspeer_der_extension(struct der_writer *writer, const char *oid, int critical, const struct der_writer *value) __attribute__((unused));
 
 /* Writes a key's SubjectPublicKeyInfo. */
-static void __attribute__((unused)) tlspeer_der_spki(struct der_writer *writer, const struct tlspeer_key *key);
+static void tlspeer_der_spki(struct der_writer *writer, const struct tlspeer_key *key) __attribute__((unused));
 
 /* Writes the AlgorithmIdentifier of ECDSA with the hash of key's curve. */
-static void __attribute__((unused)) tlspeer_der_sigalg(struct der_writer *writer, const struct tlspeer_key *key);
+static void tlspeer_der_sigalg(struct der_writer *writer, const struct tlspeer_key *key) __attribute__((unused));
 
 /* Writes the key identifier of a key (20 bytes) to out. */
-static int __attribute__((unused)) tlspeer_key_id(const struct tlspeer_key *key, uint8_t *out);
+static int tlspeer_key_id(const struct tlspeer_key *key, uint8_t *out) __attribute__((unused));
 
 /* Writes the extensions block [3] of a certificate. */
-static int __attribute__((unused)) tlspeer_der_extensions(struct der_writer *writer, const struct tlspeer_cert *spec);
+static int tlspeer_der_extensions(struct der_writer *writer, const struct tlspeer_cert *spec) __attribute__((unused));
 
 /* Records the first failure and moves to TLSPEER_FAILED; returns error. */
-static int __attribute__((unused)) tlspeer_fail(struct tlspeer *peer, int error, const char *why);
+static int tlspeer_fail(struct tlspeer *peer, int error, const char *why) __attribute__((unused));
 
 /* Ends the script (the client is expected to abort); returns 0. */
-static int __attribute__((unused)) tlspeer_stop(struct tlspeer *peer, const char *why);
+static int tlspeer_stop(struct tlspeer *peer, const char *why) __attribute__((unused));
 
 /* Starts writing an item into the flight buffer (resetting it when everything was taken). */
-static void __attribute__((unused)) tlspeer_item_begin(struct tlspeer *peer, struct tlspeer_writer *writer);
+static void tlspeer_item_begin(struct tlspeer *peer, struct tlspeer_writer *writer) __attribute__((unused));
 
 /* Registers the bytes writer holds as an item; absorbs a handshake message into the transcript when absorb is 1. */
-static int __attribute__((unused)) tlspeer_item_commit(struct tlspeer *peer, struct tlspeer_writer *writer, unsigned kind, unsigned type, int absorb);
+static int tlspeer_item_commit(struct tlspeer *peer, struct tlspeer_writer *writer, unsigned kind, unsigned type, int absorb) __attribute__((unused));
 
 /* Adds an item of kind with a copy of size bytes. */
-static int __attribute__((unused)) tlspeer_item_add(struct tlspeer *peer, unsigned kind, unsigned type, const uint8_t *data, size_t size, int absorb);
+static int tlspeer_item_add(struct tlspeer *peer, unsigned kind, unsigned type, const uint8_t *data, size_t size, int absorb) __attribute__((unused));
 
 /* Adds new write keys and makes them the epoch of the next items. */
-static int __attribute__((unused)) tlspeer_add_epoch(struct tlspeer *peer, const struct sslc_traffic_keys *keys, int version13);
+static int tlspeer_add_epoch(struct tlspeer *peer, const struct sslc_traffic_keys *keys, int version13) __attribute__((unused));
 
 /* Writes the transcript hash so far into out (hash_size bytes). */
-static void __attribute__((unused)) tlspeer_transcript_hash(const struct tlspeer *peer, uint8_t *out);
+static void tlspeer_transcript_hash(const struct tlspeer *peer, uint8_t *out) __attribute__((unused));
 
 /* Replaces the transcript of ClientHello1 by message_hash (RFC 8446 4.4.1). */
-static void __attribute__((unused)) tlspeer_transcript_restart(struct tlspeer *peer);
+static void tlspeer_transcript_restart(struct tlspeer *peer) __attribute__((unused));
 
 /* Finds the client's key share of group; returns it or NULL. */
-static const struct tlspeer_share * __attribute__((unused)) tlspeer_find_share(const struct tlspeer *peer, uint16_t group);
+static const struct tlspeer_share * tlspeer_find_share(const struct tlspeer *peer, uint16_t group) __attribute__((unused));
 
 /* Computes the (EC)DH shared secret with the client's public key. */
-static int __attribute__((unused)) tlspeer_compute_shared(struct tlspeer *peer, const uint8_t *client_key, size_t client_key_size);
+static int tlspeer_compute_shared(struct tlspeer *peer, const uint8_t *client_key, size_t client_key_size) __attribute__((unused));
 
 /* Fills peer->server_share with the server's public key (or the broken one). */
-static int __attribute__((unused)) tlspeer_make_share(struct tlspeer *peer);
+static int tlspeer_make_share(struct tlspeer *peer) __attribute__((unused));
 
 /* Signs content with the configured key under the configured scheme's hash, into out as DER. */
-static int __attribute__((unused)) tlspeer_sign_content(struct tlspeer *peer, uint8_t *content, size_t content_size, uint8_t *out, size_t room, size_t *written);
+static int tlspeer_sign_content(struct tlspeer *peer, uint8_t *content, size_t content_size, uint8_t *out, size_t room, size_t *written) __attribute__((unused));
 
 /* Writes the extra extension when extra_at has where. */
-static void __attribute__((unused)) tlspeer_put_extra(const struct tlspeer *peer, struct tlspeer_writer *writer, uint32_t where);
+static void tlspeer_put_extra(const struct tlspeer *peer, struct tlspeer_writer *writer, uint32_t where) __attribute__((unused));
 
 /* Sends a HelloRetryRequest. */
-static int __attribute__((unused)) tlspeer_send_retry(struct tlspeer *peer);
+static int tlspeer_send_retry(struct tlspeer *peer) __attribute__((unused));
 
 /* Answers a TLS 1.3 ClientHello with the whole server flight. */
-static int __attribute__((unused)) tlspeer_flight13(struct tlspeer *peer);
+static int tlspeer_flight13(struct tlspeer *peer) __attribute__((unused));
 
 /* Answers a TLS 1.2 ClientHello with ServerHello to ServerHelloDone. */
-static int __attribute__((unused)) tlspeer_flight12(struct tlspeer *peer);
+static int tlspeer_flight12(struct tlspeer *peer) __attribute__((unused));
 
 /* Writes a Certificate message of the chain (TLS 1.3 when tls13 is 1). */
-static int __attribute__((unused)) tlspeer_send_certificate(struct tlspeer *peer, int tls13);
+static int tlspeer_send_certificate(struct tlspeer *peer, int tls13) __attribute__((unused));
 
 /* Takes a ClientHello. */
-static int __attribute__((unused)) tlspeer_on_hello(struct tlspeer *peer, const uint8_t *message, size_t size);
+static int tlspeer_on_hello(struct tlspeer *peer, const uint8_t *message, size_t size) __attribute__((unused));
 
 /* Takes the client's (empty) Certificate. */
-static int __attribute__((unused)) tlspeer_on_certificate(struct tlspeer *peer, const uint8_t *message, size_t size);
+static int tlspeer_on_certificate(struct tlspeer *peer, const uint8_t *message, size_t size) __attribute__((unused));
 
 /* Takes a TLS 1.2 ClientKeyExchange. */
-static int __attribute__((unused)) tlspeer_on_key_exchange(struct tlspeer *peer, const uint8_t *message, size_t size);
+static int tlspeer_on_key_exchange(struct tlspeer *peer, const uint8_t *message, size_t size) __attribute__((unused));
 
 /* Takes the client's Finished. */
-static int __attribute__((unused)) tlspeer_on_finished(struct tlspeer *peer, const uint8_t *message, size_t size);
+static int tlspeer_on_finished(struct tlspeer *peer, const uint8_t *message, size_t size) __attribute__((unused));
 
 /* Takes a TLS 1.3 KeyUpdate after the handshake. */
-static int __attribute__((unused)) tlspeer_on_key_update(struct tlspeer *peer, const uint8_t *message, size_t size);
+static int tlspeer_on_key_update(struct tlspeer *peer, const uint8_t *message, size_t size) __attribute__((unused));
 
 /* Sets the read keys the client's next records use. */
-static int __attribute__((unused)) tlspeer_set_read(struct tlspeer *peer, const struct sslc_traffic_keys *keys, int version13);
+static int tlspeer_set_read(struct tlspeer *peer, const struct sslc_traffic_keys *keys, int version13) __attribute__((unused));
 
 /* Seals one record of type with size bytes under the write dir into out. */
-static int __attribute__((unused)) tlspeer_seal(struct tlspeer *peer, unsigned type, const uint8_t *data, size_t size);
+static int tlspeer_seal(struct tlspeer *peer, unsigned type, const uint8_t *data, size_t size) __attribute__((unused));
 
 /* Seals size bytes of type as records of at most record_size bytes. */
-static int __attribute__((unused)) tlspeer_seal_split(struct tlspeer *peer, unsigned type, const uint8_t *data, size_t size);
+static int tlspeer_seal_split(struct tlspeer *peer, unsigned type, const uint8_t *data, size_t size) __attribute__((unused));
 
 /* Moves the write dir to epoch. */
-static int __attribute__((unused)) tlspeer_write_epoch(struct tlspeer *peer, unsigned epoch);
+static int tlspeer_write_epoch(struct tlspeer *peer, unsigned epoch) __attribute__((unused));
 
 /* Takes one record's content of type (plaintext or opened). */
-static int __attribute__((unused)) tlspeer_on_content(struct tlspeer *peer, unsigned type, const uint8_t *content, size_t size, int protected_record);
+static int tlspeer_on_content(struct tlspeer *peer, unsigned type, const uint8_t *content, size_t size, int protected_record) __attribute__((unused));
 
 /* Takes one whole record from peer->in. */
-static int __attribute__((unused)) tlspeer_on_record(struct tlspeer *peer, uint8_t *record, size_t size);
+static int tlspeer_on_record(struct tlspeer *peer, uint8_t *record, size_t size) __attribute__((unused));
 
 /*
  * The special Random of a HelloRetryRequest and the downgrade marks
@@ -905,6 +905,8 @@ tlspeer_put(
 		writer->error = ENOBUFS;
 		return;
 	}
+
+	/* Copies the bytes in and advances the write position. */
 	if (size > 0U)
 		memcpy(writer->data + writer->used, data, size);
 	writer->used += size;
@@ -1081,6 +1083,8 @@ tlspeer_get_vector(
 		inner->error = EINVAL;
 		return;
 	}
+
+	/* Starts the inner reader over the vector. */
 	tlspeer_reader_init(inner, view, length);
 }
 
@@ -1147,6 +1151,8 @@ tlspeer_parse_extension(
 	const uint8_t *bytes;
 	uint32_t name_type;
 	struct tlspeer_share *share;
+	const void *nul;
+	int done;
 	int error;
 
 	/* Each known extension by its syntax; others are only recorded. */
@@ -1162,18 +1168,29 @@ tlspeer_parse_extension(
 				list.error = EINVAL;
 				break;
 			}
+
+			/* Refuses a name too long for the buffer. */
 			if (entry.size > 255U) {
 				error = ENOBUFS;
 				break;
 			}
-			if (memchr(entry.data, 0, entry.size) != NULL) {
+
+			/* Looks for a NUL byte inside the name. */
+			nul = memchr(entry.data, 0, entry.size);
+
+			/* Refuses a name with an embedded NUL. */
+			if (nul != NULL) {
 				list.error = EINVAL;
 				break;
 			}
+
+			/* Stores the name, terminated, and notes it was seen. */
 			memcpy(hello->server_name, entry.data, entry.size);
 			hello->server_name[entry.size] = '\0';
 			hello->has_server_name = 1;
 		}
+
+		/* A malformed list is a malformed extension. */
 		if (list.error != 0)
 			error = EINVAL;
 		break;
@@ -1188,10 +1205,14 @@ tlspeer_parse_extension(
 			error = EINVAL;
 			break;
 		}
+
+		/* Refuses a list longer than the table. */
 		if (list.size > TLSPEER_LIST_MAX) {
 			error = ENOBUFS;
 			break;
 		}
+
+		/* Stores the point formats. */
 		memcpy(hello->point_formats, list.data, list.size);
 		hello->point_format_count = list.size;
 		break;
@@ -1214,10 +1235,14 @@ tlspeer_parse_extension(
 			error = EINVAL;
 			break;
 		}
+
+		/* Refuses a cookie longer than the table. */
 		if (list.size > TLSPEER_COOKIE_MAX) {
 			error = ENOBUFS;
 			break;
 		}
+
+		/* Stores the cookie. */
 		memcpy(hello->cookie, list.data, list.size);
 		hello->cookie_size = list.size;
 		hello->has_cookie = 1;
@@ -1231,6 +1256,8 @@ tlspeer_parse_extension(
 				error = ENOBUFS;
 				break;
 			}
+
+			/* Starts the next key share. */
 			share = &hello->shares[hello->share_count];
 			share->group = (uint16_t)tlspeer_get_int(&list, 2);
 			tlspeer_get_vector(&list, 2, 1, 65535, &entry);
@@ -1240,10 +1267,14 @@ tlspeer_parse_extension(
 				error = ENOBUFS;
 				break;
 			}
+
+			/* Stores the share's key and counts the share. */
 			memcpy(share->key, entry.data, entry.size);
 			share->key_size = entry.size;
 			hello->share_count++;
 		}
+
+		/* A malformed share list is a malformed extension. */
 		if (error == 0 && list.error != 0)
 			error = EINVAL;
 		break;
@@ -1254,6 +1285,8 @@ tlspeer_parse_extension(
 			error = EINVAL;
 			break;
 		}
+
+		/* Stores the renegotiation data, if any, and notes it was seen. */
 		if (list.size > 0U)
 			memcpy(hello->renegotiation_info, list.data, list.size);
 		hello->renegotiation_info_size = list.size;
@@ -1270,7 +1303,10 @@ tlspeer_parse_extension(
 	/* An extension's data must be read exactly. */
 	if (error != 0)
 		return error;
-	if (!tlspeer_reader_done(data))
+
+	/* Asks whether the extension's data was all read. */
+	done = tlspeer_reader_done(data);
+	if (!done)
 		return EINVAL;
 
 	/* Read. */
@@ -1296,6 +1332,7 @@ tlspeer_parse_client_hello(
 	const uint8_t *bytes;
 	uint32_t type;
 	size_t index;
+	int done;
 	int error;
 
 	/* Nothing is kept from an earlier hello. */
@@ -1307,7 +1344,10 @@ tlspeer_parse_client_hello(
 	tlspeer_get_vector(&reader, 3, 0, 0xffffffU, &body);
 	if (body.error != 0 || type != SSLC_HS_CLIENT_HELLO)
 		return EINVAL;
-	if (!tlspeer_reader_done(&reader))
+
+	/* Asks whether the message is exactly one handshake message. */
+	done = tlspeer_reader_done(&reader);
+	if (!done)
 		return EINVAL;
 
 	/* legacy_version and random. */
@@ -1351,7 +1391,10 @@ tlspeer_parse_client_hello(
 	tlspeer_get_vector(&body, 2, 0, 65535, &extensions);
 	if (extensions.error != 0)
 		return EINVAL;
-	if (!tlspeer_reader_done(&body))
+
+	/* Asks whether the extensions block ends the body. */
+	done = tlspeer_reader_done(&body);
+	if (!done)
 		return EINVAL;
 	hello->has_extensions = 1;
 
@@ -1365,6 +1408,8 @@ tlspeer_parse_client_hello(
 			if (hello->extensions[index] == type)
 				return EINVAL;
 		}
+
+		/* Refuses more extensions than the table holds. */
 		if (hello->extension_count >= TLSPEER_EXT_MAX)
 			return ENOBUFS;
 		hello->extensions[hello->extension_count] = (uint16_t)type;
@@ -1477,6 +1522,7 @@ tlspeer_order_minus_two(
 	size_t index;
 	unsigned borrow;
 	unsigned value;
+	unsigned next_borrow;
 
 	/* n, then 2 subtracted from the last byte with the borrow carried. */
 	cryc_bn_encode(key->ec.order.modulus, key->ec.limbs, out, key->ec.size);
@@ -1484,7 +1530,10 @@ tlspeer_order_minus_two(
 	for (index = key->ec.size; index > 0U && borrow != 0U; index--) {
 		value = out[index - 1U];
 		out[index - 1U] = (uint8_t)(value - borrow);
-		borrow = value < borrow ? 1U : 0U;
+		next_borrow = 0U;
+		if (value < borrow)
+			next_borrow = 1U;
+		borrow = next_borrow;
 	}
 }
 
@@ -2132,6 +2181,8 @@ tlspeer_new(
 			return EINVAL;
 		}
 	}
+
+	/* Makes the P-384 key when that group is used. */
 	if (config->group == SSLC_GROUP_SECP384R1) {
 		error = tlspeer_key_init(&peer->p384, CRYC_CURVE_P384, config->p384_private);
 		if (error != 0) {
@@ -2174,6 +2225,8 @@ tlspeer_fail(
 		peer->error = error;
 		peer->why = why;
 	}
+
+	/* Marks the peer as failed. */
 	peer->state = TLSPEER_FAILED;
 
 	/* The failure. */
@@ -2208,6 +2261,8 @@ tlspeer_item_begin(
 		peer->item_taken = 0;
 		peer->flight_used = 0;
 	}
+
+	/* Starts the writer over the room that is left in the flight. */
 	tlspeer_writer_init(writer, peer->flight + peer->flight_used, sizeof(peer->flight) - peer->flight_used);
 }
 
@@ -2395,10 +2450,14 @@ tlspeer_make_share(
 			peer->server_share[0] = 0x04;
 			peer->server_share_size = 65;
 		}
+
+		/* A P-384 share is an uncompressed point of 97 bytes. */
 		if (peer->config.group == SSLC_GROUP_SECP384R1) {
 			peer->server_share[0] = 0x04;
 			peer->server_share_size = 97;
 		}
+
+		/* Succeeded: the share is made. */
 		return 0;
 	}
 
@@ -2444,6 +2503,8 @@ tlspeer_sign_content(
 	} else {
 		return tlspeer_fail(peer, EINVAL, "the scheme is not one tlspeer can sign");
 	}
+
+	/* Refuses to sign without a key. */
 	if (peer->config.key == NULL)
 		return tlspeer_fail(peer, EINVAL, "no signing key");
 
@@ -2514,6 +2575,8 @@ tlspeer_send_retry(
 		tlspeer_put_int(&writer, 2, 2);
 		tlspeer_put_int(&writer, peer->config.group, 2);
 	}
+
+	/* Adds the cookie when one is configured. */
 	if (peer->config.cookie != NULL) {
 		tlspeer_put_int(&writer, SSLC_EXT_COOKIE, 2);
 		tlspeer_begin(&writer, 2);
@@ -2522,6 +2585,8 @@ tlspeer_send_retry(
 		tlspeer_end(&writer);
 		tlspeer_end(&writer);
 	}
+
+	/* Adds the supported_versions extension. */
 	tlspeer_put_int(&writer, SSLC_EXT_SUPPORTED_VERSIONS, 2);
 	tlspeer_put_int(&writer, 2, 2);
 	tlspeer_put_int(&writer, SSLC_TLS13, 2);
@@ -2579,6 +2644,8 @@ tlspeer_send_certificate(
 			tlspeer_end(&writer);
 		}
 	}
+
+	/* Closes the certificate_list and the message. */
 	tlspeer_end(&writer);
 	tlspeer_end(&writer);
 	error = tlspeer_item_commit(peer, &writer, TLSPEER_ITEM_HANDSHAKE, SSLC_CT_HANDSHAKE, 1);
@@ -2619,6 +2686,8 @@ tlspeer_flight13(
 		if (error != 0)
 			return error;
 	}
+
+	/* Makes the server's own key share. */
 	tlspeer_make_share(peer);
 
 	/* ServerHello: legacy_version, random, the session id echoed (or not), suite, compression 0. */
@@ -2636,6 +2705,8 @@ tlspeer_flight13(
 		if ((peer->breaks & TLSPEER_BREAK_SESSION_ID) != 0U)
 			writer.data[writer.used - peer->hello.session_id_size] ^= 1U;
 	}
+
+	/* Closes the session id vector. */
 	tlspeer_end(&writer);
 	tlspeer_put_int(&writer, peer->config.suite, 2);
 	tlspeer_put_int(&writer, 0, 1);
@@ -2705,6 +2776,8 @@ tlspeer_flight13(
 			tlspeer_put_extension(&writer, SSLC_EXT_SERVER_NAME, NULL, 0);
 		tlspeer_put_extra(peer, &writer, TLSPEER_AT_ENCRYPTED_EXTENSIONS);
 	}
+
+	/* Closes the extensions and the message. */
 	tlspeer_end(&writer);
 	tlspeer_end(&writer);
 	error = tlspeer_item_commit(peer, &writer, TLSPEER_ITEM_HANDSHAKE, SSLC_CT_HANDSHAKE, 1);
@@ -2856,6 +2929,8 @@ tlspeer_flight12(
 		tlspeer_put_int(&writer, 1, 2);
 		tlspeer_put_int(&writer, 0, 1);
 	}
+
+	/* Adds the extended master secret acknowledgement when negotiated. */
 	if (peer->ems != 0)
 		tlspeer_put_extension(&writer, SSLC_EXT_EXTENDED_MASTER_SECRET, NULL, 0);
 	if ((peer->config.options & TLSPEER_OPT_POINT_FORMATS) != 0U) {
@@ -2864,6 +2939,8 @@ tlspeer_flight12(
 		tlspeer_put_int(&writer, 1, 1);
 		tlspeer_put_int(&writer, 0, 1);
 	}
+
+	/* Adds the server name acknowledgement when asked for. */
 	if ((peer->config.options & TLSPEER_OPT_SNI_ACK) != 0U && peer->hello.has_server_name != 0)
 		tlspeer_put_extension(&writer, SSLC_EXT_SERVER_NAME, NULL, 0);
 	tlspeer_put_extra(peer, &writer, TLSPEER_AT_SERVER_HELLO);
@@ -2954,6 +3031,7 @@ tlspeer_on_hello(
 	const uint8_t *message,
 	size_t size)
 {
+	int different;
 	int error;
 
 	/* Its syntax, and its place in the transcript. */
@@ -2978,6 +3056,8 @@ tlspeer_on_hello(
 			return error;
 		return 0;
 	}
+
+	/* Sends a second retry when the test asks for one. */
 	if ((peer->breaks & TLSPEER_BREAK_SECOND_HRR) != 0U && peer->retries == 1U) {
 		error = tlspeer_send_retry(peer);
 		if (error != 0)
@@ -2989,7 +3069,10 @@ tlspeer_on_hello(
 	if (peer->retries > 0U && peer->config.cookie != NULL) {
 		if (peer->hello.has_cookie == 0 || peer->hello.cookie_size != peer->config.cookie_size)
 			return tlspeer_fail(peer, EPROTO, "the second ClientHello does not echo the cookie");
-		if (memcmp(peer->hello.cookie, peer->config.cookie, peer->config.cookie_size) != 0)
+
+		/* Compares the cookie the client sent back with the one that was issued. */
+		different = memcmp(peer->hello.cookie, peer->config.cookie, peer->config.cookie_size);
+		if (different != 0)
 			return tlspeer_fail(peer, EPROTO, "the second ClientHello does not echo the cookie");
 	}
 
@@ -3012,6 +3095,8 @@ tlspeer_on_certificate(
 	struct tlspeer_reader reader;
 	struct tlspeer_reader context;
 	struct tlspeer_reader list;
+	int different;
+	int done;
 
 	/* TLS 1.3: the request's context echoed, then the list. */
 	tlspeer_reader_init(&reader, message + 4, size - 4U);
@@ -3021,13 +3106,18 @@ tlspeer_on_certificate(
 			return tlspeer_fail(peer, EINVAL, "the client Certificate does not parse");
 		if (context.size != peer->config.request_context_size)
 			return tlspeer_fail(peer, EPROTO, "the client Certificate does not echo the request context");
-		if (context.size > 0U && memcmp(context.data, peer->config.request_context, context.size) != 0)
-			return tlspeer_fail(peer, EPROTO, "the client Certificate does not echo the request context");
+		if (context.size > 0U) {
+			/* Compares the echoed context with the one that was sent. */
+			different = memcmp(context.data, peer->config.request_context, context.size);
+			if (different != 0)
+				return tlspeer_fail(peer, EPROTO, "the client Certificate does not echo the request context");
+		}
 	}
 
 	/* An empty list, the only answer tlspeer takes. */
 	tlspeer_get_vector(&reader, 3, 0, 0xffffffU, &list);
-	if (!tlspeer_reader_done(&reader))
+	done = tlspeer_reader_done(&reader);
+	if (!done)
 		return tlspeer_fail(peer, EINVAL, "the client Certificate does not parse");
 	if (list.size != 0U)
 		return tlspeer_fail(peer, EPROTO, "the client Certificate is not empty");
@@ -3051,12 +3141,14 @@ tlspeer_on_key_exchange(
 	struct tlspeer_reader point;
 	uint8_t context[CRYC_HASH_MAX_SIZE + 64U];
 	size_t context_size;
+	int done;
 	int error;
 
 	/* ClientECDiffieHellmanPublic: point<1..2^8-1>, nothing after. */
 	tlspeer_reader_init(&reader, message + 4, size - 4U);
 	tlspeer_get_vector(&reader, 1, 1, 255, &point);
-	if (!tlspeer_reader_done(&reader))
+	done = tlspeer_reader_done(&reader);
+	if (!done)
 		return tlspeer_fail(peer, EINVAL, "the ClientKeyExchange does not parse");
 
 	/* The premaster secret is the (EC)DH result. */
@@ -3074,6 +3166,8 @@ tlspeer_on_key_exchange(
 		memcpy(context + 32, peer->server_random, 32);
 		context_size = 64;
 	}
+
+	/* Derives the master secret. */
 	error = sslc_tls12_master(peer->hash, peer->ems, peer->shared, peer->shared_size, context, context_size, peer->master);
 	if (error != 0)
 		return tlspeer_fail(peer, error, "the master secret cannot be made");
@@ -3100,6 +3194,7 @@ tlspeer_on_finished(
 	uint8_t digest[CRYC_HASH_MAX_SIZE];
 	uint8_t expected[CRYC_HASH_MAX_SIZE];
 	size_t expected_size;
+	int different;
 	int error;
 
 	/* The expected verify_data over the transcript before it. */
@@ -3111,13 +3206,18 @@ tlspeer_on_finished(
 		error = sslc_tls12_finished(peer->hash, peer->master, 1, digest, expected);
 		expected_size = SSLC_TLS12_VERIFY_DATA;
 	}
+
+	/* Refuses a Finished that cannot be computed. */
 	if (error != 0)
 		return tlspeer_fail(peer, error, "the client Finished cannot be computed");
 
 	/* The message must carry exactly that. */
 	if (size != 4U + expected_size)
 		return tlspeer_fail(peer, EINVAL, "the client Finished has the wrong length");
-	if (memcmp(message + 4, expected, expected_size) != 0)
+
+	/* Compares the verify_data the client sent with the expected one. */
+	different = memcmp(message + 4, expected, expected_size);
+	if (different != 0)
 		return tlspeer_fail(peer, EBADMSG, "the client Finished does not verify");
 	cryc_hash_update(&peer->transcript, message, size);
 
@@ -3200,6 +3300,7 @@ tlspeer_handshake(
 	size_t size)
 {
 	unsigned type;
+	uint32_t declared;
 	int error;
 
 	/* A failed or ended script takes nothing more. */
@@ -3211,7 +3312,10 @@ tlspeer_handshake(
 	/* One whole message: a header whose length is the rest. */
 	if (size < 4U)
 		return tlspeer_fail(peer, EINVAL, "a client handshake message is shorter than its header");
-	if (cryc_load_be24(message + 1) != size - 4U)
+
+	/* Reads the length the message's header declares. */
+	declared = cryc_load_be24(message + 1);
+	if (declared != size - 4U)
 		return tlspeer_fail(peer, EINVAL, "a client handshake message's length is wrong");
 	type = message[0];
 
@@ -3246,6 +3350,8 @@ tlspeer_handshake(
 		error = tlspeer_on_key_update(peer, message, size);
 		break;
 	}
+
+	/* Propagates the failure of the message handler. */
 	if (error != 0)
 		return error;
 
@@ -3350,6 +3456,7 @@ tlspeer_send_key_update(
 {
 	struct tlspeer_writer writer;
 	struct sslc_traffic_keys keys;
+	unsigned request;
 	int error;
 
 	/* Only after the server's application secret exists. */
@@ -3360,7 +3467,10 @@ tlspeer_send_key_update(
 	tlspeer_item_begin(peer, &writer);
 	tlspeer_put_int(&writer, SSLC_HS_KEY_UPDATE, 1);
 	tlspeer_put_int(&writer, 1, 3);
-	tlspeer_put_int(&writer, request_update != 0 ? 1U : 0U, 1);
+	request = 0U;
+	if (request_update != 0)
+		request = 1U;
+	tlspeer_put_int(&writer, request, 1);
 	error = tlspeer_item_commit(peer, &writer, TLSPEER_ITEM_HANDSHAKE, SSLC_CT_HANDSHAKE, 0);
 	if (error != 0)
 		return error;
@@ -3519,6 +3629,8 @@ tlspeer_write_epoch(
 		if (error != 0)
 			return tlspeer_fail(peer, error, "the write keys do not suit the suite");
 	}
+
+	/* Records which epoch the write direction now uses. */
 	peer->write_dir_epoch = epoch;
 
 	/* Moved. */
@@ -3546,6 +3658,8 @@ tlspeer_seal(
 		peer->out[peer->out_used + written - 1U] ^= 1U;
 		peer->breaks &= ~(uint32_t)TLSPEER_BREAK_RECORD_TAG;
 	}
+
+	/* Counts the sealed record. */
 	peer->out_used += written;
 	peer->records_out++;
 
@@ -3636,6 +3750,8 @@ tlspeer_flush(
 			last++;
 			peer->breaks &= ~(uint32_t)TLSPEER_BREAK_SAME_RECORD;
 		}
+
+		/* Takes the end of the last item put in the record. */
 		end = peer->items[last - 1U].offset + peer->items[last - 1U].size;
 		error = tlspeer_seal_split(peer, SSLC_CT_HANDSHAKE, peer->flight + slot->offset, end - slot->offset);
 		if (error != 0)
@@ -3678,6 +3794,8 @@ tlspeer_take(
 		peer->out_taken = 0;
 		peer->out_used = 0;
 	}
+
+	/* Succeeded: the output is flushed or kept for later. */
 	return 0;
 }
 
@@ -3719,6 +3837,8 @@ tlspeer_on_content(
 			if (changes != peer->read_changes && peer->message_used > 0U)
 				return tlspeer_fail(peer, EPROTO, "client handshake bytes span a key change");
 		}
+
+		/* Succeeded: the handshake bytes are consumed. */
 		return 0;
 	case SSLC_CT_CHANGE_CIPHER_SPEC:
 		/* The byte 1, in plaintext, not inside a handshake message. */

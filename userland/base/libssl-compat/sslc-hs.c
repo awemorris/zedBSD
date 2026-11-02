@@ -147,6 +147,8 @@ sslc_hs_start(
 		hs->state = SSLC_HS_FAILED;
 		return error;
 	}
+
+	/* Keeps the configuration the handshake runs under. */
 	hs->config = config;
 
 	/* The suites of the versions allowed, then the groups and the schemes, all in preference order. */
@@ -268,6 +270,7 @@ sslc_hs_message(
 			/* Nothing else may come before the ServerHello. */
 			return sslc_hs_fail(hs, SSLC_ALERT_UNEXPECTED_MESSAGE, EPROTO);
 		}
+
 		break;
 	case SSLC_HS13_WAIT_ENCRYPTED_EXTENSIONS:
 	case SSLC_HS13_WAIT_CERTIFICATE_OR_REQUEST:
@@ -333,6 +336,7 @@ sslc_hs_change_cipher_spec(
 			cryc_wipe(actions, sizeof(*actions));
 			return sslc_hs_fail(hs, hs->alert, error);
 		}
+
 		break;
 	case SSLC_HS_WAIT_SERVER_HELLO:
 		/*
@@ -598,6 +602,8 @@ sslc_hs_certificate(
 		hs->alert = 0;
 		return error;
 	}
+
+	/* Keeps the verification code for later reporting. */
 	hs->verify_code = hs->verify.code;
 
 	/*
@@ -659,6 +665,7 @@ sslc_hs_shared_secret(
 {
 	int error;
 
+	/* Starts with no shared secret, so a failure reports none. */
 	*shared_size = 0;
 
 	/* x25519: a u-coordinate of 32 bytes, and a result that is not all zeros. */
@@ -898,6 +905,8 @@ sslc_hs_server_hello(
 		hs->alert = 0;
 		return error;
 	}
+
+	/* Feeds the message into the transcript. */
 	sslc_transcript_update(&hs->transcript, message, size);
 
 	/* The version's own continuation: TLS 1.3's keys, or TLS 1.2's checks and states. */
@@ -933,12 +942,16 @@ sslc_hs_choose_version(
 			hs->alert = SSLC_ALERT_ILLEGAL_PARAMETER;
 			return EPROTO;
 		}
+
+		/* Selects TLS 1.3. */
 		*version = SSLC_TLS13;
 	} else {
 		if (hs->config->min_version != SSLC_TLS12) {
 			hs->alert = SSLC_ALERT_PROTOCOL_VERSION;
 			return EPROTO;
 		}
+
+		/* Selects TLS 1.2. */
 		*version = SSLC_TLS12;
 	}
 
@@ -1104,11 +1117,15 @@ sslc_hs_retry(
 		hs->alert = 0;
 		return error;
 	}
+
+	/* Restarts the transcript as a HelloRetryRequest requires. */
 	error = sslc_transcript_restart_hrr(&hs->transcript);
 	if (error != 0) {
 		hs->alert = 0;
 		return error;
 	}
+
+	/* Feeds the HelloRetryRequest into the restarted transcript. */
 	sslc_transcript_update(&hs->transcript, message, size);
 
 	/* The cookie, echoed in the second ClientHello (4.2.2; its size the parser bounded). */
@@ -1127,9 +1144,13 @@ sslc_hs_retry(
 	if ((hello->seen & SSLC_SEEN_KEY_SHARE) != 0U) {
 		error = sslc_hs_make_ec(hs, hello->share_group);
 		if (error != 0) {
-			hs->alert = error == EPROTO ? SSLC_ALERT_ILLEGAL_PARAMETER : 0;
+			hs->alert = 0;
+			if (error == EPROTO)
+				hs->alert = SSLC_ALERT_ILLEGAL_PARAMETER;
 			return error;
 		}
+
+		/* Drops the old X25519 private key now that the new share replaces it. */
 		cryc_wipe(hs->x25519_private, sizeof(hs->x25519_private));
 		hs->hello.shares[0].group = hello->share_group;
 		hs->hello.shares[0].key = hs->ec_public;
@@ -1177,8 +1198,13 @@ sslc_hs_make_ec(
 		curve = CRYC_CURVE_P384;
 	else
 		return EPROTO;
-	if (hs->has_ec)
-		return hs->ec_group == group ? 0 : EPROTO;
+	if (hs->has_ec) {
+		if (hs->ec_group != group)
+			return EPROTO;
+
+		/* Succeeded: the key pair of this group already exists. */
+		return 0;
+	}
 
 	/* The curve, on the heap (it is about 4 KiB). */
 	if (hs->ec == NULL) {

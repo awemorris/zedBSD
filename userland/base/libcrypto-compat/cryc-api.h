@@ -239,7 +239,16 @@ void cryc_x509_store_free(X509_STORE *store);
  */
 X509 *cryc_x509_from_der(const uint8_t *der, size_t size);
 
-/* Maps a validation verdict to its X509_V_ code. */
+/*
+ * Maps a validation verdict to its X509_V_ code.  A verdict the public
+ * subset has no code for (NO_PEER_CERTIFICATE, MALFORMED, WORK_EXCEEDED,
+ * a value outside the enumeration) is X509_V_ERR_UNSPECIFIED;
+ * UNABLE_TO_GET_ISSUER is X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY
+ * (20); a verdict that stands for two codes takes one: KEY_USAGE is
+ * X509_V_ERR_KEYUSAGE_NO_CERTSIGN (32) and NAME_CONSTRAINT_VIOLATION
+ * X509_V_ERR_PERMITTED_VIOLATION (47), as the verdict does not say which
+ * certificate or which subtree.
+ */
 long cryc_verify_code_to_x509(enum cryc_verify_code code);
 
 /*

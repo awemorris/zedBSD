@@ -116,6 +116,14 @@ struct thread_job {
 	unsigned ok;
 };
 
+/*
+ * A small DER part: a buffer of its own and a writer over it.
+ */
+struct small {
+	unsigned char data[2048];
+	struct der_writer writer;
+};
+
 /* The generator point of P-256 (SEC 2, 2.4.2: the base point G), which is a real point the public key can carry. */
 static const unsigned char p256_g[65] = {
 	0x04,
@@ -129,43 +137,129 @@ static const unsigned char p256_g[65] = {
 static const unsigned char doc_ipv4[4] = { 192, 0, 2, 7 };
 static const unsigned char doc_ipv6[16] = { 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
 
+/* Returns the next pseudo-random number. */
 static uint32_t next_random(void);
-static unsigned drain_errors(void);
-static int one_error(unsigned long expected);
-static int no_error(void);
-static void blob_init(struct blob *blob, size_t room);
-static void blob_free(struct blob *blob);
-static unsigned char *build_cert(const struct cert_spec *spec, size_t *size);
-static unsigned char *simple_cert(unsigned serial, size_t *size);
-static unsigned char *exact_copy(const unsigned char *data, size_t size);
-static X509 *make_cert(const unsigned char *der, size_t size);
-static void test_verdicts(void);
-static void test_error_strings(void);
-static void test_d2i_basic(void);
-static void test_d2i_out(void);
-static void test_d2i_errors(void);
-static void test_d2i_hostile(void);
-static void test_d2i_sizes(void);
-static void test_from_der(void);
-static void test_references(void);
-static void test_store(void);
-static void test_store_limit(void);
-static void test_host(void);
-static void test_ip_valid(void);
-static void test_ip_invalid(void);
-static void test_ip_differential(void);
-static void test_param_interplay(void);
-static void test_validation(void);
-static void test_threads(void);
-static void test_bundle(void);
-static void test_limbo(void);
 
+/* Empties the calling thread's error queue, keeping the first codes; returns how many there were. */
+static unsigned drain_errors(void);
+
+/* Drains the queue and says whether it held exactly one code, equal to expected. */
+static int one_error(unsigned long expected);
+
+/* Drains the queue and says whether it was empty. */
+static int no_error(void);
+
+/* Starts a blob with room bytes. */
+static void blob_init(struct blob *blob, size_t room);
+
+/* Frees a blob's buffer. */
+static void blob_free(struct blob *blob);
+
+/* Starts a small part. */
+static void small_init(struct small *part);
+
+/* Builds one Certificate (RFC 5280 4.1) as a malloc'd buffer with the given amount of padding. */
+static unsigned char *build_once(const struct cert_spec *spec, size_t padding, size_t *size);
+
+/* Builds a certificate to the spec, adjusting the padding when an exact content size is asked for. */
+static unsigned char *build_cert(const struct cert_spec *spec, size_t *size);
+
+/* Builds a certificate of a serial with a host name in its subjectAltName. */
+static unsigned char *simple_cert(unsigned serial, size_t *size);
+
+/* Returns a copy of data in a buffer of exactly size bytes (so that a read past the end is seen by the sanitizer). */
+static unsigned char *exact_copy(const unsigned char *data, size_t size);
+
+/* Makes an X509 from DER with d2i_X509, which the test needs to succeed. */
+static X509 *make_cert(const unsigned char *der, size_t size);
+
+/* The verdicts and their X509_V_ codes. */
+static void test_verdicts(void);
+
+/* The texts of the verification results. */
+static void test_error_strings(void);
+
+/* A certificate through d2i_X509: the object, the pointer's advance, the copy. */
+static void test_d2i_basic(void);
+
+/* The out argument: reuse, replacement and the failure convention. */
+static void test_d2i_out(void);
+
+/* The error cases of d2i_X509, one by one. */
+static void test_d2i_errors(void);
+
+/* Hostile and random input: nothing is read beyond the buffer, and every call either fails with one error or succeeds with none. */
+static void test_d2i_hostile(void);
+
+/* Large certificates, the length forms, the largest the interface allows and one octet more. */
+static void test_d2i_sizes(void);
+
+/* cryc_x509_from_der. */
+static void test_from_der(void);
+
+/* The reference counts of certificates and stores. */
+static void test_references(void);
+
+/* X509_STORE_add_cert. */
+static void test_store(void);
+
+/* The store's size limit: the last certificate that fits, and one more. */
+static void test_store_limit(void);
+
+/* Checks the host name that X509_VERIFY_PARAM_set1_host recorded: the stored form and the flags. */
+static int host_is(const X509_VERIFY_PARAM *param, const char *expected);
+
+/* X509_VERIFY_PARAM_set1_host. */
+static void test_host(void);
+
+/* Checks an address text: it must be accepted, recorded as the given octets, and clear a host name set before. */
+static void check_ip(const char *text, const char *hex);
+
+/* IP addresses that must be accepted, with the octets worked out from RFC 4291 2.2. */
+static void test_ip_valid(void);
+
+/* IP address texts that must be refused. */
+static void test_ip_invalid(void);
+
+/* Reference reader of a decimal IPv4 address, written by splitting at the dots first (the library scans character by character). */
+static int reference_v4(const char *begin, size_t length, unsigned char *out);
+
+/* Reference reader of an IPv6 address, written by splitting the text at the "::" first. */
+static int reference_v6(const char *text, unsigned char *out);
+
+/* Random and mutated texts: the library and the reference reader must agree on accepting, and on the octets. */
+static void test_ip_differential(void);
+
+/* How a host name and an address replace each other, and how clearing works. */
+static void test_param_interplay(void);
+
+/* Runs a validation of a peer certificate in a store with the parameters, and returns the X509_V_ code. */
+static long validate(X509_STORE *store, X509 *peer, X509_VERIFY_PARAM *param);
+
+/* The public calls working together: a trusted self-signed server, the names, and the verdicts. */
+static void test_validation(void);
+
+/* The thread function of the concurrency check. */
 #ifdef _WIN32
 static DWORD WINAPI thread_entry(LPVOID argument);
 #else
 static void *thread_entry(void *argument);
 #endif
+
+/* What each thread does: adds its own certificates and the shared ones to the store, and takes and drops references to one certificate. */
 static void thread_body(struct thread_job *job);
+
+/* Several threads adding to one store and sharing one certificate. */
+static void test_threads(void);
+
+/* Reads a whole file into a NUL-terminated buffer; NULL when it cannot be read. */
+static char *read_file(const char *path, size_t *size);
+
+/* Reads every certificate of the ca-certificates bundle with d2i_X509 and puts them in a store. */
+static void test_bundle(void);
+
+/* Reads every certificate of the x509-limbo cases with d2i_X509: it accepts exactly what the parser accepts. */
+static void test_limbo(void);
 
 /* Returns the next pseudo-random number. */
 static uint32_t
@@ -194,7 +288,11 @@ drain_errors(void)
 		count++;
 		code = ERR_get_error();
 	}
+
+	/* Remembers how many codes there were. */
 	err_total = count;
+
+	/* The number of codes that were queued. */
 	return count;
 }
 
@@ -211,6 +309,8 @@ one_error(
 		return 0;
 	if (err_codes[0] != expected)
 		return 0;
+
+	/* Succeeded: the queue held exactly the expected code. */
 	return 1;
 }
 
@@ -218,8 +318,15 @@ one_error(
 static int
 no_error(void)
 {
+	unsigned count;
+
 	/* Nothing queued. */
-	return drain_errors() == 0U;
+	count = drain_errors();
+	if (count != 0U)
+		return 0;
+
+	/* Succeeded: the queue was empty. */
+	return 1;
 }
 
 /* Starts a blob with room bytes. */
@@ -234,6 +341,8 @@ blob_init(
 		printf("FAIL no memory for a test buffer\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Starts the DER writer over the buffer. */
 	der_init(&blob->writer, blob->data, room);
 }
 
@@ -246,14 +355,6 @@ blob_free(
 	free(blob->data);
 	blob->data = NULL;
 }
-
-/*
- * A small DER part: a buffer of its own and a writer over it.
- */
-struct small {
-	unsigned char data[2048];
-	struct der_writer writer;
-};
 
 /* Starts a small part. */
 static void
@@ -312,6 +413,7 @@ build_once(
 	unsigned char *result;
 	size_t room;
 
+	/* The room that holds the fixed parts and the padding. */
 	room = padding + 4096U;
 
 	/* The signature algorithm: ecdsa-with-SHA256 (1.2.840.10045.4.3.2) with no parameters. */
@@ -369,12 +471,16 @@ build_once(
 		der_wrap(&san_extension.writer, 0x30U, &san_content.writer);
 		der_raw(&extension_list.writer, san_extension.data, san_extension.writer.used);
 	}
+
+	/* The unknown extension that carries the padding, when padding is wanted. */
 	if (padding != 0U) {
 		zeros = calloc(padding, 1U);
 		if (zeros == NULL) {
 			printf("FAIL no memory for a test buffer\n");
 			exit(EXIT_FAILURE);
 		}
+
+		/* Builds the extension that holds the zero octets. */
 		blob_init(&pad_content, room);
 		der_oid(&pad_content.writer, "1.3.6.1.4.1.99999.1");
 		der_put(&pad_content.writer, 0x04U, zeros, padding);
@@ -405,6 +511,8 @@ build_once(
 		der_put(&tbs_content.writer, 0xa3U, extension_seq.data, extension_seq.writer.used);
 		blob_free(&extension_seq);
 	}
+
+	/* Wraps the content into the tbsCertificate SEQUENCE. */
 	blob_init(&tbs, room + 4096U + 16U);
 	der_wrap(&tbs.writer, 0x30U, &tbs_content.writer);
 
@@ -428,13 +536,19 @@ build_once(
 		printf("FAIL no memory for a test buffer\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Stores the copy and its size. */
 	memcpy(result, certificate.data, certificate.writer.used);
 	*size = certificate.writer.used;
+
+	/* Releases the buffers of the parts. */
 	blob_free(&extension_list);
 	blob_free(&tbs_content);
 	blob_free(&tbs);
 	blob_free(&certificate_content);
 	blob_free(&certificate);
+
+	/* The finished certificate, which the caller frees. */
 	return result;
 }
 
@@ -503,13 +617,19 @@ exact_copy(
 	size_t size)
 {
 	unsigned char *copy;
+	size_t room;
 
 	/* A buffer of exactly the size (one byte for size 0). */
-	copy = malloc(size > 0U ? size : 1U);
+	room = 1U;
+	if (size > 0U)
+		room = size;
+	copy = malloc(room);
 	if (copy == NULL) {
 		printf("FAIL no memory for a test buffer\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Copies the data when there is any. */
 	if (size > 0U)
 		memcpy(copy, data, size);
 	return copy;
@@ -664,6 +784,8 @@ test_error_strings(void)
 			if (table[index].code == code)
 				known = 1;
 		}
+
+		/* A code of the table has a text of its own; any other code gets the generic text. */
 		if (known)
 			CHECK(strcmp(text, unknown) != 0);
 		else
@@ -852,6 +974,7 @@ test_d2i_out(void)
 	X509_free(held);
 	free(input);
 
+	/* Frees the certificate encodings. */
 	free(first_der);
 	free(second_der);
 }
@@ -871,6 +994,7 @@ test_d2i_errors(void)
 	X509 *result;
 	static const long lengths[] = { 0L, -1L, -2L, LONG_MIN };
 
+	/* Builds the certificate that is given to d2i_X509. */
 	der = simple_cert(3U, &size);
 
 	/* A length that is not positive: the null pointer is not read; one invalid-argument error, *in unchanged. */
@@ -976,6 +1100,8 @@ test_d2i_errors(void)
 			CHECK(cursor == input);
 			CHECK(one_error(CODE_WRONG_TAG));
 		}
+
+		/* Releases the changed copy. */
 		free(input);
 	}
 
@@ -1011,8 +1137,11 @@ test_d2i_errors(void)
 		CHECK(d2i_X509(NULL, &cursor, (long)size) == NULL);
 		free(input);
 	}
+
+	/* Many failed calls without draining keep only the newest codes of the queue. */
 	CHECK(drain_errors() == 16U);
 
+	/* Releases the certificate encoding. */
 	free(der);
 }
 
@@ -1034,6 +1163,7 @@ test_d2i_hostile(void)
 	X509 *result;
 	static const unsigned char xors[] = { 0xff, 0x01, 0x80 };
 
+	/* Builds the certificate whose octets are changed. */
 	der = simple_cert(11U, &size);
 	failures = 0;
 	successes = 0;
@@ -1061,9 +1191,13 @@ test_d2i_hostile(void)
 				CHECK(no_error());
 				X509_free(result);
 			}
+
+			/* Releases the changed copy. */
 			free(input);
 		}
 	}
+
+	/* Both outcomes happen often enough for the mutations to mean something. */
 	CHECK(failures > 100UL);
 	CHECK(successes > 100UL);
 	printf("d2i mutations: %lu refused, %lu accepted\n", failures, successes);
@@ -1084,6 +1218,8 @@ test_d2i_hostile(void)
 			random_bytes[2] = (unsigned char)((length - 4U) >> 8);
 			random_bytes[3] = (unsigned char)(length - 4U);
 		}
+
+		/* Gives the random bytes to d2i_X509 in a buffer of exactly their size. */
 		input = exact_copy(random_bytes, length);
 		cursor = input;
 		result = d2i_X509(NULL, &cursor, (long)length);
@@ -1095,11 +1231,16 @@ test_d2i_hostile(void)
 			CHECK(no_error());
 			X509_free(result);
 		}
+
+		/* Releases the buffers of this round. */
 		free(input);
 		free(random_bytes);
 	}
+
+	/* Almost every random input is refused. */
 	CHECK(failures > 2900UL);
 
+	/* Releases the certificate encoding. */
 	free(der);
 }
 
@@ -1137,6 +1278,8 @@ test_d2i_sizes(void)
 			CHECK_BYTES(result->der, der, size);
 			X509_free(result);
 		}
+
+		/* A successful call leaves the error queue empty. */
 		CHECK(no_error());
 		free(input);
 		free(der);
@@ -1171,6 +1314,8 @@ test_d2i_sizes(void)
 		CHECK(one_error(CODE_WRONG_TAG));
 		free(input);
 	}
+
+	/* Releases the certificate encodings. */
 	free(der);
 	free(two);
 
@@ -1193,6 +1338,8 @@ test_d2i_sizes(void)
 		CHECK(memcmp(result->der, der, size) == 0);
 		X509_free(result);
 	}
+
+	/* A successful call leaves the error queue empty. */
 	CHECK(no_error());
 	free(input);
 
@@ -1224,6 +1371,8 @@ test_d2i_sizes(void)
 		CHECK(one_error(CODE_INVALID_ARGUMENT));
 		free(input);
 	}
+
+	/* Releases the certificate encoding. */
 	free(der);
 }
 
@@ -1236,6 +1385,7 @@ test_from_der(void)
 	size_t size;
 	X509 *certificate;
 
+	/* Builds the certificate to convert. */
 	der = simple_cert(31U, &size);
 
 	/* A certificate: one reference, a private copy. */
@@ -1253,6 +1403,8 @@ test_from_der(void)
 		CHECK_BYTES(certificate->der, der, size);
 		X509_free(certificate);
 	}
+
+	/* Releases the input copy. */
 	free(input);
 
 	/* No bytes, an empty encoding, and one that is too large. */
@@ -1282,6 +1434,7 @@ test_from_der(void)
 		free(input);
 	}
 
+	/* Releases the certificate encoding. */
 	free(der);
 }
 
@@ -1347,6 +1500,7 @@ test_store(void)
 	X509_STORE *store;
 	const struct cryc_store_entry *entry;
 
+	/* Builds two certificates and their parsed forms. */
 	first_der = simple_cert(51U, &first_size);
 	second_der = simple_cert(52U, &second_size);
 	first = make_cert(first_der, first_size);
@@ -1434,6 +1588,7 @@ test_store_limit(void)
 	int added;
 	unsigned long failures;
 
+	/* Makes the store that the certificates are added to. */
 	store = cryc_x509_store_new();
 	CHECK(store != NULL);
 	if (store == NULL)
@@ -1450,6 +1605,8 @@ test_store_limit(void)
 		X509_free(certificate);
 		free(der);
 	}
+
+	/* Every addition up to the limit succeeded. */
 	CHECK(failures == 0UL);
 	CHECK(store->store.count == STORE_MAX);
 	CHECK(no_error());
@@ -1480,15 +1637,24 @@ host_is(
 	const X509_VERIFY_PARAM *param,
 	const char *expected)
 {
+	size_t host_length;
+	size_t expected_length;
+	int comparison;
+
 	/* Set (the flag is exactly 1), with exactly the expected text, ended with a NUL, and no address. */
 	if (param->params.has_host != 1)
 		return 0;
-	if (strlen(param->params.host) != strlen(expected))
+	host_length = strlen(param->params.host);
+	expected_length = strlen(expected);
+	if (host_length != expected_length)
 		return 0;
-	if (strcmp(param->params.host, expected) != 0)
+	comparison = strcmp(param->params.host, expected);
+	if (comparison != 0)
 		return 0;
 	if (param->params.ip_size != 0U)
 		return 0;
+
+	/* Succeeded: the recorded host is the expected one. */
 	return 1;
 }
 
@@ -1576,8 +1742,14 @@ test_host(void)
 	CHECK(X509_VERIFY_PARAM_set1_host(&param, text, 0U) == 0);
 	CHECK(one_error(CODE_INVALID_ARGUMENT));
 	memset(text, 0, sizeof(text));
-	for (index = 0; index < HOST_MAX; index++)
-		text[index] = (index % 64U == 63U) ? '.' : 'b';
+	for (index = 0; index < HOST_MAX; index++) {
+		if (index % 64U == 63U)
+			text[index] = '.';
+		else
+			text[index] = 'b';
+	}
+
+	/* The last octet is a letter, so the name of the largest length ends in a label. */
 	text[HOST_MAX - 1U] = 'b';
 	CHECK(strlen(text) == HOST_MAX);
 	CHECK(X509_VERIFY_PARAM_set1_host(&param, text, 0U) == 1);
@@ -1671,6 +1843,8 @@ check_ip(
 		CHECK(param.params.ip[4] == 0U);
 		CHECK(param.params.ip[15] == 0U);
 	}
+
+	/* The call leaves no error behind. */
 	CHECK(no_error());
 }
 
@@ -1802,13 +1976,21 @@ reference_v4(
 				return 0;
 			value = value * 10U + (unsigned)(begin[start + digit] - '0');
 		}
+
+		/* A field above 255 does not fit in an octet. */
 		if (value > 255U)
 			return 0;
 		out[field] = (unsigned char)value;
 		field++;
 		start = position + 1U;
 	}
-	return field == 4U;
+
+	/* Exactly four fields make an address. */
+	if (field != 4U)
+		return 0;
+
+	/* Succeeded: the text is an address and its octets are in out. */
+	return 1;
 }
 
 /* Reference reader of an IPv6 address, written by splitting the text at the "::" first. */
@@ -1819,6 +2001,8 @@ reference_v6(
 {
 	const char *double_colon;
 	const char *second;
+	const char *triple;
+	const void *dotted;
 	const char *parts[2];
 	size_t lengths[2];
 	size_t part_count;
@@ -1834,12 +2018,14 @@ reference_v6(
 	unsigned value;
 	unsigned char v4[4];
 	int last_part;
+	int v4_valid;
 	unsigned total;
 	size_t length;
 
 	/* At most one "::", and no ":::". */
 	length = strlen(text);
-	if (strstr(text, ":::") != NULL)
+	triple = strstr(text, ":::");
+	if (triple != NULL)
 		return 0;
 	double_colon = strstr(text, "::");
 	if (double_colon != NULL) {
@@ -1871,6 +2057,8 @@ reference_v6(
 				return 0;
 			continue;
 		}
+
+		/* Splits the part at its colons. */
 		start = 0;
 		for (position = 0; position <= lengths[which]; position++) {
 			if (position < lengths[which] && parts[which][position] != ':')
@@ -1878,10 +2066,12 @@ reference_v6(
 			token_length = position - start;
 			if (token_length == 0U)
 				return 0;
-			if (memchr(parts[which] + start, '.', token_length) != NULL) {
+			dotted = memchr(parts[which] + start, '.', token_length);
+			if (dotted != NULL) {
 				if (!last_part || position != lengths[which] || counts[which] > 6U)
 					return 0;
-				if (!reference_v4(parts[which] + start, token_length, v4))
+				v4_valid = reference_v4(parts[which] + start, token_length, v4);
+				if (!v4_valid)
 					return 0;
 				groups[which][counts[which]] = (unsigned)v4[0] * 256U + v4[1];
 				counts[which]++;
@@ -1902,9 +2092,13 @@ reference_v6(
 					else
 						return 0;
 				}
+
+				/* Stores the group that was read. */
 				groups[which][counts[which]] = value;
 				counts[which]++;
 			}
+
+			/* The next token starts after the colon. */
 			start = position + 1U;
 		}
 	}
@@ -1924,10 +2118,14 @@ reference_v6(
 		out[index * 2U] = (unsigned char)(groups[0][index] >> 8);
 		out[index * 2U + 1U] = (unsigned char)groups[0][index];
 	}
+
+	/* The groups after the zeros go to the end of the address. */
 	for (index = 0; index < counts[1]; index++) {
 		out[(8U - counts[1] + index) * 2U] = (unsigned char)(groups[1][index] >> 8);
 		out[(8U - counts[1] + index) * 2U + 1U] = (unsigned char)groups[1][index];
 	}
+
+	/* Succeeded: the text is an address and its octets are in out. */
 	return 1;
 }
 
@@ -1949,6 +2147,8 @@ test_ip_differential(void)
 	size_t seed;
 	size_t position;
 	size_t changes;
+	uint32_t choice;
+	unsigned expected_size;
 	int reference;
 	int actual;
 	int is_v6;
@@ -1956,6 +2156,7 @@ test_ip_differential(void)
 	unsigned long refused;
 	unsigned long disagreements;
 
+	/* Starts the counters of the comparison. */
 	accepted = 0;
 	refused = 0;
 	disagreements = 0;
@@ -1970,10 +2171,18 @@ test_ip_differential(void)
 			seed = next_random() % (sizeof(seeds) / sizeof(seeds[0]));
 			strcpy(text, seeds[seed]);
 			length = strlen(text);
-			changes = round % 10U == 1U ? 0U : 1U + next_random() % 3U;
+			changes = 0U;
+			if (round % 10U != 1U)
+				changes = 1U + next_random() % 3U;
 			for (index = 0; index < changes; index++) {
+				/* Picks where the text changes and whether a character is deleted or inserted. */
 				position = next_random() % (length + 1U);
-				if (next_random() % 3U == 0U && length > 0U && position < length) {
+				choice = next_random() % 3U;
+
+				/* A third of the changes delete the character at the position; the others insert one while the text is short. */
+				if (choice == 0U &&
+				    length > 0U &&
+				    position < length) {
 					memmove(text + position, text + position + 1U, length - position);
 					length--;
 				} else if (length < 60U) {
@@ -2001,15 +2210,22 @@ test_ip_differential(void)
 			printf("ip reading differs for \"%s\": library %d, reference %d\n", text, actual, reference);
 			continue;
 		}
+
+		/* An accepted text has the octets the reference reader found; a refused text records no address. */
 		if (actual) {
 			accepted++;
-			CHECK(param.params.ip_size == (is_v6 ? 16U : 4U));
+			expected_size = 4U;
+			if (is_v6)
+				expected_size = 16U;
+			CHECK(param.params.ip_size == expected_size);
 			CHECK_BYTES(param.params.ip, expected, param.params.ip_size);
 		} else {
 			refused++;
 			CHECK(param.params.ip_size == 0U);
 		}
 	}
+
+	/* The library and the reference reader never disagree, and both outcomes are common. */
 	CHECK(disagreements == 0UL);
 	CHECK(accepted > 5000UL);
 	CHECK(refused > 100000UL);
@@ -2187,6 +2403,7 @@ test_validation(void)
 	CHECK(validate(store, server, &param) == X509_V_ERR_HOSTNAME_MISMATCH);
 	drain_errors();
 
+	/* Frees the certificates and the stores. */
 	X509_free(server);
 	X509_free(other);
 	cryc_x509_store_free(store);
@@ -2279,11 +2496,15 @@ test_threads(void)
 			free(der);
 		}
 	}
+
+	/* The certificates that all threads share. */
 	for (index = 0; index < SHARED_CERTS; index++) {
 		der = simple_cert(20000U + index, &size);
 		shared[index] = make_cert(der, size);
 		free(der);
 	}
+
+	/* The certificate whose reference count the threads move. */
 	der = simple_cert(30000U, &size);
 	counted = make_cert(der, size);
 	free(der);
@@ -2304,6 +2525,8 @@ test_threads(void)
 		CHECK(pthread_create(&handles[thread], NULL, thread_entry, &jobs[thread]) == 0);
 #endif
 	}
+
+	/* Waits for every thread to end. */
 	for (thread = 0; thread < THREADS; thread++) {
 #ifdef _WIN32
 		WaitForSingleObject(handles[thread], INFINITE);
@@ -2325,6 +2548,8 @@ test_threads(void)
 		for (index = 0; index < PER_THREAD; index++)
 			X509_free(own[thread][index]);
 	}
+
+	/* Frees the shared certificates and the counted one, then the store. */
 	for (index = 0; index < SHARED_CERTS; index++)
 		X509_free(shared[index]);
 	X509_free(counted);
@@ -2353,6 +2578,8 @@ read_file(
 		fclose(stream);
 		return NULL;
 	}
+
+	/* Reads the whole file and ends the text with a NUL. */
 	*size = fread(data, 1, (size_t)length, stream);
 	fclose(stream);
 	data[*size] = '\0';
@@ -2417,16 +2644,22 @@ test_bundle(void)
 			read++;
 			CHECK(cursor == input + der_size);
 			CHECK(cryc_x509_parse(&direct, der, der_size) == 0);
-			if (direct.not_before == certificate->cert.not_before && direct.not_after == certificate->cert.not_after &&
-			    direct.key.type == certificate->cert.key.type && direct.flags == certificate->cert.flags &&
+			if (direct.not_before == certificate->cert.not_before &&
+			    direct.not_after == certificate->cert.not_after &&
+			    direct.key.type == certificate->cert.key.type &&
+			    direct.flags == certificate->cert.flags &&
 			    direct.subject_size == certificate->cert.subject_size)
 				same++;
 			CHECK(store != NULL && X509_STORE_add_cert(store, certificate) == 1);
 			X509_free(certificate);
 		}
+
+		/* Releases the buffers of this certificate. */
 		free(input);
 		free(der);
 	}
+
+	/* Releases the bundle text. */
 	free(text);
 	CHECK(read == expected);
 	CHECK(same == expected);
@@ -2454,12 +2687,17 @@ test_limbo(void)
 	struct cryc_x509 direct;
 	X509 *certificate;
 	int direct_error;
+	int open_error;
+	int more;
 
 	/* The records must be present: a missing file is a failure. */
-	if (vec_open(&file, "limbo") != 0) {
+	open_error = vec_open(&file, "limbo");
+	if (open_error != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* The buffer that holds one certificate of the cases. */
 	buffer = malloc(LIMBO_MAX);
 	CHECK(buffer != NULL);
 	if (buffer == NULL) {
@@ -2472,7 +2710,13 @@ test_limbo(void)
 	accepted = 0;
 	refused = 0;
 	mismatches = 0;
-	while (vec_next(&file)) {
+	for (;;) {
+		/* Reads the next record, and stops at the end of the file. */
+		more = vec_next(&file);
+		if (!more)
+			break;
+
+		/* Every certificate the record holds. */
 		for (index = 0; index < 125U; index++) {
 			if (index == 0U)
 				sprintf(key, "peer");
@@ -2490,8 +2734,11 @@ test_limbo(void)
 			direct_error = cryc_x509_parse(&direct, input, size);
 			if (certificate != NULL) {
 				accepted++;
-				if (direct_error != 0 || cursor != input + size || certificate->der_size != size ||
-				    direct.not_after != certificate->cert.not_after || direct.flags != certificate->cert.flags)
+				if (direct_error != 0 ||
+				    cursor != input + size ||
+				    certificate->der_size != size ||
+				    direct.not_after != certificate->cert.not_after ||
+				    direct.flags != certificate->cert.flags)
 					mismatches++;
 				X509_free(certificate);
 				drain_errors();
@@ -2501,9 +2748,13 @@ test_limbo(void)
 					mismatches++;
 				CHECK(drain_errors() == 1U);
 			}
+
+			/* Releases the copy of this certificate. */
 			free(input);
 		}
 	}
+
+	/* Closes the file and frees the buffer. */
 	vec_close(&file);
 	free(buffer);
 	CHECK(mismatches == 0UL);
@@ -2516,9 +2767,12 @@ test_limbo(void)
 int
 main(void)
 {
+	int status;
+
 	/* The error queue starts empty. */
 	drain_errors();
 
+	/* Runs every group of checks. */
 	test_verdicts();
 	test_error_strings();
 	test_d2i_basic();
@@ -2541,5 +2795,6 @@ main(void)
 	test_limbo();
 
 	/* The last line the runner reads. */
-	return check_finish("test-api-x509");
+	status = check_finish("test-api-x509");
+	return status;
 }

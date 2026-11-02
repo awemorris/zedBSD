@@ -54,6 +54,39 @@ random_byte(void)
 }
 
 /* Fills size bytes with pseudo-random bytes. */
+static void random_fill(uint8_t *out, size_t size);
+
+/* Returns 1 when all size bytes are zero. */
+static int all_zero(const uint8_t *bytes, size_t size);
+
+/* Returns 1 when all size bytes equal value. */
+static int all_equal(const uint8_t *bytes, size_t size, uint8_t value);
+
+/* The reference product of 6.3, Algorithm 1, on arrays with one bit per element. */
+static void reference_multiply(uint8_t *out, const uint8_t *x, const uint8_t *y);
+
+/* The reference GHASH of 6.4 over data padded with zeros to a whole number of blocks. */
+static void reference_ghash(uint8_t *y, const uint8_t *h, const uint8_t *data, size_t size);
+
+/* Adds 1 modulo 2^32 to the last four bytes of a block, byte by byte (6.2). */
+static void reference_inc32(uint8_t *block);
+
+/* The reference GCM-AE of 7.1, built on the single-block cipher alone. */
+static void reference_seal(const uint8_t *key, size_t key_size, const uint8_t *iv, size_t iv_size, const uint8_t *aad, size_t aad_size, const uint8_t *in, size_t size, uint8_t *out, uint8_t *tag);
+
+/* Checks one record as a valid message: seal gives the ciphertext and the tag, open gives the plaintext, and forgeries fail. */
+static void check_valid_message(const uint8_t *key, size_t key_size, const uint8_t *iv, size_t iv_size, const uint8_t *aad, size_t aad_size, const uint8_t *plain, const uint8_t *cipher, size_t size, const uint8_t *tag, size_t tag_size);
+
+/* Checks the CAVP gcmEncryptExtIV file of one key size. */
+static void check_cavp_encrypt(const char *name);
+
+/* Checks the CAVP gcmDecrypt file of one key size: the 16-byte-tag records open or fail as the record says. */
+static void check_cavp_decrypt(const char *name);
+
+/* Compares the implementation with the reference on one combination of sizes, with buffers of exactly the sizes in use. */
+static void check_reference_one(size_t key_size, size_t iv_size, size_t aad_size, size_t size);
+
+/* Fills size bytes with pseudo-random bytes. */
 static void
 random_fill(
 	uint8_t *out,
@@ -79,6 +112,8 @@ all_zero(
 		if (bytes[index] != 0)
 			return 0;
 	}
+
+	/* Succeeded: every byte is zero. */
 	return 1;
 }
 
@@ -96,6 +131,8 @@ all_equal(
 		if (bytes[index] != value)
 			return 0;
 	}
+
+	/* Succeeded: every byte equals the value. */
 	return 1;
 }
 
@@ -548,26 +585,47 @@ check_cavp_encrypt(
 	size_t cipher_size;
 	size_t tag_size;
 	size_t tag_bits;
+	const char *taglen_text;
+	int opened;
+	int more;
+	int well_formed;
+	int good;
 
-	/* The file. */
-	if (vec_open(&file, name) != 0) {
+	/* Opens the vector file; a file that is missing fails the check. */
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
 
-	/* Each record: key, IV, plaintext, additional data, ciphertext and a tag of Taglen bits. */
-	while (vec_next(&file)) {
+	/* Checks each record: key, IV, plaintext, additional data, ciphertext and a tag of Taglen bits. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		key_size = vec_hex(&file, "Key", key, sizeof(key));
 		iv_size = vec_hex(&file, "IV", iv, sizeof(iv));
 		size = vec_hex(&file, "PT", plain, sizeof(plain));
 		aad_size = vec_hex(&file, "AAD", aad, sizeof(aad));
 		cipher_size = vec_hex(&file, "CT", cipher, sizeof(cipher));
 		tag_size = vec_hex(&file, "Tag", tag, sizeof(tag));
-		tag_bits = (size_t)atoi(vec_get(&file, "section.Taglen"));
-		if (!check_one(key_size != (size_t)-1 && iv_size != (size_t)-1 && size != (size_t)-1 &&
-		    aad_size != (size_t)-1 && cipher_size == size && tag_size == tag_bits / 8U && tag_size > 0,
-		    __FILE__, __LINE__, "record is well formed"))
+		taglen_text = vec_get(&file, "section.Taglen");
+		tag_bits = (size_t)atoi(taglen_text);
+
+		/* A record is well formed when every field decoded and the sizes agree. */
+		well_formed = 0;
+		if (key_size != (size_t)-1 &&
+		    iv_size != (size_t)-1 &&
+		    size != (size_t)-1 &&
+		    aad_size != (size_t)-1 &&
+		    cipher_size == size &&
+		    tag_size == tag_bits / 8U &&
+		    tag_size > 0)
+			well_formed = 1;
+		good = check_one(well_formed, __FILE__, __LINE__, "record is well formed");
+		if (!good)
 			continue;
+
+		/* The record is used: seal, open and compare. */
 		used_records++;
 		check_valid_message(key, key_size, iv, iv_size, aad, aad_size, plain, cipher, size, tag, tag_size);
 
@@ -575,6 +633,8 @@ check_cavp_encrypt(
 		if (tag_size != 16U)
 			skipped_records++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 }
 
@@ -601,33 +661,60 @@ check_cavp_decrypt(
 	size_t tag_bits;
 	int expect_fail;
 	int error;
+	const char *taglen_text;
+	const char *fail_text;
+	int opened;
+	int more;
+	int well_formed;
+	int good;
 
-	/* The file. */
-	if (vec_open(&file, name) != 0) {
+	/* Opens the vector file; a file that is missing fails the check. */
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
 
-	/* Each record: either FAIL, or the plaintext PT. */
-	while (vec_next(&file)) {
-		tag_bits = (size_t)atoi(vec_get(&file, "section.Taglen"));
+	/* Checks each record: either FAIL, or the plaintext PT. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
+		taglen_text = vec_get(&file, "section.Taglen");
+		tag_bits = (size_t)atoi(taglen_text);
 		if (tag_bits != 128U) {
 			skipped_records++;
 			continue;
 		}
+
+		/* The fields of a 16-byte-tag record. */
 		key_size = vec_hex(&file, "Key", key, sizeof(key));
 		iv_size = vec_hex(&file, "IV", iv, sizeof(iv));
 		aad_size = vec_hex(&file, "AAD", aad, sizeof(aad));
 		cipher_size = vec_hex(&file, "CT", cipher, sizeof(cipher));
 		tag_size = vec_hex(&file, "Tag", tag, sizeof(tag));
-		expect_fail = vec_get(&file, "FAIL") != NULL;
+		fail_text = vec_get(&file, "FAIL");
+		expect_fail = 0;
+		if (fail_text != NULL)
+			expect_fail = 1;
 		size = 0;
 		if (!expect_fail)
 			size = vec_hex(&file, "PT", plain, sizeof(plain));
-		if (!check_one(key_size != (size_t)-1 && iv_size != (size_t)-1 && aad_size != (size_t)-1 &&
-		    cipher_size != (size_t)-1 && tag_size == 16U && size != (size_t)-1 &&
-		    (expect_fail || size == cipher_size), __FILE__, __LINE__, "record is well formed"))
+
+		/* A record is well formed when every field decoded and a passing record has a plaintext as long as the ciphertext. */
+		well_formed = 0;
+		if (key_size != (size_t)-1 &&
+		    iv_size != (size_t)-1 &&
+		    aad_size != (size_t)-1 &&
+		    cipher_size != (size_t)-1 &&
+		    tag_size == 16U &&
+		    size != (size_t)-1 &&
+		    (expect_fail || size == cipher_size))
+			well_formed = 1;
+		good = check_one(well_formed, __FILE__, __LINE__, "record is well formed");
+		if (!good)
 			continue;
+
+		/* The record is used: opens it and checks the verdict. */
 		used_records++;
 		error = cryc_gcm_init(&gcm, key, key_size);
 		CHECK(error == 0);
@@ -640,9 +727,13 @@ check_cavp_decrypt(
 			CHECK(error == 0);
 			CHECK_BYTES(out, plain, size);
 		}
+
+		/* The bytes after the output are untouched, and the key is wiped. */
 		CHECK(all_equal(out + cipher_size, 16, SENTINEL_BYTE));
 		cryc_gcm_clear(&gcm);
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 }
 
@@ -669,15 +760,23 @@ check_wycheproof(void)
 	const char *result;
 	int valid;
 	int error;
+	int opened;
+	int more;
+	int well_formed;
+	int good;
+	int different;
 
-	/* The file. */
-	if (vec_open(&file, "wycheproof-aes_gcm_test") != 0) {
+	/* Opens the vector file; a file that is missing fails the check. */
+	opened = vec_open(&file, "wycheproof-aes_gcm_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
 
-	/* Each record. */
-	while (vec_next(&file)) {
+	/* Checks each record. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		key_size = vec_hex(&file, "key", key, sizeof(key));
 		iv_size = vec_hex(&file, "iv", iv, sizeof(iv));
 		aad_size = vec_hex(&file, "aad", aad, sizeof(aad));
@@ -685,9 +784,19 @@ check_wycheproof(void)
 		cipher_size = vec_hex(&file, "ct", cipher, sizeof(cipher));
 		tag_size = vec_hex(&file, "tag", tag, sizeof(tag));
 		result = vec_get(&file, "result");
-		if (!check_one(key_size != (size_t)-1 && iv_size != (size_t)-1 && aad_size != (size_t)-1 &&
-		    size != (size_t)-1 && cipher_size != (size_t)-1 && tag_size != (size_t)-1 && result != NULL,
-		    __FILE__, __LINE__, "record is well formed"))
+
+		/* A record is well formed when every field decoded and the verdict is present. */
+		well_formed = 0;
+		if (key_size != (size_t)-1 &&
+		    iv_size != (size_t)-1 &&
+		    aad_size != (size_t)-1 &&
+		    size != (size_t)-1 &&
+		    cipher_size != (size_t)-1 &&
+		    tag_size != (size_t)-1 &&
+		    result != NULL)
+			well_formed = 1;
+		good = check_one(well_formed, __FILE__, __LINE__, "record is well formed");
+		if (!good)
 			continue;
 
 		/* A tag that is not 16 bytes is out of range. */
@@ -695,8 +804,13 @@ check_wycheproof(void)
 			skipped_records++;
 			continue;
 		}
+
+		/* The record is used: the file says whether it is valid. */
 		used_records++;
-		valid = strcmp(result, "valid") == 0;
+		different = strcmp(result, "valid");
+		valid = 0;
+		if (different == 0)
+			valid = 1;
 		error = cryc_gcm_init(&gcm, key, key_size);
 		CHECK(error == 0);
 		memset(out, SENTINEL_BYTE, sizeof(out));
@@ -722,8 +836,12 @@ check_wycheproof(void)
 			CHECK(all_zero(out, cipher_size));
 			CHECK(all_equal(out + cipher_size, 16, SENTINEL_BYTE));
 		}
+
+		/* The key is wiped. */
 		cryc_gcm_clear(&gcm);
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 }
 
@@ -747,16 +865,36 @@ check_reference_one(
 	uint8_t *expected;
 	uint8_t *back;
 	int error;
+	size_t aad_room;
+	size_t data_room;
+	int allocated;
+	int good;
 
-	/* The inputs, in buffers of exactly the sizes (a write or read past them is an ASan error). */
+	/* The inputs, in buffers of exactly the sizes (a write or read past them is an ASan error); an empty one still gets a byte. */
+	aad_room = aad_size;
+	if (aad_room == 0)
+		aad_room = 1U;
+	data_room = size;
+	if (data_room == 0)
+		data_room = 1U;
 	iv = malloc(iv_size);
-	aad = malloc(aad_size > 0 ? aad_size : 1U);
-	plain = malloc(size > 0 ? size : 1U);
-	cipher = malloc(size > 0 ? size : 1U);
-	expected = malloc(size > 0 ? size : 1U);
-	back = malloc(size > 0 ? size : 1U);
-	if (!check_one(iv != NULL && aad != NULL && plain != NULL && cipher != NULL && expected != NULL && back != NULL,
-	    __FILE__, __LINE__, "allocated")) {
+	aad = malloc(aad_room);
+	plain = malloc(data_room);
+	cipher = malloc(data_room);
+	expected = malloc(data_room);
+	back = malloc(data_room);
+
+	/* Every buffer must have been allocated. */
+	allocated = 0;
+	if (iv != NULL &&
+	    aad != NULL &&
+	    plain != NULL &&
+	    cipher != NULL &&
+	    expected != NULL &&
+	    back != NULL)
+		allocated = 1;
+	good = check_one(allocated, __FILE__, __LINE__, "allocated");
+	if (!good) {
 		free(iv);
 		free(aad);
 		free(plain);
@@ -765,6 +903,8 @@ check_reference_one(
 		free(back);
 		return;
 	}
+
+	/* Fills the inputs with random bytes. */
 	random_fill(key, key_size);
 	random_fill(iv, iv_size);
 	random_fill(aad, aad_size);
@@ -948,6 +1088,8 @@ check_tamper(void)
 			CHECK(error == EBADMSG);
 			CHECK(all_zero(out, sizeof(out)));
 		}
+
+		/* The key is wiped. */
 		cryc_gcm_clear(&gcm);
 	}
 }
@@ -1060,9 +1202,13 @@ check_init(void)
 			CHECK(error == EINVAL);
 			CHECK(all_zero((const uint8_t *)&gcm, sizeof(gcm)));
 		}
+
+		/* Clearing the structure leaves all zeros. */
 		cryc_gcm_clear(&gcm);
 		CHECK(all_zero((const uint8_t *)&gcm, sizeof(gcm)));
 	}
+
+	/* The largest size_t is refused too. */
 	memset(&gcm, 0xa5, sizeof(gcm));
 	error = cryc_gcm_init(&gcm, key, (size_t)-1);
 	CHECK(error == EINVAL);
@@ -1102,6 +1248,8 @@ main(void)
 		printf("cavp encrypt %lu: records used so far %lu, out of range (tag under 16 bytes) so far %lu\n",
 		    (unsigned long)index, used_records, skipped_records);
 	}
+
+	/* The decryption files. */
 	for (index = 0; index < 3U; index++) {
 		check_cavp_decrypt(decrypt_names[index]);
 		printf("cavp decrypt %lu: records used so far %lu, out of range (tag under 16 bytes) so far %lu\n",

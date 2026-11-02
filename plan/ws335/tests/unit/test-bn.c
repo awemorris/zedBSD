@@ -54,6 +54,78 @@ random32(void)
 }
 
 /* Sets a reference number to zero. */
+static void ref_zero(struct ref *r);
+
+/* Loads n limbs into a reference number (two digits per limb). */
+static void ref_set_limbs(struct ref *r, const uint32_t *limbs, size_t n);
+
+/* Reads the low n limbs of a reference number. */
+static void ref_get_limbs(uint32_t *out, size_t n, const struct ref *r);
+
+/* Returns whether every digit at or above 2n is zero (the number fits in n limbs). */
+static int ref_fits(const struct ref *r, size_t n);
+
+/* Compares the low `digits` digits (the rest are zero): -1, 0 or 1. */
+static int ref_cmp(const struct ref *a, const struct ref *b, size_t digits);
+
+/* a = a - b over `digits` digits, for a >= b. */
+static void ref_sub_in(struct ref *a, const struct ref *b, size_t digits);
+
+/* r = a + b over `digits` digits; the carry goes to digit `digits`. */
+static void ref_add(struct ref *r, const struct ref *a, const struct ref *b, size_t digits);
+
+/* p = a * b, a of na digits and b of nb digits (schoolbook). */
+static void ref_mul(struct ref *p, const struct ref *a, size_t na, const struct ref *b, size_t nb);
+
+/* Sets r to x mod m by the bit-by-bit reference. */
+static void ref_mod(struct ref *r, const struct ref *x, size_t xdigits, const struct ref *m, size_t mdigits);
+
+/* r = a * b mod m, with a and b of mdigits digits. */
+static void ref_mulmod(struct ref *r, const struct ref *a, const struct ref *b, const struct ref *m, size_t mdigits);
+
+/* r = x * R mod m with R = 2^(32 * limbs) (x of `limbs` limbs below m). */
+static void ref_to_mont(struct ref *r, const struct ref *x, const struct ref *m, size_t limbs);
+
+/* r = x ^ e mod m by square-and-multiply on plain numbers (e of esize big-endian bytes). */
+static void ref_modexp(struct ref *r, const struct ref *x, const uint8_t *e, size_t esize, const struct ref *m, size_t mdigits);
+
+/* Checks that n limbs equal the reference number r (and that r fits). */
+static void check_limbs_ref(const uint32_t *got, size_t n, const struct ref *r);
+
+/* Allocates n limbs of exactly that size (so a stray access is caught by the sanitizer). */
+static uint32_t * limbs_alloc(size_t n);
+
+/* Makes a copy of n limbs in a buffer of exactly that size. */
+static uint32_t * limbs_dup(const uint32_t *p, size_t n);
+
+/* Fills n limbs with pseudo-random values. */
+static void limbs_random(uint32_t *p, size_t n);
+
+/* Writes the big-endian bytes of n limbs (4n bytes) into out. */
+static void limbs_to_bytes(const uint32_t *p, size_t n, uint8_t *out);
+
+/* p = m - w for a small w (m is at least w), over n limbs. */
+static void limbs_sub_word(uint32_t *out, const uint32_t *m, size_t n, uint32_t w);
+
+/* Returns the number of significant bits of n limbs. */
+static size_t limbs_bits(const uint32_t *p, size_t n);
+
+/* Makes a modulus of the given width and kind. */
+static void make_modulus(uint32_t *m, size_t limbs, int kind);
+
+/* Makes a value below the modulus: kind 0 random, 1 zero, 2 one, 3 m - 1, 4 m - 2, 5 near m, 6 small. */
+static void make_value(uint32_t *a, const uint32_t *m, size_t limbs, int kind);
+
+/* Checks one prepared modulus against the reference. */
+static void check_modulus(const uint32_t *m_limbs, size_t limbs, unsigned pairs, size_t exp_bytes, int heavy);
+
+/* Reads a hex string of a prime into limbs and bytes. */
+static size_t prime_bytes(const char *hex, uint8_t *out);
+
+/* Checks one prime of the curves. */
+static void check_prime(const char *hex, size_t bytes_expected);
+
+/* Sets a reference number to zero. */
 static void
 ref_zero(
 	struct ref *r)
@@ -109,6 +181,8 @@ ref_fits(
 		if (r->digit[i] != 0)
 			return 0;
 	}
+
+	/* Succeeded: every digit from 2n up is zero. */
 	return 1;
 }
 
@@ -128,6 +202,8 @@ ref_cmp(
 		if (a->digit[i - 1U] > b->digit[i - 1U])
 			return 1;
 	}
+
+	/* The numbers are equal. */
 	return 0;
 }
 
@@ -170,6 +246,8 @@ ref_add(
 		r->digit[i] = value & 0xffffU;
 		carry = value >> 16;
 	}
+
+	/* The carry out of the top digit. */
 	r->digit[digits] = carry;
 }
 
@@ -196,6 +274,8 @@ ref_mul(
 			p->digit[i + j] = value & 0xffffU;
 			carry = value >> 16;
 		}
+
+		/* The carry of this row lands above its partial products. */
 		p->digit[na + j] = carry;
 	}
 }
@@ -219,6 +299,7 @@ ref_mod(
 	int bit;
 	uint32_t carry;
 	uint32_t value;
+	int order;
 
 	/* The remainder starts at zero; leading zero digits of x add nothing. */
 	ref_zero(r);
@@ -239,7 +320,8 @@ ref_mod(
 		}
 
 		/* Subtracts m when the remainder reached it. */
-		if (ref_cmp(r, m, mdigits + 1U) >= 0)
+		order = ref_cmp(r, m, mdigits + 1U);
+		if (order >= 0)
 			ref_sub_in(r, m, mdigits + 1U);
 	}
 }
@@ -337,6 +419,8 @@ limbs_alloc(
 		printf("FAIL: out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Succeeded: the caller owns the limbs. */
 	return p;
 }
 
@@ -398,12 +482,16 @@ limbs_sub_word(
 	size_t i;
 	uint32_t borrow;
 	uint32_t value;
+	uint32_t previous;
 
 	/* The word comes off the lowest limb and the borrow runs up. */
 	borrow = w;
 	for (i = 0; i < n; i++) {
 		value = m[i] - borrow;
-		borrow = m[i] < borrow ? 1U : 0U;
+		previous = borrow;
+		borrow = 0U;
+		if (m[i] < previous)
+			borrow = 1U;
 		out[i] = value;
 	}
 }
@@ -427,9 +515,13 @@ limbs_bits(
 				bits++;
 				top >>= 1;
 			}
+
+			/* Reports the position of the highest set bit. */
 			return (i - 1U) * 32U + bits;
 		}
 	}
+
+	/* The number is zero. */
 	return 0;
 }
 
@@ -553,6 +645,8 @@ check_modulus(
 	int kind_b;
 	int error;
 	int round;
+	int fits;
+	size_t candidate;
 
 	/* The modulus with a random number of leading zero bytes, which init must accept. */
 	extra = random32() % 7U;
@@ -610,6 +704,8 @@ check_modulus(
 			kind_a = 0;
 			kind_b = 0;
 		}
+
+		/* The operands of this pair. */
 		make_value(a, m_limbs, limbs, kind_a);
 		make_value(b, m_limbs, limbs, kind_b);
 		CHECK(cryc_bn_lt(a, m_limbs, limbs) == 0xffffffffU);
@@ -723,14 +819,18 @@ check_modulus(
 	CHECK(cryc_bn_is_zero(out, limbs) == 0xffffffffU);
 	ref_set_limbs(&ra, a, limbs);
 	ref_add(&scratch, &ra, &m, md);
-	if (ref_fits(&scratch, limbs) != 0) {
+	fits = ref_fits(&scratch, limbs);
+	if (fits != 0) {
 		/* m + a fits the width, so it is in the range of the function. */
 		ref_get_limbs(b, limbs, &scratch);
 		cryc_bn_reduce_once(out, b, &mont);
 		CHECK_BYTES(out, a, limbs * sizeof(uint32_t));
 		carry_probe = 1;
 	}
-	if (limbs_bits(m_limbs, limbs) < 32U * limbs) {
+
+	/* Whether the modulus leaves room in the top limb. */
+	bits = limbs_bits(m_limbs, limbs);
+	if (bits < 32U * limbs) {
 		/* A modulus below the full width: 2m - 1 fits, and reduces to m - 1. */
 		ref_add(&scratch, &m, &m, md);
 		ref_sub_in(&scratch, &one, md + 1U);
@@ -741,6 +841,8 @@ check_modulus(
 		CHECK_BYTES(out, a, limbs * sizeof(uint32_t));
 		carry_probe = 1;
 	}
+
+	/* At most one of the two reductions of the sum ran. */
 	CHECK(carry_probe <= 1U);
 
 	/* Powers: a small exponent, 0, and random bytes (with leading zero bytes), against plain square-and-multiply. */
@@ -761,8 +863,13 @@ check_modulus(
 				exponent[1] = 0;
 				for (i = 2; i < exp_bytes + 2U && i < sizeof(exponent); i++)
 					exponent[i] = (uint8_t)random32();
-				exp_bytes = exp_bytes + 2U < sizeof(exponent) ? exp_bytes + 2U : sizeof(exponent);
+				candidate = exp_bytes + 2U;
+				exp_bytes = sizeof(exponent);
+				if (candidate < sizeof(exponent))
+					exp_bytes = candidate;
 			}
+
+			/* The base and its reference power. */
 			make_value(a, m_limbs, limbs, 0);
 			ref_set_limbs(&ra, a, limbs);
 			ref_to_mont(&scratch, &ra, &m, limbs);
@@ -781,6 +888,8 @@ check_modulus(
 				exp_bytes = exp_bytes - 2U;
 		}
 	}
+
+	/* Releases the buffers. */
 	free(a);
 	free(b);
 	free(am);
@@ -937,6 +1046,9 @@ test_init(void)
 	uint8_t *exact;
 	size_t index;
 	size_t size;
+	size_t room;
+	size_t wipe;
+	uint32_t coin;
 	int error;
 
 	/* A zeroed structure to compare with, and the sizes of the largest modulus. */
@@ -950,6 +1062,8 @@ test_init(void)
 		CHECK(error == EINVAL);
 		CHECK(memcmp(&mont, &zero, sizeof(mont)) == 0);
 	}
+
+	/* The value 1 in five bytes. */
 	memset(modulus, 0, sizeof(modulus));
 	modulus[4] = 1;
 	memset(&mont, 0x5a, sizeof(mont));
@@ -1005,6 +1119,8 @@ test_init(void)
 		printf("FAIL: out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* A modulus of 2024 bytes, zero in the first 1000. */
 	memset(exact, 0, 1000);
 	memset(exact + 1000, 0xff, 1024);
 	error = cryc_bn_mont_init(&mont, exact, 2024);
@@ -1053,13 +1169,23 @@ test_init(void)
 			size = random32() % 12U;
 		for (error = 0; (size_t)error < size; error++)
 			modulus[error] = (uint8_t)random32();
-		if (random32() % 2U == 0U && size > 0)
-			memset(modulus, 0, random32() % size);
-		exact = (uint8_t *)malloc(size == 0 ? 1U : size);
+		coin = random32() % 2U;
+		if (coin == 0U && size > 0) {
+			wipe = random32() % size;
+			memset(modulus, 0, wipe);
+		}
+
+		/* A buffer of exactly the size (a byte for an empty one), so a stray access is caught. */
+		room = size;
+		if (room == 0)
+			room = 1U;
+		exact = (uint8_t *)malloc(room);
 		if (exact == NULL) {
 			printf("FAIL: out of memory\n");
 			exit(EXIT_FAILURE);
 		}
+
+		/* The random modulus is initialized and its structure checked. */
 		memcpy(exact, modulus, size);
 		memset(&mont, 0x5a, sizeof(mont));
 		error = cryc_bn_mont_init(&mont, exact, size);
@@ -1071,6 +1197,8 @@ test_init(void)
 			CHECK((uint32_t)(mont.modulus[0] * mont.m0inv) == 0xffffffffU);
 			CHECK(mont.modulus[mont.limbs - 1U] != 0U);
 		}
+
+		/* Releases the buffer. */
 		free(exact);
 	}
 }
@@ -1086,6 +1214,7 @@ test_codec(void)
 	uint8_t *in;
 	size_t size;
 	size_t width;
+	size_t room;
 	size_t i;
 	int error;
 
@@ -1162,12 +1291,17 @@ test_codec(void)
 	/* Round trips for widths 1 to 40 limbs-ish and byte sizes around the width: decode then encode gives the bytes back. */
 	for (width = 1; width <= 9; width++) {
 		for (size = 0; size <= width * 4U + 3U; size++) {
-			in = (uint8_t *)malloc(size == 0 ? 1U : size);
+			room = size;
+			if (room == 0)
+				room = 1U;
+			in = (uint8_t *)malloc(room);
 			limbs = limbs_alloc(width);
 			if (in == NULL) {
 				printf("FAIL: out of memory\n");
 				exit(EXIT_FAILURE);
 			}
+
+			/* Random bytes of this size. */
 			for (i = 0; i < size; i++)
 				in[i] = (uint8_t)random32();
 			if (size > width * 4U)
@@ -1209,6 +1343,7 @@ test_compare(void)
 	size_t i;
 	unsigned round;
 	int expected_lt;
+	uint32_t want;
 	struct ref ra;
 	struct ref rb;
 
@@ -1225,6 +1360,8 @@ test_compare(void)
 				a[i] = random32();
 				b[i] = a[i];
 			}
+
+			/* Exact-size copies, so a stray access is caught. */
 			ea = limbs_dup(a, limbs);
 			eb = limbs_dup(b, limbs);
 			CHECK(cryc_bn_lt(ea, eb, limbs) == 0U);
@@ -1233,6 +1370,8 @@ test_compare(void)
 				CHECK(cryc_bn_lt(ea, eb, limbs) == 0xffffffffU);
 				CHECK(cryc_bn_lt(eb, ea, limbs) == 0U);
 			}
+
+			/* The largest limb against one below it. */
 			eb[position] = 0xffffffffU;
 			ea[position] = 0xfffffffeU;
 			CHECK(cryc_bn_lt(ea, eb, limbs) == 0xffffffffU);
@@ -1252,12 +1391,17 @@ test_compare(void)
 				b[i] = a[i];
 			b[random32() % limbs] ^= (uint32_t)1U << (random32() % 32U);
 		}
+
+		/* The reference comparison of the pair. */
 		ref_set_limbs(&ra, a, limbs);
 		ref_set_limbs(&rb, b, limbs);
 		expected_lt = ref_cmp(&ra, &rb, 2U * limbs) < 0;
 		ea = limbs_dup(a, limbs);
 		eb = limbs_dup(b, limbs);
-		CHECK(cryc_bn_lt(ea, eb, limbs) == (expected_lt ? 0xffffffffU : 0U));
+		want = 0U;
+		if (expected_lt)
+			want = 0xffffffffU;
+		CHECK(cryc_bn_lt(ea, eb, limbs) == want);
 		free(ea);
 		free(eb);
 	}
@@ -1273,6 +1417,8 @@ test_compare(void)
 			CHECK(cryc_bn_is_zero(ea, limbs) == 0U);
 			ea[position / 32U] = 0;
 		}
+
+		/* Releases the copy. */
 		free(ea);
 	}
 
@@ -1294,6 +1440,8 @@ test_compare(void)
 		free(ea);
 		free(eb);
 	}
+
+	/* A width of zero touches nothing. */
 	for (limbs = 0; limbs < 3; limbs++)
 		cryc_bn_select(out, a, b, 0, 0xffffffffU);
 }
@@ -1324,10 +1472,14 @@ test_widths(void)
 			pairs = 2;
 			exp_bytes = 2;
 		}
+
+		/* The widest moduli get one pair and no exponent work. */
 		if (widths[index] >= 64U) {
 			pairs = 1;
 			exp_bytes = 0;
 		}
+
+		/* Each kind of modulus of this width. */
 		for (kind = 0; kind < 5; kind++) {
 			if (widths[index] == 256U && kind != 2 && kind != 0)
 				continue;
@@ -1336,10 +1488,16 @@ test_widths(void)
 			make_modulus(m, widths[index], kind);
 			if (widths[index] >= 128U) {
 				/* The heavy exponent work only on the all-ones and the random full modulus. */
-				heavy = kind == 2 || widths[index] == 128U;
+				heavy = 0;
+				if (kind == 2 || widths[index] == 128U)
+					heavy = 1;
 			}
+
+			/* Checks the modulus. */
 			check_modulus(m, widths[index], pairs, exp_bytes, heavy);
 		}
+
+		/* Narrow widths get more random moduli. */
 		if (widths[index] <= 16U) {
 			for (round = 0; round < 12U; round++) {
 				make_modulus(m, widths[index], (int)(round % 5U));
@@ -1372,8 +1530,12 @@ prime_bytes(
 			else
 				value = value * 16U + (unsigned)(digit - 'a' + 10);
 		}
+
+		/* The byte of the two hex digits. */
 		out[i] = (uint8_t)value;
 	}
+
+	/* Reports the number of bytes. */
 	return length;
 }
 
@@ -1388,6 +1550,7 @@ check_prime(
 	const char *hex,
 	size_t bytes_expected)
 {
+	static const unsigned small[6] = { 2, 3, 5, 7, 11, 13 };
 	static struct cryc_bn_mont mont;
 	uint8_t modulus[64];
 	uint8_t exponent[64];
@@ -1428,12 +1591,12 @@ check_prime(
 		limbs_random(a, limbs);
 		a[limbs - 1U] = 0;
 		if (base < 6U) {
-			static const unsigned small[6] = { 2, 3, 5, 7, 11, 13 };
-
 			for (i = 0; i < limbs; i++)
 				a[i] = 0;
 			a[0] = small[base];
 		}
+
+		/* The power of the base in Montgomery form. */
 		cryc_bn_to_mont(am, a, &mont);
 		cryc_bn_mont_exp(power, am, exponent, size, &mont);
 		CHECK_BYTES(power, one, limbs * sizeof(uint32_t));
@@ -1497,6 +1660,9 @@ test_primes(void)
 	uint32_t limbs[8];
 	uint8_t built[32];
 	uint8_t hex_bytes[32];
+	uint32_t limbs384[12];
+	uint8_t built384[48];
+	uint8_t hex384[48];
 
 	/* P-256's p = 2^256 - 2^224 + 2^192 + 2^96 - 1 from the formula, against the hex value. */
 	ref_zero(&p256);
@@ -1521,31 +1687,25 @@ test_primes(void)
 	CHECK_BYTES(built, hex_bytes, 32);
 
 	/* P-384's p = 2^384 - 2^128 - 2^96 + 2^32 - 1 against its hex value. */
-	{
-		uint32_t limbs384[12];
-		uint8_t built384[48];
-		uint8_t hex384[48];
-
-		ref_zero(&p256);
-		p256.digit[24] = 1;
-		ref_zero(&term);
-		term.digit[8] = 1;
-		ref_sub_in(&p256, &term, 25);
-		ref_zero(&term);
-		term.digit[6] = 1;
-		ref_sub_in(&p256, &term, 25);
-		ref_zero(&term);
-		term.digit[2] = 1;
-		ref_add(&scratch, &p256, &term, 25);
-		p256 = scratch;
-		ref_zero(&term);
-		term.digit[0] = 1;
-		ref_sub_in(&p256, &term, 25);
-		ref_get_limbs(limbs384, 12, &p256);
-		limbs_to_bytes(limbs384, 12, built384);
-		prime_bytes("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff", hex384);
-		CHECK_BYTES(built384, hex384, 48);
-	}
+	ref_zero(&p256);
+	p256.digit[24] = 1;
+	ref_zero(&term);
+	term.digit[8] = 1;
+	ref_sub_in(&p256, &term, 25);
+	ref_zero(&term);
+	term.digit[6] = 1;
+	ref_sub_in(&p256, &term, 25);
+	ref_zero(&term);
+	term.digit[2] = 1;
+	ref_add(&scratch, &p256, &term, 25);
+	p256 = scratch;
+	ref_zero(&term);
+	term.digit[0] = 1;
+	ref_sub_in(&p256, &term, 25);
+	ref_get_limbs(limbs384, 12, &p256);
+	limbs_to_bytes(limbs384, 12, built384);
+	prime_bytes("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff", hex384);
+	CHECK_BYTES(built384, hex384, 48);
 
 	/* The four primes: Fermat, inverses, associativity. */
 	check_prime("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff", 32);

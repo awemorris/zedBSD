@@ -116,6 +116,7 @@
  * did not take yet, and what the sink saw of the client's application data.
  */
 struct rig {
+	unsigned flags;
 	intptr_t client;
 	intptr_t server;
 	struct tlspeer *peer;
@@ -152,6 +153,96 @@ static int callback_store_seen;
 static int callback_answer;
 
 /* The byte of a pattern at an offset: the application data of both directions. */
+static uint8_t pattern_at(unsigned long offset);
+
+/* Makes a connected pair of stream sockets; returns 1 on success. */
+static int make_pair(intptr_t *first, intptr_t *second);
+
+/* Puts a descriptor in non-blocking mode (1) or blocking mode (0). */
+static void set_nonblocking(intptr_t descriptor, int nonblocking);
+
+/* Asks for small socket buffers on both ends, so that a large write fills them. */
+static void shrink_buffers(struct rig *rig);
+
+/* Closes a descriptor. */
+static void close_descriptor(intptr_t descriptor);
+
+/* Sleeps for a number of milliseconds. */
+static void pause_milliseconds(unsigned milliseconds);
+
+/* Writes the DER of a certificate as a PEM block of 64-column lines (RFC 7468 2); returns the length. */
+static size_t pem_block(const uint8_t *der, size_t size, char *out);
+
+/* Writes a file in the test directory in binary mode; returns 1 on success. */
+static int write_file(const char *name, const char *bytes, size_t size, char *path_out);
+
+/* Takes the first queued error and checks its library and reason; then the queue must be empty. */
+static void expect_error(int library, int reason);
+
+/* The verify callback: records what it was given and answers callback_answer. */
+static int verify_callback(int preverify_ok, X509_STORE_CTX *store);
+
+/* Fills the peer's script for a version with TLS 1.3's middlebox change_cipher_spec as a server sends it. */
+static void peer_config(struct tlspeer_config *config, uint16_t version, const struct tlspeer_pki *pki);
+
+/* Moves the sink's check over what the peer received as application data, then forgets it. */
+static void rig_sink(struct rig *rig);
+
+/* Moves bytes between the socket and the peer once each way; returns 1 when anything moved. */
+static int rig_pump(struct rig *rig);
+
+/* Pumps a number of rounds with a short sleep between, so bytes in flight arrive. */
+static void rig_settle(struct rig *rig, unsigned rounds);
+
+/* Pumps until the sink holds at least total bytes (or the tries run out). */
+static void rig_settle_sink(struct rig *rig, unsigned long total);
+
+/* Pumps until the peer has seen at least count alerts (or the tries run out), then a few rounds more to see any extra. */
+static void rig_settle_alerts(struct rig *rig, unsigned count);
+
+/* Makes a rig for a peer script; flags say whether the context trusts the root and the SSL has its names. */
+static struct rig * rig_open(const struct tlspeer_config *config, const struct tlspeer_pki *pki, unsigned flags);
+
+/* Makes the rig's SSL again after its context changed (SSL_new copies the context's settings, as OpenSSL's does). */
+static void rig_renew(struct rig *rig);
+
+/* Frees a rig and everything in it. */
+static void rig_close(struct rig *rig);
+
+/* Runs SSL_connect with pumping until it is not waiting; returns its last result. */
+static int rig_connect(struct rig *rig);
+
+/* Completes the handshake and lets the peer see the client's last flight; the result must be 1. */
+static void rig_up(struct rig *rig);
+
+/* Reads exactly size bytes the peer sent (pumping while the SSL waits); the bytes must be the pattern of the peer's stream. */
+static int rig_read_exact(struct rig *rig, unsigned long size);
+
+/* Has the peer send size bytes of its pattern and reads them all back; returns 1 when they arrived intact. */
+static int rig_peer_sends(struct rig *rig, unsigned long size);
+
+/* Writes size bytes of the client's pattern with SSL_write until all are taken (pumping while it waits); returns the final result. */
+static int rig_send(struct rig *rig, unsigned long size);
+
+/* Tells whether the peer's last ClientHello offered a version in supported_versions. */
+static int hello_offers(const struct tlspeer *peer, uint16_t version);
+
+/* Counts the suites of the last ClientHello that are TLS 1.3 suites (0x13xx) and those that are not (the SCSV is kept apart). */
+static void hello_suites(const struct tlspeer *peer, size_t *tls13, size_t *tls12);
+
+/* One handshake of a version, suite, group and certificate curve; the SSL must verify and the peer must be connected. */
+static void handshake_case(uint16_t version, uint16_t suite, uint16_t group, const struct tlspeer_pki *pki, int retry);
+
+/* Writes bytes straight into the pump's end of the socket (what the peer would never send). */
+static void rig_inject(struct rig *rig, const uint8_t *bytes, size_t size);
+
+/* Reads and drops what the client wrote, without giving it to the peer. */
+static void rig_discard(struct rig *rig);
+
+/* The directory of the program is where the test's files go; Windows runs in the directory of its own. */
+static void find_test_directory(int argc, char **argv);
+
+/* The byte of a pattern at an offset: the application data of both directions. */
 static uint8_t
 pattern_at(
 	unsigned long offset)
@@ -172,6 +263,7 @@ make_pair(
 	SOCKET server;
 	struct sockaddr_in address;
 	int length;
+	int failed;
 
 	/* A loopback listener on a port the system picks. */
 	listener = socket(AF_INET, SOCK_STREAM, 0);
@@ -182,31 +274,49 @@ make_pair(
 	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 	address.sin_port = 0;
 	length = (int)sizeof(address);
-	if (bind(listener, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(listener, 1) != 0 ||
-	    getsockname(listener, (struct sockaddr *)&address, &length) != 0) {
+	failed = bind(listener, (struct sockaddr *)&address, sizeof(address));
+	if (failed == 0)
+		failed = listen(listener, 1);
+	if (failed == 0)
+		failed = getsockname(listener, (struct sockaddr *)&address, &length);
+	if (failed != 0) {
 		closesocket(listener);
 		return 0;
 	}
 
 	/* The client connects (the backlog completes it) and the server accepts. */
 	client = socket(AF_INET, SOCK_STREAM, 0);
-	if (client == INVALID_SOCKET || connect(client, (struct sockaddr *)&address, sizeof(address)) != 0) {
+	if (client == INVALID_SOCKET) {
 		closesocket(listener);
 		return 0;
 	}
+
+	/* Connects the client to the listener. */
+	failed = connect(client, (struct sockaddr *)&address, sizeof(address));
+	if (failed != 0) {
+		closesocket(listener);
+		return 0;
+	}
+
+	/* Takes the connection the client made and ends the listener. */
 	server = accept(listener, NULL, NULL);
 	closesocket(listener);
 	if (server == INVALID_SOCKET) {
 		closesocket(client);
 		return 0;
 	}
+
+	/* Hands out the two ends. */
 	*first = (intptr_t)client;
 	*second = (intptr_t)server;
 	return 1;
 #else
 	int fds[2];
+	int failed;
 
-	if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0)
+	/* A connected pair of stream sockets. */
+	failed = socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+	if (failed != 0)
 		return 0;
 	*first = fds[0];
 	*second = fds[1];
@@ -223,11 +333,15 @@ set_nonblocking(
 #ifdef _WIN32
 	u_long mode;
 
-	mode = nonblocking ? 1UL : 0UL;
+	/* Sets the socket's mode. */
+	mode = 0UL;
+	if (nonblocking)
+		mode = 1UL;
 	ioctlsocket((SOCKET)descriptor, FIONBIO, &mode);
 #else
 	int flags;
 
+	/* Reads the flags of the descriptor and sets or clears non-blocking mode. */
 	flags = fcntl((int)descriptor, F_GETFL, 0);
 	if (nonblocking)
 		flags |= O_NONBLOCK;
@@ -244,6 +358,7 @@ shrink_buffers(
 {
 	int size;
 
+	/* Asks for small buffers on both ends of the connection. */
 	size = 4096;
 #ifdef _WIN32
 	setsockopt((SOCKET)rig->client, SOL_SOCKET, SO_SNDBUF, (const char *)&size, (int)sizeof(size));
@@ -276,6 +391,7 @@ pause_milliseconds(
 #else
 	struct timespec request;
 
+	/* Sleeps the number of milliseconds. */
 	request.tv_sec = (time_t)(milliseconds / 1000U);
 	request.tv_nsec = (long)(milliseconds % 1000U) * 1000000L;
 	nanosleep(&request, NULL);
@@ -301,7 +417,9 @@ pem_block(
 	used = (size_t)sprintf(out, "-----BEGIN CERTIFICATE-----\n");
 	column = 0;
 	for (index = 0; index < size; index += 3U) {
-		count = (unsigned)(size - index < 3U ? size - index : 3U);
+		count = 3U;
+		if (size - index < 3U)
+			count = (unsigned)(size - index);
 		group = (unsigned long)der[index] << 16;
 		if (count > 1U)
 			group |= (unsigned long)der[index + 1U] << 8;
@@ -319,6 +437,8 @@ pem_block(
 			}
 		}
 	}
+
+	/* Ends the last line. */
 	if (column != 0U)
 		out[used++] = '\n';
 
@@ -337,14 +457,18 @@ write_file(
 {
 	FILE *file;
 	size_t put;
+	int failed;
 
 	/* The path is the directory, a slash and the name. */
 	sprintf(path_out, "%s/%s", test_dir, name);
 	file = fopen(path_out, "wb");
 	if (file == NULL)
 		return 0;
-	put = size == 0U ? 0U : fwrite(bytes, 1, size, file);
-	if (fclose(file) != 0)
+	put = 0U;
+	if (size != 0U)
+		put = fwrite(bytes, 1, size, file);
+	failed = fclose(file);
+	if (failed != 0)
 		return 0;
 	return put == size;
 }
@@ -357,12 +481,58 @@ expect_error(
 {
 	unsigned long code;
 
+	/* Takes the first error in the queue. */
 	code = ERR_get_error();
 	CHECK(code != 0UL);
 	CHECK(ERR_GET_LIB(code) == library);
 	CHECK(ERR_GET_REASON(code) == reason);
 	CHECK(ERR_get_error() == 0UL);
 }
+
+/* Checks that the queue is empty. */
+static void expect_no_error(void);
+
+/* The table of reasons: 57 numbers that are the sslerr.h numbers and the alerts plus 1000, each with a text. */
+static void test_tables(void);
+
+/* The context: the method, options, ctrls, the store, references, and null arguments. */
+static void test_ctx(void);
+
+/* Loading trust anchors: PEM files, bad blocks, missing files, the directory argument, and the default paths. */
+static void test_ctx_files(void);
+
+/* The SSL object: the socket, the names, the bounds, the parameters, and a connection that never started. */
+static void test_ssl(void);
+
+/* Handshakes: TLS 1.3 and 1.2, the suites, the three groups, a retry, both curves of certificate. */
+static void test_handshake(void);
+
+/* The verification results: untrusted, name mismatch, address mismatch, expired, not yet valid, no verification. */
+static void test_verify(void);
+
+/* The verify callback: when it is called, what it is told, and how its answer decides. */
+static void test_callback(void);
+
+/* The version bounds and options: what the ClientHello offers, and the failures of a range with nothing left. */
+static void test_versions(void);
+
+/* Writing: sizes around the record limit, the records made, retries after a wait. */
+static void test_write(void);
+
+/* A write that fills the socket: WANT_WRITE with part of it taken, the retry rule, and no byte lost or repeated. */
+static void test_write_wait(void);
+
+/* Reading: sizes, partial reads and SSL_pending, a wait with nothing to read, bad lengths that leave the connection usable. */
+static void test_read(void);
+
+/* A read or a write first starts the handshake; the first call waits and the handshake completes through the calls. */
+static void test_implicit_handshake(void);
+
+/* The closing exchange, ends of the stream, alerts, socket failures and a connection that is shut down. */
+static void test_close(void);
+
+/* Several threads share one context: references come back to one and every option bit is set. */
+static void test_threads(void);
 
 /* Checks that the queue is empty. */
 static void
@@ -384,6 +554,8 @@ verify_callback(
 		callback_error = store->error;
 		callback_depth = store->depth;
 	}
+
+	/* Answers as the test says. */
 	return callback_answer;
 }
 
@@ -406,12 +578,16 @@ rig_sink(
 	struct rig *rig)
 {
 	size_t index;
+	uint8_t expected;
 
 	/* Each byte against the pattern at its place in the stream. */
 	for (index = 0; index < rig->peer->data_size; index++) {
-		if (rig->peer->data[index] != pattern_at(rig->sink_total + (unsigned long)index))
+		expected = pattern_at(rig->sink_total + (unsigned long)index);
+		if (rig->peer->data[index] != expected)
 			rig->sink_errors++;
 	}
+
+	/* Counts the bytes that were checked and forgets them. */
 	rig->sink_total += (unsigned long)rig->peer->data_size;
 	rig->peer->data_size = 0;
 }
@@ -444,6 +620,8 @@ rig_pump(
 			moved = 1;
 		}
 	}
+
+	/* Starts the carry buffer over when everything in it was sent. */
 	if (rig->carry_sent == rig->carry_used) {
 		rig->carry_sent = 0;
 		rig->carry_used = 0;
@@ -479,6 +657,8 @@ rig_pump(
 			moved = 1;
 		}
 	}
+
+	/* Reports whether anything moved. */
 	return moved;
 }
 
@@ -490,6 +670,7 @@ rig_settle(
 {
 	unsigned round;
 
+	/* Pumps with a short sleep in between. */
 	for (round = 0; round < rounds; round++) {
 		rig_pump(rig);
 		pause_milliseconds(1);
@@ -503,9 +684,12 @@ rig_settle_sink(
 	unsigned long total)
 {
 	unsigned tries;
+	int moved;
 
+	/* Pumps until the sink has the bytes. */
 	for (tries = 0; tries < TRIES && rig->sink_total < total; tries++) {
-		if (!rig_pump(rig))
+		moved = rig_pump(rig);
+		if (!moved)
 			pause_milliseconds(1);
 	}
 }
@@ -517,13 +701,21 @@ rig_settle_alerts(
 	unsigned count)
 {
 	unsigned tries;
+	int moved;
 
+	/* Pumps until the peer has seen the alerts. */
 	for (tries = 0; tries < TRIES && rig->peer->alert_count < count; tries++) {
-		if (!rig_pump(rig))
+		moved = rig_pump(rig);
+		if (!moved)
 			pause_milliseconds(1);
 	}
+
+	/* A few more rounds to see any extra alert. */
 	rig_settle(rig, 3);
 }
+
+/* Makes and remakes a rig's SSL (defined after rig_open). */
+static void rig_make_ssl(struct rig *rig);
 
 /* Makes a rig for a peer script; flags say whether the context trusts the root and the SSL has its names. */
 static struct rig *
@@ -535,7 +727,6 @@ rig_open(
 	struct rig *rig;
 	const unsigned char *cursor;
 	X509 *root;
-	X509_VERIFY_PARAM *param;
 	int result;
 
 	/* The rig, its sockets and its peer. */
@@ -544,6 +735,8 @@ rig_open(
 		CHECK(0);
 		return NULL;
 	}
+
+	/* Makes the socket pair and puts both ends in non-blocking mode. */
 	CHECK(make_pair(&rig->client, &rig->server));
 	set_nonblocking(rig->client, 1);
 	set_nonblocking(rig->server, 1);
@@ -560,10 +753,25 @@ rig_open(
 		CHECK(result == 1);
 		X509_free(root);
 	}
+
+	/* Asks the SSL to verify the peer when the rig says so. */
 	if ((flags & RIG_PEER) != 0U)
 		SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, NULL);
 
-	/* The SSL on the socket, verifying at a fixed time inside the certificates' validity. */
+	/* The SSL on the socket. */
+	rig->flags = flags;
+	rig_make_ssl(rig);
+	return rig;
+}
+
+/* Makes the rig's SSL from its context: on the socket, verifying at a fixed time inside the certificates' validity, with the names when asked. */
+static void
+rig_make_ssl(
+	struct rig *rig)
+{
+	X509_VERIFY_PARAM *param;
+
+	/* The SSL on the socket, at the fixed time. */
 	rig->ssl = SSL_new(rig->ctx);
 	CHECK(rig->ssl != NULL);
 	CHECK(SSL_set_fd(rig->ssl, (int)rig->client) == 1);
@@ -573,11 +781,20 @@ rig_open(
 	param->params.time = TLSPEER_PKI_TIME;
 
 	/* The SNI name and the host name the certificate must match. */
-	if ((flags & RIG_NAMES) != 0U) {
+	if ((rig->flags & RIG_NAMES) != 0U) {
 		CHECK(SSL_set_tlsext_host_name(rig->ssl, HOST) == 1);
 		CHECK(SSL_set1_host(rig->ssl, HOST) == 1);
 	}
-	return rig;
+}
+
+/* Makes the rig's SSL again after its context changed (SSL_new copies the context's settings, as OpenSSL's does). */
+static void
+rig_renew(
+	struct rig *rig)
+{
+	/* The old SSL never started; the new one copies the context as it is now. */
+	SSL_free(rig->ssl);
+	rig_make_ssl(rig);
 }
 
 /* Frees a rig and everything in it. */
@@ -604,6 +821,7 @@ rig_connect(
 	unsigned tries;
 	int result;
 	int error;
+	int moved;
 
 	/* Each wait is answered by moving bytes. */
 	for (tries = 0; tries < TRIES; tries++) {
@@ -613,9 +831,12 @@ rig_connect(
 		error = SSL_get_error(rig->ssl, result);
 		if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE)
 			return result;
-		if (!rig_pump(rig))
+		moved = rig_pump(rig);
+		if (!moved)
 			pause_milliseconds(1);
 	}
+
+	/* The connection did not finish within the tries. */
 	CHECK(0);
 	return -2;
 }
@@ -643,31 +864,45 @@ rig_read_exact(
 	int error;
 	int index;
 	int room;
+	int moved;
+	uint8_t expected;
 
 	/* Reads record after record until the count is there. */
 	got = 0;
 	for (tries = 0; tries < TRIES && got < size; tries++) {
-		room = (int)(size - got < (unsigned long)BIG ? size - got : (unsigned long)BIG);
+		room = (int)BIG;
+		if (size - got < (unsigned long)BIG)
+			room = (int)(size - got);
 		result = SSL_read(rig->ssl, big_buffer, room);
 		if (result > 0) {
 			CHECK((unsigned long)result <= size - got);
 			for (index = 0; index < result; index++) {
-				if (big_buffer[index] != pattern_at(rig->read_total + got + (unsigned long)index)) {
+				expected = pattern_at(rig->read_total + got + (unsigned long)index);
+				if (big_buffer[index] != expected) {
 					CHECK(0);
 					return 0;
 				}
 			}
+
+			/* Counts the bytes read. */
 			got += (unsigned long)result;
 			continue;
 		}
+
+		/* Takes the reason the read gave nothing. */
 		error = SSL_get_error(rig->ssl, result);
 		if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) {
 			CHECK(0);
 			return 0;
 		}
-		if (!rig_pump(rig))
+
+		/* Moves bytes while the read waits. */
+		moved = rig_pump(rig);
+		if (!moved)
 			pause_milliseconds(1);
 	}
+
+	/* Reports whether every byte was read. */
 	rig->read_total += got;
 	return got == size;
 }
@@ -704,6 +939,7 @@ rig_send(
 	unsigned tries;
 	int result;
 	int error;
+	int moved;
 
 	/* The bytes, from where the client's stream stands. */
 	for (index = 0; index < size; index++)
@@ -718,9 +954,12 @@ rig_send(
 		error = SSL_get_error(rig->ssl, result);
 		if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE)
 			return result;
-		if (!rig_pump(rig))
+		moved = rig_pump(rig);
+		if (!moved)
 			pause_milliseconds(1);
 	}
+
+	/* Counts the bytes written and lets the peer take them. */
 	rig->written_total += size;
 	rig_settle_sink(rig, rig->written_total);
 	return result;
@@ -734,10 +973,13 @@ hello_offers(
 {
 	size_t index;
 
+	/* Looks for the version among those the hello offered. */
 	for (index = 0; index < peer->hello.version_count; index++) {
 		if (peer->hello.versions[index] == version)
 			return 1;
 	}
+
+	/* The version was not offered. */
 	return 0;
 }
 
@@ -750,6 +992,7 @@ hello_suites(
 {
 	size_t index;
 
+	/* Counts the suites by version. */
 	*tls13 = 0;
 	*tls12 = 0;
 	for (index = 0; index < peer->hello.suite_count; index++) {
@@ -800,6 +1043,8 @@ test_tables(void)
 		CHECK(strstr(text, sslc_reason_texts[index]) != NULL);
 		CHECK(strstr(text, "reason(") == NULL);
 	}
+
+	/* Frees the context. */
 	SSL_CTX_free(ctx);
 }
 
@@ -933,6 +1178,7 @@ test_ctx_files(void)
 	struct tlspeer_config config;
 	struct rig *rig;
 
+	/* A client context and its SSL. */
 	ctx = SSL_CTX_new(TLS_client_method());
 	CHECK(ctx != NULL);
 	ERR_clear_error();
@@ -1027,6 +1273,7 @@ test_ssl(void)
 	char name[400];
 	size_t index;
 
+	/* A client context. */
 	ctx = SSL_CTX_new(TLS_client_method());
 	CHECK(ctx != NULL);
 	ssl = SSL_new(ctx);
@@ -1197,10 +1444,10 @@ test_ssl(void)
 	CHECK(SSL_get0_param(NULL) == NULL);
 	expect_error(L_SSL, (int)CRYC_R_PASSED_NULL_PARAMETER);
 
-	/* The SSL's own version bounds override the context's and are read back; the context keeps its own. */
+	/* The SSL's own version bounds (copied by SSL_new) are read back; a later change to the context does not reach them, and the context keeps its own. */
 	CHECK(SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == 0L);
 	CHECK(SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION) == 1L);
-	CHECK(SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == TLS1_2_VERSION);
+	CHECK(SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == 0L);
 	CHECK(SSL_ctrl(ssl, SSL_CTRL_SET_MIN_PROTO_VERSION, TLS1_3_VERSION, NULL) == 1L);
 	CHECK(SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == TLS1_3_VERSION);
 	CHECK(SSL_ctrl(ssl, SSL_CTRL_SET_MAX_PROTO_VERSION, TLS1_3_VERSION, NULL) == 1L);
@@ -1398,6 +1645,7 @@ test_verify(void)
 	peer_config(&config, SSLC_TLS13, &pki256);
 	rig = rig_open(&config, &pki256, RIG_NAMES);
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER | 2 | 4, NULL);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	expect_error(L_SSL, R_CERTIFICATE_VERIFY_FAILED);
@@ -1406,6 +1654,7 @@ test_verify(void)
 	rig = rig_open(&config, &pki256, RIG_NAMES);
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, NULL);
 	SSL_CTX_set_verify(rig->ctx, 8 | 2, NULL);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(SSL_get_verify_result(rig->ssl) == V_UNABLE_TO_GET_ISSUER_LOCALLY);
 	rig_close(rig);
@@ -1425,6 +1674,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 1;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(callback_calls == 1U);
 	CHECK(callback_preverify == 0);
@@ -1441,6 +1691,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 0;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_SSL);
@@ -1458,6 +1709,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 1;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(callback_calls == 1U);
 	CHECK(callback_preverify == 1);
@@ -1468,6 +1720,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 0;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	expect_error(L_SSL, R_CERTIFICATE_VERIFY_FAILED);
@@ -1484,6 +1737,7 @@ test_callback(void)
 	callback_answer = 1;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, verify_callback);
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_PEER, NULL);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	expect_error(L_SSL, R_CERTIFICATE_VERIFY_FAILED);
@@ -1496,6 +1750,7 @@ test_callback(void)
 	callback_calls = 0;
 	callback_answer = 0;
 	SSL_CTX_set_verify(rig->ctx, SSL_VERIFY_NONE, verify_callback);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(callback_calls == 0U);
 	rig_close(rig);
@@ -1525,6 +1780,7 @@ test_versions(void)
 	/* A minimum of TLS 1.3 offers only TLS 1.3 and its suites. */
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(rig->peer->hello.version_count == 1U);
 	CHECK(hello_offers(rig->peer, 0x0304));
@@ -1536,6 +1792,7 @@ test_versions(void)
 	/* SSL_OP_NO_TLSv1_2 does the same. */
 	rig = rig_open(&config, &pki256, RIG_STD);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_2);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(rig->peer->hello.version_count == 1U);
 	CHECK(hello_offers(rig->peer, 0x0304));
@@ -1557,6 +1814,7 @@ test_versions(void)
 	peer_config(&config, SSLC_TLS12, &pki256);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_max_proto_version(rig->ctx, TLS1_2_VERSION) == 1L);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(!hello_offers(rig->peer, 0x0304));
 	hello_suites(rig->peer, &tls13, &tls12);
@@ -1567,6 +1825,7 @@ test_versions(void)
 	/* SSL_OP_NO_TLSv1_3 does the same. */
 	rig = rig_open(&config, &pki256, RIG_STD);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_3);
+	rig_renew(rig);
 	rig_up(rig);
 	CHECK(!hello_offers(rig->peer, 0x0304));
 	rig_close(rig);
@@ -1575,6 +1834,7 @@ test_versions(void)
 	peer_config(&config, SSLC_TLS12, &pki256);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
+	rig_renew(rig);
 	result = rig_connect(rig);
 	CHECK(result == -1);
 	CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_SSL);
@@ -1587,6 +1847,7 @@ test_versions(void)
 	peer_config(&config, SSLC_TLS13, &pki256);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_2 | SSL_OP_NO_TLSv1_3);
+	rig_renew(rig);
 	CHECK(SSL_connect(rig->ssl) == -1);
 	CHECK(SSL_get_error(rig->ssl, -1) == SSL_ERROR_SSL);
 	expect_error(L_SSL, R_NO_PROTOCOLS_AVAILABLE);
@@ -1597,25 +1858,36 @@ test_versions(void)
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
 	CHECK(SSL_CTX_set_max_proto_version(rig->ctx, TLS1_2_VERSION) == 1L);
+	rig_renew(rig);
 	CHECK(SSL_connect(rig->ssl) == -1);
 	expect_error(L_SSL, R_NO_PROTOCOLS_AVAILABLE);
 	rig_close(rig);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_3);
+	rig_renew(rig);
 	CHECK(SSL_connect(rig->ssl) == -1);
 	expect_error(L_SSL, R_NO_PROTOCOLS_AVAILABLE);
 	rig_close(rig);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_max_proto_version(rig->ctx, TLS1_2_VERSION) == 1L);
 	SSL_CTX_set_options(rig->ctx, SSL_OP_NO_TLSv1_2);
+	rig_renew(rig);
 	CHECK(SSL_connect(rig->ssl) == -1);
 	expect_error(L_SSL, R_NO_PROTOCOLS_AVAILABLE);
 	rig_close(rig);
 
-	/* A setting made on the context after SSL_new and before the first call is seen (the settings are read at the start). */
+	/* A setting made on the context after SSL_new does not reach that SSL (SSL_new copied the settings); an SSL made after it has it. */
 	rig = rig_open(&config, &pki256, RIG_STD);
 	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
+	CHECK(SSL_ctrl(rig->ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == 0L);
+	rig_up(rig);
+	CHECK(rig->peer->hello.version_count == 2U);
+	rig_close(rig);
+	rig = rig_open(&config, &pki256, RIG_STD);
+	CHECK(SSL_CTX_set_min_proto_version(rig->ctx, TLS1_3_VERSION) == 1L);
+	rig_renew(rig);
+	CHECK(SSL_ctrl(rig->ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) == (long)TLS1_3_VERSION);
 	rig_up(rig);
 	CHECK(rig->peer->hello.version_count == 1U);
 	rig_close(rig);
@@ -1640,11 +1912,16 @@ test_write(void)
 	unsigned long before;
 	unsigned long expected;
 	size_t index;
+	uint16_t peer_version;
 	int version;
 	int result;
 
+	/* Both versions. */
 	for (version = 0; version < 2; version++) {
-		peer_config(&config, version == 0 ? SSLC_TLS13 : SSLC_TLS12, &pki256);
+		peer_version = SSLC_TLS12;
+		if (version == 0)
+			peer_version = SSLC_TLS13;
+		peer_config(&config, peer_version, &pki256);
 		rig = rig_open(&config, &pki256, RIG_STD);
 		rig_up(rig);
 
@@ -1658,6 +1935,8 @@ test_write(void)
 			CHECK(rig->peer->records_in - before == expected);
 			CHECK(rig->sink_total == rig->written_total);
 		}
+
+		/* Checks that nothing went wrong in the sink or at the peer. */
 		CHECK(rig->sink_errors == 0UL);
 		CHECK(rig->peer_error == 0);
 		expect_no_error();
@@ -1677,7 +1956,9 @@ test_write_wait(void)
 	int result;
 	int blocked;
 	int error;
+	int moved;
 
+	/* A TLS 1.3 connection up. */
 	peer_config(&config, SSLC_TLS13, &pki256);
 	rig = rig_open(&config, &pki256, RIG_STD);
 	rig_up(rig);
@@ -1722,9 +2003,12 @@ test_write_wait(void)
 	for (tries = 0; tries < TRIES; tries++) {
 		if (rig->sink_total >= (unsigned long)BIG)
 			break;
-		if (!rig_pump(rig))
+		moved = rig_pump(rig);
+		if (!moved)
 			pause_milliseconds(1);
 	}
+
+	/* Repeats the full write when the first was blocked. */
 	if (blocked) {
 		/* The retry above ended at taken bytes only if it completed; the full write is repeated to its end. */
 		for (tries = 0; tries < TRIES; tries++) {
@@ -1733,11 +2017,16 @@ test_write_wait(void)
 				break;
 			error = SSL_get_error(rig->ssl, result);
 			CHECK(error == SSL_ERROR_WANT_WRITE || error == SSL_ERROR_WANT_READ);
-			if (!rig_pump(rig))
+			moved = rig_pump(rig);
+			if (!moved)
 				pause_milliseconds(1);
 		}
+
+		/* Checks that the whole write completed. */
 		CHECK(result == (int)BIG);
 	}
+
+	/* Waits until the sink has all the bytes. */
 	rig_settle_sink(rig, (unsigned long)BIG);
 	CHECK(rig->sink_total == (unsigned long)BIG);
 	CHECK(rig->sink_errors == 0UL);
@@ -1752,11 +2041,17 @@ test_read(void)
 	struct tlspeer_config config;
 	struct rig *rig;
 	unsigned long total;
+	uint16_t peer_version;
 	int version;
 	int result;
+	int error;
 
+	/* Both versions. */
 	for (version = 0; version < 2; version++) {
-		peer_config(&config, version == 0 ? SSLC_TLS13 : SSLC_TLS12, &pki256);
+		peer_version = SSLC_TLS12;
+		if (version == 0)
+			peer_version = SSLC_TLS13;
+		peer_config(&config, peer_version, &pki256);
 		rig = rig_open(&config, &pki256, RIG_STD);
 		rig_up(rig);
 
@@ -1838,7 +2133,10 @@ test_read(void)
 	CHECK(tlspeer_send_data(rig->peer, big_buffer, 10U) == 0);
 	do {
 		result = SSL_read(rig->ssl, big_buffer, 100);
-		if (result < 0 && SSL_get_error(rig->ssl, result) == SSL_ERROR_WANT_READ)
+		error = SSL_ERROR_NONE;
+		if (result < 0)
+			error = SSL_get_error(rig->ssl, result);
+		if (result < 0 && error == SSL_ERROR_WANT_READ)
 			rig_pump(rig);
 		else
 			break;
@@ -1865,10 +2163,16 @@ test_implicit_handshake(void)
 	int error;
 	int version;
 	int index;
+	int moved;
+	uint16_t peer_version;
 
+	/* Both versions. */
 	for (version = 0; version < 2; version++) {
 		/* SSL_write first: the handshake runs inside it, and the write completes. */
-		peer_config(&config, version == 0 ? SSLC_TLS13 : SSLC_TLS12, &pki256);
+		peer_version = SSLC_TLS12;
+		if (version == 0)
+			peer_version = SSLC_TLS13;
+		peer_config(&config, peer_version, &pki256);
 		rig = rig_open(&config, &pki256, RIG_STD);
 		ERR_clear_error();
 		for (index = 0; index < 100; index++)
@@ -1879,7 +2183,8 @@ test_implicit_handshake(void)
 		CHECK(rig->ssl->started == 1);
 		result = -1;
 		for (tries = 0; tries < TRIES && result != 100; tries++) {
-			if (!rig_pump(rig))
+			moved = rig_pump(rig);
+			if (!moved)
 				pause_milliseconds(1);
 			result = SSL_write(rig->ssl, big_buffer, 100);
 			if (result != 100) {
@@ -1887,6 +2192,8 @@ test_implicit_handshake(void)
 				CHECK(error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE);
 			}
 		}
+
+		/* Checks the write that ran the handshake. */
 		CHECK(result == 100);
 		rig->written_total = 100UL;
 		rig_settle_sink(rig, 100UL);
@@ -1905,6 +2212,8 @@ test_implicit_handshake(void)
 			rig_pump(rig);
 			pause_milliseconds(1);
 		}
+
+		/* Checks the connection is complete. */
 		CHECK(rig->peer->state == TLSPEER_CONNECTED);
 		CHECK(SSL_connect(rig->ssl) == 1);
 		CHECK(SSL_get_verify_result(rig->ssl) == V_OK);
@@ -1925,6 +2234,7 @@ rig_inject(
 	int os_error;
 	int error;
 
+	/* Writes the bytes straight into the socket the client reads. */
 	error = cryc_os_socket_write(rig->server, bytes, size, &put, &os_error);
 	CHECK(error == 0);
 	CHECK(put == size);
@@ -1949,6 +2259,8 @@ rig_discard(
 			rig->bytes_in += (unsigned long)done;
 			continue;
 		}
+
+		/* Stops waiting when something arrived. */
 		if (rig->bytes_in > 0UL)
 			break;
 		pause_milliseconds(2);
@@ -1966,9 +2278,16 @@ test_close(void)
 	unsigned tries;
 	int result;
 	int version;
+	int error;
+	unsigned long code;
+	uint16_t peer_version;
 
+	/* Both versions. */
 	for (version = 0; version < 2; version++) {
-		peer_config(&config, version == 0 ? SSLC_TLS13 : SSLC_TLS12, &pki256);
+		peer_version = SSLC_TLS12;
+		if (version == 0)
+			peer_version = SSLC_TLS13;
+		peer_config(&config, peer_version, &pki256);
 
 		/* The peer sends data and then its close_notify: the data first, then 0 and ZERO_RETURN, repeatedly. */
 		rig = rig_open(&config, &pki256, RIG_STD);
@@ -1983,6 +2302,8 @@ test_close(void)
 				rig_pump(rig);
 			}
 		}
+
+		/* Checks the shutdown result. */
 		CHECK(result == 0);
 		CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_ZERO_RETURN);
 		CHECK(SSL_read(rig->ssl, big_buffer, 10) == 0);
@@ -2030,6 +2351,8 @@ test_close(void)
 			if (result == -1)
 				rig_pump(rig);
 		}
+
+		/* Checks the shutdown result. */
 		CHECK(result == 0);
 		CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_ZERO_RETURN);
 		CHECK(SSL_shutdown(rig->ssl) == 1);
@@ -2058,6 +2381,7 @@ test_close(void)
 		/* With SSL_OP_IGNORE_UNEXPECTED_EOF the same end is a clean close: 0 and ZERO_RETURN, nothing queued. */
 		rig = rig_open(&config, &pki256, RIG_STD);
 		SSL_CTX_set_options(rig->ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+		rig_renew(rig);
 		rig_up(rig);
 		CHECK(tlspeer_send_data(rig->peer, big_buffer, 10U) == 0);
 		rig->peer_total += 10UL;
@@ -2079,11 +2403,16 @@ test_close(void)
 		result = -1;
 		for (tries = 0; tries < TRIES && result == -1; tries++) {
 			result = SSL_read(rig->ssl, big_buffer, 10);
-			if (result == -1 && SSL_get_error(rig->ssl, result) == SSL_ERROR_WANT_READ)
+			error = SSL_ERROR_NONE;
+			if (result == -1)
+				error = SSL_get_error(rig->ssl, result);
+			if (result == -1 && error == SSL_ERROR_WANT_READ)
 				rig_pump(rig);
 			else
 				break;
 		}
+
+		/* Checks that the read failed with the alert. */
 		CHECK(result == -1);
 		CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_SSL);
 		expect_error(L_SSL, 1000 + (int)A_HANDSHAKE_FAILURE);
@@ -2114,13 +2443,13 @@ test_close(void)
 		CHECK(errno == EBADF);
 #endif
 		{
-			unsigned long code;
-
 			code = ERR_get_error();
 			CHECK(ERR_GET_LIB(code) == L_SYS);
 			CHECK(ERR_GET_REASON(code) == errno);
 			CHECK(ERR_get_error() == 0UL);
 		}
+
+		/* Checks the error codes of the failed connection. */
 		CHECK(SSL_get_error(rig->ssl, 3) == SSL_ERROR_NONE);
 		CHECK(SSL_read(rig->ssl, big_buffer, 10) == -1);
 		CHECK(SSL_get_error(rig->ssl, -1) == SSL_ERROR_SSL);
@@ -2229,6 +2558,10 @@ typedef pthread_t test_thread;
 #endif
 
 /* Makes and frees SSL objects on a shared context while setting its options and reading its bounds. */
+static THREAD_RETURN THREAD_CALL thread_main(void *argument);
+
+
+/* Makes and frees SSL objects on a shared context while setting its options and reading its bounds. */
 static THREAD_RETURN THREAD_CALL
 thread_main(
 	void *argument)
@@ -2236,6 +2569,8 @@ thread_main(
 	struct thread_work *work;
 	SSL *ssl;
 	unsigned round;
+	long bound;
+	int status;
 
 	/* The same context in every thread; each thread makes its own SSL objects. */
 	work = (struct thread_work *)argument;
@@ -2245,13 +2580,18 @@ thread_main(
 			work->failures++;
 			continue;
 		}
-		if (SSL_set1_host(ssl, "thread.example") != 1)
+
+		/* Sets the host name and reads the bounds. */
+		status = SSL_set1_host(ssl, "thread.example");
+		if (status != 1)
 			work->failures++;
-		if (SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL) != 0L)
+		bound = SSL_ctrl(ssl, SSL_CTRL_GET_MIN_PROTO_VERSION, 0, NULL);
+		if (bound != 0L)
 			work->failures++;
 		SSL_CTX_set_options(work->ctx, (uint64_t)1 << work->bit);
 		SSL_CTX_set_verify(work->ctx, SSL_VERIFY_PEER, NULL);
-		if (SSL_CTX_ctrl(work->ctx, SSL_CTRL_GET_MAX_PROTO_VERSION, 0, NULL) != 0L)
+		bound = SSL_CTX_ctrl(work->ctx, SSL_CTRL_GET_MAX_PROTO_VERSION, 0, NULL);
+		if (bound != 0L)
 			work->failures++;
 		SSL_free(ssl);
 	}
@@ -2272,6 +2612,7 @@ test_threads(void)
 	unsigned index;
 	int started[4];
 
+	/* A client context shared by the threads. */
 	ctx = SSL_CTX_new(TLS_client_method());
 	CHECK(ctx != NULL);
 	for (index = 0; index < 4U; index++) {
@@ -2286,6 +2627,8 @@ test_threads(void)
 #endif
 		CHECK(started[index]);
 	}
+
+	/* Joins every thread that started. */
 	for (index = 0; index < 4U; index++) {
 		if (!started[index])
 			continue;
@@ -2297,6 +2640,8 @@ test_threads(void)
 #endif
 		CHECK(work[index].failures == 0U);
 	}
+
+	/* Checks that the context is held by this program alone, and that the options are intact. */
 	CHECK(ctx->references == 1L);
 	CHECK((SSL_CTX_set_options(ctx, 0) & (((uint64_t)15) << 40)) == (((uint64_t)15) << 40));
 	SSL_CTX_free(ctx);
@@ -2333,13 +2678,15 @@ main(
 {
 #ifdef _WIN32
 	WSADATA wsa;
+	int started;
 #endif
 
 	/* The files go beside the program; a closed peer must not kill the test with SIGPIPE. */
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	find_test_directory(argc, argv);
 #ifdef _WIN32
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+	started = WSAStartup(MAKEWORD(2, 2), &wsa);
+	if (started != 0) {
 		printf("WSAStartup failed\n");
 		return EXIT_FAILURE;
 	}
@@ -2351,6 +2698,7 @@ main(
 	CHECK(tlspeer_pki_init(&pki256, CRYC_CURVE_P256, HOST) == 0);
 	CHECK(tlspeer_pki_init(&pki384, CRYC_CURVE_P384, HOST) == 0);
 
+	/* Runs the checks. */
 	test_tables();
 	test_ctx();
 	test_ctx_files();

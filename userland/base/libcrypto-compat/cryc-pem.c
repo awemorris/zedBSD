@@ -138,6 +138,8 @@ cryc_base64_decode(
 			if (emit > 2U)
 				out[used + 2U] = (uint8_t)accumulator;
 		}
+
+		/* Counts the bytes this group produced. */
 		used += emit;
 
 		/* Padding ends the data; an unpadded group starts the next. */
@@ -370,6 +372,8 @@ pem_find_begin(
 				break;
 			scan++;
 		}
+
+		/* Skips a line that is not a complete closing line. */
 		if (scan >= size || text[scan] == '\r' || text[scan] == '\n')
 			continue;
 

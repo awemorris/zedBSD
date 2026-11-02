@@ -211,6 +211,8 @@ cryc_store_add_distrusted(
 	struct cryc_x509 parsed;
 	size_t index;
 	size_t capacity;
+	int difference;
+	int parse_error;
 	int error;
 
 	/* Refuses a missing store and an empty certificate. */
@@ -218,7 +220,8 @@ cryc_store_add_distrusted(
 		return EINVAL;
 
 	/* The mark: the SHA-256 of the tbsCertificate, or of the whole DER when it does not parse. */
-	if (cryc_x509_parse(&parsed, der, size) == 0)
+	parse_error = cryc_x509_parse(&parsed, der, size);
+	if (parse_error == 0)
 		error = cryc_hash_digest(CRYC_HASH_SHA256, parsed.tbs, parsed.tbs_size, digest);
 	else
 		error = cryc_hash_digest(CRYC_HASH_SHA256, der, size, digest);
@@ -230,7 +233,8 @@ cryc_store_add_distrusted(
 
 	/* A value already marked is not marked again, and that is not an error. */
 	for (index = 0; index < store->distrusted_count; index++) {
-		if (memcmp(store->distrusted[index], digest, CRYC_SHA256_SIZE) == 0) {
+		difference = memcmp(store->distrusted[index], digest, CRYC_SHA256_SIZE);
+		if (difference == 0) {
 			cryc_os_mutex_unlock(&store->lock);
 			return 0;
 		}
@@ -254,6 +258,8 @@ cryc_store_add_distrusted(
 			cryc_os_mutex_unlock(&store->lock);
 			return ENOMEM;
 		}
+
+		/* Publishes the larger mark table. */
 		store->distrusted = grown;
 		store->distrusted_capacity = capacity;
 	}
@@ -339,6 +345,8 @@ cryc_store_add_pem(
 				*added = total;
 			return error;
 		}
+
+		/* Counts the certificate when it was new to the store. */
 		if (was_added != 0)
 			total++;
 
@@ -452,6 +460,8 @@ cryc_chain_verify(
 		result->code = CRYC_VERIFY_MALFORMED;
 		return EINVAL;
 	}
+
+	/* Refuses a peer list that is missing though it is said to hold certificates. */
 	if (peer == NULL && peer_count != 0U) {
 		result->code = CRYC_VERIFY_MALFORMED;
 		return EINVAL;
@@ -530,15 +540,18 @@ store_find_entry(
 {
 	const struct cryc_store_entry *entry;
 	size_t index;
+	int difference;
 
 	/* Compares the digest first and the bytes of a certificate with the same digest. */
 	for (index = 0; index < store->count; index++) {
 		entry = store->entries[index];
-		if (memcmp(entry->digest, digest, CRYC_SHA256_SIZE) != 0)
+		difference = memcmp(entry->digest, digest, CRYC_SHA256_SIZE);
+		if (difference != 0)
 			continue;
 		if (entry->der_size != der_size)
 			continue;
-		if (memcmp(entry->der, der, der_size) != 0)
+		difference = memcmp(entry->der, der, der_size);
+		if (difference != 0)
 			continue;
 		return 1;
 	}
@@ -571,6 +584,8 @@ store_make_entry(
 		free(made);
 		return ENOMEM;
 	}
+
+	/* Copies the certificate bytes into the entry. */
 	memcpy(made->der, der, size);
 	made->der_size = size;
 
@@ -650,6 +665,8 @@ store_insert(
 			store_free_entry(entry);
 			return ENOMEM;
 		}
+
+		/* Publishes the larger entry table. */
 		store->entries = grown;
 		store->capacity = capacity;
 	}
@@ -801,18 +818,29 @@ chain_is_distrusted(
 	uint8_t tbs_digest[CRYC_SHA256_SIZE];
 	size_t index;
 	int have_tbs;
+	int difference;
+	int error;
 
 	/* Nothing to compare with. */
 	if (store->distrusted_count == 0U)
 		return 0;
-	have_tbs = cryc_hash_digest(CRYC_HASH_SHA256, cert->tbs, cert->tbs_size, tbs_digest) == 0;
+
+	/* Digests the tbsCertificate; without it only the whole-DER digest is looked up. */
+	error = cryc_hash_digest(CRYC_HASH_SHA256, cert->tbs, cert->tbs_size, tbs_digest);
+	have_tbs = 0;
+	if (error == 0)
+		have_tbs = 1;
 
 	/* Looks both values up among the marks. */
 	for (index = 0; index < store->distrusted_count; index++) {
-		if (memcmp(store->distrusted[index], digest, CRYC_SHA256_SIZE) == 0)
+		difference = memcmp(store->distrusted[index], digest, CRYC_SHA256_SIZE);
+		if (difference == 0)
 			return 1;
-		if (have_tbs && memcmp(store->distrusted[index], tbs_digest, CRYC_SHA256_SIZE) == 0)
-			return 1;
+		if (have_tbs) {
+			difference = memcmp(store->distrusted[index], tbs_digest, CRYC_SHA256_SIZE);
+			if (difference == 0)
+				return 1;
+		}
 	}
 
 	/* Not marked. */
@@ -827,6 +855,8 @@ chain_same_der(
 	const struct cryc_x509 *left,
 	const struct cryc_x509 *right)
 {
+	int difference;
+
 	/* The same object is the same certificate. */
 	if (left == right)
 		return 1;
@@ -836,7 +866,8 @@ chain_same_der(
 		return 0;
 
 	/* Equal lengths are compared byte for byte. */
-	if (memcmp(left->der, right->der, left->der_size) != 0)
+	difference = memcmp(left->der, right->der, left->der_size);
+	if (difference != 0)
 		return 0;
 
 	/* The same bytes. */
@@ -878,6 +909,7 @@ chain_issued_by(
 	const struct cryc_x509 *issuer)
 {
 	int equal;
+	int difference;
 
 	/* The issuer's subject must be the certificate's issuer name. */
 	equal = cryc_name_equal(cert->issuer, cert->issuer_size, issuer->subject, issuer->subject_size);
@@ -893,7 +925,8 @@ chain_issued_by(
 	/* When both carry one they must agree. */
 	if (cert->aki_size != issuer->ski_size)
 		return 0;
-	if (memcmp(cert->aki, issuer->ski, cert->aki_size) != 0)
+	difference = memcmp(cert->aki, issuer->ski, cert->aki_size);
+	if (difference != 0)
 		return 0;
 
 	/* The names and the key identifiers agree. */
@@ -1151,6 +1184,8 @@ chain_check_intermediate(
 			if (self_issued == 0)
 				below_count++;
 		}
+
+		/* Refuses a path that is longer than the issuer allows below it. */
 		if ((size_t)cert->path_len < below_count)
 			return CRYC_VERIFY_PATH_LENGTH_EXCEEDED;
 	}
@@ -1234,9 +1269,17 @@ chain_validate_certificate(
 	if (code != CRYC_VERIFY_OK)
 		return code;
 
-	/* The anchor of a longer path is taken as trusted as it is: nothing else of it is checked. */
-	if (index == anchor && index != 0U)
+	/*
+	 * The anchor of a longer path is taken as trusted as it is, except that
+	 * a constraint it marks critical and this library cannot honour is not
+	 * ignored: such an anchor is refused (no basicConstraints is asked of
+	 * it, as old version 1 roots have none).
+	 */
+	if (index == anchor && index != 0U) {
+		if ((cert->flags & CRYC_X509_UNKNOWN_CRITICAL) != 0U)
+			return CRYC_VERIFY_UNHANDLED_CRITICAL_EXTENSION;
 		return CRYC_VERIFY_OK;
+	}
 
 	/* The name constraints of the certificates above apply to this one. */
 	code = chain_check_names(search, index);
@@ -1517,6 +1560,7 @@ chain_search_prepare(
 	size_t other;
 	size_t entry_index;
 	int same;
+	int difference;
 	int error;
 
 	/* Takes the SHA-256 of each peer certificate. */
@@ -1529,15 +1573,19 @@ chain_search_prepare(
 	/* Marks a certificate that repeats an earlier one, or is the twin of a store entry, so the walk skips it. */
 	for (index = 1; index < search->peer_count; index++) {
 		for (other = 0; other < index; other++) {
-			if (memcmp(search->peer_digest[index], search->peer_digest[other], CRYC_SHA256_SIZE) != 0)
+			difference = memcmp(search->peer_digest[index], search->peer_digest[other], CRYC_SHA256_SIZE);
+			if (difference != 0)
 				continue;
 			same = chain_same_der(&search->peer[index], &search->peer[other]);
 			if (same != 0)
 				search->peer_skip[index] = 1;
 		}
+
+		/* Marks a peer that is a twin of a store entry. */
 		for (entry_index = 0; entry_index < search->store->count; entry_index++) {
 			entry = search->store->entries[entry_index];
-			if (memcmp(search->peer_digest[index], entry->digest, CRYC_SHA256_SIZE) != 0)
+			difference = memcmp(search->peer_digest[index], entry->digest, CRYC_SHA256_SIZE);
+			if (difference != 0)
 				continue;
 			same = chain_same_der(&search->peer[index], &entry->cert);
 			if (same != 0)
@@ -1548,7 +1596,8 @@ chain_search_prepare(
 	/* A leaf that is a store entry byte for byte is its own trust anchor: that one-certificate path is handled first. */
 	for (entry_index = 0; entry_index < search->store->count; entry_index++) {
 		entry = search->store->entries[entry_index];
-		if (memcmp(search->peer_digest[0], entry->digest, CRYC_SHA256_SIZE) != 0)
+		difference = memcmp(search->peer_digest[0], entry->digest, CRYC_SHA256_SIZE);
+		if (difference != 0)
 			continue;
 		same = chain_same_der(&search->peer[0], &entry->cert);
 		if (same == 0)

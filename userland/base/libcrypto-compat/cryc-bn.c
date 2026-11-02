@@ -86,6 +86,8 @@ cryc_bn_mont_init(
 		top_bits++;
 		top_byte >>= 1;
 	}
+
+	/* Totals the bits of the modulus. */
 	bits = (significant - 1U) * 8U + (size_t)top_bits;
 
 	/* Refuses a modulus wider than the largest allowed. */
@@ -101,6 +103,8 @@ cryc_bn_mont_init(
 		cryc_wipe(mont, sizeof(*mont));
 		return EINVAL;
 	}
+
+	/* Records the size of the modulus. */
 	mont->limbs = limbs;
 	mont->bits = bits;
 
@@ -340,7 +344,8 @@ cryc_bn_mod_sub(
 /*
  * out = a mod m for a less than 2m (one conditional subtraction, by mask):
  * reduces a hash taken as an integer of the order's bit length (FIPS 186-5
- * 6.4.2 step 4's e) into the range.
+ * 6.4.2 step 3's e, derived from the leftmost bits of the hash) into the
+ * range.
  */
 void
 cryc_bn_reduce_once(
@@ -406,6 +411,8 @@ cryc_bn_mont_mul(
 			total[column] = (uint32_t)accumulator;
 			carry = (uint32_t)(accumulator >> 32);
 		}
+
+		/* Takes the carry into the top two words of the total. */
 		accumulator = (uint64_t)total[limbs] + carry;
 		total[limbs] = (uint32_t)accumulator;
 		total[limbs + 1U] = (uint32_t)(accumulator >> 32);
@@ -421,6 +428,8 @@ cryc_bn_mont_mul(
 			total[column - 1U] = (uint32_t)accumulator;
 			carry = (uint32_t)(accumulator >> 32);
 		}
+
+		/* Takes the last carry into the top words of the total. */
 		accumulator = (uint64_t)total[limbs] + carry;
 		total[limbs - 1U] = (uint32_t)accumulator;
 		carry = (uint32_t)(accumulator >> 32);

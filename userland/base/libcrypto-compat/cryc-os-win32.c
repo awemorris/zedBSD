@@ -142,6 +142,8 @@ cryc_os_random(
 			cryc_wipe(out, size);
 			return EIO;
 		}
+
+		/* Counts the chunk as filled. */
 		filled += want;
 	}
 
@@ -341,6 +343,7 @@ cryc_os_read_file(
 	size_t limit;
 	size_t total;
 	size_t got;
+	int failed;
 	int error;
 
 	/* Refuses missing outputs; with them there is nothing to clear. */
@@ -386,6 +389,8 @@ cryc_os_read_file(
 		(void)fclose(file);
 		return ENOMEM;
 	}
+
+	/* Starts with an empty file. */
 	total = 0;
 	error = 0;
 
@@ -408,6 +413,8 @@ cryc_os_read_file(
 				error = ENOMEM;
 				break;
 			}
+
+			/* Takes the grown buffer. */
 			buffer = grown;
 		}
 
@@ -415,14 +422,19 @@ cryc_os_read_file(
 		got = fread(buffer + total, 1, capacity - 1U - total, file);
 		if (got == 0) {
 			/* A failed read leaves the file unusable. */
-			if (ferror(file) != 0)
+			failed = ferror(file);
+			if (failed != 0)
 				error = EIO;
 
 			/* The end of the file. */
 			break;
 		}
+
+		/* Counts the bytes read. */
 		total += got;
 	}
+
+	/* Closes the file. */
 	(void)fclose(file);
 
 	/* A file that reached the limit's extra byte is larger than max. */
@@ -641,6 +653,8 @@ os_key_make(
 		/* The once object is complete either way; os_key_ready says whether it worked. */
 		return TRUE;
 	}
+
+	/* Records the slot. */
 	os_key_index = index;
 
 	/* Publishes the slot to the readers that test os_key_ready first. */
@@ -837,6 +851,8 @@ os_executable_path(
 			free(path);
 			return ENOMEM;
 		}
+
+		/* Takes the grown buffer. */
 		path = grown;
 	}
 
@@ -885,6 +901,8 @@ os_hand_beside_file(
 		free(path);
 		return 0;
 	}
+
+	/* Drops the backslash itself. */
 	directory--;
 
 	/* Builds <directory>\cert.pem as UTF-16, the name widened one character at a time. */
@@ -895,6 +913,8 @@ os_hand_beside_file(
 		free(path);
 		return ENOMEM;
 	}
+
+	/* Copies the directory and appends the file name. */
 	memcpy(full, path, directory * sizeof(WCHAR));
 	free(path);
 	full[directory] = L'\\';
@@ -908,6 +928,8 @@ os_hand_beside_file(
 		free(full);
 		return 0;
 	}
+
+	/* Allocates the UTF-8 copy. */
 	utf8 = (char *)malloc((size_t)count);
 	if (utf8 == NULL) {
 		free(full);
@@ -980,6 +1002,8 @@ os_hand_store(
 				(void)CertCloseStore(store, 0);
 				return error;
 			}
+
+			/* Skips a certificate the property limits. */
 			if (allowed == 0)
 				continue;
 		}
@@ -1012,6 +1036,8 @@ os_allows_server_auth(
 	CERT_ENHKEY_USAGE *usage;
 	DWORD size;
 	DWORD index;
+	DWORD last_error;
+	int difference;
 	BOOL found;
 
 	/* A certificate is refused until its property says otherwise. */
@@ -1022,7 +1048,8 @@ os_allows_server_auth(
 	found = CertGetEnhancedKeyUsage(certificate, CERT_FIND_PROP_ONLY_ENHKEY_USAGE_FLAG, NULL, &size);
 	if (!found) {
 		/* No property: the certificate's own extension is the CA's business, not a local restriction. */
-		if (GetLastError() == (DWORD)CRYPT_E_NOT_FOUND)
+		last_error = GetLastError();
+		if (last_error == (DWORD)CRYPT_E_NOT_FOUND)
 			*allowed = 1;
 
 		/* Any other failure to read the property is taken as a restriction. */
@@ -1056,9 +1083,12 @@ os_allows_server_auth(
 
 	/* Otherwise server authentication must be listed. */
 	for (index = 0; index < usage->cUsageIdentifier; index++) {
-		if (strcmp(usage->rgpszUsageIdentifier[index], szOID_PKIX_KP_SERVER_AUTH) == 0)
+		difference = strcmp(usage->rgpszUsageIdentifier[index], szOID_PKIX_KP_SERVER_AUTH);
+		if (difference == 0)
 			*allowed = 1;
 	}
+
+	/* Releases the copy of the property. */
 	free(usage);
 
 	/* Succeeded: *allowed says whether the property permits server authentication. */

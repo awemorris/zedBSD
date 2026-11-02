@@ -131,6 +131,119 @@ static struct tlspeer_pki pki256;
 static struct tlspeer_pki pki384;
 
 /* Draws size bytes from the stream; fails at the call fail_at names. */
+static int stream_random(void *context, uint8_t *out, size_t size);
+
+/* Gives the connection bytes from the pipe: the injected bytes first, then what the peer sends. */
+static void pipe_pull(struct pipe *pipe);
+
+/* Seals what the peer has to send now into records of its own (so that the next thing it sends is a record apart). */
+static void pipe_seal(struct pipe *pipe);
+
+/* Appends bytes the peer did not make to what the connection will read. */
+static void pipe_inject(struct pipe *pipe, const uint8_t *bytes, size_t size);
+
+/* The transport's read. */
+static int pipe_read(void *context, uint8_t *buffer, size_t size, size_t *done, int *os_error);
+
+/* The transport's write: the bytes are logged and given to the peer at once. */
+static int pipe_write(void *context, const uint8_t *buffer, size_t size, size_t *done, int *os_error);
+
+/* Parses the records the connection wrote; returns how many there are. */
+static size_t wire_parse(const struct pipe *pipe, struct wire_record *records, size_t room);
+
+/* Writes the types of what the connection wrote as letters (c ccs, a alert, h handshake, d data) into text. */
+static void wire_types(const struct pipe *pipe, char *text, size_t room);
+
+/* Makes a bench: a client of min to max trusting root (may be NULL) for server.test, and a peer of config (may be NULL: raw). */
+static struct bench * bench_new(uint16_t min_version, uint16_t max_version, const struct tlspeer_pki *root, const struct tlspeer_config *peer_config, uint32_t flags);
+
+/* Frees a bench. */
+static void bench_free(struct bench *bench);
+
+/* Checks the wants of an EAGAIN: only the two bits, at least one. */
+static void bench_wants(struct bench *bench, unsigned wants);
+
+/* Tells whether nothing can reach the connection: no byte in the pipe and nothing queued at the peer. */
+static int pipe_dry(const struct bench *bench);
+
+/* Runs the handshake, repeating on EAGAIN, until it ends; returns its result. */
+static int drive_handshake(struct bench *bench);
+
+/* Reads up to size bytes, repeating on EAGAIN while the peer still has something to send; returns the result. */
+static int drive_read(struct bench *bench, uint8_t *buffer, size_t size, size_t *done);
+
+/* Writes size bytes, repeating on EAGAIN; returns the result. */
+static int drive_write(struct bench *bench, const uint8_t *buffer, size_t size, size_t *done);
+
+/* Fills a pattern of size bytes that depends on seed. */
+static void pattern(uint8_t *out, size_t size, unsigned seed);
+
+/* The peer's script for a version: the tool's default over pki. */
+static void script(struct tlspeer_config *config, uint16_t version, const struct tlspeer_pki *pki);
+
+/* Makes a client of TLS 1.3 (or of 1.2 to 1.3) with a peer of config and connects it (all checked); returns the bench. */
+static struct bench * connected(uint16_t min_version, uint16_t max_version, const struct tlspeer_config *config, const struct tlspeer_pki *pki);
+
+/* Checks the alert the peer got last: its level and description, and whether it was protected. */
+static void check_peer_alert(const struct bench *bench, unsigned count, unsigned level, unsigned description, int protected_alert);
+
+/* Tells whether size bytes at bytes are all zero. */
+static int buffer_is_zero(const uint8_t *bytes, size_t size);
+
+/* Checks that a failed connection refuses every operation with EPROTO and sends nothing more. */
+static void check_dead(struct bench *bench);
+
+/* The result of one read and its bytes, for the tests that read data. */
+static void read_exact(struct bench *bench, const uint8_t *expected, size_t size, size_t buffer_size);
+
+/* Sets the pipe's scripts for transport mode 0 (plain), 1 (one byte at a time), 2 (EAGAIN often) or 3 (small pieces and EAGAIN). */
+static void set_mode(struct pipe *pipe, unsigned mode);
+
+/* The records a write of size bytes makes: full fragments and the rest. */
+static size_t record_count(size_t size);
+
+/* Writes and reads data of every size on a connected bench whose protected record adds overhead bytes beyond the header's 5 and the plaintext. */
+static void check_data(struct bench *bench, size_t overhead);
+
+static void check_write_retry(struct bench *bench, size_t overhead);
+
+/* Has the peer send an alert and puts it in the pipe as a record of its own. */
+static void peer_alert(struct bench *bench, unsigned level, unsigned description);
+
+/* Has the peer send application data and puts it in the pipe as a record of its own. */
+static void peer_data(struct bench *bench, const char *text);
+
+/* Checks that the next read gives the text. */
+static void expect_text(struct bench *bench, const char *text);
+
+/* Checks that the next read fails with error, with the connection's reason, and the alert the peer got (0: none was sent). */
+static void expect_failure(struct bench *bench, int error, unsigned reason, unsigned alert);
+
+/* A close_notify after data: the data is read first, then EPIPE; the reading side is over but the writing side is not. */
+static void check_close_notify(int version13, unsigned level);
+
+/* A fatal alert from the peer ends the connection with a reason of 1000 plus its description, and nothing is sent back. */
+static void check_fatal_alert(int version13, unsigned level, unsigned description);
+
+/* Checks the bytes of the alert record the client wrote after its ClientHello: a plaintext fatal alert of description. */
+static void check_wire_alert(const struct bench *bench, unsigned description);
+
+/* Gives the client raw bytes in the handshake and checks the failure, the reason, and the alert (0: none) it sent. */
+static void raw_case(const uint8_t *bytes, size_t size, int error, unsigned reason, unsigned alert);
+
+static void inject_big_message(struct bench *bench, const size_t *sizes, size_t count);
+
+/* EOF after the handshake without close_notify: ECONNRESET, or EPIPE with SSLC_CONN_IGNORE_EOF; buffered data first. */
+static void check_eof(uint32_t flags, int cut_record);
+
+static size_t make_record13(const struct sslc_traffic_keys *keys, uint64_t sequence, unsigned inner_type, const uint8_t *content, size_t size, size_t padding, uint8_t *out);
+
+static struct bench * manual_server(size_t insert_after, unsigned inner_type, const uint8_t *content, size_t size, int *result);
+
+/* A verification callback that refuses every chain, valid or not. */
+static int refuse_callback(void *context, int preverified, enum cryc_verify_code code);
+
+/* Draws size bytes from the stream; fails at the call fail_at names. */
 static int
 stream_random(
 	void *context,
@@ -158,6 +271,8 @@ stream_random(
 		cryc_hash_digest(CRYC_HASH_SHA256, input, 16, block);
 		out[index] = block[position % 32U];
 	}
+
+	/* Counts the bytes drawn so far. */
 	stream->position += size;
 	return 0;
 }
@@ -214,6 +329,8 @@ pipe_inject(
 		CHECK(0);
 		return;
 	}
+
+	/* Appends the bytes to the pipe. */
 	memcpy(pipe->in + pipe->in_used, bytes, size);
 	pipe->in_used += size;
 }
@@ -248,6 +365,8 @@ pipe_read(
 		*os_error = pipe->read_fail_errno;
 		return EIO;
 	}
+
+	/* Answers a read with EAGAIN at the configured interval. */
 	if (pipe->read_eagain_every != 0U && pipe->read_calls % pipe->read_eagain_every == 0U) {
 		pipe->read_eagains++;
 		return EAGAIN;
@@ -287,6 +406,8 @@ pipe_read(
 				pipe->header_have = 0;
 		}
 	}
+
+	/* Reports the bytes read; a lying pipe reports one too many. */
 	*done = count;
 	if (pipe->read_lie)
 		*done = size + 1U;
@@ -314,14 +435,20 @@ pipe_write(
 		*os_error = pipe->write_fail_errno;
 		return EIO;
 	}
+
+	/* Answers a write with EAGAIN at the configured interval. */
 	if (pipe->write_eagain_every != 0U && pipe->write_calls % pipe->write_eagain_every == 0U) {
 		pipe->write_eagains++;
 		return EAGAIN;
 	}
+
+	/* Answers a write with EAGAIN when the budget is used up. */
 	if (pipe->write_limited && pipe->write_budget == 0U) {
 		pipe->write_eagains++;
 		return EAGAIN;
 	}
+
+	/* Takes nothing when the pipe is set to write zero bytes. */
 	if (pipe->write_zero)
 		return 0;
 
@@ -335,6 +462,8 @@ pipe_write(
 		CHECK(0);
 		return EIO;
 	}
+
+	/* Keeps the bytes the connection sent. */
 	memcpy(pipe->sent + pipe->sent_used, buffer, count);
 	pipe->sent_used += count;
 	if (pipe->write_limited)
@@ -346,6 +475,8 @@ pipe_write(
 		if (error != 0 && pipe->peer_error == 0)
 			pipe->peer_error = error;
 	}
+
+	/* Reports the bytes written; a lying pipe reports one too many. */
 	*done = count;
 	if (pipe->write_lie)
 		*done = size + 1U;
@@ -375,6 +506,8 @@ wire_parse(
 		offset += 5U + records[count].length;
 		count++;
 	}
+
+	/* Reports how many records were found. */
 	return count;
 }
 
@@ -410,6 +543,8 @@ wire_types(
 			break;
 		}
 	}
+
+	/* Ends the text. */
 	text[index] = '\0';
 }
 
@@ -431,6 +566,8 @@ bench_new(
 		CHECK(0);
 		return NULL;
 	}
+
+	/* Makes the certificate store. */
 	CHECK(cryc_store_init(&bench->store) == 0);
 	if (root != NULL)
 		CHECK(cryc_store_add_der(&bench->store, root->root, root->root_size) == 0);
@@ -512,6 +649,7 @@ drive_handshake(
 {
 	unsigned wants;
 	unsigned guard;
+	int dry;
 	int error;
 
 	/* The same call until it stops waiting. */
@@ -523,12 +661,19 @@ drive_handshake(
 				CHECK(wants == 0U);
 			return error;
 		}
+
+		/* Notes the wants of the connection. */
 		bench_wants(bench, wants);
 
 		/* A real wait: the connection waits to read, nothing is in the pipe and the peer has nothing to send. */
-		if ((wants & SSLC_WANT_WRITE) == 0U && pipe_dry(bench))
-			return EAGAIN;
+		if ((wants & SSLC_WANT_WRITE) == 0U) {
+			dry = pipe_dry(bench);
+			if (dry)
+				return EAGAIN;
+		}
 	}
+
+	/* The loop ran out of rounds without finishing. */
 	CHECK(0);
 	return EAGAIN;
 }
@@ -543,6 +688,7 @@ drive_read(
 {
 	unsigned wants;
 	unsigned guard;
+	int dry;
 	int error;
 
 	/* The same call until it stops waiting. */
@@ -555,13 +701,20 @@ drive_read(
 				CHECK(wants == 0U);
 			return error;
 		}
+
+		/* Checks that nothing was transferred while the call was waiting. */
 		CHECK(*done == 0U);
 		bench_wants(bench, wants);
 
 		/* A real wait: the connection waits to read, nothing is in the pipe and the peer has nothing to send. */
-		if ((wants & SSLC_WANT_WRITE) == 0U && pipe_dry(bench))
-			return EAGAIN;
+		if ((wants & SSLC_WANT_WRITE) == 0U) {
+			dry = pipe_dry(bench);
+			if (dry)
+				return EAGAIN;
+		}
 	}
+
+	/* The loop ran out of rounds without finishing. */
 	CHECK(0);
 	return EAGAIN;
 }
@@ -588,9 +741,13 @@ drive_write(
 				CHECK(wants == 0U);
 			return error;
 		}
+
+		/* Checks that nothing was transferred while the call was waiting. */
 		CHECK(*done == 0U);
 		bench_wants(bench, wants);
 	}
+
+	/* The loop ran out of rounds without finishing. */
 	CHECK(0);
 	return EAGAIN;
 }
@@ -639,6 +796,104 @@ connected(
 	CHECK((bench->conn.flags & SSLC_CONN_FAILED) == 0U);
 	return bench;
 }
+
+/* Makes a connected TLS 1.3 bench over the default script. */
+static struct bench * connected13(void);
+
+/* Makes a connected TLS 1.2 bench over the default script. */
+static struct bench * connected12(void);
+
+/* Runs every handshake of the matrix in every transport mode. */
+static void test_handshakes(void);
+
+/* Checks data in every version and AEAD the matrix has, in a plain transport and in a stuttering one. */
+static void test_data(void);
+
+/* Checks that application bytes are kept for later reads, that the transport is not touched for them, and that an empty read is refused. */
+static void test_pending(void);
+
+static void test_read_ahead(void);
+
+/* Runs the write retry in TLS 1.3 and TLS 1.2. */
+static void test_write_retry(void);
+
+/* Checks the writes of no bytes, and a write after the transport stopped half way. */
+static void test_write_edges(void);
+
+/* The alerts of TLS 1.3 (RFC 8446 6) and of TLS 1.2 (RFC 5246 7.2). */
+static void test_alerts(void);
+
+/* Checks the limit of records without progress for every kind, and that data resets the count. */
+static void test_empties(void);
+
+static void test_empties_handshake(void);
+
+/* A key change must fall on a record boundary: the server's first protected message in the record of the ServerHello. */
+static void test_key_change(void);
+
+/* A handshake message cut into records, other records inside a message, and empty fragments. */
+static void test_framing(void);
+
+/* Sends each damaged record after a finished handshake and checks the outcome. */
+static void test_damage(void);
+
+/* A tag that does not verify, a protected change_cipher_spec, and other records out of place after the handshake. */
+static void test_out_of_place(void);
+
+/* Starts a client of TLS 1.3 with no peer: the ClientHello is written and the client waits for the server. */
+static struct bench * raw_start(void);
+
+/* The raw cases of the handshake phase. */
+static void test_raw(void);
+
+static void test_message_limit(void);
+
+/* EOF during the handshake is EPIPE, without a failure and without an alert; EOF inside a record too. */
+static void test_eof_handshake(void);
+
+/* Runs the end-of-stream checks. */
+static void test_eof(void);
+
+/* A failure of the transport is EIO with the system's error value, ends the connection and sends nothing. */
+static void test_transport_failures(void);
+
+/* Checks the closing exchange: before the handshake, once, with a write held back, and after the peer's close_notify. */
+static void test_shutdown(void);
+
+/* Checks init's refusals and copies, and free's idempotence. */
+static void test_init_free(void);
+
+/* A handshake that cannot start: the random source fails, or the configuration is out of range. */
+static void test_start_failure(void);
+
+/* A sequence number that would wrap ends the connection: a write cannot seal, a read cannot open. */
+static void test_sequence(void);
+
+/* Checks KeyUpdate in TLS 1.3: the keys of both directions move, data goes on both ways, and an answer is sent only when asked for. */
+static void test_key_update(void);
+
+/* Handshakes and data with the peer writing records of a few bytes, in both versions and with a stuttering transport. */
+static void test_fragments(void);
+
+/* Runs each failing server and checks the error, the reason, the alert the peer got and the dead connection. */
+static void test_handshake_failures(void);
+
+/* A fatal alert during the handshake from the peer through tlspeer's own records (plaintext, TLS 1.3 and 1.2). */
+static void test_handshake_alert(void);
+
+/* Checks the handshake with records made by hand: the plain flight is accepted, and a record that must not be there fails it. */
+static void test_manual(void);
+
+/* Runs each of those failures, and a failure of the random source after the handshake began (internal_error). */
+static void test_tweaked_failures(void);
+
+/* A write or a read is the first call: the handshake runs first, then the call goes on. */
+static void test_before_handshake(void);
+
+/* A failure that is not a record's: while application bytes are buffered, and when the sequence number cannot be used to close. */
+static void test_failure_with_buffer(void);
+
+static void test_pending_output(void);
 
 /* Makes a connected TLS 1.3 bench over the default script. */
 static struct bench *
@@ -695,6 +950,8 @@ buffer_is_zero(
 		if (bytes[index] != 0U)
 			return 0;
 	}
+
+	/* Succeeded: every byte is zero. */
 	return 1;
 }
 
@@ -756,6 +1013,8 @@ read_exact(
 		CHECK(0);
 		return;
 	}
+
+	/* Reads until all the bytes are in, one call at a time. */
 	total = 0;
 	for (guard = 0; guard < GUARD && total < size; guard++) {
 		error = drive_read(bench, buffer, buffer_size, &done);
@@ -764,15 +1023,21 @@ read_exact(
 			printf("  read gave %d after %lu of %lu bytes\n", error, (unsigned long)total, (unsigned long)size);
 			break;
 		}
+
+		/* Checks the size of each read. */
 		CHECK(done > 0U);
 		CHECK(done <= buffer_size);
 		if (done > size - total) {
 			CHECK(0);
 			break;
 		}
+
+		/* Checks the bytes against the expected ones. */
 		CHECK_BYTES(buffer, expected + total, done);
 		total += done;
 	}
+
+	/* Checks that every byte arrived. */
 	CHECK(total == size);
 	free(buffer);
 }
@@ -791,6 +1056,9 @@ struct hs_case {
 	uint32_t options;
 	const char *wire;
 };
+
+/* Checks one handshake of the matrix in one transport mode. */
+static void check_handshake(const struct hs_case *item, unsigned mode);
 
 /*
  * The handshakes: TLS 1.3 with each suite, one after a HelloRetryRequest
@@ -846,10 +1114,14 @@ check_handshake(
 	unsigned wants;
 	size_t count;
 	size_t index;
+	int different;
 	int error;
 
 	/* The peer's script, the client, the pipe's mode. */
-	pki = item->p384 ? &pki384 : &pki256;
+	if (item->p384)
+		pki = &pki384;
+	else
+		pki = &pki256;
 	script(&config, item->version, pki);
 	config.suite = item->suite;
 	config.group = item->group;
@@ -896,7 +1168,8 @@ check_handshake(
 	/* The records written: their kinds, the first with the legacy version 0x0301 and the others 0x0303 (RFC 8446 5.1). */
 	wire_types(&bench->pipe, types, sizeof(types));
 	CHECK(strcmp(types, item->wire) == 0);
-	if (strcmp(types, item->wire) != 0)
+	different = strcmp(types, item->wire);
+	if (different != 0)
 		printf("  wire %s, expected %s\n", types, item->wire);
 	count = wire_parse(&bench->pipe, records, 16U);
 	CHECK(count == strlen(item->wire));
@@ -914,6 +1187,8 @@ check_handshake(
 			CHECK(bench->pipe.sent[records[index].offset + 5U] == 1U);
 		}
 	}
+
+	/* Frees the bench. */
 	bench_free(bench);
 }
 
@@ -989,6 +1264,8 @@ check_data(
 			read_exact(bench, data, data_sizes[index], 100U);
 		}
 	}
+
+	/* Checks that neither side saw an error. */
 	CHECK(bench->peer->error == 0);
 	CHECK(bench->pipe.peer_error == 0);
 	CHECK(bench->pipe.overreads == 0U);
@@ -1021,6 +1298,8 @@ test_data(void)
 				config.suite = 0xcca9;
 				overhead = 16U;
 			}
+
+			/* Starts a connected pair under the suite chosen above. */
 			bench = connected(SSLC_TLS12, SSLC_TLS13, &config, &pki256);
 			if (bench == NULL)
 				continue;
@@ -1045,7 +1324,11 @@ test_pending(void)
 
 	/* TLS 1.3 and 1.2. */
 	for (version = 0; version < 2U; version++) {
-		bench = version == 0U ? connected13() : connected12();
+		/* Connects under the TLS version being tried. */
+		if (version == 0U)
+			bench = connected13();
+		else
+			bench = connected12();
 		if (bench == NULL)
 			continue;
 		pattern(data, sizeof(data), 3U);
@@ -1118,10 +1401,19 @@ test_read_ahead(void)
 	sizes[1] = 20;
 	sizes[2] = 30;
 	for (version = 0; version < 2U; version++) {
-		bench = version == 0U ? connected13() : connected12();
+		/* Connects under the TLS version being tried. */
+		if (version == 0U)
+			bench = connected13();
+		else
+			bench = connected12();
 		if (bench == NULL)
 			continue;
-		overhead = version == 0U ? 17U : 24U;
+
+		/* Takes the record overhead of that version. */
+		if (version == 0U)
+			overhead = 17U;
+		else
+			overhead = 24U;
 		pattern(data, sizeof(data), 8U);
 
 		/* Three records, sealed apart, all in the pipe. */
@@ -1129,6 +1421,8 @@ test_read_ahead(void)
 			CHECK(tlspeer_send_data(bench->peer, data, sizes[index]) == 0);
 			pipe_seal(&bench->pipe);
 		}
+
+		/* Remembers how much the connection has taken so far. */
 		before = bench->pipe.in_taken;
 		expected = 0;
 
@@ -1335,11 +1629,13 @@ expect_text(
 {
 	uint8_t buffer[64];
 	size_t done;
+	size_t length;
 
 	/* The bytes of the record, all at once. */
 	CHECK(drive_read(bench, buffer, sizeof(buffer), &done) == 0);
 	CHECK(done == strlen(text));
-	if (done == strlen(text))
+	length = strlen(text);
+	if (done == length)
 		CHECK_BYTES(buffer, text, done);
 }
 
@@ -1386,7 +1682,12 @@ check_close_notify(
 	int both;
 
 	/* Data, then the closing. */
-	bench = version13 ? connected13() : connected12();
+
+	/* Connects under the TLS version being tried. */
+	if (version13)
+		bench = connected13();
+	else
+		bench = connected12();
 	if (bench == NULL)
 		return;
 	peer_data(bench, "abc");
@@ -1438,7 +1739,12 @@ check_fatal_alert(
 	struct bench *bench;
 
 	/* The alert, the failure. */
-	bench = version13 ? connected13() : connected12();
+
+	/* Connects under the TLS version being tried. */
+	if (version13)
+		bench = connected13();
+	else
+		bench = connected12();
 	if (bench == NULL)
 		return;
 	peer_alert(bench, level, description);
@@ -1503,6 +1809,8 @@ test_alerts(void)
 		expect_failure(bench, EPROTO, SSL_R_UNEXPECTED_MESSAGE, A_ILLEGAL_PARAMETER);
 		bench_free(bench);
 	}
+
+	/* Does the same for a TLS 1.2 connection. */
 	bench = connected12();
 	if (bench != NULL) {
 		peer_alert(bench, 0, A_CLOSE_NOTIFY);
@@ -1516,7 +1824,12 @@ test_alerts(void)
 		for (size = 0; size <= 3U; size++) {
 			if (size == 2U)
 				continue;
-			bench = version == 0U ? connected13() : connected12();
+
+			/* Connects under the TLS version being tried. */
+			if (version == 0U)
+				bench = connected13();
+			else
+				bench = connected12();
 			if (bench == NULL)
 				continue;
 			CHECK(tlspeer_send_record(bench->peer, T_ALERT, record, size) == 0);
@@ -1538,6 +1851,9 @@ enum empty_kind {
 	EMPTY_TICKET,
 	EMPTY_WARNING12
 };
+
+/* Has the peer send count records of a kind, each apart, then a record of data; checks what the connection does. */
+static void check_empties(struct bench *bench, enum empty_kind kind, unsigned count);
 
 /* Has the peer send count records of a kind, each apart, then a record of data; checks what the connection does. */
 static void
@@ -1565,8 +1881,12 @@ check_empties(
 			CHECK(tlspeer_send_alert(bench->peer, 1, A_NO_RENEGOTIATION) == 0);
 			break;
 		}
+
+		/* Seals the record the peer sent. */
 		pipe_seal(&bench->pipe);
 	}
+
+	/* Sends one more byte of data after the records. */
 	peer_data(bench, "z");
 
 	/* At most 32 in a row: the 33rd is unexpected_message. */
@@ -1610,6 +1930,8 @@ test_empties(void)
 		check_empties(bench, EMPTY_TICKET, 32);
 		bench_free(bench);
 	}
+
+	/* Does the same for a TLS 1.2 connection. */
 	bench = connected12();
 	if (bench != NULL) {
 		check_empties(bench, EMPTY_DATA, 32);
@@ -1636,11 +1958,15 @@ test_empties_handshake(void)
 	unsigned kind;
 	unsigned variant;
 	unsigned index;
+	uint16_t version;
 	int error;
 
 	/* TLS 1.3 with the compatibility record after the ServerHello, TLS 1.3 without it, and TLS 1.2. */
 	for (variant = 0; variant < 3U; variant++) {
-		script(&config, variant == 2U ? SSLC_TLS12 : SSLC_TLS13, &pki256);
+		version = SSLC_TLS13;
+		if (variant == 2U)
+			version = SSLC_TLS12;
+		script(&config, version, &pki256);
 		if (variant == 0U)
 			config.options = TLSPEER_OPT_CCS;
 
@@ -1656,6 +1982,8 @@ test_empties_handshake(void)
 					else
 						pipe_inject(&bench->pipe, canceled, sizeof(canceled));
 				}
+
+				/* Drives the handshake through the injected records. */
 				error = drive_handshake(bench);
 				if (count <= SSLC_CONN_MAX_EMPTY) {
 					CHECK(error == 0);
@@ -1666,6 +1994,8 @@ test_empties_handshake(void)
 					check_peer_alert(bench, 1, 2, A_UNEXPECTED_MESSAGE, 0);
 					check_dead(bench);
 				}
+
+				/* Frees the bench. */
 				bench_free(bench);
 			}
 		}
@@ -1761,6 +2091,8 @@ test_framing(void)
 		CHECK(bench->conn.message_used == 0U);
 		bench_free(bench);
 	}
+
+	/* Does the same for a TLS 1.2 connection. */
 	bench = connected12();
 	if (bench != NULL) {
 		CHECK(tlspeer_send_record(bench->peer, T_HANDSHAKE, request, 2) == 0);
@@ -1776,7 +2108,11 @@ test_framing(void)
 	/* A record of another kind between the parts of a message is unexpected_message (RFC 8446 5.1). */
 	for (version = 0; version < 2U; version++) {
 		for (variant = 0; variant < 4U; variant++) {
-			bench = version == 0U ? connected13() : connected12();
+			/* Connects under the TLS version being tried. */
+			if (version == 0U)
+				bench = connected13();
+			else
+				bench = connected12();
 			if (bench == NULL)
 				continue;
 			CHECK(tlspeer_send_record(bench->peer, T_HANDSHAKE, ticket_message, 6) == 0);
@@ -1800,7 +2136,11 @@ test_framing(void)
 
 	/* An empty fragment of a handshake record is decode_error (RFC 8446 5.1), in both versions. */
 	for (version = 0; version < 2U; version++) {
-		bench = version == 0U ? connected13() : connected12();
+		/* Connects under the TLS version being tried. */
+		if (version == 0U)
+			bench = connected13();
+		else
+			bench = connected12();
 		if (bench == NULL)
 			continue;
 		CHECK(tlspeer_send_record(bench->peer, T_HANDSHAKE, none, 0) == 0);
@@ -1869,7 +2209,11 @@ test_damage(void)
 
 	/* The record is the header and a body of zeros; the failure comes at the header or at the tag. */
 	for (index = 0; index < sizeof(damages) / sizeof(damages[0]); index++) {
-		bench = damages[index].version13 ? connected13() : connected12();
+		/* Connects under the version the damage is made for. */
+		if (damages[index].version13)
+			bench = connected13();
+		else
+			bench = connected12();
 		if (bench == NULL)
 			continue;
 		memcpy(bytes, damages[index].header, 5);
@@ -1901,7 +2245,11 @@ test_out_of_place(void)
 
 	/* A flipped tag on data, in both versions: bad_record_mac, and the failure leaves no byte to read. */
 	for (version = 0; version < 2U; version++) {
-		bench = version == 0U ? connected13() : connected12();
+		/* Connects under the TLS version being tried. */
+		if (version == 0U)
+			bench = connected13();
+		else
+			bench = connected12();
 		if (bench == NULL)
 			continue;
 		bench->peer->breaks |= TLSPEER_BREAK_RECORD_TAG;
@@ -1937,6 +2285,8 @@ test_out_of_place(void)
 		expect_failure(bench, EPROTO, SSL_R_UNEXPECTED_MESSAGE, A_UNEXPECTED_MESSAGE);
 		bench_free(bench);
 	}
+
+	/* Does the same for a TLS 1.2 connection. */
 	bench = connected12();
 	if (bench != NULL) {
 		CHECK(tlspeer_send_record(bench->peer, T_CCS, ccs_two, 1) == 0);
@@ -1953,6 +2303,8 @@ test_out_of_place(void)
 		expect_failure(bench, EPROTO, SSL_R_UNEXPECTED_MESSAGE, A_UNEXPECTED_MESSAGE);
 		bench_free(bench);
 	}
+
+	/* Does the same for a TLS 1.2 connection. */
 	bench = connected12();
 	if (bench != NULL) {
 		CHECK(tlspeer_send_handshake(bench->peer, ticket12, sizeof(ticket12)) == 0);
@@ -2069,6 +2421,8 @@ raw_case(
 		wire_types(&bench->pipe, types, sizeof(types));
 		CHECK(strcmp(types, "h") == 0);
 	}
+
+	/* Checks that no message is pending. */
 	CHECK(bench->conn.message == NULL);
 	CHECK(bench->conn.message_used == 0U);
 	check_dead(bench);
@@ -2217,9 +2571,13 @@ inject_big_message(
 			record[7] = 0x90;
 			record[8] = 0x00;
 		}
+
+		/* Feeds the record to the connection. */
 		pipe_inject(&bench->pipe, record, 5U + sizes[index]);
 		total += sizes[index];
 	}
+
+	/* Checks that enough bytes were sent to cross the limit. */
 	CHECK(total >= 102404U);
 }
 
@@ -2314,6 +2672,7 @@ check_eof(
 	unsigned wants;
 	int both;
 	int expected;
+	int expected_both;
 
 	/* A connected client with the flag, and data waiting. */
 	script(&config, SSLC_TLS13, &pki256);
@@ -2322,7 +2681,12 @@ check_eof(
 		return;
 	CHECK(drive_handshake(bench) == 0);
 	CHECK((bench->conn.flags & SSLC_CONN_IGNORE_EOF) == (flags & SSLC_CONN_IGNORE_EOF));
-	expected = (flags & SSLC_CONN_IGNORE_EOF) != 0U ? EPIPE : ECONNRESET;
+
+	/* Takes the error the connection should report for the end of the stream. */
+	if ((flags & SSLC_CONN_IGNORE_EOF) != 0U)
+		expected = EPIPE;
+	else
+		expected = ECONNRESET;
 	peer_data(bench, "tail");
 	if (cut_record) {
 		/* The record is cut three bytes short: its data never arrives. */
@@ -2339,6 +2703,8 @@ check_eof(
 		/* Asked again, the same answer. */
 		CHECK(sslc_conn_read(&bench->conn, buffer, sizeof(buffer), &done, &wants) == expected);
 	}
+
+	/* Checks the reason stays the one of the end of the stream. */
 	CHECK(bench->conn.reason == SSL_R_UNEXPECTED_EOF_WHILE_READING);
 	CHECK(bench->conn.os_error == 0);
 	CHECK((bench->conn.flags & SSLC_CONN_FAILED) == 0U);
@@ -2352,7 +2718,10 @@ check_eof(
 	CHECK(bench->peer->data_size == 3U);
 	both = 5;
 	CHECK(sslc_conn_shutdown(&bench->conn, &both, &wants) == 0);
-	CHECK(both == ((flags & SSLC_CONN_IGNORE_EOF) != 0U ? 1 : 0));
+	expected_both = 0;
+	if ((flags & SSLC_CONN_IGNORE_EOF) != 0U)
+		expected_both = 1;
+	CHECK(both == expected_both);
 	check_peer_alert(bench, 1, 1, A_CLOSE_NOTIFY, 1);
 	bench_free(bench);
 }
@@ -2394,6 +2763,8 @@ test_transport_failures(void)
 		check_dead(bench);
 		bench_free(bench);
 	}
+
+	/* Does the same for a TLS 1.2 connection. */
 	bench = bench_new(SSLC_TLS12, SSLC_TLS13, &pki256, NULL, 0);
 	if (bench != NULL) {
 		bench->pipe.write_fail_at = 1;
@@ -2428,6 +2799,8 @@ test_transport_failures(void)
 			CHECK(sslc_conn_shutdown(&bench->conn, &both, &wants) == EIO);
 			CHECK(bench->conn.os_error == 45);
 		}
+
+		/* Checks that the connection failed. */
 		CHECK((bench->conn.flags & SSLC_CONN_FAILED) != 0U);
 		check_peer_alert(bench, 0, 0, 0, 0);
 		check_dead(bench);
@@ -2452,6 +2825,8 @@ test_transport_failures(void)
 			bench->pipe.write_zero = 1;
 			CHECK(drive_handshake(bench) == EIO);
 		}
+
+		/* Checks that no OS error was recorded. */
 		CHECK(bench->conn.os_error == 0);
 		CHECK((bench->conn.flags & SSLC_CONN_FAILED) != 0U);
 		bench_free(bench);
@@ -2583,6 +2958,8 @@ test_init_free(void)
 		CHECK(0);
 		return;
 	}
+
+	/* Starts with an empty pipe and the transport's functions. */
 	memset(&pipe, 0, sizeof(pipe));
 	transport.read = pipe_read;
 	transport.write = pipe_write;
@@ -2678,6 +3055,8 @@ test_start_failure(void)
 				continue;
 			CHECK(drive_handshake(bench) == EINVAL);
 		}
+
+		/* Checks that the connection never started. */
 		CHECK((bench->conn.flags & SSLC_CONN_STARTED) == 0U);
 		CHECK(bench->pipe.sent_used == 0U);
 		check_dead(bench);
@@ -2734,6 +3113,9 @@ test_key_update(void)
 	size_t done;
 	unsigned request;
 	unsigned round;
+	unsigned wants;
+	uint8_t buffer[400];
+	int both;
 
 	/* Three updates from the server in a row, asking for an answer or not. */
 	for (request = 0; request < 2U; request++) {
@@ -2763,6 +3145,8 @@ test_key_update(void)
 			CHECK(bench->peer->error == 0);
 			CHECK(bench->pipe.peer_error == 0);
 		}
+
+		/* Checks that the connection did not fail. */
 		CHECK((bench->conn.flags & SSLC_CONN_FAILED) == 0U);
 		bench_free(bench);
 	}
@@ -2770,9 +3154,6 @@ test_key_update(void)
 	/* After our close_notify a KeyUpdate that asks for an answer gets none: nothing more goes out, the data is still read. */
 	bench = connected13();
 	if (bench != NULL) {
-		int both;
-		unsigned wants;
-
 		CHECK(sslc_conn_shutdown(&bench->conn, &both, &wants) == 0);
 		CHECK((bench->conn.flags & SSLC_CONN_CLOSE_SENT) != 0U);
 		before = bench->pipe.sent_used;
@@ -2790,9 +3171,6 @@ test_key_update(void)
 	/* With the transport full the answer waits: the read says EAGAIN to write, and gives its data after the answer is sent. */
 	bench = connected13();
 	if (bench != NULL) {
-		unsigned wants;
-		uint8_t buffer[400];
-
 		CHECK(tlspeer_send_key_update(bench->peer, 1) == 0);
 		pipe_seal(&bench->pipe);
 		pattern(data, sizeof(data), 9U);
@@ -2832,12 +3210,16 @@ test_fragments(void)
 	unsigned index;
 	unsigned version;
 	unsigned mode;
+	uint16_t peer_version;
 
 	/* Each record size; the handshake messages are cut across records, and so is the data. */
 	for (version = 0; version < 2U; version++) {
 		for (index = 0; index < sizeof(sizes) / sizeof(sizes[0]); index++) {
 			for (mode = 0; mode < 4U; mode += 3U) {
-				script(&config, version == 0U ? SSLC_TLS13 : SSLC_TLS12, &pki256);
+				peer_version = SSLC_TLS12;
+				if (version == 0U)
+					peer_version = SSLC_TLS13;
+				script(&config, peer_version, &pki256);
 				config.record_size = sizes[index];
 				bench = bench_new(SSLC_TLS12, SSLC_TLS13, &pki256, &config, 0);
 				if (bench == NULL)
@@ -2900,6 +3282,7 @@ test_handshake_failures(void)
 {
 	struct tlspeer_config config;
 	struct bench *bench;
+	const struct tlspeer_pki *root;
 	unsigned index;
 	int error;
 
@@ -2908,7 +3291,10 @@ test_handshake_failures(void)
 		script(&config, hs_failures[index].version, &pki256);
 		config.options = hs_failures[index].options;
 		config.breaks = hs_failures[index].breaks;
-		bench = bench_new(SSLC_TLS12, SSLC_TLS13, hs_failures[index].untrusted ? NULL : &pki256, &config, 0);
+		root = &pki256;
+		if (hs_failures[index].untrusted)
+			root = NULL;
+		bench = bench_new(SSLC_TLS12, SSLC_TLS13, root, &config, 0);
 		if (bench == NULL)
 			continue;
 		error = drive_handshake(bench);
@@ -2990,6 +3376,8 @@ make_record13(
 		CHECK(0);
 		return 0;
 	}
+
+	/* Copies the content in front of the content type. */
 	if (size > 0U)
 		memcpy(inner, content, size);
 	inner[size] = (uint8_t)inner_type;
@@ -3042,6 +3430,7 @@ manual_server(
 	size_t length;
 	unsigned wants;
 	unsigned epoch;
+	int more;
 
 	/* The client's ClientHello goes to the peer as a message. */
 	script(&config, SSLC_TLS13, &pki256);
@@ -3061,7 +3450,10 @@ manual_server(
 	used = 0;
 	records = 0;
 	epoch = 0;
-	while (tlspeer_next(bench->peer, &item)) {
+	for (;;) {
+		more = tlspeer_next(bench->peer, &item);
+		if (!more)
+			break;
 		epoch = item.epoch;
 		if (item.epoch == 0U) {
 			stream[used] = T_HANDSHAKE;
@@ -3083,6 +3475,8 @@ manual_server(
 			used += make_record13(&bench->peer->write_keys[item.epoch], sequence[item.epoch], T_HANDSHAKE, item.data, item.size, 0, stream + used);
 			sequence[item.epoch]++;
 		}
+
+		/* Counts the record. */
 		records++;
 
 		/* The record made by hand, under the keys of the record before it. */
@@ -3184,6 +3578,8 @@ test_manual(void)
 		} else {
 			expect_failure(bench, EPROTO, SSL_R_UNEXPECTED_MESSAGE, A_UNEXPECTED_MESSAGE);
 		}
+
+		/* Frees the bench. */
 		bench_free(bench);
 	}
 }
@@ -3246,6 +3642,7 @@ test_tweaked_failures(void)
 	struct tlspeer_config config;
 	struct bench *bench;
 	unsigned index;
+	uint16_t min_version;
 	int error;
 
 	/* Each case: the alert reaches the peer in plaintext (no key of the client's exists yet). */
@@ -3255,7 +3652,12 @@ test_tweaked_failures(void)
 			config.ee_raw = malformed;
 			config.ee_raw_size = sizeof(malformed);
 		}
-		bench = bench_new(tweak_cases[index].tweak == TWEAK_ONLY13 ? SSLC_TLS13 : SSLC_TLS12, SSLC_TLS13, &pki256, &config, 0);
+
+		/* Makes a bench for the tweak; ONLY13 offers TLS 1.3 alone. */
+		min_version = SSLC_TLS12;
+		if (tweak_cases[index].tweak == TWEAK_ONLY13)
+			min_version = SSLC_TLS13;
+		bench = bench_new(min_version, SSLC_TLS13, &pki256, &config, 0);
 		if (bench == NULL)
 			continue;
 		if (tweak_cases[index].tweak == TWEAK_EXPIRED)
@@ -3300,10 +3702,14 @@ test_before_handshake(void)
 	size_t done;
 	unsigned wants;
 	unsigned version;
+	uint16_t peer_version;
 
 	/* A write first, in both versions. */
 	for (version = 0; version < 2U; version++) {
-		script(&config, version == 0U ? SSLC_TLS13 : SSLC_TLS12, &pki256);
+		peer_version = SSLC_TLS12;
+		if (version == 0U)
+			peer_version = SSLC_TLS13;
+		script(&config, peer_version, &pki256);
 		bench = bench_new(SSLC_TLS12, SSLC_TLS13, &pki256, &config, 0);
 		if (bench == NULL)
 			continue;
@@ -3318,7 +3724,10 @@ test_before_handshake(void)
 
 	/* A read first: the handshake runs, then there is nothing to read yet, and then there is. */
 	for (version = 0; version < 2U; version++) {
-		script(&config, version == 0U ? SSLC_TLS13 : SSLC_TLS12, &pki256);
+		peer_version = SSLC_TLS12;
+		if (version == 0U)
+			peer_version = SSLC_TLS13;
+		script(&config, peer_version, &pki256);
 		bench = bench_new(SSLC_TLS12, SSLC_TLS13, &pki256, &config, 0);
 		if (bench == NULL)
 			continue;

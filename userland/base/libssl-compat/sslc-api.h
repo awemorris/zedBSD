@@ -11,7 +11,8 @@
  * and its unit tests; not installed.
  *
  * An SSL_CTX is set up by one thread and then may be read by several
- * (SSL_new copies its settings under lock); an SSL belongs to one thread
+ * (SSL_new copies its settings under its lock, as OpenSSL does: a later
+ * change to the context does not reach an SSL made before); an SSL belongs to one thread
  * at a time.  Reference counts change only with cryc_os_atomic_add.
  *
  * Locks: an SSL_CTX's lock may be held while its store's lock is taken,
@@ -62,10 +63,18 @@ struct ssl_ctx_st {
  * last_error is the SSL_ERROR_ value SSL_get_error gives for a failing
  * call, set by every public call; last_errno the errno saved for
  * SSL_ERROR_SYSCALL.  verify_result the X509_V_ code of the handshake.
- * store_ctx is what the verify callback is given.
+ * store_ctx is what the verify callback is given.  min_version,
+ * max_version, options, verify_mode and verify_callback are the SSL's own
+ * settings: copied from the context by SSL_new, the version bounds then
+ * changed by SSL_ctrl until the handshake starts.
  */
 struct ssl_st {
 	SSL_CTX *ctx;
+	uint16_t min_version;
+	uint16_t max_version;
+	uint64_t options;
+	int verify_mode;
+	SSL_verify_cb verify_callback;
 	intptr_t descriptor;
 	X509_VERIFY_PARAM param;
 	char server_name[CRYC_NAME_HOST_MAX + 1U];

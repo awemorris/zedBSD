@@ -449,6 +449,93 @@ random_next(void)
 	return random_state;
 }
 
+/*
+ * The Poly1305 reference, written from RFC 8439 2.5: numbers are
+ * little-endian byte arrays of BIG_BYTES bytes, and the accumulator
+ * follows "Acc = ((Acc + block) * r) % P" with P = 2^130 - 5, the 0x01 byte
+ * appended to each block, r clamped, and "Acc + s" taken modulo 2^128 for
+ * the tag.
+ */
+typedef uint8_t big_number[BIG_BYTES];
+
+/* Fills size bytes at out with pseudo-random bytes. */
+static void random_fill(uint8_t *out, size_t size);
+
+/* Returns a pseudo-random number from 0 to limit - 1. */
+static size_t random_below(size_t limit);
+
+/* Returns whether size bytes at buffer all equal value. */
+static int all_equal(const uint8_t *buffer, size_t size, uint8_t value);
+
+/* Reads a 32-bit little-endian word (the test's own, not the library's). */
+static uint32_t read_le32(const uint8_t *bytes);
+
+/* Writes a 32-bit little-endian word. */
+static void write_le32(uint8_t *bytes, uint32_t value);
+
+/* Decodes the hex text of a vector into out and checks that it was well formed; returns the size (0 when not). */
+static size_t unhex(const char *text, uint8_t *out, size_t room);
+
+/* Computes the reference keystream. */
+static void reference_stream(const uint8_t *key, uint64_t counter, int wide, const uint8_t *nonce, size_t blocks, uint8_t *stream);
+
+/* Checks one block of the block function against the expected hex text. */
+static void check_block(const char *key_hex, const char *nonce_hex, uint32_t counter, const char *expected_hex);
+
+/* Checks the XOR entry points against the expected ciphertext. */
+static void check_cipher(int wide, const uint8_t *key, const uint8_t *nonce, uint32_t counter, const uint8_t *plain, size_t size, const uint8_t *cipher);
+
+/* Checks a vector of the cipher with both forms (the 64-bit form through the mapping of the nonce). */
+static void check_xor_vector(const char *key_hex, const char *nonce_hex, uint32_t counter, const char *plain_hex, const char *cipher_hex);
+
+/* Checks one stream case. */
+static void check_stream_case(int wide, uint64_t counter, size_t size, const uint8_t *key, const uint8_t *nonce);
+
+/* Sets a number to zero. */
+static void big_zero(big_number number);
+
+/* Adds addend to number (the sum must fit). */
+static void big_add(big_number number, const big_number addend);
+
+/* Multiplies left by right into product (the product must fit). */
+static void big_multiply(big_number product, const big_number left, const big_number right);
+
+/* Returns whether left is at least right. */
+static int big_at_least(const big_number left, const big_number right);
+
+/* Subtracts amount from number (number must be at least amount). */
+static void big_subtract(big_number number, const big_number amount);
+
+/* Reduces a number modulo P = 2^130 - 5. */
+static void big_reduce(big_number number);
+
+/* Computes the Poly1305 tag of size bytes at message by the reference. */
+static void reference_poly1305(const uint8_t *key, const uint8_t *message, size_t size, uint8_t *tag);
+
+/* Computes the tag with the library in one call. */
+static void poly1305_oneshot(const uint8_t *key, const uint8_t *message, size_t size, uint8_t *tag);
+
+/* Computes the tag with the library in pieces of random sizes from 0 to limit bytes. */
+static void poly1305_pieces(const uint8_t *key, const uint8_t *message, size_t size, size_t limit, uint8_t *tag);
+
+/* Checks one tag vector: the library in one call and in pieces, and the reference, against the expected tag. */
+static void check_mac_vector(const char *key_hex, const char *message_hex, const char *tag_hex);
+
+/* Builds the data the AEAD authenticates. */
+static size_t build_mac_data(const uint8_t *aad, size_t aad_size, const uint8_t *cipher, size_t size, uint8_t *out);
+
+/* Computes the AEAD result by the reference. */
+static void reference_seal(const uint8_t *key, const uint8_t *nonce, const uint8_t *aad, size_t aad_size, const uint8_t *plain, size_t size, uint8_t *cipher, uint8_t *tag);
+
+/* Checks seal and open of one message against the expected ciphertext and tag. */
+static void check_aead(const uint8_t *key, const uint8_t *nonce, const uint8_t *aad, size_t aad_size, const uint8_t *plain, size_t size, const uint8_t *cipher, const uint8_t *tag);
+
+/* Checks that opening fails with EBADMSG and writes nothing past the output size. */
+static void check_open_fails(const uint8_t *key, const uint8_t *nonce, const uint8_t *aad, size_t aad_size, const uint8_t *cipher, size_t size, const uint8_t *tag);
+
+/* Flips bit number bit of the bytes at buffer. */
+static void flip_bit(uint8_t *buffer, size_t bit);
+
 /* Fills size bytes at out with pseudo-random bytes. */
 static void
 random_fill(
@@ -481,9 +568,12 @@ all_equal(
 	size_t index;
 
 	/* Any other byte. */
-	for (index = 0; index < size; index++)
+	for (index = 0; index < size; index++) {
 		if (buffer[index] != value)
 			return 0;
+	}
+
+	/* Succeeded: every byte equals the value. */
 	return 1;
 }
 
@@ -557,6 +647,8 @@ reference_stream(
 		} else {
 			memcpy(block_nonce, nonce, 12);
 		}
+
+		/* The block of this counter. */
 		cryc_chacha20_block(key, (uint32_t)(current & 0xffffffffU), block_nonce, stream + 64U * index);
 	}
 }
@@ -791,9 +883,10 @@ test_cipher(void)
 	random_fill(nonce, sizeof(nonce));
 
 	/* The 32-bit form over every size and counter, including the cases that pass 2^32 - 1. */
-	for (which = 0; which < sizeof(counters32) / sizeof(counters32[0]); which++)
+	for (which = 0; which < sizeof(counters32) / sizeof(counters32[0]); which++) {
 		for (index = 0; index < sizeof(sizes) / sizeof(sizes[0]); index++)
 			check_stream_case(0, counters32[which], sizes[index], key, nonce);
+	}
 
 	/* The 64-bit form, with counters on both sides of the 32-bit boundary and at the end of the 64-bit range. */
 	wide_counters[0] = 0U;
@@ -808,9 +901,10 @@ test_cipher(void)
 	wide_counters[9] = CRYC_U64(0xffffffffU, 0xfffffffeU);
 	wide_counters[10] = CRYC_U64(0xffffffffU, 0xffffffffU);
 	wide_counters[11] = CRYC_U64(0x80000000U, 0U);
-	for (which = 0; which < sizeof(wide_counters) / sizeof(wide_counters[0]); which++)
+	for (which = 0; which < sizeof(wide_counters) / sizeof(wide_counters[0]); which++) {
 		for (index = 0; index < sizeof(sizes) / sizeof(sizes[0]); index++)
 			check_stream_case(1, wide_counters[which], sizes[index], key, nonce);
+	}
 
 	/* A zero size succeeds even at the last counter, and the buffers are not touched. */
 	memset(scratch, SENTINEL_BYTE, sizeof(scratch));
@@ -862,14 +956,6 @@ test_wide_block(void)
 	CHECK(error == 0);
 	CHECK_BYTES(out, expected, 64U);
 }
-/*
- * The Poly1305 reference, written from RFC 8439 2.5: numbers are
- * little-endian byte arrays of BIG_BYTES bytes, and the accumulator
- * follows "Acc = ((Acc + block) * r) % P" with P = 2^130 - 5, the 0x01 byte
- * appended to each block, r clamped, and "Acc + s" taken modulo 2^128 for
- * the tag.
- */
-typedef uint8_t big_number[BIG_BYTES];
 
 /* Sets a number to zero. */
 static void
@@ -913,9 +999,10 @@ big_multiply(
 
 	/* The columns of the long multiplication; each stays far below 2^32. */
 	memset(column, 0, sizeof(column));
-	for (row = 0; row < BIG_BYTES; row++)
+	for (row = 0; row < BIG_BYTES; row++) {
 		for (index = 0; row + index < BIG_BYTES; index++)
 			column[row + index] += (uint32_t)left[row] * (uint32_t)right[index];
+	}
 
 	/* Carries between the columns. */
 	carry = 0;
@@ -941,6 +1028,8 @@ big_at_least(
 		if (left[index - 1U] < right[index - 1U])
 			return 0;
 	}
+
+	/* Succeeded: the numbers are equal, which counts as at least. */
 	return 1;
 }
 
@@ -963,6 +1052,8 @@ big_subtract(
 			difference += 256;
 			borrow = 1;
 		}
+
+		/* The byte of the difference. */
 		number[index] = (uint8_t)difference;
 	}
 }
@@ -982,6 +1073,7 @@ big_reduce(
 	unsigned carry;
 	unsigned value;
 	int again;
+	int at_least;
 	size_t index;
 
 	/* P in bytes: 2^130 - 5 is fb, then 15 bytes of ff, then 03. */
@@ -1004,6 +1096,8 @@ big_reduce(
 			if (value != 0U)
 				again = 1;
 		}
+
+		/* Nothing above bit 130 means the fold is done. */
 		if (!again)
 			break;
 
@@ -1017,11 +1111,14 @@ big_reduce(
 			five_high[index] = (uint8_t)(value & 0xffU);
 			carry = value >> 8;
 		}
+
+		/* Adds the folded part. */
 		big_add(number, five_high);
 	} while (again);
 
 	/* Less than 2^130 but possibly at least P. */
-	if (big_at_least(number, prime))
+	at_least = big_at_least(number, prime);
+	if (at_least)
 		big_subtract(number, prime);
 }
 
@@ -1085,10 +1182,16 @@ poly1305_oneshot(
 	uint8_t *tag)
 {
 	struct cryc_poly1305 mac;
+	const uint8_t *piece;
 
-	/* The three calls; a NULL message is allowed for size 0. */
+	/* A NULL message is allowed for size 0. */
+	piece = message;
+	if (size == 0U)
+		piece = NULL;
+
+	/* The three calls. */
 	cryc_poly1305_init(&mac, key);
-	cryc_poly1305_update(&mac, size == 0U ? NULL : message, size);
+	cryc_poly1305_update(&mac, piece, size);
 	cryc_poly1305_final(&mac, tag);
 }
 
@@ -1104,6 +1207,7 @@ poly1305_pieces(
 	struct cryc_poly1305 mac;
 	size_t offset;
 	size_t take;
+	const uint8_t *piece;
 
 	/* A piece of size 0 is passed with a NULL pointer. */
 	cryc_poly1305_init(&mac, key);
@@ -1112,9 +1216,14 @@ poly1305_pieces(
 		take = random_below(limit + 1U);
 		if (take > size - offset)
 			take = size - offset;
-		cryc_poly1305_update(&mac, take == 0U ? NULL : message + offset, take);
+		piece = message + offset;
+		if (take == 0U)
+			piece = NULL;
+		cryc_poly1305_update(&mac, piece, take);
 		offset += take;
 	}
+
+	/* The tag over the pieces. */
 	cryc_poly1305_final(&mac, tag);
 }
 
@@ -1133,6 +1242,10 @@ check_mac_vector(
 	size_t size;
 	size_t split;
 	size_t second;
+	size_t step;
+	const uint8_t *piece_one;
+	const uint8_t *piece_two;
+	const uint8_t *piece_three;
 
 	/* The inputs. */
 	CHECK(unhex(key_hex, key, sizeof(key)) == 32U);
@@ -1148,10 +1261,19 @@ check_mac_vector(
 	CHECK_BYTES(tag, expected, 16U);
 
 	/* Two pieces at every split point (for the short messages; every 7th for the longer). */
-	for (split = 0; split <= size; split += size > 40U ? 7U : 1U) {
+	step = 1U;
+	if (size > 40U)
+		step = 7U;
+	for (split = 0; split <= size; split += step) {
+		piece_one = message;
+		if (split == 0U)
+			piece_one = NULL;
+		piece_two = message + split;
+		if (split == size)
+			piece_two = NULL;
 		cryc_poly1305_init(&mac, key);
-		cryc_poly1305_update(&mac, split == 0U ? NULL : message, split);
-		cryc_poly1305_update(&mac, split == size ? NULL : message + split, size - split);
+		cryc_poly1305_update(&mac, piece_one, split);
+		cryc_poly1305_update(&mac, piece_two, size - split);
 		cryc_poly1305_final(&mac, tag);
 		CHECK_BYTES(tag, expected, 16U);
 	}
@@ -1160,10 +1282,19 @@ check_mac_vector(
 	if (size <= 40U) {
 		for (split = 0; split <= size; split++) {
 			for (second = split; second <= size; second++) {
+				piece_one = message;
+				if (split == 0U)
+					piece_one = NULL;
+				piece_two = message + split;
+				if (second == split)
+					piece_two = NULL;
+				piece_three = message + second;
+				if (second == size)
+					piece_three = NULL;
 				cryc_poly1305_init(&mac, key);
-				cryc_poly1305_update(&mac, split == 0U ? NULL : message, split);
-				cryc_poly1305_update(&mac, second == split ? NULL : message + split, second - split);
-				cryc_poly1305_update(&mac, second == size ? NULL : message + second, size - second);
+				cryc_poly1305_update(&mac, piece_one, split);
+				cryc_poly1305_update(&mac, piece_two, second - split);
+				cryc_poly1305_update(&mac, piece_three, size - second);
 				cryc_poly1305_final(&mac, tag);
 				CHECK_BYTES(tag, expected, 16U);
 			}
@@ -1372,12 +1503,26 @@ check_aead(
 {
 	uint8_t output[MESSAGE_BYTES + 8U];
 	uint8_t got_tag[16 + 4];
+	const uint8_t *aad_arg;
+	const uint8_t *plain_arg;
+	const uint8_t *cipher_arg;
 	int error;
+
+	/* The pointers of an empty plaintext or empty additional data are NULL. */
+	aad_arg = aad;
+	if (aad_size == 0U)
+		aad_arg = NULL;
+	plain_arg = plain;
+	cipher_arg = cipher;
+	if (size == 0U) {
+		plain_arg = NULL;
+		cipher_arg = NULL;
+	}
 
 	/* Seal out of place. */
 	memset(output, SENTINEL_BYTE, sizeof(output));
 	memset(got_tag, SENTINEL_BYTE, sizeof(got_tag));
-	error = cryc_chacha20_poly1305_seal(key, nonce, aad_size == 0U ? NULL : aad, aad_size, size == 0U ? NULL : plain, size, output, got_tag);
+	error = cryc_chacha20_poly1305_seal(key, nonce, aad_arg, aad_size, plain_arg, size, output, got_tag);
 	CHECK(error == 0);
 	CHECK_BYTES(output, cipher, size);
 	CHECK_BYTES(got_tag, tag, 16U);
@@ -1388,7 +1533,7 @@ check_aead(
 	memset(output, SENTINEL_BYTE, sizeof(output));
 	if (size > 0U)
 		memcpy(output, plain, size);
-	error = cryc_chacha20_poly1305_seal(key, nonce, aad_size == 0U ? NULL : aad, aad_size, output, size, output, got_tag);
+	error = cryc_chacha20_poly1305_seal(key, nonce, aad_arg, aad_size, output, size, output, got_tag);
 	CHECK(error == 0);
 	CHECK_BYTES(output, cipher, size);
 	CHECK_BYTES(got_tag, tag, 16U);
@@ -1396,7 +1541,7 @@ check_aead(
 
 	/* Open out of place: the plaintext back, the ciphertext untouched. */
 	memset(output, SENTINEL_BYTE, sizeof(output));
-	error = cryc_chacha20_poly1305_open(key, nonce, aad_size == 0U ? NULL : aad, aad_size, size == 0U ? NULL : cipher, size, output, tag);
+	error = cryc_chacha20_poly1305_open(key, nonce, aad_arg, aad_size, cipher_arg, size, output, tag);
 	CHECK(error == 0);
 	CHECK_BYTES(output, plain, size);
 	CHECK(all_equal(output + size, 8U, SENTINEL_BYTE));
@@ -1405,7 +1550,7 @@ check_aead(
 	memset(output, SENTINEL_BYTE, sizeof(output));
 	if (size > 0U)
 		memcpy(output, cipher, size);
-	error = cryc_chacha20_poly1305_open(key, nonce, aad_size == 0U ? NULL : aad, aad_size, output, size, output, tag);
+	error = cryc_chacha20_poly1305_open(key, nonce, aad_arg, aad_size, output, size, output, tag);
 	CHECK(error == 0);
 	CHECK_BYTES(output, plain, size);
 	CHECK(all_equal(output + size, 8U, SENTINEL_BYTE));
@@ -1428,13 +1573,23 @@ check_open_fails(
 {
 	uint8_t input[MESSAGE_BYTES];
 	uint8_t output[MESSAGE_BYTES + 8U];
+	const uint8_t *aad_arg;
+	const uint8_t *input_arg;
 	int error;
+
+	/* The pointers of an empty ciphertext or empty additional data are NULL. */
+	aad_arg = aad;
+	if (aad_size == 0U)
+		aad_arg = NULL;
+	input_arg = input;
+	if (size == 0U)
+		input_arg = NULL;
 
 	/* Out of place. */
 	if (size > 0U)
 		memcpy(input, cipher, size);
 	memset(output, SENTINEL_BYTE, sizeof(output));
-	error = cryc_chacha20_poly1305_open(key, nonce, aad_size == 0U ? NULL : aad, aad_size, size == 0U ? NULL : input, size, output, tag);
+	error = cryc_chacha20_poly1305_open(key, nonce, aad_arg, aad_size, input_arg, size, output, tag);
 	CHECK(error == EBADMSG);
 	CHECK(all_equal(output, size, 0U));
 	CHECK(all_equal(output + size, 8U, SENTINEL_BYTE));
@@ -1444,7 +1599,7 @@ check_open_fails(
 	memset(output, SENTINEL_BYTE, sizeof(output));
 	if (size > 0U)
 		memcpy(output, cipher, size);
-	error = cryc_chacha20_poly1305_open(key, nonce, aad_size == 0U ? NULL : aad, aad_size, output, size, output, tag);
+	error = cryc_chacha20_poly1305_open(key, nonce, aad_arg, aad_size, output, size, output, tag);
 	CHECK(error == EBADMSG);
 	CHECK(all_equal(output, size, 0U));
 	CHECK(all_equal(output + size, 8U, SENTINEL_BYTE));
@@ -1504,21 +1659,29 @@ test_aead_rfc(void)
 		flip_bit(changed_key, bit);
 		check_open_fails(changed_key, nonce, aad, aad_size, cipher, size, tag);
 	}
+
+	/* The nonce. */
 	for (bit = 0; bit < 8U * sizeof(nonce); bit++) {
 		memcpy(changed_nonce, nonce, sizeof(nonce));
 		flip_bit(changed_nonce, bit);
 		check_open_fails(key, changed_nonce, aad, aad_size, cipher, size, tag);
 	}
+
+	/* The additional data. */
 	for (bit = 0; bit < 8U * aad_size; bit++) {
 		memcpy(changed_aad, aad, aad_size);
 		flip_bit(changed_aad, bit);
 		check_open_fails(key, nonce, changed_aad, aad_size, cipher, size, tag);
 	}
+
+	/* The ciphertext. */
 	for (bit = 0; bit < 8U * size; bit++) {
 		memcpy(changed_cipher, cipher, size);
 		flip_bit(changed_cipher, bit);
 		check_open_fails(key, nonce, aad, aad_size, changed_cipher, size, tag);
 	}
+
+	/* The tag. */
 	for (bit = 0; bit < 8U * sizeof(tag); bit++) {
 		memcpy(changed_tag, tag, sizeof(tag));
 		flip_bit(changed_tag, bit);
@@ -1579,13 +1742,21 @@ test_wycheproof(void)
 	size_t cipher_size;
 	size_t tag_size;
 	int accepted;
+	int opened;
+	int more;
+	int different;
 
-	/* Every record. */
-	if (vec_open(&file, "wycheproof-chacha20_poly1305_test") != 0) {
+	/* Opens the vector file. */
+	opened = vec_open(&file, "wycheproof-chacha20_poly1305_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
-	while (vec_next(&file)) {
+
+	/* Checks every record. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		CHECK(result != NULL);
 		if (result == NULL)
@@ -1594,19 +1765,44 @@ test_wycheproof(void)
 		/* Only 256-bit keys, 96-bit nonces and 128-bit tags are in the interface. */
 		text = vec_get(&file, "group.ivSize");
 		CHECK(text != NULL);
-		if (text == NULL || strcmp(text, "96") != 0) {
+		if (text == NULL) {
 			wycheproof_skipped++;
 			continue;
 		}
+
+		/* The nonce size must be 96 bits. */
+		different = strcmp(text, "96");
+		if (different != 0) {
+			wycheproof_skipped++;
+			continue;
+		}
+
+		/* The tag size. */
 		text = vec_get(&file, "group.tagSize");
 		CHECK(text != NULL);
-		if (text == NULL || strcmp(text, "128") != 0) {
+		if (text == NULL) {
 			wycheproof_skipped++;
 			continue;
 		}
+
+		/* The tag size must be 128 bits. */
+		different = strcmp(text, "128");
+		if (different != 0) {
+			wycheproof_skipped++;
+			continue;
+		}
+
+		/* The key size. */
 		text = vec_get(&file, "group.keySize");
 		CHECK(text != NULL);
-		if (text == NULL || strcmp(text, "256") != 0) {
+		if (text == NULL) {
+			wycheproof_skipped++;
+			continue;
+		}
+
+		/* The key size must be 256 bits. */
+		different = strcmp(text, "256");
+		if (different != 0) {
 			wycheproof_skipped++;
 			continue;
 		}
@@ -1620,17 +1816,27 @@ test_wycheproof(void)
 		tag_size = vec_hex(&file, "tag", tag, sizeof(tag));
 		CHECK(key_size == 32U && nonce_size == 12U && tag_size == 16U);
 		CHECK(aad_size != (size_t)-1 && size != (size_t)-1 && cipher_size == size);
-		if (key_size != 32U || nonce_size != 12U || tag_size != 16U || aad_size == (size_t)-1 || size == (size_t)-1 || cipher_size != size)
+		if (key_size != 32U ||
+		    nonce_size != 12U ||
+		    tag_size != 16U ||
+		    aad_size == (size_t)-1 ||
+		    size == (size_t)-1 ||
+		    cipher_size != size)
 			continue;
 
 		/* A valid record seals to the ciphertext and tag and opens back. */
-		accepted = strcmp(result, "valid") == 0;
+		different = strcmp(result, "valid");
+		accepted = 0;
+		if (different == 0)
+			accepted = 1;
 		if (accepted)
 			check_aead(key, nonce, aad, aad_size, message, size, cipher, tag);
 		else
 			check_open_fails(key, nonce, aad, aad_size, cipher, size, tag);
 		wycheproof_checked++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 }
 
@@ -1690,6 +1896,8 @@ test_aead_generated(void)
 			flip_bit(changed, random_below(8U * size));
 			check_open_fails(key, nonce, aad, aad_size, changed, size, tag);
 		}
+
+		/* The tag. */
 		memcpy(changed_tag, tag, sizeof(tag));
 		bit = random_below(8U * sizeof(tag));
 		flip_bit(changed_tag, bit);

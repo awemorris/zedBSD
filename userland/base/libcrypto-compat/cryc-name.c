@@ -243,6 +243,8 @@ cryc_name_host_normalize(
 				out[0] = '\0';
 				return EINVAL;
 			}
+
+			/* Starts the next label. */
 			label_length = 0;
 		} else {
 			if (!((character >= 'a' && character <= 'z') ||
@@ -252,12 +254,16 @@ cryc_name_host_normalize(
 				out[0] = '\0';
 				return EINVAL;
 			}
+
+			/* Counts the character in its label and refuses a label that is too long. */
 			label_length++;
 			if (label_length > NAME_LABEL_MAX) {
 				out[0] = '\0';
 				return EINVAL;
 			}
 		}
+
+		/* Stores the character in lower case. */
 		out[index] = (char)name_lower(character);
 	}
 
@@ -543,6 +549,8 @@ name_text_equal(
 			equal = 0;
 			break;
 		}
+
+		/* Stops when the left name has no more characters. */
 		if (left_character < 0)
 			break;
 	}
@@ -679,6 +687,8 @@ name_check_structure(
 			if (error != 0)
 				return EINVAL;
 		}
+
+		/* Counts the element. */
 		count++;
 	}
 
@@ -784,6 +794,8 @@ name_rdn_equal(
 			equal = 0;
 			break;
 		}
+
+		/* Reads the next attribute of the right set. */
 		error = name_read_attribute(&right_set, &right_type, &right_value);
 		if (error != 0) {
 			equal = 0;
@@ -795,6 +807,8 @@ name_rdn_equal(
 			equal = 0;
 			break;
 		}
+
+		/* Compares the attribute types. */
 		difference = memcmp(left_type.contents, right_type.contents, left_type.length);
 		if (difference != 0) {
 			equal = 0;
@@ -868,11 +882,15 @@ name_rdns_equal(
 			equal = 0;
 			break;
 		}
+
+		/* Reads the next RDN of the right name. */
 		error = cryc_der_expect(&right_names, CRYC_DER_SET, &right_rdn);
 		if (error != 0) {
 			equal = 0;
 			break;
 		}
+
+		/* Compares the two RDNs. */
 		same = name_rdn_equal(&left_rdn, &right_rdn);
 		if (!same) {
 			equal = 0;
@@ -965,6 +983,8 @@ name_dns_valid(
 				if (size > 1U && text[1] != '.')
 					return EINVAL;
 			}
+
+			/* Counts the character in its label and refuses a label that is too long. */
 			label_length++;
 			if (label_length > NAME_LABEL_MAX)
 				return EINVAL;
@@ -1139,9 +1159,13 @@ name_presented_matches(
 				if (presented_size > 1U && presented[1] != '.')
 					return 0;
 			}
+
+			/* Counts the character in its label. */
 			label_length++;
 		}
 	}
+
+	/* Refuses a name without any label. */
 	if (label_length == 0)
 		return 0;
 
@@ -1336,6 +1360,8 @@ name_ip_constraint_valid(
 					return EINVAL;
 				continue;
 			}
+
+			/* Refuses a mask whose set bits are not one run from the top. */
 			inverse = (unsigned)(mask[index] ^ 0xff);
 			if ((inverse & (inverse + 1U)) != 0U)
 				return EINVAL;

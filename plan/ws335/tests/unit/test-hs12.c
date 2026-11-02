@@ -144,6 +144,98 @@ static struct replay replay_plain;
 static struct replay replay_full;
 
 /* Draws size bytes from the stream; fails at the call fail_at names. */
+static int stream_random(void *context, uint8_t *out, size_t size);
+
+/* The verification callback: counts, records, answers as told. */
+static int verify_callback(void *context, int preverified, enum cryc_verify_code code);
+
+/* Returns 1 when two sets of record keys are equal. */
+static int keys_equal(const struct sslc_traffic_keys *left, const struct sslc_traffic_keys *right);
+
+/* Makes a run: a client of min to max trusting root (may be NULL), verifying host at the PKI time. */
+static struct run * run_new(uint16_t min_version, uint16_t max_version, const struct tlspeer_pki *root, const char *host);
+
+/* Frees a run and its peer. */
+static void run_free(struct run *run);
+
+/* Appends a letter to the run's log of actions. */
+static void log_action(struct run *run, char letter);
+
+/* Carries out the client's actions of the last call against the peer (when there is one). */
+static void apply(struct run *run);
+
+/* Feeds the peer's items to the client (checking the client reads each under the peer's keys) until none wait or the client fails. */
+static void pump(struct run *run);
+
+/* Makes the run's peer from config. */
+static int run_peer(struct run *run, const struct tlspeer_config *config);
+
+/* Starts the client and runs the exchange until it ends; returns the client's error. */
+static int go(struct run *run);
+
+/* Feeds the client one message (no peer) and carries out the actions. */
+static void feed(struct run *run, const uint8_t *message, size_t size);
+
+/* Returns 1 when size bytes at bytes are all zero. */
+static int all_zero(const uint8_t *bytes, size_t size);
+
+/* Checks that a run ended in a failure with error and alert, and that the failed handshake refuses more and holds no secret. */
+static void expect_failed(struct run *run, int error, unsigned alert);
+
+/* Checks that a run completed a TLS 1.2 handshake with the peer; log is the client's actions, ems what both sides used. */
+static void check_connected(struct run *run, const char *log, int ems);
+
+/* Makes a TLS 1.2 peer config over pki. */
+static void peer12(struct tlspeer_config *config, const struct tlspeer_pki *pki);
+
+/* Runs a full handshake against config with a client of min to max for host trusting pki; returns the run (to be freed). */
+static struct run * handshake(const struct tlspeer_config *config, const struct tlspeer_pki *pki, uint16_t max_version, const char *host);
+
+/* Runs a handshake that the client must refuse, and checks the failure. */
+static void check_peer_fails(const struct tlspeer_config *config, const struct tlspeer_pki *pki, uint16_t max_version, const char *host, int error, unsigned alert);
+
+/* Records the server's items of a handshake with config from a client of host (a 1.2-only client of seed 0). */
+static void record_replay(const struct tlspeer_config *config, const struct tlspeer_pki *pki, struct replay *replay);
+
+/* Feeds item number item of a replay to a run. */
+static void feed_item(struct run *run, const struct replay *replay, size_t item);
+
+/* Starts a fresh 1.2-only client (no peer) and feeds it the first count items of a replay; returns the run. */
+static struct run * run_prefix(const struct replay *replay, size_t count);
+
+static struct run * replay_run(const struct replay *replay, size_t index, const uint8_t *message, size_t size);
+
+/* Writes a handshake message of type with a body of size bytes into out; returns its size. */
+static size_t message_make(unsigned type, const uint8_t *body, size_t size, uint8_t *out);
+
+/* Fills a ServerHello of the plain kind: no session id, ECDHE_ECDSA_AES_128_GCM, an empty renegotiation_info. */
+static void sh_default(struct sh_spec *spec);
+
+/* Writes a hand-made ServerHello message into out; returns its size. */
+static size_t sh_write(const struct sh_spec *spec, uint8_t *out, size_t room);
+
+/* Starts a client without a peer and feeds it a hand-made ServerHello; returns the run. */
+static struct run * feed_sh(uint16_t max_version, const char *host, const struct sh_spec *spec);
+
+/* Feeds a hand-made ServerHello and checks the failure. */
+static void check_sh(uint16_t max_version, const char *host, const struct sh_spec *spec, int error, unsigned alert);
+
+/* Feeds a hand-made ServerHello and checks that the client takes it and waits for the Certificate. */
+static void check_sh_taken(uint16_t max_version, const char *host, const struct sh_spec *spec, int ems);
+
+/* Replaces every occurrence of the size bytes from by to in data; returns how many. */
+static unsigned patch(uint8_t *data, size_t data_size, const uint8_t *from, const uint8_t *to, size_t size);
+
+/* Writes a ServerKeyExchange of the given fields into out; returns its size. */
+static size_t ske_write(uint8_t *out, size_t room, unsigned curve_type, uint16_t group, const uint8_t *point, size_t point_size, uint16_t scheme, const uint8_t *signature, size_t signature_size);
+
+/* Feeds the replayed flight with the ServerKeyExchange (item 2) replaced; checks the failure. */
+static void check_ske(const struct replay *replay, const uint8_t *message, size_t size, int error, unsigned alert);
+
+/* Checks that truncated and altered server messages never complete a handshake and never fault. */
+static void test_altered(const struct replay *replay, size_t step);
+
+/* Draws size bytes from the stream; fails at the call fail_at names. */
 static int
 stream_random(
 	void *context,
@@ -173,6 +265,8 @@ stream_random(
 		cryc_hash_digest(CRYC_HASH_SHA256, input, 16, block);
 		out[index] = block[position % 32U];
 	}
+
+	/* Counts the bytes drawn so far. */
 	stream->position += size;
 	return 0;
 }
@@ -200,15 +294,25 @@ keys_equal(
 	const struct sslc_traffic_keys *left,
 	const struct sslc_traffic_keys *right)
 {
+	int different;
+
 	/* Every field that the record layer uses. */
 	if (left->suite != right->suite)
 		return 0;
 	if (left->key_size != right->key_size || left->iv_size != right->iv_size)
 		return 0;
-	if (memcmp(left->key, right->key, left->key_size) != 0)
+
+	/* Compares the keys. */
+	different = memcmp(left->key, right->key, left->key_size);
+	if (different != 0)
 		return 0;
-	if (memcmp(left->iv, right->iv, left->iv_size) != 0)
+
+	/* Compares the IVs. */
+	different = memcmp(left->iv, right->iv, left->iv_size);
+	if (different != 0)
 		return 0;
+
+	/* Succeeded: the keys are equal. */
 	return 1;
 }
 
@@ -228,6 +332,8 @@ run_new(
 		CHECK(0);
 		return NULL;
 	}
+
+	/* Makes the certificate store. */
 	CHECK(cryc_store_init(&run->store) == 0);
 	if (root != NULL)
 		CHECK(cryc_store_add_der(&run->store, root->root, root->root_size) == 0);
@@ -243,6 +349,8 @@ run_new(
 		CHECK(cryc_name_host_normalize(host, run->config.params.host) == 0);
 		run->config.server_name = run->config.params.host;
 	}
+
+	/* Asks for certificate verification and gives the client the stream of random bytes. */
 	run->config.verify_peer = 1;
 	run->config.random = stream_random;
 	run->config.random_context = &run->stream;
@@ -288,6 +396,7 @@ apply(
 	size_t index;
 	size_t offset;
 	size_t length;
+	int equal;
 	int error;
 
 	/* In order. */
@@ -305,19 +414,26 @@ apply(
 					CHECK(0);
 					break;
 				}
+
+				/* Takes the length from the message's header. */
 				length = 4U + cryc_load_be24(bytes + 1);
 				if (length > action->size - offset) {
 					CHECK(0);
 					break;
 				}
+
+				/* Counts the message. */
 				run->messages_sent++;
 				if (run->peer != NULL) {
 					error = tlspeer_handshake(run->peer, bytes, length);
 					if (error != 0 && run->peer_error == 0)
 						run->peer_error = error;
 				}
+
+				/* Moves on to the next message of the action. */
 				offset += length;
 			}
+
 			break;
 		case SSLC_HS_SEND_CCS:
 			log_action(run, 'C');
@@ -326,6 +442,7 @@ apply(
 				if (error != 0 && run->peer_error == 0)
 					run->peer_error = error;
 			}
+
 			break;
 		case SSLC_HS_SEND_WARNING:
 			log_action(run, 'A');
@@ -342,11 +459,18 @@ apply(
 
 			/* TLS 1.2 changes the write keys once, to the keys of the key block. */
 			if (run->peer != NULL) {
-				if (run->write_changes == 0U && !keys_equal(&action->keys, &run->peer->client_application_keys))
-					run->key_mismatch++;
+				if (run->write_changes == 0U) {
+					equal = keys_equal(&action->keys, &run->peer->client_application_keys);
+					if (!equal)
+						run->key_mismatch++;
+				}
+
+				/* Every later change is a violation. */
 				if (run->write_changes > 0U)
 					run->key_mismatch++;
 			}
+
+			/* Counts the key change. */
 			run->write_changes++;
 			break;
 		case SSLC_HS_DONE:
@@ -367,6 +491,7 @@ pump(
 {
 	static uint8_t copy[TLSPEER_MESSAGE_MAX];
 	struct tlspeer_item item;
+	int equal;
 	int more;
 
 	/* One item at a time; the client's answers may make more. */
@@ -378,8 +503,15 @@ pump(
 		if (item.kind == TLSPEER_ITEM_HANDSHAKE) {
 			if (item.epoch == 0U && run->read_keyed)
 				run->key_mismatch++;
-			if (item.epoch != 0U && (!run->read_keyed || !keys_equal(&run->peer->write_keys[item.epoch], &run->read_keys)))
-				run->key_mismatch++;
+			if (item.epoch != 0U) {
+				equal = 0;
+				if (run->read_keyed)
+					equal = keys_equal(&run->peer->write_keys[item.epoch], &run->read_keys);
+				if (!equal)
+					run->key_mismatch++;
+			}
+
+			/* Feeds the message to the client. */
 			run->error = sslc_hs_message(&run->hs, copy, item.size, &run->actions);
 		} else if (item.kind == TLSPEER_ITEM_CCS) {
 			run->error = sslc_hs_change_cipher_spec(&run->hs, &run->actions);
@@ -387,6 +519,8 @@ pump(
 			CHECK(0);
 			break;
 		}
+
+		/* Applies the next action unless the handshake already failed. */
 		if (run->error == 0)
 			apply(run);
 	}
@@ -447,6 +581,8 @@ all_zero(
 		if (bytes[index] != 0U)
 			return 0;
 	}
+
+	/* Succeeded: every byte is zero. */
 	return 1;
 }
 
@@ -487,11 +623,20 @@ check_connected(
 	const char *log,
 	int ems)
 {
+	const char *why;
+	int different;
+
 	/* Both sides finished, with the same keys, one change_cipher_spec from the client. */
 	CHECK(run->error == 0);
 	CHECK(run->peer_error == 0);
-	if (run->error != 0 || run->peer_error != 0)
-		printf("  error %d alert %u peer %d (%s)\n", run->error, run->hs.alert, run->peer_error, run->peer->why != NULL ? run->peer->why : "");
+	if (run->error != 0 || run->peer_error != 0) {
+		why = "";
+		if (run->peer->why != NULL)
+			why = run->peer->why;
+		printf("  error %d alert %u peer %d (%s)\n", run->error, run->hs.alert, run->peer_error, why);
+	}
+
+	/* Checks that the run finished. */
 	CHECK(run->done == 1);
 	CHECK(sslc_hs_connected(&run->hs) == 1);
 	CHECK(run->hs.state == SSLC_HS12_CONNECTED);
@@ -502,7 +647,8 @@ check_connected(
 	CHECK(run->key_mismatch == 0U);
 	CHECK(run->write_changes == 1U);
 	CHECK(strcmp(run->log, log) == 0);
-	if (strcmp(run->log, log) != 0)
+	different = strcmp(run->log, log);
+	if (different != 0)
 		printf("  log %s, expected %s\n", run->log, log);
 	CHECK(run->hs.extended_master_secret == ems);
 	CHECK(run->peer->ems == ems);
@@ -532,10 +678,12 @@ handshake(
 	const char *host)
 {
 	struct run *run;
+	int error;
 
 	/* A client and its peer, run to the end. */
 	run = run_new(SSLC_TLS12, max_version, pki, host);
-	if (run_peer(run, config) != 0)
+	error = run_peer(run, config);
+	if (error != 0)
 		return run;
 	go(run);
 	return run;
@@ -575,10 +723,13 @@ record_replay(
 	memset(replay, 0, sizeof(*replay));
 	replay->pki = pki;
 	run = run_new(SSLC_TLS12, SSLC_TLS12, pki, "server.test");
-	if (run_peer(run, config) != 0) {
+	error = run_peer(run, config);
+	if (error != 0) {
 		run_free(run);
 		return;
 	}
+
+	/* Starts the handshake and applies its first actions. */
 	run->error = sslc_hs_start(&run->hs, &run->config, &run->actions);
 	apply(run);
 	while (run->error == 0) {
@@ -589,6 +740,8 @@ record_replay(
 			CHECK(0);
 			break;
 		}
+
+		/* Keeps the item for the later replay. */
 		replay->kind[replay->count] = item.kind;
 		memcpy(replay->data[replay->count], item.data, item.size);
 		replay->size[replay->count] = item.size;
@@ -601,6 +754,8 @@ record_replay(
 		if (error == 0)
 			apply(run);
 	}
+
+	/* Checks that the handshake completed. */
 	CHECK(run->error == 0);
 	CHECK(run->done == 1);
 	CHECK(run->peer->state == TLSPEER_CONNECTED);
@@ -620,6 +775,8 @@ feed_item(
 	} else {
 		run->error = sslc_hs_change_cipher_spec(&run->hs, &run->actions);
 	}
+
+	/* Applies the actions unless the handshake already failed. */
 	if (run->error == 0)
 		apply(run);
 }
@@ -668,6 +825,8 @@ replay_run(
 			feed_item(run, replay, item);
 		}
 	}
+
+	/* Reports the finished run. */
 	return run;
 }
 
@@ -740,6 +899,8 @@ sh_write(
 		tlspeer_put_int(&writer, 1, 1);
 		tlspeer_put(&writer, renegotiated, 1);
 	}
+
+	/* Adds the extended master secret extension when the spec has it. */
 	if (spec->extended_master)
 		tlspeer_put_extension(&writer, SSLC_EXT_EXTENDED_MASTER_SECRET, NULL, 0);
 	if (spec->point_formats) {
@@ -748,6 +909,8 @@ sh_write(
 		tlspeer_put_int(&writer, 1, 1);
 		tlspeer_put_int(&writer, 0, 1);
 	}
+
+	/* Adds the server name extension when the spec has it. */
 	if (spec->server_name)
 		tlspeer_put_extension(&writer, SSLC_EXT_SERVER_NAME, NULL, 0);
 	if (spec->share) {
@@ -759,11 +922,15 @@ sh_write(
 		tlspeer_end(&writer);
 		tlspeer_end(&writer);
 	}
+
+	/* Adds the supported versions extension when the spec has a version. */
 	if (spec->version != 0U) {
 		tlspeer_put_int(&writer, SSLC_EXT_SUPPORTED_VERSIONS, 2);
 		tlspeer_put_int(&writer, 2, 2);
 		tlspeer_put_int(&writer, spec->version, 2);
 	}
+
+	/* Adds the cookie extension when the spec has one. */
 	if (spec->cookie) {
 		tlspeer_put_int(&writer, SSLC_EXT_COOKIE, 2);
 		tlspeer_begin(&writer, 2);
@@ -772,6 +939,8 @@ sh_write(
 		tlspeer_end(&writer);
 		tlspeer_end(&writer);
 	}
+
+	/* Adds the extra extension when the spec has one. */
 	if (spec->has_extra)
 		tlspeer_put_extension(&writer, spec->extra_type, NULL, 0);
 	tlspeer_end(&writer);
@@ -792,10 +961,12 @@ feed_sh(
 	static uint8_t message[4096];
 	struct run *run;
 	size_t size;
+	int error;
 
 	/* A client, its ClientHello sent nowhere, the message. */
 	run = run_new(SSLC_TLS12, max_version, &pki256, host);
-	if (go(run) != 0)
+	error = go(run);
+	if (error != 0)
 		CHECK(0);
 	size = sh_write(spec, message, sizeof(message));
 	feed(run, message, size);
@@ -852,15 +1023,19 @@ patch(
 {
 	size_t index;
 	unsigned count;
+	int different;
 
 	/* A scan. */
 	count = 0;
 	for (index = 0; index + size <= data_size; index++) {
-		if (memcmp(data + index, from, size) == 0) {
+		different = memcmp(data + index, from, size);
+		if (different == 0) {
 			memcpy(data + index, to, size);
 			count++;
 		}
 	}
+
+	/* Reports how many were found. */
 	return count;
 }
 
@@ -869,6 +1044,46 @@ patch(
  * three suites, the three groups, both leaves, a client of TLS 1.2 alone and
  * of 1.2 and 1.3, with the optional parts of the server varied.
  */
+static void test_handshakes(void);
+
+/* Checks the random draws: the client random, the x25519 key, and the secp256r1 key when the server asks for it. */
+static void test_draws(void);
+
+/* Checks each break of the peer. */
+static void test_breaks(void);
+
+/* Checks hand-made ServerHellos against each check of the header. */
+static void test_server_hello(void);
+
+static void test_session_id(void);
+
+/* Checks hand-made ServerKeyExchange messages against each check of the header. */
+static void test_server_key_exchange(void);
+
+/* Checks the suite, scheme and key combinations a ServerKeyExchange may use (the key is EC; RSA keys are for the interoperability tests). */
+static void test_scheme_suite(void);
+
+/* Checks the order of the messages: each type in each state, and the states' own messages. */
+static void test_order(void);
+
+/* Checks the CertificateRequest and the ServerHelloDone. */
+static void test_request_and_done(void);
+
+/* Checks the client's flight: its actions, its messages' bytes, and that no secret but the master secret waits. */
+static void test_flight(void);
+
+/* Checks the Finished messages: wrong lengths, and the length of the server's. */
+static void test_finished(void);
+
+/* Checks HelloRequest: ignored during the handshake (not in the transcript), answered after it. */
+static void test_hello_request(void);
+
+/* Checks the messages after the handshake: everything but HelloRequest is unexpected_message. */
+static void test_post_handshake(void);
+
+/* Checks the certificate verdicts, the callback and the leaf checks, as TLS 1.2 reaches them. */
+static void test_certificates(void);
+
 static void
 test_handshakes(void)
 {
@@ -885,6 +1100,9 @@ test_handshakes(void)
 	uint32_t options;
 	uint16_t max_version;
 	const char *log;
+	unsigned expected_messages;
+	unsigned expected_ec_public;
+	unsigned expected_shared;
 	int ems;
 
 	/* Every combination, the options of the server chosen by the combination's number. */
@@ -893,8 +1111,12 @@ test_handshakes(void)
 		for (group_index = 0; group_index < 3U; group_index++) {
 			for (curve_index = 0; curve_index < 2U; curve_index++) {
 				for (client_index = 0; client_index < 2U; client_index++) {
-					pki = curve_index == 0U ? &pki256 : &pki384;
-					max_version = client_index == 0U ? SSLC_TLS12 : SSLC_TLS13;
+					pki = &pki384;
+					if (curve_index == 0U)
+						pki = &pki256;
+					max_version = SSLC_TLS13;
+					if (client_index == 0U)
+						max_version = SSLC_TLS12;
 					options = 0;
 					if (count % 2U == 1U)
 						options |= TLSPEER_OPT_SNI_ACK | TLSPEER_OPT_POINT_FORMATS;
@@ -915,21 +1137,36 @@ test_handshakes(void)
 					CHECK(run->hs.suite != NULL && run->hs.suite->id == suite_ids[suite_index]);
 					CHECK(run->hs.verify_code == CRYC_VERIFY_OK);
 					CHECK(run->hs.peer_count == 1U);
-					CHECK(run->messages_sent == ((options & TLSPEER_OPT_CERT_REQUEST) != 0U ? 4U : 3U));
+					expected_messages = 3U;
+					if ((options & TLSPEER_OPT_CERT_REQUEST) != 0U)
+						expected_messages = 4U;
+					CHECK(run->messages_sent == expected_messages);
 					CHECK(run->hs.has_request == ((options & TLSPEER_OPT_CERT_REQUEST) != 0U));
 					CHECK(run->hs.server_group == groups[group_index]);
 					CHECK(run->hs.has_ec == (groups[group_index] != SSLC_GROUP_X25519));
 					if (groups[group_index] != SSLC_GROUP_X25519) {
 						CHECK(run->hs.ec_group == groups[group_index]);
-						CHECK(run->hs.ec_public_size == (groups[group_index] == SSLC_GROUP_SECP384R1 ? 97U : 65U));
-						CHECK(run->peer->shared_size == (groups[group_index] == SSLC_GROUP_SECP384R1 ? 48U : 32U));
+						expected_ec_public = 65U;
+						expected_shared = 32U;
+						if (groups[group_index] == SSLC_GROUP_SECP384R1) {
+							expected_ec_public = 97U;
+							expected_shared = 48U;
+						}
+
+						/* Checks the sizes the chosen group gives. */
+						CHECK(run->hs.ec_public_size == expected_ec_public);
+						CHECK(run->peer->shared_size == expected_shared);
 					}
+
+					/* Frees the run and counts the combination. */
 					run_free(run);
 					count++;
 				}
 			}
 		}
 	}
+
+	/* Checks that every suite and group combination ran. */
 	CHECK(count == 36U);
 
 	/* The hash of an ECDSA scheme and the curve of the key are independent in TLS 1.2: SHA-256 with P-384, SHA-384 with P-256. */
@@ -1163,19 +1400,21 @@ test_server_hello(void)
 	check_sh(SSLC_TLS12, NULL, &spec, EPROTO, SSLC_ALERT_UNSUPPORTED_EXTENSION);
 	check_sh_taken(SSLC_TLS12, "server.test", &spec, 0);
 
-	/* A cookie outside a HelloRetryRequest is refused (the alert is the parser's, unsupported_extension or illegal_parameter). */
+	/* A cookie outside a HelloRetryRequest is recognized and not specified for a TLS 1.2 ServerHello: illegal_parameter. */
 	sh_default(&spec);
 	spec.cookie = 1;
 	run = feed_sh(SSLC_TLS12, "server.test", &spec);
 	CHECK(run->error == EPROTO);
 	CHECK(run->hs.state == SSLC_HS_FAILED);
-	CHECK(run->hs.alert == SSLC_ALERT_UNSUPPORTED_EXTENSION || run->hs.alert == SSLC_ALERT_ILLEGAL_PARAMETER);
+	CHECK(run->hs.alert == SSLC_ALERT_ILLEGAL_PARAMETER);
 	run_free(run);
 
-	/* An extension nobody asked for is the parser's unsupported_extension. */
+	/* signature_algorithms, which the client offers, has no place in a ServerHello: illegal_parameter (RFC 8446 4.2); ALPN, never offered: unsupported_extension. */
 	sh_default(&spec);
 	spec.has_extra = 1;
 	spec.extra_type = SSLC_EXT_SIGNATURE_ALGORITHMS;
+	check_sh(SSLC_TLS12, "server.test", &spec, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
+	spec.extra_type = SSLC_EXT_ALPN;
 	check_sh(SSLC_TLS12, "server.test", &spec, EPROTO, SSLC_ALERT_UNSUPPORTED_EXTENSION);
 
 	/* The session id: a TLS 1.2 client has sent none, so a server's own id (any length to 32) is no echo. */
@@ -1307,6 +1546,7 @@ test_server_key_exchange(void)
 	static uint8_t signature[16];
 	size_t size;
 	size_t index;
+	size_t point_size;
 
 	/* A point of 32 bytes (x25519) and room for one of up to 100 (secp256r1 is 65, secp384r1 97, uncompressed), neither a signed one. */
 	CHECK(hex_decode(x25519_bob_public, point32, sizeof(point32)) == 32U);
@@ -1326,9 +1566,16 @@ test_server_key_exchange(void)
 
 	/* A point of the wrong form for its group, with a signature that would not verify either: the form is refused first. */
 	for (index = 0; index < 3U; index++) {
-		size = ske_write(message, sizeof(message), 3, 0x001d, point65, index == 0U ? 31U : (index == 1U ? 33U : 1U), 0x0403, bogus_signature, sizeof(bogus_signature));
+		point_size = 1U;
+		if (index == 0U)
+			point_size = 31U;
+		else if (index == 1U)
+			point_size = 33U;
+		size = ske_write(message, sizeof(message), 3, 0x001d, point65, point_size, 0x0403, bogus_signature, sizeof(bogus_signature));
 		check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 	}
+
+	/* Tries a group the suite does not offer, and a point of the wrong size. */
 	size = ske_write(message, sizeof(message), 3, 0x0017, point32, 32, 0x0403, bogus_signature, sizeof(bogus_signature));
 	check_ske(&replay_plain, message, size, EPROTO, SSLC_ALERT_ILLEGAL_PARAMETER);
 	size = ske_write(message, sizeof(message), 3, 0x0017, point65, 64, 0x0403, bogus_signature, sizeof(bogus_signature));
@@ -1716,8 +1963,12 @@ test_hello_request(void)
 				CHECK(run->error == 0);
 				CHECK(run->actions.count == 0U);
 			}
+
+			/* Feeds the item to the client. */
 			feed_item(run, &replay_plain, item);
 		}
+
+		/* Checks that the handshake completed with the expected actions. */
 		CHECK(run->error == 0);
 		CHECK(run->done == 1);
 		CHECK(strcmp(run->log, "SSCWSRD") == 0);

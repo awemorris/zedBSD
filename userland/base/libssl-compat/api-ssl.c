@@ -8,12 +8,11 @@
 /*
  * The public SSL_ and SSL_CTX_ functions.
  *
- * A context keeps the settings of the connections made from it; an SSL
- * reads them when its handshake starts (the first SSL_connect, SSL_read,
- * SSL_write), so a change made to the context between SSL_new and that
- * first call is seen.  The version bounds set on the SSL itself (SSL_ctrl)
- * are kept in the SSL's connection configuration until then and override
- * the context's.
+ * A context keeps the settings of the connections made from it; SSL_new
+ * copies them into the SSL (the version bounds, the options, the verify
+ * mode and callback), as OpenSSL does, so a change made to the context
+ * after SSL_new does not reach that SSL.  The version bounds set on the
+ * SSL itself (SSL_ctrl) replace its copies until its handshake starts.
  *
  * Every public function that fails queues exactly one error of the SSL
  * library (or of the X509 or system library for a file or a socket) and
@@ -531,6 +530,17 @@ SSL_new(
 	ssl->last_error = SSL_ERROR_NONE;
 	ssl->verify_result = X509_V_OK;
 
+	/* The context's settings, copied together under its lock: later changes to the context do not reach this SSL. */
+	cryc_os_mutex_lock(&ctx->lock);
+
+	ssl->min_version = ctx->min_version;
+	ssl->max_version = ctx->max_version;
+	ssl->options = ctx->options;
+	ssl->verify_mode = ctx->verify_mode;
+	ssl->verify_callback = ctx->verify_callback;
+
+	cryc_os_mutex_unlock(&ctx->lock);
+
 	/* The SSL keeps its context, and with it the store, alive until it is freed. */
 	cryc_os_atomic_add(&ctx->references, 1L);
 	ssl->ctx = ctx;
@@ -635,34 +645,23 @@ SSL_ctrl(
 		return 0;
 	}
 
-	/* The SSL's own bounds are the connection configuration's until the connection is made; 0 means the context's. */
-	minimum = ssl->conn.config.min_version;
-	maximum = ssl->conn.config.max_version;
+	/* The SSL's own bounds (copied from the context by SSL_new); 0 means unset. */
+	minimum = ssl->min_version;
+	maximum = ssl->max_version;
 	answer = ssl_version_ctrl(&minimum, &maximum, command, number);
 
 	/* A set that was accepted is kept in the SSL. */
 	if (command == SSL_CTRL_SET_MIN_PROTO_VERSION || command == SSL_CTRL_SET_MAX_PROTO_VERSION) {
 		if (answer == 1L) {
-			ssl->conn.config.min_version = minimum;
-			ssl->conn.config.max_version = maximum;
+			ssl->min_version = minimum;
+			ssl->max_version = maximum;
 		}
 
 		/* Reports 1 for a set kept, 0 for a value refused. */
 		return answer;
 	}
 
-	/* A get answers the SSL's own bound, or the context's when the SSL has none. */
-	if (answer == 0L) {
-		cryc_os_mutex_lock(&ssl->ctx->lock);
-
-		minimum = ssl->ctx->min_version;
-		maximum = ssl->ctx->max_version;
-		answer = ssl_version_ctrl(&minimum, &maximum, command, number);
-
-		cryc_os_mutex_unlock(&ssl->ctx->lock);
-	}
-
-	/* Reports the bound that applies. */
+	/* Reports the SSL's bound (0 when unset). */
 	return answer;
 }
 
@@ -671,7 +670,7 @@ SSL_ctrl(
  * SSL_set1_host: clears the host and the address set before, then an IP
  * address literal (X509_VERIFY_PARAM_set1_ip_asc's forms) sets the address
  * and any other text sets the host name (X509_VERIFY_PARAM_set1_host).
- * NULL clears both.  Returns 1, or 0 for a text that is neither.
+ * NULL or an empty text clears both.  Returns 1, or 0 for a text that is neither.
  */
 int
 SSL_set1_host(
@@ -1063,12 +1062,8 @@ ssl_verify_adapter(
 	ssl->store_ctx.error = verdict;
 	ssl->store_ctx.depth = (int)ssl->conn.hs.verify.depth;
 
-	/* Reads the callback under the lock, and calls it after the lock is released. */
-	cryc_os_mutex_lock(&ssl->ctx->lock);
-
-	callback = ssl->ctx->verify_callback;
-
-	cryc_os_mutex_unlock(&ssl->ctx->lock);
+	/* The SSL's own callback (copied by SSL_new). */
+	callback = ssl->verify_callback;
 
 	/* Without a callback the chain's own verdict decides. */
 	if (callback == NULL) {
@@ -1249,15 +1244,11 @@ ssl_start(
 		return -1;
 	}
 
-	/* Reads the context's settings together, under its lock. */
-	cryc_os_mutex_lock(&ssl->ctx->lock);
-
-	options = ssl->ctx->options;
+	/* The SSL's own options and verify mode (copied by SSL_new). */
+	options = ssl->options;
 	verify_peer = 0;
-	if ((ssl->ctx->verify_mode & SSL_VERIFY_PEER) != 0)
+	if ((ssl->verify_mode & SSL_VERIFY_PEER) != 0)
 		verify_peer = 1;
-
-	cryc_os_mutex_unlock(&ssl->ctx->lock);
 
 	/* Works out the versions the handshake may use from the bounds and the options. */
 	minimum = 0U;
@@ -1293,7 +1284,7 @@ ssl_start(
 	if ((options & SSL_OP_IGNORE_UNEXPECTED_EOF) != 0U)
 		flags |= SSLC_CONN_IGNORE_EOF;
 
-	/* Makes the connection (the SSL's own bounds in its configuration are overwritten, after they were read above). */
+	/* Makes the connection with the configuration filled above. */
 	error = sslc_conn_init(&ssl->conn, &config, &transport, flags);
 	if (error == ENOMEM) {
 		ssl_refuse(ssl, CRYC_R_MALLOC_FAILURE);
@@ -1329,19 +1320,10 @@ ssl_versions(
 	int has_12;
 	int has_13;
 
-	/* The SSL's own bounds first; 0 leaves the choice to the context, whose bounds and options are read together. */
-	low = ssl->conn.config.min_version;
-	high = ssl->conn.config.max_version;
-
-	cryc_os_mutex_lock(&ssl->ctx->lock);
-
-	if (low == 0U)
-		low = ssl->ctx->min_version;
-	if (high == 0U)
-		high = ssl->ctx->max_version;
-	options = ssl->ctx->options;
-
-	cryc_os_mutex_unlock(&ssl->ctx->lock);
+	/* The SSL's own bounds and options (copied by SSL_new, the bounds maybe changed by SSL_ctrl). */
+	low = ssl->min_version;
+	high = ssl->max_version;
+	options = ssl->options;
 
 	/* Unset bounds mean the lowest and the highest version this library has. */
 	if (low == 0U)

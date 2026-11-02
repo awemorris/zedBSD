@@ -146,7 +146,6 @@ static struct limbo_exception limbo_exceptions[] = {
 	{ "rfc5280::serial::zero", "issuance", 0 },
 	{ "rfc5280::ski::intermediate-missing-ski", "issuance", 0 },
 	{ "rfc5280::ski::root-missing-ski", "issuance", 0 },
-	{ "rfc5280::unknown-critical-extension-root", "anchor", 0 },
 	{ "rfc9881::ml-dsa-44", "no-mldsa", 0 },
 	{ "rfc9881::ml-dsa-65", "no-mldsa", 0 },
 	{ "rfc9881::ml-dsa-87", "no-mldsa", 0 },
@@ -229,6 +228,30 @@ static struct prefix_count prefixes[16];
 static unsigned prefix_used;
 static struct reason_count reasons[16];
 
+/* Parses a text IP address into its bytes. */
+static size_t parse_ip(const char *text, unsigned char *out);
+
+/* Reads decimal seconds since 1970. */
+static int64_t parse_time(const char *text);
+
+/* Finds, or adds, the counts of an id's prefix. */
+static struct prefix_count *prefix_of(const char *id);
+
+/* Marks the pool certificates that can chain up from the leaf by name. */
+static void keep_closure(const struct cryc_x509 *leaf, const struct cryc_x509 *candidates, size_t count, int *marks);
+
+/* Counts a case that differs from its expectation. */
+static void count_difference(struct prefix_count *row, const char *id, const char *expected, const char *outcome, size_t depth);
+
+/* Runs one case of the limbo file. */
+static void limbo_run(const struct vec_file *file, unsigned char *buffer);
+
+/* Checks the table of differences is well formed. */
+static void check_table(void);
+
+/* Runs every case and checks the counts. */
+static void test_limbo(void);
+
 /* Parses a text IP address (IPv4 dotted, or IPv6 with groups and one "::") into out; returns 4, 16, or 0 when it is not one. */
 static size_t
 parse_ip(
@@ -243,34 +266,54 @@ parse_ip(
 	unsigned index;
 	unsigned total;
 	const char *at;
+	const char *colon;
 	int double_colon;
 	unsigned groups[8];
 	unsigned count;
 
+	/* Finds out whether the text is IPv6, which is the one with a colon. */
+	colon = strchr(text, ':');
+
 	/* IPv4: four decimal numbers separated by dots. */
-	if (strchr(text, ':') == NULL) {
+	if (colon == NULL) {
 		at = text;
+
+		/* Reads the four numbers. */
 		for (index = 0; index < 4U; index++) {
 			value = 0;
 			digits = 0;
+
+			/* Reads the digits of one number, at most three and at most 255. */
 			while (*at >= '0' && *at <= '9') {
 				value = value * 10U + (unsigned)(*at - '0');
 				digits++;
 				at++;
+
+				/* A number too large is not an address. */
 				if (value > 255U || digits > 3U)
 					return 0;
 			}
+
+			/* An empty number is not an address. */
 			if (digits == 0U)
 				return 0;
+
+			/* Stores the number. */
 			out[index] = (unsigned char)value;
+
+			/* Each number but the last is followed by a dot. */
 			if (index < 3U) {
 				if (*at != '.')
 					return 0;
 				at++;
 			}
 		}
+
+		/* Anything after the fourth number is not an address. */
 		if (*at != '\0')
 			return 0;
+
+		/* Succeeded: four bytes of IPv4. */
 		return 4;
 	}
 
@@ -280,15 +323,21 @@ parse_ip(
 	double_colon = 0;
 	count = 0;
 	at = text;
+
+	/* A leading "::" opens the zero run; a single leading colon is not an address. */
 	if (at[0] == ':' && at[1] == ':') {
 		double_colon = 1;
 		at += 2;
 	} else if (at[0] == ':') {
 		return 0;
 	}
+
+	/* Reads the groups. */
 	while (*at != '\0') {
 		value = 0;
 		digits = 0;
+
+		/* Reads the hex digits of one group. */
 		while ((*at >= '0' && *at <= '9') || (*at >= 'a' && *at <= 'f') || (*at >= 'A' && *at <= 'F')) {
 			if (*at <= '9')
 				value = value * 16U + (unsigned)(*at - '0');
@@ -299,13 +348,19 @@ parse_ip(
 			digits++;
 			at++;
 		}
+
+		/* A group that is empty, too long or the ninth is not an address. */
 		if (digits == 0U || digits > 4U || count >= 8U)
 			return 0;
+
+		/* Keeps the group, counted before or after the zero run. */
 		groups[count++] = value;
 		if (double_colon)
 			tail++;
 		else
 			head++;
+
+		/* A colon separates the groups; two make the zero run, once. */
 		if (*at == ':') {
 			if (at[1] == ':') {
 				if (double_colon)
@@ -321,6 +376,8 @@ parse_ip(
 			return 0;
 		}
 	}
+
+	/* The groups must make eight with the zero run, or fewer than eight without. */
 	total = head + tail;
 	if (double_colon && total > 7U)
 		return 0;
@@ -338,6 +395,8 @@ parse_ip(
 		out[index * 2U] = (unsigned char)(parts[index] >> 8);
 		out[index * 2U + 1U] = (unsigned char)(parts[index] & 0xffU);
 	}
+
+	/* Succeeded: sixteen bytes of IPv6. */
 	return 16;
 }
 
@@ -354,6 +413,8 @@ parse_time(
 		value = value * 10 + (int64_t)(*text - '0');
 		text++;
 	}
+
+	/* Reports the seconds read. */
 	return value;
 }
 
@@ -363,8 +424,10 @@ prefix_of(
 	const char *id)
 {
 	size_t length;
+	size_t known_length;
 	unsigned index;
 	const char *end;
+	int same;
 
 	/* The prefix is the text before the first "::". */
 	end = strstr(id, "::");
@@ -377,7 +440,11 @@ prefix_of(
 
 	/* A known prefix. */
 	for (index = 0; index < prefix_used; index++) {
-		if (strlen(prefixes[index].prefix) == length && memcmp(prefixes[index].prefix, id, length) == 0)
+		known_length = strlen(prefixes[index].prefix);
+		if (known_length != length)
+			continue;
+		same = memcmp(prefixes[index].prefix, id, length);
+		if (same == 0)
 			return &prefixes[index];
 	}
 
@@ -387,6 +454,8 @@ prefix_of(
 		prefixes[prefix_used].prefix[length] = '\0';
 		prefix_used++;
 	}
+
+	/* Reports the row of the prefix. */
 	return &prefixes[prefix_used - 1U];
 }
 
@@ -418,6 +487,8 @@ keep_closure(
 					continue;
 				issues = cryc_name_equal(candidates[index].subject, candidates[index].subject_size, candidates[below].issuer, candidates[below].issuer_size);
 			}
+
+			/* Marks the certificate that can issue. */
 			if (issues != 0) {
 				marks[index] = 1;
 				changed = 1;
@@ -438,16 +509,21 @@ count_difference(
 	unsigned index;
 	unsigned word;
 	int explained;
+	int same;
 
 	/* The table lists the case at most once. */
 	explained = 0;
 	for (index = 0; limbo_exceptions[index].id != NULL; index++) {
-		if (strcmp(limbo_exceptions[index].id, id) != 0)
+		same = strcmp(limbo_exceptions[index].id, id);
+		if (same != 0)
 			continue;
 		limbo_exceptions[index].seen++;
 		explained = 1;
+
+		/* Counts the case under its reason. */
 		for (word = 0; reasons[word].reason != NULL; word++) {
-			if (strcmp(reasons[word].reason, limbo_exceptions[index].reason) == 0)
+			same = strcmp(reasons[word].reason, limbo_exceptions[index].reason);
+			if (same == 0)
 				reasons[word].count++;
 		}
 	}
@@ -458,6 +534,8 @@ count_difference(
 		row->explained++;
 		return;
 	}
+
+	/* A difference with no reason is reported. */
 	limbo_unexplained++;
 	row->unexplained++;
 	printf("limbo: %s: expected %s, got %s depth %u\n", id, expected, outcome, (unsigned)depth);
@@ -482,6 +560,7 @@ limbo_run(
 	const char *kind;
 	const char *value;
 	const char *features;
+	const char *found;
 	char key[32];
 	size_t size;
 	size_t peer_count;
@@ -490,13 +569,18 @@ limbo_run(
 	int success;
 	int ok;
 	int error;
+	int is_dns;
+	int is_ip;
 
+	/* Reads the id and the expectation of the case. */
 	id = vec_get(file, "id");
 	expected = vec_get(file, "expected");
 	CHECK(id != NULL);
 	CHECK(expected != NULL);
 	if (id == NULL || expected == NULL)
 		return;
+
+	/* Counts the case under its prefix. */
 	success = strcmp(expected, "SUCCESS") == 0;
 	row = prefix_of(id);
 	row->cases++;
@@ -509,6 +593,8 @@ limbo_run(
 	CHECK(error == 0);
 	if (error != 0)
 		return;
+
+	/* Adds each trusted certificate that parses. */
 	for (index = 0; index < TRUSTED_MAX; index++) {
 		sprintf(key, "trusted.%u", index);
 		size = vec_hex(file, key, buffer, LIMBO_MAX);
@@ -526,12 +612,16 @@ limbo_run(
 		cryc_store_free(&store);
 		return;
 	}
+
+	/* Keeps a copy of the leaf, which the parsed certificate points into. */
 	leaf_der = malloc(size);
 	CHECK(leaf_der != NULL);
 	if (leaf_der == NULL) {
 		cryc_store_free(&store);
 		return;
 	}
+
+	/* Parses the leaf; one that does not parse is a refusal, which agrees with a FAILURE. */
 	memcpy(leaf_der, buffer, size);
 	error = cryc_x509_parse(&peer[0], leaf_der, size);
 	if (error != 0) {
@@ -544,6 +634,8 @@ limbo_run(
 		} else {
 			count_difference(row, id, expected, "unparsed leaf", 0);
 		}
+
+		/* Releases what the case holds. */
 		free(leaf_der);
 		cryc_store_free(&store);
 		return;
@@ -569,6 +661,8 @@ limbo_run(
 			pool_der[pool_count] = NULL;
 			continue;
 		}
+
+		/* Keeps the certificate that parsed. */
 		pool_count++;
 	}
 
@@ -585,6 +679,8 @@ limbo_run(
 		limbo_reduced++;
 		keep_closure(&peer[0], pool, pool_count, keep);
 	}
+
+	/* Puts the kept certificates after the leaf in the server's list. */
 	peer_count = 1;
 	for (index = 0; index < pool_count; index++) {
 		if (keep[index] == 0)
@@ -593,6 +689,8 @@ limbo_run(
 			limbo_truncated++;
 			break;
 		}
+
+		/* Appends the certificate to the server's list. */
 		peer[peer_count] = pool[index];
 		peer_count++;
 	}
@@ -608,11 +706,20 @@ limbo_run(
 	/* The name (normalized as a caller does; a name that does not normalize is matched as it is) or the address to match. */
 	kind = vec_get(file, "peer_kind");
 	value = vec_get(file, "peer_value");
-	if (kind != NULL && value != NULL && strcmp(kind, "DNS") == 0) {
+	is_dns = 0;
+	is_ip = 0;
+	if (kind != NULL && value != NULL) {
+		is_dns = strcmp(kind, "DNS") == 0;
+		is_ip = strcmp(kind, "IP") == 0;
+	}
+
+	/* Takes the host name or the IP address of the case. */
+	if (is_dns) {
 		params.has_host = 1;
-		if (cryc_name_host_normalize(value, params.host) != 0)
+		error = cryc_name_host_normalize(value, params.host);
+		if (error != 0)
 			strncpy(params.host, value, CRYC_NAME_HOST_MAX);
-	} else if (kind != NULL && value != NULL && strcmp(kind, "IP") == 0) {
+	} else if (is_ip) {
 		params.ip_size = parse_ip(value, params.ip);
 		CHECK(params.ip_size != 0U);
 	}
@@ -623,9 +730,12 @@ limbo_run(
 	if (value != NULL)
 		depth = (size_t)atol(value);
 	features = vec_get(file, "features");
+	found = NULL;
+	if (features != NULL)
+		found = strstr(features, "max-chain-depth");
 	if (depth != 0U)
 		params.max_depth = depth + 2U;
-	else if (features != NULL && strstr(features, "max-chain-depth") != NULL)
+	else if (found != NULL)
 		params.max_depth = 2;
 
 	/* A depth beyond the header's limit is the limit (one case asks for 255 intermediates). */
@@ -655,6 +765,8 @@ limbo_run(
 		CHECK(result.chain_count >= 1U);
 		CHECK(result.chain[0]->der == peer[0].der);
 	}
+
+	/* Releases the copies of the certificates and the store. */
 	free(leaf_der);
 	for (index = 0; index < pool_count; index++)
 		free(pool_der[index]);
@@ -668,22 +780,31 @@ check_table(void)
 	unsigned index;
 	unsigned word;
 	int known;
+	int same;
+	int order;
 
+	/* Checks each entry against the reasons and the entry before it. */
 	for (index = 0; limbo_exceptions[index].id != NULL; index++) {
 		known = 0;
 		for (word = 0; reason_words[word] != NULL; word++) {
-			if (strcmp(reason_words[word], limbo_exceptions[index].reason) == 0)
+			same = strcmp(reason_words[word], limbo_exceptions[index].reason);
+			if (same == 0)
 				known = 1;
 		}
+
+		/* Reports a reason the table does not define. */
 		if (known == 0)
 			printf("limbo: unknown reason %s for %s\n", limbo_exceptions[index].reason, limbo_exceptions[index].id);
 		CHECK(known != 0);
 		if (index > 0U) {
-			if (strcmp(limbo_exceptions[index - 1U].id, limbo_exceptions[index].id) >= 0)
+			order = strcmp(limbo_exceptions[index - 1U].id, limbo_exceptions[index].id);
+			if (order >= 0)
 				printf("limbo: table out of order at %s\n", limbo_exceptions[index].id);
 			CHECK(strcmp(limbo_exceptions[index - 1U].id, limbo_exceptions[index].id) < 0);
 		}
 	}
+
+	/* Names the reasons of the summary. */
 	for (word = 0; reason_words[word] != NULL; word++)
 		reasons[word].reason = reason_words[word];
 }
@@ -695,18 +816,31 @@ test_limbo(void)
 	struct vec_file file;
 	unsigned char *buffer;
 	unsigned index;
+	int error;
+	int more;
 
+	/* Allocates the buffer a certificate is read into. */
 	buffer = malloc(LIMBO_MAX);
 	CHECK(buffer != NULL);
 	if (buffer == NULL)
 		return;
-	if (vec_open(&file, "limbo") != 0) {
+
+	/* Opens the case file. */
+	error = vec_open(&file, "limbo");
+	if (error != 0) {
 		CHECK(0);
 		free(buffer);
 		return;
 	}
-	while (vec_next(&file))
+
+	/* Runs every case. */
+	more = vec_next(&file);
+	while (more) {
 		limbo_run(&file, buffer);
+		more = vec_next(&file);
+	}
+
+	/* Releases the case file and the buffer. */
 	vec_close(&file);
 	free(buffer);
 
@@ -730,9 +864,15 @@ test_limbo(void)
 int
 main(void)
 {
+	int status;
+
+	/* Prepares the output and runs the tests. */
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	trace = getenv("WS335_LIMBO_TRACE") != NULL;
 	check_table();
 	test_limbo();
-	return check_finish("test-limbo");
+
+	/* Reports the outcome of the checks. */
+	status = check_finish("test-limbo");
+	return status;
 }

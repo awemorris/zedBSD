@@ -321,6 +321,7 @@ cryc_mlkem_byte_decode(
 			count += 8U;
 		}
 
+		/* Takes the low d bits as the next value. */
 		value = accumulator & mask;
 		accumulator >>= d;
 		count -= d;

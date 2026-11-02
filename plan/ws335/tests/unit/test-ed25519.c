@@ -281,6 +281,18 @@ random32(void)
 }
 
 /* Fills size bytes with pseudo-random bytes. */
+static void random_bytes(uint8_t *out, size_t size);
+
+/* Fills out with the message pattern of the made vectors: byte i is (i * 7 + 3) mod 256. */
+static void pattern_message(uint8_t *out, size_t size);
+
+/* Decodes exactly size bytes of hex text into out; checks the length. */
+static void decode_fixed(const char *text, uint8_t *out, size_t size);
+
+/* Checks one vector: public key from the seed, signature from the seed and message, and the verification. */
+static void check_vector(const uint8_t *seed, const uint8_t *message, size_t message_size, const uint8_t *want_public, const uint8_t *want_signature);
+
+/* Fills size bytes with pseudo-random bytes. */
 static void
 random_bytes(
 	uint8_t *out,
@@ -421,11 +433,20 @@ check_wycheproof(void)
 	unsigned long accepted;
 	unsigned long skipped;
 	unsigned long tests;
+	const char *tc_text;
+	int opened;
+	int more;
+	int valid_match;
+	int invalid_match;
 
-	if (vec_open(&file, "wycheproof-ed25519_test") != 0) {
+	/* Opens the Wycheproof vector file. */
+	opened = vec_open(&file, "wycheproof-ed25519_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Starts with no record counted and no group key seen. */
 	valid = 0;
 	invalid = 0;
 	acceptable = 0;
@@ -441,7 +462,9 @@ check_wycheproof(void)
 	 * the group fields holds a blank line, which ends a record), so it is
 	 * remembered; a record with a "tcId" is a test.
 	 */
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		text = vec_get(&file, "group.publicKey.pk");
 		if (text != NULL) {
 			public_size = hex_decode(text, scratch, sizeof(scratch));
@@ -449,7 +472,10 @@ check_wycheproof(void)
 			memcpy(public_key, scratch, sizeof(public_key));
 			have_key = 1;
 		}
-		if (vec_get(&file, "tcId") == NULL)
+
+		/* A record without a test id carries only the group fields. */
+		tc_text = vec_get(&file, "tcId");
+		if (tc_text == NULL)
 			continue;
 		CHECK(have_key == 1);
 		tests++;
@@ -466,22 +492,29 @@ check_wycheproof(void)
 			skipped++;
 			continue;
 		}
+
+		/* Verifies the signature of the record. */
 		memcpy(signature, scratch, sizeof(signature));
 		error = cryc_ed25519_verify(signature, message, message_size, public_key);
-		if (strcmp(result, "valid") == 0) {
+		/* Which verdict the file gives for the record. */
+		valid_match = strcmp(result, "valid");
+		invalid_match = strcmp(result, "invalid");
+		if (valid_match == 0) {
 			CHECK(error == 0);
 			valid++;
-		} else if (strcmp(result, "invalid") == 0) {
+		} else if (invalid_match == 0) {
 			CHECK(error == EBADMSG);
 			invalid++;
 		} else {
 			/* Either answer is allowed by the file; this implementation's answer is the equation of step 3 with the full k. */
-			tc_id = (unsigned int)strtoul(vec_get(&file, "tcId"), NULL, 10);
+			tc_id = (unsigned int)strtoul(tc_text, NULL, 10);
 			want_accept = 0;
 			for (index = 0; index < sizeof(accepted_ids) / sizeof(accepted_ids[0]); index++) {
 				if (accepted_ids[index] == tc_id)
 					want_accept = 1;
 			}
+
+			/* The expected answer follows the table of accepted ids. */
 			if (want_accept != 0)
 				CHECK(error == 0);
 			else
@@ -491,6 +524,8 @@ check_wycheproof(void)
 				accepted++;
 		}
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 
 	/* All 210 records were read; the counts match the file (117 valid, 64 invalid, 29 acceptable; 12 of the invalid ones with another signature size). */
@@ -590,6 +625,7 @@ check_tampering(void)
 	unsigned int which;
 	unsigned int bit;
 
+	/* Each length: a fresh key, a signature, and then every bit change. */
 	for (which = 0; which < sizeof(lengths) / sizeof(lengths[0]); which++) {
 		random_bytes(seed, sizeof(seed));
 		pattern_message(message, lengths[which]);
@@ -642,6 +678,7 @@ check_malleability(void)
 	unsigned int index;
 	unsigned int multiple;
 
+	/* A key and a signature over a short message. */
 	decode_fixed(order_hex, order, sizeof(order));
 	memcpy(message, "malleable", sizeof(message));
 	random_bytes(seed, sizeof(seed));
@@ -658,6 +695,8 @@ check_malleability(void)
 			altered[32U + index] = (uint8_t)sum;
 			carry = sum >> 8;
 		}
+
+		/* The sum stayed below 2^256, and the altered signature is refused. */
 		CHECK(carry == 0U);
 		CHECK(cryc_ed25519_verify(altered, message, sizeof(message), public_key) == EBADMSG);
 	}
@@ -689,7 +728,9 @@ check_edges(void)
 	unsigned int index;
 	unsigned int accepted;
 	unsigned int refused;
+	int error;
 
+	/* The encodings of the points the checks use. */
 	decode_fixed(identity_hex, identity, sizeof(identity));
 	decode_fixed(base_hex, base, sizeof(base));
 	decode_fixed(minus_base_hex, minus_base, sizeof(minus_base));
@@ -761,9 +802,12 @@ check_edges(void)
 	refused = 0;
 	for (index = 0; index < 64U; index++) {
 		message[0] = (uint8_t)index;
-		if (cryc_ed25519_verify(signature, message, 1U, key) == EBADMSG)
+		error = cryc_ed25519_verify(signature, message, 1U, key);
+		if (error == EBADMSG)
 			refused++;
 	}
+
+	/* Every message was refused. */
 	CHECK(refused == 64U);
 	decode_fixed(y_all_ones_hex, key, sizeof(key));
 	CHECK(cryc_ed25519_verify(signature, message, sizeof(message), key) == EBADMSG);
@@ -776,11 +820,14 @@ check_edges(void)
 	refused = 0;
 	for (index = 0; index < 32U; index++) {
 		message[0] = (uint8_t)index;
-		if (cryc_ed25519_verify(signature, message, 1U, key) == 0)
+		error = cryc_ed25519_verify(signature, message, 1U, key);
+		if (error == 0)
 			accepted++;
 		else
 			refused++;
 	}
+
+	/* Both answers occurred, as the order of the point promises. */
 	CHECK(accepted > 4U);
 	CHECK(refused > 4U);
 }
@@ -807,6 +854,7 @@ check_buffers(void)
 	uint8_t public_copy[32];
 	uint8_t sentinel[16];
 
+	/* The reference copies of the inputs, which must stay as they are. */
 	memset(sentinel, SENTINEL_BYTE, sizeof(sentinel));
 	random_bytes(seed, sizeof(seed));
 	random_bytes(message, sizeof(message));
@@ -856,6 +904,7 @@ check_random_inputs(void)
 	unsigned int refused;
 	unsigned int odd;
 	unsigned int even;
+	int error;
 
 	/* Random signature, key and message. */
 	refused = 0;
@@ -864,9 +913,12 @@ check_random_inputs(void)
 		random_bytes(key, sizeof(key));
 		size = random32() % sizeof(message);
 		random_bytes(message, size);
-		if (cryc_ed25519_verify(signature, message, size, key) == EBADMSG)
+		error = cryc_ed25519_verify(signature, message, size, key);
+		if (error == EBADMSG)
 			refused++;
 	}
+
+	/* Every random input was refused. */
 	CHECK(refused == 300U);
 
 	/* A random signature under a real key; a real signature of another message. */
@@ -880,13 +932,16 @@ check_random_inputs(void)
 		signature[63] &= 0x0fU;
 		size = random32() % sizeof(message);
 		random_bytes(message, size);
-		if (cryc_ed25519_verify(signature, message, size, public_key) == EBADMSG)
+		error = cryc_ed25519_verify(signature, message, size, public_key);
+		if (error == EBADMSG)
 			refused++;
 		if ((public_key[31] & 0x80U) != 0U)
 			odd++;
 		else
 			even++;
 	}
+
+	/* Every random signature was refused. */
 	CHECK(refused == 100U);
 
 	/* Both signs of x occur among the keys. */

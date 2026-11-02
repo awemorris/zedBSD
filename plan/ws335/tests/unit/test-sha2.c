@@ -47,6 +47,36 @@ random_next(void)
 }
 
 /* Fills size bytes at out with pseudo-random bytes. */
+static void random_fill(uint8_t *out, size_t size);
+
+/* Returns the digest size of kind. */
+static size_t digest_size(int kind);
+
+/* Starts a computation of kind. */
+static void any_init(struct any_hash *hash, int kind);
+
+/* Absorbs bytes into a computation. */
+static void any_update(struct any_hash *hash, const uint8_t *data, size_t size);
+
+/* Finishes a computation. */
+static void any_final(struct any_hash *hash, uint8_t *out);
+
+/* Hashes size bytes in one go. */
+static void hash_all(int kind, const uint8_t *data, size_t size, uint8_t *out);
+
+/* Hashes size bytes fed in pieces of piece bytes (the last one shorter). */
+static void hash_pieces(int kind, const uint8_t *data, size_t size, size_t piece, uint8_t *out);
+
+/* Checks one message against its digest in one go, in pieces, and through a snapshot. */
+static void check_message(int kind, const uint8_t *message, size_t size, const uint8_t *expected);
+
+/* Runs the short-message or long-message vector file of a hash; returns the records read. */
+static unsigned long run_message_file(int kind, const char *name);
+
+/* Runs the Monte Carlo vector file of a hash. */
+static unsigned long run_monte_file(int kind, const char *name);
+
+/* Fills size bytes at out with pseudo-random bytes. */
 static void
 random_fill(
 	uint8_t *out,
@@ -155,6 +185,8 @@ hash_pieces(
 		any_update(&hash, NULL, 0);
 		offset += chunk;
 	}
+
+	/* Produces the digest. */
 	any_final(&hash, out);
 }
 
@@ -211,30 +243,45 @@ run_message_file(
 	size_t size;
 	size_t length;
 	unsigned long count;
+	const char *message_text;
+	size_t room;
+	int opened;
+	int more;
 
-	/* Every record: Len (bits), Msg (hex), MD (hex). */
+	/* Opens the vector file; a file that is missing fails the check. */
 	count = 0;
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return 0;
 	}
-	while (vec_next(&file)) {
+
+	/* Checks every record: Len (bits), Msg (hex), MD (hex). */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		text = vec_get(&file, "Len");
 		if (text == NULL)
 			continue;
 		length = (size_t)strtoul(text, NULL, 10);
 		size = length / 8U;
-		message = malloc(strlen(vec_get(&file, "Msg")) / 2U + 1U);
+		message_text = vec_get(&file, "Msg");
+		room = strlen(message_text) / 2U + 1U;
+		message = malloc(room);
 		CHECK(message != NULL);
 		if (message == NULL)
 			break;
-		CHECK(vec_hex(&file, "Msg", message, strlen(vec_get(&file, "Msg")) / 2U + 1U) != (size_t)-1);
+		CHECK(vec_hex(&file, "Msg", message, room) != (size_t)-1);
 		CHECK(vec_hex(&file, "MD", expected, sizeof(expected)) == digest_size(kind));
 		check_message(kind, message, size, expected);
 		free(message);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of records read. */
 	return count;
 }
 
@@ -256,22 +303,37 @@ run_monte_file(
 	size_t step;
 	int have_seed;
 	unsigned long count;
+	const char *seed_text;
+	const char *md_text;
+	int opened;
+	int more;
 
-	/* The seed record, then the 100 checkpoints in order. */
+	/* Opens the vector file; a file that is missing fails the check. */
 	count = 0;
 	have_seed = 0;
 	size = digest_size(kind);
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return 0;
 	}
-	while (vec_next(&file)) {
-		if (vec_get(&file, "Seed") != NULL) {
+
+	/* Takes the seed record, then the 100 checkpoints in order. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
+		seed_text = vec_get(&file, "Seed");
+		md_text = vec_get(&file, "MD");
+		if (seed_text != NULL) {
 			CHECK(vec_hex(&file, "Seed", seed, sizeof(seed)) == size);
 			have_seed = 1;
 			continue;
 		}
-		if (!have_seed || vec_get(&file, "MD") == NULL)
+
+		/* Skips records before the seed and records that carry no digest. */
+		if (!have_seed)
+			continue;
+		if (md_text == NULL)
 			continue;
 		CHECK(vec_hex(&file, "MD", expected, sizeof(expected)) == size);
 
@@ -284,11 +346,17 @@ run_monte_file(
 			memmove(chain, chain + size, 2U * size);
 			memcpy(chain + 2U * size, next, size);
 		}
+
+		/* The last digest of the chain is the checkpoint, and seeds the next chain. */
 		CHECK_BYTES(next, expected, size);
 		memcpy(seed, next, size);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of checkpoints read. */
 	return count;
 }
 
@@ -333,6 +401,8 @@ test_examples(void)
 		hash_pieces(kind, million, 1000000U, 1000U, got);
 		CHECK_BYTES(got, expected, digest_size(kind));
 	}
+
+	/* Releases the buffer of the million-byte message. */
 	free(million);
 
 	/* The 448-bit message (SHA-256 only: its padding needs a second block). */
@@ -350,6 +420,8 @@ test_structure(void)
 	struct cryc_sha512 large;
 	uint8_t out[80];
 	uint8_t data[200];
+	uint8_t first[64];
+	uint8_t second[64];
 	int kind;
 
 	/* init: an empty partial block, nothing absorbed, the sizes of 384 and 512. */
@@ -396,9 +468,6 @@ test_structure(void)
 
 	/* Reusing a structure after init gives the same digest as a fresh one. */
 	for (kind = 0; kind < 3; kind++) {
-		uint8_t first[64];
-		uint8_t second[64];
-
 		hash_all(kind, data, 150U, first);
 		hash_all(kind, data, 150U, second);
 		CHECK_BYTES(first, second, digest_size(kind));
@@ -433,6 +502,7 @@ test_length_field(void)
 	uint8_t expected[64];
 	uint64_t total;
 	uint64_t bits;
+	uint64_t limit;
 	size_t used;
 	size_t padded_size;
 	size_t which;
@@ -459,7 +529,9 @@ test_length_field(void)
 			memset(padded, 0, sizeof(padded));
 			memcpy(padded, tail, used);
 			padded[used] = 0x80;
-			padded_size = used < 56U ? 64U : 128U;
+			padded_size = 128U;
+			if (used < 56U)
+				padded_size = 64U;
 			bits = total * 8U;
 			for (index = 0; index < 8U; index++)
 				padded[padded_size - 1U - index] = (uint8_t)(bits >> (8U * index));
@@ -475,6 +547,8 @@ test_length_field(void)
 				expected[index * 4U + 2U] = (uint8_t)(other.state[index] >> 8);
 				expected[index * 4U + 3U] = (uint8_t)other.state[index];
 			}
+
+			/* The digest of the structure equals the state of the hand-padded one. */
 			CHECK_BYTES(digest, expected, 32U);
 		}
 	}
@@ -488,8 +562,11 @@ test_length_field(void)
 			total = blocks[which] * 128U + used;
 
 			/* Total below 2^61 so the high half of the 128-bit length is zero. */
-			if (total >= CRYC_U64(0x20000000, 0))
+			limit = CRYC_U64(0x20000000, 0);
+			if (total >= limit)
 				continue;
+
+			/* The structure as it would be after absorbing total bytes. */
 			cryc_sha512_init(&large);
 			for (index = 0; index < 8U; index++)
 				large.state[index] = seed_large[index];
@@ -498,14 +575,18 @@ test_length_field(void)
 			large.total = total;
 			cryc_sha512_final(&large, digest);
 
+			/* The padded last block(s) by hand, with the length as 128 bits. */
 			memset(padded, 0, sizeof(padded));
 			memcpy(padded, tail, used);
 			padded[used] = 0x80;
-			padded_size = used < 112U ? 128U : 256U;
+			padded_size = 256U;
+			if (used < 112U)
+				padded_size = 128U;
 			bits = total * 8U;
 			for (index = 0; index < 8U; index++)
 				padded[padded_size - 1U - index] = (uint8_t)(bits >> (8U * index));
 
+			/* Compress them from the same state with a fresh structure. */
 			cryc_sha512_init(&large_other);
 			for (index = 0; index < 8U; index++)
 				large_other.state[index] = seed_large[index];
@@ -520,6 +601,8 @@ test_length_field(void)
 				expected[index * 8U + 6U] = (uint8_t)(large_other.state[index] >> 8);
 				expected[index * 8U + 7U] = (uint8_t)large_other.state[index];
 			}
+
+			/* The digest of the structure equals the state of the hand-padded one. */
 			CHECK_BYTES(digest, expected, 64U);
 		}
 	}
@@ -546,6 +629,7 @@ test_random_cuts(void)
 		kind = round % 3;
 		hash_all(kind, message, size, whole);
 
+		/* The same message hashed in random pieces. */
 		any_init(&hash, kind);
 		offset = 0;
 		while (offset < size) {
@@ -555,7 +639,11 @@ test_random_cuts(void)
 			any_update(&hash, message + offset, chunk);
 			offset += chunk;
 		}
+
+		/* Produces the digest of the pieces. */
 		any_final(&hash, cut);
+
+		/* The pieces gave the digest of the whole. */
 		CHECK_BYTES(cut, whole, digest_size(kind));
 	}
 }

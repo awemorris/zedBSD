@@ -20,6 +20,12 @@
 #include "userland/base/libcrypto-compat/cryc-mlkem.h"
 
 /* Fills a polynomial with a fixed pattern of values in [0, q - 1]. */
+static void fill_poly(struct cryc_mlkem_poly *f, unsigned seed);
+
+/* Folds a public polynomial into one value, to keep the call from being dropped. */
+static unsigned fold(const struct cryc_mlkem_poly *f);
+
+/* Fills a polynomial with a fixed pattern of values in [0, q - 1]. */
 static void
 fill_poly(
 	struct cryc_mlkem_poly *f,
@@ -46,6 +52,8 @@ fold(
 	value = 0U;
 	for (index = 0; index < CRYC_MLKEM_N; index++)
 		value = ((value << 1) | (value >> 15)) ^ (unsigned)(uint16_t)f->c[index];
+
+	/* Reports the folded value. */
 	return value & 0xffffU;
 }
 
@@ -63,6 +71,7 @@ main(void)
 	unsigned index;
 	int clean;
 
+	/* The sum of the folded outputs starts at zero. */
 	total = 0U;
 
 	/* NTT of a secret polynomial. */

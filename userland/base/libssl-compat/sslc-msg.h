@@ -18,8 +18,9 @@
  * body; the views live as long as the body.  On an error it returns the
  * errno value and writes the alert the client must send: decode_error for
  * bad syntax (EINVAL), unsupported_extension for an extension the client
- * did not offer (EPROTO), illegal_parameter for a value out of its range
- * (EPROTO), as each comment says.  The input is untrusted.
+ * did not offer (EPROTO), illegal_parameter for an extension the client
+ * offers but the message may not carry (RFC 8446 4.2) and for a value out
+ * of its range (EPROTO), as each comment says.  The input is untrusted.
  *
  * Every write function writes a whole message, its header included, and
  * returns 0, or ENOBUFS when room is too small (*written is then 0).
@@ -32,7 +33,7 @@
 #include "../libcrypto-compat/cryc-chain.h"
 #include "sslc-tls.h"
 
-/* The most key shares a ClientHello carries (x25519 alone in practice; room for secp256r1 too). */
+/* The most key shares a ClientHello carries (one in practice: x25519, or after a HelloRetryRequest the group it names; room for two). */
 #define SSLC_MSG_MAX_SHARES	2U
 
 /* The longest HelloRetryRequest cookie accepted (4.2.2: cookie<1..2^16-1>; a server's is far shorter). */
@@ -164,8 +165,13 @@ void sslc_msg_header(const uint8_t *in, unsigned *type, size_t *length);
 
 /*
  * Writes a ClientHello (above).  Returns 0, ENOBUFS, or EINVAL for
- * inconsistent fields (no suite, min above max, a share without TLS 1.3,
- * a server name over CRYC_NAME_HOST_MAX).
+ * inconsistent fields: a NULL hello; a version bound that is not TLS 1.2
+ * or 1.3, or min above max; a session id over SSLC_MSG_SESSION_ID_MAX;
+ * an empty or NULL list of suites, groups or schemes, or one over
+ * SSLC_MSG_LIST_MAX; more than SSLC_MSG_MAX_SHARES shares, a share
+ * without TLS 1.3, a share key NULL, empty or over 2^16 - 1 bytes; a
+ * cookie without TLS 1.3, NULL with a size, or over SSLC_MSG_COOKIE_MAX;
+ * an empty server name or one over CRYC_NAME_HOST_MAX.
  */
 int sslc_msg_write_client_hello(const struct sslc_client_hello *hello, uint8_t *out, size_t room, size_t *written);
 
@@ -175,13 +181,16 @@ int sslc_msg_write_client_hello(const struct sslc_client_hello *hello, uint8_t *
  * Syntax (decode_error, EINVAL): the fixed fields, a session id of at
  * most 32 bytes, an extensions block that ends with the body (it may be
  * absent for TLS 1.2, RFC 5246 7.4.1.3), each extension's own syntax, no
- * extension type twice.  Allowed extensions (any other is
- * unsupported_extension, EPROTO): supported_versions, key_share, cookie
- * (cookie only in a HelloRetryRequest; key_share in a HelloRetryRequest
- * is the group alone, 4.2.8), extended_master_secret (empty),
+ * extension type twice.  Recorded extensions: supported_versions,
+ * key_share, cookie (key_share in a HelloRetryRequest is the group alone,
+ * 4.2.8; which of them the message may carry is the handshake's check,
+ * sslc-hs.h), extended_master_secret (empty),
  * renegotiation_info, ec_point_formats (its list must contain
  * uncompressed, RFC 8422 5.2, else illegal_parameter), server_name
- * (empty).  A cookie over SSLC_MSG_COOKIE_MAX is illegal_parameter.
+ * (empty).  Another extension the ClientHello carries (signature_algorithms,
+ * supported_groups) is illegal_parameter (4.2: recognized, not specified
+ * for this message), any other unsupported_extension (EPROTO).  A cookie
+ * over SSLC_MSG_COOKIE_MAX is illegal_parameter.
  *
  * Returns 0, EINVAL or EPROTO with *alert set on an error.
  */
@@ -190,9 +199,10 @@ int sslc_msg_parse_server_hello(const uint8_t *body, size_t size, struct sslc_se
 /*
  * Parses an EncryptedExtensions body (4.3.1): an extensions block, each
  * well formed, no type twice; allowed: server_name (empty) and
- * supported_groups (a list, ignored, 4.2.7); anything else is
- * unsupported_extension (4.2: libssl-compat offers nothing else that a
- * server answers here).  *server_name_ack is 1 when server_name was
+ * supported_groups (a list, ignored, 4.2.7); another extension the
+ * ClientHello carries (or renegotiation_info) is illegal_parameter (4.2:
+ * recognized, not specified for this message), any other
+ * unsupported_extension.  *server_name_ack is 1 when server_name was
  * present.  Returns 0, EINVAL or EPROTO with *alert.
  */
 int sslc_msg_parse_encrypted_extensions(const uint8_t *body, size_t size, int *server_name_ack, unsigned *alert);

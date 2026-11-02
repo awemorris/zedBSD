@@ -397,6 +397,8 @@ cryc_x509_public_key(
 			memset(key, 0, sizeof(*key));
 			return EINVAL;
 		}
+
+		/* Marks the key as RSA. */
 		key->type = CRYC_KEY_RSA;
 
 		/* Succeeded: an RSA key with n and e as views. */
@@ -791,6 +793,8 @@ x509_pss_parameters(
 		} else if (error != 0) {
 			return EINVAL;
 		}
+
+		/* Treats a trailer other than the one defined value as unsupported. */
 		if (trailer != X509_PSS_TRAILER_BC)
 			trailer_unsupported = 1;
 	}
@@ -847,6 +851,8 @@ x509_signature_from_algorithm(
 			if (!is_null)
 				return EINVAL;
 		}
+
+		/* Records the signature algorithm. */
 		params->alg = (enum cryc_sig_alg)value;
 
 		/* Succeeded: a PKCS #1 signature algorithm. */
@@ -984,10 +990,14 @@ x509_ec_public_key(
 		key->type = CRYC_KEY_UNSUPPORTED;
 		return 0;
 	}
+
+	/* Reports a parameter that is not an OID as a key outside the supported range. */
 	if (algorithm->parameters.tag != CRYC_DER_OID) {
 		key->type = CRYC_KEY_UNSUPPORTED;
 		return 0;
 	}
+
+	/* Reads the curve OID. */
 	error = cryc_der_oid(&algorithm->parameters);
 	if (error != 0)
 		return EINVAL;
@@ -1488,6 +1498,8 @@ x509_read_extensions(
 			if (!critical)
 				return EINVAL;
 		}
+
+		/* Reads the extension value, an OCTET STRING. */
 		error = cryc_der_expect(&item, CRYC_DER_OCTET_STRING, &value);
 		if (error != 0)
 			return EINVAL;
@@ -1500,6 +1512,8 @@ x509_read_extensions(
 			if (same)
 				return EINVAL;
 		}
+
+		/* Remembers the OID so that a repeat is refused. */
 		seen[count] = oid;
 		count++;
 
@@ -1879,6 +1893,8 @@ x509_ext_name_constraints(
 		if (error != 0)
 			return EINVAL;
 	}
+
+	/* Checks the excluded subtrees the same way. */
 	if (has_excluded) {
 		error = x509_check_subtrees(&excluded);
 		if (error != 0)
@@ -1891,6 +1907,8 @@ x509_ext_name_constraints(
 		cert->permitted = permitted.contents;
 		cert->permitted_size = permitted.length;
 	}
+
+	/* Records the excluded subtrees. */
 	if (has_excluded) {
 		cert->excluded = excluded.contents;
 		cert->excluded_size = excluded.length;

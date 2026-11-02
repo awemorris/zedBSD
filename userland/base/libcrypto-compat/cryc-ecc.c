@@ -247,6 +247,7 @@ cryc_ecdsa_verify(
 	uint32_t below_order;
 	uint32_t zero;
 	int usable;
+	int difference;
 	int error;
 
 	/* Refuses a curve that was never prepared and a hash of no bytes. */
@@ -328,7 +329,8 @@ cryc_ecdsa_verify(
 	cryc_bn_reduce_once(v, v, &ec->order);
 
 	/* Step 8: accepts when the reduced x coordinate equals r. */
-	if (memcmp(v, r_value, ec->limbs * sizeof(v[0])) != 0)
+	difference = memcmp(v, r_value, ec->limbs * sizeof(v[0]));
+	if (difference != 0)
 		return EBADMSG;
 
 	/* Succeeded: the signature verifies. */

@@ -108,7 +108,9 @@ void sslc_record_clear(struct sslc_record_dir *dir);
  * carry, or 0 to accept 0x0301 to 0x0303 (the first records of a
  * connection, before the server's version is known: 5.1 allows 0x0301 in
  * a ServerHello's record).  Checks: a type among the four (unexpected
- * type: EPROTO, 5); a length of at least 1 and at most
+ * type: EPROTO, 5), and on a protected TLS 1.3 direction application_data
+ * or the one-byte change_cipher_spec only, whatever the length (another
+ * type: EPROTO, the caller's unexpected_message, 5); a length of at least 1 and at most
  * SSLC_RECORD13_CIPHERTEXT_MAX for a protected TLS 1.3 direction,
  * SSLC_RECORD12_CIPHERTEXT_MAX for TLS 1.2, SSLC_RECORD_PLAINTEXT_MAX for
  * a plaintext direction (more: EMSGSIZE, the caller's record_overflow

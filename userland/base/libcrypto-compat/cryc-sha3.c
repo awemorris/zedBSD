@@ -275,6 +275,7 @@ cryc_sha3_absorb(
 		/* Exclusive-ors the chunk into the state at the current position. */
 		sponge_xor_in(sponge, data, chunk);
 
+		/* Moves past the bytes taken. */
 		data += chunk;
 		size -= chunk;
 	}
@@ -379,6 +380,7 @@ cryc_shake_squeeze(
 		/* Copies the chunk out of the state at the current position. */
 		sponge_read_out(sponge, out, chunk);
 
+		/* Moves past the bytes given. */
 		out += chunk;
 		size -= chunk;
 	}
@@ -601,6 +603,8 @@ sponge_read_out(
 			for (index = 0; index < 8U; index++) {
 				out[used + index] = (uint8_t)(lane >> (8U * index));
 			}
+
+			/* Moves past the lane. */
 			sponge->position += 8U;
 			used += 8U;
 		} else {

@@ -55,6 +55,84 @@ random32(void)
 	return rng_state;
 }
 
+/* The dimension of the module of ML-KEM-768 (Table 2: k = 3). */
+#define K	3U
+
+/* Fills size bytes with pseudo-random bytes. */
+static void random_bytes(uint8_t *out, size_t size);
+
+/* Returns base^exponent mod q by square and multiply. */
+static uint32_t power_mod(uint32_t base, uint32_t exponent);
+
+/* Returns the 7-bit reversal of value (2.5, BitRev7). */
+static unsigned bit_reverse7(unsigned value);
+
+/* Makes a polynomial of random coefficients in [0, q - 1]. */
+static void random_poly(struct cryc_mlkem_poly *f);
+
+/* Makes a polynomial of random 16-bit patterns, including negative and large values. */
+static void random_wild_poly(struct cryc_mlkem_poly *f);
+
+/* Reads a polynomial's coefficients as the value each stands for modulo q. */
+static void to_residues(uint32_t *out, const struct cryc_mlkem_poly *f);
+
+/* Checks that a polynomial equals expected residues, in range; reports the first difference. */
+static void check_poly(const struct cryc_mlkem_poly *f, const uint32_t *expected, const char *what);
+
+/* Computes the NTT by the definition. */
+static void naive_ntt(uint32_t *out, const uint32_t *in);
+
+/* The product in R_q = Z_q[X] / (X^256 + 1), by the schoolbook method (2.4.4). */
+static void naive_ring_multiply(uint32_t *out, const uint32_t *left, const uint32_t *right);
+
+/* BaseCaseMultiply of Algorithm 12, written out with gamma from the powers of 17. */
+static void naive_multiply_ntts(uint32_t *out, const uint32_t *left, const uint32_t *right);
+
+/* Algorithm 5 written bit by bit with Algorithm 3: values (below 2^d, or q for d = 12) to 32 * d bytes. */
+static void naive_byte_encode(uint8_t *out, const uint32_t *values, unsigned d);
+
+/* Algorithm 6 written bit by bit with Algorithm 4: 32 * d bytes to 256 values mod m; returns 1 when no value is q or more. */
+static int naive_byte_decode(uint32_t *values, const uint8_t *in, unsigned d);
+
+/* Compares a polynomial with expected values (a short form of check_poly for byte-level checks). */
+static int poly_equals(const struct cryc_mlkem_poly *f, const uint32_t *expected);
+
+/* Compress_d of one value by equation (4.7): floor(2^d x / q + 1/2) mod 2^d, by integer division. */
+static uint32_t reference_compress(uint32_t x, unsigned d);
+
+/* Decompress_d of one value by equation (4.8): floor(q y / 2^d + 1/2), by integer division. */
+static uint32_t reference_decompress(uint32_t y, unsigned d);
+
+/* SamplePolyCBD of Algorithm 8 written bit by bit with Algorithm 4. */
+static void naive_cbd(uint32_t *out, const uint8_t *bytes, unsigned eta);
+
+/* SampleNTT of Algorithm 7 written from the standard, reading the XOF three bytes at a time. */
+static void naive_sample_ntt(uint32_t *out, const uint8_t *seed34);
+
+/* Sets out to H(a) with a of size bytes, H = SHA3-256 (4.1). */
+static void reference_h(uint8_t *out, const uint8_t *data, size_t size);
+
+/* Sets out (64 bytes) to G(a || b), G = SHA3-512 (4.1). */
+static void reference_g(uint8_t *out, const uint8_t *first, size_t first_size, const uint8_t *second, size_t second_size);
+
+/* Sets out (128 bytes) to PRF_2(seed, nonce) = SHAKE256(seed || nonce, 128) (4.1, eta 2). */
+static void reference_prf(uint8_t *out, const uint8_t *seed, uint8_t nonce);
+
+/* Adds two polynomials coefficient by coefficient mod q (2.4.5), result into sum (which may be a). */
+static void poly_add(struct cryc_mlkem_poly *sum, const struct cryc_mlkem_poly *a, const struct cryc_mlkem_poly *b);
+
+/* Fills the matrix A_hat[i][j] = SampleNTT(rho || j || i) (Algorithm 13 lines 3 to 7). */
+static void reference_matrix(struct cryc_mlkem_poly matrix[K][K], const uint8_t *rho);
+
+/* K-PKE.KeyGen (Algorithm 13) built from the module's functions: writes ek (1184 bytes) and dk_pke (1152 bytes). */
+static void reference_keygen(uint8_t *ek, uint8_t *dk_pke, const uint8_t *d);
+
+/* K-PKE.Encrypt (Algorithm 14) built from the module's functions: writes c (1088 bytes); returns 0, or 1 when ek is not a valid key. */
+static int reference_encrypt(uint8_t *ciphertext, const uint8_t *ek, const uint8_t *m, const uint8_t *r);
+
+/* Checks key generation from the seeds of one record file and returns how many records had both a seed and an ek. */
+static unsigned check_keygen_file(const char *name, int check_dk);
+
 /* Fills size bytes with pseudo-random bytes. */
 static void
 random_bytes(
@@ -85,6 +163,8 @@ power_mod(
 		base = base * base % Q;
 		exponent >>= 1;
 	}
+
+	/* Reports the power. */
 	return result;
 }
 
@@ -160,6 +240,8 @@ check_poly(
 			break;
 		}
 	}
+
+	/* Every value matches the reference. */
 	CHECK(same);
 }
 
@@ -192,6 +274,8 @@ naive_ntt(
 			odd = (odd + in[2U * m + 1U] % Q * power) % Q;
 			power = power * gamma % Q;
 		}
+
+		/* The two coefficients of this pair. */
 		out[2U * pair] = even;
 		out[2U * pair + 1U] = odd;
 	}
@@ -276,6 +360,8 @@ test_ntt_basis(void)
 		if ((uint32_t)f.c[2U * index] != want || f.c[2U * index + 1U] != 0)
 			matches = 0;
 	}
+
+	/* Every coefficient matches. */
 	CHECK(matches);
 
 	/* The NTT of X: odd entries 1, even entries 0 (no zeta enters). */
@@ -287,6 +373,8 @@ test_ntt_basis(void)
 		if (f.c[2U * index] != 0 || f.c[2U * index + 1U] != 1)
 			matches = 0;
 	}
+
+	/* Every coefficient matches. */
 	CHECK(matches);
 
 	/* The NTT of 1: even entries 1, odd entries 0. */
@@ -298,6 +386,8 @@ test_ntt_basis(void)
 		if (f.c[2U * index] != 1 || f.c[2U * index + 1U] != 0)
 			matches = 0;
 	}
+
+	/* Every coefficient matches. */
 	CHECK(matches);
 
 	/* Each delta polynomial against the definition (this covers the whole linear map). */
@@ -336,11 +426,19 @@ test_ntt_random(void)
 
 	/* Constant polynomials: 0, 1, q - 1 and 1664. */
 	for (round = 0; round < 4U; round++) {
-		constant = round == 0U ? (int16_t)0 : round == 1U ? (int16_t)1 : round == 2U ? (int16_t)(Q - 1U) : (int16_t)1664;
+		constant = (int16_t)1664;
+		if (round == 0U)
+			constant = (int16_t)0;
+		else if (round == 1U)
+			constant = (int16_t)1;
+		else if (round == 2U)
+			constant = (int16_t)(Q - 1U);
 		for (index = 0; index < CRYC_MLKEM_N; index++) {
 			f.c[index] = constant;
 			in[index] = (uint32_t)constant;
 		}
+
+		/* The definition and the module agree on the constant. */
 		naive_ntt(expected, in);
 		cryc_mlkem_ntt(&f);
 		check_poly(&f, expected, "ntt of a constant");
@@ -386,8 +484,13 @@ test_ntt_inverse(void)
 		cryc_mlkem_ntt_inverse(&f);
 		to_residues(in, &f);
 		naive_ntt(forward, in);
-		for (index = 0; index < CRYC_MLKEM_N; index++)
-			expected[index] = index == position ? 1U : 0U;
+		for (index = 0; index < CRYC_MLKEM_N; index++) {
+			expected[index] = 0U;
+			if (index == position)
+				expected[index] = 1U;
+		}
+
+		/* The definition's transform of the result is the delta again. */
 		for (index = 0; index < CRYC_MLKEM_N; index++)
 			g.c[index] = (int16_t)forward[index];
 		check_poly(&g, expected, "naive ntt of the inverse of a delta");
@@ -403,6 +506,8 @@ test_ntt_inverse(void)
 			if (f.c[index] < 0 || (uint32_t)f.c[index] >= Q)
 				in_range = 0;
 		}
+
+		/* Every coefficient is in range. */
 		CHECK(in_range);
 		to_residues(in, &f);
 		naive_ntt(forward, in);
@@ -487,6 +592,8 @@ test_multiply(void)
 			random_wild_poly(&f);
 			random_wild_poly(&g);
 		}
+
+		/* Takes the residues of the polynomials. */
 		to_residues(left, &f);
 		to_residues(right, &g);
 		naive_multiply_ntts(expected, left, right);
@@ -517,8 +624,21 @@ test_multiply(void)
 
 	/* Monomials: X^a * X^b = X^(a+b), or -X^(a+b-256) past the top (X^256 = -1). */
 	for (round = 0; round < 60U; round++) {
-		a = round == 0U ? 255U : round == 1U ? 255U : round == 2U ? 0U : random32() % CRYC_MLKEM_N;
-		b = round == 0U ? 1U : round == 1U ? 255U : round == 2U ? 0U : random32() % CRYC_MLKEM_N;
+		if (round == 0U) {
+			a = 255U;
+			b = 1U;
+		} else if (round == 1U) {
+			a = 255U;
+			b = 255U;
+		} else if (round == 2U) {
+			a = 0U;
+			b = 0U;
+		} else {
+			a = random32() % CRYC_MLKEM_N;
+			b = random32() % CRYC_MLKEM_N;
+		}
+
+		/* The two monomials. */
 		memset(&f, 0, sizeof(f));
 		memset(&g, 0, sizeof(g));
 		f.c[a] = 1;
@@ -632,7 +752,9 @@ naive_byte_decode(
 		bits[index] = (uint8_t)((in[index / 8U] >> (index % 8U)) & 1U);
 
 	/* The values: the sum of the d bits times powers of two, mod m (line 3). */
-	modulus = d == 12U ? Q : (1U << d);
+	modulus = (1U << d);
+	if (d == 12U)
+		modulus = Q;
 	clean = 1;
 	for (index = 0; index < CRYC_MLKEM_N; index++) {
 		value = 0U;
@@ -642,6 +764,8 @@ naive_byte_decode(
 			clean = 0;
 		values[index] = value % modulus;
 	}
+
+	/* Reports whether every value was below the modulus. */
 	return clean;
 }
 
@@ -658,6 +782,8 @@ poly_equals(
 		if ((uint32_t)(uint16_t)f->c[index] != expected[index])
 			return 0;
 	}
+
+	/* Succeeded: every coefficient matches. */
 	return 1;
 }
 
@@ -825,8 +951,13 @@ test_decode_examples(void)
 	in[1] = 0x01U;
 	clean = cryc_mlkem_byte_decode(&f, in, 1U);
 	CHECK(clean == 1);
-	for (index = 0; index < CRYC_MLKEM_N; index++)
-		expected[index] = index == 0U || index == 2U || index == 3U || index == 8U ? 1U : 0U;
+	for (index = 0; index < CRYC_MLKEM_N; index++) {
+		expected[index] = 0U;
+		if (index == 0U || index == 2U || index == 3U || index == 8U)
+			expected[index] = 1U;
+	}
+
+	/* The decoded polynomial has the bits of the input. */
 	CHECK(poly_equals(&f, expected));
 
 	/* d = 11 with all bytes 0xff: every value 2047 (below q: the flag stays 1). */
@@ -856,13 +987,17 @@ test_encode_decode_random(void)
 
 	/* Every bit width, several random inputs each. */
 	for (d = 1U; d <= 12U; d++) {
-		limit = d == 12U ? Q : (1U << d);
+		limit = (1U << d);
+		if (d == 12U)
+			limit = Q;
 		for (round = 0; round < 20U; round++) {
 			/* Encode random values; buffers have exactly 32 * d bytes so a longer write is caught. */
 			for (index = 0; index < CRYC_MLKEM_N; index++) {
 				values[index] = random32() % limit;
 				f.c[index] = (int16_t)values[index];
 			}
+
+			/* The buffer of exactly the size. */
 			out = (uint8_t *)malloc(32U * d);
 			CHECK(out != NULL);
 			cryc_mlkem_byte_encode(out, &f, d);
@@ -946,8 +1081,11 @@ test_encode_decode_bad_width(void)
 			if (out[slot] != 0xa5U)
 				untouched = 0;
 		}
+
+		/* No byte outside the output was touched. */
 		CHECK(untouched);
 
+		/* Decoding an undefined width fails and clears the polynomial. */
 		memset(in, 0x5a, sizeof(in));
 		random_poly(&f);
 		clean = cryc_mlkem_byte_decode(&f, in, widths[index]);
@@ -1017,6 +1155,7 @@ test_compress_all(void)
 	unsigned base;
 	unsigned index;
 	uint32_t value;
+	uint32_t reference;
 	int same;
 
 	/* Every d from 1 to 11; the 3329 values go through in blocks of 256. */
@@ -1029,15 +1168,20 @@ test_compress_all(void)
 					value = Q - 1U;
 				f.c[index] = (int16_t)value;
 			}
+
+			/* The module's compression against the reference of each value. */
 			cryc_mlkem_compress(&f, d);
 			for (index = 0; index < CRYC_MLKEM_N; index++) {
 				value = base + index;
 				if (value >= Q)
 					value = Q - 1U;
-				if ((uint32_t)f.c[index] != reference_compress(value, d))
+				reference = reference_compress(value, d);
+				if ((uint32_t)f.c[index] != reference)
 					same = 0;
 			}
 		}
+
+		/* Every value matches the reference. */
 		CHECK(same);
 	}
 }
@@ -1054,6 +1198,7 @@ test_decompress_all(void)
 	uint32_t value;
 	uint32_t limit;
 	uint32_t difference;
+	uint32_t reference;
 	int same;
 	int trip;
 	int close;
@@ -1070,13 +1215,16 @@ test_decompress_all(void)
 					value = limit - 1U;
 				f.c[index] = (int16_t)value;
 			}
+
+			/* The module's decompression against the reference of each value, and below q. */
 			cryc_mlkem_decompress(&f, d);
 			g = f;
 			for (index = 0; index < CRYC_MLKEM_N; index++) {
 				value = base + index;
 				if (value >= limit)
 					value = limit - 1U;
-				if ((uint32_t)f.c[index] != reference_decompress(value, d) || (uint32_t)f.c[index] >= Q)
+				reference = reference_decompress(value, d);
+				if ((uint32_t)f.c[index] != reference || (uint32_t)f.c[index] >= Q)
 					same = 0;
 			}
 
@@ -1090,6 +1238,8 @@ test_decompress_all(void)
 					trip = 0;
 			}
 		}
+
+		/* Every value matches the reference. */
 		CHECK(same);
 		CHECK(trip);
 	}
@@ -1104,19 +1254,25 @@ test_decompress_all(void)
 					value = Q - 1U;
 				f.c[index] = (int16_t)value;
 			}
+
+			/* A round trip through Compress and Decompress. */
 			cryc_mlkem_compress(&f, d);
 			cryc_mlkem_decompress(&f, d);
 			for (index = 0; index < CRYC_MLKEM_N; index++) {
 				value = base + index;
 				if (value >= Q)
 					value = Q - 1U;
-				difference = (uint32_t)f.c[index] > value ? (uint32_t)f.c[index] - value : value - (uint32_t)f.c[index];
+				difference = value - (uint32_t)f.c[index];
+				if ((uint32_t)f.c[index] > value)
+					difference = (uint32_t)f.c[index] - value;
 				if (difference > Q - difference)
 					difference = Q - difference;
 				if (difference > (Q + (1U << d)) / (2U << d))
 					close = 0;
 			}
 		}
+
+		/* Every value comes back within the rounding error. */
 		CHECK(close);
 	}
 }
@@ -1131,6 +1287,8 @@ test_compress_examples(void)
 	unsigned round;
 	unsigned d;
 	int same;
+	uint32_t reference;
+	static const unsigned widths[] = { 0U, 12U, 13U, 0xffffffffU };
 
 	/*
 	 * Hand-worked Compress_1: 2x/q rounds to 1 for 832.25 < x < 2496.75, so
@@ -1187,6 +1345,8 @@ test_compress_examples(void)
 		if (f.c[index] < 0 || f.c[index] >= 1024)
 			same = 0;
 	}
+
+	/* Every value matches the reference. */
 	CHECK(same);
 	memset(&f, 0, sizeof(f));
 	f.c[0] = (int16_t)0xffff;
@@ -1205,25 +1365,31 @@ test_compress_examples(void)
 			cryc_mlkem_compress(&f, d);
 			same = 1;
 			for (index = 0; index < CRYC_MLKEM_N; index++) {
-				if ((uint32_t)f.c[index] != reference_compress((uint32_t)(uint16_t)saved.c[index] % Q, d))
+				reference = reference_compress((uint32_t)(uint16_t)saved.c[index] % Q, d);
+				if ((uint32_t)f.c[index] != reference)
 					same = 0;
 			}
+
+			/* Every value matches the reference. */
 			CHECK(same);
+
+			/* The same for Decompress, which takes the low d bits. */
 			f = saved;
 			cryc_mlkem_decompress(&f, d);
 			same = 1;
 			for (index = 0; index < CRYC_MLKEM_N; index++) {
-				if ((uint32_t)f.c[index] != reference_decompress((uint32_t)(uint16_t)saved.c[index] & ((1U << d) - 1U), d))
+				reference = reference_decompress((uint32_t)(uint16_t)saved.c[index] & ((1U << d) - 1U), d);
+				if ((uint32_t)f.c[index] != reference)
 					same = 0;
 			}
+
+			/* Every value matches the reference. */
 			CHECK(same);
 		}
 	}
 
 	/* The undefined widths leave the polynomial unchanged. */
 	for (index = 0; index < 4U; index++) {
-		static const unsigned widths[] = { 0U, 12U, 13U, 0xffffffffU };
-
 		random_poly(&f);
 		saved = f;
 		cryc_mlkem_compress(&f, widths[index]);
@@ -1259,8 +1425,12 @@ naive_cbd(
 			x += bits[2U * index * eta + j];
 			y += bits[2U * index * eta + eta + j];
 		}
+
+		/* The coefficient is x - y, taken modulo q. */
 		difference = x - y;
-		out[index] = difference >= 0 ? (uint32_t)difference : Q - (uint32_t)(-difference);
+		out[index] = Q - (uint32_t)(-difference);
+		if (difference >= 0)
+			out[index] = (uint32_t)difference;
 	}
 }
 
@@ -1336,6 +1506,8 @@ test_sample_cbd(void)
 		CHECK((uint32_t)f.c[1] == want_high);
 		CHECK(f.c[2] == 0);
 	}
+
+	/* Releases the buffers. */
 	free(bytes);
 
 	/* Hand-worked eta = 3: six bits per coefficient; byte 0 = 0x07 gives x = 3, y = 0 (+3); byte 0 = 0x38 gives x = 0, y = 3 (-3). */
@@ -1413,11 +1585,15 @@ naive_sample_ntt(
 			out[count] = d1;
 			count++;
 		}
+
+		/* The second candidate counts only while the polynomial has room. */
 		if (d2 < Q && count < CRYC_MLKEM_N) {
 			out[count] = d2;
 			count++;
 		}
 	}
+
+	/* Wipes the sponge. */
 	cryc_sha3_clear(&xof);
 }
 
@@ -1432,13 +1608,17 @@ test_sample_ntt(void)
 	unsigned round;
 	unsigned index;
 	int in_range;
+	int fill;
 
 	/* Structured seeds: all zeros, all ones, and a counting pattern, each with the two index bytes varied. */
 	for (round = 0; round < 200U; round++) {
 		seed = (uint8_t *)malloc(34U);
 		CHECK(seed != NULL);
 		if (round < 50U) {
-			memset(seed, round % 2U == 0U ? 0x00 : 0xff, 34U);
+			fill = 0xff;
+			if (round % 2U == 0U)
+				fill = 0x00;
+			memset(seed, fill, 34U);
 			seed[32] = (uint8_t)(round / 2U % 3U);
 			seed[33] = (uint8_t)(round / 6U % 3U);
 		} else if (round < 100U) {
@@ -1447,6 +1627,8 @@ test_sample_ntt(void)
 		} else {
 			random_bytes(seed, 34U);
 		}
+
+		/* The definition and the module agree on the seed. */
 		naive_sample_ntt(expected, seed);
 		memset(&f, 0x77, sizeof(f));
 		cryc_mlkem_sample_ntt(&f, seed);
@@ -1458,6 +1640,8 @@ test_sample_ntt(void)
 			if (f.c[index] < 0 || (uint32_t)f.c[index] >= Q)
 				in_range = 0;
 		}
+
+		/* Every coefficient is in range. */
 		CHECK(in_range);
 		free(seed);
 	}
@@ -1475,9 +1659,6 @@ test_sample_ntt(void)
 	CHECK(memcmp(&f, &g, sizeof(f)) != 0);
 	free(seed);
 }
-
-/* The dimension of the module of ML-KEM-768 (Table 2: k = 3). */
-#define K	3U
 
 /* Sets out to H(a) with a of size bytes, H = SHA3-256 (4.1). */
 static void
@@ -1598,6 +1779,8 @@ reference_keygen(
 		nonce++;
 		cryc_mlkem_sample_cbd(&s[i], stream, 2U);
 	}
+
+	/* The error vector continues the nonce. */
 	for (i = 0; i < K; i++) {
 		reference_prf(stream, expanded + 32, nonce);
 		nonce++;
@@ -1624,6 +1807,8 @@ reference_keygen(
 		cryc_mlkem_byte_encode(ek + 384U * i, &t[i], 12U);
 		cryc_mlkem_byte_encode(dk_pke + 384U * i, &s[i], 12U);
 	}
+
+	/* The seed rho follows the encoded polynomials. */
 	memcpy(ek + 384U * K, expanded, 32U);
 }
 
@@ -1649,13 +1834,17 @@ reference_encrypt(
 	unsigned j;
 	uint8_t nonce;
 	int clean;
+	int decoded;
 
 	/* t_hat from ek, and the matrix from rho, lines 2 to 8. */
 	clean = 1;
 	for (i = 0; i < K; i++) {
-		if (cryc_mlkem_byte_decode(&t[i], ek + 384U * i, 12U) != 1)
+		decoded = cryc_mlkem_byte_decode(&t[i], ek + 384U * i, 12U);
+		if (decoded != 1)
 			clean = 0;
 	}
+
+	/* The matrix from rho. */
 	reference_matrix(matrix, ek + 384U * K);
 
 	/* y, e1 and e2 from r, lines 9 to 17. */
@@ -1665,11 +1854,15 @@ reference_encrypt(
 		nonce++;
 		cryc_mlkem_sample_cbd(&y[i], stream, 2U);
 	}
+
+	/* The first error vector. */
 	for (i = 0; i < K; i++) {
 		reference_prf(stream, r, nonce);
 		nonce++;
 		cryc_mlkem_sample_cbd(&e1[i], stream, 2U);
 	}
+
+	/* The second error, one polynomial. */
 	reference_prf(stream, r, nonce);
 	cryc_mlkem_sample_cbd(&e2, stream, 2U);
 
@@ -1688,6 +1881,8 @@ reference_encrypt(
 			cryc_mlkem_multiply_ntts(&product, &matrix[j][i], &y[j]);
 			poly_add(&u, &u, &product);
 		}
+
+		/* The inverse transform, the error, and the compressed encoding. */
 		cryc_mlkem_ntt_inverse(&u);
 		poly_add(&u, &u, &e1[i]);
 		cryc_mlkem_compress(&u, 10U);
@@ -1700,13 +1895,20 @@ reference_encrypt(
 		cryc_mlkem_multiply_ntts(&product, &t[i], &y[i]);
 		poly_add(&v, &v, &product);
 	}
+
+	/* The inverse transform, the error and the message. */
 	cryc_mlkem_ntt_inverse(&v);
 	poly_add(&v, &v, &e2);
 	poly_add(&v, &v, &mu);
 	cryc_mlkem_compress(&v, 4U);
 	cryc_mlkem_byte_encode(ciphertext + 320U * K, &v, 4U);
 
-	return clean ? 0 : 1;
+	/* Reports 1 when ek was not a valid key. */
+	if (!clean)
+		return 1;
+
+	/* Succeeded: the ciphertext is written. */
+	return 0;
 }
 
 /* Checks key generation from the seeds of one record file and returns how many records had both a seed and an ek. */
@@ -1727,20 +1929,29 @@ check_keygen_file(
 	size_t dk_size;
 	const char *result;
 	unsigned count;
+	int opened;
+	int more;
+	int verdict;
 
 	/* Opens the vectors. */
 	count = 0U;
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return 0U;
 	}
 
 	/* Each record with a seed and an encapsulation key. */
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		seed_size = vec_hex(&file, "seed", seed, sizeof(seed));
 		ek_size = vec_hex(&file, "ek", ek, sizeof(ek));
-		if (result == NULL || strcmp(result, "valid") != 0 || seed_size != 64U || ek_size != 1184U)
+		if (result == NULL)
+			continue;
+		verdict = strcmp(result, "valid");
+		if (verdict != 0 || seed_size != 64U || ek_size != 1184U)
 			continue;
 		count++;
 
@@ -1761,6 +1972,8 @@ check_keygen_file(
 			}
 		}
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 	return count;
 }
@@ -1805,18 +2018,25 @@ test_vectors_encaps(void)
 	unsigned i;
 	int clean;
 	int refused;
+	int opened;
+	int more;
+	int verdict;
+	int flagged;
 
 	/* Opens the vectors. */
 	valid = 0U;
 	overflow = 0U;
 	other = 0U;
-	if (vec_open(&file, "wycheproof-mlkem_768_encaps_test") != 0) {
+	opened = vec_open(&file, "wycheproof-mlkem_768_encaps_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
 
 	/* Each record. */
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		flags = vec_get(&file, "flags");
 		m_size = vec_hex(&file, "m", m, sizeof(m));
@@ -1825,7 +2045,8 @@ test_vectors_encaps(void)
 			continue;
 
 		/* A valid case: (K, r) = G(m || H(ek)), c = K-PKE.Encrypt(ek, m, r) (Algorithm 17). */
-		if (strcmp(result, "valid") == 0) {
+		verdict = strcmp(result, "valid");
+		if (verdict == 0) {
 			c_size = vec_hex(&file, "c", c, sizeof(c));
 			key_size = vec_hex(&file, "K", key, sizeof(key));
 			CHECK(m_size == 32U && ek_size == 1184U && c_size == 1088U && key_size == 32U);
@@ -1841,7 +2062,15 @@ test_vectors_encaps(void)
 		}
 
 		/* A modulus-overflow case: one of the 12-bit polynomials of ek has a value of q or more (7.2). */
-		if (flags != NULL && strcmp(flags, "ModulusOverflow") == 0 && ek_size == 1184U) {
+		flagged = 0;
+		if (flags != NULL) {
+			verdict = strcmp(flags, "ModulusOverflow");
+			if (verdict == 0)
+				flagged = 1;
+		}
+
+		/* The flagged case is refused when the key has its full size. */
+		if (flagged && ek_size == 1184U) {
 			overflow++;
 			refused = 0;
 			for (i = 0; i < K; i++) {
@@ -1849,11 +2078,17 @@ test_vectors_encaps(void)
 				if (clean == 0)
 					refused = 1;
 			}
+
+			/* The key was refused. */
 			CHECK(refused);
 			continue;
 		}
+
+		/* Any other record is only counted. */
 		other++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 
 	/* The file holds 133 valid cases and 12 modulus-overflow ones. */
@@ -1876,33 +2111,50 @@ test_vectors_ek_roundtrip(void)
 	unsigned i;
 	int clean;
 	int same;
+	int opened;
+	int more;
+	int verdict;
+	int decoded;
+	int different;
 
 	/* Opens the vectors. */
 	count = 0U;
-	if (vec_open(&file, "wycheproof-mlkem_768_keygen_seed_test") != 0) {
+	opened = vec_open(&file, "wycheproof-mlkem_768_keygen_seed_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
 
 	/* The ek of each key generation case: the three 12-bit polynomials decode clean and encode back. */
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		ek_size = vec_hex(&file, "ek", ek, sizeof(ek));
-		if (result == NULL || strcmp(result, "valid") != 0 || ek_size != 1184U)
+		if (result == NULL)
+			continue;
+		verdict = strcmp(result, "valid");
+		if (verdict != 0 || ek_size != 1184U)
 			continue;
 		count++;
 		same = 1;
 		clean = 1;
 		for (i = 0; i < K; i++) {
-			if (cryc_mlkem_byte_decode(&poly, ek + 384U * i, 12U) != 1)
+			decoded = cryc_mlkem_byte_decode(&poly, ek + 384U * i, 12U);
+			if (decoded != 1)
 				clean = 0;
 			cryc_mlkem_byte_encode(again, &poly, 12U);
-			if (memcmp(again, ek + 384U * i, 384U) != 0)
+			different = memcmp(again, ek + 384U * i, 384U);
+			if (different != 0)
 				same = 0;
 		}
+
+		/* Every polynomial decoded. */
 		CHECK(clean);
 		CHECK(same);
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 	CHECK(count == 100U);
 }

@@ -22,6 +22,9 @@
 #include "userland/base/libcrypto-compat/cryc-ed25519.h"
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -51,7 +54,11 @@ main(void)
 	for (round = 0; round < 4U; round++) {
 		fill(seed, sizeof(seed), 3U + round * 40U);
 		fill(message, sizeof(message), 11U);
-		size = (round == 0U) ? 0U : (round * 60U);
+
+		/* The message length is public: empty in the first round, then 60 bytes longer each round. */
+		size = 0U;
+		if (round != 0U)
+			size = round * 60U;
 
 		/* The public key of a secret seed. */
 		CT_SECRET(seed, sizeof(seed));

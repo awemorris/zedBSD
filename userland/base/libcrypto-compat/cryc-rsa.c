@@ -71,6 +71,7 @@ cryc_rsa_pkcs1_verify(
 	size_t modulus_size;
 	size_t padding_size;
 	size_t offset;
+	int difference;
 	int error;
 
 	/* Steps 1 and 2: checks the arguments and applies the public key to the signature (EM = I2OSP (m, k)). */
@@ -98,7 +99,8 @@ cryc_rsa_pkcs1_verify(
 	memcpy(expected + offset, hash, hash_size);
 
 	/* 8.2.2 step 4: the signature is valid only when EM equals EM' byte for byte. */
-	if (memcmp(encoded, expected, modulus_size) != 0)
+	difference = memcmp(encoded, expected, modulus_size);
+	if (difference != 0)
 		return EBADMSG;
 
 	/* Succeeded: the signature verifies. */
@@ -138,6 +140,7 @@ cryc_rsa_pss_verify(
 	size_t index;
 	uint32_t top_mask;
 	uint32_t keep_mask;
+	int difference;
 	int error;
 
 	/* Steps 1, 2a and 2b: checks the arguments and applies the public key (RSAVP1). */
@@ -211,7 +214,8 @@ cryc_rsa_pss_verify(
 	cryc_hash_final(&running, check);
 
 	/* 9.1.2 step 14: consistent only when H equals H'. */
-	if (memcmp(check, expected_hash, hash_size) != 0)
+	difference = memcmp(check, expected_hash, hash_size);
+	if (difference != 0)
 		return EBADMSG;
 
 	/* Succeeded: the signature verifies. */
@@ -307,6 +311,8 @@ rsa_public_operation(
 	for (index = 0; index < e_size; index++) {
 		e_value = (e_value << 8) | (uint32_t)e_bytes[index];
 	}
+
+	/* Refuses an exponent that is below three or even. */
 	if (e_value < 3U)
 		return EINVAL;
 	if ((e_value & 1U) == 0U)
@@ -323,6 +329,8 @@ rsa_public_operation(
 		top_bits++;
 		top_byte >>= 1;
 	}
+
+	/* Refuses a modulus that is too short to be trusted. */
 	bits = (n_size - 1U) * 8U + top_bits;
 	if (bits < CRYC_RSA_MIN_BITS)
 		return ENOTSUP;

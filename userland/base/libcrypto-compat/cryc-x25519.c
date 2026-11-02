@@ -26,6 +26,9 @@
 /* The u-coordinate of the base point: 9, little-endian (section 4.1). */
 #define X25519_BASE_U	9U
 
+/* Runs the ladder of section 5 for a scalar and a u-coordinate and writes the 32-byte result. */
+static int x25519_ladder(uint8_t *out, const uint8_t *scalar, const uint8_t *u);
+
 /*
  * Runs the ladder of section 5 for a scalar and a u-coordinate and
  * writes the 32-byte result; returns 0, or EINVAL when it is all zeros.

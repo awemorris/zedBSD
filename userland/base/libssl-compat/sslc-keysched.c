@@ -101,6 +101,8 @@ sslc_transcript_update(
 		cryc_hash_update(&transcript->sha256, message, size);
 		return;
 	}
+
+	/* Feeds the message into the SHA-384 transcript. */
 	if (transcript->selected == CRYC_HASH_SHA384)
 		cryc_hash_update(&transcript->sha384, message, size);
 }
@@ -211,6 +213,8 @@ sslc_transcript_restart_hrr(
 		cryc_wipe(digest, sizeof(digest));
 		return EINVAL;
 	}
+
+	/* Feeds the synthetic header and the digest into the new state. */
 	cryc_hash_update(running, header, sizeof(header));
 	cryc_hash_update(running, digest, size);
 
@@ -730,6 +734,8 @@ sslc_tls12_master(
 	} else {
 		return EINVAL;
 	}
+
+	/* Refuses a context of the wrong size. */
 	if (context_size != wanted)
 		return EINVAL;
 
@@ -761,6 +767,7 @@ sslc_tls12_key_block(
 {
 	uint8_t seed[SSLC_TLS12_RANDOMS];
 	uint8_t block[SSLC_TLS12_KEY_BLOCK_MAX];
+	size_t hash_size;
 	size_t key_size;
 	size_t iv_size;
 	size_t total;
@@ -776,7 +783,10 @@ sslc_tls12_key_block(
 	/* The suite must be a TLS 1.2 suite with a hash the PRF takes. */
 	if (suite->version != SSLC_TLS12)
 		return EINVAL;
-	if (sslc_keysched_hash_size(suite->hash) == 0)
+
+	/* Refuses a hash the PRF does not take. */
+	hash_size = sslc_keysched_hash_size(suite->hash);
+	if (hash_size == 0)
 		return EINVAL;
 
 	/* The key and IV must fit the structures. */

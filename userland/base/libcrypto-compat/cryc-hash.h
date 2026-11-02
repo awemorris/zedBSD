@@ -94,9 +94,10 @@ int cryc_hash_digest(enum cryc_hash_id id, const uint8_t *data, size_t size, uin
  * Starts HMAC with key (RFC 2104 section 2): a key longer than the block
  * is first hashed; the key is padded with zeros to the block size.
  *
- * key may be NULL only when key_size is 0 (an empty key is allowed).  The
- * key is not kept; the caller may wipe it after the call.  Returns 0 or
- * ENOTSUP for an unknown id.  Constant time in the key's bytes.
+ * key may be NULL only when key_size is 0 (an empty key is allowed; a
+ * NULL key with a size is EINVAL).  The key is not kept; the caller may
+ * wipe it after the call.  Returns 0, EINVAL or ENOTSUP for an unknown
+ * id.  Constant time in the key's bytes.
  */
 int cryc_hmac_init(struct cryc_hmac *hmac, enum cryc_hash_id id, const uint8_t *key, size_t key_size);
 
@@ -112,7 +113,7 @@ void cryc_hmac_clear(struct cryc_hmac *hmac);
 /*
  * Computes HMAC(key, data) in one call into out (the digest size).
  *
- * Returns 0 or ENOTSUP for an unknown id.
+ * Returns 0, or cryc_hmac_init's EINVAL or ENOTSUP.
  */
 int cryc_hmac(enum cryc_hash_id id, const uint8_t *key, size_t key_size, const uint8_t *data, size_t size, uint8_t *out);
 
@@ -120,8 +121,9 @@ int cryc_hmac(enum cryc_hash_id id, const uint8_t *key, size_t key_size, const u
  * HKDF-Extract (RFC 5869 section 2.2): PRK = HMAC-Hash(salt, IKM).
  *
  * A NULL salt or a salt_size of 0 means a string of HashLen zeros (2.2).
- * ikm may be NULL only when ikm_size is 0.  prk receives HashLen bytes
- * and may not overlap salt or ikm.  Returns 0 or ENOTSUP.
+ * ikm may be NULL only when ikm_size is 0 (a NULL ikm with a size is
+ * EINVAL).  prk receives HashLen bytes and may not overlap salt or ikm.
+ * Returns 0, EINVAL or ENOTSUP.
  */
 int cryc_hkdf_extract(enum cryc_hash_id id, const uint8_t *salt, size_t salt_size, const uint8_t *ikm, size_t ikm_size, uint8_t *prk);
 
@@ -129,8 +131,9 @@ int cryc_hkdf_extract(enum cryc_hash_id id, const uint8_t *salt, size_t salt_siz
  * HKDF-Expand (RFC 5869 section 2.3): out_size bytes of OKM from PRK and
  * info.
  *
- * prk_size is at least HashLen (RFC 5869 2.3; EINVAL otherwise).  info
- * may be NULL only when info_size is 0.  out_size is 0 to 255 * HashLen
+ * prk_size is at least HashLen (RFC 5869 2.3; EINVAL otherwise) and prk
+ * is not NULL (EINVAL).  info may be NULL only when info_size is 0 (else
+ * EINVAL).  out_size is 0 to 255 * HashLen
  * (EINVAL above; nothing is written).  out may not overlap prk or info.
  * Returns 0, EINVAL or ENOTSUP; on an error out is not written.
  */

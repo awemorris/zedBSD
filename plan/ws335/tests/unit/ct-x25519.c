@@ -23,6 +23,15 @@
 #include "userland/base/libcrypto-compat/cryc-x25519.h"
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* A random source whose output is secret. */
+static int secret_random(void *context, uint8_t *out, size_t size);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -49,6 +58,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value. */
 	return value & 0xffU;
 }
 
@@ -83,6 +94,7 @@ main(void)
 	unsigned total;
 	int error;
 
+	/* The sum of the folded outputs starts at zero. */
 	total = 0;
 
 	/* X25519 of a secret scalar and a public u. */

@@ -29,8 +29,97 @@
 
 #include "userland/base/libssl-compat/sslc-keysched.h"
 
+/*
+ * What a record of the RFC 8448 trace holds, told by its label.
+ *
+ * The walk over the trace acts on the labels of the keys and secrets and
+ * ignores every other one.
+ */
+enum label_kind {
+	LABEL_OTHER,
+	LABEL_PRK,
+	LABEL_BINDER_HASH,
+	LABEL_INFO,
+	LABEL_EXPANDED,
+	LABEL_KEY_EXPANDED,
+	LABEL_IV_EXPANDED,
+	LABEL_FINISHED
+};
+
 /* The state of the deterministic generator of the test inputs. */
 static uint32_t random_state = 0x2f6e2b1dU;
+
+/* Returns the next pseudo-random 32-bit value (xorshift). */
+static uint32_t random_next(void);
+
+/* Reads rfc8448.vec into recs; returns 0, or -1 when the file is missing. */
+static int load_rfc8448(void);
+
+/* Frees what load_rfc8448 made. */
+static void free_rfc8448(void);
+
+/* Classifies a record of the trace by its label. */
+static enum label_kind label_kind_of(const char *label);
+
+/* Walks every labelled step of the RFC: the expansions, the keys, the binder. */
+static void test_rfc8448_steps(void);
+
+/* Takes a pointer as it is, or in one draw in eight as NULL. */
+static const void * maybe_missing(const void *pointer);
+
+/* Takes an output pointer as it is, or in one draw in eight as NULL. */
+static void * maybe_missing_output(void *pointer);
+
+/* Runs the RFC 8448 handshakes. */
+static void test_rfc8448(void);
+
+/* Checks the transcript over messages of many sizes, split in many ways, either hash. */
+static void test_transcript_hashing(void);
+
+/* Checks the selection rules, the state after init, select and clear. */
+static void test_transcript_select(void);
+
+/* Checks the HelloRetryRequest replacement of the transcript for both hashes. */
+static void test_transcript_hrr(void);
+
+/* Checks HKDF-Expand-Label against the formula for both hashes, many labels, contexts and lengths. */
+static void test_expand_label(void);
+
+/* Checks every refusal of HKDF-Expand-Label, and that the output is then untouched. */
+static void test_expand_label_errors(void);
+
+/* Checks the whole schedule against the formulas for both hashes and many random inputs. */
+static void test_schedule(void);
+
+/* Checks the refusals of the schedule's steps, and that a refusal changes nothing. */
+static void test_schedule_errors(void);
+
+/* Checks the traffic keys for every TLS 1.3 suite against the formula, and the refusals. */
+static void test_traffic_keys(void);
+
+/* Checks Finished, the traffic update and their refusals against the formulas. */
+static void test_finished_and_update(void);
+
+/* Checks the PRF against the formula over sizes, labels and both hashes. */
+static void test_prf(void);
+
+/* Checks the refusals of the PRF, and that the output is then untouched. */
+static void test_prf_errors(void);
+
+/* Checks the master secret, both forms, against the PRF formula, and its refusals. */
+static void test_master(void);
+
+/* Checks the key block of every TLS 1.2 suite against the formula, with the order of the halves, and the refusals. */
+static void test_key_block(void);
+
+/* Checks the TLS 1.2 Finished against the PRF formula, both senders and hashes, and its refusals. */
+static void test_tls12_finished(void);
+
+/* Returns a random hash id, often a valid one. */
+static enum cryc_hash_id random_hash(void);
+
+/* Runs random calls of every function. */
+static void test_random_calls(void);
 
 /* Returns the next pseudo-random 32-bit value (xorshift). */
 static uint32_t
@@ -42,6 +131,38 @@ random_next(void)
 	random_state ^= random_state << 5;
 	return random_state;
 }
+
+/* Fills size bytes at out with pseudo-random bytes. */
+static void random_fill(uint8_t *out, size_t size);
+
+/* Returns 1 when size bytes at bytes are all zero. */
+static int is_zero(const uint8_t *bytes, size_t size);
+
+static size_t ref_info(const char *label, const uint8_t *context, size_t context_size, size_t length, uint8_t *info);
+
+/* HKDF-Expand-Label by the formula, with the HKDF of libcrypto-compat. */
+static int ref_expand_label(enum cryc_hash_id hash, const uint8_t *secret, const char *label, const uint8_t *context, size_t context_size, uint8_t *out, size_t length);
+
+/* Derive-Secret(secret, label, hash of messages) by the formula. */
+static void ref_derive(enum cryc_hash_id hash, const uint8_t *secret, const char *label, const uint8_t *transcript_hash, uint8_t *out);
+
+static void ref_prf(enum cryc_hash_id hash, const uint8_t *secret, size_t secret_size, const char *label, const uint8_t *seed, size_t seed_size, uint8_t *out, size_t out_size);
+
+/* Copies a string to the heap. */
+static char * copy_string(const char *text);
+
+static const struct rec * find(const char *section, const char *step_part, const char *label, unsigned nth);
+
+static void run_trace(const char *section, int expect_hrr);
+
+/* Hashes size bytes of data with hash into out (the reference). */
+static void digest_of(enum cryc_hash_id hash, const uint8_t *data, size_t size, uint8_t *out);
+
+/* Checks that the transcript hashes to the hash of data. */
+static void check_transcript(const struct sslc_transcript *transcript, enum cryc_hash_id hash, const uint8_t *data, size_t size);
+
+/* Allocates size bytes (at least 1) filled with random bytes. */
+static uint8_t * random_block(size_t size);
 
 /* Fills size bytes at out with pseudo-random bytes. */
 static void
@@ -73,6 +194,8 @@ is_zero(
 		if (bytes[index] != 0)
 			return 0;
 	}
+
+	/* Succeeded: every byte is zero. */
 	return 1;
 }
 
@@ -163,6 +286,9 @@ struct ref_schedule {
 	uint8_t client_application[CRYC_HASH_MAX_SIZE];
 	uint8_t server_application[CRYC_HASH_MAX_SIZE];
 };
+
+/* Makes the schedule of RFC 8446 7.1 for a shared secret and the two transcript hashes. */
+static void ref_schedule_make(enum cryc_hash_id hash, const uint8_t *shared, size_t shared_size, const uint8_t *hash_hello, const uint8_t *hash_finished, struct ref_schedule *out);
 
 /* Makes the schedule of RFC 8446 7.1 for a shared secret and the two transcript hashes. */
 static void
@@ -273,6 +399,14 @@ struct rec {
 	size_t size;
 };
 
+/* Checks that size bytes at got equal the record's value (and that the record is that size). */
+static void check_rec(const uint8_t *got, size_t size, const struct rec *rec);
+
+static void check_expand(const struct rec *prk, const struct rec *info, const struct rec *expanded);
+
+/* Checks the record keys the RFC prints for a traffic secret (AES-128-GCM, SHA-256). */
+static void check_traffic_keys(const struct rec *prk, const struct rec *key, const struct rec *iv);
+
 /* All the records of rfc8448.vec, in order. */
 static struct rec *recs;
 static size_t rec_count;
@@ -291,6 +425,8 @@ copy_string(
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Copies the text including its terminator. */
 	strcpy(copy, text);
 	return copy;
 }
@@ -305,24 +441,36 @@ load_rfc8448(void)
 	struct rec *grown;
 	struct rec *rec;
 	uint8_t *bytes;
+	int error;
+	int more;
 
 	/* The file. */
-	if (vec_open(&file, "rfc8448") != 0) {
+	error = vec_open(&file, "rfc8448");
+	if (error != 0) {
 		CHECK(0);
 		return -1;
 	}
 
 	/* Each record is copied (the file's buffer is reused). */
-	while (vec_next(&file)) {
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
 		if (rec_count == rec_room) {
-			rec_room = rec_room == 0 ? 256U : rec_room * 2U;
+			rec_room = rec_room * 2U;
+			if (rec_room == 0)
+				rec_room = 256U;
 			grown = realloc(recs, rec_room * sizeof(*recs));
 			if (grown == NULL) {
 				printf("FAIL out of memory\n");
 				exit(EXIT_FAILURE);
 			}
+
+			/* Keeps the grown table. */
 			recs = grown;
 		}
+
+		/* Takes the next free record. */
 		rec = &recs[rec_count++];
 		rec->section = copy_string(vec_get(&file, "section"));
 		rec->step = copy_string(vec_get(&file, "step"));
@@ -333,12 +481,16 @@ load_rfc8448(void)
 			printf("FAIL out of memory\n");
 			exit(EXIT_FAILURE);
 		}
+
+		/* Decodes the hex into the record's bytes and checks the size the file states. */
 		size = hex_decode(text, bytes, strlen(text) / 2U + 1U);
 		CHECK(size != (size_t)-1);
 		CHECK(size == (size_t)atoi(vec_get(&file, "octets")));
 		rec->bytes = bytes;
 		rec->size = size;
 	}
+
+	/* Closes the vector file; succeeded: the records are loaded. */
 	vec_close(&file);
 	return 0;
 }
@@ -356,6 +508,8 @@ free_rfc8448(void)
 		free(recs[index].label);
 		free(recs[index].bytes);
 	}
+
+	/* Frees the table of records. */
 	free(recs);
 	recs = NULL;
 	rec_count = 0;
@@ -374,22 +528,31 @@ find(
 	const char *label,
 	unsigned nth)
 {
+	const char *contained;
 	size_t index;
+	size_t section_length;
+	int different;
 
 	/* The records in order. */
+	section_length = strlen(section);
 	for (index = 0; index < rec_count; index++) {
-		if (strncmp(recs[index].section, section, strlen(section)) != 0)
+		different = strncmp(recs[index].section, section, section_length);
+		if (different != 0)
 			continue;
-		if (recs[index].section[strlen(section)] != ' ')
+		if (recs[index].section[section_length] != ' ')
 			continue;
-		if (strstr(recs[index].step, step_part) == NULL)
+		contained = strstr(recs[index].step, step_part);
+		if (contained == NULL)
 			continue;
-		if (strcmp(recs[index].label, label) != 0)
+		different = strcmp(recs[index].label, label);
+		if (different != 0)
 			continue;
 		if (nth == 0)
 			return &recs[index];
 		nth--;
 	}
+
+	/* Reports the missing value and fails the test. */
 	printf("  missing %s | %s | %s\n", section, step_part, label);
 	CHECK(0);
 	return NULL;
@@ -436,6 +599,8 @@ check_expand(
 		CHECK(0);
 		return;
 	}
+
+	/* Checks the sizes of the secret and the info. */
 	CHECK(prk->size == 32U);
 	CHECK(info->size >= 4U);
 	length = (size_t)info->bytes[0] * 256U + info->bytes[1];
@@ -496,6 +661,54 @@ check_traffic_keys(
 	CHECK(is_zero(keys.key + 16, sizeof(keys.key) - 16U));
 }
 
+/* Classifies a record of the trace by its label. */
+static enum label_kind
+label_kind_of(
+	const char *label)
+{
+	int different;
+
+	/* The secret the expansions start from. */
+	different = strcmp(label, "PRK");
+	if (different == 0)
+		return LABEL_PRK;
+
+	/* The hash a PSK binder is computed over. */
+	different = strcmp(label, "binder hash");
+	if (different == 0)
+		return LABEL_BINDER_HASH;
+
+	/* The info of an expansion, for a plain one, a key and an IV. */
+	different = strcmp(label, "info");
+	if (different == 0)
+		return LABEL_INFO;
+	different = strcmp(label, "key info");
+	if (different == 0)
+		return LABEL_INFO;
+	different = strcmp(label, "iv info");
+	if (different == 0)
+		return LABEL_INFO;
+
+	/* The result of an expansion, for a plain one, a key and an IV. */
+	different = strcmp(label, "expanded");
+	if (different == 0)
+		return LABEL_EXPANDED;
+	different = strcmp(label, "key expanded");
+	if (different == 0)
+		return LABEL_KEY_EXPANDED;
+	different = strcmp(label, "iv expanded");
+	if (different == 0)
+		return LABEL_IV_EXPANDED;
+
+	/* The verify_data of a PSK binder. */
+	different = strcmp(label, "finished");
+	if (different == 0)
+		return LABEL_FINISHED;
+
+	/* A label the walk does not act on. */
+	return LABEL_OTHER;
+}
+
 /* Walks every labelled step of the RFC: the expansions, the keys, the binder. */
 static void
 test_rfc8448_steps(void)
@@ -506,9 +719,12 @@ test_rfc8448_steps(void)
 	const struct rec *binder_hash;
 	const char *last_step;
 	const char *last_section;
+	enum label_kind kind;
 	unsigned expansions;
 	size_t index;
 	uint8_t verify[32];
+	int different;
+	int new_group;
 	int error;
 
 	/* Each record in order; a new step starts a new group. */
@@ -520,7 +736,14 @@ test_rfc8448_steps(void)
 	last_section = "";
 	expansions = 0;
 	for (index = 0; index < rec_count; index++) {
-		if (strcmp(recs[index].step, last_step) != 0 || strcmp(recs[index].section, last_section) != 0) {
+		new_group = 0;
+		different = strcmp(recs[index].step, last_step);
+		if (different != 0)
+			new_group = 1;
+		different = strcmp(recs[index].section, last_section);
+		if (different != 0)
+			new_group = 1;
+		if (new_group) {
 			prk = NULL;
 			info = NULL;
 			key = NULL;
@@ -528,24 +751,25 @@ test_rfc8448_steps(void)
 			last_step = recs[index].step;
 			last_section = recs[index].section;
 		}
-		if (strcmp(recs[index].label, "PRK") == 0) {
+
+		/* Notes the PRK and the binder hash by their labels. */
+		kind = label_kind_of(recs[index].label);
+		if (kind == LABEL_PRK) {
 			prk = &recs[index];
-		} else if (strcmp(recs[index].label, "binder hash") == 0) {
+		} else if (kind == LABEL_BINDER_HASH) {
 			binder_hash = &recs[index];
-		} else if (strcmp(recs[index].label, "info") == 0 ||
-		    strcmp(recs[index].label, "key info") == 0 ||
-		    strcmp(recs[index].label, "iv info") == 0) {
+		} else if (kind == LABEL_INFO) {
 			info = &recs[index];
-		} else if (strcmp(recs[index].label, "expanded") == 0 ||
-		    strcmp(recs[index].label, "key expanded") == 0 ||
-		    strcmp(recs[index].label, "iv expanded") == 0) {
+		} else if (kind == LABEL_EXPANDED ||
+		    kind == LABEL_KEY_EXPANDED ||
+		    kind == LABEL_IV_EXPANDED) {
 			check_expand(prk, info, &recs[index]);
 			expansions++;
-			if (strcmp(recs[index].label, "key expanded") == 0)
+			if (kind == LABEL_KEY_EXPANDED)
 				key = &recs[index];
-			if (strcmp(recs[index].label, "iv expanded") == 0)
+			if (kind == LABEL_IV_EXPANDED)
 				check_traffic_keys(prk, key, &recs[index]);
-		} else if (strcmp(recs[index].label, "finished") == 0 && binder_hash != NULL) {
+		} else if (kind == LABEL_FINISHED && binder_hash != NULL) {
 			/* The PSK binder: the verify_data over the binder hash with the binder key. */
 			CHECK(prk != NULL);
 			CHECK(binder_hash->size == 32U);
@@ -590,26 +814,41 @@ run_trace(
 	size_t index;
 	size_t size;
 	size_t first_hello;
+	size_t section_length;
+	const char *contained;
 	int hrr_seen;
+	int different;
+	int is_server_hello;
+	int is_finished;
+	int is_retry;
 	int error;
 
 	/* Collects the constructed handshake messages of the section in order. */
 	count = 0;
+	section_length = strlen(section);
 	for (index = 0; index < rec_count; index++) {
 		rec = &recs[index];
-		if (strncmp(rec->section, section, strlen(section)) != 0)
+		different = strncmp(rec->section, section, section_length);
+		if (different != 0)
 			continue;
-		if (strstr(rec->step, " handshake message:") == NULL)
+		contained = strstr(rec->step, " handshake message:");
+		if (contained == NULL)
 			continue;
-		if (strstr(rec->step, "construct a") == NULL)
+		contained = strstr(rec->step, "construct a");
+		if (contained == NULL)
 			continue;
 		CHECK(count < 16U);
 		if (count >= 16U)
 			break;
 		messages[count].rec = rec;
-		messages[count].from_client = strncmp(rec->step, "{client}", 8) == 0;
+		different = strncmp(rec->step, "{client}", 8);
+		messages[count].from_client = 0;
+		if (different == 0)
+			messages[count].from_client = 1;
 		count++;
 	}
+
+	/* Checks that the messages of the trace were all found. */
 	CHECK(count >= 7U);
 
 	/* Starts the transcript and the schedule. */
@@ -626,9 +865,25 @@ run_trace(
 	for (index = 0; index < count; index++) {
 		rec = messages[index].rec;
 		size = rec->size;
-		if (strcmp(rec->label, "ServerHello") == 0) {
+		different = strcmp(rec->label, "ServerHello");
+		is_server_hello = 0;
+		if (different == 0)
+			is_server_hello = 1;
+		different = strcmp(rec->label, "Finished");
+		is_finished = 0;
+		if (different == 0)
+			is_finished = 1;
+		if (is_server_hello) {
 			/* Is it a HelloRetryRequest (the special random, RFC 8446 4.1.3)? */
-			if (size >= 38U && memcmp(rec->bytes + 6, sslc_tls_hrr_random, 32) == 0) {
+			is_retry = 0;
+			if (size >= 38U) {
+				different = memcmp(rec->bytes + 6, sslc_tls_hrr_random, 32);
+				if (different == 0)
+					is_retry = 1;
+			}
+
+			/* The ServerHello is a HelloRetryRequest. */
+			if (is_retry) {
 				/* The suite is known; the transcript is replaced by message_hash || H(ClientHello1). */
 				CHECK(expect_hrr);
 				CHECK(sslc_transcript_select(&transcript, CRYC_HASH_SHA256) == 0);
@@ -670,7 +925,9 @@ run_trace(
 			check_rec(schedule.server_handshake, 32U, vec);
 			continue;
 		}
-		if (strcmp(rec->label, "Finished") == 0 && !messages[index].from_client) {
+
+		/* The server's Finished. */
+		if (is_finished && !messages[index].from_client) {
 			/* The server's Finished: the verify_data over the transcript before it. */
 			CHECK(sslc_transcript_hash(&transcript, current) == 32U);
 			error = sslc_tls13_finished(CRYC_HASH_SHA256, schedule.server_handshake, current, verify);
@@ -696,7 +953,9 @@ run_trace(
 			check_rec(schedule.server_application, 32U, vec);
 			continue;
 		}
-		if (strcmp(rec->label, "Finished") == 0 && messages[index].from_client) {
+
+		/* The client's Finished. */
+		if (is_finished && messages[index].from_client) {
 			/* The client's Finished: over the transcript before it (the client's certificate included). */
 			CHECK(sslc_transcript_hash(&transcript, current) == 32U);
 			error = sslc_tls13_finished(CRYC_HASH_SHA256, schedule.client_handshake, current, verify);
@@ -715,10 +974,13 @@ run_trace(
 		}
 
 		/* Any other message is only absorbed (the first ClientHello is remembered for a retry). */
-		if (strcmp(rec->label, "ClientHello") == 0 && index == 0)
+		different = strcmp(rec->label, "ClientHello");
+		if (different == 0 && index == 0)
 			first_hello = index;
 		sslc_transcript_update(&transcript, rec->bytes, size);
 	}
+
+	/* Checks that a HelloRetryRequest was seen when one was expected. */
 	CHECK(hrr_seen == expect_hrr);
 
 	/* The empty-string hash the "derived" steps use. */
@@ -738,8 +1000,11 @@ run_trace(
 static void
 test_rfc8448(void)
 {
+	int error;
+
 	/* The vectors are in the cache; a missing file is a failure. */
-	if (load_rfc8448() != 0)
+	error = load_rfc8448();
+	if (error != 0)
 		return;
 	test_rfc8448_steps();
 
@@ -862,6 +1127,8 @@ test_transcript_hashing(void)
 				CHECK(sslc_transcript_select(&transcript, hash_ids[pick]) == 0);
 			which++;
 		}
+
+		/* Selects the hash and checks the transcript against the reference. */
 		CHECK(sslc_transcript_select(&transcript, hash_ids[pick]) == 0);
 		check_transcript(&transcript, hash_ids[pick], data, cut);
 		sslc_transcript_clear(&transcript);
@@ -1435,6 +1702,7 @@ test_master(void)
 	uint8_t expected[SSLC_TLS12_MASTER];
 	size_t which;
 	size_t size;
+	const char *label;
 	int pick;
 	int extended;
 	int error;
@@ -1446,10 +1714,17 @@ test_master(void)
 	/* Each hash, form and pre-master size. */
 	for (pick = 0; pick < 2; pick++) {
 		for (extended = 0; extended < 2; extended++) {
-			size = extended ? hash_sizes[pick] : 64U;
+			size = 64U;
+			label = "master secret";
+			if (extended) {
+				size = hash_sizes[pick];
+				label = "extended master secret";
+			}
+
+			/* Each size of pre-master secret. */
 			for (which = 0; which < sizeof(pre_sizes) / sizeof(pre_sizes[0]); which++) {
 				/* The PRF of the pre-master over the label and the session hash or the randoms. */
-				ref_prf(hash_ids[pick], pre_master, pre_sizes[which], extended ? "extended master secret" : "master secret", context, size, expected, 48);
+				ref_prf(hash_ids[pick], pre_master, pre_sizes[which], label, context, size, expected, 48);
 				memset(master, 0xa5, sizeof(master));
 				error = sslc_tls12_master(hash_ids[pick], extended, pre_master, pre_sizes[which], context, size, master);
 				CHECK(error == 0);
@@ -1577,6 +1852,7 @@ test_tls12_finished(void)
 	uint8_t got[SSLC_TLS12_VERIFY_DATA + 1];
 	uint8_t expected[SSLC_TLS12_VERIFY_DATA];
 	uint8_t other[SSLC_TLS12_VERIFY_DATA];
+	const char *label;
 	unsigned round;
 	int pick;
 	int from_client;
@@ -1588,7 +1864,10 @@ test_tls12_finished(void)
 			random_fill(master, sizeof(master));
 			random_fill(transcript_hash, sizeof(transcript_hash));
 			for (from_client = 0; from_client < 2; from_client++) {
-				ref_prf(hash_ids[pick], master, 48, from_client ? "client finished" : "server finished", transcript_hash, hash_sizes[pick], expected, 12);
+				label = "server finished";
+				if (from_client)
+					label = "client finished";
+				ref_prf(hash_ids[pick], master, 48, label, transcript_hash, hash_sizes[pick], expected, 12);
 				memset(got, 0xa5, sizeof(got));
 				error = sslc_tls12_finished(hash_ids[pick], master, from_client, transcript_hash, got);
 				CHECK(error == 0);
@@ -1634,15 +1913,53 @@ random_block(
 	size_t size)
 {
 	uint8_t *block;
+	size_t room;
 
 	/* A heap block, so that a stray read or write past it is seen. */
-	block = malloc(size == 0 ? 1U : size);
+	room = size;
+	if (size == 0)
+		room = 1U;
+	block = malloc(room);
 	if (block == NULL) {
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Fills the block with random bytes. */
 	random_fill(block, size);
 	return block;
+}
+
+/* Takes a pointer as it is, or in one draw in eight as NULL. */
+static const void *
+maybe_missing(
+	const void *pointer)
+{
+	unsigned draw;
+
+	/* One draw in eight takes the pointer away. */
+	draw = random_next() % 8U;
+	if (draw == 0U)
+		return NULL;
+
+	/* The pointer stays. */
+	return pointer;
+}
+
+/* Takes an output pointer as it is, or in one draw in eight as NULL. */
+static void *
+maybe_missing_output(
+	void *pointer)
+{
+	unsigned draw;
+
+	/* One draw in eight takes the pointer away. */
+	draw = random_next() % 8U;
+	if (draw == 0U)
+		return NULL;
+
+	/* The pointer stays. */
+	return pointer;
 }
 
 /* Returns a random hash id, often a valid one. */
@@ -1674,9 +1991,19 @@ test_random_calls(void)
 	size_t size_two;
 	size_t size_three;
 	char *label;
+	const uint8_t *first_in;
+	const uint8_t *second_in;
+	const uint8_t *third_in;
+	const char *label_in;
+	const struct sslc_suite *suite_in;
+	uint8_t *out_arg;
+	uint8_t *secret_arg;
+	struct sslc_traffic_keys *keys_arg;
 	unsigned round;
+	unsigned draw;
 	int error;
 	int pick;
+	int mode;
 
 	/* Many rounds of each. */
 	for (round = 0; round < 3000U; round++) {
@@ -1694,7 +2021,11 @@ test_random_calls(void)
 		label = malloc(300U);
 		memset(label, 'q', 299);
 		label[random_next() % 300U] = '\0';
-		error = sslc_tls13_expand_label(hash, random_next() % 8U == 0 ? NULL : first, random_next() % 8U == 0 ? NULL : label, random_next() % 8U == 0 ? NULL : second, size_one, random_next() % 8U == 0 ? NULL : out, size_two);
+		first_in = maybe_missing(first);
+		label_in = maybe_missing(label);
+		second_in = maybe_missing(second);
+		out_arg = maybe_missing_output(out);
+		error = sslc_tls13_expand_label(hash, first_in, label_in, second_in, size_one, out_arg, size_two);
 		CHECK(error == 0 || error == EINVAL);
 		free(label);
 		free(out);
@@ -1705,14 +2036,18 @@ test_random_calls(void)
 		first = random_block(hash_size);
 		second = random_block(size_one);
 		memset(&schedule, 0, sizeof(schedule));
-		if (random_next() % 4U != 0U)
+		draw = random_next() % 4U;
+		if (draw != 0U)
 			error = sslc_tls13_start(&schedule, hash);
 		else
 			error = EINVAL;
 		CHECK(error == 0 || error == EINVAL);
-		error = sslc_tls13_handshake(&schedule, random_next() % 8U == 0 ? NULL : second, size_one, random_next() % 8U == 0 ? NULL : first);
+		second_in = maybe_missing(second);
+		first_in = maybe_missing(first);
+		error = sslc_tls13_handshake(&schedule, second_in, size_one, first_in);
 		CHECK(error == 0 || error == EINVAL);
-		error = sslc_tls13_master(&schedule, random_next() % 8U == 0 ? NULL : first);
+		first_in = maybe_missing(first);
+		error = sslc_tls13_master(&schedule, first_in);
 		CHECK(error == 0 || error == EINVAL);
 		sslc_tls13_clear(&schedule);
 		free(first);
@@ -1722,12 +2057,22 @@ test_random_calls(void)
 		first = random_block(hash_size);
 		second = random_block(hash_size);
 		out = random_block(hash_size);
-		suite = sslc_tls_suite(random_next() % 2U ? SSLC_SUITE_AES_128_GCM_SHA256 : SSLC_SUITE_AES_256_GCM_SHA384);
-		error = sslc_tls13_traffic_keys(hash, random_next() % 8U == 0 ? NULL : suite, random_next() % 8U == 0 ? NULL : first, &keys);
+		draw = random_next() % 2U;
+		if (draw != 0U)
+			suite = sslc_tls_suite(SSLC_SUITE_AES_128_GCM_SHA256);
+		else
+			suite = sslc_tls_suite(SSLC_SUITE_AES_256_GCM_SHA384);
+		suite_in = maybe_missing(suite);
+		first_in = maybe_missing(first);
+		error = sslc_tls13_traffic_keys(hash, suite_in, first_in, &keys);
 		CHECK(error == 0 || error == EINVAL);
-		error = sslc_tls13_finished(hash, random_next() % 8U == 0 ? NULL : first, random_next() % 8U == 0 ? NULL : second, random_next() % 8U == 0 ? NULL : out);
+		first_in = maybe_missing(first);
+		second_in = maybe_missing(second);
+		out_arg = maybe_missing_output(out);
+		error = sslc_tls13_finished(hash, first_in, second_in, out_arg);
 		CHECK(error == 0 || error == EINVAL);
-		error = sslc_tls13_update_secret(hash, random_next() % 8U == 0 ? NULL : first);
+		secret_arg = maybe_missing_output(first);
+		error = sslc_tls13_update_secret(hash, secret_arg);
 		CHECK(error == 0 || error == EINVAL);
 		free(first);
 		free(second);
@@ -1739,7 +2084,9 @@ test_random_calls(void)
 		size_three = random_next() % 1100U;
 		out = random_block(size_three);
 		pick = (int)(random_next() % 3U);
-		error = sslc_tls12_prf(hash, random_next() % 8U == 0 ? NULL : first, size_one, labels[pick], random_next() % 8U == 0 ? NULL : second, size_two, out, size_three);
+		first_in = maybe_missing(first);
+		second_in = maybe_missing(second);
+		error = sslc_tls12_prf(hash, first_in, size_one, labels[pick], second_in, size_two, out, size_three);
 		CHECK(error == 0 || error == EINVAL);
 		free(first);
 		free(second);
@@ -1747,10 +2094,16 @@ test_random_calls(void)
 
 		/* The master secret and the TLS 1.2 Finished. */
 		first = random_block(size_one);
-		size_three = random_next() % 2U ? 64U : hash_size;
+		draw = random_next() % 2U;
+		size_three = hash_size;
+		if (draw != 0U)
+			size_three = 64U;
 		second = random_block(size_three);
 		out = random_block(48);
-		error = sslc_tls12_master(hash, (int)(random_next() % 4U) - 1, random_next() % 8U == 0 ? NULL : first, size_one, random_next() % 8U == 0 ? NULL : second, size_three, out);
+		mode = (int)(random_next() % 4U) - 1;
+		first_in = maybe_missing(first);
+		second_in = maybe_missing(second);
+		error = sslc_tls12_master(hash, mode, first_in, size_one, second_in, size_three, out);
 		CHECK(error == 0 || error == EINVAL);
 		free(first);
 		free(second);
@@ -1758,7 +2111,11 @@ test_random_calls(void)
 		first = random_block(48);
 		second = random_block(hash_size);
 		out = random_block(12);
-		error = sslc_tls12_finished(hash, random_next() % 8U == 0 ? NULL : first, (int)(random_next() % 3U), random_next() % 8U == 0 ? NULL : second, random_next() % 8U == 0 ? NULL : out);
+		first_in = maybe_missing(first);
+		mode = (int)(random_next() % 3U);
+		second_in = maybe_missing(second);
+		out_arg = maybe_missing_output(out);
+		error = sslc_tls12_finished(hash, first_in, mode, second_in, out_arg);
 		CHECK(error == 0 || error == EINVAL);
 		free(first);
 		free(second);
@@ -1768,8 +2125,20 @@ test_random_calls(void)
 		first = random_block(48);
 		second = random_block(32);
 		third = random_block(32);
-		suite = sslc_tls_suite(random_next() % 2U ? SSLC_SUITE_ECDHE_RSA_WITH_AES_128_GCM_SHA256 : SSLC_SUITE_AES_128_GCM_SHA256);
-		error = sslc_tls12_key_block(random_next() % 8U == 0 ? NULL : suite, random_next() % 8U == 0 ? NULL : first, random_next() % 8U == 0 ? NULL : second, random_next() % 8U == 0 ? NULL : third, &keys, random_next() % 8U == 0 ? &keys : &keys_two);
+		draw = random_next() % 2U;
+		if (draw != 0U)
+			suite = sslc_tls_suite(SSLC_SUITE_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+		else
+			suite = sslc_tls_suite(SSLC_SUITE_AES_128_GCM_SHA256);
+		suite_in = maybe_missing(suite);
+		first_in = maybe_missing(first);
+		second_in = maybe_missing(second);
+		third_in = maybe_missing(third);
+		draw = random_next() % 8U;
+		keys_arg = &keys_two;
+		if (draw == 0U)
+			keys_arg = &keys;
+		error = sslc_tls12_key_block(suite_in, first_in, second_in, third_in, &keys, keys_arg);
 		CHECK(error == 0 || error == EINVAL);
 		free(first);
 		free(second);

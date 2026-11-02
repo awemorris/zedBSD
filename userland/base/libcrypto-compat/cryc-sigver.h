@@ -27,10 +27,12 @@
  * 8422 5.4): SEQUENCE { r INTEGER, s INTEGER }, nothing after it.
  *
  * r and s are written as size big-endian bytes each (left-padded with
- * zeros).  Returns 0, or EBADMSG when the encoding is not strict DER, a
+ * zeros; size is the caller's, the curve's field size, with no limit
+ * here).  Returns 0, or EBADMSG when the encoding is not strict DER, a
  * value is negative or zero, or a value has more than size significant
  * bytes (a malformed signature never verifies; EBADMSG keeps the
- * caller's mapping to an alert simple).
+ * caller's mapping to an alert simple).  On an error r and s are not
+ * written.
  */
 int cryc_ecdsa_signature_decode(const uint8_t *der, size_t der_size, size_t size, uint8_t *r, uint8_t *s);
 
@@ -46,10 +48,15 @@ int cryc_ecdsa_signature_decode(const uint8_t *der, size_t der_size, size_t size
  * handshake).  PSS
  * uses params->salt_size.
  *
- * Returns 0 when it verifies; EBADMSG when it does not; EINVAL when the
- * key does not suit the algorithm or is malformed (an EC point not on the
- * curve); ENOTSUP for CRYC_SIG_UNSUPPORTED, CRYC_KEY_UNSUPPORTED, or an
- * RSA key outside the size limits.
+ * Returns 0 when it verifies; EBADMSG when it does not; EINVAL for a
+ * NULL key or params, a NULL message or signature with a size, an
+ * algorithm of CRYC_SIG_NONE or a key of CRYC_KEY_NONE, a key that does
+ * not suit the algorithm, or a malformed key (an EC point not on the
+ * curve or in compressed form: EINVAL here, where cryc_ecp_decode says
+ * ENOTSUP); ENOTSUP for CRYC_SIG_UNSUPPORTED, CRYC_KEY_UNSUPPORTED, a
+ * value that is not one of the enumerators, or an RSA key outside the
+ * size limits.  A NULL signature of size 0 is a signature of no bytes
+ * (EBADMSG once the key is checked).
  */
 int cryc_signature_verify(const struct cryc_pubkey *key, const struct cryc_sig_params *params, const uint8_t *message, size_t message_size, const uint8_t *signature, size_t signature_size);
 

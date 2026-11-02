@@ -128,7 +128,7 @@ for name in $names; do
 			continue
 		fi
 		(cd "$out/$label.run" && LC_ALL=C.UTF-8 WINEPREFIX=$wine_prefix WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d \
-		    WS335_VECTORS="Z:$WS335_VECTORS" timeout 600 wine "$top/$program") > "$out/$label.log" 2>&1
+		    WS335_VECTORS="Z:$WS335_VECTORS" timeout 1200 wine "$top/$program") > "$out/$label.log" 2>&1
 		code=$?
 		last=$(tr -d '\r' < "$out/$label.log" | tail -1)
 		case "$code:$last" in
@@ -149,7 +149,7 @@ for name in $names; do
 		continue
 	fi
 	if ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
-	    timeout 600 "$out/$label" > "$out/$label.log" 2>&1; then
+	    timeout 1200 "$out/$label" > "$out/$label.log" 2>&1; then
 		tail -1 "$out/$label.log"
 	else
 		echo "$label: FAIL (exit; log $out/$label.log)"

@@ -23,6 +23,12 @@
 #include "userland/base/libssl-compat/sslc-record.h"
 
 /* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* Runs seal and open for one suite. */
+static unsigned run_case(unsigned suite_id, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
 static unsigned
 fold(
 	const uint8_t *bytes,
@@ -35,6 +41,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value. */
 	return value & 0xffU;
 }
 
@@ -124,6 +132,8 @@ run_case(
 	/* The keys are wiped. */
 	sslc_record_clear(&send);
 	sslc_record_clear(&recv);
+
+	/* Reports the folded outputs, so no call is dropped. */
 	return total_fold;
 }
 

@@ -209,8 +209,11 @@ struct cryc_x509 {
  * other well-formed AlgorithmIdentifier (SHA-1, MD5, Ed25519, ...) is
  * CRYC_SIG_UNSUPPORTED.
  *
- * Returns 0, or EINVAL for a malformed encoding (also: NULL parameters
- * on ECDSA, a PSS parameter structure that does not parse).
+ * Returns 0, or EINVAL for a malformed encoding (also: any parameters on
+ * ECDSA, which RFC 5758 3.2 omits; parameters other than NULL on a PKCS
+ * #1 OID; a PSS parameter structure that does not parse, a hash in it
+ * with parameters other than NULL, a missing MGF1 hash, a negative
+ * saltLength).
  */
 int cryc_x509_signature_algorithm(const uint8_t *encoding, size_t size, struct cryc_sig_params *params);
 

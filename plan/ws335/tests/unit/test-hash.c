@@ -35,6 +35,27 @@ random_next(void)
 }
 
 /* Fills size bytes at out with pseudo-random bytes. */
+static void random_fill(uint8_t *out, size_t size);
+
+/* Returns the vector-file name part of an id: "sha256", "sha384" or "sha512". */
+static const char * id_name(int which);
+
+/* Computes HMAC by the formula of RFC 2104 section 2 with the hash functions, for a check. */
+static void reference_hmac(enum cryc_hash_id id, const uint8_t *key, size_t key_size, const uint8_t *data, size_t size, uint8_t *out);
+
+/* Checks one HMAC through every entry point against its expected MAC (size bytes). */
+static void check_hmac(enum cryc_hash_id id, const uint8_t *key, size_t key_size, const uint8_t *data, size_t size, const uint8_t *expected, size_t expected_size);
+
+/* Checks a Wycheproof HMAC file; returns the records read. */
+static unsigned long run_wycheproof_hmac(int which);
+
+/* Expands with HKDF into a buffer of size + 2 canary bytes and checks the canaries. */
+static int expand_checked(enum cryc_hash_id id, const uint8_t *prk, size_t prk_size, const uint8_t *info, size_t info_size, uint8_t *out, size_t out_size);
+
+/* Checks a Wycheproof HKDF file; returns the records read. */
+static unsigned long run_wycheproof_hkdf(int which);
+
+/* Fills size bytes at out with pseudo-random bytes. */
 static void
 random_fill(
 	uint8_t *out,
@@ -229,13 +250,19 @@ test_hash_basics(void)
 		CHECK(cryc_hash_size(all_ids[which]) == all_sizes[which]);
 		CHECK(cryc_hash_block_size(all_ids[which]) == all_blocks[which]);
 	}
+
+	/* The none id has no size, and the largest sizes are the constants of the module. */
 	CHECK(cryc_hash_size(CRYC_HASH_NONE) == 0);
 	CHECK(cryc_hash_block_size(CRYC_HASH_NONE) == 0);
 	CHECK(CRYC_HASH_MAX_SIZE == 64U && CRYC_HASH_MAX_BLOCK == 128U);
+
+	/* Ids that name no hash have no size. */
 	for (bad = 4; bad < 300; bad += 37) {
 		CHECK(cryc_hash_size((enum cryc_hash_id)bad) == 0);
 		CHECK(cryc_hash_block_size((enum cryc_hash_id)bad) == 0);
 	}
+
+	/* The id -1 names no hash either. */
 	CHECK(cryc_hash_size((enum cryc_hash_id)-1) == 0);
 	CHECK(cryc_hash_block_size((enum cryc_hash_id)-1) == 0);
 
@@ -424,6 +451,7 @@ test_rfc4231(void)
 	size_t which;
 	size_t index;
 	const char *macs[3];
+	uint8_t got[64];
 
 	/* Each case, each hash; case 5 compares the first 128 bits only. */
 	for (index = 0; index < 7U; index++) {
@@ -436,8 +464,6 @@ test_rfc4231(void)
 		for (which = 0; which < 3U; which++) {
 			expected_size = hex_decode(macs[which], expected, sizeof(expected));
 			if (rfc4231_cases[index].number == 5) {
-				uint8_t got[64];
-
 				CHECK(expected_size == 16U);
 				CHECK(cryc_hmac(all_ids[which], key, key_size, data, size, got) == 0);
 				CHECK_BYTES(got, expected, expected_size);
@@ -465,6 +491,7 @@ test_hmac_properties(void)
 	size_t block;
 	size_t which;
 	int round;
+	static const uint8_t zeros[sizeof(struct cryc_hmac)] = { 0 };
 
 	/* Unknown ids are refused; a missing key with a length is refused. */
 	memset(key, 0, sizeof(key));
@@ -485,6 +512,7 @@ test_hmac_properties(void)
 			CHECK(cryc_hmac(all_ids[which], key, key_size, data, size, got) == 0);
 			CHECK_BYTES(got, expected, all_sizes[which]);
 
+			/* A key is either padded or hashed to the block size; the two rules give the same MAC. */
 			if (key_size <= block) {
 				/* A short key behaves as the key padded with zeros to the block size. */
 				memset(padded, 0, block);
@@ -534,17 +562,13 @@ test_hmac_properties(void)
 	CHECK_BYTES(got, expected, 32U);
 
 	/* clear and final wipe the structure. */
-	{
-		static const uint8_t zeros[sizeof(struct cryc_hmac)] = { 0 };
-
-		CHECK(cryc_hmac_init(&hmac, CRYC_HASH_SHA512, key, 40U) == 0);
-		cryc_hmac_update(&hmac, data, 90U);
-		cryc_hmac_clear(&hmac);
-		CHECK_BYTES(&hmac, zeros, sizeof(hmac));
-		CHECK(cryc_hmac_init(&hmac, CRYC_HASH_SHA384, key, 40U) == 0);
-		cryc_hmac_final(&hmac, got);
-		CHECK_BYTES(&hmac, zeros, sizeof(hmac));
-	}
+	CHECK(cryc_hmac_init(&hmac, CRYC_HASH_SHA512, key, 40U) == 0);
+	cryc_hmac_update(&hmac, data, 90U);
+	cryc_hmac_clear(&hmac);
+	CHECK_BYTES(&hmac, zeros, sizeof(hmac));
+	CHECK(cryc_hmac_init(&hmac, CRYC_HASH_SHA384, key, 40U) == 0);
+	cryc_hmac_final(&hmac, got);
+	CHECK_BYTES(&hmac, zeros, sizeof(hmac));
 
 	/* A refused init leaves a structure that finishes without writing. */
 	memset(got, 0x55, sizeof(got));
@@ -571,15 +595,24 @@ run_wycheproof_hmac(
 	const char *result;
 	unsigned long count;
 	int matched;
+	int different;
+	int valid;
+	int opened;
+	int more;
 
-	/* Every record: key, msg, tag (maybe truncated), result. */
+	/* Opens the vector file of the hash; a file that is missing fails the check. */
 	sprintf(name, "wycheproof-hmac_%s_test", id_name(which));
 	count = 0;
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return 0;
 	}
-	while (vec_next(&file)) {
+
+	/* Checks every record: key, msg, tag (maybe truncated), result. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		key_size = vec_hex(&file, "key", key, sizeof(key));
 		size = vec_hex(&file, "msg", message, sizeof(message));
 		tag_size = vec_hex(&file, "tag", tag, sizeof(tag));
@@ -588,18 +621,31 @@ run_wycheproof_hmac(
 		if (result == NULL || key_size == (size_t)-1 || size == (size_t)-1 || tag_size == (size_t)-1)
 			continue;
 
+		/* The full MAC of the record. */
 		memset(got, 0, sizeof(got));
 		CHECK(cryc_hmac(all_ids[which], key, key_size, message, size, got) == 0);
 
 		/* A tag counts as matching when it is a prefix of the full MAC. */
-		matched = tag_size != 0 && tag_size <= all_sizes[which] && memcmp(got, tag, tag_size) == 0;
-		if (strcmp(result, "valid") == 0)
+		matched = 0;
+		if (tag_size != 0 && tag_size <= all_sizes[which]) {
+			different = memcmp(got, tag, tag_size);
+			if (different == 0)
+				matched = 1;
+		}
+
+		/* A valid record matches, and any other record does not. */
+		valid = strcmp(result, "valid");
+		if (valid == 0)
 			CHECK(matched);
 		else
 			CHECK(!matched);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of records read. */
 	return count;
 }
 
@@ -621,6 +667,8 @@ expand_checked(
 	error = cryc_hkdf_expand(id, prk, prk_size, info, info_size, out, out_size);
 	CHECK(out[-1] == 0x5a);
 	CHECK(out[out_size] == 0x5a);
+
+	/* Reports what the expansion answered. */
 	return error;
 }
 
@@ -645,31 +693,45 @@ run_wycheproof_hkdf(
 	size_t length;
 	const char *result;
 	unsigned long count;
+	const char *size_text;
 	int error;
+	int valid;
+	int opened;
+	int more;
 
-	/* Every record: ikm, salt, info, size, okm, result. */
+	/* Opens the vector file of the hash; a file that is missing fails the check. */
 	sprintf(name, "wycheproof-hkdf_%s_test", id_name(which));
 	count = 0;
 	out = storage + 1;
-	if (vec_open(&file, name) != 0) {
+	opened = vec_open(&file, name);
+	if (opened != 0) {
 		CHECK(0);
 		return 0;
 	}
-	while (vec_next(&file)) {
+
+	/* Checks every record: ikm, salt, info, size, okm, result. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		ikm_size = vec_hex(&file, "ikm", ikm, sizeof(ikm));
 		salt_size = vec_hex(&file, "salt", salt, sizeof(salt));
 		info_size = vec_hex(&file, "info", info, sizeof(info));
 		expected_size = vec_hex(&file, "okm", expected, sizeof(expected));
 		result = vec_get(&file, "result");
-		length = (size_t)strtoul(vec_get(&file, "size"), NULL, 10);
+		size_text = vec_get(&file, "size");
+		length = (size_t)strtoul(size_text, NULL, 10);
 		CHECK(ikm_size != (size_t)-1 && salt_size != (size_t)-1 && info_size != (size_t)-1);
 		CHECK(expected_size != (size_t)-1 && result != NULL && length <= 16400U);
 		if (result == NULL || ikm_size == (size_t)-1 || salt_size == (size_t)-1 || info_size == (size_t)-1)
 			continue;
 
+		/* Extracts the PRK and expands it into the guarded buffer. */
 		CHECK(cryc_hkdf_extract(all_ids[which], salt, salt_size, ikm, ikm_size, prk) == 0);
 		error = expand_checked(all_ids[which], prk, all_sizes[which], info, info_size, out, length);
-		if (strcmp(result, "valid") == 0) {
+
+		/* A valid record expands to the listed output; an invalid one is refused. */
+		valid = strcmp(result, "valid");
+		if (valid == 0) {
 			CHECK(error == 0);
 			CHECK(expected_size == length);
 			CHECK_BYTES(out, expected, length);
@@ -678,9 +740,15 @@ run_wycheproof_hkdf(
 			CHECK(error == EINVAL);
 			CHECK(length > 255U * all_sizes[which]);
 		}
+
+		/* The record is counted. */
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of records read. */
 	return count;
 }
 
@@ -712,6 +780,7 @@ test_rfc5869(void)
 		CHECK(hex_decode(rfc5869_cases[index].prk, expected_prk, sizeof(expected_prk)) == 32U);
 		CHECK(okm_size == rfc5869_cases[index].length);
 
+		/* Extracts the PRK and expands it into the guarded buffer. */
 		memset(prk, 0, sizeof(prk));
 		CHECK(cryc_hkdf_extract(CRYC_HASH_SHA256, salt, salt_size, ikm, ikm_size, prk) == 0);
 		CHECK_BYTES(prk, expected_prk, 32U);
@@ -752,6 +821,7 @@ test_hkdf_properties(void)
 	size_t prk_size;
 	size_t index;
 	int round;
+	int expected_error;
 
 	/* Each hash. */
 	for (which = 0; which < 3U; which++) {
@@ -779,9 +849,12 @@ test_hkdf_properties(void)
 		CHECK(cryc_hkdf_expand(all_ids[which], prk, digest, info, info_size, canary, 255U * digest + 1U) == EINVAL);
 		CHECK(cryc_hkdf_expand(all_ids[which], prk, digest, info, info_size, canary, (size_t)-1) == EINVAL);
 		CHECK(cryc_hkdf_expand(all_ids[which], prk, digest, info, info_size, canary, (size_t)1 << (sizeof(size_t) * 8U - 1U)) == EINVAL);
-		for (index = 0; index < sizeof(canary); index++)
+		for (index = 0; index < sizeof(canary); index++) {
 			if (canary[index] != 0x5a)
 				break;
+		}
+
+		/* No canary byte was touched. */
 		CHECK(index == sizeof(canary));
 
 		/* A shorter output is a prefix of a longer one, for every length from 0 to 3 blocks + 1. */
@@ -828,8 +901,12 @@ test_hkdf_properties(void)
 			} else {
 				CHECK(cryc_hmac(all_ids[which], salt, length, ikm, 60U, block_two) == 0);
 			}
+
+			/* Extract equals the HMAC with the salt as the key. */
 			CHECK_BYTES(block_one, block_two, digest);
 		}
+
+		/* An absent salt is the zero salt; an absent ikm of size 0 is empty. */
 		CHECK(cryc_hkdf_extract(all_ids[which], NULL, 5U, ikm, 60U, block_one) == 0);
 		memset(prk, 0, digest);
 		CHECK(cryc_hmac(all_ids[which], prk, digest, ikm, 60U, block_two) == 0);
@@ -852,8 +929,14 @@ test_hkdf_properties(void)
 		length = (random_next() >> 8) % 400U;
 		prk_size = (random_next() >> 8) % 200U;
 		info_size = (random_next() >> 8) % 100U;
-		CHECK(cryc_hkdf_expand(all_ids[which], prk, prk_size, info, info_size, out, length) ==
-		    (prk_size < all_sizes[which] ? EINVAL : (length > 255U * all_sizes[which] ? EINVAL : 0)));
+
+		/* A PRK shorter than HashLen or an output over 255 blocks is refused. */
+		expected_error = 0;
+		if (prk_size < all_sizes[which])
+			expected_error = EINVAL;
+		else if (length > 255U * all_sizes[which])
+			expected_error = EINVAL;
+		CHECK(cryc_hkdf_expand(all_ids[which], prk, prk_size, info, info_size, out, length) == expected_error);
 	}
 }
 

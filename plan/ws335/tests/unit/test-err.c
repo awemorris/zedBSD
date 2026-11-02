@@ -172,16 +172,22 @@ thread_body(
 	job->first_seen = ERR_get_error();
 	job->ok = 1;
 
-	/* Queues the thread's codes, then reads them. */
+	/* Queues the thread's codes. */
 	for (index = 0; index < job->rounds; index++)
 		cryc_err_put(CRYC_LIB_SSL, (unsigned)(job->own_code + index));
+
+	/* Looks at the code at the head of the queue, which is the thread's first. */
 	job->peeked_after_put = ERR_peek_error();
+
+	/* Reads the codes back and notes any that is not the one queued at that place. */
 	for (index = 0; index < job->rounds; index++) {
 		expected = cryc_err_pack(CRYC_LIB_SSL, (unsigned)(job->own_code + index));
 		job->got = ERR_get_error();
 		if (job->got != expected)
 			job->ok = 0;
 	}
+
+	/* Looks at what is left once the thread's codes are drained: nothing of its own, nothing of the creator's. */
 	job->after_get = ERR_get_error();
 	job->other_seen = ERR_peek_error();
 }
@@ -247,12 +253,18 @@ check_string(
 	const char *expected)
 {
 	char buffer[256];
+	int difference;
 
 	/* Writes into a large buffer. */
 	memset(buffer, 'X', sizeof(buffer));
 	ERR_error_string_n(code, buffer, sizeof(buffer));
-	CHECK(strcmp(buffer, expected) == 0);
-	if (strcmp(buffer, expected) != 0)
+
+	/* Compares the written text with the expected one. */
+	difference = strcmp(buffer, expected);
+	CHECK(difference == 0);
+
+	/* Shows both texts when they differ. */
+	if (difference != 0)
 		printf("  got      %s\n  expected %s\n", buffer, expected);
 }
 
@@ -283,12 +295,14 @@ check_cuts(
 		memset(area + GUARD_SIZE, 0xee, 128U);
 		ERR_error_string_n(code, (char *)(area + GUARD_SIZE), length);
 
-		/* The guards before and after the buffer are intact, and nothing beyond length changed. */
+		/* The guards before the buffer are intact. */
 		guards_good = 1;
 		for (index = 0; index < GUARD_SIZE; index++) {
 			if (area[index] != GUARD_BYTE)
 				guards_good = 0;
 		}
+
+		/* Nothing beyond length changed, and the guards after the buffer are intact. */
 		for (index = GUARD_SIZE + length; index < sizeof(area); index++) {
 			if (index < GUARD_SIZE + 128U) {
 				if (area[index] != 0xee)
@@ -297,6 +311,8 @@ check_cuts(
 				guards_good = 0;
 			}
 		}
+
+		/* Reports whether every guard and every byte beyond length held. */
 		CHECK(guards_good);
 
 		/* A zero length writes nothing. */
@@ -346,16 +362,27 @@ check_reason_scope(void)
 	size_t library;
 	size_t length;
 	size_t tail;
+	int difference;
 	int is_number;
 
 	/* An owned reason is a number except in its own library. */
 	for (entry = 0; entry < sizeof(owned) / sizeof(owned[0]); entry++) {
 		for (library = 0; library < sizeof(libraries) / sizeof(libraries[0]); library++) {
+			/* Writes the text of the code, and the form a bare number would take. */
 			ERR_error_string_n(cryc_err_pack(libraries[library], owned[entry].reason), buffer, sizeof(buffer));
 			sprintf(number, "::reason(%u)", owned[entry].reason);
 			length = strlen(buffer);
 			tail = strlen(number);
-			is_number = (length >= tail && strcmp(buffer + length - tail, number) == 0);
+
+			/* Decides whether the text ends in the bare number form. */
+			is_number = 0;
+			if (length >= tail) {
+				difference = strcmp(buffer + length - tail, number);
+				if (difference == 0)
+					is_number = 1;
+			}
+
+			/* A number is expected outside the reason's own library, a text inside it. */
 			if (libraries[library] == owned[entry].library)
 				CHECK(!is_number);
 			else
@@ -366,6 +393,7 @@ check_reason_scope(void)
 	/* A common reason is a text in every library, whatever the library. */
 	for (entry = 0; entry < sizeof(common) / sizeof(common[0]); entry++) {
 		for (library = 0; library < sizeof(libraries) / sizeof(libraries[0]); library++) {
+			/* Writes the text of the code. */
 			ERR_error_string_n(cryc_err_pack(libraries[library], common[entry]), buffer, sizeof(buffer));
 			CHECK(strstr(buffer, "::reason(") == NULL);
 		}
@@ -512,25 +540,33 @@ test_queue_model(void)
 	for (step = 0; step < 200000U; step++) {
 		choice = next_random(&state) % 100UL;
 		if (choice < 45UL) {
+			/* Puts a random code in both queues. */
 			library = (unsigned)(next_random(&state) % 256UL);
 			reason = (unsigned)(next_random(&state) % 0x800000UL);
 			cryc_err_put(library, reason);
 			model_put(&model, cryc_err_pack(library, reason));
 		} else if (choice < 80UL) {
+			/* Takes the oldest code from both queues and compares them. */
 			expected = model_get(&model);
 			got = ERR_get_error();
 			if (got != expected)
 				mismatch++;
 		} else if (choice < 97UL) {
-			expected = (model.count == 0) ? 0UL : model.codes[0];
+			/* Looks at the oldest code of both queues and compares them. */
+			expected = 0UL;
+			if (model.count != 0)
+				expected = model.codes[0];
 			got = ERR_peek_error();
 			if (got != expected)
 				mismatch++;
 		} else {
+			/* Empties both queues. */
 			ERR_clear_error();
 			model.count = 0;
 		}
 	}
+
+	/* Reports whether the queue ever differed from the reference. */
 	CHECK(mismatch == 0);
 
 	/* The rest drains the same. */
@@ -539,6 +575,8 @@ test_queue_model(void)
 		got = ERR_get_error();
 		CHECK(got == expected);
 	}
+
+	/* Reports that the queue ends empty. */
 	CHECK(ERR_get_error() == 0);
 }
 
@@ -714,7 +752,11 @@ test_threads(void)
 		jobs[index].own_code = 10000U + index * 100U;
 		jobs[index].rounds = 5U + index;
 	}
+
+	/* Runs the eight threads together and waits for them. */
 	thread_run(jobs, PARALLEL_THREADS);
+
+	/* Counts the threads that saw a foreign code or lost one of their own. */
 	bad = 0;
 	for (index = 0; index < PARALLEL_THREADS; index++) {
 		if (jobs[index].first_seen != 0 || jobs[index].ok != 1U || jobs[index].after_get != 0)
@@ -722,6 +764,8 @@ test_threads(void)
 		if (jobs[index].other_seen != 0)
 			bad++;
 	}
+
+	/* Reports that no thread was wrong and the main thread's code is untouched. */
 	CHECK(bad == 0);
 	CHECK(ERR_get_error() == cryc_err_pack(CRYC_LIB_SSL, 1004U));
 	CHECK(ERR_get_error() == 0);
@@ -736,6 +780,8 @@ test_threads(void)
 		if (jobs[0].first_seen != 0 || jobs[0].ok != 1U || jobs[0].after_get != 0)
 			bad++;
 	}
+
+	/* Reports that no short-lived thread was wrong. */
 	CHECK(bad == 0);
 }
 
@@ -770,15 +816,20 @@ test_rand(void)
 	memset(area, GUARD_BYTE, sizeof(area));
 	CHECK(RAND_bytes(area + GUARD_SIZE, 0) == 1);
 	CHECK(RAND_bytes(NULL, 0) == 1);
+
+	/* Checks that the whole area still holds the guard byte. */
 	guards_good = 1;
 	for (index = 0; index < sizeof(area); index++) {
 		if (area[index] != GUARD_BYTE)
 			guards_good = 0;
 	}
+
+	/* Reports whether the guards stayed intact. */
 	CHECK(guards_good);
 
 	/* Every length: guards intact; no byte position stays at the fill in all four fills. */
 	for (which = 0; which < sizeof(counts) / sizeof(counts[0]); which++) {
+		/* Has RAND_bytes overwrite four buffers that start with different fills. */
 		count = counts[which];
 		bytes = (size_t)count;
 		for (fill = 0; fill < 4U; fill++) {
@@ -790,6 +841,8 @@ test_rand(void)
 			memset(areas[fill] + GUARD_SIZE, fills[fill], bytes);
 			CHECK(RAND_bytes(areas[fill] + GUARD_SIZE, count) == 1);
 		}
+
+		/* Checks the guards around every buffer. */
 		guards_good = 1;
 		unwritten = 0;
 		for (fill = 0; fill < 4U; fill++) {
@@ -798,17 +851,25 @@ test_rand(void)
 					guards_good = 0;
 			}
 		}
+
+		/* Counts the byte positions that stayed at the fill in all four buffers. */
 		for (index = 0; index < bytes; index++) {
 			same_as_first = 1;
 			for (fill = 0; fill < 4U; fill++) {
 				if (areas[fill][GUARD_SIZE + index] != fills[fill])
 					same_as_first = 0;
 			}
+
+			/* A position that matches every fill was not written. */
 			if (same_as_first)
 				unwritten++;
 		}
+
+		/* Reports that the guards held and every byte position was written. */
 		CHECK(guards_good);
 		CHECK(unwritten == 0);
+
+		/* Gives the buffers back. */
 		for (fill = 0; fill < 4U; fill++)
 			free(areas[fill]);
 	}
@@ -820,9 +881,13 @@ test_rand(void)
 
 	/* A byte histogram of 65536 bytes: each value 256 times on average with a standard deviation of 16; the bounds are 6 sigma. */
 	CHECK(RAND_bytes(histogram_source, 65536) == 1);
+
+	/* Counts how often each byte value occurs. */
 	memset(histogram, 0, sizeof(histogram));
 	for (index = 0; index < sizeof(histogram_source); index++)
 		histogram[histogram_source[index]]++;
+
+	/* Finds the lowest and the highest count, and the total. */
 	low = 65536UL;
 	high = 0;
 	total = 0;
@@ -833,6 +898,8 @@ test_rand(void)
 			high = histogram[index];
 		total += histogram[index];
 	}
+
+	/* Reports that every byte was counted and no value strays far from the average. */
 	CHECK(total == 65536UL);
 	CHECK(low > 160UL);
 	CHECK(high < 352UL);
@@ -877,24 +944,35 @@ test_cleanse(void)
 
 	/* Every length from 0 to 300: the bytes become zero, everything around stays. */
 	for (length = 0; length <= 300U; length++) {
+		/* Fills the area with guards and the bytes under test with a pattern. */
 		memset(area, GUARD_BYTE, sizeof(area));
 		for (index = 0; index < length; index++)
 			area[GUARD_SIZE + index] = (unsigned char)(0xa0U + index);
+
+		/* Wipes the bytes under test. */
 		OPENSSL_cleanse(area + GUARD_SIZE, length);
+
+		/* Checks that every wiped byte is zero. */
 		zero_good = 1;
 		for (index = 0; index < length; index++) {
 			if (area[GUARD_SIZE + index] != 0)
 				zero_good = 0;
 		}
+
+		/* Checks the guards before the bytes. */
 		guards_good = 1;
 		for (index = 0; index < GUARD_SIZE; index++) {
 			if (area[index] != GUARD_BYTE)
 				guards_good = 0;
 		}
+
+		/* Checks the guards after the bytes. */
 		for (index = GUARD_SIZE + length; index < sizeof(area); index++) {
 			if (area[index] != GUARD_BYTE)
 				guards_good = 0;
 		}
+
+		/* Reports whether the bytes are zero and the guards intact. */
 		CHECK(zero_good);
 		CHECK(guards_good);
 	}
@@ -902,12 +980,18 @@ test_cleanse(void)
 	/* A local array that is never read again is still wiped (read through a volatile). */
 	for (index = 0; index < sizeof(secret); index++)
 		secret[index] = (unsigned char)(index + 1U);
+
+	/* Wipes the array. */
 	OPENSSL_cleanse((void *)secret, sizeof(secret));
+
+	/* Checks that every byte of the array is zero. */
 	zero_good = 1;
 	for (index = 0; index < sizeof(secret); index++) {
 		if (secret[index] != 0)
 			zero_good = 0;
 	}
+
+	/* Reports whether the array is wiped. */
 	CHECK(zero_good);
 }
 
@@ -922,6 +1006,7 @@ test_memcmp(void)
 	size_t offset;
 	size_t length;
 	size_t position;
+	unsigned step;
 	unsigned bit;
 	int bad_equal;
 	int bad_different;
@@ -944,13 +1029,22 @@ test_memcmp(void)
 		left = left_area + offset;
 		right = right_area + 3U - offset;
 		for (length = 1; length <= 129U; length++) {
+			/* Makes the two buffers equal. */
 			for (position = 0; position < length; position++) {
 				left[position] = (unsigned char)(position * 5U + length);
 				right[position] = left[position];
 			}
-			if (CRYPTO_memcmp(left, right, length) != 0)
+
+			/* Counts an equal pair that does not compare equal. */
+			result = CRYPTO_memcmp(left, right, length);
+			if (result != 0)
 				bad_equal++;
-			for (position = 0; position < length; position += (length < 40U) ? 1U : 7U) {
+
+			/* Flips each bit of every position of a short buffer, or of every seventh of a long one. */
+			step = 7U;
+			if (length < 40U)
+				step = 1U;
+			for (position = 0; position < length; position += step) {
 				for (bit = 0; bit < 8U; bit++) {
 					right[position] = (unsigned char)(right[position] ^ (1U << bit));
 					result = CRYPTO_memcmp(left, right, length);
@@ -963,11 +1057,16 @@ test_memcmp(void)
 			/* The bytes after length are not compared: a difference there leaves the answer equal. */
 			if (length < 129U) {
 				right[length] = (unsigned char)(left[length] ^ 0xffU);
-				if (CRYPTO_memcmp(left, right, length) != 0)
+
+				/* Compares only the first length bytes. */
+				result = CRYPTO_memcmp(left, right, length);
+				if (result != 0)
 					bad_equal++;
 			}
 		}
 	}
+
+	/* Reports that equal buffers compared equal and every flipped bit was seen. */
 	CHECK(bad_equal == 0);
 	CHECK(bad_different == 0);
 

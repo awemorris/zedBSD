@@ -54,8 +54,211 @@
 /* The largest hash in bytes. */
 #define HASH_MAX	64U
 
+/* A natural number of the test's own, for building keys: limbs little endian, used limbs without leading zeros. */
+struct big {
+	uint32_t limb[BIG_LIMBS];
+	size_t used;
+};
+
+/* A key with its private exponent: all big-endian bytes without leading zeros. */
+struct tkey {
+	uint8_t n[K_MAX];
+	size_t n_size;
+	uint8_t e[8];
+	size_t e_size;
+	uint8_t d[K_MAX];
+	size_t d_size;
+	size_t bits;
+};
+
+/* The moduli built from Mersenne primes: the exponents of the primes 2^a - 1 and the bit length of the product. */
+struct key_spec {
+	size_t count;
+	unsigned exponents[6];
+	size_t bits;
+};
+
+/* The state of a Wycheproof file read record by record: the group's key and parameters, which come split over two records. */
+struct group_state {
+	char modulus[2300];
+	char exponent[64];
+	char sha[16];
+	char mgf_sha[16];
+	unsigned long salt_size;
+	int have_salt_size;
+};
+
 /* The state of the pseudo-random generator of the tests (xorshift32, Marsaglia 2003). */
 static uint32_t rng_state = 0x2545f491U;
+
+/* The three hashes, in the order the tests loop over them. */
+static const enum cryc_hash_id hash_ids[3] = {
+	CRYC_HASH_SHA256, CRYC_HASH_SHA384, CRYC_HASH_SHA512
+};
+
+/*
+ * The moduli: the product of the primes 2^a - 1 has exactly the sum of the
+ * a as its bit length.  The bit lengths are 2057, 2074, 2067, 2292, 2077,
+ * 2054, 2095 and 2120 (modBits modulo 8 of 1, 2, 3, 4, 5, 6, 7 and 0) and
+ * 8192.
+ *
+ * Values referenced: the Mersenne exponents 31, 61, 89, 107, 127, 521, 607,
+ * 1279, 2203, 3217 and 4423 give prime numbers 2^a - 1 (OEIS A000043).
+ */
+static const struct key_spec key_specs[9] = {
+	{ 5U, { 61U, 89U, 107U, 521U, 1279U, 0U }, 2057U },
+	{ 4U, { 61U, 127U, 607U, 1279U, 0U, 0U }, 2074U },
+	{ 5U, { 31U, 61U, 89U, 607U, 1279U, 0U }, 2067U },
+	{ 2U, { 89U, 2203U, 0U, 0U, 0U, 0U }, 2292U },
+	{ 5U, { 61U, 89U, 127U, 521U, 1279U, 0U }, 2077U },
+	{ 4U, { 61U, 107U, 607U, 1279U, 0U, 0U }, 2054U },
+	{ 5U, { 61U, 107U, 127U, 521U, 1279U, 0U }, 2095U },
+	{ 4U, { 107U, 127U, 607U, 1279U, 0U, 0U }, 2120U },
+	{ 4U, { 31U, 521U, 3217U, 4423U, 0U, 0U }, 8192U }
+};
+
+/* The CAVP key of 2048 bits with its private exponent, and one of 3072 bits (loaded from the PSS file). */
+static struct tkey cavp_key_2048;
+static struct tkey cavp_key_3072;
+static int have_cavp_2048;
+static int have_cavp_3072;
+
+/* The keys made from the Mersenne primes. */
+static struct tkey mersenne_keys[9];
+
+/* Counts of what the vector files held, shown at the end. */
+static unsigned long count_cavp_pkcs1;
+static unsigned long count_cavp_pkcs1_valid;
+static unsigned long count_cavp_pss;
+static unsigned long count_cavp_pss_valid;
+static unsigned long count_cavp_small;
+static unsigned long count_cavp_reproduced;
+static unsigned long count_wycheproof;
+static unsigned long count_wycheproof_valid;
+static unsigned long count_wycheproof_acceptable;
+
+/* Returns the next pseudo-random 32-bit value. */
+static uint32_t random32(void);
+
+/* Fills size bytes with pseudo-random bytes. */
+static void random_bytes(uint8_t *out, size_t size);
+
+/* The digest size of a hash id, written again here from FIPS 180-4. */
+static size_t hash_length(enum cryc_hash_id id);
+
+/* Hashes data with the library's hash (checked by its own tests). */
+static void digest(enum cryc_hash_id id, const uint8_t *data, size_t size, uint8_t *out);
+
+/* Drops the zero limbs at the top. */
+static void big_trim(struct big *x);
+
+/* Sets x to 2^bits - amount, for amount 1 or 2 and bits of at least 33 or exactly 31. */
+static void big_power_of_two_minus(struct big *x, unsigned bits, uint32_t amount);
+
+/* Sets out to x * y (out must not be x or y). */
+static void big_multiply(struct big *out, const struct big *x, const struct big *y);
+
+/* Returns x mod m for a 32-bit m. */
+static uint32_t big_mod_small(const struct big *x, uint32_t m);
+
+/* Sets x to x * multiplier + addend. */
+static void big_multiply_small_add(struct big *x, uint32_t multiplier, uint32_t addend);
+
+/* Sets x to x / divisor (floor) and returns the remainder. */
+static uint32_t big_divide_small(struct big *x, uint32_t divisor);
+
+/* Writes x big-endian without leading zero bytes into out (room bytes) and returns the size (0 when it does not fit). */
+static size_t big_to_bytes(const struct big *x, uint8_t *out, size_t room);
+
+/* Decodes hex text that may have an odd number of digits (the CAVP files drop a leading zero digit) as a number: an odd text gets a zero digit on the left. */
+static size_t hex_number(const char *text, uint8_t *out, size_t room);
+
+/* The key as the library takes it. */
+static void public_key(const struct tkey *key, struct cryc_rsa_key *out);
+
+/* Returns the bit length of a big-endian number without leading zero bytes. */
+static size_t bit_length(const uint8_t *bytes, size_t size);
+
+/* Builds the key of a spec with e = 65537: n is the product of the primes, phi the product of one less, d = (1 + t * phi) / e for the t below e that makes the numerator divisible (e * d = 1 mod phi). */
+static void make_key(struct tkey *key, const struct key_spec *spec);
+
+/* Loads a key from hex text of n, e and d (leading zeros removed); returns 0, or -1 when a value is too big. */
+static int load_key(struct tkey *key, const char *n_hex, const char *e_hex, const char *d_hex);
+
+/* RSASP1 on arbitrary bytes: sig = m^d mod n as n_size bytes, for m of m_size bytes read as an integer. */
+static int raw_sign(const struct tkey *key, const uint8_t *m, size_t m_size, uint8_t *sig);
+
+/* The DER encoding T of the DigestInfo of hash (id) built with the DER writer: SEQUENCE { SEQUENCE { OID, NULL }, OCTET STRING hash }. */
+static size_t digest_info(enum cryc_hash_id oid_id, const uint8_t *hash, size_t hash_size, int with_null, uint8_t *out, size_t room);
+
+/* Builds EM = 0x00 || 0x01 || PS || 0x00 || T of k bytes (RFC 8017 9.2); returns k, or 0 when T does not fit. */
+static size_t pkcs1_encode(const uint8_t *t, size_t t_size, size_t k, uint8_t *em);
+
+/* Fills mask with MGF1 (RFC 8017 B.2.1) over seed with hash id. */
+static void mgf1(enum cryc_hash_id id, const uint8_t *seed, size_t seed_size, uint8_t *mask, size_t mask_size);
+
+/* EMSA-PSS-ENCODE (RFC 8017 9.1.1) of the hash mhash with the given salt for em_bits: writes em_len = ceil (em_bits / 8) bytes to em and returns em_len, or 0 when the block is too short. */
+static size_t pss_encode(enum cryc_hash_id id, const uint8_t *mhash, const uint8_t *salt, size_t salt_size, size_t em_bits, uint8_t *em);
+
+/* Signs the hash with PKCS1 v1.5 (the DigestInfo of id); returns 0, or -1 when it does not fit. */
+static int sign_pkcs1(const struct tkey *key, enum cryc_hash_id id, const uint8_t *hash, uint8_t *sig);
+
+/* Signs the hash with PSS (MGF1 with the same hash); returns 0, or -1 when the salt does not fit. */
+static int sign_pss(const struct tkey *key, enum cryc_hash_id id, const uint8_t *hash, const uint8_t *salt, size_t salt_size, uint8_t *sig);
+
+/* Verifies with PKCS1 v1.5 against a key of the tests. */
+static int verify_pkcs1(const struct tkey *key, enum cryc_hash_id id, const uint8_t *hash, const uint8_t *sig);
+
+/* Verifies with PSS against a key of the tests. */
+static int verify_pss(const struct tkey *key, enum cryc_hash_id id, const uint8_t *hash, size_t salt_size, const uint8_t *sig);
+
+/* Checks that the DigestInfo built here has the lengths and prefix bytes of RFC 8017 9.2 note 1. */
+static void check_digest_info(void);
+
+/* Round trips of both schemes for one key and one hash with several salt sizes, and the changes that must fail. */
+static void round_trip_key(const struct tkey *key, enum cryc_hash_id id, int do_pkcs1, size_t salt_count);
+
+/* Forged PKCS1 v1.5 signatures: a wrong EM signed with the private key, each case refused. */
+static void forge_pkcs1(const struct tkey *key, enum cryc_hash_id id);
+
+/* Forged PSS signatures: a wrong EM signed with the private key, each case refused. */
+static void forge_pss(const struct tkey *key, enum cryc_hash_id id);
+
+/* The signature as sent changed, and truncated and lengthened signatures, for one valid signature. */
+static void check_signature_forms(const struct tkey *key);
+
+/* A valid signature whose first byte is zero, sent without it or with another zero in front: neither is a signature of k bytes. */
+static void check_leading_zero_signature(const struct tkey *key);
+
+/* Argument errors and the limits of the key, with one good key and signature. */
+static void check_arguments(const struct tkey *key);
+
+/* Salt sizes near the limits with a valid signature: no overflow, always refused. */
+static void check_salt_limits(const struct tkey *key);
+
+/* Random keys, hashes, salts and signatures: only the documented errors, and no read outside the buffers (ASan). */
+static void check_random_input(void);
+
+/* Returns the hash id named by a vector's text ("SHA256", "SHA-256", "SHA384", ...), or CRYC_HASH_NONE. */
+static enum cryc_hash_id hash_from_name(const char *name);
+
+/* Decodes the hex value of key in the current record as a number (see hex_number); (size_t)-1 when absent or malformed. */
+static size_t field_number(const struct vec_file *file, const char *key, uint8_t *out, size_t room);
+
+/* Returns 1 when the exponent bytes (leading zeros ignored) are an odd value from 3 to 2^32 - 1. */
+static int exponent_is_usable(const struct tkey *key);
+
+/* The CAVP SigVer file of PKCS1 v1.5: the modulus is in the record before its cases. */
+static void check_cavp_pkcs1(void);
+
+/* The CAVP SigVer file of PSS: the key and the cases; valid cases are also reproduced with the signer here. */
+static void check_cavp_pss(void);
+
+/* Copies a field into a state buffer when the record has it. */
+static void state_copy(const struct vec_file *file, const char *key, char *target, size_t room);
+
+/* One Wycheproof file: kind 0 is PKCS1 v1.5, kind 1 is PSS. */
+static void check_wycheproof(const char *name, int kind);
 
 /* Returns the next pseudo-random 32-bit value. */
 static uint32_t
@@ -109,17 +312,6 @@ digest(
 	CHECK(error == 0);
 }
 
-/* The three hashes, in the order the tests loop over them. */
-static const enum cryc_hash_id hash_ids[3] = {
-	CRYC_HASH_SHA256, CRYC_HASH_SHA384, CRYC_HASH_SHA512
-};
-
-/* A natural number of the test's own, for building keys: limbs little endian, used limbs without leading zeros. */
-struct big {
-	uint32_t limb[BIG_LIMBS];
-	size_t used;
-};
-
 /* Drops the zero limbs at the top. */
 static void
 big_trim(
@@ -149,7 +341,11 @@ big_power_of_two_minus(
 		x->limb[index] = 0xffffffffU;
 	if (rest != 0U)
 		x->limb[words] = (1U << rest) - 1U;
-	x->used = words + (rest != 0U ? 1U : 0U);
+
+	/* The partial top limb, when there is one, counts as used. */
+	x->used = words;
+	if (rest != 0U)
+		x->used++;
 
 	/* 2^bits - 2: the lowest limb is odd, so one is taken from it without a borrow. */
 	if (amount == 2U)
@@ -178,8 +374,12 @@ big_multiply(
 			out->limb[i + j] = (uint32_t)(total & 0xffffffffU);
 			carry = total >> 32;
 		}
+
+		/* The carry out of the row is the limb above it. */
 		out->limb[i + y->used] = (uint32_t)carry;
 	}
+
+	/* The product has at most as many limbs as both factors together. */
 	out->used = x->used + y->used;
 	big_trim(out);
 }
@@ -197,6 +397,8 @@ big_mod_small(
 	rest = 0;
 	for (index = x->used; index > 0U; index--)
 		rest = ((rest << 32) | x->limb[index - 1U]) % m;
+
+	/* The remainder fits in 32 bits because m does. */
 	return (uint32_t)rest;
 }
 
@@ -218,6 +420,8 @@ big_multiply_small_add(
 		x->limb[index] = (uint32_t)(total & 0xffffffffU);
 		carry = total >> 32;
 	}
+
+	/* A carry out of the top limb makes the number one limb longer. */
 	if (carry != 0U) {
 		x->limb[x->used] = (uint32_t)carry;
 		x->used++;
@@ -241,7 +445,11 @@ big_divide_small(
 		x->limb[index - 1U] = (uint32_t)(current / divisor);
 		rest = current % divisor;
 	}
+
+	/* The quotient loses the zero limbs the division left at the top. */
 	big_trim(x);
+
+	/* The remainder is the answer; the quotient stays in x. */
 	return (uint32_t)rest;
 }
 
@@ -271,13 +479,19 @@ big_to_bytes(
 			skip++;
 			continue;
 		}
+
+		/* The output must have room for this byte. */
 		CHECK(size < room);
 		if (size >= room)
 			return 0;
 		out[size] = (uint8_t)((x->limb[position / 4U] >> (8U * (position % 4U))) & 0xffU);
 		size++;
 	}
+
+	/* The count of skipped zero bytes is kept for symmetry and is not needed after the loop. */
 	(void)skip;
+
+	/* The number of bytes written. */
 	return size;
 }
 
@@ -294,30 +508,25 @@ hex_number(
 {
 	static char padded[8400];
 	size_t length;
+	size_t decoded;
 
 	/* Even texts as they are. */
 	length = strlen(text);
-	if (length % 2U == 0U)
-		return hex_decode(text, out, room);
+	if (length % 2U == 0U) {
+		decoded = hex_decode(text, out, room);
+		return decoded;
+	}
 
 	/* Odd texts with a zero digit in front. */
 	if (length + 2U > sizeof(padded))
 		return (size_t)-1;
 	padded[0] = '0';
 	memcpy(padded + 1, text, length + 1U);
-	return hex_decode(padded, out, room);
-}
+	decoded = hex_decode(padded, out, room);
 
-/* A key with its private exponent: all big-endian bytes without leading zeros. */
-struct tkey {
-	uint8_t n[K_MAX];
-	size_t n_size;
-	uint8_t e[8];
-	size_t e_size;
-	uint8_t d[K_MAX];
-	size_t d_size;
-	size_t bits;
-};
+	/* The bytes decoded from the padded text. */
+	return decoded;
+}
 
 /* The key as the library takes it. */
 static void
@@ -349,34 +558,6 @@ bit_length(
 		bits++;
 	return bits;
 }
-
-/* The moduli built from Mersenne primes: the exponents of the primes 2^a - 1 and the bit length of the product. */
-struct key_spec {
-	size_t count;
-	unsigned exponents[6];
-	size_t bits;
-};
-
-/*
- * The moduli: the product of the primes 2^a - 1 has exactly the sum of the
- * a as its bit length.  The bit lengths are 2057, 2074, 2067, 2292, 2077,
- * 2054, 2095 and 2120 (modBits modulo 8 of 1, 2, 3, 4, 5, 6, 7 and 0) and
- * 8192.
- *
- * Values referenced: the Mersenne exponents 31, 61, 89, 107, 127, 521, 607,
- * 1279, 2203, 3217 and 4423 give prime numbers 2^a - 1 (OEIS A000043).
- */
-static const struct key_spec key_specs[9] = {
-	{ 5U, { 61U, 89U, 107U, 521U, 1279U, 0U }, 2057U },
-	{ 4U, { 61U, 127U, 607U, 1279U, 0U, 0U }, 2074U },
-	{ 5U, { 31U, 61U, 89U, 607U, 1279U, 0U }, 2067U },
-	{ 2U, { 89U, 2203U, 0U, 0U, 0U, 0U }, 2292U },
-	{ 5U, { 61U, 89U, 127U, 521U, 1279U, 0U }, 2077U },
-	{ 4U, { 61U, 107U, 607U, 1279U, 0U, 0U }, 2054U },
-	{ 5U, { 61U, 107U, 127U, 521U, 1279U, 0U }, 2095U },
-	{ 4U, { 107U, 127U, 607U, 1279U, 0U, 0U }, 2120U },
-	{ 4U, { 31U, 521U, 3217U, 4423U, 0U, 0U }, 8192U }
-};
 
 /*
  * Builds the key of a spec with e = 65537: n is the product of the primes,
@@ -429,6 +610,8 @@ make_key(
 			inverse = (uint32_t)(((uint64_t)inverse * power) % e_value);
 		power = (uint32_t)(((uint64_t)power * power) % e_value);
 	}
+
+	/* The multiplier t for which 1 + t * phi is divisible by e. */
 	multiplier = e_value - inverse;
 
 	/* d = (1 + multiplier * phi) / e, exact. */
@@ -717,13 +900,21 @@ sign_pkcs1(
 	uint8_t em[K_MAX];
 	size_t t_size;
 	size_t em_size;
+	int error;
 
 	/* EM, then the private operation. */
 	t_size = digest_info(id, hash, hash_length(id), 1, t, sizeof(t));
 	em_size = pkcs1_encode(t, t_size, key->n_size, em);
 	if (em_size == 0U)
 		return -1;
-	return raw_sign(key, em, em_size, sig);
+
+	/* Signs EM with the private exponent. */
+	error = raw_sign(key, em, em_size, sig);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: sig holds the signature. */
+	return 0;
 }
 
 /* Signs the hash with PSS (MGF1 with the same hash); returns 0, or -1 when the salt does not fit. */
@@ -738,12 +929,20 @@ sign_pss(
 {
 	uint8_t em[K_MAX];
 	size_t em_size;
+	int error;
 
 	/* EM for emBits = modBits - 1, then the private operation on its emLen bytes. */
 	em_size = pss_encode(id, hash, salt, salt_size, key->bits - 1U, em);
 	if (em_size == 0U)
 		return -1;
-	return raw_sign(key, em, em_size, sig);
+
+	/* Signs EM with the private exponent. */
+	error = raw_sign(key, em, em_size, sig);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: sig holds the signature. */
+	return 0;
 }
 
 /* Verifies with PKCS1 v1.5 against a key of the tests. */
@@ -755,10 +954,18 @@ verify_pkcs1(
 	const uint8_t *sig)
 {
 	struct cryc_rsa_key rsa;
+	int error;
 
 	/* The key as the library takes it, the sizes from the key. */
 	public_key(key, &rsa);
-	return cryc_rsa_pkcs1_verify(&rsa, id, hash, hash_length(id), sig, key->n_size);
+
+	/* The library's verdict on the signature. */
+	error = cryc_rsa_pkcs1_verify(&rsa, id, hash, hash_length(id), sig, key->n_size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the signature is valid. */
+	return 0;
 }
 
 /* Verifies with PSS against a key of the tests. */
@@ -771,20 +978,19 @@ verify_pss(
 	const uint8_t *sig)
 {
 	struct cryc_rsa_key rsa;
+	int error;
 
 	/* The key as the library takes it, the sizes from the key. */
 	public_key(key, &rsa);
-	return cryc_rsa_pss_verify(&rsa, id, hash, hash_length(id), salt_size, sig, key->n_size);
+
+	/* The library's verdict on the signature. */
+	error = cryc_rsa_pss_verify(&rsa, id, hash, hash_length(id), salt_size, sig, key->n_size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the signature is valid. */
+	return 0;
 }
-
-/* The CAVP key of 2048 bits with its private exponent, and one of 3072 bits (loaded from the PSS file). */
-static struct tkey cavp_key_2048;
-static struct tkey cavp_key_3072;
-static int have_cavp_2048;
-static int have_cavp_3072;
-
-/* The keys made from the Mersenne primes. */
-static struct tkey mersenne_keys[9];
 
 /* Checks that the DigestInfo built here has the lengths and prefix bytes of RFC 8017 9.2 note 1. */
 static void
@@ -867,7 +1073,15 @@ round_trip_key(
 		error = verify_pkcs1(key, id, wrong, sig);
 		CHECK(error == EBADMSG);
 		for (index = 0; index < 8U; index++) {
-			position = index == 0U ? 0U : index == 1U ? k - 1U : (size_t)(random32() % k);
+			/* The first byte, the last byte, then bytes at random. */
+			if (index == 0U)
+				position = 0U;
+			else if (index == 1U)
+				position = k - 1U;
+			else
+				position = (size_t)(random32() % k);
+
+			/* One bit of the signature changed is refused, and restored it is accepted again. */
 			flip = (uint8_t)(1U << (random32() % 8U));
 			sig[position] ^= flip;
 			error = verify_pkcs1(key, id, hash, sig);
@@ -876,6 +1090,8 @@ round_trip_key(
 			error = verify_pkcs1(key, id, hash, sig);
 			CHECK(error == 0);
 		}
+
+		/* The PKCS1 v1.5 signature is no PSS signature. */
 		error = verify_pss(key, id, hash, h_len, sig);
 		CHECK(error == EBADMSG);
 
@@ -887,6 +1103,8 @@ round_trip_key(
 			other[byte - 1U] = (uint8_t)(sum & 0xffU);
 			carry = sum >> 8;
 		}
+
+		/* Only a sum that still fits in k bytes is a candidate. */
 		if (carry == 0U) {
 			error = verify_pkcs1(key, id, hash, other);
 			CHECK(error == EBADMSG);
@@ -912,6 +1130,8 @@ round_trip_key(
 				error = verify_pss(key, id, hash, sizes[index] - 1U, sig);
 				CHECK(error == EBADMSG);
 			}
+
+			/* A signature of another hash and one of the other scheme are refused. */
 			error = verify_pss(key, id, wrong, sizes[index], sig);
 			CHECK(error == EBADMSG);
 			error = verify_pkcs1(key, id, hash, sig);
@@ -976,6 +1196,8 @@ forge_pkcs1(
 		CHECK(error == EBADMSG);
 		count++;
 	}
+
+	/* Enough positions gave a signable block that was refused. */
 	CHECK(count >= 28U);
 
 	/* The block type 0x01 as 0x00, 0x02 and 0xff, and the first byte not zero. */
@@ -1001,7 +1223,9 @@ forge_pkcs1(
 	CHECK(error == EBADMSG);
 
 	/* A DigestInfo naming another hash's OID over a hash of this one's length. */
-	other_id = id == CRYC_HASH_SHA256 ? CRYC_HASH_SHA512 : CRYC_HASH_SHA256;
+	other_id = CRYC_HASH_SHA256;
+	if (id == CRYC_HASH_SHA256)
+		other_id = CRYC_HASH_SHA512;
 	t_size = digest_info(other_id, hash, h_len, 1, bad_t, sizeof(bad_t));
 	em_size = pkcs1_encode(bad_t, t_size, k, em);
 	error = raw_sign(key, em, em_size, sig);
@@ -1101,7 +1325,14 @@ forge_pss(
 			if (pattern == 1U && index != 0U && index != 1U && index != 10U)
 				continue;
 			em_len = pss_encode(id, hash, salt, h_len, em_bits, em);
-			em[positions[index]] ^= (uint8_t)(pattern == 0U ? 0x01U : 0x80U);
+
+			/* The first pattern changes the lowest bit of the byte, the second the highest. */
+			if (pattern == 0U)
+				em[positions[index]] ^= 0x01U;
+			else
+				em[positions[index]] ^= 0x80U;
+
+			/* Signs the changed block and expects the signature to be refused. */
 			signed_ok = raw_sign(key, em, em_len, sig);
 			if (signed_ok != 0)
 				continue;
@@ -1110,6 +1341,8 @@ forge_pss(
 			count++;
 		}
 	}
+
+	/* Enough fields gave a signable block that was refused. */
 	CHECK(count >= 12U);
 
 	/* H computed over another message's hash (a signature of a different message). */
@@ -1175,6 +1408,8 @@ forge_pss(
 			CHECK(error == EBADMSG);
 			count++;
 		}
+
+		/* Three signable blocks were found, and all were refused. */
 		CHECK(count == 3U);
 	}
 }
@@ -1266,6 +1501,8 @@ check_leading_zero_signature(
 		if (sig[0] == 0x00U)
 			found = 1;
 	}
+
+	/* A signature with a zero first byte was found. */
 	CHECK(found);
 	if (!found)
 		return;
@@ -1287,6 +1524,8 @@ static void
 check_arguments(
 	const struct tkey *key)
 {
+	static const size_t even_bytes[3] = { 1U, 128U, 1025U };
+	static const size_t bit_counts[8] = { 1U, 1024U, 2040U, 2047U, 2048U, 8191U, 8192U, 8193U };
 	uint8_t sig[K_MAX + 8U];
 	uint8_t hash[HASH_MAX];
 	uint8_t modulus[K_MAX + 4U];
@@ -1296,6 +1535,9 @@ check_arguments(
 	size_t k;
 	size_t size;
 	size_t index;
+	size_t bits;
+	size_t bytes;
+	size_t top;
 	int error;
 
 	/* A valid signature of both kinds. */
@@ -1369,6 +1611,8 @@ check_arguments(
 		bad = rsa;
 		bad.e = exponent;
 		bad.e_size = 1;
+
+		/* Sets the exponent bytes and length of this case. */
 		switch (index) {
 		case 0: exponent[0] = 0x00U; break;
 		case 1: exponent[0] = 0x01U; break;
@@ -1381,6 +1625,8 @@ check_arguments(
 		case 8: exponent[0] = 0x01U; exponent[2] = 0x01U; exponent[4] = 0x01U; bad.e_size = 5; break;
 		default: bad.e_size = 0; break;
 		}
+
+		/* Only the odd 32-bit exponents above 1 are usable, and this key's signature does not fit them. */
 		error = cryc_rsa_pkcs1_verify(&bad, CRYC_HASH_SHA256, hash, 32U, sig, k);
 		if (index == 4U || index == 5U)
 			CHECK(error == EBADMSG);
@@ -1430,8 +1676,6 @@ check_arguments(
 
 	/* An even modulus is refused as EINVAL before its length is judged (too short and too long ones too). */
 	for (index = 0; index < 3U; index++) {
-		static const size_t even_bytes[3] = { 1U, 128U, 1025U };
-
 		memset(modulus, 0xff, sizeof(modulus));
 		modulus[even_bytes[index] - 1U] = 0xfeU;
 		bad = rsa;
@@ -1445,11 +1689,6 @@ check_arguments(
 
 	/* Odd moduli of chosen lengths with all bits set below the top: the signature does not matter, the key is judged first. */
 	for (index = 0; index < 8U; index++) {
-		static const size_t bit_counts[8] = { 1U, 1024U, 2040U, 2047U, 2048U, 8191U, 8192U, 8193U };
-		size_t bits;
-		size_t bytes;
-		size_t top;
-
 		bits = bit_counts[index];
 		bytes = (bits + 7U) / 8U;
 		top = bits - (bytes - 1U) * 8U;
@@ -1534,6 +1773,7 @@ check_random_input(void)
 	size_t e_size;
 	size_t index;
 	size_t id;
+	size_t hash_size;
 	int error;
 	int accepted;
 
@@ -1556,13 +1796,24 @@ check_random_input(void)
 		rsa.e = exponent;
 		rsa.e_size = e_size;
 		id = (size_t)(random32() % 6U);
-		error = cryc_rsa_pkcs1_verify(&rsa, (enum cryc_hash_id)id, hash, id == 1U ? 32U : id == 2U ? 48U : 64U, sig, n_size);
+
+		/* The size of the hash the id names, and 64 for the ids that name none. */
+		hash_size = 64U;
+		if (id == 1U)
+			hash_size = 32U;
+		else if (id == 2U)
+			hash_size = 48U;
+
+		/* Verifies the random signature under the random key, both schemes. */
+		error = cryc_rsa_pkcs1_verify(&rsa, (enum cryc_hash_id)id, hash, hash_size, sig, n_size);
 		CHECK(error == EBADMSG || error == EINVAL || error == ENOTSUP);
 		if (error == EBADMSG)
 			accepted++;
-		error = cryc_rsa_pss_verify(&rsa, (enum cryc_hash_id)id, hash, id == 1U ? 32U : id == 2U ? 48U : 64U, random32() % 100U, sig, n_size);
+		error = cryc_rsa_pss_verify(&rsa, (enum cryc_hash_id)id, hash, hash_size, random32() % 100U, sig, n_size);
 		CHECK(error == EBADMSG || error == EINVAL || error == ENOTSUP);
 	}
+
+	/* Random keys that pass the checks of the library must give some bad-signature refusals. */
 	CHECK(accepted > 20);
 }
 
@@ -1571,13 +1822,33 @@ static enum cryc_hash_id
 hash_from_name(
 	const char *name)
 {
-	/* Both spellings of the three. */
-	if (strcmp(name, "SHA256") == 0 || strcmp(name, "SHA-256") == 0)
+	int comparison;
+
+	/* Both spellings of SHA-256. */
+	comparison = strcmp(name, "SHA256");
+	if (comparison == 0)
 		return CRYC_HASH_SHA256;
-	if (strcmp(name, "SHA384") == 0 || strcmp(name, "SHA-384") == 0)
+	comparison = strcmp(name, "SHA-256");
+	if (comparison == 0)
+		return CRYC_HASH_SHA256;
+
+	/* Both spellings of SHA-384. */
+	comparison = strcmp(name, "SHA384");
+	if (comparison == 0)
 		return CRYC_HASH_SHA384;
-	if (strcmp(name, "SHA512") == 0 || strcmp(name, "SHA-512") == 0)
+	comparison = strcmp(name, "SHA-384");
+	if (comparison == 0)
+		return CRYC_HASH_SHA384;
+
+	/* Both spellings of SHA-512. */
+	comparison = strcmp(name, "SHA512");
+	if (comparison == 0)
 		return CRYC_HASH_SHA512;
+	comparison = strcmp(name, "SHA-512");
+	if (comparison == 0)
+		return CRYC_HASH_SHA512;
+
+	/* The name is no hash of the three. */
 	return CRYC_HASH_NONE;
 }
 
@@ -1590,12 +1861,16 @@ field_number(
 	size_t room)
 {
 	const char *value;
+	size_t decoded;
 
 	/* The field, when there is one. */
 	value = vec_get(file, key);
 	if (value == NULL)
 		return (size_t)-1;
-	return hex_number(value, out, room);
+
+	/* The bytes of the field's number. */
+	decoded = hex_number(value, out, room);
+	return decoded;
 }
 
 /* Returns 1 when the exponent bytes (leading zeros ignored) are an odd value from 3 to 2^32 - 1. */
@@ -1617,17 +1892,6 @@ exponent_is_usable(
 	return 1;
 }
 
-/* Counts of what the vector files held, shown at the end. */
-static unsigned long count_cavp_pkcs1;
-static unsigned long count_cavp_pkcs1_valid;
-static unsigned long count_cavp_pss;
-static unsigned long count_cavp_pss_valid;
-static unsigned long count_cavp_small;
-static unsigned long count_cavp_reproduced;
-static unsigned long count_wycheproof;
-static unsigned long count_wycheproof_valid;
-static unsigned long count_wycheproof_acceptable;
-
 /* The CAVP SigVer file of PKCS1 v1.5: the modulus is in the record before its cases. */
 static void
 check_cavp_pkcs1(void)
@@ -1647,17 +1911,28 @@ check_cavp_pkcs1(void)
 	char n_text[4096];
 	int error;
 	int have_n;
+	int more;
+	int usable;
 
 	/* Opens the file. */
-	if (vec_open(&file, "cavp-186-3rsatestvectors-SigVer15_186-3") != 0) {
+	error = vec_open(&file, "cavp-186-3rsatestvectors-SigVer15_186-3");
+	if (error != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* No modulus is known before the first "n" record. */
 	have_n = 0;
 	n_text[0] = '\0';
 
 	/* Records: an "n" record sets the modulus; the others are cases. */
-	while (vec_next(&file)) {
+	for (;;) {
+		/* Reads the next record, and stops at the end of the file. */
+		more = vec_next(&file);
+		if (!more)
+			break;
+
+		/* An "n" record holds the modulus of the cases after it. */
 		value = vec_get(&file, "n");
 		if (value != NULL) {
 			CHECK(strlen(value) < sizeof(n_text));
@@ -1665,6 +1940,8 @@ check_cavp_pkcs1(void)
 			have_n = 1;
 			continue;
 		}
+
+		/* A case names its hash; a record without one is skipped. */
 		value = vec_get(&file, "SHAAlg");
 		if (value == NULL)
 			continue;
@@ -1686,6 +1963,11 @@ check_cavp_pkcs1(void)
 		public_key(&key, &rsa);
 		error = cryc_rsa_pkcs1_verify(&rsa, id, hash, length, sig, sig_size);
 		count_cavp_pkcs1++;
+
+		/* Whether the exponent is one the library accepts. */
+		usable = exponent_is_usable(&key);
+
+		/* The verdict depends on the modulus size, the signature and the exponent. */
 		if (key.bits < 2048U) {
 			/* Below the floor: refused whatever the signature. */
 			CHECK(error == ENOTSUP);
@@ -1693,12 +1975,14 @@ check_cavp_pkcs1(void)
 		} else if (result[0] == 'P') {
 			CHECK(error == 0);
 			count_cavp_pkcs1_valid++;
-		} else if (!exponent_is_usable(&key)) {
+		} else if (!usable) {
 			CHECK(error == EINVAL);
 		} else {
 			CHECK(error == EBADMSG);
 		}
 	}
+
+	/* Closes the file. */
 	vec_close(&file);
 }
 
@@ -1724,19 +2008,31 @@ check_cavp_pss(void)
 	char n_text[4096];
 	int error;
 	int have_n;
+	int more;
+	int usable;
+	size_t slot;
 	unsigned reproduced[6];
 
 	/* Opens the file. */
-	if (vec_open(&file, "cavp-186-3rsatestvectors-SigVerPSS_186-3") != 0) {
+	error = vec_open(&file, "cavp-186-3rsatestvectors-SigVerPSS_186-3");
+	if (error != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* No modulus is known before the first "n" record, and no case is reproduced yet. */
 	have_n = 0;
 	n_text[0] = '\0';
 	memset(reproduced, 0, sizeof(reproduced));
 
 	/* Records: an "n" record sets the modulus; the others are cases. */
-	while (vec_next(&file)) {
+	for (;;) {
+		/* Reads the next record, and stops at the end of the file. */
+		more = vec_next(&file);
+		if (!more)
+			break;
+
+		/* An "n" record holds the modulus of the cases after it. */
 		value = vec_get(&file, "n");
 		if (value != NULL) {
 			CHECK(strlen(value) < sizeof(n_text));
@@ -1744,6 +2040,8 @@ check_cavp_pss(void)
 			have_n = 1;
 			continue;
 		}
+
+		/* A case names its hash; a record without one is skipped. */
 		value = vec_get(&file, "SHAAlg");
 		if (value == NULL)
 			continue;
@@ -1774,23 +2072,38 @@ check_cavp_pss(void)
 			salt_size = 0;
 		error = cryc_rsa_pss_verify(&rsa, id, hash, length, salt_size, sig, sig_size);
 		count_cavp_pss++;
+
+		/* Whether the exponent is one the library accepts. */
+		usable = exponent_is_usable(&key);
+
+		/* A key below the floor is refused whatever the signature. */
 		if (key.bits < 2048U) {
 			CHECK(error == ENOTSUP);
 			count_cavp_small++;
 			continue;
 		}
+
+		/* A valid case is accepted; an invalid one is refused for the reason its key gives. */
 		if (result[0] == 'P') {
 			CHECK(error == 0);
 			count_cavp_pss_valid++;
-		} else if (!exponent_is_usable(&key)) {
+		} else if (!usable) {
 			CHECK(error == EINVAL);
 		} else {
 			CHECK(error == EBADMSG);
 		}
 
+		/* The slot that counts the reproduced cases of this hash and modulus size. */
+		slot = (size_t)(id - 1);
+		if (key.bits == 3072U)
+			slot += 3U;
+
 		/* A valid case: the key's private exponent and the case's salt must give the same signature with the signer here (a few per modulus size and hash). */
-		if (result[0] == 'P' && key.bits >= 2048U && key.d_size > 0U && reproduced[(size_t)(id - 1) + (key.bits == 3072U ? 3U : 0U)] < 4U) {
-			reproduced[(size_t)(id - 1) + (key.bits == 3072U ? 3U : 0U)]++;
+		if (result[0] == 'P' &&
+		    key.bits >= 2048U &&
+		    key.d_size > 0U &&
+		    reproduced[slot] < 4U) {
+			reproduced[slot]++;
 			error = sign_pss(&key, id, hash, salt, salt_size, made);
 			CHECK(error == 0);
 			CHECK(sig_size == key.n_size);
@@ -1798,29 +2111,23 @@ check_cavp_pss(void)
 				CHECK_BYTES(made, sig, sig_size);
 			count_cavp_reproduced++;
 
-			/* The key for the later round trips. */
+			/* The 2048-bit key for the later round trips. */
 			if (key.bits == 2048U && !have_cavp_2048) {
 				cavp_key_2048 = key;
 				have_cavp_2048 = 1;
 			}
+
+			/* The 3072-bit key for the later round trips. */
 			if (key.bits == 3072U && !have_cavp_3072) {
 				cavp_key_3072 = key;
 				have_cavp_3072 = 1;
 			}
 		}
 	}
+
+	/* Closes the file. */
 	vec_close(&file);
 }
-
-/* The state of a Wycheproof file read record by record: the group's key and parameters, which come split over two records. */
-struct group_state {
-	char modulus[2300];
-	char exponent[64];
-	char sha[16];
-	char mgf_sha[16];
-	unsigned long salt_size;
-	int have_salt_size;
-};
 
 /* Copies a field into a state buffer when the record has it. */
 static void
@@ -1857,21 +2164,34 @@ check_wycheproof(
 	const char *value;
 	const char *result;
 	const char *flags;
+	const char *missing_null;
 	size_t msg_size;
 	size_t sig_size;
 	size_t length;
 	unsigned long salt_size;
 	int error;
+	int more;
+	int valid_comparison;
+	int invalid_comparison;
 
 	/* Opens the file. */
-	if (vec_open(&file, name) != 0) {
+	error = vec_open(&file, name);
+	if (error != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* No group has been seen before the first record. */
 	memset(&state, 0, sizeof(state));
 
 	/* Records: group fields come before the case fields, in this record or the one before. */
-	while (vec_next(&file)) {
+	for (;;) {
+		/* Reads the next record, and stops at the end of the file. */
+		more = vec_next(&file);
+		if (!more)
+			break;
+
+		/* Remembers the group fields this record carries. */
 		state_copy(&file, "group.publicKey.modulus", state.modulus, sizeof(state.modulus));
 		state_copy(&file, "group.publicKey.publicExponent", state.exponent, sizeof(state.exponent));
 		state_copy(&file, "group.sha", state.sha, sizeof(state.sha));
@@ -1881,7 +2201,10 @@ check_wycheproof(
 			state.salt_size = strtoul(value, NULL, 10);
 			state.have_salt_size = 1;
 		}
-		if (vec_get(&file, "tcId") == NULL)
+
+		/* A record without a test id carries group fields only. */
+		value = vec_get(&file, "tcId");
+		if (value == NULL)
 			continue;
 
 		/* The case. */
@@ -1913,19 +2236,26 @@ check_wycheproof(
 			error = cryc_rsa_pss_verify(&rsa, id, hash, length, (size_t)salt_size, sig, sig_size);
 		}
 
+		/* Classifies the expected result of the case. */
+		valid_comparison = strcmp(result, "valid");
+		invalid_comparison = strcmp(result, "invalid");
+
 		/* valid: accepted; invalid: refused as a bad signature; acceptable: either, but a DigestInfo without NULL is refused here. */
-		if (strcmp(result, "valid") == 0) {
+		if (valid_comparison == 0) {
 			CHECK(error == 0);
 			count_wycheproof_valid++;
-		} else if (strcmp(result, "invalid") == 0) {
+		} else if (invalid_comparison == 0) {
 			CHECK(error == EBADMSG);
 		} else {
 			CHECK(error == 0 || error == EBADMSG);
-			if (strstr(flags, "MissingNull") != NULL)
+			missing_null = strstr(flags, "MissingNull");
+			if (missing_null != NULL)
 				CHECK(error == EBADMSG);
 			count_wycheproof_acceptable++;
 		}
 	}
+
+	/* Closes the file. */
 	vec_close(&file);
 }
 
@@ -1935,6 +2265,8 @@ main(void)
 {
 	size_t index;
 	size_t which;
+	size_t salt_count;
+	int status;
 
 	/* The standards' vectors first (they also find the CAVP keys with private exponents). */
 	check_digest_info();
@@ -1972,6 +2304,8 @@ main(void)
 		check_arguments(&cavp_key_2048);
 		check_salt_limits(&cavp_key_2048);
 	}
+
+	/* The 3072-bit CAVP key gets one round trip. */
 	if (have_cavp_3072)
 		round_trip_key(&cavp_key_3072, CRYC_HASH_SHA384, 1, 1);
 
@@ -1981,11 +2315,18 @@ main(void)
 			round_trip_key(&mersenne_keys[which], CRYC_HASH_SHA512, 1, 1);
 			continue;
 		}
-		round_trip_key(&mersenne_keys[which], hash_ids[which % 3U], 1, which == 0U ? 2U : 1U);
+
+		/* The first key checks two salt sizes, the others one. */
+		salt_count = 1U;
+		if (which == 0U)
+			salt_count = 2U;
+		round_trip_key(&mersenne_keys[which], hash_ids[which % 3U], 1, salt_count);
 		forge_pss(&mersenne_keys[which], hash_ids[(which + 1U) % 3U]);
 		if (which == 0U || which == 7U)
 			forge_pkcs1(&mersenne_keys[which], hash_ids[(which + 2U) % 3U]);
 	}
+
+	/* The signature forms, the salt limits and the leading zero case on the built keys. */
 	check_signature_forms(&mersenne_keys[0]);
 	check_leading_zero_signature(&mersenne_keys[0]);
 	check_salt_limits(&mersenne_keys[0]);
@@ -1994,5 +2335,7 @@ main(void)
 	/* Random input. */
 	check_random_input();
 
-	return check_finish("test-rsa");
+	/* Reports the outcome of the checks as the exit status. */
+	status = check_finish("test-rsa");
+	return status;
 }

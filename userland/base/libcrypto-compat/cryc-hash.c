@@ -277,6 +277,8 @@ cryc_hmac_init(
 		cryc_wipe(padded_key, sizeof(padded_key));
 		return error;
 	}
+
+	/* Absorbs the inner key block. */
 	cryc_hash_update(&hmac->inner, padded_key, block_size);
 
 	/*
@@ -293,6 +295,8 @@ cryc_hmac_init(
 		cryc_wipe(hmac, sizeof(*hmac));
 		return error;
 	}
+
+	/* Absorbs the outer key block. */
 	cryc_hash_update(&hmac->outer, padded_key, block_size);
 
 	/* Wipes the key block, which is the key itself in another form. */
@@ -520,6 +524,7 @@ cryc_hkdf_expand(
 	for (block_number = 1; block_number <= block_count; block_number++) {
 		counter = (uint8_t)block_number;
 
+		/* Computes T(n) as the HMAC of the previous block, the info and the counter. */
 		running = keyed;
 		cryc_hmac_update(&running, previous, previous_size);
 		cryc_hmac_update(&running, info, info_size);
@@ -527,6 +532,7 @@ cryc_hkdf_expand(
 		cryc_hmac_final(&running, previous);
 		previous_size = digest_size;
 
+		/* Takes as much of the block as the output still needs. */
 		chunk = out_size - written;
 		if (chunk > digest_size)
 			chunk = digest_size;

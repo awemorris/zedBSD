@@ -192,6 +192,8 @@ cryc_ecp_init(
 		if (ecp_curves[index].id == id)
 			params = &ecp_curves[index];
 	}
+
+	/* Refuses a curve this build does not have. */
 	if (params == NULL)
 		return ENOTSUP;
 
@@ -200,12 +202,14 @@ cryc_ecp_init(
 	ec->size = params->size;
 	ec->limbs = params->size / 4U;
 
-	/* Prepares the prime and the order for Montgomery arithmetic. */
+	/* Prepares the prime for Montgomery arithmetic. */
 	error = cryc_bn_mont_init(&ec->field, params->prime, params->size);
 	if (error != 0) {
 		cryc_wipe(ec, sizeof(*ec));
 		return error;
 	}
+
+	/* Prepares the order for Montgomery arithmetic. */
 	error = cryc_bn_mont_init(&ec->order, params->order, params->size);
 	if (error != 0) {
 		cryc_wipe(ec, sizeof(*ec));
@@ -219,6 +223,8 @@ cryc_ecp_init(
 		cryc_wipe(ec, sizeof(*ec));
 		return error;
 	}
+
+	/* Puts b into Montgomery form. */
 	cryc_bn_to_mont(ec->b_mont, value, &ec->field);
 
 	/* Reads the base point and puts both coordinates into Montgomery form. */
@@ -227,12 +233,18 @@ cryc_ecp_init(
 		cryc_wipe(ec, sizeof(*ec));
 		return error;
 	}
+
+	/* Puts the x coordinate of the base point into Montgomery form. */
 	cryc_bn_to_mont(ec->base_x, value, &ec->field);
+
+	/* Reads the y coordinate of the base point. */
 	error = cryc_bn_decode(value, ec->limbs, params->base_y, params->size);
 	if (error != 0) {
 		cryc_wipe(ec, sizeof(*ec));
 		return error;
 	}
+
+	/* Puts the y coordinate of the base point into Montgomery form. */
 	cryc_bn_to_mont(ec->base_y, value, &ec->field);
 
 	/* Succeeded: the curve is ready. */
@@ -461,6 +473,8 @@ cryc_ecp_mul(
 			mask = cryc_ct_mask_eq32((uint32_t)index, digit);
 			ecp_select(&picked, &table[index], &picked, mask);
 		}
+
+		/* Adds the selected entry to the accumulator. */
 		ecp_add(ec, &accumulator, &accumulator, &picked);
 	}
 
@@ -488,7 +502,7 @@ cryc_ecp_mul_base(
 }
 
 /*
- * out = u1 * G + u2 * q, for ECDSA verification (FIPS 186-5 6.4.2 step 5).
+ * out = u1 * G + u2 * q, for ECDSA verification (FIPS 186-5 6.4.2 step 6).
  */
 void
 cryc_ecp_mul_add_public(

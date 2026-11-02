@@ -97,6 +97,9 @@ static int sslc_msg_hello_extension(struct sslc_server_hello *hello, uint32_t ty
 /* Ends a message: reports the writer's state and how many bytes were written. */
 static int sslc_msg_end_write(const struct sslc_writer *writer, size_t *written);
 
+/* Gives the alert for an extension the message does not allow: illegal_parameter for one the client sends, else unsupported_extension. */
+static unsigned sslc_msg_misplaced_alert(uint32_t type);
+
 /*
  * Reads a handshake message header (4; RFC 5246 7.4): type and body length
  * (24 bits).
@@ -264,9 +267,9 @@ sslc_msg_parse_server_hello(
 /*
  * Parses an EncryptedExtensions body (4.3.1): an extensions block, each
  * well formed, no type twice; allowed: server_name (empty) and
- * supported_groups (a list, ignored, 4.2.7); anything else is
- * unsupported_extension (4.2: libssl-compat offers nothing else that a
- * server answers here).
+ * supported_groups (a list, ignored, 4.2.7); another extension the client
+ * sends in its ClientHello is illegal_parameter (4.2: recognized, not
+ * specified for this message), any other unsupported_extension.
  */
 int
 sslc_msg_parse_encrypted_extensions(
@@ -307,9 +310,9 @@ sslc_msg_parse_encrypted_extensions(
 		if (error != 0)
 			return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
 
-		/* An extension this client did not offer, or one that has no place here. */
+		/* An extension that has no place here (one the client offered) or that the client did not offer. */
 		if (type != SSLC_EXT_SERVER_NAME && type != SSLC_EXT_SUPPORTED_GROUPS)
-			return sslc_msg_fail(alert, SSLC_ALERT_UNSUPPORTED_EXTENSION, EPROTO);
+			return sslc_msg_fail(alert, sslc_msg_misplaced_alert(type), EPROTO);
 
 		/* The server_name acknowledgement carries no data. */
 		if (type == SSLC_EXT_SERVER_NAME) {
@@ -415,6 +418,8 @@ sslc_msg_parse_certificate(
 			if (extensions.size != 0U)
 				return sslc_msg_fail(alert, SSLC_ALERT_UNSUPPORTED_EXTENSION, EPROTO);
 		}
+
+		/* Measures what is left of the list. */
 		left = sslc_reader_left(&list);
 	}
 
@@ -1054,6 +1059,8 @@ sslc_msg_write_extensions(
 			sslc_writer_bytes(writer, hello->shares[index].key, hello->shares[index].key_size);
 			sslc_writer_end(writer);
 		}
+
+		/* Closes the share list and the extension. */
 		sslc_writer_end(writer);
 		sslc_writer_end(writer);
 	}
@@ -1077,13 +1084,13 @@ sslc_msg_hello_extension(
 	int found;
 	int error;
 
-	/* Which extension this is; the cookie is allowed in a HelloRetryRequest only. */
+	/* Which extension this is; the cookie is recorded in either message, and refused by the handshake outside a HelloRetryRequest. */
 	bit = 0;
 	if (type == SSLC_EXT_SUPPORTED_VERSIONS)
 		bit = SSLC_SEEN_SUPPORTED_VERSIONS;
 	else if (type == SSLC_EXT_KEY_SHARE)
 		bit = SSLC_SEEN_KEY_SHARE;
-	else if (type == SSLC_EXT_COOKIE && hello->is_retry)
+	else if (type == SSLC_EXT_COOKIE)
 		bit = SSLC_SEEN_COOKIE;
 	else if (type == SSLC_EXT_EXTENDED_MASTER_SECRET)
 		bit = SSLC_SEEN_EXTENDED_MASTER;
@@ -1094,9 +1101,9 @@ sslc_msg_hello_extension(
 	else if (type == SSLC_EXT_SERVER_NAME)
 		bit = SSLC_SEEN_SERVER_NAME;
 
-	/* Any other extension was not asked for, or has no place in this message. */
+	/* Any other extension has no place in this message (one the client offered) or was not asked for. */
 	if (bit == 0U)
-		return sslc_msg_fail(alert, SSLC_ALERT_UNSUPPORTED_EXTENSION, EPROTO);
+		return sslc_msg_fail(alert, sslc_msg_misplaced_alert(type), EPROTO);
 
 	/* An extension may appear once. */
 	if ((hello->seen & bit) != 0U)
@@ -1122,6 +1129,8 @@ sslc_msg_hello_extension(
 			hello->share_key = inner.data;
 			hello->share_size = inner.size;
 		}
+
+		/* Checks that the extension has no trailing bytes. */
 		error = sslc_reader_finish(data);
 		if (error != 0)
 			return sslc_msg_fail(alert, SSLC_ALERT_DECODE_ERROR, EINVAL);
@@ -1169,6 +1178,8 @@ sslc_msg_hello_extension(
 			if (inner.data[index] == SSLC_MSG_POINT_UNCOMPRESSED)
 				found = 1;
 		}
+
+		/* Refuses a list without the uncompressed point format. */
 		if (!found)
 			return sslc_msg_fail(alert, SSLC_ALERT_ILLEGAL_PARAMETER, EPROTO);
 		return 0;
@@ -1202,4 +1213,34 @@ sslc_msg_end_write(
 	/* The size of the message, header included. */
 	*written = writer->used;
 	return 0;
+}
+
+/*
+ * Gives the alert for an extension a server message may not carry (RFC
+ * 8446 4.2): one this client sends in a ClientHello is recognized and not
+ * specified for the message (illegal_parameter); any other was never
+ * offered (unsupported_extension).
+ */
+static unsigned
+sslc_msg_misplaced_alert(
+	uint32_t type)
+{
+	/* The extensions the ClientHello carries (sslc_msg_write_client_hello). */
+	switch (type) {
+	case SSLC_EXT_SERVER_NAME:
+	case SSLC_EXT_SUPPORTED_GROUPS:
+	case SSLC_EXT_EC_POINT_FORMATS:
+	case SSLC_EXT_SIGNATURE_ALGORITHMS:
+	case SSLC_EXT_EXTENDED_MASTER_SECRET:
+	case SSLC_EXT_SUPPORTED_VERSIONS:
+	case SSLC_EXT_COOKIE:
+	case SSLC_EXT_KEY_SHARE:
+	case SSLC_EXT_RENEGOTIATION_INFO:
+		return SSLC_ALERT_ILLEGAL_PARAMETER;
+	default:
+		break;
+	}
+
+	/* Not offered. */
+	return SSLC_ALERT_UNSUPPORTED_EXTENSION;
 }

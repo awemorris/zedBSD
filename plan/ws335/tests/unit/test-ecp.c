@@ -99,6 +99,123 @@ struct ref_point {
 };
 
 /* Returns the next pseudo-random byte string of size bytes into out. */
+static void random_bytes(uint8_t *out, size_t size);
+
+/* Reads hex text into exactly size bytes, left-padded with zeros; returns 0, or -1 when the value is wider. */
+static int hex_to_size(const char *text, uint8_t *out, size_t size);
+
+/* Fills a scalar of the curve's width from big-endian bytes. */
+static void scalar_from_bytes(uint32_t *scalar, const struct cryc_ecp *ec, const uint8_t *bytes);
+
+/* Sets scalar to a random value below n. */
+static void random_scalar(uint32_t *scalar, const struct cryc_ecp *ec);
+
+/* Sets scalar to the small value value. */
+static void scalar_small(uint32_t *scalar, uint32_t value);
+
+/* Sets scalar to 2^bit. */
+static void scalar_bit(uint32_t *scalar, size_t bit);
+
+/* Sets scalar to n - delta, with the single limb value delta (n is large enough). */
+static void scalar_n_minus(uint32_t *scalar, const struct cryc_ecp *ec, uint32_t delta);
+
+/* Prepares the exponent p - 2 from the text of p (the last byte is 0xff on both curves, so no borrow). */
+static void ref_prepare(const struct params *params);
+
+/* Sets out to the inverse of a (not zero) in Montgomery form. */
+static void ref_inverse(uint32_t *out, const uint32_t *a, const struct cryc_ecp *ec);
+
+/* Returns 1 when the limbs of a and b (the curve's width) are equal. */
+static int limbs_equal(const uint32_t *a, const uint32_t *b, const struct cryc_ecp *ec);
+
+/* Sets out to the double of a. */
+static void ref_double(struct ref_point *out, const struct ref_point *a, const struct cryc_ecp *ec);
+
+/* Sets out to a + b. */
+static void ref_add(struct ref_point *out, const struct ref_point *a, const struct ref_point *b, const struct cryc_ecp *ec);
+
+/* Sets out to scalar * a by double-and-add from the top bit. */
+static void ref_mul(struct ref_point *out, const uint32_t *scalar, const struct ref_point *a, const struct cryc_ecp *ec);
+
+/* Sets out to the base point of the curve, from the module's Montgomery values. */
+static void ref_base(struct ref_point *out, const struct cryc_ecp *ec);
+
+/* Sets out to -a. */
+static void ref_negate(struct ref_point *out, const struct ref_point *a, const struct cryc_ecp *ec);
+
+/* Writes the uncompressed encoding of a reference point into out (1 + 2 * size bytes). */
+static void ref_encode(uint8_t *out, const struct ref_point *a, const struct cryc_ecp *ec);
+
+/* Checks that the module's point equals the reference point. */
+static void check_point(const struct cryc_ecp *ec, const struct cryc_ecp_point *point, const struct ref_point *expected);
+
+/* Makes a point with the same affine coordinates as a reference point but Z = lambda (a random field element). */
+static void point_from_ref(const struct cryc_ecp *ec, struct cryc_ecp_point *out, const struct ref_point *a, int scaled);
+
+/* Fills the pool; the reference's multiplication is slow, so the points are made once per curve. */
+static void pool_prepare(const struct cryc_ecp *ec);
+
+/* Picks a random point of the pool. */
+static void random_point(const struct cryc_ecp *ec, struct ref_point *out);
+
+/* Adds (add is not 0) or subtracts 2^bit in a number of limbs, propagating the carry or the borrow; the result stays in range. */
+static void formula_bit(uint32_t *limbs, size_t bit, int add);
+
+/* Checks the parameters of the curve and the module's use of them. */
+static void check_parameters(const struct params *params, const struct cryc_ecp *ec);
+
+/* Checks the module's multiplications against the reference on one scalar and one point. */
+static void check_mul_one(const struct cryc_ecp *ec, const uint32_t *scalar, const struct ref_point *a, int scaled);
+
+/* Checks mul_base on one scalar. */
+static void check_mul_base_one(const struct cryc_ecp *ec, const uint32_t *scalar);
+
+/* Checks the multiplications of one curve: edge scalars, single bits, random scalars and points. */
+static void check_multiplications(const struct cryc_ecp *ec);
+
+/* Checks multiplication by a scalar that is n (outside the stated range, but the masks make the result infinity). */
+static void check_order_scalar(const struct cryc_ecp *ec);
+
+/* Checks mul_add_public: random, edge, and the cases that need the exceptional additions. */
+static void check_mul_add(const struct cryc_ecp *ec);
+
+/* Checks encode, decode, affine_x on valid points: round trips, representations, buffer sizes. */
+static void check_encode_decode(const struct cryc_ecp *ec);
+
+/* Checks the decode errors, in the stated order, and the single-byte changes of a valid encoding. */
+static void check_decode_errors(const struct params *params, const struct cryc_ecp *ec);
+
+/* Reports whether the record belongs to the curve named by the section key. */
+static int record_is_curve(const struct vec_file *file, const char *name);
+
+/* Sets out to the right side x^3 - 3 x + b of the curve equation, all in Montgomery form. */
+static void rhs_mont(const struct cryc_ecp *ec, uint32_t *out, const uint32_t *x_mont);
+
+/* Sets out to the square root of a in Montgomery form. */
+static void sqrt_mont(const struct cryc_ecp *ec, uint32_t *out, const uint32_t *a, const struct params *params);
+
+/* Adds p to the size big-endian bytes at in into out; returns 1 when the sum overflows the size. */
+static int add_p_bytes(const struct params *params, uint8_t *out, const uint8_t *in);
+
+/* For a valid encoding, tries each coordinate plus p (when it still fits): the result must be refused as out of range. */
+static void check_alias_coordinates(const struct params *params, const struct cryc_ecp *ec, const uint8_t *encoding);
+
+/* Checks the validation of constructed points. */
+static void check_constructed_points(const struct params *params, const struct cryc_ecp *ec);
+
+/* Checks the CAVP public key validation cases of the curve (the section's name is in section). */
+static void check_pkv(const struct params *params, const struct cryc_ecp *ec, const char *section);
+
+/* Checks the CAVP key pairs of the curve: Q = d * G. */
+static void check_keypair(const struct params *params, const struct cryc_ecp *ec, const char *section);
+
+/* Checks the Wycheproof ECDH cases for P-256 (public point bytes, private scalar, shared x). */
+static void check_wycheproof_ecdh(const struct params *params, const struct cryc_ecp *ec);
+
+/* Runs the checks of one curve. */
+static void run_curve(const struct params *params);
+
+/* Returns the next pseudo-random byte string of size bytes into out. */
 static void
 random_bytes(
 	uint8_t *out,
@@ -119,16 +236,17 @@ hex_to_size(
 	size_t size)
 {
 	uint8_t raw[256];
+	char padded[600];
 	size_t length;
 	size_t start;
+	size_t text_size;
 
 	/* Decodes the text and drops the leading zero bytes. */
 	length = hex_decode(text, raw, sizeof(raw));
 	if (length == (size_t)-1) {
 		/* An odd-length text: pads one zero digit on the left. */
-		char padded[600];
-
-		if (strlen(text) + 2U > sizeof(padded))
+		text_size = strlen(text);
+		if (text_size + 2U > sizeof(padded))
 			return -1;
 		padded[0] = '0';
 		strcpy(padded + 1, text);
@@ -136,6 +254,8 @@ hex_to_size(
 		if (length == (size_t)-1)
 			return -1;
 	}
+
+	/* Skips the leading zero bytes. */
 	start = 0;
 	while (start < length && raw[start] == 0)
 		start++;
@@ -145,6 +265,8 @@ hex_to_size(
 	/* Pads on the left. */
 	memset(out, 0, size);
 	memcpy(out + (size - (length - start)), raw + start, length - start);
+
+	/* Succeeded: the value fits the size. */
 	return 0;
 }
 
@@ -274,11 +396,15 @@ ref_double(
 	uint32_t three[CRYC_ECP_MAX_LIMBS];
 	uint32_t temp[CRYC_ECP_MAX_LIMBS];
 	uint32_t zero[CRYC_ECP_MAX_LIMBS];
+	int y_zero;
 
 	/* Infinity doubles to infinity, and so does a point with y = 0. */
 	memset(&result, 0, sizeof(result));
 	memset(zero, 0, sizeof(zero));
-	if (a->infinity || limbs_equal(a->y, zero, ec)) {
+	y_zero = 0;
+	if (!a->infinity)
+		y_zero = limbs_equal(a->y, zero, ec);
+	if (a->infinity || y_zero) {
 		result.infinity = 1;
 		*out = result;
 		return;
@@ -328,23 +454,31 @@ ref_add(
 	uint32_t denominator[CRYC_ECP_MAX_LIMBS];
 	uint32_t inverse[CRYC_ECP_MAX_LIMBS];
 	uint32_t temp[CRYC_ECP_MAX_LIMBS];
+	int same_x;
+	int same_y;
 
 	/* An operand at infinity is the identity. */
 	if (a->infinity) {
 		*out = *b;
 		return;
 	}
+
+	/* The same for the second operand. */
 	if (b->infinity) {
 		*out = *a;
 		return;
 	}
 
 	/* Equal x: the points are equal (double) or opposite (infinity). */
-	if (limbs_equal(a->x, b->x, ec)) {
-		if (limbs_equal(a->y, b->y, ec)) {
+	same_x = limbs_equal(a->x, b->x, ec);
+	if (same_x) {
+		same_y = limbs_equal(a->y, b->y, ec);
+		if (same_y) {
 			ref_double(out, a, ec);
 			return;
 		}
+
+		/* The opposite points add to infinity. */
 		memset(&result, 0, sizeof(result));
 		result.infinity = 1;
 		*out = result;
@@ -394,6 +528,8 @@ ref_mul(
 		if (((scalar[(bit - 1U) / 32U] >> ((bit - 1U) % 32U)) & 1U) != 0U)
 			ref_add(&accumulator, &accumulator, a, ec);
 	}
+
+	/* Stores the product. */
 	*out = accumulator;
 }
 
@@ -498,6 +634,8 @@ point_from_ref(
 	uint32_t cube[CRYC_ECP_MAX_LIMBS];
 	uint8_t bytes[CRYC_ECP_MAX_BYTES];
 	uint32_t plain[CRYC_ECP_MAX_LIMBS];
+	uint32_t below;
+	uint32_t is_zero;
 
 	/* Infinity: any triple with Z = 0. */
 	memset(out, 0, sizeof(*out));
@@ -514,11 +652,17 @@ point_from_ref(
 		cryc_bn_mont_one(out->z, &ec->field);
 		return;
 	}
+
+	/* A random lambda that is below p and not zero. */
 	do {
 		random_bytes(bytes, ec->size);
 		memset(plain, 0, sizeof(plain));
 		cryc_bn_decode(plain, ec->limbs, bytes, ec->size);
-	} while (cryc_bn_lt(plain, ec->field.modulus, ec->limbs) == 0U || cryc_bn_is_zero(plain, ec->limbs) != 0U);
+		below = cryc_bn_lt(plain, ec->field.modulus, ec->limbs);
+		is_zero = cryc_bn_is_zero(plain, ec->limbs);
+	} while (below == 0U || is_zero != 0U);
+
+	/* The scaled representation of the point. */
 	memset(lambda, 0, sizeof(lambda));
 	memset(square, 0, sizeof(square));
 	memset(cube, 0, sizeof(cube));
@@ -591,6 +735,8 @@ formula_bit(
 			index++;
 			amount = 1U;
 		}
+
+		/* The borrow stops at a limb that can pay it. */
 		limbs[index] -= amount;
 	}
 }
@@ -652,6 +798,8 @@ check_parameters(
 		formula_bit(formula, 96U, 0);
 		formula_bit(formula, 32U, 1);
 	}
+
+	/* The formula gives the modulus of the field. */
 	CHECK(limbs_equal(formula, ec->field.modulus, ec));
 
 	/* b out of Montgomery form is the text's b; G likewise. */
@@ -972,6 +1120,7 @@ check_encode_decode(
 	size_t count;
 	int error;
 
+	/* The size of an uncompressed point, and the infinity reference. */
 	total = 1U + 2U * ec->size;
 	memset(&infinity, 0, sizeof(infinity));
 	infinity.infinity = 1;
@@ -1066,7 +1215,12 @@ check_decode_errors(
 	size_t count;
 	int error;
 	unsigned tag;
+	static const size_t extra[6] = { 0, 1, 2, 3, 4, 5 };
+	static const unsigned tags[] = { 0x00U, 0x01U, 0x05U, 0x06U, 0x07U, 0x08U, 0x80U, 0x84U, 0xffU };
+	struct ref_point minus;
+	uint8_t minus_bytes[CRYC_ECP_MAX_POINT];
 
+	/* The valid encoding of the base point, and p as bytes. */
 	total = 1U + 2U * ec->size;
 	ref_base(&base, ec);
 	ref_encode(good, &base, ec);
@@ -1082,8 +1236,6 @@ check_decode_errors(
 	/* Compressed tags (0x02, 0x03): ENOTSUP whatever the size (1, a compressed size, the full size, longer). */
 	for (tag = 2; tag <= 3U; tag++) {
 		for (count = 0; count < 6U; count++) {
-			static const size_t extra[6] = { 0, 1, 2, 3, 4, 5 };
-
 			/* The sizes 1, 2, size, size + 1 (compressed), total - 1, total + 1. */
 			size = 1U;
 			if (extra[count] == 1U)
@@ -1118,20 +1270,16 @@ check_decode_errors(
 	}
 
 	/* Other first bytes: 0x00 (infinity), hybrid 0x06 and 0x07, 0x01, 0x05, 0xff, 0x84: EINVAL. */
-	{
-		static const unsigned tags[] = { 0x00U, 0x01U, 0x05U, 0x06U, 0x07U, 0x08U, 0x80U, 0x84U, 0xffU };
-
-		for (count = 0; count < sizeof(tags) / sizeof(tags[0]); count++) {
-			exact = (uint8_t *)malloc(total);
-			CHECK(exact != NULL);
-			memcpy(exact, good, total);
-			exact[0] = (uint8_t)tags[count];
-			memset(&point, SENTINEL_BYTE, sizeof(point));
-			error = cryc_ecp_decode(ec, &point, exact, total);
-			CHECK(error == EINVAL);
-			CHECK(point.z[0] == 0U && point.x[0] == 0U && point.y[0] == 0U);
-			free(exact);
-		}
+	for (count = 0; count < sizeof(tags) / sizeof(tags[0]); count++) {
+		exact = (uint8_t *)malloc(total);
+		CHECK(exact != NULL);
+		memcpy(exact, good, total);
+		exact[0] = (uint8_t)tags[count];
+		memset(&point, SENTINEL_BYTE, sizeof(point));
+		error = cryc_ecp_decode(ec, &point, exact, total);
+		CHECK(error == EINVAL);
+		CHECK(point.z[0] == 0U && point.x[0] == 0U && point.y[0] == 0U);
+		free(exact);
 	}
 
 	/* The infinity encoding: one byte 0x00. */
@@ -1148,8 +1296,13 @@ check_decode_errors(
 			continue;
 		exact = (uint8_t *)malloc(size);
 		CHECK(exact != NULL);
-		for (index = 0; index < size; index++)
-			exact[index] = index < total ? good[index] : (uint8_t)0x33U;
+		for (index = 0; index < size; index++) {
+			exact[index] = (uint8_t)0x33U;
+			if (index < total)
+				exact[index] = good[index];
+		}
+
+		/* The wrong length is refused and the output is zeroed. */
 		memset(&point, SENTINEL_BYTE, sizeof(point));
 		error = cryc_ecp_decode(ec, &point, exact, size);
 		CHECK(error == EINVAL);
@@ -1202,15 +1355,12 @@ check_decode_errors(
 	}
 
 	/* The negated point (x, p - y) is valid, and (x, y + 1) is not. */
-	{
-		struct ref_point minus;
-		uint8_t minus_bytes[CRYC_ECP_MAX_POINT];
+	ref_negate(&minus, &base, ec);
+	ref_encode(minus_bytes, &minus, ec);
+	error = cryc_ecp_decode(ec, &point, minus_bytes, total);
+	CHECK(error == 0);
 
-		ref_negate(&minus, &base, ec);
-		ref_encode(minus_bytes, &minus, ec);
-		error = cryc_ecp_decode(ec, &point, minus_bytes, total);
-		CHECK(error == 0);
-	}
+	/* Releases the buffer of the valid encoding. */
 	free(exact);
 
 	/* Random bytes with the uncompressed tag and the exact length, in exact-size buffers: refused (a random pair is nearly never on the curve). */
@@ -1251,18 +1401,28 @@ record_is_curve(
 	const struct vec_file *file,
 	const char *name)
 {
+	const char *key;
 	size_t index;
+	int different;
 
 	/* From the last key backwards: the first section key that names a curve. */
 	for (index = file->count; index > 0U; index--) {
-		const char *key = file->keys[index - 1U];
+		key = file->keys[index - 1U];
+		different = strncmp(key, "section.", 8);
+		if (different != 0)
+			continue;
+		different = strncmp(key, "section.B.4.2", 13);
+		if (different == 0)
+			continue;
 
-		if (strncmp(key, "section.", 8) != 0)
-			continue;
-		if (strncmp(key, "section.B.4.2", 13) == 0)
-			continue;
-		return strcmp(key, name) == 0;
+		/* The first curve key decides: the record is of the curve when the keys are the same. */
+		different = strcmp(key, name);
+		if (different == 0)
+			return 1;
+		return 0;
 	}
+
+	/* The record names no curve. */
 	return 0;
 }
 
@@ -1317,11 +1477,15 @@ sqrt_mont(
 		if (exponent[index] != 0U)
 			break;
 	}
+
+	/* The shift right by two bits, byte by byte from the low end. */
 	for (index = params->size; index > 0U; index--) {
 		exponent[index - 1U] = (uint8_t)(exponent[index - 1U] >> 2);
 		if (index > 1U)
 			exponent[index - 1U] = (uint8_t)(exponent[index - 1U] | (uint8_t)(exponent[index - 2U] << 6));
 	}
+
+	/* The power a^((p + 1) / 4). */
 	cryc_bn_mont_exp(out, a, exponent, params->size, &ec->field);
 }
 
@@ -1347,6 +1511,8 @@ add_p_bytes(
 		out[index - 1U] = (uint8_t)(sum & 0xffU);
 		carry = sum >> 8;
 	}
+
+	/* Reports whether the sum overflowed. */
 	return (int)carry;
 }
 
@@ -1361,11 +1527,13 @@ check_alias_coordinates(
 	uint8_t changed[CRYC_ECP_MAX_POINT];
 	size_t total;
 	int error;
+	int overflow;
 
 	/* The x coordinate. */
 	total = 1U + 2U * ec->size;
 	memcpy(changed, encoding, total);
-	if (add_p_bytes(params, changed + 1U, encoding + 1U) == 0) {
+	overflow = add_p_bytes(params, changed + 1U, encoding + 1U);
+	if (overflow == 0) {
 		error = cryc_ecp_decode(ec, &point, changed, total);
 		CHECK(error == EINVAL);
 		alias_count_x++;
@@ -1373,7 +1541,8 @@ check_alias_coordinates(
 
 	/* The y coordinate. */
 	memcpy(changed, encoding, total);
-	if (add_p_bytes(params, changed + 1U + ec->size, encoding + 1U + ec->size) == 0) {
+	overflow = add_p_bytes(params, changed + 1U + ec->size, encoding + 1U + ec->size);
+	if (overflow == 0) {
 		error = cryc_ecp_decode(ec, &point, changed, total);
 		CHECK(error == EINVAL);
 		alias_count_y++;
@@ -1408,7 +1577,10 @@ check_constructed_points(
 	unsigned long valid_small;
 	unsigned long near_misses;
 	int error;
+	int matches;
+	uint32_t below;
 
+	/* Tries each small x; counts the points that exist and the near misses. */
 	valid_small = 0;
 	near_misses = 0;
 	for (candidate = 1; candidate <= 24U; candidate++) {
@@ -1424,7 +1596,8 @@ check_constructed_points(
 		memset(square, 0, sizeof(square));
 		sqrt_mont(ec, root, rhs, params);
 		cryc_bn_mont_mul(square, root, root, &ec->field);
-		if (limbs_equal(square, rhs, ec)) {
+		matches = limbs_equal(square, rhs, ec);
+		if (matches) {
 			memset(y_plain, 0, sizeof(y_plain));
 			cryc_bn_from_mont(y_plain, root, &ec->field);
 			encoded[0] = 0x04U;
@@ -1442,15 +1615,23 @@ check_constructed_points(
 			carry = 1;
 			for (index = limb; index < ec->limbs && carry != 0U; index++) {
 				target[index] += carry;
-				carry = target[index] == 0U ? 1U : 0U;
+				carry = 0U;
+				if (target[index] == 0U)
+					carry = 1U;
 			}
-			if (carry != 0U || cryc_bn_lt(target, ec->field.modulus, ec->limbs) == 0U)
+
+			/* Skips a right side that overflowed or reached p. */
+			if (carry != 0U)
+				continue;
+			below = cryc_bn_lt(target, ec->field.modulus, ec->limbs);
+			if (below == 0U)
 				continue;
 			memset(root, 0, sizeof(root));
 			memset(square, 0, sizeof(square));
 			sqrt_mont(ec, root, target, params);
 			cryc_bn_mont_mul(square, root, root, &ec->field);
-			if (!limbs_equal(square, target, ec))
+			matches = limbs_equal(square, target, ec);
+			if (!matches)
 				continue;
 			memset(y_plain, 0, sizeof(y_plain));
 			cryc_bn_from_mont(y_plain, root, &ec->field);
@@ -1462,6 +1643,8 @@ check_constructed_points(
 			near_misses++;
 		}
 	}
+
+	/* Reports the counts and requires that both kinds occurred. */
 	printf("  %s constructed: %lu small-x points, %lu near misses\n", params->name, valid_small, near_misses);
 	CHECK(valid_small > 3U);
 	CHECK(near_misses > 2U * ec->limbs);
@@ -1488,7 +1671,11 @@ check_pkv(
 	int x_fits;
 	int y_fits;
 	int error;
+	int more;
+	int fit_error;
+	int on_curve;
 
+	/* Starts with no record counted. */
 	total = 1U + 2U * ec->size;
 	valid = 0;
 	invalid = 0;
@@ -1499,8 +1686,11 @@ check_pkv(
 		return;
 
 	/* Each record of this curve. */
-	while (vec_next(&file)) {
-		if (!record_is_curve(&file, section))
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
+		on_curve = record_is_curve(&file, section);
+		if (!on_curve)
 			continue;
 		x_text = vec_get(&file, "Qx");
 		y_text = vec_get(&file, "Qy");
@@ -1509,8 +1699,14 @@ check_pkv(
 		if (x_text == NULL || y_text == NULL || result == NULL)
 			continue;
 		input[0] = 0x04U;
-		x_fits = hex_to_size(x_text, input + 1U, ec->size) == 0;
-		y_fits = hex_to_size(y_text, input + 1U + ec->size, ec->size) == 0;
+		fit_error = hex_to_size(x_text, input + 1U, ec->size);
+		x_fits = 0;
+		if (fit_error == 0)
+			x_fits = 1;
+		fit_error = hex_to_size(y_text, input + 1U + ec->size, ec->size);
+		y_fits = 0;
+		if (fit_error == 0)
+			y_fits = 1;
 
 		/* A coordinate wider than the curve's size cannot be encoded: the case is out of range by its width. */
 		if (!x_fits || !y_fits) {
@@ -1518,6 +1714,8 @@ check_pkv(
 			too_wide++;
 			continue;
 		}
+
+		/* A valid case decodes and encodes back to the input; an invalid one is refused. */
 		error = cryc_ecp_decode(ec, &point, input, total);
 		if (result[0] == 'P') {
 			valid++;
@@ -1534,6 +1732,8 @@ check_pkv(
 			CHECK(error == EINVAL);
 		}
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 
 	/* The counts of the file: 60 valid, 120 invalid for each curve. */
@@ -1558,15 +1758,25 @@ check_keypair(
 	const char *d_text;
 	unsigned long count;
 	int error;
+	int more;
+	int on_curve;
 
+	/* Opens the vector file. */
 	count = 0;
 	error = vec_open(&file, "cavp-186-4ecdsatestvectors-KeyPair");
 	CHECK(error == 0);
 	if (error != 0)
 		return;
-	while (vec_next(&file)) {
+
+	/* Checks each record of this curve: Q = d * G. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		d_text = vec_get(&file, "d");
-		if (!record_is_curve(&file, section) || d_text == NULL)
+		on_curve = record_is_curve(&file, section);
+		if (!on_curve)
+			continue;
+		if (d_text == NULL)
 			continue;
 		CHECK(hex_to_size(d_text, d_bytes, ec->size) == 0);
 		scalar_from_bytes(scalar, ec, d_bytes);
@@ -1579,7 +1789,11 @@ check_keypair(
 		CHECK_BYTES(got, want, 1U + 2U * ec->size);
 		count++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the number of key pairs and requires at least one. */
 	printf("  %s key pairs: %lu\n", params->name, count);
 	CHECK(count > 0U);
 }
@@ -1608,7 +1822,11 @@ check_wycheproof_ecdh(
 	unsigned long refused;
 	unsigned long skipped;
 	int error;
+	int more;
+	int verdict;
+	uint32_t below;
 
+	/* Starts with no record counted, and opens the vector file. */
 	valid = 0;
 	refused = 0;
 	skipped = 0;
@@ -1616,7 +1834,11 @@ check_wycheproof_ecdh(
 	CHECK(error == 0);
 	if (error != 0)
 		return;
-	while (vec_next(&file)) {
+
+	/* Checks each record: decoding, the alias coordinates and the shared secret. */
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		pub_size = vec_hex(&file, "public", pub, sizeof(pub));
 		priv_size = vec_hex(&file, "private", priv, sizeof(priv));
@@ -1625,10 +1847,13 @@ check_wycheproof_ecdh(
 		CHECK(pub_size != (size_t)-1 && priv_size != (size_t)-1 && shared_size != (size_t)-1);
 		if (result == NULL || pub_size == (size_t)-1 || priv_size == (size_t)-1 || shared_size == (size_t)-1)
 			continue;
+
+		/* Decodes the public point of the record. */
 		error = cryc_ecp_decode(ec, &point, pub, pub_size);
 
 		/* An invalid public key (not on the curve, wrong curve, bad encoding) must be refused. */
-		if (strcmp(result, "invalid") == 0) {
+		verdict = strcmp(result, "invalid");
+		if (verdict == 0) {
 			CHECK(error != 0);
 			refused++;
 			continue;
@@ -1654,10 +1879,13 @@ check_wycheproof_ecdh(
 			skipped++;
 			continue;
 		}
+
+		/* The scalar as limbs. */
 		memset(scalar_bytes, 0, sizeof(scalar_bytes));
 		memcpy(scalar_bytes + (ec->size - (priv_size - start)), priv + start, priv_size - start);
 		scalar_from_bytes(scalar, ec, scalar_bytes);
-		if (cryc_bn_lt(scalar, ec->order.modulus, ec->limbs) == 0U) {
+		below = cryc_bn_lt(scalar, ec->order.modulus, ec->limbs);
+		if (below == 0U) {
 			skipped++;
 			continue;
 		}
@@ -1672,7 +1900,11 @@ check_wycheproof_ecdh(
 			CHECK_BYTES(got, shared, ec->size);
 		valid++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* Reports the counts and requires that the cases were computed. */
 	printf("  P-256 ECDH: %lu computed, %lu refused, %lu skipped\n", valid, refused, skipped);
 	CHECK(valid > 100U);
 	CHECK(refused > 0U);
@@ -1712,6 +1944,8 @@ run_curve(
 	const struct params *params)
 {
 	struct cryc_ecp ec;
+	struct cryc_ecp second;
+	const char *section;
 	int error;
 
 	/* Prepares the curve and the reference. */
@@ -1731,19 +1965,18 @@ run_curve(
 	check_encode_decode(&ec);
 	check_decode_errors(params, &ec);
 	check_constructed_points(params, &ec);
-	check_pkv(params, &ec, params->id == CRYC_CURVE_P256 ? "section.P-256" : "section.P-384");
-	check_keypair(params, &ec, params->id == CRYC_CURVE_P256 ? "section.P-256" : "section.P-384");
+	section = "section.P-384";
+	if (params->id == CRYC_CURVE_P256)
+		section = "section.P-256";
+	check_pkv(params, &ec, section);
+	check_keypair(params, &ec, section);
 	if (params->id == CRYC_CURVE_P256)
 		check_wycheproof_ecdh(params, &ec);
 
 	/* init twice gives the same structure (it holds no hidden state). */
-	{
-		struct cryc_ecp second;
-
-		error = cryc_ecp_init(&second, params->id);
-		CHECK(error == 0);
-		CHECK(memcmp(&second, &ec, sizeof(ec)) == 0);
-	}
+	error = cryc_ecp_init(&second, params->id);
+	CHECK(error == 0);
+	CHECK(memcmp(&second, &ec, sizeof(ec)) == 0);
 }
 
 /* Runs the checks. */

@@ -64,6 +64,30 @@ random32(void)
 }
 
 /* Fills size bytes with pseudo-random bytes. */
+static void random_bytes(uint8_t *out, size_t size);
+
+/* The cryc_random_fn of the tests: serves the bytes of a struct fixed_random. */
+static int fixed_random_fn(void *context, uint8_t *out, size_t size);
+
+/* Allocates an exact-size buffer or stops the test. */
+static uint8_t * exact(size_t size);
+
+/* Returns 1 when size bytes at buffer are all value. */
+static int all_bytes(const uint8_t *buffer, size_t size, uint8_t value);
+
+/* J(z || c) = SHAKE256(z || c, 32) (4.1), the implicit-rejection key, for a 1088-byte c. */
+static void reference_j(uint8_t *out, const uint8_t *z, const uint8_t *ciphertext);
+
+/* H(data) = SHA3-256 (4.1). */
+static void reference_h(uint8_t *out, const uint8_t *data, size_t size);
+
+/* Checks key generation, the key checks and the layout of dk for one seed d || z. */
+static void check_key_from_seed(const uint8_t *seed, const uint8_t *ek_expected, const uint8_t *dk_expected);
+
+/* Sets coefficient 2 * pair + which of the 12-bit polynomial at bytes (384 bytes) to value, leaving the others. */
+static void set_coefficient(uint8_t *bytes, unsigned index, unsigned value);
+
+/* Fills size bytes with pseudo-random bytes. */
 static void
 random_bytes(
 	uint8_t *out,
@@ -112,6 +136,8 @@ exact(
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Succeeded: the caller owns the buffer. */
 	return buffer;
 }
 
@@ -129,6 +155,8 @@ all_bytes(
 		if (buffer[i] != value)
 			return 0;
 	}
+
+	/* Succeeded: every byte equals the value. */
 	return 1;
 }
 
@@ -213,6 +241,7 @@ check_key_from_seed(
 	CHECK(cryc_mlkem768_check_ek(ek) == 0);
 	CHECK(cryc_mlkem768_check_dk(dk) == 0);
 
+	/* Releases the buffers. */
 	free(ek);
 	free(dk);
 }
@@ -230,21 +259,32 @@ test_vectors_keygen(void)
 	size_t dk_size;
 	const char *result;
 	unsigned count;
+	int opened;
+	int more;
+	int verdict;
 
 	/* Opens the vectors. */
 	count = 0U;
-	if (vec_open(&file, "wycheproof-mlkem_768_keygen_seed_test") != 0) {
+	opened = vec_open(&file, "wycheproof-mlkem_768_keygen_seed_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
 
 	/* Each record: the seed d || z gives exactly ek and dk. */
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		seed_size = vec_hex(&file, "seed", seed, sizeof(seed));
 		ek_size = vec_hex(&file, "ek", ek, sizeof(ek));
 		dk_size = vec_hex(&file, "dk", dk, sizeof(dk));
-		if (result == NULL || strcmp(result, "valid") != 0)
+
+		/* Only valid records are checked. */
+		if (result == NULL)
+			continue;
+		verdict = strcmp(result, "valid");
+		if (verdict != 0)
 			continue;
 		CHECK(seed_size == 64U && ek_size == 1184U && dk_size == 2400U);
 		if (seed_size != 64U || ek_size != 1184U || dk_size != 2400U)
@@ -252,7 +292,11 @@ test_vectors_keygen(void)
 		count++;
 		check_key_from_seed(seed, ek, dk);
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
+
+	/* All 100 records of the file were checked. */
 	CHECK(count == 100U);
 }
 
@@ -283,20 +327,28 @@ test_vectors_encaps(void)
 	unsigned refused;
 	unsigned skipped;
 	int error;
+	int opened;
+	int more;
+	int verdict;
 
 	/* Opens the vectors. */
 	valid = 0U;
 	refused = 0U;
 	skipped = 0U;
-	if (vec_open(&file, "wycheproof-mlkem_768_encaps_test") != 0) {
+	opened = vec_open(&file, "wycheproof-mlkem_768_encaps_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Allocates the buffers of the outputs at their exact sizes. */
 	made_c = exact(CRYC_MLKEM768_CT);
 	made_key = exact(CRYC_MLKEM_SHARED);
 
 	/* Each record. */
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		m_size = vec_hex(&file, "m", m, sizeof(m));
 		ek_size = vec_hex(&file, "ek", ek, sizeof(ek));
@@ -304,7 +356,8 @@ test_vectors_encaps(void)
 			continue;
 
 		/* A valid case: Encaps_internal gives c and K, and Encaps does the same when its random source serves m. */
-		if (strcmp(result, "valid") == 0) {
+		verdict = strcmp(result, "valid");
+		if (verdict == 0) {
 			c_size = vec_hex(&file, "c", c, sizeof(c));
 			key_size = vec_hex(&file, "K", key, sizeof(key));
 			CHECK(m_size == 32U && ek_size == 1184U && c_size == 1088U && key_size == 32U);
@@ -316,6 +369,7 @@ test_vectors_encaps(void)
 			CHECK_BYTES(made_c, c, 1088U);
 			CHECK_BYTES(made_key, key, 32U);
 
+			/* Encaps with a source that serves m gives the same c and K. */
 			memset(&source, 0, sizeof(source));
 			source.data = m;
 			source.size = sizeof(m);
@@ -349,6 +403,8 @@ test_vectors_encaps(void)
 		/* A wrong-length key: a caller's check. */
 		skipped++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 	free(made_c);
 	free(made_key);
@@ -385,21 +441,30 @@ test_vectors_decaps(void)
 	unsigned valid;
 	unsigned skipped;
 	unsigned rejected;
+	int opened;
+	int more;
+	int verdict;
+	int different;
 
 	/* Opens the vectors. */
 	valid = 0U;
 	skipped = 0U;
 	rejected = 0U;
-	if (vec_open(&file, "wycheproof-mlkem_768_test") != 0) {
+	opened = vec_open(&file, "wycheproof-mlkem_768_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Allocates the buffers of the outputs at their exact sizes. */
 	dk = exact(CRYC_MLKEM768_DK);
 	made_ek = exact(CRYC_MLKEM768_EK);
 	made_key = exact(CRYC_MLKEM_SHARED);
 
 	/* Each record. */
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		seed_size = vec_hex(&file, "seed", seed, sizeof(seed));
 		ek_size = vec_hex(&file, "ek", ek, sizeof(ek));
@@ -409,10 +474,13 @@ test_vectors_decaps(void)
 			continue;
 
 		/* A case with a bad seed or ciphertext length is a caller's check. */
-		if (strcmp(result, "valid") != 0) {
+		verdict = strcmp(result, "valid");
+		if (verdict != 0) {
 			skipped++;
 			continue;
 		}
+
+		/* The lengths of a valid record are the fixed ones. */
 		CHECK(seed_size == 64U && ek_size == 1184U && c_size == 1088U && key_size == 32U);
 		if (seed_size != 64U || ek_size != 1184U || c_size != 1088U || key_size != 32U)
 			continue;
@@ -427,9 +495,12 @@ test_vectors_decaps(void)
 
 		/* A case whose K is the implicit-rejection key agrees with J(z || c). */
 		reference_j(rejection, seed + 32, c);
-		if (memcmp(rejection, key, 32U) == 0)
+		different = memcmp(rejection, key, 32U);
+		if (different == 0)
 			rejected++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 	free(dk);
 	free(made_ek);
@@ -463,19 +534,28 @@ test_vectors_semi_expanded(void)
 	unsigned valid;
 	unsigned bad_key;
 	unsigned skipped;
+	int opened;
+	int more;
+	int verdict;
+	int flagged;
 
 	/* Opens the vectors. */
 	valid = 0U;
 	bad_key = 0U;
 	skipped = 0U;
-	if (vec_open(&file, "wycheproof-mlkem_768_semi_expanded_decaps_test") != 0) {
+	opened = vec_open(&file, "wycheproof-mlkem_768_semi_expanded_decaps_test");
+	if (opened != 0) {
 		CHECK(0);
 		return;
 	}
+
+	/* Allocates the buffer of the output at its exact size. */
 	made_key = exact(CRYC_MLKEM_SHARED);
 
 	/* Each record. */
-	while (vec_next(&file)) {
+	for (more = vec_next(&file);
+	     more;
+	     more = vec_next(&file)) {
 		result = vec_get(&file, "result");
 		flags = vec_get(&file, "flags");
 		dk_size = vec_hex(&file, "dk", dk, sizeof(dk));
@@ -485,7 +565,8 @@ test_vectors_semi_expanded(void)
 			continue;
 
 		/* A valid case. */
-		if (strcmp(result, "valid") == 0) {
+		verdict = strcmp(result, "valid");
+		if (verdict == 0) {
 			CHECK(dk_size == 2400U && c_size == 1088U && key_size == 32U);
 			if (dk_size != 2400U || c_size != 1088U || key_size != 32U)
 				continue;
@@ -497,7 +578,15 @@ test_vectors_semi_expanded(void)
 		}
 
 		/* An invalid dk of the right length: the hash check refuses it. */
-		if (flags != NULL && strcmp(flags, "InvalidDecapsulationKey") == 0) {
+		flagged = 0;
+		if (flags != NULL) {
+			verdict = strcmp(flags, "InvalidDecapsulationKey");
+			if (verdict == 0)
+				flagged = 1;
+		}
+
+		/* The flagged key is counted and must be refused. */
+		if (flagged) {
 			bad_key++;
 			CHECK(dk_size == 2400U);
 			CHECK(cryc_mlkem768_check_dk(dk) == EINVAL);
@@ -507,6 +596,8 @@ test_vectors_semi_expanded(void)
 		/* A wrong length of dk or c: a caller's check. */
 		skipped++;
 	}
+
+	/* Releases the file. */
 	vec_close(&file);
 	free(made_key);
 
@@ -529,6 +620,7 @@ test_keygen_random(void)
 	unsigned fail;
 	int error;
 
+	/* Allocates the key buffers at their exact sizes, so an access past them is an error. */
 	ek = exact(CRYC_MLKEM768_EK);
 	dk = exact(CRYC_MLKEM768_DK);
 	ek_expected = exact(CRYC_MLKEM768_EK);
@@ -569,6 +661,7 @@ test_keygen_random(void)
 	CHECK(error == EIO);
 	CHECK(all_bytes(dk, CRYC_MLKEM768_DK, 0U));
 
+	/* Releases the buffers. */
 	free(ek);
 	free(dk);
 	free(ek_expected);
@@ -588,6 +681,7 @@ test_encaps_random_failure(void)
 	uint8_t *key;
 	int error;
 
+	/* Allocates the key buffers at their exact sizes, so an access past them is an error. */
 	ek = exact(CRYC_MLKEM768_EK);
 	dk = exact(CRYC_MLKEM768_DK);
 	c = exact(CRYC_MLKEM768_CT);
@@ -608,6 +702,7 @@ test_encaps_random_failure(void)
 	CHECK(all_bytes(c, CRYC_MLKEM768_CT, 0U));
 	CHECK(all_bytes(key, CRYC_MLKEM_SHARED, 0U));
 
+	/* Releases the buffers. */
 	free(ek);
 	free(dk);
 	free(c);
@@ -646,6 +741,7 @@ test_check_ek(void)
 	unsigned positions[4];
 	unsigned p;
 
+	/* Allocates the key buffers at their exact sizes, so an access past them is an error. */
 	ek = exact(CRYC_MLKEM768_EK);
 	dk = exact(CRYC_MLKEM768_DK);
 	random_bytes(seed, sizeof(seed));
@@ -678,6 +774,7 @@ test_check_ek(void)
 	memset(ek + 1152, 0xff, 32U);
 	CHECK(cryc_mlkem768_check_ek(ek) == 0);
 
+	/* Releases the buffers. */
 	free(ek);
 	free(dk);
 }
@@ -693,6 +790,7 @@ test_check_dk(void)
 	int error;
 	int expected;
 
+	/* Allocates the key buffers at their exact sizes, so an access past them is an error. */
 	ek = exact(CRYC_MLKEM768_EK);
 	dk = exact(CRYC_MLKEM768_DK);
 	random_bytes(seed, sizeof(seed));
@@ -702,12 +800,17 @@ test_check_dk(void)
 	for (i = 0U; i < CRYC_MLKEM768_DK; i++) {
 		dk[i] ^= 0x01U;
 		error = cryc_mlkem768_check_dk(dk);
-		expected = (i >= 1152U && i < 2368U) ? EINVAL : 0;
+		expected = 0;
+		if (i >= 1152U && i < 2368U)
+			expected = EINVAL;
 		CHECK(error == expected);
 		dk[i] ^= 0x01U;
 	}
+
+	/* The key is whole again after every byte was flipped back. */
 	CHECK(cryc_mlkem768_check_dk(dk) == 0);
 
+	/* Releases the buffers. */
 	free(ek);
 	free(dk);
 }
@@ -728,6 +831,7 @@ test_implicit_rejection(void)
 	unsigned bit;
 	unsigned rounds;
 
+	/* Allocates the key buffers at their exact sizes, so an access past them is an error. */
 	ek = exact(CRYC_MLKEM768_EK);
 	dk = exact(CRYC_MLKEM768_DK);
 	c = exact(CRYC_MLKEM768_CT);
@@ -760,6 +864,7 @@ test_implicit_rejection(void)
 		CHECK_BYTES(got, expected, 32U);
 		c[0] ^= (uint8_t)(1U << bit);
 
+		/* The same for the last byte of the ciphertext. */
 		c[1087] ^= (uint8_t)(1U << bit);
 		cryc_mlkem768_decaps(got, c, dk);
 		reference_j(expected, seed + 32, c);
@@ -785,6 +890,7 @@ test_implicit_rejection(void)
 		CHECK_BYTES(got, expected, 32U);
 	}
 
+	/* Releases the buffers. */
 	free(ek);
 	free(dk);
 	free(c);
@@ -807,6 +913,7 @@ test_corrupt_dk(void)
 	uint8_t expected[32];
 	unsigned i;
 
+	/* Allocates the key buffers at their exact sizes, so an access past them is an error. */
 	ek = exact(CRYC_MLKEM768_EK);
 	dk = exact(CRYC_MLKEM768_DK);
 	c = exact(CRYC_MLKEM768_CT);
@@ -838,9 +945,12 @@ test_corrupt_dk(void)
 		CHECK_BYTES(got, expected, 32U);
 		dk[384U * i + 1U] ^= 0xf0U;
 	}
+
+	/* With every byte restored, the key decapsulates to the original. */
 	cryc_mlkem768_decaps(got, c, dk);
 	CHECK_BYTES(got, key, 32U);
 
+	/* Releases the buffers. */
 	free(ek);
 	free(dk);
 	free(c);
@@ -866,6 +976,7 @@ test_round_trip(void)
 	unsigned round;
 	int error;
 
+	/* Allocates the key buffers at their exact sizes, so an access past them is an error. */
 	ek = exact(CRYC_MLKEM768_EK);
 	dk = exact(CRYC_MLKEM768_DK);
 	c = exact(CRYC_MLKEM768_CT);
@@ -924,6 +1035,7 @@ test_round_trip(void)
 	reference_j(key_again, seed + 32, c);
 	CHECK_BYTES(got, key_again, 32U);
 
+	/* Releases the buffers. */
 	free(ek);
 	free(dk);
 	free(c);

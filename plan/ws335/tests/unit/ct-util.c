@@ -29,6 +29,8 @@ main(void)
 	uint32_t second;
 	uint32_t mask;
 	uint32_t result;
+	uint32_t expected;
+	uint8_t expected_byte;
 	uint64_t wide;
 	int equal;
 	size_t index;
@@ -59,32 +61,54 @@ main(void)
 
 	/* The masks with secret operands. */
 	for (round = 0; round < 8; round++) {
+		/* The operands of the zero mask: equal in even rounds (public until marked secret). */
 		first = 0x01020304U * (uint32_t)(round + 1);
-		second = (round % 2 == 0) ? first : first + 5U;
+		second = first;
+		if (round % 2 != 0)
+			second = first + 5U;
 		CT_SECRET(&first, sizeof(first));
 		CT_SECRET(&second, sizeof(second));
 		result = cryc_ct_mask_zero32(first);
 		CT_PUBLIC(&result, sizeof(result));
 		CHECK(result == 0);
+
+		/* The equality mask: all ones when the operands are equal. */
 		first = 0x01020304U * (uint32_t)(round + 1);
-		second = (round % 2 == 0) ? first : first + 5U;
+		second = first;
+		if (round % 2 != 0)
+			second = first + 5U;
 		CT_SECRET(&first, sizeof(first));
 		CT_SECRET(&second, sizeof(second));
 		result = cryc_ct_mask_eq32(first, second);
 		CT_PUBLIC(&result, sizeof(result));
-		CHECK(result == ((round % 2 == 0) ? 0xffffffffU : 0U));
+		expected = 0U;
+		if (round % 2 == 0)
+			expected = 0xffffffffU;
+		CHECK(result == expected);
+
+		/* The less-than mask: all ones when the first operand is smaller. */
 		first = 0x01020304U * (uint32_t)(round + 1);
-		second = (round % 2 == 0) ? first : first + 5U;
+		second = first;
+		if (round % 2 != 0)
+			second = first + 5U;
 		CT_SECRET(&first, sizeof(first));
 		CT_SECRET(&second, sizeof(second));
 		result = cryc_ct_mask_lt32(first, second);
 		CT_PUBLIC(&result, sizeof(result));
-		CHECK(result == ((round % 2 == 0) ? 0U : 0xffffffffU));
+		expected = 0xffffffffU;
+		if (round % 2 == 0)
+			expected = 0U;
+		CHECK(result == expected);
 	}
 
 	/* The selection and the conditional copy with a secret mask and secret inputs. */
 	for (round = 0; round < 2; round++) {
-		mask = (round == 0) ? 0xffffffffU : 0U;
+		/* The mask is all ones in the first round (public until marked secret). */
+		mask = 0U;
+		if (round == 0)
+			mask = 0xffffffffU;
+
+		/* The selection of one of two secret buffers. */
 		CT_SECRET(&mask, sizeof(mask));
 		CT_SECRET(left, sizeof(left));
 		CT_SECRET(right, sizeof(right));
@@ -93,8 +117,12 @@ main(void)
 		CT_PUBLIC(left, sizeof(left));
 		CT_PUBLIC(right, sizeof(right));
 		CT_PUBLIC(&mask, sizeof(mask));
-		CHECK(out[3] == ((round == 0) ? left[3] : right[3]));
+		expected_byte = right[3];
+		if (round == 0)
+			expected_byte = left[3];
+		CHECK(out[3] == expected_byte);
 
+		/* The conditional copy of one secret buffer over another. */
 		memcpy(out, right, sizeof(out));
 		CT_SECRET(&mask, sizeof(mask));
 		CT_SECRET(left, sizeof(left));
@@ -103,7 +131,10 @@ main(void)
 		CT_PUBLIC(out, sizeof(out));
 		CT_PUBLIC(left, sizeof(left));
 		CT_PUBLIC(&mask, sizeof(mask));
-		CHECK(out[3] == ((round == 0) ? left[3] : right[3]));
+		expected_byte = right[3];
+		if (round == 0)
+			expected_byte = left[3];
+		CHECK(out[3] == expected_byte);
 	}
 
 	/* Reading and writing secret integers: no branch on their bytes. */

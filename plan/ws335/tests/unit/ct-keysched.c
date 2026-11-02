@@ -21,6 +21,18 @@
 #include "userland/base/libssl-compat/sslc-keysched.h"
 
 /* Fills size bytes at out with a fixed pattern. */
+static void fill(uint8_t *out, size_t size, unsigned seed);
+
+/* Folds a public output into one value, to keep the call from being dropped. */
+static unsigned fold(const uint8_t *bytes, size_t size);
+
+/* Runs the TLS 1.3 schedule for one suite from a secret shared secret. */
+static unsigned run_tls13(uint16_t suite_id);
+
+/* Runs the TLS 1.2 chain for one suite from a secret pre-master secret. */
+static unsigned run_tls12(uint16_t suite_id);
+
+/* Fills size bytes at out with a fixed pattern. */
 static void
 fill(
 	uint8_t *out,
@@ -47,6 +59,8 @@ fold(
 	value = 0;
 	for (index = 0; index < size; index++)
 		value = ((value << 1) | (value >> 7)) ^ bytes[index];
+
+	/* Reports the folded value. */
 	return value & 0xffU;
 }
 
@@ -103,6 +117,8 @@ run_tls13(
 	CT_PUBLIC(shared, sizeof(shared));
 	CT_PUBLIC(schedule.server_handshake, size);
 	sslc_tls13_clear(&schedule);
+
+	/* Reports the folded outputs, so no call is dropped. */
 	return total;
 }
 
@@ -158,6 +174,8 @@ run_tls12(
 		CT_PUBLIC(pre_master, sizeof(pre_master));
 		CT_PUBLIC(master, sizeof(master));
 	}
+
+	/* Reports the folded outputs, so no call is dropped. */
 	return total;
 }
 

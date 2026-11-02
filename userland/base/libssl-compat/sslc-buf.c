@@ -430,10 +430,14 @@ sslc_writer_end(
 		sslc_writer_fail(writer, EINVAL);
 		return;
 	}
+
+	/* Refuses contents longer than a two-byte prefix can count. */
 	if (width == 2U && length >= 65536U) {
 		sslc_writer_fail(writer, EINVAL);
 		return;
 	}
+
+	/* Refuses contents longer than a three-byte prefix can count. */
 	if (width == 3U && length >= SSLC_BUF_U24_LIMIT) {
 		sslc_writer_fail(writer, EINVAL);
 		return;
@@ -497,6 +501,8 @@ sslc_reader_integer(
 	     index++) {
 		value = (value << 8) | (uint32_t)reader->data[reader->position + index];
 	}
+
+	/* Moves the read position past the integer. */
 	reader->position += width;
 
 	/* The integer read. */
@@ -531,6 +537,8 @@ sslc_writer_integer(
 		writer->data[writer->used + index] =
 		    (uint8_t)((value >> (8U * (width - 1U - index))) & 0xffU);
 	}
+
+	/* Moves the write position past the integer. */
 	writer->used += width;
 }
 

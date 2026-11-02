@@ -17,7 +17,9 @@
  * self-signed or other certificates taken as trusted as they are (RFC
  * 5280 6.1.1 (d): their name, key and name constraints are used; their own
  * signature, basicConstraints and keyUsage are not checked; their validity
- * period is checked, as OpenSSL does).
+ * period is checked, as OpenSSL does; an anchor with an extension it marks
+ * critical that this library does not know is refused, since a constraint
+ * it cannot honour is not ignored).
  *
  * All inputs are public.  The peer's certificates are untrusted; the work
  * of path building is bounded (CRYC_CHAIN_MAX_WORK) so that a hostile
@@ -190,9 +192,11 @@ int cryc_store_add_distrusted(struct cryc_store *store, const uint8_t *der, size
  * *added receives the number of certificates newly added.  A block that
  * does not decode or whose certificate does not parse is skipped and
  * remembered; the call goes on with the next block.  Returns 0 when every
- * block was good; EINVAL when at least one was bad (the good ones are
- * kept); ENOENT when the text has no CERTIFICATE block; ENOBUFS or ENOMEM
- * (the ones added before stay).
+ * block was good; EINVAL when at least one was bad (a block that does not
+ * decode counts as a block; the good ones are kept), and for a NULL store
+ * or a NULL text with a size; ENOENT when the text has no CERTIFICATE
+ * block at all, good or bad; ENOBUFS or ENOMEM (the ones added before
+ * stay).
  */
 int cryc_store_add_pem(struct cryc_store *store, const char *text, size_t size, size_t *added);
 
@@ -212,9 +216,11 @@ int cryc_store_add_file(struct cryc_store *store, const char *path);
  * add_file).  The store's lock is not held while cryc_os_system_roots
  * runs: each callback takes it for its own change (add_file reads the
  * file first, as cryc_store_add_file does).  Returns 0 or the first error
- * other than ENOENT (a missing default file leaves the store as it was
- * and is not an error, as OpenSSL's SSL_CTX_set_default_verify_paths is
- * not).
+ * other than ENOENT that cryc_os_system_roots passes back from a
+ * callback (EINVAL for a bad block of the default file, ENOBUFS, ENOMEM,
+ * EIO, EFBIG; a missing default file leaves the store as it was and is
+ * not an error, as OpenSSL's SSL_CTX_set_default_verify_paths is not);
+ * EINVAL for a NULL store.
  */
 int cryc_store_add_system(struct cryc_store *store);
 
@@ -236,12 +242,16 @@ int cryc_store_add_system(struct cryc_store *store);
  * trusted self-signed server).  A path ends at the first store entry
  * reached.  Each complete path is validated (below); the first valid path
  * is the result; otherwise the search backtracks to the next candidate.
- * The search stops after CRYC_CHAIN_MAX_WORK signature verifications.
+ * The search stops after CRYC_CHAIN_MAX_WORK signature verifications, or
+ * after it has expanded a fixed number of certificates (1024; a hostile
+ * list whose candidates fail before any signature still ends), with
+ * WORK_EXCEEDED.
  *
  * Distrusted certificates: before anything else of a complete path is
  * checked (no signature, so it costs no work), every certificate of the
  * path, the leaf, the intermediates and the trust anchor, is looked up by
- * the SHA-256 of its DER among the marks of cryc_store_add_distrusted,
+ * the SHA-256 of its tbsCertificate and of its DER among the marks of
+ * cryc_store_add_distrusted,
  * from the leaf upward; the first one found ends the path's validation
  * with REJECTED at its depth (the lowest distrusted depth).
  *
@@ -258,7 +268,8 @@ int cryc_store_add_system(struct cryc_store *store);
  *     the trust anchor included, unless it is a self-issued
  *     intermediate (6.1.3 (b) and (c); cryc_name_constraints_check: EACCES gives
  *     NAME_CONSTRAINT_VIOLATION, ENOTSUP UNSUPPORTED_NAME_CONSTRAINT);
- *   - no unknown critical extension (UNHANDLED_CRITICAL_EXTENSION);
+ *   - no unknown critical extension (UNHANDLED_CRITICAL_EXTENSION; this one
+ *     is checked for the trust anchor of a longer path too);
  *   - for an intermediate: version 3 with basicConstraints cA TRUE
  *     (INVALID_CA); keyUsage, when present, with keyCertSign (KEY_USAGE);
  *     pathLenConstraint not less than the number of non-self-issued
@@ -285,7 +296,11 @@ int cryc_store_add_system(struct cryc_store *store);
  * under it (no file is read and no callback is called with it held).
  * Lock order of the libraries: an SSL_CTX's lock before its store's lock,
  * never the reverse.  Returns 0 (the outcome is in *result, whatever it
- * is) or ENOMEM; *result is always written.
+ * is: MALFORMED for more than CRYC_CHAIN_MAX_PEER certificates, a
+ * params->max_depth outside 2 to CRYC_CHAIN_MAX_DEPTH, or a host and an
+ * address together), EINVAL for a NULL result (nothing is written), or a
+ * NULL store, params or peer with a count (code MALFORMED), or ENOMEM;
+ * *result is written whenever it is not NULL.
  */
 int cryc_chain_verify(struct cryc_store *store, const struct cryc_x509 *peer, size_t peer_count, const struct cryc_verify_params *params, struct cryc_verify_result *result);
 

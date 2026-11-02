@@ -117,6 +117,82 @@ struct server_hello {
 };
 
 /* Copies a C string into a new block. */
+static char * copy_string(const char *text);
+
+static size_t trace_get(char section, const char *step, const char *label, unsigned nth, uint8_t *out, size_t room);
+
+/* Decodes a DER Ecdsa-Sig-Value into r and s of size bytes each (strict enough for the signer's output). */
+static int signature_decode(const uint8_t *der, size_t der_size, size_t size, uint8_t *r, uint8_t *s);
+
+/* Verifies a DER ECDSA signature over message (hashed with hash) with an uncompressed key on curve. */
+static int verify_signature(enum cryc_curve_id curve, const uint8_t *key, size_t key_size, enum cryc_hash_id hash, const uint8_t *message, size_t message_size, const uint8_t *signature, size_t signature_size);
+
+static void check_sigver(enum cryc_curve_id curve, const uint8_t *key, size_t key_size, enum cryc_sig_alg alg, const uint8_t *message, size_t message_size, const uint8_t *signature, size_t signature_size, int expected);
+
+/* Checks one parsed certificate against what it was made from, and its signature with the issuer's key. */
+static void check_cert(const uint8_t *der, size_t der_size, const struct tlspeer_key *subject_key, const struct tlspeer_key *issuer_key, int is_ca, const char *host);
+
+/* Rewrites the 3-byte message length after the header of a hand-cut ClientHello. */
+static void fix_length(uint8_t *message, size_t size);
+
+/* Starts the client for suite (the peer's). */
+static void client_init(struct client *client, uint16_t suite);
+
+/* Writes the client's transcript hash. */
+static void client_hash(const struct client *client, uint8_t *out);
+
+/* Seals one record from the client and gives it to the peer; returns the peer's answer. */
+static int client_send(struct client *client, struct tlspeer *peer, unsigned type, const uint8_t *data, size_t size, int first_hello);
+
+/* Takes what the peer wrote into the client's buffer (one byte per call when bytewise, to test splits). */
+static void client_pull(struct client *client, struct tlspeer *peer);
+
+static int client_record(struct client *client);
+
+/* Gives the next whole handshake message from the peer into out; returns its size, or 0 when none comes. */
+static size_t client_message(struct client *client, struct tlspeer *peer, uint8_t *out, size_t room);
+
+/* Reads every record that waits (data, alerts); returns how many. */
+static unsigned long client_drain(struct client *client, struct tlspeer *peer);
+
+/* Parses a ServerHello or HelloRetryRequest message (RFC 8446 4.1.3; RFC 5246 7.4.1.3), as the client checks it. */
+static int parse_server_hello(const uint8_t *message, size_t size, struct server_hello *hello);
+
+/* Returns 1 when the ServerHello has an extension of type. */
+static int hello_has(const struct server_hello *hello, uint16_t type);
+
+/* Gives the leaf's public key and curve from a Certificate message (TLS 1.3 when tls13). */
+static int leaf_key(const uint8_t *message, size_t size, int tls13, struct cryc_x509 *cert);
+
+static int client_handshake13(struct client *client, struct tlspeer *peer, const uint8_t *hello1, size_t hello1_size, const uint8_t *hello2, size_t hello2_size, const uint8_t *private_key);
+
+/* Moves one side's secret to the next generation and installs it on dir. */
+static void client_update(struct client *client, uint8_t *secret, struct sslc_record_dir *dir);
+
+/* Exchanges data both ways, a ticket, and KeyUpdates both ways, after a TLS 1.3 handshake. */
+static void exchange13(struct client *client, struct tlspeer *peer);
+
+/* Takes every byte the peer wrote into out; returns the count. */
+static size_t take_all(struct tlspeer *peer, uint8_t *out, size_t room);
+
+/* Runs TLS 1.3 handshakes with tlspeer's own certificates: x25519, and secp256r1 after a HelloRetryRequest. */
+static void test_own13(enum cryc_curve_id curve, uint16_t suite, size_t record_size, int bytewise, uint32_t options);
+
+static size_t hello12(uint8_t *out, size_t room, uint16_t suite, int ems, int sid);
+
+/* Runs a TLS 1.2 ECDHE handshake with tlspeer's own certificates, then data and close_notify. */
+static void test_own12(enum cryc_curve_id curve, uint16_t suite, uint16_t group, int ems, uint32_t options, int bytewise);
+
+/* Makes a TLS 1.3 peer over pki with breaks and options and feeds it the trace's section 3 ClientHello. */
+static struct tlspeer * peer13(const struct tlspeer_pki *pki, uint32_t breaks, uint32_t options, uint16_t group);
+
+/* Collects the items of a peer into items (at most room); returns the count. */
+static size_t collect(struct tlspeer *peer, struct tlspeer_item *items, size_t room);
+
+/* Returns 1 when message (of size bytes) contains the 6 bytes of the extra extension 7a 7a 00 02 'x' 'y'. */
+static int has_extra(const uint8_t *message, size_t size);
+
+/* Copies a C string into a new block. */
 static char *
 copy_string(
 	const char *text)
@@ -131,9 +207,35 @@ copy_string(
 		printf("FAIL out of memory\n");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Copies the text including its terminator. */
 	memcpy(copy, text, size);
 	return copy;
 }
+
+/* Loads the RFC 8448 values; returns 0, or -1 when the vector file is missing. */
+static int trace_load(void);
+
+/* Frees the RFC 8448 values. */
+static void trace_free(void);
+
+/* Checks the signer on the CAVP vectors, on its fixed k, and on k out of range. */
+static void test_signer(void);
+
+/* Checks the PKI of both curves and a certificate with an address. */
+static void test_pki(void);
+
+/* Checks the reader on the ClientHellos of RFC 8448 sections 3 and 5 and on broken ones. */
+static void test_parser(void);
+
+/* Replays the server side of RFC 8448 section 3 (1-RTT). */
+static void test_rfc8448_simple(void);
+
+/* Replays the server side of RFC 8448 section 5 (HelloRetryRequest, then secp256r1). */
+static void test_rfc8448_retry(void);
+
+/* Checks each break and option. */
+static void test_breaks(void);
 
 /* Loads the RFC 8448 values; returns 0, or -1 when the vector file is missing. */
 static int
@@ -144,11 +246,21 @@ trace_load(void)
 	const char *step;
 	const char *label;
 	const char *hex;
+	int error;
+	int more;
+
+	/* Opens the vector file. */
+	error = vec_open(&file, "rfc8448");
+	if (error != 0)
+		return -1;
 
 	/* Every record with all four fields. */
-	if (vec_open(&file, "rfc8448") != 0)
-		return -1;
-	while (vec_next(&file) && trace_count < sizeof(trace) / sizeof(trace[0])) {
+	for (;;) {
+		more = vec_next(&file);
+		if (!more)
+			break;
+		if (trace_count >= sizeof(trace) / sizeof(trace[0]))
+			break;
 		section = vec_get(&file, "section");
 		step = vec_get(&file, "step");
 		label = vec_get(&file, "label");
@@ -161,6 +273,8 @@ trace_load(void)
 		trace[trace_count].hex = copy_string(hex);
 		trace_count++;
 	}
+
+	/* Closes the vector file; succeeded: the trace is loaded. */
 	vec_close(&file);
 	return 0;
 }
@@ -177,6 +291,8 @@ trace_free(void)
 		free(trace[index].label);
 		free(trace[index].hex);
 	}
+
+	/* Records that the trace is empty. */
 	trace_count = 0;
 }
 
@@ -194,24 +310,38 @@ trace_get(
 	uint8_t *out,
 	size_t room)
 {
+	const char *found;
 	size_t index;
 	size_t size;
+	int different;
 
 	/* The nth match. */
 	for (index = 0; index < trace_count; index++) {
 		if (trace[index].section != section)
 			continue;
-		if (strstr(trace[index].step, step) == NULL || strcmp(trace[index].label, label) != 0)
+
+		/* Looks for the step name in the recorded step. */
+		found = strstr(trace[index].step, step);
+		if (found == NULL)
+			continue;
+
+		/* Compares the recorded label with the one asked for. */
+		different = strcmp(trace[index].label, label);
+		if (different != 0)
 			continue;
 		if (nth > 0U) {
 			nth--;
 			continue;
 		}
+
+		/* Decodes the step's hex into the caller's buffer. */
 		size = hex_decode(trace[index].hex, out, room);
 		if (size == (size_t)-1)
 			break;
 		return size;
 	}
+
+	/* Reports the missing step and fails the test. */
 	printf("FAIL RFC 8448 %c: no \"%s\" / \"%s\"\n", section, step, label);
 	CHECK(0);
 	return 0;
@@ -232,6 +362,7 @@ signature_decode(
 	uint8_t *outs[2];
 	unsigned which;
 	unsigned tag;
+	int done;
 
 	/* SEQUENCE (short or one-byte long form, enough for P-256 and P-384). */
 	outs[0] = r;
@@ -243,7 +374,8 @@ signature_decode(
 	if (der[1] == 0x81U)
 		tlspeer_get_int(&reader, 1);
 	tlspeer_get_vector(&reader, 1, 6, 255, &sequence);
-	if (!tlspeer_reader_done(&reader))
+	done = tlspeer_reader_done(&reader);
+	if (!done)
 		return EBADMSG;
 
 	/* Two positive INTEGERs, minimal, of at most size bytes. */
@@ -260,12 +392,17 @@ signature_decode(
 			integer.data++;
 			integer.size--;
 		}
+
+		/* Refuses an integer larger than its slot. */
 		if (integer.size > size)
 			return EBADMSG;
 		memset(outs[which], 0, size);
 		memcpy(outs[which] + size - integer.size, integer.data, integer.size);
 	}
-	if (!tlspeer_reader_done(&sequence))
+
+	/* Refuses bytes left over after the two integers. */
+	done = tlspeer_reader_done(&sequence);
+	if (!done)
 		return EBADMSG;
 	return 0;
 }
@@ -340,6 +477,8 @@ check_sigver(
 		noted = 1;
 		return;
 	}
+
+	/* Checks that the call ended with the error that was expected. */
 	CHECK(error == expected);
 }
 
@@ -432,6 +571,7 @@ test_signer(void)
 	size_t size;
 	size_t index;
 	size_t hash_size;
+	enum cryc_sig_alg alg;
 	int error;
 
 	/* Each vector: Q from d, (r, s) from k, and the signature verifies. */
@@ -472,9 +612,13 @@ test_signer(void)
 		CHECK_BYTES(r2, r, size);
 		CHECK_BYTES(s2, s, size);
 		CHECK(verify_signature(siggen_vectors[index].curve, key.public_key, key.public_size, siggen_vectors[index].hash, msg, msg_size, der, der_size) == 0);
+
+		/* The signature algorithm that goes with the vector's curve. */
+		alg = CRYC_SIG_ECDSA_SHA384;
+		if (siggen_vectors[index].curve == CRYC_CURVE_P256)
+			alg = CRYC_SIG_ECDSA_SHA256;
 		check_sigver(siggen_vectors[index].curve, key.public_key, key.public_size,
-		    siggen_vectors[index].curve == CRYC_CURVE_P256 ? CRYC_SIG_ECDSA_SHA256 : CRYC_SIG_ECDSA_SHA384,
-		    msg, msg_size, der, der_size, 0);
+		    alg, msg, msg_size, der, der_size, 0);
 		CHECK(tlspeer_ecdsa_sign_der(&key, digest, hash_size, der, 8, &der_size) == ENOBUFS);
 		CHECK(der_size == 0U);
 
@@ -534,7 +678,11 @@ check_cert(
 	CHECK(error == 0);
 	if (error != 0)
 		return;
-	curve = subject_key->ec.size == 48U ? CRYC_CURVE_P384 : CRYC_CURVE_P256;
+
+	/* The curve of the subject key, by the size of its coordinates. */
+	curve = CRYC_CURVE_P256;
+	if (subject_key->ec.size == 48U)
+		curve = CRYC_CURVE_P384;
 	CHECK(cert.version == 3U);
 	CHECK(cert.not_before == TLSPEER_NOT_BEFORE_TIME);
 	CHECK(cert.not_after == TLSPEER_NOT_AFTER_TIME);
@@ -566,8 +714,14 @@ check_cert(
 	}
 
 	/* The signature over the tbsCertificate verifies with the issuer's key, and not after a change. */
-	hash = issuer_key->ec.size == 48U ? CRYC_HASH_SHA384 : CRYC_HASH_SHA256;
-	alg = issuer_key->ec.size == 48U ? CRYC_SIG_ECDSA_SHA384 : CRYC_SIG_ECDSA_SHA256;
+	hash = CRYC_HASH_SHA256;
+	alg = CRYC_SIG_ECDSA_SHA256;
+	if (issuer_key->ec.size == 48U) {
+		hash = CRYC_HASH_SHA384;
+		alg = CRYC_SIG_ECDSA_SHA384;
+	}
+
+	/* Checks the algorithm named in the certificate. */
 	CHECK(cert.signature_alg.alg == alg);
 	CHECK(cert.signature_size > 1U);
 	CHECK(verify_signature(curve, issuer_key->public_key, issuer_key->public_size, hash, cert.tbs, cert.tbs_size, cert.signature, cert.signature_size) == 0);
@@ -651,6 +805,7 @@ test_parser(void)
 	size_t cut;
 	size_t index;
 	size_t refused;
+	int error;
 
 	/* Section 3: the fields of the trace's ClientHello. */
 	size = trace_get('3', "{client} construct a ClientHello", "ClientHello", 0, message, sizeof(message));
@@ -687,7 +842,10 @@ test_parser(void)
 	refused = 0;
 	for (cut = 0; cut < size; cut++) {
 		memcpy(broken, message, cut);
-		if (tlspeer_parse_client_hello(broken, cut, &hello) != 0)
+
+		/* Parses the cut message as it is. */
+		error = tlspeer_parse_client_hello(broken, cut, &hello);
+		if (error != 0)
 			refused++;
 		if (cut >= 4U) {
 			fix_length(broken, cut);
@@ -698,10 +856,15 @@ test_parser(void)
 				refused++;
 				continue;
 			}
-			if (tlspeer_parse_client_hello(broken, cut, &hello) != 0)
+
+			/* Parses the cut message with its length made consistent, and counts a refusal. */
+			error = tlspeer_parse_client_hello(broken, cut, &hello);
+			if (error != 0)
 				refused++;
 		}
 	}
+
+	/* Every cut shorter than the message must have been refused. */
 	CHECK(refused == size + size - 4U);
 
 	/* A trailing byte, a duplicate extension, a bad type, an odd suite list. */
@@ -793,6 +956,8 @@ client_send(
 		if (error != 0)
 			return error;
 	}
+
+	/* Succeeded: every extension matched. */
 	return 0;
 }
 
@@ -803,11 +968,15 @@ client_pull(
 	struct tlspeer *peer)
 {
 	size_t taken;
+	size_t room;
 
 	/* Everything there is, in pieces of 1 or of the whole room. */
 	do {
 		taken = 0;
-		CHECK(tlspeer_take(peer, client->in + client->in_used, feed_bytewise ? 1U : sizeof(client->in) - client->in_used, &taken) == 0);
+		room = sizeof(client->in) - client->in_used;
+		if (feed_bytewise)
+			room = 1U;
+		CHECK(tlspeer_take(peer, client->in + client->in_used, room, &taken) == 0);
 		client->in_used += taken;
 	} while (taken > 0U && client->in_used < sizeof(client->in));
 }
@@ -879,6 +1048,8 @@ client_record(
 		CHECK(0);
 		break;
 	}
+
+	/* Succeeded: the message was handled. */
 	return 1;
 }
 
@@ -891,6 +1062,7 @@ client_message(
 	size_t room)
 {
 	size_t length;
+	int more;
 
 	/* Records until a whole message is there. */
 	client_pull(client, peer);
@@ -904,7 +1076,10 @@ client_message(
 				return length;
 			}
 		}
-		if (client_record(client) == 0 || client->failed != 0)
+
+		/* Stops when the peer produced no record or the client failed. */
+		more = client_record(client);
+		if (more == 0 || client->failed != 0)
 			return 0;
 	}
 }
@@ -916,12 +1091,20 @@ client_drain(
 	struct tlspeer *peer)
 {
 	unsigned long before;
+	int more;
 
 	/* All of them. */
 	before = client->records;
 	client_pull(client, peer);
-	while (client->failed == 0 && client_record(client) != 0)
-		;
+	for (;;) {
+		if (client->failed != 0)
+			break;
+		more = client_record(client);
+		if (more == 0)
+			break;
+	}
+
+	/* Reports how many records were read. */
 	return client->records - before;
 }
 
@@ -939,15 +1122,24 @@ parse_server_hello(
 	struct tlspeer_reader data;
 	struct tlspeer_reader key;
 	uint32_t type;
+	uint32_t version;
+	uint32_t compression;
+	int done;
 
 	/* The header and the fixed fields. */
 	memset(hello, 0, sizeof(*hello));
 	tlspeer_reader_init(&reader, message, size);
 	type = tlspeer_get_int(&reader, 1);
 	tlspeer_get_vector(&reader, 3, 38, 0xffffffU, &body);
-	if (type != SSLC_HS_SERVER_HELLO || !tlspeer_reader_done(&reader))
+	if (type != SSLC_HS_SERVER_HELLO)
 		return EINVAL;
-	if (tlspeer_get_int(&body, 2) != 0x0303U)
+	done = tlspeer_reader_done(&reader);
+	if (!done)
+		return EINVAL;
+
+	/* The legacy version. */
+	version = tlspeer_get_int(&body, 2);
+	if (version != 0x0303U)
 		return EINVAL;
 	memcpy(hello->random, tlspeer_get(&body, 32), 32);
 	tlspeer_get_vector(&body, 1, 0, 32, &vector);
@@ -957,14 +1149,16 @@ parse_server_hello(
 		memcpy(hello->session_id, vector.data, vector.size);
 	hello->session_id_size = vector.size;
 	hello->suite = (uint16_t)tlspeer_get_int(&body, 2);
-	if (tlspeer_get_int(&body, 1) != 0U || body.error != 0)
+	compression = tlspeer_get_int(&body, 1);
+	if (compression != 0U || body.error != 0)
 		return EINVAL;
 	if (body.position == body.size)
 		return 0;
 
 	/* The extensions. */
 	tlspeer_get_vector(&body, 2, 0, 65535, &extensions);
-	if (!tlspeer_reader_done(&body))
+	done = tlspeer_reader_done(&body);
+	if (!done)
 		return EINVAL;
 	while (extensions.position < extensions.size) {
 		type = tlspeer_get_int(&extensions, 2);
@@ -987,6 +1181,8 @@ parse_server_hello(
 			hello->cookie_size = tlspeer_get_int(&data, 2);
 		}
 	}
+
+	/* Succeeded: the extensions are parsed. */
 	return 0;
 }
 
@@ -1003,6 +1199,8 @@ hello_has(
 		if (hello->extensions[index] == type)
 			return 1;
 	}
+
+	/* The extension is not in the hello. */
 	return 0;
 }
 
@@ -1060,6 +1258,9 @@ client_handshake13(
 	uint8_t verify[CRYC_HASH_MAX_SIZE];
 	size_t content_size;
 	size_t size;
+	enum cryc_hash_id signature_hash;
+	enum cryc_sig_alg signature_alg;
+	int different;
 	int has_cert;
 	int error;
 
@@ -1070,7 +1271,8 @@ client_handshake13(
 	/* A HelloRetryRequest: the transcript restarts (4.4.1), the second ClientHello. */
 	size = client_message(client, peer, message, sizeof(message));
 	CHECK(size > 0U && parse_server_hello(message, size, &hello) == 0);
-	if (memcmp(hello.random, retry_random, 32) == 0) {
+	different = memcmp(hello.random, retry_random, 32);
+	if (different == 0) {
 		CHECK(hello2 != NULL);
 		if (hello2 == NULL)
 			return EPROTO;
@@ -1100,6 +1302,8 @@ client_handshake13(
 		cryc_ecp_init(&ec, CRYC_CURVE_P256);
 		error = cryc_ecc_ecdh(&ec, private_key, hello.key, hello.key_size, shared);
 	}
+
+	/* Checks that the shared secret was computed. */
 	CHECK(error == 0);
 	if (error != 0)
 		return error;
@@ -1135,24 +1339,34 @@ client_handshake13(
 			content_size += client->hash_size;
 			CHECK(size >= 8U && cryc_load_be16(message + 4) == peer->config.scheme);
 			CHECK(cryc_load_be16(message + 6) == size - 8U);
+			signature_hash = CRYC_HASH_SHA256;
+			signature_alg = CRYC_SIG_ECDSA_SHA256;
+			if (cert.key.curve == CRYC_CURVE_P384) {
+				signature_hash = CRYC_HASH_SHA384;
+				signature_alg = CRYC_SIG_ECDSA_SHA384;
+			}
+
+			/* Verifies the signature over the transcript with the certificate key. */
 			error = verify_signature(cert.key.curve, cert.key.point, cert.key.point_size,
-			    cert.key.curve == CRYC_CURVE_P384 ? CRYC_HASH_SHA384 : CRYC_HASH_SHA256,
-			    content, content_size, message + 8, size - 8U);
+			    signature_hash, content, content_size, message + 8, size - 8U);
 			CHECK(error == 0 || (peer->breaks & TLSPEER_BREAK_SIGNATURE) != 0U);
 			if (error != 0)
 				return EBADMSG;
 			check_sigver(cert.key.curve, cert.key.point, cert.key.point_size,
-			    cert.key.curve == CRYC_CURVE_P384 ? CRYC_SIG_ECDSA_SHA384 : CRYC_SIG_ECDSA_SHA256,
+			    signature_alg,
 			    content, content_size, message + 8, size - 8U, 0);
 		} else if (message[0] == SSLC_HS_FINISHED) {
 			client_hash(client, digest);
 			CHECK(sslc_tls13_finished(client->hash, client->schedule.server_handshake, digest, verify) == 0);
 			CHECK(size == 4U + client->hash_size);
-			if (memcmp(message + 4, verify, client->hash_size) != 0)
+			different = memcmp(message + 4, verify, client->hash_size);
+			if (different != 0)
 				return EBADMSG;
 			cryc_hash_update(&client->transcript, message, size);
 			break;
 		}
+
+		/* Adds the message to the client's transcript. */
 		cryc_hash_update(&client->transcript, message, size);
 	}
 
@@ -1179,6 +1393,8 @@ client_handshake13(
 		cryc_hash_update(&client->transcript, message, size);
 		CHECK(client_send(client, peer, SSLC_CT_HANDSHAKE, message, size, 0) == 0);
 	}
+
+	/* Computes the client Finished over the transcript so far. */
 	client_hash(client, digest);
 	CHECK(sslc_tls13_finished(client->hash, client->schedule.client_handshake, digest, verify) == 0);
 	message[0] = SSLC_HS_FINISHED;
@@ -1705,6 +1921,8 @@ test_own12(
 	size_t size;
 	size_t hello_size;
 	unsigned seen;
+	unsigned wanted;
+	enum cryc_hash_id signature_hash;
 	int used_ems;
 	int error;
 
@@ -1763,17 +1981,24 @@ test_own12(
 			memcpy(content + 64, message + 4, params_size);
 			CHECK(cryc_load_be16(message + 4 + params_size) == config.scheme);
 			CHECK(cryc_load_be16(message + 6 + params_size) == size - 8U - params_size);
+			signature_hash = CRYC_HASH_SHA256;
+			if (curve == CRYC_CURVE_P384)
+				signature_hash = CRYC_HASH_SHA384;
 			error = verify_signature(cert.key.curve, cert.key.point, cert.key.point_size,
-			    curve == CRYC_CURVE_P384 ? CRYC_HASH_SHA384 : CRYC_HASH_SHA256,
-			    content, 64U + params_size, message + 8 + params_size, size - 8U - params_size);
+			    signature_hash, content, 64U + params_size, message + 8 + params_size, size - 8U - params_size);
 			CHECK(error == 0);
 		} else if (message[0] == SSLC_HS_SERVER_HELLO_DONE) {
 			CHECK(size == 4U);
 			break;
 		}
 	}
-	CHECK(seen == ((1U << SSLC_HS_SERVER_HELLO) | (1U << SSLC_HS_CERTIFICATE) | (1U << SSLC_HS_SERVER_KEY_EXCHANGE) |
-	    (1U << SSLC_HS_SERVER_HELLO_DONE) | ((options & TLSPEER_OPT_CERT_REQUEST) != 0U ? 1U << SSLC_HS_CERTIFICATE_REQUEST : 0U)));
+
+	/* Checks that the server sent exactly the messages the options ask for. */
+	wanted = (1U << SSLC_HS_SERVER_HELLO) | (1U << SSLC_HS_CERTIFICATE) | (1U << SSLC_HS_SERVER_KEY_EXCHANGE) |
+	    (1U << SSLC_HS_SERVER_HELLO_DONE);
+	if ((options & TLSPEER_OPT_CERT_REQUEST) != 0U)
+		wanted |= 1U << SSLC_HS_CERTIFICATE_REQUEST;
+	CHECK(seen == wanted);
 
 	/* An empty Certificate when asked; ClientKeyExchange with the client's point; the shared secret. */
 	if ((options & TLSPEER_OPT_CERT_REQUEST) != 0U) {
@@ -1783,6 +2008,8 @@ test_own12(
 		cryc_hash_update(&client.transcript, message, 7);
 		CHECK(client_send(&client, peer, SSLC_CT_HANDSHAKE, message, 7, 0) == 0);
 	}
+
+	/* Builds the ClientKeyExchange message. */
 	message[0] = SSLC_HS_CLIENT_KEY_EXCHANGE;
 	if (group == SSLC_GROUP_X25519) {
 		cryc_store_be24(message + 1, 33);
@@ -1797,6 +2024,8 @@ test_own12(
 		CHECK(cryc_ecc_ecdh(&client_key.ec, client_key.private_key, point, point_size, shared) == 0);
 		size = 70;
 	}
+
+	/* Adds the ClientKeyExchange to the transcript and sends it. */
 	cryc_hash_update(&client.transcript, message, size);
 	CHECK(client_send(&client, peer, SSLC_CT_HANDSHAKE, message, size, 0) == 0);
 
@@ -1809,6 +2038,8 @@ test_own12(
 		memcpy(context + 32, server_random, 32);
 		context_size = 64;
 	}
+
+	/* Derives the master secret and checks that it was derived the same way. */
 	CHECK(sslc_tls12_master(client.hash, used_ems, shared, 32, context, context_size, master) == 0);
 	CHECK(peer->ems == used_ems);
 	CHECK(sslc_tls12_key_block(client.suite, master, client_random, server_random, &client_keys, &client.read12) == 0);
@@ -1866,6 +2097,7 @@ peer13(
 	struct tlspeer_config config;
 	struct tlspeer *peer;
 	size_t size;
+	int error;
 
 	/* The peer and its answer to the ClientHello. */
 	tlspeer_config_init(&config, SSLC_TLS13, pki);
@@ -1875,10 +2107,13 @@ peer13(
 	config.extra_type = 0x7a7a;
 	config.extra_data = (const uint8_t *)"xy";
 	config.extra_size = 2;
-	if (tlspeer_new(&peer, &config) != 0) {
+	error = tlspeer_new(&peer, &config);
+	if (error != 0) {
 		CHECK(0);
 		return NULL;
 	}
+
+	/* Feeds the recorded ClientHello to the peer. */
 	size = trace_get('3', "{client} construct a ClientHello", "ClientHello", 0, hello, sizeof(hello));
 	CHECK(tlspeer_handshake(peer, hello, size) == 0);
 	return peer;
@@ -1892,11 +2127,20 @@ collect(
 	size_t room)
 {
 	size_t count;
+	int more;
 
 	/* All of them. */
 	count = 0;
-	while (count < room && tlspeer_next(peer, &items[count]))
+	for (;;) {
+		if (count >= room)
+			break;
+		more = tlspeer_next(peer, &items[count]);
+		if (!more)
+			break;
 		count++;
+	}
+
+	/* Reports how many items were collected. */
 	return count;
 }
 
@@ -1908,12 +2152,16 @@ has_extra(
 {
 	static const uint8_t extra[6] = { 0x7a, 0x7a, 0x00, 0x02, 'x', 'y' };
 	size_t index;
+	int different;
 
 	/* A search. */
 	for (index = 0; index + 6U <= size; index++) {
-		if (memcmp(message + index, extra, 6) == 0)
+		different = memcmp(message + index, extra, 6);
+		if (different == 0)
 			return 1;
 	}
+
+	/* The extra bytes were not found. */
 	return 0;
 }
 
@@ -1958,6 +2206,8 @@ test_breaks(void)
 		normal[index].data = first_flight + first_size;
 		first_size += normal[index].size;
 	}
+
+	/* Checks that the unbroken flight carries no extra bytes. */
 	CHECK(has_extra(first_flight, first_size) == 0);
 	tlspeer_free(peer);
 
@@ -2223,8 +2473,11 @@ test_breaks(void)
 int
 main(void)
 {
+	int error;
+
 	/* The trace first: most checks use it. */
-	if (trace_load() != 0) {
+	error = trace_load();
+	if (error != 0) {
 		printf("test-tlspeer: FAIL (no rfc8448 vectors)\n");
 		return EXIT_FAILURE;
 	}
