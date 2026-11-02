@@ -70,10 +70,10 @@ struct browser_instance {
 };
 
 /*
- * Reports the calling thread's default instance, made the first time (no
- * backend: it remembers nothing beyond the process).  It is destroyed when
- * the thread ends if no view uses it then, and otherwise kept until the
- * process ends.  Returns 0 or ENOMEM.
+ * Reports the process's default instance, made the first time (no
+ * backend: it remembers nothing beyond the process) and kept until the
+ * process ends.  Returns 0, ENOTSUP (the program gave no threads) or
+ * ENOMEM.
  */
 int wb_instance_default(struct browser_instance **instance);
 

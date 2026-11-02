@@ -107,8 +107,8 @@ browser_instance_create(
  * Destroys an instance: does everything its storage queue holds, closes
  * its backend and frees its cookies and Web Storage.  Returns 0, EBUSY (a
  * view made with it is not destroyed yet: nothing is done), or EINVAL
- * (NULL, or a thread's default instance, which only its thread's end
- * destroys).
+ * (NULL, or the process's default instance, which lasts as long as the
+ * process).
  */
 int
 browser_instance_destroy(
