@@ -44,7 +44,7 @@
 | [p006](phase006/phase.md) | ssh-hostfile | cleared（2026-11-01 09:34 Q1、main 9622eaa29。Sonnet、hostfile 736314 checks、壊す確かめ 48 通り中 46 が FAIL・2 は同値） | p005 | p003 経由 |
 | [p007](phase007/phase.md) | ssh-kex | cleared（2026-11-01 09:46 Q1。09:44 Sonnet、run-unit all PASS、kex 402989 checks、壊す確かめ 25 通り全部 FAIL) | p004 | p003 経由 |
 | [p008](phase008/phase.md) | ssh-transport（Opus） | in-progress（P5 q1932） | p005・p007 | p003 経由 |
-| [p009](phase009/phase.md) | ssh-auth | 実装済み・試験 PASS（2026-11-02 11:10 Sonnet q1933。run-unit auth 2458 checks、all PASS、check-skeleton PASS、変異 94 通りのうち同値の 3 つを除き全て FAIL） | p005 | p003 経由 |
+| [p009](phase009/phase.md) | ssh-auth | cleared（2026-11-02 11:14 Q1、main で test-auth PASS）。実装済み・試験 PASS（2026-11-02 11:10 Sonnet q1933。run-unit auth 2458 checks、all PASS、check-skeleton PASS、変異 94 通りのうち同値の 3 つを除き全て FAIL） | p005 | p003 経由 |
 | [p010](phase010/phase.md) | ssh-ttymodes・ssh-channel | cleared（2026-11-01 06:19 Q1、main 290b99bab。ssh-ttymodes・ssh-channel 実装、run-unit ttymodes 20682・channel 1603651 checks PASS（Q1 再実行で確認）。phase.md と header の食い違い 2 件（長さの上限を越えた要求は header の通り OTHER、no-more-sessions は want_reply なら SUCCESS）は担当の判断を採り、header の comment の直しは規約の見直しの Phase で） | p002 | — |
 | [p011](phase011/phase.md) | ssh-config | in-progress（Sonnet q1934） | p006 | p003 経由 |
 | [p012](phase012/phase.md) | ssh-privsep（frame） | cleared（2026-11-01 06:22 Q1、main e8b028959。ssh-privsep（monitor との frame と同期の呼び出し）実装、run-unit privsep 947 checks PASS（Q1 再実行で確認）。mon_call を呼ぶ process は SIGPIPE を無視する前提（p016・p017 で守る）） | p002 | — |

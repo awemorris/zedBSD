@@ -2,7 +2,7 @@
 
 # ws335-p022: 公開の X509（d2i_X509 ほか）と内部の store の生成
 
-Status: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1927-i01。cleared は Q1。依存: p020、p021）
+Status: cleared（2026-11-02 11:14 Q1）。前: 実装済み・試験 PASS（2026-11-02 Sonnet 5.5 q1927-i01。cleared は Q1。依存: p020、p021）
 Parent: [WS335](../ws.md)。担当: Sonnet 5.5 high（phase-runner-low）。標準廉価実装手順 §5（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）。
 
 ## 1. 読む物
