@@ -719,8 +719,24 @@ void
 net_loader_dispatch(
 	struct net_loader *loader)
 {
+	/* All of them, however long their callbacks take. */
+	(void)net_loader_dispatch_until(loader, UINT64_MAX);
+}
+
+/*
+ * Does what net_loader_dispatch does until the monotonic clock
+ * (wb_os_monotonic_ns) reaches a deadline: a callback that ends after it
+ * is the last one called, and the requests after it stay, in their order,
+ * for the next call.  Returns whether some stay.
+ */
+int
+net_loader_dispatch_until(
+	struct net_loader *loader,
+	uint64_t deadline)
+{
 	struct net_request *taken;
 	struct net_request *request;
+	struct net_request *last;
 
 	/* The ended requests, all of them, and the caller is told of the next news again. */
 	pthread_mutex_lock(&loader->lock);
@@ -748,7 +764,26 @@ net_loader_dispatch(
 
 		/* The request is freed. */
 		loader_free(request);
+
+		/* Past the deadline the rest wait. */
+		if (taken != NULL && wb_os_monotonic_ns() >= deadline)
+			break;
 	}
+
+	/* Nothing left. */
+	if (taken == NULL)
+		return 0;
+
+	/* The rest go back before any that ended meanwhile. */
+	for (last = taken; last->queue_next != NULL; last = last->queue_next)
+		;
+	pthread_mutex_lock(&loader->lock);
+	last->queue_next = loader->completed;
+	if (loader->completed == NULL)
+		loader->completed_last = last;
+	loader->completed = taken;
+	pthread_mutex_unlock(&loader->lock);
+	return 1;
 }
 
 /*

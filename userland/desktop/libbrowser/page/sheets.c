@@ -53,6 +53,8 @@ struct page_sheet {
 	uint32_t used;
 	struct page *page;
 	struct net_request *request;
+	/* A parser's link or style element names it, or such a sheet imports it: the parser's scripts wait for it. */
+	int blocking;
 };
 
 /*
@@ -78,6 +80,7 @@ static struct page_sheet *sheets_find_location(const struct page *page, const ch
 static int sheets_parse(struct page *page, struct page_sheet *entry, const unsigned char *bytes, size_t length);
 static int sheets_resolve_url(void *context, const struct vm_string *url, struct vm_string **resolved);
 static void sheets_arrived(void *context, struct net_request *request);
+static int sheets_take_ahead(struct page *page, struct page_sheet *entry, const struct page_prefetched *ahead);
 static int sheets_css_mime(const struct wb_buffer *content_type);
 static void sheets_fetch_imports(struct page *page, struct page_sheet *entry);
 static void sheets_drop_unused(struct page *page);
@@ -150,6 +153,29 @@ page_sheets_pending(
 	}
 
 	/* Every sheet is here, or failed. */
+	return 0;
+}
+
+/*
+ * Tells whether a sheet that blocks the parser's scripts is still on its
+ * way: one a parser's link or style element names, or one such a sheet
+ * imports (one a script links does not block them).
+ */
+int
+page_sheets_blocking(
+	const struct page *page)
+{
+	const struct page_sheet *entry;
+	size_t index;
+
+	/* Any blocking entry with a request under way. */
+	for (index = 0; index < page->sheets.count; index++) {
+		entry = *(struct page_sheet *const *)wb_vector_at(&page->sheets, index);
+		if (entry->request != NULL && entry->blocking)
+			return 1;
+	}
+
+	/* Every such sheet is here, or failed. */
 	return 0;
 }
 
@@ -333,8 +359,10 @@ sheets_add_style(
 		}
 	}
 
-	/* The text, when a known entry matched it, is no longer needed. */
+	/* The text, when a known entry matched it, is no longer needed; a parser's style element makes its imports block the parser's scripts. */
 	wb_units_release(&units);
+	if ((element->node.flags & DOM_NODE_PARSER_CREATED) != 0U)
+		entry->blocking = 1;
 
 	/* The element's media list, then the sheet after its imports. */
 	error = sheets_element_media(page, element, chain);
@@ -461,12 +489,14 @@ sheets_add_link(
 		return 0;
 	}
 
-	/* The location's sheet, fetched when it is new. */
+	/* The location's sheet, fetched when it is new; a parser's link makes it block the parser's scripts. */
 	if (error == 0)
 		error = sheets_external(page, wb_buffer_string(&location), &entry);
 	wb_buffer_release(&location);
 	if (error != 0)
 		return error;
+	if ((element->node.flags & DOM_NODE_PARSER_CREATED) != 0U)
+		entry->blocking = 1;
 
 	/* The link's media list, then the sheet after its imports, once it is there. */
 	error = sheets_element_media(page, element, chain);
@@ -665,7 +695,7 @@ sheets_add_loaded(
 			error = page_resolve_location(base, wb_buffer_string(&text), &location);
 		wb_buffer_release(&text);
 
-		/* The import's sheet, fetched when it is new. */
+		/* The import's sheet, fetched when it is new (blocking as its importer does). */
 		imported = NULL;
 		if (error == 0)
 			error = sheets_external(page, wb_buffer_string(&location), &imported);
@@ -674,6 +704,8 @@ sheets_add_loaded(
 			continue;
 		if (error != 0)
 			return error;
+		if (entry->blocking)
+			imported->blocking = 1;
 
 		/* Its own imports and rules, under the import's media list too. */
 		chain[depth] = css_sheet_import_media(entry->sheet, index);
@@ -698,8 +730,8 @@ sheets_add_loaded(
 
 /*
  * Finds an external sheet by its location, or starts loading it into a
- * new entry: through the loader for an http or https location, read at
- * once otherwise.
+ * new entry: from what the view fetched ahead when it fetched it, through
+ * the loader for another http or https location, read at once otherwise.
  */
 static int
 sheets_external(
@@ -707,6 +739,7 @@ sheets_external(
 	const char *location,
 	struct page_sheet **found)
 {
+	const struct page_prefetched *ahead;
 	struct page_sheet *entry;
 	struct wb_buffer bytes;
 	int remote;
@@ -730,9 +763,18 @@ sheets_external(
 		return ENOMEM;
 	}
 
-	/* An http or https sheet with a loader is fetched without blocking. */
+	/* A sheet fetched ahead is checked as one that arrived would be, and parsed now. */
+	ahead = page_prefetched_find(page, entry->location);
 	remote = net_loader_takes(entry->location);
-	if (page->loader != NULL && remote) {
+	if (ahead != NULL) {
+		error = sheets_take_ahead(page, entry, ahead);
+		if (error == ENOMEM) {
+			sheets_free(entry);
+			return error;
+		}
+		if (error != 0)
+			entry->failed = 1;
+	} else if (page->loader != NULL && remote) {
 		error = net_loader_fetch(page->loader, entry->location, sheets_arrived, entry, &entry->request);
 		if (error != 0)
 			entry->failed = 1;
@@ -923,6 +965,35 @@ sheets_arrived(
 	entry->page->sheets_generation++;
 }
 
+/*
+ * Parses a sheet the view fetched ahead, with the checks of one that
+ * arrived (sheets_arrived): the fetch succeeded with a 2xx status, and in
+ * a standards-mode HTML document a Content-Type it has is CSS.  Returns
+ * EINVAL for a sheet that fails them, or the parse's error.
+ */
+static int
+sheets_take_ahead(
+	struct page *page,
+	struct page_sheet *entry,
+	const struct page_prefetched *ahead)
+{
+	int error;
+
+	/* How the fetch ended. */
+	error = ahead->error;
+	if (error == 0 && (ahead->status < 200 || ahead->status > 299))
+		error = EINVAL;
+	if (error == 0 && page->document->content == DOM_CONTENT_HTML && page->document->quirks != DOM_QUIRKS &&
+	    ahead->mime.length != 0 && !sheets_css_mime(&ahead->mime))
+		error = EINVAL;
+	if (error != 0)
+		return error;
+
+	/* The sheet. */
+	error = sheets_parse(page, entry, ahead->bytes.data, ahead->bytes.length);
+	return error;
+}
+
 /* Checks the MIME essence of an HTTP stylesheet response. */
 static int
 sheets_css_mime(
@@ -986,6 +1057,8 @@ sheets_fetch_imports(
 		wb_buffer_release(&location);
 		if (error != 0)
 			break;
+		if (entry->blocking)
+			imported->blocking = 1;
 	}
 }
 

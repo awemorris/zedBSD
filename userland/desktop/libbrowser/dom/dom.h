@@ -30,6 +30,9 @@
 /* A link's stylesheet has loaded (or failed) and its load or error event has been queued. */
 #define DOM_NODE_LINK_LOADED 0x0004U
 
+/* The element was made by a document's parser (not a fragment's): a style sheet it links blocks the parser's scripts. */
+#define DOM_NODE_PARSER_CREATED 0x0008U
+
 /*
  * The kinds of node, numbered as the DOM's nodeType numbers them.
  */

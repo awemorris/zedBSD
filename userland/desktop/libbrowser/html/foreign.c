@@ -338,6 +338,8 @@ tb_insert_foreign(
 		p->failed = 1;
 		return;
 	}
+	if (p->context == NULL)
+		element->node.flags |= DOM_NODE_PARSER_CREATED;
 
 	/* Gives it the adjusted attributes. */
 	foreign_add_attributes(p, element, token, ns);

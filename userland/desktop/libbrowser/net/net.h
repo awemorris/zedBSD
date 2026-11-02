@@ -214,6 +214,7 @@ const struct net_response *net_request_response(const struct net_request *reques
 size_t net_loader_pending(const struct net_loader *loader);
 void net_loader_wait(struct net_loader *loader, int timeout);
 void net_loader_dispatch(struct net_loader *loader);
+int net_loader_dispatch_until(struct net_loader *loader, uint64_t deadline);
 /* Called from a media engine's thread too: sets a mark and wakes the network thread, nothing more. */
 void net_loader_ring(struct net_loader *loader);
 int net_loader_takes(const char *location);
