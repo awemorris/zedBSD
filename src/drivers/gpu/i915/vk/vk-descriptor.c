@@ -545,6 +545,54 @@ drv_i915_gfx_dpool_free(
 }
 
 /*
+ * Frees descriptor sets: vkFreeDescriptorSets.
+ *
+ * The command is [device][pool][count][count]{identity} and the reply
+ * [result].  Each set of the pool named is withdrawn: command buffers that
+ * bound it let go of it, then it is freed.  An unknown set, or one of
+ * another pool, is not an error.
+ */
+int
+drv_i915_gfx_free_dsets(
+	struct i915_render_session *session,
+	struct i915_wire_reader *reader,
+	struct i915_wire_writer *reply)
+{
+	struct i915_gfx_dset *dset;
+	void *pool;
+	uint64_t pool_id;
+	uint64_t identity;
+	uint64_t count;
+	uint64_t index;
+
+	/* The device, the pool and the count twice. */
+	(void)drv_i915_wire_read_u64(reader);
+	pool_id = drv_i915_wire_read_u64(reader);
+	(void)drv_i915_wire_read_u32(reader);
+	count = drv_i915_wire_read_u64(reader);
+	if (reader->error != 0 || count > (uint64_t)(reader->size - reader->offset))
+		return EINVAL;
+
+	/* Each set of the pool. */
+	pool = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_POOL, pool_id);
+	for (index = 0U; index < count; index++) {
+		identity = drv_i915_wire_read_u64(reader);
+		if (reader->error != 0)
+			return EINVAL;
+		dset = drv_i915_object_lookup(session, I915_VK_OBJ_DESCRIPTOR_SET, identity);
+		if (dset == NULL || pool == NULL || dset->pool != pool)
+			continue;
+		drv_i915_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, identity);
+		drv_i915_gfx_forget(session, I915_VK_OBJ_DESCRIPTOR_SET, dset);
+		kern_free(dset);
+	}
+
+	/* Succeeded: the reply carries VK_SUCCESS. */
+	drv_i915_wire_reply_u32(reply, 0U);
+	return 0;
+}
+
+/*
  * Resets a VkDescriptorPool: vkResetDescriptorPool.
  *
  * The command is [device][identity][flags] and the reply [result].  The

@@ -70,6 +70,7 @@
 #define I915_VK_COMMAND_DESTROY_DESCRIPTOR_POOL		75U
 #define I915_VK_COMMAND_RESET_DESCRIPTOR_POOL		76U
 #define I915_VK_COMMAND_ALLOCATE_DESCRIPTOR_SETS	77U
+#define I915_VK_COMMAND_FREE_DESCRIPTOR_SETS		78U
 #define I915_VK_COMMAND_UPDATE_DESCRIPTOR_SETS		79U
 #define I915_VK_COMMAND_CREATE_FRAMEBUFFER		80U
 #define I915_VK_COMMAND_DESTROY_FRAMEBUFFER		81U
@@ -196,6 +197,9 @@ drv_i915_gfx_obj_dispatch(
 		break;
 	case I915_VK_COMMAND_ALLOCATE_DESCRIPTOR_SETS:
 		error = drv_i915_gfx_allocate_dsets(session, reader, reply);
+		break;
+	case I915_VK_COMMAND_FREE_DESCRIPTOR_SETS:
+		error = drv_i915_gfx_free_dsets(session, reader, reply);
 		break;
 	case I915_VK_COMMAND_UPDATE_DESCRIPTOR_SETS:
 		error = drv_i915_gfx_update_dsets(session, reader);
