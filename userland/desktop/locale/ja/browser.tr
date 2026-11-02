@@ -1,0 +1,11 @@
+# The browser's texts in Japanese (domain browser). tools/i18n/tr.py update keeps the translations.
+# userland/desktop/locale/browser.keys:4
+msg	This page isn't responding	このページは応答していません
+# userland/desktop/locale/browser.keys:5
+msg	A script on {1} has been running for {2} seconds. You can wait for it or stop it.	{1} のスクリプトが {2} 秒間動き続けています。待つか、スクリプトを止めることができます。
+# userland/desktop/locale/browser.keys:6
+msg	Wait	待つ
+# userland/desktop/locale/browser.keys:7
+msg	Stop script	スクリプトを止める
+# userland/desktop/locale/browser.keys:8
+msg	this page	このページ

@@ -45,6 +45,9 @@ static VkResult present_targets(struct shell_present *present);
 static void present_targets_free(struct shell_present *present);
 static VkResult present_commands(struct shell_present *present);
 static VkResult present_wait(struct shell_present *present);
+static VkResult present_overlay(struct shell_present *present, const struct shell_overlay *overlay, VkImage image);
+static VkResult present_overlay_fit(struct shell_present *present, VkDeviceSize size);
+static void present_overlay_free(struct shell_present *present);
 
 /*
  * Makes the Vulkan objects of the window: the instance and surface, the
@@ -190,6 +193,7 @@ VkResult
 shell_present_frame(
 	struct shell_present *present,
 	struct browser_view *view,
+	const struct shell_overlay *overlay,
 	uint64_t *serial)
 {
 	VkCommandBufferBeginInfo begin;
@@ -244,6 +248,11 @@ shell_present_frame(
 			return failure.result;
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
+
+	/* The picture over the page (the question's card), copied into the image's middle when there is one. */
+	error = present_overlay(present, overlay, target.image);
+	if (error != VK_SUCCESS)
+		return error;
 
 	/* The recording ends. */
 	present->operation = "vkEndCommandBuffer";
@@ -307,6 +316,9 @@ shell_present_close(
 		/* The view's renderer and framebuffers on the device, then the images' views. */
 		browser_view_set_gpu(view, NULL);
 		present_targets_free(present);
+
+		/* The picture's memory. */
+		present_overlay_free(present);
 
 		/* The frame's commands and fence. */
 		if (present->pool != VK_NULL_HANDLE)
@@ -499,6 +511,13 @@ present_swapchain(
 	create.imageExtent = present->extent;
 	create.imageArrayLayers = 1U;
 	create.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+	/* Copies into the images too where the surface allows (the question's card over the page). */
+	present->copy = 0;
+	if ((capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0U) {
+		create.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		present->copy = 1;
+	}
 	create.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	create.preTransform = capabilities.currentTransform;
 	create.presentMode = VK_PRESENT_MODE_FIFO_KHR;
@@ -659,4 +678,178 @@ present_wait(
 	/* Succeeded: the frame has finished. */
 	present->in_flight = 0;
 	return VK_SUCCESS;
+}
+
+/*
+ * Records the copy of a picture into the middle of an image the view drew
+ * (left ready to present, and left so): the picture in host memory, the
+ * image made a copy's destination, the copy, and the image ready to
+ * present again.  Nothing without a picture, or where the images take no
+ * copies (the picture then does not show).  For the drawing thread, the
+ * last frame's work finished.
+ */
+static VkResult
+present_overlay(
+	struct shell_present *present,
+	const struct shell_overlay *overlay,
+	VkImage image)
+{
+	VkImageMemoryBarrier barrier;
+	VkBufferImageCopy region;
+	struct kl_rect place;
+	uint32_t *words;
+	uint32_t pixel;
+	VkResult error;
+	size_t count;
+	size_t index;
+	int row;
+	int column;
+
+	/* No picture, or images that take no copies. */
+	if (overlay == NULL || overlay->width == 0U || !present->copy)
+		return VK_SUCCESS;
+	shell_render_place_overlay(overlay, present->extent.width, present->extent.height, &place);
+	if (place.width <= 0 || place.height <= 0)
+		return VK_SUCCESS;
+
+	/* Host memory for the part that fits. */
+	count = (size_t)place.width * (size_t)place.height;
+	error = present_overlay_fit(present, (VkDeviceSize)(count * sizeof(uint32_t)));
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Each row of the part, in the image's order of bytes (blue first as the words are, or red first). */
+	words = present->overlay_mapped;
+	for (row = 0; row < place.height; row++) {
+		for (column = 0; column < place.width; column++) {
+			pixel = overlay->pixels[(size_t)row * overlay->width + (size_t)column];
+			index = (size_t)row * (size_t)place.width + (size_t)column;
+			if (present->format == VK_FORMAT_R8G8B8A8_UNORM) {
+				words[index] = (pixel & 0xff00ff00U) | ((pixel >> 16) & 0xffU) | ((pixel & 0xffU) << 16);
+			} else {
+				words[index] = pixel;
+			}
+		}
+	}
+
+	/* The image, from ready to present to a copy's destination, after the view's drawing. */
+	memset(&barrier, 0, sizeof(barrier));
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = image;
+	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.levelCount = 1U;
+	barrier.subresourceRange.layerCount = 1U;
+	vkCmdPipelineBarrier(present->command, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, NULL,
+	    0U, NULL, 1U, &barrier);
+
+	/* The copy into the middle. */
+	memset(&region, 0, sizeof(region));
+	region.bufferRowLength = (uint32_t)place.width;
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.layerCount = 1U;
+	region.imageOffset.x = place.x;
+	region.imageOffset.y = place.y;
+	region.imageExtent.width = (uint32_t)place.width;
+	region.imageExtent.height = (uint32_t)place.height;
+	region.imageExtent.depth = 1U;
+	vkCmdCopyBufferToImage(present->command, present->overlay, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1U, &region);
+
+	/* The image ready to present again. */
+	barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barrier.dstAccessMask = 0U;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	vkCmdPipelineBarrier(present->command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0U, 0U, NULL, 0U, NULL,
+	    1U, &barrier);
+
+	/* Succeeded: the copy is recorded. */
+	return VK_SUCCESS;
+}
+
+/* Makes the picture's host memory hold so many bytes (a buffer the copies read, mapped for good); the last frame's work finished. */
+static VkResult
+present_overlay_fit(
+	struct shell_present *present,
+	VkDeviceSize size)
+{
+	VkPhysicalDeviceMemoryProperties properties;
+	VkMemoryRequirements requirements;
+	VkBufferCreateInfo buffer;
+	VkMemoryAllocateInfo allocate;
+	VkMemoryPropertyFlags wanted;
+	uint32_t type;
+	VkResult error;
+
+	/* Room enough already. */
+	if (present->overlay != VK_NULL_HANDLE && present->overlay_size >= size)
+		return VK_SUCCESS;
+	present_overlay_free(present);
+
+	/* The buffer the copies read. */
+	memset(&buffer, 0, sizeof(buffer));
+	buffer.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	buffer.size = size;
+	buffer.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	present->operation = "vkCreateBuffer";
+	error = vkCreateBuffer(present->device, &buffer, NULL, &present->overlay);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Host memory the CPU writes and the GPU sees without flushes. */
+	vkGetBufferMemoryRequirements(present->device, present->overlay, &requirements);
+	vkGetPhysicalDeviceMemoryProperties(present->physical, &properties);
+	wanted = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	for (type = 0U; type < properties.memoryTypeCount; type++) {
+		if ((requirements.memoryTypeBits & (1U << type)) != 0U && (properties.memoryTypes[type].propertyFlags & wanted) == wanted)
+			break;
+	}
+	if (type == properties.memoryTypeCount) {
+		present->operation = "finding host memory for the picture";
+		return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+	}
+
+	/* The memory, bound and mapped. */
+	memset(&allocate, 0, sizeof(allocate));
+	allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocate.allocationSize = requirements.size;
+	allocate.memoryTypeIndex = type;
+	present->operation = "vkAllocateMemory";
+	error = vkAllocateMemory(present->device, &allocate, NULL, &present->overlay_memory);
+	if (error != VK_SUCCESS)
+		return error;
+	present->operation = "vkBindBufferMemory";
+	error = vkBindBufferMemory(present->device, present->overlay, present->overlay_memory, 0U);
+	if (error != VK_SUCCESS)
+		return error;
+	present->operation = "vkMapMemory";
+	error = vkMapMemory(present->device, present->overlay_memory, 0U, VK_WHOLE_SIZE, 0U, &present->overlay_mapped);
+	if (error != VK_SUCCESS)
+		return error;
+
+	/* Succeeded: the memory holds the size. */
+	present->overlay_size = size;
+	return VK_SUCCESS;
+}
+
+/* Releases the picture's host memory (nothing runs that reads it). */
+static void
+present_overlay_free(
+	struct shell_present *present)
+{
+	/* The buffer and its memory, where made (unmapped with it). */
+	if (present->overlay != VK_NULL_HANDLE)
+		vkDestroyBuffer(present->device, present->overlay, NULL);
+	if (present->overlay_memory != VK_NULL_HANDLE)
+		vkFreeMemory(present->device, present->overlay_memory, NULL);
+	present->overlay = VK_NULL_HANDLE;
+	present->overlay_memory = VK_NULL_HANDLE;
+	present->overlay_mapped = NULL;
+	present->overlay_size = 0U;
 }

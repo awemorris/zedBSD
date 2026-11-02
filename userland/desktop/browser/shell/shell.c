@@ -102,6 +102,9 @@
  *
  * The sign-in codes of mail (mail.c, WS169 p005).
  *
+ * The question about a page that does not respond (prompt.c): its card
+ * over the page and the window's input to it while it shows.
+ *
  * A left press that may drag a picture out of the window (ws189-p003):
  * whether one is held, and where it went down; drag_asked says the view
  * was asked for the image there and the press is still held (its answer,
@@ -152,6 +155,7 @@ struct shell_state {
 	int touch_due;
 	unsigned long page_number;
 	struct shell_mail mail;
+	struct shell_prompt prompt;
 	int drag_armed;
 	int drag_press_x;
 	int drag_press_y;
@@ -244,6 +248,7 @@ shell_run(
 	int changed;
 	int timeout;
 	int mail_due;
+	int prompt_due;
 	int missed;
 	int retry;
 	int status;
@@ -362,6 +367,10 @@ shell_run(
 	if (state.latency.thread != NULL)
 		state.window.latency = &state.latency;
 
+	/* The question about a page that does not respond, in the desktop's language, placed in the window. */
+	shell_prompt_open(&state.prompt, options->fonts, kl_app_language(state.window.app));
+	shell_prompt_resize(&state.prompt, &state.render, state.width, state.height, shell_clock());
+
 	/* The line the tests wait for, and the titlebar's state (the page's own once one is shown; the view tells of a later one). */
 	printf("ZBROWSER READY width=%u height=%u document=%.0f\n", (unsigned)state.width,
 	    (unsigned)state.height, browser_view_document_height(state.view));
@@ -383,16 +392,24 @@ shell_run(
 			if (status != 0)
 				break;
 
-			/* The page at the new size. */
+			/* The page at the new size, and the question's card placed in it. */
 			status = shell_resize_view(&state);
 			if (status != 0)
 				break;
+			shell_prompt_resize(&state.prompt, &state.render, state.width, state.height, shell_clock());
 		}
 
-		/* The desktop's appearance changed: the page in the new scheme. */
+		/* The desktop's appearance changed: the page in the new scheme, and the question's card in the new theme. */
 		if (state.window.themed) {
 			state.window.themed = 0;
 			shell_color_scheme(&state);
+			shell_prompt_redraw(&state.prompt, &state.render, shell_clock());
+		}
+
+		/* The desktop's language changed: the question's words in it. */
+		if (state.window.languaged) {
+			state.window.languaged = 0;
+			shell_prompt_language(&state.prompt, &state.render, state.window.language);
 		}
 
 		/* The frames the drawing thread drew: shown (the CPU's way) and told (FRAME); a frame the window cannot take yet is shown again soon. */
@@ -410,6 +427,11 @@ shell_run(
 		mail_due = shell_mail_timeout(&state.mail, shell_clock());
 		if (mail_due >= 0 && (timeout < 0 || mail_due < timeout))
 			timeout = mail_due;
+
+		/* The page's running task, looked at for the question about a page that does not respond (when to look again). */
+		prompt_due = shell_prompt_round(&state.prompt, state.view, &state.render, shell_clock());
+		if (prompt_due >= 0 && (timeout < 0 || prompt_due < timeout))
+			timeout = prompt_due;
 
 		/* A frame that waits for the window is tried again after a short wait. */
 		if (retry && (timeout < 0 || timeout > SHELL_RETRY_MS))
@@ -571,7 +593,19 @@ shell_input(
 	uint32_t modifiers;
 	int distance_x;
 	int distance_y;
+	int taken;
 	int error;
+
+	/* While the question about a page that does not respond shows, its card takes the input, and the keys it leaves go to the shortcuts only. */
+	if (state->prompt.shown) {
+		taken = shell_prompt_input(&state->prompt, state->view, &state->render, event, shell_clock());
+		if (taken)
+			return;
+		if (event->type == SHELL_EVENT_KEY) {
+			(void)shell_shortcut(state, event);
+			return;
+		}
+	}
 
 	/* The modifiers held, as the view names them. */
 	modifiers = shell_key_modifiers(event->modifiers);
@@ -1274,12 +1308,13 @@ shell_resize_live(
 	state = data;
 	(void)browser_view_resize(state->view, width, height);
 
-	/* The drawing thread draws at it. */
+	/* The drawing thread draws at it, with the question's card placed in it. */
 	if (state->use_cpu)
 		return;
 	state->width = width;
 	state->height = height;
 	shell_render_resize(&state->render, width, height, 0, 0U);
+	shell_prompt_resize(&state->prompt, &state->render, width, height, shell_clock());
 }
 
 /*
@@ -1354,9 +1389,10 @@ shell_release(
 	shell_latency_stop(&state->latency);
 	state->window.latency = NULL;
 
-	/* The drawing thread, stopped before what it draws with goes. */
+	/* The drawing thread, stopped before what it draws with goes, and the question it drew the card of. */
 	shell_render_stop(&state->render, &state->window);
 	state->window.render = NULL;
+	shell_prompt_close(&state->prompt);
 
 	/* The presenter before the window whose surface it draws. */
 	shell_present_close(&state->present, state->view);

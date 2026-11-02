@@ -13,7 +13,17 @@
 #  D. Ctrl+Q closes the window; the browser's LATENCY line (the window's thread's longest wait for an event,
 #     shell/latency.c) has no wait over 100 ms.
 # Cases: busy (busy.html, a 30 s loop, GPU), xhr (hung-xhr.html, a synchronous XMLHttpRequest to 192.0.2.1, GPU),
-# busy-cpu (busy.html with --no-gpu).  Every step's screenshot (VNC of the Venus output, not the console) is in OUT.
+# busy-cpu (busy.html with --no-gpu).
+# ws345-p014, the question about a page that does not respond: spin.html's timer script runs 15 s ("spin start" ...
+# "spin end"; "tick" lines every half second while no script runs):
+#  E. the question shows 8 to 13 s after "spin start" (PROMPT shown), and goes by itself when the script ends
+#     (PROMPT hidden reason=ended, then "spin end");
+#  F. after the titlebar's reload, the question again, and its Stop script clicked: PROMPT stop error=0, the question
+#     goes, no "spin end" comes and new "tick" lines do (the page runs its timers again);
+#  G. after a reload, the question again, and Enter (Wait): PROMPT wait, the question goes, and the script ends by
+#     itself ("spin end": 15 s, before a second question would come at 20 s);
+#  and D as above.  Cases: prompt (GPU), prompt-cpu (--no-gpu).  SHELL_GUEST_CASES (default all) names the cases run.
+# Every step's screenshot (VNC of the Venus output, not the console) is in OUT.
 # The judgement uses the browser's and the compositor's logs read over SSH and the screenshots; never the serial
 # console.  Last line: shell-guest: PASS or shell-guest: FAIL.
 #
@@ -74,9 +84,10 @@ wait_more() {
 	return 1
 }
 
-# One case: run_case NAME PAGE START END [BROWSER OPTION].
-run_case() {
-	name=$1 page=$2 start=$3 end=$4 option=${5:-}
+# Starts the compositor and the browser on a page: start_session NAME PAGE [BROWSER OPTION]; sets client, surface, wx and
+# wy (the window's content on the output); nonzero when the browser did not come up.
+start_session() {
+	name=$1 page=$2 option=${3:-}
 	guest "$stop_all" >/dev/null
 	guest 'export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0
 picture=; [ -f /usr/share/keiland/wallpaper.png ] && picture=--wallpaper=/usr/share/keiland/wallpaper.png
@@ -85,13 +96,53 @@ picture=; [ -f /usr/share/keiland/wallpaper.png ] && picture=--wallpaper=/usr/sh
 	if ! wait_more /tmp/b.log 'ZBROWSER READY width=900 height=600' 0 30; then
 		result FAIL "$name" ready "no READY line"
 		guest 'cat /tmp/b.log' > "$out/$name-browser.log"
-		return
+		return 1
 	fi
 	wait_more /tmp/zdesktop.log 'KWL TITLEBAR control client=[0-9]+ surface=[0-9]+ where=[a-z]* id=3 ' 0 20
 	sleep 2
 	set -- $(last /tmp/zdesktop.log 'KWL MAP client=' | sed -n 's/.*client=\([0-9]*\) surface=\([0-9]*\) x=\(-*[0-9]*\) y=\(-*[0-9]*\).*/\1 \2 \3 \4/p')
 	client=${1:-0} surface=${2:-0} wx=${3:-0} wy=${4:-0}
 	echo "$name: window client $client surface $surface at $wx,$wy" >> "$out/notes.txt"
+	return 0
+}
+
+# Clicks the titlebar's reload control: reload NAME; nonzero when the compositor's log has none.
+reload() {
+	set -- $(last /tmp/zdesktop.log "KWL TITLEBAR control client=$client surface=$surface where=[a-z]* id=3 " | sed -n 's/.* x=\(-*[0-9]*\) y=\(-*[0-9]*\) width=\([0-9]*\) height=\([0-9]*\).*/\1 \2 \3 \4/p')
+	[ -n "${1:-}" ] || return 1
+	rx=$(($1 + $3 / 2)) ry=$(($2 + $4 / 2))
+	pointer move $((rx - 2)) "$ry" sleep 150 move "$rx" "$ry" sleep 300 down sleep 60 up sleep 200
+	return 0
+}
+
+# Ctrl+Q, and the window's thread's waits and the errors judged: finish NAME.
+finish() {
+	pointer move $((wx + 450)) $((wy + 300)) sleep 300
+	keys '<ctrl-q>'
+	wait_more /tmp/b.log 'ZBROWSER LATENCY ' 0 15
+	latency=$(last /tmp/b.log 'ZBROWSER LATENCY ')
+	over=$(echo "$latency" | sed -n 's/.* over_100ms=\([0-9]*\).*/\1/p')
+	samples=$(echo "$latency" | sed -n 's/.* samples=\([0-9]*\).*/\1/p')
+	if [ -n "$over" ] && [ "$over" = 0 ] && [ "${samples:-0}" -gt 100 ] 2>/dev/null; then
+		result PASS "$1" latency "$latency"
+	else
+		result FAIL "$1" latency "'$latency'"
+	fi
+	errors=$(count /tmp/b.log 'ZBROWSER ERROR')
+	if [ "${errors:-1}" = 0 ]; then
+		result PASS "$1" errors "no ZBROWSER ERROR line"
+	else
+		result FAIL "$1" errors "$(last /tmp/b.log 'ZBROWSER ERROR')"
+	fi
+	guest 'cat /tmp/b.log' > "$out/$1-browser.log"
+	guest 'grep -E "KWL (MAP|RESIZE|CONFIGURE|ERROR|GPU_ERROR)" /tmp/zdesktop.log' > "$out/$1-zdesktop.log"
+	guest "$stop_all" >/dev/null
+}
+
+# One case: run_case NAME PAGE START END [BROWSER OPTION].
+run_case() {
+	name=$1 page=$2 start=$3 end=$4 option=${5:-}
+	start_session "$name" "$page" "$option" || return
 
 	# The page's script runs.
 	if ! wait_more /tmp/b.log "ZBROWSER CONSOLE level=0 $start\$" 0 20; then
@@ -161,26 +212,105 @@ picture=; [ -f /usr/share/keiland/wallpaper.png ] && picture=--wallpaper=/usr/sh
 	shot "$name-4-location"
 
 	# D. Ctrl+Q, and the window's thread's waits.
-	pointer move $((wx + 450)) $((wy + 300)) sleep 300
-	keys '<ctrl-q>'
-	wait_more /tmp/b.log 'ZBROWSER LATENCY ' 0 15
-	latency=$(last /tmp/b.log 'ZBROWSER LATENCY ')
-	over=$(echo "$latency" | sed -n 's/.* over_100ms=\([0-9]*\).*/\1/p')
-	samples=$(echo "$latency" | sed -n 's/.* samples=\([0-9]*\).*/\1/p')
-	if [ -n "$over" ] && [ "$over" = 0 ] && [ "${samples:-0}" -gt 100 ] 2>/dev/null; then
-		result PASS "$name" latency "$latency"
-	else
-		result FAIL "$name" latency "'$latency'"
+	finish "$name"
+}
+
+# Waits up to SECONDS for a new question (more PROMPT shown lines than BEFORE) and reads its Stop script button into
+# sx and sy (the output's place of its middle): prompt_shown BEFORE SECONDS.
+prompt_shown() {
+	wait_more /tmp/b.log 'ZBROWSER PROMPT shown ' "$1" "$2" || return 1
+	shown=$(last /tmp/b.log 'ZBROWSER PROMPT shown ')
+	set -- $(echo "$shown" | sed -n 's/.* stop=\([0-9]*\),\([0-9]*\),\([0-9]*\),\([0-9]*\).*/\1 \2 \3 \4/p')
+	[ -n "${1:-}" ] || return 1
+	sx=$((wx + $1 + $3 / 2)) sy=$((wy + $2 + $4 / 2))
+	return 0
+}
+
+# The question about a page that does not respond: run_prompt NAME [BROWSER OPTION] (E, F, G and D above).
+run_prompt() {
+	name=$1 option=${2:-}
+	start_session "$name" spin.html "$option" || return
+
+	# E. The question 10 s into the script, and gone at its end.
+	if ! wait_more /tmp/b.log 'ZBROWSER CONSOLE level=0 spin start$' 0 20; then
+		result FAIL "$name" script "no 'spin start' line"
 	fi
-	errors=$(count /tmp/b.log 'ZBROWSER ERROR')
-	if [ "${errors:-1}" = 0 ]; then
-		result PASS "$name" errors "no ZBROWSER ERROR line"
+	begin=$(date +%s)
+	pointer move $((wx + 100)) $((wy + 500)) sleep 300
+	if prompt_shown 0 16; then
+		took=$(($(date +%s) - begin))
+		if [ "$took" -ge 8 ] && [ "$took" -le 13 ]; then
+			result PASS "$name" shown "the question $took s after 'spin start': $(echo "$shown" | cut -c1-150)"
+		else
+			result FAIL "$name" shown "the question $took s after 'spin start'"
+		fi
 	else
-		result FAIL "$name" errors "$(last /tmp/b.log 'ZBROWSER ERROR')"
+		result FAIL "$name" shown "no PROMPT shown within 16 s of 'spin start'"
 	fi
-	guest 'cat /tmp/b.log' > "$out/$name-browser.log"
-	guest 'grep -E "KWL (MAP|RESIZE|CONFIGURE|ERROR|GPU_ERROR)" /tmp/zdesktop.log' > "$out/$name-zdesktop.log"
-	guest "$stop_all" >/dev/null
+	sleep 1
+	shot "$name-1-shown"
+	if wait_more /tmp/b.log 'ZBROWSER PROMPT hidden .*reason=ended' 0 10 && wait_more /tmp/b.log 'ZBROWSER CONSOLE level=0 spin end$' 0 5; then
+		result PASS "$name" ended "the question went by itself at the script's end: $(last /tmp/b.log 'ZBROWSER PROMPT hidden ')"
+	else
+		result FAIL "$name" ended "no PROMPT hidden reason=ended and 'spin end' ($(last /tmp/b.log 'ZBROWSER PROMPT '))"
+	fi
+	sleep 1
+	shot "$name-2-ended"
+
+	# F. Reloaded, the question again, and Stop script clicked.
+	starts=$(count /tmp/b.log 'ZBROWSER CONSOLE level=0 spin start$')
+	shows=$(count /tmp/b.log 'ZBROWSER PROMPT shown ')
+	ends=$(count /tmp/b.log 'ZBROWSER CONSOLE level=0 spin end$')
+	if ! reload; then
+		result FAIL "$name" stop "no reload control in the compositor's log"
+	elif ! wait_more /tmp/b.log 'ZBROWSER CONSOLE level=0 spin start$' "$starts" 10 || ! prompt_shown "$shows" 16; then
+		result FAIL "$name" stop "no new 'spin start' and question after the reload"
+	else
+		sleep 1
+		shot "$name-3-asked"
+		pointer move $((sx - 3)) "$sy" sleep 200 move "$sx" "$sy" sleep 300 down sleep 80 up sleep 200
+		if wait_more /tmp/b.log 'ZBROWSER PROMPT stop task=[0-9]* error=0' 0 5 && wait_more /tmp/b.log 'ZBROWSER PROMPT hidden .*reason=answered' 0 3; then
+			ticks=$(count /tmp/b.log 'ZBROWSER CONSOLE level=0 tick ')
+			sleep 3
+			after=$(count /tmp/b.log 'ZBROWSER CONSOLE level=0 tick ')
+			still=$(count /tmp/b.log 'ZBROWSER CONSOLE level=0 spin end$')
+			if [ "${after:-0}" -gt "${ticks:-0}" ] && [ "${still:-0}" = "${ends:-0}" ] 2>/dev/null; then
+				result PASS "$name" stop "Stop script ($sx,$sy) ended the script: $(last /tmp/b.log 'ZBROWSER PROMPT stop '), $((after - ticks)) ticks in 3 s after, no 'spin end'"
+			else
+				result FAIL "$name" stop "after the stop: ticks $ticks -> $after, 'spin end' $ends -> $still"
+			fi
+		else
+			result FAIL "$name" stop "no PROMPT stop error=0 and hidden reason=answered after the click at $sx,$sy ($(last /tmp/b.log 'ZBROWSER PROMPT '))"
+		fi
+	fi
+	shot "$name-4-stopped"
+
+	# G. Reloaded, the question again, and Enter (Wait): the script then ends by itself.
+	starts=$(count /tmp/b.log 'ZBROWSER CONSOLE level=0 spin start$')
+	shows=$(count /tmp/b.log 'ZBROWSER PROMPT shown ')
+	ends=$(count /tmp/b.log 'ZBROWSER CONSOLE level=0 spin end$')
+	if ! reload; then
+		result FAIL "$name" wait "no reload control in the compositor's log"
+	elif ! wait_more /tmp/b.log 'ZBROWSER CONSOLE level=0 spin start$' "$starts" 10 || ! prompt_shown "$shows" 16; then
+		result FAIL "$name" wait "no new 'spin start' and question after the reload"
+	else
+		waits=$(count /tmp/b.log 'ZBROWSER PROMPT wait ')
+		keys '<ret>'
+		if wait_more /tmp/b.log 'ZBROWSER PROMPT wait ' "$waits" 5 && wait_more /tmp/b.log 'ZBROWSER CONSOLE level=0 spin end$' "$ends" 10; then
+			again=$(count /tmp/b.log 'ZBROWSER PROMPT shown ')
+			if [ "${again:-0}" = $((shows + 1)) ] 2>/dev/null; then
+				result PASS "$name" wait "Enter waited ($(last /tmp/b.log 'ZBROWSER PROMPT wait ')) and the script ended by itself"
+			else
+				result FAIL "$name" wait "the question came again before the script's end ($again shown lines)"
+			fi
+		else
+			result FAIL "$name" wait "no PROMPT wait and 'spin end' after Enter ($(last /tmp/b.log 'ZBROWSER PROMPT '))"
+		fi
+	fi
+	shot "$name-5-waited"
+
+	# D. Ctrl+Q, the waits and the errors.
+	finish "$name"
 }
 
 # The image, built from this tree.
@@ -210,9 +340,17 @@ if ! timeout 300 python3 plan/tools/guest/guest.py wait > "$out/wait.log" 2>&1; 
 fi
 
 # The cases.
-run_case busy busy.html 'busy start' 'busy end'
-run_case xhr hung-xhr.html 'xhr start' 'xhr end'
-run_case busy-cpu busy.html 'busy start' 'busy end' --no-gpu
+cases=${SHELL_GUEST_CASES:-busy xhr busy-cpu prompt prompt-cpu}
+for each in $cases; do
+	case $each in
+	busy) run_case busy busy.html 'busy start' 'busy end' ;;
+	xhr) run_case xhr hung-xhr.html 'xhr start' 'xhr end' ;;
+	busy-cpu) run_case busy-cpu busy.html 'busy start' 'busy end' --no-gpu ;;
+	prompt) run_prompt prompt ;;
+	prompt-cpu) run_prompt prompt-cpu --no-gpu ;;
+	*) result FAIL "$each" case "no such case" ;;
+	esac
+done
 
 # The guest stopped, and the summary.
 timeout 120 plan/ws035/tests/zdesktop-guest.sh stop > /dev/null 2>&1

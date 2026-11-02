@@ -82,3 +82,7 @@ Esc).
 | Try again | もう一度お試しください | after a failure |
 | Service is not running | サービスが動いていません | |
 | Coming in a later version | 今後のバージョンで対応予定 | |
+| Page (a web page) | ページ | the browser |
+| Script (of a web page) | スクリプト | |
+| Wait (a button) | 待つ | the browser's question about a page that does not respond |
+| Isn't responding | 応答していません | |
