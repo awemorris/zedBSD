@@ -119,6 +119,7 @@ static int monitor_poll_ms(const struct timespec *deadline);
 static void monitor_report_grant(int *started);
 static void monitor_stop_child(pid_t child, int socket_end);
 static void monitor_reap(pid_t child);
+static void monitor_log_text(const char *text, char *out, size_t size);
 
 /*
  * Runs the monitor of one connection on descriptor client until the
@@ -704,6 +705,7 @@ monitor_pubkey_login(
 	int status;
 	int granted;
 	int verified;
+	char shown[SSH_USER_MAX + 1];
 
 	/* Reads the user, the key blob, the signed data and the signature, with nothing after them. */
 	ssh_reader_init(&reader, body, size);
@@ -729,11 +731,14 @@ monitor_pubkey_login(
 		return status;
 	monitor->tries++;
 
+	/* Takes the user as the log may show it. */
+	monitor_log_text(user, shown, sizeof(shown));
+
 	/* Checks, in order, what was signed, who logs in, the key, and the signature. */
 	granted = 0;
 	status = monitor_signed_data_ok(monitor, signed_data, signed_size, blob, blob_size);
 	if (status != 0) {
-		syslog(LOG_AUTH | LOG_WARNING, "monitor: signed data for %.64s is not this session's", user);
+		syslog(LOG_AUTH | LOG_WARNING, "monitor: signed data for %.64s is not this session's", shown);
 	} else {
 		status = monitor_key_allowed(monitor, public_key, &uid);
 		if (status == 0) {
@@ -748,7 +753,7 @@ monitor_pubkey_login(
 	if (granted) {
 		status = monitor_put_result(0, reply);
 	} else {
-		syslog(LOG_AUTH | LOG_NOTICE, "Failed publickey for %.64s", user);
+		syslog(LOG_AUTH | LOG_NOTICE, "Failed publickey for %.64s", shown);
 		status = monitor_put_result(EACCES, reply);
 	}
 	if (status != 0)
@@ -788,6 +793,7 @@ monitor_password_login(
 	int status;
 	int allowed;
 	int correct;
+	char shown[SSH_USER_MAX + 1];
 
 	/* Reads the user and the password, with nothing after them. */
 	ssh_reader_init(&reader, body, size);
@@ -833,7 +839,9 @@ monitor_password_login(
 	if (allowed == 0 && correct == 0) {
 		status = monitor_put_result(0, reply);
 	} else {
-		syslog(LOG_AUTH | LOG_NOTICE, "Failed password for %.64s", user);
+		/* Logs the failure with the user as the log may show it. */
+		monitor_log_text(user, shown, sizeof(shown));
+		syslog(LOG_AUTH | LOG_NOTICE, "Failed password for %.64s", shown);
 		status = monitor_put_result(EACCES, reply);
 	}
 	if (status != 0)
@@ -901,6 +909,7 @@ monitor_login_record(
 	struct ssh_buf *reply)
 {
 	char tty[SSHD_TTY_MAX];
+	char shown[SSHD_TTY_MAX];
 	const char *reason;
 	pid_t pid;
 	unsigned index;
@@ -959,7 +968,9 @@ monitor_login_record(
 	/* Writes the record and keeps it for its logout, or says why not. */
 	result = 0;
 	if (reason != NULL) {
-		syslog(LOG_AUTH | LOG_NOTICE, "monitor: login record of %.17s refused: %s", tty, reason);
+		/* Logs the refusal with the terminal as the log may show it. */
+		monitor_log_text(tty, shown, sizeof(shown));
+		syslog(LOG_AUTH | LOG_NOTICE, "monitor: login record of %.17s refused: %s", shown, reason);
 		result = EACCES;
 	} else {
 		status = sshd_login_record(monitor->user, tty, pid, 1);
@@ -994,6 +1005,7 @@ monitor_logout_record(
 	struct ssh_buf *reply)
 {
 	char tty[SSHD_TTY_MAX];
+	char shown[SSHD_TTY_MAX];
 	pid_t pid;
 	unsigned index;
 	int valid;
@@ -1023,8 +1035,11 @@ monitor_logout_record(
 		monitor->records[index].used = 0;
 		break;
 	}
-	if (result == EACCES)
-		syslog(LOG_AUTH | LOG_NOTICE, "monitor: logout record of %.17s refused: no such record", tty);
+	if (result == EACCES) {
+		/* Logs the refusal with the terminal as the log may show it. */
+		monitor_log_text(tty, shown, sizeof(shown));
+		syslog(LOG_AUTH | LOG_NOTICE, "monitor: logout record of %.17s refused: no such record", shown);
+	}
 
 	/* Answers with the outcome. */
 	status = monitor_put_result(result, reply);
@@ -2059,4 +2074,34 @@ monitor_reap(
 	do {
 		reaped = waitpid(child, &status, 0);
 	} while (reaped < 0 && errno == EINTR);
+}
+
+/*
+ * Copies text into out, of size bytes, for a line of the log: every byte
+ * that is not printable ASCII (a control byte, DEL, or a byte of a
+ * character outside ASCII) becomes '?', so that a name the peer chose cannot
+ * end the line, start a forged one, or send a terminal that shows the log
+ * a control sequence.  A longer text is cut to size - 1 bytes.
+ */
+static void
+monitor_log_text(
+	const char *text,
+	char *out,
+	size_t size)
+{
+	size_t index;
+	unsigned char byte;
+
+	/* Copies the text up to the room, replacing what is not printable. */
+	for (index = 0;
+	     index + 1U < size && text[index] != '\0';
+	     index++) {
+		byte = (unsigned char)text[index];
+		if (byte < 0x20U || byte > 0x7eU)
+			byte = '?';
+		out[index] = (char)byte;
+	}
+
+	/* Ends the copy as a string. */
+	out[index] = '\0';
 }
