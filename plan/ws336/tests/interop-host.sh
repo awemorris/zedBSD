@@ -19,6 +19,16 @@
 # stdin.  Expected values come from the formats (sshd(8) known_hosts lines) and from the test's own data; OpenSSH is
 # the peer, never the source of an expected value.
 #   sh plan/ws336/tests/interop-host.sh
+#
+# Peer B: zedBSD's sshd (the real listener, monitor and children, without root), built with the test's shim
+# (sshd-host-shim.c: the account the test runs as gets the home and the shell of the server's own directory, the log
+# goes to a file there), listening on 127.0.0.1 and checked to be the test's own process before any client talks to
+# it.  From the host's OpenSSH ssh, scp and sftp: exec and the exit status, 8 MiB through stdin and back, -tt with
+# the terminal size, three sessions over one ControlMaster connection, scp 8 MiB both ways, sftp -b ls, put, get,
+# mkdir and rename, no post-quantum warning, KexAlgorithms curve25519-sha256 and Ciphers aes128-ctr refused with the
+# server still serving, -X and -A (x11-req and auth-agent-req@openssh.com refused, the session goes on), and a shell
+# that cannot be executed (exec refused).  From zedBSD's ssh: exec, 8 MiB, -tt, the exec refusal.  MaxStartups (ten
+# connections that send nothing, the eleventh closed, a login frees a place) and sshd -t.
 # SSH_SOURCE_DIR=<dir> builds from another source directory (a changed copy under build/tmp).
 # Last line: interop-host: PASS or interop-host: FAIL.  Output under build/tmp/interop-host.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -220,6 +230,62 @@ def run_pty(args):
     open(out, "wb").write(data)
     return status
 
+# startups PORT LIMIT -- LOGIN-COMMAND...: MaxStartups.  LIMIT connections that send nothing each get the
+# server's identification line; one more is closed at once.  One of them is let go, the login command (a session
+# that stays a few seconds) logs in, and then one more connection is taken and the next closed again.
+def ident(port):
+    s = socket.create_connection(("127.0.0.1", port), 5)
+    s.settimeout(5)
+    data = b""
+    try:
+        while b"\n" not in data:
+            chunk = s.recv(256)
+            if not chunk:
+                return s, False
+            data += chunk
+    except OSError:
+        return s, False
+    return s, data.startswith(b"SSH-2.0-")
+
+def startups(args):
+    import subprocess
+    port, limit = int(args[0]), int(args[1])
+    command = args[3:]
+    held = []
+    for i in range(limit):
+        s, ok = ident(port)
+        held.append(s)
+        if not ok:
+            print("connection %d got no identification" % (i + 1))
+            return 1
+    s, ok = ident(port)
+    s.close()
+    if ok:
+        print("connection %d was not closed" % (limit + 1))
+        return 1
+    held.pop().close()
+    time.sleep(1)
+    login = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(3)
+    s, ok = ident(port)
+    held.append(s)
+    if not ok:
+        print("after a login, a connection got no identification")
+        return 1
+    s, ok = ident(port)
+    s.close()
+    if ok:
+        print("after a login and one more, a connection was not closed")
+        return 1
+    status = login.wait(60)
+    for s in held:
+        s.close()
+    if status != 0:
+        print("the login ended with %d" % status)
+        return 1
+    print("ok")
+    return 0
+
 what = sys.argv[1]
 if what == "free-port":
     free_port()
@@ -233,6 +299,8 @@ elif what == "closer":
     closer(int(sys.argv[2]), float(sys.argv[3]))
 elif what == "pty":
     sys.exit(run_pty(sys.argv[2:]))
+elif what == "startups":
+    sys.exit(startups(sys.argv[2:]))
 EOF
 helper() {
 	"$python" -I "$out/helper.py" "$@"
@@ -663,6 +731,239 @@ check "a refused connection is reported" $?
 # --- the sshd processes are still serving after all of the above.
 zssh -p "$port_a" 127.0.0.1 'echo still-serving' > "$work/t28.out" 2> "$work/t28.err"
 expect_eq "the server still serves" "$?:$(cat "$work/t28.out")" "0:still-serving"
+
+# ======== Peer B: zedBSD's sshd. ========
+source_dir=${SSH_SOURCE_DIR:-userland/base/ssh}
+b_modules=""
+for file in "$source_dir"/ssh-*.c; do
+	case "$file" in
+	*-main.c|*/ssh-client-*.c) ;;
+	*) b_modules="$b_modules $file" ;;
+	esac
+done
+b_dir="$work/sshd-b"
+mkdir -p "$b_dir/home/.ssh"
+chmod 700 "$b_dir/home" "$b_dir/home/.ssh"
+# shellcheck disable=SC2086
+timeout 300 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined \
+    -fno-sanitize-recover=undefined -fno-omit-frame-pointer -I. -I"$source_dir" -Iplan/ws336/tests/host-crypto \
+    $(ls "$source_dir"/sshd-*.c) userland/base/login/verify.c plan/ws336/tests/sshd-host-shim.c $b_modules \
+    -lcrypto -lcrypt -o "$b_dir/sshd" > "$out/sshd-b.build.log" 2>&1
+check "zedBSD's sshd builds for the host with the test's shim" $?
+cp "$HOME/.ssh/id_ed25519.pub" "$b_dir/home/.ssh/authorized_keys"
+chmod 600 "$b_dir/home/.ssh/authorized_keys"
+cat > "$b_dir/shell.sh" <<'EOF'
+#!/bin/sh
+# The test account's shell on peer B: a command runs under /bin/sh; a login prints that it ran and ends.
+if [ "${1-}" = "-c" ]; then
+	exec /bin/sh -c "$2"
+fi
+echo "login-shell"
+exit 0
+EOF
+chmod 755 "$b_dir/shell.sh"
+# The same server with no shell for the account: a session's command is refused.
+noshell_dir="$work/sshd-noshell"
+mkdir -p "$noshell_dir/home/.ssh"
+chmod 700 "$noshell_dir/home" "$noshell_dir/home/.ssh"
+cp "$b_dir/sshd" "$noshell_dir/sshd"
+cp "$b_dir/home/.ssh/authorized_keys" "$noshell_dir/home/.ssh/authorized_keys"
+
+port_b=$(helper free-port)
+port_noshell=$(helper free-port)
+b_config() {
+	cat <<EOF
+Port $1
+ListenAddress 127.0.0.1
+HostKey $work/server/host_key
+AuthorizedKeysFile .ssh/authorized_keys
+PasswordAuthentication no
+LoginGraceTime 30
+Subsystem sftp /usr/lib/openssh/sftp-server
+EOF
+}
+b_config "$port_b" > "$b_dir/sshd_config"
+b_config "$port_noshell" > "$noshell_dir/sshd_config"
+
+# sshd -t: a usable configuration gives 0; an unknown keyword gives its line and 1.
+"$b_dir/sshd" -t -f "$b_dir/sshd_config" > "$work/b-t1.out" 2>&1
+expect_eq "sshd -t on a usable configuration" "$?:$(cat "$work/b-t1.out")" "0:"
+{ echo "Port $port_b"; echo "PasswordAuthentication no"; echo "NoSuchKeyword yes"; } > "$work/b-bad_config"
+"$b_dir/sshd" -t -f "$work/b-bad_config" > "$work/b-t2.out" 2>&1
+expect_eq "sshd -t on an unknown keyword gives 1" "$?" 1
+grep -q 'line 3:' "$work/b-t2.out"
+check "sshd -t names the line ($(cat "$work/b-t2.out"))" $?
+
+# start_b NAME DIR PORT: starts zedBSD's sshd and fails closed unless the port is its own.
+start_b() {
+	timeout 600 "$2/sshd" -D -e -f "$2/sshd_config" > "$2/stderr" 2>&1 &
+	b_pid=$!
+	server_pids="$server_pids $b_pid"
+	if ! helper wait-port "$3" 10; then
+		fail "zedBSD's sshd $1 did not start ($(head -5 "$2/stderr"))"
+		return 1
+	fi
+	if ! helper owner "$3" "$b_pid"; then
+		fail "port $3 is not served by the test's sshd $1"
+		return 1
+	fi
+	owned="$owned $3 $b_pid"
+	return 0
+}
+start_b b "$b_dir" "$port_b" || { servers_owned; stop_servers; echo "interop-host: FAIL"; exit 1; }
+start_b noshell "$noshell_dir" "$port_noshell" || { servers_owned; stop_servers; echo "interop-host: FAIL"; exit 1; }
+
+# ossh ARGS...: the host's OpenSSH ssh with an empty environment, no configuration and the test's own files.
+known_b="$work/known_b"
+ossh() {
+	timeout 60 env -i PATH="$PATH" "$openssh_client" -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes \
+	    -i "$HOME/.ssh/id_ed25519" -o UserKnownHostsFile="$known_b" -o GlobalKnownHostsFile=/dev/null \
+	    -o StrictHostKeyChecking=accept-new -o ControlPath=none "$@"
+}
+
+# --- OpenSSH's ssh to zedBSD's sshd: exec, the exit status, a signal, no post-quantum warning.
+ossh -p "$port_b" 127.0.0.1 'echo b-hello; exit 3' > "$work/b1.out" 2> "$work/b1.err"
+expect_eq "B: exit 3 gives 3" "$?:$(cat "$work/b1.out")" "3:b-hello"
+grep -qi 'post-quantum' "$work/b1.err"
+expect_eq "B: no post-quantum warning" "$?" 1
+expect_eq "B: the known_hosts line" "$(cat "$known_b" 2>/dev/null)" "[127.0.0.1]:$port_b ssh-ed25519 $host_blob"
+ossh -p "$port_b" 127.0.0.1 'kill -TERM $$' > /dev/null 2> "$work/b2.err"
+expect_eq "B: a command killed by a signal gives 255" "$?" 255
+
+# --- 8 MiB through stdin and back.
+ossh -p "$port_b" 127.0.0.1 cat < "$work/data8" > "$work/b-data8.out" 2> "$work/b3.err"
+expect_eq "B: 8 MiB round trip exit" "$?" 0
+cmp -s "$work/data8" "$work/b-data8.out"
+check "B: 8 MiB round trip is the same bytes" $?
+
+# --- -tt and the terminal size.
+helper pty "$work/b-pty1.out" 37 123 30 -- /usr/bin/env -i PATH="$PATH" "$openssh_client" -F /dev/null -o BatchMode=yes \
+    -o IdentitiesOnly=yes -i "$HOME/.ssh/id_ed25519" -o UserKnownHostsFile="$known_b" -o GlobalKnownHostsFile=/dev/null \
+    -tt -p "$port_b" 127.0.0.1 'printf "SIZE %s\n" "$(stty size)"; tty'
+expect_eq "B: -tt exit" "$?" 0
+grep -q 'SIZE 37 123' "$work/b-pty1.out"
+check "B: -tt gives the terminal the client's size" $?
+grep -q '/dev/pts/' "$work/b-pty1.out"
+check "B: -tt runs the command on a terminal" $?
+
+# --- three sessions over one ControlMaster connection.
+timeout 60 env -i PATH="$PATH" "$openssh_client" -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes \
+    -i "$HOME/.ssh/id_ed25519" -o UserKnownHostsFile="$known_b" -o GlobalKnownHostsFile=/dev/null \
+    -o ControlMaster=yes -o ControlPath="$work/cm.sock" -o ControlPersist=no -N -p "$port_b" 127.0.0.1 \
+    > /dev/null 2> "$work/b-cm.err" &
+cm_pid=$!
+server_pids="$server_pids $cm_pid"
+tries=0
+while [ ! -S "$work/cm.sock" ] && [ "$tries" -lt 100 ]; do
+	sleep 0.1
+	tries=$((tries + 1))
+done
+for session in 1 2 3; do
+	timeout 60 env -i PATH="$PATH" "$openssh_client" -F /dev/null -o ControlMaster=no -o ControlPath="$work/cm.sock" \
+	    -p "$port_b" 127.0.0.1 "sleep 1; echo session-$session" > "$work/b-cm$session.out" 2>&1 &
+done
+wait_sessions=0
+for session in 1 2 3; do
+	tries=0
+	while ! grep -q "session-$session" "$work/b-cm$session.out" 2>/dev/null && [ "$tries" -lt 150 ]; do
+		sleep 0.1
+		tries=$((tries + 1))
+	done
+	grep -q "session-$session" "$work/b-cm$session.out" || wait_sessions=1
+done
+check "B: three sessions over one ControlMaster connection" "$wait_sessions"
+timeout 30 env -i PATH="$PATH" "$openssh_client" -F /dev/null -o ControlPath="$work/cm.sock" -O exit -p "$port_b" \
+    127.0.0.1 > /dev/null 2>&1
+wait "$cm_pid" 2>/dev/null
+
+# --- scp (the SFTP protocol) and sftp -b.
+oscp() {
+	timeout 60 env -i PATH="$PATH" /usr/bin/scp -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes \
+	    -i "$HOME/.ssh/id_ed25519" -o UserKnownHostsFile="$known_b" -o GlobalKnownHostsFile=/dev/null -P "$port_b" "$@"
+}
+oscp "$work/data8" 127.0.0.1:b-up8 > "$work/b-scp1.out" 2>&1
+expect_eq "B: scp up exit" "$?" 0
+oscp 127.0.0.1:b-up8 "$work/b-down8" > "$work/b-scp2.out" 2>&1
+expect_eq "B: scp down exit" "$?" 0
+cmp -s "$work/data8" "$work/b-down8"
+check "B: scp 8 MiB both ways is the same bytes" $?
+head -c 30000 /dev/urandom > "$work/b-small"
+cat > "$work/b-sftp.batch" <<EOF
+mkdir b-dir
+put $work/b-small b-dir/one
+rename b-dir/one b-dir/two
+ls b-dir
+get b-dir/two $work/b-small.back
+EOF
+timeout 60 env -i PATH="$PATH" /usr/bin/sftp -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes \
+    -i "$HOME/.ssh/id_ed25519" -o UserKnownHostsFile="$known_b" -o GlobalKnownHostsFile=/dev/null -P "$port_b" \
+    -b "$work/b-sftp.batch" 127.0.0.1 > "$work/b-sftp.out" 2>&1
+expect_eq "B: sftp -b exit" "$?" 0
+grep -q 'b-dir/two' "$work/b-sftp.out"
+check "B: sftp ls shows the renamed file" $?
+cmp -s "$work/b-small" "$work/b-small.back"
+check "B: sftp put, rename and get keep the bytes" $?
+
+# --- refused algorithms, and the server still serves.
+ossh -o KexAlgorithms=curve25519-sha256 -p "$port_b" 127.0.0.1 'echo reached' > "$work/b4.out" 2> "$work/b4.err"
+expect_eq "B: KexAlgorithms curve25519-sha256 is refused with 255" "$?:$(cat "$work/b4.out")" "255:"
+ossh -o Ciphers=aes128-ctr -p "$port_b" 127.0.0.1 'echo reached' > "$work/b5.out" 2> "$work/b5.err"
+expect_eq "B: Ciphers aes128-ctr is refused with 255" "$?:$(cat "$work/b5.out")" "255:"
+ossh -p "$port_b" 127.0.0.1 'echo after-refusals' > "$work/b6.out" 2> "$work/b6.err"
+expect_eq "B: the server serves after the refusals" "$?:$(cat "$work/b6.out")" "0:after-refusals"
+
+# --- -X and -A: the requests are refused and the session goes on.
+DISPLAY=:99 timeout 60 env -i PATH="$PATH" DISPLAY=:99 "$openssh_client" -F /dev/null -o BatchMode=yes \
+    -o IdentitiesOnly=yes -i "$HOME/.ssh/id_ed25519" -o UserKnownHostsFile="$known_b" -o GlobalKnownHostsFile=/dev/null \
+    -X -p "$port_b" 127.0.0.1 'echo x-ok' > "$work/b7.out" 2> "$work/b7.err"
+expect_eq "B: -X: the session goes on" "$?:$(cat "$work/b7.out")" "0:x-ok"
+grep -q 'X11 forwarding request failed' "$work/b7.err"
+check "B: -X: x11-req is refused" $?
+timeout 30 ssh-agent -a "$work/agent.sock" -s > "$work/agent.env" 2>&1
+agent_pid=$(sed -n 's/^SSH_AGENT_PID=\([0-9]*\);.*/\1/p' "$work/agent.env")
+[ -n "$agent_pid" ] && server_pids="$server_pids $agent_pid"
+timeout 60 env -i PATH="$PATH" SSH_AUTH_SOCK="$work/agent.sock" "$openssh_client" -F /dev/null -o BatchMode=yes \
+    -o IdentitiesOnly=yes -i "$HOME/.ssh/id_ed25519" -o UserKnownHostsFile="$known_b" -o GlobalKnownHostsFile=/dev/null \
+    -A -v -p "$port_b" 127.0.0.1 'echo a-ok; echo "S=${SSH_AUTH_SOCK-unset}"' > "$work/b8.out" 2> "$work/b8.err"
+expect_eq "B: -A: the session goes on without an agent" "$?:$(tr '\n' ' ' < "$work/b8.out")" "0:a-ok S=unset "
+grep -q 'Requesting authentication agent forwarding' "$work/b8.err"
+check "B: -A: the client asked for agent forwarding (auth-agent-req@openssh.com)" $?
+
+# --- a shell that cannot be executed: the command is refused (OpenSSH's ssh and zedBSD's).
+ossh -p "$port_noshell" 127.0.0.1 'echo reached' > "$work/b9.out" 2> "$work/b9.err"
+expect_eq "B: a shell that cannot run: OpenSSH's ssh gives 255" "$?:$(cat "$work/b9.out")" "255:"
+grep -q 'exec request failed' "$work/b9.err"
+check "B: a shell that cannot run: the exec request is refused" $?
+grep -q 'cannot be executed' "$noshell_dir/log"
+check "B: a shell that cannot run: the server says why" $?
+
+# --- zedBSD's ssh to zedBSD's sshd.
+zssh -o StrictHostKeyChecking=accept-new -p "$port_b" 127.0.0.1 'echo z-hello; exit 4' > "$work/z1.out" 2> "$work/z1.err"
+expect_eq "ours: exit 4 gives 4" "$?:$(cat "$work/z1.out")" "4:z-hello"
+zssh -p "$port_b" 127.0.0.1 cat < "$work/data8" > "$work/z-data8.out" 2> "$work/z2.err"
+expect_eq "ours: 8 MiB round trip exit" "$?" 0
+cmp -s "$work/data8" "$work/z-data8.out"
+check "ours: 8 MiB round trip is the same bytes" $?
+zssh -p "$port_b" 127.0.0.1 'kill -TERM $$' > /dev/null 2>&1
+expect_eq "ours: a command killed by a signal gives 255" "$?" 255
+helper pty "$work/z-pty1.out" 37 123 30 -- "$ssh" -F "$config" -tt -p "$port_b" 127.0.0.1 'printf "SIZE %s\n" "$(stty size)"'
+expect_eq "ours: -tt exit" "$?" 0
+grep -q 'SIZE 37 123' "$work/z-pty1.out"
+check "ours: -tt gives the terminal the client's size" $?
+zssh -o StrictHostKeyChecking=accept-new -p "$port_noshell" 127.0.0.1 'echo reached' > "$work/z3.out" 2> "$work/z3.err"
+expect_eq "ours: a refused exec gives 255" "$?:$(cat "$work/z3.out")" "255:"
+grep -q 'exec request failed on channel' "$work/z3.err"
+check "ours: a refused exec is reported ($(cat "$work/z3.err"))" $?
+
+# --- MaxStartups (10): ten connections that send nothing, the eleventh closed; a login frees a place.
+helper startups "$port_b" 10 -- "$ssh" -F "$config" -p "$port_b" 127.0.0.1 'sleep 6' > "$work/b-startups.out" 2>&1
+expect_eq "B: MaxStartups ($(cat "$work/b-startups.out"))" "$?" 0
+zssh -p "$port_b" 127.0.0.1 'echo after-startups' > "$work/b10.out" 2> "$work/b10.err"
+expect_eq "B: the server serves after MaxStartups" "$?:$(cat "$work/b10.out")" "0:after-startups"
+
+# --- no sanitizer report in any of zedBSD's sshd processes (their standard error is the server's file).
+grep -l 'ERROR: AddressSanitizer\|runtime error:' "$b_dir/stderr" "$noshell_dir/stderr" > /dev/null 2>&1
+expect_eq "B: no sanitizer report from zedBSD's sshd" "$?" 1
 
 servers_owned
 stop_servers

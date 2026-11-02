@@ -1117,7 +1117,8 @@ session_env(
 /*
  * Starts the channel's child: the login shell with no arguments (command
  * NULL) or with -c and command (command_size bytes, which may not hold a
- * NUL), on the terminal or on three pipes.  Returns 0, EINVAL or EIO.
+ * NUL), on the terminal or on three pipes.  Returns 0, EACCES (the
+ * shell cannot be executed), EINVAL or EIO.
  */
 static int
 session_start(
@@ -1128,7 +1129,9 @@ session_start(
 {
 	static char storage[SESSION_ENV_FIXED][SESSION_ENV_FIXED_ENTRY];
 	char *environment[SESSION_ENV_FIXED + SESSION_ENV_MAX + 1];
+	const char *shell;
 	char *text;
+	int runnable;
 	int in_pipe[2];
 	int out_pipe[2];
 	int err_pipe[2];
@@ -1137,6 +1140,20 @@ session_start(
 	struct ssh_buf body;
 	pid_t child;
 	int status;
+
+	/*
+	 * A shell this process (already the user) cannot execute is refused
+	 * here, so the client hears of it; a shell that goes away between this
+	 * check and the start still ends the child with 127.
+	 */
+	shell = session->account.pw_shell;
+	if (shell == NULL || shell[0] == '\0')
+		shell = SESSION_SHELL;
+	runnable = access(shell, X_OK);
+	if (runnable != 0) {
+		syslog(LOG_NOTICE, "session: the shell %.200s of %.64s cannot be executed", shell, session->account.pw_name);
+		return EACCES;
+	}
 
 	/* A command is text: one with a NUL inside is refused. */
 	text = NULL;
