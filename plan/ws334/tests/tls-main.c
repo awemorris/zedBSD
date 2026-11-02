@@ -22,6 +22,9 @@
  */
 
 #include "net/net.h"
+#include "userland/desktop/browser/shell/shell.h"
+
+#include <browser/browser.h>
 
 #include <windows.h>
 #include <wincrypt.h>
@@ -75,6 +78,13 @@ main(
 	int failed;
 	int index;
 	int error;
+
+	/* The engine makes its threads with the browser's (libkeiland's Win32 threads). */
+	error = browser_threads_set(shell_threads());
+	if (error != 0) {
+		printf("tls-tool: the engine refused the threads (%d)\n", error);
+		return 2;
+	}
 
 	/* The options, then the URL. */
 	url = NULL;
@@ -188,7 +198,7 @@ fetch_blocking(
 	net_response_init(&response);
 	error = net_http_fetch(NULL, url, &response);
 	if (error != 0) {
-		printf("tls-tool: blocking error %d (%s)\n", error, net_tls_error());
+		printf("tls-tool: blocking error %d (%s)\n", error, response.reason);
 		net_response_release(&response);
 		return 1;
 	}

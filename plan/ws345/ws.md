@@ -19,6 +19,7 @@
   4. style sheet と CSS（cascade、computed style・描画の属性の更新）は専用の「描画の属性の更新」の thread で行う。
   5. 描画（paint・GPU の submit）は、できるなら shell が作る thread で、event の処理と別に行う。
   6. thread の作成は上の決定のとおり shell の側で、登録した関数の表を通す。
+- （2026-11-02、Q1 経由、J2 への答え）ユーザーから、長く走る script の頁には Chrome・Firefox のように「このページは応答していません（待つ／止める）」の問いを出す、決まった時間（10 秒ほど）script が走り続けたら出し、「止める」は p004 の打ち切りで script を終わらせる、という趣旨の決定を受けた（ws345-p014）。
 
 ## Q1 の判断
 
@@ -30,14 +31,13 @@
   - J6: 窓の thread は入力を libbrowser の FIFO に積むだけにし、iframe への振り分け（確定した iframe の矩形の参照）も libbrowser の側の thread（top の script の thread か style の thread）で行う。窓の thread では libbrowser の処理を一切しないという決定 1 を字義どおり守る。
   - J7: 決定 5 は「display list を style の thread で作り、shell の render の thread で記録・提出・表示する」と読んでよい。
   - 所有: p013 の libkeiland の変更と、p002 の plan/tools/browser-component/client.c の変更を、WS345 の範囲として認める。
-  - J2（長く応答しない頁の「応答しない頁」の確かめの表示）は製品の判断なのでユーザーに聞く。答えまでは表示無しで進める。
+  - J2（長く応答しない頁の「応答しない頁」の確かめの表示）は製品の判断なのでユーザーに聞く。答えまでは表示無しで進める。→ 2026-11-02 ユーザーが答えた（上のユーザーの決定、ws345-p014）。
 
 ## P8 の技術の判断（p001、Q1 が覆してよい）
 
 - 通信は今の非同期の loader（`browser-net` 1 本、`browser-resolve` 1 本、view ごと）を保ち、窓・script の thread に残った同期の socket の道（同期の XHR、先取りに無い parser の script、iframe の script、sheet の待ち）を loader に移す。blocking の connect の thread の pool にはしない（理由は [design.md](design.md) §3.1、判断の点 J1）。
 - libmedia の中の lock は pthread のまま、engine の thread の作成だけ shell の表を通す（J3）。1 つの view の frame は top を含め 64 まで（J4）。
-- 長い script の頁に「応答しない頁」の問いを出すかは製品の判断として Q1 に返す（J2）。今の案は出さない。navigation と閉じるは打ち切り（termination）で効く。
-- 再生中の media の engine は view に 8 まで（J5）。Q1 に確かめる点: 窓の thread が確定の iframe の枠の表を引いて入力を iframe に直に渡す事が D1 の中か（J6）、D5 の paint を「display list の組み立ては style の thread、GPU の記録と submit は shell の描画の thread」と読む事（J7）。
+- 再生中の media の engine は view に 8 まで（J5）。J2・J6・J7 は Q1 とユーザーが答えた（Q1 の判断、ユーザーの決定）。
 
 ## 計測（p001、host、2026-11-02）
 
@@ -57,8 +57,9 @@
 | [ws345-p008](phase008/phase.md) | style の thread（D4）: DOM の同期の貸し、request の種類、古くない時は貸さない、style・layout から JS を呼ぶ所を後で出す event に、style の thread の loader の client | planned | p005 |
 | [ws345-p009](phase009/phase.md) | iframe ごとの script の thread（段 A: 一つの agent の lock と heap のまま）: frame ごとの task の queue、入力の routing、frame の上限、GC の stack の底の切り替え | planned | p006、p008 |
 | [ws345-p010](phase010/phase.md) | origin ごとの agent（段 B）: cross-origin の iframe を別の heap で並べて走らせる、遠くの WindowProxy、heap を越える postMessage、location・frames・parent、agent ごとの打ち切り | planned | p009 |
-| [ws345-p011](phase011/phase.md) | 受け入れと回帰: 窓の event の遅れの上限（script の loop・connect の掛かり・document.write・resize・decode の間）、ThreadSanitizer、host の試験・js・test262 の部分集合・段 1・cross-build、zedBSD の QEMU、Windows の Wine、Linux の Keiland | planned | p007、p010 |
+| [ws345-p011](phase011/phase.md) | 受け入れと回帰: 窓の event の遅れの上限（script の loop・connect の掛かり・document.write・resize・decode の間）、ThreadSanitizer、host の試験・js・test262 の部分集合・段 1・cross-build、zedBSD の QEMU、Windows の Wine、Linux の Keiland | planned | p007、p010、p014 |
 | [ws345-p012](phase012/phase.md) | 規約の全文の見直し（AGENTS §2） | planned | p011 |
+| [ws345-p014](phase014/phase.md) | 応答しない頁の問い（約 10 s 走り続ける script に「応答していません: 待つ／止める」、止めるは p004 の打ち切り）。各 shell の UI、窓の側の timer が script の thread の task の番号と始めの時刻を読む | planned | p004、p005、p007 |
 | [ws345-p013](phase013/phase.md) | libkeiland の resize の口（Wayland の configure の ack を描画の側の present の直前に、Win32 の modal loop の間の大きさ）。design-reviewer の指摘 4 で足した（番号は表の後ろ、p007 の前にする） | planned | p001 |
 
 ## Resume point

@@ -18,6 +18,9 @@
  */
 
 #include "net/net.h"
+#include "userland/desktop/browser/shell/shell.h"
+
+#include <browser/browser.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -45,6 +48,14 @@ main(
 	char **argv)
 {
 	int failed;
+	int error;
+
+	/* The engine makes its threads with the browser's (libkeiland's Win32 threads). */
+	error = browser_threads_set(shell_threads());
+	if (error != 0) {
+		printf("fetch-tool: the engine refused the threads (%d)\n", error);
+		return 2;
+	}
 
 	/* One argument: the URL. */
 	if (argc != 2) {

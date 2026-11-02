@@ -20,6 +20,7 @@
  */
 
 #include "net/net.h"
+#include "userland/tests/browser-threads/threads-posix.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -96,6 +97,13 @@ main(void)
 	int before;
 	int index;
 	int error;
+
+	/* The engine makes its threads with the POSIX threads. */
+	error = browser_threads_set(browser_threads_posix());
+	if (error != 0) {
+		printf("net-ring-test: the engine refused the threads (%d)\n", error);
+		return 2;
+	}
 
 	/* The server. */
 	test_thread = pthread_self();

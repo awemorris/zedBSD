@@ -102,7 +102,7 @@ ws.md の「ユーザーの決定」の要点（D1〜D9）:
 
 - view は窓（tab）一つの単位。今の shell は process に窓が一つで、view も一つ。
 - 一つの view の libbrowser の thread の数: script が 1 + 今の頁の iframe の数（top を含め最大 64）、style 1、net 1、resolve 1、media が最大 8。instance に storage 1。戻る・進むのために保った頁（`VIEW_KEPT_MAX` = 3）は thread を持たない（§9）ので数に入らない。最大は view に 1 + 63 + 1 + 1 + 1 + 8 = 75 本。
-- stack: script の thread は 64-bit の target で 8 MiB、32-bit の target（armv7 など）で 2 MiB（予約だけで、触った分が memory になる）。32-bit の target では frame の上限を 16 にする（予約 32 MiB）。他の thread は 256 KiB。
+- stack: script の thread は 64-bit の target で 8 MiB、32-bit の target（armv7 など）で 2 MiB（予約だけで、触った分が memory になる）。32-bit の target では frame の上限を 16 にする（予約 32 MiB）。今ある thread は system の既定の大きさのまま。
 - `browser-resolve` を 1 本のままにする理由: 名前の解決は loader の時間切れ（30 s）と同じ道で失敗し、窓も script も止めない。遅い DNS が他の host の解決を待たせる事（head-of-line）は §11 の危険と Future Work の候補に置く。
 - `browser-net` を blocking の connect の thread の pool にしない理由: 今の loader は非同期の connect・TLS の状態の機械を 1 本の名前付きの thread で動かしていて（D2 の「専用の thread」を満たす）、同時の接続の数に thread の数が要らない。D2 は同期の呼び出しを「してよい」で、強いてはいない。同期にすると、長く開いたままの接続（長い poll など）の数だけ thread が要り、数を固定すると要求が待たされる。だから今の loader の形を保ち、窓・script の thread に残った同期の socket の道を loader に移す（§7）。この判断が製品の方向に触れるなら Q1 が覆してよい（§10 の J1）。
 
@@ -202,7 +202,7 @@ int browser_threads_set(const struct browser_threads *threads);
 
 | 項目 | 理由 |
 | --- | --- |
-| `start`（名前・stack の大きさ付き） | libbrowser の thread を作る唯一の道。名前は libbrowser が決め（`browser-script` など、15 bytes まで）、shell が system の名前に付ける。stack の大きさは script の thread に要る（VM の再帰と保守的な stack の走査。Windows の既定 1 MiB では足りない）。libbrowser は script の thread に 8 MiB、他に 256 KiB を頼む |
+| `start`（名前・stack の大きさ付き） | libbrowser の thread を作る唯一の道。名前は libbrowser が決め（`browser-script` など、15 bytes まで）、shell が system の名前に付ける。stack の大きさは script の thread に要る（VM の再帰と保守的な stack の走査。Windows の既定 1 MiB では足りない）。libbrowser は script の thread に 8 MiB を頼む。今ある thread（net・resolve・storage・media）は system の既定（0）のまま（p002 で動きを変えないため。小さくするのは測ってから） |
 | `join` | view・instance・frame を閉じる時に、その thread が終わるのを待ってから memory を放す。detach は無い（libbrowser の thread は全部 join する。§9 の閉じ方）。libbrowser は自分の thread を自分で join しない（`kl_thread_join` の `EDEADLK` の場合は起こさない） |
 | `is_current` | 呼んだ thread がその thread か。agent の lock の持ち主の確かめ（collect・貸し）と、窓の thread からしか呼べない口の確かめ（debug の assert）。thread ごとの値を使わずに済む |
 | mutex の 4 つ | 共有の物（§4.3）、mailbox、request の queue |
@@ -264,7 +264,7 @@ int browser_threads_set(const struct browser_threads *threads);
 - 上限: 離散の入力は 1024 件。超えると押す入力（button・key の down・text）は積む口が `ENOBUFS` を返し、shell はそれを捨てる（長い script の間に 1024 回押した場合だけ）。離す入力（button・key の up）と focus は上限を越えても必ず積む（押した数で抑えられるので有限。押したままの key・button を残さない）。
 - 窓の thread への通知の queue（console の行など）は 1024 件まで。越えた console の行は捨て、後で「N 行を捨てた」の 1 行を出す。
 - 順: 一つの FIFO なので、窓が受けた順に page が受ける（移動と押しの間の順を含む）。命令（navigation など）も同じ FIFO で、入力との前後を保つ。例外は §9 の「打ち切り」だけ（積むと同時に task の番号を書く）。
-- routing: front（窓の thread が積む時）が、最新の確定した frame の「iframe の枠の表」（確定と一緒に作る、変えない配列、§6.1）で点が iframe に入るかだけを見て、入れば座標を直してその iframe の mailbox に積む。表を引くのは DOM・JS・layout に触れない一定の時間の探しで、D1 の「渡すだけ」の中と読む（§10 の J6 で Q1 に確かめる）。top の頁の script が長く走っていても iframe の入力は待たない。iframe の中の要素の当たり判定はその iframe の script の thread が行う（§4.2）。枠の表が古い（DOM が動いた直後）時の誤りは、確定の時点の画面と同じ（利用者が見た位置に届く）。
+- routing（J6 の Q1 の答え）: 窓の thread は入力を view の FIFO に積むだけ。振り分けは libbrowser の thread が行う: style の thread が最新の確定した frame の「iframe の枠の表」（確定と一緒に作る、変えない配列、§6.1）で点が iframe に入るかを見て、入れば座標を直してその iframe の mailbox に、入らなければ top の script の thread の mailbox に積む（style の thread が貸しの最中なら、その貸しの後に振り分ける）。top の頁の script が長く走っていても iframe の入力は待たない。iframe の中の要素の当たり判定はその iframe の script の thread が行う（§4.2）。枠の表が古い（DOM が動いた直後）時の誤りは、確定の時点の画面と同じ（利用者が見た位置に届く）。
 - 長い script の間の入力は FIFO に残り、script が終わった後に順に処理される（どの browser も同じ。窓・描画・titlebar は止まらない）。
 
 ### 5.4 待ちと起こし方（D9）
@@ -345,21 +345,22 @@ for (;;) {
 - **打ち切り（termination）**: agent ごとの atomic の値で、終わらせる task の通し番号を書く（0 は無し）。task を始める thread は agent の task の通し番号を一つ進めて置き、VM は見る所でこの二つを比べ、同じ時だけ抜ける。窓の thread は「今走っている task の番号」を読んでそれを書くので、次の task（段 A では別の frame の task）に落ちない。値を 0 に戻すのは、その task を抜けた thread。
 - 見る所: VM は loop の印（`VM_OP_LOOP_HINT`）・関数の入口・長い native（sort・正規表現の match・JSON など）で見て、番号が合えば catch も finally も走らない終わり（今の `VM_THROWN` と別の status）で task を抜ける。microtask も捨てる。
 - 書く時: 窓の thread が navigation（`_load`・`_follow`・`_go`・reload）か `_destroy` を積んだ時に、top の agent の script が task の中なら、積むと同時にその task の番号を書く（古い頁は消えるので、その頁の script を待つ理由が無い）。iframe を外す・iframe の navigation は、その frame の task の番号に限って書く（段 A では一つの agent なので、その frame の thread が走っている時だけ）。
-- 打ち切りと unload: 頁の script が始めた navigation（task の中、打ち切りなし）では、今のとおり `pagehide`・`unload` を出す。利用者の navigation・閉じるで走っている task を打ち切った時は、その後に `pagehide`・`unload` を出し、その handler も時間の上限（1 s、上限で同じ打ち切り）の中で走らせる。`beforeunload` の確かめの dialog は出さない（今も無い。J2 に含める）。
+- 打ち切りと unload: 頁の script が始めた navigation（task の中、打ち切りなし）では、今のとおり `pagehide`・`unload` を出す。利用者の navigation・閉じるで走っている task を打ち切った時は、その後に `pagehide`・`unload` を出し、その handler も時間の上限（1 s、上限で同じ打ち切り）の中で走らせる。`beforeunload` の確かめの dialog は出さない（今も無い）。
 - 戻る・進むの保った頁（`view_keep`、`VIEW_KEPT_MAX` = 3、各々の heap）: 保つ時に、その頁の iframe の script の thread を終えて join し（top の thread は次の頁を走らせる）、頁は thread を持たない。戻す時に iframe の thread を作り直す。作れなければ戻さずに読み込み直す。打ち切られた頁は保たない。
-- `_stop` は読み込みを止める（loader の request を取り消す）が script は打ち切らない（どの browser も同じ）。止まらない頁の扱い（「応答しない頁」の問い）は製品の判断（§10 の J2）。
+- `_stop` は読み込みを止める（loader の request を取り消す）が script は打ち切らない（どの browser も同じ）。
+- **応答しない頁の問い**（ユーザーの決定、J2 の答え、ws345-p014）: script の thread は今の task の番号と始めた時刻を atomic に publish する（front の snapshot の一部、窓の thread は読むだけ）。shell の窓の thread は自分の timer でそれを見て、同じ task が 10 s 走り続けたら「このページは応答していません」の問い（待つ／止める）を出す。「止める」は `browser_view_stop_script`（新、front の口）で、その task の番号を打ち切りに書く（上の打ち切り）。「待つ」は問いを閉じ、同じ task がさらに 10 s 走ったらまた出す。task が終われば問いは自分で消える。
 - 通信の取り消し: navigation・閉じる時は、その frame の loader の client の、古い epoch の request を取り消す（§7 の寿命）。net の thread は非同期の connect・TLS の socket をすぐ閉じる。resolve の thread の中の `getaddrinfo` は止められず、答えは番号で捨てられる。同期の XHR の待ちは取り消しで起こされ、打ち切りの番号で script も抜ける。
 - `browser_view_destroy`（窓の thread）: shell が先に描画の thread を止めて join し、swapchain・surface を壊し、窓を閉じてある事（§6.3 の止め方）。その上で、走っている task の番号を打ち切りに書く → 全 frame の script の thread に「終わり」を積む → join（子から）→ style・net・resolve を止めて join。resolve の join は `getaddrinfo` の時間切れまで待つ事がある（§11 の R7。窓はもう無いので利用者には見えない）。
 
 ## 10. 判断の点（Q1 へ）
 
 - J1（技術、P8 の判断。製品の方向なら Q1）: 通信は今の非同期の loader（名前付き 1 本）を保ち、同期の connect の thread の pool にしない（§3.1）。
-- J2（製品）: 長く走る script のある頁に「応答しない頁（待つ／頁を閉じる）」の問いを出すか。出さない場合も、navigation と閉じるは打ち切りで効く。今の案は出さない（この WS の範囲の外）。
+- J2（製品）: 2026-11-02 ユーザーが答えた。約 10 s 走り続ける script に「応答していません: 待つ／止める」の問いを出す（§9、ws345-p014）。
 - J3（技術、P8 の判断）: libmedia の中の lock は pthread のまま。thread の作成だけ表を通す（§5.1）。
 - J4（技術、P8 の判断）: 1 つの view の frame の上限 64（top を含む、32-bit の target は 16）。`FRAME_MAX_DEPTH`（深さ 64）と別に、数の上限を置く。
 - J5（技術、P8 の判断）: 再生中の media の engine は view に 8 まで。
-- J6（Q1 に確かめる）: 窓の thread が front で iframe の枠の表を引いて入力を iframe に直に渡す事（§5.3）は、D1（窓の thread は libbrowser の仕事をしない）の中か。外なら、top の script の thread を経る（top の長い script の間、iframe の入力が待つ）。
-- J7（Q1 に確かめる）: D5 の「paint」を、display list の組み立ては style の thread、GPU の記録と submit は shell の描画の thread、と分ける読み（§2）。
+- J6（Q1 の答え、2026-11-02）: 窓の thread は入力を FIFO に積むだけ。iframe への振り分け（確定の iframe の枠の表を引く）は libbrowser の thread（top の script の thread か style の thread）で行う（§5.3 を直した）。
+- J7（Q1 の答え、2026-11-02）: その読みでよい（display list は style の thread、GPU の記録・submit・present は shell の描画の thread）。
 
 ## 11. 危険
 

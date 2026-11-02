@@ -28,6 +28,7 @@
 
 #include "userland/desktop/browser/shell/shell.h"
 
+#include <browser/browser.h>
 #include <browser/storage.h>
 
 #include <stdio.h>
@@ -62,6 +63,13 @@ main(
 	int found;
 	int error;
 	int status;
+
+	/* The engine makes its threads with the browser's (libkeiland's Win32 threads). */
+	error = browser_threads_set(shell_threads());
+	if (error != 0) {
+		printf("protect-test: the engine refused the threads (%d)\n", error);
+		return 2;
+	}
 
 	/* The directory. */
 	if (argc != 2) {
