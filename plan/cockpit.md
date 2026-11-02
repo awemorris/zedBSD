@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS324](ws324/ws.md) | RTX 2070 の Vulkan Video | 返却（11:17）。p007 cleared: H.265 decode が HEVC_v1 の範囲内 131 本中 130 本で正しい、Video Player の GPU の道で H.264・H.265 を再生。今日の作業は終わり | 次の指示で encode（p008a）から再開 |
 | P2 | [WS322](ws322/ws.md) | VF2 の VPU を Vulkan Video に | 返却（09:46）。p006 cleared: H.265 の decode（HEVC_v1 128 本一致）と Video Player の GPU の道での H.264・H.265 の再生。今日の作業は終わり | 次の指示で encode（p008）から再開 |
-| P3 | [BUG-412](bugs/BUG-412.md) | Pi 5 | desktop の click が効かない（q1936）。注入の入力・今の main の kernel では再現せず、ユーザーの元の kernel 8f91a0d に戻して本物の mouse の押し方を記録する所（11:43〜） | — |
+| P3 | — | 待機 | BUG-412（Pi 5 の click）は再現せず（本物の mouse で両方の kernel とも短い click が効いた）。板は元に戻した（13:12、RESTORED OK） | — |
 | P4 | — | 待機 | WS319 の H.265 decode と Video Player の GPU の道を 12:03 に merge（q1926 cleared）。5330 は Debian で空き | — |
 | P5 | [WS336](ws336/ws.md) p008 | 自前の ssh・sshd | ssh-transport（q1932、Opus） | p015 以降 |
 | P6 | [WS336](ws336/ws.md) | 互換の ssh・sshd | p016（sshd の monitor）cleared。p017（sshd の pre-auth と session の process、q1944）に着手 | — |
@@ -87,7 +87,7 @@
 - VF2 の root（UFS 256 MB）の空き: 2026-11-01 の計測で 95%〜満杯になり、P4 の mview の texture の写しが ENOSPC で切れた。試験は /tmp（tmpfs）に置く形で回避した。板の古い物（~kei の p7・p15 など他の担当の置き物を含む）の整理か、SD の root の拡げをするか。
 - OmniGrammaton.exe（Windows 版のブラウザ）を本物の Windows で: main の build の zip（`make browser-win64-zip`）を展開して起動し、WS334 p032 の M1〜M8（描画・--no-gpu・https・location の欄・IME での日本語入力・cookie と localStorage の保持・暗い mode・snap の配置）。Wine では IME・snap・公開の site が確かめられない。
 - Pi 5 で BUG-391・392: desktop で compositor を kill -9 して desktop から戻るか、Super+L の後の kill で lock 画面から戻り PIN 0000 で開くか、login 画面で PIN 0000 が既定で出るか（QEMU では確認済み、Pi 5 で 1 s 後に GPU が使えるかは未確認）。
-- Pi 5 で BUG-412（click）: 13:30 まで、Logitech の mouse で Settings の左の欄を短く 3 回・長く 1 回押す（今の Pi 5 はユーザーの元の kernel 8f91a0d で、P3 が mouse の入力を記録している。13:30 を過ぎたら P3 が板を戻して、再現せずとして ticket を残す）。
+- Pi 5 で BUG-412（click）: また効かない時があれば、その時の画面と押した所（起動の直後か、Welcome の頁か、en0 の link が上下していたか）。
 - Pi 5 の HDMI: 今の capture の板は、host で開いている間だけ hotplug・EDID を出す。Pi の電源を入れる前に capture を開けば 1920x1080 60 Hz で desktop が出る（P3 が確かめた）。
 - Pi 5 の en0 の link: P3 の計測で、起動 3・4 の途中に en0 が 1000 Mbps から 100 Mbps に落ちて SSH が切れた。cable・switch の側か driver かは未調査。
 

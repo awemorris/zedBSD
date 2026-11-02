@@ -44,6 +44,7 @@ plan/tools/aat/aat stop
 - 鍵: `aat` は自分の checkout の `plan/tmp/guest/id_ed25519`（guest の harness の鍵、`guest.py keys` が作る、git に入らない）を使う。image は**同じ checkout** で作る（`build-image.sh` がその公開鍵を `/root/.ssh/authorized_keys` に入れる）。別の鍵は `--identity`。
 - 接続は 1 本を使い回す（ssh の ControlMaster）。2 回目からの命令は速い。control の socket は短い `/tmp/aat-<uid>/ssh-%C`（Unix の socket の path の上限、T1-200）、mark と画面の大きさは `build/aat/<target>/`（`AAT_STATE`）。
 - 座標は画面の pixel（左上が 0,0）。`move`・`click`・`drag`・`wheel` は `aat-input` の絶対の pointer（`move-to`）。`rel` は相対の mouse の量（compositor の加速がかかる）。`drag` は左 button だけ（`aat-input` の drag）。他の button で引くなら `move`・`down`・`move`・`up`。
+- `aat-input mouse-down BUTTON`・`mouse-up BUTTON` は相対の mouse の device の button（`down`・`up` は絶対の pointer の button）。本物の mouse と同じ道を試す時に（2026-11-02、BUG-412）。
 - touch screen（ws190-p002）: `tap X Y [--count 2]`（2 で double tap、間 120 ms）・`touch-drag X1 Y1 X2 Y2 [--steps N]`（1 本指、離して終わる）・`touch-down ID X Y`・`touch-move ID X Y`・`touch-up ID`（指 0〜9 を持ったまま。long press は `touch-down`・待ち・`touch-up`）。`aat-input` が 4 つ目の device（`INPUT_INJECT_KIND_TOUCH`、画面の pixel）を持つので、inject の口（`INPUT_INJECT_OPENS_MAX` 4）は aat-input の間 `touchinject`・`peninject` に空かない。
 - `key` の名前は evdev の名前の小文字（`enter`・`leftctrl`・`f5`、`ctrl`・`alt`・`shift`・`super` は左）。`type` は ASCII を US の配列で打つ（改行は `key enter`）。日本語は IME（`key` で切り替えて仮名を打つ）か貼り付けで。
 - log の既定は `/run/user/1000/session.log`（`AAT_LOG`、`--log`）。`mark NAME` で今の長さを覚え、`--since NAME` でその後だけを見る。UTF-8 は host で解く（guest の shell を通さない）。
