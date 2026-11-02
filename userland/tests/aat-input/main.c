@@ -29,6 +29,8 @@
  *   click [left|right|middle] [X Y]   at (X, Y) when given
  *   double-click [BUTTON] [X Y]
  *   down BUTTON | up BUTTON
+ *   mouse-down BUTTON | mouse-up BUTTON   the relative mouse's button, as a
+ *                                     USB mouse's report without motion
  *   drag X1 Y1 X2 Y2 [STEPS]          the left button, absolute, STEPS moves (20)
  *   wheel N | hwheel N                notches, N > 0 up or right
  *   key NAME[+NAME...]                pressed in order, released in reverse
@@ -576,6 +578,20 @@ aat_command(
 		error = aat_button(server, code, strcmp(words[0], "down") == 0);
 		if (error != 0)
 			snprintf(why, why_size, "button errno=%d", error);
+		return error;
+	}
+
+	/* mouse-down and mouse-up BUTTON: the relative mouse's own button. */
+	if ((strcmp(words[0], "mouse-down") == 0 || strcmp(words[0], "mouse-up") == 0) && count == 2U) {
+		if (aat_button_code(words[1], &code) != 0) {
+			snprintf(why, why_size, "unknown button %s", words[1]);
+			return EINVAL;
+		}
+		aat_event(&events[0], EV_KEY, code, strcmp(words[0], "mouse-down") == 0);
+		aat_event(&events[1], EV_SYN, SYN_REPORT, 0);
+		error = aat_emit(server->mouse, events, 2U);
+		if (error != 0)
+			snprintf(why, why_size, "mouse button errno=%d", error);
 		return error;
 	}
 

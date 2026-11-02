@@ -1,0 +1,48 @@
+diff --git a/src/drivers/usb/usb-hid.c b/src/drivers/usb/usb-hid.c
+index 6e26c6e12d..f90b2663d7 100644
+--- a/src/drivers/usb/usb-hid.c
++++ b/src/drivers/usb/usb-hid.c
+@@ -104,6 +104,9 @@ struct usb_hid {
+ 	 * time always belongs to the buffer.
+ 	 */
+ 	uint64_t completed_milliseconds;
++	uint64_t dbg_completed, dbg_armed, dbg_window;
++	uint64_t dbg_lat_sum, dbg_lat_max, dbg_wait_sum, dbg_wait_min;
++	unsigned dbg_n;
+ 	unsigned stopping;
+ 	unsigned submit_active;
+ 	unsigned activating;
+@@ -946,6 +949,7 @@ usb_hid_completion(
+ 
+ 	/* The report's time is when the transfer finished, not when the worker runs. */
+ 	milliseconds = clock_milliseconds(NULL);
++	hid->dbg_completed = clock_ticks();
+ 
+ 	/* Hands the finished transfer and its time to the worker. */
+ 	irq = spin_lock_irqsave(&hid->lock);
+@@ -1220,6 +1224,25 @@ usb_hid_worker(
+ 		if ((work & USB_HID_WORK_ARM) != 0U) {
+ 			/* Checks the operation status. */
+ 			error = usb_hid_arm(hid);
++			if (error == 0 && (work & USB_HID_WORK_COMPLETE) != 0U) {
++				uint64_t now = clock_ticks(), rate = kern_clock_tick_rate();
++				uint64_t lat = (now - hid->dbg_completed) * 1000000U / rate;
++				uint64_t wait = hid->dbg_armed != 0U ? (hid->dbg_completed - hid->dbg_armed) * 1000000U / rate : 0U;
++				if (hid->dbg_n == 0U) { hid->dbg_window = now; hid->dbg_wait_min = UINT64_MAX; }
++				hid->dbg_n++;
++				hid->dbg_lat_sum += lat;
++				if (lat > hid->dbg_lat_max) hid->dbg_lat_max = lat;
++				hid->dbg_wait_sum += wait;
++				if (wait < hid->dbg_wait_min) hid->dbg_wait_min = wait;
++				if ((now - hid->dbg_window) >= 5U * rate) {
++					kern_logf("usb-hid-dbg: if=%u n=%u lat_avg_us=%u lat_max_us=%u wait_avg_us=%u wait_min_us=%u\n",
++						  drv_usb_interface_number(hid->interface), hid->dbg_n,
++						  (unsigned)(hid->dbg_lat_sum / hid->dbg_n), (unsigned)hid->dbg_lat_max,
++						  (unsigned)(hid->dbg_wait_sum / hid->dbg_n), (unsigned)hid->dbg_wait_min);
++					hid->dbg_n = 0; hid->dbg_lat_sum = 0; hid->dbg_lat_max = 0; hid->dbg_wait_sum = 0;
++				}
++			}
++			hid->dbg_armed = clock_ticks();
+ 			if (error != 0) {
+ 				/*
+ 				 * EBUSY is expected only after detach closes
