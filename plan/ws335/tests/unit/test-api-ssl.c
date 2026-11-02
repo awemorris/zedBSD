@@ -1828,6 +1828,29 @@ test_read(void)
 	CHECK(rig_send(rig, 50UL) == 50);
 	expect_no_error();
 	rig_close(rig);
+
+	/* A record whose tag does not verify fails the connection; SSL_connect then says it is shut down, not done. */
+	peer_config(&config, SSLC_TLS13, &pki256);
+	rig = rig_open(&config, &pki256, RIG_STD);
+	rig_up(rig);
+	CHECK(SSL_connect(rig->ssl) == 1);
+	rig->peer->breaks |= TLSPEER_BREAK_RECORD_TAG;
+	CHECK(tlspeer_send_data(rig->peer, big_buffer, 10U) == 0);
+	do {
+		result = SSL_read(rig->ssl, big_buffer, 100);
+		if (result < 0 && SSL_get_error(rig->ssl, result) == SSL_ERROR_WANT_READ)
+			rig_pump(rig);
+		else
+			break;
+	} while (1);
+	CHECK(result == -1);
+	CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_SSL);
+	ERR_clear_error();
+	result = SSL_connect(rig->ssl);
+	CHECK(result == -1);
+	CHECK(SSL_get_error(rig->ssl, result) == SSL_ERROR_SSL);
+	expect_error(L_SSL, R_PROTOCOL_IS_SHUTDOWN);
+	rig_close(rig);
 }
 
 

@@ -2039,6 +2039,14 @@ test_states(void)
 	}
 	CHECK(run->hs.state == SSLC_HS_WAIT_SERVER_HELLO);
 	run_free(run);
+
+	/* A client of TLS 1.2 alone takes none before the ServerHello (RFC 5246 7.1): unexpected_message. */
+	run = run_new(SSLC_TLS12, SSLC_TLS12, &pki256, "server.test");
+	CHECK(go(run) == 0);
+	CHECK(sslc_hs_change_cipher_spec(&run->hs, &run->actions) == EPROTO);
+	CHECK(run->hs.alert == SSLC_ALERT_UNEXPECTED_MESSAGE);
+	CHECK(run->hs.state == SSLC_HS_FAILED);
+	run_free(run);
 }
 
 /* Feeds every replayed item, with the change_cipher_spec records in between, and checks each state's refusals. */

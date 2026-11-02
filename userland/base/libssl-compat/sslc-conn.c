@@ -1274,10 +1274,6 @@ sslc_conn_on_change_cipher_spec(
 	if (record->size != 1U || record->data[0] != SSLC_CONN_CCS_VALUE)
 		return sslc_conn_fail(conn, EPROTO, SSL_R_UNEXPECTED_MESSAGE, SSLC_ALERT_UNEXPECTED_MESSAGE);
 
-	/* No record of another type may come inside a handshake message split over records (RFC 8446 5.1). */
-	if (conn->message_used != 0U)
-		return sslc_conn_fail(conn, EPROTO, SSL_R_UNEXPECTED_MESSAGE, SSLC_ALERT_UNEXPECTED_MESSAGE);
-
 	/* It counts as a record without progress, in TLS 1.3 where it is dropped and in TLS 1.2 until the Finished follows. */
 	error = sslc_conn_count_empty(conn);
 	if (error != 0)
