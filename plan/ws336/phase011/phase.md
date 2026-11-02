@@ -63,12 +63,12 @@ WS335 の待ち: p003 経由
 
 ### 作った物
 
-- `userland/base/ssh/ssh-config.c`（骨格の置き換え。header は不変）。行を LF で切り、keyword と語に分け、keyword の表（sshd 37・ssh 34 行、case を区別しない）で値を読む。値の読みは共通の部品（yes/no・10 進数・時間・名前の表・path・語）。Host の pattern は `ssh_pattern_match`（p006、fold 1）を語ごとに呼ぶ。
+- `userland/base/ssh/ssh-config.c`（骨格の置き換え。header は不変）。行を LF で切り、keyword と語に分け、keyword の表（sshd 35・ssh 33 行、case を区別しない）で値を読む。値の読みは共通の部品（yes/no・10 進数・時間・名前の表・path・語）。Host の pattern は `ssh_pattern_match`（p006、fold 1）を語ごとに呼ぶ。
 - `plan/ws336/tests/unit/test-config.c`（1321693 checks。うち約 90 万は乱数の入力。入力は大きさぴったりの heap の複写で渡し、1 byte でも先を読めば ASan が落とす）。期待の値は sshd_config.5・ssh_config.5（10.5p1）の keyword の説明・TIME FORMATS・PATTERNS と手の計算だけ。OpenSSH の出力は使っていない。
 
 ### 試験の内容
 
-sshd の既定値の全部、今の image の `sshd_config`・`ssh_config` の全行（試験の中の複写と、tree にあれば実 file）、sshd の各 keyword（yes/no 4 つ、数 2 つ、時間 2 つ、Port・ListenAddress・AddressFamily・HostKey・AuthorizedKeysFile・PermitRootLogin・MaxStartups・MaxSessions・Subsystem）の値の範囲の両端とその外、時間の表 44 行（`2m`・`1h`・`1h30m`・`1d`・`1w`・端の値・誤り）、「受けて無視する」の各 keyword の受ける値と断る値、Match、未知の keyword（`line N: unknown keyword: <名前>`、名前の制御文字は `?`、長い名前は 48 byte で切る）、行の形（tab・CR LF・`=`・引用符・`#`・VT/FF・8192 byte の行・NUL・128 語・file の大きさの境）、全 keyword を 1 度ずつ与えて次に別の値で与える（first wins、bit や id の共有が無いこと）、ssh_config の各 keyword と既定値、Host の block（pattern の list・否定・大文字小文字・`=`・引用符・CR LF・外れた block の誤りも検出）、-o と file の順（-o が先なら勝つ）、`-o` の形と誤り（行番号なし）、IdentityFile の蓄積と 8 個、乱数の file と option。
+sshd の既定値の全部、今の image の `sshd_config`・`ssh_config` の全行（試験の中の複写と、tree にあれば実 file）、sshd の各 keyword（yes/no 4 つ、数 2 つ、時間 2 つ、Port・ListenAddress・AddressFamily・HostKey・AuthorizedKeysFile・PermitRootLogin・MaxStartups・MaxSessions・Subsystem）の値の範囲の両端とその外、時間の表 41 行（`2m`・`1h`・`1h30m`・`1d`・`1w`・端の値・誤り）、「受けて無視する」の各 keyword の受ける値と断る値、Match、未知の keyword（`line N: unknown keyword: <名前>`、名前の制御文字は `?`、長い名前は 48 byte で切る）、行の形（tab・CR LF・`=`・引用符・`#`・VT/FF・8192 byte の行・NUL・128 語・file の大きさの境）、全 keyword を 1 度ずつ与えて次に別の値で与える（first wins、bit や id の共有が無いこと）、ssh_config の各 keyword と既定値、Host の block（pattern の list・否定・大文字小文字・`=`・引用符・CR LF・外れた block の誤りも検出）、-o と file の順（-o が先なら勝つ）、`-o` の形と誤り（行番号なし）、IdentityFile の蓄積と 8 個、乱数の file と option。
 
 ### 実行したコマンドと最後の行（2026-11-02 11:19）
 
