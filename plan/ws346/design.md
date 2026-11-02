@@ -2,7 +2,7 @@
 
 # WS346 設計: libbrowser の style と layout の差分の再計算（layout cache）
 
-版: 1（2026-11-03 Q1、p001）。範囲: 要求定義と外部設計（module の境界・interface・振る舞いの契約・試験・Phase の分割）。
+版: 2（2026-11-03 Q1。版 1 は p001、版 2 は p002 の実装で分かった事: `DOM_CHANGE_SHEETS`、資源の扱い、shadow の中の無効化）。範囲: 要求定義と外部設計（module の境界・interface・振る舞いの契約・試験・Phase の分割）。
 内部設計（各関数の中の算法・データの細部）は各 Phase の実装の担当が、この文書の契約の中で決め、phase.md の結果の節に書く。
 
 基点: main `8f181e0e1f`（2026-11-03）。対象の source: `userland/desktop/libbrowser/`（`dom/`・`css/`・`layout/`・`page/`・`bind/`）。
@@ -128,7 +128,8 @@ enum dom_change_kind {
 	DOM_CHANGE_SCROLL,	/* node（element）の scroll の位置が変わった */
 	DOM_CHANGE_RESOURCE,	/* node（element）が見せる image などの資源が届いた・変わった */
 	DOM_CHANGE_SHADOW,	/* node（host）に shadow root が付いた */
-	DOM_CHANGE_DOCUMENT	/* document の全体に効く変更（adopted sheet、CSSOM の規則の変更、:target の移動など） */
+	DOM_CHANGE_DOCUMENT,	/* document の全体に効く変更（:target の移動、rendering が強いた再 layout、view transition の開始など） */
+	DOM_CHANGE_SHEETS	/* adopted sheet・CSSOM の規則の変更（style の engine を作り直す。版 2 で DOCUMENT から分けた） */
 };
 ```
 
@@ -193,6 +194,8 @@ document の要約（`struct dom_document` に足す field）:
 | RESOURCE | element に `LAYOUT` だけ。 |
 | SHADOW | host に `STYLE_SUBTREE`・`LAYOUT`。 |
 | DOCUMENT | `change_full_style`・`change_full_layout`。 |
+| SHEETS | `change_sheets`・`change_full_style`・`change_full_layout`。 |
+| RESOURCE（node が document） | `change_full_layout` だけ（どの element の資源か分からない時）。generation は進めない（今も資源の到着は進めない）。 |
 
 sheet の集合の変化（`change_sheets` を立てる）: 次のどれか。
 
@@ -263,6 +266,7 @@ unsigned css_engine_change_scope(const struct css_engine *engine, const struct d
 void css_engine_invalidate(struct css_engine *engine, struct dom_element *element, unsigned scope);
 ```
 
+- `CSS_RESTYLE_SUBTREE` は、element の子孫に加えて **shadow tree の中の全 element**（host の shadow root の下、入れ子の shadow を含む）の entry も外す（shadow の中の変更は host の STYLE_SUBTREE として記録されるため、§5.1.4）。
 - 外した entry の element は、次の `css_engine_compute` で計算し直される。外していない entry は今どおり返される。
 - `css_engine_compute` の契約は今と同じ（「engine が前に計算した style を返す」）。**変えるのは engine の寿命だけ**: DOM が変わっても
   sheet の集合が同じなら engine を保ち、`css_engine_invalidate` で外す。

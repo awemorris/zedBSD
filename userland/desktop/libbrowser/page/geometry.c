@@ -343,7 +343,7 @@ page_rendering(
 	page = context;
 	page->rendering = 1;
 	if (page->laid_out && page->layout.try_pending)
-		page->document->generation++;
+		dom_note_change(&page->document->node, DOM_CHANGE_DOCUMENT, NULL, NULL);
 	geometry_layout(page);
 	page->rendering = 0;
 }
@@ -645,7 +645,7 @@ page_scroll_to(
 	if (moved && laid_out) {
 		for (index = 0; index < page->layout.sticky_count; index++) {
 			if (page->layout.sticky[index]->style.position == CSS_POSITION_FIXED && page->layout.sticky[index]->anchored) {
-				page->document->generation++;
+				dom_note_change(&page->document->node, DOM_CHANGE_DOCUMENT, NULL, NULL);
 				break;
 			}
 		}

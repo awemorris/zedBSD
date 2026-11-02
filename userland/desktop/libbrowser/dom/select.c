@@ -214,8 +214,8 @@ dom_option_set_selected(
 	/* Restore the owner's fallback rules after either selection or deselection. */
 	dom_select_reset(owner);
 
-	/* Invalidate generation-based Document observers after the native option transition. */
-	option->node.document->generation++;
+	/* Invalidate generation-based Document observers after the native option transition; the owner's whole list is what shows it. */
+	dom_note_change(owner != NULL ? owner : &option->node, DOM_CHANGE_STATE, NULL, NULL);
 
 	/* Succeeded: current option state and its owner's selection rules agree. */
 	return;

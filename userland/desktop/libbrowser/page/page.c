@@ -196,6 +196,7 @@ page_destroy(
 		text_system_close(&page->text);
 	page_media_release(page);
 	page_images_release(page);
+	page_cache_report(page);
 	css_engine_destroy(page->css);
 	css_engine_destroy(page->query_css);
 	page_box_index_release(page);
@@ -983,6 +984,7 @@ page_layout_work(
 	page->laid_out_images = page->images_generation;
 	page->laid_out_gathered = page->gathered;
 	css_engine_set_container_lookup(page->css, page_container_size, page);
+	page->cache.layouts++;
 	error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 	page->laid_out = 1;
 	page->layout.image_variant = page_image_variant;
@@ -1010,6 +1012,7 @@ page_layout_work(
 		page->previous_laid_out = 1;
 		memset(&page->layout, 0, sizeof(page->layout));
 		css_engine_forget_styles(page->css);
+		page->cache.layouts++;
 		error = layout_build(&page->layout, page->css, &page->text, page->document, page_image_of, page_image_by_url, page, args->width, args->height, layout_from_px((float)page->scroll_x), layout_from_px((float)page->scroll_y), page->transition_on ? &page->transition : NULL);
 		page->layout.image_variant = page_image_variant;
 		page->layout.frame_paint = page_frame_paint;
@@ -1386,6 +1389,71 @@ page_container_size(
 	*width = layout_to_px(box->width);
 	*height = layout_to_px(box->height);
 	return 1;
+}
+
+/*
+ * Tells how the cache of style and layout works for this process: the
+ * value of BROWSER_LAYOUT_CACHE ("off", "on" or "verify"), read once; any
+ * other value, and none, is off.
+ */
+enum page_cache_mode
+page_cache_mode(
+	void)
+{
+	static int mode = -1;
+	const char *value;
+	int made;
+
+	/* Read once (a race writes the same value). */
+	made = __atomic_load_n(&mode, __ATOMIC_RELAXED);
+	if (made >= 0)
+		return (enum page_cache_mode)made;
+	made = PAGE_CACHE_OFF;
+	value = getenv("BROWSER_LAYOUT_CACHE");
+	if (value != NULL && strcmp(value, "on") == 0)
+		made = PAGE_CACHE_ON;
+	else if (value != NULL && strcmp(value, "verify") == 0)
+		made = PAGE_CACHE_VERIFY;
+	__atomic_store_n(&mode, made, __ATOMIC_RELAXED);
+	return (enum page_cache_mode)made;
+}
+
+/* Adds what the page's style engine counted to the page's counts (before the engine goes). */
+void
+page_cache_fold(
+	struct page *page)
+{
+	uint64_t computed;
+	uint64_t hits;
+
+	/* Without an engine there is nothing to add. */
+	if (page->css == NULL)
+		return;
+	css_engine_counts(page->css, &computed, &hits);
+	page->cache.styles += computed;
+	page->cache.style_hits += hits;
+}
+
+/* Tells on standard error what the cache did for the page, in one line, when BROWSER_LAYOUT_CACHE_STATS is 1. */
+void
+page_cache_report(
+	struct page *page)
+{
+	static const char *const names[] = { "off", "on", "verify" };
+	const char *value;
+
+	/* Asked for only. */
+	value = getenv("BROWSER_LAYOUT_CACHE_STATS");
+	if (value == NULL || strcmp(value, "1") != 0)
+		return;
+
+	/* The styles of the engine that is still there too. */
+	page_cache_fold(page);
+	fprintf(stderr, "layout-cache: mode=%s engines=%llu styles=%llu style_hits=%llu invalidated=%llu layouts=%llu roots=%llu grafts=%llu graft_boxes=%llu intrinsic=%llu mismatches=%llu\n",
+	    names[page_cache_mode()], (unsigned long long)page->cache.engines, (unsigned long long)page->cache.styles,
+	    (unsigned long long)page->cache.style_hits, (unsigned long long)page->cache.invalidated, (unsigned long long)page->cache.layouts,
+	    (unsigned long long)page->cache.roots, (unsigned long long)page->cache.grafts, (unsigned long long)page->cache.graft_boxes,
+	    (unsigned long long)page->cache.intrinsic, (unsigned long long)page->cache.mismatches);
 }
 
 /*
@@ -1806,11 +1874,13 @@ page_gather_styles(
 	int error;
 
 	/* A new engine with the user agent's sheet. */
+	page_cache_fold(page);
 	css_engine_destroy(page->css);
 	page->css = NULL;
 	error = css_engine_create(&page->css, page->heap);
 	if (error != 0)
 		return error;
+	page->cache.engines++;
 	if (page->visited_urls.count != 0)
 		css_engine_set_visited_lookup(page->css, page_link_visited, page);
 	css_engine_set_view_transition(page->css, page->vt_active, page->vt_types, page->vt_type_count);

@@ -891,6 +891,6 @@ input_indeterminate_set(
 
 	/* Cloning and click preactivation share this independent owned state. */
 	control->indeterminate = indeterminate;
-	element->node.document->generation++;
+	dom_note_change(&element->node, DOM_CHANGE_STATE, NULL, NULL);
 	return 0;
 }

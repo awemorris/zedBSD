@@ -1175,7 +1175,7 @@ prelude_set_popover(
 
 		order = __atomic_add_fetch(&top_layer_order, 1, __ATOMIC_RELAXED);
 		element->popover_open = open ? order : 0;
-		element->node.document->generation++;
+		dom_note_change(&element->node, DOM_CHANGE_STATE, NULL, NULL);
 	}
 	UNUSED_PARAMETER(realm);
 	return 0;

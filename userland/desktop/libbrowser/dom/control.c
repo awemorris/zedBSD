@@ -533,7 +533,7 @@ dom_input_set_value(
 	control->preedit_begin = 0;
 
 	/* Painting and submission must observe a script's new dirty text value. */
-	element->node.document->generation++;
+	dom_note_change(&element->node, DOM_CHANGE_STATE, NULL, NULL);
 
 	/* Succeeded: replacement storage is owned by the input and the old value is released. */
 	return 0;

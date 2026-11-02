@@ -452,7 +452,7 @@ page_view_transition_active(
 	}
 	if (page->query_css != NULL)
 		css_engine_set_view_transition(page->query_css, active, page->vt_types, page->vt_type_count);
-	page->document->generation++;
+	dom_note_change(&page->document->node, DOM_CHANGE_DOCUMENT, NULL, NULL);
 }
 
 /* Computes a pseudo-element's style from its element's, on the style thread. */

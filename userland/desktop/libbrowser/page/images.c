@@ -682,6 +682,7 @@ images_arrived(
 
 	/* The page is laid out again with it. */
 	image->page->images_generation++;
+	dom_note_change(&image->page->document->node, DOM_CHANGE_RESOURCE, NULL, NULL);
 }
 
 /*

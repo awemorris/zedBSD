@@ -524,7 +524,7 @@ select_index_set(
 	}
 
 	/* Deliberately skip fallback: invalid or negative indices preserve an empty selected state. */
-	select->node.document->generation++;
+	dom_note_change(&select->node, DOM_CHANGE_STATE, NULL, NULL);
 	select_unroot(realm->heap, roots, 2);
 
 	/* Succeeded: current owned selection is published and both temporary root slots are released. */

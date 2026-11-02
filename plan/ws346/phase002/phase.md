@@ -2,11 +2,11 @@
 
 # ws346-p002: DOM の変更の記録・mode と計数の土台
 
-Status: planned
+Status: cleared（2026-11-03 Q1。host build warning 0、host-change 79/79、基点と同じ dom 39/42・js 21/21・fetch 38/38・http 15/15・async 19/20。Acid は p003 で取る）
 Disposition: normal
 Parent: [WS346](../ws.md)
 Primary Milestone: MG006
-Queue: 未割り当て（Q1 が Sonnet = phase-runner-low に渡す時に決める）
+Queue: [q2002](../../queue.md)（Q1 が直に実装、2026-11-03 ユーザーの指示）
 基点: Q1 が worktree を作る時の main（design.md の基点 8f181e0e1f 以降）
 
 ## 目標
@@ -62,4 +62,47 @@ commit の SHA、流した command と最後の行、自分で決めた点、未
 
 ## 結果
 
-（実装の担当が書く: 自分で決めた点・数・未実施）
+2026-11-03 Q1（main の checkout で実装）。
+
+### したこと
+
+- `dom/change.c`（新規）: `dom_note_change`・`dom_change_needs_sheets`・`dom_changes_take_style`・`dom_changes_clear_layout`。`dom/dom.h` に bit・enum・上限・宣言・
+  document の field（`change_sheets`・`change_full_style`・`change_full_layout`・`change_count`）、node の `reserved` を `change` に改名。`sources.mk` に追加。
+- generation を進めていた全ての場所を `dom_note_change` に置き換えた（DOM: node.c の挿入・削除・text 4 か所・shadow 付与・属性、shadow.c の adopted、select.c・control.c・radio.c 3 か所、
+  bind: html-input.c・select.c・prelude.c の popover・environment.c の :target・style-sheet.c・geometry.c の scroll、page: geometry.c 2 か所・transition.c、
+  images.c・media.c の資源）。design.md §5.1.5 の表に無かった `page/geometry.c`（rendering の強いる再 layout・anchor の scroll）と `page/transition.c`（view transition の開始）は
+  DOCUMENT として扱った。
+- `page/`: `page_cache_mode()`（`BROWSER_LAYOUT_CACHE`、既定 off）・`struct page_cache_counts`・`page_cache_fold`・`page_cache_report`（`BROWSER_LAYOUT_CACHE_STATS=1` で
+  page を壊す時に 1 行）。数えるのは `engines`・`styles`・`style_hits`・`layouts`（他は 0）。`styles`・`style_hits` は `css/cascade.c` の `css_engine_counts`（engine が作られてからの数）を
+  engine を壊す前に page に足す。page の `query_css`（2 つ目の engine）は数えない。
+- 試験: `plan/ws346/tests/host-change.c`（79 項目）。`plan/ws074/tests/host-build.sh` の試験の loop に `plan/ws346/tests/host-*.c` を足した。
+
+### 自分で決めた点（design.md が黙っていた所）
+
+1. **`DOM_CHANGE_SHEETS` の追加**: adopted sheet と CSSOM の規則の変更は DOCUMENT と分けて `DOM_CHANGE_SHEETS`（`change_sheets`・`change_full_style`・`change_full_layout` を立てる）にした。
+   design.md §5.1.2・§5.1.4 の DOCUMENT の行を直す（版 2）。
+2. **RESOURCE は generation を進めない**（今も画像の到着は document の generation を進めず、page の `images_generation` が layout を促すため）。element が分からない時は document の node に
+   RESOURCE を送り、`change_full_layout` だけを立てる（style は変わらない）。
+3. **削除された部分木の bit を消す**のは、`dom_note_change` の CHILDREN が `child->parent == NULL` の時（connected でない時・上限の後・shadow の中の時も）に行う。
+4. **connected でない木の変更は数えず、bit も立てない**（`change_count` は connected の変更だけ）。script が離れた所で作る大きな木が上限に当たらないため。
+5. **shadow tree の中の変更**は、document に最も近い host を `STYLE_SUBTREE | LAYOUT` にする（shadow の中の node には bit を立てない）。入れ子の shadow は一番外の host。
+   css の `css_engine_invalidate`（p004）の `CSS_RESTYLE_SUBTREE` は **shadow tree の中も含めて**外さなければならない（design.md §5.2.3 に追記）。
+6. **comment の文字の変更**は generation を進めるだけで bit を立てない（box も style も無い）。
+7. **`dom_option_set_selected`** は option でなく owner の select に STATE を送る（list 全体が見せる物で、peer の選択も変わるため）。
+8. `dom_changes_take_style` は style の bit に加えて `change_sheets`・`change_full_style`・`change_count` を戻す。`dom_changes_clear_layout` は layout の bit と `change_full_layout`・`change_count` を戻す。
+   `visit` は NULL でよい（bit の消去だけ）。visit の中で木を変えてはならない。
+9. 上限 `DOM_CHANGE_LIMIT` は 10000（`dom/dom.h`）。上限を超えると `change_full_style`・`change_full_layout` を立て、bit は立てない。
+
+### 確かめ
+
+- host build（`CC=clang sh plan/ws074/tests/host-build.sh plain`）warning 0。
+- `host-change` 79/79。
+- 基点（変更前の同じ build）と同じ: run-dom-tests 39/42、run-js-tests 21/21、run-fetch-tests 38/38、run-http-tests 15/15・`--async` 19/20（async-sheets は基点でも FAIL）。
+- `BROWSER_LAYOUT_CACHE_STATS=1` で 1 行が出る（off と verify で mode の名前が変わる）。
+- わざと壊した: `change_is_sheet` が常に 0、`dom_changes_take_style` が子へ降りない、`change_mark` が先祖に below bit を立てない、の 3 つを同時に入れて 49/79（30 項目が FAIL）。
+  元に戻して `cmp` で一致を確かめた。
+- Acid2・Acid3（`run-acid-tests.py`）は未実施（WPT の checkout が build/ws074-suites/wpt に無い）。p003 で取る。
+
+### 未実施・残り
+
+- generation の値の列を基点と全部の操作で比べる試験は、host-change の「+1」の確かめだけ（基点の build との直の比較は無い）。

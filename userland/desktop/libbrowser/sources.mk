@@ -88,6 +88,7 @@ LIBBROWSER_ENGINE_SOURCES := $(LIBBROWSER_OS_NET_SOURCES) \
 	$(LIBBROWSER_DIR)/html/body.c \
 	$(LIBBROWSER_DIR)/html/foreign.c \
 	$(LIBBROWSER_DIR)/dom/node.c \
+	$(LIBBROWSER_DIR)/dom/change.c \
 	$(LIBBROWSER_DIR)/dom/attribute.c \
 	$(LIBBROWSER_DIR)/dom/xml.c \
 	$(LIBBROWSER_DIR)/dom/removal.c \

@@ -157,6 +157,9 @@ struct css_engine {
 	struct cascade_cached *style_table;
 	size_t style_capacity;
 	size_t style_count;
+	/* How many styles were computed and how many were given from the kept ones (css_engine_counts). */
+	uint64_t stat_computed;
+	uint64_t stat_hits;
 	css_container_lookup container_lookup;
 	void *container_context;
 	struct dom_element *current;
@@ -865,6 +868,21 @@ css_engine_forget_styles(
 }
 
 /*
+ * Tells how many styles the engine computed and how many it gave from the
+ * ones it kept, since it was made.
+ */
+void
+css_engine_counts(
+	const struct css_engine *engine,
+	uint64_t *computed,
+	uint64_t *hits)
+{
+	/* The two counts. */
+	*computed = engine->stat_computed;
+	*hits = engine->stat_hits;
+}
+
+/*
  * Tells how many query containers' sizes the engine's styles were
  * computed with since the styles were last forgotten.
  */
@@ -942,11 +960,13 @@ css_engine_compute(
 		if (cached->element != NULL) {
 			*style = *cached->style;
 			engine->compute_contained = cached->contained;
+			engine->stat_hits++;
 			return 0;
 		}
 	}
 
 	/* The element itself. */
+	engine->stat_computed++;
 	lookups = engine->container_lookups;
 	error = cascade_compute(engine, element, parent, style, CSS_PSEUDO_ELEMENT_NONE);
 	if (error != 0)

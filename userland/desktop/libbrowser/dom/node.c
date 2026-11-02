@@ -300,7 +300,7 @@ dom_insert_before(
 	dom_select_tree_changed(child);
 
 	/* The tree changed: the document's style and layout are out of date. */
-	parent->document->generation++;
+	dom_note_change(parent, DOM_CHANGE_CHILDREN, child, NULL);
 }
 
 /*
@@ -351,7 +351,7 @@ dom_remove(
 	dom_select_tree_changed(child);
 
 	/* The tree changed: the document's style and layout are out of date. */
-	parent->document->generation++;
+	dom_note_change(parent, DOM_CHANGE_CHILDREN, child, NULL);
 }
 
 /*
@@ -380,7 +380,7 @@ dom_text_append(
 	/* Text changes retire the current source association and invalidate document layout. */
 	if (node->type == DOM_TEXT || node->type == DOM_CDATA_SECTION)
 		node_style_reset(node->parent);
-	node->document->generation++;
+	dom_note_change(node, DOM_CHANGE_TEXT, NULL, NULL);
 
 	/* Succeeded: the node holds the characters. */
 	return 0;
@@ -695,7 +695,7 @@ dom_text_set(
 	/* Text changes retire the current source association and invalidate document layout. */
 	if (node->type == DOM_TEXT || node->type == DOM_CDATA_SECTION)
 		node_style_reset(node->parent);
-	node->document->generation++;
+	dom_note_change(node, DOM_CHANGE_TEXT, NULL, NULL);
 
 	/* Succeeded: the node holds the new text. */
 	return 0;
@@ -731,7 +731,7 @@ dom_text_truncate(
 	/* Text data replacement runs the actual parent's style child-change lifecycle. */
 	if (node->type == DOM_TEXT || node->type == DOM_CDATA_SECTION)
 		node_style_reset(node->parent);
-	node->document->generation++;
+	dom_note_change(node, DOM_CHANGE_TEXT, NULL, NULL);
 
 	/* Succeeded: the original buffer retains its prefix and all live offsets are repaired. */
 	return 0;
@@ -800,7 +800,7 @@ dom_text_replace(
 		/* Text data replacement runs the actual parent's style child-change lifecycle. */
 		if (node->type == DOM_TEXT || node->type == DOM_CDATA_SECTION)
 			node_style_reset(node->parent);
-		node->document->generation++;
+		dom_note_change(node, DOM_CHANGE_TEXT, NULL, NULL);
 
 		/* Succeeded: prefix and shifted suffix remain in the original owned buffer. */
 		return 0;
@@ -843,7 +843,7 @@ dom_text_replace(
 	/* Text data replacement runs the actual parent's style child-change lifecycle. */
 	if (node->type == DOM_TEXT || node->type == DOM_CDATA_SECTION)
 		node_style_reset(node->parent);
-	node->document->generation++;
+	dom_note_change(node, DOM_CHANGE_TEXT, NULL, NULL);
 
 	/* Succeeded: the new owned buffer contains prefix, replacement and retained suffix. */
 	return 0;
@@ -1204,7 +1204,7 @@ dom_shadow_attach(
 	root->host = host;
 	root->closed = closed;
 	host->shadow_root = &root->node;
-	host->node.document->generation++;
+	dom_note_change(&host->node, DOM_CHANGE_SHADOW, NULL, NULL);
 
 	/* Succeeded: the host has its shadow tree. */
 	return root;
@@ -1427,7 +1427,8 @@ node_attribute_notify(
 /*
  * Counts a change to an element's attribute in its document's generation,
  * and in the quiet part of it when the attribute is a data-* one of no
- * namespace that the page says no style sheet names.
+ * namespace that the page says no style sheet names (which is not recorded
+ * as a change); any other is recorded (dom_note_change).
  */
 static void
 node_attribute_changed(
@@ -1440,29 +1441,33 @@ node_attribute_changed(
 	size_t index;
 	uint16_t unit;
 	int styled;
-
-	/* Every change makes the document's generation grow. */
-	document = element->node.document;
-	document->generation++;
+	int quiet;
 
 	/* Only a data-* attribute of no namespace on a page that can tell can be quiet. */
-	if (document->attribute_styled == NULL || ns != DOM_NS_NONE)
-		return;
-	if (name->length <= sizeof(prefix) - 1U)
-		return;
+	document = element->node.document;
+	quiet = document->attribute_styled != NULL && ns == DOM_NS_NONE && name->length > sizeof(prefix) - 1U;
 
 	/* The prefix, as HTML's attribute names have it. */
-	for (index = 0; index < sizeof(prefix) - 1U; index++) {
+	for (index = 0; quiet && index < sizeof(prefix) - 1U; index++) {
 		unit = vm_string_at(name, index);
 		if (unit != (uint16_t)prefix[index])
-			return;
+			quiet = 0;
 	}
 
 	/* One that a style sheet names may change a style. */
-	styled = document->attribute_styled(document->attribute_styled_context, name);
-	if (styled)
-		return;
+	if (quiet) {
+		styled = document->attribute_styled(document->attribute_styled_context, name);
+		if (styled)
+			quiet = 0;
+	}
 
-	/* The change is one no style can see. */
-	document->quiet_generation++;
+	/* The change is one no style can see: the generation grows, and so does its quiet part, and nothing else is recorded. */
+	if (quiet) {
+		document->generation++;
+		document->quiet_generation++;
+		return;
+	}
+
+	/* Every other change makes the document's generation grow and is recorded. */
+	dom_note_change(&element->node, DOM_CHANGE_ATTRIBUTE, NULL, name);
 }

@@ -1321,7 +1321,7 @@ geometry_element_scroll(
 		return;
 	element->scroll_x = next_x;
 	element->scroll_y = next_y;
-	element->node.document->generation++;
+	dom_note_change(&element->node, DOM_CHANGE_SCROLL, NULL, NULL);
 }
 
 /* Finds how far the document is scrolled, in CSS pixels (0 when the host does not say). */

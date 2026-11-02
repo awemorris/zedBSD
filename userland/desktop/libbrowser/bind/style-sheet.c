@@ -170,7 +170,7 @@ bind_style_sheet_changed(
 		return;
 
 	/* Native cascade and layout caches observe this generation without fabricated mutation records. */
-	owner->node.document->generation++;
+	dom_note_change(&owner->node.document->node, DOM_CHANGE_SHEETS, NULL, NULL);
 
 	/* Succeeded: only an actual current sheet model invalidated the owner's rendering. */
 	return;

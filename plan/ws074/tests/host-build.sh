@@ -137,7 +137,7 @@ echo "built $out/browser-probe"
 echo "built $out/wpt-ready-render"
 
 # The unit tests.
-for test in plan/ws074/tests/host-*.c; do
+for test in plan/ws074/tests/host-*.c plan/ws346/tests/host-*.c; do
 	name=$(basename "$test" .c)
 	[ "$name" = host-shell ] && continue
 	[ "$name" = host-threads ] && continue

@@ -885,6 +885,7 @@ media_follow(
 	if (media->sized) {
 		media->sized = 0;
 		media->page->images_generation++;
+		dom_note_change(&media->page->document->node, DOM_CHANGE_RESOURCE, NULL, NULL);
 	}
 
 	/* Drawn. */

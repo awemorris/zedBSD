@@ -61,6 +61,36 @@ struct page_prefetched {
 	struct wb_buffer bytes;
 };
 
+/* How the cache of style and layout works (BROWSER_LAYOUT_CACHE, read once for the process). */
+enum page_cache_mode {
+	/* Style and layout are made again whole after every change, as they always were. */
+	PAGE_CACHE_OFF,
+	/* Only what a change can reach is computed again. */
+	PAGE_CACHE_ON,
+	/* As ON, then made again whole and compared; a difference is told, and the whole one is used. */
+	PAGE_CACHE_VERIFY
+};
+
+/* What the cache did for a page, counted for BROWSER_LAYOUT_CACHE_STATS. */
+struct page_cache_counts {
+	/* The style engines made. */
+	uint64_t engines;
+	/* The styles computed, and the ones given from the kept ones. */
+	uint64_t styles;
+	uint64_t style_hits;
+	/* The kept styles dropped by a change. */
+	uint64_t invalidated;
+	/* The box trees laid out. */
+	uint64_t layouts;
+	/* The boxes that could be reused, the ones that were, how many boxes that took, and the sizes carried over. */
+	uint64_t roots;
+	uint64_t grafts;
+	uint64_t graft_boxes;
+	uint64_t intrinsic;
+	/* The differences a comparison found. */
+	uint64_t mismatches;
+};
+
 /*
  * A loaded page.
  *
@@ -209,6 +239,8 @@ struct page {
 	/* How many times the sheets were gathered, and the count the layout was made with (a gathering outside a layout makes it stale). */
 	uint32_t gathered;
 	uint32_t laid_out_gathered;
+	/* What the cache of style and layout did for this page (page_cache_report). */
+	struct page_cache_counts cache;
 	struct wb_vector scripts;
 	/* Parser-inserted inline module scripts and their retained URL graph. */
 	struct wb_vector module_scripts;
@@ -292,6 +324,9 @@ struct page_pointer {
 };
 
 /* Pages (page.c). */
+enum page_cache_mode page_cache_mode(void);
+void page_cache_report(struct page *page);
+void page_cache_fold(struct page *page);
 int page_create(struct page **page, const void *stack_base);
 void page_destroy(struct page *page);
 int page_load_html(struct page *page, const unsigned char *bytes, size_t length);

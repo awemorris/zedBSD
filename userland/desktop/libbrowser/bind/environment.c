@@ -847,7 +847,7 @@ bind_scroll_to_fragment(
 		return error;
 	if (window->document->target != target) {
 		window->document->target = target;
-		window->document->generation++;
+		dom_note_change(&window->document->node, DOM_CHANGE_DOCUMENT, NULL, NULL);
 	}
 	if (target == NULL)
 		return 0;

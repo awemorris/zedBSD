@@ -247,5 +247,5 @@ dom_adopted_set(
 			holder->first_child = nodes[index];
 		holder->last_child = nodes[index];
 	}
-	root->document->generation++;
+	dom_note_change(&root->document->node, DOM_CHANGE_SHEETS, NULL, NULL);
 }

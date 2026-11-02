@@ -273,7 +273,8 @@ struct dom_node {
 	struct vm_cell cell;
 	uint16_t type;
 	uint16_t flags;
-	uint32_t reserved;
+	/* What changed under the node since the style and layout last read it (DOM_CHANGED_*, change.c). */
+	uint32_t change;
 	struct dom_document *document;
 	struct dom_node *parent;
 	struct dom_node *first_child;
@@ -531,6 +532,11 @@ struct dom_document {
 	enum dom_quirks quirks;
 	uint32_t generation;
 	uint32_t quiet_generation;
+	/* The summary of the changes recorded since the style and layout last read them (change.c). */
+	uint32_t change_sheets;
+	uint32_t change_full_style;
+	uint32_t change_full_layout;
+	uint32_t change_count;
 	int (*attribute_styled)(void *context, const struct vm_string *name);
 	void *attribute_styled_context;
 	uint32_t compose_session;
@@ -574,6 +580,51 @@ int dom_is_character_data(const struct dom_node *node);
 int dom_is_text(const struct dom_node *node);
 struct dom_node *dom_doctype_create(struct dom_document *document, struct vm_string *name, struct vm_string *public_id, struct vm_string *system_id);
 struct dom_node *dom_fragment_create(struct dom_document *document);
+
+/* The bits of a node's change (change.c). */
+#define DOM_CHANGED_STYLE		0x01U
+#define DOM_CHANGED_STYLE_SUBTREE	0x02U
+#define DOM_CHANGED_STYLE_SIBLINGS	0x04U
+#define DOM_CHANGED_STYLE_BELOW		0x08U
+#define DOM_CHANGED_LAYOUT		0x10U
+#define DOM_CHANGED_LAYOUT_BELOW	0x20U
+
+/* The bits a style pass takes (and the ones that mean a node itself needs its style computed again). */
+#define DOM_CHANGED_STYLE_BITS		(DOM_CHANGED_STYLE | DOM_CHANGED_STYLE_SUBTREE | DOM_CHANGED_STYLE_SIBLINGS)
+
+/* How many changes a document records before it stops telling them apart and asks for a full style and layout. */
+#define DOM_CHANGE_LIMIT		10000U
+
+/* What changed. */
+enum dom_change_kind {
+	/* The node's list of children changed; child is the node that came in or went out (NULL: unknown). */
+	DOM_CHANGE_CHILDREN,
+	/* The characters of the Text, CDATA or Comment node changed. */
+	DOM_CHANGE_TEXT,
+	/* The element's attribute (the name given) was added, changed or removed. */
+	DOM_CHANGE_ATTRIBUTE,
+	/* The element's state that is not an attribute (a control's value or checkedness, a popover's opening) changed. */
+	DOM_CHANGE_STATE,
+	/* The element's scroll position changed. */
+	DOM_CHANGE_SCROLL,
+	/* A resource the element (or, on the document node, any element) shows arrived or changed; the generation does not grow. */
+	DOM_CHANGE_RESOURCE,
+	/* The host got a shadow root. */
+	DOM_CHANGE_SHADOW,
+	/* The change reaches the whole document (the :target element). */
+	DOM_CHANGE_DOCUMENT,
+	/* The adopted sheets or the rules of a sheet changed: the style engine is made again. */
+	DOM_CHANGE_SHEETS
+};
+
+/* Called by dom_changes_take_style for a node with style bits: returns 0 to go on, or another value to stop (which is returned). */
+typedef int (*dom_change_visit)(void *context, struct dom_node *node, unsigned bits);
+
+/* The record of the changes of a document's tree (change.c). */
+void dom_note_change(struct dom_node *node, enum dom_change_kind kind, struct dom_node *child, const struct vm_string *attribute);
+int dom_change_needs_sheets(const struct dom_document *document);
+int dom_changes_take_style(struct dom_document *document, dom_change_visit visit, void *context);
+void dom_changes_clear_layout(struct dom_document *document);
 
 /* Shadow trees (shadow.c). */
 struct dom_shadow_root *dom_shadow_attach(struct dom_element *host, int closed);

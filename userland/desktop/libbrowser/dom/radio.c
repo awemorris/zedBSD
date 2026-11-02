@@ -195,7 +195,7 @@ dom_input_set_checked(
 			control->checked_dirty = 1;
 
 		/* Invalidate generation-based Document observers after the native state change. */
-		element->node.document->generation++;
+		dom_note_change(&element->node, DOM_CHANGE_STATE, NULL, NULL);
 
 		/* Succeeded: a non-group assignment updates only this control. */
 		return 0;
@@ -241,7 +241,7 @@ dom_input_set_checked(
 				other_control = other->control;
 				other_control->checked = 0;
 				other_control->checked_initialized = 1;
-				other->node.document->generation++;
+				dom_note_change(&other->node, DOM_CHANGE_STATE, NULL, NULL);
 			}
 		}
 
@@ -258,7 +258,7 @@ dom_input_set_checked(
 		control->checked_dirty = 1;
 
 	/* Invalidate generation-based Document observers after committing target checkedness. */
-	element->node.document->generation++;
+	dom_note_change(&element->node, DOM_CHANGE_STATE, NULL, NULL);
 
 	/* Succeeded: target and every affected radio now expose consistent current checkedness. */
 	return 0;

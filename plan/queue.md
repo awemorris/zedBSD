@@ -753,4 +753,5 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q2001 / q2001-i01 | Q1（直に、main の checkout） | [ws346-p001](ws346/phase001/phase.md) 設計（要求・外部設計・Phase の分割） | plan/ws346/ の文書だけ。code は書かない（計測の一時の uprobe を除く） | cleared（2026-11-03 06:40、design.md 版 1、ユーザーが未決 3 件に答えた） |
-| q2002 / q2002-i01 | Q1（直に、main の checkout） | [ws346-p002](ws346/phase002/phase.md) DOM の変更の記録・mode と計数の土台 | 2026-11-03 06:39 ユーザーの指示（定義した Phase をこのメインで実装、サブエージェントなし）。振る舞いは変えない | in-progress |
+| q2002 / q2002-i01 | Q1（直に、main の checkout） | [ws346-p002](ws346/phase002/phase.md) DOM の変更の記録・mode と計数の土台 | 2026-11-03 06:39 ユーザーの指示（定義した Phase をこのメインで実装、サブエージェントなし）。振る舞いは変えない | cleared（2026-11-03 06:52、host-change 79/79、既存の試験は基点と同じ） |
+| q2003 / q2003-i01 | Q1（直に、main の checkout） | [ws346-p003](ws346/phase003/phase.md) 照合の道具と bench、[ws346-p004](ws346/phase004/phase.md) selector の特徴の表と影響の範囲（p003 と p004 は触る file が重ならない） | 2026-11-03 06:39 ユーザーの指示（定義した Phase をこのメインで実装、サブエージェントなし） | in-progress |
