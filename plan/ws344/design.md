@@ -2,7 +2,7 @@
 
 # WS344 libwebp-compat（自前の WebP の decoder）の設計（p001）
 
-- 親: [ws.md](ws.md)。作成: ws344-p001（P2、2026-11-02）。正本は header（`include/libc/compat/webp/*.h`、`userland/desktop/libwebp-compat/*.h`）の comment。この文書は全体の地図・決定・試験の道。
+- 親: [ws.md](ws.md)。作成: ws344-p001（P2、2026-11-02）。WS の完了（2026-11-02）で試験の道具は `plan/tools/webp/` に移り（[plan/tools.md](../tools.md)）、WS の中だけの check-skeleton.sh・target-build.sh と Phase の directory は消した。下の path は移った後の物に直した。正本は header（`include/libc/compat/webp/*.h`、`userland/desktop/libwebp-compat/*.h`）の comment。この文書は全体の地図・決定・試験の道。
 - 進め方: 標準廉価実装手順（[docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)）。p001 が header・骨格・試験の道具・Phase の表を作り、実装の Phase（Sonnet 5.5 high、phase-runner-low）は header を変えずに .c と単体試験を書く。統合の Phase は Opus を推す。
 
 ## 1. 出典
@@ -47,7 +47,7 @@
 | --- | --- |
 | 置き場所 | `userland/desktop/libwebp-compat/`（png・jpeg・gif の compat の隣、master-design-policy の compat の置き場）。header は `include/libc/compat/webp/`。内部の接頭辞は `webpc_`・`WEBPC_`（libwebp の内部名 VP8*・VP8L*・WebP* と重ならない）。|
 | 共有 library と static | zedBSD は `libwebp-compat.so`（`platform/common/userland-dynamic.mk` の規則、version script `exports.map`、check-dynamic-elf）を p001 で足し、warning 0 で link できることを確かめた（21 の export）。Windows（OmniGrammaton）は `apps/browser-win32/Makefile` の WIN32_COMPAT_LIBRARIES に足す（p020）。両方とも `sources.mk` の同じ list。compat の header は Windows の build が `include/libc/compat/*/*.h` を写すので追加の作業は無い。|
-| 新しい header と sysroot | `include/libc/compat/webp/` は sysroot（共有の `build/amd64/sysroot`）に写される物で、その作り直しは toolchain の作業（Q1）。担当は `plan/ws344/tests/target-build.sh` で worktree に sysroot の複写を作り、そこへ compat/webp を写して target を build する（共有の sysroot を変えない）。main に merge した後の通常の build は sysroot の stamp が header の一覧に依るので作り直しが走る（Q1 の判断 2）。|
+| 新しい header と sysroot | `include/libc/compat/webp/` は sysroot（共有の `build/amd64/sysroot`）に写される物で、その作り直しは toolchain の作業（Q1）。担当は `plan/tools/webp/target-build.sh` で worktree に sysroot の複写を作り、そこへ compat/webp を写して target を build する（共有の sysroot を変えない）。main に merge した後の通常の build は sysroot の stamp が header の一覧に依るので作り直しが走る（Q1 の判断 2）。|
 | 全体を読んでから decode | 非 incremental。libbrowser は body を全部受けてから img_decode を呼ぶ（page/images.c）。incremental は後（Future Work）。|
 | VP8 の再構成と loop filter | 全 macroblock を再構成してから、frame 全体を raster の順で filter する（RFC 6386 §15.1「intra prediction は filter 前の画素を使う」）。plane は macroblock の整数倍（右と下の余りも decode・filter し、出力で切る。端の画素は余りの画素で filter される）。行ごとの filter と遅延の最適化は速さの Phase（Future Work）。|
 | VP8 の bool decoder の終わり | libwebp と同じ「8 bit の窓が data の終わりを越えて bool を読んだら ended」（bool.h）。正しい stream では起きない。ended は sticky で、macroblock ごとと行ごとに確かめて ENOBUFS（NOT_ENOUGH_DATA）。|
@@ -114,18 +114,18 @@
 
 ## 8. 試験の道具（p001 が作り、実装の担当は変えない）
 
-全部 `plan/ws344/tests/`。出力は `build/tmp/ws344-*`（fresh_out の新しい directory）。
+全部 `plan/tools/webp/`。出力は `build/tmp/webp-*`（fresh_out の新しい directory）。
 
 | 道具 | 内容 | command・最後の行 |
 | --- | --- | --- |
-| run-unit.sh | `unit/test-<name>.c` を全 library の .c・compat header・`rfc-vp8-tables.h`（RFC 6386 の表を text から抜いた物）と ASan・UBSan で build して流す | `sh plan/ws344/tests/run-unit.sh <name>... \| all` → `run-unit: PASS` |
+| run-unit.sh | `unit/test-<name>.c` を全 library の .c・compat header・`rfc-vp8-tables.h`（RFC 6386 の表を text から抜いた物）と ASan・UBSan で build して流す | `sh plan/tools/webp/run-unit.sh <name>... \| all` → `run-unit: PASS` |
 | unit/check.h・lbitwriter.h・boolwriter.h | 判定と乱数、VP8L の bit の書き手（§3.2 の逆）、VP8 の bool の encoder（RFC 6386 §7.3 の encoder、tree の書き手つき）。test-helpers.c がこの 2 つを手計算と独立の decoder で確かめる（26 check PASS） | — |
-| check-skeleton.sh | header の単独 compile、全 .c（cc・clang、`-std=c89 -Wall -Wextra -Werror -Wpedantic`）、include の範囲、exports.map と宣言の一致、source の開発の管理情報、`BASE=` で header と道具の凍結 | `BASE=<基点> sh plan/ws344/tests/check-skeleton.sh` → `check-skeleton: PASS` |
-| target-build.sh | worktree の sysroot の複写 + compat/webp で zedBSD の target を build（既定 `build/amd64/dynamic/libwebp-compat.so`）、warning を数える | `sh plan/ws344/tests/target-build.sh [target...]` → `target-build: PASS (..., 0 warnings)` |
-| gen-sources.py・fixtures.list・fixture-encoder.c・craft.py・make-fixtures.sh | 試験の画像: 10 種 × 13〜14 の大きさの源（1x1〜1024x683）、cwebp の設定（q・m・segment・sns・filter・sharpness・simple・preset・alpha の q/filter/method・lossless の z/m/q/near_lossless/exact）、fixture-encoder の token partition 1〜8、craft の container の変種（裸・trailing・VP8X・未知の chunk・ICC/EXIF/XMP・2 つの ALPH・canvas の食い違い・短い VP8X・長すぎる RIFF の size）、img2webp の animation。364 file、期待の出力は dwebp（-pam、-nofancy、-yuv、-nofilter -yuv）と libwebp の driver の報告（.ref）。2 回の生成で全 file の SHA-256 が同じ（fixtures.sha256 に記録） | `sh plan/ws344/tests/make-fixtures.sh` → `make-fixtures: PASS (364 files, 350 decoded by dwebp, hashes same; ...)` |
-| fixture-check.c・run-fixtures.sh | 内部の module だけで fixture を dwebp と比べる: lossless（ARGB = -pam）、lossy（plane = -yuv と -nofilter -yuv）、alpha（ALPH = -pam の alpha） | `sh plan/ws344/tests/run-fixtures.sh lossless\|lossy\|alpha` → `run-fixtures: PASS (...)` |
-| webp-driver.c・compare.sh | 同じ source を compat と libwebp の両方で build し、全呼び出し・全色空間・option・Into・padding・小さすぎる buffer・partial の features・引数の誤りを 1 行ずつ報告。compat の報告が libwebp の .ref と一致 | `sh plan/ws344/tests/compare.sh [NAME...]` → `compare: PASS (364 files)` |
-| fuzz-target.c・mutate.sh・fuzz.sh | 悪意の入力: 決まった変異（mutate）と libFuzzer（fuzz） | `sh plan/ws344/tests/mutate.sh` → `mutate: PASS (...)`、`sh plan/ws344/tests/fuzz.sh [秒]` → `fuzz: PASS (...)` |
+| check-skeleton.sh（WS の完了で消した） | header の単独 compile、全 .c（cc・clang、`-std=c89 -Wall -Wextra -Werror -Wpedantic`）、include の範囲、exports.map と宣言の一致、source の開発の管理情報、`BASE=` で header と道具の凍結 | `BASE=<基点> sh plan/tools/webp/check-skeleton.sh` → `check-skeleton: PASS` |
+| target-build.sh（WS の完了で消した） | worktree の sysroot の複写 + compat/webp で zedBSD の target を build（既定 `build/amd64/dynamic/libwebp-compat.so`）、warning を数える | `sh plan/tools/webp/target-build.sh [target...]` → `target-build: PASS (..., 0 warnings)` |
+| gen-sources.py・fixtures.list・fixture-encoder.c・craft.py・make-fixtures.sh | 試験の画像: 10 種 × 13〜14 の大きさの源（1x1〜1024x683）、cwebp の設定（q・m・segment・sns・filter・sharpness・simple・preset・alpha の q/filter/method・lossless の z/m/q/near_lossless/exact）、fixture-encoder の token partition 1〜8、craft の container の変種（裸・trailing・VP8X・未知の chunk・ICC/EXIF/XMP・2 つの ALPH・canvas の食い違い・短い VP8X・長すぎる RIFF の size）、img2webp の animation。364 file、期待の出力は dwebp（-pam、-nofancy、-yuv、-nofilter -yuv）と libwebp の driver の報告（.ref）。2 回の生成で全 file の SHA-256 が同じ（fixtures.sha256 に記録） | `sh plan/tools/webp/make-fixtures.sh` → `make-fixtures: PASS (364 files, 350 decoded by dwebp, hashes same; ...)` |
+| fixture-check.c・run-fixtures.sh | 内部の module だけで fixture を dwebp と比べる: lossless（ARGB = -pam）、lossy（plane = -yuv と -nofilter -yuv）、alpha（ALPH = -pam の alpha） | `sh plan/tools/webp/run-fixtures.sh lossless\|lossy\|alpha` → `run-fixtures: PASS (...)` |
+| webp-driver.c・compare.sh | 同じ source を compat と libwebp の両方で build し、全呼び出し・全色空間・option・Into・padding・小さすぎる buffer・partial の features・引数の誤りを 1 行ずつ報告。compat の報告が libwebp の .ref と一致 | `sh plan/tools/webp/compare.sh [NAME...]` → `compare: PASS (364 files)` |
+| fuzz-target.c・mutate.sh・fuzz.sh | 悪意の入力: 決まった変異（mutate）と libFuzzer（fuzz） | `sh plan/tools/webp/mutate.sh` → `mutate: PASS (...)`、`sh plan/tools/webp/fuzz.sh [秒]` → `fuzz: PASS (...)` |
 | vp8-tables-extract.py | RFC 6386 の text から 20 の表を名前で抜き、C の配列にする（run-unit.sh が `rfc-vp8-tables.h` を作る）。表の値の独立の照合の片方 | — |
 
 - 期待の値の作り方（単体試験）: 仕様の表・式、手の計算、逆の処理（lbitwriter・boolwriter で組んだ stream の往復）、性質（DC だけの IDCT は平ら、完全な prefix code の Kraft の和は 1 など）。oracle（libwebp）は fixture の全体の試験（run-fixtures・compare）だけ。
